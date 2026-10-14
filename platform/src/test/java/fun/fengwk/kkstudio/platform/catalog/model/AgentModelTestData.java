@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.platform.catalog.model;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelAbilitiesDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
@@ -69,7 +69,7 @@ public final class AgentModelTestData {
 
   public static AgentModelConfigDTO fromJson(String json) {
     try {
-      return new ObjectMapper().readValue(json, AgentModelConfigDTO.class);
+      return JsonMapper.builder().build().readValue(json, AgentModelConfigDTO.class);
     } catch (Exception error) {
       throw new IllegalArgumentException("invalid config", error);
     }

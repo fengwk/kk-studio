@@ -6,12 +6,13 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.core.JsonGenerator;
-import com.fasterxml.jackson.databind.JsonSerializer;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializerProvider;
-import com.fasterxml.jackson.databind.module.SimpleModule;
 import org.junit.jupiter.api.Test;
+import tools.jackson.core.JsonGenerator;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.SerializationContext;
+import tools.jackson.databind.ValueSerializer;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.module.SimpleModule;
 
 import fun.fengwk.kkstudio.harness.provider.ProviderProtocolOptionsJson;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
@@ -20,7 +21,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.ProviderProtocolOptions;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser.ParsedAgentModelConfig;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
 
-import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.List;
@@ -31,7 +31,7 @@ import java.util.function.Consumer;
 class AgentModelRuntimeConfigParserTest {
 
   private final AgentModelRuntimeConfigParser parser =
-      new AgentModelRuntimeConfigParser(new ObjectMapper());
+      new AgentModelRuntimeConfigParser(JsonMapper.builder().build());
 
   /** 每个可执行字段（含 6 个独立价格）都经严格解析保留下来；variant 只保留 id、reasoningEffort 与原生协议选项。 */
   @Test
@@ -149,7 +149,7 @@ class AgentModelRuntimeConfigParserTest {
   /** HTTP 使用的普通 mapper 也只能收取真正的 JSON string token；校验后可存回 config 并作为 string 响应。 */
   @Test
   void acceptsOnlyStringTokenAtHttpDtoBoundary() throws Exception {
-    ObjectMapper httpMapper = new ObjectMapper();
+    ObjectMapper httpMapper = JsonMapper.builder().build();
     String options =
         "{\"n\":9007199254740993,\"nested\":{\"ratio\":0.12345678901234567890123456789}}";
     AgentModelConfigDTO request =
@@ -323,7 +323,7 @@ class AgentModelRuntimeConfigParserTest {
     assertEquals(
         new BigDecimal("0.12345678901234567890123456789"),
         wireOptions.path("nested").path("ratio").decimalValue());
-    String wireJson = new ObjectMapper().writeValueAsString(wireOptions);
+    String wireJson = JsonMapper.builder().build().writeValueAsString(wireOptions);
     assertTrue(wireJson.contains("\"large\":9007199254740993"), wireJson);
     assertTrue(wireJson.contains("\"beyond\":9223372036854775808"), wireJson);
     assertTrue(wireJson.contains("\"ratio\":0.12345678901234567890123456789"), wireJson);
@@ -507,8 +507,9 @@ class AgentModelRuntimeConfigParserTest {
   private static AgentModelConfigDTO copy(
       AgentModelConfigDTO source, Consumer<AgentModelConfigDTO> mutator) {
     try {
-      String json = new ObjectMapper().writeValueAsString(source);
-      AgentModelConfigDTO clone = new ObjectMapper().readValue(json, AgentModelConfigDTO.class);
+      String json = JsonMapper.builder().build().writeValueAsString(source);
+      AgentModelConfigDTO clone =
+          JsonMapper.builder().build().readValue(json, AgentModelConfigDTO.class);
       mutator.accept(clone);
       return clone;
     } catch (Exception error) {
@@ -543,12 +544,8 @@ class AgentModelRuntimeConfigParserTest {
           "\"stopSequences\":[\"done\"],");
 
   private static String withProtocolOptions(String config, String protocolOptionsJson) {
-    try {
-      return withProtocolOptionsToken(
-          config, new ObjectMapper().writeValueAsString(protocolOptionsJson));
-    } catch (IOException error) {
-      throw new AssertionError(error);
-    }
+    return withProtocolOptionsToken(
+        config, JsonMapper.builder().build().writeValueAsString(protocolOptionsJson));
   }
 
   private static String withProtocolOptionsToken(String config, String token) {
@@ -559,19 +556,17 @@ class AgentModelRuntimeConfigParserTest {
 
   /** 模拟本地真相：convention4j 与 HTTP mapper 都把 Long 序列化为字符串以避免 JS 精度丢失。 */
   private static ObjectMapper longToStringMapper() {
-    ObjectMapper mapper = new ObjectMapper();
     SimpleModule module = new SimpleModule();
     module.addSerializer(
         Long.class,
-        new JsonSerializer<Long>() {
+        new ValueSerializer<Long>() {
           @Override
-          public void serialize(Long value, JsonGenerator generator, SerializerProvider serializers)
-              throws IOException {
+          public void serialize(
+              Long value, JsonGenerator generator, SerializationContext serializers) {
             generator.writeString(String.valueOf(value));
           }
         });
-    mapper.registerModule(module);
-    return mapper;
+    return JsonMapper.builder().addModule(module).build();
   }
 
   private String validConfig() {

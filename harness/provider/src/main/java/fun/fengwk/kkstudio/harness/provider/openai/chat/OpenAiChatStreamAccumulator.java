@@ -1,13 +1,15 @@
 package fun.fengwk.kkstudio.harness.provider.openai.chat;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.JsonNodeFeature;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
@@ -24,9 +26,9 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCallDiagnostic;
 
+import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -41,13 +43,13 @@ import java.util.Set;
  */
 final class OpenAiChatStreamAccumulator {
 
-  private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+  private static final ObjectMapper OBJECT_MAPPER =
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+          .build();
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
-
-  static {
-    OBJECT_MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
-    OBJECT_MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-  }
 
   private static final Set<String> VALID_FINISH_REASONS =
       Set.of("stop", "tool_calls", "length", "content_filter");
@@ -129,7 +131,7 @@ final class OpenAiChatStreamAccumulator {
     JsonNode root;
     try {
       root = OBJECT_MAPPER.readTree(trimmed);
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw new ProviderException(ProviderErrorKind.INVALID_RESPONSE, "invalid SSE JSON payload");
     }
 
@@ -142,11 +144,11 @@ final class OpenAiChatStreamAccumulator {
       throw OpenAiChatErrorMapper.mapSseErrorEnvelope(root);
     }
 
-    if (root.has("id") && root.get("id").isTextual()) {
-      this.messageId = root.get("id").asText();
+    if (root.has("id") && root.get("id").isString()) {
+      this.messageId = root.get("id").asString("");
     }
-    if (root.has("service_tier") && root.get("service_tier").isTextual()) {
-      this.serviceTier = root.get("service_tier").asText();
+    if (root.has("service_tier") && root.get("service_tier").isString()) {
+      this.serviceTier = root.get("service_tier").asString("");
     }
 
     // 处理 usage；流式中间块允许显式 null，其他非 Object 形态严格拒绝。
@@ -180,7 +182,7 @@ final class OpenAiChatStreamAccumulator {
             ProviderErrorKind.INVALID_RESPONSE, "semantic delta received after finalized choice");
       }
       if (carriesReason) {
-        String repeatedReason = choice.get("finish_reason").textValue();
+        String repeatedReason = choice.get("finish_reason").stringValue();
         if (!repeatedReason.equals(finalizedFinishReason)
             || choiceIndexOf(choice) != finalizedChoiceIndex) {
           throw new ProviderException(
@@ -196,8 +198,8 @@ final class OpenAiChatStreamAccumulator {
       mergeNativeDelta(delta);
 
       // 1. content
-      if (delta.has("content") && delta.get("content").isTextual()) {
-        String contentDelta = delta.get("content").textValue();
+      if (delta.has("content") && delta.get("content").isString()) {
+        String contentDelta = delta.get("content").stringValue();
         if (!contentDelta.isEmpty()) {
           contentBuilder.append(contentDelta);
           bridge.emitEvent(new ProviderStreamEvent.TextDelta(contentDelta));
@@ -205,8 +207,8 @@ final class OpenAiChatStreamAccumulator {
       }
 
       // 2. refusal：协议中的成功助手输出，归一化到可见文本通道
-      if (delta.has("refusal") && delta.get("refusal").isTextual()) {
-        String refusalDelta = delta.get("refusal").textValue();
+      if (delta.has("refusal") && delta.get("refusal").isString()) {
+        String refusalDelta = delta.get("refusal").stringValue();
         if (!refusalDelta.isEmpty()) {
           refusalBuilder.append(refusalDelta);
           bridge.emitEvent(new ProviderStreamEvent.TextDelta(refusalDelta));
@@ -214,8 +216,8 @@ final class OpenAiChatStreamAccumulator {
       }
 
       // 3. reasoning_content
-      if (delta.has("reasoning_content") && delta.get("reasoning_content").isTextual()) {
-        String reasoningDelta = delta.get("reasoning_content").textValue();
+      if (delta.has("reasoning_content") && delta.get("reasoning_content").isString()) {
+        String reasoningDelta = delta.get("reasoning_content").stringValue();
         if (!reasoningDelta.isEmpty()) {
           reasoningContentBuilder.append(reasoningDelta);
           bridge.emitEvent(new ProviderStreamEvent.ThinkingDelta(reasoningDelta));
@@ -232,19 +234,19 @@ final class OpenAiChatStreamAccumulator {
         ArrayNode toolCallsArray = (ArrayNode) delta.get("tool_calls");
         for (JsonNode tcNode : toolCallsArray) {
           if (tcNode.isObject() && tcNode.has("index") && tcNode.get("index").isInt()) {
-            int wireIndex = tcNode.get("index").asInt();
+            int wireIndex = tcNode.get("index").asInt(0);
             JsonNode nativeSlot = nativeToolCall(wireIndex);
             // type=function 可以先于 function 对象到达；无已知 function 意图的调用只保留原生事实。
             if (nativeSlot == null
-                || (nativeSlot.path("type").isTextual()
-                    && !"function".equals(nativeSlot.path("type").textValue()))
-                || (tcNode.path("type").isTextual()
-                    && !"function".equals(tcNode.path("type").textValue()))) {
+                || (nativeSlot.path("type").isString()
+                    && !"function".equals(nativeSlot.path("type").stringValue()))
+                || (tcNode.path("type").isString()
+                    && !"function".equals(tcNode.path("type").stringValue()))) {
               continue;
             }
             ToolCallBuilder builder = toolCallBuilders.get(wireIndex);
             if (builder == null) {
-              if (!"function".equals(nativeSlot.path("type").asText())
+              if (!"function".equals(nativeSlot.path("type").asString(""))
                   && !nativeSlot.path("function").isObject()) {
                 continue;
               }
@@ -269,8 +271,8 @@ final class OpenAiChatStreamAccumulator {
             }
 
             String idDelta = null;
-            if (tcNode.has("id") && tcNode.get("id").isTextual()) {
-              idDelta = tcNode.get("id").textValue();
+            if (tcNode.has("id") && tcNode.get("id").isString()) {
+              idDelta = tcNode.get("id").stringValue();
               builder.appendId(idDelta);
             }
 
@@ -282,12 +284,12 @@ final class OpenAiChatStreamAccumulator {
                 throw new ProviderException(
                     ProviderErrorKind.INVALID_RESPONSE, "tool call function must be an object");
               }
-              if (fn.has("name") && fn.get("name").isTextual()) {
-                nameDelta = fn.get("name").textValue();
+              if (fn.has("name") && fn.get("name").isString()) {
+                nameDelta = fn.get("name").stringValue();
                 builder.appendName(nameDelta);
               }
-              if (fn.has("arguments") && fn.get("arguments").isTextual()) {
-                argsDelta = fn.get("arguments").textValue();
+              if (fn.has("arguments") && fn.get("arguments").isString()) {
+                argsDelta = fn.get("arguments").stringValue();
                 builder.appendArguments(argsDelta);
               }
             }
@@ -307,7 +309,7 @@ final class OpenAiChatStreamAccumulator {
 
     // 检查 finish_reason：首个非 null 有效值即封闭该 choice 的语义；同帧尾随 content 已在上方正常累积后才封闭
     if (carriesFinishReason(choice)) {
-      String reasonText = choice.get("finish_reason").textValue();
+      String reasonText = choice.get("finish_reason").stringValue();
       if (!VALID_FINISH_REASONS.contains(reasonText)) {
         throw new ProviderException(
             ProviderErrorKind.INVALID_RESPONSE, "unsupported finish_reason: " + reasonText);
@@ -333,7 +335,7 @@ final class OpenAiChatStreamAccumulator {
   }
 
   /**
-   * 判定 choice 是否携带有效 finish_reason：非 null 且非空白字符串。非字符串形态一律 fail closed，绝不被 {@code asText} 静默吞掉；显式
+   * 判定 choice 是否携带有效 finish_reason：非 null 且非空白字符串。非字符串形态一律 fail closed，绝不被 {@code asString} 静默吞掉；显式
    * null 与空白字符串属于无语义尾帧。
    */
   private static boolean carriesFinishReason(JsonNode choice) {
@@ -341,11 +343,11 @@ final class OpenAiChatStreamAccumulator {
     if (node == null || node.isNull()) {
       return false;
     }
-    if (!node.isTextual()) {
+    if (!node.isString()) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_RESPONSE, "finish_reason must be a string");
     }
-    return !node.textValue().isBlank();
+    return !node.stringValue().isBlank();
   }
 
   /** 无语义尾帧：{@code delta} 缺失、null，或所有字段都是 null、空字符串、空容器。 */
@@ -357,8 +359,8 @@ final class OpenAiChatStreamAccumulator {
     if (node == null || node.isNull()) {
       return true;
     }
-    if (node.isTextual()) {
-      return node.textValue().isEmpty();
+    if (node.isString()) {
+      return node.stringValue().isEmpty();
     }
     if (node.isArray() || node.isObject()) {
       for (JsonNode child : node) {
@@ -378,17 +380,15 @@ final class OpenAiChatStreamAccumulator {
    * 递归合并，其余标量覆盖。因此未规范化的官方字段与未来字段都能无损保留到 replay，而 chunk 级 transport metadata 不在合并范围内。
    */
   private void mergeNativeDelta(JsonNode delta) {
-    Iterator<Map.Entry<String, JsonNode>> fields = delta.fields();
-    while (fields.hasNext()) {
-      Map.Entry<String, JsonNode> field = fields.next();
+    for (Map.Entry<String, JsonNode> field : delta.properties()) {
       mergeNativeField(nativeAssistantMessage, field.getKey(), field.getValue());
     }
   }
 
   private static void mergeNativeField(ObjectNode target, String field, JsonNode incoming) {
     JsonNode existing = target.get(field);
-    if (incoming.isTextual() && existing != null && existing.isTextual()) {
-      target.put(field, existing.textValue() + incoming.textValue());
+    if (incoming.isString() && existing != null && existing.isString()) {
+      target.put(field, existing.stringValue() + incoming.stringValue());
       return;
     }
     if (incoming.isObject() && existing != null && existing.isObject()) {
@@ -406,9 +406,7 @@ final class OpenAiChatStreamAccumulator {
   }
 
   private static void mergeNativeObject(ObjectNode target, ObjectNode incoming) {
-    Iterator<Map.Entry<String, JsonNode>> fields = incoming.fields();
-    while (fields.hasNext()) {
-      Map.Entry<String, JsonNode> field = fields.next();
+    for (Map.Entry<String, JsonNode> field : incoming.properties()) {
       mergeNativeField(target, field.getKey(), field.getValue());
     }
   }
@@ -429,22 +427,28 @@ final class OpenAiChatStreamAccumulator {
     return true;
   }
 
-  /** 按条目自身的 {@code index} 定位既有槽位并递归合并，槽位不存在时追加，保持 provider 给出的片段顺序。 */
+  /**
+   * 按条目自身的 {@code index} 定位既有槽位并递归合并，槽位不存在时追加，保持 provider 给出的片段顺序。
+   *
+   * <p>槽位坐标是任意宽度的整数：索引按 {@code BigInteger} 读出并精确比对/写回，超出 int 范围的原生索引不会因截断被并进别的槽位。
+   */
   private static void mergeNativeIndexedArray(ArrayNode target, ArrayNode incoming) {
     for (JsonNode item : incoming) {
-      int index = item.get("index").asInt();
+      BigInteger index = item.get("index").bigIntegerValue();
       ObjectNode slot = indexedSlot(target, index);
       mergeNativeObject(slot, (ObjectNode) item);
     }
   }
 
-  private static ObjectNode indexedSlot(ArrayNode target, int index) {
+  private static ObjectNode indexedSlot(ArrayNode target, BigInteger index) {
     for (JsonNode item : target) {
       if (!item.isObject()) {
         continue;
       }
       JsonNode itemIndex = item.get("index");
-      if (itemIndex != null && itemIndex.isIntegralNumber() && itemIndex.asInt() == index) {
+      if (itemIndex != null
+          && itemIndex.isIntegralNumber()
+          && itemIndex.bigIntegerValue().equals(index)) {
         return (ObjectNode) item;
       }
     }
@@ -466,7 +470,7 @@ final class OpenAiChatStreamAccumulator {
   }
 
   private static String textualValue(JsonNode node) {
-    return node != null && node.isTextual() ? node.textValue() : null;
+    return node != null && node.isString() ? node.stringValue() : null;
   }
 
   private void mergeReasoningDetails(JsonNode incoming) {
@@ -530,7 +534,7 @@ final class OpenAiChatStreamAccumulator {
 
     try {
       this.rawUsageJson = OBJECT_MAPPER.writeValueAsString(usageNode);
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_RESPONSE, "cannot preserve provider usage payload");
     }
@@ -696,12 +700,12 @@ final class OpenAiChatStreamAccumulator {
         if (audio.isNull()) {
           payload.remove("audio");
         } else if (!audio.isObject()
-            || !audio.path("id").isTextual()
-            || audio.path("id").textValue().isBlank()) {
+            || !audio.path("id").isString()
+            || audio.path("id").stringValue().isBlank()) {
           throw new ProviderException(
               ProviderErrorKind.INVALID_RESPONSE, "invalid assistant audio id");
         } else {
-          payload.putObject("audio").put("id", audio.path("id").textValue());
+          payload.putObject("audio").put("id", audio.path("id").stringValue());
         }
       }
       JsonNode nativeCalls = payload.get("tool_calls");
@@ -724,8 +728,8 @@ final class OpenAiChatStreamAccumulator {
                 index != null
                         && index.isInt()
                         && call.path("function").isObject()
-                        && (!call.path("type").isTextual()
-                            || "function".equals(call.path("type").textValue()))
+                        && (!call.path("type").isString()
+                            || "function".equals(call.path("type").stringValue()))
                     ? completedCalls.remove(index.intValue())
                     : null;
             if (normalized != null) {
@@ -781,7 +785,7 @@ final class OpenAiChatStreamAccumulator {
       if (node.isObject()) {
         return node;
       }
-    } catch (JsonProcessingException ignored) {
+    } catch (JacksonException ignored) {
       // Not a valid JSON object
     }
     return null;

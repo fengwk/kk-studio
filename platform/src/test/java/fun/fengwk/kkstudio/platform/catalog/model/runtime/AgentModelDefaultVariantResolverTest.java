@@ -6,8 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.platform.catalog.model.repo.impl.model.AgentModelDO;
 import fun.fengwk.kkstudio.platform.catalog.model.repo.impl.store.AgentModelJdbcStore;
@@ -19,7 +19,8 @@ class AgentModelDefaultVariantResolverTest {
   @Test
   void resolvesDefaultAndRejectsUnknownModelOrVariant() {
     AgentModelJdbcStore store = mock(AgentModelJdbcStore.class);
-    AgentModelRuntimeConfigParser parser = new AgentModelRuntimeConfigParser(new ObjectMapper());
+    AgentModelRuntimeConfigParser parser =
+        new AgentModelRuntimeConfigParser(JsonMapper.builder().build());
     AgentModelDO model = new AgentModelDO();
     model.setProviderName("provider");
     model.setName("model");

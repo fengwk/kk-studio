@@ -8,15 +8,16 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
@@ -73,7 +74,7 @@ import java.util.stream.Stream;
  */
 class AnthropicThinkingTest {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
   private static final UUID CONNECTION_GEN_ID =
@@ -141,10 +142,10 @@ class AnthropicThinkingTest {
     AnthropicEncodedRequest encodedTurn1 = encoder.encode(turn1Request, descriptor);
     JsonNode turn1WireRoot = MAPPER.readTree(encodedTurn1.bodyUtf8Bytes());
 
-    assertEquals(modelName, turn1WireRoot.path("model").asText());
-    assertEquals("adaptive", turn1WireRoot.path("thinking").path("type").asText());
-    assertEquals("summarized", turn1WireRoot.path("thinking").path("display").asText());
-    assertEquals("high", turn1WireRoot.path("output_config").path("effort").asText());
+    assertEquals(modelName, turn1WireRoot.path("model").asString(""));
+    assertEquals("adaptive", turn1WireRoot.path("thinking").path("type").asString(""));
+    assertEquals("summarized", turn1WireRoot.path("thinking").path("display").asString(""));
+    assertEquals("high", turn1WireRoot.path("output_config").path("effort").asString(""));
     assertEquals(List.of(), encodedTurn1.betaFeatures());
     assertFalse(
         turn1WireRoot.path("thinking").has("budget_tokens"),
@@ -241,19 +242,19 @@ class AnthropicThinkingTest {
 
     assertEquals(3, wireMessages.size());
     JsonNode replayedAssistant = wireMessages.get(1);
-    assertEquals("assistant", replayedAssistant.path("role").asText());
+    assertEquals("assistant", replayedAssistant.path("role").asString(""));
     ArrayNode asstContent = (ArrayNode) replayedAssistant.path("content");
     assertEquals(2, asstContent.size());
 
     // 严格验证原生 thinking 块及其 signature 均在 wire 上精准重放
-    assertEquals("thinking", asstContent.get(0).path("type").asText());
+    assertEquals("thinking", asstContent.get(0).path("type").asString(""));
     assertEquals(
         "Analyzing geography: Berlin is the capital of Germany.",
-        asstContent.get(0).path("thinking").asText());
-    assertEquals("sig_berlin_valid_token", asstContent.get(0).path("signature").asText());
+        asstContent.get(0).path("thinking").asString(""));
+    assertEquals("sig_berlin_valid_token", asstContent.get(0).path("signature").asString(""));
 
-    assertEquals("text", asstContent.get(1).path("type").asText());
-    assertEquals("The capital of Germany is Berlin.", asstContent.get(1).path("text").asText());
+    assertEquals("text", asstContent.get(1).path("type").asString(""));
+    assertEquals("The capital of Germany is Berlin.", asstContent.get(1).path("text").asString(""));
   }
 
   /**
@@ -398,27 +399,28 @@ class AnthropicThinkingTest {
 
     assertEquals(3, messages.size());
     JsonNode asstWire = messages.get(1);
-    assertEquals("assistant", asstWire.path("role").asText());
+    assertEquals("assistant", asstWire.path("role").asString(""));
     ArrayNode asstWireContent = (ArrayNode) asstWire.path("content");
     assertEquals(2, asstWireContent.size());
 
     // wire 保序断言：thinking (带签名) 必须在 tool_use 前
-    assertEquals("thinking", asstWireContent.get(0).path("type").asText());
+    assertEquals("thinking", asstWireContent.get(0).path("type").asString(""));
     assertEquals(
         "User wants weather in Munich. Calling getWeather tool.",
-        asstWireContent.get(0).path("thinking").asText());
-    assertEquals("sig_tool_call_munich_999", asstWireContent.get(0).path("signature").asText());
+        asstWireContent.get(0).path("thinking").asString(""));
+    assertEquals("sig_tool_call_munich_999", asstWireContent.get(0).path("signature").asString(""));
 
-    assertEquals("tool_use", asstWireContent.get(1).path("type").asText());
-    assertEquals("call_munich_101", asstWireContent.get(1).path("id").asText());
-    assertEquals("getWeather", asstWireContent.get(1).path("name").asText());
-    assertEquals("Munich", asstWireContent.get(1).path("input").path("city").asText());
+    assertEquals("tool_use", asstWireContent.get(1).path("type").asString(""));
+    assertEquals("call_munich_101", asstWireContent.get(1).path("id").asString(""));
+    assertEquals("getWeather", asstWireContent.get(1).path("name").asString(""));
+    assertEquals("Munich", asstWireContent.get(1).path("input").path("city").asString(""));
 
     // 工具结果 wire 断言
     JsonNode toolWire = messages.get(2);
-    assertEquals("user", toolWire.path("role").asText());
-    assertEquals("tool_result", toolWire.path("content").get(0).path("type").asText());
-    assertEquals("call_munich_101", toolWire.path("content").get(0).path("tool_use_id").asText());
+    assertEquals("user", toolWire.path("role").asString(""));
+    assertEquals("tool_result", toolWire.path("content").get(0).path("type").asString(""));
+    assertEquals(
+        "call_munich_101", toolWire.path("content").get(0).path("tool_use_id").asString(""));
   }
 
   /**
@@ -501,9 +503,9 @@ class AnthropicThinkingTest {
     JsonNode asstWireContent = root.path("messages").get(1).path("content");
 
     assertEquals(2, asstWireContent.size());
-    assertEquals("redacted_thinking", asstWireContent.get(0).path("type").asText());
-    assertEquals(encryptedThinkingData, asstWireContent.get(0).path("data").asText());
-    assertEquals("text", asstWireContent.get(1).path("type").asText());
+    assertEquals("redacted_thinking", asstWireContent.get(0).path("type").asString(""));
+    assertEquals(encryptedThinkingData, asstWireContent.get(0).path("data").asString(""));
+    assertEquals("text", asstWireContent.get(1).path("type").asString(""));
   }
 
   /**
@@ -578,9 +580,9 @@ class AnthropicThinkingTest {
     ArrayNode contents = (ArrayNode) asstWire.path("content");
 
     // 均降级为 text，绝不包含无签名的 thinking 块
-    assertEquals("text", contents.get(0).path("type").asText());
-    assertEquals("Thinking without signature.", contents.get(0).path("text").asText());
-    assertEquals("text", contents.get(1).path("type").asText());
+    assertEquals("text", contents.get(0).path("type").asString(""));
+    assertEquals("Thinking without signature.", contents.get(0).path("text").asString(""));
+    assertEquals("text", contents.get(1).path("type").asString(""));
   }
 
   /**
@@ -640,10 +642,10 @@ class AnthropicThinkingTest {
                 .get(1)
                 .path("content");
     assertEquals(2, fallbackContents.size());
-    assertEquals("text", fallbackContents.get(0).path("type").asText());
-    assertEquals("Thought", fallbackContents.get(0).path("text").asText());
-    assertEquals("text", fallbackContents.get(1).path("type").asText());
-    assertEquals("Text", fallbackContents.get(1).path("text").asText());
+    assertEquals("text", fallbackContents.get(0).path("type").asString(""));
+    assertEquals("Thought", fallbackContents.get(0).path("text").asString(""));
+    assertEquals("text", fallbackContents.get(1).path("type").asString(""));
+    assertEquals("Text", fallbackContents.get(1).path("text").asString(""));
   }
 
   /**
@@ -703,11 +705,11 @@ class AnthropicThinkingTest {
                 .get(1)
                 .path("content");
     assertEquals(2, replayedContent.size());
-    assertEquals("thinking", replayedContent.get(0).path("type").asText());
-    assertEquals("Thought", replayedContent.get(0).path("thinking").asText());
-    assertEquals("sig_valid", replayedContent.get(0).path("signature").asText());
-    assertEquals("text", replayedContent.get(1).path("type").asText());
-    assertEquals("Text", replayedContent.get(1).path("text").asText());
+    assertEquals("thinking", replayedContent.get(0).path("type").asString(""));
+    assertEquals("Thought", replayedContent.get(0).path("thinking").asString(""));
+    assertEquals("sig_valid", replayedContent.get(0).path("signature").asString(""));
+    assertEquals("text", replayedContent.get(1).path("type").asString(""));
+    assertEquals("Text", replayedContent.get(1).path("text").asString(""));
   }
 
   /**
@@ -864,8 +866,8 @@ class AnthropicThinkingTest {
         new AnthropicStreamAccumulator(req, descriptor, bridge);
 
     for (JsonNode item : fixtureArray) {
-      String event = item.path("event").asText();
-      String data = item.path("data").asText();
+      String event = item.path("event").asString("");
+      String data = item.path("data").asString("");
       accumulator.handleEvent(event, data);
     }
 
@@ -875,7 +877,7 @@ class AnthropicThinkingTest {
     assertNotNull(completion.replayState());
     assertEquals(
         "sig_test_fixture_signature",
-        completion.replayState().payload().path("content").get(0).path("signature").asText());
+        completion.replayState().payload().path("content").get(0).path("signature").asString(""));
   }
 
   /**
@@ -906,10 +908,10 @@ class AnthropicThinkingTest {
     AnthropicEncodedRequest encodedTurn1 = budgetEncoder.encode(turn1Request, descriptor);
     JsonNode turn1WireRoot = MAPPER.readTree(encodedTurn1.bodyUtf8Bytes());
 
-    assertEquals("MiniMax-M3", turn1WireRoot.path("model").asText());
-    assertEquals("enabled", turn1WireRoot.path("thinking").path("type").asText());
-    assertEquals(8192, turn1WireRoot.path("thinking").path("budget_tokens").asInt());
-    assertEquals("summarized", turn1WireRoot.path("thinking").path("display").asText());
+    assertEquals("MiniMax-M3", turn1WireRoot.path("model").asString(""));
+    assertEquals("enabled", turn1WireRoot.path("thinking").path("type").asString(""));
+    assertEquals(8192, turn1WireRoot.path("thinking").path("budget_tokens").asInt(0));
+    assertEquals("summarized", turn1WireRoot.path("thinking").path("display").asString(""));
     assertFalse(turn1WireRoot.has("output_config"), "BUDGET mode must omit output_config");
     assertEquals(List.of("interleaved-thinking-2025-05-14"), encodedTurn1.betaFeatures());
 
@@ -979,11 +981,11 @@ class AnthropicThinkingTest {
     AnthropicEncodedRequest encodedTurn2 = budgetEncoder.encode(turn2Request, descriptor);
     JsonNode turn2WireRoot = MAPPER.readTree(encodedTurn2.bodyUtf8Bytes());
     JsonNode wireAsstMsg = turn2WireRoot.path("messages").get(1);
-    assertEquals("assistant", wireAsstMsg.path("role").asText());
-    assertEquals("thinking", wireAsstMsg.path("content").get(0).path("type").asText());
+    assertEquals("assistant", wireAsstMsg.path("role").asString(""));
+    assertEquals("thinking", wireAsstMsg.path("content").get(0).path("type").asString(""));
     assertEquals(
-        "sig_minimax_budget", wireAsstMsg.path("content").get(0).path("signature").asText());
-    assertEquals("text", wireAsstMsg.path("content").get(1).path("type").asText());
+        "sig_minimax_budget", wireAsstMsg.path("content").get(0).path("signature").asString(""));
+    assertEquals("text", wireAsstMsg.path("content").get(1).path("type").asString(""));
   }
 
   private static ModelDescriptor createReasoningModel(String modelName) {

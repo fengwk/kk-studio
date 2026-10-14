@@ -5,12 +5,13 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
@@ -55,7 +56,7 @@ import java.util.UUID;
  */
 class AnthropicOpaqueReplayTest {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
   private static final String SYSTEM_INSTRUCTION = "Test system instruction.";
 
@@ -115,8 +116,8 @@ class AnthropicOpaqueReplayTest {
     expectedNativeBlock.putObject("input").put("query", "kk");
     expectedNativeBlock.putObject("future_field").put("x", 1);
     assertEquals(expectedNativeBlock, content.get(0));
-    assertEquals("text", content.get(1).path("type").asText());
-    assertEquals("answer", content.get(1).path("text").asText());
+    assertEquals("text", content.get(1).path("type").asString(""));
+    assertEquals("answer", content.get(1).path("text").asString(""));
 
     // 下一轮：native block（含解析后的 input）与已知 text 全部无损进入 wire
     ProviderRequest nextRequest =
@@ -127,7 +128,7 @@ class AnthropicOpaqueReplayTest {
         wire(encoder.encode(nextRequest, descriptor)).path("messages").get(1).path("content");
     assertEquals(2, assistantContent.size());
     assertEquals(expectedNativeBlock, assistantContent.get(0));
-    assertEquals("answer", assistantContent.get(1).path("text").asText());
+    assertEquals("answer", assistantContent.get(1).path("text").asString(""));
   }
 
   /** 测试意图：未携带 delta 的 native block 原样保留，绝不被补造或裁剪字段。 */
@@ -150,10 +151,11 @@ class AnthropicOpaqueReplayTest {
 
     JsonNode content = accumulator.finish().replayState().payload().path("content");
     assertEquals(1, content.size());
-    assertEquals("web_search_tool_result", content.get(0).path("type").asText());
-    assertEquals("srv_1", content.get(0).path("tool_use_id").asText());
-    assertEquals("https://example.com", content.get(0).path("content").get(0).path("url").asText());
-    assertEquals(false, content.get(0).path("flag").asBoolean());
+    assertEquals("web_search_tool_result", content.get(0).path("type").asString(""));
+    assertEquals("srv_1", content.get(0).path("tool_use_id").asString(""));
+    assertEquals(
+        "https://example.com", content.get(0).path("content").get(0).path("url").asString(""));
+    assertEquals(false, content.get(0).path("flag").asBoolean(false));
     assertEquals(4, content.get(0).size());
   }
 
@@ -178,8 +180,8 @@ class AnthropicOpaqueReplayTest {
             replayState(mismatchedAffinity, citedPayload),
             List.of(new ProviderTextBlock("cited answer")));
     assertEquals(1, citedContent.size());
-    assertEquals("text", citedContent.get(0).path("type").asText());
-    assertEquals("cited answer", citedContent.get(0).path("text").asText());
+    assertEquals("text", citedContent.get(0).path("type").asString(""));
+    assertEquals("cited answer", citedContent.get(0).path("text").asString(""));
     assertFalse(citedContent.get(0).has("citations"));
     assertFalse(citedContent.get(0).has("future_official_field"));
 
@@ -195,10 +197,10 @@ class AnthropicOpaqueReplayTest {
     JsonNode toolContent =
         fallbackContent(replayState(mismatchedAffinity, extraMemberToolPayload), durableToolCall);
     assertEquals(1, toolContent.size());
-    assertEquals("tool_use", toolContent.get(0).path("type").asText());
-    assertEquals("c1", toolContent.get(0).path("id").asText());
-    assertEquals("calc", toolContent.get(0).path("name").asText());
-    assertEquals(1, toolContent.get(0).path("input").path("x").asInt());
+    assertEquals("tool_use", toolContent.get(0).path("type").asString(""));
+    assertEquals("c1", toolContent.get(0).path("id").asString(""));
+    assertEquals("calc", toolContent.get(0).path("name").asString(""));
+    assertEquals(1, toolContent.get(0).path("input").path("x").asInt(0));
     assertFalse(toolContent.get(0).has("caller"));
   }
 
@@ -225,8 +227,8 @@ class AnthropicOpaqueReplayTest {
             replayState(mismatchedAffinity, nativePayload),
             List.of(new ProviderTextBlock("answer")));
     assertEquals(1, serverToolFallback.size());
-    assertEquals("text", serverToolFallback.get(0).path("type").asText());
-    assertEquals("answer", serverToolFallback.get(0).path("text").asText());
+    assertEquals("text", serverToolFallback.get(0).path("type").asString(""));
+    assertEquals("answer", serverToolFallback.get(0).path("text").asString(""));
 
     // 2. redacted_thinking 同样无法用 durable 语义表达：失配时被丢弃
     ObjectNode redactedPayload = NODES.objectNode();
@@ -239,8 +241,8 @@ class AnthropicOpaqueReplayTest {
             replayState(mismatchedAffinity, redactedPayload),
             List.of(new ProviderTextBlock("answer")));
     assertEquals(1, redactedFallback.size());
-    assertEquals("text", redactedFallback.get(0).path("type").asText());
-    assertEquals("answer", redactedFallback.get(0).path("text").asText());
+    assertEquals("text", redactedFallback.get(0).path("type").asString(""));
+    assertEquals("answer", redactedFallback.get(0).path("text").asString(""));
 
     // 3. 纯已知 text payload 在失配时同样回退语义编码
     ObjectNode knownPayload = NODES.objectNode();
@@ -251,8 +253,8 @@ class AnthropicOpaqueReplayTest {
             replayState(mismatchedAffinity, knownPayload),
             List.of(new ProviderTextBlock("answer")));
     assertEquals(1, knownFallback.size());
-    assertEquals("text", knownFallback.get(0).path("type").asText());
-    assertEquals("answer", knownFallback.get(0).path("text").asText());
+    assertEquals("text", knownFallback.get(0).path("type").asString(""));
+    assertEquals("answer", knownFallback.get(0).path("text").asString(""));
   }
 
   /**

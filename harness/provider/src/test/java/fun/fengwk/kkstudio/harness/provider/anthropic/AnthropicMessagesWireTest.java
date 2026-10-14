@@ -7,8 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
@@ -16,6 +14,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransport;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
@@ -89,7 +90,7 @@ class AnthropicMessagesWireTest {
   private HttpClient client;
   private JdkHttpSseTransport transport;
   private AnthropicProviderAdapter adapter;
-  private final ObjectMapper mapper = new ObjectMapper();
+  private final ObjectMapper mapper = JsonMapper.builder().build();
   private final AnthropicRequestEncoder encoder = new AnthropicRequestEncoder();
 
   @BeforeEach
@@ -171,8 +172,8 @@ class AnthropicMessagesWireTest {
         req.firstHeader("anthropic-beta"), "standard native path must omit anthropic-beta header");
 
     JsonNode bodyJson = mapper.readTree(req.bodyBytes);
-    assertTrue(bodyJson.path("stream").asBoolean(), "stream field must be true");
-    assertEquals("claude-3-5-sonnet", bodyJson.path("model").asText());
+    assertTrue(bodyJson.path("stream").asBoolean(false), "stream field must be true");
+    assertEquals("claude-3-5-sonnet", bodyJson.path("model").asString(""));
   }
 
   /** 验证通过真实端点流式调用完成完整的消息创建与文本聚合流程。 */
@@ -336,9 +337,9 @@ class AnthropicMessagesWireTest {
         "BUDGET mode with reasoning enabled must send interleaved thinking beta header");
 
     JsonNode bodyJson = mapper.readTree(req.bodyBytes);
-    assertEquals("enabled", bodyJson.path("thinking").path("type").asText());
-    assertEquals(2048, bodyJson.path("thinking").path("budget_tokens").asInt());
-    assertEquals("summarized", bodyJson.path("thinking").path("display").asText());
+    assertEquals("enabled", bodyJson.path("thinking").path("type").asString(""));
+    assertEquals(2048, bodyJson.path("thinking").path("budget_tokens").asInt(0));
+    assertEquals("summarized", bodyJson.path("thinking").path("display").asString(""));
     assertFalse(bodyJson.has("output_config"), "BUDGET mode must omit output_config");
   }
 
@@ -385,9 +386,9 @@ class AnthropicMessagesWireTest {
         "ADAPTIVE mode must omit anthropic-beta header even when reasoning is enabled");
 
     JsonNode bodyJson = mapper.readTree(req.bodyBytes);
-    assertEquals("adaptive", bodyJson.path("thinking").path("type").asText());
-    assertEquals("summarized", bodyJson.path("thinking").path("display").asText());
-    assertEquals("low", bodyJson.path("output_config").path("effort").asText());
+    assertEquals("adaptive", bodyJson.path("thinking").path("type").asString(""));
+    assertEquals("summarized", bodyJson.path("thinking").path("display").asString(""));
+    assertEquals("low", bodyJson.path("output_config").path("effort").asString(""));
   }
 
   /** 验证配置的 beta 能力在单个 anthropic-beta 头内按声明顺序以逗号连接发送。 */
@@ -531,7 +532,7 @@ class AnthropicMessagesWireTest {
     JsonNode bodyJson = mapper.readTree(req.bodyBytes);
     assertEquals(
         "disabled",
-        bodyJson.path("thinking").path("type").asText(),
+        bodyJson.path("thinking").path("type").asString(""),
         "reasoningEffort=off must send thinking type disabled");
     assertFalse(bodyJson.has("output_config"), "reasoningEffort=off must omit output_config");
   }
@@ -561,7 +562,7 @@ class AnthropicMessagesWireTest {
     AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
     JsonNode root = mapper.readTree(encoded.bodyUtf8Bytes());
     assertEquals(
-        modelName, root.path("model").asText(), "model field must match upstream enum string");
+        modelName, root.path("model").asString(""), "model field must match upstream enum string");
   }
 
   /** 验证任意字符串格式的模型名称能够无损透传至线缆请求体中。 */
@@ -585,7 +586,9 @@ class AnthropicMessagesWireTest {
     AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
     JsonNode root = mapper.readTree(encoded.bodyUtf8Bytes());
     assertEquals(
-        modelName, root.path("model").asText(), "custom model string must pass through unmodified");
+        modelName,
+        root.path("model").asString(""),
+        "custom model string must pass through unmodified");
   }
 
   /** 验证请求中显式指定的模型名称正确写入线缆负载。 */
@@ -597,7 +600,7 @@ class AnthropicMessagesWireTest {
 
     AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
     JsonNode root = mapper.readTree(encoded.bodyUtf8Bytes());
-    assertEquals("claude-3-7-sonnet", root.path("model").asText());
+    assertEquals("claude-3-7-sonnet", root.path("model").asString(""));
   }
 
   /** 验证生效的 ModelDescriptor 模型名称正确序列化至线缆模型字段。 */
@@ -609,7 +612,7 @@ class AnthropicMessagesWireTest {
 
     AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
     JsonNode root = mapper.readTree(encoded.bodyUtf8Bytes());
-    assertEquals("claude-3-haiku-20240307", root.path("model").asText());
+    assertEquals("claude-3-haiku-20240307", root.path("model").asString(""));
   }
 
   // ==========================================
@@ -627,7 +630,7 @@ class AnthropicMessagesWireTest {
     AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
     JsonNode root = mapper.readTree(encoded.bodyUtf8Bytes());
 
-    assertEquals(2048, root.path("max_tokens").asInt());
+    assertEquals(2048, root.path("max_tokens").asInt(0));
   }
 
   /** 验证原生请求没有 stop-sequence 覆盖时省略 stop_sequences 字段。 */
@@ -652,7 +655,7 @@ class AnthropicMessagesWireTest {
 
     AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
     JsonNode root = mapper.readTree(encoded.bodyUtf8Bytes());
-    assertEquals(4096, root.path("max_tokens").asInt());
+    assertEquals(4096, root.path("max_tokens").asInt(0));
   }
 
   /** 验证测试构造器提供的默认请求 outputTokens 原样写入原生线缆。 */
@@ -664,7 +667,7 @@ class AnthropicMessagesWireTest {
 
     AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
     JsonNode root = mapper.readTree(encoded.bodyUtf8Bytes());
-    assertEquals(1024, root.path("max_tokens").asInt(), "default max_tokens must be 1024");
+    assertEquals(1024, root.path("max_tokens").asInt(0), "default max_tokens must be 1024");
   }
 
   /** 验证没有可选覆盖项时请求仍可编码，并保持原生协议默认。 */
@@ -693,7 +696,7 @@ class AnthropicMessagesWireTest {
     AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
     JsonNode root = mapper.readTree(encoded.bodyUtf8Bytes());
 
-    assertEquals(512, root.path("max_tokens").asInt());
+    assertEquals(512, root.path("max_tokens").asInt(0));
     assertFalse(root.has("temperature"));
     assertFalse(root.has("top_p"));
     assertFalse(root.has("top_k"));
@@ -729,9 +732,9 @@ class AnthropicMessagesWireTest {
     AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
     JsonNode root = mapper.readTree(encoded.bodyUtf8Bytes());
 
-    assertEquals("adaptive", root.path("thinking").path("type").asText());
-    assertEquals("summarized", root.path("thinking").path("display").asText());
-    assertEquals("low", root.path("output_config").path("effort").asText());
+    assertEquals("adaptive", root.path("thinking").path("type").asString(""));
+    assertEquals("summarized", root.path("thinking").path("display").asString(""));
+    assertEquals("low", root.path("output_config").path("effort").asString(""));
     assertEquals(List.of(), encoded.betaFeatures());
   }
 
@@ -747,7 +750,7 @@ class AnthropicMessagesWireTest {
     AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
     JsonNode root = mapper.readTree(encoded.bodyUtf8Bytes());
 
-    assertEquals(1500, root.path("max_tokens").asInt());
+    assertEquals(1500, root.path("max_tokens").asInt(0));
   }
 
   /** 验证默认变体仍使用请求级输出预算填充原生必需字段。 */
@@ -759,7 +762,7 @@ class AnthropicMessagesWireTest {
 
     AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
     JsonNode root = mapper.readTree(encoded.bodyUtf8Bytes());
-    assertEquals(1024, root.path("max_tokens").asInt());
+    assertEquals(1024, root.path("max_tokens").asInt(0));
   }
 
   // ==========================================
@@ -778,9 +781,9 @@ class AnthropicMessagesWireTest {
 
     JsonNode messages = root.path("messages");
     assertEquals(1, messages.size());
-    assertEquals("user", messages.get(0).path("role").asText());
-    assertEquals("text", messages.get(0).path("content").get(0).path("type").asText());
-    assertEquals("Hello Claude", messages.get(0).path("content").get(0).path("text").asText());
+    assertEquals("user", messages.get(0).path("role").asString(""));
+    assertEquals("text", messages.get(0).path("content").get(0).path("type").asString(""));
+    assertEquals("Hello Claude", messages.get(0).path("content").get(0).path("text").asString(""));
   }
 
   /** 验证请求唯一的系统指令编码为顶级 system 数组中的单条 text 块，且不进入 messages。 */
@@ -796,12 +799,12 @@ class AnthropicMessagesWireTest {
 
     JsonNode system = root.path("system");
     assertEquals(1, system.size());
-    assertEquals("text", system.get(0).path("type").asText());
-    assertEquals("You are a helpful assistant.", system.get(0).path("text").asText());
+    assertEquals("text", system.get(0).path("type").asString(""));
+    assertEquals("You are a helpful assistant.", system.get(0).path("text").asString(""));
 
     JsonNode messages = root.path("messages");
     assertEquals(1, messages.size());
-    assertEquals("user", messages.get(0).path("role").asText());
+    assertEquals("user", messages.get(0).path("role").asString(""));
   }
 
   /** 验证多轮有序历史消息（USER -> ASSISTANT -> USER）在线缆上保持严格顺序，系统指令始终是顶层单块。 */
@@ -820,16 +823,16 @@ class AnthropicMessagesWireTest {
     JsonNode root = mapper.readTree(encoded.bodyUtf8Bytes());
 
     assertEquals(1, root.path("system").size());
-    assertEquals("Sys", root.path("system").get(0).path("text").asText());
+    assertEquals("Sys", root.path("system").get(0).path("text").asString(""));
 
     JsonNode messages = root.path("messages");
     assertEquals(3, messages.size());
-    assertEquals("user", messages.get(0).path("role").asText());
-    assertEquals("User 1", messages.get(0).path("content").get(0).path("text").asText());
-    assertEquals("assistant", messages.get(1).path("role").asText());
-    assertEquals("Assistant 1", messages.get(1).path("content").get(0).path("text").asText());
-    assertEquals("user", messages.get(2).path("role").asText());
-    assertEquals("User 2", messages.get(2).path("content").get(0).path("text").asText());
+    assertEquals("user", messages.get(0).path("role").asString(""));
+    assertEquals("User 1", messages.get(0).path("content").get(0).path("text").asString(""));
+    assertEquals("assistant", messages.get(1).path("role").asString(""));
+    assertEquals("Assistant 1", messages.get(1).path("content").get(0).path("text").asString(""));
+    assertEquals("user", messages.get(2).path("role").asString(""));
+    assertEquals("User 2", messages.get(2).path("content").get(0).path("text").asString(""));
   }
 
   /** 验证允许非 user 消息（如 ASSISTANT）作为第一条对话消息，并支持连续多条 USER 消息在线缆上传输。 */
@@ -851,9 +854,9 @@ class AnthropicMessagesWireTest {
 
     JsonNode messages = root.path("messages");
     assertEquals(3, messages.size());
-    assertEquals("assistant", messages.get(0).path("role").asText());
-    assertEquals("user", messages.get(1).path("role").asText());
-    assertEquals("user", messages.get(2).path("role").asText());
+    assertEquals("assistant", messages.get(0).path("role").asString(""));
+    assertEquals("user", messages.get(1).path("role").asString(""));
+    assertEquals("user", messages.get(2).path("role").asString(""));
   }
 
   // ==========================================
@@ -873,10 +876,10 @@ class AnthropicMessagesWireTest {
     JsonNode content =
         mapper.readTree(encoded.bodyUtf8Bytes()).path("messages").get(0).path("content").get(0);
 
-    assertEquals("image", content.path("type").asText());
-    assertEquals("base64", content.path("source").path("type").asText());
-    assertEquals("image/png", content.path("source").path("media_type").asText());
-    assertFalse(content.path("source").path("data").asText().isBlank());
+    assertEquals("image", content.path("type").asString(""));
+    assertEquals("base64", content.path("source").path("type").asString(""));
+    assertEquals("image/png", content.path("source").path("media_type").asString(""));
+    assertFalse(content.path("source").path("data").asString("").isBlank());
   }
 
   /** 验证同一个消息中多个 base64 图片依次按序在线缆 content 数组中编码。 */
@@ -894,8 +897,8 @@ class AnthropicMessagesWireTest {
         mapper.readTree(encoded.bodyUtf8Bytes()).path("messages").get(0).path("content");
 
     assertEquals(2, contents.size());
-    assertEquals("image/png", contents.get(0).path("source").path("media_type").asText());
-    assertEquals("image/jpeg", contents.get(1).path("source").path("media_type").asText());
+    assertEquals("image/png", contents.get(0).path("source").path("media_type").asString(""));
+    assertEquals("image/jpeg", contents.get(1).path("source").path("media_type").asString(""));
   }
 
   /** 验证公共 HTTP/HTTPS URL 格式的图片内容在线缆上格式为 type=image, source.type=url。 */
@@ -911,9 +914,9 @@ class AnthropicMessagesWireTest {
     JsonNode content =
         mapper.readTree(encoded.bodyUtf8Bytes()).path("messages").get(0).path("content").get(0);
 
-    assertEquals("image", content.path("type").asText());
-    assertEquals("url", content.path("source").path("type").asText());
-    assertEquals("https://example.com/photo.jpg", content.path("source").path("url").asText());
+    assertEquals("image", content.path("type").asString(""));
+    assertEquals("url", content.path("source").path("type").asString(""));
+    assertEquals("https://example.com/photo.jpg", content.path("source").path("url").asString(""));
   }
 
   /** 验证多个公共 URL 图片均能正确编码在线缆 content 数组中。 */
@@ -931,8 +934,10 @@ class AnthropicMessagesWireTest {
         mapper.readTree(encoded.bodyUtf8Bytes()).path("messages").get(0).path("content");
 
     assertEquals(2, contents.size());
-    assertEquals("https://example.com/1.jpg", contents.get(0).path("source").path("url").asText());
-    assertEquals("https://example.com/2.png", contents.get(1).path("source").path("url").asText());
+    assertEquals(
+        "https://example.com/1.jpg", contents.get(0).path("source").path("url").asString(""));
+    assertEquals(
+        "https://example.com/2.png", contents.get(1).path("source").path("url").asString(""));
   }
 
   /** 验证 base64 编码的 PDF 文档在线缆上格式为 type=document, source.type=base64, media_type=application/pdf。 */
@@ -948,10 +953,10 @@ class AnthropicMessagesWireTest {
     JsonNode content =
         mapper.readTree(encoded.bodyUtf8Bytes()).path("messages").get(0).path("content").get(0);
 
-    assertEquals("document", content.path("type").asText());
-    assertEquals("base64", content.path("source").path("type").asText());
-    assertEquals("application/pdf", content.path("source").path("media_type").asText());
-    assertFalse(content.path("source").path("data").asText().isBlank());
+    assertEquals("document", content.path("type").asString(""));
+    assertEquals("base64", content.path("source").path("type").asString(""));
+    assertEquals("application/pdf", content.path("source").path("media_type").asString(""));
+    assertFalse(content.path("source").path("data").asString("").isBlank());
   }
 
   /** 验证传入 URL 格式的 PDF 文档时被确定性拒绝并抛出 INVALID_REQUEST。 */
@@ -1055,7 +1060,7 @@ class AnthropicMessagesWireTest {
     // 校验 Turn 1 的线缆请求包含 tools 定义
     JsonNode firstBody = mapper.readTree(firstReqRef.get().bodyBytes);
     assertEquals(1, firstBody.path("tools").size());
-    assertEquals("get_weather", firstBody.path("tools").get(0).path("name").asText());
+    assertEquals("get_weather", firstBody.path("tools").get(0).path("name").asString(""));
 
     // Turn 2: 携带 assistant tool_use 与 tool_result 回传
     ProviderMessage assistantMsg =
@@ -1093,13 +1098,15 @@ class AnthropicMessagesWireTest {
     JsonNode secondBody = mapper.readTree(secondReqRef.get().bodyBytes);
     JsonNode secondMessages = secondBody.path("messages");
     assertEquals(3, secondMessages.size());
-    assertEquals("assistant", secondMessages.get(1).path("role").asText());
-    assertEquals("tool_use", secondMessages.get(1).path("content").get(0).path("type").asText());
-    assertEquals("user", secondMessages.get(2).path("role").asText());
-    assertEquals("tool_result", secondMessages.get(2).path("content").get(0).path("type").asText());
+    assertEquals("assistant", secondMessages.get(1).path("role").asString(""));
+    assertEquals(
+        "tool_use", secondMessages.get(1).path("content").get(0).path("type").asString(""));
+    assertEquals("user", secondMessages.get(2).path("role").asString(""));
+    assertEquals(
+        "tool_result", secondMessages.get(2).path("content").get(0).path("type").asString(""));
     assertEquals(
         "call_weather_1",
-        secondMessages.get(2).path("content").get(0).path("tool_use_id").asText());
+        secondMessages.get(2).path("content").get(0).path("tool_use_id").asString(""));
   }
 
   /** 验证无参数工具（input={}）的调用与回传能够正确编码在线缆上。 */
@@ -1133,14 +1140,14 @@ class AnthropicMessagesWireTest {
     JsonNode root = mapper.readTree(encoded.bodyUtf8Bytes());
 
     JsonNode assistantContent = root.path("messages").get(1).path("content").get(0);
-    assertEquals("tool_use", assistantContent.path("type").asText());
-    assertEquals("call_time_1", assistantContent.path("id").asText());
+    assertEquals("tool_use", assistantContent.path("type").asString(""));
+    assertEquals("call_time_1", assistantContent.path("id").asString(""));
     assertTrue(assistantContent.path("input").isObject());
     assertEquals(0, assistantContent.path("input").size());
 
     JsonNode toolResultContent = root.path("messages").get(2).path("content").get(0);
-    assertEquals("tool_result", toolResultContent.path("type").asText());
-    assertEquals("call_time_1", toolResultContent.path("tool_use_id").asText());
+    assertEquals("tool_result", toolResultContent.path("type").asString(""));
+    assertEquals("call_time_1", toolResultContent.path("tool_use_id").asString(""));
   }
 
   /** 验证多个工具并发调用（parallel tool use）在 Assistant 消息中并列以及在 TOOL 消息中并列的结果回传。 */
@@ -1181,16 +1188,16 @@ class AnthropicMessagesWireTest {
 
     JsonNode assistantBlocks = root.path("messages").get(1).path("content");
     assertEquals(2, assistantBlocks.size());
-    assertEquals("c1", assistantBlocks.get(0).path("id").asText());
-    assertEquals("c2", assistantBlocks.get(1).path("id").asText());
+    assertEquals("c1", assistantBlocks.get(0).path("id").asString(""));
+    assertEquals("c2", assistantBlocks.get(1).path("id").asString(""));
 
     JsonNode toolResultMsgNode1 = root.path("messages").get(2);
-    assertEquals("user", toolResultMsgNode1.path("role").asText());
-    assertEquals("c1", toolResultMsgNode1.path("content").get(0).path("tool_use_id").asText());
+    assertEquals("user", toolResultMsgNode1.path("role").asString(""));
+    assertEquals("c1", toolResultMsgNode1.path("content").get(0).path("tool_use_id").asString(""));
 
     JsonNode toolResultMsgNode2 = root.path("messages").get(3);
-    assertEquals("user", toolResultMsgNode2.path("role").asText());
-    assertEquals("c2", toolResultMsgNode2.path("content").get(0).path("tool_use_id").asText());
+    assertEquals("user", toolResultMsgNode2.path("role").asString(""));
+    assertEquals("c2", toolResultMsgNode2.path("content").get(0).path("tool_use_id").asString(""));
   }
 
   /** 验证执行失败的工具调用结果在线缆 tool_result 中携带 is_error=true。 */
@@ -1216,9 +1223,10 @@ class AnthropicMessagesWireTest {
     JsonNode root = mapper.readTree(encoded.bodyUtf8Bytes());
 
     JsonNode resultBlock = root.path("messages").get(1).path("content").get(0);
-    assertEquals("tool_result", resultBlock.path("type").asText());
+    assertEquals("tool_result", resultBlock.path("type").asString(""));
     assertTrue(
-        resultBlock.path("is_error").asBoolean(), "is_error must be true on failed tool result");
+        resultBlock.path("is_error").asBoolean(false),
+        "is_error must be true on failed tool result");
   }
 
   // ==========================================
@@ -1261,7 +1269,7 @@ class AnthropicMessagesWireTest {
 
     JsonNode sysBlock = root.path("system").get(0);
     assertTrue(sysBlock.has("cache_control"));
-    assertEquals("ephemeral", sysBlock.path("cache_control").path("type").asText());
+    assertEquals("ephemeral", sysBlock.path("cache_control").path("type").asString(""));
     assertFalse(sysBlock.path("cache_control").has("ttl"), "SHORT retention must not have ttl");
   }
 
@@ -1291,7 +1299,7 @@ class AnthropicMessagesWireTest {
     assertEquals(2, tools.size());
     assertFalse(tools.get(0).has("cache_control"));
     assertTrue(tools.get(1).has("cache_control"));
-    assertEquals("ephemeral", tools.get(1).path("cache_control").path("type").asText());
+    assertEquals("ephemeral", tools.get(1).path("cache_control").path("type").asString(""));
   }
 
   /** 验证 system 与 tools 两个固定边界同时被标记，互不排斥。 */
@@ -1326,8 +1334,8 @@ class AnthropicMessagesWireTest {
     JsonNode root = mapper.readTree(encoded.bodyUtf8Bytes());
 
     JsonNode marker = root.path("system").get(0).path("cache_control");
-    assertEquals("ephemeral", marker.path("type").asText());
-    assertEquals("1h", marker.path("ttl").asText(), "LONG retention must specify 1h ttl");
+    assertEquals("ephemeral", marker.path("type").asString(""));
+    assertEquals("1h", marker.path("ttl").asString(""), "LONG retention must specify 1h ttl");
   }
 
   /** 验证最近历史端点固定携带标记，并严格遵守 SHORT（无 ttl）与 LONG（1h ttl）区分。 */
@@ -1350,7 +1358,7 @@ class AnthropicMessagesWireTest {
     JsonNode rootShort = mapper.readTree(encShort.bodyUtf8Bytes());
     JsonNode lastBlockShort = rootShort.path("messages").get(2).path("content").get(0);
     assertTrue(lastBlockShort.has("cache_control"));
-    assertEquals("ephemeral", lastBlockShort.path("cache_control").path("type").asText());
+    assertEquals("ephemeral", lastBlockShort.path("cache_control").path("type").asString(""));
     assertFalse(lastBlockShort.path("cache_control").has("ttl"));
 
     // 2. LONG retention
@@ -1362,7 +1370,7 @@ class AnthropicMessagesWireTest {
     JsonNode rootLong = mapper.readTree(encLong.bodyUtf8Bytes());
     JsonNode lastBlockLong = rootLong.path("messages").get(2).path("content").get(0);
     assertTrue(lastBlockLong.has("cache_control"));
-    assertEquals("1h", lastBlockLong.path("cache_control").path("ttl").asText());
+    assertEquals("1h", lastBlockLong.path("cache_control").path("ttl").asString(""));
   }
 
   /** 验证固定标记总量上限为 4 且按“最近优先”分配：tools、system 优先占位，剩余预算分配给最靠后的历史端点，更早的端点不标记； assistant 消息自身内容不是端点。 */
@@ -1785,9 +1793,9 @@ class AnthropicMessagesWireTest {
     assertNotNull(comp);
     JsonNode rawUsage = mapper.readTree(comp.response().rawUsageJson());
     assertTrue(rawUsage.has("cache_miss_reason"));
-    assertEquals("model_changed", rawUsage.path("cache_miss_reason").path("type").asText());
+    assertEquals("model_changed", rawUsage.path("cache_miss_reason").path("type").asString(""));
     assertEquals(
-        1500, rawUsage.path("cache_miss_reason").path("cache_missed_input_tokens").asLong());
+        1500, rawUsage.path("cache_miss_reason").path("cache_missed_input_tokens").asLong(0L));
   }
 
   /** 验证两轮交互中第一轮无诊断原因，第二轮返回 model_changed 诊断原因的序列化状态。 */
@@ -1842,7 +1850,7 @@ class AnthropicMessagesWireTest {
     assertTrue(handler2.await(5, TimeUnit.SECONDS));
     JsonNode usage2 = mapper.readTree(handler2.completion.get().response().rawUsageJson());
     assertTrue(usage2.has("cache_miss_reason"));
-    assertEquals("model_changed", usage2.path("cache_miss_reason").path("type").asText());
+    assertEquals("model_changed", usage2.path("cache_miss_reason").path("type").asString(""));
   }
 
   // ==========================================

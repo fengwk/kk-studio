@@ -15,8 +15,7 @@ class BashSurfaceAnalyzerTest {
   private static final String CUSTOM_BASH = "custom_exec";
 
   private final BashSurfaceAnalyzer analyzer = new BashSurfaceAnalyzer();
-  private final PermissionEvaluator evaluator =
-      new PermissionEvaluator(new ObjectMapper(), analyzer);
+  private final PermissionEvaluator evaluator = new PermissionEvaluator(analyzer);
 
   /** 顶层 composite/background 被拆分，quote、escape 与 comment 内操作符不拆分。 */
   @Test

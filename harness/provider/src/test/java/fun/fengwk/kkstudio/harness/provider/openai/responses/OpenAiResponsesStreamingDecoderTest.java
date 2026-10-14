@@ -6,12 +6,13 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransport;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
@@ -61,7 +62,7 @@ import java.util.concurrent.atomic.AtomicReference;
 /** 验证真实网络套接字分片下 Responses SSE 流的端到端解码：覆盖多字节 UTF-8 边界与粘包。 */
 class OpenAiResponsesStreamingDecoderTest {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
 
   private HttpServer server;
   private int port;
@@ -234,10 +235,10 @@ class OpenAiResponsesStreamingDecoderTest {
   }
 
   private static void assertToolResultItem(JsonNode item, String callId, String text) {
-    assertEquals("function_call_output", item.path("type").asText());
-    assertEquals(callId, item.path("call_id").asText());
+    assertEquals("function_call_output", item.path("type").asString(""));
+    assertEquals(callId, item.path("call_id").asString(""));
     // 单文本工具结果保持简洁的 string 形态，且绝不携带任何 cache 控制字段
-    assertEquals(text, item.path("output").asText());
+    assertEquals(text, item.path("output").asString(""));
     assertFalse(item.has("prompt_cache_breakpoint"));
     assertFalse(item.has("prompt_cache_key"));
     assertFalse(item.has("prompt_cache_options"));
@@ -406,19 +407,19 @@ class OpenAiResponsesStreamingDecoderTest {
 
     // 1. Root 映射稳定：会话 UUID 原样作为 prompt_cache_key，留存档位映射为原支持值
     for (JsonNode root : capturedRequests) {
-      assertEquals(sessionKey, root.path("prompt_cache_key").asText());
-      assertEquals("in_memory", root.path("prompt_cache_retention").asText());
-      assertEquals(sys, root.path("instructions").asText());
-      assertEquals("gpt-5.6", root.path("model").asText());
-      assertTrue(root.path("stream").asBoolean());
-      assertFalse(root.path("store").asBoolean());
+      assertEquals(sessionKey, root.path("prompt_cache_key").asString(""));
+      assertEquals("in_memory", root.path("prompt_cache_retention").asString(""));
+      assertEquals(sys, root.path("instructions").asString(""));
+      assertEquals("gpt-5.6", root.path("model").asString(""));
+      assertTrue(root.path("stream").asBoolean(false));
+      assertFalse(root.path("store").asBoolean(false));
       assertFalse(root.has("prompt_cache_options"));
     }
 
     // 2. Request 1: USER 内容块为 input_text，无任何 cache 断点
     JsonNode input1 = capturedRequests.get(0).get("input");
     assertEquals(1, input1.size());
-    assertEquals("input_text", input1.get(0).path("content").get(0).path("type").asText());
+    assertEquals("input_text", input1.get(0).path("content").get(0).path("type").asString(""));
     assertFalse(input1.get(0).path("content").get(0).has("prompt_cache_breakpoint"));
 
     // 3. Request 2: native replay 原样全等，工具结果保持 string 形态

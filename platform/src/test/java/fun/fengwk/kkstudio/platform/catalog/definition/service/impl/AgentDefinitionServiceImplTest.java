@@ -11,10 +11,10 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DuplicateKeyException;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentDefinitions;
@@ -383,7 +383,7 @@ public class AgentDefinitionServiceImplTest {
         variants,
         new AgentDefinitionConfigValidator(
             new HarnessToolCatalogAdapter(HarnessCatalog.from(List.of()))),
-        new AgentDefinitionConfigCodec(new ObjectMapper()));
+        new AgentDefinitionConfigCodec(JsonMapper.builder().build()));
   }
 
   private AgentDefinition definition() {

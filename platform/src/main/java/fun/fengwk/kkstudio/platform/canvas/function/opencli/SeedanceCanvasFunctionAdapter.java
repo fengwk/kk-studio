@@ -1,9 +1,9 @@
 package fun.fengwk.kkstudio.platform.canvas.function.opencli;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ArrayNode;
 
 import fun.fengwk.kkstudio.canvas.CanvasJson;
 import fun.fengwk.kkstudio.canvas.CanvasJson.JsonNumber;
@@ -134,7 +134,7 @@ public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
     this.integrations = Objects.requireNonNull(snapshot, "snapshot").get().integrations();
     this.client = Objects.requireNonNull(client, "client");
     uploader = new OpenCliReferenceUploader(client);
-    mapper = Objects.requireNonNull(objectMapper, "objectMapper").copy();
+    mapper = Objects.requireNonNull(objectMapper, "objectMapper").rebuild().build();
     this.clock = Objects.requireNonNull(clock, "clock");
     this.sleeper = Objects.requireNonNull(sleeper, "sleeper");
   }
@@ -438,7 +438,7 @@ public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
       }
       throw new OpenCliHubException(
           "Seedance stdout must be one object or a single-element object array");
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw new OpenCliHubException("Seedance stdout must be valid JSON", exception);
     }
   }

@@ -11,8 +11,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
@@ -69,7 +69,7 @@ class UsageCostProjectionServiceTest {
 
   private final AgentModelRepository modelRepository = mock(AgentModelRepository.class);
   private final AgentModelRuntimeConfigParser configParser =
-      new AgentModelRuntimeConfigParser(new ObjectMapper());
+      new AgentModelRuntimeConfigParser(JsonMapper.builder().build());
 
   private final UsageCostProjectionService service =
       new UsageCostProjectionService(modelRepository, configParser);

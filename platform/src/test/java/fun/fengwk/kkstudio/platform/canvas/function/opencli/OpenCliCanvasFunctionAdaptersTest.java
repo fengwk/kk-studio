@@ -15,9 +15,10 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.canvas.CanvasJson;
 import fun.fengwk.kkstudio.canvas.CanvasJson.JsonBool;
@@ -57,7 +58,7 @@ import java.util.UUID;
 /** Adapter golden argv、checkpoint 恢复、provider 状态和流式 materialize 契约。 */
 class OpenCliCanvasFunctionAdaptersTest {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
   private static final UUID CANVAS = new UUID(0L, 1L);
   private static final UUID NODE = new UUID(0L, 2L);
   private static final UUID REQUEST = new UUID(0L, 3L);

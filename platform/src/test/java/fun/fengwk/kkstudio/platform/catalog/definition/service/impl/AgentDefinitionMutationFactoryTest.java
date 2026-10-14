@@ -4,8 +4,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentDefinitions;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
@@ -25,7 +26,7 @@ public class AgentDefinitionMutationFactoryTest {
 
   @Test
   public void shouldPersistCanonicalCapabilityListsAndKeepIdentity() throws Exception {
-    ObjectMapper objectMapper = new ObjectMapper();
+    ObjectMapper objectMapper = JsonMapper.builder().build();
     AgentDefinitionMutationFactory factory = factory(objectMapper);
     AgentDefinitionConfigDTO config =
         config(List.of("browser"), List.of(skillRef("tools", "java"), skillRef("tools", "dev")));
@@ -53,7 +54,7 @@ public class AgentDefinitionMutationFactoryTest {
 
   @Test
   public void shouldRejectNonCanonicalCapabilityNames() {
-    AgentDefinitionMutationFactory factory = factory(new ObjectMapper());
+    AgentDefinitionMutationFactory factory = factory(JsonMapper.builder().build());
     AgentDefinitionCreateDTO create =
         create(
             "agent",
@@ -75,7 +76,7 @@ public class AgentDefinitionMutationFactoryTest {
 
   @Test
   public void shouldRequireCompleteConfigurationAndEnforceLimits() {
-    AgentDefinitionMutationFactory factory = factory(new ObjectMapper());
+    AgentDefinitionMutationFactory factory = factory(JsonMapper.builder().build());
     assertThrows(
         AiValidationException.class,
         () -> factory.newUserAgent(" ", new AgentDefinitionCreateDTO()));
@@ -116,7 +117,7 @@ public class AgentDefinitionMutationFactoryTest {
   /** 测试意图：内置 Agent 允许显式未配置模型，但 variant 必须同时为空；用户 Agent 仍必须提供模型。 */
   @Test
   public void shouldAllowUnconfiguredBuiltinModel() {
-    AgentDefinitionMutationFactory factory = factory(new ObjectMapper());
+    AgentDefinitionMutationFactory factory = factory(JsonMapper.builder().build());
     AgentDefinitionCreateDTO create =
         create(BuiltinAgentDefinitions.COMPACTION_NAME, null, config(List.of(), List.of()), null);
     AgentDefinition builtin =
@@ -138,7 +139,7 @@ public class AgentDefinitionMutationFactoryTest {
   // 测试意图: 验证 mutation factory 在 body 或 name 为 null 时抛出清晰的 AiValidationException
   @Test
   public void shouldRejectNullPropertiesAndNullName() {
-    AgentDefinitionMutationFactory factory = factory(new ObjectMapper());
+    AgentDefinitionMutationFactory factory = factory(JsonMapper.builder().build());
     assertThrows(AiValidationException.class, () -> factory.newUserAgent("agent", null));
     AgentDefinitionCreateDTO create =
         create(null, "provider/model", config(List.of(), List.of()), null);

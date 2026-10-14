@@ -5,9 +5,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
@@ -41,7 +42,7 @@ import java.util.UUID;
  */
 class OpenAiResponsesNativeProtocolOptionsTest {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
 
   private final OpenAiResponsesRequestEncoder encoder = new OpenAiResponsesRequestEncoder();
 
@@ -114,17 +115,16 @@ class OpenAiResponsesNativeProtocolOptionsTest {
     JsonNode root = encode(request(withOptions, userMessage(), List.of()));
     JsonNode nativeOptions = MAPPER.readTree(options);
     nativeOptions
-        .fields()
-        .forEachRemaining(
-            entry -> assertEquals(entry.getValue(), root.get(entry.getKey()), entry.getKey()));
+        .properties()
+        .forEach(entry -> assertEquals(entry.getValue(), root.get(entry.getKey()), entry.getKey()));
 
     // runtime 事实仍然唯一决定所有权字段
-    assertEquals("gpt-5.4-mini", root.path("model").asText());
-    assertTrue(root.path("stream").asBoolean());
-    assertFalse(root.path("store").asBoolean());
-    assertEquals("Test system instruction.", root.path("instructions").asText());
-    assertEquals(1024, root.path("max_output_tokens").asInt());
-    assertEquals("low", root.path("reasoning").path("effort").asText());
+    assertEquals("gpt-5.4-mini", root.path("model").asString(""));
+    assertTrue(root.path("stream").asBoolean(false));
+    assertFalse(root.path("store").asBoolean(false));
+    assertEquals("Test system instruction.", root.path("instructions").asString(""));
+    assertEquals(1024, root.path("max_output_tokens").asInt(0));
+    assertEquals("low", root.path("reasoning").path("effort").asString(""));
     // 采样参数仍绝不发送
     assertFalse(root.has("temperature"));
     assertFalse(root.has("top_p"));
@@ -176,10 +176,10 @@ class OpenAiResponsesNativeProtocolOptionsTest {
             + "\"instructions\":\"Test system instruction.\",\"max_output_tokens\":1024,\"input\":[]}";
     JsonNode root = encode(request(variant("native", null, options), List.of(), List.of()));
 
-    assertEquals("gpt-5.4-mini", root.path("model").asText());
-    assertTrue(root.path("stream").asBoolean());
-    assertFalse(root.path("store").asBoolean());
-    assertEquals(1024, root.path("max_output_tokens").asInt());
+    assertEquals("gpt-5.4-mini", root.path("model").asString(""));
+    assertTrue(root.path("stream").asBoolean(false));
+    assertFalse(root.path("store").asBoolean(false));
+    assertEquals(1024, root.path("max_output_tokens").asInt(0));
     assertEquals(0, root.path("input").size());
   }
 
@@ -241,8 +241,8 @@ class OpenAiResponsesNativeProtocolOptionsTest {
     for (int i = 0; i < expectedNative.size(); i++) {
       assertEquals(expectedNative.get(i), tools.get(i), "native tool " + i);
     }
-    assertEquals("function", tools.get(expectedNative.size()).path("type").asText());
-    assertEquals("lookup", tools.get(expectedNative.size()).path("name").asText());
+    assertEquals("function", tools.get(expectedNative.size()).path("type").asString(""));
+    assertEquals("lookup", tools.get(expectedNative.size()).path("name").asString(""));
 
     // 仅原生工具时同样完整保留（runtime 无 function 工具可追加）
     JsonNode nativeOnly =
@@ -335,9 +335,9 @@ class OpenAiResponsesNativeProtocolOptionsTest {
                     "{\"reasoning\":{\"summary\":\"concise\",\"effort\":\"high\",\"verbosity\":\"low\"}}"),
                 userMessage(),
                 List.of()));
-    assertEquals("high", preserved.path("reasoning").path("effort").asText());
-    assertEquals("concise", preserved.path("reasoning").path("summary").asText());
-    assertEquals("low", preserved.path("reasoning").path("verbosity").asText());
+    assertEquals("high", preserved.path("reasoning").path("effort").asString(""));
+    assertEquals("concise", preserved.path("reasoning").path("summary").asString(""));
+    assertEquals("low", preserved.path("reasoning").path("verbosity").asString(""));
     assertEquals(List.of("reasoning.encrypted_content"), textValues(preserved.get("include")));
 
     // 2. 原生未声明 summary：延续 runtime 的 auto 默认
@@ -347,9 +347,9 @@ class OpenAiResponsesNativeProtocolOptionsTest {
                 variant("native", "minimal", "{\"reasoning\":{\"verbosity\":\"medium\"}}"),
                 userMessage(),
                 List.of()));
-    assertEquals("minimal", defaulted.path("reasoning").path("effort").asText());
-    assertEquals("auto", defaulted.path("reasoning").path("summary").asText());
-    assertEquals("medium", defaulted.path("reasoning").path("verbosity").asText());
+    assertEquals("minimal", defaulted.path("reasoning").path("effort").asString(""));
+    assertEquals("auto", defaulted.path("reasoning").path("summary").asString(""));
+    assertEquals("medium", defaulted.path("reasoning").path("verbosity").asString(""));
 
     // 3. effort 为 null：整个原生 reasoning（含 effort）原样保留，且绝不追加 include
     JsonNode untouched =
@@ -376,8 +376,8 @@ class OpenAiResponsesNativeProtocolOptionsTest {
                     "{\"reasoning\":{\"effort\":\"none\",\"summary\":\"concise\"}}"),
                 userMessage(),
                 List.of()));
-    assertEquals("none", off.path("reasoning").path("effort").asText());
-    assertEquals("concise", off.path("reasoning").path("summary").asText());
+    assertEquals("none", off.path("reasoning").path("effort").asString(""));
+    assertEquals("concise", off.path("reasoning").path("summary").asString(""));
     assertFalse(off.has("include"));
   }
 
@@ -468,8 +468,8 @@ class OpenAiResponsesNativeProtocolOptionsTest {
     JsonNode plainRoot = encode(withoutNative);
 
     assertEquals(2, nativeRoot.get("tools").size());
-    assertEquals("web_search", nativeRoot.get("tools").get(0).path("type").asText());
-    assertEquals("function", nativeRoot.get("tools").get(1).path("type").asText());
+    assertEquals("web_search", nativeRoot.get("tools").get(0).path("type").asString(""));
+    assertEquals("function", nativeRoot.get("tools").get(1).path("type").asString(""));
     assertEquals(1, plainRoot.get("tools").size());
 
     // 同一 native 工具声明重复编码稳定：同一请求两次编码产生完全相同的接线体
@@ -500,17 +500,17 @@ class OpenAiResponsesNativeProtocolOptionsTest {
     JsonNode root =
         encode(request(variant("native", null, "{\"truncation\":\"auto\"}"), messages, List.of()));
 
-    assertEquals("auto", root.path("truncation").asText());
+    assertEquals("auto", root.path("truncation").asString(""));
     assertEquals(2, root.get("input").size());
-    assertEquals("message", root.get("input").get(0).path("type").asText());
-    assertEquals("function_call", root.get("input").get(1).path("type").asText());
-    assertEquals("c1", root.get("input").get(1).path("call_id").asText());
+    assertEquals("message", root.get("input").get(0).path("type").asString(""));
+    assertEquals("function_call", root.get("input").get(1).path("type").asString(""));
+    assertEquals("c1", root.get("input").get(1).path("call_id").asString(""));
   }
 
   private static List<String> textValues(JsonNode arrayNode) {
     List<String> values = new ArrayList<>();
     for (JsonNode item : arrayNode) {
-      values.add(item.asText());
+      values.add(item.asString(""));
     }
     return values;
   }
