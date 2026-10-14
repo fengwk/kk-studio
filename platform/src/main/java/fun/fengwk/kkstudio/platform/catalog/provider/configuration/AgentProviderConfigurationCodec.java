@@ -36,10 +36,9 @@ public final class AgentProviderConfigurationCodec {
 
   public AgentProviderConfigurationCodec(ObjectMapper objectMapper) {
     this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper");
-    // 读取必须按 BigDecimal 保真：宿主 HTTP mapper 的默认 profile 会把 1e309 读成 Infinity、把不同高精度小数折叠成同一个
-    // double，导致 merge 改写扩展值与协议等价判断都失真。只增强本读取入口，写仍走注入 mapper 以保留真实写入失败语义。
+    // 扩展配置按 BigDecimal 读取，保留极值与有效位；写出沿用宿主 mapper。
     this.configReader = objectMapper.reader().with(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS);
-    // 等价判断保持迁移前的数值语义：同值不同 scale 视为相等（先规范化尾零，再比较结构）；仅用于比较，不影响写出文本。
+    // 比较时忽略无语义尾零，不改变 merge 写出的 scale。
     this.comparisonReader = configReader.with(JsonNodeFeature.STRIP_TRAILING_BIGDECIMAL_ZEROES);
   }
 
