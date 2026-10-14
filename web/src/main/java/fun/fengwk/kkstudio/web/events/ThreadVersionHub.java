@@ -9,12 +9,8 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.function.Consumer;
 
 /**
@@ -32,7 +28,7 @@ final class ThreadVersionHub implements ThreadVersionEventSource {
   static final String CHANNEL = "harness_thread_version";
 
   private final DataSource dataSource;
-  private final Map<UUID, Set<Consumer<Event>>> subscribers = new ConcurrentHashMap<>();
+  private final SubscriptionFanOut<Event> subscribers = new SubscriptionFanOut<>();
 
   ThreadVersionHub(DataSource dataSource) {
     this.dataSource = Objects.requireNonNull(dataSource, "dataSource");
@@ -41,33 +37,15 @@ final class ThreadVersionHub implements ThreadVersionEventSource {
   @Override
   public SourceSubscribed subscribe(UUID threadId, Consumer<Event> consumer) {
     Objects.requireNonNull(threadId, "threadId");
-    Objects.requireNonNull(consumer, "consumer");
-    // add 与 map 条目创建在同一 compute 内原子完成；最后释放的 remove-if-empty 在 computeIfPresent 内原子完成，
-    // 杜绝「新订阅者加入已移除集合」的 detached subscriber 竞态。
-    subscribers.compute(
-        threadId,
-        (id, existing) -> {
-          Set<Consumer<Event>> threadSubscribers =
-              existing != null ? existing : new CopyOnWriteArraySet<>();
-          threadSubscribers.add(consumer);
-          return threadSubscribers;
-        });
+    // 先注册 consumer 再读当前 version 返回，保证返回的 cursor 之后的事件不因注册竞态丢失。
+    Runnable unsubscribe = subscribers.subscribe(threadId, consumer);
     try {
-      long cursor = currentVersion(threadId);
-      return new SourceSubscribed(cursor, () -> release(threadId, consumer));
-    } catch (RuntimeException error) {
-      release(threadId, consumer);
+      return new SourceSubscribed(currentVersion(threadId), unsubscribe::run);
+    } catch (RuntimeException | Error error) {
+      // 权威查询失败必须释放刚建立的注册，并保留原始异常（Error 同样不得吞）。
+      unsubscribe.run();
       throw error;
     }
-  }
-
-  private void release(UUID threadId, Consumer<Event> consumer) {
-    subscribers.computeIfPresent(
-        threadId,
-        (id, threadSubscribers) -> {
-          threadSubscribers.remove(consumer);
-          return threadSubscribers.isEmpty() ? null : threadSubscribers;
-        });
   }
 
   void onNotification(String payload) {
@@ -77,7 +55,7 @@ final class ThreadVersionHub implements ThreadVersionEventSource {
       broadcastResync();
       return;
     }
-    publish(notification.threadId(), new Event(notification.version(), false));
+    subscribers.publish(notification.threadId(), new Event(notification.version(), false));
   }
 
   private long currentVersion(UUID threadId) {
@@ -97,7 +75,7 @@ final class ThreadVersionHub implements ThreadVersionEventSource {
   }
 
   void broadcastResync() {
-    subscribers.forEach((threadId, ignored) -> publish(threadId, new Event(null, true)));
+    subscribers.broadcast(new Event(null, true));
   }
 
   static ThreadVersion parseNotification(String payload) {
@@ -122,21 +100,6 @@ final class ThreadVersionHub implements ThreadVersionEventSource {
       return new ThreadVersion(threadId, version);
     } catch (IllegalArgumentException ignored) {
       return null;
-    }
-  }
-
-  private void publish(UUID threadId, Event event) {
-    Set<Consumer<Event>> threadSubscribers = subscribers.get(threadId);
-    if (threadSubscribers != null) {
-      // 单个消费者回调异常只隔离该消费者，不阻断同资源其他消费者，也不杀死 LISTEN 循环。
-      for (Consumer<Event> consumer : threadSubscribers) {
-        try {
-          consumer.accept(event);
-        } catch (RuntimeException error) {
-          log.warn(
-              "thread version subscriber callback failed threadId={}; skipping", threadId, error);
-        }
-      }
     }
   }
 
