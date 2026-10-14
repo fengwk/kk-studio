@@ -97,6 +97,23 @@ class ProjectArchitectureTest {
         violations.isEmpty(), () -> "architecture violations:\n" + String.join("\n", violations));
   }
 
+  /** 执行边界窄化：Project 主源码只能经 {@code project.port} 消费执行事实，不得再出现宿主运行时的执行聚合或完整快照类型。 */
+  @Test
+  void mainSourcesNeverReferenceHarnessRuntimeOrThreadSnapshot() throws IOException {
+    List<String> violations = new ArrayList<>();
+    forEachMainSourceLine(
+        (path, line) -> {
+          if (line.contains("HarnessRuntime") || line.contains("ThreadSnapshot")) {
+            violations.add(relative(path) + ": banned runtime reference " + line.trim());
+          }
+        });
+    assertTrue(
+        violations.isEmpty(),
+        () ->
+            "project must consume execution facts only through its own port:\n"
+                + String.join("\n", violations));
+  }
+
   /** 生产依赖集合必须与允许导入的能力一致，且永不声明宿主模块。 */
   @Test
   void pomDeclaresOnlyHostNeutralProductionDependencies() throws IOException {

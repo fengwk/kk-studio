@@ -9,10 +9,7 @@ import org.springframework.transaction.annotation.Transactional;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
-import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.StopCommand;
-import fun.fengwk.kkstudio.harness.runtime.StopResult;
-import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
@@ -40,6 +37,8 @@ import fun.fengwk.kkstudio.project.model.IssueAgentThread;
 import fun.fengwk.kkstudio.project.model.IssueRun;
 import fun.fengwk.kkstudio.project.model.Project;
 import fun.fengwk.kkstudio.project.port.EvidenceBlobPort;
+import fun.fengwk.kkstudio.project.port.IssueThreadExecutionPort;
+import fun.fengwk.kkstudio.project.port.IssueThreadView;
 import fun.fengwk.kkstudio.project.repo.IssueActivityRepository;
 import fun.fengwk.kkstudio.project.repo.IssueAgentThreadRepository;
 import fun.fengwk.kkstudio.project.repo.IssueRepository;
@@ -104,7 +103,7 @@ public class IssueReconciler {
   private final IssueEvidenceService issueEvidenceService;
   private final EvidenceBlobPort evidenceBlobPort;
   private final IssueWorkStore issueWorkStore;
-  private final ObjectProvider<HarnessRuntime> runtimes;
+  private final ObjectProvider<IssueThreadExecutionPort> threadExecutions;
   private final ProjectWorkflowJsonCodec workflowCodec;
   private final IssueControllerProperties properties;
   private final Clock clock;
@@ -121,7 +120,7 @@ public class IssueReconciler {
       IssueEvidenceService issueEvidenceService,
       EvidenceBlobPort evidenceBlobPort,
       IssueWorkStore issueWorkStore,
-      ObjectProvider<HarnessRuntime> runtimes,
+      ObjectProvider<IssueThreadExecutionPort> threadExecutions,
       ProjectWorkflowJsonCodec workflowCodec,
       IssueControllerProperties properties) {
     this(
@@ -135,7 +134,7 @@ public class IssueReconciler {
         issueEvidenceService,
         evidenceBlobPort,
         issueWorkStore,
-        runtimes,
+        threadExecutions,
         workflowCodec,
         properties,
         Clock.systemUTC());
@@ -152,7 +151,7 @@ public class IssueReconciler {
       IssueEvidenceService issueEvidenceService,
       EvidenceBlobPort evidenceBlobPort,
       IssueWorkStore issueWorkStore,
-      ObjectProvider<HarnessRuntime> runtimes,
+      ObjectProvider<IssueThreadExecutionPort> threadExecutions,
       ProjectWorkflowJsonCodec workflowCodec,
       IssueControllerProperties properties,
       Clock clock) {
@@ -170,7 +169,7 @@ public class IssueReconciler {
         Objects.requireNonNull(issueEvidenceService, "issueEvidenceService");
     this.evidenceBlobPort = Objects.requireNonNull(evidenceBlobPort, "evidenceBlobPort");
     this.issueWorkStore = Objects.requireNonNull(issueWorkStore, "issueWorkStore");
-    this.runtimes = Objects.requireNonNull(runtimes, "runtimes");
+    this.threadExecutions = Objects.requireNonNull(threadExecutions, "threadExecutions");
     this.workflowCodec = Objects.requireNonNull(workflowCodec, "workflowCodec");
     this.properties = Objects.requireNonNull(properties, "properties");
     this.clock = HarnessStoreTime.millisecondClock(Objects.requireNonNull(clock, "clock"));
@@ -203,7 +202,7 @@ public class IssueReconciler {
 
   private IssueReconcileOutcome reconcileActiveRun(
       Project project, Issue issue, IssueRun run, IssueWorkClaim claim, Instant now) {
-    ThreadSnapshot snapshot = requireRuntime().getThreadSnapshot(run.getThreadId());
+    IssueThreadView view = requireThreadExecution().readThread(run.getThreadId());
     IssueAgentThread binding = issueAgentThreadRepository.findByThreadId(run.getThreadId());
     boolean bindingValid = binding != null && binding.issueId().equals(issue.getId());
     ProjectWorkflowState stage = workflowStage(project, run.getState());
@@ -223,11 +222,11 @@ public class IssueReconciler {
     // 本 Thread 之后的普通对话或后代忙碌都不能再把已结束的执行重新拉回在途。
     ThreadJoin join = matchedJoin(run.getId());
     if (join != null) {
-      return closeMatchedJoin(issue, run, binding, snapshot, join, current, claim);
+      return closeMatchedJoin(issue, run, binding, view, join, current, claim);
     }
 
     // 统一执行事实：本地工作（命令/Model/工具/continuation）与人工等待各由唯一投影给出，本类只决定预算、等待与停止政策。
-    ThreadExecutionFacts facts = snapshot.executionFacts();
+    ThreadExecutionFacts facts = view.executionFacts();
 
     if (!bindingValid) {
       if (facts.hasWork()) {
@@ -236,11 +235,7 @@ public class IssueReconciler {
       }
       // 归属已不存在：Run 无法再被驱动，安全收尾为失败并显式要求人工核查。
       return failRun(
-          run,
-          snapshot.thread().headEntryId(),
-          STALE_REASON,
-          claim,
-          IssueReconcileOutcome.STALE_RUN_CLOSED);
+          run, view.headEntryId(), STALE_REASON, claim, IssueReconcileOutcome.STALE_RUN_CLOSED);
     }
     if (!stageStillOwned || !stateStillCurrent) {
       // 迟到回调：旧 Run 的同名阶段或旧归属不得刷新当前职责，只做安全收尾，绝不提交交接目标。
@@ -250,33 +245,23 @@ public class IssueReconciler {
       }
       IssueActivity deliverable = nextDeliverableInstruction(run);
       if (deliverable != null) {
-        deliverInstruction(issue, run, snapshot, deliverable);
+        deliverInstruction(issue, run, view, deliverable);
         return finish(claim, true, Duration.ZERO, IssueReconcileOutcome.INSTRUCTION_DELIVERED);
       }
       return failRun(
-          run,
-          snapshot.thread().headEntryId(),
-          STALE_REASON,
-          claim,
-          IssueReconcileOutcome.STALE_RUN_CLOSED);
+          run, view.headEntryId(), STALE_REASON, claim, IssueReconcileOutcome.STALE_RUN_CLOSED);
     }
 
     if (run.getStatus() == IssueRunStatus.RUNNING && isBudgetExhausted(run, now)) {
       // 业务预算要求停止在途长 loop：显式 Stop（当前 Thread 版本 CAS + 稳定 requestId）结束执行，再在同一业务事务失败收尾。
       // 收尾区间以 Stop 回执的权威 Thread head 为界，绝不再反查当前 head，冻结本次停止的确定边界。
-      StopResult stopped =
-          requireRuntime()
+      UUID stopHeadEntryId =
+          requireThreadExecution()
               .stop(
                   new StopCommand(
-                      run.getThreadId(),
-                      budgetStopRequestId(run.getId()),
-                      snapshot.thread().version()));
+                      run.getThreadId(), budgetStopRequestId(run.getId()), view.version()));
       return failRun(
-          run,
-          stopped.thread().headEntryId(),
-          BUDGET_REASON,
-          claim,
-          IssueReconcileOutcome.RUN_BUDGET_EXHAUSTED);
+          run, stopHeadEntryId, BUDGET_REASON, claim, IssueReconcileOutcome.RUN_BUDGET_EXHAUSTED);
     }
     if (run.getStatus() == IssueRunStatus.RUNNING) {
       chargeActiveTime(run, now);
@@ -312,7 +297,7 @@ public class IssueReconciler {
 
     IssueActivity deliverable = nextDeliverableInstruction(run);
     if (deliverable != null) {
-      deliverInstruction(issue, run, snapshot, deliverable);
+      deliverInstruction(issue, run, view, deliverable);
       return finish(claim, true, Duration.ZERO, IssueReconcileOutcome.INSTRUCTION_DELIVERED);
     }
 
@@ -330,12 +315,12 @@ public class IssueReconciler {
       Issue issue,
       IssueRun run,
       IssueAgentThread binding,
-      ThreadSnapshot snapshot,
+      IssueThreadView view,
       ThreadJoin join,
       boolean current,
       IssueWorkClaim claim) {
     ThreadJoinReceipt receipt =
-        requireRuntime()
+        requireThreadExecution()
             .projectJoinReceipt(run.getId())
             .orElseThrow(
                 () ->
@@ -343,7 +328,7 @@ public class IssueReconciler {
                         "matched root join has no receipt for run " + run.getId()));
     switch (receipt.outcome()) {
       case COMPLETED -> {
-        publishEvidence(issue, run, binding, snapshot, join.finalAnswerEntryId());
+        publishEvidence(issue, run, binding, view, join.finalAnswerEntryId());
         String nextState = current ? run.getNextState() : null;
         issueRunService.completeRun(
             run.getId(),
@@ -529,35 +514,28 @@ public class IssueReconciler {
       Issue issue,
       IssueRun run,
       IssueAgentThread binding,
-      ThreadSnapshot snapshot,
+      IssueThreadView view,
       UUID finalAnswerEntryId) {
-    if (finalAnswerEntryId == null
-        || binding == null
-        || snapshot == null
-        || snapshot.entryPath() == null
-        || snapshot.thread() == null) {
+    if (finalAnswerEntryId == null || binding == null) {
       return;
     }
-    EntryPath path = snapshot.entryPath();
+    EntryPath path = view.entryPath();
     List<Entry> entries = path.entries();
-    if (entries == null) {
-      return;
-    }
     List<UUID> entryIds = entries.stream().map(Entry::id).toList();
     int start = entryIds.indexOf(run.getStartEntryId());
-    int end = entryIds.indexOf(snapshot.thread().headEntryId());
+    int end = entryIds.indexOf(view.headEntryId());
     int answer = entryIds.indexOf(finalAnswerEntryId);
     if (start < 0 || answer <= start || end < answer) {
       return;
     }
     Entry entry = entries.get(answer);
-    if (entry == null || !(entry.payload() instanceof MessagePayload msg)) {
+    if (!(entry.payload() instanceof MessagePayload msg)) {
       return;
     }
     if (msg.message().role() != AgentMessageRole.ASSISTANT) {
       return;
     }
-    UUID sessionId = snapshot.thread().sessionId();
+    UUID sessionId = view.sessionId();
     for (AgentMessageContent content : msg.message().contents()) {
       if (content instanceof ResourceMessageContent res
           && isPublishableResource(res, binding, sessionId)) {
@@ -601,7 +579,7 @@ public class IssueReconciler {
 
   /** 本次 Run 的 root Join 已冻结结果时返回它，否则返回 {@code null}。 */
   private ThreadJoin matchedJoin(UUID invocationId) {
-    return requireRuntime().findJoin(invocationId).filter(ThreadJoin::matched).orElse(null);
+    return requireThreadExecution().findJoin(invocationId).filter(ThreadJoin::matched).orElse(null);
   }
 
   /**
@@ -653,7 +631,7 @@ public class IssueReconciler {
 
   /** 把来自人的定向指示作为 USER_MESSAGE 投递给明确的当前 Run；幂等键由 Issue 事实位置确定，重放不会重复入队。 */
   private void deliverInstruction(
-      Issue issue, IssueRun run, ThreadSnapshot snapshot, IssueActivity activity) {
+      Issue issue, IssueRun run, IssueThreadView view, IssueActivity activity) {
     AgentMessage message =
         new AgentMessage(
             AgentMessageRole.USER, List.of(new TextMessageContent(activity.getBody())));
@@ -663,13 +641,11 @@ public class IssueReconciler {
             ("issue-instruction:" + issue.getId() + ":" + activity.getSequence())
                 .getBytes(StandardCharsets.UTF_8));
     NewThreadCommand command = new NewThreadCommand(payload, idempotencyKey);
-    requireRuntime()
+    requireThreadExecution()
         .acceptCommands(
             new AcceptCommandsCommand(
                 new AcceptCommandsTarget.Thread(
-                    run.getThreadId(),
-                    snapshot.thread().headEntryId(),
-                    snapshot.thread().nextCommandSequence()),
+                    run.getThreadId(), view.headEntryId(), view.nextCommandSequence()),
                 List.of(command)),
             AcceptancePreflight.IDENTITY);
     advanceObservedSequence(run, activity.getSequence());
@@ -684,12 +660,12 @@ public class IssueReconciler {
     }
   }
 
-  private HarnessRuntime requireRuntime() {
-    HarnessRuntime runtime = runtimes.getIfAvailable();
-    if (runtime == null) {
+  private IssueThreadExecutionPort requireThreadExecution() {
+    IssueThreadExecutionPort port = threadExecutions.getIfAvailable();
+    if (port == null) {
       throw new IllegalStateException("harness runtime is not available in this deployment");
     }
-    return runtime;
+    return port;
   }
 
   /** 接受 key 由 Issue 内待分配的 Run 序号确定：同一次催促重放不会创建第二个 Run。 */

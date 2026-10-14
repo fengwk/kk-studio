@@ -8,8 +8,6 @@ import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
 
-import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionFacts;
 import fun.fengwk.kkstudio.project.domain.IssueStageBudget;
 import fun.fengwk.kkstudio.project.domain.IssueStateTransitions;
@@ -32,6 +30,8 @@ import fun.fengwk.kkstudio.project.model.IssueStageBudgetRow;
 import fun.fengwk.kkstudio.project.model.PauseReason;
 import fun.fengwk.kkstudio.project.model.Project;
 import fun.fengwk.kkstudio.project.port.IssueAgentSessionDeletionPort;
+import fun.fengwk.kkstudio.project.port.IssueThreadExecutionPort;
+import fun.fengwk.kkstudio.project.port.IssueThreadView;
 import fun.fengwk.kkstudio.project.repo.IssueActivityRepository;
 import fun.fengwk.kkstudio.project.repo.IssueAgentThreadRepository;
 import fun.fengwk.kkstudio.project.repo.IssueRepository;
@@ -84,7 +84,7 @@ public class IssueServiceImpl implements IssueService {
   private final IssueRunService issueRunService;
   private final IssueEvidenceService issueEvidenceService;
   private final IssueAgentSessionDeletionPort sessionDeletionPort;
-  private final ObjectProvider<HarnessRuntime> runtimes;
+  private final ObjectProvider<IssueThreadExecutionPort> threadExecutions;
 
   @Override
   @Transactional
@@ -468,19 +468,19 @@ public class IssueServiceImpl implements IssueService {
       locked.issue().setPauseDetail(validDetail);
       return persist(locked, expectedVersion);
     }
-    HarnessRuntime runtime = runtimes != null ? runtimes.getIfAvailable() : null;
-    ThreadSnapshot snapshot =
-        runtime != null ? runtime.getThreadSnapshot(activeRun.getThreadId()) : null;
-    if (isUndeterminedInFlight(snapshot)) {
+    IssueThreadExecutionPort port =
+        threadExecutions != null ? threadExecutions.getIfAvailable() : null;
+    IssueThreadView view = port != null ? port.readThread(activeRun.getThreadId()) : null;
+    if (isUndeterminedInFlight(view)) {
       issueRunService.markUnknown(
           activeRun.getId(),
           activeRun.getVersion(),
           key + ":unknown",
-          snapshot.thread().headEntryId(),
+          view.headEntryId(),
           validDetail);
       return issueRepository.getById(issueId);
     }
-    UUID endId = snapshot != null ? snapshot.thread().headEntryId() : activeRun.getStartEntryId();
+    UUID endId = view != null ? view.headEntryId() : activeRun.getStartEntryId();
     issueRunService.cancelRun(activeRun.getId(), activeRun.getVersion(), key + ":cancel", endId);
     return issueRepository.getById(issueId);
   }
@@ -634,11 +634,11 @@ public class IssueServiceImpl implements IssueService {
    * 停止必须在「执行尚未收敛」时收敛为 UNKNOWN 而不是直接取消：本地仍有工作（命令 / Model / 工具 / owned continuation） 或已有结果未定的 UNKNOWN
    * 工具都表示外部状态无法安全判定。事实由 Runtime 统一投影，本类不再自行推导「在途」。
    */
-  private static boolean isUndeterminedInFlight(ThreadSnapshot snapshot) {
-    if (snapshot == null) {
+  private static boolean isUndeterminedInFlight(IssueThreadView view) {
+    if (view == null) {
       return false;
     }
-    ThreadExecutionFacts facts = snapshot.executionFacts();
+    ThreadExecutionFacts facts = view.executionFacts();
     return facts.hasWork() || facts.hasUnknownToolOutcome();
   }
 
