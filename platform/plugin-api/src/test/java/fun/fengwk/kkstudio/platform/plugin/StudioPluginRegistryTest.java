@@ -7,8 +7,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
+import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
+
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * 启动期 classpath Plugin 安装注册表契约测试。
@@ -17,12 +23,43 @@ import java.util.Optional;
  */
 class StudioPluginRegistryTest {
 
+  private static final PluginConfigSchema SCHEMA =
+      new PluginConfigSchema(new InputSchema(null, Map.of(), Set.of(), false), "{}", Map.of());
+
   private StudioPlugin createMockPlugin(String pluginId, String name) {
-    PluginDescriptor descriptor = new PluginDescriptor(pluginId, name, "1.0", List.of("CN"));
+    PluginDescriptor descriptor = new PluginDescriptor(pluginId, name, "1.0");
     return new StudioPlugin() {
       @Override
       public PluginDescriptor descriptor() {
         return descriptor;
+      }
+
+      @Override
+      public PluginConfigSchema configurationSchema() {
+        return SCHEMA;
+      }
+
+      @Override
+      public PluginAuthSpec authenticationSpec() {
+        return new PluginAuthSpec.None();
+      }
+
+      @Override
+      public PluginInstance configure(PluginConfig config, PluginContext context) {
+        return new PluginInstance() {
+          @Override
+          public List<HarnessContributor> harnessContributors() {
+            return List.of();
+          }
+
+          @Override
+          public List<CanvasFunctionAdapter> canvasAdapters() {
+            return List.of();
+          }
+
+          @Override
+          public void close() {}
+        };
       }
     };
   }

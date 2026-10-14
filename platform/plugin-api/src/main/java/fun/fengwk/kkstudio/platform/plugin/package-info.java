@@ -6,8 +6,13 @@
  * fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry} 只收集当前 Spring 容器中的
  * bean，因此「是否安装」完全由依赖决定，数据库里不存在第二个 enabled 开关，也没有运行时类加载或目录扫描路径。
  *
- * <p>Plugin 可以编译期依赖 Platform 与本包的 SPI，Platform 与 web 绝不反向依赖具体 Plugin 实现。凭据是本包唯一的秘密载体： {@link
+ * <p>Plugin 只编译期依赖轻量 plugin-api 与两域 SPI，Platform 与 web 主源码不依赖具体 Plugin 实现。凭据是本包的秘密载体： {@link
  * fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialStore} 用部署级 owner-only 主密钥做
  * AES-256-GCM 认证加密，Plugin 只能通过 SPI 交还 opaque JSON 与读取本次调用所需的解密快照，拿不到 repository、lease 或主密钥。
+ *
+ * <p>安装期定义（{@link fun.fengwk.kkstudio.platform.plugin.StudioPlugin}）与运行期实例（{@link
+ * fun.fengwk.kkstudio.platform.plugin.PluginInstance}）分离：定义声明身份、受控配置与认证协议，配置产出的实例才持有资源并贡献 Harness /
+ * Canvas 两域能力；Plugin 经由 {@link fun.fengwk.kkstudio.platform.plugin.PluginContext} 只拿到绑定自身 pluginId
+ * 的 scoped 凭据视图。
  */
 package fun.fengwk.kkstudio.platform.plugin;
