@@ -101,8 +101,10 @@ class StandardComfyuiClientDeadlineTest {
         headers.countDown();
       }
       try (H3ComfyDownload download = opening.get(2, TimeUnit.SECONDS)) {
+        // 预算从 send 前冻结：headers 阶段耗尽的额度必须在返回流上体现，先观察到看门狗关闭连接，
+        // 再读到明确的超时失败；若返回时重置预算，这里会先读到数据而非 -1。
+        assertEquals(-1, endpoint.peerRead.get(1200, TimeUnit.MILLISECONDS));
         assertThrows(HttpTimeoutException.class, () -> download.content().readAllBytes());
-        assertEquals(-1, endpoint.peerRead.get(2, TimeUnit.SECONDS));
       }
     } finally {
       headers.countDown();

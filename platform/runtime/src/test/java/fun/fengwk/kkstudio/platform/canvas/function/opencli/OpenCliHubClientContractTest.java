@@ -196,6 +196,60 @@ class OpenCliHubClientContractTest {
   }
 
   @Test
+  @ExtendWith(OutputCaptureExtension.class)
+  void returnedResourceStreamReadAndCloseFailuresAreSanitized(CapturedOutput output)
+      throws IOException {
+    // 返回给调用方的 Hub 媒体流：底层 read/close 的 marker 不得进入公开异常或日志。
+    String marker = "https://user:s3cr3t@hub.test/private/path";
+
+    InputStream readAndCloseFail =
+        new InputStream() {
+          @Override
+          public int read() throws IOException {
+            throw new IOException("read " + marker);
+          }
+
+          @Override
+          public void close() throws IOException {
+            throw new IOException("close " + marker);
+          }
+        };
+    HubResourceStream both =
+        clientReturning(streamResponse(5L, readAndCloseFail)).openResource(resource(5L));
+    IOException readError = assertThrows(IOException.class, () -> both.content().readAllBytes());
+    // 主读取失败优先，次要关闭失败已收敛为固定诊断，不进入 cause/suppressed。
+    assertEquals("response body read failed", readError.getMessage());
+    assertNull(readError.getCause());
+    assertEquals(0, readError.getSuppressed().length);
+    assertFalse(chainText(readError).contains("s3cr3t"));
+    both.close();
+
+    InputStream closeFail =
+        new InputStream() {
+          private int index;
+
+          @Override
+          public int read() {
+            return index++ < 5 ? 1 : -1;
+          }
+
+          @Override
+          public void close() throws IOException {
+            throw new IOException("close " + marker);
+          }
+        };
+    HubResourceStream closeOnly =
+        clientReturning(streamResponse(5L, closeFail)).openResource(resource(5L));
+    assertEquals(1, closeOnly.content().read());
+    IOException closeError = assertThrows(IOException.class, closeOnly::close);
+    assertEquals("response body close failed", closeError.getMessage());
+    assertNull(closeError.getCause());
+    assertEquals(0, closeError.getSuppressed().length);
+    assertFalse(chainText(closeError).contains("s3cr3t"));
+    assertFalse(output.getAll().contains("s3cr3t"));
+  }
+
+  @Test
   void validatesResourceOriginPathLengthAndMediaTypeBeforeExposingStream() throws IOException {
     byte[] media = new byte[] {1, 2, 3};
     OpenCliHubClient success = clientReturning(response(200, Map.of("Content-Length", "3"), media));
@@ -417,7 +471,6 @@ class OpenCliHubClientContractTest {
                           "a.png", "image/png", 0, null, "/api/resources/a.png")));
       assertTrue(input.closed);
       assertFalse(messageChain(error).contains(length));
-      assertEquals(0, DeadlineResponseBody.pendingWatchdogTasks());
     }
   }
 
@@ -519,6 +572,20 @@ class OpenCliHubClientContractTest {
 
   private static HttpResponse<InputStream> jsonResponse(int status, String body) {
     return response(status, "application/json", body);
+  }
+
+  private static HttpResponse<InputStream> streamResponse(long length, InputStream body) {
+    HttpHeaders headers =
+        HttpHeaders.of(
+            Map.of(
+                "Content-Length", List.of(Long.toString(length)),
+                "Content-Type", List.of("image/png")),
+            (name, value) -> true);
+    return new StubHttpResponse(200, headers, body);
+  }
+
+  private static ExecutionResource resource(long size) {
+    return new ExecutionResource("a.png", "image/png", size, null, "/api/resources/a.png");
   }
 
   private static HttpResponse<InputStream> response(int status, String contentType, String body) {

@@ -7,6 +7,7 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.harness.common.io.DeadlineResponseBody;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 
@@ -190,6 +191,7 @@ public class OpenCliHubClient {
       parseExecution(sendEnvelope(request));
     } catch (RuntimeException ignored) {
       // Foundation DB cancellation is authoritative; Hub cancellation is deliberately best effort.
+      log.debug("OpenCLI Hub cancel failed type={}", ignored.getClass().getSimpleName());
     }
   }
 
@@ -612,12 +614,10 @@ public class OpenCliHubClient {
     try {
       return mapper.writeValueAsString(value);
     } catch (JacksonException exception) {
-      // 原始 Jackson 失败可能含请求正文（含 prompt 等），只暴露固定阶段与固定 cause。
+      // 原始 Jackson 失败可能含请求正文（含 prompt 等），只暴露固定阶段。
       log.warn(
           "failed to encode OpenCLI Hub request type={}", exception.getClass().getSimpleName());
-      throw new IllegalStateException(
-          "failed to encode OpenCLI Hub request",
-          new IllegalStateException("OpenCLI Hub request encoding failed"));
+      throw new IllegalStateException("failed to encode OpenCLI Hub request");
     }
   }
 
@@ -682,7 +682,8 @@ public class OpenCliHubClient {
     try {
       input.close();
     } catch (IOException ignored) {
-      // The primary contract error is more useful than a secondary close failure.
+      // 主契约错误更有价值；次要关闭失败只记录 class，best-effort 不重试。
+      log.debug("OpenCLI Hub stream close failed type={}", ignored.getClass().getSimpleName());
     }
   }
 
