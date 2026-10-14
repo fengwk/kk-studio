@@ -60,12 +60,12 @@ final class MiniMaxMavisInstance implements PluginInstance {
     }
   }
 
-  /** 释放构建失败前已创建的实例执行器；释放失败绝不替代原始构建失败向上传播。 */
+  /** 释放实例执行器；次要关闭失败只记录类型，不替代原始构建失败。 */
   private static void releaseExecutor(ExecutorService executor) {
     try {
       executor.shutdownNow();
-    } catch (RuntimeException ignored) {
-      log.debug("MiniMax Mavis tool executor could not be shut down after a failed configure");
+    } catch (RuntimeException error) {
+      log.warn("MiniMax Mavis tool executor shutdown failed: {}", error.getClass().getName());
     }
   }
 
