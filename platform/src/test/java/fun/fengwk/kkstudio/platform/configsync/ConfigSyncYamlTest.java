@@ -65,6 +65,26 @@ class ConfigSyncYamlTest {
   }
 
   @Test
+  void dtoMapAndYamlConversionsPreserveExactDecimalsAndScale() {
+    // 转换链必须保留小数有效位、极值和尾零，而不只是 YAML 标量直接往返。
+    for (String text : List.of("0.123456789012345678901234567890", "1e309", "1e-324", "1.5000")) {
+      BigDecimal expected = new BigDecimal(text);
+      Sample dto = new Sample();
+      dto.ratio = expected;
+
+      Map<String, Object> document = yaml.toMap(dto, "sample");
+      assertInstanceOf(BigDecimal.class, document.get("ratio"));
+      assertEquals(expected, document.get("ratio"));
+      assertEquals(expected, yaml.convert(document, Sample.class, "sample").ratio);
+
+      Map<String, Object> parsed = yaml.parse(yaml.dump(document));
+      assertInstanceOf(BigDecimal.class, parsed.get("ratio"));
+      assertEquals(expected, parsed.get("ratio"));
+      assertEquals(expected, yaml.convert(parsed, Sample.class, "sample").ratio);
+    }
+  }
+
+  @Test
   void duplicateKeysAreRejected() {
     assertThrows(AiValidationException.class, () -> yaml.parse("providers: []\nproviders: []\n"));
   }
