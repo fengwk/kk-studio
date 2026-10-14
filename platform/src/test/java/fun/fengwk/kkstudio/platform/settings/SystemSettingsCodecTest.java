@@ -23,8 +23,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * System settings codec 契约：canonical 编码确定性且省略 null、任意键顺序解码到同一聚合、round-trip 恒等、未知字段 / 非法类型 / 尾随
- * token / 缺失字段全部拒绝，permission 规则顺序在 JSON 往返中保持。
+ * System settings codec 契约：canonical 编码确定性且省略 null、任意键顺序解码到同一聚合、round-trip 恒等、未知字段 / 重复字段 / 非法类型 /
+ * 尾随 token / 缺失字段全部拒绝，permission 规则顺序在 JSON 往返中保持。
  */
 class SystemSettingsCodecTest {
 
@@ -186,6 +186,23 @@ class SystemSettingsCodecTest {
                     "\"retryBackoffStrategy\":\"EXPONENTIAL\"",
                     "\"retryBackoffStrategy\":\"LINEAR\"")),
         "unsupported strategy");
+  }
+
+  @Test
+  void rejectsDuplicateFieldsInStoredJson() {
+    // 存储边界自身拒绝重复字段：同一字段出现两次时无法判断哪份值生效，属损坏数据；不依赖 Web 请求解析器的严格性。
+    String canonical = codec.encode(SystemSettings.DEFAULT);
+    assertThrows(
+        IllegalStateException.class,
+        () -> codec.decode(canonical.replace("\"aiRuntime\"", "\"aiRuntime\":{},\"aiRuntime\"")),
+        "duplicate top-level section");
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            codec.decode(
+                canonical.replace(
+                    "\"retryMaxRetries\":3", "\"retryMaxRetries\":3,\"retryMaxRetries\":3")),
+        "duplicate nested field");
   }
 
   @Test
