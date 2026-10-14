@@ -5,6 +5,7 @@ import static org.hamcrest.Matchers.not;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -297,6 +298,89 @@ class StudioPluginControllerTest {
                         + "\"}"))
         .andExpect(status().isBadRequest())
         .andExpect(content().string(not(containsString(secretMarker))));
+
+    verifyNoInteractions(pluginManagementService);
+  }
+
+  /** 测试意图：保存不等于发布。本节点尚未应用新 desired 状态时必须返回 202 Accepted，已应用时返回 200 OK，两者都禁止缓存。 */
+  @Test
+  void updateConfigurationReportsPendingApplicationAsAccepted() throws Exception {
+    String body = "{\"expectedEpoch\":\"4\",\"expectedRevision\":\"7\",\"valuesJson\":\"{}\"}";
+
+    PluginDTO pending = samplePluginDTO("my-plugin");
+    pending.setApplicationError("configuration is saved but this node has not applied it yet");
+    when(pluginManagementService.updateConfiguration(eq("my-plugin"), eq(4L), eq(7L), any(), any()))
+        .thenReturn(pending);
+
+    mockMvc
+        .perform(
+            put("/api/plugins/my-plugin/configuration")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body))
+        .andExpect(status().isAccepted())
+        .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
+        .andExpect(
+            jsonPath("$.data.applicationError")
+                .value("configuration is saved but this node has not applied it yet"));
+
+    PluginDTO applied = samplePluginDTO("my-plugin");
+    when(pluginManagementService.updateConfiguration(eq("my-plugin"), eq(4L), eq(7L), any(), any()))
+        .thenReturn(applied);
+
+    mockMvc
+        .perform(
+            put("/api/plugins/my-plugin/configuration")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body))
+        .andExpect(status().isOk())
+        .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
+        .andExpect(jsonPath("$.data.applicationError").doesNotExist());
+
+    verify(pluginManagementService, times(2))
+        .updateConfiguration(eq("my-plugin"), eq(4L), eq(7L), any(), any());
+  }
+
+  /** 测试意图：期望坐标与 SET 值只接受 JSON 字符串，数字/布尔不做标量强制转换；KEEP/CLEAR 的显式 null 同样被拒绝，且错误绝不回显请求 正文里的标记值。 */
+  @Test
+  void nonStringPluginWireFieldsAreRejectedWithoutEchoingContent() throws Exception {
+    String marker = "WIRE_COERCION_MARKER_778899";
+
+    mockMvc
+        .perform(
+            put("/api/plugins/my-plugin/configuration")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"expectedEpoch\":4,\"expectedRevision\":\"7\",\"valuesJson\":\"{}\"}"))
+        .andExpect(status().isBadRequest());
+
+    mockMvc
+        .perform(
+            put("/api/plugins/my-plugin/configuration")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    "{\"expectedEpoch\":\"4\",\"expectedRevision\":\"7\",\"valuesJson\":\"{}\""
+                        + ",\"secretPatch\":{\"apiKey\":{\"operation\":\"SET\",\"value\":12345678}}}"))
+        .andExpect(status().isBadRequest());
+
+    mockMvc
+        .perform(
+            put("/api/plugins/my-plugin/configuration")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    "{\"expectedEpoch\":\"4\",\"expectedRevision\":\"7\",\"valuesJson\":\"{}\""
+                        + ",\"secretPatch\":{\"apiKey\":{\"operation\":\"CLEAR\",\"value\":null}}}"))
+        .andExpect(status().isBadRequest());
+
+    // 非法十进制字符串同样只在绑定后校验：错误必须去敏，绝不回显正文中的标记值。
+    mockMvc
+        .perform(
+            put("/api/plugins/my-plugin/configuration")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    "{\"expectedEpoch\":\""
+                        + marker
+                        + "\",\"expectedRevision\":\"7\",\"valuesJson\":\"{}\"}"))
+        .andExpect(status().isBadRequest())
+        .andExpect(content().string(not(containsString(marker))));
 
     verifyNoInteractions(pluginManagementService);
   }

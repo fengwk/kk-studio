@@ -52,4 +52,22 @@ public record PluginAuthAttemptRow(
       throw new IllegalArgumentException("region must be a bounded non-blank printable candidate");
     }
   }
+
+  /** 显式渲染：nonce 摘要属于 attempt 身份，绝不进入日志或诊断文本。 */
+  @Override
+  public String toString() {
+    return "PluginAuthAttemptRow[pluginId="
+        + pluginId
+        + ", authGeneration="
+        + authGeneration
+        + ", contextFingerprint="
+        + contextFingerprint
+        + ", configRevision="
+        + configRevision
+        + ", region="
+        + region
+        + ", expiresAt="
+        + expiresAt
+        + ", nonceHash=<redacted>]";
+  }
 }

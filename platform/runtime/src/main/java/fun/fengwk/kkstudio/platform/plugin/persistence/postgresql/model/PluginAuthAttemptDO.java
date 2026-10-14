@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.model;
 
 import lombok.Data;
+import lombok.ToString;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -11,7 +12,7 @@ public class PluginAuthAttemptDO {
 
   private String pluginId;
 
-  private String nonceHash;
+  @ToString.Exclude private String nonceHash;
 
   private UUID authGeneration;
 

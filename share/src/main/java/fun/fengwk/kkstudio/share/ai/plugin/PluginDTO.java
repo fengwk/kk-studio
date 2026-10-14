@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.share.ai.plugin;
 import lombok.Data;
 
 import java.time.Instant;
+import java.util.List;
 
 /**
  * 已安装 Plugin 的安全投影。
@@ -50,7 +51,7 @@ public class PluginDTO {
   /** 最近一次刷新失败的有界去敏错误；成功时为 null。 */
   private String lastRefreshError;
 
-  /** 本节点已应用配置的普通值、schema 与秘密录入状态投影。 */
+  /** 权威 catalog 当前 desired 配置的普通值、schema 与秘密录入状态投影；本节点实际应用的坐标另见 {@code applied*}。 */
   private PluginConfigurationDTO configuration;
 
   /** 权威 catalog 当前 epoch（canonical 非负十进制字符串）。 */
@@ -64,6 +65,12 @@ public class PluginDTO {
 
   /** 本节点运行实例构建时的配置修订（canonical 非负十进制字符串）。 */
   private String appliedRevision;
+
+  /** 本节点已应用快照中该 Plugin 真实冻结的模型可见工具名（按冻结目录顺序）；没有贡献时为空列表。 */
+  private List<String> harnessToolNames;
+
+  /** 本节点已应用快照中该 Plugin 真实冻结的 Canvas 函数名（按冻结目录顺序）；没有贡献时为空列表。 */
+  private List<String> canvasFunctionNames;
 
   /** 已保存但尚未在本节点应用时的固定去敏说明；已应用时为 null。 */
   private String applicationError;

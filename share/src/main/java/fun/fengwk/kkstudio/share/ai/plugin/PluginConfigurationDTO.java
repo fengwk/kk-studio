@@ -5,7 +5,10 @@ import lombok.Data;
 import java.util.Map;
 
 /**
- * 已应用配置的安全投影：普通值与 schema 定义，以及每个已声明秘密字段的录入状态。
+ * 权威 catalog 当前 desired 配置的安全投影：普通值与 schema 定义，以及每个已声明秘密字段的录入状态。
+ *
+ * <p>{@code revision} 是权威 catalog 中该 Plugin 当前条目的配置修订；本节点实际应用的修订由 {@link
+ * PluginDTO#getAppliedRevision()} 单独表达。因此「刚保存但本节点尚未应用」时这里仍是本次保存的值，不会回退成旧值。
  *
  * <p>{@code valuesSchema} 由唯一 {@code InputSchema} 声明经既有 {@code SchemaJsonCodec} 派生；{@code
  * valuesJson} 与 {@code defaultsJson} 保持原有数字精度与 64 KiB 预算。{@code secrets} 只有说明与布尔，绝不携带任何秘密值。

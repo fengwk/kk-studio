@@ -10,6 +10,7 @@ import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
+import fun.fengwk.kkstudio.harness.common.json.BoundedJsonWriter;
 import fun.fengwk.kkstudio.harness.common.json.JsonValues;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
@@ -185,7 +186,6 @@ public final class PluginConfigurationCommitService {
     if (material.nextRefreshAt().isBefore(now)) {
       throw new AiValidationException("plugin", "plugin returned a refresh instant in the past");
     }
-    SecretKey key = requireKey();
     PluginCatalogRecord catalog = requireCatalog();
     PluginCatalogManifest.Entry entry = requireEntry(catalog, pluginId, expectedEpoch, null);
     Optional<PluginCredentialRow> baseline = credentialRepository.find(pluginId);
@@ -195,12 +195,6 @@ public final class PluginConfigurationCommitService {
     String contextFingerprint = contextFingerprintOf(plugin, schemaFingerprint, resolvedValues);
     // 交互材料是不透明载荷：原样落库（插件可能带 refresh token 等未在 schema 声明的字段），
     // 只有「已录入的声明秘密字段名」按声明过滤，绝不截断载荷本身。
-    CandidateCredential candidate =
-        new CandidateCredential(
-            material.payloadJson(),
-            material.region(),
-            material.expiresAt(),
-            material.nextRefreshAt());
     return executeCommit(
         plugin,
         catalog,
@@ -210,8 +204,8 @@ public final class PluginConfigurationCommitService {
         schemaFingerprint,
         contextFingerprint,
         UUID.randomUUID(),
-        declaredFields(plugin, candidate.payloadJson()),
-        candidate,
+        declaredFields(plugin, material.payloadJson()),
+        material,
         CredentialAction.WRITE,
         expectedEpoch);
   }
@@ -302,20 +296,22 @@ public final class PluginConfigurationCommitService {
           baseline.isPresent() ? CredentialAction.REMOVE : CredentialAction.NONE,
           expectedEpoch);
     }
-    SecretKey key = requireKey();
     PluginCredentialRow existing = baseline.orElse(null);
+    // 只有「已录入且本次未被 SET 替换、也未被 CLEAR 清除」的字段才需要旧值：全部被替换或清除时既不读主密钥也不解密旧密文。
     ObjectNode payload =
-        baseline
-            .map(row -> declaredPayload(plugin, key, row))
-            .orElseGet(() -> new ObjectNode(NODES));
+        needsBaselinePayload(baselineFields, patch) && existing != null
+            ? declaredPayload(plugin, requireKey(), existing)
+            : new ObjectNode(NODES);
     applyPatch(payload, patch);
-    List<String> configuredFields = declaredFields(plugin, JsonValues.write(payload));
-    CandidateCredential candidate =
-        new CandidateCredential(
-            JsonValues.write(payload),
+    // 多字段组合、多字节与转义展开都在完整分配前受同一份 64 KiB 预算约束。
+    String payloadJson = boundedPayload(payload);
+    List<String> configuredFields = declaredFields(plugin, payloadJson);
+    PluginCredentialMaterial candidate =
+        new PluginCredentialMaterial(
             existing == null ? null : existing.region(),
             existing == null ? null : existing.expiresAt(),
-            existing == null ? null : existing.nextRefreshAt());
+            existing == null ? null : existing.nextRefreshAt(),
+            payloadJson);
     return executeCommit(
         plugin,
         catalog,
@@ -342,7 +338,7 @@ public final class PluginConfigurationCommitService {
       String contextFingerprint,
       UUID generation,
       List<String> configuredSecretFields,
-      CandidateCredential candidate,
+      PluginCredentialMaterial candidate,
       CredentialAction action,
       long expectedEpoch) {
     String pluginId = plugin.descriptor().pluginId();
@@ -350,7 +346,19 @@ public final class PluginConfigurationCommitService {
     PluginCredentialReference candidateReference =
         new PluginCredentialReference(pluginId, generation, contextFingerprint);
     PluginCredentialSnapshot candidateSnapshot = null;
-    if (candidate != null) {
+    final byte[] encryptedPayload;
+    if (candidate == null) {
+      encryptedPayload = null;
+    } else {
+      // 候选用密文与凭据行必须逐字节相同，因此只加密一次，两边共享同一份输出。
+      encryptedPayload =
+          codec.encrypt(
+              requireKey(),
+              pluginId,
+              generation,
+              contextFingerprint,
+              candidate.region(),
+              candidate.payloadJson());
       candidateSnapshot =
           new PluginCredentialSnapshot(
               pluginId,
@@ -359,13 +367,7 @@ public final class PluginConfigurationCommitService {
               candidate.region(),
               candidate.expiresAt(),
               0L,
-              codec.encrypt(
-                  requireKey(),
-                  pluginId,
-                  generation,
-                  contextFingerprint,
-                  candidate.region(),
-                  candidate.payloadJson()),
+              encryptedPayload,
               candidate.payloadJson());
     }
     PluginCatalogSnapshot snapshot = null;
@@ -411,6 +413,7 @@ public final class PluginConfigurationCommitService {
                       changed,
                       manifest,
                       candidate,
+                      encryptedPayload,
                       action,
                       generation,
                       contextFingerprint));
@@ -433,7 +436,8 @@ public final class PluginConfigurationCommitService {
       long expectedEpoch,
       PluginConfigurationRow changed,
       PluginCatalogManifest manifest,
-      CandidateCredential candidate,
+      PluginCredentialMaterial candidate,
+      byte[] encryptedPayload,
       CredentialAction action,
       UUID generation,
       String contextFingerprint) {
@@ -458,13 +462,7 @@ public final class PluginConfigurationCommitService {
             pluginId,
             generation,
             contextFingerprint,
-            codec.encrypt(
-                requireKey(),
-                pluginId,
-                generation,
-                contextFingerprint,
-                candidate.region(),
-                candidate.payloadJson()),
+            encryptedPayload,
             candidate.region(),
             candidate.expiresAt(),
             candidate.nextRefreshAt(),
@@ -619,6 +617,29 @@ public final class PluginConfigurationCommitService {
     }
   }
 
+  /** 有界写出候选载荷：多字段组合、多字节与转义展开都在完整分配前受同一份 64 KiB 预算约束。 */
+  private static String boundedPayload(ObjectNode payload) {
+    String payloadJson =
+        BoundedJsonWriter.write(payload, PluginCredentialMaterial.MAX_PAYLOAD_UTF8_BYTES);
+    if (payloadJson == null) {
+      throw new AiValidationException(
+          "plugin", "secret patch payload must not exceed the credential budget");
+    }
+    return payloadJson;
+  }
+
+  /** 补丁后是否仍有「已录入但未被 SET 替换、也未被 CLEAR 清除」的字段需要旧值。 */
+  private static boolean needsBaselinePayload(
+      List<String> baselineFields, Map<String, PluginSecretPatch> patch) {
+    for (String field : baselineFields) {
+      PluginSecretPatch operation = patch.get(field);
+      if (operation == null || operation.operation() == PluginSecretPatch.Operation.KEEP) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   /** 该 Plugin 当前 revision 已录入的声明秘密字段名；历史必须存在且与 entry 逐字段一致，否则 fail closed。 */
   private List<String> configuredFieldsOf(StudioPlugin plugin, PluginCatalogManifest.Entry entry) {
     return PluginConfigurationHistory.require(
@@ -741,22 +762,6 @@ public final class PluginConfigurationCommitService {
 
   private String requireHistoryValues(String pluginId, PluginCatalogManifest.Entry entry) {
     return PluginConfigurationHistory.requireValues(configurationRepository, pluginId, entry);
-  }
-
-  /** 候选秘密视图：候选的明文载荷与路由元数据；{@code toString} 绝不回显载荷。 */
-  private record CandidateCredential(
-      String payloadJson, String region, Instant expiresAt, Instant nextRefreshAt) {
-
-    @Override
-    public String toString() {
-      return "CandidateCredential[region="
-          + region
-          + ", expiresAt="
-          + expiresAt
-          + ", nextRefreshAt="
-          + nextRefreshAt
-          + ", payload=<redacted>]";
-    }
   }
 
   /** 本次提交对凭据行的动作。 */

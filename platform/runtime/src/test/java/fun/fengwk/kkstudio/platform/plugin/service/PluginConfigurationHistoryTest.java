@@ -12,6 +12,7 @@ import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRow;
 import fun.fengwk.kkstudio.platform.plugin.testing.InMemoryPluginConfigurationRepository;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 /** 权威配置历史的严格读取契约：缺失或身份漂移一律 fail closed，绝不退回空字段或旧值。 */
@@ -103,6 +104,30 @@ class PluginConfigurationHistoryTest {
     assertTrue(error.getMessage().contains("history is missing"), error.getMessage());
   }
 
+  /** 行归属必须与请求方一致：单故障 fixture 让仓储返回另一个 Plugin 的行，此时必须 fail closed。 */
+  @Test
+  void foreignOwnerRowFailsClosed() {
+    PluginCatalogManifest.Entry expected = entry("1.0", "b".repeat(64), GENERATION, CONTEXT);
+    PluginConfigurationRow foreign = row("another.plugin", REVISION, expected, List.of(), "{}");
+    repository =
+        new InMemoryPluginConfigurationRepository() {
+          @Override
+          public Optional<PluginConfigurationRow> readConfiguration(
+              String pluginId, long revision) {
+            return Optional.of(foreign);
+          }
+        };
+
+    IllegalStateException error =
+        assertThrows(
+            IllegalStateException.class,
+            () -> PluginConfigurationHistory.require(repository, PLUGIN_ID, expected));
+    assertTrue(error.getMessage().contains("drifted"), error.getMessage());
+    assertThrows(
+        IllegalStateException.class,
+        () -> PluginConfigurationHistory.requireValues(repository, PLUGIN_ID, expected));
+  }
+
   private static PluginCatalogManifest.Entry entry(
       String codeVersion, String schemaFingerprint, UUID generation, String context) {
     return new PluginCatalogManifest.Entry(
@@ -114,8 +139,17 @@ class PluginConfigurationHistoryTest {
       PluginCatalogManifest.Entry entry,
       List<String> configuredSecretFields,
       String valuesJson) {
+    return row(PLUGIN_ID, revision, entry, configuredSecretFields, valuesJson);
+  }
+
+  private static PluginConfigurationRow row(
+      String pluginId,
+      long revision,
+      PluginCatalogManifest.Entry entry,
+      List<String> configuredSecretFields,
+      String valuesJson) {
     return new PluginConfigurationRow(
-        PLUGIN_ID,
+        pluginId,
         revision,
         entry.pluginCodeVersion(),
         entry.schemaFingerprint(),

@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.share.ai.plugin;
 
 import lombok.Data;
+import lombok.ToString;
 
 /**
  * {@code POST /api/plugins/{pluginId}/auth/prepare} 响应体：本次 pending attempt 的句柄与要在新窗口打开的官方登录链接。
@@ -11,8 +12,8 @@ import lombok.Data;
 @Data
 public class PluginAuthPrepareDTO {
 
-  /** 本次 pending attempt 的一次性句柄：complete 必须原样带上，且只能成功消费一次。 */
-  private String authAttemptId;
+  /** 本次 pending attempt 的一次性句柄：complete 必须原样带上，且只能成功消费一次。该句柄不进入 {@code toString}。 */
+  @ToString.Exclude private String authAttemptId;
 
   /** Plugin 固定公开 origin 上的登录地址。 */
   private String loginUrl;

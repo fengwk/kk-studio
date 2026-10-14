@@ -2,7 +2,9 @@ package fun.fengwk.kkstudio.platform.plugin.service;
 
 import lombok.extern.slf4j.Slf4j;
 
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
 import fun.fengwk.kkstudio.harness.common.schema.SchemaJsonCodec;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
@@ -31,6 +33,7 @@ import fun.fengwk.kkstudio.share.ai.plugin.PluginSecretProjectionDTO;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -90,9 +93,14 @@ public final class PluginManagementService {
     this.clock = Objects.requireNonNull(clock, "clock");
   }
 
-  /** 已安装 Plugin 的安全投影，顺序跟随启动期冻结的安装目录。 */
+  /**
+   * 已安装 Plugin 的安全投影，顺序跟随启动期冻结的安装目录。
+   *
+   * <p>整份列表共享一次 desired catalog 与 applied 快照读取：一次响应绝不混用两个 epoch 的坐标、配置与能力。
+   */
   public List<PluginDTO> listPlugins() {
-    return registry.plugins().stream().map(this::describe).toList();
+    CatalogView view = catalogView();
+    return registry.plugins().stream().map(plugin -> describe(plugin, view)).toList();
   }
 
   /** 单个已安装 Plugin 的安全投影；未安装 id 返回 not found。 */
@@ -170,8 +178,8 @@ public final class PluginManagementService {
     StudioPlugin plugin = requirePlugin(pluginId);
     requireDeepLink(plugin);
     PluginAuthHandler handler = requireAuthHandler(plugin);
-    if (authAttemptId == null || authAttemptId.isBlank()) {
-      throw new AiValidationException(RESOURCE, "authAttemptId must not be blank");
+    if (!PluginAuthNonce.isValidHandle(authAttemptId)) {
+      throw new AiValidationException(RESOURCE, "authAttemptId must be a canonical attempt handle");
     }
     if (callbackUrl == null || callbackUrl.isBlank()) {
       throw new AiValidationException(RESOURCE, "callbackUrl must not be blank");
@@ -273,19 +281,30 @@ public final class PluginManagementService {
     throw new AiValidationException(RESOURCE, "plugin does not provide interactive authentication");
   }
 
-  /** 安全投影：安装身份、认证状态、desired 配置与 desired/applied 坐标；秘密只以说明与布尔出现。 */
+  /**
+   * 安全投影：安装身份、认证状态、desired 配置与 desired/applied 坐标、本节点已应用能力名；秘密只以说明与布尔出现。
+   *
+   * <p>一次投影只读一次 desired catalog 与一次 applied 快照，所有坐标、配置与能力都基于这两份 view 派生：热更新期间也不会出现「坐标取自新
+   * epoch、能力取自旧快照」这种混 epoch 的响应。
+   */
   private PluginDTO describe(StudioPlugin plugin) {
+    return describe(plugin, catalogView());
+  }
+
+  private PluginDTO describe(StudioPlugin plugin, CatalogView view) {
     PluginDescriptor descriptor = plugin.descriptor();
-    PluginCatalogRecord catalog = requireCatalog();
+    String pluginId = descriptor.pluginId();
+    PluginCatalogRecord catalog = view.desired();
+    PluginCatalogSnapshot applied = view.applied();
     PluginDTO dto = new PluginDTO();
-    dto.setPluginId(descriptor.pluginId());
+    dto.setPluginId(pluginId);
     dto.setName(descriptor.name());
     dto.setVersion(descriptor.version());
     PluginAuthKindDTO authKind = authKindOf(plugin.authenticationSpec());
     dto.setAuthKind(authKind);
     if (authKind != null) {
       // 只有真正声明认证能力的 Plugin 才探测凭据表：没有认证就没有凭据状态，也绝不因为缺主密钥而谎报 KEY_UNAVAILABLE。
-      PluginCredentialProjection projection = credentialStore.projection(descriptor.pluginId());
+      PluginCredentialProjection projection = credentialStore.projection(pluginId);
       dto.setStatus(projection.status().name());
       dto.setRegion(projection.region());
       dto.setExpiresAt(projection.expiresAt());
@@ -295,16 +314,16 @@ public final class PluginManagementService {
     }
     dto.setConfiguration(configurationOf(plugin, catalog));
     dto.setDesiredEpoch(Long.toString(catalog.epoch()));
-    dto.setAppliedEpoch(Long.toString(requireAppliedSnapshot().epoch()));
-    PluginCatalogManifest.Entry desiredEntry =
-        catalog.manifest().plugins().get(descriptor.pluginId());
+    dto.setAppliedEpoch(Long.toString(applied.epoch()));
+    PluginCatalogManifest.Entry desiredEntry = catalog.manifest().plugins().get(pluginId);
     dto.setDesiredRevision(
         desiredEntry == null ? null : Long.toString(desiredEntry.configRevision()));
-    dto.setAppliedRevision(appliedRevisionOf(descriptor.pluginId()));
+    dto.setAppliedRevision(appliedRevisionOf(applied, pluginId));
     dto.setApplicationError(
-        catalog.epoch() == requireAppliedSnapshot().epoch()
+        catalog.epoch() == applied.epoch()
             ? null
             : PluginConfigurationCommitService.PENDING_APPLICATION_ERROR);
+    applyAppliedCapabilityNames(dto, applied, pluginId);
     return dto;
   }
 
@@ -340,22 +359,61 @@ public final class PluginManagementService {
     return configuration;
   }
 
+  /** 一次投影的唯一 view：同一份 desired catalog 与 applied 快照，调用方不得拆开分别读取。 */
+  private CatalogView catalogView() {
+    return new CatalogView(requireCatalog(), requireAppliedSnapshot());
+  }
+
   /** 本节点当前 applied 快照：只在真正需要投影真实应用状态时才向容器索取，装配期不解析。 */
   private PluginCatalogSnapshot requireAppliedSnapshot() {
     return Objects.requireNonNull(appliedSnapshot.get(), "applied plugin catalog snapshot");
   }
 
-  private Optional<PluginCatalogSnapshot.ConfiguredPlugin> appliedPlugin(String pluginId) {
-    return requireAppliedSnapshot().configuredPlugins().stream()
+  private static Optional<PluginCatalogSnapshot.ConfiguredPlugin> appliedPlugin(
+      PluginCatalogSnapshot applied, String pluginId) {
+    return applied.configuredPlugins().stream()
         .filter(configured -> configured.descriptor().pluginId().equals(pluginId))
         .findFirst();
   }
 
-  private String appliedRevisionOf(String pluginId) {
-    return appliedPlugin(pluginId)
+  private static String appliedRevisionOf(PluginCatalogSnapshot applied, String pluginId) {
+    return appliedPlugin(applied, pluginId)
         .map(configured -> Long.toString(configured.config().revision()))
         .orElse(null);
   }
+
+  /**
+   * 已应用能力名：只从 applied 快照的 owner map 与真实冻结 definitions 派生，既不手写能力清单，也不重新 configure。
+   *
+   * <p>因此停用的 Plugin（贡献为空）、没有两域贡献的 Plugin 与完全未安装的 id 都是空列表，绝不猜测或回退到 desired 目录。
+   */
+  private static void applyAppliedCapabilityNames(
+      PluginDTO dto, PluginCatalogSnapshot applied, String pluginId) {
+    PluginCatalogSnapshot.PluginOwnership ownership = applied.pluginOwnership().get(pluginId);
+    if (ownership == null) {
+      dto.setHarnessToolNames(List.of());
+      dto.setCanvasFunctionNames(List.of());
+      return;
+    }
+    List<String> toolNames = new ArrayList<>();
+    for (ToolContribution tool : applied.harnessCatalog().tools()) {
+      if (ownership.contributorIds().contains(tool.id().contributorId())) {
+        toolNames.add(tool.definition().descriptor().name());
+      }
+    }
+    List<String> functionNames = new ArrayList<>();
+    for (CanvasFunctionCatalog.RegisteredFunction function :
+        applied.canvasFunctionCatalog().list()) {
+      if (ownership.functionNames().contains(function.function().name())) {
+        functionNames.add(function.function().name());
+      }
+    }
+    dto.setHarnessToolNames(List.copyOf(toolNames));
+    dto.setCanvasFunctionNames(List.copyOf(functionNames));
+  }
+
+  /** 单次投影共享的 desired catalog 与 applied 快照。 */
+  private record CatalogView(PluginCatalogRecord desired, PluginCatalogSnapshot applied) {}
 
   /** 一次 complete 已消费的 attempt 与消费时的权威全局 epoch：落库必须仍匹配该 epoch。 */
   private record AttemptConsumption(PluginAuthAttemptRow attempt, long epoch) {}
