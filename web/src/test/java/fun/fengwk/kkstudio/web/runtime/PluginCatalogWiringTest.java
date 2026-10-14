@@ -9,7 +9,6 @@ import static org.mockito.Mockito.verifyNoInteractions;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.context.annotation.Bean;
@@ -27,7 +26,6 @@ import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogSnapshot;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialStore;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRepository;
 
-import java.lang.reflect.Proxy;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -104,37 +102,20 @@ class PluginCatalogWiringTest {
 
   /** 可选 JAR 只通过运行时 classpath 接入；真实 configure 产出工具，启动不解析凭据或发送请求。 */
   @Test
-  void realMavisContributesOnceThroughTheSharedSnapshot() throws ClassNotFoundException {
-    String prefix = "fun.fengwk.kkstudio.plugin.";
-    Class<?> autoConfiguration =
-        Class.forName(prefix + "minimaxmavis.MiniMaxMavisAutoConfiguration");
-    Class<?> transportType = Class.forName(prefix + "minimaxmavis.MavisHttpTransport");
+  void realMavisContributesOnceThroughTheSharedSnapshot() {
     AtomicInteger requests = new AtomicInteger();
-    Object transport =
-        Proxy.newProxyInstance(
-            transportType.getClassLoader(),
-            new Class<?>[] {transportType},
-            (proxy, method, args) -> {
-              return switch (method.getName()) {
-                case "send" -> {
-                  requests.incrementAndGet();
-                  throw new AssertionError("plugin startup must not issue remote requests");
-                }
-                case "toString" -> "offline Mavis transport";
-                case "hashCode" -> System.identityHashCode(proxy);
-                case "equals" -> proxy == args[0];
-                default -> throw new UnsupportedOperationException(method.getName());
-              };
-            });
     PluginCredentialStore credentials = mock(PluginCredentialStore.class);
-    new ApplicationContextRunner()
-        .withUserConfiguration(PluginCatalogConfiguration.class, RegistryConfiguration.class)
-        .withBean(PluginCredentialStore.class, () -> credentials)
-        .withBean(PluginConfigurationRepository.class, InMemoryPluginCatalogFakes::repository)
-        .withBean(PlatformTransactionManager.class, InMemoryPluginCatalogFakes::transactionManager)
-        .withInitializer(
-            context -> context.getBeanFactory().registerSingleton("mavisHttpTransport", transport))
-        .withConfiguration(AutoConfigurations.of(autoConfiguration))
+    RuntimeMavisTestSupport.withMavis(
+            new ApplicationContextRunner()
+                .withUserConfiguration(
+                    PluginCatalogConfiguration.class, RegistryConfiguration.class)
+                .withBean(PluginCredentialStore.class, () -> credentials)
+                .withBean(
+                    PluginConfigurationRepository.class, InMemoryPluginCatalogFakes::repository)
+                .withBean(
+                    PlatformTransactionManager.class,
+                    InMemoryPluginCatalogFakes::transactionManager),
+            requests)
         .run(
             context -> {
               assertTrue(context.getStartupFailure() == null);
