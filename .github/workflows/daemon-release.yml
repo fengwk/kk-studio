@@ -74,7 +74,7 @@ jobs:
         run: env JAVA_HOME="$JAVA_HOME" mvn -B -ntp -pl harness/daemon -am package -DskipTests "-Dmaven.repo.local=$RUNNER_TEMP/kk-studio-m2"
       - name: Test generated Windows scripts with native ACLs
         shell: bash
-        run: env JAVA_HOME="$JAVA_HOME" mvn -B -ntp -pl platform -am test -Dtest=EnvironmentInstallScriptsTest -Dsurefire.failIfNoSpecifiedTests=false "-Dmaven.repo.local=$RUNNER_TEMP/kk-studio-m2"
+        run: env JAVA_HOME="$JAVA_HOME" mvn -B -ntp -pl platform/runtime -am test -Dtest=EnvironmentInstallScriptsTest -Dsurefire.failIfNoSpecifiedTests=false "-Dmaven.repo.local=$RUNNER_TEMP/kk-studio-m2"
       - name: Test installer with Windows PowerShell 5.1
         shell: powershell
         run: .\scripts\daemon\tests\test_daemon_install_windows.ps1

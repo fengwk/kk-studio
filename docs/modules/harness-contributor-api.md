@@ -101,7 +101,7 @@ Environment 时才进入模型工具面。`requiredEnvironmentId` 用于把 `REQ
 环境绑定在持久化侧被冻结：[`ToolBinding`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/tool/ToolBinding.java)
 保留 `environmentSupport` 与可空的 `environmentId` / `environmentName`。`NONE` 不得携带
 环境，`OPTIONAL` 可携带当前选择，`REQUIRED` 只会在存在选择时被正常规划。Platform 在
-构造模型工具列表前过滤无 Environment 的 `REQUIRED` 工具；[`ToolExecutionGateway`](../../platform/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/gateway/ToolExecutionGateway.java)
+构造模型工具列表前过滤无 Environment 的 `REQUIRED` 工具；[`ToolExecutionGateway`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/gateway/ToolExecutionGateway.java)
 仍用冻结 definition、Contributor provenance、support 与 `requiredEnvironmentId` 逐项
 比对当前目录，并对陈旧或伪造的缺环境调用稳定返回 `ENVIRONMENT_NOT_SELECTED`。
 `environmentName` 与 `environmentId` 同源，继续作为历史投影判定 native 资格的

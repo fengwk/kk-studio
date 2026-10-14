@@ -199,7 +199,7 @@ class NoRedisArchitectureTest {
     Path candidate = Path.of("").toAbsolutePath().normalize();
     while (candidate != null) {
       if (Files.isRegularFile(candidate.resolve("pom.xml"))
-          && Files.isDirectory(candidate.resolve("platform/src/main/java"))
+          && Files.isDirectory(candidate.resolve("platform/runtime/src/main/java"))
           && Files.isDirectory(candidate.resolve("web/src/main/java"))) {
         return candidate;
       }

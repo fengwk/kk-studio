@@ -45,7 +45,7 @@ TARGET_MODULES=(
   web
   canvas/infra
   harness/infra
-  platform
+  platform/runtime
 )
 
 TARGET_FQCNS=(
@@ -131,7 +131,7 @@ target_module() {
       printf 'harness/infra\n'
       ;;
     fun.fengwk.kkstudio.platform.*)
-      printf 'platform\n'
+      printf 'platform/runtime\n'
       ;;
     *)
       return 1
@@ -150,7 +150,7 @@ target_area() {
     harness/infra)
       printf 'Harness Infra\n'
       ;;
-    platform)
+    platform/runtime)
       printf 'Platform Storage\n'
       ;;
     *)
@@ -895,7 +895,7 @@ MAVEN_TEST_FILTER=$(IFS=,; printf '%s' "${TARGET_FQCNS[*]}")
 MAVEN_ARGS=(
   --batch-mode
   -pl
-  web,canvas/infra,harness/infra,platform
+  web,canvas/infra,harness/infra,platform/runtime
   -am
   "-Dtest=$MAVEN_TEST_FILTER"
   -Dsurefire.failIfNoSpecifiedTests=false
