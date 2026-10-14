@@ -8,6 +8,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArraySet;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 /**
@@ -25,12 +26,12 @@ final class SubscriptionFanOut<E> {
   private final Map<UUID, Set<Consumer<E>>> keyedSubscribers = new ConcurrentHashMap<>();
   private final Set<Consumer<E>> globalSubscribers = new CopyOnWriteArraySet<>();
 
-  /** 注册订阅并返回幂等的注销动作；{@code key} 为 null 表示全局订阅，注销后不再收到任何投递。 */
+  /** 注册订阅并返回幂等的注销动作；关闭只移除后续投递的订阅，不撤回已取得的 fan-out 快照。 */
   Runnable subscribe(UUID key, Consumer<E> consumer) {
     Objects.requireNonNull(consumer, "consumer");
     if (key == null) {
       globalSubscribers.add(consumer);
-      return () -> globalSubscribers.remove(consumer);
+      return once(() -> globalSubscribers.remove(consumer));
     }
     keyedSubscribers.compute(
         key,
@@ -39,7 +40,7 @@ final class SubscriptionFanOut<E> {
           subscribers.add(consumer);
           return subscribers;
         });
-    return () -> release(key, consumer);
+    return once(() -> release(key, consumer));
   }
 
   /** 定点投递：对应 key 的订阅者与全部全局订阅者各收到一次。 */
@@ -74,6 +75,15 @@ final class SubscriptionFanOut<E> {
           subscribers.remove(consumer);
           return subscribers.isEmpty() ? null : subscribers;
         });
+  }
+
+  private static Runnable once(Runnable release) {
+    AtomicBoolean released = new AtomicBoolean();
+    return () -> {
+      if (released.compareAndSet(false, true)) {
+        release.run();
+      }
+    };
   }
 
   private static <E> void deliver(Consumer<E> consumer, E event) {
