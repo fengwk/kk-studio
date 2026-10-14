@@ -51,7 +51,7 @@
 
 | 文档 | 回答的问题 |
 | --- | --- |
-| [Canvas Core](modules/canvas-core.md) | Graph 聚合、typed command、版本和 Function ports 如何定义？ |
+| [Canvas Core](modules/canvas-core.md) | Graph 聚合、typed command、版本和 Function 运行态如何定义？ |
 | [Canvas Plugin API](modules/canvas-plugin-api.md) | Function adapter、Catalog、codec 端口与冻结运行计划约定什么契约？ |
 | [Canvas Infra](modules/canvas-infra.md) | Graph 如何持久化，Function run 如何 claim、heartbeat 和终结？ |
 | [Schema](modules/schema.md) | 唯一 Flyway baseline、表关系、seed 与数据库约束是什么？ |
