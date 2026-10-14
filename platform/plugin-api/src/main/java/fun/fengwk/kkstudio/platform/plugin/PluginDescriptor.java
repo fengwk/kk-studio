@@ -24,6 +24,18 @@ public record PluginDescriptor(String pluginId, String name, String version) {
   public static final int MAX_VERSION_CHARS = 64;
 
   public PluginDescriptor {
+    pluginId = requireCanonicalPluginId(pluginId);
+    name = requireBounded(name, "name", MAX_NAME_CHARS);
+    version = requireBounded(version, "version", MAX_VERSION_CHARS);
+  }
+
+  /**
+   * 安装身份的唯一规范：全局唯一、不可变、canonical 小写点划线标识符且不超过 {@link #MAX_PLUGIN_ID_LENGTH}，与 {@code
+   * plugin_credential.plugin_id} 列约束一致。凭据引用等其它身份载体必须复用同一规则，不得各自放宽。
+   *
+   * @throws IllegalArgumentException 为 null、空、含非法字符、带 padding 或超过长度上限
+   */
+  public static String requireCanonicalPluginId(String pluginId) {
     if (pluginId == null
         || pluginId.length() > MAX_PLUGIN_ID_LENGTH
         || !PLUGIN_ID_SYNTAX.matcher(pluginId).matches()) {
@@ -32,8 +44,7 @@ public record PluginDescriptor(String pluginId, String name, String version) {
               + MAX_PLUGIN_ID_LENGTH
               + " characters");
     }
-    name = requireBounded(name, "name", MAX_NAME_CHARS);
-    version = requireBounded(version, "version", MAX_VERSION_CHARS);
+    return pluginId;
   }
 
   private static String requireBounded(String value, String field, int maxChars) {

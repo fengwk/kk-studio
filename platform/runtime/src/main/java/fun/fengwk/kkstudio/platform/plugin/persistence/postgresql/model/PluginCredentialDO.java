@@ -13,6 +13,8 @@ public class PluginCredentialDO {
 
   private UUID authGeneration;
 
+  private String contextFingerprint;
+
   private byte[] encryptedPayload;
 
   private String region;

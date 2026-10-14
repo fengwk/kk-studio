@@ -77,14 +77,25 @@ public final class PluginConfigSchema {
     return normalized;
   }
 
-  /** {@link PluginAuthSpec.StaticKey} 必须命名本 schema 声明的秘密字段；其它形态无需秘密字段。 */
+  /**
+   * 认证声明必须与本 schema 自洽：{@link PluginAuthSpec.StaticKey} 只能命名本 schema 声明的秘密字段，其 {@code
+   * contextFields} 只能命名 {@code valuesSchema} 已声明的普通顶层字段。
+   */
   public void requireDeclaredSecrets(PluginAuthSpec authSpec) {
     Objects.requireNonNull(authSpec, "authSpec");
-    if (authSpec instanceof PluginAuthSpec.StaticKey staticKey
-        && !secrets.containsKey(staticKey.secretField())) {
-      throw new IllegalStateException(
-          "StaticKey secretField must be declared in the plugin schema secrets: "
-              + staticKey.secretField());
+    if (authSpec instanceof PluginAuthSpec.StaticKey staticKey) {
+      if (!secrets.containsKey(staticKey.secretField())) {
+        throw new IllegalStateException(
+            "StaticKey secretField must be declared in the plugin schema secrets: "
+                + staticKey.secretField());
+      }
+      for (String contextField : staticKey.contextFields()) {
+        if (!valuesSchema.properties().containsKey(contextField)) {
+          throw new IllegalStateException(
+              "StaticKey contextFields must be declared in the plugin values schema: "
+                  + contextField);
+        }
+      }
     }
   }
 

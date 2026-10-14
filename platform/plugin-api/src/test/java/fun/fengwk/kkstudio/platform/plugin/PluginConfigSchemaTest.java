@@ -278,13 +278,32 @@ class PluginConfigSchemaTest {
   void staticKeyMustNameADeclaredSecret() {
     PluginConfigSchema schema = schema(DEFAULTS, Map.of("apiKey", "static API key"));
 
-    schema.requireDeclaredSecrets(new PluginAuthSpec.StaticKey("apiKey"));
+    schema.requireDeclaredSecrets(new PluginAuthSpec.StaticKey("apiKey", Set.of()));
     schema.requireDeclaredSecrets(new PluginAuthSpec.None());
     schema.requireDeclaredSecrets(new PluginAuthSpec.DeepLink(List.of("CN")));
 
     assertThrows(
         IllegalStateException.class,
-        () -> schema.requireDeclaredSecrets(new PluginAuthSpec.StaticKey("other")));
+        () -> schema.requireDeclaredSecrets(new PluginAuthSpec.StaticKey("other", Set.of())));
     assertThrows(NullPointerException.class, () -> schema.requireDeclaredSecrets(null));
+  }
+
+  /** StaticKey 的 contextFields 只能命名 valuesSchema 已声明的普通顶层字段。 */
+  @Test
+  void staticKeyContextFieldsMustBeDeclaredProperties() {
+    PluginConfigSchema schema = schema(DEFAULTS, Map.of("apiKey", "static API key"));
+
+    schema.requireDeclaredSecrets(new PluginAuthSpec.StaticKey("apiKey", Set.of("name")));
+
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            schema.requireDeclaredSecrets(
+                new PluginAuthSpec.StaticKey("apiKey", Set.of("apiKey"))));
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            schema.requireDeclaredSecrets(
+                new PluginAuthSpec.StaticKey("apiKey", Set.of("unknown"))));
   }
 }

@@ -6,9 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -21,10 +21,12 @@ import org.springframework.transaction.support.TransactionTemplate;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
+import fun.fengwk.kkstudio.platform.plugin.PluginConfigurationState;
 import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
 import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogManifest;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogSnapshot;
+import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialReference;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialStore;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRow;
@@ -53,15 +55,24 @@ import java.util.concurrent.atomic.AtomicInteger;
  * 普通值存储）、真实事务管理器、真实 Mavis auto-configuration（离线 transport，启动与恢复都不发远端请求、不读凭据）、真实 {@code
  * PluginCatalogConfiguration} 的 context 工厂与内置两域来源。因此明确证明恢复用的是持久化的 {@code enabled=false}，而不是 schema
  * 默认值 {@code enabled=true}。
+ *
+ * <p>本测试只用 {@link ApplicationContextRunner} 装配插件目录，不需要真实 Web 上下文：它在共享物理容器上取自己的独立数据库，因此既不受 其它测试类的权威
+ * catalog 影响，也不会把 plugin-only 目录写进共享 web 库。
  */
-class PluginCatalogMavisRevisionPostgresIntegrationTest extends WebPostgresTestSupport {
+class PluginCatalogMavisRevisionPostgresIntegrationTest {
 
   private static final String MAVIS = "minimax-mavis";
   private static final String ENABLED_DEFAULTS = "{\"enabled\":true}";
   private static final String DISABLED_VALUES = "{\"enabled\":false}";
   private static final int ENABLED_TOOL_COUNT = 15;
 
-  @Autowired private DataSource dataSource;
+  private DataSource dataSource;
+
+  /** 每个测试一个全新独立库（baseline + dev seed），目录身份与共享 web 库完全隔离。 */
+  @BeforeEach
+  void createIsolatedDatabase() {
+    dataSource = WebPostgresTestSupport.createIsolatedDatabase();
+  }
 
   /** 两个同发行物节点首次并发启动：只落一组历史，双方得到同一完整 epoch。 */
   @Test
@@ -151,7 +162,14 @@ class PluginCatalogMavisRevisionPostgresIntegrationTest extends WebPostgresTestS
                   PluginCatalogSnapshot.build(
                       2L,
                       registry,
-                      Map.of(MAVIS, new PluginConfig(2, DISABLED_VALUES)),
+                      Map.of(
+                          MAVIS,
+                          new PluginConfigurationState(
+                              new PluginConfig(2, DISABLED_VALUES),
+                              new PluginCredentialReference(
+                                  MAVIS,
+                                  revisionOne.authGeneration(),
+                                  revisionOne.contextFingerprint()))),
                       PluginCatalogConfiguration.pluginContexts(
                           context.getBean(PluginCredentialStore.class),
                           context.getBeanProvider(PluginResourceGateway.class)),
@@ -171,7 +189,9 @@ class PluginCatalogMavisRevisionPostgresIntegrationTest extends WebPostgresTestS
                                 2,
                                 revisionOne.codeVersion(),
                                 revisionOne.schemaFingerprint(),
-                                capabilityFingerprint)),
+                                capabilityFingerprint,
+                                revisionOne.authGeneration(),
+                                revisionOne.contextFingerprint())),
                         disabledCatalogFingerprint[0]);
                 PluginConfigurationRow changed =
                     new PluginConfigurationRow(
@@ -180,6 +200,9 @@ class PluginCatalogMavisRevisionPostgresIntegrationTest extends WebPostgresTestS
                         revisionOne.codeVersion(),
                         revisionOne.schemaFingerprint(),
                         capabilityFingerprint,
+                        revisionOne.authGeneration(),
+                        revisionOne.contextFingerprint(),
+                        List.of(),
                         DISABLED_VALUES);
                 assertTrue(
                     Boolean.TRUE.equals(

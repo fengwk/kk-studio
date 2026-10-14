@@ -11,6 +11,7 @@ import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -26,6 +27,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.platform.plugin.PluginKeyUnavailableException;
 import fun.fengwk.kkstudio.platform.plugin.service.PluginManagementService;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginAuthKindDTO;
@@ -143,6 +145,7 @@ class StudioPluginControllerTest {
   @Test
   void prepareAuthWithValidRegionReturnsLoginUrlAndNoStore() throws Exception {
     PluginAuthPrepareDTO prepareDTO = new PluginAuthPrepareDTO();
+    prepareDTO.setAuthAttemptId("attempt-handle-1");
     prepareDTO.setLoginUrl("https://login.example.com/oauth?region=us-east-1");
     when(pluginManagementService.prepareAuth("my-plugin", "us-east-1")).thenReturn(prepareDTO);
 
@@ -155,6 +158,7 @@ class StudioPluginControllerTest {
         .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
         .andExpect(
             jsonPath("$.data.loginUrl").value("https://login.example.com/oauth?region=us-east-1"))
+        .andExpect(jsonPath("$.data.authAttemptId").value("attempt-handle-1"))
         .andExpect(jsonPath("$.data.token").doesNotExist())
         .andExpect(jsonPath("$.data.callbackUrl").doesNotExist());
 
@@ -170,20 +174,24 @@ class StudioPluginControllerTest {
     String callbackUrl = "https://app.example.com/callback?code=" + callbackMarker;
     PluginDTO connectedDto = samplePluginDTO("my-plugin");
     connectedDto.setStatus("CONNECTED");
-    when(pluginManagementService.completeAuth("my-plugin", callbackUrl)).thenReturn(connectedDto);
+    when(pluginManagementService.completeAuth("my-plugin", "attempt-handle-1", callbackUrl))
+        .thenReturn(connectedDto);
 
     mockMvc
         .perform(
             post("/api/plugins/my-plugin/auth/complete")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"callbackUrl\":\"" + callbackUrl + "\"}"))
+                .content(
+                    "{\"authAttemptId\":\"attempt-handle-1\",\"callbackUrl\":\""
+                        + callbackUrl
+                        + "\"}"))
         .andExpect(status().isOk())
         .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
         .andExpect(jsonPath("$.data.pluginId").value("my-plugin"))
         .andExpect(jsonPath("$.data.status").value("CONNECTED"))
         .andExpect(content().string(not(containsString(callbackMarker))));
 
-    verify(pluginManagementService).completeAuth("my-plugin", callbackUrl);
+    verify(pluginManagementService).completeAuth("my-plugin", "attempt-handle-1", callbackUrl);
   }
 
   /**
@@ -192,19 +200,21 @@ class StudioPluginControllerTest {
    */
   @Test
   void completeAuthCallbackRejectedReturnsBadRequest() throws Exception {
-    when(pluginManagementService.completeAuth(eq("my-plugin"), any()))
+    when(pluginManagementService.completeAuth(eq("my-plugin"), eq("attempt-handle-1"), any()))
         .thenThrow(new AiValidationException("plugin", "plugin rejected the auth callback"));
 
     mockMvc
         .perform(
             post("/api/plugins/my-plugin/auth/complete")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"callbackUrl\":\"https://app.example.com/callback?code=bad\"}"))
+                .content(
+                    "{\"authAttemptId\":\"attempt-handle-1\","
+                        + "\"callbackUrl\":\"https://app.example.com/callback?code=bad\"}"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("validation"))
         .andExpect(jsonPath("$.errors.resource").value("plugin"));
 
-    verify(pluginManagementService).completeAuth(eq("my-plugin"), any());
+    verify(pluginManagementService).completeAuth(eq("my-plugin"), eq("attempt-handle-1"), any());
   }
 
   /** 测试意图：验证 DELETE /api/plugins/{pluginId}/auth 幂等断连并返回 204 No Content，且不强制要求 no-store。 */
@@ -241,6 +251,54 @@ class StudioPluginControllerTest {
         .andExpect(content().string(not(containsString("secretToken"))));
 
     verify(pluginManagementService).getPlugin("my-plugin");
+  }
+
+  /**
+   * 测试意图：验证 PUT /api/plugins/{pluginId}/configuration 当权威坐标或凭据行 CAS 冲突时返回 409
+   * Conflict，且响应体绝不回显请求正文里的秘密值。
+   */
+  @Test
+  void updateConfigurationVersionConflictReturnsConflict() throws Exception {
+    String secretMarker = "SECRET_PATCH_VALUE_ABC123456";
+    when(pluginManagementService.updateConfiguration(eq("my-plugin"), eq(4L), eq(7L), any(), any()))
+        .thenThrow(new AiVersionConflictException("plugin", "epoch=4", "epoch=5"));
+
+    mockMvc
+        .perform(
+            put("/api/plugins/my-plugin/configuration")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    "{\"expectedEpoch\":\"4\",\"expectedRevision\":\"7\","
+                        + "\"valuesJson\":\"{}\",\"secretPatch\":{\"apiKey\":"
+                        + "{\"operation\":\"SET\",\"value\":\""
+                        + secretMarker
+                        + "\"}}}"))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("version_conflict"))
+        .andExpect(jsonPath("$.errors.resource").value("plugin"))
+        .andExpect(content().string(not(containsString(secretMarker))));
+
+    verify(pluginManagementService)
+        .updateConfiguration(eq("my-plugin"), eq(4L), eq(7L), any(), any());
+  }
+
+  /** 测试意图：验证带秘密补丁的请求体无法解析时返回 400，且固定去敏文案绝不回显正文中的秘密值。 */
+  @Test
+  void unreadableSecretPatchRequestIsSanitized() throws Exception {
+    String secretMarker = "SECRET_PATCH_VALUE_XYZ987654";
+
+    mockMvc
+        .perform(
+            put("/api/plugins/my-plugin/configuration")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    "{\"expectedEpoch\":\"4\",\"valuesJson\":\"{\"secret\":\""
+                        + secretMarker
+                        + "\"}"))
+        .andExpect(status().isBadRequest())
+        .andExpect(content().string(not(containsString(secretMarker))));
+
+    verifyNoInteractions(pluginManagementService);
   }
 
   private static PluginDTO samplePluginDTO(String pluginId) {

@@ -13,13 +13,13 @@ import fun.fengwk.kkstudio.platform.plugin.PluginContext;
 import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogBootstrap;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogSnapshot;
+import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialReference;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialStore;
-import fun.fengwk.kkstudio.platform.plugin.credential.ScopedPluginCredentialAccess;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.plugin.resource.PluginResourceGateway;
+import fun.fengwk.kkstudio.platform.plugin.service.PluginContextFactory;
 
-import java.util.Optional;
-import java.util.function.Function;
+import java.util.function.BiFunction;
 
 /**
  * 两域能力的唯一组合根：启动时经 {@link PluginCatalogBootstrap} 初始化或按持久版本恢复，再提供同一快照中的 Harness 与 Canvas 目录。
@@ -60,12 +60,11 @@ public class PluginCatalogConfiguration {
     return snapshot.canvasFunctionCatalog();
   }
 
-  /** 组合根唯一的 scoped {@link PluginContext} 工厂。 */
-  static Function<String, PluginContext> pluginContexts(
+  /** 组合根唯一的 scoped {@link PluginContext} 工厂：按 pluginId 与冻结凭据引用装配上下文。 */
+  static BiFunction<String, PluginCredentialReference, PluginContext> pluginContexts(
       PluginCredentialStore credentials, ObjectProvider<PluginResourceGateway> resourceGateways) {
-    return pluginId ->
-        new PluginContext(
-            new ScopedPluginCredentialAccess(pluginId, credentials),
-            Optional.ofNullable(resourceGateways.getIfAvailable()));
+    PluginContextFactory factory =
+        new PluginContextFactory(credentials, resourceGateways::getIfAvailable);
+    return factory::create;
   }
 }

@@ -6,13 +6,17 @@ import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import java.util.List;
 
 /**
- * Plugin 认证交互类型：一个封闭的 wire union，当前只有 {@code DEEP_LINK}。
+ * Plugin 认证交互类型：一个封闭的 wire union，当前只有 {@code DEEP_LINK} 与 {@code STATIC_KEY}。
  *
  * <p>管理面不接受任意 Plugin JSON schema。新增认证交互必须先扩展这个 sealed type、共享 DTO 与静态前端，不能从 JAR 下载或执行动态 UI 代码。
  */
 @JsonTypeInfo(use = JsonTypeInfo.Id.NAME, property = "type")
-@JsonSubTypes(@JsonSubTypes.Type(value = PluginAuthKindDTO.DeepLink.class, name = "DEEP_LINK"))
-public sealed interface PluginAuthKindDTO permits PluginAuthKindDTO.DeepLink {
+@JsonSubTypes({
+  @JsonSubTypes.Type(value = PluginAuthKindDTO.DeepLink.class, name = "DEEP_LINK"),
+  @JsonSubTypes.Type(value = PluginAuthKindDTO.StaticKey.class, name = "STATIC_KEY")
+})
+public sealed interface PluginAuthKindDTO
+    permits PluginAuthKindDTO.DeepLink, PluginAuthKindDTO.StaticKey {
 
   /**
    * 固定深链登录：用户在浏览器完成登录后把回调 deep link 粘贴回来，Platform 只接收 {@code callbackUrl}，不接收任何 token 参数。
@@ -21,4 +25,11 @@ public sealed interface PluginAuthKindDTO permits PluginAuthKindDTO.DeepLink {
    *     的公开官方地址
    */
   record DeepLink(List<String> regionCandidates) implements PluginAuthKindDTO {}
+
+  /**
+   * 静态密钥认证：用户通过配置秘密补丁录入密钥，没有交互式登录、没有 region、没有过期与自动刷新。
+   *
+   * @param secretField 该 Plugin 唯一声明的秘密字段名
+   */
+  record StaticKey(String secretField) implements PluginAuthKindDTO {}
 }

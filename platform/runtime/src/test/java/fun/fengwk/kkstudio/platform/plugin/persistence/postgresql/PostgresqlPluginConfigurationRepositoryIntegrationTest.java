@@ -34,6 +34,7 @@ import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -55,6 +56,9 @@ class PostgresqlPluginConfigurationRepositoryIntegrationTest {
   private static final String CAPABILITY_ALPHA = "b".repeat(64);
   private static final String SCHEMA_BETA = "c".repeat(64);
   private static final String CAPABILITY_BETA = "d".repeat(64);
+
+  private static final String CONTEXT = "a1".repeat(32);
+  private static final UUID GENERATION = UUID.fromString("11111111-1111-1111-1111-111111111111");
   private static final String CATALOG_FINGERPRINT = "e".repeat(64);
 
   private static DataSource dataSource;
@@ -163,7 +167,8 @@ class PostgresqlPluginConfigurationRepositoryIntegrationTest {
                 List.of(),
                 manifest(
                     ALPHA,
-                    new PluginCatalogManifest.Entry(1, "9.9", SCHEMA_ALPHA, CAPABILITY_ALPHA))));
+                    new PluginCatalogManifest.Entry(
+                        1, "9.9", SCHEMA_ALPHA, CAPABILITY_ALPHA, GENERATION, CONTEXT))));
 
     assertEquals(1, repository.readCatalog().epoch());
     assertEquals("1.0", repository.readConfiguration(ALPHA, 1).orElseThrow().codeVersion());
@@ -371,7 +376,8 @@ class PostgresqlPluginConfigurationRepositoryIntegrationTest {
                 List.of(row(ALPHA, 1)),
                 manifest(
                     ALPHA,
-                    new PluginCatalogManifest.Entry(1, "9.9", SCHEMA_ALPHA, CAPABILITY_ALPHA))));
+                    new PluginCatalogManifest.Entry(
+                        1, "9.9", SCHEMA_ALPHA, CAPABILITY_ALPHA, GENERATION, CONTEXT))));
     // manifest 不能声明没有 changed 支撑的新 revision
     assertThrows(
         IllegalArgumentException.class,
@@ -460,7 +466,15 @@ class PostgresqlPluginConfigurationRepositoryIntegrationTest {
             0,
             List.of(
                 new PluginConfigurationRow(
-                    ALPHA, 1, "1.0", SCHEMA_ALPHA, CAPABILITY_ALPHA, valuesJson)),
+                    ALPHA,
+                    1,
+                    "1.0",
+                    SCHEMA_ALPHA,
+                    CAPABILITY_ALPHA,
+                    GENERATION,
+                    CONTEXT,
+                    List.of(),
+                    valuesJson)),
             manifest(ALPHA, entry(ALPHA, 1))));
 
     assertEquals(valuesJson, repository.readConfiguration(ALPHA, 1).orElseThrow().valuesJson());
@@ -487,18 +501,36 @@ class PostgresqlPluginConfigurationRepositoryIntegrationTest {
 
   private static PluginCatalogManifest.Entry entry(String pluginId, long revision) {
     if (ALPHA.equals(pluginId)) {
-      return new PluginCatalogManifest.Entry(revision, "1.0", SCHEMA_ALPHA, CAPABILITY_ALPHA);
+      return new PluginCatalogManifest.Entry(
+          revision, "1.0", SCHEMA_ALPHA, CAPABILITY_ALPHA, GENERATION, CONTEXT);
     }
-    return new PluginCatalogManifest.Entry(revision, "1.0", SCHEMA_BETA, CAPABILITY_BETA);
+    return new PluginCatalogManifest.Entry(
+        revision, "1.0", SCHEMA_BETA, CAPABILITY_BETA, GENERATION, CONTEXT);
   }
 
   private static PluginConfigurationRow row(String pluginId, long revision) {
     if (ALPHA.equals(pluginId)) {
       return new PluginConfigurationRow(
-          ALPHA, revision, "1.0", SCHEMA_ALPHA, CAPABILITY_ALPHA, "{\"enabled\":true}");
+          ALPHA,
+          revision,
+          "1.0",
+          SCHEMA_ALPHA,
+          CAPABILITY_ALPHA,
+          GENERATION,
+          CONTEXT,
+          List.of(),
+          "{\"enabled\":true}");
     }
     return new PluginConfigurationRow(
-        BETA, revision, "1.0", SCHEMA_BETA, CAPABILITY_BETA, "{\"enabled\":false}");
+        BETA,
+        revision,
+        "1.0",
+        SCHEMA_BETA,
+        CAPABILITY_BETA,
+        GENERATION,
+        CONTEXT,
+        List.of(),
+        "{\"enabled\":false}");
   }
 
   private static String manifestJson(String pluginId, long revision) {
@@ -528,7 +560,8 @@ class PostgresqlPluginConfigurationRepositoryIntegrationTest {
       statement.execute(
           "insert into plugin_configuration_revision"
               + " (plugin_id, revision, code_version, schema_fingerprint,"
-              + " capability_fingerprint, values_json) values ('"
+              + " capability_fingerprint, auth_generation, context_fingerprint,"
+              + " configured_secret_fields, values_json) values ('"
               + pluginId
               + "', "
               + revision
@@ -539,6 +572,10 @@ class PostgresqlPluginConfigurationRepositoryIntegrationTest {
               + "', '"
               + capabilityFingerprint
               + "', '"
+              + GENERATION
+              + "', '"
+              + CONTEXT
+              + "', '{}', '"
               + valuesJson
               + "')");
     }

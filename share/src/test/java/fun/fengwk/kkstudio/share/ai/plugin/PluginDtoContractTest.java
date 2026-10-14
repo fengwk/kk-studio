@@ -14,6 +14,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 import java.lang.reflect.Field;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.List;
 
 /** Plugin 管理面 wire 契约：固定认证类型、严格认证请求与「响应不含任何秘密」边界。 */
@@ -96,24 +97,38 @@ class PluginDtoContractTest {
   }
 
   @Test
-  void authKindIsAFixedDeepLinkUnion() {
-    // 意图：认证类型是封闭 union，当前只有 DEEP_LINK，且只声明固定 region 候选。
-    assertEquals(1, PluginAuthKindDTO.class.getPermittedSubclasses().length);
+  void authKindIsAFixedUnionOfDeepLinkAndStaticKey() {
+    // 意图：认证类型是封闭 union，只有交互式 DEEP_LINK 与静态密钥 STATIC_KEY 两种真实形态。
     assertEquals(
-        PluginAuthKindDTO.DeepLink.class, PluginAuthKindDTO.class.getPermittedSubclasses()[0]);
+        List.of(PluginAuthKindDTO.DeepLink.class, PluginAuthKindDTO.StaticKey.class),
+        List.of(PluginAuthKindDTO.class.getPermittedSubclasses()));
 
     PluginAuthKindDTO.DeepLink deepLink = new PluginAuthKindDTO.DeepLink(List.of("CN", "EN"));
     assertEquals(List.of("CN", "EN"), deepLink.regionCandidates());
+
+    PluginAuthKindDTO.StaticKey staticKey = new PluginAuthKindDTO.StaticKey("apiKey");
+    assertEquals("apiKey", staticKey.secretField());
   }
 
   @Test
-  void prepareResponseOnlyExposesThePublicLoginUrl() throws Exception {
-    // 意图：prepare 响应只给公开登录链接，不携带 token、签名参数或插件内部 URL。
+  void prepareResponseOnlyExposesTheAttemptHandleAndPublicLoginUrl() throws Exception {
+    // 意图：prepare 响应只有一次性 attempt 句柄与公开登录链接，不携带 token、签名参数或插件内部 URL。
     PluginAuthPrepareDTO dto =
         MAPPER.readValue(
             "{\"loginUrl\":\"https://www.minimax.io/login\"}", PluginAuthPrepareDTO.class);
     assertEquals("https://www.minimax.io/login", dto.getLoginUrl());
-    assertEquals(1, PluginAuthPrepareDTO.class.getDeclaredFields().length);
+    assertNull(
+        dto.getAuthAttemptId(), "an absent handle must stay null, never a synthesized value");
+    assertEquals(
+        List.of("authAttemptId", "loginUrl"),
+        Arrays.stream(PluginAuthPrepareDTO.class.getDeclaredFields()).map(Field::getName).toList(),
+        "the prepare response is exactly the handle plus the login url");
+
+    PluginAuthPrepareDTO withHandle =
+        MAPPER.readValue(
+            "{\"authAttemptId\":\"handle\",\"loginUrl\":\"https://www.minimax.io/login\"}",
+            PluginAuthPrepareDTO.class);
+    assertEquals("handle", withHandle.getAuthAttemptId());
 
     PluginDTO connected = new PluginDTO();
     connected.setPluginId("minimax-mavis");

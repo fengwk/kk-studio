@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.platform.plugin.credential;
 
-import fun.fengwk.kkstudio.platform.plugin.PluginCredentialMaterial;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialSnapshot;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableException;
 import fun.fengwk.kkstudio.platform.plugin.PluginKeyUnavailableException;
@@ -20,17 +19,15 @@ public interface PluginCredentialStore {
   PluginCredentialProjection projection(String pluginId);
 
   /**
-   * 解析本次调用所需的解密快照。
+   * 按冻结引用解析本次调用所需的解密快照：必须同时满足引用仍是当前权威 manifest 的该 Plugin 坐标，且权威行仍属于同一代际与上下文。
    *
-   * @throws PluginCredentialUnavailableException 无凭据、主密钥不可用、刷新在途、需重新登录、结果未知或凭据已过期
+   * <p>这是唯一的凭据解析入口：没有「按 pluginId 直接取」的旁路，任何调用都必须持有冻结引用，因此旧上下文、已撤销代际或断连重建后的新行都无法被解析。
+   *
+   * <p>每次调用都从权威 repository 回读，实现不得缓存 Key、不得凭通知签发许可。权威不可用、旧代际、旧上下文或已撤销行都必须 fail closed。
+   *
+   * @throws PluginCredentialUnavailableException 引用已失效、无凭据、主密钥不可用、刷新在途、需重新登录、结果未知或凭据已过期
    */
-  PluginCredentialSnapshot resolve(String pluginId);
-
-  /** 以新凭据材料覆盖该 Plugin 的凭据行（不存在则创建），并重置为 {@code CONNECTED}。 */
-  PluginCredentialProjection save(String pluginId, PluginCredentialMaterial material);
-
-  /** 断连：删除该 Plugin 的凭据行；迟到 finalize 由认证代际、lease token 与 version 围栏拒绝。 */
-  void delete(String pluginId);
+  PluginCredentialSnapshot resolve(PluginCredentialReference reference);
 
   /**
    * 调用期确定性认证拒绝：只把本次已用凭据置为 {@code REAUTH_REQUIRED}。

@@ -30,6 +30,9 @@ public class PluginProperties {
   /** 凭据刷新扫描与互斥 lease。 */
   private Refresh refresh = new Refresh();
 
+  /** 一次交互式认证 attempt（prepare 到 complete）的有效窗口。 */
+  private Duration authAttemptTtl = Duration.ofMinutes(10);
+
   /** Plugin 资源端口（会话 Resource 下载与远端媒体暂存）的部署边界。 */
   private Resource resource = new Resource();
 
@@ -105,6 +108,10 @@ public class PluginProperties {
     public void setLeaseDuration(Duration leaseDuration) {
       this.leaseDuration = requirePositive(leaseDuration, "refresh.lease-duration");
     }
+  }
+
+  public void setAuthAttemptTtl(Duration authAttemptTtl) {
+    this.authAttemptTtl = requirePositive(authAttemptTtl, "auth-attempt-ttl");
   }
 
   private static Duration requirePositive(Duration value, String field) {

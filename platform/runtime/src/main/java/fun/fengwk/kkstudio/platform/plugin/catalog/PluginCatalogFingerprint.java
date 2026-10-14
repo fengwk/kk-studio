@@ -58,6 +58,21 @@ public final class PluginCatalogFingerprint {
   private PluginCatalogFingerprint() {}
 
   /** 文本是否为 64 位小写 SHA-256 指纹。 */
+  /**
+   * 共享的原始摘要原语：对给定字节取 64 位小写 SHA-256。调用方自行负责领域分隔，绝不在这里拼接任何上下文。
+   *
+   * <p>凭据 attempt 的 nonce 摘要等其它安全标识复用同一原语，避免各处重复实现 digest/hex，也就不会出现两套行为。
+   */
+  public static String sha256Hex(byte[] input) {
+    Objects.requireNonNull(input, "input");
+    try {
+      MessageDigest digest = MessageDigest.getInstance("SHA-256");
+      return HexFormat.of().formatHex(digest.digest(input));
+    } catch (NoSuchAlgorithmException error) {
+      throw new IllegalStateException("SHA-256 must be available", error);
+    }
+  }
+
   public static boolean isFingerprint(String value) {
     return value != null && FINGERPRINT.matcher(value).matches();
   }
@@ -102,6 +117,10 @@ public final class PluginCatalogFingerprint {
       case PluginAuthSpec.StaticKey staticKey -> {
         node.put("type", "static-key");
         node.put("secretField", staticKey.secretField());
+        ArrayNode contextFields = node.putArray("contextFields");
+        for (String field : sortedNames(staticKey.contextFields())) {
+          contextFields.add(field);
+        }
       }
       case PluginAuthSpec.DeepLink deepLink -> {
         node.put("type", "deep-link");
@@ -254,5 +273,22 @@ public final class PluginCatalogFingerprint {
     } catch (NoSuchAlgorithmException error) {
       throw new IllegalStateException("SHA-256 must be available", error);
     }
+  }
+
+  /** 按字典序冻结文本集合，使指纹与声明顺序无关。 */
+  static List<String> sortedNames(Set<String> names) {
+    List<String> sorted = new ArrayList<>(names);
+    sorted.sort(Comparator.naturalOrder());
+    return sorted;
+  }
+
+  /** 供包内其它身份指纹复用的 authSpec 规范节点。 */
+  static ObjectNode authSpecIdentityNode(PluginAuthSpec authSpec) {
+    return authSpecNode(authSpec);
+  }
+
+  /** 供包内其它身份指纹复用的规范摘要：先递归按对象键排序，再取紧凑 UTF-8 输出的 SHA-256。 */
+  static String digestOf(JsonNode node) {
+    return digest(node);
   }
 }

@@ -12,11 +12,13 @@ import org.junit.jupiter.api.Test;
 import java.time.Instant;
 import java.util.UUID;
 
-/** PluginCredentialSnapshot 承载密文、版本与认证代际，测试锁定数组防御性拷贝、相等语义与去敏输出。 */
+/** PluginCredentialSnapshot 承载密文、版本与认证身份，测试锁定数组防御性拷贝、相等语义、两种材料形态与去敏输出。 */
 class PluginCredentialSnapshotTest {
 
   private static final Instant EXPIRES_AT = Instant.parse("2030-01-01T00:00:00Z");
   private static final UUID GENERATION = UUID.fromString("11111111-1111-1111-1111-111111111111");
+  private static final String CONTEXT =
+      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
   @Test
   void copiesEncryptedPayloadDefensively() {
@@ -53,6 +55,7 @@ class PluginCredentialSnapshotTest {
         new PluginCredentialSnapshot(
             "acme.plugin",
             UUID.fromString("22222222-2222-2222-2222-222222222222"),
+            CONTEXT,
             "CN",
             EXPIRES_AT,
             3,
@@ -78,22 +81,72 @@ class PluginCredentialSnapshotTest {
         NullPointerException.class,
         () ->
             new PluginCredentialSnapshot(
-                null, GENERATION, "CN", EXPIRES_AT, 1, new byte[] {1}, "{}"));
+                null, GENERATION, CONTEXT, "CN", EXPIRES_AT, 1, new byte[] {1}, "{}"));
     assertThrows(
         NullPointerException.class,
-        () -> new PluginCredentialSnapshot("p", GENERATION, "CN", EXPIRES_AT, 1, null, "{}"));
+        () ->
+            new PluginCredentialSnapshot(
+                "p", GENERATION, CONTEXT, "CN", EXPIRES_AT, 1, null, "{}"));
     assertThrows(
         NullPointerException.class,
-        () -> new PluginCredentialSnapshot("p", null, "CN", EXPIRES_AT, 1, new byte[] {1}, "{}"));
+        () ->
+            new PluginCredentialSnapshot(
+                "p", null, CONTEXT, "CN", EXPIRES_AT, 1, new byte[] {1}, "{}"));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new PluginCredentialSnapshot(
+                "p", GENERATION, null, "CN", EXPIRES_AT, 1, new byte[] {1}, "{}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new PluginCredentialSnapshot(
-                "p", GENERATION, "CN", EXPIRES_AT, -1, new byte[] {1}, "{}"));
+                "p", GENERATION, CONTEXT, "CN", EXPIRES_AT, -1, new byte[] {1}, "{}"));
+  }
+
+  /** 交互凭据的 region 与 expiresAt 必须同时存在或同时缺失：绝不接受混合三元组。 */
+  @Test
+  void rejectsMixedRouteMetadata() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new PluginCredentialSnapshot(
+                "p", GENERATION, CONTEXT, "CN", null, 1, new byte[] {1}, "{}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new PluginCredentialSnapshot(
+                "p", GENERATION, CONTEXT, null, EXPIRES_AT, 1, new byte[] {1}, "{}"));
+  }
+
+  /** 静态密钥快照没有 region 与过期，仍携带认证代际与上下文指纹。 */
+  @Test
+  void staticKeySnapshotCarriesIdentityWithoutRouteMetadata() {
+    PluginCredentialSnapshot snapshot =
+        new PluginCredentialSnapshot(
+            "acme.plugin",
+            GENERATION,
+            CONTEXT,
+            null,
+            null,
+            0,
+            new byte[] {1},
+            "{\"apiKey\":\"k\"}");
+
+    assertFalse(snapshot.interactive());
+    assertEquals(GENERATION, snapshot.reference().authGeneration());
+    assertEquals(CONTEXT, snapshot.reference().contextFingerprint());
   }
 
   private static PluginCredentialSnapshot snapshot(byte[] encryptedPayload) {
     return new PluginCredentialSnapshot(
-        "acme.plugin", GENERATION, "CN", EXPIRES_AT, 3, encryptedPayload, "{\"secret\":true}");
+        "acme.plugin",
+        GENERATION,
+        CONTEXT,
+        "CN",
+        EXPIRES_AT,
+        3,
+        encryptedPayload,
+        "{\"secret\":true}");
   }
 }

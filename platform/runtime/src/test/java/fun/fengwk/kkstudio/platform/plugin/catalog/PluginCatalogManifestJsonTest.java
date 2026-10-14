@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * {@link PluginCatalogManifestJson} 的确定性编码与严格解码契约测试。
@@ -23,6 +24,8 @@ class PluginCatalogManifestJsonTest {
   private static final String FINGERPRINT_C = "c".repeat(64);
   private static final String FINGERPRINT_D = "d".repeat(64);
   private static final String INVALID_MESSAGE = "stored plugin catalog manifest is invalid";
+  private static final String GENERATION = "11111111-1111-1111-1111-111111111111";
+  private static final String CONTEXT = "e".repeat(64);
 
   /** 版本长度上限必须与 PluginDescriptor 一致：64 字符可读回，65 字符被固定拒绝。 */
   @Test
@@ -54,12 +57,20 @@ class PluginCatalogManifestJsonTest {
             + FINGERPRINT_A
             + "\",\"capabilityFingerprint\":\""
             + FINGERPRINT_D
+            + "\",\"authGeneration\":\""
+            + GENERATION
+            + "\",\"contextFingerprint\":\""
+            + CONTEXT
             + "\"},"
             + "\"beta.plugin\":{\"configRevision\":2,\"pluginCodeVersion\":\"1.1\","
             + "\"schemaFingerprint\":\""
             + FINGERPRINT_B
             + "\",\"capabilityFingerprint\":\""
             + FINGERPRINT_C
+            + "\",\"authGeneration\":\""
+            + GENERATION
+            + "\",\"contextFingerprint\":\""
+            + CONTEXT
             + "\"}},"
             + "\"catalogFingerprint\":\""
             + FINGERPRINT_D
@@ -136,6 +147,15 @@ class PluginCatalogManifestJsonTest {
     assertRejected(entryDocument("alpha.plugin", "1", "1.0", FINGERPRINT_A, "null"));
   }
 
+  /** entry 必须携带认证代际与上下文指纹：缺失、非 UUID 或空值都必须固定拒绝。 */
+  @Test
+  void rejectsEntryWithoutCredentialIdentity() {
+    assertRejected(validEntryDocument().replace(",\"authGeneration\":\"" + GENERATION + "\"", ""));
+    assertRejected(validEntryDocument().replace(",\"contextFingerprint\":\"" + CONTEXT + "\"", ""));
+    assertRejected(validEntryDocument().replace(GENERATION, "not-a-uuid"));
+    assertRejected(validEntryDocument().replace(CONTEXT, " "));
+  }
+
   /** 超过 1 MiB UTF-8 上限的 manifest 必须在编码前中止；读回同样固定拒绝。 */
   @Test
   void rejectsOversizedManifest() {
@@ -171,6 +191,10 @@ class PluginCatalogManifestJsonTest {
     assertNull(error.getCause());
   }
 
+  private static String validEntryDocument() {
+    return entryDocument("alpha.plugin", "1", "1.0", FINGERPRINT_A, FINGERPRINT_B);
+  }
+
   private static void assertRejectedWithRevision(String revision) {
     assertRejected(entryDocument("alpha.plugin", revision, "1.0", FINGERPRINT_A, FINGERPRINT_B));
   }
@@ -193,7 +217,11 @@ class PluginCatalogManifestJsonTest {
         + quoteUnlessNull(schemaFingerprint)
         + ",\"capabilityFingerprint\":"
         + quoteUnlessNull(capabilityFingerprint)
-        + "}},\"catalogFingerprint\":\""
+        + ",\"authGeneration\":\""
+        + GENERATION
+        + "\",\"contextFingerprint\":\""
+        + CONTEXT
+        + "\"}},\"catalogFingerprint\":\""
         + FINGERPRINT_C
         + "\"}";
   }
@@ -209,6 +237,10 @@ class PluginCatalogManifestJsonTest {
         + FINGERPRINT_A
         + "\",\"capabilityFingerprint\":\""
         + FINGERPRINT_B
+        + "\",\"authGeneration\":\""
+        + GENERATION
+        + "\",\"contextFingerprint\":\""
+        + CONTEXT
         + "\"}";
   }
 
@@ -222,6 +254,11 @@ class PluginCatalogManifestJsonTest {
   private static PluginCatalogManifest.Entry entry(
       long revision, String codeVersion, String schemaFingerprint, String capabilityFingerprint) {
     return new PluginCatalogManifest.Entry(
-        revision, codeVersion, schemaFingerprint, capabilityFingerprint);
+        revision,
+        codeVersion,
+        schemaFingerprint,
+        capabilityFingerprint,
+        UUID.fromString(GENERATION),
+        CONTEXT);
   }
 }
