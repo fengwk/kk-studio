@@ -16,8 +16,7 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionFacts;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
@@ -139,23 +138,24 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
     Issue inDesign = issueService.getIssue(issue.getId());
     IssueRun activeRun = issueRunService.acceptRun(inDesign.getId(), key("accept"));
 
-    // 模拟 Harness 处于在途工具调用状态 (RUNNING 工具)
-    ToolInvocation inFlightTool = mock(ToolInvocation.class);
-    when(inFlightTool.status()).thenReturn(ToolInvocationStatus.RUNNING);
+    // 受控 Harness 假件在投影边界模拟「仍在途」执行事实：RUNNING 工具 → hasWork；真实分类契约由 Runtime 测试覆盖。
     ThreadState threadState = mock(ThreadState.class);
     when(threadState.headEntryId()).thenReturn(headEntry(activeRun.getThreadId()));
     when(threadState.sessionId()).thenReturn(activeRun.getSessionId());
     // 收尾闭合 scope 会用同一 Thread 的 next_command_sequence 接受纯 SET_CONTRIBUTOR_STATE 批次，必须为正。
     when(threadState.nextCommandSequence()).thenReturn(1L);
+    // 收尾区间校验会读取当前 root-to-head 条目，head 必须是真实存在的 Entry id。
     EntryPath entryPath = mock(EntryPath.class);
     Entry rootEntry = mock(Entry.class);
     when(rootEntry.id()).thenReturn(activeRun.getStartEntryId());
     when(entryPath.entries()).thenReturn(List.of(rootEntry));
     when(entryPath.head()).thenReturn(rootEntry);
 
-    ThreadSnapshot inFlightSnapshot =
-        new ThreadSnapshot(
-            threadState, entryPath, List.of(), null, List.of(inFlightTool), List.of(), List.of());
+    ThreadSnapshot inFlightSnapshot = mock(ThreadSnapshot.class);
+    when(inFlightSnapshot.thread()).thenReturn(threadState);
+    when(inFlightSnapshot.entryPath()).thenReturn(entryPath);
+    when(inFlightSnapshot.executionFacts())
+        .thenReturn(new ThreadExecutionFacts(true, false, false));
     when(runtime.getThreadSnapshot(activeRun.getThreadId())).thenReturn(inFlightSnapshot);
 
     Issue fresh = issueService.getIssue(issue.getId());
