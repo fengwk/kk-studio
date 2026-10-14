@@ -112,6 +112,8 @@ Function 由构建期 Plugin 提供定义、校验、执行与取消能力。Can
 输入、pin、租约、恢复、发布和清理；adapter 通过受控上下文读取输入并物化输出。
 当前 Plugin 包括 `canvas-media` 与 `canvas-comfyui`，由发行物依赖选择并自动装配。
 ComfyUI 的模板随 Plugin 发布，外部引擎执行任务，adapter 负责提交、查询、取消和下载。
+adapter 的 checkpoint 状态（seed、外部任务身份与进度）由 Plugin 自己持有的 mapper 编解码，
+与宿主 HTTP mapper 的 profile 完全隔离，因此合法 Long seed 不会在恢复时被写成字符串而拒绝。
 
 插件缺失时既有配置与输出仍可读取；启动该函数要求 adapter 可用。参数面板用完整
 JSON 保留未知配置，用户可清除或选择已安装函数。

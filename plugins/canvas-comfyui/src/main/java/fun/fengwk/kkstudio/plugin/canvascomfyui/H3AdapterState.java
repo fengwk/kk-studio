@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.plugin.canvascomfyui;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ObjectNode;
 
 import java.nio.charset.StandardCharsets;
@@ -25,6 +26,12 @@ public record H3AdapterState(
   private static final Set<String> FIELDS =
       Set.of("seed", "harnessThreadId", "enhancedPrompt", "uploads", "promptId", "output");
 
+  /**
+   * 自有纯 mapper：rawMap → typed state 只做 valueToTree，不继承宿主 HTTP mapper 的任何 module/profile（如
+   * Long→String serializer），因此合法 Long seed 不会被写成字符串节点。
+   */
+  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
+
   public H3AdapterState {
     if (seed != null && seed < 0L) {
       throw new IllegalArgumentException("seed must be nonnegative");
@@ -44,9 +51,9 @@ public record H3AdapterState(
     return new H3AdapterState(null, null, null, Map.of(), null, null);
   }
 
-  public static H3AdapterState decode(Map<String, Object> raw, ObjectMapper mapper) {
+  public static H3AdapterState decode(Map<String, Object> raw) {
     Objects.requireNonNull(raw, "raw");
-    ObjectNode root = mapper.valueToTree(raw);
+    ObjectNode root = MAPPER.valueToTree(raw);
     Set<String> unknown = new HashSet<>();
     for (String field : root.propertyNames()) {
       if (!FIELDS.contains(field)) {
@@ -225,8 +232,7 @@ public record H3AdapterState(
   }
 
   private static void requireExact(ObjectNode node, Set<String> fields, String path) {
-    Set<String> actual = new HashSet<>();
-    node.fieldNames().forEachRemaining(actual::add);
+    Set<String> actual = new HashSet<>(node.propertyNames());
     if (!actual.equals(fields)) {
       throw new IllegalArgumentException(
           path + " must declare exactly " + fields + ", got " + actual);
