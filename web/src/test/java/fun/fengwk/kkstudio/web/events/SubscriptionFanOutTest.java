@@ -16,6 +16,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 /**
  * SubscriptionFanOut：events 包内共享的组合式订阅容器。
@@ -111,6 +112,35 @@ class SubscriptionFanOutTest {
 
     assertEquals(List.of("a"), selfReleased);
     assertEquals(List.of("a", "b"), other);
+  }
+
+  /** 旧 handle 重复关闭不能注销同一 callback 后来重新建立的订阅。 */
+  @Test
+  void repeatedOldCloseKeepsTheReplacementKeyedSubscription() {
+    SubscriptionFanOut<String> fanOut = new SubscriptionFanOut<>();
+    List<String> received = new ArrayList<>();
+    Consumer<String> callback = received::add;
+    Runnable old = fanOut.subscribe(KEY_A, callback);
+    old.run();
+    fanOut.subscribe(KEY_A, callback);
+    old.run();
+
+    fanOut.publish(KEY_A, "new");
+    assertEquals(List.of("new"), received);
+  }
+
+  @Test
+  void repeatedOldCloseKeepsTheReplacementGlobalSubscription() {
+    SubscriptionFanOut<String> fanOut = new SubscriptionFanOut<>();
+    List<String> received = new ArrayList<>();
+    Consumer<String> callback = received::add;
+    Runnable old = fanOut.subscribe(null, callback);
+    old.run();
+    fanOut.subscribe(null, callback);
+    old.run();
+
+    fanOut.broadcast("new");
+    assertEquals(List.of("new"), received);
   }
 
   @Test
