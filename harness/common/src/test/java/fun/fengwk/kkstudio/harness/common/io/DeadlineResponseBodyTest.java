@@ -96,6 +96,32 @@ class DeadlineResponseBodyTest {
   }
 
   @Test
+  void readAndCloseBothFailKeepPrimaryFixedWithoutSuppressed() throws Exception {
+    // 主读取失败与次要关闭失败同时发生：只暴露固定读取失败，不带 suppressed，底层恰好关闭一次。
+    AtomicInteger closes = new AtomicInteger();
+    InputStream input =
+        new InputStream() {
+          @Override
+          public int read() throws IOException {
+            throw new IOException("read failure /secret/path");
+          }
+
+          @Override
+          public void close() throws IOException {
+            closes.incrementAndGet();
+            throw new IOException("close failure /secret/url");
+          }
+        };
+    var body = new DeadlineResponseBody(input, deadline());
+    var error = assertThrows(IOException.class, body::read);
+    assertEquals("response body read failed", error.getMessage());
+    assertNull(error.getCause());
+    assertEquals(0, error.getSuppressed().length);
+    assertEquals(1, closes.get());
+    assertEquals(0, DeadlineResponseBody.pendingWatchdogTasks());
+  }
+
+  @Test
   void underlyingErrorFromCloseIsNotSwallowedAndWatchdogIsDeregistered() throws Exception {
     // Error 不属于 IO 失败，不得被吞；看门狗仍必须在 close 前注销。
     InputStream input =

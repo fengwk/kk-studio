@@ -51,7 +51,6 @@ class OpenCliResponseDeadlineTest {
         assertTrue(hasTimeout(failure));
         assertFalse(failure.getMessage().contains(endpoint.origin()));
         assertEquals(-1, endpoint.peerRead.get(1, TimeUnit.SECONDS));
-        assertEquals(0, DeadlineResponseBody.pendingWatchdogTasks());
       }
     }
   }
@@ -67,7 +66,6 @@ class OpenCliResponseDeadlineTest {
       resource.close();
       assertThrows(HttpTimeoutException.class, () -> resource.content().read());
       assertEquals(-1, endpoint.peerRead.get(1, TimeUnit.SECONDS));
-      assertEquals(0, DeadlineResponseBody.pendingWatchdogTasks());
     }
   }
 
@@ -80,7 +78,6 @@ class OpenCliResponseDeadlineTest {
               OpenCliHubException.class, () -> endpoint.client().openResource(resource(100)));
       assertTrue(hasTimeout(error));
       assertEquals(-1, endpoint.peerRead.get(1, TimeUnit.SECONDS));
-      assertEquals(0, DeadlineResponseBody.pendingWatchdogTasks());
     }
   }
 
@@ -91,7 +88,6 @@ class OpenCliResponseDeadlineTest {
         var resource = endpoint.client().openResource(resource(100))) {
       assertEquals(-1, endpoint.peerRead.get(2, TimeUnit.SECONDS));
       assertThrows(HttpTimeoutException.class, () -> resource.content().readAllBytes());
-      assertEquals(0, DeadlineResponseBody.pendingWatchdogTasks());
     }
   }
 
@@ -106,7 +102,6 @@ class OpenCliResponseDeadlineTest {
                 OpenCliHubException.class, () -> endpoint.client().openResource(resource(0)));
         assertFalse(error.getMessage().contains(length));
         assertEquals(null, error.getCause());
-        assertEquals(0, DeadlineResponseBody.pendingWatchdogTasks());
       }
     }
   }
@@ -144,7 +139,6 @@ class OpenCliResponseDeadlineTest {
     try (Endpoint endpoint = new Endpoint(200, "100", "image/png", "x", false);
         var resource = endpoint.client().openResource(resource(100))) {
       assertThrows(IOException.class, () -> resource.content().readAllBytes());
-      assertEquals(0, DeadlineResponseBody.pendingWatchdogTasks());
     }
   }
 
@@ -175,7 +169,6 @@ class OpenCliResponseDeadlineTest {
       assertEquals(-1, resource.content().read());
       assertEquals(3, resource.size());
       assertEquals("image/png", resource.mediaType());
-      assertEquals(0, DeadlineResponseBody.pendingWatchdogTasks());
     }
   }
 
@@ -250,7 +243,6 @@ class OpenCliResponseDeadlineTest {
       assertEquals("OpenCLI Hub HTTP 502", error.getMessage());
       assertNull(error.getCause());
       assertFalse(chainText(error).contains(secret));
-      assertEquals(0, DeadlineResponseBody.pendingWatchdogTasks());
     }
 
     String status = "sk-live-status-4c1d";

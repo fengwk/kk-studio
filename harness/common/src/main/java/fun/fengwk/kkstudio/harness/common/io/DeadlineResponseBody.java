@@ -115,12 +115,8 @@ public final class DeadlineResponseBody extends InputStream {
       }
       try {
         close();
-      } catch (IOException closeFailure) {
-        // 次要关闭失败已收敛为固定信息；只记录类型，不保留原 failure 链。
-        LOGGER.log(
-            System.Logger.Level.DEBUG,
-            "response body secondary close failed: {0}",
-            closeFailure.getClass().getName());
+      } catch (IOException ignored) {
+        // closeBody 已按 class 记录次要关闭失败；主读取失败优先。
       }
       if (state.get() == State.TIMED_OUT) {
         throw timeout();
@@ -192,7 +188,11 @@ public final class DeadlineResponseBody extends InputStream {
       try {
         body.close();
       } catch (IOException error) {
-        // 底层关闭失败的 message 可能含连接细节，只给固定信息。
+        // 单一诊断点：底层关闭失败可能含连接细节，只记录 class，不传出原始 message/cause。
+        LOGGER.log(
+            System.Logger.Level.DEBUG,
+            "response body secondary close failed: {0}",
+            error.getClass().getName());
         throw new IOException("response body close failed");
       }
     }
