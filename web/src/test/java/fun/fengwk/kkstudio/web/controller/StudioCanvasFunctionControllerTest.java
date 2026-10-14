@@ -13,15 +13,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import fun.fengwk.convention4j.springboot.starter.web.result.ResultResponseBodyAdvice;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
-import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
+import org.springframework.http.converter.json.JacksonJsonHttpMessageConverter;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRun;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunStatus;
@@ -330,10 +330,9 @@ class StudioCanvasFunctionControllerTest {
                 + "\"}");
   }
 
-  private static MappingJackson2HttpMessageConverter strictJsonConverter() {
-    ObjectMapper mapper = new ObjectMapper();
-    mapper.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
-    return new MappingJackson2HttpMessageConverter(mapper);
+  private static JacksonJsonHttpMessageConverter strictJsonConverter() {
+    return new JacksonJsonHttpMessageConverter(
+        JsonMapper.builder().enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION).build());
   }
 
   private static CanvasFunctionRun run(CanvasFunctionRunStatus status, String stage) {

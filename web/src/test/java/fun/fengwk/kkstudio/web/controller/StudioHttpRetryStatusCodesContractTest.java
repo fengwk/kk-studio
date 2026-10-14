@@ -19,9 +19,6 @@ import fun.fengwk.convention4j.springboot.starter.web.result.ResultResponseBodyA
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
-import org.springframework.boot.autoconfigure.AutoConfigurations;
-import org.springframework.boot.jackson.autoconfigure.JacksonAutoConfiguration;
-import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.http.MediaType;
 import org.springframework.http.converter.json.JacksonJsonHttpMessageConverter;
 import org.springframework.test.web.servlet.MockMvc;
@@ -33,16 +30,15 @@ import fun.fengwk.kkstudio.platform.settings.SystemSettingsSchemaProvider;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsService;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderDTO;
-import fun.fengwk.kkstudio.web.StrictJacksonConfiguration;
+import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
 
 import java.util.List;
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * provider 与 system settings HTTP 边界上的 {@code modelHttpRetryStatusCodes} 契约。
  *
- * <p>用真实 Jackson 3 wire mapper（{@link StrictJacksonConfiguration}）与 MockMvc 验证：Provider DTO 始终显式输出
- * null 覆盖；严格整数数组从 wire 层拒绝 {@code 429.5}/{@code 429.0}/{@code "429"}/null 元素/重复/越界，且解析器确实接到
+ * <p>用真实 Jackson 3 wire mapper（{@link StrictHttpJsonMapperTestSupport}）与 MockMvc 验证：Provider DTO
+ * 始终显式输出 null 覆盖；严格整数数组从 wire 层拒绝 {@code 429.5}/{@code 429.0}/{@code "429"}/null 元素/重复/越界，且解析器确实接到
  * {@code @JsonSetter} 三态入口。
  */
 class StudioHttpRetryStatusCodesContractTest {
@@ -171,13 +167,8 @@ class StudioHttpRetryStatusCodesContractTest {
     }
   }
 
-  /** 真实 HTTP mapper：Spring Boot 装配后经 {@link StrictJacksonConfiguration} 定制的 Jackson 3 映射器。 */
+  /** 真实 HTTP mapper：Spring Boot 装配后统一 profile 的 Jackson 3 映射器。 */
   private static JsonMapper strictHttpMapper() {
-    AtomicReference<JsonMapper> mapper = new AtomicReference<>();
-    new ApplicationContextRunner()
-        .withConfiguration(AutoConfigurations.of(JacksonAutoConfiguration.class))
-        .withUserConfiguration(StrictJacksonConfiguration.class)
-        .run(context -> mapper.set(context.getBean(JsonMapper.class)));
-    return mapper.get();
+    return StrictHttpJsonMapperTestSupport.get();
   }
 }

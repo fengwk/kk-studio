@@ -1,12 +1,13 @@
 package fun.fengwk.kkstudio.web.events;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEventJsonCodec;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKey;
@@ -37,7 +38,11 @@ final class EventFrameCodec {
   static final String BACKPRESSURE = "BACKPRESSURE";
   static final String SEND_FAILED = "SEND_FAILED";
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER =
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          .build();
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
   private static final Set<String> CLIENT_FRAME_FIELDS = orderedSet("version", "type", "resource");
@@ -50,11 +55,6 @@ final class EventFrameCodec {
   private static final String TREE = ResourceKind.TREE.name().toLowerCase();
   private static final String INTERACTIONS = ResourceKind.INTERACTIONS.name().toLowerCase();
   private static final String ENVIRONMENTS = ResourceKind.ENVIRONMENTS.name().toLowerCase();
-
-  static {
-    MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
-    MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-  }
 
   private final RealtimeEventJsonCodec realtimeCodec;
 
@@ -76,7 +76,7 @@ final class EventFrameCodec {
     JsonNode root;
     try {
       root = MAPPER.readTree(json);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalArgumentException("malformed client frame JSON");
     }
     ObjectNode node = requireObject(root, "frame");
@@ -320,29 +320,27 @@ final class EventFrameCodec {
 
   private static String requiredText(ObjectNode node, String field, String context) {
     JsonNode value = node.get(field);
-    if (value == null || !value.isTextual()) {
+    if (value == null || !value.isString()) {
       throw new IllegalArgumentException(context + "." + field + " must be a string");
     }
-    return value.textValue();
+    return value.stringValue();
   }
 
   private static void requireExactFields(ObjectNode node, Set<String> fields, String context) {
     if (node.size() != fields.size()) {
       throw new IllegalArgumentException(context + " must contain exactly " + fields + " fields");
     }
-    node.fieldNames()
-        .forEachRemaining(
-            name -> {
-              if (!fields.contains(name)) {
-                throw new IllegalArgumentException(context + " has an unknown field");
-              }
-            });
+    for (String name : node.propertyNames()) {
+      if (!fields.contains(name)) {
+        throw new IllegalArgumentException(context + " has an unknown field");
+      }
+    }
   }
 
   private static String write(ObjectNode node) {
     try {
       return MAPPER.writeValueAsString(node);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalStateException("cannot encode event frame", error);
     }
   }

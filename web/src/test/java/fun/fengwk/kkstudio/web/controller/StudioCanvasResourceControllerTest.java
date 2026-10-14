@@ -10,10 +10,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.springframework.test.web.servlet.setup.MockMvcBuilders.standaloneSetup;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
+import org.springframework.http.converter.json.JacksonJsonHttpMessageConverter;
 import org.springframework.test.web.servlet.MockMvc;
 
 import fun.fengwk.kkstudio.canvas.CanvasDocument;
@@ -24,6 +23,7 @@ import fun.fengwk.kkstudio.canvas.CanvasSnapshot;
 import fun.fengwk.kkstudio.canvas.CanvasTransform;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.share.storage.StoragePresignedUrlDTO;
+import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
 
 import java.time.Instant;
 import java.util.List;
@@ -57,7 +57,8 @@ class StudioCanvasResourceControllerTest {
     blobManager = mock(StorageBlobManager.class);
     mockMvc =
         standaloneSetup(new StudioCanvasResourceController(queryService, blobManager))
-            .setMessageConverters(new MappingJackson2HttpMessageConverter(new ObjectMapper()))
+            .setMessageConverters(
+                new JacksonJsonHttpMessageConverter(StrictHttpJsonMapperTestSupport.get()))
             .build();
     when(queryService.findSnapshot(CANVAS)).thenReturn(Optional.of(snapshot()));
   }

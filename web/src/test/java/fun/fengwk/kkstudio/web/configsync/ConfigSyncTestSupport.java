@@ -5,9 +5,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.lib.RefUpdate;
 import org.eclipse.jgit.lib.Repository;
@@ -25,6 +22,9 @@ import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilde
 import org.yaml.snakeyaml.LoaderOptions;
 import org.yaml.snakeyaml.Yaml;
 import org.yaml.snakeyaml.constructor.SafeConstructor;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.JsonNodeFeature;
 
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialRefreshDispatcher;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
@@ -113,7 +113,7 @@ public abstract class ConfigSyncTestSupport extends WebPostgresTestSupport {
   protected JsonNode data(MvcResult result) throws Exception {
     return objectMapper
         .reader()
-        .with(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+        .with(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
         .readTree(result.getResponse().getContentAsString())
         .path("data");
   }

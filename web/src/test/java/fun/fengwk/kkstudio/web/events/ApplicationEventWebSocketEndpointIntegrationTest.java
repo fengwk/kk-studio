@@ -3,10 +3,11 @@ package fun.fengwk.kkstudio.web.events;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
@@ -29,7 +30,7 @@ import java.util.concurrent.TimeUnit;
  */
 class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSupport {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
 
   @LocalServerPort private int port;
 

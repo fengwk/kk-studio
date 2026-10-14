@@ -18,10 +18,8 @@ import tools.jackson.databind.module.SimpleModule;
 import tools.jackson.databind.ser.std.ToStringSerializer;
 
 import fun.fengwk.kkstudio.harness.runtime.retry.ModelHttpErrorPolicy;
-import fun.fengwk.kkstudio.share.ai.catalog.AgentModelVariantDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderEditablePropertiesDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsAiRuntimeDTO;
-import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsNetworkDTO;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -44,59 +42,11 @@ public class StrictJacksonConfiguration {
       longToStringModule.addSerializer(Long.class, new ToStringSerializer(Long.class));
       longToStringModule.addSerializer(Long.TYPE, new ToStringSerializer(Long.TYPE));
       builder.addModule(longToStringModule);
-      // Share DTO 的严格 protocolOptionsJson 规则用 Jackson 2 注解声明，platform 的 Jackson 2 解析器仍然生效；
-      // 但 Web 的 HTTP mapper 是 Jackson 3，不识别该注解，会把数字/布尔 token 强制转换成 String。
-      // 这里用 mixin 把同一约束装回真实 wire 路径，且只作用于该字段，不改变其它契约的默认 coercion。
-      builder.addMixIn(AgentModelVariantDTO.class, ProtocolOptionsJsonMixin.class);
-      builder.addMixIn(SystemSettingsNetworkDTO.class, NetworkTextMixin.class);
-      // 系统设置与 Provider create/update 的 HTTP 重试白名单同样是严格整数列表：数字 token 绝不做 float/字符串
+      // 系统设置与 Provider create/update 的 HTTP 重试白名单是严格整数列表：数字 token 绝不做 float/字符串
       // 强制转换；Wire 层只保证 JSON 形态，范围/重复/不可变副本统一由 ModelHttpErrorPolicy 决定。
       builder.addMixIn(SystemSettingsAiRuntimeDTO.class, HttpRetryStatusListMixin.class);
       builder.addMixIn(AgentProviderEditablePropertiesDTO.class, HttpRetryStatusListMixin.class);
     };
-  }
-
-  /** 只给 {@code protocolOptionsJson} 指定严格 String 反序列化器，其它属性注解继续由 DTO 自身提供。 */
-  abstract static class ProtocolOptionsJsonMixin {
-
-    @JsonDeserialize(using = ProtocolOptionsJsonStrictDeserializer.class)
-    String protocolOptionsJson;
-  }
-
-  /** 将 Share 的 Jackson 2 网络文本约束桥接到 HTTP Jackson 3；不影响其它 DTO 字段。 */
-  abstract static class NetworkTextMixin {
-
-    @JsonDeserialize(using = NetworkTextStrictDeserializer.class)
-    String proxyUrl;
-
-    @JsonDeserialize(using = NetworkTextStrictDeserializer.class)
-    String noProxyHosts;
-  }
-
-  /** 网络字段只接受字符串；null 的可空/必填约束继续由领域边界校验。 */
-  static final class NetworkTextStrictDeserializer extends ValueDeserializer<String> {
-
-    @Override
-    public String deserialize(JsonParser parser, DeserializationContext context)
-        throws JacksonException {
-      if (parser.currentToken() != JsonToken.VALUE_STRING) {
-        throw DatabindException.from(parser, "network text field must be a JSON string");
-      }
-      return parser.getText();
-    }
-  }
-
-  /** 数字/布尔/对象/数组 token 一律拒绝：string 字段绝不做标量强制转换。 */
-  static final class ProtocolOptionsJsonStrictDeserializer extends ValueDeserializer<String> {
-
-    @Override
-    public String deserialize(JsonParser parser, DeserializationContext context)
-        throws JacksonException {
-      if (parser.currentToken() != JsonToken.VALUE_STRING) {
-        throw DatabindException.from(parser, "protocolOptionsJson must be a JSON string");
-      }
-      return parser.getText();
-    }
   }
 
   /** 给 {@code modelHttpRetryStatusCodes} 指定严格整数列表反序列化器；只作用于该属性。 */

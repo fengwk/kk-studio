@@ -99,6 +99,55 @@ class EventFrameCodecTest {
         IllegalArgumentException.class, () -> CODEC.decode("{\"version\":1.0," + base + "}"));
   }
 
+  /** 帧版本只接受整数 token 1，不能把小数、指数形式或超宽整数强制转换为有效版本。 */
+  @Test
+  void rejectsEveryNonIntegerVersionTokenWithoutReadingItAsAFloat() {
+    String resource = "{\"kind\":\"thread\",\"id\":\"" + THREAD + "\"}";
+    for (String token :
+        List.of(
+            "1.0",
+            "1.00",
+            "0.99999999999999999",
+            "1e0",
+            "1E0",
+            "9007199254740992",
+            "9007199254740993",
+            "-0.0")) {
+      assertThrows(
+          IllegalArgumentException.class,
+          () ->
+              CODEC.decode(
+                  "{\"version\":"
+                      + token
+                      + ",\"type\":\"subscribe\",\"resource\":"
+                      + resource
+                      + "}"),
+          "non-integer version token must be rejected: " + token);
+    }
+  }
+
+  /** 测试意图：游标与前进坐标在 wire 上是 canonical 十进制字符串；极值（long 上限、超过 double 精确整数范围的值）逐字符保留， 不经任何浮点往返。 */
+  @Test
+  void roundTripsExactExtremeCursorAndCoordinateStrings() {
+    String expectedMaxCursor =
+        "{\"version\":1,\"type\":\"subscribed\",\"resource\":{\"kind\":\"thread\",\"id\":\""
+            + THREAD
+            + "\"},\"cursor\":\"9223372036854775807\"}";
+    assertEquals(expectedMaxCursor, CODEC.subscribed(THREAD_KEY, Long.MAX_VALUE));
+    assertEquals(
+        "{\"version\":1,\"type\":\"subscribed\",\"resource\":{\"kind\":\"thread\",\"id\":\""
+            + THREAD
+            + "\"},\"cursor\":\"9007199254740993\"}",
+        CODEC.subscribed(THREAD_KEY, 9007199254740993L));
+
+    // 前进坐标是 canonical 十进制字符串（runtime 侧不变量），codec 原样放入 cursor 与 data。
+    assertEquals(
+        "{\"version\":1,\"type\":\"event\",\"resource\":{\"kind\":\"thread\",\"id\":\""
+            + THREAD
+            + "\"},\"name\":\"version\",\"cursor\":\"9007199254740993\",\"data\":{\"version\":\"9007199254740993\"}}",
+        CODEC.event(THREAD_KEY, new Signal.Version("9007199254740993")));
+  }
+
   @Test
   void rejectsNonCanonicalTypeCase() {
     String resource = "{\"kind\":\"thread\",\"id\":\"" + THREAD + "\"}";

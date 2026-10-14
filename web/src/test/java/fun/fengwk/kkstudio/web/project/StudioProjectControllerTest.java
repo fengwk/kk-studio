@@ -12,14 +12,13 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import fun.fengwk.convention4j.common.json.jackson.ObjectMapperHolder;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
-import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
+import org.springframework.http.converter.json.JacksonJsonHttpMessageConverter;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
 import fun.fengwk.kkstudio.project.error.ProjectNotFoundException;
@@ -34,6 +33,7 @@ import fun.fengwk.kkstudio.share.project.ProjectWorkflowStateDTO;
 import fun.fengwk.kkstudio.share.project.UpdateProjectRequestDTO;
 import fun.fengwk.kkstudio.share.project.UpdateProjectWorkflowRequestDTO;
 import fun.fengwk.kkstudio.share.project.UpdateProjectYoloRequestDTO;
+import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 
 import java.time.Instant;
@@ -47,13 +47,13 @@ class StudioProjectControllerTest {
   private ProjectSnapshotAssembler snapshotAssembler;
   private MockMvc mockMvc;
 
-  private final ObjectMapper objectMapper = ObjectMapperHolder.getInstance();
+  private final JsonMapper objectMapper = StrictHttpJsonMapperTestSupport.get();
   private final UUID projectId = UUID.randomUUID();
   private final Instant now = Instant.now();
   private final ProjectWorkflowJsonCodec codec = new ProjectWorkflowJsonCodec();
-  // 依赖显式提供：ObjectMapperHolder.getInstance() 即生产 ObjectMapper bean 的同一实例。
+  // 依赖显式提供：生产 HTTP Jackson 3 mapper，与容器注入的是同一实例。
   private final ProjectDtoMapper mapper =
-      new ProjectDtoMapper(codec, ObjectMapperHolder.getInstance());
+      new ProjectDtoMapper(codec, StrictHttpJsonMapperTestSupport.get());
 
   @BeforeEach
   void setUp() {
@@ -66,7 +66,7 @@ class StudioProjectControllerTest {
     mockMvc =
         MockMvcBuilders.standaloneSetup(controller)
             .setControllerAdvice(new StudioProjectErrorAdvice(new StudioMessageService()))
-            .setMessageConverters(new MappingJackson2HttpMessageConverter(objectMapper))
+            .setMessageConverters(new JacksonJsonHttpMessageConverter(objectMapper))
             .build();
   }
 
