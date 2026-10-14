@@ -12,6 +12,7 @@ import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.store.PluginCr
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 /** 基于 PostgreSQL 的 {@code plugin_credential} 仓库；只做行映射与语句代理，不持有主密钥也不做加解密。 */
 @AllArgsConstructor
@@ -59,6 +60,7 @@ public class PostgresqlPluginCredentialRepository implements PluginCredentialRep
   @Override
   public boolean finalizeSuccess(
       String pluginId,
+      UUID authGeneration,
       String leaseToken,
       long version,
       byte[] encryptedPayload,
@@ -69,6 +71,7 @@ public class PostgresqlPluginCredentialRepository implements PluginCredentialRep
       Instant now) {
     return pluginCredentialJdbcStore.finalizeSuccess(
             pluginId,
+            authGeneration,
             leaseToken,
             version,
             encryptedPayload,
@@ -83,6 +86,7 @@ public class PostgresqlPluginCredentialRepository implements PluginCredentialRep
   @Override
   public boolean finalizeFailure(
       String pluginId,
+      UUID authGeneration,
       String leaseToken,
       long version,
       PluginCredentialStatus status,
@@ -90,18 +94,23 @@ public class PostgresqlPluginCredentialRepository implements PluginCredentialRep
       String error,
       Instant now) {
     return pluginCredentialJdbcStore.finalizeFailure(
-            pluginId, leaseToken, version, status.name(), nextRefreshAt, error, now)
+            pluginId, authGeneration, leaseToken, version, status.name(), nextRefreshAt, error, now)
         == 1;
   }
 
   @Override
-  public boolean releaseLease(String pluginId, String leaseToken, long version, Instant now) {
-    return pluginCredentialJdbcStore.releaseLease(pluginId, leaseToken, version, now) == 1;
+  public boolean releaseLease(
+      String pluginId, UUID authGeneration, String leaseToken, long version, Instant now) {
+    return pluginCredentialJdbcStore.releaseLease(
+            pluginId, authGeneration, leaseToken, version, now)
+        == 1;
   }
 
   @Override
-  public boolean ownsUnexpiredLease(String pluginId, String leaseToken, long version, Instant now) {
-    return pluginCredentialJdbcStore.countOwnedUnexpiredLease(pluginId, leaseToken, version, now)
+  public boolean ownsUnexpiredLease(
+      String pluginId, UUID authGeneration, String leaseToken, long version, Instant now) {
+    return pluginCredentialJdbcStore.countOwnedUnexpiredLease(
+            pluginId, authGeneration, leaseToken, version, now)
         == 1;
   }
 
@@ -115,15 +124,21 @@ public class PostgresqlPluginCredentialRepository implements PluginCredentialRep
 
   @Override
   public boolean rejectUsedCredential(
-      String pluginId, long version, byte[] encryptedPayload, String error, Instant now) {
+      String pluginId,
+      UUID authGeneration,
+      long version,
+      byte[] encryptedPayload,
+      String error,
+      Instant now) {
     return pluginCredentialJdbcStore.rejectUsedCredential(
-            pluginId, version, encryptedPayload, error, now)
+            pluginId, authGeneration, version, encryptedPayload, error, now)
         == 1;
   }
 
   private PluginCredentialRow toRow(PluginCredentialDO row) {
     return new PluginCredentialRow(
         row.getPluginId(),
+        row.getAuthGeneration(),
         row.getEncryptedPayload(),
         row.getRegion(),
         row.getExpiresAt(),
@@ -141,6 +156,7 @@ public class PostgresqlPluginCredentialRepository implements PluginCredentialRep
   private PluginCredentialDO toDO(PluginCredentialRow row) {
     PluginCredentialDO data = new PluginCredentialDO();
     data.setPluginId(row.pluginId());
+    data.setAuthGeneration(row.authGeneration());
     data.setEncryptedPayload(row.encryptedPayload());
     data.setRegion(row.region());
     data.setExpiresAt(row.expiresAt());

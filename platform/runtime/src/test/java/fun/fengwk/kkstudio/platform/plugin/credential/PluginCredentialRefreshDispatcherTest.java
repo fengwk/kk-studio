@@ -40,6 +40,7 @@ import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -53,6 +54,10 @@ import java.util.function.BooleanSupplier;
  * 触发即时扫描但进行中的重复唤醒被合并；stop 之后调度绝不复活（包括与 wake 并发竞争）；单次扫描异常不终止后续调度。
  */
 class PluginCredentialRefreshDispatcherTest {
+
+  /** 本测试使用的固定认证代际：仓库/CAS 断言只要求同代际内一致。 */
+  private static final UUID AUTH_GENERATION =
+      UUID.fromString("00000000-0000-0000-0000-0000000000b1");
 
   private static final String PLUGIN_ID = "dispatcher-plugin";
 
@@ -522,7 +527,8 @@ class PluginCredentialRefreshDispatcherTest {
     SecretKey key = keyLoader.load().orElseThrow();
     return new PluginCredentialRow(
         pluginId,
-        codec.encrypt(key, pluginId, REGION, "{}"),
+        AUTH_GENERATION,
+        codec.encrypt(key, pluginId, AUTH_GENERATION, REGION, "{}"),
         REGION,
         expiresAt,
         nextRefreshAt,

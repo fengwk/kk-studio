@@ -287,6 +287,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertColumns(
         "plugin_credential",
         "plugin_id",
+        "auth_generation",
         "encrypted_payload",
         "region",
         "expires_at",

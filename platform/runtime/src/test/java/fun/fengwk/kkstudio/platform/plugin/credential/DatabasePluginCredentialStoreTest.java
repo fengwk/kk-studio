@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.plugin.credential;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -31,6 +32,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 /**
  * 数据库凭据 Store 契约与状态矩阵测试。
@@ -97,6 +99,7 @@ class DatabasePluginCredentialStoreTest {
 
     PluginCredentialRow row = repository.getDirect(PLUGIN_ID);
     assertNotNull(row, "row must be saved to repository");
+    assertNotNull(row.authGeneration(), "every save must persist a non-null auth generation");
     assertEquals(PluginCredentialStatus.CONNECTED, row.status());
     assertNull(row.refreshLeaseToken());
     assertNull(row.refreshLeaseUntil());
@@ -166,6 +169,7 @@ class DatabasePluginCredentialStoreTest {
     repository.setDirect(
         new PluginCredentialRow(
             row.pluginId(),
+            row.authGeneration(),
             tampered,
             row.region(),
             row.expiresAt(),
@@ -192,6 +196,7 @@ class DatabasePluginCredentialStoreTest {
     repository.setDirect(
         new PluginCredentialRow(
             originalRow.pluginId(),
+            originalRow.authGeneration(),
             originalRow.encryptedPayload(),
             originalRow.region(),
             originalRow.expiresAt(),
@@ -213,6 +218,7 @@ class DatabasePluginCredentialStoreTest {
     repository.setDirect(
         new PluginCredentialRow(
             originalRow.pluginId(),
+            originalRow.authGeneration(),
             originalRow.encryptedPayload(),
             originalRow.region(),
             originalRow.expiresAt(),
@@ -234,6 +240,7 @@ class DatabasePluginCredentialStoreTest {
     repository.setDirect(
         new PluginCredentialRow(
             originalRow.pluginId(),
+            originalRow.authGeneration(),
             originalRow.encryptedPayload(),
             originalRow.region(),
             now.minusSeconds(10), // expiresAt 已过
@@ -263,6 +270,7 @@ class DatabasePluginCredentialStoreTest {
     repository.setDirect(
         new PluginCredentialRow(
             freshRow.pluginId(),
+            freshRow.authGeneration(),
             freshRow.encryptedPayload(),
             freshRow.region(),
             freshRow.expiresAt(),
@@ -294,6 +302,7 @@ class DatabasePluginCredentialStoreTest {
     repository.setDirect(
         new PluginCredentialRow(
             row.pluginId(),
+            row.authGeneration(),
             row.encryptedPayload(),
             row.region(),
             row.expiresAt(),
@@ -316,6 +325,7 @@ class DatabasePluginCredentialStoreTest {
     repository.setDirect(
         new PluginCredentialRow(
             row.pluginId(),
+            row.authGeneration(),
             row.encryptedPayload(),
             row.region(),
             row.expiresAt(),
@@ -363,6 +373,7 @@ class DatabasePluginCredentialStoreTest {
     repository.setDirect(
         new PluginCredentialRow(
             row.pluginId(),
+            row.authGeneration(),
             corrupted,
             row.region(),
             row.expiresAt(),
@@ -449,6 +460,57 @@ class DatabasePluginCredentialStoreTest {
     PluginCredentialRow rejected = repository.getDirect(PLUGIN_ID);
     assertEquals(PluginCredentialStatus.REAUTH_REQUIRED, rejected.status());
     assertNull(rejected.refreshLeaseToken());
+  }
+
+  /**
+   * 关闭断连重建 ABA：save A -> 快照 A（version 0）-> delete -> save B（version 0）；A 的调用期拒绝不能作废 B，B 的状态、
+   * 载荷与代际都保持不变。
+   */
+  @Test
+  void rejectUsedCannotInvalidateARecreatedCredentialAtTheSameVersion() {
+    store.save(PLUGIN_ID, validMaterial());
+    PluginCredentialSnapshot snapshotA = store.resolve(PLUGIN_ID);
+    assertEquals(0L, snapshotA.version());
+
+    store.delete(PLUGIN_ID);
+    PluginCredentialMaterial materialB =
+        new PluginCredentialMaterial(
+            REGION, now.plusSeconds(7200), now.plusSeconds(3600), "{\"token\":\"recreated\"}");
+    store.save(PLUGIN_ID, materialB);
+
+    PluginCredentialRow rowB = repository.getDirect(PLUGIN_ID);
+    assertEquals(0L, rowB.version(), "recreate restarts the row version at zero");
+    assertNotEquals(
+        snapshotA.authGeneration(),
+        rowB.authGeneration(),
+        "a recreate must advance the auth generation even at the same version");
+
+    assertFalse(
+        store.rejectUsed(snapshotA, "stale credential rejected"),
+        "the old generation's rejection must not invalidate the recreated row");
+
+    PluginCredentialRow untouchedB = repository.getDirect(PLUGIN_ID);
+    assertEquals(PluginCredentialStatus.CONNECTED, untouchedB.status());
+    assertEquals(0L, untouchedB.version());
+    assertEquals(rowB.authGeneration(), untouchedB.authGeneration());
+    assertArrayEquals(rowB.encryptedPayload(), untouchedB.encryptedPayload());
+
+    PluginCredentialSnapshot snapshotB = store.resolve(PLUGIN_ID);
+    assertEquals("{\"token\":\"recreated\"}", snapshotB.payloadJson());
+    assertEquals(rowB.authGeneration(), snapshotB.authGeneration());
+  }
+
+  /** 每次人工完整替换都生成新的认证代际，即使载荷完全相同。 */
+  @Test
+  void repeatedSaveAlwaysAdvancesGenerationEvenForIdenticalMaterial() {
+    store.save(PLUGIN_ID, validMaterial());
+    UUID firstGeneration = repository.getDirect(PLUGIN_ID).authGeneration();
+
+    store.save(PLUGIN_ID, validMaterial());
+    UUID secondGeneration = repository.getDirect(PLUGIN_ID).authGeneration();
+
+    assertNotEquals(firstGeneration, secondGeneration);
+    assertEquals(secondGeneration, store.resolve(PLUGIN_ID).authGeneration());
   }
 
   /** save() 成功后回调通知（dispatcher 唤醒接线）：每次成功写入都必须通知一次。 */

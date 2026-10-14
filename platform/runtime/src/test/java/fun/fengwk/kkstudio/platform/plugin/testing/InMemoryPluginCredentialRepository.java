@@ -13,38 +13,28 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
 
 /**
- * 测试专用的内存凭据仓库，忠实模拟 PostgreSQL 版 {@code PluginCredentialMapper} 的原子 SQL 语义与状态约束。
+ * 测试专用的内存凭据仓库，忠实模拟 PostgreSQL 版 {@code plugin_credential} 的原子 SQL 语义与状态约束。
  *
- * <p>方法与底层 SQL 映射关系如下：
+ * <p>方法与底层语句映射关系如下：
  *
  * <ul>
- *   <li>{@link #find(String)} 模拟 {@code PluginCredentialMapper#getByPluginId(String)}:
- *       单行读取权威行，返回行快照；行不存在时返回空。
- *   <li>{@link #upsert(PluginCredentialRow)} 模拟 {@code
- *       PluginCredentialMapper#upsert(PluginCredentialDO)}: 行不存在则以 {@code version = 0}
- *       插入；已存在则在单条原子操作内覆盖载荷与元数据， 清空在途 lease（token 与 until 置空），推进 {@code version + 1}，无条件成功并返回 true。
- *   <li>{@link #delete(String)} 模拟 {@code PluginCredentialMapper#deleteByPluginId(String)}: 删除指定
- *       pluginId 的行并返回是否实际删除了一行。
- *   <li>{@link #markExpiredLeasesUncertain(List, Instant, String)} 模拟 {@code
- *       PluginCredentialMapper#markExpiredLeasesUncertain(List, Instant, String)}: 对列表内且 {@code
- *       refresh_lease_token != null && refresh_lease_until <= now} 的过期 in-flight 行生效， 将状态置为 {@code
- *       REFRESH_UNCERTAIN}、记录错误、清空 lease、{@code version + 1}，返回影响行数。
- *   <li>{@link #claimDue(List, Instant, Instant, String, int)} 模拟 {@code
- *       PluginCredentialMapper#claimDue(List, Instant, Instant, String, int)}: 筛选列表内状态为 {@code
- *       CONNECTED / REFRESH_FAILED}、{@code next_refresh_at <= now} 且 lease 为空或已过期的行，按 {@code
- *       (next_refresh_at, plugin_id)} 升序取前 limit 个， 原子写入 leaseToken、leaseUntil、{@code version +
- *       1}，并返回被领取行的新快照。
- *   <li>{@link #finalizeSuccess} 模拟 {@code PluginCredentialMapper#finalizeSuccess}: 仅当 {@code
- *       refresh_lease_token} 与 {@code version} 同时匹配时生效，替换密文、region、时间， 置状态为 {@code CONNECTED}，清空
- *       lease 并 {@code version + 1}；任一不匹配则返回 false 且绝不修改任何字段。
- *   <li>{@link #finalizeFailure} 模拟 {@code PluginCredentialMapper#finalizeFailure}: 仅当 {@code
- *       refresh_lease_token} 与 {@code version} 同时匹配时生效，写入终态、下一刷新时刻与错误， 清空 lease 并 {@code version +
- *       1}；任一不匹配则返回 false 且绝不修改任何字段。
- *   <li>{@link #releaseLease} 模拟 {@code PluginCredentialMapper#releaseLease}: 仅当 {@code
- *       refresh_lease_token} 与 {@code version} 同时匹配时生效，清空 lease 并 {@code version + 1}； 任一不匹配则返回
- *       false 且绝不修改任何字段。
+ *   <li>{@link #find(String)}：单行读取权威行，返回行快照；行不存在时返回空。
+ *   <li>{@link #upsert(PluginCredentialRow)}：行不存在则以 {@code version = 0}
+ *       插入；已存在则在单条原子操作内覆盖载荷、认证代际与元数据， 清空在途 lease（token 与 until 置空），推进 {@code version + 1}，无条件成功并返回
+ *       true。认证代际始终取传入值，因此人工完整替换必然换代际。
+ *   <li>{@link #delete(String)}：删除指定 pluginId 的行并返回是否实际删除了一行。
+ *   <li>{@link #markExpiredLeasesUncertain(List, Instant, String)}：对列表内且 {@code refresh_lease_token
+ *       != null && refresh_lease_until <= now} 的过期 in-flight 行生效，将状态置为 {@code
+ *       REFRESH_UNCERTAIN}、记录错误、清空 lease、{@code version + 1}，保持代际不变，返回影响行数。
+ *   <li>{@link #claimDue(List, Instant, Instant, String, int)}：筛选列表内状态为 {@code CONNECTED /
+ *       REFRESH_FAILED}、{@code next_refresh_at <= now} 且 lease 为空或已过期的行，按 {@code (next_refresh_at,
+ *       plugin_id)} 升序取前 limit 个，原子写入 leaseToken、leaseUntil、 {@code version +
+ *       1}，保持代际不变，并返回被领取行的新快照。
+ *   <li>{@link #finalizeSuccess} 等终结方法：仅当 {@code auth_generation}、{@code refresh_lease_token} 与
+ *       {@code version} 同时匹配时生效； 任一不匹配则返回 false 且绝不修改任何字段。
  * </ul>
  */
 public class InMemoryPluginCredentialRepository implements PluginCredentialRepository {
@@ -66,6 +56,7 @@ public class InMemoryPluginCredentialRepository implements PluginCredentialRepos
       PluginCredentialRow inserted =
           new PluginCredentialRow(
               row.pluginId(),
+              row.authGeneration(),
               row.encryptedPayload(),
               row.region(),
               row.expiresAt(),
@@ -83,6 +74,7 @@ public class InMemoryPluginCredentialRepository implements PluginCredentialRepos
       PluginCredentialRow updated =
           new PluginCredentialRow(
               row.pluginId(),
+              row.authGeneration(),
               row.encryptedPayload(),
               row.region(),
               row.expiresAt(),
@@ -121,6 +113,7 @@ public class InMemoryPluginCredentialRepository implements PluginCredentialRepos
         PluginCredentialRow updated =
             new PluginCredentialRow(
                 row.pluginId(),
+                row.authGeneration(),
                 row.encryptedPayload(),
                 row.region(),
                 row.expiresAt(),
@@ -174,6 +167,7 @@ public class InMemoryPluginCredentialRepository implements PluginCredentialRepos
       PluginCredentialRow updated =
           new PluginCredentialRow(
               row.pluginId(),
+              row.authGeneration(),
               row.encryptedPayload(),
               row.region(),
               row.expiresAt(),
@@ -195,6 +189,7 @@ public class InMemoryPluginCredentialRepository implements PluginCredentialRepos
   @Override
   public synchronized boolean finalizeSuccess(
       String pluginId,
+      UUID authGeneration,
       String leaseToken,
       long version,
       byte[] encryptedPayload,
@@ -205,6 +200,7 @@ public class InMemoryPluginCredentialRepository implements PluginCredentialRepos
       Instant now) {
     PluginCredentialRow row = storage.get(pluginId);
     if (row == null
+        || !row.authGeneration().equals(authGeneration)
         || !Objects.equals(row.refreshLeaseToken(), leaseToken)
         || row.version() != version) {
       return false;
@@ -212,6 +208,7 @@ public class InMemoryPluginCredentialRepository implements PluginCredentialRepos
     PluginCredentialRow updated =
         new PluginCredentialRow(
             row.pluginId(),
+            row.authGeneration(),
             encryptedPayload,
             region,
             expiresAt,
@@ -231,6 +228,7 @@ public class InMemoryPluginCredentialRepository implements PluginCredentialRepos
   @Override
   public synchronized boolean finalizeFailure(
       String pluginId,
+      UUID authGeneration,
       String leaseToken,
       long version,
       PluginCredentialStatus status,
@@ -239,6 +237,7 @@ public class InMemoryPluginCredentialRepository implements PluginCredentialRepos
       Instant now) {
     PluginCredentialRow row = storage.get(pluginId);
     if (row == null
+        || !row.authGeneration().equals(authGeneration)
         || !Objects.equals(row.refreshLeaseToken(), leaseToken)
         || row.version() != version) {
       return false;
@@ -246,6 +245,7 @@ public class InMemoryPluginCredentialRepository implements PluginCredentialRepos
     PluginCredentialRow updated =
         new PluginCredentialRow(
             row.pluginId(),
+            row.authGeneration(),
             row.encryptedPayload(),
             row.region(),
             row.expiresAt(),
@@ -264,9 +264,10 @@ public class InMemoryPluginCredentialRepository implements PluginCredentialRepos
 
   @Override
   public synchronized boolean releaseLease(
-      String pluginId, String leaseToken, long version, Instant now) {
+      String pluginId, UUID authGeneration, String leaseToken, long version, Instant now) {
     PluginCredentialRow row = storage.get(pluginId);
     if (row == null
+        || !row.authGeneration().equals(authGeneration)
         || !Objects.equals(row.refreshLeaseToken(), leaseToken)
         || row.version() != version) {
       return false;
@@ -274,6 +275,7 @@ public class InMemoryPluginCredentialRepository implements PluginCredentialRepos
     PluginCredentialRow updated =
         new PluginCredentialRow(
             row.pluginId(),
+            row.authGeneration(),
             row.encryptedPayload(),
             row.region(),
             row.expiresAt(),
@@ -292,9 +294,10 @@ public class InMemoryPluginCredentialRepository implements PluginCredentialRepos
 
   @Override
   public synchronized boolean ownsUnexpiredLease(
-      String pluginId, String leaseToken, long version, Instant now) {
+      String pluginId, UUID authGeneration, String leaseToken, long version, Instant now) {
     PluginCredentialRow row = storage.get(pluginId);
     return row != null
+        && row.authGeneration().equals(authGeneration)
         && Objects.equals(row.refreshLeaseToken(), leaseToken)
         && row.version() == version
         && row.refreshLeaseUntil() != null
@@ -323,9 +326,14 @@ public class InMemoryPluginCredentialRepository implements PluginCredentialRepos
 
   @Override
   public synchronized boolean rejectUsedCredential(
-      String pluginId, long version, byte[] encryptedPayload, String error, Instant now) {
+      String pluginId,
+      UUID authGeneration,
+      long version,
+      byte[] encryptedPayload,
+      String error,
+      Instant now) {
     PluginCredentialRow row = storage.get(pluginId);
-    if (row == null) {
+    if (row == null || !row.authGeneration().equals(authGeneration)) {
       return false;
     }
     boolean matches =
@@ -337,6 +345,7 @@ public class InMemoryPluginCredentialRepository implements PluginCredentialRepos
         pluginId,
         new PluginCredentialRow(
             row.pluginId(),
+            row.authGeneration(),
             row.encryptedPayload(),
             row.region(),
             row.expiresAt(),
@@ -366,13 +375,14 @@ public class InMemoryPluginCredentialRepository implements PluginCredentialRepos
     storage.put(row.pluginId(), cloneRow(row));
   }
 
-  /** 模拟另一节点或并发操作偷走 version（当前行 version + 1）。 */
+  /** 模拟另一节点或并发操作偷走 version（当前行 version + 1），保持代际不变。 */
   public synchronized void stealVersion(String pluginId) {
     PluginCredentialRow row = storage.get(pluginId);
     if (row != null) {
       PluginCredentialRow updated =
           new PluginCredentialRow(
               row.pluginId(),
+              row.authGeneration(),
               row.encryptedPayload(),
               row.region(),
               row.expiresAt(),
@@ -389,13 +399,14 @@ public class InMemoryPluginCredentialRepository implements PluginCredentialRepos
     }
   }
 
-  /** 模拟另一节点换走 leaseToken。 */
+  /** 模拟另一节点换走 leaseToken，保持代际不变。 */
   public synchronized void changeLeaseToken(String pluginId, String newToken) {
     PluginCredentialRow row = storage.get(pluginId);
     if (row != null) {
       PluginCredentialRow updated =
           new PluginCredentialRow(
               row.pluginId(),
+              row.authGeneration(),
               row.encryptedPayload(),
               row.region(),
               row.expiresAt(),
@@ -423,6 +434,7 @@ public class InMemoryPluginCredentialRepository implements PluginCredentialRepos
   private PluginCredentialRow cloneRow(PluginCredentialRow row) {
     return new PluginCredentialRow(
         row.pluginId(),
+        row.authGeneration(),
         row.encryptedPayload(),
         row.region(),
         row.expiresAt(),

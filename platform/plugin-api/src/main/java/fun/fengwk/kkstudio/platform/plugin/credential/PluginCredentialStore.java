@@ -8,8 +8,8 @@ import fun.fengwk.kkstudio.platform.plugin.PluginKeyUnavailableException;
 /**
  * Plugin 凭据的唯一持久化入口。
  *
- * <p>实现负责 AES-256-GCM 加解密、CAS version、token-fenced lease 与状态投影；调用方（管理面与 Tool）只看到安全投影或本次调用所需的解密快照，
- * 拿不到 repository、密文、主密钥或 lease。未认证时没有行，断连即删除行。
+ * <p>实现负责 AES-256-GCM 加解密、CAS version、认证代际、token-fenced lease 与状态投影；调用方（管理面与
+ * Tool）只看到安全投影或本次调用所需的解密快照， 拿不到 repository、密文、主密钥或 lease。未认证时没有行，断连即删除行。
  *
  * <p>读写都 fail closed：主密钥不可用或密文认证失败时不再读写凭据，而是以 {@code KEY_UNAVAILABLE} 投影与 {@link
  * PluginKeyUnavailableException} 表达。
@@ -29,13 +29,14 @@ public interface PluginCredentialStore {
   /** 以新凭据材料覆盖该 Plugin 的凭据行（不存在则创建），并重置为 {@code CONNECTED}。 */
   PluginCredentialProjection save(String pluginId, PluginCredentialMaterial material);
 
-  /** 断连：删除该 Plugin 的凭据行；迟到 finalize 由 lease token 与 version 围栏拒绝。 */
+  /** 断连：删除该 Plugin 的凭据行；迟到 finalize 由认证代际、lease token 与 version 围栏拒绝。 */
   void delete(String pluginId);
 
   /**
    * 调用期确定性认证拒绝：只把本次已用凭据置为 {@code REAUTH_REQUIRED}。
    *
-   * <p>匹配条件是快照里的 version，或快照携带的原始密文。并发重新登录产生的新 version 与新密文都不会命中。错误文本不得包含秘密。
+   * <p>匹配条件是快照里的认证代际，且在代际一致的前提下 version，或快照携带的原始密文匹配。并发重新登录产生的新代际、新 version 与新密文都不会命中，断连重建的同
+   * version 新代际行也不会命中。错误文本不得包含秘密。
    *
    * @return 是否实际作废了当前行
    */

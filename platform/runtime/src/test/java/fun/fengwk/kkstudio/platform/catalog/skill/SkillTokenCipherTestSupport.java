@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.platform.catalog.skill;
 
-import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialCodec;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialKeyLoader;
 
 import java.io.IOException;
@@ -21,7 +20,6 @@ public final class SkillTokenCipherTestSupport {
       Files.write(keyFile, "0123456789abcdef0123456789abcdef".getBytes(StandardCharsets.UTF_8));
       Files.setPosixFilePermissions(keyFile, PosixFilePermissions.fromString("rw-------"));
       return new SkillTokenCipher(
-          new PluginCredentialCodec(),
           new PluginCredentialKeyLoader(keyFile.toAbsolutePath().toString()));
     } catch (IOException error) {
       throw new UncheckedIOException(error);

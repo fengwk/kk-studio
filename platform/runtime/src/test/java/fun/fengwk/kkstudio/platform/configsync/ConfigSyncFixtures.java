@@ -23,7 +23,6 @@ import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEnt
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
-import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialCodec;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialKeyLoader;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
@@ -210,7 +209,6 @@ final class ConfigSyncFixtures {
       Files.write(keyFile, "0123456789abcdef0123456789abcdef".getBytes(StandardCharsets.UTF_8));
       Files.setPosixFilePermissions(keyFile, PosixFilePermissions.fromString("rw-------"));
       return new SkillTokenCipher(
-          new PluginCredentialCodec(),
           new PluginCredentialKeyLoader(keyFile.toAbsolutePath().toString()));
     } catch (IOException error) {
       throw new UncheckedIOException(error);

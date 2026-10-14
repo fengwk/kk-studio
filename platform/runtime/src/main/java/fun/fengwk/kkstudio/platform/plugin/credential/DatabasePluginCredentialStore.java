@@ -15,6 +15,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.function.Consumer;
 
 /**
@@ -123,6 +124,7 @@ public final class DatabasePluginCredentialStore implements PluginCredentialStor
     }
     return new PluginCredentialSnapshot(
         credential.pluginId(),
+        credential.authGeneration(),
         credential.region(),
         credential.expiresAt(),
         credential.version(),
@@ -144,10 +146,14 @@ public final class DatabasePluginCredentialStore implements PluginCredentialStor
     if (material.nextRefreshAt().isBefore(now)) {
       throw new IllegalArgumentException("credential nextRefreshAt must not be in the past");
     }
-    byte[] envelope = codec.encrypt(key, pluginId, material.region(), material.payloadJson());
+    // 每次人工完整替换都生成新的认证代际：即使载荷完全相同也不会复用旧代际，从而关闭断连重建的 ABA。
+    UUID authGeneration = UUID.randomUUID();
+    byte[] envelope =
+        codec.encrypt(key, pluginId, authGeneration, material.region(), material.payloadJson());
     PluginCredentialRow row =
         new PluginCredentialRow(
             pluginId,
+            authGeneration,
             envelope,
             material.region(),
             material.expiresAt(),
@@ -176,6 +182,7 @@ public final class DatabasePluginCredentialStore implements PluginCredentialStor
     String bounded = PluginCredentialRefreshService.boundedError(error, AUTH_REJECTED_ERROR);
     return repository.rejectUsedCredential(
         snapshot.pluginId(),
+        snapshot.authGeneration(),
         snapshot.version(),
         snapshot.encryptedPayload(),
         bounded,
@@ -194,7 +201,11 @@ public final class DatabasePluginCredentialStore implements PluginCredentialStor
   private String decrypt(SecretKey key, PluginCredentialRow credential) {
     try {
       return codec.decrypt(
-          key, credential.pluginId(), credential.region(), credential.encryptedPayload());
+          key,
+          credential.pluginId(),
+          credential.authGeneration(),
+          credential.region(),
+          credential.encryptedPayload());
     } catch (RuntimeException error) {
       throw unavailable(
           PluginCredentialUnavailableReason.KEY_UNAVAILABLE,

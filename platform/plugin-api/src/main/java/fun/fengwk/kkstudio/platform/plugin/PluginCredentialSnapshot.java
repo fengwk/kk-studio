@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.plugin;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.Objects;
+import java.util.UUID;
 
 /**
  * 一次调用所需的解密凭据快照：只有 Plugin 侧调用与刷新路径能看到它。
@@ -10,9 +11,13 @@ import java.util.Objects;
  * <p>{@code version} 与 {@code encryptedPayload} 是解析或领取该快照时的行版本和原始密文，供调用期认证拒绝做 CAS；密文本身不是可展示的秘密， 但
  * {@link #toString()} 仍然省略它。{@code payloadJson} 是 {@link PluginCredentialMaterial#payloadJson()}
  * 的原文。
+ *
+ * <p>{@code authGeneration} 是解析该快照时的权威认证代际：调用期作废与迟到刷新都必须带上它，才能区分「同一行的旧状态」与「断连重建后的
+ * 同版本新行」。它随快照作为调用期拒绝的 CAS 条件之一，同样不出现在管理面投影中。
  */
 public record PluginCredentialSnapshot(
     String pluginId,
+    UUID authGeneration,
     String region,
     Instant expiresAt,
     long version,
@@ -21,6 +26,7 @@ public record PluginCredentialSnapshot(
 
   public PluginCredentialSnapshot {
     pluginId = Objects.requireNonNull(pluginId, "pluginId");
+    authGeneration = Objects.requireNonNull(authGeneration, "authGeneration");
     region = Objects.requireNonNull(region, "region");
     expiresAt = Objects.requireNonNull(expiresAt, "expiresAt");
     encryptedPayload = Objects.requireNonNull(encryptedPayload, "encryptedPayload").clone();
@@ -45,6 +51,7 @@ public record PluginCredentialSnapshot(
     }
     return version == that.version
         && pluginId.equals(that.pluginId)
+        && authGeneration.equals(that.authGeneration)
         && region.equals(that.region)
         && expiresAt.equals(that.expiresAt)
         && Arrays.equals(encryptedPayload, that.encryptedPayload)
@@ -54,13 +61,21 @@ public record PluginCredentialSnapshot(
   @Override
   public int hashCode() {
     return Objects.hash(
-        pluginId, region, expiresAt, version, Arrays.hashCode(encryptedPayload), payloadJson);
+        pluginId,
+        authGeneration,
+        region,
+        expiresAt,
+        version,
+        Arrays.hashCode(encryptedPayload),
+        payloadJson);
   }
 
   @Override
   public String toString() {
     return "PluginCredentialSnapshot[pluginId="
         + pluginId
+        + ", authGeneration="
+        + authGeneration
         + ", region="
         + region
         + ", expiresAt="

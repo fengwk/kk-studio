@@ -256,14 +256,16 @@ comment on column skill_package.update_time is '最后更新时间（毫秒精�
 -- 构建期 Plugin 凭据
 --
 -- 所有构建期 Plugin 共用一行一凭据存储：plugin_id 与 classpath 中的 StudioPlugin.pluginId
--- 对齐；encrypted_payload 是 AES-256-GCM 二进制 envelope（格式版本 + 随机 nonce + 认证
--- 密文，AAD 绑定 pluginId/region/formatVersion）。加密主密钥来自部署侧 owner-only key
+-- 对齐；encrypted_payload 是 AES-256-GCM 二进制 envelope（格式版本 2 + 随机 nonce + 认证
+-- 密文，AAD 绑定 pluginId/region/authGeneration/formatVersion）。auth_generation 是应用
+-- 每次人工完整替换都重新生成的认证代际。加密主密钥来自部署侧 owner-only key
 -- file，绝不进入本表、SystemSettings、DTO 或日志；管理查询永远不返回 encrypted_payload。
--- 断连以删除行表达，迟到 finalize 由 lease token 与 version 围栏拒绝。
+-- 断连以删除行表达，迟到 finalize 由认证代际、lease token 与 version 围栏拒绝。
 -- -----------------------------------------------------------------------------
 
 create table plugin_credential (
     plugin_id           varchar(64)   not null,
+    auth_generation     uuid          not null,
     encrypted_payload   bytea         not null,
     region              varchar(64)   not null,
     expires_at          timestamptz(3) not null,
@@ -314,7 +316,8 @@ create table plugin_credential (
 
 comment on table plugin_credential is '构建期 Plugin 的加密凭据权威行：每个已认证 Plugin 一行，未认证时无行，断连即删除行';
 comment on column plugin_credential.plugin_id is 'Plugin 全局唯一不可变安装身份（canonical 小写点划线标识符，≤64），与 classpath 中的 StudioPlugin.pluginId 对齐';
-comment on column plugin_credential.encrypted_payload is 'AES-256-GCM 二进制 envelope（格式版本 + 96-bit 随机 nonce + 认证密文，AAD 绑定 pluginId/region/formatVersion）；任何查询投影都不得返回';
+comment on column plugin_credential.auth_generation is '认证代际（应用生成 UUID）：每次人工完整替换凭据都重新生成，用于区分断连重建后的同 version 新行；finalize/release/reject 必须匹配它';
+comment on column plugin_credential.encrypted_payload is 'AES-256-GCM 二进制 envelope（格式版本 2 + 96-bit 随机 nonce + 认证密文，AAD 绑定 pluginId/region/authGeneration/formatVersion）；任何查询投影都不得返回';
 comment on column plugin_credential.region is '非秘密 region 路由元数据（无环绕空白、≤64），只允许 Plugin descriptor 声明的固定 region 候选';
 comment on column plugin_credential.expires_at is 'access token 失效时刻（毫秒精度）';
 comment on column plugin_credential.next_refresh_at is '下一次 refresh claim 时刻（毫秒精度）；仅当该时刻已到且 lease 为空或过期时可被 claim';
@@ -323,7 +326,7 @@ comment on column plugin_credential.last_refreshed_at is '最近一次成功刷�
 comment on column plugin_credential.last_refresh_error is '最近一次刷新失败的有界去敏错误摘要（非空、无环绕空白、≤4096 字节）；成功时为 null';
 comment on column plugin_credential.refresh_lease_token is '跨节点 refresh lease 令牌（与 refresh_lease_until 同时存在或同时缺失）';
 comment on column plugin_credential.refresh_lease_until is 'refresh lease 到期时刻（毫秒精度）；过期 lease 视为结果未知';
-comment on column plugin_credential.version is 'CAS 乐观锁版本：非负，从 0 开始，每次写入 +1；finalize 必须匹配 lease token 与 version';
+comment on column plugin_credential.version is 'CAS 乐观锁版本：非负，从 0 开始，每次写入 +1；finalize 必须匹配认证代际、lease token 与 version';
 comment on column plugin_credential.create_time is '创建时间（毫秒精度）';
 comment on column plugin_credential.update_time is '最后更新时间（毫秒精度），应用侧维护';
 
