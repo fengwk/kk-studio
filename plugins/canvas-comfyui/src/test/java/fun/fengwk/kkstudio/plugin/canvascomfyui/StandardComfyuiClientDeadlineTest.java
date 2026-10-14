@@ -111,14 +111,15 @@ class StandardComfyuiClientDeadlineTest {
 
   @Test
   void truncatedViewBodyFailsWithoutReturningPartialMedia() throws Exception {
-    // 声明 100 字节却只发 3 字节：只有实际长度不符才判定长度失败，不返回部分媒体。
+    // 声明 100 字节却只发 3 字节：JDK 断流按读取失败固定分类，不返回部分媒体、不外抛原始 cause。
     try (Endpoint endpoint = new Endpoint(200, "100", "video/mp4", "abc", false)) {
       StandardComfyuiClient client = endpoint.client(Duration.ofSeconds(2));
       H3ComfyDownload download = client.download(new H3OutputDescriptor("a.mp4", "out", "output"));
       try {
         IOException failure =
             assertThrows(IOException.class, () -> download.content().readAllBytes());
-        assertEquals("response body ended after 3 of 100 bytes", failure.getMessage());
+        // 底层断流不证明 body 已 EOF，因此只归类为读取失败，不谎称长度或 ended。
+        assertEquals("response body read failed", failure.getMessage());
         assertNull(failure.getCause());
         assertFalse(failure instanceof HttpTimeoutException);
         // 失败后流已关闭，不复用同一 body。
@@ -227,6 +228,98 @@ class StandardComfyuiClientDeadlineTest {
       }
       assertEquals(-1, endpoint.peerRead.get(2, TimeUnit.SECONDS));
     }
+  }
+
+  @Test
+  void unsupportedHistoryTerminalStatusMarkerIsNotEchoed() throws Exception {
+    // 远端 status_str 不受控：非成功终态只给固定分类，不回显 marker。
+    String marker = "synthetic-marker-terminal";
+    String body = "{\"p1\":{\"status\":{\"status_str\":\"" + marker + "\",\"completed\":true}}}";
+    try (Endpoint endpoint =
+        new Endpoint(200, Integer.toString(body.length()), "application/json", body, false)) {
+      StandardComfyuiClient client = endpoint.client(Duration.ofSeconds(2));
+
+      IllegalArgumentException failure =
+          assertThrows(IllegalArgumentException.class, () -> client.history("p1"));
+
+      assertEquals("ComfyUI history terminal status is not supported", failure.getMessage());
+      assertNull(failure.getCause());
+      assertFalse(failure.getMessage().contains("synthetic-marker"));
+    }
+  }
+
+  @Test
+  void jsonParseFailureDoesNotEchoBodyFields() throws Exception {
+    // 解析失败可能带 body 字段名/片段；公开错误只给固定事实且不串原始 cause。
+    String body = "{\"synthetic-marker-field\":";
+    try (Endpoint endpoint =
+        new Endpoint(200, Integer.toString(body.length()), "application/json", body, false)) {
+      StandardComfyuiClient client = endpoint.client(Duration.ofSeconds(2));
+
+      IllegalArgumentException failure =
+          assertThrows(IllegalArgumentException.class, () -> client.history("p1"));
+
+      assertEquals("cannot parse ComfyUI JSON response", failure.getMessage());
+      assertNull(failure.getCause());
+      assertFalse(failure.getMessage().contains("synthetic-marker"));
+    }
+  }
+
+  @Test
+  void invalidResponseContentLengthHeaderIsSanitizedWithoutEcho() throws Exception {
+    // JDK 可能在返回 body 前因非法 Content-Length 失败；只给固定 headers 分类，不回显 header 值。
+    String marker = "synthetic-marker-content-length";
+    try (Endpoint endpoint = new Endpoint(200, marker, "application/json", "{}", false)) {
+      StandardComfyuiClient client = endpoint.client(Duration.ofSeconds(1));
+
+      RuntimeException failure = assertThrows(RuntimeException.class, () -> client.history("p1"));
+
+      assertEquals("ComfyUI response headers are invalid", failure.getMessage());
+      assertNull(failure.getCause());
+      assertFalse(failure.getMessage().contains("synthetic-marker"));
+    }
+  }
+
+  @Test
+  void interruptedSendIsSanitizedAndKeepsInterruptFlag() throws Exception {
+    // send 中断必须保留线程中断标记，但公开错误不得串原始 cause 或消息。
+    HttpClient interrupted = mock(HttpClient.class);
+    doThrow(new InterruptedException("synthetic-marker-interrupt"))
+        .when(interrupted)
+        .send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class));
+    StandardComfyuiClient client =
+        new StandardComfyuiClient(
+            "http://127.0.0.1:1", "secret", Duration.ofSeconds(1), new ObjectMapper(), interrupted);
+
+    try {
+      IllegalStateException failure =
+          assertThrows(IllegalStateException.class, () -> client.history("p1"));
+
+      assertEquals("ComfyUI HTTP request was interrupted", failure.getMessage());
+      assertNull(failure.getCause());
+      assertTrue(Thread.currentThread().isInterrupted());
+    } finally {
+      Thread.interrupted();
+    }
+  }
+
+  @Test
+  void invalidBaseUrlNeverEchoesUserInfoCredentials() {
+    // 本地 baseURI 解析失败不得把含 userInfo 的原始串带进异常。
+    IllegalArgumentException failure =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                new StandardComfyuiClient(
+                    "http://user:synthetic-marker-credential@host name",
+                    null,
+                    Duration.ofSeconds(1),
+                    Duration.ofSeconds(1),
+                    new ObjectMapper()));
+
+    assertEquals("baseUrl must be a valid URI", failure.getMessage());
+    assertNull(failure.getCause());
+    assertFalse(failure.getMessage().contains("synthetic-marker"));
   }
 
   private static boolean hasTimeout(Throwable failure) {

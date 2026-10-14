@@ -114,8 +114,8 @@ Function 由构建期 Plugin 提供定义、校验、执行与取消能力。Can
 当前 Plugin 包括 `canvas-media` 与 `canvas-comfyui`，由发行物依赖选择并自动装配。
 ComfyUI 的模板随 Plugin 发布，外部引擎执行任务，adapter 负责提交、查询、取消和下载。
 ComfyUI HTTP 请求在发送前冻结一份预算，headers、JSON/queue 与 `/view` 流共享同一截止点；
-JDK 的 request timeout 只约束 headers，慢响应体会由该截止点主动中断，超时与长度不符
-只回传固定分类和数值事实，不回显远端正文或原始 URI/header。
+JDK 的 request timeout 只约束 headers，慢响应体会由该截止点主动中断，失败只回传固定分类
+（仅当读取字节数与声明的 Content-Length 明确不符时才判定长度失败），不回显远端正文或原始 URI/header。
 adapter 的 checkpoint 状态（seed、外部任务身份与进度）由 Plugin 自己持有的 mapper 编解码，
 与宿主 HTTP mapper 的 profile 完全隔离，因此合法 Long seed 不会在恢复时被写成字符串而拒绝。
 

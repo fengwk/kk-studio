@@ -29,6 +29,8 @@ public final class DeadlineResponseBody extends InputStream {
   }
 
   private static final ScheduledThreadPoolExecutor WATCHDOG = newWatchdog();
+  private static final System.Logger LOGGER =
+      System.getLogger(DeadlineResponseBody.class.getName());
 
   private final InputStream body;
   private final long deadlineNanos;
@@ -113,8 +115,12 @@ public final class DeadlineResponseBody extends InputStream {
       }
       try {
         close();
-      } catch (IOException ignored) {
-        // 次要关闭失败已由 close 收敛为固定信息，不叠加到读取失败。
+      } catch (IOException closeFailure) {
+        // 次要关闭失败已收敛为固定信息；只记录类型，不保留原 failure 链。
+        LOGGER.log(
+            System.Logger.Level.DEBUG,
+            "response body secondary close failed: {0}",
+            closeFailure.getClass().getName());
       }
       if (state.get() == State.TIMED_OUT) {
         throw timeout();
@@ -122,13 +128,16 @@ public final class DeadlineResponseBody extends InputStream {
       if (exception instanceof LengthException) {
         throw exception;
       }
-      if (expectedLength >= 0 && received != expectedLength) {
-        // 只有实际声明长度不符才判定长度失败；不把其余 IOException 猜测成截断。
-        throw new LengthException(
-            "response body ended after " + received + " of " + expectedLength + " bytes");
-      }
-      // 其余底层失败只给中性固定信息，绝不透出原始 message/cause。
+      // 其余底层失败不证明 body 已 EOF；只给中性固定分类，不声称 ended、不透出原始 message/cause。
       throw new IOException("response body read failed");
+    } catch (RuntimeException | Error failure) {
+      // 未受检失败同样要取消看门狗并关闭底层；清理失败已收敛，原始失败必须重抛。
+      try {
+        close();
+      } catch (IOException ignored) {
+        // 清理失败不掩盖原始失败。
+      }
+      throw failure;
     }
   }
 

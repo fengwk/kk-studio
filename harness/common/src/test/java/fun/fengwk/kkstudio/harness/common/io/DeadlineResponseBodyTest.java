@@ -116,9 +116,9 @@ class DeadlineResponseBodyTest {
   }
 
   @Test
-  void truncatedStreamFailureReportsLengthMismatchWithoutRawCause() throws Exception {
-    // 底层在不足声明长度时抛 IO（连接被截断）：转成明确的长度事实，不外抛模糊的底层 cause。
-    InputStream truncating =
+  void transportReadFailureIsFixedAndNeverClaimsLengthEof() throws Exception {
+    // 已声明长度时底层 IO 失败不证明 body 已 EOF：固定归类为读取失败，不误报长度不符，也不带原始 cause。
+    InputStream midBodyFailure =
         new InputStream() {
           private int reads;
 
@@ -127,14 +127,89 @@ class DeadlineResponseBodyTest {
             if (reads++ < 2) {
               return 7;
             }
-            throw new IOException("connection reset");
+            throw new IOException("connection reset /secret");
           }
         };
-    var body = new DeadlineResponseBody(truncating, deadline());
-    body.expectLength(5);
-    var error = assertThrows(IOException.class, body::readAllBytes);
-    assertEquals("response body ended after 2 of 5 bytes", error.getMessage());
-    assertEquals(0, error.getSuppressed().length);
+    var midBody = new DeadlineResponseBody(midBodyFailure, deadline());
+    midBody.expectLength(5);
+    IOException midBodyError = assertThrows(IOException.class, midBody::readAllBytes);
+    assertEquals("response body read failed", midBodyError.getMessage());
+    assertNull(midBodyError.getCause());
+    assertEquals(0, midBodyError.getSuppressed().length);
+    assertEquals(0, DeadlineResponseBody.pendingWatchdogTasks());
+
+    InputStream firstByteFailure =
+        new InputStream() {
+          @Override
+          public int read() throws IOException {
+            throw new IOException("transport fail /secret");
+          }
+        };
+    var firstByte = new DeadlineResponseBody(firstByteFailure, deadline());
+    firstByte.expectLength(5);
+    IOException firstByteError = assertThrows(IOException.class, firstByte::readAllBytes);
+    assertEquals("response body read failed", firstByteError.getMessage());
+    assertNull(firstByteError.getCause());
+    assertEquals(0, DeadlineResponseBody.pendingWatchdogTasks());
+  }
+
+  @Test
+  void uncheckedReadFailureClosesBodyAndRethrowsOriginal() throws Exception {
+    // RuntimeException/Error 同样要关闭底层并注销看门狗，并原样重抛（不吞、不替换、不用 catchThrowable 兜底）。
+    RuntimeException runtime = new IllegalStateException("runtime boom /secret");
+    AtomicInteger runtimeCloses = new AtomicInteger();
+    CountDownLatch runtimeClosed = new CountDownLatch(1);
+    InputStream runtimeBody =
+        new InputStream() {
+          @Override
+          public int read() {
+            throw runtime;
+          }
+
+          @Override
+          public void close() {
+            runtimeCloses.incrementAndGet();
+            runtimeClosed.countDown();
+          }
+        };
+    var runtimeWrapper = new DeadlineResponseBody(runtimeBody, deadline());
+    assertEquals(runtime, assertThrows(RuntimeException.class, runtimeWrapper::read));
+    assertTrue(runtimeClosed.await(1, TimeUnit.SECONDS));
+    assertEquals(1, runtimeCloses.get());
+
+    Error error = new AssertionError("error boom /secret");
+    AtomicInteger errorCloses = new AtomicInteger();
+    CountDownLatch errorClosed = new CountDownLatch(1);
+    InputStream errorBody =
+        new InputStream() {
+          @Override
+          public int read() {
+            throw error;
+          }
+
+          @Override
+          public void close() {
+            errorCloses.incrementAndGet();
+            errorClosed.countDown();
+          }
+        };
+    var errorWrapper = new DeadlineResponseBody(errorBody, deadline());
+    assertEquals(error, assertThrows(Error.class, errorWrapper::read));
+    assertTrue(errorClosed.await(1, TimeUnit.SECONDS));
+    assertEquals(1, errorCloses.get());
+    assertEquals(0, DeadlineResponseBody.pendingWatchdogTasks());
+  }
+
+  @Test
+  void deadlineAlreadyExpiredAtConstructionTimesOutAndDeregistersWatchdog() throws Exception {
+    // 预算在 schedule 返回前就到期：构造必须可靠进入超时态并注销看门狗，读取与关闭都不得返回正常结果。
+    CountingBody input = new CountingBody(new byte[] {1, 2, 3});
+    try (var body = new DeadlineResponseBody(input, System.nanoTime() - 1)) {
+      assertThrows(HttpTimeoutException.class, body::read);
+      assertThrows(HttpTimeoutException.class, body::read);
+    }
+    assertTrue(input.closed.await(1, TimeUnit.SECONDS));
+    assertEquals(1, input.closes.get());
     assertEquals(0, DeadlineResponseBody.pendingWatchdogTasks());
   }
 

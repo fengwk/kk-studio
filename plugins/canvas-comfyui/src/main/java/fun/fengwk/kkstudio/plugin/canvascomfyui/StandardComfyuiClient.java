@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.plugin.canvascomfyui;
 
+import lombok.extern.slf4j.Slf4j;
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.StreamReadFeature;
 import tools.jackson.databind.DeserializationFeature;
@@ -33,6 +34,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Supplier;
 
 /** 只使用标准 ComfyUI HTTP API 的有界、流式客户端。 */
+@Slf4j
 public final class StandardComfyuiClient {
 
   static final int MAX_JSON_BYTES = 1024 * 1024;
@@ -165,8 +167,8 @@ public final class StandardComfyuiClient {
       return H3ComfyHistory.pending();
     }
     if (!"success".equals(statusText)) {
-      throw new IllegalArgumentException(
-          "unsupported terminal ComfyUI history status: " + statusText);
+      // 远端 status_str 不受控：只回传固定分类，不记录也不回显原值。
+      throw new IllegalArgumentException("ComfyUI history terminal status is not supported");
     }
     return H3ComfyHistory.success(extractOutput(entry));
   }
@@ -277,7 +279,8 @@ public final class StandardComfyuiClient {
       byte[] bytes = readBounded(content, MAX_JSON_BYTES);
       return mapper.readTree(bytes);
     } catch (JacksonException error) {
-      throw new IllegalArgumentException("cannot parse ComfyUI JSON response", error);
+      // 解析错误可能带 body 字段名/片段，公开错误只给固定事实，不串原始 cause。
+      throw new IllegalArgumentException("cannot parse ComfyUI JSON response");
     } catch (IOException error) {
       throw readFailure(error);
     }
@@ -295,9 +298,12 @@ public final class StandardComfyuiClient {
       response = client.send(request, HttpResponse.BodyHandlers.ofInputStream());
     } catch (IOException error) {
       throw transportFailure(error);
+    } catch (IllegalArgumentException error) {
+      // JDK 可能在返回 body 前解析非法 Content-Length；不回显 header 原值或原始 cause。
+      throw new IllegalStateException("ComfyUI response headers are invalid");
     } catch (InterruptedException error) {
       Thread.currentThread().interrupt();
-      throw new IllegalStateException("ComfyUI HTTP request was interrupted", error);
+      throw new IllegalStateException("ComfyUI HTTP request was interrupted");
     }
     return new ComfyResponse(
         response.statusCode(),
@@ -360,7 +366,8 @@ public final class StandardComfyuiClient {
       byte[] bytes = mapper.writeValueAsBytes(body);
       return HttpRequest.BodyPublishers.ofByteArray(bytes);
     } catch (JacksonException error) {
-      throw new IllegalStateException("cannot serialize ComfyUI request JSON", error);
+      // 序列化错误可能带 prompt 片段，公开错误只给固定事实，不串原始 cause。
+      throw new IllegalStateException("cannot serialize ComfyUI request JSON");
     }
   }
 
@@ -524,7 +531,14 @@ public final class StandardComfyuiClient {
     if (raw == null || raw.isBlank()) {
       throw new IllegalArgumentException("baseUrl must not be blank");
     }
-    URI uri = URI.create(raw.strip());
+    String trimmed = raw.strip();
+    URI uri;
+    try {
+      uri = URI.create(trimmed);
+    } catch (IllegalArgumentException error) {
+      // URI.create 的消息会带原始串（可能含 userInfo 凭据）；只给固定分类。
+      throw new IllegalArgumentException("baseUrl must be a valid URI");
+    }
     String scheme = uri.getScheme();
     if (scheme == null || (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme))) {
       throw new IllegalArgumentException("baseUrl must use http or https scheme");
@@ -602,12 +616,13 @@ public final class StandardComfyuiClient {
     return path(value == null ? "" : value);
   }
 
+  /** 清理阶段的释放失败不影响主流程，也绝不记录原始 Throwable/消息；只记录受控类型，Error 继续上抛。 */
   private static void closeQuietly(AutoCloseable closeable) {
     if (closeable != null) {
       try {
         closeable.close();
-      } catch (Exception ignored) {
-        // quiet
+      } catch (Exception error) {
+        log.debug("ComfyUI client cleanup close failed type={}", error.getClass().getSimpleName());
       }
     }
   }
