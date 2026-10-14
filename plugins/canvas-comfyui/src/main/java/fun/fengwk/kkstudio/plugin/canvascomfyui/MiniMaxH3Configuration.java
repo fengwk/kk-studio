@@ -1,12 +1,12 @@
 package fun.fengwk.kkstudio.plugin.canvascomfyui;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.DependsOn;
+import tools.jackson.databind.ObjectMapper;
 
 import fun.fengwk.kkstudio.platform.harness.oneshot.HarnessOneShotService;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
@@ -66,8 +66,7 @@ public class MiniMaxH3Configuration {
       H3WorkflowBuilder workflowBuilder,
       ObjectProvider<StandardComfyuiClient> comfyClients,
       StorageUploadService uploadService,
-      SessionBlobRefManager refManager,
-      ObjectMapper objectMapper) {
+      SessionBlobRefManager refManager) {
     return new MiniMaxH3CanvasFunctionAdapter(
         snapshot,
         mediaPreflight,
@@ -76,7 +75,6 @@ public class MiniMaxH3Configuration {
         workflowBuilder,
         comfyClients,
         uploadService,
-        refManager,
-        objectMapper);
+        refManager);
   }
 }

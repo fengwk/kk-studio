@@ -9,14 +9,16 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.parallel.ResourceLock;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.JsonNodeFeature;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.io.ByteArrayInputStream;
 import java.io.FilterInputStream;
@@ -50,6 +52,7 @@ class StandardComfyuiClientTest {
       new AtomicReference<>(
           "{\"name\":\"12.mp4\",\"subfolder\":\"kk-studio/00000000-0000-0000-0000-000000000007\",\"type\":\"input\"}");
   private final AtomicReference<String> viewQuery = new AtomicReference<>();
+  private final AtomicReference<String> promptBody = new AtomicReference<>();
   private final AtomicReference<String> queueDeleteBody = new AtomicReference<>();
   private final AtomicInteger queueDeleteStatus = new AtomicInteger(200);
   private final AtomicReference<byte[]> uploadBody = new AtomicReference<>();
@@ -87,7 +90,7 @@ class StandardComfyuiClientTest {
   void setUp() throws IOException {
     server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     server.createContext("/upload/image", this::upload);
-    server.createContext("/prompt", exchange -> json(exchange, 200, promptResponse.get()));
+    server.createContext("/prompt", this::prompt);
     server.createContext("/history/pending", exchange -> json(exchange, 200, "{}"));
     server.createContext(
         "/history/success",
@@ -107,6 +110,14 @@ class StandardComfyuiClientTest {
                 "{\"error\":{\"status\":{\"status_str\":\"error\",\"completed\":true,"
                     + "\"messages\":[\"boom\"]}}}"));
     server.createContext("/history/mismatch", exchange -> json(exchange, 200, "{\"another\":{}}"));
+    server.createContext(
+        "/history/precise-numbers",
+        exchange ->
+            json(
+                exchange,
+                200,
+                "{\"precise-numbers\":{\"status\":{\"status_str\":\"error\",\"completed\":true,"
+                    + "\"messages\":[0.12345678901234567890123456789]}}}"));
     server.createContext(
         "/history/bad-completed",
         exchange ->
@@ -177,6 +188,29 @@ class StandardComfyuiClientTest {
                 3L,
                 new ByteArrayInputStream(new byte[] {1, 2, 3}),
                 CANVAS));
+  }
+
+  /** ComfyUI 自由 workflow/history 树：number 必须按 BigDecimal 原样搬运，极值与高精度小数不得在 double 中失真。 */
+  @Test
+  void preservesFreeFormWorkflowAndHistoryNumbers() {
+    ObjectNode workflow =
+        (ObjectNode)
+            JsonMapper.builder()
+                .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+                .build()
+                .readTree(
+                    "{\"92\":{\"inputs\":{\"big\":1e309,\"tiny\":1e-324,"
+                        + "\"precise\":0.12345678901234567890123456789}}}");
+
+    assertEquals("p1", client.submit(workflow, "client-1"));
+
+    String body = promptBody.get();
+    assertTrue(body.contains("1E+309"), body);
+    assertTrue(body.contains("1E-324"), body);
+    assertTrue(body.contains("0.12345678901234567890123456789"), body);
+    assertFalse(body.contains("Infinity"), body);
+    assertTrue(
+        client.history("precise-numbers").error().contains("0.12345678901234567890123456789"));
   }
 
   @Test
@@ -499,6 +533,11 @@ class StandardComfyuiClientTest {
                 Duration.ofSeconds(1),
                 Duration.ofSeconds(-1),
                 new ObjectMapper()));
+  }
+
+  private void prompt(HttpExchange exchange) throws IOException {
+    promptBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+    json(exchange, 200, promptResponse.get());
   }
 
   private void upload(HttpExchange exchange) throws IOException {

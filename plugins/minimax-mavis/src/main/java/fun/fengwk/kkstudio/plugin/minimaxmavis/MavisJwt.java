@@ -1,9 +1,10 @@
 package fun.fengwk.kkstudio.plugin.minimaxmavis;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
-import java.io.IOException;
 import java.time.DateTimeException;
 import java.time.Instant;
 import java.util.Base64;
@@ -17,7 +18,7 @@ import java.util.regex.Pattern;
  */
 public final class MavisJwt {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
   private static final Pattern BASE64URL = Pattern.compile("[A-Za-z0-9_-]+");
   private static final int JWT_SEGMENT_COUNT = 3;
 
@@ -39,7 +40,7 @@ public final class MavisJwt {
     JsonNode decoded;
     try {
       decoded = MAPPER.readTree(payload);
-    } catch (IOException error) {
+    } catch (JacksonException error) {
       return Optional.empty();
     }
     if (decoded == null || !decoded.isObject()) {

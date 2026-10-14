@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.plugin.minimaxmavis;
 
-import com.fasterxml.jackson.databind.JsonNode;
+import tools.jackson.databind.JsonNode;
 
 import java.util.Optional;
 import java.util.Set;
@@ -60,7 +60,7 @@ public final class MavisStatus {
     if (code == null || code.isNull()) {
       return "";
     }
-    if (code.isContainerNode()) {
+    if (code.isContainer()) {
       return "unexpected-status";
     }
     return code.asText();

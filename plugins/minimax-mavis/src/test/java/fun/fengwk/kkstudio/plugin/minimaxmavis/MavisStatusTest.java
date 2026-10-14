@@ -5,11 +5,9 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
-
-import java.io.IOException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 /** 响应状态分层校验：私有端点三层、MCP 端点两层，401/1004 是认证拒绝。 */
 class MavisStatusTest {
@@ -17,11 +15,7 @@ class MavisStatusTest {
   private static final ObjectMapper MAPPER = new ObjectMapper();
 
   private static JsonNode json(String payload) {
-    try {
-      return MAPPER.readTree(payload);
-    } catch (IOException error) {
-      throw new IllegalStateException(error);
-    }
+    return MAPPER.readTree(payload);
   }
 
   /** 缺失、null、数值 0 与字符串 "0" 在所有层都表示成功。 */

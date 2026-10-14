@@ -8,10 +8,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.canvas.CanvasJson;
 import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
@@ -24,6 +24,7 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionSubmitState;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 
+import java.math.BigDecimal;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -152,6 +153,32 @@ class H3PromptWorkflowTest {
         IllegalArgumentException.class, () -> new H3ReferenceManifest.Item(textReference, 0));
     assertThrows(
         IllegalStateException.class, () -> new H3ReferenceManifest.Item(textReference, 1).label());
+  }
+
+  /** H3 模板是自由 JSON 图：number 必须按 BigDecimal 搬运，高精度字面量不得在 double 中失真或被 strip。 */
+  @Test
+  void preservesTemplateDecimalLiteralsAsBigDecimal() {
+    H3ReferenceManifest manifest =
+        H3ReferenceManifest.from(
+            List.of(reference(11L, 2L, 1, CanvasResourceKind.IMAGE, "image/png")));
+    ObjectNode workflow =
+        new H3WorkflowBuilder(mapper)
+            .build(
+                "prompt",
+                "16:9",
+                5,
+                0L,
+                TARGET,
+                manifest,
+                Map.of(resource(11L), new H3UploadedFile("11.png", "kk-studio/7", "input")));
+
+    JsonNode firstBlockCache = workflow.path("155").path("inputs");
+    assertTrue(firstBlockCache.path("end_percent").isBigDecimal());
+    assertEquals(new BigDecimal("0.95"), firstBlockCache.path("end_percent").decimalValue());
+    JsonNode spectrum = workflow.path("156").path("inputs");
+    assertTrue(spectrum.path("flex_window").isBigDecimal());
+    assertEquals(new BigDecimal("0.75"), spectrum.path("flex_window").decimalValue());
+    assertEquals(new BigDecimal("0.1"), spectrum.path("ridge_lambda").decimalValue());
   }
 
   /** prompt/workflow 测试只关心冻结计划形状：单 VIDEO 槽位。 */
