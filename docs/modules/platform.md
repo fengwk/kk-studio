@@ -248,11 +248,15 @@ manifest 保存代码版本、Schema 与实际能力指纹，全局指纹覆盖�
 ### Plugin credential
 
 `PluginCredentialStore` 用部署级 owner-only 32-byte key 做 AES-256-GCM 加密，
-每次写入新 nonce，AAD 绑定 pluginId、region 和格式版本。主密钥留在部署文件，
+每次写入新 nonce，AAD 绑定 pluginId、region、认证代际和格式版本（当前 fmt2）。
+每次人工保存（登录/重新登录）都会换发新的认证代际，刷新只沿用当前行代际；
+代际随之写入快照、加密 AAD 与所有 CAS 条件，因此断连删除后按 version 0 重建的行
+不会被旧调用或迟到 finalize 误伤。主密钥留在部署文件，
 Plugin 只通过 `PluginCredentialAccess` 获得本次调用快照，不持有完整 Store。
-key 缺失或解密失败为 KEY_UNAVAILABLE，读写失败关闭。
+key 缺失或解密失败为 KEY_UNAVAILABLE，读写失败关闭。fmt1 密文不再兼容读取，
+需按离线备份批准流程转换。
 
-刷新以短事务 claim lease，事务外一次 renewal，再按 token、version 和截止时刻 finalize。
+刷新以短事务 claim lease，事务外一次 renewal，再按代际、token、version 和截止时刻 finalize。
 只扫描已声明刷新器的插件，按最早 nextRefreshAt 安排，保存后唤醒，poll 是最慢兜底。
 确定认证拒绝为 REAUTH_REQUIRED，确定未发或确定无效响应为 REFRESH_FAILED；
 已发而无确定响应、过期在途 lease 为 REFRESH_UNCERTAIN，要求重新认证。

@@ -279,6 +279,39 @@
                             </rules>
                         </configuration>
                     </execution>
+                    <execution>
+                        <!-- 凭据认证代际与共享 crypto 原语的定向覆盖率门禁。 -->
+                        <id>check-plugin-credential-class-line-coverage</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <rule>
+                                    <element>CLASS</element>
+                                    <includes>
+                                        <include>fun.fengwk.kkstudio.platform.crypto.AesGcmEnvelope</include>
+                                        <include>fun.fengwk.kkstudio.platform.crypto.LengthPrefixedAad</include>
+                                        <include>fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialCodec</include>
+                                        <include>fun.fengwk.kkstudio.platform.plugin.credential.DatabasePluginCredentialStore</include>
+                                        <include>fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialRefreshService</include>
+                                        <include>fun.fengwk.kkstudio.platform.plugin.credential.ScopedPluginCredentialAccess</include>
+                                        <include>fun.fengwk.kkstudio.platform.plugin.persistence.PluginCredentialRow</include>
+                                        <include>fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.PostgresqlPluginCredentialRepository</include>
+                                        <include>fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.store.PluginCredentialJdbcStore</include>
+                                    </includes>
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.90</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                            </rules>
+                        </configuration>
+                    </execution>
                 </executions>
             </plugin>
         </plugins>

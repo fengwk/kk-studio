@@ -185,6 +185,7 @@ column	plugin_configuration_revision	plugin_id	type=character varying(64) notnul
 column	plugin_configuration_revision	revision	type=bigint notnull=t default=<null> generated= collation=-
 column	plugin_configuration_revision	schema_fingerprint	type=character(64) notnull=t default=<null> generated= collation="default"
 column	plugin_configuration_revision	values_json	type=text notnull=t default=<null> generated= collation="default"
+column	plugin_credential	auth_generation	type=uuid notnull=t default=<null> generated= collation=-
 column	plugin_credential	create_time	type=timestamp(3) with time zone notnull=t default=CURRENT_TIMESTAMP generated= collation=-
 column	plugin_credential	encrypted_payload	type=bytea notnull=t default=<null> generated= collation=-
 column	plugin_credential	expires_at	type=timestamp(3) with time zone notnull=t default=<null> generated= collation=-

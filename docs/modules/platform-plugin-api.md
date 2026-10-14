@@ -22,7 +22,7 @@
 
 ## 凭据契约
 
-[`PluginCredentialMaterial`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginCredentialMaterial.java) 是 Plugin 交还的待加密材料（region 路由元数据加 opaque `payloadJson`），`toString` 有意省略秘密载荷；[`PluginCredentialSnapshot`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginCredentialSnapshot.java) 是本次调用所需的解密快照，携带行版本与原始密文供调用期 CAS，数组访问做防御性拷贝。
+[`PluginCredentialMaterial`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginCredentialMaterial.java) 是 Plugin 交还的待加密材料（region 路由元数据加 opaque `payloadJson`），`toString` 有意省略秘密载荷；[`PluginCredentialSnapshot`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginCredentialSnapshot.java) 是本次调用所需的解密快照，携带行版本、认证代际与原始密文供调用期 CAS，数组访问做防御性拷贝。
 
 [`PluginContext`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginContext.java) 只暴露本插件的 [`PluginCredentialAccess`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/credential/PluginCredentialAccess.java) 与可选资源网关。凭据访问没有 pluginId 参数，只能取得本插件快照或作废本次已用凭据；宿主拒绝跨插件快照。
 

@@ -16,6 +16,7 @@ import fun.fengwk.kkstudio.platform.plugin.persistence.PluginCredentialRow;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 /**
  * 内存凭据仓库自身模拟 SQL 语义的单元测试。
@@ -24,6 +25,10 @@ import java.util.Optional;
  * finalizeFailure、releaseLease 以及版本偷取等行为与 PostgreSQL 实现的一致性。
  */
 class InMemoryPluginCredentialRepositoryTest {
+
+  /** 本测试使用的固定认证代际：仓库/CAS 断言只要求同代际内一致。 */
+  private static final UUID AUTH_GENERATION =
+      UUID.fromString("00000000-0000-0000-0000-0000000000b1");
 
   private InMemoryPluginCredentialRepository repository;
   private final Instant now = Instant.parse("2026-09-21T18:00:00Z");
@@ -37,6 +42,7 @@ class InMemoryPluginCredentialRepositoryTest {
       String pluginId, PluginCredentialStatus status, Instant nextRefreshAt) {
     return new PluginCredentialRow(
         pluginId,
+        AUTH_GENERATION,
         new byte[] {1, 2, 3},
         "CN",
         now.plusSeconds(3600),
@@ -49,6 +55,41 @@ class InMemoryPluginCredentialRepositoryTest {
         0L,
         now,
         now);
+  }
+
+  /** 构造指定认证代际的行，用于断言 upsert 采用传入代际。 */
+  private PluginCredentialRow rowWithGeneration(
+      String pluginId, UUID authGeneration, Instant nextRefreshAt) {
+    return new PluginCredentialRow(
+        pluginId,
+        authGeneration,
+        new byte[] {1, 2, 3},
+        "CN",
+        now.plusSeconds(3600),
+        nextRefreshAt,
+        PluginCredentialStatus.CONNECTED,
+        null,
+        null,
+        null,
+        null,
+        0L,
+        now,
+        now);
+  }
+
+  /** upsert 采用传入的新代际（模拟 SQL 的 auth_generation = excluded）：人工完整替换必然换代际而不是保留旧值。 */
+  @Test
+  void upsertAdoptsTheIncomingAuthGenerationOnEveryReplace() {
+    UUID firstGeneration = UUID.fromString("11111111-1111-1111-1111-111111111111");
+    UUID secondGeneration = UUID.fromString("22222222-2222-2222-2222-222222222222");
+
+    assertTrue(repository.upsert(rowWithGeneration("p1", firstGeneration, now.plusSeconds(100))));
+    assertEquals(firstGeneration, repository.getDirect("p1").authGeneration());
+
+    assertTrue(repository.upsert(rowWithGeneration("p1", secondGeneration, now.plusSeconds(200))));
+    PluginCredentialRow replaced = repository.getDirect("p1");
+    assertEquals(secondGeneration, replaced.authGeneration());
+    assertEquals(1L, replaced.version());
   }
 
   /** upsert 模拟：首次插入 version=0；已存在时整体替换并推进 version+1，并清空在途 lease。 */
@@ -67,6 +108,7 @@ class InMemoryPluginCredentialRepositoryTest {
     repository.setDirect(
         new PluginCredentialRow(
             inserted.pluginId(),
+            inserted.authGeneration(),
             inserted.encryptedPayload(),
             inserted.region(),
             inserted.expiresAt(),
@@ -84,6 +126,7 @@ class InMemoryPluginCredentialRepositoryTest {
     PluginCredentialRow replacement =
         new PluginCredentialRow(
             "p1",
+            AUTH_GENERATION,
             new byte[] {9, 9, 9},
             "US",
             now.plusSeconds(7200),
@@ -143,6 +186,7 @@ class InMemoryPluginCredentialRepositoryTest {
     PluginCredentialRow expired =
         new PluginCredentialRow(
             "expired-p",
+            AUTH_GENERATION,
             new byte[] {1},
             "CN",
             now.plusSeconds(1000),
@@ -161,6 +205,7 @@ class InMemoryPluginCredentialRepositoryTest {
     PluginCredentialRow active =
         new PluginCredentialRow(
             "active-p",
+            AUTH_GENERATION,
             new byte[] {1},
             "CN",
             now.plusSeconds(1000),
@@ -179,6 +224,7 @@ class InMemoryPluginCredentialRepositoryTest {
     PluginCredentialRow noLease =
         new PluginCredentialRow(
             "no-lease-p",
+            AUTH_GENERATION,
             new byte[] {1},
             "CN",
             now.plusSeconds(1000),
@@ -197,6 +243,7 @@ class InMemoryPluginCredentialRepositoryTest {
     PluginCredentialRow outsideList =
         new PluginCredentialRow(
             "outside-p",
+            AUTH_GENERATION,
             new byte[] {1},
             "CN",
             now.plusSeconds(1000),
@@ -253,6 +300,7 @@ class InMemoryPluginCredentialRepositoryTest {
     repository.setDirect(
         new PluginCredentialRow(
             "p5",
+            AUTH_GENERATION,
             new byte[] {1},
             "CN",
             now.plusSeconds(1000),
@@ -294,6 +342,7 @@ class InMemoryPluginCredentialRepositoryTest {
     PluginCredentialRow row =
         new PluginCredentialRow(
             "p1",
+            AUTH_GENERATION,
             new byte[] {1},
             "CN",
             now.plusSeconds(1000),
@@ -312,6 +361,7 @@ class InMemoryPluginCredentialRepositoryTest {
     assertFalse(
         repository.finalizeSuccess(
             "p1",
+            AUTH_GENERATION,
             "wrong-tok",
             5L,
             new byte[] {2},
@@ -327,6 +377,7 @@ class InMemoryPluginCredentialRepositoryTest {
     assertFalse(
         repository.finalizeSuccess(
             "p1",
+            AUTH_GENERATION,
             "tok-1",
             4L,
             new byte[] {2},
@@ -341,6 +392,7 @@ class InMemoryPluginCredentialRepositoryTest {
     assertTrue(
         repository.finalizeSuccess(
             "p1",
+            AUTH_GENERATION,
             "tok-1",
             5L,
             new byte[] {2},
@@ -358,6 +410,7 @@ class InMemoryPluginCredentialRepositoryTest {
     repository.setDirect(
         new PluginCredentialRow(
             "p1",
+            AUTH_GENERATION,
             new byte[] {2},
             "CN",
             now.plusSeconds(2000),
@@ -375,6 +428,7 @@ class InMemoryPluginCredentialRepositoryTest {
     assertTrue(
         repository.finalizeFailure(
             "p1",
+            AUTH_GENERATION,
             "tok-2",
             6L,
             PluginCredentialStatus.REFRESH_FAILED,
@@ -391,6 +445,7 @@ class InMemoryPluginCredentialRepositoryTest {
     repository.setDirect(
         new PluginCredentialRow(
             "p1",
+            AUTH_GENERATION,
             new byte[] {2},
             "CN",
             now.plusSeconds(2000),
@@ -405,7 +460,7 @@ class InMemoryPluginCredentialRepositoryTest {
             now));
 
     // 5. releaseLease 成功：lease 清空且推进 version+1，状态保持 CONNECTED
-    assertTrue(repository.releaseLease("p1", "tok-3", 7L, now));
+    assertTrue(repository.releaseLease("p1", AUTH_GENERATION, "tok-3", 7L, now));
     PluginCredentialRow afterRelease = repository.getDirect("p1");
     assertEquals(8L, afterRelease.version());
     assertEquals(PluginCredentialStatus.CONNECTED, afterRelease.status());
@@ -418,6 +473,7 @@ class InMemoryPluginCredentialRepositoryTest {
     PluginCredentialRow row =
         new PluginCredentialRow(
             "p1",
+            AUTH_GENERATION,
             new byte[] {1},
             "CN",
             now.plusSeconds(1000),

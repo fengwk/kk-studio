@@ -5,11 +5,13 @@ import fun.fengwk.kkstudio.platform.plugin.PluginCredentialStatus;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 /**
- * {@code plugin_credential} 的原子 SQL 契约：一行一凭据，写入必须是单条条件语句，并发靠 CAS version 与 lease token 围栏。
+ * {@code plugin_credential} 的原子 SQL 契约：一行一凭据，写入必须是单条条件语句，并发靠 CAS version、lease token 与认证代际围栏。
  *
- * <p>所有 finalize / release 都要求同时匹配 lease token 与 version，因此迟到或来自另一节点的写入只能失败，不能覆盖新凭据或新状态。
+ * <p>所有 finalize / release 都要求同时匹配 lease token、version 与认证代际，因此迟到或来自另一节点的写入只能失败，不能覆盖新凭据、新状态或
+ * 断连重建后的新代际行。
  */
 public interface PluginCredentialRepository {
 
@@ -17,9 +19,10 @@ public interface PluginCredentialRepository {
   Optional<PluginCredentialRow> find(String pluginId);
 
   /**
-   * 写入新凭据：行不存在则插入 {@code version = 0}，已存在则在同一条语句内覆盖载荷与元数据、清空 lease 并把 {@code version + 1}。
+   * 写入新凭据：行不存在则插入 {@code version = 0}，已存在则在同一条语句内覆盖载荷、认证代际与元数据、清空 lease 并把 {@code version + 1}。
    *
-   * <p>重新登录总是整体替换旧凭据，因此不传 version：用户显式认证的优先级高于任何在途刷新。
+   * <p>重新登录总是整体替换旧凭据，因此不传 version：用户显式认证的优先级高于任何在途刷新。认证代际由调用方每次生成新 UUID，即使载荷相同也 不重复，从而关闭「删除后重建 +
+   * {@code version} 归零」的 ABA。
    */
   boolean upsert(PluginCredentialRow row);
 
@@ -44,9 +47,10 @@ public interface PluginCredentialRepository {
   List<PluginCredentialRow> claimDue(
       List<String> pluginIds, Instant now, Instant leaseUntil, String leaseToken, int limit);
 
-  /** 成功终结：替换密文与时间、回到 {@code CONNECTED}，要求 lease token 与 version 都匹配。 */
+  /** 成功终结：替换密文与时间、回到 {@code CONNECTED}，要求 lease token、version 与认证代际都匹配。 */
   boolean finalizeSuccess(
       String pluginId,
+      UUID authGeneration,
       String leaseToken,
       long version,
       byte[] encryptedPayload,
@@ -56,9 +60,10 @@ public interface PluginCredentialRepository {
       Instant refreshedAt,
       Instant now);
 
-  /** 失败终结：写入终态、下一刷新时刻与有界去敏错误，清空 lease，要求 lease token 与 version 都匹配。 */
+  /** 失败终结：写入终态、下一刷新时刻与有界去敏错误，清空 lease，要求 lease token、version 与认证代际都匹配。 */
   boolean finalizeFailure(
       String pluginId,
+      UUID authGeneration,
       String leaseToken,
       long version,
       PluginCredentialStatus status,
@@ -66,15 +71,17 @@ public interface PluginCredentialRepository {
       String error,
       Instant now);
 
-  /** 释放 lease 且不改状态：无法解析凭据或 Plugin 无刷新能力时使用，要求 lease token 与 version 都匹配。 */
-  boolean releaseLease(String pluginId, String leaseToken, long version, Instant now);
+  /** 释放 lease 且不改状态：无法解析凭据或 Plugin 无刷新能力时使用，要求 lease token、version 与认证代际都匹配。 */
+  boolean releaseLease(
+      String pluginId, UUID authGeneration, String leaseToken, long version, Instant now);
 
   /**
-   * 当前 lease 是否仍由该 token 与 version 持有且截止时刻晚于 {@code now}。
+   * 当前 lease 是否仍由该 token 与 version 持有、认证代际一致且截止时刻晚于 {@code now}。
    *
-   * <p>外部刷新只能在这个条件成立时发出：lease 过期、被另一节点收敛或被重新登录替换后都必须返回 false。
+   * <p>外部刷新只能在这个条件成立时发出：lease 过期、被另一节点收敛、重新登录替换或断连后被同版本新代际行取代后都必须返回 false。
    */
-  boolean ownsUnexpiredLease(String pluginId, String leaseToken, long version, Instant now);
+  boolean ownsUnexpiredLease(
+      String pluginId, UUID authGeneration, String leaseToken, long version, Instant now);
 
   /**
    * 已安装 Plugin 中最早的可调度刷新时刻。
@@ -84,12 +91,17 @@ public interface PluginCredentialRepository {
   Optional<Instant> earliestRefreshAt(List<String> pluginIds, Instant now);
 
   /**
-   * 调用期认证拒绝只作废本次已用凭据：version 或原始密文匹配才把该行置为 {@code REAUTH_REQUIRED}。
+   * 调用期认证拒绝只作废本次已用凭据：认证代际匹配，且 version 或原始密文匹配才把该行置为 {@code REAUTH_REQUIRED}。
    *
-   * <p>并发重新登录写入的新 version 与新密文都不会命中，因此不会误杀新 token。
+   * <p>并发重新登录写入的新 version、新密文与新代际都不会命中；断连后被同 version 的新代际行取代也不会命中，因此不会误杀新 token。
    *
    * @return 是否实际作废了当前行
    */
   boolean rejectUsedCredential(
-      String pluginId, long version, byte[] encryptedPayload, String error, Instant now);
+      String pluginId,
+      UUID authGeneration,
+      long version,
+      byte[] encryptedPayload,
+      String error,
+      Instant now);
 }

@@ -187,7 +187,9 @@ public final class PluginCredentialRefreshService {
     }
     String payload;
     try {
-      payload = codec.decrypt(key, row.pluginId(), row.region(), row.encryptedPayload());
+      payload =
+          codec.decrypt(
+              key, row.pluginId(), row.authGeneration(), row.region(), row.encryptedPayload());
     } catch (RuntimeException error) {
       return finalizeFailure(
           row, PluginCredentialStatus.REAUTH_REQUIRED, row.nextRefreshAt(), UNREADABLE_ERROR);
@@ -201,6 +203,7 @@ public final class PluginCredentialRefreshService {
     PluginCredentialSnapshot snapshot =
         new PluginCredentialSnapshot(
             row.pluginId(),
+            row.authGeneration(),
             row.region(),
             row.expiresAt(),
             row.version(),
@@ -241,7 +244,9 @@ public final class PluginCredentialRefreshService {
     byte[] envelope;
     try {
       requireUsable(plugin, row, material, completedAt);
-      envelope = codec.encrypt(key, row.pluginId(), material.region(), material.payloadJson());
+      envelope =
+          codec.encrypt(
+              key, row.pluginId(), row.authGeneration(), material.region(), material.payloadJson());
     } catch (IllegalArgumentException error) {
       return finalizeFailure(
           row,
@@ -252,6 +257,7 @@ public final class PluginCredentialRefreshService {
     boolean finalized =
         repository.finalizeSuccess(
             row.pluginId(),
+            row.authGeneration(),
             row.refreshLeaseToken(),
             row.version(),
             envelope,
@@ -302,6 +308,7 @@ public final class PluginCredentialRefreshService {
     boolean finalized =
         repository.finalizeFailure(
             row.pluginId(),
+            row.authGeneration(),
             row.refreshLeaseToken(),
             row.version(),
             status,
@@ -314,16 +321,24 @@ public final class PluginCredentialRefreshService {
     return finalized;
   }
 
-  /** 外部调用前的最后一道围栏：token、version 与截止时刻任一失效都不得外呼。 */
+  /** 外部调用前的最后一道围栏：代际、token、version 与截止时刻任一失效都不得外呼。 */
   private boolean stillOwnsLease(PluginCredentialRow row) {
     return repository.ownsUnexpiredLease(
-        row.pluginId(), row.refreshLeaseToken(), row.version(), clock.instant());
+        row.pluginId(),
+        row.authGeneration(),
+        row.refreshLeaseToken(),
+        row.version(),
+        clock.instant());
   }
 
   private void releaseLease(PluginCredentialRow row) {
     boolean released =
         repository.releaseLease(
-            row.pluginId(), row.refreshLeaseToken(), row.version(), clock.instant());
+            row.pluginId(),
+            row.authGeneration(),
+            row.refreshLeaseToken(),
+            row.version(),
+            clock.instant());
     if (!released) {
       log.debug("Lost plugin credential refresh race for {}", row.pluginId());
     }
