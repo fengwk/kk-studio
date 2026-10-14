@@ -173,6 +173,19 @@
                                 <rule>
                                     <element>CLASS</element>
                                     <includes>
+                                        <include>fun.fengwk.kkstudio.web.events.SubscriptionFanOut</include>
+                                    </includes>
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.90</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                                <rule>
+                                    <element>CLASS</element>
+                                    <includes>
                                         <include>fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapper</include>
                                     </includes>
                                     <limits>

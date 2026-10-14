@@ -9,12 +9,8 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.function.Consumer;
 
 /**
@@ -35,7 +31,7 @@ final class CanvasVersionHub implements CanvasVersionEventSource {
   static final String CHANNEL = "canvas_revision";
 
   private final DataSource dataSource;
-  private final Map<UUID, Set<Consumer<Event>>> subscribers = new ConcurrentHashMap<>();
+  private final SubscriptionFanOut<Event> subscribers = new SubscriptionFanOut<>();
 
   CanvasVersionHub(DataSource dataSource) {
     this.dataSource = Objects.requireNonNull(dataSource, "dataSource");
@@ -44,33 +40,15 @@ final class CanvasVersionHub implements CanvasVersionEventSource {
   @Override
   public SourceSubscribed subscribe(UUID canvasId, Consumer<Event> consumer) {
     Objects.requireNonNull(canvasId, "canvasId");
-    Objects.requireNonNull(consumer, "consumer");
-    // add 与 map 条目创建在同一 compute 内原子完成；最后释放的 remove-if-empty 在 computeIfPresent 内原子完成，
-    // 杜绝「新订阅者加入已移除集合」的 detached subscriber 竞态。
-    subscribers.compute(
-        canvasId,
-        (id, existing) -> {
-          Set<Consumer<Event>> canvasSubscribers =
-              existing != null ? existing : new CopyOnWriteArraySet<>();
-          canvasSubscribers.add(consumer);
-          return canvasSubscribers;
-        });
+    // 先注册 consumer 再读当前 revision 返回，保证返回的 cursor 之后的事件不因注册竞态丢失。
+    Runnable unsubscribe = subscribers.subscribe(canvasId, consumer);
     try {
-      long cursor = currentRevision(canvasId);
-      return new SourceSubscribed(cursor, () -> release(canvasId, consumer));
-    } catch (RuntimeException error) {
-      release(canvasId, consumer);
+      return new SourceSubscribed(currentRevision(canvasId), unsubscribe::run);
+    } catch (RuntimeException | Error error) {
+      // 权威查询失败必须释放刚建立的注册，并保留原始异常（Error 同样不得吞）。
+      unsubscribe.run();
       throw error;
     }
-  }
-
-  private void release(UUID canvasId, Consumer<Event> consumer) {
-    subscribers.computeIfPresent(
-        canvasId,
-        (id, canvasSubscribers) -> {
-          canvasSubscribers.remove(consumer);
-          return canvasSubscribers.isEmpty() ? null : canvasSubscribers;
-        });
   }
 
   void onNotification(String payload) {
@@ -80,7 +58,7 @@ final class CanvasVersionHub implements CanvasVersionEventSource {
       broadcastResync();
       return;
     }
-    publish(notification.canvasId(), new Event(notification.revision(), false));
+    subscribers.publish(notification.canvasId(), new Event(notification.revision(), false));
   }
 
   private long currentRevision(UUID canvasId) {
@@ -100,22 +78,7 @@ final class CanvasVersionHub implements CanvasVersionEventSource {
   }
 
   void broadcastResync() {
-    subscribers.forEach((canvasId, ignored) -> publish(canvasId, new Event(null, true)));
-  }
-
-  private void publish(UUID canvasId, Event event) {
-    Set<Consumer<Event>> canvasSubscribers = subscribers.get(canvasId);
-    if (canvasSubscribers != null) {
-      // 单个消费者回调异常只隔离该消费者，不阻断同资源其他消费者，也不杀死 LISTEN 循环。
-      for (Consumer<Event> consumer : canvasSubscribers) {
-        try {
-          consumer.accept(event);
-        } catch (RuntimeException error) {
-          log.warn(
-              "canvas revision subscriber callback failed canvasId={}; skipping", canvasId, error);
-        }
-      }
-    }
+    subscribers.broadcast(new Event(null, true));
   }
 
   static CanvasRevision parseNotification(String payload) {
