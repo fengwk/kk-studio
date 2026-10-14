@@ -9,7 +9,6 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -33,8 +32,6 @@ import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.PostgresqlPlug
 import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.PostgresqlPluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.store.PluginConfigurationJdbcStore;
 import fun.fengwk.kkstudio.platform.plugin.resource.PluginResourceGateway;
-import fun.fengwk.kkstudio.plugin.minimaxmavis.MavisHttpTransport;
-import fun.fengwk.kkstudio.plugin.minimaxmavis.MiniMaxMavisAutoConfiguration;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
 import javax.sql.DataSource;
@@ -229,31 +226,21 @@ class PluginCatalogMavisRevisionPostgresIntegrationTest extends WebPostgresTestS
   }
 
   private ApplicationContextRunner contextRunner(AtomicInteger remoteRequests) {
-    return new ApplicationContextRunner()
-        .withUserConfiguration(PluginCatalogConfiguration.class, RegistryConfiguration.class)
-        .withBean(PluginCredentialStore.class, () -> mock(PluginCredentialStore.class))
-        .withBean(PluginConfigurationRepository.class, this::repository)
-        .withBean(
-            PlatformTransactionManager.class, () -> new DataSourceTransactionManager(dataSource))
-        .withInitializer(
-            context ->
-                context
-                    .getBeanFactory()
-                    .registerSingleton("mavisHttpTransport", offlineTransport(remoteRequests)))
-        .withConfiguration(AutoConfigurations.of(MiniMaxMavisAutoConfiguration.class));
+    return RuntimeMavisTestSupport.withMavis(
+        new ApplicationContextRunner()
+            .withUserConfiguration(PluginCatalogConfiguration.class, RegistryConfiguration.class)
+            .withBean(PluginCredentialStore.class, () -> mock(PluginCredentialStore.class))
+            .withBean(PluginConfigurationRepository.class, this::repository)
+            .withBean(
+                PlatformTransactionManager.class,
+                () -> new DataSourceTransactionManager(dataSource)),
+        remoteRequests);
   }
 
   private PluginConfigurationRepository repository() {
     return new PostgresqlPluginConfigurationRepository(
         new PluginConfigurationJdbcStore(JdbcClient.create(dataSource)),
         new PostgresqlPluginCatalogChangeNotifier(new JdbcTemplate(dataSource)));
-  }
-
-  private static MavisHttpTransport offlineTransport(AtomicInteger remoteRequests) {
-    return request -> {
-      remoteRequests.incrementAndGet();
-      throw new AssertionError("plugin startup and restore must not issue remote requests");
-    };
   }
 
   private static long epoch(JdbcClient jdbc) {
