@@ -18,6 +18,7 @@ import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.SimpleDriverDataSource;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
+import tools.jackson.databind.JsonNode;
 
 import fun.fengwk.kkstudio.harness.common.json.JsonValues;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
@@ -32,6 +33,7 @@ import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfigSchema;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfigurationState;
 import fun.fengwk.kkstudio.platform.plugin.PluginContext;
+import fun.fengwk.kkstudio.platform.plugin.PluginCredentialIntegrityException;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialMaterial;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialSnapshot;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialStatus;
@@ -73,6 +75,7 @@ import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -592,6 +595,133 @@ class PluginConfigurationCommitServicePostgresIntegrationTest {
         () -> commitService.configure("unknown.plugin", 1L, 1L, "{}", Map.of()));
   }
 
+  /**
+   * 多个 SET 的组合会叠加成一份载荷：多字节与转义展开都在完整分配前受同一份 64 KiB 预算约束，超限整体拒绝。
+   *
+   * <p>失败必须发生在任何写入之前：epoch、历史行与凭据行逐项保持不变，且错误文本绝不回显任何秘密值。
+   */
+  @Test
+  void oversizedSecretPatchIsRejectedWithoutAnyWrite() {
+    long epochBefore = configurationRepository.readCatalog().epoch();
+    int historyBefore = countHistoryRows();
+    String marker = "oversized-marker-4242";
+    // 每个值本身都满足单值预算（<=4096 字符且 <=4096 UTF-8 字节），但转义展开合计远超 64 KiB。
+    String escaped = "\u0001".repeat(4070) + marker;
+    String multibyte = "\u4e2d".repeat(1300);
+
+    AiValidationException error =
+        assertThrows(
+            AiValidationException.class,
+            () ->
+                commitService.configure(
+                    STATIC_PLUGIN_ID,
+                    1L,
+                    1L,
+                    BOOTSTRAP_VALUES,
+                    Map.of(
+                        "apiKey", PluginSecretPatch.set(escaped),
+                        "apiSecret", PluginSecretPatch.set(escaped),
+                        "apiToken", PluginSecretPatch.set(multibyte),
+                        "apiSalt", PluginSecretPatch.set("\u0001".repeat(4090)))));
+
+    assertFalse(
+        error.getMessage().contains(marker), "the rejection must not echo any secret value");
+    assertFalse(error.toString().contains(marker));
+    assertEquals(epochBefore, configurationRepository.readCatalog().epoch());
+    assertEquals(historyBefore, countHistoryRows());
+    assertTrue(credentialRepository.find(STATIC_PLUGIN_ID).isEmpty());
+    assertEquals(0, dispatcherWakes.get());
+  }
+
+  /**
+   * 已被全部替换或清除的旧秘密绝不解密：旧密文不可解时，整体 SET 覆盖与缺主密钥的整体 CLEAR 仍必须成功。
+   *
+   * <p>反过来，只要还有字段靠 KEEP 保留，旧密文仍是必要输入，此时不可解的旧密文必须 fail closed 而不是被静默丢弃。
+   */
+  @Test
+  void replacingOrClearingEveryConfiguredFieldNeverDecryptsTheOldSecret() throws SQLException {
+    commitService.configure(
+        STATIC_PLUGIN_ID,
+        1L,
+        1L,
+        BOOTSTRAP_VALUES,
+        Map.of(
+            "apiKey", PluginSecretPatch.set(FRESH_PAYLOAD_SECRET),
+            "apiSecret", PluginSecretPatch.set(STATIC_PAYLOAD_SECRET)));
+    assertEquals(
+        Set.of("apiKey", "apiSecret"),
+        Set.copyOf(
+            configurationRepository
+                .readConfiguration(STATIC_PLUGIN_ID, 2L)
+                .orElseThrow()
+                .configuredSecretFields()),
+        "both declared fields must be recorded as configured");
+
+    // 旧密文改成不可解：任何解密尝试都会失败，因此成功提交即证明旧值从未被读取。
+    corruptCredentialPayload();
+
+    // 全部 SET 覆盖：两个已录入字段都被替换，旧（不可解）密文不参与候选载荷。
+    commitService.configure(
+        STATIC_PLUGIN_ID,
+        2L,
+        2L,
+        BOOTSTRAP_VALUES,
+        Map.of(
+            "apiKey", PluginSecretPatch.set("rotated-key-1"),
+            "apiSecret", PluginSecretPatch.set("rotated-key-2")));
+    JsonNode rotated =
+        JsonValues.readTree(
+            credentialStore.resolve(currentReference(STATIC_PLUGIN_ID)).payloadJson());
+    assertEquals(2, rotated.size(), "only this commit's fields may remain in the payload");
+    assertEquals("rotated-key-1", rotated.get("apiKey").asString());
+    assertEquals("rotated-key-2", rotated.get("apiSecret").asString());
+    assertEquals(3L, configurationRepository.readCatalog().epoch());
+
+    // 仍有字段靠 KEEP 保留：旧密文是必要输入，不可解即 fail closed，且不留痕迹。
+    corruptCredentialPayload();
+    long epochBeforeRefusal = configurationRepository.readCatalog().epoch();
+    assertThrows(
+        PluginCredentialIntegrityException.class,
+        () ->
+            commitService.configure(
+                STATIC_PLUGIN_ID,
+                3L,
+                3L,
+                BOOTSTRAP_VALUES,
+                Map.of("apiKey", PluginSecretPatch.set("partial-rotation"))));
+    assertEquals(epochBeforeRefusal, configurationRepository.readCatalog().epoch());
+
+    // 全部 CLEAR：缺主密钥也必须能撤销全部已录入字段，绝不尝试解密旧密文。
+    keylessCommitService.configure(
+        STATIC_PLUGIN_ID,
+        3L,
+        3L,
+        BOOTSTRAP_VALUES,
+        Map.of(
+            "apiKey", PluginSecretPatch.clear(),
+            "apiSecret", PluginSecretPatch.clear()));
+    assertTrue(credentialRepository.find(STATIC_PLUGIN_ID).isEmpty());
+    assertEquals(4L, configurationRepository.readCatalog().epoch());
+    assertEquals(
+        List.of(),
+        configurationRepository
+            .readConfiguration(STATIC_PLUGIN_ID, 4L)
+            .orElseThrow()
+            .configuredSecretFields());
+  }
+
+  /** 把当前凭据行改成不可解密的密文：任何解密尝试都会失败，从而证明旧值从未被读取。 */
+  private void corruptCredentialPayload() throws SQLException {
+    try (Connection conn = PostgresSchemaSupport.newConnection();
+        Statement statement = conn.createStatement()) {
+      statement.execute(
+          "update plugin_credential set encrypted_payload = decode('00ff', 'hex')"
+              + " where plugin_id = '"
+              + STATIC_PLUGIN_ID
+              + "'");
+    }
+  }
+
   /** 在真实凭据行上植入一行已连接秘密，用于 KEEP/CLEAR 基线。 */
   private void seedStaticCredential(String secret) {
     String payload = "{\"apiKey\":\"" + secret + "\"}";
@@ -665,7 +795,7 @@ class PluginConfigurationCommitServicePostgresIntegrationTest {
     return -1;
   }
 
-  /** 静态密钥 Plugin：一个用于绑定认证上下文的普通字段、一个与上下文无关的普通字段，以及一个声明的秘密字段。 */
+  /** 静态密钥 Plugin：一个用于绑定认证上下文的普通字段、一个与上下文无关的普通字段，以及四个声明的秘密字段。 */
   private static final class StaticKeyPlugin implements StudioPlugin {
 
     static final String VERSION = "1.0";
@@ -686,7 +816,11 @@ class PluginConfigurationCommitServicePostgresIntegrationTest {
                 Set.of(),
                 false),
             "{\"endpoint\":\"https://api.example.com\",\"label\":\"default\"}",
-            Map.of("apiKey", "static API key"));
+            Map.of(
+                "apiKey", "static API key",
+                "apiSecret", "static API secret",
+                "apiToken", "static API token",
+                "apiSalt", "static API salt"));
 
     PluginAuthSpec authSpec() {
       return new PluginAuthSpec.StaticKey("apiKey", Set.of("endpoint"));

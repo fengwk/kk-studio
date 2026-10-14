@@ -4,6 +4,7 @@ import fun.fengwk.convention4j.api.result.Result;
 import fun.fengwk.convention4j.common.result.Results;
 import lombok.AllArgsConstructor;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -55,14 +56,18 @@ public class StudioPluginController {
     return Results.ok(pluginManagementService.getPlugin(pluginId));
   }
 
-  /** 保存普通配置与秘密补丁：期望 epoch 与 revision 都不可省略，冲突返回 409。 */
+  /**
+   * 保存普通配置与秘密补丁：期望 epoch 与 revision 都不可省略，冲突返回 409。
+   *
+   * <p>保存不是发布：本节点尚未应用本次保存时返回 {@code 202 Accepted}（响应体仍携带权威 desired 坐标与本节点 applied 视图），已应用时返回 {@code
+   * 200 OK}；两者都强制 {@code Cache-Control: no-store}。
+   */
   @PutMapping("/{pluginId}/configuration")
   public ResponseEntity<Result<PluginDTO>> updateConfiguration(
       @PathVariable("pluginId") String pluginId,
       @RequestBody PluginConfigurationUpdateRequestDTO request) {
-    long expectedEpoch = CatalogVersions.parse(request.getExpectedEpoch(), "expectedEpoch");
-    long expectedRevision =
-        CatalogVersions.parse(request.getExpectedRevision(), "expectedRevision");
+    long expectedEpoch = parseCoordinate(request.getExpectedEpoch(), "expectedEpoch");
+    long expectedRevision = parseCoordinate(request.getExpectedRevision(), "expectedRevision");
     PluginDTO pluginDTO =
         pluginManagementService.updateConfiguration(
             pluginId,
@@ -70,7 +75,9 @@ public class StudioPluginController {
             expectedRevision,
             request.getValuesJson(),
             toSecretPatch(request.getSecretPatch()));
-    return ResponseEntity.ok()
+    HttpStatus status =
+        pluginDTO.getApplicationError() == null ? HttpStatus.OK : HttpStatus.ACCEPTED;
+    return ResponseEntity.status(status)
         .header(HttpHeaders.CACHE_CONTROL, NO_STORE)
         .body(Results.ok(pluginDTO));
   }
@@ -101,6 +108,15 @@ public class StudioPluginController {
   public Result<Void> disconnect(@PathVariable("pluginId") String pluginId) {
     pluginManagementService.disconnect(pluginId);
     return Results.noContent();
+  }
+
+  private static long parseCoordinate(String value, String field) {
+    try {
+      return CatalogVersions.parse(value, field);
+    } catch (AiValidationException error) {
+      throw new AiValidationException(
+          RESOURCE, field + " must be a canonical non-negative decimal string");
+    }
   }
 
   /** 把请求体的秘密补丁映射为领域操作：KEEP/CLEAR 禁止携带值，SET 必须有界且非遮罩；任何失败都收敛为固定校验失败，绝不回显值。 */

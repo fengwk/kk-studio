@@ -17,7 +17,7 @@ final class PluginConfigurationHistory {
   /**
    * 读取并核对 entry 所引用的历史行。
    *
-   * @throws IllegalStateException 历史行缺失，或修订/代码版本/schema 指纹/能力指纹/认证代际/上下文指纹与 entry 不一致
+   * @throws IllegalStateException 历史行缺失，或 pluginId/修订/代码版本/schema 指纹/能力指纹/认证代际/上下文指纹与请求方不一致
    */
   static PluginConfigurationRow require(
       PluginConfigurationRepository repository,
@@ -33,7 +33,8 @@ final class PluginConfigurationHistory {
                             + pluginId
                             + " revision="
                             + entry.configRevision()));
-    if (row.revision() != entry.configRevision()
+    if (!row.pluginId().equals(pluginId)
+        || row.revision() != entry.configRevision()
         || !row.codeVersion().equals(entry.pluginCodeVersion())
         || !row.schemaFingerprint().equals(entry.schemaFingerprint())
         || !row.capabilityFingerprint().equals(entry.capabilityFingerprint())

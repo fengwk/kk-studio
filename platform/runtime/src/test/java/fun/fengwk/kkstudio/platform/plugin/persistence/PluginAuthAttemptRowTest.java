@@ -1,9 +1,12 @@
 package fun.fengwk.kkstudio.platform.plugin.persistence;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
+
+import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.model.PluginAuthAttemptDO;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -27,6 +30,23 @@ class PluginAuthAttemptRowTest {
     assertEquals(3L, row.configRevision());
     assertEquals("CN", row.region());
     assertEquals(EXPIRES_AT, row.expiresAt());
+  }
+
+  /** 摘要与句柄同源：任何文本渲染（行与持久化投影）都不得回显它。 */
+  @Test
+  void digestIsExcludedFromEveryTextRendering() {
+    PluginAuthAttemptRow row = row(HASH, CONTEXT, 3L, "CN");
+    assertFalse(row.toString().contains(HASH), row.toString());
+
+    PluginAuthAttemptDO dataObject = new PluginAuthAttemptDO();
+    dataObject.setPluginId(row.pluginId());
+    dataObject.setNonceHash(row.nonceHash());
+    dataObject.setAuthGeneration(row.authGeneration());
+    dataObject.setContextFingerprint(row.contextFingerprint());
+    dataObject.setConfigRevision(row.configRevision());
+    dataObject.setRegion(row.region());
+    dataObject.setExpiresAt(row.expiresAt());
+    assertFalse(dataObject.toString().contains(HASH), dataObject.toString());
   }
 
   @Test

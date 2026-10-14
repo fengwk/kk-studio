@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.share.ai.plugin;
 import com.fasterxml.jackson.annotation.JsonAnySetter;
 import lombok.Data;
 import lombok.ToString;
+import tools.jackson.databind.annotation.JsonDeserialize;
 
 import java.util.Map;
 
@@ -19,10 +20,12 @@ import java.util.Map;
 @Data
 public class PluginConfigurationUpdateRequestDTO {
 
-  /** 期望的全局 catalog epoch（canonical 非负十进制字符串，必填）。 */
+  /** 期望的全局 catalog epoch（canonical 非负十进制字符串，必填）；数字/布尔/null 一律拒绝，绝不做标量强制转换。 */
+  @JsonDeserialize(using = PluginWireTextDeserializer.class)
   private String expectedEpoch;
 
-  /** 期望的该插件配置修订（canonical 非负十进制字符串，必填）。 */
+  /** 期望的该插件配置修订（canonical 非负十进制字符串，必填）；数字/布尔/null 一律拒绝，绝不做标量强制转换。 */
+  @JsonDeserialize(using = PluginWireTextDeserializer.class)
   private String expectedRevision;
 
   /** 严格 JSON object 的普通配置值原文；秘密绝不进入这里。 */

@@ -13,8 +13,25 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import fun.fengwk.kkstudio.canvas.CanvasJson;
+import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionExecutionContext;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.common.schema.StringSchema;
+import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
+import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
+import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
+import fun.fengwk.kkstudio.harness.contributor.api.Tool;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
+import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
@@ -34,6 +51,7 @@ import fun.fengwk.kkstudio.platform.plugin.PluginKeyUnavailableException;
 import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
 import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogBootstrap;
+import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRecord;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogSnapshot;
 import fun.fengwk.kkstudio.platform.plugin.credential.DatabasePluginCredentialStore;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialAccess;
@@ -68,6 +86,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -85,6 +104,7 @@ class PluginManagementServiceTest {
   private static final String PLUGIN_ID = "managed-plugin";
   private static final String NO_AUTH_PLUGIN_ID = "no-auth-plugin";
   private static final String STATIC_KEY_PLUGIN_ID = "static-key-plugin";
+  private static final String CONTRIBUTING_PLUGIN_ID = "contributing-plugin";
   private static final String REGION_CN = "CN";
   private static final String REGION_US = "US";
   private static final String SECRET_TOKEN_MARKER = "very-secret-callback-token-marker-654321";
@@ -125,7 +145,9 @@ class PluginManagementServiceTest {
     authPlugin = new TestAuthPlugin();
     staticKeyPlugin = new TestStaticKeyPlugin();
     registry =
-        new StudioPluginRegistry(List.of(authPlugin, new TestNoAuthPlugin(), staticKeyPlugin));
+        new StudioPluginRegistry(
+            List.of(
+                authPlugin, new TestNoAuthPlugin(), staticKeyPlugin, new TestContributingPlugin()));
 
     // 用真实启动装配建立 epoch 1 的 manifest 与配置历史：管理面与提交服务都只看权威行。
     snapshot =
@@ -173,7 +195,7 @@ class PluginManagementServiceTest {
     completeAuthOfManagedPlugin("{\"token\":\"" + SECRET_TOKEN_MARKER + "\"}");
 
     List<PluginDTO> dtos = service.listPlugins();
-    assertEquals(3, dtos.size());
+    assertEquals(4, dtos.size());
     assertEquals(
         registry.plugins().stream().map(plugin -> plugin.descriptor().pluginId()).toList(),
         dtos.stream().map(PluginDTO::getPluginId).toList(),
@@ -301,17 +323,34 @@ class PluginManagementServiceTest {
     assertThrows(
         AiValidationException.class,
         () -> service.completeAuth(PLUGIN_ID, "  ", "https://callback.com/ok"));
+    // 形态非法的句柄：在摘要与消费之前就以固定校验失败拒绝，绝不 500、绝不回显原文。
+    AiValidationException malformed =
+        assertThrows(
+            AiValidationException.class,
+            () ->
+                service.completeAuth(
+                    PLUGIN_ID, "MALFORMED_ATTEMPT_VALUE", "https://callback.com/ok"));
+    assertFalse(malformed.getMessage().contains("MALFORMED_ATTEMPT_VALUE"));
     assertThrows(
-        AiValidationException.class, () -> service.completeAuth(PLUGIN_ID, "handle", null));
+        AiValidationException.class,
+        () -> service.completeAuth(PLUGIN_ID, "a".repeat(2000), "https://callback.com/ok"));
     assertThrows(
-        AiValidationException.class, () -> service.completeAuth(PLUGIN_ID, "handle", "   "));
+        AiValidationException.class,
+        () -> service.completeAuth(PLUGIN_ID, PluginAuthNonce.issue() + "=", "https://cb.com/ok"));
 
-    // 未经 prepare 的句柄：不得消费、不得落库，且错误里不含句柄原文。
+    String validButUnused = service.prepareAuth(PLUGIN_ID, REGION_CN).getAuthAttemptId();
+    assertThrows(
+        AiValidationException.class, () -> service.completeAuth(PLUGIN_ID, validButUnused, null));
+    assertThrows(
+        AiValidationException.class, () -> service.completeAuth(PLUGIN_ID, validButUnused, "   "));
+
+    // 未经 prepare 的合法形态句柄：不得消费、不得落库，且错误里不含句柄原文。
+    String unknownHandle = PluginAuthNonce.issue();
     AiValidationException unknown =
         assertThrows(
             AiValidationException.class,
-            () -> service.completeAuth(PLUGIN_ID, "unknown-handle", "https://callback.com/ok"));
-    assertFalse(unknown.getMessage().contains("unknown-handle"));
+            () -> service.completeAuth(PLUGIN_ID, unknownHandle, "https://callback.com/ok"));
+    assertFalse(unknown.getMessage().contains(unknownHandle));
     assertEquals(
         PluginCredentialStatus.NOT_CONNECTED, credentialStore.projection(PLUGIN_ID).status());
 
@@ -820,6 +859,70 @@ class PluginManagementServiceTest {
     }
   }
 
+  /**
+   * 一次 getPlugin / listPlugins 各自只读一次 desired catalog 与一次 applied 快照：同一份响应绝不混用两个 epoch 的坐标、配置与能力。
+   */
+  @Test
+  void oneProjectionReadsOneDesiredCatalogAndOneAppliedSnapshot() {
+    AtomicInteger catalogReads = new AtomicInteger();
+    AtomicInteger snapshotReads = new AtomicInteger();
+    InMemoryPluginConfigurationRepository countingCatalog =
+        new InMemoryPluginConfigurationRepository() {
+          @Override
+          public PluginCatalogRecord readCatalog() {
+            catalogReads.incrementAndGet();
+            return super.readCatalog();
+          }
+
+          @Override
+          public Optional<PluginConfigurationRow> readConfiguration(
+              String pluginId, long revision) {
+            return catalog.readConfiguration(pluginId, revision);
+          }
+        };
+    countingCatalog.initialize(catalog.readCatalog());
+    PluginManagementService counting =
+        new PluginManagementService(
+            registry,
+            () -> {
+              snapshotReads.incrementAndGet();
+              return snapshot;
+            },
+            countingCatalog,
+            credentialStore,
+            commitService,
+            attempts,
+            Duration.ofMinutes(10),
+            clock);
+
+    counting.getPlugin(PLUGIN_ID);
+    assertEquals(
+        1, catalogReads.get(), "one plugin projection must read the desired catalog exactly once");
+    assertEquals(
+        1,
+        snapshotReads.get(),
+        "one plugin projection must read the applied snapshot exactly once");
+
+    List<PluginDTO> dtos = counting.listPlugins();
+    assertEquals(registry.plugins().size(), dtos.size());
+    assertEquals(
+        2, catalogReads.get(), "one list projection must read the desired catalog exactly once");
+    assertEquals(
+        2, snapshotReads.get(), "one list projection must read the applied snapshot exactly once");
+  }
+
+  /** 已应用能力名只来自 applied 快照的 owner map 与真实 definitions：没有两域贡献的 Plugin 必须为空列表，绝不手写能力清单。 */
+  @Test
+  void appliedCapabilityNamesComeFromTheAppliedSnapshot() {
+    PluginDTO contributing = service.getPlugin(CONTRIBUTING_PLUGIN_ID);
+    assertEquals(List.of("contributing-tool"), contributing.getHarnessToolNames());
+    assertEquals(List.of("contributing-function"), contributing.getCanvasFunctionNames());
+
+    PluginDTO none = service.getPlugin(NO_AUTH_PLUGIN_ID);
+    assertEquals(List.of(), none.getHarnessToolNames());
+    assertEquals(List.of(), none.getCanvasFunctionNames());
+  }
+
   // --- 测试辅助桩对象 ---
 
   private static class TestAuthPlugin implements StudioPlugin {
@@ -939,6 +1042,112 @@ class PluginManagementServiceTest {
     public PluginInstance configure(PluginConfig config, PluginContext context) {
       return TestPluginFixtures.emptyInstance();
     }
+  }
+
+  /** 同时贡献 Harness 工具与 Canvas 函数的 Plugin：用于验证 applied 能力名确实是快照派生的真实名称。 */
+  private static class TestContributingPlugin implements StudioPlugin {
+    private final PluginDescriptor descriptor =
+        new PluginDescriptor(CONTRIBUTING_PLUGIN_ID, "Contributing Plugin", "1.0");
+
+    @Override
+    public PluginDescriptor descriptor() {
+      return descriptor;
+    }
+
+    @Override
+    public PluginConfigSchema configurationSchema() {
+      return TestPluginFixtures.EMPTY_SCHEMA;
+    }
+
+    @Override
+    public PluginAuthSpec authenticationSpec() {
+      return new PluginAuthSpec.None();
+    }
+
+    @Override
+    public PluginInstance configure(PluginConfig config, PluginContext context) {
+      HarnessContributor contributor =
+          HarnessContributor.of(
+              new ContributorDescriptor(
+                  new ContributorId(CONTRIBUTING_PLUGIN_ID), "contributing", "1.0", Set.of()),
+              registrar ->
+                  registrar.registerTool(
+                      "contributing-tool", new ContributingTool(), ToolVisibility.SELECTABLE));
+      CanvasFunctionAdapter adapter = contributingAdapter();
+      return new PluginInstance() {
+        @Override
+        public List<HarnessContributor> harnessContributors() {
+          return List.of(contributor);
+        }
+
+        @Override
+        public List<CanvasFunctionAdapter> canvasAdapters() {
+          return List.of(adapter);
+        }
+
+        @Override
+        public void close() {}
+      };
+    }
+  }
+
+  /** 只提供冻结定义的工具桩：管理面投影绝不执行工具。 */
+  private static class ContributingTool implements Tool {
+    @Override
+    public ToolDescriptor descriptor() {
+      return new ToolDescriptor(
+          "contributing-tool",
+          "contributing tool",
+          "contributing-tool",
+          new InputSchema(null, Map.of(), Set.of(), false),
+          ToolSideEffect.READ_ONLY,
+          Duration.ZERO);
+    }
+
+    @Override
+    public ToolExecutionHandle execute(
+        ToolExecutionRequest request, ToolExecutionListener listener) {
+      throw new UnsupportedOperationException("the management projection never executes tools");
+    }
+  }
+
+  private static CanvasFunctionAdapter contributingAdapter() {
+    CanvasFunctionDefinition definition =
+        CanvasFunctionDefinition.of(
+            "contributing-function",
+            "function contributing-function",
+            CanvasJson.parseObject(
+                "{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}"),
+            CanvasResourceKind.IMAGE,
+            new CanvasFunctionReferencePolicy(Set.of(CanvasResourceKind.IMAGE), 1, Map.of()));
+    return new CanvasFunctionAdapter() {
+      @Override
+      public List<CanvasFunctionDefinition> functions() {
+        return List.of(definition);
+      }
+
+      @Override
+      public boolean enabled() {
+        return true;
+      }
+
+      @Override
+      public String unavailableReason() {
+        return null;
+      }
+
+      @Override
+      public void preflight(CanvasFunctionFrozenRun run) {}
+
+      @Override
+      public void submit(CanvasFunctionExecutionContext context, CanvasFunctionFrozenRun run) {}
+
+      @Override
+      public List<UUID> execute(
+          CanvasFunctionExecutionContext context, CanvasFunctionFrozenRun run) {
+        return List.of();
+      }
+    };
   }
 
   @SuppressWarnings("unused")

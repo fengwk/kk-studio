@@ -14,8 +14,8 @@ import lombok.ToString;
 @Data
 public class PluginAuthCompleteRequestDTO {
 
-  /** prepare 返回的一次性 attempt 句柄：只在仍待完成且未过期时才可能被消费成功。 */
-  private String authAttemptId;
+  /** prepare 返回的一次性 attempt 句柄：只在仍待完成且未过期时才可能被消费成功。该句柄不进入 {@code toString}。 */
+  @ToString.Exclude private String authAttemptId;
 
   /** 插件回调 deep link 原值（含一次性登录参数）。 */
   @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
