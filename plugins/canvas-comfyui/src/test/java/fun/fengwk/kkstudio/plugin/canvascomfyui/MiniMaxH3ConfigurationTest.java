@@ -47,8 +47,7 @@ class MiniMaxH3ConfigurationTest {
             workflowBuilder,
             mock(ObjectProvider.class),
             mock(StorageUploadService.class),
-            mock(SessionBlobRefManager.class),
-            mapper));
+            mock(SessionBlobRefManager.class)));
   }
 
   @Test
@@ -68,8 +67,7 @@ class MiniMaxH3ConfigurationTest {
             configuration.h3WorkflowBuilder(mapper),
             mock(ObjectProvider.class),
             mock(StorageUploadService.class),
-            mock(SessionBlobRefManager.class),
-            mapper));
+            mock(SessionBlobRefManager.class)));
   }
 
   @Test

@@ -2,8 +2,6 @@ package fun.fengwk.kkstudio.plugin.canvascomfyui;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
-import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.cfg.JsonNodeFeature;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.canvas.CanvasJson;
@@ -133,7 +131,6 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
   private final ObjectProvider<StandardComfyuiClient> comfyClients;
   private final StorageUploadService uploadService;
   private final SessionBlobRefManager refManager;
-  private final ObjectMapper mapper;
 
   public MiniMaxH3CanvasFunctionAdapter(
       SystemSettingsSnapshot snapshot,
@@ -143,8 +140,7 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
       H3WorkflowBuilder workflowBuilder,
       ObjectProvider<StandardComfyuiClient> comfyClients,
       StorageUploadService uploadService,
-      SessionBlobRefManager refManager,
-      ObjectMapper mapper) {
+      SessionBlobRefManager refManager) {
     this.settings = Objects.requireNonNull(snapshot, "snapshot").get().integrations().minimaxH3();
     this.mediaPreflight = Objects.requireNonNull(mediaPreflight, "mediaPreflight");
     this.promptBuilder = Objects.requireNonNull(promptBuilder, "promptBuilder");
@@ -153,12 +149,6 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
     this.comfyClients = Objects.requireNonNull(comfyClients, "comfyClients");
     this.uploadService = Objects.requireNonNull(uploadService, "uploadService");
     this.refManager = Objects.requireNonNull(refManager, "refManager");
-    // H3 配置状态是自由 JSON：number 按 BigDecimal 读回，避免高精度小数或极值在 double 中失真。
-    this.mapper =
-        Objects.requireNonNull(mapper, "mapper")
-            .rebuild()
-            .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
-            .build();
   }
 
   @Override
@@ -191,7 +181,7 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
     requireFunction(run);
     preflight(run);
     H3ReferenceManifest manifest = H3ReferenceManifest.from(run.manifest());
-    H3AdapterState state = H3AdapterState.decode(run.adapterState(), mapper);
+    H3AdapterState state = H3AdapterState.decode(run.adapterState());
     String stage = run.stage();
 
     if (PROMPT_SUBMITTING.equals(stage) && state.harnessThreadId() == null) {
@@ -300,7 +290,7 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
   public List<UUID> execute(CanvasFunctionExecutionContext context, CanvasFunctionFrozenRun run) {
     requireFunction(run);
     preflight(run);
-    H3AdapterState state = H3AdapterState.decode(run.adapterState(), mapper);
+    H3AdapterState state = H3AdapterState.decode(run.adapterState());
     String stage = run.stage();
 
     if (COMPLETE.equals(stage)) {
@@ -344,7 +334,7 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
   public void cancel(CanvasFunctionFrozenRun run) {
     H3AdapterState state;
     try {
-      state = H3AdapterState.decode(run.adapterState(), mapper);
+      state = H3AdapterState.decode(run.adapterState());
     } catch (RuntimeException error) {
       logCancelFailure(run, error);
       return;

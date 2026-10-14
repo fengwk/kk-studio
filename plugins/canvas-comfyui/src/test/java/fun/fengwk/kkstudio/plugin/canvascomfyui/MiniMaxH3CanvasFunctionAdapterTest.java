@@ -111,8 +111,7 @@ class MiniMaxH3CanvasFunctionAdapterTest {
         new H3WorkflowBuilder(mapper),
         clients,
         uploadService,
-        refManager,
-        mapper);
+        refManager);
   }
 
   private static SystemSettings settings(SystemSettings.MiniMaxH3 minimaxH3) {

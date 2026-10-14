@@ -66,8 +66,7 @@ public class MiniMaxH3Configuration {
       H3WorkflowBuilder workflowBuilder,
       ObjectProvider<StandardComfyuiClient> comfyClients,
       StorageUploadService uploadService,
-      SessionBlobRefManager refManager,
-      ObjectMapper objectMapper) {
+      SessionBlobRefManager refManager) {
     return new MiniMaxH3CanvasFunctionAdapter(
         snapshot,
         mediaPreflight,
@@ -76,7 +75,6 @@ public class MiniMaxH3Configuration {
         workflowBuilder,
         comfyClients,
         uploadService,
-        refManager,
-        objectMapper);
+        refManager);
   }
 }
