@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.web.events;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -17,6 +18,7 @@ import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -101,6 +103,47 @@ class CanvasVersionHubTest {
 
     hub.broadcastResync();
     verify(statement, times(1)).setObject(1, canvasId);
+  }
+
+  @Test
+  void failedCursorQueryReleasesRegistrationAndPreservesRuntimeException() throws Exception {
+    DataSource dataSource = mock(DataSource.class);
+    Connection connection = mock(Connection.class);
+    PreparedStatement statement = mock(PreparedStatement.class);
+    when(dataSource.getConnection()).thenReturn(connection);
+    when(connection.prepareStatement(any())).thenReturn(statement);
+    when(statement.executeQuery()).thenThrow(new SQLException("connection lost"));
+
+    CanvasVersionHub hub = new CanvasVersionHub(dataSource);
+    UUID canvasId = new UUID(0L, 8L);
+    List<CanvasVersionEventSource.Event> received = new ArrayList<>();
+    IllegalStateException failure =
+        assertThrows(IllegalStateException.class, () -> hub.subscribe(canvasId, received::add));
+    assertEquals("cannot read current canvas revision", failure.getMessage());
+
+    hub.broadcastResync();
+    assertTrue(received.isEmpty(), "cursor 查询失败的订阅必须已释放，不再收到任何投递");
+  }
+
+  @Test
+  void failedCursorQueryReleasesRegistrationAndRethrowsError() throws Exception {
+    DataSource dataSource = mock(DataSource.class);
+    Connection connection = mock(Connection.class);
+    PreparedStatement statement = mock(PreparedStatement.class);
+    when(dataSource.getConnection()).thenReturn(connection);
+    when(connection.prepareStatement(any())).thenReturn(statement);
+    AssertionError injected = new AssertionError("injected query error");
+    when(statement.executeQuery()).thenThrow(injected);
+
+    CanvasVersionHub hub = new CanvasVersionHub(dataSource);
+    UUID canvasId = new UUID(0L, 8L);
+    List<CanvasVersionEventSource.Event> received = new ArrayList<>();
+    Error failure =
+        assertThrows(AssertionError.class, () -> hub.subscribe(canvasId, received::add));
+    assertSame(injected, failure, "Error 必须原样抛出");
+
+    hub.broadcastResync();
+    assertTrue(received.isEmpty(), "cursor 查询失败的订阅必须已释放，不再收到任何投递");
   }
 
   @Test
