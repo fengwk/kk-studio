@@ -6,7 +6,7 @@ import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessRegistrar;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
-import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialStore;
+import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialAccess;
 import fun.fengwk.kkstudio.plugin.minimaxmavis.tool.MavisToolDefinitions;
 import fun.fengwk.kkstudio.plugin.minimaxmavis.tool.MiniMaxMavisTool;
 
@@ -25,14 +25,15 @@ import java.util.concurrent.ExecutorService;
  */
 public final class MiniMaxMavisHarnessContributor implements HarnessContributor {
 
-  public static final ContributorId ID = new ContributorId(MiniMaxMavisPlugin.PLUGIN_ID);
-
-  public static final String NAME = MiniMaxMavisPlugin.PLUGIN_NAME;
-
-  public static final String VERSION = "1";
+  public static final ContributorId ID =
+      new ContributorId(MiniMaxMavisPlugin.DESCRIPTOR.pluginId());
 
   private static final ContributorDescriptor DESCRIPTOR =
-      new ContributorDescriptor(ID, NAME, VERSION, Set.of());
+      new ContributorDescriptor(
+          ID,
+          MiniMaxMavisPlugin.DESCRIPTOR.name(),
+          MiniMaxMavisPlugin.DESCRIPTOR.version(),
+          Set.of());
 
   private final Map<MavisCapability, Tool> toolsByCapability;
 
@@ -78,16 +79,16 @@ public final class MiniMaxMavisHarnessContributor implements HarnessContributor 
     return toolsByCapability.size();
   }
 
-  /** 组装 15 个工具时的共享依赖。 */
+  /** 组装 15 个工具时的共享依赖（凭据访问是绑定本安装 pluginId 的 scoped 视图）。 */
   public record ToolDependencies(
-      PluginCredentialStore credentialStore,
+      PluginCredentialAccess credentialAccess,
       MavisClient client,
       MiniMaxMavisCapabilityCache capabilityCache,
       MiniMaxMavisResourceAccess resourceAccess,
       ExecutorService executor) {
 
     public ToolDependencies {
-      Objects.requireNonNull(credentialStore, "credentialStore");
+      Objects.requireNonNull(credentialAccess, "credentialAccess");
       Objects.requireNonNull(client, "client");
       Objects.requireNonNull(capabilityCache, "capabilityCache");
       Objects.requireNonNull(resourceAccess, "resourceAccess");
@@ -104,7 +105,7 @@ public final class MiniMaxMavisHarnessContributor implements HarnessContributor 
           new MiniMaxMavisTool(
               capability,
               MavisToolDefinitions.load(capability),
-              dependencies.credentialStore(),
+              dependencies.credentialAccess(),
               dependencies.client(),
               dependencies.capabilityCache(),
               dependencies.resourceAccess(),
