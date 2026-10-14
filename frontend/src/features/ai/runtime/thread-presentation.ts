@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import type { ThreadProjection } from './useThreadProjection'
 import type { useBoundThreadPanelViews } from './useBoundThreadPanelViews'
 import type { PaneTarget } from './agent-pane'
+import { formatModelLabel } from '@/features/ai/catalog'
 
 export function paneTargetViewKey(target: PaneTarget): string {
   return target.kind === 'BOUND_THREAD' ? `thread:${target.threadId}`
@@ -26,19 +27,20 @@ export interface ThreadPresentation {
   act: (viewKey: string, action: PresentationAction, trigger?: HTMLElement) => void
 }
 
-export function threadIdentity(projection: Pick<ThreadProjection, 'thread' | 'models'>): string | null {
+/**
+ * 线程头身份：Agent 与实际生效的 model + variant。variant 直接来自 branch settings
+ * 快照，不依赖 catalog 是否加载到该模型，也不把 variant 换算成 reasoning effort。
+ */
+export function threadIdentity(projection: Pick<ThreadProjection, 'thread'>): string | null {
   const settings = projection.thread?.branchSettings
   if (!settings) {
     return null
   }
   const model = settings.model
-  const config = projection.models.find((item) =>
-    item.providerName === model?.providerName && item.name === model?.modelName)?.config
-  const effort = config?.abilities.reasoning
-    ? config.variants.find((item) => item.id === model?.variant)?.reasoningEffort
-    : null
-  return [settings.agentName, model ? `${model.providerName}/${model.modelName}` : null, effort]
-    .filter(Boolean).join(' · ')
+  return [
+    settings.agentName,
+    model ? formatModelLabel(model.providerName, model.modelName, model.variant) : null,
+  ].filter(Boolean).join(' · ')
 }
 
 /** 动作稳定但只使用 commit 后最新查看层；过期身份和隐藏层不能执行。 */

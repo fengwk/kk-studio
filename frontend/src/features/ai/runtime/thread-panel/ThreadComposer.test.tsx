@@ -322,7 +322,7 @@ describe('ThreadComposer and commands', () => {
     expect(dock?.querySelector('.thread-dock-controls')).not.toBeNull()
     expect(screen.getByRole('button', { name: '权限模式' })).toHaveTextContent('Default')
     expect(screen.getByRole('button', { name: 'Model 与 Variant' })).toHaveTextContent(
-      'minimax/MiniMax · high',
+      'minimax/MiniMax (high)',
     )
   })
 
