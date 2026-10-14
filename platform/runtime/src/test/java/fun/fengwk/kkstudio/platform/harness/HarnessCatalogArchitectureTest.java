@@ -192,7 +192,8 @@ class HarnessCatalogArchitectureTest {
   }
 
   @Test
-  void harnessCatalogImportsStayWithinStaticAdapterWiringAndMetadataConsumers() throws IOException {
+  void harnessCatalogImportsStayWithinCatalogBuildersWiringAndMetadataConsumers()
+      throws IOException {
     // 意图：新增 Platform 生产代码不得绕过 RuntimeToolCatalog 直接依赖 HarnessCatalog。
     Path main = locatePlatformMainJava();
     Set<Path> allowedImporters =
@@ -201,6 +202,8 @@ class HarnessCatalogArchitectureTest {
                     "fun/fengwk/kkstudio/platform/harness/thread/command/DatabaseTurnResolver.java")
                 .normalize(),
             main.resolve("fun/fengwk/kkstudio/platform/catalog/tool/HarnessToolCatalogAdapter.java")
+                .normalize(),
+            main.resolve("fun/fengwk/kkstudio/platform/plugin/catalog/PluginCatalogSnapshot.java")
                 .normalize(),
             main.resolve(
                     "fun/fengwk/kkstudio/platform/catalog/tool/RuntimeToolCatalogConfiguration.java")
@@ -227,7 +230,7 @@ class HarnessCatalogArchitectureTest {
     assertEquals(
         allowedImporters,
         actualImporters,
-        "HarnessCatalog imports must stay limited to its adapter/wiring and two metadata consumers");
+        "HarnessCatalog imports must stay limited to its builders/adapter/wiring and metadata consumers");
   }
 
   private static boolean contains(Path path, String expected) {

@@ -6,6 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.common.concurrent.BoundedWorkDispatcher;
+
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -47,6 +49,7 @@ class ProjectArchitectureTest {
   /** 允许声明的生产依赖：与上面的导入前缀一一对应，新增依赖必须同步在这里显式登记。 */
   private static final List<String> EXPECTED_PRODUCTION_DEPENDENCIES =
       List.of(
+          "fun.fengwk.kk-studio:kk-studio-harness-common",
           "fun.fengwk.kk-studio:kk-studio-harness-runtime",
           "org.springframework.boot:spring-boot-starter-jdbc",
           "tools.jackson.core:jackson-databind");
@@ -134,6 +137,7 @@ class ProjectArchitectureTest {
         || imported.startsWith("javax.")
         || imported.startsWith("jdk.")
         || imported.startsWith(OWN_PACKAGE_PREFIX)
+        || imported.equals(BoundedWorkDispatcher.class.getName())
         || ALLOWED_EXTERNAL_IMPORT_PREFIXES.stream().anyMatch(imported::startsWith);
   }
 

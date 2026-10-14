@@ -182,15 +182,17 @@ Agent 的 subagents allowlist 决定可委派对象。`task` 将命令与 join �
 
 [`plugins`](../plugins/pom.xml) 聚合独立 Plugin JAR，
 [`web` 的 runtime dependencies](../web/pom.xml) 决定发行物包含哪些 Plugin。
-Plugin 通过 Spring Boot auto-configuration 注册以下能力：
+Plugin 通过 Spring Boot auto-configuration 注册安装定义；配置实例按需提供独立的两域能力：
 
-- `StudioPlugin`：安装元数据、可选认证和工具默认权限。
+- `StudioPlugin`：安装身份、配置 Schema、认证形态与实例构建。
 - `HarnessContributor`：工具、自定义历史类型与上下文投影，使用 Harness 的执行和结果契约。
 - `CanvasFunctionAdapter`：Function 定义与执行，由 Canvas Runtime 管理输入冻结、租约和发布。
 
 当前 Plugin 包括 MiniMax Mavis、Canvas Media 与 Canvas ComfyUI。Plugin 与应用同进程，
-拥有相同 JVM 权限，部署者须信任其代码。Web 收集 Spring 容器中的
-`HarnessContributor` bean，校验依赖与名称后冻结为不可变 HarnessCatalog。
+拥有相同 JVM 权限，部署者须信任其代码。Mavis 的配置实例拥有工具与执行器，
+不另注册 Contributor bean；Canvas Media 与 Canvas ComfyUI 提供直接 Adapter。
+Web 将插件实例和内置贡献一次聚合为完整 `PluginCatalogSnapshot`，校验依赖与名称后
+提供同一快照中的 HarnessCatalog / CanvasFunctionCatalog；失败候选统一释放资源。
 Contributor 契约和 Plugin 装配见
 [Contributor API](modules/harness-contributor-api.md)、[Platform Plugin API](modules/platform-plugin-api.md)
 和 [Platform](modules/platform.md)。

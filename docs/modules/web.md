@@ -10,7 +10,10 @@ Controller 解析 DTO、调用用例、映射结果；领域行为与事务由�
 [`web/pom.xml`](../../web/pom.xml) 声明应用模块、Web transport、Flyway 和 runtime Plugin。
 Builtin/Common 经 Platform compile 依赖传递进入发行物。
 Plugin JAR 通过自己的 AutoConfiguration.imports 创建 bean，
-ContributorCatalogConfiguration 收集 HarnessContributor，冻结 HarnessCatalog；
+[`PluginCatalogConfiguration`](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/PluginCatalogConfiguration.java)
+将插件定义配置一次，并收集真正内置的 Contributor / Adapter，构建一个完整
+`PluginCatalogSnapshot`；HarnessCatalog 与 CanvasFunctionCatalog 来自该快照。
+两域目录校验全部通过后才提供给运行时，失败会释放已建插件实例。
 Platform 的 RuntimeToolCatalogConfiguration 加入现读数据库的 MCP 目录。
 
 [`HarnessRuntimeConfiguration`](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/HarnessRuntimeConfiguration.java)
@@ -26,6 +29,7 @@ timer 只唤醒和分派，heartbeat worker 执行续租事务，flush executor 
 | PostgresqlNotificationLoop | 专用连接 LISTEN，断线重连/resync，关闭 abort、interrupt、有界等待 |
 | ApplicationEventHub、sender 与 heartbeat scheduler | 关闭订阅与发送围栏，释放连接和 timer |
 | StorageMaintenance、PluginCredentialRefreshDispatcher | 各自持有调度器与在途任务的收尾责任 |
+| PluginCatalogSnapshot | 唯一拥有配置实例，应用关闭时逐个释放实例资源 |
 
 ## HTTP 入口
 
