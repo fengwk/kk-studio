@@ -198,15 +198,21 @@ Platform 适配注册、租约和资源票据；会话代际、在途调用和�
 
 选中的 Plugin JAR 由 [`web/pom.xml`](../../web/pom.xml) 的 runtime dependency 进入发行物，
 通过 `AutoConfiguration.imports` 创建 bean。`StudioPluginRegistry` 冻结唯一 pluginId；
-`StudioPlugin` 提供管理面，`HarnessContributor` 提供模型工具，两种 SPI 可独立使用。
+`StudioPlugin` 声明身份、配置 Schema 与认证协议，`configure` 产出持有资源的
+`PluginInstance`，按需提供独立的 Harness Contributor / Canvas Adapter，两域可为空。
 安装集合随发行物构建确定；`StudioPlugin`、安装目录以及凭据与资源端口的纯契约见
 [Platform Plugin API](platform-plugin-api.md)。
+
+`PluginCatalogSnapshot` 逐个配置实例，聚合内置贡献，并在返回前验证两域完整目录；
+任一配置、贡献或目录失败时释放全部已建实例。Web 从同一快照提供两域 Catalog，
+当前启动配置来自 Schema 的默认值，revision 为 0。
 
 ### 新增 Plugin
 
 在 [`plugins`](../../plugins/pom.xml) 下创建独立模块，并在根
-[`pom.xml`](../../pom.xml) 管理版本。实现静态 descriptor、认证处理器或 Contributor，
-用单一 Boot 自动配置入口装配 client、executor 和 lifecycle；网络访问与凭据读取在调用期执行。
+[`pom.xml`](../../pom.xml) 管理版本。实现安装定义与配置实例，Schema 是普通值和默认值的唯一来源；
+用单一 Boot 自动配置入口注册定义，实例拥有自己的执行器与生命周期；
+网络访问与凭据读取在调用期执行，插件只能通过 scoped Context 读取本插件凭据。
 工具按 [Contributor API](harness-contributor-api.md#扩展一个-contributor) 注册，
 声明真实 side effect、timeout 和 EnvironmentSupport。最后在 Web 中选择 runtime 依赖，
 验证 bean 装配、工具 schema、去敏、失败/取消/超时与资源预算。
@@ -220,10 +226,11 @@ Platform 适配注册、租约和资源票据；会话代际、在途调用和�
 
 `PluginCredentialStore` 用部署级 owner-only 32-byte key 做 AES-256-GCM 加密，
 每次写入新 nonce，AAD 绑定 pluginId、region 和格式版本。主密钥留在部署文件，
-Plugin 只获得本次调用快照。key 缺失或解密失败为 KEY_UNAVAILABLE，读写失败关闭。
+Plugin 只通过 `PluginCredentialAccess` 获得本次调用快照，不持有完整 Store。
+key 缺失或解密失败为 KEY_UNAVAILABLE，读写失败关闭。
 
 刷新以短事务 claim lease，事务外一次 renewal，再按 token、version 和截止时刻 finalize。
-扫描按最早 nextRefreshAt 安排，保存后唤醒，poll 是最慢兜底。
+只扫描已声明刷新器的插件，按最早 nextRefreshAt 安排，保存后唤醒，poll 是最慢兜底。
 确定认证拒绝为 REAUTH_REQUIRED，确定未发或确定无效响应为 REFRESH_FAILED；
 已发而无确定响应、过期在途 lease 为 REFRESH_UNCERTAIN，要求重新认证。
 lease 只保证互斥，无法证明外部 exactly-once；不确定 renewal 保留停止自动重放的边界。

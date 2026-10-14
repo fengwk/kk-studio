@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 
 import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionRuntimeProperties;
+import fun.fengwk.kkstudio.harness.common.concurrent.BoundedWorkDispatcher;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -32,6 +33,7 @@ class CanvasInfraArchitectureTest {
           "fun.fengwk.convention4j:convention4j-spring-boot-starter",
           "fun.fengwk.kk-studio:kk-studio-canvas-core",
           "fun.fengwk.kk-studio:kk-studio-canvas-plugin-api",
+          "fun.fengwk.kk-studio:kk-studio-harness-common",
           "org.springframework.boot:spring-boot-starter-aspectj",
           "org.springframework.boot:spring-boot-starter-jdbc",
           "tools.jackson.core:jackson-databind");
@@ -46,7 +48,7 @@ class CanvasInfraArchitectureTest {
           "org.springframework.",
           "tools.jackson.");
 
-  /** 生产源码必须留在 infra 包内，且不能反向依赖 Platform/Harness/Web。 */
+  /** 生产源码留在 infra 包内，只允许共享调度基座，不依赖 Platform/Harness Runtime/Web。 */
   @Test
   void mainSourcesStayInsideCanvasInfraBoundary() throws IOException {
     Path main = locateModuleRoot().resolve("src/main/java");
@@ -126,7 +128,8 @@ class CanvasInfraArchitectureTest {
         }
         String imported =
             trimmed.substring("import ".length()).replace(";", "").replace("static ", "").trim();
-        if (ALLOWED_IMPORT_PREFIXES.stream().noneMatch(imported::startsWith)) {
+        if (!imported.equals(BoundedWorkDispatcher.class.getName())
+            && ALLOWED_IMPORT_PREFIXES.stream().noneMatch(imported::startsWith)) {
           violations.add(main.relativize(path) + ": disallowed import " + trimmed);
         }
       }

@@ -126,12 +126,12 @@ durable 事实。
    降级时仍保留语义就 override `historyRenderer()`。
 3. 要维护分支状态时，先 `registerCustomEntryType(localName, customType, priority)`，再在 `ToolRequirements.stateAccesses` 中声明 READ 或 WRITE；状态载荷与 `AppendCustomEntry` 使用同一个 customType。
 4. 要注入模型上下文时注册 `ContextProjector`，只依据 `BranchView` 计算文本。
-5. 装配到组合根：把实现注册成 Spring bean，由 [`web`](web.md) 的 `ContributorCatalogConfiguration` 收集后统一交给 `HarnessCatalog.from`。
+5. 装配到组合根：内置实现注册成 Spring bean，插件实现从配置实例返回；[`web`](web.md) 的 `PluginCatalogConfiguration` 统一交给 `HarnessCatalog.from`。
 
 所有 Contributor 走同一条装配路径，区别只在宿主边界：
 
-- 构建期 Plugin 由 Spring Boot auto-configuration 创建 `HarnessContributor` bean，可以
-  同时使用 Platform 的 credential、Blob 和 management services；Plugin 仍只经本 SPI
+- 构建期 Plugin 由 Spring Boot auto-configuration 注册定义，配置实例返回 `HarnessContributor`，
+  使用作用域 Context 的凭据与资源端口；Plugin 仍只经本 SPI
   注册 Tool，不得另建执行、历史或审批协议。要访问当前 Session 的 Resource 或把远端媒体写回
   Storage，Plugin 只能调用 `PluginResourceGateway`：`resolveSessionResource(threadId, resourceUri)`
   的唯一身份来源是本次调用的 `ToolExecutionContext.threadId()`，实现据此校验 Session 对 blob 的

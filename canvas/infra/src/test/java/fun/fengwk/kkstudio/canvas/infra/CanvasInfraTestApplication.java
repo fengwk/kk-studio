@@ -5,12 +5,21 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import fun.fengwk.kkstudio.canvas.CanvasBlobReleaser;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
 
 import java.time.Clock;
+import java.util.List;
 
 /** Canvas Infra PostgreSQL 集成测试的最小 Spring Boot 组合根。 */
 @SpringBootApplication
 public class CanvasInfraTestApplication {
+
+  /** 能力目录由宿主组合；模块测试只聚合本测试容器提供的 adapter。 */
+  @Bean
+  CanvasFunctionCatalog canvasFunctionCatalog(List<CanvasFunctionAdapter> adapters) {
+    return CanvasFunctionCatalog.from(adapters);
+  }
 
   /**
    * 宿主 Storage 的 Blob 引用释放端口。
