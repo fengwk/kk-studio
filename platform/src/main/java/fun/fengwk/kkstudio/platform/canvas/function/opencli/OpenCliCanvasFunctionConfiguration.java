@@ -1,10 +1,10 @@
 package fun.fengwk.kkstudio.platform.canvas.function.opencli;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.DependsOn;
+import tools.jackson.databind.ObjectMapper;
 
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 

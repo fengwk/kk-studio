@@ -7,12 +7,13 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
@@ -44,7 +45,7 @@ import java.util.UUID;
 /** Gemini 流式累加器及 SSE 消息解析、去重、状态机测试。 */
 class GeminiStreamAccumulatorTest {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
 
   private ProviderDescriptor descriptor;
   private ProviderRequest request;
@@ -166,8 +167,8 @@ class GeminiStreamAccumulatorTest {
     ProviderCompletion completion = accumulator.finish();
     assertEquals("ACBD", completion.response().text());
     JsonNode parts = completion.replayState().payload().path("parts");
-    assertEquals("AC", parts.get(0).path("text").asText());
-    assertEquals("BD", parts.get(1).path("text").asText());
+    assertEquals("AC", parts.get(0).path("text").asString(""));
+    assertEquals("BD", parts.get(1).path("text").asString(""));
   }
 
   /** 测试意图：终态后禁止新 content 和第二个 finishReason，usage-only 空 candidates 仍可更新用量。 */
@@ -707,8 +708,8 @@ class GeminiStreamAccumulatorTest {
     assertNotNull(completion.replayState());
     JsonNode replayPart = completion.replayState().payload().get("parts").get(0);
     JsonNode replayFn = replayPart.get("functionCall");
-    assertEquals("get_current_time", replayFn.get("name").asText());
-    assertEquals("call_custom_1", replayFn.get("id").asText());
+    assertEquals("get_current_time", replayFn.get("name").asString(""));
+    assertEquals("call_custom_1", replayFn.get("id").asString(""));
     assertTrue(replayFn.get("args").isObject());
     assertEquals(0, replayFn.get("args").size());
   }
@@ -896,11 +897,11 @@ class GeminiStreamAccumulatorTest {
 
     JsonNode parts = completion.replayState().payload().get("parts");
     assertEquals(3, parts.size());
-    assertEquals("answer", parts.get(0).path("text").asText());
-    assertEquals("image/png", parts.get(1).path("inlineData").path("mimeType").asText());
-    assertEquals("QQ==", parts.get(1).path("inlineData").path("data").asText());
-    assertEquals("PYTHON", parts.get(2).path("executableCode").path("language").asText());
-    assertEquals("print(1)", parts.get(2).path("executableCode").path("code").asText());
+    assertEquals("answer", parts.get(0).path("text").asString(""));
+    assertEquals("image/png", parts.get(1).path("inlineData").path("mimeType").asString(""));
+    assertEquals("QQ==", parts.get(1).path("inlineData").path("data").asString(""));
+    assertEquals("PYTHON", parts.get(2).path("executableCode").path("language").asString(""));
+    assertEquals("print(1)", parts.get(2).path("executableCode").path("code").asString(""));
     assertFalse(parts.get(1).has("text"), "unknown part must not be rewritten as empty text");
   }
 
@@ -957,23 +958,23 @@ class GeminiStreamAccumulatorTest {
     assertEquals(3, parts.size(), "每个带未知字段的 part 都必须保留自己的原生边界");
 
     JsonNode first = parts.get(0);
-    assertEquals("Hello", first.path("text").asText());
-    assertEquals("a", first.path("futureString").asText());
+    assertEquals("Hello", first.path("text").asString(""));
+    assertEquals("a", first.path("futureString").asString(""));
     assertEquals(1, first.path("futureArray").size());
-    assertEquals(1, first.path("futureArray").get(0).path("a").asInt());
-    assertEquals(1, first.path("futureObject").path("nested").path("x").asInt());
-    assertEquals(1, first.path("futureScalar").asInt());
+    assertEquals(1, first.path("futureArray").get(0).path("a").asInt(0));
+    assertEquals(1, first.path("futureObject").path("nested").path("x").asInt(0));
+    assertEquals(1, first.path("futureScalar").asInt(0));
 
     JsonNode second = parts.get(1);
-    assertEquals(" world", second.path("text").asText());
-    assertEquals("b", second.path("futureString").asText(), "未知字符串字段绝不被跨 chunk 拼接");
+    assertEquals(" world", second.path("text").asString(""));
+    assertEquals("b", second.path("futureString").asString(""), "未知字符串字段绝不被跨 chunk 拼接");
     assertEquals(1, second.path("futureArray").size(), "未知数组字段绝不被跨 chunk 追加");
-    assertEquals(2, second.path("futureArray").get(0).path("b").asInt());
-    assertEquals(2, second.path("futureObject").path("nested").path("y").asInt());
-    assertEquals(3, second.path("futureObject").path("z").asInt());
-    assertEquals(2, second.path("futureScalar").asInt());
+    assertEquals(2, second.path("futureArray").get(0).path("b").asInt(0));
+    assertEquals(2, second.path("futureObject").path("nested").path("y").asInt(0));
+    assertEquals(3, second.path("futureObject").path("z").asInt(0));
+    assertEquals(2, second.path("futureScalar").asInt(0));
 
-    assertEquals("!", parts.get(2).path("text").asText());
+    assertEquals("!", parts.get(2).path("text").asString(""));
   }
 
   /**
@@ -1012,12 +1013,12 @@ class GeminiStreamAccumulatorTest {
 
     JsonNode parts = completion.replayState().payload().get("parts");
     assertEquals(4, parts.size(), "未知 union 成员与 functionCall 必须各自保留为独立 part");
-    assertEquals("t-1", parts.get(0).path("futurePartField").path("trace").asText());
-    assertEquals("QQ==", parts.get(1).path("inlineData").path("data").asText());
+    assertEquals("t-1", parts.get(0).path("futurePartField").path("trace").asString(""));
+    assertEquals("QQ==", parts.get(1).path("inlineData").path("data").asString(""));
     assertFalse(parts.get(1).has("text"), "未知 part 绝不被补成空 text");
-    assertEquals("v", parts.get(2).path("toolResponse").path("response").path("k").asText());
+    assertEquals("v", parts.get(2).path("toolResponse").path("response").path("k").asString(""));
     assertFalse(parts.get(2).has("text"), "未知 union 成员绝不与相邻文本 part 合并");
-    assertEquals("fn", parts.get(3).path("functionCall").path("name").asText());
+    assertEquals("fn", parts.get(3).path("functionCall").path("name").asString(""));
   }
 
   /**
@@ -1092,9 +1093,9 @@ class GeminiStreamAccumulatorTest {
     assertEquals("answer", completion.response().text());
     JsonNode parts = completion.replayState().payload().get("parts");
     assertEquals(2, parts.size());
-    assertEquals("answer", parts.get(0).path("text").asText());
+    assertEquals("answer", parts.get(0).path("text").asString(""));
     assertFalse(parts.get(0).has("thoughtSignature"), "空白签名无法写入合法 replay，按不存在处理");
-    assertEquals("QQ==", parts.get(1).path("inlineData").path("data").asText());
+    assertEquals("QQ==", parts.get(1).path("inlineData").path("data").asString(""));
     assertFalse(parts.get(1).has("text"), "null text 无法写入合法 replay，且不承载语义");
     assertFalse(parts.get(1).has("thoughtSignature"));
   }
@@ -1140,11 +1141,11 @@ class GeminiStreamAccumulatorTest {
 
     JsonNode parts = completion.replayState().payload().get("parts");
     assertEquals(2, parts.size());
-    assertEquals("Hello world", parts.get(0).path("text").asText());
-    assertEquals("b", parts.get(0).path("futureString").asText());
-    assertEquals(2, parts.get(0).path("futureObject").path("b").asInt());
+    assertEquals("Hello world", parts.get(0).path("text").asString(""));
+    assertEquals("b", parts.get(0).path("futureString").asString(""));
+    assertEquals(2, parts.get(0).path("futureObject").path("b").asInt(0));
     assertFalse(parts.get(0).path("futureObject").has("a"), "snapshot must replace unknown field");
-    assertEquals("image/jpeg", parts.get(1).path("inlineData").path("mimeType").asText());
+    assertEquals("image/jpeg", parts.get(1).path("inlineData").path("mimeType").asString(""));
   }
 
   /** 意图：已知 functionCall 以规范化累积结果写回 replay，同时保留 part 级未知字段。 */
@@ -1167,9 +1168,9 @@ class GeminiStreamAccumulatorTest {
         """);
 
     JsonNode part = accumulator.finish().replayState().payload().get("parts").get(0);
-    assertEquals("fn", part.path("functionCall").path("name").asText());
-    assertEquals("c1", part.path("functionCall").path("id").asText());
-    assertEquals(1, part.path("functionCall").path("args").path("k").asInt());
-    assertEquals("t-1", part.path("futurePartField").path("trace").asText());
+    assertEquals("fn", part.path("functionCall").path("name").asString(""));
+    assertEquals("c1", part.path("functionCall").path("id").asString(""));
+    assertEquals(1, part.path("functionCall").path("args").path("k").asInt(0));
+    assertEquals("t-1", part.path("futurePartField").path("trace").asString(""));
   }
 }

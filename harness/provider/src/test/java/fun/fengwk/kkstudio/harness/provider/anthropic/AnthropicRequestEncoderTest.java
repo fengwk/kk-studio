@@ -7,15 +7,16 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
@@ -69,7 +70,7 @@ import java.util.stream.Stream;
 /** AnthropicRequestEncoder 的纯单元与 Golden 测试。 */
 class AnthropicRequestEncoderTest {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
   private static final String SYSTEM_INSTRUCTION = "Test system instruction.";
 
@@ -95,14 +96,14 @@ class AnthropicRequestEncoderTest {
     assertNotNull(encoded);
 
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
-    assertEquals("claude-3-5-sonnet", root.path("model").asText());
-    assertEquals(1024, root.path("max_tokens").asInt());
-    assertTrue(root.path("stream").asBoolean());
+    assertEquals("claude-3-5-sonnet", root.path("model").asString(""));
+    assertEquals(1024, root.path("max_tokens").asInt(0));
+    assertTrue(root.path("stream").asBoolean(false));
     assertEquals(1, root.path("messages").size());
-    assertEquals("user", root.path("messages").get(0).path("role").asText());
+    assertEquals("user", root.path("messages").get(0).path("role").asString(""));
     assertEquals(
         "Hello Anthropic",
-        root.path("messages").get(0).path("content").get(0).path("text").asText());
+        root.path("messages").get(0).path("content").get(0).path("text").asString(""));
   }
 
   @Test
@@ -129,8 +130,8 @@ class AnthropicRequestEncoderTest {
     AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
 
-    assertEquals("claude-fable-5-dd-3M-xaMiniM", root.path("model").asText());
-    assertEquals(4096, root.path("max_tokens").asInt());
+    assertEquals("claude-fable-5-dd-3M-xaMiniM", root.path("model").asString(""));
+    assertEquals(4096, root.path("max_tokens").asInt(0));
     assertFalse(root.has("temperature"));
     assertFalse(root.has("top_p"));
     assertFalse(root.has("top_k"));
@@ -153,8 +154,9 @@ class AnthropicRequestEncoderTest {
             ProviderCacheControl.none());
     AnthropicEncodedRequest encoded = encoder.encode(reqValid, descriptor);
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
-    assertEquals("calc", root.path("tools").get(0).path("name").asText());
-    assertEquals("object", root.path("tools").get(0).path("input_schema").path("type").asText());
+    assertEquals("calc", root.path("tools").get(0).path("name").asString(""));
+    assertEquals(
+        "object", root.path("tools").get(0).path("input_schema").path("type").asString(""));
 
     // 非法工具定义（非合法 JSON）
     ProviderToolDefinition malformedTool = new ProviderToolDefinition("bad", "desc", "{not-json}");
@@ -202,27 +204,27 @@ class AnthropicRequestEncoderTest {
 
     assertEquals(5, contents.size());
     // 0: text
-    assertEquals("text", contents.get(0).path("type").asText());
+    assertEquals("text", contents.get(0).path("type").asString(""));
     // 1: base64 image —— 必须逐字节保留去掉 data URI 前缀后的原始 base64 载荷
-    assertEquals("image", contents.get(1).path("type").asText());
-    assertEquals("base64", contents.get(1).path("source").path("type").asText());
-    assertEquals("image/png", contents.get(1).path("source").path("media_type").asText());
+    assertEquals("image", contents.get(1).path("type").asString(""));
+    assertEquals("base64", contents.get(1).path("source").path("type").asString(""));
+    assertEquals("image/png", contents.get(1).path("source").path("media_type").asString(""));
     assertEquals(
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
-        contents.get(1).path("source").path("data").asText());
+        contents.get(1).path("source").path("data").asString(""));
     // 2: url image
-    assertEquals("image", contents.get(2).path("type").asText());
-    assertEquals("url", contents.get(2).path("source").path("type").asText());
+    assertEquals("image", contents.get(2).path("type").asString(""));
+    assertEquals("url", contents.get(2).path("source").path("type").asString(""));
     assertEquals(
-        "https://example.com/test.jpg", contents.get(2).path("source").path("url").asText());
+        "https://example.com/test.jpg", contents.get(2).path("source").path("url").asString(""));
     // 3: base64 document —— 同样必须逐字节保留原始 base64 载荷
-    assertEquals("document", contents.get(3).path("type").asText());
-    assertEquals("base64", contents.get(3).path("source").path("type").asText());
-    assertEquals("application/pdf", contents.get(3).path("source").path("media_type").asText());
-    assertEquals("JVBERi0xLjUK", contents.get(3).path("source").path("data").asText());
+    assertEquals("document", contents.get(3).path("type").asString(""));
+    assertEquals("base64", contents.get(3).path("source").path("type").asString(""));
+    assertEquals("application/pdf", contents.get(3).path("source").path("media_type").asString(""));
+    assertEquals("JVBERi0xLjUK", contents.get(3).path("source").path("data").asString(""));
     // 4: json as text
-    assertEquals("text", contents.get(4).path("type").asText());
-    assertEquals("{\"key\":\"value\"}", contents.get(4).path("text").asText());
+    assertEquals("text", contents.get(4).path("type").asString(""));
+    assertEquals("{\"key\":\"value\"}", contents.get(4).path("text").asString(""));
   }
 
   @Test
@@ -255,14 +257,15 @@ class AnthropicRequestEncoderTest {
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
     JsonNode systemNode = root.path("system");
     assertEquals(1, systemNode.size());
-    assertEquals("text", systemNode.get(0).path("type").asText());
-    assertEquals("Test system instruction.", systemNode.get(0).path("text").asText());
+    assertEquals("text", systemNode.get(0).path("type").asString(""));
+    assertEquals("Test system instruction.", systemNode.get(0).path("text").asString(""));
 
     // 会话数组中绝无 SYSTEM，且系统指令未重复为任何会话消息。
     JsonNode messagesNode = root.path("messages");
     assertEquals(1, messagesNode.size());
-    assertEquals("user", messagesNode.get(0).path("role").asText());
-    assertEquals("user message", messagesNode.get(0).path("content").get(0).path("text").asText());
+    assertEquals("user", messagesNode.get(0).path("role").asString(""));
+    assertEquals(
+        "user message", messagesNode.get(0).path("content").get(0).path("text").asString(""));
     assertFalse(root.toString().contains("SYSTEM"));
   }
 
@@ -317,12 +320,12 @@ class AnthropicRequestEncoderTest {
 
     AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
     JsonNode msg = MAPPER.readTree(encoded.bodyUtf8Bytes()).path("messages").get(0);
-    assertEquals("user", msg.path("role").asText());
+    assertEquals("user", msg.path("role").asString(""));
     JsonNode res = msg.path("content").get(0);
-    assertEquals("tool_result", res.path("type").asText());
-    assertEquals("call_123", res.path("tool_use_id").asText());
-    assertFalse(res.path("is_error").asBoolean());
-    assertEquals("Result data", res.path("content").get(0).path("text").asText());
+    assertEquals("tool_result", res.path("type").asString(""));
+    assertEquals("call_123", res.path("tool_use_id").asString(""));
+    assertFalse(res.path("is_error").asBoolean(false));
+    assertEquals("Result data", res.path("content").get(0).path("text").asString(""));
   }
 
   @Test
@@ -363,9 +366,9 @@ class AnthropicRequestEncoderTest {
     AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
     JsonNode asstWire = MAPPER.readTree(encoded.bodyUtf8Bytes()).path("messages").get(1);
 
-    assertEquals("thinking", asstWire.path("content").get(0).path("type").asText());
-    assertEquals("sig-123", asstWire.path("content").get(0).path("signature").asText());
-    assertEquals("text", asstWire.path("content").get(1).path("type").asText());
+    assertEquals("thinking", asstWire.path("content").get(0).path("type").asString(""));
+    assertEquals("sig-123", asstWire.path("content").get(0).path("signature").asString(""));
+    assertEquals("text", asstWire.path("content").get(1).path("type").asString(""));
   }
 
   /**
@@ -407,13 +410,13 @@ class AnthropicRequestEncoderTest {
     JsonNode asstWire = MAPPER.readTree(encoded.bodyUtf8Bytes()).path("messages").get(1);
 
     // Fallback: text 与 toolCall 由 durable 重建
-    assertEquals("text", asstWire.path("content").get(0).path("type").asText());
-    assertEquals("response text", asstWire.path("content").get(0).path("text").asText());
+    assertEquals("text", asstWire.path("content").get(0).path("type").asString(""));
+    assertEquals("response text", asstWire.path("content").get(0).path("text").asString(""));
 
-    assertEquals("tool_use", asstWire.path("content").get(1).path("type").asText());
-    assertEquals("call_1", asstWire.path("content").get(1).path("id").asText());
-    assertEquals("calc", asstWire.path("content").get(1).path("name").asText());
-    assertEquals(1, asstWire.path("content").get(1).path("input").path("x").asInt());
+    assertEquals("tool_use", asstWire.path("content").get(1).path("type").asString(""));
+    assertEquals("call_1", asstWire.path("content").get(1).path("id").asString(""));
+    assertEquals("calc", asstWire.path("content").get(1).path("name").asString(""));
+    assertEquals(1, asstWire.path("content").get(1).path("input").path("x").asInt(0));
 
     // 2. thinking 的 signature 不在 durable 中：失配时仍回退，thinking 降级为普通 text 且不泄漏 signature
     ObjectNode nativePayload = NODES.objectNode();
@@ -445,11 +448,11 @@ class AnthropicRequestEncoderTest {
     JsonNode nativeWire =
         MAPPER.readTree(encoder.encode(nativeRequest, descriptor).bodyUtf8Bytes());
     JsonNode nativeAsst = nativeWire.path("messages").get(1);
-    assertEquals("text", nativeAsst.path("content").get(0).path("type").asText());
-    assertEquals("think text", nativeAsst.path("content").get(0).path("text").asText());
+    assertEquals("text", nativeAsst.path("content").get(0).path("type").asString(""));
+    assertEquals("think text", nativeAsst.path("content").get(0).path("text").asString(""));
     assertFalse(nativeAsst.path("content").get(0).has("signature"));
-    assertEquals("text", nativeAsst.path("content").get(1).path("type").asText());
-    assertEquals("response text", nativeAsst.path("content").get(1).path("text").asText());
+    assertEquals("text", nativeAsst.path("content").get(1).path("type").asString(""));
+    assertEquals("response text", nativeAsst.path("content").get(1).path("text").asString(""));
   }
 
   @Test
@@ -472,19 +475,19 @@ class AnthropicRequestEncoderTest {
 
     // TOOLS: 标记在最后一个 tool
     assertEquals(
-        "ephemeral", root.path("tools").get(0).path("cache_control").path("type").asText());
-    assertEquals("1h", root.path("tools").get(0).path("cache_control").path("ttl").asText());
+        "ephemeral", root.path("tools").get(0).path("cache_control").path("type").asString(""));
+    assertEquals("1h", root.path("tools").get(0).path("cache_control").path("ttl").asString(""));
 
     // SYSTEM: 唯一的系统指令块被标记（之前的 system 数组只有这一块）
     assertEquals(1, root.path("system").size());
     assertEquals(
-        "ephemeral", root.path("system").get(0).path("cache_control").path("type").asText());
-    assertEquals("1h", root.path("system").get(0).path("cache_control").path("ttl").asText());
+        "ephemeral", root.path("system").get(0).path("cache_control").path("type").asString(""));
+    assertEquals("1h", root.path("system").get(0).path("cache_control").path("ttl").asString(""));
 
     // CONVERSATION: 剩余两个名额给最近的两个历史端点（User 2 与 User 1），assistant 文本不是请求边界
     JsonNode lastMsgBlock = root.path("messages").get(2).path("content").get(0);
-    assertEquals("ephemeral", lastMsgBlock.path("cache_control").path("type").asText());
-    assertEquals("1h", lastMsgBlock.path("cache_control").path("ttl").asText());
+    assertEquals("ephemeral", lastMsgBlock.path("cache_control").path("type").asString(""));
+    assertEquals("1h", lastMsgBlock.path("cache_control").path("ttl").asString(""));
     assertTrue(root.path("messages").get(0).path("content").get(0).has("cache_control"));
     assertFalse(root.path("messages").get(1).path("content").get(0).has("cache_control"));
     assertEquals(4, countCacheMarkers(root));
@@ -508,12 +511,13 @@ class AnthropicRequestEncoderTest {
 
     // TOOLS 与 SYSTEM 各占一个名额，最后一个名额给唯一历史端点 User；SHORT 不带 ttl
     assertEquals(
-        "ephemeral", root.path("tools").get(0).path("cache_control").path("type").asText());
+        "ephemeral", root.path("tools").get(0).path("cache_control").path("type").asString(""));
     assertFalse(root.path("tools").get(0).path("cache_control").has("ttl"));
     assertEquals(
-        "ephemeral", root.path("system").get(0).path("cache_control").path("type").asText());
+        "ephemeral", root.path("system").get(0).path("cache_control").path("type").asString(""));
     assertFalse(root.path("system").get(0).path("cache_control").has("ttl"));
-    assertEquals("ephemeral", cacheBlock(root, 0, 0).path("cache_control").path("type").asText());
+    assertEquals(
+        "ephemeral", cacheBlock(root, 0, 0).path("cache_control").path("type").asString(""));
     assertFalse(cacheBlock(root, 0, 0).path("cache_control").has("ttl"));
     assertEquals(3, countCacheMarkers(root));
 
@@ -546,9 +550,9 @@ class AnthropicRequestEncoderTest {
     AnthropicEncodedRequest encoded = encoder.encode(req, descriptor);
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
 
-    assertEquals("adaptive", root.path("thinking").path("type").asText());
-    assertEquals("summarized", root.path("thinking").path("display").asText());
-    assertEquals("high", root.path("output_config").path("effort").asText());
+    assertEquals("adaptive", root.path("thinking").path("type").asString(""));
+    assertEquals("summarized", root.path("thinking").path("display").asString(""));
+    assertEquals("high", root.path("output_config").path("effort").asString(""));
     assertEquals(List.of(), encoded.betaFeatures());
   }
 
@@ -588,10 +592,10 @@ class AnthropicRequestEncoderTest {
       AnthropicEncodedRequest encoded = budgetEncoder.encode(req, descriptor);
       JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
 
-      assertEquals("enabled", root.path("thinking").path("type").asText());
-      assertEquals(expectedBudget, root.path("thinking").path("budget_tokens").asInt());
-      assertEquals("summarized", root.path("thinking").path("display").asText());
-      assertEquals(outputTokens, root.path("max_tokens").asInt());
+      assertEquals("enabled", root.path("thinking").path("type").asString(""));
+      assertEquals(expectedBudget, root.path("thinking").path("budget_tokens").asInt(0));
+      assertEquals("summarized", root.path("thinking").path("display").asString(""));
+      assertEquals(outputTokens, root.path("max_tokens").asInt(0));
       assertFalse(
           root.has("output_config"),
           "BUDGET mode must omit output_config, but was: " + root.path("output_config"));
@@ -684,7 +688,7 @@ class AnthropicRequestEncoderTest {
             ProviderCacheControl.none());
     JsonNode offRoot =
         MAPPER.readTree(budgetEncoder.encode(offRequest, descriptor).bodyUtf8Bytes());
-    assertEquals("disabled", offRoot.path("thinking").path("type").asText());
+    assertEquals("disabled", offRoot.path("thinking").path("type").asString(""));
     assertFalse(offRoot.path("thinking").has("budget_tokens"));
     assertFalse(offRoot.has("output_config"));
 
@@ -789,7 +793,7 @@ class AnthropicRequestEncoderTest {
             ProviderCacheControl.none());
     AnthropicEncodedRequest enc4 = budgetEncoder.encode(req4, descriptor);
     JsonNode root4 = MAPPER.readTree(enc4.bodyUtf8Bytes());
-    assertEquals("disabled", root4.path("thinking").path("type").asText());
+    assertEquals("disabled", root4.path("thinking").path("type").asString(""));
     assertFalse(root4.path("thinking").has("budget_tokens"));
     assertFalse(
         root4.has("output_config"), "BUDGET mode with effort='off' must omit output_config");
@@ -821,7 +825,7 @@ class AnthropicRequestEncoderTest {
             ProviderCacheControl.none());
     AnthropicEncodedRequest encOff = adaptiveEncoder.encode(reqOff, descriptor);
     JsonNode rootOff = MAPPER.readTree(encOff.bodyUtf8Bytes());
-    assertEquals("disabled", rootOff.path("thinking").path("type").asText());
+    assertEquals("disabled", rootOff.path("thinking").path("type").asString(""));
     assertFalse(rootOff.path("thinking").has("display"));
     assertFalse(rootOff.path("thinking").has("budget_tokens"));
     assertFalse(
@@ -855,10 +859,10 @@ class AnthropicRequestEncoderTest {
 
     AnthropicEncodedRequest encoded = adaptiveEncoder.encode(req, descriptor);
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
-    assertEquals("adaptive", root.path("thinking").path("type").asText());
-    assertEquals("summarized", root.path("thinking").path("display").asText());
-    assertEquals("high", root.path("output_config").path("effort").asText());
-    assertEquals(512, root.path("max_tokens").asInt());
+    assertEquals("adaptive", root.path("thinking").path("type").asString(""));
+    assertEquals("summarized", root.path("thinking").path("display").asString(""));
+    assertEquals("high", root.path("output_config").path("effort").asString(""));
+    assertEquals(512, root.path("max_tokens").asInt(0));
     assertFalse(root.path("thinking").has("budget_tokens"));
     assertEquals(List.of(), encoded.betaFeatures());
   }
@@ -910,21 +914,21 @@ class AnthropicRequestEncoderTest {
     AnthropicEncodedRequest encoded = encoder.encode(req, descriptor);
     JsonNode toolRes =
         MAPPER.readTree(encoded.bodyUtf8Bytes()).path("messages").get(0).path("content").get(0);
-    assertEquals("tool_result", toolRes.path("type").asText());
+    assertEquals("tool_result", toolRes.path("type").asString(""));
     JsonNode nested = toolRes.path("content");
     assertEquals(3, nested.size());
-    assertEquals("text", nested.get(0).path("type").asText());
-    assertEquals("image", nested.get(1).path("type").asText());
-    assertEquals("document", nested.get(2).path("type").asText());
+    assertEquals("text", nested.get(0).path("type").asString(""));
+    assertEquals("image", nested.get(1).path("type").asString(""));
+    assertEquals("document", nested.get(2).path("type").asString(""));
     // 工具结果中的媒体同样必须逐字节保留原始 base64 载荷
-    assertEquals("base64", nested.get(1).path("source").path("type").asText());
-    assertEquals("image/png", nested.get(1).path("source").path("media_type").asText());
+    assertEquals("base64", nested.get(1).path("source").path("type").asString(""));
+    assertEquals("image/png", nested.get(1).path("source").path("media_type").asString(""));
     assertEquals(
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAA",
-        nested.get(1).path("source").path("data").asText());
-    assertEquals("base64", nested.get(2).path("source").path("type").asText());
-    assertEquals("application/pdf", nested.get(2).path("source").path("media_type").asText());
-    assertEquals("JVBERi0xLjUK", nested.get(2).path("source").path("data").asText());
+        nested.get(1).path("source").path("data").asString(""));
+    assertEquals("base64", nested.get(2).path("source").path("type").asString(""));
+    assertEquals("application/pdf", nested.get(2).path("source").path("media_type").asString(""));
+    assertEquals("JVBERi0xLjUK", nested.get(2).path("source").path("data").asString(""));
   }
 
   /**
@@ -958,12 +962,12 @@ class AnthropicRequestEncoderTest {
     AnthropicEncodedRequest encoded = encoder.encode(req, descriptor);
     JsonNode toolResult =
         MAPPER.readTree(encoded.bodyUtf8Bytes()).path("messages").get(0).path("content").get(0);
-    assertEquals("tool_result", toolResult.path("type").asText());
-    assertEquals("call_1", toolResult.path("tool_use_id").asText());
+    assertEquals("tool_result", toolResult.path("type").asString(""));
+    assertEquals("call_1", toolResult.path("tool_use_id").asString(""));
     JsonNode nested = toolResult.path("content");
     assertEquals(1, nested.size());
-    assertEquals(expectedType, nested.get(0).path("type").asText());
-    assertEquals("base64", nested.get(0).path("source").path("type").asText());
+    assertEquals(expectedType, nested.get(0).path("type").asString(""));
+    assertEquals("base64", nested.get(0).path("source").path("type").asString(""));
   }
 
   /** 工具结果媒体用例：仅 base64 图片与 PDF 可嵌套；音频/视频/思考块与非法来源一律 fail closed。 */
@@ -1034,8 +1038,8 @@ class AnthropicRequestEncoderTest {
 
     AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
     JsonNode asstWire = MAPPER.readTree(encoded.bodyUtf8Bytes()).path("messages").get(1);
-    assertEquals("redacted_thinking", asstWire.path("content").get(0).path("type").asText());
-    assertEquals("abc==", asstWire.path("content").get(0).path("data").asText());
+    assertEquals("redacted_thinking", asstWire.path("content").get(0).path("type").asString(""));
+    assertEquals("abc==", asstWire.path("content").get(0).path("data").asString(""));
   }
 
   @Test
@@ -1086,7 +1090,7 @@ class AnthropicRequestEncoderTest {
     AnthropicEncodedRequest encoded = encoder.encode(req, descriptor);
     JsonNode toolRes =
         MAPPER.readTree(encoded.bodyUtf8Bytes()).path("messages").get(0).path("content").get(0);
-    assertEquals(true, toolRes.path("is_error").asBoolean());
+    assertEquals(true, toolRes.path("is_error").asBoolean(false));
   }
 
   @Test
@@ -1120,7 +1124,7 @@ class AnthropicRequestEncoderTest {
 
     // 最后一个 assistant 消息全是 thinking，cache_control 应该跳过它并标记在倒数第二条的 Text before 上
     JsonNode lastBlock = messages.get(1).path("content").get(0);
-    assertEquals("thinking", lastBlock.path("type").asText());
+    assertEquals("thinking", lastBlock.path("type").asString(""));
     assertFalse(lastBlock.has("cache_control"));
 
     JsonNode beforeBlock = messages.get(0).path("content").get(0);
@@ -1339,8 +1343,8 @@ class AnthropicRequestEncoderTest {
 
     JsonNode content =
         MAPPER.readTree(encoded.bodyUtf8Bytes()).path("messages").get(1).path("content").get(0);
-    assertEquals("text", content.path("type").asText());
-    assertEquals("{\"diagnostic\":\"truncated\"}", content.path("text").asText());
+    assertEquals("text", content.path("type").asString(""));
+    assertEquals("{\"diagnostic\":\"truncated\"}", content.path("text").asString(""));
   }
 
   @Test
@@ -1417,14 +1421,14 @@ class AnthropicRequestEncoderTest {
     assertEquals(2, assistantContent.size());
 
     // content 0: text
-    assertEquals("text", assistantContent.get(0).path("type").asText());
+    assertEquals("text", assistantContent.get(0).path("type").asString(""));
     assertEquals(
         "I was trying to call weather but got cut off",
-        assistantContent.get(0).path("text").asText());
+        assistantContent.get(0).path("text").asString(""));
 
     // content 1: diagnostic JSON 物化为普通 text block
-    assertEquals("text", assistantContent.get(1).path("type").asText());
-    String diagnosticJsonText = assistantContent.get(1).path("text").asText();
+    assertEquals("text", assistantContent.get(1).path("type").asString(""));
+    String diagnosticJsonText = assistantContent.get(1).path("text").asString("");
     ProviderToolCallDiagnosticJsonCodec codec = new ProviderToolCallDiagnosticJsonCodec();
     ProviderToolCallDiagnostic decodedDiag = codec.decode(diagnosticJsonText);
     assertEquals(diagnostic.callIndex(), decodedDiag.callIndex());
@@ -1543,7 +1547,7 @@ class AnthropicRequestEncoderTest {
     assertTrue(wire.path("system").get(0).has("cache_control"));
     assertTrue(cacheBlock(wire, 0, 0).has("cache_control"));
     for (int i = 1; i < 4; i++) {
-      assertEquals("", cacheBlock(wire, i, 0).path("text").asText());
+      assertEquals("", cacheBlock(wire, i, 0).path("text").asString(""));
       assertFalse(cacheBlock(wire, i, 0).has("cache_control"));
     }
     assertEquals(
@@ -1611,17 +1615,17 @@ class AnthropicRequestEncoderTest {
     JsonNode changedSystemWire = assertReplayedOpaqueContent(changedSystem);
     assertEquals(
         "Different system instruction.",
-        changedSystemWire.path("system").get(0).path("text").asText());
+        changedSystemWire.path("system").get(0).path("text").asString(""));
   }
 
   private JsonNode assertReplayedOpaqueContent(ProviderRequest request) throws IOException {
     JsonNode wire = MAPPER.readTree(encoder.encode(request, descriptor).bodyUtf8Bytes());
     JsonNode replayed = wire.path("messages").get(1).path("content");
-    assertEquals("thinking", replayed.get(0).path("type").asText());
-    assertEquals("sig", replayed.get(0).path("signature").asText());
-    assertEquals("redacted_thinking", replayed.get(1).path("type").asText());
-    assertEquals("future_block", replayed.get(2).path("type").asText());
-    assertEquals("kept", replayed.get(2).path("value").asText());
+    assertEquals("thinking", replayed.get(0).path("type").asString(""));
+    assertEquals("sig", replayed.get(0).path("signature").asString(""));
+    assertEquals("redacted_thinking", replayed.get(1).path("type").asString(""));
+    assertEquals("future_block", replayed.get(2).path("type").asString(""));
+    assertEquals("kept", replayed.get(2).path("value").asString(""));
     return wire;
   }
 
@@ -1717,7 +1721,7 @@ class AnthropicRequestEncoderTest {
                         ProviderCacheControl.none()),
                     descriptor)
                 .bodyUtf8Bytes());
-    assertEquals(3, wire.path("tools").get(0).path("max_uses").asInt());
+    assertEquals(3, wire.path("tools").get(0).path("max_uses").asInt(0));
     assertTrue(wire.path("tools").get(0).path("future_field").has("cache_control"));
     assertEquals(
         "string",
@@ -1727,7 +1731,7 @@ class AnthropicRequestEncoderTest {
             .path("properties")
             .path("cache_control")
             .path("type")
-            .asText());
+            .asString(""));
   }
 
   /** 意图：打标移至最终冻结之后，不能放宽已有原生 replay 的形状和 durable 工具一致性校验。 */
@@ -1796,7 +1800,7 @@ class AnthropicRequestEncoderTest {
     int count =
         node.isObject()
                 && node.has("cache_control")
-                && node.path("cache_control").path("type").asText().equals("ephemeral")
+                && node.path("cache_control").path("type").asString("").equals("ephemeral")
             ? 1
             : 0;
     for (JsonNode child : node) {
@@ -1902,8 +1906,8 @@ class AnthropicRequestEncoderTest {
         request(defaultVariant(), List.of(user, asst2), List.of(), ProviderCacheControl.none());
     JsonNode asstWire =
         MAPPER.readTree(encoder.encode(req2, descriptor).bodyUtf8Bytes()).path("messages").get(1);
-    assertEquals("text", asstWire.path("content").get(0).path("type").asText());
-    assertEquals("original", asstWire.path("content").get(0).path("text").asText());
+    assertEquals("text", asstWire.path("content").get(0).path("type").asString(""));
+    assertEquals("original", asstWire.path("content").get(0).path("text").asString(""));
   }
 
   /**
@@ -2008,11 +2012,11 @@ class AnthropicRequestEncoderTest {
     AnthropicEncodedRequest encoded = encoder.encode(req, descriptor);
     JsonNode asstWire = MAPPER.readTree(encoded.bodyUtf8Bytes()).path("messages").get(1);
 
-    assertEquals("text", asstWire.path("content").get(0).path("type").asText());
-    assertEquals("fallback response", asstWire.path("content").get(0).path("text").asText());
-    assertEquals("tool_use", asstWire.path("content").get(1).path("type").asText());
-    assertEquals("call_1", asstWire.path("content").get(1).path("id").asText());
-    assertEquals(1, asstWire.path("content").get(1).path("input").path("a").asInt());
+    assertEquals("text", asstWire.path("content").get(0).path("type").asString(""));
+    assertEquals("fallback response", asstWire.path("content").get(0).path("text").asString(""));
+    assertEquals("tool_use", asstWire.path("content").get(1).path("type").asString(""));
+    assertEquals("call_1", asstWire.path("content").get(1).path("id").asString(""));
+    assertEquals(1, asstWire.path("content").get(1).path("input").path("a").asInt(0));
   }
 
   /** 意图：wire 根字段 model 始终取 ModelDescriptor.modelId，逻辑名与 modelId 可不同且不由配置映射。 */
@@ -2028,7 +2032,7 @@ class AnthropicRequestEncoderTest {
             List.of(),
             ProviderCacheControl.none());
     JsonNode rootMapped = MAPPER.readTree(encoder.encode(reqMapped, descriptor).bodyUtf8Bytes());
-    assertEquals("claude-fable-5-dd-3M-xaMiniM", rootMapped.path("model").asText());
+    assertEquals("claude-fable-5-dd-3M-xaMiniM", rootMapped.path("model").asString(""));
 
     // 逻辑名与 modelId 相同时原样下发
     ProviderRequest reqSame =
@@ -2039,7 +2043,7 @@ class AnthropicRequestEncoderTest {
             List.of(),
             ProviderCacheControl.none());
     JsonNode rootSame = MAPPER.readTree(encoder.encode(reqSame, descriptor).bodyUtf8Bytes());
-    assertEquals("claude-3-5-sonnet", rootSame.path("model").asText());
+    assertEquals("claude-3-5-sonnet", rootSame.path("model").asString(""));
   }
 
   /** 意图：回放亲和性（replay affinity）严格绑定真实 wire modelId，逻辑名不参与亲和性判定。 */
@@ -2103,18 +2107,18 @@ class AnthropicRequestEncoderTest {
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
 
     // 1. Wire 根字段 model 发出真实 modelId
-    assertEquals("claude-fable-5-dd-3M-xaMiniM", root.path("model").asText());
+    assertEquals("claude-fable-5-dd-3M-xaMiniM", root.path("model").asString(""));
 
     // 2. 历史 Assistant 消息由于逻辑亲和性完全吻合，成功采用 payload 原生回放（保留 thinking 块与 signature）
     JsonNode wireAsst = root.path("messages").get(1);
-    assertEquals("assistant", wireAsst.path("role").asText());
-    assertEquals("thinking", wireAsst.path("content").get(0).path("type").asText());
-    assertEquals("deep reasoning", wireAsst.path("content").get(0).path("thinking").asText());
-    assertEquals("sig_valid", wireAsst.path("content").get(0).path("signature").asText());
-    assertEquals("text", wireAsst.path("content").get(1).path("type").asText());
-    assertEquals("replayed answer", wireAsst.path("content").get(1).path("text").asText());
-    assertEquals("tool_use", wireAsst.path("content").get(2).path("type").asText());
-    assertEquals("call_goal", wireAsst.path("content").get(2).path("id").asText());
+    assertEquals("assistant", wireAsst.path("role").asString(""));
+    assertEquals("thinking", wireAsst.path("content").get(0).path("type").asString(""));
+    assertEquals("deep reasoning", wireAsst.path("content").get(0).path("thinking").asString(""));
+    assertEquals("sig_valid", wireAsst.path("content").get(0).path("signature").asString(""));
+    assertEquals("text", wireAsst.path("content").get(1).path("type").asString(""));
+    assertEquals("replayed answer", wireAsst.path("content").get(1).path("text").asString(""));
+    assertEquals("tool_use", wireAsst.path("content").get(2).path("type").asString(""));
+    assertEquals("call_goal", wireAsst.path("content").get(2).path("id").asString(""));
 
     // 3. 对比：如果 replayState 亲和性错误绑定到了逻辑模型名，则 affinity 失配——按 durable 语义回退，
     //    原生 thinking signature 无法由 durable 重建，只能降级为普通文本，绝不抛错。
@@ -2137,11 +2141,11 @@ class AnthropicRequestEncoderTest {
             .readTree(encoder.encode(requestMismatch, descriptor).bodyUtf8Bytes())
             .path("messages")
             .get(1);
-    assertEquals("text", mismatchAsst.path("content").get(0).path("type").asText());
-    assertEquals("deep reasoning", mismatchAsst.path("content").get(0).path("text").asText());
+    assertEquals("text", mismatchAsst.path("content").get(0).path("type").asString(""));
+    assertEquals("deep reasoning", mismatchAsst.path("content").get(0).path("text").asString(""));
     assertFalse(mismatchAsst.path("content").get(0).has("signature"));
-    assertEquals("text", mismatchAsst.path("content").get(1).path("type").asText());
-    assertEquals("tool_use", mismatchAsst.path("content").get(2).path("type").asText());
+    assertEquals("text", mismatchAsst.path("content").get(1).path("type").asString(""));
+    assertEquals("tool_use", mismatchAsst.path("content").get(2).path("type").asString(""));
   }
 
   private static ProviderRequest requestWithModelId(

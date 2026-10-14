@@ -14,10 +14,11 @@ import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import tools.jackson.databind.MapperFeature;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
@@ -110,19 +111,23 @@ class ModelRequestDebugServiceTest {
       "{\"tools\":[\"read\"],\"skills\":[{\"packageName\":\"pkg\",\"name\":\"sk\"}],"
           + "\"subagents\":[\"nested\"],\"inheritParentEnvironment\":true}";
 
-  /** required-nullable 字段在真实 NON_NULL 序列化配置下也必须显式发射。 */
+  /** required-nullable 字段在真实 NON_NULL 序列化配置下也必须显式发射；声明序由显式关闭字母序保持。 */
   private static final ObjectMapper JSON =
-      new ObjectMapper()
-          .registerModule(new JavaTimeModule())
-          .setSerializationInclusion(JsonInclude.Include.NON_NULL);
+      JsonMapper.builder()
+          .disable(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY)
+          .changeDefaultPropertyInclusion(
+              inclusion -> inclusion.withValueInclusion(JsonInclude.Include.NON_NULL))
+          .build();
 
   private final HarnessRuntime runtime = mock(HarnessRuntime.class);
   private final DatabaseTurnResolver turnResolver = mock(DatabaseTurnResolver.class);
   private final AgentDefinitionRepository agentDefinitionRepository =
       mock(AgentDefinitionRepository.class);
   // 使用真实 codec：canonical config JSON 的 wire 形状与“无凭据”由真实编码证明，而不是 mock 约定。
+  // 宿主 mapper 实际禁用字母序，这里显式对齐，保证断言的是生产声明的持久化形状。
   private final AgentDefinitionConfigCodec agentConfigCodec =
-      new AgentDefinitionConfigCodec(new ObjectMapper());
+      new AgentDefinitionConfigCodec(
+          JsonMapper.builder().disable(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY).build());
 
   private final ModelRequestDebugService service =
       new ModelRequestDebugService(

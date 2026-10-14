@@ -5,10 +5,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.platform.canvas.function.opencli.OpenCliHubClient.ExecutionResource;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
@@ -332,7 +332,7 @@ class OpenCliResponseDeadlineTest {
       return new OpenCliHubClient(
           new OpenCliHubProperties(),
           new SystemSettingsSnapshot(settings),
-          new ObjectMapper(),
+          JsonMapper.builder().build(),
           http);
     }
 

@@ -1,11 +1,10 @@
 package fun.fengwk.kkstudio.platform.catalog.support;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Component;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
-
-import java.io.IOException;
 
 /**
  * AgentEditableSupport 负责标准化 agent 管理面的字符串与 JSON 可编辑字段。
@@ -58,7 +57,7 @@ public final class AgentEditableSupport {
       if (!objectMapper.readTree(json).isArray()) {
         throw new IllegalArgumentException(fieldName + " must be a JSON array");
       }
-    } catch (IOException e) {
+    } catch (JacksonException e) {
       throw new IllegalArgumentException(fieldName + " must be valid JSON", e);
     }
   }
@@ -79,7 +78,7 @@ public final class AgentEditableSupport {
       if (!objectMapper.readTree(trimmed).isObject()) {
         throw new IllegalArgumentException(fieldName + " must be a JSON object");
       }
-    } catch (IOException e) {
+    } catch (JacksonException e) {
       throw new IllegalArgumentException(fieldName + " must be valid JSON", e);
     }
   }

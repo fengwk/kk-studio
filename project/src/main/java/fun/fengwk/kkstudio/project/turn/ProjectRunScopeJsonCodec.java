@@ -1,17 +1,17 @@
 package fun.fengwk.kkstudio.project.turn;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.util.ArrayList;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
@@ -42,13 +42,12 @@ public final class ProjectRunScopeJsonCodec {
           "nextStates",
           "agentName",
           "active");
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER =
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          .build();
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
-
-  static {
-    MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
-    MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-  }
 
   /** 编码为规范 JSON 文本；相同快照始终得到相同文本。 */
   public String encode(ProjectRunScope scope) {
@@ -121,16 +120,14 @@ public final class ProjectRunScopeJsonCodec {
     Objects.requireNonNull(dataJson, "dataJson");
     try {
       return MAPPER.readTree(dataJson);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalArgumentException(CONTEXT + " must be valid JSON", error);
     }
   }
 
   private static void requireExactFields(ObjectNode node) {
     Set<String> present = new HashSet<>();
-    Iterator<String> names = node.fieldNames();
-    while (names.hasNext()) {
-      String name = names.next();
+    for (String name : node.propertyNames()) {
       if (!FIELDS.contains(name)) {
         throw new IllegalArgumentException(CONTEXT + " has unknown field " + name);
       }
@@ -145,11 +142,11 @@ public final class ProjectRunScopeJsonCodec {
 
   private static UUID requireUuid(ObjectNode node, String field) {
     JsonNode value = node.get(field);
-    if (value == null || !value.isTextual()) {
+    if (value == null || !value.isString()) {
       throw new IllegalArgumentException(CONTEXT + " field " + field + " must be a UUID string");
     }
     try {
-      return UUID.fromString(value.textValue());
+      return UUID.fromString(value.stringValue());
     } catch (IllegalArgumentException error) {
       throw new IllegalArgumentException(
           CONTEXT + " field " + field + " must be a UUID string", error);
@@ -158,7 +155,7 @@ public final class ProjectRunScopeJsonCodec {
 
   private static long requireLong(ObjectNode node, String field) {
     JsonNode value = node.get(field);
-    if (value == null || !value.isIntegralNumber()) {
+    if (value == null || !value.isIntegralNumber() || !value.canConvertToLong()) {
       throw new IllegalArgumentException(CONTEXT + " field " + field + " must be an integer");
     }
     return value.longValue();
@@ -174,11 +171,11 @@ public final class ProjectRunScopeJsonCodec {
 
   private static String requireText(ObjectNode node, String field) {
     JsonNode value = node.get(field);
-    if (value == null || !value.isTextual() || value.textValue().isBlank()) {
+    if (value == null || !value.isString() || value.stringValue().isBlank()) {
       throw new IllegalArgumentException(
           CONTEXT + " field " + field + " must be a non-blank string");
     }
-    return value.textValue();
+    return value.stringValue();
   }
 
   private static String optionalText(ObjectNode node, String field) {
@@ -186,10 +183,10 @@ public final class ProjectRunScopeJsonCodec {
     if (value == null || value.isNull()) {
       return null;
     }
-    if (!value.isTextual()) {
+    if (!value.isString()) {
       throw new IllegalArgumentException(CONTEXT + " field " + field + " must be a string or null");
     }
-    return value.textValue();
+    return value.stringValue();
   }
 
   private static List<String> requireStringArray(ObjectNode node, String field) {
@@ -199,11 +196,11 @@ public final class ProjectRunScopeJsonCodec {
     }
     List<String> values = new ArrayList<>(value.size());
     for (JsonNode element : value) {
-      if (!element.isTextual() || element.textValue().isBlank()) {
+      if (!element.isString() || element.stringValue().isBlank()) {
         throw new IllegalArgumentException(
             CONTEXT + " field " + field + " must contain non-blank strings");
       }
-      values.add(element.textValue());
+      values.add(element.stringValue());
     }
     return values;
   }
@@ -211,7 +208,7 @@ public final class ProjectRunScopeJsonCodec {
   private static String write(JsonNode node) {
     try {
       return MAPPER.writeValueAsString(node);
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalStateException("cannot encode " + CONTEXT, error);
     }
   }

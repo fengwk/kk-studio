@@ -8,9 +8,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
@@ -37,8 +37,8 @@ class AgentBranchSettingsMaterializerTest {
         new AgentBranchSettingsMaterializer(
             agentRepository,
             modelRepository,
-            new AgentModelRuntimeConfigParser(new ObjectMapper()),
-            new AgentDefinitionConfigCodec(new ObjectMapper()));
+            new AgentModelRuntimeConfigParser(JsonMapper.builder().build()),
+            new AgentDefinitionConfigCodec(JsonMapper.builder().build()));
   }
 
   private void stub(String agentName, String variant, String modelConfigJson) {

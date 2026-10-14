@@ -40,7 +40,7 @@ class ProviderModuleArchitectureTest {
           "javax.",
           "lombok.",
           "org.slf4j.",
-          "com.fasterxml.jackson.",
+          "tools.jackson.",
           "fun.fengwk.kkstudio.harness.runtime.",
           "fun.fengwk.kkstudio.harness.provider.");
 
@@ -101,7 +101,7 @@ class ProviderModuleArchitectureTest {
       String coordinate = requiredTag(block, "groupId") + ":" + requiredTag(block, "artifactId");
       if (!Set.of(
               "fun.fengwk.kk-studio:kk-studio-harness-runtime",
-              "com.fasterxml.jackson.core:jackson-databind")
+              "tools.jackson.core:jackson-databind")
           .contains(coordinate)) {
         violations.add(coordinate + (scope == null ? "" : " [" + scope + "]"));
       }

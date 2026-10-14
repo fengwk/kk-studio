@@ -2,8 +2,9 @@ package fun.fengwk.kkstudio.platform.canvas.resource;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.platform.storage.S3ObjectMetadata;
@@ -117,7 +118,7 @@ public class FfmpegStorageMediaProbe implements StorageMediaProbe {
     FfprobeOutput output;
     try {
       output = objectMapper.readValue(stdout.toFile(), FfprobeOutput.class);
-    } catch (IOException error) {
+    } catch (JacksonException error) {
       throw new IllegalArgumentException("ffprobe produced invalid JSON", error);
     }
     if (output.format() == null || output.streams() == null) {

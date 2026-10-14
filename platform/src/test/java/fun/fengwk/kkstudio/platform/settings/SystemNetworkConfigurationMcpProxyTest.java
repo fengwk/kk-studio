@@ -4,13 +4,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.parallel.ResourceLock;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.mcp.McpCancellationToken;
 import fun.fengwk.kkstudio.harness.mcp.McpClient;
@@ -41,7 +42,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 @ResourceLock("jvm-proxy-selector")
 class SystemNetworkConfigurationMcpProxyTest {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
   private static final URI TARGET = URI.create("http://unresolvable.invalid/mcp");
 
   @Test

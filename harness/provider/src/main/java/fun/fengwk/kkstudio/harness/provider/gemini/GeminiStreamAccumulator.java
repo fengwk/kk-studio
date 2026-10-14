@@ -1,13 +1,15 @@
 package fun.fengwk.kkstudio.harness.provider.gemini;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.JsonNodeFeature;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
@@ -25,7 +27,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -49,13 +50,13 @@ import java.util.Set;
  */
 final class GeminiStreamAccumulator {
 
-  private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+  private static final ObjectMapper OBJECT_MAPPER =
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+          .build();
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
-
-  static {
-    OBJECT_MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
-    OBJECT_MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-  }
 
   private static final Set<String> FILTERED_FINISH_REASONS =
       Set.of(
@@ -162,11 +163,11 @@ final class GeminiStreamAccumulator {
     String tier = null;
     if (usageNode.has("serviceTier")) {
       JsonNode value = usageNode.get("serviceTier");
-      if (!value.isTextual() || value.textValue().isBlank()) {
+      if (!value.isString() || value.stringValue().isBlank()) {
         throw new ProviderException(
             ProviderErrorKind.INVALID_RESPONSE, "invalid usage field: serviceTier");
       }
-      tier = value.textValue();
+      tier = value.stringValue();
     }
 
     this.latestUsage =
@@ -193,7 +194,7 @@ final class GeminiStreamAccumulator {
     boolean hasFinishReason =
         candidate.has("finishReason")
             && !candidate.get("finishReason").isNull()
-            && !candidate.get("finishReason").asText().isBlank();
+            && !candidate.get("finishReason").asString("").isBlank();
     if (terminalChunkReceived && (hasContent || hasFinishReason)) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_RESPONSE, "content received after Gemini terminal chunk");
@@ -201,8 +202,8 @@ final class GeminiStreamAccumulator {
     // 检查 finishReason
     if (candidate.has("finishReason")
         && !candidate.get("finishReason").isNull()
-        && !candidate.get("finishReason").asText().isBlank()) {
-      String rawFinishReason = candidate.get("finishReason").asText().trim();
+        && !candidate.get("finishReason").asString("").isBlank()) {
+      String rawFinishReason = candidate.get("finishReason").asString("").trim();
       if (!"FINISH_REASON_UNSPECIFIED".equalsIgnoreCase(rawFinishReason)) {
         this.stopReason = mapFinishReason(rawFinishReason);
         this.terminalChunkReceived = true;
@@ -325,10 +326,10 @@ final class GeminiStreamAccumulator {
 
   /** 捕捉 functionCall 的规范化状态：id 缺失时补协议 id；name/args 已在 {@link #validateParts} 严格校验。 */
   private void captureFunctionCall(TrackedPart trackedPart, JsonNode fnNode) {
-    trackedPart.functionCallName = fnNode.get("name").asText();
+    trackedPart.functionCallName = fnNode.get("name").asString("");
     trackedPart.functionCallId =
         (fnNode.has("id") && !fnNode.get("id").isNull())
-            ? fnNode.get("id").asText()
+            ? fnNode.get("id").asString("")
             : "call_" + nextToolOrdinal;
     trackedPart.functionCallArgs = fnNode.get("args");
   }
@@ -350,9 +351,8 @@ final class GeminiStreamAccumulator {
 
   /** 判断 part 的字段集合是否只含 text/thought，即可安全增量累积的朴素形状。 */
   private static boolean isPlainPartShape(JsonNode partNode) {
-    Iterator<String> fieldNames = partNode.fieldNames();
-    while (fieldNames.hasNext()) {
-      if (!PLAIN_PART_FIELDS.contains(fieldNames.next())) {
+    for (String fieldName : partNode.propertyNames()) {
+      if (!PLAIN_PART_FIELDS.contains(fieldName)) {
         return false;
       }
     }
@@ -361,9 +361,8 @@ final class GeminiStreamAccumulator {
 
   /** 判断 candidate 是否声明了 base 的全部字段名：只有超集形状的替换才可能不丢字段。 */
   private static boolean carriesAllFieldNames(JsonNode candidate, JsonNode base) {
-    Iterator<String> fieldNames = base.fieldNames();
-    while (fieldNames.hasNext()) {
-      if (!candidate.has(fieldNames.next())) {
+    for (String fieldName : base.propertyNames()) {
+      if (!candidate.has(fieldName)) {
         return false;
       }
     }
@@ -373,15 +372,15 @@ final class GeminiStreamAccumulator {
   /** 读取 part 的 thoughtSignature：null 与空白字符串都表示该 part 不携带签名。 */
   private static String readThoughtSignature(JsonNode partNode) {
     JsonNode signature = partNode.get("thoughtSignature");
-    if (signature == null || signature.isNull() || signature.asText().isBlank()) {
+    if (signature == null || signature.isNull() || signature.asString("").isBlank()) {
       return null;
     }
-    return signature.asText();
+    return signature.asString("");
   }
 
   /** 读取 part 的 text：null 表示未声明。 */
   private static String readPartText(JsonNode partNode) {
-    return hasPartText(partNode) ? partNode.get("text").asText() : null;
+    return hasPartText(partNode) ? partNode.get("text").asString("") : null;
   }
 
   private static boolean hasPartText(JsonNode partNode) {
@@ -394,12 +393,12 @@ final class GeminiStreamAccumulator {
 
   /** 保真化原生 part：null text 与空白 thoughtSignature 不承载语义且无法写入合法 replay，按不存在处理。 */
   private static ObjectNode normalizedRawPart(JsonNode partNode) {
-    ObjectNode rawPart = partNode.deepCopy();
+    ObjectNode rawPart = (ObjectNode) partNode.deepCopy();
     if (rawPart.has("text") && rawPart.get("text").isNull()) {
       rawPart.remove("text");
     }
     JsonNode signature = rawPart.get("thoughtSignature");
-    if (signature != null && (signature.isNull() || signature.asText().isBlank())) {
+    if (signature != null && (signature.isNull() || signature.asString("").isBlank())) {
       rawPart.remove("thoughtSignature");
     }
     return rawPart;
@@ -421,8 +420,8 @@ final class GeminiStreamAccumulator {
         }
         if (!fnNode.has("name")
             || fnNode.get("name") == null
-            || !fnNode.get("name").isTextual()
-            || fnNode.get("name").asText().isBlank()) {
+            || !fnNode.get("name").isString()
+            || fnNode.get("name").asString("").isBlank()) {
           throw new ProviderException(
               ProviderErrorKind.INVALID_RESPONSE, "functionCall name must be a non-blank string");
         }
@@ -435,7 +434,7 @@ final class GeminiStreamAccumulator {
               "functionCall args must be an explicit JSON object");
         }
         if (fnNode.has("id") && fnNode.get("id") != null && !fnNode.get("id").isNull()) {
-          if (!fnNode.get("id").isTextual() || fnNode.get("id").asText().isBlank()) {
+          if (!fnNode.get("id").isString() || fnNode.get("id").asString("").isBlank()) {
             throw new ProviderException(
                 ProviderErrorKind.INVALID_RESPONSE, "functionCall id must be a non-blank string");
           }
@@ -448,7 +447,7 @@ final class GeminiStreamAccumulator {
   private static void validatePartKnownFields(JsonNode partNode) {
     if (partNode.has("text")
         && !partNode.get("text").isNull()
-        && !partNode.get("text").isTextual()) {
+        && !partNode.get("text").isString()) {
       throw new ProviderException(ProviderErrorKind.INVALID_RESPONSE, "part text must be a string");
     }
     if (partNode.has("thought")
@@ -459,7 +458,7 @@ final class GeminiStreamAccumulator {
     }
     if (partNode.has("thoughtSignature")
         && !partNode.get("thoughtSignature").isNull()
-        && !partNode.get("thoughtSignature").isTextual()) {
+        && !partNode.get("thoughtSignature").isString()) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_RESPONSE, "part thoughtSignature must be a string");
     }
@@ -587,7 +586,7 @@ final class GeminiStreamAccumulator {
   private static JsonNode parseJson(String data) {
     try {
       return OBJECT_MAPPER.readTree(data);
-    } catch (JsonProcessingException e) {
+    } catch (JacksonException e) {
       throw new ProviderException(ProviderErrorKind.INVALID_RESPONSE, "malformed SSE data JSON");
     }
   }

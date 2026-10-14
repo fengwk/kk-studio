@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.provider.openai.responses;
 
-import com.fasterxml.jackson.databind.JsonNode;
+import tools.jackson.databind.JsonNode;
 
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
@@ -29,11 +29,11 @@ final class OpenAiResponsesReasoningText {
         throw new ProviderException(errorKind, "reasoning content block must be an object");
       }
       JsonNode type = block.get("type");
-      if (type == null || !type.isTextual() || !"reasoning_text".equals(type.textValue())) {
+      if (type == null || !type.isString() || !"reasoning_text".equals(type.stringValue())) {
         throw new ProviderException(
             errorKind, "reasoning content block type must be 'reasoning_text'");
       }
-      if (!block.path("text").isTextual()) {
+      if (!block.path("text").isString()) {
         throw new ProviderException(errorKind, "reasoning content block must have string text");
       }
     }
@@ -55,16 +55,16 @@ final class OpenAiResponsesReasoningText {
       return "";
     }
     // producer 既有的 summary 字符串归一化；consumer 在调用前仍严格要求数组。
-    if ("summary_text".equals(type) && blocks.isTextual()) {
-      return blocks.textValue();
+    if ("summary_text".equals(type) && blocks.isString()) {
+      return blocks.stringValue();
     }
     StringBuilder text = new StringBuilder();
     if (blocks.isArray()) {
       for (JsonNode block : blocks) {
         if (block.isObject()
-            && type.equals(block.path("type").asText())
-            && block.path("text").isTextual()) {
-          text.append(block.get("text").textValue());
+            && type.equals(block.path("type").asString(""))
+            && block.path("text").isString()) {
+          text.append(block.get("text").stringValue());
         }
       }
     }

@@ -1,13 +1,16 @@
 package fun.fengwk.kkstudio.harness.provider.anthropic;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.JsonNodeFactory;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.JsonParser;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.JsonNodeFeature;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.provider.ProviderProtocolOptionsJson;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
@@ -63,13 +66,13 @@ import java.util.Set;
  */
 final class AnthropicRequestEncoder {
 
-  private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+  private static final ObjectMapper OBJECT_MAPPER =
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+          .build();
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
-
-  static {
-    OBJECT_MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
-    OBJECT_MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-  }
 
   private static final Set<String> ALLOWED_IMAGE_TYPES =
       Set.of("image/jpeg", "image/png", "image/gif", "image/webp");
@@ -180,7 +183,7 @@ final class AnthropicRequestEncoder {
     byte[] utf8Bytes;
     try {
       utf8Bytes = OBJECT_MAPPER.writeValueAsBytes(root);
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_REQUEST, "failed to serialize Anthropic request body");
     }
@@ -331,23 +334,23 @@ final class AnthropicRequestEncoder {
         JsonNode type = nativeTool.path("type");
         JsonNode name = nativeTool.path("name");
         if (!nativeTool.isObject()
-            || !type.isTextual()
-            || !type.textValue().matches("(web_search|web_fetch|code_execution)_[0-9]{8}")
-            || !name.isTextual()
-            || name.textValue().isBlank()) {
+            || !type.isString()
+            || !type.stringValue().matches("(web_search|web_fetch|code_execution)_[0-9]{8}")
+            || !name.isString()
+            || name.stringValue().isBlank()) {
           throw new ProviderException(
               ProviderErrorKind.INVALID_REQUEST,
               "protocolOptions tools["
                   + i
                   + "] must be a supported hosted tool; bind client tools through runtime ProviderToolDefinition");
         }
-        if (!names.add(name.textValue())) {
+        if (!names.add(name.stringValue())) {
           throw new ProviderException(
               ProviderErrorKind.INVALID_REQUEST,
               "protocolOptions tools[" + i + "] duplicates a tool name");
         }
         for (ProviderToolDefinition runtimeTool : runtimeTools) {
-          if (name.textValue().equals(runtimeTool.name())) {
+          if (name.stringValue().equals(runtimeTool.name())) {
             throw new ProviderException(
                 ProviderErrorKind.INVALID_REQUEST,
                 "protocolOptions tools[" + i + "] name conflicts with runtime tool");
@@ -371,7 +374,7 @@ final class AnthropicRequestEncoder {
     JsonNode schemaNode;
     try {
       schemaNode = OBJECT_MAPPER.readTree(tool.inputSchemaJson());
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_REQUEST, "tool inputSchemaJson is not valid JSON");
     }
@@ -553,8 +556,8 @@ final class AnthropicRequestEncoder {
         || !payload.isObject()
         || payload.size() != 2
         || !payload.has("role")
-        || !payload.get("role").isTextual()
-        || !"assistant".equals(payload.get("role").textValue())
+        || !payload.get("role").isString()
+        || !"assistant".equals(payload.get("role").stringValue())
         || !payload.has("content")
         || !payload.get("content").isArray()) {
       throw new ProviderException(
@@ -580,39 +583,39 @@ final class AnthropicRequestEncoder {
     int blockIndex = 0;
 
     for (JsonNode item : contentArray) {
-      if (!item.isObject() || !item.has("type") || !item.get("type").isTextual()) {
+      if (!item.isObject() || !item.has("type") || !item.get("type").isString()) {
         throw new ProviderException(
             ProviderErrorKind.INVALID_REQUEST, "invalid Anthropic replay payload block");
       }
-      String type = item.get("type").textValue();
+      String type = item.get("type").stringValue();
       if (type.isBlank()) {
         throw new ProviderException(
             ProviderErrorKind.INVALID_REQUEST, "invalid Anthropic replay payload block");
       }
       switch (type) {
         case "text" -> {
-          if (!item.has("text") || !item.get("text").isTextual()) {
+          if (!item.has("text") || !item.get("text").isString()) {
             throw new ProviderException(
                 ProviderErrorKind.INVALID_REQUEST, "invalid text block in replay payload");
           }
           validateCitations(item.get("citations"));
-          payloadText.append(item.get("text").textValue());
+          payloadText.append(item.get("text").stringValue());
         }
         case "thinking" -> {
           if (!item.has("thinking")
-              || !item.get("thinking").isTextual()
+              || !item.get("thinking").isString()
               || !item.has("signature")
-              || !item.get("signature").isTextual()
-              || item.get("signature").textValue().isBlank()) {
+              || !item.get("signature").isString()
+              || item.get("signature").stringValue().isBlank()) {
             throw new ProviderException(
                 ProviderErrorKind.INVALID_REQUEST, "invalid thinking block in replay payload");
           }
-          payloadThinking.append(item.get("thinking").textValue());
+          payloadThinking.append(item.get("thinking").stringValue());
         }
         case "redacted_thinking" -> {
           if (!item.has("data")
-              || !item.get("data").isTextual()
-              || item.get("data").textValue().isBlank()) {
+              || !item.get("data").isString()
+              || item.get("data").stringValue().isBlank()) {
             throw new ProviderException(
                 ProviderErrorKind.INVALID_REQUEST,
                 "invalid redacted_thinking block in replay payload");
@@ -620,11 +623,11 @@ final class AnthropicRequestEncoder {
         }
         case "tool_use" -> {
           if (!item.has("id")
-              || !item.get("id").isTextual()
-              || item.get("id").textValue().isBlank()
+              || !item.get("id").isString()
+              || item.get("id").stringValue().isBlank()
               || !item.has("name")
-              || !item.get("name").isTextual()
-              || item.get("name").textValue().isBlank()
+              || !item.get("name").isString()
+              || item.get("name").stringValue().isBlank()
               || !item.has("input")
               || !item.get("input").isObject()) {
             throw new ProviderException(
@@ -632,8 +635,8 @@ final class AnthropicRequestEncoder {
           }
           payloadCalls.add(
               new ProviderToolCall(
-                  item.get("id").textValue(),
-                  item.get("name").textValue(),
+                  item.get("id").stringValue(),
+                  item.get("name").stringValue(),
                   item.get("input").toString()));
         }
         case "compaction" -> {
@@ -839,9 +842,9 @@ final class AnthropicRequestEncoder {
     for (int i = contents.size() - 1; i >= 0; i--) {
       JsonNode block = contents.get(i);
       boolean eligible =
-          switch (block.path("type").asText()) {
-            case "text" -> block.path("text").isTextual()
-                && !block.path("text").textValue().isEmpty();
+          switch (block.path("type").asString("")) {
+            case "text" -> block.path("text").isString()
+                && !block.path("text").stringValue().isEmpty();
             case "image", "document", "tool_use", "tool_result" -> true;
             default -> false;
           };

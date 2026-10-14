@@ -6,12 +6,13 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
@@ -61,7 +62,7 @@ class AnthropicRequestMapperTest {
 
   private static final String BASE64_PDF_DATA = "JVBERi0xLjQK";
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
 
   private final AnthropicRequestEncoder encoder = new AnthropicRequestEncoder();
 
@@ -111,8 +112,8 @@ class AnthropicRequestMapperTest {
     // 系统指令始终是唯一的顶层 system 文本块，绝不进入 messages。
     JsonNode systemNode = root.path("system");
     assertEquals(1, systemNode.size());
-    assertEquals("text", systemNode.get(0).path("type").asText());
-    assertEquals(request.systemInstruction(), systemNode.get(0).path("text").asText());
+    assertEquals("text", systemNode.get(0).path("type").asString(""));
+    assertEquals(request.systemInstruction(), systemNode.get(0).path("text").asString(""));
   }
 
   static Stream<Arguments> test_toAnthropicMessages() {
@@ -641,7 +642,7 @@ class AnthropicRequestMapperTest {
     assertFalse(actualInputSchema.has("defs"));
     assertEquals(
         "#/$defs/Person",
-        actualInputSchema.path("properties").path("person").path("$ref").asText());
+        actualInputSchema.path("properties").path("person").path("$ref").asString(""));
   }
 
   /** 测试意图：验证工具定义在携带 $defs 结构时，生成的 wire 工具正确保留 $defs。 */
@@ -734,8 +735,8 @@ class AnthropicRequestMapperTest {
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
 
     JsonNode contentBlock = root.path("messages").get(0).path("content").get(0);
-    assertEquals("Hello cached world", contentBlock.path("text").asText());
-    assertEquals("ephemeral", contentBlock.path("cache_control").path("type").asText());
+    assertEquals("Hello cached world", contentBlock.path("text").asString(""));
+    assertEquals("ephemeral", contentBlock.path("cache_control").path("type").asString(""));
     assertFalse(contentBlock.path("cache_control").has("ttl"));
   }
 
@@ -756,11 +757,11 @@ class AnthropicRequestMapperTest {
 
     JsonNode contents = root.path("messages").get(0).path("content");
     assertEquals(2, contents.size());
-    assertEquals("First item", contents.get(0).path("text").asText());
+    assertEquals("First item", contents.get(0).path("text").asString(""));
     assertFalse(contents.get(0).has("cache_control"));
 
-    assertEquals("Second item", contents.get(1).path("text").asText());
-    assertEquals("ephemeral", contents.get(1).path("cache_control").path("type").asText());
+    assertEquals("Second item", contents.get(1).path("text").asString(""));
+    assertEquals("ephemeral", contents.get(1).path("cache_control").path("type").asString(""));
   }
 
   /** 测试意图：Assistant 结尾保留当前末端，同时保留生成该回复之前的用户请求端点。 */
@@ -777,11 +778,11 @@ class AnthropicRequestMapperTest {
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
 
     JsonNode userBlock = root.path("messages").get(0).path("content").get(0);
-    assertEquals("ephemeral", userBlock.path("cache_control").path("type").asText());
+    assertEquals("ephemeral", userBlock.path("cache_control").path("type").asString(""));
 
     JsonNode asstBlock = root.path("messages").get(1).path("content").get(0);
-    assertEquals("Hi", asstBlock.path("text").asText());
-    assertEquals("ephemeral", asstBlock.path("cache_control").path("type").asText());
+    assertEquals("Hi", asstBlock.path("text").asString(""));
+    assertEquals("ephemeral", asstBlock.path("cache_control").path("type").asString(""));
   }
 
   /** 测试意图：当 Assistant 消息同时包含文本与工具调用时，缓存标记应打在最后一个内容块（tool_use）上，文本块不带标记。 */
@@ -809,8 +810,8 @@ class AnthropicRequestMapperTest {
     assertFalse(asstContents.get(0).has("cache_control"));
 
     JsonNode toolUseNode = asstContents.get(1);
-    assertEquals("tool_use", toolUseNode.path("type").asText());
-    assertEquals("ephemeral", toolUseNode.path("cache_control").path("type").asText());
+    assertEquals("tool_use", toolUseNode.path("type").asString(""));
+    assertEquals("ephemeral", toolUseNode.path("cache_control").path("type").asString(""));
   }
 
   /** 测试意图：当缓存保留策略为 NONE 时，Assistant 消息绝不带有 cache_control 标记。 */
@@ -850,8 +851,8 @@ class AnthropicRequestMapperTest {
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
 
     JsonNode toolResultNode = root.path("messages").get(2).path("content").get(0);
-    assertEquals("tool_result", toolResultNode.path("type").asText());
-    assertEquals("ephemeral", toolResultNode.path("cache_control").path("type").asText());
+    assertEquals("tool_result", toolResultNode.path("type").asString(""));
+    assertEquals("ephemeral", toolResultNode.path("cache_control").path("type").asString(""));
 
     JsonNode nestedTextNode = toolResultNode.path("content").get(0);
     assertFalse(nestedTextNode.has("cache_control"));
@@ -884,8 +885,8 @@ class AnthropicRequestMapperTest {
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
 
     JsonNode toolResultNode = root.path("messages").get(2).path("content").get(0);
-    assertEquals("tool_result", toolResultNode.path("type").asText());
-    assertEquals("ephemeral", toolResultNode.path("cache_control").path("type").asText());
+    assertEquals("tool_result", toolResultNode.path("type").asString(""));
+    assertEquals("ephemeral", toolResultNode.path("cache_control").path("type").asString(""));
 
     JsonNode nestedBlocks = toolResultNode.path("content");
     assertEquals(2, nestedBlocks.size());
@@ -936,8 +937,8 @@ class AnthropicRequestMapperTest {
     assertFalse(contents.get(0).has("cache_control"));
 
     JsonNode imageNode = contents.get(1);
-    assertEquals("image", imageNode.path("type").asText());
-    assertEquals("ephemeral", imageNode.path("cache_control").path("type").asText());
+    assertEquals("image", imageNode.path("type").asString(""));
+    assertEquals("ephemeral", imageNode.path("cache_control").path("type").asString(""));
   }
 
   /** 测试意图：用户消息以 Base64 PDF 结尾时，前面的文本块无标记，末尾的 document 块被打上缓存标记。 */
@@ -961,8 +962,8 @@ class AnthropicRequestMapperTest {
     assertFalse(contents.get(0).has("cache_control"));
 
     JsonNode docNode = contents.get(1);
-    assertEquals("document", docNode.path("type").asText());
-    assertEquals("ephemeral", docNode.path("cache_control").path("type").asText());
+    assertEquals("document", docNode.path("type").asString(""));
+    assertEquals("ephemeral", docNode.path("cache_control").path("type").asString(""));
   }
 
   /** 测试意图：当图片不是最后一个内容块（后面有文本）时，图片不打标记，最后的文本打上标记。 */
@@ -985,8 +986,8 @@ class AnthropicRequestMapperTest {
     assertFalse(contents.get(0).has("cache_control"));
 
     JsonNode textNode = contents.get(1);
-    assertEquals("What is on this image?", textNode.path("text").asText());
-    assertEquals("ephemeral", textNode.path("cache_control").path("type").asText());
+    assertEquals("What is on this image?", textNode.path("text").asString(""));
+    assertEquals("ephemeral", textNode.path("cache_control").path("type").asString(""));
   }
 
   /** 测试意图：验证单 Base64 图片内容块在启用 CONVERSATION 缓存时能正确标记为 ephemeral。 */
@@ -1006,8 +1007,8 @@ class AnthropicRequestMapperTest {
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
 
     JsonNode imageNode = root.path("messages").get(0).path("content").get(0);
-    assertEquals("base64", imageNode.path("source").path("type").asText());
-    assertEquals("ephemeral", imageNode.path("cache_control").path("type").asText());
+    assertEquals("base64", imageNode.path("source").path("type").asString(""));
+    assertEquals("ephemeral", imageNode.path("cache_control").path("type").asString(""));
   }
 
   /** 测试意图：验证单 Base64 PDF 内容块在启用 CONVERSATION 缓存时能正确标记为 ephemeral。 */
@@ -1027,8 +1028,8 @@ class AnthropicRequestMapperTest {
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
 
     JsonNode docNode = root.path("messages").get(0).path("content").get(0);
-    assertEquals("base64", docNode.path("source").path("type").asText());
-    assertEquals("ephemeral", docNode.path("cache_control").path("type").asText());
+    assertEquals("base64", docNode.path("source").path("type").asString(""));
+    assertEquals("ephemeral", docNode.path("cache_control").path("type").asString(""));
   }
 
   /** 测试意图：当策略为 NONE 时，图片内容块绝不带 cache_control 标记。 */
@@ -1146,8 +1147,8 @@ class AnthropicRequestMapperTest {
     JsonNode rootLong = MAPPER.readTree(encLong.bodyUtf8Bytes());
     JsonNode markerLong =
         rootLong.path("messages").get(0).path("content").get(0).path("cache_control");
-    assertEquals("ephemeral", markerLong.path("type").asText());
-    assertEquals("1h", markerLong.path("ttl").asText());
+    assertEquals("ephemeral", markerLong.path("type").asString(""));
+    assertEquals("1h", markerLong.path("ttl").asString(""));
 
     // 2. SHORT 保留策略
     ProviderRequest reqShort =
@@ -1161,7 +1162,7 @@ class AnthropicRequestMapperTest {
     JsonNode rootShort = MAPPER.readTree(encShort.bodyUtf8Bytes());
     JsonNode markerShort =
         rootShort.path("messages").get(0).path("content").get(0).path("cache_control");
-    assertEquals("ephemeral", markerShort.path("type").asText());
+    assertEquals("ephemeral", markerShort.path("type").asString(""));
     assertFalse(markerShort.has("ttl"));
   }
 
@@ -1180,15 +1181,15 @@ class AnthropicRequestMapperTest {
 
     JsonNode systemArray = root.path("system");
     assertEquals(1, systemArray.size());
-    assertEquals("Test system instruction.", systemArray.get(0).path("text").asText());
+    assertEquals("Test system instruction.", systemArray.get(0).path("text").asString(""));
 
     JsonNode systemMarker = systemArray.get(0).path("cache_control");
-    assertEquals("ephemeral", systemMarker.path("type").asText());
+    assertEquals("ephemeral", systemMarker.path("type").asString(""));
     assertFalse(systemMarker.has("ttl"));
 
     // 系统标记与历史端点标记相互独立：用户消息尾部同样是固定标记边界
     JsonNode userTail = root.path("messages").get(0).path("content").get(0);
-    assertEquals("ephemeral", userTail.path("cache_control").path("type").asText());
+    assertEquals("ephemeral", userTail.path("cache_control").path("type").asString(""));
   }
 
   /** 测试意图：即使没有任何工具，LONG retention 也始终标记系统指令块，并让系统标记与历史端点统一携带 ttl="1h"。 */
@@ -1205,13 +1206,13 @@ class AnthropicRequestMapperTest {
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
 
     JsonNode systemMarker = root.path("system").get(0).path("cache_control");
-    assertEquals("ephemeral", systemMarker.path("type").asText());
-    assertEquals("1h", systemMarker.path("ttl").asText());
+    assertEquals("ephemeral", systemMarker.path("type").asString(""));
+    assertEquals("1h", systemMarker.path("ttl").asString(""));
 
     JsonNode userTailMarker =
         root.path("messages").get(0).path("content").get(0).path("cache_control");
-    assertEquals("ephemeral", userTailMarker.path("type").asText());
-    assertEquals("1h", userTailMarker.path("ttl").asText());
+    assertEquals("ephemeral", userTailMarker.path("type").asString(""));
+    assertEquals("1h", userTailMarker.path("ttl").asString(""));
   }
 
   /** 测试意图：retention 非 NONE 时缓存标记固定打在最后一个工具定义上，前面的工具不带标记，系统块同样被标记。 */
@@ -1239,12 +1240,12 @@ class AnthropicRequestMapperTest {
     assertFalse(toolsArray.get(0).has("cache_control"));
 
     JsonNode lastTool = toolsArray.get(1);
-    assertEquals("ephemeral", lastTool.path("cache_control").path("type").asText());
+    assertEquals("ephemeral", lastTool.path("cache_control").path("type").asString(""));
     assertFalse(lastTool.path("cache_control").has("ttl"));
 
     // 工具标记不排斥系统标记：两者都是固定边界
     assertEquals(
-        "ephemeral", root.path("system").get(0).path("cache_control").path("type").asText());
+        "ephemeral", root.path("system").get(0).path("cache_control").path("type").asString(""));
   }
 
   /** 测试意图：LONG retention 下最后一个工具定义携带 ttl="1h"，其余工具不带标记。 */
@@ -1272,8 +1273,8 @@ class AnthropicRequestMapperTest {
     assertFalse(toolsArray.get(0).has("cache_control"));
 
     JsonNode lastToolMarker = toolsArray.get(1).path("cache_control");
-    assertEquals("ephemeral", lastToolMarker.path("type").asText());
-    assertEquals("1h", lastToolMarker.path("ttl").asText());
+    assertEquals("ephemeral", lastToolMarker.path("type").asString(""));
+    assertEquals("1h", lastToolMarker.path("ttl").asString(""));
   }
 
   /** 测试意图：当请求指定 ProviderCacheControl.none() 时，整条请求中的 system、tools 与 messages 均无缓存标记。 */
@@ -1339,8 +1340,8 @@ class AnthropicRequestMapperTest {
 
     assertFalse(root.has("diagnostics"));
     JsonNode asstBlock = root.path("messages").get(1).path("content").get(0);
-    assertEquals("text", asstBlock.path("type").asText());
-    assertTrue(asstBlock.path("text").asText().contains("tool_call_diagnostic"));
+    assertEquals("text", asstBlock.path("type").asString(""));
+    assertTrue(asstBlock.path("text").asString("").contains("tool_call_diagnostic"));
   }
 
   // =========================================================================================
@@ -1382,12 +1383,12 @@ class AnthropicRequestMapperTest {
 
     JsonNode systemArray = root.path("system");
     assertEquals(1, systemArray.size());
-    assertEquals("text", systemArray.get(0).path("type").asText());
-    assertEquals("Test system instruction.", systemArray.get(0).path("text").asText());
+    assertEquals("text", systemArray.get(0).path("type").asString(""));
+    assertEquals("Test system instruction.", systemArray.get(0).path("text").asString(""));
 
     JsonNode messagesArray = root.path("messages");
     assertEquals(1, messagesArray.size());
-    assertEquals("user", messagesArray.get(0).path("role").asText());
+    assertEquals("user", messagesArray.get(0).path("role").asString(""));
     assertFalse(root.toString().contains("SYSTEM"));
   }
 

@@ -4,9 +4,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
@@ -36,7 +37,7 @@ import java.util.UUID;
 /** 验证 OpenAI Responses 思考过程、加密推理保留与带工具回放语义。 */
 class OpenAiResponsesThinkingTest {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
   private static final String VALID_PREFIX_HASH =
       "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
   private static final ModelVariant DEFAULT_VARIANT = new ModelVariant("default");
@@ -179,9 +180,9 @@ class OpenAiResponsesThinkingTest {
     // 验证 replay payload 中包含保留了 encrypted_content 的 reasoning 项
     JsonNode replayOutput = replayState.payload().get("output");
     assertEquals(2, replayOutput.size());
-    assertEquals("reasoning", replayOutput.get(0).path("type").asText());
-    assertEquals("enc_blob_123", replayOutput.get(0).path("encrypted_content").asText());
-    assertEquals("function_call", replayOutput.get(1).path("type").asText());
+    assertEquals("reasoning", replayOutput.get(0).path("type").asString(""));
+    assertEquals("enc_blob_123", replayOutput.get(0).path("encrypted_content").asString(""));
+    assertEquals("function_call", replayOutput.get(1).path("type").asString(""));
 
     // 2. 将 replayState 放入后续 Assistant 消息中回放给服务端
     ProviderMessage assistantMsg =
@@ -210,11 +211,11 @@ class OpenAiResponsesThinkingTest {
 
     JsonNode input2 = root2.get("input");
     assertEquals(4, input2.size());
-    assertEquals("message", input2.get(0).path("type").asText());
-    assertEquals("reasoning", input2.get(1).path("type").asText());
-    assertEquals("enc_blob_123", input2.get(1).path("encrypted_content").asText());
-    assertEquals("function_call", input2.get(2).path("type").asText());
-    assertEquals("function_call_output", input2.get(3).path("type").asText());
+    assertEquals("message", input2.get(0).path("type").asString(""));
+    assertEquals("reasoning", input2.get(1).path("type").asString(""));
+    assertEquals("enc_blob_123", input2.get(1).path("encrypted_content").asString(""));
+    assertEquals("function_call", input2.get(2).path("type").asString(""));
+    assertEquals("function_call_output", input2.get(3).path("type").asString(""));
   }
 
   /**
@@ -279,9 +280,9 @@ class OpenAiResponsesThinkingTest {
     JsonNode root = MAPPER.readTree(encReq2.bodyUtf8Bytes());
     JsonNode input = root.get("input");
     assertEquals(4, input.size());
-    assertEquals("reasoning", input.get(1).path("type").asText());
-    assertEquals("c1", input.get(2).path("call_id").asText());
-    assertEquals("c2", input.get(3).path("call_id").asText());
+    assertEquals("reasoning", input.get(1).path("type").asString(""));
+    assertEquals("c1", input.get(2).path("call_id").asString(""));
+    assertEquals("c2", input.get(3).path("call_id").asString(""));
   }
 
   /**
@@ -353,12 +354,13 @@ class OpenAiResponsesThinkingTest {
     assertNotNull(replayState);
     JsonNode replayOutput = replayState.payload().get("output");
     assertEquals(2, replayOutput.size());
-    assertEquals("reasoning", replayOutput.get(0).path("type").asText());
-    assertEquals("enc_blob_asym_999", replayOutput.get(0).path("encrypted_content").asText());
+    assertEquals("reasoning", replayOutput.get(0).path("type").asString(""));
+    assertEquals("enc_blob_asym_999", replayOutput.get(0).path("encrypted_content").asString(""));
     assertEquals(
-        "Deliberating deeply", replayOutput.get(0).path("summary").get(0).path("text").asText());
-    assertEquals("function_call", replayOutput.get(1).path("type").asText());
-    assertEquals("call_asym", replayOutput.get(1).path("call_id").asText());
+        "Deliberating deeply",
+        replayOutput.get(0).path("summary").get(0).path("text").asString(""));
+    assertEquals("function_call", replayOutput.get(1).path("type").asString(""));
+    assertEquals("call_asym", replayOutput.get(1).path("call_id").asString(""));
 
     // 5. 下一轮对话携带该 replayState 发起请求，验证 wire 编码中 encrypted_content 成功被回传
     ProviderMessage assistantMsg =
@@ -394,14 +396,15 @@ class OpenAiResponsesThinkingTest {
 
     JsonNode input2 = root2.get("input");
     assertEquals(4, input2.size());
-    assertEquals("message", input2.get(0).path("type").asText());
+    assertEquals("message", input2.get(0).path("type").asString(""));
     // input2[1] 必须是带有 encrypted_content 的 reasoning 回放项
-    assertEquals("reasoning", input2.get(1).path("type").asText());
-    assertEquals("enc_blob_asym_999", input2.get(1).path("encrypted_content").asText());
-    assertEquals("Deliberating deeply", input2.get(1).path("summary").get(0).path("text").asText());
+    assertEquals("reasoning", input2.get(1).path("type").asString(""));
+    assertEquals("enc_blob_asym_999", input2.get(1).path("encrypted_content").asString(""));
+    assertEquals(
+        "Deliberating deeply", input2.get(1).path("summary").get(0).path("text").asString(""));
     // input2[2] 是 function_call，input2[3] 是 function_call_output
-    assertEquals("function_call", input2.get(2).path("type").asText());
-    assertEquals("call_asym", input2.get(2).path("call_id").asText());
-    assertEquals("function_call_output", input2.get(3).path("type").asText());
+    assertEquals("function_call", input2.get(2).path("type").asString(""));
+    assertEquals("call_asym", input2.get(2).path("call_id").asString(""));
+    assertEquals("function_call_output", input2.get(3).path("type").asString(""));
   }
 }

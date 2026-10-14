@@ -7,12 +7,13 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransport;
@@ -73,7 +74,7 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 class AnthropicStreamingDecoderTest {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
 
   private HttpServer server;
   private int port;
@@ -172,11 +173,11 @@ class AnthropicStreamingDecoderTest {
     assertNotNull(completion.replayState());
     JsonNode replayContent = completion.replayState().payload().path("content");
     assertEquals(2, replayContent.size());
-    assertEquals("future_audio_block", replayContent.get(0).path("type").asText());
-    assertEquals("flac", replayContent.get(0).path("format").asText());
+    assertEquals("future_audio_block", replayContent.get(0).path("type").asString(""));
+    assertEquals("flac", replayContent.get(0).path("format").asString(""));
     assertEquals(2, replayContent.get(0).size());
-    assertEquals("text", replayContent.get(1).path("type").asText());
-    assertEquals("Known text.", replayContent.get(1).path("text").asText());
+    assertEquals("text", replayContent.get(1).path("type").asString(""));
+    assertEquals("Known text.", replayContent.get(1).path("text").asString(""));
 
     // usage 正常合并：Anthropic 无原生 total，providerTotalTokens 为 0，分类求和通过 categorizedTokens() 校验
     ModelUsage usage = response.usage();
@@ -370,19 +371,19 @@ class AnthropicStreamingDecoderTest {
 
     JsonNode replayContent = completion.replayState().payload().path("content");
     assertEquals(4, replayContent.size());
-    assertEquals("thinking", replayContent.get(0).path("type").asText());
-    assertEquals("Plan: call weather API.", replayContent.get(0).path("thinking").asText());
-    assertEquals("sig_xyz", replayContent.get(0).path("signature").asText());
+    assertEquals("thinking", replayContent.get(0).path("type").asString(""));
+    assertEquals("Plan: call weather API.", replayContent.get(0).path("thinking").asString(""));
+    assertEquals("sig_xyz", replayContent.get(0).path("signature").asString(""));
 
-    assertEquals("redacted_thinking", replayContent.get(1).path("type").asText());
-    assertEquals("encrypted_blob", replayContent.get(1).path("data").asText());
+    assertEquals("redacted_thinking", replayContent.get(1).path("type").asString(""));
+    assertEquals("encrypted_blob", replayContent.get(1).path("data").asString(""));
 
-    assertEquals("text", replayContent.get(2).path("type").asText());
-    assertEquals("I will check the weather.", replayContent.get(2).path("text").asText());
+    assertEquals("text", replayContent.get(2).path("type").asString(""));
+    assertEquals("I will check the weather.", replayContent.get(2).path("text").asString(""));
 
-    assertEquals("tool_use", replayContent.get(3).path("type").asText());
-    assertEquals("call_weather_1", replayContent.get(3).path("id").asText());
-    assertEquals("Hangzhou", replayContent.get(3).path("input").path("city").asText());
+    assertEquals("tool_use", replayContent.get(3).path("type").asString(""));
+    assertEquals("call_weather_1", replayContent.get(3).path("id").asString(""));
+    assertEquals("Hangzhou", replayContent.get(3).path("input").path("city").asString(""));
   }
 
   /**
@@ -425,9 +426,9 @@ class AnthropicStreamingDecoderTest {
     ProviderCompletion completion = accumulator.finish();
     assertNotNull(completion);
     JsonNode usageRoot = MAPPER.readTree(completion.response().rawUsageJson());
-    assertEquals("system_changed", usageRoot.path("cache_miss_reason").path("type").asText());
+    assertEquals("system_changed", usageRoot.path("cache_miss_reason").path("type").asString(""));
     assertEquals(
-        41850, usageRoot.path("cache_miss_reason").path("cache_missed_input_tokens").asLong());
+        41850, usageRoot.path("cache_miss_reason").path("cache_missed_input_tokens").asLong(0L));
   }
 
   /** 测试意图：当 message_start 未包含 diagnostics 字段时，rawUsageJson 中不得出现 cache_miss_reason。 */
@@ -767,8 +768,8 @@ class AnthropicStreamingDecoderTest {
 
     // 校验请求体
     JsonNode bodyJson = MAPPER.readTree(capturedBody.get());
-    assertTrue(bodyJson.path("stream").asBoolean());
-    assertEquals("claude-3-5-sonnet", bodyJson.path("model").asText());
+    assertTrue(bodyJson.path("stream").asBoolean(false));
+    assertEquals("claude-3-5-sonnet", bodyJson.path("model").asString(""));
     assertEquals(1, bodyJson.path("messages").size());
 
     // 校验客户端正常收敛
@@ -950,8 +951,8 @@ class AnthropicStreamingDecoderTest {
     assertNotNull(completion.replayState());
     JsonNode replayContent = completion.replayState().payload().path("content");
     assertEquals(2, replayContent.size());
-    assertEquals("call_1", replayContent.get(0).path("id").asText());
-    assertEquals("call_2", replayContent.get(1).path("id").asText());
+    assertEquals("call_1", replayContent.get(0).path("id").asString(""));
+    assertEquals("call_2", replayContent.get(1).path("id").asString(""));
   }
 
   // --- 辅助工厂方法 ---

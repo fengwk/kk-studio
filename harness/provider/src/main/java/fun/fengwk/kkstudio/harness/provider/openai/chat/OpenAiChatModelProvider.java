@@ -1,10 +1,12 @@
 package fun.fengwk.kkstudio.harness.provider.openai.chat;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.JsonNodeFeature;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.provider.transport.HttpOpenMetadata;
@@ -35,12 +37,12 @@ final class OpenAiChatModelProvider implements ModelProvider {
   private static final String DONE_EVENT_TYPE = "done";
   private static final String DONE_DATA = "[DONE]";
 
-  private static final ObjectMapper PROTOCOL_EVENT_MAPPER = new ObjectMapper();
-
-  static {
-    PROTOCOL_EVENT_MAPPER.enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
-    PROTOCOL_EVENT_MAPPER.enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
-  }
+  private static final ObjectMapper PROTOCOL_EVENT_MAPPER =
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+          .build();
 
   private final JdkHttpSseTransport transport;
   private final ProviderDescriptor descriptor;
@@ -186,12 +188,12 @@ final class OpenAiChatModelProvider implements ModelProvider {
     JsonNode payload = tryParseObject(data);
     if (payload != null) {
       JsonNode objectField = payload.get("object");
-      if (objectField != null && objectField.isTextual() && !objectField.textValue().isBlank()) {
-        return objectField.textValue();
+      if (objectField != null && objectField.isString() && !objectField.stringValue().isBlank()) {
+        return objectField.stringValue();
       }
       JsonNode typeField = payload.get("type");
-      if (typeField != null && typeField.isTextual() && !typeField.textValue().isBlank()) {
-        return typeField.textValue();
+      if (typeField != null && typeField.isString() && !typeField.stringValue().isBlank()) {
+        return typeField.stringValue();
       }
     }
     return CHUNK_EVENT_TYPE;
@@ -204,7 +206,7 @@ final class OpenAiChatModelProvider implements ModelProvider {
     try {
       JsonNode node = PROTOCOL_EVENT_MAPPER.readTree(data);
       return node != null && node.isObject() ? node : null;
-    } catch (JsonProcessingException exception) {
+    } catch (JacksonException exception) {
       // 非法 payload 由规范化累积器以 INVALID_RESPONSE 拒绝，事件名回落到 chunk
       return null;
     }

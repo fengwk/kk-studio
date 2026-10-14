@@ -5,7 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
-import tools.jackson.databind.ObjectMapper;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -15,10 +14,8 @@ class PermissionContractsTest {
   private static final String BASH = "bash";
   private static final String WRITE = "write";
 
-  private final ObjectMapper objectMapper = new ObjectMapper();
-  private final ToolSettingsCodec codec = new ToolSettingsCodec(objectMapper);
-  private final PermissionEvaluator evaluator =
-      new PermissionEvaluator(objectMapper, new BashSurfaceAnalyzer());
+  private final ToolSettingsCodec codec = new ToolSettingsCodec();
+  private final PermissionEvaluator evaluator = new PermissionEvaluator(new BashSurfaceAnalyzer());
 
   /** codec 接受 canonical list、null permission 和未知字段，并拒绝所有非规范类型。 */
   @Test
@@ -208,6 +205,40 @@ class PermissionContractsTest {
                 "{\"path\":\"#literal.txt\"}",
                 settings(WRITE, new PermissionRule("\\#literal.txt", PermissionAction.DENY)))
             .action());
+  }
+
+  /** 严格 JSON 边界：重复字段与尾随 token 拒绝，null/空白 Tool settings 按既有语义规范化为空配置。 */
+  @Test
+  void rejectsDuplicateAndTrailingTokens() {
+    assertTrue(codec.decode(null).permission().isEmpty());
+    assertTrue(codec.decode("   ").permission().isEmpty());
+    assertTrue(codec.decode("{}").permission().isEmpty());
+    assertEquals("{\"permission\":{}}", codec.canonicalize(null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> codec.canonicalize("{\"permission\":{},\"permission\":{}}"));
+    assertThrows(IllegalArgumentException.class, () -> codec.canonicalize("{} {}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            evaluator.preview(
+                new PermissionEvaluationContext(WRITE, "{} {}", ToolSettings.DEFAULT)));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            evaluator.preview(
+                new PermissionEvaluationContext(
+                    WRITE, "{\"path\":\"/a\",\"path\":\"/b\"}", ToolSettings.DEFAULT)));
+    // 空白 arguments 不是 JSON object：与畸形文档同样 fail-closed。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            evaluator.preview(new PermissionEvaluationContext(WRITE, "   ", ToolSettings.DEFAULT)));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            evaluator.evaluate(
+                new PermissionEvaluationContext(WRITE, "null", ToolSettings.DEFAULT)));
   }
 
   private static ToolSettings settings(String toolName, PermissionRule... rules) {

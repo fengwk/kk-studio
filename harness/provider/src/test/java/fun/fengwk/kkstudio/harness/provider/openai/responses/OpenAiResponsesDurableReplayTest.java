@@ -5,9 +5,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
@@ -44,7 +45,7 @@ import java.util.UUID;
  */
 class OpenAiResponsesDurableReplayTest {
 
-  private static final ObjectMapper MAPPER = new ObjectMapper();
+  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
   private static final ModelVariant DEFAULT_VARIANT = new ModelVariant("default", "medium");
   private static final ProviderToolDefinition TOOL =
       new ProviderToolDefinition(
@@ -135,9 +136,9 @@ class OpenAiResponsesDurableReplayTest {
     assertEquals(ProviderReplayFormat.OPENAI_RESPONSES, replayState.format());
     assertEquals(descriptor.affinity(firstRequest.model().modelId()), replayState.affinity());
     JsonNode replayOutput = replayState.payload().get("output");
-    assertEquals("enc_blob_durable", replayOutput.get(0).path("encrypted_content").asText());
+    assertEquals("enc_blob_durable", replayOutput.get(0).path("encrypted_content").asString(""));
     assertEquals(
-        "Check the weather", replayOutput.get(0).path("summary").get(0).path("text").asText());
+        "Check the weather", replayOutput.get(0).path("summary").get(0).path("text").asString(""));
 
     // durable 持久化：replay state 经严格 codec 往返后保持全等（含加密内容）。
     ProviderReplayStateJsonCodec codec = new ProviderReplayStateJsonCodec();
@@ -179,14 +180,15 @@ class OpenAiResponsesDurableReplayTest {
 
     // input 移位：user(0) → reasoning(1) → function_call(2) → function_call_output(3)
     assertEquals(4, input.size());
-    assertEquals("user", input.get(0).path("role").asText());
-    assertEquals("reasoning", input.get(1).path("type").asText());
-    assertEquals("enc_blob_durable", input.get(1).path("encrypted_content").asText());
-    assertEquals("Check the weather", input.get(1).path("summary").get(0).path("text").asText());
-    assertEquals("function_call", input.get(2).path("type").asText());
-    assertEquals("call_1", input.get(2).path("call_id").asText());
-    assertEquals("function_call_output", input.get(3).path("type").asText());
-    assertEquals("sunny", input.get(3).path("output").asText());
+    assertEquals("user", input.get(0).path("role").asString(""));
+    assertEquals("reasoning", input.get(1).path("type").asString(""));
+    assertEquals("enc_blob_durable", input.get(1).path("encrypted_content").asString(""));
+    assertEquals(
+        "Check the weather", input.get(1).path("summary").get(0).path("text").asString(""));
+    assertEquals("function_call", input.get(2).path("type").asString(""));
+    assertEquals("call_1", input.get(2).path("call_id").asString(""));
+    assertEquals("function_call_output", input.get(3).path("type").asString(""));
+    assertEquals("sunny", input.get(3).path("output").asString(""));
     assertFalse(
         MAPPER.readTree(second.bodyUtf8Bytes()).toString().contains("private draft"),
         "private reasoning text must never reach the wire replay");
@@ -232,12 +234,12 @@ class OpenAiResponsesDurableReplayTest {
             .get("input");
 
     assertEquals(4, input.size());
-    assertEquals("user", input.get(0).path("role").asText());
-    assertEquals("reasoning", input.get(1).path("type").asText());
-    assertEquals("durable thought", input.get(1).path("summary").get(0).path("text").asText());
+    assertEquals("user", input.get(0).path("role").asString(""));
+    assertEquals("reasoning", input.get(1).path("type").asString(""));
+    assertEquals("durable thought", input.get(1).path("summary").get(0).path("text").asString(""));
     assertFalse(input.get(1).has("encrypted_content"));
-    assertEquals("function_call", input.get(2).path("type").asText());
+    assertEquals("function_call", input.get(2).path("type").asString(""));
     assertTrue(input.get(2).has("arguments"));
-    assertEquals("function_call_output", input.get(3).path("type").asText());
+    assertEquals("function_call_output", input.get(3).path("type").asString(""));
   }
 }

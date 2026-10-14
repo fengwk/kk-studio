@@ -1,8 +1,8 @@
 package fun.fengwk.kkstudio.platform.environment.update;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateArtifact;
 import fun.fengwk.kkstudio.harness.environment.daemon.OfficialReleaseHttp;
@@ -36,7 +36,7 @@ public class OfficialDaemonReleaseProvider implements DaemonReleaseProvider {
 
   private final String targetVersion;
 
-  private final ObjectMapper mapper = new ObjectMapper();
+  private final ObjectMapper mapper = JsonMapper.builder().build();
 
   public OfficialDaemonReleaseProvider(OfficialReleaseFeed feed) {
     this(feed, PlatformBuildInfo.version());
@@ -105,7 +105,7 @@ public class OfficialDaemonReleaseProvider implements DaemonReleaseProvider {
   private JsonNode parse(String json) {
     try {
       return mapper.readTree(json);
-    } catch (RuntimeException | JsonProcessingException error) {
+    } catch (RuntimeException error) {
       return null;
     }
   }

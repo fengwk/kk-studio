@@ -1,18 +1,19 @@
 package fun.fengwk.kkstudio.platform.settings;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.MapperFeature;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.ObjectReader;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.databind.cfg.CoercionAction;
-import com.fasterxml.jackson.databind.cfg.CoercionInputShape;
-import com.fasterxml.jackson.databind.json.JsonMapper;
-import com.fasterxml.jackson.databind.type.LogicalType;
 import org.springframework.stereotype.Component;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.MapperFeature;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectReader;
+import tools.jackson.databind.SerializationFeature;
+import tools.jackson.databind.cfg.CoercionAction;
+import tools.jackson.databind.cfg.CoercionInputShape;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.type.LogicalType;
 
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionKeyValidator;
@@ -39,8 +40,8 @@ import java.util.Objects;
  * <p>职责：
  *
  * <ul>
- *   <li>{@link #decode}：严格解码持久化的 canonical JSON（未知字段、尾随 token、错误类型、缺失/null required 字段、Boolean
- *       标量强制转换全部拒绝），失败即存储数据损坏；
+ *   <li>{@link #decode}：严格解码持久化的 canonical JSON（未知字段、重复字段、尾随 token、错误类型、缺失/null required 字段、
+ *       Boolean 标量强制转换全部拒绝），失败即存储数据损坏；
  *   <li>{@link #encode}：把聚合编码为确定性 canonical JSON（键排序、map 键排序、省略 null），语义从不依赖键顺序；
  *   <li>{@link #fromDto} / {@link #toSections}：share 层 DTO 与领域聚合之间的显式双向映射，DTO 缺失字段给出精确的 field 级错误。
  * </ul>
@@ -62,6 +63,8 @@ public class SystemSettingsCodec {
         JsonMapper.builder()
             .disable(DeserializationFeature.ACCEPT_FLOAT_AS_INT)
             .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+            // 存储边界自身拒绝重复字段：同一字段出现两次时无法判断哪份值生效，属损坏数据。
+            .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
             .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
             // 显式 null 的 required primitive 必须拒绝，而不是回退到 0/false。
             .enable(DeserializationFeature.FAIL_ON_NULL_FOR_PRIMITIVES)
@@ -91,9 +94,14 @@ public class SystemSettingsCodec {
     this.settingsReader = strictMapper.readerFor(SystemSettings.class);
 
     this.canonicalMapper =
-        JsonMapper.builder().enable(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY).build();
-    this.canonicalMapper.enable(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS);
-    this.canonicalMapper.setSerializationInclusion(JsonInclude.Include.NON_NULL);
+        JsonMapper.builder()
+            .enable(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY)
+            // Jackson 3 默认把 record 的 creator 属性排在前面，会屏蔽字母序；canonical 契约要求所有层级键有序。
+            .disable(MapperFeature.SORT_CREATOR_PROPERTIES_FIRST)
+            .enable(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS)
+            .changeDefaultPropertyInclusion(
+                inclusion -> inclusion.withValueInclusion(JsonInclude.Include.NON_NULL))
+            .build();
   }
 
   /** 严格解码持久化的 canonical JSON 为领域聚合。 */
@@ -105,7 +113,7 @@ public class SystemSettingsCodec {
       SystemSettings settings = settingsReader.readValue(json);
       assertRequiredFieldsStored(settings, json);
       return settings;
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalStateException(
           "stored system settings config is invalid: " + rootMessage(error), rootCause(error));
     }
@@ -119,7 +127,7 @@ public class SystemSettingsCodec {
    * 下这两个开关会连同 nullable 引用 creator 属性一起拒绝，破坏 canonical 的省略 null 语义；因此以已解码聚合的 canonical 重编码定义必须存在的字段。
    */
   private void assertRequiredFieldsStored(SystemSettings settings, String storedJson)
-      throws JsonProcessingException {
+      throws JacksonException {
     JsonNode stored = canonicalMapper.readTree(storedJson);
     JsonNode required = canonicalMapper.valueToTree(settings);
     String missing = firstMissingRequiredField(required, stored);
@@ -153,7 +161,7 @@ public class SystemSettingsCodec {
   public String encode(SystemSettings settings) {
     try {
       return canonicalMapper.writeValueAsString(Objects.requireNonNull(settings, "settings"));
-    } catch (JsonProcessingException error) {
+    } catch (JacksonException error) {
       throw new IllegalStateException("cannot encode system settings", error);
     }
   }
