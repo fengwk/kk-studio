@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.daemon.skill;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -13,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
@@ -257,47 +259,208 @@ class SkillPackageInstallerTest {
     assertDirectoryEmpty(backupRoot);
   }
 
-  /** 验证自愈流程能清理遗留 staging 目录，并将目标缺失的 backup 恢复到 skills 目录，清除冲突或格式错误的残留。 */
+  /**
+   * 意图：恢复只处理产品命名的 staging `package.UUID[.clone]` 与 backup `package.UUID`——缺失目标的 backup 被恢复，目标已存在的
+   * backup 被清理，任何未知命名条目都必须原样保留，绝不误删用户数据。
+   */
   @Test
-  void recoverArtifactsCleansStagingAndRestoresMissingTargetFromBackup() throws Exception {
-    // 1. 遗留的 staging 目录
-    Path leftoverStaging = stagingRoot.resolve("leftover." + UUID.randomUUID());
+  void recoverArtifactsOnlyTouchesProductNamedArtifacts() throws Exception {
+    // 1. 产品命名的 staging 残留（含与不含 clone 后缀）
+    Path leftoverStaging = stagingRoot.resolve("leftover-pkg." + UUID.randomUUID());
     Files.createDirectories(leftoverStaging);
     Files.writeString(leftoverStaging.resolve("temp.txt"), "leftover");
 
-    // 2. 缺失目标的 backup 目录（应被恢复）
-    String restorableUuid = UUID.randomUUID().toString();
-    Path restorableBackup = backupRoot.resolve("restored-pkg." + restorableUuid);
+    Path leftoverClone = stagingRoot.resolve("leftover-pkg." + UUID.randomUUID() + ".clone");
+    Files.createDirectories(leftoverClone);
+    Files.writeString(leftoverClone.resolve("temp.txt"), "leftover-clone");
+
+    // 2. 非产品命名的 staging 条目：绝不删除
+    Path foreignStagingFile = stagingRoot.resolve("manual-unrelated.txt");
+    Files.writeString(foreignStagingFile, "keep-me");
+    Path foreignStagingDir = stagingRoot.resolve("unrelated-dir");
+    Files.createDirectories(foreignStagingDir);
+
+    // 3. 缺失目标的 backup 目录（应被恢复）
+    Path restorableBackup = backupRoot.resolve("restored-pkg." + UUID.randomUUID());
     Files.createDirectories(restorableBackup);
     Files.writeString(restorableBackup.resolve("recovered.txt"), "good");
 
-    // 3. 目标已存在的 backup 目录（应被安全删除）
+    // 4. 目标已存在的 backup 目录（应被安全删除）
     Path existingPackage = skillsRoot.resolve("existing-pkg");
     Files.createDirectories(existingPackage);
     Files.writeString(existingPackage.resolve("current.txt"), "current");
 
-    String existingBackupUuid = UUID.randomUUID().toString();
-    Path existingBackup = backupRoot.resolve("existing-pkg." + existingBackupUuid);
+    Path existingBackup = backupRoot.resolve("existing-pkg." + UUID.randomUUID());
     Files.createDirectories(existingBackup);
     Files.writeString(existingBackup.resolve("old.txt"), "old");
 
-    // 4. 无法解析的损坏残留（应被删除）
+    // 5. 非产品命名的 backup 条目（UUID 非法或包名非法）：绝不删除
     Path corruptBackup = backupRoot.resolve("corrupted-file.bin");
     Files.writeString(corruptBackup, "garbage");
+    Path badPackageBackup = backupRoot.resolve("bad@name." + UUID.randomUUID());
+    Files.createDirectories(badPackageBackup);
 
     installer.recoverArtifacts();
 
-    assertDirectoryEmpty(stagingRoot);
-    assertDirectoryEmpty(backupRoot);
+    // 产品命名 staging 已清理，未知条目原样保留
+    assertFalse(Files.exists(leftoverStaging));
+    assertFalse(Files.exists(leftoverClone));
+    assertTrue(Files.exists(foreignStagingFile));
+    assertTrue(Files.exists(foreignStagingDir));
 
-    // 验证缺失目标的包已被恢复
+    // 缺失目标的包已被恢复
     Path restoredDir = skillsRoot.resolve("restored-pkg");
     assertTrue(Files.exists(restoredDir));
     assertEquals("good", Files.readString(restoredDir.resolve("recovered.txt")));
 
-    // 验证目标已存在的包未被备份覆盖
+    // 目标已存在的包未被备份覆盖，其冗余 backup 被清理
     assertTrue(Files.exists(existingPackage.resolve("current.txt")));
     assertFalse(Files.exists(existingPackage.resolve("old.txt")));
+    assertFalse(Files.exists(existingBackup));
+
+    // 未知命名 backup 原样保留
+    assertTrue(Files.exists(corruptBackup));
+    assertEquals("garbage", Files.readString(corruptBackup));
+    assertTrue(Files.exists(badPackageBackup));
+  }
+
+  /**
+   * 意图（负向对照）：后端提交对象是 SHA-1；64 位 SHA-256 commit 必须在任何 clone/fetch/临时目录副作用之前以固定 INVALID_TARGET_COMMIT
+   * 拒绝。旧实现把它放进 Git 层，会退化为 INSTALL_FAILED/COMMIT_NOT_FOUND 等其它失败。
+   */
+  @Test
+  void sha256CommitIsRejectedBeforeAnyCloneOrFetch() {
+    // 故意指向不存在的仓库：只有校验先于 I/O，这里才可能得到 INVALID_TARGET_COMMIT 而不是 fetch 失败。
+    String missingRepositoryUrl = tempDir.resolve("missing-repo").toUri().toString();
+    String sha256Commit = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    SkillSyncException error =
+        assertThrows(
+            SkillSyncException.class,
+            () -> installer.install("sha256-pkg", missingRepositoryUrl, "master", sha256Commit));
+
+    assertEquals("INVALID_TARGET_COMMIT", error.code());
+    assertFalse(error.getMessage().contains(sha256Commit));
+    assertDirectoryEmpty(stagingRoot);
+    assertDirectoryEmpty(backupRoot);
+    assertFalse(Files.exists(skillsRoot.resolve("sha256-pkg")));
+  }
+
+  /** 意图：产品命名 backup 恢复失败时绝不删除可能唯一的数据副本，而是以受控失败上报；恢复在构造期完成，因此失败立刻暴露。 */
+  @Test
+  void recoveryFailureKeepsBackupAndReportsControlledFailure() throws Exception {
+    Path restorableBackup = backupRoot.resolve("fail-restore-pkg." + UUID.randomUUID());
+    Files.createDirectories(restorableBackup);
+    Files.writeString(restorableBackup.resolve("important.txt"), "safe");
+
+    UncheckedIOException failure =
+        assertThrows(
+            UncheckedIOException.class,
+            () ->
+                new SkillPackageInstaller(
+                    skillsRoot,
+                    stagingRoot,
+                    backupRoot,
+                    1000,
+                    1000,
+                    executor,
+                    (source, target) -> {
+                      throw new IOException("simulated restore failure");
+                    }));
+
+    assertTrue(failure.getMessage().contains("restore skill backup"), failure.getMessage());
+    // 备份必须原样保留
+    assertTrue(Files.exists(restorableBackup));
+    assertEquals("safe", Files.readString(restorableBackup.resolve("important.txt")));
+    assertFalse(Files.exists(skillsRoot.resolve("fail-restore-pkg")));
+  }
+
+  /** 意图：恢复期目录流本身失败（staging/backup 根被移除）也必须以受控 UncheckedIOException 上报，绝不静默吞掉。 */
+  @Test
+  void recoverySurfacesDirectoryStreamFailuresAsControlledErrors() throws Exception {
+    Files.delete(stagingRoot);
+    UncheckedIOException stagingFailure =
+        assertThrows(UncheckedIOException.class, installer::recoverArtifacts);
+    assertTrue(
+        stagingFailure.getMessage().contains("clean staging root"), stagingFailure.getMessage());
+
+    // 以独立 installer 隔离 staging 步骤，验证 backup 根缺失同样受控失败
+    Path otherSkills = tempDir.resolve("skills-other");
+    Path otherStaging = tempDir.resolve("staging-other");
+    Path otherBackup = tempDir.resolve("backup-other");
+    SkillPackageInstaller other =
+        new SkillPackageInstaller(otherSkills, otherStaging, otherBackup, executor);
+    Files.delete(otherBackup);
+    UncheckedIOException backupFailure =
+        assertThrows(UncheckedIOException.class, other::recoverArtifacts);
+    assertTrue(
+        backupFailure.getMessage().contains("recover backup root"), backupFailure.getMessage());
+  }
+
+  /** 意图：交换失败后回滚也失败时，必须给出区别于普通安装失败的安全提示，并把主错误保留为 cause、回滚错误保留为 suppressed， 既不伪装成功也不吞掉任一失败。 */
+  @Test
+  void publishSwapAndRollbackDoubleFailureSurfacesDistinctSafetyMessage() throws Exception {
+    String commit1Id;
+    String commit2Id;
+    try (Git git = Git.init().setDirectory(remoteRepoDir.toFile()).call()) {
+      Path skillDir = remoteRepoDir.resolve("rollback-skill");
+      Files.createDirectories(skillDir);
+      Files.writeString(skillDir.resolve("SKILL.md"), "# Version 1\n");
+      git.add().addFilepattern(".").call();
+      commit1Id = git.commit().setMessage("v1").call().getId().name();
+
+      Files.writeString(skillDir.resolve("SKILL.md"), "# Version 2\n");
+      git.add().addFilepattern(".").call();
+      commit2Id = git.commit().setMessage("v2").call().getId().name();
+    }
+
+    String remoteUrl = remoteRepoDir.toUri().toString();
+    installer.install("rollback-pkg", remoteUrl, "master", commit1Id);
+    Path pkgDir = skillsRoot.resolve("rollback-pkg");
+    assertEquals("# Version 1\n", Files.readString(pkgDir.resolve("rollback-skill/SKILL.md")));
+
+    SkillPackageInstaller doubleFaultInstaller =
+        new SkillPackageInstaller(
+            skillsRoot,
+            stagingRoot,
+            backupRoot,
+            1000,
+            1000,
+            executor,
+            (source, target) -> {
+              if (source.equals(pkgDir) && target.startsWith(backupRoot)) {
+                Files.move(source, target, StandardCopyOption.ATOMIC_MOVE);
+                return;
+              }
+              if (source.startsWith(stagingRoot) && target.equals(pkgDir)) {
+                throw new IOException("simulated initial swap failure");
+              }
+              if (source.startsWith(backupRoot) && target.equals(pkgDir)) {
+                throw new IOException("simulated rollback failure");
+              }
+              Files.move(source, target, StandardCopyOption.ATOMIC_MOVE);
+            });
+
+    SkillSyncException error =
+        assertThrows(
+            SkillSyncException.class,
+            () -> doubleFaultInstaller.install("rollback-pkg", remoteUrl, "master", commit2Id));
+
+    assertEquals("INSTALL_FAILED", error.code());
+    assertFalse(
+        error.getMessage().equals("Failed to swap installed package directory"),
+        "double failure must not reuse the ordinary swap-failure message");
+    assertTrue(error.getMessage().contains("rollback"), error.getMessage());
+
+    // 主错误保留为 cause，回滚错误保留为 suppressed，二者都不被吞掉
+    Throwable primary = error.getCause();
+    assertInstanceOf(IOException.class, primary);
+    assertTrue(primary.getMessage().contains("initial swap"), primary.getMessage());
+    assertEquals(1, primary.getSuppressed().length);
+    assertTrue(primary.getSuppressed()[0].getMessage().contains("rollback"));
+
+    // 明确记录数据状态：旧包已移入 backup 且不再位于 skills，绝不伪装成功
+    assertFalse(Files.exists(pkgDir));
   }
 
   /** 验证包名、commit、URL 以及分支等非法参数在产生任何文件系统副作用前被拒绝。 */
