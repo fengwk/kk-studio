@@ -9,6 +9,7 @@ import static fun.fengwk.kkstudio.platform.configsync.ConfigSyncFixtures.model;
 import static fun.fengwk.kkstudio.platform.configsync.ConfigSyncFixtures.provider;
 import static fun.fengwk.kkstudio.platform.configsync.ConfigSyncFixtures.skillPackage;
 import static fun.fengwk.kkstudio.platform.configsync.ConfigSyncFixtures.snapshot;
+import static fun.fengwk.kkstudio.platform.configsync.ConfigSyncFixtures.snapshotWithPlugins;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -175,5 +176,65 @@ class ConfigSyncExporterTest {
     assertEquals("https://studio.example.com", imported.installConfig().getDaemon().getStudioUrl());
     assertFalse(
         yaml.toMap(imported.installConfig(), "installConfig").containsKey("registrationToken"));
+  }
+
+  /** 插件条目只导出安装身份与普通值文本：epoch、修订、认证代际/上下文指纹与任何秘密/身份事实都不进入文件。 */
+  @Test
+  void exportPluginCarriesOnlyIdentityAndOrdinaryValues() {
+    String values = "{\"promptAgentName\":\"h3-agent\"}";
+    ConfigSyncSnapshot pluginSnapshot =
+        snapshotWithPlugins(
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of(),
+            9L,
+            List.of(ConfigSyncFixtures.pluginRow("acme.plugin", 7L, values)));
+
+    String yamlText =
+        exporter.export(
+            pluginSnapshot, List.of(new ConfigSyncRef(ConfigSyncKind.PLUGINS, "acme.plugin")));
+    Map<String, Object> document = yaml.parse(yamlText);
+
+    @SuppressWarnings("unchecked")
+    List<Map<String, Object>> plugins = (List<Map<String, Object>>) document.get("plugins");
+    assertEquals(1, plugins.size());
+    assertEquals(
+        Map.of("pluginId", "acme.plugin", "valuesJson", values),
+        plugins.get(0),
+        "plugin entry must carry exactly pluginId and valuesJson");
+  }
+
+  /** 普通值文本按原值导出；同名但未选中的插件与其它类别都不出现，重建同一选择得到逐字段一致的文档。 */
+  @Test
+  void exportPluginOnlyWhenSelectedAndIsReimportable() {
+    String values = "{\"promptAgentName\":\"h3-agent\"}";
+    ConfigSyncSnapshot pluginSnapshot =
+        snapshotWithPlugins(
+            List.of(provider("p")),
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of(),
+            4L,
+            List.of(
+                ConfigSyncFixtures.pluginRow("acme.plugin", 2L, values),
+                ConfigSyncFixtures.pluginRow("other.plugin", 2L, "{}")));
+
+    String yamlText =
+        exporter.export(
+            pluginSnapshot, List.of(new ConfigSyncRef(ConfigSyncKind.PLUGINS, "other.plugin")));
+    Map<String, Object> document = yaml.parse(yamlText);
+
+    @SuppressWarnings("unchecked")
+    List<Map<String, Object>> plugins = (List<Map<String, Object>>) document.get("plugins");
+    assertEquals(1, plugins.size());
+    assertEquals("other.plugin", plugins.get(0).get("pluginId"));
+    assertFalse(document.containsKey("providers"), "unselected kinds must not be exported");
   }
 }

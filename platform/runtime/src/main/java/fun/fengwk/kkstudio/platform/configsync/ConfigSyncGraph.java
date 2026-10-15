@@ -11,7 +11,8 @@ import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.platform.settings.SystemSettings;
+import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
+import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRow;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncKind;
@@ -29,7 +30,8 @@ import java.util.Set;
  * 基于一次快照构建配置引用依赖图并计算传递闭包。
  *
  * <p>有向边完全来自现有业务事实：Model → Provider；Agent → Model / Skill Package / Subagent / MCP Service（经 MCP
- * 工具名 归属）；Settings → 备用 Model 与提示词 Agent。闭包做去重并对互相引用的 Agent 终止。Environment 是独立条目，没有反向扩展。
+ * 工具名 归属）；Plugin → 该插件普通配置声明的 Agent。Settings 不再由旧集成字段反向扩展 Agent：原先由设置携带的 H3 提示词 Agent
+ * 引用改由对应插件的普通配置声明。闭包做去重并对互相引用的 Agent 终止。Environment 是独立条目，没有反向扩展。
  */
 @Component
 public final class ConfigSyncGraph {
@@ -37,9 +39,12 @@ public final class ConfigSyncGraph {
   private static final String RESOURCE = "config_sync";
 
   private final AgentDefinitionConfigCodec agentConfigCodec;
+  private final StudioPluginRegistry pluginRegistry;
 
-  public ConfigSyncGraph(AgentDefinitionConfigCodec agentConfigCodec) {
+  public ConfigSyncGraph(
+      AgentDefinitionConfigCodec agentConfigCodec, StudioPluginRegistry pluginRegistry) {
     this.agentConfigCodec = agentConfigCodec;
+    this.pluginRegistry = pluginRegistry;
   }
 
   /** 为一次快照预构建依赖图与存在集合，供 inventory 与 export 复用，避免按条目重复构图。 */
@@ -70,9 +75,10 @@ public final class ConfigSyncGraph {
     for (McpServer server : snapshot.mcpServers()) {
       edges.put(mcpRef(server), List.of());
     }
-    edges.put(
-        ConfigSyncRefs.ref(ConfigSyncKind.SETTINGS, "settings"),
-        settingsDependencies(snapshot.settings().settings()));
+    for (PluginConfigurationRow plugin : snapshot.plugins()) {
+      edges.put(pluginRef(plugin), pluginDependencies(plugin));
+    }
+    edges.put(ConfigSyncRefs.ref(ConfigSyncKind.SETTINGS, "settings"), List.of());
 
     List<ConfigSyncRef> allRefs = allRefs(snapshot);
     return new Graph(edges, new LinkedHashSet<>(allRefs), allRefs);
@@ -90,6 +96,7 @@ public final class ConfigSyncGraph {
     snapshot.environments().forEach(env -> refs.add(environmentRef(env)));
     snapshot.mcpServers().forEach(server -> refs.add(mcpRef(server)));
     refs.add(ConfigSyncRefs.ref(ConfigSyncKind.SETTINGS, "settings"));
+    snapshot.plugins().forEach(plugin -> refs.add(pluginRef(plugin)));
     return refs;
   }
 
@@ -189,11 +196,13 @@ public final class ConfigSyncGraph {
     return List.copyOf(deps);
   }
 
-  private List<ConfigSyncRef> settingsDependencies(SystemSettings settings) {
+  /** 插件对 Agent 的依赖取自插件自身的 {@code requiredAgentNames} 声明；无依赖插件不制造依赖。 */
+  private List<ConfigSyncRef> pluginDependencies(PluginConfigurationRow plugin) {
     Set<ConfigSyncRef> deps = new LinkedHashSet<>();
-    String promptAgent = settings.integrations().minimaxH3().promptAgentName();
-    if (promptAgent != null) {
-      deps.add(ConfigSyncRefs.ref(ConfigSyncKind.AGENTS, promptAgent));
+    for (String agent :
+        ConfigSyncPluginAgents.requiredAgentNames(
+            pluginRegistry, plugin.pluginId(), plugin.revision(), plugin.valuesJson())) {
+      deps.add(ConfigSyncRefs.ref(ConfigSyncKind.AGENTS, agent));
     }
     return List.copyOf(deps);
   }
@@ -216,6 +225,10 @@ public final class ConfigSyncGraph {
 
   private static ConfigSyncRef mcpRef(McpServer server) {
     return ConfigSyncRefs.ref(ConfigSyncKind.MCP_SERVERS, server.getName());
+  }
+
+  private static ConfigSyncRef pluginRef(PluginConfigurationRow plugin) {
+    return ConfigSyncRefs.ref(ConfigSyncKind.PLUGINS, plugin.pluginId());
   }
 
   /** 一次快照的依赖图：边、存在集合与稳定顺序的全部条目。 */

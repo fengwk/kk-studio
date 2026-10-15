@@ -19,6 +19,8 @@ import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
+import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRow;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsVersions;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
@@ -46,6 +48,9 @@ import java.util.Set;
  *
  * <p>外部准备失败绝不降级为成功：MCP 发现失败时跳过该 Server 及其依赖 Agent，Git 失败时不使用最新 HEAD 兜底也不重试。文件内声明但
  * 被跳过（失败/不支持）的同名条目会被从可用依赖池中剔除，避免依赖借此绕过 skip；文件未声明的既有依赖仍可满足。
+ *
+ * <p>插件条目与其它类别同一规则：安装身份与普通值已在解析期校验，这里只判定其声明的 Agent 依赖是否由导入后将生效的 Agent 池满足，并记录该插件当时的目录 epoch 与
+ * 修订作为导入事务内的 CAS 坐标。
  */
 @AllArgsConstructor
 @Component
@@ -61,6 +66,7 @@ public final class ConfigSyncPlanner {
   private final McpServerRepository mcpServerRepository;
   private final RuntimeToolCatalogSource toolCatalogSource;
   private final AgentModelRuntimeConfigParser configParser;
+  private final StudioPluginRegistry pluginRegistry;
 
   /** 读取快照后按 ParsedDocument 构建可写入计划。 */
   public ConfigSyncPlan plan(ConfigSyncParser.ParsedDocument document) {
@@ -334,6 +340,29 @@ public final class ConfigSyncPlanner {
       }
     }
 
+    List<ConfigSyncPlan.PluginImport> pluginImports = new ArrayList<>();
+    Map<String, Long> pluginRevisions = new LinkedHashMap<>();
+    for (PluginConfigurationRow row : snapshot.plugins()) {
+      pluginRevisions.put(row.pluginId(), row.revision());
+    }
+    for (ConfigSyncParser.PluginSpec spec : document.plugins()) {
+      Long revision = pluginRevisions.get(spec.pluginId());
+      if (revision == null) {
+        // 权威目录与安装集合必须一致：解析期已确认安装，却没有任何目录坐标意味着目录被篡改，绝不静默导入。
+        throw new AiValidationException(
+            RESOURCE, "plugin catalog is inconsistent: " + spec.pluginId());
+      }
+      String reason = pluginUnsatisfiedReason(spec, revision, agentPool);
+      if (reason != null) {
+        skipped.add(
+            new ConfigSyncSkipped(ConfigSyncKind.PLUGINS.wireValue(), spec.pluginId(), reason));
+        continue;
+      }
+      pluginImports.add(
+          new ConfigSyncPlan.PluginImport(spec.pluginId(), revision, spec.valuesJson()));
+      imported.add(ConfigSyncRefs.ref(ConfigSyncKind.PLUGINS, spec.pluginId()));
+    }
+
     ConfigSyncPlan.SettingsUpdate settingsUpdate = null;
     SystemSettingsSectionsDTO sections = document.settings();
     if (sections != null) {
@@ -358,9 +387,28 @@ public final class ConfigSyncPlanner {
         mcpImports,
         environments,
         agents,
+        pluginImports,
+        snapshot.pluginCatalogEpoch(),
         settingsUpdate,
         imported,
         skipped);
+  }
+
+  /**
+   * 插件普通配置声明的 Agent 必须由导入后将生效的 Agent 池满足。
+   *
+   * <p>文件里声明但被跳过的 Agent 已从池中移除，因此插件绝不会靠旧快照同名 Agent 蒙混过关；错误消息只带安全条目名，不回显配置或 cause。
+   */
+  private String pluginUnsatisfiedReason(
+      ConfigSyncParser.PluginSpec spec, long revision, Set<String> agentPool) {
+    for (String agent :
+        ConfigSyncPluginAgents.requiredAgentNames(
+            pluginRegistry, spec.pluginId(), revision, spec.valuesJson())) {
+      if (!agentPool.contains(agent)) {
+        return "missing agent: " + agent;
+      }
+    }
+    return null;
   }
 
   /**
