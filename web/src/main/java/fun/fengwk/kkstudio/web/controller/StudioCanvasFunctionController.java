@@ -15,6 +15,8 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalogSource;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunException;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionService;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionUnknownResolution;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionVersion;
+import fun.fengwk.kkstudio.share.canvas.CanvasFunctionCancelRequestDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasFunctionDefinitionDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasFunctionRunDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasFunctionRunRequestDTO;
@@ -49,8 +51,9 @@ public class StudioCanvasFunctionController {
 
   @GetMapping("/canvas-functions")
   public Result<List<CanvasFunctionDefinitionDTO>> listFunctions() {
-    // 目录只反映一次 acquireCurrent 的冻结快照：列表与可用性来自同一 epoch，不混用两个目录实例。
+    // 目录只反映一次 acquireCurrent 的冻结快照：列表、可用性与每项的 version 来自同一 epoch，不混用两个目录实例。
     try (CanvasFunctionCatalogSource.Lease lease = catalogSource.acquireCurrent()) {
+      long catalogEpoch = lease.epoch();
       return Results.ok(
           lease.catalog().list().stream()
               .map(
@@ -58,7 +61,8 @@ public class StudioCanvasFunctionController {
                       mapper.toDto(
                           registered.function(),
                           registered.enabled(),
-                          registered.unavailableReason()))
+                          registered.unavailableReason(),
+                          catalogEpoch))
               .toList());
     }
   }
@@ -74,8 +78,11 @@ public class StudioCanvasFunctionController {
     try {
       UUID canvasId = WebDtoMapper.parseUuid(canvasIdText, "canvasId");
       UUID nodeId = WebDtoMapper.parseUuid(nodeIdText, "nodeId");
+      CanvasFunctionVersion expectedVersion =
+          WebDtoMapper.parseVersion(request.getExpectedVersion(), "expectedVersion");
       return Results.accepted(
-          mapper.toDto(runtimeService.start(canvasId, nodeId, request.getRequestId())));
+          mapper.toDto(
+              runtimeService.start(canvasId, nodeId, request.getRequestId(), expectedVersion)));
     } catch (CanvasFunctionRunException exception) {
       throw map(exception);
     } catch (IllegalArgumentException exception) {
@@ -101,7 +108,7 @@ public class StudioCanvasFunctionController {
   public Result<CanvasFunctionRunDTO> cancel(
       @PathVariable("canvasId") String canvasIdText,
       @PathVariable("nodeId") String nodeIdText,
-      @RequestBody CanvasFunctionRunRequestDTO request) {
+      @RequestBody CanvasFunctionCancelRequestDTO request) {
     if (request == null) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "missing body");
     }

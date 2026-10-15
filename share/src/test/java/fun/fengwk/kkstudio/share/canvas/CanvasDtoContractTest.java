@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
@@ -21,6 +22,8 @@ import java.util.Map;
  * 位置是规范非负十进制字符串， required-nullable 字段显式发射 null。
  */
 class CanvasDtoContractTest {
+
+  private static final JsonMapper MAPPER = JsonMapper.builder().build();
 
   private static final String[] REQUIRED_NULLABLE_FIELDS = {
     "CanvasResourceNodeDTO.groupId",
@@ -39,7 +42,10 @@ class CanvasDtoContractTest {
 
   /** durable 位置与版本游标在 wire 上永远是十进制字符串，避免 JS 丢精度。 */
   private static final String[] VERSION_STRING_FIELDS = {
-    "CanvasDocumentDTO.revision", "CanvasPatchDTO.revision", "CanvasVersionEventDTO.revision"
+    "CanvasDocumentDTO.revision",
+    "CanvasPatchDTO.revision",
+    "CanvasVersionEventDTO.revision",
+    "CanvasFunctionVersionDTO.catalogEpoch"
   };
 
   /** typed command 的 wire 名与核心命令一一对应；缺失或改名都会让前端错位。 */
@@ -126,7 +132,7 @@ class CanvasDtoContractTest {
     assertEquals(Map.of("Keep", "KEEP", "Text", "TEXT", "Blob", "BLOB"), actual);
   }
 
-  /** Function 目录以 name/description/argsSchema 为身份，不再传 model/prompt/参数类型。 */
+  /** Function 目录以 name/description/argsSchema 与目录版本为身份，不再传 model/prompt/参数类型。 */
   @Test
   void functionCatalogExposesNameDescriptionAndArgsSchema() {
     assertEquals(
@@ -137,8 +143,12 @@ class CanvasDtoContractTest {
             "outputs", "List",
             "referencePolicy", "CanvasFunctionReferencePolicyDTO",
             "available", "Boolean",
-            "unavailableReason", "String"),
+            "unavailableReason", "String",
+            "version", "CanvasFunctionVersionDTO"),
         componentTypes(CanvasFunctionDefinitionDTO.class));
+    assertEquals(
+        Map.of("catalogEpoch", "String", "definitionFingerprint", "String"),
+        componentTypes(CanvasFunctionVersionDTO.class));
     assertEquals(
         Map.of("kind", "String", "name", "String"), componentTypes(CanvasFunctionOutputDTO.class));
     for (String removed :
@@ -148,6 +158,63 @@ class CanvasDtoContractTest {
           () -> Class.forName("fun.fengwk.kkstudio.share.canvas." + removed),
           removed + " must not survive as a model/parameter compatibility model");
     }
+  }
+
+  /** start 必带 expectedVersion；cancel 是独立的 requestId-only wire，不留下非必填版本分支。 */
+  @Test
+  void startRequiresExpectedVersionWhileCancelStaysRequestIdOnly() {
+    assertEquals(
+        Map.of("requestId", "String", "expectedVersion", "CanvasFunctionVersionDTO"),
+        componentTypes(CanvasFunctionRunRequestDTO.class));
+    assertEquals(
+        Map.of("requestId", "String"), componentTypes(CanvasFunctionCancelRequestDTO.class));
+  }
+
+  /**
+   * 版本字段只接受 JSON 字符串：数字/布尔/数组绝不被强制转换成文本。
+   *
+   * <p>否则 {@code {"catalogEpoch":1}} 会被读成 {@code "1"}，start 就会接受一个客户端从未以 canonical 形式表达过的版本。 显式
+   * {@code null} 由边界必填校验拒绝（见 Studio Canvas Function controller 契约测试）。
+   */
+  @Test
+  void versionFieldsOnlyAcceptJsonStrings() throws Exception {
+    String fingerprint = "a".repeat(64);
+    CanvasFunctionVersionDTO accepted =
+        MAPPER.readValue(
+            "{\"catalogEpoch\":\"1\",\"definitionFingerprint\":\"" + fingerprint + "\"}",
+            CanvasFunctionVersionDTO.class);
+    assertEquals("1", accepted.getCatalogEpoch());
+    assertEquals(fingerprint, accepted.getDefinitionFingerprint());
+
+    for (String body :
+        new String[] {
+          "{\"catalogEpoch\":1,\"definitionFingerprint\":\"" + fingerprint + "\"}",
+          "{\"catalogEpoch\":true,\"definitionFingerprint\":\"" + fingerprint + "\"}",
+          "{\"catalogEpoch\":[\"1\"],\"definitionFingerprint\":\"" + fingerprint + "\"}",
+          "{\"catalogEpoch\":\"1\",\"definitionFingerprint\":12345}",
+          "{\"catalogEpoch\":\"1\",\"definitionFingerprint\":\""
+              + fingerprint
+              + "\",\"extra\":true}"
+        }) {
+      assertThrows(
+          Exception.class, () -> MAPPER.readValue(body, CanvasFunctionVersionDTO.class), body);
+    }
+    assertThrows(
+        Exception.class,
+        () ->
+            MAPPER.readValue(
+                "{\"requestId\":\"r\",\"expectedVersion\":null}",
+                CanvasFunctionCancelRequestDTO.class));
+    // 嵌套在 start body 里同样严格：版本字段的严格化不能只在顶层 object 生效。
+    assertThrows(
+        Exception.class,
+        () ->
+            MAPPER.readValue(
+                "{\"requestId\":\"r\",\"expectedVersion\":{\"catalogEpoch\":1,"
+                    + "\"definitionFingerprint\":\""
+                    + fingerprint
+                    + "\"}}",
+                CanvasFunctionRunRequestDTO.class));
   }
 
   /** Function 只有 name 与自由 args，目录不假设 model/prompt/provider。 */

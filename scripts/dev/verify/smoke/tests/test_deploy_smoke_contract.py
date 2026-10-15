@@ -7,6 +7,7 @@ create_and_run 被原样取出执行，请求被记录、应答按固定序列�
 """
 
 import ast
+import hashlib
 import json
 import os
 import subprocess
@@ -43,6 +44,7 @@ from offline_canvas_contract import (
     assert_patch,
     assert_run_revision,
     decimal_revision,
+    definition_version,
     document_revision,
     function_batch,
     resource_batch,
@@ -100,8 +102,16 @@ def run_dto(
     }
 
 
+def function_version(name: str) -> dict:
+    """目录项版本身份：canonical 非负十进制 epoch + 该函数定义的 lowercase SHA-256。"""
+    return {
+        "catalogEpoch": "7",
+        "definitionFingerprint": hashlib.sha256(name.encode()).hexdigest(),
+    }
+
+
 def function_definitions(names=REQUIRED_FUNCTIONS) -> list:
-    """CanvasFunctionDefinitionDTO 列表：name + 严格 object schema。"""
+    """CanvasFunctionDefinitionDTO 列表：name + 严格 object schema + 目录版本。"""
     return [
         {
             "name": name,
@@ -125,6 +135,7 @@ def function_definitions(names=REQUIRED_FUNCTIONS) -> list:
             },
             "available": True,
             "unavailableReason": None,
+            "version": function_version(name),
         }
         for name in names
     ]
@@ -409,13 +420,14 @@ class TestOfflineChatBatchRequest(unittest.TestCase):
 class CreateAndRunHarness:
     """按固定顺序应答 create_and_run 的请求，并记录它真正发出的 wire payload。
 
-    序列覆盖声明、启动、轮询成功、快照和重放。
+    序列覆盖目录版本、声明、启动、轮询成功、快照和重放。
     每次应答都是独立副本，因此脚本对 replay 的相等比较无法被共享引用绕过。
     """
 
     LIFECYCLE_REVISIONS = 4  # start、beginSubmit、confirmSubmitted、complete
 
     def __init__(self, function_name, checkpoint_count):
+        self.function_name = function_name
         self.node_id = str(uuid.uuid4())
         self.request_id = str(uuid.uuid4())
         # 脚本按 nodeId、idempotencyKey、requestId 的顺序取三个 id。
@@ -441,6 +453,7 @@ class CreateAndRunHarness:
         }
         settled = document_dto(1 + self.LIFECYCLE_REVISIONS + checkpoint_count)
         self.responses = [
+            function_definitions((function_name,)),
             {"document": document_dto(0), "nodes": [], "groups": [], "references": []},
             patch_dto(
                 "1",
@@ -481,6 +494,7 @@ class CreateAndRunHarness:
             "assert_completed_run": assert_completed_run,
             "assert_patch": assert_patch,
             "assert_run_revision": assert_run_revision,
+            "definition_version": definition_version,
             "document_revision": document_revision,
             "function_batch": function_batch,
             "time": SimpleNamespace(sleep=lambda _: None),
@@ -545,14 +559,20 @@ class TestOfflineSmokeWiring(unittest.TestCase):
                         batch["idempotencyKey"],
                     ),
                 )
-                # run 请求只带 requestId，收尾后相同 requestId 的重放必须原样返回。
+                # run 请求必须回传目录项的真实版本；收尾后相同 requestId 的重放必须原样返回。
                 self.assertEqual(
                     [
                         body
                         for method, path, body in harness.requests
                         if method == "POST" and path.endswith("/function-run")
                     ],
-                    [{"requestId": harness.request_id}] * 2,
+                    [
+                        {
+                            "requestId": harness.request_id,
+                            "expectedVersion": function_version(harness.function_name),
+                        }
+                    ]
+                    * 2,
                 )
                 self.assertEqual(node["resources"], harness.node["resources"])
                 canvas_path = f"/api/canvases/{CANVAS_ID}"
@@ -560,6 +580,7 @@ class TestOfflineSmokeWiring(unittest.TestCase):
                 self.assertEqual(
                     [(method, path) for method, path, _ in harness.requests],
                     [
+                        ("GET", "/api/canvas-functions"),
                         ("GET", canvas_path),
                         ("POST", f"{canvas_path}/commands"),
                         ("POST", run_path),
@@ -574,7 +595,7 @@ class TestOfflineSmokeWiring(unittest.TestCase):
     def test_create_and_run_fails_when_replay_returns_a_different_run(self):
         """相同 requestId 的重放若返回另一次运行，smoke 必须失败而不是接受重复副作用。"""
         harness = CreateAndRunHarness("gpt-image-2", 4)
-        harness.responses[5] = run_dto(
+        harness.responses[6] = run_dto(
             harness.node_id, harness.request_id, updated_at="2026-01-01T00:00:01Z"
         )
         with self.assertRaises(AssertionError):
@@ -588,7 +609,7 @@ class TestOfflineSmokeWiring(unittest.TestCase):
         ):
             with self.subTest(mutation=mutation):
                 harness = CreateAndRunHarness("gpt-image-2", 4)
-                harness.responses[6] = harness.responses[6] | mutation
+                harness.responses[7] = harness.responses[7] | mutation
                 with self.assertRaises(AssertionError):
                     harness.run("gpt-image-2", "mock-gpt", {"ratio": "1:1"}, 4)
 

@@ -67,6 +67,19 @@ def function_batch(
     }
 
 
+def definition_version(definitions: list, name: str) -> dict:
+    """取某个函数目录项暴露的版本身份，作为 start 的 expectedVersion。
+
+    客户端看到的版本只能来自真实目录项，绝不硬编码 epoch 或 fingerprint。
+    """
+    definition = next(item for item in definitions if item["name"] == name)
+    version = definition["version"]
+    assert set(version) == {"catalogEpoch", "definitionFingerprint"}, version
+    assert re.fullmatch(r"0|[1-9][0-9]*", version["catalogEpoch"]), version
+    assert re.fullmatch(r"[0-9a-f]{64}", version["definitionFingerprint"]), version
+    return version
+
+
 def assert_function_definitions(definitions: list) -> None:
     fields = {
         "name",
@@ -76,12 +89,19 @@ def assert_function_definitions(definitions: list) -> None:
         "referencePolicy",
         "available",
         "unavailableReason",
+        "version",
     }
     assert isinstance(definitions, list) and definitions, definitions
     for definition in definitions:
         assert set(definition) == fields, definition
         assert definition["argsSchema"]["type"] == "object", definition
         assert definition["argsSchema"]["additionalProperties"] is False, definition
+        assert re.fullmatch(
+            r"0|[1-9][0-9]*", definition["version"]["catalogEpoch"]
+        ), definition
+        assert re.fullmatch(
+            r"[0-9a-f]{64}", definition["version"]["definitionFingerprint"]
+        ), definition
     for name in (
         "fake-image",
         "gpt-image-2",

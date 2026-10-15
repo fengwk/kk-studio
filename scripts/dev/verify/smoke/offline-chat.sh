@@ -233,7 +233,8 @@ from pathlib import Path
 from offline_chat_payload import build_offline_chat_batch_request
 from offline_canvas_contract import (
     assert_completed_run, assert_function_definitions, assert_patch,
-    assert_run_revision, document_revision, function_batch, resource_batch,
+    assert_run_revision, definition_version, document_revision, function_batch,
+    resource_batch,
 )
 
 base_url = os.environ["CANVAS_TEST_APP_URL"]
@@ -395,10 +396,14 @@ function_patch = json_call(
 assert_patch(function_patch, 1)
 function_node = upserted_node(function_patch, function_node_id)
 request_id = new_id()
+# start 的 expectedVersion 只能来自真实目录项，绝不硬编码 epoch 或 fingerprint。
+fake_image_version = definition_version(
+    json_call("GET", "/api/canvas-functions"), "fake-image"
+)
 started = json_call(
     "POST",
     f"/api/canvases/{canvas['id']}/nodes/{function_node['id']}/function-run",
-    {"requestId": request_id},
+    {"requestId": request_id, "expectedVersion": fake_image_version},
 )
 assert started["requestId"] == request_id
 for _ in range(120):
@@ -485,6 +490,7 @@ assert_function_definitions(json_call("GET", "/api/canvas-functions"))
 def create_and_run(
     function_name: str, name: str, parameters: dict, expected_checkpoint_count: int
 ) -> dict:
+    version = definition_version(json_call("GET", "/api/canvas-functions"), function_name)
     current = json_call("GET", f"/api/canvases/{canvas['id']}")
     current_revision = document_revision(current["document"])
     node_id = new_id()
@@ -502,7 +508,7 @@ def create_and_run(
     run = json_call(
         "POST",
         f"/api/canvases/{canvas['id']}/nodes/{node['id']}/function-run",
-        {"requestId": request_id},
+        {"requestId": request_id, "expectedVersion": version},
     )
     for _ in range(160):
         if run["status"] not in ("READY", "RUNNING"):
@@ -514,10 +520,10 @@ def create_and_run(
     assert_completed_run(run, node_id, request_id)
     snapshot = json_call("GET", f"/api/canvases/{canvas['id']}")
     assert_run_revision(snapshot["document"], patch_revision, expected_checkpoint_count)
-    # 收尾后相同 requestId 重放不能启动新运行或改写资源。
+    # 收尾后相同 requestId 重放不能启动新运行或改写资源；重放优先于版本校验。
     replay = json_call(
         "POST", f"/api/canvases/{canvas['id']}/nodes/{node_id}/function-run",
-        {"requestId": request_id},
+        {"requestId": request_id, "expectedVersion": version},
     )
     assert replay == run, replay
     assert json_call("GET", f"/api/canvases/{canvas['id']}") == snapshot

@@ -24,6 +24,10 @@ HarnessCatalog 与 CanvasFunctionCatalog 来自同一 epoch。安装集合、版
 Platform 的 RuntimeToolCatalogConfiguration 加入现读数据库的 MCP 目录。
 Canvas HTTP 目录查询在一次 `CanvasFunctionCatalogSource` 租用内完成，输出定义与可用性来自同一 epoch；
 Run 的完整定义与认证引用只保存在受保护执行状态中，普通 Run DTO 不回显它们。
+目录每项都携带 `version`（`catalogEpoch` + `definitionFingerprint`，都是字符串）；
+`POST /api/canvases/{canvasId}/nodes/{nodeId}/function-run` 必带同形状 `expectedVersion`，
+缺失、非 canonical 的非负十进制 epoch 文本或非法 fingerprint 一律 400，
+目录已前进或该函数定义已变化一律 409，且不产生 Run、pin 或外部调用；cancel 只带 `requestId`。
 
 [`HarnessRuntimeConfiguration`](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/HarnessRuntimeConfiguration.java)
 将 datasource/transaction manager 接入 PostgresqlHarnessStore，
