@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.plugin.minimaxmavis;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
@@ -67,6 +68,26 @@ class MiniMaxMavisAutoConfigurationTest {
               assertTrue(
                   recordingTransport.requests().isEmpty(),
                   "ApplicationContext startup must not trigger any MavisHttpTransport calls");
+            });
+  }
+
+  /** 其它插件已经注册不能抑制 Mavis 安装，条件退让仅针对本插件的具体类型。 */
+  @Test
+  void anotherStudioPluginDoesNotSuppressTheMavisDefinition() {
+    RecordingTransport recordingTransport = new RecordingTransport();
+    StudioPlugin anotherPlugin = mock(StudioPlugin.class);
+    baseRunner
+        .withBean("anotherPlugin", StudioPlugin.class, () -> anotherPlugin)
+        .withBean(MavisHttpTransport.class, () -> recordingTransport)
+        .withConfiguration(AutoConfigurations.of(MiniMaxMavisAutoConfiguration.class))
+        .run(
+            context -> {
+              assertThat(context).hasNotFailed();
+              assertThat(context).hasSingleBean(MiniMaxMavisPlugin.class);
+              assertThat(context.getBeansOfType(StudioPlugin.class).values())
+                  .containsExactlyInAnyOrder(
+                      anotherPlugin, context.getBean(MiniMaxMavisPlugin.class));
+              assertTrue(recordingTransport.requests().isEmpty());
             });
   }
 
