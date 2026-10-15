@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -20,6 +21,8 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionExecutionContext;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
+import fun.fengwk.kkstudio.harness.common.json.JsonValues;
+import fun.fengwk.kkstudio.harness.common.schema.BooleanSchema;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.common.schema.StringSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
@@ -51,7 +54,9 @@ import fun.fengwk.kkstudio.platform.plugin.PluginKeyUnavailableException;
 import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
 import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogBootstrap;
+import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogManifest;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRecord;
+import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRuntime;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogSnapshot;
 import fun.fengwk.kkstudio.platform.plugin.credential.DatabasePluginCredentialStore;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialAccess;
@@ -87,6 +92,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BiFunction;
 import java.util.function.Function;
 
 /**
@@ -120,10 +126,12 @@ class PluginManagementServiceTest {
   private PluginConfigurationCommitService commitService;
   private PluginConfigurationCommitService commitServiceWithoutKey;
   private PluginCatalogSnapshot snapshot;
+  private PluginCatalogRuntime runtime;
   private StudioPluginRegistry registry;
   private PluginManagementService service;
   private TestAuthPlugin authPlugin;
   private TestStaticKeyPlugin staticKeyPlugin;
+  private TestContributingPlugin contributingPlugin;
 
   @BeforeEach
   void setUp() throws IOException {
@@ -143,19 +151,20 @@ class PluginManagementServiceTest {
 
     authPlugin = new TestAuthPlugin();
     staticKeyPlugin = new TestStaticKeyPlugin();
+    contributingPlugin = new TestContributingPlugin();
     registry =
         new StudioPluginRegistry(
-            List.of(
-                authPlugin, new TestNoAuthPlugin(), staticKeyPlugin, new TestContributingPlugin()));
+            List.of(authPlugin, new TestNoAuthPlugin(), staticKeyPlugin, contributingPlugin));
 
     // 用真实启动装配建立 epoch 1 的 manifest 与配置历史：管理面与提交服务都只看权威行。
-    snapshot =
-        new PluginCatalogBootstrap(registry, catalog, transactions)
-            .bootstrap(
-                (pluginId, reference) ->
-                    new PluginContext(new PluginCredentialAccessStub(reference), Optional.empty()),
-                List.of(),
-                List.of());
+    PluginCatalogBootstrap bootstrap = new PluginCatalogBootstrap(registry, catalog, transactions);
+    BiFunction<String, PluginCredentialReference, PluginContext> contexts =
+        (pluginId, reference) ->
+            new PluginContext(new PluginCredentialAccessStub(reference), Optional.empty());
+    snapshot = bootstrap.bootstrap(contexts, List.of(), List.of());
+    // 运行期所有者唯一拥有该快照：管理面每次投影向它取一次 current 租用。
+    runtime =
+        new PluginCatalogRuntime(bootstrap, catalog, contexts, List.of(), List.of(), snapshot);
 
     credentialStore =
         new DatabasePluginCredentialStore(credentials, catalog, codec, keyLoader, clock);
@@ -179,13 +188,20 @@ class PluginManagementServiceTest {
         List::of,
         transactions,
         clock,
+        () -> {},
         () -> {});
   }
 
   private PluginManagementService service(
       DatabasePluginCredentialStore store, PluginConfigurationCommitService commits) {
     return new PluginManagementService(
-        registry, () -> snapshot, catalog, store, commits, attempts, Duration.ofMinutes(10), clock);
+        registry, () -> runtime, catalog, store, commits, attempts, Duration.ofMinutes(10), clock);
+  }
+
+  /** 运行期所有者按测试关闭其唯一初始快照，避免实例泄漏。 */
+  @AfterEach
+  void closeRuntime() {
+    runtime.close();
   }
 
   /** listPlugins() 顺序与 registry 一致；DTO 绝不泄漏敏感密钥或回调参数。 */
@@ -421,7 +437,7 @@ class PluginManagementServiceTest {
     PluginManagementService expiredClockService =
         new PluginManagementService(
             registry,
-            () -> snapshot,
+            () -> runtime,
             catalog,
             credentialStore,
             commitService,
@@ -642,7 +658,7 @@ class PluginManagementServiceTest {
     PluginManagementService probingService =
         new PluginManagementService(
             registry,
-            () -> snapshot,
+            () -> runtime,
             catalog,
             throwing,
             commitService,
@@ -743,6 +759,7 @@ class PluginManagementServiceTest {
             List::of,
             transactions,
             clock,
+            () -> {},
             () -> {});
 
     assertThrows(
@@ -859,12 +876,12 @@ class PluginManagementServiceTest {
   }
 
   /**
-   * 一次 getPlugin / listPlugins 各自只读一次 desired catalog 与一次 applied 快照：同一份响应绝不混用两个 epoch 的坐标、配置与能力。
+   * 一次 getPlugin / listPlugins 各自只读一次 desired catalog 与一次 applied 运行期：同一份响应绝不混用两个 epoch 的坐标、配置与能力。
    */
   @Test
-  void oneProjectionReadsOneDesiredCatalogAndOneAppliedSnapshot() {
+  void oneProjectionReadsOneDesiredCatalogAndOneAppliedRuntime() {
     AtomicInteger catalogReads = new AtomicInteger();
-    AtomicInteger snapshotReads = new AtomicInteger();
+    AtomicInteger runtimeReads = new AtomicInteger();
     InMemoryPluginConfigurationRepository countingCatalog =
         new InMemoryPluginConfigurationRepository() {
           @Override
@@ -884,8 +901,8 @@ class PluginManagementServiceTest {
         new PluginManagementService(
             registry,
             () -> {
-              snapshotReads.incrementAndGet();
-              return snapshot;
+              runtimeReads.incrementAndGet();
+              return runtime;
             },
             countingCatalog,
             credentialStore,
@@ -899,15 +916,15 @@ class PluginManagementServiceTest {
         1, catalogReads.get(), "one plugin projection must read the desired catalog exactly once");
     assertEquals(
         1,
-        snapshotReads.get(),
-        "one plugin projection must read the applied snapshot exactly once");
+        runtimeReads.get(),
+        "one plugin projection must consult the applied runtime exactly once");
 
     List<PluginDTO> dtos = counting.listPlugins();
     assertEquals(registry.plugins().size(), dtos.size());
     assertEquals(
         2, catalogReads.get(), "one list projection must read the desired catalog exactly once");
     assertEquals(
-        2, snapshotReads.get(), "one list projection must read the applied snapshot exactly once");
+        2, runtimeReads.get(), "one list projection must consult the applied runtime exactly once");
   }
 
   /** 已应用能力名只来自 applied 快照的 owner map 与真实 definitions：没有两域贡献的 Plugin 必须为空列表，绝不手写能力清单。 */
@@ -920,6 +937,97 @@ class PluginManagementServiceTest {
     PluginDTO none = service.getPlugin(NO_AUTH_PLUGIN_ID);
     assertEquals(List.of(), none.getHarnessToolNames());
     assertEquals(List.of(), none.getCanvasFunctionNames());
+  }
+
+  /** 投影必须释放 applied 租用：只要 getPlugin 与 listPlugins 泄漏一个租用，运行期关闭后其唯一快照就不会被退役，冻结实例也就不会关闭。 */
+  @Test
+  void projectionsReleaseTheAppliedLeaseSoTheRuntimeRetiresItsSnapshot() {
+    service.getPlugin(CONTRIBUTING_PLUGIN_ID);
+    service.listPlugins();
+
+    runtime.close();
+
+    assertEquals(
+        1,
+        contributingPlugin.instancesClosed.get(),
+        "the only snapshot owner must retire exactly once after every projection released its lease");
+  }
+
+  /** 保存后的 desired 与旧 applied 能力并列显示；对账后能力、epoch 和 revision 一起切换。 */
+  @Test
+  void capabilitiesSwitchWithTheAppliedEpochAfterRefresh() {
+    PluginDTO pending =
+        service.updateConfiguration(
+            CONTRIBUTING_PLUGIN_ID, 1L, 1L, "{\"enabled\":false}", Map.of());
+    assertEquals("2", pending.getDesiredEpoch());
+    assertEquals("1", pending.getAppliedEpoch());
+    assertEquals("1", pending.getAppliedRevision());
+    assertEquals(List.of("contributing-tool"), pending.getHarnessToolNames());
+    assertEquals(List.of("contributing-function"), pending.getCanvasFunctionNames());
+    assertEquals(
+        PluginConfigurationCommitService.PENDING_APPLICATION_ERROR, pending.getApplicationError());
+
+    runtime.refresh();
+    PluginDTO applied = service.getPlugin(CONTRIBUTING_PLUGIN_ID);
+    assertEquals("2", applied.getAppliedEpoch());
+    assertEquals("2", applied.getAppliedRevision());
+    assertEquals(List.of(), applied.getHarnessToolNames());
+    assertEquals(List.of(), applied.getCanvasFunctionNames());
+    assertNull(applied.getApplicationError());
+  }
+
+  /**
+   * applicationError 只在运行期记录的错误与本次投影的 applied 租用、权威 desired 同属一个 epoch 时才报真实固定码， 否则如实挂起；一旦权威对账成功应用
+   * desired，即恢复为 null，绝不是永久 pending。
+   */
+  @Test
+  void applicationErrorReportsTheRealFailureForTheSameEpochOnly() {
+    PluginCatalogRecord original = catalog.readCatalog();
+    PluginCatalogManifest originalManifest = original.manifest();
+
+    // 1. 权威推进到 epoch 2，但 manifest 的全局目录指纹与真实冻结目录不一致：本节点对账无法应用。
+    assertTrue(
+        catalog.commit(
+            original.epoch(),
+            List.of(),
+            new PluginCatalogManifest(originalManifest.plugins(), "0".repeat(64))));
+    runtime.refresh();
+
+    assertEquals(
+        new PluginCatalogRuntime.RuntimeState(
+            original.epoch() + 1, original.epoch(), PluginCatalogRuntime.ERROR_APPLY_FAILED),
+        runtime.state());
+
+    PluginDTO failed = service.getPlugin(PLUGIN_ID);
+    assertEquals(Long.toString(original.epoch() + 1), failed.getDesiredEpoch());
+    assertEquals(Long.toString(original.epoch()), failed.getAppliedEpoch());
+    assertEquals(
+        PluginCatalogRuntime.ERROR_APPLY_FAILED,
+        failed.getApplicationError(),
+        "the real fixed apply failure code must be reported, not a permanent pending");
+
+    // 2. 权威再次前进到 epoch 3：运行期错误仍属于 epoch 2，绝不伪装成 epoch 3 的投影状态。
+    assertTrue(
+        catalog.commit(
+            original.epoch() + 1,
+            List.of(),
+            new PluginCatalogManifest(
+                originalManifest.plugins(), originalManifest.catalogFingerprint())));
+    PluginDTO drifted = service.getPlugin(PLUGIN_ID);
+    assertEquals(Long.toString(original.epoch() + 2), drifted.getDesiredEpoch());
+    assertEquals(
+        PluginConfigurationCommitService.PENDING_APPLICATION_ERROR,
+        drifted.getApplicationError(),
+        "an error recorded for another epoch must not be disguised as this projection's state");
+
+    // 3. 对账成功应用 epoch 3：恢复同步后不再挂起。
+    runtime.refresh();
+    assertEquals(
+        new PluginCatalogRuntime.RuntimeState(original.epoch() + 2, original.epoch() + 2, null),
+        runtime.state());
+    PluginDTO applied = service.getPlugin(PLUGIN_ID);
+    assertEquals(applied.getDesiredEpoch(), applied.getAppliedEpoch());
+    assertNull(applied.getApplicationError());
   }
 
   // --- 测试辅助桩对象 ---
@@ -1048,6 +1156,9 @@ class PluginManagementServiceTest {
     private final PluginDescriptor descriptor =
         new PluginDescriptor(CONTRIBUTING_PLUGIN_ID, "Contributing Plugin", "1.0");
 
+    /** 已关闭的冻结实例数：用于断言投影释放租用后运行期能真正退役其唯一快照。 */
+    private final AtomicInteger instancesClosed = new AtomicInteger();
+
     @Override
     public PluginDescriptor descriptor() {
       return descriptor;
@@ -1055,7 +1166,11 @@ class PluginManagementServiceTest {
 
     @Override
     public PluginConfigSchema configurationSchema() {
-      return TestPluginFixtures.EMPTY_SCHEMA;
+      return new PluginConfigSchema(
+          new InputSchema(
+              "config", Map.of("enabled", new BooleanSchema("enabled")), Set.of("enabled"), false),
+          "{\"enabled\":true}",
+          Map.of());
     }
 
     @Override
@@ -1065,6 +1180,7 @@ class PluginManagementServiceTest {
 
     @Override
     public PluginInstance configure(PluginConfig config, PluginContext context) {
+      boolean enabled = JsonValues.readTree(config.valuesJson()).get("enabled").asBoolean();
       HarnessContributor contributor =
           HarnessContributor.of(
               new ContributorDescriptor(
@@ -1076,16 +1192,18 @@ class PluginManagementServiceTest {
       return new PluginInstance() {
         @Override
         public List<HarnessContributor> harnessContributors() {
-          return List.of(contributor);
+          return enabled ? List.of(contributor) : List.of();
         }
 
         @Override
         public List<CanvasFunctionAdapter> canvasAdapters() {
-          return List.of(adapter);
+          return enabled ? List.of(adapter) : List.of();
         }
 
         @Override
-        public void close() {}
+        public void close() {
+          instancesClosed.incrementAndGet();
+        }
       };
     }
   }

@@ -163,6 +163,31 @@
                 <artifactId>jacoco-maven-plugin</artifactId>
                 <executions>
                     <execution>
+                        <id>check-plugin-live-wiring-class-line-coverage</id>
+                        <phase>verify</phase>
+                        <goals>
+                            <goal>check</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <rule>
+                                    <element>CLASS</element>
+                                    <includes>
+                                        <include>fun.fengwk.kkstudio.web.runtime.PluginCatalogRefresher</include>
+                                        <include>fun.fengwk.kkstudio.web.runtime.PluginCatalogConfiguration</include>
+                                    </includes>
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.90</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
+                            </rules>
+                        </configuration>
+                    </execution>
+                    <execution>
                         <id>check-critical-class-line-coverage</id>
                         <phase>verify</phase>
                         <goals>
