@@ -325,6 +325,99 @@ export const settingsCatalog = {
     'en-US': 'None',
     'zh-CN': '无',
   },
+  'plugins.connectionCheck': {
+    'en-US': 'Check Connection',
+    'zh-CN': '检查连接',
+  },
+  'plugins.connectionCheck.blockedHint': {
+    'en-US': 'This node has not applied the current configuration yet; check after it is applied.',
+    'zh-CN': '本节点尚未应用当前配置，应用完成后再检查。',
+  },
+  'plugins.connectionCheck.pending': {
+    'en-US': 'Checking…',
+    'zh-CN': '检查中…',
+  },
+  'plugins.connectionCheck.title': {
+    'en-US': 'Connection Check: {{name}}',
+    'zh-CN': '连接检查：{{name}}',
+  },
+  'plugins.connectionCheck.description': {
+    'en-US':
+      'Runs one read-only probe against the remote service. It does not change configuration or credentials, and it never repeats on its own.',
+    'zh-CN': '仅对远端服务执行一次只读探测，不修改配置与凭据，也不会自行重复检查。',
+  },
+  'plugins.connectionCheck.coordinates': {
+    'en-US': 'Applied Coordinates',
+    'zh-CN': '已应用坐标',
+  },
+  'plugins.connectionCheck.checkedAt': {
+    'en-US': 'Checked At',
+    'zh-CN': '检查时刻',
+  },
+  'plugins.connectionCheck.reachability': {
+    'en-US': 'Reachability',
+    'zh-CN': '网络可达性',
+  },
+  'plugins.connectionCheck.authentication': {
+    'en-US': 'Authentication',
+    'zh-CN': '认证结论',
+  },
+  'plugins.connectionCheck.browserSession': {
+    'en-US': 'Browser Session',
+    'zh-CN': '浏览器会话',
+  },
+  'plugins.connectionCheck.reachability.REACHABLE': {
+    'en-US': 'Reachable',
+    'zh-CN': '可达',
+  },
+  'plugins.connectionCheck.reachability.UNREACHABLE': {
+    'en-US': 'Unreachable',
+    'zh-CN': '不可达',
+  },
+  'plugins.connectionCheck.reachability.NOT_CHECKED': {
+    'en-US': 'Not checked',
+    'zh-CN': '未检查',
+  },
+  'plugins.connectionCheck.reachability.INDETERMINATE': {
+    'en-US': 'Indeterminate',
+    'zh-CN': '无法判定',
+  },
+  'plugins.connectionCheck.authentication.ACCEPTED': {
+    'en-US': 'Credentials accepted',
+    'zh-CN': '凭据已接受',
+  },
+  'plugins.connectionCheck.authentication.REJECTED': {
+    'en-US': 'Credentials rejected',
+    'zh-CN': '凭据被拒绝',
+  },
+  'plugins.connectionCheck.authentication.UNAVAILABLE': {
+    'en-US': 'No local credentials',
+    'zh-CN': '本地无可用凭据',
+  },
+  'plugins.connectionCheck.authentication.NOT_CHECKED': {
+    'en-US': 'Not checked',
+    'zh-CN': '未检查',
+  },
+  'plugins.connectionCheck.browserSession.UNKNOWN': {
+    'en-US': 'Unknown (this check does not verify browser sign-in)',
+    'zh-CN': '未知（本检查不核验浏览器登录态）',
+  },
+  'plugins.connectionCheck.mismatch': {
+    'en-US': 'The result does not match this request and was discarded.',
+    'zh-CN': '结果与本次请求不一致，已丢弃。',
+  },
+  'plugins.connectionCheck.conflict': {
+    'en-US': 'The configuration changed. Refresh the list and check again.',
+    'zh-CN': '配置已改变，请刷新列表后重新检查。',
+  },
+  'plugins.connectionCheck.failed': {
+    'en-US': 'Connection check failed.',
+    'zh-CN': '连接检查失败。',
+  },
+  'plugins.connectionCheck.stale': {
+    'en-US': 'The configuration changed after this check; the result no longer matches the current one.',
+    'zh-CN': '此后配置已改变，本次结果已不再对应当前配置。',
+  },
   'settings.tabs.aiRuntime': {
     'en-US': 'AI Runtime',
     'zh-CN': 'AI 运行时',

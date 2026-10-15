@@ -365,6 +365,46 @@ describe('SyncTab', () => {
     fireEvent.keyDown(window, { key: 'Escape' })
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
   })
+
+  it('offers plugin configurations as its own optional kind and exports them by pluginId', async () => {
+    const user = userEvent.setup()
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+    const pluginsItem: ConfigSyncItem = {
+      kind: 'plugins',
+      name: 'minimax-mavis',
+      dependencies: [{ kind: 'agents', name: 'reviewer' }],
+    }
+    renderSyncTab({ items: [...INVENTORY_ITEMS, pluginsItem] })
+    const dialog = await openExportModal()
+
+    // 插件配置独立成组，标题即其类别名称，默认与其它类别一样可勾选。
+    expect(within(dialog).getByRole('checkbox', { name: '插件配置' })).toBeChecked()
+    const pluginsCheckbox = within(dialog).getByRole('checkbox', {
+      name: '插件配置: minimax-mavis',
+    })
+    expect(pluginsCheckbox).toBeChecked()
+    expect(within(dialog).getByText('共 8 类 · 8 项（含依赖）')).toBeInTheDocument()
+
+    // 清空全部选择后再只勾选插件配置：它可独立选择，并自动纳入声明的 Agent 依赖。
+    for (const label of [...KIND_TOGGLES, '插件配置']) {
+      await user.click(within(dialog).getByRole('checkbox', { name: label }))
+    }
+    expect(pluginsCheckbox).not.toBeChecked()
+    await user.click(within(dialog).getByRole('checkbox', { name: '插件配置' }))
+    expect(pluginsCheckbox).toBeChecked()
+    const agentDependency = within(dialog).getByRole('checkbox', { name: 'Agent: reviewer' })
+    expect(agentDependency).toBeChecked()
+    expect(agentDependency).toBeDisabled()
+    // 传递闭包：插件 → Agent → 模型/提供商/技能包。
+    expect(within(dialog).getByText('共 5 类 · 5 项（含依赖）')).toBeInTheDocument()
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '导出' }))
+
+    await waitFor(() => expect(mocks.exportConfig).toHaveBeenCalledTimes(1))
+    // 只提交用户直接勾选的 root（插件以 pluginId 为身份），依赖由后端按当时权威配置补齐。
+    expect(mocks.exportConfig).toHaveBeenCalledWith([{ kind: 'plugins', name: 'minimax-mavis' }])
+    expect(click).toHaveBeenCalled()
+  })
 })
 
 describe('SyncTab import', () => {
@@ -424,6 +464,7 @@ describe('SyncTab import', () => {
         ['skills'],
         ['environments'],
         ['mcp-servers'],
+        ['plugins'],
         ['config-sync', 'inventory'],
       ]) {
         expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: key })
@@ -687,5 +728,36 @@ describe('SyncTab import', () => {
 
     await user.click(within(dialog).getByRole('button', { name: '重新加载设置' }))
     expect(reloadSettings).toHaveBeenCalledTimes(1)
+  })
+
+  it('previews and imports plugin configurations without rendering the portable YAML body', async () => {
+    const user = userEvent.setup()
+    const yaml = 'plugins:\n- pluginId: minimax-mavis\n'
+    mocks.checkImport.mockResolvedValue(
+      makePreview({ created: [{ kind: 'plugins', name: 'minimax-mavis' }] }),
+    )
+    mocks.importConfig.mockResolvedValue({
+      imported: [{ kind: 'plugins', name: 'minimax-mavis' }],
+      skipped: [],
+    })
+    const { container, queryClient } = renderSyncTab()
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+
+    await user.upload(fileInput(container), new File([yaml], 'kk.yaml', { type: 'application/yaml' }))
+    const dialog = await screen.findByRole('dialog', { name: '导入配置' })
+
+    // 插件配置按既有类别文案展示，引用身份就是 pluginId。
+    expect(within(dialog).getByText('插件配置: minimax-mavis')).toBeInTheDocument()
+    // 不显示 YAML 正文：前端不生成也不解密 plugin values。
+    expect(dialog.textContent).not.toContain('plugins:')
+    expect(dialog.textContent).not.toContain('pluginId:')
+
+    await user.click(within(dialog).getByRole('button', { name: '确认导入' }))
+    expect(mocks.importConfig).toHaveBeenCalledWith(yaml, false)
+    expect(await within(dialog).findByText('已导入')).toBeInTheDocument()
+    expect(within(dialog).getByText('插件配置: minimax-mavis')).toBeInTheDocument()
+
+    // 导入后刷新插件列表，使管理面重新读取权威配置。
+    await waitFor(() => expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['plugins'] }))
   })
 })

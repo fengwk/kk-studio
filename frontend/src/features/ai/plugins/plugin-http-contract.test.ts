@@ -3,7 +3,11 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { findNodeAtLocation } from 'jsonc-parser'
 import { describe, expect, it } from 'vitest'
-import { decodePluginAuthPrepareDTO, decodePluginList } from '@/shared/api/ai-plugin-codec'
+import {
+  decodePluginAuthPrepareDTO,
+  decodePluginConnectionCheckDTO,
+  decodePluginList,
+} from '@/shared/api/ai-plugin-codec'
 import { getNodeSlice, parseStrictJsonObject } from './plugin-config-json'
 import { parsePluginValuesSchema } from './plugin-schema'
 
@@ -57,5 +61,23 @@ describe('plugin HTTP contract', () => {
       authAttemptId: 'attempt-handle-c0ffee-cafe',
       loginUrl: 'https://auth.example.com/deep-link?region=us-east-1',
     })
+  })
+
+  // 真实后端 golden 的已应用坐标、检查时刻与三个维度必须逐值解码，且绝不携带远端材料。
+  it('decodes the committed connection-check HTTP golden shared with the Java MVC contract test', () => {
+    const raw = httpGoldenData('connection-check-http.json')
+    expect(decodePluginConnectionCheckDTO(raw)).toEqual({
+      pluginId: 'beta-deep-connected',
+      appliedEpoch: '14',
+      appliedRevision: '8',
+      checkedAt: 1772366400,
+      reachability: 'REACHABLE',
+      authentication: 'ACCEPTED',
+      browserSession: 'UNKNOWN',
+    })
+    const serialized = JSON.stringify(raw)
+    for (const forbidden of ['http://', 'https://', 'Bearer', 'credential', 'apiKey']) {
+      expect(serialized).not.toContain(forbidden)
+    }
   })
 })

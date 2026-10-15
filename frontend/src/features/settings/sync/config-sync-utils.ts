@@ -5,7 +5,7 @@ import type {
   ConfigSyncRef,
 } from '@/shared/api/contracts/config-sync'
 
-/** 库存种类展示顺序：与契约的七类一致，Agent 在模型/提供商之前便于依赖自解释。 */
+/** 库存种类展示顺序：与契约的八类一致，Agent 在模型/提供商之前便于依赖自解释。 */
 export const CONFIG_SYNC_KIND_ORDER: ConfigSyncKind[] = [
   'agents',
   'models',
@@ -14,6 +14,7 @@ export const CONFIG_SYNC_KIND_ORDER: ConfigSyncKind[] = [
   'environments',
   'mcpServers',
   'settings',
+  'plugins',
 ]
 
 export interface ConfigSyncKindGroup {
@@ -35,6 +36,7 @@ export const CONFIG_SYNC_GROUPS: ConfigSyncKindGroup[] = [
   { key: 'environments', kindKeys: ['environments'], labelKey: 'settings.sync.kind.environments' },
   { key: 'mcpServers', kindKeys: ['mcpServers'], labelKey: 'settings.sync.kind.mcpServers' },
   { key: 'settings', kindKeys: ['settings'], labelKey: 'settings.sync.kind.settings' },
+  { key: 'plugins', kindKeys: ['plugins'], labelKey: 'settings.sync.kind.plugins' },
 ]
 
 export function configSyncKindLabelKey(kind: ConfigSyncKind): string {

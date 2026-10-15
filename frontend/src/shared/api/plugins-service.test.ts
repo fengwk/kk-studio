@@ -105,5 +105,50 @@ describe('pluginsService', () => {
 
     await service.disconnectAuth('minimax-mavis')
     expect(client.delete).toHaveBeenCalledWith('/plugins/minimax-mavis/auth')
+
+    // 显式连接检查只向该 Plugin 的固定端点提交一次期望坐标，不重试也不拼接任何其它路径。
+    const checkRequest = { expectedEpoch: '1', expectedRevision: '1' }
+    const checkResult = {
+      pluginId: 'minimax-mavis',
+      appliedEpoch: '1',
+      appliedRevision: '1',
+      checkedAt: 1772366400,
+      reachability: 'REACHABLE',
+      authentication: 'ACCEPTED',
+      browserSession: 'UNKNOWN',
+    }
+    vi.mocked(client.post).mockResolvedValueOnce(checkResult)
+    await expect(service.checkConnection('minimax-mavis', checkRequest)).resolves.toEqual(checkResult)
+    expect(client.post).toHaveBeenNthCalledWith(
+      3,
+      '/plugins/minimax-mavis/connection-check',
+      checkRequest,
+    )
+    expect(client.post).toHaveBeenCalledTimes(3)
+
+    // 需要转义的安装身份必须整体编码，确保只命中该 Plugin 自己的端点。
+    vi.mocked(client.post).mockResolvedValueOnce({ ...checkResult, pluginId: 'a/b?c' })
+    await service.checkConnection('a/b?c', checkRequest)
+    expect(client.post).toHaveBeenNthCalledWith(4, '/plugins/a%2Fb%3Fc/connection-check', checkRequest)
+    expect(client.post).toHaveBeenCalledTimes(4)
+  })
+
+  it('rejects a connection check payload that leaves the typed contract', async () => {
+    const client = createClient()
+    const service = createPluginsService(client)
+    vi.mocked(client.post).mockResolvedValue({
+      pluginId: 'minimax-mavis',
+      appliedEpoch: '1',
+      appliedRevision: '1',
+      checkedAt: 1772366400,
+      reachability: 'CONNECTED',
+      authentication: 'ACCEPTED',
+      browserSession: 'UNKNOWN',
+    })
+
+    await expect(
+      service.checkConnection('minimax-mavis', { expectedEpoch: '1', expectedRevision: '1' }),
+    ).rejects.toThrowError(/reachability must be one of/)
+    expect(client.post).toHaveBeenCalledTimes(1)
   })
 })
