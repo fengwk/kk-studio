@@ -18,6 +18,9 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.ArgumentCaptor;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
@@ -56,6 +59,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Stream;
 
 /** Adapter golden argv、checkpoint 恢复、provider 状态和流式 materialize 契约。 */
 class OpenCliCanvasFunctionAdaptersTest {
@@ -73,9 +77,9 @@ class OpenCliCanvasFunctionAdaptersTest {
   void disabledAdaptersStillDeclareFunctionsWithoutLeakingConfiguration() {
     OpenCliHubClient client = mock(OpenCliHubClient.class);
     GptImage2CanvasFunctionAdapter gpt =
-        new GptImage2CanvasFunctionAdapter(defaultSettings(), client);
+        new GptImage2CanvasFunctionAdapter(OpenCliTestSettings.defaults(), client);
     SeedanceCanvasFunctionAdapter seedance =
-        new SeedanceCanvasFunctionAdapter(defaultSettings(), client, MAPPER, ignored -> {});
+        new SeedanceCanvasFunctionAdapter(OpenCliTestSettings.defaults(), client, MAPPER, ignored -> {});
 
     assertFalse(gpt.enabled());
     assertEquals(1, gpt.functions().size());
@@ -85,18 +89,9 @@ class OpenCliCanvasFunctionAdaptersTest {
     assertEquals("Seedance generation is disabled", seedance.unavailableReason());
 
     OpenCliSettings globalDisabled =
-        new OpenCliSettings(
-            false,
-            "http://hub.local",
-            5000,
-            120000,
-            130000,
-            16384,
-            524288,
-            4096,
-            65535,
-            new OpenCliSettings.GptImage2(true, 900, 960_000L, 1_200_000L),
-            new OpenCliSettings.Seedance(true, "workspace-1", 2, 600_000L, 5L, 1_800_000L));
+        OpenCliTestSettings.parse(
+            "{\"gptImage2\":{\"paidEnabled\":true},"
+                + "\"seedance\":{\"enabled\":true,\"workspaceId\":\"workspace-1\",\"retry\":2}}");
     GptImage2CanvasFunctionAdapter gptGlobalDisabled =
         new GptImage2CanvasFunctionAdapter(globalDisabled, client);
     SeedanceCanvasFunctionAdapter seedanceGlobalDisabled =
@@ -107,18 +102,9 @@ class OpenCliCanvasFunctionAdaptersTest {
     assertEquals("Seedance generation is disabled", seedanceGlobalDisabled.unavailableReason());
 
     OpenCliSettings seedanceDisabled =
-        new OpenCliSettings(
-            true,
-            "http://hub.local",
-            5000,
-            120000,
-            130000,
-            16384,
-            524288,
-            4096,
-            65535,
-            new OpenCliSettings.GptImage2(false, 900, 960_000L, 1_200_000L),
-            new OpenCliSettings.Seedance(false, null, 0, 600_000L, 30_000L, 1_800_000L));
+        OpenCliTestSettings.parse(
+            "{\"enabled\":true,\"baseUrl\":\"http://hub.local\","
+                + "\"gptImage2\":{\"paidEnabled\":true}}");
     SeedanceCanvasFunctionAdapter seedanceDisabledAdapter =
         new SeedanceCanvasFunctionAdapter(seedanceDisabled, client, MAPPER, ignored -> {});
     assertFalse(seedanceDisabledAdapter.enabled());
@@ -132,10 +118,10 @@ class OpenCliCanvasFunctionAdaptersTest {
     assertNull(seedanceEnabled.unavailableReason());
 
     SeedanceCanvasFunctionAdapter twoArgSeedance =
-        new SeedanceCanvasFunctionAdapter(defaultSettings(), client);
+        new SeedanceCanvasFunctionAdapter(OpenCliTestSettings.defaults(), client);
     assertFalse(twoArgSeedance.enabled());
     SeedanceCanvasFunctionAdapter fourArgSeedance =
-        new SeedanceCanvasFunctionAdapter(defaultSettings(), client, MAPPER, Clock.systemUTC());
+        new SeedanceCanvasFunctionAdapter(OpenCliTestSettings.defaults(), client, MAPPER, Clock.systemUTC());
     assertFalse(fourArgSeedance.enabled());
   }
 
@@ -1029,131 +1015,128 @@ class OpenCliCanvasFunctionAdaptersTest {
                 seedanceStatusRun(seedance, "seedance-existing", Instant.now().toString())));
   }
 
+  /** 目录外的 Seedance 函数名必须在 preflight 失败，绝不猜测参数。 */
   @Test
-  void seedanceAdditionalBranchCoverageTest() {
+  void seedancePreflightRejectsUnsupportedFunctionName() {
+    SeedanceCanvasFunctionAdapter adapter =
+        seedanceAdapter(mock(OpenCliHubClient.class), ignored -> {});
+
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                adapter.preflight(
+                    run(
+                        renamed(adapter.functions().get(0), "unsupported-seedance"),
+                        "a prompt",
+                        Map.of(),
+                        List.of(),
+                        "INITIAL",
+                        Map.of())));
+
+    assertTrue(error.getMessage().contains("unsupported Seedance function"));
+  }
+
+  /** 空白提示词在 preflight 就被拒绝，绝不带着空白提交。 */
+  @Test
+  void seedancePreflightRejectsBlankPrompt() {
+    SeedanceCanvasFunctionAdapter adapter =
+        seedanceAdapter(mock(OpenCliHubClient.class), ignored -> {});
+
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                adapter.preflight(
+                    run(
+                        adapter.functions().get(0),
+                        "   ",
+                        Map.of("ratio", "16:9"),
+                        List.of(),
+                        "INITIAL",
+                        Map.of())));
+
+    assertTrue(error.getMessage().contains("Seedance prompt must not be blank"));
+  }
+
+  /** 引用清单约束：图片 MIME、音频容器、视频时长与引用数量上限都由 preflight 逐一拒绝。 */
+  @ParameterizedTest(name = "{0}")
+  @MethodSource("invalidSeedanceManifests")
+  void seedancePreflightRejectsInvalidReferences(
+      String scenario, List<CanvasFunctionFrozenReference> manifest, String expectedMessage) {
+    SeedanceCanvasFunctionAdapter adapter =
+        seedanceAdapter(mock(OpenCliHubClient.class), ignored -> {});
+
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                adapter.preflight(
+                    run(
+                        adapter.functions().get(0),
+                        "valid prompt",
+                        Map.of("ratio", "16:9"),
+                        manifest,
+                        "INITIAL",
+                        Map.of())));
+
+    assertTrue(
+        error.getMessage().contains(expectedMessage), scenario + ": " + error.getMessage());
+  }
+
+  private static Stream<Arguments> invalidSeedanceManifests() {
+    return Stream.of(
+        Arguments.of(
+            "image reference with a non-image MIME type",
+            List.of(
+                reference(
+                    1L, 0, 100L, CanvasResourceKind.IMAGE, "file.pdf", "application/pdf", null)),
+            "Seedance IMAGE reference must use image/* MIME"),
+        Arguments.of(
+            "audio reference with an unsupported container",
+            List.of(
+                reference(1L, 0, 101L, CanvasResourceKind.AUDIO, "audio.ogg", "audio/ogg", 5000L)),
+            "Seedance AUDIO requires audio/wav or audio/mpeg"),
+        Arguments.of(
+            "video shorter than two seconds",
+            List.of(
+                reference(1L, 0, 102L, CanvasResourceKind.VIDEO, "short.mp4", "video/mp4", 1000L)),
+            "VIDEO duration must be between 2 and 15 seconds"),
+        Arguments.of(
+            "more than three videos",
+            List.of(
+                reference(1L, 0, 100L, CanvasResourceKind.VIDEO, "v1.mp4", "video/mp4", 2500L),
+                reference(1L, 1, 101L, CanvasResourceKind.VIDEO, "v2.mp4", "video/mp4", 2500L),
+                reference(1L, 2, 102L, CanvasResourceKind.VIDEO, "v3.mp4", "video/mp4", 2500L),
+                reference(1L, 3, 103L, CanvasResourceKind.VIDEO, "v4.mp4", "video/mp4", 2500L)),
+            "Seedance accepts at most 3 VIDEO and 3 AUDIO references"));
+  }
+
+  /** checkpoint 里已有 assetId 的恢复必须立即返回，绝不重新提交或重新上传。 */
+  @Test
+  void seedanceSubmitReturnsImmediatelyWhenTheAssetIsAlreadyKnown() {
     OpenCliHubClient client = mock(OpenCliHubClient.class);
     SeedanceCanvasFunctionAdapter adapter = seedanceAdapter(client, ignored -> {});
 
-    // 1. unsupported Seedance function name
-    CanvasFunctionDefinition baseSeedanceDef = adapter.functions().get(0);
-    CanvasFunctionDefinition unsupportedDef =
-        new CanvasFunctionDefinition(
-            "unsupported-seedance",
-            baseSeedanceDef.description(),
-            baseSeedanceDef.argsSchema(),
-            baseSeedanceDef.outputs(),
-            baseSeedanceDef.referencePolicy());
-    CanvasFunctionFrozenRun unsupportedRun =
-        new CanvasFunctionFrozenRun(
-            CANVAS,
-            NODE,
-            "output",
-            REQUEST,
-            binding(unsupportedDef),
-            new JsonObject(Map.of("prompt", new JsonText("a prompt"))),
-            List.of(),
-            List.of(new CanvasFunctionFrozenOutput(TARGET, 0, CanvasResourceKind.VIDEO, "output")),
-            CanvasFunctionSubmitState.SUBMITTED,
-            "INITIAL",
-            Map.of());
-    IllegalArgumentException ex1 =
-        assertThrows(IllegalArgumentException.class, () -> adapter.preflight(unsupportedRun));
-    assertTrue(ex1.getMessage().contains("unsupported Seedance function"));
-
-    // 2. blank prompt
-    CanvasFunctionFrozenRun blankPromptRun =
-        run(
-            adapter.functions().get(0),
-            "   ",
-            Map.of("ratio", "16:9"),
-            List.of(),
-            "INITIAL",
-            Map.of());
-    IllegalArgumentException ex2 =
-        assertThrows(IllegalArgumentException.class, () -> adapter.preflight(blankPromptRun));
-    assertTrue(ex2.getMessage().contains("Seedance prompt must not be blank"));
-
-    // 3. IMAGE reference with non-image mime
-    CanvasFunctionFrozenReference badImageRef =
-        reference(1L, 0, 100L, CanvasResourceKind.IMAGE, "file.pdf", "application/pdf", null);
-    CanvasFunctionFrozenRun badImageRun =
-        run(
-            adapter.functions().get(0),
-            "valid prompt",
-            Map.of("ratio", "16:9"),
-            List.of(badImageRef),
-            "INITIAL",
-            Map.of());
-    IllegalArgumentException ex3 =
-        assertThrows(IllegalArgumentException.class, () -> adapter.preflight(badImageRun));
-    assertTrue(ex3.getMessage().contains("Seedance IMAGE reference must use image/* MIME"));
-
-    // 4. AUDIO reference with invalid container / invalid audio mime type
-    CanvasFunctionFrozenReference badAudioRef =
-        reference(1L, 0, 101L, CanvasResourceKind.AUDIO, "audio.ogg", "audio/ogg", 5000L);
-    CanvasFunctionFrozenRun badAudioRun =
-        run(
-            adapter.functions().get(0),
-            "valid prompt",
-            Map.of("ratio", "16:9"),
-            List.of(badAudioRef),
-            "INITIAL",
-            Map.of());
-    IllegalArgumentException ex4 =
-        assertThrows(IllegalArgumentException.class, () -> adapter.preflight(badAudioRun));
-    assertTrue(ex4.getMessage().contains("Seedance AUDIO requires audio/wav or audio/mpeg"));
-
-    // 5. duration < 2000L
-    CanvasFunctionFrozenReference shortVideoRef =
-        reference(1L, 0, 102L, CanvasResourceKind.VIDEO, "short.mp4", "video/mp4", 1000L);
-    CanvasFunctionFrozenRun shortVideoRun =
-        run(
-            adapter.functions().get(0),
-            "valid prompt",
-            Map.of("ratio", "16:9"),
-            List.of(shortVideoRef),
-            "INITIAL",
-            Map.of());
-    IllegalArgumentException ex5 =
-        assertThrows(IllegalArgumentException.class, () -> adapter.preflight(shortVideoRun));
-    assertTrue(ex5.getMessage().contains("VIDEO duration must be between 2 and 15 seconds"));
-
-    // 6. videoCount > 3
-    List<CanvasFunctionFrozenReference> fourVideos =
-        List.of(
-            reference(1L, 0, 100L, CanvasResourceKind.VIDEO, "v1.mp4", "video/mp4", 2500L),
-            reference(1L, 1, 101L, CanvasResourceKind.VIDEO, "v2.mp4", "video/mp4", 2500L),
-            reference(1L, 2, 102L, CanvasResourceKind.VIDEO, "v3.mp4", "video/mp4", 2500L),
-            reference(1L, 3, 103L, CanvasResourceKind.VIDEO, "v4.mp4", "video/mp4", 2500L));
-    CanvasFunctionFrozenRun fourVideosRun =
-        run(
-            adapter.functions().get(0),
-            "valid prompt",
-            Map.of("ratio", "16:9"),
-            fourVideos,
-            "INITIAL",
-            Map.of());
-    IllegalArgumentException ex6 =
-        assertThrows(IllegalArgumentException.class, () -> adapter.preflight(fourVideosRun));
-    assertTrue(
-        ex6.getMessage().contains("Seedance accepts at most 3 VIDEO and 3 AUDIO references"));
-
-    // 7. submit() with existing assetId returns immediately without calling client
-    RecordingContext submitContext = new RecordingContext(Map.of());
-    CanvasFunctionFrozenRun runWithAssetId =
+    RecordingContext context = new RecordingContext(Map.of());
+    adapter.submit(
+        context,
         run(
             adapter.functions().get(0),
             "prompt",
             Map.of("ratio", "16:9"),
             List.of(),
             "INITIAL",
-            Map.of(OpenCliAdapterState.ASSET_ID, "existing-asset"));
-    adapter.submit(submitContext, runWithAssetId);
-    verifyNoInteractions(client);
+            Map.of(OpenCliAdapterState.ASSET_ID, "existing-asset")));
 
-    // 8. submit() with existing executionId in state but no assetId recovers submission polling and
-    // loops in awaitHubExecution
-    RecordingContext pollingSubmitContext = new RecordingContext(Map.of());
+    verifyNoInteractions(client);
+  }
+
+  /** 提交结果未知时的恢复：按 executionId 轮询到 submitted 并写回 assetId，绝不重复提交。 */
+  @Test
+  void seedanceSubmissionPollingRecoversTheAssetIdWithoutResubmitting() {
+    OpenCliHubClient client = mock(OpenCliHubClient.class);
+    SeedanceCanvasFunctionAdapter adapter = seedanceAdapter(client, ignored -> {});
     when(client.getExecution("exec-polling", 0))
         .thenReturn(new Execution("exec-polling", ExecutionStatus.RUNNING, "", "", List.of()));
     when(client.getExecution("exec-polling", 120))
@@ -1164,111 +1147,139 @@ class OpenCliCanvasFunctionAdaptersTest {
                 "{\"submitted\":true,\"status\":\"submitted\",\"assetId\":\"0123456789abcdef\"}",
                 "",
                 List.of()));
-    CanvasFunctionFrozenRun runWithExecutionId =
+
+    RecordingContext context = new RecordingContext(Map.of());
+    adapter.submit(
+        context,
         run(
             adapter.functions().get(0),
             "prompt",
             Map.of("ratio", "16:9"),
             List.of(),
             "SEEDANCE_SUBMISSION_POLLING",
-            Map.of(OpenCliAdapterState.EXECUTION_ID, "exec-polling", "uploads", List.of()));
-    adapter.submit(pollingSubmitContext, runWithExecutionId);
-    assertEquals(
-        "0123456789abcdef",
-        pollingSubmitContext.lastAdapterState.get(OpenCliAdapterState.ASSET_ID));
+            Map.of(OpenCliAdapterState.EXECUTION_ID, "exec-polling", "uploads", List.of())));
 
-    // 9. awaitHubExecution throws when context is stopped
-    RecordingContext stoppedContext = new RecordingContext(Map.of());
-    stoppedContext.stop();
-    when(client.getExecution("exec-stopped", 0))
-        .thenReturn(new Execution("exec-stopped", ExecutionStatus.RUNNING, "", "", List.of()));
-    CanvasFunctionFrozenRun runStopped =
-        run(
-            adapter.functions().get(0),
-            "prompt",
-            Map.of("ratio", "16:9"),
-            List.of(),
-            "SEEDANCE_SUBMISSION_POLLING",
-            Map.of(OpenCliAdapterState.EXECUTION_ID, "exec-stopped", "uploads", List.of()));
-    IllegalStateException stoppedEx =
-        assertThrows(IllegalStateException.class, () -> adapter.submit(stoppedContext, runStopped));
-    assertTrue(stoppedEx.getMessage().contains("run is no longer running"));
-
-    // 10. extractText with invalid type
-    Map<String, CanvasJson> invalidArgs =
-        Map.of(
-            "prompt", new JsonText("prompt"),
-            "ratio", new JsonNumber(new BigDecimal("16")));
-    CanvasFunctionFrozenRun invalidRatioRun =
-        new CanvasFunctionFrozenRun(
-            CANVAS,
-            NODE,
-            "output",
-            REQUEST,
-            binding(adapter.functions().get(0)),
-            new JsonObject(invalidArgs),
-            List.of(),
-            List.of(new CanvasFunctionFrozenOutput(TARGET, 0, CanvasResourceKind.VIDEO, "output")),
-            CanvasFunctionSubmitState.SUBMITTED,
-            "INITIAL",
-            Map.of());
-    assertThrows(
-        CanvasFunctionUnknownException.class,
-        () -> adapter.submit(new RecordingContext(Map.of()), invalidRatioRun));
+    assertEquals("0123456789abcdef", context.lastAdapterState.get(OpenCliAdapterState.ASSET_ID));
   }
 
+  /** 运行已停止时提交轮询必须立刻失败，不再消耗远端查询。 */
   @Test
-  void gptImageAdditionalBranchCoverageTest() {
+  void seedanceSubmissionPollingFailsWhenTheRunIsNoLongerRunning() {
+    OpenCliHubClient client = mock(OpenCliHubClient.class);
+    SeedanceCanvasFunctionAdapter adapter = seedanceAdapter(client, ignored -> {});
+    when(client.getExecution("exec-stopped", 0))
+        .thenReturn(new Execution("exec-stopped", ExecutionStatus.RUNNING, "", "", List.of()));
+    RecordingContext context = new RecordingContext(Map.of());
+    context.stop();
+
+    IllegalStateException error =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                adapter.submit(
+                    context,
+                    run(
+                        adapter.functions().get(0),
+                        "prompt",
+                        Map.of("ratio", "16:9"),
+                        List.of(),
+                        "SEEDANCE_SUBMISSION_POLLING",
+                        Map.of(
+                            OpenCliAdapterState.EXECUTION_ID,
+                            "exec-stopped",
+                            "uploads",
+                            List.of()))));
+
+    assertTrue(error.getMessage().contains("run is no longer running"));
+  }
+
+  /** 参数类型不符必须 fail closed 成未知结果，绝不按字符串猜测。 */
+  @Test
+  void seedanceSubmitFailsClosedWhenAnArgumentHasTheWrongType() {
+    SeedanceCanvasFunctionAdapter adapter =
+        seedanceAdapter(mock(OpenCliHubClient.class), ignored -> {});
+
+    assertThrows(
+        CanvasFunctionUnknownException.class,
+        () ->
+            adapter.submit(
+                new RecordingContext(Map.of()),
+                run(
+                    adapter.functions().get(0),
+                    "prompt",
+                    Map.of("ratio", 16),
+                    List.of(),
+                    "INITIAL",
+                    Map.of())));
+  }
+
+  /** 目录外的 GPT Image 函数名必须在 preflight 失败，绝不猜测参数。 */
+  @Test
+  void gptImagePreflightRejectsUnsupportedFunctionName() {
+    GptImage2CanvasFunctionAdapter adapter = gptAdapter(mock(OpenCliHubClient.class));
+
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                adapter.preflight(
+                    run(
+                        renamed(adapter.functions().get(0), "unsupported-gpt"),
+                        "a prompt",
+                        Map.of(),
+                        List.of(),
+                        "INITIAL",
+                        Map.of())));
+
+    assertTrue(error.getMessage().contains("unsupported GPT Image function"));
+  }
+
+  /** 空白提示词在 preflight 就被拒绝，绝不带着空白提交。 */
+  @Test
+  void gptImagePreflightRejectsBlankPrompt() {
+    GptImage2CanvasFunctionAdapter adapter = gptAdapter(mock(OpenCliHubClient.class));
+
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                adapter.preflight(
+                    run(
+                        adapter.functions().get(0),
+                        "   ",
+                        Map.of(),
+                        List.of(),
+                        "INITIAL",
+                        Map.of())));
+
+    assertTrue(error.getMessage().contains("GPT Image prompt must not be blank"));
+  }
+
+  /** 已有 executionId 的恢复必须立即返回，绝不重新提交。 */
+  @Test
+  void gptImageSubmitReturnsImmediatelyWhenTheExecutionIsAlreadyKnown() {
     OpenCliHubClient client = mock(OpenCliHubClient.class);
     GptImage2CanvasFunctionAdapter adapter = gptAdapter(client);
 
-    // 1. unsupported function name
-    CanvasFunctionDefinition baseGptDef = adapter.functions().get(0);
-    CanvasFunctionDefinition unsupportedDef =
-        new CanvasFunctionDefinition(
-            "unsupported-gpt",
-            baseGptDef.description(),
-            baseGptDef.argsSchema(),
-            baseGptDef.outputs(),
-            baseGptDef.referencePolicy());
-    CanvasFunctionFrozenRun unsupportedRun =
-        new CanvasFunctionFrozenRun(
-            CANVAS,
-            NODE,
-            "output",
-            REQUEST,
-            binding(unsupportedDef),
-            new JsonObject(Map.of("prompt", new JsonText("a prompt"))),
-            List.of(),
-            List.of(new CanvasFunctionFrozenOutput(TARGET, 0, CanvasResourceKind.IMAGE, "output")),
-            CanvasFunctionSubmitState.SUBMITTED,
-            "INITIAL",
-            Map.of());
-    IllegalArgumentException ex1 =
-        assertThrows(IllegalArgumentException.class, () -> adapter.preflight(unsupportedRun));
-    assertTrue(ex1.getMessage().contains("unsupported GPT Image function"));
-
-    // 2. blank prompt
-    CanvasFunctionFrozenRun blankPromptRun =
-        run(adapter.functions().get(0), "   ", Map.of(), List.of(), "INITIAL", Map.of());
-    IllegalArgumentException ex2 =
-        assertThrows(IllegalArgumentException.class, () -> adapter.preflight(blankPromptRun));
-    assertTrue(ex2.getMessage().contains("GPT Image prompt must not be blank"));
-
-    // 3. submit() with existing executionId returns immediately
-    RecordingContext submitContext = new RecordingContext(Map.of());
-    CanvasFunctionFrozenRun runWithExecutionId =
+    RecordingContext context = new RecordingContext(Map.of());
+    adapter.submit(
+        context,
         run(
             adapter.functions().get(0),
             "prompt",
             Map.of(),
             List.of(),
             "GPT_IMAGE_POLLING",
-            Map.of(OpenCliAdapterState.EXECUTION_ID, "exec-already"));
-    adapter.submit(submitContext, runWithExecutionId);
-    verifyNoInteractions(client);
+            Map.of(OpenCliAdapterState.EXECUTION_ID, "exec-already")));
 
-    // 4. awaitTerminal in execute() loops through RUNNING to SUCCEEDED
+    verifyNoInteractions(client);
+  }
+
+  /** 轮询 RUNNING 到 SUCCEEDED，并把唯一的图片产物交给画布。 */
+  @Test
+  void gptImageExecutePollsTheRunningExecutionAndMaterializesTheImage() {
+    OpenCliHubClient client = mock(OpenCliHubClient.class);
+    GptImage2CanvasFunctionAdapter adapter = gptAdapter(client);
     when(client.getExecution("exec-polling", 0))
         .thenReturn(new Execution("exec-polling", ExecutionStatus.RUNNING, "", "", List.of()));
     ExecutionResource imageResource =
@@ -1281,57 +1292,77 @@ class OpenCliCanvasFunctionAdaptersTest {
         .thenReturn(
             new HubResourceStream(new ByteArrayInputStream(new byte[] {1, 2, 3}), 3L, "image/png"));
 
-    RecordingContext execContext = new RecordingContext(Map.of());
-    CanvasFunctionFrozenRun pollRun =
-        run(
-            adapter.functions().get(0),
-            "prompt",
-            Map.of(),
-            List.of(),
-            "GPT_IMAGE_POLLING",
-            Map.of(OpenCliAdapterState.EXECUTION_ID, "exec-polling", "uploads", List.of()));
-    List<UUID> result = adapter.execute(execContext, pollRun);
-    assertEquals(1, result.size());
+    RecordingContext context = new RecordingContext(Map.of());
+    List<UUID> result =
+        adapter.execute(
+            context,
+            run(
+                adapter.functions().get(0),
+                "prompt",
+                Map.of(),
+                List.of(),
+                "GPT_IMAGE_POLLING",
+                Map.of(OpenCliAdapterState.EXECUTION_ID, "exec-polling", "uploads", List.of())));
 
-    // 5. awaitTerminal throws when stopped
-    RecordingContext stoppedContext = new RecordingContext(Map.of());
-    stoppedContext.stop();
+    assertEquals(1, result.size());
+  }
+
+  /** 运行已停止时轮询必须失败，不再等待下一次查询。 */
+  @Test
+  void gptImageExecuteFailsWhenTheRunIsNoLongerRunning() {
+    OpenCliHubClient client = mock(OpenCliHubClient.class);
+    GptImage2CanvasFunctionAdapter adapter = gptAdapter(client);
     when(client.getExecution("exec-stopped", 0))
         .thenReturn(new Execution("exec-stopped", ExecutionStatus.RUNNING, "", "", List.of()));
-    CanvasFunctionFrozenRun runStopped =
-        run(
-            adapter.functions().get(0),
-            "prompt",
-            Map.of(),
-            List.of(),
-            "GPT_IMAGE_POLLING",
-            Map.of(OpenCliAdapterState.EXECUTION_ID, "exec-stopped", "uploads", List.of()));
-    IllegalStateException stoppedEx =
-        assertThrows(
-            IllegalStateException.class, () -> adapter.execute(stoppedContext, runStopped));
-    assertTrue(stoppedEx.getMessage().contains("run is no longer running"));
+    RecordingContext context = new RecordingContext(Map.of());
+    context.stop();
 
-    // 6. extractText with invalid type
-    Map<String, CanvasJson> invalidArgs =
-        Map.of(
-            "prompt", new JsonText("prompt"),
-            "ratio", new JsonNumber(new BigDecimal("16")));
-    CanvasFunctionFrozenRun invalidRatioRun =
-        new CanvasFunctionFrozenRun(
-            CANVAS,
-            NODE,
-            "output",
-            REQUEST,
-            binding(adapter.functions().get(0)),
-            new JsonObject(invalidArgs),
-            List.of(),
-            List.of(new CanvasFunctionFrozenOutput(TARGET, 0, CanvasResourceKind.IMAGE, "output")),
-            CanvasFunctionSubmitState.SUBMITTED,
-            "INITIAL",
-            Map.of());
+    IllegalStateException error =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                adapter.execute(
+                    context,
+                    run(
+                        adapter.functions().get(0),
+                        "prompt",
+                        Map.of(),
+                        List.of(),
+                        "GPT_IMAGE_POLLING",
+                        Map.of(
+                            OpenCliAdapterState.EXECUTION_ID, "exec-stopped", "uploads", List.of()))));
+
+    assertTrue(error.getMessage().contains("run is no longer running"));
+  }
+
+  /** 参数类型不符必须 fail closed 成未知结果，绝不按字符串猜测。 */
+  @Test
+  void gptImageSubmitFailsClosedWhenAnArgumentHasTheWrongType() {
+    GptImage2CanvasFunctionAdapter adapter = gptAdapter(mock(OpenCliHubClient.class));
+
     assertThrows(
         CanvasFunctionUnknownException.class,
-        () -> adapter.submit(new RecordingContext(Map.of()), invalidRatioRun));
+        () ->
+            adapter.submit(
+                new RecordingContext(Map.of()),
+                run(
+                    adapter.functions().get(0),
+                    "prompt",
+                    Map.of("ratio", 16),
+                    List.of(),
+                    "INITIAL",
+                    Map.of())));
+  }
+
+  /** 同一份定义换名：断言适配器只接受目录内的函数名。 */
+  private static CanvasFunctionDefinition renamed(
+      CanvasFunctionDefinition definition, String name) {
+    return new CanvasFunctionDefinition(
+        name,
+        definition.description(),
+        definition.argsSchema(),
+        definition.outputs(),
+        definition.referencePolicy());
   }
 
   private static CanvasFunctionFrozenRun seedanceStatusRun(
@@ -1360,43 +1391,26 @@ class OpenCliCanvasFunctionAdaptersTest {
     }
   }
 
+  /** 已启用的 GPT Image：只显式给出本用例需要的业务开关，其余取真实 schema 默认值。 */
   private static GptImage2CanvasFunctionAdapter gptAdapter(OpenCliHubClient client) {
     return new GptImage2CanvasFunctionAdapter(
-        adapterSettings(
-            new OpenCliSettings.GptImage2(true, 900, 960_000L, 1_200_000L),
-            new OpenCliSettings.Seedance(false, null, 0, 600_000L, 30_000L, 1_800_000L)),
+        OpenCliTestSettings.parse(
+            "{\"enabled\":true,\"baseUrl\":\"http://hub.local\","
+                + "\"gptImage2\":{\"paidEnabled\":true}}"),
         client);
   }
 
+  /** 已启用的 Seedance：轮询间隔 5ms 让等待预算用例可断言，其余取真实 schema 默认值。 */
   private static SeedanceCanvasFunctionAdapter seedanceAdapter(
       OpenCliHubClient client, SeedanceCanvasFunctionAdapter.Sleeper sleeper) {
     return new SeedanceCanvasFunctionAdapter(
-        adapterSettings(
-            new OpenCliSettings.GptImage2(false, 900, 960_000L, 1_200_000L),
-            new OpenCliSettings.Seedance(true, "workspace-1", 2, 600_000L, 5L, 1_800_000L)),
+        OpenCliTestSettings.parse(
+            "{\"enabled\":true,\"baseUrl\":\"http://hub.local\","
+                + "\"seedance\":{\"enabled\":true,\"workspaceId\":\"workspace-1\","
+                + "\"retry\":2,\"statusPollIntervalMillis\":5}}"),
         client,
         MAPPER,
         sleeper);
-  }
-
-  private static OpenCliSettings adapterSettings(
-      OpenCliSettings.GptImage2 gptImage2, OpenCliSettings.Seedance seedance) {
-    return new OpenCliSettings(
-        true,
-        "http://hub.local",
-        5000,
-        120000,
-        130000,
-        16384,
-        524288,
-        4096,
-        65535,
-        gptImage2,
-        seedance);
-  }
-
-  private static OpenCliSettings defaultSettings() {
-    return OpenCliTestSettings.defaults();
   }
 
   private static CanvasFunctionFrozenRun run(
