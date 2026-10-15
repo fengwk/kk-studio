@@ -149,7 +149,6 @@ class SystemSettingsChangedNotificationIntegrationTest extends WebPostgresTestSu
             ai.modelHttpRetryStatusCodes()),
         base.environment(),
         base.network(),
-        base.integrations(),
         base.storageMedia(),
         base.advanced());
   }

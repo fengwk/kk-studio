@@ -12,7 +12,6 @@ const SECTION_NAMES = [
   'aiRuntime',
   'environment',
   'network',
-  'integrations',
   'storageMedia',
   'advanced',
 ]
@@ -23,7 +22,6 @@ function updateBody(settings, expectedVersion = settings.version) {
     aiRuntime: settings.aiRuntime,
     environment: settings.environment,
     network: settings.network,
-    integrations: settings.integrations,
     storageMedia: settings.storageMedia,
     advanced: settings.advanced,
     expectedVersion,
@@ -58,7 +56,7 @@ registerCase({
   level: 'L1',
   title: 'SystemSettings 完整聚合、严格校验、CAS 与恢复',
   docs:
-    'GET 七 section + decimal-string Long/version，aiRuntime.modelHttpRetryStatusCodes 为 400–599 整数数组，storageMedia.tmp TTL/扫描间隔为正整数字符串；PUT 全局代理与重试名单 roundtrip；非法代理/凭据/重试名单形状和缺 network 400 fail-closed；严格权限和 CAS；finally 用最新版本恢复原值',
+    'GET 六 section + decimal-string Long/version，aiRuntime.modelHttpRetryStatusCodes 为 400–599 整数数组，storageMedia.tmp TTL/扫描间隔为正整数字符串；PUT 全局代理与重试名单 roundtrip；非法代理/凭据/重试名单形状和缺 network 400 fail-closed；严格权限和 CAS；finally 用最新版本恢复原值',
   async run(ctx) {
     const readSettings = async () => {
       const { json } = await ctx.call('GET', '/api/settings')
@@ -75,8 +73,8 @@ registerCase({
       'aiRuntime.retryBaseDelayMillis',
     )
     assert(
-      !Object.hasOwn(before.integrations.minimaxH3, 'presignExpirySeconds'),
-      'dead minimaxH3.presignExpirySeconds must not remain on the wire',
+      !Object.hasOwn(before, 'integrations'),
+      'the retired integrations section must not remain on the wire',
     )
     assert(
       !Object.hasOwn(before.storageMedia, 'canvasUploadExpiryMillis'),

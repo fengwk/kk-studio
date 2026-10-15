@@ -5,10 +5,10 @@ import { runWorkspaceContractMatrix } from '../ui/workspace-contracts.mjs'
 
 // 直接执行真实 UI case ui.settings.system_contract_cas，只把 HTTP 与页面替换成纯内存替身，
 // 从而在任何环境（无网络、无服务、无 Playwright）下锁住 externalUpdate / finally restore
-// 两个显式 PUT 是否完整携带七个必填 section（含 network）并 CAS 到正确版本。
+// 两个显式 PUT 是否完整携带六个必填 section（含 network）并 CAS 到正确版本。
 
 const CASE_ID = 'ui.settings.system_contract_cas'
-const SECTIONS = ['advanced', 'aiRuntime', 'environment', 'integrations', 'network', 'storageMedia', 'tool']
+const SECTIONS = ['advanced', 'aiRuntime', 'environment', 'network', 'storageMedia', 'tool']
 const EXPECTED_KEYS = [...SECTIONS, 'expectedVersion'].sort()
 const ORIGINAL_DELAY = '2501'
 const CHANGED_DELAY = '2502'
@@ -27,7 +27,6 @@ function createSettingsWorld(network) {
     },
     environment: { maxResourceBytes: '16777216', heartbeatTimeoutMillis: '60000' },
     network,
-    integrations: { enabled: false },
     storageMedia: { maxBytes: '1000000' },
     advanced: { resourceMaxBytes: '16777216' },
   }
@@ -41,7 +40,7 @@ function createSettingsWorld(network) {
     advanceVersion() {
       version += 1n
     },
-    // 严守七 section + expectedVersion：键缺失/多余一律 400，CAS 不匹配 409。
+    // 严守六 section + expectedVersion：键缺失/多余一律 400，CAS 不匹配 409。
     put(body) {
       world.puts.push({ body: structuredClone(body), versionAtCall: String(version) })
       const keys = Object.keys(body).sort()
@@ -101,7 +100,6 @@ function createSettingsPage(world) {
       aiRuntime: { ...snapshot.aiRuntime, retryBaseDelayMillis: view.draft },
       environment: snapshot.environment,
       network: snapshot.network,
-      integrations: snapshot.integrations,
       storageMedia: snapshot.storageMedia,
       advanced: snapshot.advanced,
       expectedVersion: view.knownVersion,

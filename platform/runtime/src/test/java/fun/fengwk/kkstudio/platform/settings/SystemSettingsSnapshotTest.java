@@ -74,7 +74,6 @@ class SystemSettingsSnapshotTest {
             SystemSettings.AiRuntime.DEFAULT.modelHttpRetryStatusCodes()),
         SystemSettings.Environment.DEFAULT,
         SystemSettings.Network.DEFAULT,
-        SystemSettings.Integrations.DEFAULT,
         SystemSettings.StorageMedia.DEFAULT,
         SystemSettings.Advanced.DEFAULT);
   }

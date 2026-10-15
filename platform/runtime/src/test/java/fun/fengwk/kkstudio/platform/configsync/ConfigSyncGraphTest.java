@@ -20,14 +20,9 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.platform.settings.SystemSettings;
-import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
-import fun.fengwk.kkstudio.platform.settings.SystemSettingsRepository;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncKind;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncRef;
-import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
 
-import java.time.Instant;
 import java.util.List;
 import java.util.Set;
 
@@ -40,12 +35,14 @@ class ConfigSyncGraphTest {
   private static final String BUILTIN_AGENT = "Compaction";
 
   private final ConfigSyncGraph graph =
-      new ConfigSyncGraph(ConfigSyncFixtures.AGENT_CONFIG_CODEC, ConfigSyncFixtures.registry());
+      new ConfigSyncGraph(
+          ConfigSyncFixtures.AGENT_CONFIG_CODEC, ConfigSyncFixtures.agentDependencies());
 
   private ConfigSyncGraph pluginGraph() {
     return new ConfigSyncGraph(
         ConfigSyncFixtures.AGENT_CONFIG_CODEC,
-        ConfigSyncFixtures.registry(new ConfigSyncFixtures.AgentDependencyPlugin(PLUGIN_ID)));
+        ConfigSyncFixtures.agentDependencies(
+            new ConfigSyncFixtures.AgentDependencyPlugin(PLUGIN_ID)));
   }
 
   private static ConfigSyncSnapshot pluginSnapshot(String requiredAgent, boolean agentPresent) {
@@ -66,15 +63,6 @@ class ConfigSyncGraphTest {
         List.of(
             ConfigSyncFixtures.pluginRow(
                 PLUGIN_ID, 3L, "{\"promptAgentName\":\"" + requiredAgent + "\"}")));
-  }
-
-  /** 旧 settings 集成字段仍完整保留在聚合里，但依赖图不再由它反向扩展 Agent。 */
-  private static SystemSettingsRepository.SystemSettingsRecord legacyPromptAgentSettings() {
-    SystemSettingsSectionsDTO sections =
-        new SystemSettingsCodec().toSections(SystemSettings.DEFAULT);
-    sections.getIntegrations().getMinimaxH3().setPromptAgentName("legacy-h3");
-    return new SystemSettingsRepository.SystemSettingsRecord(
-        new SystemSettingsCodec().fromDto(sections), 1L, Instant.EPOCH, Instant.EPOCH);
   }
 
   private ConfigSyncSnapshot richSnapshot() {
@@ -327,7 +315,7 @@ class ConfigSyncGraphTest {
     ConfigSyncGraph failingGraph =
         new ConfigSyncGraph(
             ConfigSyncFixtures.AGENT_CONFIG_CODEC,
-            ConfigSyncFixtures.registry(
+            ConfigSyncFixtures.agentDependencies(
                 new ConfigSyncFixtures.FailingAgentDeclarationPlugin(PLUGIN_ID)));
 
     assertThrows(IllegalStateException.class, () -> failingGraph.graph(pluginSnapshot("h3", true)));
@@ -347,20 +335,20 @@ class ConfigSyncGraphTest {
         List.of());
   }
 
-  /** 旧 settings 的 H3 提示词 Agent 引用不再产生依赖边；该字段仍完整存在于 settings 聚合。 */
+  /** 六节 settings 不再持有任何 Agent 引用：它仍是可同步条目，但依赖闭包为空、不反向扩展 Agent。 */
   @Test
-  void settingsNoLongerExpandsLegacyPromptAgent() {
+  void settingsCarriesNoAgentReference() {
     ConfigSyncSnapshot snapshot =
         new ConfigSyncSnapshot(
             List.of(),
             List.of(),
-            List.of(agent("legacy-h3", "p", "m", agentConfig(List.of(), List.of(), List.of()))),
+            List.of(agent("standalone", "p", "m", agentConfig(List.of(), List.of(), List.of()))),
             Set.of(),
             List.of(),
             List.of(),
             List.of(),
             List.of(),
-            legacyPromptAgentSettings(),
+            ConfigSyncFixtures.settings(1L),
             1L,
             List.of());
     ConfigSyncGraph.Graph prepared = graph.graph(snapshot);

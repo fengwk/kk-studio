@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.platform.error.CatalogVersions;
 import fun.fengwk.kkstudio.platform.persistence.PostgresqlIntegrityViolationClassifier;
+import fun.fengwk.kkstudio.platform.plugin.service.PluginAgentDependencies;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionDTO;
@@ -44,6 +45,7 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
   private final AgentModelDefaultVariantResolver variantResolver;
   private final AgentDefinitionConfigValidator configValidator;
   private final AgentDefinitionConfigCodec configCodec;
+  private final PluginAgentDependencies pluginAgentDependencies;
 
   @Override
   public Page<AgentDefinitionDTO> pageAgents(PageQuery pageQuery) {
@@ -137,6 +139,12 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
     }
     ensureExpectedVersion(definition, name, expectedVersion, expected);
     referenceResolver.ensureNotReferencedAsSubagent(name);
+    // 权威 desired manifest 中任一已安装插件的普通配置声明引用该 Agent 即不可删除：删除先持自身行锁，引用方保存先持同锁，
+    // 因此并发两侧最多一方成功；只读 desired 事实，不读取已应用状态、不解密秘密、不猜字段。
+    if (!pluginAgentDependencies.pluginsDeclaringAgent(name).isEmpty()) {
+      throw new AiInUseException(
+          RESOURCE, RESOURCE + " is referenced by plugin configuration: " + name);
+    }
     if (!agentDefinitionRepository.deleteByName(name, expected)) {
       AgentDefinition reread = agentDefinitionRepository.getByName(name);
       if (reread == null) {

@@ -23,6 +23,7 @@ import fun.fengwk.kkstudio.platform.plugin.persistence.PluginCredentialRepositor
 import fun.fengwk.kkstudio.platform.plugin.prompt.PluginPromptResources;
 import fun.fengwk.kkstudio.platform.plugin.prompt.PluginPromptTasks;
 import fun.fengwk.kkstudio.platform.plugin.resource.PluginResourceGateway;
+import fun.fengwk.kkstudio.platform.plugin.service.PluginAgentDependencies;
 import fun.fengwk.kkstudio.platform.plugin.service.PluginConfigurationCommitService;
 import fun.fengwk.kkstudio.platform.plugin.service.PluginContextFactory;
 import fun.fengwk.kkstudio.platform.plugin.service.PluginManagementService;
@@ -99,7 +100,8 @@ public class PluginConfiguration {
       ObjectProvider<CanvasFunctionAdapter> adapters,
       PlatformTransactionManager transactionManager,
       ObjectProvider<PluginCredentialRefreshDispatcher> refreshDispatcher,
-      ObjectProvider<PluginCatalogRefreshTrigger> catalogRefreshTrigger) {
+      ObjectProvider<PluginCatalogRefreshTrigger> catalogRefreshTrigger,
+      PluginAgentDependencies pluginAgentDependencies) {
     return new PluginConfigurationCommitService(
         registry,
         configurationRepository,
@@ -112,7 +114,8 @@ public class PluginConfiguration {
         transactionManager,
         Clock.systemUTC(),
         () -> wakeRefreshDispatcher(refreshDispatcher),
-        () -> wakeCatalogRefresh(catalogRefreshTrigger));
+        () -> wakeCatalogRefresh(catalogRefreshTrigger),
+        pluginAgentDependencies);
   }
 
   /** 提交服务已经将回调排到提交后；这里只唤醒调度，不再注册事务同步。 */

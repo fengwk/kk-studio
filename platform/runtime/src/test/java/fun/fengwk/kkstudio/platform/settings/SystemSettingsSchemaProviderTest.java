@@ -45,16 +45,9 @@ class SystemSettingsSchemaProviderTest {
   @Test
   void sectionOrderMatchesTheBaselineSettingsTabs() {
     // 基线 settings-tabs 顺序（General 在前端本地）：aiRuntime -> tool -> environment
-    // -> network -> integrations -> storageMedia -> advanced；精确顺序断言防止重构破坏 tabs 布局。
+    // -> network -> storageMedia -> advanced；精确顺序断言防止重构破坏 tabs 布局。
     assertEquals(
-        List.of(
-            "aiRuntime",
-            "tool",
-            "environment",
-            "network",
-            "integrations",
-            "storageMedia",
-            "advanced"),
+        List.of("aiRuntime", "tool", "environment", "network", "storageMedia", "advanced"),
         new SystemSettingsSchemaProvider()
             .get().getSections().stream().map(SystemSettingsSchemaDTO.SectionDTO::getKey).toList());
   }

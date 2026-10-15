@@ -115,9 +115,6 @@ kk-studio:
         heartbeat-interval-millis: ${KK_STUDIO_CANVAS_FUNCTION_HEARTBEAT_INTERVAL_MILLIS:10000}
         poll-interval-millis: ${KK_STUDIO_CANVAS_FUNCTION_POLL_INTERVAL_MILLIS:1000}
         rejection-delay-millis: ${KK_STUDIO_CANVAS_FUNCTION_REJECTION_DELAY_MILLIS:1000}
-      minimax-h3:
-        # 仅保留部署秘密；启用、路由与超时由 system_setting.integrations.minimaxH3 提供。
-        comfy-bearer-token: ${KK_STUDIO_CANVAS_H3_COMFY_BEARER_TOKEN:}
   plugins:
     # owner-only 绝对路径、32 bytes 原始 AES-256 主密钥、多节点必须一致、不进数据库/DTO/日志、留空表示本部署不提供凭据能力且读写 fail closed
     credential-key-file: ${KK_STUDIO_PLUGINS_CREDENTIAL_KEY_FILE:}

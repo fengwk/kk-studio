@@ -51,9 +51,10 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.data.environment.maxResourceBytes").isString())
         .andExpect(jsonPath("$.data.network.proxyUrl").doesNotExist())
         .andExpect(jsonPath("$.data.network.noProxyHosts").value("localhost,127.*,::1"))
-        .andExpect(jsonPath("$.data.integrations.openCliHub").doesNotExist())
-        .andExpect(jsonPath("$.data.integrations.seedance").doesNotExist())
-        .andExpect(jsonPath("$.data.integrations.gptImage2").doesNotExist())
+        // 旧 integrations 段已从设置合同删除：wire 上既不出现整段，也不出现任何残留子字段。
+        .andExpect(jsonPath("$.data.integrations").doesNotExist())
+        .andExpect(jsonPath("$.data.integrations.comfyui").doesNotExist())
+        .andExpect(jsonPath("$.data.integrations.minimaxH3").doesNotExist())
         .andExpect(jsonPath("$.data.advanced.applicationEventQueueCapacity").value(512))
         .andExpect(jsonPath("$.data.createTime").exists())
         .andExpect(jsonPath("$.data.updateTime").exists());
@@ -64,27 +65,20 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
     mockMvc
         .perform(get("/api/settings/schema"))
         .andExpect(status().isOk())
-        // section 顺序：aiRuntime -> tool -> environment -> network -> integrations
-        // -> storageMedia -> advanced（General 是前端本地 tab，不在 server schema）。
+        // section 顺序：aiRuntime -> tool -> environment -> network -> storageMedia
+        // -> advanced（General 是前端本地 tab，不在 server schema）。
         .andExpect(jsonPath("$.data.sections[0].key").value("aiRuntime"))
         .andExpect(jsonPath("$.data.sections[1].key").value("tool"))
         .andExpect(jsonPath("$.data.sections[2].key").value("environment"))
         .andExpect(jsonPath("$.data.sections[3].key").value("network"))
-        .andExpect(jsonPath("$.data.sections[4].key").value("integrations"))
-        .andExpect(jsonPath("$.data.sections[5].key").value("storageMedia"))
-        .andExpect(jsonPath("$.data.sections[6].key").value("advanced"))
+        .andExpect(jsonPath("$.data.sections[4].key").value("storageMedia"))
+        .andExpect(jsonPath("$.data.sections[5].key").value("advanced"))
         // 精确顺序断言：每个 section 的完整 key 序列必须与基线 tabs 完全一致。
         .andExpect(
             jsonPath("$.data.sections[*].key")
                 .value(
                     contains(
-                        "aiRuntime",
-                        "tool",
-                        "environment",
-                        "network",
-                        "integrations",
-                        "storageMedia",
-                        "advanced")))
+                        "aiRuntime", "tool", "environment", "network", "storageMedia", "advanced")))
         // custom atomic leaf、HTTP 名单和自动压缩组的顺序与路径。
         .andExpect(jsonPath("$.data.sections[1].groups[0].fields[0].path").value("tool.permission"))
         .andExpect(
@@ -109,9 +103,6 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
         // field 最小结构：path/labelKey/type/nullable；min/max/options 由 server 表达。
         .andExpect(jsonPath("$.data.sections[0].groups[2].fields[0].type").value("INTEGER"))
         .andExpect(jsonPath("$.data.sections[0].groups[2].fields[0].min").value(1))
-        // 领域上界映射：promptAgentName 受 MAX_LENGTH=64 约束。
-        .andExpect(jsonPath("$.data.sections[4].groups[1].fields[1].max").value(64))
-        .andExpect(jsonPath("$.data.sections[4].groups[1].fields[7].max").value(7200000))
         // ENUM options 由 server 表达。
         .andExpect(jsonPath("$.data.sections[0].groups[0].fields[1].type").value("ENUM"))
         .andExpect(
@@ -159,10 +150,10 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.data.sections[3].groups[0].fields.length()").value(2))
         .andExpect(jsonPath("$.data.sections[3].groups[0].fields[0].max").value(2048))
         .andExpect(jsonPath("$.data.sections[3].groups[0].fields[1].max").value(4096))
-        .andExpect(jsonPath("$.data.sections[5].key").value("storageMedia"))
-        .andExpect(jsonPath("$.data.sections[5].groups[1].key").value("storageMedia.canvasMedia"))
-        .andExpect(jsonPath("$.data.sections[5].groups[1].restartRequired").value(false))
-        .andExpect(jsonPath("$.data.sections[5].groups[1].applyTiming").value("NEXT_INVOCATION"));
+        .andExpect(jsonPath("$.data.sections[4].key").value("storageMedia"))
+        .andExpect(jsonPath("$.data.sections[4].groups[1].key").value("storageMedia.canvasMedia"))
+        .andExpect(jsonPath("$.data.sections[4].groups[1].restartRequired").value(false))
+        .andExpect(jsonPath("$.data.sections[4].groups[1].applyTiming").value("NEXT_INVOCATION"));
   }
 
   @Test
@@ -360,9 +351,11 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.data.version").value("0"));
   }
 
+  /** 旧 integrations 段与任何残留子段都是未知字段：按既有严格规则 400，不静默忽略、不兼容反序列化。 */
   @Test
-  public void putWithLegacyOpenCliIntegrationsReturns400() throws Exception {
-    for (String legacyField : List.of("openCliHub", "seedance", "gptImage2")) {
+  public void putWithLegacyIntegrationsReturns400() throws Exception {
+    for (String legacyField :
+        List.of("openCliHub", "seedance", "gptImage2", "comfyui", "minimaxH3")) {
       String body =
           bodyFromGet(
               update -> {
