@@ -84,6 +84,7 @@
                                         <include>fun.fengwk.kkstudio.plugin.opencli.OpenCliPlugin</include>
                                         <include>fun.fengwk.kkstudio.plugin.opencli.OpenCliSettings*</include>
                                         <include>fun.fengwk.kkstudio.plugin.opencli.OpenCliInstance</include>
+                                        <include>fun.fengwk.kkstudio.plugin.opencli.OpenCliConnectionCheck</include>
                                         <include>fun.fengwk.kkstudio.plugin.opencli.OpenCliAutoConfiguration</include>
                                         <include>fun.fengwk.kkstudio.plugin.opencli.GptImage2CanvasFunctionAdapter</include>
                                         <include>fun.fengwk.kkstudio.plugin.opencli.SeedanceCanvasFunctionAdapter</include>

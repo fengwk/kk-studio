@@ -14,15 +14,21 @@ import fun.fengwk.kkstudio.harness.common.io.DeadlineResponseBody;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialSnapshot;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableException;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialAccess;
+import fun.fengwk.kkstudio.plugin.opencli.OpenCliHubException.Kind;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
+import java.net.ConnectException;
+import java.net.NoRouteToHostException;
+import java.net.PortUnreachableException;
 import java.net.ProxySelector;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.net.UnknownHostException;
 import java.net.http.HttpClient;
+import java.net.http.HttpConnectTimeoutException;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.HttpTimeoutException;
@@ -238,6 +244,21 @@ public class OpenCliHubClient implements AutoCloseable {
     }
   }
 
+  /**
+   * 显式只读连接检查：用与其它端点完全相同的 scoped 凭据解析、Bearer、redirect NEVER、有界正文与 deadline 发送 {@code GET
+   * /api/resources/dates}，并要求返回合法信封且 {@code data} 是数组。
+   *
+   * <p>它不提交作业、不生成内容、也不写入任何远端状态；401/403 复用同一鉴权路径，只作废本次凭据。失败只抛出带 {@link OpenCliHubException#kind()}
+   * 的去敏异常，绝不回显凭据、私有身份、远端正文或 URL。
+   */
+  public void probeConnection() {
+    requireEnabled();
+    JsonNode data = sendEnvelope(request("/api/resources/dates").GET(), requestTimeout());
+    if (!(data instanceof ArrayNode)) {
+      throw malformed("resources dates data must be an array");
+    }
+  }
+
   /** 打开通过同源校验的产物响应流；调用方必须关闭返回值。 */
   public HubResourceStream openResource(ExecutionResource resource) {
     requireEnabled();
@@ -252,19 +273,21 @@ public class OpenCliHubClient implements AutoCloseable {
       try {
         contentLength = response.headers().firstValueAsLong("Content-Length").orElse(-1L);
       } catch (NumberFormatException exception) {
-        throw new OpenCliHubException("OpenCLI Hub resource Content-Length is invalid");
+        throw new OpenCliHubException(
+            Kind.PROTOCOL, "OpenCLI Hub resource Content-Length is invalid");
       }
       if (contentLength <= 0L) {
         throw new OpenCliHubException(
-            "OpenCLI Hub resource response requires positive Content-Length");
+            Kind.PROTOCOL, "OpenCLI Hub resource response requires positive Content-Length");
       }
       if (resource.size() > 0L && resource.size() != contentLength) {
         throw new OpenCliHubException(
-            "OpenCLI Hub resource Content-Length does not match metadata");
+            Kind.PROTOCOL, "OpenCLI Hub resource Content-Length does not match metadata");
       }
       String mediaType = response.headers().firstValue("Content-Type").orElse(resource.mimeType());
       if (mediaType == null || mediaType.isBlank()) {
-        throw new OpenCliHubException("OpenCLI Hub resource response requires Content-Type");
+        throw new OpenCliHubException(
+            Kind.PROTOCOL, "OpenCLI Hub resource response requires Content-Type");
       }
       body.expectLength(contentLength);
       return new HubResourceStream(body, contentLength, mediaType.strip());
@@ -293,19 +316,20 @@ public class OpenCliHubClient implements AutoCloseable {
     } catch (IllegalArgumentException exception) {
       log.warn(
           "failed to construct OpenCLI Hub request type={}", exception.getClass().getSimpleName());
-      throw new OpenCliHubException("OpenCLI Hub credential is invalid");
+      throw new OpenCliHubException(
+          Kind.CREDENTIAL_UNAVAILABLE, "OpenCLI Hub credential is invalid");
     }
     long deadline = System.nanoTime() + timeout.toNanos();
     HttpResponse<InputStream> response;
     try {
       response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
     } catch (IOException exception) {
-      throw hubFailure("OpenCLI Hub request failed", exception);
+      throw hubFailure(transportKind(exception), "OpenCLI Hub request failed", exception);
     } catch (IllegalArgumentException exception) {
-      throw new OpenCliHubException("OpenCLI Hub response headers are invalid");
+      throw new OpenCliHubException(Kind.INDETERMINATE, "OpenCLI Hub response headers are invalid");
     } catch (InterruptedException exception) {
       Thread.currentThread().interrupt();
-      throw hubFailure("OpenCLI Hub request interrupted", exception);
+      throw hubFailure(Kind.INDETERMINATE, "OpenCLI Hub request interrupted", exception);
     }
 
     InputStream stream = response.body();
@@ -375,14 +399,17 @@ public class OpenCliHubClient implements AutoCloseable {
       snapshot = credentials.resolve();
     } catch (PluginCredentialUnavailableException exception) {
       log.debug("OpenCLI Hub credential unavailable type={}", exception.getClass().getSimpleName());
-      throw new OpenCliHubException("OpenCLI Hub credential is not available");
+      throw new OpenCliHubException(
+          Kind.CREDENTIAL_UNAVAILABLE, "OpenCLI Hub credential is not available");
     } catch (RuntimeException exception) {
       log.warn(
           "OpenCLI Hub credential resolution failed type={}", exception.getClass().getSimpleName());
-      throw new OpenCliHubException("OpenCLI Hub credential is not available");
+      throw new OpenCliHubException(
+          Kind.CREDENTIAL_UNAVAILABLE, "OpenCLI Hub credential is not available");
     }
     if (snapshot == null || snapshot.payloadJson() == null || snapshot.payloadJson().isBlank()) {
-      throw new OpenCliHubException("OpenCLI Hub credential is not available");
+      throw new OpenCliHubException(
+          Kind.CREDENTIAL_UNAVAILABLE, "OpenCLI Hub credential is not available");
     }
     return snapshot;
   }
@@ -435,18 +462,19 @@ public class OpenCliHubClient implements AutoCloseable {
   }
 
   private static OpenCliHubException invalidCredential() {
-    return new OpenCliHubException("OpenCLI Hub credential payload is invalid");
+    return new OpenCliHubException(
+        Kind.CREDENTIAL_UNAVAILABLE, "OpenCLI Hub credential payload is invalid");
   }
 
   private String validateApiKey(String apiKey) {
     if (apiKey == null || apiKey.isEmpty()) {
-      throw new OpenCliHubException("OpenCLI Hub credential payload is invalid");
+      throw invalidCredential();
     }
     for (int i = 0; i < apiKey.length(); i++) {
       char c = apiKey.charAt(i);
       // HTTP header field-value 必须是 ASCII 可打印字符 (0x21 - 0x7E)，严禁换行、空格与控制符
       if (c <= 0x20 || c >= 0x7F) {
-        throw new OpenCliHubException("OpenCLI Hub credential payload is invalid");
+        throw invalidCredential();
       }
     }
     return apiKey;
@@ -505,19 +533,21 @@ public class OpenCliHubClient implements AutoCloseable {
 
   private HttpRequest.Builder request(String pathAndQuery) {
     if (origin == null) {
-      throw new OpenCliHubException("OpenCLI Hub baseUrl is not configured");
+      throw new OpenCliHubException(Kind.INDETERMINATE, "OpenCLI Hub baseUrl is not configured");
     }
     return HttpRequest.newBuilder(origin.resolve(pathAndQuery));
   }
 
   private OpenCliHubException httpError(int status, InputStream body) {
+    // 已确认收到 HTTP 响应：401/403 是远端确定性拒绝凭据，其它状态码不得被当作认证结论。
+    Kind kind = status == 401 || status == 403 ? Kind.AUTH_REJECTED : Kind.HTTP_STATUS;
     String message = "OpenCLI Hub HTTP " + status;
     try {
       drainErrorBody(body, settings.maxErrorResponseBytes());
     } catch (IOException exception) {
-      return hubFailure(message + " error response read failed", exception);
+      return hubFailure(kind, message + " error response read failed", exception);
     }
-    return new OpenCliHubException(message);
+    return new OpenCliHubException(kind, message);
   }
 
   private void drainErrorBody(InputStream input, int limit) throws IOException {
@@ -543,20 +573,21 @@ public class OpenCliHubClient implements AutoCloseable {
       int read;
       while ((read = input.read(buffer)) != -1) {
         if (total > limit - read) {
-          throw new OpenCliHubException("OpenCLI Hub " + description + " exceeds local limit");
+          throw new OpenCliHubException(
+              Kind.PROTOCOL, "OpenCLI Hub " + description + " exceeds local limit");
         }
         output.write(buffer, 0, read);
         total += read;
       }
       return output.toByteArray();
     } catch (IOException exception) {
-      throw hubFailure("failed to read OpenCLI Hub " + description, exception);
+      throw hubFailure(Kind.PROTOCOL, "failed to read OpenCLI Hub " + description, exception);
     }
   }
 
   private URI resolveResourceUri(String value) {
     if (origin == null) {
-      throw new OpenCliHubException("OpenCLI Hub baseUrl is not configured");
+      throw new OpenCliHubException(Kind.INDETERMINATE, "OpenCLI Hub baseUrl is not configured");
     }
     if (value == null || value.isBlank()) {
       throw malformed("execution resource has no contentUrl/downloadUrl");
@@ -795,7 +826,7 @@ public class OpenCliHubClient implements AutoCloseable {
 
   private void requireEnabled() {
     if (!settings.enabled()) {
-      throw new OpenCliHubException("OpenCLI Hub integration is disabled");
+      throw new OpenCliHubException(Kind.DISABLED, "OpenCLI Hub integration is disabled");
     }
   }
 
@@ -808,18 +839,33 @@ public class OpenCliHubClient implements AutoCloseable {
   }
 
   private static OpenCliHubException malformed(String message) {
-    return new OpenCliHubException("Malformed OpenCLI Hub response: " + message);
+    return new OpenCliHubException(Kind.PROTOCOL, "Malformed OpenCLI Hub response: " + message);
   }
 
   private static OpenCliHubException malformed(String message, Throwable cause) {
     log.warn(
         "Malformed OpenCLI Hub response: {} type={}", message, cause.getClass().getSimpleName());
-    return new OpenCliHubException("Malformed OpenCLI Hub response: " + message);
+    return new OpenCliHubException(Kind.PROTOCOL, "Malformed OpenCLI Hub response: " + message);
   }
 
-  private static OpenCliHubException hubFailure(String message, Throwable cause) {
+  private static OpenCliHubException hubFailure(Kind kind, String message, Throwable cause) {
     log.warn("OpenCLI Hub failure: {} type={}", message, cause.getClass().getSimpleName());
-    return new OpenCliHubException(message, timeoutCause(cause));
+    return new OpenCliHubException(kind, message, timeoutCause(cause));
+  }
+
+  /**
+   * IO 失败的最小分类：只有可证明「连接从未建立」的失败才是 {@link Kind#TRANSPORT}，其余无法区分的 IO 失败保持 {@link
+   * Kind#INDETERMINATE}，绝不把未知失败说成不可达。
+   */
+  private static Kind transportKind(IOException cause) {
+    if (cause instanceof HttpConnectTimeoutException
+        || cause instanceof ConnectException
+        || cause instanceof UnknownHostException
+        || cause instanceof NoRouteToHostException
+        || cause instanceof PortUnreachableException) {
+      return Kind.TRANSPORT;
+    }
+    return Kind.INDETERMINATE;
   }
 
   private static UncheckedIOException closeFailure(String description, IOException cause) {

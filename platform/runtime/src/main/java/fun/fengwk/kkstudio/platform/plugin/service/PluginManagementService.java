@@ -11,6 +11,8 @@ import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthHandler;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfigSchema;
+import fun.fengwk.kkstudio.platform.plugin.PluginConnectionCheck;
+import fun.fengwk.kkstudio.platform.plugin.PluginConnectionCheckResult;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialMaterial;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialStatus;
 import fun.fengwk.kkstudio.platform.plugin.PluginDescriptor;
@@ -29,6 +31,7 @@ import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRow;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginAuthKindDTO;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginAuthPrepareDTO;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginConfigurationDTO;
+import fun.fengwk.kkstudio.share.ai.plugin.PluginConnectionCheckDTO;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginDTO;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginSecretProjectionDTO;
 
@@ -247,6 +250,61 @@ public final class PluginManagementService {
     commitService.disconnect(pluginId, requireCatalog().epoch());
   }
 
+  /**
+   * 对已安装 Plugin 执行一次显式只读连接检查。
+   *
+   * <p>宿主持有一次当前 applied 租用，并在任何远端动作之前把请求坐标与 desired/applied 逐项比较：权威 epoch
+   * 尚未应用或与请求不一致、请求修订与该实例的已应用修订不一致 都是 409；未安装的 pluginId 是 404；已安装但实例未声明显式连接检查能力是 400。只有坐标全部命中才调用一次
+   * {@link PluginConnectionCheck#check()}，既不重新 configure，也不另建或关闭实例。
+   *
+   * <p>检查在数据库事务之外执行，租用由本方法在全部退出路径上释放；返回值只有类型化维度与本次已应用坐标，绝不投影异常文本、远端 URI、远端正文或凭据。
+   */
+  public PluginConnectionCheckDTO checkConnection(
+      String pluginId, long expectedEpoch, long expectedRevision) {
+    requirePlugin(pluginId);
+    PluginCatalogRuntime runtime = catalogRuntime.get();
+    try (PluginCatalogRuntime.Lease lease = runtime.acquireCurrent()) {
+      long appliedEpoch = lease.snapshot().epoch();
+      if (requireCatalog().epoch() != appliedEpoch) {
+        throw coordinateConflict(expectedEpoch, appliedEpoch);
+      }
+      if (expectedEpoch != appliedEpoch) {
+        throw coordinateConflict(expectedEpoch, appliedEpoch);
+      }
+      PluginCatalogSnapshot.ConfiguredPlugin configured =
+          appliedPlugin(lease.snapshot(), pluginId)
+              .orElseThrow(() -> coordinateConflict(expectedEpoch, appliedEpoch));
+      long appliedRevision = configured.config().revision();
+      if (appliedRevision <= 0L || expectedRevision != appliedRevision) {
+        throw new AiVersionConflictException(
+            RESOURCE, "revision=" + expectedRevision, "revision=" + appliedRevision);
+      }
+      PluginConnectionCheck connectionCheck =
+          configured
+              .instance()
+              .connectionCheck()
+              .orElseThrow(
+                  () ->
+                      new AiValidationException(
+                          RESOURCE, "plugin does not support connection checks"));
+      PluginConnectionCheckResult result = connectionCheck.check();
+      PluginConnectionCheckDTO dto = new PluginConnectionCheckDTO();
+      dto.setPluginId(pluginId);
+      dto.setAppliedEpoch(Long.toString(appliedEpoch));
+      dto.setAppliedRevision(Long.toString(appliedRevision));
+      dto.setCheckedAt(clock.instant());
+      dto.setReachability(result.reachability().name());
+      dto.setAuthentication(result.authentication().name());
+      dto.setBrowserSession(result.browserSession().name());
+      return dto;
+    }
+  }
+
+  /** 坐标冲突只陈述期望与实际 epoch，绝不回显请求正文或实例内部状态。 */
+  private static AiVersionConflictException coordinateConflict(long expected, long applied) {
+    return new AiVersionConflictException(RESOURCE, "epoch=" + expected, "epoch=" + applied);
+  }
+
   private StudioPlugin requirePlugin(String pluginId) {
     return registry.find(pluginId).orElseThrow(() -> new AiResourceNotFoundException(RESOURCE));
   }
@@ -331,6 +389,7 @@ public final class PluginManagementService {
     dto.setDesiredRevision(
         desiredEntry == null ? null : Long.toString(desiredEntry.configRevision()));
     dto.setAppliedRevision(appliedRevisionOf(applied, pluginId));
+    dto.setConnectionCheckSupported(connectionCheckSupported(applied, pluginId));
     dto.setApplicationError(applicationErrorOf(view));
     applyAppliedCapabilityNames(dto, applied, pluginId);
     return dto;
@@ -418,6 +477,13 @@ public final class PluginManagementService {
     return appliedPlugin(applied, pluginId)
         .map(configured -> Long.toString(configured.config().revision()))
         .orElse(null);
+  }
+
+  /** 显式连接检查能力取自本节点真正冻结的实例，绝不按 pluginId 硬编码；未应用时如实为 false。 */
+  private static boolean connectionCheckSupported(PluginCatalogSnapshot applied, String pluginId) {
+    return appliedPlugin(applied, pluginId)
+        .flatMap(configured -> configured.instance().connectionCheck())
+        .isPresent();
   }
 
   /**

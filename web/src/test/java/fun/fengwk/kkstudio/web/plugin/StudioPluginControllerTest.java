@@ -33,6 +33,7 @@ import fun.fengwk.kkstudio.platform.plugin.PluginKeyUnavailableException;
 import fun.fengwk.kkstudio.platform.plugin.service.PluginManagementService;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginAuthKindDTO;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginAuthPrepareDTO;
+import fun.fengwk.kkstudio.share.ai.plugin.PluginConnectionCheckDTO;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginDTO;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 
@@ -383,6 +384,111 @@ class StudioPluginControllerTest {
         .andExpect(content().string(not(containsString(marker))));
 
     verifyNoInteractions(pluginManagementService);
+  }
+
+  /** 测试意图：显式连接检查返回类型化维度、已应用坐标与 no-store，且绝不回显远端材料。 */
+  @Test
+  void checkConnectionReturnsTypedResultWithNoStore() throws Exception {
+    when(pluginManagementService.checkConnection("my-plugin", 14L, 8L))
+        .thenReturn(sampleCheckDTO("my-plugin"));
+
+    mockMvc
+        .perform(
+            post("/api/plugins/my-plugin/connection-check")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"expectedEpoch\":\"14\",\"expectedRevision\":\"8\"}"))
+        .andExpect(status().isOk())
+        .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
+        .andExpect(jsonPath("$.data.pluginId").value("my-plugin"))
+        .andExpect(jsonPath("$.data.appliedEpoch").value("14"))
+        .andExpect(jsonPath("$.data.appliedRevision").value("8"))
+        .andExpect(jsonPath("$.data.reachability").value("REACHABLE"))
+        .andExpect(jsonPath("$.data.authentication").value("ACCEPTED"))
+        .andExpect(jsonPath("$.data.browserSession").value("UNKNOWN"))
+        .andExpect(jsonPath("$.data.url").doesNotExist())
+        .andExpect(jsonPath("$.data.detail").doesNotExist())
+        .andExpect(content().string(not(containsString("https://"))));
+
+    verify(pluginManagementService).checkConnection("my-plugin", 14L, 8L);
+  }
+
+  /** 测试意图：尚未应用或坐标不匹配是 409，无能力是 400，未安装是 404，错误一律去敏。 */
+  @Test
+  void checkConnectionTranslatesDomainOutcomes() throws Exception {
+    String body = "{\"expectedEpoch\":\"14\",\"expectedRevision\":\"8\"}";
+
+    // 同一调用的连续三次失败：按顺序消费，避免重复 `when()` 在既有异常桩上再次求值。
+    when(pluginManagementService.checkConnection("my-plugin", 14L, 8L))
+        .thenThrow(new AiVersionConflictException("plugin", "epoch=14", "epoch=13"))
+        .thenThrow(new AiValidationException("plugin", "plugin does not support connection checks"))
+        .thenThrow(new AiResourceNotFoundException("plugin"));
+
+    mockMvc
+        .perform(
+            post("/api/plugins/my-plugin/connection-check")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("version_conflict"));
+
+    mockMvc
+        .perform(
+            post("/api/plugins/my-plugin/connection-check")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("validation"));
+
+    mockMvc
+        .perform(
+            post("/api/plugins/my-plugin/connection-check")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body))
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.code").value("resource_not_found"));
+  }
+
+  /** 测试意图：非字符串坐标、未知字段与缺失坐标都只在绑定期失败为 400，绝不进入服务层也绝不回显正文。 */
+  @Test
+  void nonStringConnectionCheckCoordinatesAreRejectedWithoutEchoingContent() throws Exception {
+    String marker = "CONNECTION_CHECK_COERCION_MARKER_556677";
+
+    mockMvc
+        .perform(
+            post("/api/plugins/my-plugin/connection-check")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"expectedEpoch\":14,\"expectedRevision\":\"8\"}"))
+        .andExpect(status().isBadRequest());
+
+    mockMvc
+        .perform(
+            post("/api/plugins/my-plugin/connection-check")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"expectedEpoch\":\"14\",\"expectedRevision\":\"8\",\"extra\":\"x\"}"))
+        .andExpect(status().isBadRequest())
+        .andExpect(content().string(not(containsString("extra"))));
+
+    mockMvc
+        .perform(
+            post("/api/plugins/my-plugin/connection-check")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"expectedEpoch\":\"" + marker + "\",\"expectedRevision\":\"8\"}"))
+        .andExpect(status().isBadRequest())
+        .andExpect(content().string(not(containsString(marker))));
+
+    verifyNoInteractions(pluginManagementService);
+  }
+
+  private static PluginConnectionCheckDTO sampleCheckDTO(String pluginId) {
+    PluginConnectionCheckDTO dto = new PluginConnectionCheckDTO();
+    dto.setPluginId(pluginId);
+    dto.setAppliedEpoch("14");
+    dto.setAppliedRevision("8");
+    dto.setCheckedAt(Instant.parse("2026-03-01T12:00:00Z"));
+    dto.setReachability("REACHABLE");
+    dto.setAuthentication("ACCEPTED");
+    dto.setBrowserSession("UNKNOWN");
+    return dto;
   }
 
   private static PluginDTO samplePluginDTO(String pluginId) {

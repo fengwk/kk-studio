@@ -50,6 +50,7 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionSubmitState;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionUnknownException;
 import fun.fengwk.kkstudio.harness.common.json.JsonValues;
 import fun.fengwk.kkstudio.harness.common.network.HttpProxySelector;
+import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialStatus;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableException;
 import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
@@ -76,6 +77,7 @@ import fun.fengwk.kkstudio.platform.plugin.service.PluginContextFactory;
 import fun.fengwk.kkstudio.platform.plugin.service.PluginManagementService;
 import fun.fengwk.kkstudio.platform.plugin.service.PluginSecretPatch;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginConfigurationDTO;
+import fun.fengwk.kkstudio.share.ai.plugin.PluginConnectionCheckDTO;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginDTO;
 import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
@@ -691,6 +693,81 @@ class OpenCliPluginPostgresIntegrationTest {
   }
 
   /**
+   * 显式只读连接检查的真实 PG 集成：坐标门禁、真实只读 GET 与凭据撤销后的类型化投影。
+   *
+   * <p>权威 epoch 已前进但本节点尚未应用、以及 epoch/revision 与请求不一致都是 409 且零 HTTP；坐标命中后只发出一条只读 GET
+   * /api/resources/dates 并携带当前 scoped 凭据；撤销认证密钥后本地凭据不可用，只投影为 NOT_CHECKED/UNAVAILABLE，
+   * 绝不出网，也绝不把远端故障说成缺少凭据。
+   */
+  @Test
+  void explicitConnectionCheckHonoursCoordinatesAndReadsOnlyResourceDates() throws IOException {
+    List<RecordedRequest> requests = new CopyOnWriteArrayList<>();
+    HttpServer server = createControlledServer(requests);
+    String baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
+    String apiKey = "synthetic-opencli-check-key-13579";
+    String valuesJson = "{\"enabled\":true,\"baseUrl\":\"" + baseUrl + "\"}";
+
+    createContextRunner()
+        .run(
+            context -> {
+              PluginCatalogRuntime runtime = context.getBean(PluginCatalogRuntime.class);
+              StudioPluginRegistry registry = context.getBean(StudioPluginRegistry.class);
+              PluginConfigurationCommitService commitService =
+                  createPendingCommitService(registry, runtime);
+              PluginManagementService management = createManagementService(registry, runtime);
+
+              commitService.configure(
+                  PLUGIN_ID, 1L, 1L, valuesJson, Map.of("apiKey", PluginSecretPatch.set(apiKey)));
+
+              // 权威 epoch 已到 2 但本节点尚未应用：pending 交付必须 409 且零 HTTP
+              assertThrows(
+                  AiVersionConflictException.class,
+                  () -> management.checkConnection(PLUGIN_ID, 2L, 2L));
+              assertEquals(0, requests.size(), "pending 配置不得触网");
+
+              runtime.refresh();
+              assertEquals(2L, readEpoch(jdbcClient));
+
+              // 坐标不匹配（旧 epoch / 错误 revision）同样 409 零 HTTP
+              assertThrows(
+                  AiVersionConflictException.class,
+                  () -> management.checkConnection(PLUGIN_ID, 2L, 1L));
+              assertThrows(
+                  AiVersionConflictException.class,
+                  () -> management.checkConnection(PLUGIN_ID, 1L, 1L));
+              assertEquals(0, requests.size(), "坐标不匹配不得触网");
+
+              // 坐标完全命中：真实只读 GET，携带同一次 scoped 凭据
+              PluginConnectionCheckDTO checked = management.checkConnection(PLUGIN_ID, 2L, 2L);
+              assertEquals(PLUGIN_ID, checked.getPluginId());
+              assertEquals("2", checked.getAppliedEpoch());
+              assertEquals("2", checked.getAppliedRevision());
+              assertEquals("REACHABLE", checked.getReachability());
+              assertEquals("ACCEPTED", checked.getAuthentication());
+              assertEquals("UNKNOWN", checked.getBrowserSession());
+              assertEquals(1, requests.size(), "一次检查只发出一条请求");
+              RecordedRequest probe = requests.get(0);
+              assertEquals("GET", probe.method());
+              assertEquals("/api/resources/dates", probe.path());
+              assertEquals("Bearer " + apiKey, probe.authorization());
+              assertTrue(
+                  requests.stream().noneMatch(request -> request.path().contains("/execute")),
+                  "连接检查绝不触发任何生成执行");
+
+              // 撤销认证密钥：本地凭据不可用是唯一的 UNAVAILABLE 语义，绝不触网
+              commitService.configure(
+                  PLUGIN_ID, 2L, 2L, valuesJson, Map.of("apiKey", PluginSecretPatch.clear()));
+              runtime.refresh();
+
+              PluginConnectionCheckDTO revoked = management.checkConnection(PLUGIN_ID, 3L, 3L);
+              assertEquals("NOT_CHECKED", revoked.getReachability());
+              assertEquals("UNAVAILABLE", revoked.getAuthentication());
+              assertEquals("UNKNOWN", revoked.getBrowserSession());
+              assertEquals(1, requests.size(), "撤销认证密钥后不得触网");
+            });
+  }
+
+  /**
    * 真实插件与真实管理服务到 HTTP 的共用 golden：GET /api/plugins/opencli 的响应体必须与已提交资源逐值一致。
    *
    * <p>配置只给出 baseUrl 与 seedance.workspaceId，其余取值由真实 schema 补齐，因此 golden 锁定的就是生产派生文本（默认值与
@@ -911,6 +988,25 @@ class OpenCliPluginPostgresIntegrationTest {
 
   private HttpServer createControlledServer(List<RecordedRequest> targetList) throws IOException {
     HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    // 显式连接检查使用的只读端点：只记录请求并返回合法信封，绝不产生任何生成副作用。
+    server.createContext(
+        "/api/resources/dates",
+        exchange -> {
+          String auth = exchange.getRequestHeaders().getFirst("Authorization");
+          String body =
+              new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+          targetList.add(
+              new RecordedRequest(
+                  exchange.getRequestMethod(), exchange.getRequestURI().getPath(), auth, body));
+          byte[] response =
+              ("{\"status\":200,\"code\":\"OK\",\"success\":true,\"data\":[\"2026-10-16\"]}")
+                  .getBytes(StandardCharsets.UTF_8);
+          exchange.getResponseHeaders().set("Content-Type", "application/json");
+          exchange.sendResponseHeaders(200, response.length);
+          try (OutputStream os = exchange.getResponseBody()) {
+            os.write(response);
+          }
+        });
     server.createContext(
         "/api/opencli/execute",
         exchange -> {
@@ -991,6 +1087,24 @@ class OpenCliPluginPostgresIntegrationTest {
         Clock.systemUTC(),
         () -> {},
         runtime::refresh);
+  }
+
+  /** 提交后只请求对账、不立即应用的提交服务：生产里提交只唤醒本节点对账，因此在 refresh 之前真实存在「已提交但未应用」的 pending 窗口。 */
+  private PluginConfigurationCommitService createPendingCommitService(
+      StudioPluginRegistry registry, PluginCatalogRuntime runtime) {
+    return new PluginConfigurationCommitService(
+        registry,
+        configurationRepository,
+        credentialRepository,
+        codec,
+        keyLoader,
+        new PluginContextFactory(credentialStore, () -> null),
+        List::of,
+        List::of,
+        transactionManager,
+        Clock.systemUTC(),
+        () -> {},
+        () -> {});
   }
 
   private static CanvasFunctionFrozenRun createTestRun(

@@ -41,6 +41,10 @@ class OpenCliInstanceTest {
     assertThatThrownBy(() -> adapters.add(mock(CanvasFunctionAdapter.class)))
         .isInstanceOf(UnsupportedOperationException.class);
 
+    // 显式只读连接检查能力声明在实例上，且复用同一 Client（不是按 pluginId 硬编码）
+    assertTrue(instance.connectionCheck().isPresent());
+    assertThat(instance.connectionCheck().orElseThrow()).isInstanceOf(OpenCliConnectionCheck.class);
+
     // 幂等释放
     instance.close();
     instance.close();
