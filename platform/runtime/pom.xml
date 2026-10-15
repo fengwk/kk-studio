@@ -280,7 +280,7 @@
                         </configuration>
                     </execution>
                     <execution>
-                        <!-- S3 epoch 应用与快照租用核心的定向覆盖率门禁：权威对账、原子发布与租用退役。 -->
+                        <!-- 权威 epoch 对账、原子发布与租用退役的类级覆盖率门禁。 -->
                         <id>check-plugin-epoch-runtime-class-line-coverage</id>
                         <phase>verify</phase>
                         <goals>
