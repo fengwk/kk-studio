@@ -5,12 +5,22 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonTypeInfo;
+import com.fasterxml.jackson.annotation.JsonUnwrapped;
 import com.fasterxml.jackson.annotation.JsonValue;
 import org.junit.jupiter.api.Test;
+import tools.jackson.core.JsonGenerator;
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.SerializationContext;
+import tools.jackson.databind.ValueSerializer;
+import tools.jackson.databind.annotation.JsonSerialize;
+import tools.jackson.databind.cfg.DateTimeFeature;
 import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.module.SimpleModule;
+import tools.jackson.databind.ser.std.ToStringSerializer;
 
 import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
 import fun.fengwk.kkstudio.web.generated.StableTsContractGenerator.ContractItem;
@@ -24,11 +34,20 @@ import java.util.Map;
 
 /**
  * 生成器通用分支的实测覆盖：用真实 HTTP mapper 的正反序列化行为验证 Long/string、Instant 秒、NON_NULL、ALWAYS 必要
- * null、方向/WRITE_ONLY、枚举 {@code @JsonValue}、集合/Map，并确认未知类型固定失败。只覆盖本范围真正需要的分支。
+ * null、方向/WRITE_ONLY、枚举 {@code @JsonValue}、集合/Map，并确认未知类型与未支持的定制形态固定失败。只覆盖本范围真正 需要的分支。
  */
 class StableTsContractGeneratorTest {
 
   private static final JsonMapper MAPPER = StrictHttpJsonMapperTestSupport.get();
+
+  /** 把 String 属性写成 number 的定制序列化器：wire 与 JavaType 不再一致，生成器必须拒绝。 */
+  static final class NameAsLengthSerializer extends ValueSerializer<String> {
+
+    @Override
+    public void serialize(String value, JsonGenerator gen, SerializationContext ctxt) {
+      gen.writeNumber(value.length());
+    }
+  }
 
   /** fixture 枚举：wire 值是小驼峰而非 name()，用来证明生成器走 mapper 序列化。 */
   enum FixtureKind {
@@ -98,6 +117,78 @@ class StableTsContractGeneratorTest {
   }
 
   record UnsupportedTypeFixture(Object payload) {}
+
+  /** 属性级定制序列化：String 被写成 number，生成器必须拒绝而不是当 string。 */
+  record CustomSerializerFixture(
+      @JsonSerialize(using = NameAsLengthSerializer.class) String name) {}
+
+  /** 属性级 {@code @JsonFormat} 形态：String 被写成 number，当前不支持，必须拒绝。 */
+  record JsonFormatShapeFixture(@JsonFormat(shape = JsonFormat.Shape.NUMBER) String name) {}
+
+  /** 属性级日期时间格式化：当前不支持，必须拒绝。 */
+  record JsonFormatPatternFixture(@JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss'Z'") Instant at) {}
+
+  /** class 级 ALWAYS：wire 上键必然存在且可为 null，真实 mapper 已验证。 */
+  @JsonInclude(JsonInclude.Include.ALWAYS)
+  record ClassLevelAlwaysFixture(String id) {}
+
+  /** class 级 NON_EMPTY：当前不支持，必须拒绝而不是被当成 NON_NULL。 */
+  @JsonInclude(JsonInclude.Include.NON_EMPTY)
+  record ClassLevelNonEmptyFixture(String id) {}
+
+  /** class 级定制序列化：会改变整条 wire，当前不支持，必须拒绝。 */
+  @JsonSerialize(using = NameAsLengthSerializer.class)
+  record ClassLevelSerializerFixture(String name) {}
+
+  /** class 级类型信息：会新增类型判别键，当前不支持，必须拒绝。 */
+  @JsonTypeInfo(use = JsonTypeInfo.Id.NAME)
+  record TypeInfoFixture(String id) {}
+
+  /** class 级 {@code @JsonValue}：整个对象退化成标量，当前不支持，必须拒绝。 */
+  record JsonValueFixture(String id) {
+
+    @JsonValue
+    public String wire() {
+      return id;
+    }
+  }
+
+  /** 属性级 {@code @JsonUnwrapped}：会打平嵌套结构，当前不支持，必须拒绝。 */
+  record UnwrappedFixture(@JsonUnwrapped NestedFixture nested) {}
+
+  /** wire 值含换行：无法内联成单引号 TS 字面量，必须固定失败。 */
+  enum UnsafeWireKind {
+    NEWLINE("null\nvalue"),
+    LINE_SEPARATOR("a\u2028b");
+
+    private final String wire;
+
+    UnsafeWireKind(String wire) {
+      this.wire = wire;
+    }
+
+    @JsonValue
+    public String wire() {
+      return wire;
+    }
+  }
+
+  /** wire 值含单引号与反斜线：必须被正确转义成合法 TS 字面量。 */
+  enum EscapedWireKind {
+    QUOTED("it's"),
+    BACKSLASH("a\\b");
+
+    private final String wire;
+
+    EscapedWireKind(String wire) {
+      this.wire = wire;
+    }
+
+    @JsonValue
+    public String wire() {
+      return wire;
+    }
+  }
 
   /** 多分支 fixture：name 是 NON_NULL 可省略，always 是 ALWAYS 必要 null，secret 是 WRITE_ONLY。 */
   record SampleFixture(
@@ -378,5 +469,210 @@ class StableTsContractGeneratorTest {
     IllegalStateException failure =
         assertThrows(IllegalStateException.class, () -> generator(List.of(unknown)).generate());
     assertTrue(failure.getMessage().contains("unsupported contract item"), failure.getMessage());
+  }
+
+  /** 测试意图：去掉 Long→String 的 mapper 与生成器的标量预设不再一致，构造时必须固定失败。 */
+  @Test
+  void mapperWithoutLongToStringFailsClosed() {
+    JsonMapper drifted =
+        JsonMapper.builder().enable(DateTimeFeature.WRITE_DATES_AS_TIMESTAMPS).build();
+    assertEquals("1", drifted.writeValueAsString(1L), "fixture mapper must write long as a number");
+
+    IllegalStateException failure =
+        assertThrows(IllegalStateException.class, () -> new StableTsContractGenerator(drifted));
+
+    assertTrue(failure.getMessage().contains("wire profile drifted"), failure.getMessage());
+    assertTrue(
+        failure.getMessage().contains("Long -> number, expected string"), failure.getMessage());
+    assertTrue(
+        failure.getMessage().contains("long -> number, expected string"), failure.getMessage());
+  }
+
+  /** 测试意图：Instant 变成 ISO 文本（非 epoch 秒 number）时，构造必须固定失败。 */
+  @Test
+  void mapperWithIsoInstantFailsClosed() {
+    SimpleModule longToString = new SimpleModule("LongToStringModule");
+    longToString.addSerializer(Long.class, new ToStringSerializer(Long.class));
+    longToString.addSerializer(Long.TYPE, new ToStringSerializer(Long.TYPE));
+    JsonMapper drifted = JsonMapper.builder().addModule(longToString).build();
+    assertTrue(
+        drifted.writeValueAsString(Instant.ofEpochSecond(1L)).startsWith("\""),
+        "fixture mapper must write Instant as ISO text");
+
+    IllegalStateException failure =
+        assertThrows(IllegalStateException.class, () -> new StableTsContractGenerator(drifted));
+
+    assertTrue(failure.getMessage().contains("wire profile drifted"), failure.getMessage());
+    assertTrue(
+        failure.getMessage().contains("Instant -> string, expected number"), failure.getMessage());
+  }
+
+  /** 测试意图：属性级定制序列化把 String 写成 number 时必须失败，而不是静默按 JavaType 当 string。 */
+  @Test
+  void propertyLevelCustomSerializerFailsClosed() {
+    IllegalStateException failure =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                generator(
+                        List.of(
+                            new ObjectSpec(
+                                "CustomSerializerFixture",
+                                CustomSerializerFixture.class,
+                                Direction.RESPONSE,
+                                List.of("name"))))
+                    .generate());
+    assertTrue(failure.getMessage().contains("custom @JsonSerialize"), failure.getMessage());
+    assertTrue(failure.getMessage().contains("CustomSerializerFixture.name"), failure.getMessage());
+  }
+
+  /** 测试意图：属性级 @JsonFormat 的 shape/日期时间定制当前不支持，必须失败。 */
+  @Test
+  void propertyLevelJsonFormatFailsClosed() {
+    IllegalStateException shapeFailure =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                generator(
+                        List.of(
+                            new ObjectSpec(
+                                "JsonFormatShapeFixture",
+                                JsonFormatShapeFixture.class,
+                                Direction.RESPONSE,
+                                List.of("name"))))
+                    .generate());
+    assertTrue(
+        shapeFailure.getMessage().contains("@JsonFormat shape/date customization"),
+        shapeFailure.getMessage());
+
+    IllegalStateException patternFailure =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                generator(
+                        List.of(
+                            new ObjectSpec(
+                                "JsonFormatPatternFixture",
+                                JsonFormatPatternFixture.class,
+                                Direction.RESPONSE,
+                                List.of("at"))))
+                    .generate());
+    assertTrue(
+        patternFailure.getMessage().contains("@JsonFormat shape/date customization"),
+        patternFailure.getMessage());
+  }
+
+  /** 测试意图：class 级 ALWAYS 与真实 wire 一致——键必然出现且可为 null。 */
+  @Test
+  void classLevelAlwaysMatchesTheRealWire() {
+    String ts =
+        generator(
+                List.of(
+                    new ObjectSpec(
+                        "ClassLevelAlwaysFixture",
+                        ClassLevelAlwaysFixture.class,
+                        Direction.RESPONSE,
+                        List.of())))
+            .generate();
+
+    assertTrue(ts.contains("  id: string | null\n"), ts);
+    JsonNode wire = MAPPER.readTree(MAPPER.writeValueAsString(new ClassLevelAlwaysFixture(null)));
+    assertTrue(wire.has("id"), "class-level ALWAYS key must always be present");
+    assertTrue(wire.get("id").isNull());
+  }
+
+  /** 测试意图：class 级非默认且未支持的 @JsonInclude 形态必须失败，不能被当成 NON_NULL。 */
+  @Test
+  void unsupportedClassLevelJsonIncludeFailsClosed() {
+    IllegalStateException failure =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                generator(
+                        List.of(
+                            new ObjectSpec(
+                                "ClassLevelNonEmptyFixture",
+                                ClassLevelNonEmptyFixture.class,
+                                Direction.RESPONSE,
+                                List.of())))
+                    .generate());
+    assertTrue(failure.getMessage().contains("unsupported @JsonInclude"), failure.getMessage());
+    assertTrue(failure.getMessage().contains("NON_EMPTY"), failure.getMessage());
+  }
+
+  /** 测试意图：class 级定制序列化/@JsonTypeInfo/@JsonValue 改变整条 wire，必须失败。 */
+  @Test
+  void unsupportedRootShapesFailClosed() {
+    assertRootFailure(
+        "ClassLevelSerializerFixture",
+        ClassLevelSerializerFixture.class,
+        "class-level @JsonSerialize");
+    assertRootFailure("TypeInfoFixture", TypeInfoFixture.class, "@JsonTypeInfo");
+    assertRootFailure("JsonValueFixture", JsonValueFixture.class, "@JsonValue");
+  }
+
+  /** 测试意图：属性级 @JsonUnwrapped 会打平嵌套结构，必须失败。 */
+  @Test
+  void unwrappedPropertyFailsClosed() {
+    IllegalStateException failure =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                generator(
+                        List.of(
+                            new EnumSpec("FixtureKind", "FIXTURE_KIND_VALUES", FixtureKind.class),
+                            new ObjectSpec(
+                                "NestedFixture",
+                                NestedFixture.class,
+                                Direction.RESPONSE,
+                                List.of("id")),
+                            new ObjectSpec(
+                                "UnwrappedFixture",
+                                UnwrappedFixture.class,
+                                Direction.RESPONSE,
+                                List.of("nested"))))
+                    .generate());
+    assertTrue(failure.getMessage().contains("@JsonUnwrapped"), failure.getMessage());
+    assertTrue(failure.getMessage().contains("UnwrappedFixture.nested"), failure.getMessage());
+  }
+
+  /** 测试意图：enum wire 值含换行/行分隔符时无法内联成 TS 字面量，必须失败并指出字符码点。 */
+  @Test
+  void enumWireValuesWithUnsupportedCharactersFailClosed() {
+    IllegalStateException failure =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                generator(
+                        List.of(
+                            new EnumSpec(
+                                "UnsafeWireKind", "UNSAFE_WIRE_KIND_VALUES", UnsafeWireKind.class)))
+                    .generate());
+
+    assertTrue(failure.getMessage().contains("unsupported character U+000A"), failure.getMessage());
+  }
+
+  /** 测试意图：单引号与反斜线必须被正确转义，生成合法 TS 字面量。 */
+  @Test
+  void enumWireValuesWithQuotesAndBackslashesAreEscaped() {
+    String ts =
+        generator(
+                List.of(
+                    new EnumSpec(
+                        "EscapedWireKind", "ESCAPED_WIRE_KIND_VALUES", EscapedWireKind.class)))
+            .generate();
+
+    assertTrue(ts.contains("| 'it\\'s'\n"), ts);
+    assertTrue(ts.contains("| 'a\\\\b'\n"), ts);
+  }
+
+  private static void assertRootFailure(String tsName, Class<?> javaType, String expectedMessage) {
+    IllegalStateException failure =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                generator(List.of(new ObjectSpec(tsName, javaType, Direction.RESPONSE, List.of())))
+                    .generate());
+    assertTrue(failure.getMessage().contains(expectedMessage), failure.getMessage());
   }
 }
