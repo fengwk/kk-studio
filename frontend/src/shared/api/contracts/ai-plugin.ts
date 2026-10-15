@@ -1,4 +1,5 @@
 import type { InstantTimestamp } from '@/shared/api/contracts/base'
+import type { PluginConnectionCheckDTO } from '@/shared/api/generated/stable-contracts'
 
 /**
  * Plugin 认证交互类型：封闭 union，只有 DEEP_LINK 与 STATIC_KEY。
@@ -100,44 +101,32 @@ export interface PluginConfigurationUpdateRequestDTO {
   secretPatch?: Record<string, PluginSecretPatchDTO>
 }
 
-/**
- * 显式只读连接检查的请求：只携带调用方所见已应用坐标，不携带远端地址、路径或凭据。
+/*
+ * 显式只读连接检查的 wire 契约由真实 Boot4/Jackson3 mapper 生成（见
+ * `@/shared/api/generated/stable-contracts`），此处只做重新导出，避免再手抄一份类型或 enum 字面量。
  */
-export interface PluginConnectionCheckRequestDTO {
-  expectedEpoch: string
-  expectedRevision: string
-}
+export type {
+  PluginConnectionAuthentication,
+  PluginConnectionBrowserSession,
+  PluginConnectionCheckDTO,
+  PluginConnectionCheckRequestDTO,
+  PluginConnectionReachability,
+} from '@/shared/api/generated/stable-contracts'
 
-/** 网络可达性：未发出请求时是 NOT_CHECKED，无法证明时为 INDETERMINATE。 */
-export type PluginConnectionReachability =
-  | 'REACHABLE'
-  | 'UNREACHABLE'
-  | 'NOT_CHECKED'
-  | 'INDETERMINATE'
-
-/**
- * 本次凭据的认证结论：只有远端确定性拒绝才是 REJECTED，只有成功合法响应才是 ACCEPTED；
- * UNAVAILABLE 仅表示本地没有可用凭据，其它故障一律 NOT_CHECKED。
- */
-export type PluginConnectionAuthentication =
-  | 'ACCEPTED'
-  | 'REJECTED'
-  | 'UNAVAILABLE'
-  | 'NOT_CHECKED'
-
-/** 浏览器登录会话：本能力不核验浏览器登录态，当前唯一合法值是 UNKNOWN。 */
-export type PluginConnectionBrowserSession = 'UNKNOWN'
+/** 生成契约里的 enum wire 值数组：严格解码器直接复用，不再重列字面量。 */
+export {
+  PLUGIN_CONNECTION_AUTHENTICATION_VALUES,
+  PLUGIN_CONNECTION_BROWSER_SESSION_VALUES,
+  PLUGIN_CONNECTION_REACHABILITY_VALUES,
+} from '@/shared/api/generated/stable-contracts'
 
 /**
- * 显式连接检查的结果：安装身份、本次检查依据的已应用坐标、检查时刻与三个类型化维度。
- * 检查时刻必须存在，不含异常文本、远端地址、远端正文或任何凭据。
+ * 严格解码后的连接检查投影。
+ *
+ * wire 上的 `checkedAt` 是 epoch 秒 number（生成契约 `PluginConnectionCheckDTO` 已如实声明），但严格解码器同时接受可
+ * 解析的 ISO 文本并原样保留，所以解码结果的 `checkedAt` 是 `number | string`；它是独立的 decoded/domain 时间类型，
+ * 绝不冒充当前后端序列化形态。
  */
-export interface PluginConnectionCheckDTO {
-  pluginId: string
-  appliedEpoch: string
-  appliedRevision: string
+export type PluginConnectionCheckResult = Omit<PluginConnectionCheckDTO, 'checkedAt'> & {
   checkedAt: Exclude<InstantTimestamp, null>
-  reachability: PluginConnectionReachability
-  authentication: PluginConnectionAuthentication
-  browserSession: PluginConnectionBrowserSession
 }
