@@ -227,8 +227,10 @@ manifest 保存代码版本、Schema 与实际能力指纹，全局指纹覆盖�
 指纹只由冻结定义派生，不序列化运行实例。
 
 重启必须按持久版本恢复：安装集合、历史引用、代码/Schema 身份及两域能力指纹均须一致，
-缺失或漂移直接启动失败，不采用新 defaults 替换旧配置。当前没有公开配置写入接口，
-也没有运行期目录切换；数据库提交提示不代表所有节点已经应用。
+缺失或漂移直接启动失败，不采用新 defaults 替换旧配置。
+配置写入接口以 expectedEpoch 和 expectedRevision 做 CAS，普通值、秘密变更及 manifest
+在同一事务中提交。当前没有运行期目录切换，保存后通过 desired/applied 坐标和
+applicationError 报告本节点待应用状态；数据库提交提示不代表所有节点已经应用。
 
 ### 新增 Plugin
 
@@ -240,19 +242,24 @@ manifest 保存代码版本、Schema 与实际能力指纹，全局指纹覆盖�
 声明真实 side effect、timeout 和 EnvironmentSupport。最后在 Web 中选择 runtime 依赖，
 验证 bean 装配、工具 schema、去敏、失败/取消/超时与资源预算。
 
-管理协议为 `/api/plugins` 的列表/详情与 `auth/prepare`、`auth/complete`、删除 auth。
-当前认证交互是封闭的 `DEEP_LINK`，请求分别为 `{region}`、`{callbackUrl}`，
-响应 no-store。新增交互需同步 Share DTO、静态前端和测试；管理 UI 见
+管理协议为 `/api/plugins` 的列表/详情、配置写入和认证操作。
+配置 Schema 与安全秘密投影由插件声明派生；秘密仅支持 KEEP、SET、CLEAR，不回读明文。
+无认证插件不提供登录操作；STATIC_KEY 通过配置接口更新密钥。
+DEEP_LINK 的 prepare 请求为 `{region}`，返回 loginUrl 与单次 authAttemptId；
+complete 请求为 `{authAttemptId, callbackUrl}`，仅消费仍匹配当前配置及认证身份的未过期尝试。
+认证响应 no-store。新增交互需同步 Share DTO、前端和测试；管理 UI 见
 [Plugin 设置](frontend.md#plugin-设置)。
 
 ### Plugin credential
 
 `PluginCredentialStore` 用部署级 owner-only 32-byte key 做 AES-256-GCM 加密，
-每次写入新 nonce，AAD 绑定 pluginId、region、认证代际和格式版本（当前 fmt2）。
-每次人工保存（登录/重新登录）都会换发新的认证代际，刷新只沿用当前行代际；
+每次写入新 nonce，AAD 绑定 pluginId、认证代际、上下文指纹、region 的存在性和值及格式版本（当前 fmt2）。
+登录、秘密 SET/CLEAR 和认证目标变更会换发认证代际；普通配置 KEEP 不改凭据行，
+刷新只沿用当前行代际。静态密钥没有 region、过期或刷新时刻，不参与刷新扫描。
 代际随之写入快照、加密 AAD 与所有 CAS 条件，因此断连删除后按 version 0 重建的行
 不会被旧调用或迟到 finalize 误伤。主密钥留在部署文件，
-Plugin 只通过 `PluginCredentialAccess` 获得本次调用快照，不持有完整 Store。
+Plugin 只通过绑定认证引用的 `PluginCredentialAccess` 获得本次请求快照，不持有完整 Store。
+每次解析都回读权威 manifest 并核对凭据行身份，旧代际或旧上下文不能取得新秘密。
 key 缺失或解密失败为 KEY_UNAVAILABLE，读路径不返回未认证载荷；主密钥不可用时禁止写入。
 Plugin fmt1 密文不再兼容读取，已有凭据须在备份并批准迁移后离线转换。
 Skill 令牌共用 AES-GCM 与 AAD 编码原语，但独立保持既有 fmt1 与 Package 身份绑定，不引入插件认证代际。

@@ -4,14 +4,23 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.postgresql.Driver;
+import org.springframework.beans.factory.support.StaticListableBeanFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
@@ -20,9 +29,11 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.JsonNode;
 
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
 import fun.fengwk.kkstudio.harness.common.json.JsonValues;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.common.schema.StringSchema;
+import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
@@ -31,6 +42,7 @@ import fun.fengwk.kkstudio.platform.plugin.PluginAuthHandler;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfigSchema;
+import fun.fengwk.kkstudio.platform.plugin.PluginConfiguration;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfigurationState;
 import fun.fengwk.kkstudio.platform.plugin.PluginContext;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialIntegrityException;
@@ -53,6 +65,7 @@ import fun.fengwk.kkstudio.platform.plugin.credential.DatabasePluginCredentialSt
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialCodec;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialKeyLoader;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialReference;
+import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialRefreshDispatcher;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRow;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginCredentialRepository;
@@ -386,6 +399,124 @@ class PluginConfigurationCommitServicePostgresIntegrationTest {
         "a keep-only commit reuses the authoritative scoped access for an unchanged row");
   }
 
+  /** 认证目标变化时 KEEP 保留值，但必须绑定新代际与新上下文，旧引用不能取得新秘密。 */
+  @Test
+  void contextChangeReencryptsKeptSecretsForTheNewReference() {
+    seedStaticCredential(STATIC_PAYLOAD_SECRET);
+    PluginCredentialRow before = credentialRepository.find(STATIC_PLUGIN_ID).orElseThrow();
+    PluginCredentialReference oldReference = currentReference(STATIC_PLUGIN_ID);
+    PluginCatalogManifest.Entry unchanged =
+        configurationRepository.readCatalog().manifest().plugins().get(DEEP_LINK_PLUGIN_ID);
+    String values = "{\"endpoint\":\"https://other.example.com\",\"label\":\"default\"}";
+
+    commitService.configure(
+        STATIC_PLUGIN_ID, 1L, 1L, values, Map.of("apiKey", PluginSecretPatch.keep()));
+
+    PluginCredentialRow after = credentialRepository.find(STATIC_PLUGIN_ID).orElseThrow();
+    assertNotEquals(before.authGeneration(), after.authGeneration());
+    assertNotEquals(before.contextFingerprint(), after.contextFingerprint());
+    assertEquals(before.version() + 1, after.version());
+    assertFalse(Arrays.equals(before.encryptedPayload(), after.encryptedPayload()));
+    assertEquals(
+        "{\"apiKey\":\"" + STATIC_PAYLOAD_SECRET + "\"}",
+        credentialStore.resolve(currentReference(STATIC_PLUGIN_ID)).payloadJson());
+    assertThrows(
+        PluginCredentialUnavailableException.class, () -> credentialStore.resolve(oldReference));
+    PluginConfigurationRow history =
+        configurationRepository.readConfiguration(STATIC_PLUGIN_ID, 2L).orElseThrow();
+    assertEquals(after.authGeneration(), history.authGeneration());
+    assertEquals(after.contextFingerprint(), history.contextFingerprint());
+    assertEquals(List.of("apiKey"), history.configuredSecretFields());
+    assertEquals(values, history.valuesJson());
+    assertEquals(
+        unchanged,
+        configurationRepository.readCatalog().manifest().plugins().get(DEEP_LINK_PLUGIN_ID));
+    assertEquals(1, dispatcherWakes.get());
+  }
+
+  /** 部分 SET/CLEAR 只改变指定字段，显式 KEEP 与省略的已录入字段保留原值。 */
+  @Test
+  void partialSecretChangesPreserveTheKeptFields() {
+    seedStaticCredential(STATIC_PAYLOAD_SECRET);
+
+    commitService.configure(
+        STATIC_PLUGIN_ID,
+        1L,
+        1L,
+        BOOTSTRAP_VALUES,
+        Map.of(
+            "apiKey", PluginSecretPatch.keep(),
+            "apiSecret", PluginSecretPatch.set(FRESH_PAYLOAD_SECRET)));
+    JsonNode extended =
+        JsonValues.readTree(
+            credentialStore.resolve(currentReference(STATIC_PLUGIN_ID)).payloadJson());
+    assertEquals(STATIC_PAYLOAD_SECRET, extended.get("apiKey").asString());
+    assertEquals(FRESH_PAYLOAD_SECRET, extended.get("apiSecret").asString());
+    assertEquals(2, extended.size());
+
+    commitService.configure(
+        STATIC_PLUGIN_ID, 2L, 2L, BOOTSTRAP_VALUES, Map.of("apiSecret", PluginSecretPatch.clear()));
+    JsonNode retained =
+        JsonValues.readTree(
+            credentialStore.resolve(currentReference(STATIC_PLUGIN_ID)).payloadJson());
+    assertEquals(STATIC_PAYLOAD_SECRET, retained.get("apiKey").asString());
+    assertEquals(1, retained.size());
+    assertEquals(
+        List.of("apiKey"),
+        configurationRepository
+            .readConfiguration(STATIC_PLUGIN_ID, 3L)
+            .orElseThrow()
+            .configuredSecretFields());
+  }
+
+  @Test
+  void secretReplacementConflictRollsBackCatalogAndHistory() {
+    assertCredentialVersionConflict(PluginSecretPatch.set(FRESH_PAYLOAD_SECRET));
+  }
+
+  @Test
+  void secretRemovalConflictRollsBackCatalogAndHistory() {
+    assertCredentialVersionConflict(PluginSecretPatch.clear());
+  }
+
+  /** 候选构建期间另一请求作废凭据：真实行 CAS 冲突必须回滚本次目录与历史，但保留竞争者的写入。 */
+  private void assertCredentialVersionConflict(PluginSecretPatch patch) {
+    seedStaticCredential(STATIC_PAYLOAD_SECRET);
+    PluginCredentialRow baseline = credentialRepository.find(STATIC_PLUGIN_ID).orElseThrow();
+    PluginInstance candidate = mock(PluginInstance.class);
+    when(candidate.harnessContributors()).thenReturn(List.of());
+    when(candidate.canvasAdapters()).thenReturn(List.of());
+    staticPlugin.candidateInstance = candidate;
+    staticPlugin.beforeConfigure =
+        () ->
+            assertTrue(
+                credentialRepository.rejectUsedCredential(
+                    STATIC_PLUGIN_ID,
+                    baseline.authGeneration(),
+                    baseline.contextFingerprint(),
+                    baseline.version(),
+                    baseline.encryptedPayload(),
+                    "provider rejected the stored static key",
+                    now));
+
+    assertThrows(
+        AiVersionConflictException.class,
+        () ->
+            commitService.configure(
+                STATIC_PLUGIN_ID, 1L, 1L, BOOTSTRAP_VALUES, Map.of("apiKey", patch)));
+
+    PluginCredentialRow competitor = credentialRepository.find(STATIC_PLUGIN_ID).orElseThrow();
+    assertEquals(PluginCredentialStatus.REAUTH_REQUIRED, competitor.status());
+    assertEquals(baseline.version() + 1, competitor.version());
+    assertEquals(baseline.authGeneration(), competitor.authGeneration());
+    assertTrue(Arrays.equals(baseline.encryptedPayload(), competitor.encryptedPayload()));
+    assertEquals(1L, configurationRepository.readCatalog().epoch());
+    assertEquals(2, countHistoryRows());
+    assertTrue(configurationRepository.readConfiguration(STATIC_PLUGIN_ID, 2L).isEmpty());
+    assertEquals(0, dispatcherWakes.get());
+    verify(candidate, times(1)).close();
+  }
+
   /** 第二次 SET 在既有行上整体替换：推进代际、改写密文，旧引用随即失效。 */
   @Test
   void setReplacesTheExistingRowAndInvalidatesTheOldReference() {
@@ -511,6 +642,108 @@ class PluginConfigurationCommitServicePostgresIntegrationTest {
   void completeAuthWritesInteractiveCredentialRow() {
     loginDeepLinkPlugin();
     assertEquals(1, dispatcherWakes.get());
+  }
+
+  /** 生产装配的回调在外层事务提交后只唤醒一次，不能再次注册进已经遍历的提交回调列表。 */
+  @Test
+  void productionWiringWakesDispatcherOnceAfterOuterCommit() {
+    PluginCredentialRefreshDispatcher dispatcher = mock(PluginCredentialRefreshDispatcher.class);
+    PluginConfigurationCommitService wired = wiredCommitService(dispatcher);
+
+    new TransactionTemplate(transactionManager)
+        .executeWithoutResult(
+            status -> {
+              wired.configure(
+                  STATIC_PLUGIN_ID,
+                  1L,
+                  1L,
+                  BOOTSTRAP_VALUES,
+                  Map.of("apiKey", PluginSecretPatch.set(STATIC_PAYLOAD_SECRET)));
+              verifyNoInteractions(dispatcher);
+            });
+
+    verify(dispatcher, times(1)).wake();
+    assertEquals(2L, configurationRepository.readCatalog().epoch());
+    assertTrue(credentialRepository.find(STATIC_PLUGIN_ID).isPresent());
+  }
+
+  /** 外层事务回滚时，秘密、目录与刷新唤醒都不能留下部分成功。 */
+  @Test
+  void productionWiringNeverWakesDispatcherAfterRollback() {
+    PluginCredentialRefreshDispatcher dispatcher = mock(PluginCredentialRefreshDispatcher.class);
+    PluginConfigurationCommitService wired = wiredCommitService(dispatcher);
+
+    new TransactionTemplate(transactionManager)
+        .executeWithoutResult(
+            status -> {
+              wired.configure(
+                  STATIC_PLUGIN_ID,
+                  1L,
+                  1L,
+                  BOOTSTRAP_VALUES,
+                  Map.of("apiKey", PluginSecretPatch.set(STATIC_PAYLOAD_SECRET)));
+              verifyNoInteractions(dispatcher);
+              status.setRollbackOnly();
+            });
+
+    verifyNoInteractions(dispatcher);
+    assertEquals(1L, configurationRepository.readCatalog().epoch());
+    assertTrue(credentialRepository.find(STATIC_PLUGIN_ID).isEmpty());
+    assertEquals(2, countHistoryRows());
+  }
+
+  /** 提交与候选回收同时出现致命错误时仍释放实例，原始致命错误不能被回收错误替代。 */
+  @Test
+  void candidateCleanupPreservesThePrimaryFatalError() {
+    AssertionError primary = new AssertionError("transaction fatal error");
+    AssertionError cleanup = new AssertionError("instance cleanup fatal error");
+    PlatformTransactionManager failingTransactions = mock(PlatformTransactionManager.class);
+    when(failingTransactions.getTransaction(any())).thenThrow(primary);
+    PluginInstance instance = mock(PluginInstance.class);
+    when(instance.harnessContributors()).thenReturn(List.of());
+    when(instance.canvasAdapters()).thenReturn(List.of());
+    doThrow(cleanup).when(instance).close();
+    staticPlugin.candidateInstance = instance;
+    PluginConfigurationCommitService failingCommit =
+        new PluginConfigurationCommitService(
+            registry,
+            configurationRepository,
+            credentialRepository,
+            codec,
+            new PluginCredentialKeyLoader(tempDir.resolve("commit-test.key").toString()),
+            new PluginContextFactory(credentialStore, () -> null),
+            List::of,
+            List::of,
+            failingTransactions,
+            clock,
+            dispatcherWakes::incrementAndGet);
+
+    assertSame(
+        primary,
+        assertThrows(
+            AssertionError.class,
+            () -> failingCommit.configure(STATIC_PLUGIN_ID, 1L, 1L, UPDATED_VALUES, Map.of())));
+    verify(instance, times(1)).close();
+    assertEquals(1L, configurationRepository.readCatalog().epoch());
+    assertEquals(0, dispatcherWakes.get());
+  }
+
+  private PluginConfigurationCommitService wiredCommitService(
+      PluginCredentialRefreshDispatcher dispatcher) {
+    StaticListableBeanFactory beans = new StaticListableBeanFactory();
+    beans.addBean("refreshDispatcher", dispatcher);
+    return new PluginConfiguration()
+        .pluginConfigurationCommitService(
+            registry,
+            configurationRepository,
+            credentialRepository,
+            codec,
+            new PluginCredentialKeyLoader(tempDir.resolve("commit-test.key").toString()),
+            new PluginContextFactory(credentialStore, () -> null),
+            beans.getBeanProvider(HarnessContributor.class),
+            beans.getBeanProvider(CanvasFunctionAdapter.class),
+            transactionManager,
+            beans.getBeanProvider(PluginCredentialRefreshDispatcher.class));
   }
 
   /** 登录完成写入交互凭据行的具体断言。 */
@@ -806,6 +1039,9 @@ class PluginConfigurationCommitServicePostgresIntegrationTest {
     /** 每次候选构建时该 Plugin 实际看到的秘密视图：用于断言候选从不进入活动凭据。 */
     private final List<String> observedCredentials = new ArrayList<>();
 
+    private PluginInstance candidateInstance;
+    private Runnable beforeConfigure;
+
     private final PluginConfigSchema schema =
         new PluginConfigSchema(
             new InputSchema(
@@ -843,6 +1079,11 @@ class PluginConfigurationCommitServicePostgresIntegrationTest {
 
     @Override
     public PluginInstance configure(PluginConfig config, PluginContext context) {
+      if (beforeConfigure != null) {
+        Runnable action = beforeConfigure;
+        beforeConfigure = null;
+        action.run();
+      }
       try {
         observedCredentials.add("payload=" + context.credentialAccess().resolve().payloadJson());
       } catch (PluginCredentialUnavailableException unavailable) {
@@ -850,7 +1091,7 @@ class PluginConfigurationCommitServicePostgresIntegrationTest {
       } catch (RuntimeException error) {
         observedCredentials.add(error.getClass().getSimpleName());
       }
-      return TestPluginFixtures.emptyInstance();
+      return candidateInstance == null ? TestPluginFixtures.emptyInstance() : candidateInstance;
     }
 
     String lastObservedCredential() {
