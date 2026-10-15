@@ -42,6 +42,8 @@ import fun.fengwk.kkstudio.platform.plugin.PluginAuthHandler;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfigSchema;
+import fun.fengwk.kkstudio.platform.plugin.PluginConnectionCheck;
+import fun.fengwk.kkstudio.platform.plugin.PluginConnectionCheckResult;
 import fun.fengwk.kkstudio.platform.plugin.PluginContext;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialMaterial;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialSnapshot;
@@ -75,6 +77,7 @@ import fun.fengwk.kkstudio.platform.plugin.testing.InMemoryTransactionManager;
 import fun.fengwk.kkstudio.platform.plugin.testing.TestPluginFixtures;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginAuthKindDTO;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginAuthPrepareDTO;
+import fun.fengwk.kkstudio.share.ai.plugin.PluginConnectionCheckDTO;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginDTO;
 
 import java.io.IOException;
@@ -110,6 +113,7 @@ class PluginManagementServiceTest {
   private static final String NO_AUTH_PLUGIN_ID = "no-auth-plugin";
   private static final String STATIC_KEY_PLUGIN_ID = "static-key-plugin";
   private static final String CONTRIBUTING_PLUGIN_ID = "contributing-plugin";
+  private static final String CONNECTION_CHECK_PLUGIN_ID = "connection-check-plugin";
   private static final String REGION_CN = "CN";
   private static final String REGION_US = "US";
   private static final String SECRET_TOKEN_MARKER = "very-secret-callback-token-marker-654321";
@@ -132,6 +136,7 @@ class PluginManagementServiceTest {
   private TestAuthPlugin authPlugin;
   private TestStaticKeyPlugin staticKeyPlugin;
   private TestContributingPlugin contributingPlugin;
+  private TestConnectionCheckPlugin connectionCheckPlugin;
 
   @BeforeEach
   void setUp() throws IOException {
@@ -152,9 +157,15 @@ class PluginManagementServiceTest {
     authPlugin = new TestAuthPlugin();
     staticKeyPlugin = new TestStaticKeyPlugin();
     contributingPlugin = new TestContributingPlugin();
+    connectionCheckPlugin = new TestConnectionCheckPlugin();
     registry =
         new StudioPluginRegistry(
-            List.of(authPlugin, new TestNoAuthPlugin(), staticKeyPlugin, contributingPlugin));
+            List.of(
+                authPlugin,
+                new TestNoAuthPlugin(),
+                staticKeyPlugin,
+                contributingPlugin,
+                connectionCheckPlugin));
 
     // 用真实启动装配建立 epoch 1 的 manifest 与配置历史：管理面与提交服务都只看权威行。
     PluginCatalogBootstrap bootstrap = new PluginCatalogBootstrap(registry, catalog, transactions);
@@ -210,7 +221,7 @@ class PluginManagementServiceTest {
     completeAuthOfManagedPlugin("{\"token\":\"" + SECRET_TOKEN_MARKER + "\"}");
 
     List<PluginDTO> dtos = service.listPlugins();
-    assertEquals(4, dtos.size());
+    assertEquals(5, dtos.size(), "registry now carries the explicit connection check plugin too");
     assertEquals(
         registry.plugins().stream().map(plugin -> plugin.descriptor().pluginId()).toList(),
         dtos.stream().map(PluginDTO::getPluginId).toList(),
@@ -1099,6 +1110,117 @@ class PluginManagementServiceTest {
     assertNull(applied.getApplicationError());
   }
 
+  /** 显式连接检查：只有请求坐标与当前 applied 坐标逐项一致才调用实例能力一次，返回值只含类型化维度与已应用坐标， 检查既不另建也不关闭任何实例。 */
+  @Test
+  void checkConnectionRequiresAppliedCoordinatesAndReturnsTypedResult() {
+    assertTrue(
+        service.getPlugin(CONNECTION_CHECK_PLUGIN_ID).isConnectionCheckSupported(),
+        "能力必须来自已应用实例，而不是按 pluginId 硬编码");
+    assertFalse(service.getPlugin(NO_AUTH_PLUGIN_ID).isConnectionCheckSupported());
+
+    PluginConnectionCheckDTO dto = service.checkConnection(CONNECTION_CHECK_PLUGIN_ID, 1L, 1L);
+
+    assertEquals(CONNECTION_CHECK_PLUGIN_ID, dto.getPluginId());
+    assertEquals("1", dto.getAppliedEpoch());
+    assertEquals("1", dto.getAppliedRevision());
+    assertEquals(now, dto.getCheckedAt(), "检查时刻取自管理面时钟");
+    assertEquals("REACHABLE", dto.getReachability());
+    assertEquals("ACCEPTED", dto.getAuthentication());
+    assertEquals("UNKNOWN", dto.getBrowserSession());
+    assertEquals(1, connectionCheckPlugin.checkInvocations.get(), "一次检查只调用一次能力");
+
+    // 检查只租用当前快照：不另建实例，期间也不关闭实例；租用释放后运行期关闭才真正退役实例。
+    assertEquals(0, connectionCheckPlugin.instancesClosed.get());
+    runtime.close();
+    assertEquals(1, connectionCheckPlugin.instancesClosed.get(), "租用必须已释放，实例只关闭一次");
+  }
+
+  /** 测试意图：尚未应用或坐标不匹配时明确 409，且在任何远端动作之前就必须拒绝，绝不调用实例能力。 */
+  @Test
+  void checkConnectionRejectsPendingOrMismatchedCoordinatesWithoutTouchingThePlugin() {
+    commitService.configure(CONNECTION_CHECK_PLUGIN_ID, 1L, 1L, "{}", Map.of());
+
+    // desired 已前进到 epoch 2，但本节点仍应用 epoch 1：pending 必须 409
+    assertThrows(
+        AiVersionConflictException.class,
+        () -> service.checkConnection(CONNECTION_CHECK_PLUGIN_ID, 1L, 1L));
+    // 期望 epoch 与已应用不一致
+    assertThrows(
+        AiVersionConflictException.class,
+        () -> service.checkConnection(CONNECTION_CHECK_PLUGIN_ID, 2L, 1L));
+
+    runtime.refresh();
+    // 已应用 epoch 2 后，仍持有旧 epoch 与错误修订的请求必须 409
+    assertThrows(
+        AiVersionConflictException.class,
+        () -> service.checkConnection(CONNECTION_CHECK_PLUGIN_ID, 1L, 1L));
+    assertThrows(
+        AiVersionConflictException.class,
+        () -> service.checkConnection(CONNECTION_CHECK_PLUGIN_ID, 2L, 1L));
+
+    assertEquals(0, connectionCheckPlugin.checkInvocations.get(), "坐标未命中不得触发任何检查");
+
+    // 应用后的坐标完全命中才放行：revision 跟随写入时的全局 epoch
+    PluginConnectionCheckDTO applied = service.checkConnection(CONNECTION_CHECK_PLUGIN_ID, 2L, 2L);
+    assertEquals("2", applied.getAppliedEpoch());
+    assertEquals("2", applied.getAppliedRevision());
+    assertEquals(1, connectionCheckPlugin.checkInvocations.get());
+  }
+
+  /**
+   * 租用生命周期：检查途中发布新目录时，正在执行检查的那个实例必须一直活着，只有租用释放后才真正关闭。
+   *
+   * <p>回调在同一线程内同步执行，观察的是真实租用语义而不是人为并发。注意提交服务为了算能力指纹会另行构建并关闭一份一次性候选快照，因此这里断言的是
+   * <em>具体实例</em>的关闭状态，而不是插件级别的关闭计数。
+   */
+  @Test
+  void connectionCheckKeepsTheCheckedInstanceAliveUntilTheLeaseIsReleased() {
+    connectionCheckPlugin.onCheck =
+        () -> {
+          // 检查途中提交并发布新目录：执行中的实例仍被本次租用持有，必须存活
+          commitService.configure(CONNECTION_CHECK_PLUGIN_ID, 1L, 1L, "{}", Map.of());
+          runtime.refresh();
+          TestConnectionCheckInstance serving = connectionCheckPlugin.serving;
+          assertNotNull(serving, "检查必须由真实实例执行");
+          assertFalse(serving.closed, "检查执行期间该实例不得被关闭；租用未结束前旧视图不得退役");
+        };
+
+    service.checkConnection(CONNECTION_CHECK_PLUGIN_ID, 1L, 1L);
+
+    TestConnectionCheckInstance served = connectionCheckPlugin.serving;
+    assertTrue(served.closed, "检查返回后必须释放租用并关闭旧视图的实例");
+    assertEquals(2L, runtime.state().appliedEpoch(), "新目录必须已经应用");
+  }
+
+  /** 测试意图：检查抛异常时同样必须释放租用，正在执行检查的实例不得因失败而泄漏。 */
+  @Test
+  void connectionCheckReleasesTheLeaseEvenWhenTheCheckFails() {
+    connectionCheckPlugin.onCheck =
+        () -> {
+          commitService.configure(CONNECTION_CHECK_PLUGIN_ID, 1L, 1L, "{}", Map.of());
+          runtime.refresh();
+          assertFalse(connectionCheckPlugin.serving.closed, "失败前租用仍然有效，实例不得被关闭");
+          throw new IllegalStateException("unexpected check failure");
+        };
+
+    assertThrows(
+        IllegalStateException.class,
+        () -> service.checkConnection(CONNECTION_CHECK_PLUGIN_ID, 1L, 1L));
+
+    assertTrue(connectionCheckPlugin.serving.closed, "检查失败后必须释放租用并关闭旧视图的实例");
+  }
+
+  /** 测试意图：未安装是 404，已安装但实例未声明能力是 400，两者都绝不静默成功。 */
+  @Test
+  void checkConnectionReportsUninstalledAndUnsupportedPlugins() {
+    assertThrows(
+        AiResourceNotFoundException.class,
+        () -> service.checkConnection("uninstalled-plugin", 1L, 1L));
+    assertThrows(
+        AiValidationException.class, () -> service.checkConnection(NO_AUTH_PLUGIN_ID, 1L, 1L));
+    assertEquals(0, connectionCheckPlugin.checkInvocations.get());
+  }
+
   // --- 测试辅助桩对象 ---
 
   private static class TestAuthPlugin implements StudioPlugin {
@@ -1160,6 +1282,87 @@ class PluginManagementServiceTest {
               return completeHandler.apply(callbackUrl);
             }
           });
+    }
+  }
+
+  /** 声明显式只读连接检查的 Plugin：检查调用与实例关闭都被计数，用于验证租用、坐标门禁与实例所有权。 */
+  private static class TestConnectionCheckPlugin implements StudioPlugin {
+
+    private final PluginDescriptor descriptor =
+        new PluginDescriptor(CONNECTION_CHECK_PLUGIN_ID, "Connection Check Plugin", "1.0");
+
+    private final AtomicInteger checkInvocations = new AtomicInteger();
+    private final AtomicInteger instancesClosed = new AtomicInteger();
+
+    /** 检查回调钩子：让测试在租用仍然有效时观察实例生命周期。 */
+    private volatile Runnable onCheck = () -> {};
+
+    /** 最近一次真正执行检查的实例，用于断言具体实例的关闭时机。 */
+    private volatile TestConnectionCheckInstance serving;
+
+    private final PluginConnectionCheckResult result =
+        new PluginConnectionCheckResult(
+            PluginConnectionCheckResult.Reachability.REACHABLE,
+            PluginConnectionCheckResult.Authentication.ACCEPTED,
+            PluginConnectionCheckResult.BrowserSession.UNKNOWN);
+
+    @Override
+    public PluginDescriptor descriptor() {
+      return descriptor;
+    }
+
+    @Override
+    public PluginConfigSchema configurationSchema() {
+      return TestPluginFixtures.EMPTY_SCHEMA;
+    }
+
+    @Override
+    public PluginAuthSpec authenticationSpec() {
+      return new PluginAuthSpec.None();
+    }
+
+    @Override
+    public PluginInstance configure(PluginConfig config, PluginContext context) {
+      return new TestConnectionCheckInstance(this);
+    }
+  }
+
+  /** 带生命周期观测的 Plugin 实例：每个快照实例各自记录是否已被关闭，避免与提交服务为算指纹而创建并关闭的一次性候选实例互相污染。 */
+  private static final class TestConnectionCheckInstance implements PluginInstance {
+
+    private final TestConnectionCheckPlugin owner;
+
+    private volatile boolean closed;
+
+    TestConnectionCheckInstance(TestConnectionCheckPlugin owner) {
+      this.owner = owner;
+    }
+
+    @Override
+    public List<HarnessContributor> harnessContributors() {
+      return List.of();
+    }
+
+    @Override
+    public List<CanvasFunctionAdapter> canvasAdapters() {
+      return List.of();
+    }
+
+    @Override
+    public Optional<PluginConnectionCheck> connectionCheck() {
+      return Optional.of(
+          () -> {
+            owner.checkInvocations.incrementAndGet();
+            owner.serving = this;
+            owner.onCheck.run();
+            return owner.result;
+          });
+    }
+
+    @Override
+    public void close() {
+      closed = true;
+      owner.instancesClosed.incrementAndGet();
     }
   }
 

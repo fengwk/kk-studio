@@ -4,6 +4,7 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
 
 import java.util.List;
+import java.util.Optional;
 
 /**
  * {@link StudioPlugin#configure(PluginConfig, PluginContext)} 产出的、由单个 Plugin 拥有的运行期实例。
@@ -18,6 +19,15 @@ public interface PluginInstance extends AutoCloseable {
 
   /** 本实例贡献的 Canvas Function Adapter，冻结且非 null（可为空列表）。 */
   List<CanvasFunctionAdapter> canvasAdapters();
+
+  /**
+   * 本实例可选声明的显式只读连接检查能力；未声明时为 {@link Optional#empty()}。
+   *
+   * <p>宿主只在一次显式管理面检查请求内调用它，绝不因此重新 configure 或另建实例。
+   */
+  default Optional<PluginConnectionCheck> connectionCheck() {
+    return Optional.empty();
+  }
 
   /** 释放实例拥有的资源；不抛 checked exception。 */
   @Override

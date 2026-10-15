@@ -219,6 +219,7 @@ const ALLOWED_PLUGIN_KEYS = new Set([
   'appliedEpoch',
   'desiredRevision',
   'appliedRevision',
+  'connectionCheckSupported',
   'harnessToolNames',
   'canvasFunctionNames',
   'applicationError',
@@ -250,6 +251,10 @@ export function decodePluginDTO(value: unknown, path = 'plugin'): PluginDTO {
   const appliedEpoch = requireNullableCanonicalDecimalString(rec.appliedEpoch, `${path}.appliedEpoch`)
   const desiredRevision = requireCanonicalDecimalString(rec.desiredRevision, `${path}.desiredRevision`)
   const appliedRevision = requireNullableCanonicalDecimalString(rec.appliedRevision, `${path}.appliedRevision`)
+  const connectionCheckSupported = requireBoolean(
+    rec.connectionCheckSupported,
+    `${path}.connectionCheckSupported`,
+  )
   const harnessToolNames = requireStringArray(rec.harnessToolNames, `${path}.harnessToolNames`)
   const canvasFunctionNames = requireStringArray(rec.canvasFunctionNames, `${path}.canvasFunctionNames`)
   const applicationError = requireNullableString(rec.applicationError, `${path}.applicationError`)
@@ -310,6 +315,7 @@ export function decodePluginDTO(value: unknown, path = 'plugin'): PluginDTO {
     appliedEpoch,
     desiredRevision,
     appliedRevision,
+    connectionCheckSupported,
     harnessToolNames,
     canvasFunctionNames,
     applicationError,

@@ -69,6 +69,7 @@ const samplePlugin: PluginDTO = {
   appliedEpoch: '5',
   desiredRevision: '3',
   appliedRevision: '3',
+  connectionCheckSupported: false,
   harnessToolNames: ['search'],
   canvasFunctionNames: [],
   applicationError: null,

@@ -33,6 +33,7 @@ const plugin: PluginDTO = {
   appliedEpoch: '1',
   desiredRevision: '1',
   appliedRevision: '1',
+  connectionCheckSupported: false,
   harnessToolNames: [],
   canvasFunctionNames: [],
   applicationError: null,
