@@ -25,10 +25,28 @@ export function isCanonicalUUID(value: unknown): value is UUIDString {
 }
 
 /** 存储读取失败（localStorage 不可用 / getItem 抛错）：原始字节必须保留，绝不删除。 */
-export class PendingRunStorageError extends Error {}
+export class PendingRunStorageError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options)
+    this.name = 'PendingRunStorageError'
+  }
+}
 
-/** 存在但结构非法（含缺少合法 expectedVersion 的旧记录）：调用方必须明确丢弃该坏缓存。 */
-export class PendingRunCorruptError extends Error {}
+/**
+ * 存在但结构非法（含缺少合法 expectedVersion 的旧记录）：调用方必须明确丢弃该坏缓存。
+ *
+ * raw 是本次 load 实际读到的原始字符串：丢弃必须按同一份 raw 确认（复用
+ * discardPendingFunctionRun），绝不按 key 盲目删除——记录可能已被其它标签页替换。
+ */
+export class PendingRunCorruptError extends Error {
+  readonly raw: string
+
+  constructor(message: string, raw: string, options?: ErrorOptions) {
+    super(message, options)
+    this.name = 'PendingRunCorruptError'
+    this.raw = raw
+  }
+}
 
 function getLocalStorageSafe(): Storage | null {
   if (typeof window === 'undefined') {
@@ -67,6 +85,14 @@ function isValidPendingRequest(value: unknown): value is CanvasFunctionRunReques
     && isCanvasFunctionVersion(request.expectedVersion)
 }
 
+/** 未决记录是严格存储对象：字段集合必须与 PendingFunctionRunAttempt 完全一致。 */
+const PENDING_ATTEMPT_FIELDS = ['canvasId', 'nodeId', 'request', 'basisRequestId', 'createdAt'] as const
+
+function hasExactFields(value: Record<string, unknown>, allowed: readonly string[]): boolean {
+  const keys = Object.keys(value)
+  return keys.length === allowed.length && allowed.every((field) => keys.includes(field))
+}
+
 export function loadPendingFunctionRun(canvasId: string, nodeId: string): PendingFunctionRunAttempt | null {
   const storage = getLocalStorageSafe()
   if (!storage) {
@@ -86,11 +112,13 @@ export function loadPendingFunctionRun(canvasId: string, nodeId: string): Pendin
   try {
     parsed = JSON.parse(raw)
   } catch (err) {
-    throw new PendingRunCorruptError(`Corrupted pending function run attempt (invalid JSON): ${err instanceof Error ? err.message : String(err)}`, { cause: err })
+    throw new PendingRunCorruptError(`Corrupted pending function run attempt (invalid JSON): ${err instanceof Error ? err.message : String(err)}`, raw, { cause: err })
   }
   if (
     !parsed
     || typeof parsed !== 'object'
+    || Array.isArray(parsed)
+    || !hasExactFields(parsed as Record<string, unknown>, PENDING_ATTEMPT_FIELDS)
     || !isCanonicalUUID((parsed as Partial<PendingFunctionRunAttempt>).canvasId)
     || (parsed as Partial<PendingFunctionRunAttempt>).canvasId !== canvasId
     || !isCanonicalUUID((parsed as Partial<PendingFunctionRunAttempt>).nodeId)
@@ -102,7 +130,7 @@ export function loadPendingFunctionRun(canvasId: string, nodeId: string): Pendin
     || ((parsed as Partial<PendingFunctionRunAttempt>).basisRequestId !== null
       && !isCanonicalUUID((parsed as Partial<PendingFunctionRunAttempt>).basisRequestId))
   ) {
-    throw new PendingRunCorruptError('Corrupted pending function run attempt (schema validation failed)')
+    throw new PendingRunCorruptError('Corrupted pending function run attempt (schema validation failed)', raw)
   }
   return parsed as PendingFunctionRunAttempt
 }
@@ -113,7 +141,8 @@ export function savePendingFunctionRun(attempt: PendingFunctionRunAttempt): void
     throw new PendingRunStorageError('Local storage is unavailable')
   }
   if (
-    !isCanonicalUUID(attempt.canvasId)
+    !hasExactFields(attempt as unknown as Record<string, unknown>, PENDING_ATTEMPT_FIELDS)
+    || !isCanonicalUUID(attempt.canvasId)
     || !isCanonicalUUID(attempt.nodeId)
     || !isValidPendingRequest(attempt.request)
     || (attempt.basisRequestId !== null && !isCanonicalUUID(attempt.basisRequestId))
@@ -180,24 +209,6 @@ export function clearPendingFunctionRun(
   } catch {
     // 读失败或损坏时保留原始记录，绝不盲目删除未知项
     return
-  }
-}
-
-/**
- * 丢弃结构非法的未决记录（含缺 expectedVersion 的旧记录）。
- *
- * 调用点紧接在 loadPendingFunctionRun 判定内容非法之后，中间没有任何 await，
- * 因此删除的就是刚刚被判定为非法的同一份字节。删除失败只记录日志：本次点击仍然 0 POST。
- */
-function discardCorruptPendingRun(canvasId: string, nodeId: string): void {
-  const storage = getLocalStorageSafe()
-  if (!storage) {
-    return
-  }
-  try {
-    storage.removeItem(getPendingRunStorageKey(canvasId, nodeId))
-  } catch (err) {
-    console.error('[canvas] Failed to discard corrupted pending function run attempt:', err)
   }
 }
 
@@ -373,12 +384,19 @@ export function useCanvasFunctionRun(options: {
     }
     inFlightNodesRef.current.add(nodeId)
     try {
-      // 1. 点击瞬间同步捕获「用户实际看到的目录版本」：必须早于任何 flush/re-fetch await，
-      //    之后即使目录前进也不允许替换它。
-      const clickedVersion = resolveFunctionVersion(nodeId)
+      // 1. 点击瞬间同步捕获「用户实际看到的目录版本」，并在任何 await 之前立即复制两个
+      //    坐标：之后目录对象即使被原地改写也绝不污染本次请求。缺失定义时保持 null。
+      const resolvedVersion = resolveFunctionVersion(nodeId)
+      const clickedVersion: CanvasFunctionVersionDTO | null = resolvedVersion === null
+        ? null
+        : {
+            catalogEpoch: resolvedVersion.catalogEpoch,
+            definitionFingerprint: resolvedVersion.definitionFingerprint,
+          }
 
-      // 2. 读取未决记录。坏缓存（缺合法 expectedVersion 的旧记录/损坏内容）明确丢弃且绝不
-      //    在本次点击补版本或自动启动；存储读取失败则保留原始字节。两种情况都 0 flush 0 POST。
+      // 2. 读取未决记录。坏缓存（缺合法 expectedVersion 的旧记录/损坏内容）按本次读到的
+      //    raw 确认后丢弃，且绝不在本次点击补版本或自动启动；存储读取失败则保留原始字节。
+      //    两种情况都 0 flush 0 POST。
       let existing: PendingFunctionRunAttempt | null = null
       try {
         existing = loadPendingFunctionRun(canvasId, nodeId)
@@ -394,16 +412,31 @@ export function useCanvasFunctionRun(options: {
         const message = err instanceof Error ? err.message : String(err)
         console.error('[canvas] Failed to load pending function run attempt:', message)
         if (err instanceof PendingRunCorruptError) {
-          discardCorruptPendingRun(canvasId, nodeId)
-          setLocalPendingErrors((prev) => {
-            if (!prev[nodeId]) {
-              return prev
-            }
-            const next = { ...prev }
-            delete next[nodeId]
-            return next
-          })
-          setToast('本地未决运行记录已失效（缺少目录版本），已丢弃该记录。请确认函数目录后重新点击运行。')
+          // 只按本次 load 得到的同一份 raw 确认删除：记录已被其它标签页替换或删除失败时
+          // 保留现状，绝不盲删，也绝不在本次点击自动启动。
+          let discarded = false
+          try {
+            discarded = discardPendingFunctionRun(canvasId, nodeId, err.raw)
+          } catch (discardError) {
+            console.error('[canvas] Failed to discard invalid pending function run attempt:', discardError)
+          }
+          if (discarded) {
+            setLocalPendingErrors((prev) => {
+              if (!prev[nodeId]) {
+                return prev
+              }
+              const next = { ...prev }
+              delete next[nodeId]
+              return next
+            })
+            setToast('本地未决运行记录已失效（缺少目录版本或内容非法），已丢弃该记录。请确认函数目录后重新点击运行。')
+          } else {
+            setLocalPendingErrors((prev) => ({
+              ...prev,
+              [nodeId]: { message, raw: err.raw },
+            }))
+            setToast('本地未决运行记录已失效，且未能安全清理（记录可能已被其它标签页替换）。请重新确认后再运行。')
+          }
           return
         }
         let raw: string | null = null
@@ -444,7 +477,8 @@ export function useCanvasFunctionRun(options: {
           nodeId,
           request: {
             requestId: crypto.randomUUID() as UUIDString,
-            expectedVersion: { ...clickedVersion },
+            // 只使用点击瞬间复制的副本：绝不在 flush 之后重新读取目录版本。
+            expectedVersion: clickedVersion,
           },
           basisRequestId: readBasisRequestId(nodeId),
           createdAt: Date.now(),
@@ -467,12 +501,13 @@ export function useCanvasFunctionRun(options: {
         clearPendingFunctionRun(canvasId, nodeId, requestId)
         publishRun(run, basisRequestId)
       } catch (error) {
-        // 409 表示本次接纳被目录版本围栏拒绝：清掉该 pending，提示手动刷新，
-        // 绝不自动重提、绝不换 requestId / 换版本。
+        // 409 表示本次接纳被服务端拒绝：可能是目录版本围栏（目录已变化），也可能是运行状态
+        // 冲突（例如已有 active request）。两种情况下都清掉该 pending、提示刷新目录/状态后
+        // 由用户重新确认，绝不自动重提、绝不换 requestId / 换版本。
         if (error instanceof ApiError && error.status === 409) {
           clearPendingFunctionRun(canvasId, nodeId, requestId)
           void queryClient.invalidateQueries({ queryKey: queryKeys.studio.canvasModels })
-          setToast('函数目录已变化，本次运行未启动。请刷新函数目录后重新确认运行。')
+          setToast('本次运行未启动：请求被拒绝（函数目录或运行状态可能已变化）。请刷新函数目录后重新确认运行。')
           return
         }
         if (isTerminalClientError(error)) {
