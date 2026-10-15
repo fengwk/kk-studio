@@ -1,13 +1,15 @@
 import { ApiError } from '@/shared/api/client'
+import {
+  PLUGIN_CONNECTION_AUTHENTICATION_VALUES,
+  PLUGIN_CONNECTION_BROWSER_SESSION_VALUES,
+  PLUGIN_CONNECTION_REACHABILITY_VALUES,
+} from '@/shared/api/contracts/ai-plugin'
 import type { InstantTimestamp } from '@/shared/api/contracts/base'
 import type {
   PluginAuthKindDTO,
   PluginAuthPrepareDTO,
   PluginConfigurationDTO,
-  PluginConnectionAuthentication,
-  PluginConnectionBrowserSession,
-  PluginConnectionCheckDTO,
-  PluginConnectionReachability,
+  PluginConnectionCheckResult,
   PluginDTO,
   PluginSecretProjectionDTO,
   PluginStatus,
@@ -358,22 +360,6 @@ export function decodePluginAuthPrepareDTO(
   return { authAttemptId, loginUrl }
 }
 
-const REACHABILITY_VALUES: readonly PluginConnectionReachability[] = [
-  'REACHABLE',
-  'UNREACHABLE',
-  'NOT_CHECKED',
-  'INDETERMINATE',
-]
-
-const AUTHENTICATION_VALUES: readonly PluginConnectionAuthentication[] = [
-  'ACCEPTED',
-  'REJECTED',
-  'UNAVAILABLE',
-  'NOT_CHECKED',
-]
-
-const BROWSER_SESSION_VALUES: readonly PluginConnectionBrowserSession[] = ['UNKNOWN']
-
 function requireEnumValue<T extends string>(
   value: unknown,
   allowed: readonly T[],
@@ -411,7 +397,7 @@ const ALLOWED_CONNECTION_CHECK_KEYS = new Set([
 export function decodePluginConnectionCheckDTO(
   value: unknown,
   path = 'connectionCheck',
-): PluginConnectionCheckDTO {
+): PluginConnectionCheckResult {
   const rec = requireRecord(value, path)
   checkUnknownKeys(rec, ALLOWED_CONNECTION_CHECK_KEYS, path)
   return {
@@ -424,17 +410,17 @@ export function decodePluginConnectionCheckDTO(
     checkedAt: requireInstant(rec.checkedAt, `${path}.checkedAt`),
     reachability: requireEnumValue(
       rec.reachability,
-      REACHABILITY_VALUES,
+      PLUGIN_CONNECTION_REACHABILITY_VALUES,
       `${path}.reachability`,
     ),
     authentication: requireEnumValue(
       rec.authentication,
-      AUTHENTICATION_VALUES,
+      PLUGIN_CONNECTION_AUTHENTICATION_VALUES,
       `${path}.authentication`,
     ),
     browserSession: requireEnumValue(
       rec.browserSession,
-      BROWSER_SESSION_VALUES,
+      PLUGIN_CONNECTION_BROWSER_SESSION_VALUES,
       `${path}.browserSession`,
     ),
   }

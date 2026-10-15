@@ -1,3 +1,5 @@
+import type { ConfigSyncKind } from '@/shared/api/generated/stable-contracts'
+
 /**
  * 设置同步的严格 wire 契约（对齐 /api/settings/sync 四端点）。
  *
@@ -9,15 +11,8 @@
  * 预检查不写库，只给出计划；执行会重新校验。库存与检查结果都不含配置值与凭据：
  * 凭据只随导出 YAML 出现，UI 不渲染 YAML。
  */
-export type ConfigSyncKind =
-  | 'providers'
-  | 'models'
-  | 'agents'
-  | 'skillPackages'
-  | 'environments'
-  | 'mcpServers'
-  | 'settings'
-  | 'plugins'
+export type { ConfigSyncKind } from '@/shared/api/generated/stable-contracts'
+export { CONFIG_SYNC_KIND_VALUES } from '@/shared/api/generated/stable-contracts'
 
 /** 配置引用的业务标识：模型为 `providerName/modelName`，设置为 `settings`，插件为 `pluginId`。 */
 export interface ConfigSyncRef {

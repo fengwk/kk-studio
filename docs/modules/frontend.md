@@ -45,6 +45,13 @@ HTTP 路由事实源见 [Web](web.md)，JSON 字段规则见 [Share](share.md)�
 codec 校验 canonical UUID、十进字符串、枚举、可空性和嵌套结构；
 Java long 游标保持字符串，版本比较使用长度与字典序，保留整数精度。
 
+稳定传输契约（Plugin 连接检查与其维度枚举、Canvas function version/run/cancel、ConfigSyncKind）
+由真实 HTTP Jackson mapper 生成到
+[`generated/stable-contracts.ts`](../../frontend/src/shared/api/generated/stable-contracts.ts)，
+contracts 入口只做窄化与重新导出，不手改生成物；漂移由
+[`check.sh`](../../scripts/dev/verify/generated-contracts/check.sh)（`mvn verify` 内执行同一测试）拦截，
+更新走同目录 [`write.sh`](../../scripts/dev/verify/generated-contracts/write.sh)。
+
 ## Snapshot、realtime 与恢复
 
 Thread/Canvas 先读取 Snapshot，再订阅 `/api/events/v1`。
