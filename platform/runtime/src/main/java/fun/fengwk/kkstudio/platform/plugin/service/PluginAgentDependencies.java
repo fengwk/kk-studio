@@ -14,6 +14,7 @@ import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationReposi
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRow;
 
 import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -59,7 +60,9 @@ public class PluginAgentDependencies {
   }
 
   /**
-   * 给定普通配置声明的 Agent 名称（升序、去重、不可变）。
+   * 给定普通配置声明的 Agent 名称（按名称升序、去重、不可变）。
+   *
+   * <p>返回有序集合，使「缺失的第一个声明」在依赖图、计划与写入核验里都是稳定的，异常与跳过原因不随哈希顺序漂移。
    *
    * @throws AiValidationException 普通值不符合插件 Schema，或插件拒绝该配置（已知输入边界）
    * @throws IllegalStateException 插件未安装（目录与安装集合漂移）
@@ -73,7 +76,7 @@ public class PluginAgentDependencies {
       throw invalidConfiguration(pluginId);
     }
     try {
-      return Set.copyOf(new TreeSet<>(plugin.requiredAgentNames(config)));
+      return Collections.unmodifiableSortedSet(new TreeSet<>(plugin.requiredAgentNames(config)));
     } catch (IllegalArgumentException error) {
       throw invalidConfiguration(pluginId);
     }
@@ -108,7 +111,7 @@ public class PluginAgentDependencies {
   }
 
   /**
-   * 权威 desired manifest 与其匹配历史行中声明引用该 Agent 的插件 ID（升序、不可变）。
+   * 权威 desired manifest 与其匹配历史行中声明引用该 Agent 的插件 ID（按插件 ID 升序、去重、不可变）。
    *
    * <p>只读 desired 事实：不读取本节点已应用的目录、不解析秘密、不猜字段。desired 声明引用了该 Agent 就绝不允许删除它。
    *
@@ -120,7 +123,7 @@ public class PluginAgentDependencies {
     if (catalog == null) {
       throw new IllegalStateException("plugin catalog is unavailable");
     }
-    Set<String> referencing = new TreeSet<>();
+    TreeSet<String> referencing = new TreeSet<>();
     for (Map.Entry<String, PluginCatalogManifest.Entry> entry :
         catalog.manifest().plugins().entrySet()) {
       PluginConfigurationRow row =
@@ -131,7 +134,7 @@ public class PluginAgentDependencies {
         referencing.add(entry.getKey());
       }
     }
-    return Set.copyOf(referencing);
+    return Collections.unmodifiableSortedSet(referencing);
   }
 
   private StudioPlugin requireInstalled(String pluginId) {
