@@ -11,8 +11,8 @@ import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRow;
+import fun.fengwk.kkstudio.platform.plugin.service.PluginAgentDependencies;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncKind;
@@ -41,12 +41,13 @@ public final class ConfigSyncGraph {
   private static final String RESOURCE = "config_sync";
 
   private final AgentDefinitionConfigCodec agentConfigCodec;
-  private final StudioPluginRegistry pluginRegistry;
+  private final PluginAgentDependencies pluginAgentDependencies;
 
   public ConfigSyncGraph(
-      AgentDefinitionConfigCodec agentConfigCodec, StudioPluginRegistry pluginRegistry) {
+      AgentDefinitionConfigCodec agentConfigCodec,
+      PluginAgentDependencies pluginAgentDependencies) {
     this.agentConfigCodec = agentConfigCodec;
-    this.pluginRegistry = pluginRegistry;
+    this.pluginAgentDependencies = pluginAgentDependencies;
   }
 
   /** 为一次快照预构建依赖图与存在集合，供 inventory 与 export 复用，避免按条目重复构图。 */
@@ -211,8 +212,8 @@ public final class ConfigSyncGraph {
       PluginConfigurationRow plugin, Set<String> builtinAgentNames) {
     Set<ConfigSyncRef> deps = new LinkedHashSet<>();
     for (String agent :
-        ConfigSyncPluginAgents.requiredAgentNames(
-            pluginRegistry, plugin.pluginId(), plugin.revision(), plugin.valuesJson())) {
+        pluginAgentDependencies.declaredAgentNames(
+            plugin.pluginId(), plugin.revision(), plugin.valuesJson())) {
       if (!builtinAgentNames.contains(agent)) {
         deps.add(ConfigSyncRefs.ref(ConfigSyncKind.AGENTS, agent));
       }

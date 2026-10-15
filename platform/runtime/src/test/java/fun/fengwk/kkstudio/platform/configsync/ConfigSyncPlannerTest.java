@@ -72,7 +72,7 @@ class ConfigSyncPlannerTest {
           mcpServerRepository,
           TestCatalogSources.singleLease(toolCatalog),
           ConfigSyncFixtures.MODEL_CONFIG_PARSER,
-          ConfigSyncFixtures.registry());
+          ConfigSyncFixtures.agentDependencies());
 
   private ConfigSyncSnapshot emptySnapshot() {
     return snapshot(List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
@@ -101,7 +101,7 @@ class ConfigSyncPlannerTest {
         mcpServerRepository,
         TestCatalogSources.singleLease(toolCatalog),
         ConfigSyncFixtures.MODEL_CONFIG_PARSER,
-        ConfigSyncFixtures.registry(syntheticPlugin()));
+        ConfigSyncFixtures.agentDependencies(syntheticPlugin()));
   }
 
   private static String pluginEntry(String agentName) {
@@ -575,20 +575,6 @@ class ConfigSyncPlannerTest {
   }
 
   @Test
-  void settingsPromptAgentMissingIsSkipped() {
-    when(snapshotReader.read()).thenReturn(emptySnapshot());
-    when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
-
-    SystemSettingsSectionsDTO sections = ConfigSyncFixtures.defaultSettings();
-    sections.getIntegrations().getMinimaxH3().setPromptAgentName("ghost");
-
-    ConfigSyncPlan plan = plan(ConfigSyncFixtures.settingsYaml(sections));
-
-    assertNull(plan.settings());
-    assertEquals("missing prompt agent: ghost", reason(plan.skipped(), "settings", "settings"));
-  }
-
-  @Test
   void settingsInvalidFieldIsRejected() {
     when(snapshotReader.read()).thenReturn(emptySnapshot());
     when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
@@ -1024,7 +1010,7 @@ class ConfigSyncPlannerTest {
             mcpServerRepository,
             TestCatalogSources.singleLease(toolCatalog),
             ConfigSyncFixtures.MODEL_CONFIG_PARSER,
-            ConfigSyncFixtures.registry(
+            ConfigSyncFixtures.agentDependencies(
                 new ConfigSyncFixtures.FailingAgentDeclarationPlugin(PLUGIN_ID)));
 
     assertThrows(

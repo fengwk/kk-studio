@@ -22,7 +22,6 @@ import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryBackoffStrategy;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsAdvancedDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsAiRuntimeDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsEnvironmentDTO;
-import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsIntegrationsDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsNetworkDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsStorageMediaDTO;
@@ -176,12 +175,11 @@ public class SystemSettingsCodec {
         toAiRuntime(sections.getAiRuntime()),
         toEnvironment(sections.getEnvironment()),
         toNetwork(sections.getNetwork()),
-        toIntegrations(sections.getIntegrations()),
         toStorageMedia(sections.getStorageMedia()),
         toAdvanced(sections.getAdvanced()));
   }
 
-  /** 把领域聚合七个 section 映射为 DTO 载体（GET 响应 / 测试对比）。 */
+  /** 把领域聚合六个 section 映射为 DTO 载体（GET 响应 / 测试对比）。 */
   public SystemSettingsSectionsDTO toSections(SystemSettings settings) {
     Objects.requireNonNull(settings, "settings");
     SystemSettingsSectionsDTO dto = new SystemSettingsSectionsDTO();
@@ -189,7 +187,6 @@ public class SystemSettingsCodec {
     dto.setAiRuntime(fromAiRuntime(settings.aiRuntime()));
     dto.setEnvironment(fromEnvironment(settings.environment()));
     dto.setNetwork(fromNetwork(settings.network()));
-    dto.setIntegrations(fromIntegrations(settings.integrations()));
     dto.setStorageMedia(fromStorageMedia(settings.storageMedia()));
     dto.setAdvanced(fromAdvanced(settings.advanced()));
     return dto;
@@ -249,45 +246,6 @@ public class SystemSettingsCodec {
     dto.setProxyUrl(network.proxyUrl());
     dto.setNoProxyHosts(network.noProxyHosts());
     return dto;
-  }
-
-  private static SystemSettings.Integrations toIntegrations(SystemSettingsIntegrationsDTO dto) {
-    if (dto == null) {
-      throw new IllegalArgumentException("integrations is required");
-    }
-    SystemSettingsIntegrationsDTO.ComfyuiDTO comfyui = dto.getComfyui();
-    SystemSettingsIntegrationsDTO.MiniMaxH3DTO minimaxH3 = dto.getMinimaxH3();
-    if (comfyui == null || minimaxH3 == null) {
-      throw new IllegalArgumentException("integrations.comfyui and minimaxH3 are required");
-    }
-    return new SystemSettings.Integrations(toComfyui(comfyui), toMiniMaxH3(minimaxH3));
-  }
-
-  private static SystemSettings.Comfyui toComfyui(SystemSettingsIntegrationsDTO.ComfyuiDTO dto) {
-    return new SystemSettings.Comfyui(
-        requiredBoolean(dto.getEnabled(), "integrations.comfyui.enabled"),
-        dto.getBaseUrl(),
-        requiredMillis(dto.getConnectTimeoutMillis(), "integrations.comfyui.connectTimeoutMillis"),
-        requiredMillis(dto.getReadTimeoutMillis(), "integrations.comfyui.readTimeoutMillis"),
-        requiredMillis(
-            dto.getWebsocketTimeoutMillis(), "integrations.comfyui.websocketTimeoutMillis"),
-        requiredMillis(dto.getMaxInputFileBytes(), "integrations.comfyui.maxInputFileBytes"));
-  }
-
-  private static SystemSettings.MiniMaxH3 toMiniMaxH3(
-      SystemSettingsIntegrationsDTO.MiniMaxH3DTO dto) {
-    return new SystemSettings.MiniMaxH3(
-        requiredBoolean(dto.getEnabled(), "integrations.minimaxH3.enabled"),
-        dto.getPromptAgentName(),
-        requiredMillis(dto.getPromptMaxWaitMillis(), "integrations.minimaxH3.promptMaxWaitMillis"),
-        dto.getComfyBaseUrl(),
-        requiredMillis(
-            dto.getComfyConnectTimeoutMillis(), "integrations.minimaxH3.comfyConnectTimeoutMillis"),
-        requiredMillis(
-            dto.getComfyRequestTimeoutMillis(), "integrations.minimaxH3.comfyRequestTimeoutMillis"),
-        requiredMillis(
-            dto.getComfyPollIntervalMillis(), "integrations.minimaxH3.comfyPollIntervalMillis"),
-        requiredMillis(dto.getComfyMaxWaitMillis(), "integrations.minimaxH3.comfyMaxWaitMillis"));
   }
 
   private static SystemSettings.StorageMedia toStorageMedia(SystemSettingsStorageMediaDTO dto) {
@@ -422,41 +380,6 @@ public class SystemSettingsCodec {
     SystemSettingsEnvironmentDTO dto = new SystemSettingsEnvironmentDTO();
     dto.setMaxResourceBytes(environment.maxResourceBytes());
     dto.setHeartbeatTimeoutMillis(environment.heartbeatTimeoutMillis());
-    return dto;
-  }
-
-  private static SystemSettingsIntegrationsDTO fromIntegrations(
-      SystemSettings.Integrations integrations) {
-    SystemSettingsIntegrationsDTO dto = new SystemSettingsIntegrationsDTO();
-    dto.setComfyui(fromComfyui(integrations.comfyui()));
-    dto.setMinimaxH3(fromMiniMaxH3(integrations.minimaxH3()));
-    return dto;
-  }
-
-  private static SystemSettingsIntegrationsDTO.ComfyuiDTO fromComfyui(
-      SystemSettings.Comfyui comfyui) {
-    SystemSettingsIntegrationsDTO.ComfyuiDTO dto = new SystemSettingsIntegrationsDTO.ComfyuiDTO();
-    dto.setEnabled(comfyui.enabled());
-    dto.setBaseUrl(comfyui.baseUrl());
-    dto.setConnectTimeoutMillis(comfyui.connectTimeoutMillis());
-    dto.setReadTimeoutMillis(comfyui.readTimeoutMillis());
-    dto.setWebsocketTimeoutMillis(comfyui.websocketTimeoutMillis());
-    dto.setMaxInputFileBytes(comfyui.maxInputFileBytes());
-    return dto;
-  }
-
-  private static SystemSettingsIntegrationsDTO.MiniMaxH3DTO fromMiniMaxH3(
-      SystemSettings.MiniMaxH3 minimaxH3) {
-    SystemSettingsIntegrationsDTO.MiniMaxH3DTO dto =
-        new SystemSettingsIntegrationsDTO.MiniMaxH3DTO();
-    dto.setEnabled(minimaxH3.enabled());
-    dto.setPromptAgentName(minimaxH3.promptAgentName());
-    dto.setPromptMaxWaitMillis(minimaxH3.promptMaxWaitMillis());
-    dto.setComfyBaseUrl(minimaxH3.comfyBaseUrl());
-    dto.setComfyConnectTimeoutMillis(minimaxH3.comfyConnectTimeoutMillis());
-    dto.setComfyRequestTimeoutMillis(minimaxH3.comfyRequestTimeoutMillis());
-    dto.setComfyPollIntervalMillis(minimaxH3.comfyPollIntervalMillis());
-    dto.setComfyMaxWaitMillis(minimaxH3.comfyMaxWaitMillis());
     return dto;
   }
 

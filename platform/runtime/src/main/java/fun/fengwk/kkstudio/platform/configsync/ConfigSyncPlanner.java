@@ -19,8 +19,8 @@ import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
-import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRow;
+import fun.fengwk.kkstudio.platform.plugin.service.PluginAgentDependencies;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsVersions;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
@@ -66,7 +66,7 @@ public final class ConfigSyncPlanner {
   private final McpServerRepository mcpServerRepository;
   private final RuntimeToolCatalogSource toolCatalogSource;
   private final AgentModelRuntimeConfigParser configParser;
-  private final StudioPluginRegistry pluginRegistry;
+  private final PluginAgentDependencies pluginAgentDependencies;
 
   /** 读取快照后按 ParsedDocument 构建可写入计划。 */
   public ConfigSyncPlan plan(ConfigSyncParser.ParsedDocument document) {
@@ -368,18 +368,12 @@ public final class ConfigSyncPlanner {
     ConfigSyncPlan.SettingsUpdate settingsUpdate = null;
     SystemSettingsSectionsDTO sections = document.settings();
     if (sections != null) {
-      // 完整七节契约已在解析期校验，这里只判定与当前可用依赖的引用关系。
-      String reason = settingsUnsatisfiedReason(sections, availableModels.keySet(), agentPool);
-      if (reason != null) {
-        skipped.add(
-            new ConfigSyncSkipped(ConfigSyncKind.SETTINGS.wireValue(), SETTINGS_NAME, reason));
-      } else {
-        // 携带计划期读到的版本：apply 时以 CAS 写入，中间若有并发修改会正常冲突并整体回滚。
-        settingsUpdate =
-            new ConfigSyncPlan.SettingsUpdate(
-                sections, SystemSettingsVersions.format(snapshot.settings().version()));
-        imported.add(ConfigSyncRefs.ref(ConfigSyncKind.SETTINGS, SETTINGS_NAME));
-      }
+      // 完整六节契约已在解析期校验；设置自身不再持有任何 Agent 引用，因此没有额外依赖判定。
+      // 携带计划期读到的版本：apply 时以 CAS 写入，中间若有并发修改会正常冲突并整体回滚。
+      settingsUpdate =
+          new ConfigSyncPlan.SettingsUpdate(
+              sections, SystemSettingsVersions.format(snapshot.settings().version()));
+      imported.add(ConfigSyncRefs.ref(ConfigSyncKind.SETTINGS, SETTINGS_NAME));
     }
 
     return new ConfigSyncPlan(
@@ -404,8 +398,7 @@ public final class ConfigSyncPlanner {
   private String pluginUnsatisfiedReason(
       ConfigSyncParser.PluginSpec spec, long revision, Set<String> agentPool) {
     for (String agent :
-        ConfigSyncPluginAgents.requiredAgentNames(
-            pluginRegistry, spec.pluginId(), revision, spec.valuesJson())) {
+        pluginAgentDependencies.declaredAgentNames(spec.pluginId(), revision, spec.valuesJson())) {
       if (!agentPool.contains(agent)) {
         return "missing agent: " + agent;
       }
@@ -508,19 +501,6 @@ public final class ConfigSyncPlanner {
         if (!toolAvailable(toolCatalog, tool, availableMcpTools, knownMcpToolNames)) {
           return "unsupported or unknown agent tool: " + tool;
         }
-      }
-    }
-    return null;
-  }
-
-  private String settingsUnsatisfiedReason(
-      SystemSettingsSectionsDTO settings, Set<String> availableModelKeys, Set<String> agentPool) {
-    if (settings.getIntegrations() != null
-        && settings.getIntegrations().getMinimaxH3() != null
-        && settings.getIntegrations().getMinimaxH3().getPromptAgentName() != null) {
-      String agent = settings.getIntegrations().getMinimaxH3().getPromptAgentName();
-      if (!agentPool.contains(agent)) {
-        return "missing prompt agent: " + agent;
       }
     }
     return null;

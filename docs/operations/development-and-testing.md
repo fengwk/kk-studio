@@ -472,7 +472,7 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 - `events.heartbeat_keepalive` / `events.project_invalidation`：应用事件 WebSocket 的周期
   heartbeat 保活，以及 Project 全局 changed 失效；Thread/Canvas 的 snapshot-first 对账、
   tree/interactions/environments 资源回读与 `statusExpiresAt` 一次性回读由前端 jsdom/组件测试覆盖。
-- `settings.system_contract_cas`：系统设置按固定七段（aiRuntime、…、storageMedia、advanced）严格聚合，
+- `settings.system_contract_cas`：系统设置按固定六段（tool、aiRuntime、environment、network、storageMedia、advanced）严格聚合，
   未知字段与非法值拒绝，整体 CAS 保存与恢复；`storageMedia` 持有临时资源保留期与扫描间隔
   （默认 3 天 / 30 分钟，热更经心跳通道作用于尚未回收的 Daemon workspace）以及上传有效期与下载签名默认值。
 - `crud.chat.default_environment`：Chat 默认 Environment 是 required-nullable（未选择时显式 null），创建省略
@@ -900,9 +900,9 @@ YAML 结构、类型、有效值错误或当前必填字段缺失，会直接拒
 条目名称须非空且没有首尾空白，重复名称不会依次覆盖；注册令牌被不同 Environment 占用、
 同名 Skill Package 更换仓库地址、移除仍被引用的 Skill 或 MCP 工具也会整份拒绝。
 文件未包含的类别保持原样，但包含系统设置时必须提供当前完整设置结构，不能只提供局部字段。
-系统设置已彻底删除旧有的 `integrations.openCliHub`、`integrations.gptImage2` 与 `integrations.seedance` 三段配置，
-导入包含旧字段的文件或配置将被明确拒绝，无双读与静默别名；OpenCLI 的普通配置与 `apiKey` 凭据归属于独立 Plugin 管理面，
-在导入后通过插件统一配置与 Secret API 录入。涉及历史配置结构调整时，严格遵循“配置导出备份 -> 仅在获授权时停机并数据库重建 -> 当前 Schema 初始化 -> 导入恢复”的边界，绝不直接就地操作已有部署或共享数据库。
+系统设置的 `integrations` 段整体退役，导入包含该段的文件或配置按未知字段规则被明确拒绝，无双读与静默别名；
+ComfyUI/MiniMax-H3 与 OpenCLI 的普通配置、以及 OpenCLI 的 `apiKey` 凭据都只有插件 Schema 与 ConfigSync 的 plugins 一个来源，
+在插件统一配置面与 Secret API 录入，或随 ConfigSync 的 plugins 条目导入。涉及历史配置结构调整时，严格遵循“配置导出备份 -> 仅在获授权时停机并数据库重建 -> 当前 Schema 初始化 -> 导入恢复”的边界，绝不直接就地操作已有部署或共享数据库。
 Provider 凭据按文件恢复；文件中的 Provider 没有凭据时，同名目标的旧凭据也会清空。
 
 确认后按名称新增或更新，不删除文件外的配置。预览不锁定配置，实际执行重新检查；

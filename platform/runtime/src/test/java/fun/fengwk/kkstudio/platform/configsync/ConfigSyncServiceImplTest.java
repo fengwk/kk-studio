@@ -46,7 +46,8 @@ class ConfigSyncServiceImplTest {
 
   private final ConfigSyncYaml yaml = new ConfigSyncYaml();
   private final ConfigSyncGraph graph =
-      new ConfigSyncGraph(ConfigSyncFixtures.AGENT_CONFIG_CODEC, ConfigSyncFixtures.registry());
+      new ConfigSyncGraph(
+          ConfigSyncFixtures.AGENT_CONFIG_CODEC, ConfigSyncFixtures.agentDependencies());
   private final ConfigSyncExporter exporter =
       new ConfigSyncExporter(
           ConfigSyncFixtures.PROVIDER_CONFIG_CODEC,
@@ -74,7 +75,7 @@ class ConfigSyncServiceImplTest {
           mcpServerRepository,
           TestCatalogSources.singleLease(toolCatalog),
           ConfigSyncFixtures.MODEL_CONFIG_PARSER,
-          ConfigSyncFixtures.registry());
+          ConfigSyncFixtures.agentDependencies());
 
   private final ConfigSyncServiceImpl service =
       new ConfigSyncServiceImpl(snapshotReader, graph, exporter, parser, planner, applier);

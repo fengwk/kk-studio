@@ -61,6 +61,7 @@ import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.PostgresqlPlug
 import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.PostgresqlPluginCredentialRepository;
 import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.store.PluginConfigurationJdbcStore;
 import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.store.PluginCredentialJdbcStore;
+import fun.fengwk.kkstudio.platform.plugin.service.PluginAgentDependencies;
 import fun.fengwk.kkstudio.platform.plugin.service.PluginConfigurationCommitService;
 import fun.fengwk.kkstudio.platform.plugin.service.PluginContextFactory;
 import fun.fengwk.kkstudio.platform.plugin.service.PluginSecretPatch;
@@ -131,6 +132,7 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
   @TempDir Path tempDir;
 
   private StudioPluginRegistry registry;
+  private PluginAgentDependencies pluginAgentDependencies;
   private PlatformTransactionManager transactionManager;
   private PluginConfigurationRepository configurationRepository;
   private PluginCredentialRepository credentialRepository;
@@ -185,6 +187,8 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
     credentialStore =
         new DatabasePluginCredentialStore(
             credentialRepository, configurationRepository, codec, keyLoader, clock);
+    pluginAgentDependencies =
+        new PluginAgentDependencies(registry, configurationRepository, definitionRepository);
     commitService =
         new PluginConfigurationCommitService(
             registry,
@@ -198,7 +202,8 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
             transactionManager,
             clock,
             dispatcherWakes::incrementAndGet,
-            catalogWakes::incrementAndGet);
+            catalogWakes::incrementAndGet,
+            pluginAgentDependencies);
 
     // provider 服务是唯一真实库写入的替身：只在同一事务内真插一行 provider，用于证明它随插件失败一起回滚。
     providerService = mock(AgentProviderService.class);
@@ -229,7 +234,7 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
             mock(EnvironmentService.class),
             mock(SystemSettingsService.class),
             commitService,
-            registry);
+            pluginAgentDependencies);
   }
 
   /** 计划形成后依赖 Agent 消失：事务内重检必须让此前写入与插件目录一起回滚，且不触发任何提交后回调。 */

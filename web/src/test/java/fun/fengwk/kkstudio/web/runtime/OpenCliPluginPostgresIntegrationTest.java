@@ -50,6 +50,7 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionSubmitState;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionUnknownException;
 import fun.fengwk.kkstudio.harness.common.json.JsonValues;
 import fun.fengwk.kkstudio.harness.common.network.HttpProxySelector;
+import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialStatus;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableException;
@@ -72,6 +73,7 @@ import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.PostgresqlPlug
 import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.PostgresqlPluginCredentialRepository;
 import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.store.PluginConfigurationJdbcStore;
 import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.store.PluginCredentialJdbcStore;
+import fun.fengwk.kkstudio.platform.plugin.service.PluginAgentDependencies;
 import fun.fengwk.kkstudio.platform.plugin.service.PluginConfigurationCommitService;
 import fun.fengwk.kkstudio.platform.plugin.service.PluginContextFactory;
 import fun.fengwk.kkstudio.platform.plugin.service.PluginManagementService;
@@ -1092,7 +1094,8 @@ class OpenCliPluginPostgresIntegrationTest {
         transactionManager,
         Clock.systemUTC(),
         () -> {},
-        runtime::refresh);
+        runtime::refresh,
+        pluginAgentDependencies(registry));
   }
 
   /** 提交后只请求对账、不立即应用的提交服务：生产里提交只唤醒本节点对账，因此在 refresh 之前真实存在「已提交但未应用」的 pending 窗口。 */
@@ -1110,7 +1113,14 @@ class OpenCliPluginPostgresIntegrationTest {
         transactionManager,
         Clock.systemUTC(),
         () -> {},
-        () -> {});
+        () -> {},
+        pluginAgentDependencies(registry));
+  }
+
+  /** 宿主依赖服务：OpenCLI 插件不声明 Agent 依赖，定义仓库替身不会被调用；声明解析仍走真实实现。 */
+  private PluginAgentDependencies pluginAgentDependencies(StudioPluginRegistry registry) {
+    return new PluginAgentDependencies(
+        registry, configurationRepository, mock(AgentDefinitionRepository.class));
   }
 
   private static CanvasFunctionFrozenRun createTestRun(

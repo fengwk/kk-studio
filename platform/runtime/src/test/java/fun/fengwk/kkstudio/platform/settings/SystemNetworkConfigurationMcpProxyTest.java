@@ -113,7 +113,6 @@ class SystemNetworkConfigurationMcpProxyTest {
         defaults.aiRuntime(),
         defaults.environment(),
         new SystemSettings.Network(proxyUrl, ""),
-        defaults.integrations(),
         defaults.storageMedia(),
         defaults.advanced());
   }

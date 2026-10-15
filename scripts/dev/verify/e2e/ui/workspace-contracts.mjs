@@ -632,8 +632,8 @@ export async function runWorkspaceContractMatrix(ui) {
         const after = await readSettings()
         assert(after.version !== before.version, 'CAS PUT must advance the version')
         assert(after.aiRuntime.retryBaseDelayMillis === changed, `change not persisted: ${after.aiRuntime.retryBaseDelayMillis}`)
-        // 完整聚合七 section + wire 形态（Long 字符串 / version 字符串）。
-        for (const section of ['tool', 'aiRuntime', 'environment', 'network', 'integrations', 'storageMedia', 'advanced']) {
+        // 完整聚合六 section + wire 形态（Long 字符串 / version 字符串）。
+        for (const section of ['tool', 'aiRuntime', 'environment', 'network', 'storageMedia', 'advanced']) {
           assert(after[section] != null, `missing section ${section} in GET response`)
         }
         assert(typeof after.version === 'string' && /^\d+$/.test(after.version), 'version must be a decimal string')
@@ -647,7 +647,6 @@ export async function runWorkspaceContractMatrix(ui) {
           aiRuntime: { ...after.aiRuntime, retryBaseDelayMillis: externallyChanged },
           environment: after.environment,
           network: after.network,
-          integrations: after.integrations,
           storageMedia: after.storageMedia,
           advanced: after.advanced,
           expectedVersion: after.version,
@@ -690,7 +689,6 @@ export async function runWorkspaceContractMatrix(ui) {
             aiRuntime: { ...latest.aiRuntime, retryBaseDelayMillis: original },
             environment: latest.environment,
             network: latest.network,
-            integrations: latest.integrations,
             storageMedia: latest.storageMedia,
             advanced: latest.advanced,
             expectedVersion: latest.version,

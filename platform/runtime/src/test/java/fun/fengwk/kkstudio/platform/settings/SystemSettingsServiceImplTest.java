@@ -41,7 +41,6 @@ class SystemSettingsServiceImplTest {
               SystemSettings.AiRuntime.DEFAULT.modelHttpRetryStatusCodes()),
           SystemSettings.Environment.DEFAULT,
           SystemSettings.Network.DEFAULT,
-          SystemSettings.Integrations.DEFAULT,
           SystemSettings.StorageMedia.DEFAULT,
           SystemSettings.Advanced.DEFAULT);
 
@@ -208,7 +207,6 @@ class SystemSettingsServiceImplTest {
     update.setAiRuntime(sections.getAiRuntime());
     update.setEnvironment(sections.getEnvironment());
     update.setNetwork(sections.getNetwork());
-    update.setIntegrations(sections.getIntegrations());
     update.setStorageMedia(sections.getStorageMedia());
     update.setAdvanced(sections.getAdvanced());
     return update;

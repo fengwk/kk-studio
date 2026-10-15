@@ -34,6 +34,7 @@ import fun.fengwk.kkstudio.harness.common.json.JsonValues;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.common.schema.StringSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
+import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
@@ -143,6 +144,13 @@ class PluginConfigurationCommitServicePostgresIntegrationTest {
   private DatabasePluginCredentialStore credentialStore;
   private PluginConfigurationCommitService commitService;
   private PluginConfigurationCommitService keylessCommitService;
+
+  /** 宿主依赖服务：本类合成插件不声明 Agent 依赖，定义仓库替身不会被调用；声明解析仍走真实实现。 */
+  private PluginAgentDependencies pluginAgentDependencies() {
+    return new PluginAgentDependencies(
+        registry, configurationRepository, mock(AgentDefinitionRepository.class));
+  }
+
   private final AtomicInteger dispatcherWakes = new AtomicInteger();
 
   /** 三个宿主端口的替身：只用于证明候选上下文原样透传宿主端口。 */
@@ -229,7 +237,8 @@ class PluginConfigurationCommitServicePostgresIntegrationTest {
         transactionManager,
         clock,
         dispatcherWakes::incrementAndGet,
-        catalogWakes::incrementAndGet);
+        catalogWakes::incrementAndGet,
+        pluginAgentDependencies());
   }
 
   /** 以真实快照指纹建立 epoch 1 的权威 catalog：两个已安装 Plugin 各有一条 revision 1 历史。 */
@@ -754,7 +763,8 @@ class PluginConfigurationCommitServicePostgresIntegrationTest {
             failingTransactions,
             clock,
             dispatcherWakes::incrementAndGet,
-            catalogWakes::incrementAndGet);
+            catalogWakes::incrementAndGet,
+            pluginAgentDependencies());
 
     assertSame(
         primary,
@@ -786,7 +796,8 @@ class PluginConfigurationCommitServicePostgresIntegrationTest {
             beans.getBeanProvider(CanvasFunctionAdapter.class),
             transactionManager,
             beans.getBeanProvider(PluginCredentialRefreshDispatcher.class),
-            beans.getBeanProvider(PluginCatalogRefreshTrigger.class));
+            beans.getBeanProvider(PluginCatalogRefreshTrigger.class),
+            pluginAgentDependencies());
   }
 
   /** 登录完成写入交互凭据行的具体断言。 */

@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -23,6 +24,7 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
 import fun.fengwk.kkstudio.harness.common.network.HttpProxySelector;
+import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
 import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogManifest;
@@ -41,6 +43,7 @@ import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.PostgresqlPlug
 import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.PostgresqlPluginCredentialRepository;
 import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.store.PluginConfigurationJdbcStore;
 import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.store.PluginCredentialJdbcStore;
+import fun.fengwk.kkstudio.platform.plugin.service.PluginAgentDependencies;
 import fun.fengwk.kkstudio.platform.plugin.service.PluginConfigurationCommitService;
 import fun.fengwk.kkstudio.platform.plugin.service.PluginContextFactory;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
@@ -353,7 +356,14 @@ class MediaPluginPostgresIntegrationTest {
         transactionManager,
         Clock.systemUTC(),
         () -> {},
-        runtime::refresh);
+        runtime::refresh,
+        pluginAgentDependencies(registry));
+  }
+
+  /** 宿主依赖服务：媒体插件不声明 Agent 依赖，定义仓库替身不会被调用；声明解析仍走真实实现。 */
+  private PluginAgentDependencies pluginAgentDependencies(StudioPluginRegistry registry) {
+    return new PluginAgentDependencies(
+        registry, configurationRepository, mock(AgentDefinitionRepository.class));
   }
 
   private static long readEpoch(JdbcClient jdbc) {

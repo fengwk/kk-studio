@@ -36,9 +36,9 @@ import fun.fengwk.kkstudio.platform.environment.service.EnvironmentService;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
-import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogManifest;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRecord;
+import fun.fengwk.kkstudio.platform.plugin.service.PluginAgentDependencies;
 import fun.fengwk.kkstudio.platform.plugin.service.PluginConfigurationCommitService;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
@@ -81,8 +81,9 @@ class ConfigSyncApplierTest {
       mock(PluginConfigurationCommitService.class);
 
   /** 计划里出现的插件都必须是安装目录中的插件：事务内重检直接复用插件自身的依赖声明。 */
-  private final StudioPluginRegistry pluginRegistry =
-      ConfigSyncFixtures.registry(
+  private final PluginAgentDependencies pluginAgentDependencies =
+      ConfigSyncFixtures.agentDependencies(
+          definitionRepository,
           new ConfigSyncFixtures.AgentDependencyPlugin("a.plugin"),
           new ConfigSyncFixtures.AgentDependencyPlugin("b.plugin"),
           new ConfigSyncFixtures.AgentDependencyPlugin(DEPENDENT_PLUGIN_ID),
@@ -101,7 +102,7 @@ class ConfigSyncApplierTest {
           environmentService,
           systemSettingsService,
           pluginCommitService,
-          pluginRegistry);
+          pluginAgentDependencies);
 
   private static ConfigSyncPlan plan(
       List<ConfigSyncParser.ProviderSpec> providers,

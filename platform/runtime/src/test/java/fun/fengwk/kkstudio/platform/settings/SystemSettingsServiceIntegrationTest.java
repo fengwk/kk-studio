@@ -106,11 +106,11 @@ public class SystemSettingsServiceIntegrationTest extends PostgresSpringTestSupp
   public void updateRejectsMissingSectionsAndUnknownRequestFields() {
     SystemSettingsDTO current = systemSettingsService.get();
     SystemSettingsUpdateDTO update = updateFrom(current, "0");
-    update.setIntegrations(null);
+    update.setNetwork(null);
     SystemSettingsValidationException error =
         assertThrows(
             SystemSettingsValidationException.class, () -> systemSettingsService.update(update));
-    assertTrue(error.getMessage().contains("integrations is required"), error.getMessage());
+    assertTrue(error.getMessage().contains("network is required"), error.getMessage());
   }
 
   private static SystemSettingsUpdateDTO updateFrom(
@@ -121,7 +121,6 @@ public class SystemSettingsServiceIntegrationTest extends PostgresSpringTestSupp
     update.setAiRuntime(current.getAiRuntime());
     update.setEnvironment(current.getEnvironment());
     update.setNetwork(current.getNetwork());
-    update.setIntegrations(current.getIntegrations());
     update.setStorageMedia(current.getStorageMedia());
     update.setAdvanced(current.getAdvanced());
     return update;
@@ -133,7 +132,6 @@ public class SystemSettingsServiceIntegrationTest extends PostgresSpringTestSupp
     sections.setAiRuntime(dto.getAiRuntime());
     sections.setEnvironment(dto.getEnvironment());
     sections.setNetwork(dto.getNetwork());
-    sections.setIntegrations(dto.getIntegrations());
     sections.setStorageMedia(dto.getStorageMedia());
     sections.setAdvanced(dto.getAdvanced());
     return sections;

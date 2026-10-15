@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.platform.catalog.definition.service.impl;
 
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
@@ -29,6 +30,7 @@ import fun.fengwk.kkstudio.platform.error.AiInUseException;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
+import fun.fengwk.kkstudio.platform.plugin.service.PluginAgentDependencies;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionDTO;
@@ -38,6 +40,7 @@ import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 
 import java.sql.SQLException;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Agent 定义服务的契约测试：CAS 失败必须映射为 {@link AiResourceNotFoundException} / {@link
@@ -186,6 +189,30 @@ public class AgentDefinitionServiceImplTest {
     // 行版本已过期时在 CAS 之前确定性拒绝，deleteByName 不被调用。
     definition.setVersion(1L);
     assertThrows(AiVersionConflictException.class, () -> service.deleteAgent("agent", "0"));
+    verify(repository, never()).deleteByName(eq("agent"), eq(0L));
+  }
+
+  /** 测试意图：权威插件配置声明的 Agent 引用与 subagent 引用一样受删除保护，且绝不触达真实删除。 */
+  @Test
+  public void shouldRejectDeletionWhenReferencedByPluginConfiguration() {
+    AgentDefinitionRepository repository = mock(AgentDefinitionRepository.class);
+    AgentDefinitionConverter converter = mock(AgentDefinitionConverter.class);
+    AgentDefinitionMutationFactory factory = mock(AgentDefinitionMutationFactory.class);
+    AgentDefinitionReferenceResolver resolver = mock(AgentDefinitionReferenceResolver.class);
+    AgentModelDefaultVariantResolver variants = mock(AgentModelDefaultVariantResolver.class);
+    PluginAgentDependencies pluginAgentDependencies = mock(PluginAgentDependencies.class);
+    AgentDefinitionServiceImpl service =
+        service(repository, converter, factory, resolver, variants, pluginAgentDependencies);
+
+    AgentDefinition definition = definition();
+    definition.setVersion(0L);
+    when(resolver.requireAgentForUpdate("agent")).thenReturn(definition);
+    when(pluginAgentDependencies.pluginsDeclaringAgent("agent")).thenReturn(Set.of("acme.plugin"));
+
+    AiInUseException error =
+        assertThrows(AiInUseException.class, () -> service.deleteAgent("agent", "0"));
+
+    assertTrue(error.getMessage().contains("referenced by plugin configuration"));
     verify(repository, never()).deleteByName(eq("agent"), eq(0L));
   }
 
@@ -375,6 +402,16 @@ public class AgentDefinitionServiceImplTest {
       AgentDefinitionMutationFactory factory,
       AgentDefinitionReferenceResolver resolver,
       AgentModelDefaultVariantResolver variants) {
+    return service(repository, converter, factory, resolver, variants, pluginDependencies());
+  }
+
+  private AgentDefinitionServiceImpl service(
+      AgentDefinitionRepository repository,
+      AgentDefinitionConverter converter,
+      AgentDefinitionMutationFactory factory,
+      AgentDefinitionReferenceResolver resolver,
+      AgentModelDefaultVariantResolver variants,
+      PluginAgentDependencies pluginAgentDependencies) {
     return new AgentDefinitionServiceImpl(
         repository,
         converter,
@@ -383,7 +420,13 @@ public class AgentDefinitionServiceImplTest {
         variants,
         new AgentDefinitionConfigValidator(
             TestRuntimeToolCatalogSource.of(HarnessCatalog.from(List.of()))),
-        new AgentDefinitionConfigCodec(JsonMapper.builder().build()));
+        new AgentDefinitionConfigCodec(JsonMapper.builder().build()),
+        pluginAgentDependencies);
+  }
+
+  /** 该单元用例默认没有插件引用：宿主依赖服务替身按 Mockito 默认返回空集合。 */
+  private static PluginAgentDependencies pluginDependencies() {
+    return mock(PluginAgentDependencies.class);
   }
 
   private AgentDefinition definition() {
