@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -5,155 +8,21 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { PluginConfigModal } from './PluginConfigModal'
 import { pluginsService } from '@/shared/api/plugins-service'
 import { ApiError } from '@/shared/api/client'
+import { decodePluginDTO } from '@/shared/api/ai-plugin-codec'
 import type { PluginDTO } from '@/shared/api/contracts/ai-plugin'
 
 vi.mock('@/shared/api/plugins-service', () => ({
   pluginsService: { updateConfiguration: vi.fn() },
 }))
 
-const opencliPluginFixture: PluginDTO = {
-  pluginId: 'opencli',
-  name: 'OpenCLI',
-  version: '1.0.0',
-  authKind: {
-    type: 'STATIC_KEY',
-    secretField: 'apiKey',
-  },
-  status: 'CONNECTED',
-  region: null,
-  expiresAt: null,
-  nextRefreshAt: null,
-  lastRefreshedAt: null,
-  lastRefreshError: null,
-  configuration: {
-    revision: '1',
-    valuesJson: JSON.stringify({
-      enabled: false,
-      baseUrl: 'http://127.0.0.1:8080',
-      connectTimeoutMillis: 5000,
-      requestTimeoutMillis: 120000,
-      longPollTimeoutMillis: 130000,
-      streamBufferBytes: 16384,
-      maxJsonResponseBytes: 524288,
-      maxErrorResponseBytes: 4096,
-      maxOutputChars: 65535,
-      gptImage2: {
-        paidEnabled: false,
-        askTimeoutSeconds: 900,
-        hubExecutionTimeoutMillis: 960000,
-        maxWaitMillis: 1200000,
-      },
-      seedance: {
-        enabled: false,
-        workspaceId: 'workspace-main',
-        retry: 0,
-        hubExecutionTimeoutMillis: 600000,
-        statusPollIntervalMillis: 30000,
-        maxWaitMillis: 1800000,
-      },
-    }),
-    valuesSchema: JSON.stringify({
-      type: 'object',
-      description: 'OpenCLI configuration',
-      properties: {
-        enabled: { type: 'boolean', description: 'whether OpenCLI integration is enabled' },
-        baseUrl: { type: 'string', description: 'OpenCLI Hub HTTP(S) origin base URL' },
-        connectTimeoutMillis: { type: 'integer', description: 'HTTP connect timeout in milliseconds' },
-        requestTimeoutMillis: { type: 'integer', description: 'HTTP request timeout in milliseconds' },
-        longPollTimeoutMillis: { type: 'integer', description: 'long polling timeout in milliseconds' },
-        streamBufferBytes: { type: 'integer', description: 'streaming response buffer size in bytes' },
-        maxJsonResponseBytes: { type: 'integer', description: 'maximum JSON response bytes' },
-        maxErrorResponseBytes: { type: 'integer', description: 'maximum error response bytes' },
-        maxOutputChars: { type: 'integer', description: 'maximum execution output characters' },
-        gptImage2: {
-          type: 'object',
-          description: 'GPT Image 2 configuration',
-          properties: {
-            paidEnabled: { type: 'boolean', description: 'whether paid GPT Image 2 execution is enabled' },
-            askTimeoutSeconds: { type: 'integer', description: 'timeout for ask operations in seconds' },
-            hubExecutionTimeoutMillis: { type: 'integer', description: 'Hub execution timeout in milliseconds' },
-            maxWaitMillis: { type: 'integer', description: 'maximum wait duration in milliseconds' },
-          },
-          required: ['paidEnabled', 'askTimeoutSeconds', 'hubExecutionTimeoutMillis', 'maxWaitMillis'],
-          additionalProperties: false,
-        },
-        seedance: {
-          type: 'object',
-          description: 'Seedance configuration',
-          properties: {
-            enabled: { type: 'boolean', description: 'whether Seedance execution is enabled' },
-            workspaceId: { type: 'string', description: 'optional Seedance workspace identifier' },
-            retry: { type: 'integer', description: 'retry attempt count' },
-            hubExecutionTimeoutMillis: { type: 'integer', description: 'Hub execution timeout in milliseconds' },
-            statusPollIntervalMillis: { type: 'integer', description: 'status polling interval in milliseconds' },
-            maxWaitMillis: { type: 'integer', description: 'maximum wait duration in milliseconds' },
-          },
-          required: [
-            'enabled',
-            'retry',
-            'hubExecutionTimeoutMillis',
-            'statusPollIntervalMillis',
-            'maxWaitMillis',
-          ],
-          additionalProperties: false,
-        },
-      },
-      required: [
-        'enabled',
-        'connectTimeoutMillis',
-        'requestTimeoutMillis',
-        'longPollTimeoutMillis',
-        'streamBufferBytes',
-        'maxJsonResponseBytes',
-        'maxErrorResponseBytes',
-        'maxOutputChars',
-        'gptImage2',
-        'seedance',
-      ],
-      additionalProperties: false,
-    }),
-    defaultsJson: JSON.stringify({
-      enabled: false,
-      connectTimeoutMillis: 5000,
-      requestTimeoutMillis: 120000,
-      longPollTimeoutMillis: 130000,
-      streamBufferBytes: 16384,
-      maxJsonResponseBytes: 524288,
-      maxErrorResponseBytes: 4096,
-      maxOutputChars: 65535,
-      gptImage2: {
-        paidEnabled: false,
-        askTimeoutSeconds: 900,
-        hubExecutionTimeoutMillis: 960000,
-        maxWaitMillis: 1200000,
-      },
-      seedance: {
-        enabled: false,
-        retry: 0,
-        hubExecutionTimeoutMillis: 600000,
-        statusPollIntervalMillis: 30000,
-        maxWaitMillis: 1800000,
-      },
-    }),
-    secrets: {
-      apiKey: {
-        description: 'OpenCLI API key',
-        configured: true,
-      },
-      instanceId: {
-        description: 'Private OpenCLI instance identifier',
-        configured: true,
-      },
-    },
-  },
-  desiredEpoch: '3',
-  appliedEpoch: '3',
-  desiredRevision: '1',
-  appliedRevision: '1',
-  harnessToolNames: [],
-  canvasFunctionNames: ['gpt-image-2', 'seedance-1', 'seedance-2', 'seedance-3', 'seedance-4'],
-  applicationError: null,
+const goldenEnvelope: unknown = JSON.parse(readFileSync(resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  '../../../../../web/src/test/resources/fun/fengwk/kkstudio/web/plugin/opencli-http.json',
+), 'utf8'))
+if (goldenEnvelope === null || typeof goldenEnvelope !== 'object' || !('data' in goldenEnvelope)) {
+  throw new Error('OpenCLI HTTP golden must contain a data envelope')
 }
+const opencliPluginFixture = decodePluginDTO(goldenEnvelope.data)
 
 describe('PluginConfigModal OpenCLI regression coverage', () => {
   let queryClient: QueryClient
@@ -179,7 +48,7 @@ describe('PluginConfigModal OpenCLI regression coverage', () => {
     renderModal()
 
     expect(screen.getByText('配置插件：OpenCLI')).toBeInTheDocument()
-    expect(screen.getByText('Rev 1')).toBeInTheDocument()
+    expect(screen.getByText(`Rev ${opencliPluginFixture.configuration.revision}`)).toBeInTheDocument()
 
     // 顶层 9 个标量字段渲染（以 baseUrl/connectTimeoutMillis/requestTimeoutMillis 为代表）
     expect(screen.getByRole('textbox', { name: 'baseUrl' })).toHaveValue('http://127.0.0.1:8080')
@@ -211,7 +80,9 @@ describe('PluginConfigModal OpenCLI regression coverage', () => {
 
     const secretItemInstanceId = screen.getByTestId('secret-item-instanceId')
     expect(within(secretItemInstanceId).getByText('instanceId')).toBeInTheDocument()
-    expect(within(secretItemInstanceId).getByText('Private OpenCLI instance identifier')).toBeInTheDocument()
+    expect(within(secretItemInstanceId).getByText(
+      opencliPluginFixture.configuration.secrets.instanceId.description,
+    )).toBeInTheDocument()
     expect(within(secretItemInstanceId).getByText('已配置')).toBeInTheDocument()
   })
 
@@ -244,8 +115,8 @@ describe('PluginConfigModal OpenCLI regression coverage', () => {
       expect(pluginsService.updateConfiguration).toHaveBeenCalledWith(
         'opencli',
         expect.objectContaining({
-          expectedEpoch: '3',
-          expectedRevision: '1',
+          expectedEpoch: opencliPluginFixture.desiredEpoch,
+          expectedRevision: opencliPluginFixture.configuration.revision,
           secretPatch: {
             apiKey: { operation: 'KEEP' },
             instanceId: { operation: 'KEEP' },
@@ -263,7 +134,7 @@ describe('PluginConfigModal OpenCLI regression coverage', () => {
     expect(parsedValues).not.toHaveProperty('instanceId')
   })
 
-  it('performs SET secret operations for both apiKey and private instanceId without trimming', async () => {
+  it('sets the authentication key and private identity without adding either to ordinary values', async () => {
     const user = userEvent.setup()
     vi.mocked(pluginsService.updateConfiguration).mockResolvedValue(opencliPluginFixture)
     renderModal()
@@ -275,7 +146,7 @@ describe('PluginConfigModal OpenCLI regression coverage', () => {
     await user.click(screen.getByRole('option', { name: '设置新值' }))
 
     const apiKeyInput = screen.getByLabelText(/New secret for apiKey/i)
-    const testApiKey = '  sk-opencli-live-secret-999  '
+    const testApiKey = 'synthetic-opencli-replacement'
     await user.type(apiKeyInput, testApiKey)
     expect(apiKeyInput).toHaveValue(testApiKey)
 
@@ -286,7 +157,7 @@ describe('PluginConfigModal OpenCLI regression coverage', () => {
     await user.click(screen.getByRole('option', { name: '设置新值' }))
 
     const instInput = screen.getByLabelText(/New secret for instanceId/i)
-    const testInstanceId = '  inst-private-edge-42  '
+    const testInstanceId = 'inst-private-edge-42'
     await user.type(instInput, testInstanceId)
     expect(instInput).toHaveValue(testInstanceId)
 
@@ -297,8 +168,8 @@ describe('PluginConfigModal OpenCLI regression coverage', () => {
       expect(pluginsService.updateConfiguration).toHaveBeenCalledWith(
         'opencli',
         expect.objectContaining({
-          expectedEpoch: '3',
-          expectedRevision: '1',
+          expectedEpoch: opencliPluginFixture.desiredEpoch,
+          expectedRevision: opencliPluginFixture.configuration.revision,
           secretPatch: {
             apiKey: {
               operation: 'SET',
@@ -316,6 +187,40 @@ describe('PluginConfigModal OpenCLI regression coverage', () => {
     await waitFor(() => {
       expect(onSuccess).toHaveBeenCalled()
     })
+    expect(apiKeyInput).toHaveValue('')
+    expect(instInput).toHaveValue('')
+    expect(vi.mocked(pluginsService.updateConfiguration).mock.calls[0][1].valuesJson)
+      .not.toContain(testInstanceId)
+    expect(vi.mocked(pluginsService.updateConfiguration).mock.calls[0][1].valuesJson)
+      .not.toContain(testApiKey)
+  })
+
+  it('preserves padded secret input for server rejection instead of silently changing the value', async () => {
+    const user = userEvent.setup()
+    const message = 'SET value must not have surrounding whitespace'
+    vi.mocked(pluginsService.updateConfiguration).mockRejectedValue(new ApiError(message, 400))
+    renderModal()
+    const secretItem = screen.getByTestId('secret-item-apiKey')
+    await user.click(within(secretItem).getByRole('button', { name: /Operation for apiKey/i }))
+    await user.click(screen.getByRole('option', { name: '设置新值' }))
+    const input = screen.getByLabelText(/New secret for apiKey/i)
+    const raw = '  synthetic-key-with-padding  '
+    await user.type(input, raw)
+    await user.click(screen.getByRole('button', { name: '保存配置' }))
+
+    await waitFor(() => expect(screen.getByText(message)).toBeInTheDocument())
+    expect(pluginsService.updateConfiguration).toHaveBeenCalledWith(
+      'opencli',
+      expect.objectContaining({
+        secretPatch: {
+          apiKey: { operation: 'SET', value: raw },
+          instanceId: { operation: 'KEEP' },
+        },
+      }),
+    )
+    expect(onSuccess).not.toHaveBeenCalled()
+    expect(onClose).not.toHaveBeenCalled()
+    expect(input).toHaveValue('')
   })
 
   it('manages CLEAR operation independently on protected instanceId with confirmation safeguard', async () => {
@@ -349,8 +254,8 @@ describe('PluginConfigModal OpenCLI regression coverage', () => {
       expect(pluginsService.updateConfiguration).toHaveBeenCalledWith(
         'opencli',
         expect.objectContaining({
-          expectedEpoch: '3',
-          expectedRevision: '1',
+          expectedEpoch: opencliPluginFixture.desiredEpoch,
+          expectedRevision: opencliPluginFixture.configuration.revision,
           secretPatch: {
             apiKey: { operation: 'KEEP' },
             instanceId: { operation: 'CLEAR' },
