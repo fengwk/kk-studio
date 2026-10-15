@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.platform.harness.tool.gateway;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -294,20 +293,43 @@ class ToolExecutionGatewayCleanupTest {
   }
 
   @Test
-  void handledListenerRuntimeFailureRetainsSuppressedCleanupWithoutSecondTerminal() {
-    IllegalStateException primary = new IllegalStateException("listener");
-    AssertionError cleanup = new AssertionError("catalog close");
+  void handledListenerRuntimeFailureDoesNotSwallowCleanupError() {
+    assertHandledListenerCleanupFailure(
+        new IllegalStateException("listener"), new AssertionError("catalog close"));
+  }
+
+  @Test
+  void handledListenerRuntimeFailureDoesNotSwallowCleanupRuntimeException() {
+    assertHandledListenerCleanupFailure(
+        new IllegalStateException("listener"), new IllegalArgumentException("catalog close"));
+  }
+
+  @Test
+  void identicalHandledListenerAndCleanupRuntimeExceptionIsNotSelfSuppressed() {
+    IllegalStateException failure = new IllegalStateException("same failure");
+    assertHandledListenerCleanupFailure(failure, failure);
+  }
+
+  private static void assertHandledListenerCleanupFailure(
+      RuntimeException listenerFailure, Throwable cleanup) {
     Fixture fixture = new Fixture(cleanup);
     ToolGateway.Listener listener = mock(ToolGateway.Listener.class);
-    doThrow(primary).when(listener).onSucceeded(any(ToolSuccess.class));
+    doThrow(listenerFailure).when(listener).onSucceeded(any(ToolSuccess.class));
     ToolExecutionListener callback = fixture.executeWithoutTerminal(listener);
 
-    // RuntimeException 沿用 listener 的隔离策略，目录清理异常仍附加在原异常上。
-    assertDoesNotThrow(() -> callback.onComplete(ToolGatewayTestSupport.result("call-1", "ok")));
-    assertArrayEquals(new Throwable[] {cleanup}, primary.getSuppressed());
+    // worker 已退出；回调中的 Runtime 被隔离，但目录关闭失败仍须原样抛出。
+    Throwable thrown =
+        assertThrows(
+            cleanup.getClass(),
+            () -> callback.onComplete(ToolGatewayTestSupport.result("call-1", "ok")));
+    assertSame(cleanup, thrown);
+    assertEquals(0, listenerFailure.getSuppressed().length);
+    assertEquals(0, cleanup.getSuppressed().length);
     verify(listener).onSucceeded(any(ToolSuccess.class));
     verify(listener, never()).onUnknown(any());
     fixture.assertQuotaAvailable();
+    assertEquals(1, fixture.tool.requests.size());
+    assertEquals(1, fixture.catalog.closedLeases());
   }
 
   @Test
