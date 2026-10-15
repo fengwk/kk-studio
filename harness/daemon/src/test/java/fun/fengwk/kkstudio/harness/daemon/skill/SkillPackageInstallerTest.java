@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.daemon.skill;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -20,10 +21,13 @@ import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 /** {@link SkillPackageInstaller} 的原子安装、回滚、自愈与安全隔离测试。 */
 class SkillPackageInstallerTest {
@@ -325,8 +329,8 @@ class SkillPackageInstallerTest {
   }
 
   /**
-   * 意图（负向对照）：后端提交对象是 SHA-1；64 位 SHA-256 commit 必须在任何 clone/fetch/临时目录副作用之前以固定 INVALID_TARGET_COMMIT
-   * 拒绝。旧实现把它放进 Git 层，会退化为 INSTALL_FAILED/COMMIT_NOT_FOUND 等其它失败。
+   * 意图：后端提交对象是 SHA-1，只接受 40 位小写 commit；64 位 SHA-256 必须在任何 clone/fetch/临时目录副作用之前以
+   * INVALID_TARGET_COMMIT 拒绝。
    */
   @Test
   void sha256CommitIsRejectedBeforeAnyCloneOrFetch() {
@@ -461,6 +465,90 @@ class SkillPackageInstallerTest {
 
     // 明确记录数据状态：旧包已移入 backup 且不再位于 skills，绝不伪装成功
     assertFalse(Files.exists(pkgDir));
+    // 唯一真实 backup 仍在磁盘上，且旧 SKILL.md 原文未变——双失败绝不丢弃旧包。
+    List<Path> backups = new ArrayList<>();
+    try (DirectoryStream<Path> entries = Files.newDirectoryStream(backupRoot)) {
+      for (Path entry : entries) {
+        backups.add(entry);
+      }
+    }
+    assertEquals(1, backups.size(), "exactly one backup directory must remain: " + backups);
+    assertEquals(
+        "# Version 1\n", Files.readString(backups.get(0).resolve("rollback-skill/SKILL.md")));
+  }
+
+  /**
+   * 意图：临时 clone 只用于读取对象，绝不检出工作区。发布时同 uuid 的 {@code .clone} 目录只应含 {@code .git}；即使 branch HEAD 是更新的
+   * commit，最终安装内容也必须来自请求的 exact 旧 commit。
+   */
+  @Test
+  void temporaryCloneIsNeverCheckedOutAndExactCommitWins() throws Exception {
+    String oldCommitId;
+    String headCommitId;
+    try (Git git = Git.init().setDirectory(remoteRepoDir.toFile()).call()) {
+      Path skillDir = remoteRepoDir.resolve("checkout-proof");
+      Files.createDirectories(skillDir);
+      Files.writeString(skillDir.resolve("SKILL.md"), "# OLD\n");
+      git.add().addFilepattern(".").call();
+      oldCommitId = git.commit().setMessage("old").call().getId().name();
+
+      Files.writeString(skillDir.resolve("SKILL.md"), "# NEW\n");
+      git.add().addFilepattern(".").call();
+      headCommitId = git.commit().setMessage("new").call().getId().name();
+    }
+    String remoteUrl = remoteRepoDir.toUri().toString();
+    assertNotEquals(oldCommitId, headCommitId, "branch HEAD must differ from the requested commit");
+
+    // 先装 branch HEAD，制造一个会被替换的已安装包。
+    installer.install("checkout-pkg", remoteUrl, "master", headCommitId);
+    Path pkgDir = skillsRoot.resolve("checkout-pkg");
+    assertEquals("# NEW\n", Files.readString(pkgDir.resolve("checkout-proof/SKILL.md")));
+
+    // 发布 staging 时，同 uuid 的临时 clone 尚未清理：借发布移动观察它是否被检出。
+    AtomicReference<List<String>> cloneEntries = new AtomicReference<>();
+    SkillPackageInstaller observingInstaller =
+        new SkillPackageInstaller(
+            skillsRoot,
+            stagingRoot,
+            backupRoot,
+            1000,
+            1000,
+            executor,
+            (source, target) -> {
+              if (stagingRoot.equals(source.getParent())
+                  && !source.getFileName().toString().endsWith(".clone")) {
+                List<String> entries = new ArrayList<>();
+                try (DirectoryStream<Path> clones =
+                    Files.newDirectoryStream(stagingRoot, "checkout-pkg.*.clone")) {
+                  for (Path cloneDir : clones) {
+                    try (DirectoryStream<Path> cloneContent = Files.newDirectoryStream(cloneDir)) {
+                      for (Path entry : cloneContent) {
+                        entries.add(entry.getFileName().toString());
+                      }
+                    }
+                  }
+                }
+                cloneEntries.set(entries);
+              }
+              try {
+                Files.move(source, target, StandardCopyOption.ATOMIC_MOVE);
+              } catch (AtomicMoveNotSupportedException error) {
+                Files.move(source, target);
+              }
+            });
+
+    InstalledSkillPackage installed =
+        observingInstaller.install("checkout-pkg", remoteUrl, "master", oldCommitId);
+
+    assertEquals(oldCommitId, installed.installedCommit());
+    // 临时 clone 只含 .git：既无 branch HEAD 的 SKILL.md，也无任何目标文件。
+    assertEquals(
+        List.of(".git"), cloneEntries.get(), "the temporary clone must never be checked out");
+    // 最终安装内容来自 exact 旧 commit，而不是更新的 branch HEAD。
+    assertEquals("# OLD\n", Files.readString(pkgDir.resolve("checkout-proof/SKILL.md")));
+    assertEquals(oldCommitId + "\n", Files.readString(pkgDir.resolve(".kkstudio-commit")));
+    assertDirectoryEmpty(stagingRoot);
+    assertDirectoryEmpty(backupRoot);
   }
 
   /** 验证包名、commit、URL 以及分支等非法参数在产生任何文件系统副作用前被拒绝。 */

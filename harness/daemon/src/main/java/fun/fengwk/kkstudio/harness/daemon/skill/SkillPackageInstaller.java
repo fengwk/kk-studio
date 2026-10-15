@@ -319,8 +319,8 @@ public final class SkillPackageInstaller {
                 try {
                   directoryMover.move(backupDir, packageDir);
                 } catch (Exception rollbackError) {
-                  // 交换与回滚同时失败：主错误保留为 cause、回滚错误保留为 suppressed，并给出区别于普通安装失败的安全提示：
-                  // 旧包既不在 skills 也不在 staging，只剩 backup 未被删除，绝不能把这种情况当作普通失败静默处理。
+                  // 交换与回滚同时失败：主错误保留为 cause、回滚错误保留为 suppressed；此时旧包仅存于 backup，
+                  // 必须以专用文案上报，绝不伪装成功或静默处理。
                   moveError.addSuppressed(rollbackError);
                   throw new SkillSyncException(
                       "INSTALL_FAILED",
