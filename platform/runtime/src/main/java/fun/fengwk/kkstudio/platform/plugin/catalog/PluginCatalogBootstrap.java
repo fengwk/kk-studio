@@ -127,11 +127,31 @@ public final class PluginCatalogBootstrap {
     return restore(winner, contexts, builtins, builtinAdapters);
   }
 
-  private PluginCatalogSnapshot restore(
+  /**
+   * 按已初始化 record 严格恢复完整快照；启动初始化与运行期对账共用这一条路径。
+   *
+   * <p>安装集合必须精确等于 manifest，每个 entry 的 revision 不得晚于 record 的 epoch，history row 的
+   * id/revision/code/schema/capability/generation/context 必须与 entry 逐字段相等，code/schema 还必须等于当前 JAR，
+   * 最后能力与 catalog 指纹必须与 manifest 一致。本入口只读且可复用：它不写库、不采用当前 defaults、也不把未初始化形态偷偷初始化， {@code
+   * catalog.epoch() == 0} 直接失败。
+   *
+   * @param contexts 为每个安装 id 提供 scoped {@link PluginContext}
+   * @param builtins 容器真正内置的 Harness 贡献
+   * @param builtinAdapters 容器真正内置的 Canvas adapter
+   * @throws IllegalStateException record 未初始化、身份漂移或指纹不符时（只带受控 stage，不含底层 cause）
+   */
+  public PluginCatalogSnapshot restore(
       PluginCatalogRecord catalog,
       BiFunction<String, PluginCredentialReference, PluginContext> contexts,
       List<HarnessContributor> builtins,
       List<CanvasFunctionAdapter> builtinAdapters) {
+    Objects.requireNonNull(catalog, "catalog");
+    Objects.requireNonNull(contexts, "contexts");
+    Objects.requireNonNull(builtins, "builtins");
+    Objects.requireNonNull(builtinAdapters, "builtinAdapters");
+    if (catalog.epoch() == UNINITIALIZED_EPOCH) {
+      throw failure("restore-uninitialized", null, null);
+    }
     PluginCatalogManifest manifest = catalog.manifest();
     if (!new LinkedHashSet<>(registry.pluginIds()).equals(manifest.plugins().keySet())) {
       throw failure("restore-install-set", null, null);
