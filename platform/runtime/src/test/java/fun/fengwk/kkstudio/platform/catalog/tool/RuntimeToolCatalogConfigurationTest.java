@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.platform.catalog.tool;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -8,66 +10,62 @@ import static org.mockito.Mockito.mock;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
-import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
+import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRuntime;
 
 import java.util.concurrent.ExecutorService;
 
 /**
- * {@link RuntimeToolCatalogConfiguration} 的 Spring 装配测试： 验证两个源 bean（静态适配器与 MCP 动态目录）与唯一的 @Primary
- * 复合目录均成功暴露且未发生循环/歧义注入。
+ * {@link RuntimeToolCatalogConfiguration} 的 Spring 装配测试：只暴露动态 MCP 目录与唯一的 epoch 租用
+ * source，且不再发布任何静态目录单例。
  */
 class RuntimeToolCatalogConfigurationTest {
 
   private final ApplicationContextRunner runner =
       new ApplicationContextRunner()
-          .withBean(HarnessCatalog.class, () -> mock(HarnessCatalog.class))
+          .withBean(PluginCatalogRuntime.class, () -> mock(PluginCatalogRuntime.class))
           .withBean(McpServerRepository.class, () -> mock(McpServerRepository.class))
           .withBean("toolGatewayExecutor", ExecutorService.class, () -> mock(ExecutorService.class))
           .withUserConfiguration(RuntimeToolCatalogConfiguration.class);
 
   @Test
-  void exposesSourcesAndPrimaryCompositeBean() {
-    // 意图：验证 Spring 上下文中正确暴露源 bean 与 primary aggregate RuntimeToolCatalog bean
+  void exposesSingleEpochBoundSourceAndDynamicMcpCatalog() {
+    // 意图：验证上下文中只暴露一个 runtimeToolCatalogSource，且它就是 PluginRuntimeToolCatalogSource
     runner.run(
         context -> {
-          assertTrue(context.containsBean("harnessToolCatalogAdapter"));
           assertTrue(context.containsBean("mcpToolCatalog"));
-          assertTrue(context.containsBean("runtimeToolCatalog"));
+          assertTrue(context.containsBean("runtimeToolCatalogSource"));
+          assertEquals(1, context.getBeansOfType(RuntimeToolCatalogSource.class).size());
 
-          HarnessToolCatalogAdapter adapter = context.getBean(HarnessToolCatalogAdapter.class);
-          McpToolCatalog mcp = context.getBean(McpToolCatalog.class);
+          RuntimeToolCatalogSource source = context.getBean(RuntimeToolCatalogSource.class);
+          assertSame(context.getBean("runtimeToolCatalogSource"), source);
+          assertInstanceOf(PluginRuntimeToolCatalogSource.class, source);
 
-          RuntimeToolCatalog primary = context.getBean(RuntimeToolCatalog.class);
-          assertSame(context.getBean("runtimeToolCatalog"), primary);
-          assertInstanceOf(CompositeRuntimeToolCatalog.class, primary);
-
-          // 验证按具体类型仍可注入独立的源 bean
-          assertSame(adapter, context.getBean("harnessToolCatalogAdapter"));
-          assertSame(mcp, context.getBean("mcpToolCatalog"));
+          // 静态目录单例已被删除：不得再出现按当前目录无 epoch 解析的执行入口。
+          assertFalse(context.containsBean("harnessToolCatalogAdapter"));
+          assertFalse(context.containsBean("runtimeToolCatalog"));
+          // 唯一的 RuntimeToolCatalog bean 就是动态 MCP 目录本身：不再有把静态目录与它聚合起来的执行入口。
+          assertEquals(1, context.getBeansOfType(RuntimeToolCatalog.class).size());
+          assertSame(context.getBean("mcpToolCatalog"), context.getBean(RuntimeToolCatalog.class));
         });
   }
 
   @Test
   void unrelatedConcreteCatalogBeansDoNotSuppressRequiredNamedSources() {
-    // 意图：同类型扩展 bean 不得误触发条件装配并移除聚合器按名称依赖的内置 source。
-    HarnessToolCatalogAdapter otherAdapter =
-        new HarnessToolCatalogAdapter(mock(HarnessCatalog.class));
+    // 意图：同类型扩展 bean 不得误触发条件装配并移除按名称依赖的内置 source。
     McpToolCatalog otherMcp =
         new McpToolCatalog(mock(McpServerRepository.class), mock(ExecutorService.class));
 
     runner
-        .withBean(
-            "otherHarnessToolCatalogAdapter", HarnessToolCatalogAdapter.class, () -> otherAdapter)
         .withBean("otherMcpToolCatalog", McpToolCatalog.class, () -> otherMcp)
         .run(
             context -> {
-              assertTrue(context.containsBean("harnessToolCatalogAdapter"));
               assertTrue(context.containsBean("mcpToolCatalog"));
-              assertTrue(context.containsBean("runtimeToolCatalog"));
+              assertTrue(context.containsBean("runtimeToolCatalogSource"));
               assertInstanceOf(
-                  CompositeRuntimeToolCatalog.class, context.getBean(RuntimeToolCatalog.class));
+                  PluginRuntimeToolCatalogSource.class,
+                  context.getBean(RuntimeToolCatalogSource.class));
             });
   }
 }

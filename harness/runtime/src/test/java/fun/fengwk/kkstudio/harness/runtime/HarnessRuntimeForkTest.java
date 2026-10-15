@@ -18,6 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -178,6 +179,12 @@ class HarnessRuntimeForkTest {
     ToolResultMetadata metadata =
         ((MessagePayload) copiedToolResult.payload()).toolResultMetadata();
     assertEquals(copiedAssistant.id(), metadata.assistantEntryId());
+    assertNotNull(metadata.binding());
+    assertEquals(
+        ((MessagePayload) singleRole(sourcePath.entries(), AgentMessageRole.TOOL).payload())
+            .toolResultMetadata()
+            .binding(),
+        metadata.binding());
     assertNotEquals(source.assistantEntryId(), copiedAssistant.id());
     // 复制不携带任何活跃 invocation / command / join：新 Thread 上只有本批初始命令。
     assertEquals(
@@ -616,7 +623,10 @@ class HarnessRuntimeForkTest {
                 ToolResultStatus.SUCCEEDED,
                 false,
                 null,
-                null)),
+                null,
+                HarnessRuntimeTestSupport.tooledModelRequest(List.of("bash"))
+                    .toolBindings()
+                    .get(0))),
         createdAt);
   }
 

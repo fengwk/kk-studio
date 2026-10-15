@@ -159,6 +159,7 @@ class HistoryNormalizationTest {
             ToolResultStatus.SUCCEEDED,
             false,
             null,
+            null,
             null));
   }
 

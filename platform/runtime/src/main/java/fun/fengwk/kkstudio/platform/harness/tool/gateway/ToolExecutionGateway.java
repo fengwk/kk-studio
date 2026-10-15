@@ -11,11 +11,8 @@ import fun.fengwk.kkstudio.harness.common.tool.ToolErrorGuidance.ExecutionFact;
 import fun.fengwk.kkstudio.harness.contributor.api.AppendCustomEntry;
 import fun.fengwk.kkstudio.harness.contributor.api.BoundEnvironment;
 import fun.fengwk.kkstudio.harness.contributor.api.BranchView;
-import fun.fengwk.kkstudio.harness.contributor.api.ContributionId;
-import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
-import fun.fengwk.kkstudio.harness.contributor.api.StateDeclaration;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionContext;
@@ -23,7 +20,6 @@ import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityBusyException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCall;
@@ -39,7 +35,6 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityT
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
 import fun.fengwk.kkstudio.harness.runtime.admission.ConcurrencyAdmission;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAccess;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAccessMode;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
@@ -55,11 +50,11 @@ import fun.fengwk.kkstudio.harness.runtime.port.ToolSuccess;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolResultSizeLimits;
 import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
-import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
-import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
+import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
+import fun.fengwk.kkstudio.platform.catalog.tool.ToolBindingMismatchException;
 import fun.fengwk.kkstudio.platform.harness.GatewayExecutorSafety;
 import fun.fengwk.kkstudio.platform.harness.contributor.ContributorBranchViewLoader;
 
@@ -70,6 +65,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -82,8 +79,13 @@ import java.util.function.Supplier;
  * <p>{@link #preflight} 只校验冻结绑定与当前目录是否一致，拒绝未选择 Environment 的环境工具，然后执行权限判定。{@link #start}
  * 获取并发租约，装配分支视图与可选环境绑定，再提交异步执行。
  *
+ * <p>{@link #preflight} 与 {@link #start} 都按 {@code binding.catalogEpoch()} 取得该 epoch
+ * 的目录租用并严格取回冻结贡献：epoch、 定义、贡献身份、requirements 与插件来源都必须一致，绝不按当前同名工具重放。
+ *
  * <p>工具在句柄 {@link ToolGateway.Handle#activate()} 前不会开始执行。回调桥以有界 FIFO
- * 串行派发信号，并保证单次终态；取消、拒绝、启动失败或终态都会释放租约。远程发送结果不确定时上报 {@code unknown}，不按普通失败处理。
+ * 串行派发信号，并保证单次终态；取消、拒绝、启动失败或终态都会释放并发租约。目录租用则贯穿校验与执行，只有在终态/取消决议完成且该调用的 {@link
+ * ToolExecutionHandle#quiescence()} 完成后才释放一次——取消只是通知，绝不代表工作线程已经退出。远程发送结果不确定时上报 {@code
+ * unknown}，不按普通失败处理。
  *
  * <p>终态结果进入 Runtime 前会校验 call ID、自定义条目注册与 WRITE 声明，并按大小限制外部化内容。
  */
@@ -123,8 +125,7 @@ public final class ToolExecutionGateway implements ToolGateway {
   private static final String VERIFY_EFFECT_NEXT_ACTION =
       "Check whether the tool already took effect before calling it again";
 
-  private final RuntimeToolCatalog toolCatalog;
-  private final HarnessCatalog harnessCatalog;
+  private final RuntimeToolCatalogSource toolCatalogSource;
   private final ContributorBranchViewLoader contributorBranchViewLoader;
   private final EnvironmentCapabilityTransport capabilityTransport;
   private final PermissionEvaluator permissionEvaluator;
@@ -136,8 +137,7 @@ public final class ToolExecutionGateway implements ToolGateway {
   private final ConcurrencyAdmission admission;
 
   public ToolExecutionGateway(
-      RuntimeToolCatalog toolCatalog,
-      HarnessCatalog harnessCatalog,
+      RuntimeToolCatalogSource toolCatalogSource,
       ContributorBranchViewLoader contributorBranchViewLoader,
       EnvironmentCapabilityTransport capabilityTransport,
       PermissionEvaluator permissionEvaluator,
@@ -149,8 +149,7 @@ public final class ToolExecutionGateway implements ToolGateway {
       Supplier<Duration> retryDelay,
       Clock clock,
       ConcurrencyAdmission admission) {
-    this.toolCatalog = Objects.requireNonNull(toolCatalog, "toolCatalog");
-    this.harnessCatalog = Objects.requireNonNull(harnessCatalog, "harnessCatalog");
+    this.toolCatalogSource = Objects.requireNonNull(toolCatalogSource, "toolCatalogSource");
     this.contributorBranchViewLoader =
         Objects.requireNonNull(contributorBranchViewLoader, "contributorBranchViewLoader");
     this.capabilityTransport = Objects.requireNonNull(capabilityTransport, "capabilityTransport");
@@ -171,88 +170,29 @@ public final class ToolExecutionGateway implements ToolGateway {
 
   private record ResolvedContribution(ToolContribution contribution, ToolInvocationError error) {}
 
-  private ResolvedContribution validateContribution(ToolBinding binding) {
-    AgentToolDefinition frozenDefinition = binding.definition();
-    String toolName = frozenDefinition.descriptor().name();
-    ToolContribution contribution = toolCatalog.findTool(toolName).orElse(null);
-    if (contribution == null) {
+  /**
+   * 严格从本次租用取回冻结贡献：epoch、完整定义、贡献身份、requirements 与插件来源都必须一致。
+   *
+   * <p>任何不一致都映射为确定性拒绝，绝不按当前同名工具重放，也绝不因此产生任何外部副作用。
+   */
+  private ResolvedContribution requireContribution(
+      RuntimeToolCatalogSource.Lease lease, ToolBinding binding) {
+    try {
+      return new ResolvedContribution(lease.require(binding), null);
+    } catch (ToolBindingMismatchException mismatch) {
+      String kind =
+          mismatch.reason() == ToolBindingMismatchException.Reason.NOT_FOUND
+              ? TOOL_NOT_FOUND_KIND
+              : TOOL_DEFINITION_MISMATCH_KIND;
       return new ResolvedContribution(
           null,
           new ToolInvocationError(
-              TOOL_NOT_FOUND_KIND,
+              kind,
               ToolErrorGuidance.message(
-                  "Frozen tool definition " + toolName + " is not registered",
+                  mismatch.getMessage(),
                   ExecutionFact.NOT_EXECUTED,
                   DEFINITION_MISMATCH_NEXT_ACTION)));
     }
-    if (!contribution.definition().equals(frozenDefinition)) {
-      return new ResolvedContribution(
-          null,
-          new ToolInvocationError(
-              TOOL_DEFINITION_MISMATCH_KIND,
-              ToolErrorGuidance.message(
-                  "Frozen tool definition " + toolName + " does not match its catalog definition",
-                  ExecutionFact.NOT_EXECUTED,
-                  DEFINITION_MISMATCH_NEXT_ACTION)));
-    }
-    ContributorBinding frozenContributor = binding.contributor();
-    ContributionId expectedContributionId =
-        new ContributionId(
-            new ContributorId(frozenContributor.contributorId()), frozenContributor.localName());
-    if (!contribution.id().equals(expectedContributionId)) {
-      return new ResolvedContribution(
-          null,
-          new ToolInvocationError(
-              TOOL_DEFINITION_MISMATCH_KIND,
-              ToolErrorGuidance.message(
-                  "Frozen contributor binding "
-                      + frozenContributor.contributorId()
-                      + "/"
-                      + frozenContributor.localName()
-                      + " does not match the catalog contribution",
-                  ExecutionFact.NOT_EXECUTED,
-                  DEFINITION_MISMATCH_NEXT_ACTION)));
-    }
-    ToolRequirements requirements = contribution.requirements();
-    if (binding.environmentSupport() != requirements.environmentSupport()) {
-      return new ResolvedContribution(
-          null,
-          new ToolInvocationError(
-              TOOL_DEFINITION_MISMATCH_KIND,
-              ToolErrorGuidance.message(
-                  "Frozen tool environment requirement does not match catalog requirements: "
-                      + toolName,
-                  ExecutionFact.NOT_EXECUTED,
-                  DEFINITION_MISMATCH_NEXT_ACTION)));
-    }
-    if (requirements.requiredEnvironmentId() != null
-        && binding.environmentId() != null
-        && !requirements.requiredEnvironmentId().equals(binding.environmentId())) {
-      return new ResolvedContribution(
-          null,
-          new ToolInvocationError(
-              TOOL_DEFINITION_MISMATCH_KIND,
-              ToolErrorGuidance.message(
-                  "Frozen tool bound environment "
-                      + binding.environmentId()
-                      + " does not match catalog required environment: "
-                      + requirements.requiredEnvironmentId(),
-                  ExecutionFact.NOT_EXECUTED,
-                  DEFINITION_MISMATCH_NEXT_ACTION)));
-    }
-    if (!stateAccessesMatch(frozenContributor, requirements)) {
-      return new ResolvedContribution(
-          null,
-          new ToolInvocationError(
-              TOOL_DEFINITION_MISMATCH_KIND,
-              ToolErrorGuidance.message(
-                  "Tool definition "
-                      + toolName
-                      + " no longer matches its frozen state access declaration",
-                  ExecutionFact.NOT_EXECUTED,
-                  DEFINITION_MISMATCH_NEXT_ACTION)));
-    }
-    return new ResolvedContribution(contribution, null);
   }
 
   /**
@@ -276,53 +216,41 @@ public final class ToolExecutionGateway implements ToolGateway {
             "Select an Environment for the branch, then call the tool again"));
   }
 
-  private static boolean stateAccessesMatch(
-      ContributorBinding binding, ToolRequirements requirements) {
-    if (binding.stateAccesses().size() != requirements.stateAccesses().size()) {
-      return false;
-    }
-    for (int i = 0; i < binding.stateAccesses().size(); i++) {
-      ContributorStateAccess frozen = binding.stateAccesses().get(i);
-      StateDeclaration current = requirements.stateAccesses().get(i);
-      if (!frozen.customType().equals(current.customType())
-          || !frozen.mode().name().equals(current.mode().name())) {
-        return false;
-      }
-    }
-    return true;
-  }
-
   /** 只读校验冻结工具绑定，并返回当前权限策略的判定。 */
   @Override
   public PreflightResult preflight(ToolInvocationRequest request) {
     Objects.requireNonNull(request, "request");
-    ResolvedContribution resolved = validateContribution(request.binding());
-    if (resolved.error() != null) {
-      return new ToolGateway.Deny(resolved.error());
+    // 校验全程持有 binding 冻结 epoch 的目录租用：工具定义、权限身份与 state access 都来自同一冻结目录。
+    try (RuntimeToolCatalogSource.Lease lease =
+        toolCatalogSource.acquire(request.binding().catalogEpoch())) {
+      ResolvedContribution resolved = requireContribution(lease, request.binding());
+      if (resolved.error() != null) {
+        return new ToolGateway.Deny(resolved.error());
+      }
+      // 未选择 Environment 的 branch 仍声明并允许调用环境工具；此时必须在权限判定之前给出可操作的确定性拒绝，
+      // 既不弹审批也不消耗权限策略。
+      ToolInvocationError environmentNotSelected = environmentNotSelected(request.binding());
+      if (environmentNotSelected != null) {
+        return new ToolGateway.Deny(environmentNotSelected);
+      }
+      ToolSettings settings = toolSettingsProvider.get();
+      PermissionEvaluator.Evaluation evaluation =
+          permissionEvaluator.evaluate(
+              new PermissionEvaluationContext(
+                  resolved.contribution().definition().descriptor().name(),
+                  request.call().argumentsJson(),
+                  settings));
+      PermissionAction action = evaluation.action();
+      return switch (action) {
+        case ALLOW -> new ToolGateway.Allow();
+        case ASK -> new ToolGateway.Ask("Permission rules require approval");
+        case DENY -> new ToolGateway.Deny(
+            new ToolInvocationError(PERMISSION_DENIED_KIND, PERMISSION_DENIED_MESSAGE));
+      };
     }
-    // 未选择 Environment 的 branch 仍声明并允许调用环境工具；此时必须在权限判定之前给出可操作的确定性拒绝，
-    // 既不弹审批也不消耗权限策略。
-    ToolInvocationError environmentNotSelected = environmentNotSelected(request.binding());
-    if (environmentNotSelected != null) {
-      return new ToolGateway.Deny(environmentNotSelected);
-    }
-    ToolSettings settings = toolSettingsProvider.get();
-    PermissionEvaluator.Evaluation evaluation =
-        permissionEvaluator.evaluate(
-            new PermissionEvaluationContext(
-                resolved.contribution().definition().descriptor().name(),
-                request.call().argumentsJson(),
-                settings));
-    PermissionAction action = evaluation.action();
-    return switch (action) {
-      case ALLOW -> new ToolGateway.Allow();
-      case ASK -> new ToolGateway.Ask("Permission rules require approval");
-      case DENY -> new ToolGateway.Deny(
-          new ToolInvocationError(PERMISSION_DENIED_KIND, PERMISSION_DENIED_MESSAGE));
-    };
   }
 
-  /** 获取并发租约并准备异步执行；实际工具调用等待返回句柄被激活。 */
+  /** 获取并发与目录租约并准备异步执行；实际工具调用等待返回句柄被激活。 */
   @Override
   public StartResult start(Execution execution, Listener listener) {
     Objects.requireNonNull(execution, "execution");
@@ -332,19 +260,26 @@ public final class ToolExecutionGateway implements ToolGateway {
       return new ToolGateway.RetryLater(retryDelay.get());
     }
     ConcurrencyAdmission.Lease lease = acquired.orElseThrow();
+    ToolResourceLease acquiredResources = null;
     try {
-      ResolvedContribution resolved = validateContribution(execution.request().binding());
+      // Start 成功的目录租用必须转移到执行生命周期：它钉住本次调用仍可能访问的 Plugin 实例，绝不在 start 返回时释放。
+      acquiredResources =
+          new ToolResourceLease(
+              toolCatalogSource.acquire(execution.request().binding().catalogEpoch()));
+      final ToolResourceLease resources = acquiredResources;
+      ResolvedContribution resolved =
+          requireContribution(resources.lease(), execution.request().binding());
       if (resolved.error() != null) {
-        lease.close();
-        return new ToolGateway.Rejected(resolved.error());
+        return reject(resources, lease, resolved.error());
       }
       ToolContribution contribution = resolved.contribution();
       Tool tool = contribution.tool();
       ToolDescriptor currentDescriptor = tool == null ? null : tool.descriptor();
       if (!Objects.equals(
           currentDescriptor, execution.request().binding().definition().descriptor())) {
-        lease.close();
-        return new ToolGateway.Rejected(
+        return reject(
+            resources,
+            lease,
             new ToolInvocationError(
                 TOOL_DEFINITION_MISMATCH_KIND,
                 ToolErrorGuidance.message(
@@ -357,8 +292,7 @@ public final class ToolExecutionGateway implements ToolGateway {
       ToolInvocationError environmentNotSelected =
           environmentNotSelected(execution.request().binding());
       if (environmentNotSelected != null) {
-        lease.close();
-        return new ToolGateway.Rejected(environmentNotSelected);
+        return reject(resources, lease, environmentNotSelected);
       }
 
       BranchView branch =
@@ -390,8 +324,9 @@ public final class ToolExecutionGateway implements ToolGateway {
                 context);
       } catch (IllegalArgumentException invalidRequest) {
         // arguments 级超时非法（例如非正数）或请求无法按 descriptor 构造：确定性拒绝，绝不重试也绝不执行。
-        lease.close();
-        return new ToolGateway.Rejected(
+        return reject(
+            resources,
+            lease,
             new ToolInvocationError(
                 INVALID_REQUEST_KIND,
                 ToolErrorGuidance.message(
@@ -407,29 +342,53 @@ public final class ToolExecutionGateway implements ToolGateway {
               currentDescriptor.name(),
               toolRequest.call().id(),
               lease,
-              harnessCatalog,
+              resources,
               contribution,
               execution.request().binding());
-      GatewayHandle handle = new GatewayHandle(bridge, lease);
+      GatewayHandle handle = new GatewayHandle(bridge, lease, resources);
       StartResult result =
           submitLocalExecution(
-              execution, bridge, handle, () -> runTool(tool, toolRequest, bridge, handle));
+              execution,
+              bridge,
+              handle,
+              resources,
+              () -> runTool(tool, toolRequest, bridge, handle, resources));
       if (!(result instanceof ToolGateway.Started)) {
+        // 未进入执行：没有任何在途工作，目录租用立即释放。
+        resources.resolve();
         lease.close();
       }
       return result;
     } catch (RuntimeException | Error failure) {
+      if (acquiredResources != null) {
+        acquiredResources.resolve();
+      }
       lease.close();
       throw failure;
     }
   }
 
-  /** 调用贡献者 Tool，将同步异常或空句柄转为错误回调，并把有效句柄的取消动作绑定到 Gateway。 */
+  /** 拒绝路径：目录租用与并发租用各释放一次，返回确定性拒绝。 */
+  private static ToolGateway.Rejected reject(
+      ToolResourceLease resources,
+      ConcurrencyAdmission.Lease admissionLease,
+      ToolInvocationError error) {
+    resources.resolve();
+    admissionLease.close();
+    return new ToolGateway.Rejected(error);
+  }
+
+  /**
+   * 调用贡献者 Tool，将同步异常或空句柄转为错误回调，并把有效句柄的取消动作与静止事实绑定到 Gateway。
+   *
+   * <p>只有真实返回的句柄才登记静止：同步抛错与空句柄都没有可等待的在途工作，目录租用在执行体退出后立即释放。
+   */
   private void runTool(
       Tool tool,
       ToolExecutionRequest request,
       GatedToolExecutionListener bridge,
-      GatewayHandle handle) {
+      GatewayHandle handle,
+      ToolResourceLease resources) {
     ToolExecutionHandle toolHandle;
     try {
       toolHandle = tool.execute(request, bridge);
@@ -443,7 +402,17 @@ public final class ToolExecutionGateway implements ToolGateway {
               "tool returned a null execution handle; outcome cannot be confirmed"));
       return;
     }
-    handle.attach(toolHandle::cancel);
+    try {
+      resources.attach(toolHandle);
+      handle.attach(toolHandle::cancel);
+    } catch (RuntimeException failure) {
+      // 句柄自身违反静态契约（静止 stage 抛错或为 null）时绝不能把它漏成 executor 里的无处理异常：那样本次调用永远没有终态。
+      // 结果保持 UNKNOWN——异步工作是否已停止不可知，因此既不声称未执行，也不假称已静止。
+      bridge.onError(
+          new IllegalStateException(
+              "tool execution handle cannot report quiescence; outcome cannot be confirmed",
+              failure));
+    }
   }
 
   /** 提交等待激活门控的本地任务，将线程池拒绝映射为重试，其他提交异常映射为结果不确定。 */
@@ -451,6 +420,7 @@ public final class ToolExecutionGateway implements ToolGateway {
       Execution execution,
       GatedToolExecutionListener bridge,
       GatewayHandle handle,
+      ToolResourceLease resources,
       Runnable runner) {
     try {
       executor.execute(
@@ -463,7 +433,19 @@ public final class ToolExecutionGateway implements ToolGateway {
               }
               return;
             }
-            runner.run();
+            // 取消与启动在同一仲裁点裁决：取消先赢时绝不触碰工具与插件资源；启动先赢时取消必须等执行体退出与静止。
+            if (!resources.tryStart()) {
+              return;
+            }
+            try {
+              runner.run();
+            } catch (Error failure) {
+              // 致命错误仍须先提交可观测 UNKNOWN，随后保留原 Error 传播给执行器。
+              bridge.onError(failure);
+              throw failure;
+            } finally {
+              resources.runnerFinished();
+            }
           });
     } catch (RejectedExecutionException rejected) {
       bridge.cancel();
@@ -544,6 +526,13 @@ public final class ToolExecutionGateway implements ToolGateway {
           @Override
           public boolean isCancelled() {
             return transportHandle.isCancelled();
+          }
+
+          @Override
+          public CompletionStage<Void> quiescence() {
+            // 纯转发句柄不拥有任何 per-plugin 本地资源，因此本地静止立即成立；这不表示远端能力已经停止，
+            // 远端停止与副作用是否发生是另外的事实。
+            return CompletableFuture.completedFuture(null);
           }
         };
       } catch (EnvironmentCapabilityBusyException busy) {
@@ -628,6 +617,127 @@ public final class ToolExecutionGateway implements ToolGateway {
     }
   }
 
+  /**
+   * 目录资源租用的释放守卫：取消/拒绝与真正开始执行在同一把锁内仲裁，且只有在终态决议、执行体退出与该调用静止都成立后释放一次。
+   *
+   * <p>该租用钉住本次调用仍可能访问的 Plugin 实例，因此取消绝不能被当作线程已退出。释放条件是：
+   *
+   * <ul>
+   *   <li>终态或取消决议已经提交（{@link #resolve()}）；
+   *   <li>执行体已经退出（{@link #runnerFinished()}），或从未获准进入执行段（{@link #tryStart()} 拒绝、激活前取消、执行前提交失败）；
+   *   <li>若本次调用返回了工具句柄，则其 {@link ToolExecutionHandle#quiescence()} 已完成；没有句柄时立刻满足。
+   * </ul>
+   *
+   * <p>{@link #tryStart()} 与 {@link #resolve()} 互斥：取消先赢时执行体绝不触碰工具与插件资源，执行先赢时取消必须等执行体退出与静止。
+   * 释放动作在锁内认领资格、在锁外执行，因此关闭插件快照时不会把插件代码拖进本锁。
+   */
+  static final class ToolResourceLease {
+
+    private final RuntimeToolCatalogSource.Lease lease;
+    private final Object monitor = new Object();
+    private boolean resolved;
+    private boolean started;
+    private boolean runnerFinished;
+    private boolean quiescent;
+    private boolean closed;
+    private ToolExecutionHandle handle;
+
+    ToolResourceLease(RuntimeToolCatalogSource.Lease lease) {
+      this.lease = Objects.requireNonNull(lease, "lease");
+    }
+
+    RuntimeToolCatalogSource.Lease lease() {
+      return lease;
+    }
+
+    /**
+     * 与 {@link #resolve()} 原子仲裁本次调用是否获准进入执行段：这是取消与执行之间唯一的裁决点。
+     *
+     * @return {@code true} 表示获准执行；{@code false} 表示已经决议（取消或终态），执行体必须立刻返回且绝不触碰工具
+     */
+    boolean tryStart() {
+      synchronized (monitor) {
+        if (resolved) {
+          return false;
+        }
+        started = true;
+        return true;
+      }
+    }
+
+    /** 执行体已退出（正常、异常或同步终结）：此后不再有新的在途工作。 */
+    void runnerFinished() {
+      boolean close;
+      synchronized (monitor) {
+        runnerFinished = true;
+        close = claimClose();
+      }
+      closeLease(close);
+    }
+
+    /**
+     * 登记本次调用返回的真实句柄，并以它的 {@link ToolExecutionHandle#quiescence()} 作为静止事实。
+     *
+     * <p>句柄违反契约（抛错或返回 null stage）时不假装静止：异常向上抛出，由执行边界转为可观测的 UNKNOWN 终态，租用保持钉住， 避免在异步工作仍在访问插件时释放
+     * Plugin 实例。
+     */
+    void attach(ToolExecutionHandle toolHandle) {
+      Objects.requireNonNull(toolHandle, "toolHandle");
+      synchronized (monitor) {
+        // 先登记句柄再读取静止事实：句柄违约时本租用仍被本次调用钉住，绝不因为读不到静止就当作已静止。
+        handle = toolHandle;
+      }
+      CompletionStage<Void> stage = toolHandle.quiescence();
+      if (stage == null) {
+        throw new IllegalStateException(
+            "tool execution handle returned a null quiescence stage; quiescence cannot be confirmed");
+      }
+      stage.whenComplete(
+          (ignored, failure) -> {
+            boolean closeAfter;
+            synchronized (monitor) {
+              quiescent = true;
+              closeAfter = claimClose();
+            }
+            closeLease(closeAfter);
+          });
+    }
+
+    /** 终态或取消决议已提交：此后只需等待执行体退出与静止。 */
+    void resolve() {
+      boolean close;
+      synchronized (monitor) {
+        resolved = true;
+        close = claimClose();
+      }
+      closeLease(close);
+    }
+
+    /** 在锁内认领释放资格，保证目录租用恰好释放一次。 */
+    private boolean claimClose() {
+      if (!resolved) {
+        return false;
+      }
+      if (started && !runnerFinished) {
+        return false;
+      }
+      if (handle != null && !quiescent) {
+        return false;
+      }
+      if (closed) {
+        return false;
+      }
+      closed = true;
+      return true;
+    }
+
+    private void closeLease(boolean close) {
+      if (close) {
+        lease.close();
+      }
+    }
+  }
+
   private interface CancellableHandle {
     void cancel();
   }
@@ -638,10 +748,15 @@ public final class ToolExecutionGateway implements ToolGateway {
     private final AtomicReference<CancellableHandle> cancellableHandle = new AtomicReference<>();
     private final GatedToolExecutionListener bridge;
     private final ConcurrencyAdmission.Lease lease;
+    private final ToolResourceLease resources;
 
-    GatewayHandle(GatedToolExecutionListener bridge, ConcurrencyAdmission.Lease lease) {
+    GatewayHandle(
+        GatedToolExecutionListener bridge,
+        ConcurrencyAdmission.Lease lease,
+        ToolResourceLease resources) {
       this.bridge = Objects.requireNonNull(bridge, "bridge");
       this.lease = Objects.requireNonNull(lease, "lease");
+      this.resources = Objects.requireNonNull(resources, "resources");
     }
 
     ToolExecutionListener bridge() {
@@ -663,6 +778,7 @@ public final class ToolExecutionGateway implements ToolGateway {
         try {
           bridge.activate();
         } catch (RuntimeException failure) {
+          resources.resolve();
           lease.close();
           throw failure;
         }
@@ -679,19 +795,26 @@ public final class ToolExecutionGateway implements ToolGateway {
             handle.cancel();
           }
         } finally {
+          // 取消只是决议：目录租用只在此登记，真实释放仍需等待执行体退出（quiescence）。
+          resources.resolve();
           lease.close();
         }
       }
     }
   }
 
-  /** 在激活前缓冲回调，激活后串行派发，并将一次终态作为租约释放边界。 */
+  /**
+   * 在激活前缓冲回调，激活后串行派发，并把一次终态作为并发租约的释放边界。
+   *
+   * <p>目录资源租用不在此释放，只登记终态决议：真实释放由执行体退出与该调用静止共同决定。
+   */
   private static final class GatedToolExecutionListener implements ToolExecutionListener {
     private final ToolGateway.Listener listener;
     private final ToolResultFinalizer finalizer;
     private final String toolName;
     private final String expectedCallId;
     private final ConcurrencyAdmission.Lease lease;
+    private final ToolResourceLease resources;
     private final HarnessCatalog harnessCatalog;
     private final ToolContribution contribution;
     private final ToolBinding binding;
@@ -710,7 +833,7 @@ public final class ToolExecutionGateway implements ToolGateway {
         String toolName,
         String expectedCallId,
         ConcurrencyAdmission.Lease lease,
-        HarnessCatalog harnessCatalog,
+        ToolResourceLease resources,
         ToolContribution contribution,
         ToolBinding binding) {
       this.listener = Objects.requireNonNull(listener, "listener");
@@ -718,7 +841,8 @@ public final class ToolExecutionGateway implements ToolGateway {
       this.toolName = Objects.requireNonNull(toolName, "toolName");
       this.expectedCallId = Objects.requireNonNull(expectedCallId, "expectedCallId");
       this.lease = Objects.requireNonNull(lease, "lease");
-      this.harnessCatalog = Objects.requireNonNull(harnessCatalog, "harnessCatalog");
+      this.resources = Objects.requireNonNull(resources, "resources");
+      this.harnessCatalog = resources.lease().harnessCatalog();
       this.contribution = Objects.requireNonNull(contribution, "contribution");
       this.binding = Objects.requireNonNull(binding, "binding");
     }
@@ -754,6 +878,7 @@ public final class ToolExecutionGateway implements ToolGateway {
         queue.clear();
         monitor.notifyAll();
       }
+      resources.resolve();
       lease.close();
     }
 
@@ -1084,6 +1209,7 @@ public final class ToolExecutionGateway implements ToolGateway {
         } catch (RuntimeException ignored) {
         }
       } finally {
+        resources.resolve();
         lease.close();
       }
     }

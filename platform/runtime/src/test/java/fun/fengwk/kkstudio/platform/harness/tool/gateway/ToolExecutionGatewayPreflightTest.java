@@ -38,9 +38,7 @@ import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpDiscoveryStatus;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
-import fun.fengwk.kkstudio.platform.catalog.tool.CompositeRuntimeToolCatalog;
-import fun.fengwk.kkstudio.platform.catalog.tool.HarnessToolCatalogAdapter;
-import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
+import fun.fengwk.kkstudio.platform.catalog.tool.TestRuntimeToolCatalogSource;
 
 import java.time.Duration;
 import java.util.List;
@@ -122,8 +120,7 @@ class ToolExecutionGatewayPreflightTest {
         new ToolGatewayTestSupport.FakeResourceStore();
     ToolExecutionGateway gateway =
         new ToolExecutionGateway(
-            new HarnessToolCatalogAdapter(catalog),
-            catalog,
+            TestRuntimeToolCatalogSource.of(catalog),
             ToolGatewayTestSupport.FAILING_CONTRIBUTOR_BRANCH_LOADER,
             new ToolGatewayTestSupport.FakeTransport(),
             evaluator,
@@ -145,9 +142,11 @@ class ToolExecutionGatewayPreflightTest {
                 new ToolInvocationRequest(
                     new ToolCall("unknown", "missing", "{}"),
                     new ToolBinding(
+                        1L,
                         new AgentToolDefinition(unknown, ToolVisibility.SELECTABLE),
                         new ContributorBinding("test", "missing", List.of()),
                         EnvironmentSupport.NONE,
+                        null,
                         null,
                         null))));
     assertEquals(ToolExecutionGateway.TOOL_NOT_FOUND_KIND, unknownDeny.error().kind());
@@ -166,9 +165,11 @@ class ToolExecutionGatewayPreflightTest {
                 new ToolInvocationRequest(
                     new ToolCall("mismatch", "demo", "{}"),
                     new ToolBinding(
+                        1L,
                         hostDefinition(mismatched),
                         new ContributorBinding("test", "host-tool", List.of()),
                         EnvironmentSupport.NONE,
+                        null,
                         null,
                         null))));
     assertEquals(ToolExecutionGateway.TOOL_DEFINITION_MISMATCH_KIND, mismatchDeny.error().kind());
@@ -196,8 +197,7 @@ class ToolExecutionGatewayPreflightTest {
         new ToolGatewayTestSupport.FakeResourceStore();
     ToolExecutionGateway gateway =
         new ToolExecutionGateway(
-            new HarnessToolCatalogAdapter(catalog),
-            catalog,
+            TestRuntimeToolCatalogSource.of(catalog),
             ToolGatewayTestSupport.FAILING_CONTRIBUTOR_BRANCH_LOADER,
             new ToolGatewayTestSupport.FakeTransport(),
             evaluator,
@@ -234,9 +234,11 @@ class ToolExecutionGatewayPreflightTest {
         new ToolInvocationRequest(
             new ToolCall("call-1", PREFLIGHT_DESCRIPTOR.name(), argumentsJson),
             new ToolBinding(
+                1L,
                 hostDefinition(PREFLIGHT_DESCRIPTOR),
                 new ContributorBinding("test", "host-tool", List.of()),
                 EnvironmentSupport.NONE,
+                null,
                 null,
                 null));
     ToolExecutionGateway gateway =
@@ -365,11 +367,13 @@ class ToolExecutionGatewayPreflightTest {
         new ToolInvocationRequest(
             new ToolCall("call-1", "read", argumentsJson),
             new ToolBinding(
+                1L,
                 contribution.definition(),
                 contributor,
                 EnvironmentSupport.OPTIONAL,
                 environmentId,
-                "test-env"));
+                "test-env",
+                null));
     return gateway.preflight(request);
   }
 
@@ -393,9 +397,11 @@ class ToolExecutionGatewayPreflightTest {
         new ToolInvocationRequest(
             new ToolCall("call-1", PREFLIGHT_DESCRIPTOR.name(), argumentsJson),
             new ToolBinding(
+                1L,
                 hostDefinition(PREFLIGHT_DESCRIPTOR),
                 new ContributorBinding("test", "host-tool", List.of()),
                 EnvironmentSupport.NONE,
+                null,
                 null,
                 null));
     return gateway.preflight(request);
@@ -430,14 +436,9 @@ class ToolExecutionGatewayPreflightTest {
     when(repo.listTools("mcp_server")).thenReturn(List.of(mcpTool));
 
     HarnessCatalog harnessCatalog = HarnessCatalog.from(List.of());
-    RuntimeToolCatalog toolCatalog =
-        new CompositeRuntimeToolCatalog(
-            List.of(new HarnessToolCatalogAdapter(harnessCatalog), mcpCatalog));
-
     ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
-            toolCatalog,
-            harnessCatalog,
+            TestRuntimeToolCatalogSource.of(harnessCatalog, mcpCatalog),
             new ToolGatewayTestSupport.FakeTransport(),
             new ToolGatewayTestSupport.FakeResourceStore(),
             new ToolGatewayTestSupport.DirectQueueExecutor(),
@@ -445,17 +446,19 @@ class ToolExecutionGatewayPreflightTest {
             ToolGatewayTestSupport.settings(PermissionAction.ALLOW),
             new ConcurrencyAdmission(Integer.MAX_VALUE));
 
-    ToolContribution contribution = toolCatalog.findTool("mcp_mcp_server_echo").orElseThrow();
+    ToolContribution contribution = mcpCatalog.findTool("mcp_mcp_server_echo").orElseThrow();
     ToolInvocationRequest request =
         new ToolInvocationRequest(
             new ToolCall("call-mcp", "mcp_mcp_server_echo", "{}"),
             new ToolBinding(
+                1L,
                 contribution.definition(),
                 new ContributorBinding(
                     contribution.id().contributorId().value(),
                     contribution.id().localName(),
                     List.of()),
                 EnvironmentSupport.NONE,
+                null,
                 null,
                 null));
 

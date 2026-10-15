@@ -641,6 +641,7 @@ final class DispatcherTestSupport {
 
   private static ModelRequestSpec modelRequest() {
     return new ModelRequestSpec(
+        1L,
         ProviderType.OPENAI,
         new UUID(0L, 1L),
         modelDescriptor(),
@@ -656,6 +657,7 @@ final class DispatcherTestSupport {
   private static ModelRequestSpec tooledRequest() {
     ModelRequestSpec base = modelRequest();
     return new ModelRequestSpec(
+        1L,
         base.providerType(),
         base.providerConnectionGenerationId(),
         base.model(),
@@ -688,6 +690,7 @@ final class DispatcherTestSupport {
     return new ToolInvocationRequest(
         new ToolCall("call-1", "bash", "{}"),
         new ToolBinding(
+            1L,
             new AgentToolDefinition(
                 new ToolDescriptor(
                     "bash",
@@ -700,6 +703,7 @@ final class DispatcherTestSupport {
             new ContributorBinding("test", "bash", List.of()),
             EnvironmentSupport.REQUIRED,
             ENV_ID,
-            "test-env"));
+            "test-env",
+            null));
   }
 }

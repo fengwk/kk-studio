@@ -17,6 +17,7 @@ import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
+import fun.fengwk.kkstudio.platform.testing.TestCatalogSources;
 import fun.fengwk.kkstudio.share.ai.catalog.ToolCatalogEntryDTO;
 
 import java.time.Duration;
@@ -39,7 +40,8 @@ class ToolCatalogQueryServiceTest {
     RuntimeToolCatalog catalog = mock(RuntimeToolCatalog.class);
     when(catalog.selectableTools()).thenReturn(List.of(t1, t2));
 
-    ToolCatalogQueryService service = new ToolCatalogQueryService(catalog);
+    ToolCatalogQueryService service =
+        new ToolCatalogQueryService(TestCatalogSources.singleLease(catalog));
     List<ToolCatalogEntryDTO> dtos = service.listTools();
 
     assertEquals(2, dtos.size());

@@ -47,9 +47,11 @@ final class InvocationTestData {
 
   static ToolBinding host(String name) {
     return new ToolBinding(
+        1L,
         definition(name),
         new ContributorBinding("core", name, List.of()),
         EnvironmentSupport.NONE,
+        null,
         null,
         null);
   }
@@ -60,11 +62,13 @@ final class InvocationTestData {
 
   static ToolBinding environment(String name, EnvironmentId environment) {
     return new ToolBinding(
+        1L,
         definition(name),
         new ContributorBinding("base", name, List.of()),
         EnvironmentSupport.REQUIRED,
         environment,
-        "dev");
+        "dev",
+        null);
   }
 
   private static AgentToolDefinition definition(String name) {
@@ -115,6 +119,7 @@ final class InvocationTestData {
   static ModelRequestSpec requestSpec(List<ToolBinding> bindings) {
     ProviderRequest provider = providerRequest(bindings);
     return new ModelRequestSpec(
+        1L,
         ProviderType.OPENAI,
         new UUID(0L, 1L),
         provider.model(),

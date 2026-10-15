@@ -45,7 +45,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
-import fun.fengwk.kkstudio.platform.catalog.tool.HarnessToolCatalogAdapter;
+import fun.fengwk.kkstudio.platform.catalog.tool.TestRuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.harness.contributor.ContributorBranchViewLoader;
 
 import java.time.Clock;
@@ -207,7 +207,7 @@ class ToolExecutionGatewayEffectsTest {
         new ToolInvocationRequest(
             new ToolCall("call-1", "effects_tool", "{}"),
             new ToolBinding(
-                DEFINITION, mismatchedContributor, EnvironmentSupport.NONE, null, null));
+                1L, DEFINITION, mismatchedContributor, EnvironmentSupport.NONE, null, null, null));
     ToolGateway.Execution execution =
         new ToolGateway.Execution(
             ToolGatewayTestSupport.INVOCATION_ID,
@@ -264,8 +264,7 @@ class ToolExecutionGatewayEffectsTest {
         new ToolGatewayTestSupport.FakeResourceStore();
     ToolExecutionGateway gateway =
         new ToolExecutionGateway(
-            new HarnessToolCatalogAdapter(catalog),
-            catalog,
+            TestRuntimeToolCatalogSource.of(catalog),
             (assistantEntryId, contributorId) -> emptyBranch(),
             new ToolGatewayTestSupport.FakeTransport(),
             new PermissionEvaluator(new BashSurfaceAnalyzer()),
@@ -289,7 +288,7 @@ class ToolExecutionGatewayEffectsTest {
     ToolInvocationRequest request =
         new ToolInvocationRequest(
             new ToolCall("call-1", "effects_tool", "{}"),
-            new ToolBinding(DEFINITION, binding, EnvironmentSupport.NONE, null, null));
+            new ToolBinding(1L, DEFINITION, binding, EnvironmentSupport.NONE, null, null, null));
     ToolGateway.Execution exec =
         new ToolGateway.Execution(
             ToolGatewayTestSupport.INVOCATION_ID,
@@ -354,8 +353,7 @@ class ToolExecutionGatewayEffectsTest {
         new ToolGatewayTestSupport.FakeResourceStore();
     ToolExecutionGateway gateway =
         new ToolExecutionGateway(
-            new HarnessToolCatalogAdapter(catalog),
-            catalog,
+            TestRuntimeToolCatalogSource.of(catalog),
             (assistantEntryId, contributorId) -> emptyBranch(),
             new ToolGatewayTestSupport.FakeTransport(),
             new PermissionEvaluator(new BashSurfaceAnalyzer()),
@@ -379,7 +377,7 @@ class ToolExecutionGatewayEffectsTest {
     ToolInvocationRequest request =
         new ToolInvocationRequest(
             new ToolCall("call-1", "effects_tool", "{}"),
-            new ToolBinding(DEFINITION, binding, EnvironmentSupport.NONE, null, null));
+            new ToolBinding(1L, DEFINITION, binding, EnvironmentSupport.NONE, null, null, null));
     ToolGateway.Execution exec =
         new ToolGateway.Execution(
             ToolGatewayTestSupport.INVOCATION_ID,
@@ -453,8 +451,7 @@ class ToolExecutionGatewayEffectsTest {
         new ToolGatewayTestSupport.FakeResourceStore();
     ToolExecutionGateway gateway =
         new ToolExecutionGateway(
-            new HarnessToolCatalogAdapter(catalog),
-            catalog,
+            TestRuntimeToolCatalogSource.of(catalog),
             loader,
             new ToolGatewayTestSupport.FakeTransport(),
             new PermissionEvaluator(new BashSurfaceAnalyzer()),
@@ -508,7 +505,8 @@ class ToolExecutionGatewayEffectsTest {
       ToolInvocationRequest request =
           new ToolInvocationRequest(
               new ToolCall("call-1", "effects_tool", "{}"),
-              new ToolBinding(DEFINITION, contributor, EnvironmentSupport.NONE, null, null));
+              new ToolBinding(
+                  1L, DEFINITION, contributor, EnvironmentSupport.NONE, null, null, null));
       return new ToolGateway.Execution(
           ToolGatewayTestSupport.INVOCATION_ID,
           ToolGatewayTestSupport.THREAD_ID,

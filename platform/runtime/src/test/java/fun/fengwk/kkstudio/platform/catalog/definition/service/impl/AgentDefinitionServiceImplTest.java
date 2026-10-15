@@ -23,7 +23,7 @@ import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepos
 import fun.fengwk.kkstudio.platform.catalog.definition.service.converter.AgentDefinitionConverter;
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelDefaultVariantResolver;
-import fun.fengwk.kkstudio.platform.catalog.tool.HarnessToolCatalogAdapter;
+import fun.fengwk.kkstudio.platform.catalog.tool.TestRuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
 import fun.fengwk.kkstudio.platform.error.AiInUseException;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
@@ -382,7 +382,7 @@ public class AgentDefinitionServiceImplTest {
         resolver,
         variants,
         new AgentDefinitionConfigValidator(
-            new HarnessToolCatalogAdapter(HarnessCatalog.from(List.of()))),
+            TestRuntimeToolCatalogSource.of(HarnessCatalog.from(List.of()))),
         new AgentDefinitionConfigCodec(JsonMapper.builder().build()));
   }
 

@@ -321,6 +321,7 @@ class CompactionFileSectionsTest {
                         ToolResultStatus.SUCCEEDED,
                         false,
                         null,
+                        null,
                         null)),
                 BASE));
       }

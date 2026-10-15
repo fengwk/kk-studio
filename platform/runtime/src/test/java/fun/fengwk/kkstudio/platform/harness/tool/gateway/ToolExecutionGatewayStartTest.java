@@ -304,11 +304,13 @@ class ToolExecutionGatewayStartTest {
         new ToolInvocationRequest(
             new ToolCall("call-1", "no_such_daemon_tool", "{}"),
             new ToolBinding(
+                1L,
                 unknownDefinition,
                 new ContributorBinding("test", "missing", List.of()),
                 EnvironmentSupport.REQUIRED,
                 ToolGatewayTestSupport.ENV_A,
-                "test-env"));
+                "test-env",
+                null));
     ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(),
@@ -346,11 +348,13 @@ class ToolExecutionGatewayStartTest {
         new ToolInvocationRequest(
             new ToolCall("call-1", "bash", "{}"),
             new ToolBinding(
+                1L,
                 driftedDefinition,
                 contributor,
                 EnvironmentSupport.REQUIRED,
                 ToolGatewayTestSupport.ENV_A,
-                "test-env"));
+                "test-env",
+                null));
     ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(),
@@ -419,9 +423,11 @@ class ToolExecutionGatewayStartTest {
 
     ToolBinding mismatchedContributorBinding =
         new ToolBinding(
+            1L,
             new AgentToolDefinition(DESCRIPTOR, ToolVisibility.SELECTABLE),
             new ContributorBinding("wrong-contributor", "host-tool", List.of()),
             EnvironmentSupport.NONE,
+            null,
             null,
             null);
     ToolGateway.StartResult result =
@@ -448,11 +454,13 @@ class ToolExecutionGatewayStartTest {
         ToolGatewayTestSupport.defaultCatalog().findTool("bash").orElseThrow();
     ToolBinding mismatchedBinding =
         new ToolBinding(
+            1L,
             bashContribution.definition(),
             new ContributorBinding("wrong-contributor", "environment.bash", List.of()),
             EnvironmentSupport.REQUIRED,
             ToolGatewayTestSupport.ENV_A,
-            "test-env");
+            "test-env",
+            null);
     ToolGateway.StartResult result =
         gateway.start(
             ToolGatewayTestSupport.execution(

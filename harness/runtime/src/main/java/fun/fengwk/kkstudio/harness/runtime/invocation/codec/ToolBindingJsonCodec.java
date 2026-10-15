@@ -10,6 +10,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAccess;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAccessMode;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolPluginSource;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.codec.AgentToolDefinitionJsonCodec;
 
@@ -31,11 +32,18 @@ public final class ToolBindingJsonCodec {
   public ObjectNode encodeNode(ToolBinding binding) {
     Objects.requireNonNull(binding, "binding");
     ObjectNode node = InvocationJsonSupport.NODES.objectNode();
+    node.put("catalogEpoch", binding.catalogEpoch());
     node.set("definition", DEFINITION_CODEC.encodeNode(binding.definition()));
     node.set("contributor", encodeContributor(binding.contributor()));
     node.put("environmentSupport", binding.environmentSupport().name());
     InvocationJsonSupport.putNullable(node, "environmentId", binding.environmentId());
     InvocationJsonSupport.putNullable(node, "environmentName", binding.environmentName());
+    // 插件工具携带冻结来源；内置与 MCP 工具没有插件来源，输出显式 null。
+    if (binding.pluginSource() == null) {
+      node.putNull("pluginSource");
+    } else {
+      node.set("pluginSource", encodePluginSource(binding.pluginSource()));
+    }
     return node;
   }
 
@@ -48,11 +56,14 @@ public final class ToolBindingJsonCodec {
     InvocationJsonSupport.requireFields(
         node,
         CONTEXT,
+        "catalogEpoch",
         "definition",
         "contributor",
         "environmentSupport",
         "environmentId",
-        "environmentName");
+        "environmentName",
+        "pluginSource");
+    long catalogEpoch = InvocationJsonSupport.positiveLong(node, "catalogEpoch", CONTEXT);
     AgentToolDefinition definition =
         DEFINITION_CODEC.decodeNode(InvocationJsonSupport.required(node, "definition", CONTEXT));
     ContributorBinding contributor =
@@ -63,9 +74,51 @@ public final class ToolBindingJsonCodec {
     EnvironmentId environmentId =
         InvocationJsonSupport.nullableEnvironmentId(node, "environmentId", CONTEXT);
     String environmentName = InvocationJsonSupport.nullableText(node, "environmentName", CONTEXT);
-    // 非法组合（NONE 携带环境、REQUIRED 缺少环境、id/name 不成对）由 ToolBinding 构造边界 fail closed。
+    JsonNode pluginSourceNode = InvocationJsonSupport.declared(node, "pluginSource", CONTEXT);
+    ToolPluginSource pluginSource =
+        pluginSourceNode.isNull() ? null : decodePluginSource(pluginSourceNode);
+    // 非法组合（NONE 携带环境、REQUIRED 缺少环境、id/name 不成对）由 ToolBinding 构造边界 fail
+    // closed。
     return new ToolBinding(
-        definition, contributor, environmentSupport, environmentId, environmentName);
+        catalogEpoch,
+        definition,
+        contributor,
+        environmentSupport,
+        environmentId,
+        environmentName,
+        pluginSource);
+  }
+
+  private static ObjectNode encodePluginSource(ToolPluginSource source) {
+    ObjectNode node = InvocationJsonSupport.NODES.objectNode();
+    node.put("pluginId", source.pluginId());
+    node.put("pluginVersion", source.pluginVersion());
+    node.put("configRevision", source.configRevision());
+    node.put("capabilityFingerprint", source.capabilityFingerprint());
+    node.put("contextFingerprint", source.contextFingerprint());
+    node.put("authGeneration", source.authGeneration().toString());
+    return node;
+  }
+
+  private static ToolPluginSource decodePluginSource(JsonNode value) {
+    String context = CONTEXT + ".pluginSource";
+    ObjectNode node = InvocationJsonSupport.object(value, context);
+    InvocationJsonSupport.requireFields(
+        node,
+        context,
+        "pluginId",
+        "pluginVersion",
+        "configRevision",
+        "capabilityFingerprint",
+        "contextFingerprint",
+        "authGeneration");
+    return new ToolPluginSource(
+        InvocationJsonSupport.text(node, "pluginId", context),
+        InvocationJsonSupport.text(node, "pluginVersion", context),
+        InvocationJsonSupport.positiveLong(node, "configRevision", context),
+        InvocationJsonSupport.text(node, "capabilityFingerprint", context),
+        InvocationJsonSupport.text(node, "contextFingerprint", context),
+        InvocationJsonSupport.requiredUuid(node, "authGeneration", context));
   }
 
   private static ObjectNode encodeContributor(ContributorBinding contributor) {

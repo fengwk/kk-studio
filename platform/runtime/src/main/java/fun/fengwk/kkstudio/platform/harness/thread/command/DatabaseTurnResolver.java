@@ -56,6 +56,7 @@ import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogQueryService;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
+import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
@@ -87,7 +88,7 @@ import java.util.UUID;
  * Issue"，也不据此覆写 Environment 或注入工具。
  *
  * <p>普通 branch 的输入事实只有 candidate path 的 {@link BranchSettings}（agentName / {@link ModelSelection} /
- * 可空 environmentName）；实现按这些精确引用读取最新 {@link RuntimeToolCatalog} / environment 事实，Agent 的
+ * 可空 environmentName）；实现按这些精确引用读取一次 current 租用的 {@link RuntimeToolCatalog} / environment 事实，Agent 的
  * tools/skills/subagents 每个新 turn 都从最新 Agent 配置派生，绝不回读 Chat defaults，也绝不静默丢弃缺失能力。Environment 只由
  * {@link BranchSettings#environmentName()} 在每轮 turn 开始时按全局唯一且不可变的 name 解析出当时 的内部路由身份（{@link
  * EnvironmentId}）：要求环境的工具（REQUIRED）在 Branch 未选择 Environment 时从最终模型工具列表过滤，已选择环境时按解析出的环境绑定； OPTIONAL
@@ -95,7 +96,7 @@ import java.util.UUID;
  * Prompt 三元组；内容由统一 read 按稳定 path 读取。环境上下文（name、system、user、home、date、note）只来自选中的 Environment
  * 与连接行保留的最近一次 READY 宿主 payload；引用缺失或失效时确定性拒绝规划 （返回 {@link Result.Rejected}，稳定 error code {@value
  * #REJECTION_CODE}）。只有 repository / registry 等基础设施异常向上传播， 由 ThreadProcessor reschedule。YOLO 不进入
- * spec。非工具元数据（context projectors）从保留的 {@link HarnessCatalog} 提取。
+ * spec。非工具元数据（context projectors）从同一次租用的 Harness 目录提取。
  */
 @Component
 public final class DatabaseTurnResolver implements TurnResolver {
@@ -109,8 +110,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
   private final AgentDefinitionConfigCodec agentConfigCodec;
   private final AgentModelRuntimeConfigParser modelConfigParser;
   private final ProviderFactories providerFactories;
-  private final RuntimeToolCatalog toolCatalog;
-  private final HarnessCatalog harnessCatalog;
+  private final RuntimeToolCatalogSource toolCatalogSource;
   private final EnvironmentRegistry environmentRegistry;
   private final EnvironmentRepository environmentRepository;
   private final SkillCatalogQueryService skillCatalogQueryService;
@@ -127,8 +127,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
       AgentDefinitionConfigCodec agentConfigCodec,
       AgentModelRuntimeConfigParser modelConfigParser,
       ProviderFactories providerFactories,
-      RuntimeToolCatalog toolCatalog,
-      HarnessCatalog harnessCatalog,
+      RuntimeToolCatalogSource toolCatalogSource,
       EnvironmentRegistry environmentRegistry,
       EnvironmentRepository environmentRepository,
       SkillCatalogQueryService skillCatalogQueryService,
@@ -143,8 +142,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
     this.agentConfigCodec = Objects.requireNonNull(agentConfigCodec, "agentConfigCodec");
     this.modelConfigParser = Objects.requireNonNull(modelConfigParser, "modelConfigParser");
     this.providerFactories = Objects.requireNonNull(providerFactories, "providerFactories");
-    this.toolCatalog = Objects.requireNonNull(toolCatalog, "toolCatalog");
-    this.harnessCatalog = Objects.requireNonNull(harnessCatalog, "harnessCatalog");
+    this.toolCatalogSource = Objects.requireNonNull(toolCatalogSource, "toolCatalogSource");
     this.environmentRegistry = Objects.requireNonNull(environmentRegistry, "environmentRegistry");
     this.environmentRepository =
         Objects.requireNonNull(environmentRepository, "environmentRepository");
@@ -261,6 +259,14 @@ public final class DatabaseTurnResolver implements TurnResolver {
   }
 
   private LiveTurnPlan.Planned plan(EntryPath path, BranchSettings settings, Instant now) {
+    // 一次 current 租用包住 complete resolve：工具 schema、插件来源与 contributor 元数据都来自同一个冻结 epoch。
+    try (RuntimeToolCatalogSource.Lease lease = toolCatalogSource.acquireCurrent()) {
+      return plan(path, settings, now, lease);
+    }
+  }
+
+  private LiveTurnPlan.Planned plan(
+      EntryPath path, BranchSettings settings, Instant now, RuntimeToolCatalogSource.Lease lease) {
     UUID sessionId = path.root().sessionId();
 
     AgentDefinition agent =
@@ -316,8 +322,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
     EnvironmentId environmentId = currentEnvironment.environmentId();
     List<LiveTurnPlan.PlannedSkill> skills = resolveSkills(environmentId, agentConfig.getSkills());
     List<SubagentBinding> subagentBindings = resolveSubagents(agentConfig.getSubagents());
-    List<String> toolNames = resolveToolNames(agentConfig);
-    PlannedTools tools = resolveTools(environmentId, environmentName, toolNames);
+    List<String> toolNames = resolveToolNames(lease, agentConfig);
+    PlannedTools tools = resolveTools(lease, environmentId, environmentName, toolNames);
     List<ToolBinding> toolBindings = tools.bindings();
 
     if (!toolBindings.isEmpty() && !parsedModel.tools()) {
@@ -349,7 +355,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
             currentEnvironment,
             skills.stream().map(LiveTurnPlan.PlannedSkill::promptEntry).toList(),
             subagentBindings,
-            path);
+            path,
+            lease.harnessCatalog());
     int contextWindow = contextWindow(parsedModel);
     int outputTokens =
         outputTokens(
@@ -365,6 +372,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
                 sessionId.toString());
     return new LiveTurnPlan.Planned(
         new ModelRequestSpec(
+            lease.epoch(),
             providerType,
             providerConnectionGenerationId,
             descriptor,
@@ -537,13 +545,14 @@ public final class DatabaseTurnResolver implements TurnResolver {
    *
    * <p>Agent 只能声明 SELECTABLE 工具；Catalog 缺该工具时按通用规则拒绝规划，绝不静默少一个受控工具。
    */
-  private List<String> resolveToolNames(AgentDefinitionConfigDTO config) {
+  private List<String> resolveToolNames(
+      RuntimeToolCatalogSource.Lease lease, AgentDefinitionConfigDTO config) {
     LinkedHashSet<String> toolNames = new LinkedHashSet<>();
     for (String toolName : config.getTools()) {
       if (toolName == null || toolName.isBlank()) {
         throw rejection("invalid agent tool name: " + toolName);
       }
-      ToolContribution contribution = toolCatalog.findTool(toolName).orElse(null);
+      ToolContribution contribution = lease.catalog().findTool(toolName).orElse(null);
       if (contribution == null) {
         throw rejection("tool not found: " + toolName);
       }
@@ -573,12 +582,17 @@ public final class DatabaseTurnResolver implements TurnResolver {
    * <p>返回的候选顺序固定为「SENT 在前、FILTERED 在后」，与 {@link LiveTurnPlan.Planned} 的投影契约一致。
    */
   private PlannedTools resolveTools(
-      EnvironmentId environmentId, String environmentName, List<String> toolNames) {
+      RuntimeToolCatalogSource.Lease lease,
+      EnvironmentId environmentId,
+      String environmentName,
+      List<String> toolNames) {
     List<ToolBinding> bindings = new ArrayList<>(toolNames.size());
     List<LiveTurnPlan.CandidateTool> sent = new ArrayList<>(toolNames.size());
     List<LiveTurnPlan.CandidateTool> filtered = new ArrayList<>();
+    RuntimeToolCatalog catalog = lease.catalog();
+    long catalogEpoch = lease.epoch();
     for (String toolName : toolNames) {
-      ToolContribution contribution = toolCatalog.findTool(toolName).orElse(null);
+      ToolContribution contribution = catalog.findTool(toolName).orElse(null);
       if (contribution == null) {
         throw rejection("tool not found: " + toolName);
       }
@@ -626,11 +640,13 @@ public final class DatabaseTurnResolver implements TurnResolver {
           environmentSupport == EnvironmentSupport.NONE ? null : environmentName;
       bindings.add(
           new ToolBinding(
+              catalogEpoch,
               contribution.definition(),
               contributor,
               environmentSupport,
               boundEnvironmentId,
-              boundEnvironmentName));
+              boundEnvironmentName,
+              lease.pluginSource(contribution.id())));
       sent.add(candidateTool(contribution, inputSchemaJson, LiveTurnPlan.ToolState.SENT, null));
     }
     List<LiveTurnPlan.CandidateTool> candidates = new ArrayList<>(sent.size() + filtered.size());
@@ -782,7 +798,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
       CurrentEnvironmentContext currentEnvironment,
       List<SkillPromptEntry> skills,
       List<SubagentBinding> subagentBindings,
-      EntryPath path) {
+      EntryPath path,
+      HarnessCatalog harnessCatalog) {
     List<String> sections = new ArrayList<>();
     addSection(
         sections,

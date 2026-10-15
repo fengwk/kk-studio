@@ -340,6 +340,7 @@ class ModelResponsePlannerTest {
 
   private static ToolBinding toolBinding(String name, InputSchema schema) {
     return new ToolBinding(
+        1L,
         new AgentToolDefinition(
             new ToolDescriptor(
                 name,
@@ -351,6 +352,7 @@ class ModelResponsePlannerTest {
             ToolVisibility.SELECTABLE),
         new ContributorBinding("core", name, List.of()),
         EnvironmentSupport.NONE,
+        null,
         null,
         null);
   }
