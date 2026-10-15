@@ -1381,10 +1381,13 @@ class OpenCliHubClientContractTest {
                   throw new AssertionError("transport must not be called");
                 }));
 
-    OpenCliHubException ex =
-        assertThrows(OpenCliHubException.class, () -> client.getExecution("exec-1", 0));
-    assertEquals("OpenCLI Hub credential is not available", ex.getMessage());
-    assertNull(ex.getCause());
+    IllegalStateException ex =
+        assertThrows(IllegalStateException.class, () -> client.getExecution("exec-1", 0));
+    assertEquals("OpenCLI Hub credential resolution failed", ex.getMessage());
+    assertFalse(
+        ex.getMessage().contains("unexpected credential store state"),
+        "the raw credential store message must not leak");
+    assertNull(ex.getCause(), "the raw failure must not be attached as a cause");
   }
 
   @Test

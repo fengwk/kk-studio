@@ -22,7 +22,7 @@
 
 ## 连接检查能力
 
-[`PluginConnectionCheck`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginConnectionCheck.java) 是实例的可选能力：`PluginInstance.connectionCheck()` 默认返回 `Optional.empty()`，只有显式声明的实例才提供该入口。`check()` 只执行一次用户显式触发的只读探测，复用本实例已有的作用域认证与有界超时，不修改配置、不写入凭据、不建立浏览器会话，也不做任何自动重试或后台探测。
+[`PluginConnectionCheck`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginConnectionCheck.java) 是实例的可选能力：`PluginInstance.connectionCheck()` 默认返回 `Optional.empty()`，只有显式声明的实例才提供该入口。`check()` 只执行一次用户显式触发的只读探测，复用本实例已有的作用域认证与有界超时，不修改配置、不会录入或更新凭据、不建立浏览器会话，也不做任何自动重试或后台探测；远端确定性拒绝本次凭据（401/403）时按凭据契约调用 `rejectUsed`。
 
 结果是 [`PluginConnectionCheckResult`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginConnectionCheckResult.java) 的三个封闭维度，只陈述能证明的事实：
 
@@ -32,7 +32,7 @@
 | `Authentication` | `ACCEPTED` / `REJECTED` / `UNAVAILABLE` / `NOT_CHECKED` | 只有远端确定性拒绝本次凭据才是 `REJECTED`，只有成功合法响应才是 `ACCEPTED`；`UNAVAILABLE` 仅表示本地没有可用凭据，其它故障一律 `NOT_CHECKED` |
 | `BrowserSession` | `UNKNOWN` | 浏览器登录态不由本能力核验 |
 
-实现只把已类型化的失败投影为维度，绝不从异常文本猜分类，也不吞掉未定义的运行时失败或进程级 `Error`；结果不携带异常文本、远端 URI、远端正文或凭据。宿主入口是 `POST /api/plugins/{pluginId}/connection-check`，请求体给出 `expectedEpoch` 与 `expectedRevision`，响应只回已应用坐标与上述维度并显式 `no-store`：未安装是 404，实例未声明能力是 400，期望坐标与当前已应用坐标不一致（含尚未应用）是 409，检查本身在数据库事务外、一次已应用租用内执行。管理面的 `connectionCheckSupported` 如实投影本节点已应用实例是否声明该能力。
+实现只把已类型化的失败投影为维度，绝不从异常文本猜分类；未定义的运行时失败与进程级 `Error` 原样上抛，既不降级为维度也不伪装成健康结果。结果不携带异常文本、远端 URI、远端正文或凭据。宿主入口是 `POST /api/plugins/{pluginId}/connection-check`，请求体给出 `expectedEpoch` 与 `expectedRevision`，响应只回已应用坐标与上述维度并显式 `no-store`：未安装是 404，实例未声明能力是 400，期望坐标与当前已应用坐标不一致（含尚未应用）是 409，检查本身在数据库事务外、一次已应用租用内执行。管理面的 `connectionCheckSupported` 如实投影本节点已应用实例是否声明该能力。
 
 ## 凭据契约
 

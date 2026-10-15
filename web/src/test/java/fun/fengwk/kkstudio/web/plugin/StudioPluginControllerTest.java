@@ -485,9 +485,9 @@ class StudioPluginControllerTest {
     dto.setAppliedEpoch("14");
     dto.setAppliedRevision("8");
     dto.setCheckedAt(Instant.parse("2026-03-01T12:00:00Z"));
-    dto.setReachability("REACHABLE");
-    dto.setAuthentication("ACCEPTED");
-    dto.setBrowserSession("UNKNOWN");
+    dto.setReachability(PluginConnectionCheckDTO.Reachability.REACHABLE);
+    dto.setAuthentication(PluginConnectionCheckDTO.Authentication.ACCEPTED);
+    dto.setBrowserSession(PluginConnectionCheckDTO.BrowserSession.UNKNOWN);
     return dto;
   }
 

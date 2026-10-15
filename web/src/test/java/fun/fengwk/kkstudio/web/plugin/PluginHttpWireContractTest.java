@@ -637,9 +637,9 @@ class PluginHttpWireContractTest {
     dto.setAppliedEpoch(appliedEpoch);
     dto.setAppliedRevision(appliedRevision);
     dto.setCheckedAt(CHECKED_AT);
-    dto.setReachability("REACHABLE");
-    dto.setAuthentication("ACCEPTED");
-    dto.setBrowserSession("UNKNOWN");
+    dto.setReachability(PluginConnectionCheckDTO.Reachability.REACHABLE);
+    dto.setAuthentication(PluginConnectionCheckDTO.Authentication.ACCEPTED);
+    dto.setBrowserSession(PluginConnectionCheckDTO.BrowserSession.UNKNOWN);
     return dto;
   }
 

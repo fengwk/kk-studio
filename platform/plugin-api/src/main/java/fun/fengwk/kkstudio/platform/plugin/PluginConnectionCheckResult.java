@@ -5,8 +5,9 @@ import java.util.Objects;
 /**
  * 一次显式连接检查的类型化结果：只有三个维度，没有自由文本、URI、远端正文或秘密。
  *
- * <p>三个维度各自独立陈述本次真正核验到的结论：{@code reachability} 是网络可达性，{@code authentication} 是本次凭据是否被接受， {@code
- * browserSession} 是浏览器登录会话。未核验的维度明确取 {@code NOT_CHECKED}，无法证明的取 {@code INDETERMINATE}，绝不以健康值代言未知。
+ * <p>三个维度各自独立陈述本次真正核验到的结论：{@code reachability} 是网络可达性，{@code authentication} 是本次凭据是否被接受（{@code
+ * UNAVAILABLE} 只表示本地没有可用凭据，远端故障绝不用它代言），{@code browserSession} 是浏览器登录会话。未核验的维度明确取 {@code
+ * NOT_CHECKED}，无法证明的取 {@code INDETERMINATE}，绝不以健康值代言未知。
  */
 public record PluginConnectionCheckResult(
     Reachability reachability, Authentication authentication, BrowserSession browserSession) {
@@ -42,7 +43,7 @@ public record PluginConnectionCheckResult(
     /** 远端确定性拒绝本次凭据。 */
     REJECTED,
 
-    /** 无法得到认证结论（探测失败、远端错误或协议不符）。 */
+    /** 本地没有可用凭据（例如未连接、密钥不可用）；远端故障绝不使用本值。 */
     UNAVAILABLE,
 
     /** 本次没有可判定的认证尝试（例如未启用）。 */
