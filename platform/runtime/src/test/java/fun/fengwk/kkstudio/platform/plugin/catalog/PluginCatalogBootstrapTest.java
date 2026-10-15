@@ -80,6 +80,37 @@ class PluginCatalogBootstrapTest {
     assertTrue(plugin.createdInstances.isEmpty(), "no instance may be created without an epoch");
   }
 
+  /** 公开 restore 复用同一条严格恢复路径：只接受已初始化 record，绝不写库、也绝不偷偷初始化。 */
+  @Test
+  void publicRestoreReusesTheStrictPathAndRejectsUninitializedRecords() {
+    TestPlugin plugin = new TestPlugin(PLUGIN_ALPHA);
+    plugin.schema = enabledSchema();
+    FakeRepository repository = new FakeRepository();
+    PluginCatalogBootstrap bootstrap = bootstrap(repository, plugin);
+
+    IllegalStateException failure =
+        assertThrows(
+            IllegalStateException.class,
+            () -> bootstrap.restore(epochZero(), contexts(), List.of(), List.of()));
+
+    assertTrue(failure.getMessage().contains("stage=restore-uninitialized"), failure.getMessage());
+    assertTrue(plugin.createdInstances.isEmpty(), "未初始化 record 不得 configure");
+    assertEquals(0, repository.commitCalls, "restore 绝不写库");
+
+    // 真实现场：公开 restore 与 bootstrap 恢复路径给出同一 epoch、同一指纹与同一 owner 能力。
+    try (PluginCatalogSnapshot initialized =
+        bootstrap.bootstrap(contexts(), List.of(), List.of())) {
+      int commits = repository.commitCalls;
+      try (PluginCatalogSnapshot restored =
+          bootstrap.restore(repository.catalog, contexts(), List.of(), List.of())) {
+        assertEquals(initialized.epoch(), restored.epoch());
+        assertEquals(initialized.catalogFingerprint(), restored.catalogFingerprint());
+        assertEquals(initialized.capabilityFingerprints(), restored.capabilityFingerprints());
+      }
+      assertEquals(commits, repository.commitCalls, "restore 绝不写库");
+    }
+  }
+
   @Test
   void initializesFromDefaultsAndPersistsTheFirstEpoch() {
     TestPlugin plugin = new TestPlugin(PLUGIN_ALPHA);
