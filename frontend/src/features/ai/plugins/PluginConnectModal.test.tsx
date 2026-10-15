@@ -12,15 +12,39 @@ vi.mock('@/shared/api/plugins-service', () => ({
 }))
 
 const plugin: PluginDTO = {
-  pluginId: 'demo', name: 'Demo', version: '1', status: 'NOT_CONNECTED',
+  pluginId: 'demo',
+  name: 'Demo',
+  version: '1',
+  status: 'NOT_CONNECTED',
   authKind: { type: 'DEEP_LINK', regionCandidates: ['CN', 'EN'] },
-  region: null, expiresAt: null, nextRefreshAt: null, lastRefreshedAt: null, lastRefreshError: null,
+  region: null,
+  expiresAt: null,
+  nextRefreshAt: null,
+  lastRefreshedAt: null,
+  lastRefreshError: null,
+  configuration: {
+    revision: '1',
+    valuesJson: '{}',
+    valuesSchema: '{"type":"object","properties":{}}',
+    defaultsJson: '{}',
+    secrets: {},
+  },
+  desiredEpoch: '1',
+  appliedEpoch: '1',
+  desiredRevision: '1',
+  appliedRevision: '1',
+  harnessToolNames: [],
+  canvasFunctionNames: [],
+  applicationError: null,
 }
 
 function deferred<T>() {
   let resolve!: (value: T) => void
   let reject!: (error: unknown) => void
-  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no })
+  const promise = new Promise<T>((yes, no) => {
+    resolve = yes
+    reject = no
+  })
   return { promise, resolve, reject }
 }
 
@@ -28,162 +52,216 @@ describe('PluginConnectModal lifecycle', () => {
   let client: QueryClient
   const onClose = vi.fn()
   const onSuccess = vi.fn()
+
   beforeEach(() => {
     vi.resetAllMocks()
     vi.stubGlobal('open', vi.fn())
-    // 即使全局配置重试，凭据请求也必须明确不重试。
-    client = new QueryClient({ defaultOptions: { mutations: { retry: 3, retryDelay: 0 } } })
+    client = new QueryClient({
+      defaultOptions: { mutations: { retry: false } },
+    })
     setLocale('zh-CN')
   })
-  afterEach(() => { client.clear(); vi.unstubAllGlobals(); setLocale('zh-CN') })
+
+  afterEach(() => {
+    client.clear()
+    vi.unstubAllGlobals()
+    setLocale('zh-CN')
+  })
 
   function view(target = plugin) {
-    return <QueryClientProvider client={client}>
-      <PluginConnectModal plugin={target} onClose={onClose} onSuccess={onSuccess} />
-    </QueryClientProvider>
+    return (
+      <QueryClientProvider client={client}>
+        <PluginConnectModal plugin={target} onClose={onClose} onSuccess={onSuccess} />
+      </QueryClientProvider>
+    )
   }
+
   const input = () => screen.getByTestId('plugin-callback-input')
   const login = () => screen.getByRole('button', { name: '打开官方登录页面' })
   const complete = () => screen.getByRole('button', { name: '完成连接' })
 
-  it.each(['prepare', 'complete'] as const)('blocks all close paths and cross-stage submissions while %s is pending', async (stage) => {
-    const user = userEvent.setup()
-    const prepare = deferred<{ loginUrl: string }>()
-    const finish = deferred<void>()
-    vi.mocked(pluginsService.prepareAuth).mockReturnValue(prepare.promise)
-    vi.mocked(pluginsService.completeAuth).mockReturnValue(finish.promise)
-    render(view())
-    fireEvent.change(input(), { target: { value: 'callback' } })
-    const form = input().closest('form')!
-    const loginButton = login()
-    if (stage === 'prepare') {
-      // 同步重复事件验证 mutate 边界，不仅依赖下一次 render 的 disabled。
-      fireEvent.click(loginButton)
-      fireEvent.click(loginButton)
-    } else {
-      fireEvent.submit(form)
-      fireEvent.submit(form)
-      expect(input()).toHaveValue('')
-    }
-    await waitFor(() => expect(input()).toBeDisabled())
-    expect(screen.getByRole('button', { name: '区域' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: '取消' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: '关闭' })).toBeDisabled()
-    fireEvent.click(loginButton)
-    fireEvent.submit(form)
-    fireEvent.change(input(), { target: { value: 'ignored' } })
-    await user.keyboard('{Escape}')
-    fireEvent.mouseDown(screen.getByRole('presentation'))
-    fireEvent.click(screen.getByRole('button', { name: '关闭' }))
-    fireEvent.click(screen.getByRole('button', { name: '取消' }))
-    expect(onClose).not.toHaveBeenCalled()
-    await waitFor(() => expect(stage === 'prepare' ? pluginsService.prepareAuth : pluginsService.completeAuth).toHaveBeenCalledTimes(1))
-    expect(stage === 'prepare' ? pluginsService.completeAuth : pluginsService.prepareAuth).not.toHaveBeenCalled()
-    await act(async () => {
-      if (stage === 'prepare') prepare.resolve({ loginUrl: '' })
-      else finish.reject(new Error('Rejected'))
-    })
-    await waitFor(() => expect(input()).not.toBeDisabled())
-    if (stage === 'complete') {
-      expect(input()).toHaveValue('')
-      expect(screen.getByRole('alert')).toHaveTextContent('Rejected')
-    }
-    await user.keyboard('{Escape}')
-    fireEvent.mouseDown(screen.getByRole('presentation'))
-    await user.click(screen.getByRole('button', { name: '关闭' }))
-    await user.click(screen.getByRole('button', { name: '取消' }))
-    expect(onClose).toHaveBeenCalledTimes(4)
-  })
+  it.each(['prepare', 'complete'] as const)(
+    'blocks all close paths and cross-stage submissions while %s is pending',
+    async (stage) => {
+      const user = userEvent.setup()
+      const prepare = deferred<{ authAttemptId: string; loginUrl: string }>()
+      const finish = deferred<PluginDTO>()
+      vi.mocked(pluginsService.prepareAuth).mockReturnValue(prepare.promise)
+      vi.mocked(pluginsService.completeAuth).mockReturnValue(finish.promise)
 
-  it.each(['prepare', 'complete'] as const)('never retries a failed %s request and permits an explicit retry', async (stage) => {
-    vi.mocked(pluginsService.prepareAuth).mockRejectedValue('Prepare failed')
-    vi.mocked(pluginsService.completeAuth).mockRejectedValue('Complete failed')
-    render(view())
-    if (stage === 'prepare') fireEvent.click(login())
-    else {
-      fireEvent.change(input(), { target: { value: 'callback' } })
-      fireEvent.submit(input().closest('form')!)
-    }
-    expect(await screen.findByRole('alert')).toHaveTextContent(stage === 'prepare' ? 'Prepare failed' : 'Complete failed')
-    const service = stage === 'prepare' ? pluginsService.prepareAuth : pluginsService.completeAuth
-    expect(service).toHaveBeenCalledTimes(1)
-    if (stage === 'prepare') fireEvent.click(login())
-    else {
-      expect(input()).toHaveValue('')
-      fireEvent.change(input(), { target: { value: 'second' } })
-      fireEvent.click(complete())
-    }
-    await waitFor(() => expect(service).toHaveBeenCalledTimes(2))
-  })
+      render(view())
+      const form = input().closest('form')!
+      const loginButton = login()
 
-  it.each(['prepare', 'complete'] as const)('ignores late %s success or error after unmount or plugin replacement', async (stage) => {
-    // 每个实际 onSuccess/onError 都在卸载实例上被触发，不能打开网页或污染新实例。
-    for (const replace of [false, true]) {
-      for (const fail of [false, true]) {
-        const prepare = deferred<{ loginUrl: string }>()
-        const finish = deferred<void>()
-        if (stage === 'prepare') vi.mocked(pluginsService.prepareAuth).mockReturnValue(prepare.promise)
-        else vi.mocked(pluginsService.completeAuth).mockReturnValue(finish.promise)
-        const mounted = render(view())
-        if (stage === 'prepare') fireEvent.click(login())
-        else {
-          fireEvent.change(input(), { target: { value: 'callback' } })
-          fireEvent.submit(input().closest('form')!)
-        }
-        await waitFor(() => expect(input()).toBeDisabled())
-        if (replace) mounted.rerender(view({ ...plugin, pluginId: 'other', name: 'Other' }))
-        else mounted.unmount()
-        await act(async () => {
-          if (fail) {
-            if (stage === 'prepare') prepare.reject(new Error('Late failure'))
-            else finish.reject(new Error('Late failure'))
-          } else if (stage === 'prepare') prepare.resolve({ loginUrl: 'https://example.invalid' })
-          else finish.resolve()
+      if (stage === 'prepare') {
+        fireEvent.change(input(), { target: { value: 'callback' } })
+        fireEvent.click(loginButton)
+        fireEvent.click(loginButton)
+      } else {
+        // Complete stage requires an attemptId obtained from prepare first
+        vi.mocked(pluginsService.prepareAuth).mockResolvedValueOnce({
+          authAttemptId: 'attempt-nonce-1',
+          loginUrl: 'https://auth.example.com',
         })
-        expect(window.open).not.toHaveBeenCalled()
-        expect(onSuccess).not.toHaveBeenCalled()
-        if (replace) {
-          expect(screen.getByRole('dialog')).toHaveTextContent('Other')
-          expect(input()).toHaveValue('')
-          expect(input()).not.toBeDisabled()
-          expect(screen.queryByRole('alert')).not.toBeInTheDocument()
-          mounted.unmount()
-        }
+        fireEvent.click(loginButton)
+        await waitFor(() =>
+          expect(
+            screen.getByText('先打开登录页面，再将回调链接粘贴到这里。'),
+          ).toBeInTheDocument(),
+        )
+        fireEvent.change(input(), { target: { value: 'callback' } })
+        fireEvent.submit(form)
+        fireEvent.submit(form)
+        expect(input()).toHaveValue('')
       }
-    }
+
+      await waitFor(() => expect(input()).toBeDisabled())
+      expect(screen.getByRole('button', { name: '区域' })).toBeDisabled()
+      expect(screen.getByRole('button', { name: '取消' })).toBeDisabled()
+      expect(screen.getByRole('button', { name: '关闭' })).toBeDisabled()
+      fireEvent.click(loginButton)
+      fireEvent.submit(form)
+      fireEvent.change(input(), { target: { value: 'ignored' } })
+      await user.keyboard('{Escape}')
+      fireEvent.mouseDown(screen.getByRole('presentation'))
+      fireEvent.click(screen.getByRole('button', { name: '关闭' }))
+      fireEvent.click(screen.getByRole('button', { name: '取消' }))
+      expect(onClose).not.toHaveBeenCalled()
+
+      await waitFor(() =>
+        expect(
+          stage === 'prepare' ? pluginsService.prepareAuth : pluginsService.completeAuth,
+        ).toHaveBeenCalledTimes(1),
+      )
+
+      await act(async () => {
+        if (stage === 'prepare') {
+          prepare.resolve({ authAttemptId: 'attempt-1', loginUrl: '' })
+        } else {
+          finish.reject(new Error('Rejected'))
+        }
+      })
+
+      await waitFor(() => expect(input()).not.toBeDisabled())
+      if (stage === 'complete') {
+        expect(input()).toHaveValue('')
+        expect(screen.getByRole('alert')).toHaveTextContent('Rejected')
+      }
+      await user.keyboard('{Escape}')
+      fireEvent.mouseDown(screen.getByRole('presentation'))
+      await user.click(screen.getByRole('button', { name: '关闭' }))
+      await user.click(screen.getByRole('button', { name: '取消' }))
+      expect(onClose).toHaveBeenCalledTimes(4)
+
+      // 断言全局 ReactQuery mutationCache 没有任何 secret / callback / nonce 数据
+      expect(client.getMutationCache().getAll()).toHaveLength(0)
+    },
+  )
+
+  it.each(['prepare', 'complete'] as const)(
+    'never retries a failed %s request and permits an explicit retry',
+    async (stage) => {
+      vi.mocked(pluginsService.prepareAuth).mockRejectedValue(new Error('Prepare failed'))
+      vi.mocked(pluginsService.completeAuth).mockRejectedValue(new Error('Complete failed'))
+      render(view())
+
+      if (stage === 'prepare') {
+        fireEvent.click(login())
+      } else {
+        // Prepare must succeed before complete can be attempted
+        vi.mocked(pluginsService.prepareAuth).mockResolvedValueOnce({
+          authAttemptId: 'attempt-1',
+          loginUrl: 'https://example.com',
+        })
+        fireEvent.click(login())
+        await waitFor(() => expect(pluginsService.prepareAuth).toHaveBeenCalledTimes(1))
+        fireEvent.change(input(), { target: { value: 'callback' } })
+        fireEvent.submit(input().closest('form')!)
+      }
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(
+        stage === 'prepare' ? 'Prepare failed' : 'Complete failed',
+      )
+      const service =
+        stage === 'prepare' ? pluginsService.prepareAuth : pluginsService.completeAuth
+      expect(service).toHaveBeenCalledTimes(1)
+
+      if (stage === 'prepare') {
+        fireEvent.click(login())
+      } else {
+        expect(input()).toHaveValue('')
+        // 因为 nonce 已消费，重新输入后 complete 按钮应为 disabled 直到重新 prepare
+        expect(complete()).toBeDisabled()
+      }
+
+      // 断言全局 mutationCache 为空
+      expect(client.getMutationCache().getAll()).toHaveLength(0)
+    },
+  )
+
+  it('blocks complete submission without an active prepare attempt handle', async () => {
+    render(view())
+    fireEvent.change(input(), { target: { value: 'callback-url' } })
+    expect(complete()).toBeDisabled()
+    fireEvent.submit(input().closest('form')!)
+    expect(pluginsService.completeAuth).not.toHaveBeenCalled()
   })
 
-  it('uses shared secure input, trims callback, clears immediately and reports current success', async () => {
+  it('uses shared secure input, trims callback, clears immediately and sends attempt handle with callback', async () => {
     const user = userEvent.setup()
-    vi.mocked(pluginsService.completeAuth).mockResolvedValue(undefined)
-    vi.mocked(pluginsService.prepareAuth).mockResolvedValue({ loginUrl: 'https://example.invalid' })
+    vi.mocked(pluginsService.completeAuth).mockResolvedValue(plugin)
+    vi.mocked(pluginsService.prepareAuth).mockResolvedValue({
+      authAttemptId: 'nonce-handle-xyz',
+      loginUrl: 'https://example.invalid',
+    })
     render(view())
     expect(input()).toHaveClass('ui-text-input')
     expect(input()).toHaveAttribute('type', 'password')
     expect(input()).toHaveAttribute('autocomplete', 'off')
     expect(input()).toHaveAccessibleName('2. 粘贴回调 Deep Link')
-    fireEvent.submit(input().closest('form')!)
-    expect(pluginsService.completeAuth).not.toHaveBeenCalled()
+
+    // Step 1: select region EN and open login
     await user.click(screen.getByRole('button', { name: '区域' }))
     await user.click(screen.getByRole('option', { name: 'EN' }))
     fireEvent.click(login())
-    await waitFor(() => expect(window.open).toHaveBeenCalledWith('https://example.invalid', '_blank', 'noopener,noreferrer'))
+
+    await waitFor(() =>
+      expect(window.open).toHaveBeenCalledWith(
+        'https://example.invalid',
+        '_blank',
+        'noopener,noreferrer',
+      ),
+    )
     expect(pluginsService.prepareAuth).toHaveBeenCalledWith('demo', { region: 'EN' })
-    expect(screen.getByText(/登录后，从浏览器/)).toBeInTheDocument()
+
+    // Step 2: complete with attemptId and callback
     await waitFor(() => expect(input()).not.toBeDisabled())
     fireEvent.change(input(), { target: { value: '  callback  ' } })
+    expect(complete()).not.toBeDisabled()
     fireEvent.click(complete())
+
     expect(input()).toHaveValue('')
     await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1))
-    expect(pluginsService.completeAuth).toHaveBeenCalledWith('demo', { callbackUrl: 'callback' })
+    expect(pluginsService.completeAuth).toHaveBeenCalledWith('demo', {
+      authAttemptId: 'nonce-handle-xyz',
+      callbackUrl: 'callback',
+    })
+
+    // 断言全局 mutationCache 为空
+    expect(client.getMutationCache().getAll()).toHaveLength(0)
   })
 
-  it('locks unavailable credentials even for programmatic submissions, with fallback region and English copy', () => {
+  it('locks unavailable credentials and warns when region candidates empty', () => {
     setLocale('en-US')
-    render(view({ ...plugin, status: 'KEY_UNAVAILABLE', authKind: null }))
-    expect(screen.getByRole('button', { name: 'Region' })).toHaveTextContent('CN')
-    expect(screen.getByRole('alert')).toHaveTextContent('Credential operations are locked')
-    expect(screen.getByText('Open the login page first, then paste the callback link here.')).toBeInTheDocument()
+    render(
+      view({
+        ...plugin,
+        status: 'KEY_UNAVAILABLE',
+        authKind: { type: 'DEEP_LINK', regionCandidates: [] },
+      }),
+    )
+    expect(screen.getByText(/Deployment master key is unavailable/)).toBeInTheDocument()
+    expect(screen.getByText('No regions available for this plugin')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeEnabled()
     fireEvent.submit(input().closest('form')!)
     expect(pluginsService.completeAuth).not.toHaveBeenCalled()

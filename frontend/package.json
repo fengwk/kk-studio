@@ -32,6 +32,7 @@
     "@xyflow/react": "^12.11.2",
     "axios": "^1.20.0",
     "highlight.js": "^11.11.1",
+    "jsonc-parser": "3.3.1",
     "katex": "^0.18.1",
     "lucide-react": "^0.475.0",
     "mermaid": "^11.16.0",
