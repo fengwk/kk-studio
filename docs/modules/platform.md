@@ -322,8 +322,9 @@ Platform 提供 Blob facts、原件流、presign、输出物化和 Blob 释放�
 决议见 [Canvas Infra](canvas-infra.md)。
 
 Platform 仅提供内置 fake adapter；本地 image.crop、ComfyUI/H3 以及 OpenCLI（`gpt-image-2` 与 Seedance 四函数）均由构建期 Plugin 提供。
-Function Catalog 在启动时冻结，adapter 的 submit 记录外部任务身份，
-execute 查询同一任务并物化预分配槽位。
+Function Catalog 每个 epoch 一份不可变快照，运行期以租用对外提供：任务按创建时的 `catalogEpoch` 取得租用并校验完整 binding，
+`submit` 记录外部任务身份，`execute` 在同一份租用上查询同一任务并物化预分配槽位，
+因此热更新与在途旧任务互不串目录。
 
 OpenCLI 作为独立构建期 Plugin，每次 HTTP send 前解析局部单 Bearer 凭据并冻结单调时钟 deadline，同一预算覆盖握手和完整响应体读取，
 不会随 read 重置。资源响应要求正数 Content-Length 与 metadata size 一致，并在读流时
@@ -336,17 +337,16 @@ EOF、失败和显式 close 均注销 watchdog。客户端拿到流后负责关�
 
 ### OpenCLI 插件配置与凭据契约
 
-OpenCLI 作为构建期独立 Plugin，其配置完全归属于自身受控 schema，已彻底删除旧 SystemSettings 的
-`openCliHub`、`gptImage2` 与 `seedance` 三段配置及部署环境变量属性，无双读与别名兼容；写入或导入旧字段均被明确拒绝。
+OpenCLI 的配置完全归属于插件自身的受控 schema：字段、默认值、取值区间与必填关系都以它为准，
+管理面与配置同步按同一份 schema 读写，未声明的字段一律被拒绝。使用者只需要关心三类输入：
 
-- 顶层配置字段与默认值：`enabled`(false)、`baseUrl`(可省略)、`connectTimeoutMillis`(5000)、`requestTimeoutMillis`(120000)、`longPollTimeoutMillis`(130000)、`streamBufferBytes`(16384)、`maxJsonResponseBytes`(524288)、`maxErrorResponseBytes`(4096)、`maxOutputChars`(65535)。
-- `gptImage2` 对象：`paidEnabled`(false)、`askTimeoutSeconds`(900)、`hubExecutionTimeoutMillis`(960000)、`maxWaitMillis`(1200000)。
-- `seedance` 对象：`enabled`(false)、`workspaceId`(可省略)、`retry`(0)、`hubExecutionTimeoutMillis`(600000)、`statusPollIntervalMillis`(30000)、`maxWaitMillis`(1800000)。
-- 字段校验沿用合法 HTTP origin、开启状态下的必填项校验以及私有身份的 1..36 字符约束；未配置文本通过省略字段表示，不引入 nullable 或以空字符串伪造合法 URL。
-- schema 是默认值的唯一来源：插件不再自带第二份默认值常量。
-- 唯一认证密钥 `apiKey`，通过 `PluginAuthSpec.StaticKey("apiKey", Set.of("baseUrl"))` 声明，走统一 Plugin Secret API（KEEP/SET/CLEAR）管理，不读环境变量或设置外部优先级。每次 HTTP 发送时动态解析并仅在局部构造单 Bearer 请求头，不落盘明文且不泄露在日志与异常中。
-- 可选私有身份 `instanceId` 是第二个受保护秘密字段：它与 `apiKey` 同属一次 scoped snapshot，只在真正发送执行请求前取出并填入请求体，不出现于普通值、配置历史、管理面投影或导出；未配置时不发送该字段，由 Hub 自由路由。
-- 静态认证的 `CONNECTED` 只由必需认证字段是否已录入决定：仅录入私有身份（或撤销 `apiKey` 后只留私有身份）时管理面显示 `NOT_CONNECTED`，`KEY_UNAVAILABLE` 等真实故障仍如实上报。
+- Hub 接入：`baseUrl` 给出 OpenCLI Hub 的 HTTP(S) origin，启用时必填；连接、请求、长轮询与响应体上限等预算参数都有 schema 声明的区间，默认值适用于常规部署。改动 `baseUrl` 会换发认证代际并 fence 旧实例，旧实例在出网前失败。
+- 认证与私有身份：唯一认证密钥 `apiKey` 是静态密钥，通过统一 Plugin Secret API 的 KEEP/SET/CLEAR 管理，不读环境变量也不设外部优先级。可选私有身份 `instanceId` 是第二个受保护秘密字段，与 `apiKey` 同属一次 scoped snapshot，只在真正发送执行请求前取出并填入请求体，不进入普通值、配置历史、管理面投影或导出；未配置时不发送该字段，由 Hub 自由路由。
+- 业务开关与任务预算：`enabled` 决定整个插件是否参与，`gptImage2.paidEnabled` 放开付费图片执行，`seedance.enabled`（配合 `seedance.workspaceId`）放开 Seedance 视频执行；两类任务的执行等待与重试预算同样由 schema 声明。
+
+管理面状态只表达凭据在本地是否可用：静态认证在必需认证字段已录入时才是 `CONNECTED`，只录入私有身份
+（或撤销 `apiKey` 后只留私有身份）显示 `NOT_CONNECTED`，`KEY_UNAVAILABLE` 等真实故障如实上报。
+本地秘密已配置不等于 Hub 可达或浏览器侧账号已登录，这两件事只在真正发起请求时才会暴露。
 
 ## 配置
 
