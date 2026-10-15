@@ -111,7 +111,6 @@ describe('SettingsPage general tab + notifications', () => {
       '工具与权限',
       '环境',
       '网络',
-      '集成',
       '存储与媒体',
       '高级',
       '同步',
@@ -261,7 +260,7 @@ describe('settings tabs roving tabindex + keyboard navigation', () => {
   it('keeps only the selected tab in the sequential tab order (tabIndex 0) and the rest at -1', async () => {
     renderSettings()
     expect(await tabByName('常规')).toHaveAttribute('tabindex', '0')
-    for (const name of ['AI 运行时', '工具与权限', '环境', '集成', '存储与媒体', '高级', '同步']) {
+    for (const name of ['AI 运行时', '工具与权限', '环境', '网络', '存储与媒体', '高级', '同步']) {
       expect(await tabByName(name)).toHaveAttribute('tabindex', '-1')
     }
   })

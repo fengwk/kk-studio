@@ -44,8 +44,6 @@ describe('system settings draft codec', () => {
     expect(draft.aiRuntime.retryMaxRetries).toBe('3')
     expect(draft.aiRuntime.subagentMaxTotalConcurrency).toBe('0')
     expect(draft.storageMedia.thumbnailQuality).toBe('80')
-    expect(draft.integrations.comfyui.baseUrl).toBe('')
-    expect(draft.integrations.minimaxH3.comfyBaseUrl).toBe('')
   })
 
   it('assembles a complete update with expectedVersion and correct wire types', () => {
@@ -62,9 +60,9 @@ describe('system settings draft codec', () => {
     expect(update.aiRuntime.retryMaxDelayMillis).toBe('60000')
     expect(update.environment.maxResourceBytes).toBe(DEFAULT_MAX_RESOURCE_BYTES)
     expect(update.advanced.processorLeaseDurationMillis).toBe('30000')
-    // 七个 section 全部完整存在于请求体。
+    // 六个 section 全部完整存在于请求体。
     expect(Object.keys(update).sort()).toEqual(
-      ['advanced', 'aiRuntime', 'environment', 'network', 'expectedVersion', 'integrations', 'storageMedia', 'tool'].sort(),
+      ['advanced', 'aiRuntime', 'environment', 'network', 'expectedVersion', 'storageMedia', 'tool'].sort(),
     )
   })
 
@@ -78,7 +76,6 @@ describe('system settings draft codec', () => {
       aiRuntime: dto.aiRuntime,
       environment: dto.environment,
       network: dto.network,
-      integrations: dto.integrations,
       storageMedia: dto.storageMedia,
       advanced: dto.advanced,
       expectedVersion: dto.version,
@@ -103,78 +100,31 @@ describe('system settings draft codec', () => {
   })
 
   it('normalizes blank optional text to null', () => {
-    const draft = settingsSectionsToDraft(makeSettingsDto())
-    draft.integrations.minimaxH3.comfyBaseUrl = '   '
-    draft.integrations.comfyui.baseUrl = 'https://comfy.example.com'
-    const update = assembleSettingsUpdate(draft, '0')
-    expect(update.integrations.minimaxH3.comfyBaseUrl).toBeNull()
-    expect(update.integrations.comfyui.baseUrl).toBe('https://comfy.example.com')
+    // 六节中唯一的 nullable 文本字段是全局代理地址：空白必须序列化为 null，非空保留 trim 后的值。
+    const blank = setDraftValue(settingsSectionsToDraft(makeSettingsDto()), 'network.proxyUrl', '   ')
+    expect(assembleSettingsUpdate(blank, '0').network.proxyUrl).toBeNull()
+    const trimmed = setDraftValue(blank, 'network.proxyUrl', '  http://proxy.internal:8080  ')
+    expect(assembleSettingsUpdate(trimmed, '0').network.proxyUrl).toBe(
+      'http://proxy.internal:8080',
+    )
   })
 
-  it('serializes MiniMax H3 integration with strict declared fields and rejects unknown properties', () => {
-    // MiniMax H3 契约只声明并支持合法属性，服务端与客户端均执行严格字段收敛。
-    // 本用例验证：
-    // 1. draft 初始化仅包含已声明合法字段，叶子路径列表与属性枚举严格对应；
-    // 2. getDraftValue / setDraftValue 按未知路径访问时 fail-closed；
-    // 3. update 序列化产物不包含未声明属性，现有合法字段完成正确的类型转换；
-    // 4. 即便输入 DTO 包含未知属性，draft 与 update 组装也不会透传。
-    const unknownField = 'unknownField'
-    const expectedKeys = [
-      'comfyBaseUrl',
-      'comfyConnectTimeoutMillis',
-      'comfyMaxWaitMillis',
-      'comfyPollIntervalMillis',
-      'comfyRequestTimeoutMillis',
-      'enabled',
-      'promptAgentName',
-      'promptMaxWaitMillis',
-    ].sort()
-
-    const dto = makeSettingsDto()
-    const draft = settingsSectionsToDraft(dto)
-
-    expect(Object.keys(draft.integrations.minimaxH3).sort()).toEqual(expectedKeys)
-    expect(Object.hasOwn(draft.integrations.minimaxH3, unknownField)).toBe(false)
-    expect(() => getDraftValue(draft, `integrations.minimaxH3.${unknownField}`)).toThrow(
+  it('rejects the removed integrations paths instead of keeping a compat alias', () => {
+    // 旧 integrations 整段已退役：draft 不再包含该 section，按旧路径读写必须 fail-closed，
+    // 组装出的完整聚合请求体也不能再出现 integrations 字段（避免只隐藏 UI 仍回传旧字段）。
+    const draft = settingsSectionsToDraft(makeSettingsDto())
+    expect(Object.hasOwn(draft, 'integrations')).toBe(false)
+    expect(() => getDraftValue(draft, 'integrations.comfyui.baseUrl')).toThrow(
       /unknown system settings draft path/,
     )
-    expect(() => setDraftValue(draft, `integrations.minimaxH3.${unknownField}`, 'custom')).toThrow(
+    expect(() => setDraftValue(draft, 'integrations.minimaxH3.enabled', true)).toThrow(
       /unknown system settings draft path/,
     )
-    expect(draftLeafPaths(draft)).not.toContain(`integrations.minimaxH3.${unknownField}`)
-
-    // 修改若干字段以验证合法字段的赋值与序列化转换
-    draft.integrations.minimaxH3.enabled = true
-    draft.integrations.minimaxH3.promptAgentName = '  custom-agent  '
-    draft.integrations.minimaxH3.promptMaxWaitMillis = '450000'
-    draft.integrations.minimaxH3.comfyBaseUrl = 'https://comfy.internal:8188'
-    draft.integrations.minimaxH3.comfyConnectTimeoutMillis = '12000'
-    draft.integrations.minimaxH3.comfyRequestTimeoutMillis = '35000'
-    draft.integrations.minimaxH3.comfyPollIntervalMillis = '2500'
-    draft.integrations.minimaxH3.comfyMaxWaitMillis = '1200000'
+    expect(draftLeafPaths(draft)).not.toContain('integrations.comfyui.baseUrl')
+    expect(draftLeafPaths(draft).some((path) => path.startsWith('integrations.'))).toBe(false)
 
     const update = assembleSettingsUpdate(draft, '0')
-    expect(Object.keys(update.integrations.minimaxH3).sort()).toEqual(expectedKeys)
-    expect(Object.hasOwn(update.integrations.minimaxH3, unknownField)).toBe(false)
-    expect(update.integrations.minimaxH3).toEqual({
-      enabled: true,
-      promptAgentName: 'custom-agent',
-      promptMaxWaitMillis: '450000',
-      comfyBaseUrl: 'https://comfy.internal:8188',
-      comfyConnectTimeoutMillis: '12000',
-      comfyRequestTimeoutMillis: '35000',
-      comfyPollIntervalMillis: '2500',
-      comfyMaxWaitMillis: '1200000',
-    })
-
-    // 输入 DTO 携带残留未知属性时，draft 与 update 依然不会泄露该未知属性
-    const dirtyDto = makeSettingsDto()
-    Object.assign(dirtyDto.integrations.minimaxH3, { [unknownField]: 'dirty-value' })
-    const cleanDraft = settingsSectionsToDraft(dirtyDto)
-    expect(Object.hasOwn(cleanDraft.integrations.minimaxH3, unknownField)).toBe(false)
-    const cleanUpdate = assembleSettingsUpdate(cleanDraft, '0')
-    expect(Object.hasOwn(cleanUpdate.integrations.minimaxH3, unknownField)).toBe(false)
-    expect(Object.keys(cleanUpdate.integrations.minimaxH3).sort()).toEqual(expectedKeys)
+    expect(Object.hasOwn(update, 'integrations')).toBe(false)
   })
 
   it('rejects blank tool names, blank patterns and empty numeric fields with typed reasons', () => {

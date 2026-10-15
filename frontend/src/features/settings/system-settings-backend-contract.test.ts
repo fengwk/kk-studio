@@ -24,7 +24,6 @@ describe('settings backend field contract', () => {
       ['aiRuntime', 'AiRuntime'],
       ['environment', 'Environment'],
       ['network', 'Network'],
-      ['integrations', 'Integrations'],
       ['storageMedia', 'StorageMedia'],
       ['advanced', 'Advanced'],
     ] as const) {

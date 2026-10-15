@@ -70,7 +70,6 @@ function createBackend(initial: SystemSettingsDTO = makeSettingsDto()) {
       aiRuntime: update.aiRuntime,
       environment: update.environment,
       network: update.network,
-      integrations: update.integrations,
       storageMedia: update.storageMedia,
       advanced: update.advanced,
     }
@@ -102,7 +101,6 @@ describe('system settings server editor', () => {
   // 通过真实编辑器与完整 CAS mock 验证单一全局代理：两个字段、新请求生效提示、保存与清空不丢其他段。
   it('edits and clears the global proxy while preserving every other section', async () => {
     const initial = makeSettingsDto()
-    initial.integrations.comfyui.baseUrl = 'http://comfy.internal:8188'
     const backend = createBackend(initial)
     mocks.get.mockImplementation(backend.get)
     mocks.update.mockImplementation(backend.update)
@@ -132,7 +130,6 @@ describe('system settings server editor', () => {
       tool: initial.tool,
       aiRuntime: initial.aiRuntime,
       environment: initial.environment,
-      integrations: initial.integrations,
       storageMedia: initial.storageMedia,
       advanced: initial.advanced,
     }
@@ -244,12 +241,11 @@ describe('system settings server editor', () => {
     const sent = mocks.update.mock.calls[0]![0] as SystemSettingsUpdateDTO
     expect(sent.expectedVersion).toBe('0')
     expect(sent.aiRuntime.retryBaseDelayMillis).toBe('3000')
-    // 完整聚合：七个 section 全部在请求体中。
+    // 完整聚合：六个 section 全部在请求体中。
     expect(sent.tool).toBeDefined()
     expect(sent.aiRuntime).toBeDefined()
     expect(sent.environment).toBeDefined()
     expect(sent.network).toBeDefined()
-    expect(sent.integrations).toBeDefined()
     expect(sent.storageMedia).toBeDefined()
     expect(sent.advanced).toBeDefined()
     // 成功后 refetch：GET 至少被再次调用。

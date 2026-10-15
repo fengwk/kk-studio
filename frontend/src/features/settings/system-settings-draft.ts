@@ -50,31 +50,6 @@ export interface SystemSettingsNetworkDraft {
   noProxyHosts: string
 }
 
-export interface ComfyuiIntegrationDraft {
-  enabled: boolean
-  baseUrl: string
-  connectTimeoutMillis: DraftNumericField
-  readTimeoutMillis: DraftNumericField
-  websocketTimeoutMillis: DraftNumericField
-  maxInputFileBytes: DraftNumericField
-}
-
-export interface MiniMaxH3IntegrationDraft {
-  enabled: boolean
-  promptAgentName: string
-  promptMaxWaitMillis: DraftNumericField
-  comfyBaseUrl: string
-  comfyConnectTimeoutMillis: DraftNumericField
-  comfyRequestTimeoutMillis: DraftNumericField
-  comfyPollIntervalMillis: DraftNumericField
-  comfyMaxWaitMillis: DraftNumericField
-}
-
-export interface SystemSettingsIntegrationsDraft {
-  comfyui: ComfyuiIntegrationDraft
-  minimaxH3: MiniMaxH3IntegrationDraft
-}
-
 export interface SystemSettingsStorageMediaDraft {
   uploadExpiresSeconds: DraftNumericField
   s3PresignDefaultExpiresSeconds: DraftNumericField
@@ -107,7 +82,6 @@ export interface SystemSettingsSectionsDraft {
   aiRuntime: SystemSettingsAiRuntimeDraft
   environment: SystemSettingsEnvironmentDraft
   network: SystemSettingsNetworkDraft
-  integrations: SystemSettingsIntegrationsDraft
   storageMedia: SystemSettingsStorageMediaDraft
   advanced: SystemSettingsAdvancedDraft
 }
@@ -155,7 +129,6 @@ export function settingsSectionsToDraft(dto: SystemSettingsSectionsDTO): SystemS
       proxyUrl: dto.network.proxyUrl ?? '',
       noProxyHosts: dto.network.noProxyHosts,
     },
-    integrations: integrationsToDraft(dto.integrations),
     storageMedia: {
       uploadExpiresSeconds: dto.storageMedia.uploadExpiresSeconds,
       s3PresignDefaultExpiresSeconds: dto.storageMedia.s3PresignDefaultExpiresSeconds,
@@ -202,31 +175,6 @@ function aiRuntimeToDraft(
     modelHttpRetryStatusCodes: Array.isArray(dto.modelHttpRetryStatusCodes)
       ? [...dto.modelHttpRetryStatusCodes]
       : [],
-  }
-}
-
-function integrationsToDraft(
-  dto: SystemSettingsSectionsDTO['integrations'],
-): SystemSettingsIntegrationsDraft {
-  return {
-    comfyui: {
-      enabled: dto.comfyui.enabled,
-      baseUrl: dto.comfyui.baseUrl ?? '',
-      connectTimeoutMillis: dto.comfyui.connectTimeoutMillis,
-      readTimeoutMillis: dto.comfyui.readTimeoutMillis,
-      websocketTimeoutMillis: dto.comfyui.websocketTimeoutMillis,
-      maxInputFileBytes: dto.comfyui.maxInputFileBytes,
-    },
-    minimaxH3: {
-      enabled: dto.minimaxH3.enabled,
-      promptAgentName: dto.minimaxH3.promptAgentName ?? '',
-      promptMaxWaitMillis: dto.minimaxH3.promptMaxWaitMillis,
-      comfyBaseUrl: dto.minimaxH3.comfyBaseUrl ?? '',
-      comfyConnectTimeoutMillis: dto.minimaxH3.comfyConnectTimeoutMillis,
-      comfyRequestTimeoutMillis: dto.minimaxH3.comfyRequestTimeoutMillis,
-      comfyPollIntervalMillis: dto.minimaxH3.comfyPollIntervalMillis,
-      comfyMaxWaitMillis: dto.minimaxH3.comfyMaxWaitMillis,
-    },
   }
 }
 
@@ -297,40 +245,6 @@ export function assembleSettingsUpdate(
     network: {
       proxyUrl: nullableText(draft.network.proxyUrl),
       noProxyHosts: draft.network.noProxyHosts.trim(),
-    },
-    integrations: {
-      comfyui: {
-        enabled: draft.integrations.comfyui.enabled,
-        baseUrl: nullableText(draft.integrations.comfyui.baseUrl),
-        connectTimeoutMillis: requiredLong(
-          draft.integrations.comfyui.connectTimeoutMillis,
-        ),
-        readTimeoutMillis: requiredLong(draft.integrations.comfyui.readTimeoutMillis),
-        websocketTimeoutMillis: requiredLong(
-          draft.integrations.comfyui.websocketTimeoutMillis,
-        ),
-        maxInputFileBytes: requiredLong(draft.integrations.comfyui.maxInputFileBytes),
-      },
-      minimaxH3: {
-        enabled: draft.integrations.minimaxH3.enabled,
-        promptAgentName: nullableText(draft.integrations.minimaxH3.promptAgentName),
-        promptMaxWaitMillis: requiredLong(
-          draft.integrations.minimaxH3.promptMaxWaitMillis,
-        ),
-        comfyBaseUrl: nullableText(draft.integrations.minimaxH3.comfyBaseUrl),
-        comfyConnectTimeoutMillis: requiredLong(
-          draft.integrations.minimaxH3.comfyConnectTimeoutMillis,
-        ),
-        comfyRequestTimeoutMillis: requiredLong(
-          draft.integrations.minimaxH3.comfyRequestTimeoutMillis,
-        ),
-        comfyPollIntervalMillis: requiredLong(
-          draft.integrations.minimaxH3.comfyPollIntervalMillis,
-        ),
-        comfyMaxWaitMillis: requiredLong(
-          draft.integrations.minimaxH3.comfyMaxWaitMillis,
-        ),
-      },
     },
     storageMedia: {
       uploadExpiresSeconds: requiredLong(draft.storageMedia.uploadExpiresSeconds),

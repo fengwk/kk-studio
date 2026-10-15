@@ -168,25 +168,40 @@ describe('system settings schema validation', () => {
     )
   })
 
-  it('rejects unknown integration field if declared in schema', () => {
-    // 若服务端 schema 声明了 draft 未支持的未知属性，
-    // validateSystemSettingsSchema 必须在读取 draft 时 fail-closed 报错，防止渲染出无效表单控件。
+  it('rejects an old integrations field if a stale schema still declares it', () => {
+    // 旧 integrations 整段已退役：即使一份（过期的）schema 仍声明 integrations 字段，
+    // validateSystemSettingsSchema 也必须在读取 draft 时 fail-closed，绝不渲染旧字段。
     const schema = makeSettingsSchema()
     const freshDraft = settingsSectionsToDraft(makeSettingsDto())
-    const integrations = schema.sections.find((s) => s.key === 'integrations')!
-    const minimaxGroup = integrations.groups.find((g) => g.key === 'integrations.minimaxH3')!
-    minimaxGroup.fields.push({
-      path: 'integrations.minimaxH3.unknownField',
-      labelKey: 'settings.field.integrations.minimaxH3.unknown',
-      hintKey: null,
-      type: 'TEXT',
-      nullable: true,
-      min: null,
-      max: 64,
-      options: null,
+    schema.sections.push({
+      key: 'integrations',
+      labelKey: 'settings.tabs.integrations',
+      descriptionKey: 'settings.section.integrations.description',
+      restartRequired: false,
+      groups: [
+        {
+          key: 'integrations.comfyui',
+          labelKey: 'settings.section.integrations.comfyui.title',
+          descriptionKey: 'settings.section.integrations.comfyui.description',
+          restartRequired: false,
+          applyTiming: null,
+          fields: [
+            {
+              path: 'integrations.comfyui.baseUrl',
+              labelKey: 'settings.field.integrations.comfyui.baseUrl',
+              hintKey: null,
+              type: 'TEXT',
+              nullable: true,
+              min: null,
+              max: null,
+              options: null,
+            },
+          ],
+        },
+      ],
     })
     expect(validateSystemSettingsSchema(schema, freshDraft)).toBe(
-      'unknown system settings draft path: integrations.minimaxH3.unknownField',
+      'unknown system settings draft path: integrations.comfyui.baseUrl',
     )
   })
 
