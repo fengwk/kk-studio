@@ -35,6 +35,8 @@ import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRow;
 import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.PostgresqlPluginCatalogChangeNotifier;
 import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.PostgresqlPluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.store.PluginConfigurationJdbcStore;
+import fun.fengwk.kkstudio.platform.plugin.prompt.PluginPromptResources;
+import fun.fengwk.kkstudio.platform.plugin.prompt.PluginPromptTasks;
 import fun.fengwk.kkstudio.platform.plugin.resource.PluginResourceGateway;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
@@ -181,7 +183,9 @@ class PluginCatalogMavisRevisionPostgresIntegrationTest {
                                   revisionOne.contextFingerprint()))),
                       PluginCatalogConfiguration.pluginContexts(
                           context.getBean(PluginCredentialStore.class),
-                          context.getBeanProvider(PluginResourceGateway.class)),
+                          context.getBeanProvider(PluginResourceGateway.class),
+                          context.getBeanProvider(PluginPromptTasks.class),
+                          context.getBeanProvider(PluginPromptResources.class)),
                       builtins,
                       adapters)) {
                 assertEquals(

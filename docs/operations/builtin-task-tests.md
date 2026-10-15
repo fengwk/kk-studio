@@ -41,7 +41,7 @@ env JAVA_HOME="$JAVA_HOME_21" mvn -pl harness/builtin -am test \
 # Platform 接受编排、Agent 物化、设置、归属与清理
 env JAVA_HOME="$JAVA_HOME_21" mvn -pl platform/runtime -am test \
   -Dsurefire.failIfNoSpecifiedTests=false \
-  -Dtest='SubagentTaskRunnerTest,AgentBranchSettingsMaterializerTest,AgentPromptComposerTest,HarnessOneShotServiceTest,DatabaseTurnResolverTest,BuiltinHarnessContributorConfigurationTest,SystemSettingsTest,SessionDeletionOrchestratorTest,HarnessOwnerQueryServiceTest,IssueReconcilerIntegrationTest'
+  -Dtest='SubagentTaskRunnerTest,AgentBranchSettingsMaterializerTest,AgentPromptComposerTest,PluginPromptTaskServiceTest,PluginPromptResourceBridgeTest,DatabaseTurnResolverTest,BuiltinHarnessContributorConfigurationTest,SystemSettingsTest,SessionDeletionOrchestratorTest,HarnessOwnerQueryServiceTest,IssueReconcilerIntegrationTest'
 
 # PostgreSQL 事务、准入与树锁、忙时继续、分支隔离、停止/交付竞争与委派收敛
 env JAVA_HOME="$JAVA_HOME_21" mvn -pl harness/infra -am test \
@@ -51,7 +51,7 @@ env JAVA_HOME="$JAVA_HOME_21" mvn -pl harness/infra -am test \
 # Runtime + dispatcher/Processor + PostgreSQL 执行链路，以及公开状态投影
 env JAVA_HOME="$JAVA_HOME_21" mvn -pl web -am test \
   -Dsurefire.failIfNoSpecifiedTests=false \
-  -Dtest='ThreadJoinDelegationPostgresIntegrationTest,HarnessRuntimeResponseMapperTest,StudioHarnessThreadControllerTest'
+  -Dtest='ThreadJoinDelegationPostgresIntegrationTest,PromptTaskAcceptancePostgresIntegrationTest,HarnessRuntimeResponseMapperTest,StudioHarnessThreadControllerTest'
 ```
 
 `HarnessStoreJoinContract` 是抽象测试基座，由 `InMemoryJoinTest` 与 `PostgresqlJoinTest` 执行，
@@ -107,7 +107,11 @@ Docker 不可用时的跳过不算数据库事务已验证。
 `ThreadJoinProjectorTest` 固定源命令的执行边界到冻结的 `terminalEntryId` / `finalAnswerEntryId`
 这一历史范围；之后子继续运行不会改写旧 receipt，不拾取旧任务的回答。
 执行前取消、运行失败、STOPPED 部分输出、缺失错误载荷各有独立投影断言。
-`HarnessOneShotServiceTest` 验证无父 root ticket 只读固定 receipt，不用新 thread head 代替结果。
+`PluginPromptTaskServiceTest` 验证 Prompt 任务窄端口：源 prompt 与无父 root ticket 在同一事务接受，
+await 只读冻结的固定 receipt、绝不用子 thread head 代替结果，非 COMPLETED 只声明受控 outcome。
+`PluginPromptResourceBridgeTest` 与 web 的 `PromptTaskAcceptancePostgresIntegrationTest` 共同锁定媒体接受语义：
+暂存句柄在接受事务内按上传行权威文件名与 blob 身份物化为 durable RESOURCE，失败整体回滚，
+精确回放不重复消费。
 
 `ThreadJoinCompletionRendererTest` 只生成内层 `<subagent_result>`：
 任务与结果分开，失败有 `<error>` 与可选 `<partial_result>`，XML 特殊字符转义，缺文本有明确占位，

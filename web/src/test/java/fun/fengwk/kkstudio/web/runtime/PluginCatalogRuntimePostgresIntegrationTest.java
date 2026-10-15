@@ -43,6 +43,8 @@ import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRow;
 import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.PostgresqlPluginCatalogChangeNotifier;
 import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.PostgresqlPluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.store.PluginConfigurationJdbcStore;
+import fun.fengwk.kkstudio.platform.plugin.prompt.PluginPromptResources;
+import fun.fengwk.kkstudio.platform.plugin.prompt.PluginPromptTasks;
 import fun.fengwk.kkstudio.platform.plugin.resource.PluginResourceGateway;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 import fun.fengwk.kkstudio.web.events.ApplicationEventConfiguration;
@@ -364,7 +366,9 @@ class PluginCatalogRuntimePostgresIntegrationTest {
     BiFunction<String, PluginCredentialReference, PluginContext> contexts =
         PluginCatalogConfiguration.pluginContexts(
             context.getBean(PluginCredentialStore.class),
-            context.getBeanProvider(PluginResourceGateway.class));
+            context.getBeanProvider(PluginResourceGateway.class),
+            context.getBeanProvider(PluginPromptTasks.class),
+            context.getBeanProvider(PluginPromptResources.class));
     PluginCatalogBootstrap bootstrap = context.getBean(PluginCatalogBootstrap.class);
     return new PluginCatalogRuntime(
         bootstrap,
@@ -390,7 +394,9 @@ class PluginCatalogRuntimePostgresIntegrationTest {
     BiFunction<String, PluginCredentialReference, PluginContext> contexts =
         PluginCatalogConfiguration.pluginContexts(
             context.getBean(PluginCredentialStore.class),
-            context.getBeanProvider(PluginResourceGateway.class));
+            context.getBeanProvider(PluginResourceGateway.class),
+            context.getBeanProvider(PluginPromptTasks.class),
+            context.getBeanProvider(PluginPromptResources.class));
     StudioPlugin plugin = registry.find(MAVIS).orElseThrow();
     PluginCatalogRecord authority = repository.readCatalog();
     long epoch = authority.epoch() + 1;

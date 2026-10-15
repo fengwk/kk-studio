@@ -512,6 +512,8 @@ class PluginCatalogSnapshotTest {
             return false;
           }
         },
+        Optional.empty(),
+        Optional.empty(),
         Optional.empty());
   }
 

@@ -95,7 +95,9 @@ class StudioPluginTest {
   @Test
   void configureProducesCloseableInstance() {
     StudioPlugin plugin = new MinimalPlugin();
-    PluginContext context = new PluginContext(new NoopCredentialAccess(), Optional.empty());
+    PluginContext context =
+        new PluginContext(
+            new NoopCredentialAccess(), Optional.empty(), Optional.empty(), Optional.empty());
 
     EmptyInstance instance =
         (EmptyInstance) plugin.configure(PluginConfig.initial(SCHEMA), context);

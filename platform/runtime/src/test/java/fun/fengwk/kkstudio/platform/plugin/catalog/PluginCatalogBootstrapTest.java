@@ -498,6 +498,8 @@ class PluginCatalogBootstrapTest {
                 return false;
               }
             },
+            Optional.empty(),
+            Optional.empty(),
             Optional.empty());
   }
 

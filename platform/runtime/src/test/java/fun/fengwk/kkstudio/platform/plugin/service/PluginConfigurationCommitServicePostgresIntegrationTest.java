@@ -76,6 +76,9 @@ import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.PostgresqlPlug
 import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.PostgresqlPluginCredentialRepository;
 import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.store.PluginConfigurationJdbcStore;
 import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.store.PluginCredentialJdbcStore;
+import fun.fengwk.kkstudio.platform.plugin.prompt.PluginPromptResources;
+import fun.fengwk.kkstudio.platform.plugin.prompt.PluginPromptTasks;
+import fun.fengwk.kkstudio.platform.plugin.resource.PluginResourceGateway;
 import fun.fengwk.kkstudio.platform.plugin.testing.TestPluginFixtures;
 
 import javax.crypto.SecretKey;
@@ -141,6 +144,13 @@ class PluginConfigurationCommitServicePostgresIntegrationTest {
   private PluginConfigurationCommitService commitService;
   private PluginConfigurationCommitService keylessCommitService;
   private final AtomicInteger dispatcherWakes = new AtomicInteger();
+
+  /** 三个宿主端口的替身：只用于证明候选上下文原样透传宿主端口。 */
+  private final PluginResourceGateway resourceGateway = mock(PluginResourceGateway.class);
+
+  private final PluginPromptTasks promptTasks = mock(PluginPromptTasks.class);
+
+  private final PluginPromptResources promptResources = mock(PluginPromptResources.class);
   private final AtomicInteger catalogWakes = new AtomicInteger();
 
   private StaticKeyPlugin staticPlugin;
@@ -212,7 +222,8 @@ class PluginConfigurationCommitServicePostgresIntegrationTest {
         credentialRepository,
         codec,
         keyLoader,
-        new PluginContextFactory(store, () -> null),
+        new PluginContextFactory(
+            store, () -> resourceGateway, () -> promptTasks, () -> promptResources),
         List::of,
         List::of,
         transactionManager,
@@ -267,7 +278,7 @@ class PluginConfigurationCommitServicePostgresIntegrationTest {
             1L,
             registry,
             states,
-            new PluginContextFactory(credentialStore, () -> null)::create,
+            new PluginContextFactory(credentialStore, () -> null, () -> null, () -> null)::create,
             List.of(),
             List.of())) {
       PluginCatalogManifest manifest =
@@ -368,6 +379,11 @@ class PluginConfigurationCommitServicePostgresIntegrationTest {
         "payload={\"apiKey\":\"" + STATIC_PAYLOAD_SECRET + "\"}",
         staticPlugin.lastObservedCredential(),
         "the candidate instance must see this commit's private secret view");
+    // 候选上下文只替换凭据访问：三个宿主端口必须原样保留，绝不因候选构建而静默丢失。
+    assertEquals(
+        "resourceGateway=true,promptTasks=true,promptResources=true",
+        staticPlugin.lastObservedHostPorts(),
+        "the candidate context must keep every host port");
   }
 
   /** 纯 KEEP 且认证上下文未变化：只推进普通 revision，凭据行逐字节不变、代际不变、已录入字段保留。 */
@@ -594,6 +610,11 @@ class PluginConfigurationCommitServicePostgresIntegrationTest {
         staticPlugin.lastObservedCredential(),
         "a CLEAR candidate must see this commit's private credential-less view, never the secret"
             + " it is about to revoke");
+    // CLEAR 候选同样只替换凭据访问：宿主端口必须原样保留，不得因候选构建而静默丢失。
+    assertEquals(
+        "resourceGateway=true,promptTasks=true,promptResources=true",
+        staticPlugin.lastObservedHostPorts(),
+        "the credential-less candidate context must keep every host port");
   }
 
   /** 缺主密钥且确实需要重写密文时必须 fail closed：不写凭据、不推进 epoch、不写历史。 */
@@ -727,7 +748,7 @@ class PluginConfigurationCommitServicePostgresIntegrationTest {
             credentialRepository,
             codec,
             new PluginCredentialKeyLoader(tempDir.resolve("commit-test.key").toString()),
-            new PluginContextFactory(credentialStore, () -> null),
+            new PluginContextFactory(credentialStore, () -> null, () -> null, () -> null),
             List::of,
             List::of,
             failingTransactions,
@@ -760,7 +781,7 @@ class PluginConfigurationCommitServicePostgresIntegrationTest {
             credentialRepository,
             codec,
             new PluginCredentialKeyLoader(tempDir.resolve("commit-test.key").toString()),
-            new PluginContextFactory(credentialStore, () -> null),
+            new PluginContextFactory(credentialStore, () -> null, () -> null, () -> null),
             beans.getBeanProvider(HarnessContributor.class),
             beans.getBeanProvider(CanvasFunctionAdapter.class),
             transactionManager,
@@ -1068,6 +1089,9 @@ class PluginConfigurationCommitServicePostgresIntegrationTest {
     /** 每次候选构建时该 Plugin 实际看到的秘密视图：用于断言候选从不进入活动凭据。 */
     private final List<String> observedCredentials = new ArrayList<>();
 
+    /** 每次候选构建时该 Plugin 实际看到的宿主端口形状：候选视图只替换凭据访问，其余端口必须原样透传。 */
+    private final List<String> observedHostPorts = new ArrayList<>();
+
     private PluginInstance candidateInstance;
     private Runnable beforeConfigure;
 
@@ -1120,11 +1144,22 @@ class PluginConfigurationCommitServicePostgresIntegrationTest {
       } catch (RuntimeException error) {
         observedCredentials.add(error.getClass().getSimpleName());
       }
+      observedHostPorts.add(
+          "resourceGateway="
+              + context.resourceGateway().isPresent()
+              + ",promptTasks="
+              + context.promptTasks().isPresent()
+              + ",promptResources="
+              + context.promptResources().isPresent());
       return candidateInstance == null ? TestPluginFixtures.emptyInstance() : candidateInstance;
     }
 
     String lastObservedCredential() {
       return observedCredentials.get(observedCredentials.size() - 1);
+    }
+
+    String lastObservedHostPorts() {
+      return observedHostPorts.get(observedHostPorts.size() - 1);
     }
   }
 

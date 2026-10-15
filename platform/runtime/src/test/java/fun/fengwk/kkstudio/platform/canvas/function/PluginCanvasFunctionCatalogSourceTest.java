@@ -349,6 +349,8 @@ class PluginCanvasFunctionCatalogSourceTest {
             return false;
           }
         },
+        Optional.empty(),
+        Optional.empty(),
         Optional.empty());
   }
 

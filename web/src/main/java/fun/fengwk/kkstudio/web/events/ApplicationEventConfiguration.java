@@ -52,7 +52,7 @@ public class ApplicationEventConfiguration {
   }
 
   /**
-   * 内部观察者（TaskTool / HarnessOneShotService）的 Thread change 源：复用 {@link ThreadVersionEventSource}
+   * 内部观察者（TaskTool / PluginPromptTaskService）的 Thread change 源：复用 {@link ThreadVersionEventSource}
    * 的原子订阅与 resync 语义，只保留纯 wake 信号。
    */
   @Bean

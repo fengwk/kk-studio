@@ -8,23 +8,18 @@ import fun.fengwk.kkstudio.canvas.CanvasJson.JsonObject;
 import fun.fengwk.kkstudio.canvas.CanvasJson.JsonText;
 import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.platform.plugin.prompt.PluginPromptContent;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Objects;
 
 /**
- * 构造 H3 Prompt Agent 的固定 SYSTEM 与 USER 消息。
+ * 构造 H3 Prompt Agent 的固定 SYSTEM 文本与 USER 文本片段。
  *
- * <p>USER 消息只包含 durable-safe 的 TEXT 内容（manifest 表格 + 每个引用一个 label 段落）；媒体内容不进 durable JSON，由提交方在入队
- * preflight 中按 manifest 顺序物化为全局存储 RESOURCE 内容（见 {@link MiniMaxH3CanvasFunctionAdapter}）。
+ * <p>产物只是普通文本片段：冻结 manifest 表格，以及每个引用一段 label。媒体片段由调用方在打开原始流并暂存后按同一顺序插入，因此文本内容与顺序是 durable-safe
+ * 且与提交时机无关的。
  */
 public final class H3PromptRequestBuilder {
 
@@ -45,7 +40,9 @@ public final class H3PromptRequestBuilder {
     return systemPrompt;
   }
 
-  public AgentMessage userMessage(CanvasFunctionFrozenRun run, H3ReferenceManifest manifest) {
+  /** 首段文本：任务摘要与冻结 manifest 表格（表格是 label 与顺序的权威来源）。 */
+  public PluginPromptContent.Text manifestTable(
+      CanvasFunctionFrozenRun run, H3ReferenceManifest manifest) {
     Objects.requireNonNull(run, "run");
     Objects.requireNonNull(manifest, "manifest");
     String ratio = extractText(run.args(), "ratio", "16:9");
@@ -88,15 +85,14 @@ public final class H3PromptRequestBuilder {
           .append(note)
           .append(" |\n");
     }
+    return new PluginPromptContent.Text(body.toString());
+  }
 
-    List<AgentMessageContent> contents = new ArrayList<>();
-    contents.add(new TextMessageContent(body.toString()));
-    for (H3ReferenceManifest.Item item : manifest.items()) {
-      contents.add(
-          new TextMessageContent(
-              "\nThe next attachment is " + item.label() + " from the frozen manifest.\n"));
-    }
-    return new AgentMessage(AgentMessageRole.USER, contents);
+  /** 单个引用的 label 段落：紧随其后的是该引用对应的媒体片段。 */
+  public PluginPromptContent.Text referenceLabel(H3ReferenceManifest.Item item) {
+    Objects.requireNonNull(item, "item");
+    return new PluginPromptContent.Text(
+        "\nThe next attachment is " + item.label() + " from the frozen manifest.\n");
   }
 
   private static String tableCell(String value) {
