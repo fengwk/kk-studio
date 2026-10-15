@@ -16,6 +16,7 @@ import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentSessionListener;
 import fun.fengwk.kkstudio.harness.runtime.HarnessThreadChangeSource;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.catalog.tool.TestRuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.project.controller.IssueControllerProperties;
@@ -48,16 +49,26 @@ public class PlatformHarnessTestConfiguration {
   }
 
   /**
-   * Platform 测试宿主的运行时工具目录 source：单 epoch 冻结目录，测试工具都是内置（pluginSource 为 null、无 MCP 工具）。
+   * Platform 测试宿主的运行时工具目录 source：Harness 固定在单 epoch，MCP 每次租用现读并冻结。
    *
    * <p>生产 source 需要 web 组合根发布的 {@code PluginCatalogRuntime}；platform 测试上下文不装配插件运行时，因此测试宿主只冻结自己的
-   * Harness 目录。冻结索引与严格校验仍复用生产实现，测试替身不与生产语义漂移。
+   * Harness 目录和实际 MCP 事实。冻结索引与严格校验仍复用生产实现，租用内不受后续 MCP 变化影响。
    */
   @Bean
   @ConditionalOnMissingBean(name = "runtimeToolCatalogSource")
-  public RuntimeToolCatalogSource runtimeToolCatalogSource(HarnessCatalog harnessCatalog) {
-    return TestRuntimeToolCatalogSource.of(
-        harnessCatalog, TestRuntimeToolCatalogSource.emptyMcpCatalog());
+  public RuntimeToolCatalogSource runtimeToolCatalogSource(
+      HarnessCatalog harnessCatalog, McpToolCatalog mcpCatalog) {
+    return new RuntimeToolCatalogSource() {
+      @Override
+      public Lease acquireCurrent() {
+        return acquire(TestRuntimeToolCatalogSource.EPOCH);
+      }
+
+      @Override
+      public Lease acquire(long catalogEpoch) {
+        return TestRuntimeToolCatalogSource.of(harnessCatalog, mcpCatalog).acquire(catalogEpoch);
+      }
+    };
   }
 
   /**
