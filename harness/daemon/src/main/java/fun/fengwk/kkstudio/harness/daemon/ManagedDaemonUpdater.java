@@ -1,10 +1,5 @@
 package fun.fengwk.kkstudio.harness.daemon;
 
-import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.json.JsonMapper;
-import tools.jackson.databind.node.ObjectNode;
-
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateArtifact;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateCommand;
@@ -42,11 +37,12 @@ import java.util.jar.Manifest;
  *
  * <p><b>不改磁盘配置：</b>预检用现有 {@code daemon.json} 与 {@code daemon.token}，不重写它们；更新只替换 {@code lib} 下的二进制。
  *
- * <p><b>幂等准备：</b>同一 {@code operationId} 的重复命令复用已完成的暂存制品（handoff 已存在、SHA256 一致），绝不第二次下载。
+ * <p><b>幂等准备：</b>同一 {@code operationId} 的重复命令只在 handoff 仍为 {@code ACCEPTED}
+ * 且暂存制品完好时复用，绝不第二次下载或再次启动。
  *
- * <p><b>handoff 边界：</b>{@link #prepare(DaemonUpdateCommand)} 只把验证过的制品、更新脚本与元数据写到 {@code
- * <dataDir>/updates/<operationId>/}（进程私有目录）并返回 handoff；真正替换与重启旧服务由独立于旧 service/task 生命周期的 OS
- * 更新器阶段完成。
+ * <p><b>handoff 边界：</b>{@link #prepare(DaemonUpdateCommand)} 把验证过的制品、更新脚本与元数据写到 {@code
+ * <dataDir>/updates/<operationId>/}（进程私有目录）并按 {@link UpdateHandoff} 落为 {@code
+ * PREPARING}；接受、失败与许可由编排层在启动前后落盘， 真正替换与重启旧服务由独立于旧 service/task 生命周期的 OS 更新器阶段完成。
  */
 public final class ManagedDaemonUpdater implements ManagedUpdatePreparer {
 
@@ -60,9 +56,6 @@ public final class ManagedDaemonUpdater implements ManagedUpdatePreparer {
 
   /** 暂存与 handoff 的进程私有子目录。 */
   public static final String UPDATE_DIRECTORY = "updates";
-
-  /** handoff 元数据文件名；下一阶段的 OS 更新器按它执行替换与重启。 */
-  public static final String HANDOFF_FILE = "handoff.json";
 
   /** 供独立更新器读取的最小证据文件名（阶段与去敏说明）。 */
   public static final String RESULT_FILE = "update-result.json";
@@ -102,7 +95,6 @@ public final class ManagedDaemonUpdater implements ManagedUpdatePreparer {
   private final Path dataDir;
   private final ArtifactFetcher fetcher;
   private final ConfigPreflight preflight;
-  private final ObjectMapper mapper = JsonMapper.builder().build();
 
   public ManagedDaemonUpdater(Path dataDir) {
     this(dataDir, new HttpArtifactFetcher(), new ProcessConfigPreflight());
@@ -159,11 +151,21 @@ public final class ManagedDaemonUpdater implements ManagedUpdatePreparer {
         updateRoot.resolve(DaemonUpdateArtifact.jarName(targetVersion) + ".sha256");
     Path updateScript = updateRoot.resolve(updateScriptFileName());
 
-    // 幂等：同一 operation 的重复命令复用已验证的暂存制品，绝不产生第二次下载。
-    if (isReusableHandoff(updateRoot, stagedJar, targetVersion, command.artifactSha256())) {
-      extractUpdateScript(updateScript);
-      return new ManagedUpdateOutcome.Prepared(
-          targetVersion, updateRoot, updateScript, stagedJar, managedJar);
+    // 复用仲裁：只有已被 OS 接受的 handoff 可复用；PREPARING/FAILED/不匹配一律 fail closed，绝不第二次下载或再次启动。
+    UpdateHandoff.State state = UpdateHandoff.readState(updateRoot, command);
+    if (state == UpdateHandoff.State.ACCEPTED) {
+      if (isRealRegularFile(stagedJar)
+          && command.artifactSha256().equalsIgnoreCase(sha256Hex(stagedJar))) {
+        extractUpdateScript(updateScript);
+        // 携带既有交接路径：编排层据此幂等释放 matching permit，但绝不再次启动 OS 作业。
+        return new ManagedUpdateOutcome.AlreadyAccepted(
+            new ManagedUpdateOutcome.Prepared(
+                targetVersion, updateRoot, updateScript, stagedJar, managedJar));
+      }
+      return new ManagedUpdateOutcome.Failed("the update operation is not in a reusable state");
+    }
+    if (state != UpdateHandoff.State.ABSENT) {
+      return new ManagedUpdateOutcome.Failed("the update operation is not in a reusable state");
     }
 
     fetcher.fetch(URI.create(command.artifactUrl()), stagedJar);
@@ -189,37 +191,34 @@ public final class ManagedDaemonUpdater implements ManagedUpdatePreparer {
           "staged artifact rejected the existing daemon configuration");
     }
     extractUpdateScript(updateScript);
-    writeHandoff(updateRoot, command, updateScript, stagedJar, managedJar, configFile);
+    // handoff 必须先于 OS 作业持久化为 PREPARING：启动失败或不确定都不允许被当成可复用的接受事实。
+    UpdateHandoff.writePreparing(
+        updateRoot,
+        command,
+        updateScript,
+        stagedJar,
+        managedJar,
+        configFile,
+        currentJavaExecutable());
     return new ManagedUpdateOutcome.Prepared(
         targetVersion, updateRoot, updateScript, stagedJar, managedJar);
   }
 
-  /**
-   * 同一 operation 的 handoff 是否仍可复用：handoff 存在、目标版本与命令 SHA256 一致，且暂存 JAR 仍在且摘要一致。
-   *
-   * <p>只信任本机写入的 handoff 与已校验制品；任何读取或摘要失败都返回 false，退化为重新下载而不是复用可疑内容。
-   */
-  private boolean isReusableHandoff(
-      Path updateRoot, Path stagedJar, String targetVersion, String expectedSha256) {
-    Path handoff = updateRoot.resolve(HANDOFF_FILE);
-    if (!isRealRegularFile(handoff) || !isRealRegularFile(stagedJar)) {
-      return false;
-    }
-    try {
-      JsonNode root = mapper.readTree(Files.readString(handoff, StandardCharsets.UTF_8));
-      if (!targetVersion.equals(text(root, "targetVersion"))
-          || !expectedSha256.equalsIgnoreCase(text(root, "artifactSha256"))) {
-        return false;
-      }
-      return expectedSha256.equalsIgnoreCase(sha256Hex(stagedJar));
-    } catch (IOException | RuntimeException error) {
-      return false;
-    }
-  }
-
-  private static String text(JsonNode root, String field) {
-    JsonNode value = root == null ? null : root.get(field);
-    return value != null && value.isString() ? value.stringValue() : null;
+  /** 当前 Daemon 的解释器路径：Windows 更新脚本据此核对受管计划任务的 Execute 与安装器一致。 */
+  private static String currentJavaExecutable() {
+    return ProcessHandle.current()
+        .info()
+        .command()
+        .orElseGet(
+            () ->
+                Path.of(
+                        System.getProperty("java.home"),
+                        "bin",
+                        DaemonOperatingSystemDetector.detectCurrent()
+                                == DaemonOperatingSystem.WINDOWS
+                            ? "java.exe"
+                            : "java")
+                    .toString());
   }
 
   private void extractUpdateScript(Path updateScript) throws IOException {
@@ -242,31 +241,6 @@ public final class ManagedDaemonUpdater implements ManagedUpdatePreparer {
     return DaemonOperatingSystemDetector.detectCurrent() == DaemonOperatingSystem.WINDOWS
         ? WINDOWS_UPDATE_SCRIPT
         : UNIX_UPDATE_SCRIPT;
-  }
-
-  private void writeHandoff(
-      Path updateRoot,
-      DaemonUpdateCommand command,
-      Path updateScript,
-      Path stagedJar,
-      Path managedJar,
-      Path configFile)
-      throws IOException {
-    ObjectNode handoff = mapper.createObjectNode();
-    handoff.put("operationId", command.operationId());
-    handoff.put("targetVersion", command.targetVersion());
-    handoff.put("artifactSha256", command.artifactSha256());
-    handoff.put("updateScript", updateScript.toString());
-    handoff.put("stagedJar", stagedJar.toString());
-    handoff.put("installedJar", managedJar.toString());
-    handoff.put("configFile", configFile.toString());
-    writeAtomic(updateRoot.resolve(HANDOFF_FILE), mapper.writeValueAsString(handoff));
-  }
-
-  private static void writeAtomic(Path target, String content) throws IOException {
-    Path temporary = target.resolveSibling(target.getFileName() + ".part");
-    Files.writeString(temporary, content, StandardCharsets.UTF_8);
-    Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING);
   }
 
   /** 私有暂存目录：拒绝符号链接并用 POSIX 0700 收紧（非 POSIX 平台忽略）。 */
