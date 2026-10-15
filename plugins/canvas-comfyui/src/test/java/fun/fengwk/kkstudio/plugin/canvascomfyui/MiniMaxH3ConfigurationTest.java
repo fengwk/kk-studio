@@ -9,11 +9,10 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
 import tools.jackson.databind.ObjectMapper;
 
-import fun.fengwk.kkstudio.platform.harness.oneshot.HarnessOneShotService;
+import fun.fengwk.kkstudio.platform.plugin.prompt.PluginPromptResources;
+import fun.fengwk.kkstudio.platform.plugin.prompt.PluginPromptTasks;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
-import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
-import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 
 /** 配置测试覆盖默认关闭装配、启用时的 token fail-fast 与聚合 runtime 边界。 */
 class MiniMaxH3ConfigurationTest {
@@ -43,11 +42,10 @@ class MiniMaxH3ConfigurationTest {
             snapshot,
             preflight,
             promptBuilder,
-            mock(HarnessOneShotService.class),
+            mock(PluginPromptTasks.class),
+            mock(PluginPromptResources.class),
             workflowBuilder,
-            mock(ObjectProvider.class),
-            mock(StorageUploadService.class),
-            mock(SessionBlobRefManager.class)));
+            mock(ObjectProvider.class)));
   }
 
   @Test
@@ -63,11 +61,10 @@ class MiniMaxH3ConfigurationTest {
             snapshot,
             configuration.h3MediaPreflight(),
             configuration.h3PromptRequestBuilder(),
-            mock(HarnessOneShotService.class),
+            mock(PluginPromptTasks.class),
+            mock(PluginPromptResources.class),
             configuration.h3WorkflowBuilder(mapper),
-            mock(ObjectProvider.class),
-            mock(StorageUploadService.class),
-            mock(SessionBlobRefManager.class)));
+            mock(ObjectProvider.class)));
   }
 
   @Test

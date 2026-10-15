@@ -567,7 +567,7 @@ public final class PluginConfigurationCommitService {
    * 候选上下文：目标 Plugins 一律使用本次提交的「私有候选视图」，其余插件沿用权威 scoped 访问。
    *
    * <p>候选视图有三种真实形态：新密文（SET/登录完成）、本次私有的「无凭据」（CLEAR 或本就未连接）与权威访问（纯 KEEP 且凭据行不变）。删除与未连接两种候选都绝不回读权威
-   * store：前者在事务提交前旧行仍然存在，回读会把即将被撤销的秘密交给候选实例。所有候选都只影响本次构建，不进入活动快照。
+   * store：前者在事务提交前旧行仍然存在，回读会把即将被撤销的秘密交给候选实例。候选视图只替换凭据访问，其余宿主端口必须原样透传。所有候选都只影响本次构建，不进入活动快照。
    */
   private BiFunction<String, PluginCredentialReference, PluginContext> candidateContexts(
       String pluginId,
@@ -582,7 +582,9 @@ public final class PluginConfigurationCommitService {
         PluginContext base = contextFactory.create(id, reference);
         return new PluginContext(
             new FixedPluginCredentialAccess(candidateReference, candidateSnapshot),
-            base.resourceGateway());
+            base.resourceGateway(),
+            base.promptTasks(),
+            base.promptResources());
       }
       return contextFactory.create(id, reference);
     };

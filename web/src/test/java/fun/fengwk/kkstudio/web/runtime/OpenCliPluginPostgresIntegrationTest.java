@@ -984,7 +984,7 @@ class OpenCliPluginPostgresIntegrationTest {
         credentialRepository,
         codec,
         keyLoader,
-        new PluginContextFactory(credentialStore, () -> null),
+        new PluginContextFactory(credentialStore, () -> null, () -> null, () -> null),
         List::of,
         List::of,
         transactionManager,

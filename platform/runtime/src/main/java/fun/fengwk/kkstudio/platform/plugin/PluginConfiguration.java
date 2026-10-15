@@ -20,6 +20,8 @@ import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialStore;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginAuthAttemptRepository;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginCredentialRepository;
+import fun.fengwk.kkstudio.platform.plugin.prompt.PluginPromptResources;
+import fun.fengwk.kkstudio.platform.plugin.prompt.PluginPromptTasks;
 import fun.fengwk.kkstudio.platform.plugin.resource.PluginResourceGateway;
 import fun.fengwk.kkstudio.platform.plugin.service.PluginConfigurationCommitService;
 import fun.fengwk.kkstudio.platform.plugin.service.PluginContextFactory;
@@ -73,8 +75,15 @@ public class PluginConfiguration {
   @Bean
   @ConditionalOnMissingBean
   public PluginContextFactory pluginContextFactory(
-      PluginCredentialStore credentials, ObjectProvider<PluginResourceGateway> resourceGateways) {
-    return new PluginContextFactory(credentials, resourceGateways::getIfAvailable);
+      PluginCredentialStore credentials,
+      ObjectProvider<PluginResourceGateway> resourceGateways,
+      ObjectProvider<PluginPromptTasks> promptTasks,
+      ObjectProvider<PluginPromptResources> promptResources) {
+    return new PluginContextFactory(
+        credentials,
+        resourceGateways::getIfAvailable,
+        promptTasks::getIfAvailable,
+        promptResources::getIfAvailable);
   }
 
   @Bean

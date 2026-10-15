@@ -24,7 +24,8 @@ class OpenCliInstanceTest {
   void createInstanceAndVerifyContributions() {
     OpenCliSettings settings = OpenCliTestSettings.defaults();
     PluginCredentialAccess credentialAccess = mock(PluginCredentialAccess.class);
-    PluginContext context = new PluginContext(credentialAccess, Optional.empty());
+    PluginContext context =
+        new PluginContext(credentialAccess, Optional.empty(), Optional.empty(), Optional.empty());
 
     OpenCliInstance instance =
         OpenCliInstance.create(settings, JsonMapper.builder().build(), context);
@@ -50,7 +51,8 @@ class OpenCliInstanceTest {
   void nullArgumentsThrow() {
     OpenCliSettings settings = OpenCliTestSettings.defaults();
     PluginCredentialAccess credentialAccess = mock(PluginCredentialAccess.class);
-    PluginContext context = new PluginContext(credentialAccess, Optional.empty());
+    PluginContext context =
+        new PluginContext(credentialAccess, Optional.empty(), Optional.empty(), Optional.empty());
 
     assertThatThrownBy(() -> OpenCliInstance.create(null, JsonMapper.builder().build(), context))
         .isInstanceOf(NullPointerException.class)

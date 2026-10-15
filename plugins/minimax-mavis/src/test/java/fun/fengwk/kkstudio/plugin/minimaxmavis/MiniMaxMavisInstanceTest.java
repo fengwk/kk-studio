@@ -50,7 +50,8 @@ class MiniMaxMavisInstanceTest {
   @Test
   void defaultConfigureProvidesFifteenToolsAndEmptyCanvas() {
     CountingCredentialAccess credentialAccess = new CountingCredentialAccess();
-    PluginContext context = new PluginContext(credentialAccess, Optional.empty());
+    PluginContext context =
+        new PluginContext(credentialAccess, Optional.empty(), Optional.empty(), Optional.empty());
 
     PluginInstance instance =
         plugin.configure(PluginConfig.initial(plugin.configurationSchema()), context);
@@ -85,7 +86,8 @@ class MiniMaxMavisInstanceTest {
   @Test
   void closeShutsDownTheInstanceExecutorExactlyOnce() {
     CountingCredentialAccess credentialAccess = new CountingCredentialAccess();
-    PluginContext context = new PluginContext(credentialAccess, Optional.empty());
+    PluginContext context =
+        new PluginContext(credentialAccess, Optional.empty(), Optional.empty(), Optional.empty());
     ArgumentCaptor<MiniMaxMavisHarnessContributor.ToolDependencies> captured =
         ArgumentCaptor.forClass(MiniMaxMavisHarnessContributor.ToolDependencies.class);
 
@@ -118,7 +120,8 @@ class MiniMaxMavisInstanceTest {
   @Test
   void disabledConfigureContributesNothing() {
     CountingCredentialAccess credentialAccess = new CountingCredentialAccess();
-    PluginContext context = new PluginContext(credentialAccess, Optional.empty());
+    PluginContext context =
+        new PluginContext(credentialAccess, Optional.empty(), Optional.empty(), Optional.empty());
 
     PluginInstance instance = plugin.configure(new PluginConfig(3, "{\"enabled\":false}"), context);
 
@@ -135,7 +138,9 @@ class MiniMaxMavisInstanceTest {
   /** 配置严格按 schema 解析：未知字段与非布尔 enabled 都被拒绝，绝不静默兜底。 */
   @Test
   void configureRejectsConfigThatViolatesTheSchema() {
-    PluginContext context = new PluginContext(new CountingCredentialAccess(), Optional.empty());
+    PluginContext context =
+        new PluginContext(
+            new CountingCredentialAccess(), Optional.empty(), Optional.empty(), Optional.empty());
 
     assertThrows(
         IllegalArgumentException.class,
@@ -148,7 +153,9 @@ class MiniMaxMavisInstanceTest {
   /** 装配抛出 RuntimeException 时必须立即释放已创建的执行器，绝不泄漏给宿主。 */
   @Test
   void runtimeFailureReleasesTheAlreadyCreatedExecutor() {
-    PluginContext context = new PluginContext(new CountingCredentialAccess(), Optional.empty());
+    PluginContext context =
+        new PluginContext(
+            new CountingCredentialAccess(), Optional.empty(), Optional.empty(), Optional.empty());
     ArgumentCaptor<MiniMaxMavisHarnessContributor.ToolDependencies> captured = capture();
 
     try (MockedStatic<MiniMaxMavisHarnessContributor> mocked =
@@ -171,7 +178,9 @@ class MiniMaxMavisInstanceTest {
   /** 装配抛出进程级 Error：executor 同样被释放，且原始 Error 原样向上传播。 */
   @Test
   void errorIsPropagatedVerbatimAfterReleasingTheExecutor() {
-    PluginContext context = new PluginContext(new CountingCredentialAccess(), Optional.empty());
+    PluginContext context =
+        new PluginContext(
+            new CountingCredentialAccess(), Optional.empty(), Optional.empty(), Optional.empty());
     ArgumentCaptor<MiniMaxMavisHarnessContributor.ToolDependencies> captured = capture();
     AssertionError primary = new AssertionError("tool schema rejected");
 

@@ -19,6 +19,8 @@ import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRuntime;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogSnapshot;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialStore;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRepository;
+import fun.fengwk.kkstudio.platform.plugin.prompt.PluginPromptResources;
+import fun.fengwk.kkstudio.platform.plugin.prompt.PluginPromptTasks;
 import fun.fengwk.kkstudio.platform.plugin.resource.PluginResourceGateway;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
@@ -48,6 +50,8 @@ class PluginCatalogBootstrapPostgresIntegrationTest extends WebPostgresTestSuppo
   @Autowired private PlatformTransactionManager transactionManager;
   @Autowired private PluginCredentialStore credentials;
   @Autowired private ObjectProvider<PluginResourceGateway> resourceGateways;
+  @Autowired private ObjectProvider<PluginPromptTasks> promptTasks;
+  @Autowired private ObjectProvider<PluginPromptResources> promptResources;
   @Autowired private ObjectProvider<HarnessContributor> contributors;
   @Autowired private ObjectProvider<CanvasFunctionAdapter> adapters;
   @Autowired private PluginCatalogRuntime liveRuntime;
@@ -100,7 +104,8 @@ class PluginCatalogBootstrapPostgresIntegrationTest extends WebPostgresTestSuppo
   private PluginCatalogSnapshot bootstrap() {
     return new PluginCatalogBootstrap(registry, repository, transactionManager)
         .bootstrap(
-            PluginCatalogConfiguration.pluginContexts(credentials, resourceGateways),
+            PluginCatalogConfiguration.pluginContexts(
+                credentials, resourceGateways, promptTasks, promptResources),
             contributors.orderedStream().toList(),
             adapters.orderedStream().toList());
   }
