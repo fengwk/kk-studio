@@ -618,7 +618,8 @@ class OpenCliHubClientContractTest {
                   200,
                   envelope(
                       "{\"id\":\"exec-1\",\"status\":\"PENDING\",\"stdout\":\"\","
-                          + "\"stderr\":\"\",\"resources\":[]}"));
+                          + "\"stderr\":\"\",\"stdoutTruncated\":false,"
+                          + "\"stderrTruncated\":false,\"resources\":[]}"));
             });
 
     OpenCliHubClient client =

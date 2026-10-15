@@ -239,20 +239,6 @@ class OpenCliHubClientTest {
           }
         });
 
-    OpenCliSettings configured =
-        new OpenCliSettings(
-            true,
-            "http://127.0.0.1:" + server.getAddress().getPort(),
-            5_000,
-            120_000,
-            121_000,
-            1024,
-            512 * 1024,
-            4096,
-            65_535,
-            OpenCliTestSettings.defaults().gptImage2(),
-            OpenCliTestSettings.defaults().seedance());
-    client = new OpenCliHubClient(configured, mapper, credentials);
     Execution submitted = client.execute(List.of("chatgpt-agent", "ask", "prompt"), 1000L);
     client.cancelPendingBestEffort(submitted.id());
 

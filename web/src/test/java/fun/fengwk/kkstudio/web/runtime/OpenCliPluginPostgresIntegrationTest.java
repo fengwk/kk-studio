@@ -437,7 +437,7 @@ class OpenCliPluginPostgresIntegrationTest {
   }
 
   @Test
-  void inFlightInstanceFencingRejectsNetworkEgressOnBaseUrlChangeOrRevocation() throws IOException {
+  void pinnedOldInstanceIsFencedBeforeEgressAfterBaseUrlChange() throws IOException {
     List<RecordedRequest> requestsA = new CopyOnWriteArrayList<>();
     List<RecordedRequest> requestsB = new CopyOnWriteArrayList<>();
     HttpServer serverA = createControlledServer(requestsA);
