@@ -15,6 +15,7 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunException;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunStateCodecPort;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionService;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionUnknownResolution;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionVersion;
 
 import java.util.Objects;
 import java.util.UUID;
@@ -32,10 +33,13 @@ public class CanvasFunctionRuntimeService implements CanvasFunctionService {
   private final CanvasFunctionRunStateCodecPort stateCodec;
 
   @Override
-  public CanvasFunctionRun start(UUID canvasId, UUID nodeId, String requestId) {
+  public CanvasFunctionRun start(
+      UUID canvasId, UUID nodeId, String requestId, CanvasFunctionVersion expectedVersion) {
     Objects.requireNonNull(canvasId, "canvasId");
     Objects.requireNonNull(nodeId, "nodeId");
-    CanvasFunctionStartResult result = transactions.start(canvasId, nodeId, requestId);
+    Objects.requireNonNull(expectedVersion, "expectedVersion");
+    CanvasFunctionStartResult result =
+        transactions.start(canvasId, nodeId, requestId, expectedVersion);
     return result.run();
   }
 

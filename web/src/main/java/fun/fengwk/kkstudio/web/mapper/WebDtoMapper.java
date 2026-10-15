@@ -19,7 +19,9 @@ import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
 import fun.fengwk.kkstudio.canvas.CanvasResourceNode;
 import fun.fengwk.kkstudio.canvas.CanvasSnapshot;
 import fun.fengwk.kkstudio.canvas.CanvasTransform;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionVersion;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.share.canvas.CanvasCommandDTO;
@@ -30,6 +32,7 @@ import fun.fengwk.kkstudio.share.canvas.CanvasFunctionDefinitionDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasFunctionOutputDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasFunctionReferencePolicyDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasFunctionRunDTO;
+import fun.fengwk.kkstudio.share.canvas.CanvasFunctionVersionDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasGroupDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasGroupPatchDTO;
 import fun.fengwk.kkstudio.share.canvas.CanvasNodePatchDTO;
@@ -51,6 +54,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 /**
  * Canvas domain 与 share DTO 之间的严格 HTTP 边界映射。
@@ -63,6 +67,9 @@ import java.util.UUID;
  */
 @Component
 public class WebDtoMapper {
+
+  /** canonical 非负十进制 long：无前导零、无符号、无空白。 */
+  private static final Pattern DECIMAL_LONG = Pattern.compile("^(0|[1-9][0-9]*)$");
 
   private final StorageBlobManager blobManager;
 
@@ -178,7 +185,10 @@ public class WebDtoMapper {
   }
 
   public CanvasFunctionDefinitionDTO toDto(
-      CanvasFunctionDefinition definition, boolean available, String unavailableReason) {
+      CanvasFunctionDefinition definition,
+      boolean available,
+      String unavailableReason,
+      long catalogEpoch) {
     Objects.requireNonNull(definition, "definition");
     CanvasFunctionDefinitionDTO dto = new CanvasFunctionDefinitionDTO();
     dto.setName(definition.name());
@@ -205,8 +215,48 @@ public class WebDtoMapper {
     referencePolicy.setMaxByKind(maxByKind);
     dto.setReferencePolicy(referencePolicy);
     dto.setAvailable(available);
+    dto.setVersion(versionDto(catalogEpoch, definition));
     dto.setUnavailableReason(unavailableReason);
     return dto;
+  }
+
+  /** 目录项的版本身份由同一次租用的 epoch 与该函数定义摘要一起构成。 */
+  private static CanvasFunctionVersionDTO versionDto(
+      long catalogEpoch, CanvasFunctionDefinition definition) {
+    CanvasFunctionVersionDTO version = new CanvasFunctionVersionDTO();
+    version.setCatalogEpoch(Long.toString(catalogEpoch));
+    version.setDefinitionFingerprint(CanvasFunctionCatalog.definitionFingerprint(definition));
+    return version;
+  }
+
+  /**
+   * 解析 start 的必填 expectedVersion：catalogEpoch 必须是 canonical 非负十进制长整数文本，fingerprint 必须是 64 位小写
+   * SHA-256。
+   *
+   * <p>缺失或非法都在边界处拒绝，不进入执行接受事务。错误提示只描述字段与期望形状，不回显客户端原文。
+   */
+  public static CanvasFunctionVersion parseVersion(CanvasFunctionVersionDTO dto, String field) {
+    Objects.requireNonNull(field, "field");
+    if (dto == null) {
+      throw new IllegalArgumentException(field + " is required");
+    }
+    String epoch = dto.getCatalogEpoch();
+    if (epoch == null || !DECIMAL_LONG.matcher(epoch).matches()) {
+      throw new IllegalArgumentException(
+          field + ".catalogEpoch must be a canonical non-negative decimal string");
+    }
+    long parsedEpoch;
+    try {
+      parsedEpoch = Long.parseLong(epoch);
+    } catch (NumberFormatException error) {
+      throw new IllegalArgumentException(field + ".catalogEpoch exceeds the supported long range");
+    }
+    try {
+      return new CanvasFunctionVersion(parsedEpoch, dto.getDefinitionFingerprint());
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException(
+          field + ".definitionFingerprint must be a lowercase SHA-256 hex string", error);
+    }
   }
 
   public static CanvasPresignedUrlDTO toPresignedUrlDto(StoragePresignedUrlDTO signed) {

@@ -22,6 +22,7 @@ public final class FixedCanvasFunctionCatalogSource implements CanvasFunctionCat
   private final Map<Long, Map<String, CanvasFunctionPluginSource>> pluginSourcesByEpoch =
       new LinkedHashMap<>();
   private final AtomicInteger openLeases = new AtomicInteger();
+  private final AtomicInteger acquireCurrentCalls = new AtomicInteger();
   private volatile long currentEpoch;
 
   public FixedCanvasFunctionCatalogSource(long epoch, CanvasFunctionCatalog catalog) {
@@ -62,8 +63,14 @@ public final class FixedCanvasFunctionCatalogSource implements CanvasFunctionCat
     return openLeases.get();
   }
 
+  /** {@code acquireCurrent()} 的调用次数；用于断言精确重放完全不取 current 租用。 */
+  public int acquireCurrentCalls() {
+    return acquireCurrentCalls.get();
+  }
+
   @Override
   public Lease acquireCurrent() {
+    acquireCurrentCalls.incrementAndGet();
     return acquire(currentEpoch);
   }
 

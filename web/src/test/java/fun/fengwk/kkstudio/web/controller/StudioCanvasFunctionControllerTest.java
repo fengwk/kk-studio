@@ -40,6 +40,7 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunException;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionService;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionUnknownResolution;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionVersion;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.web.mapper.WebDtoMapper;
 
@@ -88,7 +89,7 @@ class StudioCanvasFunctionControllerTest {
             .build();
   }
 
-  /** 测试意图：目录以函数名 + args schema 为身份，不再暴露 model/prompt/parameters 等旧身份字段。 */
+  /** 测试意图：目录以函数名 + args schema 为身份，并暴露同一次租用取得的 epoch 与该函数定义版本。 */
   @Test
   void listsFunctionsByNameAndArgsSchema() throws Exception {
     mockMvc
@@ -105,6 +106,11 @@ class StudioCanvasFunctionControllerTest {
         .andExpect(jsonPath("$.data[0].referencePolicy.allowedKinds[0]").value("IMAGE"))
         .andExpect(jsonPath("$.data[0].available").value(true))
         .andExpect(jsonPath("$.data[0].unavailableReason").value(nullValue()))
+        // 版本身份来自同一次 acquireCurrent：epoch 与该函数完整定义 fingerprint 一起输出。
+        .andExpect(jsonPath("$.data[0].version.catalogEpoch").value("1"))
+        .andExpect(
+            jsonPath("$.data[0].version.definitionFingerprint")
+                .value(expectedVersion().definitionFingerprint()))
         .andExpect(jsonPath("$.data[0].key").doesNotExist())
         .andExpect(jsonPath("$.data[0].model").doesNotExist())
         .andExpect(jsonPath("$.data[0].parameters").doesNotExist())
@@ -112,6 +118,131 @@ class StudioCanvasFunctionControllerTest {
         .andExpect(jsonPath("$.data[0].workflow").doesNotExist());
     // 目录读取必须是一次 acquireCurrent 的租用，并在响应前释放。
     assertEquals(0, catalogSource.openLeases());
+  }
+
+  /** 测试意图：expectedVersion 必填且形状严格；非法 epoch/fingerprint 都在边界处 400，不触达应用服务。 */
+  @Test
+  void startRequiresWellFormedExpectedVersion() throws Exception {
+    for (String body :
+        new String[] {
+          "{\"requestId\":\"request-1\"}",
+          "{\"requestId\":\"request-1\",\"expectedVersion\":null}",
+          "{\"requestId\":\"request-1\",\"expectedVersion\":{\"catalogEpoch\":\"01\","
+              + "\"definitionFingerprint\":\""
+              + "a".repeat(64)
+              + "\"}}",
+          "{\"requestId\":\"request-1\",\"expectedVersion\":{\"catalogEpoch\":\"1\","
+              + "\"definitionFingerprint\":\""
+              + "A".repeat(64)
+              + "\"}}",
+          "{\"requestId\":\"request-1\",\"expectedVersion\":{\"catalogEpoch\":\"1\","
+              + "\"definitionFingerprint\":\"abc\"}}",
+          "{\"requestId\":\"request-1\",\"expectedVersion\":{\"definitionFingerprint\":\""
+              + "a".repeat(64)
+              + "\"}}",
+        }) {
+      mockMvc
+          .perform(
+              post("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/function-run")
+                  .contentType(MediaType.APPLICATION_JSON)
+                  .content(body))
+          .andExpect(status().isBadRequest());
+    }
+    verify(runtimeService, never()).start(any(), any(), any(), any());
+  }
+
+  /** 测试意图：expectedVersion 的 epoch 只能是 JSON 字符串；number/bool/array 一律不得被读成 "1" 之类的文本。 */
+  @Test
+  void expectedVersionRejectsNonStringEpoch() throws Exception {
+    String fingerprint = expectedVersion().definitionFingerprint();
+    when(runtimeService.start(any(), any(), anyString(), any()))
+        .thenReturn(run(CanvasFunctionRunStatus.READY, "QUEUED"));
+    for (String body :
+        new String[] {
+          "{\"requestId\":\"request-1\",\"expectedVersion\":{\"catalogEpoch\":1,"
+              + "\"definitionFingerprint\":\""
+              + fingerprint
+              + "\"}}",
+          "{\"requestId\":\"request-1\",\"expectedVersion\":{\"catalogEpoch\":true,"
+              + "\"definitionFingerprint\":\""
+              + fingerprint
+              + "\"}}",
+          "{\"requestId\":\"request-1\",\"expectedVersion\":{\"catalogEpoch\":[\"1\"],"
+              + "\"definitionFingerprint\":\""
+              + fingerprint
+              + "\"}}",
+          "{\"requestId\":\"request-1\",\"expectedVersion\":{\"catalogEpoch\":\"1\","
+              + "\"definitionFingerprint\":123}}",
+          "{\"requestId\":\"request-1\",\"expectedVersion\":{\"catalogEpoch\":null,"
+              + "\"definitionFingerprint\":\""
+              + fingerprint
+              + "\"}}",
+          "{\"requestId\":\"request-1\",\"expectedVersion\":{\"catalogEpoch\":\"1\","
+              + "\"definitionFingerprint\":null}}",
+          // 超出 long 范围但仍是 canonical 十进制文本：必须在边界拒绝，不能靠溢出行为兜底。
+          "{\"requestId\":\"request-1\",\"expectedVersion\":{\"catalogEpoch\":\""
+              + "9".repeat(30)
+              + "\",\"definitionFingerprint\":\""
+              + fingerprint
+              + "\"}}",
+        }) {
+      mockMvc
+          .perform(
+              post("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/function-run")
+                  .contentType(MediaType.APPLICATION_JSON)
+                  .content(body))
+          .andExpect(status().isBadRequest());
+    }
+    verify(runtimeService, never()).start(any(), any(), any(), any());
+  }
+
+  /** 测试意图：目录已变化时应用服务返回的 409 原样映射，客户端据此刷新目录而不是静默重试。 */
+  @Test
+  void mapsCatalogChangedConflictTo409() throws Exception {
+    when(runtimeService.start(any(), any(), anyString(), any()))
+        .thenThrow(
+            new CanvasFunctionRunException(
+                CanvasFunctionRunException.Reason.CONFLICT,
+                "Canvas Function catalog changed; refresh the directory before starting"
+                    + " this function"));
+
+    mockMvc
+        .perform(
+            post("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/function-run")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    "{\"requestId\":\"request-1\",\"expectedVersion\":{\"catalogEpoch\":\"1\","
+                        + "\"definitionFingerprint\":\""
+                        + expectedVersion().definitionFingerprint()
+                        + "\"}}"))
+        .andExpect(status().isConflict());
+  }
+
+  /** 测试意图：cancel 只携带 requestId；start 的 expectedVersion 不能混进 cancel wire。 */
+  @Test
+  void cancelBodyStaysRequestIdOnly() throws Exception {
+    when(runtimeService.cancel(CANVAS, NODE, "request-1"))
+        .thenReturn(run(CanvasFunctionRunStatus.CANCELLED, "CANCELLED"));
+
+    mockMvc
+        .perform(
+            post("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/function-run/cancel")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"requestId\":\"request-1\"}"))
+        .andExpect(status().isOk());
+    verify(runtimeService).cancel(CANVAS, NODE, "request-1");
+    verify(runtimeService, never()).start(any(), any(), any(), any());
+
+    mockMvc
+        .perform(
+            post("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/function-run/cancel")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    "{\"requestId\":\"request-1\",\"expectedVersion\":{\"catalogEpoch\":\"1\","
+                        + "\"definitionFingerprint\":\""
+                        + expectedVersion().definitionFingerprint()
+                        + "\"}}"))
+        .andExpect(status().isBadRequest());
   }
 
   /** 测试意图：已安装但未配置的插件函数仍出现在目录，只以 available=false + 原因报告，绝不假装可执行。 */
@@ -135,7 +266,8 @@ class StudioCanvasFunctionControllerTest {
   @Test
   void startGetCancelExposeOnlyPublicRunFields() throws Exception {
     CanvasFunctionRun run = run(CanvasFunctionRunStatus.READY, "QUEUED");
-    when(runtimeService.start(CANVAS, NODE, "request-1")).thenReturn(run);
+    CanvasFunctionVersion version = expectedVersion();
+    when(runtimeService.start(CANVAS, NODE, "request-1", version)).thenReturn(run);
     when(runtimeService.get(CANVAS, NODE)).thenReturn(run);
     when(runtimeService.cancel(CANVAS, NODE, "request-1"))
         .thenReturn(run(CanvasFunctionRunStatus.CANCELLED, "CANCELLED"));
@@ -144,7 +276,11 @@ class StudioCanvasFunctionControllerTest {
         .perform(
             post("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/function-run")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"requestId\":\"request-1\"}"))
+                .content(
+                    "{\"requestId\":\"request-1\",\"expectedVersion\":{\"catalogEpoch\":\"1\","
+                        + "\"definitionFingerprint\":\""
+                        + version.definitionFingerprint()
+                        + "\"}}"))
         .andExpect(status().isAccepted())
         .andExpect(jsonPath("$.code").value("ACCEPTED"))
         .andExpect(jsonPath("$.data.status").value("READY"))
@@ -161,7 +297,7 @@ class StudioCanvasFunctionControllerTest {
                 .content("{\"requestId\":\"request-1\"}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.status").value("CANCELLED"));
-    verify(runtimeService).start(CANVAS, NODE, "request-1");
+    verify(runtimeService).start(CANVAS, NODE, "request-1", version);
     verify(runtimeService).cancel(CANVAS, NODE, "request-1");
   }
 
@@ -267,7 +403,22 @@ class StudioCanvasFunctionControllerTest {
         .perform(
             post("/api/canvases/not-a-uuid/nodes/" + NODE + "/function-run")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"requestId\":\"r\"}"))
+                .content(
+                    "{\"requestId\":\"r\",\"expectedVersion\":{\"catalogEpoch\":\"1\","
+                        + "\"definitionFingerprint\":\""
+                        + expectedVersion().definitionFingerprint()
+                        + "\"}}"))
+        .andExpect(status().isBadRequest());
+    // expectedVersion 内部的未知字段同样被拒绝，不能静默忽略。
+    mockMvc
+        .perform(
+            post("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/function-run")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    "{\"requestId\":\"r\",\"expectedVersion\":{\"catalogEpoch\":\"1\","
+                        + "\"definitionFingerprint\":\""
+                        + expectedVersion().definitionFingerprint()
+                        + "\",\"extra\":true}}"))
         .andExpect(status().isBadRequest());
   }
 
@@ -277,7 +428,7 @@ class StudioCanvasFunctionControllerTest {
     when(runtimeService.get(any(), any()))
         .thenThrow(
             new CanvasFunctionRunException(CanvasFunctionRunException.Reason.NOT_FOUND, "missing"));
-    when(runtimeService.start(any(), any(), anyString()))
+    when(runtimeService.start(any(), any(), anyString(), any()))
         .thenThrow(
             new CanvasFunctionRunException(CanvasFunctionRunException.Reason.CONFLICT, "running"));
     when(runtimeService.cancel(any(), any(), anyString()))
@@ -297,7 +448,11 @@ class StudioCanvasFunctionControllerTest {
         .perform(
             post("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/function-run")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"requestId\":\"r\"}"))
+                .content(
+                    "{\"requestId\":\"r\",\"expectedVersion\":{\"catalogEpoch\":\"1\","
+                        + "\"definitionFingerprint\":\""
+                        + expectedVersion().definitionFingerprint()
+                        + "\"}}"))
         .andExpect(status().isConflict());
     mockMvc
         .perform(
@@ -377,6 +532,14 @@ class StudioCanvasFunctionControllerTest {
             new CanvasJson.JsonArray(List.of(new CanvasJson.JsonText("prompt"))),
             "additionalProperties",
             new CanvasJson.JsonBool(false)));
+  }
+
+  /** 目录替身固定 epoch=1，因此「客户端看到的版本」可由此确定性构造。 */
+  private static CanvasFunctionVersion expectedVersion() {
+    CanvasFunctionDefinition definition = adapter("fake-image", true, null).functions().get(0);
+    return new CanvasFunctionVersion(
+        TestCanvasFunctionCatalogSource.EPOCH,
+        CanvasFunctionCatalog.definitionFingerprint(definition));
   }
 
   /** 以函数名声明能力的适配器；执行细节与本测试无关。 */
