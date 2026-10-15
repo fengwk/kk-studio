@@ -77,6 +77,7 @@ function renderResourceNode(node: ResourceNode, callbacks = { editTextNode: vi.f
     kind: 'resource',
     node,
     model: node.function ? {
+      version: { catalogEpoch: '1', definitionFingerprint: '0'.repeat(64) },
       name: node.function.name,
       description: 'Model label',
       outputs: [{ kind: 'IMAGE', name: null }],

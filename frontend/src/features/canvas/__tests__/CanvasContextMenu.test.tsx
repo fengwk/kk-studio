@@ -22,7 +22,10 @@ vi.mock('@/shared/api/studio-service', () => ({
   getCanvasResourceOriginalUrl: vi.fn(() => new Promise(() => undefined)),
 }))
 
+const FUNCTION_VERSION = { catalogEpoch: '1', definitionFingerprint: '0'.repeat(64) }
+
 const model: CanvasFunctionDefinitionDTO = {
+  version: FUNCTION_VERSION,
   name: 'fake-image',
   description: 'Fake Image',
   outputs: [{ kind: 'IMAGE', name: null }],

@@ -10,6 +10,7 @@ import {
 import type {
   ApplyCanvasCommandsRequestDTO,
   CanvasDocumentDTO,
+  CanvasFunctionCancelRequestDTO,
   CanvasFunctionDefinitionDTO,
   CanvasFunctionRunDTO,
   CanvasFunctionRunRequestDTO,
@@ -134,7 +135,7 @@ export function getCanvasFunctionRun(
 export function cancelCanvasFunctionRun(
   canvasId: UUIDString,
   nodeId: UUIDString,
-  request: CanvasFunctionRunRequestDTO,
+  request: CanvasFunctionCancelRequestDTO,
   options?: CanvasRequestOptions,
 ): Promise<CanvasFunctionRunDTO> {
   return canvasRequest(`/canvases/${canvasId}/nodes/${nodeId}/function-run/cancel`, {

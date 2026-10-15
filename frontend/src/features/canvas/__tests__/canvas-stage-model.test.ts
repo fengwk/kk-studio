@@ -19,7 +19,10 @@ const RESOURCE_NODE_ID = '9f1e6d2a-3b4c-4d5e-8f6a-7b8c9d0e1f2a'
 const FUNCTION_NODE_ID = 'a2b3c4d5-6e7f-4a8b-9c0d-1e2f3a4b5c6d'
 const EMPTY_NODE_ID = 'b3c4d5e6-7f8a-4b9c-8d0e-1f2a3b4c5d6e'
 
+const FUNCTION_VERSION = { catalogEpoch: '1', definitionFingerprint: '0'.repeat(64) }
+
 const model: CanvasFunctionDefinitionDTO = {
+  version: FUNCTION_VERSION,
   name: 'fake-image',
   description: 'Fake Image',
   outputs: [{ kind: 'IMAGE', name: null }],
