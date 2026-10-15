@@ -104,6 +104,29 @@ describe('PluginsTab', () => {
     expect(screen.queryByText(/token/i)).not.toHaveTextContent(/secret|bearer|key_val/i)
   })
 
+  it('formats HTTP epoch seconds including zero and shows static key rejection diagnostics', async () => {
+    vi.mocked(pluginsService.listPlugins).mockResolvedValue([
+      samplePlugin({
+        status: 'CONNECTED',
+        region: 'CN',
+        expiresAt: 1777574730,
+        nextRefreshAt: 0,
+      }),
+      samplePlugin({
+        pluginId: 'rejected-static',
+        name: 'Rejected Static Key',
+        authKind: { type: 'STATIC_KEY', secretField: 'apiKey' },
+        status: 'REAUTH_REQUIRED',
+        lastRefreshError: 'provider rejected the stored static key',
+      }),
+    ])
+    renderTab()
+    expect(await screen.findByText(new Date(1777574730 * 1000).toLocaleString('zh-CN')))
+      .toBeInTheDocument()
+    expect(screen.getByText(new Date(0).toLocaleString('zh-CN'))).toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent('provider rejected the stored static key')
+  })
+
   it('renders none/staticKey/deepLink plugin variants accurately', async () => {
     const noAuthPlugin = samplePlugin({
       pluginId: 'no-auth-plugin',

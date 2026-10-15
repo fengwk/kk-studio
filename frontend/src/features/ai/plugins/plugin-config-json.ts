@@ -27,10 +27,7 @@ function findDuplicateKeyInNode(node: Node): string | null {
     for (const child of node.children) {
       if (child.type === 'property' && child.children && child.children.length > 0) {
         const keyNode = child.children[0]
-        if (typeof keyNode.value !== 'string') {
-          return ''
-        }
-        const key = keyNode.value
+        const key = keyNode.value as string
         if (seenKeys.has(key)) {
           return key
         }
@@ -56,10 +53,13 @@ function findDuplicateKeyInNode(node: Node): string | null {
  * - 禁止注释 (disallowComments: true)
  * - 禁止尾随逗号 (allowTrailingComma: false)
  * - 禁止空内容 (allowEmptyContent: false)
- * - 必须为严格 JSON object 根节点
+ * - 根节点必须是单个对象或数组，可指定所需类型
  * - 递归拒绝重复键（包含空键 "" 和转义等价键）
  */
-export function parseStrictJsonObject(text: string): StrictJsonParseResult {
+export function parseStrictJsonContainer(
+  text: string,
+  expectedType?: 'object' | 'array',
+): StrictJsonParseResult {
   if (!text || text.trim().length === 0) {
     return { ok: false, error: 'JSON text must not be empty' }
   }
@@ -83,8 +83,11 @@ export function parseStrictJsonObject(text: string): StrictJsonParseResult {
     return { ok: false, error: 'JSON parsing failed to produce a valid AST' }
   }
 
-  if (tree.type !== 'object') {
-    return { ok: false, error: `Root JSON value must be an object, got ${tree.type}` }
+  if (
+    (expectedType !== undefined && tree.type !== expectedType) ||
+    (tree.type !== 'object' && tree.type !== 'array')
+  ) {
+    return { ok: false, error: `Root JSON value must be ${expectedType ?? 'an object or array'}` }
   }
 
   const duplicateKey = findDuplicateKeyInNode(tree)
@@ -93,6 +96,10 @@ export function parseStrictJsonObject(text: string): StrictJsonParseResult {
   }
 
   return { ok: true, tree }
+}
+
+export function parseStrictJsonObject(text: string): StrictJsonParseResult {
+  return parseStrictJsonContainer(text, 'object')
 }
 
 /**
@@ -139,10 +146,10 @@ export function isValidJsonNumberLiteral(val: string): boolean {
 }
 
 /**
- * 校验给定的字符串是否符合严格的 JSON 整数格式（无小数部分）。
+ * 校验 JSON integer token；小数或指数 token 不是 Jackson 的 integral number。
  */
 export function isValidJsonIntegerLiteral(val: string): boolean {
-  return /^-?(?:0|[1-9]\d*)(?:[eE]\+?\d+)?$/.test(val.trim())
+  return /^-?(?:0|[1-9]\d*)$/.test(val.trim())
 }
 
 /**
@@ -179,6 +186,10 @@ export function updateStrictJsonField({
   // 2. 如果传了 rawSnippetString（复杂容器数组或对象），直接替换原始文本切片
   if (rawSnippetString !== undefined) {
     const trimmed = rawSnippetString.trim()
+    const snippet = parseStrictJsonContainer(trimmed)
+    if (!snippet.ok) {
+      return snippet
+    }
     return replaceOrInsertRawSlice(rawJson, parseResult.tree, path, trimmed, null)
   }
 

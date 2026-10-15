@@ -92,7 +92,7 @@ function parseElement(raw: unknown, path: string): PluginSchemaElement {
 
   // description 错型时严禁静默忽略
   let description: string | undefined
-  if ('description' in record) {
+  if ('description' in record && record.description !== null) {
     if (typeof record.description !== 'string') {
       throw new Error(`"description" at ${path} must be a string`)
     }
@@ -114,8 +114,8 @@ function parseElement(raw: unknown, path: string): PluginSchemaElement {
         const seen = new Set<string>()
         for (let i = 0; i < record.enum.length; i++) {
           const item = record.enum[i]
-          if (typeof item !== 'string') {
-            throw new Error(`"enum" item at ${path}[${i}] must be a string`)
+          if (typeof item !== 'string' || item.trim().length === 0) {
+            throw new Error(`"enum" item at ${path}[${i}] must be a non-blank string`)
           }
           if (seen.has(item)) {
             throw new Error(`Duplicate enum value "${item}" at ${path}`)
@@ -169,37 +169,35 @@ function parseElement(raw: unknown, path: string): PluginSchemaElement {
       }
       const properties: Record<string, PluginSchemaElement> = Object.fromEntries(entries)
 
+      if (!Object.hasOwn(record, 'required')) {
+        throw new Error(`"required" at ${path} is required`)
+      }
       const required: string[] = []
-      if ('required' in record) {
-        if (!Array.isArray(record.required)) {
-          throw new Error(`"required" at ${path} must be an array of strings`)
+      if (!Array.isArray(record.required)) {
+        throw new Error(`"required" at ${path} must be an array of strings`)
+      }
+      const seenReq = new Set<string>()
+      for (let i = 0; i < record.required.length; i++) {
+        const reqName = record.required[i]
+        if (typeof reqName !== 'string' || reqName.trim().length === 0) {
+          throw new Error(`"required" item at ${path}[${i}] must be a non-blank string`)
         }
-        const seenReq = new Set<string>()
-        for (let i = 0; i < record.required.length; i++) {
-          const reqName = record.required[i]
-          if (typeof reqName !== 'string') {
-            throw new Error(`"required" item at ${path}[${i}] must be a string`)
-          }
-          if (seenReq.has(reqName)) {
-            throw new Error(`Duplicate required property "${reqName}" at ${path}`)
-          }
-          if (!(reqName in properties)) {
-            throw new Error(
-              `Required property "${reqName}" at ${path} is not defined in properties`,
-            )
-          }
-          seenReq.add(reqName)
-          required.push(reqName)
+        if (seenReq.has(reqName)) {
+          throw new Error(`Duplicate required property "${reqName}" at ${path}`)
         }
+        if (!Object.hasOwn(properties, reqName)) {
+          throw new Error(
+            `Required property "${reqName}" at ${path} is not defined in properties`,
+          )
+        }
+        seenReq.add(reqName)
+        required.push(reqName)
       }
 
-      let additionalProperties = false
-      if ('additionalProperties' in record) {
-        if (typeof record.additionalProperties !== 'boolean') {
-          throw new Error(`"additionalProperties" at ${path} must be a boolean`)
-        }
-        additionalProperties = record.additionalProperties
+      if (typeof record.additionalProperties !== 'boolean') {
+        throw new Error(`"additionalProperties" at ${path} must be a boolean`)
       }
+      const additionalProperties = record.additionalProperties
 
       return {
         kind: 'object',
@@ -232,15 +230,7 @@ export function parsePluginValuesSchema(schemaJson: string): ParseSchemaResult {
     }
   }
 
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(schemaJson)
-  } catch (err) {
-    return {
-      ok: false,
-      error: `Malformed schema JSON: ${err instanceof Error ? err.message : String(err)}`,
-    }
-  }
+  const parsed: unknown = JSON.parse(schemaJson)
 
   try {
     const root = parseElement(parsed, 'root')

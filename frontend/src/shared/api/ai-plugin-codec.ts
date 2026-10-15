@@ -1,4 +1,5 @@
 import { ApiError } from '@/shared/api/client'
+import type { InstantTimestamp } from '@/shared/api/contracts/base'
 import type {
   PluginAuthKindDTO,
   PluginAuthPrepareDTO,
@@ -19,7 +20,7 @@ function checkUnknownKeys(
 ): void {
   for (const key of Object.keys(record)) {
     if (!allowed.has(key)) {
-      throw invalidPayload(`Unknown property "${key}" at ${path}`)
+      throw invalidPayload(`Unknown property at ${path}`)
     }
   }
 }
@@ -60,6 +61,19 @@ function requireNullableString(value: unknown, path: string): string | null {
   return requireString(value, path)
 }
 
+function requireNullableInstant(value: unknown, path: string): InstantTimestamp {
+  if (value === null || value === undefined) {
+    return null
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value
+  }
+  if (typeof value === 'string' && Number.isFinite(Date.parse(value))) {
+    return value
+  }
+  throw invalidPayload(`${path} must be epoch seconds or an ISO date-time string`)
+}
+
 const CANONICAL_DECIMAL = /^(?:0|[1-9]\d*)$/
 const MAX_LONG = 9223372036854775807n
 
@@ -68,12 +82,7 @@ function requireCanonicalDecimalString(value: unknown, path: string): string {
   if (!CANONICAL_DECIMAL.test(text)) {
     throw invalidPayload(`${path} must be a canonical non-negative decimal string`)
   }
-  try {
-    const big = BigInt(text)
-    if (big > MAX_LONG) {
-      throw invalidPayload(`${path} exceeds 64-bit signed integer range`)
-    }
-  } catch {
+  if (BigInt(text) > MAX_LONG) {
     throw invalidPayload(`${path} exceeds 64-bit signed integer range`)
   }
   return text
@@ -179,9 +188,9 @@ export function decodePluginConfigurationDTO(
   const secretsRecord = requireRecord(rec.secrets, `${path}.secrets`)
 
   const secrets: Record<string, PluginSecretProjectionDTO> = Object.fromEntries(
-    Object.entries(secretsRecord).map(([key, val]) => [
+    Object.entries(secretsRecord).map(([key, val], index) => [
       key,
-      decodePluginSecretProjectionDTO(val, `${path}.secrets.${key}`),
+      decodePluginSecretProjectionDTO(val, `${path}.secrets[${index}]`),
     ]),
   )
 
@@ -232,9 +241,9 @@ export function decodePluginDTO(value: unknown, path = 'plugin'): PluginDTO {
   }
 
   const region = requireNullableString(rec.region, `${path}.region`)
-  const expiresAt = requireNullableString(rec.expiresAt, `${path}.expiresAt`)
-  const nextRefreshAt = requireNullableString(rec.nextRefreshAt, `${path}.nextRefreshAt`)
-  const lastRefreshedAt = requireNullableString(rec.lastRefreshedAt, `${path}.lastRefreshedAt`)
+  const expiresAt = requireNullableInstant(rec.expiresAt, `${path}.expiresAt`)
+  const nextRefreshAt = requireNullableInstant(rec.nextRefreshAt, `${path}.nextRefreshAt`)
+  const lastRefreshedAt = requireNullableInstant(rec.lastRefreshedAt, `${path}.lastRefreshedAt`)
   const lastRefreshError = requireNullableString(rec.lastRefreshError, `${path}.lastRefreshError`)
   const configuration = decodePluginConfigurationDTO(rec.configuration, `${path}.configuration`)
   const desiredEpoch = requireCanonicalDecimalString(rec.desiredEpoch, `${path}.desiredEpoch`)
@@ -267,14 +276,13 @@ export function decodePluginDTO(value: unknown, path = 'plugin'): PluginDTO {
       region !== null ||
       expiresAt !== null ||
       nextRefreshAt !== null ||
-      lastRefreshedAt !== null ||
-      lastRefreshError !== null
+      lastRefreshedAt !== null
     ) {
       throw invalidPayload(`${path} token/refresh metadata must be null for STATIC_KEY authKind`)
     }
-    if (!(authKind.secretField in configuration.secrets)) {
+    if (!Object.hasOwn(configuration.secrets, authKind.secretField)) {
       throw invalidPayload(
-        `${path}.configuration.secrets must contain static key field "${authKind.secretField}"`,
+        `${path}.configuration.secrets must contain the declared static key field`,
       )
     }
   } else if (authKind.type === 'DEEP_LINK') {
