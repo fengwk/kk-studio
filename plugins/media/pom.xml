@@ -11,7 +11,7 @@
         <relativePath>../pom.xml</relativePath>
     </parent>
 
-    <artifactId>kk-studio-plugin-canvas-media</artifactId>
+    <artifactId>kk-studio-plugin-media</artifactId>
 
     <dependencies>
         <dependency>
@@ -21,6 +21,14 @@
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
             <artifactId>kk-studio-canvas-plugin-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>fun.fengwk.kk-studio</groupId>
+            <artifactId>kk-studio-platform-plugin-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>fun.fengwk.kk-studio</groupId>
+            <artifactId>kk-studio-harness-common</artifactId>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -60,7 +68,9 @@
                                 <rule>
                                     <element>CLASS</element>
                                     <includes>
-                                        <include>fun.fengwk.kkstudio.plugin.canvasmedia.CanvasMediaFunctionAdapter</include>
+                                        <include>fun.fengwk.kkstudio.plugin.media.MediaPlugin</include>
+                                        <include>fun.fengwk.kkstudio.plugin.media.MediaInstance</include>
+                                        <include>fun.fengwk.kkstudio.plugin.media.MediaFunctionAdapter</include>
                                     </includes>
                                     <limits>
                                         <limit>
