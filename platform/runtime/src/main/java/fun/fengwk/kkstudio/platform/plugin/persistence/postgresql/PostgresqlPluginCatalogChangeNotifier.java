@@ -15,7 +15,7 @@ import java.util.Objects;
 @Component
 public class PostgresqlPluginCatalogChangeNotifier {
 
-  static final String CHANNEL = "plugin_catalog_changed";
+  public static final String CHANNEL = "plugin_catalog_changed";
 
   private final JdbcTemplate jdbc;
 

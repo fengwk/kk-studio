@@ -15,7 +15,12 @@ Plugin JAR 通过自己的 AutoConfiguration.imports 创建 bean，
 并收集真正内置的 Contributor / Adapter，构建一个完整 `PluginCatalogSnapshot`；
 HarnessCatalog 与 CanvasFunctionCatalog 来自同一 epoch。安装集合、版本身份与两域目录
 指纹全部通过后才提供给运行时，失败会释放已建插件实例；缺失历史不回退到默认值。
-目录当前在启动时冻结，权威存取见 [Plugin 配置存储](platform.md#plugin-配置存储)。
+初始快照立即交给唯一 `PluginCatalogRuntime` 拥有，不向容器暴露静态快照或目录 bean。
+`PluginCatalogRefresher` 用单线程每 5 秒回读权威目录，并合并本节点提交后的唤醒和共享
+`PostgresqlNotificationLoop` 的 `plugin_catalog_changed` 通知；建连/重连同样触发对账。
+通知只排队，不信任 payload，也不在 LISTEN 线程上配置插件；漏通知由周期回读追平。
+候选全量验证后原子发布，旧快照直到最后一个活动租用释放才关闭。
+权威存取见 [Plugin 配置存储](platform.md#plugin-配置存储)。
 Platform 的 RuntimeToolCatalogConfiguration 加入现读数据库的 MCP 目录。
 Canvas HTTP 目录查询在一次 `CanvasFunctionCatalogSource` 租用内完成，输出定义与可用性来自同一 epoch；
 Run 的完整定义与认证引用只保存在受保护执行状态中，普通 Run DTO 不回显它们。
@@ -33,7 +38,8 @@ timer 只唤醒和分派，heartbeat worker 执行续租事务，flush executor 
 | PostgresqlNotificationLoop | 专用连接 LISTEN，断线重连/resync，关闭 abort、interrupt、有界等待 |
 | ApplicationEventHub、sender 与 heartbeat scheduler | 关闭订阅与发送围栏，释放连接和 timer |
 | StorageMaintenance、PluginCredentialRefreshDispatcher | 各自持有调度器与在途任务的收尾责任 |
-| PluginCatalogSnapshot | 持有启动恢复的完整 epoch 与配置实例，应用关闭时逐个释放实例资源 |
+| PluginCatalogRuntime | 唯一拥有当前 epoch 与配置实例，关闭禁止新租用，已有租用释放后回收实例 |
+| PluginCatalogRefresher | 启动立即对账，周期与通知合并排队；停止后不开始待执行对账，有界等待在途任务，前代退出前禁止重启 |
 
 ## HTTP 入口
 

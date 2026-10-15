@@ -9,7 +9,8 @@ import org.springframework.transaction.PlatformTransactionManager;
 
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
-import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogSnapshot;
+import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRefreshTrigger;
+import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRuntime;
 import fun.fengwk.kkstudio.platform.plugin.credential.DatabasePluginCredentialStore;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialCodec;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialKeyLoader;
@@ -88,7 +89,8 @@ public class PluginConfiguration {
       ObjectProvider<HarnessContributor> contributors,
       ObjectProvider<CanvasFunctionAdapter> adapters,
       PlatformTransactionManager transactionManager,
-      ObjectProvider<PluginCredentialRefreshDispatcher> refreshDispatcher) {
+      ObjectProvider<PluginCredentialRefreshDispatcher> refreshDispatcher,
+      ObjectProvider<PluginCatalogRefreshTrigger> catalogRefreshTrigger) {
     return new PluginConfigurationCommitService(
         registry,
         configurationRepository,
@@ -100,7 +102,8 @@ public class PluginConfiguration {
         () -> adapters.orderedStream().toList(),
         transactionManager,
         Clock.systemUTC(),
-        () -> wakeRefreshDispatcher(refreshDispatcher));
+        () -> wakeRefreshDispatcher(refreshDispatcher),
+        () -> wakeCatalogRefresh(catalogRefreshTrigger));
   }
 
   /** 提交服务已经将回调排到提交后；这里只唤醒调度，不再注册事务同步。 */
@@ -112,12 +115,18 @@ public class PluginConfiguration {
     }
   }
 
-  /** applied 快照以 {@link ObjectProvider} 惰性获取：管理面只在真正读取「本节点已应用视图」时才向容器索取快照，装配期绝不提前解析，也不伪造空快照。 */
+  /** 提交服务已经将回调排到提交后；这里只请求一次本节点权威目录对账，通知丢失时周期对账仍能追平。 */
+  private static void wakeCatalogRefresh(
+      ObjectProvider<PluginCatalogRefreshTrigger> catalogRefreshTrigger) {
+    catalogRefreshTrigger.getObject().requestRefresh();
+  }
+
+  /** applied 运行期以 {@link ObjectProvider} 惰性获取：管理面只在真正投影「本节点已应用视图」时才向其索取租用，装配期绝不提前解析，也不伪造空快照。 */
   @Bean
   @ConditionalOnMissingBean
   public PluginManagementService pluginManagementService(
       StudioPluginRegistry registry,
-      ObjectProvider<PluginCatalogSnapshot> appliedSnapshot,
+      ObjectProvider<PluginCatalogRuntime> catalogRuntime,
       PluginConfigurationRepository configurationRepository,
       PluginCredentialStore credentialStore,
       PluginConfigurationCommitService commitService,
@@ -125,7 +134,7 @@ public class PluginConfiguration {
       PluginProperties properties) {
     return new PluginManagementService(
         registry,
-        () -> appliedSnapshot.getObject(),
+        catalogRuntime::getObject,
         configurationRepository,
         credentialStore,
         commitService,
