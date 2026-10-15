@@ -9,7 +9,7 @@ public interface CanvasFunctionRunStateCodecPort {
 
   String encode(CanvasFunctionFrozenRun run);
 
-  CanvasFunctionFrozenRun decode(String json, CanvasFunctionDefinition definition);
+  CanvasFunctionFrozenRun decode(String json);
 
   String stage(String json);
 

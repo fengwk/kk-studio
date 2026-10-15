@@ -27,6 +27,7 @@ import fun.fengwk.kkstudio.canvas.CanvasJson.JsonNumber;
 import fun.fengwk.kkstudio.canvas.CanvasJson.JsonObject;
 import fun.fengwk.kkstudio.canvas.CanvasJson.JsonText;
 import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionBinding;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionExecutionContext;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenOutput;
@@ -132,7 +133,7 @@ class OpenCliCanvasFunctionAdaptersTest {
             NODE,
             "output",
             REQUEST,
-            definition,
+            binding(definition),
             run.args(),
             run.manifest(),
             run.outputs(),
@@ -416,7 +417,7 @@ class OpenCliCanvasFunctionAdaptersTest {
             NODE,
             "output",
             REQUEST,
-            adapter.functions().get(1),
+            binding(adapter.functions().get(1)),
             run.args(),
             run.manifest(),
             run.outputs(),
@@ -1074,7 +1075,7 @@ class OpenCliCanvasFunctionAdaptersTest {
         NODE,
         "output",
         REQUEST,
-        definition,
+        binding(definition),
         new JsonObject(argsMap),
         manifest,
         outputs,
@@ -1172,5 +1173,10 @@ class OpenCliCanvasFunctionAdaptersTest {
     public UUID materializeTextOutput(CanvasFunctionFrozenOutput output, String text) {
       throw new UnsupportedOperationException();
     }
+  }
+
+  /** 内置函数绑定：目录 epoch 固定为 1，无插件来源。 */
+  private static CanvasFunctionBinding binding(CanvasFunctionDefinition definition) {
+    return new CanvasFunctionBinding(1L, definition, null);
   }
 }

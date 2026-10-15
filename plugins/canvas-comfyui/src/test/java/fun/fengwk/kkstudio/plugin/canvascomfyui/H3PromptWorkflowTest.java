@@ -15,6 +15,7 @@ import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.canvas.CanvasJson;
 import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionBinding;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenOutput;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenReference;
@@ -60,7 +61,7 @@ class H3PromptWorkflowTest {
             NODE,
             "h3",
             REQUEST,
-            videoDefinition(),
+            new CanvasFunctionBinding(1L, videoDefinition(), null),
             CanvasJson.parseObject(
                 "{\"prompt\":\"Use <Picture 1> then <Video 1>\",\"ratio\":\"16:9\",\"duration\":5}"),
             references,

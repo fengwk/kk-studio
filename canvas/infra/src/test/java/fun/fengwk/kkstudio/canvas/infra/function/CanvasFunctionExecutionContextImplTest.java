@@ -23,6 +23,7 @@ import fun.fengwk.kkstudio.canvas.CanvasJson;
 import fun.fengwk.kkstudio.canvas.CanvasResource;
 import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
 import fun.fengwk.kkstudio.canvas.CanvasResourceMaterializer;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionBinding;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionBlobAccess;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenOutput;
@@ -96,7 +97,7 @@ class CanvasFunctionExecutionContextImplTest {
             NODE,
             "output",
             REQUEST,
-            definition,
+            new CanvasFunctionBinding(1L, definition, null),
             CanvasJson.parseObject("{}"),
             List.of(reference),
             List.of(
@@ -208,12 +209,16 @@ class CanvasFunctionExecutionContextImplTest {
             NODE,
             "output",
             REQUEST,
-            CanvasFunctionDefinition.of(
-                "test.text",
-                "Text",
-                frozen.definition().argsSchema(),
-                CanvasResourceKind.TEXT,
-                new CanvasFunctionReferencePolicy(Set.of(CanvasResourceKind.IMAGE), 1, Map.of())),
+            new CanvasFunctionBinding(
+                1L,
+                CanvasFunctionDefinition.of(
+                    "test.text",
+                    "Text",
+                    frozen.definition().argsSchema(),
+                    CanvasResourceKind.TEXT,
+                    new CanvasFunctionReferencePolicy(
+                        Set.of(CanvasResourceKind.IMAGE), 1, Map.of())),
+                null),
             frozen.args(),
             frozen.manifest(),
             List.of(output),
@@ -299,7 +304,7 @@ class CanvasFunctionExecutionContextImplTest {
             frozen.nodeId(),
             frozen.nodeName(),
             frozen.requestId(),
-            frozen.definition(),
+            frozen.binding(),
             frozen.args(),
             frozen.manifest(),
             frozen.outputs(),
@@ -358,7 +363,7 @@ class CanvasFunctionExecutionContextImplTest {
             frozen.nodeId(),
             frozen.nodeName(),
             frozen.requestId(),
-            frozen.definition(),
+            frozen.binding(),
             frozen.args(),
             frozen.manifest(),
             frozen.outputs(),
@@ -375,7 +380,7 @@ class CanvasFunctionExecutionContextImplTest {
             frozen.nodeId(),
             frozen.nodeName(),
             UUID.randomUUID(),
-            frozen.definition(),
+            frozen.binding(),
             frozen.args(),
             frozen.manifest(),
             frozen.outputs(),
