@@ -37,6 +37,7 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunException;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunStateCodecPort;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionSubmitState;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionUnknownResolution;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionVersion;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -103,16 +104,19 @@ public class CanvasFunctionRunTransactions {
   /**
    * 启动新的 FunctionRun；相同 {@code requestId} 已存在时直接返回。
    *
-   * <p>事务内从一次 {@code acquireCurrent} 冻结目录 epoch、完整定义与函数来源，冻结输入清单、创建输入 pin 并构造 {@code PENDING}
-   * 提交事实，同时将画布版本推进一次。未安装的插件函数无法解析，因此保持节点内容只读且不会产生新的队列事实。
+   * <p>事务内从一次 {@code acquireCurrent} 冻结目录 epoch、完整定义与函数来源，先以同一租用校验客户端 {@code expectedVersion} 的
+   * epoch 与该函数定义 fingerprint，再冻结输入清单、创建输入 pin 并构造 {@code PENDING} 提交事实，同时将画布版本推进一次。未安装的插件函数无法解析，
+   * 因此保持节点内容只读且不会产生新的队列事实。
    *
    * <p>目录租用一直持有到真实事务的 {@code afterCompletion}（提交与回滚都释放），而不是在方法返回前关闭：外部提交前的 preflight 与
    * 冻结计划必须始终锚定同一目录实例。
    */
   @Transactional
-  public CanvasFunctionStartResult start(UUID canvasId, UUID nodeId, String requestId) {
+  public CanvasFunctionStartResult start(
+      UUID canvasId, UUID nodeId, String requestId, CanvasFunctionVersion expectedVersion) {
     Objects.requireNonNull(canvasId, "canvasId");
     Objects.requireNonNull(nodeId, "nodeId");
+    Objects.requireNonNull(expectedVersion, "expectedVersion");
     String validatedRequestId = CanvasFunctionRequestIds.validate(requestId);
     CanvasDocument document = requireDocumentForUpdate(canvasId);
     NodeRecord node =
@@ -123,6 +127,7 @@ public class CanvasFunctionRunTransactions {
       throw new IllegalArgumentException("node must be a Canvas Function");
     }
     CanvasFunctionRun existing = runRepository.findByNodeIdForUpdate(nodeId).orElse(null);
+    // 精确 requestId 重放优先于版本校验：即使 expectedVersion 已过时也返回已接受结果，不再取租用、pin 或提交。
     if (existing != null && existing.requestId().toString().equals(validatedRequestId)) {
       return new CanvasFunctionStartResult(existing, false);
     }
@@ -137,9 +142,11 @@ public class CanvasFunctionRunTransactions {
     registerLeaseReleaseAfterCompletion(lease);
     CanvasFunctionBinding binding = lease.bind(node.function().name());
     CanvasFunctionCatalog.RegisteredFunction registered = lease.require(binding);
+    CanvasFunctionDefinition definition = binding.definition();
+    // 版本围栏：在同一目录租用内比较客户端看到的 epoch 与该函数定义 fingerprint，必须先于 pin、Run 写入、task submit 与任何外部请求。
+    requireCurrentVersion(lease.epoch(), definition, expectedVersion);
     registered.requireAvailable();
     CanvasFunctionAdapter adapter = registered.adapter();
-    CanvasFunctionDefinition definition = binding.definition();
     JsonObject args = argsCodec.decode(node.function().argsJson(), definition);
     List<CanvasFunctionFrozenReference> manifest =
         freezeManifest(
@@ -188,6 +195,24 @@ public class CanvasFunctionRunTransactions {
     refRepository.addAll(inputPins(canvasId, nodeId, ready.requestId(), manifest));
     bumpVersion(document);
     return new CanvasFunctionStartResult(ready, true);
+  }
+
+  /**
+   * 在同一目录租用内校验客户端版本：epoch 与该函数完整定义 fingerprint 都必须与即将执行的定义一致。
+   *
+   * <p>不一致返回明确的 409，说明目录已变化、需要刷新；不自动重读最新目录，也不按函数名退回当前版本。
+   */
+  private static void requireCurrentVersion(
+      long catalogEpoch,
+      CanvasFunctionDefinition definition,
+      CanvasFunctionVersion expectedVersion) {
+    if (expectedVersion.catalogEpoch() != catalogEpoch
+        || !expectedVersion
+            .definitionFingerprint()
+            .equals(CanvasFunctionCatalog.definitionFingerprint(definition))) {
+      throw conflict(
+          "Canvas Function catalog changed; refresh the directory before starting this function");
+    }
   }
 
   /** 注册成功后由事务负责释放租用；提交与回滚之前都保持同一冻结目录可用。 */

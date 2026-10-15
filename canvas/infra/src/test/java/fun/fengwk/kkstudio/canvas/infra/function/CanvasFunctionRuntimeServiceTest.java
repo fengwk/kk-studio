@@ -27,6 +27,7 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunException;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunStateCodecPort;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionUnknownResolution;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionVersion;
 
 import java.time.Instant;
 import java.util.List;
@@ -48,10 +49,21 @@ class CanvasFunctionRuntimeServiceTest {
   void startReturnsTheDurableReadyRun() {
     Fixture fixture = new Fixture();
     CanvasFunctionRun ready = run(CanvasFunctionRunStatus.READY);
-    when(fixture.transactions.start(CANVAS, NODE, REQUEST.toString()))
+    CanvasFunctionVersion expectedVersion = version();
+    when(fixture.transactions.start(CANVAS, NODE, REQUEST.toString(), expectedVersion))
         .thenReturn(new CanvasFunctionStartResult(ready, true));
 
-    assertEquals(ready, fixture.service.start(CANVAS, NODE, REQUEST.toString()));
+    assertEquals(ready, fixture.service.start(CANVAS, NODE, REQUEST.toString(), expectedVersion));
+  }
+
+  /** expectedVersion 是必填合同：缺失直接在应用服务边界拒绝，不触达事务。 */
+  @Test
+  void startRejectsMissingExpectedVersion() {
+    Fixture fixture = new Fixture();
+    assertThrows(
+        NullPointerException.class,
+        () -> fixture.service.start(CANVAS, NODE, REQUEST.toString(), null));
+    verify(fixture.transactions, never()).start(any(), any(), any(), any());
   }
 
   /** get 先区分 Canvas node 不存在，再读取当前/最后 run。 */
@@ -243,6 +255,11 @@ class CanvasFunctionRuntimeServiceTest {
             "{\"type\":\"object\",\"additionalProperties\":false,\"properties\":{}}"),
         CanvasResourceKind.IMAGE,
         new CanvasFunctionReferencePolicy(Set.of(CanvasResourceKind.IMAGE), 1, Map.of()));
+  }
+
+  private static CanvasFunctionVersion version() {
+    return new CanvasFunctionVersion(
+        1L, CanvasFunctionCatalog.definitionFingerprint(definition("dummy.fn")));
   }
 
   private static final class Fixture {

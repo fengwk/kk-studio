@@ -41,7 +41,9 @@ Snapshot 读路径是 [`PostgresqlCanvasQueryService.findSnapshot`](../../canvas
 lock document (FOR UPDATE) -> lock node -> lock current run (FOR UPDATE)
   -> requestId 与现有 Run 相同：直接返回既有 Run（不推进 revision）
   -> 现有 Run 处于 READY/RUNNING/UNKNOWN 且 requestId 不同：conflict
-  -> acquireCurrent + bind(name) + require(binding) + requireAvailable；严格解码 args
+  -> acquireCurrent + bind(name) + require(binding)
+  -> 版本围栏：expectedVersion 的 epoch 与「该函数完整定义 fingerprint」都必须等于本次租用冻结的事实，否则 conflict
+  -> requireAvailable；严格解码 args
   -> 冻结 manifest：每个引用节点必须存在、index 必须在资源范围内且必须是 blob
   -> 校验 frozen blob facts 与 function reference policy
   -> 冻结输出计划：按 function 的 outputs 逐槽位预分配 resource id，构造 submitState=PENDING、stage=QUEUED 的 frozen plan
@@ -51,6 +53,8 @@ lock document (FOR UPDATE) -> lock node -> lock current run (FOR UPDATE)
   -> 写入 INPUT pin（pin 必须晚于 Run 行存在；OUTPUT pin 在物化事务中与 Resource 同事务写入）
   -> advanceRevision(revision + 1)
 ```
+
+客户端在启动时必须回传它从目录读到的 `expectedVersion`（epoch + 该函数定义 fingerprint）。围栏在同一租用内、在 pin、Run 写入、task submit 与任何外部调用之前比较，因此目录已前进或同名函数换了定义都只会得到 conflict，既不自动重试，也不退回当前同名定义。精确 requestId 重放优先于该比较：已接受的请求即使版本已陈旧也返回既有 Run，不重新取租用或提交。
 
 目录租用从取得一直保持到事务 `afterCompletion`，提交与回滚均释放，不能在事务提交前关闭 adapter。持久状态格式为版本 5，保存完整函数定义与来源绑定，不只保存函数名；解码不需要当前目录。引用在启动瞬间取 source node 的 resource identity、blob id 与权威媒体事实。之后无论用户改了配置、解除引用还是替换了源资源，这个 Run 的输入都不变。`preflight` 在事务内、在写入 READY 之前执行，因此被拒绝的配置不会留下队列事实。
 
