@@ -14,6 +14,7 @@ import fun.fengwk.kkstudio.canvas.CanvasJson;
 import fun.fengwk.kkstudio.canvas.CanvasJson.JsonObject;
 import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionArgsSchema;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionBinding;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionExecutionContext;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenOutput;
@@ -561,7 +562,7 @@ class CanvasMediaFunctionAdapterTest {
         UUID.randomUUID(),
         "CropNode",
         UUID.randomUUID(),
-        definition,
+        new CanvasFunctionBinding(1L, definition, null),
         args,
         manifest,
         outputs,

@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.web.controller;
 
 import static org.hamcrest.Matchers.nullValue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
@@ -28,7 +29,9 @@ import fun.fengwk.kkstudio.canvas.CanvasFunctionRunStatus;
 import fun.fengwk.kkstudio.canvas.CanvasJson;
 import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionBinding;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalogSource;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionExecutionContext;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
@@ -62,6 +65,7 @@ class StudioCanvasFunctionControllerTest {
 
   private MockMvc mockMvc;
   private CanvasFunctionService runtimeService;
+  private TestCanvasFunctionCatalogSource catalogSource;
 
   @BeforeEach
   void setUp() {
@@ -72,10 +76,13 @@ class StudioCanvasFunctionControllerTest {
   /** 以给定适配器重建 HTTP 边界；仅用于目录可用性断言。 */
   private void install(CanvasFunctionAdapter adapter) {
     CanvasFunctionCatalog catalog = CanvasFunctionCatalog.from(List.of(adapter));
+    catalogSource = new TestCanvasFunctionCatalogSource(catalog);
     mockMvc =
         standaloneSetup(
                 new StudioCanvasFunctionController(
-                    catalog, runtimeService, new WebDtoMapper(mock(StorageBlobManager.class))))
+                    catalogSource,
+                    runtimeService,
+                    new WebDtoMapper(mock(StorageBlobManager.class))))
             .setControllerAdvice(new ResultResponseBodyAdvice())
             .setMessageConverters(strictJsonConverter())
             .build();
@@ -103,6 +110,8 @@ class StudioCanvasFunctionControllerTest {
         .andExpect(jsonPath("$.data[0].parameters").doesNotExist())
         .andExpect(jsonPath("$.data[0].endpoint").doesNotExist())
         .andExpect(jsonPath("$.data[0].workflow").doesNotExist());
+    // 目录读取必须是一次 acquireCurrent 的租用，并在响应前释放。
+    assertEquals(0, catalogSource.openLeases());
   }
 
   /** 测试意图：已安装但未配置的插件函数仍出现在目录，只以 available=false + 原因报告，绝不假装可执行。 */
@@ -408,5 +417,76 @@ class StudioCanvasFunctionControllerTest {
         throw new UnsupportedOperationException();
       }
     };
+  }
+
+  /** 测试替身：单 epoch 冻结目录，函数都是内置来源，并记录未关闭的租用数。 */
+  private static final class TestCanvasFunctionCatalogSource
+      implements CanvasFunctionCatalogSource {
+
+    private static final long EPOCH = 1L;
+
+    private final CanvasFunctionCatalog catalog;
+    private int openLeases;
+
+    private TestCanvasFunctionCatalogSource(CanvasFunctionCatalog catalog) {
+      this.catalog = catalog;
+    }
+
+    private int openLeases() {
+      return openLeases;
+    }
+
+    @Override
+    public Lease acquireCurrent() {
+      return acquire(EPOCH);
+    }
+
+    @Override
+    public Lease acquire(long catalogEpoch) {
+      if (catalogEpoch != EPOCH) {
+        throw new IllegalArgumentException("catalog epoch is not available: " + catalogEpoch);
+      }
+      openLeases++;
+      return new Lease() {
+        private boolean closed;
+
+        @Override
+        public long epoch() {
+          return EPOCH;
+        }
+
+        @Override
+        public CanvasFunctionCatalog catalog() {
+          return catalog;
+        }
+
+        @Override
+        public CanvasFunctionBinding bind(String functionName) {
+          return new CanvasFunctionBinding(EPOCH, catalog.require(functionName).function(), null);
+        }
+
+        @Override
+        public CanvasFunctionCatalog.RegisteredFunction require(CanvasFunctionBinding binding) {
+          if (binding.catalogEpoch() != EPOCH) {
+            throw new IllegalArgumentException("binding epoch does not match the acquired catalog");
+          }
+          CanvasFunctionCatalog.RegisteredFunction registered =
+              catalog.require(binding.definition().name());
+          if (!registered.function().equals(binding.definition())
+              || binding.pluginSource() != null) {
+            throw new IllegalArgumentException("binding does not match the acquired catalog");
+          }
+          return registered;
+        }
+
+        @Override
+        public void close() {
+          if (!closed) {
+            closed = true;
+            openLeases--;
+          }
+        }
+      };
+    }
   }
 }

@@ -26,6 +26,7 @@ import fun.fengwk.kkstudio.canvas.CanvasJson.JsonNumber;
 import fun.fengwk.kkstudio.canvas.CanvasJson.JsonObject;
 import fun.fengwk.kkstudio.canvas.CanvasJson.JsonText;
 import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionBinding;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionExecutionContext;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenOutput;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenReference;
@@ -169,7 +170,7 @@ class MiniMaxH3CanvasFunctionAdapterTest {
             NODE,
             "h3",
             REQUEST,
-            adapter.functions().get(0),
+            new CanvasFunctionBinding(1L, adapter.functions().get(0), null),
             initialRun.args(),
             initialRun.manifest(),
             initialRun.outputs(),
@@ -497,7 +498,7 @@ class MiniMaxH3CanvasFunctionAdapterTest {
         NODE,
         "h3",
         REQUEST,
-        adapter.functions().get(0),
+        new CanvasFunctionBinding(1L, adapter.functions().get(0), null),
         new JsonObject(argsMap),
         manifest,
         List.of(new CanvasFunctionFrozenOutput(TARGET, 0, CanvasResourceKind.VIDEO, "result.mp4")),

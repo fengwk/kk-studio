@@ -2,6 +2,8 @@ package fun.fengwk.kkstudio.canvas.infra.function;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -19,19 +21,23 @@ import tools.jackson.databind.node.ObjectNode;
 import fun.fengwk.kkstudio.canvas.CanvasJson;
 import fun.fengwk.kkstudio.canvas.CanvasJson.JsonObject;
 import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionBinding;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenOutput;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenReference;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionPluginSource;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionSubmitState;
 
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
-/** Versioned state codec 冻结完整 plan，并严格拒绝 schema、definition 与类型漂移。 */
+/** Versioned state codec 冻结完整 binding（目录 epoch、完整定义与插件来源），并严格拒绝 schema 与类型漂移。 */
 class CanvasFunctionRunStateCodecTest {
 
   private static final UUID CANVAS = UUID.fromString("00000000-0000-0000-0000-000000000001");
@@ -41,10 +47,17 @@ class CanvasFunctionRunStateCodecTest {
   private static final UUID BLOB = UUID.fromString("00000000-0000-0000-0000-000000000005");
   private static final UUID REQUEST = UUID.fromString("00000000-0000-0000-0000-000000000006");
   private static final UUID TARGET = UUID.fromString("00000000-0000-0000-0000-000000000007");
+  private static final UUID AUTH_GENERATION =
+      UUID.fromString("00000000-0000-0000-0000-0000000000aa");
+  private static final long CATALOG_EPOCH = 9L;
+  private static final CanvasFunctionPluginSource PLUGIN_SOURCE =
+      new CanvasFunctionPluginSource(
+          "mini-max", "1.2.3", 7L, "a".repeat(64), AUTH_GENERATION, "b".repeat(64));
 
   private ObjectMapper mapper;
   private CanvasFunctionRunStateCodec codec;
   private CanvasFunctionDefinition definition;
+  private CanvasFunctionBinding binding;
   private CanvasFunctionFrozenRun run;
 
   @BeforeEach
@@ -76,6 +89,7 @@ class CanvasFunctionRunStateCodecTest {
                 Set.of(CanvasResourceKind.IMAGE, CanvasResourceKind.AUDIO),
                 3,
                 Map.of(CanvasResourceKind.AUDIO, 1)));
+    binding = new CanvasFunctionBinding(CATALOG_EPOCH, definition, PLUGIN_SOURCE);
     JsonObject args =
         CanvasJson.parseObject(
             """
@@ -96,7 +110,7 @@ class CanvasFunctionRunStateCodecTest {
             NODE,
             "output",
             REQUEST,
-            definition,
+            binding,
             args,
             List.of(
                 new CanvasFunctionFrozenReference(
@@ -118,12 +132,16 @@ class CanvasFunctionRunStateCodecTest {
             Map.of("jobId", "job-1", "attempt", 1));
   }
 
-  /** round-trip 编解码冻结计划并提取 stage/functionName，验证状态迁移与 checkpoint 方法。 */
+  /** round-trip 编解码完整 binding（epoch/完整定义/来源）与冻结计划，并覆盖 stage/functionName/transition。 */
   @Test
   void roundTripsTheTypedFrozenPlan() {
     String json = codec.encode(run);
+    CanvasFunctionFrozenRun decoded = codec.decode(json);
 
-    assertEquals(run, codec.decode(json, definition));
+    assertEquals(run, decoded);
+    assertEquals(CATALOG_EPOCH, decoded.binding().catalogEpoch());
+    assertEquals(definition, decoded.definition());
+    assertEquals(PLUGIN_SOURCE, decoded.binding().pluginSource());
     assertEquals("SUBMITTED", codec.stage(json));
     assertEquals("test.video", codec.functionName(json));
     assertEquals(json, codec.initial(run));
@@ -134,41 +152,168 @@ class CanvasFunctionRunStateCodecTest {
             .transition(
                 run, CanvasFunctionSubmitState.SUBMITTING, "SUBMITTING", Map.of("jobId", "job-2"))
             .submitState());
+
+    // 线文本必须完整携带定义与来源，而不是只留名称或摘要。
+    assertTrue(json.contains("\"version\":5"));
+    assertTrue(json.contains("\"description\":\"Test Video\""));
+    assertTrue(json.contains("\"maxReferences\":3"));
+    assertTrue(json.contains("\"pluginId\":\"mini-max\""));
+    assertTrue(json.contains("\"configRevision\":7"));
+    assertTrue(json.contains("\"capabilityFingerprint\":\"" + "a".repeat(64) + "\""));
   }
 
-  /** 拒绝非版本 4、未知根字段、未知计划字段以及与已注册定义不匹配的函数名或输出类型。 */
+  /** 内置函数的 pluginSource 为 null，round-trip 后必须仍是内置身份。 */
   @Test
-  void rejectsSchemaVersionAndRegistryDrift() throws Exception {
+  void roundTripsBuiltinFunctionWithoutPluginSource() {
+    CanvasFunctionFrozenRun builtin =
+        new CanvasFunctionFrozenRun(
+            run.canvasId(),
+            run.nodeId(),
+            run.nodeName(),
+            run.requestId(),
+            new CanvasFunctionBinding(1L, definition, null),
+            run.args(),
+            run.manifest(),
+            run.outputs(),
+            run.submitState(),
+            run.stage(),
+            run.adapterState());
+
+    CanvasFunctionFrozenRun decoded = codec.decode(codec.encode(builtin));
+
+    assertEquals(builtin, decoded);
+    assertNull(decoded.binding().pluginSource());
+    assertEquals(1L, decoded.binding().catalogEpoch());
+  }
+
+  /** state 版本必须精确匹配，不能把超宽整数截断后当作 VERSION 5。 */
+  @Test
+  void rejectsVersionNumbersThatWrapToTheSupportedVersion() {
+    ObjectNode root = encodedRoot();
+    root.put("version", 4294967301L);
+    String wrappedVersion = root.toString();
+
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(wrappedVersion));
+  }
+
+  /** 未类型化 checkpoint 数字也须保留 BigDecimal 精度、scale、极值与宽整数。 */
+  @Test
+  void preservesExactNumbersInAdapterStateAcrossDecodeAndReencode() {
+    Map<String, Object> state =
+        Map.of(
+            "precise", new BigDecimal("0.123456789012345678901234567890"),
+            "scaled", new BigDecimal("1.23000"),
+            "huge", new BigDecimal("1e1000"),
+            "tiny", new BigDecimal("1e-1000"),
+            "wide", new BigInteger("9007199254740993123456789"));
+    CanvasFunctionFrozenRun checkpoint = codec.checkpoint(run, "POLLING", state);
+    CanvasFunctionFrozenRun decoded = codec.decode(codec.encode(checkpoint));
+
+    for (String field : List.of("precise", "scaled", "huge", "tiny")) {
+      assertInstanceOf(BigDecimal.class, decoded.adapterState().get(field));
+      assertEquals(state.get(field), decoded.adapterState().get(field), field);
+    }
+    assertEquals(state.get("wide"), decoded.adapterState().get("wide"));
+    assertEquals(decoded, codec.decode(codec.encode(decoded)));
+  }
+
+  /** 拒绝非 VERSION 5（含旧 4）、未知字段、非法 epoch/来源以及损坏的完整定义。 */
+  @Test
+  void rejectsSchemaVersionSourceAndDefinitionDrift() throws Exception {
     ObjectNode root = (ObjectNode) mapper.readTree(codec.encode(run));
     root.put("extra", true);
     String unknownField = root.toString();
-    assertThrows(IllegalArgumentException.class, () -> codec.decode(unknownField, definition));
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(unknownField));
 
     root.remove("extra");
     root.put("version", 3);
     String unsupportedVersion = root.toString();
-    assertThrows(
-        IllegalArgumentException.class, () -> codec.decode(unsupportedVersion, definition));
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(unsupportedVersion));
 
-    CanvasFunctionDefinition otherDefinition =
-        CanvasFunctionDefinition.of(
-            "other.video",
-            "Other Video",
-            definition.argsSchema(),
-            CanvasResourceKind.VIDEO,
-            definition.referencePolicy());
-    assertThrows(
-        IllegalArgumentException.class, () -> codec.decode(codec.encode(run), otherDefinition));
+    // 旧 VERSION 4 不再双读：必须按新格式拒绝，而不是回退解释。
+    root = encodedRoot();
+    root.put("version", 4);
+    String legacyVersion = root.toString();
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(legacyVersion));
 
-    CanvasFunctionDefinition imageDefinition =
-        CanvasFunctionDefinition.of(
-            "test.video",
-            "Test Video",
-            definition.argsSchema(),
-            CanvasResourceKind.IMAGE,
-            definition.referencePolicy());
-    assertThrows(
-        IllegalArgumentException.class, () -> codec.decode(codec.encode(run), imageDefinition));
+    root = encodedRoot();
+    ((ObjectNode) root.get("plan")).put("catalogEpoch", 0);
+    String nonPositiveEpoch = root.toString();
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(nonPositiveEpoch));
+
+    root = encodedRoot();
+    ((ObjectNode) root.get("plan")).remove("catalogEpoch");
+    String missingEpoch = root.toString();
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(missingEpoch));
+
+    root = encodedRoot();
+    firstPlan(root).remove("pluginSource");
+    String missingSource = root.toString();
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(missingSource));
+
+    root = encodedRoot();
+    firstPlan(root).put("pluginSource", 7);
+    String scalarSource = root.toString();
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(scalarSource));
+
+    root = encodedRoot();
+    ObjectNode source = (ObjectNode) firstPlan(root).get("pluginSource");
+    source.put("configRevision", 0);
+    String invalidRevision = root.toString();
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(invalidRevision));
+
+    // binding 约束：configRevision 不得晚于 binding 的 catalogEpoch。
+    root = encodedRoot();
+    root.put("version", 5);
+    ObjectNode plan = firstPlan(root);
+    plan.put("catalogEpoch", 3);
+    String revisionAheadOfEpoch = root.toString();
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(revisionAheadOfEpoch));
+
+    root = encodedRoot();
+    ((ObjectNode) firstPlan(root).get("pluginSource")).put("capabilityFingerprint", "not-a-digest");
+    String invalidFingerprint = root.toString();
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(invalidFingerprint));
+
+    root = encodedRoot();
+    ObjectNode definitionNode = (ObjectNode) firstPlan(root).get("definition");
+    definitionNode.put("name", "");
+    String blankName = root.toString();
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(blankName));
+
+    root = encodedRoot();
+    ((ObjectNode) firstPlan(root).get("definition")).remove("referencePolicy");
+    String missingPolicy = root.toString();
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(missingPolicy));
+
+    root = encodedRoot();
+    ((ObjectNode) firstPlan(root).get("definition")).put("description", " ");
+    String blankDescription = root.toString();
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(blankDescription));
+  }
+
+  /** 冻结 plan 的输出槽位必须与持久定义逐位一致：数量、index、kind 任一漂移都拒绝。 */
+  @Test
+  void rejectsFrozenOutputPlanDriftAgainstPersistedDefinition() throws Exception {
+    ObjectNode root = encodedRoot();
+    ((ArrayNode) firstPlan(root).get("outputs")).remove(0);
+    String missingOutputSlot = root.toString();
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(missingOutputSlot));
+
+    root = encodedRoot();
+    ((ObjectNode) ((ArrayNode) firstPlan(root).get("outputs")).get(0)).put("kind", "IMAGE");
+    String kindDrift = root.toString();
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(kindDrift));
+
+    root = encodedRoot();
+    ((ObjectNode) ((ArrayNode) firstPlan(root).get("outputs")).get(0)).put("index", 1);
+    String indexDrift = root.toString();
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(indexDrift));
+
+    root = encodedRoot();
+    ((ArrayNode) firstPlan(root).get("definition").get("outputs")).remove(0);
+    String definitionPlanDrift = root.toString();
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(definitionPlanDrift));
   }
 
   /** 拒绝非法 manifest、非法 stage 命名、非法 submitState 以及重复字段与超大 adapterState。 */
@@ -179,22 +324,21 @@ class CanvasFunctionRunStateCodecTest {
     ObjectNode reference = (ObjectNode) ((ArrayNode) plan.get("manifest")).get(0);
     reference.put("sourceIndex", -1);
     String invalidManifest = root.toString();
-    assertThrows(IllegalArgumentException.class, () -> codec.decode(invalidManifest, definition));
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(invalidManifest));
 
     root = (ObjectNode) mapper.readTree(codec.encode(run));
     root.put("stage", "polling");
     String invalidStage = root.toString();
-    assertThrows(IllegalArgumentException.class, () -> codec.decode(invalidStage, definition));
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(invalidStage));
 
     root = (ObjectNode) mapper.readTree(codec.encode(run));
     ((ObjectNode) root.get("plan")).put("submitState", "INVALID_STATE");
     String invalidSubmitState = root.toString();
-    assertThrows(
-        IllegalArgumentException.class, () -> codec.decode(invalidSubmitState, definition));
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(invalidSubmitState));
 
     String duplicate =
-        codec.encode(run).replaceFirst("\"version\":4", "\"version\":4,\"version\":4");
-    assertThrows(IllegalArgumentException.class, () -> codec.decode(duplicate, definition));
+        codec.encode(run).replaceFirst("\"version\":5", "\"version\":5,\"version\":5");
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(duplicate));
     assertThrows(IllegalArgumentException.class, () -> codec.stage("{"));
     assertThrows(IllegalArgumentException.class, () -> codec.functionName("{}"));
 
@@ -206,7 +350,7 @@ class CanvasFunctionRunStateCodecTest {
             run.nodeId(),
             run.nodeName(),
             run.requestId(),
-            run.definition(),
+            run.binding(),
             run.args(),
             run.manifest(),
             run.outputs(),
@@ -220,84 +364,90 @@ class CanvasFunctionRunStateCodecTest {
   @Test
   void rejectsBlankMissingNodeInput() {
     for (String blank : List.of("", "   ", "\n\t")) {
-      assertThrows(IllegalArgumentException.class, () -> codec.decode(blank, definition));
+      assertThrows(IllegalArgumentException.class, () -> codec.decode(blank));
       assertThrows(IllegalArgumentException.class, () -> codec.stage(blank));
       assertThrows(IllegalArgumentException.class, () -> codec.functionName(blank));
     }
     // JSON 字面量 null 解析为 NullNode 而非 MissingNode，同样不是合法 state。
-    assertThrows(IllegalArgumentException.class, () -> codec.decode("null", definition));
+    assertThrows(IllegalArgumentException.class, () -> codec.decode("null"));
   }
 
   /** 拒绝 plan 内 manifest/outputs 的类型与数量漂移，以及 manifest 成员的 kind/UUID/数值类型漂移。 */
   @Test
   void rejectsPlanShapeAndManifestMemberDrift() {
     ObjectNode root = encodedRoot();
-    ((ObjectNode) root.get("plan")).put("manifest", "x");
+    firstPlan(root).put("manifest", "x");
     String manifestNotArray = root.toString();
-    assertThrows(IllegalArgumentException.class, () -> codec.decode(manifestNotArray, definition));
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(manifestNotArray));
 
     root = encodedRoot();
-    ((ObjectNode) root.get("plan")).put("outputs", "x");
+    firstPlan(root).put("outputs", "x");
     String outputsNotArray = root.toString();
-    assertThrows(IllegalArgumentException.class, () -> codec.decode(outputsNotArray, definition));
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(outputsNotArray));
 
     root = encodedRoot();
-    ((ArrayNode) ((ObjectNode) root.get("plan")).get("outputs")).remove(0);
+    ((ArrayNode) firstPlan(root).get("outputs")).remove(0);
     String outputsMismatch = root.toString();
-    assertThrows(IllegalArgumentException.class, () -> codec.decode(outputsMismatch, definition));
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(outputsMismatch));
 
     root = encodedRoot();
     firstManifestReference(root).put("kind", "NOT_A_KIND");
     String invalidKind = root.toString();
-    assertThrows(IllegalArgumentException.class, () -> codec.decode(invalidKind, definition));
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(invalidKind));
 
     root = encodedRoot();
     firstManifestReference(root).put("blobId", 5);
     String nonStringUuid = root.toString();
-    assertThrows(IllegalArgumentException.class, () -> codec.decode(nonStringUuid, definition));
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(nonStringUuid));
 
     root = encodedRoot();
     firstManifestReference(root).put("sourceNodeId", "not-a-uuid");
     String malformedUuid = root.toString();
-    assertThrows(IllegalArgumentException.class, () -> codec.decode(malformedUuid, definition));
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(malformedUuid));
 
     root = encodedRoot();
     firstManifestReference(root).put("sizeBytes", -1);
     String negativeSize = root.toString();
-    assertThrows(IllegalArgumentException.class, () -> codec.decode(negativeSize, definition));
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(negativeSize));
 
     root = encodedRoot();
     firstManifestReference(root).put("width", 0);
     String nonPositiveWidth = root.toString();
-    assertThrows(IllegalArgumentException.class, () -> codec.decode(nonPositiveWidth, definition));
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(nonPositiveWidth));
   }
 
   /** 拒绝缺失 plan 字段、空白文本、decode 侧超限 adapterState、超深 args 以及非法 stage/functionName JSON。 */
   @Test
   void rejectsMissingFieldsBlankTextOversizedAdapterStateAndDeepArgs() {
     ObjectNode root = encodedRoot();
-    ((ObjectNode) root.get("plan")).remove("outputs");
+    firstPlan(root).remove("outputs");
     String missingOutputs = root.toString();
-    assertThrows(IllegalArgumentException.class, () -> codec.decode(missingOutputs, definition));
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(missingOutputs));
 
     root = encodedRoot();
-    ((ObjectNode) root.get("plan")).put("nodeName", "");
+    firstPlan(root).put("nodeName", "");
     String blankNodeName = root.toString();
-    assertThrows(IllegalArgumentException.class, () -> codec.decode(blankNodeName, definition));
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(blankNodeName));
 
     root = encodedRoot();
     ObjectNode oversized = mapper.createObjectNode();
     oversized.put("large", "x".repeat(65 * 1024));
     root.set("adapterState", oversized);
     String oversizedAdapterState = root.toString();
-    assertThrows(
-        IllegalArgumentException.class, () -> codec.decode(oversizedAdapterState, definition));
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(oversizedAdapterState));
 
     // args 超过 Core 的嵌套深度上限：Jackson 允许解析，但严格 args 解析必须拒绝。
     root = encodedRoot();
-    ((ObjectNode) root.get("plan")).set("args", nestedObject(CanvasJson.MAX_DEPTH + 1));
+    firstPlan(root).set("args", nestedObject(CanvasJson.MAX_DEPTH + 1));
     String deepArgs = root.toString();
-    assertThrows(IllegalArgumentException.class, () -> codec.decode(deepArgs, definition));
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(deepArgs));
+
+    // 定义的 argsSchema 与 args 一样走严格解析，超深同样拒绝。
+    root = encodedRoot();
+    ((ObjectNode) firstPlan(root).get("definition"))
+        .set("argsSchema", nestedObject(CanvasJson.MAX_DEPTH + 1));
+    String deepSchema = root.toString();
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(deepSchema));
 
     assertThrows(IllegalArgumentException.class, () -> codec.functionName("{"));
   }
@@ -325,7 +475,7 @@ class CanvasFunctionRunStateCodecTest {
             run.nodeId(),
             run.nodeName(),
             run.requestId(),
-            run.definition(),
+            run.binding(),
             args,
             run.manifest(),
             run.outputs(),
@@ -341,7 +491,7 @@ class CanvasFunctionRunStateCodecTest {
     assertFalse(state.contains("NaN"));
 
     // decode 与 checkpoint 必须还原完全相等的 Core args（BigDecimal 值语义），而不是被改写的近似值。
-    assertEquals(args, codec.decode(state, definition).args());
+    assertEquals(args, codec.decode(state).args());
     assertEquals(args, codec.checkpoint(bigDecimalRun, "POLLING", Map.of()).args());
 
     // state.plan.args 的数值节点必须仍是 BigDecimal/BigInteger，而不是 DoubleNode。
@@ -368,8 +518,12 @@ class CanvasFunctionRunStateCodecTest {
     return (ObjectNode) mapper.readTree(codec.encode(run));
   }
 
+  private static ObjectNode firstPlan(ObjectNode root) {
+    return (ObjectNode) root.get("plan");
+  }
+
   private static ObjectNode firstManifestReference(ObjectNode root) {
-    return (ObjectNode) ((ArrayNode) ((ObjectNode) root.get("plan")).get("manifest")).get(0);
+    return (ObjectNode) ((ArrayNode) firstPlan(root).get("manifest")).get(0);
   }
 
   private ObjectNode nestedObject(int depth) {

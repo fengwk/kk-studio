@@ -27,6 +27,7 @@ import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
 import fun.fengwk.kkstudio.canvas.CanvasResourceMaterializer;
 import fun.fengwk.kkstudio.canvas.CanvasStore.NodeRecord;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionBinding;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionBlobAccess;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
@@ -38,6 +39,7 @@ import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionRunTransactions;
 import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionRuntimeProperties;
 import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionWorker;
 import fun.fengwk.kkstudio.canvas.infra.function.ClaimedRun;
+import fun.fengwk.kkstudio.canvas.infra.function.FixedCanvasFunctionCatalogSource;
 
 import java.sql.Connection;
 import java.time.Clock;
@@ -270,8 +272,8 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
             });
     CanvasFunctionCatalog catalog = CanvasFunctionCatalog.from(List.of(adapter));
     CanvasFunctionRunStateCodecPort stateCodec = mock(CanvasFunctionRunStateCodecPort.class);
-    when(stateCodec.functionName(claim.run().stateJson())).thenReturn("test.function");
-    when(stateCodec.decode(claim.run().stateJson(), definition)).thenReturn(frozen);
+    when(frozen.binding()).thenReturn(new CanvasFunctionBinding(1L, definition, null));
+    when(stateCodec.decode(claim.run().stateJson())).thenReturn(frozen);
     CanvasFunctionRunTransactions runTransactions = mock(CanvasFunctionRunTransactions.class);
     ObjectProvider<CanvasResourceMaterializer> materializers = mock(ObjectProvider.class);
     when(materializers.getIfAvailable()).thenReturn(mock(CanvasResourceMaterializer.class));
@@ -282,7 +284,7 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
     CanvasFunctionWorker worker =
         new CanvasFunctionWorker(
             runs,
-            catalog,
+            new FixedCanvasFunctionCatalogSource(1L, catalog),
             stateCodec,
             runTransactions,
             mock(CanvasFunctionBlobAccess.class),

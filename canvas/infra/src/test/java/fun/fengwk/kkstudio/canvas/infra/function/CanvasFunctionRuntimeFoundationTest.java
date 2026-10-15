@@ -34,13 +34,16 @@ import fun.fengwk.kkstudio.canvas.CanvasStore.NodeRecord;
 import fun.fengwk.kkstudio.canvas.CanvasTransform;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionArgsCodecPort;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionBinding;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionBlobAccess;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalogSource;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionExecutionContext;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenOutput;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionOutputSpec;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionPluginSource;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionResourceStream;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunException;
@@ -132,21 +135,27 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
   /** Runtime foundation 使用模块内的忠实 pin/owner 双替身，避免与实际 Blob ref_count 端口耦合。 */
   @BeforeEach
   void buildRuntimeTransactions() {
-    runtimeTransactions =
-        new CanvasFunctionRunTransactions(
-            canvasStore,
-            resourceRepository,
-            runRepository,
-            pinRepository,
-            catalog,
-            argsCodec,
-            stateCodec,
-            new TestResourceLifecycle(resourceRepository, pinRepository),
-            blobAccess,
-            clock);
+    runtimeTransactions = transactionsFor(catalogSource);
   }
 
-  @Autowired private CanvasFunctionCatalog catalog;
+  /** 用给定 source 构造 Runtime transactions，复用真实 store/仓库与测试 pin/owner 双替身。 */
+  private CanvasFunctionRunTransactions transactionsFor(CanvasFunctionCatalogSource catalogSource) {
+    return new CanvasFunctionRunTransactions(
+        canvasStore,
+        resourceRepository,
+        runRepository,
+        pinRepository,
+        catalogSource,
+        argsCodec,
+        stateCodec,
+        new TestResourceLifecycle(resourceRepository, pinRepository),
+        blobAccess,
+        clock);
+  }
+
+  /** 模块测试宿主提供显式固定 epoch 的可切换 source；start 的租用与按 epoch 恢复都依赖它。 */
+  @Autowired private FixedCanvasFunctionCatalogSource catalogSource;
+
   @Autowired private CanvasFunctionRunStateCodecPort stateCodec;
   @Autowired private CanvasFunctionWorkStore workStore;
   @Autowired private PlatformTransactionManager transactionManager;
@@ -158,21 +167,19 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
     UUID canvasId = addDocument();
     UUID nodeId = addFunctionNode(canvasId, "output", configWithoutReferences());
 
-    CanvasFunctionRun first = runtimeTransactions.start(canvasId, nodeId, REQUEST_1).run();
+    CanvasFunctionRun first = startRun(canvasId, nodeId, REQUEST_1).run();
     assertEquals(CanvasFunctionRunStatus.READY, first.status());
     assertEquals(1L, version(canvasId));
     // 无引用的 Run 在启动阶段不产生 pin：预分配目标没有 Resource 行，OUTPUT pin 属于物化事务。
     assertTrue(pinRepository.findByRun(canvasId, nodeId, first.requestId()).isEmpty());
 
-    CanvasFunctionStartResult replay = runtimeTransactions.start(canvasId, nodeId, REQUEST_1);
+    CanvasFunctionStartResult replay = startRun(canvasId, nodeId, REQUEST_1);
     assertFalse(replay.created());
     assertEquals(first.requestId(), replay.run().requestId());
     assertEquals(first.status(), replay.run().status());
     assertEquals(decode(first), decode(replay.run()));
     assertEquals(1L, version(canvasId), "exact replay must not bump version");
-    assertThrows(
-        CanvasFunctionRunException.class,
-        () -> runtimeTransactions.start(canvasId, nodeId, REQUEST_2));
+    assertThrows(CanvasFunctionRunException.class, () -> startRun(canvasId, nodeId, REQUEST_2));
 
     CanvasFunctionFrozenRun firstFrozen = decode(first);
     CanvasResource cancelledTarget =
@@ -183,9 +190,245 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
     assertTrue(pinRepository.findByRun(canvasId, nodeId, first.requestId()).isEmpty());
     assertTrue(resourceRepository.findById(canvasId, cancelledTarget.id()).isEmpty());
     assertEquals(2L, version(canvasId), "terminal cancel replay must not bump version");
-    CanvasFunctionRun replacement = runtimeTransactions.start(canvasId, nodeId, REQUEST_2).run();
+    CanvasFunctionRun replacement = startRun(canvasId, nodeId, REQUEST_2).run();
     assertNotEquals(first.requestId(), replacement.requestId());
     assertEquals(3L, version(canvasId));
+  }
+
+  /** start 的目录租用保持到真实事务提交后才释放。 */
+  @Test
+  void startHoldsCurrentLeaseUntilTransactionCompletion() {
+    UUID canvasId = addDocument();
+    UUID nodeId = addFunctionNode(canvasId, "output", configWithoutReferences());
+
+    CanvasFunctionStartResult started =
+        transactions.execute(
+            status -> {
+              CanvasFunctionStartResult result =
+                  runtimeTransactions.start(canvasId, nodeId, REQUEST_1);
+              // 事务内租用仍然打开：释放必须等到 afterCompletion，而不是方法返回前。
+              assertEquals(1, catalogSource.openLeases());
+              return result;
+            });
+
+    assertEquals(CanvasFunctionRunStatus.READY, started.run().status());
+    assertEquals(1L, version(canvasId));
+    assertEquals(0, catalogSource.openLeases());
+  }
+
+  /** 回滚同样释放租用，且不留下 Run 行与 version 推进。 */
+  @Test
+  void startReleasesCurrentLeaseOnRollback() {
+    UUID canvasId = addDocument();
+    UUID nodeId = addFunctionNode(canvasId, "output", configWithoutReferences());
+
+    transactions.execute(
+        status -> {
+          runtimeTransactions.start(canvasId, nodeId, REQUEST_1);
+          assertEquals(1, catalogSource.openLeases());
+          status.setRollbackOnly();
+          return null;
+        });
+
+    assertEquals(0, catalogSource.openLeases());
+    assertTrue(runRepository.findByNodeId(nodeId).isEmpty());
+    assertEquals(0L, version(canvasId));
+  }
+
+  /** 没有真实事务同步时必须先释放租用再明确拒绝，绝不降级为「方法内加锁」继续执行。 */
+  @Test
+  void startWithoutActiveTransactionReleasesLeaseAndRejects() {
+    UUID canvasId = addDocument();
+    UUID nodeId = addFunctionNode(canvasId, "output", configWithoutReferences());
+
+    assertThrows(
+        IllegalStateException.class, () -> runtimeTransactions.start(canvasId, nodeId, REQUEST_1));
+
+    assertEquals(0, catalogSource.openLeases());
+    assertTrue(runRepository.findByNodeId(nodeId).isEmpty());
+    assertEquals(0L, version(canvasId));
+  }
+
+  /** 当前目录漂移不改写已持久化的 epoch、完整定义与来源。 */
+  @Test
+  void frozenBindingKeepsEpochDefinitionAndSourceAfterCurrentDrift() {
+    UUID canvasId = addDocument();
+    UUID nodeId = addFunctionNode(canvasId, "output", configWithoutReferences());
+
+    // 该测试自持 source：epoch 1 是运行时的冻结目录，epoch 2 是同名函数换定义/换来源的漂移目录。
+    FixedCanvasFunctionCatalogSource source =
+        new FixedCanvasFunctionCatalogSource(1L, frozenCatalog());
+    CanvasFunctionRunTransactions driftTransactions = transactionsFor(source);
+    CanvasFunctionRun run =
+        transactions.execute(status -> driftTransactions.start(canvasId, nodeId, REQUEST_1)).run();
+    CanvasFunctionBinding frozen = decode(run).binding();
+    assertEquals(1L, frozen.catalogEpoch());
+    assertEquals(DEFINITION, frozen.definition());
+    assertNull(frozen.pluginSource());
+
+    CanvasFunctionDefinition drifted =
+        CanvasFunctionDefinition.of(
+            DEFINITION.name(),
+            "Drifted Definition",
+            ARGS_SCHEMA,
+            CanvasResourceKind.VIDEO,
+            new CanvasFunctionReferencePolicy(Set.of(CanvasResourceKind.IMAGE), 1, Map.of()));
+    CanvasFunctionPluginSource driftedSource =
+        new CanvasFunctionPluginSource(
+            "mini-max", "9.9.9", 2L, "c".repeat(64), UUID.randomUUID(), "d".repeat(64));
+    source.register(2L, catalogOf(drifted));
+    source.pluginSource(2L, DEFINITION.name(), driftedSource);
+    source.currentEpoch(2L);
+
+    // 持久 state 冻结的完整 binding 不随 current 漂移。
+    assertEquals(frozen, decode(run).binding());
+    // 当前目录确实已经不同：同名函数的完整定义与来源都换了。
+    try (CanvasFunctionCatalogSource.Lease current = source.acquireCurrent()) {
+      assertEquals(2L, current.epoch());
+      assertEquals(drifted, current.catalog().require(DEFINITION.name()).function());
+      CanvasFunctionBinding rebound = current.bind(DEFINITION.name());
+      assertEquals(drifted, rebound.definition());
+      assertEquals(driftedSource, rebound.pluginSource());
+    }
+    // 旧绑定只能按自己的 epoch 取回原定义：epoch 1 的目录与来源身份保持不变。
+    try (CanvasFunctionCatalogSource.Lease oldLease = source.acquire(frozen.catalogEpoch())) {
+      assertEquals(DEFINITION, oldLease.require(frozen).function());
+      assertNull(oldLease.bind(DEFINITION.name()).pluginSource());
+    }
+    // 新 epoch 拒绝旧绑定，不退回当前版本。
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> {
+          try (CanvasFunctionCatalogSource.Lease driftedLease = source.acquire(2L)) {
+            driftedLease.require(frozen);
+          }
+        });
+    assertEquals(0, source.openLeases());
+    assertEquals(0, catalogSource.openLeases());
+  }
+
+  /** 相同代码重新构建目录后，持久绑定仍能验证通过。 */
+  @Test
+  void validatesPersistedBindingAgainstARebuiltSameCodeCatalog() {
+    UUID canvasId = addDocument();
+    UUID nodeId = addFunctionNode(canvasId, "output", configWithoutReferences());
+    CanvasFunctionRun run = startRun(canvasId, nodeId, REQUEST_1).run();
+    CanvasFunctionBinding frozen = decode(run).binding();
+
+    // 重启后的新 source 实例冻结同一 epoch 与同一目录内容。
+    FixedCanvasFunctionCatalogSource restarted =
+        new FixedCanvasFunctionCatalogSource(frozen.catalogEpoch(), catalogOf(DEFINITION));
+
+    try (CanvasFunctionCatalogSource.Lease lease = restarted.acquire(frozen.catalogEpoch())) {
+      assertEquals(DEFINITION, lease.require(frozen).function());
+    }
+    // epoch 仍须精确匹配：未知 epoch 不会退回任何当前版本。
+    assertThrows(
+        IllegalArgumentException.class, () -> restarted.acquire(frozen.catalogEpoch() + 1));
+    assertEquals(0, catalogSource.openLeases());
+    assertEquals(0, restarted.openLeases());
+  }
+
+  /** 当前宿主冻结的 epoch 目录内容，用于构造自持 source。 */
+  private CanvasFunctionCatalog frozenCatalog() {
+    try (CanvasFunctionCatalogSource.Lease lease = catalogSource.acquireCurrent()) {
+      return lease.catalog();
+    }
+  }
+
+  /** 构造只声明给定定义的忠实 adapter 目录，用于冻结第二个 epoch 的目录内容。 */
+  private static CanvasFunctionCatalog catalogOf(CanvasFunctionDefinition definition) {
+    CanvasFunctionAdapter adapter =
+        new CanvasFunctionAdapter() {
+          @Override
+          public List<CanvasFunctionDefinition> functions() {
+            return List.of(definition);
+          }
+
+          @Override
+          public boolean enabled() {
+            return true;
+          }
+
+          @Override
+          public String unavailableReason() {
+            return null;
+          }
+
+          @Override
+          public void preflight(CanvasFunctionFrozenRun run) {}
+
+          @Override
+          public void submit(CanvasFunctionExecutionContext context, CanvasFunctionFrozenRun run) {}
+
+          @Override
+          public List<UUID> execute(
+              CanvasFunctionExecutionContext context, CanvasFunctionFrozenRun run) {
+            throw new UnsupportedOperationException();
+          }
+        };
+    return CanvasFunctionCatalog.from(List.of(adapter));
+  }
+
+  /** 非 Function 节点不得启动：先拒绝再取租用，不冻结、不写 Run、不推进版本。 */
+  @Test
+  void startRejectsPlainNodeWithoutLeaseOrSideEffects() {
+    UUID canvasId = addDocument();
+    UUID nodeId = addPlainNode(canvasId, "text");
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            transactions.execute(status -> runtimeTransactions.start(canvasId, nodeId, REQUEST_1)));
+
+    assertEquals(0, catalogSource.openLeases());
+    assertTrue(runRepository.findByNodeId(nodeId).isEmpty());
+    assertEquals(0L, version(canvasId));
+  }
+
+  /** cancel 只接受当前 Run 的 requestId：陈旧 requestId 必须冲突，且不改变已有 READY Run。 */
+  @Test
+  void cancelRejectsAStaleRequestId() {
+    UUID canvasId = addDocument();
+    UUID nodeId = addFunctionNode(canvasId, "output", configWithoutReferences());
+    startRun(canvasId, nodeId, REQUEST_1);
+
+    assertThrows(
+        CanvasFunctionRunException.class,
+        () ->
+            transactions.execute(
+                status -> runtimeTransactions.cancel(canvasId, nodeId, REQUEST_2)));
+    assertEquals(
+        CanvasFunctionRunStatus.READY, runRepository.findByNodeId(nodeId).orElseThrow().status());
+
+    // 当前 requestId 才能取消。
+    CanvasFunctionRun cancelled =
+        transactions.execute(status -> runtimeTransactions.cancel(canvasId, nodeId, REQUEST_1));
+    assertEquals(CanvasFunctionRunStatus.CANCELLED, cancelled.status());
+    assertEquals(0, catalogSource.openLeases());
+  }
+
+  /** resolve 只接受当前 Run 的 requestId：不匹配必须冲突，避免把别的请求的冻结事实解除。 */
+  @Test
+  void resolveRejectsAStaleRequestId() {
+    UUID canvasId = addDocument();
+    UUID nodeId = addFunctionNode(canvasId, "output", configWithoutReferences());
+    startRun(canvasId, nodeId, REQUEST_1);
+
+    assertThrows(
+        CanvasFunctionRunException.class,
+        () ->
+            transactions.execute(
+                status ->
+                    runtimeTransactions.resolve(
+                        canvasId,
+                        nodeId,
+                        REQUEST_2,
+                        CanvasFunctionUnknownResolution.RESUME,
+                        "verified")));
+    assertEquals(
+        CanvasFunctionRunStatus.READY, runRepository.findByNodeId(nodeId).orElseThrow().status());
+    assertEquals(0, catalogSource.openLeases());
   }
 
   /** start 经 bumpVersion 前进 revision，必须在提交时发布 canvas_revision 失效提示 */
@@ -194,7 +437,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
     UUID canvasId = addDocument();
     UUID nodeId = addFunctionNode(canvasId, "output", configWithoutReferences());
     try (Connection listener = listenOn("canvas_revision")) {
-      runtimeTransactions.start(canvasId, nodeId, REQUEST_1);
+      startRun(canvasId, nodeId, REQUEST_1);
       PGNotification[] notifications = pollNotifications(listener, 5_000);
       assertEquals(1, notifications.length);
       assertEquals("canvas_revision", notifications[0].getName());
@@ -240,7 +483,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
     CanvasResource source = addBlobResource(canvasId, sourceNodeId, 0, UUID.randomUUID());
 
     // 1. start 构造 PENDING 状态并落库 INPUT pin
-    CanvasFunctionRun ready = runtimeTransactions.start(canvasId, targetNodeId, REQUEST_1).run();
+    CanvasFunctionRun ready = startRun(canvasId, targetNodeId, REQUEST_1).run();
     assertEquals(CanvasFunctionRunStatus.READY, ready.status());
     CanvasFunctionFrozenRun frozenReady = decode(ready);
     assertEquals(CanvasFunctionSubmitState.PENDING, frozenReady.submitState());
@@ -328,8 +571,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
 
     // UNKNOWN 状态下拒绝不同 requestId 的 start，也拒绝直接 cancel
     assertThrows(
-        CanvasFunctionRunException.class,
-        () -> runtimeTransactions.start(canvasId, targetNodeId, REQUEST_2));
+        CanvasFunctionRunException.class, () -> startRun(canvasId, targetNodeId, REQUEST_2));
     assertThrows(
         CanvasFunctionRunException.class,
         () -> runtimeTransactions.cancel(canvasId, targetNodeId, REQUEST_1));
@@ -418,8 +660,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
                 "again"));
 
     // 2. 测试 UNKNOWN -> CANCELLED
-    CanvasFunctionRun replacement =
-        runtimeTransactions.start(canvasId, targetNodeId, REQUEST_2).run();
+    CanvasFunctionRun replacement = startRun(canvasId, targetNodeId, REQUEST_2).run();
     ClaimedRun claim2 =
         workStore
             .claimNext(replacement.availableAt(), Duration.ofSeconds(30), "worker-cancelled")
@@ -511,25 +752,20 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
 
     // 未知字段 extra
     UUID nodeUnknown = addFunctionNode(canvasId, "node1", "{\"prompt\":\"test\",\"extra\":1}");
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> runtimeTransactions.start(canvasId, nodeUnknown, REQUEST_1));
+    assertThrows(IllegalArgumentException.class, () -> startRun(canvasId, nodeUnknown, REQUEST_1));
 
     // 缺少必填字段 prompt
     UUID nodeMissing = addFunctionNode(canvasId, "node2", "{\"ratio\":\"16:9\"}");
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> runtimeTransactions.start(canvasId, nodeMissing, REQUEST_1));
+    assertThrows(IllegalArgumentException.class, () -> startRun(canvasId, nodeMissing, REQUEST_1));
 
     // 类型错误：prompt 应为 string
     UUID nodeWrongType = addFunctionNode(canvasId, "node3", "{\"prompt\":123}");
     assertThrows(
-        IllegalArgumentException.class,
-        () -> runtimeTransactions.start(canvasId, nodeWrongType, REQUEST_1));
+        IllegalArgumentException.class, () -> startRun(canvasId, nodeWrongType, REQUEST_1));
 
     // 合法输入：只传必填 prompt，默认值 ratio="16:9" 必须被自动补齐并冻结
     UUID nodeValid = addFunctionNode(canvasId, "node4", "{\"prompt\":\"hello world\"}");
-    CanvasFunctionRun run = runtimeTransactions.start(canvasId, nodeValid, REQUEST_1).run();
+    CanvasFunctionRun run = startRun(canvasId, nodeValid, REQUEST_1).run();
     CanvasFunctionFrozenRun frozen = decode(run);
     assertEquals(new CanvasJson.JsonText("hello world"), frozen.args().values().get("prompt"));
     assertEquals(new CanvasJson.JsonText("16:9"), frozen.args().values().get("ratio"));
@@ -1034,10 +1270,18 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
     assertTrue(resourceRepository.findById(canvasId, slot0Res3.id()).isEmpty());
   }
 
+  /**
+   * start 的目录租用必须由真实事务的 afterCompletion 释放，因此测试统一经 {@link TransactionTemplate} 调用， 而不是绕过 proxy
+   * 直接调用。
+   */
+  private CanvasFunctionStartResult startRun(UUID canvasId, UUID nodeId, String requestId) {
+    return transactions.execute(status -> runtimeTransactions.start(canvasId, nodeId, requestId));
+  }
+
   /** start 提交的 availableAt 是 claim 的权威时间；不能用独立 wall clock 跨过同一事务的时间边界。 */
   private ClaimedRun claimStartedRun(
       UUID canvasId, UUID nodeId, String requestId, String ownerToken) {
-    CanvasFunctionRun started = runtimeTransactions.start(canvasId, nodeId, requestId).run();
+    CanvasFunctionRun started = startRun(canvasId, nodeId, requestId).run();
     ClaimedRun claim =
         workStore
             .claimNext(started.availableAt(), Duration.ofSeconds(30), ownerToken)
@@ -1182,9 +1426,9 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
         canvasId, ownerNodeId, resourceIndex, resourceId, "resource.png", CanvasResourceKind.IMAGE);
   }
 
+  /** 恢复只从持久 state 解码完整 binding，不重查当前目录。 */
   private CanvasFunctionFrozenRun decode(CanvasFunctionRun run) {
-    return stateCodec.decode(
-        run.stateJson(), catalog.require(stateCodec.functionName(run.stateJson())).function());
+    return stateCodec.decode(run.stateJson());
   }
 
   private long version(UUID canvasId) {

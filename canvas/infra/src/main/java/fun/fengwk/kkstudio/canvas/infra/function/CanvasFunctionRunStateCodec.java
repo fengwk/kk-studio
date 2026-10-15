@@ -17,14 +17,19 @@ import tools.jackson.databind.node.ObjectNode;
 import fun.fengwk.kkstudio.canvas.CanvasJson;
 import fun.fengwk.kkstudio.canvas.CanvasJson.JsonObject;
 import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionBinding;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenOutput;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenReference;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionOutputSpec;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionPluginSource;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunStateCodecPort;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionSubmitState;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -34,11 +39,11 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
-/** FunctionRun typed/versioned stateJson 的唯一 codec。 */
+/** FunctionRun typed/versioned stateJson 的唯一 codec：冻结完整 binding（目录 epoch、完整定义与插件来源）加 checkpoint。 */
 @Component
 public final class CanvasFunctionRunStateCodec implements CanvasFunctionRunStateCodecPort {
 
-  public static final int VERSION = 4;
+  public static final int VERSION = 5;
   public static final int MAX_ADAPTER_STATE_BYTES = 64 * 1024;
 
   private static final Pattern STAGE = Pattern.compile("[A-Z][A-Z0-9_]{0,63}");
@@ -49,11 +54,26 @@ public final class CanvasFunctionRunStateCodec implements CanvasFunctionRunState
           "nodeId",
           "nodeName",
           "requestId",
-          "functionName",
+          "catalogEpoch",
+          "pluginSource",
+          "definition",
           "args",
           "manifest",
           "outputs",
           "submitState");
+  private static final Set<String> SOURCE_FIELDS =
+      Set.of(
+          "pluginId",
+          "pluginCodeVersion",
+          "configRevision",
+          "capabilityFingerprint",
+          "authGeneration",
+          "contextFingerprint");
+  private static final Set<String> DEFINITION_FIELDS =
+      Set.of("name", "description", "argsSchema", "outputs", "referencePolicy");
+  private static final Set<String> DEFINITION_OUTPUT_FIELDS = Set.of("kind", "name");
+  private static final Set<String> POLICY_FIELDS =
+      Set.of("allowedKinds", "maxReferences", "maxByKind");
   private static final Set<String> OUTPUT_FIELDS = Set.of("resourceId", "index", "kind", "name");
   private static final Set<String> REFERENCE_FIELDS =
       Set.of(
@@ -99,7 +119,14 @@ public final class CanvasFunctionRunStateCodec implements CanvasFunctionRunState
     plan.put("nodeId", run.nodeId().toString());
     plan.put("nodeName", run.nodeName());
     plan.put("requestId", run.requestId().toString());
-    plan.put("functionName", run.definition().name());
+    plan.put("catalogEpoch", run.binding().catalogEpoch());
+    CanvasFunctionPluginSource pluginSource = run.binding().pluginSource();
+    if (pluginSource == null) {
+      plan.putNull("pluginSource");
+    } else {
+      plan.set("pluginSource", sourceNode(pluginSource));
+    }
+    plan.set("definition", definitionNode(run.binding().definition()));
     plan.set("args", argsNode(run.args()));
     ArrayNode manifest = plan.putArray("manifest");
     for (CanvasFunctionFrozenReference reference : run.manifest()) {
@@ -144,8 +171,7 @@ public final class CanvasFunctionRunStateCodec implements CanvasFunctionRunState
   }
 
   @Override
-  public CanvasFunctionFrozenRun decode(String json, CanvasFunctionDefinition definition) {
-    Objects.requireNonNull(definition, "definition");
+  public CanvasFunctionFrozenRun decode(String json) {
     try {
       ObjectNode root = object(MAPPER.readTree(json), "state");
       requireExactFields(root, ROOT_FIELDS, "state");
@@ -155,10 +181,12 @@ public final class CanvasFunctionRunStateCodec implements CanvasFunctionRunState
       }
       ObjectNode plan = object(required(root, "plan"), "state.plan");
       requireExactFields(plan, PLAN_FIELDS, "state.plan");
-      String functionName = text(plan, "functionName");
-      if (!definition.name().equals(functionName)) {
-        throw invalid("state functionName does not match the registered function");
-      }
+      CanvasFunctionBinding binding =
+          new CanvasFunctionBinding(
+              positiveLong(plan, "catalogEpoch"),
+              definition(object(required(plan, "definition"), "state.plan.definition")),
+              source(plan.get("pluginSource")));
+      CanvasFunctionDefinition definition = binding.definition();
       // args 在 state 里是 JSON object（与 adapterState 一致），复用 Core 的严格解析与上限校验。
       JsonObject args =
           args(object(required(plan, "args"), "state.plan.args").toString(), "state.plan.args");
@@ -177,7 +205,7 @@ public final class CanvasFunctionRunStateCodec implements CanvasFunctionRunState
           uuid(plan, "nodeId"),
           text(plan, "nodeName"),
           uuid(plan, "requestId"),
-          definition,
+          binding,
           args,
           decodeManifest(required(plan, "manifest")),
           decodeOutputs(required(plan, "outputs"), definition),
@@ -206,7 +234,8 @@ public final class CanvasFunctionRunStateCodec implements CanvasFunctionRunState
     try {
       ObjectNode root = object(MAPPER.readTree(json), "state");
       ObjectNode plan = object(required(root, "plan"), "state.plan");
-      return text(plan, "functionName");
+      ObjectNode definition = object(required(plan, "definition"), "state.plan.definition");
+      return text(definition, "name");
     } catch (JacksonException exception) {
       throw invalid("FunctionRun stateJson must be valid typed JSON", exception);
     }
@@ -226,13 +255,127 @@ public final class CanvasFunctionRunStateCodec implements CanvasFunctionRunState
         run.nodeId(),
         run.nodeName(),
         run.requestId(),
-        run.definition(),
+        run.binding(),
         run.args(),
         run.manifest(),
         run.outputs(),
         submitState,
         stage,
         adapterState);
+  }
+
+  private ObjectNode sourceNode(CanvasFunctionPluginSource source) {
+    ObjectNode node = MAPPER.createObjectNode();
+    node.put("pluginId", source.pluginId());
+    node.put("pluginCodeVersion", source.pluginCodeVersion());
+    node.put("configRevision", source.configRevision());
+    node.put("capabilityFingerprint", source.capabilityFingerprint());
+    node.put("authGeneration", source.authGeneration().toString());
+    node.put("contextFingerprint", source.contextFingerprint());
+    return node;
+  }
+
+  private CanvasFunctionPluginSource source(JsonNode value) {
+    if (value == null || value.isNull()) {
+      return null;
+    }
+    ObjectNode node = object(value, "state.plan.pluginSource");
+    requireExactFields(node, SOURCE_FIELDS, "state.plan.pluginSource");
+    return new CanvasFunctionPluginSource(
+        text(node, "pluginId"),
+        text(node, "pluginCodeVersion"),
+        positiveLong(node, "configRevision"),
+        text(node, "capabilityFingerprint"),
+        uuid(node, "authGeneration"),
+        text(node, "contextFingerprint"));
+  }
+
+  private ObjectNode definitionNode(CanvasFunctionDefinition definition) {
+    ObjectNode node = MAPPER.createObjectNode();
+    node.put("name", definition.name());
+    node.put("description", definition.description());
+    node.set("argsSchema", argsNode(definition.argsSchema()));
+    ArrayNode outputs = node.putArray("outputs");
+    for (CanvasFunctionOutputSpec spec : definition.outputs()) {
+      ObjectNode item = outputs.addObject();
+      item.put("kind", spec.kind().name());
+      item.put("name", spec.name());
+    }
+    node.set("referencePolicy", referencePolicyNode(definition.referencePolicy()));
+    return node;
+  }
+
+  private ObjectNode referencePolicyNode(CanvasFunctionReferencePolicy policy) {
+    ObjectNode node = MAPPER.createObjectNode();
+    List<CanvasResourceKind> allowedKinds = new ArrayList<>(policy.allowedKinds());
+    allowedKinds.sort(Comparator.naturalOrder());
+    ArrayNode kinds = node.putArray("allowedKinds");
+    for (CanvasResourceKind kind : allowedKinds) {
+      kinds.add(kind.name());
+    }
+    node.put("maxReferences", policy.maxReferences());
+    ObjectNode maxByKind = node.putObject("maxByKind");
+    List<CanvasResourceKind> boundedKinds = new ArrayList<>(policy.maxByKind().keySet());
+    boundedKinds.sort(Comparator.naturalOrder());
+    for (CanvasResourceKind kind : boundedKinds) {
+      maxByKind.put(kind.name(), policy.maxByKind().get(kind).intValue());
+    }
+    return node;
+  }
+
+  private CanvasFunctionDefinition definition(ObjectNode node) {
+    requireExactFields(node, DEFINITION_FIELDS, "state.plan.definition");
+    return new CanvasFunctionDefinition(
+        text(node, "name"),
+        text(node, "description"),
+        args(
+            object(required(node, "argsSchema"), "state.plan.definition.argsSchema").toString(),
+            "state.plan.definition.argsSchema"),
+        definitionOutputs(required(node, "outputs")),
+        referencePolicy(object(required(node, "referencePolicy"), "state.plan.definition")));
+  }
+
+  private List<CanvasFunctionOutputSpec> definitionOutputs(JsonNode value) {
+    if (!(value instanceof ArrayNode array)) {
+      throw invalid("state.plan.definition.outputs must be an array");
+    }
+    List<CanvasFunctionOutputSpec> outputs = new ArrayList<>(array.size());
+    for (int index = 0; index < array.size(); index++) {
+      String path = "state.plan.definition.outputs[" + index + "]";
+      ObjectNode item = object(array.get(index), path);
+      requireExactFields(item, DEFINITION_OUTPUT_FIELDS, path);
+      outputs.add(
+          new CanvasFunctionOutputSpec(
+              enumKind(text(item, "kind"), path + ".kind"), nullableText(item, "name")));
+    }
+    return List.copyOf(outputs);
+  }
+
+  private CanvasFunctionReferencePolicy referencePolicy(ObjectNode node) {
+    requireExactFields(node, POLICY_FIELDS, "state.plan.definition.referencePolicy");
+    JsonNode allowedKindsValue = required(node, "allowedKinds");
+    if (!(allowedKindsValue instanceof ArrayNode allowedKinds)) {
+      throw invalid("state.plan.definition.referencePolicy.allowedKinds must be an array");
+    }
+    Set<CanvasResourceKind> kinds = new HashSet<>();
+    for (int index = 0; index < allowedKinds.size(); index++) {
+      String path = "state.plan.definition.referencePolicy.allowedKinds[" + index + "]";
+      JsonNode item = allowedKinds.get(index);
+      if (!item.isString()) {
+        throw invalid(path + " must be a resource kind name");
+      }
+      kinds.add(enumKind(item.stringValue(), path));
+    }
+    ObjectNode maxByKindNode =
+        object(required(node, "maxByKind"), "state.plan.definition.referencePolicy.maxByKind");
+    Map<CanvasResourceKind, Integer> maxByKind = new LinkedHashMap<>();
+    for (String name : maxByKindNode.propertyNames()) {
+      maxByKind.put(
+          enumKind(name, "state.plan.definition.referencePolicy.maxByKind name"),
+          nonnegativeInt(maxByKindNode, name));
+    }
+    return new CanvasFunctionReferencePolicy(
+        kinds, nonnegativeInt(node, "maxReferences"), maxByKind);
   }
 
   private JsonNode argsNode(JsonObject args) {
@@ -290,7 +433,7 @@ public final class CanvasFunctionRunStateCodec implements CanvasFunctionRunState
       throw invalid("state.plan.outputs must be an array");
     }
     if (array.size() != definition.outputs().size()) {
-      throw invalid("state.plan.outputs must match the registered function output plan");
+      throw invalid("state.plan.outputs must match the frozen definition output plan");
     }
     List<CanvasFunctionFrozenOutput> outputs = new ArrayList<>(array.size());
     for (int index = 0; index < array.size(); index++) {
@@ -304,7 +447,7 @@ public final class CanvasFunctionRunStateCodec implements CanvasFunctionRunState
               enumKind(text(item, "kind"), path + ".kind"),
               text(item, "name"));
       if (output.index() != index || output.kind() != definition.outputs().get(index).kind()) {
-        throw invalid(path + " does not match the registered function output plan");
+        throw invalid(path + " does not match the frozen definition output plan");
       }
       outputs.add(output);
     }
@@ -335,6 +478,14 @@ public final class CanvasFunctionRunStateCodec implements CanvasFunctionRunState
     } catch (IllegalArgumentException exception) {
       throw invalid(field + " must be a canonical UUID string", exception);
     }
+  }
+
+  private static long positiveLong(ObjectNode node, String field) {
+    JsonNode value = required(node, field);
+    if (!value.isIntegralNumber() || !value.canConvertToLong() || value.longValue() <= 0L) {
+      throw invalid(field + " must be a positive integer");
+    }
+    return value.longValue();
   }
 
   private static long nonnegativeLong(ObjectNode node, String field) {
@@ -368,6 +519,17 @@ public final class CanvasFunctionRunStateCodec implements CanvasFunctionRunState
     JsonNode value = required(node, field);
     if (!value.isString() || value.stringValue().isBlank()) {
       throw invalid(field + " must be non-blank text");
+    }
+    return value.stringValue();
+  }
+
+  private static String nullableText(ObjectNode node, String field) {
+    JsonNode value = node.get(field);
+    if (value == null || value.isNull()) {
+      return null;
+    }
+    if (!value.isString() || value.stringValue().isBlank()) {
+      throw invalid(field + " must be null or non-blank text");
     }
     return value.stringValue();
   }

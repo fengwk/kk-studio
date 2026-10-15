@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.canvas.CanvasJson;
 import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionBinding;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionExecutionContext;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenOutput;
@@ -72,7 +73,7 @@ class FakeCanvasFunctionAdapterTest {
             NODE,
             "output",
             REQUEST,
-            image,
+            binding(image),
             CanvasJson.parseObject("{\"prompt\":\"test\",\"ratio\":\"AUTO\"}"),
             List.of(),
             List.of(imageOutput),
@@ -95,7 +96,7 @@ class FakeCanvasFunctionAdapterTest {
             NODE,
             "output",
             REQUEST,
-            video,
+            binding(video),
             CanvasJson.parseObject("{\"prompt\":\"test\",\"ratio\":\"16:9\",\"duration\":5}"),
             List.of(),
             List.of(videoOutput),
@@ -116,7 +117,7 @@ class FakeCanvasFunctionAdapterTest {
             NODE,
             "output",
             REQUEST,
-            report,
+            binding(report),
             CanvasJson.parseObject("{\"prompt\":\"report test\"}"),
             List.of(),
             List.of(reportTextOutput, reportChartOutput),
@@ -153,7 +154,7 @@ class FakeCanvasFunctionAdapterTest {
             NODE,
             "output",
             REQUEST,
-            unsupported,
+            binding(unsupported),
             CanvasJson.parseObject("{}"),
             List.of(),
             List.of(imageOutput),
@@ -161,6 +162,11 @@ class FakeCanvasFunctionAdapterTest {
             "QUEUED",
             Map.of());
     assertThrows(IllegalArgumentException.class, () -> adapter.preflight(unsupportedRun));
+  }
+
+  /** 内置函数绑定：目录 epoch 固定为 1，无插件来源。 */
+  private static CanvasFunctionBinding binding(CanvasFunctionDefinition definition) {
+    return new CanvasFunctionBinding(1L, definition, null);
   }
 
   private static final class RecordingContext implements CanvasFunctionExecutionContext {
