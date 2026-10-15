@@ -49,11 +49,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /**
  * 单个 MiniMax Mavis 能力对应的模型可见 Tool。
  *
- * <p>定义在启动期从静态资源冻结（名称、描述、schema、超时、side effect），启动不访问 Mavis；每次调用才解析凭据、对齐 capability catalog 并发起一次
- * JSON 请求。所有失败都收敛为确定性错误结果：
+ * <p>定义在启动期从静态资源冻结（名称、描述、schema、超时、side effect），启动不访问 Mavis；每次调用在目录查询与能力请求各自发起前解析凭据，对齐 capability
+ * catalog 并发起一次 JSON 请求。所有失败都收敛为确定性错误结果：
  *
  * <ul>
- *   <li>凭据不可用 → {@code MAVIS_CREDENTIAL_<REASON>}（不发送任何请求）；
+ *   <li>凭据不可用 → {@code MAVIS_CREDENTIAL_<REASON>}（不发送本次未获授权的请求）；
  *   <li>catalog 缺少该 endpoint → {@code MAVIS_CAPABILITY_UNAVAILABLE}（不发送能力请求，也不动态改动 Tool 面）；
  *   <li>需要资源/媒体但没有绑定资源网关 → {@code MAVIS_RESOURCE_UNAVAILABLE}（非幂等生成在发送前失败，不消费额度）；
  *   <li>传输或业务失败 → 去敏后的有界错误文本，断连与超时一律报告为 uncertain failure，绝不重放。
@@ -292,15 +292,16 @@ public final class MiniMaxMavisTool implements Tool {
   }
 
   private ToolResult invoke(JsonNode arguments, String toolCallId) {
-    PluginCredentialSnapshot snapshot = credentialAccess.resolve();
-    MavisCredential credential = toCredential(snapshot);
-
+    // 等待缓存锁期间凭据可能被撤销；取得同一锁后才解析，避免目录请求沿用等待前的许可。
     MavisCapabilityCatalog catalog;
-    try {
-      catalog = capabilityCache.catalog(credential);
-    } catch (MavisAuthException rejected) {
-      rejectUsed(snapshot);
-      throw rejected;
+    synchronized (capabilityCache) {
+      PluginCredentialSnapshot catalogSnapshot = credentialAccess.resolve();
+      try {
+        catalog = capabilityCache.catalog(toCredential(catalogSnapshot));
+      } catch (MavisAuthException rejected) {
+        rejectUsed(catalogSnapshot);
+        throw rejected;
+      }
     }
     if (!catalog.supports(capability)) {
       return errorResult(
@@ -309,15 +310,19 @@ public final class MiniMaxMavisTool implements Tool {
           "the MiniMax Mavis gateway no longer offers " + capability.endpoint());
     }
 
+    // POST 前重新解析：即使上面命中缓存没有出网，也必须用当前权威快照获得本次请求的许可。
+    PluginCredentialSnapshot postSnapshot = credentialAccess.resolve();
     JsonNode payload;
     try {
-      payload = client.invoke(credential, capability, arguments);
+      payload = client.invoke(toCredential(postSnapshot), capability, arguments);
     } catch (MavisAuthException rejected) {
-      rejectUsed(snapshot);
+      rejectUsed(postSnapshot);
       throw rejected;
     }
     if (stagesMedia(capability)) {
-      List<ResourceRef> staged = resourceAccess.stageOutputs(payload, capability, toolCallId);
+      // 媒体暂存的每次 GET/PUT 都重新检查同一认证作用域。
+      List<ResourceRef> staged =
+          resourceAccess.stageOutputs(payload, capability, toolCallId, credentialAccess::resolve);
       if (!staged.isEmpty()) {
         return stagedResult(toolCallId, staged);
       }

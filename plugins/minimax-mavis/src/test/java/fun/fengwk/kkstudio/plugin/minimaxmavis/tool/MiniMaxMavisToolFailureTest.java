@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 import static org.mockito.Mockito.mock;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -11,6 +12,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
@@ -27,6 +31,7 @@ import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableReason;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialAccess;
 import fun.fengwk.kkstudio.platform.plugin.resource.PluginMediaFamily;
 import fun.fengwk.kkstudio.platform.plugin.resource.PluginResourceGateway;
+import fun.fengwk.kkstudio.platform.plugin.resource.PluginResourceUnavailableException;
 import fun.fengwk.kkstudio.plugin.minimaxmavis.MavisCapability;
 import fun.fengwk.kkstudio.plugin.minimaxmavis.MavisClient;
 import fun.fengwk.kkstudio.plugin.minimaxmavis.MavisHttpRequest;
@@ -47,7 +52,10 @@ import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.AbstractExecutorService;
+import java.util.concurrent.Future;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -74,6 +82,10 @@ class MiniMaxMavisToolFailureTest {
   private static final String IDENTIFIABLE_SECRET_TOKEN = "super-secret-mavis-token-xyz-98765";
   private static final String CLIENT_UUID = "11111111-2222-3333-4444-555555555555";
   private static final String VALID_BLOB_UUID = "11111111-2222-3333-4444-555555555555";
+
+  /** 直接驱动资源适配公开入口所需的最小 JSON 解析器。 */
+  private static final ObjectMapper JSON = JsonMapper.builder().build();
+
   private static final String CATALOG_RESPONSE =
       "{\"tools\":["
           + "{\"endpoint\":\"web_search\"},"
@@ -561,6 +573,488 @@ class MiniMaxMavisToolFailureTest {
     assertTrue(credentialAccess.rejected().isEmpty());
   }
 
+  /**
+   * 目录返回后凭据被撤销：目录使用的快照不能作为后续 POST 的许可。
+   *
+   * <p>POST 前必须重新解析，重解析发现授权不可用时不得发送能力请求。
+   */
+  @Test
+  void catalogSnapshotIsNotAPostPermitWhenCredentialRevokedAfterCatalogReturns() {
+    PluginCredentialSnapshot catalogSnapshot = snapshot();
+    SequencedCredentialAccess credentialAccess =
+        new SequencedCredentialAccess(
+            catalogSnapshot,
+            new PluginCredentialUnavailableException(
+                PluginCredentialUnavailableReason.REAUTH_REQUIRED, "revoked after catalog"));
+
+    ToolResult result = executeWebSearch(credentialAccess);
+
+    assertTrue(result.error());
+    assertTrue(resultText(result).startsWith("MAVIS_CREDENTIAL_REAUTH_REQUIRED"));
+    assertEquals(2, credentialAccess.resolveCount(), "目录与 POST 各自解析一次");
+    assertEquals(1, transport.requests().size(), "catalog 返回后撤销：不得再发送能力 POST");
+    assertEquals("GET", transport.requests().get(0).method());
+  }
+
+  /** 同代际刷新：目录后 POST 前重新解析出更新的行版本，POST 必须使用新快照而不是目录快照。 */
+  @Test
+  void capabilityPostResolvesFreshSnapshotAfterSameGenerationRefresh() {
+    PluginCredentialSnapshot catalogSnapshot =
+        snapshot("token-catalog-generation", 7L, new byte[] {1, 2, 3});
+    PluginCredentialSnapshot refreshedSnapshot =
+        snapshot("token-post-refresh", 8L, new byte[] {4, 5, 6, 7});
+    SequencedCredentialAccess credentialAccess =
+        new SequencedCredentialAccess(catalogSnapshot, refreshedSnapshot);
+
+    ToolResult result = executeWebSearch(credentialAccess);
+
+    assertFalse(result.error(), () -> "same-generation refresh must still succeed: " + result);
+    List<MavisHttpRequest> requests = transport.requests();
+    assertEquals("Bearer token-catalog-generation", requests.get(0).headers().get("Authorization"));
+    MavisHttpRequest postRequest = requests.get(requests.size() - 1);
+    assertEquals("POST", postRequest.method());
+    assertEquals(
+        "Bearer token-post-refresh",
+        postRequest.headers().get("Authorization"),
+        "能力 POST 必须使用本次 POST 前重新解析出的新快照");
+    // 实际用于 POST 的快照是新行版本，且与目录快照属于同一认证代际。
+    assertEquals(8L, credentialAccess.resolved().get(1).version());
+    assertEquals(
+        credentialAccess.resolved().get(0).authGeneration(),
+        credentialAccess.resolved().get(1).authGeneration());
+  }
+
+  /** POST 被认证拒绝时只作废实际发起 POST 的快照，目录快照不受影响。 */
+  @Test
+  void postRejectionInvalidatesOnlyThePostSnapshot() {
+    PluginCredentialSnapshot catalogSnapshot =
+        snapshot("token-catalog-only", 7L, new byte[] {1, 2, 3});
+    PluginCredentialSnapshot postSnapshot =
+        snapshot("token-post-only", 8L, new byte[] {4, 5, 6, 7});
+    transport.setInvokeResponse(new MavisHttpResponse(401, "{}"));
+    SequencedCredentialAccess credentialAccess =
+        new SequencedCredentialAccess(catalogSnapshot, postSnapshot);
+
+    ToolResult result = executeWebSearch(credentialAccess);
+
+    assertTrue(result.error());
+    assertTrue(resultText(result).startsWith("MAVIS_CALL_FAILED"));
+    assertEquals(
+        List.of(postSnapshot), credentialAccess.rejected(), "只有实际发起 POST 的快照能被作废，目录快照不受影响");
+  }
+
+  /** 目录请求本身被认证拒绝时作废目录快照，且不再发送能力 POST。 */
+  @Test
+  void catalogRejectionInvalidatesTheCatalogSnapshot() {
+    PluginCredentialSnapshot catalogSnapshot =
+        snapshot("token-catalog-rejected", 7L, new byte[] {1, 2, 3});
+    transport.setCatalogResponse(401, "{}");
+    SequencedCredentialAccess credentialAccess =
+        new SequencedCredentialAccess(
+            catalogSnapshot, snapshot("token-post-unused", 8L, new byte[] {4, 5, 6, 7}));
+
+    ToolResult result = executeWebSearch(credentialAccess);
+
+    assertTrue(result.error());
+    assertTrue(resultText(result).startsWith("MAVIS_CALL_FAILED"));
+    assertEquals(1, transport.requests().size(), "目录被拒绝时不得发送能力 POST");
+    assertEquals(List.of(catalogSnapshot), credentialAccess.rejected(), "目录快照才是本次实际请求所用的凭据");
+  }
+
+  /** 目录命中缓存时仍必须为 POST 重新解析；当前授权不可用时不得发送任何请求。 */
+  @Test
+  void cacheHitCannotBypassCurrentAuthorization() {
+    PluginCredentialSnapshot snapshot = snapshot();
+    MavisClient client = new MavisClient(transport);
+    MiniMaxMavisCapabilityCache cache = new MiniMaxMavisCapabilityCache(client);
+    MiniMaxMavisResourceAccess access = new MiniMaxMavisResourceAccess(gateway);
+    SequencedCredentialAccess credentialAccess =
+        new SequencedCredentialAccess(
+            snapshot,
+            snapshot,
+            snapshot,
+            new PluginCredentialUnavailableException(
+                PluginCredentialUnavailableReason.EXPIRED, "expired after cache hit"));
+    Tool tool =
+        new MiniMaxMavisTool(
+            MavisCapability.WEB_SEARCH,
+            MavisToolDefinitions.load(MavisCapability.WEB_SEARCH),
+            credentialAccess,
+            client,
+            cache,
+            access,
+            executor);
+
+    ToolResult first = executeTool(tool, "call-warm", "{\"query\":\"test\"}");
+    assertFalse(first.error(), () -> "first call must succeed: " + first);
+    assertEquals(2, transport.requests().size(), "首次调用应发送目录 GET 与能力 POST");
+
+    ToolResult second = executeTool(tool, "call-cached", "{\"query\":\"test\"}");
+    assertTrue(second.error());
+    assertTrue(resultText(second).startsWith("MAVIS_CREDENTIAL_EXPIRED"));
+    assertEquals(2, transport.requests().size(), "命中目录缓存时仍须重新解析；授权不可用时不得发送任何后续请求");
+  }
+
+  /** 多媒体输出的每一项暂存都携带同一次调用的权威授权检查（credentialAccess::resolve）。 */
+  @Test
+  void mediaStagingReceivesBeforeRequestForEveryItem() {
+    PluginCredentialSnapshot snapshot = snapshot();
+    SequencedCredentialAccess credentialAccess =
+        new SequencedCredentialAccess(snapshot, snapshot, snapshot, snapshot, snapshot, snapshot);
+    transport.setInvokeResponse(
+        new MavisHttpResponse(
+            200,
+            "{\"base_resp\":{\"status_code\":0},"
+                + "\"urls\":[\"https://cdn.example.com/a.png\",\"https://cdn.example.com/b.png\"]}"));
+    MavisClient client = new MavisClient(transport);
+    MiniMaxMavisCapabilityCache cache = new MiniMaxMavisCapabilityCache(client);
+    MiniMaxMavisResourceAccess access = new MiniMaxMavisResourceAccess(gateway);
+    Tool tool =
+        new MiniMaxMavisTool(
+            MavisCapability.GENERATE_IMAGE,
+            MavisToolDefinitions.load(MavisCapability.GENERATE_IMAGE),
+            credentialAccess,
+            client,
+            cache,
+            access,
+            executor);
+
+    ToolResult result = executeTool(tool, "call-media", "{\"prompt\":\"a cat\"}");
+
+    assertFalse(result.error(), () -> "multi-media output must stage successfully: " + result);
+    assertEquals(2, result.contents().size(), "每个媒体地址各暂存为一个 Resource 引用");
+    List<Runnable> beforeRequests = gateway.stagedBeforeRequests();
+    assertEquals(2, beforeRequests.size(), "每个媒体项各带一次授权检查");
+    assertEquals(6, credentialAccess.resolveCount(), "目录、POST 与每项 GET/PUT 分别检查当前凭据");
+  }
+
+  /**
+   * 目录解析必须在取得 capability cache monitor 之后进行：等待该锁可能很久，期间凭据可能已被撤销；若在等待前解析，就会用旧许可发出目录请求。
+   *
+   * <p>测试用真实工作线程持有/等待 cache monitor，并以 {@link Thread.State#BLOCKED} 确认排队（非 sleep），再撤销凭据并释放锁。
+   */
+  @Test
+  void catalogResolveRunsUnderCacheLockSoRevocationWhileWaitingSendsNoCatalogRequest()
+      throws Exception {
+    PluginCredentialSnapshot valid = snapshot();
+    ToggleableCredentialAccess credentialAccess = new ToggleableCredentialAccess(valid);
+    MavisClient client = new MavisClient(transport);
+    MiniMaxMavisCapabilityCache cache = new MiniMaxMavisCapabilityCache(client);
+    InspectableExecutor worker = new InspectableExecutor();
+    Tool tool =
+        new MiniMaxMavisTool(
+            MavisCapability.WEB_SEARCH,
+            MavisToolDefinitions.load(MavisCapability.WEB_SEARCH),
+            credentialAccess,
+            client,
+            cache,
+            new MiniMaxMavisResourceAccess(gateway),
+            worker);
+    MiniMaxMavisToolExecutionTest.TestToolExecutionListener listener =
+        new MiniMaxMavisToolExecutionTest.TestToolExecutionListener();
+    ToolCall call = new ToolCall("call-lock", tool.descriptor().name(), "{\"query\":\"test\"}");
+    ToolExecutionRequest request =
+        new ToolExecutionRequest(tool.descriptor(), call, Duration.ofSeconds(120));
+
+    try {
+      synchronized (cache) {
+        tool.execute(request, listener);
+        awaitBlocked(worker.createdThreads(), "capability cache monitor");
+        credentialAccess.revoke();
+      }
+      worker.awaitCompletion();
+    } finally {
+      worker.shutdownNow();
+      assertTrue(worker.awaitTermination(10, TimeUnit.SECONDS));
+    }
+
+    ToolResult result = listener.result();
+    assertTrue(result.error());
+    assertTrue(resultText(result).startsWith("MAVIS_CREDENTIAL_REAUTH_REQUIRED"));
+    assertTrue(transport.requests().isEmpty(), "等待 cache 锁期间被撤销的凭据不得再发出目录请求");
+  }
+
+  /** 多媒输出：第 2 项在出网检查时被撤销，其后项不再暂存，且结果保持凭据类型而不是普通资源错误。 */
+  @Test
+  void stagingStopsAtTheItemWhoseBeforeRequestIsRevoked() {
+    PluginCredentialSnapshot valid = snapshot();
+    SequencedCredentialAccess credentialAccess =
+        new SequencedCredentialAccess(
+            valid,
+            valid,
+            valid,
+            valid,
+            valid,
+            new PluginCredentialUnavailableException(
+                PluginCredentialUnavailableReason.REAUTH_REQUIRED, "revoked on the second item"));
+    transport.setInvokeResponse(
+        new MavisHttpResponse(
+            200,
+            "{\"base_resp\":{\"status_code\":0},\"urls\":["
+                + "\"https://cdn.example.com/1.png\","
+                + "\"https://cdn.example.com/2.png\","
+                + "\"https://cdn.example.com/3.png\"]}"));
+    MavisClient client = new MavisClient(transport);
+    Tool tool =
+        new MiniMaxMavisTool(
+            MavisCapability.GENERATE_IMAGE,
+            MavisToolDefinitions.load(MavisCapability.GENERATE_IMAGE),
+            credentialAccess,
+            client,
+            new MiniMaxMavisCapabilityCache(client),
+            new MiniMaxMavisResourceAccess(gateway),
+            executor);
+
+    ToolResult result = executeTool(tool, "call-multi", "{\"prompt\":\"x\"}");
+
+    assertTrue(result.error());
+    assertTrue(
+        resultText(result).startsWith("MAVIS_CREDENTIAL_REAUTH_REQUIRED"),
+        () -> "第 2 项撤销必须保持凭据类型，实际: " + resultText(result));
+    assertEquals(2, gateway.stagedRemoteUris().size(), "第 2 项被拒绝后不得再暂存第 3 项");
+    assertEquals(6, credentialAccess.resolveCount(), "第 2 项 PUT 检查失败后不得再申请许可");
+  }
+
+  /** 轮询直到工作线程进入 BLOCKED：条件确定且有界，不使用 sleep 弱证明。 */
+  private static void awaitBlocked(List<Thread> threads, String description) {
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+    while (true) {
+      Thread worker = threads.isEmpty() ? null : threads.get(0);
+      if (worker != null && worker.getState() == Thread.State.BLOCKED) {
+        return;
+      }
+      if (System.nanoTime() > deadline) {
+        fail("worker thread did not block on " + description);
+      }
+      Thread.onSpinWait();
+    }
+  }
+
+  private ToolResult executeTool(Tool tool, String id, String arguments) {
+    ToolCall call = new ToolCall(id, tool.descriptor().name(), arguments);
+    MiniMaxMavisToolExecutionTest.TestToolExecutionListener listener =
+        new MiniMaxMavisToolExecutionTest.TestToolExecutionListener();
+    tool.execute(
+        new ToolExecutionRequest(tool.descriptor(), call, Duration.ofSeconds(120)), listener);
+    return listener.result();
+  }
+
+  /** 冻结能力对外可见，是启动期静态定义的稳定投影。 */
+  @Test
+  void capabilityGetterExposesFrozenCapability() {
+    MiniMaxMavisTool tool =
+        new MiniMaxMavisTool(
+            MavisCapability.TTS,
+            MavisToolDefinitions.load(MavisCapability.TTS),
+            validCredentialAccess(),
+            new MavisClient(transport),
+            new MiniMaxMavisCapabilityCache(new MavisClient(transport)),
+            new MiniMaxMavisResourceAccess(gateway),
+            executor);
+
+    assertEquals(MavisCapability.TTS, tool.capability());
+  }
+
+  /** 纯文本能力响应超过结果预算时确定性失败，不做静默截断。 */
+  @Test
+  void oversizedJsonResultFailsWithResponseTooLarge() {
+    transport.setInvokeResponse(
+        new MavisHttpResponse(
+            200,
+            "{\"base_resp\":{\"status_code\":0},\"blob\":\"" + "x".repeat(600 * 1024) + "\"}"));
+    Tool tool = webSearchTool(validCredentialAccess());
+
+    ToolResult result = executeTool(tool, "call-huge", "{\"query\":\"test\"}");
+
+    assertTrue(result.error());
+    assertTrue(resultText(result).startsWith("MAVIS_RESPONSE_TOO_LARGE"));
+  }
+
+  /** reject 记账本身失败（并发重新登录已换 token）时不得掩盖认证拒绝，也不泄露秘密。 */
+  @Test
+  void rejectionBookkeepingFailureDoesNotMaskAuthResult() {
+    transport.setInvokeResponse(new MavisHttpResponse(401, "{}"));
+    Tool tool = webSearchTool(new ThrowingRejectCredentialAccess(snapshot()));
+
+    ToolResult result = executeTool(tool, "call-reject-fail", "{\"query\":\"test\"}");
+
+    assertTrue(result.error());
+    assertTrue(resultText(result).startsWith("MAVIS_CALL_FAILED"));
+    assertFalse(resultText(result).contains(IDENTIFIABLE_SECRET_TOKEN));
+  }
+
+  /** 媒体暂存的资源错误收敛为 MAVIS_RESOURCE_UNAVAILABLE；非预期运行时错误收敛为 MAVIS_CALL_FAILED。 */
+  @Test
+  void stagingFailuresAreReportedWithDeterministicCodes() {
+    transport.setInvokeResponse(
+        new MavisHttpResponse(
+            200, "{\"base_resp\":{\"status_code\":0},\"url\":\"https://cdn.example.com/a.png\"}"));
+
+    Tool resourceFailureTool =
+        generateImageTool(
+            validCredentialAccess(),
+            new FailingStageGateway(new PluginResourceUnavailableException("staging rejected")));
+    ToolResult resourceFailure =
+        executeTool(resourceFailureTool, "call-stage-res", "{\"prompt\":\"x\"}");
+    assertTrue(resourceFailure.error());
+    assertTrue(resultText(resourceFailure).startsWith("MAVIS_RESOURCE_UNAVAILABLE"));
+
+    Tool runtimeFailureTool =
+        generateImageTool(
+            validCredentialAccess(), new FailingStageGateway(new IllegalStateException("boom")));
+    ToolResult runtimeFailure =
+        executeTool(runtimeFailureTool, "call-stage-rt", "{\"prompt\":\"x\"}");
+    assertTrue(runtimeFailure.error());
+    assertTrue(resultText(runtimeFailure).startsWith("MAVIS_CALL_FAILED"));
+  }
+
+  /** 媒体能力响应对应不到任何可暂存地址时回退为有界 JSON 结果，不产生空暂存。 */
+  @Test
+  void mediaStagingFallsBackToJsonWhenResponseCarriesNoMedia() {
+    transport.setInvokeResponse(
+        new MavisHttpResponse(200, "{\"base_resp\":{\"status_code\":0},\"note\":\"no media\"}"));
+    Tool tool = reverseImageTool(validCredentialAccess());
+
+    ToolResult result =
+        executeTool(tool, "call-nomedia", "{\"image\":\"https://example.com/cat.jpg\"}");
+
+    assertFalse(result.error(), () -> "no-media response must still succeed: " + result);
+    assertTrue(gateway.stagedBeforeRequests().isEmpty(), "无媒体地址时不得暂存");
+  }
+
+  /** 媒体地址收集按固定上限截断，避免一次响应触发无界暂存。 */
+  @Test
+  void mediaUrlCollectionIsCappedAtConfiguredMaximum() {
+    StringBuilder urls = new StringBuilder("[");
+    for (int index = 0; index < 9; index++) {
+      urls.append(index > 0 ? "," : "")
+          .append("\"https://cdn.example.com/")
+          .append(index)
+          .append(".png\"");
+    }
+    urls.append("]");
+    transport.setInvokeResponse(
+        new MavisHttpResponse(200, "{\"base_resp\":{\"status_code\":0},\"urls\":" + urls + "}"));
+    Tool tool = reverseImageTool(validCredentialAccess());
+
+    ToolResult result =
+        executeTool(tool, "call-cap", "{\"image\":\"https://example.com/cat.jpg\"}");
+
+    assertFalse(result.error());
+    assertEquals(8, gateway.stagedBeforeRequests().size(), "单次调用最多暂存 8 项");
+    assertEquals(8, result.contents().size());
+  }
+
+  /** 形态无效的 https 候选地址被忽略，不影响同响应里的合法地址。 */
+  @Test
+  void malformedHttpsCandidateIsIgnoredDuringCollection() {
+    transport.setInvokeResponse(
+        new MavisHttpResponse(
+            200,
+            "{\"base_resp\":{\"status_code\":0},\"urls\":["
+                + "\"https://cdn.example.com/ok.png\","
+                + "\"https://exa mple.com/bad.png\"]}"));
+    Tool tool = reverseImageTool(validCredentialAccess());
+
+    ToolResult result =
+        executeTool(tool, "call-badurl", "{\"image\":\"https://example.com/cat.jpg\"}");
+
+    assertFalse(result.error());
+    assertEquals(1, gateway.stagedBeforeRequests().size(), "无法解析的候选地址必须被忽略");
+  }
+
+  /** 参数里的 session 资源按数组/对象结构递归解析，非资源取值原样保留（直接驱动资源适配的公开入口）。 */
+  @Test
+  void resolveInputsRecursivelyResolvesNestedSessionResources() throws Exception {
+    String resource = "kkstudio:/resources/" + VALID_BLOB_UUID;
+    JsonNode arguments =
+        JSON.readTree(
+            "{\"image\":\""
+                + resource
+                + "\",\"gallery\":[\""
+                + resource
+                + "\",{\"nested\":\""
+                + resource
+                + "\"}],\"count\":3,\"note\":\"plain\"}");
+    MiniMaxMavisResourceAccess access = new MiniMaxMavisResourceAccess(gateway);
+    UUID threadId = UUID.fromString("33333333-4444-5555-6666-777777777777");
+
+    JsonNode resolved = access.resolveInputs(threadId, arguments);
+
+    String signed = "https://resolved.files.local/" + VALID_BLOB_UUID;
+    assertEquals(signed, resolved.get("image").textValue());
+    assertEquals(signed, resolved.get("gallery").get(0).textValue());
+    assertEquals(signed, resolved.get("gallery").get(1).get("nested").textValue());
+    assertEquals("plain", resolved.get("note").textValue());
+    assertEquals(3, gateway.resolveCallCount(), "每个 session 资源引用各解析一次");
+  }
+
+  /** 网关交回不可用的下载地址时必须在发送能力请求前确定性失败。 */
+  @Test
+  void unusableResolvedDownloadUriFailsBeforeSend() {
+    MavisClient client = new MavisClient(transport);
+    Tool tool =
+        new MiniMaxMavisTool(
+            MavisCapability.REVERSE_IMAGE,
+            MavisToolDefinitions.load(MavisCapability.REVERSE_IMAGE),
+            validCredentialAccess(),
+            client,
+            new MiniMaxMavisCapabilityCache(client),
+            new MiniMaxMavisResourceAccess(new HttpDownloadGateway()),
+            executor);
+    String arguments = "{\"image\":\"kkstudio:/resources/" + VALID_BLOB_UUID + "\"}";
+    ToolCall call = new ToolCall("call-bad-download", tool.descriptor().name(), arguments);
+    UUID threadId = UUID.fromString("44444444-5555-6666-7777-888888888888");
+    MiniMaxMavisToolExecutionTest.TestToolExecutionListener listener =
+        new MiniMaxMavisToolExecutionTest.TestToolExecutionListener();
+    tool.execute(
+        new ToolExecutionRequest(
+            tool.descriptor(), call, Duration.ofSeconds(120), createContext(threadId)),
+        listener);
+
+    ToolResult result = listener.result();
+    assertTrue(result.error());
+    assertTrue(resultText(result).startsWith("MAVIS_RESOURCE_UNAVAILABLE"));
+    assertTrue(transport.requests().isEmpty(), "下载地址不可用时不得发送能力请求");
+  }
+
+  private Tool webSearchTool(PluginCredentialAccess credentialAccess) {
+    MavisClient client = new MavisClient(transport);
+    return new MiniMaxMavisTool(
+        MavisCapability.WEB_SEARCH,
+        MavisToolDefinitions.load(MavisCapability.WEB_SEARCH),
+        credentialAccess,
+        client,
+        new MiniMaxMavisCapabilityCache(client),
+        new MiniMaxMavisResourceAccess(gateway),
+        executor);
+  }
+
+  private Tool reverseImageTool(PluginCredentialAccess credentialAccess) {
+    MavisClient client = new MavisClient(transport);
+    return new MiniMaxMavisTool(
+        MavisCapability.REVERSE_IMAGE,
+        MavisToolDefinitions.load(MavisCapability.REVERSE_IMAGE),
+        credentialAccess,
+        client,
+        new MiniMaxMavisCapabilityCache(client),
+        new MiniMaxMavisResourceAccess(gateway),
+        executor);
+  }
+
+  private Tool generateImageTool(
+      PluginCredentialAccess credentialAccess, PluginResourceGateway resourceGateway) {
+    MavisClient client = new MavisClient(transport);
+    return new MiniMaxMavisTool(
+        MavisCapability.GENERATE_IMAGE,
+        MavisToolDefinitions.load(MavisCapability.GENERATE_IMAGE),
+        credentialAccess,
+        client,
+        new MiniMaxMavisCapabilityCache(client),
+        new MiniMaxMavisResourceAccess(resourceGateway),
+        executor);
+  }
+
   private ToolResult executeWebSearch(PluginCredentialAccess credentialAccess) {
     MavisClient client = new MavisClient(transport);
     MiniMaxMavisCapabilityCache cache = new MiniMaxMavisCapabilityCache(client);
@@ -584,16 +1078,21 @@ class MiniMaxMavisToolFailureTest {
   }
 
   private static PluginCredentialSnapshot snapshot() {
+    return snapshot(IDENTIFIABLE_SECRET_TOKEN, 7L, new byte[] {1, 2, 3});
+  }
+
+  /** 指定 token、行版本与密文的快照：用于构造同代际下「已刷新」的新版本。 */
+  private static PluginCredentialSnapshot snapshot(
+      String token, long version, byte[] encryptedPayload) {
     return new PluginCredentialSnapshot(
         MiniMaxMavisPlugin.PLUGIN_ID,
         AUTH_GENERATION,
         AUTH_CONTEXT,
         MavisRegion.CN.id().toUpperCase(),
         Instant.now().plusSeconds(3600),
-        7L,
-        new byte[] {1, 2, 3},
-        new MiniMaxMavisCredentialPayload(IDENTIFIABLE_SECRET_TOKEN, CLIENT_UUID, Instant.now())
-            .toJson());
+        version,
+        encryptedPayload,
+        new MiniMaxMavisCredentialPayload(token, CLIENT_UUID, Instant.now()).toJson());
   }
 
   /**
@@ -708,14 +1207,117 @@ class MiniMaxMavisToolFailureTest {
     }
   }
 
+  /** 按次序返回快照或抛出凭据错误；额外解析会使测试失败。 */
+  static final class SequencedCredentialAccess implements PluginCredentialAccess {
+    private final List<Object> outcomes;
+    private final List<PluginCredentialSnapshot> resolved =
+        Collections.synchronizedList(new ArrayList<>());
+    private final List<PluginCredentialSnapshot> rejected =
+        Collections.synchronizedList(new ArrayList<>());
+    private int index = 0;
+
+    SequencedCredentialAccess(Object... outcomes) {
+      this.outcomes = List.of(outcomes);
+    }
+
+    @Override
+    public synchronized PluginCredentialSnapshot resolve() {
+      Object outcome = outcomes.get(index);
+      index++;
+      if (outcome instanceof PluginCredentialSnapshot snapshot) {
+        resolved.add(snapshot);
+        return snapshot;
+      }
+      throw (PluginCredentialUnavailableException) outcome;
+    }
+
+    @Override
+    public boolean rejectUsed(PluginCredentialSnapshot snapshot, String error) {
+      rejected.add(snapshot);
+      return true;
+    }
+
+    synchronized int resolveCount() {
+      return index;
+    }
+
+    List<PluginCredentialSnapshot> resolved() {
+      return List.copyOf(resolved);
+    }
+
+    List<PluginCredentialSnapshot> rejected() {
+      return List.copyOf(rejected);
+    }
+  }
+
+  /** rejectUsed 抛异常的假 scoped 凭据访问：验证记账失败不掩盖认证拒绝结果。 */
+  static final class ThrowingRejectCredentialAccess implements PluginCredentialAccess {
+    private final PluginCredentialSnapshot snapshot;
+
+    ThrowingRejectCredentialAccess(PluginCredentialSnapshot snapshot) {
+      this.snapshot = snapshot;
+    }
+
+    @Override
+    public PluginCredentialSnapshot resolve() {
+      return snapshot;
+    }
+
+    @Override
+    public boolean rejectUsed(PluginCredentialSnapshot snapshot, String error) {
+      throw new IllegalStateException("concurrent re-login replaced the credential");
+    }
+  }
+
+  /** 暂存阶段抛指定运行时错误的假网关。 */
+  static final class FailingStageGateway implements PluginResourceGateway {
+    private final RuntimeException failure;
+
+    FailingStageGateway(RuntimeException failure) {
+      this.failure = failure;
+    }
+
+    @Override
+    public URI resolveSessionResource(UUID threadId, String resourceUri) {
+      return URI.create("https://stage.local/download/mock-file");
+    }
+
+    @Override
+    public ResourceRef stageRemoteMedia(
+        URI remoteUri, PluginMediaFamily family, String name, Runnable beforeRequest) {
+      throw failure;
+    }
+  }
+
+  /** 交回非 https 下载地址的假网关：验证解析结果必须可安全使用。 */
+  static final class HttpDownloadGateway implements PluginResourceGateway {
+
+    @Override
+    public URI resolveSessionResource(UUID threadId, String resourceUri) {
+      return URI.create("http://insecure.local/download/mock-file");
+    }
+
+    @Override
+    public ResourceRef stageRemoteMedia(
+        URI remoteUri, PluginMediaFamily family, String name, Runnable beforeRequest) {
+      throw new UnsupportedOperationException("this test never stages media");
+    }
+  }
+
   /** 支持预设 catalog 响应和注入调用异常的假传输。 */
   static final class FakeTransport implements MavisHttpTransport {
     private final List<MavisHttpRequest> requests = Collections.synchronizedList(new ArrayList<>());
     private String catalogResponse = CATALOG_RESPONSE;
+    private int catalogStatus = 200;
     private MavisTransportException invokeFailure;
     private MavisHttpResponse invokeResponse;
 
     void setCatalogResponse(String catalogResponse) {
+      this.catalogResponse = catalogResponse;
+    }
+
+    void setCatalogResponse(int catalogStatus, String catalogResponse) {
+      this.catalogStatus = catalogStatus;
       this.catalogResponse = catalogResponse;
     }
 
@@ -731,7 +1333,7 @@ class MiniMaxMavisToolFailureTest {
     public MavisHttpResponse send(MavisHttpRequest request) {
       requests.add(request);
       if (request.url().endsWith("/mavis/api/v1/mcp/tools")) {
-        return new MavisHttpResponse(200, catalogResponse);
+        return new MavisHttpResponse(catalogStatus, catalogResponse);
       }
       if (invokeFailure != null) {
         throw invokeFailure;
@@ -753,6 +1355,9 @@ class MiniMaxMavisToolFailureTest {
   static final class FakeGateway implements PluginResourceGateway {
     private final List<UUID> resolvedThreadIds = Collections.synchronizedList(new ArrayList<>());
     private final List<String> resolvedUris = Collections.synchronizedList(new ArrayList<>());
+    private final List<Runnable> stagedBeforeRequests =
+        Collections.synchronizedList(new ArrayList<>());
+    private final List<String> stagedRemoteUris = Collections.synchronizedList(new ArrayList<>());
 
     @Override
     public URI resolveSessionResource(UUID threadId, String resourceUri) {
@@ -763,13 +1368,27 @@ class MiniMaxMavisToolFailureTest {
     }
 
     @Override
-    public ResourceRef stageRemoteMedia(URI remoteUri, PluginMediaFamily family, String name) {
+    public ResourceRef stageRemoteMedia(
+        URI remoteUri, PluginMediaFamily family, String name, Runnable beforeRequest) {
+      stagedRemoteUris.add(remoteUri.toASCIIString());
+      stagedBeforeRequests.add(beforeRequest);
+      // 模拟真实网关：每一项在出网 GET 与 PUT 之前各执行一次宿主授权检查。
+      beforeRequest.run();
+      beforeRequest.run();
       return new ResourceRef(
           "blob-upload:" + VALID_BLOB_UUID,
           "image/png",
           name,
           1024L,
           "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+    }
+
+    List<Runnable> stagedBeforeRequests() {
+      return List.copyOf(stagedBeforeRequests);
+    }
+
+    List<String> stagedRemoteUris() {
+      return List.copyOf(stagedRemoteUris);
     }
 
     public List<UUID> resolvedThreadIds() {
@@ -863,6 +1482,95 @@ class MiniMaxMavisToolFailureTest {
     @Override
     public void execute(Runnable command) {
       command.run();
+    }
+  }
+
+  /** 暴露等待缓存锁的工作线程，并通过 Future 把异步失败传回测试。 */
+  static final class InspectableExecutor extends AbstractExecutorService {
+    private final List<Thread> createdThreads = Collections.synchronizedList(new ArrayList<>());
+    private Future<?> submitted;
+    private final ThreadPoolExecutor pool =
+        new ThreadPoolExecutor(
+            1,
+            1,
+            0L,
+            TimeUnit.MILLISECONDS,
+            new LinkedBlockingQueue<>(),
+            runnable -> {
+              Thread thread = new Thread(runnable, "mavis-fence-worker");
+              thread.setDaemon(true);
+              createdThreads.add(thread);
+              return thread;
+            });
+
+    List<Thread> createdThreads() {
+      return List.copyOf(createdThreads);
+    }
+
+    void awaitCompletion() throws Exception {
+      submitted.get(10, TimeUnit.SECONDS);
+    }
+
+    @Override
+    public void shutdown() {
+      pool.shutdown();
+    }
+
+    @Override
+    public List<Runnable> shutdownNow() {
+      return pool.shutdownNow();
+    }
+
+    @Override
+    public boolean isShutdown() {
+      return pool.isShutdown();
+    }
+
+    @Override
+    public boolean isTerminated() {
+      return pool.isTerminated();
+    }
+
+    @Override
+    public boolean awaitTermination(long timeout, TimeUnit unit) throws InterruptedException {
+      return pool.awaitTermination(timeout, unit);
+    }
+
+    @Override
+    public void execute(Runnable command) {
+      if (!(command instanceof Future<?> future)) {
+        throw new AssertionError("expected an executor submission");
+      }
+      submitted = future;
+      pool.execute(command);
+    }
+  }
+
+  /** 可撤销的假 scoped 凭据访问：撤销后 resolve 抛出确定性的不可用，模拟调用中途凭据失效。 */
+  static final class ToggleableCredentialAccess implements PluginCredentialAccess {
+    private volatile PluginCredentialSnapshot snapshot;
+
+    ToggleableCredentialAccess(PluginCredentialSnapshot snapshot) {
+      this.snapshot = snapshot;
+    }
+
+    void revoke() {
+      this.snapshot = null;
+    }
+
+    @Override
+    public PluginCredentialSnapshot resolve() {
+      PluginCredentialSnapshot current = snapshot;
+      if (current == null) {
+        throw new PluginCredentialUnavailableException(
+            PluginCredentialUnavailableReason.REAUTH_REQUIRED, "credential revoked");
+      }
+      return current;
+    }
+
+    @Override
+    public boolean rejectUsed(PluginCredentialSnapshot snapshot, String error) {
+      return true;
     }
   }
 }
