@@ -19,7 +19,7 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * {@code plugin_catalog_state.manifest_json} 与 {@link PluginCatalogManifest} 之间的严格、确定性编解码。
+ * {@code plugin_catalog_revision.manifest_json} 与 {@link PluginCatalogManifest} 之间的严格、确定性编解码。
  *
  * <p>编码按 pluginId 升序输出 {@code {plugins:{...}, catalogFingerprint}}，每个 entry 固定字段顺序 {@code
  * {configRevision, pluginCodeVersion, schemaFingerprint, capabilityFingerprint, authGeneration,

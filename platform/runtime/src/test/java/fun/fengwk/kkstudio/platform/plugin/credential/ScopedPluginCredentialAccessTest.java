@@ -232,6 +232,11 @@ class ScopedPluginCredentialAccessTest {
     }
 
     @Override
+    public Optional<PluginCatalogRecord> readCatalog(long epoch) {
+      throw new UnsupportedOperationException("the credential store must never read the catalog");
+    }
+
+    @Override
     public Optional<PluginConfigurationRow> readConfiguration(String pluginId, long revision) {
       return Optional.empty();
     }

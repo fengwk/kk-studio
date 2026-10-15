@@ -63,6 +63,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "mcp_server",
           "mcp_tool",
           "plugin_auth_attempt",
+          "plugin_catalog_revision",
           "plugin_catalog_state",
           "plugin_configuration_revision",
           "plugin_credential",
@@ -274,8 +275,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "updated_at",
         "version");
     assertColumns("mcp_tool", "name", "server_name", "source_name", "description", "input_schema");
-    assertColumns(
-        "plugin_catalog_state", "id", "epoch", "manifest_json", "created_at", "updated_at");
+    assertColumns("plugin_catalog_revision", "epoch", "manifest_json", "created_at");
+    assertColumns("plugin_catalog_state", "id", "epoch", "created_at", "updated_at");
     assertColumns(
         "plugin_auth_attempt",
         "plugin_id",
@@ -579,7 +580,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "harness_tool_invocation.result",
             "mcp_server.headers",
             "mcp_tool.input_schema",
-            "plugin_catalog_state.manifest_json",
+            "plugin_catalog_revision.manifest_json",
             "project.workflow",
             "project_issue_activity.data",
             "skill_package.skills",
@@ -689,6 +690,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "mcp_server.updated_at",
             "plugin_auth_attempt.created_at",
             "plugin_auth_attempt.expires_at",
+            "plugin_catalog_revision.created_at",
             "plugin_catalog_state.created_at",
             "plugin_catalog_state.updated_at",
             "plugin_configuration_revision.created_at",
@@ -729,7 +731,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "system_setting.created_at",
             "system_setting.updated_at"),
         temporalColumns,
-        "business schema temporal columns must exactly equal the 82 timestamptz(3) columns");
+        "business schema temporal columns must exactly equal the 83 timestamptz(3) columns");
 
     assertEquals(
         128L,
@@ -998,6 +1000,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "fk_harness_tool_invocation_model",
             "fk_harness_work_environment",
             "fk_mcp_tool_server",
+            "fk_plugin_catalog_state_revision",
             "fk_project_issue_activity_agent",
             "fk_project_issue_activity_issue",
             "fk_project_issue_activity_run",
@@ -1021,7 +1024,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "fk_storage_upload_blob",
             "project_issue_project_id_fkey"),
         foreignKeys,
-        "all 65 declared foreign keys must exist in public schema");
+        "all 66 declared foreign keys must exist in public schema");
   }
 
   @Test
@@ -1123,9 +1126,10 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "fk_harness_thread_stop_receipt_turn_end",
             "fk_harness_thread_yolo_root",
             "fk_harness_tool_invocation_assistant",
-            "fk_harness_tool_invocation_model"),
+            "fk_harness_tool_invocation_model",
+            "fk_plugin_catalog_state_revision"),
         noActionFks,
-        "exact set of 26 NO ACTION foreign keys");
+        "exact set of 27 NO ACTION foreign keys");
   }
 
   @Test

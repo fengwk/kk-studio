@@ -8,6 +8,7 @@ import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogManifestJson;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRecord;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRow;
+import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.model.PluginCatalogRevisionDO;
 import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.model.PluginCatalogStateDO;
 import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.model.PluginConfigurationRowDO;
 import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.store.PluginConfigurationJdbcStore;
@@ -23,7 +24,8 @@ import java.util.Optional;
  *
  * <p>{@link #commit(long, List, PluginCatalogManifest)} 在任何 SQL 之前先要求活跃事务，并在 Java 侧校验 changed 历史与
  * manifest 精确一致；随后同一事务内锁定并读取权威基线：epoch 不匹配直接返回 false，且既有 pluginId 一个都不能消失、未 changed 的条目必须与 基线 entry
- * 逐字段相等。全部通过后才 CAS epoch、插入 changed 历史、用数据库断点复核每个 manifest 引用，最后发出通知。任何一步异常都交由事务整体回滚。
+ * 逐字段相等。全部通过后才用一条语句同时推进 epoch 指针并新建该 epoch 的不可变 manifest 历史，再插入 changed 历史、用数据库断点复核每个 manifest
+ * 引用，最后发出通知。任何一步异常都交由事务整体回滚，CAS 未命中不留下 manifest 或 changed 历史。
  */
 @AllArgsConstructor
 @Repository
@@ -35,12 +37,21 @@ public class PostgresqlPluginConfigurationRepository implements PluginConfigurat
 
   @Override
   public PluginCatalogRecord readCatalog() {
-    PluginCatalogStateDO row = pluginConfigurationJdbcStore.getCatalog();
-    if (row == null) {
+    PluginCatalogStateDO state = pluginConfigurationJdbcStore.getCatalog();
+    if (state == null) {
       return null;
     }
-    return new PluginCatalogRecord(
-        row.getEpoch(), PluginCatalogManifestJson.decode(row.getManifestJson()));
+    return toRecord(pluginConfigurationJdbcStore.getCatalogRevision(state.getEpoch()));
+  }
+
+  @Override
+  public Optional<PluginCatalogRecord> readCatalog(long epoch) {
+    if (epoch < 0) {
+      throw new IllegalArgumentException("epoch must not be negative");
+    }
+    // 指定 epoch 只读不可变 manifest 历史：不读当前指针、不做任何兜底。
+    return Optional.ofNullable(pluginConfigurationJdbcStore.getCatalogRevision(epoch))
+        .map(PostgresqlPluginConfigurationRepository::toRecord);
   }
 
   @Override
@@ -67,15 +78,18 @@ public class PostgresqlPluginConfigurationRepository implements PluginConfigurat
       return false;
     }
     PluginCatalogRecord baseline =
-        new PluginCatalogRecord(
-            baselineRow.getEpoch(),
-            PluginCatalogManifestJson.decode(baselineRow.getManifestJson()));
+        toRecord(pluginConfigurationJdbcStore.getCatalogRevision(expectedEpoch));
+    if (baseline == null) {
+      throw new IllegalStateException("the authoritative catalog revision is missing");
+    }
     requireBaselinePreserved(newEpoch, baseline.manifest(), manifest);
-    new PluginCatalogRecord(newEpoch, manifest);
 
-    String manifestJson = PluginCatalogManifestJson.encode(manifest);
-    // SQL CAS 仍是并发的最终围栏：基线读取之后任何并发提交都会让这里失败。
-    if (pluginConfigurationJdbcStore.compareAndSetEpoch(expectedEpoch, manifestJson) != 1) {
+    PluginCatalogRecord next = new PluginCatalogRecord(newEpoch, manifest);
+    String manifestJson = PluginCatalogManifestJson.encode(next.manifest());
+    // 单条语句同时推进 state 指针并新建该 epoch 的 manifest 历史：语句末的即时外键校验保证指针与历史同时成立，
+    // 而 CAS 未命中时插入 0 行，因此并发败方既不推进 epoch 也不留下任何历史。
+    if (pluginConfigurationJdbcStore.advanceEpochAndInsertRevision(expectedEpoch, manifestJson)
+        != 1) {
       return false;
     }
     for (PluginConfigurationRow row : changedConfigurations) {
@@ -169,6 +183,14 @@ public class PostgresqlPluginConfigurationRepository implements PluginConfigurat
                 + entry.getKey());
       }
     }
+  }
+
+  private static PluginCatalogRecord toRecord(PluginCatalogRevisionDO row) {
+    if (row == null) {
+      return null;
+    }
+    return new PluginCatalogRecord(
+        row.getEpoch(), PluginCatalogManifestJson.decode(row.getManifestJson()));
   }
 
   private static PluginConfigurationRow toRow(PluginConfigurationRowDO row) {

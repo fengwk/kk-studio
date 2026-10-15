@@ -2,6 +2,8 @@ package fun.fengwk.kkstudio.platform.plugin.catalog;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -51,6 +53,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -436,6 +439,312 @@ class PluginCatalogRuntimeTest {
     assertEquals(1, alpha.createdInstances.get(0).closeCount, "Lease 关闭幂等");
   }
 
+  /** 未初始化形态不是合法租用坐标：绝不按 epoch 0 重建。 */
+  @Test
+  void acquireRejectsUninitializedEpochs() {
+    Fixture fixture = fixture(PLUGIN_ALPHA);
+    try (PluginCatalogRuntime runtime = fixture.runtime()) {
+      assertThrows(IllegalArgumentException.class, () -> runtime.acquire(0));
+      assertThrows(IllegalArgumentException.class, () -> runtime.acquire(-1));
+      assertEquals(1, fixture.plugin(PLUGIN_ALPHA).createdInstances.size(), "非法坐标不得 configure");
+    }
+  }
+
+  /** 已发布的 epoch 直接复用当前视图，不重复构建。 */
+  @Test
+  void acquireReusesTheCurrentViewForThePublishedEpoch() {
+    Fixture fixture = fixture(PLUGIN_ALPHA);
+    TestPlugin alpha = fixture.plugin(PLUGIN_ALPHA);
+    try (PluginCatalogRuntime runtime = fixture.runtime();
+        PluginCatalogRuntime.Lease current = runtime.acquireCurrent();
+        PluginCatalogRuntime.Lease byEpoch = runtime.acquire(1)) {
+      assertSame(current.snapshot(), byEpoch.snapshot(), "同 epoch 必须返回同一已发布视图");
+      assertEquals(new PluginCatalogRuntime.RuntimeState(1, 1, null), runtime.state());
+      assertEquals(1, alpha.createdInstances.size(), "复用不得重新 configure");
+    }
+  }
+
+  /** 旧 epoch 按持久完整 manifest 严格重建，绝不倒退当前发布、也不把当前插件拼进旧任务。 */
+  @Test
+  void acquireRebuildsAnOlderEpochWithoutRegressingTheCurrentView() {
+    Fixture fixture = fixture(PLUGIN_ALPHA);
+    TestPlugin alpha = fixture.plugin(PLUGIN_ALPHA);
+    commitEpoch(fixture, Map.of(PLUGIN_ALPHA, DISABLED_VALUES));
+    try (PluginCatalogRuntime runtime = fixture.runtime()) {
+      runtime.refresh();
+      int commits = fixture.repository().commitCalls;
+      assertEquals(new PluginCatalogRuntime.RuntimeState(2, 2, null), runtime.state());
+
+      try (PluginCatalogRuntime.Lease history = runtime.acquire(1)) {
+        assertEquals(1, history.snapshot().epoch());
+        assertTrue(
+            hasContributor(history.snapshot(), PLUGIN_ALPHA + ".contrib"),
+            "旧 epoch 必须按持久 revision 重建完整两域目录");
+        assertEquals(Set.of(PLUGIN_ALPHA + ".run"), canvasFunctionNames(history.snapshot()));
+        assertEquals(0, alpha.createdInstances.get(2).closeCount, "活动租用不得关闭历史视图");
+      }
+
+      assertEquals(
+          new PluginCatalogRuntime.RuntimeState(2, 2, null),
+          runtime.state(),
+          "历史租用绝不修改 desired/applied");
+      assertEquals(commits, fixture.repository().commitCalls, "历史租用绝不写库");
+      try (PluginCatalogRuntime.Lease current = runtime.acquireCurrent()) {
+        assertEquals(2, current.snapshot().epoch(), "历史租用绝不倒退当前发布");
+        assertFalse(hasContributor(current.snapshot(), PLUGIN_ALPHA + ".contrib"));
+      }
+      assertEquals(3, alpha.createdInstances.size(), "epoch 1 历史视图只构建一次");
+      assertEquals(1, alpha.createdInstances.get(2).closeCount, "最后一个租用释放恰好关一次");
+    }
+  }
+
+  /** 当前视图退役但仍有活动租用时必须按 epoch 保留：同 epoch 再取复用同一视图，不构建第二套实例。 */
+  @Test
+  void retiredButStillLeasedViewIsReusedForTheSameEpoch() {
+    Fixture fixture = fixture(PLUGIN_ALPHA);
+    TestPlugin alpha = fixture.plugin(PLUGIN_ALPHA);
+    try (PluginCatalogRuntime runtime = fixture.runtime()) {
+      try (PluginCatalogRuntime.Lease pinned = runtime.acquireCurrent()) {
+        commitEpoch(fixture, Map.of(PLUGIN_ALPHA, DISABLED_VALUES));
+        runtime.refresh();
+        assertEquals(new PluginCatalogRuntime.RuntimeState(2, 2, null), runtime.state());
+        assertEquals(2, alpha.createdInstances.size(), "epoch 2 只构建一次");
+
+        try (PluginCatalogRuntime.Lease reused = runtime.acquire(1)) {
+          assertSame(pinned.snapshot(), reused.snapshot(), "仍在租用中的退役视图必须被复用，不得为同一 epoch 构建第二套实例");
+        }
+        assertEquals(2, alpha.createdInstances.size(), "复用退役视图不得重新 configure");
+        assertEquals(0, alpha.createdInstances.get(0).closeCount, "活动租用仍在时不得关闭");
+      }
+
+      assertEquals(1, alpha.createdInstances.get(0).closeCount, "最后一个租用释放恰好关一次");
+    }
+  }
+
+  /** 再取同一 epoch 返回现有历史视图；最后一个租用释放即关闭并移除。 */
+  @Test
+  void acquireReusesAndThenClosesTheRetainedHistoryView() {
+    Fixture fixture = fixture(PLUGIN_ALPHA);
+    TestPlugin alpha = fixture.plugin(PLUGIN_ALPHA);
+    commitEpoch(fixture, Map.of(PLUGIN_ALPHA, DISABLED_VALUES));
+    try (PluginCatalogRuntime runtime = fixture.runtime()) {
+      runtime.refresh();
+
+      PluginCatalogRuntime.Lease first = runtime.acquire(1);
+      try (PluginCatalogRuntime.Lease second = runtime.acquire(1)) {
+        assertSame(first.snapshot(), second.snapshot(), "再取同 epoch 必须复用现有视图");
+        assertEquals(3, alpha.createdInstances.size(), "复用不得重新 configure");
+      }
+      assertEquals(0, alpha.createdInstances.get(2).closeCount, "仍有活动租用时不得关闭");
+
+      first.close();
+      first.close();
+      assertEquals(1, alpha.createdInstances.get(2).closeCount, "最后一个租用释放恰好关一次");
+
+      // 视图已移除：再次租用该 epoch 必须重新严格构建。
+      try (PluginCatalogRuntime.Lease rebuilt = runtime.acquire(1)) {
+        assertEquals(1, rebuilt.snapshot().epoch());
+        assertTrue(hasContributor(rebuilt.snapshot(), PLUGIN_ALPHA + ".contrib"));
+      }
+      assertEquals(4, alpha.createdInstances.size(), "已闭合的历史视图不得再被复用");
+    }
+    assertEquals(1, alpha.createdInstances.get(3).closeCount, "重建视图由最后租用回收");
+  }
+
+  /** 缺历史明确拒绝：不采用当前配置、不写库、不改变状态。 */
+  @Test
+  void acquireFailsWhenTheEpochHasNoPersistedHistory() {
+    Fixture fixture = fixture(PLUGIN_ALPHA);
+    TestPlugin alpha = fixture.plugin(PLUGIN_ALPHA);
+    try (PluginCatalogRuntime runtime = fixture.runtime()) {
+      IllegalStateException failure =
+          assertThrows(IllegalStateException.class, () -> runtime.acquire(7));
+
+      assertTrue(failure.getMessage().contains("epoch=7"), failure.getMessage());
+      assertEquals(new PluginCatalogRuntime.RuntimeState(1, 1, null), runtime.state());
+      assertEquals(1, alpha.createdInstances.size(), "缺历史不得 configure");
+    }
+  }
+
+  /** 历史回读失败收敛为受控失败，不泄漏底层细节。 */
+  @Test
+  void acquireFailsControlledWhenTheHistoryReadIsUnavailable() {
+    Fixture fixture = fixture(PLUGIN_ALPHA);
+    TestPlugin alpha = fixture.plugin(PLUGIN_ALPHA);
+    fixture.repository().readFailure = new IllegalStateException("the database is unavailable");
+    try (PluginCatalogRuntime runtime = fixture.runtime()) {
+      IllegalStateException failure =
+          assertThrows(IllegalStateException.class, () -> runtime.acquire(7));
+
+      assertTrue(failure.getMessage().contains("stage=history"), failure.getMessage());
+      assertEquals(1, alpha.createdInstances.size());
+    }
+  }
+
+  /** 持久历史与当前代码/身份漂移时明确拒绝，并独立回收已建候选。 */
+  @Test
+  void acquireRejectsDriftedHistoryAndReapsTheCandidate() {
+    Fixture fixture = fixture(PLUGIN_ALPHA);
+    TestPlugin alpha = fixture.plugin(PLUGIN_ALPHA);
+    FakeRepository repository = fixture.repository();
+    // epoch 3 的 manifest 条目与持久行一致，但全局目录指纹不同：目录构建完成后必须整体拒绝。
+    PluginCatalogManifest original = fixture.initialRecord().manifest();
+    repository.store(
+        new PluginCatalogRecord(3, new PluginCatalogManifest(original.plugins(), "e".repeat(64))),
+        List.of());
+
+    try (PluginCatalogRuntime runtime = fixture.runtime()) {
+      assertThrows(IllegalStateException.class, () -> runtime.acquire(3));
+
+      assertEquals(
+          new PluginCatalogRuntime.RuntimeState(1, 1, null), runtime.state(), "漂移拒绝不得改变状态");
+      assertEquals(2, alpha.createdInstances.size(), "候选已建即必须整体回收");
+      assertEquals(1, alpha.createdInstances.get(1).closeCount, "漂移候选恰好回收一次");
+    }
+  }
+
+  /** 构建期关闭：候选独立回收，且抛出已关闭错误，不让租用访问已关闭实例。 */
+  @Test
+  void acquireReapsTheCandidateWhenClosedDuringTheBuild() throws Exception {
+    Fixture fixture = fixture(PLUGIN_ALPHA);
+    TestPlugin alpha = fixture.plugin(PLUGIN_ALPHA);
+    commitEpoch(fixture, Map.of(PLUGIN_ALPHA, DISABLED_VALUES));
+    CountDownLatch buildStarted = new CountDownLatch(1);
+    CountDownLatch releaseBuild = new CountDownLatch(1);
+    alpha.beforeConfigure =
+        () -> {
+          buildStarted.countDown();
+          awaitLatch(releaseBuild);
+        };
+
+    PluginCatalogRuntime runtime = fixture.runtime();
+    ExecutorService executor = Executors.newSingleThreadExecutor();
+    try {
+      Future<PluginCatalogRuntime.Lease> acquiring = executor.submit(() -> runtime.acquire(2));
+      assertTrue(buildStarted.await(30, TimeUnit.SECONDS), "历史构建必须开始");
+
+      runtime.close();
+      releaseBuild.countDown();
+
+      ExecutionException failure =
+          assertThrows(ExecutionException.class, () -> acquiring.get(30, TimeUnit.SECONDS));
+      assertInstanceOf(IllegalStateException.class, failure.getCause());
+      assertEquals(2, alpha.createdInstances.size());
+      assertEquals(1, alpha.createdInstances.get(1).closeCount, "关闭后的候选必须独立回收");
+    } finally {
+      executor.shutdownNow();
+      assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+    }
+  }
+
+  /** 并发 acquire 同一 epoch 被串行化：只构建一次，双方拿到同一历史视图。 */
+  @Test
+  void concurrentAcquiresOfTheSameEpochBuildOnceAndShareTheView() throws Exception {
+    Fixture fixture = fixture(PLUGIN_ALPHA);
+    TestPlugin alpha = fixture.plugin(PLUGIN_ALPHA);
+    commitEpoch(fixture, Map.of(PLUGIN_ALPHA, DISABLED_VALUES));
+    CountDownLatch buildStarted = new CountDownLatch(1);
+    CountDownLatch releaseBuild = new CountDownLatch(1);
+    alpha.beforeConfigure =
+        () -> {
+          buildStarted.countDown();
+          awaitLatch(releaseBuild);
+        };
+
+    PluginCatalogRuntime runtime = fixture.runtime();
+    ExecutorService executor = Executors.newSingleThreadExecutor();
+    try {
+      Future<PluginCatalogRuntime.Lease> first = executor.submit(() -> runtime.acquire(2));
+      assertTrue(buildStarted.await(30, TimeUnit.SECONDS), "第一个 acquire 必须开始构建");
+
+      // 第二个 acquire 在首个安装前进入：它阻塞在运行期锁上，安装后必须复用而不是重复构建。
+      PluginCatalogRuntime.Lease[] secondLease = new PluginCatalogRuntime.Lease[1];
+      Thread second = new Thread(() -> secondLease[0] = runtime.acquire(2));
+      second.start();
+      awaitBlockedOnRuntimeLock(second);
+      releaseBuild.countDown();
+
+      try (PluginCatalogRuntime.Lease firstLease = first.get(30, TimeUnit.SECONDS)) {
+        second.join(TimeUnit.SECONDS.toMillis(30));
+        assertFalse(second.isAlive(), "第二个 acquire 必须在窗口内完成");
+        assertNotNull(secondLease[0], "第二个 acquire 必须取得租用");
+        assertSame(firstLease.snapshot(), secondLease[0].snapshot(), "同 epoch 只能有一个视图");
+      }
+      secondLease[0].close();
+
+      assertEquals(
+          new PluginCatalogRuntime.RuntimeState(1, 1, null), runtime.state(), "acquire 绝不写坐标");
+      assertEquals(2, alpha.createdInstances.size(), "同一 epoch 只允许构建一次候选");
+      assertEquals(1, alpha.createdInstances.get(1).closeCount, "释放后历史视图恰好回收一次");
+    } finally {
+      executor.shutdownNow();
+      assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+    }
+  }
+
+  /** 对账发布已在租用中的历史 epoch 时提升该视图为当前视图，不再保留第二套活动实例。 */
+  @Test
+  void refreshPromotesAnAlreadyLoadedHistoryViewInsteadOfKeepingTwoLiveViews() {
+    Fixture fixture = fixture(PLUGIN_ALPHA);
+    TestPlugin alpha = fixture.plugin(PLUGIN_ALPHA);
+    commitEpoch(fixture, Map.of(PLUGIN_ALPHA, DISABLED_VALUES));
+    try (PluginCatalogRuntime runtime = fixture.runtime()) {
+      PluginCatalogRuntime.Lease history = runtime.acquire(2);
+      assertEquals(2, alpha.createdInstances.size(), "历史构建只新增一套实例");
+
+      runtime.refresh();
+
+      assertEquals(new PluginCatalogRuntime.RuntimeState(2, 2, null), runtime.state());
+      // refresh 仍会构建候选（构建期不占生命周期锁），但发布时提升已加载的历史视图并回收重复候选。
+      assertEquals(3, alpha.createdInstances.size());
+      assertEquals(1, alpha.createdInstances.get(2).closeCount, "重复候选必须回收");
+      assertEquals(0, alpha.createdInstances.get(1).closeCount, "被提升的历史视图保持活跃");
+      assertEquals(
+          DISABLED_VALUES, history.snapshot().configuredPlugins().get(0).config().valuesJson());
+      try (PluginCatalogRuntime.Lease current = runtime.acquireCurrent()) {
+        assertSame(history.snapshot(), current.snapshot(), "提升后的视图成为当前视图");
+      }
+
+      history.close();
+      assertEquals(0, alpha.createdInstances.get(1).closeCount, "所有者引用仍在时租用不得关闭");
+      runtime.close();
+      assertEquals(1, alpha.createdInstances.get(1).closeCount, "close 释放所有者引用后恰好关一次");
+    }
+  }
+
+  /** 关闭后 acquire 不再授予新租用。 */
+  @Test
+  void acquireRejectsAfterClose() {
+    Fixture fixture = fixture(PLUGIN_ALPHA);
+    PluginCatalogRuntime runtime = fixture.runtime();
+    runtime.close();
+
+    assertThrows(IllegalStateException.class, () -> runtime.acquire(1));
+  }
+
+  /** 提升历史视图后，重复候选回收的致命错误不能阻断前代回收，也不能被次要错误替代。 */
+  @Test
+  void promotedHistoryStillRetiresThePreviousViewWhenDuplicateCleanupFailsFatally() {
+    Fixture fixture = fixture(PLUGIN_ALPHA);
+    TestPlugin alpha = fixture.plugin(PLUGIN_ALPHA);
+    commitEpoch(fixture, Map.of(PLUGIN_ALPHA, DISABLED_VALUES));
+    Error primary = new AssertionError("duplicate candidate cleanup failed");
+    alpha.createdInstances.get(0).closeError = new LinkageError("retired view cleanup failed");
+    try (PluginCatalogRuntime runtime = fixture.runtime();
+        PluginCatalogRuntime.Lease history = runtime.acquire(2)) {
+      alpha.instanceCloseError = primary;
+
+      assertSame(primary, assertThrows(Error.class, runtime::refresh));
+
+      assertEquals(new PluginCatalogRuntime.RuntimeState(2, 2, null), runtime.state());
+      assertEquals(1, alpha.createdInstances.get(0).closeCount, "重复候选回收失败后仍须关闭前代");
+      assertEquals(1, alpha.createdInstances.get(2).closeCount, "重复候选只能关闭一次");
+      try (PluginCatalogRuntime.Lease current = runtime.acquireCurrent()) {
+        assertSame(history.snapshot(), current.snapshot(), "已提升视图保持发布");
+      }
+    }
+  }
+
   /** 关闭后对账不发布任何内容。 */
   @Test
   void refreshAfterCloseNeverPublishes() {
@@ -595,6 +904,23 @@ class PluginCatalogRuntimeTest {
       Thread.currentThread().interrupt();
       throw new IllegalStateException(error);
     }
+  }
+
+  /** 等待给定线程阻塞在运行期串行锁上：确定性证明并发 acquire 已越过无锁快速路径。 */
+  private static void awaitBlockedOnRuntimeLock(Thread thread) {
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+    while (System.nanoTime() < deadline) {
+      if (thread.getState() == Thread.State.BLOCKED) {
+        return;
+      }
+      try {
+        Thread.sleep(1);
+      } catch (InterruptedException error) {
+        Thread.currentThread().interrupt();
+        throw new IllegalStateException(error);
+      }
+    }
+    throw new AssertionError("the concurrent acquire must block on the runtime lock");
   }
 
   private static boolean hasContributor(PluginCatalogSnapshot snapshot, String contributorId) {
@@ -825,12 +1151,14 @@ class PluginCatalogRuntimeTest {
     }
   }
 
-  /** 内存权威仓储替身：模拟单行 CAS、append-only 历史与可注入的读失败、读钩子。 */
+  /** 内存权威仓储替身：模拟单行 CAS、append-only manifest/配置历史与可注入的读失败、读钩子。 */
   private static final class FakeRepository implements PluginConfigurationRepository {
 
     private PluginCatalogRecord catalog =
         new PluginCatalogRecord(
             PluginCatalogBootstrap.UNINITIALIZED_EPOCH, PluginCatalogManifest.uninitialized());
+    private final Map<Long, PluginCatalogRecord> catalogRevisions =
+        new LinkedHashMap<>(Map.of(0L, catalog));
     private final Map<String, PluginConfigurationRow> history = new LinkedHashMap<>();
     private RuntimeException readFailure;
     private Runnable readHook;
@@ -845,6 +1173,14 @@ class PluginCatalogRuntimeTest {
         throw readFailure;
       }
       return catalog;
+    }
+
+    @Override
+    public Optional<PluginCatalogRecord> readCatalog(long epoch) {
+      if (readFailure != null) {
+        throw readFailure;
+      }
+      return Optional.ofNullable(catalogRevisions.get(epoch));
     }
 
     @Override
@@ -865,12 +1201,13 @@ class PluginCatalogRuntimeTest {
       return true;
     }
 
-    /** 原子落库一位模拟写入方提交的完整 epoch：manifest 与新增历史同时可见。 */
+    /** 原子落库一位模拟写入方提交的完整 epoch：manifest 历史与新增配置历史同时可见。 */
     void store(PluginCatalogRecord next, List<PluginConfigurationRow> changedConfigurations) {
       for (PluginConfigurationRow row : changedConfigurations) {
         history.put(row.pluginId() + "#" + row.revision(), row);
       }
       catalog = next;
+      catalogRevisions.put(next.epoch(), next);
     }
   }
 

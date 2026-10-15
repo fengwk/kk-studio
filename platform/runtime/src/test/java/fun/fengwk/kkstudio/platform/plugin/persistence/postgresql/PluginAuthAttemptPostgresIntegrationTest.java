@@ -85,14 +85,20 @@ class PluginAuthAttemptPostgresIntegrationTest {
     seedCatalog(1L, 1L, GENERATION, CONTEXT);
   }
 
-  /** 直接在权威表里种一份 epoch 与 manifest：消费语句会与它逐字段比对。 */
+  /** 直接在权威表里种一份 epoch 与 manifest 历史：消费语句会与它逐字段比对。 */
   private static void seedCatalog(long epoch, long revision, UUID generation, String context) {
+    // 先写该 epoch 的不可变 manifest 历史，再让 state 指针指向它（外键在语句执行时立即校验）。
     jdbcClient
         .sql(
-            "update plugin_catalog_state set epoch = :epoch, manifest_json = cast(:manifest as jsonb)"
-                + " where id = 1")
+            "insert into plugin_catalog_revision (epoch, manifest_json)"
+                + " values (:epoch, cast(:manifest as jsonb))"
+                + " on conflict (epoch) do update set manifest_json = excluded.manifest_json")
         .param("epoch", epoch)
         .param("manifest", manifestJson(revision, generation, context))
+        .update();
+    jdbcClient
+        .sql("update plugin_catalog_state set epoch = :epoch where id = 1")
+        .param("epoch", epoch)
         .update();
   }
 

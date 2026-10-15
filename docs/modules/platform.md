@@ -210,16 +210,18 @@ Platform 适配注册、租约和资源票据；会话代际、在途调用和�
 ### Plugin 配置存储
 
 [`PluginCatalogBootstrap`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/plugin/catalog/PluginCatalogBootstrap.java)
-从单行 `plugin_catalog_state` 读取全局 epoch 与完整 manifest，再按其中的 revision
-读取不可变 `plugin_configuration_revision`。全新库的 epoch 0 只表示未初始化：
+从单行 `plugin_catalog_state` 读取当前 epoch 指针，再按该 epoch 读取不可变完整 manifest
+（`plugin_catalog_revision`）与其中 revision 指定的 `plugin_configuration_revision`。
+全新库的 epoch 0 只表示未初始化：
 宿主以所有安装定义的 Schema 默认值构建完整候选，通过 CAS 写入 epoch 1 与配置历史；
 首次启动的竞争败方释放候选、回读赢家，不重复初始化。
 
 配置 revision 取该插件最后一次写入的全局 epoch，不另设插件计数器。
 [`PluginConfigurationRepository`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/plugin/persistence/PluginConfigurationRepository.java)
-在同一短事务中核验权威基线、CAS 推进 epoch、插入配置历史、复核完整 manifest 引用，
+在同一短事务中核验权威基线、用一条语句同时推进 epoch 指针并新建该 epoch 的 manifest 历史、
+插入配置历史、复核完整 manifest 引用，
 最后发出 `plugin_catalog_changed` 提示。未修改条目必须与基线相同，不能丢失已登记插件或回退到旧 revision；
-任何失败都回滚 epoch、历史与通知。
+任何失败都回滚 epoch、历史与通知，CAS 败方不留下 manifest 或配置历史。
 
 普通值以受 64 KiB UTF-8 预算约束的严格 JSON 文本保存，数据库同时拒绝非对象与重复键；
 不经 jsonb 数值展开，精度、scale 与指数表示保持可恢复。秘密不进入普通配置历史。
@@ -228,6 +230,13 @@ manifest 保存代码版本、Schema 与实际能力指纹，全局指纹覆盖�
 
 重启必须按持久版本恢复：安装集合、历史引用、代码/Schema 身份及两域能力指纹均须一致，
 缺失或漂移直接启动失败，不采用新 defaults 替换旧配置。
+
+[`PluginCatalogRuntime`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/plugin/catalog/PluginCatalogRuntime.java)
+持有当前已发布快照，并把最近一次权威回读的 `desiredEpoch`、已发布 `appliedEpoch` 与固定受控错误码报给节点。
+已持久接受但尚未执行完的任务用 `acquire(epoch)` 取该 epoch 的完整两域目录：已加载的当前视图或仍被租用钉住的
+历史视图直接复用；未加载时按该 epoch 的不可变完整 manifest 与配置在刷新锁内严格重建一次，
+因此绝不把当前其它插件拼进旧任务，也不修改 desired/applied、不发布旧 epoch。历史视图只由租约持有，
+最后一个租约释放即移除并关闭，重启后旧 epoch 仍按持久历史重建。
 配置写入接口以 expectedEpoch 和 expectedRevision 做 CAS，普通值、秘密变更及 manifest
 在同一事务中提交。当前没有运行期目录切换，保存后通过 desired/applied 坐标和
 applicationError 报告本节点待应用状态；数据库提交提示不代表所有节点已经应用。

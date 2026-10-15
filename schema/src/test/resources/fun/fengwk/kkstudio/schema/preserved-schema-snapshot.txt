@@ -181,10 +181,12 @@ column	plugin_auth_attempt	expires_at	type=timestamp(3) with time zone notnull=t
 column	plugin_auth_attempt	nonce_hash	type=character(64) notnull=t default=<null> generated= collation="default"
 column	plugin_auth_attempt	plugin_id	type=character varying(64) notnull=t default=<null> generated= collation="default"
 column	plugin_auth_attempt	region	type=character varying(64) notnull=t default=<null> generated= collation="default"
+column	plugin_catalog_revision	created_at	type=timestamp(3) with time zone notnull=t default=CURRENT_TIMESTAMP generated= collation=-
+column	plugin_catalog_revision	epoch	type=bigint notnull=t default=<null> generated= collation=-
+column	plugin_catalog_revision	manifest_json	type=jsonb notnull=t default=<null> generated= collation=-
 column	plugin_catalog_state	created_at	type=timestamp(3) with time zone notnull=t default=CURRENT_TIMESTAMP generated= collation=-
 column	plugin_catalog_state	epoch	type=bigint notnull=t default=<null> generated= collation=-
 column	plugin_catalog_state	id	type=bigint notnull=t default=<null> generated= collation=-
-column	plugin_catalog_state	manifest_json	type=jsonb notnull=t default=<null> generated= collation=-
 column	plugin_catalog_state	updated_at	type=timestamp(3) with time zone notnull=t default=CURRENT_TIMESTAMP generated= collation=-
 column	plugin_configuration_revision	auth_generation	type=uuid notnull=t default=<null> generated= collation=-
 column	plugin_configuration_revision	capability_fingerprint	type=character(64) notnull=t default=<null> generated= collation="default"
@@ -426,10 +428,13 @@ constraint	plugin_auth_attempt	ck_plugin_auth_attempt_nonce_hash	CHECK ((nonce_h
 constraint	plugin_auth_attempt	ck_plugin_auth_attempt_plugin_id	CHECK (((plugin_id)::text ~ '^[a-z0-9]+([.-][a-z0-9]+)*$'::text))
 constraint	plugin_auth_attempt	ck_plugin_auth_attempt_region	CHECK ((((region)::text = btrim((region)::text)) AND ((char_length((region)::text) >= 1) AND (char_length((region)::text) <= 64))))
 constraint	plugin_auth_attempt	pk_plugin_auth_attempt	PRIMARY KEY (plugin_id)
+constraint	plugin_catalog_revision	ck_plugin_catalog_revision_epoch	CHECK ((epoch >= 0))
+constraint	plugin_catalog_revision	ck_plugin_catalog_revision_manifest_object	CHECK ((jsonb_typeof(manifest_json) = 'object'::text))
+constraint	plugin_catalog_revision	plugin_catalog_revision_pkey	PRIMARY KEY (epoch)
 constraint	plugin_catalog_state	ck_plugin_catalog_state_epoch	CHECK ((epoch >= 0))
 constraint	plugin_catalog_state	ck_plugin_catalog_state_id	CHECK ((id = 1))
-constraint	plugin_catalog_state	ck_plugin_catalog_state_manifest_object	CHECK ((jsonb_typeof(manifest_json) = 'object'::text))
 constraint	plugin_catalog_state	ck_plugin_catalog_state_time_order	CHECK ((updated_at >= created_at))
+constraint	plugin_catalog_state	fk_plugin_catalog_state_revision	FOREIGN KEY (epoch) REFERENCES plugin_catalog_revision(epoch)
 constraint	plugin_catalog_state	plugin_catalog_state_pkey	PRIMARY KEY (id)
 constraint	plugin_configuration_revision	ck_plugin_configuration_revision_capability_fingerprint	CHECK ((capability_fingerprint ~ '^[0-9a-f]{64}$'::text))
 constraint	plugin_configuration_revision	ck_plugin_configuration_revision_code_version	CHECK ((((code_version)::text = btrim((code_version)::text)) AND (char_length((code_version)::text) > 0)))
@@ -540,6 +545,7 @@ index	mcp_server	mcp_server_pkey	CREATE UNIQUE INDEX mcp_server_pkey ON public.m
 index	mcp_tool	mcp_tool_pkey	CREATE UNIQUE INDEX mcp_tool_pkey ON public.mcp_tool USING btree (name)
 index	mcp_tool	uk_mcp_tool_server_source_name	CREATE UNIQUE INDEX uk_mcp_tool_server_source_name ON public.mcp_tool USING btree (server_name, source_name)
 index	plugin_auth_attempt	pk_plugin_auth_attempt	CREATE UNIQUE INDEX pk_plugin_auth_attempt ON public.plugin_auth_attempt USING btree (plugin_id)
+index	plugin_catalog_revision	plugin_catalog_revision_pkey	CREATE UNIQUE INDEX plugin_catalog_revision_pkey ON public.plugin_catalog_revision USING btree (epoch)
 index	plugin_catalog_state	plugin_catalog_state_pkey	CREATE UNIQUE INDEX plugin_catalog_state_pkey ON public.plugin_catalog_state USING btree (id)
 index	plugin_configuration_revision	pk_plugin_configuration_revision	CREATE UNIQUE INDEX pk_plugin_configuration_revision ON public.plugin_configuration_revision USING btree (plugin_id, revision)
 index	plugin_credential	idx_plugin_credential_refresh_due	CREATE INDEX idx_plugin_credential_refresh_due ON public.plugin_credential USING btree (next_refresh_at)
@@ -574,6 +580,7 @@ table	harness_work		preserved
 table	mcp_server		preserved
 table	mcp_tool		preserved
 table	plugin_auth_attempt		preserved
+table	plugin_catalog_revision		preserved
 table	plugin_catalog_state		preserved
 table	plugin_configuration_revision		preserved
 table	plugin_credential		preserved
