@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.plugin.canvasmedia;
+package fun.fengwk.kkstudio.plugin.media;
 
 import fun.fengwk.kkstudio.canvas.CanvasJson;
 import fun.fengwk.kkstudio.canvas.CanvasJson.JsonNumber;
@@ -26,7 +26,7 @@ import java.util.Set;
 import java.util.UUID;
 
 /** 基础媒体处理 Canvas Function 适配器，提供本地无模型依赖的图像裁剪（{@code image.crop}）能力。 */
-public class CanvasMediaFunctionAdapter implements CanvasFunctionAdapter {
+public class MediaFunctionAdapter implements CanvasFunctionAdapter {
 
   public static final String FUNCTION_NAME = "image.crop";
 

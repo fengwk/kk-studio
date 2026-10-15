@@ -321,7 +321,7 @@ Platform 提供 Blob facts、原件流、presign、输出物化和 Blob 释放�
 上传过期回收作为兜底。TEXT 输出内联且有长度上限。整组成功挂接、pin 生命周期和 UNKNOWN
 决议见 [Canvas Infra](canvas-infra.md)。
 
-Platform 仅提供内置 fake adapter；本地 image.crop、ComfyUI/H3 以及 OpenCLI（`gpt-image-2` 与 Seedance 四函数）均由构建期 Plugin 提供。
+Platform 仅提供内置 fake adapter；本地 `image.crop` 由 Media 插件提供（默认启用，停用后该函数不再进入目录），ComfyUI/H3 以及 OpenCLI（`gpt-image-2` 与 Seedance 四函数）均由构建期 Plugin 提供。
 Function Catalog 每个 epoch 一份不可变快照，运行期以租用对外提供：任务按创建时的 `catalogEpoch` 取得租用并校验完整 binding，
 `submit` 记录外部任务身份，`execute` 在同一份租用上查询同一任务并物化预分配槽位，
 因此热更新与在途旧任务互不串目录。

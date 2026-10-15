@@ -33,8 +33,8 @@ import java.util.stream.Collectors;
  * 真实 Web 启动链路的 PostgreSQL 集成测试：V1 未初始化行上的首次初始化与同版本重启恢复。
  *
  * <p>直接复用容器中真实的 {@link StudioPluginRegistry}、{@link PluginConfigurationRepository} 与事务管理器驱动 {@link
- * PluginCatalogBootstrap}，因此覆盖真实发行物（Mavis 与 OpenCLI）的安装定义、真实 jsonb 持久化与真实指纹计算。任一 Plugin 未配置凭据时
- * 仍可安装与冻结贡献，启动绝不解析凭据或发起远端请求。
+ * PluginCatalogBootstrap}，因此覆盖真实发行物（Media、Mavis 与 OpenCLI）的安装定义、真实 jsonb 持久化与真实指纹计算。任一 Plugin
+ * 未配置凭据时 仍可安装与冻结贡献，启动绝不解析凭据或发起远端请求。
  */
 class PluginCatalogBootstrapPostgresIntegrationTest extends WebPostgresTestSupport {
 
@@ -42,8 +42,8 @@ class PluginCatalogBootstrapPostgresIntegrationTest extends WebPostgresTestSuppo
 
   private static final String OPENCLI = "opencli";
 
-  /** 真实 Web 测试 classpath 上注册的全部发行物：Mavis 与 OpenCLI 都是构建期可选 Plugin。 */
-  private static final Set<String> INSTALLED_PLUGIN_IDS = Set.of(MAVIS, OPENCLI);
+  /** 真实 Web 测试 classpath 上注册的全部构建期可选 Plugin。 */
+  private static final Set<String> INSTALLED_PLUGIN_IDS = Set.of("media", MAVIS, OPENCLI);
 
   @Autowired private StudioPluginRegistry registry;
   @Autowired private PluginConfigurationRepository repository;
@@ -71,6 +71,8 @@ class PluginCatalogBootstrapPostgresIntegrationTest extends WebPostgresTestSuppo
               .collect(Collectors.toSet()));
       assertTrue(
           liveSnapshot.harnessCatalog().findDescriptor(new ContributorId(MAVIS)).isPresent());
+      assertEquals(
+          Set.of("image.crop"), liveSnapshot.pluginOwnership().get("media").functionNames());
       assertNotNull(liveSnapshot.catalogFingerprint());
     }
   }

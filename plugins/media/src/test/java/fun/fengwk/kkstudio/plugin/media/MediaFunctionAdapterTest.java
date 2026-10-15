@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.plugin.canvasmedia;
+package fun.fengwk.kkstudio.plugin.media;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -43,13 +43,13 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * CanvasMediaFunctionAdapter 单元测试。
+ * MediaFunctionAdapter 单元测试。
  *
  * <p>涵盖定义声明、严格 Schema 校验与默认值补齐、Preflight 边界校验、真实内存图像裁剪执行、取消与 Checkpoint 行为。
  */
-class CanvasMediaFunctionAdapterTest {
+class MediaFunctionAdapterTest {
 
-  private final CanvasMediaFunctionAdapter adapter = new CanvasMediaFunctionAdapter();
+  private final MediaFunctionAdapter adapter = new MediaFunctionAdapter();
 
   /** 验证适配器对外暴露的函数定义、启用状态及不可用原因符合契约。 */
   @Test
@@ -479,48 +479,43 @@ class CanvasMediaFunctionAdapterTest {
     assertThrows(NullPointerException.class, () -> adapter.execute(context, null));
 
     // CropRectangle 参数提取异常分支校验
-    assertThrows(
-        NullPointerException.class, () -> CanvasMediaFunctionAdapter.CropRectangle.from(null));
+    assertThrows(NullPointerException.class, () -> MediaFunctionAdapter.CropRectangle.from(null));
 
     // 缺少必填字段 width
     JsonObject missingWidth = CanvasJson.parseObject("{\"height\":20}");
     assertThrows(
         IllegalArgumentException.class,
-        () -> CanvasMediaFunctionAdapter.CropRectangle.from(missingWidth));
+        () -> MediaFunctionAdapter.CropRectangle.from(missingWidth));
 
     // 缺少必填字段 height
     JsonObject missingHeight = CanvasJson.parseObject("{\"width\":20}");
     assertThrows(
         IllegalArgumentException.class,
-        () -> CanvasMediaFunctionAdapter.CropRectangle.from(missingHeight));
+        () -> MediaFunctionAdapter.CropRectangle.from(missingHeight));
 
     // 字段类型不是 JsonNumber
     JsonObject stringWidth = CanvasJson.parseObject("{\"width\":\"20\",\"height\":20}");
     assertThrows(
-        IllegalArgumentException.class,
-        () -> CanvasMediaFunctionAdapter.CropRectangle.from(stringWidth));
+        IllegalArgumentException.class, () -> MediaFunctionAdapter.CropRectangle.from(stringWidth));
 
     // 小数导致 ArithmeticException
     JsonObject decimalWidth = CanvasJson.parseObject("{\"width\":20.5,\"height\":20}");
     assertThrows(
         IllegalArgumentException.class,
-        () -> CanvasMediaFunctionAdapter.CropRectangle.from(decimalWidth));
+        () -> MediaFunctionAdapter.CropRectangle.from(decimalWidth));
 
     // 非法非正数
     JsonObject zeroHeight = CanvasJson.parseObject("{\"width\":20,\"height\":0}");
     assertThrows(
-        IllegalArgumentException.class,
-        () -> CanvasMediaFunctionAdapter.CropRectangle.from(zeroHeight));
+        IllegalArgumentException.class, () -> MediaFunctionAdapter.CropRectangle.from(zeroHeight));
 
     JsonObject negativeX = CanvasJson.parseObject("{\"x\":-5,\"width\":20,\"height\":20}");
     assertThrows(
-        IllegalArgumentException.class,
-        () -> CanvasMediaFunctionAdapter.CropRectangle.from(negativeX));
+        IllegalArgumentException.class, () -> MediaFunctionAdapter.CropRectangle.from(negativeX));
 
     JsonObject negativeY = CanvasJson.parseObject("{\"y\":-5,\"width\":20,\"height\":20}");
     assertThrows(
-        IllegalArgumentException.class,
-        () -> CanvasMediaFunctionAdapter.CropRectangle.from(negativeY));
+        IllegalArgumentException.class, () -> MediaFunctionAdapter.CropRectangle.from(negativeY));
   }
 
   private static byte[] encodeToPng(BufferedImage image) {
@@ -551,7 +546,7 @@ class CanvasMediaFunctionAdapterTest {
 
   private static CanvasFunctionFrozenRun createRun(
       JsonObject args, List<CanvasFunctionFrozenReference> manifest, UUID targetResourceId) {
-    CanvasMediaFunctionAdapter adapter = new CanvasMediaFunctionAdapter();
+    MediaFunctionAdapter adapter = new MediaFunctionAdapter();
     CanvasFunctionDefinition definition = adapter.functions().get(0);
     List<CanvasFunctionFrozenOutput> outputs =
         List.of(
