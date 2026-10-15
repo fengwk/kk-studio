@@ -17,20 +17,11 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionResourceStream;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionUnknownException;
-import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.thread.SystemReminder;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
-import fun.fengwk.kkstudio.platform.harness.oneshot.HarnessOneShotService;
-import fun.fengwk.kkstudio.platform.harness.oneshot.OneShotTicket;
+import fun.fengwk.kkstudio.platform.plugin.prompt.PluginPromptContent;
+import fun.fengwk.kkstudio.platform.plugin.prompt.PluginPromptResources;
+import fun.fengwk.kkstudio.platform.plugin.prompt.PluginPromptTasks;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
-import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
-import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -45,8 +36,8 @@ import java.util.concurrent.ThreadLocalRandom;
 /**
  * MiniMax-H3 Ref2VA Canvas Function adapter。
  *
- * <p>引用媒体在 Harness acceptance 事务外统一 stage；acceptance 短事务只校验 READY blob 事实并原子转移 Session
- * 引用，因停止、失败或回滚未消费的 upload 交由 Storage maintenance 回收。
+ * <p>引用媒体通过 Prompt 媒体端口在接受事务外统一暂存，由宿主在接受事务内物化为 durable RESOURCE；因停止、失败或回滚未消费的暂存交由 Storage
+ * maintenance 回收。
  */
 @Slf4j
 public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapter {
@@ -126,29 +117,26 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
   private final SystemSettings.MiniMaxH3 settings;
   private final H3MediaPreflight mediaPreflight;
   private final H3PromptRequestBuilder promptBuilder;
-  private final HarnessOneShotService oneShotService;
+  private final PluginPromptTasks promptTasks;
+  private final PluginPromptResources promptResources;
   private final H3WorkflowBuilder workflowBuilder;
   private final ObjectProvider<StandardComfyuiClient> comfyClients;
-  private final StorageUploadService uploadService;
-  private final SessionBlobRefManager refManager;
 
   public MiniMaxH3CanvasFunctionAdapter(
       SystemSettingsSnapshot snapshot,
       H3MediaPreflight mediaPreflight,
       H3PromptRequestBuilder promptBuilder,
-      HarnessOneShotService oneShotService,
+      PluginPromptTasks promptTasks,
+      PluginPromptResources promptResources,
       H3WorkflowBuilder workflowBuilder,
-      ObjectProvider<StandardComfyuiClient> comfyClients,
-      StorageUploadService uploadService,
-      SessionBlobRefManager refManager) {
+      ObjectProvider<StandardComfyuiClient> comfyClients) {
     this.settings = Objects.requireNonNull(snapshot, "snapshot").get().integrations().minimaxH3();
     this.mediaPreflight = Objects.requireNonNull(mediaPreflight, "mediaPreflight");
     this.promptBuilder = Objects.requireNonNull(promptBuilder, "promptBuilder");
-    this.oneShotService = Objects.requireNonNull(oneShotService, "oneShotService");
+    this.promptTasks = Objects.requireNonNull(promptTasks, "promptTasks");
+    this.promptResources = Objects.requireNonNull(promptResources, "promptResources");
     this.workflowBuilder = Objects.requireNonNull(workflowBuilder, "workflowBuilder");
     this.comfyClients = Objects.requireNonNull(comfyClients, "comfyClients");
-    this.uploadService = Objects.requireNonNull(uploadService, "uploadService");
-    this.refManager = Objects.requireNonNull(refManager, "refManager");
   }
 
   @Override
@@ -209,14 +197,10 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
         // 提交前的确定性输入校验与准备：失败必须保持 FAILED，绝不进入 UNKNOWN 保守窗口。
         String promptAgentName = requireText(settings.promptAgentName(), "promptAgentName");
         String systemPrompt = promptBuilder.systemPrompt();
-        AgentMessage promptRequest = promptBuilder.userMessage(run, manifest);
-        PreparedMedia preparedMedia = mediaPreflight(context, manifest);
-        UUID threadId;
+        List<PluginPromptContent> contents = prepareContents(context, run, manifest);
+        UUID taskId;
         try {
-          threadId =
-              oneShotService
-                  .submit(promptAgentName, systemPrompt, promptRequest, preparedMedia.preflight())
-                  .threadId();
+          taskId = promptTasks.submit(promptAgentName, systemPrompt, contents);
         } catch (RuntimeException failure) {
           // submit 已越过输入校验：异常不能证明接受事实未成立，禁止删除可能已被消费的 staged media。
           if (failure instanceof CanvasFunctionUnknownException unknown) {
@@ -225,16 +209,14 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
           // 只声明结果未知，不回显可能的远端 URI/凭据/Cause。
           throw new CanvasFunctionUnknownException("H3 Prompt Agent submission outcome unknown");
         }
-        state = state.withHarnessThreadId(threadId);
+        state = state.withHarnessThreadId(taskId);
         checkpoint(context, PROMPT_WAITING, state);
       }
 
-      UUID threadId = Objects.requireNonNull(state.harnessThreadId(), "harnessThreadId");
+      UUID taskId = Objects.requireNonNull(state.harnessThreadId(), "harnessThreadId");
       String enhancedPrompt =
-          oneShotService.await(
-              OneShotTicket.forThread(threadId),
-              Duration.ofMillis(settings.promptMaxWaitMillis()),
-              context::isRunning);
+          promptTasks.await(
+              taskId, Duration.ofMillis(settings.promptMaxWaitMillis()), context::isRunning);
       state = state.withEnhancedPrompt(enhancedPrompt);
       checkpoint(context, PROMPT_READY, state);
     }
@@ -340,7 +322,7 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
     }
     if (state.harnessThreadId() != null) {
       try {
-        oneShotService.stop(state.harnessThreadId());
+        promptTasks.stop(state.harnessThreadId());
       } catch (RuntimeException error) {
         logCancelFailure(run, error);
       }
@@ -364,107 +346,76 @@ public final class MiniMaxH3CanvasFunctionAdapter implements CanvasFunctionAdapt
         error.getClass().getSimpleName());
   }
 
-  private PreparedMedia mediaPreflight(
-      CanvasFunctionExecutionContext context, H3ReferenceManifest manifest) {
+  /**
+   * 引用媒体的准备与顺序：先完成可失败的纯文本准备，再逐个打开原始流、暂存并登记句柄，最后按「manifest 表格文本 -> 每个引用 label 文本 + 对应媒体片段」组织有序内容。
+   *
+   * <p>纯文本准备不产生宿主资源，因此先行完成；一旦开始暂存，每个句柄都在产生后立即登记进本方法持有的清理清单，任何后续失败（暂存失败、关闭原流失败或内容组装失败）都在同一所有权边界内
+   * 清理全部已知句柄，且绝不调用 submit。
+   */
+  private List<PluginPromptContent> prepareContents(
+      CanvasFunctionExecutionContext context,
+      CanvasFunctionFrozenRun run,
+      H3ReferenceManifest manifest) {
     List<H3ReferenceManifest.Item> items = manifest.items();
-    List<StagedMedia> staged = new ArrayList<>(items.size());
+    PluginPromptContent table = promptBuilder.manifestTable(run, manifest);
+    List<PluginPromptContent> labels = new ArrayList<>(items.size());
+    for (H3ReferenceManifest.Item item : items) {
+      labels.add(promptBuilder.referenceLabel(item));
+    }
+    List<PluginPromptResources.StagedResource> staged = new ArrayList<>(items.size());
     try {
-      for (H3ReferenceManifest.Item item : items) {
-        staged.add(stageMedia(context, item));
+      List<PluginPromptContent> contents = new ArrayList<>(1 + items.size() * 2);
+      contents.add(table);
+      for (int i = 0; i < items.size(); i++) {
+        contents.add(labels.get(i));
+        contents.add(new PluginPromptContent.Media(stageMedia(context, items.get(i), staged)));
       }
-    } catch (RuntimeException failure) {
-      staged.forEach(this::discardBestEffort);
+      return contents;
+    } catch (RuntimeException | Error failure) {
+      discardAll(staged, failure);
       throw failure;
     }
-    AcceptancePreflight preflight =
-        (tx, session, commands) -> {
-          List<NewThreadCommand> prepared = new ArrayList<>(commands.size());
-          for (NewThreadCommand command : commands) {
-            if (!(command.payload() instanceof CustomMessageCommandPayload custom)) {
-              prepared.add(command);
-              continue;
-            }
-            AgentMessage message = custom.message();
-            int offset = hasLeadingReminder(message) ? 1 : 0;
-            if (message.contents().size() != offset + 1 + items.size()) {
-              throw new IllegalStateException(
-                  "H3 prompt message must carry the manifest table plus one label per reference");
-            }
-            List<AgentMessageContent> contents = new ArrayList<>(offset + 1 + items.size() * 2);
-            contents.addAll(message.contents().subList(0, offset + 1));
-            for (int i = 0; i < items.size(); i++) {
-              AgentMessageContent label = message.contents().get(offset + 1 + i);
-              if (!(label instanceof TextMessageContent)
-                  || !((TextMessageContent) label).text().startsWith("\nThe next attachment is ")) {
-                throw new IllegalStateException("H3 prompt label mismatch at index " + i);
-              }
-              contents.add(label);
-              contents.add(consumeMedia(session.id(), items.get(i), staged.get(i)));
-            }
-            prepared.add(
-                command.withPayload(
-                    new CustomMessageCommandPayload(new AgentMessage(message.role(), contents))));
-          }
-          return List.copyOf(prepared);
-        };
-    return new PreparedMedia(preflight, staged);
   }
 
-  private static boolean hasLeadingReminder(AgentMessage message) {
-    AgentMessageContent first = message.contents().get(0);
-    return first instanceof TextMessageContent text && SystemReminder.isReminderText(text.text());
-  }
-
-  private StagedMedia stageMedia(
-      CanvasFunctionExecutionContext context, H3ReferenceManifest.Item item) {
+  /** 打开原始流并暂存句柄，句柄在关闭原始流之前就登记进调用方的清理清单：即使关闭原流失败，本次已产生的句柄也不会丢失清理。 */
+  private PluginPromptResources.StagedResource stageMedia(
+      CanvasFunctionExecutionContext context,
+      H3ReferenceManifest.Item item,
+      List<PluginPromptResources.StagedResource> staged) {
     try (CanvasFunctionResourceStream stream = context.openOriginal(item.reference())) {
-      StorageUploadService.StagedUpload upload =
-          uploadService.stage(
+      PluginPromptResources.StagedResource handle =
+          promptResources.stage(
               item.reference().name(),
               item.reference().mediaType(),
               stream.content(),
               stream.size());
-      if (!item.reference().mediaType().equals(upload.mediaType())
-          || stream.size() != upload.sizeBytes()) {
-        discardBestEffort(new StagedMedia(upload.uploadId(), upload.blobId()));
-        throw new IllegalArgumentException(
-            "H3 reference media failed integrity validation: " + item.reference().resourceId());
-      }
-      return new StagedMedia(upload.uploadId(), upload.blobId());
+      staged.add(handle);
+      return handle;
     } catch (IOException error) {
       throw new IllegalArgumentException(
           "cannot close H3 reference media " + item.reference().resourceId(), error);
     }
   }
 
-  private ResourceMessageContent consumeMedia(
-      UUID sessionId, H3ReferenceManifest.Item item, StagedMedia staged) {
-    StorageUploadService.ReadyUpload ready = uploadService.lockReady(staged.uploadId());
-    if (!staged.blobId().equals(ready.blobId())) {
-      throw new IllegalArgumentException(
-          "H3 reference media failed integrity validation: " + item.reference().resourceId());
-    }
-    refManager.retainRef(sessionId, ready.blobId());
-    uploadService.delete(staged.uploadId());
-    return ResourceMessageContent.media(ready.blobId(), ready.filename());
-  }
-
-  private void discardBestEffort(StagedMedia staged) {
-    try {
-      uploadService.delete(staged.uploadId());
-    } catch (RuntimeException ignored) {
-      // Durable upload expiry remains the fallback.
-    }
-  }
-
-  private record PreparedMedia(AcceptancePreflight preflight, List<StagedMedia> staged) {
-
-    private PreparedMedia {
-      staged = List.copyOf(staged);
+  /**
+   * 尽力清理全部已知句柄：每个句柄都尝试一次，主失败的身份与类型必须原样保留。
+   *
+   * <p>清理期的 {@link RuntimeException} 只按去敏类型日志（上传行的耐久过期仍是兜底），绝不进入主失败的传播链；清理期的 {@link Error} 按仓库
+   * primary/suppressed 约定附加到主失败后继续清理剩余句柄，既不遮蔽也不吞掉。
+   */
+  private void discardAll(List<PluginPromptResources.StagedResource> staged, Throwable primary) {
+    for (PluginPromptResources.StagedResource handle : staged) {
+      try {
+        promptResources.discard(handle);
+      } catch (RuntimeException cleanup) {
+        log.debug("H3 staged media cleanup failed type={}", cleanup.getClass().getSimpleName());
+      } catch (Error cleanup) {
+        if (cleanup != primary) {
+          primary.addSuppressed(cleanup);
+        }
+      }
     }
   }
-
-  private record StagedMedia(UUID uploadId, UUID blobId) {}
 
   private static H3OutputDescriptor awaitComfy(
       CanvasFunctionExecutionContext context,

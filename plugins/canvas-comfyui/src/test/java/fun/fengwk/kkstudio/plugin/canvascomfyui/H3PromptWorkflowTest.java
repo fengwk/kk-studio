@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.plugin.canvascomfyui;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
@@ -22,8 +21,7 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenReference;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionOutputSpec;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionSubmitState;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.platform.plugin.prompt.PluginPromptContent;
 
 import java.math.BigDecimal;
 import java.util.LinkedHashMap;
@@ -70,17 +68,15 @@ class H3PromptWorkflowTest {
             CanvasFunctionSubmitState.PENDING,
             "QUEUED",
             Map.of());
-    AgentMessage user = promptBuilder.userMessage(run, manifest);
+    String table = promptBuilder.manifestTable(run, manifest).text();
 
-    String text = assertInstanceOf(TextMessageContent.class, user.contents().get(0)).text();
-    assertTrue(text.contains("Use <Picture 1> then <Video 1>"));
-    assertTrue(text.contains("<Audio 1> | AUDIO"));
-    assertTrue(text.contains("embedded audio, if present, belongs to this same video label"));
-    // durable-safe 消息：manifest 表格 + 每个引用一个 label 段落，媒体内容由入队 preflight 物化。
-    assertEquals(1 + manifest.items().size(), user.contents().size());
-    for (int i = 1; i < user.contents().size(); i++) {
-      String label = assertInstanceOf(TextMessageContent.class, user.contents().get(i)).text();
-      assertTrue(label.startsWith("\nThe next attachment is "), label);
+    assertTrue(table.contains("Use <Picture 1> then <Video 1>"));
+    assertTrue(table.contains("<Audio 1> | AUDIO"));
+    assertTrue(table.contains("embedded audio, if present, belongs to this same video label"));
+    // 产物只是 durable-safe 文本片段：manifest 表格 + 每个引用一个 label；媒体由调用方在暂存后按同一顺序插入。
+    for (H3ReferenceManifest.Item item : manifest.items()) {
+      PluginPromptContent.Text label = promptBuilder.referenceLabel(item);
+      assertTrue(label.text().startsWith("\nThe next attachment is " + item.label()), label.text());
     }
 
     Map<UUID, H3UploadedFile> uploads = new LinkedHashMap<>();

@@ -17,6 +17,8 @@ import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogSnapshot;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialReference;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialStore;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRepository;
+import fun.fengwk.kkstudio.platform.plugin.prompt.PluginPromptResources;
+import fun.fengwk.kkstudio.platform.plugin.prompt.PluginPromptTasks;
 import fun.fengwk.kkstudio.platform.plugin.resource.PluginResourceGateway;
 import fun.fengwk.kkstudio.platform.plugin.service.PluginContextFactory;
 
@@ -61,10 +63,12 @@ public class PluginCatalogConfiguration {
       PluginConfigurationRepository repository,
       PluginCredentialStore credentials,
       ObjectProvider<PluginResourceGateway> resourceGateways,
+      ObjectProvider<PluginPromptTasks> promptTasks,
+      ObjectProvider<PluginPromptResources> promptResources,
       ObjectProvider<HarnessContributor> contributors,
       ObjectProvider<CanvasFunctionAdapter> adapters) {
     BiFunction<String, PluginCredentialReference, PluginContext> contexts =
-        pluginContexts(credentials, resourceGateways);
+        pluginContexts(credentials, resourceGateways, promptTasks, promptResources);
     List<HarnessContributor> builtins = contributors.orderedStream().toList();
     List<CanvasFunctionAdapter> builtinAdapters = adapters.orderedStream().toList();
     PluginCatalogSnapshot initial = bootstrap.bootstrap(contexts, builtins, builtinAdapters);
@@ -87,9 +91,16 @@ public class PluginCatalogConfiguration {
 
   /** 组合根唯一的 scoped {@link PluginContext} 工厂：按 pluginId 与冻结凭据引用装配上下文。 */
   static BiFunction<String, PluginCredentialReference, PluginContext> pluginContexts(
-      PluginCredentialStore credentials, ObjectProvider<PluginResourceGateway> resourceGateways) {
+      PluginCredentialStore credentials,
+      ObjectProvider<PluginResourceGateway> resourceGateways,
+      ObjectProvider<PluginPromptTasks> promptTasks,
+      ObjectProvider<PluginPromptResources> promptResources) {
     PluginContextFactory factory =
-        new PluginContextFactory(credentials, resourceGateways::getIfAvailable);
+        new PluginContextFactory(
+            credentials,
+            resourceGateways::getIfAvailable,
+            promptTasks::getIfAvailable,
+            promptResources::getIfAvailable);
     return factory::create;
   }
 }
