@@ -34,7 +34,7 @@ import java.util.stream.Collectors;
  *
  * <p>直接复用容器中真实的 {@link StudioPluginRegistry}、{@link PluginConfigurationRepository} 与事务管理器驱动 {@link
  * PluginCatalogBootstrap}，因此覆盖真实发行物（Media、Mavis 与 OpenCLI）的安装定义、真实 jsonb 持久化与真实指纹计算。任一 Plugin
- * 未配置凭据时 仍可安装与冻结贡献，启动绝不解析凭据或发起远端请求。
+ * 未配置凭据也可安装与冻结贡献，启动绝不解析凭据或发起远端请求。
  */
 class PluginCatalogBootstrapPostgresIntegrationTest extends WebPostgresTestSupport {
 
