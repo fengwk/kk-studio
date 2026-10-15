@@ -1124,9 +1124,9 @@ class PluginManagementServiceTest {
     assertEquals("1", dto.getAppliedEpoch());
     assertEquals("1", dto.getAppliedRevision());
     assertEquals(now, dto.getCheckedAt(), "检查时刻取自管理面时钟");
-    assertEquals("REACHABLE", dto.getReachability());
-    assertEquals("ACCEPTED", dto.getAuthentication());
-    assertEquals("UNKNOWN", dto.getBrowserSession());
+    assertEquals(PluginConnectionCheckDTO.Reachability.REACHABLE, dto.getReachability());
+    assertEquals(PluginConnectionCheckDTO.Authentication.ACCEPTED, dto.getAuthentication());
+    assertEquals(PluginConnectionCheckDTO.BrowserSession.UNKNOWN, dto.getBrowserSession());
     assertEquals(1, connectionCheckPlugin.checkInvocations.get(), "一次检查只调用一次能力");
 
     // 检查只租用当前快照：不另建实例，期间也不关闭实例；租用释放后运行期关闭才真正退役实例。

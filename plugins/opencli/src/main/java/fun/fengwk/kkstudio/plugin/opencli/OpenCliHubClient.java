@@ -402,10 +402,11 @@ public class OpenCliHubClient implements AutoCloseable {
       throw new OpenCliHubException(
           Kind.CREDENTIAL_UNAVAILABLE, "OpenCLI Hub credential is not available");
     } catch (RuntimeException exception) {
+      // 未知运行时失败不是「没有凭据」：只记录异常类型，抛固定去敏错误，绝不把数据库/编程错误
+      // 投影成健康结果，也不携带原始消息或 cause。
       log.warn(
           "OpenCLI Hub credential resolution failed type={}", exception.getClass().getSimpleName());
-      throw new OpenCliHubException(
-          Kind.CREDENTIAL_UNAVAILABLE, "OpenCLI Hub credential is not available");
+      throw new IllegalStateException("OpenCLI Hub credential resolution failed");
     }
     if (snapshot == null || snapshot.payloadJson() == null || snapshot.payloadJson().isBlank()) {
       throw new OpenCliHubException(

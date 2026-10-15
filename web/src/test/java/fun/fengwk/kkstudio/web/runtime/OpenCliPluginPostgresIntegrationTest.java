@@ -742,9 +742,12 @@ class OpenCliPluginPostgresIntegrationTest {
               assertEquals(PLUGIN_ID, checked.getPluginId());
               assertEquals("2", checked.getAppliedEpoch());
               assertEquals("2", checked.getAppliedRevision());
-              assertEquals("REACHABLE", checked.getReachability());
-              assertEquals("ACCEPTED", checked.getAuthentication());
-              assertEquals("UNKNOWN", checked.getBrowserSession());
+              assertEquals(
+                  PluginConnectionCheckDTO.Reachability.REACHABLE, checked.getReachability());
+              assertEquals(
+                  PluginConnectionCheckDTO.Authentication.ACCEPTED, checked.getAuthentication());
+              assertEquals(
+                  PluginConnectionCheckDTO.BrowserSession.UNKNOWN, checked.getBrowserSession());
               assertEquals(1, requests.size(), "一次检查只发出一条请求");
               RecordedRequest probe = requests.get(0);
               assertEquals("GET", probe.method());
@@ -760,9 +763,12 @@ class OpenCliPluginPostgresIntegrationTest {
               runtime.refresh();
 
               PluginConnectionCheckDTO revoked = management.checkConnection(PLUGIN_ID, 3L, 3L);
-              assertEquals("NOT_CHECKED", revoked.getReachability());
-              assertEquals("UNAVAILABLE", revoked.getAuthentication());
-              assertEquals("UNKNOWN", revoked.getBrowserSession());
+              assertEquals(
+                  PluginConnectionCheckDTO.Reachability.NOT_CHECKED, revoked.getReachability());
+              assertEquals(
+                  PluginConnectionCheckDTO.Authentication.UNAVAILABLE, revoked.getAuthentication());
+              assertEquals(
+                  PluginConnectionCheckDTO.BrowserSession.UNKNOWN, revoked.getBrowserSession());
               assertEquals(1, requests.size(), "撤销认证密钥后不得触网");
             });
   }

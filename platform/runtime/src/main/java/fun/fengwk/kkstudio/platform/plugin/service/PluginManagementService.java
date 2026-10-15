@@ -32,6 +32,9 @@ import fun.fengwk.kkstudio.share.ai.plugin.PluginAuthKindDTO;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginAuthPrepareDTO;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginConfigurationDTO;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginConnectionCheckDTO;
+import fun.fengwk.kkstudio.share.ai.plugin.PluginConnectionCheckDTO.Authentication;
+import fun.fengwk.kkstudio.share.ai.plugin.PluginConnectionCheckDTO.BrowserSession;
+import fun.fengwk.kkstudio.share.ai.plugin.PluginConnectionCheckDTO.Reachability;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginDTO;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginSecretProjectionDTO;
 
@@ -293,9 +296,9 @@ public final class PluginManagementService {
       dto.setAppliedEpoch(Long.toString(appliedEpoch));
       dto.setAppliedRevision(Long.toString(appliedRevision));
       dto.setCheckedAt(clock.instant());
-      dto.setReachability(result.reachability().name());
-      dto.setAuthentication(result.authentication().name());
-      dto.setBrowserSession(result.browserSession().name());
+      dto.setReachability(Reachability.valueOf(result.reachability().name()));
+      dto.setAuthentication(Authentication.valueOf(result.authentication().name()));
+      dto.setBrowserSession(BrowserSession.valueOf(result.browserSession().name()));
       return dto;
     }
   }

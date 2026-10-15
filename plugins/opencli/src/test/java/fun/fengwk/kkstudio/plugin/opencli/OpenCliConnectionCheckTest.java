@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.plugin.opencli;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.doThrow;
@@ -319,6 +320,38 @@ class OpenCliConnectionCheckTest {
     OpenCliHubClient fatal = mock(OpenCliHubClient.class);
     doThrow(new AssertionError("fatal")).when(fatal).probeConnection();
     assertThrows(AssertionError.class, () -> new OpenCliConnectionCheck(fatal).check());
+  }
+
+  /** 测试意图：真实 client 的未知凭据解析失败绝不被投影成维度，check 直接上抛且一条 HTTP 都不发。 */
+  @Test
+  void unknownCredentialResolutionFailureIsNotProjectedAsAHealthResult() throws IOException {
+    HttpServer server = startDatedServer(200, envelope("[]"), DATES_PATH);
+    PluginCredentialAccess failing =
+        new PluginCredentialAccess() {
+          @Override
+          public PluginCredentialSnapshot resolve() {
+            throw new IllegalStateException("credential store exploded");
+          }
+
+          @Override
+          public boolean rejectUsed(PluginCredentialSnapshot snapshot, String error) {
+            return false;
+          }
+        };
+    OpenCliHubClient client =
+        new OpenCliHubClient(
+            settings("{\"enabled\":true,\"baseUrl\":\"" + baseUrl(server) + "\"}"),
+            JsonMapper.builder().build(),
+            failing,
+            directHttpClient());
+
+    IllegalStateException failure =
+        assertThrows(IllegalStateException.class, () -> new OpenCliConnectionCheck(client).check());
+
+    assertEquals("OpenCLI Hub credential resolution failed", failure.getMessage());
+    assertNull(failure.getCause(), "原始失败不得作为 cause 泄漏");
+    assertEquals(List.of(), requestLines, "凭据解析失败绝不触网");
+    assertEquals(List.of(), otherRequests);
   }
 
   /** 测试意图：中断被保留而不是被吞掉，结论保持无法证明，绝不冒充不可达或健康。 */
