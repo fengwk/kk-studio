@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.fasterxml.jackson.annotation.JsonAnyGetter;
 import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -13,11 +14,14 @@ import com.fasterxml.jackson.annotation.JsonUnwrapped;
 import com.fasterxml.jackson.annotation.JsonValue;
 import org.junit.jupiter.api.Test;
 import tools.jackson.core.JsonGenerator;
+import tools.jackson.databind.JavaType;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.SerializationContext;
 import tools.jackson.databind.ValueSerializer;
 import tools.jackson.databind.annotation.JsonSerialize;
 import tools.jackson.databind.cfg.DateTimeFeature;
+import tools.jackson.databind.introspect.BeanPropertyDefinition;
+import tools.jackson.databind.introspect.ClassIntrospector;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.module.SimpleModule;
 import tools.jackson.databind.ser.std.ToStringSerializer;
@@ -29,6 +33,7 @@ import fun.fengwk.kkstudio.web.generated.StableTsContractGenerator.EnumSpec;
 import fun.fengwk.kkstudio.web.generated.StableTsContractGenerator.ObjectSpec;
 
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -155,6 +160,17 @@ class StableTsContractGeneratorTest {
 
   /** 属性级 {@code @JsonUnwrapped}：会打平嵌套结构，当前不支持，必须拒绝。 */
   record UnwrappedFixture(@JsonUnwrapped NestedFixture nested) {}
+
+  /** class 级 {@code @JsonFormat} 形态：真实 wire 变成数组，生成器必须拒绝而不是产出 interface。 */
+  @JsonFormat(shape = JsonFormat.Shape.ARRAY)
+  record RootArrayFormatFixture(String id) {}
+
+  /** class 级默认 {@code @JsonFormat}：形态仍是对象，正常生成。 */
+  @JsonFormat(shape = JsonFormat.Shape.ANY)
+  record RootDefaultFormatFixture(String id) {}
+
+  /** class 级 {@code @JsonAnyGetter}：真实 wire 会内联动态键，当前不支持，必须拒绝。 */
+  record AnyGetterFixture(String id, @JsonAnyGetter Map<String, String> extra) {}
 
   /** wire 值含换行：无法内联成单引号 TS 字面量，必须固定失败。 */
   enum UnsafeWireKind {
@@ -664,6 +680,92 @@ class StableTsContractGeneratorTest {
 
     assertTrue(ts.contains("| 'it\\'s'\n"), ts);
     assertTrue(ts.contains("| 'a\\\\b'\n"), ts);
+  }
+
+  /** 测试意图：class 级 @JsonFormat 把真实 wire 变成数组时必须失败，而不是照旧产出 interface。 */
+  @Test
+  void classLevelJsonFormatShapeFailsClosed() {
+    // 负向对照：真实 mapper 输出数组，而序列化视图仍然只有 id 属性——旧代码据此产出 interface，与 wire 矛盾。
+    JsonNode wire = MAPPER.readTree(MAPPER.writeValueAsString(new RootArrayFormatFixture("x")));
+    assertTrue(wire.isArray(), wire.toString());
+    assertEquals("[\"x\"]", wire.toString());
+    assertEquals(List.of("id"), serializationPropertyNames(RootArrayFormatFixture.class));
+
+    IllegalStateException failure =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                generator(
+                        List.of(
+                            new ObjectSpec(
+                                "RootArrayFormatFixture",
+                                RootArrayFormatFixture.class,
+                                Direction.RESPONSE,
+                                List.of("id"))))
+                    .generate());
+    assertTrue(
+        failure.getMessage().contains("class-level @JsonFormat shape/date customization"),
+        failure.getMessage());
+  }
+
+  /** 测试意图：class 级默认 @JsonFormat 不改变 wire 形态，仍可正常生成。 */
+  @Test
+  void classLevelDefaultJsonFormatStillGenerates() {
+    JsonNode wire = MAPPER.readTree(MAPPER.writeValueAsString(new RootDefaultFormatFixture("x")));
+    assertTrue(wire.isObject(), wire.toString());
+
+    String ts =
+        generator(
+                List.of(
+                    new ObjectSpec(
+                        "RootDefaultFormatFixture",
+                        RootDefaultFormatFixture.class,
+                        Direction.RESPONSE,
+                        List.of("id"))))
+            .generate();
+
+    assertTrue(ts.contains("export interface RootDefaultFormatFixture {\n"), ts);
+    assertTrue(ts.contains("  id: string\n"), ts);
+  }
+
+  /** 测试意图：@JsonAnyGetter 的动态属性不出现在属性清单里，必须固定失败而不是产出漏字段的 interface。 */
+  @Test
+  void anyGetterDynamicPropertiesFailClosed() {
+    // 负向对照：真实 wire 内联了动态键且没有 extra 键，但序列化视图会报告 id 与 extra；
+    // 旧代码因此产出 { id, extra } 的 interface，既多出 extra 又漏掉真实动态键。
+    Map<String, String> extra = new LinkedHashMap<>();
+    extra.put("dynamic", "v");
+    JsonNode wire = MAPPER.readTree(MAPPER.writeValueAsString(new AnyGetterFixture("x", extra)));
+    assertEquals("{\"id\":\"x\",\"dynamic\":\"v\"}", wire.toString());
+    assertFalse(wire.has("extra"), wire.toString());
+    assertEquals(List.of("id", "extra"), serializationPropertyNames(AnyGetterFixture.class));
+
+    IllegalStateException failure =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                generator(
+                        List.of(
+                            new ObjectSpec(
+                                "AnyGetterFixture",
+                                AnyGetterFixture.class,
+                                Direction.RESPONSE,
+                                List.of("id"))))
+                    .generate());
+    assertTrue(failure.getMessage().contains("@JsonAnyGetter"), failure.getMessage());
+  }
+
+  /** 真实 mapper 序列化视图下的可见属性名；用来证明旧生成器会照它产出 interface。 */
+  private static List<String> serializationPropertyNames(Class<?> javaType) {
+    JavaType type = MAPPER.constructType(javaType);
+    ClassIntrospector introspector = MAPPER.serializationConfig().classIntrospectorInstance();
+    return introspector
+        .introspectForSerialization(type, introspector.introspectClassAnnotations(type))
+        .findProperties()
+        .stream()
+        .filter(BeanPropertyDefinition::couldSerialize)
+        .map(BeanPropertyDefinition::getName)
+        .toList();
   }
 
   private static void assertRootFailure(String tsName, Class<?> javaType, String expectedMessage) {
