@@ -885,6 +885,14 @@ async function main(argv) {
         fakeImage?.available === true,
         `fake-image Canvas Function must be available (run with --with-canvas-function): ${JSON.stringify(catalog.json?.data?.map((f) => [f.name, f.available]))}`,
       )
+      // 目录必须暴露完整版本身份；前端把它作为 start 的 expectedVersion 回传。
+      assert(
+        typeof fakeImage.version?.catalogEpoch === 'string'
+          && /^(0|[1-9][0-9]*)$/.test(fakeImage.version.catalogEpoch)
+          && typeof fakeImage.version?.definitionFingerprint === 'string'
+          && /^[0-9a-f]{64}$/.test(fakeImage.version.definitionFingerprint),
+        `fake-image must expose a canonical version: ${JSON.stringify(fakeImage.version)}`,
+      )
 
       let canvasId = null
       const flowStamp = Date.now().toString(36)

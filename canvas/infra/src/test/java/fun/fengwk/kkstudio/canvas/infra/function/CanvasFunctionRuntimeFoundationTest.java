@@ -50,6 +50,7 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunException;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunStateCodecPort;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionSubmitState;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionUnknownResolution;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionVersion;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasFunctionWorkStore;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.PostgresCanvasInfraTestSupport;
 
@@ -205,7 +206,8 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
         transactions.execute(
             status -> {
               CanvasFunctionStartResult result =
-                  runtimeTransactions.start(canvasId, nodeId, REQUEST_1);
+                  runtimeTransactions.start(
+                      canvasId, nodeId, REQUEST_1, currentVersion(DEFINITION.name()));
               // 事务内租用仍然打开：释放必须等到 afterCompletion，而不是方法返回前。
               assertEquals(1, catalogSource.openLeases());
               return result;
@@ -224,7 +226,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
 
     transactions.execute(
         status -> {
-          runtimeTransactions.start(canvasId, nodeId, REQUEST_1);
+          runtimeTransactions.start(canvasId, nodeId, REQUEST_1, currentVersion(DEFINITION.name()));
           assertEquals(1, catalogSource.openLeases());
           status.setRollbackOnly();
           return null;
@@ -242,7 +244,10 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
     UUID nodeId = addFunctionNode(canvasId, "output", configWithoutReferences());
 
     assertThrows(
-        IllegalStateException.class, () -> runtimeTransactions.start(canvasId, nodeId, REQUEST_1));
+        IllegalStateException.class,
+        () ->
+            runtimeTransactions.start(
+                canvasId, nodeId, REQUEST_1, currentVersion(DEFINITION.name())));
 
     assertEquals(0, catalogSource.openLeases());
     assertTrue(runRepository.findByNodeId(nodeId).isEmpty());
@@ -260,7 +265,16 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
         new FixedCanvasFunctionCatalogSource(1L, frozenCatalog());
     CanvasFunctionRunTransactions driftTransactions = transactionsFor(source);
     CanvasFunctionRun run =
-        transactions.execute(status -> driftTransactions.start(canvasId, nodeId, REQUEST_1)).run();
+        transactions
+            .execute(
+                status ->
+                    driftTransactions.start(
+                        canvasId,
+                        nodeId,
+                        REQUEST_1,
+                        new CanvasFunctionVersion(
+                            1L, CanvasFunctionCatalog.definitionFingerprint(DEFINITION))))
+            .run();
     CanvasFunctionBinding frozen = decode(run).binding();
     assertEquals(1L, frozen.catalogEpoch());
     assertEquals(DEFINITION, frozen.definition());
@@ -303,8 +317,221 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
             driftedLease.require(frozen);
           }
         });
+    // 目录推进后，用旧版本对另一节点 start 必须 409：既不自动重读最新目录，也不自动 retry。
+    UUID otherNode = addFunctionNode(canvasId, "other", configWithoutReferences());
+    long versionBeforeReject = version(canvasId);
+    CanvasFunctionRunException rejected =
+        assertThrows(
+            CanvasFunctionRunException.class,
+            () ->
+                transactions.execute(
+                    status ->
+                        driftTransactions.start(
+                            canvasId,
+                            otherNode,
+                            REQUEST_2,
+                            new CanvasFunctionVersion(
+                                1L, CanvasFunctionCatalog.definitionFingerprint(DEFINITION)))));
+    assertEquals(CanvasFunctionRunException.Reason.CONFLICT, rejected.reason());
+    assertTrue(runRepository.findByNodeId(otherNode).isEmpty());
+    assertEquals(versionBeforeReject, version(canvasId));
     assertEquals(0, source.openLeases());
     assertEquals(0, catalogSource.openLeases());
+  }
+
+  /**
+   * 验收证据：目录 epoch 已前进时拒绝启动，且不新增 Run/pin、不推进版本、不触发 adapter 外部调用。
+   *
+   * <p>围栏必须在 pin、Run 写入与 preflight 之前生效，否则一次过期请求就会留下执行事实或付费副作用。
+   */
+  @Test
+  void startRejectsStaleEpochBeforeAnySideEffect() {
+    UUID canvasId = addDocument();
+    UUID nodeId = addFunctionNode(canvasId, "output", configWithoutReferences());
+    CountingAdapter adapter = new CountingAdapter(DEFINITION);
+    FixedCanvasFunctionCatalogSource source =
+        new FixedCanvasFunctionCatalogSource(2L, catalogOf(adapter));
+    CanvasFunctionRunTransactions candidate = transactionsFor(source);
+
+    CanvasFunctionRunException conflict =
+        assertThrows(
+            CanvasFunctionRunException.class,
+            () ->
+                transactions.execute(
+                    status ->
+                        candidate.start(canvasId, nodeId, REQUEST_1, versionOf(1L, DEFINITION))));
+
+    assertEquals(CanvasFunctionRunException.Reason.CONFLICT, conflict.reason());
+    assertEquals(0, adapter.preflightCalls, "stale epoch must not reach the adapter");
+    assertTrue(runRepository.findByNodeId(nodeId).isEmpty());
+    assertTrue(pinRepository.findByNode(canvasId, nodeId).isEmpty());
+    assertTrue(resourceRepository.findByOwnerNode(canvasId, nodeId).isEmpty());
+    assertEquals(0L, version(canvasId));
+    assertEquals(0, source.openLeases());
+  }
+
+  /**
+   * 验收证据：同一 epoch 内定义 fingerprint 不匹配（同名函数换了定义）同样 409，且没有副作用。
+   *
+   * <p>epoch 相同不代表客户端看到的定义仍然有效：必须比较具体被执行函数的完整定义摘要。
+   */
+  @Test
+  void startRejectsStaleFingerprintWithinTheSameEpoch() {
+    UUID canvasId = addDocument();
+    UUID nodeId = addFunctionNode(canvasId, "output", configWithoutReferences());
+    CountingAdapter adapter = new CountingAdapter(DEFINITION);
+    FixedCanvasFunctionCatalogSource source =
+        new FixedCanvasFunctionCatalogSource(3L, catalogOf(adapter));
+    CanvasFunctionRunTransactions candidate = transactionsFor(source);
+
+    CanvasFunctionRunException conflict =
+        assertThrows(
+            CanvasFunctionRunException.class,
+            () ->
+                transactions.execute(
+                    status ->
+                        candidate.start(
+                            canvasId, nodeId, REQUEST_1, versionOf(3L, MULTI_MEDIA_DEFINITION))));
+
+    assertEquals(CanvasFunctionRunException.Reason.CONFLICT, conflict.reason());
+    assertEquals(0, adapter.preflightCalls, "stale fingerprint must not reach the adapter");
+    assertTrue(runRepository.findByNodeId(nodeId).isEmpty());
+    assertTrue(pinRepository.findByNode(canvasId, nodeId).isEmpty());
+    assertEquals(0L, version(canvasId));
+    assertEquals(0, source.openLeases());
+  }
+
+  /**
+   * 验收证据：新 epoch 已移除该函数（或目录为空）时，旧客户端版本必须得到 409 版本冲突，而不是「未知函数」400。
+   *
+   * <p>epoch 比较必须早于按名绑定，否则「函数被移除」会被误报为请求非法，客户端会去改请求而不是刷新目录。
+   */
+  @Test
+  void startRejectsStaleEpochWhenTheFunctionWasRemoved() {
+    for (CanvasFunctionCatalog nextEpoch :
+        List.of(CanvasFunctionCatalog.from(List.of()), catalogOf(MULTI_MEDIA_DEFINITION))) {
+      UUID canvasId = addDocument();
+      UUID nodeId = addFunctionNode(canvasId, "output", configWithoutReferences());
+      CountingAdapter adapter = new CountingAdapter(DEFINITION);
+      FixedCanvasFunctionCatalogSource source =
+          new FixedCanvasFunctionCatalogSource(1L, catalogOf(adapter));
+      // epoch 1 客户端看到的就是 test.image；epoch 2 起目录不再提供它。
+      source.register(2L, nextEpoch);
+      source.currentEpoch(2L);
+      CanvasFunctionRunTransactions candidate = transactionsFor(source);
+
+      CanvasFunctionRunException conflict =
+          assertThrows(
+              CanvasFunctionRunException.class,
+              () ->
+                  transactions.execute(
+                      status ->
+                          candidate.start(canvasId, nodeId, REQUEST_1, versionOf(1L, DEFINITION))));
+
+      assertEquals(CanvasFunctionRunException.Reason.CONFLICT, conflict.reason());
+      assertEquals(
+          "Canvas Function catalog changed; refresh the directory before starting this function",
+          conflict.getMessage());
+      assertEquals(0, adapter.preflightCalls, "removed function must not reach any adapter");
+      assertTrue(runRepository.findByNodeId(nodeId).isEmpty());
+      assertTrue(pinRepository.findByNode(canvasId, nodeId).isEmpty());
+      assertTrue(resourceRepository.findByOwnerNode(canvasId, nodeId).isEmpty());
+      assertEquals(0L, version(canvasId));
+      assertEquals(1, source.acquireCurrentCalls(), "the fence must not acquire a second lease");
+      assertEquals(0, source.openLeases());
+    }
+  }
+
+  /**
+   * 验收证据：目录推进后，精确 requestId 重放仍命中已接受结果，不重新取目录、pin 或提交。
+   *
+   * <p>重放优先于版本校验，因此客户端不必因为目录前进而重放失败，执行事实也不会被二次冻结。
+   */
+  @Test
+  void exactRequestIdReplaySurvivesCatalogAdvance() {
+    UUID canvasId = addDocument();
+    UUID nodeId = addFunctionNode(canvasId, "output", configWithoutReferences());
+    CountingAdapter accepted = new CountingAdapter(DEFINITION);
+    FixedCanvasFunctionCatalogSource source =
+        new FixedCanvasFunctionCatalogSource(1L, catalogOf(accepted));
+    CanvasFunctionRunTransactions candidate = transactionsFor(source);
+    CanvasFunctionVersion acceptedVersion = versionOf(1L, DEFINITION);
+
+    CanvasFunctionRun first =
+        transactions
+            .execute(status -> candidate.start(canvasId, nodeId, REQUEST_1, acceptedVersion))
+            .run();
+    long versionAfterStart = version(canvasId);
+    assertEquals(
+        1, accepted.preflightCalls, "the accepted start must reach the adapter exactly once");
+
+    // 目录推进到 epoch 2：同名函数换成另一份定义，旧版本对它已经陈旧。
+    source.register(2L, catalogOf(MULTI_MEDIA_DEFINITION));
+    source.currentEpoch(2L);
+
+    CanvasFunctionStartResult replay =
+        transactions.execute(
+            status -> candidate.start(canvasId, nodeId, REQUEST_1, acceptedVersion));
+
+    assertFalse(replay.created());
+    assertEquals(first.requestId(), replay.run().requestId());
+    assertEquals(first.status(), replay.run().status());
+    assertEquals(decode(first), decode(replay.run()));
+    assertEquals(versionAfterStart, version(canvasId), "exact replay must not bump version");
+    assertEquals(1, accepted.preflightCalls, "exact replay must not repeat adapter side effects");
+    assertTrue(pinRepository.findByNode(canvasId, nodeId).isEmpty(), "exact replay must not pin");
+    assertTrue(
+        resourceRepository.findByOwnerNode(canvasId, nodeId).isEmpty(),
+        "exact replay must not allocate resources");
+    assertEquals(0, source.openLeases());
+  }
+
+  /**
+   * 验收证据：函数被整个移除后，已接受的精确 requestId 重放仍返回既有 Run，且完全不取 current 租用。
+   *
+   * <p>这是重放优先的最强形式：新 epoch 连该函数名都不存在，按名绑定会失败，但已接受的执行事实必须原样返回。
+   */
+  @Test
+  void exactRequestIdReplaySurvivesFunctionRemoval() {
+    UUID canvasId = addDocument();
+    UUID nodeId = addFunctionNode(canvasId, "output", configWithoutReferences());
+    FixedCanvasFunctionCatalogSource source =
+        new FixedCanvasFunctionCatalogSource(1L, catalogOf(DEFINITION));
+    CanvasFunctionRunTransactions candidate = transactionsFor(source);
+    CanvasFunctionVersion acceptedVersion = versionOf(1L, DEFINITION);
+
+    CanvasFunctionRun first =
+        transactions
+            .execute(status -> candidate.start(canvasId, nodeId, REQUEST_1, acceptedVersion))
+            .run();
+    long versionAfterStart = version(canvasId);
+    int acquiresAfterStart = source.acquireCurrentCalls();
+
+    // 目录推进到 epoch 2 且不再提供该函数：按名绑定会失败，但重放必须在绑定之前返回。
+    source.register(2L, CanvasFunctionCatalog.from(List.of()));
+    source.currentEpoch(2L);
+
+    CanvasFunctionStartResult replay =
+        transactions.execute(
+            status -> candidate.start(canvasId, nodeId, REQUEST_1, acceptedVersion));
+
+    assertFalse(replay.created());
+    assertEquals(first.requestId(), replay.run().requestId());
+    assertEquals(decode(first), decode(replay.run()));
+    assertEquals(versionAfterStart, version(canvasId), "exact replay must not bump version");
+    assertEquals(
+        acquiresAfterStart,
+        source.acquireCurrentCalls(),
+        "exact replay must not take a current lease");
+    assertTrue(pinRepository.findByNode(canvasId, nodeId).isEmpty());
+    assertEquals(0, source.openLeases());
+  }
+
+  /** 同一目录重算得到同一版本：客户端从目录读到的 epoch/fingerprint 与 start 接受的完全对齐。 */
+  private static CanvasFunctionVersion versionOf(
+      long catalogEpoch, CanvasFunctionDefinition definition) {
+    return new CanvasFunctionVersion(
+        catalogEpoch, CanvasFunctionCatalog.definitionFingerprint(definition));
   }
 
   /** 相同代码重新构建目录后，持久绑定仍能验证通过。 */
@@ -370,6 +597,52 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
     return CanvasFunctionCatalog.from(List.of(adapter));
   }
 
+  /** 包住给定 adapter 的目录，用于断言围栏拒绝时外部副作用（preflight）根本没有发生。 */
+  private static CanvasFunctionCatalog catalogOf(CountingAdapter adapter) {
+    return CanvasFunctionCatalog.from(List.of(adapter));
+  }
+
+  /** 只统计 preflight 次数的 adapter：被拒绝的 start 绝不能触达任何外部提交路径。 */
+  private static final class CountingAdapter implements CanvasFunctionAdapter {
+
+    private final CanvasFunctionDefinition definition;
+    private int preflightCalls;
+
+    private CountingAdapter(CanvasFunctionDefinition definition) {
+      this.definition = definition;
+    }
+
+    @Override
+    public List<CanvasFunctionDefinition> functions() {
+      return List.of(definition);
+    }
+
+    @Override
+    public boolean enabled() {
+      return true;
+    }
+
+    @Override
+    public String unavailableReason() {
+      return null;
+    }
+
+    @Override
+    public void preflight(CanvasFunctionFrozenRun run) {
+      preflightCalls++;
+    }
+
+    @Override
+    public void submit(CanvasFunctionExecutionContext context, CanvasFunctionFrozenRun run) {
+      throw new UnsupportedOperationException("fence test does not submit");
+    }
+
+    @Override
+    public List<UUID> execute(CanvasFunctionExecutionContext context, CanvasFunctionFrozenRun run) {
+      throw new UnsupportedOperationException("fence test does not execute");
+    }
+  }
+
   /** 非 Function 节点不得启动：先拒绝再取租用，不冻结、不写 Run、不推进版本。 */
   @Test
   void startRejectsPlainNodeWithoutLeaseOrSideEffects() {
@@ -379,7 +652,10 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            transactions.execute(status -> runtimeTransactions.start(canvasId, nodeId, REQUEST_1)));
+            transactions.execute(
+                status ->
+                    runtimeTransactions.start(
+                        canvasId, nodeId, REQUEST_1, currentVersion(DEFINITION.name()))));
 
     assertEquals(0, catalogSource.openLeases());
     assertTrue(runRepository.findByNodeId(nodeId).isEmpty());
@@ -1275,7 +1551,38 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
    * 直接调用。
    */
   private CanvasFunctionStartResult startRun(UUID canvasId, UUID nodeId, String requestId) {
-    return transactions.execute(status -> runtimeTransactions.start(canvasId, nodeId, requestId));
+    return startRun(canvasId, nodeId, requestId, currentVersion(canvasId, nodeId));
+  }
+
+  /** 显式提交某个 expectedVersion 的 start，用于版本围栏断言。 */
+  private CanvasFunctionStartResult startRun(
+      UUID canvasId, UUID nodeId, String requestId, CanvasFunctionVersion expectedVersion) {
+    return transactions.execute(
+        status -> runtimeTransactions.start(canvasId, nodeId, requestId, expectedVersion));
+  }
+
+  /**
+   * 客户端视角的当前目录版本：在真实目录租用内取该节点函数的 epoch 与定义 fingerprint。
+   *
+   * <p>节点不是 Function 或不存在时退回默认函数，让事务自己报告真正的领域错误，而不是在测试辅助里提前失败。
+   */
+  private CanvasFunctionVersion currentVersion(UUID canvasId, UUID nodeId) {
+    String functionName =
+        canvasStore
+            .findNode(canvasId, nodeId)
+            .map(NodeRecord::function)
+            .map(CanvasFunction::name)
+            .orElse(DEFINITION.name());
+    return currentVersion(functionName);
+  }
+
+  private CanvasFunctionVersion currentVersion(String functionName) {
+    try (CanvasFunctionCatalogSource.Lease lease = catalogSource.acquireCurrent()) {
+      return new CanvasFunctionVersion(
+          lease.epoch(),
+          CanvasFunctionCatalog.definitionFingerprint(
+              lease.catalog().require(functionName).function()));
+    }
   }
 
   /** start 提交的 availableAt 是 claim 的权威时间；不能用独立 wall clock 跨过同一事务的时间边界。 */

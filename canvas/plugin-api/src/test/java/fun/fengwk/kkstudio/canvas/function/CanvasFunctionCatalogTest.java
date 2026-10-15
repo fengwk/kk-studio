@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.canvas.function;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -129,6 +130,119 @@ class CanvasFunctionCatalogTest {
 
   private static List<String> names(CanvasFunctionCatalog catalog) {
     return catalog.list().stream().map(entry -> entry.function().name()).toList();
+  }
+
+  /** definition fingerprint 是完整定义的 canonical 摘要：对象键序/集合顺序不影响，任一字段变化都换指纹。 */
+  @Test
+  void definitionFingerprintIsCanonicalAndCoversEveryDefinitionField() {
+    CanvasFunctionDefinition base =
+        new CanvasFunctionDefinition(
+            "fingerprint.fn",
+            "Fingerprint Fn",
+            CanvasJson.parseObject(
+                "{\"type\":\"object\",\"properties\":{\"b\":{\"type\":\"string\"},"
+                    + "\"a\":{\"type\":\"integer\"}},\"required\":[\"a\"],"
+                    + "\"additionalProperties\":false}"),
+            List.of(
+                CanvasFunctionOutputSpec.named(CanvasResourceKind.IMAGE, "preview.png"),
+                CanvasFunctionOutputSpec.of(CanvasResourceKind.TEXT)),
+            new CanvasFunctionReferencePolicy(
+                Set.of(CanvasResourceKind.IMAGE, CanvasResourceKind.VIDEO),
+                2,
+                Map.of(CanvasResourceKind.IMAGE, 1)));
+    String fingerprint = CanvasFunctionCatalog.definitionFingerprint(base);
+    assertTrue(fingerprint.matches("[0-9a-f]{64}"), fingerprint);
+    // 幂等：同一定义每次摘要一致，否则目录版本会在无变化时漂移。
+    assertEquals(fingerprint, CanvasFunctionCatalog.definitionFingerprint(base));
+
+    // 键序不同的等价 argsSchema 必须得到同一指纹：摘要只由 JSON 语义决定。
+    CanvasFunctionDefinition reorderedKeys =
+        new CanvasFunctionDefinition(
+            base.name(),
+            base.description(),
+            CanvasJson.parseObject(
+                "{\"additionalProperties\":false,\"required\":[\"a\"],"
+                    + "\"properties\":{\"a\":{\"type\":\"integer\"},\"b\":{\"type\":\"string\"}},"
+                    + "\"type\":\"object\"}"),
+            base.outputs(),
+            base.referencePolicy());
+    assertEquals(fingerprint, CanvasFunctionCatalog.definitionFingerprint(reorderedKeys));
+
+    // 每类字段变化都必须换指纹，否则围栏会放过真正变了的定义。
+    assertNotEquals(
+        fingerprint,
+        CanvasFunctionCatalog.definitionFingerprint(
+            new CanvasFunctionDefinition(
+                "fingerprint.other",
+                base.description(),
+                base.argsSchema(),
+                base.outputs(),
+                base.referencePolicy())));
+    assertNotEquals(
+        fingerprint,
+        CanvasFunctionCatalog.definitionFingerprint(
+            new CanvasFunctionDefinition(
+                base.name(),
+                "Fingerprint Fn v2",
+                base.argsSchema(),
+                base.outputs(),
+                base.referencePolicy())));
+    assertNotEquals(
+        fingerprint,
+        CanvasFunctionCatalog.definitionFingerprint(
+            new CanvasFunctionDefinition(
+                base.name(),
+                base.description(),
+                CanvasJson.parseObject(
+                    "{\"type\":\"object\",\"properties\":{},\"required\":[],"
+                        + "\"additionalProperties\":false}"),
+                base.outputs(),
+                base.referencePolicy())));
+    assertNotEquals(
+        fingerprint,
+        CanvasFunctionCatalog.definitionFingerprint(
+            new CanvasFunctionDefinition(
+                base.name(),
+                base.description(),
+                base.argsSchema(),
+                List.of(CanvasFunctionOutputSpec.of(CanvasResourceKind.IMAGE)),
+                base.referencePolicy())));
+    assertNotEquals(
+        fingerprint,
+        CanvasFunctionCatalog.definitionFingerprint(
+            new CanvasFunctionDefinition(
+                base.name(),
+                base.description(),
+                base.argsSchema(),
+                base.outputs(),
+                new CanvasFunctionReferencePolicy(Set.of(CanvasResourceKind.IMAGE), 1, Map.of()))));
+    assertThrows(
+        NullPointerException.class, () -> CanvasFunctionCatalog.definitionFingerprint(null));
+  }
+
+  /**
+   * 预算回归：恰好用满 {@link CanvasJson#MAX_LENGTH} 的合法 argsSchema 必须仍能取指纹。
+   *
+   * <p>该用例锁住「摘要不得把完整定义重新包装成一个更大的 JSON 文档」这一约束：任何包装实现都会让这份合法的最大 schema 越界，从而拒绝原本可注册的函数。
+   */
+  @Test
+  void definitionFingerprintAcceptsTheLargestLegalArgsSchema() {
+    String template =
+        "{\"type\":\"object\",\"properties\":{\"prompt\":{\"type\":\"string\",\"description\":\"%s\"}},"
+            + "\"required\":[],\"additionalProperties\":false}";
+    String schema =
+        template.formatted("x".repeat(CanvasJson.MAX_LENGTH - template.formatted("").length()));
+    assertEquals(CanvasJson.MAX_LENGTH, schema.length());
+    CanvasFunctionDefinition definition =
+        new CanvasFunctionDefinition(
+            "largest.fn",
+            "Largest Fn",
+            CanvasJson.parseObject(schema),
+            List.of(CanvasFunctionOutputSpec.of(CanvasResourceKind.TEXT)),
+            new CanvasFunctionReferencePolicy(Set.of(CanvasResourceKind.IMAGE), 1, Map.of()));
+
+    String fingerprint = CanvasFunctionCatalog.definitionFingerprint(definition);
+    assertEquals(fingerprint, CanvasFunctionCatalog.definitionFingerprint(definition));
   }
 
   static CanvasFunctionDefinition function(String name) {
