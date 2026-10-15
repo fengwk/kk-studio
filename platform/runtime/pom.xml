@@ -208,7 +208,7 @@
                                         <include>fun.fengwk.kkstudio.platform.harness.model.ProviderResourceMaterializer*</include>
                                         <include>fun.fengwk.kkstudio.platform.harness.model.ProviderInlineBlobReader*</include>
                                         <include>fun.fengwk.kkstudio.platform.harness.tool.gateway.ToolExecutionGateway</include>
-                                        <include>fun.fengwk.kkstudio.platform.harness.tool.gateway.ToolExecutionGateway$ToolResourceLease</include>
+                                        <include>fun.fengwk.kkstudio.platform.harness.tool.gateway.ToolExecutionGateway.ToolResourceLease</include>
                                         <include>fun.fengwk.kkstudio.platform.catalog.tool.PluginRuntimeToolCatalogSource*</include>
                                         <include>fun.fengwk.kkstudio.platform.catalog.tool.FrozenToolBindingVerifier</include>
                                         <include>fun.fengwk.kkstudio.platform.catalog.mcp.discovery.McpInputSchemaConverter</include>
