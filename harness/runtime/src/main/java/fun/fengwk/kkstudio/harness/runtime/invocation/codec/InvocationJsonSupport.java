@@ -135,6 +135,15 @@ final class InvocationJsonSupport {
     return value.intValue();
   }
 
+  static long positiveLong(ObjectNode node, String field, String context) {
+    JsonNode value = required(node, field, context);
+    if (!value.isIntegralNumber() || !value.canConvertToLong() || value.longValue() <= 0) {
+      throw new IllegalArgumentException(
+          context + "." + field + " must be a positive long integer");
+    }
+    return value.longValue();
+  }
+
   static long nonNegativeLong(ObjectNode node, String field, String context) {
     JsonNode value = required(node, field, context);
     if (!value.isIntegralNumber() || !value.canConvertToLong() || value.longValue() < 0) {

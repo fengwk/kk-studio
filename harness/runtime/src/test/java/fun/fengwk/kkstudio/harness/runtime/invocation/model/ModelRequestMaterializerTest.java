@@ -383,13 +383,22 @@ class ModelRequestMaterializerTest {
                             "{}"))),
                 null,
                 new ToolResultMetadata(
-                    id(44L), id(4L), "call-1", 0, ToolResultStatus.SUCCEEDED, false, null, null))));
+                    id(44L),
+                    id(4L),
+                    "call-1",
+                    0,
+                    ToolResultStatus.SUCCEEDED,
+                    false,
+                    null,
+                    null,
+                    null))));
     return new EntryPath(entries);
   }
 
   /** 冻结了 Environment 名的 fs_read binding：environmentName 是历史投影判定 native 资格的 durable 事实。 */
   private static ToolBinding environmentBinding(String environmentName) {
     return new ToolBinding(
+        1L,
         new AgentToolDefinition(
             new ToolDescriptor(
                 "fs_read",
@@ -402,7 +411,8 @@ class ModelRequestMaterializerTest {
         new ContributorBinding("core", "fs.read", List.of()),
         EnvironmentSupport.REQUIRED,
         new EnvironmentId(id(9L)),
-        environmentName);
+        environmentName,
+        null);
   }
 
   private static ProviderReplayState sampleReplayState() {
@@ -447,6 +457,7 @@ class ModelRequestMaterializerTest {
 
   private static ModelRequestSpec liveSpec(ToolBinding binding) {
     return new ModelRequestSpec(
+        1L,
         ProviderType.OPENAI,
         new UUID(0L, 1L),
         descriptor(),
@@ -564,6 +575,7 @@ class ModelRequestMaterializerTest {
 
   private static ToolBinding bashBinding() {
     return new ToolBinding(
+        1L,
         new AgentToolDefinition(
             new ToolDescriptor(
                 "bash",
@@ -575,6 +587,7 @@ class ModelRequestMaterializerTest {
             ToolVisibility.SELECTABLE),
         new ContributorBinding("core", "bash", List.of()),
         EnvironmentSupport.NONE,
+        null,
         null,
         null);
   }

@@ -15,8 +15,7 @@ import fun.fengwk.kkstudio.harness.builtin.subagent.TaskTool;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolResultHistoryMaterializer;
-import fun.fengwk.kkstudio.platform.catalog.tool.CompositeRuntimeToolCatalog;
-import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
+import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderResourceMaterializer;
 import fun.fengwk.kkstudio.platform.harness.tool.gateway.GlobalStorageToolResultHistoryMaterializer;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
@@ -44,9 +43,13 @@ class BuiltinHarnessContributorWiringTest extends PostgresSpringTestSupport {
     assertInstanceOf(
         GlobalStorageToolResultHistoryMaterializer.class,
         context.getBean(ToolResultHistoryMaterializer.class));
-    assertEquals(3, context.getBeansOfType(RuntimeToolCatalog.class).size());
-    assertInstanceOf(CompositeRuntimeToolCatalog.class, context.getBean(RuntimeToolCatalog.class));
-    assertTrue(context.getBean(RuntimeToolCatalog.class).findTool(ReadTool.NAME).isPresent());
+    assertEquals(1, context.getBeansOfType(RuntimeToolCatalogSource.class).size());
+    RuntimeToolCatalogSource source = context.getBean(RuntimeToolCatalogSource.class);
+    assertSame(context.getBean("runtimeToolCatalogSource"), source);
+    try (RuntimeToolCatalogSource.Lease lease = source.acquireCurrent()) {
+      assertTrue(lease.catalog().findTool(ReadTool.NAME).isPresent());
+      assertTrue(lease.harnessCatalog().findTool(TaskTool.NAME).isPresent());
+    }
   }
 
   @Test

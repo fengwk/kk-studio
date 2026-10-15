@@ -281,6 +281,7 @@ class CompactionSummaryAssemblerTest {
             ToolResultStatus.SUCCEEDED,
             false,
             null,
+            null,
             null));
   }
 

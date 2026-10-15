@@ -30,6 +30,7 @@ public final class ModelRequestSpecJsonCodec {
   public ObjectNode encodeNode(ModelRequestSpec spec) {
     Objects.requireNonNull(spec, "spec");
     ObjectNode node = InvocationJsonSupport.NODES.objectNode();
+    node.put("catalogEpoch", spec.catalogEpoch());
     node.put("providerType", spec.providerType().name());
     node.put("providerConnectionGenerationId", spec.providerConnectionGenerationId().toString());
     node.set("model", MODEL_CODEC.encodeDescriptorNode(spec.model()));
@@ -57,6 +58,7 @@ public final class ModelRequestSpecJsonCodec {
     InvocationJsonSupport.requireFields(
         node,
         CONTEXT,
+        "catalogEpoch",
         "providerType",
         "providerConnectionGenerationId",
         "model",
@@ -81,6 +83,7 @@ public final class ModelRequestSpecJsonCodec {
       subagentBindings.add(decodeSubagent(subagentNode));
     }
     return new ModelRequestSpec(
+        InvocationJsonSupport.positiveLong(node, "catalogEpoch", CONTEXT),
         InvocationJsonSupport.requiredEnum(node, "providerType", ProviderType.class, CONTEXT),
         InvocationJsonSupport.requiredUuid(node, "providerConnectionGenerationId", CONTEXT),
         MODEL_CODEC.decodeDescriptorNode(InvocationJsonSupport.required(node, "model", CONTEXT)),

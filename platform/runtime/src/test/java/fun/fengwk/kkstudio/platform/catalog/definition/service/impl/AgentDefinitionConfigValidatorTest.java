@@ -29,9 +29,7 @@ import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpDiscoveryStatus;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
-import fun.fengwk.kkstudio.platform.catalog.tool.CompositeRuntimeToolCatalog;
-import fun.fengwk.kkstudio.platform.catalog.tool.HarnessToolCatalogAdapter;
-import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
+import fun.fengwk.kkstudio.platform.catalog.tool.TestRuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 
@@ -44,7 +42,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 
-/** Agent 配置的校验：工具名必须来自统一 RuntimeToolCatalog 且对应可选择条目，且 skill 名必须遵守有界长度规则。 */
+/** Agent 配置的校验：工具名必须来自运行时目录的当前 epoch 且对应可选择条目，且 skill 名必须遵守有界长度规则。 */
 class AgentDefinitionConfigValidatorTest {
 
   private static final String CUSTOM_TOOL_NAME = "custom_tool";
@@ -190,11 +188,8 @@ class AgentDefinitionConfigValidatorTest {
     when(repo.listAllServers()).thenReturn(List.of(server));
     when(repo.listTools("test_server")).thenReturn(List.of(mcpTool));
 
-    HarnessToolCatalogAdapter staticAdapter =
-        new HarnessToolCatalogAdapter(HarnessCatalog.from(List.of()));
-    RuntimeToolCatalog composite =
-        new CompositeRuntimeToolCatalog(List.of(staticAdapter, mcpCatalog));
-    AgentDefinitionConfigValidator validator = new AgentDefinitionConfigValidator(composite);
+    AgentDefinitionConfigValidator validator =
+        new AgentDefinitionConfigValidator(TestRuntimeToolCatalogSource.ofMcp(mcpCatalog));
 
     AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
     config.setTools(List.of("mcp_test_server_echo"));
@@ -270,7 +265,7 @@ class AgentDefinitionConfigValidatorTest {
                 }));
       }
       this.catalog = HarnessCatalog.from(contributors);
-      this.validator = new AgentDefinitionConfigValidator(new HarnessToolCatalogAdapter(catalog));
+      this.validator = new AgentDefinitionConfigValidator(TestRuntimeToolCatalogSource.of(catalog));
     }
 
     @Override

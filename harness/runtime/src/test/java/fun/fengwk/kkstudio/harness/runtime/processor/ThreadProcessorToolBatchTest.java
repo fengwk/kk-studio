@@ -479,6 +479,8 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
     requestThreadWork(fixture.store, chain.turn().threadId());
     fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000, 16_384));
 
+    var originals = toolsByAssistant(fixture.store, chain.assistantEntryId());
+
     // claim1：Tool batch 精确映射 FAILED/CANCELLED/UNKNOWN outcome payload 并收尾 TURN_END。
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(chain.turn().threadId()));
     List<Entry> batchEntries = path(fixture.store, chain.turn().threadId()).entries();
@@ -496,12 +498,24 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
       assertTrue(result.detailsJson().contains("\"kind\""));
       ToolResultMetadata metadata = toolPayload.toolResultMetadata();
       assertEquals(expectedStatus[i], metadata.status());
+      assertNotNull(metadata.binding());
+      assertEquals(originals.get(i).binding(), metadata.binding());
       assertFalse(metadata.synthetic());
       assertNull(metadata.reason());
       assertEquals("call-" + (i + 1), metadata.toolCallId());
       assertEquals(i, metadata.callIndex());
       assertEquals(chain.assistantEntryId(), metadata.assistantEntryId());
     }
+
+    // 临时行真实物理删除后，Entry 仍能独立核查原冻结 binding。
+    for (ToolInvocation original : originals) {
+      assertTrue(fixture.store.transaction(tx -> tx.findToolInvocation(original.id())).isEmpty());
+    }
+    assertTrue(
+        fixture
+            .store
+            .transaction(tx -> tx.findModelInvocation(chain.modelInvocationId()))
+            .isEmpty());
 
     // claim2：下一 claim 才做 continuation。
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(chain.turn().threadId()));

@@ -562,6 +562,7 @@ public abstract class HarnessRuntimeThreadTreeContract {
                 ToolResultStatus.SUCCEEDED,
                 false,
                 null,
+                null,
                 null)),
         T1);
   }

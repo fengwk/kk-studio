@@ -174,14 +174,18 @@ RUNNING -> SUCCEEDED / FAILED / CANCELLED / UNKNOWN / READY（retry）
 
 `WAITING_INPUT` 与 `WAITING_APPROVAL` 刻意分离：问卷不能授权工具，审批也不能代替回答；两者都只占 durable 行，不占用 Worker 或外部执行。
 
-`ToolBinding` 把工具定义、Contributor 归属、`EnvironmentSupport` 与冻结的
+`ModelRequestSpec` 即使没有工具也保留正整数 `catalogEpoch`，所有工具绑定必须与之同 epoch。
+`ToolBinding` 将该 epoch、可空 `ToolPluginSource`（插件版本、配置修订、能力与凭据上下文指纹、auth generation）、
+工具定义、Contributor 归属、`EnvironmentSupport` 与冻结的
 `environmentId` / `environmentName` 绑在一起。`NONE` 不得携带环境，`OPTIONAL` 可以携带
 当前选择，`REQUIRED` 的正常规划结果必须携带环境；无选择的 `REQUIRED` 工具在
 ModelRequestSpec 构造前已被过滤。Gateway 对陈旧或伪造 binding 继续 fail closed。执行端
 不写 Store：[`ToolEffectBatch`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/tool/ToolEffectBatch.java)
 最多携带 16 条 CUSTOM 副作用，且只在 `SUCCEEDED` 状态允许非空；终态 Tool 行只表示
 结果已产出，物化为历史 Entry 由 ThreadProcessor 在同一事务里完成，同时物理删除 Tool
-行与父 ModelInvocation。
+行与父 ModelInvocation。真实工具所有终态（包括 UNKNOWN、CANCELLED 和人工决议）
+均将原 binding 写入 `ToolResultMetadata`，删除临时行与 session fork 不会丢失原 epoch、定义及来源。
+synthetic 归一化结果没有真实 invocation，binding 为 null。
 
 `Work` 是调度邮箱的持久化当前状态，每个 target 一行：`target = (THREAD|MODEL|TOOL, targetId)`、`availableAt`、`wakeVersion`、`leaseToken`、`leaseUntil` 与可选的环境路由标记 `requiredEnvironmentId`。所有跃迁都是返回新状态的纯函数（`initial` / `request` / `claim` / `renew` / `complete` / `reschedule`）：`request` 把 `availableAt` 提前到最早值并把 `wakeVersion` +1，`claim` 写入租约，`complete` 在 `wakeVersion` 未变时删除该行、被新 wake 推进时只清空租约保留行。`reschedule` 总是清空租约：没有新 wake 时采用目标时刻，有新 wake 时取现有 `availableAt` 与目标时刻的较早值，不让旧 claim 延后新唤醒。`leaseToken`、有效租约与认领时的 `wakeVersion` 共同拦截迟到的旧执行体，防止删除更新的 wake。
 

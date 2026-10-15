@@ -44,6 +44,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -394,6 +396,11 @@ class GoalFeatureTest {
           @Override
           public boolean isCancelled() {
             return false;
+          }
+
+          @Override
+          public CompletionStage<Void> quiescence() {
+            return CompletableFuture.completedFuture(null);
           }
         };
       }
