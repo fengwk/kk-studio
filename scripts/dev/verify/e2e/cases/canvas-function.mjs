@@ -1,4 +1,4 @@
-import { assert, assertDecimalVersion, assertExactFields, cid, envelopeData, expectHttpError, sleep } from '../lib/http.mjs'
+import { assert, assertDecimalVersion, assertExactFields, cid, differentDecimalLong, envelopeData, expectHttpError, sleep } from '../lib/http.mjs'
 import { registerCase } from '../lib/registry.mjs'
 
 const UUID_TEXT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
@@ -44,7 +44,7 @@ registerCase({
   requires: ['canvas-function'],
   title: 'Canvas Function 目录与免费 fake 运行链路',
   docs:
-    '需 backend 启用 S3 与 kk-studio.canvas.function.fake-enabled；验证已删除的 /api/canvas-function-models 不再存在、GET /api/canvas-functions 只暴露函数名/说明/严格 args schema/有界输出/引用限制与目录版本（available + required-nullable unavailableReason + version{catalogEpoch,definitionFingerprint}）；typed SET_NODE_FUNCTION 冻结函数配置，POST function-run 的 expectedVersion 必填且形状严格（缺失/前导零 epoch/非法 fingerprint 400），目录已变化（epoch 或同 epoch 定义 fingerprint 不匹配）返回 409 且不写 Run/pin，精确 requestId 重放优先于版本校验，返回 202 且只在 nodeId/requestId/status/stage/error/updatedAt 上表达运行状态（无 stateJson），非 Function 节点 400、无运行 404；RUNNING->SUCCEEDED 后快照按输出槽位替换 Resource（IMAGE+blobId），resource preview-url 可直读 WEBP；resolve 只对 UNKNOWN 有效（非 UNKNOWN 409、非法 resolution/空 verification 400），cancel 幂等',
+    '需 backend 启用 S3 与 kk-studio.canvas.function.fake-enabled；验证已删除的 /api/canvas-function-models 不再存在、GET /api/canvas-functions 只暴露函数名/说明/严格 args schema/有界输出/引用限制与目录版本（available + required-nullable unavailableReason + version{catalogEpoch,definitionFingerprint}）；typed SET_NODE_FUNCTION 冻结函数配置，POST function-run 的 expectedVersion 必填且形状严格（缺失/前导零 epoch/非法 fingerprint 400），目录已变化（epoch 或同 epoch 定义 fingerprint 不匹配；stale epoch 用 BigInt 精确构造并保持在合法 long 范围）返回 409 且不写 Run/pin，精确 requestId 重放优先于版本校验，返回 202 且只在 nodeId/requestId/status/stage/error/updatedAt 上表达运行状态（无 stateJson），非 Function 节点 400、无运行 404；RUNNING->SUCCEEDED 后快照按输出槽位替换 Resource（IMAGE+blobId），resource preview-url 可直读 WEBP；resolve 只对 UNKNOWN 有效（非 UNKNOWN 409、非法 resolution/空 verification 400），cancel 幂等',
   async run(ctx) {
     // 旧 ComfyUI 风格的模型目录端点已删除。
     await expectHttpError(() => ctx.call('GET', '/api/canvas-function-models'), { status: 404 })
@@ -177,10 +177,13 @@ registerCase({
         { status: 400 },
       )
     }
+    // stale epoch 必须真实待在合法 long 范围内且不等于当前 epoch：用 BigInt 精确构造，避免 Number 丢精度或造出越界值。
     const staleVersion = {
-      catalogEpoch: String(Number(imageVersion.catalogEpoch) + 1),
+      catalogEpoch: differentDecimalLong(imageVersion.catalogEpoch, 'fake-image version.catalogEpoch'),
       definitionFingerprint: imageVersion.definitionFingerprint,
     }
+    // 构造出的 stale 版本自身也必须是合法 wire 版本（canonical 且不越 long 上界），否则它会先撞 400 而不是围栏 409。
+    assertVersion(staleVersion, 'stale expectedVersion')
     // 保证与真实 fingerprint 不同，避免理论上的偶然相等掩盖围栏。
     const mismatchedVersion = {
       catalogEpoch: imageVersion.catalogEpoch,
