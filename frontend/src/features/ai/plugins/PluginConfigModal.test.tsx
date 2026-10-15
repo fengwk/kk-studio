@@ -196,6 +196,43 @@ describe('PluginConfigModal', () => {
     expect(screen.getByRole('button', { name: 'mode' })).not.toHaveTextContent('FAST')
   })
 
+  it('offers the explicit unset entry for an optional enum and omits the key on save', async () => {
+    const user = userEvent.setup()
+    vi.mocked(pluginsService.updateConfiguration).mockResolvedValue(samplePlugin)
+    renderModal()
+
+    // 已选择的 optional enum 必须能显式省略，而不是只能改成另一个合法选项。
+    const unset = screen.getByRole('button', { name: '未设置 mode' })
+    await user.click(unset)
+    expect(screen.getByRole('button', { name: 'mode' })).toHaveAttribute('data-value', '')
+    // 省略后字段不存在，因此不再提供无意义的省略入口。
+    expect(screen.queryByRole('button', { name: '未设置 mode' })).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '保存配置' }))
+    const payload = vi.mocked(pluginsService.updateConfiguration).mock.calls[0][1]
+    const values = JSON.parse(payload.valuesJson) as Record<string, unknown>
+    expect(Object.hasOwn(values, 'mode')).toBe(false)
+    expect(payload.valuesJson).not.toContain('"mode":null')
+    expect(payload.valuesJson).not.toContain('"mode":""')
+  })
+
+  it('keeps a required enum without an unset entry', () => {
+    renderModal({
+      ...samplePlugin,
+      configuration: {
+        ...samplePlugin.configuration,
+        valuesSchema: samplePlugin.configuration.valuesSchema.replace(
+          '"required":["enabled"]',
+          '"required":["enabled","mode"]',
+        ),
+      },
+    })
+    expect(screen.getByRole('button', { name: 'mode' })).toHaveTextContent('FAST')
+    expect(screen.queryByRole('button', { name: '未设置 mode' })).not.toBeInTheDocument()
+    // 必填的其它标量同样不提供省略入口。
+    expect(screen.queryByRole('button', { name: '未设置 enabled' })).not.toBeInTheDocument()
+  })
+
   it('edits complex array container with raw JSON preserving big numbers', async () => {
     const user = userEvent.setup()
     vi.mocked(pluginsService.updateConfiguration).mockResolvedValue(samplePlugin)

@@ -106,6 +106,12 @@ export function SchemaElementRenderer({
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   // 在途文件读取令牌：本字段的新编辑、模式切换或卸载都会让晚到的读取结果失效。
   const fileReadTokenRef = useRef(0)
+  // 文件读取跨越 await，读取期间用户可能已经改过别的字段并让父组件写出新的 valuesJson；
+  // 因此续跑只调用当前渲染的 editor，绝不使用发起读取那一刻捕获的旧回调（旧闭包会以旧配置覆盖这些新编辑）。
+  const editorRef = useRef(editor)
+  useLayoutEffect(() => {
+    editorRef.current = editor
+  })
 
   useLayoutEffect(() => {
     return () => {
@@ -184,7 +190,10 @@ export function SchemaElementRenderer({
         const val = typeof currentSafeVal === 'string' ? currentSafeVal : ''
         return (
           <div className="form-group" key={name}>
-            <FieldLabel>{name}</FieldLabel>
+            <div className="plugin-config-field-header">
+              <FieldLabel>{name}</FieldLabel>
+              {unsetOptionalButton}
+            </div>
             <Select
               id={fieldId}
               value={val}
@@ -256,11 +265,11 @@ export function SchemaElementRenderer({
         setFileError(null)
 
         let result: JsonFileReadResult
-        editor.onFileReadStart()
+        editorRef.current.onFileReadStart()
         try {
           result = await readStrictJsonFile(file)
         } finally {
-          editor.onFileReadEnd()
+          editorRef.current.onFileReadEnd()
         }
         // 晚到的读取结果绝不覆盖期间发生的新编辑、换模式或让旧值复活。
         if (fileReadTokenRef.current !== token) {
@@ -272,11 +281,11 @@ export function SchemaElementRenderer({
         }
         if (!validateJsonText) {
           setTextDraft(null)
-          editor.onStringEdit(path, fieldKey, result.text, false)
+          editorRef.current.onStringEdit(path, fieldKey, result.text, false)
           return
         }
         setTextDraft(result.text)
-        editor.onStringEdit(path, fieldKey, result.text, true)
+        editorRef.current.onStringEdit(path, fieldKey, result.text, true)
       }
 
       return (
