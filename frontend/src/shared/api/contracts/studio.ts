@@ -252,6 +252,17 @@ export interface CanvasFunctionOutputDTO {
   name: string | null
 }
 
+/**
+ * 函数目录暴露的版本身份；也是 start 必须回传的 expectedVersion。
+ *
+ * catalogEpoch 是 canonical 非负十进制 Java long 文本（绝不转成 JS number），
+ * definitionFingerprint 是该函数完整定义的 lowercase SHA-256。
+ */
+export interface CanvasFunctionVersionDTO {
+  catalogEpoch: string
+  definitionFingerprint: string
+}
+
 /** Function 目录项 */
 export interface CanvasFunctionDefinitionDTO {
   name: string
@@ -261,6 +272,8 @@ export interface CanvasFunctionDefinitionDTO {
   referencePolicy?: CanvasFunctionReferencePolicyDTO | null
   available?: boolean
   unavailableReason?: string | null
+  /** 目录项版本身份：epoch 与该函数定义指纹一起从同一次目录响应取得。 */
+  version: CanvasFunctionVersionDTO
 }
 
 /** 人工核查 UNKNOWN Function Run 的请求体 */
@@ -270,7 +283,15 @@ export interface CanvasFunctionUnknownResolutionDTO {
   verification: string
 }
 
+/** Function start 的严格 requestId + expectedVersion body。 */
 export interface CanvasFunctionRunRequestDTO {
+  requestId: UUIDString
+  /** 客户端点击时从目录看到的函数版本；必填，且不得被后续目录更新替换。 */
+  expectedVersion: CanvasFunctionVersionDTO
+}
+
+/** Function cancel 的严格 requestId body：cancel 不带版本围栏。 */
+export interface CanvasFunctionCancelRequestDTO {
   requestId: UUIDString
 }
 

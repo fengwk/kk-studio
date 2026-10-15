@@ -29,7 +29,10 @@ const NODE_VIDEO = '00000000-0000-4000-8000-000000000003' as UUIDString
 const NODE_SECOND = '00000000-0000-4000-8000-000000000004' as UUIDString
 const NODE_TARGET = '00000000-0000-4000-8000-000000000009' as UUIDString
 
+const FUNCTION_VERSION = { catalogEpoch: '1', definitionFingerprint: '0'.repeat(64) }
+
 const models: CanvasFunctionDefinitionDTO[] = [{
+  version: FUNCTION_VERSION,
   name: 'image-a',
   description: 'Image A',
   outputs: [{ kind: 'IMAGE', name: null }],
@@ -58,6 +61,7 @@ const models: CanvasFunctionDefinitionDTO[] = [{
   available: true,
   unavailableReason: null,
 }, {
+  version: FUNCTION_VERSION,
   name: 'image-b',
   description: 'Image B',
   outputs: [{ kind: 'IMAGE', name: null }],
