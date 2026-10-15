@@ -57,20 +57,6 @@ class SystemSettingsTest {
     assertEquals(null, defaults.network().proxyUrl());
     assertEquals("localhost,127.*,::1", defaults.network().noProxyHosts());
 
-    SystemSettings.Integrations integrations = defaults.integrations();
-    assertEquals(false, integrations.comfyui().enabled());
-    assertEquals(null, integrations.comfyui().baseUrl());
-    assertEquals(10_000L, integrations.comfyui().connectTimeoutMillis());
-    assertEquals(30_000L, integrations.comfyui().readTimeoutMillis());
-    assertEquals(1_800_000L, integrations.comfyui().websocketTimeoutMillis());
-    assertEquals(50L * 1024 * 1024, integrations.comfyui().maxInputFileBytes());
-    assertEquals(false, integrations.minimaxH3().enabled());
-    assertEquals(600_000L, integrations.minimaxH3().promptMaxWaitMillis());
-    assertEquals(10_000L, integrations.minimaxH3().comfyConnectTimeoutMillis());
-    assertEquals(30_000L, integrations.minimaxH3().comfyRequestTimeoutMillis());
-    assertEquals(2_000L, integrations.minimaxH3().comfyPollIntervalMillis());
-    assertEquals(1_800_000L, integrations.minimaxH3().comfyMaxWaitMillis());
-
     SystemSettings.StorageMedia storageMedia = defaults.storageMedia();
     assertEquals(86_400L, storageMedia.uploadExpiresSeconds());
     assertEquals(1_800L, storageMedia.s3PresignDefaultExpiresSeconds());
@@ -339,34 +325,6 @@ class SystemSettingsTest {
                 base.thumbnailQuality(),
                 base.temporaryResourceTtlSeconds(),
                 0L));
-  }
-
-  @Test
-  void rejectsEnabledIntegrationsMissingIdentityOrLocationFields() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new SystemSettings.Comfyui(
-                true, null, 10_000L, 30_000L, 1_800_000L, 50L * 1024 * 1024));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new SystemSettings.MiniMaxH3(
-                true, null, 600_000L, "http://comfy:8188", 10_000L, 30_000L, 2_000L, 1_800_000L));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new SystemSettings.MiniMaxH3(
-                true, "agent", 600_000L, null, 10_000L, 30_000L, 2_000L, 1_800_000L));
-  }
-
-  @Test
-  void rejectsPollingNotBelowMaxWaitInMiniMaxH3() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new SystemSettings.MiniMaxH3(
-                false, null, 600_000L, null, 10_000L, 30_000L, 1_800_000L, 1_800_000L));
   }
 
   @Test

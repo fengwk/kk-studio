@@ -211,7 +211,6 @@ class SystemSettingsChangeNotificationIntegrationTest extends PostgresSpringTest
         SystemSettings.DEFAULT.aiRuntime(),
         SystemSettings.DEFAULT.environment(),
         SystemSettings.DEFAULT.network(),
-        SystemSettings.DEFAULT.integrations(),
         SystemSettings.DEFAULT.storageMedia(),
         SystemSettings.DEFAULT.advanced());
   }
@@ -224,7 +223,6 @@ class SystemSettingsChangeNotificationIntegrationTest extends PostgresSpringTest
     update.setAiRuntime(current.getAiRuntime());
     update.setEnvironment(current.getEnvironment());
     update.setNetwork(current.getNetwork());
-    update.setIntegrations(current.getIntegrations());
     update.setStorageMedia(current.getStorageMedia());
     update.setAdvanced(current.getAdvanced());
     return update;

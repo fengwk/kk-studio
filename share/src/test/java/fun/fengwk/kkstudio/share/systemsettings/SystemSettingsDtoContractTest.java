@@ -32,7 +32,7 @@ class SystemSettingsDtoContractTest {
     assertRejectsUnknown(
         () ->
             objectMapper.readValue(
-                "{\"tool\":{},\"aiRuntime\":{},\"environment\":{},\"network\":{},\"integrations\":{},"
+                "{\"tool\":{},\"aiRuntime\":{},\"environment\":{},\"network\":{},"
                     + "\"storageMedia\":{},\"advanced\":{},\"unknown\":1}",
                 SystemSettingsUpdateDTO.class));
     assertRejectsUnknown(
@@ -40,22 +40,13 @@ class SystemSettingsDtoContractTest {
             objectMapper.readValue(
                 "{\"pattern\":\"*\",\"action\":\"ask\",\"unknown\":1}",
                 SystemSettingsToolDTO.PermissionRuleDTO.class));
+    // 旧 integrations 段已从设置合同删除：整体与残留子段都按「未知字段」硬拒绝，绝不静默忽略或兼容反序列化。
+    assertRejectsUnknown(
+        () -> objectMapper.readValue("{\"integrations\":{}}", SystemSettingsSectionsDTO.class));
     assertRejectsUnknown(
         () ->
             objectMapper.readValue(
-                "{\"enabled\":true,\"unknown\":1}",
-                SystemSettingsIntegrationsDTO.ComfyuiDTO.class));
-    assertRejectsUnknown(
-        () ->
-            objectMapper.readValue(
-                "{\"enabled\":false,\"unknown\":1}",
-                SystemSettingsIntegrationsDTO.MiniMaxH3DTO.class));
-    assertRejectsUnknown(
-        () -> objectMapper.readValue("{\"openCliHub\":{}}", SystemSettingsIntegrationsDTO.class));
-    assertRejectsUnknown(
-        () -> objectMapper.readValue("{\"seedance\":{}}", SystemSettingsIntegrationsDTO.class));
-    assertRejectsUnknown(
-        () -> objectMapper.readValue("{\"gptImage2\":{}}", SystemSettingsIntegrationsDTO.class));
+                "{\"integrations\":{\"comfyui\":{}}}", SystemSettingsSectionsDTO.class));
     // network 只允许两个全局字段，不接受 enabled 或模块级 override。
     assertRejectsUnknown(
         () -> objectMapper.readValue("{\"enabled\":true}", SystemSettingsNetworkDTO.class));
@@ -116,9 +107,6 @@ class SystemSettingsDtoContractTest {
             SystemSettingsAiRuntimeDTO.class,
             SystemSettingsEnvironmentDTO.class,
             SystemSettingsNetworkDTO.class,
-            SystemSettingsIntegrationsDTO.class,
-            SystemSettingsIntegrationsDTO.ComfyuiDTO.class,
-            SystemSettingsIntegrationsDTO.MiniMaxH3DTO.class,
             SystemSettingsStorageMediaDTO.class,
             SystemSettingsAdvancedDTO.class);
     List<String> forbidden =

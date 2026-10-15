@@ -94,7 +94,6 @@ class HarnessRuntimeConfigurationHttpPolicyTest {
             retryStatusCodes),
         SystemSettings.DEFAULT.environment(),
         SystemSettings.DEFAULT.network(),
-        SystemSettings.DEFAULT.integrations(),
         SystemSettings.DEFAULT.storageMedia(),
         SystemSettings.DEFAULT.advanced());
   }

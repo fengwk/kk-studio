@@ -92,6 +92,7 @@ public final class PluginConfigurationCommitService {
   private final Clock clock;
   private final Runnable credentialChanged;
   private final Runnable catalogChanged;
+  private final PluginAgentDependencies pluginAgentDependencies;
 
   public PluginConfigurationCommitService(
       StudioPluginRegistry registry,
@@ -105,7 +106,8 @@ public final class PluginConfigurationCommitService {
       PlatformTransactionManager transactionManager,
       Clock clock,
       Runnable credentialChanged,
-      Runnable catalogChanged) {
+      Runnable catalogChanged,
+      PluginAgentDependencies pluginAgentDependencies) {
     this.registry = Objects.requireNonNull(registry, "registry");
     this.configurationRepository =
         Objects.requireNonNull(configurationRepository, "configurationRepository");
@@ -121,6 +123,8 @@ public final class PluginConfigurationCommitService {
     this.clock = Objects.requireNonNull(clock, "clock");
     this.credentialChanged = Objects.requireNonNull(credentialChanged, "credentialChanged");
     this.catalogChanged = Objects.requireNonNull(catalogChanged, "catalogChanged");
+    this.pluginAgentDependencies =
+        Objects.requireNonNull(pluginAgentDependencies, "pluginAgentDependencies");
   }
 
   /**
@@ -212,6 +216,7 @@ public final class PluginConfigurationCommitService {
         UUID.randomUUID(),
         declaredFields(plugin, material.payloadJson()),
         material,
+        false,
         CredentialAction.WRITE,
         expectedEpoch);
   }
@@ -241,6 +246,7 @@ public final class PluginConfigurationCommitService {
         UUID.randomUUID(),
         List.of(),
         null,
+        false,
         baseline.isPresent() ? CredentialAction.REMOVE : CredentialAction.NONE,
         expectedEpoch);
   }
@@ -282,6 +288,7 @@ public final class PluginConfigurationCommitService {
           generation,
           baselineFields,
           null,
+          true,
           CredentialAction.NONE,
           expectedEpoch);
     }
@@ -299,6 +306,7 @@ public final class PluginConfigurationCommitService {
           generation,
           List.of(),
           null,
+          true,
           baseline.isPresent() ? CredentialAction.REMOVE : CredentialAction.NONE,
           expectedEpoch);
     }
@@ -329,6 +337,7 @@ public final class PluginConfigurationCommitService {
         generation,
         configuredFields,
         candidate,
+        true,
         CredentialAction.WRITE,
         expectedEpoch);
   }
@@ -345,6 +354,7 @@ public final class PluginConfigurationCommitService {
       UUID generation,
       List<String> configuredSecretFields,
       PluginCredentialMaterial candidate,
+      boolean verifyDeclaredAgents,
       CredentialAction action,
       long expectedEpoch) {
     String pluginId = plugin.descriptor().pluginId();
@@ -421,6 +431,7 @@ public final class PluginConfigurationCommitService {
                       manifest,
                       candidate,
                       encryptedPayload,
+                      verifyDeclaredAgents,
                       action,
                       generation,
                       contextFingerprint));
@@ -454,9 +465,16 @@ public final class PluginConfigurationCommitService {
       PluginCatalogManifest manifest,
       PluginCredentialMaterial candidate,
       byte[] encryptedPayload,
+      boolean verifyDeclaredAgents,
       CredentialAction action,
       UUID generation,
       String contextFingerprint) {
+    if (verifyDeclaredAgents) {
+      // 先核验目标插件写入的普通值声明的 Agent 仍存在（Agent 行锁，锁序 Agent -> catalog/credential），
+      // 再做原有的 epoch CAS 与凭据写；缺失即固定去敏 400，epoch/history/secret/通知一概不变。
+      pluginAgentDependencies.requireDeclaredAgents(
+          changed.pluginId(), changed.revision(), changed.valuesJson());
+    }
     if (!configurationRepository.commit(expectedEpoch, List.of(changed), manifest)) {
       return false;
     }

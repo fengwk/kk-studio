@@ -370,17 +370,21 @@ Skill exact commit 获取、manifest 扫描和 MCP 发现先在写事务外完�
 预览不冻结状态，执行时同名配置以文件为准，不维护跨步骤检查状态。
 可恢复配置在一个事务中写入，复用现有校验、引用保护和 CAS；循环 Agent 用同事务两阶段写入。
 插件是第八类：条目只含 `pluginId` 与普通值文本，秘密、认证代际、目录 epoch 与配置修订都不进入文件。
-导出只覆盖已安装插件，并按插件在代码里声明的所需 Agent 补齐插件→Agent 闭包，缺失 Agent 时拒绝导出；
-导入时未安装的 id 按条目级跳过，已安装插件按本插件的 configurationSchema 归一化普通值，非法值整份拒绝。
+导出只覆盖已安装插件，并按插件在代码里声明的所需 Agent 补齐插件→Agent 闭包，缺失 Agent 时拒绝导出，
+内置 Agent 只满足依赖、从不作为条目导出；导入时未安装的 id 按条目级跳过，已安装插件按本插件的
+configurationSchema 归一化普通值，非法值整份拒绝。普通值可随文件往返，秘密与受保护身份不进入文件，
+导入后仍需在 Plugin Secret API 或登录流程录入。
 插件写入复用唯一提交服务：计划期的 epoch 与各插件修订只作为导入事务内的 CAS 坐标，按返回的权威目录链式推进，
 秘密补丁恒为 KEEP，因此导入既不创建也不恢复任何凭据；任一条目（含插件与其它类别）失败都整份回滚。
-系统设置按当前完整七节契约直接校验，不合并局部字段；以执行准备时版本 CAS，提交后沿现有通知刷新快照。
+系统设置按当前完整六节契约直接校验，不合并局部字段；文件里的未知设置字段（含已退役的 `integrations` 段）
+被移除并作为跳过项列出，不做别名或双读，其余六节按 `allowPartial` 语义导入；以执行准备时版本 CAS，
+提交后沿现有通知刷新快照。
 产品操作、恢复范围与保密要求见[配置导入与导出](../operations/development-and-testing.md#配置导入与导出)。
 
 ### 在线设置与启动配置
 
 在线设置由单行 `system_setting` 保存，包含 tool、aiRuntime、environment、network、
-integrations、storageMedia、advanced 七个 section。strict codec 与 record 校验完整聚合，
+storageMedia、advanced 六个 section。strict codec 与 record 校验完整聚合，
 `expectedVersion` CAS 后提交通知驱动权威回读，内存快照按 version 替换。
 `SystemSettingsSchemaProvider` 提供 UI 编辑 metadata。
 aiRuntime 包含 `modelHttpRetryStatusCodes`（唯一可重试 HTTP 状态名单，默认 `[408,429,500,502,503,504]`，仅接受 400–599）、调用重试次数与退避、压缩保留量与 subagent 限额；Provider 可用同名字段覆盖该名单（null 继承、数组完全替代、空数组禁用 HTTP 重试），压缩执行使用普通 Agent 目录中的 `Compaction` 定义，不在 settings 里选择。

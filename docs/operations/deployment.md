@@ -164,7 +164,7 @@ Flyway 校验失败时停止切换并查明差异；修改 `flyway_schema_histor
 
 若目标是建立新的空数据面，按[共享数据库重建](development-and-testing.md#共享数据库重建)
 先在“设置 → 同步”导出配置，执行 reset 的 `--dry-run`，确认数据范围、备份与恢复方案，
-再批准停机和实际执行。初始化当前 Schema 后通过产品导入 YAML，恢复七类配置及所需凭据。
+再批准停机和实际执行。初始化当前 Schema 后通过产品导入 YAML，恢复八类配置及文件随带的 Provider 凭据与注册令牌。
 会话、项目、画布、运行历史与 Blob 引用保留在冻结库/备份中，新的入口无法直接访问它们。
 Environment 注册令牌可恢复；Daemon 重连仍须验收，Plugin 认证和部署级配置需另行准备（如 OpenCLI 的独立 Plugin 普通配置与 `apiKey` 静态秘密，旧 SystemSettings 中对应三项已彻底废除拒绝，无双读别名）。结构调整仅允许通过配置导出备份后由数据所有者授权重建，严禁在已有部署或共享数据库上就地执行未授权改动。
 reset 不删除 S3 对象；这些对象仍受备份恢复策略保护，不能凭新库无引用就清理。
@@ -308,7 +308,7 @@ PI_BASE_ANCHOR=/path/to/pi-base \
 | --- | --- | --- |
 | local | host mapping/database/S3/profile | `KK_STUDIO_APP_*`、`KK_STUDIO_PG_*`、`KK_STUDIO_S3_*`、`KK_STUDIO_STORAGE_S3_*`、`KK_STUDIO_SPRING_PROFILES_ACTIVE` |
 | local | Harness dispatcher | `KK_STUDIO_HARNESS_DISPATCHER_*` |
-| NAS App 节点 | prod 数据面与异步执行 | `KK_STUDIO_DB_*`、`KK_STUDIO_STORAGE_S3_*`、`KK_STUDIO_PLUGINS_CREDENTIAL_KEY_FILE`、`KK_STUDIO_CANVAS_H3_COMFY_BEARER_TOKEN` |
+| NAS App 节点 | prod 数据面与异步执行 | `KK_STUDIO_DB_*`、`KK_STUDIO_STORAGE_S3_*`、`KK_STUDIO_PLUGINS_CREDENTIAL_KEY_FILE` |
 | 本机 preview | 外部数据面配置文件 | `SHARED_PREVIEW_ENV_FILE` 指向的文件内的同一组 `KK_STUDIO_DB_*` / `KK_STUDIO_STORAGE_S3_*` |
 | local/reliability | admission/gateway | `KK_STUDIO_MODEL_MAX_CONCURRENCY`、`KK_STUDIO_TOOL_MAX_CONCURRENCY`、`KK_STUDIO_ENVIRONMENT_GATEWAY_*`（subagent 并发上限不经环境变量配置，只由运行时 SystemSettings 的 `aiRuntime.subagent*` 持有） |
 | production with authenticated Plugin | encrypted credential | `KK_STUDIO_PLUGINS_CREDENTIAL_KEY_FILE`（所有 App 节点挂载同一 owner-only 文件） |
@@ -323,7 +323,7 @@ PI_BASE_ANCHOR=/path/to/pi-base \
 | 显式 Seedance prepare-only | 确认与外部 Hub/workspace | `RUN_REAL_SEEDANCE_PREPARE_SMOKE=1`、`OPENCLI_HUB_BASE_URL`、`SEEDANCE_WORKSPACE_ID`、`OPENCLI_API_KEY`、可选 `OPENCLI_HUB_INSTANCE_ID` / `SEEDANCE_PREPARE_SMOKE_PROMPT`；另需唯一参数 `--confirm-prepare-only`，见 [deploy/test](../../deploy/test/README.md#真实-seedance-prepare-only-边界) |
 
 Dispatcher、Admission 和 gateway frame/queue 上限是启动配置，不由 SystemSettings editor 修改。
-Canvas Function runtime 变量和 `KK_STUDIO_CANVAS_H3_COMFY_BEARER_TOKEN` 也只在启动期读取。
+Canvas Function runtime 变量也只在启动期读取。
 
 凭据边界：
 
