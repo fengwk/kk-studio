@@ -1,0 +1,919 @@
+package fun.fengwk.kkstudio.plugin.comfyui;
+
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.atLeast;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpServer;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.parallel.ResourceLock;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.JsonNodeFeature;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
+
+import fun.fengwk.kkstudio.platform.plugin.PluginCredentialSnapshot;
+import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableException;
+import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableReason;
+import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialAccess;
+
+import java.io.ByteArrayInputStream;
+import java.io.FilterInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.UncheckedIOException;
+import java.net.InetSocketAddress;
+import java.net.Proxy;
+import java.net.ProxySelector;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+
+/** 标准客户端以本地 HTTP route 验证 multipart、严格 history、编码、流式 view 与 pending-only cancel。 */
+@ResourceLock("jvm-proxy-selector")
+class StandardComfyuiClientTest {
+
+  private static final UUID CANVAS = new UUID(0L, 7L);
+
+  private HttpServer server;
+  private StandardComfyuiClient client;
+  private final AtomicReference<String> promptResponse =
+      new AtomicReference<>("{\"prompt_id\":\"p1\",\"node_errors\":{}}");
+  private final AtomicReference<String> uploadResponse =
+      new AtomicReference<>(
+          "{\"name\":\"12.mp4\",\"subfolder\":\"kk-studio/00000000-0000-0000-0000-000000000007\",\"type\":\"input\"}");
+  private final AtomicReference<String> viewQuery = new AtomicReference<>();
+  private final AtomicReference<String> promptBody = new AtomicReference<>();
+  private final AtomicReference<String> queueDeleteBody = new AtomicReference<>();
+  private final AtomicInteger queueDeleteStatus = new AtomicInteger(200);
+  private final AtomicReference<byte[]> uploadBody = new AtomicReference<>();
+  private final AtomicReference<String> uploadContentLength = new AtomicReference<>();
+  private final AtomicInteger uploadStatus = new AtomicInteger(200);
+  private final AtomicReference<String> authorization = new AtomicReference<>();
+  private final AtomicReference<String> viewAuthorization = new AtomicReference<>();
+  private final AtomicReference<String> historyAuthorization = new AtomicReference<>();
+
+  /** 生产构造使用已安装的系统代理；无法直连的 ComfyUI 域名经本地代理完成标准 prompt 请求。 */
+  @Test
+  void usesTheInstalledSystemProxy() {
+    ProxySelector previous = ProxySelector.getDefault();
+    ProxySelector selector = mock(ProxySelector.class);
+    when(selector.select(any(URI.class)))
+        .thenReturn(
+            List.of(
+                new Proxy(
+                    Proxy.Type.HTTP,
+                    new InetSocketAddress("127.0.0.1", server.getAddress().getPort()))));
+    try {
+      ProxySelector.setDefault(selector);
+      StandardComfyuiClient proxied =
+          new StandardComfyuiClient(
+              "http://unresolvable.invalid",
+              ComfyuiSettings.AuthMode.NONE,
+              Duration.ofSeconds(1),
+              Duration.ofSeconds(2),
+              new ObjectMapper(),
+              null);
+      ObjectNode workflow = new ObjectMapper().createObjectNode().putObject("92");
+      assertEquals("p1", proxied.submit(workflow, "client-1"));
+    } finally {
+      ProxySelector.setDefault(previous);
+    }
+  }
+
+  @BeforeEach
+  void setUp() throws IOException {
+    server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    server.createContext("/upload/image", this::upload);
+    server.createContext("/prompt", this::prompt);
+    server.createContext("/history/pending", exchange -> json(exchange, 200, "{}"));
+    server.createContext(
+        "/history/success",
+        exchange ->
+            json(
+                exchange,
+                200,
+                "{\"success\":{\"status\":{\"status_str\":\"success\",\"completed\":true},"
+                    + "\"outputs\":{\"92\":{\"videos\":[{\"filename\":\"result.mp4\","
+                    + "\"subfolder\":\"video/out\",\"type\":\"output\"}]}}}}"));
+    server.createContext(
+        "/history/error",
+        exchange ->
+            json(
+                exchange,
+                200,
+                "{\"error\":{\"status\":{\"status_str\":\"error\",\"completed\":true,"
+                    + "\"messages\":[\"boom\"]}}}"));
+    server.createContext("/history/mismatch", exchange -> json(exchange, 200, "{\"another\":{}}"));
+    server.createContext(
+        "/history/precise-numbers",
+        exchange ->
+            json(
+                exchange,
+                200,
+                "{\"precise-numbers\":{\"status\":{\"status_str\":\"error\",\"completed\":true,"
+                    + "\"messages\":[0.12345678901234567890123456789]}}}"));
+    server.createContext(
+        "/history/bad-completed",
+        exchange ->
+            json(
+                exchange,
+                200,
+                "{\"bad-completed\":{\"status\":{\"status_str\":\"running\","
+                    + "\"completed\":\"false\"}}}"));
+    server.createContext(
+        "/history/bad-terminal",
+        exchange ->
+            json(
+                exchange,
+                200,
+                "{\"bad-terminal\":{\"status\":{\"status_str\":\"stopped\","
+                    + "\"completed\":true}}}"));
+    server.createContext(
+        "/history/two-videos",
+        exchange ->
+            json(
+                exchange,
+                200,
+                "{\"two-videos\":{\"status\":{\"status_str\":\"success\",\"completed\":true},"
+                    + "\"outputs\":{\"92\":{\"videos\":[{},{}]}}}}"));
+    server.createContext("/history/invalid-json", exchange -> json(exchange, 200, "{"));
+    server.createContext(
+        "/history/http-error", exchange -> json(exchange, 500, "{\"error\":true}"));
+    server.createContext("/history/auth-history", this::authHistory);
+    server.createContext("/view", this::view);
+    server.createContext("/queue", this::queue);
+    server.start();
+    client =
+        new StandardComfyuiClient(
+            "http://127.0.0.1:" + server.getAddress().getPort(),
+            ComfyuiSettings.AuthMode.NONE,
+            Duration.ofSeconds(1),
+            Duration.ofSeconds(2),
+            new ObjectMapper(),
+            null);
+  }
+
+  @AfterEach
+  void tearDown() {
+    server.stop(0);
+  }
+
+  @Test
+  void uploadsFixedLengthMultipartAndSubmitsStrictPrompt() {
+    H3UploadedFile uploaded =
+        client.upload(
+            "12.mp4", "video/mp4", 3L, new ByteArrayInputStream(new byte[] {1, 2, 3}), CANVAS);
+    assertEquals(new H3UploadedFile("12.mp4", "kk-studio/" + CANVAS, "input"), uploaded);
+
+    ObjectNode workflow = new ObjectMapper().createObjectNode().putObject("92");
+    assertEquals("p1", client.submit(workflow, "client-1"));
+    promptResponse.set("{\"prompt_id\":\"p1\",\"node_errors\":{\"136\":{\"error\":\"bad\"}}}");
+    assertThrows(IllegalArgumentException.class, () -> client.submit(workflow, "client-1"));
+    uploadResponse.set("{\"name\":\"12.mp4\",\"subfolder\":\"other\",\"type\":\"input\"}");
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            client.upload(
+                "12.mp4", "video/mp4", 3L, new ByteArrayInputStream(new byte[] {1, 2, 3}), CANVAS));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            client.upload(
+                "../escape.mp4",
+                "video/mp4",
+                3L,
+                new ByteArrayInputStream(new byte[] {1, 2, 3}),
+                CANVAS));
+  }
+
+  /** ComfyUI 自由 workflow 树：number 必须按 BigDecimal 原样搬运，极值与高精度小数不得在 double 中失真。 */
+  @Test
+  void preservesFreeFormWorkflowAndHistoryNumbers() {
+    ObjectNode workflow =
+        (ObjectNode)
+            JsonMapper.builder()
+                .enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+                .build()
+                .readTree(
+                    "{\"92\":{\"inputs\":{\"big\":1e309,\"tiny\":1e-324,"
+                        + "\"precise\":0.12345678901234567890123456789}}}");
+
+    assertEquals("p1", client.submit(workflow, "client-1"));
+
+    String body = promptBody.get();
+    assertTrue(body.contains("1E+309"), body);
+    assertTrue(body.contains("1E-324"), body);
+    assertTrue(body.contains("0.12345678901234567890123456789"), body);
+    assertFalse(body.contains("Infinity"), body);
+    // 高精度 messages number 仍按 BigDecimal 解析（不抛精度错误），但不回显到受控分类之外。
+    H3ComfyHistory precise = client.history("precise-numbers");
+    assertEquals(H3ComfyHistory.Status.ERROR, precise.status());
+    assertEquals("ComfyUI execution failed with status=error", precise.error());
+  }
+
+  @Test
+  void uploadsExactMultipartBytesWhenContentIsDemandedInOneRequest() {
+    byte[] payload = new byte[] {9, 8, 7, 6};
+    AtomicBoolean closed = new AtomicBoolean();
+    uploadResponse.set(
+        "{\"name\":\"clip.mp4\",\"subfolder\":\"kk-studio/" + CANVAS + "\",\"type\":\"input\"}");
+    H3UploadedFile uploaded =
+        client.upload(
+            "clip.mp4",
+            "video/mp4",
+            payload.length,
+            tracking(new ByteArrayInputStream(payload), closed),
+            CANVAS);
+    assertEquals("clip.mp4", uploaded.name());
+    byte[] body = uploadBody.get();
+    assertEquals(Long.parseLong(uploadContentLength.get()), body.length);
+    String text = new String(body, StandardCharsets.ISO_8859_1);
+    assertTrue(text.contains("name=\"subfolder\""));
+    assertTrue(text.contains("kk-studio/" + CANVAS));
+    assertTrue(text.contains("name=\"overwrite\""));
+    assertTrue(text.contains("name=\"image\"; filename=\"clip.mp4\""));
+    assertTrue(text.contains("Content-Type: video/mp4"));
+    int payloadAt = indexOf(body, payload);
+    assertTrue(payloadAt > 0);
+    assertEquals(
+        "\r\n--", text.substring(payloadAt + payload.length, payloadAt + payload.length + 4));
+    assertTrue(text.trim().endsWith("--"));
+    assertTrue(closed.get());
+  }
+
+  /** 碎片化输入流（每次最多 100 字节）必须被完整组装成单个 multipart 请求体，不能截断或重复内容。 */
+  @Test
+  void uploadsCompleteMultipartFromFragmentedContentStream() {
+    byte[] payload = new byte[40 * 1024];
+    for (int i = 0; i < payload.length; i++) {
+      payload[i] = (byte) (i & 0xff);
+    }
+    AtomicBoolean closed = new AtomicBoolean();
+    client.upload(
+        "wide.bin",
+        "application/octet-stream",
+        payload.length,
+        tracking(new ChunkedInputStream(payload, 100), closed),
+        CANVAS);
+    byte[] body = uploadBody.get();
+    assertEquals(Long.parseLong(uploadContentLength.get()), body.length);
+    assertTrue(indexOf(body, payload) >= 0);
+    String text = new String(body, StandardCharsets.ISO_8859_1);
+    assertTrue(text.contains("filename=\"wide.bin\""));
+    assertTrue(text.contains("Content-Type: application/octet-stream"));
+    assertTrue(closed.get());
+  }
+
+  /** HttpClient 的 executor 拒绝提交上传请求时调用方流仍必须被关闭，且不得继续读取内容。 */
+  @Test
+  void closesCallerStreamWhenExecutorRejectsUploadRequest() {
+    AtomicBoolean closed = new AtomicBoolean();
+    InputStream content =
+        tracking(
+            new InputStream() {
+              @Override
+              public int read() {
+                return 7;
+              }
+            },
+            closed);
+    HttpClient cancelling =
+        HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(1))
+            .followRedirects(HttpClient.Redirect.NEVER)
+            .executor(
+                command -> {
+                  throw new SecurityException("cancelled before request");
+                })
+            .build();
+    StandardComfyuiClient cancellingClient =
+        new StandardComfyuiClient(
+            "http://127.0.0.1:" + server.getAddress().getPort(),
+            ComfyuiSettings.AuthMode.NONE,
+            Duration.ofSeconds(2),
+            new ObjectMapper(),
+            null,
+            cancelling);
+    assertThrows(
+        SecurityException.class,
+        () ->
+            cancellingClient.upload(
+                "cancel.bin", "application/octet-stream", 1024L, content, CANVAS));
+    assertTrue(closed.get());
+    assertThrows(IOException.class, () -> content.read(new byte[1]));
+  }
+
+  @Test
+  void exactUploadContentChecksSingleBulkAndZeroReadsOnce() throws Exception {
+    InputStream content =
+        StandardComfyuiClient.contentSupplier(new ByteArrayInputStream(new byte[] {1, 2, 3}), 2L)
+            .get();
+    assertEquals(1, content.read());
+    byte[] bulk = new byte[4];
+    assertEquals(1, content.read(bulk, 1, 3));
+    assertEquals(2, bulk[1]);
+    assertEquals(0, content.read(bulk, 0, 0));
+    assertThrows(IOException.class, () -> content.read(bulk, 0, 1));
+
+    InputStream empty =
+        StandardComfyuiClient.contentSupplier(new ByteArrayInputStream(new byte[0]), 1L).get();
+    assertEquals(0, empty.read(new byte[2], 0, 0));
+    assertThrows(IOException.class, () -> empty.read());
+
+    InputStream exact =
+        StandardComfyuiClient.contentSupplier(new ByteArrayInputStream(new byte[] {7}), 1L).get();
+    assertEquals(7, exact.read());
+    assertEquals(-1, exact.read());
+
+    var again = StandardComfyuiClient.contentSupplier(new ByteArrayInputStream(new byte[] {9}), 1L);
+    again.get();
+    IllegalStateException replay = assertThrows(IllegalStateException.class, again::get);
+    assertTrue(replay.getMessage().contains("already open"));
+  }
+
+  @Test
+  void rejectsUploadShorterOrLongerThanDeclaredLength() {
+    AtomicBoolean shortClosed = new AtomicBoolean();
+    UncheckedIOException tooShort =
+        assertThrows(
+            UncheckedIOException.class,
+            () ->
+                client.upload(
+                    "short.bin",
+                    "application/octet-stream",
+                    8L,
+                    tracking(new ByteArrayInputStream(new byte[] {1, 2}), shortClosed),
+                    CANVAS));
+    assertTrue(tooShort.getCause().getMessage().contains("ended after"));
+    assertTrue(shortClosed.get());
+    assertEquals(null, uploadBody.get());
+
+    AtomicBoolean longClosed = new AtomicBoolean();
+    UncheckedIOException tooLong =
+        assertThrows(
+            UncheckedIOException.class,
+            () ->
+                client.upload(
+                    "long.bin",
+                    "application/octet-stream",
+                    2L,
+                    tracking(new ByteArrayInputStream(new byte[] {1, 2, 3, 4}), longClosed),
+                    CANVAS));
+    assertTrue(tooLong.getCause().getMessage().contains("longer than declared"));
+    assertTrue(longClosed.get());
+    assertEquals(null, uploadBody.get());
+  }
+
+  @Test
+  void rejectsHeaderBreakingFilenameAndMediaType() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            client.upload(
+                "bad\"name.mp4",
+                "video/mp4",
+                1L,
+                new ByteArrayInputStream(new byte[] {1}),
+                CANVAS));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            client.upload(
+                "bad\r\nname.mp4",
+                "video/mp4",
+                1L,
+                new ByteArrayInputStream(new byte[] {1}),
+                CANVAS));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            client.upload(
+                "clip.mp4",
+                "video/mp4\r\nX-Injected: 1",
+                1L,
+                new ByteArrayInputStream(new byte[] {1}),
+                CANVAS));
+  }
+
+  @Test
+  void closesUploadStreamWhenReadFailsOrContentIsShorterThanDeclared() {
+    AtomicBoolean failedClosed = new AtomicBoolean();
+    assertThrows(
+        UncheckedIOException.class,
+        () ->
+            client.upload(
+                "broken.bin",
+                "application/octet-stream",
+                8L,
+                tracking(new FailingInputStream(), failedClosed),
+                CANVAS));
+    assertTrue(failedClosed.get());
+
+    AtomicBoolean shortClosed = new AtomicBoolean();
+    assertThrows(
+        UncheckedIOException.class,
+        () ->
+            client.upload(
+                "short.bin",
+                "application/octet-stream",
+                8L,
+                tracking(new ByteArrayInputStream(new byte[] {1, 2}), shortClosed),
+                CANVAS));
+    assertTrue(shortClosed.get());
+  }
+
+  @Test
+  void parsesPendingSuccessAndErrorWithExactlyOneSaveVideoOutput() {
+    assertEquals(H3ComfyHistory.Status.PENDING, client.history("pending").status());
+    H3ComfyHistory success = client.history("success");
+    assertEquals(H3ComfyHistory.Status.SUCCESS, success.status());
+    // 协议层原样回传 entry.outputs，输出节点的解释留给定义侧 selector。
+    assertEquals(
+        "result.mp4", success.outputs().path("92").path("videos").get(0).path("filename").asText());
+    assertEquals(
+        "video/out", success.outputs().path("92").path("videos").get(0).path("subfolder").asText());
+    H3ComfyHistory error = client.history("error");
+    assertEquals(H3ComfyHistory.Status.ERROR, error.status());
+    // 受控分类不解析回显远端 messages 内容。
+    assertEquals("ComfyUI execution failed with status=error", error.error());
+    assertFalse(error.error().contains("boom"));
+    assertThrows(IllegalArgumentException.class, () -> client.history("mismatch"));
+    assertThrows(IllegalArgumentException.class, () -> client.history("bad-completed"));
+    assertThrows(IllegalArgumentException.class, () -> client.history("bad-terminal"));
+    // 输出数量约束属于冻结定义侧：协议层对多个 video 原样回传。
+    H3ComfyHistory twoVideos = client.history("two-videos");
+    assertEquals(H3ComfyHistory.Status.SUCCESS, twoVideos.status());
+    assertEquals(2, twoVideos.outputs().path("92").path("videos").size());
+    assertThrows(IllegalArgumentException.class, () -> client.history("invalid-json"));
+    IllegalStateException httpError =
+        assertThrows(IllegalStateException.class, () -> client.history("http-error"));
+    // 非 2xx 只保留 HTTP 数值事实，不拼接远端错误正文。
+    assertEquals("ComfyUI request failed with HTTP 500", httpError.getMessage());
+    assertThrows(IllegalArgumentException.class, () -> client.history("../bad"));
+  }
+
+  @Test
+  void downloadsStreamingWithEncodedQueryAndDeletesPendingOnly() throws IOException {
+    try (H3ComfyDownload download =
+        client.download(new H3OutputDescriptor("result file.mp4", "video/out", "output"))) {
+      assertEquals(4L, download.length());
+      assertEquals("video/mp4", download.mediaType());
+      assertArrayEquals(new byte[] {4, 5, 6, 7}, download.content().readAllBytes());
+    }
+    assertTrue(viewQuery.get().contains("filename=result%20file.mp4"));
+    assertTrue(viewQuery.get().contains("subfolder=video%2Fout"));
+
+    assertTrue(client.cancelPending("pending-id"));
+    assertTrue(queueDeleteBody.get().contains("\"pending-id\""));
+    assertFalse(client.cancelPending("running-id"));
+    assertFalse(client.cancelPending("missing-id"));
+    queueDeleteStatus.set(500);
+    assertThrows(IllegalStateException.class, () -> client.cancelPending("pending-id"));
+  }
+
+  @Test
+  void rejectsUnsafeInputsBaseUrlsAndMissingViewLength() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new StandardComfyuiClient(
+                "http://127.0.0.1/path",
+                ComfyuiSettings.AuthMode.NONE,
+                Duration.ofSeconds(1),
+                Duration.ofSeconds(1),
+                new ObjectMapper(),
+                null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new StandardComfyuiClient(
+                "ftp://127.0.0.1",
+                ComfyuiSettings.AuthMode.NONE,
+                Duration.ofSeconds(1),
+                Duration.ofSeconds(1),
+                new ObjectMapper(),
+                null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new StandardComfyuiClient(
+                "http://user@127.0.0.1",
+                ComfyuiSettings.AuthMode.NONE,
+                Duration.ofSeconds(1),
+                Duration.ofSeconds(1),
+                new ObjectMapper(),
+                null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new StandardComfyuiClient(
+                "http://127.0.0.1:8188?bad=true",
+                ComfyuiSettings.AuthMode.NONE,
+                Duration.ofSeconds(1),
+                Duration.ofSeconds(1),
+                new ObjectMapper(),
+                null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new StandardComfyuiClient(
+                "http://127.0.0.1:8188#fragment",
+                ComfyuiSettings.AuthMode.NONE,
+                Duration.ofSeconds(1),
+                Duration.ofSeconds(1),
+                new ObjectMapper(),
+                null));
+    // NONE 模式不需要凭据访问端口：不解析、不发送任何凭据头。
+    assertDoesNotThrow(
+        () -> {
+          try (StandardComfyuiClient none =
+              new StandardComfyuiClient(
+                  "http://127.0.0.1:8188",
+                  ComfyuiSettings.AuthMode.NONE,
+                  Duration.ofSeconds(1),
+                  Duration.ofSeconds(1),
+                  new ObjectMapper(),
+                  null)) {
+            assertNotNull(none);
+          }
+        });
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new StandardComfyuiClient(
+                "http://127.0.0.1:8188",
+                ComfyuiSettings.AuthMode.NONE,
+                Duration.ZERO,
+                Duration.ofSeconds(1),
+                new ObjectMapper(),
+                null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new StandardComfyuiClient(
+                "http://127.0.0.1:8188",
+                ComfyuiSettings.AuthMode.NONE,
+                Duration.ofSeconds(1),
+                Duration.ofSeconds(-1),
+                new ObjectMapper(),
+                null));
+  }
+
+  /** NONE 模式显式不发凭据头：提交、上传与下载都不带 Authorization。 */
+  @Test
+  void noneModeSendsNoAuthorizationHeader() {
+    authorization.set(null);
+    viewAuthorization.set(null);
+    ObjectNode workflow = new ObjectMapper().createObjectNode().putObject("92");
+    assertEquals("p1", client.submit(workflow, "client-1"));
+    assertNull(authorization.get());
+    client.upload("a.mp4", "video/mp4", 1L, new ByteArrayInputStream(new byte[] {1}), CANVAS);
+    assertNull(authorization.get());
+    try (H3ComfyDownload download =
+        client.download(new H3OutputDescriptor("result file.mp4", "video/out", "output"))) {
+      download.content().readAllBytes();
+    } catch (IOException error) {
+      throw new UncheckedIOException(error);
+    }
+    assertNull(viewAuthorization.get());
+  }
+
+  /** BEARER 模式每个受保护请求都独立解析权威快照并局部添加 Bearer，绝不缓存构造期明文。 */
+  @Test
+  void bearerModeResolvesScopedCredentialForEveryProtectedRequest() {
+    PluginCredentialAccess access = mock(PluginCredentialAccess.class);
+    PluginCredentialSnapshot snapshot = snapshot("secret");
+    when(access.resolve()).thenReturn(snapshot);
+    StandardComfyuiClient bearer = authenticatedClient(ComfyuiSettings.AuthMode.BEARER, access);
+    authorization.set(null);
+    viewAuthorization.set(null);
+    historyAuthorization.set(null);
+
+    ObjectNode workflow = new ObjectMapper().createObjectNode().putObject("92");
+    assertEquals("p1", bearer.submit(workflow, "client-1"));
+    assertEquals("Bearer secret", authorization.get());
+    bearer.upload("a.mp4", "video/mp4", 1L, new ByteArrayInputStream(new byte[] {1}), CANVAS);
+    assertEquals("Bearer secret", authorization.get());
+    assertTrue(bearer.cancelPending("pending-id"));
+    assertEquals("Bearer secret", authorization.get());
+    try (H3ComfyDownload download =
+        bearer.download(new H3OutputDescriptor("result file.mp4", "video/out", "output"))) {
+      download.content().readAllBytes();
+    } catch (IOException error) {
+      throw new UncheckedIOException(error);
+    }
+    assertEquals("Bearer secret", viewAuthorization.get());
+    assertEquals(H3ComfyHistory.Status.PENDING, bearer.history("auth-history").status());
+    assertEquals("Bearer secret", historyAuthorization.get());
+    verify(access, atLeast(5)).resolve();
+  }
+
+  /** 服务端 401/403 只作废当次使用过的快照，并按 HTTP 事实报错，绝不静默降级到无认证。 */
+  @Test
+  void bearerModeRejectsUsedSnapshotOnUnauthorizedResponse() {
+    PluginCredentialAccess access = mock(PluginCredentialAccess.class);
+    PluginCredentialSnapshot snapshot = snapshot("revoked");
+    when(access.resolve()).thenReturn(snapshot);
+    StandardComfyuiClient bearer = authenticatedClient(ComfyuiSettings.AuthMode.BEARER, access);
+    queueDeleteStatus.set(401);
+
+    IllegalStateException failure =
+        assertThrows(IllegalStateException.class, () -> bearer.cancelPending("pending-id"));
+
+    assertEquals("ComfyUI queue delete failed with HTTP 401", failure.getMessage());
+    verify(access).rejectUsed(snapshot, "ComfyUI rejected the bearer credential");
+  }
+
+  /** BEARER 凭据缺失/撤销是确定性失败：不加任何认证头、也不发出任何出网请求。 */
+  @Test
+  void bearerModeFailsDeterministicallyWhenCredentialIsUnavailable() {
+    PluginCredentialAccess access = mock(PluginCredentialAccess.class);
+    when(access.resolve())
+        .thenThrow(
+            new PluginCredentialUnavailableException(
+                PluginCredentialUnavailableReason.REAUTH_REQUIRED, "reauth required"));
+    StandardComfyuiClient bearer = authenticatedClient(ComfyuiSettings.AuthMode.BEARER, access);
+
+    assertThrows(
+        PluginCredentialUnavailableException.class,
+        () -> bearer.submit(new ObjectMapper().createObjectNode(), "client-1"));
+    assertNull(authorization.get());
+  }
+
+  /** 凭据载荷里的非法 header 字符在出网前被拒绝，错误不回显取值。 */
+  @Test
+  void bearerModeRejectsIllegalCredentialPayload() {
+    PluginCredentialAccess access = mock(PluginCredentialAccess.class);
+    when(access.resolve()).thenReturn(snapshot("bad token\\n"));
+    StandardComfyuiClient bearer = authenticatedClient(ComfyuiSettings.AuthMode.BEARER, access);
+
+    IllegalStateException failure =
+        assertThrows(
+            IllegalStateException.class,
+            () -> bearer.submit(new ObjectMapper().createObjectNode(), "client-1"));
+
+    assertEquals("ComfyUI credential payload is invalid", failure.getMessage());
+  }
+
+  /** rejectUsed 致命失败（Error）时也必须释放已经取得的响应体，且主失败身份原样保留：这是本方法真正拥有的资源边界。 */
+  @Test
+  void bearerModeReleasesBodyWhenCredentialRejectionFailsFatally() throws Exception {
+    PluginCredentialAccess access = mock(PluginCredentialAccess.class);
+    when(access.resolve()).thenReturn(snapshot("revoked"));
+    AssertionError fatal = new AssertionError("synthetic fatal rejection");
+    doThrow(fatal).when(access).rejectUsed(any(), any());
+    AtomicBoolean closed = new AtomicBoolean();
+    HttpResponse<InputStream> unauthorized = mock(HttpResponse.class);
+    when(unauthorized.statusCode()).thenReturn(401);
+    when(unauthorized.body()).thenReturn(trackingBody(closed));
+    HttpClient http = mock(HttpClient.class);
+    doReturn(unauthorized).when(http).send(any(), any());
+    StandardComfyuiClient bearer =
+        new StandardComfyuiClient(
+            "http://127.0.0.1:1",
+            ComfyuiSettings.AuthMode.BEARER,
+            Duration.ofSeconds(1),
+            new ObjectMapper(),
+            access,
+            http);
+
+    AssertionError thrown =
+        assertThrows(
+            AssertionError.class,
+            () -> bearer.submit(new ObjectMapper().createObjectNode(), "client-1"));
+
+    assertSame(fatal, thrown);
+    assertTrue(closed.get());
+  }
+
+  /** 未知解析故障不是"本地未配置"：只回传去敏 resolution failed，且在任何出网之前失败。 */
+  @Test
+  void bearerModeReportsUnknownCredentialResolutionFailureWithoutHttp() {
+    PluginCredentialAccess access = mock(PluginCredentialAccess.class);
+    when(access.resolve()).thenThrow(new IllegalStateException("synthetic-secret resolver"));
+    StandardComfyuiClient bearer = authenticatedClient(ComfyuiSettings.AuthMode.BEARER, access);
+    authorization.set(null);
+
+    IllegalStateException failure =
+        assertThrows(
+            IllegalStateException.class,
+            () -> bearer.submit(new ObjectMapper().createObjectNode(), "client-1"));
+
+    assertEquals("ComfyUI credential resolution failed", failure.getMessage());
+    assertFalse(failure.getMessage().contains("synthetic-secret"));
+    assertNull(authorization.get());
+  }
+
+  /** 解析期的 Error 原样上抛，既不伪装成配置缺失也不发出请求。 */
+  @Test
+  void bearerModePropagatesCredentialResolutionErrorUnchanged() {
+    PluginCredentialAccess access = mock(PluginCredentialAccess.class);
+    AssertionError fatal = new AssertionError("synthetic fatal resolution");
+    when(access.resolve()).thenThrow(fatal);
+    StandardComfyuiClient bearer = authenticatedClient(ComfyuiSettings.AuthMode.BEARER, access);
+    authorization.set(null);
+
+    AssertionError thrown =
+        assertThrows(
+            AssertionError.class,
+            () -> bearer.submit(new ObjectMapper().createObjectNode(), "client-1"));
+
+    assertSame(fatal, thrown);
+    assertNull(authorization.get());
+  }
+
+  /** 只记录 close 的响应体：用于断言失败路径释放了已取得的响应。 */
+  private static InputStream trackingBody(AtomicBoolean closed) {
+    return new FilterInputStream(new ByteArrayInputStream(new byte[] {1})) {
+      @Override
+      public void close() throws IOException {
+        closed.set(true);
+        super.close();
+      }
+    };
+  }
+
+  private StandardComfyuiClient authenticatedClient(
+      ComfyuiSettings.AuthMode authMode, PluginCredentialAccess access) {
+    return new StandardComfyuiClient(
+        "http://127.0.0.1:" + server.getAddress().getPort(),
+        authMode,
+        Duration.ofSeconds(1),
+        Duration.ofSeconds(2),
+        new ObjectMapper(),
+        access);
+  }
+
+  /** 宿主真实写入的形状：静态密钥载荷只有 apiKey，且 region/expiresAt 同时为空。 */
+  private static PluginCredentialSnapshot snapshot(String apiKeyLiteral) {
+    return new PluginCredentialSnapshot(
+        "comfyui",
+        UUID.randomUUID(),
+        "context-fingerprint",
+        null,
+        null,
+        1L,
+        new byte[] {1},
+        "{\"apiKey\":\"" + apiKeyLiteral + "\"}");
+  }
+
+  private void prompt(HttpExchange exchange) throws IOException {
+    authorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
+    promptBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+    json(exchange, 200, promptResponse.get());
+  }
+
+  private void authHistory(HttpExchange exchange) throws IOException {
+    historyAuthorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
+    json(exchange, 200, "{}");
+  }
+
+  private void upload(HttpExchange exchange) throws IOException {
+    byte[] body = exchange.getRequestBody().readAllBytes();
+    uploadBody.set(body);
+    uploadContentLength.set(exchange.getRequestHeaders().getFirst("Content-Length"));
+    String text = new String(body, StandardCharsets.ISO_8859_1);
+    if (text.contains("filename=\"../escape.mp4\"")) {
+      json(exchange, 400, "{\"error\":\"escape\"}");
+      return;
+    }
+    json(exchange, uploadStatus.get(), uploadResponse.get());
+  }
+
+  private static InputStream tracking(InputStream content, AtomicBoolean closed) {
+    return new FilterInputStream(content) {
+      @Override
+      public void close() throws IOException {
+        closed.set(true);
+        super.close();
+      }
+
+      @Override
+      public int read() throws IOException {
+        if (closed.get()) {
+          throw new IOException("closed");
+        }
+        return super.read();
+      }
+
+      @Override
+      public int read(byte[] buffer, int offset, int length) throws IOException {
+        if (closed.get()) {
+          throw new IOException("closed");
+        }
+        return super.read(buffer, offset, length);
+      }
+    };
+  }
+
+  private static int indexOf(byte[] body, byte[] needle) {
+    for (int i = 0; i <= body.length - needle.length; i++) {
+      boolean matched = true;
+      for (int j = 0; j < needle.length; j++) {
+        if (body[i + j] != needle[j]) {
+          matched = false;
+          break;
+        }
+      }
+      if (matched) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  /** 每次最多读固定字节，让 BodyPublisher 分多次拉取内容（模拟碎片化输入流）。 */
+  private static final class ChunkedInputStream extends InputStream {
+
+    private final byte[] payload;
+    private final int chunk;
+    private int offset;
+
+    private ChunkedInputStream(byte[] payload, int chunk) {
+      this.payload = payload;
+      this.chunk = chunk;
+    }
+
+    @Override
+    public int read(byte[] buffer, int off, int len) {
+      if (offset >= payload.length) {
+        return -1;
+      }
+      int count = Math.min(chunk, Math.min(len, payload.length - offset));
+      System.arraycopy(payload, offset, buffer, off, count);
+      offset += count;
+      return count;
+    }
+
+    @Override
+    public int read() {
+      byte[] one = new byte[1];
+      int read = read(one, 0, 1);
+      return read < 0 ? -1 : one[0] & 0xff;
+    }
+  }
+
+  private static final class FailingInputStream extends InputStream {
+
+    @Override
+    public int read() throws IOException {
+      throw new IOException("read failed");
+    }
+  }
+
+  private void view(HttpExchange exchange) throws IOException {
+    viewAuthorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
+    viewQuery.set(exchange.getRequestURI().getRawQuery());
+    byte[] bytes = new byte[] {4, 5, 6, 7};
+    exchange.getResponseHeaders().set("Content-Type", "video/mp4");
+    exchange.getResponseHeaders().set("Content-Length", Integer.toString(bytes.length));
+    exchange.sendResponseHeaders(200, bytes.length);
+    exchange.getResponseBody().write(bytes);
+    exchange.close();
+  }
+
+  private void queue(HttpExchange exchange) throws IOException {
+    if ("GET".equals(exchange.getRequestMethod())) {
+      json(
+          exchange,
+          200,
+          "{\"queue_running\":[[\"0\",\"running-id\"]],\"queue_pending\":[[\"1\",\"pending-id\"]]}");
+      return;
+    }
+    queueDeleteBody.set(
+        new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+    json(exchange, queueDeleteStatus.get(), "{}");
+  }
+
+  private static void json(HttpExchange exchange, int status, String body) throws IOException {
+    byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+    exchange.getResponseHeaders().set("Content-Type", "application/json");
+    exchange.sendResponseHeaders(status, bytes.length);
+    exchange.getResponseBody().write(bytes);
+    exchange.close();
+  }
+}

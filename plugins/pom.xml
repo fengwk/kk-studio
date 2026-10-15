@@ -17,6 +17,6 @@
         <module>minimax-mavis</module>
         <module>opencli</module>
         <module>media</module>
-        <module>canvas-comfyui</module>
+        <module>comfyui</module>
     </modules>
 </project>

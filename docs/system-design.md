@@ -72,7 +72,7 @@ Worker 与生命周期。领域契约和状态机位于内层，数据库、主�
 frontend -> web -> platform-runtime
 web -> platform-plugin-api
 web -(runtime)-> selected plugins -> platform-plugin-api / harness-contributor-api / canvas-plugin-api / canvas-core
-canvas-comfyui -> platform-runtime（提示词任务与资源服务）
+comfyui -> platform-plugin-api / canvas-plugin-api / harness-common（标准 ComfyUI HTTP 与冻结工作流）
 web -> canvas-infra -> canvas-plugin-api -> canvas-core
 web -> project -> harness-runtime
 web -> harness-infra -> harness-runtime -> harness-tool / harness-environment
