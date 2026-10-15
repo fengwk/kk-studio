@@ -292,24 +292,23 @@ class PluginAgentDependencyPostgresIntegrationTest {
   void saveWinningTheAgentRowLockMakesTheConcurrentDeleteReject() throws Exception {
     seedAgentModel();
     assertTrue(definitionRepository.create(agentDefinition(DECLARED_AGENT)));
-    CountDownLatch lockAcquired = new CountDownLatch(1);
+    CountDownLatch saveLockHeld = new CountDownLatch(1);
     CountDownLatch releaseSave = new CountDownLatch(1);
     PluginAgentDependencies gatedDependencies =
         new PluginAgentDependencies(
             registry,
             configurationRepository,
-            new GatedAgentDefinitionRepository(definitionRepository, lockAcquired, releaseSave));
+            new GatedAgentDefinitionRepository(definitionRepository, saveLockHeld, releaseSave));
 
     ExecutorService executor = Executors.newFixedThreadPool(2);
     try {
+      // 保存侧被闸门停在「已持有 Agent 行锁、尚未提交」的位置，删除才有确定的相反锁顺序。
       Future<PluginCatalogRecord> save =
           executor.submit(
               () ->
                   commitServiceWith(gatedDependencies)
                       .configure(DECLARING_PLUGIN_ID, 1L, 1L, VALUES_DECLARING, Map.of()));
-      assertTrue(
-          lockAcquired.await(30, TimeUnit.SECONDS),
-          "the save must reach the Agent row lock before the delete starts");
+      awaitLatch(saveLockHeld, "the save must reach the Agent row lock before the delete starts");
 
       Future<AiInUseException> delete =
           executor.submit(
@@ -321,6 +320,7 @@ class PluginAgentDependencyPostgresIntegrationTest {
                   return error;
                 }
               });
+      // 真实库证明删除确实在等待同一 Agent 行锁，而不是等保存提交后才开始。
       awaitUngrantedRowLock();
 
       releaseSave.countDown();
@@ -330,20 +330,24 @@ class PluginAgentDependencyPostgresIntegrationTest {
       assertNotNull(rejection, "the delete must reject an agent the committed save references");
       assertTrue(rejection.getMessage().contains("referenced by plugin configuration"));
     } finally {
-      executor.shutdownNow();
+      releaseSave.countDown();
+      shutdownWorkers(executor);
     }
 
     assertNotNull(definitionRepository.getByName(DECLARED_AGENT), "the agent must survive");
     assertEquals(
         VALUES_DECLARING, currentValues(), "the committed reference must be the desired one");
+    assertEquals(
+        2L, configurationHistoryCount(), "the committed save must own exactly one revision");
   }
 
-  /** 并发方向二：删除先取得 Agent 行锁并提交，随后保存必须固定失败，绝不写入悬空引用。 */
+  /** 并发方向二：删除先取得 Agent 行锁并在保存真的等待该锁后才提交，保存必须固定失败且零写。 */
   @Test
   void deleteWinningTheAgentRowLockMakesTheConcurrentSaveFail() throws Exception {
     seedAgentModel();
     assertTrue(definitionRepository.create(agentDefinition(DECLARED_AGENT)));
     CountDownLatch deleteLockHeld = new CountDownLatch(1);
+    CountDownLatch releaseDelete = new CountDownLatch(1);
 
     ExecutorService executor = Executors.newFixedThreadPool(2);
     try {
@@ -353,13 +357,14 @@ class PluginAgentDependencyPostgresIntegrationTest {
                   new TransactionTemplate(transactionManager)
                       .execute(
                           status -> {
-                            // 与生产删除同一锁序：先取自身 Agent 行锁，再去读权威声明。
+                            // 与生产删除同一锁序：先取自身 Agent 行锁，闸门放行前绝不提交。
                             definitionRepository.getByNameForUpdate(DECLARED_AGENT);
                             deleteLockHeld.countDown();
+                            awaitLatchQuietly(releaseDelete);
                             definitionService.deleteAgent(DECLARED_AGENT, "0");
                             return null;
                           }));
-      assertTrue(deleteLockHeld.await(30, TimeUnit.SECONDS));
+      awaitLatch(deleteLockHeld, "the delete must hold the Agent row lock before the save starts");
 
       Future<AiValidationException> save =
           executor.submit(
@@ -371,23 +376,69 @@ class PluginAgentDependencyPostgresIntegrationTest {
                   return error;
                 }
               });
+      // 真实库证明保存正阻塞在同一 Agent 行锁上：此时删除尚未提交，方向是确定的「删除先持锁」。
+      awaitUngrantedRowLock();
 
+      releaseDelete.countDown();
       delete.get(30, TimeUnit.SECONDS);
       AiValidationException rejection = save.get(30, TimeUnit.SECONDS);
       assertNotNull(rejection, "the save must fail once the agent was deleted");
       assertEquals("plugins reference a missing agent", rejection.getMessage());
+      assertTrue(rejection.getCause() == null, "the dependency failure must not carry a cause");
     } finally {
-      executor.shutdownNow();
+      releaseDelete.countDown();
+      shutdownWorkers(executor);
     }
 
     assertEquals(null, definitionRepository.getByName(DECLARED_AGENT));
     assertEquals(1L, catalog().epoch(), "a rejected save must leave the catalog epoch untouched");
+    assertEquals(1L, configurationHistoryCount(), "a rejected save must not add history");
     assertEquals(
         VALUES_NO_DECLARATION,
         currentValues(),
         "the desired values must stay the bootstrap default");
     assertEquals(0L, credentialRowCount());
     assertEquals(0, catalogWakes.get());
+    assertEquals(0, dispatcherWakes.get());
+  }
+
+  /** 等待闸门或锁步信号；超时即失败，不使用固定睡眠做同步。 */
+  private static void awaitLatch(CountDownLatch latch, String message) {
+    try {
+      assertTrue(latch.await(30, TimeUnit.SECONDS), message);
+    } catch (InterruptedException interrupted) {
+      Thread.currentThread().interrupt();
+      throw new AssertionError("interrupted while " + message);
+    }
+  }
+
+  /** worker 内部的闸门等待：被中断时以断言失败结束，让所在事务正常回滚。 */
+  private static void awaitLatchQuietly(CountDownLatch latch) {
+    try {
+      if (!latch.await(30, TimeUnit.SECONDS)) {
+        throw new AssertionError("the gated worker was not released");
+      }
+    } catch (InterruptedException interrupted) {
+      Thread.currentThread().interrupt();
+      throw new AssertionError("interrupted while waiting for the gate");
+    }
+  }
+
+  /**
+   * 先释放闸门再关停 worker，并断言它们真的退出：断言失败时也不留下持有事务的线程。
+   *
+   * <p>调用方必须已经 {@code countDown} 自己的闸门，否则这里退化为中断挂起线程并在超时后失败。
+   */
+  private static void shutdownWorkers(ExecutorService executor) {
+    executor.shutdown();
+    try {
+      assertTrue(executor.awaitTermination(30, TimeUnit.SECONDS), "concurrent workers must exit");
+    } catch (InterruptedException interrupted) {
+      Thread.currentThread().interrupt();
+      throw new AssertionError("interrupted while waiting for the concurrent workers to exit");
+    } finally {
+      executor.shutdownNow();
+    }
   }
 
   /** 与生产装配一致、只替换依赖服务的提交服务：其余依赖原样复用。 */
@@ -556,14 +607,7 @@ class PluginAgentDependencyPostgresIntegrationTest {
     public AgentDefinition getByNameForUpdate(String name) {
       AgentDefinition locked = delegate.getByNameForUpdate(name);
       lockAcquired.countDown();
-      try {
-        if (!release.await(30, TimeUnit.SECONDS)) {
-          throw new AssertionError("the gated save was not released");
-        }
-      } catch (InterruptedException interrupted) {
-        Thread.currentThread().interrupt();
-        throw new AssertionError("interrupted while gating the save");
-      }
+      awaitLatchQuietly(release);
       return locked;
     }
 

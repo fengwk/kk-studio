@@ -445,7 +445,7 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
   `config_sync.environment_identity_and_token` /
   `config_sync.import_precheck_and_partial_confirmation` /
   `config_sync.environment_install_config_roundtrip` /
-  `config_sync.install_config_hard_invalid_precheck`：七类配置清单、凭据随 YAML 导出、导入前的
+  `config_sync.install_config_hard_invalid_precheck`：八类配置清单、凭据随 YAML 导出、导入前的
   新增/覆盖/跳过清单、硬错误拒绝与部分导入授权、同名 Provider 更新、Environment 身份与注册令牌保留，
   以及 `installConfig`（studioUrl、note、bashExecutable、内联 LSP servers）随注册令牌的导出导入往返、
   token+配置原子更新与清除、installConfig 硬错误在预检查与导入阶段的零副作用拒绝，响应带 `no-store`。
@@ -473,7 +473,7 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
   heartbeat 保活，以及 Project 全局 changed 失效；Thread/Canvas 的 snapshot-first 对账、
   tree/interactions/environments 资源回读与 `statusExpiresAt` 一次性回读由前端 jsdom/组件测试覆盖。
 - `settings.system_contract_cas`：系统设置按固定六段（tool、aiRuntime、environment、network、storageMedia、advanced）严格聚合，
-  未知字段与非法值拒绝，整体 CAS 保存与恢复；`storageMedia` 持有临时资源保留期与扫描间隔
+  HTTP 边界未知字段（含已退役的 `integrations`）与非法值 400，整体 CAS 保存与恢复；`storageMedia` 持有临时资源保留期与扫描间隔
   （默认 3 天 / 30 分钟，热更经心跳通道作用于尚未回收的 Daemon workspace）以及上传有效期与下载签名默认值。
 - `crud.chat.default_environment`：Chat 默认 Environment 是 required-nullable（未选择时显式 null），创建省略
   `yoloEnabled` 时为 `false`；携带已存在 Environment 作为默认环境，PUT 省略 `environmentName` 保留当前默认环境、
@@ -883,12 +883,16 @@ Environment Daemon 不属于 NAS App 容器。需要在某台主机上执行文�
 
 设置页的“同步”位于“高级”之后，提供“导入”和“导出”。
 导出默认选择全部配置，也可只选具体条目；依赖自动加入，无需另选开关。
-文件始终包含配置所需的凭据和注册令牌，请保存在私密位置，不提交到 Git、不粘贴到日志。
+文件会携带 Provider 的凭据与 Environment 的注册令牌，请保存在私密位置，不提交到 Git、不粘贴到日志；
+插件秘密（如 OpenCLI 的 `apiKey`）与受保护私有身份（如 `instanceId`）永不导出，只能在统一的 Plugin Secret API
+或登录流程里录入。
 
-可导出 Provider、Model、Agent、Skill Package、Environment、MCP 服务与系统设置。
+可导出 Provider、Model、Agent、Skill Package、Environment、MCP 服务、插件普通配置与系统设置。
 Environment 条目把保存的安装设置 `installConfig` 与 `name`、`registrationToken` 并列嵌套，缺失
 该键表示没有安装设置。Agent 自动包含 Model、Provider、引用的 Skill Package、MCP 服务和 Subagent；
-Model 包含 Provider；系统设置包含其引用的备用模型和提示词 Agent。
+Model 包含 Provider；插件条目只带 `pluginId` 与普通值，并按插件在代码里声明的所需 Agent 补齐依赖。
+内置 Agent（如 `Compaction`）只满足依赖，不作为条目导出；导入节点用自身内置定义满足引用，不会因此被覆盖。
+系统设置是有界的六节核心设置，不引用任何模型或提示词 Agent。
 依赖只沿引用方向扩展，不包含无关的其它模型或 Agent，也不因选择 Agent 自动加入 Environment。
 
 导入选择 `.yaml` 或 `.yml` 文件后先检查，不写数据库。确认页分别列出将新增、将覆盖的配置，
@@ -900,9 +904,11 @@ YAML 结构、类型、有效值错误或当前必填字段缺失，会直接拒
 条目名称须非空且没有首尾空白，重复名称不会依次覆盖；注册令牌被不同 Environment 占用、
 同名 Skill Package 更换仓库地址、移除仍被引用的 Skill 或 MCP 工具也会整份拒绝。
 文件未包含的类别保持原样，但包含系统设置时必须提供当前完整设置结构，不能只提供局部字段。
-系统设置的 `integrations` 段整体退役，导入包含该段的文件或配置按未知字段规则被明确拒绝，无双读与静默别名；
-ComfyUI/MiniMax-H3 与 OpenCLI 的普通配置、以及 OpenCLI 的 `apiKey` 凭据都只有插件 Schema 与 ConfigSync 的 plugins 一个来源，
-在插件统一配置面与 Secret API 录入，或随 ConfigSync 的 plugins 条目导入。涉及历史配置结构调整时，严格遵循“配置导出备份 -> 仅在获授权时停机并数据库重建 -> 当前 Schema 初始化 -> 导入恢复”的边界，绝不直接就地操作已有部署或共享数据库。
+系统设置的 `integrations` 段整体退役：HTTP 写入携带该段一律 400；配置同步文件里的未知设置字段会被移除
+并作为跳过项列出（沿用既有严格未知字段语义，不做别名、不做双读），其余完整六节在用户明确选择
+“仅导入可用配置”时照常导入，而不是整份文件或整个 settings 条目被拒绝。
+ComfyUI/MiniMax-H3 与 OpenCLI 的普通配置只有插件 Schema 与配置同步 plugins 一个来源：
+普通值随 plugins 条目导入导出，`apiKey` 等秘密与受保护身份走 Plugin Secret API 或登录流程。涉及历史配置结构调整时，严格遵循“配置导出备份 -> 仅在获授权时停机并数据库重建 -> 当前 Schema 初始化 -> 导入恢复”的边界，绝不直接就地操作已有部署或共享数据库。
 Provider 凭据按文件恢复；文件中的 Provider 没有凭据时，同名目标的旧凭据也会清空。
 
 确认后按名称新增或更新，不删除文件外的配置。预览不锁定配置，实际执行重新检查；
