@@ -14,10 +14,10 @@ import java.util.UUID;
  * Plugin opaque JSON 的 AES-256-GCM 认证加密包装器。
  *
  * <p>它把共享原语 {@link AesGcmEnvelope} 固定到 Plugin 凭据的唯一当前格式 {@link #FORMAT_VERSION}，AAD 精确绑定 {@code
- * pluginId + region + authGeneration + formatVersion}（长度前缀 UTF-8 编码，避免字段拼接歧义），因此把密文换到另一个
- * pluginId、region 或认证代际上都会认证失败。
+ * pluginId + authGeneration + contextFingerprint + region 存在性与值 + formatVersion}（长度前缀 UTF-8 编码，可空
+ * region 带显式存在标记，避免字段拼接歧义），因此把密文换到另一个 pluginId、认证代际、认证上下文、region 或「有/无 region」形态上都会认证失败。
  *
- * <p>当前只存在格式 2 一种 Plugin 格式：不读取旧格式，也不接受缺省代际。旧部署的密文必须先经批准完成转换，再进入本版本。原语的 {@link
+ * <p>当前只存在格式 2 一种 Plugin 格式：不读取旧格式，也不接受缺省代际或上下文。旧部署的密文必须先经批准完成转换，再进入本版本。原语的 {@link
  * GeneralSecurityException} 在这里收敛为去敏的 {@link PluginCredentialIntegrityException}；密钥/参数错误保持 {@link
  * IllegalArgumentException}。
  */
@@ -28,14 +28,19 @@ public final class PluginCredentialCodec {
 
   /** 加密一份 Plugin 秘密载荷，返回完整 envelope。 */
   public byte[] encrypt(
-      SecretKey key, String pluginId, UUID authGeneration, String region, String payloadJson) {
+      SecretKey key,
+      String pluginId,
+      UUID authGeneration,
+      String contextFingerprint,
+      String region,
+      String payloadJson) {
     if (payloadJson == null) {
       throw new IllegalArgumentException("payloadJson must not be null");
     }
     return AesGcmEnvelope.encrypt(
         key,
         FORMAT_VERSION,
-        aad(pluginId, region, authGeneration),
+        aad(pluginId, authGeneration, contextFingerprint, region),
         payloadJson.getBytes(StandardCharsets.UTF_8));
   }
 
@@ -46,8 +51,13 @@ public final class PluginCredentialCodec {
    * closed。
    */
   public String decrypt(
-      SecretKey key, String pluginId, UUID authGeneration, String region, byte[] envelope) {
-    byte[] aad = aad(pluginId, region, authGeneration);
+      SecretKey key,
+      String pluginId,
+      UUID authGeneration,
+      String contextFingerprint,
+      String region,
+      byte[] envelope) {
+    byte[] aad = aad(pluginId, authGeneration, contextFingerprint, region);
     try {
       return new String(
           AesGcmEnvelope.decrypt(key, FORMAT_VERSION, aad, envelope), StandardCharsets.UTF_8);
@@ -57,15 +67,20 @@ public final class PluginCredentialCodec {
     }
   }
 
-  private static byte[] aad(String pluginId, String region, UUID authGeneration) {
-    if (pluginId == null || region == null || authGeneration == null) {
+  private static byte[] aad(
+      String pluginId, UUID authGeneration, String contextFingerprint, String region) {
+    if (pluginId == null
+        || authGeneration == null
+        || contextFingerprint == null
+        || contextFingerprint.isBlank()) {
       throw new IllegalArgumentException(
-          "pluginId, region and authGeneration are required for the AAD");
+          "pluginId, authGeneration and contextFingerprint are required for the AAD");
     }
     return LengthPrefixedAad.create()
         .field(pluginId)
-        .field(region)
         .field(authGeneration.toString())
+        .field(contextFingerprint)
+        .optionalField(region)
         .intValue(FORMAT_VERSION)
         .build();
   }

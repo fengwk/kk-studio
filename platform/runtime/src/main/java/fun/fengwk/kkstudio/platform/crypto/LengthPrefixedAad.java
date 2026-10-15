@@ -28,6 +28,20 @@ public final class LengthPrefixedAad {
     return this;
   }
 
+  /**
+   * 追加一个可空 UTF-8 字段：先写 1 byte 存在标记（1=存在、0=缺失），存在时再写长度前缀与字节。
+   *
+   * <p>存在标记使「字段缺失」与「字段为空串」在 AAD 中不可互换，因此可空身份字段也能安全绑定。
+   */
+  public LengthPrefixedAad optionalField(String value) {
+    if (value == null) {
+      out.write(0);
+      return this;
+    }
+    out.write(1);
+    return field(value);
+  }
+
   /** 追加一个 4 bytes 大端整数字段。 */
   public LengthPrefixedAad intValue(int value) {
     writeInt(value);

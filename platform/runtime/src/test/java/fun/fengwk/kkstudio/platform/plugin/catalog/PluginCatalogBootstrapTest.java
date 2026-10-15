@@ -28,6 +28,7 @@ import fun.fengwk.kkstudio.platform.plugin.PluginInstance;
 import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
 import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialAccess;
+import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialReference;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRow;
 import fun.fengwk.kkstudio.platform.plugin.testing.TestPluginFixtures;
@@ -38,7 +39,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.function.Function;
+import java.util.UUID;
+import java.util.function.BiFunction;
 
 /**
  * {@link PluginCatalogBootstrap} 的初始化与恢复契约测试（内存仓储替身）。
@@ -51,6 +53,9 @@ class PluginCatalogBootstrapTest {
   private static final String PLUGIN_ALPHA = "alpha.plugin";
   private static final String PLUGIN_BETA = "beta.plugin";
   private static final String DEFAULT_SCHEMA_JSON = "{\"enabled\":true}";
+  private static final String CONTEXT =
+      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+  private static final UUID GENERATION = UUID.fromString("11111111-1111-1111-1111-111111111111");
 
   private static PluginConfigSchema enabledSchema() {
     return new PluginConfigSchema(
@@ -194,6 +199,9 @@ class PluginCatalogBootstrapTest {
             "1.0",
             fixture.schemaFingerprint(PLUGIN_ALPHA),
             fixture.capabilityFingerprint(PLUGIN_ALPHA),
+            fixture.entry(PLUGIN_ALPHA).authGeneration(),
+            fixture.entry(PLUGIN_ALPHA).contextFingerprint(),
+            List.of(),
             "{\"enabled\":false}"));
 
     TestPlugin restarted = new TestPlugin(PLUGIN_ALPHA);
@@ -290,7 +298,9 @@ class PluginCatalogBootstrapTest {
                         original.configRevision(),
                         original.pluginCodeVersion(),
                         "f".repeat(64),
-                        original.capabilityFingerprint())),
+                        original.capabilityFingerprint(),
+                        original.authGeneration(),
+                        original.contextFingerprint())),
                 fixture.repository.catalog.manifest().catalogFingerprint()));
 
     assertRestoreStage(fixture, "stage=restore-history-identity");
@@ -311,7 +321,9 @@ class PluginCatalogBootstrapTest {
                         original.configRevision(),
                         "9.9",
                         original.schemaFingerprint(),
-                        original.capabilityFingerprint())),
+                        original.capabilityFingerprint(),
+                        original.authGeneration(),
+                        original.contextFingerprint())),
                 fixture.repository.catalog.manifest().catalogFingerprint()));
 
     assertRestoreStage(fixture, "stage=restore-history-identity");
@@ -440,8 +452,8 @@ class PluginCatalogBootstrapTest {
     return new PluginCatalogBootstrap(registry, repository, new InMemoryTransactionManager());
   }
 
-  private static Function<String, PluginContext> contexts() {
-    return pluginId ->
+  private static BiFunction<String, PluginCredentialReference, PluginContext> contexts() {
+    return (pluginId, reference) ->
         new PluginContext(
             new PluginCredentialAccess() {
               @Override
@@ -511,6 +523,9 @@ class PluginCatalogBootstrapTest {
               codeVersion,
               schemaFingerprint,
               capabilityFingerprint,
+              identity.authGeneration(),
+              identity.contextFingerprint(),
+              previous.configuredSecretFields(),
               previous.valuesJson()));
       repository.catalog =
           new PluginCatalogRecord(
@@ -522,7 +537,9 @@ class PluginCatalogBootstrapTest {
                           identity.configRevision(),
                           codeVersion,
                           schemaFingerprint,
-                          capabilityFingerprint)),
+                          capabilityFingerprint,
+                          identity.authGeneration(),
+                          identity.contextFingerprint())),
                   repository.catalog.manifest().catalogFingerprint()));
     }
 

@@ -189,7 +189,12 @@ public final class PluginCredentialRefreshService {
     try {
       payload =
           codec.decrypt(
-              key, row.pluginId(), row.authGeneration(), row.region(), row.encryptedPayload());
+              key,
+              row.pluginId(),
+              row.authGeneration(),
+              row.contextFingerprint(),
+              row.region(),
+              row.encryptedPayload());
     } catch (RuntimeException error) {
       return finalizeFailure(
           row, PluginCredentialStatus.REAUTH_REQUIRED, row.nextRefreshAt(), UNREADABLE_ERROR);
@@ -204,6 +209,7 @@ public final class PluginCredentialRefreshService {
         new PluginCredentialSnapshot(
             row.pluginId(),
             row.authGeneration(),
+            row.contextFingerprint(),
             row.region(),
             row.expiresAt(),
             row.version(),
@@ -246,7 +252,12 @@ public final class PluginCredentialRefreshService {
       requireUsable(plugin, row, material, completedAt);
       envelope =
           codec.encrypt(
-              key, row.pluginId(), row.authGeneration(), material.region(), material.payloadJson());
+              key,
+              row.pluginId(),
+              row.authGeneration(),
+              row.contextFingerprint(),
+              material.region(),
+              material.payloadJson());
     } catch (IllegalArgumentException error) {
       return finalizeFailure(
           row,
@@ -258,6 +269,7 @@ public final class PluginCredentialRefreshService {
         repository.finalizeSuccess(
             row.pluginId(),
             row.authGeneration(),
+            row.contextFingerprint(),
             row.refreshLeaseToken(),
             row.version(),
             envelope,
@@ -286,7 +298,8 @@ public final class PluginCredentialRefreshService {
     if (material == null) {
       throw new IllegalArgumentException(INVALID_RENEWAL_ERROR);
     }
-    if (!material.region().equals(row.region())
+    if (!material.interactive()
+        || !material.region().equals(row.region())
         || !acceptsCredentialRegion(plugin, material.region())) {
       throw new IllegalArgumentException(INVALID_RENEWAL_ERROR);
     }
@@ -309,6 +322,7 @@ public final class PluginCredentialRefreshService {
         repository.finalizeFailure(
             row.pluginId(),
             row.authGeneration(),
+            row.contextFingerprint(),
             row.refreshLeaseToken(),
             row.version(),
             status,
@@ -326,6 +340,7 @@ public final class PluginCredentialRefreshService {
     return repository.ownsUnexpiredLease(
         row.pluginId(),
         row.authGeneration(),
+        row.contextFingerprint(),
         row.refreshLeaseToken(),
         row.version(),
         clock.instant());
@@ -336,6 +351,7 @@ public final class PluginCredentialRefreshService {
         repository.releaseLease(
             row.pluginId(),
             row.authGeneration(),
+            row.contextFingerprint(),
             row.refreshLeaseToken(),
             row.version(),
             clock.instant());

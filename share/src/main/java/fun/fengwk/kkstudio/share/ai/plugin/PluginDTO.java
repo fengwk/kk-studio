@@ -3,11 +3,16 @@ package fun.fengwk.kkstudio.share.ai.plugin;
 import lombok.Data;
 
 import java.time.Instant;
+import java.util.List;
 
 /**
  * 已安装 Plugin 的安全投影。
  *
- * <p>只包含安装身份与认证状态：密文、access token、加密密钥、client identity 与 callback URL 都不在这里，也不出现在任何响应中。
+ * <p>只包含安装身份、配置投影与认证状态：密文、access token、加密密钥、client identity 与 callback URL 都不在这里，也不出现在任何响应中。 秘密只以
+ * {@link PluginConfigurationDTO#getSecrets()} 的说明与布尔出现。
+ *
+ * <p>配置身份与运行状态分开：{@code desired*} 是权威 catalog 的当前坐标，{@code applied*} 是本节点实际构建运行实例时的坐标；两者不一致时 {@code
+ * applicationError} 如实说明「已保存但尚未应用」，绝不把保存当发布。
  */
 @Data
 public class PluginDTO {
@@ -21,7 +26,7 @@ public class PluginDTO {
   /** Plugin 版本。 */
   private String version;
 
-  /** 认证交互类型；Plugin 不提供交互认证时为 null。 */
+  /** 认证交互类型；Plugin 不提供认证时为 null。 */
   private PluginAuthKindDTO authKind;
 
   /**
@@ -31,13 +36,13 @@ public class PluginDTO {
    */
   private String status;
 
-  /** 当前凭据的 region；无凭据时为 null。 */
+  /** 当前凭据的 region；无凭据或静态密钥时为 null。 */
   private String region;
 
-  /** access token 到期时间；无凭据时为 null。 */
+  /** access token 到期时间；无凭据或静态密钥时为 null。 */
   private Instant expiresAt;
 
-  /** 下一次自动刷新时间；无凭据时为 null。 */
+  /** 下一次自动刷新时间；无凭据或静态密钥时为 null。 */
   private Instant nextRefreshAt;
 
   /** 最近一次成功刷新时间；从未成功刷新时为 null。 */
@@ -45,4 +50,28 @@ public class PluginDTO {
 
   /** 最近一次刷新失败的有界去敏错误；成功时为 null。 */
   private String lastRefreshError;
+
+  /** 权威 catalog 当前 desired 配置的普通值、schema 与秘密录入状态投影；本节点实际应用的坐标另见 {@code applied*}。 */
+  private PluginConfigurationDTO configuration;
+
+  /** 权威 catalog 当前 epoch（canonical 非负十进制字符串）。 */
+  private String desiredEpoch;
+
+  /** 本节点运行实例构建时的 epoch（canonical 非负十进制字符串）。 */
+  private String appliedEpoch;
+
+  /** 权威 catalog 中该插件的当前配置修订（canonical 非负十进制字符串）。 */
+  private String desiredRevision;
+
+  /** 本节点运行实例构建时的配置修订（canonical 非负十进制字符串）。 */
+  private String appliedRevision;
+
+  /** 本节点已应用快照中该 Plugin 真实冻结的模型可见工具名（按冻结目录顺序）；没有贡献时为空列表。 */
+  private List<String> harnessToolNames;
+
+  /** 本节点已应用快照中该 Plugin 真实冻结的 Canvas 函数名（按冻结目录顺序）；没有贡献时为空列表。 */
+  private List<String> canvasFunctionNames;
+
+  /** 已保存但尚未在本节点应用时的固定去敏说明；已应用时为 null。 */
+  private String applicationError;
 }

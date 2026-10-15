@@ -59,6 +59,8 @@ class PluginCredentialRefreshDispatcherTest {
   private static final UUID AUTH_GENERATION =
       UUID.fromString("00000000-0000-0000-0000-0000000000b1");
 
+  private static final String AUTH_CONTEXT = "a1".repeat(32);
+
   private static final String PLUGIN_ID = "dispatcher-plugin";
 
   private static final String SECOND_PLUGIN_ID = "dispatcher-plugin-2";
@@ -528,7 +530,8 @@ class PluginCredentialRefreshDispatcherTest {
     return new PluginCredentialRow(
         pluginId,
         AUTH_GENERATION,
-        codec.encrypt(key, pluginId, AUTH_GENERATION, REGION, "{}"),
+        AUTH_CONTEXT,
+        codec.encrypt(key, pluginId, AUTH_GENERATION, AUTH_CONTEXT, REGION, "{}"),
         REGION,
         expiresAt,
         nextRefreshAt,

@@ -49,6 +49,12 @@ class PluginCredentialJdbcStoreIntegrationTest {
   private static final UUID AUTH_GENERATION =
       UUID.fromString("00000000-0000-0000-0000-0000000000b1");
 
+  /** 本测试使用的固定 64 位十六进制认证上下文指纹。 */
+  private static final String CONTEXT = "a1".repeat(32);
+
+  /** 用于断言上下文指纹不匹配场景的备用指纹。 */
+  private static final String OTHER_CONTEXT = "b2".repeat(32);
+
   private static DataSource dataSource;
   private static JdbcClient jdbcClient;
 
@@ -90,6 +96,7 @@ class PluginCredentialJdbcStoreIntegrationTest {
     return new PluginCredentialRow(
         pluginId,
         AUTH_GENERATION,
+        CONTEXT,
         new byte[] {0x01, 0x02, 0x03},
         "us-east-1",
         now.plusSeconds(3600),
@@ -128,11 +135,11 @@ class PluginCredentialJdbcStoreIntegrationTest {
   }
 
   /**
-   * 测试意图 1：验证通过 PostgresqlPluginCredentialRepository 执行 upsert 后再 find，所有字段（包括 bytea 二进制载荷与
+   * 测试意图 1：验证通过 PostgresqlPluginCredentialRepository 执行 insert 后再 find，所有字段（包括 bytea 二进制载荷与
    * timestamptz(3) 毫秒精度时间）均被精确双向映射，无精度或内容损失。
    */
   @Test
-  void upsertAndFind_ShouldMapAllFieldsAccurately_IncludingByteaAndTimestamptz() {
+  void insertAndFind_ShouldMapAllFieldsAccurately_IncludingByteaAndTimestamptz() {
     Instant createTime = Instant.parse("2026-09-21T10:15:30.123Z");
     Instant updateTime = Instant.parse("2026-09-21T10:15:30.123Z");
     Instant expiresAt = Instant.parse("2026-09-21T12:00:00.456Z");
@@ -143,6 +150,7 @@ class PluginCredentialJdbcStoreIntegrationTest {
         new PluginCredentialRow(
             "test-plugin-mapping",
             AUTH_GENERATION,
+            CONTEXT,
             payload,
             "us-east-1",
             expiresAt,
@@ -156,8 +164,9 @@ class PluginCredentialJdbcStoreIntegrationTest {
             createTime,
             updateTime);
 
-    boolean upserted = repository.upsert(row);
-    assertTrue(upserted);
+    boolean inserted = repository.insert(row);
+    assertTrue(inserted);
+    assertFalse(repository.insert(row));
 
     Optional<PluginCredentialRow> foundOpt = repository.find("test-plugin-mapping");
     assertTrue(foundOpt.isPresent());
@@ -165,6 +174,7 @@ class PluginCredentialJdbcStoreIntegrationTest {
 
     assertEquals(row.pluginId(), found.pluginId());
     assertEquals(row.authGeneration(), found.authGeneration());
+    assertEquals(row.contextFingerprint(), found.contextFingerprint());
     assertArrayEquals(row.encryptedPayload(), found.encryptedPayload());
     assertEquals(row.region(), found.region());
     assertEquals(row.expiresAt(), found.expiresAt());
@@ -201,6 +211,7 @@ class PluginCredentialJdbcStoreIntegrationTest {
         repository.finalizeSuccess(
             "test-plugin-mapping",
             AUTH_GENERATION,
+            CONTEXT,
             "mapping-lease-token",
             1L,
             newPayload,
@@ -223,16 +234,18 @@ class PluginCredentialJdbcStoreIntegrationTest {
   }
 
   /**
-   * 测试意图 2：验证 upsert 的原子语义：首次插入时 version=0、lease 与 error 为 null；同一 pluginId 二次 upsert
-   * 时整行替换载荷与元数据、递增 version，并清除原有的 refresh lease、error 与 lastRefreshedAt。
+   * 测试意图 2：验证条件写契约：首次写入通过 insert(row) 落库，version=0、lease 与 error 为 null；同一 pluginId 二次写入 必须通过匹配
+   * (expectedAuthGeneration, expectedContextFingerprint, expectedVersion) 的 replace 完成整行替换， 递增
+   * version 并清除原有的 refresh lease 与 error；不匹配的三元组返回 false 且保持原行不变。
    */
   @Test
-  void upsert_FirstInsertAndSubsequentUpdate_ShouldResetLeaseAndErrorAndAdvanceVersion() {
+  void insertAndReplace_FirstInsertAndSubsequentUpdate_ShouldResetLeaseAndErrorAndAdvanceVersion() {
     Instant now = Instant.parse("2026-09-21T10:00:00.000Z");
     PluginCredentialRow row1 =
         new PluginCredentialRow(
             "test-plugin-upsert",
             AUTH_GENERATION,
+            CONTEXT,
             new byte[] {0x11, 0x22},
             "us-east-1",
             now.plusSeconds(3600),
@@ -245,7 +258,8 @@ class PluginCredentialJdbcStoreIntegrationTest {
             0L,
             now,
             now);
-    assertTrue(repository.upsert(row1));
+    assertTrue(repository.insert(row1));
+    assertFalse(repository.insert(row1));
 
     PluginCredentialRow firstRow = repository.find("test-plugin-upsert").orElseThrow();
     assertEquals(0L, firstRow.version());
@@ -266,6 +280,7 @@ class PluginCredentialJdbcStoreIntegrationTest {
         repository.finalizeFailure(
             "test-plugin-upsert",
             AUTH_GENERATION,
+            CONTEXT,
             "lease-token-1",
             1L,
             PluginCredentialStatus.REFRESH_FAILED,
@@ -286,13 +301,14 @@ class PluginCredentialJdbcStoreIntegrationTest {
     assertNotNull(dirtyRow.refreshLeaseUntil());
     assertEquals("initial refresh failed", dirtyRow.lastRefreshError());
 
-    // 模拟用户重新登录，二次 upsert
+    // 模拟用户重新登录，二次写入通过 replace 完成，且验证 CAS 围栏
     Instant updateNow = now.plusSeconds(100);
     byte[] newPayload = new byte[] {0x33, 0x44, 0x55};
     PluginCredentialRow row2 =
         new PluginCredentialRow(
             "test-plugin-upsert",
             AUTH_GENERATION,
+            CONTEXT,
             newPayload,
             "eu-west-1",
             updateNow.plusSeconds(7200),
@@ -305,7 +321,24 @@ class PluginCredentialJdbcStoreIntegrationTest {
             0L,
             now,
             updateNow);
-    assertTrue(repository.upsert(row2));
+
+    // 任意不匹配的条件均返回 false 且行内容不变
+    assertFalse(
+        repository.replace(
+            row2, UUID.randomUUID(), dirtyRow.contextFingerprint(), dirtyRow.version()));
+    assertFalse(
+        repository.replace(row2, dirtyRow.authGeneration(), OTHER_CONTEXT, dirtyRow.version()));
+    assertFalse(
+        repository.replace(
+            row2,
+            dirtyRow.authGeneration(),
+            dirtyRow.contextFingerprint(),
+            dirtyRow.version() - 1));
+    assertEquals(dirtyRow, repository.find("test-plugin-upsert").orElseThrow());
+
+    assertTrue(
+        repository.replace(
+            row2, dirtyRow.authGeneration(), dirtyRow.contextFingerprint(), dirtyRow.version()));
 
     PluginCredentialRow reloaded = repository.find("test-plugin-upsert").orElseThrow();
     assertArrayEquals(newPayload, reloaded.encryptedPayload());
@@ -321,7 +354,10 @@ class PluginCredentialJdbcStoreIntegrationTest {
     assertEquals(updateNow, reloaded.updateTime());
   }
 
-  /** 测试意图 3：验证 find 在行不存在时返回 empty；delete 成功删除行返回 true 且行被移除；重复 delete 返回 false。 */
+  /**
+   * 测试意图 3：验证 find 在行不存在时返回 empty；delete 在代际、上下文指纹或 version 不匹配时返回 false 且不删行；全匹配时成功删除返回 true； 重复
+   * delete 返回 false。
+   */
   @Test
   void findAndEmpty_DeleteAndRepeatedDelete() {
     Optional<PluginCredentialRow> notFound = repository.find("non-existent-plugin");
@@ -332,6 +368,7 @@ class PluginCredentialJdbcStoreIntegrationTest {
         new PluginCredentialRow(
             "test-plugin-delete",
             AUTH_GENERATION,
+            CONTEXT,
             new byte[] {0x01},
             "us-east-1",
             now.plusSeconds(3600),
@@ -344,15 +381,22 @@ class PluginCredentialJdbcStoreIntegrationTest {
             0L,
             now,
             now);
-    assertTrue(repository.upsert(row));
+    assertTrue(repository.insert(row));
+    assertFalse(repository.insert(row));
     assertTrue(repository.find("test-plugin-delete").isPresent());
 
-    boolean deleted = repository.delete("test-plugin-delete");
+    // 任何不匹配的删除条件均返回 false 且行保留
+    assertFalse(repository.delete("test-plugin-delete", UUID.randomUUID(), CONTEXT, 0L));
+    assertFalse(repository.delete("test-plugin-delete", AUTH_GENERATION, OTHER_CONTEXT, 0L));
+    assertFalse(repository.delete("test-plugin-delete", AUTH_GENERATION, CONTEXT, 1L));
+    assertTrue(repository.find("test-plugin-delete").isPresent());
+
+    boolean deleted = repository.delete("test-plugin-delete", AUTH_GENERATION, CONTEXT, 0L);
     assertTrue(deleted);
 
     assertTrue(repository.find("test-plugin-delete").isEmpty());
 
-    boolean repeatedDelete = repository.delete("test-plugin-delete");
+    boolean repeatedDelete = repository.delete("test-plugin-delete", AUTH_GENERATION, CONTEXT, 0L);
     assertFalse(repeatedDelete);
   }
 
@@ -366,7 +410,7 @@ class PluginCredentialJdbcStoreIntegrationTest {
 
     // 1. plugin-ok-connected: CONNECTED, next_refresh_at = now - 10s, 无 lease -> 应该领取
     assertTrue(
-        repository.upsert(
+        repository.insert(
             createSampleRow(
                 "plugin-ok-connected",
                 PluginCredentialStatus.CONNECTED,
@@ -375,7 +419,7 @@ class PluginCredentialJdbcStoreIntegrationTest {
 
     // 2. plugin-ok-failed: REFRESH_FAILED, next_refresh_at = now - 5s, 无 lease -> 应该领取
     assertTrue(
-        repository.upsert(
+        repository.insert(
             createSampleRow(
                 "plugin-ok-failed", PluginCredentialStatus.CONNECTED, now.minusSeconds(20), now)));
     List<PluginCredentialRow> initClaim2 =
@@ -386,6 +430,7 @@ class PluginCredentialJdbcStoreIntegrationTest {
         repository.finalizeFailure(
             "plugin-ok-failed",
             AUTH_GENERATION,
+            CONTEXT,
             "token-init-2",
             initClaim2.get(0).version(),
             PluginCredentialStatus.REFRESH_FAILED,
@@ -395,7 +440,7 @@ class PluginCredentialJdbcStoreIntegrationTest {
 
     // 3. plugin-ok-expired: CONNECTED, next_refresh_at = now - 20s, lease 已过期 (now - 1s) -> 应该领取
     assertTrue(
-        repository.upsert(
+        repository.insert(
             createSampleRow(
                 "plugin-ok-expired", PluginCredentialStatus.CONNECTED, now.minusSeconds(20), now)));
     List<PluginCredentialRow> initClaim3 =
@@ -405,7 +450,7 @@ class PluginCredentialJdbcStoreIntegrationTest {
 
     // 4. plugin-filter-future: next_refresh_at 未到 (now + 10s) -> 不应领取
     assertTrue(
-        repository.upsert(
+        repository.insert(
             createSampleRow(
                 "plugin-filter-future",
                 PluginCredentialStatus.CONNECTED,
@@ -414,7 +459,7 @@ class PluginCredentialJdbcStoreIntegrationTest {
 
     // 5. plugin-filter-reauth: REAUTH_REQUIRED -> 不应领取
     assertTrue(
-        repository.upsert(
+        repository.insert(
             createSampleRow(
                 "plugin-filter-reauth",
                 PluginCredentialStatus.CONNECTED,
@@ -428,6 +473,7 @@ class PluginCredentialJdbcStoreIntegrationTest {
         repository.finalizeFailure(
             "plugin-filter-reauth",
             AUTH_GENERATION,
+            CONTEXT,
             "token-init-5",
             initClaim5.get(0).version(),
             PluginCredentialStatus.REAUTH_REQUIRED,
@@ -437,7 +483,7 @@ class PluginCredentialJdbcStoreIntegrationTest {
 
     // 6. plugin-filter-uncertain: REFRESH_UNCERTAIN -> 不应领取
     assertTrue(
-        repository.upsert(
+        repository.insert(
             createSampleRow(
                 "plugin-filter-uncertain",
                 PluginCredentialStatus.CONNECTED,
@@ -453,7 +499,7 @@ class PluginCredentialJdbcStoreIntegrationTest {
 
     // 7. plugin-filter-active-lease: lease 仍有效 (now + 60s) -> 不应领取
     assertTrue(
-        repository.upsert(
+        repository.insert(
             createSampleRow(
                 "plugin-filter-active-lease",
                 PluginCredentialStatus.CONNECTED,
@@ -466,7 +512,7 @@ class PluginCredentialJdbcStoreIntegrationTest {
 
     // 8. plugin-filter-uninstalled: 条件满足但不在传入的 pluginIds 列表中 -> 不应领取
     assertTrue(
-        repository.upsert(
+        repository.insert(
             createSampleRow(
                 "plugin-filter-uninstalled",
                 PluginCredentialStatus.CONNECTED,
@@ -495,6 +541,7 @@ class PluginCredentialJdbcStoreIntegrationTest {
         Set.of("plugin-ok-connected", "plugin-ok-failed", "plugin-ok-expired"), claimedIds);
 
     for (PluginCredentialRow row : claimed) {
+      assertEquals(CONTEXT, row.contextFingerprint());
       assertEquals(leaseToken, row.refreshLeaseToken());
       assertEquals(leaseUntil, row.refreshLeaseUntil());
       assertEquals(now, row.updateTime());
@@ -504,28 +551,28 @@ class PluginCredentialJdbcStoreIntegrationTest {
     // 插入新记录用于纯粹排序验证
     Instant sortNow = Instant.parse("2026-09-21T12:00:00.000Z");
     assertTrue(
-        repository.upsert(
+        repository.insert(
             createSampleRow(
                 "sort-plugin-b",
                 PluginCredentialStatus.CONNECTED,
                 sortNow.minusSeconds(10),
                 sortNow)));
     assertTrue(
-        repository.upsert(
+        repository.insert(
             createSampleRow(
                 "sort-plugin-a",
                 PluginCredentialStatus.CONNECTED,
                 sortNow.minusSeconds(10),
                 sortNow)));
     assertTrue(
-        repository.upsert(
+        repository.insert(
             createSampleRow(
                 "sort-plugin-c",
                 PluginCredentialStatus.CONNECTED,
                 sortNow.minusSeconds(20),
                 sortNow)));
     assertTrue(
-        repository.upsert(
+        repository.insert(
             createSampleRow(
                 "sort-plugin-d",
                 PluginCredentialStatus.CONNECTED,
@@ -548,6 +595,7 @@ class PluginCredentialJdbcStoreIntegrationTest {
         repository.releaseLease(
             "sort-plugin-c",
             AUTH_GENERATION,
+            CONTEXT,
             "sort-token-1",
             sortedClaimed.get(0).version(),
             sortNow));
@@ -555,6 +603,7 @@ class PluginCredentialJdbcStoreIntegrationTest {
         repository.releaseLease(
             "sort-plugin-a",
             AUTH_GENERATION,
+            CONTEXT,
             "sort-token-1",
             sortedClaimed.get(1).version(),
             sortNow));
@@ -584,7 +633,7 @@ class PluginCredentialJdbcStoreIntegrationTest {
       String pluginId = "concurrent-plugin-" + i;
       allPluginIds.add(pluginId);
       assertTrue(
-          repository.upsert(
+          repository.insert(
               createSampleRow(
                   pluginId, PluginCredentialStatus.CONNECTED, now.minusSeconds(10 + i), now)));
     }
@@ -648,6 +697,7 @@ class PluginCredentialJdbcStoreIntegrationTest {
       for (PluginCredentialRow row : workerClaimed) {
         PluginCredentialRow inDb = repository.find(row.pluginId()).orElseThrow();
         assertEquals(row.refreshLeaseToken(), inDb.refreshLeaseToken());
+        assertEquals(CONTEXT, inDb.contextFingerprint());
         assertEquals(1L, inDb.version());
         assertEquals(leaseUntil, inDb.refreshLeaseUntil());
       }
@@ -655,15 +705,16 @@ class PluginCredentialJdbcStoreIntegrationTest {
   }
 
   /**
-   * 测试意图 6：验证 finalizeSuccess、finalizeFailure 与 releaseLease 的 token+version 双围栏机制：当 token
-   * 错、version 错或两者均错时，更新返回 false 且数据库行内容逐字段保持不变；当两者均正确时更新返回 true 且按契约推进行状态与 version。
+   * 测试意图 6：验证 finalizeSuccess、finalizeFailure 与 releaseLease 的 token+version+context 多维围栏机制：当 token
+   * 错、version 错、contextFingerprint 错或组合错时，更新返回 false 且数据库行内容逐字段保持不变；当全部正确时更新返回 true 且按契约推进行状态与
+   * version。
    */
   @Test
   void tokenAndVersion_DualFencing_OnFinalizeAndRelease() {
     Instant now = Instant.parse("2026-09-21T10:00:00.000Z");
     String pluginId = "plugin-dual-fence";
     assertTrue(
-        repository.upsert(
+        repository.insert(
             createSampleRow(
                 pluginId, PluginCredentialStatus.CONNECTED, now.minusSeconds(10), now)));
 
@@ -689,6 +740,7 @@ class PluginCredentialJdbcStoreIntegrationTest {
         repository.finalizeSuccess(
             pluginId,
             AUTH_GENERATION,
+            CONTEXT,
             wrongToken,
             validVersion,
             newPayload,
@@ -704,6 +756,7 @@ class PluginCredentialJdbcStoreIntegrationTest {
         repository.finalizeSuccess(
             pluginId,
             AUTH_GENERATION,
+            CONTEXT,
             validToken,
             wrongVersion,
             newPayload,
@@ -719,6 +772,7 @@ class PluginCredentialJdbcStoreIntegrationTest {
         repository.finalizeSuccess(
             pluginId,
             AUTH_GENERATION,
+            CONTEXT,
             wrongToken,
             wrongVersion,
             newPayload,
@@ -729,11 +783,28 @@ class PluginCredentialJdbcStoreIntegrationTest {
             now));
     assertEquals(baselineRow, repository.find(pluginId).orElseThrow());
 
-    // 4. finalizeFailure: 错 token / 错 version 组合
+    // 3b. finalizeSuccess: 错 contextFingerprint + 对 token + 对 version
+    assertFalse(
+        repository.finalizeSuccess(
+            pluginId,
+            AUTH_GENERATION,
+            OTHER_CONTEXT,
+            validToken,
+            validVersion,
+            newPayload,
+            "us-west-2",
+            newExpiresAt,
+            newNextRefreshAt,
+            refreshedAt,
+            now));
+    assertEquals(baselineRow, repository.find(pluginId).orElseThrow());
+
+    // 4. finalizeFailure: 错 token / 错 version / 错 context 组合
     assertFalse(
         repository.finalizeFailure(
             pluginId,
             AUTH_GENERATION,
+            CONTEXT,
             wrongToken,
             validVersion,
             PluginCredentialStatus.REFRESH_FAILED,
@@ -745,6 +816,7 @@ class PluginCredentialJdbcStoreIntegrationTest {
         repository.finalizeFailure(
             pluginId,
             AUTH_GENERATION,
+            CONTEXT,
             validToken,
             wrongVersion,
             PluginCredentialStatus.REFRESH_FAILED,
@@ -756,6 +828,7 @@ class PluginCredentialJdbcStoreIntegrationTest {
         repository.finalizeFailure(
             pluginId,
             AUTH_GENERATION,
+            CONTEXT,
             wrongToken,
             wrongVersion,
             PluginCredentialStatus.REFRESH_FAILED,
@@ -763,17 +836,37 @@ class PluginCredentialJdbcStoreIntegrationTest {
             "err",
             now));
     assertEquals(baselineRow, repository.find(pluginId).orElseThrow());
+    assertFalse(
+        repository.finalizeFailure(
+            pluginId,
+            AUTH_GENERATION,
+            OTHER_CONTEXT,
+            validToken,
+            validVersion,
+            PluginCredentialStatus.REFRESH_FAILED,
+            newNextRefreshAt,
+            "err",
+            now));
+    assertEquals(baselineRow, repository.find(pluginId).orElseThrow());
 
-    // 5. releaseLease: 错 token / 错 version 组合
-    assertFalse(repository.releaseLease(pluginId, AUTH_GENERATION, wrongToken, validVersion, now));
+    // 5. releaseLease: 错 token / 错 version / 错 context 组合
+    assertFalse(
+        repository.releaseLease(pluginId, AUTH_GENERATION, CONTEXT, wrongToken, validVersion, now));
     assertEquals(baselineRow, repository.find(pluginId).orElseThrow());
-    assertFalse(repository.releaseLease(pluginId, AUTH_GENERATION, validToken, wrongVersion, now));
+    assertFalse(
+        repository.releaseLease(pluginId, AUTH_GENERATION, CONTEXT, validToken, wrongVersion, now));
     assertEquals(baselineRow, repository.find(pluginId).orElseThrow());
-    assertFalse(repository.releaseLease(pluginId, AUTH_GENERATION, wrongToken, wrongVersion, now));
+    assertFalse(
+        repository.releaseLease(pluginId, AUTH_GENERATION, CONTEXT, wrongToken, wrongVersion, now));
+    assertEquals(baselineRow, repository.find(pluginId).orElseThrow());
+    assertFalse(
+        repository.releaseLease(
+            pluginId, AUTH_GENERATION, OTHER_CONTEXT, validToken, validVersion, now));
     assertEquals(baselineRow, repository.find(pluginId).orElseThrow());
 
     // 6. releaseLease 成功路径
-    assertTrue(repository.releaseLease(pluginId, AUTH_GENERATION, validToken, validVersion, now));
+    assertTrue(
+        repository.releaseLease(pluginId, AUTH_GENERATION, CONTEXT, validToken, validVersion, now));
     PluginCredentialRow afterRelease = repository.find(pluginId).orElseThrow();
     assertEquals(validVersion + 1, afterRelease.version());
     assertNull(afterRelease.refreshLeaseToken());
@@ -789,6 +882,7 @@ class PluginCredentialJdbcStoreIntegrationTest {
         repository.finalizeFailure(
             pluginId,
             AUTH_GENERATION,
+            CONTEXT,
             "token-2",
             version2,
             PluginCredentialStatus.REFRESH_FAILED,
@@ -813,6 +907,7 @@ class PluginCredentialJdbcStoreIntegrationTest {
         repository.finalizeSuccess(
             pluginId,
             AUTH_GENERATION,
+            CONTEXT,
             "token-3",
             version3,
             newPayload,
@@ -835,7 +930,7 @@ class PluginCredentialJdbcStoreIntegrationTest {
   }
 
   /**
-   * 测试意图 7：验证晚到的 finalize 操作与用户重新登录 upsert 的竞争保护：claim 后用户 upsert 推进 version 并清空 lease，随后晚到的
+   * 测试意图 7：验证晚到的 finalize 操作与用户重新登录 replace 的竞争保护：claim 后用户 replace 推进 version 并清空 lease，随后晚到的
    * finalizeSuccess 与 finalizeFailure 均返回 false，绝不覆盖用户的新凭据。
    */
   @Test
@@ -848,6 +943,7 @@ class PluginCredentialJdbcStoreIntegrationTest {
         new PluginCredentialRow(
             pluginId,
             AUTH_GENERATION,
+            CONTEXT,
             userPayloadA,
             "us-east-1",
             now.plusSeconds(3600),
@@ -860,7 +956,7 @@ class PluginCredentialJdbcStoreIntegrationTest {
             0L,
             now,
             now);
-    assertTrue(repository.upsert(rowA));
+    assertTrue(repository.insert(rowA));
 
     // 后台 claim 成功
     String staleToken = "stale-lease-token";
@@ -870,13 +966,14 @@ class PluginCredentialJdbcStoreIntegrationTest {
     long staleVersion = claimed.get(0).version();
     assertEquals(1L, staleVersion);
 
-    // 用户重新登录：upsert 新凭据 B
+    // 用户重新登录：replace 新凭据 B
     Instant loginTime = now.plusSeconds(10);
     byte[] userPayloadB = new byte[] {0x21, 0x22, 0x23};
     PluginCredentialRow rowB =
         new PluginCredentialRow(
             pluginId,
             AUTH_GENERATION,
+            CONTEXT,
             userPayloadB,
             "ap-northeast-1",
             loginTime.plusSeconds(7200),
@@ -889,7 +986,28 @@ class PluginCredentialJdbcStoreIntegrationTest {
             0L,
             now,
             loginTime);
-    assertTrue(repository.upsert(rowB));
+
+    PluginCredentialRow beforeRelogin = repository.find(pluginId).orElseThrow();
+    assertFalse(
+        repository.replace(
+            rowB, UUID.randomUUID(), beforeRelogin.contextFingerprint(), beforeRelogin.version()));
+    assertFalse(
+        repository.replace(
+            rowB, beforeRelogin.authGeneration(), OTHER_CONTEXT, beforeRelogin.version()));
+    assertFalse(
+        repository.replace(
+            rowB,
+            beforeRelogin.authGeneration(),
+            beforeRelogin.contextFingerprint(),
+            beforeRelogin.version() - 1));
+    assertEquals(beforeRelogin, repository.find(pluginId).orElseThrow());
+
+    assertTrue(
+        repository.replace(
+            rowB,
+            beforeRelogin.authGeneration(),
+            beforeRelogin.contextFingerprint(),
+            beforeRelogin.version()));
 
     PluginCredentialRow current = repository.find(pluginId).orElseThrow();
     assertEquals(2L, current.version());
@@ -902,6 +1020,7 @@ class PluginCredentialJdbcStoreIntegrationTest {
         repository.finalizeSuccess(
             pluginId,
             AUTH_GENERATION,
+            CONTEXT,
             staleToken,
             staleVersion,
             stalePayload,
@@ -917,6 +1036,7 @@ class PluginCredentialJdbcStoreIntegrationTest {
         repository.finalizeFailure(
             pluginId,
             AUTH_GENERATION,
+            CONTEXT,
             staleToken,
             staleVersion,
             PluginCredentialStatus.REFRESH_FAILED,
@@ -947,7 +1067,7 @@ class PluginCredentialJdbcStoreIntegrationTest {
     // 行 A: 过期 lease（设置 lease_until = now - 10s）
     String pluginExpired = "plugin-expired-lease";
     assertTrue(
-        repository.upsert(
+        repository.insert(
             createSampleRow(
                 pluginExpired, PluginCredentialStatus.CONNECTED, now.minusSeconds(60), now)));
     List<PluginCredentialRow> claimA =
@@ -958,7 +1078,7 @@ class PluginCredentialJdbcStoreIntegrationTest {
     // 行 B: 有效 lease（设置 lease_until = now + 300s）
     String pluginActive = "plugin-active-lease";
     assertTrue(
-        repository.upsert(
+        repository.insert(
             createSampleRow(
                 pluginActive, PluginCredentialStatus.CONNECTED, now.minusSeconds(60), now)));
     List<PluginCredentialRow> claimB =
@@ -969,7 +1089,7 @@ class PluginCredentialJdbcStoreIntegrationTest {
     // 行 C: 无 lease 正常行
     String pluginNoLease = "plugin-no-lease";
     assertTrue(
-        repository.upsert(
+        repository.insert(
             createSampleRow(
                 pluginNoLease, PluginCredentialStatus.CONNECTED, now.minusSeconds(60), now)));
     long versionBeforeC = repository.find(pluginNoLease).orElseThrow().version();
@@ -1036,7 +1156,7 @@ class PluginCredentialJdbcStoreIntegrationTest {
     Instant now = Instant.parse("2026-09-21T10:00:00.000Z");
     String pluginId = "plugin-constraint-check";
     assertTrue(
-        repository.upsert(
+        repository.insert(
             createSampleRow(
                 pluginId, PluginCredentialStatus.CONNECTED, now.minusSeconds(10), now)));
 
@@ -1052,6 +1172,7 @@ class PluginCredentialJdbcStoreIntegrationTest {
             repository.finalizeFailure(
                 pluginId,
                 AUTH_GENERATION,
+                CONTEXT,
                 "lease-token",
                 version,
                 PluginCredentialStatus.REFRESH_FAILED,
@@ -1065,6 +1186,7 @@ class PluginCredentialJdbcStoreIntegrationTest {
         repository.finalizeFailure(
             pluginId,
             AUTH_GENERATION,
+            CONTEXT,
             "lease-token",
             version,
             PluginCredentialStatus.REFRESH_FAILED,
@@ -1078,13 +1200,13 @@ class PluginCredentialJdbcStoreIntegrationTest {
     assertEquals(PluginCredentialStatus.REFRESH_FAILED, updated.status());
   }
 
-  /** 测试意图 11：发请求前的租约核验必须同时要求代际、token、version 与未过期截止时刻；任一不符都必须返回 false，调用方据此取消外呼。 */
+  /** 测试意图 11：发请求前的租约核验必须同时要求代际、上下文指纹、token、version 与未过期截止时刻；任一不符都必须返回 false，调用方据此取消外呼。 */
   @Test
   void ownsUnexpiredLease_ShouldRequireTokenVersionAndUnexpiredDeadline() {
     Instant now = Instant.parse("2026-09-21T10:00:00.000Z");
     String pluginId = "plugin-lease-ownership";
     assertTrue(
-        repository.upsert(
+        repository.insert(
             createSampleRow(pluginId, PluginCredentialStatus.CONNECTED, now.minusSeconds(1), now)));
 
     List<PluginCredentialRow> claimed =
@@ -1093,20 +1215,31 @@ class PluginCredentialJdbcStoreIntegrationTest {
     long version = claimed.get(0).version();
 
     assertTrue(
-        repository.ownsUnexpiredLease(pluginId, AUTH_GENERATION, "lease-token", version, now));
+        repository.ownsUnexpiredLease(
+            pluginId, AUTH_GENERATION, CONTEXT, "lease-token", version, now));
     assertFalse(
-        repository.ownsUnexpiredLease(pluginId, AUTH_GENERATION, "another-token", version, now),
+        repository.ownsUnexpiredLease(
+            pluginId, AUTH_GENERATION, CONTEXT, "another-token", version, now),
         "a foreign lease token must never look owned");
     assertFalse(
-        repository.ownsUnexpiredLease(pluginId, AUTH_GENERATION, "lease-token", version + 1, now),
+        repository.ownsUnexpiredLease(
+            pluginId, AUTH_GENERATION, CONTEXT, "lease-token", version + 1, now),
         "a stale version must never look owned");
     assertFalse(
         repository.ownsUnexpiredLease(
-            pluginId, AUTH_GENERATION, "lease-token", version, now.plusSeconds(60)),
+            pluginId, AUTH_GENERATION, OTHER_CONTEXT, "lease-token", version, now),
+        "a foreign context fingerprint must never look owned");
+    assertFalse(
+        repository.ownsUnexpiredLease(
+            pluginId, UUID.randomUUID(), CONTEXT, "lease-token", version, now),
+        "a foreign auth generation must never look owned");
+    assertFalse(
+        repository.ownsUnexpiredLease(
+            pluginId, AUTH_GENERATION, CONTEXT, "lease-token", version, now.plusSeconds(60)),
         "an expired deadline must never look owned");
     assertFalse(
         repository.ownsUnexpiredLease(
-            "plugin-absent", AUTH_GENERATION, "lease-token", version, now));
+            "plugin-absent", AUTH_GENERATION, CONTEXT, "lease-token", version, now));
   }
 
   /** 测试意图 12：下一次扫描时刻必须来自未被在途租约占用的可调度行，且只考虑 CONNECTED / REFRESH_FAILED。 */
@@ -1117,13 +1250,13 @@ class PluginCredentialJdbcStoreIntegrationTest {
     String leased = "plugin-earliest-b";
     String needsLogin = "plugin-earliest-c";
     assertTrue(
-        repository.upsert(
+        repository.insert(
             createSampleRow(dueSoon, PluginCredentialStatus.CONNECTED, now.plusSeconds(60), now)));
     assertTrue(
-        repository.upsert(
+        repository.insert(
             createSampleRow(leased, PluginCredentialStatus.CONNECTED, now.minusSeconds(5), now)));
     assertTrue(
-        repository.upsert(
+        repository.insert(
             createSampleRow(
                 needsLogin, PluginCredentialStatus.REAUTH_REQUIRED, now.plusSeconds(1), now)));
 
@@ -1146,7 +1279,7 @@ class PluginCredentialJdbcStoreIntegrationTest {
         repository.earliestRefreshAt(List.of(leased), afterLease));
   }
 
-  /** 测试意图 13：调用期认证拒绝在代际一致的前提下按 version 或原始密文 CAS 作废本行；并发重新登录写入的新代际、新 version 与新密文都必须逃过这次作废。 */
+  /** 测试意图 13：调用期认证拒绝在代际与上下文一致的前提下按 version 或原始密文 CAS 作废本行；并发重新登录写入的新代际、新 version 与新密文都必须逃过这次作废。 */
   @Test
   void rejectUsedCredential_ShouldMatchVersionOrCiphertextAndSpareConcurrentRelogin() {
     Instant now = Instant.parse("2026-09-21T10:00:00.000Z");
@@ -1158,14 +1291,20 @@ class PluginCredentialJdbcStoreIntegrationTest {
     byte[] unrelated = {0x2a, 0x2b};
 
     // 1. version 匹配：在途 claim 已把 version 推进到 1，密文虽然换了参数也必须作废。
-    assertTrue(repository.upsert(rowWithPayload(byVersion, used, now)));
+    assertTrue(repository.insert(rowWithPayload(byVersion, used, now)));
     List<PluginCredentialRow> claimed =
         repository.claimDue(List.of(byVersion), now, now.plusSeconds(60), "lease-token", 1);
     assertEquals(1, claimed.size());
     assertEquals(1L, claimed.get(0).version());
     assertTrue(
         repository.rejectUsedCredential(
-            byVersion, AUTH_GENERATION, 1L, unrelated, "provider rejected the access token", now),
+            byVersion,
+            AUTH_GENERATION,
+            CONTEXT,
+            1L,
+            unrelated,
+            "provider rejected the access token",
+            now),
         "an advanced version must be invalidated even when the ciphertext argument differs");
     PluginCredentialRow rejected = repository.find(byVersion).orElseThrow();
     assertEquals(PluginCredentialStatus.REAUTH_REQUIRED, rejected.status());
@@ -1174,7 +1313,7 @@ class PluginCredentialJdbcStoreIntegrationTest {
     assertEquals(2L, rejected.version(), "rejection advances the version once");
 
     // 2. 同代际 claim 推进了 version，但本次调用用的密文没变，仍必须作废。
-    assertTrue(repository.upsert(rowWithPayload(byCiphertext, used, now)));
+    assertTrue(repository.insert(rowWithPayload(byCiphertext, used, now)));
     assertEquals(
         1,
         repository
@@ -1183,30 +1322,62 @@ class PluginCredentialJdbcStoreIntegrationTest {
     assertEquals(1L, repository.find(byCiphertext).orElseThrow().version());
     assertTrue(
         repository.rejectUsedCredential(
-            byCiphertext, AUTH_GENERATION, 0L, used, "provider rejected the access token", now),
+            byCiphertext,
+            AUTH_GENERATION,
+            CONTEXT,
+            0L,
+            used,
+            "provider rejected the access token",
+            now),
         "an unchanged ciphertext must be invalidated even when the version argument is stale");
     assertEquals(
         PluginCredentialStatus.REAUTH_REQUIRED,
         repository.find(byCiphertext).orElseThrow().status());
 
     // 3. 并发重新登录同时换了 version 与密文：迟到的作废必须是 0 行，且新凭据原样保留。
-    assertTrue(repository.upsert(rowWithPayload(relogged, used, now)));
+    assertTrue(repository.insert(rowWithPayload(relogged, used, now)));
     UUID newGeneration = UUID.randomUUID();
-    assertTrue(repository.upsert(rowWithGeneration(relogged, newGeneration, fresh, now)));
+    PluginCredentialRow beforeRelogin = repository.find(relogged).orElseThrow();
+    PluginCredentialRow newRow = rowWithGeneration(relogged, newGeneration, fresh, now);
+    assertFalse(
+        repository.replace(
+            newRow,
+            UUID.randomUUID(),
+            beforeRelogin.contextFingerprint(),
+            beforeRelogin.version()));
+    assertTrue(
+        repository.replace(
+            newRow,
+            beforeRelogin.authGeneration(),
+            beforeRelogin.contextFingerprint(),
+            beforeRelogin.version()));
+
     assertFalse(
         repository.rejectUsedCredential(
-            relogged, AUTH_GENERATION, 0L, used, "provider rejected the access token", now),
+            relogged,
+            AUTH_GENERATION,
+            CONTEXT,
+            0L,
+            used,
+            "provider rejected the access token",
+            now),
         "a concurrent re-login must not be invalidated by a stale rejection");
     PluginCredentialRow kept = repository.find(relogged).orElseThrow();
     assertEquals(PluginCredentialStatus.CONNECTED, kept.status());
     assertArrayEquals(fresh, kept.encryptedPayload());
     assertEquals(1L, kept.version());
+    assertEquals(newGeneration, kept.authGeneration());
     assertFalse(
         repository.rejectUsedCredential(
-            relogged, AUTH_GENERATION, 9L, new byte[] {0x77}, "stale", now),
+            relogged, AUTH_GENERATION, CONTEXT, 9L, new byte[] {0x77}, "stale", now),
         "a rejection matching neither version nor ciphertext must be a no-op");
     assertFalse(
-        repository.rejectUsedCredential("plugin-absent", AUTH_GENERATION, 0L, used, "stale", now),
+        repository.rejectUsedCredential(
+            relogged, newGeneration, OTHER_CONTEXT, 1L, fresh, "wrong context", now),
+        "a rejection with a mismatching context fingerprint must be a no-op");
+    assertFalse(
+        repository.rejectUsedCredential(
+            "plugin-absent", AUTH_GENERATION, CONTEXT, 0L, used, "stale", now),
         "an absent row must not report a rejection");
   }
 
@@ -1223,7 +1394,7 @@ class PluginCredentialJdbcStoreIntegrationTest {
     byte[] payloadA = {0x0a, 0x0a};
     byte[] payloadB = {0x0b, 0x0b};
 
-    assertTrue(repository.upsert(rowWithGeneration(pluginId, generationA, payloadA, now)));
+    assertTrue(repository.insert(rowWithGeneration(pluginId, generationA, payloadA, now)));
     List<PluginCredentialRow> claimedA =
         repository.claimDue(List.of(pluginId), now, now.plusSeconds(300), "aba-lease", 1);
     assertEquals(1, claimedA.size());
@@ -1231,8 +1402,11 @@ class PluginCredentialJdbcStoreIntegrationTest {
     assertEquals(generationA, claimedA.get(0).authGeneration());
 
     // 断连删除后以新代际 B 重建，并领取到与 A 相同的 version 与 leaseToken。
-    assertTrue(repository.delete(pluginId));
-    assertTrue(repository.upsert(rowWithGeneration(pluginId, generationB, payloadB, now)));
+    assertFalse(repository.delete(pluginId, generationB, CONTEXT, sharedVersion));
+    assertFalse(repository.delete(pluginId, generationA, OTHER_CONTEXT, sharedVersion));
+    assertFalse(repository.delete(pluginId, generationA, CONTEXT, sharedVersion - 1));
+    assertTrue(repository.delete(pluginId, generationA, CONTEXT, sharedVersion));
+    assertTrue(repository.insert(rowWithGeneration(pluginId, generationB, payloadB, now)));
     List<PluginCredentialRow> claimedB =
         repository.claimDue(List.of(pluginId), now, now.plusSeconds(300), "aba-lease", 1);
     assertEquals(1, claimedB.size());
@@ -1245,6 +1419,7 @@ class PluginCredentialJdbcStoreIntegrationTest {
         repository.finalizeSuccess(
             pluginId,
             generationA,
+            CONTEXT,
             "aba-lease",
             sharedVersion,
             new byte[] {0x7f},
@@ -1258,6 +1433,7 @@ class PluginCredentialJdbcStoreIntegrationTest {
         repository.finalizeFailure(
             pluginId,
             generationA,
+            CONTEXT,
             "aba-lease",
             sharedVersion,
             PluginCredentialStatus.REFRESH_FAILED,
@@ -1266,31 +1442,130 @@ class PluginCredentialJdbcStoreIntegrationTest {
             now),
         "a stale generation must never finalize failure");
     assertFalse(
-        repository.releaseLease(pluginId, generationA, "aba-lease", sharedVersion, now),
+        repository.releaseLease(pluginId, generationA, CONTEXT, "aba-lease", sharedVersion, now),
         "a stale generation must never release the lease");
     assertFalse(
-        repository.ownsUnexpiredLease(pluginId, generationA, "aba-lease", sharedVersion, now),
+        repository.ownsUnexpiredLease(
+            pluginId, generationA, CONTEXT, "aba-lease", sharedVersion, now),
         "a stale generation must never own the lease");
     assertFalse(
         repository.rejectUsedCredential(
-            pluginId, generationA, sharedVersion, payloadB, "stale", now),
+            pluginId, generationA, CONTEXT, sharedVersion, payloadB, "stale", now),
         "a stale generation must never invalidate the recreated row");
+
+    // 同样，带错误 contextFingerprint 的写入也必须被拒绝
+    assertFalse(
+        repository.finalizeSuccess(
+            pluginId,
+            generationB,
+            OTHER_CONTEXT,
+            "aba-lease",
+            sharedVersion,
+            new byte[] {0x7f},
+            "us-east-1",
+            now.plusSeconds(3600),
+            now.plusSeconds(1800),
+            now,
+            now),
+        "a mismatching context fingerprint must never finalize success");
 
     // B 仍然完整，且可以正常操作。
     PluginCredentialRow stillB = repository.find(pluginId).orElseThrow();
     assertEquals(generationB, stillB.authGeneration());
+    assertEquals(CONTEXT, stillB.contextFingerprint());
     assertEquals(PluginCredentialStatus.CONNECTED, stillB.status());
     assertEquals(sharedVersion, stillB.version());
     assertArrayEquals(payloadB, stillB.encryptedPayload());
     assertTrue(
-        repository.ownsUnexpiredLease(pluginId, generationB, "aba-lease", sharedVersion, now),
+        repository.ownsUnexpiredLease(
+            pluginId, generationB, CONTEXT, "aba-lease", sharedVersion, now),
         "the recreated generation must still own its lease");
     assertTrue(
         repository.rejectUsedCredential(
-            pluginId, generationB, sharedVersion, payloadA, "genuine rejection", now),
+            pluginId, generationB, CONTEXT, sharedVersion, payloadA, "genuine rejection", now),
         "the current generation must still be invalidated by its own rejection");
     assertEquals(
         PluginCredentialStatus.REAUTH_REQUIRED, repository.find(pluginId).orElseThrow().status());
+  }
+
+  /**
+   * 测试意图 15：验证上下文指纹的完整隔离与围栏：在 pluginId、authGeneration、version 与 leaseToken 均相同的情况下， 不同的
+   * contextFingerprint 依然无法命中任何 CAS
+   * 操作（finalizeSuccess、finalizeFailure、releaseLease、ownsUnexpiredLease、rejectUsedCredential、replace、delete）。
+   */
+  @Test
+  void contextFingerprintFencesOperationsWithTheSameVersionAndLeaseToken() {
+    Instant now = Instant.parse("2026-09-21T10:00:00.000Z");
+    String pluginId = "plugin-context-fence";
+    byte[] payload = {0x01, 0x02};
+
+    PluginCredentialRow row =
+        new PluginCredentialRow(
+            pluginId,
+            AUTH_GENERATION,
+            CONTEXT,
+            payload,
+            "us-east-1",
+            now.plusSeconds(3600),
+            now.minusSeconds(1),
+            PluginCredentialStatus.CONNECTED,
+            null,
+            null,
+            null,
+            null,
+            0L,
+            now,
+            now);
+    assertTrue(repository.insert(row));
+
+    List<PluginCredentialRow> claimed =
+        repository.claimDue(List.of(pluginId), now, now.plusSeconds(300), "context-lease", 1);
+    assertEquals(1, claimed.size());
+    long version = claimed.get(0).version();
+
+    // 所有带 OTHER_CONTEXT 的 CAS 操作都必须返回 false
+    assertFalse(
+        repository.finalizeSuccess(
+            pluginId,
+            AUTH_GENERATION,
+            OTHER_CONTEXT,
+            "context-lease",
+            version,
+            payload,
+            "us-east-1",
+            now.plusSeconds(3600),
+            now.plusSeconds(1800),
+            now,
+            now));
+    assertFalse(
+        repository.finalizeFailure(
+            pluginId,
+            AUTH_GENERATION,
+            OTHER_CONTEXT,
+            "context-lease",
+            version,
+            PluginCredentialStatus.REFRESH_FAILED,
+            now,
+            "stale context",
+            now));
+    assertFalse(
+        repository.releaseLease(
+            pluginId, AUTH_GENERATION, OTHER_CONTEXT, "context-lease", version, now));
+    assertFalse(
+        repository.ownsUnexpiredLease(
+            pluginId, AUTH_GENERATION, OTHER_CONTEXT, "context-lease", version, now));
+    assertFalse(
+        repository.rejectUsedCredential(
+            pluginId, AUTH_GENERATION, OTHER_CONTEXT, version, payload, "error", now));
+    assertFalse(repository.delete(pluginId, AUTH_GENERATION, OTHER_CONTEXT, version));
+    assertFalse(repository.replace(row, AUTH_GENERATION, OTHER_CONTEXT, version));
+
+    // 正确的 CONTEXT 操作能够正常通过
+    assertTrue(
+        repository.ownsUnexpiredLease(
+            pluginId, AUTH_GENERATION, CONTEXT, "context-lease", version, now));
+    assertTrue(
+        repository.releaseLease(pluginId, AUTH_GENERATION, CONTEXT, "context-lease", version, now));
   }
 
   private PluginCredentialRow rowWithGeneration(
@@ -1298,6 +1573,7 @@ class PluginCredentialJdbcStoreIntegrationTest {
     return new PluginCredentialRow(
         pluginId,
         authGeneration,
+        CONTEXT,
         encryptedPayload,
         "us-east-1",
         now.plusSeconds(3600),
@@ -1317,6 +1593,7 @@ class PluginCredentialJdbcStoreIntegrationTest {
     return new PluginCredentialRow(
         pluginId,
         AUTH_GENERATION,
+        CONTEXT,
         encryptedPayload,
         "us-east-1",
         now.plusSeconds(3600),

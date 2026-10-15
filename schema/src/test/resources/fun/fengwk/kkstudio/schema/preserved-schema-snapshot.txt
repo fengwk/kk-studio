@@ -173,29 +173,41 @@ column	mcp_tool	input_schema	type=jsonb notnull=t default=<null> generated= coll
 column	mcp_tool	name	type=character varying(64) notnull=t default=<null> generated= collation="default"
 column	mcp_tool	server_name	type=character varying(32) notnull=t default=<null> generated= collation="default"
 column	mcp_tool	source_name	type=character varying(128) notnull=t default=<null> generated= collation="default"
+column	plugin_auth_attempt	auth_generation	type=uuid notnull=t default=<null> generated= collation=-
+column	plugin_auth_attempt	config_revision	type=bigint notnull=t default=<null> generated= collation=-
+column	plugin_auth_attempt	context_fingerprint	type=character(64) notnull=t default=<null> generated= collation="default"
+column	plugin_auth_attempt	created_at	type=timestamp(3) with time zone notnull=t default=CURRENT_TIMESTAMP generated= collation=-
+column	plugin_auth_attempt	expires_at	type=timestamp(3) with time zone notnull=t default=<null> generated= collation=-
+column	plugin_auth_attempt	nonce_hash	type=character(64) notnull=t default=<null> generated= collation="default"
+column	plugin_auth_attempt	plugin_id	type=character varying(64) notnull=t default=<null> generated= collation="default"
+column	plugin_auth_attempt	region	type=character varying(64) notnull=t default=<null> generated= collation="default"
 column	plugin_catalog_state	created_at	type=timestamp(3) with time zone notnull=t default=CURRENT_TIMESTAMP generated= collation=-
 column	plugin_catalog_state	epoch	type=bigint notnull=t default=<null> generated= collation=-
 column	plugin_catalog_state	id	type=bigint notnull=t default=<null> generated= collation=-
 column	plugin_catalog_state	manifest_json	type=jsonb notnull=t default=<null> generated= collation=-
 column	plugin_catalog_state	updated_at	type=timestamp(3) with time zone notnull=t default=CURRENT_TIMESTAMP generated= collation=-
+column	plugin_configuration_revision	auth_generation	type=uuid notnull=t default=<null> generated= collation=-
 column	plugin_configuration_revision	capability_fingerprint	type=character(64) notnull=t default=<null> generated= collation="default"
 column	plugin_configuration_revision	code_version	type=character varying(64) notnull=t default=<null> generated= collation="default"
+column	plugin_configuration_revision	configured_secret_fields	type=text[] notnull=t default='{}'::text[] generated= collation="default"
+column	plugin_configuration_revision	context_fingerprint	type=character(64) notnull=t default=<null> generated= collation="default"
 column	plugin_configuration_revision	created_at	type=timestamp(3) with time zone notnull=t default=CURRENT_TIMESTAMP generated= collation=-
 column	plugin_configuration_revision	plugin_id	type=character varying(64) notnull=t default=<null> generated= collation="default"
 column	plugin_configuration_revision	revision	type=bigint notnull=t default=<null> generated= collation=-
 column	plugin_configuration_revision	schema_fingerprint	type=character(64) notnull=t default=<null> generated= collation="default"
 column	plugin_configuration_revision	values_json	type=text notnull=t default=<null> generated= collation="default"
 column	plugin_credential	auth_generation	type=uuid notnull=t default=<null> generated= collation=-
+column	plugin_credential	context_fingerprint	type=character(64) notnull=t default=<null> generated= collation="default"
 column	plugin_credential	create_time	type=timestamp(3) with time zone notnull=t default=CURRENT_TIMESTAMP generated= collation=-
 column	plugin_credential	encrypted_payload	type=bytea notnull=t default=<null> generated= collation=-
-column	plugin_credential	expires_at	type=timestamp(3) with time zone notnull=t default=<null> generated= collation=-
+column	plugin_credential	expires_at	type=timestamp(3) with time zone notnull=f default=<null> generated= collation=-
 column	plugin_credential	last_refresh_error	type=text notnull=f default=<null> generated= collation="default"
 column	plugin_credential	last_refreshed_at	type=timestamp(3) with time zone notnull=f default=<null> generated= collation=-
-column	plugin_credential	next_refresh_at	type=timestamp(3) with time zone notnull=t default=<null> generated= collation=-
+column	plugin_credential	next_refresh_at	type=timestamp(3) with time zone notnull=f default=<null> generated= collation=-
 column	plugin_credential	plugin_id	type=character varying(64) notnull=t default=<null> generated= collation="default"
 column	plugin_credential	refresh_lease_token	type=character varying(128) notnull=f default=<null> generated= collation="default"
 column	plugin_credential	refresh_lease_until	type=timestamp(3) with time zone notnull=f default=<null> generated= collation=-
-column	plugin_credential	region	type=character varying(64) notnull=t default=<null> generated= collation="default"
+column	plugin_credential	region	type=character varying(64) notnull=f default=<null> generated= collation="default"
 column	plugin_credential	status	type=character varying(32) notnull=t default=<null> generated= collation="default"
 column	plugin_credential	update_time	type=timestamp(3) with time zone notnull=t default=CURRENT_TIMESTAMP generated= collation=-
 column	plugin_credential	version	type=bigint notnull=t default=0 generated= collation=-
@@ -408,6 +420,12 @@ constraint	mcp_tool	ck_mcp_tool_name	CHECK (((name)::text ~ '[A-Za-z][A-Za-z0-9_
 constraint	mcp_tool	ck_mcp_tool_source_name	CHECK ((char_length((source_name)::text) > 0))
 constraint	mcp_tool	fk_mcp_tool_server	FOREIGN KEY (server_name) REFERENCES mcp_server(name) ON DELETE CASCADE
 constraint	mcp_tool	mcp_tool_pkey	PRIMARY KEY (name)
+constraint	plugin_auth_attempt	ck_plugin_auth_attempt_config_revision	CHECK ((config_revision > 0))
+constraint	plugin_auth_attempt	ck_plugin_auth_attempt_context_fingerprint	CHECK ((context_fingerprint ~ '^[0-9a-f]{64}$'::text))
+constraint	plugin_auth_attempt	ck_plugin_auth_attempt_nonce_hash	CHECK ((nonce_hash ~ '^[0-9a-f]{64}$'::text))
+constraint	plugin_auth_attempt	ck_plugin_auth_attempt_plugin_id	CHECK (((plugin_id)::text ~ '^[a-z0-9]+([.-][a-z0-9]+)*$'::text))
+constraint	plugin_auth_attempt	ck_plugin_auth_attempt_region	CHECK ((((region)::text = btrim((region)::text)) AND ((char_length((region)::text) >= 1) AND (char_length((region)::text) <= 64))))
+constraint	plugin_auth_attempt	pk_plugin_auth_attempt	PRIMARY KEY (plugin_id)
 constraint	plugin_catalog_state	ck_plugin_catalog_state_epoch	CHECK ((epoch >= 0))
 constraint	plugin_catalog_state	ck_plugin_catalog_state_id	CHECK ((id = 1))
 constraint	plugin_catalog_state	ck_plugin_catalog_state_manifest_object	CHECK ((jsonb_typeof(manifest_json) = 'object'::text))
@@ -415,17 +433,21 @@ constraint	plugin_catalog_state	ck_plugin_catalog_state_time_order	CHECK ((updat
 constraint	plugin_catalog_state	plugin_catalog_state_pkey	PRIMARY KEY (id)
 constraint	plugin_configuration_revision	ck_plugin_configuration_revision_capability_fingerprint	CHECK ((capability_fingerprint ~ '^[0-9a-f]{64}$'::text))
 constraint	plugin_configuration_revision	ck_plugin_configuration_revision_code_version	CHECK ((((code_version)::text = btrim((code_version)::text)) AND (char_length((code_version)::text) > 0)))
+constraint	plugin_configuration_revision	ck_plugin_configuration_revision_configured_secret_fields	CHECK ((array_position(configured_secret_fields, NULL::text) IS NULL))
+constraint	plugin_configuration_revision	ck_plugin_configuration_revision_context_fingerprint	CHECK ((context_fingerprint ~ '^[0-9a-f]{64}$'::text))
 constraint	plugin_configuration_revision	ck_plugin_configuration_revision_plugin_id	CHECK (((plugin_id)::text ~ '^[a-z0-9]+([.-][a-z0-9]+)*$'::text))
 constraint	plugin_configuration_revision	ck_plugin_configuration_revision_revision	CHECK ((revision > 0))
 constraint	plugin_configuration_revision	ck_plugin_configuration_revision_schema_fingerprint	CHECK ((schema_fingerprint ~ '^[0-9a-f]{64}$'::text))
 constraint	plugin_configuration_revision	ck_plugin_configuration_revision_values_budget	CHECK ((octet_length(values_json) <= 65536))
 constraint	plugin_configuration_revision	ck_plugin_configuration_revision_values_object	CHECK ((values_json IS JSON OBJECT WITH UNIQUE KEYS))
 constraint	plugin_configuration_revision	pk_plugin_configuration_revision	PRIMARY KEY (plugin_id, revision)
+constraint	plugin_credential	ck_plugin_credential_context_fingerprint	CHECK ((context_fingerprint ~ '^[0-9a-f]{64}$'::text))
 constraint	plugin_credential	ck_plugin_credential_encrypted_payload	CHECK ((octet_length(encrypted_payload) > 0))
 constraint	plugin_credential	ck_plugin_credential_last_refresh_error	CHECK (((last_refresh_error IS NULL) OR ((last_refresh_error = btrim(last_refresh_error)) AND (char_length(last_refresh_error) > 0) AND (octet_length(last_refresh_error) <= 4096))))
 constraint	plugin_credential	ck_plugin_credential_plugin_id	CHECK (((plugin_id)::text ~ '^[a-z0-9]+([.-][a-z0-9]+)*$'::text))
 constraint	plugin_credential	ck_plugin_credential_refresh_lease	CHECK ((((refresh_lease_token IS NULL) = (refresh_lease_until IS NULL)) AND ((refresh_lease_token IS NULL) OR (((refresh_lease_token)::text = btrim((refresh_lease_token)::text)) AND (char_length((refresh_lease_token)::text) > 0)))))
-constraint	plugin_credential	ck_plugin_credential_region	CHECK ((((region)::text = btrim((region)::text)) AND (char_length((region)::text) > 0)))
+constraint	plugin_credential	ck_plugin_credential_region	CHECK (((region IS NULL) OR (((region)::text = btrim((region)::text)) AND (char_length((region)::text) > 0))))
+constraint	plugin_credential	ck_plugin_credential_route_metadata	CHECK ((((region IS NULL) = (expires_at IS NULL)) AND ((region IS NULL) = (next_refresh_at IS NULL))))
 constraint	plugin_credential	ck_plugin_credential_status	CHECK (((status)::text = ANY ((ARRAY['CONNECTED'::character varying, 'REFRESH_FAILED'::character varying, 'REFRESH_UNCERTAIN'::character varying, 'REAUTH_REQUIRED'::character varying])::text[])))
 constraint	plugin_credential	ck_plugin_credential_time_order	CHECK ((update_time >= create_time))
 constraint	plugin_credential	ck_plugin_credential_version	CHECK ((version >= 0))
@@ -517,6 +539,7 @@ index	harness_work	idx_harness_work_lease_until	CREATE INDEX idx_harness_work_le
 index	mcp_server	mcp_server_pkey	CREATE UNIQUE INDEX mcp_server_pkey ON public.mcp_server USING btree (name)
 index	mcp_tool	mcp_tool_pkey	CREATE UNIQUE INDEX mcp_tool_pkey ON public.mcp_tool USING btree (name)
 index	mcp_tool	uk_mcp_tool_server_source_name	CREATE UNIQUE INDEX uk_mcp_tool_server_source_name ON public.mcp_tool USING btree (server_name, source_name)
+index	plugin_auth_attempt	pk_plugin_auth_attempt	CREATE UNIQUE INDEX pk_plugin_auth_attempt ON public.plugin_auth_attempt USING btree (plugin_id)
 index	plugin_catalog_state	plugin_catalog_state_pkey	CREATE UNIQUE INDEX plugin_catalog_state_pkey ON public.plugin_catalog_state USING btree (id)
 index	plugin_configuration_revision	pk_plugin_configuration_revision	CREATE UNIQUE INDEX pk_plugin_configuration_revision ON public.plugin_configuration_revision USING btree (plugin_id, revision)
 index	plugin_credential	idx_plugin_credential_refresh_due	CREATE INDEX idx_plugin_credential_refresh_due ON public.plugin_credential USING btree (next_refresh_at)
@@ -550,6 +573,7 @@ table	harness_tool_invocation		preserved
 table	harness_work		preserved
 table	mcp_server		preserved
 table	mcp_tool		preserved
+table	plugin_auth_attempt		preserved
 table	plugin_catalog_state		preserved
 table	plugin_configuration_revision		preserved
 table	plugin_credential		preserved
