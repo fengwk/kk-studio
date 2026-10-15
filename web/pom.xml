@@ -32,7 +32,7 @@
         </dependency>
         <dependency>
             <groupId>fun.fengwk.kk-studio</groupId>
-            <artifactId>kk-studio-plugin-canvas-media</artifactId>
+            <artifactId>kk-studio-plugin-media</artifactId>
             <scope>runtime</scope>
         </dependency>
         <dependency>

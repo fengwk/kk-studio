@@ -5,8 +5,6 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.DependsOn;
 
-import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
-
 /**
  * MiniMax Mavis Plugin 的唯一装配入口，由 {@code AutoConfiguration.imports} 声明。
  *
@@ -47,7 +45,7 @@ public class MiniMaxMavisAutoConfiguration {
 
   @Bean
   @ConditionalOnMissingBean
-  public StudioPlugin mavisStudioPlugin(
+  public MiniMaxMavisPlugin mavisStudioPlugin(
       MavisClient mavisClient,
       MiniMaxMavisAuthHandler mavisAuthHandler,
       MiniMaxMavisCredentialRefresher mavisCredentialRefresher) {
