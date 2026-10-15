@@ -41,6 +41,7 @@ import fun.fengwk.kkstudio.platform.plugin.service.PluginManagementService;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginAuthKindDTO;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginAuthPrepareDTO;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginConfigurationDTO;
+import fun.fengwk.kkstudio.share.ai.plugin.PluginConnectionCheckDTO;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginDTO;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginSecretProjectionDTO;
 import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
@@ -114,6 +115,7 @@ class PluginHttpWireContractTest {
       Instant.parse("2026-04-30T17:45:30Z");
   private static final Instant DEEP_CONNECTED_LAST_REFRESHED_AT =
       Instant.parse("2026-04-30T16:45:30Z");
+  private static final Instant CHECKED_AT = Instant.parse("2026-03-01T12:00:00Z");
 
   private PluginManagementService pluginManagementService;
   private MockMvc mockMvc;
@@ -305,6 +307,68 @@ class PluginHttpWireContractTest {
     assertEquals("FAST", values.get("mode").asString());
     assertTrue(values.has("__proto__"));
     assertTrue(values.has("constructor"));
+  }
+
+  /** 测试意图：连接检查能力标记是真实 boolean，既按实例能力取值也绝不在 wire 上省略。 */
+  @Test
+  void connectionCheckSupportIsProjectedAsARealBoolean() throws Exception {
+    when(pluginManagementService.listPlugins()).thenReturn(pluginCatalogue());
+
+    JsonNode catalogue = responseBody(listPlugins()).get("data");
+
+    for (JsonNode plugin : catalogue) {
+      assertTrue(plugin.has("connectionCheckSupported"), "capability flag must not be omitted");
+      assertEquals(JsonNodeType.BOOLEAN, plugin.get("connectionCheckSupported").getNodeType());
+    }
+    assertFalse(catalogue.get(0).get("connectionCheckSupported").booleanValue());
+    assertTrue(catalogue.get(4).get("connectionCheckSupported").booleanValue());
+  }
+
+  /** 测试意图：POST connection-check 的真实响应体（含 no-store 头）必须与已提交的共用 golden 逐值一致。 */
+  @Test
+  void checkConnectionResponseMatchesCommittedHttpWireGolden() throws Exception {
+    when(pluginManagementService.checkConnection("beta-deep-connected", 14L, 8L))
+        .thenReturn(connectionCheck("beta-deep-connected", "14", "8"));
+
+    MockHttpServletResponse response =
+        mockMvc
+            .perform(
+                post("/api/plugins/beta-deep-connected/connection-check")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"expectedEpoch\":\"14\",\"expectedRevision\":\"8\"}"))
+            .andReturn()
+            .getResponse();
+
+    assertEquals(200, response.getStatus());
+    assertEquals("no-store", response.getHeader(HttpHeaders.CACHE_CONTROL));
+    assertWireMatchesGolden("connection-check-http.json", response);
+  }
+
+  /** 测试意图：检查结果只含类型化维度与已应用坐标，绝不回显远端地址、正文、凭据或异常文本。 */
+  @Test
+  void checkConnectionBodyNeverCarriesRemoteMaterial() throws Exception {
+    when(pluginManagementService.checkConnection("beta-deep-connected", 14L, 8L))
+        .thenReturn(connectionCheck("beta-deep-connected", "14", "8"));
+
+    MockHttpServletResponse response =
+        mockMvc
+            .perform(
+                post("/api/plugins/beta-deep-connected/connection-check")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"expectedEpoch\":\"14\",\"expectedRevision\":\"8\"}"))
+            .andReturn()
+            .getResponse();
+
+    String body = bodyText(response);
+    for (String forbidden :
+        List.of("http://", "https://", "Bearer", "apiKey", "instanceId", "credential")) {
+      assertFalse(body.contains(forbidden), "connection check body must never expose " + forbidden);
+    }
+    JsonNode data = JsonValues.readTree(body).get("data");
+    assertEquals("REACHABLE", data.get("reachability").asString());
+    assertEquals("ACCEPTED", data.get("authentication").asString());
+    assertEquals("UNKNOWN", data.get("browserSession").asString());
+    assertInstantToken(data.get("checkedAt"), CHECKED_AT);
   }
 
   /** 测试意图：POST auth/prepare 的响应体（含 no-store 头）必须与已提交的共用 golden 逐值一致。 */
@@ -557,10 +621,25 @@ class PluginHttpWireContractTest {
     dto.setHarnessToolNames(List.of("beta-deep-connected-tool", "beta-deep-connected-extra"));
     dto.setCanvasFunctionNames(List.of("beta-deep-connected-fn"));
     dto.setConfiguration(configuration("8", PROBE_VALUES_JSON, true));
+    dto.setConnectionCheckSupported(true);
     dto.setDesiredEpoch("14");
     dto.setAppliedEpoch("14");
     dto.setDesiredRevision("8");
     dto.setAppliedRevision("8");
+    return dto;
+  }
+
+  /** 显式连接检查的响应 fixture：只有类型化维度与本次已应用坐标。 */
+  private static PluginConnectionCheckDTO connectionCheck(
+      String pluginId, String appliedEpoch, String appliedRevision) {
+    PluginConnectionCheckDTO dto = new PluginConnectionCheckDTO();
+    dto.setPluginId(pluginId);
+    dto.setAppliedEpoch(appliedEpoch);
+    dto.setAppliedRevision(appliedRevision);
+    dto.setCheckedAt(CHECKED_AT);
+    dto.setReachability(PluginConnectionCheckDTO.Reachability.REACHABLE);
+    dto.setAuthentication(PluginConnectionCheckDTO.Authentication.ACCEPTED);
+    dto.setBrowserSession(PluginConnectionCheckDTO.BrowserSession.UNKNOWN);
     return dto;
   }
 

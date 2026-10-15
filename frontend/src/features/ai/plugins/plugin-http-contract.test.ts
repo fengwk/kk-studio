@@ -33,6 +33,8 @@ describe('plugin HTTP contract', () => {
     expect(plugins[3].appliedRevision).toBe('1')
     expect(plugins[3].applicationError).not.toBeNull()
     expect(plugins[4].expiresAt).toBe(1777574730)
+    expect(plugins[0].connectionCheckSupported).toBe(false)
+    expect(plugins[4].connectionCheckSupported).toBe(true)
     const raw = plugins[4].configuration.valuesJson
     const parsed = parseStrictJsonObject(raw)
     expect(parsed.ok).toBe(true)

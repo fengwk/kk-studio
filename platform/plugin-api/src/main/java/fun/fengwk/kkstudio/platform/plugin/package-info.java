@@ -13,6 +13,7 @@
  * <p>安装期定义（{@link fun.fengwk.kkstudio.platform.plugin.StudioPlugin}）与运行期实例（{@link
  * fun.fengwk.kkstudio.platform.plugin.PluginInstance}）分离：定义声明身份、受控配置与认证协议，配置产出的实例才持有资源并贡献 Harness /
  * Canvas 两域能力；Plugin 经由 {@link fun.fengwk.kkstudio.platform.plugin.PluginContext} 只拿到绑定自身 pluginId
- * 的 scoped 凭据视图。
+ * 的 scoped 凭据视图。实例还可选声明 {@link
+ * fun.fengwk.kkstudio.platform.plugin.PluginConnectionCheck}，由管理面的显式请求按需触发一次只读检查。
  */
 package fun.fengwk.kkstudio.platform.plugin;

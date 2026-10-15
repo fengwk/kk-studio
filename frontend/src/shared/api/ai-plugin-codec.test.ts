@@ -37,6 +37,7 @@ describe('ai-plugin-codec', () => {
     appliedEpoch: '10',
     desiredRevision: '5',
     appliedRevision: '5',
+    connectionCheckSupported: true,
     harnessToolNames: ['search'],
     canvasFunctionNames: ['draw'],
     applicationError: null,
@@ -73,6 +74,7 @@ describe('ai-plugin-codec', () => {
     appliedEpoch: '1',
     desiredRevision: '1',
     appliedRevision: '1',
+    connectionCheckSupported: false,
     harnessToolNames: [],
     canvasFunctionNames: [],
     applicationError: null,
@@ -101,6 +103,7 @@ describe('ai-plugin-codec', () => {
     appliedEpoch: '0',
     desiredRevision: '1',
     appliedRevision: '1',
+    connectionCheckSupported: false,
     harnessToolNames: [],
     canvasFunctionNames: [],
     applicationError: null,
@@ -115,6 +118,8 @@ describe('ai-plugin-codec', () => {
     const decodedStatic = decodePluginDTO(sampleStaticKeyDTO)
     expect(decodedStatic.pluginId).toBe('custom-static')
     expect(decodedStatic.authKind?.type).toBe('STATIC_KEY')
+    expect(decodedDeep.connectionCheckSupported).toBe(true)
+    expect(decodedStatic.connectionCheckSupported).toBe(false)
 
     const decodedNone = decodePluginDTO(sampleNoAuthDTO)
     expect(decodedNone.authKind).toBeNull()

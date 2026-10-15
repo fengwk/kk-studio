@@ -23,6 +23,8 @@ import fun.fengwk.kkstudio.share.ai.plugin.PluginAuthCompleteRequestDTO;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginAuthPrepareDTO;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginAuthPrepareRequestDTO;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginConfigurationUpdateRequestDTO;
+import fun.fengwk.kkstudio.share.ai.plugin.PluginConnectionCheckDTO;
+import fun.fengwk.kkstudio.share.ai.plugin.PluginConnectionCheckRequestDTO;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginDTO;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginSecretPatchDTO;
 
@@ -80,6 +82,24 @@ public class StudioPluginController {
     return ResponseEntity.status(status)
         .header(HttpHeaders.CACHE_CONTROL, NO_STORE)
         .body(Results.ok(pluginDTO));
+  }
+
+  /**
+   * 显式只读连接检查：期望坐标不可省略，未安装返回 not found，尚未应用或坐标不匹配返回 409，实例未声明能力返回 400。
+   *
+   * <p>响应只含类型化维度与本次已应用坐标，强制 {@code Cache-Control: no-store}；绝不回显远端内容、URL 或凭据。
+   */
+  @PostMapping("/{pluginId}/connection-check")
+  public ResponseEntity<Result<PluginConnectionCheckDTO>> checkConnection(
+      @PathVariable("pluginId") String pluginId,
+      @RequestBody PluginConnectionCheckRequestDTO request) {
+    long expectedEpoch = parseCoordinate(request.getExpectedEpoch(), "expectedEpoch");
+    long expectedRevision = parseCoordinate(request.getExpectedRevision(), "expectedRevision");
+    PluginConnectionCheckDTO checkDTO =
+        pluginManagementService.checkConnection(pluginId, expectedEpoch, expectedRevision);
+    return ResponseEntity.ok()
+        .header(HttpHeaders.CACHE_CONTROL, NO_STORE)
+        .body(Results.ok(checkDTO));
   }
 
   @PostMapping("/{pluginId}/auth/prepare")
