@@ -5,7 +5,7 @@ The runner loads exactly one versioned migration, `schema/src/main/resources/db/
 which is the single authoritative definition of the product schema: there is no second design DDL to keep
 in sync. It then proves three kinds of target facts:
 
-* the 39 business and infrastructure tables of that baseline are present and nothing else was added;
+* the 45 business and infrastructure tables of that baseline are present and nothing else was added;
 * the 16 Canvas / Project / Chat-Session target tables expose exactly their declared columns, foreign-key
   relations and indexes;
 * the shared contract probes (`fresh-install-probes.sql`, also executed by the schema module's Java
@@ -38,8 +38,10 @@ PROBE_FILE = "schema/src/test/resources/fun/fengwk/kkstudio/schema/fresh-install
 MINIMUM_PROBE_ASSERTIONS = 135
 IMAGE = "postgres:17.10"
 
-# The 39 business and infrastructure tables of the sole production baseline. Flyway adds its own
-# history table on top, so the accepted table set is exactly this list.
+# The 45 business and infrastructure tables of the sole production baseline. Flyway adds its own
+# history table on top, so the accepted table set is exactly this list. `main` re-derives the set
+# from the baseline DDL and fails on any drift, so a new or removed table can never slip through
+# silently.
 BUSINESS_TABLES = (
     "agent_definition",
     "agent_model",
@@ -55,16 +57,22 @@ BUSINESS_TABLES = (
     "chat_session",
     "environment",
     "environment_connection",
+    "environment_update_operation",
     "harness_entry",
     "harness_model_invocation",
     "harness_session",
     "harness_thread",
     "harness_thread_command",
     "harness_thread_join",
+    "harness_thread_stop_receipt",
     "harness_tool_invocation",
     "harness_work",
     "mcp_server",
     "mcp_tool",
+    "plugin_auth_attempt",
+    "plugin_catalog_revision",
+    "plugin_catalog_state",
+    "plugin_configuration_revision",
     "plugin_credential",
     "project",
     "project_issue",
@@ -384,6 +392,28 @@ NEGATIVE_PROBES = (
 )
 
 
+TABLE_DECLARATION = re.compile(
+    r"^\s*create\s+table\s+(?:if\s+not\s+exists\s+)?([a-z_][a-z0-9_]*)",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def declared_baseline_tables(baseline_sql):
+    """Return the sorted table names the baseline DDL creates, ignoring SQL line comments."""
+    without_comments = re.sub(r"--[^\n]*", "", baseline_sql)
+    return sorted(TABLE_DECLARATION.findall(without_comments))
+
+
+def inventory_mismatch(baseline_sql):
+    """Return the declared inventory's drift against the baseline DDL as two sorted lists.
+
+    The first list holds baseline tables that are missing from `BUSINESS_TABLES` (a silently
+    ignored new table); the second holds declared tables the baseline never creates (a stale entry).
+    """
+    declared = set(declared_baseline_tables(baseline_sql))
+    return sorted(declared - set(BUSINESS_TABLES)), sorted(set(BUSINESS_TABLES) - declared)
+
+
 def repository_root():
     configured = os.environ.get("KK_STUDIO_REPO_ROOT")
     if configured:
@@ -516,11 +546,21 @@ def main():
             f"the production schema must be the single {BASELINE_FILE}; found {baselines}"
         )
     baseline = root / MIGRATION_DIRECTORY / BASELINE_FILE
+    baseline_sql = baseline.read_text(encoding="utf-8")
     probes = root / PROBE_FILE
     if not probes.is_file():
         raise RuntimeError(f"missing shared contract probes: {PROBE_FILE}")
-    if len(BUSINESS_TABLES) != 39 or len(TARGET_TABLES) != 16:
-        raise RuntimeError("the declared inventory must stay at 39 business and 16 target tables")
+    if len(BUSINESS_TABLES) != 45 or len(TARGET_TABLES) != 16:
+        raise RuntimeError("the declared inventory must stay at 45 business and 16 target tables")
+    # Re-derive the inventory from the baseline DDL: a table added to (or removed from) the
+    # baseline without updating BUSINESS_TABLES must fail before the isolated database runs.
+    missing_from_inventory, not_created_by_baseline = inventory_mismatch(baseline_sql)
+    if missing_from_inventory or not_created_by_baseline:
+        raise RuntimeError(
+            "declared table inventory drifted from the baseline DDL: "
+            f"baseline tables missing from the inventory {missing_from_inventory}, "
+            f"declared tables the baseline does not create {not_created_by_baseline}"
+        )
 
     # Force the local Unix socket; never inherit a deployment Docker context or PG URL.
     socket = Path("/var/run/docker.sock")
@@ -627,7 +667,7 @@ def main():
                 text=source,
             ).stdout
 
-        sql(baseline.read_text(encoding="utf-8"))
+        sql(baseline_sql)
         violations = parse_violations(sql(violations_query()))
         if violations:
             raise RuntimeError(f"baseline structure mismatch: {describe(violations)}")
