@@ -8,7 +8,9 @@ import fun.fengwk.kkstudio.platform.plugin.PluginContext;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialReference;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRepository;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.function.BiFunction;
 
@@ -18,8 +20,12 @@ import java.util.function.BiFunction;
  * <p>{@link #refresh()} 串行回读权威状态，只在 epoch 前进时通过 {@link PluginCatalogBootstrap#restore}
  * 构建并校验完整候选。候选构建不占生命周期锁；发布前再次回读，过期候选独立关闭，等待下次对账。任一插件应用失败时保留整个旧视图，不部分发布。
  *
- * <p>发布、退役与 {@link #acquireCurrent()} 同锁。每个已发布快照持有一个所有者引用和若干活动租用，最后一个引用释放时才在锁外关闭。 {@link #close()}
+ * <p>发布、退役与租用同锁。每个已发布快照持有一个所有者引用和若干活动租用，最后一个引用释放时才在锁外关闭。 {@link #close()}
  * 禁止新租用并释放所有者引用，不强杀活动使用者；通知、调度与消费者装配由组合根负责。
+ *
+ * <p>{@link #acquire(long)} 为已持久接受的旧 epoch 任务重建对应快照：同一生命周期锁内先复用已加载的当前或历史视图，未加载时才在 {@link
+ * #refreshLock} 内严格回读指定历史并 {@link PluginCatalogBootstrap#restore}，因此绝不把当前其它插件拼到旧任务上，也不修改
+ * desired/applied、不发布旧 epoch。历史视图没有所有者引用，仅由租用持有，最后一个租用释放即移除并关闭。
  *
  * <p>{@link RuntimeException} 转为固定受控错误码，日志只记录 epoch、阶段与异常类型；{@link Error} 保持原样传播，候选回收失败不得替代原始致命错误。
  */
@@ -49,6 +55,9 @@ public final class PluginCatalogRuntime implements AutoCloseable {
   private final Object refreshLock = new Object();
 
   private View current;
+
+  /** 仅由租用持有的历史 epoch 视图；没有所有者引用，最后一个租用释放时移除并关闭。 */
+  private final Map<Long, View> retained = new LinkedHashMap<>();
 
   private long desiredEpoch;
 
@@ -172,17 +181,37 @@ public final class PluginCatalogRuntime implements AutoCloseable {
     publish(candidate);
   }
 
-  /** 在短锁内一次发布候选：同/更旧 epoch 已存在或已关闭时关闭候选而不采纳，退役快照在锁外关闭。 */
+  /**
+   * 在短锁内一次发布候选：同/更旧 epoch 已存在或已关闭时关闭候选而不采纳，退役快照在锁外关闭。
+   *
+   * <p>若该 epoch 已有仅由租用持有的历史视图（{@link #acquire(long)} 先于对账加载），直接把该视图提升为当前视图并关闭重复构建的候选， 避免同一 epoch
+   * 出现两套活动实例。被替换的旧当前视图只在最后一个引用释放时关闭；仍有活动租用时按 epoch 保留，供同 epoch 的 {@link #acquire(long)} 复用。
+   */
   private void publish(PluginCatalogSnapshot candidate) {
     PluginCatalogSnapshot retired = null;
+    PluginCatalogSnapshot discarded = null;
     boolean published = false;
     synchronized (lifecycleLock) {
       if (!closed && candidate.epoch() > current.snapshot.epoch()) {
+        View promoted = retained.remove(candidate.epoch());
+        View next;
+        if (promoted == null) {
+          // 新候选自带一个所有者引用，不再额外加计数。
+          next = new View(candidate);
+        } else {
+          next = promoted;
+          // 提升为当前视图：为已加载的仅租用历史视图补上所有者引用，并回收重复构建的候选。
+          next.holders++;
+          discarded = candidate;
+        }
         View previous = current;
-        current = new View(candidate);
+        current = next;
         previous.holders--;
         if (previous.holders == 0) {
           retired = previous.snapshot;
+        } else {
+          // 仍被活动租用钉住：保留该 epoch 的视图，使同 epoch 的后续 acquire 复用同一套实例。
+          retained.put(previous.snapshot.epoch(), previous);
         }
         desiredEpoch = Math.max(desiredEpoch, candidate.epoch());
         applicationError = null;
@@ -195,6 +224,16 @@ public final class PluginCatalogRuntime implements AutoCloseable {
           candidate.epoch());
       candidate.close();
       return;
+    }
+    if (discarded != null) {
+      try {
+        discarded.close();
+      } catch (Error primary) {
+        if (retired != null) {
+          throw closePreservingPrimary(retired, primary);
+        }
+        throw primary;
+      }
     }
     if (retired != null) {
       retired.close();
@@ -215,6 +254,93 @@ public final class PluginCatalogRuntime implements AutoCloseable {
       View view = current;
       view.holders++;
       return new Lease(view);
+    }
+  }
+
+  /**
+   * 租用指定已持久 epoch 的完整快照，供已接受但尚未执行完的任务精确重建其目录。
+   *
+   * <p>已加载的 epoch（当前视图或仍被租用钉住的历史视图）直接复用并加引用。未加载时在 {@link #refreshLock} 内串行回读该 epoch 的不可变完整 manifest
+   * 并走 {@link PluginCatalogBootstrap#restore} 严格重建：绝不修改 desired/applied、不发布旧 epoch、也不把当前其它插件拼到旧任务上。
+   * 历史视图没有所有者引用，最后一个租用释放即移除并关闭。
+   *
+   * @return 幂等关闭的租用；租用期间该 epoch 的快照不会被关闭
+   * @throws IllegalArgumentException epoch 为未初始化形态（{@code <= 0}）
+   * @throws IllegalStateException 已 {@link #close()}，或该 epoch 缺少历史、代码/身份漂移、权威不可读时（只带受控诊断）
+   */
+  public Lease acquire(long epoch) {
+    if (epoch <= PluginCatalogBootstrap.UNINITIALIZED_EPOCH) {
+      throw new IllegalArgumentException("epoch must be an initialized epoch");
+    }
+    View loaded = retainLoaded(epoch);
+    if (loaded != null) {
+      return new Lease(loaded);
+    }
+
+    synchronized (refreshLock) {
+      // 串行窗口内可能有并发 acquire/refresh 已经加载该 epoch：只复用，不重复构建。
+      loaded = retainLoaded(epoch);
+      if (loaded != null) {
+        return new Lease(loaded);
+      }
+      PluginCatalogSnapshot candidate = restoreHistory(epoch);
+      Lease lease = null;
+      synchronized (lifecycleLock) {
+        if (!closed) {
+          View view = new View(candidate);
+          retained.put(epoch, view);
+          lease = new Lease(view);
+        }
+      }
+      if (lease == null) {
+        // 关闭后不再授予新租用：候选独立回收，绝不让租用访问已关闭实例。
+        candidate.close();
+        throw new IllegalStateException("plugin catalog runtime is closed");
+      }
+      return lease;
+    }
+  }
+
+  /** 在短锁内返回已加载的 epoch 视图并加一个引用；未加载返回 null，已关闭抛出。 */
+  private View retainLoaded(long epoch) {
+    synchronized (lifecycleLock) {
+      if (closed) {
+        throw new IllegalStateException("plugin catalog runtime is closed");
+      }
+      View view = current.snapshot.epoch() == epoch ? current : retained.get(epoch);
+      if (view != null) {
+        view.holders++;
+      }
+      return view;
+    }
+  }
+
+  /** 严格重建指定 epoch 的完整快照：回读不可变历史，缺失或恢复失败都明确拒绝，不做任何 current/default 兜底。 */
+  private PluginCatalogSnapshot restoreHistory(long epoch) {
+    PluginCatalogRecord record;
+    try {
+      record = repository.readCatalog(epoch).orElse(null);
+    } catch (RuntimeException error) {
+      log.warn(
+          "Plugin catalog history acquire failed: stage=history epoch={} error={}",
+          epoch,
+          error.getClass().getSimpleName());
+      throw new IllegalStateException(
+          "plugin catalog history acquire failed: stage=history epoch=" + epoch);
+    }
+    if (record == null) {
+      log.warn("Plugin catalog history acquire rejected: stage=history-missing epoch={}", epoch);
+      throw new IllegalStateException(
+          "plugin catalog history acquire failed: stage=history-missing epoch=" + epoch);
+    }
+    try {
+      return bootstrap.restore(record, contexts, builtins, builtinAdapters);
+    } catch (RuntimeException error) {
+      log.warn(
+          "Plugin catalog history acquire failed: stage=restore epoch={} error={}",
+          epoch,
+          error.getClass().getSimpleName());
+      throw error;
     }
   }
 
@@ -320,6 +446,8 @@ public final class PluginCatalogRuntime implements AutoCloseable {
         closedLease = true;
         view.holders--;
         if (view.holders == 0) {
+          // 历史视图没有所有者引用：最后一个租用释放时从加载集合移除并关闭；当前视图由 publish/close 自行退役。
+          retained.remove(view.snapshot.epoch(), view);
           released = view.snapshot;
         }
       }

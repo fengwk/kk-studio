@@ -579,10 +579,12 @@ class PluginCatalogBootstrapTest {
     }
   }
 
-  /** 内存权威仓储替身：模拟单行 CAS、append-only 历史与可注入的读/写失败。 */
+  /** 内存权威仓储替身：模拟单行 CAS、append-only manifest/配置历史与可注入的读/写失败。 */
   private static final class FakeRepository implements PluginConfigurationRepository {
 
     private PluginCatalogRecord catalog = epochZero();
+    private final Map<Long, PluginCatalogRecord> catalogRevisions =
+        new LinkedHashMap<>(Map.of(0L, catalog));
     private final Map<String, PluginConfigurationRow> history = new LinkedHashMap<>();
     private RuntimeException commitFailure;
     private Error commitError;
@@ -599,6 +601,11 @@ class PluginCatalogBootstrapTest {
     public PluginCatalogRecord readCatalog() {
       readCatalogCalls++;
       return catalog;
+    }
+
+    @Override
+    public Optional<PluginCatalogRecord> readCatalog(long epoch) {
+      return Optional.ofNullable(catalogRevisions.get(epoch));
     }
 
     @Override
@@ -637,6 +644,7 @@ class PluginCatalogBootstrapTest {
         history.put(row.pluginId() + "#" + row.revision(), row);
       }
       catalog = new PluginCatalogRecord(expectedEpoch + 1, manifest);
+      catalogRevisions.put(catalog.epoch(), catalog);
       return true;
     }
   }

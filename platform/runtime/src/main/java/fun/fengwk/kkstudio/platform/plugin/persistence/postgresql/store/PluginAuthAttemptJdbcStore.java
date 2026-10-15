@@ -49,22 +49,24 @@ public class PluginAuthAttemptJdbcStore {
 
   /**
    * 单条语句同时判定摘要、过期、全局 epoch 与当前 manifest 坐标：任一条不满足都不会删除任何行，因此不存在「先检查、再按 nonce 单独删除」的漂移窗口。manifest
-   * 坐标来自权威 {@code plugin_catalog_state.manifest_json}，并与 attempt 行逐字段比较。
+   * 坐标来自权威 {@code plugin_catalog_state} 指针对应的 {@code plugin_catalog_revision.manifest_json}，并与
+   * attempt 行逐字段比较。
    */
   private static final String CONSUME_SQL =
       """
       delete from plugin_auth_attempt a
       using plugin_catalog_state s
+      join plugin_catalog_revision r on r.epoch = s.epoch
       where a.plugin_id = :pluginId
         and a.nonce_hash = :nonceHash
         and a.expires_at > :now
         and s.id = 1
         and s.epoch = :expectedEpoch
-        and (s.manifest_json -> 'plugins' -> :pluginId ->> 'configRevision')::bigint
+        and (r.manifest_json -> 'plugins' -> :pluginId ->> 'configRevision')::bigint
             = a.config_revision
-        and (s.manifest_json -> 'plugins' -> :pluginId ->> 'authGeneration')::uuid
+        and (r.manifest_json -> 'plugins' -> :pluginId ->> 'authGeneration')::uuid
             = a.auth_generation
-        and (s.manifest_json -> 'plugins' -> :pluginId ->> 'contextFingerprint')
+        and (r.manifest_json -> 'plugins' -> :pluginId ->> 'contextFingerprint')
             = a.context_fingerprint
       returning
           a.plugin_id, a.nonce_hash, a.auth_generation, a.context_fingerprint, a.config_revision,
