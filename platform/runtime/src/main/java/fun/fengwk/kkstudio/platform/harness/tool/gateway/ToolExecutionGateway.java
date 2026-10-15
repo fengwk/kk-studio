@@ -355,16 +355,44 @@ public final class ToolExecutionGateway implements ToolGateway {
               () -> runTool(tool, toolRequest, bridge, handle, resources));
       if (!(result instanceof ToolGateway.Started)) {
         // 未进入执行：没有任何在途工作，目录租用立即释放。
-        resources.resolve();
-        lease.close();
+        resolveAndRelease(resources, lease);
       }
       return result;
     } catch (RuntimeException | Error failure) {
-      if (acquiredResources != null) {
-        acquiredResources.resolve();
-      }
-      lease.close();
+      resolveAndReleaseAfterFailure(acquiredResources, lease, failure);
       throw failure;
+    }
+  }
+
+  /** 目录只登记决议；即使目录关闭失败，并发配额仍独立释放。 */
+  private static void resolveAndRelease(
+      ToolResourceLease resources, ConcurrencyAdmission.Lease admissionLease) {
+    try {
+      if (resources != null) {
+        resources.resolve();
+      }
+    } catch (RuntimeException | Error failure) {
+      try {
+        admissionLease.close();
+      } catch (RuntimeException | Error cleanup) {
+        if (cleanup != failure) {
+          failure.addSuppressed(cleanup);
+        }
+      }
+      throw failure;
+    }
+    admissionLease.close();
+  }
+
+  /** 已有主异常时，清理失败只附加到原异常，不替换它。 */
+  private static void resolveAndReleaseAfterFailure(
+      ToolResourceLease resources, ConcurrencyAdmission.Lease admissionLease, Throwable failure) {
+    try {
+      resolveAndRelease(resources, admissionLease);
+    } catch (RuntimeException | Error cleanup) {
+      if (cleanup != failure) {
+        failure.addSuppressed(cleanup);
+      }
     }
   }
 
@@ -373,8 +401,7 @@ public final class ToolExecutionGateway implements ToolGateway {
       ToolResourceLease resources,
       ConcurrencyAdmission.Lease admissionLease,
       ToolInvocationError error) {
-    resources.resolve();
-    admissionLease.close();
+    resolveAndRelease(resources, admissionLease);
     return new ToolGateway.Rejected(error);
   }
 
@@ -437,24 +464,57 @@ public final class ToolExecutionGateway implements ToolGateway {
             if (!resources.tryStart()) {
               return;
             }
+            Throwable primary = null;
             try {
               runner.run();
-            } catch (Error failure) {
-              // 致命错误仍须先提交可观测 UNKNOWN，随后保留原 Error 传播给执行器。
-              bridge.onError(failure);
+            } catch (RuntimeException | Error failure) {
+              primary = failure;
+              if (failure instanceof Error) {
+                // 致命错误先提交 UNKNOWN；回调与延迟关闭的失败均不能替换原始执行错误。
+                try {
+                  bridge.onError(failure);
+                } catch (RuntimeException | Error callbackFailure) {
+                  if (callbackFailure != failure) {
+                    failure.addSuppressed(callbackFailure);
+                  }
+                }
+              }
               throw failure;
             } finally {
-              resources.runnerFinished();
+              try {
+                resources.runnerFinished();
+              } catch (RuntimeException | Error cleanup) {
+                if (primary == null) {
+                  throw cleanup;
+                }
+                if (cleanup != primary) {
+                  primary.addSuppressed(cleanup);
+                }
+              }
             }
           });
     } catch (RejectedExecutionException rejected) {
-      bridge.cancel();
+      try {
+        bridge.cancel();
+      } catch (RuntimeException | Error cleanup) {
+        if (cleanup != rejected) {
+          rejected.addSuppressed(cleanup);
+        }
+        throw rejected;
+      }
       log.warn(
           "tool gateway executor rejected local execution for invocation {}",
           execution.invocationId());
       return new ToolGateway.RetryLater(retryDelay.get());
     } catch (RuntimeException ambiguous) {
-      bridge.cancel();
+      try {
+        bridge.cancel();
+      } catch (RuntimeException | Error cleanup) {
+        if (cleanup != ambiguous) {
+          ambiguous.addSuppressed(cleanup);
+        }
+        throw ambiguous;
+      }
       log.warn(
           "tool gateway executor submission failed for invocation {}",
           execution.invocationId(),
@@ -777,9 +837,8 @@ public final class ToolExecutionGateway implements ToolGateway {
       if (activated.compareAndSet(false, true) && !cancelled.get()) {
         try {
           bridge.activate();
-        } catch (RuntimeException failure) {
-          resources.resolve();
-          lease.close();
+        } catch (RuntimeException | Error failure) {
+          resolveAndReleaseAfterFailure(resources, lease, failure);
           throw failure;
         }
       }
@@ -790,15 +849,24 @@ public final class ToolExecutionGateway implements ToolGateway {
       if (cancelled.compareAndSet(false, true)) {
         try {
           bridge.cancel();
-          CancellableHandle handle = cancellableHandle.get();
-          if (handle != null) {
-            handle.cancel();
+        } catch (RuntimeException | Error failure) {
+          try {
+            cancelAttached();
+          } catch (RuntimeException | Error cancellation) {
+            if (cancellation != failure) {
+              failure.addSuppressed(cancellation);
+            }
           }
-        } finally {
-          // 取消只是决议：目录租用只在此登记，真实释放仍需等待执行体退出（quiescence）。
-          resources.resolve();
-          lease.close();
+          throw failure;
         }
+        cancelAttached();
+      }
+    }
+
+    private void cancelAttached() {
+      CancellableHandle handle = cancellableHandle.get();
+      if (handle != null) {
+        handle.cancel();
       }
     }
   }
@@ -878,8 +946,7 @@ public final class ToolExecutionGateway implements ToolGateway {
         queue.clear();
         monitor.notifyAll();
       }
-      resources.resolve();
-      lease.close();
+      resolveAndRelease(resources, lease);
     }
 
     boolean awaitRelease() {
@@ -967,6 +1034,11 @@ public final class ToolExecutionGateway implements ToolGateway {
           try {
             terminalSignal = process(signal);
           } catch (RuntimeException failure) {
+            synchronized (monitor) {
+              if (terminal) {
+                throw failure;
+              }
+            }
             terminalSignal = unknown(failure, "tool callback dispatch failed");
           }
         }
@@ -1197,9 +1269,16 @@ public final class ToolExecutionGateway implements ToolGateway {
     }
 
     private void deliverTerminal(Runnable callback) {
+      synchronized (monitor) {
+        // 终态先于回调与清理固定，关闭失败不能被重新解释为第二个 UNKNOWN。
+        terminal = true;
+        queue.clear();
+      }
+      Error primary = null;
       try {
         callback.run();
       } catch (RuntimeException failure) {
+        // 已隔离的 listener 异常不是待传播的主异常，不能阻止清理失败向上传播。
         try {
           log.warn(
               "tool gateway listener threw while accepting a terminal callback for {}: {}; "
@@ -1208,9 +1287,18 @@ public final class ToolExecutionGateway implements ToolGateway {
               safeMessage(failure));
         } catch (RuntimeException ignored) {
         }
+      } catch (Error failure) {
+        primary = failure;
+        throw failure;
       } finally {
-        resources.resolve();
-        lease.close();
+        synchronized (monitor) {
+          dispatching = false;
+        }
+        if (primary == null) {
+          resolveAndRelease(resources, lease);
+        } else {
+          resolveAndReleaseAfterFailure(resources, lease, primary);
+        }
       }
     }
 
