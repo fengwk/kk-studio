@@ -402,6 +402,47 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
   }
 
   /**
+   * 验收证据：新 epoch 已移除该函数（或目录为空）时，旧客户端版本必须得到 409 版本冲突，而不是「未知函数」400。
+   *
+   * <p>epoch 比较必须早于按名绑定，否则「函数被移除」会被误报为请求非法，客户端会去改请求而不是刷新目录。
+   */
+  @Test
+  void startRejectsStaleEpochWhenTheFunctionWasRemoved() {
+    for (CanvasFunctionCatalog nextEpoch :
+        List.of(CanvasFunctionCatalog.from(List.of()), catalogOf(MULTI_MEDIA_DEFINITION))) {
+      UUID canvasId = addDocument();
+      UUID nodeId = addFunctionNode(canvasId, "output", configWithoutReferences());
+      CountingAdapter adapter = new CountingAdapter(DEFINITION);
+      FixedCanvasFunctionCatalogSource source =
+          new FixedCanvasFunctionCatalogSource(1L, catalogOf(adapter));
+      // epoch 1 客户端看到的就是 test.image；epoch 2 起目录不再提供它。
+      source.register(2L, nextEpoch);
+      source.currentEpoch(2L);
+      CanvasFunctionRunTransactions candidate = transactionsFor(source);
+
+      CanvasFunctionRunException conflict =
+          assertThrows(
+              CanvasFunctionRunException.class,
+              () ->
+                  transactions.execute(
+                      status ->
+                          candidate.start(canvasId, nodeId, REQUEST_1, versionOf(1L, DEFINITION))));
+
+      assertEquals(CanvasFunctionRunException.Reason.CONFLICT, conflict.reason());
+      assertEquals(
+          "Canvas Function catalog changed; refresh the directory before starting this function",
+          conflict.getMessage());
+      assertEquals(0, adapter.preflightCalls, "removed function must not reach any adapter");
+      assertTrue(runRepository.findByNodeId(nodeId).isEmpty());
+      assertTrue(pinRepository.findByNode(canvasId, nodeId).isEmpty());
+      assertTrue(resourceRepository.findByOwnerNode(canvasId, nodeId).isEmpty());
+      assertEquals(0L, version(canvasId));
+      assertEquals(1, source.acquireCurrentCalls(), "the fence must not acquire a second lease");
+      assertEquals(0, source.openLeases());
+    }
+  }
+
+  /**
    * 验收证据：目录推进后，精确 requestId 重放仍命中已接受结果，不重新取目录、pin 或提交。
    *
    * <p>重放优先于版本校验，因此客户端不必因为目录前进而重放失败，执行事实也不会被二次冻结。
@@ -442,6 +483,47 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
     assertTrue(
         resourceRepository.findByOwnerNode(canvasId, nodeId).isEmpty(),
         "exact replay must not allocate resources");
+    assertEquals(0, source.openLeases());
+  }
+
+  /**
+   * 验收证据：函数被整个移除后，已接受的精确 requestId 重放仍返回既有 Run，且完全不取 current 租用。
+   *
+   * <p>这是重放优先的最强形式：新 epoch 连该函数名都不存在，按名绑定会失败，但已接受的执行事实必须原样返回。
+   */
+  @Test
+  void exactRequestIdReplaySurvivesFunctionRemoval() {
+    UUID canvasId = addDocument();
+    UUID nodeId = addFunctionNode(canvasId, "output", configWithoutReferences());
+    FixedCanvasFunctionCatalogSource source =
+        new FixedCanvasFunctionCatalogSource(1L, catalogOf(DEFINITION));
+    CanvasFunctionRunTransactions candidate = transactionsFor(source);
+    CanvasFunctionVersion acceptedVersion = versionOf(1L, DEFINITION);
+
+    CanvasFunctionRun first =
+        transactions
+            .execute(status -> candidate.start(canvasId, nodeId, REQUEST_1, acceptedVersion))
+            .run();
+    long versionAfterStart = version(canvasId);
+    int acquiresAfterStart = source.acquireCurrentCalls();
+
+    // 目录推进到 epoch 2 且不再提供该函数：按名绑定会失败，但重放必须在绑定之前返回。
+    source.register(2L, CanvasFunctionCatalog.from(List.of()));
+    source.currentEpoch(2L);
+
+    CanvasFunctionStartResult replay =
+        transactions.execute(
+            status -> candidate.start(canvasId, nodeId, REQUEST_1, acceptedVersion));
+
+    assertFalse(replay.created());
+    assertEquals(first.requestId(), replay.run().requestId());
+    assertEquals(decode(first), decode(replay.run()));
+    assertEquals(versionAfterStart, version(canvasId), "exact replay must not bump version");
+    assertEquals(
+        acquiresAfterStart,
+        source.acquireCurrentCalls(),
+        "exact replay must not take a current lease");
+    assertTrue(pinRepository.findByNode(canvasId, nodeId).isEmpty());
     assertEquals(0, source.openLeases());
   }
 

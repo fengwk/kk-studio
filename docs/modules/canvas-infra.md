@@ -41,8 +41,10 @@ Snapshot 读路径是 [`PostgresqlCanvasQueryService.findSnapshot`](../../canvas
 lock document (FOR UPDATE) -> lock node -> lock current run (FOR UPDATE)
   -> requestId 与现有 Run 相同：直接返回既有 Run（不推进 revision）
   -> 现有 Run 处于 READY/RUNNING/UNKNOWN 且 requestId 不同：conflict
-  -> acquireCurrent + bind(name) + require(binding)
-  -> 版本围栏：expectedVersion 的 epoch 与「该函数完整定义 fingerprint」都必须等于本次租用冻结的事实，否则 conflict
+  -> acquireCurrent
+  -> 版本围栏（一）：expectedVersion 的 epoch 必须等于本次租用冻结的 epoch，早于按名绑定（新 epoch 已移除该函数时旧版本仍是 conflict）
+  -> bind(name) + require(binding)
+  -> 版本围栏（二）：绑定后比较该函数完整定义 fingerprint
   -> requireAvailable；严格解码 args
   -> 冻结 manifest：每个引用节点必须存在、index 必须在资源范围内且必须是 blob
   -> 校验 frozen blob facts 与 function reference policy

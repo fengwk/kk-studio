@@ -1,5 +1,8 @@
 /** 共享 HTTP / 断言工具（Node 原生 fetch，无第三方依赖）。 */
 
+/** Java long 上界：wire 上的 canonical 版本游标只能是这个范围内的非负十进制文本。 */
+const LONG_MAX = 9223372036854775807n
+
 export class HttpError extends Error {
   constructor(status, body, requestPath) {
     super(`HTTP ${status} ${requestPath}: ${String(body).slice(0, 500)}`)
@@ -23,12 +26,26 @@ export function assertExactFields(value, expectedFields, label = 'object') {
   )
 }
 
-/** canonical 非负十进制字符串（Java long wire）：'0' 或非零开头，拒绝前导零/负数/空白/数字。 */
+/** canonical 非负十进制字符串（Java long wire）：'0' 或非零开头，拒绝前导零/负数/空白/数字，且不得越过 signed 64-bit 上界。 */
 export function assertDecimalVersion(value, label = 'version') {
   assert(
-    typeof value === 'string' && /^(0|[1-9][0-9]*)$/.test(value),
-    `${label} must be a canonical non-negative decimal string, got ${JSON.stringify(value)}`,
+    typeof value === 'string'
+      && /^(0|[1-9][0-9]*)$/.test(value)
+      && BigInt(value) <= LONG_MAX,
+    `${label} must be a canonical non-negative decimal Java long, got ${JSON.stringify(value)}`,
   )
+}
+
+/**
+ * 与给定 canonical 非负十进制 long 文本不同、且仍落在同一合法 long 范围内的版本。
+ *
+ * <p>用 BigInt 精确构造：超过 2^53 的 epoch 用 Number 加减一会丢精度（甚至造出越界值），
+ * 因此 `MAX` 时只能减一，其余情况加一。
+ */
+export function differentDecimalLong(value, label = 'version') {
+  assertDecimalVersion(value, label)
+  const current = BigInt(value)
+  return (current === LONG_MAX ? current - 1n : current + 1n).toString()
 }
 
 export async function httpJson(
