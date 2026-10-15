@@ -65,6 +65,8 @@ export interface PluginDTO {
   appliedEpoch: string | null
   desiredRevision: string
   appliedRevision: string | null
+  /** 当前已应用实例是否声明显式只读连接检查能力；能力来自实例本身，绝不按 pluginId 推断。 */
+  connectionCheckSupported: boolean
   harnessToolNames: string[]
   canvasFunctionNames: string[]
   applicationError: string | null

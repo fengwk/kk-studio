@@ -52,7 +52,7 @@ health、资源下载和 WebSocket 使用各自传输形式。公开路由如下
 | Catalog | `/api/ai/catalog/providers|models|agents|tools` | Provider/Model/Agent CRUD、工具候选；变更使用 expectedVersion |
 | Skill | `/api/ai/catalog/skill-packages` | CRUD、check、exact commit update |
 | MCP | `/api/ai/mcp-servers` | name-keyed CRUD、显式 no-store config、同步 discover |
-| Plugin | `/api/plugins` | 安全投影、auth/prepare、auth/complete、删除 auth |
+| Plugin | `/api/plugins` | 安全投影、auth/prepare、auth/complete、删除 auth；`{pluginId}/connection-check` 按 expected 坐标执行一次显式只读连接检查 |
 | Chat | `/api/ai/chats` | CRUD 与归属 Session |
 | Harness command | `/api/harness/command-batches`、`/api/harness/threads/{threadId}/command-batches` | 创建型 Chat 命令接受（owner-aware）与既有 Thread 的 owner-free 续写；都返回 202 |
 | Session | `/api/harness/sessions/{sessionId}` | threads、entries（含读取时 `usageCost`）、name、草稿/历史请求预览 |

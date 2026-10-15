@@ -66,6 +66,9 @@ public class PluginDTO {
   /** 本节点运行实例构建时的配置修订（canonical 非负十进制字符串）。 */
   private String appliedRevision;
 
+  /** 本节点已应用实例是否声明显式只读连接检查能力；按已应用实例的能力如实投影，绝不按 pluginId 硬编码。 */
+  private boolean connectionCheckSupported;
+
   /** 本节点已应用快照中该 Plugin 真实冻结的模型可见工具名（按冻结目录顺序）；没有贡献时为空列表。 */
   private List<String> harnessToolNames;
 

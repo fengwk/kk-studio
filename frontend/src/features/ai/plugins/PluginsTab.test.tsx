@@ -44,6 +44,7 @@ function samplePlugin(overrides: Partial<PluginDTO> = {}): PluginDTO {
     appliedEpoch: '1',
     desiredRevision: '1',
     appliedRevision: '1',
+    connectionCheckSupported: false,
     harnessToolNames: ['search'],
     canvasFunctionNames: ['draw'],
     applicationError: null,

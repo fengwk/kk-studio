@@ -4,28 +4,35 @@ import tools.jackson.databind.ObjectMapper;
 
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
+import fun.fengwk.kkstudio.platform.plugin.PluginConnectionCheck;
 import fun.fengwk.kkstudio.platform.plugin.PluginContext;
 import fun.fengwk.kkstudio.platform.plugin.PluginInstance;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * OpenCLI 插件的运行期实例。
  *
  * <p>按一次配置装配 Client、GPT Image 2 与 Seedance 函数适配器；Harness Contributor 为空。 实例拥有其创建的 Client 资源，{@link
- * #close()} 幂等释放自身资源，不关闭宿主共享资源。
+ * #close()} 幂等释放自身资源，不关闭宿主共享资源。它还声明可选的只读连接检查能力，复用同一 Client 的 scoped 认证路径。
  */
 final class OpenCliInstance implements PluginInstance {
 
   private final List<CanvasFunctionAdapter> canvasAdapters;
   private final OpenCliHubClient client;
+  private final PluginConnectionCheck connectionCheck;
   private final AtomicBoolean closed = new AtomicBoolean(false);
 
-  private OpenCliInstance(List<CanvasFunctionAdapter> canvasAdapters, OpenCliHubClient client) {
+  private OpenCliInstance(
+      List<CanvasFunctionAdapter> canvasAdapters,
+      OpenCliHubClient client,
+      PluginConnectionCheck connectionCheck) {
     this.canvasAdapters = List.copyOf(canvasAdapters);
     this.client = client;
+    this.connectionCheck = connectionCheck;
   }
 
   static OpenCliInstance create(
@@ -37,7 +44,8 @@ final class OpenCliInstance implements PluginInstance {
     OpenCliHubClient client = new OpenCliHubClient(settings, mapper, context.credentialAccess());
     CanvasFunctionAdapter gptImage2Adapter = new GptImage2CanvasFunctionAdapter(settings, client);
     CanvasFunctionAdapter seedanceAdapter = new SeedanceCanvasFunctionAdapter(settings, client);
-    return new OpenCliInstance(List.of(gptImage2Adapter, seedanceAdapter), client);
+    return new OpenCliInstance(
+        List.of(gptImage2Adapter, seedanceAdapter), client, new OpenCliConnectionCheck(client));
   }
 
   @Override
@@ -48,6 +56,11 @@ final class OpenCliInstance implements PluginInstance {
   @Override
   public List<CanvasFunctionAdapter> canvasAdapters() {
     return canvasAdapters;
+  }
+
+  @Override
+  public Optional<PluginConnectionCheck> connectionCheck() {
+    return Optional.of(connectionCheck);
   }
 
   @Override

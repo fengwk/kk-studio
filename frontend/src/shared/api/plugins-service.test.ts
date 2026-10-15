@@ -36,6 +36,7 @@ const validPluginPayload = {
   appliedEpoch: '1',
   desiredRevision: '1',
   appliedRevision: '1',
+  connectionCheckSupported: true,
   harnessToolNames: ['search'],
   canvasFunctionNames: [],
   applicationError: null,
