@@ -1,6 +1,8 @@
 package fun.fengwk.kkstudio.platform.plugin.catalog;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -34,6 +36,7 @@ import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRow;
 import fun.fengwk.kkstudio.platform.plugin.testing.TestPluginFixtures;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -46,7 +49,8 @@ import java.util.function.BiFunction;
  * {@link PluginCatalogBootstrap} 的初始化与恢复契约测试（内存仓储替身）。
  *
  * <p>覆盖权威行缺失、epoch 0 首次初始化写入默认值与历史、初始化失败释放候选实例、CAS 败方回读赢家恢复、无赢家的初始化竞争，以及恢复期安装集合、 历史缺失与
- * code/schema/capability/catalog 漂移的明确失败。
+ * code/schema/capability/catalog 漂移的明确失败；并覆盖离线 {@code prepareInitial}
+ * 的纯构造、与首次初始化同一算法，以及非法输入零写入/零实例。
  */
 class PluginCatalogBootstrapTest {
 
@@ -62,6 +66,14 @@ class PluginCatalogBootstrapTest {
         new InputSchema(null, Map.of("enabled", new BooleanSchema(null)), Set.of("enabled"), false),
         DEFAULT_SCHEMA_JSON,
         Map.of());
+  }
+
+  /** 声明两个秘密字段的配置 schema，用于 prepareInitial 的秘密字段名校验。 */
+  private static PluginConfigSchema secretSchema() {
+    return new PluginConfigSchema(
+        new InputSchema(null, Map.of("enabled", new BooleanSchema(null)), Set.of("enabled"), false),
+        DEFAULT_SCHEMA_JSON,
+        Map.of("alphaKey", "Alpha secret", "zetaKey", "Zeta secret"));
   }
 
   @Test
@@ -433,6 +445,203 @@ class PluginCatalogBootstrapTest {
 
     assertSame(cleanup, propagated);
     assertEquals(1, plugin.createdInstances.get(0).closeCount);
+  }
+
+  /** 离线 prepareInitial 纯构造：不读也不写权威 catalog，产出 epoch 1 的完整初始候选。 */
+  @Test
+  void prepareInitialBuildsTheEpochOneCandidateWithoutTouchingTheRepository() {
+    TestPlugin plugin = new TestPlugin(PLUGIN_ALPHA);
+    plugin.schema = enabledSchema();
+    FakeRepository repository = new FakeRepository();
+
+    PluginCatalogBootstrap.PreparedInitial prepared =
+        bootstrap(repository, plugin)
+            .prepareInitial(
+                Map.of(PLUGIN_ALPHA, "{}"),
+                Map.of(PLUGIN_ALPHA, List.of()),
+                contexts(),
+                List.of(),
+                List.of());
+
+    assertEquals(0, repository.readCatalogCalls, "prepareInitial must not read the catalog");
+    assertEquals(0, repository.commitCalls, "prepareInitial must not write");
+    try {
+      assertEquals(PluginCatalogBootstrap.INITIAL_EPOCH, prepared.snapshot().epoch());
+      PluginCatalogManifest.Entry entry = prepared.manifest().plugins().get(PLUGIN_ALPHA);
+      assertNotNull(entry);
+      assertEquals(PluginCatalogBootstrap.INITIAL_EPOCH, entry.configRevision());
+      assertEquals(plugin.descriptor().version(), entry.pluginCodeVersion());
+      assertEquals(
+          prepared.snapshot().catalogFingerprint(), prepared.manifest().catalogFingerprint());
+      assertEquals(
+          prepared.snapshot().capabilityFingerprints().get(PLUGIN_ALPHA),
+          entry.capabilityFingerprint());
+      assertEquals(1, prepared.configurationRows().size());
+      PluginConfigurationRow row = prepared.configurationRows().get(0);
+      assertEquals(PLUGIN_ALPHA, row.pluginId());
+      assertEquals(PluginCatalogBootstrap.INITIAL_EPOCH, row.revision());
+      assertEquals(DEFAULT_SCHEMA_JSON, row.valuesJson(), "values must be the resolved defaults");
+      assertTrue(row.configuredSecretFields().isEmpty());
+      assertEquals(entry.authGeneration(), row.authGeneration());
+      assertEquals(entry.contextFingerprint(), row.contextFingerprint());
+      assertEquals(
+          new PluginConfig(PluginCatalogBootstrap.INITIAL_EPOCH, DEFAULT_SCHEMA_JSON),
+          plugin.receivedConfig);
+    } finally {
+      prepared.snapshot().close();
+    }
+    assertEquals(1, plugin.createdInstances.get(0).closeCount, "the caller owns the snapshot");
+  }
+
+  /** prepareInitial 与普通 initialize 复用同一条构建算法：身份指纹、历史行与 catalog 指纹完全一致，只有代际是新生成。 */
+  @Test
+  void prepareInitialMatchesTheFirstEpochBootstrapCandidate() {
+    TestPlugin initialized = new TestPlugin(PLUGIN_ALPHA);
+    initialized.schema = enabledSchema();
+    FakeRepository repository = new FakeRepository();
+    PluginCatalogSnapshot committed =
+        bootstrap(repository, initialized).bootstrap(contexts(), List.of(), List.of());
+    PluginCatalogManifest committedManifest = repository.lastManifest;
+    List<PluginConfigurationRow> committedRows = repository.lastChanged;
+    try {
+      TestPlugin preparedPlugin = new TestPlugin(PLUGIN_ALPHA);
+      preparedPlugin.schema = enabledSchema();
+      PluginCatalogBootstrap.PreparedInitial prepared =
+          bootstrap(new FakeRepository(), preparedPlugin)
+              .prepareInitial(
+                  Map.of(PLUGIN_ALPHA, "{}"),
+                  Map.of(PLUGIN_ALPHA, List.of()),
+                  contexts(),
+                  List.of(),
+                  List.of());
+      try {
+        assertEquals(committed.epoch(), prepared.snapshot().epoch());
+        assertEquals(committed.catalogFingerprint(), prepared.snapshot().catalogFingerprint());
+        assertEquals(
+            committed.capabilityFingerprints(), prepared.snapshot().capabilityFingerprints());
+        PluginCatalogManifest.Entry committedEntry = committedManifest.plugins().get(PLUGIN_ALPHA);
+        PluginCatalogManifest.Entry preparedEntry = prepared.manifest().plugins().get(PLUGIN_ALPHA);
+        assertEquals(committedEntry.configRevision(), preparedEntry.configRevision());
+        assertEquals(committedEntry.pluginCodeVersion(), preparedEntry.pluginCodeVersion());
+        assertEquals(committedEntry.schemaFingerprint(), preparedEntry.schemaFingerprint());
+        assertEquals(committedEntry.capabilityFingerprint(), preparedEntry.capabilityFingerprint());
+        assertEquals(committedEntry.contextFingerprint(), preparedEntry.contextFingerprint());
+        assertNotEquals(
+            committedEntry.authGeneration(),
+            preparedEntry.authGeneration(),
+            "each candidate must freeze a fresh auth generation");
+        PluginConfigurationRow committedRow = committedRows.get(0);
+        PluginConfigurationRow preparedRow = prepared.configurationRows().get(0);
+        assertEquals(committedRow.pluginId(), preparedRow.pluginId());
+        assertEquals(committedRow.revision(), preparedRow.revision());
+        assertEquals(committedRow.codeVersion(), preparedRow.codeVersion());
+        assertEquals(committedRow.schemaFingerprint(), preparedRow.schemaFingerprint());
+        assertEquals(committedRow.capabilityFingerprint(), preparedRow.capabilityFingerprint());
+        assertEquals(committedRow.configuredSecretFields(), preparedRow.configuredSecretFields());
+        assertEquals(committedRow.valuesJson(), preparedRow.valuesJson());
+      } finally {
+        prepared.snapshot().close();
+      }
+    } finally {
+      committed.close();
+    }
+  }
+
+  /** 非法安装集合、普通值与 secret field 名都在构建任何实例前失败：零写入、零实例、无底层 cause。 */
+  @Test
+  void prepareInitialRejectsInvalidInputWithoutCreatingInstancesOrWriting() {
+    TestPlugin plugin = new TestPlugin(PLUGIN_ALPHA);
+    plugin.schema = enabledSchema();
+    FakeRepository repository = new FakeRepository();
+    PluginCatalogBootstrap bootstrap = bootstrap(repository, plugin);
+
+    assertPrepareStage(
+        bootstrap, Map.of(), Map.of(PLUGIN_ALPHA, List.of()), "stage=prepare-values-set");
+    assertPrepareStage(
+        bootstrap,
+        Map.of(PLUGIN_ALPHA, "{}", PLUGIN_BETA, "{}"),
+        Map.of(PLUGIN_ALPHA, List.of()),
+        "stage=prepare-values-set");
+    assertPrepareStage(
+        bootstrap, Map.of(PLUGIN_ALPHA, "{}"), Map.of(), "stage=prepare-secret-fields-set");
+    Map<String, List<String>> nullFields = new HashMap<>();
+    nullFields.put(PLUGIN_ALPHA, null);
+    assertPrepareStage(
+        bootstrap, Map.of(PLUGIN_ALPHA, "{}"), nullFields, "stage=prepare-secret-fields");
+    assertPrepareStage(
+        bootstrap,
+        Map.of(PLUGIN_ALPHA, "{\"bogus\":1}"),
+        Map.of(PLUGIN_ALPHA, List.of()),
+        "stage=prepare-values");
+    assertPrepareStage(
+        bootstrap,
+        Map.of(PLUGIN_ALPHA, "not-json"),
+        Map.of(PLUGIN_ALPHA, List.of()),
+        "stage=prepare-values");
+    assertPrepareStage(
+        bootstrap,
+        Map.of(PLUGIN_ALPHA, "{}"),
+        Map.of(PLUGIN_ALPHA, List.of("apiKey")),
+        "stage=prepare-secret-fields");
+
+    assertTrue(plugin.createdInstances.isEmpty(), "invalid input must not build any instance");
+    assertEquals(0, repository.readCatalogCalls);
+    assertEquals(0, repository.commitCalls);
+  }
+
+  /** 声明的秘密字段名被接受并稳定排序；只接受字段名，非声明名（含疑似秘密值）与重复都必须被拒绝。 */
+  @Test
+  void prepareInitialValidatesConfiguredSecretFieldNames() {
+    TestPlugin plugin = new TestPlugin(PLUGIN_ALPHA);
+    plugin.schema = secretSchema();
+    FakeRepository repository = new FakeRepository();
+    PluginCatalogBootstrap bootstrap = bootstrap(repository, plugin);
+
+    PluginCatalogBootstrap.PreparedInitial prepared =
+        bootstrap.prepareInitial(
+            Map.of(PLUGIN_ALPHA, "{}"),
+            Map.of(PLUGIN_ALPHA, List.of("zetaKey", "alphaKey")),
+            contexts(),
+            List.of(),
+            List.of());
+    try {
+      assertEquals(
+          List.of("alphaKey", "zetaKey"),
+          prepared.configurationRows().get(0).configuredSecretFields(),
+          "configured field names must be stably sorted");
+    } finally {
+      prepared.snapshot().close();
+    }
+
+    assertPrepareStage(
+        bootstrap,
+        Map.of(PLUGIN_ALPHA, "{}"),
+        Map.of(PLUGIN_ALPHA, List.of("apiKey")),
+        "stage=prepare-secret-fields");
+    assertPrepareStage(
+        bootstrap,
+        Map.of(PLUGIN_ALPHA, "{}"),
+        Map.of(PLUGIN_ALPHA, List.of("zetaKey", "zetaKey")),
+        "stage=prepare-secret-fields");
+    assertPrepareStage(
+        bootstrap,
+        Map.of(PLUGIN_ALPHA, "{}"),
+        Map.of(PLUGIN_ALPHA, List.of("sk-super-secret-value")),
+        "stage=prepare-secret-fields");
+  }
+
+  private static void assertPrepareStage(
+      PluginCatalogBootstrap bootstrap,
+      Map<String, String> values,
+      Map<String, List<String>> secretFields,
+      String expectedStage) {
+    IllegalStateException failure =
+        assertThrows(
+            IllegalStateException.class,
+            () -> bootstrap.prepareInitial(values, secretFields, contexts(), List.of(), List.of()));
+    assertTrue(failure.getMessage().contains(expectedStage), failure.getMessage());
+    assertNull(failure.getCause(), "controlled diagnostics must not expose the underlying cause");
+    assertFalse(failure.getMessage().contains("sk-super-secret-value"), failure.getMessage());
   }
 
   private static void assertRestoreStage(Fixture fixture, String expectedStage) {
