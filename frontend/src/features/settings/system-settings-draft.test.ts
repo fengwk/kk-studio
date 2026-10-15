@@ -45,7 +45,7 @@ describe('system settings draft codec', () => {
     expect(draft.aiRuntime.subagentMaxTotalConcurrency).toBe('0')
     expect(draft.storageMedia.thumbnailQuality).toBe('80')
     expect(draft.integrations.comfyui.baseUrl).toBe('')
-    expect(draft.integrations.openCliHub.baseUrl).toBe('')
+    expect(draft.integrations.minimaxH3.comfyBaseUrl).toBe('')
   })
 
   it('assembles a complete update with expectedVersion and correct wire types', () => {

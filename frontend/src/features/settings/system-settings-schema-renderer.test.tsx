@@ -299,12 +299,12 @@ describe('system settings schema renderer', () => {
     const { container } = renderRenderer(
       <SystemSettingsSchemaRenderer schema={{ sections: [section] }} draft={draft} onChange={() => {}} />,
     )
-    const retry = container.querySelector('[data-settings-field-path="integrations.openCliHub.requestTimeoutMillis"]')!
-    expect(retry.getAttribute('data-settings-min')).toBe('1000')
-    expect(retry.getAttribute('data-settings-max')).toBe('1800000')
-    const seedanceRetry = container.querySelector('[data-settings-field-path="integrations.seedance.retry"]')!
-    expect(seedanceRetry.getAttribute('data-settings-min')).toBe('0')
-    expect(seedanceRetry.getAttribute('data-settings-max')).toBe('5')
+    const comfyTimeout = container.querySelector('[data-settings-field-path="integrations.minimaxH3.comfyConnectTimeoutMillis"]')!
+    expect(comfyTimeout.getAttribute('data-settings-min')).toBe('1')
+    expect(comfyTimeout.getAttribute('data-settings-max')).toBe('60000')
+    const promptMaxWait = container.querySelector('[data-settings-field-path="integrations.minimaxH3.promptMaxWaitMillis"]')!
+    expect(promptMaxWait.getAttribute('data-settings-min')).toBe('1')
+    expect(promptMaxWait.getAttribute('data-settings-max')).toBe('1800000')
     const nullableBaseUrl = container.querySelector('[data-settings-field-path="integrations.comfyui.baseUrl"]')!
     expect(nullableBaseUrl.getAttribute('data-settings-nullable')).toBe('true')
     const enumField = container.querySelector('[data-settings-field-path="aiRuntime.retryBackoffStrategy"]')

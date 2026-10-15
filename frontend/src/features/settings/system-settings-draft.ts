@@ -59,34 +59,6 @@ export interface ComfyuiIntegrationDraft {
   maxInputFileBytes: DraftNumericField
 }
 
-export interface OpenCliHubIntegrationDraft {
-  enabled: boolean
-  baseUrl: string
-  connectTimeoutMillis: DraftNumericField
-  requestTimeoutMillis: DraftNumericField
-  longPollTimeoutMillis: DraftNumericField
-  streamBufferBytes: DraftNumericField
-  maxJsonResponseBytes: DraftNumericField
-  maxErrorResponseBytes: DraftNumericField
-  maxOutputChars: DraftNumericField
-}
-
-export interface SeedanceIntegrationDraft {
-  enabled: boolean
-  workspaceId: string
-  retry: DraftNumericField
-  hubExecutionTimeoutMillis: DraftNumericField
-  statusPollIntervalMillis: DraftNumericField
-  maxWaitMillis: DraftNumericField
-}
-
-export interface GptImage2IntegrationDraft {
-  paidEnabled: boolean
-  askTimeoutSeconds: DraftNumericField
-  hubExecutionTimeoutMillis: DraftNumericField
-  maxWaitMillis: DraftNumericField
-}
-
 export interface MiniMaxH3IntegrationDraft {
   enabled: boolean
   promptAgentName: string
@@ -100,9 +72,6 @@ export interface MiniMaxH3IntegrationDraft {
 
 export interface SystemSettingsIntegrationsDraft {
   comfyui: ComfyuiIntegrationDraft
-  openCliHub: OpenCliHubIntegrationDraft
-  seedance: SeedanceIntegrationDraft
-  gptImage2: GptImage2IntegrationDraft
   minimaxH3: MiniMaxH3IntegrationDraft
 }
 
@@ -248,31 +217,6 @@ function integrationsToDraft(
       websocketTimeoutMillis: dto.comfyui.websocketTimeoutMillis,
       maxInputFileBytes: dto.comfyui.maxInputFileBytes,
     },
-    openCliHub: {
-      enabled: dto.openCliHub.enabled,
-      baseUrl: dto.openCliHub.baseUrl ?? '',
-      connectTimeoutMillis: dto.openCliHub.connectTimeoutMillis,
-      requestTimeoutMillis: dto.openCliHub.requestTimeoutMillis,
-      longPollTimeoutMillis: dto.openCliHub.longPollTimeoutMillis,
-      streamBufferBytes: String(dto.openCliHub.streamBufferBytes),
-      maxJsonResponseBytes: String(dto.openCliHub.maxJsonResponseBytes),
-      maxErrorResponseBytes: String(dto.openCliHub.maxErrorResponseBytes),
-      maxOutputChars: String(dto.openCliHub.maxOutputChars),
-    },
-    seedance: {
-      enabled: dto.seedance.enabled,
-      workspaceId: dto.seedance.workspaceId ?? '',
-      retry: String(dto.seedance.retry),
-      hubExecutionTimeoutMillis: dto.seedance.hubExecutionTimeoutMillis,
-      statusPollIntervalMillis: dto.seedance.statusPollIntervalMillis,
-      maxWaitMillis: dto.seedance.maxWaitMillis,
-    },
-    gptImage2: {
-      paidEnabled: dto.gptImage2.paidEnabled,
-      askTimeoutSeconds: String(dto.gptImage2.askTimeoutSeconds),
-      hubExecutionTimeoutMillis: dto.gptImage2.hubExecutionTimeoutMillis,
-      maxWaitMillis: dto.gptImage2.maxWaitMillis,
-    },
     minimaxH3: {
       enabled: dto.minimaxH3.enabled,
       promptAgentName: dto.minimaxH3.promptAgentName ?? '',
@@ -366,45 +310,6 @@ export function assembleSettingsUpdate(
           draft.integrations.comfyui.websocketTimeoutMillis,
         ),
         maxInputFileBytes: requiredLong(draft.integrations.comfyui.maxInputFileBytes),
-      },
-      openCliHub: {
-        enabled: draft.integrations.openCliHub.enabled,
-        baseUrl: nullableText(draft.integrations.openCliHub.baseUrl),
-        connectTimeoutMillis: requiredLong(
-          draft.integrations.openCliHub.connectTimeoutMillis,
-        ),
-        requestTimeoutMillis: requiredLong(draft.integrations.openCliHub.requestTimeoutMillis),
-        longPollTimeoutMillis: requiredLong(
-          draft.integrations.openCliHub.longPollTimeoutMillis,
-        ),
-        streamBufferBytes: requiredInt(draft.integrations.openCliHub.streamBufferBytes),
-        maxJsonResponseBytes: requiredInt(
-          draft.integrations.openCliHub.maxJsonResponseBytes,
-        ),
-        maxErrorResponseBytes: requiredInt(
-          draft.integrations.openCliHub.maxErrorResponseBytes,
-        ),
-        maxOutputChars: requiredInt(draft.integrations.openCliHub.maxOutputChars),
-      },
-      seedance: {
-        enabled: draft.integrations.seedance.enabled,
-        workspaceId: nullableText(draft.integrations.seedance.workspaceId),
-        retry: requiredInt(draft.integrations.seedance.retry),
-        hubExecutionTimeoutMillis: requiredLong(
-          draft.integrations.seedance.hubExecutionTimeoutMillis,
-        ),
-        statusPollIntervalMillis: requiredLong(
-          draft.integrations.seedance.statusPollIntervalMillis,
-        ),
-        maxWaitMillis: requiredLong(draft.integrations.seedance.maxWaitMillis),
-      },
-      gptImage2: {
-        paidEnabled: draft.integrations.gptImage2.paidEnabled,
-        askTimeoutSeconds: requiredInt(draft.integrations.gptImage2.askTimeoutSeconds),
-        hubExecutionTimeoutMillis: requiredLong(
-          draft.integrations.gptImage2.hubExecutionTimeoutMillis,
-        ),
-        maxWaitMillis: requiredLong(draft.integrations.gptImage2.maxWaitMillis),
       },
       minimaxH3: {
         enabled: draft.integrations.minimaxH3.enabled,
