@@ -146,7 +146,8 @@ final class StableTsContractGenerator {
         throw new IllegalStateException("unsupported contract item: " + item);
       }
     }
-    return builder.toString();
+    // 每个分块自身以空行收尾，这里去掉末项的尾随空行，产物恰好以一个换行结束。
+    return builder.toString().stripTrailing() + '\n';
   }
 
   /** 枚举：TS 联合类型 + 由 mapper 序列化真实常量得到的 readonly wire 值数组。 */

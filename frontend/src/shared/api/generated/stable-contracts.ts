@@ -100,4 +100,3 @@ export const CONFIG_SYNC_KIND_VALUES: readonly ConfigSyncKind[] = [
   'settings',
   'plugins',
 ]
-
