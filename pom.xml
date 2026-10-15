@@ -242,7 +242,7 @@
             </dependency>
             <dependency>
                 <groupId>fun.fengwk.kk-studio</groupId>
-                <artifactId>kk-studio-plugin-canvas-comfyui</artifactId>
+                <artifactId>kk-studio-plugin-comfyui</artifactId>
                 <version>${kk-studio.version}</version>
             </dependency>
             <dependency>
