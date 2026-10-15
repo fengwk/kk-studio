@@ -79,7 +79,8 @@ class OpenCliCanvasFunctionAdaptersTest {
     GptImage2CanvasFunctionAdapter gpt =
         new GptImage2CanvasFunctionAdapter(OpenCliTestSettings.defaults(), client);
     SeedanceCanvasFunctionAdapter seedance =
-        new SeedanceCanvasFunctionAdapter(OpenCliTestSettings.defaults(), client, MAPPER, ignored -> {});
+        new SeedanceCanvasFunctionAdapter(
+            OpenCliTestSettings.defaults(), client, MAPPER, ignored -> {});
 
     assertFalse(gpt.enabled());
     assertEquals(1, gpt.functions().size());
@@ -121,7 +122,8 @@ class OpenCliCanvasFunctionAdaptersTest {
         new SeedanceCanvasFunctionAdapter(OpenCliTestSettings.defaults(), client);
     assertFalse(twoArgSeedance.enabled());
     SeedanceCanvasFunctionAdapter fourArgSeedance =
-        new SeedanceCanvasFunctionAdapter(OpenCliTestSettings.defaults(), client, MAPPER, Clock.systemUTC());
+        new SeedanceCanvasFunctionAdapter(
+            OpenCliTestSettings.defaults(), client, MAPPER, Clock.systemUTC());
     assertFalse(fourArgSeedance.enabled());
   }
 
@@ -1080,8 +1082,7 @@ class OpenCliCanvasFunctionAdaptersTest {
                         "INITIAL",
                         Map.of())));
 
-    assertTrue(
-        error.getMessage().contains(expectedMessage), scenario + ": " + error.getMessage());
+    assertTrue(error.getMessage().contains(expectedMessage), scenario + ": " + error.getMessage());
   }
 
   private static Stream<Arguments> invalidSeedanceManifests() {
@@ -1330,7 +1331,10 @@ class OpenCliCanvasFunctionAdaptersTest {
                         List.of(),
                         "GPT_IMAGE_POLLING",
                         Map.of(
-                            OpenCliAdapterState.EXECUTION_ID, "exec-stopped", "uploads", List.of()))));
+                            OpenCliAdapterState.EXECUTION_ID,
+                            "exec-stopped",
+                            "uploads",
+                            List.of()))));
 
     assertTrue(error.getMessage().contains("run is no longer running"));
   }

@@ -133,6 +133,25 @@ class OpenCliHubClientContractTest {
                 .getExecution("exec-1", 0));
   }
 
+  /** 合法执行结果不能让溢出的状态整数截断成 HTTP 200 后通过信封校验。 */
+  @Test
+  void rejectsEnvelopeStatusThatOnlyMatchesAfterIntegerTruncation() {
+    for (String status : List.of("4294967496", "18446744073709551816")) {
+      String response =
+          "{\"status\":"
+              + status
+              + ",\"code\":\"OK\",\"data\":"
+              + executionData("\"resources\":[]")
+              + "}";
+      OpenCliHubClient client = clientReturning(jsonResponse(200, response));
+      OpenCliHubException error =
+          assertThrows(OpenCliHubException.class, () -> client.getExecution("exec-1", 0));
+      assertEquals(
+          "Malformed OpenCLI Hub response: Result envelope status must match HTTP status",
+          error.getMessage());
+    }
+  }
+
   @Test
   void boundsJsonAndErrorBodiesWithoutEchoingRemoteDetail() {
     OpenCliSettings limitedJson = hub(1024, 1024, 4096, 65_535);
@@ -949,6 +968,64 @@ class OpenCliHubClientContractTest {
 
     assertSame(injected, error, "凭据作废的 Error 不得被吞掉或降级");
     assertTrue(body.closed, "401 失败路径必须释放已取得的响应正文");
+  }
+
+  /** 原始主错误与致命关闭错误保留身份，普通关闭错误中的连接秘密不进入异常链或日志。 */
+  @Test
+  @ExtendWith(OutputCaptureExtension.class)
+  void cleanupPreservesFatalErrorsButSanitizesOrdinaryCloseFailures(CapturedOutput output) {
+    String marker = "synthetic-private-transport-detail";
+    for (Throwable closeFailure :
+        List.of(
+            new IOException(marker),
+            new IllegalStateException(marker),
+            new AssertionError("synthetic fatal close failure"))) {
+      AtomicBoolean closed = new AtomicBoolean();
+      InputStream body =
+          new ByteArrayInputStream(new byte[] {1}) {
+            @Override
+            public void close() throws IOException {
+              closed.set(true);
+              if (closeFailure instanceof IOException ioFailure) {
+                throw ioFailure;
+              }
+              if (closeFailure instanceof RuntimeException runtimeFailure) {
+                throw runtimeFailure;
+              }
+              throw (Error) closeFailure;
+            }
+          };
+      Error primary = new AssertionError("synthetic rejection failure");
+      PluginCredentialAccess access =
+          new PluginCredentialAccess() {
+            @Override
+            public PluginCredentialSnapshot resolve() {
+              return validSnapshot(DEFAULT_KEY);
+            }
+
+            @Override
+            public boolean rejectUsed(PluginCredentialSnapshot snapshot, String error) {
+              throw primary;
+            }
+          };
+      OpenCliHubClient client =
+          new OpenCliHubClient(
+              hub(), MAPPER, access, new StubHttpClient(request -> bodyResponse(401, body)));
+
+      Error error = assertThrows(Error.class, () -> client.getExecution("exec-1", 0));
+
+      assertSame(primary, error);
+      assertTrue(closed.get());
+      assertEquals(1, error.getSuppressed().length);
+      if (closeFailure instanceof Error) {
+        assertSame(closeFailure, error.getSuppressed()[0]);
+      } else {
+        assertTrue(error.getSuppressed()[0] instanceof IOException);
+        assertNull(error.getSuppressed()[0].getCause());
+      }
+      assertFalse(chainText(error).contains(marker));
+      assertFalse(output.getAll().contains(marker));
+    }
   }
 
   /** 错误响应解释阶段抛出的 Error 原样上抛，且正文流必须被关闭。 */

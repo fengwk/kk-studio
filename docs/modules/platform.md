@@ -337,12 +337,12 @@ EOF、失败和显式 close 均注销 watchdog。客户端拿到流后负责关�
 
 ### OpenCLI 插件配置与凭据契约
 
-OpenCLI 的配置完全归属于插件自身的受控 schema：字段、默认值、取值区间与必填关系都以它为准，
+OpenCLI 的配置完全归属于插件：受控 schema 声明字段、结构与默认值，配置模型校验取值区间和跨字段必填关系。
 管理面与配置同步按同一份 schema 读写，未声明的字段一律被拒绝。使用者只需要关心三类输入：
 
-- Hub 接入：`baseUrl` 给出 OpenCLI Hub 的 HTTP(S) origin，启用时必填；连接、请求、长轮询与响应体上限等预算参数都有 schema 声明的区间，默认值适用于常规部署。改动 `baseUrl` 会换发认证代际并 fence 旧实例，旧实例在出网前失败。
+- Hub 接入：`baseUrl` 给出 OpenCLI Hub 的 HTTP(S) origin，启用时必填；连接、请求、长轮询与响应体上限等预算参数有明确取值范围，默认值由 schema 给出。改动 `baseUrl` 会换发认证代际并 fence 旧实例，旧实例在出网前失败。
 - 认证与私有身份：唯一认证密钥 `apiKey` 是静态密钥，通过统一 Plugin Secret API 的 KEEP/SET/CLEAR 管理，不读环境变量也不设外部优先级。可选私有身份 `instanceId` 是第二个受保护秘密字段，与 `apiKey` 同属一次 scoped snapshot，只在真正发送执行请求前取出并填入请求体，不进入普通值、配置历史、管理面投影或导出；未配置时不发送该字段，由 Hub 自由路由。
-- 业务开关与任务预算：`enabled` 决定整个插件是否参与，`gptImage2.paidEnabled` 放开付费图片执行，`seedance.enabled`（配合 `seedance.workspaceId`）放开 Seedance 视频执行；两类任务的执行等待与重试预算同样由 schema 声明。
+- 业务开关与任务预算：`enabled` 决定整个插件是否参与，`gptImage2.paidEnabled` 放开付费图片执行，`seedance.enabled`（配合 `seedance.workspaceId`）放开 Seedance 视频执行；两类任务的执行等待与重试预算也由插件配置模型统一校验。
 
 管理面状态只表达凭据在本地是否可用：静态认证在必需认证字段已录入时才是 `CONNECTED`，只录入私有身份
 （或撤销 `apiKey` 后只留私有身份）显示 `NOT_CONNECTED`，`KEY_UNAVAILABLE` 等真实故障如实上报。

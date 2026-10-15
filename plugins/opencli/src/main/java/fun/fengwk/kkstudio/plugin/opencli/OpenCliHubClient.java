@@ -346,7 +346,9 @@ public class OpenCliHubClient implements AutoCloseable {
         throw malformed("Result envelope must be an object");
       }
       JsonNode status = required(root, "status");
-      if (!status.isIntegralNumber() || status.intValue() != response.statusCode()) {
+      if (!status.isIntegralNumber()
+          || !status.canConvertToInt()
+          || status.intValue() != response.statusCode()) {
         throw malformed("Result envelope status must match HTTP status");
       }
       requiredText(root, "code");
@@ -843,7 +845,7 @@ public class OpenCliHubClient implements AutoCloseable {
   /**
    * 已取得 response 后的唯一清理：释放正文流并保留原 primary。
    *
-   * <p>close 自身失败只作为 suppressed 附加到 primary，绝不替换 primary，也绝不把 Error 降级或吞掉。
+   * <p>非致命 close 失败只附加固定分类，不泄露底层异常详情；Error 原样保留为 suppressed，绝不替换 primary。
    */
   private static void closeAfterFailure(InputStream body, Throwable primary) {
     try {
@@ -851,7 +853,12 @@ public class OpenCliHubClient implements AutoCloseable {
     } catch (IOException | RuntimeException | Error closeFailure) {
       log.debug("OpenCLI Hub stream close failed type={}", closeFailure.getClass().getSimpleName());
       if (closeFailure != primary) {
-        primary.addSuppressed(closeFailure);
+        primary.addSuppressed(
+            closeFailure instanceof Error
+                ? closeFailure
+                : new IOException(
+                    "OpenCLI Hub response close failed type="
+                        + closeFailure.getClass().getSimpleName()));
       }
     }
   }
