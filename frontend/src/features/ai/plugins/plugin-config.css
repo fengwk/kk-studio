@@ -3,6 +3,10 @@
   max-width: 680px;
 }
 
+.plugin-config-modal > .modal-footer {
+  gap: var(--space-2, 8px);
+}
+
 .plugin-config-mode-switch {
   display: flex;
   justify-content: flex-end;

@@ -21,6 +21,7 @@ import {
   getNodeSlice,
   isValidJsonIntegerLiteral,
   isValidJsonNumberLiteral,
+  parseStrictJsonContainer,
   parseStrictJsonObject,
   updateStrictJsonField,
 } from './plugin-config-json'
@@ -122,14 +123,14 @@ export function PluginConfigModal({
         secretPatch[key] = { operation: 'KEEP' }
       } else if (op === 'CLEAR') {
         // 在提交 handler 中严格检查确认勾选，不仅依靠 disabled
-        if (!clearConfirmed[key]) {
+        if (!Object.hasOwn(clearConfirmed, key) || clearConfirmed[key] !== true) {
           setSaveError(t('plugins.configDialog.mustConfirmClear', { key }))
           return
         }
         secretPatch[key] = { operation: 'CLEAR' }
       } else if (op === 'SET') {
         // SET 严格保留用户原值，严禁静默 trim，无 padding
-        const val = secretValues[key]
+        const val = Object.hasOwn(secretValues, key) ? secretValues[key] : undefined
         if (val === undefined || val === '') {
           setSaveError(t('plugins.configDialog.secretRequired', { key }))
           return
@@ -146,6 +147,7 @@ export function PluginConfigModal({
     }
 
     busyRef.current = true
+    setSecretValues({})
     setPending(true)
     setSaveError(null)
     setConflictError(false)
@@ -239,9 +241,7 @@ export function PluginConfigModal({
   ) {
     setFieldDrafts((prev) => ({ ...prev, [fieldKey]: snippetText }))
 
-    const strict = parseStrictJsonObject(
-      expectedType === 'object' ? snippetText : `{"_wrap":${snippetText}}`,
-    )
+    const strict = parseStrictJsonContainer(snippetText, expectedType)
     if (!strict.ok) {
       setFieldErrors((prev) => ({
         ...prev,
@@ -375,6 +375,8 @@ export function PluginConfigModal({
                 value={valuesJson}
                 onChange={(e) => {
                   setValuesJson(e.target.value)
+                  setFieldDrafts({})
+                  setFieldErrors({})
                   setSaveError(null)
                 }}
                 rows={10}
@@ -463,6 +465,16 @@ export function PluginConfigModal({
                                   ...prev,
                                   [secretField]: next as PluginSecretPatchOperation,
                                 }))
+                                setSecretValues((prev) => {
+                                  const remaining = { ...prev }
+                                  delete remaining[secretField]
+                                  return remaining
+                                })
+                                setClearConfirmed((prev) => {
+                                  const remaining = { ...prev }
+                                  delete remaining[secretField]
+                                  return remaining
+                                })
                                 setSaveError(null)
                               }}
                             />
@@ -482,7 +494,7 @@ export function PluginConfigModal({
                             disabled={pending}
                             aria-label={`New secret for ${secretField}`}
                             placeholder={t('plugins.secrets.inputPlaceholder')}
-                            value={secretValues[secretField] || ''}
+                            value={Object.hasOwn(secretValues, secretField) ? secretValues[secretField] : ''}
                             onChange={(e) => {
                               // 保持原值，绝不 trim
                               const nextVal = e.target.value
@@ -503,7 +515,7 @@ export function PluginConfigModal({
                         >
                           <Checkbox
                             id={`confirm-clear-${secretField}`}
-                            checked={clearConfirmed[secretField] || false}
+                            checked={Object.hasOwn(clearConfirmed, secretField) && clearConfirmed[secretField] === true}
                             disabled={pending}
                             onChange={(checked) => {
                               setClearConfirmed((prev) => ({
@@ -524,34 +536,34 @@ export function PluginConfigModal({
           </section>
         ) : null}
 
-        <div className="modal-footer plugin-connect-footer">
-          <Button
-            type="button"
-            variant="ghost"
-            disabled={pending}
-            onClick={handleClose}
-          >
-            {t('plugins.configDialog.cancel')}
-          </Button>
-          <Button
-            type="button"
-            variant="primary"
-            disabled={
-              pending ||
-              !hasRevision ||
-              hasFieldErrors ||
-              !parseResult.ok ||
-              Object.entries(secretOperations).some(([k, op]) =>
-                op === 'CLEAR' ? !clearConfirmed[k] : false,
-              )
-            }
-            onClick={handleSave}
-          >
-            {pending
-              ? t('plugins.configDialog.saving')
-              : t('plugins.configDialog.save')}
-          </Button>
-        </div>
+      </div>
+      <div className="modal-footer">
+        <Button
+          type="button"
+          variant="ghost"
+          disabled={pending}
+          onClick={handleClose}
+        >
+          {t('plugins.configDialog.cancel')}
+        </Button>
+        <Button
+          type="button"
+          variant="primary"
+          disabled={
+            pending ||
+            !hasRevision ||
+            hasFieldErrors ||
+            !parseResult.ok ||
+            Object.entries(secretOperations).some(([k, op]) =>
+              op === 'CLEAR' ? !Object.hasOwn(clearConfirmed, k) || clearConfirmed[k] !== true : false,
+            )
+          }
+          onClick={handleSave}
+        >
+          {pending
+            ? t('plugins.configDialog.saving')
+            : t('plugins.configDialog.save')}
+        </Button>
       </div>
     </Dialog>
   )
@@ -595,7 +607,7 @@ function SchemaElementRenderer({
   const node = findNodeAtLocation(rootTree, path)
   const currentSafeVal = node ? getNodeSafeValue(node, rawJson) : undefined
   const fieldId = useId()
-  const fieldKey = path.join('.')
+  const fieldKey = JSON.stringify(path)
   const fieldError = errors[fieldKey]
 
   switch (element.kind) {
@@ -619,7 +631,7 @@ function SchemaElementRenderer({
 
     case 'string': {
       if (element.enum && element.enum.length > 0) {
-        const val = typeof currentSafeVal === 'string' ? currentSafeVal : element.enum[0]
+        const val = typeof currentSafeVal === 'string' ? currentSafeVal : ''
         return (
           <div className="form-group" key={name}>
             <FieldLabel>{name}</FieldLabel>

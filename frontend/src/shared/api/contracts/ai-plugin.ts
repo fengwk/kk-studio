@@ -1,3 +1,5 @@
+import type { InstantTimestamp } from '@/shared/api/contracts/base'
+
 /**
  * Plugin 认证交互类型：封闭 union，只有 DEEP_LINK 与 STATIC_KEY。
  */
@@ -54,9 +56,9 @@ export interface PluginDTO {
   authKind: PluginAuthKindDTO | null
   status: PluginStatus | null
   region: string | null
-  expiresAt: string | null
-  nextRefreshAt: string | null
-  lastRefreshedAt: string | null
+  expiresAt: InstantTimestamp
+  nextRefreshAt: InstantTimestamp
+  lastRefreshedAt: InstantTimestamp
   lastRefreshError: string | null
   configuration: PluginConfigurationDTO
   desiredEpoch: string

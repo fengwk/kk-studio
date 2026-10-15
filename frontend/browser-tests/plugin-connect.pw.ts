@@ -285,7 +285,7 @@ test('renders three plugin shapes (None, StaticKey, DeepLink) and opens configur
   { page },
   info,
 ) => {
-  await transport(page, [deepLinkPlugin, staticKeyPlugin, noAuthPlugin])
+  const network = await transport(page, [deepLinkPlugin, staticKeyPlugin, noAuthPlugin])
 
   // Wide screen validation
   await page.setViewportSize({ width: 1280, height: 800 })
@@ -316,6 +316,10 @@ test('renders three plugin shapes (None, StaticKey, DeepLink) and opens configur
   await expect(configDialog.locator('input[value="9007199254740993123456789"]')).toBeVisible()
   await expect(configDialog.locator('input[value="1.230000"]')).toBeVisible()
   await expect(configDialog.locator('input[value="1e1000"]')).toBeVisible()
+  const save = configDialog.getByRole('button', { name: '保存配置', exact: true })
+  await expect(save).toBeInViewport()
+  await expect(configDialog.getByRole('button', { name: '取消', exact: true })).toBeInViewport()
+  await expect(configDialog.locator('.modal-body .modal-footer')).toHaveCount(0)
 
   await page.screenshot({ path: info.outputPath('plugin-config-wide.png') })
 
@@ -323,9 +327,12 @@ test('renders three plugin shapes (None, StaticKey, DeepLink) and opens configur
   await page.setViewportSize({ width: 360, height: 800 })
   const overflow = await configDialog.evaluate((el) => el.scrollWidth > el.clientWidth + 1)
   expect(overflow).toBe(false)
+  await expect(save).toBeInViewport()
+  await configDialog.locator('.modal-body').evaluate((el) => { el.scrollTop = el.scrollHeight })
+  await expect(save).toBeInViewport()
   await page.screenshot({ path: info.outputPath('plugin-config-360px.png') })
 
-  // Close config modal with keyboard
-  await page.keyboard.press('Escape')
+  await save.click()
+  await expect.poll(() => network.requests.filter((path) => path.endsWith('/configuration')).length).toBe(1)
   await expect(configDialog).toHaveCount(0)
 })

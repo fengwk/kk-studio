@@ -3,14 +3,15 @@ import { useI18n, type AppLocale } from '@/shared/i18n'
 import { Button } from '@/shared/ui/controls/Button'
 import { ResourceCard, type ResourceCardMetaRow } from '@/shared/ui/cards/ResourceCard'
 import type { PluginDTO, PluginStatus } from '@/shared/api/contracts/ai-plugin'
+import type { InstantTimestamp } from '@/shared/api/contracts/base'
 
-function formatDateTime(value: string | null | undefined, locale: AppLocale): string {
-  if (!value) {
+function formatDateTime(value: InstantTimestamp | undefined, locale: AppLocale): string {
+  if (value === null || value === undefined) {
     return '—'
   }
-  const date = new Date(value)
+  const date = new Date(typeof value === 'number' ? value * 1000 : value)
   if (Number.isNaN(date.getTime())) {
-    return value
+    return String(value)
   }
   return date.toLocaleString(locale)
 }
@@ -100,17 +101,18 @@ export function PluginCard({
       [t('plugins.lastRefreshedAt'), formatDateTime(plugin.lastRefreshedAt, locale)],
     )
 
-    if (plugin.lastRefreshError) {
-      rows.push({
-        label: t('plugins.lastRefreshError'),
-        value: (
-          <span className="inline-hint danger" role="alert">
-            {plugin.lastRefreshError}
-          </span>
-        ),
-        wrap: true,
-      })
-    }
+  }
+
+  if (plugin.lastRefreshError) {
+    rows.push({
+      label: t('plugins.lastRefreshError'),
+      value: (
+        <span className="inline-hint danger" role="alert">
+          {plugin.lastRefreshError}
+        </span>
+      ),
+      wrap: true,
+    })
   }
 
   return (

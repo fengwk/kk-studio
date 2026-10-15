@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { PluginConfigModal } from './PluginConfigModal'
@@ -179,12 +179,33 @@ describe('PluginConfigModal', () => {
     expect(bigIntInput).toHaveValue('123.45')
     expect(screen.getByText('无效的整数格式。')).toBeInTheDocument()
     expect(saveBtn).toBeDisabled()
+    fireEvent.change(bigIntInput, { target: { value: '1e3' } })
+    expect(bigIntInput).toHaveValue('1e3')
+    expect(saveBtn).toBeDisabled()
+  })
+
+  it('does not invent the first enum option for an absent optional field', () => {
+    renderModal({
+      ...samplePlugin,
+      configuration: {
+        ...samplePlugin.configuration,
+        valuesJson: samplePlugin.configuration.valuesJson.replace('"mode":"FAST",', ''),
+      },
+    })
+    expect(screen.getByRole('button', { name: 'mode' })).not.toHaveTextContent('FAST')
   })
 
   it('edits complex array container with raw JSON preserving big numbers', async () => {
     const user = userEvent.setup()
     vi.mocked(pluginsService.updateConfiguration).mockResolvedValue(samplePlugin)
-    renderModal()
+    renderModal({
+      ...samplePlugin,
+      configuration: {
+        ...samplePlugin.configuration,
+        valuesJson: samplePlugin.configuration.valuesJson.replace('["a","b"]', '[10,20]'),
+        valuesSchema: '{"type":"object","properties":{"tags":{"type":"array","items":{"type":"number"}}},"required":[],"additionalProperties":true}',
+      },
+    })
 
     const tagsInput = screen.getByRole('textbox', { name: 'tags' })
     await user.clear(tagsInput)
@@ -376,6 +397,7 @@ describe('PluginConfigModal', () => {
             customObj: {
               type: 'object',
               properties: {},
+              required: [],
               additionalProperties: true,
               description: 'Open object',
             },
@@ -490,5 +512,110 @@ describe('PluginConfigModal', () => {
     const { unmount } = renderModal()
     unmount()
     expect(queryClient.getMutationCache().getAll()).toHaveLength(0)
+  })
+
+  it('rejects wrong array roots and neighboring-field injection without updating the stored JSON', async () => {
+    const user = userEvent.setup()
+    renderModal()
+    const tags = screen.getByRole('textbox', { name: 'tags' })
+    for (const value of ['123', '{}', '[] ,"injected":1']) {
+      fireEvent.change(tags, { target: { value } })
+      expect(screen.getByRole('button', { name: '保存配置' })).toBeDisabled()
+      expect(screen.getByRole('alert')).toHaveTextContent('无效的 JSON 容器格式')
+    }
+    await user.click(screen.getByRole('button', { name: /JSON 编辑/ }))
+    expect(screen.getByRole('textbox', { name: /JSON 编辑/ }))
+      .toHaveValue(samplePlugin.configuration.valuesJson)
+    expect(pluginsService.updateConfiguration).not.toHaveBeenCalled()
+  })
+
+  it('keeps invalid field drafts unsavable until an explicit JSON edit replaces them', async () => {
+    const user = userEvent.setup()
+    vi.mocked(pluginsService.updateConfiguration).mockResolvedValue(samplePlugin)
+    renderModal()
+    fireEvent.change(screen.getByRole('textbox', { name: 'decimal' }), { target: { value: '-' } })
+    await user.click(screen.getByRole('button', { name: /JSON 编辑/ }))
+    expect(screen.getByRole('button', { name: '保存配置' })).toBeDisabled()
+    const json = screen.getByRole('textbox', { name: /JSON 编辑/ })
+    fireEvent.change(json, {
+      target: { value: samplePlugin.configuration.valuesJson.replace('1.230000', '-2.500000') },
+    })
+    await user.click(screen.getByRole('button', { name: /表单编辑/ }))
+    expect(screen.getByRole('textbox', { name: 'decimal' })).toHaveValue('-2.500000')
+    expect(screen.getByRole('button', { name: '保存配置' })).not.toBeDisabled()
+    await user.click(screen.getByRole('button', { name: '保存配置' }))
+    expect(pluginsService.updateConfiguration).toHaveBeenCalledWith(
+      samplePlugin.pluginId,
+      expect.objectContaining({ valuesJson: expect.stringContaining('"decimal":-2.500000') }),
+    )
+  })
+
+  it('separates dotted property paths from nested paths and treats constructor as an own field', () => {
+    renderModal({
+      ...samplePlugin,
+      configuration: {
+        ...samplePlugin.configuration,
+        valuesJson: '{"a.b":10,"a":{"b":20},"constructor":30}',
+        valuesSchema: '{"type":"object","properties":{"a.b":{"type":"integer"},"a":{"type":"object","properties":{"b":{"type":"integer"}},"required":[],"additionalProperties":false},"constructor":{"type":"integer"}},"required":[],"additionalProperties":false}',
+      },
+    })
+    const dotted = screen.getByRole('textbox', { name: 'a.b' })
+    const nested = screen.getByRole('textbox', { name: /^b$/ })
+    expect(screen.getByRole('textbox', { name: 'constructor' })).toHaveValue('30')
+    fireEvent.change(dotted, { target: { value: '-' } })
+    fireEvent.change(nested, { target: { value: '-2' } })
+    expect(dotted).toHaveValue('-')
+    expect(nested).toHaveValue('-2')
+    expect(screen.getByRole('button', { name: '保存配置' })).toBeDisabled()
+    fireEvent.change(dotted, { target: { value: '-1' } })
+    expect(screen.getByRole('button', { name: '保存配置' })).not.toBeDisabled()
+  })
+
+  it('does not inherit secret values or CLEAR confirmation for a constructor secret', async () => {
+    const user = userEvent.setup()
+    renderModal({
+      ...samplePlugin,
+      authKind: { type: 'STATIC_KEY', secretField: 'constructor' },
+      configuration: {
+        ...samplePlugin.configuration,
+        secrets: Object.fromEntries([['constructor', { description: 'Own secret', configured: true }]]),
+      },
+    })
+    const item = screen.getByTestId('secret-item-constructor')
+    await user.click(within(item).getByRole('button', { name: 'Operation for constructor' }))
+    await user.click(screen.getByRole('option', { name: '清除' }))
+    expect(within(item).getByRole('checkbox')).not.toBeChecked()
+    expect(screen.getByRole('button', { name: '保存配置' })).toBeDisabled()
+    await user.click(within(item).getByRole('button', { name: 'Operation for constructor' }))
+    await user.click(screen.getByRole('option', { name: '设置新值' }))
+    expect(within(item).getByLabelText('New secret for constructor')).toHaveValue('')
+  })
+
+  it('clears SET text before pending or failed requests and cannot revive it by changing operations', async () => {
+    const user = userEvent.setup()
+    let rejectRequest: (error: Error) => void = () => { throw new Error('request not pending') }
+    vi.mocked(pluginsService.updateConfiguration).mockReturnValue(
+      new Promise<PluginDTO>((_, reject) => { rejectRequest = reject }),
+    )
+    renderModal()
+    const item = screen.getByTestId('secret-item-apiKey')
+    const operation = within(item).getByRole('button', { name: 'Operation for apiKey' })
+    await user.click(operation)
+    await user.click(screen.getByRole('option', { name: '设置新值' }))
+    const input = within(item).getByLabelText('New secret for apiKey')
+    await user.type(input, 'temporary-local-secret')
+    await user.click(screen.getByRole('button', { name: '保存配置' }))
+    expect(input).toHaveValue('')
+    expect(queryClient.getMutationCache().getAll()).toHaveLength(0)
+    rejectRequest(new ApiError('Conflict', 409, 'version_conflict'))
+    expect(await screen.findByTestId('plugin-config-conflict-banner')).toBeInTheDocument()
+    expect(input).toHaveValue('')
+    expect(pluginsService.updateConfiguration).toHaveBeenCalledTimes(1)
+    await user.type(input, 'second-local-secret')
+    await user.click(operation)
+    await user.click(screen.getByRole('option', { name: '保持不变' }))
+    await user.click(operation)
+    await user.click(screen.getByRole('option', { name: '设置新值' }))
+    expect(within(item).getByLabelText('New secret for apiKey')).toHaveValue('')
   })
 })

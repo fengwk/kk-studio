@@ -127,7 +127,7 @@ describe('ai-plugin-codec', () => {
         ...sampleDeepLinkDTO,
         unknownEvilField: 'should-reject',
       }),
-    ).toThrowError(/Unknown property "unknownEvilField"/)
+    ).toThrowError(/Unknown property at plugin/)
 
     expect(() =>
       decodePluginAuthPrepareDTO({
@@ -135,7 +135,7 @@ describe('ai-plugin-codec', () => {
         loginUrl: 'https://example.com',
         extraSecret: '12345',
       }),
-    ).toThrowError(/Unknown property "extraSecret"/)
+    ).toThrowError(/Unknown property at authPrepare/)
   })
 
   it('rejects numbers exceeding 64-bit signed Long range', () => {
@@ -177,7 +177,7 @@ describe('ai-plugin-codec', () => {
         ...sampleStaticKeyDTO,
         authKind: { type: 'STATIC_KEY', secretField: 'missingField' },
       }),
-    ).toThrowError(/must contain static key field "missingField"/)
+    ).toThrowError(/must contain the declared static key field/)
 
     // DeepLink region must be in regionCandidates
     expect(() =>
@@ -198,4 +198,43 @@ describe('ai-plugin-codec', () => {
     })
     expect(prepare.authAttemptId).toBe('nonce-123')
   })
+
+  it('accepts HTTP epoch seconds, preserves static rejection errors, and rejects invalid time values', () => {
+    const decoded = decodePluginDTO({
+      ...sampleDeepLinkDTO,
+      expiresAt: 1777574730,
+      nextRefreshAt: 1777571130.125,
+      lastRefreshedAt: 0,
+    })
+    expect(decoded.expiresAt).toBe(1777574730)
+    expect(decoded.nextRefreshAt).toBe(1777571130.125)
+    expect(decoded.lastRefreshedAt).toBe(0)
+    expect(decodePluginDTO({
+      ...sampleStaticKeyDTO,
+      status: 'REAUTH_REQUIRED',
+      lastRefreshError: 'provider rejected the stored static key',
+    }).lastRefreshError).toBe('provider rejected the stored static key')
+    for (const expiresAt of [true, {}, Infinity, NaN, 'not-a-time']) {
+      expect(() => decodePluginDTO({ ...sampleDeepLinkDTO, expiresAt }))
+        .toThrowError(/epoch seconds or an ISO date-time string/)
+    }
+  })
+
+  it('requires own static secret fields and does not echo unknown provider keys', () => {
+    expect(() => decodePluginDTO({
+      ...sampleStaticKeyDTO,
+      authKind: { type: 'STATIC_KEY', secretField: 'constructor' },
+      configuration: { ...sampleStaticKeyDTO.configuration, secrets: {} },
+    })).toThrowError(/must contain the declared static key field/)
+    const marker = 'remote-secret-marker-9876'
+    let thrown: unknown
+    try {
+      decodePluginDTO({ ...sampleStaticKeyDTO, [marker]: true })
+    } catch (error) {
+      thrown = error
+    }
+    expect(thrown).toBeInstanceOf(Error)
+    expect(String(thrown)).not.toContain(marker)
+  })
+
 })

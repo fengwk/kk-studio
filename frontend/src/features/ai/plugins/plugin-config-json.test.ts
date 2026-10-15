@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest'
 import {
   getNodeSafeValue,
   getNodeSlice,
+  getNodeAtPath,
   isValidJsonIntegerLiteral,
   isValidJsonNumberLiteral,
+  parseStrictJsonContainer,
   parseStrictJsonObject,
   updateStrictJsonField,
 } from './plugin-config-json'
@@ -18,7 +20,7 @@ describe('plugin-config-json', () => {
     expect(res.ok).toBe(true)
     if (res.ok) {
       const tree = res.tree
-      const bigIntNode = findNodeAtLocation(tree, ['bigInt'])!
+      const bigIntNode = getNodeAtPath(tree, ['bigInt'])!
       expect(getNodeSlice(sampleWithBigNumbers, bigIntNode)).toBe('9007199254740993123456789')
       expect(getNodeSafeValue(bigIntNode, sampleWithBigNumbers)).toBe('9007199254740993123456789')
 
@@ -180,7 +182,10 @@ describe('plugin-config-json', () => {
     expect(isValidJsonIntegerLiteral('0')).toBe(true)
     expect(isValidJsonIntegerLiteral('-100')).toBe(true)
     expect(isValidJsonIntegerLiteral('9007199254740993123456789')).toBe(true)
-    expect(isValidJsonIntegerLiteral('1e5')).toBe(true)
+    expect(isValidJsonIntegerLiteral('1e5')).toBe(false)
+    expect(isValidJsonIntegerLiteral('1e0')).toBe(false)
+    expect(isValidJsonIntegerLiteral('1e+3')).toBe(false)
+    expect(isValidJsonIntegerLiteral('1e-0')).toBe(false)
 
     expect(isValidJsonIntegerLiteral('1.23')).toBe(false)
     expect(isValidJsonIntegerLiteral('1.')).toBe(false)
@@ -249,6 +254,21 @@ describe('plugin-config-json', () => {
 
       const listNode = findNodeAtLocation(tree, ['list'])!
       expect(getNodeSafeValue(listNode, json)).toBe('[1,2]')
+    }
+  })
+
+  it('accepts only a single independent container with the requested root type', () => {
+    expect(parseStrictJsonContainer('{}', 'object').ok).toBe(true)
+    expect(parseStrictJsonContainer('[]', 'array').ok).toBe(true)
+    for (const snippet of ['123', '{}', '[] ,"injected":1', '[1,]', '[{"":1,"":2}]']) {
+      expect(parseStrictJsonContainer(snippet, 'array').ok).toBe(false)
+    }
+    for (const snippet of ['123', '[] ,"injected":1', '{"":1,"":2}']) {
+      expect(updateStrictJsonField({
+        rawJson: '{"items":[],"unchanged":9007199254740993}',
+        path: ['items'],
+        rawSnippetString: snippet,
+      }).ok).toBe(false)
     }
   })
 })

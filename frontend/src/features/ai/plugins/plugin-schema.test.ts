@@ -53,6 +53,8 @@ describe('plugin-schema parser', () => {
       type: 'object',
       $ref: '#/definitions/MyType',
       properties: {},
+      required: [],
+      additionalProperties: false,
     })
     const resRef = parsePluginValuesSchema(withRef)
     expect(resRef.ok).toBe(false)
@@ -63,6 +65,9 @@ describe('plugin-schema parser', () => {
     const withOneOf = JSON.stringify({
       type: 'object',
       oneOf: [{ type: 'string' }],
+      properties: {},
+      required: [],
+      additionalProperties: false,
     })
     const resOneOf = parsePluginValuesSchema(withOneOf)
     expect(resOneOf.ok).toBe(false)
@@ -75,6 +80,8 @@ describe('plugin-schema parser', () => {
       properties: {
         port: { type: 'integer', minimum: 1024 },
       },
+      required: [],
+      additionalProperties: false,
     })
     const resMin = parsePluginValuesSchema(withMin)
     expect(resMin.ok).toBe(false)
@@ -96,143 +103,62 @@ describe('plugin-schema parser', () => {
   })
 
   it('strictly validates description, properties, required, enum, and additionalProperties', () => {
-    // 1. description not string
-    expect(
-      parsePluginValuesSchema(
-        JSON.stringify({
-          type: 'object',
-          description: 12345,
-          properties: {},
-        }),
-      ).ok,
-    ).toBe(false)
-
-    // 2. properties missing
-    expect(
-      parsePluginValuesSchema(
-        JSON.stringify({
-          type: 'object',
-        }),
-      ).ok,
-    ).toBe(false)
-
-    // 3. properties not object
-    expect(
-      parsePluginValuesSchema(
-        JSON.stringify({
-          type: 'object',
-          properties: 'invalid',
-        }),
-      ).ok,
-    ).toBe(false)
-
-    // 4. required contains duplicates
-    expect(
-      parsePluginValuesSchema(
-        JSON.stringify({
-          type: 'object',
-          properties: { foo: { type: 'string' } },
-          required: ['foo', 'foo'],
-        }),
-      ).ok,
-    ).toBe(false)
-
-    // 5. required references undeclared property
-    const resUndeclared = parsePluginValuesSchema(
-      JSON.stringify({
-        type: 'object',
-        properties: { foo: { type: 'string' } },
-        required: ['bar'],
-      }),
-    )
-    expect(resUndeclared.ok).toBe(false)
-    if (!resUndeclared.ok) {
-      expect(resUndeclared.error).toContain('not defined in properties')
+    const valid = {
+      type: 'object',
+      properties: { foo: { type: 'string' } },
+      required: [],
+      additionalProperties: false,
     }
+    // 每个负例只改变一个边界，避免缺失的其它字段掩盖被测校验。
+    for (const change of [
+      { description: 12345 },
+      { properties: undefined },
+      { properties: 'invalid' },
+      { required: undefined },
+      { required: 'foo' },
+      { required: [123] },
+      { required: [''] },
+      { required: ['  '] },
+      { required: ['foo', 'foo'] },
+      { required: ['bar'] },
+      { required: ['constructor'] },
+      { additionalProperties: undefined },
+      { additionalProperties: 'yes' },
+      { properties: { bad: null } },
+      { properties: { bad: { type: 123 } } },
+      { properties: { bad: { type: 'custom' } } },
+      { properties: { list: { type: 'array' } } },
+      { properties: { mode: { type: 'string', enum: [] } } },
+      { properties: { mode: { type: 'string', enum: ['A', 'A'] } } },
+      { properties: { mode: { type: 'string', enum: [''] } } },
+      { properties: { mode: { type: 'string', enum: [' '] } } },
+      { properties: { mode: { type: 'string', enum: [123] } } },
+      { properties: { mode: { type: 'string', enum: 'A' } } },
+      { properties: { nested: { type: 'object', properties: {}, additionalProperties: false } } },
+    ]) {
+      expect(parsePluginValuesSchema(JSON.stringify({ ...valid, ...change })).ok)
+        .toBe(false)
+    }
+    const undeclared = parsePluginValuesSchema(
+      JSON.stringify({ ...valid, required: ['bar'] }),
+    )
+    expect(undeclared.ok).toBe(false)
+    if (!undeclared.ok) {
+      expect(undeclared.error).toContain('not defined in properties')
+    }
+  })
 
-    // 6. required not an array or has non-string
-    expect(
-      parsePluginValuesSchema(
-        JSON.stringify({
-          type: 'object',
-          properties: { foo: { type: 'string' } },
-          required: 'foo',
-        }),
-      ).ok,
-    ).toBe(false)
-    expect(
-      parsePluginValuesSchema(
-        JSON.stringify({
-          type: 'object',
-          properties: { foo: { type: 'string' } },
-          required: [123],
-        }),
-      ).ok,
-    ).toBe(false)
-
-    // 7. enum is empty or has duplicates or non-strings
-    expect(
-      parsePluginValuesSchema(
-        JSON.stringify({
-          type: 'object',
-          properties: {
-            mode: { type: 'string', enum: [] },
-          },
-        }),
-      ).ok,
-    ).toBe(false)
-
-    expect(
-      parsePluginValuesSchema(
-        JSON.stringify({
-          type: 'object',
-          properties: {
-            mode: { type: 'string', enum: ['A', 'A'] },
-          },
-        }),
-      ).ok,
-    ).toBe(false)
-
-    expect(
-      parsePluginValuesSchema(
-        JSON.stringify({
-          type: 'object',
-          properties: {
-            mode: { type: 'string', enum: 'A' },
-          },
-        }),
-      ).ok,
-    ).toBe(false)
-
-    // 8. additionalProperties not boolean
-    expect(
-      parsePluginValuesSchema(
-        JSON.stringify({
-          type: 'object',
-          properties: {},
-          additionalProperties: 'yes',
-        }),
-      ).ok,
-    ).toBe(false)
-
-    // 9. array missing items
-    expect(
-      parsePluginValuesSchema(
-        JSON.stringify({
-          type: 'object',
-          properties: { list: { type: 'array' } },
-        }),
-      ).ok,
-    ).toBe(false)
-
-    // 10. unknown element type
-    expect(
-      parsePluginValuesSchema(
-        JSON.stringify({
-          type: 'object',
-          properties: { bad: { type: 'custom' } },
-        }),
-      ).ok,
-    ).toBe(false)
+  it('accepts null descriptions and declared special names without prototype inheritance', () => {
+    const result = parsePluginValuesSchema(
+      '{"type":"object","description":null,"properties":{"__proto__":{"type":"string"},'
+        + '"constructor":{"type":"number"}},"required":["constructor"],"additionalProperties":true}',
+    )
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.schema.description).toBeUndefined()
+      expect(Object.hasOwn(result.schema.properties, '__proto__')).toBe(true)
+      expect(result.schema.properties.constructor).toEqual({ kind: 'number', description: undefined })
+      expect(result.schema.additionalProperties).toBe(true)
+    }
   })
 })
