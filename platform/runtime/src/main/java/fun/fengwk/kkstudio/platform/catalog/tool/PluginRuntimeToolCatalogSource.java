@@ -52,7 +52,7 @@ public final class PluginRuntimeToolCatalogSource implements RuntimeToolCatalogS
   /**
    * 用已取得的 runtime 租用构建冻结视图；冻结失败（含目录冲突或快照事实不一致）时先释放该租用再向上抛出。
    *
-   * <p>释放失败绝不遮蔽原始失败：清理异常只作为 suppressed 附加，主异常照原样传播，因此不会泄漏已取得的快照引用。
+   * <p>主异常原样传播；不同实例的清理异常附加为 suppressed，同实例不重复附加。
    */
   private Lease open(PluginCatalogRuntime.Lease snapshotLease) {
     try {
@@ -61,7 +61,9 @@ public final class PluginRuntimeToolCatalogSource implements RuntimeToolCatalogS
       try {
         snapshotLease.close();
       } catch (RuntimeException | Error cleanup) {
-        failure.addSuppressed(cleanup);
+        if (cleanup != failure) {
+          failure.addSuppressed(cleanup);
+        }
       }
       throw failure;
     }
