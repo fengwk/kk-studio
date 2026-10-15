@@ -570,10 +570,6 @@ class OpenCliHubClientContractTest {
     }
   }
 
-  // ==========================================
-  // 新增鉴权测试：每请求解析、轮换、撤销、严格载荷
-  // ==========================================
-
   @Test
   void singleKeyAllEndpointsIncludeBearerHeader() throws Exception {
     String apiKey = "sk-opencli-live-token";
@@ -599,14 +595,19 @@ class OpenCliHubClientContractTest {
                 return new StubHttpResponse(
                     200, headers, new ByteArrayInputStream(new byte[] {1, 2, 3, 4}));
               }
-              return jsonResponse(200, envelope(executionData("\"resources\":[]")));
+              return jsonResponse(
+                  200,
+                  envelope(
+                      "{\"id\":\"exec-1\",\"status\":\"PENDING\",\"stdout\":\"\","
+                          + "\"stderr\":\"\",\"resources\":[]}"));
             });
 
     OpenCliHubClient client =
         new OpenCliHubClient(hub(), MAPPER, validCredentialAccess(apiKey), stubHttp);
 
     client.execute(List.of("agent", "start"), 1000L);
-    client.getExecution("exec-1", 0);
+    // 取消先查询 PENDING 再 POST，连同上传与下载覆盖全部五类端点。
+    client.cancelPendingBestEffort("exec-1");
     client.upload(
         "test.bin", "application/octet-stream", 4L, new ByteArrayInputStream(new byte[4]));
     try (HubResourceStream stream =
@@ -615,7 +616,13 @@ class OpenCliHubClientContractTest {
       assertNotNull(stream);
     }
 
-    assertEquals(4, capturedRequests.size());
+    assertEquals(5, capturedRequests.size());
+    assertTrue(
+        capturedRequests.stream()
+            .anyMatch(
+                request ->
+                    request.method().equals("POST")
+                        && request.uri().getPath().equals("/api/executions/exec-1/cancel")));
     for (HttpRequest request : capturedRequests) {
       assertEquals("Bearer " + apiKey, request.headers().firstValue("Authorization").orElse(null));
     }
@@ -1009,6 +1016,7 @@ class OpenCliHubClientContractTest {
     field.setAccessible(true);
     HttpClient ownedClient = (HttpClient) field.get(client);
     assertNotNull(ownedClient);
+    assertEquals(HttpClient.Redirect.NEVER, ownedClient.followRedirects());
     assertFalse(ownedClient.isTerminated());
 
     client.close();
@@ -1144,17 +1152,22 @@ class OpenCliHubClientContractTest {
   @ExtendWith(OutputCaptureExtension.class)
   void maliciousApiKeyAndTrailingAndDuplicateRejectionsNeverLeakSecret(CapturedOutput output) {
     String secretWithCrlf = "sk-live-secret\r\nInjected-Header: malicious";
-    String secretWithUnicode = "sk-live-secret-©-utf8-\u0000";
+    String secretWithUnicode = "sk-live-secret-©-utf8";
+    String secretWithNul = "sk-live-secret-\u0000";
+    String secretWithDel = "sk-live-secret-\u007f";
     String secretWithSpaces = "sk-live-secret with space";
     String secretTrailing = "sk-live-secret-trailing-token";
     String secretDup1 = "sk-live-secret-dup-first";
     String secretDup2 = "sk-live-secret-dup-second";
 
+    // 控制字符以合法 JSON 编码，确保测试进入 Bearer 校验而非提前在 JSON 解析处失败。
     List<String> badPayloads =
         List.of(
-            "{\"apiKey\":\"" + secretWithCrlf + "\"}",
-            "{\"apiKey\":\"" + secretWithUnicode + "\"}",
-            "{\"apiKey\":\"" + secretWithSpaces + "\"}",
+            MAPPER.writeValueAsString(Map.of("apiKey", secretWithCrlf)),
+            MAPPER.writeValueAsString(Map.of("apiKey", secretWithUnicode)),
+            MAPPER.writeValueAsString(Map.of("apiKey", secretWithNul)),
+            MAPPER.writeValueAsString(Map.of("apiKey", secretWithDel)),
+            MAPPER.writeValueAsString(Map.of("apiKey", secretWithSpaces)),
             "{\"apiKey\":\"" + secretTrailing + "\"} extra_trailing_token",
             "{\"apiKey\":\"" + secretDup1 + "\",\"apiKey\":\"" + secretDup2 + "\"}");
 

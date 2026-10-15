@@ -123,7 +123,7 @@ pollIntervalMillis      = 1000     rejectionDelayMillis    = 1000
 - 改 SQL 或加列：先看 [`V1__schema.sql`](../../schema/src/main/resources/db/migration/V1__schema.sql) 的 canvas 段与 [Schema](schema.md) 的重建规则，再改对应 JdbcStore 与集成测试；`canvas_*` 的外键全部 RESTRICT，删除顺序不能靠 cascade。
 - 改命令写路径与读模型：[`PostgresqlCanvasCommandService.java`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasCommandService.java)、[`PostgresqlCanvasQueryService.java`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasQueryService.java)、[`PostgresqlCanvasStore.java`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasStore.java) 与 [`PostgresqlCanvasResourceLifecycle.java`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasResourceLifecycle.java)。
 - 改 Runtime：[`function` 目录](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/function/) 下的 dispatcher、worker、transactions、properties、codec 是一个整体；改动 lease 语义时同步检查 `claimNext` 的 `where` 与 `CanvasFunctionRunTransactions` 的 lock order。
-- 新增模型能力：在 [Platform](platform.md) 或插件模块实现 `CanvasFunctionAdapter`，由 Catalog 启动冻结。
+- 新增模型能力：在插件模块实现 `CanvasFunctionAdapter`，由 [Platform](platform.md) 发布到不可变 epoch 快照；任务持久绑定目录版本，并在执行期间持有对应租用。
 
 测试入口（标出「纯 JUnit」的不需要数据库，其余使用 Testcontainers PostgreSQL）：
 
