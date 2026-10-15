@@ -1,6 +1,6 @@
 import type {
-  PluginConnectionCheckDTO,
   PluginConnectionCheckRequestDTO,
+  PluginConnectionCheckResult,
   PluginDTO,
 } from '@/shared/api/contracts/ai-plugin'
 
@@ -20,7 +20,7 @@ export interface PluginConnectionCheckRun {
   expectedEpoch: string
   expectedRevision: string
   phase: PluginConnectionCheckPhase
-  result: PluginConnectionCheckDTO | null
+  result: PluginConnectionCheckResult | null
   /** 只有 `failed` 时的可控错误文案；不外显远端原始值。 */
   errorMessage: string | null
 }

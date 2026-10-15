@@ -1,4 +1,30 @@
 import type { CanvasRevision } from '@/shared/api/contracts/base'
+import type {
+  CanvasFunctionCancelRequestDTO as GeneratedCanvasFunctionCancelRequestDTO,
+  CanvasFunctionRunRequestDTO as GeneratedCanvasFunctionRunRequestDTO,
+  CanvasFunctionVersionDTO,
+} from '@/shared/api/generated/stable-contracts'
+
+/*
+ * Canvas 函数版本身份与 run/cancel 请求的 wire 契约由真实 Boot4/Jackson3 mapper 生成，此处只重新导出，
+ * 不再手抄字段列表。
+ */
+export type { CanvasFunctionVersionDTO }
+
+/**
+ * run 请求：生成契约在 wire 上把 requestId 如实表达为 Java String；前端把它收窄成 canonical UUID（与运行时严格校验
+ * 一致），不手抄其它任何字段。
+ */
+export type CanvasFunctionRunRequestDTO = Omit<
+  GeneratedCanvasFunctionRunRequestDTO,
+  'requestId'
+> & { requestId: UUIDString }
+
+/** cancel 请求：同样只把 requestId 收窄成 canonical UUID。 */
+export type CanvasFunctionCancelRequestDTO = Omit<
+  GeneratedCanvasFunctionCancelRequestDTO,
+  'requestId'
+> & { requestId: UUIDString }
 
 /**
  * Canonical UUID ids cross the HTTP boundary as lowercase dashed strings.
@@ -252,17 +278,6 @@ export interface CanvasFunctionOutputDTO {
   name: string | null
 }
 
-/**
- * 函数目录暴露的版本身份；也是 start 必须回传的 expectedVersion。
- *
- * catalogEpoch 是 canonical 非负十进制 Java long 文本（绝不转成 JS number），
- * definitionFingerprint 是该函数完整定义的 lowercase SHA-256。
- */
-export interface CanvasFunctionVersionDTO {
-  catalogEpoch: string
-  definitionFingerprint: string
-}
-
 /** Function 目录项 */
 export interface CanvasFunctionDefinitionDTO {
   name: string
@@ -281,18 +296,6 @@ export interface CanvasFunctionUnknownResolutionDTO {
   requestId: UUIDString
   resolution: 'RESUME' | 'FAILED' | 'CANCELLED'
   verification: string
-}
-
-/** Function start 的严格 requestId + expectedVersion body。 */
-export interface CanvasFunctionRunRequestDTO {
-  requestId: UUIDString
-  /** 客户端点击时从目录看到的函数版本；必填，且不得被后续目录更新替换。 */
-  expectedVersion: CanvasFunctionVersionDTO
-}
-
-/** Function cancel 的严格 requestId body：cancel 不带版本围栏。 */
-export interface CanvasFunctionCancelRequestDTO {
-  requestId: UUIDString
 }
 
 export interface CanvasPresignedUrlDTO {
