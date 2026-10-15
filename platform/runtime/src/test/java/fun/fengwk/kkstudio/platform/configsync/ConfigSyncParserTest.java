@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.platform.configsync;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -16,12 +17,24 @@ import java.util.Map;
 
 /**
  * 测试意图：锁定 Parser 的条目级决策——不支持协议 skip、未知字段/嵌套 config 未知字段在通过 known 校验后才整体 skip、已知非法值或缺必填即使伴随未知字段
- * 也硬错、settings 完整七节校验且未知叶剔除并保留受支持 section、重复名（含被 skip 条目）硬错、present-but-null 与 absent 区分。
+ * 也硬错、settings 完整七节校验且未知叶剔除并保留受支持 section、重复名（含被 skip 条目）硬错、present-but-null 与 absent
+ * 区分；插件条目先严格校验字段与 未知字段，再判未安装 skip，已安装按插件 schema 解析。
  */
 class ConfigSyncParserTest {
 
+  private static final String PLUGIN_ID = "acme.plugin";
+
   private final ConfigSyncYaml yaml = new ConfigSyncYaml();
   private final ConfigSyncParser parser = ConfigSyncFixtures.parser(yaml);
+
+  private ConfigSyncParser pluginParser() {
+    return ConfigSyncFixtures.parser(
+        yaml, ConfigSyncFixtures.registry(new ConfigSyncFixtures.AgentDependencyPlugin(PLUGIN_ID)));
+  }
+
+  private static String pluginYaml(String body) {
+    return "plugins:\n  - pluginId: " + PLUGIN_ID + "\n" + body;
+  }
 
   private static final String VALID_MODEL_CONFIG =
       ConfigSyncFixtures.resourceYaml("model-config-block.yaml");
@@ -522,5 +535,112 @@ class ConfigSyncParserTest {
                     + "    url: https://mcp.example.com/mcp\n"
                     + "    headers:\n"
                     + "      Authorization: 5\n"));
+  }
+
+  /** 已安装插件的普通值按插件自身 schema 归一化；wire 只承载 pluginId 与 valuesJson。 */
+  @Test
+  void installedPluginEntryIsParsedAndNormalized() {
+    var document =
+        pluginParser().parse(pluginYaml("    valuesJson: '{\"promptAgentName\":\"h3\"}'\n"));
+
+    assertEquals(1, document.plugins().size());
+    assertEquals(PLUGIN_ID, document.plugins().get(0).pluginId());
+    assertEquals("{\"promptAgentName\":\"h3\"}", document.plugins().get(0).valuesJson());
+    assertTrue(document.skipped().isEmpty());
+  }
+
+  /** 未安装的 pluginId 在字段与未知字段都合法后按既有条目级 skip 模式上报，不加载也不合成插件。 */
+  @Test
+  void uninstalledPluginIsSkipped() {
+    var document = parser.parse(pluginYaml("    valuesJson: '{}'\n"));
+
+    assertTrue(document.plugins().isEmpty());
+    assertEquals(1, document.skipped().size());
+    assertEquals("plugins", document.skipped().get(0).getKind());
+    assertEquals(PLUGIN_ID, document.skipped().get(0).getName());
+  }
+
+  /** 条目上的未声明字段按条目级 skip 上报，与其它类别一致。 */
+  @Test
+  void unknownPluginEntryFieldIsSkipped() {
+    var document = pluginParser().parse(pluginYaml("    revision: 5\n    valuesJson: '{}'\n"));
+
+    assertTrue(document.plugins().isEmpty());
+    assertEquals(1, document.skipped().size());
+    assertEquals("plugins", document.skipped().get(0).getKind());
+  }
+
+  /** 已声明的普通字段类型不符是硬错误，绝不被降级成 skip；附加未知字段也不能让它提前变成 skip。 */
+  @Test
+  void pluginEntryRejectsWrongFieldType() {
+    assertThrows(
+        AiValidationException.class,
+        () -> pluginParser().parse(pluginYaml("    valuesJson: '{\"promptAgentName\":5}'\n")));
+    assertThrows(
+        AiValidationException.class,
+        () ->
+            pluginParser()
+                .parse(pluginYaml("    revision: 5\n    valuesJson: '{\"promptAgentName\":5}'\n")));
+  }
+
+  /** 未声明（含秘密）字段不得借插件条目夹带：schema 拒绝额外字段，且错误文本不回显输入值。 */
+  @Test
+  void pluginEntryRejectsSecretLikeFieldWithoutEchoingValue() {
+    String sentinel = "sk-sentinel-13579";
+    AiValidationException error =
+        assertThrows(
+            AiValidationException.class,
+            () ->
+                pluginParser()
+                    .parse(pluginYaml("    valuesJson: '{\"apiKey\":\"" + sentinel + "\"}'\n")));
+    assertFalse(error.getMessage().contains(sentinel), "error must not echo the value");
+  }
+
+  /** valuesJson 结构非法或超 64 KiB 上限都是硬错误。 */
+  @Test
+  void pluginEntryRejectsMalformedOrOversizedValues() {
+    assertThrows(
+        AiValidationException.class,
+        () -> pluginParser().parse(pluginYaml("    valuesJson: '[1,2]'\n")));
+    assertThrows(
+        AiValidationException.class,
+        () -> pluginParser().parse(pluginYaml("    valuesJson: '{\"promptAgentName\":1}'\n")));
+    String oversized = "x".repeat(66 * 1024);
+    assertThrows(
+        AiValidationException.class,
+        () ->
+            pluginParser()
+                .parse(
+                    pluginYaml("    valuesJson: '{\"promptAgentName\":\"" + oversized + "\"}'\n")));
+  }
+
+  /** 文件内重复 pluginId（含被 skip 的条目）是硬错误。 */
+  @Test
+  void duplicatePluginIdIsRejected() {
+    assertThrows(
+        AiValidationException.class,
+        () ->
+            pluginParser()
+                .parse(
+                    "plugins:\n"
+                        + "  - pluginId: "
+                        + PLUGIN_ID
+                        + "\n    valuesJson: '{}'\n"
+                        + "  - pluginId: "
+                        + PLUGIN_ID
+                        + "\n    valuesJson: '{}'\n"));
+  }
+
+  /** 缺 pluginId/valuesJson 或类型不符是硬错误。 */
+  @Test
+  void pluginEntryRequiresStrictFields() {
+    assertThrows(
+        AiValidationException.class,
+        () -> pluginParser().parse("plugins:\n  - valuesJson: '{}'\n"));
+    assertThrows(
+        AiValidationException.class,
+        () -> pluginParser().parse("plugins:\n  - pluginId: " + PLUGIN_ID + "\n"));
+    assertThrows(
+        AiValidationException.class, () -> pluginParser().parse(pluginYaml("    valuesJson: 5\n")));
   }
 }

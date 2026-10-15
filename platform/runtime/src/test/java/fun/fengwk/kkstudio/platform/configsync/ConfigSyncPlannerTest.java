@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.configsync;
 
+import static fun.fengwk.kkstudio.platform.configsync.ConfigSyncFixtures.agentConfig;
 import static fun.fengwk.kkstudio.platform.configsync.ConfigSyncFixtures.mcpServer;
 import static fun.fengwk.kkstudio.platform.configsync.ConfigSyncFixtures.mcpTool;
 import static fun.fengwk.kkstudio.platform.configsync.ConfigSyncFixtures.model;
@@ -7,6 +8,7 @@ import static fun.fengwk.kkstudio.platform.configsync.ConfigSyncFixtures.provide
 import static fun.fengwk.kkstudio.platform.configsync.ConfigSyncFixtures.providerAndModelYaml;
 import static fun.fengwk.kkstudio.platform.configsync.ConfigSyncFixtures.skillPackage;
 import static fun.fengwk.kkstudio.platform.configsync.ConfigSyncFixtures.snapshot;
+import static fun.fengwk.kkstudio.platform.configsync.ConfigSyncFixtures.snapshotWithPlugins;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -42,6 +44,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * 测试意图：锁定 Planner 的依赖判定与外部准备——MCP 发现失败必须 skip 当前 MCP 及依赖 Agent、disabled MCP 保存配置且不发起发现、
@@ -68,10 +71,46 @@ class ConfigSyncPlannerTest {
           agentDefinitionRepository,
           mcpServerRepository,
           TestCatalogSources.singleLease(toolCatalog),
-          ConfigSyncFixtures.MODEL_CONFIG_PARSER);
+          ConfigSyncFixtures.MODEL_CONFIG_PARSER,
+          ConfigSyncFixtures.registry());
 
   private ConfigSyncSnapshot emptySnapshot() {
     return snapshot(List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
+  }
+
+  private static final String PLUGIN_ID = "acme.plugin";
+
+  /** 合成系统内置 Agent 名称：只来自快照的内置集合，测试不依赖任何真实内置身份。 */
+  private static final String BUILTIN_AGENT = "Compaction";
+
+  private static ConfigSyncFixtures.AgentDependencyPlugin syntheticPlugin() {
+    return new ConfigSyncFixtures.AgentDependencyPlugin(PLUGIN_ID);
+  }
+
+  /** 与 planner 共用同一安装目录的 Parser，保证插件条目与依赖判定看到同一份声明。 */
+  private ConfigSyncParser pluginParser() {
+    return ConfigSyncFixtures.parser(yaml, ConfigSyncFixtures.registry(syntheticPlugin()));
+  }
+
+  private ConfigSyncPlanner pluginPlanner() {
+    return new ConfigSyncPlanner(
+        snapshotReader,
+        mcpDiscovery,
+        skillGitCache,
+        agentDefinitionRepository,
+        mcpServerRepository,
+        TestCatalogSources.singleLease(toolCatalog),
+        ConfigSyncFixtures.MODEL_CONFIG_PARSER,
+        ConfigSyncFixtures.registry(syntheticPlugin()));
+  }
+
+  private static String pluginEntry(String agentName) {
+    return "plugins:\n"
+        + "  - pluginId: "
+        + PLUGIN_ID
+        + "\n    valuesJson: '{\"promptAgentName\":\""
+        + agentName
+        + "\"}'\n";
   }
 
   private ConfigSyncPlan plan(String yamlText) {
@@ -517,11 +556,14 @@ class ConfigSyncPlannerTest {
                 List.of(),
                 List.of(),
                 List.of(),
+                Set.of(),
                 List.of(),
                 List.of(),
                 List.of(),
                 List.of(),
-                ConfigSyncFixtures.settings(5L)));
+                ConfigSyncFixtures.settings(5L),
+                0L,
+                List.of()));
     when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
 
     ConfigSyncPlan plan =
@@ -762,5 +804,231 @@ class ConfigSyncPlannerTest {
     entry.put("variant", variant);
     entry.put("config", ConfigSyncFixtures.agentConfigMap(config));
     return entry;
+  }
+
+  /** 插件条目在快照里有该 Agent 时被导入，并携带计划期的目录 epoch 与配置修订作为 CAS 坐标。 */
+  @Test
+  void pluginImportCarriesCatalogEpochAndRevision() {
+    when(snapshotReader.read())
+        .thenReturn(
+            snapshotWithPlugins(
+                List.of(provider("p")),
+                List.of(model("p", "m")),
+                List.of(
+                    ConfigSyncFixtures.agent(
+                        "h3", "p", "m", agentConfig(List.of(), List.of(), List.of()))),
+                Set.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                4L,
+                List.of(
+                    ConfigSyncFixtures.pluginRow(PLUGIN_ID, 7L, "{\"promptAgentName\":\"h3\"}"))));
+    when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
+
+    ConfigSyncPlan plan = pluginPlanner().plan(pluginParser().parse(pluginEntry("h3")));
+
+    assertEquals(4L, plan.pluginCatalogEpoch());
+    assertEquals(
+        List.of(new ConfigSyncPlan.PluginImport(PLUGIN_ID, 7L, "{\"promptAgentName\":\"h3\"}")),
+        plan.plugins());
+    assertTrue(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.PLUGINS, PLUGIN_ID)));
+    assertTrue(plan.skipped().isEmpty());
+  }
+
+  /** 插件声明的 Agent 不在导入后将生效的 Agent 池中时按既有依赖 skip 模式上报，不写入插件。 */
+  @Test
+  void pluginWithMissingAgentIsSkipped() {
+    when(snapshotReader.read())
+        .thenReturn(
+            snapshotWithPlugins(
+                List.of(provider("p")),
+                List.of(model("p", "m")),
+                List.of(),
+                Set.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                4L,
+                List.of(
+                    ConfigSyncFixtures.pluginRow(
+                        PLUGIN_ID, 7L, "{\"promptAgentName\":\"ghost\"}"))));
+    when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
+
+    ConfigSyncPlan plan = pluginPlanner().plan(pluginParser().parse(pluginEntry("ghost")));
+
+    assertTrue(plan.plugins().isEmpty());
+    assertEquals("missing agent: ghost", reason(plan.skipped(), "plugins", PLUGIN_ID));
+  }
+
+  /** 文件内声明但失败的 Agent 已被移出依赖池：插件不得靠旧快照同名 Agent 兜底，同样按缺失依赖 skip。 */
+  @Test
+  void pluginDoesNotFallBackToSkippedSameNameAgent() {
+    when(snapshotReader.read())
+        .thenReturn(
+            snapshotWithPlugins(
+                List.of(provider("p")),
+                List.of(model("p", "m")),
+                List.of(
+                    ConfigSyncFixtures.agent(
+                        "a", "p", "m", agentConfig(List.of(), List.of(), List.of()))),
+                Set.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                4L,
+                List.of(
+                    ConfigSyncFixtures.pluginRow(PLUGIN_ID, 7L, "{\"promptAgentName\":\"a\"}"))));
+    when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
+    // 文件内同名 Agent 引用不存在的工具：它必须被跳过，且不能以旧快照同名 Agent 满足插件依赖。
+    when(toolCatalog.findTool(anyString())).thenReturn(Optional.empty());
+
+    ConfigSyncPlan plan =
+        pluginPlanner()
+            .plan(
+                pluginParser()
+                    .parse(
+                        pluginEntry("a")
+                            + "agents:\n"
+                            + agent(
+                                "a",
+                                "p/m",
+                                "      tools: [ghost_tool]\n      skills: []\n      subagents: []\n")));
+
+    assertTrue(skipped(plan.skipped(), "agents", "a"));
+    assertTrue(plan.plugins().isEmpty());
+    assertEquals("missing agent: a", reason(plan.skipped(), "plugins", PLUGIN_ID));
+  }
+
+  /** 插件声明的 Agent 是系统内置 Agent 时视为已由系统满足：不 skip，插件按计划写入。 */
+  @Test
+  void pluginDependingOnBuiltinAgentIsPlanned() {
+    when(snapshotReader.read())
+        .thenReturn(
+            snapshotWithPlugins(
+                List.of(provider("p")),
+                List.of(model("p", "m")),
+                List.of(),
+                Set.of(BUILTIN_AGENT),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                4L,
+                List.of(
+                    ConfigSyncFixtures.pluginRow(
+                        PLUGIN_ID, 7L, "{\"promptAgentName\":\"" + BUILTIN_AGENT + "\"}"))));
+    when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
+
+    ConfigSyncPlan plan = pluginPlanner().plan(pluginParser().parse(pluginEntry(BUILTIN_AGENT)));
+
+    assertEquals(
+        List.of(
+            new ConfigSyncPlan.PluginImport(
+                PLUGIN_ID, 7L, "{\"promptAgentName\":\"" + BUILTIN_AGENT + "\"}")),
+        plan.plugins());
+    assertTrue(plan.skipped().isEmpty());
+  }
+
+  /** 自定义 Agent 把系统内置 Agent 当 subagent：内置身份满足依赖，Agent 不会被 skip。 */
+  @Test
+  void agentSubagentBuiltinIsSatisfiedByTheSystem() {
+    when(snapshotReader.read())
+        .thenReturn(
+            snapshotWithPlugins(
+                List.of(provider("p")),
+                List.of(model("p", "m")),
+                List.of(),
+                Set.of(BUILTIN_AGENT),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                1L,
+                List.of()));
+    when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
+    when(toolCatalog.findTool(anyString())).thenReturn(Optional.empty());
+
+    ConfigSyncPlan plan =
+        plan(
+            "providers:\n  - name: p\n    providerType: openai\n"
+                + ConfigSyncFixtures.documentYaml(
+                    Map.of(
+                        "agents",
+                        List.of(
+                            agent(
+                                "a",
+                                "p/m",
+                                "default",
+                                ConfigSyncFixtures.agentConfig(
+                                    List.of(), List.of(), List.of(BUILTIN_AGENT)))))));
+
+    assertTrue(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.AGENTS, "a")));
+    assertTrue(plan.skipped().isEmpty());
+  }
+
+  /** 插件拒绝自身普通配置是已知输入边界：计划必须硬失败，绝不降级为 skip，也不回显配置值。 */
+  @Test
+  void pluginDeclarationInputErrorFailsThePlan() {
+    when(snapshotReader.read())
+        .thenReturn(
+            snapshotWithPlugins(
+                List.of(provider("p")),
+                List.of(model("p", "m")),
+                List.of(),
+                Set.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                4L,
+                List.of(
+                    ConfigSyncFixtures.pluginRow(PLUGIN_ID, 7L, "{\"promptAgentName\":\"h3\"}"))));
+    when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
+
+    AiValidationException error =
+        assertThrows(
+            AiValidationException.class,
+            () -> pluginPlanner().plan(pluginParser().parse(pluginEntry("!secret-marker"))));
+
+    assertEquals("plugin configuration is invalid: " + PLUGIN_ID, error.getMessage());
+    assertTrue(error.getCause() == null);
+  }
+
+  /** 插件声明解析抛出的未知错误原样上抛，绝不伪装成校验失败或 skip。 */
+  @Test
+  void unexpectedPluginDeclarationErrorPropagates() {
+    when(snapshotReader.read())
+        .thenReturn(
+            snapshotWithPlugins(
+                List.of(provider("p")),
+                List.of(model("p", "m")),
+                List.of(),
+                Set.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                1L,
+                List.of(ConfigSyncFixtures.pluginRow(PLUGIN_ID, 1L, "{}"))));
+    when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
+    ConfigSyncPlanner failingPlanner =
+        new ConfigSyncPlanner(
+            snapshotReader,
+            mcpDiscovery,
+            skillGitCache,
+            agentDefinitionRepository,
+            mcpServerRepository,
+            TestCatalogSources.singleLease(toolCatalog),
+            ConfigSyncFixtures.MODEL_CONFIG_PARSER,
+            ConfigSyncFixtures.registry(
+                new ConfigSyncFixtures.FailingAgentDeclarationPlugin(PLUGIN_ID)));
+
+    assertThrows(
+        IllegalStateException.class,
+        () -> failingPlanner.plan(pluginParser().parse(pluginEntry("h3"))));
   }
 }

@@ -9,8 +9,10 @@ import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRow;
  *
  * <p>历史行是「某次提交写下的不可变事实」，manifest entry 是同一次提交写下的坐标。二者不一致意味着目录被篡改或库被手工改动，此时既不能悄悄退回空值，也不能 用旧 revision
  * 的普通值冒充当前配置，只能拒绝服务。
+ *
+ * <p>配置同步等宿主读取路径复用本类，因此「当前 desired 配置」在任何入口都经过同一份严格一致性核对。
  */
-final class PluginConfigurationHistory {
+public final class PluginConfigurationHistory {
 
   private PluginConfigurationHistory() {}
 
@@ -19,7 +21,7 @@ final class PluginConfigurationHistory {
    *
    * @throws IllegalStateException 历史行缺失，或 pluginId/修订/代码版本/schema 指纹/能力指纹/认证代际/上下文指纹与请求方不一致
    */
-  static PluginConfigurationRow require(
+  public static PluginConfigurationRow require(
       PluginConfigurationRepository repository,
       String pluginId,
       PluginCatalogManifest.Entry entry) {

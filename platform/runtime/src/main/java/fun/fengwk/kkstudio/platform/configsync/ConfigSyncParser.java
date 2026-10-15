@@ -12,6 +12,8 @@ import fun.fengwk.kkstudio.platform.catalog.skill.service.SkillCatalogService;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentInstallConfigs;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentServiceImpl;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
+import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionEditablePropertiesDTO;
@@ -32,6 +34,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -40,6 +43,9 @@ import java.util.Set;
  * <p>读取每个受支持条目的已知字段后，立即用写入路径共用的校验器校验有效值，再决定是否因未知字段整体 skip。因此「未知字段」不能绕过缺必填或非法值的硬错误， 只有真正满足当前契约的条目才会被
  * skip 上报。未知顶层类别、不支持的 Provider 协议仍是条目级 skip；结构错误、错误类型、非法有效值、缺必填与文件内重复业务名 （含被 skip
  * 的条目）作为导入错误抛出。settings 出现时按完整七节契约在解析期校验。密钥字段的值绝不进入错误文本。
+ *
+ * <p>插件条目在字段与未知字段检查之后才判定安装身份：未安装的 id 按条目级 skip 上报，已安装的用该插件自身的 configurationSchema 解析与校验普通值，
+ * 非法值与未知（含秘密）字段是硬错误，绝不静默降级或接受秘密。
  */
 @Component
 public final class ConfigSyncParser {
@@ -55,7 +61,8 @@ public final class ConfigSyncParser {
           ConfigSyncKind.SKILL_PACKAGES.wireValue(),
           ConfigSyncKind.ENVIRONMENTS.wireValue(),
           ConfigSyncKind.MCP_SERVERS.wireValue(),
-          ConfigSyncKind.SETTINGS.wireValue());
+          ConfigSyncKind.SETTINGS.wireValue(),
+          ConfigSyncKind.PLUGINS.wireValue());
 
   private final ConfigSyncYaml yaml;
   private final AgentProviderMutationFactory providerFactory;
@@ -63,6 +70,7 @@ public final class ConfigSyncParser {
   private final AgentDefinitionMutationFactory agentFactory;
   private final SkillCatalogService skillCatalogService;
   private final SystemSettingsCodec systemSettingsCodec;
+  private final StudioPluginRegistry pluginRegistry;
 
   public ConfigSyncParser(
       ConfigSyncYaml yaml,
@@ -70,13 +78,15 @@ public final class ConfigSyncParser {
       AgentModelMutationFactory modelFactory,
       AgentDefinitionMutationFactory agentFactory,
       SkillCatalogService skillCatalogService,
-      SystemSettingsCodec systemSettingsCodec) {
+      SystemSettingsCodec systemSettingsCodec,
+      StudioPluginRegistry pluginRegistry) {
     this.yaml = yaml;
     this.providerFactory = providerFactory;
     this.modelFactory = modelFactory;
     this.agentFactory = agentFactory;
     this.skillCatalogService = skillCatalogService;
     this.systemSettingsCodec = systemSettingsCodec;
+    this.pluginRegistry = pluginRegistry;
   }
 
   /** 解析并预校验；返回的候选已剔除被 skip 的条目，重复业务名在返回前判定。 */
@@ -150,9 +160,27 @@ public final class ConfigSyncParser {
     }
     requireDistinct(mcpNames, ConfigSyncKind.MCP_SERVERS);
 
+    List<String> pluginIds = new ArrayList<>();
+    List<PluginSpec> plugins = new ArrayList<>();
+    for (Entry entry : entries(document, ConfigSyncKind.PLUGINS)) {
+      PluginSpec spec = parsePlugin(entry, skipped, pluginIds);
+      if (spec != null) {
+        plugins.add(spec);
+      }
+    }
+    requireDistinct(pluginIds, ConfigSyncKind.PLUGINS);
+
     SystemSettingsSectionsDTO settings = parseSettings(document, skipped);
     return new ParsedDocument(
-        providers, models, agents, skillPackages, environments, mcpServers, settings, skipped);
+        providers,
+        models,
+        agents,
+        skillPackages,
+        environments,
+        mcpServers,
+        plugins,
+        settings,
+        skipped);
   }
 
   private List<Entry> entries(Map<String, Object> document, ConfigSyncKind kind) {
@@ -361,6 +389,35 @@ public final class ConfigSyncParser {
     }
   }
 
+  private PluginSpec parsePlugin(
+      Entry entry, List<ConfigSyncSkipped> skipped, List<String> declared) {
+    String pluginId = entry.reqName("pluginId");
+    declared.add(pluginId);
+    String valuesJson = entry.reqString("valuesJson");
+    Optional<StudioPlugin> plugin = pluginRegistry.find(pluginId);
+    String resolvedValues = null;
+    if (plugin.isPresent()) {
+      // known 字段非法值（类型不符、未声明字段、超限）即使伴随未知字段也必须硬拒绝：与其它类别一样先用写入路径校验，再判定未知字段 skip。
+      try {
+        resolvedValues = plugin.get().configurationSchema().resolveValues(valuesJson);
+      } catch (IllegalArgumentException error) {
+        // 底层消息可能含用户值，统一替换为安全的类别与条目名；秘密字段名不得借插件条目夹带。
+        throw new AiValidationException(RESOURCE, "plugins entry is invalid: " + pluginId);
+      }
+    }
+    if (skipUnknown(entry, ConfigSyncKind.PLUGINS, pluginId, skipped)) {
+      return null;
+    }
+    if (plugin.isEmpty()) {
+      // 安装身份由依赖决定：文件里未安装的 id 按既有条目级 skip 上报，不加载也不合成插件。
+      skipped.add(
+          new ConfigSyncSkipped(
+              ConfigSyncKind.PLUGINS.wireValue(), pluginId, "plugin is not installed"));
+      return null;
+    }
+    return new PluginSpec(pluginId, resolvedValues);
+  }
+
   private SystemSettingsSectionsDTO parseSettings(
       Map<String, Object> document, List<ConfigSyncSkipped> skipped) {
     String key = ConfigSyncKind.SETTINGS.wireValue();
@@ -451,6 +508,7 @@ public final class ConfigSyncParser {
       List<SkillSpec> skillPackages,
       List<EnvironmentSpec> environments,
       List<McpSpec> mcpServers,
+      List<PluginSpec> plugins,
       SystemSettingsSectionsDTO settings,
       List<ConfigSyncSkipped> skipped) {}
 
@@ -477,6 +535,13 @@ public final class ConfigSyncParser {
       String name, String registrationToken, EnvironmentInstallConfigDTO installConfig) {}
 
   public record McpSpec(String name, McpServerMutationValidator.HttpConfig config) {}
+
+  /**
+   * 已安装插件的普通配置条目：安装身份加该插件 schema 归一化后的普通值文本。
+   *
+   * <p>只承载 wire 上的两个字段；epoch、修订、秘密与其它身份事实都不属于 portable 条目。
+   */
+  public record PluginSpec(String pluginId, String valuesJson) {}
 
   /** 单条目字段读取器：跟踪已消费键，读取时严格校验类型且不回显值。 */
   private static final class Entry {
