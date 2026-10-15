@@ -99,6 +99,20 @@ function requireNullableCanonicalDecimalString(value: unknown, path: string): st
   return requireCanonicalDecimalString(value, path)
 }
 
+const POSITIVE_DECIMAL = /^[1-9]\d*$/
+
+/**
+ * 已应用配置修订必须为正：0 表示尚无已应用配置，响应里出现即为非法，绝不当作可用的检查坐标。
+ * 范围与 canonical 形态仍由 Long 约定约束。
+ */
+function requirePositiveDecimalString(value: unknown, path: string): string {
+  const text = requireCanonicalDecimalString(value, path)
+  if (!POSITIVE_DECIMAL.test(text)) {
+    throw invalidPayload(`${path} must be a positive decimal string`)
+  }
+  return text
+}
+
 function requireBoolean(value: unknown, path: string): boolean {
   if (typeof value !== 'boolean') {
     throw invalidPayload(`${path} must be a boolean`)
@@ -392,7 +406,7 @@ const ALLOWED_CONNECTION_CHECK_KEYS = new Set([
 
 /**
  * 严格解码连接检查结果：未知字段、缺失或非法坐标、非法枚举、超出 64 位范围的坐标都拒绝。
- * 三个维度按事实解码，绝不把未知值兜底成健康值。
+ * 已应用 epoch 允许为 0，已应用修订必须为正；三个维度按事实解码，绝不把未知值兜底成健康值。
  */
 export function decodePluginConnectionCheckDTO(
   value: unknown,
@@ -403,7 +417,7 @@ export function decodePluginConnectionCheckDTO(
   return {
     pluginId: requireNonEmptyString(rec.pluginId, `${path}.pluginId`),
     appliedEpoch: requireCanonicalDecimalString(rec.appliedEpoch, `${path}.appliedEpoch`),
-    appliedRevision: requireCanonicalDecimalString(
+    appliedRevision: requirePositiveDecimalString(
       rec.appliedRevision,
       `${path}.appliedRevision`,
     ),

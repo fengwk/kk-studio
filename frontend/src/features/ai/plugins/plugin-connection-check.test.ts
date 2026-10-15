@@ -96,6 +96,14 @@ describe('pluginConnectionCheckExpected', () => {
     ).toBeNull()
   })
 
+  // 与 wire 解码一致：epoch 可以从 0 起，修订必须为正。
+  it('accepts a zero epoch because only the revision must be positive', () => {
+    expect(pluginConnectionCheckExpected(plugin({ desiredEpoch: '0', appliedEpoch: '0' }))).toEqual({
+      expectedEpoch: '0',
+      expectedRevision: '8',
+    })
+  })
+
   it('refuses the entry while the local applied coordinates are behind desired', () => {
     expect(pluginConnectionCheckExpected(plugin({ desiredEpoch: '15' }))).toBeNull()
     expect(pluginConnectionCheckExpected(plugin({ desiredRevision: '9' }))).toBeNull()
