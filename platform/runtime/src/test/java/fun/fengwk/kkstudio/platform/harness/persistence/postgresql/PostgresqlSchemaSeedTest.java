@@ -242,13 +242,6 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
 
       assertEquals(900L, settings.storageMedia().uploadExpiresSeconds());
       assertEquals(SystemSettings.Network.DEFAULT, settings.network());
-      assertTrue(settings.integrations().openCliHub().enabled());
-      assertEquals("http://opencli-hub:8080", settings.integrations().openCliHub().baseUrl());
-      assertTrue(settings.integrations().gptImage2().paidEnabled());
-      assertTrue(settings.integrations().seedance().enabled());
-      assertEquals("mock-workspace", settings.integrations().seedance().workspaceId());
-      assertEquals(10L, settings.integrations().seedance().statusPollIntervalMillis());
-      assertEquals(30_000L, settings.integrations().seedance().maxWaitMillis());
       assertTrue(!settings.integrations().comfyui().enabled());
       assertTrue(!settings.integrations().minimaxH3().enabled());
       assertRepeatableMigrationRecorded(conn, "canvas test seed");

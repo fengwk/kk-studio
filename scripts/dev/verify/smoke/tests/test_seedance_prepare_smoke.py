@@ -51,15 +51,23 @@ class TestSeedancePrepareSmoke(unittest.TestCase):
                 self.assertNotIn(invalid_origin, result.stderr)
                 self.assertIsNone(curl_invocation, "invalid Hub origin must fail before curl")
 
+    def test_missing_api_key_fails_closed_before_curl(self):
+        """A missing explicit API key exits before the first network request."""
+        result, curl_invocation = self.run_smoke("https://hub.example/", api_key=None)
+        self.assertEqual(2, result.returncode, result.stdout + result.stderr)
+        self.assertIn("OPENCLI_API_KEY is required", result.stderr)
+        self.assertIsNone(curl_invocation, "missing API key must fail before curl")
+
     def test_valid_hub_origin_strips_root_trailing_slash_before_curl(self):
-        """A valid origin is normalized before the first request is built."""
-        result, curl_invocation = self.run_smoke("https://hub.example/")
+        """A valid origin is normalized before the first request is built, and bearer header is passed."""
+        result, curl_invocation = self.run_smoke("https://hub.example/", api_key="explicit-caller-token")
 
         self.assertIsNotNone(curl_invocation, result.stdout + result.stderr)
         self.assertIn("https://hub.example/api/opencli/execute", curl_invocation)
         self.assertNotIn("https://hub.example//api", curl_invocation)
+        self.assertIn("Authorization: Bearer explicit-caller-token", curl_invocation)
 
-    def run_smoke(self, hub_url=None):
+    def run_smoke(self, hub_url=None, api_key="test-api-key"):
         """Run the guard with a fake curl and retain its evidence before cleanup."""
         with tempfile.TemporaryDirectory() as temporary_directory:
             temporary_path = Path(temporary_directory)
@@ -88,6 +96,11 @@ class TestSeedancePrepareSmoke(unittest.TestCase):
                 environment.pop("OPENCLI_HUB_BASE_URL", None)
             else:
                 environment["OPENCLI_HUB_BASE_URL"] = hub_url
+
+            if api_key is None:
+                environment.pop("OPENCLI_API_KEY", None)
+            else:
+                environment["OPENCLI_API_KEY"] = api_key
 
             result = subprocess.run(
                 [str(SMOKE_SCRIPT), "--confirm-prepare-only"],

@@ -728,7 +728,7 @@ const CORE_STATE_ENUMS = [
     constants: ['PENDING', 'SUCCESS', 'ERROR'],
   },
   {
-    path: 'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/canvas/function/opencli/OpenCliHubClient.java',
+    path: 'plugins/opencli/src/main/java/fun/fengwk/kkstudio/plugin/opencli/OpenCliHubClient.java',
     enumName: 'ExecutionStatus',
     constants: ['PENDING', 'RUNNING', 'SUCCEEDED', 'FAILED', 'TIMED_OUT', 'CANCELLED'],
   },
@@ -1023,6 +1023,128 @@ test('repository structure guard rejects missing or empty core state enum consta
     assert.throws(
       () => assertManagedCoreStateEnums(mirrorRoot),
       /enum ProcessResult\.STARTED .* must have immediate non-empty Javadoc/u,
+    )
+  } finally {
+    rmSync(mirrorRoot, { recursive: true, force: true })
+  }
+})
+
+test('opencli plugin must not depend on host implementation modules', () => {
+  // Test intent: ensure plugins/opencli POM does not declare forbidden host dependencies.
+  const opencliPomPath = path.join(REPOSITORY_ROOT, 'plugins/opencli/pom.xml')
+  assert.equal(existsSync(opencliPomPath), true, 'plugins/opencli/pom.xml must exist')
+  const pomContent = readFileSync(opencliPomPath, 'utf8')
+  const forbiddenHostArtifacts = [
+    'kk-studio-platform-runtime',
+    'kk-studio-share',
+    'kk-studio-web',
+    'kk-studio-harness-runtime',
+    'kk-studio-harness-provider',
+    'kk-studio-harness-environment',
+    'kk-studio-harness-environment-server',
+    'kk-studio-harness-builtin',
+    'kk-studio-harness-infra',
+    'kk-studio-harness-daemon',
+    'kk-studio-project',
+    'kk-studio-canvas-infra',
+  ]
+  for (const forbidden of forbiddenHostArtifacts) {
+    assert.equal(
+      pomContent.includes(`<artifactId>${forbidden}</artifactId>`),
+      false,
+      `plugins/opencli must not depend on ${forbidden}`,
+    )
+  }
+})
+
+test('web test suite must not compile-import opencli plugin classes', () => {
+  // Test intent: verify web tests interact with opencli via reflection runtime-only, without compile-time imports or static imports.
+  const webTestDir = path.join(REPOSITORY_ROOT, 'web/src/test/java')
+  if (!existsSync(webTestDir)) {
+    return
+  }
+  function scan(dir) {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name)
+      if (entry.isDirectory()) {
+        scan(full)
+      } else if (entry.name.endsWith('.java')) {
+        const source = readFileSync(full, 'utf8')
+        assert.equal(
+          /^\s*import\s+(?:static\s+)?fun\.fengwk\.kkstudio\.plugin\.opencli\./mu.test(source),
+          false,
+          `forbidden compile import in ${path.relative(REPOSITORY_ROOT, full)}`,
+        )
+      }
+    }
+  }
+  scan(webTestDir)
+})
+
+test('plugin dependency guard rejects forbidden host dependencies in isolation', () => {
+  // Test intent: verify check.mjs fails closed if a forbidden host dependency is introduced in plugins/opencli.
+  const mirrorRoot = createRepositoryMirror()
+  try {
+    const mirrorPlugins = path.join(mirrorRoot, 'plugins')
+    rmSync(mirrorPlugins, { recursive: true, force: true })
+    cpSync(path.join(REPOSITORY_ROOT, 'plugins'), mirrorPlugins, {
+      recursive: true,
+      filter: (source) => path.basename(source) !== 'target',
+    })
+    const mirrorOpencliPom = path.join(mirrorPlugins, 'opencli/pom.xml')
+    const original = readFileSync(mirrorOpencliPom, 'utf8')
+    const corrupted = original.replace(
+      '</dependencies>',
+      '    <dependency><groupId>fun.fengwk.kk-studio</groupId><artifactId>kk-studio-platform-runtime</artifactId></dependency>\n    </dependencies>',
+    )
+    writeFileSync(mirrorOpencliPom, corrupted)
+    assert.throws(
+      () => {
+        execFileSync('node', [CHECK_SCRIPT, '--root', mirrorRoot], {
+          cwd: mirrorRoot,
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'pipe'],
+        })
+      },
+      (error) => {
+        const stderr = error.stderr || ''
+        return stderr.includes('forbidden host implementation dependency kk-studio-platform-runtime')
+      },
+    )
+  } finally {
+    rmSync(mirrorRoot, { recursive: true, force: true })
+  }
+})
+
+test('plugin dependency guard rejects forbidden static import in isolation', () => {
+  // Test intent: verify check.mjs rejects static compile-import of opencli plugin classes.
+  const mirrorRoot = createRepositoryMirror()
+  try {
+    const mirrorWeb = path.join(mirrorRoot, 'web')
+    rmSync(mirrorWeb, { recursive: true, force: true })
+    cpSync(path.join(REPOSITORY_ROOT, 'web'), mirrorWeb, {
+      recursive: true,
+      filter: (source) => path.basename(source) !== 'target',
+    })
+    const mirrorWebTestDir = path.join(mirrorWeb, 'src/test/java/fun/fengwk/kkstudio/web/plugin')
+    mkdirSync(mirrorWebTestDir, { recursive: true })
+    const testFile = path.join(mirrorWebTestDir, 'StaticImportGuardTest.java')
+    writeFileSync(
+      testFile,
+      'package fun.fengwk.kkstudio.web.plugin;\nimport static fun.fengwk.kkstudio.plugin.opencli.OpenCliHubClient.ExecutionStatus.*;\npublic class StaticImportGuardTest {}\n',
+    )
+    assert.throws(
+      () => {
+        execFileSync('node', [CHECK_SCRIPT, '--root', mirrorRoot], {
+          cwd: mirrorRoot,
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'pipe'],
+        })
+      },
+      (error) => {
+        const stderr = error.stderr || ''
+        return stderr.includes('forbidden compile import of opencli plugin class')
+      },
     )
   } finally {
     rmSync(mirrorRoot, { recursive: true, force: true })

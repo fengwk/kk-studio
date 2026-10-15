@@ -7,6 +7,7 @@ Usage:
   RUN_REAL_SEEDANCE_PREPARE_SMOKE=1 \
   SEEDANCE_WORKSPACE_ID=... \
   OPENCLI_HUB_BASE_URL=... \
+  OPENCLI_API_KEY=... \
   scripts/dev/verify/smoke/seedance-prepare.sh --confirm-prepare-only
 
 This script calls OpenCLI Hub directly. It is hard-coded to:
@@ -32,6 +33,10 @@ if [[ -z "${SEEDANCE_WORKSPACE_ID:-}" ]]; then
 fi
 if [[ -z "${OPENCLI_HUB_BASE_URL:-}" ]]; then
   echo "OPENCLI_HUB_BASE_URL is required; set it to the OpenCLI Hub HTTP(S) origin" >&2
+  exit 2
+fi
+if [[ -z "${OPENCLI_API_KEY:-}" ]]; then
+  echo "OPENCLI_API_KEY is required; provide the explicit caller key" >&2
   exit 2
 fi
 
@@ -109,6 +114,7 @@ PY
 execution_id=$(
   curl -fsS --connect-timeout 10 --max-time 620 \
     -H 'Content-Type: application/json' \
+    -H "Authorization: Bearer $OPENCLI_API_KEY" \
     --data-binary "$request_body" \
     "$HUB_URL/api/opencli/execute" |
     python3 -c 'import json,sys; print(json.load(sys.stdin)["data"]["id"])'
@@ -117,6 +123,7 @@ execution_id=$(
 for _ in $(seq 1 80); do
   response=$(
     curl -fsS --connect-timeout 10 --max-time 20 \
+      -H "Authorization: Bearer $OPENCLI_API_KEY" \
       "$HUB_URL/api/executions/$execution_id?waitSeconds=10"
   )
   status=$(printf '%s' "$response" | python3 -c 'import json,sys; print(json.load(sys.stdin)["data"]["status"])')

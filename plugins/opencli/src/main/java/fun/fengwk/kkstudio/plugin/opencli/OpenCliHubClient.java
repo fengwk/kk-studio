@@ -1,15 +1,19 @@
-package fun.fengwk.kkstudio.platform.canvas.function.opencli;
+package fun.fengwk.kkstudio.plugin.opencli;
 
 import lombok.extern.slf4j.Slf4j;
 import tools.jackson.core.JacksonException;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.common.io.DeadlineResponseBody;
-import fun.fengwk.kkstudio.platform.settings.SystemSettings;
-import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
+import fun.fengwk.kkstudio.platform.plugin.PluginCredentialSnapshot;
+import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableException;
+import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialAccess;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -43,11 +47,11 @@ import java.util.regex.Pattern;
  * <p>远端资源 URL 必须与 Hub 同源并位于 {@code /api/resources/} 下。客户端还会规范化上传文件名，校验响应
  * envelope、输出长度和截断标记，避免把不完整结果交给下游。
  *
- * <p>公开错误只暴露固定分类、HTTP 状态与阶段名。远端 body/status、请求 URI/header 以及底层 Jackson/IO 的
- * message/cause/suppressed 可能含凭据，绝不进入异常链；原始失败仅按 type 记录到本地日志。
+ * <p>所有端点统一通过带 scoped 凭据校验的发送路径出网；每次 HTTP 发送前独立解析权威凭据，局部添加 Bearer 认证。 401/403
+ * 触发调用期确定性作废，固定去敏错误上抛；无凭据时直接抛出去敏异常，不重试。
  */
 @Slf4j
-public class OpenCliHubClient {
+public class OpenCliHubClient implements AutoCloseable {
 
   private static final Pattern EXECUTION_ID = Pattern.compile("[A-Za-z0-9-]{1,64}");
   private static final Pattern VIRTUAL_RESOURCE_PATH =
@@ -56,39 +60,70 @@ public class OpenCliHubClient {
       List.of("SUCCEEDED", "FAILED", "TIMED_OUT", "CANCELLED");
   private static final int MAX_UPLOAD_BASENAME_LENGTH = 128;
   private static final int MAX_UPLOAD_EXTENSION_LENGTH = 16;
+  private static final String AUTH_REJECTED_ERROR = "OpenCLI Hub authentication rejected";
 
-  private final OpenCliHubProperties properties;
-  private final SystemSettings.OpenCliHub settings;
+  private static final ObjectMapper CREDENTIAL_MAPPER =
+      JsonMapper.builder()
+          .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+          .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          .build();
+
+  private final OpenCliSettings settings;
   private final ObjectMapper mapper;
+  private final PluginCredentialAccess credentials;
   private final HttpClient httpClient;
   private final URI origin;
+  private final boolean ownedClient;
+  private final AtomicBoolean closed = new AtomicBoolean();
 
   public OpenCliHubClient(
-      OpenCliHubProperties properties, SystemSettingsSnapshot snapshot, ObjectMapper objectMapper) {
+      OpenCliSettings settings, ObjectMapper mapper, PluginCredentialAccess credentials) {
     this(
-        properties,
-        snapshot,
-        objectMapper,
+        settings,
+        mapper,
+        credentials,
         HttpClient.newBuilder()
             .proxy(ProxySelector.getDefault())
             .connectTimeout(
                 Duration.ofMillis(
-                    snapshot.get().integrations().openCliHub().connectTimeoutMillis()))
+                    Objects.requireNonNull(settings, "settings").connectTimeoutMillis()))
             .followRedirects(HttpClient.Redirect.NEVER)
-            .build());
+            .build(),
+        true);
   }
 
   OpenCliHubClient(
-      OpenCliHubProperties properties,
-      SystemSettingsSnapshot snapshot,
-      ObjectMapper objectMapper,
+      OpenCliSettings settings,
+      ObjectMapper mapper,
+      PluginCredentialAccess credentials,
       HttpClient httpClient) {
-    this.properties = Objects.requireNonNull(properties, "properties");
-    properties.validate();
-    this.settings = Objects.requireNonNull(snapshot, "snapshot").get().integrations().openCliHub();
-    mapper = Objects.requireNonNull(objectMapper, "objectMapper").rebuild().build();
+    this(settings, mapper, credentials, httpClient, false);
+  }
+
+  private OpenCliHubClient(
+      OpenCliSettings settings,
+      ObjectMapper mapper,
+      PluginCredentialAccess credentials,
+      HttpClient httpClient,
+      boolean ownedClient) {
+    this.settings = Objects.requireNonNull(settings, "settings");
+    this.mapper = Objects.requireNonNull(mapper, "mapper").rebuild().build();
+    this.credentials = Objects.requireNonNull(credentials, "credentials");
     this.httpClient = Objects.requireNonNull(httpClient, "httpClient");
-    origin = settings.baseUrl() == null ? null : normalizeOrigin(URI.create(settings.baseUrl()));
+    this.ownedClient = ownedClient;
+    this.origin =
+        settings.baseUrl() == null || settings.baseUrl().isBlank()
+            ? null
+            : normalizeOrigin(URI.create(settings.baseUrl()));
+  }
+
+  @Override
+  public void close() {
+    if (closed.compareAndSet(false, true)) {
+      if (ownedClient) {
+        httpClient.close();
+      }
+    }
   }
 
   /** 以定长 multipart 流上传资源，并校验 Hub 返回的虚拟资源路径。 */
@@ -122,12 +157,11 @@ public class OpenCliHubClient {
             HttpRequest.BodyPublishers.ofByteArray(prefix),
             media,
             HttpRequest.BodyPublishers.ofByteArray(suffix));
-    HttpRequest request =
-        request("/api/resources/uploads", requestTimeout())
+    HttpRequest.Builder request =
+        request("/api/resources/uploads")
             .header("Content-Type", "multipart/form-data; boundary=" + boundary)
-            .POST(body)
-            .build();
-    JsonNode data = sendEnvelope(request);
+            .POST(body);
+    JsonNode data = sendEnvelope(request, requestTimeout());
     JsonNode items = required(data, "items");
     if (!(items instanceof ArrayNode array) || array.size() != 1) {
       throw malformed("upload data.items must contain exactly one item");
@@ -148,18 +182,17 @@ public class OpenCliHubClient {
       throw new IllegalArgumentException("timeoutMillis must be between 1 and 1800000");
     }
     ObjectNode body = mapper.createObjectNode();
-    if (properties.getInstanceId() != null) {
-      body.put("instanceId", properties.getInstanceId());
+    if (settings.instanceId() != null && !settings.instanceId().isBlank()) {
+      body.put("instanceId", settings.instanceId());
     }
     ArrayNode argvNode = body.putArray("argv");
     normalized.forEach(argvNode::add);
     body.put("timeoutMillis", timeoutMillis);
-    HttpRequest request =
-        request("/api/opencli/execute", requestTimeout())
+    HttpRequest.Builder request =
+        request("/api/opencli/execute")
             .header("Content-Type", "application/json")
-            .POST(HttpRequest.BodyPublishers.ofString(writeJson(body), StandardCharsets.UTF_8))
-            .build();
-    return parseExecution(sendEnvelope(request));
+            .POST(HttpRequest.BodyPublishers.ofString(writeJson(body), StandardCharsets.UTF_8));
+    return parseExecution(sendEnvelope(request, requestTimeout()));
   }
 
   /** 查询执行状态；{@code waitSeconds > 0} 时使用长轮询超时。 */
@@ -170,9 +203,9 @@ public class OpenCliHubClient {
       throw new IllegalArgumentException("waitSeconds must be between 0 and 120");
     }
     Duration timeout = waitSeconds == 0 ? requestTimeout() : longPollTimeout();
-    HttpRequest request =
-        request("/api/executions/" + id + "?waitSeconds=" + waitSeconds, timeout).GET().build();
-    return parseExecution(sendEnvelope(request));
+    HttpRequest.Builder request =
+        request("/api/executions/" + id + "?waitSeconds=" + waitSeconds).GET();
+    return parseExecution(sendEnvelope(request, timeout));
   }
 
   /** 仅尝试取消 PENDING 作业；Hub 查询或取消失败不会改变调用方的本地终态。 */
@@ -182,15 +215,11 @@ public class OpenCliHubClient {
       if (execution.status() != ExecutionStatus.PENDING) {
         return;
       }
-      HttpRequest request =
-          request(
-                  "/api/executions/" + validateExecutionId(executionId) + "/cancel",
-                  requestTimeout())
-              .POST(HttpRequest.BodyPublishers.noBody())
-              .build();
-      parseExecution(sendEnvelope(request));
+      HttpRequest.Builder request =
+          request("/api/executions/" + validateExecutionId(executionId) + "/cancel")
+              .POST(HttpRequest.BodyPublishers.noBody());
+      parseExecution(sendEnvelope(request, requestTimeout()));
     } catch (RuntimeException ignored) {
-      // Foundation DB cancellation is authoritative; Hub cancellation is deliberately best effort.
       log.debug("OpenCLI Hub cancel failed type={}", ignored.getClass().getSimpleName());
     }
   }
@@ -200,30 +229,15 @@ public class OpenCliHubClient {
     requireEnabled();
     Objects.requireNonNull(resource, "resource");
     URI uri = resolveResourceUri(firstText(resource.downloadUrl(), resource.contentUrl()));
-    HttpRequest request = HttpRequest.newBuilder(uri).timeout(requestTimeout()).GET().build();
-    HttpResponse<InputStream> response;
-    long deadline = System.nanoTime() + request.timeout().orElseThrow().toNanos();
+    HttpRequest.Builder request = HttpRequest.newBuilder(uri).GET();
+    SendResult result = send(request, requestTimeout());
+    HttpResponse<InputStream> response = result.response();
+    DeadlineResponseBody body = result.body();
     try {
-      response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
-    } catch (IOException exception) {
-      throw hubFailure("OpenCLI Hub resource request failed", exception);
-    } catch (IllegalArgumentException exception) {
-      // JDK 可能在返回 body 前解析非法 Content-Length；不回显 header 原值。
-      throw new OpenCliHubException("OpenCLI Hub resource response headers are invalid");
-    } catch (InterruptedException exception) {
-      Thread.currentThread().interrupt();
-      throw hubFailure("OpenCLI Hub resource request interrupted", exception);
-    }
-    DeadlineResponseBody body = new DeadlineResponseBody(response.body(), deadline);
-    try {
-      if (response.statusCode() < 200 || response.statusCode() >= 300) {
-        throw httpError(response.statusCode(), body);
-      }
       long contentLength;
       try {
         contentLength = response.headers().firstValueAsLong("Content-Length").orElse(-1L);
       } catch (NumberFormatException exception) {
-        // NumberFormatException 的 message 包含远端原值，不传播到错误消息。
         throw new OpenCliHubException("OpenCLI Hub resource Content-Length is invalid");
       }
       if (contentLength <= 0L) {
@@ -246,10 +260,28 @@ public class OpenCliHubClient {
     }
   }
 
-  /** 发送 HTTP 请求并校验解包 OpenCLI Hub 标准响应信封中的业务数据。 */
-  private JsonNode sendEnvelope(HttpRequest request) {
+  /**
+   * 统一鉴权发送：每次请求独立解析凭据并构造 Bearer Header； 401/403 触发 rejectUsed CAS 并抛出去敏 HTTP 错误；统一管理 response
+   * deadline。
+   */
+  private SendResult send(HttpRequest.Builder requestBuilder, Duration timeout) {
+    PluginCredentialSnapshot snapshot = resolveCredential();
+    String apiKey = parseApiKey(snapshot.payloadJson());
+    HttpRequest request;
+    try {
+      request =
+          requestBuilder
+              .copy()
+              .header("Authorization", "Bearer " + apiKey)
+              .timeout(timeout)
+              .build();
+    } catch (IllegalArgumentException exception) {
+      log.warn(
+          "failed to construct OpenCLI Hub request type={}", exception.getClass().getSimpleName());
+      throw new OpenCliHubException("OpenCLI Hub credential is invalid");
+    }
+    long deadline = System.nanoTime() + timeout.toNanos();
     HttpResponse<InputStream> response;
-    long deadline = System.nanoTime() + request.timeout().orElseThrow().toNanos();
     try {
       response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
     } catch (IOException exception) {
@@ -260,10 +292,27 @@ public class OpenCliHubClient {
       Thread.currentThread().interrupt();
       throw hubFailure("OpenCLI Hub request interrupted", exception);
     }
-    try (InputStream body = new DeadlineResponseBody(response.body(), deadline)) {
-      if (response.statusCode() < 200 || response.statusCode() >= 300) {
+
+    if (response.statusCode() == 401 || response.statusCode() == 403) {
+      rejectUsed(snapshot);
+    }
+
+    DeadlineResponseBody body = new DeadlineResponseBody(response.body(), deadline);
+    if (response.statusCode() < 200 || response.statusCode() >= 300) {
+      try {
         throw httpError(response.statusCode(), body);
+      } finally {
+        closeQuietly(body);
       }
+    }
+    return new SendResult(response, body);
+  }
+
+  /** 发送 HTTP 请求并校验解包 OpenCLI Hub 标准响应信封中的业务数据。 */
+  private JsonNode sendEnvelope(HttpRequest.Builder requestBuilder, Duration timeout) {
+    SendResult result = send(requestBuilder, timeout);
+    HttpResponse<InputStream> response = result.response();
+    try (InputStream body = result.body()) {
       String contentType = response.headers().firstValue("Content-Type").orElse("");
       if (!contentType.toLowerCase(Locale.ROOT).startsWith("application/json")) {
         throw malformed("success response Content-Type must be application/json");
@@ -287,6 +336,68 @@ public class OpenCliHubClient {
       throw malformed("Result envelope must be valid JSON", exception);
     } catch (IOException exception) {
       throw closeFailure("OpenCLI Hub response", exception);
+    }
+  }
+
+  private PluginCredentialSnapshot resolveCredential() {
+    PluginCredentialSnapshot snapshot;
+    try {
+      snapshot = credentials.resolve();
+    } catch (PluginCredentialUnavailableException exception) {
+      log.debug("OpenCLI Hub credential unavailable type={}", exception.getClass().getSimpleName());
+      throw new OpenCliHubException("OpenCLI Hub credential is not available");
+    } catch (RuntimeException exception) {
+      log.warn(
+          "OpenCLI Hub credential resolution failed type={}", exception.getClass().getSimpleName());
+      throw new OpenCliHubException("OpenCLI Hub credential is not available");
+    }
+    if (snapshot == null || snapshot.payloadJson() == null || snapshot.payloadJson().isBlank()) {
+      throw new OpenCliHubException("OpenCLI Hub credential is not available");
+    }
+    return snapshot;
+  }
+
+  private String parseApiKey(String payloadJson) {
+    JsonNode root;
+    try {
+      root = CREDENTIAL_MAPPER.readTree(payloadJson);
+    } catch (JacksonException exception) {
+      log.warn(
+          "failed to parse OpenCLI Hub credential payload type={}",
+          exception.getClass().getSimpleName());
+      throw new OpenCliHubException("OpenCLI Hub credential payload is invalid");
+    }
+    if (root == null || !root.isObject() || root.size() != 1 || !root.has("apiKey")) {
+      throw new OpenCliHubException("OpenCLI Hub credential payload is invalid");
+    }
+    JsonNode apiKeyNode = root.get("apiKey");
+    if (!apiKeyNode.isTextual() || apiKeyNode.textValue().isBlank()) {
+      throw new OpenCliHubException("OpenCLI Hub credential payload is invalid");
+    }
+    return validateApiKey(apiKeyNode.textValue());
+  }
+
+  private String validateApiKey(String apiKey) {
+    if (apiKey == null || apiKey.isEmpty()) {
+      throw new OpenCliHubException("OpenCLI Hub credential payload is invalid");
+    }
+    for (int i = 0; i < apiKey.length(); i++) {
+      char c = apiKey.charAt(i);
+      // HTTP header field-value 必须是 ASCII 可打印字符 (0x21 - 0x7E)，严禁换行、空格与控制符
+      if (c <= 0x20 || c >= 0x7F) {
+        throw new OpenCliHubException("OpenCLI Hub credential payload is invalid");
+      }
+    }
+    return apiKey;
+  }
+
+  private void rejectUsed(PluginCredentialSnapshot snapshot) {
+    try {
+      credentials.rejectUsed(snapshot, AUTH_REJECTED_ERROR);
+    } catch (RuntimeException exception) {
+      log.debug(
+          "failed to reject used OpenCLI Hub credential type={}",
+          exception.getClass().getSimpleName());
     }
   }
 
@@ -331,8 +442,11 @@ public class OpenCliHubClient {
     return new Execution(id, status, stdout, stderr, List.copyOf(resources));
   }
 
-  private HttpRequest.Builder request(String pathAndQuery, Duration timeout) {
-    return HttpRequest.newBuilder(origin.resolve(pathAndQuery)).timeout(timeout);
+  private HttpRequest.Builder request(String pathAndQuery) {
+    if (origin == null) {
+      throw new OpenCliHubException("OpenCLI Hub baseUrl is not configured");
+    }
+    return HttpRequest.newBuilder(origin.resolve(pathAndQuery));
   }
 
   private OpenCliHubException httpError(int status, InputStream body) {
@@ -340,13 +454,11 @@ public class OpenCliHubClient {
     try {
       drainErrorBody(body, settings.maxErrorResponseBytes());
     } catch (IOException exception) {
-      // 错误正文只在统一 deadline 内消费，绝不进入公开消息；读取失败也仅暴露状态与阶段。
       return hubFailure(message + " error response read failed", exception);
     }
     return new OpenCliHubException(message);
   }
 
-  /** 按上限丢弃错误正文；仍受 response deadline 约束，超时/断流会作为失败上抛。 */
   private void drainErrorBody(InputStream input, int limit) throws IOException {
     byte[] buffer = new byte[Math.min(settings.streamBufferBytes(), 8192)];
     int remaining = limit;
@@ -357,7 +469,6 @@ public class OpenCliHubClient {
       }
       remaining -= read;
     }
-    // 达到上限后再确认一次，确保超出上限的挂起响应同样受 deadline 约束。
     if (input.read() != -1) {
       log.debug("OpenCLI Hub error response exceeded local limit");
     }
@@ -382,8 +493,10 @@ public class OpenCliHubClient {
     }
   }
 
-  /** 将产物 URL 限制为 Hub 同源的 {@code /api/resources/} 路径。 */
   private URI resolveResourceUri(String value) {
+    if (origin == null) {
+      throw new OpenCliHubException("OpenCLI Hub baseUrl is not configured");
+    }
     if (value == null || value.isBlank()) {
       throw malformed("execution resource has no contentUrl/downloadUrl");
     }
@@ -439,7 +552,6 @@ public class OpenCliHubClient {
     return "https".equalsIgnoreCase(scheme) ? 443 : 80;
   }
 
-  /** 规范化上传文件名，并限制字符集、扩展名和总长度。 */
   private static String safeBasename(String filename) {
     if (filename == null) {
       throw new IllegalArgumentException("filename must not be null");
@@ -614,7 +726,6 @@ public class OpenCliHubClient {
     try {
       return mapper.writeValueAsString(value);
     } catch (JacksonException exception) {
-      // 原始 Jackson 失败可能含请求正文（含 prompt 等），只暴露固定阶段。
       log.warn(
           "failed to encode OpenCLI Hub request type={}", exception.getClass().getSimpleName());
       throw new IllegalStateException("failed to encode OpenCLI Hub request");
@@ -639,23 +750,12 @@ public class OpenCliHubClient {
     return new OpenCliHubException("Malformed OpenCLI Hub response: " + message);
   }
 
-  /**
-   * 记录失败 type 后返回固定文案的 malformed 错误。
-   *
-   * <p>原始异常可能携带 URI、header 或正文片段，不能进入公开异常链，因此只保留分类日志。
-   */
   private static OpenCliHubException malformed(String message, Throwable cause) {
     log.warn(
         "Malformed OpenCLI Hub response: {} type={}", message, cause.getClass().getSimpleName());
     return new OpenCliHubException("Malformed OpenCLI Hub response: " + message);
   }
 
-  /**
-   * 记录失败 type 后返回固定文案的传输/读取错误。
-   *
-   * <p>仅保留本进程以固定文案构造的超时信号作为 cause；请求 URI、header、正文以及 Jackson/IO 原始 message/cause/suppressed
-   * 都不进入公开异常。
-   */
   private static OpenCliHubException hubFailure(String message, Throwable cause) {
     log.warn("OpenCLI Hub failure: {} type={}", message, cause.getClass().getSimpleName());
     return new OpenCliHubException(message, timeoutCause(cause));
@@ -666,11 +766,6 @@ public class OpenCliHubClient {
     return new UncheckedIOException(new IOException("failed to close " + description));
   }
 
-  /**
-   * 只把超时信号重建为受控异常：类型可观测，但不携带原始 message/cause/suppressed。
-   *
-   * <p>其余底层异常（请求 IO、Jackson、URI 解析）可能含 URI、header 或正文片段，返回 {@code null}。
-   */
   private static Throwable timeoutCause(Throwable cause) {
     if (cause instanceof HttpTimeoutException) {
       return new HttpTimeoutException("OpenCLI Hub response deadline exceeded");
@@ -682,28 +777,29 @@ public class OpenCliHubClient {
     try {
       input.close();
     } catch (IOException ignored) {
-      // 主契约错误更有价值；次要关闭失败只记录 class，best-effort 不重试。
       log.debug("OpenCLI Hub stream close failed type={}", ignored.getClass().getSimpleName());
     }
   }
 
+  private record SendResult(HttpResponse<InputStream> response, DeadlineResponseBody body) {}
+
   public enum ExecutionStatus {
-    /** OpenCLI 任务已提交等待调度。 */
+    /** 任务已排队或等待执行。 */
     PENDING,
 
-    /** OpenCLI 任务正在执行。 */
+    /** 任务正在执行中。 */
     RUNNING,
 
-    /** OpenCLI 任务执行成功。 */
+    /** 任务执行成功完成。 */
     SUCCEEDED,
 
-    /** OpenCLI 任务执行失败。 */
+    /** 任务执行失败。 */
     FAILED,
 
-    /** OpenCLI 任务执行超时。 */
+    /** 任务执行超时。 */
     TIMED_OUT,
 
-    /** OpenCLI 任务已被取消。 */
+    /** 任务已被取消。 */
     CANCELLED;
 
     public boolean terminal() {
@@ -723,7 +819,6 @@ public class OpenCliHubClient {
   public record ExecutionResource(
       String fileName, String mimeType, long size, String contentUrl, String downloadUrl) {}
 
-  /** 调用方必须关闭的 Hub 媒体响应。 */
   public static final class HubResourceStream implements AutoCloseable {
 
     private final InputStream content;
@@ -754,7 +849,6 @@ public class OpenCliHubClient {
     }
   }
 
-  /** 单订阅的定长输入流发布者；按 demand 分块读取，并在完成、失败或取消时关闭源流。 */
   private static final class FixedInputStreamPublisher implements Flow.Publisher<ByteBuffer> {
 
     private final InputStream input;

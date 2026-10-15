@@ -2,8 +2,6 @@ package fun.fengwk.kkstudio.platform.settings;
 
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionPathPattern;
 
-import java.net.URI;
-
 /**
  * {@link SystemSettings} 各 section 共享的字段级校验工具。
  *
@@ -39,48 +37,6 @@ final class SystemSettingsValidation {
       throw new IllegalArgumentException(field + " must not contain surrounding whitespace");
     }
     return value.strip();
-  }
-
-  /** 返回规范化 {@code http(s)://host[:port][/]} 形式的 base URL；null 表示未配置。 */
-  static String requireHttpOrigin(String value, String field) {
-    String trimmed = requirePresentableUrl(value, field);
-    if (trimmed == null) {
-      return null;
-    }
-    URI uri;
-    try {
-      uri = URI.create(trimmed);
-    } catch (IllegalArgumentException error) {
-      throw new IllegalArgumentException(field + " must be an HTTP(S) origin", error);
-    }
-    if (!("http".equalsIgnoreCase(uri.getScheme()) || "https".equalsIgnoreCase(uri.getScheme()))
-        || uri.getHost() == null
-        || uri.getUserInfo() != null
-        || uri.getQuery() != null
-        || uri.getFragment() != null) {
-      throw new IllegalArgumentException(
-          field + " must be an HTTP(S) origin without path, userinfo, query or fragment");
-    }
-    String path = uri.getPath();
-    if (path != null && !path.isEmpty() && !"/".equals(path)) {
-      throw new IllegalArgumentException(field + " must be an HTTP(S) origin without path");
-    }
-    return trimmed;
-  }
-
-  static String requireOptionalBoundedText(String value, int maxLength, String field) {
-    if (value == null) {
-      return null;
-    }
-    if (!value.equals(value.strip())) {
-      throw new IllegalArgumentException(field + " must not contain surrounding whitespace");
-    }
-    String stripped = value.strip();
-    if (stripped.isEmpty() || stripped.length() > maxLength) {
-      throw new IllegalArgumentException(
-          field + " must be absent or 1.." + maxLength + " characters");
-    }
-    return stripped;
   }
 
   static String requireOptionalAgentName(String value, String field) {

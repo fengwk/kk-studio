@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.canvas.function.opencli;
+package fun.fengwk.kkstudio.plugin.opencli;
 
 /** OpenCLI Hub transport、wire contract 或 provider execution 的 fail-closed 错误。 */
 public class OpenCliHubException extends RuntimeException {

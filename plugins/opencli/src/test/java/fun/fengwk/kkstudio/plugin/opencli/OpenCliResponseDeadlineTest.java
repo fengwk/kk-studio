@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.canvas.function.opencli;
+package fun.fengwk.kkstudio.plugin.opencli;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -11,9 +11,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import tools.jackson.databind.json.JsonMapper;
 
-import fun.fengwk.kkstudio.platform.canvas.function.opencli.OpenCliHubClient.ExecutionResource;
-import fun.fengwk.kkstudio.platform.settings.SystemSettings;
-import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
+import fun.fengwk.kkstudio.platform.plugin.PluginCredentialSnapshot;
+import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialAccess;
+import fun.fengwk.kkstudio.plugin.opencli.OpenCliHubClient.ExecutionResource;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -29,6 +29,7 @@ import java.net.http.HttpResponse;
 import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -101,7 +102,7 @@ class OpenCliResponseDeadlineTest {
             assertThrows(
                 OpenCliHubException.class, () -> endpoint.client().openResource(resource(0)));
         assertFalse(error.getMessage().contains(length));
-        assertEquals(null, error.getCause());
+        assertNull(error.getCause());
       }
     }
   }
@@ -290,6 +291,30 @@ class OpenCliResponseDeadlineTest {
     return new ExecutionResource("a.png", "image/png", size, null, "/api/resources/a.png");
   }
 
+  private static PluginCredentialAccess fakeCredentialAccess(String apiKey) {
+    PluginCredentialSnapshot snapshot =
+        new PluginCredentialSnapshot(
+            "opencli",
+            UUID.randomUUID(),
+            "context",
+            null,
+            null,
+            0L,
+            new byte[0],
+            "{\"apiKey\":\"" + apiKey + "\"}");
+    return new PluginCredentialAccess() {
+      @Override
+      public PluginCredentialSnapshot resolve() {
+        return snapshot;
+      }
+
+      @Override
+      public boolean rejectUsed(PluginCredentialSnapshot target, String error) {
+        return true;
+      }
+    };
+  }
+
   /** 原始本机 HTTP 服务可保留非法 headers，并直接观察客户端是否关闭 TCP 连接。 */
   private static final class Endpoint implements AutoCloseable {
     private final ServerSocket server = new ServerSocket();
@@ -353,28 +378,22 @@ class OpenCliResponseDeadlineTest {
     }
 
     OpenCliHubClient client(long requestTimeoutMillis) {
-      var hub =
-          new SystemSettings.OpenCliHub(
-              true, origin(), 1000, requestTimeoutMillis, 121_000, 1024, 512 * 1024, 4096, 65_535);
-      var settings =
-          new SystemSettings(
-              SystemSettings.Tool.DEFAULT,
-              SystemSettings.AiRuntime.DEFAULT,
-              SystemSettings.Environment.DEFAULT,
-              SystemSettings.Network.DEFAULT,
-              new SystemSettings.Integrations(
-                  SystemSettings.Comfyui.DEFAULT,
-                  hub,
-                  SystemSettings.Seedance.DEFAULT,
-                  SystemSettings.GptImage2.DEFAULT,
-                  SystemSettings.MiniMaxH3.DEFAULT),
-              SystemSettings.StorageMedia.DEFAULT,
-              SystemSettings.Advanced.DEFAULT);
-      return new OpenCliHubClient(
-          new OpenCliHubProperties(),
-          new SystemSettingsSnapshot(settings),
-          JsonMapper.builder().build(),
-          http);
+      OpenCliSettings settings =
+          new OpenCliSettings(
+              true,
+              origin(),
+              "test-instance",
+              1000,
+              (int) requestTimeoutMillis,
+              121_000,
+              1024,
+              512 * 1024,
+              4096,
+              65_535,
+              OpenCliSettings.GptImage2.DEFAULT,
+              OpenCliSettings.Seedance.DEFAULT);
+      PluginCredentialAccess credentials = fakeCredentialAccess("test-api-key");
+      return new OpenCliHubClient(settings, JsonMapper.builder().build(), credentials, http);
     }
 
     @Override

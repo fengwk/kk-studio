@@ -2,24 +2,9 @@
 update system_setting
 set config =
     jsonb_set(
-        jsonb_set(
-            jsonb_set(
-                jsonb_set(
-                    config,
-                    '{storageMedia}',
-                    config -> 'storageMedia'
-                        || '{"uploadExpiresSeconds":900}'::jsonb
-                ),
-                '{integrations,openCliHub}',
-                config #> '{integrations,openCliHub}'
-                    || '{"enabled":true,"baseUrl":"http://opencli-hub:8080"}'::jsonb
-            ),
-            '{integrations,gptImage2}',
-            config #> '{integrations,gptImage2}'
-                || '{"paidEnabled":true}'::jsonb
-        ),
-        '{integrations,seedance}',
-        config #> '{integrations,seedance}'
-            || '{"enabled":true,"workspaceId":"mock-workspace","statusPollIntervalMillis":10,"maxWaitMillis":30000}'::jsonb
+        config,
+        '{storageMedia}',
+        config -> 'storageMedia'
+            || '{"uploadExpiresSeconds":900}'::jsonb
     )
 where id = 1;

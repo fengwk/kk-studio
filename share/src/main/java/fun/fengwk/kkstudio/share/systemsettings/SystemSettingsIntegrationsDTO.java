@@ -13,12 +13,6 @@ public class SystemSettingsIntegrationsDTO {
 
   private ComfyuiDTO comfyui;
 
-  private OpenCliHubDTO openCliHub;
-
-  private SeedanceDTO seedance;
-
-  private GptImage2DTO gptImage2;
-
   private MiniMaxH3DTO minimaxH3;
 
   @JsonAnySetter
@@ -46,77 +40,6 @@ public class SystemSettingsIntegrationsDTO {
     public void rejectUnknownField(String name, Object value) {
       throw new IllegalArgumentException(
           "unknown system settings integrations.comfyui field: " + name);
-    }
-  }
-
-  /** {@code integrations.openCliHub}（不含 instanceId 等部署身份）。 */
-  @Data
-  public static class OpenCliHubDTO {
-
-    private Boolean enabled;
-
-    private String baseUrl;
-
-    private Long connectTimeoutMillis;
-
-    private Long requestTimeoutMillis;
-
-    private Long longPollTimeoutMillis;
-
-    private Integer streamBufferBytes;
-
-    private Integer maxJsonResponseBytes;
-
-    private Integer maxErrorResponseBytes;
-
-    private Integer maxOutputChars;
-
-    @JsonAnySetter
-    public void rejectUnknownField(String name, Object value) {
-      throw new IllegalArgumentException(
-          "unknown system settings integrations.openCliHub field: " + name);
-    }
-  }
-
-  /** {@code integrations.seedance}。 */
-  @Data
-  public static class SeedanceDTO {
-
-    private Boolean enabled;
-
-    private String workspaceId;
-
-    private Integer retry;
-
-    private Long hubExecutionTimeoutMillis;
-
-    private Long statusPollIntervalMillis;
-
-    private Long maxWaitMillis;
-
-    @JsonAnySetter
-    public void rejectUnknownField(String name, Object value) {
-      throw new IllegalArgumentException(
-          "unknown system settings integrations.seedance field: " + name);
-    }
-  }
-
-  /** {@code integrations.gptImage2}。 */
-  @Data
-  public static class GptImage2DTO {
-
-    private Boolean paidEnabled;
-
-    private Integer askTimeoutSeconds;
-
-    private Long hubExecutionTimeoutMillis;
-
-    private Long maxWaitMillis;
-
-    @JsonAnySetter
-    public void rejectUnknownField(String name, Object value) {
-      throw new IllegalArgumentException(
-          "unknown system settings integrations.gptImage2 field: " + name);
     }
   }
 

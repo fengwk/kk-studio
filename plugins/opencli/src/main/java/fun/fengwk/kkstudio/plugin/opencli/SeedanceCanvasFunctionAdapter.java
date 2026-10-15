@@ -1,9 +1,10 @@
-package fun.fengwk.kkstudio.platform.canvas.function.opencli;
+package fun.fengwk.kkstudio.plugin.opencli;
 
 import lombok.extern.slf4j.Slf4j;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ArrayNode;
 
 import fun.fengwk.kkstudio.canvas.CanvasJson;
@@ -18,12 +19,10 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenReference;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionUnknownException;
-import fun.fengwk.kkstudio.platform.canvas.function.opencli.OpenCliHubClient.Execution;
-import fun.fengwk.kkstudio.platform.canvas.function.opencli.OpenCliHubClient.ExecutionResource;
-import fun.fengwk.kkstudio.platform.canvas.function.opencli.OpenCliHubClient.ExecutionStatus;
-import fun.fengwk.kkstudio.platform.canvas.function.opencli.OpenCliHubClient.HubResourceStream;
-import fun.fengwk.kkstudio.platform.settings.SystemSettings;
-import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
+import fun.fengwk.kkstudio.plugin.opencli.OpenCliHubClient.Execution;
+import fun.fengwk.kkstudio.plugin.opencli.OpenCliHubClient.ExecutionResource;
+import fun.fengwk.kkstudio.plugin.opencli.OpenCliHubClient.ExecutionStatus;
+import fun.fengwk.kkstudio.plugin.opencli.OpenCliHubClient.HubResourceStream;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -104,36 +103,37 @@ public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
           definition("seedance2.0_vip", "Seedance 2.0 VIP"),
           definition("seedance2.0fast_vip", "Seedance 2.0 Fast VIP"));
 
-  private final SystemSettings.Integrations integrations;
+  private final OpenCliSettings settings;
   private final OpenCliHubClient client;
   private final OpenCliReferenceUploader uploader;
   private final ObjectMapper mapper;
   private final Clock clock;
   private final Sleeper sleeper;
 
+  public SeedanceCanvasFunctionAdapter(OpenCliSettings settings, OpenCliHubClient client) {
+    this(settings, client, JsonMapper.builder().build(), Clock.systemUTC(), Thread::sleep);
+  }
+
   public SeedanceCanvasFunctionAdapter(
-      SystemSettingsSnapshot snapshot,
-      OpenCliHubClient client,
-      ObjectMapper objectMapper,
-      Clock clock) {
-    this(snapshot, client, objectMapper, clock, Thread::sleep);
+      OpenCliSettings settings, OpenCliHubClient client, ObjectMapper objectMapper, Clock clock) {
+    this(settings, client, objectMapper, clock, Thread::sleep);
   }
 
   SeedanceCanvasFunctionAdapter(
-      SystemSettingsSnapshot snapshot,
+      OpenCliSettings settings,
       OpenCliHubClient client,
       ObjectMapper objectMapper,
       Sleeper sleeper) {
-    this(snapshot, client, objectMapper, Clock.systemUTC(), sleeper);
+    this(settings, client, objectMapper, Clock.systemUTC(), sleeper);
   }
 
   SeedanceCanvasFunctionAdapter(
-      SystemSettingsSnapshot snapshot,
+      OpenCliSettings settings,
       OpenCliHubClient client,
       ObjectMapper objectMapper,
       Clock clock,
       Sleeper sleeper) {
-    this.integrations = Objects.requireNonNull(snapshot, "snapshot").get().integrations();
+    this.settings = Objects.requireNonNull(settings, "settings");
     this.client = Objects.requireNonNull(client, "client");
     uploader = new OpenCliReferenceUploader(client);
     mapper = Objects.requireNonNull(objectMapper, "objectMapper").rebuild().build();
@@ -148,9 +148,9 @@ public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
 
   @Override
   public boolean enabled() {
-    return integrations.openCliHub().enabled()
-        && integrations.seedance().enabled()
-        && integrations.seedance().workspaceId() != null;
+    return settings.enabled()
+        && settings.seedance().enabled()
+        && settings.seedance().workspaceId() != null;
   }
 
   @Override
@@ -159,7 +159,7 @@ public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
   }
 
   private Duration seedanceHubExecutionTimeout() {
-    return Duration.ofMillis(integrations.seedance().hubExecutionTimeoutMillis());
+    return Duration.ofMillis(settings.seedance().hubExecutionTimeoutMillis());
   }
 
   @Override
@@ -241,7 +241,7 @@ public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
       try {
         submitted =
             client.execute(
-                buildSubmitArgv(run, uploads), integrations.seedance().hubExecutionTimeoutMillis());
+                buildSubmitArgv(run, uploads), settings.seedance().hubExecutionTimeoutMillis());
       } catch (RuntimeException failure) {
         // 提交失败意味着外部任务可能已创建；只按 type 记录，不把原始 message/cause 交给人工决议。
         log.warn("Seedance submission outcome unknown type={}", failure.getClass().getSimpleName());
@@ -294,7 +294,7 @@ public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
       }
       executionId = OpenCliAdapterState.optionalString(state, OpenCliAdapterState.EXECUTION_ID);
       if (executionId == null) {
-        sleep(Duration.ofMillis(integrations.seedance().statusPollIntervalMillis()));
+        sleep(Duration.ofMillis(settings.seedance().statusPollIntervalMillis()));
         if (!context.isRunning()) {
           throw new IllegalStateException("Canvas Function run is no longer running");
         }
@@ -303,7 +303,7 @@ public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
         }
         Execution statusExecution =
             client.execute(
-                buildStatusArgv(assetId), integrations.seedance().hubExecutionTimeoutMillis());
+                buildStatusArgv(assetId), settings.seedance().hubExecutionTimeoutMillis());
         executionId = statusExecution.id();
         state.put(OpenCliAdapterState.EXECUTION_ID, executionId);
         context.checkpoint("SEEDANCE_STATUS_POLLING", state);
@@ -378,7 +378,7 @@ public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
             "jimeng-agent",
             "video",
             "--workspace",
-            integrations.seedance().workspaceId(),
+            settings.seedance().workspaceId(),
             "--ratio",
             ratio,
             "--model_version",
@@ -394,7 +394,7 @@ public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
     argv.add("--submit");
     argv.add("1");
     argv.add("--retry");
-    argv.add(Integer.toString(integrations.seedance().retry()));
+    argv.add(Integer.toString(settings.seedance().retry()));
     return List.copyOf(argv);
   }
 
@@ -403,7 +403,7 @@ public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
         "jimeng-agent",
         "status",
         "--workspace",
-        integrations.seedance().workspaceId(),
+        settings.seedance().workspaceId(),
         "--search_key",
         assetId,
         "--download",
@@ -486,8 +486,7 @@ public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
       throw new IllegalArgumentException("Seedance checkpoint is missing pollStartedAt");
     }
     try {
-      return Instant.parse(started)
-          .plus(integrations.seedance().maxWaitMillis(), ChronoUnit.MILLIS);
+      return Instant.parse(started).plus(settings.seedance().maxWaitMillis(), ChronoUnit.MILLIS);
     } catch (DateTimeParseException exception) {
       throw new IllegalArgumentException("Seedance checkpoint pollStartedAt is invalid", exception);
     }

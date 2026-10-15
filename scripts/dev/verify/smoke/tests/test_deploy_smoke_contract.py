@@ -7,7 +7,9 @@ create_and_run 被原样取出执行，请求被记录、应答按固定序列�
 """
 
 import ast
+import json
 import os
+import subprocess
 import sys
 import unittest
 import uuid
@@ -596,6 +598,201 @@ class TestSmokePlacement(unittest.TestCase):
         """Human host runners belong to scripts/; deploy/ keeps only compose/images/runtime assets."""
         self.assertTrue(SMOKE_SCRIPT.exists())
         self.assertFalse((REPOSITORY_ROOT / "deploy" / "test" / "run.sh").exists())
+
+
+def extract_script_opencli_init_source() -> str:
+    """提取 offline-chat.sh 中 opencli 插件初始化到 assert_function_definitions 之间的源码。"""
+    content = SMOKE_SCRIPT.read_text(encoding="utf-8")
+    start_marker = 'opencli_descriptor = json_call("GET", "/api/plugins/opencli")'
+    end_marker = 'assert_function_definitions(json_call("GET", "/api/canvas-functions"))'
+    start_pos = content.find(start_marker)
+    end_pos = content.find(end_marker)
+    if start_pos == -1 or end_pos == -1 or start_pos >= end_pos:
+        raise AssertionError("could not locate opencli initialization section in offline-chat.sh")
+    return content[start_pos:end_pos]
+
+
+class TestOfflinePluginInitializationContract(unittest.TestCase):
+    """验证 offline-chat.sh 对 opencli 插件的统一初始化契约（GET 坐标 -> PUT 秘密补丁 -> 状态轮询）。"""
+
+    def test_opencli_initialization_extracts_coordinates_and_sends_secret_patch(self):
+        source = extract_script_opencli_init_source()
+        requests = []
+
+        def mock_json_call(method, path, body=None):
+            requests.append((method, path, body))
+            if method == "GET" and path == "/api/plugins/opencli":
+                if len(requests) == 1:
+                    return {
+                        "desiredEpoch": "42",
+                        "desiredRevision": "99",
+                        "appliedEpoch": "40",
+                        "appliedRevision": "98",
+                        "status": "NOT_CONNECTED",
+                        "applicationError": None,
+                    }
+                else:
+                    return {
+                        "desiredEpoch": "43",
+                        "desiredRevision": "100",
+                        "appliedEpoch": "43",
+                        "appliedRevision": "100",
+                        "status": "CONNECTED",
+                        "applicationError": None,
+                    }
+            elif method == "PUT" and path == "/api/plugins/opencli/configuration":
+                return {"desiredEpoch": "43", "desiredRevision": "100"}
+            raise AssertionError(f"unexpected request {method} {path}")
+
+        namespace = {
+            "json": __import__("json"),
+            "time": SimpleNamespace(sleep=lambda _: None),
+            "json_call": mock_json_call,
+        }
+        exec(source, namespace)
+
+        self.assertGreaterEqual(len(requests), 3)
+        self.assertEqual(requests[0], ("GET", "/api/plugins/opencli", None))
+
+        put_method, put_path, put_body = requests[1]
+        self.assertEqual(put_method, "PUT")
+        self.assertEqual(put_path, "/api/plugins/opencli/configuration")
+        # 验证从 GET 实际取得坐标
+        self.assertEqual(put_body["expectedEpoch"], "42")
+        self.assertEqual(put_body["expectedRevision"], "99")
+        # 验证 secretPatch
+        self.assertEqual(
+            put_body["secretPatch"],
+            {"apiKey": {"operation": "SET", "value": "synthetic-opencli-key"}},
+        )
+        # 验证 valuesJson
+        import json
+        values = json.loads(put_body["valuesJson"])
+        self.assertTrue(values["enabled"])
+        self.assertEqual(values["baseUrl"], "http://opencli-hub:8080")
+        self.assertTrue(values["gptImage2"]["paidEnabled"])
+        self.assertTrue(values["seedance"]["enabled"])
+        self.assertEqual(values["seedance"]["workspaceId"], "mock-workspace")
+
+    def test_opencli_initialization_fails_when_poll_does_not_converge(self):
+        source = extract_script_opencli_init_source()
+
+        def mock_json_call(method, path, body=None):
+            if method == "GET":
+                return {
+                    "desiredEpoch": "1",
+                    "desiredRevision": "1",
+                    "appliedEpoch": "0",
+                    "appliedRevision": "0",
+                    "status": "NOT_CONNECTED",
+                    "applicationError": "saving",
+                }
+            return {}
+
+        namespace = {
+            "json": __import__("json"),
+            "time": SimpleNamespace(sleep=lambda _: None),
+            "json_call": mock_json_call,
+        }
+        with self.assertRaises(AssertionError) as ctx:
+            exec(source, namespace)
+        self.assertIn("opencli plugin configuration did not converge", str(ctx.exception))
+
+
+class TestCanvasTestComposeContract(unittest.TestCase):
+    """deploy/test/compose.yaml 的静态配置契约验证（不拉起全栈、不执行镜像构建）。"""
+
+    COMPOSE_FILE = REPOSITORY_ROOT / "deploy" / "test" / "compose.yaml"
+
+    def run_compose_config(self, *extra_args) -> dict:
+        result = subprocess.run(
+            [
+                "docker",
+                "compose",
+                "-f",
+                str(self.COMPOSE_FILE),
+                *extra_args,
+                "config",
+                "--format",
+                "json",
+            ],
+            cwd=str(REPOSITORY_ROOT),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=True,
+        )
+        return json.loads(result.stdout)
+
+    def test_default_profile_omits_app_and_credential_init(self):
+        """默认依赖启动不拉起 app 和 plugin-credential-init，保持最小常驻栈。"""
+        config = self.run_compose_config()
+        services = config.get("services", {})
+        self.assertIn("postgres", services)
+        self.assertIn("minio", services)
+        self.assertIn("minio-init", services)
+        self.assertIn("http-mock", services)
+        self.assertNotIn("app", services)
+        self.assertNotIn("plugin-credential-init", services)
+
+    def test_app_profile_wires_isolated_plugin_credential_key_volume_and_init(self):
+        """--profile app 必须通过一次性 init 在专用测试 volume 生成 32 字节主密钥，app 只读挂载。"""
+        config = self.run_compose_config("--profile", "app")
+        services = config.get("services", {})
+
+        # 1. 验证 plugin-credential-init 一次性服务契约
+        self.assertIn("plugin-credential-init", services)
+        init_svc = services["plugin-credential-init"]
+        self.assertEqual(init_svc.get("image"), "python:3.12-alpine")
+        self.assertEqual(init_svc.get("restart"), "no")
+        self.assertEqual(init_svc.get("user"), "0:0")
+        command_str = " ".join(init_svc.get("command", []))
+        self.assertIn("os.urandom(32)", command_str)
+        self.assertIn("10001", command_str)
+        self.assertIn("0o400", command_str)
+        self.assertIn("/secrets/plugin-credential-key", command_str)
+        init_volumes = init_svc.get("volumes", [])
+        self.assertTrue(
+            any(
+                v.get("source") == "plugin-credential-key" and v.get("target") == "/secrets"
+                for v in init_volumes
+            ),
+            f"plugin-credential-init must mount plugin-credential-key volume: {init_volumes}",
+        )
+
+        # 2. 验证 app 服务依赖与挂载契约
+        self.assertIn("app", services)
+        app_svc = services["app"]
+        env = app_svc.get("environment", {})
+        self.assertEqual(
+            env.get("KK_STUDIO_PLUGINS_CREDENTIAL_KEY_FILE"),
+            "/secrets/plugin-credential-key",
+            "app must configure KK_STUDIO_PLUGINS_CREDENTIAL_KEY_FILE to point to the mounted key file",
+        )
+        depends_on = app_svc.get("depends_on", {})
+        self.assertIn("plugin-credential-init", depends_on)
+        self.assertEqual(
+            depends_on["plugin-credential-init"].get("condition"),
+            "service_completed_successfully",
+        )
+        app_volumes = app_svc.get("volumes", [])
+        key_mount = next(
+            (
+                v
+                for v in app_volumes
+                if v.get("source") == "plugin-credential-key" and v.get("target") == "/secrets"
+            ),
+            None,
+        )
+        self.assertIsNotNone(key_mount, "app must mount plugin-credential-key to /secrets")
+        self.assertTrue(
+            key_mount.get("read_only"),
+            "app volume mount for plugin-credential-key must be read-only",
+        )
+
+        # 3. 验证卷声明
+        volumes = config.get("volumes", {})
+        self.assertIn("plugin-credential-key", volumes)
 
 
 if __name__ == "__main__":

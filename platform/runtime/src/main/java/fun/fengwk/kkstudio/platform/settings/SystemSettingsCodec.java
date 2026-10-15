@@ -256,24 +256,11 @@ public class SystemSettingsCodec {
       throw new IllegalArgumentException("integrations is required");
     }
     SystemSettingsIntegrationsDTO.ComfyuiDTO comfyui = dto.getComfyui();
-    SystemSettingsIntegrationsDTO.OpenCliHubDTO openCliHub = dto.getOpenCliHub();
-    SystemSettingsIntegrationsDTO.SeedanceDTO seedance = dto.getSeedance();
-    SystemSettingsIntegrationsDTO.GptImage2DTO gptImage2 = dto.getGptImage2();
     SystemSettingsIntegrationsDTO.MiniMaxH3DTO minimaxH3 = dto.getMinimaxH3();
-    if (comfyui == null
-        || openCliHub == null
-        || seedance == null
-        || gptImage2 == null
-        || minimaxH3 == null) {
-      throw new IllegalArgumentException(
-          "integrations.comfyui, openCliHub, seedance, gptImage2 and minimaxH3 are required");
+    if (comfyui == null || minimaxH3 == null) {
+      throw new IllegalArgumentException("integrations.comfyui and minimaxH3 are required");
     }
-    return new SystemSettings.Integrations(
-        toComfyui(comfyui),
-        toOpenCliHub(openCliHub),
-        toSeedance(seedance),
-        toGptImage2(gptImage2),
-        toMiniMaxH3(minimaxH3));
+    return new SystemSettings.Integrations(toComfyui(comfyui), toMiniMaxH3(minimaxH3));
   }
 
   private static SystemSettings.Comfyui toComfyui(SystemSettingsIntegrationsDTO.ComfyuiDTO dto) {
@@ -285,46 +272,6 @@ public class SystemSettingsCodec {
         requiredMillis(
             dto.getWebsocketTimeoutMillis(), "integrations.comfyui.websocketTimeoutMillis"),
         requiredMillis(dto.getMaxInputFileBytes(), "integrations.comfyui.maxInputFileBytes"));
-  }
-
-  private static SystemSettings.OpenCliHub toOpenCliHub(
-      SystemSettingsIntegrationsDTO.OpenCliHubDTO dto) {
-    return new SystemSettings.OpenCliHub(
-        requiredBoolean(dto.getEnabled(), "integrations.openCliHub.enabled"),
-        dto.getBaseUrl(),
-        requiredMillis(
-            dto.getConnectTimeoutMillis(), "integrations.openCliHub.connectTimeoutMillis"),
-        requiredMillis(
-            dto.getRequestTimeoutMillis(), "integrations.openCliHub.requestTimeoutMillis"),
-        requiredMillis(
-            dto.getLongPollTimeoutMillis(), "integrations.openCliHub.longPollTimeoutMillis"),
-        requiredInt(dto.getStreamBufferBytes(), "integrations.openCliHub.streamBufferBytes"),
-        requiredInt(dto.getMaxJsonResponseBytes(), "integrations.openCliHub.maxJsonResponseBytes"),
-        requiredInt(
-            dto.getMaxErrorResponseBytes(), "integrations.openCliHub.maxErrorResponseBytes"),
-        requiredInt(dto.getMaxOutputChars(), "integrations.openCliHub.maxOutputChars"));
-  }
-
-  private static SystemSettings.Seedance toSeedance(SystemSettingsIntegrationsDTO.SeedanceDTO dto) {
-    return new SystemSettings.Seedance(
-        requiredBoolean(dto.getEnabled(), "integrations.seedance.enabled"),
-        dto.getWorkspaceId(),
-        requiredInt(dto.getRetry(), "integrations.seedance.retry"),
-        requiredMillis(
-            dto.getHubExecutionTimeoutMillis(), "integrations.seedance.hubExecutionTimeoutMillis"),
-        requiredMillis(
-            dto.getStatusPollIntervalMillis(), "integrations.seedance.statusPollIntervalMillis"),
-        requiredMillis(dto.getMaxWaitMillis(), "integrations.seedance.maxWaitMillis"));
-  }
-
-  private static SystemSettings.GptImage2 toGptImage2(
-      SystemSettingsIntegrationsDTO.GptImage2DTO dto) {
-    return new SystemSettings.GptImage2(
-        requiredBoolean(dto.getPaidEnabled(), "integrations.gptImage2.paidEnabled"),
-        requiredInt(dto.getAskTimeoutSeconds(), "integrations.gptImage2.askTimeoutSeconds"),
-        requiredMillis(
-            dto.getHubExecutionTimeoutMillis(), "integrations.gptImage2.hubExecutionTimeoutMillis"),
-        requiredMillis(dto.getMaxWaitMillis(), "integrations.gptImage2.maxWaitMillis"));
   }
 
   private static SystemSettings.MiniMaxH3 toMiniMaxH3(
@@ -482,9 +429,6 @@ public class SystemSettingsCodec {
       SystemSettings.Integrations integrations) {
     SystemSettingsIntegrationsDTO dto = new SystemSettingsIntegrationsDTO();
     dto.setComfyui(fromComfyui(integrations.comfyui()));
-    dto.setOpenCliHub(fromOpenCliHub(integrations.openCliHub()));
-    dto.setSeedance(fromSeedance(integrations.seedance()));
-    dto.setGptImage2(fromGptImage2(integrations.gptImage2()));
     dto.setMinimaxH3(fromMiniMaxH3(integrations.minimaxH3()));
     return dto;
   }
@@ -498,45 +442,6 @@ public class SystemSettingsCodec {
     dto.setReadTimeoutMillis(comfyui.readTimeoutMillis());
     dto.setWebsocketTimeoutMillis(comfyui.websocketTimeoutMillis());
     dto.setMaxInputFileBytes(comfyui.maxInputFileBytes());
-    return dto;
-  }
-
-  private static SystemSettingsIntegrationsDTO.OpenCliHubDTO fromOpenCliHub(
-      SystemSettings.OpenCliHub openCliHub) {
-    SystemSettingsIntegrationsDTO.OpenCliHubDTO dto =
-        new SystemSettingsIntegrationsDTO.OpenCliHubDTO();
-    dto.setEnabled(openCliHub.enabled());
-    dto.setBaseUrl(openCliHub.baseUrl());
-    dto.setConnectTimeoutMillis(openCliHub.connectTimeoutMillis());
-    dto.setRequestTimeoutMillis(openCliHub.requestTimeoutMillis());
-    dto.setLongPollTimeoutMillis(openCliHub.longPollTimeoutMillis());
-    dto.setStreamBufferBytes(openCliHub.streamBufferBytes());
-    dto.setMaxJsonResponseBytes(openCliHub.maxJsonResponseBytes());
-    dto.setMaxErrorResponseBytes(openCliHub.maxErrorResponseBytes());
-    dto.setMaxOutputChars(openCliHub.maxOutputChars());
-    return dto;
-  }
-
-  private static SystemSettingsIntegrationsDTO.SeedanceDTO fromSeedance(
-      SystemSettings.Seedance seedance) {
-    SystemSettingsIntegrationsDTO.SeedanceDTO dto = new SystemSettingsIntegrationsDTO.SeedanceDTO();
-    dto.setEnabled(seedance.enabled());
-    dto.setWorkspaceId(seedance.workspaceId());
-    dto.setRetry(seedance.retry());
-    dto.setHubExecutionTimeoutMillis(seedance.hubExecutionTimeoutMillis());
-    dto.setStatusPollIntervalMillis(seedance.statusPollIntervalMillis());
-    dto.setMaxWaitMillis(seedance.maxWaitMillis());
-    return dto;
-  }
-
-  private static SystemSettingsIntegrationsDTO.GptImage2DTO fromGptImage2(
-      SystemSettings.GptImage2 gptImage2) {
-    SystemSettingsIntegrationsDTO.GptImage2DTO dto =
-        new SystemSettingsIntegrationsDTO.GptImage2DTO();
-    dto.setPaidEnabled(gptImage2.paidEnabled());
-    dto.setAskTimeoutSeconds(gptImage2.askTimeoutSeconds());
-    dto.setHubExecutionTimeoutMillis(gptImage2.hubExecutionTimeoutMillis());
-    dto.setMaxWaitMillis(gptImage2.maxWaitMillis());
     return dto;
   }
 

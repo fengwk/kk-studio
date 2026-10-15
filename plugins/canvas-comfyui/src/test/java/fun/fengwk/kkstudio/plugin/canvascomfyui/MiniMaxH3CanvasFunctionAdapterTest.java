@@ -121,12 +121,7 @@ class MiniMaxH3CanvasFunctionAdapterTest {
         SystemSettings.AiRuntime.DEFAULT,
         SystemSettings.Environment.DEFAULT,
         SystemSettings.Network.DEFAULT,
-        new SystemSettings.Integrations(
-            SystemSettings.Comfyui.DEFAULT,
-            SystemSettings.OpenCliHub.DEFAULT,
-            SystemSettings.Seedance.DEFAULT,
-            SystemSettings.GptImage2.DEFAULT,
-            minimaxH3),
+        new SystemSettings.Integrations(SystemSettings.Comfyui.DEFAULT, minimaxH3),
         SystemSettings.StorageMedia.DEFAULT,
         SystemSettings.Advanced.DEFAULT);
   }

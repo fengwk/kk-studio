@@ -108,6 +108,24 @@ services:
           - opencli-hub
           - comfyui
 
+  plugin-credential-init:
+    profiles: ["app"]
+    image: python:3.12-alpine
+    restart: "no"
+    user: "0:0"
+    entrypoint: ["python", "-c"]
+    command:
+      - >-
+        import os;
+        path = '/secrets/plugin-credential-key';
+        os.path.exists(path) or open(path, 'xb').write(os.urandom(32));
+        os.chown(path, 10001, 10001);
+        os.chmod(path, 0o400)
+    volumes:
+      - plugin-credential-key:/secrets
+    networks:
+      - canvas-test
+
   app:
     profiles: ["app"]
     build:
@@ -130,14 +148,19 @@ services:
       KK_STUDIO_CANVAS_RESOURCE_FFMPEG_BINARY: ffmpeg
       KK_STUDIO_CANVAS_RESOURCE_TEMP_DIR: /tmp
       KK_STUDIO_CANVAS_FUNCTION_FAKE_ENABLED: "true"
+      KK_STUDIO_PLUGINS_CREDENTIAL_KEY_FILE: /secrets/plugin-credential-key
     ports:
       - "127.0.0.1:${CANVAS_TEST_APP_PORT:-18088}:8080"
+    volumes:
+      - plugin-credential-key:/secrets:ro
     depends_on:
       postgres:
         condition: service_healthy
       minio:
         condition: service_healthy
       minio-init:
+        condition: service_completed_successfully
+      plugin-credential-init:
         condition: service_completed_successfully
       http-mock:
         condition: service_healthy
@@ -147,6 +170,7 @@ services:
 volumes:
   postgres-data:
   minio-data:
+  plugin-credential-key:
 
 networks:
   canvas-test:

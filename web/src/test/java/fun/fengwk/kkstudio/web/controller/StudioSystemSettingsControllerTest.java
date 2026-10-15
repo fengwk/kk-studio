@@ -51,7 +51,9 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.data.environment.maxResourceBytes").isString())
         .andExpect(jsonPath("$.data.network.proxyUrl").doesNotExist())
         .andExpect(jsonPath("$.data.network.noProxyHosts").value("localhost,127.*,::1"))
-        .andExpect(jsonPath("$.data.integrations.openCliHub.baseUrl").doesNotExist())
+        .andExpect(jsonPath("$.data.integrations.openCliHub").doesNotExist())
+        .andExpect(jsonPath("$.data.integrations.seedance").doesNotExist())
+        .andExpect(jsonPath("$.data.integrations.gptImage2").doesNotExist())
         .andExpect(jsonPath("$.data.advanced.applicationEventQueueCapacity").value(512))
         .andExpect(jsonPath("$.data.createTime").exists())
         .andExpect(jsonPath("$.data.updateTime").exists());
@@ -107,9 +109,9 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
         // field 最小结构：path/labelKey/type/nullable；min/max/options 由 server 表达。
         .andExpect(jsonPath("$.data.sections[0].groups[2].fields[0].type").value("INTEGER"))
         .andExpect(jsonPath("$.data.sections[0].groups[2].fields[0].min").value(1))
-        .andExpect(jsonPath("$.data.sections[4].groups[1].fields[3].max").value(1800000))
         // 领域上界映射：promptAgentName 受 MAX_LENGTH=64 约束。
-        .andExpect(jsonPath("$.data.sections[4].groups[4].fields[1].max").value(64))
+        .andExpect(jsonPath("$.data.sections[4].groups[1].fields[1].max").value(64))
+        .andExpect(jsonPath("$.data.sections[4].groups[1].fields[7].max").value(7200000))
         // ENUM options 由 server 表达。
         .andExpect(jsonPath("$.data.sections[0].groups[0].fields[1].type").value("ENUM"))
         .andExpect(
@@ -347,6 +349,25 @@ public class StudioSystemSettingsControllerTest extends WebPostgresTestSupport {
               update -> {
                 update.put("expectedVersion", "0");
                 invalid.accept(update);
+              });
+      mockMvc
+          .perform(put("/api/settings").contentType(MediaType.APPLICATION_JSON).content(body))
+          .andExpect(status().isBadRequest());
+    }
+    mockMvc
+        .perform(get("/api/settings"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.version").value("0"));
+  }
+
+  @Test
+  public void putWithLegacyOpenCliIntegrationsReturns400() throws Exception {
+    for (String legacyField : List.of("openCliHub", "seedance", "gptImage2")) {
+      String body =
+          bodyFromGet(
+              update -> {
+                update.put("expectedVersion", "0");
+                update.withObject("integrations").putObject(legacyField);
               });
       mockMvc
           .perform(put("/api/settings").contentType(MediaType.APPLICATION_JSON).content(body))
