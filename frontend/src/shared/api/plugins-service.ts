@@ -4,10 +4,13 @@ import type {
   PluginAuthPrepareDTO,
   PluginAuthPrepareRequestDTO,
   PluginConfigurationUpdateRequestDTO,
+  PluginConnectionCheckDTO,
+  PluginConnectionCheckRequestDTO,
   PluginDTO,
 } from '@/shared/api/contracts/ai-plugin'
 import {
   decodePluginAuthPrepareDTO,
+  decodePluginConnectionCheckDTO,
   decodePluginDTO,
   decodePluginList,
 } from '@/shared/api/ai-plugin-codec'
@@ -59,6 +62,21 @@ export function createPluginsService(client: HttpClient = apiClient) {
 
     disconnectAuth: (pluginId: string): Promise<void> =>
       client.delete(`/plugins/${encodeURIComponent(pluginId)}/auth`),
+
+    /**
+     * 显式只读连接检查：只向该 Plugin 的固定端点提交一次期望已应用坐标。
+     * 调用方只以用户显式操作触发，本方法不重试、不拼接任意路径或凭据。
+     */
+    checkConnection: async (
+      pluginId: string,
+      data: PluginConnectionCheckRequestDTO,
+    ): Promise<PluginConnectionCheckDTO> => {
+      const resp = await client.post<unknown>(
+        `/plugins/${encodeURIComponent(pluginId)}/connection-check`,
+        data,
+      )
+      return decodePluginConnectionCheckDTO(resp)
+    },
   }
 }
 

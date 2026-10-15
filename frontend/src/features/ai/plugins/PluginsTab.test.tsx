@@ -1,10 +1,12 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PluginsTab } from '@/features/ai/plugins/PluginsTab'
 import { pluginsService } from '@/shared/api/plugins-service'
-import type { PluginDTO } from '@/shared/api/contracts/ai-plugin'
+import { ApiError } from '@/shared/api/client'
+import { queryKeys } from '@/shared/lib/query-keys'
+import type { PluginConnectionCheckDTO, PluginDTO } from '@/shared/api/contracts/ai-plugin'
 
 vi.mock('@/shared/api/plugins-service', () => ({
   pluginsService: {
@@ -14,6 +16,7 @@ vi.mock('@/shared/api/plugins-service', () => ({
     completeAuth: vi.fn(),
     updateConfiguration: vi.fn(),
     disconnectAuth: vi.fn(),
+    checkConnection: vi.fn(),
   },
 }))
 
@@ -485,5 +488,360 @@ describe('PluginsTab', () => {
     await waitFor(() => {
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     })
+  })
+
+  function checkablePlugin(overrides: Partial<PluginDTO> = {}): PluginDTO {
+    return samplePlugin({
+      pluginId: 'opencli',
+      name: 'OpenCLI Probe',
+      status: 'CONNECTED',
+      region: 'CN',
+      connectionCheckSupported: true,
+      desiredEpoch: '14',
+      appliedEpoch: '14',
+      desiredRevision: '8',
+      appliedRevision: '8',
+      ...overrides,
+    })
+  }
+
+  function checkResult(
+    overrides: Partial<PluginConnectionCheckDTO> = {},
+  ): PluginConnectionCheckDTO {
+    return {
+      pluginId: 'opencli',
+      appliedEpoch: '14',
+      appliedRevision: '8',
+      checkedAt: 1772366400,
+      reachability: 'REACHABLE',
+      authentication: 'ACCEPTED',
+      browserSession: 'UNKNOWN',
+      ...overrides,
+    }
+  }
+
+  function deferred<T>() {
+    let resolve!: (value: T) => void
+    let reject!: (error: unknown) => void
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res
+      reject = rej
+    })
+    return { promise, resolve, reject }
+  }
+
+  function checkButton(name: string): HTMLElement {
+    return screen.getByRole('button', { name: `检查连接 ${name}` })
+  }
+
+  it('never issues a connection check from render, list load, or for instances without the capability', async () => {
+    vi.mocked(pluginsService.listPlugins).mockResolvedValue([
+      checkablePlugin(),
+      samplePlugin({ pluginId: 'unsupported', name: 'Unsupported Plugin' }),
+    ])
+
+    renderTab()
+
+    await waitFor(() => {
+      expect(screen.getByText('OpenCLI Probe')).toBeInTheDocument()
+      expect(screen.getByText('Unsupported Plugin')).toBeInTheDocument()
+    })
+    // 挂载、列表加载与渲染都不得触发检查。
+    expect(pluginsService.checkConnection).not.toHaveBeenCalled()
+    expect(checkButton('OpenCLI Probe')).toBeEnabled()
+    // 能力来自实例 metadata：未声明的实例连入口都不展示。
+    expect(
+      screen.queryByRole('button', { name: '检查连接 Unsupported Plugin' }),
+    ).not.toBeInTheDocument()
+
+    // 打开其它弹层同样不触发检查。
+    await userEvent.setup().click(
+      screen.getByRole('button', { name: '配置 Unsupported Plugin' }),
+    )
+    expect(await screen.findByRole('dialog')).toBeInTheDocument()
+    expect(pluginsService.checkConnection).not.toHaveBeenCalled()
+  })
+
+  it('disables the entry with an explanation while the local coordinates are unusable', async () => {
+    const user = userEvent.setup()
+    vi.mocked(pluginsService.listPlugins).mockResolvedValue([
+      checkablePlugin({ desiredEpoch: '15', applicationError: 'configuration is not applied yet' }),
+      checkablePlugin({
+        pluginId: 'no-applied',
+        name: 'No Applied Plugin',
+        appliedEpoch: null,
+        appliedRevision: null,
+      }),
+      checkablePlugin({
+        pluginId: 'zero-revision',
+        name: 'Zero Revision Plugin',
+        desiredRevision: '0',
+        appliedRevision: '0',
+      }),
+    ])
+
+    renderTab()
+
+    await waitFor(() => {
+      expect(screen.getByText('No Applied Plugin')).toBeInTheDocument()
+      expect(screen.getByText('Zero Revision Plugin')).toBeInTheDocument()
+    })
+
+    for (const name of ['OpenCLI Probe', 'No Applied Plugin', 'Zero Revision Plugin']) {
+      expect(checkButton(name)).toBeDisabled()
+    }
+    expect(screen.getByTestId('plugin-check-blocked-opencli')).toHaveTextContent('尚未应用当前配置')
+    expect(screen.getByTestId('plugin-check-blocked-no-applied')).toHaveTextContent('尚未应用当前配置')
+    expect(screen.getByTestId('plugin-check-blocked-zero-revision')).toHaveTextContent('尚未应用当前配置')
+
+    // 禁用入口绝不发出请求，也绝不提交 null 或 0 坐标。
+    await user.click(checkButton('No Applied Plugin'))
+    expect(pluginsService.checkConnection).not.toHaveBeenCalled()
+  })
+
+  it('runs exactly one POST with the applied coordinates and shows the three dimensions independently', async () => {
+    const user = userEvent.setup()
+    vi.mocked(pluginsService.listPlugins).mockResolvedValue([checkablePlugin()])
+    const pending = deferred<PluginConnectionCheckDTO>()
+    vi.mocked(pluginsService.checkConnection).mockReturnValue(pending.promise)
+
+    renderTab()
+    await waitFor(() => expect(screen.getByText('OpenCLI Probe')).toBeInTheDocument())
+
+    const opener = checkButton('OpenCLI Probe')
+    await user.click(opener)
+
+    expect(pluginsService.checkConnection).toHaveBeenCalledTimes(1)
+    expect(pluginsService.checkConnection).toHaveBeenCalledWith('opencli', {
+      expectedEpoch: '14',
+      expectedRevision: '8',
+    })
+
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByRole('heading', { name: '连接检查：OpenCLI Probe' })).toBeInTheDocument()
+    expect(within(dialog).getByTestId('plugin-check-pending')).toBeInTheDocument()
+    expect(within(dialog).getByTestId('plugin-check-coordinates')).toHaveTextContent('Epoch 14 · Rev 8')
+
+    // 进行中的检查禁用入口并阻止关闭，重复激活不产生第二次请求。
+    expect(opener).toBeDisabled()
+    expect(opener).toHaveAttribute('aria-busy', 'true')
+    fireEvent.click(opener)
+    fireEvent.click(within(dialog).getByTestId('plugin-check-close'))
+    expect(pluginsService.checkConnection).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+
+    await act(async () => {
+      pending.resolve(checkResult())
+    })
+
+    await waitFor(() => {
+      expect(within(dialog).getByTestId('plugin-check-reachability')).toHaveTextContent('可达')
+    })
+    expect(within(dialog).getByTestId('plugin-check-authentication')).toHaveTextContent('凭据已接受')
+    expect(within(dialog).getByTestId('plugin-check-browser-session')).toHaveTextContent(
+      '未知（本检查不核验浏览器登录态）',
+    )
+    expect(within(dialog).getByTestId('plugin-check-checked-at')).toHaveTextContent(
+      new Date(1772366400 * 1000).toLocaleString('zh-CN'),
+    )
+    // 三个维度各自独立呈现，绝不把认证结论说成浏览器登录。
+    expect(within(dialog).getByTestId('plugin-check-authentication')).not.toHaveTextContent('浏览器')
+    expect(within(dialog).getByTestId('plugin-check-browser-session')).not.toHaveTextContent('已登录')
+    expect(pluginsService.checkConnection).toHaveBeenCalledTimes(1)
+  })
+
+  it('discards a late response for a plugin the user has left', async () => {
+    const user = userEvent.setup()
+    vi.mocked(pluginsService.listPlugins).mockResolvedValue([
+      checkablePlugin(),
+      checkablePlugin({ pluginId: 'other', name: 'Other Plugin' }),
+    ])
+    const first = deferred<PluginConnectionCheckDTO>()
+    const second = deferred<PluginConnectionCheckDTO>()
+    vi.mocked(pluginsService.checkConnection).mockReturnValueOnce(first.promise)
+    vi.mocked(pluginsService.checkConnection).mockReturnValueOnce(second.promise)
+
+    renderTab()
+    await waitFor(() => expect(screen.getByText('Other Plugin')).toBeInTheDocument())
+
+    await user.click(checkButton('OpenCLI Probe'))
+    await user.click(checkButton('Other Plugin'))
+    expect(pluginsService.checkConnection).toHaveBeenNthCalledWith(2, 'other', {
+      expectedEpoch: '14',
+      expectedRevision: '8',
+    })
+
+    // 迟到的旧插件响应必须被丢弃：既不显示维度，也不冒充当前检查的健康状态。
+    await act(async () => {
+      first.resolve(checkResult())
+    })
+    const dialog = screen.getByRole('dialog')
+    expect(within(dialog).queryByTestId('plugin-check-reachability')).toBeNull()
+    expect(within(dialog).getByTestId('plugin-check-pending')).toBeInTheDocument()
+
+    await act(async () => {
+      second.resolve(checkResult({ pluginId: 'other' }))
+    })
+    await waitFor(() => {
+      expect(within(dialog).getByTestId('plugin-check-reachability')).toHaveTextContent('可达')
+    })
+    expect(pluginsService.checkConnection).toHaveBeenCalledTimes(2)
+  })
+
+  it('rejects a response whose identity or coordinates differ from the request', async () => {
+    const user = userEvent.setup()
+    vi.mocked(pluginsService.listPlugins).mockResolvedValue([checkablePlugin()])
+
+    // 跨 ID：服务端回了别的安装身份。
+    vi.mocked(pluginsService.checkConnection).mockResolvedValueOnce(
+      checkResult({ pluginId: 'someone-else' }),
+    )
+    renderTab()
+    await waitFor(() => expect(screen.getByText('OpenCLI Probe')).toBeInTheDocument())
+    await user.click(checkButton('OpenCLI Probe'))
+
+    let dialog = await screen.findByRole('dialog')
+    await waitFor(() => {
+      expect(within(dialog).getByTestId('plugin-check-mismatch')).toHaveTextContent(
+        '结果与本次请求不一致，已丢弃。',
+      )
+    })
+    expect(within(dialog).queryByTestId('plugin-check-reachability')).toBeNull()
+
+    // 跨坐标：同 ID 但坐标与本次请求不同。
+    await user.click(within(dialog).getByTestId('plugin-check-close'))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    vi.mocked(pluginsService.checkConnection).mockResolvedValueOnce(
+      checkResult({ appliedEpoch: '99' }),
+    )
+    await user.click(checkButton('OpenCLI Probe'))
+
+    dialog = await screen.findByRole('dialog')
+    await waitFor(() => {
+      expect(within(dialog).getByTestId('plugin-check-mismatch')).toBeInTheDocument()
+    })
+    expect(within(dialog).queryByTestId('plugin-check-authentication')).toBeNull()
+  })
+
+  it('shows a completed result only as stale once the catalogue applies new coordinates', async () => {
+    const user = userEvent.setup()
+    vi.mocked(pluginsService.listPlugins).mockResolvedValue([checkablePlugin()])
+    vi.mocked(pluginsService.checkConnection).mockResolvedValue(checkResult())
+
+    renderTab()
+    await waitFor(() => expect(screen.getByText('OpenCLI Probe')).toBeInTheDocument())
+    await user.click(checkButton('OpenCLI Probe'))
+
+    const dialog = await screen.findByRole('dialog')
+    await waitFor(() => {
+      expect(within(dialog).getByTestId('plugin-check-reachability')).toBeInTheDocument()
+    })
+
+    // 异步换版：列表刷新为新的已应用坐标。
+    vi.mocked(pluginsService.listPlugins).mockResolvedValue([
+      checkablePlugin({ desiredEpoch: '15', appliedEpoch: '15', desiredRevision: '9', appliedRevision: '9' }),
+    ])
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.plugins.all })
+    })
+
+    await waitFor(() => {
+      expect(within(dialog).getByTestId('plugin-check-stale')).toHaveTextContent('此后配置已改变')
+    })
+    expect(within(dialog).queryByTestId('plugin-check-reachability')).toBeNull()
+    expect(within(dialog).queryByTestId('plugin-check-authentication')).toBeNull()
+    // 陈旧结果绝不自动重查。
+    expect(pluginsService.checkConnection).toHaveBeenCalledTimes(1)
+  })
+
+  it('drops the result on close and never probes again on its own', async () => {
+    const user = userEvent.setup()
+    vi.mocked(pluginsService.listPlugins).mockResolvedValue([checkablePlugin()])
+    vi.mocked(pluginsService.checkConnection).mockResolvedValue(checkResult())
+
+    renderTab()
+    await waitFor(() => expect(screen.getByText('OpenCLI Probe')).toBeInTheDocument())
+    await user.click(checkButton('OpenCLI Probe'))
+
+    const dialog = await screen.findByRole('dialog')
+    await waitFor(() => {
+      expect(within(dialog).getByTestId('plugin-check-reachability')).toBeInTheDocument()
+    })
+
+    await user.click(within(dialog).getByTestId('plugin-check-close'))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(screen.queryByTestId('plugin-check-reachability')).toBeNull()
+
+    // 关闭后列表换版：既不复活旧结果，也不自动重新检查。
+    vi.mocked(pluginsService.listPlugins).mockResolvedValue([checkablePlugin({ appliedEpoch: '15', desiredEpoch: '15' })])
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.plugins.all })
+    })
+    expect(screen.queryByTestId('plugin-check-stale')).toBeNull()
+    expect(screen.queryByTestId('plugin-check-reachability')).toBeNull()
+    expect(pluginsService.checkConnection).toHaveBeenCalledTimes(1)
+  })
+
+  it('reports a 409 as a conflict, refreshes the list, and never retries the check', async () => {
+    const user = userEvent.setup()
+    vi.mocked(pluginsService.listPlugins).mockResolvedValue([checkablePlugin()])
+    vi.mocked(pluginsService.checkConnection).mockRejectedValueOnce(
+      new ApiError('配置已改变', 409),
+    )
+
+    renderTab()
+    await waitFor(() => expect(screen.getByText('OpenCLI Probe')).toBeInTheDocument())
+    await user.click(checkButton('OpenCLI Probe'))
+
+    const dialog = await screen.findByRole('dialog')
+    await waitFor(() => {
+      expect(within(dialog).getByTestId('plugin-check-conflict')).toHaveTextContent(
+        '配置已改变，请刷新列表后重新检查。',
+      )
+    })
+    // 冲突只刷新列表，绝不自动重发检查。
+    await waitFor(() => expect(pluginsService.listPlugins).toHaveBeenCalledTimes(2))
+    expect(pluginsService.checkConnection).toHaveBeenCalledTimes(1)
+    expect(within(dialog).queryByTestId('plugin-check-reachability')).toBeNull()
+  })
+
+  it('never lets a rejected or unauthorized check overwrite the local authentication projection', async () => {
+    const user = userEvent.setup()
+    vi.mocked(pluginsService.listPlugins).mockResolvedValue([checkablePlugin()])
+
+    // 远端明确拒绝本次凭据：本地认证状态不受影响。
+    vi.mocked(pluginsService.checkConnection).mockResolvedValueOnce(
+      checkResult({ authentication: 'REJECTED', reachability: 'REACHABLE' }),
+    )
+    renderTab()
+    await waitFor(() => expect(screen.getByText('OpenCLI Probe')).toBeInTheDocument())
+    await user.click(checkButton('OpenCLI Probe'))
+
+    let dialog = await screen.findByRole('dialog')
+    await waitFor(() => {
+      expect(within(dialog).getByTestId('plugin-check-authentication')).toHaveTextContent(
+        '凭据被拒绝',
+      )
+    })
+    expect(screen.getByTestId('plugin-status-opencli')).toHaveTextContent('已连接')
+    expect(pluginsService.listPlugins).toHaveBeenCalledTimes(1)
+
+    await user.click(within(dialog).getByTestId('plugin-check-close'))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+
+    // 传输层 401 只作为可控失败呈现，既不刷新列表也不改写本地认证投影。
+    vi.mocked(pluginsService.checkConnection).mockRejectedValueOnce(
+      new ApiError('Unauthorized', 401),
+    )
+    await user.click(checkButton('OpenCLI Probe'))
+
+    dialog = await screen.findByRole('dialog')
+    await waitFor(() => {
+      expect(within(dialog).getByTestId('plugin-check-failed')).toHaveTextContent('Unauthorized')
+    })
+    expect(screen.getByTestId('plugin-status-opencli')).toHaveTextContent('已连接')
+    expect(within(dialog).queryByTestId('plugin-check-conflict')).toBeNull()
+    expect(pluginsService.listPlugins).toHaveBeenCalledTimes(1)
+    expect(pluginsService.checkConnection).toHaveBeenCalledTimes(2)
   })
 })
