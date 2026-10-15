@@ -18,6 +18,8 @@ const ID: UUIDString = '11111111-1111-4111-8111-111111111111'
 const CANVAS_ID: UUIDString = '22222222-2222-4222-8222-222222222222'
 const NODE_ID: UUIDString = '33333333-3333-4333-8333-333333333333'
 const REQUEST_ID: UUIDString = '55555555-5555-4555-8555-555555555555'
+/** 目录版本夹具：start 必须回传同形状 expectedVersion，cancel 只发 requestId。 */
+const FUNCTION_VERSION = { catalogEpoch: '9', definitionFingerprint: 'e'.repeat(64) }
 
 const fetchMock = vi.fn<typeof fetch>()
 
@@ -87,6 +89,7 @@ describe('studio service transport adapter', () => {
       .mockResolvedValueOnce(response(envelope(snapshotPayload())))
       .mockResolvedValueOnce(response(envelope(patchPayload())))
       .mockResolvedValueOnce(response(envelope([{
+        version: FUNCTION_VERSION,
         name: 'image',
         description: 'Image',
         outputs: [{ kind: 'IMAGE', name: null }],
@@ -112,8 +115,10 @@ describe('studio service transport adapter', () => {
     expect(await listCanvasFunctions()).toHaveLength(1)
     expect((await getCanvasResourceOriginalUrl(CANVAS_ID, ID)).method).toBe('GET')
     expect((await getCanvasResourcePreviewUrl(CANVAS_ID, ID)).url).toContain('preview')
-    expect((await startCanvasFunctionRun(CANVAS_ID, NODE_ID, { requestId: REQUEST_ID })).status)
-      .toBe('RUNNING')
+    expect((await startCanvasFunctionRun(CANVAS_ID, NODE_ID, {
+      requestId: REQUEST_ID,
+      expectedVersion: FUNCTION_VERSION,
+    })).status).toBe('RUNNING')
     expect((await cancelCanvasFunctionRun(CANVAS_ID, NODE_ID, { requestId: REQUEST_ID })).status)
       .toBe('CANCELLED')
     expect((await getCanvasFunctionRun(CANVAS_ID, NODE_ID)).status).toBe('SUCCEEDED')
@@ -137,7 +142,10 @@ describe('studio service transport adapter', () => {
     await createCanvas('Named', { signal: controller.signal })
     await getCanvas(CANVAS_ID, { signal: controller.signal })
     await postCanvasCommands(CANVAS_ID, { idempotencyKey: ID, commands: [] }, { signal: controller.signal })
-    await startCanvasFunctionRun(CANVAS_ID, NODE_ID, { requestId: REQUEST_ID }, { signal: controller.signal })
+    await startCanvasFunctionRun(CANVAS_ID, NODE_ID, {
+      requestId: REQUEST_ID,
+      expectedVersion: FUNCTION_VERSION,
+    }, { signal: controller.signal })
     await getCanvasFunctionRun(CANVAS_ID, NODE_ID, { signal: controller.signal })
     await cancelCanvasFunctionRun(CANVAS_ID, NODE_ID, { requestId: REQUEST_ID }, { signal: controller.signal })
 
@@ -159,7 +167,7 @@ describe('studio service transport adapter', () => {
     expect(calls[3]).toMatchObject({
       url: `/api/canvases/${CANVAS_ID}/nodes/${NODE_ID}/function-run`,
       method: 'POST',
-      body: JSON.stringify({ requestId: REQUEST_ID }),
+      body: JSON.stringify({ requestId: REQUEST_ID, expectedVersion: FUNCTION_VERSION }),
     })
     expect(calls[4]).toMatchObject({
       url: `/api/canvases/${CANVAS_ID}/nodes/${NODE_ID}/function-run`,

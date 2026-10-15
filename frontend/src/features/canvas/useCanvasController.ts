@@ -60,6 +60,7 @@ import {
 import { useCanvasKeyboard } from '@/features/canvas/useCanvasKeyboard'
 import type {
   CanvasCommandDTO,
+  CanvasFunctionVersionDTO,
   CanvasTransformDTO,
   UUIDString,
 } from '@/shared/api/contracts/studio'
@@ -725,6 +726,29 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
       },
       getDraftGeneration: (nodeId) => draftsRef.current[nodeId]?.generation,
     })
+  /**
+   * 解析 node 当前将被执行函数在用户所见目录中的版本。
+   *
+   * 纯同步、无 await：start 在点击那一刻调用，随后即使目录 re-fetch/推进也不替换已捕获版本；
+   * 返回值是脱离查询缓存的新对象（调用方随后也不会被目录原地改写影响）。
+   * 目录中没有对应定义时返回 null，调用方必须 0 flush / 0 POST。
+   */
+  const resolveFunctionVersion = useCallback((nodeId: UUIDString): CanvasFunctionVersionDTO | null => {
+    const snapshot = queueRef.current?.currentSnapshot() ?? snapshotQuery.data
+    const functionName = draftsRef.current[nodeId]?.function?.name
+      ?? snapshot?.nodes.find((node) => node.id === nodeId)?.function?.name
+    if (!functionName) {
+      return null
+    }
+    const version = modelsQuery.data?.find((item) => item.name === functionName)?.version
+    return version
+      ? {
+          catalogEpoch: version.catalogEpoch,
+          definitionFingerprint: version.definitionFingerprint,
+        }
+      : null
+  }, [modelsQuery.data, snapshotQuery.data])
+
   const {
     startFunctionRun,
     cancelFunctionRun,
@@ -737,6 +761,7 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     queryClient,
     setToast,
     flushFunctionConfig,
+    resolveFunctionVersion,
   })
 
   useEffect(() => () => {
