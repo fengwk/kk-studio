@@ -3,6 +3,8 @@ package fun.fengwk.kkstudio.platform.plugin.resource;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -23,6 +25,8 @@ import org.mockito.ArgumentCaptor;
 import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableException;
+import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableReason;
 import fun.fengwk.kkstudio.platform.plugin.PluginProperties;
 import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
@@ -50,6 +54,7 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.stream.Stream;
 
@@ -312,19 +317,19 @@ class StoragePluginResourceGatewayTest {
 
     assertThrows(
         PluginResourceUnavailableException.class,
-        () -> gateway.stageRemoteMedia(nonHttps, PluginMediaFamily.IMAGE, "test.png"));
+        () -> stageRemoteMedia(nonHttps, PluginMediaFamily.IMAGE, "test.png"));
     assertThrows(
         PluginResourceUnavailableException.class,
-        () -> gateway.stageRemoteMedia(withUserInfo, PluginMediaFamily.IMAGE, "test.png"));
+        () -> stageRemoteMedia(withUserInfo, PluginMediaFamily.IMAGE, "test.png"));
     assertThrows(
         PluginResourceUnavailableException.class,
-        () -> gateway.stageRemoteMedia(withFragment, PluginMediaFamily.IMAGE, "test.png"));
+        () -> stageRemoteMedia(withFragment, PluginMediaFamily.IMAGE, "test.png"));
     assertThrows(
         PluginResourceUnavailableException.class,
-        () -> gateway.stageRemoteMedia(nonAbsolute, PluginMediaFamily.IMAGE, "test.png"));
+        () -> stageRemoteMedia(nonAbsolute, PluginMediaFamily.IMAGE, "test.png"));
     assertThrows(
         PluginResourceUnavailableException.class,
-        () -> gateway.stageRemoteMedia(null, PluginMediaFamily.IMAGE, "test.png"));
+        () -> stageRemoteMedia(null, PluginMediaFamily.IMAGE, "test.png"));
 
     assertEquals(0, transport.getGetCallCount());
   }
@@ -343,7 +348,7 @@ class StoragePluginResourceGatewayTest {
     PluginResourceUnavailableException exception =
         assertThrows(
             PluginResourceUnavailableException.class,
-            () -> gateway.stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "pic.png"));
+            () -> stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "pic.png"));
     assertTrue(exception.getMessage().contains("responded with status 302"));
     assertEquals(1, transport.getGetCallCount());
   }
@@ -358,7 +363,7 @@ class StoragePluginResourceGatewayTest {
     PluginResourceUnavailableException exception =
         assertThrows(
             PluginResourceUnavailableException.class,
-            () -> gateway.stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "pic.png"));
+            () -> stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "pic.png"));
     assertTrue(exception.getMessage().contains("responded with status " + status));
   }
 
@@ -376,7 +381,7 @@ class StoragePluginResourceGatewayTest {
     PluginResourceUnavailableException exception =
         assertThrows(
             PluginResourceUnavailableException.class,
-            () -> gateway.stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "pic.png"));
+            () -> stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "pic.png"));
     assertTrue(exception.getMessage().contains("more bytes than this deployment can stage"));
     assertFalse(body.isReadInvoked(), "Body should not have been read");
     assertTrue(body.isClosed(), "Body stream must have been closed");
@@ -396,7 +401,7 @@ class StoragePluginResourceGatewayTest {
     PluginResourceUnavailableException exception =
         assertThrows(
             PluginResourceUnavailableException.class,
-            () -> gateway.stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "pic.png"));
+            () -> stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "pic.png"));
     assertTrue(exception.getMessage().contains("exceeds the configured staging byte budget"));
     assertTempDirClean();
   }
@@ -412,7 +417,7 @@ class StoragePluginResourceGatewayTest {
     PluginResourceUnavailableException underEx =
         assertThrows(
             PluginResourceUnavailableException.class,
-            () -> gateway.stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "pic.png"));
+            () -> stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "pic.png"));
     assertTrue(underEx.getMessage().contains("content-length does not match"));
     assertTempDirClean();
 
@@ -421,7 +426,7 @@ class StoragePluginResourceGatewayTest {
     PluginResourceUnavailableException overEx =
         assertThrows(
             PluginResourceUnavailableException.class,
-            () -> gateway.stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "pic.png"));
+            () -> stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "pic.png"));
     assertTrue(overEx.getMessage().contains("content-length does not match"));
     assertTempDirClean();
   }
@@ -441,7 +446,7 @@ class StoragePluginResourceGatewayTest {
     byte[] exactData = createPngData((int) maxBytes);
     transport.setGetResponse(
         200, Map.of("content-length", List.of(String.valueOf(maxBytes))), exactData);
-    ResourceRef ref = gateway.stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "pic.png");
+    ResourceRef ref = stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "pic.png");
     assertEquals(maxBytes, ref.size());
     assertTempDirClean();
 
@@ -451,7 +456,7 @@ class StoragePluginResourceGatewayTest {
         200, Map.of("content-length", List.of(String.valueOf(maxBytes + 1))), plusOneData);
     assertThrows(
         PluginResourceUnavailableException.class,
-        () -> gateway.stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "pic.png"));
+        () -> stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "pic.png"));
     assertTempDirClean();
   }
 
@@ -459,14 +464,15 @@ class StoragePluginResourceGatewayTest {
   @Test
   void stageRemoteMediaRejectsNonNumericContentLength() throws IOException {
     URI uri = URI.create("https://media.example.com/pic.png");
-    transport.setGetResponse(
-        200, Map.of("content-length", List.of("not-a-number")), createPngData(100));
+    TrackedInputStream body = new TrackedInputStream(createPngData(100));
+    transport.setGetResponse(200, Map.of("content-length", List.of("not-a-number")), body);
 
     PluginResourceUnavailableException exception =
         assertThrows(
             PluginResourceUnavailableException.class,
-            () -> gateway.stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "pic.png"));
+            () -> stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "pic.png"));
     assertTrue(exception.getMessage().contains("content-length is not a number"));
+    assertTrue(body.isClosed(), "响应头不合法时仍须关闭下载响应体");
     assertTempDirClean();
   }
 
@@ -483,7 +489,7 @@ class StoragePluginResourceGatewayTest {
 
     transport.setGetResponse(
         200, Map.of("content-length", List.of(String.valueOf(pngData.length))), pngData);
-    ResourceRef ref = gateway.stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "pic.png");
+    ResourceRef ref = stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "pic.png");
 
     assertEquals(pngData.length, ref.size());
     assertEquals(expectedSha256, ref.sha256());
@@ -537,7 +543,7 @@ class StoragePluginResourceGatewayTest {
     PluginResourceUnavailableException exception =
         assertThrows(
             PluginResourceUnavailableException.class,
-            () -> gateway.stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "pic.png"));
+            () -> stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "pic.png"));
     assertTrue(exception.getMessage().contains("exceeded the response deadline"));
     assertTempDirClean();
   }
@@ -587,7 +593,7 @@ class StoragePluginResourceGatewayTest {
     PluginResourceUnavailableException exception =
         assertThrows(
             PluginResourceUnavailableException.class,
-            () -> gateway.stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "stalled.png"));
+            () -> stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "stalled.png"));
     long elapsedMillis = (System.nanoTime() - startedNanos) / 1_000_000L;
 
     assertTrue(exception.getMessage().contains("exceeded the response deadline"));
@@ -613,7 +619,7 @@ class StoragePluginResourceGatewayTest {
     PluginResourceUnavailableException exception =
         assertThrows(
             PluginResourceUnavailableException.class,
-            () -> gateway.stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "sound.wav"));
+            () -> stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "sound.wav"));
     assertTrue(exception.getMessage().contains("remote media type is not the declared image"));
     assertTempDirClean();
   }
@@ -635,7 +641,7 @@ class StoragePluginResourceGatewayTest {
             "content-type", List.of("Text/Plain; charset=UTF-8")),
         textData);
 
-    ResourceRef ref = gateway.stageRemoteMedia(uri, PluginMediaFamily.DOCUMENT, "data.txt");
+    ResourceRef ref = stageRemoteMedia(uri, PluginMediaFamily.DOCUMENT, "data.txt");
     assertEquals("text/plain", ref.mediaType());
     assertTempDirClean();
   }
@@ -656,7 +662,7 @@ class StoragePluginResourceGatewayTest {
     PluginResourceUnavailableException exception =
         assertThrows(
             PluginResourceUnavailableException.class,
-            () -> gateway.stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "data.bin"));
+            () -> stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "data.bin"));
     assertTrue(exception.getMessage().contains("remote media type is not the declared image"));
     assertTempDirClean();
   }
@@ -673,7 +679,7 @@ class StoragePluginResourceGatewayTest {
     PluginResourceUnavailableException exception =
         assertThrows(
             PluginResourceUnavailableException.class,
-            () -> gateway.stageRemoteMedia(uri, PluginMediaFamily.DOCUMENT, "mystery"));
+            () -> stageRemoteMedia(uri, PluginMediaFamily.DOCUMENT, "mystery"));
     assertTrue(exception.getMessage().contains("cannot determine remote media type"));
     assertTempDirClean();
   }
@@ -695,7 +701,7 @@ class StoragePluginResourceGatewayTest {
     transport.setGetResponse(
         200, Map.of("content-length", List.of(String.valueOf(pngData.length))), pngData);
 
-    ResourceRef ref = gateway.stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "pic.png");
+    ResourceRef ref = stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "pic.png");
 
     assertEquals(ResourceRef.blobUploadUri(uploadId), ref.uri());
     assertEquals((long) pngData.length, ref.size());
@@ -749,7 +755,7 @@ class StoragePluginResourceGatewayTest {
         200, Map.of("content-length", List.of(String.valueOf(pngData.length))), pngData);
     transport.setPutStatus(200);
 
-    ResourceRef ref = gateway.stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "pic.png");
+    ResourceRef ref = stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "pic.png");
 
     assertEquals(ResourceRef.blobUploadUri(uploadId), ref.uri());
     assertEquals(1, transport.getPutCallCount());
@@ -792,7 +798,7 @@ class StoragePluginResourceGatewayTest {
     PluginResourceUnavailableException exception =
         assertThrows(
             PluginResourceUnavailableException.class,
-            () -> gateway.stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "pic.png"));
+            () -> stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "pic.png"));
     assertTrue(exception.getMessage().contains("unexpected method"));
     verify(storageUploadService).delete(uploadId);
     assertTempDirClean();
@@ -818,7 +824,7 @@ class StoragePluginResourceGatewayTest {
     PluginResourceUnavailableException exception =
         assertThrows(
             PluginResourceUnavailableException.class,
-            () -> gateway.stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "pic.png"));
+            () -> stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "pic.png"));
     assertTrue(exception.getMessage().contains("must not carry userinfo"));
     verify(storageUploadService).delete(uploadId);
     assertTempDirClean();
@@ -846,7 +852,7 @@ class StoragePluginResourceGatewayTest {
     PluginResourceUnavailableException exception =
         assertThrows(
             PluginResourceUnavailableException.class,
-            () -> gateway.stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "pic.png"));
+            () -> stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "pic.png"));
     assertTrue(exception.getMessage().contains("responded with status " + putStatus));
     verify(storageUploadService).delete(uploadId);
     assertTempDirClean();
@@ -879,7 +885,7 @@ class StoragePluginResourceGatewayTest {
                 .build());
     assertThrows(
         PluginResourceUnavailableException.class,
-        () -> gateway.stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "pic.png"));
+        () -> stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "pic.png"));
     verify(storageUploadService).delete(uploadId);
     assertTempDirClean();
 
@@ -888,7 +894,7 @@ class StoragePluginResourceGatewayTest {
         .thenThrow(new RuntimeException("Checksum verify failed in storage"));
     assertThrows(
         PluginResourceUnavailableException.class,
-        () -> gateway.stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "pic.png"));
+        () -> stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "pic.png"));
     assertTempDirClean();
   }
 
@@ -906,7 +912,7 @@ class StoragePluginResourceGatewayTest {
     PluginResourceUnavailableException exception =
         assertThrows(
             PluginResourceUnavailableException.class,
-            () -> gateway.stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "pic.png"));
+            () -> stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "pic.png"));
     assertTrue(exception.getMessage().contains("cannot reserve a staging upload"));
     verify(storageUploadService, never()).delete(any());
     assertEquals(0, transport.getPutCallCount());
@@ -938,7 +944,7 @@ class StoragePluginResourceGatewayTest {
     PluginResourceUnavailableException exception =
         assertThrows(
             PluginResourceUnavailableException.class,
-            () -> gateway.stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "pic.png"));
+            () -> stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "pic.png"));
     assertTrue(exception.getMessage().contains("responded with status 500"));
     assertTempDirClean();
   }
@@ -961,29 +967,28 @@ class StoragePluginResourceGatewayTest {
 
     // 路径剥离
     ResourceRef pathRef =
-        gateway.stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "/var/log/upload/avatar.png");
+        stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "/var/log/upload/avatar.png");
     assertEquals("avatar.png", pathRef.name());
 
     // Windows 路径剥离
     ResourceRef winRef =
-        gateway.stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "C:\\Users\\test\\my_photo.png");
+        stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "C:\\Users\\test\\my_photo.png");
     assertEquals("my_photo.png", winRef.name());
 
     // 控制字符替换为下划线
-    ResourceRef controlRef =
-        gateway.stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "photo\r\n\tname.png");
+    ResourceRef controlRef = stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "photo\r\n\tname.png");
     assertEquals("photo___name.png", controlRef.name());
 
     // 空/空白名称回退为 media.png
-    ResourceRef blankRef = gateway.stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "   ");
+    ResourceRef blankRef = stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "   ");
     assertEquals("media.png", blankRef.name());
 
-    ResourceRef nullRef = gateway.stageRemoteMedia(uri, PluginMediaFamily.IMAGE, null);
+    ResourceRef nullRef = stageRemoteMedia(uri, PluginMediaFamily.IMAGE, null);
     assertEquals("media.png", nullRef.name());
 
     // 超长文件名截断（baseName 截断到 120，随后按需追加扩展名）
     String longName = "a".repeat(200);
-    ResourceRef longRef = gateway.stageRemoteMedia(uri, PluginMediaFamily.IMAGE, longName);
+    ResourceRef longRef = stageRemoteMedia(uri, PluginMediaFamily.IMAGE, longName);
     assertTrue(longRef.name().length() <= 130);
     assertTrue(longRef.name().startsWith("a".repeat(120)));
     assertEquals("a".repeat(120) + ".png", longRef.name());
@@ -1004,18 +1009,116 @@ class StoragePluginResourceGatewayTest {
         200, Map.of("content-length", List.of(String.valueOf(pngData.length))), pngData);
 
     // 无扩展名，补 .png
-    ResourceRef noExtRef = gateway.stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "myavatar");
+    ResourceRef noExtRef = stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "myavatar");
     assertEquals("myavatar.png", noExtRef.name());
 
     // 已有扩展名，保留原有扩展名（即使与 MIME 略有差异）
-    ResourceRef hasExtRef = gateway.stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "myavatar.jpeg");
+    ResourceRef hasExtRef = stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "myavatar.jpeg");
     assertEquals("myavatar.jpeg", hasExtRef.name());
 
     assertTempDirClean();
   }
 
   // =========================================================================
-  // 6. 资源释放（close）
+  // 7. 每请求权威授权围栏（beforeRequest）
+  // =========================================================================
+
+  /** 下载 GET 出网前必须执行宿主授权检查；检查失败时不得发出下载请求，且不留临时文件。 */
+  @Test
+  void stageRemoteMediaChecksBeforeRequestBeforeGetAndSkipsNetworkWhenRevoked() throws IOException {
+    AtomicInteger checks = new AtomicInteger();
+    PluginCredentialUnavailableException revoked =
+        new PluginCredentialUnavailableException(
+            PluginCredentialUnavailableReason.REAUTH_REQUIRED, "credential revoked");
+
+    PluginCredentialUnavailableException thrown =
+        assertThrows(
+            PluginCredentialUnavailableException.class,
+            () ->
+                gateway.stageRemoteMedia(
+                    URI.create("https://media.example.com/pic.png"),
+                    PluginMediaFamily.IMAGE,
+                    "pic.png",
+                    () -> {
+                      checks.incrementAndGet();
+                      throw revoked;
+                    }));
+
+    assertSame(revoked, thrown, "beforeRequest 失败必须保持 PluginCredentialUnavailableException 类型");
+    assertEquals(1, checks.get(), "下载 GET 前必须恰好执行一次授权检查");
+    assertEquals(0, transport.getGetCallCount(), "授权失败不得发出下载请求");
+    assertTempDirClean();
+  }
+
+  /** 下载完成后授权被撤销：PUT 前重新检查失败，不发上传请求，并清理已 reserve 上传与临时文件。 */
+  @Test
+  void stageRemoteMediaRevokedAfterGetSkipsPutAndCleansReservationAndTemp() throws IOException {
+    URI uri = URI.create("https://media.example.com/pic.png");
+    byte[] pngData = createPngData(300);
+    UUID uploadId = UUID.randomUUID();
+    StoragePresignedUrlDTO presignedPut =
+        StoragePresignedUrlDTO.builder()
+            .method("PUT")
+            .url("https://s3.example.com/uploads/" + uploadId)
+            .build();
+    mockReservePending(uploadId, presignedPut);
+    transport.setGetResponse(
+        200, Map.of("content-length", List.of(String.valueOf(pngData.length))), pngData);
+
+    AtomicInteger checks = new AtomicInteger();
+    PluginCredentialUnavailableException revoked =
+        new PluginCredentialUnavailableException(
+            PluginCredentialUnavailableReason.REAUTH_REQUIRED, "credential revoked");
+
+    PluginCredentialUnavailableException thrown =
+        assertThrows(
+            PluginCredentialUnavailableException.class,
+            () ->
+                gateway.stageRemoteMedia(
+                    uri,
+                    PluginMediaFamily.IMAGE,
+                    "pic.png",
+                    () -> {
+                      // 第一次（GET 前）放行，第二次（PUT 前）判定授权已撤销。
+                      if (checks.incrementAndGet() == 2) {
+                        throw revoked;
+                      }
+                    }));
+
+    assertSame(revoked, thrown, "PUT 前授权失败必须保持原类型而不被包装成资源错误");
+    assertEquals(2, checks.get(), "GET 与 PUT 的紧前都必须检查授权");
+    assertEquals(1, transport.getGetCallCount());
+    assertEquals(0, transport.getPutCallCount(), "授权失败不得发送预签名上传请求");
+    verify(storageUploadService).delete(uploadId);
+    assertTempDirClean();
+  }
+
+  /** reserve 直接 READY（无需 PUT）时只在真正出网的那一步检查授权：GET 前一次，不产生多余的 PUT 检查。 */
+  @Test
+  void stageRemoteMediaChecksBeforeRequestOnlyForIssuedNetworkCalls() throws IOException {
+    byte[] pngData = createPngData(200);
+    UUID uploadId = UUID.randomUUID();
+    UUID blobId = UUID.randomUUID();
+    mockReserveReady(uploadId, blobId);
+    transport.setGetResponse(
+        200, Map.of("content-length", List.of(String.valueOf(pngData.length))), pngData);
+
+    AtomicInteger checks = new AtomicInteger();
+    ResourceRef ref =
+        gateway.stageRemoteMedia(
+            URI.create("https://media.example.com/pic.png"),
+            PluginMediaFamily.IMAGE,
+            "pic.png",
+            checks::incrementAndGet);
+
+    assertEquals(ResourceRef.blobUploadUri(uploadId), ref.uri());
+    assertEquals(1, checks.get(), "只有实际出网的 GET 需要执行授权检查");
+    assertEquals(0, transport.getPutCallCount());
+    assertTempDirClean();
+  }
+
+  // =========================================================================
+  // 8. 资源释放（close）
   // =========================================================================
 
   /** 关闭网关必须把关闭动作交给下游传输（Spring 组合根按 inferred destroy method 调用），且重复关闭也安全。 */
@@ -1028,8 +1131,228 @@ class StoragePluginResourceGatewayTest {
   }
 
   // =========================================================================
+  // 9. 生产装配与边界/错误路径
+  // =========================================================================
+
+  /** 生产装配路径：公共构造器自行装配真实传输与配置的临时目录，且关闭幂等。 */
+  @Test
+  void publicConstructorWiresRealTransportAndClosesIdempotently() throws IOException {
+    StoragePluginResourceGateway publicGateway =
+        new StoragePluginResourceGateway(
+            harnessStore,
+            sessionBlobRefManager,
+            storageBlobManager,
+            storageUploadService,
+            properties);
+    publicGateway.close();
+    publicGateway.close();
+  }
+
+  /** 签发会话资源下载地址时的非预期底层失败必须收敛为资源不可用，而不是泄露原始异常。 */
+  @Test
+  void resolveSessionResourceFailsWhenSigningBackendThrows() {
+    UUID blobId = UUID.randomUUID();
+    UUID threadId = UUID.randomUUID();
+    UUID sessionId = UUID.randomUUID();
+    mockThreadSession(threadId, sessionId);
+    when(sessionBlobRefManager.contains(sessionId, blobId)).thenReturn(true);
+    when(storageBlobManager.presignOriginalUrl(blobId))
+        .thenThrow(new IllegalStateException("signing backend unavailable"));
+
+    PluginResourceUnavailableException exception =
+        assertThrows(
+            PluginResourceUnavailableException.class,
+            () -> gateway.resolveSessionResource(threadId, "kkstudio:/resources/" + blobId));
+    assertTrue(exception.getMessage().contains("cannot sign this session resource"));
+  }
+
+  /** 缺少 content-length 响应头时按无长度处理，仍以嗅探结果完成暂存。 */
+  @Test
+  void stageRemoteMediaStagesWithoutContentLengthHeader() throws IOException {
+    byte[] pngData = createPngData(128);
+    mockReserveReady(UUID.randomUUID(), UUID.randomUUID());
+    transport.setGetResponse(200, Map.of(), pngData);
+
+    ResourceRef ref =
+        stageRemoteMedia(
+            URI.create("https://media.example.com/pic.png"), PluginMediaFamily.IMAGE, "pic.png");
+
+    assertEquals((long) pngData.length, ref.size());
+    assertEquals("image/png", ref.mediaType());
+    assertTempDirClean();
+  }
+
+  /** 预签名 PUT 目标缺失（空白 URL）时必须在出网前拒绝并清理已 reserve 上传。 */
+  @Test
+  void stageRemoteMediaPutRejectsMissingPresignedTarget() throws IOException {
+    byte[] pngData = createPngData(96);
+    UUID uploadId = UUID.randomUUID();
+    mockReservePending(uploadId, StoragePresignedUrlDTO.builder().method("PUT").url("   ").build());
+    transport.setGetResponse(
+        200, Map.of("content-length", List.of(String.valueOf(pngData.length))), pngData);
+
+    PluginResourceUnavailableException exception =
+        assertThrows(
+            PluginResourceUnavailableException.class,
+            () ->
+                stageRemoteMedia(
+                    URI.create("https://media.example.com/pic.png"),
+                    PluginMediaFamily.IMAGE,
+                    "pic.png"));
+
+    assertTrue(exception.getMessage().contains("no presigned target"));
+    assertEquals(0, transport.getPutCallCount());
+    verify(storageUploadService).delete(uploadId);
+    assertTempDirClean();
+  }
+
+  /** 预签名 PUT 目标 URL 无法解析时必须在出网前拒绝并清理。 */
+  @Test
+  void stageRemoteMediaPutRejectsMalformedPresignedUrl() throws IOException {
+    byte[] pngData = createPngData(96);
+    UUID uploadId = UUID.randomUUID();
+    mockReservePending(
+        uploadId,
+        StoragePresignedUrlDTO.builder().method("PUT").url("https://s3.example.com/a b").build());
+    transport.setGetResponse(
+        200, Map.of("content-length", List.of(String.valueOf(pngData.length))), pngData);
+
+    PluginResourceUnavailableException exception =
+        assertThrows(
+            PluginResourceUnavailableException.class,
+            () ->
+                stageRemoteMedia(
+                    URI.create("https://media.example.com/pic.png"),
+                    PluginMediaFamily.IMAGE,
+                    "pic.png"));
+
+    assertTrue(exception.getMessage().contains("url is malformed"));
+    assertEquals(0, transport.getPutCallCount());
+    verify(storageUploadService).delete(uploadId);
+    assertTempDirClean();
+  }
+
+  /** reserve 返回的上传 id 缺失或非规范 UUID 时确定性拒绝，且不进行 PUT。 */
+  @Test
+  void stageRemoteMediaRejectsUploadWithoutIdOrWithNonUuidId() throws IOException {
+    byte[] pngData = createPngData(96);
+    transport.setGetResponse(
+        200, Map.of("content-length", List.of(String.valueOf(pngData.length))), pngData);
+
+    when(storageUploadService.reserve(any()))
+        .thenReturn(StorageUploadDTO.builder().state(StorageUploadState.PENDING).build());
+    PluginResourceUnavailableException noId =
+        assertThrows(
+            PluginResourceUnavailableException.class,
+            () ->
+                stageRemoteMedia(
+                    URI.create("https://media.example.com/pic.png"),
+                    PluginMediaFamily.IMAGE,
+                    "pic.png"));
+    assertTrue(noId.getMessage().contains("has no id"));
+
+    when(storageUploadService.reserve(any()))
+        .thenReturn(
+            StorageUploadDTO.builder().id("not-a-uuid").state(StorageUploadState.PENDING).build());
+    PluginResourceUnavailableException badId =
+        assertThrows(
+            PluginResourceUnavailableException.class,
+            () ->
+                stageRemoteMedia(
+                    URI.create("https://media.example.com/pic.png"),
+                    PluginMediaFamily.IMAGE,
+                    "pic.png"));
+    assertTrue(badId.getMessage().contains("not a canonical uuid"));
+
+    assertEquals(0, transport.getPutCallCount());
+    assertTempDirClean();
+  }
+
+  /** 临时目录不可创建（被同名普通文件占用）时确定性失败，且不发出上传。 */
+  @Test
+  void stageRemoteMediaFailsWhenTempDirectoryIsNotCreatable() throws IOException {
+    Path blocked = tempDir.resolve("blocked-temp-path");
+    Files.writeString(blocked, "occupied");
+    PluginProperties broken = new PluginProperties();
+    broken.getResource().setTempDirectory(blocked.toString());
+    broken.getResource().setMaxBytes(1024 * 1024);
+    broken.getResource().setRequestTimeout(Duration.ofSeconds(10));
+    broken.getResource().setConnectTimeout(Duration.ofSeconds(2));
+    broken.getResource().setUploadTimeout(Duration.ofMinutes(1));
+    StoragePluginResourceGateway blockedGateway =
+        new StoragePluginResourceGateway(
+            harnessStore,
+            sessionBlobRefManager,
+            storageBlobManager,
+            storageUploadService,
+            broken,
+            transport);
+    byte[] pngData = createPngData(96);
+    TrackedInputStream body = new TrackedInputStream(pngData);
+    transport.setGetResponse(
+        200, Map.of("content-length", List.of(String.valueOf(pngData.length))), body);
+
+    PluginResourceUnavailableException exception =
+        assertThrows(
+            PluginResourceUnavailableException.class,
+            () ->
+                blockedGateway.stageRemoteMedia(
+                    URI.create("https://media.example.com/pic.png"),
+                    PluginMediaFamily.IMAGE,
+                    "pic.png",
+                    () -> {}));
+
+    assertTrue(exception.getMessage().contains("cannot create a staging temp file"));
+    assertTrue(body.isClosed(), "创建暂存文件失败后仍须释放已打开的下载响应体");
+    assertEquals(0, transport.getPutCallCount());
+  }
+
+  /** 未配置临时目录时回退到系统临时目录，构造仍然成功。 */
+  @Test
+  void gatewayFallsBackToSystemTempDirectoryWhenUnset() {
+    PluginProperties defaults = new PluginProperties();
+    defaults.getResource().setTempDirectory("   ");
+    StoragePluginResourceGateway defaultGateway =
+        new StoragePluginResourceGateway(
+            harnessStore,
+            sessionBlobRefManager,
+            storageBlobManager,
+            storageUploadService,
+            defaults,
+            transport);
+
+    assertNotNull(defaultGateway);
+  }
+
+  /** 无扩展名时按嗅探出的 subtype 派生扩展名（video/mp4 → mp4、text/plain → txt）。 */
+  @Test
+  void stageRemoteMediaDerivesExtensionFromMediaSubtype() throws IOException {
+    mockReserveReady(UUID.randomUUID(), UUID.randomUUID());
+    byte[] payload = new byte[64];
+
+    transport.setGetResponse(200, Map.of("content-type", List.of("video/mp4")), payload);
+    assertEquals(
+        "clip.mp4",
+        stageRemoteMedia(
+                URI.create("https://media.example.com/clip"), PluginMediaFamily.VIDEO, "clip")
+            .name());
+
+    transport.setGetResponse(200, Map.of("content-type", List.of("text/plain")), payload);
+    assertEquals(
+        "notes.txt",
+        stageRemoteMedia(
+                URI.create("https://media.example.com/notes"), PluginMediaFamily.DOCUMENT, "notes")
+            .name());
+  }
+
+  // =========================================================================
   // 测试辅助方法与替身类
   // =========================================================================
+
+  /** 3 参便捷入口：宿主授权检查恒为通过（{@code beforeRequest} 为空操作）；每请求围栏语义由第 7 组用例单独覆盖。 */
+  private ResourceRef stageRemoteMedia(URI remoteUri, PluginMediaFamily family, String name) {
+    return gateway.stageRemoteMedia(remoteUri, family, name, () -> {});
+  }
 
   private void mockThreadSession(UUID threadId, UUID sessionId) {
     ThreadState thread = mock(ThreadState.class);

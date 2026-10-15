@@ -364,6 +364,8 @@ class MiniMaxMavisToolExecutionTest {
   static final class FakeResourceGateway implements PluginResourceGateway {
     private final List<UUID> resolvedThreadIds = Collections.synchronizedList(new ArrayList<>());
     private final List<String> resolvedUris = Collections.synchronizedList(new ArrayList<>());
+    private final List<Runnable> stagedBeforeRequests =
+        Collections.synchronizedList(new ArrayList<>());
 
     @Override
     public URI resolveSessionResource(UUID threadId, String resourceUri) {
@@ -373,13 +375,21 @@ class MiniMaxMavisToolExecutionTest {
     }
 
     @Override
-    public ResourceRef stageRemoteMedia(URI remoteUri, PluginMediaFamily family, String name) {
+    public ResourceRef stageRemoteMedia(
+        URI remoteUri, PluginMediaFamily family, String name, Runnable beforeRequest) {
+      // 记录并执行宿主授权检查，模拟真实网关「每次出网前紧前检查」的收口。
+      stagedBeforeRequests.add(beforeRequest);
+      beforeRequest.run();
       return new ResourceRef(
           "blob-upload:" + STAGED_BLOB_ID,
           "image/png",
           name,
           1024L,
           "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+    }
+
+    List<Runnable> stagedBeforeRequests() {
+      return List.copyOf(stagedBeforeRequests);
     }
 
     public List<UUID> resolvedThreadIds() {
