@@ -18,7 +18,7 @@ import java.util.Set;
  * 一个已解析并经校验的冻结工作流定义。
  *
  * <p>图、参数/媒体绑定、输出 selector 与引用策略都是配置唯一来源的不可变快照：每个配置修订产出一份全新的 {@code ComfyuiWorkflow}，因此热更新不会改变已冻结
- * Run 的解释。{@link #graph()} 是唯一可变的宿主对象，调用方必须先用 {@link #graphCopy()} 复制再改写。
+ * Run 的解释。图只在构造时深拷贝一次，并且只经 {@link #graph()} 以副本暴露，调用方无法改写快照。
  */
 public record ComfyuiWorkflow(
     String id,
@@ -205,8 +205,9 @@ public record ComfyuiWorkflow(
         id, description, argsSchema, specs, referencePolicy.toCanvasPolicy());
   }
 
-  /** 图的调用方副本：注入前必须复制，避免污染冻结快照。 */
-  public ObjectNode graphCopy() {
+  /** 冻结图的调用方副本：每次访问都返回独立深拷贝，任何原地改写都不影响快照与后续构图。 */
+  @Override
+  public ObjectNode graph() {
     return graph.deepCopy();
   }
 

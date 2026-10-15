@@ -102,6 +102,39 @@ class ComfyuiCanvasFunctionDirectTest {
   private static final JsonMapper MAPPER =
       JsonMapper.builder().enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS).build();
 
+  private static final String DIRECT_PARAMETER_BINDINGS =
+      "[{\"argument\":\"prompt\",\"nodeId\":\"2\",\"input\":\"value\"},"
+          + "{\"argument\":\"duration\",\"nodeId\":\"3\",\"input\":\"value\"}]";
+
+  private static final String DIRECT_MEDIA_BINDINGS =
+      "[{\"referenceIndex\":0,\"nodeId\":\"1\",\"input\":\"image\"}]";
+
+  private static final String DIRECT_OUTPUTS =
+      "[{\"name\":\"preview\",\"kind\":\"VIDEO\",\"nodeId\":\"4\",\"field\":\"videos\",\"index\":1},"
+          + "{\"name\":\"final\",\"kind\":\"VIDEO\",\"nodeId\":\"4\",\"field\":\"videos\",\"index\":0}]";
+
+  private static final String WITH_FLAVOUR_BINDINGS =
+      "[{\"argument\":\"prompt\",\"nodeId\":\"2\",\"input\":\"value\"},"
+          + "{\"argument\":\"duration\",\"nodeId\":\"3\",\"input\":\"value\"},"
+          + "{\"argument\":\"flavour\",\"nodeId\":\"1000\",\"input\":\"value\"}]";
+
+  private static final String WITH_STYLE_BINDINGS =
+      "[{\"argument\":\"prompt\",\"nodeId\":\"2\",\"input\":\"value\"},"
+          + "{\"argument\":\"duration\",\"nodeId\":\"3\",\"input\":\"value\"},"
+          + "{\"argument\":\"style\",\"nodeId\":\"1000\",\"input\":\"value\"}]";
+
+  /** 与 {@link #GRAPH} 相同，另加一个 1000 号静态节点：DIRECT 不受 H3 保留动态区约束。 */
+  private static final String GRAPH_WITH_1000 =
+      """
+      {
+        "1": {"class_type": "LoadImage", "inputs": {"image": ""}},
+        "2": {"class_type": "PrimitiveString", "inputs": {"value": ""}},
+        "3": {"class_type": "PrimitiveInt", "inputs": {"value": 0}},
+        "4": {"class_type": "SaveVideo", "inputs": {"filename_prefix": "out", "video": ["5", 0]}},
+        "1000": {"class_type": "PrimitiveString", "inputs": {"value": "synthetic"}}
+      }
+      """;
+
   private HttpServer server;
   private String baseUrl;
 
@@ -194,6 +227,116 @@ class ComfyuiCanvasFunctionDirectTest {
     assertEquals(
         List.of(ComfyuiCanvasFunctionAdapter.COMFY_READY, ComfyuiCanvasFunctionAdapter.COMPLETE),
         resumeContext.stages);
+  }
+
+  /** 已声明但缺省且无 schema default 的参数必须在任何上传/Prompt/远端提交之前失败：PREFLIGHT 只做纯值解析。 */
+  @Test
+  void knownArgumentErrorsFailBeforeAnyUploadOrSubmit() {
+    String argsSchema =
+        """
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {"prompt": {"type": "string"}, "duration": {"type": "integer"},
+            "flavour": {"type": "string"}},
+          "required": ["prompt"]
+        }
+        """;
+    StandardComfyuiClient client = client(ComfyuiSettings.AuthMode.NONE, null);
+    ComfyuiCanvasFunctionAdapter adapter =
+        directAdapter(client, GRAPH_WITH_1000, argsSchema, WITH_FLAVOUR_BINDINGS);
+    RecordingContext context = new RecordingContext();
+
+    IllegalArgumentException failure =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                adapter.submit(
+                    context,
+                    run(
+                        adapter,
+                        CanvasFunctionSubmitState.SUBMITTED,
+                        "QUEUED",
+                        H3AdapterState.empty().encode())));
+
+    assertEquals("workflow argument is missing: flavour", failure.getMessage());
+    // 纯校验：没有上传、没有提交、也没有任何 checkpoint。
+    assertEquals(0, uploads.get());
+    assertEquals(0, promptPosts.get());
+    assertEquals(0, historyCalls.get());
+    assertEquals(List.of(), context.stages);
+  }
+
+  /** DIRECT 可用保留区节点 id，且参数按"显式值优先、其次 schema default"注入，EXPLICIT 与 default 行为都不变。 */
+  @Test
+  void directInjectsExplicitValuesAndSchemaDefaultsIncludingReservedNodeIds() {
+    String argsSchema =
+        """
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {"prompt": {"type": "string"}, "duration": {"type": "integer"},
+            "style": {"type": "string", "default": "cinematic"}},
+          "required": ["prompt"]
+        }
+        """;
+    StandardComfyuiClient client = client(ComfyuiSettings.AuthMode.NONE, null);
+    ComfyuiCanvasFunctionAdapter adapter =
+        directAdapter(client, GRAPH_WITH_1000, argsSchema, WITH_STYLE_BINDINGS);
+
+    adapter.submit(
+        new RecordingContext(),
+        run(
+            adapter,
+            CanvasFunctionSubmitState.SUBMITTED,
+            "QUEUED",
+            H3AdapterState.empty().encode()));
+
+    assertEquals(1, uploads.get());
+    assertEquals(1, promptPosts.get());
+    JsonNode graph = submittedPrompt.get().path("prompt");
+    assertEquals("animate it", graph.path("2").path("inputs").path("value").asText());
+    assertEquals(5, graph.path("3").path("inputs").path("value").asInt());
+    assertEquals("cinematic", graph.path("1000").path("inputs").path("value").asText());
+    assertEquals(5, graph.size());
+  }
+
+  /** 冻结图只以副本暴露：改写 accessor 拿到的副本不影响后续构图，连续两次运行得到同一冻结解释。 */
+  @Test
+  void mutatingGraphAccessorCopiesNeverPollutesLaterRuns() {
+    ComfyuiSettings settings = directSettings(GRAPH, ARGS_SCHEMA, DIRECT_PARAMETER_BINDINGS);
+    ComfyuiWorkflow workflow = settings.workflows().get(0);
+    ObjectNode leaked = workflow.graph();
+    ((ObjectNode) leaked.get("2").get("inputs")).put("value", "leaked");
+    leaked.set(
+        "1000",
+        (ObjectNode)
+            JsonValues.readTree(
+                "{\"class_type\":\"PrimitiveString\",\"inputs\":{\"value\":\"leaked\"}}"));
+    assertEquals(4, workflow.graph().size());
+    assertEquals(2, workflow.definition().outputs().size());
+
+    StandardComfyuiClient client = client(ComfyuiSettings.AuthMode.NONE, null);
+    ComfyuiCanvasFunctionAdapter adapter = directAdapter(settings, client);
+    for (int attempt = 0; attempt < 2; attempt++) {
+      adapter.submit(
+          new RecordingContext(),
+          run(
+              adapter,
+              CanvasFunctionSubmitState.SUBMITTED,
+              "QUEUED",
+              H3AdapterState.empty().encode()));
+      JsonNode graph = submittedPrompt.get().path("prompt");
+      assertEquals("animate it", graph.path("2").path("inputs").path("value").asText());
+      assertEquals(4, graph.size());
+      assertFalse(graph.has("1000"));
+      assertEquals(
+          "kk-studio/" + CANVAS + "/" + uploadedPath.get(),
+          graph.path("1").path("inputs").path("image").asText());
+    }
+    // 两次运行都各自重新上传与提交，解释始终来自同一份冻结快照。
+    assertEquals(2, uploads.get());
+    assertEquals(2, promptPosts.get());
   }
 
   /** 提交边界之后的恢复只能查询：无 promptId 的 SUBMITTING 一律 UNKNOWN，绝不自动重提。 */
@@ -469,24 +612,35 @@ class ComfyuiCanvasFunctionDirectTest {
 
   /** DIRECT 工作流不需要 Prompt 端口：构造参数必须允许为空。 */
   private ComfyuiCanvasFunctionAdapter directAdapter(StandardComfyuiClient client) {
-    ComfyuiSettings settings =
-        ComfyuiSettings.parse(
-            ComfyuiWorkflowFixtures.settingsJson(
-                true,
-                ComfyuiWorkflowFixtures.singleWorkflowArray(
-                    ComfyuiWorkflowFixtures.workflow(
-                        "direct-flow",
-                        "DIRECT",
-                        GRAPH,
-                        ARGS_SCHEMA,
-                        "[{\"argument\":\"prompt\",\"nodeId\":\"2\",\"input\":\"value\"},"
-                            + "{\"argument\":\"duration\",\"nodeId\":\"3\",\"input\":\"value\"}]",
-                        "[{\"referenceIndex\":0,\"nodeId\":\"1\",\"input\":\"image\"}]",
-                        "[{\"name\":\"preview\",\"kind\":\"VIDEO\",\"nodeId\":\"4\",\"field\":\"videos\",\"index\":1},"
-                            + "{\"name\":\"final\",\"kind\":\"VIDEO\",\"nodeId\":\"4\",\"field\":\"videos\",\"index\":0}]",
-                        ComfyuiWorkflowFixtures.IMAGE_POLICY))));
+    return directAdapter(directSettings(GRAPH, ARGS_SCHEMA, DIRECT_PARAMETER_BINDINGS), client);
+  }
+
+  private ComfyuiCanvasFunctionAdapter directAdapter(
+      StandardComfyuiClient client, String graph, String argsSchema, String parameterBindings) {
+    return directAdapter(directSettings(graph, argsSchema, parameterBindings), client);
+  }
+
+  private static ComfyuiCanvasFunctionAdapter directAdapter(
+      ComfyuiSettings settings, StandardComfyuiClient client) {
     return new ComfyuiCanvasFunctionAdapter(
         settings, settings.workflows().get(0), client, null, null, null, null);
+  }
+
+  private static ComfyuiSettings directSettings(
+      String graph, String argsSchema, String parameterBindings) {
+    return ComfyuiSettings.parse(
+        ComfyuiWorkflowFixtures.settingsJson(
+            true,
+            ComfyuiWorkflowFixtures.singleWorkflowArray(
+                ComfyuiWorkflowFixtures.workflow(
+                    "direct-flow",
+                    "DIRECT",
+                    graph,
+                    argsSchema,
+                    parameterBindings,
+                    DIRECT_MEDIA_BINDINGS,
+                    DIRECT_OUTPUTS,
+                    ComfyuiWorkflowFixtures.IMAGE_POLICY))));
   }
 
   private static ObjectNode capturedSubmit(StandardComfyuiClient client) {

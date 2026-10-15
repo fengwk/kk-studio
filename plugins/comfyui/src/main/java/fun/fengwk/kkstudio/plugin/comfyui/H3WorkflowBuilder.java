@@ -24,8 +24,8 @@ import java.util.UUID;
 /**
  * MiniMax-H3 Ref2VA 预设的唯一事实来源：默认 API 图、args schema、固有绑定与图构造。
  *
- * <p>预设图允许普通配置修订，但必须始终保留 H3 优化链与帧长表达式；选择的 SaveVideo 输出节点由预置 selector 声明，构图 filename_prefix
- * 与输出解释都使用同一个 节点 id，客户端不持有任何节点常量。
+ * <p>预设图允许普通配置修订，但必须始终保留 H3 优化链与帧长表达式，并让规范十进制 {@code >= 1000} 的保留动态区保持空闲：构图从该区起无条件追加动态媒体节点，因此这些 id
+ * 不允许被静态节点占用。选择的 SaveVideo 输出节点由预置 selector 声明，构图 filename_prefix 与输出解释都使用同一个 节点 id，客户端不持有任何节点常量。
  */
 final class H3WorkflowBuilder {
 
@@ -78,7 +78,10 @@ final class H3WorkflowBuilder {
       "/fun/fengwk/kkstudio/plugin/comfyui/minimax-h3-ref2va-workflow.json";
 
   private static final String DEFAULT_SAVE_NODE = "92";
+
+  /** H3 保留动态区起点：构图从这里起无条件追加动态媒体节点，静态配置不得占用这些 id。 */
   private static final int DYNAMIC_NODE_START = 1000;
+
   private static final Map<String, String> RATIOS =
       Map.of(
           "21:9", "21:9 (Ultrawide)",
@@ -169,10 +172,17 @@ final class H3WorkflowBuilder {
       throw new IllegalArgumentException(
           "workflow " + WORKFLOW_ID + " must declare a single anonymous VIDEO output slot");
     }
-    validateTemplate(workflow.graph(), selector.nodeId());
+    String saveNodeId = selector.nodeId();
+    try {
+      validateTemplate(workflow.graph(), saveNodeId);
+    } catch (IllegalStateException templateFailure) {
+      // 注册图现在是外部配置：已知模板校验失败在配置边界收敛为去敏 IllegalArgumentException，未知 RuntimeException/Error 不降级。
+      throw new IllegalArgumentException(
+          "workflow " + WORKFLOW_ID + " workflowJson must preserve the supported H3 template");
+    }
   }
 
-  /** 图校验：样本节点必须已删除，优化链与帧长表达式必须完整，选择的 SaveVideo 输出节点必须存在且声明 filename_prefix 与 video 输入。 */
+  /** 图校验：样本节点必须已删除，保留动态区必须空闲，优化链与帧长表达式必须完整，选择的 SaveVideo 输出节点必须存在且声明 filename_prefix 与 video 输入。 */
   static void validateTemplate(ObjectNode template, String saveNodeId) {
     Objects.requireNonNull(template, "template");
     for (String deleted : new String[] {"137", "138", "139", "141", "142", "143", "144"}) {
@@ -180,6 +190,7 @@ final class H3WorkflowBuilder {
         throw new IllegalStateException("H3 workflow template contains sample node " + deleted);
       }
     }
+    requireDynamicRegionFree(template);
     requireClass(template, "127", "UNETLoader");
     requireClass(template, "154", "PathchSageAttentionKJ");
     requireClass(template, "147", "MiniMaxH3MemoryEfficientSageAttentionPatch");
@@ -290,6 +301,42 @@ final class H3WorkflowBuilder {
       throw new IllegalArgumentException("ComfyUI uploads must exactly match the H3 manifest");
     }
     return workflow;
+  }
+
+  /**
+   * 保留动态区判定：规范十进制（ASCII 数字）节点 id 且数值 >= {@link #DYNAMIC_NODE_START}。构图从这里起无条件追加动态媒体节点，静态节点不得占用，用
+   * JDK 直接判值，不引入编号框架；非十进制 id（如 {@code "a1000"}）不在此区。
+   */
+  static boolean isReservedDynamicNodeId(String nodeId) {
+    if (nodeId.isEmpty()) {
+      return false;
+    }
+    for (int index = 0; index < nodeId.length(); index++) {
+      char c = nodeId.charAt(index);
+      if (c < '0' || c > '9') {
+        return false;
+      }
+    }
+    int first = 0;
+    while (first < nodeId.length() - 1 && nodeId.charAt(first) == '0') {
+      first++;
+    }
+    String digits = nodeId.substring(first);
+    if (digits.length() > 18) {
+      return true;
+    }
+    return Long.parseLong(digits) >= DYNAMIC_NODE_START;
+  }
+
+  private static void requireDynamicRegionFree(ObjectNode template) {
+    for (String nodeId : template.propertyNames()) {
+      if (isReservedDynamicNodeId(nodeId)) {
+        throw new IllegalStateException(
+            "H3 workflow template must keep the dynamic node range >= "
+                + DYNAMIC_NODE_START
+                + " free");
+      }
+    }
   }
 
   private static ObjectNode node(String classType, Map<String, ?> values) {

@@ -115,6 +115,10 @@ public final class ComfyuiCanvasFunctionAdapter implements CanvasFunctionAdapter
       mediaPreflight.validate(run.manifest());
       return;
     }
+    // DIRECT：已知的参数错误必须在任何上传/Prompt/远端提交之前暴露，因此这里只做纯值解析（显式值或 schema 默认）。
+    for (ComfyuiWorkflow.ParameterBinding binding : workflow.parameterBindings()) {
+      argument(run.args(), binding.argument());
+    }
     // DIRECT 媒体绑定按 manifest 顺序固定索引：绑定的数量必须正好覆盖全部 frozen 引用（0 引用合法）。
     if (run.manifest().size() != workflow.mediaBindings().size()) {
       throw new IllegalArgumentException(
@@ -289,7 +293,7 @@ public final class ComfyuiCanvasFunctionAdapter implements CanvasFunctionAdapter
   /** 冻结图的一次性副本：DIRECT 按绑定注入参数与媒体，H3 由预设构造器注入增强提示词与动态媒体节点。 */
   private ObjectNode buildWorkflow(
       CanvasFunctionFrozenRun run, H3ReferenceManifest manifest, H3AdapterState state) {
-    ObjectNode graph = workflow.graphCopy();
+    ObjectNode graph = workflow.graph();
     if (workflow.strategy() == ComfyuiWorkflow.Strategy.H3) {
       ComfyuiWorkflow.OutputSelector selector = workflow.outputs().get(0);
       return H3WorkflowBuilder.build(

@@ -45,6 +45,8 @@ final class ComfyuiWorkflowParser {
         throw new IllegalArgumentException("workflow id must be unique: " + id);
       }
       ComfyuiWorkflow workflow = parseWorkflow(item, path, id);
+      // Canvas 业务校验（args schema/输出槽位/引用策略）必须与 enabled 无关地先完成：非法定义在配置期失败，不等到运行期装配。
+      workflow.definition();
       if (workflow.strategy() == ComfyuiWorkflow.Strategy.H3) {
         H3WorkflowBuilder.validatePreset(workflow);
       }
