@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Code, FormInput, Lock } from 'lucide-react'
 import { Button } from '@/shared/ui/controls/Button'
 import { Checkbox } from '@/shared/ui/controls/Checkbox'
@@ -17,19 +17,20 @@ import type {
   PluginSecretPatchOperation,
 } from '@/shared/api/contracts/ai-plugin'
 import {
-  getNodeSafeValue,
-  getNodeSlice,
+  appendStrictJsonArrayItem,
   isValidJsonIntegerLiteral,
   isValidJsonNumberLiteral,
+  MAX_PLUGIN_VALUES_UTF8_BYTES,
   parseStrictJsonContainer,
   parseStrictJsonObject,
+  removeStrictJsonNode,
   updateStrictJsonField,
+  utf8ByteLength,
 } from './plugin-config-json'
-import {
-  parsePluginValuesSchema,
-  type PluginSchemaElement,
-} from './plugin-schema'
-import { findNodeAtLocation, type JSONPath, type Node } from 'jsonc-parser'
+import { isDraftKeyUnderPath, withoutStaleDrafts } from './plugin-draft-keys'
+import { parsePluginValuesSchema } from './plugin-schema'
+import { SchemaElementRenderer, type PluginSchemaEditor } from './SchemaElementRenderer'
+import type { JSONPath } from 'jsonc-parser'
 import './plugin-config.css'
 
 interface PluginConfigModalProps {
@@ -63,6 +64,11 @@ export function PluginConfigModal({
   // 数字与复杂容器的局部草稿及草稿错误状态
   const [fieldDrafts, setFieldDrafts] = useState<Record<string, string>>({})
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
+  // 结构增删代数：让数组条目子树重建，避免旧条目的局部编辑状态与在途文件读取落到移位后的条目上
+  const [structureGeneration, setStructureGeneration] = useState(0)
+  // 在途的本地文件读取数量：父组件据此阻止提交，晚到的读取结果因此不可能落在已提交的旧值之后。
+  const [pendingFileReads, setPendingFileReads] = useState(0)
+  const readingFiles = pendingFileReads > 0
 
   const [pending, setPending] = useState(false)
   const [conflictError, setConflictError] = useState(false)
@@ -97,8 +103,15 @@ export function PluginConfigModal({
 
   const hasFieldErrors = Object.keys(fieldErrors).length > 0
 
+  // POST 前的 UTF-8 字节预算：判定对象就是即将提交的 valuesJson 原文（含嵌入字符串的转义开销）。
+  const valuesByteLength = useMemo(() => utf8ByteLength(valuesJson), [valuesJson])
+  const valuesTooLarge = valuesByteLength > MAX_PLUGIN_VALUES_UTF8_BYTES
+  // 表单子树里的草稿错误（键即字段路径）都会拦住离开表单模式与提交，绝不替换成上次的合法值。
+  const formModeBlockedByDrafts =
+    editorMode === 'form' && Object.keys(fieldErrors).some((key) => isDraftKeyUnderPath(key, []))
+
   async function handleSave() {
-    if (pending || busyRef.current) return
+    if (pending || busyRef.current || readingFiles) return
 
     if (!hasRevision) {
       setSaveError(t('plugins.configDialog.missingRevision'))
@@ -113,6 +126,13 @@ export function PluginConfigModal({
 
     if (!parseResult.ok) {
       setSaveError(parseResult.error)
+      return
+    }
+
+    if (valuesTooLarge) {
+      setSaveError(
+        t('plugins.configDialog.valuesTooLarge', { max: MAX_PLUGIN_VALUES_UTF8_BYTES }),
+      )
       return
     }
 
@@ -190,6 +210,81 @@ export function PluginConfigModal({
     } else {
       setSaveError(res.error)
     }
+  }
+
+  /** 显式省略可选字段：只有这条路径会删除键，清空输入永远是写入空串。 */
+  function handleFieldRemove(path: JSONPath) {
+    const fieldKey = JSON.stringify(path)
+    setFieldDrafts((prev) => withoutKey(prev, fieldKey))
+    setFieldErrors((prev) => withoutKey(prev, fieldKey))
+    const res = removeStrictJsonNode(valuesJson, path)
+    if (res.ok) {
+      setValuesJson(res.newJson)
+      setSaveError(null)
+    } else {
+      setSaveError(res.error)
+    }
+  }
+
+  /** 字符串字段落值：开启 JSON 校验时先按严格 JSON 判定，非法草稿只报错、绝不写入旧值顶替。 */
+  function handleStringEdit(
+    path: JSONPath,
+    fieldKey: string,
+    text: string,
+    validateJson: boolean,
+  ) {
+    if (validateJson) {
+      const strict = parseStrictJsonContainer(text)
+      if (!strict.ok) {
+        setFieldErrors((prev) => ({
+          ...prev,
+          [fieldKey]: t('plugins.configDialog.invalidJsonText', { error: strict.error }),
+        }))
+        setSaveError(null)
+        return
+      }
+    }
+
+    setFieldErrors((prev) => withoutKey(prev, fieldKey))
+    const res = updateStrictJsonField({ rawJson: valuesJson, path, value: text })
+    if (res.ok) {
+      setValuesJson(res.newJson)
+      setSaveError(null)
+    } else {
+      setFieldErrors((prev) => ({ ...prev, [fieldKey]: res.error }))
+    }
+  }
+
+  function handleFieldDraftDiscard(fieldKey: string) {
+    setFieldDrafts((prev) => withoutKey(prev, fieldKey))
+    setFieldErrors((prev) => withoutKey(prev, fieldKey))
+  }
+
+  /** 追加只插入新条目切片：既有条目与草稿都不会移动，因此不重置任何草稿。 */
+  function handleArrayItemAppend(path: JSONPath, value: unknown) {
+    const res = appendStrictJsonArrayItem({ rawJson: valuesJson, path, value })
+    if (!res.ok) {
+      setSaveError(res.error)
+      return
+    }
+    setValuesJson(res.newJson)
+    setSaveError(null)
+  }
+
+  /**
+   * 删除条目：只丢弃随目标索引之后条目一起移位的草稿，其余字段草稿原样保留；被移动的条目子树按代数重建。
+   */
+  function handleArrayItemRemove(path: JSONPath, index: number) {
+    const res = removeStrictJsonNode(valuesJson, [...path, index])
+    if (!res.ok) {
+      setSaveError(res.error)
+      return
+    }
+    setValuesJson(res.newJson)
+    setFieldDrafts((prev) => withoutStaleDrafts(prev, path, index))
+    setFieldErrors((prev) => withoutStaleDrafts(prev, path, index))
+    setStructureGeneration((prev) => prev + 1)
+    setSaveError(null)
   }
 
   function handleFieldDraftNumberChange(
@@ -272,6 +367,28 @@ export function PluginConfigModal({
 
   const hasSecrets = Object.keys(plugin.configuration.secrets).length > 0
 
+  /** 每次文件读取开始/结束各报告一次，父组件据此持有在途读取计数。 */
+  function handleFileReadStart() {
+    setPendingFileReads((prev) => prev + 1)
+  }
+
+  function handleFileReadEnd() {
+    setPendingFileReads((prev) => Math.max(0, prev - 1))
+  }
+
+  const editor: PluginSchemaEditor = {
+    onFileReadStart: handleFileReadStart,
+    onFileReadEnd: handleFileReadEnd,
+    onScalarChange: handleFieldScalarChange,
+    onFieldRemove: handleFieldRemove,
+    onStringEdit: handleStringEdit,
+    onFieldDraftDiscard: handleFieldDraftDiscard,
+    onNumberDraftChange: handleFieldDraftNumberChange,
+    onRawSnippetChange: handleFieldRawSnippetChange,
+    onArrayItemAppend: handleArrayItemAppend,
+    onArrayItemRemove: handleArrayItemRemove,
+  }
+
   return (
     <Dialog
       className="resource-modal-card plugin-config-modal"
@@ -310,16 +427,34 @@ export function PluginConfigModal({
           </div>
         ) : null}
 
-        {/* 模式切换按钮 */}
+        {readingFiles ? (
+          <div className="plugin-config-warning-banner" role="status">
+            {t('plugins.configDialog.fileReadPending')}
+          </div>
+        ) : null}
+
+        {valuesTooLarge ? (
+          <div className="plugin-config-warning-banner" role="alert">
+            {t('plugins.configDialog.valuesTooLarge', {
+              max: MAX_PLUGIN_VALUES_UTF8_BYTES,
+            })}
+          </div>
+        ) : null}
+
+        {/* 模式切换按钮：表单里还有未解决的草稿错误时不允许离开表单模式，避免旧合法值被当成当前配置提交。 */}
         {schemaResult.ok ? (
           <div className="plugin-config-mode-switch">
             <Button
               variant="ghost"
               size="compact"
-              disabled={pending}
-              onClick={() =>
+              disabled={pending || formModeBlockedByDrafts}
+              aria-describedby={formModeBlockedByDrafts ? 'plugin-config-mode-blocked' : undefined}
+              onClick={() => {
+                if (editorMode === 'form' && formModeBlockedByDrafts) {
+                  return
+                }
                 setEditorMode((prev) => (prev === 'form' ? 'json' : 'form'))
-              }
+              }}
             >
               {editorMode === 'form' ? (
                 <>
@@ -333,6 +468,11 @@ export function PluginConfigModal({
                 </>
               )}
             </Button>
+            {formModeBlockedByDrafts ? (
+              <span id="plugin-config-mode-blocked" className="inline-hint danger">
+                {t('plugins.configDialog.resolveFormDraftErrors')}
+              </span>
+            ) : null}
           </div>
         ) : null}
 
@@ -354,14 +494,14 @@ export function PluginConfigModal({
                     name={propName}
                     path={[propName]}
                     element={element}
+                    required={schemaResult.schema.required.includes(propName)}
                     rootTree={parseResult.tree}
                     rawJson={valuesJson}
                     disabled={pending}
                     drafts={fieldDrafts}
                     errors={fieldErrors}
-                    onScalarChange={handleFieldScalarChange}
-                    onNumberDraftChange={handleFieldDraftNumberChange}
-                    onRawSnippetChange={handleFieldRawSnippetChange}
+                    structureGeneration={structureGeneration}
+                    editor={editor}
                   />
                 ),
               )}
@@ -551,9 +691,11 @@ export function PluginConfigModal({
           variant="primary"
           disabled={
             pending ||
+            readingFiles ||
             !hasRevision ||
             hasFieldErrors ||
             !parseResult.ok ||
+            valuesTooLarge ||
             Object.entries(secretOperations).some(([k, op]) =>
               op === 'CLEAR' ? !Object.hasOwn(clearConfirmed, k) || clearConfirmed[k] !== true : false,
             )
@@ -569,240 +711,9 @@ export function PluginConfigModal({
   )
 }
 
-function SchemaElementRenderer({
-  name,
-  path,
-  element,
-  rootTree,
-  rawJson,
-  disabled,
-  drafts,
-  errors,
-  onScalarChange,
-  onNumberDraftChange,
-  onRawSnippetChange,
-}: {
-  name: string
-  path: JSONPath
-  element: PluginSchemaElement
-  rootTree: Node
-  rawJson: string
-  disabled: boolean
-  drafts: Record<string, string>
-  errors: Record<string, string>
-  onScalarChange: (path: JSONPath, value: unknown) => void
-  onNumberDraftChange: (
-    path: JSONPath,
-    fieldKey: string,
-    rawText: string,
-    isInteger: boolean,
-  ) => void
-  onRawSnippetChange: (
-    path: JSONPath,
-    fieldKey: string,
-    snippetText: string,
-    expectedType: 'array' | 'object',
-  ) => void
-}) {
-  const node = findNodeAtLocation(rootTree, path)
-  const currentSafeVal = node ? getNodeSafeValue(node, rawJson) : undefined
-  const fieldId = useId()
-  const fieldKey = JSON.stringify(path)
-  const fieldError = errors[fieldKey]
-
-  switch (element.kind) {
-    case 'boolean': {
-      const isChecked = typeof currentSafeVal === 'boolean' ? currentSafeVal : false
-      return (
-        <div className="form-group" key={name}>
-          <Checkbox
-            id={fieldId}
-            checked={isChecked}
-            disabled={disabled}
-            onChange={(checked) => onScalarChange(path, checked)}
-            label={name}
-          />
-          {element.description ? (
-            <span className="inline-hint">{element.description}</span>
-          ) : null}
-        </div>
-      )
-    }
-
-    case 'string': {
-      if (element.enum && element.enum.length > 0) {
-        const val = typeof currentSafeVal === 'string' ? currentSafeVal : ''
-        return (
-          <div className="form-group" key={name}>
-            <FieldLabel>{name}</FieldLabel>
-            <Select
-              id={fieldId}
-              value={val}
-              disabled={disabled}
-              aria-label={name}
-              options={element.enum.map((opt) => ({ value: opt, label: opt }))}
-              onChange={(next) => onScalarChange(path, next)}
-            />
-            {element.description ? (
-              <span className="inline-hint">{element.description}</span>
-            ) : null}
-          </div>
-        )
-      }
-
-      const val = typeof currentSafeVal === 'string' ? currentSafeVal : ''
-      return (
-        <div className="form-group" key={name}>
-          <FieldLabel>{name}</FieldLabel>
-          <TextInput
-            id={fieldId}
-            value={val}
-            disabled={disabled}
-            aria-label={name}
-            onChange={(e) => onScalarChange(path, e.target.value)}
-          />
-          {element.description ? (
-            <span className="inline-hint">{element.description}</span>
-          ) : null}
-        </div>
-      )
-    }
-
-    case 'integer':
-    case 'number': {
-      const isInteger = element.kind === 'integer'
-      const valStr =
-        drafts[fieldKey] !== undefined
-          ? drafts[fieldKey]
-          : typeof currentSafeVal === 'string'
-            ? currentSafeVal
-            : typeof currentSafeVal === 'number'
-              ? String(currentSafeVal)
-              : ''
-
-      return (
-        <div className="form-group" key={name}>
-          <FieldLabel>{name}</FieldLabel>
-          <TextInput
-            id={fieldId}
-            value={valStr}
-            disabled={disabled}
-            aria-label={name}
-            onChange={(e) => {
-              onNumberDraftChange(path, fieldKey, e.target.value, isInteger)
-            }}
-          />
-          {element.description ? (
-            <span className="inline-hint">{element.description}</span>
-          ) : null}
-          {fieldError ? (
-            <span className="inline-hint danger" role="alert">
-              {fieldError}
-            </span>
-          ) : null}
-        </div>
-      )
-    }
-
-    case 'object': {
-      const hasSpecificProperties = Object.keys(element.properties).length > 0
-      // 若包含具体 properties 且不允许任意额外属性，渲染嵌套字段
-      if (hasSpecificProperties && !element.additionalProperties) {
-        return (
-          <fieldset key={name} className="plugin-config-fieldset">
-            <legend>{name}</legend>
-            {element.description ? (
-              <p className="inline-hint" style={{ marginTop: 0 }}>
-                {element.description}
-              </p>
-            ) : null}
-            <div className="plugin-config-field-group">
-              {Object.entries(element.properties).map(([subName, subElement]) => (
-                <SchemaElementRenderer
-                  key={subName}
-                  name={subName}
-                  path={[...path, subName]}
-                  element={subElement}
-                  rootTree={rootTree}
-                  rawJson={rawJson}
-                  disabled={disabled}
-                  drafts={drafts}
-                  errors={errors}
-                  onScalarChange={onScalarChange}
-                  onNumberDraftChange={onNumberDraftChange}
-                  onRawSnippetChange={onRawSnippetChange}
-                />
-              ))}
-            </div>
-          </fieldset>
-        )
-      }
-
-      // 动态对象或空 properties 对象：提供局部 Raw JSON 文本框
-      const rawSnippet =
-        drafts[fieldKey] !== undefined
-          ? drafts[fieldKey]
-          : node
-            ? getNodeSlice(rawJson, node)
-            : '{}'
-
-      return (
-        <div className="form-group" key={name}>
-          <FieldLabel>{name}</FieldLabel>
-          <TextArea
-            id={fieldId}
-            value={rawSnippet}
-            disabled={disabled}
-            aria-label={name}
-            rows={4}
-            onChange={(e) => {
-              onRawSnippetChange(path, fieldKey, e.target.value, 'object')
-            }}
-          />
-          {element.description ? (
-            <span className="inline-hint">{element.description}</span>
-          ) : null}
-          {fieldError ? (
-            <span className="inline-hint danger" role="alert">
-              {fieldError}
-            </span>
-          ) : null}
-        </div>
-      )
-    }
-
-    case 'array': {
-      // 集合容器：提供局部 Raw JSON 文本框编辑，保持原 tokens
-      const rawSnippet =
-        drafts[fieldKey] !== undefined
-          ? drafts[fieldKey]
-          : node
-            ? getNodeSlice(rawJson, node)
-            : '[]'
-
-      return (
-        <div className="form-group" key={name}>
-          <FieldLabel>{name}</FieldLabel>
-          <TextArea
-            id={fieldId}
-            value={rawSnippet}
-            disabled={disabled}
-            aria-label={name}
-            rows={3}
-            onChange={(e) => {
-              onRawSnippetChange(path, fieldKey, e.target.value, 'array')
-            }}
-          />
-          {element.description ? (
-            <span className="inline-hint">{element.description}</span>
-          ) : null}
-          {fieldError ? (
-            <span className="inline-hint danger" role="alert">
-              {fieldError}
-            </span>
-          ) : null}
-        </div>
-      )
-    }
-  }
+/** 复制并去掉指定键；草稿与错误映射共用同一不可变更新方式。 */
+function withoutKey<T>(record: Record<string, T>, key: string): Record<string, T> {
+  const next = { ...record }
+  delete next[key]
+  return next
 }

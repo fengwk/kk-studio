@@ -1,13 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import {
+  appendStrictJsonArrayItem,
   getNodeSafeValue,
   getNodeSlice,
   getNodeAtPath,
   isValidJsonIntegerLiteral,
   isValidJsonNumberLiteral,
+  MAX_PLUGIN_VALUES_UTF8_BYTES,
   parseStrictJsonContainer,
   parseStrictJsonObject,
+  removeStrictJsonNode,
   updateStrictJsonField,
+  utf8ByteLength,
 } from './plugin-config-json'
 import { findNodeAtLocation } from 'jsonc-parser'
 
@@ -270,5 +274,154 @@ describe('plugin-config-json', () => {
         rawSnippetString: snippet,
       }).ok).toBe(false)
     }
+  })
+})
+
+describe('plugin-config-json structural edits and byte budget', () => {
+  /** 探针文档：长整数、带 scale 的小数、指数都在未改切片里，任何结构编辑都必须逐字节保留它们。 */
+  const probe =
+    '{"enabled":true,"seed":9007199254740993123456789,"ratio":1.230000,"exp":1e1000,' +
+    '"workflows":[{"nodeId":"1","index":0},{"nodeId":"2","index":1},{"nodeId":"3","index":2}]}'
+
+  function expectProbesIntact(json: string) {
+    expect(json).toContain('9007199254740993123456789')
+    expect(json).toContain('1.230000')
+    expect(json).toContain('1e1000')
+  }
+
+  it('counts UTF-8 bytes, including multi-byte characters and escape overhead', () => {
+    expect(MAX_PLUGIN_VALUES_UTF8_BYTES).toBe(64 * 1024)
+    expect(utf8ByteLength('')).toBe(0)
+    expect(utf8ByteLength('abc')).toBe(3)
+    expect(utf8ByteLength('中')).toBe(3)
+    // 原始换行是 1 个字节，进入 valuesJson 后必须写成 \n 两个字节。
+    expect(utf8ByteLength('a\nb')).toBe(3)
+    expect(utf8ByteLength(JSON.stringify('a\nb'))).toBe(6)
+  })
+
+  it('removes array items at any position while keeping every untouched byte', () => {
+    const first = removeStrictJsonNode(probe, ['workflows', 0])
+    expect(first.ok).toBe(true)
+    if (first.ok) {
+      expect(JSON.parse(first.newJson).workflows).toEqual([
+        { nodeId: '2', index: 1 },
+        { nodeId: '3', index: 2 },
+      ])
+      expectProbesIntact(first.newJson)
+    }
+
+    const middle = removeStrictJsonNode(probe, ['workflows', 1])
+    expect(middle.ok).toBe(true)
+    if (middle.ok) {
+      expect(JSON.parse(middle.newJson).workflows).toEqual([
+        { nodeId: '1', index: 0 },
+        { nodeId: '3', index: 2 },
+      ])
+    }
+
+    // 末位条目是 jsonc-parser modify 无法正确删除的边界，切片实现必须仍然产出合法 JSON。
+    const last = removeStrictJsonNode(probe, ['workflows', 2])
+    expect(last.ok).toBe(true)
+    if (last.ok) {
+      expect(JSON.parse(last.newJson).workflows).toEqual([
+        { nodeId: '1', index: 0 },
+        { nodeId: '2', index: 1 },
+      ])
+      expectProbesIntact(last.newJson)
+    }
+  })
+
+  it('removes object properties, nested properties and the only item without corrupting the document', () => {
+    const firstProp = removeStrictJsonNode(probe, ['enabled'])
+    expect(firstProp.ok).toBe(true)
+    if (firstProp.ok) {
+      expect(Object.hasOwn(JSON.parse(firstProp.newJson), 'enabled')).toBe(false)
+      expectProbesIntact(firstProp.newJson)
+    }
+
+    const nested = removeStrictJsonNode(probe, ['workflows', 0, 'index'])
+    expect(nested.ok).toBe(true)
+    if (nested.ok) {
+      expect(JSON.parse(nested.newJson).workflows[0]).toEqual({ nodeId: '1' })
+    }
+
+    const single = removeStrictJsonNode('{"only":1}', ['only'])
+    expect(single.ok).toBe(true)
+    if (single.ok) {
+      expect(single.newJson).toBe('{}')
+    }
+
+    const singleItem = removeStrictJsonNode('{"items":[9007199254740993]}', ['items', 0])
+    expect(singleItem.ok).toBe(true)
+    if (singleItem.ok) {
+      expect(singleItem.newJson).toBe('{"items":[]}')
+    }
+  })
+
+  it('keeps formatted documents valid on removal and treats missing targets as already satisfied', () => {
+    const formatted =
+      '{\n  "seed": 9007199254740993123456789,\n  "items": [\n    {"a": 1},\n    {"b": 2}\n  ]\n}'
+    const removed = removeStrictJsonNode(formatted, ['items', 1])
+    expect(removed.ok).toBe(true)
+    if (removed.ok) {
+      // 逐字节比对：删除后除目标切片外一个字符都没动。
+      expect(removed.newJson).toBe(
+        '{\n  "seed": 9007199254740993123456789,\n  "items": [\n    {"a": 1}\n  ]\n}',
+      )
+      // 删除只改目标切片：未改数字 token 保持原文（不是 9.007199254740993e+24）。
+      expect(removed.newJson).toContain('9007199254740993123456789')
+    }
+
+    const missing = removeStrictJsonNode(probe, ['absent'])
+    expect(missing.ok).toBe(true)
+    if (missing.ok) {
+      expect(missing.newJson).toBe(probe)
+    }
+
+    expect(removeStrictJsonNode(probe, []).ok).toBe(false)
+    expect(removeStrictJsonNode('not json', ['a']).ok).toBe(false)
+  })
+
+  it('appends schema placeholders to existing, empty and missing arrays', () => {
+    const appended = appendStrictJsonArrayItem({
+      rawJson: probe,
+      path: ['workflows'],
+      value: { nodeId: '', index: 0 },
+    })
+    expect(appended.ok).toBe(true)
+    if (appended.ok) {
+      const workflows = JSON.parse(appended.newJson).workflows
+      expect(workflows).toHaveLength(4)
+      expect(workflows[3]).toEqual({ nodeId: '', index: 0 })
+      expectProbesIntact(appended.newJson)
+    }
+
+    const empty = appendStrictJsonArrayItem({
+      rawJson: '{"items":[],"seed":9007199254740993}',
+      path: ['items'],
+      value: { a: '' },
+    })
+    expect(empty.ok).toBe(true)
+    if (empty.ok) {
+      expect(empty.newJson).toBe('{"items":[{"a":""}],"seed":9007199254740993}')
+    }
+
+    const created = appendStrictJsonArrayItem({
+      rawJson: '{"seed":1.230000}',
+      path: ['items'],
+      value: { a: '' },
+    })
+    expect(created.ok).toBe(true)
+    if (created.ok) {
+      expect(JSON.parse(created.newJson).items).toEqual([{ a: '' }])
+      expect(created.newJson).toContain('1.230000')
+    }
+
+    expect(
+      appendStrictJsonArrayItem({ rawJson: '{"items":1}', path: ['items'], value: {} }).ok,
+    ).toBe(false)
+    expect(
+      appendStrictJsonArrayItem({ rawJson: probe, path: ['workflows'], value: undefined }).ok,
+    ).toBe(false)
   })
 })
