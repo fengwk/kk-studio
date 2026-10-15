@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.web.runtime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -195,6 +196,70 @@ class PluginCatalogRuntimePostgresIntegrationTest {
               }
             });
     assertEquals(0, remoteRequests.get(), "启用、停用与重启都不得发起远端请求");
+  }
+
+  /** 旧 epoch 的任务在运行中与重启后都能按持久历史严格重建：真实 Mavis JAR、离线 transport、绝不发远端请求。 */
+  @Test
+  void olderMavisEpochIsRebuiltFromPersistedHistoryAcrossRestarts() {
+    AtomicInteger remoteRequests = new AtomicInteger();
+    String[] enabledFingerprint = new String[1];
+    contextRunner(remoteRequests)
+        .run(
+            context -> {
+              PluginConfigurationRepository repository = repository();
+              PluginCatalogRuntime original = node(context, repository);
+              try {
+                try (PluginCatalogRuntime.Lease lease = original.acquireCurrent()) {
+                  enabledFingerprint[0] = lease.snapshot().catalogFingerprint();
+                  assertEquals(
+                      ENABLED_TOOL_COUNT, lease.snapshot().harnessCatalog().tools().size());
+                }
+                commitDisabledRevision(context, repository);
+                original.refresh();
+                assertEquals(new PluginCatalogRuntime.RuntimeState(2, 2, null), original.state());
+
+                // 运行中的旧 epoch 任务仍按 epoch 1 的完整目录运行，且不倒退当前发布。
+                try (PluginCatalogRuntime.Lease history = original.acquire(1)) {
+                  assertEquals(1, history.snapshot().epoch());
+                  assertEquals(
+                      ENABLED_TOOL_COUNT,
+                      history.snapshot().harnessCatalog().tools().size(),
+                      "旧 epoch 必须重建完整 Mavis 目录，而不是拼接当前其它插件");
+                  assertEquals(enabledFingerprint[0], history.snapshot().catalogFingerprint());
+                }
+                assertEquals(new PluginCatalogRuntime.RuntimeState(2, 2, null), original.state());
+              } finally {
+                original.close();
+              }
+
+              // 重启：全新运行期先按 epoch 2 恢复当前视图，再按持久历史重建 epoch 1。
+              PluginCatalogRuntime restarted = node(context, repository);
+              try {
+                assertEquals(new PluginCatalogRuntime.RuntimeState(2, 2, null), restarted.state());
+                try (PluginCatalogRuntime.Lease current = restarted.acquireCurrent()) {
+                  assertTrue(current.snapshot().harnessCatalog().tools().isEmpty());
+                }
+                try (PluginCatalogRuntime.Lease first = restarted.acquire(1);
+                    PluginCatalogRuntime.Lease reused = restarted.acquire(1)) {
+                  assertEquals(1, first.snapshot().epoch());
+                  assertEquals(
+                      ENABLED_TOOL_COUNT,
+                      first.snapshot().harnessCatalog().tools().size(),
+                      "重启后必须按持久历史严格重建旧 epoch");
+                  assertEquals(
+                      enabledFingerprint[0],
+                      first.snapshot().catalogFingerprint(),
+                      "旧 epoch 的完整目录指纹必须与首次发布一致");
+                  assertSame(first.snapshot(), reused.snapshot(), "再取同 epoch 必须复用现有视图");
+                }
+                assertEquals(new PluginCatalogRuntime.RuntimeState(2, 2, null), restarted.state());
+                assertEquals(2, epoch(), "历史租用绝不推进 epoch");
+                assertEquals(2, historyRows(), "历史租用绝不追加历史");
+              } finally {
+                restarted.close();
+              }
+            });
+    assertEquals(0, remoteRequests.get(), "历史重建与复用都不得发起远端请求");
   }
 
   /** 一个运行期节点：真实 Mavis 安装定义、真实两域来源、真实仓储与它自己的初始快照。 */

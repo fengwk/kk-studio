@@ -16,7 +16,7 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Web 组合根测试的内存替身：权威 catalog 单行 CAS 与最小事务边界。
+ * Web 组合根测试的内存替身：权威 catalog 单行 CAS、按 epoch 的完整 manifest 历史与最小事务边界。
  *
  * <p>只服务不接触数据库的组合根测试；真实持久化行为由 PostgreSQL 集成测试覆盖。
  */
@@ -39,11 +39,18 @@ final class InMemoryPluginCatalogFakes {
 
     private PluginCatalogRecord catalog =
         new PluginCatalogRecord(0, PluginCatalogManifest.uninitialized());
+    private final Map<Long, PluginCatalogRecord> catalogRevisions =
+        new LinkedHashMap<>(Map.of(0L, catalog));
     private final Map<String, PluginConfigurationRow> history = new LinkedHashMap<>();
 
     @Override
     public PluginCatalogRecord readCatalog() {
       return catalog;
+    }
+
+    @Override
+    public Optional<PluginCatalogRecord> readCatalog(long epoch) {
+      return Optional.ofNullable(catalogRevisions.get(epoch));
     }
 
     @Override
@@ -63,6 +70,7 @@ final class InMemoryPluginCatalogFakes {
         history.put(row.pluginId() + "#" + row.revision(), row);
       }
       catalog = new PluginCatalogRecord(expectedEpoch + 1, manifest);
+      catalogRevisions.put(catalog.epoch(), catalog);
       return true;
     }
   }

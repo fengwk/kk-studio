@@ -45,8 +45,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 /**
  * {@link PostgresqlPluginConfigurationRepository} 的真实 PostgreSQL 契约测试。
  *
- * <p>覆盖 epoch CAS、同事务权威基线防篡改（未 changed 条目不得偷退到旧 revision、既有 pluginId 不得消失）、提交后校验失败的整事务回滚、 {@code
- * plugin_catalog_changed} 仅在成功提交时投递、并发 CAS 唯一赢家、被篡改 manifest 的读取拒绝，以及 DDL 约束与 Java 门禁的同一身份/范围。
+ * <p>覆盖 epoch CAS、按 epoch 的不可变完整 manifest 历史（多 epoch 精确读取、缺口返回空）、同事务权威基线防篡改（未 changed 条目不得偷退到旧
+ * revision、既有 pluginId 不得消失）、提交后校验失败的整事务回滚（不留 manifest 与配置历史）、 {@code plugin_catalog_changed}
+ * 仅在成功提交时投递、并发 CAS 唯一赢家、被篡改 manifest 的读取拒绝，以及 DDL 约束与 Java 门禁的同一身份/范围。
  */
 class PostgresqlPluginConfigurationRepositoryIntegrationTest {
 
@@ -96,15 +97,22 @@ class PostgresqlPluginConfigurationRepositoryIntegrationTest {
             new PluginConfigurationJdbcStore(jdbcClient), notifier);
   }
 
-  /** Flyway V1 必须留下唯一 epoch=0 的未初始化权威单行。 */
+  /** Flyway V1 必须留下唯一 epoch=0 的未初始化权威单行与唯一对应 manifest 历史行。 */
   @Test
   void baselineRowStartsUninitialized() {
     assertEquals(1, countCatalogRows());
+    assertEquals(1, countCatalogRevisionRows());
     var catalog = repository.readCatalog();
     assertNotNull(catalog);
     assertEquals(0, catalog.epoch());
     assertTrue(catalog.manifest().plugins().isEmpty());
     assertNull(catalog.manifest().catalogFingerprint());
+
+    // 指定 epoch 入口只读不可变历史：epoch 0 有行，未初始化的更高 epoch 无行。
+    assertEquals(catalog, repository.readCatalog(0).orElseThrow());
+    assertTrue(repository.readCatalog(1).isEmpty());
+    // 负 epoch 不是合法历史坐标。
+    assertThrows(IllegalArgumentException.class, () -> repository.readCatalog(-1));
   }
 
   @Test
@@ -120,11 +128,79 @@ class PostgresqlPluginConfigurationRepositoryIntegrationTest {
     assertEquals(CAPABILITY_ALPHA, stored.capabilityFingerprint());
     assertEquals("{\"enabled\":true}", stored.valuesJson(), "values must round-trip exactly");
     assertEquals(1, countHistoryRows());
+    // 提交同时新建该 epoch 的不可变完整 manifest 历史。
+    assertEquals(2, countCatalogRevisionRows());
+    assertEquals(
+        manifest(ALPHA, entry(ALPHA, 1)), repository.readCatalog(1).orElseThrow().manifest());
+    assertEquals(
+        PluginCatalogManifest.uninitialized(),
+        repository.readCatalog(0).orElseThrow().manifest(),
+        "the epoch 0 history row must stay untouched");
 
     // 同一 expected epoch 再次提交：CAS 未命中，不写历史、不推进 epoch。
     assertFalse(commit(0, List.of(row(ALPHA, 1)), manifest(ALPHA, entry(ALPHA, 1))));
     assertEquals(1, repository.readCatalog().epoch());
     assertEquals(1, countHistoryRows());
+    assertEquals(2, countCatalogRevisionRows(), "the CAS loser must not add a manifest revision");
+  }
+
+  /** 每个 epoch 的完整 manifest 历史都精确保留，可被按 epoch 读取；未落库的 epoch 返回空。 */
+  @Test
+  void everyCommittedEpochKeepsAnExactlyReadableManifestHistory() {
+    assertTrue(commit(0, List.of(row(ALPHA, 1)), manifest(ALPHA, entry(ALPHA, 1))));
+    assertTrue(
+        commit(1, List.of(row(BETA, 2)), manifest(ALPHA, entry(ALPHA, 1), BETA, entry(BETA, 2))));
+
+    assertEquals(3, countCatalogRevisionRows(), "epoch 0/1/2 must each keep exactly one revision");
+    assertEquals(1, repository.readCatalog(1).orElseThrow().epoch());
+    assertEquals(
+        Map.of(ALPHA, entry(ALPHA, 1)),
+        repository.readCatalog(1).orElseThrow().manifest().plugins());
+    assertEquals(
+        Map.of(ALPHA, entry(ALPHA, 1), BETA, entry(BETA, 2)),
+        repository.readCatalog(2).orElseThrow().manifest().plugins());
+    assertEquals(
+        repository.readCatalog().manifest(), repository.readCatalog(2).orElseThrow().manifest());
+    assertTrue(repository.readCatalog(3).isEmpty());
+  }
+
+  /** 即使没有安装插件，initialized epoch 也必须声明完整目录指纹，不能提交未初始化 manifest。 */
+  @Test
+  void commitRejectsAnUninitializedManifestWithoutAdvancingThePointer() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> commit(0, List.of(), PluginCatalogManifest.uninitialized()));
+
+    assertEquals(0, repository.readCatalog().epoch());
+    assertEquals(1, countCatalogRevisionRows());
+    assertEquals(0, countHistoryRows());
+  }
+
+  /** CAS 败方不留下该 epoch 的 manifest 历史，也不留下 changed 配置历史。 */
+  @Test
+  void casLoserLeavesNoManifestAndNoConfigurationHistory() {
+    assertTrue(commit(0, List.of(row(ALPHA, 1)), manifest(ALPHA, entry(ALPHA, 1))));
+    assertTrue(
+        commit(1, List.of(row(BETA, 2)), manifest(ALPHA, entry(ALPHA, 1), BETA, entry(BETA, 2))));
+
+    // expected epoch 已经过期：基线不匹配，直接返回 false，且该提交本该写入的 history 一行都不出现。
+    assertFalse(
+        commit(1, List.of(row(BETA, 2)), manifest(ALPHA, entry(ALPHA, 1), BETA, entry(BETA, 2))));
+
+    assertEquals(2, repository.readCatalog().epoch());
+    assertEquals(3, countCatalogRevisionRows(), "only epoch 0/1/2 keep a revision");
+    assertTrue(repository.readCatalog(3).isEmpty(), "no manifest history for a lost CAS");
+    assertEquals(2, countHistoryRows(), "no configuration history for a lost CAS");
+  }
+
+  /** state 指针必须指向已存在的 manifest 历史行：指向不存在 epoch 的写入被外键拒绝。 */
+  @Test
+  void stateEpochMustReferenceAnExistingManifestRevision() throws SQLException {
+    try (Connection conn = PostgresSchemaSupport.newConnection()) {
+      PostgresSchemaSupport.assertTransactionConstraintViolation(
+          conn, "fk_plugin_catalog_state_revision", () -> updateStateEpochInTransaction(conn, 7L));
+    }
+    assertEquals(0, repository.readCatalog().epoch(), "the rejected update must not advance epoch");
   }
 
   /** A 把 ALPHA 更新到 revision 2 后，B 基于旧 A 条目（revision 1）构造 manifest 且 expectedEpoch 是新值：必须拒绝。 */
@@ -201,6 +277,8 @@ class PostgresqlPluginConfigurationRepositoryIntegrationTest {
 
     assertEquals(1, repository.readCatalog().epoch(), "rollback must restore the epoch");
     assertEquals(0, countHistoryRows(), "rollback must not leave a partial history row");
+    assertEquals(
+        2, countCatalogRevisionRows(), "rollback must not leave the rejected epoch manifest");
     assertTrue(repository.readConfiguration(BETA, 2).isEmpty());
   }
 
@@ -313,14 +391,14 @@ class PostgresqlPluginConfigurationRepositoryIntegrationTest {
     assertNull(repository.readCatalog());
   }
 
-  /** CAS 在基线通过后仍返回 0 行时必须返回 false，绝不插入历史、绝不发通知。 */
+  /** CAS 在基线通过后仍插入 0 行时必须返回 false，绝不插入 manifest 或配置历史、绝不发通知。 */
   @Test
   void commitReturnsFalseWhenCasAffectsNoRow() {
     PostgresqlPluginConfigurationRepository stubRepository =
         new PostgresqlPluginConfigurationRepository(
             new PluginConfigurationJdbcStore(jdbcClient) {
               @Override
-              public int compareAndSetEpoch(long expectedEpoch, String manifestJson) {
+              public int advanceEpochAndInsertRevision(long expectedEpoch, String manifestJson) {
                 return 0;
               }
             },
@@ -330,6 +408,7 @@ class PostgresqlPluginConfigurationRepositoryIntegrationTest {
         commit(stubRepository, 0, List.of(row(ALPHA, 1)), manifest(ALPHA, entry(ALPHA, 1))));
     assertEquals(0, repository.readCatalog().epoch());
     assertEquals(0, countHistoryRows());
+    assertEquals(1, countCatalogRevisionRows(), "a defensive CAS miss must not add a revision");
   }
 
   /** 历史插入未落行是内部一致性错误，必须显式失败并整事务回滚。 */
@@ -350,6 +429,8 @@ class PostgresqlPluginConfigurationRepositoryIntegrationTest {
         () -> commit(stubRepository, 0, List.of(row(ALPHA, 1)), manifest(ALPHA, entry(ALPHA, 1))));
     assertEquals(0, repository.readCatalog().epoch(), "failed insert must roll the CAS back");
     assertEquals(0, countHistoryRows());
+    assertEquals(
+        1, countCatalogRevisionRows(), "the rolled-back transaction must not leave a revision");
   }
 
   /** Java 侧 changed↔manifest 一致性门禁：逐条非法组合都必须固定拒绝。 */
@@ -499,6 +580,15 @@ class PostgresqlPluginConfigurationRepositoryIntegrationTest {
     return new PluginCatalogManifest(Map.of(pluginId, entry), CATALOG_FINGERPRINT);
   }
 
+  private static PluginCatalogManifest manifest(
+      String firstPluginId,
+      PluginCatalogManifest.Entry first,
+      String secondPluginId,
+      PluginCatalogManifest.Entry second) {
+    return new PluginCatalogManifest(
+        Map.of(firstPluginId, first, secondPluginId, second), CATALOG_FINGERPRINT);
+  }
+
   private static PluginCatalogManifest.Entry entry(String pluginId, long revision) {
     if (ALPHA.equals(pluginId)) {
       return new PluginCatalogManifest.Entry(
@@ -595,6 +685,21 @@ class PostgresqlPluginConfigurationRepositoryIntegrationTest {
         .single();
   }
 
+  private static int countCatalogRevisionRows() {
+    return jdbcClient
+        .sql("select count(*) from plugin_catalog_revision")
+        .query(Integer.class)
+        .single();
+  }
+
+  /** 在调用方事务内把指针指向指定 epoch；用于验证 state 到 revision 的外键。 */
+  private static void updateStateEpochInTransaction(Connection conn, long epoch)
+      throws SQLException {
+    try (Statement statement = conn.createStatement()) {
+      statement.execute("update plugin_catalog_state set epoch = " + epoch + " where id = 1");
+    }
+  }
+
   private static void deleteHistory(String pluginId, long revision) {
     jdbcClient
         .sql(
@@ -605,12 +710,18 @@ class PostgresqlPluginConfigurationRepositoryIntegrationTest {
         .update();
   }
 
+  /** 只把被测 epoch 的不可变 manifest 历史行改成指定 JSON 并让指针指向它，不触碰其它行的其它字段。 */
   private static void tamperManifest(String manifestJson, long epoch) {
     jdbcClient
         .sql(
-            "update plugin_catalog_state set manifest_json = cast(:json as jsonb), epoch = :epoch"
-                + " where id = 1")
+            "insert into plugin_catalog_revision (epoch, manifest_json)"
+                + " values (:epoch, cast(:json as jsonb))"
+                + " on conflict (epoch) do update set manifest_json = excluded.manifest_json")
+        .param("epoch", epoch)
         .param("json", manifestJson)
+        .update();
+    jdbcClient
+        .sql("update plugin_catalog_state set epoch = :epoch where id = 1")
         .param("epoch", epoch)
         .update();
   }

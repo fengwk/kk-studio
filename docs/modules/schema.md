@@ -25,7 +25,7 @@ V1 写入单行 SystemSettings 默认聚合；Java 解码与 profile 默认契�
 | 区域 | 表与事实 | 语义事实源 |
 | --- | --- | --- |
 | Catalog | agent_provider/model/definition、skill_package | [Platform Catalog](platform.md#catalog) |
-| Plugin | plugin_catalog_state：全局 epoch 与完整 manifest；plugin_configuration_revision：不可变普通配置历史；plugin_credential：认证密文、认证代际、状态、refresh lease | [Plugin 配置存储](platform.md#plugin-配置存储)、[Plugin credential](platform.md#plugin-credential) |
+| Plugin | plugin_catalog_state：当前 epoch 指针；plugin_catalog_revision：每个 epoch 的不可变完整 manifest；plugin_configuration_revision：不可变普通配置历史；plugin_credential：认证密文、认证代际、状态、refresh lease | [Plugin 配置存储](platform.md#plugin-配置存储)、[Plugin credential](platform.md#plugin-credential) |
 | MCP | mcp_server、mcp_tool：配置与原子发现快照 | [Platform MCP](platform.md#mcp-server-与运行时工具目录) |
 | Environment | environment、environment_connection：注册与路由租约、保存的安装设置（`install_config`）、宿主/Skill 投影 | [Environment](harness-environment.md) |
 | Chat | chat、chat_session：owner 关系 | [Platform](platform.md#命令接受产品归属与派发) |
@@ -44,8 +44,11 @@ V1 写入单行 SystemSettings 默认聚合；Java 解码与 profile 默认契�
 Run 区间和节点资源属于同一聚合；CHECK 约束防御形状，业务授权与转换由 service 决定。
 所有外键为即时校验，删除依赖由应用按明确顺序处理；MCP 工具随所属 server 级联删除。
 
-Plugin catalog 恒为 `id = 1` 单行；epoch 0 的空 manifest 只表示未初始化，
-应用在完整目录验证后以 CAS 推进 epoch。配置历史主键为 `(plugin_id, revision)`，
+Plugin catalog 恒为 `id = 1` 单行，只保存指向 `plugin_catalog_revision` 的 epoch 指针、时间与
+外键，因此 epoch 与 manifest 不双来源；`plugin_catalog_revision` 按 epoch 永久保存不可变完整
+manifest，包含初始化的 epoch 0。epoch 0、空 manifest 只表示未初始化。提交用同一条语句同时推进
+指针并新建该 epoch 的 manifest 历史，语句末的即时外键校验保证两者同时成立，CAS 未命中则不留下任何历史。
+配置历史主键为 `(plugin_id, revision)`，
 revision 是写入时的全局 epoch，只有插入入口。`values_json` 是 text：
 数据库要求严格 JSON object、每层对象键唯一及最多 65,536 UTF-8 字节，
 避免 jsonb 数值展开改变普通值的字节预算和恢复形态。manifest 引用、代码/Schema/能力身份、
