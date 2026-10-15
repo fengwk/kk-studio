@@ -14,6 +14,7 @@ import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionRule;
+import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsNetworkDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsToolDTO;
 
@@ -89,11 +90,10 @@ class SystemSettingsCodecTest {
   @Test
   void canonicalJsonIsSortedAndOmitsNulls() {
     String canonical = codec.encode(SystemSettings.DEFAULT);
-    // 七个 section 按字母序输出。
+    // 六个 section 按字母序输出。
     int advanced = canonical.indexOf("\"advanced\"");
     int aiRuntime = canonical.indexOf("\"aiRuntime\"");
     int environment = canonical.indexOf("\"environment\"");
-    int integrations = canonical.indexOf("\"integrations\"");
     int network = canonical.indexOf("\"network\"");
     int storageMedia = canonical.indexOf("\"storageMedia\"");
     int tool = canonical.indexOf("\"tool\"");
@@ -101,23 +101,20 @@ class SystemSettingsCodecTest {
         advanced >= 0 && aiRuntime > advanced && environment > aiRuntime,
         "sections must be sorted: " + canonical);
     assertTrue(
-        integrations > environment
-            && network > integrations
-            && storageMedia > network
-            && tool > storageMedia,
+        network > environment && storageMedia > network && tool > storageMedia,
         "sections must be sorted: " + canonical);
     // 规则对象键与工具名 key 也排序。
     assertTrue(canonical.indexOf("\"action\":\"ask\",\"pattern\":\"*\"") >= 0, canonical);
     // null 可空字段省略。
     assertTrue(!canonical.contains("workspaceId"), canonical);
-    assertTrue(!canonical.contains("comfyui\":{\"baseUrl"), canonical);
+    assertTrue(!canonical.contains("integrations"), canonical);
     assertTrue(!canonical.contains("proxyUrl"), canonical);
   }
 
   @Test
   void decodingDoesNotDependOnObjectKeyOrdering() throws Exception {
     String canonical = codec.encode(SystemSettings.DEFAULT);
-    // 反转七个 section 的声明顺序，解码结果必须与顺序无关。
+    // 反转六个 section 的声明顺序，解码结果必须与顺序无关。
     String reordered = reverseTopLevelKeys(canonical);
     assertEquals(SystemSettings.DEFAULT, codec.decode(reordered));
   }
@@ -236,62 +233,61 @@ class SystemSettingsCodecTest {
   }
 
   @Test
-  void rejectsBooleanScalarCoercionFromStringIntegerAndFloat() throws Exception {
-    // 布尔字段只接受 JSON true/false；string/整数/浮点标量（jackson 2.19.0 默认强制转换）一律拒绝。
+  void rejectsScalarCoercionFromStringFloatAndBooleanInStoredJson() throws Exception {
+    // 数值字段只接受对应 JSON 数值：string/浮点/布尔标量（jackson 默认强制转换）在存储层一律拒绝。
     String canonical = codec.encode(SystemSettings.DEFAULT);
     assertThrows(
         IllegalStateException.class,
         () ->
             codec.decode(
-                withIntegrationsField(
-                    canonical, "comfyui", "enabled", mapper.getNodeFactory().textNode("true"))),
-        "string boolean");
+                withStorageMediaField(
+                    canonical, "thumbnailQuality", mapper.getNodeFactory().textNode("80"))),
+        "string integer");
     assertThrows(
         IllegalStateException.class,
         () ->
             codec.decode(
-                withIntegrationsField(
-                    canonical, "comfyui", "enabled", mapper.getNodeFactory().numberNode(1))),
-        "integer boolean");
+                withStorageMediaField(
+                    canonical, "thumbnailQuality", mapper.getNodeFactory().numberNode(80.5))),
+        "fractional integer");
     assertThrows(
         IllegalStateException.class,
         () ->
             codec.decode(
-                withIntegrationsField(
-                    canonical, "comfyui", "enabled", mapper.getNodeFactory().numberNode(1.5))),
-        "float boolean");
+                withStorageMediaField(
+                    canonical, "thumbnailQuality", mapper.getNodeFactory().booleanNode(true))),
+        "boolean integer");
   }
 
   @Test
-  void omittedNullableReferencesStillRoundTrip() {
-    // 构造全部 nullable 引用（baseUrl、workspaceId、minimaxH3 身份字段）为 null 的配置：
-    // canonical 编码必须省略这些字段，严格解码不得误报缺失，且重编码保持幂等。
+  void omittedNullableNetworkProxyStillRoundTrips() {
+    // 唯一的可空引用是 network.proxyUrl（null 即明确直连）：canonical 编码必须省略该字段，严格解码不得误报缺失，
+    // 且重编码保持幂等。
     SystemSettings settings =
         new SystemSettings(
             SystemSettings.DEFAULT.tool(),
             SystemSettings.DEFAULT.aiRuntime(),
             SystemSettings.DEFAULT.environment(),
-            SystemSettings.DEFAULT.network(),
-            new SystemSettings.Integrations(
-                new SystemSettings.Comfyui(
-                    false, null, 10_000L, 30_000L, 1_800_000L, 50L * 1024 * 1024),
-                new SystemSettings.MiniMaxH3(
-                    false, null, 600_000L, null, 10_000L, 30_000L, 2_000L, 1_800_000L)),
+            new SystemSettings.Network(null, "localhost,127.*,::1"),
             SystemSettings.DEFAULT.storageMedia(),
             SystemSettings.DEFAULT.advanced());
     String canonical = codec.encode(settings);
-    assertTrue(!canonical.contains("\"baseUrl\""), canonical);
-    assertTrue(!canonical.contains("\"comfyBaseUrl\""), canonical);
+    assertTrue(!canonical.contains("proxyUrl"), canonical);
     assertEquals(settings, codec.decode(canonical));
     assertEquals(canonical, codec.encode(codec.decode(canonical)));
   }
 
   @Test
-  void rejectsLegacyOpenCliIntegrations() throws Exception {
-    String canonical = codec.encode(SystemSettings.DEFAULT);
-    for (String legacyField : List.of("openCliHub", "seedance", "gptImage2")) {
-      ObjectNode node = (ObjectNode) mapper.readTree(canonical);
-      ((ObjectNode) node.get("integrations")).putObject(legacyField);
+  void rejectsLegacyIntegrationsInStoredJson() throws Exception {
+    // 旧 integrations 段（含 comfyui/minimaxH3 与更早的 openCliHub/seedance/gptImage2）已从设置合同删除：
+    // 存储层按未知字段硬拒绝，绝不静默忽略或兼容解码出旧值。
+    ObjectNode legacySections = (ObjectNode) mapper.readTree(codec.encode(SystemSettings.DEFAULT));
+    legacySections.putObject("integrations");
+    assertThrows(
+        IllegalStateException.class, () -> codec.decode(mapper.writeValueAsString(legacySections)));
+    for (String legacyField : List.of("openCliHub", "seedance", "gptImage2", "comfyui")) {
+      ObjectNode node = (ObjectNode) mapper.readTree(codec.encode(SystemSettings.DEFAULT));
+      ((ObjectNode) node.putObject("integrations")).putObject(legacyField);
       assertThrows(
           IllegalStateException.class,
           () -> codec.decode(mapper.writeValueAsString(node)),
@@ -303,8 +299,7 @@ class SystemSettingsCodecTest {
   void explicitNullNullableReferencesStillDecode() throws Exception {
     // 显式 null 的 nullable 引用（语义等于 canonical 省略）必须仍可解码为同一聚合。
     ObjectNode root = (ObjectNode) mapper.readTree(codec.encode(SystemSettings.DEFAULT));
-    ((ObjectNode) ((ObjectNode) root.get("integrations")).get("comfyui"))
-        .set("baseUrl", mapper.nullNode());
+    ((ObjectNode) root.get("network")).set("proxyUrl", mapper.nullNode());
     assertEquals(SystemSettings.DEFAULT, codec.decode(mapper.writeValueAsString(root)));
   }
 
@@ -399,9 +394,15 @@ class SystemSettingsCodecTest {
         error.getMessage());
     sections.getAiRuntime().setRetryBaseDelayMillis(2_000L);
 
-    sections.getIntegrations().setMinimaxH3(null);
-    assertThrows(IllegalArgumentException.class, () -> codec.fromDto(sections));
+    SystemSettingsNetworkDTO network = sections.getNetwork();
+    sections.setNetwork(null);
+    IllegalArgumentException missingSection =
+        assertThrows(IllegalArgumentException.class, () -> codec.fromDto(sections));
+    assertTrue(
+        missingSection.getMessage().contains("network is required"), missingSection.getMessage());
+    sections.setNetwork(network);
     assertThrows(IllegalArgumentException.class, () -> codec.fromDto(null));
+    assertEquals(SystemSettings.DEFAULT, codec.fromDto(sections));
   }
 
   @Test
@@ -424,7 +425,6 @@ class SystemSettingsCodecTest {
         SystemSettings.DEFAULT.aiRuntime(),
         SystemSettings.DEFAULT.environment(),
         SystemSettings.DEFAULT.network(),
-        SystemSettings.DEFAULT.integrations(),
         SystemSettings.DEFAULT.storageMedia(),
         SystemSettings.DEFAULT.advanced());
   }
@@ -457,10 +457,10 @@ class SystemSettingsCodecTest {
     return mapper.writeValueAsString(root);
   }
 
-  private String withIntegrationsField(String canonical, String group, String field, JsonNode value)
+  private String withStorageMediaField(String canonical, String field, JsonNode value)
       throws Exception {
     ObjectNode root = (ObjectNode) mapper.readTree(canonical);
-    ((ObjectNode) ((ObjectNode) root.get("integrations")).get(group)).set(field, value);
+    ((ObjectNode) root.get("storageMedia")).set(field, value);
     return mapper.writeValueAsString(root);
   }
 

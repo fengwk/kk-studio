@@ -339,7 +339,6 @@ public class S3PresignServiceTest {
         SystemSettings.DEFAULT.aiRuntime(),
         SystemSettings.DEFAULT.environment(),
         SystemSettings.DEFAULT.network(),
-        SystemSettings.DEFAULT.integrations(),
         storageMedia,
         SystemSettings.DEFAULT.advanced());
   }

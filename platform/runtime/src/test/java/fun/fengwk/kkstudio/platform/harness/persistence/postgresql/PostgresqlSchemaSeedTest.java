@@ -242,8 +242,6 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
 
       assertEquals(900L, settings.storageMedia().uploadExpiresSeconds());
       assertEquals(SystemSettings.Network.DEFAULT, settings.network());
-      assertTrue(!settings.integrations().comfyui().enabled());
-      assertTrue(!settings.integrations().minimaxH3().enabled());
       assertRepeatableMigrationRecorded(conn, "canvas test seed");
       assertRepeatableMigrationRecorded(conn, "dev seed");
 

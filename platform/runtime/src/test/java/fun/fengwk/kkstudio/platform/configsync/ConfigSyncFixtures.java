@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.platform.configsync;
 
+import static org.mockito.Mockito.mock;
+
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
@@ -9,6 +11,7 @@ import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.common.schema.StringSchema;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
+import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.service.impl.AgentDefinitionMutationFactory;
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpDiscoveryStatus;
@@ -36,7 +39,9 @@ import fun.fengwk.kkstudio.platform.plugin.PluginInstance;
 import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
 import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialKeyLoader;
+import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRow;
+import fun.fengwk.kkstudio.platform.plugin.service.PluginAgentDependencies;
 import fun.fengwk.kkstudio.platform.plugin.testing.TestPluginFixtures;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
@@ -333,6 +338,20 @@ final class ConfigSyncFixtures {
 
   static StudioPluginRegistry registry(StudioPlugin... plugins) {
     return new StudioPluginRegistry(List.of(plugins));
+  }
+
+  /** 宿主依赖服务替身：Graph/Planner 只做纯声明解析，仓库替身不会被调用。 */
+  static PluginAgentDependencies agentDependencies(StudioPlugin... plugins) {
+    return new PluginAgentDependencies(
+        registry(plugins),
+        mock(PluginConfigurationRepository.class),
+        mock(AgentDefinitionRepository.class));
+  }
+
+  static PluginAgentDependencies agentDependencies(
+      AgentDefinitionRepository definitionRepository, StudioPlugin... plugins) {
+    return new PluginAgentDependencies(
+        registry(plugins), mock(PluginConfigurationRepository.class), definitionRepository);
   }
 
   /**

@@ -29,36 +29,6 @@ final class SystemSettingsValidation {
     PermissionPathPattern.validate(pattern);
   }
 
-  static String requirePresentableUrl(String value, String field) {
-    if (value == null || value.isBlank()) {
-      return null;
-    }
-    if (!value.equals(value.strip())) {
-      throw new IllegalArgumentException(field + " must not contain surrounding whitespace");
-    }
-    return value.strip();
-  }
-
-  static String requireOptionalAgentName(String value, String field) {
-    if (value == null) {
-      return null;
-    }
-    if (!value.equals(value.strip())) {
-      throw new IllegalArgumentException(field + " must not contain surrounding whitespace");
-    }
-    String stripped = value.strip();
-    if (stripped.isEmpty()) {
-      throw new IllegalArgumentException(field + " must not be blank");
-    }
-    if (stripped.indexOf('/') >= 0) {
-      throw new IllegalArgumentException(field + " must not contain '/'");
-    }
-    if (stripped.length() > 64) {
-      throw new IllegalArgumentException(field + " must be at most 64 characters");
-    }
-    return stripped;
-  }
-
   static void requirePositiveMillis(long value, String field) {
     if (value <= 0) {
       throw new IllegalArgumentException(field + " must be positive");

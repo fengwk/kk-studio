@@ -174,7 +174,6 @@ test('settings contract accepts an empty existing HTTP retry list without mutati
     aiRuntime: { retryBaseDelayMillis: '2500', modelHttpRetryStatusCodes: [] },
     environment: {},
     network: { proxyUrl: null, noProxyHosts: '' },
-    integrations: { minimaxH3: {} },
     storageMedia: {
       temporaryResourceTtlSeconds: '259200',
       temporaryResourceCleanupIntervalSeconds: '1800',

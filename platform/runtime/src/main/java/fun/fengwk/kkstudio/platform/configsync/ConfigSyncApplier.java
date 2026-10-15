@@ -17,10 +17,9 @@ import fun.fengwk.kkstudio.platform.catalog.skill.service.SkillCatalogService;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentService;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
-import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.CatalogVersions;
-import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRecord;
+import fun.fengwk.kkstudio.platform.plugin.service.PluginAgentDependencies;
 import fun.fengwk.kkstudio.platform.plugin.service.PluginConfigurationCommitService;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsService;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
@@ -35,8 +34,6 @@ import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsUpdateDTO;
 
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.TreeSet;
 
 /**
  * 在一个数据库事务内落地 {@link ConfigSyncPlan}。
@@ -68,7 +65,7 @@ public class ConfigSyncApplier {
   private final EnvironmentService environmentService;
   private final SystemSettingsService systemSettingsService;
   private final PluginConfigurationCommitService pluginCommitService;
-  private final StudioPluginRegistry pluginRegistry;
+  private final PluginAgentDependencies pluginAgentDependencies;
 
   /** 事务内写入计划中的全部事实。 */
   @Transactional
@@ -166,33 +163,20 @@ public class ConfigSyncApplier {
    * <p>导入只承载普通值，秘密补丁恒为空（全部 KEEP），因此绝不复制或恢复任何凭据；普通配置变化可能合法推进认证代际，但秘密载荷保持原状。
    */
   private void applyPlugins(ConfigSyncPlan plan) {
-    requirePluginAgentDependencies(plan.plugins());
+    // 计划到写入之间删除的 Agent 不会改变插件目录 epoch，CAS 无法发现它；先按同一声明批量预锁，再开始任何插件写入。
+    pluginAgentDependencies.requireDeclaredAgents(
+        plan.plugins().stream()
+            .map(
+                plugin ->
+                    new PluginAgentDependencies.Declaration(
+                        plugin.pluginId(), plugin.expectedRevision(), plugin.valuesJson()))
+            .toList());
     long epoch = plan.pluginCatalogEpoch();
     for (ConfigSyncPlan.PluginImport plugin : plan.plugins()) {
       PluginCatalogRecord committed =
           pluginCommitService.configure(
               plugin.pluginId(), epoch, plugin.expectedRevision(), plugin.valuesJson(), Map.of());
       epoch = committed.epoch();
-    }
-  }
-
-  /**
-   * 事务内重新核验计划插件声明的 Agent 依赖仍存在。
-   *
-   * <p>计划到写入之间删除的 Agent 不会改变插件目录 epoch，CAS 无法发现它；这里按插件自身的声明重新解析，稳定排序去重后逐个以 {@code for update}
-   * 读取：缺失即固定的安全校验失败，让整份导入回滚。未知或致命错误不在此转换，照常上抛。
-   */
-  private void requirePluginAgentDependencies(List<ConfigSyncPlan.PluginImport> plugins) {
-    Set<String> requiredAgents = new TreeSet<>();
-    for (ConfigSyncPlan.PluginImport plugin : plugins) {
-      requiredAgents.addAll(
-          ConfigSyncPluginAgents.requiredAgentNames(
-              pluginRegistry, plugin.pluginId(), plugin.expectedRevision(), plugin.valuesJson()));
-    }
-    for (String agent : requiredAgents) {
-      if (definitionRepository.getByNameForUpdate(agent) == null) {
-        throw new AiValidationException(RESOURCE, "plugins reference a missing agent");
-      }
     }
   }
 
@@ -203,7 +187,6 @@ public class ConfigSyncApplier {
     dto.setAiRuntime(sections.getAiRuntime());
     dto.setEnvironment(sections.getEnvironment());
     dto.setNetwork(sections.getNetwork());
-    dto.setIntegrations(sections.getIntegrations());
     dto.setStorageMedia(sections.getStorageMedia());
     dto.setAdvanced(sections.getAdvanced());
     // 使用计划期快照版本做 CAS：计划到 apply 之间 settings 若被并发修改会正常冲突并随事务整体回滚。

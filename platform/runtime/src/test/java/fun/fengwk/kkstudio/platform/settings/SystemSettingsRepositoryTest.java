@@ -131,7 +131,6 @@ public class SystemSettingsRepositoryTest extends PostgresSpringTestSupport {
         SystemSettings.DEFAULT.aiRuntime(),
         SystemSettings.DEFAULT.environment(),
         SystemSettings.DEFAULT.network(),
-        SystemSettings.DEFAULT.integrations(),
         SystemSettings.DEFAULT.storageMedia(),
         SystemSettings.DEFAULT.advanced());
   }
@@ -150,7 +149,6 @@ public class SystemSettingsRepositoryTest extends PostgresSpringTestSupport {
         SystemSettings.DEFAULT.aiRuntime(),
         SystemSettings.DEFAULT.environment(),
         SystemSettings.DEFAULT.network(),
-        SystemSettings.DEFAULT.integrations(),
         SystemSettings.DEFAULT.storageMedia(),
         SystemSettings.DEFAULT.advanced());
   }

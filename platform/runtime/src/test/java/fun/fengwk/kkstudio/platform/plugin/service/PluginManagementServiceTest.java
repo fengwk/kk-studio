@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -35,6 +36,7 @@ import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
+import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
@@ -204,7 +206,13 @@ class PluginManagementServiceTest {
         transactions,
         clock,
         () -> {},
-        () -> {});
+        () -> {},
+        pluginAgentDependencies());
+  }
+
+  /** 该类的合成插件不声明 Agent 依赖：定义仓库替身不会被调用，声明解析仍走真实宿主服务。 */
+  private PluginAgentDependencies pluginAgentDependencies() {
+    return new PluginAgentDependencies(registry, catalog, mock(AgentDefinitionRepository.class));
   }
 
   private PluginManagementService service(
@@ -775,7 +783,8 @@ class PluginManagementServiceTest {
             transactions,
             clock,
             () -> {},
-            () -> {});
+            () -> {},
+            pluginAgentDependencies());
 
     assertThrows(
         AiVersionConflictException.class,

@@ -17,21 +17,20 @@ import java.util.Objects;
 /**
  * 全局 system settings 的强类型聚合。
  *
- * <p>这是 {@code system_setting} 单行（{@code id=1}）中 {@code config} JSON 的唯一语义模型：七个必填 section （tool /
- * aiRuntime / environment / network / integrations / storageMedia / advanced）完整携带，任何一个 section
- * 缺失都失败。所有校验都在 canonical constructor 中执行：字段范围、跨字段约束（例如 retry maxDelay&gt;=baseDelay、processor
- * heartbeat&lt;lease、comfyPollInterval&lt;comfyMaxWait）以及「启用集成必须携带其身份 / 位置字段」。permission 规则数组保序；不依赖
- * JSON 对象键顺序。
+ * <p>这是 {@code system_setting} 单行（{@code id=1}）中 {@code config} JSON 的唯一语义模型：六个必填 section （tool /
+ * aiRuntime / environment / network / storageMedia / advanced）完整携带，任何一个 section 缺失都失败。所有校验都在
+ * canonical constructor 中执行：字段范围与跨字段约束（例如 retry maxDelay&gt;=baseDelay、processor
+ * heartbeat&lt;lease）。permission 规则数组保序；不依赖 JSON 对象键顺序。
  *
- * <p>安全边界：本聚合只承载可持久化的非敏感配置。DB/server 连接、filesystem root/workdir/temp/二进制路径、 daemon
- * token/identity、access/API key、bearer token、OpenCLI instanceId 等秘密与 bootstrap 输入绝不进入本模型。
+ * <p>插件（含 ComfyUI 与 MiniMax-H3）的运行参数不再属于设置合同：它们只有插件 Schema 与配置同步 plugins 一个来源。本聚合只承载可持久化的
+ * 非敏感配置。DB/server 连接、filesystem root/workdir/temp/二进制路径、daemon token/identity、access/API key、bearer
+ * token、OpenCLI instanceId 等秘密与 bootstrap 输入绝不进入本模型。
  */
 public record SystemSettings(
     Tool tool,
     AiRuntime aiRuntime,
     Environment environment,
     Network network,
-    Integrations integrations,
     StorageMedia storageMedia,
     Advanced advanced) {
 
@@ -42,7 +41,6 @@ public record SystemSettings(
           AiRuntime.DEFAULT,
           Environment.DEFAULT,
           Network.DEFAULT,
-          Integrations.DEFAULT,
           StorageMedia.DEFAULT,
           Advanced.DEFAULT);
 
@@ -51,7 +49,6 @@ public record SystemSettings(
     aiRuntime = Objects.requireNonNull(aiRuntime, "aiRuntime");
     environment = Objects.requireNonNull(environment, "environment");
     network = Objects.requireNonNull(network, "network");
-    integrations = Objects.requireNonNull(integrations, "integrations");
     storageMedia = Objects.requireNonNull(storageMedia, "storageMedia");
     advanced = Objects.requireNonNull(advanced, "advanced");
   }
@@ -199,99 +196,6 @@ public record SystemSettings(
         HttpProxySelector.fixed(proxyUrl, noProxyHosts);
       } catch (IllegalArgumentException error) {
         throw new IllegalArgumentException("network.noProxyHosts is invalid");
-      }
-    }
-  }
-
-  /** integrations section：外部媒体/生成集成的非敏感运行参数，每个集成都是必填嵌套对象。 */
-  public record Integrations(Comfyui comfyui, MiniMaxH3 minimaxH3) {
-
-    public static final Integrations DEFAULT = new Integrations(Comfyui.DEFAULT, MiniMaxH3.DEFAULT);
-
-    public Integrations {
-      comfyui = Objects.requireNonNull(comfyui, "integrations.comfyui");
-      minimaxH3 = Objects.requireNonNull(minimaxH3, "integrations.minimaxH3");
-    }
-  }
-
-  /** {@code integrations.comfyui}：ComfyUI 运行端点与文件输入预算。apiKey 属秘密，不进入聚合。 */
-  public record Comfyui(
-      boolean enabled,
-      String baseUrl,
-      long connectTimeoutMillis,
-      long readTimeoutMillis,
-      long websocketTimeoutMillis,
-      long maxInputFileBytes) {
-
-    public static final Comfyui DEFAULT =
-        new Comfyui(false, null, 10_000L, 30_000L, 1_800_000L, 50L * 1024 * 1024);
-
-    public Comfyui {
-      SystemSettingsValidation.requirePositiveMillis(
-          connectTimeoutMillis, "integrations.comfyui.connectTimeoutMillis");
-      SystemSettingsValidation.requirePositiveMillis(
-          readTimeoutMillis, "integrations.comfyui.readTimeoutMillis");
-      SystemSettingsValidation.requirePositiveMillis(
-          websocketTimeoutMillis, "integrations.comfyui.websocketTimeoutMillis");
-      SystemSettingsValidation.requirePositiveMillis(
-          maxInputFileBytes, "integrations.comfyui.maxInputFileBytes");
-      baseUrl =
-          SystemSettingsValidation.requirePresentableUrl(baseUrl, "integrations.comfyui.baseUrl");
-      if (enabled && baseUrl == null) {
-        throw new IllegalArgumentException(
-            "integrations.comfyui.baseUrl is required when comfyui is enabled");
-      }
-    }
-  }
-
-  /** {@code integrations.minimaxH3}：MiniMax-H3 Ref2VA adapter 的非敏感配置。comfyBearerToken 属秘密，不进入聚合。 */
-  public record MiniMaxH3(
-      boolean enabled,
-      String promptAgentName,
-      long promptMaxWaitMillis,
-      String comfyBaseUrl,
-      long comfyConnectTimeoutMillis,
-      long comfyRequestTimeoutMillis,
-      long comfyPollIntervalMillis,
-      long comfyMaxWaitMillis) {
-
-    public static final MiniMaxH3 DEFAULT =
-        new MiniMaxH3(false, null, 600_000L, null, 10_000L, 30_000L, 2_000L, 1_800_000L);
-
-    public MiniMaxH3 {
-      SystemSettingsValidation.requirePositiveBounded(
-          promptMaxWaitMillis, 30L * 60 * 1000, "integrations.minimaxH3.promptMaxWaitMillis");
-      SystemSettingsValidation.requirePositiveBounded(
-          comfyConnectTimeoutMillis,
-          60L * 1000,
-          "integrations.minimaxH3.comfyConnectTimeoutMillis");
-      SystemSettingsValidation.requirePositiveBounded(
-          comfyRequestTimeoutMillis,
-          5L * 60 * 1000,
-          "integrations.minimaxH3.comfyRequestTimeoutMillis");
-      SystemSettingsValidation.requirePositiveBounded(
-          comfyPollIntervalMillis, 60L * 1000, "integrations.minimaxH3.comfyPollIntervalMillis");
-      SystemSettingsValidation.requirePositiveBounded(
-          comfyMaxWaitMillis, 2L * 60 * 60 * 1000, "integrations.minimaxH3.comfyMaxWaitMillis");
-      if (comfyPollIntervalMillis >= comfyMaxWaitMillis) {
-        throw new IllegalArgumentException(
-            "integrations.minimaxH3.comfyPollIntervalMillis must be less than comfyMaxWaitMillis");
-      }
-      promptAgentName =
-          SystemSettingsValidation.requireOptionalAgentName(
-              promptAgentName, "integrations.minimaxH3.promptAgentName");
-      comfyBaseUrl =
-          SystemSettingsValidation.requirePresentableUrl(
-              comfyBaseUrl, "integrations.minimaxH3.comfyBaseUrl");
-      if (enabled) {
-        if (promptAgentName == null) {
-          throw new IllegalArgumentException(
-              "integrations.minimaxH3.promptAgentName is required when minimaxH3 is enabled");
-        }
-        if (comfyBaseUrl == null) {
-          throw new IllegalArgumentException(
-              "integrations.minimaxH3.comfyBaseUrl is required when minimaxH3 is enabled");
-        }
       }
     }
   }
