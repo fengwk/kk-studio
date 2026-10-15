@@ -60,6 +60,7 @@ import fun.fengwk.kkstudio.platform.plugin.catalog.PluginAuthContextFingerprint;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogFingerprint;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogManifest;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRecord;
+import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRefreshTrigger;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogSnapshot;
 import fun.fengwk.kkstudio.platform.plugin.credential.DatabasePluginCredentialStore;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialCodec;
@@ -140,6 +141,7 @@ class PluginConfigurationCommitServicePostgresIntegrationTest {
   private PluginConfigurationCommitService commitService;
   private PluginConfigurationCommitService keylessCommitService;
   private final AtomicInteger dispatcherWakes = new AtomicInteger();
+  private final AtomicInteger catalogWakes = new AtomicInteger();
 
   private StaticKeyPlugin staticPlugin;
   private DeepLinkPlugin deepLinkPlugin;
@@ -199,6 +201,7 @@ class PluginConfigurationCommitServicePostgresIntegrationTest {
 
     seedCatalog();
     dispatcherWakes.set(0);
+    catalogWakes.set(0);
   }
 
   private PluginConfigurationCommitService commitService(
@@ -214,7 +217,8 @@ class PluginConfigurationCommitServicePostgresIntegrationTest {
         List::of,
         transactionManager,
         clock,
-        dispatcherWakes::incrementAndGet);
+        dispatcherWakes::incrementAndGet,
+        catalogWakes::incrementAndGet);
   }
 
   /** 以真实快照指纹建立 epoch 1 的权威 catalog：两个已安装 Plugin 各有一条 revision 1 历史。 */
@@ -359,6 +363,8 @@ class PluginConfigurationCommitServicePostgresIntegrationTest {
     assertEquals(
         1, dispatcherWakes.get(), "a credential write must wake the refresh dispatcher once");
     assertEquals(
+        1, catalogWakes.get(), "every successful commit must wake the local catalog refresh once");
+    assertEquals(
         "payload={\"apiKey\":\"" + STATIC_PAYLOAD_SECRET + "\"}",
         staticPlugin.lastObservedCredential(),
         "the candidate instance must see this commit's private secret view");
@@ -381,6 +387,10 @@ class PluginConfigurationCommitServicePostgresIntegrationTest {
         Arrays.equals(before.encryptedPayload(), after.encryptedPayload()),
         "a keep-only commit must not re-encrypt the credential");
     assertEquals(0, dispatcherWakes.get(), "no credential change means no dispatcher wake");
+    assertEquals(
+        1,
+        catalogWakes.get(),
+        "a keep-only commit still advances the catalog and must wake the local refresh once");
 
     PluginConfigurationRow history =
         configurationRepository.readConfiguration(STATIC_PLUGIN_ID, 2L).orElseThrow();
@@ -514,6 +524,7 @@ class PluginConfigurationCommitServicePostgresIntegrationTest {
     assertEquals(2, countHistoryRows());
     assertTrue(configurationRepository.readConfiguration(STATIC_PLUGIN_ID, 2L).isEmpty());
     assertEquals(0, dispatcherWakes.get());
+    assertEquals(0, catalogWakes.get(), "a rolled-back commit must not wake the local refresh");
     verify(candidate, times(1)).close();
   }
 
@@ -605,6 +616,7 @@ class PluginConfigurationCommitServicePostgresIntegrationTest {
     assertEquals(epochBefore, configurationRepository.readCatalog().epoch());
     assertEquals(2, countHistoryRows(), "no revision history may be written");
     assertEquals(0, dispatcherWakes.get());
+    assertEquals(0, catalogWakes.get(), "a failed commit must not wake the local refresh");
   }
 
   /** 陈旧坐标必须冲突失败，且失败提交不留任何痕迹。 */
@@ -635,6 +647,8 @@ class PluginConfigurationCommitServicePostgresIntegrationTest {
         configurationRepository.readConfiguration(STATIC_PLUGIN_ID, 1L).orElseThrow().valuesJson());
     assertTrue(credentialRepository.find(STATIC_PLUGIN_ID).isEmpty());
     assertEquals(0, dispatcherWakes.get());
+    assertEquals(
+        0, catalogWakes.get(), "a stale-coordinate conflict must not wake the local refresh");
   }
 
   /** 登录完成走同一提交入口：写入交互凭据行并轮换代际，配置值保持不变。 */
@@ -663,6 +677,7 @@ class PluginConfigurationCommitServicePostgresIntegrationTest {
             });
 
     verify(dispatcher, times(1)).wake();
+    assertEquals(1, catalogWakes.get(), "the wired catalog trigger must be woken exactly once");
     assertEquals(2L, configurationRepository.readCatalog().epoch());
     assertTrue(credentialRepository.find(STATIC_PLUGIN_ID).isPresent());
   }
@@ -687,6 +702,7 @@ class PluginConfigurationCommitServicePostgresIntegrationTest {
             });
 
     verifyNoInteractions(dispatcher);
+    assertEquals(0, catalogWakes.get(), "a rolled-back commit must not wake the local refresh");
     assertEquals(1L, configurationRepository.readCatalog().epoch());
     assertTrue(credentialRepository.find(STATIC_PLUGIN_ID).isEmpty());
     assertEquals(2, countHistoryRows());
@@ -716,7 +732,8 @@ class PluginConfigurationCommitServicePostgresIntegrationTest {
             List::of,
             failingTransactions,
             clock,
-            dispatcherWakes::incrementAndGet);
+            dispatcherWakes::incrementAndGet,
+            catalogWakes::incrementAndGet);
 
     assertSame(
         primary,
@@ -726,12 +743,16 @@ class PluginConfigurationCommitServicePostgresIntegrationTest {
     verify(instance, times(1)).close();
     assertEquals(1L, configurationRepository.readCatalog().epoch());
     assertEquals(0, dispatcherWakes.get());
+    assertEquals(0, catalogWakes.get(), "a rolled-back commit must not wake the local refresh");
   }
 
   private PluginConfigurationCommitService wiredCommitService(
       PluginCredentialRefreshDispatcher dispatcher) {
     StaticListableBeanFactory beans = new StaticListableBeanFactory();
     beans.addBean("refreshDispatcher", dispatcher);
+    // 生产装配的目录监听端口同样只排队：这里用计数器替身断言它在提交后恰好被唤醒一次。
+    beans.addBean(
+        "catalogRefreshTrigger", (PluginCatalogRefreshTrigger) catalogWakes::incrementAndGet);
     return new PluginConfiguration()
         .pluginConfigurationCommitService(
             registry,
@@ -743,7 +764,8 @@ class PluginConfigurationCommitServicePostgresIntegrationTest {
             beans.getBeanProvider(HarnessContributor.class),
             beans.getBeanProvider(CanvasFunctionAdapter.class),
             transactionManager,
-            beans.getBeanProvider(PluginCredentialRefreshDispatcher.class));
+            beans.getBeanProvider(PluginCredentialRefreshDispatcher.class),
+            beans.getBeanProvider(PluginCatalogRefreshTrigger.class));
   }
 
   /** 登录完成写入交互凭据行的具体断言。 */
@@ -806,18 +828,24 @@ class PluginConfigurationCommitServicePostgresIntegrationTest {
   void disconnectDeletesTheRowAndIsIdempotentWithoutTheMasterKey() {
     loginDeepLinkPlugin();
     int wakesAfterLogin = dispatcherWakes.get();
+    int catalogWakesAfterLogin = catalogWakes.get();
 
     keylessCommitService.disconnect(DEEP_LINK_PLUGIN_ID, 2L);
 
     assertTrue(credentialRepository.find(DEEP_LINK_PLUGIN_ID).isEmpty());
     assertEquals(3L, configurationRepository.readCatalog().epoch());
     assertEquals(wakesAfterLogin + 1, dispatcherWakes.get());
+    assertEquals(catalogWakesAfterLogin + 1, catalogWakes.get());
 
     keylessCommitService.disconnect(DEEP_LINK_PLUGIN_ID, 3L);
 
     assertTrue(credentialRepository.find(DEEP_LINK_PLUGIN_ID).isEmpty());
     assertEquals(4L, configurationRepository.readCatalog().epoch(), "disconnect is idempotent");
     assertEquals(wakesAfterLogin + 1, dispatcherWakes.get(), "a no-op disconnect must not wake");
+    assertEquals(
+        catalogWakesAfterLogin + 2,
+        catalogWakes.get(),
+        "even a no-op disconnect advances the catalog and must wake the local refresh");
   }
 
   /** 只有 registry 里已安装的 Plugin 才能提交；未知 id fail closed。 */
@@ -864,6 +892,7 @@ class PluginConfigurationCommitServicePostgresIntegrationTest {
     assertEquals(historyBefore, countHistoryRows());
     assertTrue(credentialRepository.find(STATIC_PLUGIN_ID).isEmpty());
     assertEquals(0, dispatcherWakes.get());
+    assertEquals(0, catalogWakes.get(), "a rejected patch must not wake the local refresh");
   }
 
   /**

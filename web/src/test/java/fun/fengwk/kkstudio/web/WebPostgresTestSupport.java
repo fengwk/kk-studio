@@ -20,6 +20,7 @@ import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
 import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogFingerprint;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogManifest;
+import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRuntime;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogSnapshot;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRow;
@@ -35,7 +36,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.UUID;
 
 /**
@@ -84,7 +84,7 @@ public abstract class WebPostgresTestSupport {
     }
   }
 
-  @Autowired private PluginCatalogSnapshot baselineSnapshot;
+  @Autowired private PluginCatalogRuntime baselineRuntime;
 
   @Autowired private StudioPluginRegistry baselineRegistry;
 
@@ -146,58 +146,61 @@ public abstract class WebPostgresTestSupport {
     return dataSource;
   }
 
-  /** 与本 Context 冻结快照同身份的权威 catalog：身份字段全部来自 live 快照，绝不重新 configure 或采用默认值。 */
+  /** 与本 Context 冻结快照同身份的权威 catalog：身份字段全部来自一次 current 租用的 live 快照，绝不重新 configure 或采用默认值。 */
   private void persistBaselineCatalog() {
-    PluginCatalogSnapshot snapshot = Objects.requireNonNull(baselineSnapshot, "baselineSnapshot");
-    Map<String, PluginCatalogManifest.Entry> entries = new LinkedHashMap<>();
-    List<PluginConfigurationRow> rows = new ArrayList<>();
-    for (PluginCatalogSnapshot.ConfiguredPlugin configured : snapshot.configuredPlugins()) {
-      String pluginId = configured.descriptor().pluginId();
-      StudioPlugin plugin =
-          baselineRegistry
-              .find(pluginId)
-              .orElseThrow(
-                  () -> new IllegalStateException("baseline plugin is not installed: " + pluginId));
-      String schemaFingerprint =
-          PluginCatalogFingerprint.schema(
-              plugin.configurationSchema(), plugin.authenticationSpec());
-      String capabilityFingerprint = snapshot.capabilityFingerprints().get(pluginId);
-      UUID authGeneration = configured.credentialReference().authGeneration();
-      String contextFingerprint = configured.credentialReference().contextFingerprint();
-      long revision = configured.config().revision();
-      String valuesJson = configured.config().valuesJson();
-      entries.put(
-          pluginId,
-          new PluginCatalogManifest.Entry(
-              revision,
-              configured.descriptor().version(),
-              schemaFingerprint,
-              capabilityFingerprint,
-              authGeneration,
-              contextFingerprint));
-      rows.add(
-          new PluginConfigurationRow(
-              pluginId,
-              revision,
-              configured.descriptor().version(),
-              schemaFingerprint,
-              capabilityFingerprint,
-              authGeneration,
-              contextFingerprint,
-              List.of(),
-              valuesJson));
-    }
-    PluginCatalogManifest manifest =
-        new PluginCatalogManifest(entries, snapshot.catalogFingerprint());
-    long expectedEpoch = snapshot.epoch() - 1;
-    if (expectedEpoch < UNINITIALIZED_EPOCH) {
-      throw new IllegalStateException("baseline snapshot must be an initialized epoch");
-    }
-    Boolean committed =
-        new TransactionTemplate(baselineTransactionManager)
-            .execute(status -> baselineRepository.commit(expectedEpoch, rows, manifest));
-    if (!Boolean.TRUE.equals(committed)) {
-      throw new IllegalStateException("baseline catalog initialization must win the epoch CAS");
+    try (PluginCatalogRuntime.Lease lease = baselineRuntime.acquireCurrent()) {
+      PluginCatalogSnapshot snapshot = lease.snapshot();
+      Map<String, PluginCatalogManifest.Entry> entries = new LinkedHashMap<>();
+      List<PluginConfigurationRow> rows = new ArrayList<>();
+      for (PluginCatalogSnapshot.ConfiguredPlugin configured : snapshot.configuredPlugins()) {
+        String pluginId = configured.descriptor().pluginId();
+        StudioPlugin plugin =
+            baselineRegistry
+                .find(pluginId)
+                .orElseThrow(
+                    () ->
+                        new IllegalStateException("baseline plugin is not installed: " + pluginId));
+        String schemaFingerprint =
+            PluginCatalogFingerprint.schema(
+                plugin.configurationSchema(), plugin.authenticationSpec());
+        String capabilityFingerprint = snapshot.capabilityFingerprints().get(pluginId);
+        UUID authGeneration = configured.credentialReference().authGeneration();
+        String contextFingerprint = configured.credentialReference().contextFingerprint();
+        long revision = configured.config().revision();
+        String valuesJson = configured.config().valuesJson();
+        entries.put(
+            pluginId,
+            new PluginCatalogManifest.Entry(
+                revision,
+                configured.descriptor().version(),
+                schemaFingerprint,
+                capabilityFingerprint,
+                authGeneration,
+                contextFingerprint));
+        rows.add(
+            new PluginConfigurationRow(
+                pluginId,
+                revision,
+                configured.descriptor().version(),
+                schemaFingerprint,
+                capabilityFingerprint,
+                authGeneration,
+                contextFingerprint,
+                List.of(),
+                valuesJson));
+      }
+      PluginCatalogManifest manifest =
+          new PluginCatalogManifest(entries, snapshot.catalogFingerprint());
+      long expectedEpoch = snapshot.epoch() - 1;
+      if (expectedEpoch < UNINITIALIZED_EPOCH) {
+        throw new IllegalStateException("baseline snapshot must be an initialized epoch");
+      }
+      Boolean committed =
+          new TransactionTemplate(baselineTransactionManager)
+              .execute(status -> baselineRepository.commit(expectedEpoch, rows, manifest));
+      if (!Boolean.TRUE.equals(committed)) {
+        throw new IllegalStateException("baseline catalog initialization must win the epoch CAS");
+      }
     }
   }
 

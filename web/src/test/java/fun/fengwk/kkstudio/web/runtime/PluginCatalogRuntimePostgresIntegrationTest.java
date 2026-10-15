@@ -44,12 +44,19 @@ import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.PostgresqlPlug
 import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.store.PluginConfigurationJdbcStore;
 import fun.fengwk.kkstudio.platform.plugin.resource.PluginResourceGateway;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
+import fun.fengwk.kkstudio.web.events.ApplicationEventConfiguration;
+import fun.fengwk.kkstudio.web.events.postgresql.PostgresqlNotificationHandler;
+import fun.fengwk.kkstudio.web.events.postgresql.PostgresqlNotificationLoop;
 
 import javax.sql.DataSource;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.LockSupport;
 import java.util.function.BiFunction;
 
 /**
@@ -75,6 +82,89 @@ class PluginCatalogRuntimePostgresIntegrationTest {
   @BeforeEach
   void createIsolatedDatabase() {
     dataSource = WebPostgresTestSupport.createIsolatedDatabase();
+  }
+
+  /** 真 LISTEN 节点收到提交提示立即对账；未接入 LISTEN 的节点仍由周期权威回读追平。 */
+  @Test
+  void notificationAndMissedNotificationBothConvergeToCommittedAuthority() {
+    AtomicInteger remoteRequests = new AtomicInteger();
+    contextRunner(remoteRequests)
+        .run(
+            context -> {
+              PluginConfigurationRepository repository = repository();
+              try (PluginCatalogRuntime notified = node(context, repository);
+                  PluginCatalogRuntime polling = node(context, repository);
+                  PluginCatalogRefresher notificationRefresh =
+                      new PluginCatalogRefresher(notified, Duration.ofHours(1));
+                  PluginCatalogRefresher periodicRefresh =
+                      new PluginCatalogRefresher(polling, Duration.ofMillis(50))) {
+                CountDownLatch listening = new CountDownLatch(1);
+                CountDownLatch notification = new CountDownLatch(1);
+                PostgresqlNotificationHandler production =
+                    new ApplicationEventConfiguration()
+                        .pluginCatalogNotificationHandler(notificationRefresh);
+                PostgresqlNotificationHandler observed =
+                    new PostgresqlNotificationHandler(
+                        production.channel(),
+                        payload -> {
+                          production.onNotification(payload);
+                          notification.countDown();
+                        },
+                        () -> {
+                          production.onResync();
+                          listening.countDown();
+                        });
+                try (PostgresqlNotificationLoop loop =
+                    new PostgresqlNotificationLoop(
+                        dataSource,
+                        List.of(observed),
+                        Duration.ofMillis(50),
+                        Duration.ofMillis(50))) {
+                  notificationRefresh.start();
+                  periodicRefresh.start();
+                  loop.start();
+                  assertTrue(listening.await(5, TimeUnit.SECONDS), "LISTEN must be installed");
+                  commitDisabledRevision(context, repository);
+                  assertTrue(
+                      notification.await(5, TimeUnit.SECONDS),
+                      "committed NOTIFY must be delivered");
+                  awaitApplied(notified, 2);
+                  awaitApplied(polling, 2);
+                  assertEquals(notified.state(), polling.state());
+                  try (PluginCatalogRuntime.Lease lease = notified.acquireCurrent()) {
+                    assertTrue(lease.snapshot().harnessCatalog().tools().isEmpty());
+                  }
+
+                  // 回滚不能成为新权威，也不能由事务中的 NOTIFY 提前应用。
+                  new TransactionTemplate(new DataSourceTransactionManager(dataSource))
+                      .executeWithoutResult(
+                          status -> {
+                            commitDisabledRevision(context, repository);
+                            assertEquals(2, notified.state().appliedEpoch());
+                            status.setRollbackOnly();
+                          });
+                  assertEquals(2, epoch());
+                  assertEquals(2, historyRows());
+
+                  // 断开监听期间漏掉提交；周期节点先追平，监听节点只在重连 resync 后追平。
+                  loop.stop();
+                  commitDisabledRevision(context, repository);
+                  awaitApplied(polling, 3);
+                  assertEquals(2, notified.state().appliedEpoch());
+                  loop.start();
+                  awaitApplied(notified, 3);
+                }
+              }
+            });
+    assertEquals(0, remoteRequests.get());
+  }
+
+  private static void awaitApplied(PluginCatalogRuntime runtime, long epoch) {
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    while (runtime.state().appliedEpoch() != epoch && System.nanoTime() < deadline) {
+      LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(1));
+    }
+    assertEquals(new PluginCatalogRuntime.RuntimeState(epoch, epoch, null), runtime.state());
   }
 
   /** 两个运行期节点对同一权威推进各自对账：都发布同一 epoch、同一指纹与同一两域事实，且都不发远端请求。 */

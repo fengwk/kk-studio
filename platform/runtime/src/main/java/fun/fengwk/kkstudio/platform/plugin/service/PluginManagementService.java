@@ -17,6 +17,7 @@ import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
 import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogManifest;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRecord;
+import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRuntime;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogSnapshot;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialProjection;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialStore;
@@ -62,7 +63,7 @@ public final class PluginManagementService {
   private static final SchemaJsonCodec SCHEMA_CODEC = new SchemaJsonCodec();
 
   private final StudioPluginRegistry registry;
-  private final Supplier<PluginCatalogSnapshot> appliedSnapshot;
+  private final Supplier<PluginCatalogRuntime> catalogRuntime;
   private final PluginConfigurationRepository configurationRepository;
   private final PluginCredentialStore credentialStore;
   private final PluginConfigurationCommitService commitService;
@@ -72,7 +73,7 @@ public final class PluginManagementService {
 
   public PluginManagementService(
       StudioPluginRegistry registry,
-      Supplier<PluginCatalogSnapshot> appliedSnapshot,
+      Supplier<PluginCatalogRuntime> catalogRuntime,
       PluginConfigurationRepository configurationRepository,
       PluginCredentialStore credentialStore,
       PluginConfigurationCommitService commitService,
@@ -80,7 +81,7 @@ public final class PluginManagementService {
       Duration authAttemptTtl,
       Clock clock) {
     this.registry = Objects.requireNonNull(registry, "registry");
-    this.appliedSnapshot = Objects.requireNonNull(appliedSnapshot, "appliedSnapshot");
+    this.catalogRuntime = Objects.requireNonNull(catalogRuntime, "catalogRuntime");
     this.configurationRepository =
         Objects.requireNonNull(configurationRepository, "configurationRepository");
     this.credentialStore = Objects.requireNonNull(credentialStore, "credentialStore");
@@ -96,11 +97,14 @@ public final class PluginManagementService {
   /**
    * 已安装 Plugin 的安全投影，顺序跟随启动期冻结的安装目录。
    *
-   * <p>整份列表共享一次 desired catalog 与 applied 快照读取：一次响应绝不混用两个 epoch 的坐标、配置与能力。
+   * <p>整份列表共享一次 applied 租用、一次 desired catalog 读取与一次运行期状态读取：一次响应绝不混用两个 epoch 的坐标、配置与能力。
    */
   public List<PluginDTO> listPlugins() {
-    CatalogView view = catalogView();
-    return registry.plugins().stream().map(plugin -> describe(plugin, view)).toList();
+    PluginCatalogRuntime runtime = catalogRuntime.get();
+    try (PluginCatalogRuntime.Lease lease = runtime.acquireCurrent()) {
+      CatalogView view = catalogView(runtime, lease);
+      return registry.plugins().stream().map(plugin -> describe(plugin, view)).toList();
+    }
   }
 
   /** 单个已安装 Plugin 的安全投影；未安装 id 返回 not found。 */
@@ -284,18 +288,21 @@ public final class PluginManagementService {
   /**
    * 安全投影：安装身份、认证状态、desired 配置与 desired/applied 坐标、本节点已应用能力名；秘密只以说明与布尔出现。
    *
-   * <p>一次投影只读一次 desired catalog 与一次 applied 快照，所有坐标、配置与能力都基于这两份 view 派生：热更新期间也不会出现「坐标取自新
-   * epoch、能力取自旧快照」这种混 epoch 的响应。
+   * <p>一次投影只取一次当前 applied 租用、读一次 desired catalog 与一次运行期状态，所有坐标、配置与能力都基于同一租用派生：租用覆盖整个 DTO 投影，
+   * 热更新期间也不会出现「坐标取自新 epoch、能力取自旧快照」这种混 epoch 的响应。
    */
   private PluginDTO describe(StudioPlugin plugin) {
-    return describe(plugin, catalogView());
+    PluginCatalogRuntime runtime = catalogRuntime.get();
+    try (PluginCatalogRuntime.Lease lease = runtime.acquireCurrent()) {
+      return describe(plugin, catalogView(runtime, lease));
+    }
   }
 
   private PluginDTO describe(StudioPlugin plugin, CatalogView view) {
     PluginDescriptor descriptor = plugin.descriptor();
     String pluginId = descriptor.pluginId();
     PluginCatalogRecord catalog = view.desired();
-    PluginCatalogSnapshot applied = view.applied();
+    PluginCatalogSnapshot applied = view.lease().snapshot();
     PluginDTO dto = new PluginDTO();
     dto.setPluginId(pluginId);
     dto.setName(descriptor.name());
@@ -319,12 +326,28 @@ public final class PluginManagementService {
     dto.setDesiredRevision(
         desiredEntry == null ? null : Long.toString(desiredEntry.configRevision()));
     dto.setAppliedRevision(appliedRevisionOf(applied, pluginId));
-    dto.setApplicationError(
-        catalog.epoch() == applied.epoch()
-            ? null
-            : PluginConfigurationCommitService.PENDING_APPLICATION_ERROR);
+    dto.setApplicationError(applicationErrorOf(view));
     applyAppliedCapabilityNames(dto, applied, pluginId);
     return dto;
+  }
+
+  /**
+   * 本节点待应用状态：只有运行期记录的错误与本次投影观察到的 applied 租用、权威 desired 完全同属一个 epoch 时才如实报错，
+   * 否则（例如并发的另一次发布留下了错误）仍只说明本节点尚未应用，绝不把另一个 epoch 的错误伪装成本投影状态。
+   */
+  private static String applicationErrorOf(CatalogView view) {
+    long desiredEpoch = view.desired().epoch();
+    long appliedEpoch = view.lease().snapshot().epoch();
+    if (desiredEpoch == appliedEpoch) {
+      return null;
+    }
+    PluginCatalogRuntime.RuntimeState state = view.runtimeState();
+    if (state.applicationError() != null
+        && state.appliedEpoch() == appliedEpoch
+        && state.desiredEpoch() == desiredEpoch) {
+      return state.applicationError();
+    }
+    return PluginConfigurationCommitService.PENDING_APPLICATION_ERROR;
   }
 
   /**
@@ -359,14 +382,9 @@ public final class PluginManagementService {
     return configuration;
   }
 
-  /** 一次投影的唯一 view：同一份 desired catalog 与 applied 快照，调用方不得拆开分别读取。 */
-  private CatalogView catalogView() {
-    return new CatalogView(requireCatalog(), requireAppliedSnapshot());
-  }
-
-  /** 本节点当前 applied 快照：只在真正需要投影真实应用状态时才向容器索取，装配期不解析。 */
-  private PluginCatalogSnapshot requireAppliedSnapshot() {
-    return Objects.requireNonNull(appliedSnapshot.get(), "applied plugin catalog snapshot");
+  /** 一次投影的唯一 view：同一份 desired catalog、一个当前 applied 租用与一次运行期状态读取，调用方不得拆开分别读取。 */
+  private CatalogView catalogView(PluginCatalogRuntime runtime, PluginCatalogRuntime.Lease lease) {
+    return new CatalogView(requireCatalog(), lease, runtime.state());
   }
 
   private static Optional<PluginCatalogSnapshot.ConfiguredPlugin> appliedPlugin(
@@ -412,8 +430,11 @@ public final class PluginManagementService {
     dto.setCanvasFunctionNames(List.copyOf(functionNames));
   }
 
-  /** 单次投影共享的 desired catalog 与 applied 快照。 */
-  private record CatalogView(PluginCatalogRecord desired, PluginCatalogSnapshot applied) {}
+  /** 单次投影共享的 desired catalog、当前 applied 租用与运行期状态。 */
+  private record CatalogView(
+      PluginCatalogRecord desired,
+      PluginCatalogRuntime.Lease lease,
+      PluginCatalogRuntime.RuntimeState runtimeState) {}
 
   /** 一次 complete 已消费的 attempt 与消费时的权威全局 epoch：落库必须仍匹配该 epoch。 */
   private record AttemptConsumption(PluginAuthAttemptRow attempt, long epoch) {}

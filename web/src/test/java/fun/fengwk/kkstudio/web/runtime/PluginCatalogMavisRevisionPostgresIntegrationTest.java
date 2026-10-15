@@ -25,6 +25,7 @@ import fun.fengwk.kkstudio.platform.plugin.PluginConfigurationState;
 import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
 import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogManifest;
+import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRuntime;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogSnapshot;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialReference;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialStore;
@@ -91,13 +92,16 @@ class PluginCatalogMavisRevisionPostgresIntegrationTest {
                   contextRunner(remoteRequests)
                       .run(
                           context -> {
-                            PluginCatalogSnapshot snapshot =
-                                context.getBean(PluginCatalogSnapshot.class);
-                            assertEquals(1, snapshot.epoch());
-                            assertEquals(
-                                ENABLED_TOOL_COUNT, snapshot.harnessCatalog().tools().size());
-                            verifyNoInteractions(context.getBean(PluginCredentialStore.class));
-                            fingerprint[0] = snapshot.catalogFingerprint();
+                            PluginCatalogRuntime runtime =
+                                context.getBean(PluginCatalogRuntime.class);
+                            try (PluginCatalogRuntime.Lease lease = runtime.acquireCurrent()) {
+                              PluginCatalogSnapshot snapshot = lease.snapshot();
+                              assertEquals(1, snapshot.epoch());
+                              assertEquals(
+                                  ENABLED_TOOL_COUNT, snapshot.harnessCatalog().tools().size());
+                              verifyNoInteractions(context.getBean(PluginCredentialStore.class));
+                              fingerprint[0] = snapshot.catalogFingerprint();
+                            }
                           });
                   return fingerprint[0];
                 }));
@@ -130,14 +134,17 @@ class PluginCatalogMavisRevisionPostgresIntegrationTest {
     contextRunner(remoteRequests)
         .run(
             context -> {
-              PluginCatalogSnapshot snapshot = context.getBean(PluginCatalogSnapshot.class);
-              assertEquals(1, snapshot.epoch());
-              assertEquals(ENABLED_TOOL_COUNT, snapshot.harnessCatalog().tools().size());
-              snapshot
-                  .harnessCatalog()
-                  .tools()
-                  .forEach(tool -> firstStartupTools.add(tool.definition().descriptor().name()));
-              catalogFingerprint[0] = snapshot.catalogFingerprint();
+              PluginCatalogRuntime runtime = context.getBean(PluginCatalogRuntime.class);
+              try (PluginCatalogRuntime.Lease lease = runtime.acquireCurrent()) {
+                PluginCatalogSnapshot snapshot = lease.snapshot();
+                assertEquals(1, snapshot.epoch());
+                assertEquals(ENABLED_TOOL_COUNT, snapshot.harnessCatalog().tools().size());
+                snapshot
+                    .harnessCatalog()
+                    .tools()
+                    .forEach(tool -> firstStartupTools.add(tool.definition().descriptor().name()));
+                catalogFingerprint[0] = snapshot.catalogFingerprint();
+              }
               verifyNoInteractions(context.getBean(PluginCredentialStore.class));
             });
     assertEquals(1, epoch(jdbc), "the first startup must persist epoch 1");
@@ -220,14 +227,17 @@ class PluginCatalogMavisRevisionPostgresIntegrationTest {
     contextRunner(remoteRequests)
         .run(
             context -> {
-              PluginCatalogSnapshot snapshot = context.getBean(PluginCatalogSnapshot.class);
-              assertEquals(2, snapshot.epoch(), "restart must restore the persisted epoch");
-              assertTrue(
-                  snapshot.harnessCatalog().tools().isEmpty(),
-                  "the persisted disabled revision must not be replaced by the enabled default");
-              assertEquals(disabledCatalogFingerprint[0], snapshot.catalogFingerprint());
-              assertEquals(
-                  DISABLED_VALUES, snapshot.configuredPlugins().get(0).config().valuesJson());
+              PluginCatalogRuntime runtime = context.getBean(PluginCatalogRuntime.class);
+              try (PluginCatalogRuntime.Lease lease = runtime.acquireCurrent()) {
+                PluginCatalogSnapshot snapshot = lease.snapshot();
+                assertEquals(2, snapshot.epoch(), "restart must restore the persisted epoch");
+                assertTrue(
+                    snapshot.harnessCatalog().tools().isEmpty(),
+                    "the persisted disabled revision must not be replaced by the enabled default");
+                assertEquals(disabledCatalogFingerprint[0], snapshot.catalogFingerprint());
+                assertEquals(
+                    DISABLED_VALUES, snapshot.configuredPlugins().get(0).config().valuesJson());
+              }
               assertEquals(
                   ENABLED_DEFAULTS,
                   context

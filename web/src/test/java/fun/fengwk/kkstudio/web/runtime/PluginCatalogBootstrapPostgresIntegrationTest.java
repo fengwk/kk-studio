@@ -15,6 +15,7 @@ import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
 import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogBootstrap;
+import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRuntime;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogSnapshot;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialStore;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRepository;
@@ -43,21 +44,25 @@ class PluginCatalogBootstrapPostgresIntegrationTest extends WebPostgresTestSuppo
   @Autowired private ObjectProvider<PluginResourceGateway> resourceGateways;
   @Autowired private ObjectProvider<HarnessContributor> contributors;
   @Autowired private ObjectProvider<CanvasFunctionAdapter> adapters;
-  @Autowired private PluginCatalogSnapshot liveSnapshot;
+  @Autowired private PluginCatalogRuntime liveRuntime;
   @Autowired private DataSource dataSource;
 
   /** 容器启动期缓存的冻结快照：从 V1 未初始化形态初始化到 epoch 1 并覆盖全部安装定义。 */
   @Test
   void contextStartupInitializesTheAuthoritativeCatalog() {
     assertEquals(List.of(MAVIS), registry.pluginIds());
-    assertEquals(1, liveSnapshot.epoch());
-    assertEquals(
-        List.of(MAVIS),
-        liveSnapshot.configuredPlugins().stream()
-            .map(configured -> configured.descriptor().pluginId())
-            .toList());
-    assertTrue(liveSnapshot.harnessCatalog().findDescriptor(new ContributorId(MAVIS)).isPresent());
-    assertNotNull(liveSnapshot.catalogFingerprint());
+    try (PluginCatalogRuntime.Lease lease = liveRuntime.acquireCurrent()) {
+      PluginCatalogSnapshot liveSnapshot = lease.snapshot();
+      assertEquals(1, liveSnapshot.epoch());
+      assertEquals(
+          List.of(MAVIS),
+          liveSnapshot.configuredPlugins().stream()
+              .map(configured -> configured.descriptor().pluginId())
+              .toList());
+      assertTrue(
+          liveSnapshot.harnessCatalog().findDescriptor(new ContributorId(MAVIS)).isPresent());
+      assertNotNull(liveSnapshot.catalogFingerprint());
+    }
   }
 
   /** 同版本重启必须按持久 revision 恢复：epoch 不推进、历史不新增、值来自已持久 config 而不是当前默认值。 */
