@@ -527,6 +527,22 @@ class PluginRuntimeToolCatalogSourceTest {
     assertSame(cleanupException, suppressed[0]);
   }
 
+  @Test
+  void openFailure_whenFatalErrorOccursAndLeaseCloseThrowsSameError_doesNotSelfSuppress() {
+    // 冻结与关闭共享同一 Error：仍传播原实例，不附加自身。
+    AssertionError fatal = new AssertionError("fatal catalog read error");
+    when(mcpCatalog.readSnapshot()).thenThrow(fatal);
+    doThrow(fatal).when(currentRuntimeLease).close();
+
+    PluginRuntimeToolCatalogSource source = new PluginRuntimeToolCatalogSource(runtime, mcpCatalog);
+
+    AssertionError thrown = assertThrows(AssertionError.class, source::acquireCurrent);
+
+    assertSame(fatal, thrown);
+    assertEquals(0, thrown.getSuppressed().length);
+    verify(currentRuntimeLease, times(1)).close();
+  }
+
   // =========================================================================
   // 5. 严格 require 各 mismatch reason
   // =========================================================================
