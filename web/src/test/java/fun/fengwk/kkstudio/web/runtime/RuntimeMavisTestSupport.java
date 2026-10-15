@@ -13,6 +13,17 @@ final class RuntimeMavisTestSupport {
 
   static ApplicationContextRunner withMavis(
       ApplicationContextRunner runner, AtomicInteger requests) {
+    return withMavis(
+        runner,
+        request -> {
+          requests.incrementAndGet();
+          throw new AssertionError("plugin startup and restore must not issue remote requests");
+        });
+  }
+
+  /** 仅替换传输边界；请求和响应都保持运行期类型，不引入可选插件的编译期依赖。 */
+  static ApplicationContextRunner withMavis(
+      ApplicationContextRunner runner, RequestHandler handler) {
     String prefix = "fun.fengwk.kkstudio.plugin.";
     try {
       Class<?> configuration = Class.forName(prefix + "minimaxmavis.MiniMaxMavisAutoConfiguration");
@@ -23,11 +34,7 @@ final class RuntimeMavisTestSupport {
               new Class<?>[] {transportType},
               (proxy, method, args) ->
                   switch (method.getName()) {
-                    case "send" -> {
-                      requests.incrementAndGet();
-                      throw new AssertionError(
-                          "plugin startup and restore must not issue remote requests");
-                    }
+                    case "send" -> handler.send(args[0]);
                     case "toString" -> "offline Mavis transport";
                     case "hashCode" -> System.identityHashCode(proxy);
                     case "equals" -> proxy == args[0];
@@ -41,5 +48,10 @@ final class RuntimeMavisTestSupport {
     } catch (ClassNotFoundException error) {
       throw new AssertionError("the Mavis plugin must be on the web test runtime classpath", error);
     }
+  }
+
+  @FunctionalInterface
+  interface RequestHandler {
+    Object send(Object request) throws Exception;
   }
 }
