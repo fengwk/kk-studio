@@ -99,3 +99,45 @@ export interface PluginConfigurationUpdateRequestDTO {
   valuesJson: string
   secretPatch?: Record<string, PluginSecretPatchDTO>
 }
+
+/**
+ * 显式只读连接检查的请求：只携带调用方所见已应用坐标，不携带远端地址、路径或凭据。
+ */
+export interface PluginConnectionCheckRequestDTO {
+  expectedEpoch: string
+  expectedRevision: string
+}
+
+/** 网络可达性：未发出请求时是 NOT_CHECKED，无法证明时为 INDETERMINATE。 */
+export type PluginConnectionReachability =
+  | 'REACHABLE'
+  | 'UNREACHABLE'
+  | 'NOT_CHECKED'
+  | 'INDETERMINATE'
+
+/**
+ * 本次凭据的认证结论：只有远端确定性拒绝才是 REJECTED，只有成功合法响应才是 ACCEPTED；
+ * UNAVAILABLE 仅表示本地没有可用凭据，其它故障一律 NOT_CHECKED。
+ */
+export type PluginConnectionAuthentication =
+  | 'ACCEPTED'
+  | 'REJECTED'
+  | 'UNAVAILABLE'
+  | 'NOT_CHECKED'
+
+/** 浏览器登录会话：本能力不核验浏览器登录态，当前唯一合法值是 UNKNOWN。 */
+export type PluginConnectionBrowserSession = 'UNKNOWN'
+
+/**
+ * 显式连接检查的结果：安装身份、本次检查依据的已应用坐标、检查时刻与三个类型化维度。
+ * 检查时刻必须存在，不含异常文本、远端地址、远端正文或任何凭据。
+ */
+export interface PluginConnectionCheckDTO {
+  pluginId: string
+  appliedEpoch: string
+  appliedRevision: string
+  checkedAt: Exclude<InstantTimestamp, null>
+  reachability: PluginConnectionReachability
+  authentication: PluginConnectionAuthentication
+  browserSession: PluginConnectionBrowserSession
+}

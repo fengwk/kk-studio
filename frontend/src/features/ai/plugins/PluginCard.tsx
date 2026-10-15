@@ -1,9 +1,10 @@
-import { Key, LogIn, LogOut, Plug, Settings } from 'lucide-react'
+import { Activity, Key, LogIn, LogOut, Plug, Settings } from 'lucide-react'
 import { useI18n, type AppLocale } from '@/shared/i18n'
 import { Button } from '@/shared/ui/controls/Button'
 import { ResourceCard, type ResourceCardMetaRow } from '@/shared/ui/cards/ResourceCard'
 import type { PluginDTO, PluginStatus } from '@/shared/api/contracts/ai-plugin'
 import type { InstantTimestamp } from '@/shared/api/contracts/base'
+import { pluginConnectionCheckExpected } from '@/features/ai/plugins/plugin-connection-check'
 
 function formatDateTime(value: InstantTimestamp | undefined, locale: AppLocale): string {
   if (value === null || value === undefined) {
@@ -37,11 +38,16 @@ export function PluginCard({
   onConfigure,
   onConnect,
   onDisconnect,
+  onCheckConnection,
+  connectionCheckPending,
 }: {
   plugin: PluginDTO
   onConfigure: () => void
   onConnect: () => void
   onDisconnect: () => void
+  onCheckConnection: () => void
+  /** 本 Plugin 的显式连接检查正在进行：入口必须禁用，避免重复请求。 */
+  connectionCheckPending: boolean
 }) {
   const { t, locale } = useI18n()
 
@@ -55,6 +61,9 @@ export function PluginCard({
     plugin.applicationError !== null ||
     plugin.desiredEpoch !== plugin.appliedEpoch ||
     plugin.desiredRevision !== plugin.appliedRevision
+
+  // 能力来自实例 metadata；未应用或坐标缺失时不提供可提交的检查坐标。
+  const connectionCheckAvailable = pluginConnectionCheckExpected(plugin) !== null
 
   const activeCapabilities = [
     ...plugin.harnessToolNames,
@@ -157,6 +166,20 @@ export function PluginCard({
             {t('plugins.configure')}
           </Button>
 
+          {plugin.connectionCheckSupported ? (
+            <Button
+              size="compact"
+              variant="ghost"
+              aria-label={`${t('plugins.connectionCheck')} ${plugin.name}`}
+              disabled={!connectionCheckAvailable}
+              loading={connectionCheckPending}
+              onClick={onCheckConnection}
+            >
+              <Activity size={14} aria-hidden="true" />
+              {t('plugins.connectionCheck')}
+            </Button>
+          ) : null}
+
           {isDeepLink ? (
             isConnected ? (
               <Button
@@ -188,6 +211,15 @@ export function PluginCard({
       {isKeyUnavailable ? (
         <p className="inline-hint danger" role="status">
           <Key aria-hidden="true" size={14} /> {t('plugins.connectDialog.keyUnavailableHint')}
+        </p>
+      ) : null}
+      {plugin.connectionCheckSupported && !connectionCheckAvailable ? (
+        <p
+          className="inline-hint"
+          role="status"
+          data-testid={`plugin-check-blocked-${plugin.pluginId}`}
+        >
+          {t('plugins.connectionCheck.blockedHint')}
         </p>
       ) : null}
     </ResourceCard>

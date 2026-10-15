@@ -4,6 +4,10 @@ import type {
   PluginAuthKindDTO,
   PluginAuthPrepareDTO,
   PluginConfigurationDTO,
+  PluginConnectionAuthentication,
+  PluginConnectionBrowserSession,
+  PluginConnectionCheckDTO,
+  PluginConnectionReachability,
   PluginDTO,
   PluginSecretProjectionDTO,
   PluginStatus,
@@ -338,4 +342,86 @@ export function decodePluginAuthPrepareDTO(
   const authAttemptId = requireNonEmptyString(rec.authAttemptId, `${path}.authAttemptId`)
   const loginUrl = requireNonEmptyString(rec.loginUrl, `${path}.loginUrl`)
   return { authAttemptId, loginUrl }
+}
+
+const REACHABILITY_VALUES: readonly PluginConnectionReachability[] = [
+  'REACHABLE',
+  'UNREACHABLE',
+  'NOT_CHECKED',
+  'INDETERMINATE',
+]
+
+const AUTHENTICATION_VALUES: readonly PluginConnectionAuthentication[] = [
+  'ACCEPTED',
+  'REJECTED',
+  'UNAVAILABLE',
+  'NOT_CHECKED',
+]
+
+const BROWSER_SESSION_VALUES: readonly PluginConnectionBrowserSession[] = ['UNKNOWN']
+
+function requireEnumValue<T extends string>(
+  value: unknown,
+  allowed: readonly T[],
+  path: string,
+): T {
+  if (typeof value !== 'string' || !(allowed as readonly string[]).includes(value)) {
+    throw invalidPayload(`${path} must be one of ${allowed.join(', ')}`)
+  }
+  return value as T
+}
+
+/** 检查时刻必须存在且可解析：缺失、null、非法数值或非法时间串一律拒绝，绝不当作“刚刚检查过”。 */
+function requireInstant(value: unknown, path: string): Exclude<InstantTimestamp, null> {
+  const instant = requireNullableInstant(value, path)
+  if (instant === null) {
+    throw invalidPayload(`${path} must not be null`)
+  }
+  return instant
+}
+
+const ALLOWED_CONNECTION_CHECK_KEYS = new Set([
+  'pluginId',
+  'appliedEpoch',
+  'appliedRevision',
+  'checkedAt',
+  'reachability',
+  'authentication',
+  'browserSession',
+])
+
+/**
+ * 严格解码连接检查结果：未知字段、缺失或非法坐标、非法枚举、超出 64 位范围的坐标都拒绝。
+ * 三个维度按事实解码，绝不把未知值兜底成健康值。
+ */
+export function decodePluginConnectionCheckDTO(
+  value: unknown,
+  path = 'connectionCheck',
+): PluginConnectionCheckDTO {
+  const rec = requireRecord(value, path)
+  checkUnknownKeys(rec, ALLOWED_CONNECTION_CHECK_KEYS, path)
+  return {
+    pluginId: requireNonEmptyString(rec.pluginId, `${path}.pluginId`),
+    appliedEpoch: requireCanonicalDecimalString(rec.appliedEpoch, `${path}.appliedEpoch`),
+    appliedRevision: requireCanonicalDecimalString(
+      rec.appliedRevision,
+      `${path}.appliedRevision`,
+    ),
+    checkedAt: requireInstant(rec.checkedAt, `${path}.checkedAt`),
+    reachability: requireEnumValue(
+      rec.reachability,
+      REACHABILITY_VALUES,
+      `${path}.reachability`,
+    ),
+    authentication: requireEnumValue(
+      rec.authentication,
+      AUTHENTICATION_VALUES,
+      `${path}.authentication`,
+    ),
+    browserSession: requireEnumValue(
+      rec.browserSession,
+      BROWSER_SESSION_VALUES,
+      `${path}.browserSession`,
+    ),
+  }
 }
