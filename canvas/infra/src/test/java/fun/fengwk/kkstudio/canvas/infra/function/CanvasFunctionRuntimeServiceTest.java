@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.canvas.infra.function;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -17,7 +18,9 @@ import fun.fengwk.kkstudio.canvas.CanvasJson;
 import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
 import fun.fengwk.kkstudio.canvas.CanvasStore;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionBinding;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalogSource;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
@@ -79,15 +82,62 @@ class CanvasFunctionRuntimeServiceTest {
     when(adapter.enabled()).thenReturn(true);
     when(adapter.unavailableReason()).thenReturn(null);
     CanvasFunctionCatalog catalog = CanvasFunctionCatalog.from(List.of(adapter));
-    CanvasFunctionCatalog.RegisteredFunction registered = catalog.require("test.function");
-    Fixture cancelFixture = new Fixture(catalog);
+    FixedCanvasFunctionCatalogSource catalogSource =
+        new FixedCanvasFunctionCatalogSource(1L, catalog);
+    when(frozen.binding()).thenReturn(new CanvasFunctionBinding(1L, definition, null));
+    Fixture cancelFixture = new Fixture(catalogSource);
     when(cancelFixture.transactions.cancel(CANVAS, NODE, REQUEST.toString())).thenReturn(cancelled);
-    when(cancelFixture.stateCodec.functionName(cancelled.stateJson())).thenReturn("test.function");
-    when(cancelFixture.stateCodec.decode(cancelled.stateJson(), registered.function()))
-        .thenReturn(frozen);
+    when(cancelFixture.stateCodec.decode(cancelled.stateJson())).thenReturn(frozen);
 
     assertEquals(cancelled, cancelFixture.service.cancel(CANVAS, NODE, REQUEST.toString()));
     verify(adapter).cancel(frozen);
+    // cancel 只按冻结 binding 取一次同 epoch 租用，并在返回前释放。
+    assertEquals(0, catalogSource.openLeases());
+  }
+
+  /** best-effort cancel：adapter hook 或冻结读取失败只记录告警，不得回滚已提交的 CANCELLED 终态。 */
+  @Test
+  void cancelStaysBestEffortWhenAdapterHookFails() {
+    CanvasFunctionRun cancelled = run(CanvasFunctionRunStatus.CANCELLED);
+    CanvasFunctionFrozenRun frozen = mock(CanvasFunctionFrozenRun.class);
+    CanvasFunctionDefinition definition = definition("test.function");
+    CanvasFunctionAdapter adapter = mock(CanvasFunctionAdapter.class);
+    when(adapter.functions()).thenReturn(List.of(definition));
+    when(adapter.enabled()).thenReturn(true);
+    when(adapter.unavailableReason()).thenReturn(null);
+    doThrow(new IllegalStateException("hook failed")).when(adapter).cancel(frozen);
+    FixedCanvasFunctionCatalogSource catalogSource =
+        new FixedCanvasFunctionCatalogSource(1L, CanvasFunctionCatalog.from(List.of(adapter)));
+    when(frozen.binding()).thenReturn(new CanvasFunctionBinding(1L, definition, null));
+    Fixture fixture = new Fixture(catalogSource);
+    when(fixture.transactions.cancel(CANVAS, NODE, REQUEST.toString())).thenReturn(cancelled);
+    when(fixture.stateCodec.decode(cancelled.stateJson())).thenReturn(frozen);
+
+    assertEquals(cancelled, fixture.service.cancel(CANVAS, NODE, REQUEST.toString()));
+
+    verify(adapter).cancel(frozen);
+    // 失败路径同样必须释放租用。
+    assertEquals(0, catalogSource.openLeases());
+  }
+
+  /** 冻结绑定已无法读取时，cancel 仍返回终态：best-effort hook 不允许把已提交状态变成错误。 */
+  @Test
+  void cancelStaysBestEffortWhenFrozenStateCannotBeRead() {
+    CanvasFunctionRun cancelled = run(CanvasFunctionRunStatus.CANCELLED);
+    CanvasFunctionAdapter adapter = mock(CanvasFunctionAdapter.class);
+    when(adapter.functions()).thenReturn(List.of(definition("test.function")));
+    when(adapter.enabled()).thenReturn(true);
+    FixedCanvasFunctionCatalogSource catalogSource =
+        new FixedCanvasFunctionCatalogSource(1L, CanvasFunctionCatalog.from(List.of(adapter)));
+    Fixture fixture = new Fixture(catalogSource);
+    when(fixture.transactions.cancel(CANVAS, NODE, REQUEST.toString())).thenReturn(cancelled);
+    when(fixture.stateCodec.decode(cancelled.stateJson()))
+        .thenThrow(new IllegalStateException("state unreadable"));
+
+    assertEquals(cancelled, fixture.service.cancel(CANVAS, NODE, REQUEST.toString()));
+
+    verify(adapter, never()).cancel(any());
+    assertEquals(0, catalogSource.openLeases());
   }
 
   /**
@@ -101,8 +151,7 @@ class CanvasFunctionRuntimeServiceTest {
     when(adapter.enabled()).thenReturn(true);
     when(adapter.unavailableReason()).thenReturn(null);
     CanvasFunctionCatalog catalog = CanvasFunctionCatalog.from(List.of(adapter));
-    CanvasFunctionCatalog.RegisteredFunction registered = catalog.require("test.function");
-    Fixture fixture = new Fixture(catalog);
+    Fixture fixture = new Fixture(new FixedCanvasFunctionCatalogSource(1L, catalog));
 
     // 1. RESUME -> READY (不调 adapter.cancel)
     CanvasFunctionRun resumed = run(CanvasFunctionRunStatus.READY);
@@ -118,6 +167,7 @@ class CanvasFunctionRuntimeServiceTest {
     // 2. CANCELLED -> CANCELLED (调用 adapter.cancel)
     CanvasFunctionRun cancelled = run(CanvasFunctionRunStatus.CANCELLED);
     CanvasFunctionFrozenRun frozen = mock(CanvasFunctionFrozenRun.class);
+    when(frozen.binding()).thenReturn(new CanvasFunctionBinding(1L, definition, null));
     when(fixture.transactions.resolve(
             CANVAS,
             NODE,
@@ -125,9 +175,7 @@ class CanvasFunctionRuntimeServiceTest {
             CanvasFunctionUnknownResolution.CANCELLED,
             "confirmed cancelled"))
         .thenReturn(cancelled);
-    when(fixture.stateCodec.functionName(cancelled.stateJson())).thenReturn("test.function");
-    when(fixture.stateCodec.decode(cancelled.stateJson(), registered.function()))
-        .thenReturn(frozen);
+    when(fixture.stateCodec.decode(cancelled.stateJson())).thenReturn(frozen);
 
     assertEquals(
         cancelled,
@@ -208,13 +256,15 @@ class CanvasFunctionRuntimeServiceTest {
     private final CanvasFunctionRuntimeService service;
 
     private Fixture() {
-      this(CanvasFunctionCatalog.from(List.of(dummyAdapter())));
+      this(
+          new FixedCanvasFunctionCatalogSource(
+              1L, CanvasFunctionCatalog.from(List.of(dummyAdapter()))));
     }
 
-    private Fixture(CanvasFunctionCatalog catalog) {
+    private Fixture(CanvasFunctionCatalogSource catalogSource) {
       service =
           new CanvasFunctionRuntimeService(
-              canvasStore, runRepository, transactions, catalog, stateCodec);
+              canvasStore, runRepository, transactions, catalogSource, stateCodec);
     }
 
     private static CanvasFunctionAdapter dummyAdapter() {

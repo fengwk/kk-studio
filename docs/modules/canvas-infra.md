@@ -41,7 +41,7 @@ Snapshot 读路径是 [`PostgresqlCanvasQueryService.findSnapshot`](../../canvas
 lock document (FOR UPDATE) -> lock node -> lock current run (FOR UPDATE)
   -> requestId 与现有 Run 相同：直接返回既有 Run（不推进 revision）
   -> 现有 Run 处于 READY/RUNNING/UNKNOWN 且 requestId 不同：conflict
-  -> Catalog require(name) + requireAvailable；CanvasFunctionArgsCodec 严格解码 args
+  -> acquireCurrent + bind(name) + require(binding) + requireAvailable；严格解码 args
   -> 冻结 manifest：每个引用节点必须存在、index 必须在资源范围内且必须是 blob
   -> 校验 frozen blob facts 与 function reference policy
   -> 冻结输出计划：按 function 的 outputs 逐槽位预分配 resource id，构造 submitState=PENDING、stage=QUEUED 的 frozen plan
@@ -52,7 +52,7 @@ lock document (FOR UPDATE) -> lock node -> lock current run (FOR UPDATE)
   -> advanceRevision(revision + 1)
 ```
 
-冻结的含义是：引用在启动瞬间取 source node 的 resource identity、blob id 与权威媒体事实。之后无论用户改了配置、解除引用还是替换了源资源，这个 Run 的输入都不变。`preflight` 在事务内、在写入 READY 之前执行，因此被拒绝的配置不会留下队列事实。
+目录租用从取得一直保持到事务 `afterCompletion`，提交与回滚均释放，不能在事务提交前关闭 adapter。持久状态格式为版本 5，保存完整函数定义与来源绑定，不只保存函数名；解码不需要当前目录。引用在启动瞬间取 source node 的 resource identity、blob id 与权威媒体事实。之后无论用户改了配置、解除引用还是替换了源资源，这个 Run 的输入都不变。`preflight` 在事务内、在写入 READY 之前执行，因此被拒绝的配置不会留下队列事实。
 
 ### claim：数据库就是队列
 
@@ -77,9 +77,9 @@ update canvas_function_run
 postgres 的 NOTIFY 由组合根接进同一个共享 `LISTEN` 连接：[`ApplicationEventConfiguration`](../../web/src/main/java/fun/fengwk/kkstudio/web/events/ApplicationEventConfiguration.java) 把 `CanvasFunctionDispatcher.CHANNEL`（即 `canvas_function_work`）的 handler 指向 `dispatcher.wake()`，断连后由 `dispatcher::wake` 兜底。也就是说 NOTIFY 只提供低延迟，**正确性来自 poll 与 lease**：通知丢失、listener 重连、应用重启都能在下一次 poll 或租约过期后重新 claim。[`PostgresqlCanvasChangeNotifier#functionWorkChanged`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasChangeNotifier.java) 在写事务内于提交后行立刻可认领（`READY`、无 lease、`available_at <= now()`）时发空 payload；`canvas_revision` 通道只提示 document revision，客户端据此回读 Snapshot。
 
 [`CanvasFunctionWorker.run`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/function/CanvasFunctionWorker.java) 执行两阶段协议：
-1. 解析版本 4 state JSON 得到 frozen plan、`requireAvailable`；
+1. 从版本 5 state JSON 解码完整冻结计划，不查询当前目录；
 2. 若 `submitState == SUBMITTING`，说明提交意图已持久化但进程曾崩溃导致状态不明，绝不重试提交，调用 `markUnknown` 将 Run 转换为 `UNKNOWN` 状态，退出自动调度并保留 pin 与目标资源等待人工核对；
-3. 若 `submitState == PENDING`，在独立事务调用 `beginSubmit` 先行持久化 `SUBMITTING` 意图，随后调用 adapter 的 `submit`，外部确认后再经 `confirmSubmitted` 持久化 `SUBMITTED`；
+3. 按冻结的 `catalogEpoch` 取得租用并校验完整 binding，持有至本次执行结束；若 `submitState == PENDING`，在独立事务调用 `beginSubmit` 先行持久化 `SUBMITTING` 意图，随后调用 adapter 的 `submit`，外部确认后再经 `confirmSubmitted` 持久化 `SUBMITTED`；
 4. 调用 adapter 的 `execute`（仅查询和物化预分配目标 resource id），确认返回值恰好是冻结目标 id，最后 `completeSuccess`。
 
 执行期间 heartbeat 按固定间隔续租，**只**更新 `lease_until`，不触碰 document revision、Run state 或其他业务事实；续租返回 false 或抛 `RuntimeException` 时把 `ownershipLost` 置位，worker 随即停止新的 checkpoint 与 terminal 写入。Run 被 cancel、node/document 被删或租约被新 owner 接管则表现为短事务 CAS 失败，被转成 `CanvasFunctionInternalCancellation` 后静默退出。adapter 抛出普通异常时，worker 在仍持有所有权时用固定文案走 `failIfRunning`，Run 进入业务 `FAILED`；抛出 `CanvasFunctionUnknownException` 时改走 `markUnknown`。`Error` 不在此处吞掉而是上抛，交由进程外失败处理，其 Run 由租约到期后的恢复路径重新 claim。无论走哪条路径，worker 都在 `finally` 中取消 heartbeat 调度任务，不留下续租残留。
@@ -93,7 +93,7 @@ checkpoint 与终态都走 [`CanvasFunctionRunTransactions`](../../canvas/infra/
 - `resolve` 处理人工核对：要求非空 `verification` 说明，通过 `RESUME` 将 Run 还回 `READY`（仅重新轮询任务结果，不 resubmit），或指定 `FAILED` / `CANCELLED` 释放 pin 并丢弃未归属的计划输出。`UNKNOWN` 期间 pin 与已物化槽位都保留，因此人工恢复后可以继续补齐缺失槽位。
 - 终态 Run 允许被新的 requestId 取代：`replaceTerminalWithReady` 的 `where status in ('SUCCEEDED','FAILED','CANCELLED')` 保证并发下只有一个新 Run 成功（每个 Function 节点只有一行 Run）。重复 requestId 则直接返回既有 Run（含终态），不重复推进版本。
 
-[`CanvasFunctionRuntimeService`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/function/CanvasFunctionRuntimeService.java) 实现 Core 的 `CanvasFunctionService` 端口。`cancel` 或 `resolve(CANCELLED)` 在事务完成后调用 adapter 的 `cancel(frozen)`；该钩子是 best effort，`RuntimeException` 只记日志，不回滚已提交的终态与 pin 清理。`resolve(RESUME)` 和 `resolve(FAILED)` 不调用取消钩子。
+[`CanvasFunctionRuntimeService`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/function/CanvasFunctionRuntimeService.java) 实现 Core 的 `CanvasFunctionService` 端口。`cancel` 或 `resolve(CANCELLED)` 在事务完成后按冻结 binding 租用对应 epoch，再调用 adapter 的 `cancel(frozen)`；该钩子是 best effort，`RuntimeException` 只记日志，不回滚已提交的终态与 pin 清理。`resolve(RESUME)` 和 `resolve(FAILED)` 不调用取消钩子。
 
 pin 由 [`CanvasFunctionResourcePinRepository`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasFunctionResourcePinRepository.java) 持久化，`INPUT` 每个冻结引用一条、`OUTPUT` 每个已物化输出槽位一条（成功发布时 `resource_index` 等于槽位 index）；pin 只保护「无 owner 资源不被回收」，绝不参与 `storage_blob.ref_count`。Resource 行的删除与 pin 回收由本模块的 [`PostgresqlCanvasResourceLifecycle`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasResourceLifecycle.java) 在调用方事务内完成，Blob 释放经 [`CanvasBlobReleaser`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasBlobReleaser.java) 由 Platform 的 `StorageBlobManager` 适配；物化时的 retain 则由 Platform 物化器直接完成（见 [Platform](platform.md#canvas-媒体与-function-适配)）。
 
@@ -107,7 +107,7 @@ leaseDurationMillis     = 30000    heartbeatIntervalMillis = 10000
 pollIntervalMillis      = 1000     rejectionDelayMillis    = 1000
 ```
 
-`validate()` 在 worker executor、heartbeat scheduler 的 bean 创建和 dispatcher 构造时校验：`workerConcurrency >= 1`、`1 <= maxDispatchTasks <= workerConcurrency`、四个时间参数为正毫秒、heartbeat 间隔必须小于 lease 时长。Executor、dispatcher、poll 与 heartbeat scheduler 的生命周期都由 [`CanvasFunctionRuntimeConfiguration`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/function/CanvasFunctionRuntimeConfiguration.java) 装配；Catalog bean 只在缺失时创建，因此 adapter 集合来自宿主配置。adapter 的 `submit`/`execute` 在固定并发 worker 上同步执行，外部等待和轮询会占用该 worker 槽位，续租由独立 heartbeat scheduler 维持。
+`validate()` 在 worker executor、heartbeat scheduler 的 bean 创建和 dispatcher 构造时校验：`workerConcurrency >= 1`、`1 <= maxDispatchTasks <= workerConcurrency`、四个时间参数为正毫秒、heartbeat 间隔必须小于 lease 时长。Executor、dispatcher、poll 与 heartbeat scheduler 的生命周期都由 [`CanvasFunctionRuntimeConfiguration`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/function/CanvasFunctionRuntimeConfiguration.java) 装配；宿主提供 `CanvasFunctionCatalogSource`，Infra 不自行组装插件目录。adapter 的 `submit`/`execute` 在固定并发 worker 上同步执行，外部等待和轮询会占用该 worker 槽位，续租由独立 heartbeat scheduler 维持。
 
 ## 不变量与恢复
 

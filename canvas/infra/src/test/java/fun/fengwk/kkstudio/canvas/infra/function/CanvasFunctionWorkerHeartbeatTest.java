@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.canvas.CanvasJson;
 import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
 import fun.fengwk.kkstudio.canvas.CanvasResourceMaterializer;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionBinding;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionBlobAccess;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
@@ -291,7 +292,7 @@ class CanvasFunctionWorkerHeartbeatTest {
     private final CanvasFunctionDefinition definition;
     private final ScheduledThreadPoolExecutor scheduler = new ScheduledThreadPoolExecutor(1);
     private final ClaimedRun claim;
-    private final CanvasFunctionCatalog catalog;
+    private final FixedCanvasFunctionCatalogSource catalogSource;
     private final CanvasFunctionWorker worker;
 
     @SuppressWarnings("unchecked")
@@ -307,7 +308,8 @@ class CanvasFunctionWorkerHeartbeatTest {
       when(adapter.functions()).thenReturn(List.of(definition));
       when(adapter.enabled()).thenReturn(true);
       when(adapter.unavailableReason()).thenReturn(null);
-      catalog = CanvasFunctionCatalog.from(List.of(adapter));
+      catalogSource =
+          new FixedCanvasFunctionCatalogSource(1L, CanvasFunctionCatalog.from(List.of(adapter)));
 
       CanvasFunctionRun run =
           new CanvasFunctionRun(
@@ -325,15 +327,15 @@ class CanvasFunctionWorkerHeartbeatTest {
               NOW);
       claim = new ClaimedRun(run);
       when(runRepository.findByNodeId(run.nodeId())).thenReturn(Optional.of(run));
-      when(stateCodec.functionName(run.stateJson())).thenReturn("test.function");
 
+      CanvasFunctionBinding binding = new CanvasFunctionBinding(1L, definition, null);
       frozen =
           new CanvasFunctionFrozenRun(
               UUID.randomUUID(),
               run.nodeId(),
               "output",
               run.requestId(),
-              definition,
+              binding,
               CanvasJson.parseObject("{}"),
               List.of(),
               List.of(
@@ -349,7 +351,7 @@ class CanvasFunctionWorkerHeartbeatTest {
               frozen.nodeId(),
               frozen.nodeName(),
               frozen.requestId(),
-              frozen.definition(),
+              frozen.binding(),
               frozen.args(),
               frozen.manifest(),
               frozen.outputs(),
@@ -363,7 +365,7 @@ class CanvasFunctionWorkerHeartbeatTest {
               frozen.nodeId(),
               frozen.nodeName(),
               frozen.requestId(),
-              frozen.definition(),
+              frozen.binding(),
               frozen.args(),
               frozen.manifest(),
               frozen.outputs(),
@@ -371,8 +373,7 @@ class CanvasFunctionWorkerHeartbeatTest {
               "SUBMITTED",
               Map.of());
 
-      CanvasFunctionCatalog.RegisteredFunction registered = catalog.require("test.function");
-      when(stateCodec.decode(run.stateJson(), registered.function())).thenReturn(frozen);
+      when(stateCodec.decode(run.stateJson())).thenReturn(frozen);
 
       ObjectProvider<CanvasResourceMaterializer> materializers = mock(ObjectProvider.class);
       when(materializers.getIfAvailable()).thenReturn(mock(CanvasResourceMaterializer.class));
@@ -382,7 +383,7 @@ class CanvasFunctionWorkerHeartbeatTest {
       worker =
           new CanvasFunctionWorker(
               runRepository,
-              catalog,
+              catalogSource,
               stateCodec,
               transactions,
               blobAccess,

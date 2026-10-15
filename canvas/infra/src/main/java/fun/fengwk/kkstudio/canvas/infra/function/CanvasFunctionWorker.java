@@ -9,6 +9,7 @@ import fun.fengwk.kkstudio.canvas.CanvasFunctionRunRepository;
 import fun.fengwk.kkstudio.canvas.CanvasResourceMaterializer;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionBlobAccess;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalogSource;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunStateCodecPort;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionSubmitState;
@@ -34,7 +35,7 @@ public class CanvasFunctionWorker {
       "external submission outcome is unknown; manual verification required";
 
   private final CanvasFunctionRunRepository runRepository;
-  private final CanvasFunctionCatalog catalog;
+  private final CanvasFunctionCatalogSource catalogSource;
   private final CanvasFunctionRunStateCodecPort stateCodec;
   private final CanvasFunctionRunTransactions transactions;
   private final CanvasFunctionBlobAccess blobAccess;
@@ -46,7 +47,7 @@ public class CanvasFunctionWorker {
 
   public CanvasFunctionWorker(
       CanvasFunctionRunRepository runRepository,
-      CanvasFunctionCatalog catalog,
+      CanvasFunctionCatalogSource catalogSource,
       CanvasFunctionRunStateCodecPort stateCodec,
       CanvasFunctionRunTransactions transactions,
       CanvasFunctionBlobAccess blobAccess,
@@ -56,7 +57,7 @@ public class CanvasFunctionWorker {
       Clock clock,
       @Qualifier("canvasFunctionHeartbeatScheduler") ScheduledExecutorService heartbeatScheduler) {
     this.runRepository = runRepository;
-    this.catalog = catalog;
+    this.catalogSource = catalogSource;
     this.stateCodec = stateCodec;
     this.transactions = transactions;
     this.blobAccess = blobAccess;
@@ -77,42 +78,14 @@ public class CanvasFunctionWorker {
             heartbeatMillis,
             TimeUnit.MILLISECONDS);
     try {
-      CanvasFunctionCatalog.RegisteredFunction registered =
-          catalog.require(stateCodec.functionName(claim.run().stateJson()));
-      registered.requireAvailable();
-      CanvasFunctionFrozenRun frozen =
-          stateCodec.decode(claim.run().stateJson(), registered.function());
+      CanvasFunctionFrozenRun frozen = stateCodec.decode(claim.run().stateJson());
       if (frozen.submitState() == CanvasFunctionSubmitState.SUBMITTING) {
         // 提交意图已持久化但结果不明：绝不重新提交，退出自动调度等待人工核查。
         transactions.markUnknown(
             claim.nodeId(), claim.requestId().toString(), claim.leaseToken(), AMBIGUOUS_SUBMISSION);
         return;
       }
-      CanvasFunctionExecutionContextImpl context =
-          new CanvasFunctionExecutionContextImpl(
-              runRepository,
-              transactions,
-              blobAccess,
-              materializers,
-              clock,
-              claim,
-              ownershipLost,
-              frozen);
-      if (!frozen.submitted()) {
-        frozen = transactions.beginSubmit(frozen, claim.leaseToken());
-        context.replace(frozen);
-        registered.adapter().submit(context, frozen);
-        requireOwnership(ownershipLost);
-        frozen = transactions.confirmSubmitted(context.currentRun(), claim.leaseToken());
-        context.replace(frozen);
-      }
-      List<UUID> result = List.copyOf(registered.adapter().execute(context, frozen));
-      requireOwnership(ownershipLost);
-      if (!result.equals(frozen.outputResourceIds())) {
-        throw new IllegalArgumentException(
-            "adapter result must equal the frozen output plan, in order");
-      }
-      transactions.completeSuccess(context.currentRun(), claim.leaseToken(), result);
+      execute(claim, ownershipLost, frozen);
     } catch (CanvasFunctionUnknownException unknown) {
       log.warn(
           "Canvas Function reported unknown outcome nodeId={} requestId={}",
@@ -141,6 +114,47 @@ public class CanvasFunctionWorker {
       }
     } finally {
       heartbeat.cancel(false);
+    }
+  }
+
+  /**
+   * 按冻结绑定的目录 epoch 取得租用，并持有整个 submit/query/checkpoint/complete 期间。
+   *
+   * <p>恢复路径只能通过 {@link CanvasFunctionCatalogSource.Lease#require} 取回同一 epoch、同一完整定义与来源的 adapter 实例；
+   * epoch 已不可用或绑定漂移都会拒绝执行，而不是按函数名换用当前版本。
+   */
+  private void execute(
+      ClaimedRun claim, AtomicBoolean ownershipLost, CanvasFunctionFrozenRun frozen) {
+    try (CanvasFunctionCatalogSource.Lease lease =
+        catalogSource.acquire(frozen.binding().catalogEpoch())) {
+      CanvasFunctionCatalog.RegisteredFunction registered = lease.require(frozen.binding());
+      registered.requireAvailable();
+      CanvasFunctionExecutionContextImpl context =
+          new CanvasFunctionExecutionContextImpl(
+              runRepository,
+              transactions,
+              blobAccess,
+              materializers,
+              clock,
+              claim,
+              ownershipLost,
+              frozen);
+      CanvasFunctionFrozenRun current = frozen;
+      if (!current.submitted()) {
+        current = transactions.beginSubmit(current, claim.leaseToken());
+        context.replace(current);
+        registered.adapter().submit(context, current);
+        requireOwnership(ownershipLost);
+        current = transactions.confirmSubmitted(context.currentRun(), claim.leaseToken());
+        context.replace(current);
+      }
+      List<UUID> result = List.copyOf(registered.adapter().execute(context, current));
+      requireOwnership(ownershipLost);
+      if (!result.equals(current.outputResourceIds())) {
+        throw new IllegalArgumentException(
+            "adapter result must equal the frozen output plan, in order");
+      }
+      transactions.completeSuccess(context.currentRun(), claim.leaseToken(), result);
     }
   }
 

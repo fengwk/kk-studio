@@ -14,9 +14,10 @@ import java.util.UUID;
 /**
  * Adapter 每次执行或恢复时读取的完整冻结计划与 checkpoint。
  *
- * <p>{@code args} 是启动时按函数 schema 校验并补齐默认值后的 canonical 输入，{@code manifest} 是启动时冻结的输入资源事实，两者在执行期间都不再随
- * 节点配置变化。{@code outputs} 是启动时冻结的有界输出计划：每个槽位已预分配 Resource ID、节点内位置、类型与资源名，adapter 只能物化计划内槽位。 {@code
- * submitState} 是 Runtime 持久化的外部提交事实：只有 {@link CanvasFunctionSubmitState#PENDING} 才允许发起外部提交， {@link
+ * <p>{@code binding} 是启动时冻结的目录 epoch、完整函数定义与插件来源，执行与恢复都只能按它选择同 epoch 的实例。{@code args} 是启动时按函数
+ * schema 校验并补齐默认值后的 canonical 输入，{@code manifest} 是启动时冻结的输入资源事实，两者在执行期间都不再随 节点配置变化。{@code outputs}
+ * 是启动时冻结的有界输出计划：每个槽位已预分配 Resource ID、节点内位置、类型与资源名，adapter 只能物化计划内槽位。 {@code submitState} 是 Runtime
+ * 持久化的外部提交事实：只有 {@link CanvasFunctionSubmitState#PENDING} 才允许发起外部提交， {@link
  * CanvasFunctionSubmitState#SUBMITTING} 表示提交意图已持久化但结果不明，{@link CanvasFunctionSubmitState#SUBMITTED}
  * 表示外部任务身份 已可查询，恢复时只能查询而不能重新提交。
  */
@@ -25,7 +26,7 @@ public record CanvasFunctionFrozenRun(
     UUID nodeId,
     String nodeName,
     UUID requestId,
-    CanvasFunctionDefinition definition,
+    CanvasFunctionBinding binding,
     JsonObject args,
     List<CanvasFunctionFrozenReference> manifest,
     List<CanvasFunctionFrozenOutput> outputs,
@@ -38,7 +39,8 @@ public record CanvasFunctionFrozenRun(
     Objects.requireNonNull(nodeId, "nodeId");
     requireText(nodeName, "nodeName");
     Objects.requireNonNull(requestId, "requestId");
-    Objects.requireNonNull(definition, "definition");
+    Objects.requireNonNull(binding, "binding");
+    CanvasFunctionDefinition definition = binding.definition();
     Objects.requireNonNull(args, "args");
     manifest = List.copyOf(Objects.requireNonNull(manifest, "manifest"));
     outputs = List.copyOf(Objects.requireNonNull(outputs, "outputs"));
@@ -65,6 +67,11 @@ public record CanvasFunctionFrozenRun(
     adapterState =
         Collections.unmodifiableMap(
             new LinkedHashMap<>(Objects.requireNonNull(adapterState, "adapterState")));
+  }
+
+  /** 冻结绑定的完整函数定义便捷访问器；adapter 据此声明校验，不能改读当前目录。 */
+  public CanvasFunctionDefinition definition() {
+    return binding.definition();
   }
 
   /** 是否已经持久化可查询的外部任务身份；为真时 adapter 只能查询，不得重新提交。 */

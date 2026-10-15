@@ -42,6 +42,13 @@ class CanvasPluginApiArchitectureTest {
           "tools.jackson.databind.");
   private static final Pattern DEPENDENCY_PATTERN =
       Pattern.compile("<dependency>(.*?)</dependency>", Pattern.DOTALL);
+
+  /**
+   * 只匹配直接实现 {@code CanvasFunctionCatalog} 的声明；{@code CanvasFunctionCatalogSource} 是另一个端口，不算第二实现。
+   */
+  private static final Pattern IMPLEMENTS_CATALOG =
+      Pattern.compile("implements\\s+CanvasFunctionCatalog(?!\\w)");
+
   private static final Set<String> GENERATED_DIRS =
       Set.of(".git", ".workspace", "target", "node_modules", "dist", "coverage", "reports");
 
@@ -165,8 +172,9 @@ class CanvasPluginApiArchitectureTest {
           .filter(
               path -> {
                 try {
-                  return Files.readString(path, StandardCharsets.UTF_8)
-                      .contains("implements CanvasFunctionCatalog");
+                  return IMPLEMENTS_CATALOG
+                      .matcher(Files.readString(path, StandardCharsets.UTF_8))
+                      .find();
                 } catch (IOException error) {
                   throw new IllegalStateException(error);
                 }
