@@ -54,8 +54,8 @@ class SkillPackageInstallerNetworkTest {
   }
 
   /**
-   * 意图（负向对照）：64 位 SHA-256 commit 在 40 位校验处即被拒绝，绝不进入 Git 网络层——即使远端真实可达、可用且停滞， 也必须零请求返回
-   * INVALID_TARGET_COMMIT。旧实现会把该 commit 交给 JGit，产生网络或其它失败。
+   * 意图：64 位 SHA-256 commit 在 40 位校验处即被拒绝，绝不进入 Git 网络层——即使远端真实可达、可用且停滞，也必须零请求返回
+   * INVALID_TARGET_COMMIT。
    */
   @Test
   void sha256CommitNeverReachesTheGitNetwork(@TempDir Path directory) throws Exception {
