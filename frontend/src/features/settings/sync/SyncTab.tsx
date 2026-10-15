@@ -98,6 +98,7 @@ export function SyncTab({ reloadSettings, settingsDirty }: SyncTabProps) {
       queryClient.invalidateQueries({ queryKey: queryKeys.skills.all }),
       queryClient.invalidateQueries({ queryKey: queryKeys.environments.all }),
       queryClient.invalidateQueries({ queryKey: queryKeys.mcpServers.all }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.plugins.all }),
       queryClient.invalidateQueries({ queryKey: queryKeys.configSync.inventory }),
     ])
     // 存在未保存 draft 时保持原样，由用户在结果中显式重新加载设置。

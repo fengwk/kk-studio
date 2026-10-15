@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   decodePluginAuthPrepareDTO,
+  decodePluginConnectionCheckDTO,
   decodePluginDTO,
   decodePluginList,
 } from './ai-plugin-codec'
@@ -240,6 +241,85 @@ describe('ai-plugin-codec', () => {
     }
     expect(thrown).toBeInstanceOf(Error)
     expect(String(thrown)).not.toContain(marker)
+  })
+
+  const connectionCheckDTO = {
+    pluginId: 'opencli',
+    appliedEpoch: '14',
+    appliedRevision: '8',
+    checkedAt: 1772366400,
+    reachability: 'REACHABLE',
+    authentication: 'ACCEPTED',
+    browserSession: 'UNKNOWN',
+  }
+
+  it('decodes connection check dimensions and checkedAt without rescaling the wire value', () => {
+    expect(decodePluginConnectionCheckDTO(connectionCheckDTO)).toEqual(connectionCheckDTO)
+    // 检查时刻也接受既有 HTTP Instant 的 ISO 语义，但绝不擅自按毫秒重算。
+    expect(decodePluginConnectionCheckDTO({
+      ...connectionCheckDTO,
+      checkedAt: '2026-03-01T12:00:00Z',
+    }).checkedAt).toBe('2026-03-01T12:00:00Z')
+  })
+
+  it('rejects unknown, missing, non-contract or overflowing connection check payloads', () => {
+    expect(() => decodePluginConnectionCheckDTO({
+      ...connectionCheckDTO,
+      remoteHealth: 'HEALTHY',
+    })).toThrowError(/Unknown property at connectionCheck/)
+
+    for (const field of ['pluginId', 'appliedEpoch', 'appliedRevision', 'checkedAt', 'reachability', 'authentication', 'browserSession']) {
+      const withoutField: Record<string, unknown> = { ...connectionCheckDTO }
+      delete withoutField[field]
+      expect(() => decodePluginConnectionCheckDTO(withoutField), field).toThrowError(
+        /connectionCheck/,
+      )
+    }
+
+    expect(() => decodePluginConnectionCheckDTO({ ...connectionCheckDTO, pluginId: '' }))
+      .toThrowError(/pluginId must be a non-empty string/)
+    expect(() => decodePluginConnectionCheckDTO({ ...connectionCheckDTO, appliedEpoch: null }))
+      .toThrowError(/appliedEpoch must be a string/)
+    expect(() => decodePluginConnectionCheckDTO({ ...connectionCheckDTO, appliedRevision: '08' }))
+      .toThrowError(/canonical non-negative decimal string/)
+    expect(() => decodePluginConnectionCheckDTO({
+      ...connectionCheckDTO,
+      appliedEpoch: '9223372036854775808',
+    })).toThrowError(/exceeds 64-bit signed integer range/)
+    expect(() => decodePluginConnectionCheckDTO({ ...connectionCheckDTO, checkedAt: null }))
+      .toThrowError(/checkedAt must not be null/)
+    expect(() => decodePluginConnectionCheckDTO({ ...connectionCheckDTO, checkedAt: 'yesterday' }))
+      .toThrowError(/epoch seconds or an ISO date-time string/)
+  })
+
+  it('rejects a zero applied revision while still accepting a zero applied epoch', () => {
+    // 响应中的已应用修订必须为正：0 表示本节点没有已应用配置，绝不被当作可用坐标。
+    expect(() => decodePluginConnectionCheckDTO({ ...connectionCheckDTO, appliedRevision: '0' }))
+      .toThrowError(/appliedRevision must be a positive decimal string/)
+    // epoch 从 0 起是合法的。
+    expect(
+      decodePluginConnectionCheckDTO({ ...connectionCheckDTO, appliedEpoch: '0' }).appliedEpoch,
+    ).toBe('0')
+    expect(
+      decodePluginConnectionCheckDTO({ ...connectionCheckDTO, appliedRevision: '1' }).appliedRevision,
+    ).toBe('1')
+  })
+
+  it('rejects every out-of-contract connection dimension instead of falling back to health', () => {
+    expect(() => decodePluginConnectionCheckDTO({ ...connectionCheckDTO, reachability: 'HEALTHY' }))
+      .toThrowError(/reachability must be one of/)
+    expect(() => decodePluginConnectionCheckDTO({ ...connectionCheckDTO, authentication: 'LOGGED_IN' }))
+      .toThrowError(/authentication must be one of/)
+    expect(() => decodePluginConnectionCheckDTO({ ...connectionCheckDTO, browserSession: 'SIGNED_IN' }))
+      .toThrowError(/browserSession must be one of/)
+    // 三个维度的合法取值互不通用：认证枚举不能冒充可达性，未检查也不得被当作健康。
+    expect(() => decodePluginConnectionCheckDTO({ ...connectionCheckDTO, reachability: 'ACCEPTED' }))
+      .toThrowError(/reachability must be one of/)
+    expect(decodePluginConnectionCheckDTO({
+      ...connectionCheckDTO,
+      reachability: 'NOT_CHECKED',
+      authentication: 'NOT_CHECKED',
+    }).reachability).toBe('NOT_CHECKED')
   })
 
 })

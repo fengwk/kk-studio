@@ -121,10 +121,50 @@ const noAuthPlugin: PluginDTO = {
   applicationError: 'configuration is saved but this node has not applied it yet',
 }
 
+const checkPlugin: PluginDTO = {
+  pluginId: 'offline-check',
+  name: 'Offline Check Plugin',
+  version: '3.1.0',
+  authKind: { type: 'STATIC_KEY', secretField: 'token' },
+  status: 'CONNECTED',
+  region: null,
+  expiresAt: null,
+  nextRefreshAt: null,
+  lastRefreshedAt: null,
+  lastRefreshError: null,
+  configuration: {
+    revision: '3',
+    valuesJson: '{"timeout":30}',
+    valuesSchema: JSON.stringify({
+      type: 'object',
+      properties: {
+        timeout: { type: 'integer' },
+      },
+      required: [],
+      additionalProperties: false,
+    }),
+    defaultsJson: '{"timeout":30}',
+    secrets: {
+      token: {
+        description: 'Static Access Token',
+        configured: true,
+      },
+    },
+  },
+  desiredEpoch: '21',
+  appliedEpoch: '21',
+  desiredRevision: '3',
+  appliedRevision: '3',
+  connectionCheckSupported: true,
+  harnessToolNames: [],
+  canvasFunctionNames: [],
+  applicationError: null,
+}
+
 async function transport(
   page: Page,
   pluginsList: PluginDTO[] = [deepLinkPlugin],
-  blockStage?: 'prepare' | 'complete',
+  blockStage?: 'prepare' | 'complete' | 'check',
 ) {
   let release!: () => void
   const gate = new Promise<void>((resolve) => {
@@ -138,6 +178,32 @@ async function transport(
 
     if (path === '/api/plugins') {
       await route.fulfill({ json: { status: 200, data: pluginsList } })
+    } else if (path.endsWith('/connection-check') && route.request().method() === 'POST') {
+      requests.push(path)
+      if (blockStage === 'check') {
+        await gate
+      }
+      const postData = route.request().postDataJSON() as {
+        expectedEpoch: string
+        expectedRevision: string
+      }
+      if (!postData || typeof postData.expectedEpoch !== 'string') {
+        throw new Error(`Connection check must submit the applied coordinates: ${path}`)
+      }
+      await route.fulfill({
+        json: {
+          status: 200,
+          data: {
+            pluginId: decodeURIComponent(path.split('/')[3] ?? ''),
+            appliedEpoch: postData.expectedEpoch,
+            appliedRevision: postData.expectedRevision,
+            checkedAt: 1772366400,
+            reachability: 'REACHABLE',
+            authentication: 'ACCEPTED',
+            browserSession: 'UNKNOWN',
+          },
+        },
+      })
     } else if (path.endsWith('/auth/prepare')) {
       requests.push(path)
       if (blockStage === 'prepare') {
@@ -338,4 +404,47 @@ test('renders three plugin shapes (None, StaticKey, DeepLink) and opens configur
   await save.click()
   await expect.poll(() => network.requests.filter((path) => path.endsWith('/configuration')).length).toBe(1)
   await expect(configDialog).toHaveCount(0)
+})
+
+test('connection check runs only on explicit click and reports the three typed dimensions', async (
+  { page },
+  info,
+) => {
+  await page.setViewportSize({ width: 320, height: 800 })
+  const network = await transport(page, [checkPlugin], 'check')
+  await page.goto('/browser-tests/resource-card-harness.html?plugins')
+
+  const opener = page.getByRole('button', { name: '检查连接 Offline Check Plugin' })
+  await expect(opener).toBeVisible()
+  // 渲染与列表加载绝不触发探测：点击之前没有任何检查请求。
+  expect(network.requests).toEqual([])
+
+  await opener.click()
+  await expect.poll(() => network.requests.length).toBe(1)
+  const dialog = page.getByRole('dialog')
+  await expect(dialog).toHaveAccessibleName('连接检查：Offline Check Plugin')
+  await expect(dialog.getByTestId('plugin-check-pending')).toBeVisible()
+
+  // 进行中：入口与关闭都被禁用，Escape 也不能关掉弹窗。
+  await expect(opener).toBeDisabled()
+  await expect(dialog.getByTestId('plugin-check-close')).toBeDisabled()
+  await page.keyboard.press('Escape')
+  await expect(dialog).toBeVisible()
+  await page.screenshot({ path: info.outputPath('connection-check-pending-320.png') })
+
+  network.release()
+  await expect(dialog.getByTestId('plugin-check-reachability')).toHaveText('可达')
+  await expect(dialog.getByTestId('plugin-check-authentication')).toHaveText('凭据已接受')
+  // 浏览器登录态恒为未知，绝不冒充已登录。
+  await expect(dialog.getByTestId('plugin-check-browser-session')).toHaveText(
+    '未知（本检查不核验浏览器登录态）',
+  )
+  await expect(dialog.getByTestId('plugin-check-coordinates')).toHaveText('Epoch 21 · Rev 3')
+  expect(await dialog.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
+  await page.screenshot({ path: info.outputPath('connection-check-result-320.png') })
+
+  await dialog.getByTestId('plugin-check-close').click()
+  await expect(dialog).toHaveCount(0)
+  // 关闭后不自动重查。
+  expect(network.requests.length).toBe(1)
 })

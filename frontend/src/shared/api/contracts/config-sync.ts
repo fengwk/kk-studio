@@ -17,8 +17,9 @@ export type ConfigSyncKind =
   | 'environments'
   | 'mcpServers'
   | 'settings'
+  | 'plugins'
 
-/** 配置引用的业务标识：模型为 `providerName/modelName`，设置为 `settings`。 */
+/** 配置引用的业务标识：模型为 `providerName/modelName`，设置为 `settings`，插件为 `pluginId`。 */
 export interface ConfigSyncRef {
   kind: ConfigSyncKind
   name: string

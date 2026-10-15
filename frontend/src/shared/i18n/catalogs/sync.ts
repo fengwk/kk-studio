@@ -66,6 +66,10 @@ export const syncCatalog = {
     'en-US': 'Settings',
     'zh-CN': '设置',
   },
+  'settings.sync.kind.plugins': {
+    'en-US': 'Plugin configurations',
+    'zh-CN': '插件配置',
+  },
   'settings.sync.export.title': {
     'en-US': 'Export configuration',
     'zh-CN': '导出配置',

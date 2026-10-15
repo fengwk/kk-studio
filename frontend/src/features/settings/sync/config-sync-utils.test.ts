@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 import type { ConfigSyncItem } from '@/shared/api/contracts/config-sync'
 import {
   CONFIG_SYNC_GROUPS,
+  CONFIG_SYNC_KIND_ORDER,
   configSyncImportMode,
+  configSyncKindLabelKey,
   configSyncRefKey,
   configSyncScopeKindCounts,
   configSyncScopeRefs,
@@ -40,7 +42,20 @@ describe('sync selection grouping', () => {
       ['environments'],
       ['mcpServers'],
       ['settings'],
+      ['plugins'],
     ])
+  })
+
+  // 插件配置是固定第八类：类别顺序与分组都由前端白名单决定，未知类别不会进入展示。
+  it('keeps plugin configurations as the eighth kind at a fixed position', () => {
+    expect(CONFIG_SYNC_KIND_ORDER).toHaveLength(8)
+    expect(CONFIG_SYNC_KIND_ORDER.at(-1)).toBe('plugins')
+    expect(CONFIG_SYNC_GROUPS.at(-1)).toEqual({
+      key: 'plugins',
+      kindKeys: ['plugins'],
+      labelKey: 'settings.sync.kind.plugins',
+    })
+    expect(configSyncKindLabelKey('plugins')).toBe('settings.sync.kind.plugins')
   })
 })
 
@@ -113,6 +128,32 @@ describe('computeExportScope', () => {
     expect(configSyncScopeKindCounts(INVENTORY, scope)).toEqual([
       { kind: 'models', count: 1 },
       { kind: 'providers', count: 1 },
+    ])
+  })
+
+  // 插件配置以 pluginId 为身份，其 Agent 依赖必须进入闭包并计入类别统计。
+  it('resolves a plugin closure through its declared agents', () => {
+    const withPlugins: ConfigSyncItem[] = [
+      item('plugins', 'minimax-mavis', [{ kind: 'agents', name: 'reviewer' }]),
+      item('agents', 'reviewer', [{ kind: 'models', name: 'openai/gpt' }]),
+      item('models', 'openai/gpt'),
+    ]
+    const scope = computeExportScope(withPlugins, new Set(['plugins:minimax-mavis']))
+
+    expect([...scope].sort()).toEqual([
+      'agents:reviewer',
+      'models:openai/gpt',
+      'plugins:minimax-mavis',
+    ])
+    expect(configSyncScopeRefs(withPlugins, scope)).toEqual([
+      { kind: 'plugins', name: 'minimax-mavis' },
+      { kind: 'agents', name: 'reviewer' },
+      { kind: 'models', name: 'openai/gpt' },
+    ])
+    expect(configSyncScopeKindCounts(withPlugins, scope)).toEqual([
+      { kind: 'agents', count: 1 },
+      { kind: 'models', count: 1 },
+      { kind: 'plugins', count: 1 },
     ])
   })
 })
