@@ -1,11 +1,14 @@
 package fun.fengwk.kkstudio.plugin.canvascomfyui;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -34,24 +37,16 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionResourceStream;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionSubmitState;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionUnknownException;
-import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
-import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.session.Session;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
-import fun.fengwk.kkstudio.platform.harness.oneshot.HarnessOneShotService;
-import fun.fengwk.kkstudio.platform.harness.oneshot.OneShotTicket;
+import fun.fengwk.kkstudio.platform.plugin.prompt.PluginPromptContent;
+import fun.fengwk.kkstudio.platform.plugin.prompt.PluginPromptResources;
+import fun.fengwk.kkstudio.platform.plugin.prompt.PluginPromptTasks;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
-import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
-import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 
 import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigDecimal;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -69,15 +64,15 @@ class MiniMaxH3CanvasFunctionAdapterTest {
   private static final UUID SOURCE_NODE = new UUID(0L, 2L);
   private static final UUID RESOURCE = new UUID(0L, 11L);
   private static final UUID SECOND_RESOURCE = new UUID(0L, 12L);
+  private static final UUID THIRD_RESOURCE = new UUID(0L, 13L);
   private static final UUID THREAD_ID = new UUID(0L, 55L);
   private static final UUID SESSION_ID = new UUID(0L, 56L);
   private static final UUID UPLOAD_ID = new UUID(0L, 57L);
   private static final UUID BLOB_ID = new UUID(0L, 58L);
 
   private final ObjectMapper mapper = new ObjectMapper();
-  private HarnessOneShotService oneShot;
-  private StorageUploadService uploadService;
-  private SessionBlobRefManager refManager;
+  private PluginPromptTasks promptTasks;
+  private PluginPromptResources promptResources;
 
   private StandardComfyuiClient comfy;
   private MiniMaxH3CanvasFunctionAdapter adapter;
@@ -86,16 +81,11 @@ class MiniMaxH3CanvasFunctionAdapterTest {
   @BeforeEach
   @SuppressWarnings("unchecked")
   void setUp() {
-    oneShot = mock(HarnessOneShotService.class);
+    promptTasks = mock(PluginPromptTasks.class);
+    promptResources = mock(PluginPromptResources.class);
     comfy = mock(StandardComfyuiClient.class);
-    uploadService = mock(StorageUploadService.class);
-    refManager = mock(SessionBlobRefManager.class);
-    when(uploadService.stage(any(), any(), any(InputStream.class), anyLong()))
-        .thenReturn(
-            new StorageUploadService.StagedUpload(
-                UPLOAD_ID, BLOB_ID, "source.png", "image/png", 3L, "a".repeat(64)));
-    when(uploadService.lockReady(UPLOAD_ID))
-        .thenReturn(new StorageUploadService.ReadyUpload(BLOB_ID, "source.png"));
+    when(promptResources.stage(any(), any(), any(InputStream.class), anyLong()))
+        .thenReturn(new PluginPromptResources.StagedResource(UPLOAD_ID, BLOB_ID));
     snapshot = new SystemSettingsSnapshot(settings(h3Settings(true, 1L, 1_000L)));
     adapter = newAdapter(snapshot);
   }
@@ -108,11 +98,10 @@ class MiniMaxH3CanvasFunctionAdapterTest {
         snapshot,
         new H3MediaPreflight(),
         new H3PromptRequestBuilder(),
-        oneShot,
+        promptTasks,
+        promptResources,
         new H3WorkflowBuilder(mapper),
-        clients,
-        uploadService,
-        refManager);
+        clients);
   }
 
   private static SystemSettings settings(SystemSettings.MiniMaxH3 minimaxH3) {
@@ -142,9 +131,8 @@ class MiniMaxH3CanvasFunctionAdapterTest {
   @Test
   void executesAllStagesAndMaterializesOnlyTarget() {
     RecordingContext context = new RecordingContext();
-    when(oneShot.submit(anyString(), anyString(), any(), any()))
-        .thenReturn(OneShotTicket.forThread(THREAD_ID));
-    when(oneShot.await(any(), any(), any())).thenReturn("enhanced prompt");
+    when(promptTasks.submit(anyString(), anyString(), any())).thenReturn(THREAD_ID);
+    when(promptTasks.await(any(), any(), any())).thenReturn("enhanced prompt");
     when(comfy.upload(anyString(), anyString(), anyLong(), any(), any()))
         .thenReturn(new H3UploadedFile("11.png", "kk-studio/7", "input"));
     when(comfy.submit(any(), anyString())).thenReturn("p1");
@@ -192,49 +180,38 @@ class MiniMaxH3CanvasFunctionAdapterTest {
     assertEquals(List.of(9, 8, 7), context.materializedBytes);
   }
 
+  /** 窄端口只接收有序 Text/Media 片段：宿主接受细节（RESOURCE 物化、Session 引用、upload owner 释放）由宿主测试覆盖，adapter 不得触碰。 */
   @Test
-  void preflightTransfersStagedMediaIntoDurableMessage() {
-    AtomicReference<List<NewThreadCommand>> preparedCommands = new AtomicReference<>();
-    when(oneShot.submit(anyString(), anyString(), any(), any()))
+  void submitsOrderedTextAndMediaPartsThroughNarrowPorts() {
+    AtomicReference<List<PluginPromptContent>> submitted = new AtomicReference<>();
+    when(promptTasks.submit(anyString(), anyString(), any()))
         .thenAnswer(
             invocation -> {
-              AgentMessage prompt = invocation.getArgument(2);
-              AcceptancePreflight preflight = invocation.getArgument(3);
-              NewThreadCommand command =
-                  new NewThreadCommand(new CustomMessageCommandPayload(prompt), UUID.randomUUID());
-              preparedCommands.set(
-                  preflight.prepare(
-                      mock(HarnessStore.Transaction.class),
-                      new Session(SESSION_ID, "h3", Instant.EPOCH),
-                      List.of(command)));
-              return OneShotTicket.forThread(THREAD_ID);
+              submitted.set(invocation.getArgument(2));
+              return THREAD_ID;
             });
-    when(oneShot.await(any(), any(), any()))
+    when(promptTasks.await(any(), any(), any()))
         .thenThrow(new IllegalStateException("stop after preflight"));
 
     assertThrows(
         IllegalStateException.class,
         () -> adapter.submit(new RecordingContext(), run("QUEUED", Map.of())));
 
-    CustomMessageCommandPayload payload =
-        assertInstanceOf(
-            CustomMessageCommandPayload.class, preparedCommands.get().get(0).payload());
-    ResourceMessageContent resource =
-        assertInstanceOf(ResourceMessageContent.class, payload.message().contents().get(2));
-    assertEquals(BLOB_ID, resource.blobId());
-    assertEquals("source.png", resource.name());
-    verify(refManager).retainRef(SESSION_ID, BLOB_ID);
-    verify(uploadService).delete(UPLOAD_ID);
+    List<PluginPromptContent> contents = submitted.get();
+    assertEquals(3, contents.size());
+    assertTrue(((PluginPromptContent.Text) contents.get(0)).text().contains("Frozen manifest"));
+    String label = ((PluginPromptContent.Text) contents.get(1)).text();
+    assertTrue(label.startsWith("\nThe next attachment is "), label);
+    PluginPromptContent.Media media =
+        assertInstanceOf(PluginPromptContent.Media.class, contents.get(2));
+    assertEquals(new PluginPromptResources.StagedResource(UPLOAD_ID, BLOB_ID), media.resource());
+    verify(promptResources, never()).discard(any());
   }
 
-  /**
-   * 提交前的输入准备失败仍按 FAILED 清理 staged media，且不得调用 submit。
-   *
-   * <p>一旦进入 oneShot.submit，异常不能证明接受事实未成立：必须转 UNKNOWN，禁止删除可能已被消费的 staged media，恢复时不得再次 submit。
-   */
+  /** 一旦进入窄端口 submit，异常不能证明接受事实未成立：必须转 UNKNOWN，禁止删除可能已被消费的 staged media，恢复时不得再次 submit。 */
   @Test
   void promptSubmitExceptionBecomesUnknownWithoutDiscardingStagedMedia() {
-    when(oneShot.submit(anyString(), anyString(), any(), any()))
+    when(promptTasks.submit(anyString(), anyString(), any()))
         .thenThrow(new IllegalStateException("response lost after accept"));
 
     RecordingContext context = new RecordingContext();
@@ -243,7 +220,7 @@ class MiniMaxH3CanvasFunctionAdapterTest {
             CanvasFunctionUnknownException.class,
             () -> adapter.submit(context, run("QUEUED", Map.of())));
     assertFalse(unknown.getMessage().isBlank());
-    verify(uploadService, never()).delete(UPLOAD_ID);
+    verify(promptResources, never()).discard(any());
     assertEquals(
         List.of(
             MiniMaxH3CanvasFunctionAdapter.INITIALIZED,
@@ -257,14 +234,14 @@ class MiniMaxH3CanvasFunctionAdapterTest {
     assertThrows(
         CanvasFunctionUnknownException.class,
         () -> adapter.submit(new RecordingContext(), crashed));
-    verify(oneShot, times(1)).submit(anyString(), anyString(), any(), any());
+    verify(promptTasks, times(1)).submit(anyString(), anyString(), any());
   }
 
   @Test
   void promptAgentFailureCauseSecretNeverAppearsInUnknownMessage() {
     // 真实 H3 失败 cause 可能带 synthetic key/路径/URL 原文；UNKNOWN 分类只声明结果未知。
     String secret = "synthetic-secret path/to/agent.conf https://evil.example/leak";
-    when(oneShot.submit(anyString(), anyString(), any(), any()))
+    when(promptTasks.submit(anyString(), anyString(), any()))
         .thenThrow(new IllegalStateException(secret));
 
     CanvasFunctionUnknownException unknown =
@@ -311,29 +288,12 @@ class MiniMaxH3CanvasFunctionAdapterTest {
     verify(comfy, never()).history(anyString());
   }
 
-  @Test
-  void validationBeforeSubmitStillFailsAndCleansStagedMedia() {
-    CanvasFunctionExecutionContext context = mock(CanvasFunctionExecutionContext.class);
-    InputStream first = new ByteArrayInputStream(new byte[] {1, 2, 3});
-    when(context.openOriginal(any()))
-        .thenReturn(new CanvasFunctionResourceStream(first, 3L, first::close));
-    when(uploadService.stage(any(), any(), any(InputStream.class), anyLong()))
-        .thenReturn(
-            new StorageUploadService.StagedUpload(
-                UPLOAD_ID, BLOB_ID, "source.png", "image/jpeg", 3L, "a".repeat(64)));
-
-    assertThrows(
-        IllegalArgumentException.class, () -> adapter.submit(context, run("QUEUED", Map.of())));
-
-    verify(uploadService).delete(UPLOAD_ID);
-    verify(oneShot, never()).submit(anyString(), anyString(), any(), any());
-  }
-
   private static long contextSeed(RecordingContext context) {
     Object seed = context.lastAdapterState.get("seed");
     return ((Number) seed).longValue();
   }
 
+  /** 提交前的输入准备失败仍按 FAILED 清理 staged media，且不得调用 submit。 */
   @Test
   void stagingFailureDiscardsPreviouslyPreparedMedia() {
     CanvasFunctionExecutionContext context = mock(CanvasFunctionExecutionContext.class);
@@ -352,8 +312,138 @@ class MiniMaxH3CanvasFunctionAdapterTest {
                     Map.of(),
                     List.of(imageReference(RESOURCE), imageReference(SECOND_RESOURCE)))));
 
-    verify(uploadService).delete(UPLOAD_ID);
-    verify(oneShot, never()).submit(anyString(), anyString(), any(), any());
+    verify(promptResources).discard(new PluginPromptResources.StagedResource(UPLOAD_ID, BLOB_ID));
+    verify(promptTasks, never()).submit(anyString(), anyString(), any());
+  }
+
+  /** 关闭原流失败发生在句柄已产生之后：该句柄必须已被登记清理，绝不留给耐久过期兜底。 */
+  @Test
+  void failingStreamCloseStillDiscardsItsStagedHandle() {
+    CanvasFunctionExecutionContext context = mock(CanvasFunctionExecutionContext.class);
+    InputStream content = new ByteArrayInputStream(new byte[] {1, 2, 3});
+    when(context.openOriginal(any()))
+        .thenReturn(
+            new CanvasFunctionResourceStream(
+                content,
+                3L,
+                () -> {
+                  throw new IOException("close failed");
+                }));
+    PluginPromptResources.StagedResource handle =
+        new PluginPromptResources.StagedResource(UPLOAD_ID, BLOB_ID);
+    when(promptResources.stage(any(), any(), any(InputStream.class), anyLong())).thenReturn(handle);
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> adapter.submit(context, run("QUEUED", Map.of(), List.of(imageReference(RESOURCE)))));
+
+    verify(promptResources).discard(handle);
+    verify(promptTasks, never()).submit(anyString(), anyString(), any());
+  }
+
+  /** 后续准备失败必须清理每一个已登记句柄：前面成功的引用不能因为后面的引用失败而泄漏。 */
+  @Test
+  void laterPreparationFailureDiscardsEveryAlreadyStagedHandle() {
+    CanvasFunctionExecutionContext context = mock(CanvasFunctionExecutionContext.class);
+    PluginPromptResources.StagedResource firstHandle =
+        new PluginPromptResources.StagedResource(UPLOAD_ID, BLOB_ID);
+    PluginPromptResources.StagedResource secondHandle =
+        new PluginPromptResources.StagedResource(new UUID(0L, 61L), new UUID(0L, 62L));
+    when(context.openOriginal(any()))
+        .thenReturn(stream())
+        .thenReturn(stream())
+        .thenThrow(new IllegalStateException("third source unavailable"));
+    when(promptResources.stage(any(), any(), any(InputStream.class), anyLong()))
+        .thenReturn(firstHandle, secondHandle);
+
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            adapter.submit(
+                context,
+                run(
+                    "QUEUED",
+                    Map.of(),
+                    List.of(
+                        imageReference(RESOURCE),
+                        imageReference(SECOND_RESOURCE),
+                        imageReference(THIRD_RESOURCE)))));
+
+    verify(promptResources).discard(firstHandle);
+    verify(promptResources).discard(secondHandle);
+    verify(promptTasks, never()).submit(anyString(), anyString(), any());
+  }
+
+  /** 主失败是 Error 时身份必须原样保留：清理抛出的 Error 只作为 suppressed 附加，剩余句柄仍然继续清理。 */
+  @Test
+  void primaryErrorIsPreservedWhileCleanupErrorsAreSuppressedAndCleanupContinues() {
+    CanvasFunctionExecutionContext context = mock(CanvasFunctionExecutionContext.class);
+    PluginPromptResources.StagedResource firstHandle =
+        new PluginPromptResources.StagedResource(UPLOAD_ID, BLOB_ID);
+    PluginPromptResources.StagedResource secondHandle =
+        new PluginPromptResources.StagedResource(new UUID(0L, 61L), new UUID(0L, 62L));
+    AssertionError primary = new AssertionError("third source unavailable");
+    LinkageError cleanupError = new LinkageError("discard failed");
+    when(context.openOriginal(any())).thenReturn(stream()).thenReturn(stream()).thenThrow(primary);
+    when(promptResources.stage(any(), any(), any(InputStream.class), anyLong()))
+        .thenReturn(firstHandle, secondHandle);
+    doThrow(cleanupError).when(promptResources).discard(firstHandle);
+
+    AssertionError propagated =
+        assertThrows(
+            AssertionError.class,
+            () ->
+                adapter.submit(
+                    context,
+                    run(
+                        "QUEUED",
+                        Map.of(),
+                        List.of(
+                            imageReference(RESOURCE),
+                            imageReference(SECOND_RESOURCE),
+                            imageReference(THIRD_RESOURCE)))));
+
+    assertSame(primary, propagated, "the primary Error identity must survive cleanup");
+    assertArrayEquals(new Throwable[] {cleanupError}, propagated.getSuppressed());
+    verify(promptResources).discard(firstHandle);
+    verify(promptResources).discard(secondHandle);
+    verify(promptTasks, never()).submit(anyString(), anyString(), any());
+  }
+
+  /** 清理期的 RuntimeException 只按去敏类型日志：它绝不进入主失败的传播链，主失败消息原样保留。 */
+  @Test
+  void cleanupRuntimeFailureNeverEntersThePrimaryFailureChain() {
+    CanvasFunctionExecutionContext context = mock(CanvasFunctionExecutionContext.class);
+    PluginPromptResources.StagedResource handle =
+        new PluginPromptResources.StagedResource(UPLOAD_ID, BLOB_ID);
+    when(context.openOriginal(any()))
+        .thenReturn(stream())
+        .thenThrow(new IllegalStateException("second source unavailable"));
+    when(promptResources.stage(any(), any(), any(InputStream.class), anyLong())).thenReturn(handle);
+    doThrow(new IllegalStateException("upload already consumed"))
+        .when(promptResources)
+        .discard(handle);
+
+    IllegalStateException propagated =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                adapter.submit(
+                    context,
+                    run(
+                        "QUEUED",
+                        Map.of(),
+                        List.of(imageReference(RESOURCE), imageReference(SECOND_RESOURCE)))));
+
+    assertEquals("second source unavailable", propagated.getMessage());
+    assertEquals(0, propagated.getSuppressed().length);
+    verify(promptResources).discard(handle);
+    verify(promptTasks, never()).submit(anyString(), anyString(), any());
+  }
+
+  private static CanvasFunctionResourceStream stream() {
+    InputStream content = new ByteArrayInputStream(new byte[] {1, 2, 3});
+    return new CanvasFunctionResourceStream(content, 3L, content::close);
   }
 
   @Test
@@ -368,7 +458,7 @@ class MiniMaxH3CanvasFunctionAdapterTest {
                         MiniMaxH3CanvasFunctionAdapter.PROMPT_SUBMITTING,
                         H3AdapterState.empty().withSeed(1L).encode())));
     assertFalse(prompt.getMessage().isBlank());
-    verify(oneShot, never()).submit(anyString(), anyString(), any(), any());
+    verify(promptTasks, never()).submit(anyString(), anyString(), any());
 
     CanvasFunctionUnknownException comfyError =
         assertThrows(
@@ -407,9 +497,9 @@ class MiniMaxH3CanvasFunctionAdapterTest {
     verify(comfy, never()).upload(anyString(), anyString(), anyLong(), any(), any());
 
     H3AdapterState cancelState = state.withHarnessThreadId(THREAD_ID).withPromptId("p1");
-    doThrow(new IllegalStateException("stop failed")).when(oneShot).stop(THREAD_ID);
+    doThrow(new IllegalStateException("stop failed")).when(promptTasks).stop(THREAD_ID);
     adapter.cancel(run(MiniMaxH3CanvasFunctionAdapter.COMFY_WAITING, cancelState.encode()));
-    verify(oneShot).stop(THREAD_ID);
+    verify(promptTasks).stop(THREAD_ID);
     verify(comfy).cancelPending("p1");
   }
 
@@ -475,7 +565,7 @@ class MiniMaxH3CanvasFunctionAdapterTest {
     doThrow(new IllegalStateException("delete failed")).when(comfy).cancelPending("p1");
     assertDoesNotThrow(
         () -> adapter.cancel(run(MiniMaxH3CanvasFunctionAdapter.COMFY_WAITING, state.encode())));
-    verify(oneShot).stop(THREAD_ID);
+    verify(promptTasks).stop(THREAD_ID);
   }
 
   private CanvasFunctionFrozenRun run(String stage, Map<String, Object> state) {

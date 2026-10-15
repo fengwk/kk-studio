@@ -24,7 +24,7 @@
 
 [`PluginCredentialMaterial`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginCredentialMaterial.java) 是 Plugin 交还的待加密材料（region 路由元数据加 opaque `payloadJson`），`toString` 有意省略秘密载荷；[`PluginCredentialSnapshot`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginCredentialSnapshot.java) 是本次调用所需的解密快照，携带行版本、认证代际与原始密文供调用期 CAS，数组访问做防御性拷贝。
 
-[`PluginContext`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginContext.java) 只暴露本插件的 [`PluginCredentialAccess`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/credential/PluginCredentialAccess.java) 与可选资源网关。凭据访问没有 pluginId 参数，只能取得本插件快照或作废本次已用凭据；宿主拒绝跨插件快照。
+[`PluginContext`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginContext.java) 只暴露本插件的 [`PluginCredentialAccess`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/credential/PluginCredentialAccess.java)、可选资源网关与 Prompt 任务/媒体端口。凭据访问没有 pluginId 参数，只能取得本插件快照或作废本次已用凭据；宿主拒绝跨插件快照。
 
 [`PluginCredentialStore`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/credential/PluginCredentialStore.java) 是宿主的唯一凭据存取端口，不通过 Context 交给插件。管理面只看到 [`PluginCredentialProjection`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/credential/PluginCredentialProjection.java)，调用快照不投影到管理面。密码学、CAS、租约与状态投影由宿主实现，读写都 fail closed。
 
@@ -35,6 +35,14 @@
 [`PluginResourceGateway`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/resource/PluginResourceGateway.java) 是 Plugin 与 Storage 之间唯一的窄接口：`resolveSessionResource` 按本次调用显式给出的 threadId 解析 Session 引用并签发受控短期 HTTPS 下载地址，`stageRemoteMedia` 把远端媒体按声明的 [`PluginMediaFamily`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/resource/PluginMediaFamily.java) 有界流式暂存为全局 Blob 上传。授权、HTTPS、重定向与私网校验以及 MIME 嗅探都由宿主实现，任何不满足约束的输入以 [`PluginResourceUnavailableException`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/resource/PluginResourceUnavailableException.java) 终结。
 
 [`SessionResourceUri`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/resource/SessionResourceUri.java) 定义平台托管资源 URI 的规范形态 `kkstudio:/resources/<canonical-uuid>`，只接受完整规范形态，并在自由文本中按边界识别内嵌 URI；URI 只是指向全局 Blob 的标识，不是权限凭据。
+
+## Prompt 任务与媒体端口
+
+[`PluginPromptTasks`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/prompt/PluginPromptTasks.java) 让插件提交一次受信 system 文本与有序内容的 Prompt 任务：`submit` 返回可持久化的任务句柄，`await` 在调用方仍活跃且未超时前观察终态报告，`stop` 结束任务。宿主负责创建 root Session/Thread、把 system 文本包成前导提醒、与任务的固定回执在同一事务内接受源 Prompt；任务句柄在重启后仍指向同一次 join 与同一份冻结结果。
+
+[`PluginPromptResources`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/prompt/PluginPromptResources.java) 是本次调用独有的媒体暂存端口：`stage` 把插件持有的字节有界暂存为受校验的上传并返回 `StagedResource` 句柄，`discard` 主动放弃句柄。句柄不跨调用复用；宿主只按句柄的持久身份在接受事务内把它物化为 durable RESOURCE，插件无权构造存储引用。
+
+[`PluginPromptContent`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/prompt/PluginPromptContent.java) 是 Prompt 内容的封闭形态：可信文本，或引用已暂存媒体的句柄。端口只使用 JDK 类型，Harness 消息结构、存储上传与 blob 引用都不出现在插件契约里。
 
 ---
 

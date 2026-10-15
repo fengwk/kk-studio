@@ -160,7 +160,11 @@ class PluginManagementServiceTest {
     PluginCatalogBootstrap bootstrap = new PluginCatalogBootstrap(registry, catalog, transactions);
     BiFunction<String, PluginCredentialReference, PluginContext> contexts =
         (pluginId, reference) ->
-            new PluginContext(new PluginCredentialAccessStub(reference), Optional.empty());
+            new PluginContext(
+                new PluginCredentialAccessStub(reference),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty());
     snapshot = bootstrap.bootstrap(contexts, List.of(), List.of());
     // 运行期所有者唯一拥有该快照：管理面每次投影向它取一次 current 租用。
     runtime =
@@ -183,7 +187,7 @@ class PluginManagementServiceTest {
         credentials,
         codec,
         keyLoader,
-        new PluginContextFactory(credentialStore, () -> null),
+        new PluginContextFactory(credentialStore, () -> null, () -> null, () -> null),
         List::of,
         List::of,
         transactions,
@@ -754,7 +758,7 @@ class PluginManagementServiceTest {
             failing,
             new PluginCredentialCodec(),
             keyLoader(),
-            new PluginContextFactory(credentialStore, () -> null),
+            new PluginContextFactory(credentialStore, () -> null, () -> null, () -> null),
             List::of,
             List::of,
             transactions,
