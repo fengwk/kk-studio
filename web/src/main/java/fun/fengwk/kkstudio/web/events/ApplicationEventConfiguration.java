@@ -10,6 +10,8 @@ import fun.fengwk.kkstudio.harness.infra.realtime.RealtimeEventSource;
 import fun.fengwk.kkstudio.harness.runtime.HarnessThreadChangeSource;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEventJsonCodec;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrchestrator;
+import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRefreshTrigger;
+import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.PostgresqlPluginCatalogChangeNotifier;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsChangeHandler;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
@@ -75,6 +77,7 @@ public class ApplicationEventConfiguration {
       ExecutionTreeChangeHub executionTreeChangeHub,
       InteractionChangeHub interactionChangeHub,
       EnvironmentChangeHub environmentChangeHub,
+      PostgresqlNotificationHandler pluginCatalogNotificationHandler,
       SystemSettingsSnapshot systemSettingsSnapshot) {
     SystemSettings.Advanced advanced = systemSettingsSnapshot.get().advanced();
     return new PostgresqlNotificationLoop(
@@ -145,9 +148,21 @@ public class ApplicationEventConfiguration {
                 () -> {
                   environmentChangeHub.broadcastResync();
                   interactionChangeHub.broadcastResync();
-                })),
+                }),
+            // 14. Plugin 目录变更：集群任一节点提交配置后广播提示其它节点立即回读权威目录；payload 只作提示、不能作为可信状态，
+            // 建连/重连时同样 resync，通知丢失由周期对账追平
+            pluginCatalogNotificationHandler),
         Duration.ofMillis(advanced.postgresqlWorkNotificationPollMillis()),
         Duration.ofMillis(advanced.postgresqlWorkReconnectBackoffMillis()));
+  }
+
+  @Bean
+  public PostgresqlNotificationHandler pluginCatalogNotificationHandler(
+      PluginCatalogRefreshTrigger trigger) {
+    return new PostgresqlNotificationHandler(
+        PostgresqlPluginCatalogChangeNotifier.CHANNEL,
+        ignored -> trigger.requestRefresh(),
+        trigger::requestRefresh);
   }
 
   @Bean(destroyMethod = "close")

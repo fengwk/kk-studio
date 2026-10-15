@@ -67,6 +67,9 @@ import java.util.function.Supplier;
  * catalog_state}），再按基线条件写凭据行（锁 credential 行）。任一步失败都整体回滚，候选实例在所有分支上都被关闭。
  *
  * <p>刷新仍只操作 credential 行。CAS 未命中不写历史、不写秘密、不发通知，所有非变更 manifest entry 与基线逐字段一致。
+ *
+ * <p>每次成功提交后，本节点在同一个 afterCommit 同步里被唤醒：目录提示对所有提交都必要（本节点必须立即回读权威目录），只有真正改写了凭据行的 WRITE/REMOVE
+ * 才额外唤醒凭据刷新调度；回滚既不发布也不唤醒。
  */
 @Slf4j
 public final class PluginConfigurationCommitService {
@@ -88,6 +91,7 @@ public final class PluginConfigurationCommitService {
   private final TransactionTemplate commitTemplate;
   private final Clock clock;
   private final Runnable credentialChanged;
+  private final Runnable catalogChanged;
 
   public PluginConfigurationCommitService(
       StudioPluginRegistry registry,
@@ -100,7 +104,8 @@ public final class PluginConfigurationCommitService {
       Supplier<List<CanvasFunctionAdapter>> builtinAdapters,
       PlatformTransactionManager transactionManager,
       Clock clock,
-      Runnable credentialChanged) {
+      Runnable credentialChanged,
+      Runnable catalogChanged) {
     this.registry = Objects.requireNonNull(registry, "registry");
     this.configurationRepository =
         Objects.requireNonNull(configurationRepository, "configurationRepository");
@@ -115,6 +120,7 @@ public final class PluginConfigurationCommitService {
         new TransactionTemplate(Objects.requireNonNull(transactionManager, "transactionManager"));
     this.clock = Objects.requireNonNull(clock, "clock");
     this.credentialChanged = Objects.requireNonNull(credentialChanged, "credentialChanged");
+    this.catalogChanged = Objects.requireNonNull(catalogChanged, "catalogChanged");
   }
 
   /**
@@ -455,6 +461,8 @@ public final class PluginConfigurationCommitService {
       return false;
     }
     if (action == CredentialAction.NONE) {
+      // 只推进普通 revision：本节点仍要立即回读权威目录，但绝不能无谓唤醒凭据刷新调度。
+      registerCommittedChange(false);
       return true;
     }
     PluginCredentialRow existing = baseline.orElse(null);
@@ -463,7 +471,7 @@ public final class PluginConfigurationCommitService {
           pluginId, existing.authGeneration(), existing.contextFingerprint(), existing.version())) {
         throw credentialChangedConcurrently(pluginId);
       }
-      registerCredentialChanged();
+      registerCommittedChange(true);
       return true;
     }
     Instant now = clock.instant();
@@ -492,7 +500,7 @@ public final class PluginConfigurationCommitService {
     if (!written) {
       throw credentialChangedConcurrently(pluginId);
     }
-    registerCredentialChanged();
+    registerCommittedChange(true);
     return true;
   }
 
@@ -502,18 +510,27 @@ public final class PluginConfigurationCommitService {
         "plugin", "credential of " + pluginId, "credential changed concurrently");
   }
 
-  /** 提交成功后唤醒刷新调度：有活跃事务时排到提交后，避免通知早于新凭据可见。 */
-  private void registerCredentialChanged() {
+  /** 提交成功后唤醒刷新调度与本节点目录对账：有活跃事务时排到提交后，避免通知早于新凭据可见。 */
+  private void registerCommittedChange(boolean credentialWritten) {
+    Runnable committed =
+        () -> {
+          // 目录提示对所有成功提交都必要：本节点必须立即回读权威目录，而不是等周期对账。
+          catalogChanged.run();
+          if (credentialWritten) {
+            // 只有真正改写了凭据行才唤醒刷新调度：纯 KEEP 普通配置提交不得无谓唤醒它。
+            credentialChanged.run();
+          }
+        };
     if (TransactionSynchronizationManager.isSynchronizationActive()) {
       TransactionSynchronizationManager.registerSynchronization(
           new TransactionSynchronization() {
             @Override
             public void afterCommit() {
-              credentialChanged.run();
+              committed.run();
             }
           });
     } else {
-      credentialChanged.run();
+      committed.run();
     }
   }
 

@@ -205,7 +205,7 @@ Platform 适配注册、租约和资源票据；会话代际、在途调用和�
 
 `PluginCatalogSnapshot` 逐个配置实例，聚合内置贡献，并在返回前验证两域完整目录；
 任一配置、贡献或目录失败时释放全部已建实例。Web 从同一快照提供两域 Catalog，
-配置由权威 manifest 指定，目录在启动时冻结。
+配置由权威 manifest 指定，每个 epoch 内目录冻结，运行期通过完整快照原子切换。
 
 ### Plugin 配置存储
 
@@ -238,8 +238,18 @@ manifest 保存代码版本、Schema 与实际能力指纹，全局指纹覆盖�
 因此绝不把当前其它插件拼进旧任务，也不修改 desired/applied、不发布旧 epoch。历史视图只由租约持有，
 最后一个租约释放即移除并关闭，重启后旧 epoch 仍按持久历史重建。
 配置写入接口以 expectedEpoch 和 expectedRevision 做 CAS，普通值、秘密变更及 manifest
-在同一事务中提交。当前没有运行期目录切换，保存后通过 desired/applied 坐标和
-applicationError 报告本节点待应用状态；数据库提交提示不代表所有节点已经应用。
+在同一事务中提交。唯一 afterCommit 同步始终唤醒本节点目录对账，仅秘密写入或删除时
+额外唤醒凭据刷新调度器；KEEP 不唤醒凭据调度器，回滚不触发任何唤醒。
+Web 合并通知、重连提示与每 5 秒的权威回读，应用失败时保留整个旧视图。
+管理面一次投影先取得当前 applied 租用，持有到完整 DTO 构造结束，再将权威 desired
+与该租用的 applied 坐标一起报告；仅当运行期错误状态的两端 epoch 都匹配时暴露
+`authority-unavailable` 或 `apply-failed`，不匹配或尚未应用时报告 pending。
+数据库提交提示不代表所有节点已经应用。
+
+`PluginCanvasFunctionCatalogSource` 将 current/history 租用直接绑定到该运行期。
+函数绑定的 epoch、完整定义与插件来源必须逐项匹配，内置函数来源为 null；
+来源中的能力指纹、配置修订及认证引用只取自同一冻结快照，不读取凭据内容。
+失败即释放租用，关闭幂等且关闭后不可访问，不按同名函数回退到当前版本。
 
 ### 新增 Plugin
 
