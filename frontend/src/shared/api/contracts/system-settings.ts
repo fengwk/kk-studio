@@ -62,34 +62,6 @@ export interface ComfyuiIntegrationDTO {
   maxInputFileBytes: DecimalLong
 }
 
-export interface OpenCliHubIntegrationDTO {
-  enabled: boolean
-  baseUrl: string | null
-  connectTimeoutMillis: DecimalLong
-  requestTimeoutMillis: DecimalLong
-  longPollTimeoutMillis: DecimalLong
-  streamBufferBytes: number
-  maxJsonResponseBytes: number
-  maxErrorResponseBytes: number
-  maxOutputChars: number
-}
-
-export interface SeedanceIntegrationDTO {
-  enabled: boolean
-  workspaceId: string | null
-  retry: number
-  hubExecutionTimeoutMillis: DecimalLong
-  statusPollIntervalMillis: DecimalLong
-  maxWaitMillis: DecimalLong
-}
-
-export interface GptImage2IntegrationDTO {
-  paidEnabled: boolean
-  askTimeoutSeconds: number
-  hubExecutionTimeoutMillis: DecimalLong
-  maxWaitMillis: DecimalLong
-}
-
 export interface MiniMaxH3IntegrationDTO {
   enabled: boolean
   promptAgentName: string | null
@@ -103,9 +75,6 @@ export interface MiniMaxH3IntegrationDTO {
 
 export interface SystemSettingsIntegrationsDTO {
   comfyui: ComfyuiIntegrationDTO
-  openCliHub: OpenCliHubIntegrationDTO
-  seedance: SeedanceIntegrationDTO
-  gptImage2: GptImage2IntegrationDTO
   minimaxH3: MiniMaxH3IntegrationDTO
 }
 
