@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.daemon;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -25,6 +26,8 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdatePhase;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateResult;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateResultCodec;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -40,6 +43,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BooleanSupplier;
 
 /**
  * 意图：受管更新编排的每条可达路径都收敛为确定回执——未 READY 拒绝、执行器拒绝/停机、同一 operation 幂等与在途互斥、准备失败与准备崩溃都不得谎报成功，
@@ -60,6 +64,9 @@ class DaemonUpdateCoordinatorTest {
 
   private final RecordingSink sink = new RecordingSink();
   private final List<ExecutorService> executors = new ArrayList<>();
+
+  /** 交接顺序的共享事件表：准备器、启动器与出站端口都按发生顺序追加。 */
+  private final List<String> events = Collections.synchronizedList(new ArrayList<>());
 
   @AfterEach
   void shutdownExecutors() {
@@ -356,6 +363,260 @@ class DaemonUpdateCoordinatorTest {
     assertEquals("detached updater could not be started", failed.message());
   }
 
+  /**
+   * 交接顺序：handoff 先落 PREPARING，OS 接受后才冻结 ACCEPTED，许可只在本次 PREPARED 回执入缓存并完成一次出站尝试后释放。
+   *
+   * <p>准备器替身使用真实 {@link UpdateHandoff} 文件，因此事件表与文件事实互相印证，而不是只验证调用顺序。
+   */
+  @Test
+  void releasesPermitOnlyAfterThePreparedReceiptIsFrozenAndSent()
+      throws InterruptedException, IOException {
+    Path updateRoot = root.resolve("updates").resolve(OP);
+    HandoffPreparer preparer = new HandoffPreparer(updateRoot);
+    HandoffSink handoffSink = new HandoffSink(preparer);
+    DaemonUpdateCoordinator coordinator =
+        new DaemonUpdateCoordinator(
+            root, DaemonOperatingSystem.LINUX, singleThread(), handoffSink, () -> true);
+    coordinator.setPreparer(preparer);
+    coordinator.setLauncher(
+        prepared -> {
+          events.add("launch");
+          return true;
+        });
+
+    coordinator.handleUpdate(updateCommand(OP));
+    awaitUntil(preparer::permitExists, "the released permit");
+
+    assertEquals(
+        List.of("send:ACCEPTED", "prepare", "launch", "send:PREPARED"), List.copyOf(events));
+    assertEquals(
+        UpdateHandoff.State.ACCEPTED,
+        handoffSink.stateAtPrepared,
+        "the PREPARED receipt must be sent only after the handoff is ACCEPTED");
+    assertFalse(
+        handoffSink.permitAtPrepared,
+        "the permit must not exist when the PREPARED receipt is sent");
+    assertEquals(
+        OP,
+        Files.readString(updateRoot.resolve(UpdateHandoff.PERMIT_FILE)).strip(),
+        "the permit must carry the operationId after delivery");
+  }
+
+  /** 已接受的同一 operation 只重放 PREPARED：绝不再次启动 OS 作业，但仍幂等释放 matching permit（崩溃在许可落盘前也能被重放救回）。 */
+  @Test
+  void doesNotRelaunchAnAlreadyAcceptedOperation() throws InterruptedException, IOException {
+    AtomicInteger launches = new AtomicInteger();
+    Path updateRoot = root.resolve("updates").resolve(OP);
+    DaemonUpdateCoordinator coordinator =
+        coordinator(singleThread(), true, DaemonOperatingSystem.LINUX);
+    coordinator.setPreparer(command -> alreadyAcceptedOutcome(command.operationId()));
+    coordinator.setLauncher(
+        prepared -> {
+          launches.incrementAndGet();
+          return true;
+        });
+
+    coordinator.handleUpdate(updateCommand(OP));
+    awaitUntil(
+        () -> Files.exists(updateRoot.resolve(UpdateHandoff.PERMIT_FILE)), "the released permit");
+
+    assertEquals(DaemonUpdatePhase.ACCEPTED, sink.await().phase());
+    assertEquals(DaemonUpdatePhase.PREPARED, sink.await().phase());
+    assertEquals(0, launches.get(), "an accepted operation must not be launched again");
+    assertEquals(
+        OP,
+        Files.readString(updateRoot.resolve(UpdateHandoff.PERMIT_FILE)).strip(),
+        "the replay must idempotently release the matching permit");
+  }
+
+  /** 启动失败必须落 FAILED 且零许可：独立更新器绝不会据此替换发行目录。 */
+  @Test
+  void leavesNoPermitWhenTheLaunchIsRejected() throws InterruptedException {
+    Path updateRoot = root.resolve("updates").resolve(OP);
+    HandoffPreparer preparer = new HandoffPreparer(updateRoot);
+    DaemonUpdateCoordinator coordinator =
+        new DaemonUpdateCoordinator(
+            root, DaemonOperatingSystem.LINUX, singleThread(), sink, () -> true);
+    coordinator.setPreparer(preparer);
+    coordinator.setLauncher(
+        prepared -> {
+          events.add("launch");
+          return false;
+        });
+
+    coordinator.handleUpdate(updateCommand(OP));
+
+    assertEquals(DaemonUpdatePhase.ACCEPTED, sink.await().phase());
+    DaemonUpdateResult failed = sink.await();
+    assertEquals(DaemonUpdatePhase.FAILED, failed.phase());
+    assertEquals("detached updater could not be started", failed.message());
+    assertEquals(UpdateHandoff.State.FAILED, preparer.state());
+    assertFalse(preparer.permitExists(), "a rejected launch must not release the permit");
+  }
+
+  /** 无法持久化 ACCEPTED 等价于未被接受：落 FAILED 且零许可，绝不把不确定当成成功。 */
+  @Test
+  void leavesNoPermitWhenAcceptanceCannotBePersisted() throws InterruptedException, IOException {
+    Path updateRoot = root.resolve("updates").resolve(OP);
+    HandoffPreparer preparer = new HandoffPreparer(updateRoot);
+    DaemonUpdateCoordinator coordinator =
+        new DaemonUpdateCoordinator(
+            root, DaemonOperatingSystem.LINUX, singleThread(), sink, () -> true);
+    coordinator.setPreparer(preparer);
+    coordinator.setLauncher(
+        prepared -> {
+          events.add("launch");
+          // 让 ACCEPTED 无法持久化：handoff 换成目录，原子改写前的「非符号链接普通文件」校验必然失败。
+          Path handoff = updateRoot.resolve(UpdateHandoff.HANDOFF_FILE);
+          try {
+            Files.delete(handoff);
+            Files.createDirectory(handoff);
+          } catch (IOException error) {
+            throw new UncheckedIOException(error);
+          }
+          return true;
+        });
+
+    coordinator.handleUpdate(updateCommand(OP));
+
+    assertEquals(DaemonUpdatePhase.ACCEPTED, sink.await().phase());
+    DaemonUpdateResult failed = sink.await();
+    assertEquals(DaemonUpdatePhase.FAILED, failed.phase());
+    assertFalse(preparer.permitExists(), "an unpersisted acceptance must not release the permit");
+  }
+
+  /** 启动抛出 {@link Error} 时：许可不释放，但认领必须释放，后续同一 operation 仍可被重新接受。 */
+  @Test
+  void releasesTheInFlightGateAndNoPermitWhenTheLaunchCannotRun() throws InterruptedException {
+    Path updateRoot = root.resolve("updates").resolve(OP);
+    HandoffPreparer preparer = new HandoffPreparer(updateRoot);
+    AtomicReference<Throwable> fatal = new AtomicReference<>();
+    ExecutorService executor =
+        Executors.newSingleThreadExecutor(
+            runnable -> {
+              Thread thread = new Thread(runnable, "run-update");
+              thread.setUncaughtExceptionHandler((source, error) -> fatal.set(error));
+              return thread;
+            });
+    executors.add(executor);
+    DaemonUpdateCoordinator coordinator =
+        new DaemonUpdateCoordinator(root, DaemonOperatingSystem.LINUX, executor, sink, () -> true);
+    coordinator.setPreparer(preparer);
+    coordinator.setLauncher(
+        prepared -> {
+          throw new AssertionError("fatal bootstrap error");
+        });
+
+    coordinator.handleUpdate(updateCommand(OP));
+    awaitUntil(() -> fatal.get() != null, "the fatal launch error");
+    assertInstanceOf(AssertionError.class, fatal.get());
+    assertFalse(preparer.permitExists(), "a fatal launch must not release the permit");
+
+    // 认领必须已被释放：同一 operation 可以重新走完整流程。
+    coordinator.setLauncher(prepared -> true);
+    coordinator.handleUpdate(updateCommand(OP));
+    awaitUntil(() -> sink.phasesInOrder().size() >= 3, "the retried update receipts");
+    assertEquals(
+        List.of(DaemonUpdatePhase.ACCEPTED, DaemonUpdatePhase.ACCEPTED, DaemonUpdatePhase.PREPARED),
+        sink.phasesInOrder());
+  }
+
+  /** handoff 在启动后被损坏/改写时同样收敛为固定安全失败：绝不带着不确定继续，也绝不释放许可。 */
+  @Test
+  void leavesNoPermitWhenTheHandoffIsCorruptedAfterLaunch()
+      throws InterruptedException, IOException {
+    Path updateRoot = root.resolve("updates").resolve(OP);
+    HandoffPreparer preparer = new HandoffPreparer(updateRoot);
+    DaemonUpdateCoordinator coordinator =
+        new DaemonUpdateCoordinator(
+            root, DaemonOperatingSystem.LINUX, singleThread(), sink, () -> true);
+    coordinator.setPreparer(preparer);
+    coordinator.setLauncher(
+        prepared -> {
+          try {
+            Files.writeString(updateRoot.resolve(UpdateHandoff.HANDOFF_FILE), "[1,2,3]");
+          } catch (IOException error) {
+            throw new UncheckedIOException(error);
+          }
+          return true;
+        });
+
+    coordinator.handleUpdate(updateCommand(OP));
+
+    assertEquals(DaemonUpdatePhase.ACCEPTED, sink.await().phase());
+    assertEquals(DaemonUpdatePhase.FAILED, sink.await().phase());
+    assertFalse(preparer.permitExists(), "a corrupted handoff must not release the permit");
+  }
+
+  /**
+   * 许可释放失败必须可见但绝不掩盖主异常：回执发送抛出的是调用方的原始异常，许可失败只作为日志。
+   *
+   * <p>把 permit 造成目录可确定地让释放失败；断言被观测到的仍是回执发送异常本身。
+   */
+  @Test
+  void permitReleaseFailureNeverMasksThePrimaryException()
+      throws InterruptedException, IOException {
+    Path updateRoot = root.resolve("updates").resolve(OP);
+    HandoffPreparer preparer = new HandoffPreparer(updateRoot);
+    AtomicReference<Throwable> fatal = new AtomicReference<>();
+    ExecutorService executor =
+        Executors.newSingleThreadExecutor(
+            runnable -> {
+              Thread thread = new Thread(runnable, "run-update");
+              thread.setUncaughtExceptionHandler((source, error) -> fatal.set(error));
+              return thread;
+            });
+    executors.add(executor);
+    DaemonUpdateCoordinator coordinator =
+        new DaemonUpdateCoordinator(
+            root, DaemonOperatingSystem.LINUX, executor, new PreparedThrowingSink(), () -> true);
+    coordinator.setPreparer(preparer);
+    coordinator.setLauncher(
+        prepared -> {
+          try {
+            Files.createDirectory(updateRoot.resolve(UpdateHandoff.PERMIT_FILE));
+          } catch (IOException error) {
+            throw new UncheckedIOException(error);
+          }
+          return true;
+        });
+
+    coordinator.handleUpdate(updateCommand(OP));
+    awaitUntil(() -> fatal.get() != null, "the primary receipt exception");
+
+    assertInstanceOf(
+        IllegalStateException.class,
+        fatal.get(),
+        "the receipt-send exception must remain the observed primary failure");
+    assertEquals(
+        UpdateHandoff.State.ACCEPTED,
+        preparer.state(),
+        "the accepted fact is cached even when the permit could not be released");
+  }
+
+  /** 出站失败（断线）仍保留已接受的更新事实：许可必须释放，独立更新器不被卡住。 */
+  @Test
+  void releasesPermitEvenWhenThePreparedReceiptCannotBeSent()
+      throws InterruptedException, IOException {
+    Path updateRoot = root.resolve("updates").resolve(OP);
+    HandoffPreparer preparer = new HandoffPreparer(updateRoot);
+    DaemonUpdateCoordinator coordinator =
+        new DaemonUpdateCoordinator(
+            root,
+            DaemonOperatingSystem.LINUX,
+            singleThread(),
+            new PreparedThrowingSink(),
+            () -> true);
+    coordinator.setPreparer(preparer);
+    coordinator.setLauncher(prepared -> true);
+
+    coordinator.handleUpdate(updateCommand(OP));
+
+    awaitUntil(preparer::permitExists, "the released permit");
+    assertEquals(UpdateHandoff.State.ACCEPTED, preparer.state());
+    assertEquals(OP, Files.readString(updateRoot.resolve(UpdateHandoff.PERMIT_FILE)).strip());
+  }
+
   private DaemonUpdateCoordinator coordinator(
       ExecutorService executor, boolean ready, DaemonOperatingSystem operatingSystem) {
     return new DaemonUpdateCoordinator(root, operatingSystem, executor, sink, () -> ready);
@@ -388,6 +649,15 @@ class DaemonUpdateCoordinatorTest {
     long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(ASYNC_TIMEOUT_SECONDS);
     while (thread.getState() != Thread.State.BLOCKED) {
       assertTrue(System.nanoTime() < deadline, "thread must contend on the update gate");
+      Thread.onSpinWait();
+    }
+  }
+
+  /** 自旋等待一个短时条件成立：超时即让测试明确失败，绝不静默继续。 */
+  private static void awaitUntil(BooleanSupplier condition, String description) {
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(ASYNC_TIMEOUT_SECONDS);
+    while (!condition.getAsBoolean()) {
+      assertTrue(System.nanoTime() < deadline, "timed out waiting for " + description);
       Thread.onSpinWait();
     }
   }
@@ -452,8 +722,22 @@ class DaemonUpdateCoordinatorTest {
     }
   }
 
+  /** 写出真实 {@code PREPARING} handoff 的准备结果：协调器随后必须把它冻结为 ACCEPTED/FAILED。 */
   private ManagedUpdateOutcome.Prepared preparedOutcome(String operationId) {
     Path handoff = root.resolve("updates").resolve(operationId);
+    try {
+      Files.createDirectories(handoff);
+      UpdateHandoff.writePreparing(
+          handoff,
+          updateCommandValue(operationId),
+          handoff.resolve(ManagedDaemonUpdater.UNIX_UPDATE_SCRIPT),
+          handoff.resolve(DaemonUpdateArtifact.jarName(TARGET_VERSION)),
+          root.resolve("lib").resolve(ManagedDaemonUpdater.MANAGED_JAR_NAME),
+          handoff.resolve(ManagedDaemonUpdater.MANAGED_CONFIG_NAME),
+          "/usr/bin/java");
+    } catch (IOException error) {
+      throw new UncheckedIOException(error);
+    }
     return new ManagedUpdateOutcome.Prepared(
         TARGET_VERSION,
         handoff,
@@ -462,19 +746,120 @@ class DaemonUpdateCoordinatorTest {
         root.resolve("lib").resolve(ManagedDaemonUpdater.MANAGED_JAR_NAME));
   }
 
+  /** 已接受交接的重放事实：真实写出 {@code ACCEPTED} handoff，重放只应幂等释放 matching permit，绝不再次启动。 */
+  private ManagedUpdateOutcome.AlreadyAccepted alreadyAcceptedOutcome(String operationId) {
+    ManagedUpdateOutcome.Prepared prepared = preparedOutcome(operationId);
+    try {
+      UpdateHandoff.transition(prepared.handoffDirectory(), UpdateHandoff.State.ACCEPTED);
+    } catch (IOException error) {
+      throw new UncheckedIOException(error);
+    }
+    return new ManagedUpdateOutcome.AlreadyAccepted(prepared);
+  }
+
   private static DaemonEnvelope updateCommand(String operationId) {
-    DaemonUpdateCommand command =
-        new DaemonUpdateCommand(
-            operationId,
-            TARGET_VERSION,
-            DaemonUpdateArtifact.artifactUrl(TARGET_VERSION),
-            ARTIFACT_SHA);
     return new DaemonEnvelope(
         DaemonProtocol.VERSION,
         DaemonMessageType.UPDATE,
         ENVIRONMENT_ID,
         null,
-        new DaemonUpdateCommandCodec().encode(command));
+        new DaemonUpdateCommandCodec().encode(updateCommandValue(operationId)));
+  }
+
+  private static DaemonUpdateCommand updateCommandValue(String operationId) {
+    return new DaemonUpdateCommand(
+        operationId,
+        TARGET_VERSION,
+        DaemonUpdateArtifact.artifactUrl(TARGET_VERSION),
+        ARTIFACT_SHA);
+  }
+
+  /**
+   * 使用真实 handoff 文件的准备器替身：只负责写出 {@code PREPARING} 并暴露文件事实；接受/失败/许可的生命周期完全由协调器驱动 {@link
+   * UpdateHandoff} 落盘，因此断言看到的是真实文件状态而非替身编造的事件。
+   */
+  private final class HandoffPreparer implements ManagedUpdatePreparer {
+
+    private final Path updateRoot;
+
+    private HandoffPreparer(Path updateRoot) {
+      this.updateRoot = updateRoot;
+    }
+
+    @Override
+    public ManagedUpdateOutcome prepare(DaemonUpdateCommand command) {
+      events.add("prepare");
+      try {
+        Files.createDirectories(updateRoot);
+        UpdateHandoff.writePreparing(
+            updateRoot,
+            command,
+            updateRoot.resolve("kk-studio-daemon-update.sh"),
+            updateRoot.resolve("kk-studio-daemon-v1.0.9.jar"),
+            updateRoot.resolve("kk-studio-daemon.jar"),
+            updateRoot.resolve("daemon.json"),
+            "/usr/bin/java");
+      } catch (IOException error) {
+        throw new UncheckedIOException(error);
+      }
+      return new ManagedUpdateOutcome.Prepared(
+          TARGET_VERSION,
+          updateRoot,
+          updateRoot.resolve("kk-studio-daemon-update.sh"),
+          updateRoot.resolve("kk-studio-daemon-v1.0.9.jar"),
+          updateRoot.resolve("kk-studio-daemon.jar"));
+    }
+
+    private UpdateHandoff.State state() {
+      try {
+        return UpdateHandoff.readState(updateRoot, updateCommandValue(OP));
+      } catch (IOException error) {
+        throw new UncheckedIOException(error);
+      }
+    }
+
+    private boolean permitExists() {
+      return Files.exists(updateRoot.resolve(UpdateHandoff.PERMIT_FILE));
+    }
+  }
+
+  /** 出站记录端口：把回执阶段追加到共享事件表，并在 PREPARED 送达瞬间核对 handoff 状态与许可。 */
+  private final class HandoffSink implements DaemonMessageSink {
+
+    private final DaemonUpdateResultCodec codec = new DaemonUpdateResultCodec();
+    private final HandoffPreparer preparer;
+    private volatile UpdateHandoff.State stateAtPrepared;
+    private volatile boolean permitAtPrepared;
+
+    private HandoffSink(HandoffPreparer preparer) {
+      this.preparer = preparer;
+    }
+
+    @Override
+    public boolean send(DaemonMessageType messageType, String invocationId, String payloadJson) {
+      DaemonUpdateResult result = codec.decode(payloadJson);
+      events.add("send:" + result.phase());
+      if (result.phase() == DaemonUpdatePhase.PREPARED) {
+        stateAtPrepared = preparer.state();
+        permitAtPrepared = preparer.permitExists();
+      }
+      return true;
+    }
+  }
+
+  /** 接受回执正常、PREPARED 回执抛出异常的出站端口：验证断线也不阻止许可释放。 */
+  private static final class PreparedThrowingSink implements DaemonMessageSink {
+
+    private final DaemonUpdateResultCodec codec = new DaemonUpdateResultCodec();
+
+    @Override
+    public boolean send(DaemonMessageType messageType, String invocationId, String payloadJson) {
+      DaemonUpdateResult result = codec.decode(payloadJson);
+      if (result.phase() == DaemonUpdatePhase.PREPARED) {
+        throw new IllegalStateException("connection dropped before the prepared receipt");
+      }
+      return true;
+    }
   }
 
   /** 记录出站回执的窄端口实现：可等待下一条回执，也可无阻塞检查"没有回执"。 */

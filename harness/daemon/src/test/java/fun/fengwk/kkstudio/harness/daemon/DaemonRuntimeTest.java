@@ -495,26 +495,43 @@ class DaemonRuntimeTest {
   private static final String UPDATE_OTHER_OP = "22222222-2222-2222-2222-222222222222";
 
   private DaemonEnvelope updateCommand(String operationId) {
-    DaemonUpdateCommand command =
-        new DaemonUpdateCommand(
-            operationId, "1.0.9", DaemonUpdateArtifact.artifactUrl("1.0.9"), "a".repeat(64));
     return new DaemonEnvelope(
         DaemonProtocol.VERSION,
         DaemonMessageType.UPDATE,
         ENVIRONMENT_ID,
         null,
-        new DaemonUpdateCommandCodec().encode(command));
+        new DaemonUpdateCommandCodec().encode(updateCommandValue(operationId)));
   }
 
-  private static ManagedUpdateOutcome.Prepared preparedUpdate(String operationId) {
-    Path updateDirectory = Path.of("/var/lib/kk-studio/updates/" + operationId);
-    Path script = updateDirectory.resolve("kk-studio-daemon-update.sh");
+  private static DaemonUpdateCommand updateCommandValue(String operationId) {
+    return new DaemonUpdateCommand(
+        operationId, "1.0.9", DaemonUpdateArtifact.artifactUrl("1.0.9"), "a".repeat(64));
+  }
+
+  /**
+   * 写出真实 {@code PREPARING} handoff 的准备结果：编排层随后必须把它冻结为 {@code ACCEPTED}/{@code
+   * FAILED}，因此必须落在测试独占目录里。
+   */
+  private ManagedUpdateOutcome.Prepared preparedUpdate(String operationId) {
+    Path updateDirectory = testRoot.resolve("updates").resolve(operationId);
+    Path script = updateDirectory.resolve(ManagedDaemonUpdater.UNIX_UPDATE_SCRIPT);
+    Path stagedJar = updateDirectory.resolve(DaemonUpdateArtifact.jarName("1.0.9"));
+    Path installedJar = testRoot.resolve("lib").resolve(ManagedDaemonUpdater.MANAGED_JAR_NAME);
+    try {
+      Files.createDirectories(updateDirectory);
+      UpdateHandoff.writePreparing(
+          updateDirectory,
+          updateCommandValue(operationId),
+          script,
+          stagedJar,
+          installedJar,
+          testRoot.resolve(ManagedDaemonUpdater.MANAGED_CONFIG_NAME),
+          "/usr/bin/java");
+    } catch (IOException error) {
+      throw new UncheckedIOException(error);
+    }
     return new ManagedUpdateOutcome.Prepared(
-        "1.0.9",
-        updateDirectory,
-        script,
-        updateDirectory.resolve("kk-studio-daemon-v1.0.9.jar"),
-        Path.of("/var/lib/kk-studio/lib/kk-studio-daemon.jar"));
+        "1.0.9", updateDirectory, script, stagedJar, installedJar);
   }
 
   /** 生产构造器不能为不完整的 registry 公布固定的 catalog。 */

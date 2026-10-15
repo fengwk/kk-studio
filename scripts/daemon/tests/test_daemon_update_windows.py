@@ -2,12 +2,15 @@
 
 The update script runs as an independent one-shot scheduled task on Windows, where the
 ScheduledTasks module does not exist on the Linux/macOS CI legs. These tests therefore
-inspect the failure handling, cleanup independence and de-sensitisation ordering directly
-from the shipped source, so the B03 guarantees stay verifiable wherever the suite runs.
+inspect the failure handling, cleanup independence, de-sensitisation ordering, the
+handoff/permit gate ordering, the exact-root scheduled-task ownership checks and the
+copy-based unique backup directly from the shipped source, so those guarantees stay
+verifiable wherever the suite runs.
 
 The native companion (`test_daemon_update_windows.ps1`) drives the real script through the
 ScheduledTasks API with disposable fixtures; it needs Windows PowerShell and is executed on
-the Windows matrix leg.
+the Windows matrix leg, so the assertions below also pin the contract that companion test
+must exercise.
 """
 
 import os
@@ -146,6 +149,150 @@ class TestWindowsUpdateCleanup(unittest.TestCase):
 
     def test_native_windows_companion_test_is_shipped(self):
         self.assertTrue(NATIVE_TEST_PATH.is_file())
+
+
+class TestWindowsUpdateHandoffGate(unittest.TestCase):
+    """The one-shot task starts while `PREPARING` is still persisted, so only the permit gates it."""
+
+    def test_matching_permit_is_awaited_before_the_state_is_required(self):
+        text = script_text()
+        permit_wait = text.index("while (-not (Test-Path -LiteralPath $permitPath -PathType Leaf))")
+        accepted = text.index("if ([string]$handoff.state -ne 'ACCEPTED')")
+        self.assertLess(
+            permit_wait, accepted, "the ACCEPTED state must be required only after the permit")
+        self.assertNotIn(
+            "is not accepted",
+            text[:permit_wait],
+            "a transient PREPARING at job start must never fail the job early")
+
+    def test_operation_id_is_pre_checked_and_the_transitioned_handoff_is_re_read(self):
+        text = script_text()
+        permit_wait = text.index("while (-not (Test-Path -LiteralPath $permitPath -PathType Leaf))")
+        self.assertIn(
+            "if ([string]$handoff.operationId -ne $operationId) { Fail-Closed 'handoff metadata does not match the operation' }",
+            text[:permit_wait],
+            "the operationId must be pre-checked before the permit wait")
+        self.assertGreaterEqual(
+            text[:permit_wait].count("$handoff = Read-Handoff"),
+            1,
+            "the handoff must be read before the permit wait")
+        self.assertGreaterEqual(
+            text[permit_wait:].count("$handoff = Read-Handoff"),
+            1,
+            "the possibly transitioned handoff must be re-read after the permit arrives")
+
+    def test_missing_permit_fails_closed_with_the_permit_reason(self):
+        text = script_text()
+        self.assertIn(
+            "Fail-Closed 'the daemon did not release the update permit in time'", text)
+        self.assertIn("if ((Get-Content -LiteralPath $permitPath -Raw).Trim() -ne $operationId)", text)
+        self.assertIn("Fail-Closed 'the update permit does not match the operation'", text)
+        self.assertIn("Fail-Closed 'the update permit is not a regular file'", text)
+
+    def test_managed_runtime_must_be_recorded_by_the_handoff(self):
+        text = script_text()
+        self.assertIn(
+            "if ([string]::IsNullOrEmpty([string]$handoff.javaExecutable)) { Fail-Closed 'handoff metadata does not record the managed runtime' }",
+            text)
+
+
+class TestWindowsUpdateTaskOwnership(unittest.TestCase):
+    """The real current installer task must be re-verified at the exact root path before anything stops."""
+
+    def test_task_lookup_uses_the_exact_root_path_and_never_swallows_scheduler_errors(self):
+        text = script_text()
+        self.assertIn("$taskPath = '\\'", text)
+        self.assertIn("function Find-ManagedTask([string]$TaskName) {", text)
+        self.assertIn("Get-ScheduledTask -ErrorAction Stop |", text)
+        self.assertIn(
+            "Where-Object { $_.TaskPath -eq $taskPath -and $_.TaskName -eq $TaskName }", text)
+        # A name-filtered query reports an absent task as an error; that is only safe while a
+        # genuine scheduler failure still terminates, so it must never be silenced.
+        self.assertNotRegex(text, r"Get-ScheduledTask[^\n]*-ErrorAction\s+SilentlyContinue")
+        self.assertNotRegex(text, r"Get-ScheduledTask\s+-TaskName")
+
+    def test_task_mutations_target_the_exact_root_path(self):
+        text = script_text()
+        self.assertIn("Stop-ScheduledTask -TaskName $taskName -TaskPath $taskPath", text)
+        self.assertIn("Start-ScheduledTask -TaskName $taskName -TaskPath $taskPath", text)
+
+    def test_stop_waits_for_both_running_and_queued(self):
+        text = script_text()
+        self.assertIn("[string]$current.State -notin @('Running', 'Queued')", text)
+
+    def test_ownership_checks_cover_description_single_action_runtime_arguments_and_cwd(self):
+        text = script_text()
+        self.assertIn(
+            '$taskDescription = "Managed by scripts/daemon/install.ps1; schema=1; ownerSid=$sid"',
+            text)
+        self.assertIn(
+            "if ([string]$task.Description -ne $taskDescription) { Fail-Closed 'managed scheduled task is not owned by the installer' }",
+            text)
+        self.assertIn("if ($actions.Count -ne 1)", text)
+        self.assertIn(
+            "Test-SamePath -Left ([string]$action.Execute) -Right ([string]$handoff.javaExecutable)",
+            text,
+            "the action must run the managed JVM recorded by the handoff, never a copied foreign runtime")
+        self.assertIn("if ([string]$action.Arguments -ne $expectedArguments)", text)
+        self.assertIn(
+            "Test-SamePath -Left ([string]$action.WorkingDirectory) -Right $installedDir", text)
+        self.assertNotIn("node", text.lower())
+
+    def test_expected_arguments_are_the_installers_base64_config_invocation(self):
+        text = script_text()
+        self.assertIn("'-jar kk-studio-daemon.jar --base64-args '", text)
+        self.assertIn("[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes('--config'))", text)
+        self.assertIn(
+            "[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($configPath))", text)
+        self.assertIn("$configPath = Join-Path $installRoot 'daemon.json'", text)
+
+    def test_ownership_failure_is_reported_before_any_destructive_action(self):
+        text = script_text()
+        stop = text.index("Stop-ScheduledTask -TaskName $taskName -TaskPath $taskPath")
+        self.assertLess(
+            text.index("if ($null -eq $task) { Fail-Closed 'managed scheduled task is missing' }"),
+            stop)
+        self.assertLess(text.index("if ([string]$task.Description -ne $taskDescription)"), stop)
+        self.assertLess(text.index("Test-SamePath -Left ([string]$action.WorkingDirectory)"), stop)
+
+
+class TestWindowsUpdateBackup(unittest.TestCase):
+    """Every applied update gets its own unique backup and the installed binary is never moved aside."""
+
+    def test_guid_backup_is_created_without_reuse_and_copied(self):
+        text = script_text()
+        self.assertIn("'backup-' + [Guid]::NewGuid().ToString('N')", text)
+        self.assertIn("New-Item -ItemType Directory -Path $backupDir | Out-Null", text)
+        self.assertNotIn(
+            "New-Item -ItemType Directory -Force",
+            text,
+            "a generated backup directory must never reuse an existing one")
+        self.assertIn(
+            "Copy-Item -LiteralPath $InstalledJar -Destination (Join-Path $backupDir 'previous')",
+            text)
+        self.assertNotIn(
+            "Move-Item -LiteralPath $InstalledJar",
+            text,
+            "the installed binary must stay in place; the backup is a copy")
+        self.assertNotIn("Remove-Item -Recurse", text)
+
+
+class TestWindowsUpdateNativeFixture(unittest.TestCase):
+    """The Windows-only companion must exercise the same contract on the Windows matrix leg."""
+
+    def test_native_fixture_covers_the_handoff_permit_and_task_contract(self):
+        text = NATIVE_TEST_PATH.read_text(encoding="utf-8")
+        for needle in ("handoff.json", "permit", "ACCEPTED", "PREPARING",
+                       "TaskPath", "Running", "Queued", "backup-", "previous",
+                       "handoff metadata is not accepted",
+                       "the daemon did not release the update permit in time",
+                       "managed scheduled task is missing"):
+            self.assertIn(needle, text, f"the native fixture must cover {needle!r}")
+
+    def test_native_fixture_does_not_register_or_touch_real_tasks(self):
+        text = NATIVE_TEST_PATH.read_text(encoding="utf-8")
+        self.assertNotIn("Register-ScheduledTask", text)
+        self.assertIn("Remove-Case", text)
 
 
 if __name__ == "__main__":
