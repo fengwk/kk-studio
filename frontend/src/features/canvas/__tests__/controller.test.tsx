@@ -3,6 +3,7 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { useState, type PropsWithChildren } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useCanvasController } from '@/features/canvas/useCanvasController'
+import { loadPendingFunctionRun } from '@/features/canvas/function-run'
 import { canvasViewportStorageKey } from '@/features/canvas/viewport-storage'
 import { loadCanvasDrafts, saveCanvasDraft } from '@/features/canvas/canvas-draft-storage'
 import * as draftStorageModule from '@/features/canvas/canvas-draft-storage'
@@ -46,6 +47,10 @@ const REQUEST_NEW = 'eeeeeeee-0000-4000-8000-000000000004' as UUIDString
 const BLOB_OUTPUT = 'ffffffff-0000-4000-8000-000000000001' as UUIDString
 const BLOB_IMAGE = 'ffffffff-0000-4000-8000-000000000002' as UUIDString
 const { FAKE_SHA256 } = vi.hoisted(() => ({ FAKE_SHA256: 'a'.repeat(64) }))
+
+/** 目录版本夹具：同 epoch 下定义指纹不同，代表目录已推进到新版本。 */
+const FUNCTION_VERSION_A = { catalogEpoch: '7', definitionFingerprint: 'a'.repeat(64) }
+const FUNCTION_VERSION_B = { catalogEpoch: '8', definitionFingerprint: 'b'.repeat(64) }
 
 const { fakeApplicationEvents, canvasEventSubscriptions } = vi.hoisted(() => {
   const subscriptions: Array<{
@@ -376,6 +381,7 @@ function deferred<T>() {
   return { promise, resolve, reject }
 }
 
+
 describe('useCanvasController real snapshot runtime', () => {
   let current: CanvasSnapshotDTO
   let commands: ApplyCanvasCommandsRequestDTO[]
@@ -388,6 +394,7 @@ describe('useCanvasController real snapshot runtime', () => {
     commands = []
     vi.mocked(getCanvas).mockImplementation(async () => current)
     vi.mocked(listCanvasFunctions).mockResolvedValue([{
+      version: FUNCTION_VERSION_A,
       name: 'fake-image',
       description: 'Fake Image',
       outputs: [{ kind: 'IMAGE', name: null }],
@@ -939,7 +946,10 @@ describe('useCanvasController real snapshot runtime', () => {
     expect(startCanvasFunctionRun).toHaveBeenCalledWith(
       CANVAS_ID,
       NODE_FN,
-      { requestId: expect.stringMatching(/^[0-9a-f-]{36}$/i) },
+      {
+        requestId: expect.stringMatching(/^[0-9a-f-]{36}$/i),
+        expectedVersion: FUNCTION_VERSION_A,
+      },
     )
     expect(vi.mocked(postCanvasCommands).mock.invocationCallOrder[0]).toBeLessThan(
       vi.mocked(startCanvasFunctionRun).mock.invocationCallOrder[0] ?? Number.MAX_SAFE_INTEGER,
@@ -999,6 +1009,126 @@ describe('useCanvasController real snapshot runtime', () => {
       NODE_FN,
       { requestId: REQUEST_STARTED },
     )
+  })
+
+  it('captures the clicked catalog version before flush and keeps it when the catalog is mutated in place mid-flush', async () => {
+    // 测试意图：点击后 flush 阻塞期间，查询缓存里同一个 version 对象被原地改写（不是换目录数组），
+    // 仍必须发送点击前看到的版本（A）；这不是「换一个目录数组」的弱化版本。
+    // 目录项持有同一个 version 对象引用，测试在 flush 期间原地改写它。
+    const catalogVersion = { ...FUNCTION_VERSION_A }
+    vi.mocked(listCanvasFunctions).mockResolvedValue([{
+      version: catalogVersion,
+      name: 'fake-image',
+      description: 'Fake Image',
+      outputs: [{ kind: 'IMAGE', name: null }],
+      argsSchema: {
+        type: 'object',
+        properties: {
+          prompt: { type: 'string' },
+          ratio: { type: 'string', enum: ['AUTO'] },
+          references: { type: 'array', items: { type: 'resourceReference' } },
+        },
+      },
+      referencePolicy: { allowedKinds: ['IMAGE'], maxReferences: 1, maxByKind: {} },
+      available: true,
+      unavailableReason: null,
+    }])
+
+    const flushGate = deferred<CanvasPatchDTO>()
+    vi.mocked(postCanvasCommands).mockImplementation(async (_canvasId, request) => {
+      commands.push(request)
+      await flushGate.promise
+      current = applyCommandBatch(current, request.commands)
+      return diffPatch(current)
+    })
+
+    const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
+    act(() => result.current.openEditor(CANVAS_ID))
+    await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
+    await waitFor(() => expect(result.current.models).toHaveLength(1))
+    // 确认查询缓存持有的就是同一个对象引用（否则本用例不成立）
+    expect(result.current.models[0]?.version).toBe(catalogVersion)
+
+    act(() => {
+      result.current.scheduleFunctionConfig(NODE_FN, 'fake-image', {
+        prompt: 'new prompt',
+        references: [],
+        parameters: { ratio: 'AUTO' },
+      })
+    })
+
+    let startPromise: Promise<void> = Promise.resolve()
+    act(() => {
+      startPromise = result.current.startFunctionRun(NODE_FN)
+    })
+    // flush 已把配置命令发往服务端且仍被阻塞
+    await waitFor(() => expect(postCanvasCommands).toHaveBeenCalled())
+
+    // 阻塞期间原地换版：改写查询缓存里同一个 version 对象的两个字段
+    catalogVersion.catalogEpoch = FUNCTION_VERSION_B.catalogEpoch
+    catalogVersion.definitionFingerprint = FUNCTION_VERSION_B.definitionFingerprint
+
+    await act(async () => {
+      flushGate.resolve(diffPatch(current))
+      await startPromise
+    })
+
+    expect(startCanvasFunctionRun).toHaveBeenCalledTimes(1)
+    expect(startCanvasFunctionRun).toHaveBeenCalledWith(CANVAS_ID, NODE_FN, {
+      requestId: expect.stringMatching(/^[0-9a-f-]{36}$/i),
+      expectedVersion: FUNCTION_VERSION_A,
+    })
+    expect(loadPendingFunctionRun(CANVAS_ID, NODE_FN)).toBeNull()
+  })
+
+  it('does not flush or POST when the node function has no catalog definition', async () => {
+    // 测试意图：目录缺少该函数定义时，点击必须 0 flush、0 POST（不得凭空构造请求）。
+    vi.mocked(listCanvasFunctions).mockResolvedValue([])
+    const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
+    act(() => result.current.openEditor(CANVAS_ID))
+    await waitFor(() => expect(listCanvasFunctions).toHaveBeenCalled())
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    act(() => {
+      result.current.scheduleFunctionConfig(NODE_FN, 'fake-image', {
+        prompt: 'new prompt',
+        references: [],
+        parameters: { ratio: 'AUTO' },
+      })
+    })
+    await act(async () => {
+      await result.current.startFunctionRun(NODE_FN)
+    })
+
+    expect(postCanvasCommands).not.toHaveBeenCalled()
+    expect(startCanvasFunctionRun).not.toHaveBeenCalled()
+    expect(result.current.state.toast).toContain('目录版本')
+  })
+
+  it('clears the pending attempt and asks for a catalog refresh on 409 without auto-retrying', async () => {
+    // 测试意图：409 表示接纳被目录版本围栏拒绝——清 pending、提示手动刷新、绝不自动重提。
+    vi.mocked(startCanvasFunctionRun).mockRejectedValueOnce(
+      new ApiError('catalog changed', 409, 'CONFLICT'),
+    )
+    const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
+    act(() => result.current.openEditor(CANVAS_ID))
+    await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
+    await waitFor(() => expect(result.current.models).toHaveLength(1))
+
+    await act(async () => {
+      await result.current.startFunctionRun(NODE_FN)
+    })
+
+    expect(startCanvasFunctionRun).toHaveBeenCalledTimes(1)
+    expect(getCanvasFunctionRun).not.toHaveBeenCalled()
+    expect(loadPendingFunctionRun(CANVAS_ID, NODE_FN)).toBeNull()
+    // 不武断断言 409 一定是「目录已变化」，但必须要求刷新目录后重新确认
+    expect(result.current.state.toast).toContain('刷新函数目录后重新确认运行')
+    expect(result.current.state.toast).not.toContain('目录已变化')
+    // 目录被标记失效后重新拉取，用户能看到新目录
+    await waitFor(() => expect(listCanvasFunctions).toHaveBeenCalledTimes(2))
   })
 
   it('does not poll RUNNING nodes loaded from the authoritative snapshot', async () => {

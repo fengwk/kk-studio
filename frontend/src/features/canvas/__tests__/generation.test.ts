@@ -22,7 +22,10 @@ const NODE_OUTPUT = '00000000-0000-4000-8000-000000000004' as UUIDString
 const NODE_VIDEO = '00000000-0000-4000-8000-000000000005' as UUIDString
 const NODE_TARGET = '00000000-0000-4000-8000-000000000009' as UUIDString
 
+const FUNCTION_VERSION = { catalogEpoch: '1', definitionFingerprint: '0'.repeat(64) }
+
 const imageModel: CanvasFunctionDefinitionDTO = {
+  version: FUNCTION_VERSION,
   name: 'fake-image',
   description: 'Fake Image',
   outputs: [{ kind: 'IMAGE', name: null }],
@@ -63,6 +66,7 @@ const imageModel: CanvasFunctionDefinitionDTO = {
 }
 
 const reportModelNoRef: CanvasFunctionDefinitionDTO = {
+  version: FUNCTION_VERSION,
   name: 'fake-report',
   description: 'Fake Report',
   outputs: [{ kind: 'TEXT', name: 'report.txt' }],
@@ -175,6 +179,7 @@ describe('Canvas canonical generation codec & policy', () => {
   it('supports decimals (float number), numeric enums, and nested future fields losslessly', () => {
     // 1. 小数支持
     const floatModel: CanvasFunctionDefinitionDTO = {
+      version: FUNCTION_VERSION,
       name: 'model-float',
       description: 'Float Model',
       outputs: [{ kind: 'IMAGE', name: null }],
@@ -197,6 +202,7 @@ describe('Canvas canonical generation codec & policy', () => {
 
     // 2. Numeric Enum 保持原始 JSON 类型（不转成 string）
     const numEnumModel: CanvasFunctionDefinitionDTO = {
+      version: FUNCTION_VERSION,
       name: 'model-num-enum',
       description: 'Numeric Enum Model',
       outputs: [{ kind: 'IMAGE', name: null }],
@@ -257,6 +263,7 @@ describe('Canvas canonical generation codec & policy', () => {
 
     // 3. schema 定义中 prompt 并非 string（例如 prompt 为 object）：转入 rawArgs 模式
     const objectPromptSchemaModel: CanvasFunctionDefinitionDTO = {
+      version: FUNCTION_VERSION,
       name: 'model-complex-prompt',
       description: 'Complex Prompt Model',
       outputs: [{ kind: 'IMAGE', name: null }],
@@ -282,6 +289,7 @@ describe('Canvas canonical generation codec & policy', () => {
 
     // items 不存在或 items.type 并非 resourceReference 必须严格返回 false
     const missingItemsModel: CanvasFunctionDefinitionDTO = {
+      version: FUNCTION_VERSION,
       name: 'model-no-items',
       outputs: [],
       argsSchema: {
@@ -294,6 +302,7 @@ describe('Canvas canonical generation codec & policy', () => {
     expect(functionSupportsReferences(missingItemsModel)).toBe(false)
 
     const wrongItemsModel: CanvasFunctionDefinitionDTO = {
+      version: FUNCTION_VERSION,
       name: 'model-wrong-items',
       outputs: [],
       argsSchema: {
@@ -307,6 +316,7 @@ describe('Canvas canonical generation codec & policy', () => {
 
     // 即使 referencePolicy 设置了 allowedKinds，但 argsSchema 中未声明 references 属性，绝不推断支持
     const policyOnlyModel: CanvasFunctionDefinitionDTO = {
+      version: FUNCTION_VERSION,
       name: 'model-policy-only',
       description: 'Policy Only',
       outputs: [{ kind: 'IMAGE', name: null }],
@@ -345,6 +355,7 @@ describe('Canvas canonical generation codec & policy', () => {
     // createDefaultFunctionConfig 会使用 options[0] 初始化；
     // 但 parseFunctionConfig 解析时不给未声明 default 的 enum 擅自填充 default。
     const noDefaultEnumModel: CanvasFunctionDefinitionDTO = {
+      version: FUNCTION_VERSION,
       name: 'model-no-default-enum',
       outputs: [],
       argsSchema: {
@@ -443,6 +454,7 @@ describe('Canvas canonical generation codec & policy', () => {
     // 验证真实后端 Java Adapter schemas 的解析与 wire 生成符合契约：
     // 1. FakeImage (IMAGE_ARGS_SCHEMA)
     const fakeImageModel: CanvasFunctionDefinitionDTO = {
+      version: FUNCTION_VERSION,
       name: 'fake-image',
       description: 'Fake Image',
       outputs: [{ kind: 'IMAGE', name: null }],
@@ -474,6 +486,7 @@ describe('Canvas canonical generation codec & policy', () => {
 
     // 2. MiniMaxH3 (MiniMaxH3CanvasFunctionAdapter)
     const miniMaxH3Model: CanvasFunctionDefinitionDTO = {
+      version: FUNCTION_VERSION,
       name: 'minimax-h3',
       description: 'MiniMax H3 Video',
       outputs: [{ kind: 'VIDEO', name: null }],
@@ -513,6 +526,7 @@ describe('Canvas canonical generation codec & policy', () => {
 
     // 3. FakeReport (REPORT_ARGS_SCHEMA): additionalProperties: false, 无 references
     const fakeReportModel: CanvasFunctionDefinitionDTO = {
+      version: FUNCTION_VERSION,
       name: 'fake-report',
       description: 'Fake Report',
       outputs: [{ kind: 'TEXT', name: 'report.txt' }],
