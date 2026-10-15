@@ -57,12 +57,7 @@ public final class PluginCatalogFingerprint {
 
   private PluginCatalogFingerprint() {}
 
-  /** 文本是否为 64 位小写 SHA-256 指纹。 */
-  /**
-   * 共享的原始摘要原语：对给定字节取 64 位小写 SHA-256。调用方自行负责领域分隔，绝不在这里拼接任何上下文。
-   *
-   * <p>凭据 attempt 的 nonce 摘要等其它安全标识复用同一原语，避免各处重复实现 digest/hex，也就不会出现两套行为。
-   */
+  /** 对给定字节取 64 位小写 SHA-256；调用方负责领域分隔。 */
   public static String sha256Hex(byte[] input) {
     Objects.requireNonNull(input, "input");
     try {
@@ -73,6 +68,7 @@ public final class PluginCatalogFingerprint {
     }
   }
 
+  /** 文本是否为 64 位小写 SHA-256 指纹。 */
   public static boolean isFingerprint(String value) {
     return value != null && FINGERPRINT.matcher(value).matches();
   }
@@ -267,12 +263,7 @@ public final class PluginCatalogFingerprint {
 
   private static String digest(JsonNode node) {
     String canonical = JsonValues.write(canonicalize(node));
-    try {
-      MessageDigest digest = MessageDigest.getInstance("SHA-256");
-      return HexFormat.of().formatHex(digest.digest(canonical.getBytes(StandardCharsets.UTF_8)));
-    } catch (NoSuchAlgorithmException error) {
-      throw new IllegalStateException("SHA-256 must be available", error);
-    }
+    return sha256Hex(canonical.getBytes(StandardCharsets.UTF_8));
   }
 
   /** 按字典序冻结文本集合，使指纹与声明顺序无关。 */

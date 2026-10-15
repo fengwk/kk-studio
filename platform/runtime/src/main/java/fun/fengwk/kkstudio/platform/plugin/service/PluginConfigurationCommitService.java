@@ -371,6 +371,7 @@ public final class PluginConfigurationCommitService {
               candidate.payloadJson());
     }
     PluginCatalogSnapshot snapshot = null;
+    Error primaryError = null;
     try {
       Map<String, PluginConfigurationState> states =
           candidateStates(catalog, pluginId, resolvedValues, candidateReference, newEpoch);
@@ -422,9 +423,18 @@ public final class PluginConfigurationCommitService {
             "plugin", "epoch=" + expectedEpoch, "epoch=" + catalog.epoch());
       }
       return new PluginCatalogRecord(newEpoch, manifest);
+    } catch (Error error) {
+      primaryError = error;
+      throw error;
     } finally {
       if (snapshot != null) {
-        snapshot.close();
+        try {
+          snapshot.close();
+        } catch (Error cleanup) {
+          if (primaryError == null) {
+            throw cleanup;
+          }
+        }
       }
     }
   }

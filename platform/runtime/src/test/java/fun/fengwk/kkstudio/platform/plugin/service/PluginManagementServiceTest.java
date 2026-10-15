@@ -88,7 +88,6 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
-import java.util.function.Supplier;
 
 /**
  * Plugin 管理面用例契约测试（内存权威 + 真实启动装配）。
@@ -1148,10 +1147,5 @@ class PluginManagementServiceTest {
         return List.of();
       }
     };
-  }
-
-  @SuppressWarnings("unused")
-  private static Supplier<PluginCatalogSnapshot> snapshotSupplier(PluginCatalogSnapshot snapshot) {
-    return () -> snapshot;
   }
 }

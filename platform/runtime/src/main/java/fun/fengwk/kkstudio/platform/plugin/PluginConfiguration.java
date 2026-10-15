@@ -6,8 +6,6 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
@@ -102,25 +100,14 @@ public class PluginConfiguration {
         () -> adapters.orderedStream().toList(),
         transactionManager,
         Clock.systemUTC(),
-        () -> wakeAfterCommit(refreshDispatcher));
+        () -> wakeRefreshDispatcher(refreshDispatcher));
   }
 
-  /** 凭据事实变化后唤醒刷新调度：有活跃事务时排到提交后，避免通知早于新凭据可见；无事务时立即唤醒。 */
-  private static void wakeAfterCommit(
+  /** 提交服务已经将回调排到提交后；这里只唤醒调度，不再注册事务同步。 */
+  private static void wakeRefreshDispatcher(
       ObjectProvider<PluginCredentialRefreshDispatcher> refreshDispatcher) {
     PluginCredentialRefreshDispatcher dispatcher = refreshDispatcher.getIfAvailable();
-    if (dispatcher == null) {
-      return;
-    }
-    if (TransactionSynchronizationManager.isSynchronizationActive()) {
-      TransactionSynchronizationManager.registerSynchronization(
-          new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-              dispatcher.wake();
-            }
-          });
-    } else {
+    if (dispatcher != null) {
       dispatcher.wake();
     }
   }

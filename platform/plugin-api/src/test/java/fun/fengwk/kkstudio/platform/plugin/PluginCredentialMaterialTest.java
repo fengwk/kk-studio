@@ -48,7 +48,6 @@ class PluginCredentialMaterialTest {
     assertThrows(IllegalArgumentException.class, () -> material(" CN ", "{}"));
   }
 
-  /** 混合三元组（region 与两个时刻不全存在）必须固定拒绝，绝不接受半个交互凭据。 */
   /** 静态密钥形态没有 region/过期/刷新，且 interactive() 如实为 false。 */
   @Test
   void staticKeyMaterialHasNoRouteMetadata() {
@@ -61,6 +60,7 @@ class PluginCredentialMaterialTest {
     assertTrue(material("CN", "{}").interactive());
   }
 
+  /** region 与两个时刻必须全部存在或全部缺失。 */
   @Test
   void rejectsMixedRouteMetadata() {
     assertThrows(
