@@ -6,10 +6,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.atLeast;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -40,6 +43,7 @@ import java.net.Proxy;
 import java.net.ProxySelector;
 import java.net.URI;
 import java.net.http.HttpClient;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
@@ -673,6 +677,84 @@ class StandardComfyuiClientTest {
             () -> bearer.submit(new ObjectMapper().createObjectNode(), "client-1"));
 
     assertEquals("ComfyUI credential payload is invalid", failure.getMessage());
+  }
+
+  /** rejectUsed 致命失败（Error）时也必须释放已经取得的响应体，且主失败身份原样保留：这是本方法真正拥有的资源边界。 */
+  @Test
+  void bearerModeReleasesBodyWhenCredentialRejectionFailsFatally() throws Exception {
+    PluginCredentialAccess access = mock(PluginCredentialAccess.class);
+    when(access.resolve()).thenReturn(snapshot("revoked"));
+    AssertionError fatal = new AssertionError("synthetic fatal rejection");
+    doThrow(fatal).when(access).rejectUsed(any(), any());
+    AtomicBoolean closed = new AtomicBoolean();
+    HttpResponse<InputStream> unauthorized = mock(HttpResponse.class);
+    when(unauthorized.statusCode()).thenReturn(401);
+    when(unauthorized.body()).thenReturn(trackingBody(closed));
+    HttpClient http = mock(HttpClient.class);
+    doReturn(unauthorized).when(http).send(any(), any());
+    StandardComfyuiClient bearer =
+        new StandardComfyuiClient(
+            "http://127.0.0.1:1",
+            ComfyuiSettings.AuthMode.BEARER,
+            Duration.ofSeconds(1),
+            new ObjectMapper(),
+            access,
+            http);
+
+    AssertionError thrown =
+        assertThrows(
+            AssertionError.class,
+            () -> bearer.submit(new ObjectMapper().createObjectNode(), "client-1"));
+
+    assertSame(fatal, thrown);
+    assertTrue(closed.get());
+  }
+
+  /** 未知解析故障不是"本地未配置"：只回传去敏 resolution failed，且在任何出网之前失败。 */
+  @Test
+  void bearerModeReportsUnknownCredentialResolutionFailureWithoutHttp() {
+    PluginCredentialAccess access = mock(PluginCredentialAccess.class);
+    when(access.resolve()).thenThrow(new IllegalStateException("synthetic-secret resolver"));
+    StandardComfyuiClient bearer = authenticatedClient(ComfyuiSettings.AuthMode.BEARER, access);
+    authorization.set(null);
+
+    IllegalStateException failure =
+        assertThrows(
+            IllegalStateException.class,
+            () -> bearer.submit(new ObjectMapper().createObjectNode(), "client-1"));
+
+    assertEquals("ComfyUI credential resolution failed", failure.getMessage());
+    assertFalse(failure.getMessage().contains("synthetic-secret"));
+    assertNull(authorization.get());
+  }
+
+  /** 解析期的 Error 原样上抛，既不伪装成配置缺失也不发出请求。 */
+  @Test
+  void bearerModePropagatesCredentialResolutionErrorUnchanged() {
+    PluginCredentialAccess access = mock(PluginCredentialAccess.class);
+    AssertionError fatal = new AssertionError("synthetic fatal resolution");
+    when(access.resolve()).thenThrow(fatal);
+    StandardComfyuiClient bearer = authenticatedClient(ComfyuiSettings.AuthMode.BEARER, access);
+    authorization.set(null);
+
+    AssertionError thrown =
+        assertThrows(
+            AssertionError.class,
+            () -> bearer.submit(new ObjectMapper().createObjectNode(), "client-1"));
+
+    assertSame(fatal, thrown);
+    assertNull(authorization.get());
+  }
+
+  /** 只记录 close 的响应体：用于断言失败路径释放了已取得的响应。 */
+  private static InputStream trackingBody(AtomicBoolean closed) {
+    return new FilterInputStream(new ByteArrayInputStream(new byte[] {1})) {
+      @Override
+      public void close() throws IOException {
+        closed.set(true);
+        super.close();
+      }
+    };
   }
 
   private StandardComfyuiClient authenticatedClient(

@@ -191,6 +191,46 @@ class H3PromptWorkflowTest {
     assertEquals(new BigDecimal("0.1"), spectrum.path("ridge_lambda").decimalValue());
   }
 
+  /** 正常媒体引用仍从 1000 起的保留动态区分配节点，且不覆盖任何静态模板节点。 */
+  @Test
+  void allocatesDynamicMediaNodesInTheReservedRegion() {
+    List<CanvasFunctionFrozenReference> references =
+        List.of(
+            reference(11L, 2L, 1, CanvasResourceKind.IMAGE, "image/png"),
+            reference(12L, 3L, 0, CanvasResourceKind.VIDEO, "video/mp4"),
+            reference(13L, 4L, 2, CanvasResourceKind.AUDIO, "audio/mpeg"));
+    H3ReferenceManifest manifest = H3ReferenceManifest.from(references);
+    int staticNodes = H3WorkflowBuilder.defaultTemplate().size();
+
+    ObjectNode workflow =
+        buildWorkflow(
+            "prompt",
+            "16:9",
+            5,
+            1L,
+            TARGET,
+            manifest,
+            Map.of(
+                resource(11L), new H3UploadedFile("11.png", "kk-studio/7", "input"),
+                resource(12L), new H3UploadedFile("12.mp4", "kk-studio/7", "input"),
+                resource(13L), new H3UploadedFile("13.mp3", "kk-studio/7", "input")));
+
+    assertEquals(staticNodes + 4, workflow.size());
+    assertEquals("LoadImage", workflow.path("1000").path("class_type").asText());
+    assertEquals("LoadVideo", workflow.path("1001").path("class_type").asText());
+    assertEquals("GetVideoComponents", workflow.path("1002").path("class_type").asText());
+    assertEquals("LoadAudio", workflow.path("1003").path("class_type").asText());
+    assertEquals(
+        "1000",
+        workflow.path("136").path("inputs").path("ref_images.ref_image_0").path(0).asText());
+    // 保留区判定只覆盖规范十进制 id：边界之下与混合 id 都不属于动态区。
+    assertTrue(H3WorkflowBuilder.isReservedDynamicNodeId("1000"));
+    assertTrue(H3WorkflowBuilder.isReservedDynamicNodeId("01000"));
+    assertFalse(H3WorkflowBuilder.isReservedDynamicNodeId("999"));
+    assertFalse(H3WorkflowBuilder.isReservedDynamicNodeId("a1000"));
+    assertFalse(H3WorkflowBuilder.isReservedDynamicNodeId(""));
+  }
+
   /** prompt/workflow 测试只关心冻结计划形状：单 VIDEO 槽位。 */
   private static CanvasFunctionDefinition videoDefinition() {
     CanvasFunctionDefinition definition = mock(CanvasFunctionDefinition.class);

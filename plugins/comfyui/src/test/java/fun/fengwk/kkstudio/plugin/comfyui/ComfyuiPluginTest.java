@@ -7,10 +7,13 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
+import fun.fengwk.kkstudio.harness.common.json.JsonValues;
 import fun.fengwk.kkstudio.harness.common.schema.ArraySchema;
 import fun.fengwk.kkstudio.harness.common.schema.ObjectSchema;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
@@ -149,6 +152,45 @@ class ComfyuiPluginTest {
     assertEquals(List.of(), instance.harnessContributors());
     instance.close();
     instance.close();
+  }
+
+  /** 停用且工作流为空时不装配任何运行期实例，因此绝不出网、也绝不解析凭据（即使 authMode 是 BEARER）。 */
+  @Test
+  void disabledConfigurationNeverResolvesCredentials() {
+    ObjectNode defaults = (ObjectNode) JsonValues.readTree(ComfyuiWorkflowFixtures.defaultsJson());
+    defaults.put("enabled", false);
+    defaults.put("authMode", "BEARER");
+    PluginCredentialAccess access = mock(PluginCredentialAccess.class);
+    when(access.resolve())
+        .thenThrow(new AssertionError("credentials must not be resolved while disabled"));
+    PluginContext context =
+        new PluginContext(access, Optional.empty(), Optional.empty(), Optional.empty());
+
+    PluginInstance instance =
+        plugin.configure(new PluginConfig(1L, JsonValues.write(defaults)), context);
+
+    assertEquals(List.of(), instance.canvasAdapters());
+    instance.close();
+  }
+
+  /** 停用不是"以后再校验"：非法工作流定义（如 args schema 非法）在配置期就被拒绝。 */
+  @Test
+  void disabledConfigurationStillRejectsIllegalWorkflowDefinitions() {
+    PluginConfig config =
+        pluginConfig(
+            false,
+            ComfyuiWorkflowFixtures.singleWorkflowArray(
+                ComfyuiWorkflowFixtures.workflow(
+                    "direct-args",
+                    "DIRECT",
+                    ComfyuiWorkflowFixtures.DIRECT_GRAPH,
+                    "{\"type\":\"object\",\"additionalProperties\":false,"
+                        + "\"properties\":{\"prompt\":{\"type\":\"uri\"}}}",
+                    "[]",
+                    "[]",
+                    ComfyuiWorkflowFixtures.DIRECT_OUTPUTS,
+                    ComfyuiWorkflowFixtures.IMAGE_POLICY)));
+    assertThrows(IllegalArgumentException.class, () -> plugin.configure(config, context()));
   }
 
   @Test

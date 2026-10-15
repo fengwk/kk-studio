@@ -12,7 +12,8 @@ import java.util.Objects;
  * ComfyUI 插件私有配置值对象：连接与认证、Prompt 预算与冻结工作流集合。
  *
  * <p>默认值唯一来源是 {@link ComfyuiPlugin#CONFIGURATION_SCHEMA}；本模型只做业务校验并产出不可变快照，不做 HTTP、Prompt 或生成，
- * 也不读取任何秘密。连接与超时预算沿用平台既有有界安全值，不放大也不臆造更宽的时间/大小。
+ * 也不读取任何秘密。连接目标复用 {@link StandardComfyuiClient} 的同一份纯 URI 门禁（不创建
+ * transport），因此非法目标与是否启用无关地在配置期失败；超时预算沿用平台既有有界安全值，不放大也不臆造更宽的时间/大小。
  */
 record ComfyuiSettings(
     boolean enabled,
@@ -37,6 +38,8 @@ record ComfyuiSettings(
 
   ComfyuiSettings {
     baseUrl = requireBoundedText(baseUrl, MAX_BASE_URL_CHARS, "baseUrl");
+    // 复用客户端同一份纯 URI 门禁：非法目标（userInfo、非 HTTP、路径、query 等）在配置期就被拒绝，且这里不创建任何 transport。
+    StandardComfyuiClient.normalizeBaseUrl(baseUrl);
     authMode = Objects.requireNonNull(authMode, "authMode");
     requireBounded(connectTimeoutMillis, 60_000L, "connectTimeoutMillis");
     requireBounded(requestTimeoutMillis, 5L * 60 * 1000, "requestTimeoutMillis");

@@ -15,6 +15,8 @@ import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /** 冻结工作流普通配置的严格解析边界：非法 JSON、预算、绑定与 selector 规则、H3 预置不变量。 */
 class ComfyuiWorkflowConfigTest {
@@ -437,22 +439,116 @@ class ComfyuiWorkflowConfigTest {
 
   @Test
   void rejectsH3PresetsWhoseGraphBreaksTheOptimizationOrLengthChain() {
-    // 样本节点必须已删除。
+    // 样本节点必须已删除；模板现在是外部配置，已知模板校验失败在配置边界收敛为去敏 IllegalArgumentException。
     ObjectNode withSample =
         ComfyuiWorkflowFixtures.h3WithAddedNode(
             "137", "{\"class_type\":\"SaveImage\",\"inputs\":{}}");
-    assertThrows(IllegalStateException.class, () -> settingsJson(h3Array(withSample)));
+    IllegalArgumentException templateFailure =
+        assertThrows(IllegalArgumentException.class, () -> settingsJson(h3Array(withSample)));
+    assertEquals(
+        "workflow minimax-h3-ref2va workflowJson must preserve the supported H3 template",
+        templateFailure.getMessage());
     // 优化链 / 帧长表达式不能被改写。
     ObjectNode brokenChain = ComfyuiWorkflowFixtures.h3WithInput("154", "model", "[\"999\",0]");
-    assertThrows(IllegalStateException.class, () -> settingsJson(h3Array(brokenChain)));
+    assertThrows(IllegalArgumentException.class, () -> settingsJson(h3Array(brokenChain)));
     ObjectNode brokenExpression = ComfyuiWorkflowFixtures.h3WithInput("131", "expression", "\"1\"");
-    assertThrows(IllegalStateException.class, () -> settingsJson(h3Array(brokenExpression)));
+    assertThrows(IllegalArgumentException.class, () -> settingsJson(h3Array(brokenExpression)));
     // 所选输出节点必须是完整 SaveVideo。
     ObjectNode brokenSave =
         ComfyuiWorkflowFixtures.h3WithGraphField("92", "class_type", "\"SaveImage\"");
-    assertThrows(IllegalStateException.class, () -> settingsJson(h3Array(brokenSave)));
+    assertThrows(IllegalArgumentException.class, () -> settingsJson(h3Array(brokenSave)));
     ObjectNode missingPrefix = ComfyuiWorkflowFixtures.h3WithoutInput("92", "filename_prefix");
-    assertThrows(IllegalStateException.class, () -> settingsJson(h3Array(missingPrefix)));
+    assertThrows(IllegalArgumentException.class, () -> settingsJson(h3Array(missingPrefix)));
+  }
+
+  /** H3 构图从保留区无条件追加动态媒体节点：静态模板占用这些 id 必须在配置期被拒绝，而不是等已付出 Prompt/上传代价。 */
+  @Test
+  void rejectsH3TemplatesThatOccupyTheReservedDynamicNodeRange() {
+    ObjectNode atBoundary =
+        ComfyuiWorkflowFixtures.h3WithAddedNode(
+            "1000", "{\"class_type\":\"PrimitiveString\",\"inputs\":{\"value\":\"x\"}}");
+    ObjectNode farAbove =
+        ComfyuiWorkflowFixtures.h3WithAddedNode(
+            "100000000000000000000",
+            "{\"class_type\":\"PrimitiveString\",\"inputs\":{\"value\":\"x\"}}");
+    for (ObjectNode preset : List.of(atBoundary, farAbove)) {
+      IllegalArgumentException failure =
+          assertThrows(IllegalArgumentException.class, () -> settingsJson(h3Array(preset)));
+      assertEquals(
+          "workflow minimax-h3-ref2va workflowJson must preserve the supported H3 template",
+          failure.getMessage());
+    }
+    // 边界之下仍可用：保留区只从 1000 的规范十进制 id 开始。
+    ObjectNode belowBoundary =
+        ComfyuiWorkflowFixtures.h3WithAddedNode(
+            "999", "{\"class_type\":\"PrimitiveString\",\"inputs\":{\"value\":\"x\"}}");
+    assertTrue(settingsJson(h3Array(belowBoundary)).workflows().get(0).graph().has("999"));
+  }
+
+  /** 保留区只约束 H3：DIRECT 工作流可以自由声明并使用 1000 及更大的规范十进制节点 id。 */
+  @Test
+  void acceptsDirectWorkflowsThatUseTheH3ReservedDynamicNodeIds() {
+    String graph =
+        """
+        {
+          "1": {"class_type": "PrimitiveString", "inputs": {"value": "placeholder"}},
+          "1000": {"class_type": "SaveVideo", "inputs": {"filename_prefix": "out", "videos": ["1", 0]}}
+        }
+        """;
+    ComfyuiSettings settings =
+        settingsJson(
+            ComfyuiWorkflowFixtures.singleWorkflowArray(
+                ComfyuiWorkflowFixtures.directWorkflow(
+                    "direct-1000",
+                    graph,
+                    "[{\"argument\":\"prompt\",\"nodeId\":\"1000\",\"input\":\"filename_prefix\"}]",
+                    "[]",
+                    "[{\"kind\":\"VIDEO\",\"nodeId\":\"1000\",\"field\":\"videos\",\"index\":0}]")));
+    assertEquals("1000", settings.workflows().get(0).outputs().get(0).nodeId());
+    assertTrue(settings.workflows().get(0).graph().has("1000"));
+  }
+
+  /** 冻结图只在构造时深拷贝并只以副本暴露：外部初始图与每次 accessor 副本的深层原地改写都不影响快照与定义。 */
+  @Test
+  void frozenGraphNeverLeaksMutatingCallers() {
+    ObjectNode initialGraph =
+        (ObjectNode) JsonValues.readTree(ComfyuiWorkflowFixtures.DIRECT_GRAPH);
+    ComfyuiWorkflow workflow =
+        new ComfyuiWorkflow(
+            "direct",
+            "test workflow",
+            ComfyuiWorkflow.Strategy.DIRECT,
+            initialGraph,
+            CanvasJson.parseObject(ComfyuiWorkflowFixtures.DIRECT_ARGS_SCHEMA),
+            List.of(),
+            List.of(),
+            List.of(
+                new ComfyuiWorkflow.OutputSelector(
+                    null, CanvasResourceKind.VIDEO, "4", ComfyuiWorkflow.OutputField.VIDEOS, 0)),
+            new ComfyuiWorkflow.ReferencePolicy(Set.of(CanvasResourceKind.IMAGE), 0, Map.of()));
+
+    mutateGraph(initialGraph);
+    assertSnapshotUnchanged(workflow);
+
+    mutateGraph(workflow.graph());
+    assertSnapshotUnchanged(workflow);
+  }
+
+  private static void assertSnapshotUnchanged(ComfyuiWorkflow workflow) {
+    assertEquals(4, workflow.graph().size());
+    assertEquals("placeholder", workflow.graph().path("2").path("inputs").path("value").asText());
+    assertEquals("direct", workflow.definition().name());
+    assertEquals(1, workflow.definition().outputs().size());
+  }
+
+  /** 深层原地改写：改绑定目标值并追加一个节点，模拟调用方对"自己拿到的图"做任意修改。 */
+  private static void mutateGraph(ObjectNode graph) {
+    ((ObjectNode) graph.get("2").get("inputs")).put("value", "leaked");
+    graph.set(
+        "1000",
+        (ObjectNode)
+            JsonValues.readTree(
+                "{\"class_type\":\"PrimitiveString\",\"inputs\":{\"value\":\"leaked\"}}"));
   }
 
   /** H3 selector 不被锁死为 92：图内任意已验证的合法 SaveVideo 节点都可作为输出与构图目标。 */

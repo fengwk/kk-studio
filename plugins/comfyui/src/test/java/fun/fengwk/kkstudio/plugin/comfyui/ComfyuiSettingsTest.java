@@ -10,8 +10,13 @@ import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.common.json.JsonValues;
 
+import java.util.List;
+
 /** 配置值对象的业务边界：默认值形状、上限与固定去敏错误，绝不臆造更宽的时间/大小预算。 */
 class ComfyuiSettingsTest {
+
+  private static final String ZERO_REFERENCE_POLICY =
+      "{\"allowedKinds\":[\"IMAGE\"],\"maxCount\":0,\"maxCountByKind\":[]}";
 
   @Test
   void parseRequiresAJsonObjectWithEveryDeclaredField() {
@@ -77,6 +82,106 @@ class ComfyuiSettingsTest {
         () ->
             ComfyuiSettings.parse(
                 config(config("pollIntervalMillis", "2001"), "maxWaitMillis", "2000")));
+  }
+
+  /** 普通配置的校验与 {@code enabled} 无关：停用状态下的非法连接目标、args schema、输出名与引用策略同样必须在保存时失败，而不是等启用后才爆。 */
+  @Test
+  void disabledConfigurationsValidateEveryOrdinaryFieldPurely() {
+    // 连接目标复用客户端同一份 URI 门禁：userInfo / 非 HTTP / 路径 / query / 无 scheme 都必须拒绝。
+    for (String baseUrl :
+        List.of(
+            "http://user:pass@127.0.0.1:8188",
+            "ftp://127.0.0.1:8188",
+            "http://127.0.0.1:8188/api",
+            "http://127.0.0.1:8188?token=1",
+            "127.0.0.1:8188")) {
+      assertThrows(
+          IllegalArgumentException.class,
+          () ->
+              ComfyuiSettings.parse(
+                  config(
+                      config("enabled", "false"),
+                      "baseUrl",
+                      ComfyuiWorkflowFixtures.quote(baseUrl))),
+          baseUrl);
+    }
+    // argsSchema 关键字/类型非法。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ComfyuiSettings.parse(
+                ComfyuiWorkflowFixtures.settingsJson(
+                    false,
+                    ComfyuiWorkflowFixtures.singleWorkflowArray(
+                        ComfyuiWorkflowFixtures.workflow(
+                            "direct-args",
+                            "DIRECT",
+                            ComfyuiWorkflowFixtures.DIRECT_GRAPH,
+                            "{\"type\":\"object\",\"additionalProperties\":false,"
+                                + "\"properties\":{\"prompt\":{\"type\":\"uri\"}}}",
+                            "[]",
+                            "[]",
+                            ComfyuiWorkflowFixtures.DIRECT_OUTPUTS,
+                            ComfyuiWorkflowFixtures.IMAGE_POLICY)))));
+    // 输出名必须唯一且不超过定义层上限。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ComfyuiSettings.parse(
+                ComfyuiWorkflowFixtures.settingsJson(
+                    false,
+                    ComfyuiWorkflowFixtures.singleWorkflowArray(
+                        ComfyuiWorkflowFixtures.workflow(
+                            "direct-output",
+                            "DIRECT",
+                            ComfyuiWorkflowFixtures.DIRECT_GRAPH,
+                            ComfyuiWorkflowFixtures.DIRECT_ARGS_SCHEMA,
+                            "[]",
+                            "[]",
+                            "[{\"name\":\"same\",\"kind\":\"VIDEO\",\"nodeId\":\"4\","
+                                + "\"field\":\"videos\",\"index\":0},"
+                                + "{\"name\":\"same\",\"kind\":\"VIDEO\",\"nodeId\":\"4\","
+                                + "\"field\":\"videos\",\"index\":1}]",
+                            ZERO_REFERENCE_POLICY)))));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ComfyuiSettings.parse(
+                ComfyuiWorkflowFixtures.settingsJson(
+                    false,
+                    ComfyuiWorkflowFixtures.singleWorkflowArray(
+                        ComfyuiWorkflowFixtures.workflow(
+                            "direct-output",
+                            "DIRECT",
+                            ComfyuiWorkflowFixtures.DIRECT_GRAPH,
+                            ComfyuiWorkflowFixtures.DIRECT_ARGS_SCHEMA,
+                            "[]",
+                            "[]",
+                            "[{\"name\":\""
+                                + "n".repeat(513)
+                                + "\",\"kind\":\"VIDEO\","
+                                + "\"nodeId\":\"4\",\"field\":\"videos\",\"index\":0}]",
+                            ZERO_REFERENCE_POLICY)))));
+    // 引用策略的单类上限不得超过总数上限：只有 Canvas 定义层校验才覆盖这条。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ComfyuiSettings.parse(
+                ComfyuiWorkflowFixtures.settingsJson(
+                    false,
+                    ComfyuiWorkflowFixtures.singleWorkflowArray(
+                        ComfyuiWorkflowFixtures.workflow(
+                            "direct-policy",
+                            "DIRECT",
+                            ComfyuiWorkflowFixtures.DIRECT_GRAPH,
+                            ComfyuiWorkflowFixtures.DIRECT_ARGS_SCHEMA,
+                            "[]",
+                            "[]",
+                            ComfyuiWorkflowFixtures.DIRECT_OUTPUTS,
+                            "{\"allowedKinds\":[\"IMAGE\"],\"maxCount\":0,"
+                                + "\"maxCountByKind\":[{\"kind\":\"IMAGE\",\"maxCount\":1}]}")))));
+    // 默认（停用）配置仍然合法：普通校验不放宽也不误伤。
+    assertFalse(ComfyuiSettings.parse(ComfyuiWorkflowFixtures.defaultsJson()).enabled());
   }
 
   @Test

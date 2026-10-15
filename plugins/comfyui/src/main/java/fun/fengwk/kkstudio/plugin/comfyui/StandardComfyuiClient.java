@@ -348,9 +348,10 @@ public final class StandardComfyuiClient implements Closeable {
     if (snapshot != null && (response.statusCode() == 401 || response.statusCode() == 403)) {
       try {
         rejectUsed(snapshot);
-      } catch (RuntimeException error) {
-        closeQuietly(response.body());
-        throw error;
+      } catch (RuntimeException | Error failure) {
+        // 已经拿到的响应体属于本方法：任何清理结果都不得替换主失败，Error 按 primary/suppressed 约定附加。
+        releaseBodyOnFailure(response.body(), failure);
+        throw failure;
       }
     }
     return new ComfyResponse(
@@ -370,8 +371,9 @@ public final class StandardComfyuiClient implements Closeable {
       // 局部拒绝/未配置/过期都是确定性结果：原样上报，绝不静默降级到无认证。
       throw unavailable;
     } catch (RuntimeException error) {
+      // 未知解析故障只声明去敏的解析失败，不伪装成本地未配置；Error 原样上抛。两者都在出网前失败。
       log.debug("ComfyUI credential resolution failed type={}", error.getClass().getSimpleName());
-      throw new IllegalStateException("ComfyUI credential is not available");
+      throw new IllegalStateException("ComfyUI credential resolution failed");
     }
   }
 
@@ -616,7 +618,12 @@ public final class StandardComfyuiClient implements Closeable {
     return array;
   }
 
-  private static URI normalizeBaseUrl(String raw) {
+  /**
+   * 纯 URI 门禁：只接受声明 host、无 userInfo/路径/query/fragment 的 http(s) 目标，不创建任何 transport。
+   *
+   * <p>包内复用于配置期校验（{@link ComfyuiSettings}），保证"保存配置"与"真实出网"用同一份判定。
+   */
+  static URI normalizeBaseUrl(String raw) {
     if (raw == null || raw.isBlank()) {
       throw new IllegalArgumentException("baseUrl must not be blank");
     }
@@ -689,6 +696,24 @@ public final class StandardComfyuiClient implements Closeable {
   /** query 值统一按 RFC 3986 编码：空格用 %20 而非 +，与 ComfyUI 的路径解析保持一致。 */
   private static String query(String value) {
     return path(value == null ? "" : value);
+  }
+
+  /**
+   * 资源所有权边界：释放本方法已经取得的响应体，清理结果绝不替换主失败。
+   *
+   * <p>清理期 {@link Error} 按仓库 primary/suppressed 约定附加到主失败后照常传播；清理期 {@link Exception}（含 body 关闭的
+   * {@code IOException}）只按去敏类型日志。
+   */
+  private static void releaseBodyOnFailure(InputStream body, Throwable primary) {
+    try {
+      body.close();
+    } catch (Error cleanup) {
+      if (cleanup != primary) {
+        primary.addSuppressed(cleanup);
+      }
+    } catch (Exception cleanup) {
+      log.debug("ComfyUI response body cleanup failed type={}", cleanup.getClass().getSimpleName());
+    }
   }
 
   /** 清理阶段的释放失败不影响主流程，也绝不记录原始 Throwable/消息；只记录受控类型，Error 继续上抛。 */
