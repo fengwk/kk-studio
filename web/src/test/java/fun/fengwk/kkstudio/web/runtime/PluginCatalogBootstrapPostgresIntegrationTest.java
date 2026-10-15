@@ -10,7 +10,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.PlatformTransactionManager;
 
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
+import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
 import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogBootstrap;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogSnapshot;
@@ -39,6 +41,8 @@ class PluginCatalogBootstrapPostgresIntegrationTest extends WebPostgresTestSuppo
   @Autowired private PlatformTransactionManager transactionManager;
   @Autowired private PluginCredentialStore credentials;
   @Autowired private ObjectProvider<PluginResourceGateway> resourceGateways;
+  @Autowired private ObjectProvider<HarnessContributor> contributors;
+  @Autowired private ObjectProvider<CanvasFunctionAdapter> adapters;
   @Autowired private PluginCatalogSnapshot liveSnapshot;
   @Autowired private DataSource dataSource;
 
@@ -81,12 +85,13 @@ class PluginCatalogBootstrapPostgresIntegrationTest extends WebPostgresTestSuppo
     }
   }
 
+  /** 本 Context 真实的两域来源：内置贡献必须与该 Context 启动期冻结的目录同一来源，绝不写成 plugin-only 目录。 */
   private PluginCatalogSnapshot bootstrap() {
     return new PluginCatalogBootstrap(registry, repository, transactionManager)
         .bootstrap(
             PluginCatalogConfiguration.pluginContexts(credentials, resourceGateways),
-            List.of(),
-            List.of());
+            contributors.orderedStream().toList(),
+            adapters.orderedStream().toList());
   }
 
   private long epoch() {

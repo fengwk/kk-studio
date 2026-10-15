@@ -9,6 +9,10 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogManifest;
 
+import java.util.Arrays;
+import java.util.List;
+import java.util.UUID;
+
 /**
  * {@link PluginConfigurationRow} 的不可变记录门禁与值语义测试。
  *
@@ -21,6 +25,8 @@ class PluginConfigurationRowTest {
   private static final String SCHEMA_FINGERPRINT = "a".repeat(64);
   private static final String CAPABILITY_FINGERPRINT = "b".repeat(64);
   private static final String VALUES = "{\"enabled\":true}";
+  private static final String CONTEXT = "c".repeat(64);
+  private static final UUID GENERATION = UUID.fromString("11111111-1111-1111-1111-111111111111");
 
   @Test
   void exposesEveryFieldWithValueSemantics() {
@@ -32,6 +38,9 @@ class PluginConfigurationRowTest {
     assertEquals("1.0", row.codeVersion());
     assertEquals(SCHEMA_FINGERPRINT, row.schemaFingerprint());
     assertEquals(CAPABILITY_FINGERPRINT, row.capabilityFingerprint());
+    assertEquals(GENERATION, row.authGeneration());
+    assertEquals(CONTEXT, row.contextFingerprint());
+    assertEquals(List.of(), row.configuredSecretFields());
     assertEquals(VALUES, row.valuesJson());
     assertEquals(row, same);
     assertEquals(row.hashCode(), same.hashCode());
@@ -68,25 +77,126 @@ class PluginConfigurationRowTest {
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            new PluginConfigurationRow(PLUGIN_ID, 1, "1.0", null, CAPABILITY_FINGERPRINT, VALUES));
+            new PluginConfigurationRow(
+                PLUGIN_ID,
+                1,
+                "1.0",
+                null,
+                CAPABILITY_FINGERPRINT,
+                GENERATION,
+                CONTEXT,
+                List.of(),
+                VALUES));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new PluginConfigurationRow(
-                PLUGIN_ID, 1, "1.0", "A".repeat(64), CAPABILITY_FINGERPRINT, VALUES));
+                PLUGIN_ID,
+                1,
+                "1.0",
+                "A".repeat(64),
+                CAPABILITY_FINGERPRINT,
+                GENERATION,
+                CONTEXT,
+                List.of(),
+                VALUES));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new PluginConfigurationRow(
-                PLUGIN_ID, 1, "1.0", "a".repeat(63), CAPABILITY_FINGERPRINT, VALUES));
+                PLUGIN_ID,
+                1,
+                "1.0",
+                "a".repeat(63),
+                CAPABILITY_FINGERPRINT,
+                GENERATION,
+                CONTEXT,
+                List.of(),
+                VALUES));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new PluginConfigurationRow(
-                PLUGIN_ID, 1, "1.0", SCHEMA_FINGERPRINT, "z".repeat(64), VALUES));
+                PLUGIN_ID,
+                1,
+                "1.0",
+                SCHEMA_FINGERPRINT,
+                "z".repeat(64),
+                GENERATION,
+                CONTEXT,
+                List.of(),
+                VALUES));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new PluginConfigurationRow(PLUGIN_ID, 1, "1.0", SCHEMA_FINGERPRINT, null, VALUES));
+        () ->
+            new PluginConfigurationRow(
+                PLUGIN_ID,
+                1,
+                "1.0",
+                SCHEMA_FINGERPRINT,
+                null,
+                GENERATION,
+                CONTEXT,
+                List.of(),
+                VALUES));
+  }
+
+  /** 认证身份与已录入秘密字段名各有独立门禁：缺代际、指纹形状错与含 null 字段名都必须固定拒绝。 */
+  @Test
+  void rejectsInvalidCredentialIdentityAndConfiguredFields() {
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new PluginConfigurationRow(
+                PLUGIN_ID,
+                1,
+                "1.0",
+                SCHEMA_FINGERPRINT,
+                CAPABILITY_FINGERPRINT,
+                null,
+                CONTEXT,
+                List.of(),
+                VALUES));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new PluginConfigurationRow(
+                PLUGIN_ID,
+                1,
+                "1.0",
+                SCHEMA_FINGERPRINT,
+                CAPABILITY_FINGERPRINT,
+                GENERATION,
+                "A".repeat(64),
+                List.of(),
+                VALUES));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new PluginConfigurationRow(
+                PLUGIN_ID,
+                1,
+                "1.0",
+                SCHEMA_FINGERPRINT,
+                CAPABILITY_FINGERPRINT,
+                GENERATION,
+                CONTEXT,
+                Arrays.asList("apiKey", null),
+                VALUES));
+    assertEquals(
+        List.of("apiKey"),
+        new PluginConfigurationRow(
+                PLUGIN_ID,
+                1,
+                "1.0",
+                SCHEMA_FINGERPRINT,
+                CAPABILITY_FINGERPRINT,
+                GENERATION,
+                CONTEXT,
+                List.of("apiKey", "apiKey"),
+                VALUES)
+            .configuredSecretFields(),
+        "configured secret field names must be deduplicated");
   }
 
   @Test
@@ -104,6 +214,14 @@ class PluginConfigurationRowTest {
   private static PluginConfigurationRow row(
       String pluginId, long revision, String codeVersion, String valuesJson) {
     return new PluginConfigurationRow(
-        pluginId, revision, codeVersion, SCHEMA_FINGERPRINT, CAPABILITY_FINGERPRINT, valuesJson);
+        pluginId,
+        revision,
+        codeVersion,
+        SCHEMA_FINGERPRINT,
+        CAPABILITY_FINGERPRINT,
+        GENERATION,
+        CONTEXT,
+        List.of(),
+        valuesJson);
   }
 }

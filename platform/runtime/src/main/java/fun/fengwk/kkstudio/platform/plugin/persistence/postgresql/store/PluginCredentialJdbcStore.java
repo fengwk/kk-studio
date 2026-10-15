@@ -18,42 +18,64 @@ import java.util.UUID;
 /**
  * {@code plugin_credential} 的 JdbcClient 入口。
  *
- * <p>写入只有三种形态：整行 upsert（重新登录）、条件终结（finalize / release，同时匹配 lease token、version 与认证代际）与过期 lease
- * 收敛。领取与终结都靠 {@code for update skip locked} 与 CAS version 在多节点间互斥；任何不匹配的写入都是 0
- * 行更新，调用方据此判定竞争失败而不是覆盖。
+ * <p>写入只有几种形态：条件插入（要求当前无行）、条件整行替换（匹配认证代际、上下文指纹与 version）、条件删除（同一组匹配）、条件终结（finalize / release）与过期
+ * lease 收敛。没有无条件 upsert：不匹配的写入都是 0 行更新，调用方据此判定竞争失败而不是覆盖。领取与终结都靠 {@code for update skip locked} 与
+ * CAS version 在多节点间互斥。
+ *
+ * <p>静态密钥行没有 region/expires_at/next_refresh_at，因此既不会被 refresh 领取（{@code next_refresh_at <= now} 对
+ * null 为假），也没有本地过期语义。
  */
 @Repository
 public class PluginCredentialJdbcStore {
 
   private static final String COLUMNS =
-      "plugin_id, auth_generation, encrypted_payload, region, expires_at, next_refresh_at, status, "
-          + "last_refreshed_at, last_refresh_error, refresh_lease_token, refresh_lease_until, "
-          + "version, create_time, update_time";
+      "plugin_id, auth_generation, context_fingerprint, encrypted_payload, region, expires_at, "
+          + "next_refresh_at, status, last_refreshed_at, last_refresh_error, refresh_lease_token, "
+          + "refresh_lease_until, version, create_time, update_time";
 
-  private static final String UPSERT_SQL =
+  private static final String INSERT_SQL =
       """
       insert into plugin_credential (
-          plugin_id, auth_generation, encrypted_payload, region, expires_at, next_refresh_at,
-          status, last_refreshed_at, last_refresh_error,
+          plugin_id, auth_generation, context_fingerprint, encrypted_payload, region, expires_at,
+          next_refresh_at, status, last_refreshed_at, last_refresh_error,
           refresh_lease_token, refresh_lease_until, version, create_time, update_time
       ) values (
-          :pluginId, :authGeneration, :encryptedPayload, :region, :expiresAt, :nextRefreshAt,
-          :status, null, null,
-          null, null, 0, :createTime, :updateTime
+          :pluginId, :authGeneration, :contextFingerprint, :encryptedPayload, :region, :expiresAt,
+          :nextRefreshAt, :status, :lastRefreshedAt, :lastRefreshError,
+          :refreshLeaseToken, :refreshLeaseUntil, :version, :createTime, :updateTime
       )
-      on conflict (plugin_id) do update set
-          auth_generation = excluded.auth_generation,
-          encrypted_payload = excluded.encrypted_payload,
-          region = excluded.region,
-          expires_at = excluded.expires_at,
-          next_refresh_at = excluded.next_refresh_at,
-          status = excluded.status,
-          last_refreshed_at = null,
-          last_refresh_error = null,
-          refresh_lease_token = null,
-          refresh_lease_until = null,
-          version = plugin_credential.version + 1,
-          update_time = excluded.update_time
+      on conflict (plugin_id) do nothing
+      """;
+
+  private static final String REPLACE_SQL =
+      """
+      update plugin_credential
+      set auth_generation = :authGeneration,
+          context_fingerprint = :contextFingerprint,
+          encrypted_payload = :encryptedPayload,
+          region = :region,
+          expires_at = :expiresAt,
+          next_refresh_at = :nextRefreshAt,
+          status = :status,
+          last_refreshed_at = :lastRefreshedAt,
+          last_refresh_error = :lastRefreshError,
+          refresh_lease_token = :refreshLeaseToken,
+          refresh_lease_until = :refreshLeaseUntil,
+          version = version + 1,
+          update_time = :updateTime
+      where plugin_id = :pluginId
+        and auth_generation = :expectedAuthGeneration
+        and context_fingerprint = :expectedContextFingerprint
+        and version = :expectedVersion
+      """;
+
+  private static final String DELETE_SQL =
+      """
+      delete from plugin_credential
+      where plugin_id = :pluginId
+        and auth_generation = :expectedAuthGeneration
+        and context_fingerprint = :expectedContextFingerprint
+        and version = :expectedVersion
       """;
 
   private static final String CLAIM_DUE_SQL =
@@ -77,11 +99,12 @@ public class PluginCredentialJdbcStore {
       from claimable
       where credential.plugin_id = claimable.plugin_id
       returning
-          credential.plugin_id, credential.auth_generation, credential.encrypted_payload,
-          credential.region, credential.expires_at, credential.next_refresh_at, credential.status,
-          credential.last_refreshed_at, credential.last_refresh_error,
-          credential.refresh_lease_token, credential.refresh_lease_until,
-          credential.version, credential.create_time, credential.update_time
+          credential.plugin_id, credential.auth_generation, credential.context_fingerprint,
+          credential.encrypted_payload, credential.region, credential.expires_at,
+          credential.next_refresh_at, credential.status, credential.last_refreshed_at,
+          credential.last_refresh_error, credential.refresh_lease_token,
+          credential.refresh_lease_until, credential.version, credential.create_time,
+          credential.update_time
       """;
 
   private static final RowMapper<PluginCredentialDO> ROW_MAPPER = PluginCredentialJdbcStore::mapRow;
@@ -101,25 +124,33 @@ public class PluginCredentialJdbcStore {
         .orElse(null);
   }
 
-  public int upsert(PluginCredentialDO row) {
-    return jdbcClient
-        .sql(UPSERT_SQL)
-        .param("pluginId", row.getPluginId())
-        .param("authGeneration", row.getAuthGeneration())
-        .param("encryptedPayload", row.getEncryptedPayload())
-        .param("region", row.getRegion())
-        .param("expiresAt", PostgresJdbcTypes.toOffsetDateTime(row.getExpiresAt()))
-        .param("nextRefreshAt", PostgresJdbcTypes.toOffsetDateTime(row.getNextRefreshAt()))
-        .param("status", row.getStatus())
-        .param("createTime", PostgresJdbcTypes.toOffsetDateTime(row.getCreateTime()))
-        .param("updateTime", PostgresJdbcTypes.toOffsetDateTime(row.getUpdateTime()))
+  public int insert(PluginCredentialDO row) {
+    return bindRow(jdbcClient.sql(INSERT_SQL), row).update();
+  }
+
+  public int replace(
+      PluginCredentialDO row,
+      UUID expectedAuthGeneration,
+      String expectedContextFingerprint,
+      long expectedVersion) {
+    return bindRow(jdbcClient.sql(REPLACE_SQL), row)
+        .param("expectedAuthGeneration", expectedAuthGeneration)
+        .param("expectedContextFingerprint", expectedContextFingerprint)
+        .param("expectedVersion", expectedVersion)
         .update();
   }
 
-  public int deleteByPluginId(String pluginId) {
+  public int deleteByReference(
+      String pluginId,
+      UUID expectedAuthGeneration,
+      String expectedContextFingerprint,
+      long expectedVersion) {
     return jdbcClient
-        .sql("delete from plugin_credential where plugin_id = :pluginId")
+        .sql(DELETE_SQL)
         .param("pluginId", pluginId)
+        .param("expectedAuthGeneration", expectedAuthGeneration)
+        .param("expectedContextFingerprint", expectedContextFingerprint)
+        .param("expectedVersion", expectedVersion)
         .update();
   }
 
@@ -160,6 +191,7 @@ public class PluginCredentialJdbcStore {
   public int finalizeSuccess(
       String pluginId,
       UUID authGeneration,
+      String contextFingerprint,
       String leaseToken,
       long version,
       byte[] encryptedPayload,
@@ -185,6 +217,7 @@ public class PluginCredentialJdbcStore {
                 update_time = :now
             where plugin_id = :pluginId
               and auth_generation = :authGeneration
+              and context_fingerprint = :contextFingerprint
               and refresh_lease_token = :leaseToken
               and version = :version
             """)
@@ -196,6 +229,7 @@ public class PluginCredentialJdbcStore {
         .param("now", PostgresJdbcTypes.toOffsetDateTime(now))
         .param("pluginId", pluginId)
         .param("authGeneration", authGeneration)
+        .param("contextFingerprint", contextFingerprint)
         .param("leaseToken", leaseToken)
         .param("version", version)
         .update();
@@ -204,6 +238,7 @@ public class PluginCredentialJdbcStore {
   public int finalizeFailure(
       String pluginId,
       UUID authGeneration,
+      String contextFingerprint,
       String leaseToken,
       long version,
       String status,
@@ -223,6 +258,7 @@ public class PluginCredentialJdbcStore {
                 update_time = :now
             where plugin_id = :pluginId
               and auth_generation = :authGeneration
+              and context_fingerprint = :contextFingerprint
               and refresh_lease_token = :leaseToken
               and version = :version
             """)
@@ -232,13 +268,19 @@ public class PluginCredentialJdbcStore {
         .param("now", PostgresJdbcTypes.toOffsetDateTime(now))
         .param("pluginId", pluginId)
         .param("authGeneration", authGeneration)
+        .param("contextFingerprint", contextFingerprint)
         .param("leaseToken", leaseToken)
         .param("version", version)
         .update();
   }
 
   public int releaseLease(
-      String pluginId, UUID authGeneration, String leaseToken, long version, Instant now) {
+      String pluginId,
+      UUID authGeneration,
+      String contextFingerprint,
+      String leaseToken,
+      long version,
+      Instant now) {
     return jdbcClient
         .sql(
             """
@@ -249,19 +291,26 @@ public class PluginCredentialJdbcStore {
                 update_time = :now
             where plugin_id = :pluginId
               and auth_generation = :authGeneration
+              and context_fingerprint = :contextFingerprint
               and refresh_lease_token = :leaseToken
               and version = :version
             """)
         .param("now", PostgresJdbcTypes.toOffsetDateTime(now))
         .param("pluginId", pluginId)
         .param("authGeneration", authGeneration)
+        .param("contextFingerprint", contextFingerprint)
         .param("leaseToken", leaseToken)
         .param("version", version)
         .update();
   }
 
   public int countOwnedUnexpiredLease(
-      String pluginId, UUID authGeneration, String leaseToken, long version, Instant now) {
+      String pluginId,
+      UUID authGeneration,
+      String contextFingerprint,
+      String leaseToken,
+      long version,
+      Instant now) {
     return jdbcClient
         .sql(
             """
@@ -269,12 +318,14 @@ public class PluginCredentialJdbcStore {
             from plugin_credential
             where plugin_id = :pluginId
               and auth_generation = :authGeneration
+              and context_fingerprint = :contextFingerprint
               and refresh_lease_token = :leaseToken
               and version = :version
               and refresh_lease_until > :now
             """)
         .param("pluginId", pluginId)
         .param("authGeneration", authGeneration)
+        .param("contextFingerprint", contextFingerprint)
         .param("leaseToken", leaseToken)
         .param("version", version)
         .param("now", PostgresJdbcTypes.toOffsetDateTime(now))
@@ -302,6 +353,7 @@ public class PluginCredentialJdbcStore {
   public int rejectUsedCredential(
       String pluginId,
       UUID authGeneration,
+      String contextFingerprint,
       long version,
       byte[] encryptedPayload,
       String error,
@@ -318,21 +370,44 @@ public class PluginCredentialJdbcStore {
                 update_time = :now
             where plugin_id = :pluginId
               and auth_generation = :authGeneration
+              and context_fingerprint = :contextFingerprint
               and (version = :version or encrypted_payload = :encryptedPayload)
             """)
         .param("error", error)
         .param("now", PostgresJdbcTypes.toOffsetDateTime(now))
         .param("pluginId", pluginId)
         .param("authGeneration", authGeneration)
+        .param("contextFingerprint", contextFingerprint)
         .param("version", version)
         .param("encryptedPayload", encryptedPayload)
         .update();
+  }
+
+  private static JdbcClient.StatementSpec bindRow(
+      JdbcClient.StatementSpec statement, PluginCredentialDO row) {
+    return statement
+        .param("pluginId", row.getPluginId())
+        .param("authGeneration", row.getAuthGeneration())
+        .param("contextFingerprint", row.getContextFingerprint())
+        .param("encryptedPayload", row.getEncryptedPayload())
+        .param("region", row.getRegion())
+        .param("expiresAt", PostgresJdbcTypes.toOffsetDateTime(row.getExpiresAt()))
+        .param("nextRefreshAt", PostgresJdbcTypes.toOffsetDateTime(row.getNextRefreshAt()))
+        .param("status", row.getStatus())
+        .param("lastRefreshedAt", PostgresJdbcTypes.toOffsetDateTime(row.getLastRefreshedAt()))
+        .param("lastRefreshError", row.getLastRefreshError())
+        .param("refreshLeaseToken", row.getRefreshLeaseToken())
+        .param("refreshLeaseUntil", PostgresJdbcTypes.toOffsetDateTime(row.getRefreshLeaseUntil()))
+        .param("version", row.getVersion())
+        .param("createTime", PostgresJdbcTypes.toOffsetDateTime(row.getCreateTime()))
+        .param("updateTime", PostgresJdbcTypes.toOffsetDateTime(row.getUpdateTime()));
   }
 
   private static PluginCredentialDO mapRow(ResultSet rs, int rowNum) throws SQLException {
     PluginCredentialDO row = new PluginCredentialDO();
     row.setPluginId(rs.getString("plugin_id"));
     row.setAuthGeneration(rs.getObject("auth_generation", UUID.class));
+    row.setContextFingerprint(rs.getString("context_fingerprint"));
     row.setEncryptedPayload(rs.getBytes("encrypted_payload"));
     row.setRegion(rs.getString("region"));
     row.setExpiresAt(toInstant(rs, "expires_at"));

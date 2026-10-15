@@ -62,6 +62,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "harness_work",
           "mcp_server",
           "mcp_tool",
+          "plugin_auth_attempt",
           "plugin_catalog_state",
           "plugin_configuration_revision",
           "plugin_credential",
@@ -276,18 +277,32 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
     assertColumns(
         "plugin_catalog_state", "id", "epoch", "manifest_json", "created_at", "updated_at");
     assertColumns(
+        "plugin_auth_attempt",
+        "plugin_id",
+        "nonce_hash",
+        "auth_generation",
+        "context_fingerprint",
+        "config_revision",
+        "region",
+        "expires_at",
+        "created_at");
+    assertColumns(
         "plugin_configuration_revision",
         "plugin_id",
         "revision",
         "code_version",
         "schema_fingerprint",
         "capability_fingerprint",
+        "auth_generation",
+        "context_fingerprint",
+        "configured_secret_fields",
         "values_json",
         "created_at");
     assertColumns(
         "plugin_credential",
         "plugin_id",
         "auth_generation",
+        "context_fingerprint",
         "encrypted_payload",
         "region",
         "expires_at",
@@ -672,6 +687,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "harness_work.lease_until",
             "mcp_server.created_at",
             "mcp_server.updated_at",
+            "plugin_auth_attempt.created_at",
+            "plugin_auth_attempt.expires_at",
             "plugin_catalog_state.created_at",
             "plugin_catalog_state.updated_at",
             "plugin_configuration_revision.created_at",
@@ -712,7 +729,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "system_setting.created_at",
             "system_setting.updated_at"),
         temporalColumns,
-        "business schema temporal columns must exactly equal the 80 timestamptz(3) columns");
+        "business schema temporal columns must exactly equal the 82 timestamptz(3) columns");
 
     assertEquals(
         128L,

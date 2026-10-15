@@ -1,11 +1,11 @@
 package fun.fengwk.kkstudio.platform.plugin.credential;
 
-import fun.fengwk.kkstudio.platform.plugin.PluginCredentialMaterial;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialSnapshot;
-import fun.fengwk.kkstudio.platform.plugin.PluginCredentialStatus;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableException;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableReason;
-import fun.fengwk.kkstudio.platform.plugin.PluginKeyUnavailableException;
+import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogManifest;
+import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRecord;
+import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginCredentialRepository;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginCredentialRow;
 
@@ -15,48 +15,44 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.UUID;
-import java.util.function.Consumer;
 
 /**
- * {@code plugin_credential} 上唯一的凭据读写实现。
+ * {@code plugin_credential} 上唯一的凭据读取实现。
  *
- * <p>读路径先确认主密钥可用，再做 GCM 认证解密；写路径先在内存中加密，再以单条 upsert 落库。失败一律 fail closed：主密钥不可用或密文认证失败时既不返回
- * 旧凭据也不写新凭据，而是以 {@code KEY_UNAVAILABLE} 表达。
+ * <p>读路径先确认主密钥可用，再做 GCM 认证解密；失败一律 fail closed：主密钥不可用或密文认证失败时既不返回旧凭据也不写新凭据，而是以 {@code
+ * KEY_UNAVAILABLE} 表达。写入不在本类：管理面只通过 catalog CAS 事务入口提交，本类不提供任何无条件写入口。
  *
- * <p>{@link #resolve(String)} 还要反映刷新互斥：claim 后新的调用解析返回可重试的 {@code AUTH_REFRESHING}，避免与可能使旧 token
- * 失效的 renewal 并发；已经取得快照的调用允许自然结束。
+ * <p>{@link #resolve(PluginCredentialReference)} 是唯一的解析入口：每次都从权威 catalog 与权威行回读，要求引用仍是当前 manifest
+ * 的该 Plugin 坐标（代际 + 上下文指纹），且行仍属于同一代际与上下文；旧上下文、已撤销代际或断连重建后的新行都无法再解析。
+ *
+ * <p>解析还要反映刷新互斥：claim 后新的调用解析返回可重试的 {@code AUTH_REFRESHING}，避免与可能使旧 token 失效的 renewal
+ * 并发；已经取得快照的调用允许自然结束。
  */
 public final class DatabasePluginCredentialStore implements PluginCredentialStore {
 
   static final String AUTH_REJECTED_ERROR =
       "plugin credential was rejected by the provider and must be re-authenticated";
+  static final String STALE_REFERENCE_ERROR =
+      "plugin credential reference is no longer current for this plugin";
 
   private final PluginCredentialRepository repository;
+  private final PluginConfigurationRepository configurationRepository;
   private final PluginCredentialCodec codec;
   private final PluginCredentialKeyLoader keyLoader;
   private final Clock clock;
-  private final Consumer<String> saved;
 
   public DatabasePluginCredentialStore(
       PluginCredentialRepository repository,
+      PluginConfigurationRepository configurationRepository,
       PluginCredentialCodec codec,
       PluginCredentialKeyLoader keyLoader,
       Clock clock) {
-    this(repository, codec, keyLoader, clock, pluginId -> {});
-  }
-
-  public DatabasePluginCredentialStore(
-      PluginCredentialRepository repository,
-      PluginCredentialCodec codec,
-      PluginCredentialKeyLoader keyLoader,
-      Clock clock,
-      Consumer<String> saved) {
     this.repository = Objects.requireNonNull(repository, "repository");
+    this.configurationRepository =
+        Objects.requireNonNull(configurationRepository, "configurationRepository");
     this.codec = Objects.requireNonNull(codec, "codec");
     this.keyLoader = Objects.requireNonNull(keyLoader, "keyLoader");
     this.clock = Objects.requireNonNull(clock, "clock");
-    this.saved = Objects.requireNonNull(saved, "saved");
   }
 
   @Override
@@ -83,26 +79,87 @@ public final class DatabasePluginCredentialStore implements PluginCredentialStor
   }
 
   @Override
-  public PluginCredentialSnapshot resolve(String pluginId) {
+  public PluginCredentialSnapshot resolve(PluginCredentialReference reference) {
+    Objects.requireNonNull(reference, "reference");
+    SecretKey key = requireKey();
+    requireCurrentReference(reference);
+    Optional<PluginCredentialRow> found = repository.find(reference.pluginId());
+    if (found.isEmpty()) {
+      throw unavailable(PluginCredentialUnavailableReason.NOT_CONNECTED, "plugin is not connected");
+    }
+    PluginCredentialRow credential = found.get();
+    // 行必须仍属于引用的代际与上下文：旧引用绝不拿到新 Key，新引用也绝不读取旧行。
+    if (!credential.authGeneration().equals(reference.authGeneration())
+        || !credential.contextFingerprint().equals(reference.contextFingerprint())) {
+      throw unavailable(PluginCredentialUnavailableReason.NOT_CONNECTED, STALE_REFERENCE_ERROR);
+    }
+    Instant now = clock.instant();
+    requireNotRefreshing(credential, now);
+    requireReadableStatus(credential);
+    if (credential.expiresAt() != null && !credential.expiresAt().isAfter(now)) {
+      throw unavailable(
+          PluginCredentialUnavailableReason.EXPIRED,
+          "plugin credential is expired; re-authenticate the plugin");
+    }
+    return snapshotOf(credential, decrypt(key, credential));
+  }
+
+  @Override
+  public boolean rejectUsed(PluginCredentialSnapshot snapshot, String error) {
+    Objects.requireNonNull(snapshot, "snapshot");
+    String bounded = PluginCredentialRefreshService.boundedError(error, AUTH_REJECTED_ERROR);
+    return repository.rejectUsedCredential(
+        snapshot.pluginId(),
+        snapshot.authGeneration(),
+        snapshot.contextFingerprint(),
+        snapshot.version(),
+        snapshot.encryptedPayload(),
+        bounded,
+        clock.instant());
+  }
+
+  private SecretKey requireKey() {
     SecretKey key = keyLoader.load().orElse(null);
     if (key == null) {
       throw unavailable(
           PluginCredentialUnavailableReason.KEY_UNAVAILABLE,
           "plugin credential key is unavailable");
     }
-    Optional<PluginCredentialRow> row = repository.find(pluginId);
-    if (row.isEmpty()) {
-      throw unavailable(PluginCredentialUnavailableReason.NOT_CONNECTED, "plugin is not connected");
-    }
-    PluginCredentialRow credential = row.get();
-    String payload = decrypt(key, credential);
+    return key;
+  }
 
-    Instant now = clock.instant();
+  /** 引用必须仍是当前权威 manifest 的该 Plugin 坐标；catalog 不可用或坐标已变化都 fail closed。 */
+  private void requireCurrentReference(PluginCredentialReference reference) {
+    PluginCatalogRecord catalog;
+    try {
+      catalog = configurationRepository.readCatalog();
+    } catch (RuntimeException error) {
+      throw unavailable(
+          PluginCredentialUnavailableReason.KEY_UNAVAILABLE,
+          "plugin catalog is unavailable; plugin credential access fails closed");
+    }
+    if (catalog == null) {
+      throw unavailable(
+          PluginCredentialUnavailableReason.KEY_UNAVAILABLE,
+          "plugin catalog is unavailable; plugin credential access fails closed");
+    }
+    PluginCatalogManifest.Entry entry = catalog.manifest().plugins().get(reference.pluginId());
+    if (entry == null
+        || !entry.authGeneration().equals(reference.authGeneration())
+        || !entry.contextFingerprint().equals(reference.contextFingerprint())) {
+      throw unavailable(PluginCredentialUnavailableReason.NOT_CONNECTED, STALE_REFERENCE_ERROR);
+    }
+  }
+
+  private static void requireNotRefreshing(PluginCredentialRow credential, Instant now) {
     if (credential.leased() && credential.refreshLeaseUntil().isAfter(now)) {
       throw unavailable(
           PluginCredentialUnavailableReason.AUTH_REFRESHING,
           "plugin credential refresh is in flight");
     }
+  }
+
+  private static void requireReadableStatus(PluginCredentialRow credential) {
     switch (credential.status()) {
       case REAUTH_REQUIRED -> throw unavailable(
           PluginCredentialUnavailableReason.REAUTH_REQUIRED,
@@ -117,76 +174,19 @@ public final class DatabasePluginCredentialStore implements PluginCredentialStor
           PluginCredentialUnavailableReason.KEY_UNAVAILABLE,
           "plugin credential status is not readable");
     }
-    if (!credential.expiresAt().isAfter(now)) {
-      throw unavailable(
-          PluginCredentialUnavailableReason.EXPIRED,
-          "plugin credential is expired; re-authenticate the plugin");
-    }
+  }
+
+  private static PluginCredentialSnapshot snapshotOf(
+      PluginCredentialRow credential, String payload) {
     return new PluginCredentialSnapshot(
         credential.pluginId(),
         credential.authGeneration(),
+        credential.contextFingerprint(),
         credential.region(),
         credential.expiresAt(),
         credential.version(),
         credential.encryptedPayload(),
         payload);
-  }
-
-  @Override
-  public PluginCredentialProjection save(String pluginId, PluginCredentialMaterial material) {
-    Objects.requireNonNull(material, "material");
-    SecretKey key = keyLoader.load().orElse(null);
-    if (key == null) {
-      throw new PluginKeyUnavailableException("plugin credential key is unavailable");
-    }
-    Instant now = clock.instant();
-    if (!material.expiresAt().isAfter(now)) {
-      throw new IllegalArgumentException("credential expiresAt must be in the future");
-    }
-    if (material.nextRefreshAt().isBefore(now)) {
-      throw new IllegalArgumentException("credential nextRefreshAt must not be in the past");
-    }
-    // 每次人工完整替换都生成新的认证代际：即使载荷完全相同也不会复用旧代际，从而关闭断连重建的 ABA。
-    UUID authGeneration = UUID.randomUUID();
-    byte[] envelope =
-        codec.encrypt(key, pluginId, authGeneration, material.region(), material.payloadJson());
-    PluginCredentialRow row =
-        new PluginCredentialRow(
-            pluginId,
-            authGeneration,
-            envelope,
-            material.region(),
-            material.expiresAt(),
-            material.nextRefreshAt(),
-            PluginCredentialStatus.CONNECTED,
-            null,
-            null,
-            null,
-            null,
-            0L,
-            now,
-            now);
-    repository.upsert(row);
-    saved.accept(pluginId);
-    return projection(pluginId);
-  }
-
-  @Override
-  public void delete(String pluginId) {
-    repository.delete(pluginId);
-  }
-
-  @Override
-  public boolean rejectUsed(PluginCredentialSnapshot snapshot, String error) {
-    Objects.requireNonNull(snapshot, "snapshot");
-    String bounded = PluginCredentialRefreshService.boundedError(error, AUTH_REJECTED_ERROR);
-    return repository.rejectUsedCredential(
-        snapshot.pluginId(),
-        snapshot.authGeneration(),
-        snapshot.version(),
-        snapshot.encryptedPayload(),
-        bounded,
-        clock.instant());
   }
 
   private boolean decryptable(SecretKey key, PluginCredentialRow credential) {
@@ -204,6 +204,7 @@ public final class DatabasePluginCredentialStore implements PluginCredentialStor
           key,
           credential.pluginId(),
           credential.authGeneration(),
+          credential.contextFingerprint(),
           credential.region(),
           credential.encryptedPayload());
     } catch (RuntimeException error) {

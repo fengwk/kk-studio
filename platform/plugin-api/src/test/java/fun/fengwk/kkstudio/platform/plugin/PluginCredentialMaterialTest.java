@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.platform.plugin;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -47,14 +48,30 @@ class PluginCredentialMaterialTest {
     assertThrows(IllegalArgumentException.class, () -> material(" CN ", "{}"));
   }
 
+  /** 静态密钥形态没有 region/过期/刷新，且 interactive() 如实为 false。 */
   @Test
-  void rejectsMissingTimes() {
+  void staticKeyMaterialHasNoRouteMetadata() {
+    PluginCredentialMaterial material = PluginCredentialMaterial.staticKey("{\"apiKey\":\"k\"}");
+
+    assertNull(material.region());
+    assertNull(material.expiresAt());
+    assertNull(material.nextRefreshAt());
+    assertFalse(material.interactive());
+    assertTrue(material("CN", "{}").interactive());
+  }
+
+  /** region 与两个时刻必须全部存在或全部缺失。 */
+  @Test
+  void rejectsMixedRouteMetadata() {
     assertThrows(
-        NullPointerException.class,
+        IllegalArgumentException.class,
         () -> new PluginCredentialMaterial("CN", null, NEXT_REFRESH_AT, "{}"));
     assertThrows(
-        NullPointerException.class,
+        IllegalArgumentException.class,
         () -> new PluginCredentialMaterial("CN", EXPIRES_AT, null, "{}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new PluginCredentialMaterial(null, EXPIRES_AT, NEXT_REFRESH_AT, "{}"));
   }
 
   @Test

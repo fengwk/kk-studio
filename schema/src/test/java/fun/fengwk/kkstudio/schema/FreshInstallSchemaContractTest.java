@@ -90,6 +90,7 @@ class FreshInstallSchemaContractTest {
           "harness_work",
           "mcp_server",
           "mcp_tool",
+          "plugin_auth_attempt",
           "plugin_catalog_state",
           "plugin_configuration_revision",
           "plugin_credential",

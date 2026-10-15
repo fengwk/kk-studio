@@ -10,11 +10,13 @@ import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
+import fun.fengwk.kkstudio.platform.plugin.PluginConfigurationState;
 import fun.fengwk.kkstudio.platform.plugin.PluginContext;
 import fun.fengwk.kkstudio.platform.plugin.PluginDescriptor;
 import fun.fengwk.kkstudio.platform.plugin.PluginInstance;
 import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
 import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
+import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialReference;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -24,7 +26,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.function.Function;
+import java.util.function.BiFunction;
 
 /**
  * 启动期一次 configure 出的 Plugin 两域快照，并携带该快照的冻结 epoch、owner map 与身份指纹。
@@ -68,11 +70,11 @@ public final class PluginCatalogSnapshot implements AutoCloseable {
   }
 
   /**
-   * 用每个已安装 Plugin 的配置装配一次快照，并绑定该快照的 epoch。
+   * 用每个已安装 Plugin 的配置身份装配一次快照，并绑定该快照的 epoch。
    *
    * <p>{@code configurations} 必须精确覆盖安装集合：缺少任一已安装 id 或带有未知 id 都直接失败，绝不静默回退缺失配置；每个配置的 revision 都必须不晚于
-   * {@code epoch}；{@code contexts} 为每个安装 id 提供 scoped {@link PluginContext}；{@code builtins} 与
-   * {@code builtinAdapters} 是容器真正内置的贡献，不被伪装成外部插件。
+   * {@code epoch}；{@code contexts} 按 pluginId 与冻结凭据引用提供 scoped {@link PluginContext}；{@code
+   * builtins} 与 {@code builtinAdapters} 是容器真正内置的贡献，不被伪装成外部插件。
    *
    * @param epoch 该快照对应的权威全局 epoch，必须非负
    * @throws IllegalStateException 配置覆盖不全、安装定义不一致或两域目录构建失败时（只带 stage 与 pluginId，不含底层 cause）
@@ -80,8 +82,8 @@ public final class PluginCatalogSnapshot implements AutoCloseable {
   public static PluginCatalogSnapshot build(
       long epoch,
       StudioPluginRegistry registry,
-      Map<String, PluginConfig> configurations,
-      Function<String, PluginContext> contexts,
+      Map<String, PluginConfigurationState> configurations,
+      BiFunction<String, PluginCredentialReference, PluginContext> contexts,
       List<HarnessContributor> builtins,
       List<CanvasFunctionAdapter> builtinAdapters) {
     Objects.requireNonNull(registry, "registry");
@@ -112,10 +114,14 @@ public final class PluginCatalogSnapshot implements AutoCloseable {
         plugin.configurationSchema().requireDeclaredSecrets(authSpec);
 
         stage = "configuration";
-        PluginConfig config = configurations.get(activeId);
-        if (config == null) {
+        PluginConfigurationState state = configurations.get(activeId);
+        if (state == null) {
           throw new IllegalStateException("plugin configuration is missing");
         }
+        if (!state.credentialReference().pluginId().equals(activeId)) {
+          throw new IllegalStateException("plugin credential reference belongs to another plugin");
+        }
+        PluginConfig config = state.config();
         if (config.revision() > epoch) {
           throw new IllegalStateException(
               "plugin configuration revision must not exceed the snapshot epoch");
@@ -125,7 +131,7 @@ public final class PluginCatalogSnapshot implements AutoCloseable {
                 config.revision(), plugin.configurationSchema().resolveValues(config.valuesJson()));
 
         stage = "configure";
-        PluginContext context = contexts.apply(activeId);
+        PluginContext context = contexts.apply(activeId, state.credentialReference());
         if (context == null) {
           throw new IllegalStateException("plugin context is missing");
         }
@@ -134,7 +140,11 @@ public final class PluginCatalogSnapshot implements AutoCloseable {
           throw new IllegalStateException("plugin configure returned no instance");
         }
         // 立即纳入回收列表：随后读取贡献列表失败时实例也必须被回收，绝不泄漏。
-        configured.add(new ConfiguredPlugin(descriptor, normalized, instance));
+        configured.add(
+            new ConfiguredPlugin(
+                descriptor,
+                new PluginConfigurationState(normalized, state.credentialReference()),
+                instance));
 
         stage = "collect-contributions";
         List<HarnessContributor> pluginContributors =
@@ -246,7 +256,7 @@ public final class PluginCatalogSnapshot implements AutoCloseable {
   }
 
   private static void requireConfigurationCoverage(
-      StudioPluginRegistry registry, Map<String, PluginConfig> configurations) {
+      StudioPluginRegistry registry, Map<String, PluginConfigurationState> configurations) {
     for (String pluginId : registry.pluginIds()) {
       if (!configurations.containsKey(pluginId)) {
         throw buildFailure("configuration", pluginId);
@@ -311,14 +321,24 @@ public final class PluginCatalogSnapshot implements AutoCloseable {
         "Plugin catalog snapshot build failed: stage=" + stage + suffix);
   }
 
-  /** 一次配置产出的、由本快照拥有的运行期实例。 */
+  /** 一次配置产出的、由本快照拥有的运行期实例，附带该实例的配置身份。 */
   public record ConfiguredPlugin(
-      PluginDescriptor descriptor, PluginConfig config, PluginInstance instance) {
+      PluginDescriptor descriptor, PluginConfigurationState state, PluginInstance instance) {
 
     public ConfiguredPlugin {
       Objects.requireNonNull(descriptor, "descriptor");
-      Objects.requireNonNull(config, "config");
+      Objects.requireNonNull(state, "state");
       Objects.requireNonNull(instance, "instance");
+    }
+
+    /** 该实例使用的不可变普通配置。 */
+    public PluginConfig config() {
+      return state.config();
+    }
+
+    /** 该实例冻结的凭据身份引用。 */
+    public PluginCredentialReference credentialReference() {
+      return state.credentialReference();
     }
   }
 

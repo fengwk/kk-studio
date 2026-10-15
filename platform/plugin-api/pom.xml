@@ -64,6 +64,20 @@
                                         </limit>
                                     </limits>
                                 </rule>
+                                <rule>
+                                    <!-- S3-B2 身份与冻结引用：scoped 访问的唯一输入，必须逐点覆盖。 -->
+                                    <element>CLASS</element>
+                                    <includes>
+                                        <include>fun.fengwk.kkstudio.platform.plugin.credential.*</include>
+                                    </includes>
+                                    <limits>
+                                        <limit>
+                                            <counter>LINE</counter>
+                                            <value>COVEREDRATIO</value>
+                                            <minimum>0.90</minimum>
+                                        </limit>
+                                    </limits>
+                                </rule>
                             </rules>
                         </configuration>
                     </execution>
