@@ -9,6 +9,7 @@ import fun.fengwk.kkstudio.canvas.CanvasFunctionRunRepository;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunStatus;
 import fun.fengwk.kkstudio.canvas.CanvasStore;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalogSource;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunException;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunStateCodecPort;
@@ -27,7 +28,7 @@ public class CanvasFunctionRuntimeService implements CanvasFunctionService {
   private final CanvasStore canvasStore;
   private final CanvasFunctionRunRepository runRepository;
   private final CanvasFunctionRunTransactions transactions;
-  private final CanvasFunctionCatalog catalog;
+  private final CanvasFunctionCatalogSource catalogSource;
   private final CanvasFunctionRunStateCodecPort stateCodec;
 
   @Override
@@ -72,12 +73,15 @@ public class CanvasFunctionRuntimeService implements CanvasFunctionService {
     return result;
   }
 
+  /** best-effort 取消：只按冻结 binding 取对应 epoch 的租用，绝不按当前同名函数找实例。 */
   private void bestEffortAdapterCancel(CanvasFunctionRun run) {
     try {
-      CanvasFunctionCatalog.RegisteredFunction registered =
-          catalog.require(stateCodec.functionName(run.stateJson()));
-      CanvasFunctionFrozenRun frozen = stateCodec.decode(run.stateJson(), registered.function());
-      registered.adapter().cancel(frozen);
+      CanvasFunctionFrozenRun frozen = stateCodec.decode(run.stateJson());
+      try (CanvasFunctionCatalogSource.Lease lease =
+          catalogSource.acquire(frozen.binding().catalogEpoch())) {
+        CanvasFunctionCatalog.RegisteredFunction registered = lease.require(frozen.binding());
+        registered.adapter().cancel(frozen);
+      }
     } catch (RuntimeException error) {
       log.warn(
           "Canvas Function adapter cancel hook failed nodeId={} requestId={} type={}",

@@ -11,7 +11,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalogSource;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunException;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionService;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionUnknownResolution;
@@ -34,28 +34,33 @@ import java.util.UUID;
 @RequestMapping("/api")
 public class StudioCanvasFunctionController {
 
-  private final CanvasFunctionCatalog catalog;
+  private final CanvasFunctionCatalogSource catalogSource;
   private final CanvasFunctionService runtimeService;
   private final WebDtoMapper mapper;
 
   public StudioCanvasFunctionController(
-      CanvasFunctionCatalog catalog, CanvasFunctionService runtimeService, WebDtoMapper mapper) {
-    this.catalog = Objects.requireNonNull(catalog, "catalog");
+      CanvasFunctionCatalogSource catalogSource,
+      CanvasFunctionService runtimeService,
+      WebDtoMapper mapper) {
+    this.catalogSource = Objects.requireNonNull(catalogSource, "catalogSource");
     this.runtimeService = Objects.requireNonNull(runtimeService, "runtimeService");
     this.mapper = Objects.requireNonNull(mapper, "mapper");
   }
 
   @GetMapping("/canvas-functions")
   public Result<List<CanvasFunctionDefinitionDTO>> listFunctions() {
-    return Results.ok(
-        catalog.list().stream()
-            .map(
-                registered ->
-                    mapper.toDto(
-                        registered.function(),
-                        registered.enabled(),
-                        registered.unavailableReason()))
-            .toList());
+    // 目录只反映一次 acquireCurrent 的冻结快照：列表与可用性来自同一 epoch，不混用两个目录实例。
+    try (CanvasFunctionCatalogSource.Lease lease = catalogSource.acquireCurrent()) {
+      return Results.ok(
+          lease.catalog().list().stream()
+              .map(
+                  registered ->
+                      mapper.toDto(
+                          registered.function(),
+                          registered.enabled(),
+                          registered.unavailableReason()))
+              .toList());
+    }
   }
 
   @PostMapping("/canvases/{canvasId}/nodes/{nodeId}/function-run")

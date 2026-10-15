@@ -2,6 +2,8 @@ package fun.fengwk.kkstudio.canvas.infra.function;
 
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import fun.fengwk.kkstudio.canvas.CanvasDocument;
 import fun.fengwk.kkstudio.canvas.CanvasFunction;
@@ -20,9 +22,11 @@ import fun.fengwk.kkstudio.canvas.CanvasStore;
 import fun.fengwk.kkstudio.canvas.CanvasStore.NodeRecord;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionArgsCodecPort;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionBinding;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionBlobAccess;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionBlobAccess.BlobFacts;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalogSource;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenOutput;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenReference;
@@ -66,7 +70,7 @@ public class CanvasFunctionRunTransactions {
   private final CanvasResourceRepository resourceRepository;
   private final CanvasFunctionRunRepository runRepository;
   private final CanvasFunctionResourcePinRepository refRepository;
-  private final CanvasFunctionCatalog catalog;
+  private final CanvasFunctionCatalogSource catalogSource;
   private final CanvasFunctionArgsCodecPort argsCodec;
   private final CanvasFunctionRunStateCodecPort stateCodec;
   private final CanvasResourceLifecycle resourceLifecycle;
@@ -78,7 +82,7 @@ public class CanvasFunctionRunTransactions {
       CanvasResourceRepository resourceRepository,
       CanvasFunctionRunRepository runRepository,
       CanvasFunctionResourcePinRepository refRepository,
-      CanvasFunctionCatalog catalog,
+      CanvasFunctionCatalogSource catalogSource,
       CanvasFunctionArgsCodecPort argsCodec,
       CanvasFunctionRunStateCodecPort stateCodec,
       CanvasResourceLifecycle resourceLifecycle,
@@ -88,7 +92,7 @@ public class CanvasFunctionRunTransactions {
     this.resourceRepository = Objects.requireNonNull(resourceRepository, "resourceRepository");
     this.runRepository = Objects.requireNonNull(runRepository, "runRepository");
     this.refRepository = Objects.requireNonNull(refRepository, "refRepository");
-    this.catalog = Objects.requireNonNull(catalog, "catalog");
+    this.catalogSource = Objects.requireNonNull(catalogSource, "catalogSource");
     this.argsCodec = Objects.requireNonNull(argsCodec, "argsCodec");
     this.stateCodec = Objects.requireNonNull(stateCodec, "stateCodec");
     this.resourceLifecycle = Objects.requireNonNull(resourceLifecycle, "resourceLifecycle");
@@ -99,7 +103,11 @@ public class CanvasFunctionRunTransactions {
   /**
    * 启动新的 FunctionRun；相同 {@code requestId} 已存在时直接返回。
    *
-   * <p>事务内冻结输入清单、创建输入 pin 并构造 {@code PENDING} 提交事实，同时将画布版本推进一次。未安装的插件函数无法解析，因此保持节点内容只读且 不会产生新的队列事实。
+   * <p>事务内从一次 {@code acquireCurrent} 冻结目录 epoch、完整定义与函数来源，冻结输入清单、创建输入 pin 并构造 {@code PENDING}
+   * 提交事实，同时将画布版本推进一次。未安装的插件函数无法解析，因此保持节点内容只读且不会产生新的队列事实。
+   *
+   * <p>目录租用一直持有到真实事务的 {@code afterCompletion}（提交与回滚都释放），而不是在方法返回前关闭：外部提交前的 preflight 与
+   * 冻结计划必须始终锚定同一目录实例。
    */
   @Transactional
   public CanvasFunctionStartResult start(UUID canvasId, UUID nodeId, String requestId) {
@@ -125,10 +133,13 @@ public class CanvasFunctionRunTransactions {
       throw conflict("another requestId is already active or awaiting verification for this node");
     }
 
-    CanvasFunctionCatalog.RegisteredFunction registered = catalog.require(node.function().name());
+    CanvasFunctionCatalogSource.Lease lease = catalogSource.acquireCurrent();
+    registerLeaseReleaseAfterCompletion(lease);
+    CanvasFunctionBinding binding = lease.bind(node.function().name());
+    CanvasFunctionCatalog.RegisteredFunction registered = lease.require(binding);
     registered.requireAvailable();
     CanvasFunctionAdapter adapter = registered.adapter();
-    CanvasFunctionDefinition definition = registered.function();
+    CanvasFunctionDefinition definition = binding.definition();
     JsonObject args = argsCodec.decode(node.function().argsJson(), definition);
     List<CanvasFunctionFrozenReference> manifest =
         freezeManifest(
@@ -140,7 +151,7 @@ public class CanvasFunctionRunTransactions {
             nodeId,
             node.name(),
             UUID.fromString(validatedRequestId),
-            definition,
+            binding,
             args,
             manifest,
             outputs,
@@ -177,6 +188,30 @@ public class CanvasFunctionRunTransactions {
     refRepository.addAll(inputPins(canvasId, nodeId, ready.requestId(), manifest));
     bumpVersion(document);
     return new CanvasFunctionStartResult(ready, true);
+  }
+
+  /** 注册成功后由事务负责释放租用；提交与回滚之前都保持同一冻结目录可用。 */
+  private static void registerLeaseReleaseAfterCompletion(CanvasFunctionCatalogSource.Lease lease) {
+    if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+      lease.close();
+      throw new IllegalStateException(
+          "Canvas Function start must run inside an active transaction so the catalog lease is held"
+              + " until afterCompletion");
+    }
+    try {
+      TransactionSynchronizationManager.registerSynchronization(
+          new TransactionSynchronization() {
+            @Override
+            public void afterCompletion(int status) {
+              lease.close();
+            }
+          });
+    } catch (RuntimeException | Error error) {
+      // 尚未转交事务；释放失败不得遮蔽原始异常。
+      try (lease) {
+        throw error;
+      }
+    }
   }
 
   /**
@@ -556,10 +591,9 @@ public class CanvasFunctionRunTransactions {
     }
   }
 
+  /** 只从持久 state 解码冻结计划；恢复不再重查当前目录，避免按名字重新解释旧任务。 */
   private CanvasFunctionFrozenRun decode(CanvasFunctionRun run) {
-    CanvasFunctionDefinition definition =
-        catalog.require(stateCodec.functionName(run.stateJson())).function();
-    return stateCodec.decode(run.stateJson(), definition);
+    return stateCodec.decode(run.stateJson());
   }
 
   private void persistRunningState(
