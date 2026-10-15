@@ -11,18 +11,26 @@ import fun.fengwk.kkstudio.share.ai.catalog.ToolCatalogEntryDTO;
 import java.util.List;
 import java.util.Objects;
 
-/** 统一 {@link RuntimeToolCatalog} 的 Platform 查询边界，提供所有可用工具的列表。 */
+/**
+ * 统一运行时工具目录的 Platform 查询边界，提供所有可用工具的列表。
+ *
+ * <p>每次查询取得一次 current 租用：列表与可用性来自同一 epoch 的冻结目录。
+ */
 @Service
 public class ToolCatalogQueryService {
 
-  private final RuntimeToolCatalog toolCatalog;
+  private final RuntimeToolCatalogSource toolCatalogSource;
 
-  public ToolCatalogQueryService(RuntimeToolCatalog toolCatalog) {
-    this.toolCatalog = Objects.requireNonNull(toolCatalog, "toolCatalog");
+  public ToolCatalogQueryService(RuntimeToolCatalogSource toolCatalogSource) {
+    this.toolCatalogSource = Objects.requireNonNull(toolCatalogSource, "toolCatalogSource");
   }
 
   public List<ToolCatalogEntryDTO> listTools() {
-    return toolCatalog.selectableTools().stream().map(ToolCatalogQueryService::toDto).toList();
+    try (RuntimeToolCatalogSource.Lease lease = toolCatalogSource.acquireCurrent()) {
+      return lease.catalog().selectableTools().stream()
+          .map(ToolCatalogQueryService::toDto)
+          .toList();
+    }
   }
 
   private static ToolCatalogEntryDTO toDto(ToolContribution contribution) {

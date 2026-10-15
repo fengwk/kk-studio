@@ -1034,6 +1034,7 @@ public final class ThreadProcessor {
     long outputBudget = frozen.outputBudget();
     int outputTokens = (int) Math.min(spec.outputTokens(), outputBudget);
     return new ModelRequestSpec(
+        spec.catalogEpoch(),
         spec.providerType(),
         spec.providerConnectionGenerationId(),
         spec.model(),

@@ -27,6 +27,7 @@ import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
+import fun.fengwk.kkstudio.platform.testing.TestCatalogSources;
 import fun.fengwk.kkstudio.share.ai.skill.SkillRefDTO;
 
 import java.util.Arrays;
@@ -60,7 +61,7 @@ class AgentDefinitionReferenceResolverTest {
             mock(AgentModelRepository.class),
             mock(SkillCatalogQueryService.class),
             mock(McpServerRepository.class),
-            mock(RuntimeToolCatalog.class));
+            TestCatalogSources.singleLease(mock(RuntimeToolCatalog.class)));
 
     assertSame(
         target,
@@ -82,7 +83,7 @@ class AgentDefinitionReferenceResolverTest {
             mock(AgentModelRepository.class),
             skillQueryService,
             mock(McpServerRepository.class),
-            mock(RuntimeToolCatalog.class));
+            TestCatalogSources.singleLease(mock(RuntimeToolCatalog.class)));
 
     SkillPackage pkg = new SkillPackage();
     pkg.setPackageName("tools");
@@ -121,7 +122,7 @@ class AgentDefinitionReferenceResolverTest {
             mock(AgentModelRepository.class),
             skillQueryService,
             mock(McpServerRepository.class),
-            mock(RuntimeToolCatalog.class));
+            TestCatalogSources.singleLease(mock(RuntimeToolCatalog.class)));
 
     assertDoesNotThrow(() -> resolver.requireReferencedLifecycles(List.of(), List.of()));
     verify(skillQueryService, never()).getPackage(null);
@@ -158,7 +159,11 @@ class AgentDefinitionReferenceResolverTest {
     when(servers.lockForShare("zulu")).thenReturn(Optional.of(mcpServer("zulu")));
     AgentDefinitionReferenceResolver resolver =
         new AgentDefinitionReferenceResolver(
-            definitions, mock(AgentModelRepository.class), skills, servers, tools);
+            definitions,
+            mock(AgentModelRepository.class),
+            skills,
+            servers,
+            TestCatalogSources.singleLease(tools));
 
     assertDoesNotThrow(
         () ->
@@ -192,7 +197,7 @@ class AgentDefinitionReferenceResolverTest {
             mock(AgentModelRepository.class),
             mock(SkillCatalogQueryService.class),
             servers,
-            tools);
+            TestCatalogSources.singleLease(tools));
 
     assertThrows(
         AiValidationException.class,
@@ -213,7 +218,7 @@ class AgentDefinitionReferenceResolverTest {
             mock(AgentModelRepository.class),
             skills,
             mock(McpServerRepository.class),
-            mock(RuntimeToolCatalog.class));
+            TestCatalogSources.singleLease(mock(RuntimeToolCatalog.class)));
 
     assertThrows(
         AiValidationException.class,
@@ -243,7 +248,7 @@ class AgentDefinitionReferenceResolverTest {
             mock(AgentModelRepository.class),
             mock(SkillCatalogQueryService.class),
             servers,
-            tools);
+            TestCatalogSources.singleLease(tools));
 
     assertThrows(
         AiValidationException.class,
@@ -266,7 +271,7 @@ class AgentDefinitionReferenceResolverTest {
             mock(AgentModelRepository.class),
             mock(SkillCatalogQueryService.class),
             servers,
-            tools);
+            TestCatalogSources.singleLease(tools));
 
     assertThrows(
         AiValidationException.class,
@@ -280,7 +285,7 @@ class AgentDefinitionReferenceResolverTest {
         mock(AgentModelRepository.class),
         mock(SkillCatalogQueryService.class),
         mock(McpServerRepository.class),
-        mock(RuntimeToolCatalog.class));
+        TestCatalogSources.singleLease(mock(RuntimeToolCatalog.class)));
   }
 
   private static SkillPackage packageWith(String packageName, String... skillNames) {

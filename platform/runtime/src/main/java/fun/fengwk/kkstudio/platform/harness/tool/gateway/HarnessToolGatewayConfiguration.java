@@ -7,14 +7,13 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTransport;
 import fun.fengwk.kkstudio.harness.runtime.admission.ConcurrencyAdmission;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionEvaluator;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsProvider;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
-import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
+import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessExecutionAdmissionProperties;
 import fun.fengwk.kkstudio.platform.harness.contributor.ContributorBranchViewLoader;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
@@ -56,8 +55,7 @@ public class HarnessToolGatewayConfiguration {
   @ConditionalOnBean(ResourceStore.class)
   @ConditionalOnMissingBean(ToolGateway.class)
   public ToolExecutionGateway toolExecutionGateway(
-      RuntimeToolCatalog runtimeToolCatalog,
-      HarnessCatalog harnessCatalog,
+      RuntimeToolCatalogSource runtimeToolCatalogSource,
       ContributorBranchViewLoader contributorBranchViewLoader,
       EnvironmentCapabilityTransport capabilityTransport,
       PermissionEvaluator permissionEvaluator,
@@ -71,8 +69,7 @@ public class HarnessToolGatewayConfiguration {
     int resourceMaxBytes =
         Math.toIntExact(systemSettingsSnapshot.get().advanced().resourceMaxBytes());
     return new ToolExecutionGateway(
-        runtimeToolCatalog,
-        harnessCatalog,
+        runtimeToolCatalogSource,
         contributorBranchViewLoader,
         capabilityTransport,
         permissionEvaluator,

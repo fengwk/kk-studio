@@ -150,7 +150,8 @@ public final class HistoryPayloadMapper {
             statusOf(invocation),
             false,
             null,
-            invocation.inputReceipt());
+            invocation.inputReceipt(),
+            invocation.binding());
     return new MessagePayload(
         new AgentMessage(AgentMessageRole.TOOL, List.of(content)), null, metadata);
   }
@@ -179,6 +180,7 @@ public final class HistoryPayloadMapper {
             ToolResultStatus.UNKNOWN,
             true,
             ToolResultReason.HISTORY_CUT,
+            null,
             null);
     return new MessagePayload(
         new AgentMessage(AgentMessageRole.TOOL, List.of(content)), null, metadata);
@@ -224,7 +226,8 @@ public final class HistoryPayloadMapper {
             statusOf(invocation),
             false,
             null,
-            invocation.inputReceipt()));
+            invocation.inputReceipt(),
+            invocation.binding()));
   }
 
   private ToolResultMessageContent succeededContent(ToolInvocation invocation, ToolResult result) {

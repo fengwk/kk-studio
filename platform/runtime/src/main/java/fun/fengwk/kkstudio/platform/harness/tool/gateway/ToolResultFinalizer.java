@@ -63,8 +63,8 @@ public final class ToolResultFinalizer {
    *
    * <p>{@code read} 契约自身已把正文限制在 2000 行、60000 个 Unicode code point 以内（不计行号、元数据与行分隔符），最坏 4 字节 code
    * point 正文为 240000 字节，加上 2000 行行号前缀与 header/footer 仍在 320 KiB 内，因此该窗口不需要二次外化。 该上限只对可信内置 {@code
-   * read} 身份生效：工具身份就是模型可见 name，跨源/同源同名在 {@code CompositeRuntimeToolCatalog} 中 fail-closed， 任意 MCP
-   * 同名工具无法借 {@code read} 名放宽预算。
+   * read} 身份生效：工具身份就是模型可见 name，跨源/同源同名在 {@code PluginRuntimeToolCatalogSource} 中 fail-closed， 任意
+   * MCP 同名工具无法借 {@code read} 名放宽预算。
    */
   public static final int READ_INLINE_MAX_UTF8_BYTES = 320 * 1024;
 

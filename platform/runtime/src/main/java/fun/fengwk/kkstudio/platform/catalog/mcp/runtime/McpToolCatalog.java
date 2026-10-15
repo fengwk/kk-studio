@@ -17,8 +17,11 @@ import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
@@ -52,14 +55,7 @@ public final class McpToolCatalog implements RuntimeToolCatalog {
 
   @Override
   public List<ToolContribution> selectableTools() {
-    return repository.listAllServers().stream()
-        .filter(this::isServerSelectable)
-        .flatMap(
-            server ->
-                repository.listTools(server.getName()).stream()
-                    .map(tool -> contribution(tool, server)))
-        .sorted(Comparator.comparing(contribution -> contribution.definition().descriptor().name()))
-        .toList();
+    return readSnapshot().selectableTools();
   }
 
   /**
@@ -71,13 +67,81 @@ public final class McpToolCatalog implements RuntimeToolCatalog {
   @Override
   public Optional<ToolContribution> findTool(String toolName) {
     Objects.requireNonNull(toolName, "toolName");
-    return repository
-        .getTool(toolName)
-        .flatMap(
-            tool ->
-                repository
-                    .getByName(tool.getServerName())
-                    .map(server -> contribution(tool, server)));
+    return Optional.ofNullable(readSnapshot().plannableByName().get(toolName));
+  }
+
+  /**
+   * 一次现读全部 MCP 事实：遍历 {@code mcp_server} 行及其 {@code mcp_tool} 行，组装同一批 server 记录产出的两份不可变列表。
+   *
+   * <p>{@code plannableTools} 是 planning/查找面：只要求工具行与其所属 server 行存在，不按 enabled 或发现状态过滤，因此 server
+   * 可用性不会提前变成 planning 期的 tool-not-found。{@code selectableTools} 是 UI/配置选择面：只含 {@code enabled=true}
+   * 且 {@code AVAILABLE} 的 server 行下的工具。租用必须用同一次读取冻结两份视图，绝不二次读库。
+   */
+  public Snapshot readSnapshot() {
+    List<ToolContribution> plannable = new ArrayList<>();
+    List<ToolContribution> selectable = new ArrayList<>();
+    for (McpServer server : repository.listAllServers()) {
+      if (server == null) {
+        continue;
+      }
+      boolean selectableServer = isServerSelectable(server);
+      for (McpTool tool : repository.listTools(server.getName())) {
+        if (tool == null) {
+          continue;
+        }
+        ToolContribution contribution = contribution(tool, server);
+        plannable.add(contribution);
+        if (selectableServer) {
+          selectable.add(contribution);
+        }
+      }
+    }
+    return new Snapshot(plannable, selectable);
+  }
+
+  /**
+   * 一次 MCP 现读的冻结事实：planning 面与选择面来自同一批 server/tool 行。
+   *
+   * <p>两份列表都按模型可见 name 稳定排序；{@code plannableTools} 覆盖全部可解析行，因此既是 {@code findTool} 的唯一索引，也不与
+   * 选择面各自读库。
+   */
+  public static final class Snapshot {
+
+    private final List<ToolContribution> plannableTools;
+    private final List<ToolContribution> selectableTools;
+    private final Map<String, ToolContribution> plannableByName;
+
+    Snapshot(List<ToolContribution> plannableTools, List<ToolContribution> selectableTools) {
+      this.plannableTools =
+          plannableTools.stream()
+              .sorted(
+                  Comparator.comparing(
+                      contribution -> contribution.definition().descriptor().name()))
+              .toList();
+      this.selectableTools =
+          selectableTools.stream()
+              .sorted(
+                  Comparator.comparing(
+                      contribution -> contribution.definition().descriptor().name()))
+              .toList();
+      Map<String, ToolContribution> byName = new LinkedHashMap<>();
+      for (ToolContribution contribution : this.plannableTools) {
+        byName.putIfAbsent(contribution.definition().descriptor().name(), contribution);
+      }
+      this.plannableByName = Map.copyOf(byName);
+    }
+
+    public List<ToolContribution> plannableTools() {
+      return plannableTools;
+    }
+
+    public List<ToolContribution> selectableTools() {
+      return selectableTools;
+    }
+
+    private Map<String, ToolContribution> plannableByName() {
+      return plannableByName;
+    }
   }
 
   private boolean isServerSelectable(McpServer server) {

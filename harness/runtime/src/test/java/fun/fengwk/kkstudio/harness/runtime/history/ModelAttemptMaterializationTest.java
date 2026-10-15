@@ -823,6 +823,7 @@ class ModelAttemptMaterializationTest {
 
   private static ModelRequestSpec requestSpec() {
     return new ModelRequestSpec(
+        1L,
         ProviderType.OPENAI,
         new UUID(0L, 1L),
         modelDescriptor(),
@@ -870,6 +871,7 @@ class ModelAttemptMaterializationTest {
   private static ModelRequestSpec toolPhaseRequest() {
     ToolBinding binding =
         new ToolBinding(
+            1L,
             new AgentToolDefinition(
                 new ToolDescriptor(
                     "bash",
@@ -882,8 +884,10 @@ class ModelAttemptMaterializationTest {
             new ContributorBinding("core", "bash", List.of()),
             EnvironmentSupport.NONE,
             null,
+            null,
             null);
     return new ModelRequestSpec(
+        1L,
         ProviderType.OPENAI,
         new UUID(0L, 1L),
         modelDescriptor(),
@@ -976,7 +980,7 @@ class ModelAttemptMaterializationTest {
                         "{}"))),
             null,
             new ToolResultMetadata(
-                id(44L), id(4L), "call-1", 0, ToolResultStatus.SUCCEEDED, false, null, null)),
+                id(44L), id(4L), "call-1", 0, ToolResultStatus.SUCCEEDED, false, null, null, null)),
         T3);
   }
 

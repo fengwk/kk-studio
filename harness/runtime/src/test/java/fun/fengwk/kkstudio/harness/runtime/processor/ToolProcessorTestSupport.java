@@ -150,6 +150,7 @@ final class ToolProcessorTestSupport {
     InputSchema schema = new InputSchema("arguments", Map.of(), Set.of(), true);
     ToolBinding spoofed =
         new ToolBinding(
+            1L,
             new AgentToolDefinition(
                 new ToolDescriptor(
                     "ask_user",
@@ -161,6 +162,7 @@ final class ToolProcessorTestSupport {
                 ToolVisibility.SELECTABLE),
             new ContributorBinding("core", "ask-user", List.of()),
             EnvironmentSupport.NONE,
+            null,
             null,
             null);
     return new Scenario("ask_user", "{}", ToolSideEffect.READ_ONLY, spoofed);
@@ -182,6 +184,7 @@ final class ToolProcessorTestSupport {
             Set.of("questions"),
             false);
     return new ToolBinding(
+        1L,
         new AgentToolDefinition(
             new ToolDescriptor(
                 "ask_user",
@@ -193,6 +196,7 @@ final class ToolProcessorTestSupport {
             ToolVisibility.SELECTABLE),
         new ContributorBinding("builtin", "ask-user", List.of()),
         EnvironmentSupport.NONE,
+        null,
         null,
         null);
   }
@@ -698,9 +702,11 @@ final class ToolProcessorTestSupport {
 
   private static ToolBinding hostBinding(ToolSideEffect sideEffect) {
     return new ToolBinding(
+        1L,
         new AgentToolDefinition(toolDescriptor(sideEffect), ToolVisibility.SELECTABLE),
         new ContributorBinding("core", "bash", List.of()),
         EnvironmentSupport.NONE,
+        null,
         null,
         null);
   }
@@ -718,6 +724,7 @@ final class ToolProcessorTestSupport {
   private static ModelRequestSpec modelRequest(Scenario scenario) {
     ProviderRequest provider = providerRequest();
     return new ModelRequestSpec(
+        1L,
         ProviderType.OPENAI,
         new UUID(0L, 1L),
         provider.model(),

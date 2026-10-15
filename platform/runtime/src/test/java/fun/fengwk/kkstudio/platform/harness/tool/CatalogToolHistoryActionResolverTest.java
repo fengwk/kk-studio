@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -30,7 +31,8 @@ import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
-import fun.fengwk.kkstudio.platform.catalog.tool.HarnessToolCatalogAdapter;
+import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
+import fun.fengwk.kkstudio.platform.catalog.tool.ToolBindingMismatchException;
 
 import java.time.Duration;
 import java.util.List;
@@ -71,8 +73,8 @@ class CatalogToolHistoryActionResolverTest {
   @Test
   void resolveRequiresNonNullBindingAndCall() {
     // 验证 resolve 方法参数非空约束
-    HarnessToolCatalogAdapter toolCatalog = mock(HarnessToolCatalogAdapter.class);
-    CatalogToolHistoryActionResolver resolver = new CatalogToolHistoryActionResolver(toolCatalog);
+    SourceFixture fixture = new SourceFixture();
+    CatalogToolHistoryActionResolver resolver = fixture.resolver();
 
     ToolDescriptor descriptor = testDescriptor(TOOL_NAME);
     ToolBinding binding =
@@ -86,8 +88,8 @@ class CatalogToolHistoryActionResolverTest {
   @Test
   void matchingContributionWithRendererReturnsRenderedText() {
     // 验证贡献身份完全匹配且 renderer 返回有效动作时，resolver 原样返回
-    HarnessToolCatalogAdapter toolCatalog = mock(HarnessToolCatalogAdapter.class);
-    CatalogToolHistoryActionResolver resolver = new CatalogToolHistoryActionResolver(toolCatalog);
+    SourceFixture fixture = new SourceFixture();
+    CatalogToolHistoryActionResolver resolver = fixture.resolver();
 
     ToolDescriptor descriptor = testDescriptor(TOOL_NAME);
     ToolRequirements requirements = ToolRequirements.none();
@@ -101,7 +103,7 @@ class CatalogToolHistoryActionResolverTest {
 
     ToolContribution contribution =
         createContribution(CONTRIBUTOR_ID, LOCAL_NAME, tool, descriptor, requirements);
-    when(toolCatalog.findTool(any(ContributionId.class))).thenReturn(Optional.of(contribution));
+    fixture.requireReturns(contribution);
 
     ToolBinding binding =
         createBinding(CONTRIBUTOR_ID, LOCAL_NAME, descriptor, EnvironmentSupport.NONE, null, null);
@@ -116,8 +118,8 @@ class CatalogToolHistoryActionResolverTest {
   @Test
   void matchingContributionWhenRendererReturnsEmptyReturnsEmpty() {
     // 验证贡献身份匹配但 renderer 返回 empty 时，resolver 返回 empty
-    HarnessToolCatalogAdapter toolCatalog = mock(HarnessToolCatalogAdapter.class);
-    CatalogToolHistoryActionResolver resolver = new CatalogToolHistoryActionResolver(toolCatalog);
+    SourceFixture fixture = new SourceFixture();
+    CatalogToolHistoryActionResolver resolver = fixture.resolver();
 
     ToolDescriptor descriptor = testDescriptor(TOOL_NAME);
     ToolRequirements requirements = ToolRequirements.none();
@@ -131,7 +133,7 @@ class CatalogToolHistoryActionResolverTest {
 
     ToolContribution contribution =
         createContribution(CONTRIBUTOR_ID, LOCAL_NAME, tool, descriptor, requirements);
-    when(toolCatalog.findTool(any(ContributionId.class))).thenReturn(Optional.of(contribution));
+    fixture.requireReturns(contribution);
 
     ToolBinding binding =
         createBinding(CONTRIBUTOR_ID, LOCAL_NAME, descriptor, EnvironmentSupport.NONE, null, null);
@@ -145,8 +147,8 @@ class CatalogToolHistoryActionResolverTest {
   /** Contributor renderer 违反纯函数契约抛异常时，Platform 边界安全回退。 */
   @Test
   void rendererFailureReturnsEmpty() {
-    HarnessToolCatalogAdapter toolCatalog = mock(HarnessToolCatalogAdapter.class);
-    CatalogToolHistoryActionResolver resolver = new CatalogToolHistoryActionResolver(toolCatalog);
+    SourceFixture fixture = new SourceFixture();
+    CatalogToolHistoryActionResolver resolver = fixture.resolver();
 
     ToolDescriptor descriptor = testDescriptor(TOOL_NAME);
     ToolRequirements requirements = ToolRequirements.none();
@@ -160,7 +162,7 @@ class CatalogToolHistoryActionResolverTest {
     when(tool.historyRenderer()).thenReturn(Optional.of(renderer));
     ToolContribution contribution =
         createContribution(CONTRIBUTOR_ID, LOCAL_NAME, tool, descriptor, requirements);
-    when(toolCatalog.findTool(any(ContributionId.class))).thenReturn(Optional.of(contribution));
+    fixture.requireReturns(contribution);
 
     ToolBinding binding =
         createBinding(CONTRIBUTOR_ID, LOCAL_NAME, descriptor, EnvironmentSupport.NONE, null, null);
@@ -172,8 +174,8 @@ class CatalogToolHistoryActionResolverTest {
   @Test
   void mismatchedContributorIdReturnsEmptyAndNeverCallsRenderer() {
     // 验证 contributorId 不一致时，返回 empty 且绝不触发 renderer 调用
-    HarnessToolCatalogAdapter toolCatalog = mock(HarnessToolCatalogAdapter.class);
-    CatalogToolHistoryActionResolver resolver = new CatalogToolHistoryActionResolver(toolCatalog);
+    SourceFixture fixture = new SourceFixture();
+    CatalogToolHistoryActionResolver resolver = fixture.resolver();
 
     ToolDescriptor descriptor = testDescriptor(TOOL_NAME);
     ToolRequirements requirements = ToolRequirements.none();
@@ -185,9 +187,9 @@ class CatalogToolHistoryActionResolverTest {
     when(tool.historyRenderer()).thenReturn(Optional.of(renderer));
 
     // Catalog 中来自 custom.contributor
-    ToolContribution contribution =
-        createContribution("custom.contributor", LOCAL_NAME, tool, descriptor, requirements);
-    when(toolCatalog.findTool(any(ContributionId.class))).thenReturn(Optional.of(contribution));
+    fixture.requireFails(
+        new ToolBindingMismatchException(
+            ToolBindingMismatchException.Reason.CONTRIBUTOR, "contributor mismatch"));
 
     // Binding 中冻结的是 builtin.environment
     ToolBinding binding =
@@ -203,8 +205,8 @@ class CatalogToolHistoryActionResolverTest {
   @Test
   void mismatchedLocalNameReturnsEmptyAndNeverCallsRenderer() {
     // 验证 localName 不一致时，返回 empty 且绝不触发 renderer 调用
-    HarnessToolCatalogAdapter toolCatalog = mock(HarnessToolCatalogAdapter.class);
-    CatalogToolHistoryActionResolver resolver = new CatalogToolHistoryActionResolver(toolCatalog);
+    SourceFixture fixture = new SourceFixture();
+    CatalogToolHistoryActionResolver resolver = fixture.resolver();
 
     ToolDescriptor descriptor = testDescriptor(TOOL_NAME);
     ToolRequirements requirements = ToolRequirements.none();
@@ -216,9 +218,9 @@ class CatalogToolHistoryActionResolverTest {
     when(tool.historyRenderer()).thenReturn(Optional.of(renderer));
 
     // Catalog 中 localName 为 read.v2
-    ToolContribution contribution =
-        createContribution(CONTRIBUTOR_ID, "read.v2", tool, descriptor, requirements);
-    when(toolCatalog.findTool(any(ContributionId.class))).thenReturn(Optional.of(contribution));
+    fixture.requireFails(
+        new ToolBindingMismatchException(
+            ToolBindingMismatchException.Reason.CONTRIBUTOR, "local name mismatch"));
 
     // Binding 中 localName 为 read
     ToolBinding binding =
@@ -234,8 +236,8 @@ class CatalogToolHistoryActionResolverTest {
   /** 冻结定义与目录定义不一致时不得用新渲染器重新解释旧参数。 */
   @Test
   void mismatchedDefinitionReturnsEmptyAndNeverCallsRenderer() {
-    HarnessToolCatalogAdapter toolCatalog = mock(HarnessToolCatalogAdapter.class);
-    CatalogToolHistoryActionResolver resolver = new CatalogToolHistoryActionResolver(toolCatalog);
+    SourceFixture fixture = new SourceFixture();
+    CatalogToolHistoryActionResolver resolver = fixture.resolver();
 
     ToolDescriptor frozenDescriptor = testDescriptor(TOOL_NAME);
     ToolDescriptor currentDescriptor =
@@ -252,9 +254,9 @@ class CatalogToolHistoryActionResolverTest {
     when(tool.descriptor()).thenReturn(currentDescriptor);
     when(tool.requirements()).thenReturn(requirements);
     when(tool.historyRenderer()).thenReturn(Optional.of(renderer));
-    ToolContribution contribution =
-        createContribution(CONTRIBUTOR_ID, LOCAL_NAME, tool, currentDescriptor, requirements);
-    when(toolCatalog.findTool(any(ContributionId.class))).thenReturn(Optional.of(contribution));
+    fixture.requireFails(
+        new ToolBindingMismatchException(
+            ToolBindingMismatchException.Reason.DEFINITION, "definition mismatch"));
 
     ToolBinding binding =
         createBinding(
@@ -268,10 +270,12 @@ class CatalogToolHistoryActionResolverTest {
   @Test
   void toolNotFoundInCatalogReturnsEmpty() {
     // 验证工具在 catalog 中不存在时返回 empty
-    HarnessToolCatalogAdapter toolCatalog = mock(HarnessToolCatalogAdapter.class);
-    CatalogToolHistoryActionResolver resolver = new CatalogToolHistoryActionResolver(toolCatalog);
+    SourceFixture fixture = new SourceFixture();
+    CatalogToolHistoryActionResolver resolver = fixture.resolver();
 
-    when(toolCatalog.findTool(any(ContributionId.class))).thenReturn(Optional.empty());
+    fixture.requireFails(
+        new ToolBindingMismatchException(
+            ToolBindingMismatchException.Reason.NOT_FOUND, "tool is not registered"));
 
     ToolDescriptor descriptor = testDescriptor(TOOL_NAME);
     ToolBinding binding =
@@ -286,11 +290,10 @@ class CatalogToolHistoryActionResolverTest {
   @Test
   void findToolThrowingRuntimeExceptionReturnsEmptyWithoutRethrowing() {
     // 验证 findTool 抛出 RuntimeException 时安全降级返回 empty，绝不上抛
-    HarnessToolCatalogAdapter toolCatalog = mock(HarnessToolCatalogAdapter.class);
-    CatalogToolHistoryActionResolver resolver = new CatalogToolHistoryActionResolver(toolCatalog);
+    SourceFixture fixture = new SourceFixture();
+    CatalogToolHistoryActionResolver resolver = fixture.resolver();
 
-    when(toolCatalog.findTool(any(ContributionId.class)))
-        .thenThrow(new RuntimeException("Catalog lookup failed"));
+    fixture.requireFails(new RuntimeException("Catalog lookup failed"));
 
     ToolDescriptor descriptor = testDescriptor(TOOL_NAME);
     ToolBinding binding =
@@ -305,8 +308,8 @@ class CatalogToolHistoryActionResolverTest {
   @Test
   void toolWithoutHistoryRendererReturnsEmpty() {
     // 验证贡献存在且身份匹配，但 Tool 未提供 historyRenderer（返回 empty）时，resolver 返回 empty
-    HarnessToolCatalogAdapter toolCatalog = mock(HarnessToolCatalogAdapter.class);
-    CatalogToolHistoryActionResolver resolver = new CatalogToolHistoryActionResolver(toolCatalog);
+    SourceFixture fixture = new SourceFixture();
+    CatalogToolHistoryActionResolver resolver = fixture.resolver();
 
     ToolDescriptor descriptor = testDescriptor(TOOL_NAME);
     ToolRequirements requirements = ToolRequirements.none();
@@ -318,7 +321,7 @@ class CatalogToolHistoryActionResolverTest {
 
     ToolContribution contribution =
         createContribution(CONTRIBUTOR_ID, LOCAL_NAME, tool, descriptor, requirements);
-    when(toolCatalog.findTool(any(ContributionId.class))).thenReturn(Optional.of(contribution));
+    fixture.requireReturns(contribution);
 
     ToolBinding binding =
         createBinding(CONTRIBUTOR_ID, LOCAL_NAME, descriptor, EnvironmentSupport.NONE, null, null);
@@ -332,8 +335,8 @@ class CatalogToolHistoryActionResolverTest {
   @Test
   void renderRequestReceivesExactCallAndFrozenEnvironmentName() {
     // 验证传递给 ToolHistoryRenderRequest 的 call 与 binding 冻结的 environmentName 完全保真
-    HarnessToolCatalogAdapter toolCatalog = mock(HarnessToolCatalogAdapter.class);
-    CatalogToolHistoryActionResolver resolver = new CatalogToolHistoryActionResolver(toolCatalog);
+    SourceFixture fixture = new SourceFixture();
+    CatalogToolHistoryActionResolver resolver = fixture.resolver();
 
     ToolDescriptor descriptor = testDescriptor(TOOL_NAME);
     ToolRequirements requirements = ToolRequirements.none();
@@ -347,7 +350,7 @@ class CatalogToolHistoryActionResolverTest {
 
     ToolContribution contribution =
         createContribution(CONTRIBUTOR_ID, LOCAL_NAME, tool, descriptor, requirements);
-    when(toolCatalog.findTool(any(ContributionId.class))).thenReturn(Optional.of(contribution));
+    fixture.requireReturns(contribution);
 
     String envName = "production-cluster";
     ToolBinding binding =
@@ -372,8 +375,8 @@ class CatalogToolHistoryActionResolverTest {
   @Test
   void renderRequestReceivesNullEnvironmentNameWhenBindingHasNoEnvironment() {
     // 验证当 binding 未绑定环境时，传递给 ToolHistoryRenderRequest 的 environmentName 为 null
-    HarnessToolCatalogAdapter toolCatalog = mock(HarnessToolCatalogAdapter.class);
-    CatalogToolHistoryActionResolver resolver = new CatalogToolHistoryActionResolver(toolCatalog);
+    SourceFixture fixture = new SourceFixture();
+    CatalogToolHistoryActionResolver resolver = fixture.resolver();
 
     ToolDescriptor descriptor = testDescriptor(TOOL_NAME);
     ToolRequirements requirements = ToolRequirements.none();
@@ -387,7 +390,7 @@ class CatalogToolHistoryActionResolverTest {
 
     ToolContribution contribution =
         createContribution(CONTRIBUTOR_ID, LOCAL_NAME, tool, descriptor, requirements);
-    when(toolCatalog.findTool(any(ContributionId.class))).thenReturn(Optional.of(contribution));
+    fixture.requireReturns(contribution);
 
     ToolBinding binding =
         createBinding(CONTRIBUTOR_ID, LOCAL_NAME, descriptor, EnvironmentSupport.NONE, null, null);
@@ -437,6 +440,29 @@ class CatalogToolHistoryActionResolverTest {
     AgentToolDefinition definition = new AgentToolDefinition(descriptor, ToolVisibility.SELECTABLE);
     ContributorBinding contributor = new ContributorBinding(contributorId, localName, List.of());
     return new ToolBinding(
-        definition, contributor, environmentSupport, environmentId, environmentName);
+        1L, definition, contributor, environmentSupport, environmentId, environmentName, null);
+  }
+
+  /** 单租用替身：resolver 只按 binding 冻结 epoch 取租用并严格取回贡献，因此测试只需固定 {@code require} 的事实。 */
+  private static final class SourceFixture {
+
+    private final RuntimeToolCatalogSource source = mock(RuntimeToolCatalogSource.class);
+    private final RuntimeToolCatalogSource.Lease lease = mock(RuntimeToolCatalogSource.Lease.class);
+
+    SourceFixture() {
+      when(source.acquire(anyLong())).thenReturn(lease);
+    }
+
+    CatalogToolHistoryActionResolver resolver() {
+      return new CatalogToolHistoryActionResolver(source);
+    }
+
+    void requireReturns(ToolContribution contribution) {
+      when(lease.require(any())).thenReturn(contribution);
+    }
+
+    void requireFails(RuntimeException failure) {
+      when(lease.require(any())).thenThrow(failure);
+    }
   }
 }

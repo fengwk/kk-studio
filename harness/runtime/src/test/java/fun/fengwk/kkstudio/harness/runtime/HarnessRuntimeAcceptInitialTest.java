@@ -908,6 +908,7 @@ class HarnessRuntimeAcceptInitialTest {
             ToolResultStatus.SUCCEEDED,
             false,
             null,
+            null,
             null);
     return new MessagePayload(
         new AgentMessage(AgentMessageRole.TOOL, List.of(content)), null, metadata);

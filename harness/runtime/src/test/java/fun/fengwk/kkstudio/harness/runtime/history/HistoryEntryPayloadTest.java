@@ -8,10 +8,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
@@ -23,10 +27,17 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
+import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
+import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
+import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /** history payload record 的不变量：role/metadata 矩阵、synthetic tool result 与 turn end。 */
@@ -35,7 +46,7 @@ class HistoryEntryPayloadTest {
 
   private static final ToolResultMetadata TOOL_METADATA =
       new ToolResultMetadata(
-          id(22L), id(2L), "call-1", 0, ToolResultStatus.SUCCEEDED, false, null, null);
+          id(22L), id(2L), "call-1", 0, ToolResultStatus.SUCCEEDED, false, null, null, null);
 
   @Test
   void messagePayloadEnforcesRoleMetadataMatrix() {
@@ -82,7 +93,15 @@ class HistoryEntryPayloadTest {
                 toolMessage("call-1"),
                 null,
                 new ToolResultMetadata(
-                    id(22L), id(2L), "call-9", 0, ToolResultStatus.SUCCEEDED, false, null, null)));
+                    id(22L),
+                    id(2L),
+                    "call-9",
+                    0,
+                    ToolResultStatus.SUCCEEDED,
+                    false,
+                    null,
+                    null,
+                    null)));
     assertThrows(NullPointerException.class, () -> new MessagePayload(null, null, null));
   }
 
@@ -354,6 +373,7 @@ class HistoryEntryPayloadTest {
             ToolResultStatus.UNKNOWN,
             true,
             ToolResultReason.HISTORY_CUT,
+            null,
             null);
     assertNull(synthetic.invocationId());
     assertEquals(ToolResultReason.HISTORY_CUT, synthetic.reason());
@@ -364,7 +384,7 @@ class HistoryEntryPayloadTest {
         IllegalArgumentException.class,
         () ->
             new ToolResultMetadata(
-                null, id(2L), "call-1", 0, ToolResultStatus.SUCCEEDED, false, null, null));
+                null, id(2L), "call-1", 0, ToolResultStatus.SUCCEEDED, false, null, null, null));
     // synthetic 结果没有原调用，不允许伪造 invocation id。
     assertThrows(
         IllegalArgumentException.class,
@@ -377,22 +397,23 @@ class HistoryEntryPayloadTest {
                 ToolResultStatus.UNKNOWN,
                 true,
                 ToolResultReason.HISTORY_CUT,
+                null,
                 null));
     assertThrows(
         NullPointerException.class,
         () ->
             new ToolResultMetadata(
-                id(22L), null, "call-1", 0, ToolResultStatus.SUCCEEDED, false, null, null));
+                id(22L), null, "call-1", 0, ToolResultStatus.SUCCEEDED, false, null, null, null));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ToolResultMetadata(
-                id(22L), id(2L), " ", 0, ToolResultStatus.SUCCEEDED, false, null, null));
+                id(22L), id(2L), " ", 0, ToolResultStatus.SUCCEEDED, false, null, null, null));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ToolResultMetadata(
-                id(22L), id(2L), " call", 0, ToolResultStatus.SUCCEEDED, false, null, null));
+                id(22L), id(2L), " call", 0, ToolResultStatus.SUCCEEDED, false, null, null, null));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -404,15 +425,24 @@ class HistoryEntryPayloadTest {
                 ToolResultStatus.SUCCEEDED,
                 false,
                 null,
+                null,
                 null));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ToolResultMetadata(
-                id(22L), id(2L), "call-1", -1, ToolResultStatus.SUCCEEDED, false, null, null));
+                id(22L),
+                id(2L),
+                "call-1",
+                -1,
+                ToolResultStatus.SUCCEEDED,
+                false,
+                null,
+                null,
+                null));
     assertThrows(
         NullPointerException.class,
-        () -> new ToolResultMetadata(id(22L), id(2L), "call-1", 0, null, false, null, null));
+        () -> new ToolResultMetadata(id(22L), id(2L), "call-1", 0, null, false, null, null, null));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -424,12 +454,13 @@ class HistoryEntryPayloadTest {
                 ToolResultStatus.SUCCEEDED,
                 true,
                 ToolResultReason.HISTORY_CUT,
+                null,
                 null));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ToolResultMetadata(
-                null, id(2L), "call-1", 0, ToolResultStatus.UNKNOWN, true, null, null));
+                null, id(2L), "call-1", 0, ToolResultStatus.UNKNOWN, true, null, null, null));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -441,7 +472,61 @@ class HistoryEntryPayloadTest {
                 ToolResultStatus.UNKNOWN,
                 false,
                 ToolResultReason.HISTORY_CUT,
+                null,
                 null));
+
+    ToolBinding sampleBinding =
+        new ToolBinding(
+            1L,
+            new AgentToolDefinition(
+                new ToolDescriptor(
+                    "bash",
+                    "desc",
+                    "bash",
+                    new InputSchema("arguments", Map.of(), Set.of(), false),
+                    ToolSideEffect.READ_ONLY,
+                    Duration.ofSeconds(30)),
+                ToolVisibility.SELECTABLE),
+            new ContributorBinding("core", "bash", List.of()),
+            EnvironmentSupport.NONE,
+            null,
+            null,
+            null);
+
+    // synthetic 结果不允许携带 binding
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ToolResultMetadata(
+                null,
+                id(2L),
+                "call-1",
+                0,
+                ToolResultStatus.UNKNOWN,
+                true,
+                ToolResultReason.HISTORY_CUT,
+                null,
+                sampleBinding));
+
+    // 真实结果携带 binding 正常读回
+    ToolResultMetadata withBinding =
+        new ToolResultMetadata(
+            id(22L),
+            id(2L),
+            "call-1",
+            0,
+            ToolResultStatus.SUCCEEDED,
+            false,
+            null,
+            null,
+            sampleBinding);
+    assertEquals(sampleBinding, withBinding.binding());
+
+    // 真实结果 binding 可空（unknown-tool 槽位）
+    ToolResultMetadata withoutBinding =
+        new ToolResultMetadata(
+            id(22L), id(2L), "call-1", 0, ToolResultStatus.SUCCEEDED, false, null, null, null);
+    assertNull(withoutBinding.binding());
   }
 
   @Test

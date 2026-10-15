@@ -16,6 +16,7 @@ import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitException;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
+import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsVersions;
@@ -58,7 +59,7 @@ public final class ConfigSyncPlanner {
   private final SkillGitCache skillGitCache;
   private final AgentDefinitionRepository agentDefinitionRepository;
   private final McpServerRepository mcpServerRepository;
-  private final RuntimeToolCatalog toolCatalog;
+  private final RuntimeToolCatalogSource toolCatalogSource;
   private final AgentModelRuntimeConfigParser configParser;
 
   /** 读取快照后按 ParsedDocument 构建可写入计划。 */
@@ -69,6 +70,17 @@ public final class ConfigSyncPlanner {
   /** 在给定快照上校验并构建可写入计划；预检查与执行复用同一套规则。 */
   public ConfigSyncPlan plan(
       ConfigSyncParser.ParsedDocument document, ConfigSyncSnapshot snapshot) {
+    // 一次 current 租用包住完整规划：工具 schema 与可选择性来自同一个冻结目录 epoch。
+    try (RuntimeToolCatalogSource.Lease lease = toolCatalogSource.acquireCurrent()) {
+      return plan(document, snapshot, lease.catalog());
+    }
+  }
+
+  /** 在给定快照与同一次租用的运行时目录上校验并构建可写入计划。 */
+  private ConfigSyncPlan plan(
+      ConfigSyncParser.ParsedDocument document,
+      ConfigSyncSnapshot snapshot,
+      RuntimeToolCatalog toolCatalog) {
     rejectEnvironmentTokenConflicts(document.environments(), snapshot);
     List<ConfigSyncSkipped> skipped = new ArrayList<>(document.skipped());
     List<ConfigSyncRef> imported = new ArrayList<>();
@@ -293,7 +305,8 @@ public final class ConfigSyncPlanner {
                 availableModels.keySet(),
                 availableSkills,
                 availableMcpTools,
-                knownMcpToolNames)
+                knownMcpToolNames,
+                toolCatalog)
             != null) {
           agentPool.remove(spec.name());
           changed = true;
@@ -316,7 +329,8 @@ public final class ConfigSyncPlanner {
                     availableModels.keySet(),
                     availableSkills,
                     availableMcpTools,
-                    knownMcpToolNames)));
+                    knownMcpToolNames,
+                    toolCatalog)));
       }
     }
 
@@ -390,7 +404,10 @@ public final class ConfigSyncPlanner {
   }
 
   private boolean toolAvailable(
-      String toolName, Map<String, Set<String>> availableMcpTools, Set<String> knownMcpToolNames) {
+      RuntimeToolCatalog toolCatalog,
+      String toolName,
+      Map<String, Set<String>> availableMcpTools,
+      Set<String> knownMcpToolNames) {
     if (knownMcpToolNames.contains(toolName)) {
       return availableMcpTools.values().stream().anyMatch(names -> names.contains(toolName));
     }
@@ -406,7 +423,8 @@ public final class ConfigSyncPlanner {
       Set<String> availableModelKeys,
       Map<String, Set<String>> availableSkills,
       Map<String, Set<String>> availableMcpTools,
-      Set<String> knownMcpToolNames) {
+      Set<String> knownMcpToolNames,
+      RuntimeToolCatalog toolCatalog) {
     String modelKey = ConfigSyncRefs.modelName(spec.providerName(), spec.modelName());
     if (!availableModelKeys.contains(modelKey)) {
       return "missing model: " + modelKey;
@@ -437,7 +455,7 @@ public final class ConfigSyncPlanner {
     }
     if (config.getTools() != null) {
       for (String tool : config.getTools()) {
-        if (!toolAvailable(tool, availableMcpTools, knownMcpToolNames)) {
+        if (!toolAvailable(toolCatalog, tool, availableMcpTools, knownMcpToolNames)) {
           return "unsupported or unknown agent tool: " + tool;
         }
       }

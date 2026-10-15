@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.history;
 
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInputReceipt;
 
 import java.util.Objects;
@@ -19,6 +20,11 @@ import java.util.UUID;
  * <p>{@code inputReceipt} 是内部人工输入工具（{@code ask_user}）回答的 durable 提交回执：Invocation 行在结果物化后被物理删除，
  * 因此已接受回答的 submissionId / actor / acceptedAt 随结果一起迁入 Entry 元数据，绝不写入业务 {@code detailsJson}。synthetic
  * 结果不携带回执。
+ *
+ * <p>{@code binding} 是产生本结果的原 Tool invocation 冻结的 {@link ToolBinding}（含目录 epoch、完整定义、requirements 与
+ * 插件来源）：真实终态（SUCCEEDED/FAILED/CANCELLED/UNKNOWN，含人工 resolve 后的结果）即使 invocation 行被物理删除也必须保留
+ * binding，使同代码重启后仍能核查原 epoch/definition/source，绝不静默按当前版本重放。只有模型调用未命中任何冻结 binding 的 unknown-tool 槽位为
+ * null。synthetic 结果没有真实 invocation，必须为 null。
  */
 public record ToolResultMetadata(
     UUID invocationId,
@@ -28,7 +34,8 @@ public record ToolResultMetadata(
     ToolResultStatus status,
     boolean synthetic,
     ToolResultReason reason,
-    ToolInputReceipt inputReceipt) {
+    ToolInputReceipt inputReceipt,
+    ToolBinding binding) {
 
   private static final int TOOL_CALL_ID_MAX_LENGTH = 256;
 
@@ -51,6 +58,10 @@ public record ToolResultMetadata(
       if (inputReceipt != null) {
         throw new IllegalArgumentException(
             "synthetic tool results must not carry an input receipt");
+      }
+      if (binding != null) {
+        throw new IllegalArgumentException(
+            "synthetic tool results must not carry a frozen tool binding");
       }
     } else {
       if (invocationId == null) {

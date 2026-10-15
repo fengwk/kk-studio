@@ -1451,6 +1451,7 @@ class EntryPathTest {
                 ToolResultStatus.SUCCEEDED,
                 false,
                 null,
+                null,
                 null)),
         time(id));
   }

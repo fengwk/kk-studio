@@ -16,6 +16,7 @@ import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogQueryService;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
+import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.error.AiInUseException;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
@@ -47,7 +48,7 @@ final class AgentDefinitionReferenceResolver {
   private final AgentModelRepository agentModelRepository;
   private final SkillCatalogQueryService skillCatalogQueryService;
   private final McpServerRepository mcpServerRepository;
-  private final RuntimeToolCatalog toolCatalog;
+  private final RuntimeToolCatalogSource toolCatalogSource;
 
   AgentDefinition requireAgent(String name) {
     AgentDefinition definition = agentDefinitionRepository.getByName(name);
@@ -91,37 +92,41 @@ final class AgentDefinitionReferenceResolver {
    */
   void requireReferencedLifecycles(List<SkillRefDTO> skills, List<String> toolNames) {
     Map<String, TreeSet<String>> skillNames = skillNames(skills);
-    Map<String, TreeSet<String>> mcpServers = mcpServers(toolNames);
-    for (String packageName : new TreeSet<>(skillNames.keySet())) {
-      SkillPackage locked = skillCatalogQueryService.lockPackageForShare(packageName);
-      for (String skillName : skillNames.get(packageName)) {
-        if (locked == null || locked.findSkill(skillName) == null) {
-          throw new AiValidationException(
-              SKILL_RESOURCE, "unknown agent skills: " + packageName + "/" + skillName);
+    // 一次 current 租用包住完整引用重读：锁前后与选择面都来自同一个冻结目录 epoch。
+    try (RuntimeToolCatalogSource.Lease lease = toolCatalogSource.acquireCurrent()) {
+      RuntimeToolCatalog toolCatalog = lease.catalog();
+      Map<String, TreeSet<String>> mcpServers = mcpServers(toolCatalog, toolNames);
+      for (String packageName : new TreeSet<>(skillNames.keySet())) {
+        SkillPackage locked = skillCatalogQueryService.lockPackageForShare(packageName);
+        for (String skillName : skillNames.get(packageName)) {
+          if (locked == null || locked.findSkill(skillName) == null) {
+            throw new AiValidationException(
+                SKILL_RESOURCE, "unknown agent skills: " + packageName + "/" + skillName);
+          }
         }
       }
-    }
-    for (String serverName : new TreeSet<>(mcpServers.keySet())) {
-      McpServer locked =
-          mcpServerRepository
-              .lockForShare(serverName)
-              .orElseThrow(
-                  () ->
-                      new AiValidationException(
-                          TOOL_RESOURCE,
-                          "unknown agent tool: " + mcpServers.get(serverName).first()));
-      for (String toolName : mcpServers.get(serverName)) {
-        ToolContribution contribution = toolCatalog.findTool(toolName).orElse(null);
-        McpTool tool =
+      for (String serverName : new TreeSet<>(mcpServers.keySet())) {
+        McpServer locked =
             mcpServerRepository
-                .lockToolForShare(toolName)
-                .filter(candidate -> serverName.equals(candidate.getServerName()))
-                .orElse(null);
-        if (contribution == null
-            || !MCP_CONTRIBUTOR.equals(contribution.id().contributorId())
-            || tool == null
-            || !serverName.equals(locked.getName())) {
-          throw new AiValidationException(TOOL_RESOURCE, "unknown agent tool: " + toolName);
+                .lockForShare(serverName)
+                .orElseThrow(
+                    () ->
+                        new AiValidationException(
+                            TOOL_RESOURCE,
+                            "unknown agent tool: " + mcpServers.get(serverName).first()));
+        for (String toolName : mcpServers.get(serverName)) {
+          ToolContribution contribution = toolCatalog.findTool(toolName).orElse(null);
+          McpTool tool =
+              mcpServerRepository
+                  .lockToolForShare(toolName)
+                  .filter(candidate -> serverName.equals(candidate.getServerName()))
+                  .orElse(null);
+          if (contribution == null
+              || !MCP_CONTRIBUTOR.equals(contribution.id().contributorId())
+              || tool == null
+              || !serverName.equals(locked.getName())) {
+            throw new AiValidationException(TOOL_RESOURCE, "unknown agent tool: " + toolName);
+          }
         }
       }
     }
@@ -153,7 +158,8 @@ final class AgentDefinitionReferenceResolver {
     return names;
   }
 
-  private Map<String, TreeSet<String>> mcpServers(List<String> toolNames) {
+  private Map<String, TreeSet<String>> mcpServers(
+      RuntimeToolCatalog toolCatalog, List<String> toolNames) {
     Map<String, TreeSet<String>> servers = new LinkedHashMap<>();
     if (toolNames == null || toolNames.isEmpty()) {
       return servers;

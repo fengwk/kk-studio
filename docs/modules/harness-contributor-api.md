@@ -103,9 +103,14 @@ Environment 时才进入模型工具面。`requiredEnvironmentId` 用于把 `REQ
 环境，`OPTIONAL` 可携带当前选择，`REQUIRED` 只会在存在选择时被正常规划。Platform 在
 构造模型工具列表前过滤无 Environment 的 `REQUIRED` 工具；[`ToolExecutionGateway`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/gateway/ToolExecutionGateway.java)
 仍用冻结 definition、Contributor provenance、support 与 `requiredEnvironmentId` 逐项
-比对当前目录，并对陈旧或伪造的缺环境调用稳定返回 `ENVIRONMENT_NOT_SELECTED`。
+比对 binding 所属 epoch 的租用目录，并对陈旧或伪造的缺环境调用稳定返回 `ENVIRONMENT_NOT_SELECTED`。
 `environmentName` 与 `environmentId` 同源，继续作为历史投影判定 native 资格的
 durable 事实。
+
+`ToolExecutionHandle.quiescence()` 必须返回非空 stage，表示该调用不再访问本地工具资源。
+取消只是请求，不能以 `Future.cancel` 或 `FutureTask.done` 冒充真实线程退出；
+异步工具通过工作线程退出完成静止，尚未启动即取消的任务和同步终结句柄可以立即完成。
+纯 Environment 转发句柄只声明本地资源静止，不表示远端停止或副作用已被撤销。
 
 ## 分支状态与副作用
 

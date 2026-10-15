@@ -327,6 +327,7 @@ class HumanInputContractTest {
 
   private static ToolBinding binding(String toolName, String contributorId, String localName) {
     return new ToolBinding(
+        1L,
         new AgentToolDefinition(
             new ToolDescriptor(
                 toolName,
@@ -338,6 +339,7 @@ class HumanInputContractTest {
             ToolVisibility.SELECTABLE),
         new ContributorBinding(contributorId, localName, List.of()),
         EnvironmentSupport.NONE,
+        null,
         null,
         null);
   }

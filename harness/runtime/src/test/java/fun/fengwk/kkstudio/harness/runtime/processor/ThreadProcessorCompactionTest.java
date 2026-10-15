@@ -1163,6 +1163,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                           ToolResultStatus.SUCCEEDED,
                           false,
                           null,
+                          null,
                           null)),
                   NOW));
           UUID turnEndEntryId = tx.nextId();
@@ -1765,6 +1766,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
       BranchSettings settings, int outputTokens, ProviderCacheControl cacheControl) {
     ModelRequestSpec base = ThreadProcessorTestSupport.requestFor(settings);
     return new ModelRequestSpec(
+        1L,
         base.providerType(),
         base.providerConnectionGenerationId(),
         base.model(),
