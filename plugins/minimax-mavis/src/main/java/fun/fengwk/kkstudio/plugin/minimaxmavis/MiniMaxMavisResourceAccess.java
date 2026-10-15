@@ -81,10 +81,13 @@ public final class MiniMaxMavisResourceAccess {
   /**
    * 把响应里的第三方媒体逐个暂存为 Blob 上传引用。
    *
+   * <p>{@code beforeRequest} 是宿主为本次调用给出的权威授权检查，必须原样交给每一项暂存；暂存实现会在每次真正出网（下载 GET 与预签名上传 PUT）
+   * 之前紧前执行它，因此冻结的调用 scope 不会丢失。
+   *
    * @return 稳定 Resource 引用列表；响应中没有可用的绝对 URL 时返回空列表
    */
   public List<ResourceRef> stageOutputs(
-      JsonNode payload, MavisCapability capability, String toolCallId) {
+      JsonNode payload, MavisCapability capability, String toolCallId, Runnable beforeRequest) {
     List<URI> mediaUris = mediaUris(payload);
     if (mediaUris.isEmpty()) {
       return List.of();
@@ -97,7 +100,8 @@ public final class MiniMaxMavisResourceAccess {
           gateway.stageRemoteMedia(
               mediaUris.get(index),
               family,
-              toolCallId + "-" + capability.id() + "-" + (index + 1)));
+              toolCallId + "-" + capability.id() + "-" + (index + 1),
+              beforeRequest));
     }
     return staged;
   }

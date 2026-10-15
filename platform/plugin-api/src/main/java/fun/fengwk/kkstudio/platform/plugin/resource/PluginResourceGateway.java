@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.platform.plugin.resource;
 
 import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
+import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableException;
 
 import java.net.URI;
 import java.util.UUID;
@@ -45,7 +46,11 @@ public interface PluginResourceGateway {
    * @param remoteUri 远端媒体地址；实现必须自行做 HTTPS、重定向与私有网络校验
    * @param family 调用方声明的媒体族；实现必须用 MIME 嗅探结果复核，不得只信声明
    * @param name 建议的规范文件名（不含扩展名推导）
+   * @param beforeRequest 宿主调用代码提供的权威授权检查；实现在每一次真正出网（下载 GET 与预签名上传 PUT）的紧前都必须执行它，一旦抛出就不得发送那次请求
    * @throws PluginResourceUnavailableException 下载失败、超出预算或嗅探结果不属于声明族
+   * @throws PluginCredentialUnavailableException {@code beforeRequest}
+   *     判定当前授权不可用时原样抛出；实现不得包装或吞掉该类型，且须清理已 reserve 的上传与临时文件
    */
-  ResourceRef stageRemoteMedia(URI remoteUri, PluginMediaFamily family, String name);
+  ResourceRef stageRemoteMedia(
+      URI remoteUri, PluginMediaFamily family, String name, Runnable beforeRequest);
 }

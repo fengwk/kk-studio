@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableException;
 import fun.fengwk.kkstudio.platform.plugin.PluginProperties;
 import fun.fengwk.kkstudio.platform.storage.error.StorageResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
@@ -44,13 +45,16 @@ import java.util.UUID;
  *       durable Thread 行解析 Session，只有该 Session 的 {@code session_blob_ref} 确实引用该 blob 时才签发短期预签名
  *       GET。没有 threadId 或 thread 无法解析时确定性失败，绝不退化成「未鉴权下载」。
  *   <li><b>输出</b>：远端地址必须是 HTTPS 且没有 userinfo/fragment；地址准入由下载传输在真正解析 socket 目标时执行，
- *       解析出的每个地址都必须是公网地址，且校验通过的那批地址就是建连使用的地址，因此不存在「先校验、再第二次解析」 的 DNS rebinding
- *       窗口；下载禁止自动重定向与自动重试、受整体期限与字节上限约束，内容边流式写临时文件边算 SHA-256（不把媒体读进内存），媒体类型由 magic
- *       特征判定并复核调用方声明的族；暂存走 reserve → 预签名 PUT （原样回传 signed headers）→ complete，只有真正 READY 才返回引用。
+ *       解析出的每个地址都必须是公网地址，且校验通过的那批地址就是建连使用的地址，因此不存在「先校验、再第二次解析」 的 DNS rebinding 窗口；宿主授权检查（{@code
+ *       beforeRequest}）在每一次真正出网（下载 GET 与预签名上传
+ *       PUT）的紧前执行，一旦抛出就不发送该请求；下载禁止自动重定向与自动重试、受整体期限与字节上限约束，内容边流式写临时文件边算 SHA-256（不把媒体读进内存），媒体类型由
+ *       magic 特征判定并复核调用方声明的族；暂存走 reserve → 预签名 PUT （原样回传 signed headers）→ complete，只有真正 READY
+ *       才返回引用。
  * </ul>
  *
  * <p>失败语义：任何一步失败都收敛为 {@link PluginResourceUnavailableException}，并且在已 reserve 的情况下 best-effort
- * 删除上传，避免留下孤儿对象； 临时文件在 finally 中删除。日志只记录 id、大小与类型，绝不记录预签名 URL 或响应头。
+ * 删除上传，避免留下孤儿对象； 临时文件在 finally 中删除。{@link PluginCredentialUnavailableException} 由 {@code
+ * beforeRequest} 抛出时保持自身类型向上传播（绝不包装成普通资源错误），且同样完成上传与临时文件的清理。日志只记录 id、大小与类型，绝不记录预签名 URL 或响应头。
  */
 @Slf4j
 public final class StoragePluginResourceGateway implements PluginResourceGateway, AutoCloseable {
@@ -153,12 +157,14 @@ public final class StoragePluginResourceGateway implements PluginResourceGateway
   }
 
   @Override
-  public ResourceRef stageRemoteMedia(URI remoteUri, PluginMediaFamily family, String name) {
+  public ResourceRef stageRemoteMedia(
+      URI remoteUri, PluginMediaFamily family, String name, Runnable beforeRequest) {
     Objects.requireNonNull(family, "family");
+    Objects.requireNonNull(beforeRequest, "beforeRequest");
     URI uri = requireDownloadable(remoteUri);
-    StagedMedia media = download(uri, family);
+    StagedMedia media = download(uri, family, beforeRequest);
     try {
-      return upload(media, family, sanitizeName(name));
+      return upload(media, family, sanitizeName(name), beforeRequest);
     } finally {
       deleteQuietly(media.path());
     }
@@ -167,25 +173,33 @@ public final class StoragePluginResourceGateway implements PluginResourceGateway
   /**
    * 校验远端地址并流式落盘：返回权威 size、SHA-256、媒体类型与临时文件。
    *
-   * <p>总期限由这里的看门狗施加（HTTP 客户端自身的超时只是空闲超时，不能代替总期限）：超时后关闭响应体让读线程立刻退出，同时删除临时文件。
+   * <p>GET 前检查宿主授权；总期限覆盖响应体读取，超时后关闭响应体并删除临时文件。
    */
-  private StagedMedia download(URI uri, PluginMediaFamily family) {
+  private StagedMedia download(URI uri, PluginMediaFamily family, Runnable beforeRequest) {
     Duration timeout = properties.getResource().getRequestTimeout();
     long maxBytes = properties.getResource().getMaxBytes();
     long deadlineNanos = System.nanoTime() + timeout.toNanos();
+    beforeRequest.run();
     RemoteMediaTransport.MediaResponse response = transport.get(uri, timeout);
     if (response.status() != 200) {
       closeQuietly(response.body());
       throw new PluginResourceUnavailableException(
           "remote media responded with status " + response.status());
     }
-    long declaredLength = contentLength(response);
-    if (declaredLength > maxBytes) {
+    long declaredLength;
+    Path temp;
+    try {
+      declaredLength = contentLength(response);
+      if (declaredLength > maxBytes) {
+        throw new PluginResourceUnavailableException(
+            "remote media declares more bytes than this deployment can stage");
+      }
+      temp = createTempFile();
+    } catch (RuntimeException | Error failure) {
+      // 交给 StreamingCopy 之前，响应体仍由当前调用负责释放。
       closeQuietly(response.body());
-      throw new PluginResourceUnavailableException(
-          "remote media declares more bytes than this deployment can stage");
+      throw failure;
     }
-    Path temp = createTempFile();
     StreamingCopy copy = new StreamingCopy(response.body(), temp, maxBytes, deadlineNanos);
     copy.awaitCompletion();
     PluginResourceUnavailableException failure = copy.failure();
@@ -215,7 +229,8 @@ public final class StoragePluginResourceGateway implements PluginResourceGateway
   }
 
   /** reserve → （PENDING 时预签名 PUT）→ complete，任何失败都清理上传。 */
-  private ResourceRef upload(StagedMedia media, PluginMediaFamily family, String baseName) {
+  private ResourceRef upload(
+      StagedMedia media, PluginMediaFamily family, String baseName, Runnable beforeRequest) {
     String filename = filename(baseName, media.mediaType());
     StorageUploadDTO reserved;
     try {
@@ -227,6 +242,8 @@ public final class StoragePluginResourceGateway implements PluginResourceGateway
     try {
       StorageUploadDTO upload = reserved;
       if (reserved.getState() == StorageUploadState.PENDING) {
+        // 下载已经完成不代表 PUT 获准：真正上传的紧前再检查一次当前授权。
+        beforeRequest.run();
         putObject(reserved.getPresignedPut(), media.path());
         upload = storageUploadService.complete(uploadId);
       }
@@ -249,9 +266,11 @@ public final class StoragePluginResourceGateway implements PluginResourceGateway
           media.sha256());
     } catch (RuntimeException error) {
       deleteQuietly(uploadId);
-      throw error instanceof PluginResourceUnavailableException unavailable
-          ? unavailable
-          : new PluginResourceUnavailableException("cannot stage remote media", error);
+      if (error instanceof PluginResourceUnavailableException
+          || error instanceof PluginCredentialUnavailableException) {
+        throw error;
+      }
+      throw new PluginResourceUnavailableException("cannot stage remote media", error);
     }
   }
 
