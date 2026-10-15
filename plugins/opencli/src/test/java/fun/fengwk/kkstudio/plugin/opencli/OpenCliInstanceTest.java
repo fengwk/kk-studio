@@ -22,7 +22,7 @@ class OpenCliInstanceTest {
 
   @Test
   void createInstanceAndVerifyContributions() {
-    OpenCliSettings settings = OpenCliSettings.DEFAULT;
+    OpenCliSettings settings = OpenCliTestSettings.defaults();
     PluginCredentialAccess credentialAccess = mock(PluginCredentialAccess.class);
     PluginContext context = new PluginContext(credentialAccess, Optional.empty());
 
@@ -41,8 +41,6 @@ class OpenCliInstanceTest {
     assertThatThrownBy(() -> adapters.add(mock(CanvasFunctionAdapter.class)))
         .isInstanceOf(UnsupportedOperationException.class);
 
-    assertNotNull(instance.client());
-
     // 幂等释放
     instance.close();
     instance.close();
@@ -50,7 +48,7 @@ class OpenCliInstanceTest {
 
   @Test
   void nullArgumentsThrow() {
-    OpenCliSettings settings = OpenCliSettings.DEFAULT;
+    OpenCliSettings settings = OpenCliTestSettings.defaults();
     PluginCredentialAccess credentialAccess = mock(PluginCredentialAccess.class);
     PluginContext context = new PluginContext(credentialAccess, Optional.empty());
 

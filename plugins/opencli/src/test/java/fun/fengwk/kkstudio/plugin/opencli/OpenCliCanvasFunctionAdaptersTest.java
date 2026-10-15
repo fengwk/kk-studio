@@ -88,7 +88,6 @@ class OpenCliCanvasFunctionAdaptersTest {
         new OpenCliSettings(
             false,
             "http://hub.local",
-            null,
             5000,
             120000,
             130000,
@@ -111,7 +110,6 @@ class OpenCliCanvasFunctionAdaptersTest {
         new OpenCliSettings(
             true,
             "http://hub.local",
-            null,
             5000,
             120000,
             130000,
@@ -1386,7 +1384,6 @@ class OpenCliCanvasFunctionAdaptersTest {
     return new OpenCliSettings(
         true,
         "http://hub.local",
-        null,
         5000,
         120000,
         130000,
@@ -1399,7 +1396,7 @@ class OpenCliCanvasFunctionAdaptersTest {
   }
 
   private static OpenCliSettings defaultSettings() {
-    return OpenCliSettings.DEFAULT;
+    return OpenCliTestSettings.defaults();
   }
 
   private static CanvasFunctionFrozenRun run(

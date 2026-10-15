@@ -101,7 +101,7 @@ class OpenCliHubClientTest {
     server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     server.start();
     settings = openCliSettings("http://127.0.0.1:" + server.getAddress().getPort(), 121_000);
-    credentials = fakeCredentialAccess(API_KEY);
+    credentials = fakeCredentialAccess(API_KEY, "instance-1");
     client = new OpenCliHubClient(settings, mapper, credentials);
   }
 
@@ -243,7 +243,6 @@ class OpenCliHubClientTest {
         new OpenCliSettings(
             true,
             "http://127.0.0.1:" + server.getAddress().getPort(),
-            "instance-1",
             5_000,
             120_000,
             121_000,
@@ -251,17 +250,40 @@ class OpenCliHubClientTest {
             512 * 1024,
             4096,
             65_535,
-            OpenCliSettings.GptImage2.DEFAULT,
-            OpenCliSettings.Seedance.DEFAULT);
+            OpenCliTestSettings.defaults().gptImage2(),
+            OpenCliTestSettings.defaults().seedance());
     client = new OpenCliHubClient(configured, mapper, credentials);
     Execution submitted = client.execute(List.of("chatgpt-agent", "ask", "prompt"), 1000L);
     client.cancelPendingBestEffort(submitted.id());
 
     assertEquals(ExecutionStatus.PENDING, submitted.status());
+    // 私有身份与 apiKey 同属一次 snapshot：这里只验证请求体确实携带了已配置的实例身份
     assertEquals("instance-1", executeBody.get().get("instanceId").textValue());
     assertEquals(1000L, executeBody.get().get("timeoutMillis").longValue());
     assertEquals("chatgpt-agent", executeBody.get().get("argv").get(0).textValue());
     assertEquals(1, cancelCalls.get());
+  }
+
+  /** 未配置私有身份时不发送 instanceId，由 Hub 自由路由。 */
+  @Test
+  void omitsInstanceIdFromExecutionBodyWhenNoPrivateIdentityIsConfigured() {
+    AtomicReference<JsonNode> executeBody = new AtomicReference<>();
+    server.createContext(
+        "/api/opencli/execute",
+        exchange -> {
+          executeBody.set(mapper.readTree(exchange.getRequestBody()));
+          respond(exchange, 200, envelope(execution("exec-1", "PENDING", false, "", "[]")));
+        });
+    OpenCliHubClient anonymousClient =
+        new OpenCliHubClient(settings, mapper, fakeCredentialAccess(API_KEY, null));
+    try {
+      anonymousClient.execute(List.of("chatgpt-agent", "ask", "prompt"), 1000L);
+    } finally {
+      anonymousClient.close();
+    }
+
+    assertFalse(executeBody.get().has("instanceId"));
+    assertEquals(1000L, executeBody.get().get("timeoutMillis").longValue());
   }
 
   @Test
@@ -415,7 +437,6 @@ class OpenCliHubClientTest {
     return new OpenCliSettings(
         true,
         baseUrl,
-        "test-instance",
         5_000,
         120_000,
         longPollTimeoutMillis,
@@ -423,21 +444,18 @@ class OpenCliHubClientTest {
         512 * 1024,
         4096,
         65_535,
-        OpenCliSettings.GptImage2.DEFAULT,
-        OpenCliSettings.Seedance.DEFAULT);
+        OpenCliTestSettings.defaults().gptImage2(),
+        OpenCliTestSettings.defaults().seedance());
   }
 
-  private static PluginCredentialAccess fakeCredentialAccess(String apiKey) {
+  private static PluginCredentialAccess fakeCredentialAccess(String apiKey, String instanceId) {
+    String payload =
+        instanceId == null
+            ? "{\"apiKey\":\"" + apiKey + "\"}"
+            : "{\"apiKey\":\"" + apiKey + "\",\"instanceId\":\"" + instanceId + "\"}";
     PluginCredentialSnapshot snapshot =
         new PluginCredentialSnapshot(
-            "opencli",
-            UUID.randomUUID(),
-            "context",
-            null,
-            null,
-            0L,
-            new byte[0],
-            "{\"apiKey\":\"" + apiKey + "\"}");
+            "opencli", UUID.randomUUID(), "context", null, null, 0L, new byte[0], payload);
     return new PluginCredentialAccess() {
       @Override
       public PluginCredentialSnapshot resolve() {

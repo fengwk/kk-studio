@@ -22,6 +22,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
 import fun.fengwk.kkstudio.harness.common.json.JsonValues;
+import fun.fengwk.kkstudio.harness.common.network.HttpProxySelector;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfigurationState;
@@ -50,6 +51,7 @@ import fun.fengwk.kkstudio.web.events.postgresql.PostgresqlNotificationLoop;
 
 import javax.sql.DataSource;
 
+import java.net.ProxySelector;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -455,6 +457,10 @@ class PluginCatalogRuntimePostgresIntegrationTest {
         new ApplicationContextRunner()
             .withUserConfiguration(PluginCatalogConfiguration.class, RegistryConfiguration.class)
             .withBean(PluginCredentialStore.class, () -> mock(PluginCredentialStore.class))
+            // PluginCatalogRuntime 显式依赖 systemProxySelector：隔离组合根提供直连的合法 selector 依赖，
+            // 不安装 JVM 全局代理，保持与其他用例的全局代理隔离。
+            .withBean(
+                "systemProxySelector", ProxySelector.class, () -> HttpProxySelector.fixed(null, ""))
             .withBean(PluginConfigurationRepository.class, this::repository)
             .withBean(
                 PlatformTransactionManager.class,

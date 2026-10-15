@@ -5,12 +5,15 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 
 import com.sun.net.httpserver.HttpServer;
+import fun.fengwk.convention4j.springboot.starter.web.result.ResultResponseBodyAdvice;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -20,10 +23,18 @@ import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.http.converter.json.JacksonJsonHttpMessageConverter;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.transaction.PlatformTransactionManager;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.canvas.CanvasJson.JsonObject;
 import fun.fengwk.kkstudio.canvas.CanvasJson.JsonText;
@@ -37,6 +48,8 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionOutputSpec;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionSubmitState;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionUnknownException;
+import fun.fengwk.kkstudio.harness.common.json.JsonValues;
+import fun.fengwk.kkstudio.harness.common.network.HttpProxySelector;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialStatus;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableException;
 import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
@@ -48,6 +61,7 @@ import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialCodec;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialKeyLoader;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialReference;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialStore;
+import fun.fengwk.kkstudio.platform.plugin.persistence.PluginAuthAttemptRepository;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRow;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginCredentialRepository;
@@ -59,19 +73,28 @@ import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.store.PluginCo
 import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.store.PluginCredentialJdbcStore;
 import fun.fengwk.kkstudio.platform.plugin.service.PluginConfigurationCommitService;
 import fun.fengwk.kkstudio.platform.plugin.service.PluginContextFactory;
+import fun.fengwk.kkstudio.platform.plugin.service.PluginManagementService;
 import fun.fengwk.kkstudio.platform.plugin.service.PluginSecretPatch;
+import fun.fengwk.kkstudio.share.ai.plugin.PluginConfigurationDTO;
+import fun.fengwk.kkstudio.share.ai.plugin.PluginDTO;
+import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
+import fun.fengwk.kkstudio.web.plugin.StudioPluginController;
 
 import javax.sql.DataSource;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.UncheckedIOException;
 import java.net.InetSocketAddress;
+import java.net.ProxySelector;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Clock;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -84,7 +107,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
  *
  * <p>验证： 1. 独占隔离数据库，runtime-only 插件通过反射加载配置； 2. 真实凭据加密落库，HTTP 请求携带 Bearer； 3. 密钥轮换演进宿主代际并 fence
  * 旧实例，新 lease 实例使用新密钥； 4. baseUrl 变更重新派生 contextFingerprint 并 fence 旧上下文； 5. 在途旧实例在 baseUrl
- * 变更或密钥撤销（CLEAR）后出网前 fail-closed； 6. 历史 epoch 恢复后旧代际实例在调用时 fail-closed。
+ * 变更或密钥撤销（CLEAR）后出网前 fail-closed； 6. 历史 epoch 恢复后旧代际实例在调用时 fail-closed； 7. 真实管理服务到 HTTP 的响应体与共用
+ * golden 一致。
  */
 class OpenCliPluginPostgresIntegrationTest {
 
@@ -93,6 +117,18 @@ class OpenCliPluginPostgresIntegrationTest {
   private static final String OPENCLI_PACKAGE_PREFIX = "fun.fengwk.kkstudio.plugin.";
   private static final String OPENCLI_AUTO_CONFIGURATION_NAME =
       OPENCLI_PACKAGE_PREFIX + "opencli.OpenCliAutoConfiguration";
+  private static final String HTTP_GOLDEN = "fun/fengwk/kkstudio/web/plugin/opencli-http.json";
+
+  /** 合成凭据：只用于隔离数据库与 golden，本身没有价值。 */
+  private static final String HTTP_GOLDEN_API_KEY = "synthetic-opencli-api-key-97531";
+
+  private static final String HTTP_GOLDEN_INSTANCE_ID = "synthetic-instance-identity";
+
+  /** 生产 HTTP mapper 与该 profile 自己的 MVC converter，golden 因此由真实序列化形态产出。 */
+  private static final JsonMapper HTTP_MAPPER = StrictHttpJsonMapperTestSupport.get();
+
+  private static final JacksonJsonHttpMessageConverter HTTP_CONVERTER =
+      new JacksonJsonHttpMessageConverter(HTTP_MAPPER);
 
   @TempDir Path tempDir;
 
@@ -654,6 +690,225 @@ class OpenCliPluginPostgresIntegrationTest {
             });
   }
 
+  /**
+   * 真实插件与真实管理服务到 HTTP 的共用 golden：GET /api/plugins/opencli 的响应体必须与已提交资源逐值一致。
+   *
+   * <p>配置只给出 baseUrl 与 seedance.workspaceId，其余取值由真实 schema 补齐，因此 golden 锁定的就是生产派生文本（默认值与
+   * valuesSchema）； 前端直接消费同一份资源，不再手写镜像。
+   */
+  @Test
+  void pluginProjectionMatchesCommittedHttpWireGolden() {
+    createContextRunner()
+        .run(
+            context -> {
+              PluginCatalogRuntime runtime = context.getBean(PluginCatalogRuntime.class);
+              StudioPluginRegistry registry = context.getBean(StudioPluginRegistry.class);
+              PluginConfigurationCommitService commitService =
+                  createCommitService(registry, runtime);
+              PluginManagementService management = createManagementService(registry, runtime);
+
+              commitService.configure(
+                  PLUGIN_ID,
+                  1L,
+                  1L,
+                  "{\"baseUrl\":\"http://127.0.0.1:8080\","
+                      + "\"seedance\":{\"workspaceId\":\"workspace-main\"}}",
+                  Map.of(
+                      "apiKey", PluginSecretPatch.set(HTTP_GOLDEN_API_KEY),
+                      "instanceId", PluginSecretPatch.set(HTTP_GOLDEN_INSTANCE_ID)));
+              runtime.refresh();
+              assertEquals(2L, readEpoch(jdbcClient));
+
+              assertSame(HTTP_MAPPER, HTTP_CONVERTER.getMapper());
+              MockMvc mockMvc =
+                  MockMvcBuilders.standaloneSetup(new StudioPluginController(management))
+                      .setMessageConverters(HTTP_CONVERTER)
+                      .setControllerAdvice(new ResultResponseBodyAdvice())
+                      .build();
+
+              MockHttpServletResponse response =
+                  mockMvc.perform(get("/api/plugins/" + PLUGIN_ID)).andReturn().getResponse();
+
+              assertEquals(200, response.getStatus());
+              String body = new String(response.getContentAsByteArray(), StandardCharsets.UTF_8);
+              assertEquals(
+                  wireView(goldenText(HTTP_GOLDEN)),
+                  wireView(body),
+                  HTTP_GOLDEN + " must match the live HTTP body");
+            });
+  }
+
+  /**
+   * 私有身份与认证密钥同为受保护秘密：只有 instanceId 不得显示 CONNECTED，取值不进入普通配置/历史/投影，并且执行请求只从同次 scoped snapshot 取用两者。
+   *
+   * <p>覆盖三段状态：只录入私有身份（NOT_CONNECTED 但仍以秘密落库）、补齐认证密钥（CONNECTED 且出网携带两者）、仅撤销认证密钥而保留私有身份 （回到
+   * NOT_CONNECTED 且出网前 fail closed）。
+   */
+  @Test
+  void privateIdentityIsAProtectedSecretAndNeverReportsConnectedOnItsOwn() throws IOException {
+    List<RecordedRequest> requests = new CopyOnWriteArrayList<>();
+    HttpServer server = createControlledServer(requests);
+    String baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
+    String privateIdentity = "private-instance-identity";
+    String apiKey = "synthetic-opencli-key-24680";
+    String valuesJson =
+        "{\"enabled\":true,\"baseUrl\":\"" + baseUrl + "\",\"gptImage2\":{\"paidEnabled\":true}}";
+
+    createContextRunner()
+        .run(
+            context -> {
+              PluginCatalogRuntime runtime = context.getBean(PluginCatalogRuntime.class);
+              StudioPluginRegistry registry = context.getBean(StudioPluginRegistry.class);
+              PluginConfigurationCommitService commitService =
+                  createCommitService(registry, runtime);
+              PluginManagementService management = createManagementService(registry, runtime);
+
+              // 1. 只录入私有身份：凭据行存在且可解密，但没有任何可用认证
+              commitService.configure(
+                  PLUGIN_ID,
+                  1L,
+                  1L,
+                  valuesJson,
+                  Map.of("instanceId", PluginSecretPatch.set(privateIdentity)));
+              runtime.refresh();
+
+              PluginCredentialRow row =
+                  credentialRepository
+                      .find(PLUGIN_ID)
+                      .orElseThrow(() -> new AssertionError("private identity must be stored"));
+              assertFalse(
+                  containsBytes(
+                      row.encryptedPayload(), privateIdentity.getBytes(StandardCharsets.UTF_8)),
+                  "plaintext private identity must not exist in database");
+
+              PluginDTO privateOnly = management.getPlugin(PLUGIN_ID);
+              assertEquals(
+                  PluginCredentialStatus.NOT_CONNECTED.name(),
+                  privateOnly.getStatus(),
+                  "只有私有身份时不得显示认证 CONNECTED");
+
+              PluginConfigurationDTO configuration = privateOnly.getConfiguration();
+              assertFalse(configuration.getValuesJson().contains(privateIdentity));
+              assertTrue(configuration.getSecrets().get("instanceId").isConfigured());
+              assertFalse(configuration.getSecrets().get("apiKey").isConfigured());
+
+              PluginConfigurationRow privateHistory =
+                  configurationRepository.readConfiguration(PLUGIN_ID, 2L).orElseThrow();
+              assertEquals(List.of("instanceId"), privateHistory.configuredSecretFields());
+              assertFalse(privateHistory.valuesJson().contains(privateIdentity));
+
+              String resolved =
+                  credentialStore
+                      .resolve(
+                          new PluginCredentialReference(
+                              PLUGIN_ID, row.authGeneration(), row.contextFingerprint()))
+                      .payloadJson();
+              assertEquals("{\"instanceId\":\"" + privateIdentity + "\"}", resolved);
+
+              // 2. 补齐认证密钥：状态变为 CONNECTED，出网同时携带同一 snapshot 的 Bearer 与私有身份
+              commitService.configure(
+                  PLUGIN_ID, 2L, 2L, valuesJson, Map.of("apiKey", PluginSecretPatch.set(apiKey)));
+              runtime.refresh();
+
+              assertEquals(
+                  PluginCredentialStatus.CONNECTED.name(),
+                  management.getPlugin(PLUGIN_ID).getStatus());
+
+              CanvasFunctionExecutionContext execContext =
+                  mock(CanvasFunctionExecutionContext.class);
+              when(execContext.isRunning()).thenReturn(true);
+              try (PluginCatalogRuntime.Lease lease = runtime.acquireCurrent()) {
+                CanvasFunctionAdapter adapter =
+                    lease.snapshot().canvasFunctionCatalog().require(GPT_IMAGE_FUNCTION).adapter();
+                adapter.submit(
+                    execContext,
+                    createTestRun(3L, adapter.functions().get(0), "generate portrait"));
+              }
+
+              assertEquals(1, requests.size());
+              assertEquals("Bearer " + apiKey, requests.get(0).authorization());
+              assertTrue(
+                  requests.get(0).body().contains("\"instanceId\":\"" + privateIdentity + "\""),
+                  "执行请求必须携带同次 snapshot 的私有身份");
+
+              // 3. 只撤销认证密钥、保留私有身份：不得回到 CONNECTED，且新旧实例都 fail closed 不出网
+              try (PluginCatalogRuntime.Lease staleLease = runtime.acquireCurrent()) {
+                CanvasFunctionAdapter staleAdapter =
+                    staleLease
+                        .snapshot()
+                        .canvasFunctionCatalog()
+                        .require(GPT_IMAGE_FUNCTION)
+                        .adapter();
+
+                commitService.configure(
+                    PLUGIN_ID, 3L, 3L, valuesJson, Map.of("apiKey", PluginSecretPatch.clear()));
+                runtime.refresh();
+
+                assertTrue(credentialRepository.find(PLUGIN_ID).isPresent(), "保留的私有身份仍是受保护秘密行");
+                PluginConfigurationRow partialHistory =
+                    configurationRepository.readConfiguration(PLUGIN_ID, 4L).orElseThrow();
+                assertEquals(List.of("instanceId"), partialHistory.configuredSecretFields());
+                assertEquals(
+                    PluginCredentialStatus.NOT_CONNECTED.name(),
+                    management.getPlugin(PLUGIN_ID).getStatus(),
+                    "撤销认证密钥后只凭私有身份不得显示 CONNECTED");
+
+                assertThrows(
+                    CanvasFunctionUnknownException.class,
+                    () ->
+                        staleAdapter.submit(
+                            execContext,
+                            createTestRun(3L, staleAdapter.functions().get(0), "stale prompt")),
+                    "撤销认证密钥后旧实例必须 fail closed");
+
+                try (PluginCatalogRuntime.Lease freshLease = runtime.acquireCurrent()) {
+                  CanvasFunctionAdapter freshAdapter =
+                      freshLease
+                          .snapshot()
+                          .canvasFunctionCatalog()
+                          .require(GPT_IMAGE_FUNCTION)
+                          .adapter();
+                  assertThrows(
+                      CanvasFunctionUnknownException.class,
+                      () ->
+                          freshAdapter.submit(
+                              execContext,
+                              createTestRun(4L, freshAdapter.functions().get(0), "fresh prompt")),
+                      "缺少认证密钥的载荷必须在出网前被拒绝");
+                }
+              }
+              assertEquals(1, requests.size(), "撤销认证密钥后不得再有请求到达 Hub");
+            });
+  }
+
+  /**
+   * wire 值视图：配置里的内嵌 JSON 文本按其 JSON 值参与比较。
+   *
+   * <p>这些文本的 key 顺序来自生产 schema 的 map 迭代顺序，同一份配置在两次 JVM 之间可能不同，而顺序不是 wire 契约的一部分；除此之外（字段有无、 取值、token
+   * 类型、内嵌文档的全部键值）都逐值比较。
+   */
+  private static JsonNode wireView(String body) {
+    JsonNode root = JsonValues.readTree(body);
+    JsonNode configuration = root.get("data").get("configuration");
+    for (String field : List.of("valuesJson", "valuesSchema", "defaultsJson")) {
+      JsonNode text = configuration.get(field);
+      if (text != null && text.isTextual()) {
+        ((ObjectNode) configuration).set(field, JsonValues.readTree(text.asString()));
+      }
+    }
+    return root;
+  }
+
+  /** 已提交的共用 golden 原文：测试只读取，绝不在运行时改写资源。 */
+  private static String goldenText(String name) {
+    ClassPathResource resource = new ClassPathResource(name);
+    try (InputStream in = resource.getInputStream()) {
+      return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+    } catch (IOException error) {
+      throw new UncheckedIOException("shared plugin HTTP golden must exist: " + name, error);
+    }
+  }
+
   private HttpServer createControlledServer(List<RecordedRequest> targetList) throws IOException {
     HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     server.createContext(
@@ -699,9 +954,26 @@ class OpenCliPluginPostgresIntegrationTest {
     return new ApplicationContextRunner()
         .withUserConfiguration(PluginCatalogConfiguration.class, RegistryConfiguration.class)
         .withConfiguration(AutoConfigurations.of(openCliConfigClass))
+        // PluginCatalogRuntime 显式依赖 systemProxySelector：隔离组合根提供直接连接的合法 selector 依赖，
+        // 不安装 JVM 全局代理，保持与其他测试的全局代理隔离。
+        .withBean(
+            "systemProxySelector", ProxySelector.class, () -> HttpProxySelector.fixed(null, ""))
         .withBean(PluginCredentialStore.class, () -> credentialStore)
         .withBean(PluginConfigurationRepository.class, () -> configurationRepository)
         .withBean(PlatformTransactionManager.class, () -> transactionManager);
+  }
+
+  private PluginManagementService createManagementService(
+      StudioPluginRegistry registry, PluginCatalogRuntime runtime) {
+    return new PluginManagementService(
+        registry,
+        () -> runtime,
+        configurationRepository,
+        credentialStore,
+        createCommitService(registry, runtime),
+        mock(PluginAuthAttemptRepository.class),
+        Duration.ofMinutes(5),
+        Clock.systemUTC());
   }
 
   private PluginConfigurationCommitService createCommitService(

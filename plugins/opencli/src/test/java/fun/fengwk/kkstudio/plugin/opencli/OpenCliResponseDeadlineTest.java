@@ -382,7 +382,6 @@ class OpenCliResponseDeadlineTest {
           new OpenCliSettings(
               true,
               origin(),
-              "test-instance",
               1000,
               (int) requestTimeoutMillis,
               121_000,
@@ -390,8 +389,8 @@ class OpenCliResponseDeadlineTest {
               512 * 1024,
               4096,
               65_535,
-              OpenCliSettings.GptImage2.DEFAULT,
-              OpenCliSettings.Seedance.DEFAULT);
+              OpenCliTestSettings.defaults().gptImage2(),
+              OpenCliTestSettings.defaults().seedance());
       PluginCredentialAccess credentials = fakeCredentialAccess("test-api-key");
       return new OpenCliHubClient(settings, JsonMapper.builder().build(), credentials, http);
     }
