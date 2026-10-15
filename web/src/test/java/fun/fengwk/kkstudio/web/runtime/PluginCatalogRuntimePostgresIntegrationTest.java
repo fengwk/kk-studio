@@ -59,7 +59,7 @@ import java.util.function.BiFunction;
  * 时按权威回读整体应用或整体保留。写入方始终经真实 {@code PluginConfigurationRepository} 的唯一 CAS 提交入口落库。
  *
  * <p>插件来源是真实发行物：Mavis 从运行期 JAR 经 {@link RuntimeMavisTestSupport} 装配，传输被替换为禁止出网的替身，因此启动、对账与重启都绝不发起远端
- * 或收费调用；本片只验证持久版本被遵循，不启用真实网络。
+ * 或收费调用。
  */
 class PluginCatalogRuntimePostgresIntegrationTest {
 
@@ -149,17 +149,10 @@ class PluginCatalogRuntimePostgresIntegrationTest {
                       "首次初始化必须冻结 schema 默认值下的完整 Mavis 目录");
                   enabledFingerprint[0] = lease.snapshot().catalogFingerprint();
                 }
-              } finally {
-                enabled.close();
-              }
-
-              commitDisabledRevision(context, repository);
-
-              PluginCatalogRuntime disabled = node(context, repository);
-              try {
-                disabled.refresh();
-                assertEquals(new PluginCatalogRuntime.RuntimeState(2, 2, null), disabled.state());
-                try (PluginCatalogRuntime.Lease lease = disabled.acquireCurrent()) {
+                commitDisabledRevision(context, repository);
+                enabled.refresh();
+                assertEquals(new PluginCatalogRuntime.RuntimeState(2, 2, null), enabled.state());
+                try (PluginCatalogRuntime.Lease lease = enabled.acquireCurrent()) {
                   assertTrue(
                       lease.snapshot().harnessCatalog().tools().isEmpty(),
                       "运行期对账必须应用持久化的停用 revision");
@@ -169,7 +162,7 @@ class PluginCatalogRuntimePostgresIntegrationTest {
                       "停用 revision 必须绑定不同的完整目录指纹");
                 }
               } finally {
-                disabled.close();
+                enabled.close();
               }
 
               // 重启：全新运行期按持久 epoch 2 恢复，绝不采用当前 schema 默认值。
@@ -207,7 +200,6 @@ class PluginCatalogRuntimePostgresIntegrationTest {
   /** 一个运行期节点：真实 Mavis 安装定义、真实两域来源、真实仓储与它自己的初始快照。 */
   private PluginCatalogRuntime node(
       ConfigurableApplicationContext context, PluginConfigurationRepository repository) {
-    StudioPluginRegistry registry = context.getBean(StudioPluginRegistry.class);
     List<HarnessContributor> builtins =
         List.copyOf(context.getBeansOfType(HarnessContributor.class).values());
     List<CanvasFunctionAdapter> adapters =

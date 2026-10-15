@@ -13,22 +13,15 @@ import java.util.Objects;
 import java.util.function.BiFunction;
 
 /**
- * Plugin catalog 的运行期所有者：唯一持有已发布的完整两域快照，并把「权威 epoch → 一次原子发布」与租用退役绑定在同一个生命周期锁上。
+ * 完整两域 Plugin 快照的运行期所有者，负责权威 epoch 对账、原子发布与租用退役。
  *
- * <p>构造只注入 {@link PluginCatalogBootstrap}、权威仓储、scoped {@link PluginContext}
- * 工厂、容器真正内置的两域贡献与启动期已冻结的初始快照； 本类不获取任何 Spring service、不新建持久表或版本注册器，也不创建调度线程与消费者接线。
+ * <p>{@link #refresh()} 串行回读权威状态，只在 epoch 前进时通过 {@link PluginCatalogBootstrap#restore}
+ * 构建并校验完整候选。候选构建不占生命周期锁；发布前再次回读，过期候选独立关闭，等待下次对账。任一插件应用失败时保留整个旧视图，不部分发布。
  *
- * <p>{@link #refresh()} 每次做一次权威回读：权威 epoch 未前进时绝不 configure（相同 epoch 不重复构建，乱序回读也不降级已发布视图）。只有 epoch
- * 前进时才按完整 manifest 走 {@link PluginCatalogBootstrap#restore} 的全量校验并构建候选，构建期间不占生命周期锁；候选整体通过后复核权威
- * epoch，期间 权威若已推进则候选过期，独立关闭且不发布，交由下一次对账处理（本类不循环重试、不忙等）。发布在短锁内一次完成，因此并发刷新既不会降级也不会对同一 epoch 重复发布；A
- * 的目标配置无法应用时整个新 epoch 保留旧视图，后续任何仍包含该配置的完整 manifest 同样只能整体发布或整体不发布。
+ * <p>发布、退役与 {@link #acquireCurrent()} 同锁。每个已发布快照持有一个所有者引用和若干活动租用，最后一个引用释放时才在锁外关闭。 {@link #close()}
+ * 禁止新租用并释放所有者引用，不强杀活动使用者；通知、调度与消费者装配由组合根负责。
  *
- * <p>发布/退役与取租用同锁：{@link #acquireCurrent()} 在锁内取当前视图并增加引用计数，{@link Lease#close()} 在锁外关闭已无引用的快照。每个已发布
- * 快照恰有一个所有者引用与若干活动租用，最后一个引用释放时才关闭，所以候选与前代实例各自只关一次；{@link #close()} 只撤销所有者引用并停止授予新租用，
- * 绝不强杀仍在使用中的实例，最后释放的租用负责回收。
- *
- * <p>应用失败保留整个旧视图：{@link RuntimeException} 收敛为 {@link RuntimeState#applicationError()}
- * 里的固定受控错误码，日志只记录 epoch/stage/异常类型，不携带原始异常与任何配置值；{@link Error} 既不被降级也不被吞掉，候选与前代的回收彼此独立并保留原始致命错误。
+ * <p>{@link RuntimeException} 转为固定受控错误码，日志只记录 epoch、阶段与异常类型；{@link Error} 保持原样传播，候选回收失败不得替代原始致命错误。
  */
 @Slf4j
 public final class PluginCatalogRuntime implements AutoCloseable {
@@ -235,7 +228,7 @@ public final class PluginCatalogRuntime implements AutoCloseable {
   /**
    * 停止运行：撤销当前快照的所有者引用并禁止新的租用，但绝不强杀仍在使用中的实例。
    *
-   * <p>已有租用不受影响；最后一个引用（含租用）释放时快照才按 Spring 原协议关闭。幂等，关闭动作都在短锁外执行。
+   * <p>已有租用不受影响；最后一个引用释放时关闭快照。幂等，关闭动作在短锁外执行。
    */
   @Override
   public void close() {
