@@ -89,6 +89,7 @@ class StudioPluginTest {
     assertTrue(plugin.refresher().isEmpty());
     assertEquals(new PluginAuthSpec.None(), plugin.authenticationSpec());
     assertSame(SCHEMA, plugin.configurationSchema());
+    assertEquals(Set.of(), plugin.requiredAgentNames(PluginConfig.initial(SCHEMA)));
   }
 
   /** configure 产出的实例是可关闭的，且两域贡献可以为空列表。 */

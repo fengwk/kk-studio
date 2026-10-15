@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.platform.plugin;
 
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * 构建期 Plugin SPI：一个可选 JAR 向 Platform 声明安装身份、受控配置、认证交互与运行期实例装配方式。
@@ -25,6 +26,15 @@ public interface StudioPlugin {
 
   /** 按一次配置装配一个由本 Plugin 拥有、可关闭的运行期实例。 */
   PluginInstance configure(PluginConfig config, PluginContext context);
+
+  /**
+   * 普通配置所引用的 Agent 名称；默认无依赖。
+   *
+   * <p>实现只解析已验证的配置，不访问外部资源。宿主据此校验引用及构建配置同步依赖图，不按 Plugin ID 或字段路径猜测依赖。
+   */
+  default Set<String> requiredAgentNames(PluginConfig config) {
+    return Set.of();
+  }
 
   /** 交互式认证能力；不提供时管理面不开放任何 auth 动作。 */
   default Optional<PluginAuthHandler> authHandler() {
