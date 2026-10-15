@@ -189,7 +189,7 @@ describe('system settings schema renderer', () => {
   it('puts a restart badge on every restart-required card and never on the section header', () => {
     const schema = makeSettingsSchema()
     const draft = settingsSectionsToDraft(makeSettingsDto())
-    const section = renderSection(schema, 'integrations')
+    const section = renderSection(schema, 'advanced')
     const { container } = renderRenderer(
       <SystemSettingsSchemaRenderer schema={{ sections: [section] }} draft={draft} onChange={() => {}} />,
     )
@@ -217,18 +217,46 @@ describe('system settings schema renderer', () => {
   })
 
   it('consumes BOOLEAN hints through the switch row description', () => {
-    const schema = makeSettingsSchema()
-    const draft = settingsSectionsToDraft(makeSettingsDto())
-    const section = renderSection(schema, 'integrations')
-    // fixture 的 BOOLEAN 字段都没有 hintKey；补一个以覆盖 switch description 消费路径。
-    section.groups[0]!.fields[0]!.hintKey = 'settings.section.integrations.comfyui.description'
+    // 六节 fixture 已不含 BOOLEAN 字段：用合成 BOOLEAN leaf 覆盖 renderer 的 switch row hint→description 消费路径。
+    const baseDraft = settingsSectionsToDraft(makeSettingsDto())
+    const draft = {
+      ...baseDraft,
+      advanced: { ...baseDraft.advanced, syntheticFlag: false },
+    } as SystemSettingsSectionsDraft
+    const section: SystemSettingsSchemaDTO['sections'][number] = {
+      key: 'advanced',
+      labelKey: 'settings.tabs.advanced',
+      descriptionKey: 'settings.section.advanced.description',
+      restartRequired: false,
+      groups: [
+        {
+          key: 'advanced.synthetic',
+          labelKey: 'settings.section.advanced.resource.title',
+          descriptionKey: 'settings.section.advanced.resource.description',
+          restartRequired: false,
+          applyTiming: null,
+          fields: [
+            {
+              path: 'advanced.syntheticFlag',
+              labelKey: 'settings.field.network.proxyUrl',
+              hintKey: 'settings.field.network.proxyUrl.hint',
+              type: 'BOOLEAN',
+              nullable: false,
+              min: null,
+              max: null,
+              options: null,
+            },
+          ],
+        },
+      ],
+    }
     renderRenderer(
       <SystemSettingsSchemaRenderer schema={{ sections: [section] }} draft={draft} onChange={() => {}} />,
     )
     const switchRow = screen
-      .getByRole('switch', { name: '启用 ComfyUI' })
+      .getByRole('switch', { name: '代理地址' })
       .closest('.settings-row')!
-    expect(switchRow).toHaveTextContent('ComfyUI 运行端点与输入预算。')
+    expect(switchRow).toHaveTextContent('Backend 全局默认 HTTP 代理')
   })
 
   it('fail-closes on a duplicate field path', () => {
@@ -295,18 +323,23 @@ describe('system settings schema renderer', () => {
   it('renders metadata-driven min/max/options/nullable on primitives', () => {
     const schema = makeSettingsSchema()
     const draft = settingsSectionsToDraft(makeSettingsDto())
-    const section = renderSection(schema, 'integrations')
+    const storageMedia = renderSection(schema, 'storageMedia')
+    const network = renderSection(schema, 'network')
     const { container } = renderRenderer(
-      <SystemSettingsSchemaRenderer schema={{ sections: [section] }} draft={draft} onChange={() => {}} />,
+      <SystemSettingsSchemaRenderer
+        schema={{ sections: [storageMedia, network] }}
+        draft={draft}
+        onChange={() => {}}
+      />,
     )
-    const comfyTimeout = container.querySelector('[data-settings-field-path="integrations.minimaxH3.comfyConnectTimeoutMillis"]')!
-    expect(comfyTimeout.getAttribute('data-settings-min')).toBe('1')
-    expect(comfyTimeout.getAttribute('data-settings-max')).toBe('60000')
-    const promptMaxWait = container.querySelector('[data-settings-field-path="integrations.minimaxH3.promptMaxWaitMillis"]')!
-    expect(promptMaxWait.getAttribute('data-settings-min')).toBe('1')
-    expect(promptMaxWait.getAttribute('data-settings-max')).toBe('1800000')
-    const nullableBaseUrl = container.querySelector('[data-settings-field-path="integrations.comfyui.baseUrl"]')!
-    expect(nullableBaseUrl.getAttribute('data-settings-nullable')).toBe('true')
+    const quality = container.querySelector('[data-settings-field-path="storageMedia.thumbnailQuality"]')!
+    expect(quality.getAttribute('data-settings-min')).toBe('1')
+    expect(quality.getAttribute('data-settings-max')).toBe('100')
+    const uploadExpires = container.querySelector('[data-settings-field-path="storageMedia.uploadExpiresSeconds"]')!
+    expect(uploadExpires.getAttribute('data-settings-min')).toBe('1')
+    expect(uploadExpires.getAttribute('data-settings-max')).toBeNull()
+    const nullableProxy = container.querySelector('[data-settings-field-path="network.proxyUrl"]')!
+    expect(nullableProxy.getAttribute('data-settings-nullable')).toBe('true')
     const enumField = container.querySelector('[data-settings-field-path="aiRuntime.retryBackoffStrategy"]')
     // 非当前 section 不渲染。
     expect(enumField).toBeNull()

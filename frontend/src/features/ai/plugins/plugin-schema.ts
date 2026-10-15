@@ -213,6 +213,30 @@ function parseElement(raw: unknown, path: string): PluginSchemaElement {
 }
 
 /**
+ * 按 schema 构建新数组条目的待填写基础结构。
+ *
+ * <p>只给出类型占位（string 为空串、数字为 0、布尔为 false、数组为空数组），绝不发明插件默认值；optional 属性整体省略，
+ * 因此新增的单输出条目不会把可选的 {@code name} 写成 null 或空串。枚举字段同样不预选任何候选。
+ */
+export function buildSchemaPlaceholder(element: PluginSchemaElement): unknown {
+  switch (element.kind) {
+    case 'string':
+      return ''
+    case 'integer':
+    case 'number':
+      return 0
+    case 'boolean':
+      return false
+    case 'array':
+      return []
+    case 'object':
+      return Object.fromEntries(
+        element.required.map((name) => [name, buildSchemaPlaceholder(element.properties[name]!)]),
+      )
+  }
+}
+
+/**
  * 严格解析受控配置 valuesSchema JSON 字符串。
  * 使用严格 parseStrictJsonObject 杜绝 duplicate keys、注释、尾随逗号。
  */

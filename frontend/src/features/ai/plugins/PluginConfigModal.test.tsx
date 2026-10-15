@@ -524,26 +524,37 @@ describe('PluginConfigModal', () => {
       expect(screen.getByRole('button', { name: '保存配置' })).toBeDisabled()
       expect(screen.getByRole('alert')).toHaveTextContent('无效的 JSON 容器格式')
     }
-    await user.click(screen.getByRole('button', { name: /JSON 编辑/ }))
-    expect(screen.getByRole('textbox', { name: /JSON 编辑/ }))
-      .toHaveValue(samplePlugin.configuration.valuesJson)
+    // 草稿错误未解决时不允许离开表单模式：否则用户会以为提交的是刚输入的内容，实际看到的是上次的合法值。
+    const jsonMode = screen.getByRole('button', { name: /JSON 编辑/ })
+    expect(jsonMode).toBeDisabled()
+    await user.click(jsonMode)
+    expect(screen.queryByRole('textbox', { name: /JSON 编辑/ })).not.toBeInTheDocument()
+    expect(screen.getByText('请先修复或显式丢弃表单中的草稿错误，再切换编辑器')).toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent('无效的 JSON 容器格式')
     expect(pluginsService.updateConfiguration).not.toHaveBeenCalled()
   })
 
-  it('keeps invalid field drafts unsavable until an explicit JSON edit replaces them', async () => {
+  it('keeps invalid field drafts unsavable and switches editors only after the user resolves them', async () => {
     const user = userEvent.setup()
     vi.mocked(pluginsService.updateConfiguration).mockResolvedValue(samplePlugin)
     renderModal()
     fireEvent.change(screen.getByRole('textbox', { name: 'decimal' }), { target: { value: '-' } })
-    await user.click(screen.getByRole('button', { name: /JSON 编辑/ }))
     expect(screen.getByRole('button', { name: '保存配置' })).toBeDisabled()
-    const json = screen.getByRole('textbox', { name: /JSON 编辑/ })
-    fireEvent.change(json, {
-      target: { value: samplePlugin.configuration.valuesJson.replace('1.230000', '-2.500000') },
+
+    // 错误草稿只能被用户显式修复或丢弃，切换到全局 JSON 不会把它悄悄换成上次的合法值。
+    const jsonMode = screen.getByRole('button', { name: /JSON 编辑/ })
+    await user.click(jsonMode)
+    expect(screen.queryByRole('textbox', { name: /JSON 编辑/ })).not.toBeInTheDocument()
+    expect(pluginsService.updateConfiguration).not.toHaveBeenCalled()
+
+    // 显式修复后错误消失，模式切换与保存同时恢复，提交的正是用户刚输入的值。
+    fireEvent.change(screen.getByRole('textbox', { name: 'decimal' }), {
+      target: { value: '-2.500000' },
     })
+    expect(screen.getByRole('button', { name: '保存配置' })).not.toBeDisabled()
+    await user.click(screen.getByRole('button', { name: /JSON 编辑/ }))
     await user.click(screen.getByRole('button', { name: /表单编辑/ }))
     expect(screen.getByRole('textbox', { name: 'decimal' })).toHaveValue('-2.500000')
-    expect(screen.getByRole('button', { name: '保存配置' })).not.toBeDisabled()
     await user.click(screen.getByRole('button', { name: '保存配置' }))
     expect(pluginsService.updateConfiguration).toHaveBeenCalledWith(
       samplePlugin.pluginId,
