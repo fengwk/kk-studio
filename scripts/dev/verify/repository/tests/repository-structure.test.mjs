@@ -723,7 +723,7 @@ const CORE_STATE_ENUMS = [
     constants: ['PENDING', 'READY'],
   },
   {
-    path: 'plugins/canvas-comfyui/src/main/java/fun/fengwk/kkstudio/plugin/canvascomfyui/H3ComfyHistory.java',
+    path: 'plugins/comfyui/src/main/java/fun/fengwk/kkstudio/plugin/comfyui/H3ComfyHistory.java',
     enumName: 'Status',
     constants: ['PENDING', 'SUCCESS', 'ERROR'],
   },
