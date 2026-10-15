@@ -11,6 +11,9 @@ import { HttpError } from '../lib/http.mjs'
 import { ALL_CASES, getCase } from '../lib/registry.mjs'
 
 const RUN_MATRIX = fileURLToPath(new URL('../run-matrix.mjs', import.meta.url))
+const DEFERRED_OUTPUT_FIXTURE = fileURLToPath(
+  new URL('./fixtures/deferred-output.mjs', import.meta.url),
+)
 
 const FREE_L1_CASES = [
   'crud.provider.http_retry_override',
@@ -247,4 +250,42 @@ test('run-matrix --list/--docs execute fully offline and include the new contrac
       `${flag} enumerated cases must match the reported total`,
     )
   }
+})
+
+test('run-matrix drains deferred stdout/stderr before exiting', () => {
+  // 测试意图：预加载夹具把 stdout/stderr 写入推迟到定时器（模拟真实管道下的异步写入），
+  // 入口必须在退出前 drain 这些 pending 写入，否则旧版 process.exit 会截断尾部 case（如
+  // settings.system_contract_cas）或吞掉整个错误输出。保留完整 inventory 断言，不降低既有覆盖。
+  for (const flag of ['--list', '--docs']) {
+    const result = spawnSync(
+      process.execPath,
+      ['--import', DEFERRED_OUTPUT_FIXTURE, RUN_MATRIX, flag],
+      { encoding: 'utf8' },
+    )
+    assert.equal(result.status, 0, `${flag} exited ${result.status}: ${result.stderr}`)
+    assert.equal(result.stderr, '', `${flag} must not write to stderr: ${result.stderr}`)
+    for (const id of FREE_L1_CASES) {
+      assert.ok(result.stdout.includes(id), `${flag} output must include ${id}`)
+    }
+    const caseLines = result.stdout.split('\n').filter((line) => /^\[L\d\] /.test(line))
+    const totalMatch = result.stdout.match(/Total registered: (\d+)/)
+    assert.ok(totalMatch, `${flag} output must report Total registered`)
+    assert.equal(
+      Number(totalMatch[1]),
+      caseLines.length,
+      `${flag} enumerated cases must match the reported total`,
+    )
+  }
+
+  // 未知参数路径同样走自然退出：exit 2、错误写入 stderr，且不产生 stdout。
+  const bogus = '--bogus-flag'
+  const result = spawnSync(
+    process.execPath,
+    ['--import', DEFERRED_OUTPUT_FIXTURE, RUN_MATRIX, bogus],
+    { encoding: 'utf8' },
+  )
+  assert.equal(result.status, 2, `unknown arg must exit 2: ${result.stderr}`)
+  assert.equal(result.stdout, '', 'unknown arg must not write to stdout')
+  assert.ok(result.stderr.includes('Error: unknown arg'), result.stderr)
+  assert.ok(result.stderr.includes(bogus), result.stderr)
 })
