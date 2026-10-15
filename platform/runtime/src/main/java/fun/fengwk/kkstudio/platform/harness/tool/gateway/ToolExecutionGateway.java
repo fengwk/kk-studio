@@ -1274,11 +1274,11 @@ public final class ToolExecutionGateway implements ToolGateway {
         terminal = true;
         queue.clear();
       }
-      Throwable primary = null;
+      Error primary = null;
       try {
         callback.run();
       } catch (RuntimeException failure) {
-        primary = failure;
+        // 已隔离的 listener 异常不是待传播的主异常，不能阻止清理失败向上传播。
         try {
           log.warn(
               "tool gateway listener threw while accepting a terminal callback for {}: {}; "
