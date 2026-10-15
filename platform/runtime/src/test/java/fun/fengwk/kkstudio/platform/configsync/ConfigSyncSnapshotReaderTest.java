@@ -38,6 +38,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 /** 测试意图：锁定一次性快照读取装配八类事实，settings 行缺失时给出资源不存在错误，插件配置取自权威目录并与其配置历史逐字段核对。 */
 class ConfigSyncSnapshotReaderTest {
@@ -171,7 +172,7 @@ class ConfigSyncSnapshotReaderTest {
     assertThrows(AiResourceNotFoundException.class, () -> reader.read());
   }
 
-  /** 测试意图：系统内置 Agent 由系统持有身份，不参与配置同步，读取快照时被排除。 */
+  /** 测试意图：系统内置 Agent 由系统持有身份，不参与配置同步，读取快照时被排除；其名称作为「已由系统满足」的依赖单独带出。 */
   @Test
   void excludesBuiltinAgentsFromTheSnapshot() {
     when(systemSettingsRepository.get()).thenReturn(settings(1L));
@@ -193,6 +194,7 @@ class ConfigSyncSnapshotReaderTest {
 
     assertEquals(
         List.of("user-agent"), snapshot.agents().stream().map(AgentDefinition::getName).toList());
+    assertEquals(Set.of(BuiltinAgentDefinitions.COMPACTION_NAME), snapshot.builtinAgentNames());
   }
 
   @Test

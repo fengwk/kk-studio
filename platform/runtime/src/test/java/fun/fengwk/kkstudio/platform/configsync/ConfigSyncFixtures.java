@@ -279,6 +279,7 @@ final class ConfigSyncFixtures {
         providers,
         models,
         agents,
+        Set.of(),
         skillPackages,
         environments,
         mcpServers,
@@ -291,6 +292,7 @@ final class ConfigSyncFixtures {
       List<AgentProvider> providers,
       List<AgentModel> models,
       List<AgentDefinition> agents,
+      Set<String> builtinAgentNames,
       List<SkillPackage> skillPackages,
       List<Environment> environments,
       List<McpServer> mcpServers,
@@ -301,6 +303,7 @@ final class ConfigSyncFixtures {
         providers,
         models,
         agents,
+        builtinAgentNames,
         skillPackages,
         environments,
         mcpServers,
@@ -335,7 +338,8 @@ final class ConfigSyncFixtures {
   /**
    * 合成插件：普通配置声明一个 Agent 名称字段，{@code requiredAgentNames} 只解析该字段。
    *
-   * <p>用于证明「插件声明 Agent 依赖」的通用机制，不引用也不猜测任何具体插件的字段或实现。
+   * <p>用于证明「插件声明 Agent 依赖」的通用机制，不引用也不猜测任何具体插件的字段或实现。名称以 {@code "!"} 开头表示插件拒绝该普通配置
+   * （真实的插件会纯解析内嵌结构化配置并抛输入错误），用于证明输入边界异常被收敛为固定去敏校验失败。
    */
   static final class AgentDependencyPlugin implements StudioPlugin {
 
@@ -384,7 +388,50 @@ final class ConfigSyncFixtures {
       if (agent == null || !agent.isString() || agent.stringValue().isBlank()) {
         return Set.of();
       }
-      return Set.of(agent.stringValue());
+      String name = agent.stringValue();
+      if (name.startsWith("!")) {
+        throw new IllegalArgumentException("invalid agent name: " + name);
+      }
+      return Set.of(name);
+    }
+  }
+
+  /**
+   * 合成插件：声明解析抛非输入边界异常。
+   *
+   * <p>用于证明未知运行时错误绝不被伪装成校验失败或 skip，而是照常上抛。
+   */
+  static final class FailingAgentDeclarationPlugin implements StudioPlugin {
+
+    private final String pluginId;
+
+    FailingAgentDeclarationPlugin(String pluginId) {
+      this.pluginId = pluginId;
+    }
+
+    @Override
+    public PluginDescriptor descriptor() {
+      return new PluginDescriptor(pluginId, "Failing " + pluginId, "1.0.0");
+    }
+
+    @Override
+    public PluginConfigSchema configurationSchema() {
+      return AgentDependencyPlugin.SCHEMA;
+    }
+
+    @Override
+    public PluginAuthSpec authenticationSpec() {
+      return new PluginAuthSpec.None();
+    }
+
+    @Override
+    public PluginInstance configure(PluginConfig config, PluginContext context) {
+      return TestPluginFixtures.emptyInstance();
+    }
+
+    @Override
+    public Set<String> requiredAgentNames(PluginConfig config) {
+      throw new IllegalStateException("declaration failure for " + pluginId);
     }
   }
 

@@ -4,14 +4,21 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.MediaType;
 import org.springframework.test.annotation.DirtiesContext;
 import tools.jackson.databind.JsonNode;
 
+import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentDefinitions;
+import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
+import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncApplier;
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncParser;
@@ -22,6 +29,9 @@ import fun.fengwk.kkstudio.platform.configsync.ConfigSyncSnapshotReader;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRow;
 import fun.fengwk.kkstudio.platform.plugin.service.PluginManagementService;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionType;
 
 import javax.sql.DataSource;
 
@@ -58,6 +68,7 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
   @Autowired private ConfigSyncSnapshotReader snapshotReader;
   @Autowired private PluginManagementService pluginManagementService;
   @Autowired private DataSource dataSource;
+  @Autowired private AgentDefinitionRepository definitionRepository;
 
   /** inventory 与导出把已安装插件当第八类，且 portable 条目只含 pluginId 与 valuesJson。 */
   @SuppressWarnings("unchecked")
@@ -179,6 +190,59 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
         "the earlier provider write must be rolled back when the plugin epoch CAS fails");
   }
 
+  /**
+   * 意图：系统内置 Agent 绝不导出、绝不出现在 inventory、也不允许被覆盖，但它的存在必须满足引用依赖。
+   *
+   * <p>subagent 指向真实内置 Agent 的自定义 Agent 能正常 inventory、导出与重新导入；portable 文件里只有这一个自定义 Agent 条目。
+   */
+  @Test
+  void builtinAgentSatisfiesReferencesWithoutBecomingPortable() throws Exception {
+    // 系统内置 Agent 由系统持有身份：测试按同类身份落一行真实 BUILTIN 行，绝不把它当作可同步条目。
+    seedBuiltinAgent(BuiltinAgentDefinitions.COMPACTION_NAME);
+    String agent = "builtin-dep-agent";
+    createBuiltinDependentAgent(agent);
+
+    JsonNode items = getData("/api/settings/sync").path("items");
+    assertNotNull(findItem(items, "agents", agent));
+    assertNull(
+        findItem(items, "agents", BuiltinAgentDefinitions.COMPACTION_NAME),
+        "a builtin agent must never be a selectable inventory item");
+
+    JsonNode exported =
+        postData(
+            "/api/settings/sync/export",
+            Map.of("items", List.of(Map.of("kind", "agents", "name", agent))));
+    String yaml = exported.path("yaml").asText();
+    assertEquals(
+        List.of(agent),
+        agentNames(parseYaml(yaml)),
+        "only the selected custom agent may be exported; the builtin subagent must not become an item");
+
+    JsonNode result =
+        postData("/api/settings/sync/import", Map.of("yaml", yaml, "allowPartial", true));
+    assertTrue(references(result.path("imported")).contains("agents/" + agent));
+    assertTrue(references(result.path("skipped")).isEmpty());
+
+    // 保留名仍不可覆盖：导入内置身份本身必须整份拒绝，库内内置行逐字段不变（version/config 都不被改写）。
+    AgentDefinition before =
+        definitionRepository.getByName(BuiltinAgentDefinitions.COMPACTION_NAME);
+    String reserved =
+        "agents:\n  - name: "
+            + BuiltinAgentDefinitions.COMPACTION_NAME
+            + "\n    description: overridden\n    model: stub/acceptance-stub\n"
+            + "    systemPrompt: overridden\n";
+    mockMvc
+        .perform(
+            post("/api/settings/sync/import")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(Map.of("yaml", reserved))))
+        .andExpect(status().isBadRequest());
+    AgentDefinition after = definitionRepository.getByName(BuiltinAgentDefinitions.COMPACTION_NAME);
+    assertEquals(before.getVersion(), after.getVersion());
+    assertEquals(before.getConfigJson(), after.getConfigJson());
+    assertEquals(before.getSystemPrompt(), after.getSystemPrompt());
+  }
+
   /** 插件权威表的 FK 必须保持立即约束：任何坏行立刻失败，而不是被推迟到事务提交。 */
   @Test
   void pluginForeignKeysStayImmediate() throws Exception {
@@ -199,6 +263,47 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
       }
       assertTrue(found, "the plugin tables must declare at least one foreign key");
     }
+  }
+
+  /** 以系统持有身份落一行 BUILTIN Agent：只用于证明内置身份满足引用却绝不进入 portable 范围。 */
+  private void seedBuiltinAgent(String name) {
+    AgentDefinition builtin = new AgentDefinition();
+    builtin.setName(name);
+    builtin.setType(AgentDefinitionType.BUILTIN);
+    builtin.setSystemPrompt("builtin prompt");
+    builtin.setConfigJson(
+        "{\"tools\":[],\"skills\":[],\"subagents\":[],\"inheritParentEnvironment\":true}");
+    definitionRepository.create(builtin);
+  }
+
+  /** 建一个 subagent 指向系统内置 Agent 的自定义 Agent：内置身份必须满足该引用。 */
+  private void createBuiltinDependentAgent(String name) throws Exception {
+    AgentDefinitionConfigDTO config = new AgentDefinitionConfigDTO();
+    config.setTools(List.of());
+    config.setSkills(List.of());
+    config.setSubagents(List.of(BuiltinAgentDefinitions.COMPACTION_NAME));
+    config.setInheritParentEnvironment(Boolean.TRUE);
+
+    AgentDefinitionCreateDTO dto = new AgentDefinitionCreateDTO();
+    dto.setName(name);
+    dto.setDescription("agent " + name);
+    dto.setSystemPrompt("prompt " + name);
+    dto.setModel("stub/acceptance-stub");
+    dto.setVariant("default");
+    dto.setConfig(config);
+    postData("/api/ai/catalog/agents", dto);
+  }
+
+  /** 导出文档里的 Agent 条目名，用于断言内置身份没有变成独立条目。 */
+  @SuppressWarnings("unchecked")
+  private static List<String> agentNames(Map<String, Object> document) {
+    List<Map<String, Object>> agents =
+        (List<Map<String, Object>>) document.getOrDefault("agents", List.of());
+    List<String> names = new ArrayList<>();
+    for (Map<String, Object> entry : agents) {
+      names.add((String) entry.get("name"));
+    }
+    return names;
   }
 
   /** 已安装插件的 pluginId 到权威普通值文本；只取真实存在配置投影的插件。 */

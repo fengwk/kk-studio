@@ -25,6 +25,7 @@ import fun.fengwk.kkstudio.share.configsync.ConfigSyncRef;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /** 测试意图：锁定导出只包含可编辑业务字段且保留原始凭据/registrationToken，不泄露运行态（UUID/时间戳/版本/发现状态），settings 以对象导出。 */
 class ConfigSyncExporterTest {
@@ -187,6 +188,7 @@ class ConfigSyncExporterTest {
             List.of(),
             List.of(),
             List.of(),
+            Set.of(),
             List.of(),
             List.of(),
             List.of(),
@@ -217,6 +219,7 @@ class ConfigSyncExporterTest {
             List.of(provider("p")),
             List.of(),
             List.of(),
+            Set.of(),
             List.of(),
             List.of(),
             List.of(),
