@@ -16,6 +16,7 @@ import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ToolBindingJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ToolInputReceiptJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageJsonCodec;
@@ -87,10 +88,13 @@ public final class HistoryEntryPayloadJsonCodec {
           "synthetic",
           "reason",
           "inputReceipt",
-          "invocationId");
+          "invocationId",
+          "binding");
 
   private static final ToolInputReceiptJsonCodec INPUT_RECEIPT_CODEC =
       new ToolInputReceiptJsonCodec();
+
+  private static final ToolBindingJsonCodec TOOL_BINDING_CODEC = new ToolBindingJsonCodec();
 
   private static final AgentMessageJsonCodec MESSAGE_CODEC = new AgentMessageJsonCodec();
 
@@ -354,6 +358,12 @@ public final class HistoryEntryPayloadJsonCodec {
       node.putNull("invocationId");
     } else {
       node.put("invocationId", metadata.invocationId().toString());
+    }
+    // 真实终态即使 invocation 行被物理删除也必须保留原冻结 binding；synthetic 结果没有真实 invocation，输出显式 null。
+    if (metadata.binding() == null) {
+      node.putNull("binding");
+    } else {
+      node.set("binding", TOOL_BINDING_CODEC.encodeNode(metadata.binding()));
     }
     return node;
   }
@@ -634,7 +644,10 @@ public final class HistoryEntryPayloadJsonCodec {
             ToolResultReason.class, node, "reason", "toolResultMetadata.reason"),
         node.get("inputReceipt") == null || node.get("inputReceipt").isNull()
             ? null
-            : INPUT_RECEIPT_CODEC.decodeNode(node.get("inputReceipt")));
+            : INPUT_RECEIPT_CODEC.decodeNode(node.get("inputReceipt")),
+        node.get("binding") == null || node.get("binding").isNull()
+            ? null
+            : TOOL_BINDING_CODEC.decodeNode(node.get("binding")));
   }
 
   // ---------- 通用工具方法 ----------

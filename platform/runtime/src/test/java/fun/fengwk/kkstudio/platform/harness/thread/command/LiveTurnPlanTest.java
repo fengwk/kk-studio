@@ -111,6 +111,7 @@ class LiveTurnPlanTest {
   /** 最小可用 spec：LiveTurnPlan 只把 spec 当作不可为空的冻结契约载体。 */
   private static ModelRequestSpec spec() {
     return new ModelRequestSpec(
+        1L,
         ProviderType.OPENAI,
         new UUID(0L, 42L),
         new ModelDescriptor(

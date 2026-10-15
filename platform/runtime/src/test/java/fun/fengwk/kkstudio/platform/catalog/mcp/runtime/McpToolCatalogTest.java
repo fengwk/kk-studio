@@ -19,7 +19,6 @@ import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
 
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 
 /**
@@ -71,8 +70,8 @@ class McpToolCatalogTest {
     McpServer server = server("brave", McpDiscoveryStatus.AVAILABLE, true);
     McpTool tool = tool("mcp_brave_search", "brave", "search", "Search");
 
-    when(repository.getTool("mcp_brave_search")).thenReturn(Optional.of(tool));
-    when(repository.getByName("brave")).thenReturn(Optional.of(server));
+    when(repository.listTools("brave")).thenReturn(List.of(tool));
+    when(repository.listAllServers()).thenReturn(List.of(server));
 
     ToolContribution contribution = catalog.findTool("mcp_brave_search").orElseThrow();
     assertEquals("mcp_brave_search", contribution.definition().descriptor().name());
@@ -99,8 +98,8 @@ class McpToolCatalogTest {
         String toolName = "mcp_srv_tool";
         McpServer server = server("srv", status, enabled);
         McpTool tool = tool(toolName, "srv", "tool", "Tool");
-        when(repository.getTool(toolName)).thenReturn(Optional.of(tool));
-        when(repository.getByName("srv")).thenReturn(Optional.of(server));
+        when(repository.listTools("srv")).thenReturn(List.of(tool));
+        when(repository.listAllServers()).thenReturn(List.of(server));
 
         ToolContribution contribution =
             catalog
@@ -122,8 +121,8 @@ class McpToolCatalogTest {
     // 同一 server 的可用性不影响兄弟工具：两种状态都能各自解析出精确定义，且与可选面无耦合。
     McpServer available = server("srv", McpDiscoveryStatus.AVAILABLE, true);
     McpTool sibling = tool("mcp_srv_sibling", "srv", "sibling", "Sibling");
-    when(repository.getByName("srv")).thenReturn(Optional.of(available));
-    when(repository.getTool("mcp_srv_sibling")).thenReturn(Optional.of(sibling));
+    when(repository.listAllServers()).thenReturn(List.of(available));
+    when(repository.listTools("srv")).thenReturn(List.of(sibling));
     assertEquals(
         "mcp_srv_sibling",
         catalog.findTool("mcp_srv_sibling").orElseThrow().definition().descriptor().name());
@@ -132,12 +131,12 @@ class McpToolCatalogTest {
     // 因此 planning 期冻结的绑定不会因 server 后来被禁用或发现失败而在调用期 preflight 漂移，
     // 且定义中的 timeout 始终取自 server 行，不因可用性被改写。
     McpTool defined = tool("mcp_srv_defined", "srv", "defined", "Defined");
-    when(repository.getTool("mcp_srv_defined")).thenReturn(Optional.of(defined));
-    when(repository.getByName("srv"))
-        .thenReturn(Optional.of(server("srv", McpDiscoveryStatus.AVAILABLE, true)));
+    when(repository.listTools("srv")).thenReturn(List.of(defined));
+    when(repository.listAllServers())
+        .thenReturn(List.of(server("srv", McpDiscoveryStatus.AVAILABLE, true)));
     ToolContribution availableFace = catalog.findTool("mcp_srv_defined").orElseThrow();
-    when(repository.getByName("srv"))
-        .thenReturn(Optional.of(server("srv", McpDiscoveryStatus.FAILED, false)));
+    when(repository.listAllServers())
+        .thenReturn(List.of(server("srv", McpDiscoveryStatus.FAILED, false)));
     ToolContribution unavailableFace = catalog.findTool("mcp_srv_defined").orElseThrow();
     assertEquals(availableFace.id(), unavailableFace.id());
     assertEquals(availableFace.definition(), unavailableFace.definition());
@@ -147,12 +146,11 @@ class McpToolCatalogTest {
   @Test
   void findToolStaysEmptyForMissingToolOrServerRow() {
     // 意图：查找面仍然 fail closed：工具行不存在，或工具行的 server 行不存在时一律返回空，绝不合成定义
-    when(repository.getTool("mcp_missing_tool")).thenReturn(Optional.empty());
+    when(repository.listAllServers()).thenReturn(List.of());
     assertTrue(catalog.findTool("mcp_missing_tool").isEmpty());
 
     McpTool orphan = tool("mcp_orphan_tool", "ghost", "tool", "Tool");
-    when(repository.getTool("mcp_orphan_tool")).thenReturn(Optional.of(orphan));
-    when(repository.getByName("ghost")).thenReturn(Optional.empty());
+    when(repository.listTools("ghost")).thenReturn(List.of(orphan));
     assertTrue(catalog.findTool("mcp_orphan_tool").isEmpty());
   }
 

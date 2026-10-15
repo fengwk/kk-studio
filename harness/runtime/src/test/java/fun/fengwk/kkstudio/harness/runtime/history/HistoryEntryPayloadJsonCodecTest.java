@@ -9,6 +9,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
@@ -17,7 +19,10 @@ import fun.fengwk.kkstudio.harness.runtime.entry.GoalSetting;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInputReceipt;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolPluginSource;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
@@ -26,9 +31,16 @@ import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
+import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
+import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
+import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /** history Entry payload codec：标准形态、严格边界拒绝与老字段拒绝。 */
@@ -68,6 +80,7 @@ class HistoryEntryPayloadJsonCodecTest {
                 0,
                 ToolResultStatus.SUCCEEDED,
                 false,
+                null,
                 null,
                 null));
     EntryPayload custom =
@@ -126,6 +139,7 @@ class HistoryEntryPayloadJsonCodecTest {
                 ToolResultStatus.UNKNOWN,
                 true,
                 ToolResultReason.HISTORY_CUT,
+                null,
                 null));
     EntryPayload root = new RootPayload(settings());
     EntryPayload completedEnd =
@@ -188,8 +202,8 @@ class HistoryEntryPayloadJsonCodecTest {
             ToolResultStatus.SUCCEEDED,
             false,
             null,
-            new ToolInputReceipt(
-                new UUID(0L, 21L), "alice", Instant.parse("2026-09-27T00:00:00Z")));
+            new ToolInputReceipt(new UUID(0L, 21L), "alice", Instant.parse("2026-09-27T00:00:00Z")),
+            null);
     MessagePayload payload =
         new MessagePayload(
             new AgentMessage(
@@ -234,9 +248,76 @@ class HistoryEntryPayloadJsonCodecTest {
                 ToolResultStatus.SUCCEEDED,
                 false,
                 null,
+                null,
                 null));
     assertEquals(withoutReceipt, CODEC.decode(EntryType.MESSAGE, CODEC.encode(withoutReceipt)));
     assertTrue(CODEC.encode(withoutReceipt).contains("\"inputReceipt\":null"));
+  }
+
+  /** 测试意图：真实 ToolResult 必须能携带完整的冻结 ToolBinding（含 pluginSource）完整往返，并作为 metadata 严格编码。 */
+  @Test
+  void roundTripsToolResultWithDurableBindingAndPluginSource() {
+    ToolPluginSource pluginSource =
+        new ToolPluginSource(
+            "my-plugin",
+            "1.0.0",
+            1L,
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+            UUID.fromString("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"));
+    ToolBinding bindingWithPlugin =
+        new ToolBinding(
+            1L,
+            new AgentToolDefinition(
+                new ToolDescriptor(
+                    "custom_tool",
+                    "Custom desc",
+                    "custom_tool",
+                    new InputSchema("arguments", Map.of(), Set.of(), false),
+                    ToolSideEffect.READ_ONLY,
+                    Duration.ofSeconds(30)),
+                ToolVisibility.SELECTABLE),
+            new ContributorBinding("core", "custom-tool", List.of()),
+            EnvironmentSupport.NONE,
+            null,
+            null,
+            pluginSource);
+
+    ToolResultMetadata metadata =
+        new ToolResultMetadata(
+            new UUID(0L, 41L),
+            new UUID(0L, 7L),
+            "call-1",
+            0,
+            ToolResultStatus.SUCCEEDED,
+            false,
+            null,
+            null,
+            bindingWithPlugin);
+
+    MessagePayload payload =
+        new MessagePayload(
+            new AgentMessage(
+                AgentMessageRole.TOOL,
+                List.of(
+                    new ToolResultMessageContent(
+                        "call-1",
+                        "custom_tool",
+                        "custom_tool",
+                        List.of(new TextMessageContent("success")),
+                        false,
+                        "{}"))),
+            null,
+            metadata);
+
+    String encoded = CODEC.encode(payload);
+    assertTrue(encoded.contains("\"binding\":{\"catalogEpoch\":1"));
+    assertTrue(encoded.contains("\"pluginSource\":{\"pluginId\":\"my-plugin\""));
+
+    MessagePayload decoded = (MessagePayload) CODEC.decode(EntryType.MESSAGE, encoded);
+    assertEquals(payload, decoded);
+    assertEquals(bindingWithPlugin, decoded.toolResultMetadata().binding());
+    assertEquals(pluginSource, decoded.toolResultMetadata().binding().pluginSource());
   }
 
   /** 意图：decodeDurationMillis 的严格边界——非负整数与显式 null 合法，负值、非整数、非数字类型与未知字段一律拒绝。 */
@@ -738,6 +819,9 @@ class HistoryEntryPayloadJsonCodecTest {
         "{\"message\":{\"role\":\"TOOL\",\"contents\":[{\"type\":\"tool_result\",\"toolCallId\":\"call-1\","
             + "\"toolName\":\"read\",\"contents\":[{\"type\":\"text\",\"text\":\"ok\"}],\"error\":false,"
             + "\"detailsJson\":\"{}\"}]},\"assistantMetadata\":null,";
+    String validSuffix =
+        ",\"inputReceipt\":null,\"invocationId\":\"" + UUID_7 + "\",\"binding\":null}}";
+
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -746,7 +830,8 @@ class HistoryEntryPayloadJsonCodecTest {
                 toolMessageJson
                     + "\"toolResultMetadata\":{\"assistantEntryId\":\""
                     + UUID_0
-                    + "\",\"toolCallId\":\"call-1\",\"callIndex\":0,\"status\":\"SUCCEEDED\",\"synthetic\":false,\"reason\":null}}"));
+                    + "\",\"toolCallId\":\"call-1\",\"callIndex\":0,\"status\":\"SUCCEEDED\",\"synthetic\":false,\"reason\":null"
+                    + validSuffix));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -755,7 +840,8 @@ class HistoryEntryPayloadJsonCodecTest {
                 toolMessageJson
                     + "\"toolResultMetadata\":{\"assistantEntryId\":\""
                     + UUID_2
-                    + "\",\"toolCallId\":\"call-1\",\"callIndex\":-1,\"status\":\"SUCCEEDED\",\"synthetic\":false,\"reason\":null}}"));
+                    + "\",\"toolCallId\":\"call-1\",\"callIndex\":-1,\"status\":\"SUCCEEDED\",\"synthetic\":false,\"reason\":null"
+                    + validSuffix));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -764,7 +850,8 @@ class HistoryEntryPayloadJsonCodecTest {
                 toolMessageJson
                     + "\"toolResultMetadata\":{\"assistantEntryId\":\""
                     + UUID_2
-                    + "\",\"toolCallId\":\"call-1\",\"callIndex\":0,\"status\":\"FOO\",\"synthetic\":false,\"reason\":null}}"));
+                    + "\",\"toolCallId\":\"call-1\",\"callIndex\":0,\"status\":\"FOO\",\"synthetic\":false,\"reason\":null"
+                    + validSuffix));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -773,7 +860,8 @@ class HistoryEntryPayloadJsonCodecTest {
                 toolMessageJson
                     + "\"toolResultMetadata\":{\"assistantEntryId\":\""
                     + UUID_2
-                    + "\",\"toolCallId\":\"call-1\",\"callIndex\":0,\"status\":\"SUCCEEDED\",\"synthetic\":true,\"reason\":\"HISTORY_CUT\"}}"));
+                    + "\",\"toolCallId\":\"call-1\",\"callIndex\":0,\"status\":\"SUCCEEDED\",\"synthetic\":true,\"reason\":\"HISTORY_CUT\""
+                    + validSuffix));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -782,23 +870,16 @@ class HistoryEntryPayloadJsonCodecTest {
                 toolMessageJson
                     + "\"toolResultMetadata\":{\"assistantEntryId\":\""
                     + UUID_2
-                    + "\",\"toolCallId\":\"call-9\",\"callIndex\":0,\"status\":\"SUCCEEDED\",\"synthetic\":false,\"reason\":null}}"));
+                    + "\",\"toolCallId\":\"call-9\",\"callIndex\":0,\"status\":\"SUCCEEDED\",\"synthetic\":false,\"reason\":null"
+                    + validSuffix));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             CODEC.decode(
                 EntryType.MESSAGE,
                 toolMessageJson
-                    + "\"toolResultMetadata\":{\"assistantEntryId\":\"00000000-0000-0000-0000-000000000007\",\"toolCallId\":\"call-1\",\"callIndex\":0,\"status\":\"SUCCEEDED\",\"synthetic\":false,\"reason\":null}}"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            CODEC.decode(
-                EntryType.MESSAGE,
-                toolMessageJson
-                    + "\"toolResultMetadata\":{\"assistantEntryId\":\""
-                    + UUID_2
-                    + "\",\"toolCallId\":\"call-1\",\"callIndex\":0,\"status\":\"SUCCEEDED\",\"synthetic\":false,\"reason\":5}}"));
+                    + "\"toolResultMetadata\":{\"assistantEntryId\":\"00000000-0000-0000-0000-000000000007\",\"toolCallId\":\"call-1\",\"callIndex\":0,\"status\":\"SUCCEEDED\",\"synthetic\":false,\"reason\":null"
+                    + validSuffix));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -807,7 +888,8 @@ class HistoryEntryPayloadJsonCodecTest {
                 toolMessageJson
                     + "\"toolResultMetadata\":{\"assistantEntryId\":\""
                     + UUID_2
-                    + "\",\"toolCallId\":\"call-1\",\"callIndex\":99999999999999,\"status\":\"SUCCEEDED\",\"synthetic\":false,\"reason\":null}}"));
+                    + "\",\"toolCallId\":\"call-1\",\"callIndex\":0,\"status\":\"SUCCEEDED\",\"synthetic\":false,\"reason\":5"
+                    + validSuffix));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -816,10 +898,66 @@ class HistoryEntryPayloadJsonCodecTest {
                 toolMessageJson
                     + "\"toolResultMetadata\":{\"assistantEntryId\":\""
                     + UUID_2
-                    + "\",\"toolCallId\":\"call-1\",\"callIndex\":\"x\",\"status\":\"SUCCEEDED\",\"synthetic\":false,\"reason\":null}}"));
+                    + "\",\"toolCallId\":\"call-1\",\"callIndex\":99999999999999,\"status\":\"SUCCEEDED\",\"synthetic\":false,\"reason\":null"
+                    + validSuffix));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            CODEC.decode(
+                EntryType.MESSAGE,
+                toolMessageJson
+                    + "\"toolResultMetadata\":{\"assistantEntryId\":\""
+                    + UUID_2
+                    + "\",\"toolCallId\":\"call-1\",\"callIndex\":\"x\",\"status\":\"SUCCEEDED\",\"synthetic\":false,\"reason\":null"
+                    + validSuffix));
     assertThrows(
         IllegalArgumentException.class,
         () -> CODEC.decode(EntryType.MESSAGE, toolMessageJson + "\"toolResultMetadata\":[]}"));
+
+    // 缺少 binding 字段
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            CODEC.decode(
+                EntryType.MESSAGE,
+                toolMessageJson
+                    + "\"toolResultMetadata\":{\"assistantEntryId\":\""
+                    + UUID_2
+                    + "\",\"toolCallId\":\"call-1\",\"callIndex\":0,\"status\":\"SUCCEEDED\",\"synthetic\":false,\"reason\":null,\"inputReceipt\":null,\"invocationId\":\""
+                    + UUID_7
+                    + "\"}}"));
+
+    // binding 类型错误
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            CODEC.decode(
+                EntryType.MESSAGE,
+                toolMessageJson
+                    + "\"toolResultMetadata\":{\"assistantEntryId\":\""
+                    + UUID_2
+                    + "\",\"toolCallId\":\"call-1\",\"callIndex\":0,\"status\":\"SUCCEEDED\",\"synthetic\":false,\"reason\":null,\"inputReceipt\":null,\"invocationId\":\""
+                    + UUID_7
+                    + "\",\"binding\":123}}"));
+
+    // synthetic 结果携带非空 binding 被拒绝
+    String validBindingJson =
+        "{\"catalogEpoch\":1,\"definition\":{\"descriptor\":{\"name\":\"read\",\"description\":\"read\","
+            + "\"rendererKey\":\"read\",\"sideEffect\":\"READ_ONLY\",\"defaultTimeoutMillis\":30000,"
+            + "\"inputSchema\":{\"type\":\"object\",\"description\":\"arguments\",\"properties\":{},\"required\":[],\"additionalProperties\":false}},"
+            + "\"visibility\":\"SELECTABLE\"},\"contributor\":{\"contributorId\":\"core\",\"localName\":\"read\",\"stateAccesses\":[]},"
+            + "\"environmentSupport\":\"NONE\",\"environmentId\":null,\"environmentName\":null,\"pluginSource\":null}";
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            CODEC.decode(
+                EntryType.MESSAGE,
+                toolMessageJson
+                    + "\"toolResultMetadata\":{\"assistantEntryId\":\""
+                    + UUID_2
+                    + "\",\"toolCallId\":\"call-1\",\"callIndex\":0,\"status\":\"UNKNOWN\",\"synthetic\":true,\"reason\":\"HISTORY_CUT\",\"inputReceipt\":null,\"invocationId\":null,\"binding\":"
+                    + validBindingJson
+                    + "}}"));
   }
 
   @Test

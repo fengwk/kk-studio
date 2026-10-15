@@ -152,6 +152,7 @@ class ResolvedRequestValidatorTest {
       List<SubagentBinding> subagents,
       ProviderCacheControl cacheControl) {
     return new ModelRequestSpec(
+        1L,
         ProviderType.OPENAI,
         new UUID(0L, 1L),
         new ModelDescriptor(
@@ -171,11 +172,13 @@ class ResolvedRequestValidatorTest {
 
   private static ToolBinding environmentTool(EnvironmentId environment) {
     return new ToolBinding(
+        1L,
         toolDefinition("test.fs"),
         new ContributorBinding("base", "fs", List.of()),
         EnvironmentSupport.REQUIRED,
         environment,
-        "dev");
+        "dev",
+        null);
   }
 
   private static AgentToolDefinition toolDefinition(String id) {

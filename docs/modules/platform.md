@@ -107,11 +107,18 @@ URL 与 headers 仅在显式配置查询中以 `no-store` 返回，变量占位�
 原子替换该 server 的工具行；失败保留整批旧目录，Agent 引用保护仍生效。
 
 [`RuntimeToolCatalogConfiguration`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/tool/RuntimeToolCatalogConfiguration.java)
-组合静态 `HarnessToolCatalogAdapter` 与现读数据库的 `McpToolCatalog`。
+发布 `RuntimeToolCatalogSource` 与动态 `McpToolCatalog`。每次 current 或历史 epoch 租用
+钉住 `PluginCatalogRuntime` 的同版本快照，同时一次读取 MCP 的 planning 与 selectable 事实，
+冻结为不可变目录；后续查找不再读库。Harness 插件来源来自该快照的 owner map、配置及凭据身份。
 重复模型可见工具名使查询失败关闭。MCP 可选面要求 server enabled 且 AVAILABLE；
 查找面按已持久化工具行返回定义，调用前再复验 server 状态与归属。
 远端 MCP 工具使用 `EnvironmentSupport.NONE`、`NON_IDEMPOTENT`，deadline 覆盖初始化和调用。
 客户端行为见 [Harness MCP](harness-mcp.md)。
+
+执行网关按 binding 的 epoch 取历史租用，逐项校验完整定义、贡献身份、requirements 与插件来源；
+不会按当前同名工具替换旧执行语义。MCP 没有独立历史快照，旧 binding 与现读定义不一致时拒绝执行。
+成功启动后，目录租用持续到终态或取消决议、执行体退出及句柄静止同时成立；
+取消先于启动时不进入工具执行体。违反静止契约的句柄产生 UNKNOWN，无法确认静止时保留资源租用。
 
 ## 命令接受、产品归属与派发
 
@@ -124,7 +131,7 @@ Runtime 在自己的 lease 所有权短事务内直接持久 `READY -> DISPATCHI
 
 ## Model 与 Tool 执行
 
-`DatabaseTurnResolver` 每个 live turn 现读 Catalog，只按该分支冻结/提交的 Agent、Model、Variant、
+`DatabaseTurnResolver` 每个 live turn 持有一次 current epoch 租用完成全部规划，只按该分支冻结/提交的 Agent、Model、Variant、
 Environment、工具、Skill 和 subagents 规划；它不判断 Thread 属于哪个 Issue/Chat，也不据此覆写
 Environment 或注入工具——Issue Run 的 Agent/Model/Environment、业务工具与身份上下文都在接受 Run 时
 显式提交或冻结到 branch state。缺失引用返回规划失败。

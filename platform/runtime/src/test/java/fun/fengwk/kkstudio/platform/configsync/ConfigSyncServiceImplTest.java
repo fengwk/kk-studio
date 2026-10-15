@@ -24,6 +24,7 @@ import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitCache;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
+import fun.fengwk.kkstudio.platform.testing.TestCatalogSources;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncExportRequestDTO;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncImportCheckDTO;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncImportCheckRequestDTO;
@@ -70,7 +71,7 @@ class ConfigSyncServiceImplTest {
           skillGitCache,
           agentDefinitionRepository,
           mcpServerRepository,
-          toolCatalog,
+          TestCatalogSources.singleLease(toolCatalog),
           ConfigSyncFixtures.MODEL_CONFIG_PARSER);
 
   private final ConfigSyncServiceImpl service =

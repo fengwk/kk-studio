@@ -8,7 +8,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
-import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
+import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -128,7 +128,7 @@ class HarnessCatalogArchitectureTest {
       assertTrue(Files.isRegularFile(consumer), "consumer file must exist: " + consumer);
       String source = Files.readString(consumer, StandardCharsets.UTF_8);
       assertTrue(
-          source.contains("import " + RuntimeToolCatalog.class.getName() + ";"),
+          source.contains("import " + RuntimeToolCatalogSource.class.getName() + ";"),
           consumer + " must import RuntimeToolCatalog");
     }
     for (Path consumer : allConsumers) {
@@ -165,18 +165,9 @@ class HarnessCatalogArchitectureTest {
       assertFalse(
           source.contains("harnessCatalog.tools()"),
           consumer + " must not list tools via harnessCatalog.tools()");
-      assertFalse(
-          source.contains("catalog.findTool"),
-          consumer + " must not look up tools via catalog.findTool");
-      assertFalse(
-          source.contains("catalog.selectableTools"),
-          consumer + " must not list tools via catalog.selectableTools");
-      assertFalse(
-          source.contains("catalog.tools()"),
-          consumer + " must not list tools via catalog.tools()");
       assertTrue(
-          source.contains("toolCatalog.findTool"),
-          consumer + " must look up tools via toolCatalog.findTool");
+          source.contains("toolCatalogSource.acquire"),
+          consumer + " must acquire an epoch lease before accessing tools");
     }
 
     // 确认保留的 HarnessCatalog 在两个消费方中具体使用的非工具元数据能力
@@ -201,19 +192,15 @@ class HarnessCatalogArchitectureTest {
             main.resolve(
                     "fun/fengwk/kkstudio/platform/harness/thread/command/DatabaseTurnResolver.java")
                 .normalize(),
-            main.resolve("fun/fengwk/kkstudio/platform/catalog/tool/HarnessToolCatalogAdapter.java")
+            main.resolve(
+                    "fun/fengwk/kkstudio/platform/catalog/tool/PluginRuntimeToolCatalogSource.java")
                 .normalize(),
             main.resolve("fun/fengwk/kkstudio/platform/plugin/catalog/PluginCatalogSnapshot.java")
                 .normalize(),
             main.resolve(
                     "fun/fengwk/kkstudio/platform/plugin/catalog/PluginCatalogFingerprint.java")
                 .normalize(),
-            main.resolve(
-                    "fun/fengwk/kkstudio/platform/catalog/tool/RuntimeToolCatalogConfiguration.java")
-                .normalize(),
-            main.resolve(
-                    "fun/fengwk/kkstudio/platform/harness/tool/gateway/"
-                        + "HarnessToolGatewayConfiguration.java")
+            main.resolve("fun/fengwk/kkstudio/platform/catalog/tool/RuntimeToolCatalogSource.java")
                 .normalize(),
             main.resolve(
                     "fun/fengwk/kkstudio/platform/harness/tool/gateway/ToolExecutionGateway.java")

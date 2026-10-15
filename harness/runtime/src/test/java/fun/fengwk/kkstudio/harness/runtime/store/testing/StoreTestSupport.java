@@ -305,7 +305,15 @@ final class StoreTestSupport {
             toolCallId, "bash", rendererKey, List.of(new TextMessageContent("ok")), false, "{}");
     ToolResultMetadata metadata =
         new ToolResultMetadata(
-            toolInvocationId, assistantEntryId, toolCallId, callIndex, status, false, null, null);
+            toolInvocationId,
+            assistantEntryId,
+            toolCallId,
+            callIndex,
+            status,
+            false,
+            null,
+            null,
+            null);
     return new MessagePayload(
         new AgentMessage(AgentMessageRole.TOOL, List.of(content)), null, metadata);
   }
@@ -325,6 +333,7 @@ final class StoreTestSupport {
             ToolResultStatus.UNKNOWN,
             true,
             ToolResultReason.HISTORY_CUT,
+            null,
             null);
     return new MessagePayload(
         new AgentMessage(AgentMessageRole.TOOL, List.of(content)), null, metadata);
@@ -571,6 +580,7 @@ final class StoreTestSupport {
     AgentToolDefinition definition = invocation.binding().definition();
     ToolBinding binding =
         new ToolBinding(
+            1L,
             new AgentToolDefinition(
                 new ToolDescriptor(
                     descriptor.name(),
@@ -583,7 +593,8 @@ final class StoreTestSupport {
             invocation.binding().contributor(),
             invocation.binding().environmentSupport(),
             invocation.binding().environmentId(),
-            invocation.binding().environmentName());
+            invocation.binding().environmentName(),
+            null);
     return new ToolInvocation(
         invocation.id(),
         invocation.modelInvocationId(),
@@ -608,6 +619,7 @@ final class StoreTestSupport {
   static ModelRequestSpec modelRequest() {
     ProviderRequest provider = providerRequest();
     return new ModelRequestSpec(
+        1L,
         ProviderType.OPENAI,
         new UUID(0L, 1L),
         provider.model(),
@@ -623,6 +635,7 @@ final class StoreTestSupport {
   static ModelRequestSpec succeededRequest() {
     ModelRequestSpec base = modelRequest();
     return new ModelRequestSpec(
+        1L,
         base.providerType(),
         base.providerConnectionGenerationId(),
         base.model(),
@@ -638,6 +651,7 @@ final class StoreTestSupport {
   static ModelRequestSpec askUserRequest() {
     ModelRequestSpec base = modelRequest();
     return new ModelRequestSpec(
+        1L,
         base.providerType(),
         base.providerConnectionGenerationId(),
         base.model(),
@@ -710,6 +724,7 @@ final class StoreTestSupport {
   /** 内置 contributor 贡献的 {@code ask_user}：只有该 provenance 才会被运行时视为人工输入等待。 */
   static ToolBinding askUserBinding() {
     return new ToolBinding(
+        1L,
         new AgentToolDefinition(
             new ToolDescriptor(
                 "ask_user",
@@ -722,14 +737,17 @@ final class StoreTestSupport {
         new ContributorBinding("builtin", "ask-user", List.of()),
         EnvironmentSupport.NONE,
         null,
+        null,
         null);
   }
 
   static ToolBinding hostBinding() {
     return new ToolBinding(
+        1L,
         new AgentToolDefinition(toolDescriptor("bash"), ToolVisibility.SELECTABLE),
         new ContributorBinding("core", "bash", List.of()),
         EnvironmentSupport.NONE,
+        null,
         null,
         null);
   }

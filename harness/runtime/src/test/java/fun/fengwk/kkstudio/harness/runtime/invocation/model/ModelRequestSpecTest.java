@@ -60,6 +60,7 @@ class ModelRequestSpecTest {
         new ArrayList<>(List.of(new SubagentBinding("reviewer", "Review changes")));
     ModelRequestSpec spec =
         new ModelRequestSpec(
+            1L,
             ProviderType.OPENAI,
             CONNECTION_GENERATION_ID,
             modelDescriptor(),
@@ -85,6 +86,7 @@ class ModelRequestSpecTest {
         IllegalArgumentException.class,
         () ->
             new ModelRequestSpec(
+                1L,
                 ProviderType.OPENAI,
                 CONNECTION_GENERATION_ID,
                 modelDescriptor(),
@@ -98,6 +100,7 @@ class ModelRequestSpecTest {
         IllegalArgumentException.class,
         () ->
             new ModelRequestSpec(
+                1L,
                 ProviderType.OPENAI,
                 CONNECTION_GENERATION_ID,
                 modelDescriptor(),
@@ -111,6 +114,7 @@ class ModelRequestSpecTest {
         IllegalArgumentException.class,
         () ->
             new ModelRequestSpec(
+                1L,
                 ProviderType.OPENAI,
                 CONNECTION_GENERATION_ID,
                 modelDescriptor(),
@@ -131,16 +135,20 @@ class ModelRequestSpecTest {
     // 不同 contributor 提供的同名工具同样拒绝：模型可见 tool name 唯一。
     ToolBinding tool1 =
         new ToolBinding(
+            1L,
             new AgentToolDefinition(toolDescriptor("bash"), ToolVisibility.SELECTABLE),
             new ContributorBinding("core", "bash", List.of()),
             EnvironmentSupport.NONE,
             null,
+            null,
             null);
     ToolBinding tool2 =
         new ToolBinding(
+            1L,
             new AgentToolDefinition(toolDescriptor("bash"), ToolVisibility.SELECTABLE),
             new ContributorBinding("other", "bash", List.of()),
             EnvironmentSupport.NONE,
+            null,
             null,
             null);
     assertThrows(IllegalArgumentException.class, () -> spec(List.of(tool1, tool2), List.of()));
@@ -167,11 +175,13 @@ class ModelRequestSpecTest {
     // REQUIRED 与携带不同环境的 OPTIONAL 混用必须被拒绝
     ToolBinding optionalWithDifferentEnv =
         new ToolBinding(
+            1L,
             new AgentToolDefinition(toolDescriptor("optional_tool"), ToolVisibility.SELECTABLE),
             new ContributorBinding("core", "optional", List.of()),
             EnvironmentSupport.OPTIONAL,
             other,
-            "other-env");
+            "other-env",
+            null);
     assertThrows(
         IllegalArgumentException.class,
         () -> spec(List.of(environment("fs", ENV_ID), optionalWithDifferentEnv), List.of()));
@@ -179,11 +189,13 @@ class ModelRequestSpecTest {
     // 两个携带不同环境的 OPTIONAL 混用也必须被拒绝
     ToolBinding optionalWithEnv1 =
         new ToolBinding(
+            1L,
             new AgentToolDefinition(toolDescriptor("optional1"), ToolVisibility.SELECTABLE),
             new ContributorBinding("core", "opt1", List.of()),
             EnvironmentSupport.OPTIONAL,
             ENV_ID,
-            "dev");
+            "dev",
+            null);
     assertThrows(
         IllegalArgumentException.class,
         () -> spec(List.of(optionalWithEnv1, optionalWithDifferentEnv), List.of()));
@@ -194,16 +206,20 @@ class ModelRequestSpecTest {
   void permitsConsistentEnvironmentCombinationsAcrossSupportTypes() {
     ToolBinding optionalWithSameEnv =
         new ToolBinding(
+            1L,
             new AgentToolDefinition(toolDescriptor("optional_tool"), ToolVisibility.SELECTABLE),
             new ContributorBinding("core", "optional", List.of()),
             EnvironmentSupport.OPTIONAL,
             ENV_ID,
-            "dev");
+            "dev",
+            null);
     ToolBinding optionalWithoutEnv =
         new ToolBinding(
+            1L,
             new AgentToolDefinition(toolDescriptor("optional_unbound"), ToolVisibility.SELECTABLE),
             new ContributorBinding("core", "unbound", List.of()),
             EnvironmentSupport.OPTIONAL,
+            null,
             null,
             null);
 
@@ -220,12 +236,79 @@ class ModelRequestSpecTest {
   }
 
   @Test
+  void enforcesCatalogEpochInvariantsAndConsistency() {
+    // catalogEpoch <= 0 必须被拒绝
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ModelRequestSpec(
+                0L,
+                ProviderType.OPENAI,
+                CONNECTION_GENERATION_ID,
+                modelDescriptor(),
+                variant(),
+                1024,
+                "Test system instruction.",
+                List.of(),
+                List.of(),
+                ProviderCacheControl.none()));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ModelRequestSpec(
+                -1L,
+                ProviderType.OPENAI,
+                CONNECTION_GENERATION_ID,
+                modelDescriptor(),
+                variant(),
+                1024,
+                "Test system instruction.",
+                List.of(),
+                List.of(),
+                ProviderCacheControl.none()));
+
+    // toolBinding 的 catalogEpoch 必须与 requestSpec 的 catalogEpoch 一致
+    ToolBinding epoch1Binding = host("bash"); // default epoch 1L
+    assertEquals(1L, epoch1Binding.catalogEpoch());
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ModelRequestSpec(
+                2L,
+                ProviderType.OPENAI,
+                CONNECTION_GENERATION_ID,
+                modelDescriptor(),
+                variant(),
+                1024,
+                "Test system instruction.",
+                List.of(epoch1Binding),
+                List.of(),
+                ProviderCacheControl.none()));
+
+    // 同 epoch 合法构造
+    assertDoesNotThrow(
+        () ->
+            new ModelRequestSpec(
+                1L,
+                ProviderType.OPENAI,
+                CONNECTION_GENERATION_ID,
+                modelDescriptor(),
+                variant(),
+                1024,
+                "Test system instruction.",
+                List.of(epoch1Binding),
+                List.of(),
+                ProviderCacheControl.none()));
+  }
+
+  @Test
   void rejectsNullFacts() {
     // 所有冻结事实必须显式存在；空能力用空列表表达。
     assertThrows(
         NullPointerException.class,
         () ->
             new ModelRequestSpec(
+                1L,
                 null,
                 CONNECTION_GENERATION_ID,
                 modelDescriptor(),
@@ -239,6 +322,7 @@ class ModelRequestSpecTest {
         NullPointerException.class,
         () ->
             new ModelRequestSpec(
+                1L,
                 ProviderType.OPENAI,
                 null,
                 modelDescriptor(),
@@ -252,6 +336,7 @@ class ModelRequestSpecTest {
         NullPointerException.class,
         () ->
             new ModelRequestSpec(
+                1L,
                 ProviderType.OPENAI,
                 CONNECTION_GENERATION_ID,
                 null,
@@ -265,6 +350,7 @@ class ModelRequestSpecTest {
         NullPointerException.class,
         () ->
             new ModelRequestSpec(
+                1L,
                 ProviderType.OPENAI,
                 CONNECTION_GENERATION_ID,
                 modelDescriptor(),
@@ -278,6 +364,7 @@ class ModelRequestSpecTest {
         NullPointerException.class,
         () ->
             new ModelRequestSpec(
+                1L,
                 ProviderType.OPENAI,
                 CONNECTION_GENERATION_ID,
                 modelDescriptor(),
@@ -291,6 +378,7 @@ class ModelRequestSpecTest {
 
   private static ModelRequestSpec spec(List<ToolBinding> tools, List<SubagentBinding> subagents) {
     return new ModelRequestSpec(
+        1L,
         ProviderType.OPENAI,
         CONNECTION_GENERATION_ID,
         modelDescriptor(),

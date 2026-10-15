@@ -114,9 +114,8 @@ import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogQueryService;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
-import fun.fengwk.kkstudio.platform.catalog.tool.CompositeRuntimeToolCatalog;
-import fun.fengwk.kkstudio.platform.catalog.tool.HarnessToolCatalogAdapter;
-import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
+import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
+import fun.fengwk.kkstudio.platform.catalog.tool.TestRuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentSkillState;
@@ -1110,9 +1109,8 @@ class DatabaseTurnResolverTest {
                     0));
     HarnessCatalog catalogWithProjector = HarnessCatalog.from(List.of(projectorContributor));
 
-    RuntimeToolCatalog composite =
-        new CompositeRuntimeToolCatalog(
-            List.of(new HarnessToolCatalogAdapter(catalogWithProjector), mcpCatalog));
+    RuntimeToolCatalogSource toolCatalogSource =
+        TestRuntimeToolCatalogSource.of(catalogWithProjector, mcpCatalog);
 
     Fixture fixture =
         new Fixture(
@@ -1125,7 +1123,7 @@ class DatabaseTurnResolverTest {
             PromptCacheRetention.NONE,
             true,
             catalogWithProjector,
-            composite,
+            toolCatalogSource,
             Clock.fixed(NOW, ZoneOffset.UTC));
 
     EntryPath path = fixture.path(settings("default"));
@@ -1167,9 +1165,8 @@ class DatabaseTurnResolverTest {
         when(repo.listTools("srv")).thenReturn(List.of(echo, sibling));
 
         McpToolCatalog mcpCatalog = new McpToolCatalog(repo, mock(ExecutorService.class));
-        RuntimeToolCatalog composite =
-            new CompositeRuntimeToolCatalog(
-                List.of(new HarnessToolCatalogAdapter(staticCatalog), mcpCatalog));
+        RuntimeToolCatalogSource toolCatalogSource =
+            TestRuntimeToolCatalogSource.of(staticCatalog, mcpCatalog);
 
         // 可选面（UI/配置选择）仍严格按 enabled + AVAILABLE 收窄：该 server 不满足时两个工具都不可见，
         // 但它们依然在下面的 planning 中被解析并冻结。
@@ -1192,7 +1189,7 @@ class DatabaseTurnResolverTest {
                 PromptCacheRetention.NONE,
                 true,
                 staticCatalog,
-                composite,
+                toolCatalogSource,
                 Clock.fixed(NOW, ZoneOffset.UTC));
         fixture.readyEnvironment(ENV_A);
 
@@ -1215,11 +1212,9 @@ class DatabaseTurnResolverTest {
     // 反例边界：工具行真正不存在时 planning 仍必须 fail closed，绝不因可用性与定义解耦而合成任何定义。
     McpServerRepository emptyRepo = mock(McpServerRepository.class);
     when(emptyRepo.getTool("mcp_srv_echo")).thenReturn(Optional.empty());
-    RuntimeToolCatalog emptyComposite =
-        new CompositeRuntimeToolCatalog(
-            List.of(
-                new HarnessToolCatalogAdapter(staticCatalog),
-                new McpToolCatalog(emptyRepo, mock(ExecutorService.class))));
+    RuntimeToolCatalogSource missingToolSource =
+        TestRuntimeToolCatalogSource.of(
+            staticCatalog, new McpToolCatalog(emptyRepo, mock(ExecutorService.class)));
     Fixture missingToolFixture =
         new Fixture(
             List.of("mcp_srv_echo"),
@@ -1231,7 +1226,7 @@ class DatabaseTurnResolverTest {
             PromptCacheRetention.NONE,
             true,
             staticCatalog,
-            emptyComposite,
+            missingToolSource,
             Clock.fixed(NOW, ZoneOffset.UTC));
     missingToolFixture.readyEnvironment(ENV_A);
     assertEquals(
@@ -3041,7 +3036,7 @@ class DatabaseTurnResolverTest {
         PromptCacheRetention promptCacheRetention,
         boolean includeProviderFactory,
         HarnessCatalog providedCatalog,
-        RuntimeToolCatalog providedToolCatalog,
+        RuntimeToolCatalogSource providedToolCatalogSource,
         Clock clock) {
       agent.setName("assistant");
       agent.setSystemPrompt("agent system prompt");
@@ -3151,10 +3146,10 @@ class DatabaseTurnResolverTest {
         catalog = HarnessCatalog.from(contributors);
       }
 
-      RuntimeToolCatalog toolCatalog =
-          providedToolCatalog != null
-              ? providedToolCatalog
-              : new HarnessToolCatalogAdapter(catalog);
+      RuntimeToolCatalogSource toolCatalogSource =
+          providedToolCatalogSource != null
+              ? providedToolCatalogSource
+              : TestRuntimeToolCatalogSource.of(catalog);
 
       resolver =
           new DatabaseTurnResolver(
@@ -3164,8 +3159,7 @@ class DatabaseTurnResolverTest {
               agentConfigCodec,
               modelConfigParser,
               new ProviderFactories(factories),
-              toolCatalog,
-              catalog,
+              toolCatalogSource,
               environmentRegistry,
               environmentRepository,
               skillCatalogQueryService,

@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.catalog.mcp.runtime;
 import lombok.extern.slf4j.Slf4j;
 
 import fun.fengwk.kkstudio.harness.builtin.CompletedToolExecutionHandle;
+import fun.fengwk.kkstudio.harness.common.concurrent.QuiescentFutureTask;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;
@@ -29,8 +30,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BiFunction;
 import java.util.function.Function;
@@ -133,8 +134,9 @@ public final class RemoteMcpExecutableTool implements Tool {
     McpCancellationToken token = new McpCancellationToken();
     AtomicBoolean completed = new AtomicBoolean(false);
 
-    Future<?> worker =
-        executor.submit(
+    // 真实静止事实来自 run-finally：MCP client 的关闭在工作体退出时发生，取消不得提前宣告本地资源静止。
+    QuiescentFutureTask<Void> worker =
+        new QuiescentFutureTask<>(
             () -> {
               try {
                 Map<String, String> resolvedHeaders =
@@ -177,6 +179,7 @@ public final class RemoteMcpExecutableTool implements Tool {
                 }
               }
             });
+    executor.execute(worker);
 
     return new ToolExecutionHandle() {
       @Override
@@ -188,6 +191,11 @@ public final class RemoteMcpExecutableTool implements Tool {
       @Override
       public boolean isCancelled() {
         return token.isCancelled();
+      }
+
+      @Override
+      public CompletionStage<Void> quiescence() {
+        return worker.quiescence();
       }
     };
   }

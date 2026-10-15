@@ -81,9 +81,11 @@ class HistoryPayloadMapperTest {
             List.of(
                 binding(),
                 new ToolBinding(
+                    1L,
                     definition("grep"),
                     new ContributorBinding("core", "grep", List.of()),
                     EnvironmentSupport.NONE,
+                    null,
                     null,
                     null)));
     assertEquals(4, payload.message().contents().size());
@@ -209,9 +211,11 @@ class HistoryPayloadMapperTest {
             response,
             List.of(
                 new ToolBinding(
+                    1L,
                     definition("grep"),
                     new ContributorBinding("core", "grep", List.of()),
                     EnvironmentSupport.NONE,
+                    null,
                     null,
                     null)));
     ToolCallMessageContent unboundCall =
@@ -239,11 +243,13 @@ class HistoryPayloadMapperTest {
             "{}");
     ToolBinding environmentBinding =
         new ToolBinding(
+            1L,
             definition("fs_read"),
             new ContributorBinding("core", "fs.read", List.of()),
             EnvironmentSupport.REQUIRED,
             new EnvironmentId(id(1)),
-            "dev");
+            "dev",
+            null);
 
     MessagePayload payload = MAPPER.assistantPayload(response, List.of(environmentBinding));
 
@@ -297,6 +303,7 @@ class HistoryPayloadMapperTest {
     assertEquals("{\"a\":1}", ((JsonMessageContent) result.contents().get(1)).json());
     ToolResultMetadata metadata = payload.toolResultMetadata();
     assertEquals(ToolResultStatus.SUCCEEDED, metadata.status());
+    assertEquals(invocation.binding(), metadata.binding());
     assertEquals(id(7L), metadata.assistantEntryId());
     assertEquals(3, metadata.callIndex());
     assertEquals("call-1", metadata.toolCallId());
@@ -347,6 +354,7 @@ class HistoryPayloadMapperTest {
     assertEquals(new UUID(0L, 1L), mapped.blobId());
     assertEquals("report.txt", mapped.name());
     assertEquals("complete preview", mapped.preview());
+    assertEquals(invocation.binding(), payload.toolResultMetadata().binding());
   }
 
   @Test
@@ -378,6 +386,7 @@ class HistoryPayloadMapperTest {
       ToolInvocationError decoded = new ToolInvocationErrorJsonCodec().decode(result.detailsJson());
       assertEquals("KIND_X", decoded.kind());
       assertEquals("boom", decoded.message());
+      assertEquals(invocation.binding(), payload.toolResultMetadata().binding());
       assertEquals(
           switch (status) {
             case FAILED -> ToolResultStatus.FAILED;
@@ -456,6 +465,7 @@ class HistoryPayloadMapperTest {
     assertEquals(ToolResultStatus.UNKNOWN, metadata.status());
     assertTrue(metadata.synthetic());
     assertEquals(ToolResultReason.HISTORY_CUT, metadata.reason());
+    assertNull(metadata.binding());
     ToolResultMessageContent result =
         (ToolResultMessageContent) payload.message().contents().get(0);
     assertTrue(result.error());
@@ -482,6 +492,7 @@ class HistoryPayloadMapperTest {
             NOW,
             NOW);
     MessagePayload payload = MAPPER.toolResultPayload(invocation);
+    assertNull(payload.toolResultMetadata().binding());
     ToolResultMessageContent result =
         (ToolResultMessageContent) payload.message().contents().get(0);
     assertEquals("tool", result.rendererKey());
@@ -576,9 +587,11 @@ class HistoryPayloadMapperTest {
 
   private static ToolBinding binding() {
     return new ToolBinding(
+        1L,
         definition("bash"),
         new ContributorBinding("core", "bash", List.of()),
         EnvironmentSupport.NONE,
+        null,
         null,
         null);
   }

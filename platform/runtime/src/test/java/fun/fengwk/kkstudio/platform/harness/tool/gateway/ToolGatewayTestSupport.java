@@ -53,8 +53,8 @@ import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
-import fun.fengwk.kkstudio.platform.catalog.tool.HarnessToolCatalogAdapter;
-import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
+import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
+import fun.fengwk.kkstudio.platform.catalog.tool.TestRuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.platform.harness.contributor.ContributorBranchViewLoader;
 import fun.fengwk.kkstudio.platform.testing.TestEnvironments;
@@ -73,6 +73,8 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.AbstractExecutorService;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -181,9 +183,11 @@ final class ToolGatewayTestSupport {
     return new ToolInvocationRequest(
         new ToolCall(callId, descriptor.name(), "{}"),
         new ToolBinding(
+            1L,
             new AgentToolDefinition(descriptor, ToolVisibility.SELECTABLE),
             new ContributorBinding("test", "host-tool", List.of()),
             EnvironmentSupport.NONE,
+            null,
             null,
             null));
   }
@@ -207,11 +211,13 @@ final class ToolGatewayTestSupport {
     return new ToolInvocationRequest(
         new ToolCall(callId, "bash", argumentsJson),
         new ToolBinding(
+            1L,
             bashContribution.definition(),
             contributor,
             EnvironmentSupport.REQUIRED,
             environmentId,
-            "test-env"));
+            "test-env",
+            null));
   }
 
   /** branch 未选择 Environment 的环境工具请求：environmentRequired=true 但路由身份为 null。 */
@@ -224,6 +230,7 @@ final class ToolGatewayTestSupport {
             bashContribution.id().localName(),
             List.of());
     ToolBinding binding = mock(ToolBinding.class);
+    when(binding.catalogEpoch()).thenReturn(1L);
     when(binding.definition()).thenReturn(bashContribution.definition());
     when(binding.descriptor()).thenReturn(bashContribution.definition().descriptor());
     when(binding.contributor()).thenReturn(contributor);
@@ -293,8 +300,7 @@ final class ToolGatewayTestSupport {
       ToolSettings settings,
       ConcurrencyAdmission admission) {
     return gateway(
-        new HarnessToolCatalogAdapter(catalog),
-        catalog,
+        TestRuntimeToolCatalogSource.of(catalog),
         transport,
         store,
         executor,
@@ -304,8 +310,7 @@ final class ToolGatewayTestSupport {
   }
 
   static ToolExecutionGateway gateway(
-      RuntimeToolCatalog toolCatalog,
-      HarnessCatalog catalog,
+      RuntimeToolCatalogSource toolCatalogSource,
       FakeTransport transport,
       FakeResourceStore store,
       ExecutorService executor,
@@ -313,8 +318,7 @@ final class ToolGatewayTestSupport {
       ToolSettings settings,
       ConcurrencyAdmission admission) {
     return new ToolExecutionGateway(
-        toolCatalog,
-        catalog,
+        toolCatalogSource,
         DEFAULT_CONTRIBUTOR_BRANCH_LOADER,
         transport,
         new PermissionEvaluator(new BashSurfaceAnalyzer()),
@@ -336,8 +340,7 @@ final class ToolGatewayTestSupport {
       ExecutorService executor,
       ToolSettings settings) {
     return new ToolExecutionGateway(
-        new HarnessToolCatalogAdapter(catalog),
-        catalog,
+        TestRuntimeToolCatalogSource.of(catalog),
         DEFAULT_CONTRIBUTOR_BRANCH_LOADER,
         transport,
         new PermissionEvaluator(new BashSurfaceAnalyzer()),
@@ -459,6 +462,12 @@ final class ToolGatewayTestSupport {
     @Override
     public boolean isCancelled() {
       return cancelled.get();
+    }
+
+    @Override
+    public CompletionStage<Void> quiescence() {
+      // 该替身只作为 Environment capability transport 句柄出现：网关为纯转发句柄，本地静止立即成立。
+      return CompletableFuture.completedFuture(null);
     }
   }
 

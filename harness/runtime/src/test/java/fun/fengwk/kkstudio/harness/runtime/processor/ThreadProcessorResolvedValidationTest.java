@@ -129,6 +129,7 @@ class ThreadProcessorResolvedValidationTest extends ThreadProcessorTestBase {
   private static ModelRequestSpec requestWithEnvironmentTool(BranchSettings settings) {
     ToolBinding environmentTool =
         new ToolBinding(
+            1L,
             new AgentToolDefinition(
                 new ToolDescriptor(
                     "fs",
@@ -141,8 +142,10 @@ class ThreadProcessorResolvedValidationTest extends ThreadProcessorTestBase {
             new ContributorBinding("base", "fs", List.of()),
             EnvironmentSupport.REQUIRED,
             EnvironmentId.parse("11111111-1111-1111-1111-111111111111"),
-            "dev");
+            "dev",
+            null);
     return new ModelRequestSpec(
+        1L,
         ProviderType.OPENAI,
         new UUID(0L, 1L),
         new ModelDescriptor(

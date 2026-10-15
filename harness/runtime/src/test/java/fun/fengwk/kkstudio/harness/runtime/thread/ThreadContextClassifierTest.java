@@ -845,6 +845,7 @@ class ThreadContextClassifierTest {
 
   private static ModelRequestSpec modelRequest() {
     return new ModelRequestSpec(
+        1L,
         ProviderType.OPENAI,
         new UUID(0L, 1L),
         modelDescriptor(),
@@ -858,6 +859,7 @@ class ThreadContextClassifierTest {
 
   private static ToolBinding toolBinding() {
     return new ToolBinding(
+        1L,
         new AgentToolDefinition(
             new ToolDescriptor(
                 "bash",
@@ -869,6 +871,7 @@ class ThreadContextClassifierTest {
             ToolVisibility.SELECTABLE),
         new ContributorBinding("core", "bash", List.of()),
         EnvironmentSupport.NONE,
+        null,
         null,
         null);
   }

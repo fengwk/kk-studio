@@ -854,7 +854,15 @@ class HarnessCommandAcceptanceOrchestratorTest {
             new AgentMessage(AgentMessageRole.TOOL, List.of(result)),
             null,
             new ToolResultMetadata(
-                id(72), ENTRY_ID, "call-1", 0, ToolResultStatus.SUCCEEDED, false, null, null)),
+                id(72),
+                ENTRY_ID,
+                "call-1",
+                0,
+                ToolResultStatus.SUCCEEDED,
+                false,
+                null,
+                null,
+                null)),
         NOW);
   }
 
