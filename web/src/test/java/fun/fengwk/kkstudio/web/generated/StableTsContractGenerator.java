@@ -396,7 +396,10 @@ final class StableTsContractGenerator {
     return properties;
   }
 
-  /** 根类型只支持字段直出的 DTO：class 级定制序列化、类型信息、@JsonValue/@JsonUnwrapped 都会改变真实 wire 形态。 */
+  /**
+   * 根类型只支持字段直出的 DTO：class 级定制序列化/格式化、类型信息、动态属性、@JsonValue/@JsonUnwrapped 都会改变真实 wire
+   * 形态，因此固定失败；默认注解形态（例如 {@code @JsonFormat(shape = ANY)}）不受影响。
+   */
   private void requireSupportedRootShape(ObjectSpec spec, BeanDescription bean) {
     AnnotatedClass classInfo = bean.getClassInfo();
     if (classInfo.getAnnotation(JsonTypeInfo.class) != null) {
@@ -411,10 +414,23 @@ final class StableTsContractGenerator {
               + " declares a class-level @JsonSerialize customization, which is not supported by the"
               + " generated contract");
     }
+    JsonFormat classFormat = classInfo.getAnnotation(JsonFormat.class);
+    if (classFormat != null && !isDefaultAnnotation(classFormat, JSON_FORMAT_MEMBERS)) {
+      throw new IllegalStateException(
+          spec.tsName()
+              + " declares a class-level @JsonFormat shape/date customization, which is not supported"
+              + " by the generated contract");
+    }
     if (bean.findJsonValueAccessor() != null) {
       throw new IllegalStateException(
           spec.tsName()
               + " declares @JsonValue, which is not supported for a generated object contract");
+    }
+    if (bean.findAnyGetter() != null) {
+      throw new IllegalStateException(
+          spec.tsName()
+              + " declares @JsonAnyGetter, whose dynamic properties are not supported by the generated"
+              + " contract");
     }
     for (BeanPropertyDefinition property : bean.findProperties()) {
       for (AnnotatedMember member : members(property)) {
