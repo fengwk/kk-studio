@@ -54,6 +54,7 @@ import fun.fengwk.kkstudio.platform.plugin.prompt.PluginPromptResources;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
@@ -136,11 +137,12 @@ class PluginPromptTaskServiceTest {
         "<system-reminder>\nsystem\n</system-reminder>\n\n",
         ((TextMessageContent) submitted.contents().getFirst()).text());
     assertEquals("prompt", ((TextMessageContent) submitted.contents().get(1)).text());
-    // 重启后只凭持久化的任务句柄就能恢复同一 join。
+    // 任务句柄与固定 invocation 的已定义派生关系不能随实现重构而改变。
     assertEquals(
+        UUID.nameUUIDFromBytes(
+            ("kk-studio/harness/oneshot/" + taskId).getBytes(StandardCharsets.UTF_8)),
         PluginPromptTaskService.invocationId(taskId),
-        PluginPromptTaskService.invocationId(taskId),
-        "the durable task handle must deterministically recover the same join");
+        "the durable task handle must preserve its join identity");
     assertEquals(join.getValue().requestHash(), command.getValue().commands().get(0).requestHash());
   }
 
