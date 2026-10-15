@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -13,9 +12,6 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ObjectNode;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.lang.reflect.Field;
 import java.util.List;
 import java.util.function.LongFunction;
 
@@ -23,15 +19,13 @@ import java.util.function.LongFunction;
 class OpenCliSettingsTest {
 
   private static final JsonMapper MAPPER = JsonMapper.builder().build();
-  private static final OpenCliSettings.GptImage2 DEFAULT_GPT = OpenCliSettings.GptImage2.DEFAULT;
-  private static final OpenCliSettings.Seedance DEFAULT_SEEDANCE = OpenCliSettings.Seedance.DEFAULT;
 
   @Test
   void defaultValuesMatchBaseline() {
-    OpenCliSettings s = OpenCliSettings.DEFAULT;
+    // 默认值来自真实 schema：本断言是默认值与契约基线一致性的唯一出处。
+    OpenCliSettings s = OpenCliTestSettings.defaults();
     assertFalse(s.enabled());
     assertNull(s.baseUrl());
-    assertNull(s.instanceId());
     assertEquals(5000L, s.connectTimeoutMillis());
     assertEquals(120000L, s.requestTimeoutMillis());
     assertEquals(130000L, s.longPollTimeoutMillis());
@@ -59,7 +53,6 @@ class OpenCliSettingsTest {
         new OpenCliSettings(
             true,
             "https://hub.example.com",
-            "inst-123",
             10000L,
             60000L,
             150000L,
@@ -72,14 +65,13 @@ class OpenCliSettingsTest {
 
     assertTrue(settings.enabled());
     assertEquals("https://hub.example.com", settings.baseUrl());
-    assertEquals("inst-123", settings.instanceId());
     assertEquals(10000L, settings.connectTimeoutMillis());
     assertEquals("ws-1", settings.seedance().workspaceId());
   }
 
   @Test
   void baseUrlValidation() {
-    assertThatThrownBy(() -> create(true, null, null))
+    assertThatThrownBy(() -> create(true, null))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("baseUrl is required when opencli is enabled");
 
@@ -94,7 +86,7 @@ class OpenCliSettingsTest {
             "http://proxy:65536",
             "http://proxy:-5")) {
       IllegalArgumentException error =
-          assertThrows(IllegalArgumentException.class, () -> create(false, invalidUrl, null));
+          assertThrows(IllegalArgumentException.class, () -> create(false, invalidUrl));
       assertNull(error.getCause());
     }
 
@@ -104,18 +96,7 @@ class OpenCliSettingsTest {
             "http://proxy:1",
             "http://127.0.0.1:65535",
             "http://localhost:8080")) {
-      assertEquals(validUrl, create(false, validUrl, null).baseUrl());
-    }
-  }
-
-  @Test
-  void instanceIdValidation() {
-    assertEquals("instance", create(false, null, " instance ").instanceId());
-    assertNull(create(false, null, null).instanceId());
-    for (String invalidId : List.of("a".repeat(37), "", " ")) {
-      assertThatThrownBy(() -> create(false, null, invalidId))
-          .isInstanceOf(IllegalArgumentException.class)
-          .hasMessageContaining("instanceId must be");
+      assertEquals(validUrl, create(false, validUrl).baseUrl());
     }
   }
 
@@ -178,7 +159,6 @@ class OpenCliSettingsTest {
     ObjectNode node = defaultJsonNode();
     node.put("enabled", true)
         .put("baseUrl", "https://hub.kkstudio.fun")
-        .put("instanceId", "prod-1")
         .put("connectTimeoutMillis", 6000L);
     ((ObjectNode) node.get("gptImage2")).put("paidEnabled", true);
     ((ObjectNode) node.get("seedance")).put("enabled", true).put("workspaceId", "ws-prod");
@@ -186,7 +166,6 @@ class OpenCliSettingsTest {
     OpenCliSettings settings = OpenCliSettings.parse(node.toString());
     assertTrue(settings.enabled());
     assertEquals("https://hub.kkstudio.fun", settings.baseUrl());
-    assertEquals("prod-1", settings.instanceId());
     assertEquals(6000L, settings.connectTimeoutMillis());
     assertTrue(settings.gptImage2().paidEnabled());
     assertTrue(settings.seedance().enabled());
@@ -195,7 +174,6 @@ class OpenCliSettingsTest {
     OpenCliSettings defaultResolved = OpenCliSettings.parse(defaultJsonNode().toString());
     assertFalse(defaultResolved.enabled());
     assertNull(defaultResolved.baseUrl());
-    assertNull(defaultResolved.instanceId());
     assertNull(defaultResolved.seedance().workspaceId());
   }
 
@@ -226,29 +204,6 @@ class OpenCliSettingsTest {
     assertParseMalformed(defaultJsonNode().put("enabled", true).toString());
   }
 
-  @Test
-  void isolatedClassLoaderGptImage2FirstInitializationDoesNotThrow() throws Exception {
-    assertIsolatedInit(OpenCliSettings.GptImage2.class);
-  }
-
-  @Test
-  void isolatedClassLoaderSeedanceFirstInitializationDoesNotThrow() throws Exception {
-    assertIsolatedInit(OpenCliSettings.Seedance.class);
-  }
-
-  private static void assertDefaultField(Class<?> clazz, ClassLoader loader) throws Exception {
-    Class<?> loaded = Class.forName(clazz.getName(), true, loader);
-    Field field = loaded.getDeclaredField("DEFAULT");
-    field.setAccessible(true);
-    assertNotNull(field.get(null));
-  }
-
-  private static void assertIsolatedInit(Class<?> target) throws Exception {
-    ClassLoader loader = createIsolatedPluginClassLoader();
-    assertDefaultField(target, loader);
-    assertDefaultField(OpenCliSettings.class, loader);
-  }
-
   private static void assertParseMalformed(String json) {
     assertThatThrownBy(() -> OpenCliSettings.parse(json))
         .isInstanceOf(IllegalArgumentException.class)
@@ -256,11 +211,10 @@ class OpenCliSettingsTest {
         .hasNoCause();
   }
 
-  private static OpenCliSettings create(boolean enabled, String url, String inst, long... v) {
+  private static OpenCliSettings create(boolean enabled, String url, long... v) {
     return new OpenCliSettings(
         enabled,
         url,
-        inst,
         v.length > 0 ? v[0] : 5000L,
         v.length > 1 ? v[1] : 120000L,
         v.length > 2 ? v[2] : 130000L,
@@ -268,14 +222,14 @@ class OpenCliSettingsTest {
         v.length > 4 ? (int) v[4] : 524288,
         v.length > 5 ? (int) v[5] : 4096,
         v.length > 6 ? (int) v[6] : 65535,
-        DEFAULT_GPT,
-        DEFAULT_SEEDANCE);
+        OpenCliTestSettings.defaults().gptImage2(),
+        OpenCliTestSettings.defaults().seedance());
   }
 
   private static OpenCliSettings withRootField(long val, int index) {
     long[] v = new long[] {5000L, 120000L, 130000L, 16384, 524288, 4096, 65535};
     v[index] = val;
-    return create(false, null, null, v);
+    return create(false, null, v);
   }
 
   private static OpenCliSettings.GptImage2 gpt(long v, int idx) {
@@ -311,36 +265,5 @@ class OpenCliSettingsTest {
     } catch (Exception e) {
       throw new IllegalStateException(e);
     }
-  }
-
-  private static ClassLoader createIsolatedPluginClassLoader() {
-    ClassLoader parent = OpenCliSettingsTest.class.getClassLoader();
-    String prefix = OpenCliSettings.class.getName();
-    return new ClassLoader(parent) {
-      @Override
-      protected Class<?> loadClass(String name, boolean resolve) throws ClassNotFoundException {
-        if (name.startsWith(prefix)) {
-          Class<?> loaded = findLoadedClass(name);
-          if (loaded != null) {
-            return loaded;
-          }
-          String resourcePath = name.replace('.', '/') + ".class";
-          try (InputStream in = parent.getResourceAsStream(resourcePath)) {
-            if (in == null) {
-              throw new ClassNotFoundException(name);
-            }
-            byte[] bytes = in.readAllBytes();
-            Class<?> c = defineClass(name, bytes, 0, bytes.length);
-            if (resolve) {
-              resolveClass(c);
-            }
-            return c;
-          } catch (IOException e) {
-            throw new ClassNotFoundException(name, e);
-          }
-        }
-        return super.loadClass(name, resolve);
-      }
-    };
   }
 }

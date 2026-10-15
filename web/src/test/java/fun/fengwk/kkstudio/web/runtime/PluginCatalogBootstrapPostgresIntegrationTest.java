@@ -24,18 +24,24 @@ import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
 import javax.sql.DataSource;
 
-import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * 真实 Web 启动链路的 PostgreSQL 集成测试：V1 未初始化行上的首次初始化与同版本重启恢复。
  *
  * <p>直接复用容器中真实的 {@link StudioPluginRegistry}、{@link PluginConfigurationRepository} 与事务管理器驱动 {@link
- * PluginCatalogBootstrap}，因此覆盖真实发行物的 Mavis 安装定义、真实 jsonb 持久化与真实指纹计算。Mavis 未配置凭据时仍可安装与冻结贡献，
- * 启动绝不解析凭据或发起远端请求。
+ * PluginCatalogBootstrap}，因此覆盖真实发行物（Mavis 与 OpenCLI）的安装定义、真实 jsonb 持久化与真实指纹计算。任一 Plugin 未配置凭据时
+ * 仍可安装与冻结贡献，启动绝不解析凭据或发起远端请求。
  */
 class PluginCatalogBootstrapPostgresIntegrationTest extends WebPostgresTestSupport {
 
   private static final String MAVIS = "minimax-mavis";
+
+  private static final String OPENCLI = "opencli";
+
+  /** 真实 Web 测试 classpath 上注册的全部发行物：Mavis 与 OpenCLI 都是构建期可选 Plugin。 */
+  private static final Set<String> INSTALLED_PLUGIN_IDS = Set.of(MAVIS, OPENCLI);
 
   @Autowired private StudioPluginRegistry registry;
   @Autowired private PluginConfigurationRepository repository;
@@ -47,18 +53,18 @@ class PluginCatalogBootstrapPostgresIntegrationTest extends WebPostgresTestSuppo
   @Autowired private PluginCatalogRuntime liveRuntime;
   @Autowired private DataSource dataSource;
 
-  /** 容器启动期缓存的冻结快照：从 V1 未初始化形态初始化到 epoch 1 并覆盖全部安装定义。 */
+  /** 容器启动期缓存的冻结快照：从 V1 未初始化形态初始化到 epoch 1 并覆盖全部真实安装定义。 */
   @Test
   void contextStartupInitializesTheAuthoritativeCatalog() {
-    assertEquals(List.of(MAVIS), registry.pluginIds());
+    assertEquals(INSTALLED_PLUGIN_IDS, Set.copyOf(registry.pluginIds()));
     try (PluginCatalogRuntime.Lease lease = liveRuntime.acquireCurrent()) {
       PluginCatalogSnapshot liveSnapshot = lease.snapshot();
       assertEquals(1, liveSnapshot.epoch());
       assertEquals(
-          List.of(MAVIS),
+          INSTALLED_PLUGIN_IDS,
           liveSnapshot.configuredPlugins().stream()
               .map(configured -> configured.descriptor().pluginId())
-              .toList());
+              .collect(Collectors.toSet()));
       assertTrue(
           liveSnapshot.harnessCatalog().findDescriptor(new ContributorId(MAVIS)).isPresent());
       assertNotNull(liveSnapshot.catalogFingerprint());
@@ -72,7 +78,7 @@ class PluginCatalogBootstrapPostgresIntegrationTest extends WebPostgresTestSuppo
     try {
       assertEquals(1, first.epoch());
       assertEquals(1, epoch());
-      assertEquals(1, historyRows());
+      assertEquals(INSTALLED_PLUGIN_IDS.size(), historyRows(), "每个安装定义恰好持久化一条历史 revision");
     } finally {
       first.close();
     }
@@ -81,7 +87,7 @@ class PluginCatalogBootstrapPostgresIntegrationTest extends WebPostgresTestSuppo
     try {
       assertEquals(1, second.epoch(), "restart must restore, never re-initialize");
       assertEquals(1, epoch(), "restart must not advance the epoch");
-      assertEquals(1, historyRows(), "restart must not append history");
+      assertEquals(INSTALLED_PLUGIN_IDS.size(), historyRows(), "restart must not append history");
       assertEquals(first.catalogFingerprint(), second.catalogFingerprint());
       assertTrue(second.harnessCatalog().findDescriptor(new ContributorId(MAVIS)).isPresent());
       assertNotNull(second.capabilityFingerprints().get(MAVIS));

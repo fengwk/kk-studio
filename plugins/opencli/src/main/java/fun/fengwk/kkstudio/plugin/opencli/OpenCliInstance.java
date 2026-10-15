@@ -52,12 +52,8 @@ final class OpenCliInstance implements PluginInstance {
 
   @Override
   public void close() {
-    if (closed.compareAndSet(false, true) && client != null) {
+    if (closed.compareAndSet(false, true)) {
       client.close();
     }
-  }
-
-  OpenCliHubClient client() {
-    return client;
   }
 }

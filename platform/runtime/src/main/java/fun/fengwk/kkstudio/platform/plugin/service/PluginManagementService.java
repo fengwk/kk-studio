@@ -12,6 +12,7 @@ import fun.fengwk.kkstudio.platform.plugin.PluginAuthHandler;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfigSchema;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialMaterial;
+import fun.fengwk.kkstudio.platform.plugin.PluginCredentialStatus;
 import fun.fengwk.kkstudio.platform.plugin.PluginDescriptor;
 import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
 import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
@@ -309,26 +310,49 @@ public final class PluginManagementService {
     dto.setVersion(descriptor.version());
     PluginAuthKindDTO authKind = authKindOf(plugin.authenticationSpec());
     dto.setAuthKind(authKind);
+    PluginCatalogManifest.Entry desiredEntry = catalog.manifest().plugins().get(pluginId);
+    PluginConfigurationRow history =
+        desiredEntry == null
+            ? null
+            : PluginConfigurationHistory.require(configurationRepository, pluginId, desiredEntry);
     if (authKind != null) {
       // 只有真正声明认证能力的 Plugin 才探测凭据表：没有认证就没有凭据状态，也绝不因为缺主密钥而谎报 KEY_UNAVAILABLE。
       PluginCredentialProjection projection = credentialStore.projection(pluginId);
-      dto.setStatus(projection.status().name());
+      dto.setStatus(authenticationStatusOf(plugin.authenticationSpec(), projection, history));
       dto.setRegion(projection.region());
       dto.setExpiresAt(projection.expiresAt());
       dto.setNextRefreshAt(projection.nextRefreshAt());
       dto.setLastRefreshedAt(projection.lastRefreshedAt());
       dto.setLastRefreshError(projection.lastRefreshError());
     }
-    dto.setConfiguration(configurationOf(plugin, catalog));
+    dto.setConfiguration(configurationOf(plugin, history));
     dto.setDesiredEpoch(Long.toString(catalog.epoch()));
     dto.setAppliedEpoch(Long.toString(applied.epoch()));
-    PluginCatalogManifest.Entry desiredEntry = catalog.manifest().plugins().get(pluginId);
     dto.setDesiredRevision(
         desiredEntry == null ? null : Long.toString(desiredEntry.configRevision()));
     dto.setAppliedRevision(appliedRevisionOf(applied, pluginId));
     dto.setApplicationError(applicationErrorOf(view));
     applyAppliedCapabilityNames(dto, applied, pluginId);
     return dto;
+  }
+
+  /**
+   * 认证状态投影：静态认证的 {@code CONNECTED} 必须由 schema 声明的必需认证字段真正录入支撑。
+   *
+   * <p>同一份秘密行可能只承载可选秘密字段（例如私有身份）：此时凭据行存在且可解密，但没有任何可用认证，因此不得对外显示为已连接。 其余投影态（{@code KEY_UNAVAILABLE}
+   * 等真实故障）原样保留，不被本约束掩盖。
+   */
+  private static String authenticationStatusOf(
+      PluginAuthSpec authSpec,
+      PluginCredentialProjection projection,
+      PluginConfigurationRow history) {
+    if (projection.status() == PluginCredentialStatus.CONNECTED
+        && authSpec instanceof PluginAuthSpec.StaticKey staticKey
+        && (history == null
+            || !history.configuredSecretFields().contains(staticKey.secretField()))) {
+      return PluginCredentialStatus.NOT_CONNECTED.name();
+    }
+    return projection.status().name();
   }
 
   /**
@@ -351,22 +375,18 @@ public final class PluginManagementService {
   }
 
   /**
-   * desired 配置投影：普通值、修订与已录入秘密字段都来自权威 catalog 中该 Plugin
-   * 当前条目的历史行，因此「刚保存但本节点尚未应用」时前端读到的仍是本次保存的值，不会把编辑回退成旧值。
+   * desired 配置投影：普通值、修订与已录入秘密字段都取自调用方按权威 entry 严格读取的历史行，因此「刚保存但本节点尚未应用」时前端读到的仍是本次保存的值， 不会把编辑回退成旧值。
    *
    * <p>本节点实际应用到的坐标与能力由 {@code appliedRevision}/{@code appliedEpoch} 单独表达，两者不混。
    */
-  private PluginConfigurationDTO configurationOf(StudioPlugin plugin, PluginCatalogRecord catalog) {
-    String pluginId = plugin.descriptor().pluginId();
+  private PluginConfigurationDTO configurationOf(
+      StudioPlugin plugin, PluginConfigurationRow history) {
     PluginConfigurationDTO configuration = new PluginConfigurationDTO();
     PluginConfigSchema schema = plugin.configurationSchema();
     configuration.setValuesSchema(SCHEMA_CODEC.encode(schema.valuesSchema()));
     configuration.setDefaultsJson(schema.defaultsJson());
     Set<String> configuredFields = Set.of();
-    PluginCatalogManifest.Entry desired = catalog.manifest().plugins().get(pluginId);
-    if (desired != null) {
-      PluginConfigurationRow history =
-          PluginConfigurationHistory.require(configurationRepository, pluginId, desired);
+    if (history != null) {
       configuration.setRevision(Long.toString(history.revision()));
       configuration.setValuesJson(history.valuesJson());
       configuredFields = Set.copyOf(history.configuredSecretFields());

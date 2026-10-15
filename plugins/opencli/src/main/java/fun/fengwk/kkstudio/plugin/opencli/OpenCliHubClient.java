@@ -47,8 +47,12 @@ import java.util.regex.Pattern;
  * <p>远端资源 URL 必须与 Hub 同源并位于 {@code /api/resources/} 下。客户端还会规范化上传文件名，校验响应
  * envelope、输出长度和截断标记，避免把不完整结果交给下游。
  *
- * <p>所有端点统一通过带 scoped 凭据校验的发送路径出网；每次 HTTP 发送前独立解析权威凭据，局部添加 Bearer 认证。 401/403
+ * <p>所有端点统一通过带 scoped 凭据校验的发送路径出网；每次 HTTP 发送前独立解析权威凭据，局部添加 Bearer 认证。 同一份 snapshot 同时提供唯一认证密钥
+ * {@code apiKey} 与可选私有身份 {@code instanceId}，后者只填入执行请求体，不构造期读取也不跨请求缓存。 401/403
  * 触发调用期确定性作废，固定去敏错误上抛；无凭据时直接抛出去敏异常，不重试。
+ *
+ * <p>已取得响应后，任何失败路径都必须释放响应正文流：凭据作废或响应解释抛出的 {@code RuntimeException}/{@code Error} 原样上抛，close 失败只作为
+ * suppressed 附加，既不遮蔽原 primary 也不被降级吞掉。
  */
 @Slf4j
 public class OpenCliHubClient implements AutoCloseable {
@@ -181,18 +185,28 @@ public class OpenCliHubClient implements AutoCloseable {
     if (timeoutMillis <= 0L || timeoutMillis > Duration.ofMinutes(30).toMillis()) {
       throw new IllegalArgumentException("timeoutMillis must be between 1 and 1800000");
     }
+    // 私有身份只在真正发送前从本次 scoped snapshot 取得，因此请求体在鉴权发送路径内构造。
+    CredentialedRequest request =
+        credential ->
+            request("/api/opencli/execute")
+                .header("Content-Type", "application/json")
+                .POST(
+                    HttpRequest.BodyPublishers.ofString(
+                        writeJson(executeBody(credential.instanceId(), normalized, timeoutMillis)),
+                        StandardCharsets.UTF_8));
+    return parseExecution(sendEnvelope(request, requestTimeout()));
+  }
+
+  /** 执行请求体：只有已配置的私有身份才出现 {@code instanceId}，未配置时交给 Hub 自由路由。 */
+  private ObjectNode executeBody(String instanceId, List<String> argv, long timeoutMillis) {
     ObjectNode body = mapper.createObjectNode();
-    if (settings.instanceId() != null && !settings.instanceId().isBlank()) {
-      body.put("instanceId", settings.instanceId());
+    if (instanceId != null) {
+      body.put("instanceId", instanceId);
     }
     ArrayNode argvNode = body.putArray("argv");
-    normalized.forEach(argvNode::add);
+    argv.forEach(argvNode::add);
     body.put("timeoutMillis", timeoutMillis);
-    HttpRequest.Builder request =
-        request("/api/opencli/execute")
-            .header("Content-Type", "application/json")
-            .POST(HttpRequest.BodyPublishers.ofString(writeJson(body), StandardCharsets.UTF_8));
-    return parseExecution(sendEnvelope(request, requestTimeout()));
+    return body;
   }
 
   /** 查询执行状态；{@code waitSeconds > 0} 时使用长轮询超时。 */
@@ -254,25 +268,26 @@ public class OpenCliHubClient implements AutoCloseable {
       }
       body.expectLength(contentLength);
       return new HubResourceStream(body, contentLength, mediaType.strip());
-    } catch (RuntimeException exception) {
-      closeQuietly(body);
+    } catch (RuntimeException | Error exception) {
+      closeAfterFailure(body, exception);
       throw exception;
     }
   }
 
   /**
    * 统一鉴权发送：每次请求独立解析凭据并构造 Bearer Header； 401/403 触发 rejectUsed CAS 并抛出去敏 HTTP 错误；统一管理 response
-   * deadline。
+   * deadline，并在任何失败路径上释放已取得的响应正文。
    */
-  private SendResult send(HttpRequest.Builder requestBuilder, Duration timeout) {
+  private SendResult send(CredentialedRequest requestFactory, Duration timeout) {
     PluginCredentialSnapshot snapshot = resolveCredential();
-    String apiKey = parseApiKey(snapshot.payloadJson());
+    ScopedCredential credential = parseCredential(snapshot.payloadJson());
     HttpRequest request;
     try {
       request =
-          requestBuilder
+          requestFactory
+              .build(credential)
               .copy()
-              .header("Authorization", "Bearer " + apiKey)
+              .header("Authorization", "Bearer " + credential.apiKey())
               .timeout(timeout)
               .build();
     } catch (IllegalArgumentException exception) {
@@ -293,24 +308,32 @@ public class OpenCliHubClient implements AutoCloseable {
       throw hubFailure("OpenCLI Hub request interrupted", exception);
     }
 
-    if (response.statusCode() == 401 || response.statusCode() == 403) {
-      rejectUsed(snapshot);
-    }
-
-    DeadlineResponseBody body = new DeadlineResponseBody(response.body(), deadline);
-    if (response.statusCode() < 200 || response.statusCode() >= 300) {
-      try {
-        throw httpError(response.statusCode(), body);
-      } finally {
-        closeQuietly(body);
+    InputStream stream = response.body();
+    DeadlineResponseBody body = null;
+    try {
+      if (response.statusCode() == 401 || response.statusCode() == 403) {
+        rejectUsed(snapshot);
       }
+      body = new DeadlineResponseBody(stream, deadline);
+      if (response.statusCode() < 200 || response.statusCode() >= 300) {
+        throw httpError(response.statusCode(), body);
+      }
+      return new SendResult(response, body);
+    } catch (RuntimeException | Error failure) {
+      // 凭据作废与错误响应解释都可能任意失败：正文流必须在此释放，且原失败原样上抛。
+      closeAfterFailure(body == null ? stream : body, failure);
+      throw failure;
     }
-    return new SendResult(response, body);
+  }
+
+  /** 与凭据无关的请求：调用方已在鉴权前构造并校验过 builder。 */
+  private SendResult send(HttpRequest.Builder requestBuilder, Duration timeout) {
+    return send(credential -> requestBuilder, timeout);
   }
 
   /** 发送 HTTP 请求并校验解包 OpenCLI Hub 标准响应信封中的业务数据。 */
-  private JsonNode sendEnvelope(HttpRequest.Builder requestBuilder, Duration timeout) {
-    SendResult result = send(requestBuilder, timeout);
+  private JsonNode sendEnvelope(CredentialedRequest requestFactory, Duration timeout) {
+    SendResult result = send(requestFactory, timeout);
     HttpResponse<InputStream> response = result.response();
     try (InputStream body = result.body()) {
       String contentType = response.headers().firstValue("Content-Type").orElse("");
@@ -339,6 +362,11 @@ public class OpenCliHubClient implements AutoCloseable {
     }
   }
 
+  /** 与凭据无关的请求：仍走同一鉴权发送路径后再解包信封。 */
+  private JsonNode sendEnvelope(HttpRequest.Builder requestBuilder, Duration timeout) {
+    return sendEnvelope(credential -> requestBuilder, timeout);
+  }
+
   private PluginCredentialSnapshot resolveCredential() {
     PluginCredentialSnapshot snapshot;
     try {
@@ -357,7 +385,12 @@ public class OpenCliHubClient implements AutoCloseable {
     return snapshot;
   }
 
-  private String parseApiKey(String payloadJson) {
+  /**
+   * 从同一次 scoped snapshot 的载荷严格解析本次请求真正使用的凭据：必需 {@code apiKey} 与可选 {@code instanceId}。
+   *
+   * <p>载荷形状是宿主实际写入的秘密 JSON 对象，只允许这两个声明字段；任何其它字段、类型不符或越界都 fail closed。
+   */
+  private ScopedCredential parseCredential(String payloadJson) {
     JsonNode root;
     try {
       root = CREDENTIAL_MAPPER.readTree(payloadJson);
@@ -365,16 +398,42 @@ public class OpenCliHubClient implements AutoCloseable {
       log.warn(
           "failed to parse OpenCLI Hub credential payload type={}",
           exception.getClass().getSimpleName());
-      throw new OpenCliHubException("OpenCLI Hub credential payload is invalid");
+      throw invalidCredential();
     }
-    if (root == null || !root.isObject() || root.size() != 1 || !root.has("apiKey")) {
-      throw new OpenCliHubException("OpenCLI Hub credential payload is invalid");
+    if (root == null || !root.isObject() || !root.has("apiKey")) {
+      throw invalidCredential();
+    }
+    String instanceId = null;
+    for (String field : root.propertyNames()) {
+      if (!"apiKey".equals(field) && !"instanceId".equals(field)) {
+        throw invalidCredential();
+      }
     }
     JsonNode apiKeyNode = root.get("apiKey");
     if (!apiKeyNode.isTextual() || apiKeyNode.textValue().isBlank()) {
-      throw new OpenCliHubException("OpenCLI Hub credential payload is invalid");
+      throw invalidCredential();
     }
-    return validateApiKey(apiKeyNode.textValue());
+    JsonNode instanceIdNode = root.get("instanceId");
+    if (instanceIdNode != null) {
+      if (!instanceIdNode.isTextual()) {
+        throw invalidCredential();
+      }
+      instanceId = requireInstanceId(instanceIdNode.textValue());
+    }
+    return new ScopedCredential(validateApiKey(apiKeyNode.textValue()), instanceId);
+  }
+
+  /** 私有身份沿用部署期 1..36 字符约束；非法取值只以固定去敏错误暴露，绝不回显取值。 */
+  private static String requireInstanceId(String value) {
+    try {
+      return OpenCliSettingsValidation.requireOptionalBoundedText(value.strip(), 36, "instanceId");
+    } catch (IllegalArgumentException error) {
+      throw invalidCredential();
+    }
+  }
+
+  private static OpenCliHubException invalidCredential() {
+    return new OpenCliHubException("OpenCLI Hub credential payload is invalid");
   }
 
   private String validateApiKey(String apiKey) {
@@ -779,6 +838,38 @@ public class OpenCliHubClient implements AutoCloseable {
     } catch (IOException ignored) {
       log.debug("OpenCLI Hub stream close failed type={}", ignored.getClass().getSimpleName());
     }
+  }
+
+  /**
+   * 已取得 response 后的唯一清理：释放正文流并保留原 primary。
+   *
+   * <p>close 自身失败只作为 suppressed 附加到 primary，绝不替换 primary，也绝不把 Error 降级或吞掉。
+   */
+  private static void closeAfterFailure(InputStream body, Throwable primary) {
+    try {
+      body.close();
+    } catch (IOException | RuntimeException | Error closeFailure) {
+      log.debug("OpenCLI Hub stream close failed type={}", closeFailure.getClass().getSimpleName());
+      if (closeFailure != primary) {
+        primary.addSuppressed(closeFailure);
+      }
+    }
+  }
+
+  /** 一次请求真正使用的 scoped 凭据：同一份 snapshot 解析出的认证密钥与可选私有身份；永不回显取值。 */
+  record ScopedCredential(String apiKey, String instanceId) {
+
+    @Override
+    public String toString() {
+      return "ScopedCredential[<redacted>]";
+    }
+  }
+
+  /** 出网请求构造器：在真正鉴权发送前用本次解析出的 scoped 凭据补全请求。 */
+  @FunctionalInterface
+  private interface CredentialedRequest {
+
+    HttpRequest.Builder build(ScopedCredential credential);
   }
 
   private record SendResult(HttpResponse<InputStream> response, DeadlineResponseBody body) {}

@@ -53,13 +53,17 @@ class OpenCliPluginTest {
   void configurationSchemaMatchesContract() {
     PluginConfigSchema schema = plugin.configurationSchema();
     assertNotNull(schema);
-    assertTrue(schema.secrets().containsKey("apiKey"));
+    assertEquals(Set.of("apiKey", "instanceId"), schema.secrets().keySet());
     schema.requireDeclaredSecrets(plugin.authenticationSpec());
 
-    // 空对象补齐默认值
+    // 空对象补齐默认值：默认值的唯一来源就是 schema 本身
     String resolved = schema.resolveValues("{}");
     OpenCliSettings settings = OpenCliSettings.parse(resolved);
-    assertEquals(OpenCliSettings.DEFAULT, settings);
+    assertEquals(OpenCliTestSettings.defaults(), settings);
+
+    // 私有身份不是普通配置字段：无论是否已录入秘密，都不能作为 values 出现
+    assertThatThrownBy(() -> schema.resolveValues("{\"instanceId\": \"prod-1\"}"))
+        .isInstanceOf(IllegalArgumentException.class);
 
     // 未知字段拒绝
     assertThatThrownBy(() -> schema.resolveValues("{\"unknownProperty\": true}"))

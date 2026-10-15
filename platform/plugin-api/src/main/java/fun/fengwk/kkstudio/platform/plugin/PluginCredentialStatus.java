@@ -3,12 +3,16 @@ package fun.fengwk.kkstudio.platform.plugin;
 /**
  * 管理面看到的凭据状态投影。
  *
- * <p>{@link #NOT_CONNECTED} 与 {@link #KEY_UNAVAILABLE} 是投影态（分别表示没有凭据行、主密钥不可用），其余四个状态是 {@code
+ * <p>{@link #NOT_CONNECTED} 与 {@link #KEY_UNAVAILABLE} 是投影态（分别表示必需认证尚未配置、主密钥不可用），其余四个状态是 {@code
  * plugin_credential.status} 的权威列取值。
  */
 public enum PluginCredentialStatus {
 
-  /** 尚无凭据行。 */
+  /**
+   * 尚无可用认证：没有凭据行，或凭据行只承载了可选秘密字段而必需认证字段尚未录入。
+   *
+   * <p>后者仍是投影态而非持久列取值：凭据行本身可以存在且可解密。
+   */
   NOT_CONNECTED,
 
   /** 部署主密钥不可用或密文无法解密，读写 fail closed。 */

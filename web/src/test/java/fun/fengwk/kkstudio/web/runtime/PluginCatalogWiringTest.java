@@ -18,6 +18,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalogSource;
+import fun.fengwk.kkstudio.harness.common.network.HttpProxySelector;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
@@ -37,6 +38,7 @@ import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogSnapshot;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialStore;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRepository;
 
+import java.net.ProxySelector;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -160,6 +162,12 @@ class PluginCatalogWiringTest {
             new ApplicationContextRunner()
                 .withUserConfiguration(
                     PluginCatalogConfiguration.class, RegistryConfiguration.class)
+                // PluginCatalogRuntime 显式依赖 systemProxySelector：隔离组合根提供直连的合法 selector
+                // 依赖，不安装 JVM 全局代理，保持与其他用例的全局代理隔离。
+                .withBean(
+                    "systemProxySelector",
+                    ProxySelector.class,
+                    () -> HttpProxySelector.fixed(null, ""))
                 .withBean(PluginCredentialStore.class, () -> credentials)
                 .withBean(
                     PluginConfigurationRepository.class, InMemoryPluginCatalogFakes::repository)
@@ -199,6 +207,10 @@ class PluginCatalogWiringTest {
 
   private static void registerHost(AnnotationConfigApplicationContext context) {
     context.register(PluginCatalogConfiguration.class, RegistryConfiguration.class);
+    // PluginCatalogRuntime 显式依赖 systemProxySelector：隔离组合根提供直连的合法 selector 依赖，
+    // 不安装 JVM 全局代理，保持与其他用例的全局代理隔离。
+    context.registerBean(
+        "systemProxySelector", ProxySelector.class, () -> HttpProxySelector.fixed(null, ""));
     context.registerBean(PluginCredentialStore.class, () -> mock(PluginCredentialStore.class));
     context.registerBean(
         PluginConfigurationRepository.class, InMemoryPluginCatalogFakes::repository);

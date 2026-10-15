@@ -5,8 +5,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -30,6 +33,7 @@ import javax.net.ssl.SSLParameters;
 import javax.net.ssl.SSLSession;
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.lang.reflect.Field;
@@ -454,7 +458,6 @@ class OpenCliHubClientContractTest {
         new OpenCliSettings(
             false,
             "http://hub.test:8080",
-            "test-instance",
             5_000,
             120_000,
             130_000,
@@ -462,8 +465,8 @@ class OpenCliHubClientContractTest {
             512 * 1024,
             4096,
             65_535,
-            OpenCliSettings.GptImage2.DEFAULT,
-            OpenCliSettings.Seedance.DEFAULT);
+            OpenCliTestSettings.defaults().gptImage2(),
+            OpenCliTestSettings.defaults().seedance());
     OpenCliHubClient disabled =
         new OpenCliHubClient(
             disabledSettings,
@@ -516,6 +519,35 @@ class OpenCliHubClientContractTest {
       assertTrue(input.closed);
       assertFalse(messageChain(error).contains(length));
     }
+  }
+
+  /** 已取得资源响应后元数据解释本身失败：原始 Error 必须原样上抛，且已取得的正文流必须被关闭。 */
+  @Test
+  void resourceMetadataErrorKeepsIdentityAndClosesTheOwnedBody() {
+    TrackingInputStream input = new TrackingInputStream(new byte[] {1});
+    Error metadataError = new AssertionError("synthetic metadata interpretation Error");
+    OpenCliHubClient client = clientReturning(failingHeadersResponse(200, input, metadataError));
+
+    Error thrown =
+        assertThrows(
+            Error.class,
+            () ->
+                client.openResource(
+                    new ExecutionResource("a.png", "image/png", 1L, null, "/api/resources/a.png")));
+
+    assertSame(metadataError, thrown, "the original Error must be rethrown, never wrapped");
+    assertTrue(input.closed, "the owned response body must be closed on the failure path");
+  }
+
+  /** 元数据 getter 在解释阶段失败的响应：headers() 抛出合成 Error，body() 仍是真实取得的所有权流。 */
+  @SuppressWarnings("unchecked")
+  private static HttpResponse<InputStream> failingHeadersResponse(
+      int status, InputStream body, Error headersError) {
+    HttpResponse<InputStream> response = mock(HttpResponse.class);
+    when(response.statusCode()).thenReturn(status);
+    when(response.body()).thenReturn(body);
+    when(response.headers()).thenThrow(headersError);
+    return response;
   }
 
   @Test
@@ -701,6 +733,15 @@ class OpenCliHubClientContractTest {
     assertPayloadRejected("[\"apiKey\"]");
     // 7. payload 包含未知字段 (严格模式)
     assertPayloadRejected("{\"apiKey\":\"abc\",\"unknownField\":123}");
+    // 8. 只有私有身份而没有认证密钥
+    assertPayloadRejected("{\"instanceId\":\"prod-1\"}");
+    // 9. 私有身份不是文本
+    assertPayloadRejected("{\"apiKey\":\"abc\",\"instanceId\":123}");
+    // 10. 私有身份为空白
+    assertPayloadRejected("{\"apiKey\":\"abc\",\"instanceId\":\"\"}");
+    assertPayloadRejected("{\"apiKey\":\"abc\",\"instanceId\":\"   \"}");
+    // 11. 私有身份超出 1..36 字符上限
+    assertPayloadRejected("{\"apiKey\":\"abc\",\"instanceId\":\"" + "a".repeat(37) + "\"}");
   }
 
   private void assertPayloadRejected(String payloadJson) {
@@ -814,6 +855,149 @@ class OpenCliHubClientContractTest {
         assertThrows(OpenCliHubException.class, () -> client.getExecution("exec-1", 0));
     assertEquals("OpenCLI Hub HTTP " + statusCode, ex.getMessage());
     assertTrue(rejected.get());
+  }
+
+  /** 私有身份与 apiKey 必须来自同一次 scoped snapshot：一次请求只 resolve 一次，两个字段都取自该次结果。 */
+  @Test
+  void executeUsesApiKeyAndInstanceIdFromTheSameSnapshot() {
+    AtomicInteger resolveCount = new AtomicInteger();
+    PluginCredentialAccess access =
+        new PluginCredentialAccess() {
+          @Override
+          public PluginCredentialSnapshot resolve() {
+            int count = resolveCount.incrementAndGet();
+            return snapshot("key-generation-" + count, "instance-generation-" + count);
+          }
+
+          @Override
+          public boolean rejectUsed(PluginCredentialSnapshot snapshot, String error) {
+            return false;
+          }
+        };
+
+    List<String> authorizations = new ArrayList<>();
+    List<String> bodies = new ArrayList<>();
+    StubHttpClient stubHttp =
+        new StubHttpClient(
+            request -> {
+              authorizations.add(request.headers().firstValue("Authorization").orElse(null));
+              bodies.add(requestBodyText(request));
+              return jsonResponse(200, envelope(executionData("\"resources\":[]")));
+            });
+
+    OpenCliHubClient client = new OpenCliHubClient(hub(), MAPPER, access, stubHttp);
+    client.execute(List.of("chatgpt-agent", "ask", "prompt"), 1000L);
+    client.execute(List.of("chatgpt-agent", "ask", "prompt"), 1000L);
+
+    assertEquals(List.of("Bearer key-generation-1", "Bearer key-generation-2"), authorizations);
+    assertEquals(2, bodies.size());
+    assertTrue(bodies.get(0).contains("\"instanceId\":\"instance-generation-1\""), bodies.get(0));
+    assertTrue(bodies.get(1).contains("\"instanceId\":\"instance-generation-2\""), bodies.get(1));
+    assertEquals(2, resolveCount.get(), "每次请求只解析一次 scoped 凭据，Bearer 与私有身份同源");
+  }
+
+  /** 未配置私有身份时执行请求体不得出现 instanceId，由 Hub 自由路由。 */
+  @Test
+  void executeOmitsInstanceIdWhenTheSnapshotHasNoPrivateIdentity() {
+    List<String> bodies = new ArrayList<>();
+    StubHttpClient stubHttp =
+        new StubHttpClient(
+            request -> {
+              bodies.add(requestBodyText(request));
+              return jsonResponse(200, envelope(executionData("\"resources\":[]")));
+            });
+
+    OpenCliHubClient client =
+        new OpenCliHubClient(hub(), MAPPER, validCredentialAccess(DEFAULT_KEY), stubHttp);
+    client.execute(List.of("chatgpt-agent", "ask", "prompt"), 1000L);
+
+    assertEquals(1, bodies.size());
+    assertFalse(bodies.get(0).contains("instanceId"), bodies.get(0));
+    assertTrue(bodies.get(0).contains("\"timeoutMillis\":1000"), bodies.get(0));
+  }
+
+  /** 401 时凭据作废抛出的 Error 原样上抛，且已取得的响应正文必须被关闭。 */
+  @Test
+  void rejectUsedErrorPropagatesAndStillClosesTheResponseBody() {
+    TrackingInputStream body = new TrackingInputStream(new byte[] {1, 2, 3});
+    Error injected = new AssertionError("synthetic rejectUsed failure");
+    PluginCredentialAccess access =
+        new PluginCredentialAccess() {
+          @Override
+          public PluginCredentialSnapshot resolve() {
+            return validSnapshot(DEFAULT_KEY);
+          }
+
+          @Override
+          public boolean rejectUsed(PluginCredentialSnapshot snapshot, String error) {
+            throw injected;
+          }
+        };
+
+    OpenCliHubClient client =
+        new OpenCliHubClient(
+            hub(), MAPPER, access, new StubHttpClient(request -> bodyResponse(401, body)));
+
+    Error error = assertThrows(Error.class, () -> client.getExecution("exec-1", 0));
+
+    assertSame(injected, error, "凭据作废的 Error 不得被吞掉或降级");
+    assertTrue(body.closed, "401 失败路径必须释放已取得的响应正文");
+  }
+
+  /** 错误响应解释阶段抛出的 Error 原样上抛，且正文流必须被关闭。 */
+  @Test
+  void errorResponseInterpretationErrorPropagatesAndClosesTheBody() {
+    TrackingInputStream body = new TrackingInputStream(new byte[] {1, 2, 3});
+    Error injected = new StackOverflowError("synthetic drain failure");
+    InputStream failing =
+        new InputStream() {
+          @Override
+          public int read() {
+            throw injected;
+          }
+
+          @Override
+          public int read(byte[] buffer, int offset, int length) {
+            throw injected;
+          }
+
+          @Override
+          public void close() throws IOException {
+            body.close();
+          }
+        };
+
+    OpenCliHubClient client = clientReturning(bodyResponse(500, failing));
+
+    Error error = assertThrows(Error.class, () -> client.getExecution("exec-1", 0));
+
+    assertSame(injected, error, "响应解释阶段的 Error 不得被吞掉或降级");
+    assertTrue(body.closed, "错误响应解释失败后必须释放响应正文");
+  }
+
+  /** 非 2xx 的常规失败路径同样释放正文流（真实 stream.closed 回归）。 */
+  @Test
+  void errorStatusClosesTheResponseBody() {
+    TrackingInputStream body = new TrackingInputStream("denied".getBytes(StandardCharsets.UTF_8));
+    OpenCliHubClient client = clientReturning(bodyResponse(409, body));
+
+    OpenCliHubException error =
+        assertThrows(OpenCliHubException.class, () -> client.getExecution("exec-1", 0));
+
+    assertEquals("OpenCLI Hub HTTP 409", error.getMessage());
+    assertTrue(body.closed);
+  }
+
+  /** 持有秘密的取值对象不得经 toString 泄漏：日志与异常只能看到脱敏表示。 */
+  @Test
+  void scopedCredentialToStringNeverExposesSecrets() {
+    OpenCliHubClient.ScopedCredential credential =
+        new OpenCliHubClient.ScopedCredential("sk-live-secret", "private-instance");
+
+    assertEquals("Bearer sk-live-secret", "Bearer " + credential.apiKey());
+    assertEquals("private-instance", credential.instanceId());
+    assertFalse(credential.toString().contains("sk-live-secret"));
+    assertFalse(credential.toString().contains("private-instance"));
   }
 
   @Test
@@ -1255,7 +1439,6 @@ class OpenCliHubClientContractTest {
     return new OpenCliSettings(
         true,
         "http://hub.test:8080",
-        "test-instance",
         5_000,
         120_000,
         130_000,
@@ -1263,11 +1446,16 @@ class OpenCliHubClientContractTest {
         maxJsonResponseBytes,
         maxErrorResponseBytes,
         maxOutputChars,
-        OpenCliSettings.GptImage2.DEFAULT,
-        OpenCliSettings.Seedance.DEFAULT);
+        OpenCliTestSettings.defaults().gptImage2(),
+        OpenCliTestSettings.defaults().seedance());
   }
 
   private static PluginCredentialSnapshot validSnapshot(String apiKey) {
+    return snapshot(apiKey, null);
+  }
+
+  /** 同一份载荷同时承载认证密钥与可选私有身份，模拟宿主写入的秘密 JSON 形状。 */
+  private static PluginCredentialSnapshot snapshot(String apiKey, String instanceId) {
     return new PluginCredentialSnapshot(
         "opencli",
         UUID.randomUUID(),
@@ -1276,7 +1464,44 @@ class OpenCliHubClientContractTest {
         null,
         1L,
         new byte[] {1, 2, 3},
-        "{\"apiKey\":\"" + apiKey + "\"}");
+        instanceId == null
+            ? "{\"apiKey\":\"" + apiKey + "\"}"
+            : "{\"apiKey\":\"" + apiKey + "\",\"instanceId\":\"" + instanceId + "\"}");
+  }
+
+  /** 聚合客户端真正写出的请求体文本，用于断言私有身份字段的有无。 */
+  private static String requestBodyText(HttpRequest request) {
+    ByteArrayOutputStream collected = new ByteArrayOutputStream();
+    request
+        .bodyPublisher()
+        .orElseThrow()
+        .subscribe(
+            new Flow.Subscriber<ByteBuffer>() {
+              @Override
+              public void onSubscribe(Flow.Subscription subscription) {
+                subscription.request(Long.MAX_VALUE);
+              }
+
+              @Override
+              public void onNext(ByteBuffer item) {
+                byte[] chunk = new byte[item.remaining()];
+                item.get(chunk);
+                collected.writeBytes(chunk);
+              }
+
+              @Override
+              public void onError(Throwable throwable) {
+                throw new IllegalStateException(throwable);
+              }
+
+              @Override
+              public void onComplete() {}
+            });
+    return collected.toString(StandardCharsets.UTF_8);
+  }
+
+  private static HttpResponse<InputStream> bodyResponse(int status, InputStream body) {
+    return new StubHttpResponse(status, HttpHeaders.of(Map.of(), (name, value) -> true), body);
   }
 
   private static PluginCredentialAccess validCredentialAccess(String apiKey) {

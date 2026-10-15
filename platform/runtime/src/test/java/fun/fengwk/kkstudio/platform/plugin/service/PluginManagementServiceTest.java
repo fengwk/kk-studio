@@ -806,6 +806,75 @@ class PluginManagementServiceTest {
         PluginCredentialStatus.NOT_CONNECTED, credentialStore.projection(PLUGIN_ID).status());
   }
 
+  /** 静态认证的状态投影只约束 {@code CONNECTED}：同一份秘密行只承载可选私有字段时，真实故障态（主密钥不可用）绝不被改写成未连接。 */
+  @Test
+  void staticKeyPreservesKeyUnavailableWhenOnlyThePrivateSecretIsConfigured() {
+    long epoch = catalog.readCatalog().epoch();
+    long revision =
+        catalog.readCatalog().manifest().plugins().get(STATIC_KEY_PLUGIN_ID).configRevision();
+    service.updateConfiguration(
+        STATIC_KEY_PLUGIN_ID,
+        epoch,
+        revision,
+        "{\"endpoint\":\"https://api.example.com\"}",
+        Map.of("instanceId", PluginSecretPatch.set("private-identity-7")));
+
+    long configuredRevision =
+        catalog.readCatalog().manifest().plugins().get(STATIC_KEY_PLUGIN_ID).configRevision();
+    assertEquals(
+        List.of("instanceId"),
+        catalog
+            .readConfiguration(STATIC_KEY_PLUGIN_ID, configuredRevision)
+            .orElseThrow()
+            .configuredSecretFields(),
+        "only the optional private secret field is recorded, the auth key is still missing");
+
+    assertEquals(
+        PluginCredentialStatus.KEY_UNAVAILABLE.name(),
+        serviceWithProjection(PluginCredentialProjection.keyUnavailable())
+            .getPlugin(STATIC_KEY_PLUGIN_ID)
+            .getStatus(),
+        "the missing auth key must not mask a key failure that is reported by the credential store");
+    assertEquals(
+        PluginCredentialStatus.NOT_CONNECTED.name(),
+        serviceWithProjection(
+                new PluginCredentialProjection(
+                    PluginCredentialStatus.CONNECTED, null, null, null, null, null))
+            .getPlugin(STATIC_KEY_PLUGIN_ID)
+            .getStatus(),
+        "a credential row without the required auth field must never be reported as connected");
+  }
+
+  /** 只固定投影状态的 store：状态投影分支不依赖真实主密钥环境，也不得顺带解析或作废凭据。 */
+  private PluginManagementService serviceWithProjection(PluginCredentialProjection projection) {
+    PluginCredentialStore store =
+        new PluginCredentialStore() {
+          @Override
+          public PluginCredentialProjection projection(String pluginId) {
+            return projection;
+          }
+
+          @Override
+          public PluginCredentialSnapshot resolve(PluginCredentialReference reference) {
+            throw new AssertionError("a status projection must not resolve credentials");
+          }
+
+          @Override
+          public boolean rejectUsed(PluginCredentialSnapshot snapshot, String error) {
+            throw new AssertionError("a status projection must not reject credentials");
+          }
+        };
+    return new PluginManagementService(
+        registry,
+        () -> runtime,
+        catalog,
+        store,
+        commitService,
+        attempts,
+        Duration.ofMinutes(10),
+        clock);
+  }
+
   private PluginCredentialKeyLoader keyLoader() {
     return new PluginCredentialKeyLoader(
         tempDir.resolve("mgmt-test.key").toAbsolutePath().toString());
@@ -1128,7 +1197,7 @@ class PluginManagementServiceTest {
         new PluginConfigSchema(
             new InputSchema(null, Map.of("endpoint", new StringSchema(null)), Set.of(), false),
             "{\"endpoint\":\"https://default.example.com\"}",
-            Map.of("apiKey", "static API key"));
+            Map.of("apiKey", "static API key", "instanceId", "optional private identity"));
 
     @Override
     public PluginDescriptor descriptor() {

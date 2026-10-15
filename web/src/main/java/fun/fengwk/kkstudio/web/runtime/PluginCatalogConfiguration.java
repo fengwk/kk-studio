@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.web.runtime;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.DependsOn;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
@@ -49,8 +50,12 @@ public class PluginCatalogConfiguration {
    * 唯一运行期所有者：构造期一次 {@link PluginCatalogBootstrap#bootstrap} 得到初始快照，之后由本 bean 全权拥有并按 epoch 发布。
    *
    * <p>真正内置的两域贡献与 scoped {@link PluginContext} 工厂在这里冻结一次，同时供启动初始化和后续对账/历史重建使用，绝不出现两套内置来源。
+   *
+   * <p>Plugin 实例在 configure 期构造的客户端隐式继承 JVM 默认代理，因此本组合根显式依赖 {@code systemProxySelector}
+   * 先完成安装：该顺序是宿主组合根 自身的装配约束，不依赖任何具体插件或插件的 {@code @DependsOn}，插件侧也不引用宿主类型或 Bean 名。
    */
   @Bean(destroyMethod = "close")
+  @DependsOn("systemProxySelector")
   public PluginCatalogRuntime pluginCatalogRuntime(
       PluginCatalogBootstrap bootstrap,
       PluginConfigurationRepository repository,

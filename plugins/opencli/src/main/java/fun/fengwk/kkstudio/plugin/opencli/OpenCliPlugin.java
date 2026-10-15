@@ -24,7 +24,7 @@ import java.util.Optional;
 import java.util.Set;
 
 /**
- * OpenCLI 的 Studio Plugin 安装期定义：安装身份、受控配置、静态 apiKey 认证与运行期实例装配。
+ * OpenCLI 的 Studio Plugin 安装期定义：安装身份、受控配置、静态 apiKey 认证、受保护私有身份与运行期实例装配。
  *
  * <p>启动期静态冻结 descriptor 与受控配置 schema，不访问 Hub 也不解析凭据。 运行期实例由 {@link #configure(PluginConfig,
  * PluginContext)} 装配，归本 Plugin 所有并可关闭。
@@ -41,7 +41,9 @@ public final class OpenCliPlugin implements StudioPlugin {
   private static final PluginAuthSpec AUTHENTICATION_SPEC =
       new PluginAuthSpec.StaticKey("apiKey", Set.of("baseUrl"));
 
-  private static final Map<String, String> SECRETS = Map.of("apiKey", "OpenCLI API key");
+  /** 唯一认证密钥与可选私有身份都以受保护秘密字段存取；instanceId 绝不是普通配置值。 */
+  private static final Map<String, String> SECRETS =
+      Map.of("apiKey", "OpenCLI API key", "instanceId", "optional OpenCLI instance identifier");
 
   private static final String DEFAULTS_JSON =
       "{\"enabled\":false,"
@@ -80,7 +82,6 @@ public final class OpenCliPlugin implements StudioPlugin {
         Map.ofEntries(
             Map.entry("enabled", new BooleanSchema("whether OpenCLI integration is enabled")),
             Map.entry("baseUrl", new StringSchema("OpenCLI Hub HTTP(S) origin base URL")),
-            Map.entry("instanceId", new StringSchema("optional OpenCLI instance identifier")),
             Map.entry(
                 "connectTimeoutMillis", new IntegerSchema("HTTP connect timeout in milliseconds")),
             Map.entry(

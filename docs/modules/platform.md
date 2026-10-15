@@ -339,11 +339,14 @@ EOF、失败和显式 close 均注销 watchdog。客户端拿到流后负责关�
 OpenCLI 作为构建期独立 Plugin，其配置完全归属于自身受控 schema，已彻底删除旧 SystemSettings 的
 `openCliHub`、`gptImage2` 与 `seedance` 三段配置及部署环境变量属性，无双读与别名兼容；写入或导入旧字段均被明确拒绝。
 
-- 顶层配置字段与默认值：`enabled`(false)、`baseUrl`(可省略)、`instanceId`(可省略)、`connectTimeoutMillis`(5000)、`requestTimeoutMillis`(120000)、`longPollTimeoutMillis`(130000)、`streamBufferBytes`(16384)、`maxJsonResponseBytes`(524288)、`maxErrorResponseBytes`(4096)、`maxOutputChars`(65535)。
+- 顶层配置字段与默认值：`enabled`(false)、`baseUrl`(可省略)、`connectTimeoutMillis`(5000)、`requestTimeoutMillis`(120000)、`longPollTimeoutMillis`(130000)、`streamBufferBytes`(16384)、`maxJsonResponseBytes`(524288)、`maxErrorResponseBytes`(4096)、`maxOutputChars`(65535)。
 - `gptImage2` 对象：`paidEnabled`(false)、`askTimeoutSeconds`(900)、`hubExecutionTimeoutMillis`(960000)、`maxWaitMillis`(1200000)。
 - `seedance` 对象：`enabled`(false)、`workspaceId`(可省略)、`retry`(0)、`hubExecutionTimeoutMillis`(600000)、`statusPollIntervalMillis`(30000)、`maxWaitMillis`(1800000)。
-- 字段校验沿用合法 HTTP origin、instanceId 规范与开启状态下的必填项校验；未配置文本通过省略字段表示，不引入 nullable 或以空字符串伪造合法 URL。
-- 唯一秘密凭据 `apiKey`，通过 `PluginAuthSpec.StaticKey("apiKey", Set.of("baseUrl"))` 声明，走统一 Plugin Secret API（KEEP/SET/CLEAR）管理，不读环境变量或设置外部优先级。每次 HTTP 发送时动态解析并仅在局部构造单 Bearer 请求头，不落盘明文且不泄露在日志与异常中。
+- 字段校验沿用合法 HTTP origin、开启状态下的必填项校验以及私有身份的 1..36 字符约束；未配置文本通过省略字段表示，不引入 nullable 或以空字符串伪造合法 URL。
+- schema 是默认值的唯一来源：插件不再自带第二份默认值常量。
+- 唯一认证密钥 `apiKey`，通过 `PluginAuthSpec.StaticKey("apiKey", Set.of("baseUrl"))` 声明，走统一 Plugin Secret API（KEEP/SET/CLEAR）管理，不读环境变量或设置外部优先级。每次 HTTP 发送时动态解析并仅在局部构造单 Bearer 请求头，不落盘明文且不泄露在日志与异常中。
+- 可选私有身份 `instanceId` 是第二个受保护秘密字段：它与 `apiKey` 同属一次 scoped snapshot，只在真正发送执行请求前取出并填入请求体，不出现于普通值、配置历史、管理面投影或导出；未配置时不发送该字段，由 Hub 自由路由。
+- 静态认证的 `CONNECTED` 只由必需认证字段是否已录入决定：仅录入私有身份（或撤销 `apiKey` 后只留私有身份）时管理面显示 `NOT_CONNECTED`，`KEY_UNAVAILABLE` 等真实故障仍如实上报。
 
 ## 配置
 
