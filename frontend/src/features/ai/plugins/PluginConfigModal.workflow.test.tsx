@@ -477,6 +477,38 @@ describe('PluginConfigModal workflow editing', () => {
     expect(values.graphJson).toBe('{"manual":1}')
   })
 
+  it('keeps edits made in other fields while a file read is still pending', async () => {
+    vi.mocked(pluginsService.updateConfiguration).mockResolvedValue(workflowPlugin)
+    renderModal()
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('button', { name: 'graphJson 的多行/JSON 文本编辑器' }))
+    const input = fileInputOf()
+
+    // 读取挂起期间修改另一个标量字段，并往另一个数组追加条目：
+    // 文件返回时必须调用当前渲染的 editor，而不是发起读取那一刻捕获的旧闭包（旧闭包会以旧 valuesJson 覆盖这两处编辑）。
+    const read = deferredRead('{"from-file":{"seed":9007199254740993}}')
+    fireEvent.change(input, { target: { files: [read.file] } })
+    fireEvent.change(screen.getByRole('textbox', { name: 'title' }), {
+      target: { value: 'edited-during-read' },
+    })
+    await user.click(screen.getByRole('button', { name: '添加 entries 条目' }))
+
+    read.release()
+    await waitFor(() => {
+      expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    })
+    expect(screen.getByRole('textbox', { name: 'graphJson' })).toHaveValue(
+      '{"from-file":{"seed":9007199254740993}}',
+    )
+
+    const values = await save()
+    // 文件内容、另一字段的新值与新追加的条目必须同时存在。
+    expect(values.graphJson).toBe('{"from-file":{"seed":9007199254740993}}')
+    expect(values.title).toBe('edited-during-read')
+    expect(values.entries).toHaveLength(3)
+    expect((values.entries as Record<string, unknown>[])[2]).toMatchObject({ id: '', slot: { index: 0 } })
+  })
+
   it('blocks switching editors while the form still holds unresolved draft errors', async () => {
     renderModal()
     const user = userEvent.setup()
