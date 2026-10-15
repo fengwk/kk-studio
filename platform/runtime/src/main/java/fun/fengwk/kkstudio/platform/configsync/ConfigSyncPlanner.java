@@ -297,6 +297,8 @@ public final class ConfigSyncPlanner {
         agentPool.add(agent.getName());
       }
     }
+    // 系统内置 Agent 不在可导入条目里，但确实存在：作为已满足的依赖进入池，插件与 Agent 的引用都可解析。
+    agentPool.addAll(snapshot.builtinAgentNames());
     document.agents().forEach(spec -> agentPool.add(spec.name()));
     boolean changed = true;
     while (changed) {
