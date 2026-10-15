@@ -40,7 +40,7 @@
 
 [`PluginPromptTasks`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/prompt/PluginPromptTasks.java) 让插件提交一次受信 system 文本与有序内容的 Prompt 任务：`submit` 返回可持久化的任务句柄，`await` 在调用方仍活跃且未超时前观察终态报告，`stop` 结束任务。宿主负责创建 root Session/Thread、把 system 文本包成前导提醒、与任务的固定回执在同一事务内接受源 Prompt；任务句柄在重启后仍指向同一次 join 与同一份冻结结果。
 
-[`PluginPromptResources`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/prompt/PluginPromptResources.java) 是本次调用独有的媒体暂存端口：`stage` 把插件持有的字节有界暂存为受校验的上传并返回 `StagedResource` 句柄，`discard` 主动放弃句柄。句柄不跨调用复用；宿主只按句柄的持久身份在接受事务内把它物化为 durable RESOURCE，插件无权构造存储引用。
+[`PluginPromptResources`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/prompt/PluginPromptResources.java) 提供媒体暂存：`stage` 把插件持有的字节有界暂存为受校验的上传并返回 `StagedResource` 句柄，输入流仍由插件关闭；准备失败且尚未尝试提交时，用 `discard` 放弃句柄。宿主在接受事务内锁定并校验上传身份，为 Session 建立引用后释放上传归属。提交结果不明确时，插件不得推断拒绝并清理或重新提交。
 
 [`PluginPromptContent`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/prompt/PluginPromptContent.java) 是 Prompt 内容的封闭形态：可信文本，或引用已暂存媒体的句柄。端口只使用 JDK 类型，Harness 消息结构、存储上传与 blob 引用都不出现在插件契约里。
 
