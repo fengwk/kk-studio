@@ -34,7 +34,7 @@ PostgreSQL 保存业务事实，内存 registry、执行句柄和通知承担可
 | [plugin](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/plugin) | PluginProperties、安全管理面、凭据存储/刷新与资源传输实现；纯 SPI 契约见 [Platform Plugin API](platform-plugin-api.md) |
 | [canvas](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/canvas) | Function 输出物化、Blob 访问与媒体处理适配 |
 | [settings](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/settings) | 全局设置、严格 codec、编辑 schema、版本快照与运行时现读的全局代理装配 |
-| [configsync](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/configsync) | 七类配置的 YAML 读写、依赖闭包与原子导入 |
+| [configsync](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/configsync) | 八类配置的 YAML 读写、依赖闭包与原子导入 |
 
 ## 待处理交互
 
@@ -369,6 +369,11 @@ Skill exact commit 获取、manifest 扫描和 MCP 发现先在写事务外完�
 时拒绝写入。Environment 的注册令牌与安装设置在同一次 CAS 更新中生效，同名更新保持其 UUID 身份。
 预览不冻结状态，执行时同名配置以文件为准，不维护跨步骤检查状态。
 可恢复配置在一个事务中写入，复用现有校验、引用保护和 CAS；循环 Agent 用同事务两阶段写入。
+插件是第八类：条目只含 `pluginId` 与普通值文本，秘密、认证代际、目录 epoch 与配置修订都不进入文件。
+导出只覆盖已安装插件，并按插件在代码里声明的所需 Agent 补齐插件→Agent 闭包，缺失 Agent 时拒绝导出；
+导入时未安装的 id 按条目级跳过，已安装插件按本插件的 configurationSchema 归一化普通值，非法值整份拒绝。
+插件写入复用唯一提交服务：计划期的 epoch 与各插件修订只作为导入事务内的 CAS 坐标，按返回的权威目录链式推进，
+秘密补丁恒为 KEEP，因此导入既不创建也不恢复任何凭据；任一条目（含插件与其它类别）失败都整份回滚。
 系统设置按当前完整七节契约直接校验，不合并局部字段；以执行准备时版本 CAS，提交后沿现有通知刷新快照。
 产品操作、恢复范围与保密要求见[配置导入与导出](../operations/development-and-testing.md#配置导入与导出)。
 

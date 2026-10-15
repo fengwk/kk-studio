@@ -45,7 +45,8 @@ import java.util.Map;
 class ConfigSyncServiceImplTest {
 
   private final ConfigSyncYaml yaml = new ConfigSyncYaml();
-  private final ConfigSyncGraph graph = new ConfigSyncGraph(ConfigSyncFixtures.AGENT_CONFIG_CODEC);
+  private final ConfigSyncGraph graph =
+      new ConfigSyncGraph(ConfigSyncFixtures.AGENT_CONFIG_CODEC, ConfigSyncFixtures.registry());
   private final ConfigSyncExporter exporter =
       new ConfigSyncExporter(
           ConfigSyncFixtures.PROVIDER_CONFIG_CODEC,
@@ -72,7 +73,8 @@ class ConfigSyncServiceImplTest {
           agentDefinitionRepository,
           mcpServerRepository,
           TestCatalogSources.singleLease(toolCatalog),
-          ConfigSyncFixtures.MODEL_CONFIG_PARSER);
+          ConfigSyncFixtures.MODEL_CONFIG_PARSER,
+          ConfigSyncFixtures.registry());
 
   private final ConfigSyncServiceImpl service =
       new ConfigSyncServiceImpl(snapshotReader, graph, exporter, parser, planner, applier);

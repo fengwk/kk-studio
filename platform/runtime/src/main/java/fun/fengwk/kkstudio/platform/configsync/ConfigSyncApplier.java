@@ -18,6 +18,8 @@ import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentService;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.platform.error.CatalogVersions;
+import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRecord;
+import fun.fengwk.kkstudio.platform.plugin.service.PluginConfigurationCommitService;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsService;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
@@ -30,13 +32,17 @@ import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsUpdateDTO;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * 在一个数据库事务内落地 {@link ConfigSyncPlan}。
  *
- * <p>写入顺序遵守外键与引用依赖：Provider → Model → Skill Package → MCP Server → Environment → Agent →
+ * <p>写入顺序遵守外键与引用依赖：Provider → Model → Skill Package → MCP Server → Environment → Agent → Plugin →
  * Settings。新增 Agent 先以空 subagent allowlist 创建，再在同一事务内统一更新为完整列表，使循环引用可解且事务外不可见中间态。任何写入失败都随异常整体回滚，绝不
  * 捕获后继续。
+ *
+ * <p>插件复用唯一的 {@link PluginConfigurationCommitService}：每次 configure 都在本事务内做 catalog epoch
+ * CAS，第一项比较计划 epoch，后续用同事务前一成功提交的新 epoch，同时各自比较该插件计划期的配置修订；任一项冲突或失败都让整份导入回滚，afterCommit 才在本节点应用与通知。
  */
 @AllArgsConstructor
 @Component
@@ -52,6 +58,7 @@ public class ConfigSyncApplier {
   private final EnvironmentRepository environmentRepository;
   private final EnvironmentService environmentService;
   private final SystemSettingsService systemSettingsService;
+  private final PluginConfigurationCommitService pluginCommitService;
 
   /** 事务内写入计划中的全部事实。 */
   @Transactional
@@ -79,6 +86,7 @@ public class ConfigSyncApplier {
     }
     applyEnvironments(plan.environments());
     applyAgents(plan.agents());
+    applyPlugins(plan);
     if (plan.settings() != null) {
       applySettings(plan.settings());
     }
@@ -139,6 +147,21 @@ public class ConfigSyncApplier {
       AgentDefinitionUpdateDTO update = buildAgentUpdate(spec);
       update.setExpectedVersion(CatalogVersions.format(current.getVersion()));
       definitionService.updateAgent(spec.name(), update);
+    }
+  }
+
+  /**
+   * 插件按计划顺序串行写入唯一提交入口：第一项比较计划 epoch，后续用同事务前一成功的新 epoch，各自仍比较计划期配置修订。
+   *
+   * <p>导入只承载普通值，秘密补丁恒为空（全部 KEEP），因此绝不复制或恢复任何凭据；普通配置变化可能合法推进认证代际，但秘密载荷保持原状。
+   */
+  private void applyPlugins(ConfigSyncPlan plan) {
+    long epoch = plan.pluginCatalogEpoch();
+    for (ConfigSyncPlan.PluginImport plugin : plan.plugins()) {
+      PluginCatalogRecord committed =
+          pluginCommitService.configure(
+              plugin.pluginId(), epoch, plugin.expectedRevision(), plugin.valuesJson(), Map.of());
+      epoch = committed.epoch();
     }
   }
 

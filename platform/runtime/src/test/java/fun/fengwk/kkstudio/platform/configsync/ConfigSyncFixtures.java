@@ -1,8 +1,12 @@
 package fun.fengwk.kkstudio.platform.configsync;
 
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
+import fun.fengwk.kkstudio.harness.common.json.JsonValues;
+import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.common.schema.StringSchema;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.definition.service.impl.AgentDefinitionMutationFactory;
@@ -23,7 +27,17 @@ import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEnt
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
+import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
+import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
+import fun.fengwk.kkstudio.platform.plugin.PluginConfigSchema;
+import fun.fengwk.kkstudio.platform.plugin.PluginContext;
+import fun.fengwk.kkstudio.platform.plugin.PluginDescriptor;
+import fun.fengwk.kkstudio.platform.plugin.PluginInstance;
+import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
+import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialKeyLoader;
+import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRow;
+import fun.fengwk.kkstudio.platform.plugin.testing.TestPluginFixtures;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsRepository;
@@ -51,6 +65,7 @@ import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /** 配置同步单测共用 fixture：用真实 codec 生成可被生产 parser 解码的模型/Agent 配置。 */
@@ -80,15 +95,21 @@ final class ConfigSyncFixtures {
 
   private ConfigSyncFixtures() {}
 
-  /** 构造注入了真实校验器的 Parser，供解析期硬校验测试使用。 */
+  /** 构造注入了真实校验器的 Parser，供解析期硬校验测试使用；无已安装插件。 */
   static ConfigSyncParser parser(ConfigSyncYaml yaml) {
+    return parser(yaml, registry());
+  }
+
+  /** 同上，但带指定安装目录，用于插件条目的解析期校验。 */
+  static ConfigSyncParser parser(ConfigSyncYaml yaml, StudioPluginRegistry pluginRegistry) {
     return new ConfigSyncParser(
         yaml,
         PROVIDER_MUTATION_FACTORY,
         MODEL_MUTATION_FACTORY,
         AGENT_MUTATION_FACTORY,
         SKILL_CATALOG_SERVICE,
-        new SystemSettingsCodec());
+        new SystemSettingsCodec(),
+        pluginRegistry);
   }
 
   static AgentModelConfigDTO modelConfig() {
@@ -254,8 +275,117 @@ final class ConfigSyncFixtures {
       List<Environment> environments,
       List<McpServer> mcpServers,
       List<McpTool> mcpTools) {
+    return snapshotWithPlugins(
+        providers,
+        models,
+        agents,
+        skillPackages,
+        environments,
+        mcpServers,
+        mcpTools,
+        0L,
+        List.of());
+  }
+
+  static ConfigSyncSnapshot snapshotWithPlugins(
+      List<AgentProvider> providers,
+      List<AgentModel> models,
+      List<AgentDefinition> agents,
+      List<SkillPackage> skillPackages,
+      List<Environment> environments,
+      List<McpServer> mcpServers,
+      List<McpTool> mcpTools,
+      long pluginCatalogEpoch,
+      List<PluginConfigurationRow> plugins) {
     return new ConfigSyncSnapshot(
-        providers, models, agents, skillPackages, environments, mcpServers, mcpTools, settings(1L));
+        providers,
+        models,
+        agents,
+        skillPackages,
+        environments,
+        mcpServers,
+        mcpTools,
+        settings(1L),
+        pluginCatalogEpoch,
+        plugins);
+  }
+
+  /** 合法 64 位小写 SHA-256 占位指纹；插件历史行的身份字段只需形状正确，不参与 configsync 语义。 */
+  static final String FINGERPRINT =
+      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+  /** 权威配置历史行：pluginId + 修订 + 普通值文本；身份字段用占位指纹。 */
+  static PluginConfigurationRow pluginRow(String pluginId, long revision, String valuesJson) {
+    return new PluginConfigurationRow(
+        pluginId,
+        revision,
+        "1.0.0",
+        FINGERPRINT,
+        FINGERPRINT,
+        UUID.fromString("00000000-0000-0000-0000-0000000000ff"),
+        FINGERPRINT,
+        List.of(),
+        valuesJson);
+  }
+
+  static StudioPluginRegistry registry(StudioPlugin... plugins) {
+    return new StudioPluginRegistry(List.of(plugins));
+  }
+
+  /**
+   * 合成插件：普通配置声明一个 Agent 名称字段，{@code requiredAgentNames} 只解析该字段。
+   *
+   * <p>用于证明「插件声明 Agent 依赖」的通用机制，不引用也不猜测任何具体插件的字段或实现。
+   */
+  static final class AgentDependencyPlugin implements StudioPlugin {
+
+    static final String AGENT_FIELD = "promptAgentName";
+
+    private static final PluginConfigSchema SCHEMA =
+        new PluginConfigSchema(
+            new InputSchema(
+                "config",
+                Map.of(AGENT_FIELD, new StringSchema("prompt agent name")),
+                Set.of(),
+                false),
+            "{}",
+            Map.of());
+
+    private final String pluginId;
+
+    AgentDependencyPlugin(String pluginId) {
+      this.pluginId = pluginId;
+    }
+
+    @Override
+    public PluginDescriptor descriptor() {
+      return new PluginDescriptor(pluginId, "Synthetic " + pluginId, "1.0.0");
+    }
+
+    @Override
+    public PluginConfigSchema configurationSchema() {
+      return SCHEMA;
+    }
+
+    @Override
+    public PluginAuthSpec authenticationSpec() {
+      return new PluginAuthSpec.None();
+    }
+
+    @Override
+    public PluginInstance configure(PluginConfig config, PluginContext context) {
+      return TestPluginFixtures.emptyInstance();
+    }
+
+    @Override
+    public Set<String> requiredAgentNames(PluginConfig config) {
+      JsonNode node = JsonValues.readTree(config.valuesJson());
+      JsonNode agent = node.get(AGENT_FIELD);
+      if (agent == null || !agent.isString() || agent.stringValue().isBlank()) {
+        return Set.of();
+      }
+      return Set.of(agent.stringValue());
+    }
   }
 
   static List<String> listOf(String... values) {

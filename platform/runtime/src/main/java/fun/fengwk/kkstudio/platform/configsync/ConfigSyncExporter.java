@@ -14,6 +14,7 @@ import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillTokenCipher;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
+import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRow;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncKind;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncRef;
@@ -30,7 +31,7 @@ import java.util.Set;
  * 把一次快照按引用选择导出为纯结构 YAML 文档。
  *
  * <p>只导出可编辑业务字段：不含 UUID、时间戳、乐观锁版本、Provider generation、连接/发现状态等运行态事实；凭据、registrationToken 与 MCP
- * headers 按原值导出，{@code ${VAR}} 不解析。
+ * headers 按原值导出，{@code ${VAR}} 不解析。插件只导出安装身份与普通值文本，其秘密与认证/代理解密事实一律不进入文件。
  */
 @AllArgsConstructor
 @Component
@@ -103,7 +104,27 @@ public final class ConfigSyncExporter {
       document.put(ConfigSyncKind.SETTINGS.wireValue(), yaml.toMap(sections, "settings"));
     }
 
+    List<Object> plugins = new ArrayList<>();
+    for (PluginConfigurationRow plugin : snapshot.plugins()) {
+      if (selected.contains(ConfigSyncRefs.ref(ConfigSyncKind.PLUGINS, plugin.pluginId()))) {
+        plugins.add(exportPlugin(plugin));
+      }
+    }
+    putIfNotEmpty(document, ConfigSyncKind.PLUGINS, plugins);
+
     return yaml.dump(document);
+  }
+
+  /**
+   * 插件条目只带安装身份与普通值文本。
+   *
+   * <p>秘密、受保护 instanceId、认证历史/代际/状态、代码与能力指纹、任务与 catalog 历史都不属于普通值，绝不进入文件。
+   */
+  private Map<String, Object> exportPlugin(PluginConfigurationRow plugin) {
+    Map<String, Object> map = new LinkedHashMap<>();
+    map.put("pluginId", plugin.pluginId());
+    map.put("valuesJson", plugin.valuesJson());
+    return map;
   }
 
   private Map<String, Object> exportProvider(AgentProvider provider) {
