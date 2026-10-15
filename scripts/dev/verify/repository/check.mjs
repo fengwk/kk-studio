@@ -528,7 +528,7 @@ function checkRepositoryStructure() {
   }
 
   // plugins 只聚合构建期可选 Plugin；发行物包含哪些 Plugin 由 web 的 runtime dependency 决定。
-  const expectedPluginsModules = ['minimax-mavis', 'canvas-media', 'canvas-comfyui']
+  const expectedPluginsModules = ['minimax-mavis', 'opencli', 'canvas-media', 'canvas-comfyui']
   const pluginsRoot = path.join(repositoryRoot, 'plugins')
   if (existsSync(pluginsRoot)) {
     const actualPluginsDirectories = readdirSync(pluginsRoot, { withFileTypes: true })
@@ -759,12 +759,58 @@ function checkEnvironmentRouteDocs() {
   }
 }
 
+function checkPluginsDependencyGuards() {
+  const opencliPomPath = path.join(repositoryRoot, 'plugins/opencli/pom.xml')
+  if (existsSync(opencliPomPath)) {
+    const forbiddenHostArtifacts = new Set([
+      'kk-studio-platform-runtime',
+      'kk-studio-share',
+      'kk-studio-web',
+      'kk-studio-harness-runtime',
+      'kk-studio-harness-provider',
+      'kk-studio-harness-environment',
+      'kk-studio-harness-environment-server',
+      'kk-studio-harness-builtin',
+      'kk-studio-harness-infra',
+      'kk-studio-harness-daemon',
+      'kk-studio-project',
+      'kk-studio-canvas-infra',
+    ])
+    const pomContent = read(relativeFromRoot(opencliPomPath))
+    for (const depMatch of pomContent.matchAll(/<dependency>([\s\S]*?)<\/dependency>/gu)) {
+      const depBlock = depMatch[1]
+      const artifactMatch = depBlock.match(/<artifactId>\s*([^<\s]+)\s*<\/artifactId>/u)
+      if (artifactMatch && forbiddenHostArtifacts.has(artifactMatch[1])) {
+        addError(
+          `plugins/opencli/pom.xml: forbidden host implementation dependency ${artifactMatch[1]}`,
+        )
+      }
+    }
+  }
+
+  const webTestRoot = path.join(repositoryRoot, 'web/src/test/java')
+  if (existsSync(webTestRoot)) {
+    for (const filePath of walkFiles(webTestRoot)) {
+      if (!filePath.endsWith('.java')) {
+        continue
+      }
+      const source = read(relativeFromRoot(filePath))
+      if (/^\s*import\s+(?:static\s+)?fun\.fengwk\.kkstudio\.plugin\.opencli\./mu.test(source)) {
+        addError(
+          `${relativeFromRoot(filePath)}: forbidden compile import of opencli plugin class; use runtime reflection`,
+        )
+      }
+    }
+  }
+}
+
 checkFixedLayout()
 checkHeadings()
 checkLinks()
 checkInlineSourcePaths()
 checkForbiddenReferencesAndTerms()
 checkRepositoryStructure()
+checkPluginsDependencyGuards()
 checkNoHarnessModuleDocs()
 checkHarnessPackageInfo()
 checkHarnessPackageArchitectureDocs()

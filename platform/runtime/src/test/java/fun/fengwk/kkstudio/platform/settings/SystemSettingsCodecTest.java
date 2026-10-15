@@ -275,19 +275,28 @@ class SystemSettingsCodecTest {
             new SystemSettings.Integrations(
                 new SystemSettings.Comfyui(
                     false, null, 10_000L, 30_000L, 1_800_000L, 50L * 1024 * 1024),
-                new SystemSettings.OpenCliHub(
-                    false, null, 5_000L, 120_000L, 130_000L, 16 * 1024, 512 * 1024, 4096, 65_535),
-                SystemSettings.DEFAULT.integrations().seedance(),
-                SystemSettings.DEFAULT.integrations().gptImage2(),
                 new SystemSettings.MiniMaxH3(
                     false, null, 600_000L, null, 10_000L, 30_000L, 2_000L, 1_800_000L)),
             SystemSettings.DEFAULT.storageMedia(),
             SystemSettings.DEFAULT.advanced());
     String canonical = codec.encode(settings);
     assertTrue(!canonical.contains("\"baseUrl\""), canonical);
-    assertTrue(!canonical.contains("\"workspaceId\""), canonical);
+    assertTrue(!canonical.contains("\"comfyBaseUrl\""), canonical);
     assertEquals(settings, codec.decode(canonical));
     assertEquals(canonical, codec.encode(codec.decode(canonical)));
+  }
+
+  @Test
+  void rejectsLegacyOpenCliIntegrations() throws Exception {
+    String canonical = codec.encode(SystemSettings.DEFAULT);
+    for (String legacyField : List.of("openCliHub", "seedance", "gptImage2")) {
+      ObjectNode node = (ObjectNode) mapper.readTree(canonical);
+      ((ObjectNode) node.get("integrations")).putObject(legacyField);
+      assertThrows(
+          IllegalStateException.class,
+          () -> codec.decode(mapper.writeValueAsString(node)),
+          legacyField);
+    }
   }
 
   @Test
@@ -390,7 +399,7 @@ class SystemSettingsCodecTest {
         error.getMessage());
     sections.getAiRuntime().setRetryBaseDelayMillis(2_000L);
 
-    sections.getIntegrations().setSeedance(null);
+    sections.getIntegrations().setMinimaxH3(null);
     assertThrows(IllegalArgumentException.class, () -> codec.fromDto(sections));
     assertThrows(IllegalArgumentException.class, () -> codec.fromDto(null));
   }

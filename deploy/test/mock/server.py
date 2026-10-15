@@ -134,10 +134,40 @@ class MockHandler(BaseHTTPRequestHandler):
         self._send_sse(200, chat_completions_sse(model))
         return True
 
+    def _is_opencli_fake_request(self, path: str) -> bool:
+        if self.command == "POST" and (
+            path == "/api/resources/uploads" or path == "/api/opencli/execute"
+        ):
+            return True
+        if self.command == "GET" and re.fullmatch(
+            r"/api/executions/([A-Za-z0-9-]+)", path
+        ):
+            return True
+        if self.command == "POST" and re.fullmatch(
+            r"/api/executions/([A-Za-z0-9-]+)/cancel", path
+        ):
+            return True
+        if self.command == "GET" and (
+            path in self.server.resources or path.startswith("/api/resources/fake/")
+        ):
+            return True
+        return False
+
     def _handle_opencli_fake(self, path: str, body: bytes) -> bool:
         fixtures = self.server.opencli_fake_fixtures
         if fixtures is None:
             return False
+
+        if not self._is_opencli_fake_request(path):
+            return False
+
+        auth_header = self.headers.get("Authorization", "")
+        expected_token = getattr(
+            self.server, "opencli_bearer_token", "synthetic-opencli-key"
+        )
+        if auth_header != f"Bearer {expected_token}":
+            self._send_json(401, {"error": "unauthorized"})
+            return True
 
         if self.command == "POST" and path == "/api/resources/uploads":
             disposition = re.search(
@@ -320,6 +350,7 @@ class MockHandler(BaseHTTPRequestHandler):
 def build_server(
     routes_path: Path,
     opencli_fake_fixtures: Path | None = None,
+    opencli_bearer_token: str = "synthetic-opencli-key",
     *,
     host: str = "0.0.0.0",
     port: int = 8080,
@@ -329,6 +360,7 @@ def build_server(
     server = ThreadingHTTPServer((host, port), MockHandler)
     server.routes_path = routes_path
     server.opencli_fake_fixtures = opencli_fake_fixtures
+    server.opencli_bearer_token = opencli_bearer_token
     server.execution_counter = 0
     server.upload_counter = 0
     server.executions = {}
@@ -340,9 +372,14 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--routes", required=True, type=Path)
     parser.add_argument("--opencli-fake-fixtures", type=Path)
+    parser.add_argument("--opencli-bearer-token", default="synthetic-opencli-key")
     args = parser.parse_args()
 
-    server = build_server(args.routes, args.opencli_fake_fixtures)
+    server = build_server(
+        args.routes,
+        args.opencli_fake_fixtures,
+        opencli_bearer_token=args.opencli_bearer_token,
+    )
     server.serve_forever()
 
 

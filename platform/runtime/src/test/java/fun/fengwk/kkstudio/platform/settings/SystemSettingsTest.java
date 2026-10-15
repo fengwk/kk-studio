@@ -64,25 +64,6 @@ class SystemSettingsTest {
     assertEquals(30_000L, integrations.comfyui().readTimeoutMillis());
     assertEquals(1_800_000L, integrations.comfyui().websocketTimeoutMillis());
     assertEquals(50L * 1024 * 1024, integrations.comfyui().maxInputFileBytes());
-    assertEquals(false, integrations.openCliHub().enabled());
-    assertEquals(null, integrations.openCliHub().baseUrl());
-    assertEquals(5_000L, integrations.openCliHub().connectTimeoutMillis());
-    assertEquals(120_000L, integrations.openCliHub().requestTimeoutMillis());
-    assertEquals(130_000L, integrations.openCliHub().longPollTimeoutMillis());
-    assertEquals(16 * 1024, integrations.openCliHub().streamBufferBytes());
-    assertEquals(512 * 1024, integrations.openCliHub().maxJsonResponseBytes());
-    assertEquals(4096, integrations.openCliHub().maxErrorResponseBytes());
-    assertEquals(65_535, integrations.openCliHub().maxOutputChars());
-    assertEquals(false, integrations.seedance().enabled());
-    assertEquals(null, integrations.seedance().workspaceId());
-    assertEquals(0, integrations.seedance().retry());
-    assertEquals(600_000L, integrations.seedance().hubExecutionTimeoutMillis());
-    assertEquals(30_000L, integrations.seedance().statusPollIntervalMillis());
-    assertEquals(1_800_000L, integrations.seedance().maxWaitMillis());
-    assertEquals(false, integrations.gptImage2().paidEnabled());
-    assertEquals(900, integrations.gptImage2().askTimeoutSeconds());
-    assertEquals(960_000L, integrations.gptImage2().hubExecutionTimeoutMillis());
-    assertEquals(1_200_000L, integrations.gptImage2().maxWaitMillis());
     assertEquals(false, integrations.minimaxH3().enabled());
     assertEquals(600_000L, integrations.minimaxH3().promptMaxWaitMillis());
     assertEquals(10_000L, integrations.minimaxH3().comfyConnectTimeoutMillis());
@@ -369,14 +350,6 @@ class SystemSettingsTest {
                 true, null, 10_000L, 30_000L, 1_800_000L, 50L * 1024 * 1024));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new SystemSettings.Seedance(true, null, 0, 600_000L, 30_000L, 1_800_000L));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new SystemSettings.OpenCliHub(
-                true, null, 5_000L, 120_000L, 130_000L, 16 * 1024, 512 * 1024, 4096, 65_535));
-    assertThrows(
-        IllegalArgumentException.class,
         () ->
             new SystemSettings.MiniMaxH3(
                 true, null, 600_000L, "http://comfy:8188", 10_000L, 30_000L, 2_000L, 1_800_000L));
@@ -388,72 +361,17 @@ class SystemSettingsTest {
   }
 
   @Test
-  void rejectsPollingNotBelowMaxWaitAndInvalidGptImage2Budget() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new SystemSettings.Seedance(false, null, 0, 600_000L, 1_800_000L, 1_800_000L));
+  void rejectsPollingNotBelowMaxWaitInMiniMaxH3() {
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new SystemSettings.MiniMaxH3(
                 false, null, 600_000L, null, 10_000L, 30_000L, 1_800_000L, 1_800_000L));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new SystemSettings.GptImage2(false, 900, 900_000L, 1_200_000L));
   }
 
   @Test
-  void rejectsInvalidOpenCliHubOriginAndByteRanges() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new SystemSettings.OpenCliHub(
-                false,
-                "http://hub:8080/api",
-                5_000L,
-                120_000L,
-                130_000L,
-                16 * 1024,
-                512 * 1024,
-                4096,
-                65_535));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new SystemSettings.OpenCliHub(
-                false,
-                "http://user@hub:8080",
-                5_000L,
-                120_000L,
-                130_000L,
-                16 * 1024,
-                512 * 1024,
-                4096,
-                65_535));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new SystemSettings.OpenCliHub(
-                false,
-                "http://hub:8080",
-                5_000L,
-                120_000L,
-                130_000L,
-                10,
-                512 * 1024,
-                4096,
-                65_535));
-  }
-
-  @Test
-  void rejectsInvalidEnvironmentAndSeedanceBudgets() {
+  void rejectsInvalidEnvironmentBudgets() {
     assertThrows(IllegalArgumentException.class, () -> new SystemSettings.Environment(0L, 60_000L));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new SystemSettings.Seedance(false, null, 6, 600_000L, 30_000L, 1_800_000L));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new SystemSettings.Seedance(false, "  ws  ", 0, 600_000L, 30_000L, 1_800_000L));
   }
 
   @Test

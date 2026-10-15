@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.canvas.function.opencli;
+package fun.fengwk.kkstudio.plugin.opencli;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -21,12 +21,12 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
-import fun.fengwk.kkstudio.platform.canvas.function.opencli.OpenCliHubClient.Execution;
-import fun.fengwk.kkstudio.platform.canvas.function.opencli.OpenCliHubClient.ExecutionResource;
-import fun.fengwk.kkstudio.platform.canvas.function.opencli.OpenCliHubClient.ExecutionStatus;
-import fun.fengwk.kkstudio.platform.canvas.function.opencli.OpenCliHubClient.HubResourceStream;
-import fun.fengwk.kkstudio.platform.settings.SystemSettings;
-import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
+import fun.fengwk.kkstudio.platform.plugin.PluginCredentialSnapshot;
+import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialAccess;
+import fun.fengwk.kkstudio.plugin.opencli.OpenCliHubClient.Execution;
+import fun.fengwk.kkstudio.plugin.opencli.OpenCliHubClient.ExecutionResource;
+import fun.fengwk.kkstudio.plugin.opencli.OpenCliHubClient.ExecutionStatus;
+import fun.fengwk.kkstudio.plugin.opencli.OpenCliHubClient.HubResourceStream;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -38,6 +38,7 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -46,10 +47,12 @@ import java.util.concurrent.atomic.AtomicReference;
 @ResourceLock("jvm-proxy-selector")
 class OpenCliHubClientTest {
 
+  private static final String API_KEY = "test-api-key";
+
   private final ObjectMapper mapper = JsonMapper.builder().build();
   private HttpServer server;
-  private OpenCliHubProperties properties;
-  private SystemSettingsSnapshot snapshot;
+  private OpenCliSettings settings;
+  private PluginCredentialAccess credentials;
   private OpenCliHubClient client;
 
   /** Hub 客户端捕获启动期统一 selector；不解析远端 Hub 域名，上传经本地 HTTP 代理完成。 */
@@ -66,6 +69,7 @@ class OpenCliHubClientTest {
     server.createContext(
         "/api/resources/uploads",
         exchange -> {
+          assertEquals("Bearer " + API_KEY, exchange.getRequestHeaders().getFirst("Authorization"));
           exchange.getRequestBody().readAllBytes();
           respond(
               exchange,
@@ -80,15 +84,13 @@ class OpenCliHubClientTest {
       ProxySelector.setDefault(selector);
       OpenCliHubClient proxied =
           new OpenCliHubClient(
-              properties,
-              new SystemSettingsSnapshot(
-                  settings(openCliHub("http://unresolvable.invalid", 121_000L))),
-              mapper);
+              openCliSettings("http://unresolvable.invalid", 121_000), mapper, credentials);
       assertEquals(
           "/resources/proxy/source.png",
           proxied
               .upload("source.png", "image/png", 3, new ByteArrayInputStream(new byte[] {1, 2, 3}))
               .resourcePath());
+      proxied.close();
     } finally {
       ProxySelector.setDefault(previous);
     }
@@ -98,15 +100,16 @@ class OpenCliHubClientTest {
   void setUp() throws IOException {
     server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     server.start();
-    properties = new OpenCliHubProperties();
-    snapshot =
-        new SystemSettingsSnapshot(
-            settings(openCliHub("http://127.0.0.1:" + server.getAddress().getPort(), 121_000L)));
-    client = new OpenCliHubClient(properties, snapshot, mapper);
+    settings = openCliSettings("http://127.0.0.1:" + server.getAddress().getPort(), 121_000);
+    credentials = fakeCredentialAccess(API_KEY);
+    client = new OpenCliHubClient(settings, mapper, credentials);
   }
 
   @AfterEach
   void tearDown() {
+    if (client != null) {
+      client.close();
+    }
     server.stop(0);
   }
 
@@ -120,9 +123,11 @@ class OpenCliHubClientTest {
     AtomicReference<String> transferEncoding = new AtomicReference<>();
     AtomicReference<String> contentLength = new AtomicReference<>();
     AtomicReference<byte[]> requestBody = new AtomicReference<>();
+    AtomicReference<String> authorization = new AtomicReference<>();
     server.createContext(
         "/api/resources/uploads",
         exchange -> {
+          authorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
           transferEncoding.set(exchange.getRequestHeaders().getFirst("Transfer-Encoding"));
           contentLength.set(exchange.getRequestHeaders().getFirst("Content-Length"));
           requestBody.set(exchange.getRequestBody().readAllBytes());
@@ -140,11 +145,11 @@ class OpenCliHubClientTest {
         client.upload("../unsafe source.png", "image/png", media.length, input);
 
     assertEquals("/resources/2026-08-10/upload-test/source.png", uploaded.resourcePath());
-    assertEquals(null, transferEncoding.get());
+    assertEquals("Bearer " + API_KEY, authorization.get());
+    assertNull(transferEncoding.get());
     assertEquals(requestBody.get().length, Long.parseLong(contentLength.get()));
     assertTrue(input.closed);
-    assertTrue(
-        input.maxRequested <= snapshot.get().integrations().openCliHub().streamBufferBytes());
+    assertTrue(input.maxRequested <= settings.streamBufferBytes());
     byte[] body = requestBody.get();
     String text = new String(body, StandardCharsets.ISO_8859_1);
     assertTrue(text.contains("name=\"files\""));
@@ -216,12 +221,14 @@ class OpenCliHubClientTest {
     server.createContext(
         "/api/opencli/execute",
         exchange -> {
+          assertEquals("Bearer " + API_KEY, exchange.getRequestHeaders().getFirst("Authorization"));
           executeBody.set(mapper.readTree(exchange.getRequestBody()));
           respond(exchange, 200, envelope(execution("exec-1", "PENDING", false, "", "[]")));
         });
     server.createContext(
         "/api/executions/exec-1",
         exchange -> {
+          assertEquals("Bearer " + API_KEY, exchange.getRequestHeaders().getFirst("Authorization"));
           if (exchange.getRequestURI().getPath().endsWith("/cancel")) {
             cancelCalls.incrementAndGet();
             respond(exchange, 200, envelope(execution("exec-1", "CANCELLED", false, "", "[]")));
@@ -232,8 +239,21 @@ class OpenCliHubClientTest {
           }
         });
 
-    properties.setInstanceId("instance-1");
-    client = new OpenCliHubClient(properties, snapshot, mapper);
+    OpenCliSettings configured =
+        new OpenCliSettings(
+            true,
+            "http://127.0.0.1:" + server.getAddress().getPort(),
+            "instance-1",
+            5_000,
+            120_000,
+            121_000,
+            1024,
+            512 * 1024,
+            4096,
+            65_535,
+            OpenCliSettings.GptImage2.DEFAULT,
+            OpenCliSettings.Seedance.DEFAULT);
+    client = new OpenCliHubClient(configured, mapper, credentials);
     Execution submitted = client.execute(List.of("chatgpt-agent", "ask", "prompt"), 1000L);
     client.cancelPendingBestEffort(submitted.id());
 
@@ -279,6 +299,7 @@ class OpenCliHubClientTest {
     server.createContext(
         "/api/resources/2026-08-10/execution-1/output.png",
         exchange -> {
+          assertEquals("Bearer " + API_KEY, exchange.getRequestHeaders().getFirst("Authorization"));
           exchange.getResponseHeaders().set("Content-Type", "image/png");
           exchange.sendResponseHeaders(200, media.length);
           exchange.getResponseBody().write(media);
@@ -384,59 +405,50 @@ class OpenCliHubClientTest {
     assertFalse(redirect.getMessage().contains("/api/resources/target"));
     assertNull(redirect.getCause());
 
-    // Hub 部署信息（base 配置）由 SystemSettings.integrations.openCliHub 判定：
-    // 带凭据/查询串的 base URL、超限超时都在聚合构造时 fail fast。
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> openCliHub("https://user@example.com/?secret=x", 130_000L));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> openCliHub("http://127.0.0.1:1", 180_000L, 120_000L, 130_000L));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> openCliHub("http://127.0.0.1:1", 120_000L, 31L * 60 * 1000, 130_000L));
-
-    new OpenCliHubClient(
-        properties,
-        new SystemSettingsSnapshot(settings(openCliHub("http://[::1]:8080", 130_000L))),
-        mapper);
+    // IPv6 baseUrl 正常支持
+    OpenCliHubClient ipv6Client =
+        new OpenCliHubClient(openCliSettings("http://[::1]:8080", 130_000), mapper, credentials);
+    ipv6Client.close();
   }
 
-  private static SystemSettings.OpenCliHub openCliHub(String baseUrl, long longPollTimeoutMillis) {
-    return openCliHub(baseUrl, 5_000L, 120_000L, longPollTimeoutMillis);
-  }
-
-  private static SystemSettings.OpenCliHub openCliHub(
-      String baseUrl,
-      long connectTimeoutMillis,
-      long requestTimeoutMillis,
-      long longPollTimeoutMillis) {
-    return new SystemSettings.OpenCliHub(
+  private static OpenCliSettings openCliSettings(String baseUrl, int longPollTimeoutMillis) {
+    return new OpenCliSettings(
         true,
         baseUrl,
-        connectTimeoutMillis,
-        requestTimeoutMillis,
+        "test-instance",
+        5_000,
+        120_000,
         longPollTimeoutMillis,
         1024,
         512 * 1024,
         4096,
-        65_535);
+        65_535,
+        OpenCliSettings.GptImage2.DEFAULT,
+        OpenCliSettings.Seedance.DEFAULT);
   }
 
-  private static SystemSettings settings(SystemSettings.OpenCliHub openCliHub) {
-    return new SystemSettings(
-        SystemSettings.Tool.DEFAULT,
-        SystemSettings.AiRuntime.DEFAULT,
-        SystemSettings.Environment.DEFAULT,
-        SystemSettings.Network.DEFAULT,
-        new SystemSettings.Integrations(
-            SystemSettings.Comfyui.DEFAULT,
-            openCliHub,
-            SystemSettings.Seedance.DEFAULT,
-            SystemSettings.GptImage2.DEFAULT,
-            SystemSettings.MiniMaxH3.DEFAULT),
-        SystemSettings.StorageMedia.DEFAULT,
-        SystemSettings.Advanced.DEFAULT);
+  private static PluginCredentialAccess fakeCredentialAccess(String apiKey) {
+    PluginCredentialSnapshot snapshot =
+        new PluginCredentialSnapshot(
+            "opencli",
+            UUID.randomUUID(),
+            "context",
+            null,
+            null,
+            0L,
+            new byte[0],
+            "{\"apiKey\":\"" + apiKey + "\"}");
+    return new PluginCredentialAccess() {
+      @Override
+      public PluginCredentialSnapshot resolve() {
+        return snapshot;
+      }
+
+      @Override
+      public boolean rejectUsed(PluginCredentialSnapshot target, String error) {
+        return true;
+      }
+    };
   }
 
   private void assertUploadedFilename(String filename, String expected) {

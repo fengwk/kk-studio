@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.canvas.function.opencli;
+package fun.fengwk.kkstudio.plugin.opencli;
 
 import java.net.URI;
 import java.util.ArrayList;

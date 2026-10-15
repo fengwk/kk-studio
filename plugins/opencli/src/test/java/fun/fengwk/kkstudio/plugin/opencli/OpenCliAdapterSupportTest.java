@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.canvas.function.opencli;
+package fun.fengwk.kkstudio.plugin.opencli;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -20,8 +20,8 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionExecutionContext;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenReference;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionResourceStream;
-import fun.fengwk.kkstudio.platform.canvas.function.opencli.OpenCliAdapterState.UploadedInput;
-import fun.fengwk.kkstudio.platform.canvas.function.opencli.OpenCliHubClient.UploadedResource;
+import fun.fengwk.kkstudio.plugin.opencli.OpenCliAdapterState.UploadedInput;
+import fun.fengwk.kkstudio.plugin.opencli.OpenCliHubClient.UploadedResource;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -31,7 +31,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.function.Consumer;
 
 /** Checkpoint、上传恢复和配置边界必须在调用 provider 前 fail closed。 */
 class OpenCliAdapterSupportTest {
@@ -158,21 +157,6 @@ class OpenCliAdapterSupportTest {
         () -> uploader.uploadAll(closeFailureContext, run, new LinkedHashMap<>()));
   }
 
-  @Test
-  void hubPropertiesOnlyValidateInstanceIdentity() {
-    assertInvalidHub(properties -> properties.setInstanceId(" "));
-    assertInvalidHub(properties -> properties.setInstanceId("x".repeat(37)));
-
-    OpenCliHubProperties valid = new OpenCliHubProperties();
-    valid.setInstanceId(" instance ");
-    valid.validate();
-    assertEquals("instance", valid.getInstanceId());
-
-    OpenCliHubProperties absent = new OpenCliHubProperties();
-    absent.validate();
-    assertNull(absent.getInstanceId());
-  }
-
   private static CanvasFunctionFrozenReference image(long resourceId, String name) {
     UUID resource = new UUID(0L, resourceId);
     return new CanvasFunctionFrozenReference(
@@ -187,11 +171,5 @@ class OpenCliAdapterSupportTest {
         null,
         null,
         null);
-  }
-
-  private static void assertInvalidHub(Consumer<OpenCliHubProperties> mutation) {
-    OpenCliHubProperties properties = new OpenCliHubProperties();
-    mutation.accept(properties);
-    assertThrows(IllegalArgumentException.class, properties::validate);
   }
 }

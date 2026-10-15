@@ -598,7 +598,7 @@ env JAVA_HOME=$JAVA_HOME_21 KK_STUDIO_REAL_CACHE_PROBE=true \
 
 隔离栈之外还有一条真实 Seedance prepare-only smoke：它只验证页面准备与 checkpoint，不点击生成、
 不创建 FunctionRun、不下载或导入视频，因此必须在显式开关下由人工执行。它固定 `seedance2.0fast`、
-`duration=4`、`submit=0`、`retry=0`，`OPENCLI_HUB_BASE_URL` 没有默认值。完整命令、参数约束与失败
+`duration=4`、`submit=0`、`retry=0`，`OPENCLI_HUB_BASE_URL` 与显式 `OPENCLI_API_KEY` 没有默认值。完整命令、参数约束与失败
 边界见 [deploy/test 的真实 Seedance prepare-only 边界](../../deploy/test/README.md#真实-seedance-prepare-only-边界)；
 任何正式 Seedance/GPT Image 提交都可能产生费用，只能由人工通过应用的独立真实提交开关启用。
 
@@ -900,6 +900,9 @@ YAML 结构、类型、有效值错误或当前必填字段缺失，会直接拒
 条目名称须非空且没有首尾空白，重复名称不会依次覆盖；注册令牌被不同 Environment 占用、
 同名 Skill Package 更换仓库地址、移除仍被引用的 Skill 或 MCP 工具也会整份拒绝。
 文件未包含的类别保持原样，但包含系统设置时必须提供当前完整设置结构，不能只提供局部字段。
+系统设置已彻底删除旧有的 `integrations.openCliHub`、`integrations.gptImage2` 与 `integrations.seedance` 三段配置，
+导入包含旧字段的文件或配置将被明确拒绝，无双读与静默别名；OpenCLI 的普通配置与 `apiKey` 凭据归属于独立 Plugin 管理面，
+在导入后通过插件统一配置与 Secret API 录入。涉及历史配置结构调整时，严格遵循“配置导出备份 -> 仅在获授权时停机并数据库重建 -> 当前 Schema 初始化 -> 导入恢复”的边界，绝不直接就地操作已有部署或共享数据库。
 Provider 凭据按文件恢复；文件中的 Provider 没有凭据时，同名目标的旧凭据也会清空。
 
 确认后按名称新增或更新，不删除文件外的配置。预览不锁定配置，实际执行重新检查；

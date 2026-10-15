@@ -431,6 +431,54 @@ with urllib.request.urlopen(generated_preview["url"], timeout=30) as response:
     assert response.status == 200
     assert body.startswith(b"RIFF") and b"WEBP" in body[:16]
 
+# Offline seed/smoke: initialize opencli plugin through unified plugin configuration + secret API.
+# Secrets never enter seed or schema. Coordinates expectedEpoch/expectedRevision are obtained from GET.
+opencli_descriptor = json_call("GET", "/api/plugins/opencli")
+json_call(
+    "PUT",
+    "/api/plugins/opencli/configuration",
+    {
+        "expectedEpoch": opencli_descriptor["desiredEpoch"],
+        "expectedRevision": opencli_descriptor["desiredRevision"],
+        "valuesJson": json.dumps(
+            {
+                "enabled": True,
+                "baseUrl": "http://opencli-hub:8080",
+                "gptImage2": {
+                    "paidEnabled": True,
+                },
+                "seedance": {
+                    "enabled": True,
+                    "workspaceId": "mock-workspace",
+                    "statusPollIntervalMillis": 10,
+                    "maxWaitMillis": 30000,
+                },
+            },
+            separators=(",", ":"),
+        ),
+        "secretPatch": {
+            "apiKey": {
+                "operation": "SET",
+                "value": "synthetic-opencli-key",
+            },
+        },
+    },
+)
+for _ in range(80):
+    current_opencli = json_call("GET", "/api/plugins/opencli")
+    if (
+        current_opencli.get("status") == "CONNECTED"
+        and current_opencli.get("appliedEpoch") == current_opencli.get("desiredEpoch")
+        and current_opencli.get("appliedRevision") == current_opencli.get("desiredRevision")
+        and current_opencli.get("applicationError") is None
+    ):
+        break
+    time.sleep(0.1)
+else:
+    raise AssertionError(
+        f"opencli plugin configuration did not converge to applied CONNECTED state: {current_opencli}"
+    )
+
 assert_function_definitions(json_call("GET", "/api/canvas-functions"))
 
 

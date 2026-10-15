@@ -166,7 +166,7 @@ Flyway 校验失败时停止切换并查明差异；修改 `flyway_schema_histor
 先在“设置 → 同步”导出配置，执行 reset 的 `--dry-run`，确认数据范围、备份与恢复方案，
 再批准停机和实际执行。初始化当前 Schema 后通过产品导入 YAML，恢复七类配置及所需凭据。
 会话、项目、画布、运行历史与 Blob 引用保留在冻结库/备份中，新的入口无法直接访问它们。
-Environment 注册令牌可恢复；Daemon 重连仍须验收，Plugin 认证和部署级配置需另行准备。
+Environment 注册令牌可恢复；Daemon 重连仍须验收，Plugin 认证和部署级配置需另行准备（如 OpenCLI 的独立 Plugin 普通配置与 `apiKey` 静态秘密，旧 SystemSettings 中对应三项已彻底废除拒绝，无双读别名）。结构调整仅允许通过配置导出备份后由数据所有者授权重建，严禁在已有部署或共享数据库上就地执行未授权改动。
 reset 不删除 S3 对象；这些对象仍受备份恢复策略保护，不能凭新库无引用就清理。
 
 验收完成且确认备份可恢复后，可用 `reset-database.sh --cleanup-snapshots --dry-run`
@@ -203,7 +203,8 @@ Studio 当前没有内置登录鉴权。向局域网或公网暴露前，必须�
 ### [`deploy/test`](../../deploy/test/README.md)：Canvas/Storage 离线栈
 
 `kk-studio-canvas-test` project 提供 PostgreSQL、MinIO、HTTP mock 与可选的 App，用于 Canvas
-Resource、fake Function、OpenCLI fake Hub adapter 和离线 Chat smoke。bucket 由一次性的
+Resource、fake Function、OpenCLI fake Hub adapter 和离线 Chat smoke。内置 fake Hub 只接受合成单 Bearer，
+各受保护端点严格校验；offline smoke 经统一插件配置与 secret API 初始化。bucket 由一次性的
 `minio-init` 容器创建，App 以 `service_completed_successfully` 等它成功退出；不启用 App 时没有
 这个依赖条件，smoke 只等待常驻服务 `healthy`，再显式 `compose run --rm` 执行同一份初始化：
 
@@ -319,7 +320,7 @@ PI_BASE_ANCHOR=/path/to/pi-base \
 | supply-chain | reports/images/cache/network | `SUPPLY_CHAIN_REPORT_ROOT`、`SUPPLY_CHAIN_APP_IMAGE`、`SUPPLY_CHAIN_DAEMON_IMAGE`、`SUPPLY_CHAIN_TRIVY_CACHE_VOLUME`、`SUPPLY_CHAIN_TRIVY_NETWORK`、`TRIVY_SKIP_DB_UPDATE` |
 | 显式 `--real` E2E | 仅宿主 credential 同步 | `TEST_GOOGLE_*`、`TEST_OPENAI_RESPONSES_*`、`TEST_ANTHROPIC_*`、`TEST_OPENAI_*` |
 | reliability Agent 矩阵 | 仅宿主 credential 同步 | `TEST_MINIMAX_BASE_URL`、`TEST_MINIMAX_API_KEY` |
-| 显式 Seedance prepare-only | 确认与外部 Hub/workspace | `RUN_REAL_SEEDANCE_PREPARE_SMOKE=1`、`OPENCLI_HUB_BASE_URL`、`SEEDANCE_WORKSPACE_ID`、可选 `OPENCLI_HUB_INSTANCE_ID` / `SEEDANCE_PREPARE_SMOKE_PROMPT`；另需唯一参数 `--confirm-prepare-only`，见 [deploy/test](../../deploy/test/README.md#真实-seedance-prepare-only-边界) |
+| 显式 Seedance prepare-only | 确认与外部 Hub/workspace | `RUN_REAL_SEEDANCE_PREPARE_SMOKE=1`、`OPENCLI_HUB_BASE_URL`、`SEEDANCE_WORKSPACE_ID`、`OPENCLI_API_KEY`、可选 `OPENCLI_HUB_INSTANCE_ID` / `SEEDANCE_PREPARE_SMOKE_PROMPT`；另需唯一参数 `--confirm-prepare-only`，见 [deploy/test](../../deploy/test/README.md#真实-seedance-prepare-only-边界) |
 
 Dispatcher、Admission 和 gateway frame/queue 上限是启动配置，不由 SystemSettings editor 修改。
 Canvas Function runtime 变量和 `KK_STUDIO_CANVAS_H3_COMFY_BEARER_TOKEN` 也只在启动期读取。

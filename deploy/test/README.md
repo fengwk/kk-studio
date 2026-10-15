@@ -76,13 +76,14 @@ docker compose -f deploy/test/compose.yaml --profile app up -d --build --wait
 # 停止容器和网络，保留手动验证的数据
 docker compose -f deploy/test/compose.yaml --profile app down --remove-orphans
 
-# 确认测试数据可丢弃后才执行：额外删除 PostgreSQL 和 MinIO volumes，无确认提示
+# 确认测试数据可丢弃后才执行：额外删除 PostgreSQL、MinIO 与 Plugin 凭据主密钥 volumes，无确认提示
 docker compose -f deploy/test/compose.yaml --profile app down -v --remove-orphans
 ```
 
 没有 app 时，不要对全部服务直接 `up --wait`：成功退出的 `minio-init` 没有常驻 health 状态，
 此时也没有 app 的 `service_completed_successfully` 依赖承接它。上面的两步与 smoke 脚本一致。
-启动 app 时它会等待初始化成功退出。手动启动默认保留已有数据；需要构建时 Compose 使用
+启动 app 时它会等待 `minio-init` 与一次性 `plugin-credential-init` 成功退出。
+`plugin-credential-init` 沿用一次性 init 模式，在测试专用 named volume `plugin-credential-key` 中动态生成 32 字节随机主密钥（属主 `10001:10001`、权限 `0400`，owner-only 且 app 用户可读），app 以只读挂载并通过 `KK_STUDIO_PLUGINS_CREDENTIAL_KEY_FILE` 注入，主密钥绝不明文进入 seed 或 schema，`down -v` 自动释放。手动启动默认保留已有数据；需要构建时 Compose 使用
 [deploy/local/Dockerfile](../local/Dockerfile)，也可先自行构建镜像。
 
 默认宿主地址：
@@ -98,8 +99,9 @@ docker compose -f deploy/test/compose.yaml --profile app down -v --remove-orphan
 `CANVAS_TEST_APP_PORT` 覆盖，应用镜像 tag 用 `CANVAS_TEST_APP_IMAGE` 覆盖；容器内端口固定。应用以 `dev,canvas-test` profile 启动，
 `KK_STUDIO_STORAGE_S3_*` 指向容器内 `minio:9000`，public endpoint 指向
 `http://127.0.0.1:19000`，媒体进程使用容器内 `ffprobe`/`ffmpeg`，临时目录 `/tmp`。
-Compose 卷键为 `minio-data` 与 `postgres-data`；默认 Docker 卷名为
-`kk-studio-canvas-test_minio-data` 与 `kk-studio-canvas-test_postgres-data`。
+Compose 卷键为 `minio-data`、`postgres-data` 与 `plugin-credential-key`；默认 Docker 卷名为
+`kk-studio-canvas-test_minio-data`、`kk-studio-canvas-test_postgres-data` 与
+`kk-studio-canvas-test_plugin-credential-key`。
 
 应用 seed 后 `default-assistant` 指向 `stub/acceptance-stub`，stub provider 的 `base_url` 是
 `http://stub.local:8080/v1`；本栈把 `stub.local` 配成 HTTP mock 的网络别名，由其内置的
@@ -149,9 +151,10 @@ route 文件格式：
 ```
 
 响应可以使用 `json`，或使用字符串 `body` 并自行设置 `Content-Type`。同一份配置可通过
-`http://opencli-hub:8080` 与 `http://comfyui:8080` 两个容器内地址访问。内置 fake Hub 只实现
-Canvas adapter smoke 所需的最小协议；细粒度异常、origin、multipart 与状态边界仍由
-[server.py](mock/server.py) 的 contract tests 覆盖。
+`http://opencli-hub:8080` 与 `http://comfyui:8080` 两个容器内地址访问。内置 fake Hub 只接受
+合成单 Bearer（默认 `synthetic-opencli-key`），上传、执行、查询、取消与资源下载各受保护端点均严格验证；
+offline smoke 经统一插件配置与 secret API 初始化，不将秘密明文写入 seed 或 schema。细粒度异常、
+origin、multipart 与状态边界由 [server.py](mock/server.py) 的 contract tests 覆盖。
 
 ## 真实 Seedance prepare-only 边界
 
@@ -161,14 +164,16 @@ Canvas adapter smoke 所需的最小协议；细粒度异常、origin、multipar
 RUN_REAL_SEEDANCE_PREPARE_SMOKE=1 \
 SEEDANCE_WORKSPACE_ID=... \
 OPENCLI_HUB_BASE_URL=https://your-opencli-hub.example \
+OPENCLI_API_KEY=... \
   ./scripts/dev/verify/smoke/seedance-prepare.sh --confirm-prepare-only
 ```
 
 [scripts/dev/verify/smoke/seedance-prepare.sh](../../scripts/dev/verify/smoke/seedance-prepare.sh) 硬编码 `seedance2.0fast`、
 `duration=4`、`submit=0`、`retry=0`，只验证页面准备与 checkpoint，不点击真实生成、不创建
 FunctionRun、不下载或导入视频。`--confirm-prepare-only` 必须是唯一参数，同时要求
-`RUN_REAL_SEEDANCE_PREPARE_SMOKE=1`、非空 `SEEDANCE_WORKSPACE_ID` 和非空
-`OPENCLI_HUB_BASE_URL`；缺任一条件都在发起外部请求前退出。workspace 必须真实可访问，
+`RUN_REAL_SEEDANCE_PREPARE_SMOKE=1`、非空 `SEEDANCE_WORKSPACE_ID`、非空
+`OPENCLI_HUB_BASE_URL` 和显式调用方 `OPENCLI_API_KEY`；真实脚本仅接受显式 Key，不取外部真实 Key 或开启收费测试，
+缺任一条件都在发起外部请求前退出。workspace 必须真实可访问，
 Hub URL 必须是无 userinfo、path、query 和 fragment 的 HTTP(S) origin，先校验再访问。
 `OPENCLI_HUB_INSTANCE_ID` 可选，`SEEDANCE_PREPARE_SMOKE_PROMPT` 可覆盖准备提示词。
 

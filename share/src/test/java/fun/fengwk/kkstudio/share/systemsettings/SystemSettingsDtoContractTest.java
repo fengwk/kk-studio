@@ -48,8 +48,14 @@ class SystemSettingsDtoContractTest {
     assertRejectsUnknown(
         () ->
             objectMapper.readValue(
-                "{\"paidEnabled\":false,\"unknown\":1}",
-                SystemSettingsIntegrationsDTO.GptImage2DTO.class));
+                "{\"enabled\":false,\"unknown\":1}",
+                SystemSettingsIntegrationsDTO.MiniMaxH3DTO.class));
+    assertRejectsUnknown(
+        () -> objectMapper.readValue("{\"openCliHub\":{}}", SystemSettingsIntegrationsDTO.class));
+    assertRejectsUnknown(
+        () -> objectMapper.readValue("{\"seedance\":{}}", SystemSettingsIntegrationsDTO.class));
+    assertRejectsUnknown(
+        () -> objectMapper.readValue("{\"gptImage2\":{}}", SystemSettingsIntegrationsDTO.class));
     // network 只允许两个全局字段，不接受 enabled 或模块级 override。
     assertRejectsUnknown(
         () -> objectMapper.readValue("{\"enabled\":true}", SystemSettingsNetworkDTO.class));
@@ -112,9 +118,6 @@ class SystemSettingsDtoContractTest {
             SystemSettingsNetworkDTO.class,
             SystemSettingsIntegrationsDTO.class,
             SystemSettingsIntegrationsDTO.ComfyuiDTO.class,
-            SystemSettingsIntegrationsDTO.OpenCliHubDTO.class,
-            SystemSettingsIntegrationsDTO.SeedanceDTO.class,
-            SystemSettingsIntegrationsDTO.GptImage2DTO.class,
             SystemSettingsIntegrationsDTO.MiniMaxH3DTO.class,
             SystemSettingsStorageMediaDTO.class,
             SystemSettingsAdvancedDTO.class);

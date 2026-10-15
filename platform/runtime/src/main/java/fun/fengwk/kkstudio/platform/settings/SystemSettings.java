@@ -204,26 +204,12 @@ public record SystemSettings(
   }
 
   /** integrations section：外部媒体/生成集成的非敏感运行参数，每个集成都是必填嵌套对象。 */
-  public record Integrations(
-      Comfyui comfyui,
-      OpenCliHub openCliHub,
-      Seedance seedance,
-      GptImage2 gptImage2,
-      MiniMaxH3 minimaxH3) {
+  public record Integrations(Comfyui comfyui, MiniMaxH3 minimaxH3) {
 
-    public static final Integrations DEFAULT =
-        new Integrations(
-            Comfyui.DEFAULT,
-            OpenCliHub.DEFAULT,
-            Seedance.DEFAULT,
-            GptImage2.DEFAULT,
-            MiniMaxH3.DEFAULT);
+    public static final Integrations DEFAULT = new Integrations(Comfyui.DEFAULT, MiniMaxH3.DEFAULT);
 
     public Integrations {
       comfyui = Objects.requireNonNull(comfyui, "integrations.comfyui");
-      openCliHub = Objects.requireNonNull(openCliHub, "integrations.openCliHub");
-      seedance = Objects.requireNonNull(seedance, "integrations.seedance");
-      gptImage2 = Objects.requireNonNull(gptImage2, "integrations.gptImage2");
       minimaxH3 = Objects.requireNonNull(minimaxH3, "integrations.minimaxH3");
     }
   }
@@ -254,122 +240,6 @@ public record SystemSettings(
       if (enabled && baseUrl == null) {
         throw new IllegalArgumentException(
             "integrations.comfyui.baseUrl is required when comfyui is enabled");
-      }
-    }
-  }
-
-  /** {@code integrations.openCliHub}：OpenCLI Hub 的无凭证共享配置。instanceId 属部署身份，不进入聚合。 */
-  public record OpenCliHub(
-      boolean enabled,
-      String baseUrl,
-      long connectTimeoutMillis,
-      long requestTimeoutMillis,
-      long longPollTimeoutMillis,
-      int streamBufferBytes,
-      int maxJsonResponseBytes,
-      int maxErrorResponseBytes,
-      int maxOutputChars) {
-
-    public static final OpenCliHub DEFAULT =
-        new OpenCliHub(
-            false, null, 5_000L, 120_000L, 130_000L, 16 * 1024, 512 * 1024, 4096, 65_535);
-
-    public OpenCliHub {
-      baseUrl =
-          SystemSettingsValidation.requireHttpOrigin(baseUrl, "integrations.openCliHub.baseUrl");
-      if (enabled && baseUrl == null) {
-        throw new IllegalArgumentException(
-            "integrations.openCliHub.baseUrl is required when openCliHub is enabled");
-      }
-      SystemSettingsValidation.requireBounded(
-          connectTimeoutMillis, 1L, 2L * 60 * 1000, "integrations.openCliHub.connectTimeoutMillis");
-      SystemSettingsValidation.requireBounded(
-          requestTimeoutMillis,
-          1_000L,
-          30L * 60 * 1000,
-          "integrations.openCliHub.requestTimeoutMillis");
-      SystemSettingsValidation.requireBounded(
-          longPollTimeoutMillis,
-          121_000L,
-          10L * 60 * 1000,
-          "integrations.openCliHub.longPollTimeoutMillis");
-      SystemSettingsValidation.requireBounded(
-          streamBufferBytes, 1024, 1024 * 1024, "integrations.openCliHub.streamBufferBytes");
-      SystemSettingsValidation.requireBounded(
-          maxJsonResponseBytes,
-          1024,
-          4 * 1024 * 1024,
-          "integrations.openCliHub.maxJsonResponseBytes");
-      SystemSettingsValidation.requireBounded(
-          maxErrorResponseBytes, 256, 64 * 1024, "integrations.openCliHub.maxErrorResponseBytes");
-      SystemSettingsValidation.requireBounded(
-          maxOutputChars, 1024, 1_000_000, "integrations.openCliHub.maxOutputChars");
-    }
-  }
-
-  /** {@code integrations.seedance}：Seedance 真实提交开关、workspace 与有界轮询预算。 */
-  public record Seedance(
-      boolean enabled,
-      String workspaceId,
-      int retry,
-      long hubExecutionTimeoutMillis,
-      long statusPollIntervalMillis,
-      long maxWaitMillis) {
-
-    public static final Seedance DEFAULT =
-        new Seedance(false, null, 0, 600_000L, 30_000L, 1_800_000L);
-
-    public Seedance {
-      workspaceId =
-          SystemSettingsValidation.requireOptionalBoundedText(
-              workspaceId, 256, "integrations.seedance.workspaceId");
-      if (enabled && workspaceId == null) {
-        throw new IllegalArgumentException(
-            "integrations.seedance.workspaceId is required when seedance is enabled");
-      }
-      SystemSettingsValidation.requireBounded(retry, 0, 5, "integrations.seedance.retry");
-      SystemSettingsValidation.requireBounded(
-          hubExecutionTimeoutMillis,
-          1_000L,
-          30L * 60 * 1000,
-          "integrations.seedance.hubExecutionTimeoutMillis");
-      SystemSettingsValidation.requireBounded(
-          statusPollIntervalMillis,
-          1L,
-          5L * 60 * 1000,
-          "integrations.seedance.statusPollIntervalMillis");
-      SystemSettingsValidation.requireBounded(
-          maxWaitMillis, 1_000L, 4L * 60 * 60 * 1000, "integrations.seedance.maxWaitMillis");
-      if (statusPollIntervalMillis >= maxWaitMillis) {
-        throw new IllegalArgumentException(
-            "integrations.seedance.statusPollIntervalMillis must be less than maxWaitMillis");
-      }
-    }
-  }
-
-  /** {@code integrations.gptImage2}：GPT Image 2 付费提交开关与有界执行预算。 */
-  public record GptImage2(
-      boolean paidEnabled,
-      int askTimeoutSeconds,
-      long hubExecutionTimeoutMillis,
-      long maxWaitMillis) {
-
-    public static final GptImage2 DEFAULT = new GptImage2(false, 900, 960_000L, 1_200_000L);
-
-    public GptImage2 {
-      SystemSettingsValidation.requireBounded(
-          askTimeoutSeconds, 1, 1740, "integrations.gptImage2.askTimeoutSeconds");
-      SystemSettingsValidation.requireBounded(
-          hubExecutionTimeoutMillis,
-          31_000L,
-          30L * 60 * 1000,
-          "integrations.gptImage2.hubExecutionTimeoutMillis");
-      SystemSettingsValidation.requireBounded(
-          maxWaitMillis, 1_000L, 2L * 60 * 60 * 1000, "integrations.gptImage2.maxWaitMillis");
-      if (hubExecutionTimeoutMillis / 1000L <= askTimeoutSeconds + 30L) {
-        throw new IllegalArgumentException(
-            "integrations.gptImage2.hubExecutionTimeoutMillis must exceed askTimeoutSeconds plus"
-                + " OpenCLI padding");
       }
     }
   }

@@ -321,11 +321,11 @@ Platform 提供 Blob facts、原件流、presign、输出物化和 Blob 释放�
 上传过期回收作为兜底。TEXT 输出内联且有长度上限。整组成功挂接、pin 生命周期和 UNKNOWN
 决议见 [Canvas Infra](canvas-infra.md)。
 
-Platform 提供 fake/opencli adapter；本地 image.crop 和 ComfyUI/H3 由构建期 Plugin 提供。
+Platform 仅提供内置 fake adapter；本地 image.crop、ComfyUI/H3 以及 OpenCLI（`gpt-image-2` 与 Seedance 四函数）均由构建期 Plugin 提供。
 Function Catalog 在启动时冻结，adapter 的 submit 记录外部任务身份，
 execute 查询同一任务并物化预分配槽位。
 
-OpenCLI 每次 HTTP send 前冻结单调时钟 deadline，同一预算覆盖握手和完整响应体读取，
+OpenCLI 作为独立构建期 Plugin，每次 HTTP send 前解析局部单 Bearer 凭据并冻结单调时钟 deadline，同一预算覆盖握手和完整响应体读取，
 不会随 read 重置。资源响应要求正数 Content-Length 与 metadata size 一致，并在读流时
 拒绝短读和超长。响应体 watchdog 到期主动关闭流，关闭在独立线程执行以免阻塞共享调度器；
 EOF、失败和显式 close 均注销 watchdog。客户端拿到流后负责关闭；JDK 若在交付响应前
@@ -333,6 +333,17 @@ EOF、失败和显式 close 均注销 watchdog。客户端拿到流后负责关�
 非 2xx 响应、未知 execution/asset 状态与提交失败只暴露固定分类、HTTP 状态和阶段名；
 远端 body、status、URL/header 以及底层 IO/Jackson/URI 异常的 message/cause/suppressed
 都不进入公开异常与诊断日志，诊断只记录受控阶段与异常类型。
+
+### OpenCLI 插件配置与凭据契约
+
+OpenCLI 作为构建期独立 Plugin，其配置完全归属于自身受控 schema，已彻底删除旧 SystemSettings 的
+`openCliHub`、`gptImage2` 与 `seedance` 三段配置及部署环境变量属性，无双读与别名兼容；写入或导入旧字段均被明确拒绝。
+
+- 顶层配置字段与默认值：`enabled`(false)、`baseUrl`(可省略)、`instanceId`(可省略)、`connectTimeoutMillis`(5000)、`requestTimeoutMillis`(120000)、`longPollTimeoutMillis`(130000)、`streamBufferBytes`(16384)、`maxJsonResponseBytes`(524288)、`maxErrorResponseBytes`(4096)、`maxOutputChars`(65535)。
+- `gptImage2` 对象：`paidEnabled`(false)、`askTimeoutSeconds`(900)、`hubExecutionTimeoutMillis`(960000)、`maxWaitMillis`(1200000)。
+- `seedance` 对象：`enabled`(false)、`workspaceId`(可省略)、`retry`(0)、`hubExecutionTimeoutMillis`(600000)、`statusPollIntervalMillis`(30000)、`maxWaitMillis`(1800000)。
+- 字段校验沿用合法 HTTP origin、instanceId 规范与开启状态下的必填项校验；未配置文本通过省略字段表示，不引入 nullable 或以空字符串伪造合法 URL。
+- 唯一秘密凭据 `apiKey`，通过 `PluginAuthSpec.StaticKey("apiKey", Set.of("baseUrl"))` 声明，走统一 Plugin Secret API（KEEP/SET/CLEAR）管理，不读环境变量或设置外部优先级。每次 HTTP 发送时动态解析并仅在局部构造单 Bearer 请求头，不落盘明文且不泄露在日志与异常中。
 
 ## 配置
 

@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.canvas.function.opencli;
+package fun.fengwk.kkstudio.plugin.opencli;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -13,12 +13,10 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenReference;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionUnknownException;
-import fun.fengwk.kkstudio.platform.canvas.function.opencli.OpenCliHubClient.Execution;
-import fun.fengwk.kkstudio.platform.canvas.function.opencli.OpenCliHubClient.ExecutionResource;
-import fun.fengwk.kkstudio.platform.canvas.function.opencli.OpenCliHubClient.ExecutionStatus;
-import fun.fengwk.kkstudio.platform.canvas.function.opencli.OpenCliHubClient.HubResourceStream;
-import fun.fengwk.kkstudio.platform.settings.SystemSettings;
-import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
+import fun.fengwk.kkstudio.plugin.opencli.OpenCliHubClient.Execution;
+import fun.fengwk.kkstudio.plugin.opencli.OpenCliHubClient.ExecutionResource;
+import fun.fengwk.kkstudio.plugin.opencli.OpenCliHubClient.ExecutionStatus;
+import fun.fengwk.kkstudio.plugin.opencli.OpenCliHubClient.HubResourceStream;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -80,12 +78,12 @@ public class GptImage2CanvasFunctionAdapter implements CanvasFunctionAdapter {
           CanvasResourceKind.IMAGE,
           new CanvasFunctionReferencePolicy(Set.of(CanvasResourceKind.IMAGE), 20, Map.of()));
 
-  private final SystemSettings.Integrations integrations;
+  private final OpenCliSettings settings;
   private final OpenCliHubClient client;
   private final OpenCliReferenceUploader uploader;
 
-  public GptImage2CanvasFunctionAdapter(SystemSettingsSnapshot snapshot, OpenCliHubClient client) {
-    this.integrations = Objects.requireNonNull(snapshot, "snapshot").get().integrations();
+  public GptImage2CanvasFunctionAdapter(OpenCliSettings settings, OpenCliHubClient client) {
+    this.settings = Objects.requireNonNull(settings, "settings");
     this.client = Objects.requireNonNull(client, "client");
     uploader = new OpenCliReferenceUploader(client);
   }
@@ -97,7 +95,7 @@ public class GptImage2CanvasFunctionAdapter implements CanvasFunctionAdapter {
 
   @Override
   public boolean enabled() {
-    return integrations.openCliHub().enabled() && integrations.gptImage2().paidEnabled();
+    return settings.enabled() && settings.gptImage2().paidEnabled();
   }
 
   @Override
@@ -145,8 +143,7 @@ public class GptImage2CanvasFunctionAdapter implements CanvasFunctionAdapter {
     Execution submitted;
     try {
       submitted =
-          client.execute(
-              buildArgv(run, uploads), integrations.gptImage2().hubExecutionTimeoutMillis());
+          client.execute(buildArgv(run, uploads), settings.gptImage2().hubExecutionTimeoutMillis());
     } catch (RuntimeException failure) {
       // 提交失败意味着外部任务可能已创建；只按 type 记录，不把原始 message/cause 交给人工决议。
       log.warn("GPT Image submission outcome unknown type={}", failure.getClass().getSimpleName());
@@ -172,7 +169,7 @@ public class GptImage2CanvasFunctionAdapter implements CanvasFunctionAdapter {
 
     Execution execution =
         awaitTerminal(
-            context, executionId, Duration.ofMillis(integrations.gptImage2().maxWaitMillis()));
+            context, executionId, Duration.ofMillis(settings.gptImage2().maxWaitMillis()));
     if (execution.status() != ExecutionStatus.SUCCEEDED) {
       throw new OpenCliHubException("GPT Image Hub execution ended as " + execution.status());
     }
@@ -231,7 +228,7 @@ public class GptImage2CanvasFunctionAdapter implements CanvasFunctionAdapter {
       argv.add(upload.resourcePath());
     }
     argv.add("--timeout");
-    argv.add(Integer.toString(integrations.gptImage2().askTimeoutSeconds()));
+    argv.add(Integer.toString(settings.gptImage2().askTimeoutSeconds()));
     return List.copyOf(argv);
   }
 
