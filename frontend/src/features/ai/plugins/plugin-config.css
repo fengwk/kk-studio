@@ -118,3 +118,87 @@
   margin-bottom: var(--space-3, 12px);
   font-size: var(--font-size-sm, 13px);
 }
+
+/* 字段标题行：左侧是标签，右侧是该字段的显式动作（省略、展开编辑器）。 */
+.plugin-config-field-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2, 8px);
+  min-width: 0;
+}
+
+.plugin-config-field-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1, 4px);
+  flex: 0 0 auto;
+}
+
+/* 多行/JSON 文本编辑器：与单行输入互斥呈现，因此两者共用同一字段可访问名。 */
+.plugin-config-text-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2, 8px);
+  min-width: 0;
+}
+
+.plugin-config-text-editor-area {
+  font-family: var(--font-mono, monospace);
+  font-size: var(--font-size-xs, 12px);
+  max-height: 320px;
+  resize: vertical;
+}
+
+.plugin-config-text-editor-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2, 8px);
+  min-width: 0;
+}
+
+/* 文件选择由工具栏按钮触发：input 本身不可见，但仍可被程序化点击与自动化设置文件。 */
+.plugin-config-file-input {
+  display: none;
+}
+
+.plugin-config-array-field {
+  min-width: 0;
+}
+
+.plugin-config-array-items {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3, 12px);
+  min-width: 0;
+}
+
+.plugin-config-array-item {
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+  border-radius: var(--radius-sm, 6px);
+  padding: var(--space-3, 12px);
+  min-width: 0;
+}
+
+.plugin-config-array-item legend {
+  font-size: var(--font-size-xs, 12px);
+  font-family: var(--font-mono, monospace);
+  color: var(--text-secondary, #a1a1aa);
+  padding: 0 var(--space-1, 4px);
+}
+
+.plugin-config-array-item-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: var(--space-2, 8px);
+}
+
+.plugin-config-array-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2, 8px);
+  margin-top: var(--space-3, 12px);
+}

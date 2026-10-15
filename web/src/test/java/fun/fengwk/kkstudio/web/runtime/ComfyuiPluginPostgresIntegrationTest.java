@@ -2,12 +2,16 @@ package fun.fengwk.kkstudio.web.runtime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+import fun.fengwk.convention4j.springboot.starter.web.result.ResultResponseBodyAdvice;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -18,12 +22,18 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.http.converter.json.JacksonJsonHttpMessageConverter;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.mock.web.MockHttpServletResponse;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
@@ -55,8 +65,10 @@ import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogManifest;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRecord;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRuntime;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogSnapshot;
+import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialProjection;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialReference;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialStore;
+import fun.fengwk.kkstudio.platform.plugin.persistence.PluginAuthAttemptRepository;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRow;
 import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.PostgresqlPluginCatalogChangeNotifier;
@@ -65,16 +77,23 @@ import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.store.PluginCo
 import fun.fengwk.kkstudio.platform.plugin.prompt.PluginPromptResources;
 import fun.fengwk.kkstudio.platform.plugin.prompt.PluginPromptTasks;
 import fun.fengwk.kkstudio.platform.plugin.resource.PluginResourceGateway;
+import fun.fengwk.kkstudio.platform.plugin.service.PluginConfigurationCommitService;
+import fun.fengwk.kkstudio.platform.plugin.service.PluginManagementService;
+import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
+import fun.fengwk.kkstudio.web.plugin.StudioPluginController;
 
 import javax.sql.DataSource;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.UncheckedIOException;
 import java.net.InetSocketAddress;
 import java.net.ProxySelector;
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -96,11 +115,21 @@ import java.util.function.BiFunction;
 class ComfyuiPluginPostgresIntegrationTest {
 
   private static final String COMFYUI = "comfyui";
+
+  /** 与前端共用的真实 schema/default HTTP golden：由生产 mapper 产出，测试只比对，绝不在运行期改写资源。 */
+  private static final String HTTP_GOLDEN = "fun/fengwk/kkstudio/web/plugin/comfyui-http.json";
+
   private static final String FUNCTION = "direct-history";
   private static final String ARGUMENT = "text";
 
   /** 运行期 JAR 上的插件前缀：与其它 runtime-only 测试一致，只拼前缀而不写完整类名。 */
   private static final String PLUGIN_PREFIX = "fun.fengwk.kkstudio.plugin.";
+
+  /** 生产 HTTP mapper 与该 profile 自己的 MVC converter，golden 因此由真实序列化形态产出。 */
+  private static final JsonMapper HTTP_MAPPER = StrictHttpJsonMapperTestSupport.get();
+
+  private static final JacksonJsonHttpMessageConverter HTTP_CONVERTER =
+      new JacksonJsonHttpMessageConverter(HTTP_MAPPER);
 
   private static final String AUTO_CONFIGURATION =
       PLUGIN_PREFIX + "comfyui.ComfyuiAutoConfiguration";
@@ -253,6 +282,85 @@ class ComfyuiPluginPostgresIntegrationTest {
                 assertEquals(2, executeOnce(previous));
               }
             });
+  }
+
+  /**
+   * 真实 ComfyUI schema/default 到 HTTP 的共用 golden：GET /api/plugins/comfyui 的响应体必须与已提交资源逐值一致。
+   *
+   * <p>配置从启动期 bootstrap 的 schema 默认值来，因此 golden 锁定的就是生产派生文本（默认 H3 预置工作流与 valuesSchema）；
+   * 前端消费同一份资源，不再手写镜像。
+   */
+  @Test
+  void pluginProjectionMatchesCommittedHttpWireGolden() {
+    runner()
+        .run(
+            context -> {
+              PluginCredentialStore credentials = context.getBean(PluginCredentialStore.class);
+              when(credentials.projection(COMFYUI))
+                  .thenReturn(PluginCredentialProjection.notConnected());
+              PluginCatalogRuntime runtime = runtime(context);
+              PluginManagementService management = managementService(context, runtime, credentials);
+
+              assertSame(HTTP_MAPPER, HTTP_CONVERTER.getMapper());
+              MockMvc mockMvc =
+                  MockMvcBuilders.standaloneSetup(new StudioPluginController(management))
+                      .setMessageConverters(HTTP_CONVERTER)
+                      .setControllerAdvice(new ResultResponseBodyAdvice())
+                      .build();
+
+              MockHttpServletResponse response =
+                  mockMvc.perform(get("/api/plugins/" + COMFYUI)).andReturn().getResponse();
+
+              assertEquals(200, response.getStatus());
+              String body = new String(response.getContentAsByteArray(), StandardCharsets.UTF_8);
+              assertEquals(
+                  wireView(goldenText(HTTP_GOLDEN)),
+                  wireView(body),
+                  HTTP_GOLDEN + " must match the live HTTP body");
+            });
+  }
+
+  private PluginManagementService managementService(
+      ConfigurableApplicationContext context,
+      PluginCatalogRuntime runtime,
+      PluginCredentialStore credentials) {
+    return new PluginManagementService(
+        registry(context),
+        () -> runtime,
+        repository,
+        credentials,
+        mock(PluginConfigurationCommitService.class),
+        mock(PluginAuthAttemptRepository.class),
+        Duration.ofMinutes(5),
+        Clock.systemUTC());
+  }
+
+  /**
+   * wire 值视图：配置里的内嵌 JSON 文本按其 JSON 值参与比较。
+   *
+   * <p>内嵌文本的对象键顺序来自生产 schema 的 map 迭代顺序，同一份配置在两次 JVM 之间可能不同，而顺序不是 wire 契约的一部分； 除此之外（字段有无、取值、token
+   * 类型、内嵌文档的全部键值）都逐值比较。
+   */
+  private static JsonNode wireView(String body) {
+    JsonNode root = JsonValues.readTree(body);
+    JsonNode configuration = root.get("data").get("configuration");
+    for (String field : List.of("valuesJson", "valuesSchema", "defaultsJson")) {
+      JsonNode text = configuration.get(field);
+      if (text != null && text.isTextual()) {
+        ((ObjectNode) configuration).set(field, JsonValues.readTree(text.asString()));
+      }
+    }
+    return root;
+  }
+
+  /** 已提交的共用 golden 原文：测试只读取，绝不在运行时改写资源。 */
+  private static String goldenText(String name) {
+    ClassPathResource resource = new ClassPathResource(name);
+    try (InputStream in = resource.getInputStream()) {
+      return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+    } catch (IOException error) {
+      throw new UncheckedIOException("shared plugin HTTP golden must exist: " + name, error);
+    }
   }
 
   // ---------------------------------------------------------------- 运行期装配

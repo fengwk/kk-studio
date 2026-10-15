@@ -139,6 +139,20 @@ const DEFAULT_FORMATTING = {
 }
 
 /**
+ * 普通配置 valuesJson 的 UTF-8 字节上限，与后端 {@code PluginConfig.MAX_VALUES_UTF8_BYTES} 同一约定。
+ *
+ * <p>判定始终针对即将提交的 valuesJson 原文，因此嵌入字符串的转义开销（换行、引号、反斜杠）自然计入预算。
+ */
+export const MAX_PLUGIN_VALUES_UTF8_BYTES = 64 * 1024
+
+const UTF8_ENCODER = new TextEncoder()
+
+/** 文本的 UTF-8 字节数；预算门禁与后端同一口径。 */
+export function utf8ByteLength(text: string): number {
+  return UTF8_ENCODER.encode(text).length
+}
+
+/**
  * 校验给定的字符串是否符合严格的 JSON 数字格式（支持大整数、高精度小数、指数）。
  */
 export function isValidJsonNumberLiteral(val: string): boolean {
@@ -261,4 +275,119 @@ function replaceOrInsertRawSlice(
       error: err instanceof Error ? err.message : String(err),
     }
   }
+}
+
+/**
+ * 删除 JSON 文档中的一个对象属性或一个数组条目。
+ *
+ * <p>只改写目标节点自身与相邻的一个分隔逗号，其它字节（含未修改的数字 token）保持原样；目标不存在视为已经满足，返回原文。 结果必须仍是严格 JSON
+ * object，否则返回错误且不产生新文本。
+ */
+export function removeStrictJsonNode(rawJson: string, path: JSONPath): StrictJsonUpdateResult {
+  if (path.length === 0) {
+    return { ok: false, error: 'Cannot remove the root JSON object' }
+  }
+
+  const parseResult = parseStrictJsonObject(rawJson)
+  if (!parseResult.ok) {
+    return parseResult
+  }
+
+  const container = findNodeAtLocation(parseResult.tree, path.slice(0, -1))
+  const children = container?.children
+  if (!container || !children) {
+    return { ok: true, newJson: rawJson }
+  }
+
+  const target = childNodeOf(container, path[path.length - 1])
+  const index = target ? children.indexOf(target) : -1
+  if (!target || index < 0) {
+    return { ok: true, newJson: rawJson }
+  }
+
+  const previous = index > 0 ? children[index - 1] : undefined
+  const next = children[index + 1]
+  let removeBegin: number
+  let removeEnd: number
+  if (next) {
+    // 有后继节点：连同紧随目标的分隔符与空白一起删除。
+    removeBegin = target.offset
+    removeEnd = next.offset
+  } else if (previous) {
+    // 末位节点：从上一个节点结尾起删除，分隔符与空白一并带走。
+    removeBegin = previous.offset + previous.length
+    removeEnd = target.offset + target.length
+  } else {
+    removeBegin = target.offset
+    removeEnd = target.offset + target.length
+  }
+
+  const nextJson = rawJson.slice(0, removeBegin) + rawJson.slice(removeEnd)
+  const verify = parseStrictJsonObject(nextJson)
+  if (!verify.ok) {
+    return { ok: false, error: verify.error }
+  }
+  return { ok: true, newJson: nextJson }
+}
+
+/**
+ * 在指定路径的数组末尾追加一个条目；数组尚不存在时按该值为其新建。
+ *
+ * <p>只插入分隔逗号与新条目文本，既有字节保持不变，因此同一文档里的数字 token 不会经过 number 往返。
+ */
+export function appendStrictJsonArrayItem({
+  rawJson,
+  path,
+  value,
+}: {
+  rawJson: string
+  path: JSONPath
+  value: unknown
+}): StrictJsonUpdateResult {
+  if (value === undefined) {
+    return { ok: false, error: 'Array item must be a JSON value' }
+  }
+
+  const parseResult = parseStrictJsonObject(rawJson)
+  if (!parseResult.ok) {
+    return parseResult
+  }
+
+  const arrayNode = findNodeAtLocation(parseResult.tree, path)
+  if (!arrayNode) {
+    return updateStrictJsonField({
+      rawJson,
+      path,
+      rawSnippetString: JSON.stringify([value]),
+    })
+  }
+  if (arrayNode.type !== 'array' || !arrayNode.children) {
+    return { ok: false, error: 'Target field is not a JSON array' }
+  }
+
+  const children = arrayNode.children
+  const lastChild = children[children.length - 1]
+  const insertAt = lastChild ? lastChild.offset + lastChild.length : arrayNode.offset + 1
+  const itemText = `${lastChild ? ',' : ''}${JSON.stringify(value)}`
+  const nextJson = rawJson.slice(0, insertAt) + itemText + rawJson.slice(insertAt)
+
+  const verify = parseStrictJsonObject(nextJson)
+  if (!verify.ok) {
+    return { ok: false, error: verify.error }
+  }
+  return { ok: true, newJson: nextJson }
+}
+
+/**
+ * 容器中指定键/下标对应的子节点：对象取属性节点（含键与值），数组取条目节点。
+ */
+function childNodeOf(container: Node, segment: string | number): Node | undefined {
+  if (typeof segment === 'number') {
+    return container.type === 'array' ? container.children?.[segment] : undefined
+  }
+  if (container.type !== 'object') {
+    return undefined
+  }
+  // 属性值节点的 parent 正是覆盖 "key": value 的属性节点。
+  return findNodeAtLocation(container, [segment])?.parent
 }

@@ -277,6 +277,106 @@ export const settingsCatalog = {
     'en-US': 'Invalid JSON container: {{error}}',
     'zh-CN': '无效的 JSON 容器格式：{{error}}',
   },
+  'plugins.configDialog.fileReadPending': {
+    'en-US': 'Reading the imported file; saving is unavailable until it finishes',
+    'zh-CN': '正在读取导入的文件，读取完成前无法保存',
+  },
+  'plugins.configDialog.resolveFormDraftErrors': {
+    'en-US': 'Resolve or explicitly discard the draft errors in the form before switching editors',
+    'zh-CN': '请先修复或显式丢弃表单中的草稿错误，再切换编辑器',
+  },
+  'plugins.configDialog.resolveArrayDraftErrors': {
+    'en-US': 'Resolve or explicitly discard the draft errors under {{name}} before switching editors',
+    'zh-CN': '请先修复或显式丢弃 {{name}} 下的草稿错误，再切换编辑器',
+  },
+  'plugins.configDialog.valuesTooLarge': {
+    'en-US': 'Configuration must not exceed {{max}} bytes (UTF-8)',
+    'zh-CN': '普通配置不得超过 {{max}} 字节（UTF-8）',
+  },
+  'plugins.configDialog.toggleTextEditor': {
+    'en-US': 'Multiline/JSON text editor for {{name}}',
+    'zh-CN': '{{name}} 的多行/JSON 文本编辑器',
+  },
+  'plugins.configDialog.expandTextEditor': {
+    'en-US': 'Multiline/JSON',
+    'zh-CN': '多行/JSON',
+  },
+  'plugins.configDialog.collapseTextEditor': {
+    'en-US': 'Collapse',
+    'zh-CN': '收起',
+  },
+  'plugins.configDialog.validateJsonText': {
+    'en-US': 'Validate as JSON',
+    'zh-CN': '按 JSON 校验',
+  },
+  'plugins.configDialog.invalidJsonText': {
+    'en-US': 'Invalid JSON content: {{error}}',
+    'zh-CN': 'JSON 内容无效：{{error}}',
+  },
+  'plugins.configDialog.importJsonFile': {
+    'en-US': 'Import JSON file',
+    'zh-CN': '从文件导入 JSON',
+  },
+  'plugins.configDialog.importFileTooLarge': {
+    'en-US': 'JSON file must not exceed {{max}} bytes',
+    'zh-CN': 'JSON 文件不得超过 {{max}} 字节',
+  },
+  'plugins.configDialog.importFileNotUtf8': {
+    'en-US': 'JSON file must be strict UTF-8',
+    'zh-CN': 'JSON 文件必须是严格 UTF-8',
+  },
+  'plugins.configDialog.importFileInvalidJson': {
+    'en-US': 'Invalid JSON file syntax: {{error}}',
+    'zh-CN': 'JSON 文件语法无效：{{error}}',
+  },
+  'plugins.configDialog.importFileReadFailed': {
+    'en-US': 'Failed to read the JSON file',
+    'zh-CN': '读取 JSON 文件失败',
+  },
+  'plugins.configDialog.discardDraft': {
+    'en-US': 'Discard draft for {{name}}',
+    'zh-CN': '丢弃 {{name}} 的草稿',
+  },
+  'plugins.configDialog.discardDraftLabel': {
+    'en-US': 'Discard draft',
+    'zh-CN': '丢弃草稿',
+  },
+  'plugins.configDialog.unsetOptionalField': {
+    'en-US': 'Unset {{name}}',
+    'zh-CN': '未设置 {{name}}',
+  },
+  'plugins.configDialog.unsetOptionalFieldLabel': {
+    'en-US': 'Unset',
+    'zh-CN': '未设置',
+  },
+  'plugins.configDialog.arrayAddItem': {
+    'en-US': 'Add {{name}} item',
+    'zh-CN': '添加 {{name}} 条目',
+  },
+  'plugins.configDialog.arrayRemoveItem': {
+    'en-US': 'Remove {{name}}[{{index}}]',
+    'zh-CN': '删除 {{name}}[{{index}}]',
+  },
+  'plugins.configDialog.arrayRemoveItemLabel': {
+    'en-US': 'Remove',
+    'zh-CN': '删除',
+  },
+  'plugins.configDialog.toggleArrayEditor': {
+    'en-US': 'Toggle structured/Raw JSON for {{name}}',
+    'zh-CN': '切换 {{name}} 的结构化/Raw JSON 编辑',
+  },
+  'plugins.configDialog.arrayStructuredMode': {
+    'en-US': 'Structured',
+    'zh-CN': '结构化编辑',
+  },
+  'plugins.configDialog.arrayRawMode': {
+    'en-US': 'Raw JSON',
+    'zh-CN': 'Raw JSON',
+  },
+  'plugins.configDialog.structureEditsBlocked': {
+    'en-US': 'Resolve draft errors before removing {{name}} items',
+    'zh-CN': '请先解决草稿错误，再删除 {{name}} 条目',
+  },
   'plugins.epochAndRevision': {
     'en-US': 'Epoch & Revision',
     'zh-CN': '版本坐标',
