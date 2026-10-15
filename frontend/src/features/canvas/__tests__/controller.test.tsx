@@ -4,7 +4,6 @@ import { useState, type PropsWithChildren } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useCanvasController } from '@/features/canvas/useCanvasController'
 import { loadPendingFunctionRun } from '@/features/canvas/function-run'
-import { queryKeys } from '@/shared/lib/query-keys'
 import { canvasViewportStorageKey } from '@/features/canvas/viewport-storage'
 import { loadCanvasDrafts, saveCanvasDraft } from '@/features/canvas/canvas-draft-storage'
 import * as draftStorageModule from '@/features/canvas/canvas-draft-storage'
@@ -382,12 +381,6 @@ function deferred<T>() {
   return { promise, resolve, reject }
 }
 
-/** 外部持有 QueryClient 的 wrapper：便于测试内主动推进目录查询（refetch/invalidate）。 */
-function wrapperWithClient(client: QueryClient) {
-  return function ClientWrapper({ children }: PropsWithChildren) {
-    return <QueryClientProvider client={client}>{children}</QueryClientProvider>
-  }
-}
 
 describe('useCanvasController real snapshot runtime', () => {
   let current: CanvasSnapshotDTO
@@ -1018,11 +1011,29 @@ describe('useCanvasController real snapshot runtime', () => {
     )
   })
 
-  it('captures the clicked catalog version before flush and keeps it when the catalog advances mid-flush', async () => {
-    // 测试意图：点击后 flush 阻塞期间目录已换版，仍必须发送点击前看到的版本（A），绝不用新版本（B）。
-    const client = new QueryClient({
-      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-    })
+  it('captures the clicked catalog version before flush and keeps it when the catalog is mutated in place mid-flush', async () => {
+    // 测试意图：点击后 flush 阻塞期间，查询缓存里同一个 version 对象被原地改写（不是换目录数组），
+    // 仍必须发送点击前看到的版本（A）；这不是「换一个目录数组」的弱化版本。
+    // 目录项持有同一个 version 对象引用，测试在 flush 期间原地改写它。
+    const catalogVersion = { ...FUNCTION_VERSION_A }
+    vi.mocked(listCanvasFunctions).mockResolvedValue([{
+      version: catalogVersion,
+      name: 'fake-image',
+      description: 'Fake Image',
+      outputs: [{ kind: 'IMAGE', name: null }],
+      argsSchema: {
+        type: 'object',
+        properties: {
+          prompt: { type: 'string' },
+          ratio: { type: 'string', enum: ['AUTO'] },
+          references: { type: 'array', items: { type: 'resourceReference' } },
+        },
+      },
+      referencePolicy: { allowedKinds: ['IMAGE'], maxReferences: 1, maxByKind: {} },
+      available: true,
+      unavailableReason: null,
+    }])
+
     const flushGate = deferred<CanvasPatchDTO>()
     vi.mocked(postCanvasCommands).mockImplementation(async (_canvasId, request) => {
       commands.push(request)
@@ -1031,10 +1042,12 @@ describe('useCanvasController real snapshot runtime', () => {
       return diffPatch(current)
     })
 
-    const { result } = renderHook(() => useCanvasController(), { wrapper: wrapperWithClient(client) })
+    const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
     act(() => result.current.openEditor(CANVAS_ID))
     await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
     await waitFor(() => expect(result.current.models).toHaveLength(1))
+    // 确认查询缓存持有的就是同一个对象引用（否则本用例不成立）
+    expect(result.current.models[0]?.version).toBe(catalogVersion)
 
     act(() => {
       result.current.scheduleFunctionConfig(NODE_FN, 'fake-image', {
@@ -1051,21 +1064,9 @@ describe('useCanvasController real snapshot runtime', () => {
     // flush 已把配置命令发往服务端且仍被阻塞
     await waitFor(() => expect(postCanvasCommands).toHaveBeenCalled())
 
-    // 阻塞期间目录推进到新版本（同 epoch 下定义指纹变化）
-    vi.mocked(listCanvasFunctions).mockResolvedValue([{
-      version: FUNCTION_VERSION_B,
-      name: 'fake-image',
-      description: 'Fake Image',
-      outputs: [{ kind: 'IMAGE', name: null }],
-      argsSchema: { type: 'object', properties: {} },
-      referencePolicy: { allowedKinds: ['IMAGE'], maxReferences: 1, maxByKind: {} },
-      available: true,
-      unavailableReason: null,
-    }])
-    await act(async () => {
-      await client.refetchQueries({ queryKey: queryKeys.studio.canvasModels })
-    })
-    await waitFor(() => expect(result.current.models[0]?.version).toEqual(FUNCTION_VERSION_B))
+    // 阻塞期间原地换版：改写查询缓存里同一个 version 对象的两个字段
+    catalogVersion.catalogEpoch = FUNCTION_VERSION_B.catalogEpoch
+    catalogVersion.definitionFingerprint = FUNCTION_VERSION_B.definitionFingerprint
 
     await act(async () => {
       flushGate.resolve(diffPatch(current))
@@ -1077,6 +1078,7 @@ describe('useCanvasController real snapshot runtime', () => {
       requestId: expect.stringMatching(/^[0-9a-f-]{36}$/i),
       expectedVersion: FUNCTION_VERSION_A,
     })
+    expect(loadPendingFunctionRun(CANVAS_ID, NODE_FN)).toBeNull()
   })
 
   it('does not flush or POST when the node function has no catalog definition', async () => {
@@ -1122,7 +1124,9 @@ describe('useCanvasController real snapshot runtime', () => {
     expect(startCanvasFunctionRun).toHaveBeenCalledTimes(1)
     expect(getCanvasFunctionRun).not.toHaveBeenCalled()
     expect(loadPendingFunctionRun(CANVAS_ID, NODE_FN)).toBeNull()
+    // 不武断断言 409 一定是「目录已变化」，但必须要求刷新目录后重新确认
     expect(result.current.state.toast).toContain('刷新函数目录后重新确认运行')
+    expect(result.current.state.toast).not.toContain('目录已变化')
     // 目录被标记失效后重新拉取，用户能看到新目录
     await waitFor(() => expect(listCanvasFunctions).toHaveBeenCalledTimes(2))
   })

@@ -730,6 +730,7 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
    * 解析 node 当前将被执行函数在用户所见目录中的版本。
    *
    * 纯同步、无 await：start 在点击那一刻调用，随后即使目录 re-fetch/推进也不替换已捕获版本；
+   * 返回值是脱离查询缓存的新对象（调用方随后也不会被目录原地改写影响）。
    * 目录中没有对应定义时返回 null，调用方必须 0 flush / 0 POST。
    */
   const resolveFunctionVersion = useCallback((nodeId: UUIDString): CanvasFunctionVersionDTO | null => {
@@ -739,7 +740,13 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     if (!functionName) {
       return null
     }
-    return modelsQuery.data?.find((item) => item.name === functionName)?.version ?? null
+    const version = modelsQuery.data?.find((item) => item.name === functionName)?.version
+    return version
+      ? {
+          catalogEpoch: version.catalogEpoch,
+          definitionFingerprint: version.definitionFingerprint,
+        }
+      : null
   }, [modelsQuery.data, snapshotQuery.data])
 
   const {
