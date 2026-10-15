@@ -723,6 +723,75 @@ describe('PluginsTab', () => {
     expect(within(dialog).queryByTestId('plugin-check-authentication')).toBeNull()
   })
 
+  it('keeps one in-flight check per plugin across plugin switches and allows an explicit re-check after settling', async () => {
+    const user = userEvent.setup()
+    vi.mocked(pluginsService.listPlugins).mockResolvedValue([
+      checkablePlugin(),
+      checkablePlugin({ pluginId: 'other', name: 'Other Plugin' }),
+    ])
+    const firstA = deferred<PluginConnectionCheckDTO>()
+    const b = deferred<PluginConnectionCheckDTO>()
+    const secondA = deferred<PluginConnectionCheckDTO>()
+    vi.mocked(pluginsService.checkConnection)
+      .mockReturnValueOnce(firstA.promise)
+      .mockReturnValueOnce(b.promise)
+      .mockReturnValueOnce(secondA.promise)
+
+    renderTab()
+    await waitFor(() => expect(screen.getByText('Other Plugin')).toBeInTheDocument())
+
+    // A 未完成前切到 B：B 是另一次显式点击，A 仍只有一次请求。
+    await user.click(checkButton('OpenCLI Probe'))
+    expect(pluginsService.checkConnection).toHaveBeenCalledTimes(1)
+    await user.click(checkButton('Other Plugin'))
+    expect(pluginsService.checkConnection).toHaveBeenCalledTimes(2)
+    expect(pluginsService.checkConnection).toHaveBeenNthCalledWith(1, 'opencli', {
+      expectedEpoch: '14',
+      expectedRevision: '8',
+    })
+    expect(pluginsService.checkConnection).toHaveBeenNthCalledWith(2, 'other', {
+      expectedEpoch: '14',
+      expectedRevision: '8',
+    })
+
+    // A 仍在途：即使视图已切到 B，A 的入口也必须保持禁用，再次激活不产生第二次 A 请求。
+    expect(checkButton('OpenCLI Probe')).toBeDisabled()
+    fireEvent.click(checkButton('OpenCLI Probe'))
+    expect(pluginsService.checkConnection).toHaveBeenCalledTimes(2)
+
+    // A 的迟到结果被丢弃，既不复活维度也不解除 B 的在途状态。
+    await act(async () => {
+      firstA.resolve(checkResult())
+    })
+    let dialog = screen.getByRole('dialog')
+    expect(within(dialog).queryByTestId('plugin-check-reachability')).toBeNull()
+    expect(within(dialog).getByTestId('plugin-check-pending')).toBeInTheDocument()
+    // A 请求结束后其入口重新可用（在途标记随 finally 解除）。
+    expect(checkButton('OpenCLI Probe')).toBeEnabled()
+
+    await act(async () => {
+      b.resolve(checkResult({ pluginId: 'other' }))
+    })
+    await waitFor(() => {
+      expect(within(dialog).getByTestId('plugin-check-reachability')).toHaveTextContent('可达')
+    })
+    await user.click(within(dialog).getByTestId('plugin-check-close'))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+
+    // 关闭之后唯一的新请求来自用户显式再次点击。
+    await user.click(checkButton('OpenCLI Probe'))
+    expect(pluginsService.checkConnection).toHaveBeenCalledTimes(3)
+    dialog = await screen.findByRole('dialog')
+    await act(async () => {
+      secondA.resolve(checkResult())
+    })
+    await waitFor(() => {
+      expect(within(dialog).getByTestId('plugin-check-reachability')).toHaveTextContent('可达')
+    })
+    expect(within(dialog).getByTestId('plugin-check-authentication')).toHaveTextContent('凭据已接受')
+    expect(pluginsService.checkConnection).toHaveBeenCalledTimes(3)
+  })
+
   it('shows a completed result only as stale once the catalogue applies new coordinates', async () => {
     const user = userEvent.setup()
     vi.mocked(pluginsService.listPlugins).mockResolvedValue([checkablePlugin()])

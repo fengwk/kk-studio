@@ -292,6 +292,19 @@ describe('ai-plugin-codec', () => {
       .toThrowError(/epoch seconds or an ISO date-time string/)
   })
 
+  it('rejects a zero applied revision while still accepting a zero applied epoch', () => {
+    // 响应中的已应用修订必须为正：0 表示本节点没有已应用配置，绝不被当作可用坐标。
+    expect(() => decodePluginConnectionCheckDTO({ ...connectionCheckDTO, appliedRevision: '0' }))
+      .toThrowError(/appliedRevision must be a positive decimal string/)
+    // epoch 从 0 起是合法的。
+    expect(
+      decodePluginConnectionCheckDTO({ ...connectionCheckDTO, appliedEpoch: '0' }).appliedEpoch,
+    ).toBe('0')
+    expect(
+      decodePluginConnectionCheckDTO({ ...connectionCheckDTO, appliedRevision: '1' }).appliedRevision,
+    ).toBe('1')
+  })
+
   it('rejects every out-of-contract connection dimension instead of falling back to health', () => {
     expect(() => decodePluginConnectionCheckDTO({ ...connectionCheckDTO, reachability: 'HEALTHY' }))
       .toThrowError(/reachability must be one of/)
