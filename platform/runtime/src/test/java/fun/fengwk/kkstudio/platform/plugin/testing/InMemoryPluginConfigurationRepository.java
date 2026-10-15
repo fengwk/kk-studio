@@ -17,20 +17,23 @@ import java.util.Optional;
  *   <li>{@link #commit(long, List, PluginCatalogManifest)} 在 epoch 不匹配时返回 false 且不写任何历史，命中时全局 epoch
  *       前进到 {@code expectedEpoch + 1}、插入 changed 历史并整体替换 manifest；
  *   <li>changed 的 revision 必须等于 {@code expectedEpoch + 1}，且不能删除已存在的 pluginId 条目（与 PG 侧一致性校验同构）；
- *   <li>历史 append-only：同一 {@code (pluginId, revision)} 不会被覆盖成不同内容。
+ *   <li>历史 append-only：同一 {@code (pluginId, revision)} 不会被覆盖成不同内容，完整 manifest 也按 epoch 追加保存。
  * </ul>
  */
 public class InMemoryPluginConfigurationRepository implements PluginConfigurationRepository {
 
   private PluginCatalogRecord catalog =
       new PluginCatalogRecord(0L, PluginCatalogManifest.uninitialized());
+  private final Map<Long, PluginCatalogRecord> catalogRevisions =
+      new LinkedHashMap<>(Map.of(0L, catalog));
   private final Map<String, PluginConfigurationRow> history = new LinkedHashMap<>();
   private RuntimeException readFailure;
   private RuntimeException commitFailure;
 
-  /** 初始化权威单行（epoch 与 manifest）。 */
+  /** 初始化权威单行（epoch 与 manifest），并同步该 epoch 的完整 manifest 历史。 */
   public void initialize(PluginCatalogRecord record) {
     this.catalog = record;
+    this.catalogRevisions.put(record.epoch(), record);
   }
 
   /** 直接植入一条历史行（模拟自其它节点已提交的 revision）。 */
@@ -61,6 +64,14 @@ public class InMemoryPluginConfigurationRepository implements PluginConfiguratio
       throw readFailure;
     }
     return catalog;
+  }
+
+  @Override
+  public Optional<PluginCatalogRecord> readCatalog(long epoch) {
+    if (readFailure != null) {
+      throw readFailure;
+    }
+    return Optional.ofNullable(catalogRevisions.get(epoch));
   }
 
   @Override
@@ -96,6 +107,7 @@ public class InMemoryPluginConfigurationRepository implements PluginConfiguratio
       history.put(row.pluginId() + "#" + row.revision(), row);
     }
     catalog = new PluginCatalogRecord(expectedEpoch + 1, manifest);
+    catalogRevisions.put(catalog.epoch(), catalog);
     return true;
   }
 }

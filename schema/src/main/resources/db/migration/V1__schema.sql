@@ -350,33 +350,51 @@ comment on index idx_plugin_credential_refresh_due is 'refresh dispatcher 按 ne
 -- -----------------------------------------------------------------------------
 -- Plugin 配置权威存储
 --
--- 恒单行 id=1，以 epoch CAS 推进唯一全局修订。manifest 记录全部插件配置身份及两域目录指纹；
--- epoch=0、空 plugins 与 null catalogFingerprint 是唯一未初始化形态。
+-- plugin_catalog_revision 保存每个全局 epoch 的不可变完整 manifest（唯一新建入口，历史行不可更新）；
+-- plugin_catalog_state 恒单行 id=1，只保存指向某个 revision 的 epoch 指针与时间，因此 epoch 与 manifest
+-- 不双来源。epoch=0、空 plugins 与 null catalogFingerprint 是唯一未初始化形态。
+-- state.epoch 对 revision.epoch 的外键即时校验：提交用单条语句同时 CAS 指针并新建该 epoch 的 revision，
+-- 语句末校验时两者已经同时成立；CAS 未命中则不插入任何历史。
 -- -----------------------------------------------------------------------------
 
+create table plugin_catalog_revision (
+    epoch         bigint         primary key,
+    manifest_json jsonb          not null,
+    created_at    timestamptz(3) not null default current_timestamp,
+    constraint ck_plugin_catalog_revision_epoch check (epoch >= 0),
+    constraint ck_plugin_catalog_revision_manifest_object check (
+        jsonb_typeof(manifest_json) = 'object'
+    )
+);
+
+comment on table plugin_catalog_revision is 'Plugin catalog 的不可变完整 manifest 历史：每个全局 epoch 恰好一行，只有插入入口，不回写历史行';
+comment on column plugin_catalog_revision.epoch is '唯一全局修订（非负 bigint）：每次成功提交恰好新增一行；历史行不更新也不删除';
+comment on column plugin_catalog_revision.manifest_json is '完整冻结两域目录的 catalog manifest JSON object：plugins 是按 pluginId 排序的冻结映射，catalogFingerprint 绑定完整两域目录；epoch=0 时为 {"plugins":{},"catalogFingerprint":null}';
+comment on column plugin_catalog_revision.created_at is '创建时间（毫秒精度）';
+
 create table plugin_catalog_state (
-    id            bigint       primary key,
-    epoch         bigint       not null,
-    manifest_json jsonb        not null,
+    id            bigint         primary key,
+    epoch         bigint         not null,
     created_at    timestamptz(3) not null default current_timestamp,
     updated_at    timestamptz(3) not null default current_timestamp,
     constraint ck_plugin_catalog_state_id check (id = 1),
     constraint ck_plugin_catalog_state_epoch check (epoch >= 0),
-    constraint ck_plugin_catalog_state_manifest_object check (
-        jsonb_typeof(manifest_json) = 'object'
-    ),
-    constraint ck_plugin_catalog_state_time_order check (updated_at >= created_at)
+    constraint ck_plugin_catalog_state_time_order check (updated_at >= created_at),
+    constraint fk_plugin_catalog_state_revision foreign key (epoch)
+        references plugin_catalog_revision (epoch)
 );
 
-comment on table plugin_catalog_state is 'Plugin catalog 权威单行聚合（id=1）：epoch 是唯一全局修订，manifest_json 是完整冻结两域目录的 catalog manifest';
+comment on table plugin_catalog_state is 'Plugin catalog 权威单行指针（id=1）：epoch 指向 plugin_catalog_revision 中当前生效的完整 manifest';
 comment on column plugin_catalog_state.id is '恒为 1 的单行聚合键';
-comment on column plugin_catalog_state.epoch is '唯一全局修订（非负 bigint）：每次成功提交 +1；CAS 只通过 where epoch = :expectedEpoch 的 epoch = epoch + 1 完成';
-comment on column plugin_catalog_state.manifest_json is '完整冻结两域目录的 catalog manifest JSON object：plugins 是按 pluginId 排序的冻结映射，catalogFingerprint 绑定完整两域目录；epoch=0 时为 {"plugins":{},"catalogFingerprint":null}';
+comment on column plugin_catalog_state.epoch is '唯一全局修订（非负 bigint）：每次成功提交 +1；CAS 与 manifest 历史新建在同一条语句内完成，且只通过 where epoch = :expectedEpoch 的 epoch = epoch + 1 推进';
 comment on column plugin_catalog_state.created_at is '创建时间（毫秒精度）';
 comment on column plugin_catalog_state.updated_at is '最后更新时间（毫秒精度），应用侧维护';
 
-insert into plugin_catalog_state (id, epoch, manifest_json)
-values (1, 0, '{"plugins":{},"catalogFingerprint":null}'::jsonb);
+insert into plugin_catalog_revision (epoch, manifest_json)
+values (0, '{"plugins":{},"catalogFingerprint":null}'::jsonb);
+
+insert into plugin_catalog_state (id, epoch)
+values (1, 0);
 
 -- -----------------------------------------------------------------------------
 -- Plugin 普通配置历史的不可变权威存储
