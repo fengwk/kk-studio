@@ -332,7 +332,12 @@ final class DaemonResourceTransferClient {
     return deadline.canContinue();
   }
 
-  /** 按票据的已签名事实原样发起请求；方法与 headers 必须与签名完全一致，整个 HTTP 调用不得越过 invocation deadline。 */
+  /**
+   * 按票据的已签名事实原样发起请求；方法与 headers 必须与签名完全一致，整个 HTTP 调用不得越过 invocation deadline。
+   *
+   * <p>派生客户端显式禁止普通与跨协议重定向：预签名 PUT 的 headers 与 body 只对票据指定的目标有效，跟随重定向会把签名与对象内容泄漏给第三方。 3xx
+   * 因此按既有的「非成功存储响应」处理，不引入额外重试策略，transfer/commit/deadline 与响应关闭语义均不变。
+   */
   private void putObject(DaemonPresignedPut presigned, byte[] bytes, Deadline deadline)
       throws IOException {
     if (!canContinue(deadline)) {
@@ -347,6 +352,9 @@ final class DaemonResourceTransferClient {
     OkHttpClient deadlineClient =
         httpClient
             .newBuilder()
+            // 预签名 PUT 绝不跟随重定向：跨目标复用已签名 headers/body 会把签名与对象内容泄漏给重定向目的地。
+            .followRedirects(false)
+            .followSslRedirects(false)
             // OkHttp 4.x 的 duration 上限是 Integer.MAX_VALUE ms；更长的 invocation
             // 以单次约 24 天的调用窗口滚动重试，不能因 duration 溢出把合法上传误判为失败。
             .callTimeout(

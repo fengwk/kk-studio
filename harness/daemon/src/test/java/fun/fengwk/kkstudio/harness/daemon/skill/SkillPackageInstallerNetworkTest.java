@@ -53,6 +53,36 @@ class SkillPackageInstallerNetworkTest {
     }
   }
 
+  /**
+   * 意图（负向对照）：64 位 SHA-256 commit 在 40 位校验处即被拒绝，绝不进入 Git 网络层——即使远端真实可达、可用且停滞， 也必须零请求返回
+   * INVALID_TARGET_COMMIT。旧实现会把该 commit 交给 JGit，产生网络或其它失败。
+   */
+  @Test
+  void sha256CommitNeverReachesTheGitNetwork(@TempDir Path directory) throws Exception {
+    try (LocalGitHttpServer server = new LocalGitHttpServer(directory, "a".repeat(40))) {
+      server.stall = true;
+      SkillPackageInstaller installer = installer(directory, 100);
+      SkillSyncException failure =
+          assertThrows(
+              SkillSyncException.class,
+              () ->
+                  installer.install(
+                      "pkg",
+                      server.url(),
+                      "main",
+                      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"));
+      assertEquals("INVALID_TARGET_COMMIT", failure.code());
+      assertEquals(
+          0, server.requests.get(), "no Git request may be issued before the 40-hex check");
+      assertFalse(Files.exists(directory.resolve("skills/pkg")));
+      try (var staging = Files.list(installer.stagingRoot());
+          var backup = Files.list(installer.backupRoot())) {
+        assertEquals(0, staging.count());
+        assertEquals(0, backup.count());
+      }
+    }
+  }
+
   /** 意图：Git socket 停滞报告 READ_TIMEOUT，无二次分支 fetch、无 staging/backup 副作用。 */
   @Test
   void idleFetchStopsWithoutRetryOrInstallArtifacts(@TempDir Path directory) throws Exception {

@@ -180,6 +180,20 @@ class EnvironmentCapabilityCatalogTest {
     }
   }
 
+  /** skill.sync 的 targetCommit 文案必须如实声明后端只接受 40 位小写 SHA-1，避免 64 位 SHA-256 的误导。 */
+  @Test
+  void skillSyncSchemaDocumentsFortyCharacterSha1TargetCommit() {
+    String description =
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.SKILL_SYNC)
+            .inputSchema()
+            .properties()
+            .get("targetCommit")
+            .description();
+
+    assertTrue(description.contains("40"), description);
+    assertTrue(description.contains("SHA-1"), description);
+  }
+
   /** process.exec 缺少必填 workdir 时在 Capability 调用参数校验边界抛出异常。 */
   @Test
   void processExecRequiresWorkdirAtValidationBoundary() {
