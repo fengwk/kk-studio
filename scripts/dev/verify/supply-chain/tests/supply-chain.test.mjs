@@ -463,7 +463,8 @@ test('locks tool versions, policy thresholds, and secret indirection', () => {
     assert.match(pom, /<artifactId>convention4j-spring-boot-starter<\/artifactId>/)
     assert.match(pom, /<artifactId>convention4j-spring-boot-starter-web<\/artifactId>/)
     assert.match(pom, /<artifactId>convention4j-spring-boot-starter-test<\/artifactId>/)
-    assert.match(pom, /<artifactId>convention4j-comfyui<\/artifactId>/)
+    // 无消费者的托管依赖是死依赖：根 POM 不得继续为其固定版本。
+    assert.doesNotMatch(pom, /<artifactId>convention4j-comfyui<\/artifactId>/)
     for (const source of [pom, canvasInfraPom, platformPom, webPom]) {
         assert.doesNotMatch(source, /mybatis|org\.apache\.ibatis/)
     }
