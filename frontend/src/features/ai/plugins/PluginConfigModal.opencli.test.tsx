@@ -30,7 +30,6 @@ const opencliPluginFixture: PluginDTO = {
     valuesJson: JSON.stringify({
       enabled: false,
       baseUrl: 'http://127.0.0.1:8080',
-      instanceId: 'inst-default',
       connectTimeoutMillis: 5000,
       requestTimeoutMillis: 120000,
       longPollTimeoutMillis: 130000,
@@ -59,7 +58,6 @@ const opencliPluginFixture: PluginDTO = {
       properties: {
         enabled: { type: 'boolean', description: 'whether OpenCLI integration is enabled' },
         baseUrl: { type: 'string', description: 'OpenCLI Hub HTTP(S) origin base URL' },
-        instanceId: { type: 'string', description: 'optional OpenCLI instance identifier' },
         connectTimeoutMillis: { type: 'integer', description: 'HTTP connect timeout in milliseconds' },
         requestTimeoutMillis: { type: 'integer', description: 'HTTP request timeout in milliseconds' },
         longPollTimeoutMillis: { type: 'integer', description: 'long polling timeout in milliseconds' },
@@ -142,6 +140,10 @@ const opencliPluginFixture: PluginDTO = {
         description: 'OpenCLI API key',
         configured: true,
       },
+      instanceId: {
+        description: 'Private OpenCLI instance identifier',
+        configured: true,
+      },
     },
   },
   desiredEpoch: '3',
@@ -173,17 +175,20 @@ describe('PluginConfigModal OpenCLI regression coverage', () => {
     )
   }
 
-  it('renders OpenCLI nested schema accurately without leaking API key plaintext into standard fields', () => {
+  it('renders OpenCLI schema without leaking apiKey or instanceId into standard fields, protecting instanceId under secrets', () => {
     renderModal()
 
     expect(screen.getByText('配置插件：OpenCLI')).toBeInTheDocument()
     expect(screen.getByText('Rev 1')).toBeInTheDocument()
 
-    // 顶层标量字段
+    // 顶层 9 个标量字段渲染（以 baseUrl/connectTimeoutMillis/requestTimeoutMillis 为代表）
     expect(screen.getByRole('textbox', { name: 'baseUrl' })).toHaveValue('http://127.0.0.1:8080')
-    expect(screen.getByRole('textbox', { name: 'instanceId' })).toHaveValue('inst-default')
     expect(screen.getByRole('textbox', { name: 'connectTimeoutMillis' })).toHaveValue('5000')
     expect(screen.getByRole('textbox', { name: 'requestTimeoutMillis' })).toHaveValue('120000')
+
+    // instanceId 与 apiKey 绝对不作为普通表单输入渲染，也不在 valuesJson 暴露
+    expect(screen.queryByRole('textbox', { name: 'instanceId' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: 'apiKey' })).not.toBeInTheDocument()
 
     // 嵌套结构 gptImage2 渲染为 fieldset，并包含其子字段
     const gptFieldset = screen.getByRole('group', { name: 'gptImage2' })
@@ -198,15 +203,19 @@ describe('PluginConfigModal OpenCLI regression coverage', () => {
     expect(within(seedanceFieldset).getByRole('textbox', { name: 'workspaceId' })).toHaveValue('workspace-main')
     expect(within(seedanceFieldset).getByRole('textbox', { name: 'retry' })).toHaveValue('0')
 
-    // API Key 绝不作为普通配置输入渲染，只在秘密区域显示状态，不回显凭据明文
-    expect(screen.queryByRole('textbox', { name: 'apiKey' })).not.toBeInTheDocument()
-    const secretItem = screen.getByTestId('secret-item-apiKey')
-    expect(within(secretItem).getByText('apiKey')).toBeInTheDocument()
-    expect(within(secretItem).getByText('OpenCLI API key')).toBeInTheDocument()
-    expect(within(secretItem).getByText('已配置')).toBeInTheDocument()
+    // 秘密区域：apiKey（认证密钥）与 instanceId（受保护的私有路由身份）安全展示，不回显明文
+    const secretItemApiKey = screen.getByTestId('secret-item-apiKey')
+    expect(within(secretItemApiKey).getByText('apiKey')).toBeInTheDocument()
+    expect(within(secretItemApiKey).getByText('OpenCLI API key')).toBeInTheDocument()
+    expect(within(secretItemApiKey).getByText('已配置')).toBeInTheDocument()
+
+    const secretItemInstanceId = screen.getByTestId('secret-item-instanceId')
+    expect(within(secretItemInstanceId).getByText('instanceId')).toBeInTheDocument()
+    expect(within(secretItemInstanceId).getByText('Private OpenCLI instance identifier')).toBeInTheDocument()
+    expect(within(secretItemInstanceId).getByText('已配置')).toBeInTheDocument()
   })
 
-  it('edits nested schema properties and saves with expected coordinates and default KEEP secret operation', async () => {
+  it('edits nested schema properties and saves with expected coordinates and KEEP secret operations', async () => {
     const user = userEvent.setup()
     vi.mocked(pluginsService.updateConfiguration).mockResolvedValue(opencliPluginFixture)
     renderModal()
@@ -239,6 +248,7 @@ describe('PluginConfigModal OpenCLI regression coverage', () => {
           expectedRevision: '1',
           secretPatch: {
             apiKey: { operation: 'KEEP' },
+            instanceId: { operation: 'KEEP' },
           },
         }),
       )
@@ -249,23 +259,36 @@ describe('PluginConfigModal OpenCLI regression coverage', () => {
     expect(parsedValues.baseUrl).toBe('https://hub.example.com')
     expect(parsedValues.gptImage2.paidEnabled).toBe(true)
     expect(parsedValues.seedance.retry).toBe(3)
+    // 确保 instanceId 不进入 valuesJson
+    expect(parsedValues).not.toHaveProperty('instanceId')
   })
 
-  it('performs SET secret operation without trimming and clears sensitive state upon save', async () => {
+  it('performs SET secret operations for both apiKey and private instanceId without trimming', async () => {
     const user = userEvent.setup()
     vi.mocked(pluginsService.updateConfiguration).mockResolvedValue(opencliPluginFixture)
     renderModal()
 
-    const secretItem = screen.getByTestId('secret-item-apiKey')
-    const opSelect = within(secretItem).getByRole('button', { name: /Operation for apiKey/i })
-    await user.click(opSelect)
+    // 设置 apiKey
+    const secretItemApiKey = screen.getByTestId('secret-item-apiKey')
+    const opSelectApiKey = within(secretItemApiKey).getByRole('button', { name: /Operation for apiKey/i })
+    await user.click(opSelectApiKey)
     await user.click(screen.getByRole('option', { name: '设置新值' }))
 
-    const secretInput = screen.getByLabelText(/New secret for apiKey/i)
-    // 严格保留原值，包含前后空格等特殊字符
-    const testSecret = '  sk-opencli-live-secret-999  '
-    await user.type(secretInput, testSecret)
-    expect(secretInput).toHaveValue(testSecret)
+    const apiKeyInput = screen.getByLabelText(/New secret for apiKey/i)
+    const testApiKey = '  sk-opencli-live-secret-999  '
+    await user.type(apiKeyInput, testApiKey)
+    expect(apiKeyInput).toHaveValue(testApiKey)
+
+    // 设置受保护的私有 instanceId
+    const secretItemInst = screen.getByTestId('secret-item-instanceId')
+    const opSelectInst = within(secretItemInst).getByRole('button', { name: /Operation for instanceId/i })
+    await user.click(opSelectInst)
+    await user.click(screen.getByRole('option', { name: '设置新值' }))
+
+    const instInput = screen.getByLabelText(/New secret for instanceId/i)
+    const testInstanceId = '  inst-private-edge-42  '
+    await user.type(instInput, testInstanceId)
+    expect(instInput).toHaveValue(testInstanceId)
 
     const saveBtn = screen.getByRole('button', { name: '保存配置' })
     await user.click(saveBtn)
@@ -279,44 +302,48 @@ describe('PluginConfigModal OpenCLI regression coverage', () => {
           secretPatch: {
             apiKey: {
               operation: 'SET',
-              value: testSecret,
+              value: testApiKey,
+            },
+            instanceId: {
+              operation: 'SET',
+              value: testInstanceId,
             },
           },
         }),
       )
     })
 
-    // 保存后，秘密输入框从界面移除且状态已清空
     await waitFor(() => {
       expect(onSuccess).toHaveBeenCalled()
     })
   })
 
-  it('requires confirmation before clearing secret and submits CLEAR operation', async () => {
+  it('manages CLEAR operation independently on protected instanceId with confirmation safeguard', async () => {
     const user = userEvent.setup()
     vi.mocked(pluginsService.updateConfiguration).mockResolvedValue(opencliPluginFixture)
     renderModal()
 
-    const secretItem = screen.getByTestId('secret-item-apiKey')
-    const opSelect = within(secretItem).getByRole('button', { name: /Operation for apiKey/i })
-    await user.click(opSelect)
+    // 仅清除受保护的 instanceId，apiKey 维持 KEEP
+    const secretItemInst = screen.getByTestId('secret-item-instanceId')
+    const opSelectInst = within(secretItemInst).getByRole('button', { name: /Operation for instanceId/i })
+    await user.click(opSelectInst)
     await user.click(screen.getByRole('option', { name: '清除' }))
 
     const saveBtn = screen.getByRole('button', { name: '保存配置' })
 
-    // 未勾选确认时：保存按钮禁用，阻止未授权误清
+    // 未确认前：保存按钮禁用
     expect(saveBtn).toBeDisabled()
     expect(pluginsService.updateConfiguration).not.toHaveBeenCalled()
 
-    // 勾选确认
-    const confirmCheckbox = screen.getByRole('checkbox', {
+    // 勾选确认复选框
+    const confirmCheckbox = within(secretItemInst).getByRole('checkbox', {
       name: '确认保存时清除此秘密凭据？',
     })
     await user.click(confirmCheckbox)
     expect(confirmCheckbox).toBeChecked()
     expect(saveBtn).not.toBeDisabled()
 
-    // 再次点击保存：成功提交 CLEAR
+    // 提交保存：instanceId CLEAR，apiKey KEEP
     await user.click(saveBtn)
     await waitFor(() => {
       expect(pluginsService.updateConfiguration).toHaveBeenCalledWith(
@@ -325,7 +352,8 @@ describe('PluginConfigModal OpenCLI regression coverage', () => {
           expectedEpoch: '3',
           expectedRevision: '1',
           secretPatch: {
-            apiKey: { operation: 'CLEAR' },
+            apiKey: { operation: 'KEEP' },
+            instanceId: { operation: 'CLEAR' },
           },
         }),
       )
