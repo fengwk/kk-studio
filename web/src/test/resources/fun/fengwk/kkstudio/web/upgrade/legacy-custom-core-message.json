@@ -1,0 +1,15 @@
+{
+  "contributorId": "core",
+  "customType": "message",
+  "rendererKey": "message",
+  "message": {
+    "role": "USER",
+    "contents": [
+      {
+        "type": "text",
+        "text": "ping from a plugin"
+      }
+    ]
+  },
+  "details": {}
+}
