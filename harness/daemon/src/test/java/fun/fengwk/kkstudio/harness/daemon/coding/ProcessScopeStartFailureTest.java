@@ -17,6 +17,7 @@ import java.io.OutputStream;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -149,6 +150,58 @@ class ProcessScopeStartFailureTest {
             () -> failStart(ordinary, scope(otherDir, new ControlledProcess(true, cleanupError))));
     assertSame(cleanupError, promoted, "抑制被禁用的清理 Error 同样必须按身份提升");
     assertEquals(0, promoted.getSuppressed().length, "抑制被禁用时不得留下任何 suppressed 元数据");
+  }
+
+  /** 删除目录也可能失败；后到的 Error 不得替换已有的启动 Error。 */
+  @Test
+  void stateDirectoryFailureDoesNotMaskTheFirstError() throws Exception {
+    Error original = new AssertionError("startup");
+    Error deletion = new AssertionError("state directory cleanup");
+    ProcessScope scope = scope(failingStateDirectory(deletion), new ControlledProcess(false, null));
+
+    Error failure = assertThrows(AssertionError.class, () -> failStart(original, scope));
+
+    assertSame(original, failure);
+    assertEquals(List.of(deletion), List.of(failure.getSuppressed()));
+  }
+
+  /** 删除目录的致命失败必须提升到普通启动失败之上。 */
+  @Test
+  void stateDirectoryErrorOutranksAnOrdinaryStartFailure() throws Exception {
+    RuntimeException original = new IllegalStateException("startup");
+    Error deletion = new AssertionError("state directory cleanup");
+    ProcessScope scope = scope(failingStateDirectory(deletion), new ControlledProcess(false, null));
+
+    Error failure = assertThrows(AssertionError.class, () -> failStart(original, scope));
+
+    assertSame(deletion, failure);
+    assertEquals(List.of(original), List.of(failure.getSuppressed()));
+  }
+
+  /** 同一个 Error 被启动和终止路径共同抛出时不得自抑制。 */
+  @Test
+  void repeatedErrorIdentityDoesNotCauseSelfSuppression() throws Exception {
+    Error original = new AssertionError("startup and termination");
+    Path stateDir = newStateDirectory();
+    ProcessScope scope = scope(stateDir, new ControlledProcess(true, original));
+
+    assertSame(original, assertThrows(AssertionError.class, () -> failStart(original, scope)));
+    assertEquals(0, original.getSuppressed().length);
+    assertFalse(Files.exists(stateDir));
+  }
+
+  /** 在路径访问点制造确定的失败，不替换生产删除逻辑或创建真实 OS 资源。 */
+  private static Path failingStateDirectory(Throwable failure) {
+    return (Path)
+        Proxy.newProxyInstance(
+            Path.class.getClassLoader(),
+            new Class<?>[] {Path.class},
+            (proxy, method, args) -> {
+              if ("getFileSystem".equals(method.getName())) {
+                throw failure;
+              }
+              throw new UnsupportedOperationException(method.getName());
+            });
   }
 
   /** 反射调用私有的失败收尾路径：它是生产代码本身，真实启动失败走的就是这里。 */

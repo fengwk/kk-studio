@@ -175,27 +175,27 @@ final class ProcessScope implements AutoCloseable {
    * <p>清理动作必须做完：终止失败时状态目录的删除仍然尝试。首个失败保持身份，后到的 {@link Error} 提升到普通异常之上， 其余作为 {@code suppressed}
    * 附着（抑制被禁用时也不出错，因此结论绝不依赖 suppressed 元数据）。最终是 {@link Error} 时原样抛出、绝不包装；普通启动失败一旦清理没能证明收敛，就用固定的
    * {@link StartupCleanupFailure} 承载「资源结论不可靠」。
-   *
-   * <p>这是本类私有的失败收尾路径：真实启动失败与测试注入的合成失败走的是同一条代码。
    */
   private static RuntimeException failStart(Throwable original, ProcessScope scope) {
     boolean converged = false;
     Throwable terminationFailure = null;
+    Throwable directoryFailure = null;
     try {
       converged = scope.terminate();
     } catch (RuntimeException | Error error) {
       terminationFailure = error;
-    } finally {
+    }
+    try {
       deleteStateDirectory(scope.stateDir);
+    } catch (RuntimeException | Error error) {
+      directoryFailure = error;
     }
     Throwable primary = original;
-    if (terminationFailure != null && terminationFailure != original) {
-      if (terminationFailure instanceof Error && !(original instanceof Error)) {
-        terminationFailure.addSuppressed(original);
-        primary = terminationFailure;
-      } else {
-        original.addSuppressed(terminationFailure);
-      }
+    if (terminationFailure != null) {
+      primary = mergeStartFailure(primary, terminationFailure);
+    }
+    if (directoryFailure != null) {
+      primary = mergeStartFailure(primary, directoryFailure);
     }
     if (primary instanceof Error fatal) {
       throw fatal;
@@ -204,6 +204,19 @@ final class ProcessScope implements AutoCloseable {
       throw new StartupCleanupFailure((RuntimeException) primary);
     }
     return (RuntimeException) primary;
+  }
+
+  /** 两步收尾共用同一优先级：首个 Error 保持身份，后到的 Error 优先于普通异常。 */
+  private static Throwable mergeStartFailure(Throwable primary, Throwable later) {
+    if (primary == later) {
+      return primary;
+    }
+    if (later instanceof Error && !(primary instanceof Error)) {
+      later.addSuppressed(primary);
+      return later;
+    }
+    primary.addSuppressed(later);
+    return primary;
   }
 
   /**
