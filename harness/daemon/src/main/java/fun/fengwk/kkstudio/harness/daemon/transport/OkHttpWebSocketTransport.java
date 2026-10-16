@@ -65,7 +65,7 @@ public final class OkHttpWebSocketTransport implements DaemonTransport {
   private final URI gatewayUri;
   private final int maxInboundTextChars;
 
-  /** 覆盖在途与已交付原生句柄的受管握手；终结时移除，保证 close 可收敛全部在途资源。 */
+  /** 覆盖在途与已交付原生句柄；仅在原生终结回调或 dial 失败时退役，不以逻辑断连代替物理关闭。 */
   private final Set<Handshake> handshakes = ConcurrentHashMap.newKeySet();
 
   private final Object lifecycleLock = new Object();
@@ -256,6 +256,7 @@ public final class OkHttpWebSocketTransport implements DaemonTransport {
         Request request = new Request.Builder().url(gatewayUri.toASCIIString()).build();
         connection.attach(dialer.dial(request, this));
       } catch (RuntimeException error) {
+        handshakes.remove(this);
         result.completeExceptionally(error);
       }
       return completion;
@@ -304,6 +305,7 @@ public final class OkHttpWebSocketTransport implements DaemonTransport {
 
     @Override
     public void onClosed(WebSocket webSocket, int code, String reason) {
+      handshakes.remove(this);
       if (!result.completeExceptionally(
           new IllegalStateException("websocket closed before open"))) {
         // 已交付连接被远端正常关闭：只补一次断开通知，原因保持为空。
@@ -313,6 +315,7 @@ public final class OkHttpWebSocketTransport implements DaemonTransport {
 
     @Override
     public void onFailure(WebSocket webSocket, Throwable error, Response response) {
+      handshakes.remove(this);
       if (!result.completeExceptionally(error)) {
         // 已交付连接失效：只补一次断开通知，保留首个失败。
         notifyDisconnected(error);
@@ -386,13 +389,12 @@ public final class OkHttpWebSocketTransport implements DaemonTransport {
       }
     }
 
-    /** 恰好一次地把断开事件交给使用者，并释放受管握手。 */
+    /** 恰好一次地投递逻辑断开；graceful close 仍可能等待原生终结回调。 */
     private void notifyDisconnected(Throwable cause) {
       if (!disconnected.compareAndSet(false, true)) {
         return;
       }
       connection.markClosed();
-      handshakes.remove(this);
       delegate.onDisconnected(cause);
     }
 
