@@ -91,6 +91,22 @@ class LegacySchemaRejectionPostgresIntegrationTest {
             "dev",
             "SOURCE_PROFILE",
             "create type unknown_extra_enum as enum ('A', 'B')"),
+        // 数组伴生类型已由 typtype 排除；下划线开头的独立用户类型仍须进入指纹。
+        drift(
+            "underscore-prefixed enum type",
+            "dev",
+            "SOURCE_PROFILE",
+            "create type _unknown_enum as enum ('A', 'B')"),
+        drift(
+            "underscore-prefixed domain type",
+            "dev",
+            "SOURCE_PROFILE",
+            "create domain _unknown_domain as text"),
+        drift(
+            "underscore-prefixed composite type on MAIN",
+            "main",
+            "SOURCE_PROFILE",
+            "create type _unknown_composite as (value text)"),
         drift(
             "unknown sequence", "dev", "SOURCE_PROFILE", "create sequence unknown_extra_sequence"),
         drift("unknown namespace", "dev", "SOURCE_PROFILE", "create schema unknown_extra_schema"),
@@ -260,6 +276,21 @@ class LegacySchemaRejectionPostgresIntegrationTest {
             "dev",
             "TARGET_SCHEMA",
             "create view unknown_extra_view as select 1 as one"),
+        drift(
+            "underscore-prefixed target enum",
+            "dev",
+            "TARGET_SCHEMA",
+            "create type _unknown_enum as enum ('A', 'B')"),
+        drift(
+            "underscore-prefixed target domain",
+            "dev",
+            "TARGET_SCHEMA",
+            "create domain _unknown_domain as text"),
+        drift(
+            "underscore-prefixed target composite",
+            "dev",
+            "TARGET_SCHEMA",
+            "create type _unknown_composite as (value text)"),
         drift(
             "extra target column",
             "dev",
