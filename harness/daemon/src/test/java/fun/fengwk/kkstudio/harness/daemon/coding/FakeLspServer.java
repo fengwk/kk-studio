@@ -57,6 +57,15 @@ public final class FakeLspServer {
   }
 
   private void run() throws Exception {
+    if (mode.equals("no-overlap")) {
+      Path previousPidFile = transcript.resolveSibling("previous-server.pid");
+      if (Files.exists(previousPidFile)
+          && ProcessHandle.of(Long.parseLong(Files.readString(previousPidFile)))
+              .map(ProcessHandle::isAlive)
+              .orElse(false)) {
+        throw new IllegalStateException("previous fake server is still alive");
+      }
+    }
     record(
         MAPPER
             .createObjectNode()
