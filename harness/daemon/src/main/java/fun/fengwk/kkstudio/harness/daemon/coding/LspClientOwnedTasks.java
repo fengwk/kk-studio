@@ -202,11 +202,17 @@ final class LspClientOwnedTasks extends AbstractExecutorService {
     private Throwable awaitExit(long deadline) {
       try {
         if (!runnerExited.await(Math.max(deadline - System.nanoTime(), 0), TimeUnit.NANOSECONDS)) {
-          return new ToolServiceFailureException("LSP client I/O task did not exit in time");
+          // 超时之后再读一次完成闩锁：等待期间运行体刚好结束就不算未证明静止。
+          return runnerExited.getCount() == 0
+              ? null
+              : new ToolServiceFailureException("LSP client I/O task did not exit in time");
         }
       } catch (InterruptedException error) {
         Thread.currentThread().interrupt();
-        return new ToolServiceFailureException("LSP client I/O task exit was interrupted");
+        // 中断不能改写已经发布的完成事实：只有运行体确实还没结束才报告未证明静止。
+        if (runnerExited.getCount() != 0) {
+          return new ToolServiceFailureException("LSP client I/O task exit was interrupted");
+        }
       }
       return null;
     }
