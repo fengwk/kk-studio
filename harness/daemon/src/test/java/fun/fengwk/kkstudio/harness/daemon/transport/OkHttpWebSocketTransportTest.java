@@ -117,6 +117,53 @@ class OkHttpWebSocketTransportTest {
     assertTrue(listener.messages.isEmpty());
   }
 
+  /** 拒绝握手只请求 graceful close；物理关闭尚未回调时，transport 仍拥有原生句柄。 */
+  @Test
+  void retainsRejectedHandshakeUntilNativeCloseCompletes() {
+    FakeDialer dialer = new FakeDialer();
+    RecordingListener listener = new RecordingListener();
+    OkHttpWebSocketTransport transport = transport(dialer);
+    try {
+      CompletableFuture<DaemonConnection> stage = transport.connect(listener).toCompletableFuture();
+      dialer.listener.onOpen(dialer.webSocket, response(null));
+      assertThrows(CompletionException.class, stage::join);
+      assertEquals(1, dialer.webSocket.closeCalls.get());
+      assertEquals(0, dialer.webSocket.cancelCalls.get());
+
+      transport.close();
+      transport.close();
+
+      assertEquals(1, dialer.webSocket.cancelCalls.get());
+      assertEquals(1, listener.disconnections.get());
+      assertTrue(dialer.closed.get());
+    } finally {
+      transport.close();
+    }
+  }
+
+  /** 已收到物理关闭回调的拒绝握手必须退役，不能在 transport 关闭时再次取消。 */
+  @Test
+  void retiresRejectedHandshakeAfterNativeCloseCompletes() {
+    FakeDialer dialer = new FakeDialer();
+    RecordingListener listener = new RecordingListener();
+    OkHttpWebSocketTransport transport = transport(dialer);
+    try {
+      CompletableFuture<DaemonConnection> stage = transport.connect(listener).toCompletableFuture();
+      dialer.listener.onOpen(dialer.webSocket, response(null));
+      assertThrows(CompletionException.class, stage::join);
+      dialer.listener.onClosed(
+          dialer.webSocket, OkHttpWebSocketTransport.MANDATORY_EXTENSION, "closed");
+
+      transport.close();
+
+      assertEquals(0, dialer.webSocket.cancelCalls.get());
+      assertEquals(1, listener.disconnections.get());
+      assertTrue(dialer.closed.get());
+    } finally {
+      transport.close();
+    }
+  }
+
   /** 协商参数中不包含 permessage-deflate token 时同样拒绝，避免把其它扩展误判为压缩。 */
   @Test
   void rejectsConnectionWhenOnlyUnrelatedExtensionsAreNegotiated() {
