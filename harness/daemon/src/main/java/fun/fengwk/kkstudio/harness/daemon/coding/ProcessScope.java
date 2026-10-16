@@ -57,6 +57,21 @@ final class ProcessScope implements AutoCloseable {
 
   private static final StartGate ALWAYS_ALLOW = () -> true;
 
+  /**
+   * 启动失败清理没能证明收敛的固定边界。
+   *
+   * <p>终止返回 {@code false} 或抛出时，「资源可能还活着」不能被上层当成普通启动失败去重试；这个类型只承载固定文案， 原始失败作为 cause
+   * 保留，绝不内联原始诊断。上层据此把它当成终结事实，而不是靠 suppressed 元数据（抑制可以被禁用）。
+   */
+  static final class StartupCleanupFailure extends RuntimeException {
+
+    private static final long serialVersionUID = 1L;
+
+    StartupCleanupFailure(RuntimeException cause) {
+      super("the process scope startup cleanup did not converge", cause);
+    }
+  }
+
   /** 等待 helper 发布 scope 的预算：覆盖 helper JVM 冷启动与 JNA 载入。 */
   private static final long PREPARE_BUDGET_MILLIS = 20_000;
 
@@ -103,6 +118,9 @@ final class ProcessScope implements AutoCloseable {
    * 在给定 workdir 中启动 {@code command}，返回已经确认 OS 范围建立的范围对象。
    *
    * <p>范围未确认、helper 提前退出、平台不支持或调用方在启动阶段取消时失败关闭：用户命令不会启动，状态目录也不会残留。
+   *
+   * <p>启动失败一律先收敛整组再抛出：普通失败保持原身份，致命 {@link Error} 原样抛出；只有清理没能证明收敛时，普通失败才被固定的 {@link
+   * StartupCleanupFailure} 包住，让上层把「资源结论不可靠」当成终结事实。
    */
   static ProcessScope start(Path workdir, List<String> command) throws IOException {
     return start(workdir, command, ALWAYS_ALLOW);
@@ -144,13 +162,48 @@ final class ProcessScope implements AutoCloseable {
     ProcessScope scope = new ProcessScope(helper, stateDir, windows);
     try {
       scope.awaitScope(gate);
-    } catch (RuntimeException error) {
+    } catch (RuntimeException | Error error) {
       // 范围可能已经建立（命令可能已经运行），因此统一走收敛路径；未建立时它只是强杀 keeper。
-      scope.terminate();
-      deleteStateDirectory(stateDir);
-      throw error;
+      throw failStart(error, scope);
     }
     return scope;
+  }
+
+  /**
+   * 启动失败后的清理：收敛整组并删除调用私有的状态目录，把「没能证明收敛」这一事实显式交付给调用方。
+   *
+   * <p>清理动作必须做完：终止失败时状态目录的删除仍然尝试。首个失败保持身份，后到的 {@link Error} 提升到普通异常之上， 其余作为 {@code suppressed}
+   * 附着（抑制被禁用时也不出错，因此结论绝不依赖 suppressed 元数据）。最终是 {@link Error} 时原样抛出、绝不包装；普通启动失败一旦清理没能证明收敛，就用固定的
+   * {@link StartupCleanupFailure} 承载「资源结论不可靠」。
+   *
+   * <p>这是本类私有的失败收尾路径：真实启动失败与测试注入的合成失败走的是同一条代码。
+   */
+  private static RuntimeException failStart(Throwable original, ProcessScope scope) {
+    boolean converged = false;
+    Throwable terminationFailure = null;
+    try {
+      converged = scope.terminate();
+    } catch (RuntimeException | Error error) {
+      terminationFailure = error;
+    } finally {
+      deleteStateDirectory(scope.stateDir);
+    }
+    Throwable primary = original;
+    if (terminationFailure != null && terminationFailure != original) {
+      if (terminationFailure instanceof Error && !(original instanceof Error)) {
+        terminationFailure.addSuppressed(original);
+        primary = terminationFailure;
+      } else {
+        original.addSuppressed(terminationFailure);
+      }
+    }
+    if (primary instanceof Error fatal) {
+      throw fatal;
+    }
+    if (!converged) {
+      throw new StartupCleanupFailure((RuntimeException) primary);
+    }
+    return (RuntimeException) primary;
   }
 
   /**

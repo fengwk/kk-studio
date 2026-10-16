@@ -27,7 +27,8 @@ import java.util.concurrent.TimeoutException;
  *
  * <p>并发不变量：{@link #clients}、{@link #boots}、{@link #retiring} 与 {@code closed} 只在 {@link #lock}
  * 内判定与迁移， 一切阻塞操作（进程启动、初始化、真实停止、等待完成结论）都在锁外执行。同一个 key 在任何时刻只属于三者之一：可用实例、启动中的实例、
- * 尚未证明收敛的退休；已死与已开始关闭的实例都先移入退休，因此旧实例的物理收敛一定先于同 key 的新实例。
+ * 尚未证明收敛的退休；已死与已开始关闭的实例都先移入退休，因此旧实例的物理收敛一定先于同 key 的新实例。启动以终结失败（致命 {@link Error}
+ * 或清理没能证明收敛）结束时，这次启动登记会保留到 close：同 key 因此失败关闭，既不会在旧资源可能还活着时重启，也不会把致命失败当成可重试。
  */
 final class LspClientPool implements AutoCloseable {
 
@@ -71,7 +72,8 @@ final class LspClientPool implements AutoCloseable {
   /**
    * 为文件对应的服务器借出一个客户端，并把它标记为有在途请求。
    *
-   * <p>同一 key 正在启动时共享同一次启动；正在退休时先在锁外等退休结束再重新判定，因此新实例只在旧实例停止之后才会启动。
+   * <p>同一 key 正在启动时共享同一次启动；正在退休时先在锁外等退休结束再重新判定，因此新实例只在旧实例停止之后才会启动；已经以终结失败结束的启动 会共享同一条失败，因此这个 key
+   * 失败关闭，直到 close。
    *
    * @throws IllegalStateException 未配置服务器、服务器未安装、配置无效或服务已关闭
    */
@@ -276,13 +278,14 @@ final class LspClientPool implements AutoCloseable {
   /**
    * 启动一个实例：初始化与发布都在锁外完成，只有状态判定与状态迁移进入锁。
    *
-   * <p>失败路径在锁外收敛本线程已经拥有的物理资源（实例或范围），结论作为启动的完成事实交给 {@link #close()}；收敛失败时保留启动登记， 同 key
-   * 因此不会在旧实例可能还活着时启动第二个实例。
+   * <p>失败路径在锁外收敛本线程已经拥有的物理资源（实例或范围），结论作为启动的完成事实交给 {@link #close()}。终结该 key 的
+   * 失败（致命启动失败、或清理没能证明收敛）保留启动登记：同 key 的新 lease 因此共享同一条失败，close 也报告同一条 Error；
+   * 普通失败只有在清理已经证明收敛时才注销登记，从而允许同 key 重试。
    */
   private void start(Boot boot, LspServerConfig server, Path root, String executable) {
     LspClient client = null;
     boolean published = false;
-    Throwable convergenceFailure = null;
+    Throwable terminalFailure = null;
     try {
       client = LspClient.launch(server, root, executable, dispatch, this::commandPermitted);
       synchronized (lock) {
@@ -300,17 +303,24 @@ final class LspClientPool implements AutoCloseable {
       boot.result.complete(client);
     } catch (Exception | Error error) {
       Throwable failure = error;
+      // 致命启动失败即使资源已经清理也不允许重试；清理没能证明收敛同样终结该 key。
+      boolean terminal = error instanceof Error;
       if (client != null && !published) {
         // 实例已经构造出来：由它完成真实停止，范围与自有 IO 任务都在这条路径里收敛。
-        convergenceFailure = stopClient(client);
-      } else if (LspClient.startupCleanupFailed(error)) {
-        convergenceFailure = error;
+        Throwable stopFailure = stopClient(client);
+        if (stopFailure != null) {
+          terminal = true;
+          failure = LspClient.mergeFailure(failure, stopFailure);
+        }
+      } else if (client == null && LspClient.startupCleanupFailed(error)) {
+        // 范围建立之前清理没能证明收敛：旧资源可能还活着，这个 key 不允许重新启动。
+        terminal = true;
       }
-      if (convergenceFailure != null) {
-        failure = LspClient.mergeFailure(failure, convergenceFailure);
-      }
-      synchronized (lock) {
-        if (convergenceFailure == null) {
+      if (terminal) {
+        // 终结事实留在启动登记里：新 lease 共享同一条失败，close 等这次启动并报告同一条 Error。
+        terminalFailure = failure;
+      } else {
+        synchronized (lock) {
           boots.remove(boot.key, boot);
         }
       }
@@ -319,7 +329,7 @@ final class LspClientPool implements AutoCloseable {
         throw fatal;
       }
     } finally {
-      boot.convergenceFailure = convergenceFailure;
+      boot.terminalFailure = terminalFailure;
       boot.settled.countDown();
     }
   }
@@ -467,7 +477,7 @@ final class LspClientPool implements AutoCloseable {
       Thread.currentThread().interrupt();
       return new ToolServiceFailureException("LSP service close was interrupted");
     }
-    return boot.convergenceFailure;
+    return boot.terminalFailure;
   }
 
   /** 调度器已停止时放弃重新排期：空闲回收由 {@link #close()} 的全量收尾兜底，不向调用方抛错。 */
@@ -553,6 +563,10 @@ final class LspClientPool implements AutoCloseable {
    * 一次进行中的启动：等待者共享同一个交付结果。
    *
    * <p>{@link #result} 是调用方看到的结果，{@link #settled} 是「这次启动真正结束、它拥有的物理资源都已经收敛」这一事实； 关闭先取消结果，再等事实。
+   *
+   * <p>{@link #terminalFailure} 是终结该 key 的失败：致命启动失败（{@link Error}），或清理没能证明收敛（ {@link
+   * LspClient#startupCleanupFailed(Throwable)}）。它不是 {@code null} 时这次启动登记会一直保留到 close， 因此同 key
+   * 不会在旧资源可能还活着、或已经致命失败时重新启动。
    */
   private final class Boot {
 
@@ -561,8 +575,8 @@ final class LspClientPool implements AutoCloseable {
 
     private volatile LspClient client;
 
-    /** 启动阶段的收敛结论：{@code null} 表示已经证明收敛。 */
-    private volatile Throwable convergenceFailure;
+    /** 终结该 key 的失败：{@code null} 表示这次启动失败（如果有）允许同 key 重试。 */
+    private volatile Throwable terminalFailure;
 
     private final CountDownLatch settled = new CountDownLatch(1);
 

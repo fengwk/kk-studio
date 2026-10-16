@@ -21,6 +21,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -152,10 +153,10 @@ class LspClientQuiescenceTest {
   }
 
   /**
-   * 意图：关闭先停止可用实例，再逐个等启动收敛；即使另一个 key 的启动最终以致命失败结束，可用实例也必须已经被收回。
+   * 意图：关闭先停止可用实例，再逐个等启动收敛；即使另一个 key 的启动最终以致命失败结束，可用实例也必须已经被收回，且关闭报告同一条终结 Error。
    *
    * <p>同步点是关闭线程真正阻塞在生产 {@code awaitBootCompletion} 上时，第一个 key 的进程已经消失：这既证明关闭没有跳过健康实例，
-   * 也证明它没有把「等启动失败」当成「完成」。
+   * 也证明它没有把「等启动失败」当成「完成」。致命启动失败对那个 key 是终结事实，因此关闭不能宣称成功。
    */
   @Test
   void closeStopsTheHealthyClientWhileAnotherKeyStartupFailsFatally() throws Exception {
@@ -192,8 +193,11 @@ class LspClientQuiescenceTest {
       assertFalse(closing.isDone(), "启动还没有给出收敛结论时 close 不得声称完成");
 
       gate.countDown();
-      closing.get(WAIT.toSeconds(), TimeUnit.SECONDS);
+      ExecutionException closeFailure =
+          assertThrows(
+              ExecutionException.class, () -> closing.get(WAIT.toSeconds(), TimeUnit.SECONDS));
 
+      assertSame(dispatch.fatal, closeFailure.getCause(), "关闭必须报告同一条终结 Error");
       assertSame(dispatch.fatal, awaitFailure(creator), "致命失败必须交给创建者并保持身份");
       FakeLspServers.awaitProcessGone(betaPid, Duration.ofSeconds(10));
       assertEquals(stateDirectories, countStateDirectories(), "关闭之后不得留下进程范围状态目录");

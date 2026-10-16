@@ -212,31 +212,44 @@ final class LspClient {
       // 收尾失败不得掩盖启动失败：第一 Error 保持身份；范围与已经提交的自有 IO 任务都必须收敛。
       Throwable cleanup = mergeFailure(closeScope(scope), closeOwnedIo(process, ioTasks));
       Throwable failure = mergeFailure(error, cleanup);
-      if (cleanup != null) {
-        // 尚未构造出客户端也必须交付清理结论；Error 不能包装，故用固定 suppressed 类型携带该事实。
-        failure.addSuppressed(new StartupCleanupFailure());
-      }
       if (failure instanceof Error fatal) {
+        // Error 不能包装，也不能靠附加元数据承载清理结论：池对启动中的致命失败一律按终结处理。
         throw fatal;
       }
-      throw (RuntimeException) failure;
-    }
-  }
-
-  static boolean startupCleanupFailed(Throwable failure) {
-    for (Throwable suppressed : failure.getSuppressed()) {
-      if (suppressed instanceof StartupCleanupFailure) {
-        return true;
+      if (cleanup == null) {
+        throw (RuntimeException) failure;
       }
+      // 清理没能证明收敛：用固定类型承载这一事实，绝不依赖 suppressed 元数据（抑制可以被禁用）。
+      throw new StartupCleanupFailure((RuntimeException) failure);
     }
-    return false;
   }
 
+  /**
+   * 这次启动失败是否留下「清理没能证明收敛」的结论。
+   *
+   * <p>两种形态都来自固定类型边界，而不是 suppressed 元数据：本类在启动收尾失败时抛出 {@link StartupCleanupFailure}； 范围建立之前的失败由
+   * {@code startScope} 把 {@link ProcessScope.StartupCleanupFailure} 包进 {@link
+   * ToolServiceFailureException} 的 cause。{@link Error} 一律保持身份，由池按终结事实处理，不在这里识别。
+   */
+  static boolean startupCleanupFailed(Throwable failure) {
+    if (failure instanceof StartupCleanupFailure) {
+      return true;
+    }
+    return failure instanceof ToolServiceFailureException
+        && failure.getCause() instanceof ProcessScope.StartupCleanupFailure;
+  }
+
+  /**
+   * 启动清理没能证明收敛的固定边界：普通启动失败被它包住，让池把「资源结论不可靠」当成终结该 key 的事实。
+   *
+   * <p>只承载固定文案，原始失败作为 cause；{@link Error} 绝不包装，因此这里只可能包住 {@link RuntimeException}。
+   */
   private static final class StartupCleanupFailure extends RuntimeException {
+
     private static final long serialVersionUID = 1L;
 
-    private StartupCleanupFailure() {
-      super("LSP client startup cleanup did not converge");
+    private StartupCleanupFailure(RuntimeException cause) {
+      super("LSP client startup cleanup did not converge", cause);
     }
   }
 
@@ -787,6 +800,10 @@ final class LspClient {
     } catch (ExecutionException error) {
       // 结果不可确认：只声明请求失败与操作名，不附带 cause message（远端/OS 原始文本可能内联凭据）。
       Throwable cause = error.getCause() == null ? error : error.getCause();
+      if (cause instanceof Error fatal) {
+        // 致命失败保持身份：把它包装成普通服务失败会降级成可重试的普通错误。
+        throw fatal;
+      }
       throw new ToolServiceFailureException("LSP request failed (" + description + ")", cause);
     } catch (CancellationException error) {
       throw new ToolServiceFailureException(
