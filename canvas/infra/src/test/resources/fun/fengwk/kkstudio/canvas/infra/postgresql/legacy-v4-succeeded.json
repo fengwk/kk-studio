@@ -1,0 +1,41 @@
+{
+  "version": 4,
+  "plan": {
+    "canvasId": "11111111-1111-4111-8111-111111111111",
+    "nodeId": "11111111-1111-4111-8111-111111111112",
+    "nodeName": "legacy-node",
+    "requestId": "11111111-1111-4111-8111-111111111113",
+    "functionName": "legacy.video",
+    "args": {},
+    "manifest": [
+      {
+        "sourceNodeId": "11111111-1111-4111-8111-111111111114",
+        "sourceIndex": 0,
+        "resourceId": "11111111-1111-4111-8111-111111111115",
+        "blobId": "11111111-1111-4111-8111-111111111116",
+        "kind": "IMAGE",
+        "name": "legacy-source.png",
+        "mediaType": "image/png",
+        "sizeBytes": 10485760,
+        "width": 3840,
+        "height": 2160,
+        "durationMs": null
+      }
+    ],
+    "outputs": [
+      {
+        "resourceId": "11111111-1111-4111-8111-111111111117",
+        "index": 0,
+        "kind": "VIDEO",
+        "name": "legacy-output.mp4"
+      }
+    ],
+    "submitState": "SUBMITTED"
+  },
+  "stage": "SUCCEEDED",
+  "adapterState": {
+    "jobId": "job-legacy-7f3",
+    "attempt": 2,
+    "seed": 9007199254740993
+  }
+}
