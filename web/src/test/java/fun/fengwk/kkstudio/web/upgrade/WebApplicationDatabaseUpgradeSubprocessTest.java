@@ -277,7 +277,7 @@ class WebApplicationDatabaseUpgradeSubprocessTest {
     return tables;
   }
 
-  /** 源库的可观察身份：冻结 profile 指纹，任何源端改动都会让它变化。 */
+  /** 冻结 profile 约束 schema 与基线历史身份；行值是否改变由逐表摘要单独验证。 */
   private static String sourceProfile(DataSource source) throws SQLException {
     try (Connection connection = source.getConnection()) {
       return LegacySchemaProfile.identify(LegacySchemaProfile.fingerprint(connection));
@@ -365,10 +365,20 @@ class WebApplicationDatabaseUpgradeSubprocessTest {
   /** 有界等待被强杀的进程退出；中断只被推迟到回收结束，绝不吞掉中断语义。 */
   private static void awaitShutdown(Process process) {
     boolean interrupted = Thread.interrupted();
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(CHILD_SHUTDOWN_SECONDS);
     try {
-      process.waitFor(CHILD_SHUTDOWN_SECONDS, TimeUnit.SECONDS);
-    } catch (InterruptedException error) {
-      interrupted = true;
+      while (process.isAlive()) {
+        long remaining = deadline - System.nanoTime();
+        if (remaining <= 0) {
+          assertFalse(process.isAlive(), "the offline CLI subprocess survived forced termination");
+          break;
+        }
+        try {
+          process.waitFor(remaining, TimeUnit.NANOSECONDS);
+        } catch (InterruptedException error) {
+          interrupted = true;
+        }
+      }
     } finally {
       if (interrupted) {
         Thread.currentThread().interrupt();
