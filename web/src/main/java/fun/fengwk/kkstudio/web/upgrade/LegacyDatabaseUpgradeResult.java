@@ -16,6 +16,7 @@ import java.util.TreeMap;
  * @param retiredClusterNodeRows 因旧 lease 已到期而未导入并记为退休的 {@code cluster_node} 行数
  * @param rewrittenCredentials 按当前 format 2 重封装的旧凭据行数
  * @param installedStaticCredentials 由显式静态材料新写入的静态密钥行数
+ * @param rewrittenSkillTokens 用目标主密钥重封装的旧 Skill Package 令牌行数；与 Plugin 凭据数量相互独立
  */
 record LegacyDatabaseUpgradeResult(
     String sourceProfile,
@@ -23,7 +24,8 @@ record LegacyDatabaseUpgradeResult(
     Map<String, Long> rowCounts,
     long retiredClusterNodeRows,
     long rewrittenCredentials,
-    long installedStaticCredentials) {
+    long installedStaticCredentials,
+    long rewrittenSkillTokens) {
 
   LegacyDatabaseUpgradeResult {
     Objects.requireNonNull(sourceProfile, "sourceProfile");
