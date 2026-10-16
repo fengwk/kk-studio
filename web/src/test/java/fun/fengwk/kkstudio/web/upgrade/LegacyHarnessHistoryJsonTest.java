@@ -60,7 +60,7 @@ class LegacyHarnessHistoryJsonTest {
       new ThreadCommandPayloadJsonCodec();
   private static final ProjectRunScopeJsonCodec RUN_SCOPE_CODEC = new ProjectRunScopeJsonCodec();
 
-  /** 冻结 DEV 源 writer（commit 8126841e1）离线产出的已知第一方 wire；见类尾 provenance 注释。 */
+  /** 冻结 DEV 源 writer（commit 8126841e1）离线产出的第一方 wire 夹具。 */
   private static final String LEGACY_GOAL_COMPLETE = "legacy-custom-goal-progress-complete.json";
 
   private static final String LEGACY_GOAL_BLOCKED = "legacy-custom-goal-progress-blocked.json";
@@ -309,6 +309,16 @@ class LegacyHarnessHistoryJsonTest {
     assertEquals(JsonValues.readTree(legacy).get("data"), JsonValues.readTree(payload.dataJson()));
   }
 
+  /** 验证与模型内部的 reason 规范化分离，导入不裁剪持久化文本。 */
+  @Test
+  void preservesGoalReasonWhitespace() {
+    ObjectNode entry = (ObjectNode) JsonValues.readTree(fixture(LEGACY_GOAL_COMPLETE));
+    ((ObjectNode) entry.get("data")).put("reason", "  completed with surrounding whitespace  ");
+    String legacy = JsonValues.write(entry);
+
+    assertEquals(legacy, LegacyHarnessHistoryJson.entryPayload(EntryType.CUSTOM, legacy));
+  }
+
   /** 未知 contributorId / customType / schemaVersion 组合在任何 data 之前就被拒绝。 */
   @Test
   void rejectsUnknownCustomProducersAndVersions() {
@@ -323,6 +333,13 @@ class LegacyHarnessHistoryJsonTest {
     assertUnsupportedCustomEntry(
         entry -> entry.put("schemaVersion", "1"),
         LegacyHarnessHistoryJson.ENTRY_CUSTOM_UNSUPPORTED);
+    assertUnsupportedCustomEntry(
+        entry -> entry.put("schemaVersion", 4294967297L),
+        LegacyHarnessHistoryJson.ENTRY_CUSTOM_UNSUPPORTED);
+    assertUnsupportedCustomEntry(
+        entry -> entry.putNull("schemaVersion"), LegacyHarnessHistoryJson.ENTRY_CUSTOM_UNSUPPORTED);
+    assertUnsupportedCustomEntry(
+        entry -> entry.remove("schemaVersion"), LegacyHarnessHistoryJson.ENTRY_CUSTOM_UNSUPPORTED);
     assertUnsupportedCustomEntry(
         entry -> entry.put("contributorId", 5), LegacyHarnessHistoryJson.ENTRY_CUSTOM_UNSUPPORTED);
   }
@@ -447,6 +464,13 @@ class LegacyHarnessHistoryJsonTest {
         LegacyHarnessHistoryJson.ENTRY_MALFORMED);
     assertEntryMessage(
         fixture(LEGACY_GOAL_COMPLETE) + " 0", LegacyHarnessHistoryJson.ENTRY_MALFORMED);
+
+    ObjectNode invalidMessage = (ObjectNode) JsonValues.readTree(fixture(LEGACY_CORE_MESSAGE));
+    ((ObjectNode) invalidMessage.get("message")).put("role", 5);
+    assertEntryMessage(
+        EntryType.CUSTOM_MESSAGE,
+        JsonValues.write(invalidMessage),
+        LegacyHarnessHistoryJson.ENTRY_TARGET_REJECTED);
   }
 
   // ---------- 已知 typed Thread command ----------
@@ -528,6 +552,12 @@ class LegacyHarnessHistoryJsonTest {
     ObjectNode extraState = (ObjectNode) JsonValues.readTree(fixture(LEGACY_STATE_COMMAND_GOAL));
     extraState.put("unexpected", true);
     assertCommand(JsonValues.write(extraState), LegacyHarnessHistoryJson.COMMAND_TARGET_REJECTED);
+
+    ObjectNode extraStateField =
+        (ObjectNode) JsonValues.readTree(fixture(LEGACY_STATE_COMMAND_GOAL));
+    ((ObjectNode) extraStateField.get("state")).putObject("binding");
+    assertCommand(
+        JsonValues.write(extraStateField), LegacyHarnessHistoryJson.COMMAND_TARGET_REJECTED);
 
     ObjectNode extraUser = (ObjectNode) JsonValues.readTree(fixture(LEGACY_USER_COMMAND));
     extraUser.put("unexpected", "sk-SECRET-DEADBEEF");
@@ -736,18 +766,4 @@ class LegacyHarnessHistoryJsonTest {
       throw new UncheckedIOException(error);
     }
   }
-
-  // Fixture provenance: the legacy-custom-* / legacy-command-* resources were generated offline by
-  // the frozen
-  // source writers of the read-only DEV worktree at commit 8126841e1 (identical in the MAIN
-  // worktree):
-  //   * goal.progress / project run data via a freshly compiled GoalProgressCodec and the source
-  //     ProjectRunScopeJsonCodec;
-  //   * the CUSTOM / CUSTOM_MESSAGE envelopes and the typed command payloads via the source
-  //     HistoryEntryPayloadJsonCodec / ThreadCommandPayloadJsonCodec driven by the source
-  //     CustomEntryPayload / CustomMessagePayload / SetContributorStateCommandPayload /
-  // UserMessageCommandPayload.
-  // They are stored re-indented (2 spaces) like the sibling fixtures; the exact source writer bytes
-  // and their
-  // sha256 are recorded in the slice NOTES. The current writer was never used to produce them.
 }
