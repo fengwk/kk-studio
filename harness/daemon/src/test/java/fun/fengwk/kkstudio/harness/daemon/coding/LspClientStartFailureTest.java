@@ -21,6 +21,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -57,7 +58,13 @@ class LspClientStartFailureTest {
   @AfterEach
   void tearDown() {
     try {
-      assertAll(pools.stream().map(pool -> pool::close));
+      for (LspClientPool pool : pools) {
+        try {
+          pool.close();
+        } catch (RuntimeException | Error ignored) {
+          // 用例可能已经断言过终结 Error 的结论（close 报告同一条启动失败）：teardown 只保证资源被清理。
+        }
+      }
     } finally {
       List<ExecutorService> executors = new ArrayList<>(dispatchers);
       executors.add(scheduler);
@@ -97,9 +104,9 @@ class LspClientStartFailureTest {
     }
   }
 
-  /** 意图：同 key 的多个等待者共享一次致命失败启动，都以原身份有界返回；登记清理后同一 key 可以重试成功。 */
+  /** 意图：同 key 的多个等待者共享一次致命失败启动，都以原身份有界返回；致命失败对同 key 是终结事实，因此失败关闭而不是重试。 */
   @Test
-  void sharedFatalBootDeliversToEveryWaiterAndCanRetry() throws Exception {
+  void sharedFatalBootDeliversToEveryWaiterAndStaysTerminalUntilClose() throws Exception {
     Path transcript = FakeLspServers.transcript(root);
     FatalDispatch dispatch = fatalDispatch(transcript, true);
     LspClientPool pool =
@@ -130,18 +137,16 @@ class LspClientStartFailureTest {
       assertEquals(1, startedProcesses(transcript), "并发失败启动只允许一次真实启动");
       FakeLspServers.awaitProcessGone(dispatch.observedPid, Duration.ofSeconds(10));
 
-      // 失败登记已在锁内清理：同一 key 重新启动，而不是永久等待一个已完成的启动。
-      LspClientPool.Client retried = pool.lease(file);
-      assertTrue(retried.client().isAlive(), "清理后重试必须启动出存活实例");
-      assertEquals(2, startedProcesses(transcript), "重试必须真的重新启动");
-      pool.release(retried);
+      // 致命启动失败即使资源已经清理也是终结事实：这个 key 必须继续失败关闭，而不是启动第二个实例。
+      assertSame(dispatch.fatal, leaseFailure(pool, file), "终结的 key 必须共享同一条失败");
+      assertEquals(1, startedProcesses(transcript), "终结的 key 不得重新启动");
     } finally {
       dispatch.release.countDown();
       reapOwnedProcess(dispatch.observedProcess);
     }
   }
 
-  /** 关闭与迟到的启动失败并发：关闭必须在有界等待里等到这次启动的收敛结论，不能提前声称完成；创建者仍然收到原身份的致命失败，且不留进程、状态目录与自有任务。 */
+  /** 关闭与迟到的启动失败并发：关闭必须在有界等待里等到这次启动的收敛结论，不能提前声称完成；创建者仍然收到原身份的致命失败，关闭也报告同一条 Error，且不留进程、状态目录与自有任务。 */
   @Test
   void closeWaitsForTheLateFatalStartupAndStillDeliversItToTheCreator() throws Exception {
     Path transcript = FakeLspServers.transcript(root);
@@ -163,8 +168,11 @@ class LspClientStartFailureTest {
       assertFalse(closing.isDone(), "启动还没有给出收敛结论时 close 不得声称完成");
 
       dispatch.release.countDown();
-      closing.get(WAIT.toSeconds(), TimeUnit.SECONDS);
+      ExecutionException closeFailure =
+          assertThrows(
+              ExecutionException.class, () -> closing.get(WAIT.toSeconds(), TimeUnit.SECONDS));
 
+      assertSame(dispatch.fatal, closeFailure.getCause(), "关闭必须报告同一条终结 Error");
       assertSame(dispatch.fatal, awaitFailure(creator), "迟到的致命失败必须交给创建者并保持身份");
       FakeLspServers.awaitProcessGone(dispatch.observedPid, Duration.ofSeconds(10));
       assertEquals(stateDirectories, countStateDirectories(), "启动失败与关闭都不允许留下状态目录");
@@ -293,7 +301,8 @@ class LspClientStartFailureTest {
   /**
    * 真实线程池：在首次启动派发上先确认真实服务器进程已经启动，再抛出固定的合成 {@link AssertionError}。
    *
-   * <p>{@code gated} 为真时抛错前等待测试释放闩锁，让测试线程先观察到等待者进入生产 {@code waitForBoot}；此后它恢复为普通执行器，供清理后的重试启动使用。
+   * <p>{@code gated} 为真时抛错前等待测试释放闩锁，让测试线程先观察到等待者进入生产 {@code
+   * waitForBoot}；此后它恢复为普通执行器（本用例不再触发第二次致命派发）。
    */
   private static final class FatalDispatch extends ThreadPoolExecutor {
 
