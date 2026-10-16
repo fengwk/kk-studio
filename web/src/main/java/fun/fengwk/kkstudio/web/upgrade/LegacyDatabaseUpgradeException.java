@@ -31,7 +31,7 @@ final class LegacyDatabaseUpgradeException extends RuntimeException {
 
   private final Stage stage;
 
-  private final boolean outcomeUncertain;
+  private boolean outcomeUncertain;
 
   LegacyDatabaseUpgradeException(Stage stage, String reason) {
     this(stage, reason, false);
@@ -50,5 +50,10 @@ final class LegacyDatabaseUpgradeException extends RuntimeException {
   /** 目标事务的结果是否无法确认：为 true 时不能声称「零写入」，调用方必须人工核验目标库的实际状态，且不得自动重试。 */
   boolean outcomeUncertain() {
     return outcomeUncertain;
+  }
+
+  /** 标记整体结果无法确认：一次真实回滚/提交的通信结果未知，或已确认提交之后仍发生失败时，失败必须要求人工核验目标状态。 */
+  void markOutcomeUncertain() {
+    outcomeUncertain = true;
   }
 }

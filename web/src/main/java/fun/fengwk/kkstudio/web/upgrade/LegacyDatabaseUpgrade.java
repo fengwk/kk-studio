@@ -120,23 +120,22 @@ final class LegacyDatabaseUpgrade {
     try {
       source = openIdleConnection(sourceDataSource);
       target = openIdleConnection(targetDataSource);
-    } catch (LegacyDatabaseUpgradeException | Error error) {
-      releaseConnections(error, target, source);
-      throw error;
-    } catch (RuntimeException error) {
-      releaseConnections(error, target, source);
-      throw new LegacyDatabaseUpgradeException(
-          LegacyDatabaseUpgradeException.Stage.CONNECTION, "cannot open the upgrade databases");
+    } catch (LegacyDatabaseUpgradeException | Error failure) {
+      throw convergedFailure(
+          releaseConnections(failure, target, source),
+          LegacyDatabaseUpgradeException.Stage.CONNECTION);
+    } catch (RuntimeException ignored) {
+      // 连接取得的未受检失败不回显底层信息；释放本身出现 Error 时以 identity 提升为主失败。
+      throw convergedFailure(
+          releaseConnections(
+              new LegacyDatabaseUpgradeException(
+                  LegacyDatabaseUpgradeException.Stage.CONNECTION,
+                  "cannot open the upgrade databases"),
+              target,
+              source),
+          LegacyDatabaseUpgradeException.Stage.CONNECTION);
     }
-    Throwable failure = null;
-    try {
-      return run(source, target, sourceKey, targetKey, staticSecretsByPlugin, dryRun, clock);
-    } catch (Throwable error) {
-      failure = error;
-      throw error;
-    } finally {
-      releaseConnections(failure, target, source);
-    }
+    return run(source, target, sourceKey, targetKey, staticSecretsByPlugin, dryRun, clock);
   }
 
   private static LegacyDatabaseUpgradeResult run(
@@ -147,27 +146,28 @@ final class LegacyDatabaseUpgrade {
       Map<String, Map<String, String>> staticSecretsByPlugin,
       boolean dryRun,
       Clock clock) {
-    beginSourceSnapshot(source);
-    String profile = LegacySchemaProfile.identify(LegacySchemaProfile.fingerprint(source));
-    LegacySchemaProfile.requireSourceHistory(source, profile);
-    LegacySourceGuard.requireDrained(source);
-    LegacySourceGuard.SourceSettings systemSetting = LegacySourceGuard.readSystemSetting(source);
-    SourceFacts facts =
-        new SourceFacts(
-            parseSettings(systemSetting.config()),
-            systemSetting,
-            profile,
-            LegacySourceGuard.retiredClusterNodeRows(source));
-
     SingleConnectionDataSource scoped = new SingleConnectionDataSource(target, true);
     PlatformTransactionManager transactionManager = new DataSourceTransactionManager(scoped);
     TransactionStatus transaction = null;
     OfflinePluginCatalog catalog = null;
     PluginCatalogBootstrap.PreparedInitial prepared = null;
+    LegacyDatabaseUpgradeResult result = null;
     Throwable failure = null;
+    boolean committed = false;
     try {
-      transaction = openTargetTransaction(transactionManager);
-      beginTargetSession(target);
+      beginSourceSnapshot(source);
+      String profile = LegacySchemaProfile.identify(LegacySchemaProfile.fingerprint(source));
+      LegacySchemaProfile.requireSourceHistory(source, profile);
+      LegacySourceGuard.requireDrained(source);
+      LegacySourceGuard.SourceSettings systemSetting = LegacySourceGuard.readSystemSetting(source);
+      SourceFacts facts =
+          new SourceFacts(
+              parseSettings(systemSetting.config()),
+              systemSetting,
+              profile,
+              LegacySourceGuard.retiredClusterNodeRows(source));
+
+      // 候选装配与 prepared 在任何目标写事务之外完成：两者都不打开连接、不写库，也不依赖目标 session。
       catalog = OfflinePluginCatalog.open(scoped, facts.settings().settings());
       StudioPluginRegistry registry = catalog.registry();
       LegacyStaticCredentials staticCredentials =
@@ -177,15 +177,17 @@ final class LegacyDatabaseUpgrade {
               catalog,
               pluginValues(facts.settings(), registry, staticCredentials),
               staticCredentials.configuredSecretFields(registry));
-      CatalogCandidate candidate =
-          new CatalogCandidate(scoped, catalog, registry, prepared, staticCredentials);
+
+      // 候选就绪之后才真正开始写事务，再在同一事务里做 session 门禁、写入、目录 CAS 与回读校验。
+      transaction = openTargetTransaction(transactionManager);
+      beginTargetSession(target);
       ConversionCounts counts =
           writeTarget(
               source,
               target,
               scoped,
               transactionManager,
-              candidate,
+              new CatalogCandidate(scoped, catalog, registry, prepared, staticCredentials),
               new CredentialKeys(sourceKey, targetKey),
               facts,
               clock);
@@ -195,22 +197,37 @@ final class LegacyDatabaseUpgrade {
       catalog = null;
       prepared = null;
       releaseBeforeCommit(pendingSnapshot, pendingCatalog);
-      commitOrRollback(transactionManager, transaction, dryRun);
+      // 事务所有权交给提交/回滚路径：通信失败绝不重试，也不在这里重复回滚。
+      TransactionStatus pendingTransaction = transaction;
       transaction = null;
-      afterTargetTransaction(target, !dryRun);
-      return new LegacyDatabaseUpgradeResult(
-          facts.profile(),
-          !dryRun,
-          counts.rowCounts(),
-          facts.retiredClusterNodeRows(),
-          counts.rewrittenCredentials(),
-          counts.installedStaticCredentials());
+      commitOrRollback(transactionManager, pendingTransaction, dryRun);
+      committed = !dryRun;
+      result =
+          new LegacyDatabaseUpgradeResult(
+              facts.profile(),
+              !dryRun,
+              counts.rowCounts(),
+              facts.retiredClusterNodeRows(),
+              counts.rewrittenCredentials(),
+              counts.installedStaticCredentials());
     } catch (Throwable error) {
       failure = error;
-      throw error;
     } finally {
-      releaseAfterFailure(failure, transactionManager, transaction, catalog, prepared);
+      failure =
+          release(
+              failure,
+              transactionManager,
+              transaction,
+              catalog,
+              prepared,
+              target,
+              source,
+              committed);
     }
+    if (failure != null) {
+      throw convergedFailure(failure, LegacyDatabaseUpgradeException.Stage.CONVERT);
+    }
+    return result;
   }
 
   /** 目标写事务之外仍需的一组源端事实；只是参数收敛。 */
@@ -420,25 +437,26 @@ final class LegacyDatabaseUpgrade {
     store.transaction(
         transaction -> {
           try (PreparedStatement statement =
-                  target.prepareStatement(
-                      "select id, head_entry_id from harness_thread order by id");
-              ResultSet rows = statement.executeQuery()) {
+              target.prepareStatement("select id, head_entry_id from harness_thread order by id")) {
+            // fetchSize 必须在 executeQuery 之前设定，否则查询已经执行，结果集不会被流式读取。
             statement.setFetchSize(LegacyTableCopy.FETCH_SIZE);
-            while (rows.next()) {
-              UUID threadId = UUID.fromString(rows.getString(1));
-              UUID headEntryId = UUID.fromString(rows.getString(2));
-              if (transaction.findThread(threadId).isEmpty()) {
-                throw new LegacyDatabaseUpgradeException(
-                    LegacyDatabaseUpgradeException.Stage.VERIFY,
-                    "a converted thread could not be read back from the current store");
-              }
-              transaction.loadCommandsByThread(threadId);
-              transaction.loadStopReceiptsByThread(threadId);
-              EntryPath path = transaction.loadEntryPath(headEntryId);
-              if (path.openTurnStart().isPresent()) {
-                throw new LegacyDatabaseUpgradeException(
-                    LegacyDatabaseUpgradeException.Stage.VERIFY,
-                    "a converted thread still has an open turn");
+            try (ResultSet rows = statement.executeQuery()) {
+              while (rows.next()) {
+                UUID threadId = UUID.fromString(rows.getString(1));
+                UUID headEntryId = UUID.fromString(rows.getString(2));
+                if (transaction.findThread(threadId).isEmpty()) {
+                  throw new LegacyDatabaseUpgradeException(
+                      LegacyDatabaseUpgradeException.Stage.VERIFY,
+                      "a converted thread could not be read back from the current store");
+                }
+                transaction.loadCommandsByThread(threadId);
+                transaction.loadStopReceiptsByThread(threadId);
+                EntryPath path = transaction.loadEntryPath(headEntryId);
+                if (path.openTurnStart().isPresent()) {
+                  throw new LegacyDatabaseUpgradeException(
+                      LegacyDatabaseUpgradeException.Stage.VERIFY,
+                      "a converted thread still has an open turn");
+                }
               }
             }
           } catch (SQLException error) {
@@ -731,26 +749,50 @@ final class LegacyDatabaseUpgrade {
     }
   }
 
-  /** 两个连接都必须是无遗留事务的普通连接：不接管调用方已经打开的写事务。 */
+  /** 两个连接都必须是无遗留事务的普通连接：不接管调用方已经打开的写事务，也不假设数据源一定会给出新连接。 */
   private static Connection openIdleConnection(DataSource dataSource) {
-    Connection connection = null;
+    Connection connection;
     try {
       connection = dataSource.getConnection();
-      if (!connection.getAutoCommit()) {
-        closeConnection(connection);
-        throw new LegacyDatabaseUpgradeException(
-            LegacyDatabaseUpgradeException.Stage.CONNECTION,
-            "the upgrade requires connections without an ambient transaction");
-      }
-      return connection;
     } catch (SQLException error) {
-      closeConnection(connection);
       throw new LegacyDatabaseUpgradeException(
           LegacyDatabaseUpgradeException.Stage.CONNECTION, "cannot open the upgrade databases");
-    } catch (RuntimeException error) {
-      closeConnection(connection);
-      throw error;
     }
+    boolean idle;
+    try {
+      idle = connection.getAutoCommit();
+    } catch (SQLException | RuntimeException | Error error) {
+      // 探测失败时刚取得、尚未交给外层的句柄仍需归还；Error 以 identity 上抛，其余固定去敏。
+      throw rejectHandle(connection, openFailure(error));
+    }
+    if (!idle) {
+      throw rejectHandle(
+          connection,
+          new LegacyDatabaseUpgradeException(
+              LegacyDatabaseUpgradeException.Stage.CONNECTION,
+              "the upgrade requires connections without an ambient transaction"));
+    }
+    return connection;
+  }
+
+  /** 连接取得阶段的固定失败：Error 保持 identity，其余（SQL 或未受检）固定为连接阶段失败。 */
+  private static Throwable openFailure(Throwable failure) {
+    if (failure instanceof Error) {
+      return failure;
+    }
+    return new LegacyDatabaseUpgradeException(
+        LegacyDatabaseUpgradeException.Stage.CONNECTION, "cannot open the upgrade databases");
+  }
+
+  /** 归还被拒绝的连接句柄：只关闭本次取得的句柄，绝不接管或回滚它自己带着的事务。 */
+  private static RuntimeException rejectHandle(Connection connection, Throwable rejection) {
+    return convergedFailure(
+        mergeRelease(
+            rejection,
+            closeResource(connection),
+            LegacyDatabaseUpgradeException.Stage.CONNECTION,
+            "the rejected connection handle could not be returned"),
+        LegacyDatabaseUpgradeException.Stage.CONNECTION);
   }
 
   /** 源连接只读一致快照：固定 search_path / DateStyle / UTC 并关闭 row security，再验证 PG17、UTF-8 与 origin 写角色。 */
@@ -842,36 +884,27 @@ final class LegacyDatabaseUpgrade {
     }
   }
 
-  /** 提交前释放候选快照与其离线装配：只有它们真的释放成功才允许提交，否则走真实回滚。Error 保持 identity 向外传播，另一项资源仍然会被释放。 */
+  /** 提交前释放候选快照与其离线装配：两项都尝试，只有真的释放成功才允许提交；其余失败在提交前走真实回滚。 */
   private static void releaseBeforeCommit(
       PluginCatalogSnapshot snapshot, OfflinePluginCatalog catalog) {
-    Throwable failure = null;
-    try {
-      snapshot.close();
-    } catch (Throwable error) {
-      failure = error;
+    Throwable failure =
+        mergeRelease(
+            null,
+            closeResource(snapshot),
+            LegacyDatabaseUpgradeException.Stage.CONVERT,
+            "the assembled target candidate could not be released before commit");
+    failure =
+        mergeRelease(
+            failure,
+            closeResource(catalog),
+            LegacyDatabaseUpgradeException.Stage.CONVERT,
+            "the assembled target candidate could not be released before commit");
+    if (failure != null) {
+      throw convergedFailure(failure, LegacyDatabaseUpgradeException.Stage.CONVERT);
     }
-    try {
-      catalog.close();
-    } catch (Throwable error) {
-      if (failure == null) {
-        failure = error;
-      } else if (failure != error) {
-        failure.addSuppressed(error);
-      }
-    }
-    if (failure == null) {
-      return;
-    }
-    if (failure instanceof Error error) {
-      throw error;
-    }
-    throw new LegacyDatabaseUpgradeException(
-        LegacyDatabaseUpgradeException.Stage.CONVERT,
-        "the assembled target candidate could not be released before commit");
   }
 
-  /** dry run 与真实提交的唯一差异：dry run 走同一条写入路径后回滚。通信失败一律标为结果未知。 */
+  /** dry run 与真实提交的唯一差异：dry run 走同一条写入路径后回滚。通信失败一律标为结果未知，绝不重试。 */
   private static void commitOrRollback(
       PlatformTransactionManager manager, TransactionStatus transaction, boolean dryRun) {
     try {
@@ -888,83 +921,108 @@ final class LegacyDatabaseUpgrade {
     }
   }
 
-  /** 提交后显式关闭目标物理连接；关闭失败在真正提交时标记为结果需核验。 */
-  private static void afterTargetTransaction(Connection target, boolean committed) {
-    Throwable failure = closeConnection(target);
-    if (failure == null) {
-      return;
-    }
-    if (failure instanceof Error error) {
-      throw error;
-    }
-    throw new LegacyDatabaseUpgradeException(
-        LegacyDatabaseUpgradeException.Stage.COMMIT,
-        "the target connection could not be closed after the transaction",
-        committed);
-  }
-
-  /** 失败路径：真实回滚未结束的事务，并释放尚未交出的候选与离线装配；一个释放失败不跳过其它资源。 */
-  private static void releaseAfterFailure(
+  /**
+   * 失败与成功路径共用的唯一收敛点：先回滚尚未交出的事务（已交给提交/回滚路径或已结束的事务绝不重复处理，通信失败也不重试），再释放候选，最后关闭两个连接。
+   *
+   * <p>任一释放失败都不跳过其余资源；非 Error 一律固定去敏（原始 SQL/message/cause 绝不进入失败链），Error 保持 identity 并提升为主失败。
+   *
+   * <p>{@code committed} 是「一次真实提交已被证明」的事实：此后任何失败都必须提示结果需核验，绝不暗示零写入；真实回滚失败也无法排除目标已被写入。
+   *
+   * @return 应向外传播的失败；没有失败时为 null
+   */
+  private static Throwable release(
       Throwable primary,
       PlatformTransactionManager manager,
       TransactionStatus transaction,
       OfflinePluginCatalog catalog,
-      PluginCatalogBootstrap.PreparedInitial prepared) {
-    if (primary == null) {
-      return;
-    }
-    if (transaction != null) {
+      PluginCatalogBootstrap.PreparedInitial prepared,
+      Connection target,
+      Connection source,
+      boolean committed) {
+    Throwable failure =
+        primary == null ? null : sanitized(primary, LegacyDatabaseUpgradeException.Stage.CONVERT);
+    boolean uncertain = committed;
+    if (transaction != null && !transaction.isCompleted()) {
       try {
         manager.rollback(transaction);
       } catch (RuntimeException | Error rollbackFailure) {
-        if (rollbackFailure != primary) {
-          primary.addSuppressed(rollbackFailure);
-        }
+        failure =
+            mergeRelease(
+                failure,
+                rollbackFailure,
+                LegacyDatabaseUpgradeException.Stage.COMMIT,
+                "the target transaction rollback could not be confirmed");
+        uncertain = true;
       }
     }
     if (prepared != null) {
-      try {
-        prepared.snapshot().close();
-      } catch (Throwable closeFailure) {
-        if (closeFailure != primary) {
-          primary.addSuppressed(closeFailure);
-        }
-      }
+      failure =
+          mergeRelease(
+              failure,
+              closeResource(prepared.snapshot()),
+              LegacyDatabaseUpgradeException.Stage.CONVERT,
+              "the assembled target candidate could not be released");
     }
     if (catalog != null) {
-      try {
-        catalog.close();
-      } catch (Throwable closeFailure) {
-        if (closeFailure != primary) {
-          primary.addSuppressed(closeFailure);
-        }
-      }
+      failure =
+          mergeRelease(
+              failure,
+              closeResource(catalog),
+              LegacyDatabaseUpgradeException.Stage.CONVERT,
+              "the assembled target candidate could not be released");
     }
+    LegacyDatabaseUpgradeException.Stage closeStage =
+        committed
+            ? LegacyDatabaseUpgradeException.Stage.COMMIT
+            : LegacyDatabaseUpgradeException.Stage.CONNECTION;
+    failure =
+        mergeRelease(
+            failure,
+            closeConnection(target),
+            closeStage,
+            "an upgrade database connection could not be released");
+    failure =
+        mergeRelease(
+            failure,
+            closeConnection(source),
+            closeStage,
+            "an upgrade database connection could not be released");
+    if (failure == null) {
+      return null;
+    }
+    if (!uncertain) {
+      return failure;
+    }
+    if (failure instanceof LegacyDatabaseUpgradeException upgradeFailure) {
+      upgradeFailure.markOutcomeUncertain();
+      return upgradeFailure;
+    }
+    // Error 保持 identity 不包装：结果未知只能以固定安全提示挂在压制链上。
+    failure.addSuppressed(
+        new LegacyDatabaseUpgradeException(
+            LegacyDatabaseUpgradeException.Stage.COMMIT,
+            "the target transaction result could not be confirmed",
+            true));
+    return failure;
   }
 
-  /** 释放两个连接：一个释放失败不跳过另一个；已在传播的失败只被挂上 suppressed，成功路径上的释放失败必须可见。 */
-  private static void releaseConnections(Throwable primary, Connection target, Connection source) {
-    Throwable targetFailure = closeConnection(target);
-    Throwable sourceFailure = closeConnection(source);
-    if (primary != null) {
-      suppress(primary, targetFailure);
-      suppress(primary, sourceFailure);
-      return;
-    }
-    Throwable failure = targetFailure != null ? targetFailure : sourceFailure;
-    if (failure == null) {
-      return;
-    }
-    suppress(failure, failure == targetFailure ? sourceFailure : targetFailure);
-    if (failure instanceof Error error) {
-      throw error;
-    }
-    throw new LegacyDatabaseUpgradeException(
+  /** 释放两个连接（连接取得阶段的失败路径）：两个都尝试；非 Error 只以固定安全提示并入，Error 提升为主失败。 */
+  private static Throwable releaseConnections(
+      Throwable primary, Connection target, Connection source) {
+    Throwable failure =
+        mergeRelease(
+            primary,
+            closeConnection(target),
+            LegacyDatabaseUpgradeException.Stage.CONNECTION,
+            "an upgrade database connection could not be released");
+    return mergeRelease(
+        failure,
+        closeConnection(source),
         LegacyDatabaseUpgradeException.Stage.CONNECTION,
         "an upgrade database connection could not be released");
   }
 
-  /** 关闭一个连接（必要时先回滚）；返回真实失败而不是吞掉它。 */
+  /** 关闭一个连接（必要时先回滚）；任何 Throwable 之后仍尝试 close，返回真实失败（含 Error）而不是吞掉它。 */
   private static Throwable closeConnection(Connection connection) {
     if (connection == null) {
       return null;
@@ -974,24 +1032,84 @@ final class LegacyDatabaseUpgrade {
       if (!connection.isClosed() && !connection.getAutoCommit()) {
         connection.rollback();
       }
-    } catch (SQLException | RuntimeException error) {
+    } catch (Throwable error) {
       failure = error;
     }
     try {
       connection.close();
-    } catch (SQLException | RuntimeException error) {
-      if (failure == null) {
-        failure = error;
-      } else if (failure != error) {
-        failure.addSuppressed(error);
-      }
+    } catch (Throwable error) {
+      failure =
+          mergeRelease(
+              failure,
+              error,
+              LegacyDatabaseUpgradeException.Stage.CONNECTION,
+              "an upgrade database connection could not be released");
     }
     return failure;
   }
 
-  private static void suppress(Throwable primary, Throwable suppressed) {
-    if (suppressed != null && suppressed != primary) {
-      primary.addSuppressed(suppressed);
+  /** 关闭一个候选资源；返回真实失败（含 Error），绝不吞掉。 */
+  private static Throwable closeResource(AutoCloseable resource) {
+    if (resource == null) {
+      return null;
     }
+    try {
+      resource.close();
+    } catch (Throwable failure) {
+      return failure;
+    }
+    return null;
+  }
+
+  /**
+   * 合并一次释放失败：Error 保持 identity 并提升为返回的主失败（原失败去敏后进入压制链，或原失败本身是首个 Error 时保留其 identity）， 其余释放失败只以固定
+   * stage 与原因并入。原始 SQL/message/cause 绝不进入失败链；primary 为空时以该安全失败作为主失败。
+   */
+  private static Throwable mergeRelease(
+      Throwable primary,
+      Throwable release,
+      LegacyDatabaseUpgradeException.Stage stage,
+      String reason) {
+    if (release == null) {
+      return primary;
+    }
+    if (release instanceof Error releaseError) {
+      if (primary == null) {
+        return releaseError;
+      }
+      if (primary instanceof Error primaryError) {
+        if (primaryError != releaseError) {
+          primaryError.addSuppressed(releaseError);
+        }
+        return primaryError;
+      }
+      releaseError.addSuppressed(sanitized(primary, stage));
+      return releaseError;
+    }
+    Throwable safePrimary = primary == null ? null : sanitized(primary, stage);
+    if (safePrimary == null) {
+      return new LegacyDatabaseUpgradeException(stage, reason);
+    }
+    safePrimary.addSuppressed(new LegacyDatabaseUpgradeException(stage, reason));
+    return safePrimary;
+  }
+
+  /** 固定去敏：Error 与自身失败类型保持 identity，其余原始 SQL/未受检失败替换为只带固定原因的安全失败。 */
+  private static Throwable sanitized(
+      Throwable failure, LegacyDatabaseUpgradeException.Stage stage) {
+    if (failure instanceof Error || failure instanceof LegacyDatabaseUpgradeException) {
+      return failure;
+    }
+    return new LegacyDatabaseUpgradeException(
+        stage, "the upgrade failed for an unclassified reason");
+  }
+
+  /** 交给调用点抛出：Error 保持 identity，其余统一为固定的安全失败类型（返回值总被调用点 throw）。 */
+  private static RuntimeException convergedFailure(
+      Throwable failure, LegacyDatabaseUpgradeException.Stage stage) {
+    if (failure instanceof Error error) {
+      throw error;
+    }
+    return (LegacyDatabaseUpgradeException) sanitized(failure, stage);
   }
 }
