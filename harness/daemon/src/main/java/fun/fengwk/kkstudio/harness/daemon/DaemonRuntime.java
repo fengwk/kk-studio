@@ -498,7 +498,7 @@ public final class DaemonRuntime implements AutoCloseable {
     } catch (InterruptedException error) {
       failures.record(phase, error);
       return true;
-    } catch (RuntimeException error) {
+    } catch (Throwable error) {
       failures.record(phase, error);
       return false;
     }

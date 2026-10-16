@@ -4,12 +4,9 @@ import java.lang.System.Logger;
 import java.lang.System.Logger.Level;
 
 /**
- * 关停与构造失败收尾的统一聚合：每次失败按固定阶段输出安全日志，并按同一优先级合入唯一的聚合结果。
+ * 关停及构造失败的收尾聚合。首个 Error 保持主因，后到 Error 优先于普通异常，其余失败以 suppressed 保留并避免 self-suppression。
  *
- * <p>优先级规则：保留首个 {@link Error} 的对象身份；后到的 {@link Error} 提升到之前的普通异常之上；其余失败作为 {@code suppressed}
- * 附加。同一个失败对象只记录一次，避免 self-suppression。调用方据此在全部清理完成后抛出聚合结果： Error 主因保持身份向上传播，普通异常主因携带全部其它失败。
- *
- * <p>日志只输出固定阶段与异常类名，绝不输出 message、Throwable、堆栈、路径或载荷：堆栈可能携带原始取值。
+ * <p>日志仅输出固定阶段与异常类名，不附原始异常或正文。
  */
 final class DaemonShutdownFailures {
 
@@ -18,17 +15,11 @@ final class DaemonShutdownFailures {
   /** 关停失败时对外发布的固定安全原因：不含阶段、异常类型、message 或路径。 */
   static final String SHUTDOWN_FAILURE_REASON = "daemon shutdown failed";
 
-  /** checked 失败不能直接抛出时的固定安全包装消息。 */
-  private static final String UNCHECKED_MESSAGE = "daemon shutdown failed";
-
   /** 聚合结果；首个失败决定其初始类型，后续按优先级合入。 */
   private Throwable primary;
 
   /** 记录一次收尾失败：先输出安全 WARNING，再按统一优先级合入聚合。 */
   void record(String phase, Throwable failure) {
-    if (failure == null) {
-      return;
-    }
     LOG.log(Level.WARNING, "daemon " + phase + " failed: " + failure.getClass().getSimpleName());
     merge(failure);
   }
@@ -59,7 +50,7 @@ final class DaemonShutdownFailures {
     if (primary instanceof RuntimeException runtime) {
       return runtime;
     }
-    return new IllegalStateException(UNCHECKED_MESSAGE, primary);
+    return new IllegalStateException(SHUTDOWN_FAILURE_REASON, primary);
   }
 
   private void merge(Throwable failure) {
