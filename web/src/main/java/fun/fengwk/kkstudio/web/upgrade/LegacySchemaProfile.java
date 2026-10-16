@@ -220,7 +220,6 @@ final class LegacySchemaProfile {
       where n.nspname = 'public'
         and t.typtype in ('e', 'd', 'c', 'r', 'm')
         and (t.typrelid = 0 or c.relkind = 'c')
-        and t.typname not like '\\_%%'
       order by t.typname
       """;
 
