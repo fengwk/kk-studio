@@ -48,7 +48,8 @@ class SkillPromptPathResolverTest {
               "dev",
               "/home/dev",
               "Linux environment.",
-              "/tmp/kk-studio"));
+              "/tmp/kk-studio",
+              "amd64"));
 
   private EnvironmentRegistry registry;
   private SkillPromptPathResolver resolver;

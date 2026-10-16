@@ -97,7 +97,8 @@ class EnvironmentSkillSyncOrchestratorTest {
               "dev",
               "/home/dev",
               "Linux environment.",
-              "/tmp/kk-studio"));
+              "/tmp/kk-studio",
+              "amd64"));
 
   private final Map<String, SkillPackage> catalog = new LinkedHashMap<>();
   private final List<EnvironmentSkillState> rowSkillState = new ArrayList<>();
@@ -302,7 +303,8 @@ class EnvironmentSkillSyncOrchestratorTest {
                 "dev",
                 "C:\\Users\\dev",
                 "Windows environment.",
-                "/tmp/kk-studio")));
+                "/tmp/kk-studio",
+                "amd64")));
     transport.responder =
         request ->
             EnvironmentCapabilityResult.json(
