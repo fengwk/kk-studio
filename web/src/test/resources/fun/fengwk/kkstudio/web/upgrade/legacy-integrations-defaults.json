@@ -1,0 +1,45 @@
+{
+  "comfyui": {
+    "enabled": false,
+    "baseUrl": null,
+    "connectTimeoutMillis": 10000,
+    "readTimeoutMillis": 30000,
+    "websocketTimeoutMillis": 1800000,
+    "maxInputFileBytes": 52428800
+  },
+  "openCliHub": {
+    "enabled": false,
+    "baseUrl": null,
+    "connectTimeoutMillis": 5000,
+    "requestTimeoutMillis": 120000,
+    "longPollTimeoutMillis": 130000,
+    "streamBufferBytes": 16384,
+    "maxJsonResponseBytes": 524288,
+    "maxErrorResponseBytes": 4096,
+    "maxOutputChars": 65535
+  },
+  "seedance": {
+    "enabled": false,
+    "workspaceId": null,
+    "retry": 0,
+    "hubExecutionTimeoutMillis": 600000,
+    "statusPollIntervalMillis": 30000,
+    "maxWaitMillis": 1800000
+  },
+  "gptImage2": {
+    "paidEnabled": false,
+    "askTimeoutSeconds": 900,
+    "hubExecutionTimeoutMillis": 960000,
+    "maxWaitMillis": 1200000
+  },
+  "minimaxH3": {
+    "enabled": false,
+    "promptAgentName": null,
+    "promptMaxWaitMillis": 600000,
+    "comfyBaseUrl": null,
+    "comfyConnectTimeoutMillis": 10000,
+    "comfyRequestTimeoutMillis": 30000,
+    "comfyPollIntervalMillis": 2000,
+    "comfyMaxWaitMillis": 1800000
+  }
+}
