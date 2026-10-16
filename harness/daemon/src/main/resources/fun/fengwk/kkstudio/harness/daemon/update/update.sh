@@ -6,8 +6,12 @@
 # It replaces only the binary; configuration, token and data are untouched and it never
 # rolls back automatically. It performs no elevation and does not become a resident engine.
 #
-# It fails closed: if the managed service definition is missing, not owned by the
-# installer, or cannot be stopped, it reports failure and leaves the old binary untouched.
+# It fails closed: the handoff metadata must name this operation and the private permit
+# (whose content is this operation) must appear before anything is stopped, and only then is
+# the handoff state required to be ACCEPTED.
+# The job necessarily starts while the daemon still persists PREPARING, so an early PREPARING
+# is never rejected as a mismatch; a missing/mismatched handoff or a permit that never
+# arrives leaves the old binary untouched with zero stop, backup or replace.
 #
 # Failure handling is uniform: `fail_closed` is the single failure entry point, every
 # step that touches the filesystem or the service goes through it (including I/O errors
@@ -24,6 +28,9 @@ PLIST_MARKER='<!-- Managed by scripts/daemon/install.sh -->'
 SERVICE_NAME=kk-studio-daemon.service
 LAUNCHD_LABEL=fun.fengwk.kkstudio.environment-daemon
 STOP_WAIT_SECONDS=30
+# The permit budget only bounds how long an already accepted update may wait; it is not a
+# timing guess. The daemon releases the permit after the PREPARED receipt is frozen.
+PERMIT_WAIT_SECONDS=${KK_STUDIO_UPDATE_PERMIT_WAIT_SECONDS:-120}
 
 if [ "$#" -ne 2 ]; then
   echo "usage: $0 <staged-jar> <installed-jar>" >&2
@@ -33,7 +40,8 @@ staged_jar=$1
 installed_jar=$2
 update_dir=$(dirname "$staged_jar")
 operation_id=$(basename "$update_dir")
-backup_dir="$update_dir/backup"
+handoff_file="$update_dir/handoff.json"
+permit_file="$update_dir/permit"
 result_path="$update_dir/update-result.json"
 result_written=0
 
@@ -70,8 +78,32 @@ trap cleanup EXIT
 [ -f "$staged_jar" ] || fail_closed "staged artifact is missing"
 [ -f "$installed_jar" ] || fail_closed "installed artifact is missing"
 
-# Give the old daemon a moment to flush its PREPARED receipt before the service is stopped.
-sleep "${KK_STUDIO_UPDATE_GRACE_SECONDS:-3}" || fail_closed "could not wait for the update grace period"
+# Handoff metadata must exist, be a regular non-symlink file and name this operation.
+# The state is deliberately NOT required yet: the independent job is started while the daemon
+# is still persisting PREPARING, so an early PREPARING is normal and must not be rejected.
+# Never source or eval the metadata; only bounded, de-sensitised text checks are used.
+[ -f "$handoff_file" ] && [ ! -L "$handoff_file" ] || fail_closed "handoff metadata is missing"
+grep -qE "\"operationId\"[[:space:]]*:[[:space:]]*\"$operation_id\"" "$handoff_file" ||
+  fail_closed "handoff metadata does not match the operation"
+
+# The binary is only replaced after the old daemon releases the permit for this operation.
+# A missing permit is never guessed around: the job fails closed with zero stop/backup/replace.
+waited=0
+while [ ! -e "$permit_file" ]; do
+  waited=$((waited + 1))
+  [ "$waited" -lt "$PERMIT_WAIT_SECONDS" ] ||
+    fail_closed "the daemon did not release the update permit in time"
+  sleep 1
+done
+[ -f "$permit_file" ] && [ ! -L "$permit_file" ] ||
+  fail_closed "the update permit is not a regular file"
+[ "$(cat "$permit_file")" = "$operation_id" ] ||
+  fail_closed "the update permit does not match the operation"
+
+# The permit is released only after ACCEPTED is durably frozen, so by now the state must be
+# ACCEPTED. Anything else means the acceptance was never recorded and nothing may be replaced.
+grep -qE "\"state\"[[:space:]]*:[[:space:]]*\"ACCEPTED\"" "$handoff_file" ||
+  fail_closed "handoff metadata is not accepted"
 
 os=$(uname -s)
 if [ "$os" = "Darwin" ]; then
@@ -101,13 +133,16 @@ else
   done
 fi
 
-mkdir -p "$backup_dir" || fail_closed "could not create the backup directory"
-cp -p "$installed_jar" "$backup_dir/$(basename "$installed_jar")" ||
+# A unique backup directory is created for every applied update and a previous backup is never
+# overwritten. The installed artifact is copied (not moved) so a later replacement failure still
+# leaves the old binary in place and the backup intact. There is no automatic rollback: on
+# failure the service stays stopped and recovery is manual.
+backup_dir=$(mktemp -d "$update_dir/backup.XXXXXXXX") ||
+  fail_closed "could not create the backup directory"
+cp -p "$installed_jar" "$backup_dir/previous" ||
   fail_closed "could not back up the installed artifact"
 
-if ! mv -f "$staged_jar" "$installed_jar"; then
-  fail_closed "could not replace the installed artifact"
-fi
+mv "$staged_jar" "$installed_jar" || fail_closed "could not replace the installed artifact"
 
 if [ "$os" = "Darwin" ]; then
   launchctl bootstrap "$domain" "$plist" || fail_closed "could not restart the managed launch agent"
