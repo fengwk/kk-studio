@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.daemon.coding;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -22,7 +23,10 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Stream;
 
 /**
  * 执行范围的跨平台真实进程验收：用 {@link ProcessScopeFixtureMain} 造出真实的父子/孙进程层级，并用原生 PID 断言收敛。
@@ -212,6 +216,108 @@ class ProcessScopeCrossPlatformTest {
     assertTrue(
         failure.getMessage().contains("cancelled before the user command"), failure.getMessage());
     assertFalse(Files.exists(rootPid), "许可之前取消不得让命令产生任何副作用");
+  }
+
+  /**
+   * 许可阶段抛出致命 {@link Error}：范围已经建立但命令从未运行，失败必须保持原身份，helper 与私有状态目录都必须被收敛。
+   *
+   * <p>「许可抛出」与「许可返回 false」是同一条安全性约定的两个形态：许可之前失败永远等价于「用户命令没有产生任何副作用」。 这里额外固定两点：致命失败不能被普通清理结论取代，也不能把
+   * helper 留在系统里。
+   *
+   * <p>helper 用「许可阶段（范围已建立、命令尚未放行）时本 JVM 直接子进程的差集」只读地定位：它本身就是被 {@code ProcessBuilder} 直接拉起的子进程，没有
+   * shell 中转。许可阶段由闸门同步，因此捕获到的就是本次调用真实存活的那个 helper，而不是靠枚举 PID 去猜收敛； 状态目录同样按调用前后计数。
+   */
+  @Test
+  void fatalStartGateFailureKeepsItsIdentityAndReapsTheHelper() throws Exception {
+    Path rootPid = workdir.resolve("root.pid");
+    AssertionError fatal = new AssertionError("synthetic start gate failure");
+    List<ProcessHandle> childrenBefore = currentChildren();
+    long stateDirectories = countStateDirectories();
+    CountDownLatch permitted = new CountDownLatch(1);
+    CountDownLatch release = new CountDownLatch(1);
+    AtomicReference<Throwable> thrown = new AtomicReference<>();
+    Thread starter =
+        new Thread(
+            () -> {
+              try {
+                ProcessScope.start(
+                    workdir,
+                    fixture("hold", rootPid),
+                    () -> {
+                      // 范围已经建立、命令尚未放行：此刻 helper 一定还活着，测试因此可以确定性地捕获它。
+                      permitted.countDown();
+                      awaitRelease(release);
+                      throw fatal;
+                    });
+                thrown.set(null);
+              } catch (Throwable error) {
+                thrown.set(error);
+              }
+            },
+            "process-scope-gate-error");
+    ProcessHandle helper = null;
+    try {
+      starter.start();
+      assertTrue(permitted.await(PID_BUDGET.toSeconds(), TimeUnit.SECONDS), "启动必须进入许可阶段");
+      List<ProcessHandle> added = newChildren(childrenBefore);
+      assertEquals(1, added.size(), "许可阶段必须能唯一定位本次调用的 helper");
+      helper = added.getFirst();
+      assertTrue(helper.isAlive(), "许可阶段 helper 必须真实存活");
+
+      release.countDown();
+      starter.join(GONE_BUDGET.toMillis());
+      assertFalse(starter.isAlive(), "启动线程必须在有界时间内结束");
+
+      assertSame(fatal, thrown.get(), "致命失败必须保持原身份");
+      assertFalse(Files.exists(rootPid), "许可之前失败不得让命令产生任何副作用");
+      assertFalse(helper.isAlive(), "启动失败返回时 helper 必须已经被收敛");
+      assertEquals(stateDirectories, countStateDirectories(), "启动失败收尾不得留下状态目录");
+    } finally {
+      // 放行后先等生产收尾；兜底只使用捕获的进程身份，不重新按 PID 或子进程差集选择终止对象。
+      release.countDown();
+      starter.join(GONE_BUDGET.toMillis());
+      if (helper != null && helper.isAlive()) {
+        helper.destroyForcibly();
+        helper.onExit().get(GONE_BUDGET.toMillis(), TimeUnit.MILLISECONDS);
+      }
+      assertFalse(starter.isAlive(), "启动线程必须结束");
+    }
+  }
+
+  /** 闸门上的有界等待：被中断是测试自身的问题，不能变成「静默继续」。 */
+  private static void awaitRelease(CountDownLatch release) {
+    try {
+      if (!release.await(PID_BUDGET.toMillis(), TimeUnit.MILLISECONDS)) {
+        throw new IllegalStateException("timed out waiting for the gate release");
+      }
+    } catch (InterruptedException error) {
+      Thread.currentThread().interrupt();
+      throw new IllegalStateException("interrupted while waiting for the gate release", error);
+    }
+  }
+
+  /** 当前 JVM 的直接子进程身份快照：只读定位 helper，并保留捕获时的身份。 */
+  private static List<ProcessHandle> currentChildren() {
+    try (Stream<ProcessHandle> children = ProcessHandle.current().children()) {
+      return children.toList();
+    }
+  }
+
+  /** 调用前后直接子进程的差集：本次调用新起的进程（helper 由 {@code ProcessBuilder} 直接拉起，没有 shell 中转）。 */
+  private static List<ProcessHandle> newChildren(List<ProcessHandle> before) {
+    List<ProcessHandle> added = new ArrayList<>(currentChildren());
+    added.removeAll(before);
+    return added;
+  }
+
+  /** 统计临时目录里的进程范围状态目录数量：启动失败收尾不允许留下残留。 */
+  private static long countStateDirectories() throws IOException {
+    try (Stream<Path> entries = Files.list(Path.of(System.getProperty("java.io.tmpdir")))) {
+      return entries
+          .filter(Files::isDirectory)
+          .filter(path -> path.getFileName().toString().startsWith(ProcessScope.STATE_DIR_PREFIX))
+          .count();
+    }
   }
 
   /**

@@ -19,6 +19,8 @@ REQUIRED_CASES = {
         # 双向标准流：命令真的收到调用方写进 stdin 的字节，stderr 不被合并，且根进程自然退出后活着的子进程被收敛。
         "duplexStdioCarriesInputAndKeepsStderrSeparate",
         "duplexStdioConvergesLiveChildrenAfterNaturalExit",
+        # 许可阶段抛出致命 Error：失败保持原身份，命令从未运行，helper 与状态目录都被收敛。
+        "fatalStartGateFailureKeepsItsIdentityAndReapsTheHelper",
     },
 }
 
@@ -54,6 +56,7 @@ SELECTED_CLASSES = (
     "ProcessScopeTest",
     "ProcessScopeStateTest",
     "ProcessScopeHelperFailureTest",
+    "ProcessScopeStartFailureTest",
     "PosixProcessGroupTest",
     "BashCapabilityTest",
     "CodingCapabilitiesTest",
