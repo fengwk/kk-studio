@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Method;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -37,9 +38,14 @@ class LspClientOwnedTasksTest {
   private final List<ExecutorService> executors = new ArrayList<>();
 
   @AfterEach
-  void tearDown() {
+  void tearDown() throws InterruptedException {
     executors.forEach(ExecutorService::shutdownNow);
     callers.shutdownNow();
+    // 测试自有执行器必须真正静止：这里逐个有界等待，而不是假设它们已经终止。
+    for (ExecutorService executor : executors) {
+      assertTrue(executor.awaitTermination(WAIT.toSeconds(), TimeUnit.SECONDS), "测试自有执行器必须真正终止");
+    }
+    assertTrue(callers.awaitTermination(WAIT.toSeconds(), TimeUnit.SECONDS), "测试自有执行器必须真正终止");
   }
 
   /**
@@ -67,6 +73,34 @@ class LspClientOwnedTasksTest {
 
     gate.countDown();
     assertNull(closed.get(WAIT.toSeconds(), TimeUnit.SECONDS), "运行体结束之后才允许成功");
+  }
+
+  /**
+   * 意图：关闭已经 snapshot 到某次任务、运行体随后真实结束（完成闩锁已经发布）之后，即使调用者预先带中断， {@code awaitExit}
+   * 也必须返回「静止」而不是把自己的处境改写成未证明静止；中断标记必须保留。
+   *
+   * <p>竞态窗口是确定构造的：先从外部队列取出真实 {@code Task}（等价于关闭时的 snapshot），手动 {@code run()} 让它结算，再对同一个 snapshot
+   * 对象反射调用私有的 {@code awaitExit(long)}。反射只提供 {@code Task} 的控制流事实，不是 OS 物理证明。
+   */
+  @Test
+  void awaitExitAfterPublishedRunnerExitIgnoresCallerInterrupt() throws Exception {
+    PausedDispatch dispatch = pausedDispatch();
+    LspClientOwnedTasks owned = new LspClientOwnedTasks(dispatch);
+    owned.execute(() -> {});
+    Runnable task = dispatch.queued.get(0);
+
+    // 运行体真实结束：完成闩锁已经发布，随后调用者才带着中断进入等待。
+    task.run();
+
+    Thread.currentThread().interrupt();
+    try {
+      assertNull(
+          invokeAwaitExit(task, System.nanoTime() + WAIT.toNanos()),
+          "已经发布的完成事实不得因为调用者中断而被改写成未证明静止");
+      assertTrue(Thread.currentThread().isInterrupted(), "读取已发布完成不得清除中断标记");
+    } finally {
+      Thread.interrupted();
+    }
   }
 
   /** 意图：从未开始的任务在关闭时被结算为「永不执行」；外部执行器之后取出它也不得执行运行体，且必须仍然可用。 */
@@ -265,6 +299,13 @@ class LspClientOwnedTasksTest {
       Thread.currentThread().interrupt();
       throw new AssertionError("interrupted while waiting for the test gate", error);
     }
+  }
+
+  /** 反射调用私有的 {@code Task.awaitExit(long)}：只用于对一个已 snapshot 的任务构造控制流事实。 */
+  private static Object invokeAwaitExit(Runnable task, long deadline) throws Exception {
+    Method method = task.getClass().getDeclaredMethod("awaitExit", long.class);
+    method.setAccessible(true);
+    return method.invoke(task, deadline);
   }
 
   private static void awaitBlockedIn(Class<?> owner, String method, Duration timeout)
