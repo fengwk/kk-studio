@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.daemon.coding;
 
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -12,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import tools.jackson.databind.JsonNode;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -27,6 +29,7 @@ import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Stream;
 
 /**
  * 启动阶段致命失败（{@link Error}）的收尾：已拥有的真实进程范围必须收敛，共享启动的等待者必须有界返回，失败登记必须清理。
@@ -82,7 +85,9 @@ class LspClientStartFailureTest {
       Error error =
           assertThrows(
               AssertionError.class,
-              () -> LspClient.launch(server, root, server.command().getFirst(), dispatch));
+              () ->
+                  LspClient.launch(
+                      server, root, server.command().getFirst(), dispatch, () -> true));
 
       assertSame(dispatch.fatal, error, "致命失败必须保持原身份");
       FakeLspServers.awaitProcessGone(dispatch.observedPid, Duration.ofSeconds(10));
@@ -136,9 +141,9 @@ class LspClientStartFailureTest {
     }
   }
 
-  /** 关闭先取消共享交付，迟到的启动 Error 仍由创建线程收到，且真实进程被收回。 */
+  /** 关闭与迟到的启动失败并发：关闭必须在有界等待里等到这次启动的收敛结论，不能提前声称完成；创建者仍然收到原身份的致命失败，且不留进程、状态目录与自有任务。 */
   @Test
-  void closeCannotSwallowAFatalErrorFromTheLateStartup() throws Exception {
+  void closeWaitsForTheLateFatalStartupAndStillDeliversItToTheCreator() throws Exception {
     Path transcript = FakeLspServers.transcript(root);
     FatalDispatch dispatch = fatalDispatch(transcript, true);
     LspClientPool pool =
@@ -148,13 +153,21 @@ class LspClientStartFailureTest {
             dispatch,
             FakeLspServers.javaServer("late-fatal", "normal", root, transcript));
     Path file = Files.writeString(root.resolve("App.java"), "class App {}\n");
+    long stateDirectories = countStateDirectories();
     try {
       Future<Throwable> creator = callers.submit(() -> leaseFailure(pool, file));
       assertTrue(dispatch.entered.await(WAIT.toSeconds(), TimeUnit.SECONDS));
-      pool.close();
+      Future<?> closing = callers.submit(pool::close);
+      // 同步点：关闭线程必须真正阻塞在生产 awaitBootCompletion 上，而不是靠 sleep 猜测它已经开始收尾。
+      awaitBlockedInAwaitBootCompletion(callerThreads, WAIT);
+      assertFalse(closing.isDone(), "启动还没有给出收敛结论时 close 不得声称完成");
+
       dispatch.release.countDown();
-      assertSame(dispatch.fatal, awaitFailure(creator));
+      closing.get(WAIT.toSeconds(), TimeUnit.SECONDS);
+
+      assertSame(dispatch.fatal, awaitFailure(creator), "迟到的致命失败必须交给创建者并保持身份");
       FakeLspServers.awaitProcessGone(dispatch.observedPid, Duration.ofSeconds(10));
+      assertEquals(stateDirectories, countStateDirectories(), "启动失败与关闭都不允许留下状态目录");
       assertThrows(IllegalStateException.class, () -> pool.lease(file));
       assertEquals(1, startedProcesses(transcript));
     } finally {
@@ -207,9 +220,21 @@ class LspClientStartFailureTest {
   /** 等待指定数量的调用线程真正进入生产 waitForBoot：读取线程栈，不依赖 sleep 猜测同步点。 */
   private static void awaitBlockedInWaitForBoot(
       List<Thread> threads, int expected, Duration timeout) throws InterruptedException {
+    awaitBlockedIn(threads, "waitForBoot", expected, timeout);
+  }
+
+  /** 等待关闭线程真正进入生产 awaitBootCompletion：这是「关闭正在等启动收敛」的唯一同步依据。 */
+  private static void awaitBlockedInAwaitBootCompletion(List<Thread> threads, Duration timeout)
+      throws InterruptedException {
+    awaitBlockedIn(threads, "awaitBootCompletion", 1, timeout);
+  }
+
+  private static void awaitBlockedIn(
+      List<Thread> threads, String method, int expected, Duration timeout)
+      throws InterruptedException {
     long deadline = System.nanoTime() + timeout.toNanos();
     while (System.nanoTime() < deadline) {
-      if (blockedInWaitForBoot(threads) >= expected) {
+      if (blockedIn(threads, method) >= expected) {
         return;
       }
       Thread.sleep(10);
@@ -217,22 +242,34 @@ class LspClientStartFailureTest {
     throw new AssertionError(
         "expected "
             + expected
-            + " lease threads blocked in waitForBoot, saw "
-            + blockedInWaitForBoot(threads));
+            + " pool threads blocked in "
+            + method
+            + ", saw "
+            + blockedIn(threads, method));
   }
 
-  private static int blockedInWaitForBoot(List<Thread> threads) {
+  private static int blockedIn(List<Thread> threads, String method) {
     int blocked = 0;
     for (Thread thread : threads) {
       for (StackTraceElement frame : thread.getStackTrace()) {
         if (frame.getClassName().equals(LspClientPool.class.getName())
-            && frame.getMethodName().equals("waitForBoot")) {
+            && frame.getMethodName().equals(method)) {
           blocked++;
           break;
         }
       }
     }
     return blocked;
+  }
+
+  /** 统计临时目录里的进程范围状态目录数量，用于断言启动失败与关闭都不留残留。 */
+  private static long countStateDirectories() throws IOException {
+    try (Stream<Path> entries = Files.list(Path.of(System.getProperty("java.io.tmpdir")))) {
+      return entries
+          .filter(Files::isDirectory)
+          .filter(path -> path.getFileName().toString().startsWith(ProcessScope.STATE_DIR_PREFIX))
+          .count();
+    }
   }
 
   private static int startedProcesses(Path transcript) {

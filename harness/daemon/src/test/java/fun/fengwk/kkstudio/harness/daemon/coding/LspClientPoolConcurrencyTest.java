@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.daemon.coding;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -26,6 +27,7 @@ import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 /**
@@ -133,6 +135,99 @@ class LspClientPoolConcurrencyTest {
     FakeLspServers.awaitProcessGone(pid, Duration.ofSeconds(10));
     assertEquals(0, pool.activeCount(), "未发布的实例不得进入可用集合");
     assertThrows(IllegalStateException.class, () -> pool.lease(file));
+  }
+
+  /**
+   * 意图：启动还没给出结论时关闭，等待同一次启动的调用者必须得到显式失败而不是一直挂住，进程与登记照常收敛。
+   *
+   * <p>同步点是第二个调用者真的停在生产 {@code waitForBoot} 上：只有共享交付已经有了结论，这个等待才会以显式失败结束。
+   * 关闭把交付标成「已关闭」，创建者则在自己走到发布点时看到「启动已取消」，两条路径都不能是静默挂住。
+   */
+  @Test
+  void closeEndsTheWaitingCallerOfASharedBootWithAnExplicitFailure() throws Exception {
+    Path transcript = FakeLspServers.transcript(root);
+    // 初始化握手比关闭慢：创建者因此会在关闭之后才走到发布点，两条等待路径都能被观察到。
+    LspClientPool pool =
+        new LspClientPool(
+            FakeLspServers.discovery(
+                FakeLspServers.javaServer("fake", "slow-init", root, transcript)),
+            scheduler,
+            newDispatch(),
+            Duration.ofSeconds(30),
+            Duration.ofMillis(500),
+            Duration.ofSeconds(30));
+    pools.add(pool);
+    Path file = Files.writeString(root.resolve("App.java"), "class App {}\n");
+
+    AtomicReference<Thread> waiting = new AtomicReference<>();
+    Future<Throwable> creator = callers.submit(() -> leaseFailure(pool, file));
+    long pid = FakeLspServers.startedPid(transcript);
+    Future<Throwable> waiter =
+        callers.submit(
+            () -> {
+              waiting.set(Thread.currentThread());
+              return leaseFailure(pool, file);
+            });
+    awaitBlockedIn(waiting, LspClientPool.class, "waitForBoot", WAIT);
+
+    pool.close();
+
+    Throwable waiterFailure = waiter.get(WAIT.toSeconds(), TimeUnit.SECONDS);
+    assertTrue(
+        String.valueOf(waiterFailure).contains("closed"), "等待共享启动的调用者必须看到显式失败，实际 " + waiterFailure);
+    Throwable creatorFailure = creator.get(WAIT.toSeconds(), TimeUnit.SECONDS);
+    assertTrue(
+        String.valueOf(creatorFailure).contains("cancelled"),
+        "创建者走到发布点时必须看到启动已被取消，实际 " + creatorFailure);
+    FakeLspServers.awaitProcessGone(pid, Duration.ofSeconds(10));
+    assertEquals(0, pool.activeCount(), "被取消的启动不得进入可用集合");
+    assertThrows(IllegalStateException.class, () -> pool.lease(file));
+  }
+
+  /**
+   * 意图：等待同一次关闭的调用者被中断时必须如实报告未证明收敛，绝不能因为别人还在收尾就宣称成功。
+   *
+   * <p>stubborn 服务器配上较长的关闭宽限给出确定的窗口：只有接手的调用者会发出 {@code shutdown}，因此等待者的中断 一定发生在那一次真实关闭尚未得出结论的时候。
+   */
+  @Test
+  void interruptedCloseWaiterReportsUnprovenConvergence() throws Exception {
+    Path transcript = FakeLspServers.transcript(root);
+    LspClientPool pool =
+        new LspClientPool(
+            FakeLspServers.discovery(
+                FakeLspServers.javaServer("fake", "stubborn", root, transcript)),
+            scheduler,
+            newDispatch(),
+            Duration.ofSeconds(30),
+            Duration.ofSeconds(5),
+            Duration.ofSeconds(3));
+    pools.add(pool);
+    Path file = Files.writeString(root.resolve("App.java"), "class App {}\n");
+    pool.release(pool.lease(file));
+    long pid = FakeLspServers.startedPid(transcript);
+
+    Future<Throwable> closing = callers.submit(() -> closeFailure(pool));
+    FakeLspServers.await(
+        transcript,
+        event ->
+            "recv".equals(event.path("event").asString(null))
+                && "shutdown".equals(event.path("message").path("method").asString(null)));
+
+    // 中断发生在调用自己的等待之前：它与「已经给出结论」的竞争因此是确定的，而不是靠时序碰运气。
+    Future<Throwable> interrupted =
+        callers.submit(
+            () -> {
+              Thread.currentThread().interrupt();
+              return closeFailure(pool);
+            });
+
+    Throwable interruptedFailure = interrupted.get(WAIT.toSeconds(), TimeUnit.SECONDS);
+    assertTrue(
+        String.valueOf(interruptedFailure).contains("interrupted"),
+        "被中断的等待者必须报告未证明收敛，实际 " + interruptedFailure);
+    assertNull(closing.get(WAIT.toSeconds(), TimeUnit.SECONDS), "接手的关闭必须照常收敛");
+    FakeLspServers.awaitProcessGone(pid, Duration.ofSeconds(10));
+    assertEquals(0, pool.activeCount(), "关闭之后不得留下活动实例");
   }
 
   /** 意图：同一 key 的并发失败启动共享一次真实启动，失败登记被清理，后续调用可以重新尝试。 */
@@ -466,6 +561,49 @@ class LspClientPoolConcurrencyTest {
       }
     }
     return pids;
+  }
+
+  private static Throwable leaseFailure(LspClientPool pool, Path file) {
+    try {
+      pool.lease(file);
+      return null;
+    } catch (Throwable error) {
+      return error;
+    }
+  }
+
+  private static Throwable closeFailure(LspClientPool pool) {
+    try {
+      pool.close();
+      return null;
+    } catch (Throwable error) {
+      return error;
+    }
+  }
+
+  /** 等到某个线程真的停在指定的生产方法上：不靠 sleep 猜测竞态窗口。 */
+  private static void awaitBlockedIn(
+      AtomicReference<Thread> target, Class<?> owner, String method, Duration timeout)
+      throws InterruptedException {
+    awaitTrue(() -> anyThreadBlockedIn(target.get(), owner, method), timeout);
+  }
+
+  private static boolean anyThreadBlockedIn(Thread target, Class<?> owner, String method) {
+    for (Thread thread : Thread.getAllStackTraces().keySet()) {
+      if (target != null && thread != target) {
+        continue;
+      }
+      for (StackTraceElement frame : thread.getStackTrace()) {
+        if (isInnerOf(frame.getClassName(), owner) && frame.getMethodName().equals(method)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  private static boolean isInnerOf(String className, Class<?> owner) {
+    return className.equals(owner.getName()) || className.startsWith(owner.getName() + "$");
   }
 
   private static void awaitTrue(Supplier<Boolean> condition, Duration timeout)
