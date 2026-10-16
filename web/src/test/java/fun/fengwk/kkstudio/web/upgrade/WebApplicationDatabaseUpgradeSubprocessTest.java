@@ -7,8 +7,14 @@ import static org.junit.jupiter.api.Assertions.fail;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.datasource.SimpleDriverDataSource;
 
+import fun.fengwk.kkstudio.platform.environment.repo.impl.PostgresqlEnvironmentChangeNotifier;
+import fun.fengwk.kkstudio.platform.environment.repo.impl.PostgresqlEnvironmentRepository;
+import fun.fengwk.kkstudio.platform.environment.repo.impl.store.EnvironmentJdbcStore;
+import fun.fengwk.kkstudio.platform.environment.service.EnvironmentInstallConfigs;
 import fun.fengwk.kkstudio.web.WebApplication;
 
 import javax.crypto.SecretKey;
@@ -20,12 +26,15 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
+import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -34,11 +43,10 @@ import java.util.concurrent.TimeUnit;
  * 里以进程退出码与输出呈现。
  *
  * <p>子进程继承的 JVM 环境会污染 stderr（如 {@code JAVA_TOOL_OPTIONS} 的 "Picked up" 提示），因此启动前从子环境移除这些变量并显式传入非
- * /tmp 的临时目录；输出重定向到私有文件后再读取，避免管道写满造成死锁。stderr 断言保持严格：任何额外的诊断行都会失败。
+ * /tmp 的临时目录；输出重定向到私有文件后再读取，避免管道写满造成死锁；超时或中断时都会强杀并回收本次启动的那一个子进程。stderr 断言保持严格：任何额外的诊断行都会失败。
  *
- * <p>默认用当前测试 classpath 直接运行 {@link WebApplication}；提供 {@code
- * -Dkkstudio.upgrade.test.jar=/abs/path.jar} 时改为运行该 Fat JAR 产物本身，因此同一批用例可以在打包后原样复用（打包产物的验收由 parent
- * 在集成阶段执行）。
+ * <p>两种入口模式共用同一批用例：默认用当前测试 classpath 直接运行 {@link WebApplication}；设置 {@code
+ * -Dkkstudio.upgrade.test.jar=/abs/path.jar} 时先校验该绝对路径上的普通 JAR，再以 {@code java -jar} 运行产物本身。
  *
  * <p>用例只连接可丢弃的隔离容器库，不连接任何实际部署。
  */
@@ -46,10 +54,25 @@ class WebApplicationDatabaseUpgradeSubprocessTest {
 
   private static final long TIMEOUT_SECONDS = 120;
 
+  /** 强杀后回收子进程的有界等待：只保证本次启动的进程被释放，不枚举任何后代进程。 */
+  private static final long CHILD_SHUTDOWN_SECONDS = 30;
+
   private static final String SENTINEL = "sentinel-subprocess-credential-3312";
 
   /** 指向待验收的 Fat JAR；未设置时用当前测试 classpath 直接运行入口类。 */
   private static final String TEST_JAR_PROPERTY = "kkstudio.upgrade.test.jar";
+
+  /** 源库的 Flyway 历史表：不在复制清单里，但必须与全部共有表一起证明源库未被改动。 */
+  private static final String FLYWAY_HISTORY_TABLE = "flyway_schema_history";
+
+  /** {@code LegacyUpgradeSourceFixture} 写入的源 Environment；提交后必须能被常规读侧读出同一份 install config。 */
+  private static final UUID LEGACY_ENVIRONMENT_ID =
+      UUID.fromString("0e5a5f27-0f7c-4a3a-9a8f-3a1c2b4d5e6f");
+
+  /** 整表规范值摘要：行 JSON 文本排序后取 md5，空表用固定标记；因此摘要覆盖全部列值且本身不含任何原始行。 */
+  private static final String TABLE_DIGEST =
+      "select coalesce(md5(string_agg(to_jsonb(t)::text, E'\\n' order by to_jsonb(t)::text)), '(empty)')"
+          + " from %s t";
 
   @TempDir Path tempDir;
 
@@ -139,7 +162,7 @@ class WebApplicationDatabaseUpgradeSubprocessTest {
     LegacyUpgradeSourceFixture.load(source, sourceKey);
     LegacyHarnessHistoryFixture.insert(source);
     DataSource target = UpgradePostgresTestSupport.blankDatabase();
-    Map<String, Long> sourceFacts = sourceFacts(source);
+    Map<String, String> sourceDigests = sourceDigests(source, profile);
 
     Path dir = UpgradeCliInputFixture.ownerOnlyDir(tempDir);
     Path sourceKeyFile =
@@ -168,10 +191,13 @@ class WebApplicationDatabaseUpgradeSubprocessTest {
     assertTrue(dryRun.out().contains("mode=dry-run"));
     assertTrue(dryRun.out().contains("profile=" + profile));
     assertTrue(dryRun.out().contains("applied=false"));
+    assertEquals("", dryRun.err());
     Map<String, Long> dryRunCounts = rowCounts(dryRun.out());
     assertFalse(dryRunCounts.isEmpty(), dryRun.out());
-    // dry-run 必须整体回滚：目标回到 pristine。
+    // dry-run 必须整体回滚：目标回到 pristine，源库逐表值摘要不变。
     UpgradePostgresTestSupport.assertPristine(target);
+    assertEquals(
+        sourceDigests, sourceDigests(source, profile), "dry-run must not change the source");
 
     ProcessResult apply =
         runSubprocess("database-upgrade", "apply", "--config", convertConfig.toString());
@@ -179,6 +205,7 @@ class WebApplicationDatabaseUpgradeSubprocessTest {
     assertTrue(apply.out().contains("mode=apply"));
     assertTrue(apply.out().contains("profile=" + profile));
     assertTrue(apply.out().contains("applied=true"));
+    assertEquals("", apply.err());
     // apply 与 dry-run 必须逐表一致，且提交后的目标能被常规读取。
     assertEquals(dryRunCounts, rowCounts(apply.out()));
     for (Map.Entry<String, Long> row : dryRunCounts.entrySet()) {
@@ -187,10 +214,11 @@ class WebApplicationDatabaseUpgradeSubprocessTest {
           UpgradePostgresTestSupport.count(target, row.getKey()),
           row.getKey());
     }
+    assertTargetInstallConfigMatchesSource(source, target);
 
-    // 源库完全不变：仍是同一个冻结 profile，且常规读取事实逐一相同。
+    // 源库完全不变：仍是同一个冻结 profile（schema/history 身份），且逐表值摘要完全一致。
     assertEquals(profile, sourceProfile(source));
-    assertEquals(sourceFacts, sourceFacts(source));
+    assertEquals(sourceDigests, sourceDigests(source, profile), "apply must not change the source");
 
     // 已提交的目标不再是 pristine：同一份配置再 apply 必须拒绝而不是覆盖或重试。
     ProcessResult reapply =
@@ -198,15 +226,55 @@ class WebApplicationDatabaseUpgradeSubprocessTest {
     assertEquals(1, reapply.exit());
     assertTrue(reapply.err().contains("error.stage=TARGET_PRISTINE"), reapply.err());
     assertEquals("", reapply.out());
+    assertEquals(
+        sourceDigests,
+        sourceDigests(source, profile),
+        "the refused reapply must not change the source");
   }
 
-  /** 源库的常规读取事实：关键表的真实行数，前后相等即证明 CLI 不改源。 */
-  private static Map<String, Long> sourceFacts(DataSource source) throws SQLException {
-    Map<String, Long> facts = new LinkedHashMap<>();
-    facts.put("agent_provider", UpgradePostgresTestSupport.count(source, "agent_provider"));
-    facts.put("plugin_credential", UpgradePostgresTestSupport.count(source, "plugin_credential"));
-    facts.put("system_setting", UpgradePostgresTestSupport.count(source, "system_setting"));
-    return facts;
+  /** 提交后的目标必须能被常规读侧读回与源完全一致的 install config（不是镜像 SQL 计数）。 */
+  private static void assertTargetInstallConfigMatchesSource(DataSource source, DataSource target)
+      throws SQLException {
+    PostgresqlEnvironmentRepository environments =
+        new PostgresqlEnvironmentRepository(
+            new EnvironmentJdbcStore(JdbcClient.create(target)),
+            new PostgresqlEnvironmentChangeNotifier(new JdbcTemplate(target)));
+    assertEquals(
+        EnvironmentInstallConfigs.read(
+            UpgradePostgresTestSupport.text(
+                source, "select install_config::text from environment")),
+        environments.getById(LEGACY_ENVIRONMENT_ID).getInstallConfig());
+  }
+
+  /** 源库逐表规范值摘要：在同一个真实连接上固定 UTC 与 ISO DateStyle，再对每张表取整表行文本的 md5；行数变化或任何列值改动都会改变摘要。 */
+  private static Map<String, String> sourceDigests(DataSource source, String profile)
+      throws SQLException {
+    Map<String, String> digests = new LinkedHashMap<>();
+    try (Connection connection = source.getConnection()) {
+      connection.setAutoCommit(false);
+      try (Statement statement = connection.createStatement()) {
+        statement.execute("set local time zone 'UTC'");
+        statement.execute("set local datestyle = 'ISO, MDY'");
+        for (String table : digestTables(profile)) {
+          try (ResultSet rows = statement.executeQuery(TABLE_DIGEST.formatted(table))) {
+            rows.next();
+            digests.put(table, rows.getString(1));
+          }
+        }
+      }
+      connection.rollback();
+    }
+    return digests;
+  }
+
+  /** 摘要覆盖的源表：全部共有表加 Flyway 历史；MAIN 源另有只存在于该基线的 cluster_node。 */
+  private static List<String> digestTables(String profile) {
+    List<String> tables = new ArrayList<>(LegacySchemaProfile.SHARED_TABLES);
+    tables.add(FLYWAY_HISTORY_TABLE);
+    if ("main".equals(profile)) {
+      tables.add("cluster_node");
+    }
+    return tables;
   }
 
   /** 源库的可观察身份：冻结 profile 指纹，任何源端改动都会让它变化。 */
@@ -277,14 +345,35 @@ class WebApplicationDatabaseUpgradeSubprocessTest {
     builder.redirectOutput(outFile.toFile());
     builder.redirectError(errFile.toFile());
     Process process = builder.start();
-    if (!process.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
-      process.destroyForcibly();
-      fail("the offline CLI subprocess did not finish in time");
+    try {
+      if (!process.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+        fail("the offline CLI subprocess did not finish in time");
+      }
+    } finally {
+      // 超时、中断或断言失败都必须回收本次启动的那一个进程，绝不留存活子进程。
+      if (process.isAlive()) {
+        process.destroyForcibly();
+        awaitShutdown(process);
+      }
     }
     return new ProcessResult(
         process.exitValue(),
         Files.readString(outFile, StandardCharsets.UTF_8),
         Files.readString(errFile, StandardCharsets.UTF_8));
+  }
+
+  /** 有界等待被强杀的进程退出；中断只被推迟到回收结束，绝不吞掉中断语义。 */
+  private static void awaitShutdown(Process process) {
+    boolean interrupted = Thread.interrupted();
+    try {
+      process.waitFor(CHILD_SHUTDOWN_SECONDS, TimeUnit.SECONDS);
+    } catch (InterruptedException error) {
+      interrupted = true;
+    } finally {
+      if (interrupted) {
+        Thread.currentThread().interrupt();
+      }
+    }
   }
 
   /**
