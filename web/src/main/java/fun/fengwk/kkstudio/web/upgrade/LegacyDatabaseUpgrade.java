@@ -619,8 +619,10 @@ final class LegacyDatabaseUpgrade {
     }
   }
 
-  /** 目标必须是唯一 pristine 形态：默认 settings 一行、epoch 0 指针与空 manifest 各恰好一行，其余共有与新增表全空。 */
-  private static void requirePristineTarget(Connection target) throws SQLException {
+  /**
+   * 目标必须是唯一 pristine 形态：默认 settings 一行、epoch 0 指针与空 manifest 各恰好一行，其余共有与新增表全空。包内可见供显式 prepare 复用。
+   */
+  static void requirePristineTarget(Connection target) throws SQLException {
     for (String table : LegacySchemaProfile.SHARED_TABLES) {
       if (!SYSTEM_SETTING.equals(table) && count(target, "select count(*) from " + table) != 0) {
         throw notPristine();
@@ -775,8 +777,8 @@ final class LegacyDatabaseUpgrade {
     }
   }
 
-  /** 两个连接都必须是无遗留事务的普通连接：不接管调用方已经打开的写事务，也不假设数据源一定会给出新连接。 */
-  private static Connection openIdleConnection(DataSource dataSource) {
+  /** 两个连接都必须是无遗留事务的普通连接：不接管调用方已经打开的写事务，也不假设数据源一定会给出新连接。包内可见供显式 prepare 复用。 */
+  static Connection openIdleConnection(DataSource dataSource) {
     Connection connection;
     try {
       connection = dataSource.getConnection();
@@ -840,8 +842,11 @@ final class LegacyDatabaseUpgrade {
     }
   }
 
-  /** 目标写事务内的 session 前置：与源同一份 search_path / DateStyle / UTC / row_security 与服务器形态检查。 */
-  private static void beginTargetSession(Connection target) {
+  /**
+   * 目标写事务内的 session 前置：与源同一份 search_path / DateStyle / UTC / row_security 与服务器形态检查。包内可见供显式 prepare
+   * 复用。
+   */
+  static void beginTargetSession(Connection target) {
     try (Statement statement = target.createStatement()) {
       applySessionSettings(statement);
       requireServerSession(statement, false);
