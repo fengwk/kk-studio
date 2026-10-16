@@ -13,12 +13,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/**
- * 真实 OkHttp transport 的握手期限行为，只用公共构造器与本地真实协议 fixture，不访问真实远端或凭据。
- *
- * <p>与生产契约一致但不引用任何新增/包内 API，因而可作为旧源码的安全 negative control：旧实现既无 {@code callTimeout} 也无逻辑期限，服务端接受 TCP
- * 连接但不返回 HTTP 101 时握手永不结算，首个用例因此失败在 {@code stage.get} 的 TimeoutException。
- */
+/** 真实 OkHttp transport 的握手期限行为：只用公共构造器与本地真实协议 fixture，不访问真实远端或凭据。 */
 class OkHttpWebSocketHandshakeDeadlineTest {
 
   /** 与生产契约一致的握手预算（2 秒）。 */

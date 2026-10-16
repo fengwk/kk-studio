@@ -28,8 +28,8 @@ import java.util.concurrent.atomic.AtomicReference;
  * <p>stalled 模式接受 TCP 连接但不返回 HTTP 101，用于验证握手期限有界；upgrading 模式返回带 {@code permessage-deflate} 的
  * 101，用于验证 upgrade 成功后长连接不受握手预算限制。
  *
- * <p>证据区分三类事实：连接是否被接受、对端是否真正结束连接（读 EOF 或建立后的重置）、以及 fixture 自身的 I/O 故障。只有第一类之后的第三类才被视为对端关闭；fixture
- * 主动 {@link #close()} 期间的 accept/read 失败不计入对端关闭。
+ * <p>证据区分三类事实：连接是否被接受、对端是否真正结束连接（读 EOF 或建立后的重置）、以及 fixture 自身的 I/O 故障。fixture 主动 {@link #close()}
+ * 期间的 accept/read 失败不计为对端关闭；socket 关闭失败与握手阶段的 I/O 故障记入 {@link #failure()}，供测试失败而不是静默丢弃。
  */
 final class LocalWebSocketServer implements AutoCloseable {
 
@@ -106,12 +106,17 @@ final class LocalWebSocketServer implements AutoCloseable {
       socket = serverSocket.accept();
     } catch (IOException error) {
       if (!closing.get()) {
-        failure.compareAndSet(null, error);
+        recordFailure(error);
       }
       return;
     }
     client = socket;
     accepted.countDown();
+    if (closing.get()) {
+      // close 先于 accept 返回：收回刚接受的连接，避免服务线程在无人关闭的 socket 上阻塞。
+      closeSocket(socket);
+      return;
+    }
     try {
       Map<String, String> headers = readRequest(socket.getInputStream());
       if (upgrade) {
@@ -123,7 +128,7 @@ final class LocalWebSocketServer implements AutoCloseable {
     } catch (IOException error) {
       // 握手请求/响应阶段的失败是 fixture 协议故障，不得当作对端关闭证据。
       if (!closing.get()) {
-        failure.compareAndSet(null, error);
+        recordFailure(error);
       }
       closeSocket(socket);
       return;
@@ -209,11 +214,16 @@ final class LocalWebSocketServer implements AutoCloseable {
     }
   }
 
-  private static void closeSocket(Socket socket) {
+  private void recordFailure(IOException error) {
+    failure.compareAndSet(null, error);
+  }
+
+  /** 关闭连接；失败记入 fixture failure，而不是被吞掉。 */
+  private void closeSocket(Socket socket) {
     try {
       socket.close();
-    } catch (IOException ignored) {
-      // 连接已经不可用：关闭失败不影响结束。
+    } catch (IOException error) {
+      recordFailure(error);
     }
   }
 
@@ -247,6 +257,8 @@ final class LocalWebSocketServer implements AutoCloseable {
     if (!stopped) {
       failure = accumulate(failure, new IOException("server thread did not stop"));
     }
+    // close 结尾核对 fixture 记录的 I/O 故障，避免静默丢弃。
+    failure = accumulate(failure, this.failure.get());
     if (failure != null) {
       throw failure;
     }
