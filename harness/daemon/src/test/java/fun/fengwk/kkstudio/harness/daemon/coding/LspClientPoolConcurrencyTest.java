@@ -233,6 +233,30 @@ class LspClientPoolConcurrencyTest {
     assertEquals(0, pool.activeCount(), "关闭之后不得留下活动实例");
   }
 
+  /**
+   * 意图：池已经成功关闭并发布成功结论后，重复 {@code close} 的调用者即使预先带中断标记，也必须读取到已发布成功而不是被自己的处境改成失败；
+   * 该中断标记在读取结论后仍必须保留（本用例在 finally 清除，避免污染测试线程）。
+   */
+  @Test
+  void repeatedCloseAfterSuccessReadsPublishedSuccessAndKeepsInterrupt() throws Exception {
+    Path transcript = FakeLspServers.transcript(root);
+    LspClientPool pool = pool("normal", transcript, Duration.ofMinutes(5), newDispatch());
+    Path file = Files.writeString(root.resolve("App.java"), "class App {}\n");
+
+    pool.release(pool.lease(file));
+    pool.close();
+    assertEquals(0, pool.activeCount(), "成功关闭必须已经把实例全部停止");
+    assertThrows(IllegalStateException.class, () -> pool.lease(file), "关闭必须已经发布");
+
+    Thread.currentThread().interrupt();
+    try {
+      pool.close();
+      assertTrue(Thread.currentThread().isInterrupted(), "读取已发布结论不得清除中断标记");
+    } finally {
+      Thread.interrupted();
+    }
+  }
+
   /** 意图：同一 key 的并发失败启动共享一次真实启动，失败登记被清理，后续调用可以重新尝试。 */
   @Test
   void concurrentFailedBootsShareOneLaunchAndCleanUpRegistration() throws Exception {
