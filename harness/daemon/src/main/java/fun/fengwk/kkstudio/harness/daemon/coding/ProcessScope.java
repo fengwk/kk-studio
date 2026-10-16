@@ -218,6 +218,16 @@ final class ProcessScope implements AutoCloseable {
     return stateDir;
   }
 
+  /** 范围建立（helper 冷启动与确认）的等待预算：调用方据此把「等待启动真正结束」的边界设在启动预算之上。 */
+  static long startBudgetMillis() {
+    return PREPARE_BUDGET_MILLIS;
+  }
+
+  /** 收敛整组的等待预算：调用方据此把「等待停止真正结束」的边界设在真实收敛之上，而不是猜一个更短的宽限。 */
+  static long terminationBudgetMillis() {
+    return TERMINATION_WAIT_MILLIS;
+  }
+
   /**
    * 收敛整个范围，并返回「范围里不再有任何活着的成员」这一事实是否已经被证明。
    *

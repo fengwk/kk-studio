@@ -415,7 +415,8 @@ class LspClientTest {
     IllegalStateException error =
         assertThrows(
             IllegalStateException.class,
-            () -> LspClient.launch(config, root, config.command().getFirst(), dispatch));
+            () ->
+                LspClient.launch(config, root, config.command().getFirst(), dispatch, () -> true));
     assertTrue(error.getMessage().contains("exited before initialization"), error.getMessage());
     assertTrue(error.getMessage().contains("exit code 7"), error.getMessage());
 
@@ -443,7 +444,8 @@ class LspClientTest {
   }
 
   private LspClient start(LspServerConfig config) throws Exception {
-    LspClient client = LspClient.launch(config, root, config.command().getFirst(), dispatch);
+    LspClient client =
+        LspClient.launch(config, root, config.command().getFirst(), dispatch, () -> true);
     clients.add(client);
     client.initialize(INITIALIZE_TIMEOUT);
     return client;
