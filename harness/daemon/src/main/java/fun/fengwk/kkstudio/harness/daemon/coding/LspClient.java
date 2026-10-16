@@ -143,9 +143,10 @@ final class LspClient {
     List<String> command = new ArrayList<>(server.command());
     command.set(0, executable);
     ProcessScope scope = startScope(server, root, command);
-    Process process = scope.process();
-    ByteTailBuffer stderrTail = new ByteTailBuffer(STDERR_TAIL_BYTES);
     try {
+      // 范围取得后的探测、构造与派发失败都由本次调用负责收尾。
+      Process process = scope.process();
+      ByteTailBuffer stderrTail = new ByteTailBuffer(STDERR_TAIL_BYTES);
       // stderr 排空与后续初始化同属本进程所有权：提交被拒也必须终止整棵范围，不能把泄漏留给调用方。
       dispatch.submit(() -> drain(process.getErrorStream(), stderrTail));
       if (scope.awaitNaturalExit(PROCESS_PROBE_MILLIS)) {
@@ -170,10 +171,30 @@ final class LspClient {
                   .create());
       client.launcher.startListening();
       return client;
-    } catch (RuntimeException error) {
-      scope.close();
-      throw error;
+    } catch (RuntimeException | Error error) {
+      // 收尾失败不得掩盖启动失败：合并后第一 Error 保持身份，后到的 Error 优先于普通异常。
+      Throwable failure = cleanupStartFailure(error, scope::close);
+      if (failure instanceof Error fatal) {
+        throw fatal;
+      }
+      throw (RuntimeException) failure;
     }
+  }
+
+  /** 启动失败后尝试清理：首个 Error 优先，其余失败保留为 suppressed，避免自抑制。 */
+  static Throwable cleanupStartFailure(Throwable original, Runnable cleanup) {
+    try {
+      cleanup.run();
+    } catch (RuntimeException | Error failure) {
+      if (failure != original) {
+        if (failure instanceof Error && !(original instanceof Error)) {
+          failure.addSuppressed(original);
+          return failure;
+        }
+        original.addSuppressed(failure);
+      }
+    }
+    return original;
   }
 
   /** 启动承载服务器命令的执行范围；建立范围之前的任何失败都是「服务器无法启动」。 */
@@ -217,19 +238,19 @@ final class LspClient {
    * <p>失败时终止整棵进程树，因此半初始化的实例不会留在池中。
    */
   void initialize(Duration timeout) throws Exception {
-    InitializeParams params = new InitializeParams();
-    params.setProcessId((int) ProcessHandle.current().pid());
-    String rootUri = root.toUri().toString();
-    params.setRootUri(rootUri);
-    params.setRootPath(root.toString());
-    params.setWorkspaceFolders(List.of(new WorkspaceFolder(rootUri, "workspace")));
-    params.setCapabilities(clientCapabilities());
-    if (isJdtls()) {
-      // jdtls 只在客户端声明 classFileContents 支持时才允许 java/classFileContents 请求。
-      params.setInitializationOptions(
-          Map.of("extendedClientCapabilities", Map.of("classFileContentsSupport", true)));
-    }
     try {
+      InitializeParams params = new InitializeParams();
+      params.setProcessId((int) ProcessHandle.current().pid());
+      String rootUri = root.toUri().toString();
+      params.setRootUri(rootUri);
+      params.setRootPath(root.toString());
+      params.setWorkspaceFolders(List.of(new WorkspaceFolder(rootUri, "workspace")));
+      params.setCapabilities(clientCapabilities());
+      if (isJdtls()) {
+        // jdtls 只在客户端声明 classFileContents 支持时才允许 java/classFileContents 请求。
+        params.setInitializationOptions(
+            Map.of("extendedClientCapabilities", Map.of("classFileContentsSupport", true)));
+      }
       InitializeResult result = await(remote.initialize(params), timeout, "initialize");
       ServerCapabilities advertised = result == null ? null : result.getCapabilities();
       this.capabilities = advertised;
@@ -238,9 +259,13 @@ final class LspClient {
         this.positionEncoding = encoding;
       }
       remote.initialized();
-    } catch (Exception error) {
-      stop(Duration.ZERO);
-      throw error;
+    } catch (Exception | Error error) {
+      // 收敛失败不得掩盖初始化失败：合并后第一 Error 保持身份，后到的 Error 优先于普通异常。
+      Throwable failure = cleanupStartFailure(error, () -> stop(Duration.ZERO));
+      if (failure instanceof Error fatal) {
+        throw fatal;
+      }
+      throw (Exception) failure;
     }
   }
 
