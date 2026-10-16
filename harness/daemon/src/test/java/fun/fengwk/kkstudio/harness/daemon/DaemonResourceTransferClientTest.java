@@ -2,11 +2,14 @@ package fun.fengwk.kkstudio.harness.daemon;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.sun.net.httpserver.HttpServer;
 import okhttp3.OkHttpClient;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -18,6 +21,7 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceTransferCode
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceUploader;
 
 import java.io.IOException;
+import java.net.InetSocketAddress;
 import java.time.Duration;
 import java.util.Map;
 import java.util.UUID;
@@ -195,6 +199,116 @@ class DaemonResourceTransferClientTest {
       assertEquals(
           "resource upload failed", cause.getMessage(), "only the bounded text may escape");
       storage.assertNoSensitiveLeakIn(cause);
+    }
+  }
+
+  /**
+   * 预签名 PUT 绝不跟随 301/302/303/307/308：第二目的地零请求、零 header/body 外泄。3xx 按既有非成功存储响应处理，
+   * 最终失败仍收敛为有界文案，且整个调用受 invocation deadline 约束。
+   */
+  @Test
+  void neverFollowsStorageRedirectsForTheSignedPut() throws Exception {
+    for (int status : new int[] {301, 302, 303, 307, 308}) {
+      assertSignedPutRedirectIsRefused(status);
+    }
+  }
+
+  private void assertSignedPutRedirectIsRefused(int status) throws Exception {
+    String secret = "SECRETQUERY-" + status;
+    AtomicInteger destinationHits = new AtomicInteger();
+    AtomicReference<String> leakedHeader = new AtomicReference<>();
+    AtomicReference<byte[]> leakedBody = new AtomicReference<>();
+
+    HttpServer destination = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    destination.createContext(
+        "/object",
+        exchange -> {
+          destinationHits.incrementAndGet();
+          leakedHeader.set(exchange.getRequestHeaders().getFirst("X-Amz-Signature"));
+          leakedBody.set(exchange.getRequestBody().readAllBytes());
+          exchange.sendResponseHeaders(200, -1);
+          exchange.close();
+        });
+    destination.start();
+    int destinationPort = destination.getAddress().getPort();
+
+    AtomicInteger signedTargetHits = new AtomicInteger();
+    HttpServer redirector = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    redirector.createContext(
+        "/signed",
+        exchange -> {
+          signedTargetHits.incrementAndGet();
+          // 先排空请求体，3xx 才能可靠返回；此即已签名目标，收到签名属预期。
+          exchange.getRequestBody().readAllBytes();
+          exchange
+              .getResponseHeaders()
+              .add("Location", "http://127.0.0.1:" + destinationPort + "/object?sig=" + secret);
+          exchange.sendResponseHeaders(status, -1);
+          exchange.close();
+        });
+    redirector.start();
+    String signedUrl =
+        "http://127.0.0.1:"
+            + redirector.getAddress().getPort()
+            + "/signed?X-Amz-Signature="
+            + secret;
+
+    try {
+      DaemonResourceTransferClient client = client(Duration.ofMillis(200));
+      client.onConnectionReady();
+      AtomicBoolean active = new AtomicBoolean(true);
+      Future<ResourceRef> uploaded =
+          workers.submit(
+              () ->
+                  client
+                      .uploaderFor(toggledDeadline(active))
+                      .upload(
+                          INVOCATION_ID,
+                          "application/octet-stream",
+                          "secret.bin",
+                          new byte[] {9, 9}));
+
+      DaemonResourceTransferCodec.UploadRequest request =
+          codec.decodeRequest(awaitFrame(DaemonMessageType.RESOURCE_UPLOAD_REQUEST).payloadJson());
+      client.onTicket(
+          INVOCATION_ID,
+          codec.encodeTicket(
+              DaemonResourceTransferCodec.UploadTicket.pending(
+                  request.transferId(),
+                  UUID.randomUUID(),
+                  new DaemonPresignedPut(
+                      "PUT", signedUrl, Map.of("X-Amz-Signature", "signed-" + secret)))));
+
+      // 3xx 被当作非成功存储响应：只做权威提交判定，绝不重发字节到重定向目的地。
+      awaitFrame(DaemonMessageType.RESOURCE_UPLOAD_COMMIT);
+      assertEquals(
+          1,
+          signedTargetHits.get(),
+          "the signed PUT target must be hit exactly once for " + status);
+      client.onTicket(
+          INVOCATION_ID,
+          codec.encodeTicket(
+              DaemonResourceTransferCodec.UploadTicket.failed(request.transferId(), "rejected")));
+      awaitFrame(DaemonMessageType.RESOURCE_UPLOAD_REQUEST);
+      active.set(false);
+
+      ExecutionException failure =
+          assertThrows(
+              ExecutionException.class, () -> uploaded.get(AWAIT_SECONDS, TimeUnit.SECONDS));
+      IOException cause = assertInstanceOf(IOException.class, failure.getCause());
+      assertEquals(
+          "resource upload failed", cause.getMessage(), "only the bounded text may escape");
+
+      assertEquals(
+          0, destinationHits.get(), "a redirect target must never receive a request: " + status);
+      assertNull(leakedHeader.get(), "signed headers must not leak to the redirect target");
+      assertNull(leakedBody.get(), "the signed body must not leak to the redirect target");
+      String text = String.valueOf(cause);
+      assertFalse(text.contains(secret), text);
+      assertFalse(text.contains("X-Amz-Signature"), text);
+    } finally {
+      destination.stop(0);
+      redirector.stop(0);
     }
   }
 
