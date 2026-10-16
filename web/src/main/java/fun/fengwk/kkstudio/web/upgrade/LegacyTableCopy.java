@@ -19,8 +19,8 @@ import java.util.List;
  * <ul>
  *   <li>{@link #binary}：binary COPY OUT → COPY IN 直接流式对接，保留原生类型字节，并且每张含 self-FK
  *       的表仍是单语句，因此语句末校验时父子行都已就位；
- *   <li>{@link #text}：需要逐行标量转换的两张表用 text COPY，源端按 {@code fetchSize} 流式读取、逐行转换后按 COPY text 规则转义（反斜线
- *       / 制表符 / 回车 / 换行 / NULL），每表仍只有一个 COPY IN 语句。
+ *   <li>{@link #text}：需要逐行标量转换的表用 text COPY，源端按 {@code fetchSize} 流式读取、逐行转换后按 COPY text 规则转义（反斜线 /
+ *       制表符 / 回车 / 换行 / NULL），每表仍只有一个 COPY IN 语句。
  * </ul>
  *
  * <p>返回服务端确认的 handled row count（未知为 -1），供调用方与目标 COUNT 一起对账。失败时仍尝试取消全部已打开的 COPY，取消失败挂回原失败：取消 SQL

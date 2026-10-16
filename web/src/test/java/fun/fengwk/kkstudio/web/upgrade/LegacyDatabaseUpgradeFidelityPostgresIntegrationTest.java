@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -13,13 +14,17 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.runtime.history.EntryType;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillTokenCipher;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
 import fun.fengwk.kkstudio.platform.environment.repo.impl.PostgresqlEnvironmentChangeNotifier;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialCodec;
+import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
 
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
@@ -45,7 +50,7 @@ import java.util.stream.Stream;
 
 /**
  * J4 密集跨表引用的真实 PostgreSQL 17 保真验收：在冻结 DEV / MAIN 源上补齐所有可非空持久表的真实代表行后，逐表核对原生 binary COPY
- * 的完整行、逐字段核对四类转换、验证 self-FK 的 child-first 单语句语义，并用真实终态 V4 Canvas 历史确认 引用没有被重写或丢失。
+ * 的完整行、逐字段核对六类转换、验证 self-FK 的 child-first 单语句语义，并用真实终态 V4 Canvas 历史确认引用没有被重写或丢失。
  *
  * <p>它同时证明源端 drain 守卫对真实 Canvas 坏形态（字符串 {@code "4"}、未知 version、READY / RUNNING / UNKNOWN、 stage 与
  * status 不一致）fail closed，且拒绝后目标保持 pristine。
@@ -58,6 +63,8 @@ class LegacyDatabaseUpgradeFidelityPostgresIntegrationTest {
 
   private static final PluginCredentialCodec CODEC = new PluginCredentialCodec();
 
+  private static final JsonMapper MAPPER = JsonMapper.builder().build();
+
   /** LegacyUpgradeSourceFixture 写入的全局 storage blob（只在本测试的断言中引用）。 */
   private static final String BLOB_ID = "6c1f5a1e-58b2-4b1c-9d7e-2f3a4b5c6d7e";
 
@@ -69,9 +76,15 @@ class LegacyDatabaseUpgradeFidelityPostgresIntegrationTest {
   private static final UUID REGISTRY_NODE_ID =
       UUID.fromString("9f9f9f9f-0000-4000-8000-0000000000ff");
 
-  /** 只被文本转换改写的四张表；其余 37 张共有表必须是原生逐字节保真。 */
+  /** 六类转换表按字段对账，其余 35 张共有表必须是原生逐字节保真。 */
   private static final Set<String> CONVERTED_TABLES =
-      Set.of("agent_provider", "harness_entry", "plugin_credential", "system_setting");
+      Set.of(
+          "agent_provider",
+          "harness_entry",
+          "plugin_credential",
+          "system_setting",
+          "environment_connection",
+          "skill_package");
 
   private static final String PROVIDER_PROJECTION =
       "select name, description, provider_type, base_url, credential, config::text,"
@@ -104,6 +117,7 @@ class LegacyDatabaseUpgradeFidelityPostgresIntegrationTest {
     assertEquals("dev", dry.sourceProfile());
     assertEquals(1L, dry.rewrittenCredentials());
     assertEquals(1L, dry.installedStaticCredentials());
+    assertEquals(1L, dry.rewrittenSkillTokens());
     UpgradePostgresTestSupport.assertPristine(target);
     assertEquals(sourceBefore, digests(source));
 
@@ -117,16 +131,17 @@ class LegacyDatabaseUpgradeFidelityPostgresIntegrationTest {
 
     // 源库在真实提交后逐表不变，包括被拒绝/重写的表：源历史字节没有被就地改写。
     assertEquals(sourceBefore, digests(source));
-    assertDigestFidelity(sourceBefore, digests(target));
+    assertDigestFidelity(sourceBefore, digests(target), "dev");
     assertRawTablesAreByteIdentical(source, target);
     assertProviderFidelity(source, target);
     assertHarnessEntryFidelity(source, target);
     assertConvertedSettings(source, target);
     assertConvertedCredentials(source, target);
+    assertConvertedSkillTokens(source, target);
+    assertEnvironmentFidelity(source, target, "dev");
     assertCanvasHistoryPreserved(source, target);
     assertDenseReferencesPreserved(target);
-    // 目标正常读取方必须能消费导入的 READY 连接：DEV canonical metadata 与当前 codec 同代，必须成功。
-    assertImportedEnvironmentConnectionReadable(target);
+    assertImportedEnvironmentConnectionReadable(target, "dev");
 
     LegacyDatabaseUpgradeException second =
         assertThrows(LegacyDatabaseUpgradeException.class, () -> convert(source, target, false));
@@ -134,7 +149,7 @@ class LegacyDatabaseUpgradeFidelityPostgresIntegrationTest {
     assertFalse(second.outcomeUncertain());
   }
 
-  /** MAIN 密集源同样通过 profile 识别、drain 守卫与四类转换，且 cluster_node 按已到期 lease 退休。 */
+  /** MAIN 密集源同样通过 profile 识别、drain 守卫与六类转换，且 cluster_node 按已到期 lease 退休。 */
   @Test
   void denseMainSourceConvertsInDryRun() throws SQLException {
     DataSource source = UpgradePostgresTestSupport.sourceDatabase("main");
@@ -164,10 +179,20 @@ class LegacyDatabaseUpgradeFidelityPostgresIntegrationTest {
     loadDenseSource(source, "main");
     LegacyUpgradeSourceFixture.retireClusterNodes(source, 3);
 
+    Map<String, String> sourceBefore = digests(source);
     LegacyDatabaseUpgradeResult applied = convert(source, target, false);
     assertTrue(applied.applied());
     assertEquals("main", applied.sourceProfile());
-    assertImportedEnvironmentConnectionReadable(target);
+    assertEquals(sourceBefore, digests(source));
+    assertDigestFidelity(sourceBefore, digests(target), "main");
+    assertRawTablesAreByteIdentical(source, target);
+    assertProviderFidelity(source, target);
+    assertHarnessEntryFidelity(source, target);
+    assertConvertedSettings(source, target);
+    assertConvertedCredentials(source, target);
+    assertConvertedSkillTokens(source, target);
+    assertEnvironmentFidelity(source, target, "main");
+    assertImportedEnvironmentConnectionReadable(target, "main");
   }
 
   /** 真实坏 Canvas 形态必须在 drain 守卫处 fail closed，且目标保持 pristine（不做任何部分写入）。 */
@@ -186,6 +211,83 @@ class LegacyDatabaseUpgradeFidelityPostgresIntegrationTest {
     assertEquals(LegacyDatabaseUpgradeException.Stage.SOURCE_DRAIN, errorThrown.stage());
     assertFalse(errorThrown.outcomeUncertain());
     UpgradePostgresTestSupport.assertPristine(target);
+  }
+
+  /** 持久 JSON 损坏或跨代 READY 形状必须整体拒绝，不能让目标启动后才暴露读取失败。 */
+  @ParameterizedTest(name = "{0}")
+  @MethodSource("invalidEnvironmentRows")
+  void invalidEnvironmentMetadataRollsBackTheWholeTarget(
+      String label, String profile, String mutation) throws SQLException {
+    DataSource source = UpgradePostgresTestSupport.sourceDatabase(profile);
+    DataSource target = UpgradePostgresTestSupport.pristineTargetDatabase();
+    loadDenseSource(source, profile);
+    try (Connection connection = source.getConnection();
+        Statement statement = connection.createStatement()) {
+      statement.execute("update environment_connection set " + mutation);
+    }
+    Map<String, String> sourceBefore = digests(source);
+
+    LegacyDatabaseUpgradeException error =
+        assertThrows(LegacyDatabaseUpgradeException.class, () -> convert(source, target, false));
+
+    assertEquals(LegacyDatabaseUpgradeException.Stage.CONVERT, error.stage());
+    assertFalse(error.outcomeUncertain());
+    assertNull(error.getCause());
+    assertEquals(0, error.getSuppressed().length);
+    assertFalse(error.getMessage().contains("untrusted"));
+    UpgradePostgresTestSupport.assertPristine(target);
+    assertEquals(sourceBefore, digests(source));
+  }
+
+  static Stream<Arguments> invalidEnvironmentRows() {
+    return Stream.of(
+        Arguments.of(
+            "dev with v5", "dev", "runtime_info = jsonb_set(runtime_info, '{version}', '5')"),
+        Arguments.of(
+            "dev with architecture",
+            "dev",
+            "runtime_info = jsonb_set(runtime_info, '{environment,architecture}', '\"amd64\"')"),
+        Arguments.of(
+            "main with unknown architecture",
+            "main",
+            "runtime_info = jsonb_set(runtime_info, '{environment,architecture}', 'null')"),
+        Arguments.of(
+            "main with v4", "main", "runtime_info = jsonb_set(runtime_info, '{version}', '4')"),
+        Arguments.of(
+            "unknown skill field",
+            "dev",
+            "skill_state = '[{\"packageName\":\"legacy-skill\",\"status\":\"installed\","
+                + "\"untrusted-field-marker\":\"untrusted-value-marker\"}]'"),
+        Arguments.of(
+            "unknown event field",
+            "dev",
+            "recent_events = '[{\"time\":\"2025-01-02T03:04:05.678Z\",\"level\":\"INFO\","
+                + "\"type\":\"READY\",\"message\":\"legacy\","
+                + "\"untrusted-field-marker\":\"untrusted-value-marker\"}]'"));
+  }
+
+  /** 尚未报告 READY 的连接没有 metadata；离线转换保留 SQL NULL，不伪造宿主事实。 */
+  @Test
+  void preservesNullEnvironmentMetadata() throws SQLException {
+    DataSource source = UpgradePostgresTestSupport.sourceDatabase("dev");
+    DataSource target = UpgradePostgresTestSupport.pristineTargetDatabase();
+    loadDenseSource(source, "dev");
+    try (Connection connection = source.getConnection();
+        Statement statement = connection.createStatement()) {
+      statement.execute(
+          "update environment_connection set status = 'CONNECTING', runtime_info = null");
+    }
+    Map<String, String> sourceBefore = digests(source);
+
+    convert(source, target, false);
+
+    assertEquals(sourceBefore, digests(source));
+    assertEquals(
+        readTextRows(source, "select * from environment_connection"),
+        readTextRows(target, "select * from environment_connection"));
+    assertNull(
+        UpgradePostgresTestSupport.text(
+            target, "select runtime_info::text from environment_connection"));
   }
 
   static Stream<Arguments> invalidCanvasRuns() {
@@ -207,7 +309,9 @@ class LegacyDatabaseUpgradeFidelityPostgresIntegrationTest {
   private static void loadDenseSource(DataSource source, String profile) throws SQLException {
     LegacyUpgradeSourceFixture.load(source, SOURCE_KEY);
     LegacyHarnessHistoryFixture.insert(source);
-    LegacyReferenceDataFixture.load(source, profile);
+    LegacyReferenceDataFixture.load(source, profile, SOURCE_KEY);
+    new ProjectWorkflowJsonCodec()
+        .decode(UpgradePostgresTestSupport.text(source, "select workflow::text from project"));
   }
 
   /**
@@ -215,7 +319,7 @@ class LegacyDatabaseUpgradeFidelityPostgresIntegrationTest {
    * skill_state} / {@code recent_events} 的无条件严格 decode，是 source→target metadata 语义可消费性的直接证据，绝不复刻
    * codec。
    */
-  private static void assertImportedEnvironmentConnectionReadable(DataSource target)
+  private static void assertImportedEnvironmentConnectionReadable(DataSource target, String profile)
       throws SQLException {
     EnvironmentRegistry registry =
         new EnvironmentRegistry(
@@ -230,6 +334,10 @@ class LegacyDatabaseUpgradeFidelityPostgresIntegrationTest {
     assertEquals(LEGACY_ENVIRONMENT_ID, connection.environmentId().value());
     assertEquals(LiveEnvironmentStatus.READY, connection.status());
     assertNotNull(connection.daemonCapabilities(), "READY 连接的 runtime_info 必须能被当前 codec 解码");
+    assertEquals(5, connection.daemonCapabilities().version());
+    assertEquals(
+        profile.equals("dev") ? null : "amd64",
+        connection.daemonCapabilities().environment().architecture());
     assertEquals(1, connection.skillState().size());
     assertEquals("legacy-skill", connection.skillState().get(0).packageName());
     assertEquals(1, connection.recentEvents().size());
@@ -309,12 +417,13 @@ class LegacyDatabaseUpgradeFidelityPostgresIntegrationTest {
     throw new IllegalStateException("the referenced row is missing: " + id);
   }
 
-  /** 41 张共有表的按 PK 稳定排序原生摘要：只有四类转换表允许不同，其余 37 张必须逐字节一致。 */
+  /** 逐表摘要只有声明的转换表允许不同；MAIN metadata 不转换，摘要也必须相同。 */
   private static void assertDigestFidelity(
-      Map<String, String> sourceDigests, Map<String, String> targetDigests) {
+      Map<String, String> sourceDigests, Map<String, String> targetDigests, String profile) {
     assertEquals(LegacySchemaProfile.SHARED_TABLES.size(), sourceDigests.size());
     for (String table : LegacySchemaProfile.SHARED_TABLES) {
-      if (CONVERTED_TABLES.contains(table)) {
+      if (CONVERTED_TABLES.contains(table)
+          && !(table.equals("environment_connection") && profile.equals("main"))) {
         assertNotEquals(sourceDigests.get(table), targetDigests.get(table), table);
       } else {
         assertEquals(sourceDigests.get(table), targetDigests.get(table), table);
@@ -322,7 +431,7 @@ class LegacyDatabaseUpgradeFidelityPostgresIntegrationTest {
     }
   }
 
-  /** 37 张原生表的完整行必须与源逐字段相同。 */
+  /** 35 张原生表的完整行必须与源逐字段相同。 */
   private static void assertRawTablesAreByteIdentical(DataSource source, DataSource target)
       throws SQLException {
     for (String table : LegacySchemaProfile.SHARED_TABLES) {
@@ -509,6 +618,57 @@ class LegacyDatabaseUpgradeFidelityPostgresIntegrationTest {
                 target,
                 "select encrypted_payload from plugin_credential where plugin_id = 'comfyui'"));
     assertTrue(staticPlaintext.contains(LegacyUpgradeSourceFixture.COMFYUI_API_KEY));
+  }
+
+  private static void assertConvertedSkillTokens(DataSource source, DataSource target)
+      throws SQLException {
+    String projection =
+        "select (to_jsonb(t) - 'encrypted_token')::text from skill_package t order by package_name";
+    assertEquals(readTextRows(source, projection), readTextRows(target, projection));
+    byte[] sourceEnvelope =
+        UpgradePostgresTestSupport.bytes(source, "select encrypted_token from skill_package");
+    byte[] targetEnvelope =
+        UpgradePostgresTestSupport.bytes(target, "select encrypted_token from skill_package");
+    assertEquals(
+        LegacyReferenceDataFixture.SKILL_TOKEN,
+        SkillTokenCipher.decrypt(SOURCE_KEY, "legacy-skill", sourceEnvelope));
+    assertEquals(
+        LegacyReferenceDataFixture.SKILL_TOKEN,
+        SkillTokenCipher.decrypt(TARGET_KEY, "legacy-skill", targetEnvelope));
+    assertEquals(1, sourceEnvelope[0]);
+    assertEquals(1, targetEnvelope[0]);
+    assertFalse(Arrays.equals(sourceEnvelope, targetEnvelope));
+    assertThrows(
+        IllegalStateException.class,
+        () -> SkillTokenCipher.decrypt(SOURCE_KEY, "legacy-skill", targetEnvelope));
+  }
+
+  private static void assertEnvironmentFidelity(
+      DataSource source, DataSource target, String profile) throws SQLException {
+    String projection =
+        "select (to_jsonb(t) - 'runtime_info')::text from environment_connection t"
+            + " order by environment_id";
+    assertEquals(readTextRows(source, projection), readTextRows(target, projection));
+    ObjectNode expected =
+        (ObjectNode)
+            MAPPER.readTree(
+                UpgradePostgresTestSupport.text(
+                    source, "select runtime_info::text from environment_connection"));
+    if (profile.equals("dev")) {
+      expected.put("version", 5);
+      ((ObjectNode) expected.get("environment")).putNull("architecture");
+    }
+    assertEquals(
+        expected,
+        MAPPER.readTree(
+            UpgradePostgresTestSupport.text(
+                target, "select runtime_info::text from environment_connection")));
+    ProjectWorkflowJsonCodec workflow = new ProjectWorkflowJsonCodec();
+    assertEquals(
+        workflow.decode(
+            UpgradePostgresTestSupport.text(source, "select workflow::text from project")),
+        workflow.decode(
+            UpgradePostgresTestSupport.text(target, "select workflow::text from project")));
   }
 
   /**

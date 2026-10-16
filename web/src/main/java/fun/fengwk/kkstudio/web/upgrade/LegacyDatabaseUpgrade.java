@@ -79,6 +79,8 @@ final class LegacyDatabaseUpgrade {
 
   private static final String SKILL_PACKAGE = "skill_package";
 
+  private static final String ENVIRONMENT_CONNECTION = "environment_connection";
+
   private static final String AGENT_PROVIDER = "agent_provider";
 
   private static final String HARNESS_ENTRY = "harness_entry";
@@ -298,6 +300,14 @@ final class LegacyDatabaseUpgrade {
         } else if (HARNESS_ENTRY.equals(table)) {
           copied =
               LegacyTableCopy.text(source, target, table, columns, LegacyDatabaseUpgrade::entryRow);
+        } else if (ENVIRONMENT_CONNECTION.equals(table)) {
+          copied =
+              LegacyTableCopy.text(
+                  source,
+                  target,
+                  table,
+                  columns,
+                  row -> LegacyEnvironmentMetadata.row(row, facts.profile()));
         } else {
           validateMailboxPayloads(source, table);
           copied = LegacyTableCopy.binary(source, target, table, columns);
