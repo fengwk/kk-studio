@@ -830,7 +830,9 @@ final class LegacyDatabaseUpgrade {
 
   /** 两边共用的会话固定项：裸表名与时间/RLS 语义必须与本内核读取目录时的假设一致。 */
   private static void applySessionSettings(Statement statement) throws SQLException {
-    statement.execute("set local search_path = public");
+    // 显式把 pg_temp 放最后，避免已有临时表遮蔽 public 业务表。
+    statement.execute("set local search_path = pg_catalog, public, pg_temp");
+    statement.execute("set local client_encoding = 'UTF8'");
     statement.execute("set local datestyle = 'ISO, MDY'");
     statement.execute("set local time zone 'UTC'");
     statement.execute("set local row_security = off");
@@ -918,6 +920,13 @@ final class LegacyDatabaseUpgrade {
           LegacyDatabaseUpgradeException.Stage.COMMIT,
           "the target transaction result could not be confirmed",
           true);
+    } catch (Error error) {
+      error.addSuppressed(
+          new LegacyDatabaseUpgradeException(
+              LegacyDatabaseUpgradeException.Stage.COMMIT,
+              "the target transaction result could not be confirmed",
+              true));
+      throw error;
     }
   }
 
