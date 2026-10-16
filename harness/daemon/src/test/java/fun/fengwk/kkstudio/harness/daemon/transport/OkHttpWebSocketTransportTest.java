@@ -20,6 +20,7 @@ import okio.ByteString;
 import org.junit.jupiter.api.Test;
 
 import java.net.InetAddress;
+import java.net.Proxy;
 import java.net.URI;
 import java.net.UnknownHostException;
 import java.time.Duration;
@@ -332,6 +333,27 @@ class OkHttpWebSocketTransportTest {
     assertTrue(dialer.closed.get());
   }
 
+  /** 异步握手失败后的清理 Error 必须留在返回的 stage 中，不能丢进未观察的 future 依赖。 */
+  @Test
+  void propagatesAsynchronousCleanupErrorThroughTheReturnedStage() {
+    FakeDialer dialer = new FakeDialer();
+    Error callbackError = new AssertionError("listener exploded");
+    RuntimeException networkError = new IllegalStateException("connection failed");
+    OkHttpWebSocketTransport transport = transport(dialer);
+    CompletableFuture<DaemonConnection> stage =
+        transport.connect(new FailingErrorListener(callbackError)).toCompletableFuture();
+    try {
+      dialer.listener.onFailure(dialer.webSocket, networkError, null);
+
+      CompletionException thrown = assertThrows(CompletionException.class, stage::join);
+      assertSame(callbackError, thrown.getCause());
+      assertArrayEquals(new Throwable[] {networkError}, callbackError.getSuppressed());
+      assertEquals(1, dialer.webSocket.cancelCalls.get());
+    } finally {
+      transport.close();
+    }
+  }
+
   /** 首个失败是 runtime、dialer 释放再抛 Error 时：Error 提升为主因，原 runtime 变为 suppressed 且未被跳过。 */
   @Test
   void promotesDialerErrorOverEarlierCallbackRuntime() {
@@ -423,6 +445,7 @@ class OkHttpWebSocketTransportTest {
     CountDownLatch releaseDns = new CountDownLatch(1);
     OkHttpClient client =
         new OkHttpClient.Builder()
+            .proxy(Proxy.NO_PROXY)
             .dns(new BlockingDns(dnsEntered, releaseDns))
             .connectTimeout(Duration.ofMillis(HANDSHAKE_BUDGET_MILLIS))
             .callTimeout(Duration.ofMillis(HANDSHAKE_BUDGET_MILLIS))
