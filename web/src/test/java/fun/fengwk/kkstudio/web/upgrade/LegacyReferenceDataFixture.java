@@ -27,7 +27,10 @@ import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
+import fun.fengwk.kkstudio.platform.crypto.AesGcmEnvelope;
+import fun.fengwk.kkstudio.platform.crypto.LengthPrefixedAad;
 
+import javax.crypto.SecretKey;
 import javax.sql.DataSource;
 
 import java.io.IOException;
@@ -39,6 +42,7 @@ import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Types;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -61,8 +65,7 @@ import java.util.UUID;
  * TURN_END。{@code environment_connection} 的 READY metadata 按源 profile 使用各自 canonical 完整形态（DEV 版本
  * 4、MAIN 版本 5 + architecture），绝不写跨代假形状。
  *
- * <p>只有 {@code agent_provider} / {@code harness_entry} 两张表经文本转换写入，其余行保持原生值；静态数据放同名前缀的 SQL
- * 资源，只有必须由当前 codec 生成的 payload 才在 Java 中构造。
+ * <p>静态数据放同名前缀的资源；历史消息由对应 codec 构造，Skill 密文独立按旧格式 1 合成。
  *
  * <p>包内可见（package-private）：只是升级测试的源端 fixture，不是生产代码。
  */
@@ -137,21 +140,7 @@ final class LegacyReferenceDataFixture {
   /** 旧 openai_response replay 别名，payload 内保留 1e309 / 1e-324 / 超长整数。 */
   private static final String LEGACY_REPLAY = "legacy-provider-replay-openai-response.json";
 
-  /**
-   * 两源各自的 canonical READY 宿主 metadata：DEV 源 DaemonCapabilities 版本 4、MAIN 源版本 5（多 architecture）， 与各自
-   * DaemonCapabilitiesCodec 的完整 wire 形状逐字段一致，绝不写不属于该源的假形状。
-   */
-  private static final String DEV_RUNTIME_INFO =
-      "{\"version\":4,\"daemonVersion\":\"1.0.10\",\"environment\":{\"operatingSystem\":\"linux\","
-          + "\"timeZone\":\"Asia/Shanghai\",\"userName\":\"kkdaemon\","
-          + "\"homeDirectory\":\"/home/kkdaemon\",\"note\":\"legacy dev host\","
-          + "\"tempDirectory\":\"/tmp\"}}";
-
-  private static final String MAIN_RUNTIME_INFO =
-      "{\"version\":5,\"daemonVersion\":\"1.0.14\",\"environment\":{\"operatingSystem\":\"linux\","
-          + "\"architecture\":\"amd64\",\"timeZone\":\"Asia/Shanghai\",\"userName\":\"kkdaemon\","
-          + "\"homeDirectory\":\"/home/kkdaemon\",\"note\":\"legacy main host\","
-          + "\"tempDirectory\":\"/tmp\"}}";
+  static final String SKILL_TOKEN = "legacy-private-skill-token";
 
   private static final String LEGACY_GOAL_COMPLETE = "legacy-custom-goal-progress-complete.json";
 
@@ -160,10 +149,16 @@ final class LegacyReferenceDataFixture {
   private LegacyReferenceDataFixture() {}
 
   /** 在已经加载 provider / Agent / storage / chat 与旧 Harness 历史的源库上补齐全部密集行。 */
-  static void load(DataSource source, String profile) throws SQLException {
+  static void load(DataSource source, String profile, SecretKey sourceKey) throws SQLException {
     insertHarness(source);
     execute(
-        source, "legacy-reference-data-business.sql", Map.of("runtimeInfo", runtimeInfo(profile)));
+        source,
+        "legacy-reference-data-business.sql",
+        Map.of(
+            "runtimeInfo",
+            runtimeInfo(profile),
+            "skillTokenHex",
+            HexFormat.of().formatHex(legacySkillEnvelope(sourceKey))));
     Map<String, String> tokens = new LinkedHashMap<>();
     tokens.put("session", SESSION.toString());
     tokens.put("rootThread", ROOT_THREAD.toString());
@@ -176,10 +171,16 @@ final class LegacyReferenceDataFixture {
   /** 该源真实可能留下的 READY 宿主 metadata；未知 profile 直接拒绝，绝不猜形状。 */
   private static String runtimeInfo(String profile) {
     return switch (profile) {
-      case "dev" -> DEV_RUNTIME_INFO;
-      case "main" -> MAIN_RUNTIME_INFO;
+      case "dev" -> resource("legacy-dev-ready-metadata.json");
+      case "main" -> resource("legacy-main-ready-metadata.json");
       default -> throw new IllegalArgumentException("unknown upgrade source profile: " + profile);
     };
+  }
+
+  private static byte[] legacySkillEnvelope(SecretKey sourceKey) {
+    byte[] aad =
+        LengthPrefixedAad.create().field("skill-package").field("legacy-skill").intValue(1).build();
+    return AesGcmEnvelope.encrypt(sourceKey, 1, aad, SKILL_TOKEN.getBytes(StandardCharsets.UTF_8));
   }
 
   /** 把密集 fixture 中一个终态 Canvas Run 改写成指定的坏形态，用于源端 drain 守卫负例；只改被点名的行，不触碰 schema 或约束。 */

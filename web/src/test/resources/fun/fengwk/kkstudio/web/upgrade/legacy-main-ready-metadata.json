@@ -1,0 +1,13 @@
+{
+  "version": 5,
+  "daemonVersion": "1.0.14",
+  "environment": {
+    "operatingSystem": "linux",
+    "architecture": "amd64",
+    "timeZone": "Asia/Shanghai",
+    "userName": "kkdaemon",
+    "homeDirectory": "/home/kkdaemon",
+    "note": "legacy main host",
+    "tempDirectory": "/tmp"
+  }
+}

@@ -4,7 +4,7 @@
 
 insert into project (id, title, description, workflow, yolo_enabled, next_issue_number, version, archived_at, created_at, updated_at) values
     ('1e610000-0000-4000-8000-000000000010', 'Legacy project', 'Legacy project description',
-     '{"states":[{"name":"IMPLEMENTATION"},{"name":"REVIEW"}],"initialState":"IMPLEMENTATION"}', false, 2, 3, null,
+     '{"states":[{"state":"INIT","name":"Initial","next":["IMPLEMENTATION"]},{"state":"BLOCKED","name":"Blocked"},{"state":"DONE","name":"Done"},{"state":"IMPLEMENTATION","name":"Implementation","agent":"legacy-agent","maxRuns":5,"next":["REVIEW"]},{"state":"REVIEW","name":"Review","next":["DONE"]}]}', false, 2, 3, null,
      timestamptz '2025-01-02 03:04:05.678+00', timestamptz '2025-02-03 04:05:06.789+00');
 
 insert into project_issue (id, project_id, number, title, description, state, blocked_from_state, block_reason, pause_reason, pause_detail, next_run_ordinal, next_activity_sequence, version, archived_at, created_at, updated_at) values

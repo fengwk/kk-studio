@@ -61,7 +61,7 @@ insert into skill_package (package_name, description, repository_url, branch, cu
     ('legacy-skill', 'legacy skill package', 'https://git.example.invalid/legacy/skill.git', 'main',
      '1111111111111111111111111111111111111111', '2222222222222222222222222222222222222222',
      timestamptz '2025-02-03 04:05:06.789+00', null,
-     '[{"name":"legacy-skill","description":"legacy skill"}]', decode('0001ff10', 'hex'), 3,
+     '[{"name":"legacy-skill","description":"legacy skill"}]', decode('${skillTokenHex}', 'hex'), 3,
      timestamptz '2025-01-02 03:04:05.678+00', timestamptz '2025-02-03 04:05:06.789+00');
 
 -- Canvas V4 终态历史：一个 group、四个节点（三个 Function 终态 + 一个普通文本节点）、三个资源、
