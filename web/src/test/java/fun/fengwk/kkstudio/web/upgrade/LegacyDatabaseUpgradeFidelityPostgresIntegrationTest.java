@@ -13,6 +13,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ObjectNode;
@@ -23,6 +24,9 @@ import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
 import fun.fengwk.kkstudio.platform.environment.repo.impl.PostgresqlEnvironmentChangeNotifier;
+import fun.fengwk.kkstudio.platform.environment.repo.impl.PostgresqlEnvironmentRepository;
+import fun.fengwk.kkstudio.platform.environment.repo.impl.store.EnvironmentJdbcStore;
+import fun.fengwk.kkstudio.platform.environment.service.EnvironmentInstallConfigs;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialCodec;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
 
@@ -312,6 +316,8 @@ class LegacyDatabaseUpgradeFidelityPostgresIntegrationTest {
     LegacyReferenceDataFixture.load(source, profile, SOURCE_KEY);
     new ProjectWorkflowJsonCodec()
         .decode(UpgradePostgresTestSupport.text(source, "select workflow::text from project"));
+    EnvironmentInstallConfigs.read(
+        UpgradePostgresTestSupport.text(source, "select install_config::text from environment"));
   }
 
   /**
@@ -663,6 +669,15 @@ class LegacyDatabaseUpgradeFidelityPostgresIntegrationTest {
         MAPPER.readTree(
             UpgradePostgresTestSupport.text(
                 target, "select runtime_info::text from environment_connection")));
+    PostgresqlEnvironmentRepository environments =
+        new PostgresqlEnvironmentRepository(
+            new EnvironmentJdbcStore(JdbcClient.create(target)),
+            new PostgresqlEnvironmentChangeNotifier(new JdbcTemplate(target)));
+    assertEquals(
+        EnvironmentInstallConfigs.read(
+            UpgradePostgresTestSupport.text(
+                source, "select install_config::text from environment")),
+        environments.getById(LEGACY_ENVIRONMENT_ID).getInstallConfig());
     ProjectWorkflowJsonCodec workflow = new ProjectWorkflowJsonCodec();
     assertEquals(
         workflow.decode(

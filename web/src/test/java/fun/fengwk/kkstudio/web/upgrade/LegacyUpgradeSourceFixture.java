@@ -95,7 +95,8 @@ final class LegacyUpgradeSourceFixture {
           "insert into environment (id, name, registration_token, install_config, created_at,"
               + " updated_at, version) values"
               + " ('0e5a5f27-0f7c-4a3a-9a8f-3a1c2b4d5e6f', 'legacy-environment',"
-              + " 'legacy-registration-token', '{\"os\":\"linux\"}',"
+              + " 'legacy-registration-token', '{\"operatingSystem\":\"linux\","
+              + "\"daemon\":{\"studioUrl\":\"https://legacy-studio.example.invalid\"}}',"
               + " timestamptz '2025-01-02 03:04:05.678+00',"
               + " timestamptz '2025-01-02 03:04:05.678+00', 3)");
       statement.execute(
