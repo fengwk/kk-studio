@@ -68,6 +68,10 @@ class LegacyDatabaseUpgradeCliPostgresIntegrationTest {
 
   private static final String OBSERVED_HEAD = "b".repeat(40);
 
+  /** 只装进 {@code pg_catalog} 的 contrib extension；PG17 官方镜像自带 postgres_fdw。 */
+  private static final String CATALOG_EXTENSION =
+      "create extension postgres_fdw with schema pg_catalog";
+
   @TempDir Path tempDir;
 
   /** 一次 CLI 调用的退出码与两条输出流。 */
@@ -150,6 +154,35 @@ class LegacyDatabaseUpgradeCliPostgresIntegrationTest {
     assertPrepareRejectsForeignSchemaObject("create collation alien_collation (locale = 'C')");
     assertPrepareRejectsForeignSchemaObject(
         "create operator === (leftarg = int4, rightarg = int4, function = int4eq)");
+  }
+
+  /**
+   * 只装进 {@code pg_catalog} 的额外 extension 不属于任何 public namespace 对象，仍必须在任何 Flyway DDL 之前被 prepare
+   * 拒绝。
+   *
+   * <p>这条路径在 public 对象计数上完全不可见（extension 与它的对象都在 pg_catalog），只有按 extension 目录检查才能拒绝。
+   */
+  @Test
+  void prepareRejectsExtensionsOutsideThePublicNamespace() throws Exception {
+    DataSource target = UpgradePostgresTestSupport.blankDatabase();
+    execute(target, CATALOG_EXTENSION);
+
+    Run result = run("prepare", "--config", prepareConfig(target).toString());
+
+    assertEquals(1, result.exit(), result.err());
+    assertTrue(result.err().contains("error.stage=PREPARE"), result.err());
+    assertTrue(result.err().contains("outcomeUncertain=false"), result.err());
+    // 没有任何 V1 关系落地，且目标里 public 依旧没有对象、extension 本身仍在。
+    assertEquals(
+        0L,
+        UpgradePostgresTestSupport.longValue(
+            target,
+            "select count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace"
+                + " where n.nspname = 'public'"));
+    assertEquals(
+        1L,
+        UpgradePostgresTestSupport.longValue(
+            target, "select count(*) from pg_extension where extname = 'postgres_fdw'"));
   }
 
   private void assertPrepareRejectsForeignSchemaObject(String sql) throws Exception {
