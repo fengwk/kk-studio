@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.web.upgrade;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -25,18 +26,31 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.Arrays;
+import java.util.List;
 import java.util.UUID;
 
 /**
- * 真实隔离 PostgreSQL 17 上的 CLI 端到端：空目标 prepare 只初始化一次、非空/未知对象/非 origin session 拒绝且保留、DEV 源
- * dry-run→apply→再 apply 拒绝，并验证 Plugin 凭据与 Skill 令牌的显式 key 与静态材料真实生效、源库不变、失败不泄漏测试 sentinel。
+ * 真实隔离 PostgreSQL 17 上的 CLI 端到端：空目标 prepare 只初始化一次、非空/未知对象/非 origin session 拒绝且保留、真实迁移连接上的固定
+ * session 前置与门禁、DEV 源 dry-run→apply→再 apply 拒绝，并验证 Plugin 凭据与 Skill 令牌的显式 key
+ * 与静态材料真实生效、源库不变、失败不泄漏测试 sentinel。
  *
  * <p>全部用例只在可丢弃的隔离容器库上运行，不连接任何实际部署。
  */
 class LegacyDatabaseUpgradeCliPostgresIntegrationTest {
+
+  /** 本内核转换会话的固定 search_path（pg_catalog 前置，拒绝旧源遮蔽系统目录）。 */
+  private static final String CANONICAL_SEARCH_PATH =
+      "set local search_path = pg_catalog, public, pg_temp";
+
+  /** 迁移连接的固定 search_path：V1 是未限定 schema 的 DDL，创建命名空间必须是 public。 */
+  private static final String MIGRATION_CREATION_SEARCH_PATH =
+      "set local search_path = public, pg_catalog, pg_temp";
+
+  private static final String V1_DDL = "create table plugin_catalog_state";
 
   private static final SecretKey SOURCE_KEY = key(0x55);
 
@@ -162,20 +176,149 @@ class LegacyDatabaseUpgradeCliPostgresIntegrationTest {
   @Test
   void baselineFailureIsReportedAsUncertain() throws Exception {
     DataSource target = UpgradePostgresTestSupport.blankDatabase();
-    // 空 search_path 让 Flyway 自己的历史表也无法创建：migrate 在第一条 DDL 前失败。
-    execute(target, "alter database " + databaseName(target) + " set search_path = ''");
+    // 库级默认 tablespace 指向 pg_global：读取与 preflight 不受影响，但任何 DDL 都会被 PostgreSQL 拒绝。
+    execute(
+        target, "alter database " + databaseName(target) + " set default_tablespace = 'pg_global'");
     Run result = run("prepare", "--config", prepareConfig(target).toString());
     assertEquals(1, result.exit());
     assertTrue(result.err().contains("error.stage=PREPARE"));
-    assertTrue(result.err().contains("baseline migration"));
     assertTrue(result.err().contains("outcomeUncertain=true"));
     assertTrue(result.err().contains("do not retry blindly"));
+    // V1 的 DDL 一条都没落地；可能已留下的 Flyway 元数据正是 outcomeUncertain=true 要人工核验的对象。
     assertEquals(
         0L,
         UpgradePostgresTestSupport.longValue(
             target,
             "select count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace"
-                + " where n.nspname = 'public' and c.relkind in ('r','p','v','m','S','f')"));
+                + " where n.nspname = 'public' and c.relname = 'plugin_catalog_state'"));
+  }
+
+  /**
+   * 真实迁移连接不受库级会话默认值影响：数据库默认 search_path 只指向 pg_catalog（其中无法创建任何用户对象），prepare 仍必须落在 public 的 唯当前
+   * V1，且在 pg_catalog 里既不留迁移历史也不留任何 V1 表。
+   *
+   * <p>会话级敌意默认值只能施加在 search_path 上：pgjdbc 在启动包里强制自己的 DateStyle 与 JVM 默认 TimeZone，会覆盖 URL {@code
+   * options} 与库级默认（实测），而 search_path 不被驱动接管，因此它正是「Flyway 自己打开的连接带着不受控默认值」的真实场景。内核要求的
+   * client_encoding/DateStyle/UTC/row_security 由迁移连接自己承担，见真实迁移连接记录的用例。
+   */
+  @Test
+  void prepareIgnoresHostileConnectionDefaults() throws Exception {
+    DataSource target = UpgradePostgresTestSupport.blankDatabase();
+    execute(target, "alter database " + databaseName(target) + " set search_path = 'pg_catalog'");
+    assertHostileSearchPathIsInEffect(target);
+
+    Run result = run("prepare", "--config", prepareConfig(target).toString());
+    assertEquals(0, result.exit(), result.err());
+    assertTrue(result.out().contains("mode=prepare"));
+    assertTrue(result.out().contains("applied=true"));
+    assertEquals("", result.err());
+
+    // 敌意默认值只用于驱动 prepare；恢复正常默认值后复用常规读取断言。
+    execute(target, "alter database " + databaseName(target) + " reset search_path");
+    try (Connection connection = target.getConnection()) {
+      assertEquals(
+          (long) LegacySchemaProfile.TARGET_V1_CHECKSUM,
+          UpgradePostgresTestSupport.v1Checksum(connection));
+    }
+    UpgradePostgresTestSupport.assertPristine(target);
+    for (String table : List.of("flyway_schema_history", "plugin_catalog_state")) {
+      assertEquals(
+          0L,
+          UpgradePostgresTestSupport.longValue(
+              target,
+              "select count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace"
+                  + " where n.nspname = 'pg_catalog' and c.relname = '"
+                  + table
+                  + "'"),
+          table);
+    }
+    assertEquals(
+        1L,
+        UpgradePostgresTestSupport.longValue(
+            target,
+            "select count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace"
+                + " where n.nspname = 'public' and c.relname = 'plugin_catalog_state'"));
+  }
+
+  /**
+   * 非 origin 的迁移连接必须被真实门禁拒绝：只让第一个连接（本进程 preflight）保持 origin，之后打开的迁移连接都是 replica。
+   *
+   * <p>若门禁只覆盖 preflight，这里就会准备成功；因此失败本身就是「门禁跑在真实迁移连接上」的证据，而没有任何 V1 DDL 被记录则说明它在 迁移事务的第一条语句之前中止。
+   */
+  @Test
+  void prepareRefusesANonOriginMigrationConnection() throws Exception {
+    DataSource target = UpgradePostgresTestSupport.blankDatabase();
+    UpgradeProbeDataSource probe = UpgradeProbeDataSource.nonOriginAfterTheFirstConnection(target);
+
+    LegacyUpgradeCliException failure =
+        assertThrows(LegacyUpgradeCliException.class, () -> LegacyDatabasePrepare.prepare(probe));
+
+    assertEquals(LegacyUpgradeCliException.Stage.PREPARE, failure.stage());
+    assertTrue(failure.outcomeUncertain());
+    assertTrue(probe.statementsByConnection().size() >= 2, "Flyway must open its own connection");
+    boolean gatedOnMigrationConnection = false;
+    for (List<String> recorded :
+        probe.statementsByConnection().subList(1, probe.statementsByConnection().size())) {
+      if (indexOf(recorded, CANONICAL_SEARCH_PATH) >= 0) {
+        gatedOnMigrationConnection = true;
+        assertTrue(indexOf(recorded, "create table") < 0, recorded.toString());
+      }
+    }
+    assertTrue(gatedOnMigrationConnection, probe.statementsByConnection().toString());
+    assertEquals(
+        0L,
+        UpgradePostgresTestSupport.longValue(
+            target,
+            "select count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace"
+                + " where n.nspname = 'public' and c.relname = 'plugin_catalog_state'"));
+  }
+
+  /** 真实迁移连接必须自己执行固定 session 前置与门禁，并在同一连接上先于 V1 的第一条 DDL。 */
+  @Test
+  void prepareAppliesCanonicalSessionSettingsOnTheMigrationConnection() throws Exception {
+    DataSource target = UpgradePostgresTestSupport.blankDatabase();
+    UpgradeProbeDataSource probe = UpgradeProbeDataSource.recording(target);
+
+    LegacyDatabasePrepare.prepare(probe);
+
+    boolean settingsBeforeDdl = false;
+    for (List<String> recorded : probe.statementsByConnection()) {
+      int settings = indexOf(recorded, CANONICAL_SEARCH_PATH);
+      int creationPath = indexOf(recorded, MIGRATION_CREATION_SEARCH_PATH);
+      int ddl = indexOf(recorded, V1_DDL);
+      if (settings >= 0 && creationPath > settings && ddl > creationPath) {
+        settingsBeforeDdl = true;
+      }
+    }
+    assertTrue(settingsBeforeDdl, probe.statementsByConnection().toString());
+    try (Connection connection = target.getConnection()) {
+      assertEquals(
+          (long) LegacySchemaProfile.TARGET_V1_CHECKSUM,
+          UpgradePostgresTestSupport.v1Checksum(connection));
+    }
+    UpgradePostgresTestSupport.assertPristine(target);
+  }
+
+  /** 库级默认 search_path 确实生效（否则上面的用例会因为无法施加敌意默认值而失去意义）。 */
+  private static void assertHostileSearchPathIsInEffect(DataSource dataSource) throws SQLException {
+    try (Connection connection = dataSource.getConnection();
+        Statement statement = connection.createStatement();
+        ResultSet rows =
+            statement.executeQuery("select current_schema(), current_setting('search_path')")) {
+      rows.next();
+      assertEquals("pg_catalog", rows.getString(1));
+      assertEquals("pg_catalog", rows.getString(2));
+    }
+  }
+
+  /** 记录中首个包含给定片段的语句下标，未出现时为 -1。 */
+  private static int indexOf(List<String> recorded, String fragment) {
+    for (int index = 0; index < recorded.size(); index++) {
+      if (recorded.get(index).contains(fragment)) {
+        return index;
+      }
+    }
+    return -1;
   }
 
   @Test

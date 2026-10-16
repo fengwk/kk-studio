@@ -1,6 +1,9 @@
 package fun.fengwk.kkstudio.web.upgrade;
 
 import org.flywaydb.core.Flyway;
+import org.flywaydb.core.api.callback.Callback;
+import org.flywaydb.core.api.callback.Context;
+import org.flywaydb.core.api.callback.Event;
 
 import javax.sql.DataSource;
 
@@ -16,8 +19,11 @@ import java.util.List;
  * <p>绝不 {@code CREATE DATABASE}/drop/truncate/reset/baseline/repair，也不对已有 V1 库或任何未知
  * namespace/table/view/sequence/type/routine/extension 做幂等迁移：应用前要求 {@code public}
  * 恰好存在且没有任何用户对象。baseline 由真实 Flyway 以唯一 classpath V1 应用（{@code baselineOnMigrate=false}、{@code
- * cleanDisabled=true}、严格 naming、零日志 sink），随后用当前 schema/history/pristine 守卫确认，不启动 Spring
- * auto-config/seed/catalog epoch1。
+ * cleanDisabled=true}、严格 naming、显式 {@code public} default schema、零日志 sink），随后用当前
+ * schema/history/pristine 守卫确认，不启动 Spring auto-config/seed/catalog epoch1。
+ *
+ * <p>Flyway 自己打开迁移连接并按 default schema 改写 search_path，因此固定 session 前置与服务器形态门禁还会通过一个最小 {@link
+ * Callback} 在迁移事务内重新应用（见 {@link TargetSessionCallback}）。
  *
  * <p>失败可能已经留下 Flyway 元数据或 DDL，因此应用后的任何失败都保守标记为需人工核验；本类不自动重试、不删除。
  */
@@ -26,6 +32,16 @@ final class LegacyDatabasePrepare {
   private static final String MIGRATION_LOCATION = "classpath:db/migration";
 
   /** {@code public} 是唯一允许的用户 schema，且必须恰好存在一个。 */
+  private static final String PUBLIC_SCHEMA_NAME = "public";
+
+  /**
+   * 迁移连接的 session search_path：PostgreSQL 用 search_path 首项作为创建命名空间，而 V1 是未限定 schema 的 DDL，因此首位必须是
+   * {@code public}；规范读取顺序（{@code pg_catalog} 前置以拒绝旧源遮蔽系统目录）只适用于转换会话，不能用在这里。
+   */
+  private static final String MIGRATION_SEARCH_PATH =
+      "set local search_path = public, pg_catalog, pg_temp";
+
+  /** 门禁查询：{@code public} schema 的存在性（不允许零个或重复）。 */
   private static final String PUBLIC_SCHEMA =
       "select count(*) from pg_namespace where nspname = 'public'";
 
@@ -97,14 +113,58 @@ final class LegacyDatabasePrepare {
       Flyway.configure()
           .dataSource(target)
           .locations(MIGRATION_LOCATION)
+          .defaultSchema(PUBLIC_SCHEMA_NAME)
+          .schemas(PUBLIC_SCHEMA_NAME)
+          .createSchemas(false)
           .baselineOnMigrate(false)
           .cleanDisabled(true)
           .validateMigrationNaming(true)
+          .callbacks(new TargetSessionCallback())
           .loggers()
           .load()
           .migrate();
     } catch (RuntimeException error) {
       throw failure("the baseline migration did not complete", true);
+    }
+  }
+
+  /**
+   * 真实迁移连接上的固定 session 前置与服务器形态门禁：preflight/postcheck 只覆盖本类自己打开的连接，Flyway 会另开物理连接并按 default schema
+   * 切换 search_path，因此必须在迁移事务内重新应用。
+   *
+   * <p>BEFORE_EACH_MIGRATE 与迁移本身同一事务（PostgreSQL 的 V1 全是事务性 DDL），且在 Flyway 完成 schema 切换之后触发；
+   * 这里失败只意味着目标可能已留下 Flyway 元数据，因此沿 Flyway 边界收敛为上层的 PREPARE 阶段失败。
+   *
+   * <p>包内可见（package-private）：它只是离线升级包内部的迁移会话前置，不是平台 API；固定事件、同事务声明与名字由包内测试钉住。
+   */
+  static final class TargetSessionCallback implements Callback {
+
+    @Override
+    public boolean supports(Event event, Context context) {
+      return Event.BEFORE_EACH_MIGRATE == event;
+    }
+
+    @Override
+    public boolean canHandleInTransaction(Event event, Context context) {
+      return true;
+    }
+
+    @Override
+    public void handle(Event event, Context context) {
+      Connection connection = context.getConnection();
+      LegacyDatabaseUpgrade.beginTargetSession(connection);
+      try (Statement statement = connection.createStatement()) {
+        statement.execute(MIGRATION_SEARCH_PATH);
+      } catch (SQLException error) {
+        throw new LegacyDatabaseUpgradeException(
+            LegacyDatabaseUpgradeException.Stage.CONNECTION,
+            "cannot establish the target migration session");
+      }
+    }
+
+    @Override
+    public String getCallbackName() {
+      return "kk-studio-offline-target-session";
     }
   }
 
