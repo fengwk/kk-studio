@@ -67,6 +67,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -75,12 +76,12 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * 原样保留源 DEV/MAIN 版本 4 Canvas 历史的真实消费者边界（真实 PostgreSQL）。
+ * 版本 4（旧 codec 形状）Canvas 运行历史在真实 PostgreSQL 上的消费者边界。
  *
- * <p>本切片只验证一条候选边界：已终结 {@code SUCCEEDED}/{@code FAILED}/{@code CANCELLED} 的版本 4 state JSON 由现有
- * repository、query、run service 与 transactions 入口原样保留——查看与精确 requestId 重放返回同一份 JSON、同一
- * status/stage/requestId/error，既不执行旧计划，也不把缺失的目录 epoch/definition/source 伪造成 V5 绑定。UNKNOWN 仍只
- * 走人工核查：start/cancel 明确拒绝，resolve 必须先经 V5 decode 并显式失败。
+ * <p>已终结 {@code SUCCEEDED}/{@code FAILED}/{@code CANCELLED} 的 state JSON 由现有 repository、query、run
+ * service 与 transactions 入口按 {@code stage} 单字段读取并原样保留：查看与精确 requestId 重放返回同一份 JSON、同一
+ * status/stage/requestId/error，已物化输出与其 Blob 引用按真实 owner 形态存续。UNKNOWN 只走人工核查：start/cancel 明确
+ * 拒绝，resolve 必须先经 V5 decode 并显式失败。
  */
 @Import(PostgresqlCanvasLegacyV4StateIntegrationTest.LegacyCatalogConfiguration.class)
 class PostgresqlCanvasLegacyV4StateIntegrationTest extends PostgresCanvasInfraTestSupport {
@@ -107,8 +108,41 @@ class PostgresqlCanvasLegacyV4StateIntegrationTest extends PostgresCanvasInfraTe
   private static final long LEGACY_WIDTH = 3_840L;
   private static final long LEGACY_HEIGHT = 2_160L;
 
-  /** 用于证明 V5 decode 不会被 legacy state 满足的显式拒绝消息。 */
+  /** V5 decode 对版本 4 state 的显式拒绝消息。 */
   private static final String V5_VERSION_REJECTION = "state.version must be 5";
+
+  /** 旧 V4 codec 的字段白名单：仅用于断言 fixture 保持该结构，不复刻 codec 语义。 */
+  private static final Set<String> LEGACY_ROOT_FIELDS =
+      Set.of("version", "plan", "stage", "adapterState");
+
+  private static final Set<String> LEGACY_PLAN_FIELDS =
+      Set.of(
+          "canvasId",
+          "nodeId",
+          "nodeName",
+          "requestId",
+          "functionName",
+          "args",
+          "manifest",
+          "outputs",
+          "submitState");
+  private static final Set<String> LEGACY_REFERENCE_FIELDS =
+      Set.of(
+          "sourceNodeId",
+          "sourceIndex",
+          "resourceId",
+          "blobId",
+          "kind",
+          "name",
+          "mediaType",
+          "sizeBytes",
+          "width",
+          "height",
+          "durationMs");
+  private static final Set<String> LEGACY_OUTPUT_FIELDS =
+      Set.of("resourceId", "index", "kind", "name");
+  private static final Set<String> LEGACY_SUBMIT_STATES =
+      Set.of("PENDING", "SUBMITTING", "SUBMITTED");
 
   @Autowired private CanvasQueryService queryService;
   @Autowired private CanvasCommandService commandService;
@@ -258,6 +292,70 @@ class PostgresqlCanvasLegacyV4StateIntegrationTest extends PostgresCanvasInfraTe
     assertTrue(
         resourceRepository.findById(legacy.canvasId(), legacy.sourceResourceId()).isEmpty(),
         "releasing the last pin must reclaim the orphaned historical resource");
+  }
+
+  /**
+   * SUCCEEDED 终态的真实形态：输出资源已物化并挂在 Function 节点上，Blob 引用由资源行持有；成功流程释放本次 Run 的 全部 pin，因此终态不存在 OUTPUT
+   * pin。换资源时无 pin 的旧输出资源按既有语义删除并释放 Blob 引用。
+   */
+  @Test
+  void succeededTerminalKeepsMaterializedOutputUntilNodeResourcesAreReplaced() {
+    LegacyRun legacy = insertLegacyRun(CanvasFunctionRunStatus.SUCCEEDED, false);
+    MaterializedOutput output = materializeOutput(legacy);
+
+    assertEquals(0, pinCount(legacy.canvasId()), "success releases every pin of the run");
+    assertEquals(1, blobRefCount(output.blobId()));
+    assertEquals("ACTIVE", blobState(output.blobId()));
+
+    CanvasResourceNode node =
+        nodeOf(queryService.findSnapshot(legacy.canvasId()).orElseThrow(), legacy.nodeId());
+    assertEquals(
+        List.of(output.resourceId()), node.resources().stream().map(CanvasResource::id).toList());
+    assertEquals(output.blobId(), node.resources().get(0).blobId());
+    assertEquals(
+        legacy.storedJson(), functionService.get(legacy.canvasId(), legacy.nodeId()).stateJson());
+
+    CanvasCommandResult replaced =
+        commandService.applyCommands(
+            legacy.canvasId(),
+            UUID.randomUUID(),
+            List.of(
+                new CanvasCommand.SetNodeResources(
+                    legacy.nodeId(),
+                    List.of(output.resourceId()),
+                    List.of(new CanvasResourceInput.Text("replacement.png", "replacement")))));
+    assertInstanceOf(Accepted.class, replaced);
+
+    assertTrue(resourceRepository.findById(legacy.canvasId(), output.resourceId()).isEmpty());
+    assertEquals(0, blobRefCount(output.blobId()));
+    assertEquals("DELETING", blobState(output.blobId()));
+    assertEquals(0, pinCount(legacy.canvasId()));
+    assertVerbatimUnchanged(legacy);
+  }
+
+  /** 删除 Canvas 走真实现有语义：终态 Run、节点资源与全部 Blob 引用一起释放，pin 表清空且可重复调用。 */
+  @Test
+  void deleteCanvasReleasesTerminalRunResourcesAndBlobReferences() {
+    LegacyRun legacy = insertLegacyRun(CanvasFunctionRunStatus.SUCCEEDED, false);
+    addSourceBlob(legacy);
+    MaterializedOutput output = materializeOutput(legacy);
+    assertEquals(1, blobRefCount(legacy.blobId()));
+    assertEquals(1, blobRefCount(output.blobId()));
+
+    commandService.deleteCanvas(legacy.canvasId());
+
+    assertTrue(canvasStore.findDocument(legacy.canvasId()).isEmpty());
+    assertTrue(canvasStore.listNodes(legacy.canvasId()).isEmpty());
+    assertEquals(0, jdbc.queryForObject("select count(1) from canvas_function_run", Integer.class));
+    assertEquals(
+        0, jdbc.queryForObject("select count(1) from canvas_function_resource_pin", Integer.class));
+    assertTrue(resourceRepository.findByCanvasId(legacy.canvasId()).isEmpty());
+    assertEquals(0, blobRefCount(legacy.blobId()));
+    assertEquals("DELETING", blobState(legacy.blobId()));
+    assertEquals(0, blobRefCount(output.blobId()));
+    assertEquals("DELETING", blobState(output.blobId()));
+
+    commandService.deleteCanvas(legacy.canvasId());
   }
 
   /** 新 requestId 覆盖终态时由真实当前目录建立 V5 绑定，绝不把缺失 epoch/definition/source 的 V4 升级为假绑定。 */
@@ -486,7 +584,7 @@ class PostgresqlCanvasLegacyV4StateIntegrationTest extends PostgresCanvasInfraTe
     if (withSourceAndPin) {
       canvasStore.addNode(
           new NodeRecord(sourceNodeId, canvasId, "legacy-source", TRANSFORM, null, null));
-      addBlob(canvasId, sourceNodeId, sourceResourceId, blobId);
+      addPinnedSourceBlob(canvasId, sourceNodeId, sourceResourceId, blobId);
     }
     canvasStore.addNode(functionNode(canvasId, nodeId, "legacy-node"));
     jdbc.update(
@@ -520,28 +618,75 @@ class PostgresqlCanvasLegacyV4StateIntegrationTest extends PostgresCanvasInfraTe
         readStoredState(nodeId));
   }
 
-  /** 历史输入 blob：storage_blob 与 canvas_resource 行都按 fixture 的精确尺寸写入。 */
-  private void addBlob(UUID canvasId, UUID sourceNodeId, UUID sourceResourceId, UUID blobId) {
+  /** 历史输入资源连同 INPUT pin 一起落库：storage_blob 与 canvas_resource 行按 fixture 的精确尺寸写入。 */
+  private void addPinnedSourceBlob(
+      UUID canvasId, UUID sourceNodeId, UUID sourceResourceId, UUID blobId) {
+    addActiveBlob(blobId, LEGACY_SIZE_BYTES, LEGACY_WIDTH, LEGACY_HEIGHT, LEGACY_MEDIA_TYPE);
+    addResource(sourceResourceId, canvasId, sourceNodeId, 0, blobId, "legacy-source.png");
+  }
+
+  /** 历史输入资源仍由源节点持有：成功流程只释放 pin，不删除有 owner 的资源行。 */
+  private void addSourceBlob(LegacyRun legacy) {
+    canvasStore.addNode(
+        new NodeRecord(
+            legacy.sourceNodeId(), legacy.canvasId(), "legacy-source", TRANSFORM, null, null));
+    addActiveBlob(
+        legacy.blobId(), LEGACY_SIZE_BYTES, LEGACY_WIDTH, LEGACY_HEIGHT, LEGACY_MEDIA_TYPE);
+    addResource(
+        legacy.sourceResourceId(),
+        legacy.canvasId(),
+        legacy.sourceNodeId(),
+        0,
+        legacy.blobId(),
+        "legacy-source.png");
+  }
+
+  /** 物化 SUCCEEDED 的输出槽位：blob 行 + 已挂接到节点 index 0 的 Resource 行（与成功流程的挂接形态一致）。 */
+  private MaterializedOutput materializeOutput(LegacyRun legacy) {
+    JsonNode output =
+        FIXTURE_MAPPER.readTree(legacy.fixtureJson()).get("plan").get("outputs").get(0);
+    UUID resourceId = UUID.fromString(output.get("resourceId").stringValue());
+    UUID blobId = UUID.randomUUID();
+    addActiveBlob(blobId, LEGACY_SIZE_BYTES, LEGACY_WIDTH, LEGACY_HEIGHT, LEGACY_MEDIA_TYPE);
+    addResource(
+        resourceId,
+        legacy.canvasId(),
+        legacy.nodeId(),
+        0,
+        blobId,
+        output.get("name").stringValue());
+    return new MaterializedOutput(resourceId, blobId);
+  }
+
+  private void addResource(
+      UUID resourceId, UUID canvasId, UUID ownerNodeId, int index, UUID blobId, String name) {
+    resourceRepository.add(
+        new CanvasResource(
+            resourceId, canvasId, ownerNodeId, index, blobId, name, null, Instant.now()));
+  }
+
+  /** storage_blob 行按 fixture 的精确尺寸写入并初始持有 1 个引用。 */
+  private void addActiveBlob(
+      UUID blobId, long sizeBytes, long width, long height, String mediaType) {
     jdbc.update(
         "insert into storage_blob"
             + " (id, sha256, size_bytes, media_type, width, height, ref_count, state)"
             + " values (?, ?, ?, ?, ?, ?, 1, 'ACTIVE')",
         blobId,
         String.format("%064x", blobId.getLeastSignificantBits() & Long.MAX_VALUE),
-        LEGACY_SIZE_BYTES,
-        LEGACY_MEDIA_TYPE,
-        LEGACY_WIDTH,
-        LEGACY_HEIGHT);
-    resourceRepository.add(
-        new CanvasResource(
-            sourceResourceId,
-            canvasId,
-            sourceNodeId,
-            0,
-            blobId,
-            "legacy-source.png",
-            null,
-            Instant.now()));
+        sizeBytes,
+        mediaType,
+        width,
+        height);
+  }
+
+  private int blobRefCount(UUID blobId) {
+    return jdbc.queryForObject(
+        "select ref_count from storage_blob where id = ?", Integer.class, blobId);
+  }
+
+  private String blobState(UUID blobId) {
+    return jdbc.queryForObject("select state from storage_blob where id = ?", String.class, blobId);
   }
 
   private static String legacyError(CanvasFunctionRunStatus status) {
@@ -552,6 +697,11 @@ class PostgresqlCanvasLegacyV4StateIntegrationTest extends PostgresCanvasInfraTe
     };
   }
 
+  /**
+   * 读取 fixture 并断言其保持旧 V4 codec 的字段白名单与 version=4。
+   *
+   * <p>断言只覆盖结构形状，不复刻 V4 codec 的解析或校验语义。
+   */
   private static String readFixture(CanvasFunctionRunStatus status) {
     String path = FIXTURE_DIR + "legacy-v4-" + status.name().toLowerCase(Locale.ROOT) + ".json";
     try (InputStream stream =
@@ -559,10 +709,38 @@ class PostgresqlCanvasLegacyV4StateIntegrationTest extends PostgresCanvasInfraTe
       if (stream == null) {
         throw new IllegalStateException("missing legacy V4 fixture: " + path);
       }
-      return new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+      String json = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+      assertLegacyV4Shape(json);
+      return json;
     } catch (IOException error) {
       throw new UncheckedIOException(error);
     }
+  }
+
+  private static void assertLegacyV4Shape(String fixtureJson) {
+    JsonNode root = FIXTURE_MAPPER.readTree(fixtureJson);
+    assertEquals(LEGACY_ROOT_FIELDS, fieldNames(root));
+    assertEquals(4, root.get("version").intValue());
+    assertFalse(root.get("stage").stringValue().isBlank());
+    assertTrue(root.get("adapterState").isObject());
+    JsonNode plan = root.get("plan");
+    assertEquals(LEGACY_PLAN_FIELDS, fieldNames(plan));
+    assertTrue(plan.get("args").isObject());
+    assertTrue(LEGACY_SUBMIT_STATES.contains(plan.get("submitState").stringValue()));
+    JsonNode manifest = plan.get("manifest");
+    assertTrue(manifest.isArray());
+    for (int index = 0; index < manifest.size(); index++) {
+      assertEquals(LEGACY_REFERENCE_FIELDS, fieldNames(manifest.get(index)));
+    }
+    JsonNode outputs = plan.get("outputs");
+    assertTrue(outputs.isArray());
+    for (int index = 0; index < outputs.size(); index++) {
+      assertEquals(LEGACY_OUTPUT_FIELDS, fieldNames(outputs.get(index)));
+    }
+  }
+
+  private static Set<String> fieldNames(JsonNode node) {
+    return new HashSet<>(node.propertyNames());
   }
 
   /** 终态 legacy Run 的身份与原始 JSON。 */
@@ -577,6 +755,9 @@ class PostgresqlCanvasLegacyV4StateIntegrationTest extends PostgresCanvasInfraTe
       String error,
       String fixtureJson,
       String storedJson) {}
+
+  /** 物化输出槽位的身份：Resource 行与其持有的 Blob 引用。 */
+  private record MaterializedOutput(UUID resourceId, UUID blobId) {}
 
   /** 目录 stub：任何 acquire 都直接抛错，用于证明精确重放完全不查目录。 */
   private static final class RejectingCanvasFunctionCatalogSource
