@@ -306,6 +306,10 @@ class PostgresqlCanvasLegacyV4StateIntegrationTest extends PostgresCanvasInfraTe
     assertEquals(0, pinCount(legacy.canvasId()), "success releases every pin of the run");
     assertEquals(1, blobRefCount(output.blobId()));
     assertEquals("ACTIVE", blobState(output.blobId()));
+    assertEquals(
+        "video/mp4",
+        jdbc.queryForObject(
+            "select media_type from storage_blob where id = ?", String.class, output.blobId()));
 
     CanvasResourceNode node =
         nodeOf(queryService.findSnapshot(legacy.canvasId()).orElseThrow(), legacy.nodeId());
@@ -618,7 +622,7 @@ class PostgresqlCanvasLegacyV4StateIntegrationTest extends PostgresCanvasInfraTe
         readStoredState(nodeId));
   }
 
-  /** 历史输入资源连同 INPUT pin 一起落库：storage_blob 与 canvas_resource 行按 fixture 的精确尺寸写入。 */
+  /** 历史输入资源行：storage_blob 与 canvas_resource 按 fixture 的精确尺寸写入。 */
   private void addPinnedSourceBlob(
       UUID canvasId, UUID sourceNodeId, UUID sourceResourceId, UUID blobId) {
     addActiveBlob(blobId, LEGACY_SIZE_BYTES, LEGACY_WIDTH, LEGACY_HEIGHT, LEGACY_MEDIA_TYPE);
@@ -647,7 +651,7 @@ class PostgresqlCanvasLegacyV4StateIntegrationTest extends PostgresCanvasInfraTe
         FIXTURE_MAPPER.readTree(legacy.fixtureJson()).get("plan").get("outputs").get(0);
     UUID resourceId = UUID.fromString(output.get("resourceId").stringValue());
     UUID blobId = UUID.randomUUID();
-    addActiveBlob(blobId, LEGACY_SIZE_BYTES, LEGACY_WIDTH, LEGACY_HEIGHT, LEGACY_MEDIA_TYPE);
+    addActiveBlob(blobId, LEGACY_SIZE_BYTES, LEGACY_WIDTH, LEGACY_HEIGHT, "video/mp4");
     addResource(
         resourceId,
         legacy.canvasId(),
