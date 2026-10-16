@@ -1,0 +1,29 @@
+{
+  "message": {
+    "role": "TOOL",
+    "contents": [
+      {
+        "type": "tool_result",
+        "toolCallId": "call-legacy-cut",
+        "toolName": "bash",
+        "rendererKey": "bash",
+        "contents": [
+          {"type": "text", "text": "history cut"}
+        ],
+        "error": false,
+        "detailsJson": "{}"
+      }
+    ]
+  },
+  "assistantMetadata": null,
+  "toolResultMetadata": {
+    "assistantEntryId": "00000000-0000-0000-0000-0000000000a2",
+    "toolCallId": "call-legacy-cut",
+    "callIndex": 1,
+    "status": "UNKNOWN",
+    "synthetic": true,
+    "reason": "HISTORY_CUT",
+    "inputReceipt": null,
+    "invocationId": null
+  }
+}
