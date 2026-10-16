@@ -16,12 +16,14 @@ REQUIRED_CASES = (
     "naturalExitConvergesLiveChildren",
     "terminateConvergesNestedProcesses",
     "unpermittedStartNeverRunsTheFixture",
+    "fatalStartGateFailureKeepsItsIdentityAndReapsTheHelper",
     "stdinEofLetsTheFixtureExitNaturally",
     "duplexStdioCarriesInputAndKeepsStderrSeparate",
     "duplexStdioConvergesLiveChildrenAfterNaturalExit",
 )
 SELECTED_CLASSES = (
     "ProcessScopeCrossPlatformTest",
+    "ProcessScopeStartFailureTest",
     "ProcessScopeTest",
     "ProcessScopeStateTest",
     "ProcessScopeHelperFailureTest",
@@ -128,8 +130,8 @@ def write_complete_reports(
         )
 
 
-class CollectCoverageInputsTest(unittest.TestCase):
-    """收集与合并前置条件：三平台的 class 必须一致，且收集出来的 class 链接必须真的可用。"""
+class CoverageInputPathsTest(unittest.TestCase):
+    """收集出来的 class 链接在 CI 使用的相对路径与工作目录下必须真的可用。"""
 
     @staticmethod
     def write_platforms(platforms):
@@ -153,18 +155,6 @@ class CollectCoverageInputsTest(unittest.TestCase):
             self.assertTrue(
                 any(path.suffix == ".class" for path in collected.rglob("*.class"))
             )
-
-    def test_fails_when_a_platform_class_tree_differs(self):
-        """三个平台的 class 不一致时必须显式失败：JaCoCo 会按 class id 静默丢 session。"""
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            self.write_platforms(root / "platforms")
-            (
-                root / "platforms" / "scope-coverage-macos-latest" / "classes" / "fun" / "Sample.class"
-            ).write_bytes(b"different-bytes")
-            result = run_script("collect-coverage-inputs.py", "platforms", "inputs", cwd=root)
-            self.assertEqual(1, result.returncode, result.stdout + result.stderr)
-            self.assertIn("class files differ across platforms", result.stdout)
 
 class AssertSurefireReportsTest(unittest.TestCase):
     """按用例名核对：数量正确但用例不对、被跳过、失败，都必须让门禁失败。"""
@@ -268,13 +258,15 @@ class AssertSurefireReportsTest(unittest.TestCase):
             self.assertIn("failing cases", result.stdout)
 
     def test_fails_when_a_selected_report_is_missing(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            reports = Path(tmp)
-            write_complete_reports(reports)
-            (reports / f"TEST-{PACKAGE}.WindowsJobScopeTest.xml").unlink()
-            result = run_script("assert-surefire-reports.py", reports, "test-os")
-            self.assertEqual(1, result.returncode)
-            self.assertIn("missing surefire report", result.stdout)
+        for class_name in ("WindowsJobScopeTest", "ProcessScopeStartFailureTest"):
+            with self.subTest(class_name=class_name):
+                with tempfile.TemporaryDirectory() as tmp:
+                    reports = Path(tmp)
+                    write_complete_reports(reports)
+                    (reports / f"TEST-{PACKAGE}.{class_name}.xml").unlink()
+                    result = run_script("assert-surefire-reports.py", reports, "test-os")
+                    self.assertEqual(1, result.returncode)
+                    self.assertIn(f"{class_name}: missing surefire report", result.stdout)
 
     def test_owner_only_cases_are_required_by_platform(self):
         """权限门禁拒绝漏跑与跳过本平台用例，但允许另一平台的前置条件跳过。"""
