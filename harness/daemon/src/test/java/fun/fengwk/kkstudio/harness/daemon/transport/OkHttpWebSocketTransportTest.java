@@ -18,8 +18,12 @@ import org.junit.jupiter.api.Test;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /** OkHttp transport 适配器必须保留握手协商门禁、完整文本成帧以及 close/disconnect 所有权。 */
@@ -28,6 +32,9 @@ class OkHttpWebSocketTransportTest {
   private static final URI GATEWAY = URI.create("ws://127.0.0.1:1/daemon");
   private static final String DEFLATE = "permessage-deflate";
 
+  /** 与生产契约一致的握手预算（测试不引用生产私有常量）。 */
+  private static final long HANDSHAKE_BUDGET_MILLIS = 2000;
+
   /** 连接适配器发送完整帧，拒绝已关闭 socket，并发送一次 graceful close。 */
   @Test
   void adaptsSendAndCloseLifecycle() {
@@ -35,7 +42,7 @@ class OkHttpWebSocketTransportTest {
     OkHttpWebSocketTransport.OkHttpWebSocketConnection connection =
         new OkHttpWebSocketTransport.OkHttpWebSocketConnection();
     connection.attach(webSocket);
-    connection.markOpen();
+    assertTrue(connection.markOpen());
 
     connection.sendText("hello").toCompletableFuture().join();
     assertEquals(List.of("hello"), webSocket.textMessages);
@@ -84,10 +91,11 @@ class OkHttpWebSocketTransportTest {
     RecordingListener listener = new RecordingListener();
     CompletionStage<DaemonConnection> stage = transport(dialer).connect(listener);
 
-    FakeWebSocket webSocket = new FakeWebSocket();
+    FakeWebSocket webSocket = dialer.webSocket;
     dialer.listener.onOpen(webSocket, response(null));
 
     assertEquals(1, webSocket.closeCalls.get());
+    assertEquals(0, webSocket.cancelCalls.get());
     assertEquals(OkHttpWebSocketTransport.MANDATORY_EXTENSION, webSocket.closeStatus);
     assertEquals(1, listener.disconnections.get());
     assertThrows(CompletionException.class, () -> stage.toCompletableFuture().join());
@@ -103,12 +111,39 @@ class OkHttpWebSocketTransportTest {
     RecordingListener listener = new RecordingListener();
     CompletionStage<DaemonConnection> stage = transport(dialer).connect(listener);
 
-    FakeWebSocket webSocket = new FakeWebSocket();
-    dialer.listener.onOpen(webSocket, response("x-custom-extension"));
+    dialer.listener.onOpen(dialer.webSocket, response("x-custom-extension"));
 
-    assertEquals(OkHttpWebSocketTransport.MANDATORY_EXTENSION, webSocket.closeStatus);
+    assertEquals(OkHttpWebSocketTransport.MANDATORY_EXTENSION, dialer.webSocket.closeStatus);
     assertThrows(CompletionException.class, () -> stage.toCompletableFuture().join());
     assertEquals(1, listener.disconnections.get());
+  }
+
+  /** 形如 {@code not-permessage-deflate} 的扩展名不得被子串匹配误判为已协商压缩。 */
+  @Test
+  void rejectsExtensionWhoseTokenOnlyContainsTheDeflateName() {
+    FakeDialer dialer = new FakeDialer();
+    RecordingListener listener = new RecordingListener();
+    CompletionStage<DaemonConnection> stage = transport(dialer).connect(listener);
+
+    dialer.listener.onOpen(dialer.webSocket, response("not-permessage-deflate"));
+
+    assertEquals(OkHttpWebSocketTransport.MANDATORY_EXTENSION, dialer.webSocket.closeStatus);
+    assertThrows(CompletionException.class, () -> stage.toCompletableFuture().join());
+    assertEquals(1, listener.disconnections.get());
+  }
+
+  /** 逗号分组、大小写不同但名称 token 相同时视为协商成功。 */
+  @Test
+  void acceptsDeflateTokenWithParametersAndDifferentCase() {
+    FakeDialer dialer = new FakeDialer();
+    RecordingListener listener = new RecordingListener();
+    CompletionStage<DaemonConnection> stage = transport(dialer).connect(listener);
+
+    dialer.listener.onOpen(dialer.webSocket, response("x-custom; a=1, PerMessage-Deflate; b=2"));
+
+    DaemonConnection connection = stage.toCompletableFuture().join();
+    assertTrue(connection.isOpen());
+    assertEquals(0, listener.disconnections.get());
   }
 
   /** 单条入站文本超过上限时确定性拒绝：一次 1008 close、无消息投递、不再消费后续帧。 */
@@ -194,6 +229,167 @@ class OkHttpWebSocketTransportTest {
     assertFalse(connection.isOpen());
   }
 
+  /** dial 返回前同步回调 onOpen 时：仍恰好交付一次，close 幂等。 */
+  @Test
+  void deliversWhenOnOpenArrivesBeforeDialReturns() {
+    FakeDialer dialer = new FakeDialer();
+    dialer.synchronousOpen = true;
+    RecordingListener listener = new RecordingListener();
+    OkHttpWebSocketTransport transport = transport(dialer);
+
+    DaemonConnection connection = transport.connect(listener).toCompletableFuture().join();
+
+    assertTrue(connection.isOpen());
+    assertEquals(0, listener.disconnections.get());
+    connection.close();
+    connection.close();
+    assertEquals(1, dialer.webSocket.closeCalls.get());
+    transport.close();
+  }
+
+  /** 未交付握手在 transport close 时结算：future 失败、原生句柄取消、断开通知一次、dialer 释放。 */
+  @Test
+  void closesPendingHandshakeAndReleasesClientOnTransportClose() {
+    FakeDialer dialer = new FakeDialer();
+    RecordingListener listener = new RecordingListener();
+    OkHttpWebSocketTransport transport = transport(dialer);
+    CompletableFuture<DaemonConnection> stage = transport.connect(listener).toCompletableFuture();
+
+    transport.close();
+    transport.close();
+
+    assertTrue(dialer.closed.get());
+    assertTrue(stage.isCompletedExceptionally());
+    assertEquals(1, listener.disconnections.get());
+    assertEquals(1, dialer.webSocket.cancelCalls.get());
+  }
+
+  /** close 时单个使用者的断开回调失败不得跳过其余握手与 dialer 释放，并保留首个失败。 */
+  @Test
+  void continuesClosingRemainingHandshakesWhenOneCallbackFails() {
+    FakeDialer dialer = new FakeDialer();
+    OkHttpWebSocketTransport transport = transport(dialer);
+    IllegalStateException boom = new IllegalStateException("listener failed");
+    CompletableFuture<DaemonConnection> first =
+        transport.connect(new FailingListener(boom)).toCompletableFuture();
+    RecordingListener second = new RecordingListener();
+    CompletableFuture<DaemonConnection> secondStage =
+        transport.connect(second).toCompletableFuture();
+
+    IllegalStateException thrown = assertThrows(IllegalStateException.class, transport::close);
+
+    assertSame(boom, thrown);
+    assertTrue(dialer.closed.get());
+    assertTrue(first.isCompletedExceptionally());
+    assertTrue(secondStage.isCompletedExceptionally());
+    assertEquals(1, second.disconnections.get());
+  }
+
+  /** dialer 释放失败必须向外传播，且此时握手已被收敛。 */
+  @Test
+  void propagatesDialerCloseFailureAfterSettlingHandshakes() {
+    FakeDialer dialer = new FakeDialer();
+    dialer.closeFailure = new IllegalStateException("client release failed");
+    OkHttpWebSocketTransport transport = transport(dialer);
+    CompletableFuture<DaemonConnection> stage =
+        transport.connect(new RecordingListener()).toCompletableFuture();
+
+    IllegalStateException thrown = assertThrows(IllegalStateException.class, transport::close);
+
+    assertSame(dialer.closeFailure, thrown);
+    assertTrue(stage.isCompletedExceptionally());
+    assertEquals(1, dialer.webSocket.cancelCalls.get());
+  }
+
+  /** close 之后拒绝新连接，且不再发起 upgrade。 */
+  @Test
+  void rejectsConnectAfterClose() {
+    FakeDialer dialer = new FakeDialer();
+    OkHttpWebSocketTransport transport = transport(dialer);
+    transport.close();
+    int dialsBefore = dialer.dialCalls.get();
+
+    CompletionStage<DaemonConnection> stage = transport.connect(new RecordingListener());
+
+    assertTrue(stage.toCompletableFuture().isCompletedExceptionally());
+    assertEquals(dialsBefore, dialer.dialCalls.get());
+  }
+
+  /** 握手期限到期后迟到的 onOpen 不得复活连接：有界失败、原生句柄取消、恰好一次断开。 */
+  @Test
+  void ignoresLateOnOpenAfterHandshakeDeadline() {
+    FakeDialer dialer = new FakeDialer();
+    RecordingListener listener = new RecordingListener();
+    OkHttpWebSocketTransport transport = transport(dialer);
+    CompletableFuture<DaemonConnection> stage = transport.connect(listener).toCompletableFuture();
+
+    assertThrows(
+        ExecutionException.class,
+        () -> stage.get(HANDSHAKE_BUDGET_MILLIS + 3000, TimeUnit.MILLISECONDS));
+
+    // 迟到 onOpen：不交付、不复活已取消连接、不投递后续帧。
+    dialer.listener.onOpen(dialer.webSocket, response(DEFLATE));
+    dialer.listener.onMessage(dialer.webSocket, "late");
+
+    assertTrue(stage.isCompletedExceptionally());
+    assertEquals(1, listener.disconnections.get());
+    assertEquals(1, dialer.webSocket.cancelCalls.get());
+    assertTrue(listener.messages.isEmpty());
+    transport.close();
+  }
+
+  /** 超时与 close 竞争时只终结一次：一次失败结算、一次断开通知、一次取消。 */
+  @Test
+  void settlesHandshakeOnceWhenCloseRacesWithDialbacks() {
+    FakeDialer dialer = new FakeDialer();
+    RecordingListener listener = new RecordingListener();
+    OkHttpWebSocketTransport transport = transport(dialer);
+    CompletableFuture<DaemonConnection> stage = transport.connect(listener).toCompletableFuture();
+
+    // close 先到：pending 握手立即失败；随后迟到的 open/failure 不得改变终态。
+    transport.close();
+    dialer.listener.onOpen(dialer.webSocket, response(DEFLATE));
+    dialer.listener.onFailure(dialer.webSocket, new IllegalStateException("late"), null);
+
+    assertTrue(stage.isCompletedExceptionally());
+    assertEquals(1, listener.disconnections.get());
+    assertEquals(1, dialer.webSocket.cancelCalls.get());
+  }
+
+  /** transport close 收敛已交付连接：强制中止原生句柄并恰好通知一次断开。 */
+  @Test
+  void abortsDeliveredConnectionAndNotifiesOnceOnTransportClose() {
+    FakeDialer dialer = new FakeDialer();
+    dialer.synchronousOpen = true;
+    RecordingListener listener = new RecordingListener();
+    OkHttpWebSocketTransport transport = transport(dialer);
+    DaemonConnection connection = transport.connect(listener).toCompletableFuture().join();
+
+    transport.close();
+
+    assertFalse(connection.isOpen());
+    assertEquals(1, dialer.webSocket.cancelCalls.get());
+    assertEquals(1, listener.disconnections.get());
+  }
+
+  /** transport close 不因已请求 graceful close 而跳过取消：先发一次 close 帧，再强制取消原生句柄。 */
+  @Test
+  void cancelsNativeHandleAfterGracefulCloseRequestOnTransportClose() {
+    FakeDialer dialer = new FakeDialer();
+    dialer.synchronousOpen = true;
+    RecordingListener listener = new RecordingListener();
+    OkHttpWebSocketTransport transport = transport(dialer);
+    DaemonConnection connection = transport.connect(listener).toCompletableFuture().join();
+
+    connection.close();
+    transport.close();
+
+    assertEquals(1, dialer.webSocket.closeCalls.get());
+    assertEquals(OkHttpWebSocketTransport.NORMAL_CLOSURE, dialer.webSocket.closeStatus);
+    assertEquals(1, dialer.webSocket.cancelCalls.get());
+    assertEquals(1, listener.disconnections.get());
+  }
+
   /** 非法上限在构造期拒绝。 */
   @Test
   void rejectsInvalidConstructorArguments() {
@@ -217,6 +413,7 @@ class OkHttpWebSocketTransportTest {
     assertThrows(CompletionException.class, () -> stage.toCompletableFuture().join());
     assertNotNull(defaultTransport.connect(listener));
     defaultTransport.close();
+    boundedTransport.close();
   }
 
   /** 完成一次成功握手并返回交付的连接，逼近生产时序：先 dial，再收到 101 + 扩展协商。 */
@@ -228,7 +425,6 @@ class OkHttpWebSocketTransportTest {
       FakeDialer dialer, RecordingListener listener, int maxInboundTextChars) {
     CompletionStage<DaemonConnection> stage =
         transport(dialer, maxInboundTextChars).connect(listener);
-    dialer.webSocket = new FakeWebSocket();
     dialer.listener.onOpen(dialer.webSocket, response(DEFLATE));
     return stage.toCompletableFuture().join();
   }
@@ -254,17 +450,54 @@ class OkHttpWebSocketTransportTest {
     return builder.build();
   }
 
-  /** 捕获 upgrade 请求与 listener，让测试完全掌控握手与入站帧时序。 */
+  /** 捕获 upgrade 请求与 listener，让测试完全掌控握手与入站帧时序；dial 返回真实原生句柄。 */
   private static final class FakeDialer implements OkHttpWebSocketTransport.WebSocketDialer {
 
     private final List<Request> requests = new ArrayList<>();
+    private final AtomicInteger dialCalls = new AtomicInteger();
+    private final AtomicBoolean closed = new AtomicBoolean();
     private WebSocketListener listener;
     private FakeWebSocket webSocket;
+    private boolean synchronousOpen;
+    private RuntimeException closeFailure;
 
     @Override
-    public void dial(Request request, WebSocketListener listener) {
+    public WebSocket dial(Request request, WebSocketListener listener) {
+      dialCalls.incrementAndGet();
       requests.add(request);
       this.listener = listener;
+      this.webSocket = new FakeWebSocket();
+      if (synchronousOpen) {
+        listener.onOpen(webSocket, response(DEFLATE));
+      }
+      return webSocket;
+    }
+
+    @Override
+    public void close() {
+      closed.set(true);
+      if (closeFailure != null) {
+        throw closeFailure;
+      }
+    }
+  }
+
+  private static final class FailingListener implements DaemonTransportListener {
+
+    private final RuntimeException failure;
+
+    private FailingListener(RuntimeException failure) {
+      this.failure = failure;
+    }
+
+    @Override
+    public void onMessage(String message) {
+      // 本测试只关注断开回调失败时的收敛。
+    }
+
+    @Override
+    public void onDisconnected(Throwable cause) {
+      throw failure;
     }
   }
 
@@ -290,6 +523,7 @@ class OkHttpWebSocketTransportTest {
 
     private final List<String> textMessages = new ArrayList<>();
     private final AtomicInteger closeCalls = new AtomicInteger();
+    private final AtomicInteger cancelCalls = new AtomicInteger();
     private volatile int closeStatus;
 
     @Override
@@ -321,6 +555,8 @@ class OkHttpWebSocketTransportTest {
     }
 
     @Override
-    public void cancel() {}
+    public void cancel() {
+      cancelCalls.incrementAndGet();
+    }
   }
 }

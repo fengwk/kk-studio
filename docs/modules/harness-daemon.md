@@ -71,7 +71,7 @@ INVOKE 先严格解码，再以 `journal.start(invocationId)` 原子去重。已
 
 恢复范围是同一 Daemon 进程与仍持有在途目录的 Gateway。Daemon 重启生成新 instanceId，Gateway 将此前在途调用收敛为结果不确定，等待调用层处理；journal 的去重事实随进程生命周期保留。
 
-[`OkHttpWebSocketTransport`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/transport/OkHttpWebSocketTransport.java) 强制握手协商 `permessage-deflate`，缺失以 1010 关闭；只接收文本帧，二进制帧或单条文本超过 16 MiB 字符以 1008 关闭，不退化为另一种传输。
+[`OkHttpWebSocketTransport`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/transport/OkHttpWebSocketTransport.java) 强制握手协商 `permessage-deflate`（按扩展名 token 精确匹配），缺失以 1010 关闭；只接收文本帧，二进制帧或单条文本超过 16 MiB 字符以 1008 关闭，不退化为另一种传输。每次连接尝试的握手预算是 2 秒：TCP 连接与 HTTP upgrade 共用，upgrade 成功后不再约束长连接；期限或 `close()` 已结算时迟到的 `onOpen` 只释放原生句柄，不交付连接。transport 持有在途与已交付握手的原生句柄，`close()` 幂等、拒绝新连接、结算 pending 握手并取消原生 I/O。
 
 ## 本地存储与文本输出
 
