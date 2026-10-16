@@ -107,7 +107,7 @@ final class LspClientPool implements AutoCloseable {
       }
       if (retirement != null) {
         // 锁外等待：退休自己会做阻塞的真实停止；派发被丢弃时等待者接替完成同一次停止。
-        throwIfFailed(retirement.awaitCompletion(this, shutdownGrace));
+        throwIfFailed(retirement.complete(this));
         continue;
       }
       if (creator) {
@@ -168,8 +168,9 @@ final class LspClientPool implements AutoCloseable {
     synchronized (lock) {
       if (!closed) {
         closed = true;
-        cancelIdleCheck();
-        work = snapshotForClose();
+        ScheduledFuture<?> pendingIdleCheck = idleCheck;
+        idleCheck = null;
+        work = snapshotForClose(pendingIdleCheck);
       }
     }
     if (work != null) {
@@ -186,7 +187,7 @@ final class LspClientPool implements AutoCloseable {
   }
 
   /** 锁内快照：取消启动交付、把全部实例移入退休登记，并算出关闭的等待预算。调用方必须持有 {@link #lock}。 */
-  private CloseWork snapshotForClose() {
+  private CloseWork snapshotForClose(ScheduledFuture<?> pendingIdleCheck) {
     IllegalStateException closedError = new IllegalStateException("LSP service is closed");
     List<Retiring> retirements = new ArrayList<>();
     for (Client entry : clients.values()) {
@@ -205,15 +206,23 @@ final class LspClientPool implements AutoCloseable {
     for (Retiring retirement : retirements) {
       retiring.put(retirement.key, retirement);
     }
+    List<Retiring> allRetirements = List.copyOf(retiring.values());
     closeBudgetMillis =
-        (long) retirements.size() * LspClient.stopBudgetMillis(shutdownGrace)
+        (long) allRetirements.size() * LspClient.stopBudgetMillis(shutdownGrace)
             + (long) outstanding.size() * bootBudgetMillis();
-    return new CloseWork(List.copyOf(retiring.values()), outstanding);
+    return new CloseWork(allRetirements, outstanding, pendingIdleCheck);
   }
 
   /** 锁外收尾：逐个真实停止实例，再逐个等启动结束；一个失败不跳过其余，首个失败保持身份。 */
   private Throwable performClose(CloseWork work) {
     Throwable failure = null;
+    if (work.idleCheck() != null) {
+      try {
+        work.idleCheck().cancel(false);
+      } catch (RuntimeException | Error cancellationFailure) {
+        failure = cancellationFailure;
+      }
+    }
     for (Retiring retirement : work.retirements()) {
       // 已经在执行的停止在这里共享同一条结论；还没被执行的（队列被丢弃）由本节接替完成。
       failure = LspClient.mergeFailure(failure, retirement.complete(this));
@@ -294,8 +303,9 @@ final class LspClientPool implements AutoCloseable {
       if (client != null && !published) {
         // 实例已经构造出来：由它完成真实停止，范围与自有 IO 任务都在这条路径里收敛。
         convergenceFailure = stopClient(client);
+      } else if (LspClient.startupCleanupFailed(error)) {
+        convergenceFailure = error;
       }
-      // client 为 null 时启动自己的清理路径（含已经提交的 stderr 任务）已经收敛它取得的一切，没有额外结论。
       if (convergenceFailure != null) {
         failure = LspClient.mergeFailure(failure, convergenceFailure);
       }
@@ -499,7 +509,8 @@ final class LspClientPool implements AutoCloseable {
   }
 
   /** 一次关闭的锁内快照：已登记的退休与仍未结束的启动。 */
-  private record CloseWork(List<Retiring> retirements, List<Boot> boots) {}
+  private record CloseWork(
+      List<Retiring> retirements, List<Boot> boots, ScheduledFuture<?> idleCheck) {}
 
   /**
    * 结构化复用键：项目根与完整服务器配置共同决定一个实例。
@@ -560,52 +571,14 @@ final class LspClientPool implements AutoCloseable {
     }
   }
 
-  /**
-   * 一次尚未证明收敛的退休：同一个 key 记录一份，物理停止由 {@link LspClient} 的停止事实执行一次。
-   *
-   * <p>结论只写一次；只有结论为「已经证明收敛」才注销登记，因此失败保留登记，同 key 不会在旧实例可能还活着时启动新实例。
-   */
-  private static final class Retiring {
-    private final Key key;
-    private final LspClient client;
-    private final CountDownLatch done = new CountDownLatch(1);
-    private boolean concluded;
-    private volatile Throwable failure;
-
-    private Retiring(Key key, LspClient client) {
-      this.key = key;
-      this.client = client;
-    }
-
-    /** 执行或共享这次退休的真实停止，并写下唯一结论；返回 {@code null} 表示已经证明收敛。 */
+  /** 退休只持有实例；真实停止与完成结论由客户端唯一负责，等待者中断不能污染该结论。 */
+  private record Retiring(Key key, LspClient client) {
     private Throwable complete(LspClientPool pool) {
-      Throwable stopFailure = pool.stopClient(client);
-      synchronized (this) {
-        if (concluded) {
-          // 先写结论者胜出：并发等待的中断结果不能改写别人写下的结论。
-          return failure;
-        }
-        concluded = true;
-        failure = stopFailure;
-        done.countDown();
-      }
-      if (stopFailure == null) {
+      Throwable failure = pool.stopClient(client);
+      if (failure == null) {
         pool.unregister(this);
       }
-      return stopFailure;
-    }
-
-    /** 等这次退休真正结束；派发被丢弃时由等待者接替完成同一次真实停止。 */
-    private Throwable awaitCompletion(LspClientPool pool, Duration grace) {
-      try {
-        if (done.await(LspClient.stopBudgetMillis(grace), TimeUnit.MILLISECONDS)) {
-          return failure;
-        }
-      } catch (InterruptedException error) {
-        // 中断不能假报成功，也不能跳过清理：保留标记后接替执行。
-        Thread.currentThread().interrupt();
-      }
-      return complete(pool);
+      return failure;
     }
   }
 }

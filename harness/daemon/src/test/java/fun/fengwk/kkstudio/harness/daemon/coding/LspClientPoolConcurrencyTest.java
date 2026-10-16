@@ -33,7 +33,7 @@ import java.util.function.Supplier;
 /**
  * {@link LspClientPool} 的并发不变量：所有共享状态只在同一把锁内判定与迁移，阻塞操作在锁外完成。
  *
- * <p>用例用可控派发执行器精确制造三种窗口：暂停派发（观察“退休中 lease 必须等待而不是启动第二个实例”）、拒绝派发（观察同步兜底清理
+ * <p>用例用可控派发执行器精确制造三种窗口：暂停派发（观察“lease 接替退休且新旧实例绝不重叠”）、拒绝派发（观察同步兜底清理
  * 与关闭的逐个兜底）、启动未完成（观察关闭时的取消与进程终止）。全部断言基于真实假服务器进程与真实收发记录。
  */
 class LspClientPoolConcurrencyTest {
@@ -55,16 +55,17 @@ class LspClientPoolConcurrencyTest {
     callers.shutdownNow();
   }
 
-  /** 意图：同一 key 退休未完成前，并发 lease 必须在锁外等待，不得与旧实例并行启动第二个实例。 */
+  /** 意图：派发尚未执行退休时，同 key 的 lease 接替真实停止；新服务器在启动点直接验证旧进程已经消失。 */
   @Test
-  void leaseWaitsForRetirementBeforeStartingANewInstance() throws Exception {
+  void leaseCompletesQueuedRetirementBeforeStartingANewInstance() throws Exception {
     Path transcript = FakeLspServers.transcript(root);
     GateDispatch dispatch = gate();
-    LspClientPool pool = pool("normal", transcript, Duration.ofMillis(100), dispatch);
+    LspClientPool pool = pool("no-overlap", transcript, Duration.ofMillis(100), dispatch);
     Path file = Files.writeString(root.resolve("App.java"), "class App {}\n");
 
     LspClientPool.Client first = pool.lease(file);
     long firstPid = startedPids(transcript).get(0);
+    Files.writeString(transcript.resolveSibling("previous-server.pid"), String.valueOf(firstPid));
     pool.release(first);
 
     // 暂停派发：空闲检查仍会在 scheduler 上运行，于是退休登记可见，而真正阻塞的 stop 还停在队列里。
@@ -72,9 +73,9 @@ class LspClientPoolConcurrencyTest {
     awaitTrue(() -> pool.activeCount() == 0, WAIT);
 
     Future<LspClientPool.Client> second = callers.submit(() -> pool.lease(file));
-    Thread.sleep(300);
-    assertFalse(second.isDone(), "退休完成前 lease 不得返回");
-    assertEquals(1, startedProcesses(transcript), "退休完成前不得启动第二个实例");
+    FakeLspServers.await(
+        transcript, event -> "shutdown".equals(event.path("message").path("method").asString()));
+    assertFalse(second.isDone(), "派发暂停期间新客户端不能完成初始化");
 
     dispatch.resume();
     LspClientPool.Client secondEntry = second.get(WAIT.toSeconds(), TimeUnit.SECONDS);
@@ -141,7 +142,7 @@ class LspClientPoolConcurrencyTest {
    * 意图：启动还没给出结论时关闭，等待同一次启动的调用者必须得到显式失败而不是一直挂住，进程与登记照常收敛。
    *
    * <p>同步点是第二个调用者真的停在生产 {@code waitForBoot} 上：只有共享交付已经有了结论，这个等待才会以显式失败结束。
-   * 关闭把交付标成「已关闭」，创建者则在自己走到发布点时看到「启动已取消」，两条路径都不能是静默挂住。
+   * 关闭取消共享交付和在途初始化；创建者与等待者都必须得到显式关闭失败。
    */
   @Test
   void closeEndsTheWaitingCallerOfASharedBootWithAnExplicitFailure() throws Exception {
@@ -176,9 +177,11 @@ class LspClientPoolConcurrencyTest {
     assertTrue(
         String.valueOf(waiterFailure).contains("closed"), "等待共享启动的调用者必须看到显式失败，实际 " + waiterFailure);
     Throwable creatorFailure = creator.get(WAIT.toSeconds(), TimeUnit.SECONDS);
+    assertTrue(creatorFailure instanceof IllegalStateException, "创建者必须得到显式关闭失败");
     assertTrue(
-        String.valueOf(creatorFailure).contains("cancelled"),
-        "创建者走到发布点时必须看到启动已被取消，实际 " + creatorFailure);
+        creatorFailure.getMessage().contains("closed")
+            || creatorFailure.getMessage().contains("cancelled"),
+        "创建者必须观察到初始化或发布被关闭取消，实际 " + creatorFailure);
     FakeLspServers.awaitProcessGone(pid, Duration.ofSeconds(10));
     assertEquals(0, pool.activeCount(), "被取消的启动不得进入可用集合");
     assertThrows(IllegalStateException.class, () -> pool.lease(file));

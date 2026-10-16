@@ -178,10 +178,10 @@ final class LspClient {
       ProcessScope.StartGate gate) {
     List<String> command = new ArrayList<>(server.command());
     command.set(0, executable);
+    LspClientOwnedTasks ioTasks = new LspClientOwnedTasks(dispatch);
     ProcessScope scope = startScope(server, root, command, gate);
     Process process = scope.process();
     // 本实例自有 IO 都经同一个登记提交：stderr 排空与 lsp4j 监听因此共享同一条静止结论。
-    LspClientOwnedTasks ioTasks = new LspClientOwnedTasks(dispatch);
     try {
       ByteTailBuffer stderrTail = new ByteTailBuffer(STDERR_TAIL_BYTES);
       ioTasks.submit(() -> drain(process.getErrorStream(), stderrTail));
@@ -212,10 +212,31 @@ final class LspClient {
       // 收尾失败不得掩盖启动失败：第一 Error 保持身份；范围与已经提交的自有 IO 任务都必须收敛。
       Throwable cleanup = mergeFailure(closeScope(scope), closeOwnedIo(process, ioTasks));
       Throwable failure = mergeFailure(error, cleanup);
+      if (cleanup != null) {
+        // 尚未构造出客户端也必须交付清理结论；Error 不能包装，故用固定 suppressed 类型携带该事实。
+        failure.addSuppressed(new StartupCleanupFailure());
+      }
       if (failure instanceof Error fatal) {
         throw fatal;
       }
       throw (RuntimeException) failure;
+    }
+  }
+
+  static boolean startupCleanupFailed(Throwable failure) {
+    for (Throwable suppressed : failure.getSuppressed()) {
+      if (suppressed instanceof StartupCleanupFailure) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private static final class StartupCleanupFailure extends RuntimeException {
+    private static final long serialVersionUID = 1L;
+
+    private StartupCleanupFailure() {
+      super("LSP client startup cleanup did not converge");
     }
   }
 
@@ -652,19 +673,22 @@ final class LspClient {
    * @return 未证明静止的失败；{@code null} 表示自有 IO 任务都已经结束
    */
   private static Throwable closeOwnedIo(Process process, LspClientOwnedTasks ioTasks) {
-    closeQuietly(process.getOutputStream());
-    closeQuietly(process.getInputStream());
-    closeQuietly(process.getErrorStream());
-    return ioTasks.closeAndAwait(OWNED_TASK_EXIT_BUDGET_MILLIS);
+    Throwable failure = closeStream(process.getOutputStream());
+    failure = mergeFailure(failure, closeStream(process.getInputStream()));
+    failure = mergeFailure(failure, closeStream(process.getErrorStream()));
+    return mergeFailure(failure, ioTasks.closeAndAwait(OWNED_TASK_EXIT_BUDGET_MILLIS));
   }
 
   /** 关闭自有流：流是否成功关闭不改变收敛事实，任务是否退出才是这里的判据。 */
-  private static void closeQuietly(Closeable stream) {
+  private static Throwable closeStream(Closeable stream) {
     try {
       stream.close();
     } catch (IOException ignored) {
       // 流已经关闭或随进程退出而结束。
+    } catch (RuntimeException | Error failure) {
+      return failure;
     }
+    return null;
   }
 
   /** 一次停止的等待预算：两次协议宽限（请求 shutdown 与等待退出）+ 范围收敛 + 自有 IO 任务静止（共用一条预算）。 */
