@@ -16,12 +16,14 @@ import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationReposi
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRow;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.BiFunction;
 
@@ -92,25 +94,18 @@ public final class PluginCatalogBootstrap {
       BiFunction<String, PluginCredentialReference, PluginContext> contexts,
       List<HarnessContributor> builtins,
       List<CanvasFunctionAdapter> builtinAdapters) {
-    PluginCatalogSnapshot candidate =
-        PluginCatalogSnapshot.build(
-            INITIAL_EPOCH, registry, defaultConfigurations(), contexts, builtins, builtinAdapters);
-
-    PluginCatalogManifest manifest;
-    List<PluginConfigurationRow> changed;
-    try {
-      manifest = manifestFor(candidate);
-      changed = changedRowsFor(candidate, manifest);
-    } catch (RuntimeException | Error error) {
-      throw releaseConvergingFailure("initialize-manifest", null, error, candidate);
-    }
+    PreparedInitial prepared =
+        buildInitial(defaultConfigurations(), Map.of(), contexts, builtins, builtinAdapters);
+    PluginCatalogSnapshot candidate = prepared.snapshot();
 
     boolean committed;
     try {
       committed =
           Boolean.TRUE.equals(
               commitTemplate.execute(
-                  status -> repository.commit(UNINITIALIZED_EPOCH, changed, manifest)));
+                  status ->
+                      repository.commit(
+                          UNINITIALIZED_EPOCH, prepared.configurationRows(), prepared.manifest())));
     } catch (RuntimeException | Error error) {
       throw releaseConvergingFailure("initialize-commit", null, error, candidate);
     }
@@ -125,6 +120,111 @@ public final class PluginCatalogBootstrap {
       throw failure("initialize-race", null, null);
     }
     return restore(winner, contexts, builtins, builtinAdapters);
+  }
+
+  /**
+   * 在任意目标写事务之外纯构造一次 epoch 1 的初始候选，绝不读权威 catalog、绝不提交任何写入。
+   *
+   * <p>输入必须精确覆盖安装集合：{@code valuesJsonByPluginId} 与 {@code configuredSecretFieldsByPluginId} 的 key
+   * 集都必须恰好等于当前安装目录，缺项或未知 id 都直接失败，绝不用当前 defaults 偷偷补齐。每个普通值先按该 Plugin 的 schema 归一化；配置的 secret field
+   * 名只能是该 schema 声明的秘密字段，稳定排序并拒绝重复，且本方法从不接收任何秘密值。
+   *
+   * <p>返回的 {@link PreparedInitial} 与 {@link #bootstrap} 首次初始化复用同一套 Schema
+   * 解析、schema/context/capability/catalog 指纹与 manifest 构建算法，因此逐字段一致。结果只持有候选快照、manifest
+   * 与完整配置历史行；{@link PreparedInitial#snapshot()} 的资源所有权交给调用方， 结果不自动提交，也不拥有任何独立 registry 或服务。
+   *
+   * @param valuesJsonByPluginId 每个已安装 id 的初始普通值 JSON，key 集必须精确等于安装集合
+   * @param configuredSecretFieldsByPluginId 每个已安装 id 的「已录入」秘密字段名，key 集必须精确等于安装集合；只接受字段名，绝不携带秘密值
+   * @throws IllegalStateException 安装集合不符、普通值非法或 secret field 名非法时（只带受控 stage，不含底层 cause，也绝不回显值或秘密）
+   */
+  public PreparedInitial prepareInitial(
+      Map<String, String> valuesJsonByPluginId,
+      Map<String, List<String>> configuredSecretFieldsByPluginId,
+      BiFunction<String, PluginCredentialReference, PluginContext> contexts,
+      List<HarnessContributor> builtins,
+      List<CanvasFunctionAdapter> builtinAdapters) {
+    Objects.requireNonNull(valuesJsonByPluginId, "valuesJsonByPluginId");
+    Objects.requireNonNull(configuredSecretFieldsByPluginId, "configuredSecretFieldsByPluginId");
+    Objects.requireNonNull(contexts, "contexts");
+    Objects.requireNonNull(builtins, "builtins");
+    Objects.requireNonNull(builtinAdapters, "builtinAdapters");
+
+    Set<String> installed = new LinkedHashSet<>(registry.pluginIds());
+    if (!installed.equals(valuesJsonByPluginId.keySet())) {
+      throw failure("prepare-values-set", null, null);
+    }
+    if (!installed.equals(configuredSecretFieldsByPluginId.keySet())) {
+      throw failure("prepare-secret-fields-set", null, null);
+    }
+
+    Map<String, PluginConfigurationState> configurations = new LinkedHashMap<>();
+    Map<String, List<String>> configuredSecretFields = new LinkedHashMap<>();
+    for (StudioPlugin plugin : registry.plugins()) {
+      String pluginId = plugin.descriptor().pluginId();
+      String resolved = resolveInitialValues(plugin, valuesJsonByPluginId.get(pluginId));
+      configuredSecretFields.put(
+          pluginId, declaredSecretFields(plugin, configuredSecretFieldsByPluginId.get(pluginId)));
+      configurations.put(
+          pluginId,
+          new PluginConfigurationState(
+              new PluginConfig(INITIAL_EPOCH, resolved),
+              new PluginCredentialReference(
+                  pluginId,
+                  UUID.randomUUID(),
+                  contextFingerprintFor(plugin, schemaFingerprintFor(plugin), resolved))));
+    }
+    return buildInitial(
+        configurations, configuredSecretFields, contexts, builtins, builtinAdapters);
+  }
+
+  /**
+   * 以 epoch 1 组装一次完整初始候选（快照 + manifest + 完整配置历史行）。
+   *
+   * <p>普通 {@link #initialize} 与离线 {@link #prepareInitial} 共用这一条构建路径：候选在任何目标写事务之外建成；manifest
+   * 或行构造失败时通过 {@link #releaseConvergingFailure} 独立释放候选的全部实例，绝不外泄半成品。
+   */
+  private PreparedInitial buildInitial(
+      Map<String, PluginConfigurationState> configurations,
+      Map<String, List<String>> configuredSecretFields,
+      BiFunction<String, PluginCredentialReference, PluginContext> contexts,
+      List<HarnessContributor> builtins,
+      List<CanvasFunctionAdapter> builtinAdapters) {
+    PluginCatalogSnapshot candidate =
+        PluginCatalogSnapshot.build(
+            INITIAL_EPOCH, registry, configurations, contexts, builtins, builtinAdapters);
+    try {
+      PluginCatalogManifest manifest = manifestFor(candidate);
+      return new PreparedInitial(
+          candidate, manifest, changedRowsFor(candidate, manifest, configuredSecretFields));
+    } catch (RuntimeException | Error error) {
+      throw releaseConvergingFailure("initialize-manifest", null, error, candidate);
+    }
+  }
+
+  /** 归一化一个已安装 Plugin 的初始普通值：非法输入收敛为只带 stage 与 pluginId 的受控诊断，绝不回显原文。 */
+  private static String resolveInitialValues(StudioPlugin plugin, String valuesJson) {
+    try {
+      return plugin.configurationSchema().resolveValues(valuesJson);
+    } catch (RuntimeException error) {
+      throw failure("prepare-values", plugin.descriptor().pluginId(), null);
+    }
+  }
+
+  /** 校验「已录入」秘密字段名：只能为本 Plugin schema 声明的秘密字段，稳定排序、拒绝重复，绝不接收秘密值。 */
+  private static List<String> declaredSecretFields(StudioPlugin plugin, List<String> fields) {
+    if (fields == null) {
+      throw failure("prepare-secret-fields", plugin.descriptor().pluginId(), null);
+    }
+    Set<String> declared = plugin.configurationSchema().secrets().keySet();
+    Set<String> unique = new LinkedHashSet<>();
+    for (String field : fields) {
+      if (field == null || !declared.contains(field) || !unique.add(field)) {
+        throw failure("prepare-secret-fields", plugin.descriptor().pluginId(), null);
+      }
+    }
+    List<String> sorted = new ArrayList<>(unique);
+    Collections.sort(sorted);
+    return List.copyOf(sorted);
   }
 
   /**
@@ -269,7 +369,9 @@ public final class PluginCatalogBootstrap {
   }
 
   private List<PluginConfigurationRow> changedRowsFor(
-      PluginCatalogSnapshot snapshot, PluginCatalogManifest manifest) {
+      PluginCatalogSnapshot snapshot,
+      PluginCatalogManifest manifest,
+      Map<String, List<String>> configuredSecretFields) {
     List<PluginConfigurationRow> rows = new ArrayList<>();
     for (PluginCatalogSnapshot.ConfiguredPlugin configured : snapshot.configuredPlugins()) {
       String pluginId = configured.descriptor().pluginId();
@@ -283,7 +385,7 @@ public final class PluginCatalogBootstrap {
               entry.capabilityFingerprint(),
               configured.credentialReference().authGeneration(),
               configured.credentialReference().contextFingerprint(),
-              List.of(),
+              configuredSecretFields.getOrDefault(pluginId, List.of()),
               configured.config().valuesJson()));
     }
     return rows;
@@ -342,5 +444,23 @@ public final class PluginCatalogBootstrap {
       message.append(" cause=").append(error.getClass().getSimpleName());
     }
     return new IllegalStateException(message.toString());
+  }
+
+  /**
+   * 一次 epoch 1 初始候选的纯构造结果：候选快照、冻结 manifest 与完整配置历史行。
+   *
+   * <p>它不自动提交，也不拥有任何独立 registry 或服务；{@link #snapshot()} 的资源所有权明确交给调用方，调用方必须在失败或结束时关闭该快照。
+   */
+  public record PreparedInitial(
+      PluginCatalogSnapshot snapshot,
+      PluginCatalogManifest manifest,
+      List<PluginConfigurationRow> configurationRows) {
+
+    public PreparedInitial {
+      Objects.requireNonNull(snapshot, "snapshot");
+      Objects.requireNonNull(manifest, "manifest");
+      configurationRows =
+          List.copyOf(Objects.requireNonNull(configurationRows, "configurationRows"));
+    }
   }
 }
