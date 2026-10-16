@@ -23,8 +23,6 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocolException;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonResourceUploader;
 
 import java.io.IOException;
-import java.lang.System.Logger;
-import java.lang.System.Logger.Level;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.ZoneId;
@@ -53,8 +51,6 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public final class DaemonRuntime implements AutoCloseable {
 
-  private static final Logger LOG = System.getLogger(DaemonRuntime.class.getName());
-
   private static final Duration EXECUTOR_TERMINATION_TIMEOUT = Duration.ofSeconds(5);
 
   private final DaemonConnectionSession session;
@@ -74,6 +70,8 @@ public final class DaemonRuntime implements AutoCloseable {
   /**
    * 创建完整生产运行时。LSP 服务、scheduler 与 virtual-thread-per-task executor 在注册 capability 前创建并注入，成功后由
    * runtime 独占生命周期；任一步构造失败都会释放 transport、LSP 客户端和已创建的执行资源。
+   *
+   * <p>构造失败与清理失败共用同一优先级：原失败保持主因（Error 保持对象身份），清理失败作为 suppressed 附加且不跳过其它资源。
    */
   public static DaemonRuntime create(
       DaemonConfig config, CodingToolsConfig toolsConfig, DaemonDataDirectory dataDirectory) {
@@ -102,7 +100,6 @@ public final class DaemonRuntime implements AutoCloseable {
     ExecutorService lspExecutor = null;
     DaemonTransport transport = null;
     AutoCloseable capabilityResources = null;
-    boolean completed = false;
     try {
       taskExecutor = newTaskExecutor();
       lspExecutor = newLspExecutor();
@@ -110,26 +107,29 @@ public final class DaemonRuntime implements AutoCloseable {
       DaemonCapabilityRegistry capabilityRegistry = new DaemonCapabilityRegistry();
       capabilityResources =
           registrar.register(capabilityRegistry, taskExecutor, scheduler, lspExecutor);
-      DaemonRuntime runtime =
-          new DaemonRuntime(
-              config,
-              transport,
-              capabilityRegistry,
-              new InMemoryDaemonInvocationJournal(),
-              scheduler,
-              taskExecutor,
-              lspExecutor,
-              capabilityResources,
-              textOutputStore,
-              true);
-      completed = true;
-      return runtime;
-    } finally {
-      if (!completed) {
-        closeQuietly(capabilityResources, "capability resources");
-        closeQuietly(transport, "transport");
-        shutdownExecutors(scheduler, taskExecutor, lspExecutor);
+      return new DaemonRuntime(
+          config,
+          transport,
+          capabilityRegistry,
+          new InMemoryDaemonInvocationJournal(),
+          scheduler,
+          taskExecutor,
+          lspExecutor,
+          capabilityResources,
+          textOutputStore,
+          true);
+    } catch (Throwable constructionFailure) {
+      // 部分构造失败：原失败是主因，清理失败按同一优先级并入且不跳过任何已创建资源。
+      DaemonShutdownFailures failures = new DaemonShutdownFailures();
+      failures.record("construction", constructionFailure);
+      closeResource(capabilityResources, "capability resource close", failures);
+      closeResource(transport, "transport close", failures);
+      shutdownExecutors(scheduler, taskExecutor, lspExecutor, failures);
+      Error fatal = failures.error();
+      if (fatal != null) {
+        throw fatal;
       }
+      throw failures.exception();
     }
   }
 
@@ -409,28 +409,34 @@ public final class DaemonRuntime implements AutoCloseable {
     return invocations.sendControlWhileActive(messageType, invocationId, payloadJson);
   }
 
+  /**
+   * 关停：只有赢得关闭权的调用者继续执行，顺序固定为连接/transport → 全部调用 → capability 资源 → 临时资源 → 全部执行器。
+   *
+   * <p>每一项无论 {@link RuntimeException}、{@link Error} 还是 checked 关闭失败都继续后续动作，失败按统一优先级聚合；终止闩始终在
+   * finally 中释放，因此同步抛出的聚合失败不会让 {@link #awaitTermination()} 悬挂。任一关停失败都会把会话终态发布为 FAILED 与固定 安全原因。
+   */
   private void shutdown(DaemonRuntimeState terminalState, String reason) {
     if (!session.beginShutdown(terminalState, reason)) {
       return;
     }
-    // shutdown 必须收敛：任一步抛出都不得跳过后续清理或悬挂 termination 闩。
+    DaemonShutdownFailures failures = new DaemonShutdownFailures();
     try {
-      invocations.shutdown();
+      session.releaseShutdownResources(failures);
+      invocations.shutdown(failures);
+      closeResource(capabilityResources, "capability resource close", failures);
+      closeResource(temporaryResources, "temporary resource close", failures);
+      shutdownExecutors(scheduler, taskExecutor, lspExecutor, failures);
     } finally {
-      try {
-        closeQuietly(capabilityResources, "capability resources");
-      } finally {
-        try {
-          temporaryResources.close();
-        } finally {
-          try {
-            shutdownExecutors(scheduler, taskExecutor, lspExecutor);
-          } finally {
-            session.signalTerminated();
-          }
-        }
-      }
+      session.completeShutdown(failures);
     }
+    if (!failures.hasFailure()) {
+      return;
+    }
+    Error fatal = failures.error();
+    if (fatal != null) {
+      throw fatal;
+    }
+    throw failures.exception();
   }
 
   @Override
@@ -438,49 +444,76 @@ public final class DaemonRuntime implements AutoCloseable {
     shutdown(DaemonRuntimeState.STOPPED, null);
   }
 
+  /**
+   * 关闭全部执行器：先对每个执行器请求立即停止，再分别等待既有预算。
+   *
+   * <p>任一步失败都按固定阶段记入聚合并继续，绝不跳过其余执行器：等待超时（{@code false}）不是真正终止，中断只被记录且不影响其余等待， 并在全部等待结束后恢复。
+   */
   private static void shutdownExecutors(
       ScheduledExecutorService scheduler,
       ExecutorService taskExecutor,
-      ExecutorService lspExecutor) {
-    if (taskExecutor != null) {
-      taskExecutor.shutdownNow();
-      try {
-        taskExecutor.awaitTermination(
-            EXECUTOR_TERMINATION_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
-      } catch (InterruptedException error) {
-        Thread.currentThread().interrupt();
-      }
-    }
-    if (lspExecutor != null) {
-      lspExecutor.shutdownNow();
-      try {
-        lspExecutor.awaitTermination(
-            EXECUTOR_TERMINATION_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
-      } catch (InterruptedException error) {
-        Thread.currentThread().interrupt();
-      }
-    }
-    if (scheduler != null) {
-      scheduler.shutdownNow();
-      try {
-        scheduler.awaitTermination(EXECUTOR_TERMINATION_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
-      } catch (InterruptedException error) {
-        Thread.currentThread().interrupt();
-      }
+      ExecutorService lspExecutor,
+      DaemonShutdownFailures failures) {
+    stopExecutor(taskExecutor, "task executor shutdown", failures);
+    stopExecutor(lspExecutor, "lsp executor shutdown", failures);
+    stopExecutor(scheduler, "scheduler shutdown", failures);
+    boolean interrupted = false;
+    interrupted |= awaitExecutorTermination(taskExecutor, "task executor shutdown", failures);
+    interrupted |= awaitExecutorTermination(lspExecutor, "lsp executor shutdown", failures);
+    interrupted |= awaitExecutorTermination(scheduler, "scheduler shutdown", failures);
+    if (interrupted) {
+      Thread.currentThread().interrupt();
     }
   }
 
-  /** 关闭一个生命周期资源：释放失败不影响其余清理，只记录安全阶段与异常类型（不回显底层正文）。 */
-  private static void closeQuietly(AutoCloseable closeable, String phase) {
-    if (closeable == null) {
+  private static void stopExecutor(
+      ExecutorService executor, String phase, DaemonShutdownFailures failures) {
+    if (executor == null) {
       return;
     }
     try {
-      closeable.close();
-    } catch (Exception error) {
-      // best effort：关闭失败不阻断 shutdown，也不吞掉进程级 Error。
-      LOG.log(
-          Level.DEBUG, "daemon " + phase + " close failed: " + error.getClass().getSimpleName());
+      executor.shutdownNow();
+    } catch (Throwable error) {
+      failures.record(phase, error);
+    }
+  }
+
+  /**
+   * 等待一个执行器在既有预算内终止。
+   *
+   * @return true 表示等待被中断：中断只被记录，调用方在全部执行器等待结束后恢复中断标记
+   */
+  private static boolean awaitExecutorTermination(
+      ExecutorService executor, String phase, DaemonShutdownFailures failures) {
+    if (executor == null) {
+      return false;
+    }
+    try {
+      if (executor.awaitTermination(
+          EXECUTOR_TERMINATION_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS)) {
+        return false;
+      }
+      failures.record(phase, new IllegalStateException(phase + " did not terminate in time"));
+      return false;
+    } catch (InterruptedException error) {
+      failures.record(phase, error);
+      return true;
+    } catch (RuntimeException error) {
+      failures.record(phase, error);
+      return false;
+    }
+  }
+
+  /** 关闭一个生命周期资源：失败按固定阶段记入聚合，绝不阻断其余清理。 */
+  private static void closeResource(
+      AutoCloseable resource, String phase, DaemonShutdownFailures failures) {
+    if (resource == null) {
+      return;
+    }
+    try {
+      resource.close();
+    } catch (Throwable error) {
+      failures.record(phase, error);
     }
   }
 
