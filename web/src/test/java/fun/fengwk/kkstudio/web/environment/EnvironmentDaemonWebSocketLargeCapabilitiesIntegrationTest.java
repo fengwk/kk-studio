@@ -184,7 +184,8 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
                 "dev",
                 "/home/dev",
                 "Linux environment.",
-                "/tmp/kk-studio")));
+                "/tmp/kk-studio",
+                "amd64")));
   }
 
   private static DaemonEnvelope helloEnvelope() {

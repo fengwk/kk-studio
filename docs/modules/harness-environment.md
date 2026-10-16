@@ -122,7 +122,7 @@ protocolVersion / messageType / environmentId / invocationId? / payload
 ```text
 Daemon -> HELLO(protocolVersion=3, registrationToken, capabilityCatalogVersion=2, daemonVersion, daemonInstanceId)
 Gateway -> WELCOME(environmentId, name, maxResourceBytes, temporaryResourceTtlSeconds, temporaryResourceCleanupIntervalSeconds)
-Daemon -> READY(version=4, daemonVersion, environment)
+Daemon -> READY(version=5, daemonVersion, environment)
 Daemon -> HEARTBEAT*
 
 Gateway -> INVOKE
@@ -149,20 +149,21 @@ Daemon -> CANCELLED | 已冻结的终态重放
 [`DaemonCapabilitiesCodec`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilitiesCodec.java) 编解码 READY 载荷：
 
 ```text
-version=4
+version=5
 daemonVersion=构建版本
-environment: operatingSystem / timeZone / userName / homeDirectory / note / tempDirectory
+environment: operatingSystem / timeZone / userName / homeDirectory / note / tempDirectory / architecture
 ```
 
-READY 只公开宿主侧的六项环境元数据与 Daemon 自身构建版本，**不发送 capability descriptor 列表或 LSP 可用性**；能力集合由 HELLO 中的 catalog 版本与两端固定目录约定。`daemonVersion` 取自 shaded JAR manifest 的
+READY 只公开宿主侧的七项环境元数据与 Daemon 自身构建版本，**不发送 capability descriptor 列表或 LSP 可用性**；能力集合由 HELLO 中的 catalog 版本与两端固定目录约定。`daemonVersion` 取自 shaded JAR manifest 的
 `Implementation-Version`，未打包运行时为固定标记 `development`（明确表示不是发布版本），与 Card 上的 CAS
-`version` 是两个不同事实。六项数据为目标操作系统、时区、Daemon 进程用户、该用户的
-HOME、可信操作者备注与受控临时目录 `tempDirectory`（HOME 优先 canonical，无法解析时为绝对规范路径）。`operatingSystem` 是发送前路径词法校验的目标
-OS 依据；`userName` 与 `homeDirectory` 只用于 Card 和当前 Environment Prompt 展示，
-不构成 cwd、默认 workdir 或沙箱；`tempDirectory` 是受控临时 workspace 的 canonical 绝对路径，同样只是展示事实。`environment` 是必填对象且字段固定；未知字段、必填
-字段缺失或类型错误都是协议错误。
+`version` 是两个不同事实。七项数据为目标操作系统、时区、Daemon 进程用户、该用户的
+HOME、可信操作者备注、受控临时目录 `tempDirectory` 与宿主 CPU 架构 `architecture`（HOME 优先 canonical，无法解析时为绝对规范路径）。`operatingSystem` 是发送前路径词法校验的目标
+OS 依据；`userName`、`homeDirectory` 与 `architecture` 只用于 Card 和当前 Environment Prompt 展示，
+不构成 cwd、默认 workdir 或沙箱；`tempDirectory` 是受控临时 workspace 的 canonical 绝对路径，同样只是展示事实。`architecture` 是 Daemon 真实采集的宿主事实
+（`System.getProperty("os.arch")`），JSON `null` 明确表示该事实未知，绝不填造取值；Daemon 仍以单一 JAR 分发，不按它自动挑选发行归档。`environment` 是必填对象且字段固定；未知字段、必填
+字段缺失或类型错误都是协议错误，其中 `architecture` 的键必须存在且值允许明确 JSON `null`。
 
-载荷的硬约束：`userName` 与 `homeDirectory` 非空、单行且无控制字符，`note` 必填、非空白、无周边空白、单行且不超过 512 字符；未指定 note 时 Daemon 按 OS 生成默认说明。凭证、请求头、环境变量、命令与 Git URL/ref 都不进入 READY；
+载荷的硬约束：`userName` 与 `homeDirectory` 非空、单行且无控制字符，`note` 必填、非空白、无周边空白、单行且不超过 512 字符，`architecture` 是 `null` 或有界非空的单行标识；未指定 note 时 Daemon 按 OS 生成默认说明。当前 codec 只接受版本 5，不双读或兼容旧 V4 payload。凭证、请求头、环境变量、命令与 Git URL/ref 都不进入 READY；
 Skill 安装状态通过内部 `skill.sync` 调用结果报告，MCP 目录完全属于 Platform。
 
 [`DaemonCapabilityInvokeCodec`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilityInvokeCodec.java)

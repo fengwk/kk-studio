@@ -89,7 +89,7 @@ INVOKE 先严格解码，再以 `journal.start(invocationId)` 原子去重。已
 
 [`EnvironmentPaths`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/EnvironmentPaths.java) 用本次 arguments 定位路径。文件与 LSP 能力的 `path` 必须是绝对路径，相对路径直接拒绝、不接受 `workdir`；只有 process.exec 要求本次调用显式给出绝对、现存、可读的 `workdir`。目录校验失败即拒绝本次调用，每次调用独立解析目录。
 
-workdir **不是沙箱**：目标可在其外，符号链接照常跟随；宿主权限来自运行用户，业务授权由 Platform 判定。READY 的进程用户、时区、OS、HOME、可信 note 与受控临时目录 `tempDirectory` 仅为宿主展示事实，HOME canonical 化失败时退回绝对规范路径，不是执行默认值。
+workdir **不是沙箱**：目标可在其外，符号链接照常跟随；宿主权限来自运行用户，业务授权由 Platform 判定。READY 的进程用户、时区、OS、HOME、可信 note、受控临时目录 `tempDirectory` 与真实 `os.arch` 架构仅为宿主展示事实，HOME canonical 化失败时退回绝对规范路径，`os.arch` 缺失即启动失败，它们都不是执行默认值。
 
 ### 进程执行范围
 
