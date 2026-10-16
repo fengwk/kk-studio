@@ -51,7 +51,7 @@ class PluginConfigurationCommitServiceInitialStaticMaterialTest {
     assertEquals("{\"apiKey\":\"" + API_KEY + "\"}", material.payloadJson());
     JsonNode payload = JsonValues.readTree(material.payloadJson());
     assertEquals(1, payload.size());
-    assertEquals(API_KEY, payload.get("apiKey").textValue());
+    assertEquals(API_KEY, payload.get("apiKey").stringValue());
   }
 
   @Test
@@ -77,9 +77,9 @@ class PluginConfigurationCommitServiceInitialStaticMaterialTest {
     JsonNode payload = JsonValues.readTree(prepare(plugin, provided).payloadJson());
 
     assertEquals(3, payload.size());
-    assertEquals("token-value-3", payload.get("apiToken").textValue());
-    assertEquals("key-value-1", payload.get("apiKey").textValue());
-    assertEquals("秘密-值-2", payload.get("apiSecret").textValue());
+    assertEquals("token-value-3", payload.get("apiToken").stringValue());
+    assertEquals("key-value-1", payload.get("apiKey").stringValue());
+    assertEquals("秘密-值-2", payload.get("apiSecret").stringValue());
   }
 
   @Test
@@ -92,8 +92,8 @@ class PluginConfigurationCommitServiceInitialStaticMaterialTest {
     JsonNode payload = JsonValues.readTree(prepare(plugin, provided).payloadJson());
 
     assertEquals(2, payload.size());
-    assertEquals("aux-secret-2", payload.get("apiSecret").textValue());
-    assertEquals("aux-token-3", payload.get("apiToken").textValue());
+    assertEquals("aux-secret-2", payload.get("apiSecret").stringValue());
+    assertEquals("aux-token-3", payload.get("apiToken").stringValue());
     assertFalse(payload.has("apiKey"), "preparation must not invent the main key");
   }
 
@@ -235,7 +235,7 @@ class PluginConfigurationCommitServiceInitialStaticMaterialTest {
     JsonNode payload = JsonValues.readTree(prepare(plugin, provided).payloadJson());
 
     assertEquals(3, payload.size());
-    assertEquals(value, payload.get("apiKey").textValue());
+    assertEquals(value, payload.get("apiKey").stringValue());
   }
 
   private static PluginCredentialMaterial prepare(
