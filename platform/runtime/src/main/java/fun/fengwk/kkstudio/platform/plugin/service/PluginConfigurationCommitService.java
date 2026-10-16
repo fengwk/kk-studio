@@ -252,6 +252,39 @@ public final class PluginConfigurationCommitService {
   }
 
   /**
+   * 校验声明的初始静态秘密，构造尚未加密的凭据材料。
+   *
+   * <p>复用正常提交的声明字段、{@code SET} 值与有界载荷校验，不访问仓储、主密钥或插件运行期。目录身份、加密和原子写入由调用方负责。
+   *
+   * <p>仅接受 {@link PluginAuthSpec.StaticKey} 的非空秘密映射；允许独立录入声明的辅助秘密，不补造主密钥。
+   *
+   * @param plugin 目标 Plugin；其认证声明与秘密字段声明必须自洽
+   * @param secretValues 已声明秘密字段到秘密值的映射；必须至少包含一个字段
+   * @return 静态密钥材料：{@code region}、{@code expiresAt}、{@code nextRefreshAt} 三项路由元数据均为 {@code null}
+   * @throws IllegalArgumentException 任一秘密值为空、带 padding、纯遮罩占位符或超过单个字段上限时
+   */
+  public static PluginCredentialMaterial prepareInitialStaticMaterial(
+      StudioPlugin plugin, Map<String, String> secretValues) {
+    Objects.requireNonNull(plugin, "plugin");
+    Objects.requireNonNull(secretValues, "secretValues");
+    if (!(plugin.authenticationSpec() instanceof PluginAuthSpec.StaticKey)) {
+      throw new AiValidationException(
+          "plugin", "initial static credential requires a static key authentication spec");
+    }
+    if (secretValues.isEmpty()) {
+      throw new AiValidationException(
+          "plugin", "initial static credential requires at least one secret value");
+    }
+    Map<String, PluginSecretPatch> patch = new LinkedHashMap<>();
+    for (Map.Entry<String, String> secret : secretValues.entrySet()) {
+      patch.put(secret.getKey(), PluginSecretPatch.set(secret.getValue()));
+    }
+    ObjectNode payload = new ObjectNode(NODES);
+    applyPatch(payload, requirePatch(plugin, patch));
+    return PluginCredentialMaterial.staticKey(boundedPayload(payload));
+  }
+
+  /**
    * 按 patch 与上下文变化决定凭据动作，并保持「纯 KEEP 普通配置不写凭据、不破坏 lease/version」。
    *
    * <p>主密钥是惰性的：没有任何秘密操作且认证上下文未变化时是纯普通配置提交；CLEAR 掉全部已录入字段时是条件删除；两条路径都不读取主密钥也不解密任何密文，
@@ -748,7 +781,7 @@ public final class PluginConfigurationCommitService {
         JsonValues.readTree(resolvedValues));
   }
 
-  private Map<String, PluginSecretPatch> requirePatch(
+  private static Map<String, PluginSecretPatch> requirePatch(
       StudioPlugin plugin, Map<String, PluginSecretPatch> secretPatch) {
     Map<String, PluginSecretPatch> patch = new LinkedHashMap<>();
     if (secretPatch == null) {
