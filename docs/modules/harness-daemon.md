@@ -81,7 +81,7 @@ INVOKE 先严格解码，再以 `journal.start(invocationId)` 原子去重。已
 
 自然退出、非零退出、超时、取消都先保留可发布输出。收尾说明不写入全文、不计入全文统计；只有自然退出报告 exitCode。`detailsJson.process.outcome` 区分 EXITED / TIMED_OUT / CANCELLED，运行时强制失败或取消的 wire 正文通过前述收尾窗口携带文本。
 
-[`SkillPackageInstaller`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/skill/SkillPackageInstaller.java) 在独立 staging 目录 clone 并 checkout 请求指定的 exact commit，不以 branch HEAD 替代。检查整棵 tree 后物化到发布暂存目录，只有新包完整物化并校验通过后才原子替换 `skills/<package>`，失败则保留旧包或从 backup 恢复；拒绝符号链接、submodule、路径穿越与非普通文件。包内 `.kkstudio-commit` 记录 commit，模型路径稳定为 `<data-dir>/skills/<package>/<skill>/SKILL.md`；marker 相同也重新校验物化结果。
+[`SkillPackageInstaller`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/skill/SkillPackageInstaller.java) 在独立 staging 目录 clone 请求指定的 exact commit（不检出工作区），不以 branch HEAD 替代。检查整棵 tree 后物化到发布暂存目录，只有新包完整物化并校验通过后才原子替换 `skills/<package>`，失败则保留旧包或从 backup 恢复；拒绝符号链接、submodule、路径穿越与非普通文件。包内 `.kkstudio-commit` 记录 commit，模型路径稳定为 `<data-dir>/skills/<package>/<skill>/SKILL.md`；marker 相同也重新校验物化结果。
 
 ## 编码能力
 

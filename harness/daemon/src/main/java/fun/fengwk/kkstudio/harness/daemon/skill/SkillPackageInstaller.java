@@ -45,13 +45,16 @@ import java.util.regex.Pattern;
 /**
  * 守护进程侧原子 Git skill 包安装器。
  *
- * <p>单路径安装：临时 clone 精确分支 -> 检出 exact commit -> 校验并物化到 staging -> 原子替换 skills 目录，支持失败回滚与重启自愈。
+ * <p>单路径安装：临时 clone 精确分支（不检出工作区）-> 校验并物化 exact commit 树到 staging -> 原子替换 skills 目录，支持失败回滚与重启自愈。
  */
 public final class SkillPackageInstaller {
 
   private static final Logger LOG = System.getLogger(SkillPackageInstaller.class.getName());
 
-  private static final Pattern COMMIT_PATTERN = Pattern.compile("^[0-9a-f]{40}$|^[0-9a-f]{64}$");
+  private static final Pattern COMMIT_PATTERN = Pattern.compile("^[0-9a-f]{40}$");
+
+  /** 临时 clone 目录相对于 staging 根的固定后缀；恢复期据此识别产品产物。 */
+  private static final String CLONE_SUFFIX = ".clone";
 
   /** 只有受网络保护覆盖的 http/https 与本地直读 file 允许进入 Git 网络层。 */
   private static final Set<String> SUPPORTED_REPOSITORY_SCHEMES = Set.of("http", "https", "file");
@@ -180,7 +183,7 @@ public final class SkillPackageInstaller {
       String targetCommit,
       String credential) {
     String uuid = UUID.randomUUID().toString();
-    Path cloneDir = stagingRoot.resolve(packageName + "." + uuid + ".clone");
+    Path cloneDir = stagingRoot.resolve(packageName + "." + uuid + CLONE_SUFFIX);
 
     CredentialsProvider credentialsProvider =
         (credential != null && !credential.isBlank())
@@ -197,6 +200,7 @@ public final class SkillPackageInstaller {
                 .setURI(repositoryUrl)
                 .setDirectory(cloneDir.toFile())
                 .setBranch(branch)
+                .setNoCheckout(true)
                 .setTransportConfigCallback(network.callback());
         if (credentialsProvider != null) {
           cloneCommand.setCredentialsProvider(credentialsProvider);
@@ -235,13 +239,6 @@ public final class SkillPackageInstaller {
           if (!repo.getObjectDatabase().has(commitId)) {
             throw new SkillSyncException(
                 "COMMIT_NOT_FOUND", "Target commit could not be resolved from remote repository");
-          }
-
-          try {
-            git.checkout().setName(targetCommit).call();
-          } catch (Exception error) {
-            throw new SkillSyncException(
-                "COMMIT_NOT_FOUND", "Target commit could not be checked out", error);
           }
 
           RevCommit revCommit;
@@ -322,7 +319,14 @@ public final class SkillPackageInstaller {
                 try {
                   directoryMover.move(backupDir, packageDir);
                 } catch (Exception rollbackError) {
+                  // 交换与回滚同时失败：主错误保留为 cause、回滚错误保留为 suppressed；此时旧包仅存于 backup，
+                  // 必须以专用文案上报，绝不伪装成功或静默处理。
                   moveError.addSuppressed(rollbackError);
+                  throw new SkillSyncException(
+                      "INSTALL_FAILED",
+                      "Failed to swap installed package directory and rollback of the previous package"
+                          + " failed; the previous package remains only in the backup directory",
+                      moveError);
                 }
               }
               throw new SkillSyncException(
@@ -360,34 +364,32 @@ public final class SkillPackageInstaller {
   }
 
   public void recoverArtifacts() {
+    // staging 只清理产品命名的 package.UUID[.clone]；任何未知名都原样保留，绝不删除未知条目。
     try (DirectoryStream<Path> entries = Files.newDirectoryStream(stagingRoot)) {
       for (Path entry : entries) {
-        deleteRecursivelyQuietly(entry);
+        if (stagingArtifactPackageName(entry.getFileName().toString()) != null) {
+          deleteRecursivelyQuietly(entry);
+        }
       }
     } catch (IOException error) {
       throw new UncheckedIOException("failed to clean staging root during recovery", error);
     }
 
+    // backup 只恢复产品命名的 package.UUID；未知名既不删除也不恢复。
     try (DirectoryStream<Path> entries = Files.newDirectoryStream(backupRoot)) {
       for (Path entry : entries) {
-        String fileName = entry.getFileName().toString();
-        int lastDot = fileName.lastIndexOf('.');
-        if (lastDot <= 0) {
-          deleteRecursivelyQuietly(entry);
+        String packageName = backupArtifactPackageName(entry.getFileName().toString());
+        if (packageName == null) {
           continue;
         }
-        String pkgName = fileName.substring(0, lastDot);
-        String uuidPart = fileName.substring(lastDot + 1);
-        if (!isValidUuid(uuidPart) || !isValidPackageNameQuietly(pkgName)) {
-          deleteRecursivelyQuietly(entry);
-          continue;
-        }
-        Path target = skillsRoot.resolve(pkgName);
+        Path target = skillsRoot.resolve(packageName);
         if (!Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
           try {
-            moveDirectory(entry, target);
+            directoryMover.move(entry, target);
           } catch (IOException moveError) {
-            deleteRecursivelyQuietly(entry);
+            // 有效备份恢复失败必须保留原备份，并把受控失败上报给调用方，绝不静默删除可能唯一的数据副本。
+            throw new UncheckedIOException(
+                "failed to restore skill backup during recovery", moveError);
           }
         } else {
           deleteRecursivelyQuietly(entry);
@@ -396,6 +398,33 @@ public final class SkillPackageInstaller {
     } catch (IOException error) {
       throw new UncheckedIOException("failed to recover backup root during recovery", error);
     }
+  }
+
+  /** 产品 staging 条目名：{@code package.UUID} 或 {@code package.UUID.clone}；非产品命名返回 null。 */
+  private static String stagingArtifactPackageName(String entryName) {
+    String name =
+        entryName.endsWith(CLONE_SUFFIX)
+            ? entryName.substring(0, entryName.length() - CLONE_SUFFIX.length())
+            : entryName;
+    return packageUuidArtifactPackageName(name);
+  }
+
+  /** 产品 backup 条目名：{@code package.UUID}；非产品命名返回 null。 */
+  private static String backupArtifactPackageName(String entryName) {
+    return packageUuidArtifactPackageName(entryName);
+  }
+
+  private static String packageUuidArtifactPackageName(String name) {
+    int lastDot = name.lastIndexOf('.');
+    if (lastDot <= 0) {
+      return null;
+    }
+    String packageName = name.substring(0, lastDot);
+    String uuidPart = name.substring(lastDot + 1);
+    if (!isValidUuid(uuidPart) || !isValidPackageNameQuietly(packageName)) {
+      return null;
+    }
+    return packageName;
   }
 
   private static void validatePackageName(String packageName) {
@@ -429,7 +458,7 @@ public final class SkillPackageInstaller {
   private static void validateTargetCommit(String targetCommit) {
     if (targetCommit == null || !COMMIT_PATTERN.matcher(targetCommit).matches()) {
       throw new SkillSyncException(
-          "INVALID_TARGET_COMMIT", "Target commit must be 40 or 64 lowercase hex characters");
+          "INVALID_TARGET_COMMIT", "Target commit must be a 40-character lowercase SHA-1");
     }
   }
 
