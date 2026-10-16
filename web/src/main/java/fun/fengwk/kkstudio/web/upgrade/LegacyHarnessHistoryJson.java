@@ -37,10 +37,9 @@ import java.util.UUID;
  *       payload，业务值一个字节都不改。
  * </ul>
  *
- * <p>{@code CUSTOM} / {@code CUSTOM_MESSAGE} 不再一律拒绝：只有经源产物证实的第一方固定组合才离线放行，并按 producer 语义校验旧 {@code
- * data}——{@code builtin/goal.progress/1} 的精确 4 键终态声明、{@code project/run/1} 经 {@link
- * ProjectRunScopeJsonCodec} 校验的 13 字段快照、{@code core/message/message} 且 {@code details} 为空对象； 其余
- * producer / type / version 组合继续 fail closed，绝不静默放过。
+ * <p>{@code CUSTOM} / {@code CUSTOM_MESSAGE} 仅接受已确认的第一方组合：{@code builtin/goal.progress/1} 的精确 4
+ * 键终态声明、{@code project/run/1} 经 {@link ProjectRunScopeJsonCodec} 校验的快照，以及 {@code
+ * core/message/message} 且 {@code details} 为空对象的消息。其余 producer / type / version 组合一律拒绝。
  *
  * <p>转换结果经目标真实 codec（{@link HistoryEntryPayloadJsonCodec} / {@link ProviderReplayStateJsonCodec} /
  * {@link ThreadCommandPayloadJsonCodec}）校验；不借 encode 重建或裁剪其它字段。 输入与目标结构校验失败只包含固定安全消息，不附带 cause
@@ -245,8 +244,8 @@ final class LegacyHarnessHistoryJson {
 
   /** 只接受 {@code builtin/goal.progress/1} 与 {@code project/run/1} 两个已知组合及其旧 data 形态。 */
   private static void requireKnownCustom(ObjectNode node, String unsupported, String invalidData) {
-    String contributorId = identity(node, "contributorId", unsupported);
-    String customType = identity(node, "customType", unsupported);
+    String contributorId = stringValue(node, "contributorId", unsupported);
+    String customType = stringValue(node, "customType", unsupported);
     if (!isKnownSchemaVersion(node)) {
       throw new IllegalArgumentException(unsupported);
     }
@@ -265,7 +264,7 @@ final class LegacyHarnessHistoryJson {
   /**
    * 旧 goal.progress 终态声明 data：精确 4 键、全为非 null string；{@code goalId} 是 UUID、{@code status} 精确为
    * {@code complete}/{@code blocked}、{@code reason} 非 blank、{@code reportedAt} 是可解析
-   * Instant。只校验，绝不改写原始 业务文本。
+   * Instant。只校验，不改写业务文本。
    */
   private static void requireGoalProgressData(JsonNode data, String message) {
     if (!(data instanceof ObjectNode object) || !names(object).equals(GOAL_PROGRESS_FIELDS)) {
@@ -314,11 +313,11 @@ final class LegacyHarnessHistoryJson {
    */
   private static void requireKnownCoreCustomMessage(ObjectNode entry) {
     if (!CORE_MESSAGE_CONTRIBUTOR_ID.equals(
-            identity(entry, "contributorId", ENTRY_CUSTOM_MESSAGE_UNSUPPORTED))
+            stringValue(entry, "contributorId", ENTRY_CUSTOM_MESSAGE_UNSUPPORTED))
         || !CORE_MESSAGE_CUSTOM_TYPE.equals(
-            identity(entry, "customType", ENTRY_CUSTOM_MESSAGE_UNSUPPORTED))
+            stringValue(entry, "customType", ENTRY_CUSTOM_MESSAGE_UNSUPPORTED))
         || !CORE_MESSAGE_RENDERER_KEY.equals(
-            identity(entry, "rendererKey", ENTRY_CUSTOM_MESSAGE_UNSUPPORTED))) {
+            stringValue(entry, "rendererKey", ENTRY_CUSTOM_MESSAGE_UNSUPPORTED))) {
       throw new IllegalArgumentException(ENTRY_CUSTOM_MESSAGE_UNSUPPORTED);
     }
     JsonNode details = entry.get("details");
@@ -327,16 +326,7 @@ final class LegacyHarnessHistoryJson {
     }
   }
 
-  /** 只接受非 null string 的身份字段；缺失或错误类型都判为未知组合。 */
-  private static String identity(ObjectNode node, String field, String message) {
-    JsonNode value = node.get(field);
-    if (value == null || !value.isString()) {
-      throw new IllegalArgumentException(message);
-    }
-    return value.stringValue();
-  }
-
-  /** 已知 CUSTOM 组合共享的 schemaVersion 必须精确保存在 {@link #KNOWN_SCHEMA_VERSION}。 */
+  /** 只接受已知版本的整数字面量，拒绝类型转换和整数截断。 */
   private static boolean isKnownSchemaVersion(ObjectNode node) {
     JsonNode value = node.get("schemaVersion");
     return value != null
