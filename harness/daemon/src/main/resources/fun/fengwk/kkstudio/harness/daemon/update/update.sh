@@ -81,7 +81,7 @@ trap cleanup EXIT
 # Handoff metadata must exist, be a regular non-symlink file and name this operation.
 # The state is deliberately NOT required yet: the independent job is started while the daemon
 # is still persisting PREPARING, so an early PREPARING is normal and must not be rejected.
-# Never source or eval the metadata; only bounded, de-sensitised text checks are used.
+# Never source or eval the metadata.
 [ -f "$handoff_file" ] && [ ! -L "$handoff_file" ] || fail_closed "handoff metadata is missing"
 grep -qE "\"operationId\"[[:space:]]*:[[:space:]]*\"$operation_id\"" "$handoff_file" ||
   fail_closed "handoff metadata does not match the operation"
@@ -100,9 +100,15 @@ done
 [ "$(cat "$permit_file")" = "$operation_id" ] ||
   fail_closed "the update permit does not match the operation"
 
-# The permit is released only after ACCEPTED is durably frozen, so by now the state must be
-# ACCEPTED. Anything else means the acceptance was never recorded and nothing may be replaced.
-grep -qE "\"state\"[[:space:]]*:[[:space:]]*\"ACCEPTED\"" "$handoff_file" ||
+# Re-read one metadata snapshot after the wait: both its identity and acceptance must still
+# match before anything is stopped.
+[ -f "$handoff_file" ] && [ ! -L "$handoff_file" ] || fail_closed "handoff metadata is missing"
+handoff_metadata=$(cat "$handoff_file") || fail_closed "could not read handoff metadata"
+printf '%s\n' "$handoff_metadata" |
+  grep -qE "\"operationId\"[[:space:]]*:[[:space:]]*\"$operation_id\"" ||
+  fail_closed "handoff metadata does not match the operation"
+printf '%s\n' "$handoff_metadata" |
+  grep -qE "\"state\"[[:space:]]*:[[:space:]]*\"ACCEPTED\"" ||
   fail_closed "handoff metadata is not accepted"
 
 os=$(uname -s)

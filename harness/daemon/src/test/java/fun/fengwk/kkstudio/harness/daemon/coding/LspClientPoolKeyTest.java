@@ -12,8 +12,7 @@ import java.util.List;
 /**
  * {@link LspClientPool} 复用键的值语义：键按项目根与完整结构化配置比较。
  *
- * <p>白盒测试：用反射调用私有 key 工厂并比较它投影出的键，不启动任何语言服务器，因此只证明键的投影语义，不声称工具 运行层面的行为变化。发现器保证 id
- * 唯一且不可变，同一池不可能同时观察到同 id 的两份配置，所以这里不是“已发生或可达的复用 故障”的回归，只是结构化值语义的验证。
+ * <p>通过反射比较私有 key 工厂的投影，不启动语言服务器；实际进程复用由池的并发测试覆盖。
  */
 class LspClientPoolKeyTest {
 
@@ -24,7 +23,9 @@ class LspClientPoolKeyTest {
   void identicalRootAndConfigAreEqual() throws Exception {
     LspServerConfig config =
         config("fake", List.of("java", "-jar"), List.of(".java"), List.of(), List.of());
-    assertEquals(key(ROOT, config), key(ROOT, config));
+    LspServerConfig equalConfig =
+        config("fake", List.of("java", "-jar"), List.of(".java"), List.of(), List.of());
+    assertEquals(key(ROOT, config), key(ROOT, equalConfig));
   }
 
   /** 意图：命令参数按逗号/空格重新分组后 {@code List.toString()} 相同，但配置结构不同，键必须不同。 */
