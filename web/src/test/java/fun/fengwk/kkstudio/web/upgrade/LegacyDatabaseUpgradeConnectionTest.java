@@ -115,8 +115,8 @@ class LegacyDatabaseUpgradeConnectionTest {
     Connection target = idleConnection();
     when(source.createStatement()).thenThrow(new SQLException("session setup failed"));
     // 取得探测时是空闲连接，释放时仍处于未恢复的事务中，且回滚本身失败。
-    when(target.getAutoCommit()).thenReturn(true, false);
-    doThrow(new SQLException("rollback failed")).when(target).rollback();
+    when(source.getAutoCommit()).thenReturn(true, false);
+    doThrow(new SQLException("rollback failed")).when(source).rollback();
 
     LegacyDatabaseUpgradeException failure =
         assertThrows(
@@ -125,7 +125,7 @@ class LegacyDatabaseUpgradeConnectionTest {
 
     assertEquals(LegacyDatabaseUpgradeException.Stage.CONNECTION, failure.stage());
     assertFalse(failure.outcomeUncertain());
-    verify(target).rollback();
+    verify(source).rollback();
     verify(target).close();
     verify(source).close();
     assertNoRawFailure(failure);

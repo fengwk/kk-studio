@@ -7,7 +7,9 @@ import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.TransactionStatus;
+import org.springframework.transaction.TransactionSystemException;
 import org.springframework.transaction.support.DefaultTransactionDefinition;
+import org.springframework.transaction.support.DefaultTransactionStatus;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlHarnessStore;
@@ -146,8 +148,7 @@ final class LegacyDatabaseUpgrade {
       Map<String, Map<String, String>> staticSecretsByPlugin,
       boolean dryRun,
       Clock clock) {
-    SingleConnectionDataSource scoped = new SingleConnectionDataSource(target, true);
-    PlatformTransactionManager transactionManager = new DataSourceTransactionManager(scoped);
+    PlatformTransactionManager transactionManager = null;
     TransactionStatus transaction = null;
     OfflinePluginCatalog catalog = null;
     PluginCatalogBootstrap.PreparedInitial prepared = null;
@@ -155,6 +156,8 @@ final class LegacyDatabaseUpgrade {
     Throwable failure = null;
     boolean committed = false;
     try {
+      SingleConnectionDataSource scoped = new SingleConnectionDataSource(target, true);
+      transactionManager = new UpgradeTransactionManager(scoped);
       beginSourceSnapshot(source);
       String profile = LegacySchemaProfile.identify(LegacySchemaProfile.fingerprint(source));
       LegacySchemaProfile.requireSourceHistory(source, profile);
@@ -179,7 +182,7 @@ final class LegacyDatabaseUpgrade {
               staticCredentials.configuredSecretFields(registry));
 
       // 候选就绪之后才真正开始写事务，再在同一事务里做 session 门禁、写入、目录 CAS 与回读校验。
-      transaction = openTargetTransaction(transactionManager);
+      transaction = openTargetTransaction(transactionManager, target);
       beginTargetSession(target);
       ConversionCounts counts =
           writeTarget(
@@ -873,13 +876,24 @@ final class LegacyDatabaseUpgrade {
     }
   }
 
-  private static TransactionStatus openTargetTransaction(PlatformTransactionManager manager) {
+  private static TransactionStatus openTargetTransaction(
+      PlatformTransactionManager manager, Connection target) {
     DefaultTransactionDefinition definition = new DefaultTransactionDefinition();
     definition.setName("legacy-database-upgrade");
     definition.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
     try {
+      // 本调用独占连接且只用一次事务；不让事务管理器在回滚失败后恢复 autocommit，造成隐式提交。
+      target.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED);
+      target.setAutoCommit(false);
       return manager.getTransaction(definition);
+    } catch (SQLException error) {
+      throw new LegacyDatabaseUpgradeException(
+          LegacyDatabaseUpgradeException.Stage.TARGET_TRANSACTION,
+          "the target write transaction could not be started");
     } catch (RuntimeException error) {
+      if (error.getCause() instanceof Error fatal) {
+        throw fatal;
+      }
       throw new LegacyDatabaseUpgradeException(
           LegacyDatabaseUpgradeException.Stage.TARGET_TRANSACTION,
           "the target write transaction could not be started");
@@ -916,17 +930,42 @@ final class LegacyDatabaseUpgrade {
         manager.commit(transaction);
       }
     } catch (RuntimeException error) {
+      if (error.getCause() instanceof Error fatal) {
+        throw uncertainTransactionError(fatal);
+      }
       throw new LegacyDatabaseUpgradeException(
           LegacyDatabaseUpgradeException.Stage.COMMIT,
           "the target transaction result could not be confirmed",
           true);
     } catch (Error error) {
-      error.addSuppressed(
-          new LegacyDatabaseUpgradeException(
-              LegacyDatabaseUpgradeException.Stage.COMMIT,
-              "the target transaction result could not be confirmed",
-              true));
-      throw error;
+      throw uncertainTransactionError(error);
+    }
+  }
+
+  private static Error uncertainTransactionError(Error error) {
+    error.addSuppressed(
+        new LegacyDatabaseUpgradeException(
+            LegacyDatabaseUpgradeException.Stage.COMMIT,
+            "the target transaction result could not be confirmed",
+            true));
+    return error;
+  }
+
+  /** 提交 Error 也按结果未知处理，不让框架追加回滚并以回滚失败覆盖原发 Error；边界处恢复其 identity。 */
+  private static final class UpgradeTransactionManager extends DataSourceTransactionManager {
+
+    private UpgradeTransactionManager(DataSource dataSource) {
+      super(dataSource);
+    }
+
+    @Override
+    protected void doCommit(DefaultTransactionStatus status) {
+      try {
+        super.doCommit(status);
+      } catch (Error error) {
+        throw new TransactionSystemException(
+            "the target commit result could not be confirmed", error);
+      }
     }
   }
 
@@ -987,7 +1026,7 @@ final class LegacyDatabaseUpgrade {
     failure =
         mergeRelease(
             failure,
-            closeConnection(target),
+            closeResource(target),
             closeStage,
             "an upgrade database connection could not be released");
     failure =

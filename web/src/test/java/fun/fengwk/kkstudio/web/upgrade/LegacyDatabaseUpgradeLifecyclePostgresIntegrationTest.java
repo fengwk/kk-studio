@@ -28,8 +28,7 @@ import java.util.function.Supplier;
 /**
  * 真实 PostgreSQL 17 上的生命周期与结果语义：窄故障探针只替换被注入的调用，其余仍是真实连接、真实事务与真实 SQL。
  *
- * <p>覆盖四类契约：候选构造与释放必须发生在目标写事务之外；事务中途失败都是「已知回滚」而不是结果未知；真实提交之后的任何失败都不得暗示未落盘；首 {@code Error}
- * 必须保身份提升为主失败，且可见的安全异常绝不携带原始 SQL/秘密标记。测试只断言契约，不弱化断言也不改生产代码。
+ * <p>候选在目标事务外构造、提交前释放；事务失败保留真实回滚结果；提交回执丢失不能暗示零写入；首 {@code Error} 保持身份，安全异常不携带原始 SQL/秘密标记。
  */
 class LegacyDatabaseUpgradeLifecyclePostgresIntegrationTest {
 
@@ -150,6 +149,8 @@ class LegacyDatabaseUpgradeLifecyclePostgresIntegrationTest {
       assertEquals(1, fixture.targetProbe().countEvents("rollback"));
       assertTrue(fixture.targetProbe().sawEvent("close-connection"));
       assertTrue(fixture.sourceProbe().sawEvent("close-connection"));
+      assertFalse(fixture.targetProbe().sawEvent("setAutoCommit:true"));
+      UpgradePostgresTestSupport.assertPristine(fixture.target());
     } finally {
       fixture.release();
     }
@@ -186,6 +187,74 @@ class LegacyDatabaseUpgradeLifecyclePostgresIntegrationTest {
           "a failed rollback without commit acknowledgement must be reported as an uncertain result");
       assertNoLeak(thrown, ROLLBACK_MARKER);
       assertNoLeak(thrown, SQL_MARKER);
+      assertEquals(1, fixture.targetProbe().countEvents("rollback"));
+      assertEquals(0, fixture.targetProbe().countEvents("commit"));
+      assertFalse(fixture.targetProbe().sawEvent("setAutoCommit:true"));
+      assertTrue(fixture.targetProbe().realConnectionClosed());
+      UpgradePostgresTestSupport.assertPristine(fixture.target());
+    } finally {
+      fixture.release();
+    }
+  }
+
+  /** dry-run 的回滚失败也不能在框架清理时隐式提交完整转换，关闭物理连接后仍须 pristine。 */
+  @Test
+  void aFailedDryRunRollbackNeverRestoresAutoCommitOrRetries() throws SQLException {
+    Fixture fixture = Fixture.open();
+    fixture.targetProbe().failRollback(() -> new SQLException(ROLLBACK_MARKER));
+    try {
+      LegacyDatabaseUpgradeException thrown = fixture.convertExpectingSafeFailure(true);
+      assertTrue(thrown.outcomeUncertain());
+      assertEquals(LegacyDatabaseUpgradeException.Stage.COMMIT, thrown.stage());
+      assertEquals(1, fixture.targetProbe().countEvents("rollback"));
+      assertEquals(0, fixture.targetProbe().countEvents("commit"));
+      assertFalse(fixture.targetProbe().sawEvent("setAutoCommit:true"));
+      assertTrue(fixture.targetProbe().realConnectionClosed());
+      UpgradePostgresTestSupport.assertPristine(fixture.target());
+      assertNoLeak(thrown, ROLLBACK_MARKER);
+    } finally {
+      fixture.release();
+    }
+  }
+
+  /** 已提交后的致命错误保持 identity，并携带固定结果未知提示，不再尝试提交或回滚。 */
+  @Test
+  void aFatalCommitAcknowledgementKeepsItsIdentityAndUncertainOutcome() throws SQLException {
+    Fixture fixture = Fixture.open();
+    Error fatal = new AssertionError(COMMIT_MARKER);
+    fixture.targetProbe().failCommitAcknowledgement(() -> fatal);
+    fixture.targetProbe().failRollback(() -> new SQLException(ROLLBACK_MARKER));
+    try {
+      assertSame(fatal, fixture.convertExpectingThrowable(false));
+      assertTrue(
+          Arrays.stream(fatal.getSuppressed())
+              .filter(LegacyDatabaseUpgradeException.class::isInstance)
+              .map(LegacyDatabaseUpgradeException.class::cast)
+              .anyMatch(LegacyDatabaseUpgradeException::outcomeUncertain));
+      assertEquals(1L, UpgradePostgresTestSupport.longValue(fixture.target(), epochSql()));
+      assertEquals(1, fixture.targetProbe().countEvents("commit"));
+      assertEquals(0, fixture.targetProbe().countEvents("rollback"));
+      assertFalse(fixture.targetProbe().sawEvent("setAutoCommit:true"));
+      assertTrue(fixture.targetProbe().realConnectionClosed());
+    } finally {
+      fixture.release();
+    }
+  }
+
+  /** Spring 的 begin 包装不能吞掉 JDBC Error，尚未开始写入时仍须释放两个连接与已构造候选。 */
+  @Test
+  void aFatalTransactionStartKeepsIdentityAndReleasesTheIdleTarget() throws SQLException {
+    Fixture fixture = Fixture.open();
+    Error fatal = new AssertionError(SQL_MARKER);
+    fixture.targetProbe().failTransactionStart(() -> fatal);
+    try (CatalogSpy spy = CatalogSpy.install(fixture.targetProbe())) {
+      assertSame(fatal, fixture.convertExpectingThrowable(false));
+      assertEquals(1, spy.snapshotCloseAttempts());
+      assertEquals(1, spy.catalogCloseAttempts());
+      assertEquals(0, fixture.targetProbe().countEvents("commit"));
+      assertEquals(0, fixture.targetProbe().countEvents("rollback"));
+      assertTrue(fixture.targetProbe().realConnectionClosed());
+      assertTrue(fixture.sourceProbe().realConnectionClosed());
       UpgradePostgresTestSupport.assertPristine(fixture.target());
     } finally {
       fixture.release();

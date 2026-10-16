@@ -58,6 +58,8 @@ final class LegacyDatabaseUpgradeLifecycleProbe {
 
   private Supplier<Throwable> commitAcknowledgementFailure;
 
+  private Supplier<Throwable> transactionStartFailure;
+
   private LegacyDatabaseUpgradeLifecycleProbe(String label, DataSource real) {
     this.label = label;
     this.real = real;
@@ -94,6 +96,12 @@ final class LegacyDatabaseUpgradeLifecycleProbe {
   /** 注入五：真实 {@code commit} 已经落到 PostgreSQL、但客户端把回执当成失败，用于模拟通信丢包。 */
   LegacyDatabaseUpgradeLifecycleProbe failCommitAcknowledgement(Supplier<Throwable> failure) {
     commitAcknowledgementFailure = failure;
+    return this;
+  }
+
+  /** 连接入口探测成功后，在事务管理器第二次探测 autocommit 时失败。 */
+  LegacyDatabaseUpgradeLifecycleProbe failTransactionStart(Supplier<Throwable> failure) {
+    transactionStartFailure = failure;
     return this;
   }
 
@@ -207,6 +215,15 @@ final class LegacyDatabaseUpgradeLifecycleProbe {
       events.add("commit");
       Object result = invoke(delegate, method, args);
       return throwIfInjected(commitAcknowledgementFailure, result);
+    }
+    if ("setAutoCommit".equals(name)) {
+      events.add("setAutoCommit:" + args[0]);
+    }
+    if ("getAutoCommit".equals(name)) {
+      events.add("getAutoCommit");
+      if (transactionStartFailure != null && countEvents("getAutoCommit") == 2) {
+        throw transactionStartFailure.get();
+      }
     }
     if ("unwrap".equals(name)) {
       Supplier<Throwable> failure = copyApiFailure;
