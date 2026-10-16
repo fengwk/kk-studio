@@ -231,7 +231,7 @@ class ProcessScopeCrossPlatformTest {
   void fatalStartGateFailureKeepsItsIdentityAndReapsTheHelper() throws Exception {
     Path rootPid = workdir.resolve("root.pid");
     AssertionError fatal = new AssertionError("synthetic start gate failure");
-    List<Long> childrenBefore = currentChildren();
+    List<ProcessHandle> childrenBefore = currentChildren();
     long stateDirectories = countStateDirectories();
     CountDownLatch permitted = new CountDownLatch(1);
     CountDownLatch release = new CountDownLatch(1);
@@ -255,12 +255,14 @@ class ProcessScopeCrossPlatformTest {
               }
             },
             "process-scope-gate-error");
-    List<Long> helpers = List.of();
+    ProcessHandle helper = null;
     try {
       starter.start();
       assertTrue(permitted.await(PID_BUDGET.toSeconds(), TimeUnit.SECONDS), "启动必须进入许可阶段");
-      helpers = newChildren(childrenBefore);
-      assertFalse(helpers.isEmpty(), "许可阶段必须能观察到本次调用真实存活的 helper 进程");
+      List<ProcessHandle> added = newChildren(childrenBefore);
+      assertEquals(1, added.size(), "许可阶段必须能唯一定位本次调用的 helper");
+      helper = added.getFirst();
+      assertTrue(helper.isAlive(), "许可阶段 helper 必须真实存活");
 
       release.countDown();
       starter.join(GONE_BUDGET.toMillis());
@@ -268,43 +270,42 @@ class ProcessScopeCrossPlatformTest {
 
       assertSame(fatal, thrown.get(), "致命失败必须保持原身份");
       assertFalse(Files.exists(rootPid), "许可之前失败不得让命令产生任何副作用");
-      for (long helper : helpers) {
-        assertTrue(awaitGone(helper, GONE_BUDGET), "helper " + helper + " 必须已经被收敛");
-      }
+      assertFalse(helper.isAlive(), "启动失败返回时 helper 必须已经被收敛");
       assertEquals(stateDirectories, countStateDirectories(), "启动失败收尾不得留下状态目录");
     } finally {
-      // 只在用例自己失败时兜底：放行闸门、收回捕获到或本次新起、且仍然存活的 helper，绝不动无关进程。
+      // 放行后先等生产收尾；兜底只使用捕获的进程身份，不重新按 PID 或子进程差集选择终止对象。
       release.countDown();
-      List<Long> reclaim = new ArrayList<>(helpers);
-      reclaim.addAll(newChildren(childrenBefore));
-      for (long helper : reclaim) {
-        if (isAlive(helper)) {
-          ProcessHandle.of(helper).ifPresent(ProcessHandle::destroyForcibly);
-        }
+      starter.join(GONE_BUDGET.toMillis());
+      if (helper != null && helper.isAlive()) {
+        helper.destroyForcibly();
+        helper.onExit().get(GONE_BUDGET.toMillis(), TimeUnit.MILLISECONDS);
       }
+      assertFalse(starter.isAlive(), "启动线程必须结束");
     }
   }
 
   /** 闸门上的有界等待：被中断是测试自身的问题，不能变成「静默继续」。 */
   private static void awaitRelease(CountDownLatch release) {
     try {
-      release.await();
+      if (!release.await(PID_BUDGET.toMillis(), TimeUnit.MILLISECONDS)) {
+        throw new IllegalStateException("timed out waiting for the gate release");
+      }
     } catch (InterruptedException error) {
       Thread.currentThread().interrupt();
       throw new IllegalStateException("interrupted while waiting for the gate release", error);
     }
   }
 
-  /** 当前 JVM 的直接子进程 pid 快照：用来只读地定位本次调用新起的 helper。 */
-  private static List<Long> currentChildren() {
+  /** 当前 JVM 的直接子进程身份快照：只读定位 helper，并保留捕获时的身份。 */
+  private static List<ProcessHandle> currentChildren() {
     try (Stream<ProcessHandle> children = ProcessHandle.current().children()) {
-      return children.map(ProcessHandle::pid).sorted().toList();
+      return children.toList();
     }
   }
 
   /** 调用前后直接子进程的差集：本次调用新起的进程（helper 由 {@code ProcessBuilder} 直接拉起，没有 shell 中转）。 */
-  private static List<Long> newChildren(List<Long> before) {
-    List<Long> added = new ArrayList<>(currentChildren());
+  private static List<ProcessHandle> newChildren(List<ProcessHandle> before) {
+    List<ProcessHandle> added = new ArrayList<>(currentChildren());
     added.removeAll(before);
     return added;
   }

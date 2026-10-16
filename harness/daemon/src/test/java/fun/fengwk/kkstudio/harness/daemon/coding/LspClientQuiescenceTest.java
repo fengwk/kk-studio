@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.daemon.coding;
 
+import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -59,34 +60,41 @@ class LspClientQuiescenceTest {
   private final List<LspClient> clients = new ArrayList<>();
   private final List<LspClientPool> pools = new ArrayList<>();
 
+  private Error expectedCloseFailure;
+
   @AfterEach
   void tearDown() {
-    for (LspClientPool pool : pools) {
-      try {
-        pool.close();
-      } catch (RuntimeException | Error ignored) {
-        // 用例可能已经断言过未证明收敛的结论：teardown 只保证资源被清理。
-      }
-    }
-    for (LspClient client : clients) {
-      try {
-        client.stop(Duration.ofMillis(200));
-      } catch (RuntimeException | Error ignored) {
-        // 用例可能已经断言过这次停止的结论（例如「取消不能被当成已经静止」）：teardown 只保证资源被清理。
-      }
-    }
-    List<ExecutorService> executors = new ArrayList<>(dispatchers);
-    executors.add(scheduler);
-    executors.add(callers);
-    executors.forEach(ExecutorService::shutdownNow);
-    for (ExecutorService executor : executors) {
-      try {
-        assertTrue(
-            executor.awaitTermination(WAIT.toMillis(), TimeUnit.MILLISECONDS),
-            "the owned executor must terminate");
-      } catch (InterruptedException error) {
-        Thread.currentThread().interrupt();
-        fail("interrupted while waiting for executor termination");
+    try {
+      assertAll(
+          () ->
+              assertAll(
+                  pools.stream()
+                      .map(
+                          pool ->
+                              () -> {
+                                if (expectedCloseFailure == null) {
+                                  pool.close();
+                                } else {
+                                  assertSame(
+                                      expectedCloseFailure, assertThrows(Error.class, pool::close));
+                                }
+                              })),
+          () ->
+              assertAll(clients.stream().map(client -> () -> client.stop(Duration.ofMillis(200)))));
+    } finally {
+      List<ExecutorService> executors = new ArrayList<>(dispatchers);
+      executors.add(scheduler);
+      executors.add(callers);
+      executors.forEach(ExecutorService::shutdownNow);
+      for (ExecutorService executor : executors) {
+        try {
+          assertTrue(
+              executor.awaitTermination(WAIT.toMillis(), TimeUnit.MILLISECONDS),
+              "the owned executor must terminate");
+        } catch (InterruptedException error) {
+          Thread.currentThread().interrupt();
+          fail("interrupted while waiting for executor termination");
+        }
       }
     }
   }
@@ -164,6 +172,7 @@ class LspClientQuiescenceTest {
     prepareRoot();
     CountDownLatch gate = new CountDownLatch(1);
     TrackingDispatch dispatch = tracking(0, gate);
+    expectedCloseFailure = dispatch.fatal;
     LspServerConfig alpha = server("alpha", ".java", transcript);
     LspServerConfig beta = server("beta", ".txt", transcript);
     LspClientPool pool =

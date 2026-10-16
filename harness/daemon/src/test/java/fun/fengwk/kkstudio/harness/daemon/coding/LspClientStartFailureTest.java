@@ -33,7 +33,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Stream;
 
 /**
- * 启动阶段致命失败（{@link Error}）的收尾：已拥有的真实进程范围必须收敛，共享启动的等待者必须有界返回，失败登记必须清理。
+ * 启动阶段致命失败（{@link Error}）的收尾：已拥有的真实进程范围必须收敛，共享启动的等待者必须有界返回，致命失败保留为同 key 的终结事实。
  *
  * <p>失败由真实执行器在启动派发上抛出固定的合成 {@link AssertionError}：不伪造客户端、不使用 OOM，也不插入测试专用的生产钩子。
  */
@@ -52,19 +52,22 @@ class LspClientStartFailureTest {
             callerThreads.add(thread);
             return thread;
           });
-  private final List<ExecutorService> dispatchers = new ArrayList<>();
+  private final List<FatalDispatch> dispatchers = new ArrayList<>();
   private final List<LspClientPool> pools = new ArrayList<>();
 
   @AfterEach
   void tearDown() {
     try {
-      for (LspClientPool pool : pools) {
-        try {
-          pool.close();
-        } catch (RuntimeException | Error ignored) {
-          // 用例可能已经断言过终结 Error 的结论（close 报告同一条启动失败）：teardown 只保证资源被清理。
-        }
-      }
+      assertAll(
+          pools.stream()
+              .map(
+                  pool ->
+                      () -> {
+                        Error failure = assertThrows(Error.class, pool::close);
+                        assertTrue(
+                            dispatchers.stream().anyMatch(dispatch -> dispatch.fatal == failure),
+                            "关闭必须重复交付本用例已知的致命失败");
+                      }));
     } finally {
       List<ExecutorService> executors = new ArrayList<>(dispatchers);
       executors.add(scheduler);
@@ -140,6 +143,14 @@ class LspClientStartFailureTest {
       // 致命启动失败即使资源已经清理也是终结事实：这个 key 必须继续失败关闭，而不是启动第二个实例。
       assertSame(dispatch.fatal, leaseFailure(pool, file), "终结的 key 必须共享同一条失败");
       assertEquals(1, startedProcesses(transcript), "终结的 key 不得重新启动");
+      Thread.currentThread().interrupt();
+      try {
+        assertSame(dispatch.fatal, assertThrows(Error.class, pool::close));
+        assertSame(dispatch.fatal, assertThrows(Error.class, pool::close));
+        assertTrue(Thread.currentThread().isInterrupted(), "读取已发布结论不得清除中断标记");
+      } finally {
+        Thread.interrupted();
+      }
     } finally {
       dispatch.release.countDown();
       reapOwnedProcess(dispatch.observedProcess);

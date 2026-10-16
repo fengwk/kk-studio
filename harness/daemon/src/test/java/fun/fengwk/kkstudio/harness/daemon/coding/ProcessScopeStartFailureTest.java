@@ -190,6 +190,23 @@ class ProcessScopeStartFailureTest {
     assertFalse(Files.exists(stateDir));
   }
 
+  /** 已发布的终止结论优先于重复调用者的中断状态；成功与未证明收敛都不得被改写。 */
+  @Test
+  void interruptedRepeatCallerSeesThePublishedTerminationFact() throws Exception {
+    for (boolean alive : new boolean[] {false, true}) {
+      try (ProcessScope scope = scope(newStateDirectory(), new ControlledProcess(alive, null))) {
+        assertEquals(!alive, scope.terminate());
+        Thread.currentThread().interrupt();
+        try {
+          assertEquals(!alive, scope.terminate());
+          assertTrue(Thread.currentThread().isInterrupted());
+        } finally {
+          Thread.interrupted();
+        }
+      }
+    }
+  }
+
   /** 在路径访问点制造确定的失败，不替换生产删除逻辑或创建真实 OS 资源。 */
   private static Path failingStateDirectory(Throwable failure) {
     return (Path)
