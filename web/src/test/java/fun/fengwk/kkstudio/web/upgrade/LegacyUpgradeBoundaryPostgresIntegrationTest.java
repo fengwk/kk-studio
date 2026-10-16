@@ -151,7 +151,11 @@ class LegacyUpgradeBoundaryPostgresIntegrationTest {
       assertEquals(LegacyDatabaseUpgradeException.Stage.CREDENTIAL, error.stage());
       assertFailClosed(fixture, error, before);
       assertTrue(
-          fixture.targetProbe().sawEvent("execute:update plugin_catalog_state"),
+          fixture.targetProbe().events().stream()
+              .anyMatch(
+                  event ->
+                      event.startsWith("execute:")
+                          && event.contains("update plugin_catalog_state")),
           "the static credential refusal must follow a real catalog CAS attempt");
       assertEquals(1, fixture.targetProbe().countEvents("rollback"));
       assertEquals(
@@ -178,7 +182,11 @@ class LegacyUpgradeBoundaryPostgresIntegrationTest {
       assertEquals(LegacyDatabaseUpgradeException.Stage.CREDENTIAL, error.stage());
       assertFailClosed(fixture, error, before);
       assertTrue(
-          fixture.targetProbe().sawEvent("execute:update plugin_catalog_state"),
+          fixture.targetProbe().events().stream()
+              .anyMatch(
+                  event ->
+                      event.startsWith("execute:")
+                          && event.contains("update plugin_catalog_state")),
           "the legacy credential read refusal must follow a real catalog CAS attempt");
       assertEquals(1, fixture.targetProbe().countEvents("rollback"));
       assertEquals(
