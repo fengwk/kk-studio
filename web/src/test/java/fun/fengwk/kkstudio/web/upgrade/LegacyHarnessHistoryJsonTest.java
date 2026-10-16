@@ -105,6 +105,27 @@ class LegacyHarnessHistoryJsonTest {
     assertNull(metadata.binding());
   }
 
+  /** 失败、取消与人工判定 UNKNOWN 的真实调用同样保留原 invocation，不借当前目录补造 binding。 */
+  @ParameterizedTest
+  @ValueSource(strings = {"FAILED", "CANCELLED", "UNKNOWN"})
+  void preservesEveryOtherRealTerminalStatus(String status) {
+    ObjectNode source = (ObjectNode) JsonValues.readTree(fixture(LEGACY_TOOL_RESULT));
+    ObjectNode sourceMetadata = (ObjectNode) source.get("toolResultMetadata");
+    sourceMetadata.put("status", status);
+    String upgraded =
+        LegacyHarnessHistoryJson.entryPayload(EntryType.MESSAGE, JsonValues.write(source));
+    ToolResultMetadata metadata =
+        ((MessagePayload) ENTRY_CODEC.decode(EntryType.MESSAGE, upgraded)).toolResultMetadata();
+    assertEquals(ToolResultStatus.valueOf(status), metadata.status());
+    assertEquals(
+        UUID.fromString(sourceMetadata.get("invocationId").stringValue()), metadata.invocationId());
+    assertNull(metadata.binding());
+    ObjectNode upgradedMetadata =
+        (ObjectNode) JsonValues.readTree(upgraded).get("toolResultMetadata");
+    upgradedMetadata.remove("binding");
+    assertEquals(sourceMetadata, upgradedMetadata);
+  }
+
   /** 真实人工输入回执被完整保留（不是仅非 null）：提交身份、操作者与接受时间逐字段相同。 */
   @Test
   void preservesTheRealInputReceiptExactly() {
@@ -160,7 +181,7 @@ class LegacyHarnessHistoryJsonTest {
         missingFieldError.getMessage());
   }
 
-  /** CUSTOM / CUSTOM_MESSAGE 的自由 data 需要 producer 白名单语义，本切片明确拒绝；null 类型固定报错。 */
+  /** CUSTOM / CUSTOM_MESSAGE 的自由 data 需要 producer 语义验证；null 类型固定报错。 */
   @Test
   void rejectsUnsupportedEntryTypes() {
     String root = fixture(CURRENT_ROOT_ENTRY);
@@ -202,13 +223,16 @@ class LegacyHarnessHistoryJsonTest {
   @Test
   void rejectsDuplicateFieldsAndTrailingTokens() {
     String root = fixture(CURRENT_ROOT_ENTRY);
+    String duplicateMetadata =
+        fixture(LEGACY_TOOL_RESULT)
+            .replace(
+                "\"status\": \"SUCCEEDED\",",
+                "\"status\": \"SUCCEEDED\", \"status\": \"SUCCEEDED\",");
     assertEquals(
         LegacyHarnessHistoryJson.ENTRY_MALFORMED,
         assertThrows(
                 IllegalArgumentException.class,
-                () ->
-                    LegacyHarnessHistoryJson.entryPayload(
-                        EntryType.ROOT, root.replace("\"settings\"", "\"settings\",\"settings\"")))
+                () -> LegacyHarnessHistoryJson.entryPayload(EntryType.MESSAGE, duplicateMetadata))
             .getMessage());
     assertEquals(
         LegacyHarnessHistoryJson.ENTRY_MALFORMED,
@@ -232,7 +256,7 @@ class LegacyHarnessHistoryJsonTest {
     assertNull(error.getCause());
   }
 
-  /** provider replay 只改 affinity.providerType；format 与 opaque payload（含同名字串、精确数值）逐字节原样。 */
+  /** provider replay 只改 affinity.providerType；format 与 opaque payload（含同名字串、精确数值）语义不变。 */
   @Test
   void upgradesOnlyTheAffinityProviderTypeOfLegacyReplayState() {
     String legacy = fixture(LEGACY_REPLAY);

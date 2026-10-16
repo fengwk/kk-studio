@@ -29,12 +29,11 @@ import java.util.Set;
  *       一律不动，绝不做全局字符串替换。
  * </ul>
  *
- * <p>转换结果一律经目标真实 codec（{@link HistoryEntryPayloadJsonCodec} / {@link
- * ProviderReplayStateJsonCodec}）校验为当前 目标结构；绝不借 encode 重建或裁剪其它字段。{@code CUSTOM} / {@code
- * CUSTOM_MESSAGE} 的自由 data 另需按 producer 语义判定， 这里明确拒绝。所有失败都是不含底层 cause 或原始输入的固定安全 {@link
- * IllegalArgumentException}。
+ * <p>转换结果经目标真实 codec（{@link HistoryEntryPayloadJsonCodec} / {@link
+ * ProviderReplayStateJsonCodec}）校验；不借 encode 重建或裁剪其它字段。{@code CUSTOM} / {@code CUSTOM_MESSAGE} 另需按
+ * producer 语义判定，这里明确拒绝。输入与目标结构校验失败只包含固定安全消息，不附带 cause 或原始输入。
  *
- * <p>web 组合根禁止直接依赖 {@code harness.common}，因此这里就地启用与 {@code JsonValues} 相同的三个严格精度开关。
+ * <p>严格拒绝重复字段与尾随 token；自由 JSON number 按精确十进制保留，不经过 double。
  */
 final class LegacyHarnessHistoryJson {
 
