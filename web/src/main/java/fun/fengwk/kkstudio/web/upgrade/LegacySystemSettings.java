@@ -18,41 +18,21 @@ import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
-import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
 /**
- * 一次性离线升级工具专用的旧七节 system settings 到当前六节聚合与 Plugin 普通值的纯转换。
+ * 离线升级的两阶段纯转换：先严格解析旧七节配置，再以六节 settings 装配的实际安装目录投影 Plugin 普通值。
  *
- * <p>两阶段、无宿主副作用：
+ * <p>旧字段形状与标量类型必须匹配；nullable 文本可以省略或显式 null，符合旧 Codec 的 NON_NULL 存储语义。 六节聚合仅经当前 {@link
+ * SystemSettingsCodec} 解码，不复制领域模型。
  *
- * <ul>
- *   <li>构造：严格解析并校验一次旧 {@code config} JSON（顶层恰为 tool / aiRuntime / environment / network /
- *       integrations / storageMedia / advanced 七节；{@code integrations} 恰为 comfyui / openCliHub /
- *       seedance / gptImage2 / minimaxH3 五块，各块按旧 Codec 的精确字段集与 boolean / string-or-null / integral
- *       类型校验）。去掉 {@code integrations} 后的六节只交给当前 {@link SystemSettingsCodec} 解码校验，本类不复制它的模型、codec
- *       或缺省逻辑。
- *   <li>{@link #pluginValues(StudioPluginRegistry, boolean, boolean)}：用调用方以当前六节 settings 现场打开的真实
- *       {@link StudioPluginRegistry} 作为唯一安装 authority，把旧 integrations 的普通值投影为每个实际已安装 Plugin 的配置
- *       JSON。
- * </ul>
+ * <p>无消费者的旧 comfyui 块仅允许默认值退休；实际 H3 只取 minimaxH3 的端点、预算与开关。 新工作流来自实际 Plugin 默认，仅用于未来配置，不补历史
+ * binding；启用但缺端点、Agent 或显式凭据必须拒绝。
  *
- * <p>边界与事实约束：
- *
- * <ul>
- *   <li>旧 {@code integrations.comfyui} 块在当前运行时没有任何消费者：只有字段与值全部等于旧 {@code Comfyui.DEFAULT}
- *       才可安全退休；任何非默认值都明确拒绝，要求操作人另行保留 / 审查后恢复，绝不把它当作 H3 endpoint 或预算 fallback。
- *   <li>H3 端点与预算只来自旧 {@code integrations.minimaxH3}，并覆盖当前已安装 comfyui Plugin 自己声明的默认工作流；新增 workflow
- *       只来自当前真实已装 Plugin 默认，不补历史 binding。
- *   <li>普通值只按目标 PluginSchema 归一化校验；完整业务区间 / URL / 工作流校验仍由随后现有的 {@code
- *       OfflinePluginCatalog.prepareInitial} 真正 configure 完成，本类不重复各 Plugin 私有 Settings 解析，也不做任何
- *       clamp / strip / fallback。
- *   <li>本类不读取密钥、不编造旧侧不存在的秘密、不推断历史 identity；对外失败只携带固定阶段 / 字段消息，绝不泄漏原始 JSON、值或 Throwable cause。
- * </ul>
- *
- * <p>严格拒绝重复字段与尾随 token；自由 JSON number 按精确十进制保留。
+ * <p>输出经实际 PluginSchema 校验，完整业务校验仍须由 {@link OfflinePluginCatalog#prepareInitial} 真正 configure 完成。
+ * 本类不执行宿主端口、不读取秘密或数据库，也不清洗或截断值；失败不回显输入或附带原始 cause。
  */
 final class LegacySystemSettings {
 
@@ -103,10 +83,6 @@ final class LegacySystemSettings {
           "integrations",
           "storageMedia",
           "advanced");
-
-  /** 去掉 integrations 后交给当前 codec 的六节名，顺序即当前聚合声明顺序。 */
-  private static final List<String> CURRENT_SECTIONS =
-      List.of("tool", "aiRuntime", "environment", "network", "storageMedia", "advanced");
 
   private static final Set<String> LEGACY_INTEGRATION_BLOCKS =
       Set.of("comfyui", "openCliHub", "seedance", "gptImage2", "minimaxH3");
@@ -240,27 +216,23 @@ final class LegacySystemSettings {
    * / promptAgentName 非 null 原样映射，null 且 H3 禁用时保留目标新默认（是禁用的新配置，不是历史绑定）。
    */
   private String comfyuiValues(PluginConfigSchema schema, boolean hasComfyBearer) {
-    ObjectNode h3 = requireBlock(integrations, "minimaxH3", MINIMAX_H3_BLOCK);
-    boolean enabled = requireBoolean(h3, "enabled", MINIMAX_H3_BLOCK);
-    String promptAgentName = requireTextOrNull(h3, "promptAgentName", MINIMAX_H3_BLOCK);
-    String comfyBaseUrl = requireTextOrNull(h3, "comfyBaseUrl", MINIMAX_H3_BLOCK);
+    ObjectNode h3 = (ObjectNode) integrations.get("minimaxH3");
+    boolean enabled = h3.get("enabled").booleanValue();
     if (enabled && !hasComfyBearer) {
       throw new IllegalArgumentException(COMFYUI_BEARER_REQUIRED);
     }
     ObjectNode values = (ObjectNode) readNode(schema.resolveValues("{}"));
-    values.put("enabled", enabled);
-    values.put("promptMaxWaitMillis", requireLong(h3, "promptMaxWaitMillis", MINIMAX_H3_BLOCK));
-    values.put(
-        "connectTimeoutMillis", requireLong(h3, "comfyConnectTimeoutMillis", MINIMAX_H3_BLOCK));
-    values.put(
-        "requestTimeoutMillis", requireLong(h3, "comfyRequestTimeoutMillis", MINIMAX_H3_BLOCK));
-    values.put("pollIntervalMillis", requireLong(h3, "comfyPollIntervalMillis", MINIMAX_H3_BLOCK));
-    values.put("maxWaitMillis", requireLong(h3, "comfyMaxWaitMillis", MINIMAX_H3_BLOCK));
-    if (promptAgentName != null) {
-      values.put("promptAgentName", promptAgentName);
+    values.set("enabled", h3.get("enabled"));
+    values.set("promptMaxWaitMillis", h3.get("promptMaxWaitMillis"));
+    values.set("connectTimeoutMillis", h3.get("comfyConnectTimeoutMillis"));
+    values.set("requestTimeoutMillis", h3.get("comfyRequestTimeoutMillis"));
+    values.set("pollIntervalMillis", h3.get("comfyPollIntervalMillis"));
+    values.set("maxWaitMillis", h3.get("comfyMaxWaitMillis"));
+    if (h3.hasNonNull("promptAgentName")) {
+      values.set("promptAgentName", h3.get("promptAgentName"));
     }
-    if (comfyBaseUrl != null) {
-      values.put("baseUrl", comfyBaseUrl);
+    if (h3.hasNonNull("comfyBaseUrl")) {
+      values.set("baseUrl", h3.get("comfyBaseUrl"));
     }
     values.put("authMode", hasComfyBearer ? "BEARER" : "NONE");
     return schema.resolveValues(write(values));
@@ -272,61 +244,28 @@ final class LegacySystemSettings {
    * instanceId。
    */
   private String openCliValues(PluginConfigSchema schema, boolean hasOpenCliApiKey) {
-    ObjectNode hub = requireBlock(integrations, "openCliHub", OPENCLI_HUB_BLOCK);
-    ObjectNode seedance = requireBlock(integrations, "seedance", SEEDANCE_BLOCK);
-    ObjectNode gptImage2 = requireBlock(integrations, "gptImage2", GPT_IMAGE_2_BLOCK);
-    boolean enabled = requireBoolean(hub, "enabled", OPENCLI_HUB_BLOCK);
+    ObjectNode hub = (ObjectNode) integrations.get("openCliHub");
+    boolean enabled = hub.get("enabled").booleanValue();
     if (enabled && !hasOpenCliApiKey) {
       throw new IllegalArgumentException(OPENCLI_API_KEY_REQUIRED);
     }
-    ObjectNode values = MAPPER.createObjectNode();
-    values.put("enabled", enabled);
-    values.put("connectTimeoutMillis", requireLong(hub, "connectTimeoutMillis", OPENCLI_HUB_BLOCK));
-    values.put("requestTimeoutMillis", requireLong(hub, "requestTimeoutMillis", OPENCLI_HUB_BLOCK));
-    values.put(
-        "longPollTimeoutMillis", requireLong(hub, "longPollTimeoutMillis", OPENCLI_HUB_BLOCK));
-    values.put("streamBufferBytes", requireInt(hub, "streamBufferBytes", OPENCLI_HUB_BLOCK));
-    values.put("maxJsonResponseBytes", requireInt(hub, "maxJsonResponseBytes", OPENCLI_HUB_BLOCK));
-    values.put(
-        "maxErrorResponseBytes", requireInt(hub, "maxErrorResponseBytes", OPENCLI_HUB_BLOCK));
-    values.put("maxOutputChars", requireInt(hub, "maxOutputChars", OPENCLI_HUB_BLOCK));
-    String baseUrl = requireTextOrNull(hub, "baseUrl", OPENCLI_HUB_BLOCK);
-    if (baseUrl != null) {
-      values.put("baseUrl", baseUrl);
+    ObjectNode values = hub.deepCopy();
+    if (!values.hasNonNull("baseUrl")) {
+      values.remove("baseUrl");
     }
-
-    ObjectNode gptValues = values.putObject("gptImage2");
-    gptValues.put("paidEnabled", requireBoolean(gptImage2, "paidEnabled", GPT_IMAGE_2_BLOCK));
-    gptValues.put(
-        "askTimeoutSeconds", requireInt(gptImage2, "askTimeoutSeconds", GPT_IMAGE_2_BLOCK));
-    gptValues.put(
-        "hubExecutionTimeoutMillis",
-        requireLong(gptImage2, "hubExecutionTimeoutMillis", GPT_IMAGE_2_BLOCK));
-    gptValues.put("maxWaitMillis", requireLong(gptImage2, "maxWaitMillis", GPT_IMAGE_2_BLOCK));
-
-    ObjectNode seedanceValues = values.putObject("seedance");
-    seedanceValues.put("enabled", requireBoolean(seedance, "enabled", SEEDANCE_BLOCK));
-    seedanceValues.put("retry", requireInt(seedance, "retry", SEEDANCE_BLOCK));
-    seedanceValues.put(
-        "hubExecutionTimeoutMillis",
-        requireLong(seedance, "hubExecutionTimeoutMillis", SEEDANCE_BLOCK));
-    seedanceValues.put(
-        "statusPollIntervalMillis",
-        requireLong(seedance, "statusPollIntervalMillis", SEEDANCE_BLOCK));
-    seedanceValues.put("maxWaitMillis", requireLong(seedance, "maxWaitMillis", SEEDANCE_BLOCK));
-    String workspaceId = requireTextOrNull(seedance, "workspaceId", SEEDANCE_BLOCK);
-    if (workspaceId != null) {
-      seedanceValues.put("workspaceId", workspaceId);
+    values.set("gptImage2", integrations.get("gptImage2").deepCopy());
+    ObjectNode seedance = ((ObjectNode) integrations.get("seedance")).deepCopy();
+    if (!seedance.hasNonNull("workspaceId")) {
+      seedance.remove("workspaceId");
     }
+    values.set("seedance", seedance);
     return schema.resolveValues(write(values));
   }
 
   /** 去 integrations 的六节交给当前 codec 严格解码；任何失败收敛为固定消息，绝不附带原始 JSON 或 cause。 */
   private static SystemSettings decodeCurrentSections(ObjectNode root) {
-    ObjectNode sixSections = MAPPER.createObjectNode();
-    for (String section : CURRENT_SECTIONS) {
-      sixSections.set(section, root.get(section));
-    }
+    ObjectNode sixSections = root.deepCopy();
+    sixSections.remove("integrations");
     try {
       return SETTINGS_CODEC.decode(write(sixSections));
     } catch (RuntimeException error) {
@@ -335,7 +274,7 @@ final class LegacySystemSettings {
   }
 
   private static void requireComfyui(ObjectNode block) {
-    requireExactFields(block, LEGACY_COMFYUI_FIELDS, COMFYUI_BLOCK);
+    requireFields(block, LEGACY_COMFYUI_FIELDS, Set.of("baseUrl"), COMFYUI_BLOCK);
     requireBoolean(block, "enabled", COMFYUI_BLOCK);
     requireTextOrNull(block, "baseUrl", COMFYUI_BLOCK);
     requireLong(block, "connectTimeoutMillis", COMFYUI_BLOCK);
@@ -349,20 +288,17 @@ final class LegacySystemSettings {
   }
 
   private static boolean isLegacyComfyuiDefault(ObjectNode block) {
-    return !requireBoolean(block, "enabled", COMFYUI_BLOCK)
-        && requireTextOrNull(block, "baseUrl", COMFYUI_BLOCK) == null
-        && requireLong(block, "connectTimeoutMillis", COMFYUI_BLOCK)
-            == LEGACY_COMFYUI_CONNECT_TIMEOUT_MILLIS
-        && requireLong(block, "readTimeoutMillis", COMFYUI_BLOCK)
-            == LEGACY_COMFYUI_READ_TIMEOUT_MILLIS
-        && requireLong(block, "websocketTimeoutMillis", COMFYUI_BLOCK)
+    return !block.get("enabled").booleanValue()
+        && !block.hasNonNull("baseUrl")
+        && block.get("connectTimeoutMillis").longValue() == LEGACY_COMFYUI_CONNECT_TIMEOUT_MILLIS
+        && block.get("readTimeoutMillis").longValue() == LEGACY_COMFYUI_READ_TIMEOUT_MILLIS
+        && block.get("websocketTimeoutMillis").longValue()
             == LEGACY_COMFYUI_WEBSOCKET_TIMEOUT_MILLIS
-        && requireLong(block, "maxInputFileBytes", COMFYUI_BLOCK)
-            == LEGACY_COMFYUI_MAX_INPUT_FILE_BYTES;
+        && block.get("maxInputFileBytes").longValue() == LEGACY_COMFYUI_MAX_INPUT_FILE_BYTES;
   }
 
   private static void requireOpenCliHub(ObjectNode block) {
-    requireExactFields(block, LEGACY_OPENCLI_HUB_FIELDS, OPENCLI_HUB_BLOCK);
+    requireFields(block, LEGACY_OPENCLI_HUB_FIELDS, Set.of("baseUrl"), OPENCLI_HUB_BLOCK);
     requireBoolean(block, "enabled", OPENCLI_HUB_BLOCK);
     requireTextOrNull(block, "baseUrl", OPENCLI_HUB_BLOCK);
     requireLong(block, "connectTimeoutMillis", OPENCLI_HUB_BLOCK);
@@ -375,7 +311,7 @@ final class LegacySystemSettings {
   }
 
   private static void requireSeedance(ObjectNode block) {
-    requireExactFields(block, LEGACY_SEEDANCE_FIELDS, SEEDANCE_BLOCK);
+    requireFields(block, LEGACY_SEEDANCE_FIELDS, Set.of("workspaceId"), SEEDANCE_BLOCK);
     requireBoolean(block, "enabled", SEEDANCE_BLOCK);
     requireTextOrNull(block, "workspaceId", SEEDANCE_BLOCK);
     requireInt(block, "retry", SEEDANCE_BLOCK);
@@ -393,15 +329,22 @@ final class LegacySystemSettings {
   }
 
   private static void requireMiniMaxH3(ObjectNode block) {
-    requireExactFields(block, LEGACY_MINIMAX_H3_FIELDS, MINIMAX_H3_BLOCK);
-    requireBoolean(block, "enabled", MINIMAX_H3_BLOCK);
-    requireTextOrNull(block, "promptAgentName", MINIMAX_H3_BLOCK);
+    requireFields(
+        block,
+        LEGACY_MINIMAX_H3_FIELDS,
+        Set.of("promptAgentName", "comfyBaseUrl"),
+        MINIMAX_H3_BLOCK);
+    boolean enabled = requireBoolean(block, "enabled", MINIMAX_H3_BLOCK);
+    String promptAgentName = requireTextOrNull(block, "promptAgentName", MINIMAX_H3_BLOCK);
     requireLong(block, "promptMaxWaitMillis", MINIMAX_H3_BLOCK);
-    requireTextOrNull(block, "comfyBaseUrl", MINIMAX_H3_BLOCK);
+    String comfyBaseUrl = requireTextOrNull(block, "comfyBaseUrl", MINIMAX_H3_BLOCK);
     requireLong(block, "comfyConnectTimeoutMillis", MINIMAX_H3_BLOCK);
     requireLong(block, "comfyRequestTimeoutMillis", MINIMAX_H3_BLOCK);
     requireLong(block, "comfyPollIntervalMillis", MINIMAX_H3_BLOCK);
     requireLong(block, "comfyMaxWaitMillis", MINIMAX_H3_BLOCK);
+    if (enabled && (promptAgentName == null || comfyBaseUrl == null)) {
+      throw new IllegalArgumentException(MINIMAX_H3_BLOCK);
+    }
   }
 
   private static ObjectNode parseObject(String json) {
@@ -437,9 +380,15 @@ final class LegacySystemSettings {
   }
 
   private static void requireExactFields(ObjectNode node, Set<String> fields, String message) {
+    requireFields(node, fields, Set.of(), message);
+  }
+
+  private static void requireFields(
+      ObjectNode node, Set<String> fields, Set<String> nullable, String message) {
     Set<String> names = new LinkedHashSet<>();
     node.propertyNames().forEach(names::add);
-    if (!names.equals(fields)) {
+    if (!fields.containsAll(names)
+        || fields.stream().anyMatch(field -> !nullable.contains(field) && !names.contains(field))) {
       throw new IllegalArgumentException(message);
     }
   }
@@ -454,10 +403,7 @@ final class LegacySystemSettings {
 
   private static String requireTextOrNull(ObjectNode node, String field, String message) {
     JsonNode value = node.get(field);
-    if (value == null) {
-      throw new IllegalArgumentException(message);
-    }
-    if (value.isNull()) {
+    if (value == null || value.isNull()) {
       return null;
     }
     if (!value.isString()) {

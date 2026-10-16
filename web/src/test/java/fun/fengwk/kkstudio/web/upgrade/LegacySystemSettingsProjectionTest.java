@@ -79,7 +79,12 @@ class LegacySystemSettingsProjectionTest {
   void projectsTheLegacyDefaultsIntoTheFrozenProfile() throws IOException {
     CountingDataSource dataSource = new CountingDataSource();
     try (LocalHttpProbe probe = LocalHttpProbe.start()) {
-      LegacySystemSettings legacy = parse(DEFAULTS, probe.proxyUrl());
+      ObjectNode source =
+          readObject(LegacySystemSettingsTest.fixture("legacy-settings-defaults-canonical.json"));
+      ((ObjectNode) source.get("network"))
+          .put("proxyUrl", probe.proxyUrl())
+          .put("noProxyHosts", "");
+      LegacySystemSettings legacy = LegacySystemSettings.parse(JsonValues.write(source));
       try (OfflinePluginCatalog catalog =
           OfflinePluginCatalog.open(dataSource, legacy.settings())) {
         StudioPluginRegistry registry = catalog.registry();
@@ -234,7 +239,8 @@ class LegacySystemSettingsProjectionTest {
       seedance.put("enabled", true);
       seedance.put("workspaceId", "legacy-child-workspace");
       ((ObjectNode) integrations.get("gptImage2")).put("paidEnabled", true);
-      LegacySystemSettings legacy = parseJson(legacyJsonWithProxy(integrations, probe.proxyUrl()));
+      LegacySystemSettings legacy =
+          LegacySystemSettings.parse(legacyJsonWithProxy(integrations, probe.proxyUrl()));
 
       try (OfflinePluginCatalog catalog =
           OfflinePluginCatalog.open(dataSource, legacy.settings())) {
@@ -298,6 +304,40 @@ class LegacySystemSettingsProjectionTest {
     }
   }
 
+  /** 启用 H3 但旧端点/Agent 缺失时不得拿新默认伪装成合法旧配置。 */
+  @Test
+  void rejectsMissingH3IdentityInsteadOfApplyingEnabledDefaults() throws IOException {
+    CountingDataSource dataSource = new CountingDataSource();
+    try (LocalHttpProbe probe = LocalHttpProbe.start()) {
+      try (OfflinePluginCatalog catalog =
+          OfflinePluginCatalog.open(dataSource, parse(ENABLED, probe.proxyUrl()).settings())) {
+        for (String field : List.of("promptAgentName", "comfyBaseUrl")) {
+          for (boolean omitted : List.of(false, true)) {
+            ObjectNode integrations =
+                (ObjectNode) JsonValues.readTree(LegacySystemSettingsTest.fixture(ENABLED));
+            ObjectNode h3 = (ObjectNode) integrations.get("minimaxH3");
+            if (omitted) {
+              h3.remove(field);
+            } else {
+              h3.putNull(field);
+            }
+            IllegalArgumentException error =
+                assertThrows(
+                    IllegalArgumentException.class,
+                    () ->
+                        LegacySystemSettings.parse(
+                                legacyJsonWithProxy(integrations, probe.proxyUrl()))
+                            .pluginValues(catalog.registry(), true, true));
+            assertEquals(LegacySystemSettings.MINIMAX_H3_BLOCK, error.getMessage());
+            assertNull(error.getCause());
+          }
+        }
+        assertEquals(0, dataSource.openedConnections());
+      }
+      assertEquals(0, probe.connections());
+    }
+  }
+
   /** 安装集合必须恰为冻结四插件 profile：缺、多或空都 fail-closed，不新增安装 authority。 */
   @Test
   void rejectsAnInstallSetThatIsNotTheFrozenProfile() throws IOException {
@@ -338,12 +378,21 @@ class LegacySystemSettingsProjectionTest {
         ObjectNode badUrl =
             (ObjectNode) JsonValues.readTree(LegacySystemSettingsTest.fixture(ENABLED));
         ((ObjectNode) badUrl.get("minimaxH3")).put("comfyBaseUrl", "ftp://legacy-comfy");
-        assertConfigureRejected(catalog, registry, probe, badUrl);
+        assertConfigureRejected(catalog, registry, probe, badUrl, "comfyui");
 
         ObjectNode outOfRange =
             (ObjectNode) JsonValues.readTree(LegacySystemSettingsTest.fixture(ENABLED));
         ((ObjectNode) outOfRange.get("minimaxH3")).put("comfyPollIntervalMillis", 120_000L);
-        assertConfigureRejected(catalog, registry, probe, outOfRange);
+        assertConfigureRejected(catalog, registry, probe, outOfRange, "comfyui");
+
+        // 旧 Hub 的 URI 校验没有端口范围检查，目标拒绝时不能自动改成默认端口。
+        for (int port : List.of(0, 70_000)) {
+          ObjectNode badPort =
+              (ObjectNode) JsonValues.readTree(LegacySystemSettingsTest.fixture(ENABLED));
+          ((ObjectNode) badPort.get("openCliHub"))
+              .put("baseUrl", "https://legacy-hub.example:" + port);
+          assertConfigureRejected(catalog, registry, probe, badPort, "opencli");
+        }
 
         assertEquals(0, dataSource.openedConnections());
       }
@@ -355,16 +404,19 @@ class LegacySystemSettingsProjectionTest {
       OfflinePluginCatalog catalog,
       StudioPluginRegistry registry,
       LocalHttpProbe probe,
-      ObjectNode integrations)
-      throws IOException {
-    LegacySystemSettings legacy = parseJson(legacyJsonWithProxy(integrations, probe.proxyUrl()));
+      ObjectNode integrations,
+      String expectedPluginId) {
+    LegacySystemSettings legacy =
+        LegacySystemSettings.parse(legacyJsonWithProxy(integrations, probe.proxyUrl()));
     Map<String, String> values = legacy.pluginValues(registry, true, true);
     IllegalStateException rejection =
         assertThrows(
             IllegalStateException.class,
             () -> catalog.prepareInitial(values, secretFields(registry, true, true)));
-    assertTrue(rejection.getMessage().contains("stage=configure"), rejection.getMessage());
-    assertTrue(rejection.getMessage().contains("comfyui"), rejection.getMessage());
+    assertEquals(
+        "Plugin catalog snapshot build failed: stage=configure pluginId=" + expectedPluginId,
+        rejection.getMessage());
+    assertNull(rejection.getCause());
     assertEquals(0, probe.connections(), "rejection must not issue any HTTP request");
   }
 
@@ -383,7 +435,7 @@ class LegacySystemSettingsProjectionTest {
             JsonValues.readTree(
                 LegacySystemSettingsTest.legacyJsonWithIntegrations(
                     JsonValues.write(integrations)));
-    ((ObjectNode) root.get("network")).put("proxyUrl", proxyUrl);
+    ((ObjectNode) root.get("network")).put("proxyUrl", proxyUrl).put("noProxyHosts", "");
     return JsonValues.write(root);
   }
 
@@ -392,10 +444,6 @@ class LegacySystemSettingsProjectionTest {
         legacyJsonWithProxy(
             (ObjectNode) JsonValues.readTree(LegacySystemSettingsTest.fixture(integrationsFixture)),
             proxyUrl));
-  }
-
-  private static LegacySystemSettings parseJson(String legacyJson) {
-    return LegacySystemSettings.parse(legacyJson);
   }
 
   private static Map<String, List<String>> secretFields(

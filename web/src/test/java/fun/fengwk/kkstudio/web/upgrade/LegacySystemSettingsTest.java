@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.web.upgrade;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -19,8 +20,8 @@ import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 
 /**
- * {@link LegacySystemSettings} 第一阶段的定向回归：旧七节 JSON 只交给当前六节 codec 与旧 integrations 精确形状校验，任何缺失 / 未知 /
- * 错误类型 / 重复 / 尾随 / 巨整数都不 coerce，死块非默认明确拒绝，失败只带固定安全消息。
+ * {@link LegacySystemSettings} 第一阶段的定向回归：旧 nullable 文本允许省略，非 nullable 缺失、未知字段、错误类型、 重复键、尾随 token
+ * 与巨整数都拒绝；死块非默认明确拒绝，失败只带固定安全消息。
  *
  * <p>六节基线由当前 {@link SystemSettingsCodec} 的 {@link SystemSettings#DEFAULT}
  * 编码得到（六节字段源码未改），再插入资源里按旧源码逐字段记录的 integrations 五个块；因此这里不手写权限规则等无关结构，只用真实基线验证 integrations 边界。
@@ -36,6 +37,44 @@ class LegacySystemSettingsTest {
   void decodesTheSixSectionsAndValidatesTheLegacyIntegrationsShape() {
     LegacySystemSettings legacy = LegacySystemSettings.parse(defaultLegacyJson());
     assertEquals(SystemSettings.DEFAULT, legacy.settings());
+  }
+
+  /** 旧 Codec 的 NON_NULL canonical 输出省略 nullable 文本，不要求伪造显式 null。 */
+  @Test
+  void acceptsCanonicalOmissionsOfNullableIntegrationFields() {
+    ObjectNode root = defaultRoot();
+    ObjectNode integrations = integrations(root);
+    ((ObjectNode) integrations.get("comfyui")).remove("baseUrl");
+    ((ObjectNode) integrations.get("openCliHub")).remove("baseUrl");
+    ((ObjectNode) integrations.get("seedance")).remove("workspaceId");
+    ((ObjectNode) integrations.get("minimaxH3")).remove("promptAgentName");
+    ((ObjectNode) integrations.get("minimaxH3")).remove("comfyBaseUrl");
+    LegacySystemSettings converted =
+        assertDoesNotThrow(() -> LegacySystemSettings.parse(JsonValues.write(root)));
+    assertEquals(SystemSettings.DEFAULT, converted.settings());
+  }
+
+  /** 资源由源版本真实 model/validation/codec 新编译后编码 DEFAULT，非手写七节形状。 */
+  @Test
+  void acceptsTheActualSourceCanonicalDefaults() {
+    assertEquals(
+        SystemSettings.DEFAULT,
+        LegacySystemSettings.parse(fixture("legacy-settings-defaults-canonical.json")).settings());
+  }
+
+  /** 六节中的非默认值整树保留，不按升级工具自己的默认值重建。 */
+  @Test
+  void preservesEveryCurrentSectionWithoutResettingOrdinaryValues() {
+    ObjectNode root = defaultRoot();
+    ((ObjectNode) root.get("tool")).put("modelGatewayBusyRetryMillis", 2_001);
+    ((ObjectNode) root.get("aiRuntime")).put("compactionKeepRecentTokens", 20_001);
+    ((ObjectNode) root.get("environment")).put("maxResourceBytes", 16_777_217);
+    ((ObjectNode) root.get("network")).put("noProxyHosts", "service.internal,192.0.2.0/24");
+    ((ObjectNode) root.get("storageMedia")).put("s3PresignDefaultExpiresSeconds", 1_850);
+    ((ObjectNode) root.get("advanced")).put("applicationEventQueueCapacity", 513);
+    LegacySystemSettings converted = LegacySystemSettings.parse(JsonValues.write(root));
+    root.remove("integrations");
+    assertEquals(root, JsonValues.readTree(CODEC.encode(converted.settings())));
   }
 
   /** 顶层必须恰为旧七节；非对象、缺节、多节都拒绝。 */
