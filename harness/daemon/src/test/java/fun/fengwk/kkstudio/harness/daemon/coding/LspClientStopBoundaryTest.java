@@ -35,7 +35,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * {@link LspClient} 关闭边界的行为：协议失败、范围未收敛、在途取消失败与并发等待者中断都不能跳过后续清理，也不能改写首失败身份。
+ * {@link LspClient} 关闭与启动握手边界的行为：协议失败（含异步 RPC future 的 Error）、启动握手失败、范围未收敛、在途取消失败与并发等待者中断
+ * 都不能跳过后续清理，也不能改写首失败身份。
  *
  * <p>这里不启动真实服务器：实例经包内私有构造器反射装配，进程范围是真实 {@link ProcessScope} 但承载受控 {@link Process}，远端是受控代理。
  * 「真实进程/真实自有任务」的物理收敛证据由 {@code LspClientQuiescenceTest} 等物理测试负责，本类只证明关闭路径的控制流、清理顺序与失败身份。
@@ -50,8 +51,10 @@ class LspClientStopBoundaryTest {
   private final ExecutorService dispatch = Executors.newCachedThreadPool();
 
   @AfterEach
-  void tearDown() {
+  void tearDown() throws InterruptedException {
     dispatch.shutdownNow();
+    // 自有排空任务只在流被关闭后退出，因此这里有界等待执行器真正终止，而不是假设它已经静止。
+    assertTrue(dispatch.awaitTermination(WAIT.toSeconds(), TimeUnit.SECONDS), "自有派发执行器必须真正终止");
   }
 
   /** 意图：{@code shutdown} 请求本身抛出 Error 时保持原身份，但范围、标准流与自有 IO 任务仍必须逐个收敛。 */
@@ -83,6 +86,47 @@ class LspClientStopBoundaryTest {
 
     assertSame(exit, thrown, "首 Error 必须保持身份");
     assertEveryCleanupAttempted(harness);
+  }
+
+  /**
+   * 意图：{@code shutdown} 的 RPC future 以 Error 异步失败时，{@code await} 经 {@code ExecutionException}
+   * 仍须按身份重抛首 Error； 范围、标准流与自有 IO 任务照常逐个收敛，重复停止交付同一条失败。
+   */
+  @Test
+  void asyncShutdownErrorKeepsIdentityAndStillRunsEveryCleanup() throws Exception {
+    RemoteStub remote = new RemoteStub();
+    AssertionError shutdown = new AssertionError("synthetic async shutdown failure");
+    remote.shutdownResult = CompletableFuture.failedFuture(shutdown);
+    Harness harness = harness(remote);
+
+    Error thrown = assertThrows(AssertionError.class, () -> harness.client().stop(STOP_GRACE));
+
+    assertSame(shutdown, thrown, "首 Error 必须保持身份");
+    assertEveryCleanupAttempted(harness);
+    // 幂等：其余调用者看到同一条失败，而不是另一次关闭或成功。
+    assertSame(
+        shutdown, assertThrows(AssertionError.class, () -> harness.client().stop(STOP_GRACE)));
+  }
+
+  /**
+   * 意图：{@code initialize} 的 RPC future 以 Error 异步失败时，原 Error 身份必须在启动清理之后仍保持；启动清理控制流必须真实完成一次停止
+   * （协议、范围、标准流与自有 IO 任务全部收敛）。
+   *
+   * <p>这是控制流证据：实例由反射装配、远端是受控代理，不是 OS 物理收敛证明。
+   */
+  @Test
+  void initializeFutureErrorKeepsIdentityAndRunsStartupCleanup() throws Exception {
+    RemoteStub remote = new RemoteStub();
+    AssertionError initialize = new AssertionError("synthetic async initialize failure");
+    remote.initializeResult = CompletableFuture.failedFuture(initialize);
+    Harness harness = harness(remote);
+
+    Error thrown = assertThrows(AssertionError.class, () -> harness.client().initialize(WAIT));
+
+    assertSame(initialize, thrown, "首 Error 必须保持身份");
+    assertEquals(1, remote.exitCalls(), "启动清理必须真实走完一次关闭协议");
+    assertEveryCleanupAttempted(harness);
+    assertFalse(harness.client().isAlive());
   }
 
   /** 意图：范围没有证明收敛时按固定安全失败报告，但{@code close}仍必须被调用（状态目录被删除）。 */
@@ -425,12 +469,14 @@ class LspClientStopBoundaryTest {
       CountDownLatch taskExited,
       RemoteStub remote) {}
 
-  /** 受控远端：只回答关闭协议，其余方法一律视为「本次边界不涉及」。 */
+  /** 受控远端：只回答关闭协议与初始化握手，其余方法一律视为「本次边界不涉及」。 */
   private static final class RemoteStub implements InvocationHandler {
 
     private final CountDownLatch shutdownRequested = new CountDownLatch(1);
     private final AtomicInteger shutdownCalls = new AtomicInteger();
     private final AtomicInteger exitCalls = new AtomicInteger();
+    private volatile CompletableFuture<Object> initializeResult =
+        CompletableFuture.completedFuture(null);
     private volatile CompletableFuture<Object> shutdownResult =
         CompletableFuture.completedFuture(null);
     private volatile Throwable shutdownFailure;
@@ -446,6 +492,9 @@ class LspClientStopBoundaryTest {
 
     @Override
     public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+      if (method.getName().equals("initialize")) {
+        return initializeResult;
+      }
       if (method.getName().equals("shutdown")) {
         shutdownCalls.incrementAndGet();
         shutdownRequested.countDown();
