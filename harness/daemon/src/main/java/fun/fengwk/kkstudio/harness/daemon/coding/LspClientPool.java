@@ -21,7 +21,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * 按 {@code (项目根, 服务器 id, 配置指纹)} 复用 LSP 客户端。
+ * 按 {@code (项目根, 服务器配置)} 复用 LSP 客户端。
  *
  * <p>同一 key 的并发启动被合并成一次真实启动；没有在途请求且闲置超过 {@code idleTimeout} 的客户端被回收；线程结束不关闭共享实例，只有 Daemon
  * 退出或配置失效才全量关闭。关闭顺序与失败清理都由 {@link LspClient} 保证。
@@ -40,9 +40,9 @@ final class LspClientPool implements AutoCloseable {
   private final Duration initializeTimeout;
 
   private final Object lock = new Object();
-  private final Map<String, Client> clients = new HashMap<>();
-  private final Map<String, Boot> boots = new HashMap<>();
-  private final Map<String, Retiring> retiring = new HashMap<>();
+  private final Map<Key, Client> clients = new HashMap<>();
+  private final Map<Key, Boot> boots = new HashMap<>();
+  private final Map<Key, Retiring> retiring = new HashMap<>();
   private long generation;
   private boolean closed;
   private ScheduledFuture<?> idleCheck;
@@ -73,7 +73,7 @@ final class LspClientPool implements AutoCloseable {
     LspServerConfig server = discovery.requireServer(file);
     String executable = discovery.requireExecutable(server);
     Path root = discovery.workspaceRoot(server, file);
-    String key = key(root, server);
+    Key key = key(root, server);
     for (; ; ) {
       Retiring retirement;
       Boot boot = null;
@@ -120,7 +120,7 @@ final class LspClientPool implements AutoCloseable {
         .flatMap(
             server -> {
               Path root = discovery.workspaceRoot(server, file);
-              String key = key(root, server);
+              Key key = key(root, server);
               synchronized (lock) {
                 Client existing = clients.get(key);
                 return existing != null && existing.client.isAlive()
@@ -201,7 +201,7 @@ final class LspClientPool implements AutoCloseable {
     }
   }
 
-  private Client attach(String key, LspClient client) {
+  private Client attach(Key key, LspClient client) {
     synchronized (lock) {
       requireOpen();
       Client entry = clients.get(key);
@@ -213,7 +213,7 @@ final class LspClientPool implements AutoCloseable {
   }
 
   /** 启动一个实例：进程登记、初始化与发布都在锁外完成，只有状态判定与状态迁移进入锁；任何失败路径都在锁内移除登记， 并在锁外停止已经启动的进程。 */
-  private void start(String key, Boot boot, LspServerConfig server, Path root, String executable) {
+  private void start(Key key, Boot boot, LspServerConfig server, Path root, String executable) {
     LspClient client = null;
     boolean published = false;
     try {
@@ -243,7 +243,7 @@ final class LspClientPool implements AutoCloseable {
   }
 
   /** 启动仍可发布时返回；否则在锁内移除登记并抛出取消错误。调用方必须持有 {@link #lock}。 */
-  private void requireUsable(String key, Boot boot) {
+  private void requireUsable(Key key, Boot boot) {
     if (closed || boot.generation != generation) {
       boots.remove(key, boot);
       throw new IllegalStateException("LSP client startup cancelled");
@@ -415,18 +415,6 @@ final class LspClientPool implements AutoCloseable {
     }
   }
 
-  /** 复用键：项目根、服务器 id 与配置指纹共同决定一个实例。 */
-  private static String key(Path root, LspServerConfig server) {
-    return root
-        + "\n"
-        + server.id()
-        + "\n"
-        + server.command()
-        + server.extensions()
-        + server.rootMarkers()
-        + server.firstMatchMarkers();
-  }
-
   private static Duration requirePositive(Duration value, String name) {
     Objects.requireNonNull(value, name);
     if (value.isZero() || value.isNegative()) {
@@ -435,14 +423,26 @@ final class LspClientPool implements AutoCloseable {
     return value;
   }
 
+  /** 复用键工厂：项目根与完整服务器配置共同决定一个实例。 */
+  private static Key key(Path root, LspServerConfig server) {
+    return new Key(root, server);
+  }
+
+  /**
+   * 结构化复用键：项目根与完整服务器配置共同决定一个实例。
+   *
+   * <p>record 按值比较结构化字段，避免把 {@code List.toString()} 表示相同、结构却不同的配置误判为同一实例。
+   */
+  private record Key(Path root, LspServerConfig server) {}
+
   /** 池中一个客户端条目：在途请求计数与最近活动时间决定它是否可以被回收；字段只在池锁内访问。 */
   static final class Client {
-    private final String key;
+    private final Key key;
     private final LspClient client;
     private int inFlight;
     private long lastUsedAt;
 
-    private Client(String key, LspClient client) {
+    private Client(Key key, LspClient client) {
       this.key = key;
       this.client = client;
       this.lastUsedAt = System.currentTimeMillis();
