@@ -231,14 +231,20 @@ final class LspClientPool implements AutoCloseable {
         published = true;
       }
       boot.result.complete(client);
-    } catch (Exception error) {
+    } catch (Exception | Error error) {
+      Throwable failure = error;
       if (client != null && !published) {
-        stopQuietly(client, null);
+        // 清理失败不得掩盖启动失败，也不得跳过下面的登记清理与共享交付。
+        LspClient failedClient = client;
+        failure = LspClient.cleanupStartFailure(failure, () -> failedClient.stop(shutdownGrace));
       }
       synchronized (lock) {
         boots.remove(key, boot);
       }
-      boot.result.completeExceptionally(error);
+      if (!boot.result.completeExceptionally(failure) && failure instanceof Error fatal) {
+        // 共享交付已被 close 的取消抢先失败：本线程上的致命失败不能被吞掉。
+        throw fatal;
+      }
     }
   }
 
