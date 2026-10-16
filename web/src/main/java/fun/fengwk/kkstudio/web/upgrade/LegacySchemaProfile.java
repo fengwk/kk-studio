@@ -20,8 +20,10 @@ import java.util.TreeSet;
  *
  * <p>指纹覆盖 public canonical 应用 schema 的全部可观察形态：关系集合与
  * kind/persistence/partition/RLS、列的序号/名称/类型/可空/default/generated/identity/collation、所有
- * PK/UNIQUE/CHECK/FK 定义与 validated/deferrable/deferred、索引定义与有效性、非内部 trigger 与 rule、独立用户类型（enum /
- * domain / 独立 composite / range）、额外 sequence/view/routine、非 public 用户 namespace。
+ * PK/UNIQUE/CHECK/FK 定义与 validated/deferrable/deferred、索引定义与有效性、非内部 trigger 与 rule、独立用户类型（除隐式数组与
+ * relation 行类型之外的 public 全部 {@code pg_type}）、额外 sequence/view/routine、未被上述专用查询覆盖的其它 public schema
+ * 对象（collation / operator / operator class 等，按真实 namespace 依赖与 {@code pg_identify_object} 稳定身份）、非内置
+ * extension（无论装在哪个 namespace）、非 public 用户 namespace。
  *
  * <p>只有 Flyway 工具自己的 {@code flyway_schema_history} 表及其索引被排除（按表名精确排除，绝不用前缀匹配吞掉未知业务表）；FK 的 RI trigger
  * 只以「状态计数 + 状态多重集」参与其约束行，绝不把 trigger 名或 OID 放进指纹。因此任何未列入白名单的业务表、未知用户类型或被人为改动的 RI trigger
@@ -208,8 +210,10 @@ final class LegacySchemaProfile {
       """;
 
   /**
-   * public 下独立存在的用户类型：enum / domain / range / multirange，以及不承载表的独立 composite（表自身的行类型按其 pg_class
-   * 形态已进入 relation 行）。
+   * public 下的独立用户类型：不按类型种类白名单筛选，因此 enum / domain / 独立 composite / range / multirange 之外的 base 与未定义
+   * shell type 同样进入指纹。
+   *
+   * <p>只按真实 catalog 链接排除两类隐式类型：由 {@code pg_type.typarray} 指向的数组伴生类型，以及已经由 relation 行覆盖的行类型。
    */
   private static final String USER_TYPES =
       """
@@ -218,10 +222,41 @@ final class LegacySchemaProfile {
       join pg_namespace n on n.oid = t.typnamespace
       left join pg_class c on c.oid = t.typrelid
       where n.nspname = 'public'
-        and t.typtype in ('e', 'd', 'c', 'r', 'm')
         and (t.typrelid = 0 or c.relkind = 'c')
-        and t.typname not like '\\_%%'
+        and not exists (select 1 from pg_type element where element.typarray = t.oid)
       order by t.typname
+      """;
+
+  /**
+   * public 下未被前述专用查询覆盖的其它 schema 对象：collation、operator、operator class/family、text search 对象等。
+   *
+   * <p>枚举依据是 PostgreSQL 自己记录的「对象 → public namespace」依赖，身份用 {@code pg_identify_object} 的稳定标识（类型 +
+   * 限定名/签名），绝不使用 OID；已由 relation/index/type/routine/constraint 专门查询覆盖的类在这里排除。规范化顺序覆盖投影出的全部字段。
+   */
+  private static final String SCHEMA_OBJECTS =
+      """
+      select o.type, o.identity
+      from pg_depend d
+      join pg_namespace n on n.oid = d.refobjid
+      cross join lateral pg_identify_object(d.classid, d.objid, d.objsubid) o
+      where d.refclassid = 'pg_namespace'::regclass
+        and n.nspname = 'public'
+        and d.classid not in ('pg_class'::regclass, 'pg_type'::regclass, 'pg_proc'::regclass,
+                              'pg_constraint'::regclass)
+      order by o.type, o.identity
+      """;
+
+  /**
+   * 非内置 extension：上面所有查询都只看 public namespace，而 extension 可以装进任何 namespace（装进 {@code pg_catalog}
+   * 时连它自己的对象都不出现在 public），因此必须单独按 extension 目录核对。
+   *
+   * <p>只排除每个数据库都有的内置 {@code plpgsql}，按 {@code extname} 稳定排序。
+   */
+  private static final String EXTENSIONS =
+      """
+      select extname from pg_extension
+      where extname <> 'plpgsql'
+      order by extname
       """;
 
   private static final String NAMESPACES =
@@ -267,6 +302,8 @@ final class LegacySchemaProfile {
       append(connection, lines, "rule", RULES);
       append(connection, lines, "routine", ROUTINES);
       append(connection, lines, "type", USER_TYPES);
+      append(connection, lines, "schema-object", SCHEMA_OBJECTS);
+      append(connection, lines, "extension", EXTENSIONS);
       append(connection, lines, "namespace", NAMESPACES);
     } catch (SQLException error) {
       throw new LegacyDatabaseUpgradeException(
