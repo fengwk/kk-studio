@@ -1,0 +1,10 @@
+{
+  "message": {
+    "role": "USER",
+    "contents": [
+      {"type": "text", "text": "hello"}
+    ]
+  },
+  "assistantMetadata": null,
+  "toolResultMetadata": null
+}
