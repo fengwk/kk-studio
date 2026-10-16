@@ -2,11 +2,17 @@ package fun.fengwk.kkstudio.web.upgrade;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.boot.logging.LogLevel;
+import org.springframework.boot.logging.LoggingSystem;
+import org.springframework.boot.logging.LoggingSystemFactory;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -25,7 +31,8 @@ import java.util.Map;
  *
  * <p>「输入被接受」的用例仍走真实 {@code SimpleDriverDataSource}，因此验证的是输入解析后安全 fail closed 且不回显凭据，而不是 mock 的转换器。
  *
- * <p>CLI 会在读 secret 前关闭本 JVM 的根日志（独占一次性进程语义）；本类只断言输出流本身，不依赖日志。
+ * <p>CLI 会在读 secret 前关闭本 JVM 的全部现存 logger、根日志与 JUL（独占一次性进程语义）；日志关闭断言观察的是本进程真实 SLF4J
+ * 后端的启用决策，其余用例只断言输出流本身。
  */
 class LegacyDatabaseUpgradeCliTest {
 
@@ -34,6 +41,9 @@ class LegacyDatabaseUpgradeCliTest {
   private static final String UNREACHABLE_TARGET = "jdbc:postgresql://127.0.0.1:1/kk_studio_target";
 
   private static final String SENTINEL = "sentinel-value-do-not-leak-5142";
+
+  /** 日志关闭回归的探针：一个被显式置为 DEBUG 的命名 logger；只关根日志时它仍会输出。 */
+  private static final String DEBUG_PROBE_LOGGER = "fun.fengwk.kkstudio.web.upgrade.cli.probe";
 
   @TempDir Path tempDir;
 
@@ -55,6 +65,61 @@ class LegacyDatabaseUpgradeCliTest {
     Run result = run("--help", "extra");
     assertEquals(2, result.exit());
     assertTrue(result.err().contains("error.stage=USAGE"));
+  }
+
+  /**
+   * 真实 CLI 入口的日志关闭回归：显式 DEBUG 的命名 logger 在 {@code --help} 边界之后也必须关闭。
+   *
+   * <p>断言的是本进程真实 SLF4J 后端（探针 logger 由该后端自己接受 DEBUG）的启用决策，而不是任何 Spring 配置值。
+   */
+  @Test
+  void helpTurnsOffAnExplicitlyDebugNamedLogger() {
+    configureDebugProbeLogger();
+
+    Run result = run("--help");
+
+    assertEquals(0, result.exit());
+    assertFalse(
+        LoggerFactory.getLogger(DEBUG_PROBE_LOGGER).isDebugEnabled(),
+        "an explicitly DEBUG named logger must be off after the CLI ran");
+    assertFalse(
+        LoggerFactory.getLogger(Logger.ROOT_LOGGER_NAME).isDebugEnabled(),
+        "the root logger must be off after the CLI ran");
+  }
+
+  /** {@code LoggingSystem=none} 不能把关闭变成 no-op：真实 classpath 后端仍必须被选中并关闭。 */
+  @Test
+  void helpTurnsOffLoggingWhenTheLoggingSystemIsConfiguredAsNone() {
+    String previous = System.getProperty(LoggingSystem.SYSTEM_PROPERTY);
+    System.setProperty(LoggingSystem.SYSTEM_PROPERTY, LoggingSystem.NONE);
+    try {
+      configureDebugProbeLogger();
+
+      Run result = run("--help");
+
+      assertEquals(0, result.exit());
+      assertFalse(
+          LoggerFactory.getLogger(DEBUG_PROBE_LOGGER).isDebugEnabled(),
+          "LoggingSystem=none must not turn the diagnostic logging shutdown into a no-op");
+    } finally {
+      if (previous == null) {
+        System.clearProperty(LoggingSystem.SYSTEM_PROPERTY);
+      } else {
+        System.setProperty(LoggingSystem.SYSTEM_PROPERTY, previous);
+      }
+    }
+  }
+
+  /** 用 Spring Boot 的通用后端选择把探针 logger 显式置为 DEBUG，并断言真实后端确实接受它；否则随后的关闭断言没有意义。 */
+  private static void configureDebugProbeLogger() {
+    LoggingSystem loggingSystem =
+        LoggingSystemFactory.fromSpringFactories()
+            .getLoggingSystem(LegacyDatabaseUpgradeCliTest.class.getClassLoader());
+    assertNotNull(loggingSystem, "the test classpath must provide a real logging backend");
+    loggingSystem.setLogLevel(DEBUG_PROBE_LOGGER, LogLevel.DEBUG);
+    assertTrue(
+        LoggerFactory.getLogger(DEBUG_PROBE_LOGGER).isDebugEnabled(),
+        "the real logging backend must honour an explicitly configured DEBUG logger");
   }
 
   @Test
@@ -249,6 +314,33 @@ class LegacyDatabaseUpgradeCliTest {
     Path directoryKey = dir().resolve("keydir");
     Files.createDirectory(directoryKey);
     assertDryRunRejected(dryRunWithKeys(directoryKey.toString(), null));
+  }
+
+  /** 主密钥必须恰为 32 bytes raw AES-256：多一个字节也不能被截断接受，两个 key 字段都要按同一规则拒绝。 */
+  @Test
+  void thirtyThreeByteKeyIsRejectedOnBothKeyFields() throws IOException {
+    Path longKey = UpgradeCliInputFixture.key(dir(), "long.key", new byte[33]);
+
+    Run source =
+        run("dry-run", "--config", configFile(dryRunWithKeys(longKey.toString(), null)).toString());
+    assertEquals(2, source.exit());
+    assertTrue(source.err().contains("must contain exactly 32 bytes"));
+
+    Run target =
+        run("dry-run", "--config", configFile(dryRunWithKeys(null, longKey.toString())).toString());
+    assertEquals(2, target.exit());
+    assertTrue(target.err().contains("must contain exactly 32 bytes"));
+  }
+
+  /** 严格 UTF-8 解码：非法字节序列必须在解析 JSON 之前按输入形态拒绝，且不回显任何原文。 */
+  @Test
+  void malformedUtf8ConfigIsRejected() throws IOException {
+    byte[] malformed = new byte[] {'{', '"', (byte) 0xC3, (byte) 0x28, '"', '}'};
+    Path config = UpgradeCliInputFixture.ownerOnlyFile(dir(), "config.json", malformed);
+    Run result = run("prepare", "--config", config.toString());
+    assertEquals(2, result.exit());
+    assertTrue(result.err().contains("error.stage=INPUT"));
+    assertTrue(result.err().contains("UTF-8"));
   }
 
   @Test

@@ -17,10 +17,10 @@ import java.util.List;
  * 显式空目标初始化：只把一个操作员新建、专用于本次升级的全新空 PostgreSQL 17 数据库推进到当前唯一 baseline。
  *
  * <p>绝不 {@code CREATE DATABASE}/drop/truncate/reset/baseline/repair，也不对已有 V1 库或任何未知
- * namespace/table/view/sequence/type/routine/extension 做幂等迁移：应用前要求 {@code public}
- * 恰好存在且没有任何用户对象。baseline 由真实 Flyway 以唯一 classpath V1 应用（{@code baselineOnMigrate=false}、{@code
- * cleanDisabled=true}、严格 naming、显式 {@code public} default schema、零日志 sink），随后用当前
- * schema/history/pristine 守卫确认，不启动 Spring auto-config/seed/catalog epoch1。
+ * namespace/schema 内对象（表、视图、序列、类型、routine、collation、operator、extension 等）做幂等迁移：应用前要求 {@code public}
+ * 恰好存在且 public 内没有任何 schema 对象。baseline 由真实 Flyway 以唯一 classpath V1 应用（{@code
+ * baselineOnMigrate=false}、{@code cleanDisabled=true}、严格 naming、显式 {@code public} default
+ * schema、零日志 sink），随后用当前 schema/history/pristine 守卫确认，不启动 Spring auto-config/seed/catalog epoch1。
  *
  * <p>Flyway 自己打开迁移连接并按 default schema 改写 search_path，因此固定 session 前置与服务器形态门禁还会通过一个最小 {@link
  * Callback} 在迁移事务内重新应用（见 {@link TargetSessionCallback}）。
@@ -45,21 +45,13 @@ final class LegacyDatabasePrepare {
   private static final String PUBLIC_SCHEMA =
       "select count(*) from pg_namespace where nspname = 'public'";
 
-  /** 空目标里不允许任何用户关系：表 / 分区表 / 视图 / 物化视图 / 序列 / 外部表。 */
-  private static final String USER_RELATIONS =
-      "select count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace"
-          + " where n.nspname = 'public' and c.relkind in ('r','p','v','m','S','f')";
-
-  /** 独立用户类型：enum / domain / range / multirange，以及不承载表的独立 composite。 */
-  private static final String USER_TYPES =
-      "select count(*) from pg_type t join pg_namespace n on n.oid = t.typnamespace"
-          + " left join pg_class c on c.oid = t.typrelid"
-          + " where n.nspname = 'public' and t.typtype in ('e','d','c','r','m')"
-          + " and (t.typrelid = 0 or c.relkind = 'c')";
-
-  private static final String USER_ROUTINES =
-      "select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace"
-          + " where n.nspname = 'public'";
+  /**
+   * 空目标里不允许任何 schema 内对象：直接按 PostgreSQL 自己记录的「对象 → public namespace」依赖计数，一次覆盖表/视图/序列、 类型（含
+   * base/pseudo/shell）、routine、collation、operator、extension 等全部命名空间对象，而不是逐类部分清单。
+   */
+  private static final String PUBLIC_SCHEMA_OBJECTS =
+      "select count(*) from pg_depend d join pg_namespace n on n.oid = d.refobjid"
+          + " where d.refclassid = 'pg_namespace'::regclass and n.nspname = 'public'";
 
   private static final String USER_NAMESPACES =
       "select count(*) from pg_namespace where nspname <> 'public'"
@@ -69,7 +61,7 @@ final class LegacyDatabasePrepare {
       "select count(*) from pg_extension where extname <> 'plpgsql'";
 
   private static final List<String> BLANK_CHECKS =
-      List.of(USER_RELATIONS, USER_TYPES, USER_ROUTINES, USER_NAMESPACES, USER_EXTENSIONS);
+      List.of(PUBLIC_SCHEMA_OBJECTS, USER_NAMESPACES, USER_EXTENSIONS);
 
   private LegacyDatabasePrepare() {}
 
