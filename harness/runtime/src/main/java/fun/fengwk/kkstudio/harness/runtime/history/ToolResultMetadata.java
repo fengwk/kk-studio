@@ -23,8 +23,8 @@ import java.util.UUID;
  *
  * <p>{@code binding} 是产生本结果的原 Tool invocation 冻结的 {@link ToolBinding}（含目录 epoch、完整定义、requirements 与
  * 插件来源）：真实终态（SUCCEEDED/FAILED/CANCELLED/UNKNOWN，含人工 resolve 后的结果）即使 invocation 行被物理删除也必须保留
- * binding，使同代码重启后仍能核查原 epoch/definition/source，绝不静默按当前版本重放。只有模型调用未命中任何冻结 binding 的 unknown-tool 槽位为
- * null。synthetic 结果没有真实 invocation，必须为 null。
+ * binding，使同代码重启后仍能核查原 epoch/definition/source，绝不静默按当前版本重放。模型调用未命中冻结 binding 的 unknown-tool 槽位与
+ * synthetic 结果为 null。离线导入的旧版历史没有保存 binding，也以 null 表达缺失；这些记录仅保留历史事实，不由当前同名工具补造执行身份。
  */
 public record ToolResultMetadata(
     UUID invocationId,
