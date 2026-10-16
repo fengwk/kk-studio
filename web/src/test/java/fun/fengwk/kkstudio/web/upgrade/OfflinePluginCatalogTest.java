@@ -19,6 +19,7 @@ import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.platform.plugin.PluginContext;
 import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
+import fun.fengwk.kkstudio.platform.plugin.catalog.OfflinePluginHost;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogBootstrap;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogSnapshot;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialStore;
@@ -247,48 +248,47 @@ class OfflinePluginCatalogTest {
     assertTrue(context.promptTasks().isPresent(), "prompt task port must stay present");
     assertTrue(context.promptResources().isPresent(), "prompt resource port must stay present");
 
-    OfflinePluginCatalog.OfflineHostOperationException credential =
+    OfflinePluginHost.HostOperationException credential =
         assertThrows(
-            OfflinePluginCatalog.OfflineHostOperationException.class,
+            OfflinePluginHost.HostOperationException.class,
             () -> context.credentialAccess().resolve());
     assertNull(credential.getCause());
     Object host = context.resourceGateway().orElseThrow();
     assertThrows(
-        OfflinePluginCatalog.OfflineHostOperationException.class,
+        OfflinePluginHost.HostOperationException.class,
         () -> ((ReadToolExecutor) host).read(null, null));
     assertThrows(
-        OfflinePluginCatalog.OfflineHostOperationException.class,
-        () -> ((SubagentRunner) host).accept(null));
+        OfflinePluginHost.HostOperationException.class, () -> ((SubagentRunner) host).accept(null));
     assertThrows(
-        OfflinePluginCatalog.OfflineHostOperationException.class,
+        OfflinePluginHost.HostOperationException.class,
         () -> ((PluginCredentialStore) host).projection(installed.descriptor().pluginId()));
     assertThrows(
-        OfflinePluginCatalog.OfflineHostOperationException.class,
+        OfflinePluginHost.HostOperationException.class,
         () -> ((PluginCredentialStore) host).rejectUsed(null, "synthetic rejection"));
     assertThrows(
-        OfflinePluginCatalog.OfflineHostOperationException.class,
+        OfflinePluginHost.HostOperationException.class,
         () ->
             context
                 .resourceGateway()
                 .orElseThrow()
                 .resolveSessionResource(null, "kkstudio:/resources/offline"));
     assertThrows(
-        OfflinePluginCatalog.OfflineHostOperationException.class,
+        OfflinePluginHost.HostOperationException.class,
         () -> context.resourceGateway().orElseThrow().stageRemoteMedia(null, null, null, null));
     assertThrows(
-        OfflinePluginCatalog.OfflineHostOperationException.class,
+        OfflinePluginHost.HostOperationException.class,
         () -> context.promptTasks().orElseThrow().submit("offline", "synthetic", List.of()));
     assertThrows(
-        OfflinePluginCatalog.OfflineHostOperationException.class,
+        OfflinePluginHost.HostOperationException.class,
         () -> context.promptTasks().orElseThrow().await(null, null, null));
     assertThrows(
-        OfflinePluginCatalog.OfflineHostOperationException.class,
+        OfflinePluginHost.HostOperationException.class,
         () -> context.promptTasks().orElseThrow().stop(null));
     assertThrows(
-        OfflinePluginCatalog.OfflineHostOperationException.class,
+        OfflinePluginHost.HostOperationException.class,
         () -> context.promptResources().orElseThrow().stage("synthetic", "image/png", null, 0));
     assertThrows(
-        OfflinePluginCatalog.OfflineHostOperationException.class,
+        OfflinePluginHost.HostOperationException.class,
         () -> context.promptResources().orElseThrow().discard(null));
   }
 
