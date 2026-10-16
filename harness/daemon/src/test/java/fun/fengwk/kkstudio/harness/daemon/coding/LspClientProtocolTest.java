@@ -177,7 +177,7 @@ class LspClientProtocolTest {
         new Thread(
             () -> {
               try {
-                LspClient.launch(config, root, config.command().getFirst(), rejecting);
+                LspClient.launch(config, root, config.command().getFirst(), rejecting, () -> true);
               } catch (RuntimeException error) {
                 rejecting.failure = error;
               }
@@ -203,7 +203,7 @@ class LspClientProtocolTest {
         new Thread(
             () -> {
               try {
-                LspClient.launch(config, root, config.command().getFirst(), holding);
+                LspClient.launch(config, root, config.command().getFirst(), holding, () -> true);
               } catch (RuntimeException error) {
                 holding.failure = error;
               }
@@ -232,7 +232,8 @@ class LspClientProtocolTest {
     IllegalStateException error =
         assertThrows(
             IllegalStateException.class,
-            () -> LspClient.launch(config, root, config.command().getFirst(), dispatch));
+            () ->
+                LspClient.launch(config, root, config.command().getFirst(), dispatch, () -> true));
     assertTrue(error.getMessage().contains("exited before initialization"), error.getMessage());
     assertTrue(error.getMessage().contains("exit code 7"), error.getMessage());
     // sentinel：模型可见文案只保留固定 server id 与已知退出码，绝不回显命令参数（如 shell 脚本正文）。
@@ -246,7 +247,8 @@ class LspClientProtocolTest {
   void initializeTimeoutTerminatesTheProcess() throws Exception {
     Path transcript = transcript();
     LspServerConfig config = FakeLspServers.javaServer("noinit", "no-init", root, transcript);
-    LspClient client = LspClient.launch(config, root, config.command().getFirst(), dispatch);
+    LspClient client =
+        LspClient.launch(config, root, config.command().getFirst(), dispatch, () -> true);
     clients.add(client);
 
     Exception error =
@@ -341,7 +343,8 @@ class LspClientProtocolTest {
     IllegalStateException error =
         assertThrows(
             IllegalStateException.class,
-            () -> LspClient.launch(config, root, config.command().getFirst(), dispatch));
+            () ->
+                LspClient.launch(config, root, config.command().getFirst(), dispatch, () -> true));
     assertTrue(error.getMessage().contains("cannot be started"), error.getMessage());
     assertTrue(error.getMessage().contains(notAProgram.toString()), error.getMessage());
 
@@ -413,7 +416,8 @@ class LspClientProtocolTest {
 
   private LspClient start(String mode) throws Exception {
     LspServerConfig config = FakeLspServers.javaServer("fake", mode, root, transcript());
-    LspClient client = LspClient.launch(config, root, config.command().getFirst(), dispatch);
+    LspClient client =
+        LspClient.launch(config, root, config.command().getFirst(), dispatch, () -> true);
     clients.add(client);
     client.initialize(INITIALIZE_TIMEOUT);
     return client;

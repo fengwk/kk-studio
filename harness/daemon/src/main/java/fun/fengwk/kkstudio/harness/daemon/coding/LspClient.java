@@ -46,6 +46,7 @@ import org.eclipse.lsp4j.launch.LSPLauncher;
 import org.eclipse.lsp4j.services.LanguageClient;
 import org.eclipse.lsp4j.services.LanguageServer;
 
+import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
@@ -58,9 +59,11 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -75,12 +78,20 @@ import java.util.regex.Pattern;
  *
  * <p>协议层由标准 LSP 客户端库承担（JSON-RPC 分帧、请求/响应/服务端请求分发），本类只负责进程生命周期、位置编码换算、文档同步与结果格式化。
  *
- * <p>关闭顺序固定为 {@code shutdown} 请求、{@code exit} 通知、有界等待、必要时强制终止整棵进程树；实例幂等，可在初始化中途被清理。
+ * <p>关闭顺序固定为 {@code shutdown} 请求、{@code exit} 通知、有界等待、随后收敛整棵进程范围、关闭自有标准流并等待自有 IO 任务退出。 实例幂等：只有第一个
+ * {@link #stop(Duration)} 调用者执行真实关闭，其余调用者等待同一条完成结论并看到同一条安全失败；初始化中途也能被清理。
+ *
+ * <p>执行器由调用方拥有，本类只持有自己提交的 stderr 排空任务与 JSON-RPC 监听任务句柄：任务退出必须被有界等待， {@code Future.cancel}
+ * 只代表取消请求，不能当成任务已经静止的证据。
  */
 final class LspClient {
 
   private static final int STDERR_TAIL_BYTES = 8 * 1024;
   private static final long PROCESS_PROBE_MILLIS = 200;
+
+  /** 自有 IO 任务在进程范围收敛之后退出所需的等待预算：任务只需要观察到流结束或流已被关闭。 */
+  private static final long OWNED_TASK_EXIT_BUDGET_MILLIS = 2_000;
+
   private static final String JAVA_CLASS_FILE_CONTENTS = "java/classFileContents";
   private static final String JAVA_DECOMPILE_COMMAND = "java.decompile";
   private static final Pattern JDT_URI = Pattern.compile("jdt://\\S+");
@@ -115,17 +126,37 @@ final class LspClient {
 
   private final Launcher<JdtlsServer> launcher;
   private final JdtlsServer remote;
+
+  /** 本实例自有的 IO 任务登记（stderr 排空与 lsp4j 监听）：是否静止由它回答，绝不由 Future 的终态回答。 */
+  private final LspClientOwnedTasks ioTasks;
+
+  /** 在途 JSON-RPC 请求：停止时逐个取消，等待者因此立即得到「客户端已停止」而不是各自耗到自己的超时。 */
+  private final Set<CompletableFuture<?>> inFlightRequests = ConcurrentHashMap.newKeySet();
+
   private final Map<Path, Document> documents = new ConcurrentHashMap<>();
-  private final AtomicBoolean stopped = new AtomicBoolean();
+
+  /** 停止声明：第一个调用者执行真实关闭，其余调用者等待同一条完成结论。 */
+  private final AtomicBoolean stopClaimed = new AtomicBoolean();
+
+  /** 单次真实关闭的结论：{@code null} 表示整条链路（协议、范围、自有 IO）都已经静止。 */
+  private volatile Throwable stopFailure;
+
+  private final CountDownLatch stopDone = new CountDownLatch(1);
+
   private volatile ServerCapabilities capabilities;
   private volatile String positionEncoding = PositionEncodingKind.UTF16;
 
   private LspClient(
-      LspServerConfig server, Path root, ProcessScope scope, Launcher<JdtlsServer> launcher) {
+      LspServerConfig server,
+      Path root,
+      ProcessScope scope,
+      LspClientOwnedTasks ioTasks,
+      Launcher<JdtlsServer> launcher) {
     this.server = server;
     this.root = root;
     this.scope = scope;
     this.process = scope.process();
+    this.ioTasks = ioTasks;
     this.launcher = launcher;
     this.remote = launcher.getRemoteProxy();
   }
@@ -134,21 +165,26 @@ final class LspClient {
    * 启动服务器进程并建立 stdio JSON-RPC 会话，但尚未握手。
    *
    * <p>服务器运行在一个 OS 级执行范围里（双向标准流），因此「服务器退出」与「整棵进程范围收敛」都由范围回答；调用方随后必须调用 {@link
-   * #initialize(Duration)}。启动失败会终止整棵范围（含服务器自己派生的后代），绝不留下半初始化的进程。
+   * #initialize(Duration)}。启动中途失败会终止整棵范围（含服务器自己派生的后代）并等待已经提交的自有 IO 任务退出，绝不留下半初始化的进程或任务。
    *
    * @param executable 已解析的绝对可执行文件，用于替换命令首元素（确保 {@code ~}/{@code $HOME} 展开生效）
+   * @param gate 放行服务器命令之前的最后一道许可；范围已经建立但调用方不再允许启动时返回 {@code false}，命令因此不会产生副作用
    */
   static LspClient launch(
-      LspServerConfig server, Path root, String executable, ExecutorService dispatch) {
+      LspServerConfig server,
+      Path root,
+      String executable,
+      ExecutorService dispatch,
+      ProcessScope.StartGate gate) {
     List<String> command = new ArrayList<>(server.command());
     command.set(0, executable);
-    ProcessScope scope = startScope(server, root, command);
+    LspClientOwnedTasks ioTasks = new LspClientOwnedTasks(dispatch);
+    ProcessScope scope = startScope(server, root, command, gate);
+    Process process = scope.process();
+    // 本实例自有 IO 都经同一个登记提交：stderr 排空与 lsp4j 监听因此共享同一条静止结论。
     try {
-      // 范围取得后的探测、构造与派发失败都由本次调用负责收尾。
-      Process process = scope.process();
       ByteTailBuffer stderrTail = new ByteTailBuffer(STDERR_TAIL_BYTES);
-      // stderr 排空与后续初始化同属本进程所有权：提交被拒也必须终止整棵范围，不能把泄漏留给调用方。
-      dispatch.submit(() -> drain(process.getErrorStream(), stderrTail));
+      ioTasks.submit(() -> drain(process.getErrorStream(), stderrTail));
       if (scope.awaitNaturalExit(PROCESS_PROBE_MILLIS)) {
         throw new ToolServiceFailureException(earlyExitMessage(server, command, scope));
       }
@@ -157,6 +193,7 @@ final class LspClient {
               server,
               root,
               scope,
+              ioTasks,
               new LSPLauncher.Builder<JdtlsServer>()
                   .setLocalService(new ClientEndpoint(root))
                   /*
@@ -166,41 +203,92 @@ final class LspClient {
                   .setRemoteInterfaces(List.of(JdtlsServer.class))
                   .setInput(process.getInputStream())
                   .setOutput(process.getOutputStream())
-                  .setExecutorService(dispatch)
+                  .setExecutorService(ioTasks)
                   .wrapMessages(Function.identity())
                   .create());
       client.launcher.startListening();
       return client;
     } catch (RuntimeException | Error error) {
-      // 收尾失败不得掩盖启动失败：合并后第一 Error 保持身份，后到的 Error 优先于普通异常。
-      Throwable failure = cleanupStartFailure(error, scope::close);
+      // 收尾失败不得掩盖启动失败：第一 Error 保持身份；范围与已经提交的自有 IO 任务都必须收敛。
+      Throwable cleanup = mergeFailure(closeScope(scope), closeOwnedIo(process, ioTasks));
+      Throwable failure = mergeFailure(error, cleanup);
       if (failure instanceof Error fatal) {
+        // Error 不能包装，也不能靠附加元数据承载清理结论：池对启动中的致命失败一律按终结处理。
         throw fatal;
       }
-      throw (RuntimeException) failure;
+      if (cleanup == null) {
+        throw (RuntimeException) failure;
+      }
+      // 清理没能证明收敛：用固定类型承载这一事实，绝不依赖 suppressed 元数据（抑制可以被禁用）。
+      throw new StartupCleanupFailure((RuntimeException) failure);
     }
   }
 
-  /** 启动失败后尝试清理：首个 Error 优先，其余失败保留为 suppressed，避免自抑制。 */
+  /**
+   * 这次启动失败是否留下「清理没能证明收敛」的结论。
+   *
+   * <p>两种形态都来自固定类型边界，而不是 suppressed 元数据：本类在启动收尾失败时抛出 {@link StartupCleanupFailure}； 范围建立之前的失败由
+   * {@code startScope} 把 {@link ProcessScope.StartupCleanupFailure} 包进 {@link
+   * ToolServiceFailureException} 的 cause。{@link Error} 一律保持身份，由池按终结事实处理，不在这里识别。
+   */
+  static boolean startupCleanupFailed(Throwable failure) {
+    if (failure instanceof StartupCleanupFailure) {
+      return true;
+    }
+    return failure instanceof ToolServiceFailureException
+        && failure.getCause() instanceof ProcessScope.StartupCleanupFailure;
+  }
+
+  /**
+   * 启动清理没能证明收敛的固定边界：普通启动失败被它包住，让池把「资源结论不可靠」当成终结该 key 的事实。
+   *
+   * <p>只承载固定文案，原始失败作为 cause；{@link Error} 绝不包装，因此这里只可能包住 {@link RuntimeException}。
+   */
+  private static final class StartupCleanupFailure extends RuntimeException {
+
+    private static final long serialVersionUID = 1L;
+
+    private StartupCleanupFailure(RuntimeException cause) {
+      super("LSP client startup cleanup did not converge", cause);
+    }
+  }
+
+  /**
+   * 合并两次失败：首个失败保持身份，后到的 {@link Error} 提升到普通异常之上，其余作为 {@code suppressed} 附着，避免自抑制。
+   *
+   * <p>{@link #cleanupStartFailure(Throwable, Runnable)} 用的就是这条规则；这里以「已经是失败对象」的形式复用，
+   * 使多处收尾（启动清理、关闭聚合）不必为了合并再造一次异常。
+   */
+  static Throwable mergeFailure(Throwable primary, Throwable later) {
+    if (later == null || later == primary) {
+      return primary;
+    }
+    if (primary == null) {
+      return later;
+    }
+    if (later instanceof Error && !(primary instanceof Error)) {
+      later.addSuppressed(primary);
+      return later;
+    }
+    primary.addSuppressed(later);
+    return primary;
+  }
+
+  /** 启动失败后尝试清理：清理必须真正执行，失败按 {@link #mergeFailure(Throwable, Throwable)} 合并。 */
   static Throwable cleanupStartFailure(Throwable original, Runnable cleanup) {
     try {
       cleanup.run();
     } catch (RuntimeException | Error failure) {
-      if (failure != original) {
-        if (failure instanceof Error && !(original instanceof Error)) {
-          failure.addSuppressed(original);
-          return failure;
-        }
-        original.addSuppressed(failure);
-      }
+      return mergeFailure(original, failure);
     }
     return original;
   }
 
   /** 启动承载服务器命令的执行范围；建立范围之前的任何失败都是「服务器无法启动」。 */
-  private static ProcessScope startScope(LspServerConfig server, Path root, List<String> command) {
+  private static ProcessScope startScope(
+      LspServerConfig server, Path root, List<String> command, ProcessScope.StartGate gate) {
     try {
-      return ProcessScope.startDuplex(root, command);
+      return ProcessScope.startDuplex(root, command, gate);
     } catch (IOException | RuntimeException error) {
       // 只回显固定 server id 与可信的启动命令二进制名：不输出原始启动错误（可能内联 OS 文本与命令参数）或目录。
       throw new ToolServiceFailureException(
@@ -292,9 +380,9 @@ final class LspClient {
     return capabilities;
   }
 
-  /** 服务器进程是否仍在运行；自然退出、传输失败或已关闭的实例不再被复用。 */
+  /** 服务器进程是否仍在运行；自然退出、传输失败或已经开始关闭的实例不再被复用。 */
   boolean isAlive() {
-    return !stopped.get() && running();
+    return !stopClaimed.get() && running();
   }
 
   /**
@@ -486,34 +574,172 @@ final class LspClient {
   }
 
   /**
-   * 关闭连接：先发 {@code shutdown} 并等待，再发 {@code exit}，在有界宽限内等待进程自行退出，最后强制终止整棵进程树。
+   * 关闭连接：先发 {@code shutdown} 并等待，再发 {@code exit}，在有界宽限内等待进程自行退出，随后收敛整棵进程范围、关闭自有标准流并等待自有 IO 任务退出。
    *
-   * <p>幂等：重复调用只执行一次真实关闭；初始化中的实例也能立即收敛。
+   * <p>幂等且只有一次真实关闭：第一个调用者执行关闭，其余调用者等待同一条完成结论并看到同一条安全失败；初始化中的实例也能立即收敛。范围或自有 IO
+   * 任务无法证明已经静止时抛出固定安全失败，绝不吞掉后报告成功。
    */
   void stop(Duration grace) {
-    if (!stopped.compareAndSet(false, true)) {
+    if (stopClaimed.compareAndSet(false, true)) {
+      try {
+        stopFailure = closeConnection(grace);
+      } catch (RuntimeException | Error unexpected) {
+        // 真实关闭内部的意外失败同样是这次停止的结论：并发与重复调用不能因此看到「成功」。
+        stopFailure = unexpected;
+      } finally {
+        stopDone.countDown();
+      }
+    }
+    Throwable failure = awaitStopCompletion(grace);
+    if (failure != null) {
+      throw rethrow(failure);
+    }
+  }
+
+  /**
+   * 真正关闭一次连接：结束协议、收敛整棵进程范围、关闭自有标准流并等待自有 IO 任务退出。
+   *
+   * <p>每一步都不能跳过：结束协议本身失败（超时、断管、取消）不是关闭失败，但收敛动作必须继续，直到范围与自有 IO 任务的静止都被证明；
+   * 结束协议期间出现的致命失败是关闭失败的一部分，但不允许跳过后续收敛。
+   *
+   * @return 未证明收敛的失败；{@code null} 表示整条链路都已经静止
+   */
+  private Throwable closeConnection(Duration grace) {
+    long graceMillis = Math.max(0, grace.toMillis());
+    // 先取消在途请求：等待者因此立即知道实例正在停止，不必各自耗到自己的超时。
+    Throwable failure = cancelInFlightRequests();
+    try {
+      endProtocol(graceMillis);
+    } catch (RuntimeException ignored) {
+      // 结束协议的正常不收敛路径（未读出的退出码、shutdown 超时、断管）：最终判据是范围与自有 IO 任务的静止。
+    } catch (Error fatal) {
+      // 致命失败不能被吞掉，但它也不允许跳过后面必做的收敛。
+      failure = mergeFailure(failure, fatal);
+    }
+    documents.clear();
+    // 范围先收敛：整组（含后代）结束后自有标准流才会结束，IO 任务才可能真正静止。
+    return mergeFailure(failure, mergeFailure(closeScope(scope), closeOwnedIo(process, ioTasks)));
+  }
+
+  /**
+   * 逐个取消在途请求：取消是「实例正在停止」的显式事实，等待者因此立即失败而不是各自耗到自己的超时。
+   *
+   * <p>每个请求独立取消，单个请求的取消失败不跳过其余请求，也不影响后续的范围与自有 IO 收敛。
+   */
+  private Throwable cancelInFlightRequests() {
+    Throwable failure = null;
+    for (CompletableFuture<?> request : inFlightRequests) {
+      try {
+        request.cancel(false);
+      } catch (RuntimeException | Error cancelFailure) {
+        failure = mergeFailure(failure, cancelFailure);
+      }
+    }
+    return failure;
+  }
+
+  /** 结束协议：请求 shutdown、通知 exit 并在宽限内等待命令自行退出；超时与断管都交给范围收敛。 */
+  private void endProtocol(long graceMillis) {
+    if (!running()) {
       return;
     }
     try {
-      if (running()) {
-        long graceMillis = Math.max(0, grace.toMillis());
-        try {
-          await(remote.shutdown(), Duration.ofMillis(graceMillis), "shutdown", false);
-        } catch (Exception ignored) {
-          // shutdown 失败不影响后续 exit 与强制终止。
-        }
-        try {
-          remote.exit();
-        } catch (RuntimeException ignored) {
-          // 通道已断开时 exit 通知失败是正常路径。
-        }
-        waitForExit(process, graceMillis);
-      }
-    } finally {
-      documents.clear();
-      // 关闭整棵范围：服务器自己派生的后代也必须在这次调用里消失，而不是留给操作系统。
-      scope.close();
+      await(remote.shutdown(), Duration.ofMillis(graceMillis), "shutdown", false);
+    } catch (Exception ignored) {
+      // shutdown 超时或通道已断开：继续 exit 与强制收敛，这条路径本身不是关闭失败。
     }
+    try {
+      remote.exit();
+    } catch (RuntimeException ignored) {
+      // 通道已断开时 exit 通知失败是正常路径。
+    }
+    waitForExit(process, graceMillis);
+  }
+
+  /**
+   * 收敛并释放一个进程范围：未证明收敛时返回固定安全失败，释放自身（调用私有的状态目录、覆盖率收集）的失败按同一优先级合并。
+   *
+   * <p>释放动作无论是否收敛都必须执行，因此这里只报告事实，不改变清理路径。
+   */
+  static Throwable closeScope(ProcessScope scope) {
+    Throwable failure = null;
+    try {
+      if (!scope.terminate()) {
+        failure = new ToolServiceFailureException("LSP server process scope did not converge");
+      }
+    } catch (RuntimeException | Error terminationFailure) {
+      failure = terminationFailure;
+    }
+    try {
+      scope.close();
+    } catch (RuntimeException | Error releaseFailure) {
+      failure = mergeFailure(failure, releaseFailure);
+    }
+    return failure;
+  }
+
+  /**
+   * 关闭一次启动取得的标准流，并等待它已经提交的自有 IO 任务静止。
+   *
+   * <p>启动中途失败与真实关闭走同一条实现：关闭流让阻塞在读取上的任务确定性地看到流结束；执行器由调用方拥有，绝不在这里关闭它。
+   *
+   * @return 未证明静止的失败；{@code null} 表示自有 IO 任务都已经结束
+   */
+  private static Throwable closeOwnedIo(Process process, LspClientOwnedTasks ioTasks) {
+    Throwable failure = closeStream(process.getOutputStream());
+    failure = mergeFailure(failure, closeStream(process.getInputStream()));
+    failure = mergeFailure(failure, closeStream(process.getErrorStream()));
+    return mergeFailure(failure, ioTasks.closeAndAwait(OWNED_TASK_EXIT_BUDGET_MILLIS));
+  }
+
+  /** 关闭自有流：流是否成功关闭不改变收敛事实，任务是否退出才是这里的判据。 */
+  private static Throwable closeStream(Closeable stream) {
+    try {
+      stream.close();
+    } catch (IOException ignored) {
+      // 流已经关闭或随进程退出而结束。
+    } catch (RuntimeException | Error failure) {
+      return failure;
+    }
+    return null;
+  }
+
+  /** 一次停止的等待预算：两次协议宽限（请求 shutdown 与等待退出）+ 范围收敛 + 自有 IO 任务静止（共用一条预算）。 */
+  static long stopBudgetMillis(Duration grace) {
+    return 2 * Math.max(0, grace.toMillis())
+        + ProcessScope.terminationBudgetMillis()
+        + OWNED_TASK_EXIT_BUDGET_MILLIS;
+  }
+
+  /**
+   * 等待这一次真实关闭的完成结论：执行者与等待者看到同一条失败。
+   *
+   * <p>等待有界且覆盖真实的收敛预算；被中断或超时都按未证明收敛处理，但一旦别人已经写下结论就以那条结论为准，不改写成等待者的处境。
+   */
+  private Throwable awaitStopCompletion(Duration grace) {
+    try {
+      if (!stopDone.await(stopBudgetMillis(grace), TimeUnit.MILLISECONDS)) {
+        return stopDone.getCount() == 0
+            ? stopFailure
+            : new ToolServiceFailureException(
+                "LSP client stop did not converge within " + stopBudgetMillis(grace) + "ms");
+      }
+    } catch (InterruptedException error) {
+      Thread.currentThread().interrupt();
+      if (stopDone.getCount() != 0) {
+        return new ToolServiceFailureException(
+            "LSP client stop was interrupted before it converged");
+      }
+    }
+    return stopFailure;
+  }
+
+  /** 以原身份抛出停止失败：Error 保持 Error，普通失败保持 RuntimeException。 */
+  private static RuntimeException rethrow(Throwable failure) {
+    if (failure instanceof Error fatal) {
+      throw fatal;
+    }
+    return (RuntimeException) failure;
   }
 
   /** 有界等待进程退出；被中断时保留中断标记并视为未退出。 */
@@ -527,7 +753,7 @@ final class LspClient {
   }
 
   private void requireRunning() {
-    if (stopped.get()) {
+    if (stopClaimed.get()) {
       throw new ToolServiceFailureException("LSP client stopped");
     }
     if (!running()) {
@@ -549,6 +775,14 @@ final class LspClient {
       throws Exception {
     Objects.requireNonNull(future, description);
     long millis = Math.max(1, timeout.toMillis());
+    if (requireAlive) {
+      // 与停止竞争时先登记再复查：登记之前停止已经取消完、登记之后没有人再取消的窗口必须关掉。
+      inFlightRequests.add(future);
+      if (stopClaimed.get()) {
+        inFlightRequests.remove(future);
+        future.cancel(false);
+      }
+    }
     try {
       T result = future.get(millis, TimeUnit.MILLISECONDS);
       if (requireAlive) {
@@ -566,10 +800,18 @@ final class LspClient {
     } catch (ExecutionException error) {
       // 结果不可确认：只声明请求失败与操作名，不附带 cause message（远端/OS 原始文本可能内联凭据）。
       Throwable cause = error.getCause() == null ? error : error.getCause();
+      if (cause instanceof Error fatal) {
+        // 致命失败保持身份：把它包装成普通服务失败会降级成可重试的普通错误。
+        throw fatal;
+      }
       throw new ToolServiceFailureException("LSP request failed (" + description + ")", cause);
     } catch (CancellationException error) {
       throw new ToolServiceFailureException(
           "LSP client stopped before the request finished (" + description + ").", error);
+    } finally {
+      if (requireAlive) {
+        inFlightRequests.remove(future);
+      }
     }
   }
 

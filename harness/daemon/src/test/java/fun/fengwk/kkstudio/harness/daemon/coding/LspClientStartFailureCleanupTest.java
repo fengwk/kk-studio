@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.daemon.coding;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -87,5 +88,22 @@ class LspClientStartFailureCleanupTest {
     AtomicBoolean executed = new AtomicBoolean();
     assertSame(first, LspClient.cleanupStartFailure(first, () -> executed.set(true)));
     assertTrue(executed.get());
+  }
+
+  /** 合并两次收尾失败：{@code null} 不参与合并、也不允许触发空指针；同一个失败不得自抑制。 */
+  @Test
+  void mergeFailureToleratesNullsAndKeepsIdentity() {
+    RuntimeException stop = new ToolServiceFailureException("stop");
+    Error fatal = new AssertionError("fatal");
+
+    assertNull(LspClient.mergeFailure(null, null), "两次收尾都成功时结论就是没有问题");
+    assertSame(stop, LspClient.mergeFailure(stop, null), "空的后续失败不得改变主失败");
+    assertEquals(0, stop.getSuppressed().length, "空的后续失败不得附着任何东西");
+    assertSame(fatal, LspClient.mergeFailure(null, fatal), "只有后续失败时它就是结论");
+
+    assertSame(fatal, LspClient.mergeFailure(stop, fatal), "Error 优先于普通安全失败");
+    assertEquals(List.of(stop), List.of(fatal.getSuppressed()));
+    assertSame(stop, LspClient.mergeFailure(stop, stop), "同一个失败不得自抑制");
+    assertEquals(0, stop.getSuppressed().length);
   }
 }
