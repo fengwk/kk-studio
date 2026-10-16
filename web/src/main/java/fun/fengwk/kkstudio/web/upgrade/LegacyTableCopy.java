@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.web.upgrade;
 import org.postgresql.PGConnection;
 import org.postgresql.copy.CopyIn;
 import org.postgresql.copy.CopyManager;
+import org.postgresql.copy.CopyOperation;
 import org.postgresql.copy.CopyOut;
 
 import java.nio.charset.StandardCharsets;
@@ -123,51 +124,50 @@ final class LegacyTableCopy {
   }
 
   /**
-   * 取消全部已打开的 COPY：任一取消失败都不跳过其它 COPY；取消失败挂在原失败上，取消产生的 Error 在无 Error 原失败时向外传播（原失败保留为 suppressed）。
+   * 取消全部已打开的 COPY：任何取消失败都不跳过其它 COPY；取消产生的 Error 完整保留（先出现的保持 identity，其余进入压制链），并且只在原失败不是 Error
+   * 时才取代它。
    */
   private static void cancelAll(Throwable failure, CopyIn copyIn, CopyOut copyOut) {
-    Error firstCancelError = cancel(failure, copyIn);
-    Error secondCancelError = cancel(failure, copyOut);
-    if (firstCancelError == null) {
-      firstCancelError = secondCancelError;
+    Error cancelError = cancel(failure, copyIn);
+    Error otherError = cancel(failure, copyOut);
+    if (cancelError == null) {
+      cancelError = otherError;
+    } else if (otherError != null && otherError != cancelError) {
+      cancelError.addSuppressed(otherError);
     }
-    if (firstCancelError != null && !(failure instanceof Error)) {
-      if (firstCancelError != failure) {
-        firstCancelError.addSuppressed(failure);
+    if (cancelError == null) {
+      return;
+    }
+    if (failure instanceof Error fatal) {
+      if (fatal != cancelError) {
+        fatal.addSuppressed(cancelError);
       }
-      throw firstCancelError;
+      return;
     }
+    if (cancelError != failure) {
+      cancelError.addSuppressed(
+          new LegacyDatabaseUpgradeException(
+              LegacyDatabaseUpgradeException.Stage.TARGET_WRITE,
+              "the table COPY failed before cancellation"));
+    }
+    throw cancelError;
   }
 
-  /** 取消一个已打开的 COPY；返回取消过程中的 Error（SQL 失败挂回原失败），无 Error 时为 null。 */
-  private static Error cancel(Throwable failure, CopyIn copyIn) {
-    if (copyIn == null) {
+  /** 取消一个已打开的 COPY；返回取消过程中的 Error（保 identity），非 Error 只以固定原因并入原失败，原始 SQL 细节绝不带出。 */
+  private static Error cancel(Throwable failure, CopyOperation copy) {
+    if (copy == null) {
       return null;
     }
     try {
-      copyIn.cancelCopy();
-    } catch (SQLException cancelFailure) {
-      if (cancelFailure != failure) {
-        failure.addSuppressed(cancelFailure);
-      }
+      copy.cancelCopy();
     } catch (Error cancelFailure) {
       return cancelFailure;
-    }
-    return null;
-  }
-
-  private static Error cancel(Throwable failure, CopyOut copyOut) {
-    if (copyOut == null) {
-      return null;
-    }
-    try {
-      copyOut.cancelCopy();
-    } catch (SQLException cancelFailure) {
-      if (cancelFailure != failure) {
-        failure.addSuppressed(cancelFailure);
-      }
-    } catch (Error cancelFailure) {
-      return cancelFailure;
+    } catch (SQLException | RuntimeException ignored) {
+      // 取消 SQL 失败既可能是服务端已结束，也可能是协议/网络失败，一律不当作正常结束；原始细节绝不带出。
+      failure.addSuppressed(
+          new LegacyDatabaseUpgradeException(
+              LegacyDatabaseUpgradeException.Stage.TARGET_WRITE,
+              "an open COPY could not be cancelled"));
     }
     return null;
   }
