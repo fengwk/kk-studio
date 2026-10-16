@@ -23,6 +23,9 @@ import java.util.Objects;
  * <p>Skill 令牌没有 Plugin 凭据的认证代际：它与 Plugin 凭据格式分离，保持既有格式 {@link #FORMAT_VERSION} 与既有 AAD 布局，从而继续读取
  * 历史密文。原语的 {@link GeneralSecurityException} 在这里收敛为去敏的失败关闭错误；主密钥不可用同样 fail closed。
  *
+ * <p>{@link #encrypt(SecretKey, String, String)} 与 {@link #decrypt(SecretKey, String, byte[])}
+ * 让已经持有显式主密钥的调用点（如离线转换）复用同一格式 1 实现；它们不引入第二份 envelope 或兼容读取路径，通常的读写仍由实例方法从 keyLoader 取密钥。
+ *
  * <p>令牌明文只在临时的加解密调用中出现：绝不持久化为明文、绝不回显、绝不进入日志、Prompt 或模型上下文。
  */
 @Component
@@ -42,19 +45,36 @@ public class SkillTokenCipher {
 
   /** 加密 {@code packageName} 的访问令牌；主密钥不可用时 fail closed，绝不退化为明文或跳过。 */
   public byte[] encrypt(String packageName, String token) {
-    Objects.requireNonNull(packageName, "packageName");
-    Objects.requireNonNull(token, "token");
-    return AesGcmEnvelope.encrypt(
-        requireKey(), FORMAT_VERSION, aad(packageName), token.getBytes(StandardCharsets.UTF_8));
+    return encrypt(requireKey(), packageName, token);
   }
 
   /** 解密 {@code packageName} 的访问令牌密文；密文被搬移、篡改或主密钥不可用时 fail closed。 */
   public String decrypt(String packageName, byte[] encryptedToken) {
+    return decrypt(requireKey(), packageName, encryptedToken);
+  }
+
+  /**
+   * 以显式 AES-256 主密钥加密 {@code packageName} 的访问令牌。
+   *
+   * <p>供已经持有真实密钥的离线调用点复用与实例方法完全相同的格式 {@link #FORMAT_VERSION} 与 AAD 布局；本类不提供第二套 envelope、
+   * 兼容读取路径或测试专用入口，调用方必须自行承担密钥的来源与生命周期。
+   */
+  public static byte[] encrypt(SecretKey key, String packageName, String token) {
+    Objects.requireNonNull(key, "key");
+    Objects.requireNonNull(packageName, "packageName");
+    Objects.requireNonNull(token, "token");
+    return AesGcmEnvelope.encrypt(
+        key, FORMAT_VERSION, aad(packageName), token.getBytes(StandardCharsets.UTF_8));
+  }
+
+  /** 以显式 AES-256 主密钥解密 {@code packageName} 的访问令牌密文；格式、AAD 或认证失败时 fail closed。 */
+  public static String decrypt(SecretKey key, String packageName, byte[] encryptedToken) {
+    Objects.requireNonNull(key, "key");
     Objects.requireNonNull(packageName, "packageName");
     Objects.requireNonNull(encryptedToken, "encryptedToken");
     try {
       return new String(
-          AesGcmEnvelope.decrypt(requireKey(), FORMAT_VERSION, aad(packageName), encryptedToken),
+          AesGcmEnvelope.decrypt(key, FORMAT_VERSION, aad(packageName), encryptedToken),
           StandardCharsets.UTF_8);
     } catch (GeneralSecurityException error) {
       throw new IllegalStateException("skill package access token cannot be authenticated", error);

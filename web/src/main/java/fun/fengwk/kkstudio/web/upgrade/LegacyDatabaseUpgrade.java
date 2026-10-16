@@ -54,7 +54,8 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * 离线原子数据库转换内核：把旧部署的 41 张共有表按已验证 FK 拓扑复制进当前 V1 目标库，并把旧 Plugin 配置、settings 与凭据封装成当前契约。
+ * 离线原子数据库转换内核：把旧部署的 41 张共有表按已验证 FK 拓扑复制进当前 V1 目标库，并把旧 Plugin 配置、settings、凭据与 Skill Package
+ * 令牌封装成当前契约。
  *
  * <p>两个连接都必须是无遗留事务的普通连接：源以只读 {@code REPEATABLE READ} 一致快照打开，目标只取一个物理连接并在其上独占一个写事务，真实 Spring
  * 仓储/Store 与 COPY 共用该事务。两边的 session 前置（PG17、UTF8、origin 复制角色、search_path / DateStyle / UTC /
@@ -76,6 +77,8 @@ final class LegacyDatabaseUpgrade {
 
   private static final String PLUGIN_CREDENTIAL = "plugin_credential";
 
+  private static final String SKILL_PACKAGE = "skill_package";
+
   private static final String AGENT_PROVIDER = "agent_provider";
 
   private static final String HARNESS_ENTRY = "harness_entry";
@@ -91,8 +94,8 @@ final class LegacyDatabaseUpgrade {
    *
    * @param sourceDataSource 旧部署句柄；本调用自行取得只读一致快照并关闭
    * @param targetDataSource 目标句柄；本调用只取一个物理连接并在其上独占一个写事务
-   * @param sourceKey 读取旧 format 1 凭据的主密钥；没有旧凭据行时可为 null
-   * @param targetKey 写入当前 format 2 凭据的主密钥；没有任何凭据可写时可为 null
+   * @param sourceKey 读取旧 format 1 Plugin 凭据与旧 Skill Package 令牌的主密钥；源没有这两类密文时可为 null
+   * @param targetKey 写入当前 Plugin 凭据与 Skill Package 令牌的主密钥；没有任何密文可写时可为 null
    * @param staticSecretsByPlugin 显式静态密钥材料（pluginId → 字段名到真实值）；没有材料的插件省略
    * @param dryRun 为 true 时执行同一写入与验证路径后回滚，目标保持 pristine
    * @param clock 新增静态凭据创建/更新时刻的来源
@@ -212,7 +215,8 @@ final class LegacyDatabaseUpgrade {
               counts.rowCounts(),
               facts.retiredClusterNodeRows(),
               counts.rewrittenCredentials(),
-              counts.installedStaticCredentials());
+              counts.installedStaticCredentials(),
+              counts.rewrittenSkillTokens());
     } catch (Throwable error) {
       failure = error;
     } finally {
@@ -250,9 +254,12 @@ final class LegacyDatabaseUpgrade {
 
   private record CredentialKeys(SecretKey sourceKey, SecretKey targetKey) {}
 
-  /** 逐表目标行数与两类凭据写入数量。 */
+  /** 逐表目标行数与三类凭据写入数量。 */
   private record ConversionCounts(
-      Map<String, Long> rowCounts, long rewrittenCredentials, long installedStaticCredentials) {}
+      Map<String, Long> rowCounts,
+      long rewrittenCredentials,
+      long installedStaticCredentials,
+      long rewrittenSkillTokens) {}
 
   private static ConversionCounts writeTarget(
       Connection source,
@@ -270,6 +277,7 @@ final class LegacyDatabaseUpgrade {
 
       Map<String, Long> counts = new LinkedHashMap<>();
       long legacyCredentialRows = 0;
+      long rewrittenSkillTokens = 0;
       for (String table : LegacySchemaProfile.parentFirstOrder(target)) {
         long sourceRows = count(source, "select count(*) from " + table);
         if (SYSTEM_SETTING.equals(table)) {
@@ -301,6 +309,11 @@ final class LegacyDatabaseUpgrade {
               "a copied table does not match its server confirmed row count");
         }
         reconcile(counts, table, targetRows, sourceRows);
+        if (SKILL_PACKAGE.equals(table)) {
+          // 整行已原生 COPY：只把令牌从源主密钥重封装到目标主密钥，匿名行保持 null。
+          rewrittenSkillTokens =
+              LegacySkillTokens.rewriteLegacy(source, target, keys.sourceKey(), keys.targetKey());
+        }
       }
 
       initializeCatalog(candidate);
@@ -329,7 +342,7 @@ final class LegacyDatabaseUpgrade {
 
       verifyCatalogRestore(catalogRepository(scoped), candidate.catalog(), candidate.prepared());
       verifyHarness(scoped, transactionManager, target);
-      return new ConversionCounts(counts, rewritten, installedStatic);
+      return new ConversionCounts(counts, rewritten, installedStatic, rewrittenSkillTokens);
     } catch (LegacyDatabaseUpgradeException error) {
       throw error;
     } catch (SQLException error) {

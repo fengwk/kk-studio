@@ -9,6 +9,9 @@ import org.junit.jupiter.api.io.TempDir;
 
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialKeyLoader;
 
+import javax.crypto.SecretKey;
+import javax.crypto.spec.SecretKeySpec;
+
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -95,5 +98,33 @@ class SkillTokenCipherTest {
 
     assertThrows(IllegalStateException.class, () -> cipher.encrypt("pkg", TOKEN));
     assertThrows(IllegalStateException.class, () -> cipher.decrypt("pkg", new byte[] {1, 2, 3, 4}));
+  }
+
+  /**
+   * 测试意图：显式主密钥重载与实例方法共用同一格式 1 算法（跨路径可互相读取，且能读固定历史样本），错 key、错 packageName 与短密文都 fail closed，绝不引入第二份
+   * envelope。
+   */
+  @Test
+  void explicitKeyOverloadsShareTheFormatOneAlgorithm() throws IOException {
+    SkillTokenCipher cipher = cipherWithKeyFile("explicit.key");
+    SecretKey key = new SecretKeySpec(KEY.getBytes(StandardCharsets.UTF_8), "AES");
+    SecretKey other =
+        new SecretKeySpec(
+            "abcdef0123456789abcdef0123456789".getBytes(StandardCharsets.UTF_8), "AES");
+
+    byte[] byInstance = cipher.encrypt(PACKAGE_NAME, TOKEN);
+    byte[] byExplicitKey = SkillTokenCipher.encrypt(key, PACKAGE_NAME, TOKEN);
+
+    assertEquals(TOKEN, SkillTokenCipher.decrypt(key, PACKAGE_NAME, byInstance));
+    assertEquals(TOKEN, cipher.decrypt(PACKAGE_NAME, byExplicitKey));
+    assertEquals(TOKEN, SkillTokenCipher.decrypt(key, PACKAGE_NAME, FORMAT_ONE_ENVELOPE));
+    assertThrows(
+        IllegalStateException.class,
+        () -> SkillTokenCipher.decrypt(other, PACKAGE_NAME, byExplicitKey));
+    assertThrows(
+        IllegalStateException.class, () -> SkillTokenCipher.decrypt(key, "pkg-b", byExplicitKey));
+    assertThrows(
+        IllegalStateException.class,
+        () -> SkillTokenCipher.decrypt(key, PACKAGE_NAME, new byte[] {1, 2, 3}));
   }
 }
