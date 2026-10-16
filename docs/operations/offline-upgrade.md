@@ -17,7 +17,7 @@
 | MAIN 基线 | `cb36799384c60f15119439276a8656efe303dc68` |
 | 当前目标 V1 | `f990606a115736e1e0a0ee411000e77c1174ae3d` |
 
-任何其它 schema、被人为改动的约束或未知的命名空间、表、视图、序列、类型、函数与扩展都会被拒绝，
+任何其它 schema、被人为改动的约束或未知的命名空间、表、视图、序列、独立类型、collation、operator、函数与扩展都会被拒绝，
 不会做幂等迁移或就地修补。
 
 运行环境必须满足：
@@ -88,8 +88,9 @@ java -jar web/target/kk-studio-web-<version>.jar database-upgrade apply --config
    `outcomeUncertain` 与安全建议；`outcomeUncertain=true` 表示目标事务是否生效无法确认，必须人工检查
    目标库的实际状态（迁移历史、逐表行数、目录 epoch）而不是盲目重试。
 
-CLI 在读取任何密钥前先关闭进程内的根日志与 JUL，因此第三方驱动、Flyway 与 Plugin 的诊断不会把连接
-信息或凭据打进终端；它自身也从不输出连接串、路径、原始配置、SQL 或凭据。
+CLI 在读取任何密钥前先关闭进程内实际 classpath 后端的全部现存 logger、根日志与 JUL（`LoggingSystem=none`
+也不会让它变成 no-op），因此第三方驱动、Flyway 与 Plugin 的诊断不会把连接信息或凭据打进终端；它自身也从不
+输出连接串、路径、原始配置、SQL 或凭据。
 
 ## 切换与回退
 

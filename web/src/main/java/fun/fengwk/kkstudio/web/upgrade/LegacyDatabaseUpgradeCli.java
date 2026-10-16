@@ -2,7 +2,9 @@ package fun.fengwk.kkstudio.web.upgrade;
 
 import org.postgresql.Driver;
 import org.springframework.boot.logging.LogLevel;
+import org.springframework.boot.logging.LoggerConfiguration;
 import org.springframework.boot.logging.LoggingSystem;
+import org.springframework.boot.logging.LoggingSystemFactory;
 import org.springframework.jdbc.datasource.SimpleDriverDataSource;
 
 import javax.sql.DataSource;
@@ -19,8 +21,9 @@ import java.util.logging.LogManager;
  * --help}）以独占一次性进程运行，成功只输出固定事实，失败只输出固定阶段与安全建议。
  *
  * <p>由 Web Fat JAR 的 {@code WebApplication} 在首参 {@code database-upgrade} 时调用，不启动 Spring
- * Web/Worker。进程在读 secret 前禁用 SLF4J 根日志与 JUL；不替换全局 {@code System.out}/{@code System.err}，并保证任何
- * {@code Throwable}（含 {@code Error}）都收敛为非零退出码而不是 JVM 默认打印。
+ * Web/Worker。进程在读 secret 前禁用 SLF4J 全部现存 logger、根日志与 JUL（即使 {@code
+ * org.springframework.boot.logging.LoggingSystem=none} 也按真实 classpath 后端关闭）；不替换全局 {@code
+ * System.out}/{@code System.err}，并保证任何 {@code Throwable}（含 {@code Error}）都收敛为非零退出码而不是 JVM 默认打印。
  *
  * <p>dry-run/apply 只调用现有 {@link LegacyDatabaseUpgrade#convert}，不隐式 prepare、不覆盖/增量/重试。
  */
@@ -120,11 +123,24 @@ public final class LegacyDatabaseUpgradeCli {
     }
   }
 
-  /** 在读取任何 secret 前禁用第三方日志：SLF4J 根日志经 Spring Boot 公共 API，JUL 直接 reset；任一步失败即 fail closed。 */
+  /**
+   * 在读取任何 secret 前禁用进程的诊断日志：从 {@code spring.factories} 直接选真实 classpath 后端（不经过 {@code
+   * LoggingSystem=none} 的 no-op 分支），关闭该后端当前已知的全部命名 logger 与根日志，再 reset JUL。
+   *
+   * <p>覆盖全部现存 logger 是必需的：只关根日志时，任何被显式配置为 DEBUG 的子 logger 仍会输出。选不到后端或任一步失败都 fail closed。
+   */
   private static void disableDiagnosticLogging() {
     try {
-      LoggingSystem.get(LegacyDatabaseUpgradeCli.class.getClassLoader())
-          .setLogLevel(LoggingSystem.ROOT_LOGGER_NAME, LogLevel.OFF);
+      LoggingSystem loggingSystem =
+          LoggingSystemFactory.fromSpringFactories()
+              .getLoggingSystem(LegacyDatabaseUpgradeCli.class.getClassLoader());
+      if (loggingSystem == null) {
+        throw new IllegalStateException("no logging system is available to disable");
+      }
+      for (LoggerConfiguration configuration : loggingSystem.getLoggerConfigurations()) {
+        loggingSystem.setLogLevel(configuration.getName(), LogLevel.OFF);
+      }
+      loggingSystem.setLogLevel(LoggingSystem.ROOT_LOGGER_NAME, LogLevel.OFF);
       LogManager.getLogManager().reset();
     } catch (RuntimeException error) {
       throw new LegacyUpgradeCliException(

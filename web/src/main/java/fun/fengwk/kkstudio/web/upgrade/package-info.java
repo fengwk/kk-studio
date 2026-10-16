@@ -6,9 +6,9 @@
  * <ul>
  *   <li>入口与编排：{@link fun.fengwk.kkstudio.web.upgrade.LegacyDatabaseUpgradeCli} 是 {@code
  *       database-upgrade prepare|dry-run|apply --config /absolute/path.json}
- *       的独占一次性进程边界，只输出固定事实、固定失败阶段与退出码，并在读取任何 secret 前禁用诊断日志；Web Fat JAR 的唯一 main 在首参命中时路由到它，不启动
- *       Spring Web/worker。 {@link fun.fengwk.kkstudio.web.upgrade.LegacyUpgradeCliException}
- *       是它面向运维的固定失败分类；
+ *       的独占一次性进程边界，只输出固定事实、固定失败阶段与退出码，并在读取任何 secret 前关闭实际 classpath 后端的全部现存 logger、根日志与 JUL；Web Fat
+ *       JAR 的唯一 main 在首参命中时路由到它，不启动 Spring Web/worker。 {@link
+ *       fun.fengwk.kkstudio.web.upgrade.LegacyUpgradeCliException} 是它面向运维的固定失败分类；
  *   <li>受保护输入：{@link fun.fengwk.kkstudio.web.upgrade.LegacyUpgradeConfig} 严格解析绝对路径、owner-only 的
  *       JSON 与 raw32 主密钥文件，得到连接信息、主密钥与显式静态材料；
  *   <li>显式空目标：{@link fun.fengwk.kkstudio.web.upgrade.LegacyDatabasePrepare} 只把操作员新建的空 PostgreSQL 17

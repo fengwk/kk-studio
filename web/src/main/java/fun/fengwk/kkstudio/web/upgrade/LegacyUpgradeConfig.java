@@ -130,12 +130,15 @@ final class LegacyUpgradeConfig {
     return source;
   }
 
-  /** 旧 format 1 凭据与 Skill 令牌的主密钥；未提供时为 null。 */
+  /** 旧 format 1 Plugin 凭据与旧 Skill 令牌（令牌自己的 format 1，独立 AAD 命名空间）的源侧主密钥；未提供时为 null。 */
   SecretKey sourceKey() {
     return sourceKey;
   }
 
-  /** 当前 format 2 凭据与 Skill 令牌的主密钥；未提供时为 null。 */
+  /**
+   * 目标侧主密钥：重封装 Plugin 凭据时用它写当前 format 2，重封装 Skill 令牌时用它写令牌自己的 format 1——同一把部署主密钥上并存两套独立格式， Skill
+   * 令牌不随 Plugin 凭据代际演进；未提供时为 null。
+   */
   SecretKey targetKey() {
     return targetKey;
   }

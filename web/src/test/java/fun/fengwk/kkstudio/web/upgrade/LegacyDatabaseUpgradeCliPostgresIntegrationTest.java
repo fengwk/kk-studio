@@ -137,6 +137,45 @@ class LegacyDatabaseUpgradeCliPostgresIntegrationTest {
     assertTrue(typeResult.err().contains("error.stage=PREPARE"));
   }
 
+  /**
+   * 只被部分清单覆盖的 schema 对象（shell type、独立 collation、只引用现有 builtin routine 的 operator）也必须在任何 Flyway DDL
+   * 之前拒绝。
+   *
+   * <p>拒绝后目标必须仍只是操作员创建了那一个对象的空库：没有 V1 表、没有迁移历史，也没有其它 schema 对象。
+   */
+  @Test
+  void prepareRejectsSchemaObjectsThatPartialChecksMissed() throws Exception {
+    // 未定义的 shell type 只产生 typtype='p' 的类型，任何类型种类白名单都会漏掉它。
+    assertPrepareRejectsForeignSchemaObject("create type alien_shell");
+    assertPrepareRejectsForeignSchemaObject("create collation alien_collation (locale = 'C')");
+    assertPrepareRejectsForeignSchemaObject(
+        "create operator === (leftarg = int4, rightarg = int4, function = int4eq)");
+  }
+
+  private void assertPrepareRejectsForeignSchemaObject(String sql) throws Exception {
+    DataSource target = UpgradePostgresTestSupport.blankDatabase();
+    execute(target, sql);
+
+    Run result = run("prepare", "--config", prepareConfig(target).toString());
+
+    assertEquals(1, result.exit(), result.err());
+    assertTrue(result.err().contains("error.stage=PREPARE"), result.err());
+    assertTrue(result.err().contains("outcomeUncertain=false"), result.err());
+    // 没有任何 V1 关系落地，且目标里恰好只剩操作员自己创建的那一个 schema 对象。
+    assertEquals(
+        0L,
+        UpgradePostgresTestSupport.longValue(
+            target,
+            "select count(*) from pg_class c join pg_namespace n on n.oid = c.relnamespace"
+                + " where n.nspname = 'public'"));
+    assertEquals(
+        1L,
+        UpgradePostgresTestSupport.longValue(
+            target,
+            "select count(*) from pg_depend d join pg_namespace n on n.oid = d.refobjid"
+                + " where d.refclassid = 'pg_namespace'::regclass and n.nspname = 'public'"));
+  }
+
   @Test
   void prepareRejectsANonOriginSession() throws Exception {
     DataSource target = UpgradePostgresTestSupport.blankDatabase();
