@@ -1,0 +1,13 @@
+{
+  "state": {
+    "contributorId": "builtin",
+    "customType": "goal.progress",
+    "schemaVersion": 1,
+    "data": {
+      "goalId": "00000000-0000-0000-0000-0000000000e1",
+      "status": "complete",
+      "reason": "Shipped the offline upgrade slice and verified it with focused tests",
+      "reportedAt": "2026-02-03T04:05:06Z"
+    }
+  }
+}

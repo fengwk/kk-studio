@@ -15,6 +15,8 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.common.json.JsonValues;
+import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.CustomMessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryType;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryEntryPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
@@ -26,6 +28,11 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderReplayStateJsonCodec;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetContributorStateCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
+import fun.fengwk.kkstudio.project.turn.ProjectRunScope;
+import fun.fengwk.kkstudio.project.turn.ProjectRunScopeJsonCodec;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -34,11 +41,14 @@ import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
+import java.util.function.Consumer;
 
 /**
  * {@link LegacyHarnessHistoryJson} 的定向转换回归：旧 8 键 tool metadata 只补显式 null binding，receipt / 数值 /
- * 其它节点 原样；provider replay 只改 affinity wire，format 与 payload 不变；所有失败都是固定安全消息。
+ * 其它节点 原样；provider replay 只改 affinity wire，format 与 payload 不变；已知第一方 CUSTOM / CUSTOM_MESSAGE 与
+ * SET_CONTRIBUTOR_STATE 命令按 producer 语义校验后逐字节原样；所有失败都是固定安全消息。
  */
 class LegacyHarnessHistoryJsonTest {
 
@@ -46,6 +56,22 @@ class LegacyHarnessHistoryJsonTest {
       new HistoryEntryPayloadJsonCodec();
   private static final ProviderReplayStateJsonCodec REPLAY_CODEC =
       new ProviderReplayStateJsonCodec();
+  private static final ThreadCommandPayloadJsonCodec COMMAND_CODEC =
+      new ThreadCommandPayloadJsonCodec();
+  private static final ProjectRunScopeJsonCodec RUN_SCOPE_CODEC = new ProjectRunScopeJsonCodec();
+
+  /** 冻结 DEV 源 writer（commit 8126841e1）离线产出的第一方 wire 夹具。 */
+  private static final String LEGACY_GOAL_COMPLETE = "legacy-custom-goal-progress-complete.json";
+
+  private static final String LEGACY_GOAL_BLOCKED = "legacy-custom-goal-progress-blocked.json";
+  private static final String LEGACY_RUN_ACTIVE = "legacy-custom-project-run-active.json";
+  private static final String LEGACY_RUN_CLOSED = "legacy-custom-project-run-closed.json";
+  private static final String LEGACY_CORE_MESSAGE = "legacy-custom-core-message.json";
+  private static final String LEGACY_STATE_COMMAND_GOAL =
+      "legacy-command-set-contributor-state-goal.json";
+  private static final String LEGACY_STATE_COMMAND_RUN =
+      "legacy-command-set-contributor-state-run.json";
+  private static final String LEGACY_USER_COMMAND = "legacy-command-user-message.json";
 
   private static final String LEGACY_TOOL_RESULT = "legacy-tool-result-message.json";
   private static final String LEGACY_SYNTHETIC_TOOL_RESULT =
@@ -181,7 +207,7 @@ class LegacyHarnessHistoryJsonTest {
         missingFieldError.getMessage());
   }
 
-  /** CUSTOM / CUSTOM_MESSAGE 的自由 data 需要 producer 语义验证；null 类型固定报错。 */
+  /** 少了第一方身份字段（或整体非对象）的 CUSTOM / CUSTOM_MESSAGE 依旧是不可升级的旧源；null 类型固定报错。 */
   @Test
   void rejectsUnsupportedEntryTypes() {
     String root = fixture(CURRENT_ROOT_ENTRY);
@@ -192,10 +218,16 @@ class LegacyHarnessHistoryJsonTest {
                 () -> LegacyHarnessHistoryJson.entryPayload(EntryType.CUSTOM, root))
             .getMessage());
     assertEquals(
-        LegacyHarnessHistoryJson.ENTRY_CUSTOM_UNSUPPORTED,
+        LegacyHarnessHistoryJson.ENTRY_CUSTOM_MESSAGE_UNSUPPORTED,
         assertThrows(
                 IllegalArgumentException.class,
                 () -> LegacyHarnessHistoryJson.entryPayload(EntryType.CUSTOM_MESSAGE, root))
+            .getMessage());
+    assertEquals(
+        LegacyHarnessHistoryJson.ENTRY_MALFORMED,
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> LegacyHarnessHistoryJson.entryPayload(EntryType.CUSTOM, "[1, 2]"))
             .getMessage());
     assertEquals(
         LegacyHarnessHistoryJson.ENTRY_TYPE_REQUIRED,
@@ -254,6 +286,354 @@ class LegacyHarnessHistoryJsonTest {
                 LegacyHarnessHistoryJson.entryPayload(EntryType.MESSAGE, JsonValues.write(extra)));
     assertEquals(LegacyHarnessHistoryJson.ENTRY_TARGET_REJECTED, error.getMessage());
     assertNull(error.getCause());
+  }
+
+  // ---------- 已知第一方 CUSTOM / CUSTOM_MESSAGE ----------
+
+  /**
+   * 已知 {@code builtin/goal.progress/1} 终态声明：转换器逐字节原样返回（reason 文本不改写），目标 codec 解码后业务字段 与源 wire
+   * 逐字段相同。
+   */
+  @ParameterizedTest
+  @ValueSource(strings = {LEGACY_GOAL_COMPLETE, LEGACY_GOAL_BLOCKED})
+  void preservesKnownGoalProgressCustomEntryVerbatim(String fixture) {
+    String legacy = fixture(fixture);
+    String upgraded = LegacyHarnessHistoryJson.entryPayload(EntryType.CUSTOM, legacy);
+    assertEquals(legacy, upgraded);
+
+    CustomEntryPayload payload =
+        (CustomEntryPayload) ENTRY_CODEC.decode(EntryType.CUSTOM, upgraded);
+    assertEquals("builtin", payload.contributorId());
+    assertEquals("goal.progress", payload.customType());
+    assertEquals(1, payload.schemaVersion());
+    assertEquals(JsonValues.readTree(legacy).get("data"), JsonValues.readTree(payload.dataJson()));
+  }
+
+  /** 验证与模型内部的 reason 规范化分离，导入不裁剪持久化文本。 */
+  @Test
+  void preservesGoalReasonWhitespace() {
+    ObjectNode entry = (ObjectNode) JsonValues.readTree(fixture(LEGACY_GOAL_COMPLETE));
+    ((ObjectNode) entry.get("data")).put("reason", "  completed with surrounding whitespace  ");
+    String legacy = JsonValues.write(entry);
+
+    assertEquals(legacy, LegacyHarnessHistoryJson.entryPayload(EntryType.CUSTOM, legacy));
+  }
+
+  /** 未知 contributorId / customType / schemaVersion 组合在任何 data 之前就被拒绝。 */
+  @Test
+  void rejectsUnknownCustomProducersAndVersions() {
+    assertUnsupportedCustomEntry(
+        entry -> entry.put("contributorId", "other"),
+        LegacyHarnessHistoryJson.ENTRY_CUSTOM_UNSUPPORTED);
+    assertUnsupportedCustomEntry(
+        entry -> entry.put("customType", "goal.other"),
+        LegacyHarnessHistoryJson.ENTRY_CUSTOM_UNSUPPORTED);
+    assertUnsupportedCustomEntry(
+        entry -> entry.put("schemaVersion", 2), LegacyHarnessHistoryJson.ENTRY_CUSTOM_UNSUPPORTED);
+    assertUnsupportedCustomEntry(
+        entry -> entry.put("schemaVersion", "1"),
+        LegacyHarnessHistoryJson.ENTRY_CUSTOM_UNSUPPORTED);
+    assertUnsupportedCustomEntry(
+        entry -> entry.put("schemaVersion", 4294967297L),
+        LegacyHarnessHistoryJson.ENTRY_CUSTOM_UNSUPPORTED);
+    assertUnsupportedCustomEntry(
+        entry -> entry.putNull("schemaVersion"), LegacyHarnessHistoryJson.ENTRY_CUSTOM_UNSUPPORTED);
+    assertUnsupportedCustomEntry(
+        entry -> entry.remove("schemaVersion"), LegacyHarnessHistoryJson.ENTRY_CUSTOM_UNSUPPORTED);
+    assertUnsupportedCustomEntry(
+        entry -> entry.put("contributorId", 5), LegacyHarnessHistoryJson.ENTRY_CUSTOM_UNSUPPORTED);
+  }
+
+  /** 各种非旧形态的 goal 终态 data（含错误状态 / 大小写、错 UUID / Instant、空白 reason、字段键集与类型）都固定拒绝。 */
+  @Test
+  void rejectsNonLegacyKnownGoalProgressData() {
+    assertNonLegacyCustomData(data -> data.put("status", "active"));
+    assertNonLegacyCustomData(data -> data.put("status", "COMPLETE"));
+    assertNonLegacyCustomData(data -> data.put("goalId", "not-a-uuid"));
+    assertNonLegacyCustomData(data -> data.put("reportedAt", "2026-02-03 04:05:06"));
+    assertNonLegacyCustomData(data -> data.put("reason", "   "));
+    assertNonLegacyCustomData(data -> data.put("goalId", 5));
+    assertNonLegacyCustomData(data -> data.putNull("reason"));
+    assertNonLegacyCustomData(data -> data.put("extra", 1));
+    assertNonLegacyCustomData(data -> data.remove("reason"));
+    assertNonLegacyCustomData(data -> data.remove("reportedAt"));
+
+    ObjectNode entry = (ObjectNode) JsonValues.readTree(fixture(LEGACY_GOAL_COMPLETE));
+    entry.putArray("data");
+    assertEntryMessage(
+        JsonValues.write(entry), LegacyHarnessHistoryJson.ENTRY_CUSTOM_DATA_NOT_LEGACY);
+  }
+
+  /** 已知 {@code project/run/1} 快照：active / closed 两态都逐字节原样，目标 codec 解码后业务字段与源 wire 相同。 */
+  @ParameterizedTest
+  @ValueSource(strings = {LEGACY_RUN_ACTIVE, LEGACY_RUN_CLOSED})
+  void preservesKnownProjectRunCustomEntryVerbatim(String fixture) {
+    String legacy = fixture(fixture);
+    String upgraded = LegacyHarnessHistoryJson.entryPayload(EntryType.CUSTOM, legacy);
+    assertEquals(legacy, upgraded);
+
+    CustomEntryPayload payload =
+        (CustomEntryPayload) ENTRY_CODEC.decode(EntryType.CUSTOM, upgraded);
+    assertEquals("project", payload.contributorId());
+    assertEquals("run", payload.customType());
+    assertEquals(1, payload.schemaVersion());
+    assertEquals(JsonValues.readTree(legacy).get("data"), JsonValues.readTree(payload.dataJson()));
+  }
+
+  /** 复用目标 ProjectRunScopeJsonCodec：active=true/false、nullable 与非空、空数组、long 边界都逐字段读回。 */
+  @Test
+  void decodesKnownProjectRunScopeAcrossActiveAndClosedVariants() {
+    ProjectRunScope active = RUN_SCOPE_CODEC.decode(customData(LEGACY_RUN_ACTIVE));
+    assertTrue(active.active());
+    assertEquals(9007199254740993L, active.issueNumber());
+    assertEquals("Accepted: freeze the issue context for this run", active.issueDescription());
+    assertEquals("Write the code, then request a handoff", active.stageInstructions());
+    assertEquals(List.of("review", "done"), active.nextStates());
+
+    ProjectRunScope closed = RUN_SCOPE_CODEC.decode(customData(LEGACY_RUN_CLOSED));
+    assertFalse(closed.active());
+    assertEquals(Long.MAX_VALUE, closed.issueNumber());
+    assertNull(closed.issueDescription());
+    assertNull(closed.stageInstructions());
+    assertTrue(closed.nextStates().isEmpty());
+  }
+
+  /** 目标 project codec 的 long 范围校验不允许截断；越界 issueNumber 与错误类型都固定拒绝。 */
+  @Test
+  void rejectsProjectRunDataOutsideTheTargetContract() {
+    ObjectNode beyondLong = (ObjectNode) JsonValues.readTree(fixture(LEGACY_RUN_ACTIVE));
+    ((ObjectNode) beyondLong.get("data")).put("issueNumber", new BigInteger("9223372036854775808"));
+    assertEntryMessage(
+        JsonValues.write(beyondLong), LegacyHarnessHistoryJson.ENTRY_CUSTOM_DATA_NOT_LEGACY);
+
+    assertNonLegacyRunData(data -> data.put("active", "true"));
+    assertNonLegacyRunData(data -> data.put("issueNumber", 1.5));
+    assertNonLegacyRunData(data -> data.remove("nextStates"));
+    assertNonLegacyRunData(data -> data.putArray("nextStates").add(" "));
+    assertNonLegacyRunData(data -> data.put("extra", 1));
+
+    ObjectNode arrayData = (ObjectNode) JsonValues.readTree(fixture(LEGACY_RUN_ACTIVE));
+    arrayData.putArray("data");
+    assertEntryMessage(
+        JsonValues.write(arrayData), LegacyHarnessHistoryJson.ENTRY_CUSTOM_DATA_NOT_LEGACY);
+  }
+
+  /**
+   * TurnPlanBuilder 固定的 {@code core/message/message} CUSTOM_MESSAGE 逐字节原样，message 由当前 entry codec
+   * 校验。
+   */
+  @Test
+  void preservesKnownCoreCustomMessageVerbatim() {
+    String legacy = fixture(LEGACY_CORE_MESSAGE);
+    String upgraded = LegacyHarnessHistoryJson.entryPayload(EntryType.CUSTOM_MESSAGE, legacy);
+    assertEquals(legacy, upgraded);
+
+    CustomMessagePayload payload =
+        (CustomMessagePayload) ENTRY_CODEC.decode(EntryType.CUSTOM_MESSAGE, upgraded);
+    assertEquals("core", payload.contributorId());
+    assertEquals("message", payload.customType());
+    assertEquals("message", payload.rendererKey());
+    assertEquals("{}", payload.detailsJson());
+    // 完整重编码后与源 wire 同构：message 子树的每个字段都没有被改变。
+    assertEquals(JsonValues.readTree(legacy), JsonValues.readTree(ENTRY_CODEC.encode(payload)));
+  }
+
+  /** 未知 renderer / contributor、非空或缺失 details 都不是可安全升级的旧第一方消息。 */
+  @Test
+  void rejectsUnknownCustomMessages() {
+    assertUnsupportedCustomMessage(message -> message.put("rendererKey", "other"));
+    assertUnsupportedCustomMessage(message -> message.put("customType", "other"));
+    assertUnsupportedCustomMessage(message -> message.put("contributorId", "other"));
+    assertUnsupportedCustomMessage(message -> message.remove("details"));
+    assertUnsupportedCustomMessage(message -> message.putNull("details"));
+    assertUnsupportedCustomMessage(message -> message.putArray("details"));
+    assertUnsupportedCustomMessage(
+        message -> ((ObjectNode) message.get("details")).put("priority", 1));
+  }
+
+  /** 已知 CUSTOM 组合仍受当前 entry codec 的外层键集约束；重复字段与尾随 token 在严格解析阶段拒绝。 */
+  @Test
+  void rejectsKnownCustomEntriesRejectedByTheTargetCodec() {
+    ObjectNode extra = (ObjectNode) JsonValues.readTree(fixture(LEGACY_GOAL_COMPLETE));
+    extra.put("unexpected", true);
+    assertEntryMessage(JsonValues.write(extra), LegacyHarnessHistoryJson.ENTRY_TARGET_REJECTED);
+
+    assertEntryMessage(
+        fixture(LEGACY_GOAL_COMPLETE)
+            .replace("\"schemaVersion\": 1,", "\"schemaVersion\": 1, \"schemaVersion\": 1,"),
+        LegacyHarnessHistoryJson.ENTRY_MALFORMED);
+    assertEntryMessage(
+        fixture(LEGACY_GOAL_COMPLETE) + " 0", LegacyHarnessHistoryJson.ENTRY_MALFORMED);
+
+    ObjectNode invalidMessage = (ObjectNode) JsonValues.readTree(fixture(LEGACY_CORE_MESSAGE));
+    ((ObjectNode) invalidMessage.get("message")).put("role", 5);
+    assertEntryMessage(
+        EntryType.CUSTOM_MESSAGE,
+        JsonValues.write(invalidMessage),
+        LegacyHarnessHistoryJson.ENTRY_TARGET_REJECTED);
+  }
+
+  // ---------- 已知 typed Thread command ----------
+
+  /** 普通 USER_MESSAGE 与两个已知 SET_CONTRIBUTOR_STATE 命令都不改业务值，并经当前 command codec 校验。 */
+  @Test
+  void passesThroughKnownCommandsVerbatim() {
+    String user = fixture(LEGACY_USER_COMMAND);
+    assertEquals(
+        user, LegacyHarnessHistoryJson.threadCommandPayload(ThreadCommandType.USER_MESSAGE, user));
+    assertNotNull(COMMAND_CODEC.decode(ThreadCommandType.USER_MESSAGE, user));
+
+    String goal = fixture(LEGACY_STATE_COMMAND_GOAL);
+    assertEquals(
+        goal,
+        LegacyHarnessHistoryJson.threadCommandPayload(
+            ThreadCommandType.SET_CONTRIBUTOR_STATE, goal));
+    SetContributorStateCommandPayload goalState =
+        (SetContributorStateCommandPayload)
+            COMMAND_CODEC.decode(ThreadCommandType.SET_CONTRIBUTOR_STATE, goal);
+    assertEquals("builtin", goalState.state().contributorId());
+    assertEquals("goal.progress", goalState.state().customType());
+    assertEquals(
+        JsonValues.readTree(fixture(LEGACY_GOAL_COMPLETE)).get("data"),
+        JsonValues.readTree(goalState.state().dataJson()));
+
+    String run = fixture(LEGACY_STATE_COMMAND_RUN);
+    assertEquals(
+        run,
+        LegacyHarnessHistoryJson.threadCommandPayload(
+            ThreadCommandType.SET_CONTRIBUTOR_STATE, run));
+    SetContributorStateCommandPayload runState =
+        (SetContributorStateCommandPayload)
+            COMMAND_CODEC.decode(ThreadCommandType.SET_CONTRIBUTOR_STATE, run);
+    assertEquals("project", runState.state().contributorId());
+    assertTrue(RUN_SCOPE_CODEC.decode(runState.state().dataJson()).active());
+  }
+
+  /** 未知 / 损坏的 contributor state 固定拒绝，绝不当成可升级的旧第一方状态放过。 */
+  @Test
+  void rejectsUnknownOrCorruptContributorStates() {
+    assertCommand(
+        fixture(LEGACY_STATE_COMMAND_GOAL)
+            .replace("\"contributorId\": \"builtin\"", "\"contributorId\": \"other\""),
+        LegacyHarnessHistoryJson.COMMAND_STATE_NOT_KNOWN);
+    assertCommand(
+        fixture(LEGACY_STATE_COMMAND_GOAL).replace("\"schemaVersion\": 1", "\"schemaVersion\": 2"),
+        LegacyHarnessHistoryJson.COMMAND_STATE_NOT_KNOWN);
+    assertCommand(
+        fixture(LEGACY_STATE_COMMAND_GOAL)
+            .replace("\"status\": \"complete\"", "\"status\": \"active\""),
+        LegacyHarnessHistoryJson.COMMAND_STATE_NOT_KNOWN);
+    assertCommand(
+        fixture(LEGACY_STATE_COMMAND_RUN)
+            .replace("\"issueNumber\": 9007199254740993", "\"issueNumber\": 9223372036854775808"),
+        LegacyHarnessHistoryJson.COMMAND_STATE_NOT_KNOWN);
+    assertCommand("{\"state\":[]}", LegacyHarnessHistoryJson.COMMAND_STATE_NOT_KNOWN);
+    assertCommand("{}", LegacyHarnessHistoryJson.COMMAND_STATE_NOT_KNOWN);
+  }
+
+  /** null 类型、非对象、重复字段、尾随 token 与当前 codec 的非法 shape 都收敛为固定安全消息。 */
+  @Test
+  void rejectsMalformedOrTargetInvalidCommands() {
+    assertNull(
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> LegacyHarnessHistoryJson.threadCommandPayload(null, "{}"))
+            .getCause());
+    assertEquals(
+        LegacyHarnessHistoryJson.COMMAND_TYPE_REQUIRED,
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> LegacyHarnessHistoryJson.threadCommandPayload(null, "{}"))
+            .getMessage());
+    assertCommand("[1, 2]", LegacyHarnessHistoryJson.COMMAND_MALFORMED);
+    assertCommand("{\"state\":{},\"state\":{}}", LegacyHarnessHistoryJson.COMMAND_MALFORMED);
+    assertCommand(fixture(LEGACY_USER_COMMAND) + " 0", LegacyHarnessHistoryJson.COMMAND_MALFORMED);
+
+    ObjectNode extraState = (ObjectNode) JsonValues.readTree(fixture(LEGACY_STATE_COMMAND_GOAL));
+    extraState.put("unexpected", true);
+    assertCommand(JsonValues.write(extraState), LegacyHarnessHistoryJson.COMMAND_TARGET_REJECTED);
+
+    ObjectNode extraStateField =
+        (ObjectNode) JsonValues.readTree(fixture(LEGACY_STATE_COMMAND_GOAL));
+    ((ObjectNode) extraStateField.get("state")).putObject("binding");
+    assertCommand(
+        JsonValues.write(extraStateField), LegacyHarnessHistoryJson.COMMAND_TARGET_REJECTED);
+
+    ObjectNode extraUser = (ObjectNode) JsonValues.readTree(fixture(LEGACY_USER_COMMAND));
+    extraUser.put("unexpected", "sk-SECRET-DEADBEEF");
+    IllegalArgumentException targetRejected =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                LegacyHarnessHistoryJson.threadCommandPayload(
+                    ThreadCommandType.USER_MESSAGE, JsonValues.write(extraUser)));
+    assertEquals(LegacyHarnessHistoryJson.COMMAND_TARGET_REJECTED, targetRejected.getMessage());
+    assertNull(targetRejected.getCause());
+    assertFalse(targetRejected.getMessage().contains("sk-SECRET-DEADBEEF"));
+
+    assertCommand(
+        ThreadCommandType.GOAL, "{\"text\": 5}", LegacyHarnessHistoryJson.COMMAND_TARGET_REJECTED);
+  }
+
+  private static void assertUnsupportedCustomEntry(
+      Consumer<ObjectNode> mutation, String expectedMessage) {
+    ObjectNode entry = (ObjectNode) JsonValues.readTree(fixture(LEGACY_GOAL_COMPLETE));
+    mutation.accept(entry);
+    assertEntryMessage(JsonValues.write(entry), expectedMessage);
+  }
+
+  private static void assertNonLegacyCustomData(Consumer<ObjectNode> mutation) {
+    ObjectNode entry = (ObjectNode) JsonValues.readTree(fixture(LEGACY_GOAL_COMPLETE));
+    mutation.accept((ObjectNode) entry.get("data"));
+    assertEntryMessage(
+        JsonValues.write(entry), LegacyHarnessHistoryJson.ENTRY_CUSTOM_DATA_NOT_LEGACY);
+  }
+
+  private static void assertNonLegacyRunData(Consumer<ObjectNode> mutation) {
+    ObjectNode entry = (ObjectNode) JsonValues.readTree(fixture(LEGACY_RUN_ACTIVE));
+    mutation.accept((ObjectNode) entry.get("data"));
+    assertEntryMessage(
+        JsonValues.write(entry), LegacyHarnessHistoryJson.ENTRY_CUSTOM_DATA_NOT_LEGACY);
+  }
+
+  private static void assertUnsupportedCustomMessage(Consumer<ObjectNode> mutation) {
+    ObjectNode message = (ObjectNode) JsonValues.readTree(fixture(LEGACY_CORE_MESSAGE));
+    mutation.accept(message);
+    assertEntryMessage(
+        EntryType.CUSTOM_MESSAGE,
+        JsonValues.write(message),
+        LegacyHarnessHistoryJson.ENTRY_CUSTOM_MESSAGE_UNSUPPORTED);
+  }
+
+  private static void assertEntryMessage(String json, String expected) {
+    assertEntryMessage(EntryType.CUSTOM, json, expected);
+  }
+
+  private static void assertEntryMessage(EntryType type, String json, String expected) {
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> LegacyHarnessHistoryJson.entryPayload(type, json));
+    assertEquals(expected, error.getMessage());
+    assertNull(error.getCause());
+  }
+
+  private static void assertCommand(String json, String expected) {
+    assertCommand(ThreadCommandType.SET_CONTRIBUTOR_STATE, json, expected);
+  }
+
+  private static void assertCommand(ThreadCommandType type, String json, String expected) {
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> LegacyHarnessHistoryJson.threadCommandPayload(type, json));
+    assertEquals(expected, error.getMessage());
+    assertNull(error.getCause());
+  }
+
+  /** 取出已知 CUSTOM fixture 的 {@code data} 子树的 canonical JSON 文本。 */
+  private static String customData(String fixture) {
+    return JsonValues.write(JsonValues.readTree(fixture(fixture)).get("data"));
   }
 
   /** provider replay 只改 affinity.providerType；format 与 opaque payload（含同名字串、精确数值）语义不变。 */
