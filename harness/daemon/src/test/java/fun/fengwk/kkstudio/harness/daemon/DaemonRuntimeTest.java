@@ -129,6 +129,15 @@ class DaemonRuntimeTest {
     return user;
   }
 
+  /** 与生产一致：宿主架构只来自真实 {@code os.arch}，未知事实不填造、不用 null 掩盖采集错误。 */
+  private static String expectedHostArchitecture() {
+    String architecture = System.getProperty("os.arch");
+    if (architecture == null || architecture.isBlank()) {
+      throw new IllegalStateException("system property os.arch must be present");
+    }
+    return architecture;
+  }
+
   /** 与生产一致：canonical 化失败时退化为绝对规范化路径，不伪造 HOME。 */
   private static String expectedProcessHomeDirectory() {
     String home = System.getProperty("user.home");
@@ -207,6 +216,20 @@ class DaemonRuntimeTest {
           IllegalStateException.class, () -> runtime(new FakeTransport(), new TestCapability()));
     } finally {
       System.setProperty("user.name", userName);
+    }
+  }
+
+  /** 宿主架构属性缺失时必须启动即失败：宿主事实只用真实采集结果表达，不用 null 掩盖采集错误。 */
+  @Test
+  void rejectsAMissingHostArchitectureProperty() {
+    String architecture = System.getProperty("os.arch");
+    try {
+      System.clearProperty("os.arch");
+
+      assertThrows(
+          IllegalStateException.class, () -> runtime(new FakeTransport(), new TestCapability()));
+    } finally {
+      System.setProperty("os.arch", architecture);
     }
   }
 
@@ -357,6 +380,8 @@ class DaemonRuntimeTest {
     assertEquals(expectedProcessUserName(), ready.path("environment").path("userName").asString());
     assertEquals(
         expectedProcessHomeDirectory(), ready.path("environment").path("homeDirectory").asString());
+    assertEquals(
+        expectedHostArchitecture(), ready.path("environment").path("architecture").asString());
 
     transport.disconnect();
     transport.awaitConnections(1);
@@ -653,6 +678,7 @@ class DaemonRuntimeTest {
         capabilities.environment().operatingSystem());
     assertEquals(expectedProcessUserName(), capabilities.environment().userName());
     assertEquals(expectedProcessHomeDirectory(), capabilities.environment().homeDirectory());
+    assertEquals(expectedHostArchitecture(), capabilities.environment().architecture());
     assertEquals(
         new DaemonConfig(
                 URI.create("ws://localhost/gateway"),
@@ -2108,13 +2134,14 @@ class DaemonRuntimeTest {
     assertEquals(DaemonCapabilities.VERSION, payload.path("version").asInt());
     assertEquals(DaemonBuildInfo.DEVELOPMENT_VERSION, payload.path("daemonVersion").asString());
     JsonNode environment = payload.path("environment");
-    assertEquals(6, environment.size());
+    assertEquals(7, environment.size());
     assertTrue(environment.path("operatingSystem").isString());
     assertTrue(environment.path("timeZone").isString());
     assertTrue(environment.path("userName").isString());
     assertTrue(environment.path("homeDirectory").isString());
     assertTrue(environment.path("note").isString());
     assertTrue(environment.path("tempDirectory").isString());
+    assertTrue(environment.path("architecture").isString());
     assertTrue(environment.path("rootPath").isMissingNode());
     assertTrue(environment.path("workingDirectory").isMissingNode());
     // 严格 wire 形状：必须能被共享 codec 往返解码。

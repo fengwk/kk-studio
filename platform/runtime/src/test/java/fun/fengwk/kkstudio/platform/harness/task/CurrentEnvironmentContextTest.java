@@ -168,7 +168,8 @@ public class CurrentEnvironmentContextTest {
             "dev",
             "/home/dev",
             "Linux environment.",
-            "/tmp/kk-studio");
+            "/tmp/kk-studio",
+            "amd64");
     CurrentEnvironmentContext reported =
         CurrentEnvironmentContext.selected(envId, "nas-dev", hostFacts, NOW, ZoneOffset.UTC);
     assertEquals(LocalDate.of(2026, 9, 12), reported.currentDate());

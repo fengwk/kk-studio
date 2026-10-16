@@ -51,7 +51,8 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
               "dev",
               "/home/dev",
               "Linux environment.",
-              "/tmp/kk-studio"));
+              "/tmp/kk-studio",
+              "amd64"));
 
   private final UUID node1 = UUID.randomUUID();
   private final UUID node2 = UUID.randomUUID();

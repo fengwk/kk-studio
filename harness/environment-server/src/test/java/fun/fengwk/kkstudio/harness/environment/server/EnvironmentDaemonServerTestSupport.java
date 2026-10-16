@@ -75,7 +75,8 @@ final class EnvironmentDaemonServerTestSupport {
               "dev",
               "/home/dev",
               "note",
-              "/tmp/kk-studio"));
+              "/tmp/kk-studio",
+              "amd64"));
 
   /** 测试用单条/聚合资源字节预算：与生产 16 MiB 业务上限一致。 */
   static final long MAX_RESOURCE_BYTES = 16L * 1024 * 1024;

@@ -5,11 +5,11 @@ import java.time.ZoneId;
 import java.util.Objects;
 
 /**
- * READY 中冻结的类型化本地环境 metadata；只包含 prompt 所需的 OS、时区、真实进程用户、canonical HOME、稳定说明与受控临时目录。
+ * READY 中冻结的类型化本地环境 metadata；只包含 prompt 所需的 OS、CPU 架构、时区、真实进程用户、canonical HOME、稳定说明与受控临时目录。
  *
  * <p>{@code note} 会进入受信任的模型 SYSTEM Prompt，只能来自 Daemon 固定默认值或可信操作者配置，禁止包含凭证、秘密或不可信外部文本。格式校验与下游 XML
- * escape 不能替代这一信任边界。{@code userName}、{@code homeDirectory} 与 {@code tempDirectory} 只用于 Card 和当前
- * Environment Prompt 展示，不构成 cwd、默认 workdir 或沙箱。
+ * escape 不能替代这一信任边界。{@code architecture}、{@code userName}、{@code homeDirectory} 与 {@code
+ * tempDirectory} 只用于 Card 和当前 Environment Prompt 展示，不构成 cwd、默认 workdir 或沙箱。
  */
 public record DaemonEnvironmentInfo(
     DaemonOperatingSystem operatingSystem,
@@ -17,9 +17,13 @@ public record DaemonEnvironmentInfo(
     String userName,
     String homeDirectory,
     String note,
-    String tempDirectory) {
+    String tempDirectory,
+    String architecture) {
 
   public static final int MAX_NOTE_CHARS = 512;
+
+  /** 宿主架构标识上界；真实 {@code os.arch} 取值远小于该值。 */
+  public static final int MAX_ARCHITECTURE_CHARS = 32;
 
   public DaemonEnvironmentInfo {
     operatingSystem = Objects.requireNonNull(operatingSystem, "operatingSystem");
@@ -28,6 +32,40 @@ public record DaemonEnvironmentInfo(
     homeDirectory = validateHomeDirectory(homeDirectory, operatingSystem);
     note = validateNote(note);
     tempDirectory = validateTempDirectory(tempDirectory);
+    architecture = validateArchitecture(architecture);
+  }
+
+  /**
+   * 校验 architecture 的展示结构边界：{@code null} 表示该宿主事实未知；否则必须是有界、无周边空白、单行且无控制字符的标识。
+   *
+   * <p>该值来自 Daemon 真实采集的宿主事实（{@code os.arch}）；未知事实用 {@code null} 表达，不填造取值。
+   */
+  public static String validateArchitecture(String value) {
+    if (value == null) {
+      return null;
+    }
+    if (value.isBlank()) {
+      throw new IllegalArgumentException("architecture must not be blank");
+    }
+    if (!value.equals(value.strip())) {
+      throw new IllegalArgumentException("architecture must not have surrounding whitespace");
+    }
+    if (value.length() > MAX_ARCHITECTURE_CHARS) {
+      throw new IllegalArgumentException(
+          "architecture exceeds " + MAX_ARCHITECTURE_CHARS + " characters");
+    }
+    if (value.codePoints().anyMatch(Character::isISOControl)) {
+      throw new IllegalArgumentException("architecture must not contain ISO control characters");
+    }
+    if (value
+        .codePoints()
+        .anyMatch(
+            codePoint ->
+                Character.getType(codePoint) == Character.LINE_SEPARATOR
+                    || Character.getType(codePoint) == Character.PARAGRAPH_SEPARATOR)) {
+      throw new IllegalArgumentException("architecture must be a single line");
+    }
+    return value;
   }
 
   /** 校验模型可见 note 的结构边界；调用方仍必须保证内容来自可信操作者且不含凭证、秘密或不可信文本。 */
