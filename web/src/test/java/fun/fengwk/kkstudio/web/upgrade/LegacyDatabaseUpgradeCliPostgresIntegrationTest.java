@@ -194,12 +194,8 @@ class LegacyDatabaseUpgradeCliPostgresIntegrationTest {
   }
 
   /**
-   * 真实迁移连接不受库级会话默认值影响：数据库默认 search_path 只指向 pg_catalog（其中无法创建任何用户对象），prepare 仍必须落在 public 的 唯当前
-   * V1，且在 pg_catalog 里既不留迁移历史也不留任何 V1 表。
-   *
-   * <p>会话级敌意默认值只能施加在 search_path 上：pgjdbc 在启动包里强制自己的 DateStyle 与 JVM 默认 TimeZone，会覆盖 URL {@code
-   * options} 与库级默认（实测），而 search_path 不被驱动接管，因此它正是「Flyway 自己打开的连接带着不受控默认值」的真实场景。内核要求的
-   * client_encoding/DateStyle/UTC/row_security 由迁移连接自己承担，见真实迁移连接记录的用例。
+   * 迁移连接带着不受控的会话默认值也必须落在 public 的唯一当前 V1：数据库默认 search_path 只指向 pg_catalog 时，V1 的未限定 DDL 与迁移历史都不得落进
+   * pg_catalog；内核要求的 client_encoding/DateStyle/UTC/row_security 由迁移连接自己承担。
    */
   @Test
   void prepareIgnoresHostileConnectionDefaults() throws Exception {
@@ -243,7 +239,7 @@ class LegacyDatabaseUpgradeCliPostgresIntegrationTest {
   /**
    * 非 origin 的迁移连接必须被真实门禁拒绝：只让第一个连接（本进程 preflight）保持 origin，之后打开的迁移连接都是 replica。
    *
-   * <p>若门禁只覆盖 preflight，这里就会准备成功；因此失败本身就是「门禁跑在真实迁移连接上」的证据，而没有任何 V1 DDL 被记录则说明它在 迁移事务的第一条语句之前中止。
+   * <p>若门禁只覆盖 preflight，这里就会准备成功；因此失败本身就是「门禁跑在真实迁移连接上」的证据，而没有任何 V1 DDL 被记录则说明它在迁移事务的第一条语句之前中止。
    */
   @Test
   void prepareRefusesANonOriginMigrationConnection() throws Exception {

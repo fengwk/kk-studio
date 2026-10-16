@@ -134,8 +134,6 @@ final class LegacyDatabasePrepare {
    *
    * <p>BEFORE_EACH_MIGRATE 与迁移本身同一事务（PostgreSQL 的 V1 全是事务性 DDL），且在 Flyway 完成 schema 切换之后触发；
    * 这里失败只意味着目标可能已留下 Flyway 元数据，因此沿 Flyway 边界收敛为上层的 PREPARE 阶段失败。
-   *
-   * <p>包内可见（package-private）：它只是离线升级包内部的迁移会话前置，不是平台 API；固定事件、同事务声明与名字由包内测试钉住。
    */
   static final class TargetSessionCallback implements Callback {
 
