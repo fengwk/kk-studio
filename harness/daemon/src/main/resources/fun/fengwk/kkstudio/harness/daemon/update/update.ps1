@@ -169,16 +169,18 @@ try {
   }
 
   # Unique backup directory: created without -Force so a generated name is never reused and a
-  # previous backup is never overwritten. The installed artifact is copied (not moved) so a
-  # later replacement failure still leaves the old binary in place and the backup intact.
-  # There is no automatic rollback; on failure recovery is manual.
+  # previous backup is never overwritten. The installed artifact is copied, keeping it in place
+  # for the replacement step. There is no automatic rollback; on failure recovery is manual.
   $step = 'backup'
   $backupDir = Join-Path $updateDir ('backup-' + [Guid]::NewGuid().ToString('N'))
   New-Item -ItemType Directory -Path $backupDir | Out-Null
   Copy-Item -LiteralPath $InstalledJar -Destination (Join-Path $backupDir 'previous')
 
+  # The staged jar atomically replaces the installed jar on the same volume (both live under
+  # the managed data directory): the installed jar is never deleted or moved aside first and
+  # there is no non-atomic fallback, so a failure leaves it in place.
   $step = 'replace'
-  Move-Item -LiteralPath $StagedJar -Destination $InstalledJar
+  [IO.File]::Replace($StagedJar, $InstalledJar, $null)
 
   $step = 'restart'
   Start-ScheduledTask -TaskName $taskName -TaskPath $taskPath

@@ -17,11 +17,6 @@ non-zero abort (the EXIT trap), a failing receipt write that must not swallow th
 failing success receipt that must not become a false update failure, the unique copy-based
 backup that never overwrites a previous one and never leaves the installed binary missing,
 and the stopped-then-replace ordering.
-
-`TestHandoffGate.test_early_preparing_handoff_is_not_rejected_before_acceptance` is the
-negative control for the ordering defect: with the previous order the job would already have
-exited non-zero on the transient `PREPARING`, so asserting it is still running is exactly
-what distinguishes the corrected gate.
 """
 
 import json

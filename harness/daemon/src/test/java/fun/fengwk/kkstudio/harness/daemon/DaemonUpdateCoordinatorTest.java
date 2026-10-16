@@ -30,6 +30,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.lang.reflect.Field;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -44,6 +45,10 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 
 /**
  * 意图：受管更新编排的每条可达路径都收敛为确定回执——未 READY 拒绝、执行器拒绝/停机、同一 operation 幂等与在途互斥、准备失败与准备崩溃都不得谎报成功，
@@ -59,6 +64,9 @@ class DaemonUpdateCoordinatorTest {
       EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
   private static final String TARGET_VERSION = "1.0.9";
   private static final String ARTIFACT_SHA = "a".repeat(64);
+
+  /** 合成秘密：只用于证明安全失败日志不回显原始失败内容。 */
+  private static final String SYNTHETIC_SECRET = "registrationToken-synthetic-value";
 
   @TempDir Path root;
 
@@ -594,6 +602,95 @@ class DaemonUpdateCoordinatorTest {
         "the accepted fact is cached even when the permit could not be released");
   }
 
+  /** 首次许可释放失败（permit 被目录占位）后，显式重放与重连重发必须只补发 matching permit，绝不重复准备/下载/启动。 */
+  @Test
+  void replayAndReconnectRetryThePermitReleaseWithoutRepreparing()
+      throws InterruptedException, IOException {
+    Path updateRoot = root.resolve("updates").resolve(OP);
+    Path permit = updateRoot.resolve(UpdateHandoff.PERMIT_FILE);
+    HandoffPreparer preparer = new HandoffPreparer(updateRoot);
+    AtomicInteger launches = new AtomicInteger();
+    DaemonUpdateCoordinator coordinator =
+        coordinator(singleThread(), true, DaemonOperatingSystem.LINUX);
+    coordinator.setPreparer(preparer);
+    coordinator.setLauncher(
+        prepared -> {
+          launches.incrementAndGet();
+          return true;
+        });
+    // 许可目标被目录占位：首次释放必然失败，但已接受的更新事实仍然成立。
+    Files.createDirectories(updateRoot);
+    Files.createDirectory(permit);
+
+    coordinator.handleUpdate(updateCommand(OP));
+    assertEquals(DaemonUpdatePhase.ACCEPTED, sink.await().phase());
+    assertEquals(DaemonUpdatePhase.PREPARED, sink.await().phase());
+    assertTrue(Files.isDirectory(permit, LinkOption.NOFOLLOW_LINKS), "the permit is still blocked");
+
+    // 阻塞消失后，同一 operation 的重放只重发回执并补发 matching permit。
+    Files.delete(permit);
+    coordinator.handleUpdate(updateCommand(OP));
+    awaitUntil(() -> Files.isRegularFile(permit), "the retried permit");
+    assertEquals(DaemonUpdatePhase.PREPARED, sink.await().phase());
+    assertEquals(OP, Files.readString(permit).strip());
+    assertEquals(1, preparer.preparations(), "a replay must not prepare again");
+    assertEquals(1, launches.get(), "a replay must not launch again");
+
+    // 重连重发同样是许可释放的重试触发点。
+    Files.delete(permit);
+    coordinator.resendAfterReconnect();
+    awaitUntil(() -> Files.isRegularFile(permit), "the permit retried by the reconnect resend");
+    assertEquals(DaemonUpdatePhase.PREPARED, sink.await().phase());
+    assertEquals(OP, Files.readString(permit).strip());
+    assertEquals(1, preparer.preparations(), "a reconnect resend must not prepare again");
+    assertEquals(1, launches.get(), "a reconnect resend must not launch again");
+  }
+
+  /** 安全失败日志只记录固定阶段与异常类型：绝不回显原始异常、元数据或其中的敏感内容。 */
+  @Test
+  void safeFailureLogsRecordOnlyTheFixedStageAndType() throws IOException, InterruptedException {
+    Path updateRoot = root.resolve("updates").resolve(OP);
+    HandoffPreparer preparer = new HandoffPreparer(updateRoot);
+    DaemonUpdateCoordinator coordinator =
+        coordinator(singleThread(), true, DaemonOperatingSystem.LINUX);
+    coordinator.setPreparer(preparer);
+    coordinator.setLauncher(
+        prepared -> {
+          // 启动后把 handoff 覆盖成携带合成秘密的损坏元数据：接受阶段的失败与秘密同源。
+          try {
+            Files.writeString(
+                updateRoot.resolve(UpdateHandoff.HANDOFF_FILE),
+                "registrationToken=" + SYNTHETIC_SECRET);
+          } catch (IOException error) {
+            throw new UncheckedIOException(error);
+          }
+          return true;
+        });
+
+    try (CoordinatorLogCapture capture = new CoordinatorLogCapture()) {
+      coordinator.handleUpdate(updateCommand(OP));
+      awaitUntil(() -> !capture.records().isEmpty(), "the safe failure log");
+
+      assertEquals(DaemonUpdatePhase.ACCEPTED, sink.await().phase());
+      assertEquals(DaemonUpdatePhase.FAILED, sink.await().phase());
+      assertFalse(preparer.permitExists(), "a corrupted handoff must not release the permit");
+
+      for (LogRecord record : capture.records()) {
+        assertNull(record.getThrown(), "a raw throwable must never be logged");
+        assertTrue(
+            record
+                .getMessage()
+                .matches(
+                    "managed update (handoff could not be (accepted|marked failed)"
+                        + "|permit could not be released): [A-Za-z0-9_]+"),
+            record.getMessage());
+        assertFalse(
+            record.getMessage().contains(SYNTHETIC_SECRET),
+            "the safe log must not echo the raw failure content");
+      }
+    }
+  }
+
   /** 出站失败（断线）仍保留已接受的更新事实：许可必须释放，独立更新器不被卡住。 */
   @Test
   void releasesPermitEvenWhenThePreparedReceiptCannotBeSent()
@@ -781,6 +878,7 @@ class DaemonUpdateCoordinatorTest {
   private final class HandoffPreparer implements ManagedUpdatePreparer {
 
     private final Path updateRoot;
+    private int preparations;
 
     private HandoffPreparer(Path updateRoot) {
       this.updateRoot = updateRoot;
@@ -788,6 +886,7 @@ class DaemonUpdateCoordinatorTest {
 
     @Override
     public ManagedUpdateOutcome prepare(DaemonUpdateCommand command) {
+      preparations++;
       events.add("prepare");
       try {
         Files.createDirectories(updateRoot);
@@ -820,6 +919,54 @@ class DaemonUpdateCoordinatorTest {
 
     private boolean permitExists() {
       return Files.exists(updateRoot.resolve(UpdateHandoff.PERMIT_FILE));
+    }
+
+    private int preparations() {
+      return preparations;
+    }
+  }
+
+  /**
+   * 捕获协调器日志的 JUL 端口：安全失败日志是普通的 {@code System.Logger} 记录，只有挂接处理器才能断言其内容。
+   *
+   * <p>{@link #close()} 恢复接管前的级别与父处理器设置，避免影响其它测试。
+   */
+  private static final class CoordinatorLogCapture implements AutoCloseable {
+
+    private final Logger logger = Logger.getLogger(DaemonUpdateCoordinator.class.getName());
+    private final Level previousLevel = logger.getLevel();
+    private final boolean previousUseParentHandlers = logger.getUseParentHandlers();
+    private final List<LogRecord> records = Collections.synchronizedList(new ArrayList<>());
+    private final Handler handler =
+        new Handler() {
+          @Override
+          public void publish(LogRecord record) {
+            records.add(record);
+          }
+
+          @Override
+          public void flush() {}
+
+          @Override
+          public void close() {}
+        };
+
+    private CoordinatorLogCapture() {
+      handler.setLevel(Level.ALL);
+      logger.addHandler(handler);
+      logger.setLevel(Level.ALL);
+      logger.setUseParentHandlers(false);
+    }
+
+    private List<LogRecord> records() {
+      return List.copyOf(records);
+    }
+
+    @Override
+    public void close() {
+      logger.removeHandler(handler);
+      logger.setLevel(previousLevel);
+      logger.setUseParentHandlers(previousUseParentHandlers);
     }
   }
 

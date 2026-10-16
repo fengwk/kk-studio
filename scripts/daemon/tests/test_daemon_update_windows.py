@@ -270,11 +270,32 @@ class TestWindowsUpdateBackup(unittest.TestCase):
         self.assertIn(
             "Copy-Item -LiteralPath $InstalledJar -Destination (Join-Path $backupDir 'previous')",
             text)
-        self.assertNotIn(
-            "Move-Item -LiteralPath $InstalledJar",
-            text,
-            "the installed binary must stay in place; the backup is a copy")
+        self.assertLess(
+            text.index("Copy-Item -LiteralPath $InstalledJar"),
+            text.index("[IO.File]::Replace("),
+            "the backup must be copied before the installed jar is replaced")
         self.assertNotIn("Remove-Item -Recurse", text)
+
+
+class TestWindowsUpdateReplacement(unittest.TestCase):
+    """The staged jar must atomically replace the installed jar on the same volume."""
+
+    def test_staged_jar_atomically_replaces_the_installed_jar(self):
+        text = script_text()
+        self.assertIn("[IO.File]::Replace($StagedJar, $InstalledJar, $null)", text)
+        self.assertNotIn(
+            "Move-Item", text, "the replacement must not move the installed jar aside")
+        self.assertNotIn(
+            "Remove-Item", text, "the installed jar must never be deleted before replacement")
+        self.assertIn("$step = 'replace'", text)
+
+    def test_replacement_keeps_the_installed_jar_untouched_until_it_succeeds(self):
+        text = script_text()
+        backup = text.index("Copy-Item -LiteralPath $InstalledJar")
+        replace = text.index("[IO.File]::Replace($StagedJar, $InstalledJar, $null)")
+        restart = text.index("Start-ScheduledTask -TaskName $taskName -TaskPath $taskPath")
+        self.assertLess(backup, replace)
+        self.assertLess(replace, restart)
 
 
 class TestWindowsUpdateNativeFixture(unittest.TestCase):
@@ -286,7 +307,8 @@ class TestWindowsUpdateNativeFixture(unittest.TestCase):
                        "TaskPath", "Running", "Queued", "backup-", "previous",
                        "handoff metadata is not accepted",
                        "the daemon did not release the update permit in time",
-                       "managed scheduled task is missing"):
+                       "managed scheduled task is missing",
+                       "FileShare]::None", "CopyItem:"):
             self.assertIn(needle, text, f"the native fixture must cover {needle!r}")
 
     def test_native_fixture_does_not_register_or_touch_real_tasks(self):

@@ -6,6 +6,7 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonProtocolException;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateCommand;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateCommandCodec;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdatePhase;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateResult;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateResultCodec;
 
@@ -55,17 +56,46 @@ final class DaemonUpdateCoordinator {
   /** 同步门：同门守护在途认领与结果缓存，使判定/认领/完成入缓存+释放都是原子决定；门外的 prepare、launch 与出站不持锁。 */
   private final Object updateGate = new Object();
 
-  /** 冻结回执缓存（operationId -> 回执）：同一 operation 只重放结果，最近若干条供重连重发。仅由 {@link #updateGate} 保护。 */
-  private final Map<String, DaemonUpdateResult> updateResults =
+  /**
+   * 冻结的已完成事实缓存（operationId -> 已完成事实）：同一 operation 只重放结果与许可，最近若干条供重连重发。仅由 {@link #updateGate} 保护。
+   */
+  private final Map<String, CompletedUpdate> completedUpdates =
       new LinkedHashMap<>(16, 0.75f, false) {
         @Override
-        protected boolean removeEldestEntry(Map.Entry<String, DaemonUpdateResult> eldest) {
+        protected boolean removeEldestEntry(Map.Entry<String, CompletedUpdate> eldest) {
           return size() > MAX_TRACKED_UPDATE_OPERATIONS;
         }
       };
 
-  /** 在途认领的 operationId；null 表示无在途更新。与 {@link #updateResults} 同受 {@link #updateGate} 保护。 */
+  /** 在途认领的 operationId；null 表示无在途更新。与 {@link #completedUpdates} 同受 {@link #updateGate} 保护。 */
   private String activeUpdateOperationId;
+
+  /**
+   * 已完成 operation 的冻结事实：回执，加上「确实已接受」时才存在的交接目录。
+   *
+   * <p>重放与重连只需要这一份事实：不再准备、下载或启动，但仍幂等释放 matching permit，因此一次失败的许可释放可由后续重放自然重试。回执自带权威 operationId。
+   */
+  private record CompletedUpdate(DaemonUpdateResult result, Path acceptedHandoffDirectory) {
+
+    /** 已被 OS 接受并冻结为 {@code PREPARED} 的完成事实：交接目录必须存在，重放时据此幂等补发 permit。 */
+    private static CompletedUpdate accepted(
+        DaemonUpdateResult result, Path acceptedHandoffDirectory) {
+      if (result.phase() != DaemonUpdatePhase.PREPARED) {
+        throw new IllegalArgumentException("an accepted handoff requires a PREPARED receipt");
+      }
+      return new CompletedUpdate(
+          Objects.requireNonNull(result, "result"),
+          Objects.requireNonNull(acceptedHandoffDirectory, "acceptedHandoffDirectory"));
+    }
+
+    /** 未被接受的完成事实：绝不持有可释放的许可。 */
+    private static CompletedUpdate unaccepted(DaemonUpdateResult result) {
+      if (result.phase() == DaemonUpdatePhase.PREPARED) {
+        throw new IllegalArgumentException("a PREPARED receipt requires an accepted handoff");
+      }
+      return new CompletedUpdate(Objects.requireNonNull(result, "result"), null);
+    }
+  }
 
   private volatile ManagedUpdatePreparer managedUpdater;
   private volatile ManagedUpdateLauncher updateLauncher;
@@ -94,9 +124,9 @@ final class DaemonUpdateCoordinator {
       throw new DaemonProtocolException("UPDATE requires a READY bound connection");
     }
     DaemonUpdateCommand command = updateCommandCodec.decode(envelope.payloadJson());
-    DaemonUpdateResult completed;
+    CompletedUpdate completed;
     synchronized (updateGate) {
-      completed = updateResults.get(command.operationId());
+      completed = completedUpdates.get(command.operationId());
       if (completed == null) {
         // 判定与认领必须同门原子：否则重放可能落在「已释放认领、结果尚未入缓存」的窗口，触发第二次下载。
         if (command.operationId().equals(activeUpdateOperationId)) {
@@ -109,7 +139,8 @@ final class DaemonUpdateCoordinator {
       }
     }
     if (completed != null) {
-      sendUpdateResult(completed);
+      // 已完成的 operation 只重放冻结回执；若它来自已接受的交接，这里同时幂等补发 matching permit。
+      deliverCompletedUpdate(completed);
       return;
     }
     try {
@@ -128,19 +159,40 @@ final class DaemonUpdateCoordinator {
     }
   }
 
-  /** 重连 READY 后重发已知更新回执：进行中重发 ACCEPTED，否则重发最近一次已完成回执。 */
+  /** 重连 READY 后重发已知更新回执：进行中重发 ACCEPTED，否则重发最近一次已完成回执并幂等补发 matching permit。 */
   void resendAfterReconnect() {
-    DaemonUpdateResult resend;
+    CompletedUpdate completed = null;
+    DaemonUpdateResult inFlight = null;
     synchronized (updateGate) {
-      if (activeUpdateOperationId != null && !updateResults.containsKey(activeUpdateOperationId)) {
-        resend = DaemonUpdateResult.accepted(activeUpdateOperationId);
+      if (activeUpdateOperationId != null
+          && !completedUpdates.containsKey(activeUpdateOperationId)) {
+        inFlight = DaemonUpdateResult.accepted(activeUpdateOperationId);
       } else {
-        List<DaemonUpdateResult> snapshot = new ArrayList<>(updateResults.values());
-        resend = snapshot.isEmpty() ? null : snapshot.get(snapshot.size() - 1);
+        List<CompletedUpdate> snapshot = new ArrayList<>(completedUpdates.values());
+        completed = snapshot.isEmpty() ? null : snapshot.get(snapshot.size() - 1);
       }
     }
-    if (resend != null) {
-      sendUpdateResult(resend);
+    if (inFlight != null) {
+      sendUpdateResult(inFlight);
+    } else if (completed != null) {
+      deliverCompletedUpdate(completed);
+    }
+  }
+
+  /**
+   * 交付一条已完成回执：出站成功与否都在 finally 中对「确实已接受」的交接幂等释放许可。
+   *
+   * <p>显式重放与重连重发都经由此处，因此它们既是回执重发，也是许可释放的天然重试；绝不再次准备、下载或启动。
+   */
+  private void deliverCompletedUpdate(CompletedUpdate completed) {
+    try {
+      sendUpdateResult(completed.result());
+    } finally {
+      Path acceptedHandoffDirectory = completed.acceptedHandoffDirectory();
+      if (acceptedHandoffDirectory != null) {
+        // 释放失败只记录固定阶段与异常类型，绝不掩盖出站异常。
+        releasePermit(acceptedHandoffDirectory, completed.result().operationId());
+      }
     }
   }
 
@@ -155,27 +207,35 @@ final class DaemonUpdateCoordinator {
   }
 
   private void runUpdate(DaemonUpdateCommand command) {
-    DaemonUpdateResult result;
-    Path permitHandoff = null;
+    CompletedUpdate completed;
     try {
       ManagedUpdateOutcome outcome = managedUpdater().prepare(command);
       if (outcome instanceof ManagedUpdateOutcome.Prepared prepared) {
         if (startAndAccept(prepared)) {
-          permitHandoff = prepared.handoffDirectory();
-          result = DaemonUpdateResult.prepared(command.operationId());
+          completed =
+              CompletedUpdate.accepted(
+                  DaemonUpdateResult.prepared(command.operationId()), prepared.handoffDirectory());
         } else {
-          result = DaemonUpdateResult.failed(command.operationId(), LAUNCH_FAILED_MESSAGE);
+          completed =
+              CompletedUpdate.unaccepted(
+                  DaemonUpdateResult.failed(command.operationId(), LAUNCH_FAILED_MESSAGE));
         }
       } else if (outcome instanceof ManagedUpdateOutcome.AlreadyAccepted accepted) {
-        // 已接受的同一 operation 只重放 PREPARED：绝不再次启动 OS 作业，但仍幂等释放 matching permit。
-        permitHandoff = accepted.prepared().handoffDirectory();
-        result = DaemonUpdateResult.prepared(command.operationId());
+        // 已接受的同一 operation 只重放 PREPARED：绝不再次启动 OS 作业。
+        completed =
+            CompletedUpdate.accepted(
+                DaemonUpdateResult.prepared(command.operationId()),
+                accepted.prepared().handoffDirectory());
       } else {
         ManagedUpdateOutcome.Failed failed = (ManagedUpdateOutcome.Failed) outcome;
-        result = DaemonUpdateResult.failed(command.operationId(), failed.message());
+        completed =
+            CompletedUpdate.unaccepted(
+                DaemonUpdateResult.failed(command.operationId(), failed.message()));
       }
     } catch (RuntimeException error) {
-      result = DaemonUpdateResult.failed(command.operationId(), "update preparation failed");
+      completed =
+          CompletedUpdate.unaccepted(
+              DaemonUpdateResult.failed(command.operationId(), "update preparation failed"));
     } catch (Error error) {
       // Error 仍向上传播：不进入任何许可释放路径，但必须释放认领，避免后续更新永久阻塞。
       releaseActive(command.operationId());
@@ -183,19 +243,12 @@ final class DaemonUpdateCoordinator {
     }
     // 入缓存与释放认领必须同门完成：中间窗口会让重放越过已完成判定并触发第二次下载。
     synchronized (updateGate) {
-      updateResults.put(command.operationId(), result);
+      completedUpdates.put(command.operationId(), completed);
       if (command.operationId().equals(activeUpdateOperationId)) {
         activeUpdateOperationId = null;
       }
     }
-    try {
-      sendUpdateResult(result);
-    } finally {
-      // 许可只在本次 PREPARED 回执冻结入缓存并完成一次出站尝试后释放；断线也保留实际 accepted 事实。
-      if (permitHandoff != null) {
-        releasePermit(permitHandoff, command.operationId());
-      }
-    }
+    deliverCompletedUpdate(completed);
   }
 
   /**
@@ -220,7 +273,7 @@ final class DaemonUpdateCoordinator {
       return true;
     } catch (IOException | RuntimeException error) {
       // 元数据在 readState 之后被改写/损坏时同样收敛为固定的安全失败，绝不带着不确定继续、也不释放许可。
-      LOG.log(Level.WARNING, "managed update handoff could not be accepted", error);
+      logSafeFailure("managed update handoff could not be accepted", error);
       markFailed(prepared.handoffDirectory());
       return false;
     }
@@ -231,7 +284,7 @@ final class DaemonUpdateCoordinator {
     try {
       UpdateHandoff.transition(updateRoot, UpdateHandoff.State.FAILED);
     } catch (IOException | RuntimeException error) {
-      LOG.log(Level.WARNING, "managed update handoff could not be marked failed", error);
+      logSafeFailure("managed update handoff could not be marked failed", error);
     }
   }
 
@@ -240,8 +293,13 @@ final class DaemonUpdateCoordinator {
     try {
       UpdateHandoff.releasePermit(updateRoot, operationId);
     } catch (IOException | RuntimeException error) {
-      LOG.log(Level.WARNING, "managed update permit could not be released", error);
+      logSafeFailure("managed update permit could not be released", error);
     }
+  }
+
+  /** 只记录固定阶段与异常类型：绝不输出原始异常、其消息或可能携带元数据/未知内容的堆栈。 */
+  private static void logSafeFailure(String stage, Throwable error) {
+    LOG.log(Level.WARNING, stage + ": " + error.getClass().getSimpleName());
   }
 
   /** 在同一门内释放在途认领；仅当它仍属于同一次 operation 时释放。 */

@@ -524,25 +524,36 @@ function New-Item {
 } finally { Remove-Case $case }
 
 # 18. Replace failure is reported; the copy-based backup leaves the installed binary in place.
+#     The real backup copy runs first, then a FileShare.None handle on the installed jar makes
+#     the real [IO.File]::Replace fail: no artificial hook exists in the production script.
 $case = New-Case 'replace-fail'
 try {
-  $replaceFails = @'
-function Move-Item {
-  param([switch]$Force, [string]$LiteralPath, [string]$Destination)
-  throw 'installed artifact cannot be replaced'
+  $replaceBlocked = @'
+function Copy-Item {
+  param([string]$LiteralPath, [string]$Destination, [switch]$Force)
+  Add-TestLog "CopyItem:$LiteralPath"
+  Microsoft.PowerShell.Management\Copy-Item -LiteralPath $LiteralPath -Destination $Destination -Force:$Force
+  $script:installedLock = [IO.File]::Open($LiteralPath, [IO.FileMode]::Open,
+    [IO.FileAccess]::Read, [IO.FileShare]::None)
 }
 '@
-  $exit = Invoke-Case $case $defaultGet $defaultStop $defaultStart $defaultUnregister $replaceFails
+  $exit = Invoke-Case $case $defaultGet $defaultStop $defaultStart $defaultUnregister $replaceBlocked
   $result = Read-Result $case
+  $log = Read-Log $case
   Assert-True ($exit -ne 0) 'replace failure exits non-zero'
   Assert-True ($result.phase -eq 'FAILED') 'replace failure writes a FAILED receipt'
   Assert-True ($result.message -like 'update failed during replace*') `
     'replace failure reports the safe stage and exception type'
+  Assert-True ($log -match 'CopyItem:') 'the real backup copy runs before the replacement'
   Assert-True ((Get-Content -LiteralPath $case.Installed -Raw) -eq 'installed-release-jar') `
     'replace failure leaves the installed binary in place'
+  Assert-True ((Test-Path -LiteralPath $case.Staged -PathType Leaf)) `
+    'replace failure keeps the staged artifact'
   $backup = Read-Backup $case
   Assert-True ($backup.Content -eq 'installed-release-jar') `
     'replace failure keeps the previous binary in its unique backup'
+  Assert-True ($log -notmatch 'StartScheduledTask') `
+    'replace failure never restarts the managed task'
 } finally { Remove-Case $case }
 
 # 19. Restart failure is reported and never rolls the replaced binary back.
