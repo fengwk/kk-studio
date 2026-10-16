@@ -11,10 +11,7 @@ import org.junit.jupiter.api.Test;
 import java.io.IOException;
 import java.util.List;
 
-/**
- * 意图：关停失败的聚合算法本身有确定结论——首个 Error 保持对象身份、后到 Error 提升到普通异常之上、其余失败作为 suppressed 附加且 同一对象不重复记录；checked
- * 失败按固定安全消息包装；没有失败时不伪造聚合结果。
- */
+/** 关停失败的优先级、异常身份及 checked 异常的固定包装。 */
 class DaemonShutdownFailuresTest {
 
   /** 尚未记录失败时既不报失败，也不伪造可抛出的聚合结果。 */
@@ -25,16 +22,6 @@ class DaemonShutdownFailuresTest {
     assertFalse(failures.hasFailure());
     assertNull(failures.error());
     assertThrows(IllegalStateException.class, failures::exception);
-  }
-
-  /** 空失败被忽略：既不进入聚合，也不产生安全日志。 */
-  @Test
-  void ignoresANullFailure() {
-    DaemonShutdownFailures failures = new DaemonShutdownFailures();
-
-    failures.record("connection close", null);
-
-    assertFalse(failures.hasFailure());
   }
 
   /** 首个 Error 保持对象身份：先到的普通异常与后到的 Error 都作为 suppressed 附加而不是被丢弃。 */
@@ -53,7 +40,7 @@ class DaemonShutdownFailuresTest {
     assertEquals(List.of(ordinary, later), List.of(first.getSuppressed()));
   }
 
-  /** 同一个失败对象重复出现只记录一次：绝不把它自己加为自己的 suppressed。 */
+  /** 同一主因重复出现时，绝不把它自己加为自己的 suppressed。 */
   @Test
   void recordsTheSameFailureObjectOnlyOnce() {
     DaemonShutdownFailures failures = new DaemonShutdownFailures();

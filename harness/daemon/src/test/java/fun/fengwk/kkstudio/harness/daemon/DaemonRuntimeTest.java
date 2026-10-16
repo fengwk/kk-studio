@@ -95,6 +95,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -2340,12 +2341,19 @@ class DaemonRuntimeTest {
   /** 关闭等待执行资源时被中断：关闭仍必须完成、中断标记被恢复，并把中断作为聚合失败发布为 FAILED。 */
   @Test
   void closeRestoresInterruptWhileWaitingForExecutors() throws Exception {
+    CountDownLatch taskStarted = new CountDownLatch(1);
+    CountDownLatch releaseTask = new CountDownLatch(1);
+    CountDownLatch awaiting = new CountDownLatch(1);
     ExecutorService stuckTasks =
-        Executors.newSingleThreadExecutor(runnable -> daemonThread("stuck-task", runnable));
-    ScheduledExecutorService stuckScheduler =
-        Executors.newScheduledThreadPool(1, runnable -> daemonThread("stuck-scheduler", runnable));
-    stuckTasks.execute(uninterruptibleTask());
-    stuckScheduler.schedule(uninterruptibleTask(), 0L, TimeUnit.MILLISECONDS);
+        new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS, new LinkedBlockingQueue<>()) {
+          @Override
+          public boolean awaitTermination(long timeout, TimeUnit unit) throws InterruptedException {
+            awaiting.countDown();
+            return super.awaitTermination(timeout, unit);
+          }
+        };
+    ObservedScheduler stuckScheduler = new ObservedScheduler();
+    stuckTasks.execute(uninterruptibleTask(taskStarted, releaseTask));
     DaemonRuntime closing =
         new DaemonRuntime(
             new DaemonConfig(
@@ -2376,14 +2384,15 @@ class DaemonRuntimeTest {
               finished.set(true);
             },
             "closer");
-    closer.start();
     try {
-      // 关闭已进入等待执行资源终止：此时中断只允许被恢复，绝不允许让关闭悬挂或跳过其余执行器。
-      Thread.sleep(200L);
+      assertTrue(taskStarted.await(ASYNC_TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS));
+      closer.start();
+      assertTrue(awaiting.await(ASYNC_TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS));
       closer.interrupt();
-      closer.join(TimeUnit.SECONDS.toMillis(20));
+      closer.join(TimeUnit.SECONDS.toMillis(ASYNC_TEST_TIMEOUT_SECONDS));
 
       assertTrue(finished.get(), "关闭不得因中断而悬挂");
+      assertFalse(closer.isAlive());
       assertTrue(interruptRestored.get(), "关闭必须恢复中断标记而不是吞掉它");
       assertTrue(
           aggregate.get() instanceof IllegalStateException
@@ -2391,11 +2400,16 @@ class DaemonRuntimeTest {
           "the interrupt must be published as the recorded shutdown failure");
       assertEquals(DaemonRuntimeState.FAILED, closing.state());
       assertEquals(SHUTDOWN_FAILURE_REASON, closing.failureReason());
-      assertTrue(stuckScheduler.isShutdown(), "the remaining executor must still be waited for");
+      assertEquals(1, stuckScheduler.awaitCalls.get(), "the remaining executor must be awaited");
     } finally {
+      releaseTask.countDown();
       closer.interrupt();
       stuckTasks.shutdownNow();
       stuckScheduler.shutdownNow();
+      assertTrue(stuckTasks.awaitTermination(ASYNC_TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS));
+      assertTrue(stuckScheduler.awaitTermination(ASYNC_TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS));
+      closer.join(TimeUnit.SECONDS.toMillis(ASYNC_TEST_TIMEOUT_SECONDS));
+      assertFalse(closer.isAlive());
     }
   }
 
@@ -2405,15 +2419,15 @@ class DaemonRuntimeTest {
     return thread;
   }
 
-  /** 一个忽略中断、无法在关闭超时前终止的任务：用来验证关闭被中断时的收敛行为。 */
-  private static Runnable uninterruptibleTask() {
+  /** 由测试显式释放的在途任务，避免把中断测试绑定到 sleep 时序。 */
+  private static Runnable uninterruptibleTask(CountDownLatch started, CountDownLatch release) {
     return () -> {
-      long deadline = System.currentTimeMillis() + 1_000L;
-      while (System.currentTimeMillis() < deadline) {
+      started.countDown();
+      while (release.getCount() != 0) {
         try {
-          Thread.sleep(50L);
+          release.await();
         } catch (InterruptedException ignored) {
-          // 故意忽略中断：模拟不配合关闭的本地任务。
+          // 模拟取消请求后仍需显式收敛的工作线程。
         }
       }
     };
@@ -2801,14 +2815,42 @@ class DaemonRuntimeTest {
     assertEquals(SHUTDOWN_FAILURE_REASON, runtime.failureReason());
   }
 
+  /** 等待时的 Error 仍须聚合先前失败并完成其余执行器等待，不能直接跳出清理。 */
+  @Test
+  void executorWaitErrorRetainsPriorFailureAndStillWaitsForTheScheduler() throws Exception {
+    IllegalStateException stopFailure = new IllegalStateException("shutdown failed");
+    AssertionError awaitFailure = new AssertionError("await failed");
+    FailingExecutor taskExecutor = new FailingExecutor(stopFailure, awaitFailure);
+    ObservedScheduler scheduler = new ObservedScheduler();
+    runtime =
+        new DaemonRuntime(
+            config(),
+            new FakeTransport(),
+            new DaemonCapabilityRegistry(),
+            new InMemoryDaemonInvocationJournal(),
+            scheduler,
+            taskExecutor);
+
+    AssertionError thrown = assertThrows(AssertionError.class, runtime::close);
+
+    assertSame(awaitFailure, thrown);
+    assertArrayEquals(new Throwable[] {stopFailure}, thrown.getSuppressed());
+    assertEquals(1, taskExecutor.awaitCalls());
+    assertEquals(1, scheduler.awaitCalls.get(), "later executors must still be awaited");
+    assertEquals(DaemonRuntimeState.FAILED, runtime.awaitTermination());
+    assertEquals(SHUTDOWN_FAILURE_REASON, runtime.failureReason());
+    assertDoesNotThrow(runtime::close);
+  }
+
   /** 已中断进入关闭：中断被保留为失败并在全部等待结束后恢复，其余执行器仍被关闭与等待，同步调用方收到聚合失败。 */
   @Test
   void closeEnteredWithInterruptStillCleansEveryExecutorAndRestoresInterrupt() throws Exception {
     FakeTransport transport = new FakeTransport();
-    ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
-    ExecutorService busyExecutor =
-        Executors.newSingleThreadExecutor(runnable -> daemonThread("busy-shutdown-task", runnable));
-    busyExecutor.execute(uninterruptibleTask());
+    ObservedScheduler scheduler = new ObservedScheduler();
+    ExecutorService busyExecutor = Executors.newSingleThreadExecutor();
+    CountDownLatch taskStarted = new CountDownLatch(1);
+    CountDownLatch releaseTask = new CountDownLatch(1);
+    busyExecutor.execute(uninterruptibleTask(taskStarted, releaseTask));
     runtime =
         new DaemonRuntime(
             config(),
@@ -2819,6 +2861,7 @@ class DaemonRuntimeTest {
             busyExecutor);
 
     try {
+      assertTrue(taskStarted.await(ASYNC_TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS));
       // 关闭开始前线程已中断：等待立即被中断，但其余执行器仍必须被关闭与等待。
       Thread.currentThread().interrupt();
       IllegalStateException thrown = assertThrows(IllegalStateException.class, runtime::close);
@@ -2832,11 +2875,40 @@ class DaemonRuntimeTest {
       assertEquals(SHUTDOWN_FAILURE_REASON, runtime.failureReason());
       assertTrue(busyExecutor.isShutdown());
       assertTrue(scheduler.isShutdown());
-      assertTrue(scheduler.awaitTermination(1, TimeUnit.SECONDS));
+      assertEquals(1, scheduler.awaitCalls.get());
     } finally {
       Thread.interrupted();
+      releaseTask.countDown();
       busyExecutor.shutdownNow();
       scheduler.shutdownNow();
+      assertTrue(busyExecutor.awaitTermination(ASYNC_TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS));
+      assertTrue(scheduler.awaitTermination(ASYNC_TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS));
+    }
+  }
+
+  /** 构造本身抛出 Error 也必须保持身份，同时停止并确认所有已创建执行器终止。 */
+  @Test
+  void constructionErrorRetainsItsIdentityAndReleasesCreatedExecutors() throws Exception {
+    AssertionError constructionFailure = new AssertionError("construction failed");
+    List<ExecutorService> executors = new ArrayList<>();
+
+    AssertionError thrown =
+        assertThrows(
+            AssertionError.class,
+            () ->
+                DaemonRuntime.create(
+                    config(),
+                    null,
+                    (registry, taskExecutor, scheduler, lspExecutor) -> {
+                      executors.addAll(List.of(taskExecutor, scheduler, lspExecutor));
+                      throw constructionFailure;
+                    }));
+
+    assertSame(constructionFailure, thrown);
+    assertEquals(3, executors.size());
+    for (ExecutorService executor : executors) {
+      assertTrue(executor.isShutdown());
+      assertTrue(executor.awaitTermination(ASYNC_TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS));
     }
   }
 
@@ -3966,6 +4038,22 @@ class DaemonRuntimeTest {
     @Override
     public void execute(Runnable command) {
       throw new RejectedExecutionException("this test executor does not accept tasks");
+    }
+  }
+
+  /** 观察 runtime 是否真正等待调度器，而不以 shutdown 请求代替终止确认。 */
+  private static final class ObservedScheduler extends ScheduledThreadPoolExecutor {
+
+    private final AtomicInteger awaitCalls = new AtomicInteger();
+
+    private ObservedScheduler() {
+      super(1);
+    }
+
+    @Override
+    public boolean awaitTermination(long timeout, TimeUnit unit) throws InterruptedException {
+      awaitCalls.incrementAndGet();
+      return super.awaitTermination(timeout, unit);
     }
   }
 
