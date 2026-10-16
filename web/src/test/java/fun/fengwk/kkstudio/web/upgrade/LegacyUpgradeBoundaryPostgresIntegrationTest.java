@@ -138,13 +138,17 @@ class LegacyUpgradeBoundaryPostgresIntegrationTest {
     }
   }
 
-  /** 有静态密钥材料却没有目标主密钥：真实候选 CAS 之后再拒绝，并且整笔写入必须全部回滚。 */
+  /** 有静态密钥材料却没有目标主密钥（且源端无 Skill 令牌行）：真实候选 CAS 之后再拒绝，并且整笔写入必须全部回滚。 */
   @Test
   void aStaticCredentialWithoutATargetKeyIsRejectedAfterTheCatalogCasAndRolledBack()
       throws SQLException {
     Fixture fixture = Fixture.open();
     execute(fixture.source(), "delete from plugin_credential");
     try {
+      assertEquals(
+          0L,
+          UpgradePostgresTestSupport.count(fixture.source(), "skill_package"),
+          "this boundary must reach the static credential check instead of the skill token keys");
       Fixture.SourceBaseline before = fixture.sourceBaseline();
       LegacyDatabaseUpgradeException error =
           fixture.convertExpectingSafeFailure(null, LegacyUpgradeSourceFixture.staticSecrets());
