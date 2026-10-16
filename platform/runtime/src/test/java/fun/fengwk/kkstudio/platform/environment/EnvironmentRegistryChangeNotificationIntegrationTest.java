@@ -62,7 +62,8 @@ class EnvironmentRegistryChangeNotificationIntegrationTest
               "dev",
               "/home/dev",
               "notify test daemon.",
-              "/tmp/kk-studio"));
+              "/tmp/kk-studio",
+              "amd64"));
 
   @Autowired private EnvironmentRegistry environmentRegistry;
 

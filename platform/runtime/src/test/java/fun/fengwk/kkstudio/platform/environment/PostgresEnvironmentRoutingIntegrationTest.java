@@ -72,7 +72,8 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
               "dev",
               "/home/dev",
               "Linux environment.",
-              "/tmp/kk-studio"));
+              "/tmp/kk-studio",
+              "amd64"));
 
   private static final DaemonEnvelopeCodec ENVELOPE_CODEC = new DaemonEnvelopeCodec();
 

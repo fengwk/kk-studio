@@ -219,9 +219,10 @@ public final class DaemonRuntime implements AutoCloseable {
   }
 
   /**
-   * 采集真实进程宿主事实：进程用户、canonical HOME 与受控临时目录。
+   * 采集真实进程宿主事实：进程用户、canonical HOME、受控临时目录与宿主 CPU 架构。
    *
    * <p>这些只是模型可见的展示事实，不构成 cwd、默认 workdir 或沙箱；HOME 无法 canonical 化时退化为绝对规范化路径，宿主目录缺失不阻止 Daemon 启动。
+   * {@code os.arch} 是唯一真实的架构来源，缺失即启动失败，绝不用 null 掩盖采集错误。
    */
   private static DaemonEnvironmentInfo detectEnvironmentInfo(
       DaemonConfig config, DaemonOperatingSystem operatingSystem, String tempDirectory) {
@@ -231,7 +232,8 @@ public final class DaemonRuntime implements AutoCloseable {
         requireHostProperty("user.name"),
         canonicalHomeDirectory(requireHostProperty("user.home")),
         config.effectiveNote(operatingSystem),
-        tempDirectory);
+        tempDirectory,
+        requireHostProperty("os.arch"));
   }
 
   /**
