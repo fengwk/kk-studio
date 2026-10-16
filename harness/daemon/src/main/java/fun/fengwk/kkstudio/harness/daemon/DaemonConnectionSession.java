@@ -87,6 +87,10 @@ final class DaemonConnectionSession {
   private final AtomicReference<EnvironmentId> boundEnvironmentId = new AtomicReference<>();
 
   private final AtomicReference<ActiveConnection> activeConnection = new AtomicReference<>();
+
+  /** 赢得关闭的调用者在 {@link #beginShutdown} 中取走的连接；由该调用者随后释放。 */
+  private ActiveConnection shutdownConnection;
+
   private final AtomicLong connectionGeneration = new AtomicLong();
   private final AtomicBoolean started = new AtomicBoolean();
   private final AtomicBoolean closed = new AtomicBoolean();
@@ -178,12 +182,14 @@ final class DaemonConnectionSession {
   }
 
   /**
-   * 进入终态关闭：幂等，只有首个调用者继续执行收尾；先停止传输接入并关闭当前连接与 transport。
+   * 进入终态关闭：幂等，只有首个调用者继续执行收尾。
    *
-   * @return true 表示本调用者赢得关闭，应继续释放其余生命周期资源并最终调用 {@link #signalTerminated()}
+   * <p>本方法只做关闭所有权与状态跃迁，并在锁内取走当前连接；绝不在此调用可能抛错的关闭动作，因此「赢得关闭权」与「关闭资源」互不 影响：赢家随后通过 {@link
+   * #releaseShutdownResources} 释放取走的连接与 transport，并最终通过 {@link #completeShutdown} 发布终态与释放终止闩。
+   *
+   * @return true 表示本调用者赢得关闭，应继续释放其余生命周期资源
    */
   boolean beginShutdown(DaemonRuntimeState terminalState, String reason) {
-    ActiveConnection connection;
     synchronized (lifecycleLock) {
       if (!closed.compareAndSet(false, true)) {
         return false;
@@ -191,17 +197,44 @@ final class DaemonConnectionSession {
       started.set(false);
       state = terminalState;
       failureReason = reason;
-      connection = activeConnection.getAndSet(null);
+      shutdownConnection = activeConnection.getAndSet(null);
+      return true;
     }
-    if (connection != null) {
-      closeConnectionQuietly(connection.connection(), "shutdown");
-    }
-    closeTransportQuietly();
-    return true;
   }
 
-  /** 释放终止闩；由赢得关闭的调用者在全部清理完成后调用一次。 */
-  void signalTerminated() {
+  /**
+   * 释放 {@link #beginShutdown} 取走的连接与 transport：任一项失败都记入聚合，绝不跳过另一项。
+   *
+   * <p>只由赢得关闭的调用者执行一次；重复调用不会再关闭任何资源。
+   */
+  void releaseShutdownResources(DaemonShutdownFailures failures) {
+    ActiveConnection connection = shutdownConnection;
+    shutdownConnection = null;
+    if (connection != null) {
+      try {
+        connection.connection().close();
+      } catch (Throwable error) {
+        failures.record("connection close", error);
+      }
+    }
+    try {
+      transport.close();
+    } catch (Throwable error) {
+      failures.record("transport close", error);
+    }
+  }
+
+  /**
+   * 关停收尾：任一关停失败都发布 FAILED 与固定安全原因（清理成功时保留原有终态与原因），随后释放终止闩。
+   *
+   * <p>终止闩在全部清理动作之后、调用方抛出聚合失败之前释放，因此同步 {@code close()} 抛错时 {@link #awaitTermination()}
+   * 的观察者仍能看到确定的终态。
+   */
+  void completeShutdown(DaemonShutdownFailures failures) {
+    if (failures.hasFailure()) {
+      state = DaemonRuntimeState.FAILED;
+      failureReason = DaemonShutdownFailures.SHUTDOWN_FAILURE_REASON;
+    }
     termination.countDown();
   }
 
@@ -506,17 +539,6 @@ final class DaemonConnectionSession {
         hello ? null : boundEnvironmentId.get(),
         invocationId,
         payloadJson);
-  }
-
-  private void closeTransportQuietly() {
-    try {
-      transport.close();
-    } catch (RuntimeException error) {
-      // 连接失败收尾：transport 关闭失败不影响其余清理，只记录安全阶段与异常类型。
-      LOG.log(
-          Level.DEBUG,
-          "daemon transport close failed during shutdown: " + error.getClass().getSimpleName());
-    }
   }
 
   private void closeConnectionQuietly(DaemonConnection connection, String phase) {

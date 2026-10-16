@@ -26,8 +26,6 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvelope;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvelopeCodec;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType;
 
-import java.lang.System.Logger;
-import java.lang.System.Logger.Level;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.Optional;
@@ -47,8 +45,6 @@ import java.util.function.BooleanSupplier;
  * 在终态编码时直传资源，因此不持有连接、资源或更新状态。
  */
 final class DaemonInvocationCoordinator {
-
-  private static final Logger LOG = System.getLogger(DaemonInvocationCoordinator.class.getName());
 
   private final DaemonCapabilityRegistry capabilityRegistry;
   private final DaemonInvocationJournal journal;
@@ -155,20 +151,28 @@ final class DaemonInvocationCoordinator {
         EnvironmentCapabilityTerminationCause.CANCELLED);
   }
 
-  /** 关闭：取消全部在途调用并各写可重放的 CANCELLED；单个调用收尾失败（RuntimeException）只记录类型，不中断其余调用，Error 仍向上传播。 */
-  void shutdown() {
+  /**
+   * 关闭：取消全部在途调用并各写可重放的 CANCELLED。
+   *
+   * <p>单个调用的收尾失败（RuntimeException、Error）不阻断该调用的 journal 终态写入与其余调用的收尾：失败按统一优先级记入 {@code
+   * failures}，由调用方在全部清理完成后统一发布。保留原 wire/journal shutdown 原因，不发送单独终态，也不把 logical terminal 当成 worker
+   * 已停止。
+   */
+  void shutdown(DaemonShutdownFailures failures) {
     for (DaemonRunningInvocation invocation : running.values()) {
       try {
         invocation.terminate(EnvironmentCapabilityTerminationCause.CANCELLED);
-      } catch (RuntimeException error) {
-        // 释放失败不阻断 shutdown，也不回显底层正文。
-        LOG.log(
-            Level.DEBUG, "daemon invocation terminate failed: " + error.getClass().getSimpleName());
+      } catch (Throwable error) {
+        failures.record("invocation termination", error);
       }
-      journal.complete(
-          invocation.invocationId(),
-          new DaemonTerminalMessage(
-              DaemonMessageType.CANCELLED, "{\"reason\":\"daemon shutdown\"}"));
+      try {
+        journal.complete(
+            invocation.invocationId(),
+            new DaemonTerminalMessage(
+                DaemonMessageType.CANCELLED, "{\"reason\":\"daemon shutdown\"}"));
+      } catch (Throwable error) {
+        failures.record("invocation journal write", error);
+      }
     }
     running.clear();
   }
