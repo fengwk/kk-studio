@@ -8,9 +8,12 @@ import static fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType.P
 import static fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType.READY;
 import static fun.fengwk.kkstudio.harness.environment.daemon.DaemonMessageType.STARTED;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -73,11 +76,13 @@ import java.nio.file.attribute.PosixFilePermission;
 import java.time.Duration;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.AbstractExecutorService;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -90,10 +95,15 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 
 /** Daemon 生命周期及本地 Environment Capability SPI 的协议集成测试。 */
 class DaemonRuntimeTest {
@@ -135,6 +145,12 @@ class DaemonRuntimeTest {
 
   /** 测试用注册凭证：与真实部署一样，只以 owner-only 文件形式存在，argv/日志中不出现明文。 */
   private static final String REGISTRATION_TOKEN = "test-registration-token";
+
+  /** 关停失败对外发布的固定安全原因：钉住公开文本，绝不随阶段、异常类型或原始正文变化。 */
+  private static final String SHUTDOWN_FAILURE_REASON = "daemon shutdown failed";
+
+  /** 合成秘密串：注入的失败正文携带它，安全日志与固定失败原因都不得回显。 */
+  private static final String SYNTHETIC_SECRET = "registrationToken-synthetic-value";
 
   private final DaemonEnvelopeCodec codec = new DaemonEnvelopeCodec();
   private final DaemonCapabilityResultCodec resultCodec = new DaemonCapabilityResultCodec();
@@ -2322,15 +2338,22 @@ class DaemonRuntimeTest {
     assertFalse(transport.awaitConnection(Duration.ofMillis(100)));
   }
 
-  /** 关闭等待执行资源时被中断：关闭必须仍然完成，且中断标记被恢复而不是吞掉。 */
+  /** 关闭等待执行资源时被中断：关闭仍必须完成、中断标记被恢复，并把中断作为聚合失败发布为 FAILED。 */
   @Test
   void closeRestoresInterruptWhileWaitingForExecutors() throws Exception {
+    CountDownLatch taskStarted = new CountDownLatch(1);
+    CountDownLatch releaseTask = new CountDownLatch(1);
+    CountDownLatch awaiting = new CountDownLatch(1);
     ExecutorService stuckTasks =
-        Executors.newSingleThreadExecutor(runnable -> daemonThread("stuck-task", runnable));
-    ScheduledExecutorService stuckScheduler =
-        Executors.newScheduledThreadPool(1, runnable -> daemonThread("stuck-scheduler", runnable));
-    stuckTasks.execute(uninterruptibleTask());
-    stuckScheduler.schedule(uninterruptibleTask(), 0L, TimeUnit.MILLISECONDS);
+        new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS, new LinkedBlockingQueue<>()) {
+          @Override
+          public boolean awaitTermination(long timeout, TimeUnit unit) throws InterruptedException {
+            awaiting.countDown();
+            return super.awaitTermination(timeout, unit);
+          }
+        };
+    ObservedScheduler stuckScheduler = new ObservedScheduler();
+    stuckTasks.execute(uninterruptibleTask(taskStarted, releaseTask));
     DaemonRuntime closing =
         new DaemonRuntime(
             new DaemonConfig(
@@ -2348,28 +2371,45 @@ class DaemonRuntimeTest {
             stuckTasks);
     AtomicBoolean interruptRestored = new AtomicBoolean();
     AtomicBoolean finished = new AtomicBoolean();
+    AtomicReference<Throwable> aggregate = new AtomicReference<>();
     Thread closer =
         new Thread(
             () -> {
-              closing.close();
+              try {
+                closing.close();
+              } catch (Throwable failure) {
+                aggregate.set(failure);
+              }
               interruptRestored.set(Thread.currentThread().isInterrupted());
               finished.set(true);
             },
             "closer");
-    closer.start();
     try {
-      // 关闭已进入等待执行资源终止：此时中断只允许被恢复，绝不允许让关闭悬挂。
-      Thread.sleep(200L);
+      assertTrue(taskStarted.await(ASYNC_TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS));
+      closer.start();
+      assertTrue(awaiting.await(ASYNC_TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS));
       closer.interrupt();
-      closer.join(TimeUnit.SECONDS.toMillis(20));
+      closer.join(TimeUnit.SECONDS.toMillis(ASYNC_TEST_TIMEOUT_SECONDS));
 
       assertTrue(finished.get(), "关闭不得因中断而悬挂");
+      assertFalse(closer.isAlive());
       assertTrue(interruptRestored.get(), "关闭必须恢复中断标记而不是吞掉它");
-      assertEquals(DaemonRuntimeState.STOPPED, closing.state());
+      assertTrue(
+          aggregate.get() instanceof IllegalStateException
+              && aggregate.get().getCause() instanceof InterruptedException,
+          "the interrupt must be published as the recorded shutdown failure");
+      assertEquals(DaemonRuntimeState.FAILED, closing.state());
+      assertEquals(SHUTDOWN_FAILURE_REASON, closing.failureReason());
+      assertEquals(1, stuckScheduler.awaitCalls.get(), "the remaining executor must be awaited");
     } finally {
+      releaseTask.countDown();
       closer.interrupt();
       stuckTasks.shutdownNow();
       stuckScheduler.shutdownNow();
+      assertTrue(stuckTasks.awaitTermination(ASYNC_TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS));
+      assertTrue(stuckScheduler.awaitTermination(ASYNC_TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS));
+      closer.join(TimeUnit.SECONDS.toMillis(ASYNC_TEST_TIMEOUT_SECONDS));
+      assertFalse(closer.isAlive());
     }
   }
 
@@ -2379,15 +2419,15 @@ class DaemonRuntimeTest {
     return thread;
   }
 
-  /** 一个忽略中断、无法在关闭超时前终止的任务：用来验证关闭被中断时的收敛行为。 */
-  private static Runnable uninterruptibleTask() {
+  /** 由测试显式释放的在途任务，避免把中断测试绑定到 sleep 时序。 */
+  private static Runnable uninterruptibleTask(CountDownLatch started, CountDownLatch release) {
     return () -> {
-      long deadline = System.currentTimeMillis() + 1_000L;
-      while (System.currentTimeMillis() < deadline) {
+      started.countDown();
+      while (release.getCount() != 0) {
         try {
-          Thread.sleep(50L);
+          release.await();
         } catch (InterruptedException ignored) {
-          // 故意忽略中断：模拟不配合关闭的本地任务。
+          // 模拟取消请求后仍需显式收敛的工作线程。
         }
       }
     };
@@ -2473,11 +2513,16 @@ class DaemonRuntimeTest {
     }
   }
 
-  /** transport close 抛错不得悬挂 shutdown：终止闩释放且 close 幂等。 */
+  /**
+   * transport close 失败必须可见：同步 close 抛出以该失败为主因的聚合异常，连接 close 照常执行，终止闩释放后等待终态的观察者看到 FAILED 与固定安全原因；重复
+   * close 既不重做也不重复抛旧失败。
+   */
   @Test
-  void shutdownConvergesWhenTransportCloseThrows() throws Exception {
+  void closePublishesFailedTerminalAndThrowsAggregateWhenTransportCloseFails() throws Exception {
     FakeTransport transport = new FakeTransport();
-    transport.closeThrows.set(true);
+    IllegalStateException transportFailure =
+        new IllegalStateException("transport close failed: " + SYNTHETIC_SECRET);
+    transport.failClose(transportFailure);
     runtime = runtime(transport, new TestCapability(), Duration.ofMinutes(1));
 
     runtime.start();
@@ -2485,12 +2530,44 @@ class DaemonRuntimeTest {
     completeHandshake();
     transport.takeMessages(2);
 
-    runtime.close();
-    runtime.close();
+    CountDownLatch observing = new CountDownLatch(1);
+    AtomicReference<DaemonRuntimeState> observedState = new AtomicReference<>();
+    AtomicReference<String> observedReason = new AtomicReference<>();
+    Thread observer =
+        new Thread(
+            () -> {
+              observing.countDown();
+              try {
+                observedState.set(runtime.awaitTermination());
+                observedReason.set(runtime.failureReason());
+              } catch (InterruptedException error) {
+                Thread.currentThread().interrupt();
+              }
+            },
+            "await-termination-observer");
+    observer.setDaemon(true);
+    observer.start();
+    assertTrue(observing.await(ASYNC_TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS));
 
-    // transport close 抛错被吸收：termination 闩仍释放，shutdown 不悬挂。
-    assertEquals(DaemonRuntimeState.STOPPED, runtime.awaitTermination());
+    IllegalStateException thrown = assertThrows(IllegalStateException.class, runtime::close);
+
+    assertSame(
+        transportFailure, thrown, "the aggregate must keep the transport close failure identity");
     assertTrue(transport.closed.get());
+    assertTrue(
+        transport.connection.awaitClosed(Duration.ofSeconds(1)),
+        "the connection close must still run when the transport close fails");
+    observer.join(TimeUnit.SECONDS.toMillis(ASYNC_TEST_TIMEOUT_SECONDS));
+    assertFalse(
+        observer.isAlive(), "the awaiting observer must observe the released termination latch");
+    assertEquals(DaemonRuntimeState.FAILED, observedState.get());
+    assertEquals(SHUTDOWN_FAILURE_REASON, observedReason.get());
+    assertEquals(DaemonRuntimeState.FAILED, runtime.state());
+    assertEquals(SHUTDOWN_FAILURE_REASON, runtime.failureReason());
+
+    // 重复 close 不重做、不重复抛旧失败。
+    assertDoesNotThrow(runtime::close);
+    assertEquals(DaemonRuntimeState.FAILED, runtime.state());
   }
 
   /** shutdown 与 Tool 启动交错时，迟到的 execution handle 也必须收到取消且 journal 不得遗留 RUNNING。 */
@@ -2524,11 +2601,11 @@ class DaemonRuntimeTest {
   }
 
   /**
-   * 单个调用的收尾抛出 RuntimeException 不得跳过其余调用与生命周期资源：其余调用仍被取消并写入 journal 终态， executor、scheduler 与
-   * transport 全部释放，termination 闩照常释放。
+   * 多个调用收尾同时抛出 RuntimeException 不得跳过其余调用与生命周期资源：每次失败都留在同一个聚合结果里（首个为主因，其余 suppressed），其余调用仍被取消并写入
+   * journal 终态，executor、scheduler 与 transport 全部释放，termination 闩照常释放。
    */
   @Test
-  void closeConvergesRemainingInvocationsAndResourcesWhenTerminationThrows() throws Exception {
+  void closeAggregatesTerminationFailuresAndStillReleasesEveryResource() throws Exception {
     FakeTransport transport = new FakeTransport();
     handshakeTransport = transport;
     ThrowingTerminateCapability first =
@@ -2556,9 +2633,13 @@ class DaemonRuntimeTest {
     transport.receive(invoke("call-surviving", "surviving", "1.0.0", 60_000L));
     assertMessageTypes(transport.takeMessages(3), STARTED, STARTED, STARTED);
 
-    runtime.close();
-    runtime.close();
+    IllegalStateException thrown = assertThrows(IllegalStateException.class, runtime::close);
 
+    assertEquals(1, thrown.getSuppressed().length, "两次收尾失败都必须留在聚合结果里");
+    assertTrue(
+        thrown.getSuppressed()[0] instanceof IllegalStateException,
+        "the second wrap-up failure must stay as suppressed");
+    assertDoesNotThrow(runtime::close, "repeated close must not rethrow the old aggregate");
     assertEquals(1, first.terminateCalls(), "the failing wrap-up must be attempted");
     assertEquals(1, second.terminateCalls(), "the failing wrap-up must be attempted");
     assertEquals(
@@ -2576,10 +2657,11 @@ class DaemonRuntimeTest {
     assertTrue(taskExecutor.isShutdown());
     assertTrue(scheduler.awaitTermination(1, TimeUnit.SECONDS));
     assertTrue(taskExecutor.awaitTermination(1, TimeUnit.SECONDS));
-    assertEquals(DaemonRuntimeState.STOPPED, runtime.awaitTermination());
+    assertEquals(DaemonRuntimeState.FAILED, runtime.awaitTermination());
+    assertEquals(SHUTDOWN_FAILURE_REASON, runtime.failureReason());
   }
 
-  /** 调用收尾抛出进程级 Error 不得被吞：Error 照常向上传播，且其余生命周期资源与 termination 闩仍被释放。 */
+  /** 调用收尾抛出进程级 Error 保持对象身份向上传播（即便其它资源随后也失败），其余生命周期资源与 termination 闩仍被释放。 */
   @Test
   void closeReleasesLifecycleResourcesWhenInvocationTerminationThrowsError() throws Exception {
     FakeTransport transport = new FakeTransport();
@@ -2602,18 +2684,318 @@ class DaemonRuntimeTest {
     transport.awaitConnections(1);
     completeHandshake();
     transport.takeMessages(2);
+    // transport 关闭先于调用收尾发生并以 Error 收尾：调用收尾的 Error 不得遮蔽先到的 Error。
+    AssertionError transportFailure = new AssertionError("transport close failed");
+    transport.failClose(transportFailure);
     transport.receive(invoke("fatal-invocation", "terminate-fatal", "1.0.0", 60_000L));
     assertMessageTypes(transport.takeMessages(1), STARTED);
 
     AssertionError thrown = assertThrows(AssertionError.class, runtime::close);
 
-    assertEquals("capability wrap-up failed", thrown.getMessage());
+    assertSame(transportFailure, thrown, "the first Error must keep its object identity");
+    assertArrayEquals(new Throwable[] {fatal.fatalFailure()}, thrown.getSuppressed());
     assertTrue(transport.closed.get());
     assertTrue(scheduler.isShutdown());
     assertTrue(taskExecutor.isShutdown());
     assertTrue(scheduler.awaitTermination(1, TimeUnit.SECONDS));
     assertTrue(taskExecutor.awaitTermination(1, TimeUnit.SECONDS));
-    assertEquals(DaemonRuntimeState.STOPPED, runtime.awaitTermination());
+    assertEquals(DaemonRuntimeState.FAILED, runtime.awaitTermination());
+    assertEquals(SHUTDOWN_FAILURE_REASON, runtime.failureReason());
+  }
+
+  /**
+   * 连接 close 抛 Error、transport close 抛 RuntimeException、调用收尾抛 Error：三项互不跳过、后续关闭继续执行；首个 Error 保持对象
+   * 身份，后到失败作为 suppressed；安全 WARNING 只含固定阶段与异常类名，绝不回显原始正文。
+   */
+  @Test
+  void connectionCloseErrorAndTransportFailureDoNotSkipRemainingShutdown() throws Exception {
+    FailingShutdownFixture fixture = new FailingShutdownFixture();
+    AssertionError connectionFailure =
+        new AssertionError("connection close failed: " + SYNTHETIC_SECRET);
+    IllegalStateException transportFailure =
+        new IllegalStateException("transport close failed: " + SYNTHETIC_SECRET);
+    fixture.transport.connection.failClose(connectionFailure);
+    fixture.transport.failClose(transportFailure);
+
+    AssertionError thrown;
+    try (ShutdownLogCapture logs = new ShutdownLogCapture()) {
+      thrown = assertThrows(AssertionError.class, runtime::close);
+      logs.assertOnlySafeFailures(3);
+    }
+
+    assertSame(connectionFailure, thrown, "the first Error must keep its object identity");
+    assertArrayEquals(
+        new Throwable[] {transportFailure, fixture.capability.fatalFailure()},
+        thrown.getSuppressed());
+    assertTrue(
+        fixture.transport.connection.awaitClosed(Duration.ofSeconds(1)),
+        "the connection close must be executed even when it fails");
+    fixture.assertEveryResourceWasReleased();
+  }
+
+  /** 首个失败是普通异常、随后出现多个 Error：Error 提升为聚合主因（保持身份），普通异常与后到 Error 都作为 suppressed 保留。 */
+  @Test
+  void runtimeFailureBeforeLaterErrorsIsPromotedBelowTheFirstError() throws Exception {
+    FailingShutdownFixture fixture = new FailingShutdownFixture();
+    IllegalStateException connectionFailure = new IllegalStateException("connection close failed");
+    AssertionError transportFailure = new AssertionError("transport close failed");
+    fixture.transport.connection.failClose(connectionFailure);
+    fixture.transport.failClose(transportFailure);
+
+    AssertionError thrown = assertThrows(AssertionError.class, runtime::close);
+
+    assertSame(
+        transportFailure,
+        thrown,
+        "a later Error must be promoted above the earlier ordinary failure");
+    assertArrayEquals(
+        new Throwable[] {connectionFailure, fixture.capability.fatalFailure()},
+        thrown.getSuppressed());
+    fixture.assertEveryResourceWasReleased();
+  }
+
+  /** 执行器 shutdownNow 失败与等待超时都必须被记录，且绝不能把未确认终止当作真正终止或跳过其余执行器。 */
+  @Test
+  void executorFailuresAreRecordedWithoutSkippingTheOtherExecutors() throws Exception {
+    FakeTransport transport = new FakeTransport();
+    AssertionError stopFailure = new AssertionError("task executor shutdown failed");
+    FailingExecutor taskExecutor = new FailingExecutor(stopFailure, null);
+    ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+    runtime =
+        new DaemonRuntime(
+            config(),
+            transport,
+            new DaemonCapabilityRegistry(),
+            new InMemoryDaemonInvocationJournal(),
+            scheduler,
+            taskExecutor);
+
+    AssertionError thrown = assertThrows(AssertionError.class, runtime::close);
+
+    assertSame(stopFailure, thrown, "the shutdown failure must keep its object identity");
+    assertEquals(1, thrown.getSuppressed().length);
+    assertEquals(
+        "task executor shutdown did not terminate in time",
+        thrown.getSuppressed()[0].getMessage(),
+        "a false termination result must be a recorded failure, not a real termination");
+    assertEquals(1, taskExecutor.awaitCalls());
+    assertTrue(transport.closed.get());
+    assertTrue(scheduler.isShutdown(), "the remaining executors must still be shut down");
+    assertTrue(scheduler.awaitTermination(1, TimeUnit.SECONDS));
+    assertEquals(DaemonRuntimeState.FAILED, runtime.awaitTermination());
+    assertEquals(SHUTDOWN_FAILURE_REASON, runtime.failureReason());
+    assertEquals(SHUTDOWN_FAILURE_REASON, DaemonShutdownFailures.SHUTDOWN_FAILURE_REASON);
+  }
+
+  /** 执行器等待直接抛出 RuntimeException 时同样被记录并保留身份，其余执行器仍被关闭与等待。 */
+  @Test
+  void executorWaitThrowIsRecordedWithoutSkippingTheOtherExecutors() throws Exception {
+    FakeTransport transport = new FakeTransport();
+    IllegalStateException awaitFailure = new IllegalStateException("await failed");
+    FailingExecutor taskExecutor = new FailingExecutor(null, awaitFailure);
+    ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+    runtime =
+        new DaemonRuntime(
+            config(),
+            transport,
+            new DaemonCapabilityRegistry(),
+            new InMemoryDaemonInvocationJournal(),
+            scheduler,
+            taskExecutor);
+
+    IllegalStateException thrown = assertThrows(IllegalStateException.class, runtime::close);
+
+    assertSame(awaitFailure, thrown, "the wait failure must keep its object identity");
+    assertEquals(0, thrown.getSuppressed().length);
+    assertEquals(1, taskExecutor.awaitCalls());
+    assertTrue(transport.closed.get());
+    assertTrue(scheduler.isShutdown(), "the remaining executors must still be shut down");
+    assertTrue(scheduler.awaitTermination(1, TimeUnit.SECONDS));
+    assertEquals(DaemonRuntimeState.FAILED, runtime.state());
+    assertEquals(SHUTDOWN_FAILURE_REASON, runtime.failureReason());
+  }
+
+  /** 等待时的 Error 仍须聚合先前失败并完成其余执行器等待，不能直接跳出清理。 */
+  @Test
+  void executorWaitErrorRetainsPriorFailureAndStillWaitsForTheScheduler() throws Exception {
+    IllegalStateException stopFailure = new IllegalStateException("shutdown failed");
+    AssertionError awaitFailure = new AssertionError("await failed");
+    FailingExecutor taskExecutor = new FailingExecutor(stopFailure, awaitFailure);
+    ObservedScheduler scheduler = new ObservedScheduler();
+    runtime =
+        new DaemonRuntime(
+            config(),
+            new FakeTransport(),
+            new DaemonCapabilityRegistry(),
+            new InMemoryDaemonInvocationJournal(),
+            scheduler,
+            taskExecutor);
+
+    AssertionError thrown = assertThrows(AssertionError.class, runtime::close);
+
+    assertSame(awaitFailure, thrown);
+    assertArrayEquals(new Throwable[] {stopFailure}, thrown.getSuppressed());
+    assertEquals(1, taskExecutor.awaitCalls());
+    assertEquals(1, scheduler.awaitCalls.get(), "later executors must still be awaited");
+    assertEquals(DaemonRuntimeState.FAILED, runtime.awaitTermination());
+    assertEquals(SHUTDOWN_FAILURE_REASON, runtime.failureReason());
+    assertDoesNotThrow(runtime::close);
+  }
+
+  /** 已中断进入关闭：中断被保留为失败并在全部等待结束后恢复，其余执行器仍被关闭与等待，同步调用方收到聚合失败。 */
+  @Test
+  void closeEnteredWithInterruptStillCleansEveryExecutorAndRestoresInterrupt() throws Exception {
+    FakeTransport transport = new FakeTransport();
+    ObservedScheduler scheduler = new ObservedScheduler();
+    ExecutorService busyExecutor = Executors.newSingleThreadExecutor();
+    CountDownLatch taskStarted = new CountDownLatch(1);
+    CountDownLatch releaseTask = new CountDownLatch(1);
+    busyExecutor.execute(uninterruptibleTask(taskStarted, releaseTask));
+    runtime =
+        new DaemonRuntime(
+            config(),
+            transport,
+            new DaemonCapabilityRegistry(),
+            new InMemoryDaemonInvocationJournal(),
+            scheduler,
+            busyExecutor);
+
+    try {
+      assertTrue(taskStarted.await(ASYNC_TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS));
+      // 关闭开始前线程已中断：等待立即被中断，但其余执行器仍必须被关闭与等待。
+      Thread.currentThread().interrupt();
+      IllegalStateException thrown = assertThrows(IllegalStateException.class, runtime::close);
+
+      assertTrue(
+          thrown.getCause() instanceof InterruptedException,
+          "the interrupt must be preserved as the recorded failure");
+      assertTrue(
+          Thread.currentThread().isInterrupted(), "the interrupt must be restored at the end");
+      assertEquals(DaemonRuntimeState.FAILED, runtime.state());
+      assertEquals(SHUTDOWN_FAILURE_REASON, runtime.failureReason());
+      assertTrue(busyExecutor.isShutdown());
+      assertTrue(scheduler.isShutdown());
+      assertEquals(1, scheduler.awaitCalls.get());
+    } finally {
+      Thread.interrupted();
+      releaseTask.countDown();
+      busyExecutor.shutdownNow();
+      scheduler.shutdownNow();
+      assertTrue(busyExecutor.awaitTermination(ASYNC_TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS));
+      assertTrue(scheduler.awaitTermination(ASYNC_TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS));
+    }
+  }
+
+  /** 构造本身抛出 Error 也必须保持身份，同时停止并确认所有已创建执行器终止。 */
+  @Test
+  void constructionErrorRetainsItsIdentityAndReleasesCreatedExecutors() throws Exception {
+    AssertionError constructionFailure = new AssertionError("construction failed");
+    List<ExecutorService> executors = new ArrayList<>();
+
+    AssertionError thrown =
+        assertThrows(
+            AssertionError.class,
+            () ->
+                DaemonRuntime.create(
+                    config(),
+                    null,
+                    (registry, taskExecutor, scheduler, lspExecutor) -> {
+                      executors.addAll(List.of(taskExecutor, scheduler, lspExecutor));
+                      throw constructionFailure;
+                    }));
+
+    assertSame(constructionFailure, thrown);
+    assertEquals(3, executors.size());
+    for (ExecutorService executor : executors) {
+      assertTrue(executor.isShutdown());
+      assertTrue(executor.awaitTermination(ASYNC_TEST_TIMEOUT_SECONDS, TimeUnit.SECONDS));
+    }
+  }
+
+  /** capability 资源以 checked 失败收尾：聚合按固定安全消息包装并保留原因身份，transport、LSP 与任务执行器照常释放。 */
+  @Test
+  void capabilityResourceCheckedCloseFailureIsVisibleAndDoesNotSkipOtherResources()
+      throws Exception {
+    IOException capabilityFailure =
+        new IOException("capability resource close failed: " + SYNTHETIC_SECRET);
+    AtomicReference<ExecutorService> executorRef = new AtomicReference<>();
+    AtomicReference<ExecutorService> lspExecutorRef = new AtomicReference<>();
+    AtomicReference<ScheduledExecutorService> schedulerRef = new AtomicReference<>();
+
+    runtime =
+        DaemonRuntime.create(
+            config(),
+            (TextOutputStore) null,
+            (registry, executor, scheduler, lspExecutor) -> {
+              executorRef.set(executor);
+              lspExecutorRef.set(lspExecutor);
+              schedulerRef.set(scheduler);
+              EnvironmentCapabilityCatalog.descriptors()
+                  .forEach(
+                      descriptor -> registry.register(new DescriptorOnlyCapability(descriptor)));
+              return () -> {
+                throw capabilityFailure;
+              };
+            });
+
+    IllegalStateException thrown = assertThrows(IllegalStateException.class, runtime::close);
+
+    assertSame(capabilityFailure, thrown.getCause(), "the checked failure must keep its identity");
+    assertEquals(DaemonRuntimeState.FAILED, runtime.state());
+    assertEquals(SHUTDOWN_FAILURE_REASON, runtime.failureReason());
+    assertTrue(executorRef.get().isShutdown());
+    assertTrue(lspExecutorRef.get().isShutdown());
+    assertTrue(schedulerRef.get().isShutdown());
+    assertTrue(executorRef.get().awaitTermination(1, TimeUnit.SECONDS));
+    assertTrue(lspExecutorRef.get().awaitTermination(1, TimeUnit.SECONDS));
+    assertTrue(schedulerRef.get().awaitTermination(1, TimeUnit.SECONDS));
+  }
+
+  /**
+   * 已 READY 且带一个在途调用的运行时装配：关闭失败场景共用同一装配，避免每个用例重复握手。
+   *
+   * <p>调用收尾能力固定抛出同一个 Error 对象，使聚合结果的主因与 suppressed 身份可精确断言。
+   */
+  private final class FailingShutdownFixture {
+
+    private final FakeTransport transport = new FakeTransport();
+    private final ThrowingTerminateCapability capability =
+        new ThrowingTerminateCapability("invocation-error", true);
+    private final InMemoryDaemonInvocationJournal journal = new InMemoryDaemonInvocationJournal();
+    private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+    private final ExecutorService taskExecutor = Executors.newVirtualThreadPerTaskExecutor();
+    private final String invocationId = "call-error";
+
+    private FailingShutdownFixture() throws InterruptedException {
+      handshakeTransport = transport;
+      DaemonCapabilityRegistry registry = new DaemonCapabilityRegistry();
+      registry.register(capability);
+      runtime = new DaemonRuntime(config(), transport, registry, journal, scheduler, taskExecutor);
+      runtime.start();
+      transport.awaitConnections(1);
+      completeHandshake();
+      transport.takeMessages(2);
+      transport.receive(invoke(invocationId, "invocation-error", "1.0.0", 60_000L));
+      assertMessageTypes(transport.takeMessages(1), STARTED);
+    }
+
+    /** 其余关闭动作仍然完成：调用取消与 journal 终态、transport/executor/scheduler 释放、termination 闩释放并发布 FAILED。 */
+    private void assertEveryResourceWasReleased() throws InterruptedException {
+      assertEquals(1, capability.terminateCalls(), "the failing wrap-up must still be attempted");
+      assertEquals(
+          new DaemonTerminalMessage(
+              DaemonMessageType.CANCELLED, "{\"reason\":\"daemon shutdown\"}"),
+          journal.find(invocationId).orElseThrow().terminalMessage(),
+          "the invocation must reach a re-playable terminal even when other resources fail");
+      assertFalse(transport.hasMessages(), "shutdown must not emit per-invocation wire terminals");
+      assertTrue(transport.closed.get());
+      assertTrue(scheduler.isShutdown());
+      assertTrue(taskExecutor.isShutdown());
+      assertTrue(scheduler.awaitTermination(1, TimeUnit.SECONDS));
+      assertTrue(taskExecutor.awaitTermination(1, TimeUnit.SECONDS));
+      assertEquals(DaemonRuntimeState.FAILED, runtime.awaitTermination());
+      assertEquals(SHUTDOWN_FAILURE_REASON, runtime.failureReason());
+    }
   }
 
   /** 测试运行时使用的连接配置：本地网关、真实凭证文件与隔离数据目录。 */
@@ -3039,6 +3421,14 @@ class DaemonRuntimeTest {
     assertEquals(List.of(expected), envelopes.stream().map(DaemonEnvelope::messageType).toList());
   }
 
+  /** 抛出测试注入的 unchecked 失败：Error 保持对象身份，RuntimeException 直接抛出。 */
+  private static void throwUnchecked(Throwable failure) {
+    if (failure instanceof RuntimeException runtime) {
+      throw runtime;
+    }
+    throw (Error) failure;
+  }
+
   private final class FakeTransport implements DaemonTransport {
 
     private final Semaphore connections = new Semaphore(0);
@@ -3050,7 +3440,7 @@ class DaemonRuntimeTest {
     private final AtomicBoolean returnNullNextConnection = new AtomicBoolean();
     private final AtomicBoolean delayNextConnection = new AtomicBoolean();
     private final AtomicBoolean closed = new AtomicBoolean();
-    private final AtomicBoolean closeThrows = new AtomicBoolean();
+    private final AtomicReference<Throwable> closeFailure = new AtomicReference<>();
     private final List<DaemonTransportListener> listeners = new CopyOnWriteArrayList<>();
     private volatile DaemonTransportListener listener;
     private volatile FakeConnection connection;
@@ -3094,6 +3484,11 @@ class DaemonRuntimeTest {
       if (connection != null) {
         connection.open = false;
       }
+    }
+
+    /** 让下一次 transport close 抛出注入失败；transport.close() 不声明 checked，因此失败必须是 unchecked。 */
+    private void failClose(Throwable failure) {
+      closeFailure.set(failure);
     }
 
     private void throwNextConnection() {
@@ -3185,8 +3580,9 @@ class DaemonRuntimeTest {
     @Override
     public void close() {
       closed.set(true);
-      if (closeThrows.compareAndSet(true, false)) {
-        throw new IllegalStateException("transport close failed");
+      Throwable failure = closeFailure.getAndSet(null);
+      if (failure != null) {
+        throwUnchecked(failure);
       }
     }
 
@@ -3194,6 +3590,12 @@ class DaemonRuntimeTest {
 
       private volatile boolean open = !refuseNextOpen.getAndSet(false);
       private final CountDownLatch closed = new CountDownLatch(1);
+      private final AtomicReference<Throwable> closeFailure = new AtomicReference<>();
+
+      /** 让下一次 connection close 抛出注入失败；不声明 checked，因此失败必须是 unchecked。 */
+      private void failClose(Throwable failure) {
+        closeFailure.set(failure);
+      }
 
       @Override
       public CompletionStage<Void> sendText(String message) {
@@ -3209,6 +3611,10 @@ class DaemonRuntimeTest {
       public void close() {
         open = false;
         closed.countDown();
+        Throwable failure = closeFailure.getAndSet(null);
+        if (failure != null) {
+          throwUnchecked(failure);
+        }
       }
 
       @Override
@@ -3265,6 +3671,12 @@ class DaemonRuntimeTest {
     private final AtomicInteger terminateCalls = new AtomicInteger();
     private final boolean fatal;
 
+    /** 收尾失败对象在装配时固定，使聚合结果的主因/suppressed 身份可精确断言。 */
+    private final IllegalStateException wrapUpFailure =
+        new IllegalStateException("capability wrap-up failed: " + SYNTHETIC_SECRET);
+
+    private final AssertionError fatalFailure = new AssertionError("capability wrap-up failed");
+
     private ThrowingTerminateCapability(String name, boolean fatal) {
       this.descriptor =
           new EnvironmentCapabilityDescriptor(
@@ -3291,6 +3703,14 @@ class DaemonRuntimeTest {
       return terminateCalls.get();
     }
 
+    private IllegalStateException wrapUpFailure() {
+      return wrapUpFailure;
+    }
+
+    private AssertionError fatalFailure() {
+      return fatalFailure;
+    }
+
     private final class Handle implements EnvironmentCapabilityExecutionHandle {
 
       @Override
@@ -3307,9 +3727,9 @@ class DaemonRuntimeTest {
       public void terminate(EnvironmentCapabilityTerminationCause cause) {
         terminateCalls.incrementAndGet();
         if (fatal) {
-          throw new AssertionError("capability wrap-up failed");
+          throw fatalFailure;
         }
-        throw new IllegalStateException("capability wrap-up failed: secret");
+        throw wrapUpFailure;
       }
     }
   }
@@ -3560,6 +3980,163 @@ class DaemonRuntimeTest {
     @Override
     public boolean isCancelled() {
       return cancelCalls.get() > 0;
+    }
+  }
+
+  /**
+   * 受控执行器：{@code shutdownNow} 与等待都按注入失败表现。
+   *
+   * <p>既证明 shutdownNow 的失败与等待直接抛出的失败被记录，也证明等待返回 {@code false} 是失败而不是真正的终止。
+   */
+  private static final class FailingExecutor extends AbstractExecutorService {
+
+    private final Throwable stopFailure;
+    private final Throwable awaitFailure;
+    private final AtomicInteger awaits = new AtomicInteger();
+
+    private FailingExecutor(Throwable stopFailure, Throwable awaitFailure) {
+      this.stopFailure = stopFailure;
+      this.awaitFailure = awaitFailure;
+    }
+
+    private int awaitCalls() {
+      return awaits.get();
+    }
+
+    @Override
+    public void shutdown() {
+      throw new UnsupportedOperationException("daemon shutdown only requests shutdownNow");
+    }
+
+    @Override
+    public List<Runnable> shutdownNow() {
+      if (stopFailure != null) {
+        throwUnchecked(stopFailure);
+      }
+      return List.of();
+    }
+
+    @Override
+    public boolean isShutdown() {
+      return true;
+    }
+
+    @Override
+    public boolean isTerminated() {
+      return false;
+    }
+
+    @Override
+    public boolean awaitTermination(long timeout, TimeUnit unit) {
+      awaits.incrementAndGet();
+      if (awaitFailure != null) {
+        throwUnchecked(awaitFailure);
+      }
+      return false;
+    }
+
+    @Override
+    public void execute(Runnable command) {
+      throw new RejectedExecutionException("this test executor does not accept tasks");
+    }
+  }
+
+  /** 观察 runtime 是否真正等待调度器，而不以 shutdown 请求代替终止确认。 */
+  private static final class ObservedScheduler extends ScheduledThreadPoolExecutor {
+
+    private final AtomicInteger awaitCalls = new AtomicInteger();
+
+    private ObservedScheduler() {
+      super(1);
+    }
+
+    @Override
+    public boolean awaitTermination(long timeout, TimeUnit unit) throws InterruptedException {
+      awaitCalls.incrementAndGet();
+      return super.awaitTermination(timeout, unit);
+    }
+  }
+
+  /** 只提供固定 catalog descriptor 的能力桩：满足固定 catalog 门禁而不启动真实 LSP 与技能装配。 */
+  private static final class DescriptorOnlyCapability implements EnvironmentCapability {
+
+    private final EnvironmentCapabilityDescriptor descriptor;
+
+    private DescriptorOnlyCapability(EnvironmentCapabilityDescriptor descriptor) {
+      this.descriptor = descriptor;
+    }
+
+    @Override
+    public EnvironmentCapabilityDescriptor descriptor() {
+      return descriptor;
+    }
+
+    @Override
+    public EnvironmentCapabilityExecutionHandle execute(
+        EnvironmentCapabilityExecutionRequest request,
+        EnvironmentCapabilityExecutionListener listener) {
+      throw new IllegalStateException("a descriptor-only capability must not execute");
+    }
+  }
+
+  /**
+   * 捕获关停日志的 JUL 端口：安全失败日志是普通的 {@code System.Logger} 记录，只有挂接处理器才能断言其内容。
+   *
+   * <p>{@link #close()} 恢复接管前的级别与父处理器设置，避免影响其它测试。
+   */
+  private static final class ShutdownLogCapture implements AutoCloseable {
+
+    private final Logger logger = Logger.getLogger(DaemonShutdownFailures.class.getName());
+    private final Level previousLevel = logger.getLevel();
+    private final boolean previousUseParentHandlers = logger.getUseParentHandlers();
+    private final List<LogRecord> records = Collections.synchronizedList(new ArrayList<>());
+    private final Handler handler =
+        new Handler() {
+          @Override
+          public void publish(LogRecord record) {
+            records.add(record);
+          }
+
+          @Override
+          public void flush() {}
+
+          @Override
+          public void close() {}
+        };
+
+    private ShutdownLogCapture() {
+      handler.setLevel(Level.ALL);
+      logger.addHandler(handler);
+      logger.setLevel(Level.ALL);
+      logger.setUseParentHandlers(false);
+    }
+
+    /** 每条失败恰好一条 WARNING，且只含固定阶段与异常类名：没有原始 throwable、堆栈或合成秘密正文。 */
+    private void assertOnlySafeFailures(int expectedRecords) {
+      assertEquals(expectedRecords, records.size(), "every shutdown failure must be logged once");
+      for (LogRecord record : records) {
+        assertEquals(Level.WARNING, record.getLevel());
+        assertNull(record.getThrown(), "a raw throwable must never be logged");
+        assertTrue(
+            record
+                .getMessage()
+                .matches(
+                    "daemon (connection close|transport close|invocation termination"
+                        + "|invocation journal write|capability resource close|temporary resource close"
+                        + "|task executor shutdown|lsp executor shutdown|scheduler shutdown|construction)"
+                        + " failed: [A-Za-z0-9_$]+"),
+            record.getMessage());
+        assertFalse(
+            record.getMessage().contains(SYNTHETIC_SECRET),
+            "the safe log must not echo the raw failure content");
+      }
+    }
+
+    @Override
+    public void close() {
+      logger.removeHandler(handler);
+      logger.setLevel(previousLevel);
+      logger.setUseParentHandlers(previousUseParentHandlers);
     }
   }
 }

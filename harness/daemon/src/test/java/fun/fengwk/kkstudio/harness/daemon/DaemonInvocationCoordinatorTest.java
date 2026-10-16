@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.daemon;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.AfterEach;
@@ -12,6 +13,7 @@ import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.daemon.journal.DaemonInvocationJournal;
 import fun.fengwk.kkstudio.harness.daemon.journal.DaemonInvocationJournalEntry;
+import fun.fengwk.kkstudio.harness.daemon.journal.DaemonInvocationJournalStart;
 import fun.fengwk.kkstudio.harness.daemon.journal.DaemonInvocationState;
 import fun.fengwk.kkstudio.harness.daemon.journal.DaemonTerminalMessage;
 import fun.fengwk.kkstudio.harness.daemon.journal.InMemoryDaemonInvocationJournal;
@@ -34,6 +36,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CountDownLatch;
@@ -220,10 +223,10 @@ class DaemonInvocationCoordinatorTest {
         "an empty capability text must not append anything to the runtime verdict");
   }
 
-  /** 单个调用的收尾抛出 RuntimeException 不得中断 shutdown：其余调用仍被取消、各调用分别写入 CANCELLED 终态，且异常不外泄。 */
+  /** 单个调用的收尾抛出 RuntimeException 不得中断 shutdown：其余调用仍被取消、各调用分别写入 CANCELLED 终态，失败被聚合而不外泄。 */
   @Test
   void shutdownConvergesEveryInvocationWhenTerminationThrows() throws Exception {
-    ThrowingTerminateCapability capability = new ThrowingTerminateCapability();
+    ThrowingTerminateCapability capability = new ThrowingTerminateCapability(false);
     Harness harness = harness(() -> true, capability);
     List<String> invocationIds = List.of("call-a", "call-b", "call-c");
     invocationIds.forEach(
@@ -232,10 +235,13 @@ class DaemonInvocationCoordinatorTest {
     assertEquals(
         invocationIds, harness.sink.drain(3).stream().map(Outbound::invocationId).toList());
 
-    assertDoesNotThrow(harness.coordinator::shutdown);
+    DaemonShutdownFailures failures = new DaemonShutdownFailures();
+    assertDoesNotThrow(() -> harness.coordinator.shutdown(failures));
 
     assertEquals(1, capability.terminationFailures(), "the throwing wrap-up must be attempted");
     assertEquals(2, capability.terminations(), "the remaining calls must still be terminated");
+    assertTrue(failures.hasFailure(), "the wrap-up failure must be visible to the shutdown caller");
+    assertSame(capability.wrapUpFailure(), failures.exception());
     invocationIds.forEach(
         invocationId ->
             assertEquals(
@@ -252,12 +258,70 @@ class DaemonInvocationCoordinatorTest {
     assertTrue(harness.sink.isEmpty(), "shutdown must not emit per-invocation wire terminals");
   }
 
+  /** journal 终态写入失败不得跳过其余调用：写入失败被聚合，运行集合仍被清空且不发单独终态。 */
+  @Test
+  void shutdownAggregatesJournalWriteFailuresAndStillClearsEveryInvocation() throws Exception {
+    ThrowingJournal journal = new ThrowingJournal();
+    Harness harness = harness(() -> true, new StubCapability(Duration.ZERO), journal);
+    List<String> invocationIds = List.of("call-a", "call-b");
+    invocationIds.forEach(
+        invocationId ->
+            harness.coordinator.handleInvoke(invoke(invocationId, Duration.ofSeconds(30))));
+    assertEquals(
+        invocationIds, harness.sink.drain(2).stream().map(Outbound::invocationId).toList());
+
+    DaemonShutdownFailures failures = new DaemonShutdownFailures();
+    harness.coordinator.shutdown(failures);
+
+    assertEquals(2, journal.writeFailures(), "every invocation must still attempt its terminal");
+    assertEquals("journal write failed", failures.exception().getMessage());
+    invocationIds.forEach(
+        invocationId ->
+            assertFalse(
+                harness.coordinator.sendControlWhileActive(
+                    DaemonMessageType.RESOURCE_UPLOAD_REQUEST, invocationId, "{}"),
+                "shutdown must clear every in-flight invocation even when a write fails"));
+    assertTrue(harness.sink.isEmpty(), "shutdown must not emit per-invocation wire terminals");
+  }
+
+  /** 首个调用收尾抛出 Error：Error 保持对象身份被聚合，其余调用继续收尾并各自写入 CANCELLED 终态。 */
+  @Test
+  void shutdownAggregatesTheFirstErrorAndStillCleansTheOtherInvocations() throws Exception {
+    ThrowingTerminateCapability capability = new ThrowingTerminateCapability(true);
+    Harness harness = harness(() -> true, capability);
+    List<String> invocationIds = List.of("call-a", "call-b");
+    invocationIds.forEach(
+        invocationId ->
+            harness.coordinator.handleInvoke(invoke(invocationId, Duration.ofSeconds(30))));
+    assertEquals(
+        invocationIds, harness.sink.drain(2).stream().map(Outbound::invocationId).toList());
+
+    DaemonShutdownFailures failures = new DaemonShutdownFailures();
+    harness.coordinator.shutdown(failures);
+
+    assertSame(
+        capability.fatalFailure(), failures.error(), "the first Error must keep its identity");
+    assertEquals(1, capability.terminations(), "the remaining call must still be terminated");
+    invocationIds.forEach(
+        invocationId ->
+            assertEquals(
+                new DaemonTerminalMessage(
+                    DaemonMessageType.CANCELLED, "{\"reason\":\"daemon shutdown\"}"),
+                harness.journal.find(invocationId).orElseThrow().terminalMessage()));
+    assertTrue(harness.sink.isEmpty(), "shutdown must not emit per-invocation wire terminals");
+  }
+
   private Harness harness(BooleanSupplier started) {
     return harness(started, new StubCapability(Duration.ZERO));
   }
 
   private Harness harness(BooleanSupplier started, EnvironmentCapability capability) {
-    Harness harness = new Harness(started, capability);
+    return harness(started, capability, new InMemoryDaemonInvocationJournal());
+  }
+
+  private Harness harness(
+      BooleanSupplier started, EnvironmentCapability capability, DaemonInvocationJournal journal) {
+    Harness harness = new Harness(started, capability, journal);
     harnesses.add(harness);
     return harness;
   }
@@ -289,19 +353,50 @@ class DaemonInvocationCoordinatorTest {
   private static final class Harness {
 
     private final DaemonCapabilityRegistry registry = new DaemonCapabilityRegistry();
-    private final DaemonInvocationJournal journal = new InMemoryDaemonInvocationJournal();
+    private final DaemonInvocationJournal journal;
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
     private final RecordingSink sink = new RecordingSink();
     private final DaemonInvocationCoordinator coordinator;
 
-    private Harness(BooleanSupplier started, EnvironmentCapability capability) {
+    private Harness(
+        BooleanSupplier started,
+        EnvironmentCapability capability,
+        DaemonInvocationJournal journal) {
       registry.register(capability);
+      this.journal = journal;
       this.coordinator =
           new DaemonInvocationCoordinator(registry, journal, scheduler, started, sink, NO_UPLOADS);
     }
 
     private void close() {
       scheduler.shutdownNow();
+    }
+  }
+
+  /** journal 写入失败的受控实现：读取与去重委托真实 journal，使「终态写入失败仍继续收尾其余调用」可确定断言。 */
+  private static final class ThrowingJournal implements DaemonInvocationJournal {
+
+    private final DaemonInvocationJournal delegate = new InMemoryDaemonInvocationJournal();
+    private final AtomicInteger writeFailures = new AtomicInteger();
+
+    @Override
+    public DaemonInvocationJournalStart start(String invocationId) {
+      return delegate.start(invocationId);
+    }
+
+    @Override
+    public Optional<DaemonInvocationJournalEntry> find(String invocationId) {
+      return delegate.find(invocationId);
+    }
+
+    @Override
+    public boolean complete(String invocationId, DaemonTerminalMessage message) {
+      writeFailures.incrementAndGet();
+      throw new IllegalStateException("journal write failed");
+    }
+
+    private int writeFailures() {
+      return writeFailures.get();
     }
   }
 
@@ -435,9 +530,10 @@ class DaemonInvocationCoordinatorTest {
   }
 
   /**
-   * 首个调用的执行句柄在收尾时抛出 RuntimeException、其余句柄正常收尾的能力：用于验证单调用收尾失败不得中断 shutdown。
+   * 首个调用的执行句柄在收尾时抛出注入失败、其余句柄正常收尾的能力：用于验证单调用收尾失败不得中断 shutdown。
    *
-   * <p>首个句柄抛错使失败的调用在两个保证点上都可检测：其 journal 必须仍有 CANCELLED 终态，且其余调用必须继续被收尾。
+   * <p>首个句柄抛错使失败的调用在两个保证点上都可检测：其 journal 必须仍有 CANCELLED 终态，且其余调用必须继续被收尾；失败对象在装配时
+   * 固定，因此聚合结果的身份断言是确定的。
    */
   private static final class ThrowingTerminateCapability implements EnvironmentCapability {
 
@@ -450,6 +546,15 @@ class DaemonInvocationCoordinatorTest {
     private final AtomicInteger executions = new AtomicInteger();
     private final AtomicInteger terminations = new AtomicInteger();
     private final AtomicInteger terminationFailures = new AtomicInteger();
+    private final boolean fatal;
+
+    private final IllegalStateException wrapUpFailure =
+        new IllegalStateException("terminate failed: must not leak");
+    private final AssertionError fatalFailure = new AssertionError("terminate failed fatally");
+
+    private ThrowingTerminateCapability(boolean fatal) {
+      this.fatal = fatal;
+    }
 
     @Override
     public EnvironmentCapabilityDescriptor descriptor() {
@@ -469,6 +574,14 @@ class DaemonInvocationCoordinatorTest {
 
     private int terminationFailures() {
       return terminationFailures.get();
+    }
+
+    private IllegalStateException wrapUpFailure() {
+      return wrapUpFailure;
+    }
+
+    private AssertionError fatalFailure() {
+      return fatalFailure;
     }
 
     private final class Handle implements EnvironmentCapabilityExecutionHandle {
@@ -493,7 +606,10 @@ class DaemonInvocationCoordinatorTest {
       public void terminate(EnvironmentCapabilityTerminationCause cause) {
         if (failing) {
           terminationFailures.incrementAndGet();
-          throw new IllegalStateException("terminate failed: must not leak");
+          if (fatal) {
+            throw fatalFailure;
+          }
+          throw wrapUpFailure;
         }
         terminations.incrementAndGet();
       }
