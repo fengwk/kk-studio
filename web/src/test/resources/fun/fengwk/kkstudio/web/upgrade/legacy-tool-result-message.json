@@ -1,0 +1,29 @@
+{
+  "message": {
+    "role": "TOOL",
+    "contents": [
+      {
+        "type": "tool_result",
+        "toolCallId": "call-legacy-1",
+        "toolName": "bash",
+        "rendererKey": "bash",
+        "contents": [
+          {"type": "text", "text": "ok"}
+        ],
+        "error": false,
+        "detailsJson": "{}"
+      }
+    ]
+  },
+  "assistantMetadata": null,
+  "toolResultMetadata": {
+    "assistantEntryId": "00000000-0000-0000-0000-0000000000a1",
+    "toolCallId": "call-legacy-1",
+    "callIndex": 0,
+    "status": "SUCCEEDED",
+    "synthetic": false,
+    "reason": null,
+    "inputReceipt": null,
+    "invocationId": "00000000-0000-0000-0000-0000000000b1"
+  }
+}

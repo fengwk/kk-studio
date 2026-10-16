@@ -11,32 +11,21 @@ import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
-import fun.fengwk.kkstudio.harness.builtin.environment.ReadToolExecutor;
-import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentRunner;
-import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentTaskAcceptance;
-import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentTaskRequest;
-import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.platform.harness.tool.BuiltinHarnessContributorConfiguration;
 import fun.fengwk.kkstudio.platform.plugin.PluginContext;
-import fun.fengwk.kkstudio.platform.plugin.PluginCredentialSnapshot;
 import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
 import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
+import fun.fengwk.kkstudio.platform.plugin.catalog.OfflinePluginHost;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogBootstrap;
-import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialProjection;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialReference;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialStore;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.PostgresqlPluginCatalogChangeNotifier;
 import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.PostgresqlPluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.store.PluginConfigurationJdbcStore;
-import fun.fengwk.kkstudio.platform.plugin.prompt.PluginPromptContent;
 import fun.fengwk.kkstudio.platform.plugin.prompt.PluginPromptResources;
 import fun.fengwk.kkstudio.platform.plugin.prompt.PluginPromptTasks;
-import fun.fengwk.kkstudio.platform.plugin.resource.PluginMediaFamily;
 import fun.fengwk.kkstudio.platform.plugin.resource.PluginResourceGateway;
 import fun.fengwk.kkstudio.platform.plugin.service.PluginContextFactory;
 import fun.fengwk.kkstudio.platform.project.tool.IssueTransitionService;
@@ -60,16 +49,11 @@ import fun.fengwk.kkstudio.web.StrictJacksonConfiguration;
 
 import javax.sql.DataSource;
 
-import java.io.InputStream;
-import java.net.URI;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.UUID;
 import java.util.function.BiFunction;
-import java.util.function.BooleanSupplier;
 
 /**
  * 一次性离线升级工具专用的宿主装配：在不启动 Web、不启动 worker、不读凭据的前提下，把当前发行物真正会安装的 Plugin 与真正内置的两域贡献组装成一次 epoch 1 初始目录候选。
@@ -84,9 +68,9 @@ import java.util.function.BooleanSupplier;
  *       Contributor）与真实的 Project 交接工具（三个真实 JDBC 仓储 + {@link ProjectWorkflowJsonCodec}，只构造不执行）。
  * </ul>
  *
- * <p>宿主侧能力全部由 {@link OfflineHost} 明确拒绝：read/subagent、凭据、资源网关与两个 Prompt 端口都只抛固定安全异常。当前第一方 Plugin 的
- * {@code configure} 只做静态构造，不探测网络、不解析凭据，因此装配与构造候选的整个过程不打开数据库连接、不发出 HTTP，也绝不用空 Optional
- * 掩盖启用中的能力（否则会伪造出与线上不同的指纹）。
+ * <p>宿主侧能力全部由 Platform 的 {@link OfflinePluginHost} 明确拒绝：read/subagent、凭据、资源网关与两个 Prompt
+ * 端口都只抛固定安全异常。当前第一方 Plugin 的 {@code configure} 只做静态构造，不探测网络、不解析凭据，因此装配与构造候选的整个过程不打开数据库连接、不发出
+ * HTTP，也绝不用空 Optional 掩盖启用中的能力（否则会伪造出与线上不同的指纹）。
  *
  * <p>这不是 sandbox：Plugin 自己仍可创建客户端，本组件只保证宿主端口不被执行；因此「零 HTTP」是由宿主端口拒绝与当前第一方 configure
  * 的静态行为共同保证的事实，而不是对插件代码的强制隔离。
@@ -138,7 +122,7 @@ final class OfflinePluginCatalog implements AutoCloseable {
     Objects.requireNonNull(settings, "settings");
     AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext();
     try {
-      OfflineHost host = new OfflineHost();
+      OfflinePluginHost host = new OfflinePluginHost();
       JdbcClient jdbc = JdbcClient.create(dataSource);
       PluginConfigurationRepository repository =
           new PostgresqlPluginConfigurationRepository(
@@ -153,7 +137,7 @@ final class OfflinePluginCatalog implements AutoCloseable {
           "offlineSystemSettingsSnapshot",
           SystemSettingsSnapshot.class,
           () -> new SystemSettingsSnapshot(settings));
-      context.registerBean("offlineHost", OfflineHost.class, () -> host);
+      context.registerBean("offlineHost", OfflinePluginHost.class, () -> host);
       context.registerBean(
           "offlineProjectHarnessContributor",
           HarnessContributor.class,
@@ -286,96 +270,6 @@ final class OfflinePluginCatalog implements AutoCloseable {
       if (!(primary instanceof Error)) {
         throw cleanup;
       }
-    }
-  }
-
-  /**
-   * 离线宿主的非成功执行端口：任何 read/subagent/凭据/远端媒体/Prompt 操作都直接以固定安全异常终止——端口本身既不发出请求也不改变状态。
-   *
-   * <p>这些端口必须以 bean 存在（而不是 Optional.empty）：线上启用中的能力集合不能因为离线而消失，否则冻结出的两域指纹会与真实目录不同。
-   */
-  private static final class OfflineHost
-      implements ReadToolExecutor,
-          SubagentRunner,
-          PluginCredentialStore,
-          PluginResourceGateway,
-          PluginPromptTasks,
-          PluginPromptResources {
-
-    @Override
-    public ToolExecutionHandle read(ToolExecutionRequest request, ToolExecutionListener listener) {
-      throw unavailable();
-    }
-
-    @Override
-    public SubagentTaskAcceptance accept(SubagentTaskRequest request) {
-      throw unavailable();
-    }
-
-    @Override
-    public PluginCredentialProjection projection(String pluginId) {
-      throw unavailable();
-    }
-
-    @Override
-    public PluginCredentialSnapshot resolve(PluginCredentialReference reference) {
-      throw unavailable();
-    }
-
-    @Override
-    public boolean rejectUsed(PluginCredentialSnapshot snapshot, String error) {
-      throw unavailable();
-    }
-
-    @Override
-    public URI resolveSessionResource(UUID threadId, String resourceUri) {
-      throw unavailable();
-    }
-
-    @Override
-    public ResourceRef stageRemoteMedia(
-        URI remoteUri, PluginMediaFamily family, String name, Runnable beforeRequest) {
-      throw unavailable();
-    }
-
-    @Override
-    public UUID submit(String agentName, String systemText, List<PluginPromptContent> contents) {
-      throw unavailable();
-    }
-
-    @Override
-    public String await(UUID taskId, Duration timeout, BooleanSupplier continueWaiting) {
-      throw unavailable();
-    }
-
-    @Override
-    public void stop(UUID taskId) {
-      throw unavailable();
-    }
-
-    @Override
-    public PluginPromptResources.StagedResource stage(
-        String filename, String mediaType, InputStream input, long expectedSize) {
-      throw unavailable();
-    }
-
-    @Override
-    public void discard(PluginPromptResources.StagedResource resource) {
-      throw unavailable();
-    }
-
-    private static OfflineHostOperationException unavailable() {
-      return new OfflineHostOperationException();
-    }
-  }
-
-  /** 离线装配期间的宿主操作固定安全异常：绝不携带底层 cause、输入或任何凭据/媒体片段。 */
-  static final class OfflineHostOperationException extends IllegalStateException {
-
-    private static final long serialVersionUID = 1L;
-
-    OfflineHostOperationException() {
-      super("offline plugin catalog assembly cannot execute host operations");
     }
   }
 }
