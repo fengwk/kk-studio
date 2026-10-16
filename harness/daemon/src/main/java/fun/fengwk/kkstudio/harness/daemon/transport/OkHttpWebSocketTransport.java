@@ -146,14 +146,19 @@ public final class OkHttpWebSocketTransport implements DaemonTransport {
     }
   }
 
-  /** 保留首个失败，其余作为 suppressed 附加，使清理可以继续而不丢失原因。 */
+  /** 聚合清理失败：Error 优先作为主因（首个 Error 保留），否则保留首个失败；其余失败作为 suppressed 附加且不自我抑制。 */
   private static Throwable accumulate(Throwable first, Throwable next) {
     if (first == null) {
       return next;
     }
-    if (first != next) {
-      first.addSuppressed(next);
+    if (first == next) {
+      return first;
     }
+    if (next instanceof Error && !(first instanceof Error)) {
+      next.addSuppressed(first);
+      return next;
+    }
+    first.addSuppressed(next);
     return first;
   }
 
@@ -198,15 +203,25 @@ public final class OkHttpWebSocketTransport implements DaemonTransport {
 
     @Override
     public void close() {
-      // 任一步失败都不得跳过其余释放；首个异常沿 finally 向外传播。
+      // 三个释放动作全部 attempt，任一步失败都不跳过其余；Error 优先作为主因，其余 suppressed。
+      Throwable failure = null;
       try {
         client.dispatcher().cancelAll();
-      } finally {
-        try {
-          client.dispatcher().executorService().shutdown();
-        } finally {
-          client.connectionPool().evictAll();
-        }
+      } catch (Throwable error) {
+        failure = accumulate(failure, error);
+      }
+      try {
+        client.dispatcher().executorService().shutdown();
+      } catch (Throwable error) {
+        failure = accumulate(failure, error);
+      }
+      try {
+        client.connectionPool().evictAll();
+      } catch (Throwable error) {
+        failure = accumulate(failure, error);
+      }
+      if (failure != null) {
+        rethrow(failure);
       }
     }
   }
@@ -312,13 +327,25 @@ public final class OkHttpWebSocketTransport implements DaemonTransport {
       return result.isDone() && !result.isCompletedExceptionally() && connection.isOpen();
     }
 
-    /** 结果结算后的统一收尾：失败时中止尚未 graceful close 的原生 I/O 并投递一次断开通知。 */
+    /** 结果结算后的统一收尾：中止原生 I/O 与投递断开通知都必须 attempt，Error 优先作为主因。 */
     private void onSettled(DaemonConnection settledConnection, Throwable error) {
       if (error == null) {
         return;
       }
-      connection.abortPending();
-      notifyDisconnected(unwrap(error));
+      Throwable failure = null;
+      try {
+        connection.abortPending();
+      } catch (Throwable abortError) {
+        failure = accumulate(failure, abortError);
+      }
+      try {
+        notifyDisconnected(unwrap(error));
+      } catch (Throwable notifyError) {
+        failure = accumulate(failure, notifyError);
+      }
+      if (failure != null) {
+        rethrow(failure);
+      }
     }
 
     /** 确定性拒绝：恰好一次 close 帧、恰好一次断开通知，且不再消费后续帧。 */
@@ -337,20 +364,30 @@ public final class OkHttpWebSocketTransport implements DaemonTransport {
       }
     }
 
-    /** transport close 的收敛动作：结算 pending 握手、强制中止原生 I/O 并释放受管句柄。 */
+    /** transport close 的收敛动作：notify、强制中止与 pending future 结算都必须 attempt，最终按 Error 优先聚合抛出。 */
     private void terminate() {
       IllegalStateException closedError = new IllegalStateException("transport is closed");
+      Throwable failure = null;
       try {
         // 直接通知：使用者回调异常必须向 close 调用方传播，而不是被 future 依赖吞掉。
         notifyDisconnected(closedError);
-      } finally {
-        try {
-          result.completeExceptionally(closedError);
-        } finally {
-          // 即使 close 已请求 graceful close，transport close 也必须强制取消原生句柄。
-          connection.abort();
-          handshakes.remove(this);
-        }
+      } catch (Throwable notifyError) {
+        failure = accumulate(failure, notifyError);
+      }
+      try {
+        // 即使 close 已请求 graceful close，transport close 也必须强制取消原生句柄。
+        connection.abort();
+      } catch (Throwable abortError) {
+        failure = accumulate(failure, abortError);
+      }
+      try {
+        result.completeExceptionally(closedError);
+      } catch (Throwable settlementError) {
+        failure = accumulate(failure, settlementError);
+      }
+      handshakes.remove(this);
+      if (failure != null) {
+        rethrow(failure);
       }
     }
 

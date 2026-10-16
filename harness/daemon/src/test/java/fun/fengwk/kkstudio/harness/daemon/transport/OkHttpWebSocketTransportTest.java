@@ -1,12 +1,16 @@
 package fun.fengwk.kkstudio.harness.daemon.transport;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import okhttp3.Dns;
+import okhttp3.OkHttpClient;
 import okhttp3.Protocol;
 import okhttp3.Request;
 import okhttp3.Response;
@@ -15,16 +19,21 @@ import okhttp3.WebSocketListener;
 import okio.ByteString;
 import org.junit.jupiter.api.Test;
 
+import java.net.InetAddress;
 import java.net.URI;
+import java.net.UnknownHostException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 /** OkHttp transport 适配器必须保留握手协商门禁、完整文本成帧以及 close/disconnect 所有权。 */
 class OkHttpWebSocketTransportTest {
@@ -34,6 +43,9 @@ class OkHttpWebSocketTransportTest {
 
   /** 与生产契约一致的握手预算（测试不引用生产私有常量）。 */
   private static final long HANDSHAKE_BUDGET_MILLIS = 2000;
+
+  /** 真实线程与线程池收敛的等待上限。 */
+  private static final long THREAD_JOIN_MILLIS = 5000;
 
   /** 连接适配器发送完整帧，拒绝已关闭 socket，并发送一次 graceful close。 */
   @Test
@@ -301,6 +313,146 @@ class OkHttpWebSocketTransportTest {
     assertEquals(1, dialer.webSocket.cancelCalls.get());
   }
 
+  /** 断开回调抛 Error、随后取消原生句柄抛 runtime 时：Error 仍是主因，后续失败只作为 suppressed。 */
+  @Test
+  void keepsCallbackErrorWhenCancelAlsoFails() {
+    FakeDialer dialer = new FakeDialer();
+    Error callbackError = new AssertionError("listener exploded");
+    RuntimeException cancelError = new IllegalStateException("cancel failed");
+    dialer.cancelFailure = cancelError;
+    OkHttpWebSocketTransport transport = transport(dialer);
+    CompletableFuture<DaemonConnection> stage =
+        transport.connect(new FailingErrorListener(callbackError)).toCompletableFuture();
+
+    Throwable thrown = assertThrows(Error.class, transport::close);
+
+    assertSame(callbackError, thrown);
+    assertArrayEquals(new Throwable[] {cancelError}, thrown.getSuppressed());
+    assertTrue(stage.isCompletedExceptionally());
+    assertTrue(dialer.closed.get());
+  }
+
+  /** 首个失败是 runtime、dialer 释放再抛 Error 时：Error 提升为主因，原 runtime 变为 suppressed 且未被跳过。 */
+  @Test
+  void promotesDialerErrorOverEarlierCallbackRuntime() {
+    FakeDialer dialer = new FakeDialer();
+    RuntimeException callbackError = new IllegalStateException("listener failed");
+    Error releaseError = new AssertionError("client release failed");
+    dialer.closeFailure = releaseError;
+    OkHttpWebSocketTransport transport = transport(dialer);
+    CompletableFuture<DaemonConnection> stage =
+        transport.connect(new FailingListener(callbackError)).toCompletableFuture();
+
+    Throwable thrown = assertThrows(Error.class, transport::close);
+
+    assertSame(releaseError, thrown);
+    assertArrayEquals(new Throwable[] {callbackError}, thrown.getSuppressed());
+    assertTrue(stage.isCompletedExceptionally());
+    assertTrue(dialer.closed.get());
+    assertEquals(1, dialer.webSocket.cancelCalls.get());
+  }
+
+  /** 多个失败并存时仍必须全部收敛：每个 future 结算、每个原生句柄取消一次、dialer 释放且 suppressed 精确。 */
+  @Test
+  void settlesEveryHandshakeAndHandleDespiteMultipleFailures() {
+    FakeDialer dialer = new FakeDialer();
+    RuntimeException callbackError = new IllegalStateException("listener failed");
+    Error releaseError = new AssertionError("client release failed");
+    dialer.closeFailure = releaseError;
+    OkHttpWebSocketTransport transport = transport(dialer);
+    CompletableFuture<DaemonConnection> failed =
+        transport.connect(new FailingListener(callbackError)).toCompletableFuture();
+    RecordingListener settledListener = new RecordingListener();
+    CompletableFuture<DaemonConnection> settled =
+        transport.connect(settledListener).toCompletableFuture();
+
+    Throwable thrown = assertThrows(Error.class, transport::close);
+
+    assertSame(releaseError, thrown);
+    assertArrayEquals(new Throwable[] {callbackError}, thrown.getSuppressed());
+    assertTrue(failed.isCompletedExceptionally());
+    assertTrue(settled.isCompletedExceptionally());
+    assertEquals(1, settledListener.disconnections.get());
+    assertEquals(2, dialer.sockets.size());
+    for (FakeWebSocket socket : dialer.sockets) {
+      assertEquals(1, socket.cancelCalls.get());
+    }
+    assertTrue(dialer.closed.get());
+  }
+
+  /**
+   * close 与 dial 返回的真实竞争：connect 调用线程阻塞在 dial 内，close 在原生句柄创建前到达，必须立即结算 pending
+   * future；此后迟到的原生句柄仍必须被取消，不得泄漏。
+   */
+  @Test
+  void closesHandshakeWhileDialIsBlockedAndCancelsLateHandle() throws Exception {
+    FakeDialer dialer = new FakeDialer();
+    dialer.blockDial(new CountDownLatch(1));
+    RecordingListener listener = new RecordingListener();
+    OkHttpWebSocketTransport transport = transport(dialer);
+    AtomicReference<CompletionStage<DaemonConnection>> stageRef = new AtomicReference<>();
+    Thread connector =
+        new Thread(() -> stageRef.set(transport.connect(listener)), "dial-return-race");
+    connector.start();
+    try {
+      assertTrue(dialer.awaitDialEntered(THREAD_JOIN_MILLIS), "dial 应已进入阻塞");
+      assertNull(dialer.webSocket, "dial 尚未返回就不应存在原生句柄");
+
+      transport.close();
+    } finally {
+      dialer.releaseDial();
+      connector.join(THREAD_JOIN_MILLIS);
+    }
+
+    assertFalse(connector.isAlive(), "connect 调用线程应已返回");
+    CompletionStage<DaemonConnection> stage = stageRef.get();
+    assertNotNull(stage, "connect 应返回失败的 stage 而不是抛出");
+    assertTrue(stage.toCompletableFuture().isCompletedExceptionally());
+    assertEquals(1, listener.disconnections.get());
+    assertEquals(1, dialer.webSocket.cancelCalls.get());
+    assertTrue(dialer.closed.get());
+  }
+
+  /**
+   * 仅靠 callTimeout 不足以约束握手：JDK 同步 DNS 是 callTimeout 无法强制中断的物理边界，只要解析仍在阻塞，就必须由逻辑 future
+   * 期限有界结算。本用例不宣称 close 能立即终止原生 DNS，只断言逻辑期限。
+   */
+  @Test
+  void logicalDeadlineSettlesHandshakeWhileDnsBlocksTheCallTimeout() throws Exception {
+    CountDownLatch dnsEntered = new CountDownLatch(1);
+    CountDownLatch releaseDns = new CountDownLatch(1);
+    OkHttpClient client =
+        new OkHttpClient.Builder()
+            .dns(new BlockingDns(dnsEntered, releaseDns))
+            .connectTimeout(Duration.ofMillis(HANDSHAKE_BUDGET_MILLIS))
+            .callTimeout(Duration.ofMillis(HANDSHAKE_BUDGET_MILLIS))
+            .readTimeout(0, TimeUnit.MILLISECONDS)
+            .build();
+    OkHttpWebSocketTransport transport =
+        new OkHttpWebSocketTransport(
+            new OkHttpWebSocketTransport.OkHttpWebSocketDialer(client),
+            URI.create("ws://dns-stalled.invalid/daemon"),
+            1024);
+    RecordingListener listener = new RecordingListener();
+    try {
+      CompletableFuture<DaemonConnection> stage = transport.connect(listener).toCompletableFuture();
+      assertTrue(dnsEntered.await(THREAD_JOIN_MILLIS, TimeUnit.MILLISECONDS), "同步 DNS 应已阻塞");
+
+      assertThrows(
+          ExecutionException.class,
+          () -> stage.get(HANDSHAKE_BUDGET_MILLIS + THREAD_JOIN_MILLIS, TimeUnit.MILLISECONDS));
+    } finally {
+      releaseDns.countDown();
+      transport.close();
+    }
+    assertTrue(
+        client
+            .dispatcher()
+            .executorService()
+            .awaitTermination(THREAD_JOIN_MILLIS, TimeUnit.MILLISECONDS),
+        "close 后自有 OkHttp 线程池必须终止");
+  }
+
   /** close 之后拒绝新连接，且不再发起 upgrade。 */
   @Test
   void rejectsConnectAfterClose() {
@@ -450,23 +602,61 @@ class OkHttpWebSocketTransportTest {
     return builder.build();
   }
 
+  /** 同步阻塞的 DNS 实现：制造 callTimeout 无法强制中断的解析阶段。 */
+  private static final class BlockingDns implements Dns {
+
+    private final CountDownLatch entered;
+    private final CountDownLatch release;
+
+    private BlockingDns(CountDownLatch entered, CountDownLatch release) {
+      this.entered = entered;
+      this.release = release;
+    }
+
+    @Override
+    public List<InetAddress> lookup(String hostname) throws UnknownHostException {
+      entered.countDown();
+      try {
+        release.await();
+      } catch (InterruptedException error) {
+        Thread.currentThread().interrupt();
+      }
+      throw new UnknownHostException(hostname);
+    }
+  }
+
   /** 捕获 upgrade 请求与 listener，让测试完全掌控握手与入站帧时序；dial 返回真实原生句柄。 */
   private static final class FakeDialer implements OkHttpWebSocketTransport.WebSocketDialer {
 
     private final List<Request> requests = new ArrayList<>();
+    private final List<FakeWebSocket> sockets = new ArrayList<>();
     private final AtomicInteger dialCalls = new AtomicInteger();
     private final AtomicBoolean closed = new AtomicBoolean();
+    private final CountDownLatch dialEntered = new CountDownLatch(1);
+    private volatile CountDownLatch dialGate;
     private WebSocketListener listener;
     private FakeWebSocket webSocket;
     private boolean synchronousOpen;
-    private RuntimeException closeFailure;
+    private RuntimeException cancelFailure;
+    private Throwable closeFailure;
 
     @Override
     public WebSocket dial(Request request, WebSocketListener listener) {
       dialCalls.incrementAndGet();
       requests.add(request);
       this.listener = listener;
-      this.webSocket = new FakeWebSocket();
+      dialEntered.countDown();
+      CountDownLatch gate = dialGate;
+      if (gate != null) {
+        try {
+          gate.await();
+        } catch (InterruptedException error) {
+          Thread.currentThread().interrupt();
+        }
+      }
+      // 原生句柄在闸门之后创建，使 close 与 dial 返回之间的竞争由测试确定性控制。
+      this.webSocket = new FakeWebSocket(cancelFailure);
+      sockets.add(webSocket);
       if (synchronousOpen) {
         listener.onOpen(webSocket, response(DEFLATE));
       }
@@ -477,8 +667,31 @@ class OkHttpWebSocketTransportTest {
     public void close() {
       closed.set(true);
       if (closeFailure != null) {
-        throw closeFailure;
+        rethrow(closeFailure);
       }
+    }
+
+    /** 让后续 dial 阻塞在给定的闸门上，由测试显式放行。 */
+    void blockDial(CountDownLatch gate) {
+      this.dialGate = gate;
+    }
+
+    boolean awaitDialEntered(long timeoutMillis) throws InterruptedException {
+      return dialEntered.await(timeoutMillis, TimeUnit.MILLISECONDS);
+    }
+
+    void releaseDial() {
+      CountDownLatch gate = dialGate;
+      if (gate != null) {
+        gate.countDown();
+      }
+    }
+
+    private static void rethrow(Throwable failure) {
+      if (failure instanceof Error) {
+        throw (Error) failure;
+      }
+      throw (RuntimeException) failure;
     }
   }
 
@@ -493,6 +706,25 @@ class OkHttpWebSocketTransportTest {
     @Override
     public void onMessage(String message) {
       // 本测试只关注断开回调失败时的收敛。
+    }
+
+    @Override
+    public void onDisconnected(Throwable cause) {
+      throw failure;
+    }
+  }
+
+  private static final class FailingErrorListener implements DaemonTransportListener {
+
+    private final Error failure;
+
+    private FailingErrorListener(Error failure) {
+      this.failure = failure;
+    }
+
+    @Override
+    public void onMessage(String message) {
+      // 本测试只关注断开回调抛出 Error 时的收敛。
     }
 
     @Override
@@ -524,7 +756,16 @@ class OkHttpWebSocketTransportTest {
     private final List<String> textMessages = new ArrayList<>();
     private final AtomicInteger closeCalls = new AtomicInteger();
     private final AtomicInteger cancelCalls = new AtomicInteger();
+    private final RuntimeException cancelFailure;
     private volatile int closeStatus;
+
+    private FakeWebSocket() {
+      this(null);
+    }
+
+    private FakeWebSocket(RuntimeException cancelFailure) {
+      this.cancelFailure = cancelFailure;
+    }
 
     @Override
     public Request request() {
@@ -557,6 +798,9 @@ class OkHttpWebSocketTransportTest {
     @Override
     public void cancel() {
       cancelCalls.incrementAndGet();
+      if (cancelFailure != null) {
+        throw cancelFailure;
+      }
     }
   }
 }
