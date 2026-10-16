@@ -51,7 +51,12 @@ final class UpgradePostgresTestSupport {
     return isolatedDatabase(MIGRATION_LOCATIONS);
   }
 
-  /** 新建一个全新 UUID 库并只应用给定迁移位置；同一个物理容器上不同库互不可见。 */
+  /** 全新空库：完全不应用任何迁移，供显式 prepare 从零初始化并验证空库门禁。 */
+  static DataSource blankDatabase() {
+    return isolatedDatabase(null);
+  }
+
+  /** 新建一个全新 UUID 库并只应用给定迁移位置（null 表示完全不迁移）；同一个物理容器上不同库互不可见。 */
   private static DataSource isolatedDatabase(String locations) {
     String database = "kk_studio_upgrade_" + UUID.randomUUID().toString().replace("-", "");
     try (Connection connection =
@@ -67,12 +72,14 @@ final class UpgradePostgresTestSupport {
     SimpleDriverDataSource dataSource =
         new SimpleDriverDataSource(
             new Driver(), databaseUrl(database), POSTGRES.getUsername(), POSTGRES.getPassword());
-    Flyway.configure()
-        .dataSource(dataSource)
-        .locations(locations)
-        .validateMigrationNaming(true)
-        .load()
-        .migrate();
+    if (locations != null) {
+      Flyway.configure()
+          .dataSource(dataSource)
+          .locations(locations)
+          .validateMigrationNaming(true)
+          .load()
+          .migrate();
+    }
     return dataSource;
   }
 
