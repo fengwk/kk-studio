@@ -1,0 +1,33 @@
+{
+  "message": {
+    "role": "TOOL",
+    "contents": [
+      {
+        "type": "tool_result",
+        "toolCallId": "call-legacy-ask",
+        "toolName": "ask_user",
+        "rendererKey": "ask_user",
+        "contents": [
+          {"type": "text", "text": "answer accepted"}
+        ],
+        "error": false,
+        "detailsJson": "{}"
+      }
+    ]
+  },
+  "assistantMetadata": null,
+  "toolResultMetadata": {
+    "assistantEntryId": "00000000-0000-0000-0000-0000000000a3",
+    "toolCallId": "call-legacy-ask",
+    "callIndex": 0,
+    "status": "SUCCEEDED",
+    "synthetic": false,
+    "reason": null,
+    "inputReceipt": {
+      "submissionId": "00000000-0000-0000-0000-0000000000c3",
+      "actor": "operator",
+      "acceptedAt": "2026-01-02T03:04:05Z"
+    },
+    "invocationId": "00000000-0000-0000-0000-0000000000b3"
+  }
+}
