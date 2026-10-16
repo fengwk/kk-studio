@@ -13,9 +13,15 @@ import fun.fengwk.kkstudio.harness.runtime.history.EntryType;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryEntryPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderReplayStateJsonCodec;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
+import fun.fengwk.kkstudio.project.turn.ProjectRunScopeJsonCodec;
 
+import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * 一次性离线升级工具专用的历史 JSON 纯转换：只改写两处精确路径，其余字节的语义原样保留。
@@ -27,11 +33,18 @@ import java.util.Set;
  *   <li>{@link #providerReplayState(String)}：旧 {@code affinity.providerType} 的 wire 值 {@code
  *       "openai_response"} 改名为当前的 {@code "openai_responses"}；顶层 format 与 opaque payload
  *       一律不动，绝不做全局字符串替换。
+ *   <li>{@link #threadCommandPayload(ThreadCommandType, String)}：只校验旧 typed command 的
+ *       payload，业务值一个字节都不改。
  * </ul>
  *
- * <p>转换结果经目标真实 codec（{@link HistoryEntryPayloadJsonCodec} / {@link
- * ProviderReplayStateJsonCodec}）校验；不借 encode 重建或裁剪其它字段。{@code CUSTOM} / {@code CUSTOM_MESSAGE} 另需按
- * producer 语义判定，这里明确拒绝。输入与目标结构校验失败只包含固定安全消息，不附带 cause 或原始输入。
+ * <p>{@code CUSTOM} / {@code CUSTOM_MESSAGE} 不再一律拒绝：只有经源产物证实的第一方固定组合才离线放行，并按 producer 语义校验旧 {@code
+ * data}——{@code builtin/goal.progress/1} 的精确 4 键终态声明、{@code project/run/1} 经 {@link
+ * ProjectRunScopeJsonCodec} 校验的 13 字段快照、{@code core/message/message} 且 {@code details} 为空对象； 其余
+ * producer / type / version 组合继续 fail closed，绝不静默放过。
+ *
+ * <p>转换结果经目标真实 codec（{@link HistoryEntryPayloadJsonCodec} / {@link ProviderReplayStateJsonCodec} /
+ * {@link ThreadCommandPayloadJsonCodec}）校验；不借 encode 重建或裁剪其它字段。 输入与目标结构校验失败只包含固定安全消息，不附带 cause
+ * 或原始输入。
  *
  * <p>严格拒绝重复字段与尾随 token；自由 JSON number 按精确十进制保留，不经过 double。
  */
@@ -40,11 +53,21 @@ final class LegacyHarnessHistoryJson {
   static final String ENTRY_TYPE_REQUIRED = "legacy history entry type is required";
   static final String ENTRY_CUSTOM_UNSUPPORTED =
       "legacy custom entry payloads are not upgradable offline";
+  static final String ENTRY_CUSTOM_DATA_NOT_LEGACY =
+      "legacy custom entry data is not the exact known source shape";
+  static final String ENTRY_CUSTOM_MESSAGE_UNSUPPORTED =
+      "legacy custom message entry payloads are not the known core message shape";
   static final String ENTRY_MALFORMED = "legacy history entry payload is not valid strict JSON";
   static final String ENTRY_TOOL_RESULT_METADATA_NOT_LEGACY =
       "legacy tool result metadata is not the exact pre-binding shape";
   static final String ENTRY_TARGET_REJECTED =
       "upgraded history entry payload is rejected by the current codec";
+  static final String COMMAND_TYPE_REQUIRED = "legacy thread command type is required";
+  static final String COMMAND_MALFORMED = "legacy thread command payload is not valid strict JSON";
+  static final String COMMAND_STATE_NOT_KNOWN =
+      "legacy contributor state command is not a known upgradable state";
+  static final String COMMAND_TARGET_REJECTED =
+      "upgraded thread command payload is rejected by the current codec";
   static final String REPLAY_MALFORMED = "legacy provider replay state is not valid strict JSON";
   static final String REPLAY_UNKNOWN_PROVIDER_TYPE =
       "legacy provider replay state carries an unknown provider type";
@@ -65,6 +88,11 @@ final class LegacyHarnessHistoryJson {
   private static final ProviderReplayStateJsonCodec REPLAY_CODEC =
       new ProviderReplayStateJsonCodec();
 
+  private static final ThreadCommandPayloadJsonCodec COMMAND_CODEC =
+      new ThreadCommandPayloadJsonCodec();
+
+  private static final ProjectRunScopeJsonCodec RUN_SCOPE_CODEC = new ProjectRunScopeJsonCodec();
+
   /** 旧 OpenAI Responses provider 的 wire 值；当前目标值为 {@link ProviderType#OPENAI_RESPONSES}。 */
   private static final String LEGACY_OPENAI_RESPONSE_WIRE = "openai_response";
 
@@ -80,36 +108,97 @@ final class LegacyHarnessHistoryJson {
           "inputReceipt",
           "invocationId");
 
+  /** 已知第一方 goal 进度声明的 CUSTOM 组合：{@code builtin/goal.progress}。 */
+  private static final String GOAL_PROGRESS_CONTRIBUTOR_ID = "builtin";
+
+  private static final String GOAL_PROGRESS_CUSTOM_TYPE = "goal.progress";
+
+  /** 已知第一方 Issue run scope 的 CUSTOM 组合：{@code project/run}。 */
+  private static final String PROJECT_RUN_CONTRIBUTOR_ID = "project";
+
+  private static final String PROJECT_RUN_CUSTOM_TYPE = "run";
+
+  /** 已知第一方 core custom message 的固定组合：{@code core/message/message}。 */
+  private static final String CORE_MESSAGE_CONTRIBUTOR_ID = "core";
+
+  private static final String CORE_MESSAGE_CUSTOM_TYPE = "message";
+
+  private static final String CORE_MESSAGE_RENDERER_KEY = "message";
+
+  /** 已知第一方 CUSTOM 组合共享的 schemaVersion。 */
+  private static final int KNOWN_SCHEMA_VERSION = 1;
+
+  /** 旧 goal.progress 终态声明的冻结 4 键。 */
+  private static final Set<String> GOAL_PROGRESS_FIELDS =
+      Set.of("goalId", "status", "reason", "reportedAt");
+
+  /** 旧 goal 终态声明的两个 wire 值（仍然 active 的 {@code "active"} 不是终态声明）。 */
+  private static final String GOAL_STATUS_COMPLETE = "complete";
+
+  private static final String GOAL_STATUS_BLOCKED = "blocked";
+
   private LegacyHarnessHistoryJson() {}
 
   /**
-   * 升级一条旧 Entry payload 文本；只有旧 {@code MESSAGE} 的精确 8 键 tool metadata 会被补上显式 {@code "binding":null}。
-   * 目标已合法且无需变化的输入原样返回，但仍经真实 codec 校验。
+   * 升级一条旧 Entry payload 文本；只有旧 {@code MESSAGE} 的精确 8 键 tool metadata 会被补上显式 {@code "binding":null}，
+   * 已知第一方 {@code CUSTOM} / {@code CUSTOM_MESSAGE} 按 producer 语义校验后原样返回。目标已合法且无需变化的输入原样返回， 但仍经真实
+   * codec 校验。
    */
   static String entryPayload(EntryType type, String json) {
     if (type == null) {
       throw new IllegalArgumentException(ENTRY_TYPE_REQUIRED);
     }
-    if (type == EntryType.CUSTOM || type == EntryType.CUSTOM_MESSAGE) {
-      throw new IllegalArgumentException(ENTRY_CUSTOM_UNSUPPORTED);
-    }
     JsonNode root = parse(json, ENTRY_MALFORMED);
     if (!(root instanceof ObjectNode rootObject)) {
       throw new IllegalArgumentException(ENTRY_MALFORMED);
     }
-    String upgraded = json;
-    if (type == EntryType.MESSAGE) {
-      JsonNode metadata = rootObject.get("toolResultMetadata");
-      if (metadata != null && !metadata.isNull()) {
-        upgraded = addExplicitNullBinding(rootObject, metadata);
-      }
-    }
+    String upgraded =
+        switch (type) {
+          case CUSTOM -> {
+            requireKnownCustomEntry(rootObject);
+            yield json;
+          }
+          case CUSTOM_MESSAGE -> {
+            requireKnownCoreCustomMessage(rootObject);
+            yield json;
+          }
+          case MESSAGE -> {
+            JsonNode metadata = rootObject.get("toolResultMetadata");
+            yield metadata != null && !metadata.isNull()
+                ? addExplicitNullBinding(rootObject, metadata)
+                : json;
+          }
+          default -> json;
+        };
     try {
       ENTRY_CODEC.decode(type, upgraded);
     } catch (IllegalArgumentException error) {
       throw new IllegalArgumentException(ENTRY_TARGET_REJECTED);
     }
     return upgraded;
+  }
+
+  /**
+   * 校验一条旧 typed Thread command payload 文本；只对已知第一方 {@code SET_CONTRIBUTOR_STATE} 的 {@code state} 追加
+   * producer 语义校验，业务值一个字节都不改，并按目标真实 command codec 校验。
+   */
+  static String threadCommandPayload(ThreadCommandType type, String json) {
+    if (type == null) {
+      throw new IllegalArgumentException(COMMAND_TYPE_REQUIRED);
+    }
+    JsonNode root = parse(json, COMMAND_MALFORMED);
+    if (!(root instanceof ObjectNode rootObject)) {
+      throw new IllegalArgumentException(COMMAND_MALFORMED);
+    }
+    if (type == ThreadCommandType.SET_CONTRIBUTOR_STATE) {
+      requireKnownContributorState(rootObject);
+    }
+    try {
+      COMMAND_CODEC.decode(type, json);
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException(COMMAND_TARGET_REJECTED);
+    }
+    return json;
   }
 
   /**
@@ -136,6 +225,138 @@ final class LegacyHarnessHistoryJson {
       throw new IllegalArgumentException(REPLAY_TARGET_REJECTED);
     }
     return upgraded;
+  }
+
+  /** 已知 CUSTOM Entry 的 producer 语义校验：先按原始身份字段判定组合，再校验旧 data，未知组合 fail closed。 */
+  private static void requireKnownCustomEntry(ObjectNode entry) {
+    requireKnownCustom(entry, ENTRY_CUSTOM_UNSUPPORTED, ENTRY_CUSTOM_DATA_NOT_LEGACY);
+  }
+
+  /**
+   * 已知 {@code SET_CONTRIBUTOR_STATE} 的 {@code state}：外层与 state 键集仍由当前 codec 校验，这里只判 producer 语义。
+   */
+  private static void requireKnownContributorState(ObjectNode command) {
+    JsonNode state = command.get("state");
+    if (!(state instanceof ObjectNode stateObject)) {
+      throw new IllegalArgumentException(COMMAND_STATE_NOT_KNOWN);
+    }
+    requireKnownCustom(stateObject, COMMAND_STATE_NOT_KNOWN, COMMAND_STATE_NOT_KNOWN);
+  }
+
+  /** 只接受 {@code builtin/goal.progress/1} 与 {@code project/run/1} 两个已知组合及其旧 data 形态。 */
+  private static void requireKnownCustom(ObjectNode node, String unsupported, String invalidData) {
+    String contributorId = identity(node, "contributorId", unsupported);
+    String customType = identity(node, "customType", unsupported);
+    if (!isKnownSchemaVersion(node)) {
+      throw new IllegalArgumentException(unsupported);
+    }
+    JsonNode data = node.get("data");
+    if (GOAL_PROGRESS_CONTRIBUTOR_ID.equals(contributorId)
+        && GOAL_PROGRESS_CUSTOM_TYPE.equals(customType)) {
+      requireGoalProgressData(data, invalidData);
+    } else if (PROJECT_RUN_CONTRIBUTOR_ID.equals(contributorId)
+        && PROJECT_RUN_CUSTOM_TYPE.equals(customType)) {
+      requireProjectRunData(data, invalidData);
+    } else {
+      throw new IllegalArgumentException(unsupported);
+    }
+  }
+
+  /**
+   * 旧 goal.progress 终态声明 data：精确 4 键、全为非 null string；{@code goalId} 是 UUID、{@code status} 精确为
+   * {@code complete}/{@code blocked}、{@code reason} 非 blank、{@code reportedAt} 是可解析
+   * Instant。只校验，绝不改写原始 业务文本。
+   */
+  private static void requireGoalProgressData(JsonNode data, String message) {
+    if (!(data instanceof ObjectNode object) || !names(object).equals(GOAL_PROGRESS_FIELDS)) {
+      throw new IllegalArgumentException(message);
+    }
+    String goalId = stringValue(object, "goalId", message);
+    String status = stringValue(object, "status", message);
+    String reason = stringValue(object, "reason", message);
+    String reportedAt = stringValue(object, "reportedAt", message);
+    try {
+      UUID.fromString(goalId);
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException(message);
+    }
+    if (!GOAL_STATUS_COMPLETE.equals(status) && !GOAL_STATUS_BLOCKED.equals(status)) {
+      throw new IllegalArgumentException(message);
+    }
+    if (reason.isBlank()) {
+      throw new IllegalArgumentException(message);
+    }
+    try {
+      Instant.parse(reportedAt);
+    } catch (DateTimeParseException error) {
+      throw new IllegalArgumentException(message);
+    }
+  }
+
+  /**
+   * 旧 {@code project/run/1} data：直接复用公开的 {@link ProjectRunScopeJsonCodec#decode(String)} 校验 13 字段快照
+   * （含 issueNumber long 范围），不另写解析器、不重编码存储内容。
+   */
+  private static void requireProjectRunData(JsonNode data, String message) {
+    if (!(data instanceof ObjectNode object)) {
+      throw new IllegalArgumentException(message);
+    }
+    try {
+      RUN_SCOPE_CODEC.decode(write(object));
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException(message);
+    }
+  }
+
+  /**
+   * 旧 {@code CUSTOM_MESSAGE} 只放行 TurnPlanBuilder 固定的 {@code core/message/message} 组合，且 {@code
+   * details} 必须是空对象；未知 renderer / 非空 details 都不是可安全升级的旧第一方消息。
+   */
+  private static void requireKnownCoreCustomMessage(ObjectNode entry) {
+    if (!CORE_MESSAGE_CONTRIBUTOR_ID.equals(
+            identity(entry, "contributorId", ENTRY_CUSTOM_MESSAGE_UNSUPPORTED))
+        || !CORE_MESSAGE_CUSTOM_TYPE.equals(
+            identity(entry, "customType", ENTRY_CUSTOM_MESSAGE_UNSUPPORTED))
+        || !CORE_MESSAGE_RENDERER_KEY.equals(
+            identity(entry, "rendererKey", ENTRY_CUSTOM_MESSAGE_UNSUPPORTED))) {
+      throw new IllegalArgumentException(ENTRY_CUSTOM_MESSAGE_UNSUPPORTED);
+    }
+    JsonNode details = entry.get("details");
+    if (!(details instanceof ObjectNode detailsObject) || detailsObject.size() != 0) {
+      throw new IllegalArgumentException(ENTRY_CUSTOM_MESSAGE_UNSUPPORTED);
+    }
+  }
+
+  /** 只接受非 null string 的身份字段；缺失或错误类型都判为未知组合。 */
+  private static String identity(ObjectNode node, String field, String message) {
+    JsonNode value = node.get(field);
+    if (value == null || !value.isString()) {
+      throw new IllegalArgumentException(message);
+    }
+    return value.stringValue();
+  }
+
+  /** 已知 CUSTOM 组合共享的 schemaVersion 必须精确保存在 {@link #KNOWN_SCHEMA_VERSION}。 */
+  private static boolean isKnownSchemaVersion(ObjectNode node) {
+    JsonNode value = node.get("schemaVersion");
+    return value != null
+        && value.isIntegralNumber()
+        && value.canConvertToInt()
+        && value.intValue() == KNOWN_SCHEMA_VERSION;
+  }
+
+  private static String stringValue(ObjectNode node, String field, String message) {
+    JsonNode value = node.get(field);
+    if (value == null || !value.isString()) {
+      throw new IllegalArgumentException(message);
+    }
+    return value.stringValue();
+  }
+
+  private static Set<String> names(ObjectNode node) {
+    Set<String> names = new HashSet<>();
+    node.propertyNames().forEach(names::add);
+    return names;
   }
 
   /** 只接受旧 metadata 的精确 8 键形态；已带 binding（哪怕 null）或键集不符都判定为不可静默覆盖的历史。 */
