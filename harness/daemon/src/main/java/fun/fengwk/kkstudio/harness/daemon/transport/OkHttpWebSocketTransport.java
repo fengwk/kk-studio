@@ -203,22 +203,18 @@ public final class OkHttpWebSocketTransport implements DaemonTransport {
 
     @Override
     public void close() {
-      // 三个释放动作全部 attempt，任一步失败都不跳过其余；Error 优先作为主因，其余 suppressed。
+      List<Runnable> releases =
+          List.of(
+              () -> client.dispatcher().cancelAll(),
+              () -> client.dispatcher().executorService().shutdown(),
+              () -> client.connectionPool().evictAll());
       Throwable failure = null;
-      try {
-        client.dispatcher().cancelAll();
-      } catch (Throwable error) {
-        failure = accumulate(failure, error);
-      }
-      try {
-        client.dispatcher().executorService().shutdown();
-      } catch (Throwable error) {
-        failure = accumulate(failure, error);
-      }
-      try {
-        client.connectionPool().evictAll();
-      } catch (Throwable error) {
-        failure = accumulate(failure, error);
+      for (Runnable release : releases) {
+        try {
+          release.run();
+        } catch (Throwable error) {
+          failure = accumulate(failure, error);
+        }
       }
       if (failure != null) {
         rethrow(failure);
@@ -235,6 +231,7 @@ public final class OkHttpWebSocketTransport implements DaemonTransport {
   private final class Handshake extends WebSocketListener {
 
     private final CompletableFuture<DaemonConnection> result = new CompletableFuture<>();
+    private final CompletionStage<DaemonConnection> completion;
     private final OkHttpWebSocketConnection connection = new OkHttpWebSocketConnection();
     private final DaemonTransportListener delegate;
     private final int maxInboundTextChars;
@@ -244,14 +241,14 @@ public final class OkHttpWebSocketTransport implements DaemonTransport {
     private Handshake(DaemonTransportListener delegate, int maxInboundTextChars) {
       this.delegate = Objects.requireNonNull(delegate, "delegate");
       this.maxInboundTextChars = maxInboundTextChars;
-      // 只安装终态收尾；期限必须在登记成功后由 start() 启动，避免未登记的握手泄漏回调。
-      result.whenComplete(this::onSettled);
+      // 返回包含收尾结果的 stage，不能把清理失败留在未观察的依赖中。
+      completion = result.handle(this::onSettled);
     }
 
     private CompletionStage<DaemonConnection> start() {
       if (result.isDone()) {
         // transport close 已先行终结本握手：不登记期限，也不发起 upgrade。
-        return result;
+        return completion;
       }
       // 逻辑期限：即使原生 call 无法立即取消，future 也必须有界结算。
       result.orTimeout(HANDSHAKE_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
@@ -261,7 +258,7 @@ public final class OkHttpWebSocketTransport implements DaemonTransport {
       } catch (RuntimeException error) {
         result.completeExceptionally(error);
       }
-      return result;
+      return completion;
     }
 
     @Override
@@ -328,11 +325,11 @@ public final class OkHttpWebSocketTransport implements DaemonTransport {
     }
 
     /** 结果结算后的统一收尾：中止原生 I/O 与投递断开通知都必须 attempt，Error 优先作为主因。 */
-    private void onSettled(DaemonConnection settledConnection, Throwable error) {
+    private DaemonConnection onSettled(DaemonConnection settledConnection, Throwable error) {
       if (error == null) {
-        return;
+        return settledConnection;
       }
-      Throwable failure = null;
+      Throwable failure = unwrap(error);
       try {
         connection.abortPending();
       } catch (Throwable abortError) {
@@ -343,9 +340,7 @@ public final class OkHttpWebSocketTransport implements DaemonTransport {
       } catch (Throwable notifyError) {
         failure = accumulate(failure, notifyError);
       }
-      if (failure != null) {
-        rethrow(failure);
-      }
+      throw new CompletionException(failure);
     }
 
     /** 确定性拒绝：恰好一次 close 帧、恰好一次断开通知，且不再消费后续帧。 */
@@ -417,7 +412,7 @@ public final class OkHttpWebSocketTransport implements DaemonTransport {
     }
   }
 
-  /** {@link CompletableFuture#whenComplete} 可能包装失败；还原为原始 cause 以便透传首个错误。 */
+  /** 还原异步结果包装的原始 cause。 */
   private static Throwable unwrap(Throwable error) {
     if (error instanceof CompletionException && error.getCause() != null) {
       return error.getCause();
