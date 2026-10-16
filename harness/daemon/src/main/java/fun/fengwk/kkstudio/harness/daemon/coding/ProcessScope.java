@@ -534,10 +534,11 @@ final class ProcessScope implements AutoCloseable {
 
   private boolean awaitTerminationDone() {
     try {
-      return terminationDone.await(TERMINATION_WAIT_MILLIS, TimeUnit.MILLISECONDS);
+      return terminationDone.await(TERMINATION_WAIT_MILLIS, TimeUnit.MILLISECONDS)
+          || terminationDone.getCount() == 0;
     } catch (InterruptedException error) {
       Thread.currentThread().interrupt();
-      return false;
+      return terminationDone.getCount() == 0;
     }
   }
 

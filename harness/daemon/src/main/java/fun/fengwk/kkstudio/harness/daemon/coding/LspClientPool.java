@@ -243,13 +243,16 @@ final class LspClientPool implements AutoCloseable {
       budget = closeBudgetMillis;
     }
     try {
-      if (!closeDone.await(Math.max(budget, 1), TimeUnit.MILLISECONDS)) {
+      if (!closeDone.await(Math.max(budget, 1), TimeUnit.MILLISECONDS)
+          && closeDone.getCount() != 0) {
         return new ToolServiceFailureException("LSP service close did not converge in time");
       }
     } catch (InterruptedException error) {
       Thread.currentThread().interrupt();
-      return new ToolServiceFailureException(
-          "LSP service close was interrupted before it converged");
+      if (closeDone.getCount() != 0) {
+        return new ToolServiceFailureException(
+            "LSP service close was interrupted before it converged");
+      }
     }
     return closeFailure;
   }
@@ -470,12 +473,15 @@ final class LspClientPool implements AutoCloseable {
   /** 等一个启动的完成结论；超时说明它没能证明收敛，不能当成已经静止。 */
   private Throwable awaitBootCompletion(Boot boot) {
     try {
-      if (!boot.settled.await(bootBudgetMillis(), TimeUnit.MILLISECONDS)) {
+      if (!boot.settled.await(bootBudgetMillis(), TimeUnit.MILLISECONDS)
+          && boot.settled.getCount() != 0) {
         return new ToolServiceFailureException("LSP client startup did not converge in time");
       }
     } catch (InterruptedException error) {
       Thread.currentThread().interrupt();
-      return new ToolServiceFailureException("LSP service close was interrupted");
+      if (boot.settled.getCount() != 0) {
+        return new ToolServiceFailureException("LSP service close was interrupted");
+      }
     }
     return boot.terminalFailure;
   }
@@ -562,7 +568,8 @@ final class LspClientPool implements AutoCloseable {
   /**
    * 一次进行中的启动：等待者共享同一个交付结果。
    *
-   * <p>{@link #result} 是调用方看到的结果，{@link #settled} 是「这次启动真正结束、它拥有的物理资源都已经收敛」这一事实； 关闭先取消结果，再等事实。
+   * <p>{@link #result} 是调用方看到的交付，{@link #settled} 表示启动路径已经结束并发布了终结结论，不单独代表资源已经收敛；
+   * 关闭先取消交付，再等待终结结论与已构造客户端的真实停止。
    *
    * <p>{@link #terminalFailure} 是终结该 key 的失败：致命启动失败（{@link Error}），或清理没能证明收敛（ {@link
    * LspClient#startupCleanupFailed(Throwable)}）。它不是 {@code null} 时这次启动登记会一直保留到 close， 因此同 key
