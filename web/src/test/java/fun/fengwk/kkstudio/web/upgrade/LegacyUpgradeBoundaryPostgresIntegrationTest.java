@@ -21,13 +21,9 @@ import java.util.Map;
 import java.util.function.Supplier;
 
 /**
- * J4 转换内核在真实 PostgreSQL 17 上的守卫与凭据失败关闭边界：源端排空判据、源端目录与 settings 读取的真实 SQL 故障、目标迁移历史里多出的 repeatable
- * 记录，以及旧凭据重封装与静态密钥写入的凭据边界，都必须以固定阶段拒绝，并且目标真正 pristine、连接与语句全部释放、源端零写入。
+ * 真实 PostgreSQL 17 上的转换守卫与凭据失败关闭回归：固定阶段拒绝、目标原子回滚、资源释放与源端零写入。
  *
- * <p>除「删掉源端唯一 canonical settings 行」「删掉旧凭据行」「往目标历史里插一条 repeatable 记录」这三种真实数据变异外，其余用例只用一个窄故障探针把指定的源端
- * SQL 替换成真实 {@link SQLException}（其余调用仍是真实连接、真实事务与真实 SQL），因此覆盖的是内核真实 JDBC 故障分支而不是伪造的 SQLState。
- *
- * <p>包内可见（package-private）：它只是升级测试的失败关闭事实，不是生产代码。
+ * <p>数据变异作用于独立测试库；通信故障由窄 JDBC 探针注入 SQLException，其余操作仍委托真实连接，不伪造数据库约束行为。
  */
 class LegacyUpgradeBoundaryPostgresIntegrationTest {
 
@@ -154,11 +150,15 @@ class LegacyUpgradeBoundaryPostgresIntegrationTest {
           fixture.convertExpectingSafeFailure(null, LegacyUpgradeSourceFixture.staticSecrets());
       assertEquals(LegacyDatabaseUpgradeException.Stage.CREDENTIAL, error.stage());
       assertFailClosed(fixture, error, before);
+      assertTrue(
+          fixture.targetProbe().sawEvent("execute:update plugin_catalog_state"),
+          "the static credential refusal must follow a real catalog CAS attempt");
+      assertEquals(1, fixture.targetProbe().countEvents("rollback"));
       assertEquals(
           0L,
           UpgradePostgresTestSupport.longValue(
               fixture.target(), "select epoch from plugin_catalog_state where id = 1"),
-          "the committed-by-CAS epoch must be rolled back with the rest of the target writes");
+          "the CAS-advanced epoch must be rolled back with the rest of the target writes");
     } finally {
       fixture.release();
     }
@@ -177,6 +177,10 @@ class LegacyUpgradeBoundaryPostgresIntegrationTest {
               TARGET_KEY, LegacyUpgradeSourceFixture.staticSecrets());
       assertEquals(LegacyDatabaseUpgradeException.Stage.CREDENTIAL, error.stage());
       assertFailClosed(fixture, error, before);
+      assertTrue(
+          fixture.targetProbe().sawEvent("execute:update plugin_catalog_state"),
+          "the legacy credential read refusal must follow a real catalog CAS attempt");
+      assertEquals(1, fixture.targetProbe().countEvents("rollback"));
       assertEquals(
           0L,
           UpgradePostgresTestSupport.longValue(

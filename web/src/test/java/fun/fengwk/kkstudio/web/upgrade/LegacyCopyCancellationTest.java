@@ -29,10 +29,6 @@ import java.util.List;
 /**
  * {@link LegacyTableCopy#binary} 多重取消失败的纯仲裁回归：用 Mockito 句柄驱动 primary 失败与两个取消失败，核对优先级与 identity。
  *
- * <p>固定形态：primary Error 保持 identity 并依次压制两个取消 Error；primary 是非 Error 的原始 SQLException 时由首个取消 Error
- * 提升为 主失败，原始 SQL 只以固定安全包装入链、绝不被 raw 暴露；primary 与唯一取消 Error 同实例时既不自压制也不被取代；两个取消 Error 是同一实例时
- * 只加入一次；copyIn 取消成功而 copyOut 取消抛 Error 时该 Error 仍抛出，且两个句柄都被取消。
- *
  * <p>这些用例只断言异常仲裁语义，不声称任何真实 PostgreSQL 协议行为：真实的 COPY OUT/IN 运输、外键/唯一约束拒绝与连接回滚由 {@link
  * LegacyTableCopyPostgresIntegrationTest} 覆盖。
  */
@@ -208,7 +204,7 @@ class LegacyCopyCancellationTest {
     return visited;
   }
 
-  /** binary 运输的句式柄：源/目标连接已 unwrap，且 copyOut/copyIn 已按调用返回。 */
+  /** 已配置 binary COPY 双端句柄的测试现场。 */
   private record CopyHarness(
       Connection source, Connection target, CopyOut copyOut, CopyIn copyIn) {}
 }
