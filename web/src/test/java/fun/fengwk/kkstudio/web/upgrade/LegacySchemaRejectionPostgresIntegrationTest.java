@@ -130,6 +130,13 @@ class LegacySchemaRejectionPostgresIntegrationTest {
             "main",
             "SOURCE_PROFILE",
             builtinOperator()),
+        // 只装进 pg_catalog 的 contrib extension：public namespace 完全看不到它。
+        drift("extension installed into pg_catalog", "dev", "SOURCE_PROFILE", catalogExtension()),
+        drift(
+            "extension installed into pg_catalog on the MAIN source",
+            "main",
+            "SOURCE_PROFILE",
+            catalogExtension()),
         drift(
             "unknown sequence", "dev", "SOURCE_PROFILE", "create sequence unknown_extra_sequence"),
         drift("unknown namespace", "dev", "SOURCE_PROFILE", "create schema unknown_extra_schema"),
@@ -324,6 +331,11 @@ class LegacySchemaRejectionPostgresIntegrationTest {
             "TARGET_SCHEMA",
             builtinOperator()),
         drift(
+            "target extension installed into pg_catalog",
+            "dev",
+            "TARGET_SCHEMA",
+            catalogExtension()),
+        drift(
             "extra target column",
             "dev",
             "TARGET_SCHEMA",
@@ -388,6 +400,14 @@ class LegacySchemaRejectionPostgresIntegrationTest {
   }
 
   /**
+   * 只装进 {@code pg_catalog} 的 contrib extension（PG17 官方镜像自带 postgres_fdw）：extension 自身与它的对象都不在
+   * public namespace，因此只有按 extension 目录而不是按 public 对象枚举才能发现。
+   */
+  private static String catalogExtension() {
+    return "create extension postgres_fdw with schema pg_catalog";
+  }
+
+  /**
    * 把一张真实表上某个内部 RI trigger 置为 Replica 状态：只改这一个真实外部键约束触发器的状态，绝不插数据、不动其它触发器，也不把动态 trigger 名写进任何 指纹。
    */
   private static String replicaRiTrigger(String table) {
@@ -448,7 +468,12 @@ class LegacySchemaRejectionPostgresIntegrationTest {
     }
   }
 
-  /** 目标「无写入」的目录对照：public 内的关系、类型、routine 数量与真实迁移历史行数。任何 DDL、迁移元数据或新对象都会改变它，且绝不回显对象名或行。 */
+  /**
+   * 目标「无写入」的对照，但只覆盖列出的类别：public 内关系、类型、routine、public namespace 依赖与真实迁移历史行数。
+   *
+   * <p>它能证明拒绝没有追加这些类别的对象或迁移记录，**不等价于「schema 完全未变」**：其它类别的对象（例如仅落在 pg_catalog 的
+   * extension、operator、collation）不在其中，原地改写也可能让每个计数保持不变。
+   */
   private static List<Long> targetCatalogCounts(DataSource target) throws SQLException {
     return List.of(
         UpgradePostgresTestSupport.longValue(
@@ -463,12 +488,17 @@ class LegacySchemaRejectionPostgresIntegrationTest {
             target,
             "select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace"
                 + " where n.nspname = 'public'"),
+        UpgradePostgresTestSupport.longValue(
+            target,
+            "select count(*) from pg_depend d join pg_namespace n on n.oid = d.refobjid"
+                + " where d.refclassid = 'pg_namespace'::regclass and n.nspname = 'public'"),
         UpgradePostgresTestSupport.count(target, "flyway_schema_history"));
   }
 
   private static void assertCatalogCounts(DataSource target, List<Long> expected)
       throws SQLException {
-    assertEquals(expected, targetCatalogCounts(target), "the target catalog must be unchanged");
+    assertEquals(
+        expected, targetCatalogCounts(target), "the listed target catalog counts must match");
   }
 
   private static SecretKey key(int fill) {
