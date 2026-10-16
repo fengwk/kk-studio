@@ -7,6 +7,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.cfg.JsonNodeFeature;
 import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.runtime.history.EntryType;
@@ -72,6 +73,12 @@ final class LegacyHarnessHistoryJson {
       "legacy provider replay state carries an unknown provider type";
   static final String REPLAY_TARGET_REJECTED =
       "provider replay state is rejected by the current codec";
+  static final String PROVIDER_TYPE_REQUIRED = "legacy provider type is required";
+  static final String PROVIDER_TYPE_UNKNOWN = "legacy provider type is not a known wire value";
+  static final String RECEIPT_MALFORMED =
+      "legacy stop receipt cancelled inputs are not valid strict JSON";
+  static final String RECEIPT_NOT_LEGACY =
+      "legacy stop receipt cancelled inputs are not the exact source shape";
 
   private static final ObjectMapper MAPPER =
       JsonMapper.builder()
@@ -106,6 +113,10 @@ final class LegacyHarnessHistoryJson {
           "reason",
           "inputReceipt",
           "invocationId");
+
+  /** 旧 stop 回执 {@code cancelled_inputs} 每项的冻结 4 键。 */
+  private static final Set<String> CANCELLED_INPUT_FIELDS =
+      Set.of("sequence", "idempotencyKey", "type", "payload");
 
   /** 已知第一方 goal 进度声明的 CUSTOM 组合：{@code builtin/goal.progress}。 */
   private static final String GOAL_PROGRESS_CONTRIBUTOR_ID = "builtin";
@@ -213,7 +224,7 @@ final class LegacyHarnessHistoryJson {
     String wire = providerTypeWire(affinity);
     String upgraded = json;
     if (LEGACY_OPENAI_RESPONSE_WIRE.equals(wire)) {
-      affinity.put("providerType", ProviderType.OPENAI_RESPONSES.wireValue());
+      affinity.put("providerType", providerType(wire));
       upgraded = write(root);
     } else {
       requireKnownProviderType(wire);
@@ -224,6 +235,74 @@ final class LegacyHarnessHistoryJson {
       throw new IllegalArgumentException(REPLAY_TARGET_REJECTED);
     }
     return upgraded;
+  }
+
+  /**
+   * 把旧 provider wire 值归一化为当前值：只有已确认的历史别名 {@code openai_response} 改名为 {@code
+   * openai_responses}，其余已知值原样返回，未知值拒绝。
+   *
+   * <p>这是 provider 别名转换的唯一规则，同时供 agent_provider 列与 replay {@code affinity.providerType}
+   * 使用；绝不做全局字符串替换，也不会改写 config 里同名的字面量。
+   */
+  static String providerType(String wire) {
+    if (wire == null || wire.isBlank()) {
+      throw new IllegalArgumentException(PROVIDER_TYPE_REQUIRED);
+    }
+    if (LEGACY_OPENAI_RESPONSE_WIRE.equals(wire)) {
+      return ProviderType.OPENAI_RESPONSES.wireValue();
+    }
+    try {
+      return ProviderType.fromWireValue(wire).wireValue();
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException(PROVIDER_TYPE_UNKNOWN);
+    }
+  }
+
+  /**
+   * 校验一条旧 stop 回执的 {@code cancelled_inputs} 原文：严格 array，每项精确 4 键，sequence 是可表示的正
+   * long、idempotencyKey 是 UUID、type 是合法枚举，嵌套 payload 复用同一 command helper 与其 known state 检查。整个原 JSON
+   * 一字不改。
+   */
+  static String stopReceiptCancelledInputs(String json) {
+    JsonNode root = parse(json, RECEIPT_MALFORMED);
+    if (!(root instanceof ArrayNode array)) {
+      throw new IllegalArgumentException(RECEIPT_MALFORMED);
+    }
+    for (JsonNode item : array) {
+      requireCancelledInput(item);
+    }
+    return json;
+  }
+
+  /** 旧 {@code cancelled_inputs} 单项：键集、sequence 范围、UUID、命令枚举与嵌套 payload 全部按源形态校验。 */
+  private static void requireCancelledInput(JsonNode item) {
+    if (!(item instanceof ObjectNode object) || !names(object).equals(CANCELLED_INPUT_FIELDS)) {
+      throw new IllegalArgumentException(RECEIPT_NOT_LEGACY);
+    }
+    JsonNode sequence = object.get("sequence");
+    if (sequence == null
+        || !sequence.isIntegralNumber()
+        || !sequence.canConvertToLong()
+        || sequence.longValue() <= 0) {
+      throw new IllegalArgumentException(RECEIPT_NOT_LEGACY);
+    }
+    try {
+      UUID.fromString(stringValue(object, "idempotencyKey", RECEIPT_NOT_LEGACY));
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException(RECEIPT_NOT_LEGACY);
+    }
+    String type = stringValue(object, "type", RECEIPT_NOT_LEGACY);
+    ThreadCommandType commandType;
+    try {
+      commandType = ThreadCommandType.valueOf(type);
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException(RECEIPT_NOT_LEGACY);
+    }
+    JsonNode payload = object.get("payload");
+    if (!(payload instanceof ObjectNode payloadObject)) {
+      throw new IllegalArgumentException(RECEIPT_NOT_LEGACY);
+    }
+    threadCommandPayload(commandType, write(payloadObject));
   }
 
   /** 已知 CUSTOM Entry 的 producer 语义校验：先按原始身份字段判定组合，再校验旧 data，未知组合 fail closed。 */

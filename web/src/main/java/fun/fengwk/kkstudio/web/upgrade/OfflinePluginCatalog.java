@@ -18,6 +18,8 @@ import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
 import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
 import fun.fengwk.kkstudio.platform.plugin.catalog.OfflinePluginHost;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogBootstrap;
+import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRecord;
+import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogSnapshot;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialReference;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialStore;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRepository;
@@ -216,6 +218,21 @@ final class OfflinePluginCatalog implements AutoCloseable {
         contexts,
         builtins,
         builtinAdapters);
+  }
+
+  /**
+   * 用同一份真实装配按已初始化的权威 record 严格恢复目录：内部调用自身 bootstrap 的公开 restore 并传入实际 contexts / builtins /
+   * builtinAdapters，绝不外部猜空 adapters 或新增 registry。
+   *
+   * @param catalog 事务内真实仓储回读出的已初始化 catalog record（epoch 必须 &gt; 0）
+   * @return 现场恢复的快照；所有权交给调用方关闭
+   * @throws IllegalStateException 上下文已关闭或 record 与真实装配不一致时
+   */
+  PluginCatalogSnapshot restore(PluginCatalogRecord catalog) {
+    if (!context.isActive()) {
+      throw new IllegalStateException("offline plugin catalog context is closed");
+    }
+    return bootstrap.restore(catalog, contexts, builtins, builtinAdapters);
   }
 
   /** 只关闭装配自己创建的上下文资源（含全局代理 selector 恢复）；候选快照始终由调用方关闭。 */

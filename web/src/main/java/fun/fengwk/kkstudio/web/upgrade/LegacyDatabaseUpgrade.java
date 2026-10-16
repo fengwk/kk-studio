@@ -1,0 +1,997 @@
+package fun.fengwk.kkstudio.web.upgrade;
+
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.jdbc.datasource.SingleConnectionDataSource;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.TransactionStatus;
+import org.springframework.transaction.support.DefaultTransactionDefinition;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+
+import fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlHarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryType;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
+import fun.fengwk.kkstudio.platform.catalog.definition.repo.impl.PostgresqlAgentDefinitionRepository;
+import fun.fengwk.kkstudio.platform.catalog.definition.repo.impl.store.AgentDefinitionJdbcStore;
+import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
+import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogBootstrap;
+import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRecord;
+import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogSnapshot;
+import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialReference;
+import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRepository;
+import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRow;
+import fun.fengwk.kkstudio.platform.plugin.persistence.PluginCredentialRepository;
+import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.PostgresqlPluginCatalogChangeNotifier;
+import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.PostgresqlPluginConfigurationRepository;
+import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.PostgresqlPluginCredentialRepository;
+import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.store.PluginConfigurationJdbcStore;
+import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.store.PluginCredentialJdbcStore;
+import fun.fengwk.kkstudio.platform.plugin.service.PluginAgentDependencies;
+import fun.fengwk.kkstudio.platform.settings.SystemSettings;
+import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
+
+import javax.crypto.SecretKey;
+import javax.sql.DataSource;
+
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
+import java.time.Clock;
+import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.UUID;
+
+/**
+ * 离线原子数据库转换内核：把旧部署的 41 张共有表按已验证 FK 拓扑复制进当前 V1 目标库，并把旧 Plugin 配置、settings 与凭据封装成当前契约。
+ *
+ * <p>两个连接都必须是无遗留事务的普通连接：源以只读 {@code REPEATABLE READ} 一致快照打开，目标只取一个物理连接并在其上独占一个写事务，真实 Spring
+ * 仓储/Store 与 COPY 共用该事务。两边的 session 前置（PG17、UTF8、origin 复制角色、search_path / DateStyle / UTC /
+ * row_security 与真实可写性）在各自事务内验证，绝不复制两套逻辑也绝不假设默认值。
+ *
+ * <p>只接受 DEV / MAIN 的冻结 schema 指纹与对应 Flyway V1 校验和（源与目标都校验），目标必须是唯一 pristine 形态并带着当前唯一成功的 V1 历史。
+ * 候选快照与离线装配在提交前释放，释放失败走真实回滚；提交/回滚通信失败或提交后关闭连接失败才标为结果需核验。异常只报告固定阶段与固定原因。
+ *
+ * <p>包内可见（package-private）：离线升级包内部的转换内核，不装配进常驻 Web 运行时。
+ */
+final class LegacyDatabaseUpgrade {
+
+  private static final SystemSettingsCodec SETTINGS_CODEC = new SystemSettingsCodec();
+
+  /** 当前目标目录未初始化 epoch；转换只从它推进到 1，绝不覆盖已有已初始化目录。 */
+  private static final long UNINITIALIZED_EPOCH = 0L;
+
+  private static final String SYSTEM_SETTING = "system_setting";
+
+  private static final String PLUGIN_CREDENTIAL = "plugin_credential";
+
+  private static final String AGENT_PROVIDER = "agent_provider";
+
+  private static final String HARNESS_ENTRY = "harness_entry";
+
+  private static final String HARNESS_THREAD_COMMAND = "harness_thread_command";
+
+  private static final String HARNESS_THREAD_STOP_RECEIPT = "harness_thread_stop_receipt";
+
+  private LegacyDatabaseUpgrade() {}
+
+  /**
+   * 执行一次完整转换。
+   *
+   * @param sourceDataSource 旧部署句柄；本调用自行取得只读一致快照并关闭
+   * @param targetDataSource 目标句柄；本调用只取一个物理连接并在其上独占一个写事务
+   * @param sourceKey 读取旧 format 1 凭据的主密钥；没有旧凭据行时可为 null
+   * @param targetKey 写入当前 format 2 凭据的主密钥；没有任何凭据可写时可为 null
+   * @param staticSecretsByPlugin 显式静态密钥材料（pluginId → 字段名到真实值）；没有材料的插件省略
+   * @param dryRun 为 true 时执行同一写入与验证路径后回滚，目标保持 pristine
+   * @param clock 新增静态凭据创建/更新时刻的来源
+   * @return 只含 profile、逐表行数与对账数量的不可变小结果
+   * @throws LegacyDatabaseUpgradeException 任何阶段失败（固定阶段与固定原因；提交/回滚结果未知时 {@code outcomeUncertain} 为
+   *     true）
+   */
+  static LegacyDatabaseUpgradeResult convert(
+      DataSource sourceDataSource,
+      DataSource targetDataSource,
+      SecretKey sourceKey,
+      SecretKey targetKey,
+      Map<String, Map<String, String>> staticSecretsByPlugin,
+      boolean dryRun,
+      Clock clock) {
+    Objects.requireNonNull(sourceDataSource, "sourceDataSource");
+    Objects.requireNonNull(targetDataSource, "targetDataSource");
+    Objects.requireNonNull(staticSecretsByPlugin, "staticSecretsByPlugin");
+    Objects.requireNonNull(clock, "clock");
+    if (TransactionSynchronizationManager.isActualTransactionActive()) {
+      throw new LegacyDatabaseUpgradeException(
+          LegacyDatabaseUpgradeException.Stage.TARGET_TRANSACTION,
+          "the converter does not accept an ambient transaction");
+    }
+    Connection source = null;
+    Connection target = null;
+    try {
+      source = openIdleConnection(sourceDataSource);
+      target = openIdleConnection(targetDataSource);
+    } catch (LegacyDatabaseUpgradeException | Error error) {
+      releaseConnections(error, target, source);
+      throw error;
+    } catch (RuntimeException error) {
+      releaseConnections(error, target, source);
+      throw new LegacyDatabaseUpgradeException(
+          LegacyDatabaseUpgradeException.Stage.CONNECTION, "cannot open the upgrade databases");
+    }
+    Throwable failure = null;
+    try {
+      return run(source, target, sourceKey, targetKey, staticSecretsByPlugin, dryRun, clock);
+    } catch (Throwable error) {
+      failure = error;
+      throw error;
+    } finally {
+      releaseConnections(failure, target, source);
+    }
+  }
+
+  private static LegacyDatabaseUpgradeResult run(
+      Connection source,
+      Connection target,
+      SecretKey sourceKey,
+      SecretKey targetKey,
+      Map<String, Map<String, String>> staticSecretsByPlugin,
+      boolean dryRun,
+      Clock clock) {
+    beginSourceSnapshot(source);
+    String profile = LegacySchemaProfile.identify(LegacySchemaProfile.fingerprint(source));
+    LegacySchemaProfile.requireSourceHistory(source, profile);
+    LegacySourceGuard.requireDrained(source);
+    LegacySourceGuard.SourceSettings systemSetting = LegacySourceGuard.readSystemSetting(source);
+    SourceFacts facts =
+        new SourceFacts(
+            parseSettings(systemSetting.config()),
+            systemSetting,
+            profile,
+            LegacySourceGuard.retiredClusterNodeRows(source));
+
+    SingleConnectionDataSource scoped = new SingleConnectionDataSource(target, true);
+    PlatformTransactionManager transactionManager = new DataSourceTransactionManager(scoped);
+    TransactionStatus transaction = null;
+    OfflinePluginCatalog catalog = null;
+    PluginCatalogBootstrap.PreparedInitial prepared = null;
+    Throwable failure = null;
+    try {
+      transaction = openTargetTransaction(transactionManager);
+      beginTargetSession(target);
+      catalog = OfflinePluginCatalog.open(scoped, facts.settings().settings());
+      StudioPluginRegistry registry = catalog.registry();
+      LegacyStaticCredentials staticCredentials =
+          LegacyStaticCredentials.validate(registry, staticSecretsByPlugin);
+      prepared =
+          prepareInitial(
+              catalog,
+              pluginValues(facts.settings(), registry, staticCredentials),
+              staticCredentials.configuredSecretFields(registry));
+      CatalogCandidate candidate =
+          new CatalogCandidate(scoped, catalog, registry, prepared, staticCredentials);
+      ConversionCounts counts =
+          writeTarget(
+              source,
+              target,
+              scoped,
+              transactionManager,
+              candidate,
+              new CredentialKeys(sourceKey, targetKey),
+              facts,
+              clock);
+      // 候选与离线装配的所有权在此交出：只有它们真的释放成功才允许提交。
+      PluginCatalogSnapshot pendingSnapshot = prepared.snapshot();
+      OfflinePluginCatalog pendingCatalog = catalog;
+      catalog = null;
+      prepared = null;
+      releaseBeforeCommit(pendingSnapshot, pendingCatalog);
+      commitOrRollback(transactionManager, transaction, dryRun);
+      transaction = null;
+      afterTargetTransaction(target, !dryRun);
+      return new LegacyDatabaseUpgradeResult(
+          facts.profile(),
+          !dryRun,
+          counts.rowCounts(),
+          facts.retiredClusterNodeRows(),
+          counts.rewrittenCredentials(),
+          counts.installedStaticCredentials());
+    } catch (Throwable error) {
+      failure = error;
+      throw error;
+    } finally {
+      releaseAfterFailure(failure, transactionManager, transaction, catalog, prepared);
+    }
+  }
+
+  /** 目标写事务之外仍需的一组源端事实；只是参数收敛。 */
+  private record SourceFacts(
+      LegacySystemSettings settings,
+      LegacySourceGuard.SourceSettings systemSetting,
+      String profile,
+      long retiredClusterNodeRows) {}
+
+  /** 一次转换的目录候选身份：epoch 1 的 manifest/revision 都从同一份真实装配与同一目标事务派生。 */
+  private record CatalogCandidate(
+      DataSource scoped,
+      OfflinePluginCatalog catalog,
+      StudioPluginRegistry registry,
+      PluginCatalogBootstrap.PreparedInitial prepared,
+      LegacyStaticCredentials staticCredentials) {}
+
+  private record CredentialKeys(SecretKey sourceKey, SecretKey targetKey) {}
+
+  /** 逐表目标行数与两类凭据写入数量。 */
+  private record ConversionCounts(
+      Map<String, Long> rowCounts, long rewrittenCredentials, long installedStaticCredentials) {}
+
+  private static ConversionCounts writeTarget(
+      Connection source,
+      Connection target,
+      DataSource scoped,
+      PlatformTransactionManager transactionManager,
+      CatalogCandidate candidate,
+      CredentialKeys keys,
+      SourceFacts facts,
+      Clock clock) {
+    try {
+      lockCanonicalTables(target);
+      LegacySchemaProfile.requireTarget(target);
+      requirePristineTarget(target);
+
+      Map<String, Long> counts = new LinkedHashMap<>();
+      long legacyCredentialRows = 0;
+      for (String table : LegacySchemaProfile.parentFirstOrder(target)) {
+        long sourceRows = count(source, "select count(*) from " + table);
+        if (SYSTEM_SETTING.equals(table)) {
+          convertSystemSetting(target, facts.settings().settings(), facts.systemSetting());
+          reconcile(counts, table, count(target, "select count(*) from " + table), sourceRows);
+          continue;
+        }
+        if (PLUGIN_CREDENTIAL.equals(table)) {
+          legacyCredentialRows = sourceRows;
+          continue;
+        }
+        List<String> columns = copyColumns(source, target, table);
+        long copied;
+        if (AGENT_PROVIDER.equals(table)) {
+          copied =
+              LegacyTableCopy.text(
+                  source, target, table, columns, LegacyDatabaseUpgrade::providerRow);
+        } else if (HARNESS_ENTRY.equals(table)) {
+          copied =
+              LegacyTableCopy.text(source, target, table, columns, LegacyDatabaseUpgrade::entryRow);
+        } else {
+          validateMailboxPayloads(source, table);
+          copied = LegacyTableCopy.binary(source, target, table, columns);
+        }
+        long targetRows = count(target, "select count(*) from " + table);
+        if (copied >= 0 && copied != targetRows) {
+          throw new LegacyDatabaseUpgradeException(
+              LegacyDatabaseUpgradeException.Stage.TARGET_WRITE,
+              "a copied table does not match its server confirmed row count");
+        }
+        reconcile(counts, table, targetRows, sourceRows);
+      }
+
+      initializeCatalog(candidate);
+      Map<String, PluginCredentialReference> references =
+          credentialReferences(candidate.prepared());
+      long rewritten =
+          LegacyPluginCredentials.rewriteLegacy(
+              source,
+              credentialRepository(scoped),
+              candidate.registry(),
+              references,
+              keys.sourceKey(),
+              keys.targetKey());
+      long installedStatic =
+          LegacyPluginCredentials.installStatic(
+              credentialRepository(scoped),
+              candidate.staticCredentials(),
+              references,
+              keys.targetKey(),
+              clock.instant().truncatedTo(ChronoUnit.MILLIS));
+      reconcile(
+          counts,
+          PLUGIN_CREDENTIAL,
+          count(target, "select count(*) from " + PLUGIN_CREDENTIAL),
+          legacyCredentialRows + installedStatic);
+
+      verifyCatalogRestore(catalogRepository(scoped), candidate.catalog(), candidate.prepared());
+      verifyHarness(scoped, transactionManager, target);
+      return new ConversionCounts(counts, rewritten, installedStatic);
+    } catch (LegacyDatabaseUpgradeException error) {
+      throw error;
+    } catch (SQLException error) {
+      throw new LegacyDatabaseUpgradeException(
+          LegacyDatabaseUpgradeException.Stage.TARGET_WRITE, "the target conversion failed");
+    } catch (RuntimeException error) {
+      throw new LegacyDatabaseUpgradeException(
+          LegacyDatabaseUpgradeException.Stage.CONVERT,
+          "the converted data was rejected while writing the target");
+    }
+  }
+
+  /** 导完 Agent 后、目录 CAS 之前先按真实仓储锁住并核验普通值声明的 Agent 依赖，再赢得 epoch 0 → 1 的唯一 CAS。 */
+  private static void initializeCatalog(CatalogCandidate candidate) {
+    PluginConfigurationRepository repository = catalogRepository(candidate.scoped());
+    PluginCatalogBootstrap.PreparedInitial prepared = candidate.prepared();
+    try {
+      PluginAgentDependencies dependencies =
+          new PluginAgentDependencies(
+              candidate.registry(),
+              repository,
+              new PostgresqlAgentDefinitionRepository(
+                  new AgentDefinitionJdbcStore(JdbcClient.create(candidate.scoped()))));
+      List<PluginAgentDependencies.Declaration> declarations = new ArrayList<>();
+      for (PluginConfigurationRow row : prepared.configurationRows()) {
+        declarations.add(
+            new PluginAgentDependencies.Declaration(
+                row.pluginId(), row.revision(), row.valuesJson()));
+      }
+      dependencies.requireDeclaredAgents(declarations);
+      if (!repository.commit(
+          UNINITIALIZED_EPOCH, prepared.configurationRows(), prepared.manifest())) {
+        throw new LegacyDatabaseUpgradeException(
+            LegacyDatabaseUpgradeException.Stage.CATALOG,
+            "the target catalog epoch CAS did not win");
+      }
+    } catch (LegacyDatabaseUpgradeException error) {
+      throw error;
+    } catch (RuntimeException error) {
+      throw new LegacyDatabaseUpgradeException(
+          LegacyDatabaseUpgradeException.Stage.CATALOG,
+          "the target plugin catalog could not be initialized");
+    }
+  }
+
+  /** 提交前从事务内真实仓储回读，用正常严格 restore 校验完整身份、指纹与逐配置行都与候选一致。 */
+  private static void verifyCatalogRestore(
+      PluginConfigurationRepository repository,
+      OfflinePluginCatalog catalog,
+      PluginCatalogBootstrap.PreparedInitial prepared) {
+    PluginCatalogRecord record = repository.readCatalog();
+    if (record == null || record.epoch() != 1L) {
+      throw new LegacyDatabaseUpgradeException(
+          LegacyDatabaseUpgradeException.Stage.CATALOG,
+          "the committed target catalog is not the first initialized epoch");
+    }
+    try (PluginCatalogSnapshot actual = catalog.restore(record)) {
+      for (PluginConfigurationRow row : prepared.configurationRows()) {
+        PluginConfigurationRow persisted =
+            repository
+                .readConfiguration(row.pluginId(), row.revision())
+                .orElseThrow(
+                    () ->
+                        new LegacyDatabaseUpgradeException(
+                            LegacyDatabaseUpgradeException.Stage.CATALOG,
+                            "a committed target configuration row is missing"));
+        if (!persisted.equals(row)) {
+          throw new LegacyDatabaseUpgradeException(
+              LegacyDatabaseUpgradeException.Stage.CATALOG,
+              "a committed target configuration row does not match the candidate");
+        }
+      }
+      PluginCatalogSnapshot expected = prepared.snapshot();
+      if (actual.epoch() != expected.epoch()
+          || !Objects.equals(actual.catalogFingerprint(), expected.catalogFingerprint())
+          || !actual.capabilityFingerprints().equals(expected.capabilityFingerprints())) {
+        throw new LegacyDatabaseUpgradeException(
+            LegacyDatabaseUpgradeException.Stage.VERIFY,
+            "the restored target catalog identity differs from the candidate");
+      }
+      List<PluginCatalogSnapshot.ConfiguredPlugin> restoredPlugins = actual.configuredPlugins();
+      List<PluginCatalogSnapshot.ConfiguredPlugin> expectedPlugins = expected.configuredPlugins();
+      if (restoredPlugins.size() != expectedPlugins.size()) {
+        throw new LegacyDatabaseUpgradeException(
+            LegacyDatabaseUpgradeException.Stage.VERIFY,
+            "the restored target catalog does not cover the installed plugins");
+      }
+      for (int index = 0; index < expectedPlugins.size(); index++) {
+        PluginCatalogSnapshot.ConfiguredPlugin expectedPlugin = expectedPlugins.get(index);
+        PluginCatalogSnapshot.ConfiguredPlugin restoredPlugin = restoredPlugins.get(index);
+        if (!expectedPlugin.descriptor().equals(restoredPlugin.descriptor())
+            || expectedPlugin.config().revision() != restoredPlugin.config().revision()
+            || !expectedPlugin.config().valuesJson().equals(restoredPlugin.config().valuesJson())
+            || !expectedPlugin.credentialReference().equals(restoredPlugin.credentialReference())) {
+          throw new LegacyDatabaseUpgradeException(
+              LegacyDatabaseUpgradeException.Stage.VERIFY,
+              "a restored target plugin identity differs from the candidate");
+        }
+      }
+    }
+  }
+
+  /** 逐 Thread 流式读回祖先路径与 typed payload，并拒绝任何仍未关闭的 Turn；表锁已在目标写事务内取得。 */
+  private static void verifyHarness(
+      DataSource scoped, PlatformTransactionManager transactionManager, Connection target) {
+    PostgresqlHarnessStore store =
+        new PostgresqlHarnessStore(scoped, transactionManager, UUID::randomUUID);
+    store.transaction(
+        transaction -> {
+          try (PreparedStatement statement =
+                  target.prepareStatement(
+                      "select id, head_entry_id from harness_thread order by id");
+              ResultSet rows = statement.executeQuery()) {
+            statement.setFetchSize(LegacyTableCopy.FETCH_SIZE);
+            while (rows.next()) {
+              UUID threadId = UUID.fromString(rows.getString(1));
+              UUID headEntryId = UUID.fromString(rows.getString(2));
+              if (transaction.findThread(threadId).isEmpty()) {
+                throw new LegacyDatabaseUpgradeException(
+                    LegacyDatabaseUpgradeException.Stage.VERIFY,
+                    "a converted thread could not be read back from the current store");
+              }
+              transaction.loadCommandsByThread(threadId);
+              transaction.loadStopReceiptsByThread(threadId);
+              EntryPath path = transaction.loadEntryPath(headEntryId);
+              if (path.openTurnStart().isPresent()) {
+                throw new LegacyDatabaseUpgradeException(
+                    LegacyDatabaseUpgradeException.Stage.VERIFY,
+                    "a converted thread still has an open turn");
+              }
+            }
+          } catch (SQLException error) {
+            throw new LegacyDatabaseUpgradeException(
+                LegacyDatabaseUpgradeException.Stage.VERIFY,
+                "cannot read back the converted harness threads");
+          }
+          return null;
+        });
+  }
+
+  private static Map<String, PluginCredentialReference> credentialReferences(
+      PluginCatalogBootstrap.PreparedInitial prepared) {
+    Map<String, PluginCredentialReference> references = new LinkedHashMap<>();
+    for (PluginCatalogSnapshot.ConfiguredPlugin plugin : prepared.snapshot().configuredPlugins()) {
+      references.put(plugin.descriptor().pluginId(), plugin.credentialReference());
+    }
+    return references;
+  }
+
+  /** agent_provider 只改写 provider_type 的旧 wire 值，其余列原样。 */
+  private static List<String> providerRow(ResultSet row) throws SQLException {
+    return Arrays.asList(
+        row.getString("name"),
+        row.getString("description"),
+        LegacyHarnessHistoryJson.providerType(row.getString("provider_type")),
+        row.getString("base_url"),
+        row.getString("credential"),
+        row.getString("config"),
+        row.getString("connection_generation_id"),
+        row.getString("created_at"),
+        row.getString("updated_at"),
+        row.getString("version"));
+  }
+
+  /** harness_entry 只经已有 entryPayload / providerReplayState 两处变换，其余列原样。 */
+  private static List<String> entryRow(ResultSet row) throws SQLException {
+    String entryType = row.getString("entry_type");
+    EntryType type;
+    try {
+      type = EntryType.valueOf(entryType);
+    } catch (RuntimeException error) {
+      throw new LegacyDatabaseUpgradeException(
+          LegacyDatabaseUpgradeException.Stage.CONVERT,
+          "legacy history entry carries an unknown type");
+    }
+    return Arrays.asList(
+        row.getString("id"),
+        row.getString("session_id"),
+        row.getString("parent_entry_id"),
+        entryType,
+        LegacyHarnessHistoryJson.entryPayload(type, row.getString("payload")),
+        row.getString("created_at"),
+        LegacyHarnessHistoryJson.providerReplayState(row.getString("provider_replay_state")));
+  }
+
+  /** 逐行流式校验两张带结构化 JSON 的表：命令 payload 与 stop 回执的嵌套命令都按真实 codec 验证，字节不改写。 */
+  private static void validateMailboxPayloads(Connection source, String table) throws SQLException {
+    String sql;
+    if (HARNESS_THREAD_COMMAND.equals(table)) {
+      sql = "select command_type, payload::text from harness_thread_command";
+    } else if (HARNESS_THREAD_STOP_RECEIPT.equals(table)) {
+      sql = "select cancelled_inputs::text from harness_thread_stop_receipt";
+    } else {
+      return;
+    }
+    try (Statement statement = source.createStatement()) {
+      statement.setFetchSize(LegacyTableCopy.FETCH_SIZE);
+      try (ResultSet rows = statement.executeQuery(sql)) {
+        while (rows.next()) {
+          if (HARNESS_THREAD_COMMAND.equals(table)) {
+            ThreadCommandType type;
+            try {
+              type = ThreadCommandType.valueOf(rows.getString(1));
+            } catch (RuntimeException error) {
+              throw new LegacyDatabaseUpgradeException(
+                  LegacyDatabaseUpgradeException.Stage.CONVERT,
+                  "legacy thread command carries an unknown type");
+            }
+            LegacyHarnessHistoryJson.threadCommandPayload(type, rows.getString(2));
+          } else {
+            LegacyHarnessHistoryJson.stopReceiptCancelledInputs(rows.getString(1));
+          }
+        }
+      }
+    }
+  }
+
+  /** 用当前六节 codec 重写目标唯一 settings 行，并保留源行的 id、version 与两个应用侧时间。 */
+  private static void convertSystemSetting(
+      Connection target, SystemSettings settings, LegacySourceGuard.SourceSettings source)
+      throws SQLException {
+    String converted = SETTINGS_CODEC.encode(settings);
+    try (PreparedStatement update =
+        target.prepareStatement(
+            "update system_setting set config = cast(? as jsonb), version = ?,"
+                + " created_at = cast(? as timestamptz), updated_at = cast(? as timestamptz)"
+                + " where id = 1")) {
+      update.setString(1, converted);
+      update.setLong(2, source.version());
+      update.setString(3, source.createdAt());
+      update.setString(4, source.updatedAt());
+      if (update.executeUpdate() != 1) {
+        throw new LegacyDatabaseUpgradeException(
+            LegacyDatabaseUpgradeException.Stage.TARGET_WRITE,
+            "the target system settings row is not the canonical singleton");
+      }
+    }
+  }
+
+  private static void reconcile(
+      Map<String, Long> counts, String table, long targetRows, long expectedRows) {
+    if (targetRows != expectedRows) {
+      throw new LegacyDatabaseUpgradeException(
+          LegacyDatabaseUpgradeException.Stage.TARGET_WRITE,
+          "converted row counts do not reconcile with the legacy source");
+    }
+    counts.put(table, targetRows);
+  }
+
+  /** 目标写事务取得稳定顺序的 canonical 表 ACCESS EXCLUSIVE NOWAIT 锁；竞争即拒绝，绝不等待或重试。 */
+  private static void lockCanonicalTables(Connection target) throws SQLException {
+    List<String> tables = new ArrayList<>(LegacySchemaProfile.SHARED_TABLES);
+    tables.addAll(LegacySchemaProfile.TARGET_ONLY_TABLES);
+    tables.sort(null);
+    try (Statement statement = target.createStatement()) {
+      for (String table : tables) {
+        statement.execute("LOCK TABLE " + table + " IN ACCESS EXCLUSIVE MODE NOWAIT");
+      }
+    } catch (SQLException error) {
+      throw new LegacyDatabaseUpgradeException(
+          LegacyDatabaseUpgradeException.Stage.TARGET_PRISTINE,
+          "target tables are locked by another writer");
+    }
+  }
+
+  /** 目标必须是唯一 pristine 形态：默认 settings 一行、epoch 0 指针与空 manifest 各恰好一行，其余共有与新增表全空。 */
+  private static void requirePristineTarget(Connection target) throws SQLException {
+    for (String table : LegacySchemaProfile.SHARED_TABLES) {
+      if (!SYSTEM_SETTING.equals(table) && count(target, "select count(*) from " + table) != 0) {
+        throw notPristine();
+      }
+    }
+    for (String table : LegacySchemaProfile.TARGET_ONLY_TABLES) {
+      if (table.equals("plugin_catalog_revision") || table.equals("plugin_catalog_state")) {
+        continue;
+      }
+      if (count(target, "select count(*) from " + table) != 0) {
+        throw notPristine();
+      }
+    }
+    if (count(target, "select count(*) from plugin_catalog_state") != 1
+        || count(target, "select count(*) from plugin_catalog_state where id = 1 and epoch = 0")
+            != 1) {
+      throw notPristine();
+    }
+    if (count(target, "select count(*) from plugin_catalog_revision") != 1
+        || count(
+                target,
+                "select count(*) from plugin_catalog_revision where epoch = 0"
+                    + " and manifest_json = cast('{\"plugins\":{},\"catalogFingerprint\":null}' as jsonb)")
+            != 1) {
+      throw notPristine();
+    }
+    requireDefaultSystemSetting(target);
+  }
+
+  private static void requireDefaultSystemSetting(Connection target) throws SQLException {
+    int rows = 0;
+    long id = 0;
+    long version = -1;
+    SystemSettings settings = null;
+    try (Statement statement = target.createStatement();
+        ResultSet resultSet =
+            statement.executeQuery("select id, version, config::text from system_setting")) {
+      while (resultSet.next()) {
+        rows++;
+        id = resultSet.getLong(1);
+        version = resultSet.getLong(2);
+        try {
+          settings = SETTINGS_CODEC.decode(resultSet.getString(3));
+        } catch (RuntimeException error) {
+          throw notPristine();
+        }
+      }
+    }
+    if (rows != 1 || id != 1L || version != 0L || !SystemSettings.DEFAULT.equals(settings)) {
+      throw notPristine();
+    }
+  }
+
+  private static LegacyDatabaseUpgradeException notPristine() {
+    return new LegacyDatabaseUpgradeException(
+        LegacyDatabaseUpgradeException.Stage.TARGET_PRISTINE,
+        "target is not in the unique pristine baseline shape");
+  }
+
+  /** 目标可写列（排除 generated 列）名单；同时要求源表列名与类型逐列一致，否则拒绝运输。 */
+  private static List<String> copyColumns(Connection source, Connection target, String table)
+      throws SQLException {
+    List<String> sourceNames = new ArrayList<>();
+    List<String> sourceTypes = new ArrayList<>();
+    readColumnLayout(source, table, sourceNames, sourceTypes);
+    List<String> targetNames = new ArrayList<>();
+    List<String> targetTypes = new ArrayList<>();
+    readColumnLayout(target, table, targetNames, targetTypes);
+    if (targetNames.isEmpty()
+        || !sourceNames.equals(targetNames)
+        || !sourceTypes.equals(targetTypes)) {
+      throw new LegacyDatabaseUpgradeException(
+          LegacyDatabaseUpgradeException.Stage.TARGET_WRITE,
+          "legacy and target column layouts differ for a copied table");
+    }
+    return List.copyOf(targetNames);
+  }
+
+  private static void readColumnLayout(
+      Connection connection, String table, List<String> names, List<String> types)
+      throws SQLException {
+    try (PreparedStatement statement =
+        connection.prepareStatement(
+            "select a.attname, format_type(a.atttypid, a.atttypmod) from pg_attribute a"
+                + " where a.attrelid = to_regclass(?) and a.attnum > 0 and not a.attisdropped"
+                + " and a.attgenerated = '' order by a.attnum")) {
+      statement.setString(1, table);
+      try (ResultSet rows = statement.executeQuery()) {
+        while (rows.next()) {
+          names.add(rows.getString(1));
+          types.add(rows.getString(2));
+        }
+      }
+    }
+  }
+
+  private static long count(Connection connection, String sql) throws SQLException {
+    try (Statement statement = connection.createStatement();
+        ResultSet rows = statement.executeQuery(sql)) {
+      rows.next();
+      return rows.getLong(1);
+    }
+  }
+
+  private static PluginConfigurationRepository catalogRepository(DataSource scoped) {
+    return new PostgresqlPluginConfigurationRepository(
+        new PluginConfigurationJdbcStore(JdbcClient.create(scoped)),
+        new PostgresqlPluginCatalogChangeNotifier(new JdbcTemplate(scoped)));
+  }
+
+  private static PluginCredentialRepository credentialRepository(DataSource scoped) {
+    return new PostgresqlPluginCredentialRepository(
+        new PluginCredentialJdbcStore(JdbcClient.create(scoped)));
+  }
+
+  private static LegacySystemSettings parseSettings(String legacyJson) {
+    try {
+      return LegacySystemSettings.parse(legacyJson);
+    } catch (IllegalArgumentException error) {
+      throw new LegacyDatabaseUpgradeException(
+          LegacyDatabaseUpgradeException.Stage.CONVERT,
+          "legacy system settings cannot be converted");
+    }
+  }
+
+  private static Map<String, String> pluginValues(
+      LegacySystemSettings legacy,
+      StudioPluginRegistry registry,
+      LegacyStaticCredentials staticCredentials) {
+    try {
+      return legacy.pluginValues(
+          registry,
+          staticCredentials.hasRequiredSecret(registry, "comfyui"),
+          staticCredentials.hasRequiredSecret(registry, "opencli"));
+    } catch (IllegalArgumentException error) {
+      throw new LegacyDatabaseUpgradeException(
+          LegacyDatabaseUpgradeException.Stage.CONVERT,
+          "legacy plugin values do not match the installed plugins");
+    }
+  }
+
+  private static PluginCatalogBootstrap.PreparedInitial prepareInitial(
+      OfflinePluginCatalog catalog,
+      Map<String, String> values,
+      Map<String, List<String>> configuredSecretFields) {
+    try {
+      return catalog.prepareInitial(values, configuredSecretFields);
+    } catch (RuntimeException error) {
+      throw new LegacyDatabaseUpgradeException(
+          LegacyDatabaseUpgradeException.Stage.CONVERT,
+          "the current plugin catalog rejected the upgraded configuration");
+    }
+  }
+
+  /** 两个连接都必须是无遗留事务的普通连接：不接管调用方已经打开的写事务。 */
+  private static Connection openIdleConnection(DataSource dataSource) {
+    Connection connection = null;
+    try {
+      connection = dataSource.getConnection();
+      if (!connection.getAutoCommit()) {
+        closeConnection(connection);
+        throw new LegacyDatabaseUpgradeException(
+            LegacyDatabaseUpgradeException.Stage.CONNECTION,
+            "the upgrade requires connections without an ambient transaction");
+      }
+      return connection;
+    } catch (SQLException error) {
+      closeConnection(connection);
+      throw new LegacyDatabaseUpgradeException(
+          LegacyDatabaseUpgradeException.Stage.CONNECTION, "cannot open the upgrade databases");
+    } catch (RuntimeException error) {
+      closeConnection(connection);
+      throw error;
+    }
+  }
+
+  /** 源连接只读一致快照：固定 search_path / DateStyle / UTC 并关闭 row security，再验证 PG17、UTF-8 与 origin 写角色。 */
+  private static void beginSourceSnapshot(Connection source) {
+    try {
+      source.setAutoCommit(false);
+      try (Statement statement = source.createStatement()) {
+        statement.execute("set transaction isolation level repeatable read");
+        statement.execute("set transaction read only");
+        applySessionSettings(statement);
+        requireServerSession(statement, true);
+      }
+    } catch (LegacyDatabaseUpgradeException error) {
+      throw error;
+    } catch (SQLException error) {
+      throw new LegacyDatabaseUpgradeException(
+          LegacyDatabaseUpgradeException.Stage.CONNECTION,
+          "cannot establish the read-only source snapshot");
+    }
+  }
+
+  /** 目标写事务内的 session 前置：与源同一份 search_path / DateStyle / UTC / row_security 与服务器形态检查。 */
+  private static void beginTargetSession(Connection target) {
+    try (Statement statement = target.createStatement()) {
+      applySessionSettings(statement);
+      requireServerSession(statement, false);
+    } catch (LegacyDatabaseUpgradeException error) {
+      throw error;
+    } catch (SQLException error) {
+      throw new LegacyDatabaseUpgradeException(
+          LegacyDatabaseUpgradeException.Stage.CONNECTION,
+          "cannot establish the target write session");
+    }
+  }
+
+  /** 两边共用的会话固定项：裸表名与时间/RLS 语义必须与本内核读取目录时的假设一致。 */
+  private static void applySessionSettings(Statement statement) throws SQLException {
+    statement.execute("set local search_path = public");
+    statement.execute("set local datestyle = 'ISO, MDY'");
+    statement.execute("set local time zone 'UTC'");
+    statement.execute("set local row_security = off");
+  }
+
+  /** 服务器形态检查：PG17、UTF-8、origin 复制角色（replica 会让真实 FK 不生效），以及事务真实可写性。 */
+  private static void requireServerSession(Statement statement, boolean readOnlyExpected)
+      throws SQLException {
+    try (ResultSet rows =
+        statement.executeQuery(
+            "select current_setting('server_version_num')::int,"
+                + " current_setting('server_encoding'),"
+                + " current_setting('session_replication_role'),"
+                + " current_setting('transaction_read_only')::boolean")) {
+      rows.next();
+      int serverVersion = rows.getInt(1);
+      if (serverVersion < 170000 || serverVersion >= 180000) {
+        throw new LegacyDatabaseUpgradeException(
+            LegacyDatabaseUpgradeException.Stage.CONNECTION, "the upgrade requires PostgreSQL 17");
+      }
+      if (!"UTF8".equals(rows.getString(2))) {
+        throw new LegacyDatabaseUpgradeException(
+            LegacyDatabaseUpgradeException.Stage.CONNECTION,
+            "the upgrade requires a UTF-8 database");
+      }
+      if (!"origin".equals(rows.getString(3))) {
+        throw new LegacyDatabaseUpgradeException(
+            LegacyDatabaseUpgradeException.Stage.CONNECTION,
+            "the upgrade requires the origin replication role");
+      }
+      if (rows.getBoolean(4) != readOnlyExpected) {
+        throw new LegacyDatabaseUpgradeException(
+            LegacyDatabaseUpgradeException.Stage.CONNECTION,
+            readOnlyExpected
+                ? "the legacy source session must be read only"
+                : "the target session must be writable");
+      }
+    }
+  }
+
+  private static TransactionStatus openTargetTransaction(PlatformTransactionManager manager) {
+    DefaultTransactionDefinition definition = new DefaultTransactionDefinition();
+    definition.setName("legacy-database-upgrade");
+    definition.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
+    try {
+      return manager.getTransaction(definition);
+    } catch (RuntimeException error) {
+      throw new LegacyDatabaseUpgradeException(
+          LegacyDatabaseUpgradeException.Stage.TARGET_TRANSACTION,
+          "the target write transaction could not be started");
+    }
+  }
+
+  /** 提交前释放候选快照与其离线装配：只有它们真的释放成功才允许提交，否则走真实回滚。Error 保持 identity 向外传播，另一项资源仍然会被释放。 */
+  private static void releaseBeforeCommit(
+      PluginCatalogSnapshot snapshot, OfflinePluginCatalog catalog) {
+    Throwable failure = null;
+    try {
+      snapshot.close();
+    } catch (Throwable error) {
+      failure = error;
+    }
+    try {
+      catalog.close();
+    } catch (Throwable error) {
+      if (failure == null) {
+        failure = error;
+      } else if (failure != error) {
+        failure.addSuppressed(error);
+      }
+    }
+    if (failure == null) {
+      return;
+    }
+    if (failure instanceof Error error) {
+      throw error;
+    }
+    throw new LegacyDatabaseUpgradeException(
+        LegacyDatabaseUpgradeException.Stage.CONVERT,
+        "the assembled target candidate could not be released before commit");
+  }
+
+  /** dry run 与真实提交的唯一差异：dry run 走同一条写入路径后回滚。通信失败一律标为结果未知。 */
+  private static void commitOrRollback(
+      PlatformTransactionManager manager, TransactionStatus transaction, boolean dryRun) {
+    try {
+      if (dryRun) {
+        manager.rollback(transaction);
+      } else {
+        manager.commit(transaction);
+      }
+    } catch (RuntimeException error) {
+      throw new LegacyDatabaseUpgradeException(
+          LegacyDatabaseUpgradeException.Stage.COMMIT,
+          "the target transaction result could not be confirmed",
+          true);
+    }
+  }
+
+  /** 提交后显式关闭目标物理连接；关闭失败在真正提交时标记为结果需核验。 */
+  private static void afterTargetTransaction(Connection target, boolean committed) {
+    Throwable failure = closeConnection(target);
+    if (failure == null) {
+      return;
+    }
+    if (failure instanceof Error error) {
+      throw error;
+    }
+    throw new LegacyDatabaseUpgradeException(
+        LegacyDatabaseUpgradeException.Stage.COMMIT,
+        "the target connection could not be closed after the transaction",
+        committed);
+  }
+
+  /** 失败路径：真实回滚未结束的事务，并释放尚未交出的候选与离线装配；一个释放失败不跳过其它资源。 */
+  private static void releaseAfterFailure(
+      Throwable primary,
+      PlatformTransactionManager manager,
+      TransactionStatus transaction,
+      OfflinePluginCatalog catalog,
+      PluginCatalogBootstrap.PreparedInitial prepared) {
+    if (primary == null) {
+      return;
+    }
+    if (transaction != null) {
+      try {
+        manager.rollback(transaction);
+      } catch (RuntimeException | Error rollbackFailure) {
+        if (rollbackFailure != primary) {
+          primary.addSuppressed(rollbackFailure);
+        }
+      }
+    }
+    if (prepared != null) {
+      try {
+        prepared.snapshot().close();
+      } catch (Throwable closeFailure) {
+        if (closeFailure != primary) {
+          primary.addSuppressed(closeFailure);
+        }
+      }
+    }
+    if (catalog != null) {
+      try {
+        catalog.close();
+      } catch (Throwable closeFailure) {
+        if (closeFailure != primary) {
+          primary.addSuppressed(closeFailure);
+        }
+      }
+    }
+  }
+
+  /** 释放两个连接：一个释放失败不跳过另一个；已在传播的失败只被挂上 suppressed，成功路径上的释放失败必须可见。 */
+  private static void releaseConnections(Throwable primary, Connection target, Connection source) {
+    Throwable targetFailure = closeConnection(target);
+    Throwable sourceFailure = closeConnection(source);
+    if (primary != null) {
+      suppress(primary, targetFailure);
+      suppress(primary, sourceFailure);
+      return;
+    }
+    Throwable failure = targetFailure != null ? targetFailure : sourceFailure;
+    if (failure == null) {
+      return;
+    }
+    suppress(failure, failure == targetFailure ? sourceFailure : targetFailure);
+    if (failure instanceof Error error) {
+      throw error;
+    }
+    throw new LegacyDatabaseUpgradeException(
+        LegacyDatabaseUpgradeException.Stage.CONNECTION,
+        "an upgrade database connection could not be released");
+  }
+
+  /** 关闭一个连接（必要时先回滚）；返回真实失败而不是吞掉它。 */
+  private static Throwable closeConnection(Connection connection) {
+    if (connection == null) {
+      return null;
+    }
+    Throwable failure = null;
+    try {
+      if (!connection.isClosed() && !connection.getAutoCommit()) {
+        connection.rollback();
+      }
+    } catch (SQLException | RuntimeException error) {
+      failure = error;
+    }
+    try {
+      connection.close();
+    } catch (SQLException | RuntimeException error) {
+      if (failure == null) {
+        failure = error;
+      } else if (failure != error) {
+        failure.addSuppressed(error);
+      }
+    }
+    return failure;
+  }
+
+  private static void suppress(Throwable primary, Throwable suppressed) {
+    if (suppressed != null && suppressed != primary) {
+      primary.addSuppressed(suppressed);
+    }
+  }
+}
