@@ -276,10 +276,34 @@ class TestHandoffGate(UpdateScriptTestCase):
         self.assertEqual(0, process.returncode, stdout + stderr)
         self.assertEqual("PREPARED", fixture.result_document()["phase"])
 
+    def test_operation_is_rechecked_after_waiting_for_the_permit(self):
+        fixture = self.prepared(handoff_state="PREPARING", permit="absent", permit_wait=15)
+        write_tool(
+            fixture.bin / "sleep",
+            'echo "permit-wait" >> "$FAKE_RECORD"\nexec /bin/sleep "$@"\n')
+        process = fixture.start()
+        try:
+            deadline = time.monotonic() + 10
+            while "permit-wait" not in fixture.calls():
+                self.assertIsNone(process.poll(), "the job must reach the permit wait")
+                self.assertLess(time.monotonic(), deadline, "the permit wait must be observable")
+                time.sleep(0.01)
+            fixture.handoff_operation = "22222222-2222-2222-2222-222222222222"
+            fixture.write_handoff("ACCEPTED")
+            fixture.permit.write_text(fixture.operation_id + "\n", encoding="utf-8")
+            stdout, stderr = process.communicate(timeout=30)
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.communicate()
+        self.assertNotEqual(0, process.returncode, stdout + stderr)
+        self.assertEqual("FAILED", fixture.result_document()["phase"])
+        self.assertEqual(
+            "handoff metadata does not match the operation", fixture.result_document()["message"])
+        self.assert_no_destructive_action(fixture)
+
     def test_early_preparing_handoff_is_not_rejected_before_acceptance(self):
-        # The independent job starts while the daemon is still persisting PREPARING. With the
-        # previous order this process would already have exited non-zero on that transient
-        # state; the corrected gate must instead wait for the permit and then see ACCEPTED.
+        # A job started during PREPARING must await the permit before requiring ACCEPTED.
         fixture = self.prepared(handoff_state="PREPARING", permit="absent", permit_wait=15)
         process = fixture.start()
         try:

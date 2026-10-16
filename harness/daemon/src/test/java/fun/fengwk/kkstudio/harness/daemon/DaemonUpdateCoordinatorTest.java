@@ -622,28 +622,40 @@ class DaemonUpdateCoordinatorTest {
     Files.createDirectories(updateRoot);
     Files.createDirectory(permit);
 
-    coordinator.handleUpdate(updateCommand(OP));
-    assertEquals(DaemonUpdatePhase.ACCEPTED, sink.await().phase());
-    assertEquals(DaemonUpdatePhase.PREPARED, sink.await().phase());
-    assertTrue(Files.isDirectory(permit, LinkOption.NOFOLLOW_LINKS), "the permit is still blocked");
+    try (CoordinatorLogCapture capture = new CoordinatorLogCapture()) {
+      coordinator.handleUpdate(updateCommand(OP));
+      assertEquals(DaemonUpdatePhase.ACCEPTED, sink.await().phase());
+      assertEquals(DaemonUpdatePhase.PREPARED, sink.await().phase());
+      awaitUntil(
+          () ->
+              capture.records().stream()
+                  .anyMatch(
+                      record ->
+                          record
+                              .getMessage()
+                              .startsWith("managed update permit could not be released: ")),
+          "the failed first permit release");
+      assertTrue(
+          Files.isDirectory(permit, LinkOption.NOFOLLOW_LINKS), "the permit is still blocked");
 
-    // 阻塞消失后，同一 operation 的重放只重发回执并补发 matching permit。
-    Files.delete(permit);
-    coordinator.handleUpdate(updateCommand(OP));
-    awaitUntil(() -> Files.isRegularFile(permit), "the retried permit");
-    assertEquals(DaemonUpdatePhase.PREPARED, sink.await().phase());
-    assertEquals(OP, Files.readString(permit).strip());
-    assertEquals(1, preparer.preparations(), "a replay must not prepare again");
-    assertEquals(1, launches.get(), "a replay must not launch again");
+      // 阻塞消失后，同一 operation 的重放只重发回执并补发 matching permit。
+      Files.delete(permit);
+      coordinator.handleUpdate(updateCommand(OP));
+      awaitUntil(() -> Files.isRegularFile(permit), "the retried permit");
+      assertEquals(DaemonUpdatePhase.PREPARED, sink.await().phase());
+      assertEquals(OP, Files.readString(permit).strip());
+      assertEquals(1, preparer.preparations(), "a replay must not prepare again");
+      assertEquals(1, launches.get(), "a replay must not launch again");
 
-    // 重连重发同样是许可释放的重试触发点。
-    Files.delete(permit);
-    coordinator.resendAfterReconnect();
-    awaitUntil(() -> Files.isRegularFile(permit), "the permit retried by the reconnect resend");
-    assertEquals(DaemonUpdatePhase.PREPARED, sink.await().phase());
-    assertEquals(OP, Files.readString(permit).strip());
-    assertEquals(1, preparer.preparations(), "a reconnect resend must not prepare again");
-    assertEquals(1, launches.get(), "a reconnect resend must not launch again");
+      // 重连重发同样是许可释放的重试触发点。
+      Files.delete(permit);
+      coordinator.resendAfterReconnect();
+      awaitUntil(() -> Files.isRegularFile(permit), "the permit retried by the reconnect resend");
+      assertEquals(DaemonUpdatePhase.PREPARED, sink.await().phase());
+      assertEquals(OP, Files.readString(permit).strip());
+      assertEquals(1, preparer.preparations(), "a reconnect resend must not prepare again");
+      assertEquals(1, launches.get(), "a reconnect resend must not launch again");
+    }
   }
 
   /** 安全失败日志只记录固定阶段与异常类型：绝不回显原始异常、元数据或其中的敏感内容。 */
