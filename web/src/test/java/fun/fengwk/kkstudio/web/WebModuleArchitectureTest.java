@@ -53,7 +53,7 @@ class WebModuleArchitectureTest {
    * web/pom.xml 禁止直接声明的依赖项：
    *
    * <ul>
-   *   <li>{@code kk-studio-harness-tool} / {@code kk-studio-harness-daemon}：避免组合根直接耦合底层执行与守护实现。
+   *   <li>{@code kk-studio-harness-tool}：避免组合根直接耦合底层执行实现。
    *   <li>{@code kk-studio-harness-builtin} / {@code kk-studio-harness-common}：必须由 {@code
    *       kk-studio-platform-runtime} 在 compile scope 传递引入；严禁在 web 声明任何 scope（特别是 test
    *       scope）的直接依赖。若声明更近的 test 依赖，Maven 最近依赖优先原则会遮蔽 platform 的 compile-scope 传递依赖，导致 Spring Boot
@@ -61,11 +61,7 @@ class WebModuleArchitectureTest {
    * </ul>
    */
   private static final List<String> FORBIDDEN_POM_ARTIFACTS =
-      List.of(
-          "kk-studio-harness-tool",
-          "kk-studio-harness-daemon",
-          "kk-studio-harness-builtin",
-          "kk-studio-harness-common");
+      List.of("kk-studio-harness-tool", "kk-studio-harness-builtin", "kk-studio-harness-common");
 
   private static final List<String> REQUIRED_POM_ARTIFACTS =
       List.of(

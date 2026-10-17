@@ -137,6 +137,14 @@ test('every daemon coverage gate builds the tested JavaScript first', () => {
     }
 })
 
+test('Node daemon release and installer jobs do not require a JDK toolchain', () => {
+    // 发行 fixture 已使用 Node/tar，不再需要退役 Java Daemon 的 jar 工具。
+    assert.doesNotMatch(RELEASE, /actions\/setup-java@|JAVA_VERSION/u)
+    for (const name of ['validate_unix_daemon', 'validate_windows_daemon']) {
+        assert.doesNotMatch(jobBlock(DOCKER, name), /actions\/setup-java@|JAVA_VERSION/u)
+    }
+})
+
 test('daemon-ci pins the daemon lockfile cache and stays a read-only push/pull-request gate', () => {
     const triggers = topLevelSection(CI, 'on')
     assert.match(triggers, /^ {2}workflow_call:$/m)

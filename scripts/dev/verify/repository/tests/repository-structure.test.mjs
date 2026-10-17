@@ -63,12 +63,6 @@ function createRepositoryMirror() {
   }
   cpSync(path.join(REPOSITORY_ROOT, 'harness'), path.join(mirrorRoot, 'harness'), copyOptions)
   cpSync(path.join(REPOSITORY_ROOT, 'docs'), path.join(mirrorRoot, 'docs'), copyOptions)
-  // 目标图：Java Daemon 模块已经退役，只保留 Node Daemon 产品；mirror 据此模拟合并后的仓库，
-  // 使 structure/docs 守卫的逻辑可以独立于“父切片尚未删除 Java 模块”的过渡状态被验证。
-  rmSync(path.join(mirrorRoot, 'harness', 'daemon'), { recursive: true, force: true })
-  const harnessPomPath = path.join(mirrorRoot, 'harness', 'pom.xml')
-  const harnessPom = readFileSync(harnessPomPath, 'utf8')
-  writeFileSync(harnessPomPath, harnessPom.replace(/ *<module>daemon<\/module>\n/u, ''))
 
   return mirrorRoot
 }
