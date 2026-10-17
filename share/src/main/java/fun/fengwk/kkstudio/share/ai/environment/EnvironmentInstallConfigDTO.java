@@ -6,6 +6,5 @@ import lombok.Data;
 @Data
 public class EnvironmentInstallConfigDTO {
   private String operatingSystem;
-  private String javaHome;
   private DaemonConfiguration daemon;
 }
