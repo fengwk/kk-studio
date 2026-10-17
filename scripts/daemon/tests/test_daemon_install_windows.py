@@ -417,6 +417,13 @@ class TestWindowsInstallerNativeContracts(unittest.TestCase):
         for value in ("java.exe", "JDK", "base64", "Base64", "DaemonArguments", "-jar"):
             self.assertNotIn(value, native)
 
+    def test_windows_gate_also_runs_the_managed_update_native_suite(self):
+        """The CI-invoked installer suite must chain the update suite for both PS hosts."""
+        native = NATIVE_TEST.read_text(encoding="utf-8")
+        self.assertIn("test_daemon_update_windows.ps1", native)
+        self.assertIn("& $hostExe", native)
+        self.assertIn("if ($LASTEXITCODE -ne 0)", native)
+
     def test_native_capture_keeps_streams_separate_and_drains_both_before_waiting(self):
         """Guard PS 5.1 compatibility and deadlock ordering; real outcomes are tested in PowerShell."""
         body = function_body("Invoke-NativeProcess")
