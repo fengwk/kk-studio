@@ -1,5 +1,7 @@
 import { apiClient, type HttpClient } from '@/shared/api/client'
 import type {
+  ChangeIdeViewDirectoryDTO,
+  CreateIdeViewDTO,
   EnvironmentCardDTO,
   EnvironmentCreateDTO,
   EnvironmentEventDTO,
@@ -7,6 +9,7 @@ import type {
   EnvironmentInstallConfigDTO,
   EnvironmentRegistrationTokenDTO,
   EnvironmentUpdateDTO,
+  IdeViewDTO,
 } from '@/shared/api/contracts/ai-environment'
 
 export function createEnvironmentService(client: HttpClient = apiClient) {
@@ -65,6 +68,29 @@ export function createEnvironmentService(client: HttpClient = apiClient) {
     deleteEnvironment: (id: string, expectedVersion: string): Promise<void> =>
       client.delete(
         `/harness/environments/${encodeURIComponent(id)}?expectedVersion=${encodeURIComponent(expectedVersion)}`,
+      ),
+
+    createIdeView: (environmentId: string, data: CreateIdeViewDTO): Promise<IdeViewDTO> =>
+      client.post(`/harness/environments/${encodeURIComponent(environmentId)}/ide/views`, data),
+
+    changeIdeViewDirectory: (
+      environmentId: string,
+      viewId: string,
+      data: ChangeIdeViewDirectoryDTO,
+    ): Promise<IdeViewDTO> =>
+      client.put(
+        `/harness/environments/${encodeURIComponent(environmentId)}/ide/views/${encodeURIComponent(viewId)}/directory`,
+        data,
+      ),
+
+    openIdeViewTerminal: (environmentId: string, viewId: string): Promise<void> =>
+      client.post(
+        `/harness/environments/${encodeURIComponent(environmentId)}/ide/views/${encodeURIComponent(viewId)}/terminal`,
+      ),
+
+    closeIdeView: (environmentId: string, viewId: string): Promise<void> =>
+      client.delete(
+        `/harness/environments/${encodeURIComponent(environmentId)}/ide/views/${encodeURIComponent(viewId)}`,
       ),
   }
 }
