@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process'
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, test } from 'vitest'
+import { afterEach, beforeEach, describe, expect, onTestFailed, test } from 'vitest'
 import { PosixProcessSupervisor } from '../../src/native/posix-supervisor.js'
 import type { ManagedProcess, ProcessSupervisor } from '../../src/contracts.js'
 import { awaitGone, fixtureCommand, fixturePath, isAlive, waitForFile, waitForPid } from './process-test-util.js'
@@ -224,7 +224,8 @@ describe.skipIf(process.platform === 'win32')('native process supervisor (POSIX)
     expect(await awaitGone(child)).toBe(true)
   }, TEST_TIMEOUT)
 
-  test('the scope helper converges everything when its parent daemon is killed', async (context) => {
+  test.each(process.platform === 'linux' ? ['escape-fork.mjs', 'zombie-leader.mjs'] : ['escape-fork.mjs'])(
+    'the scope helper converges everything when its parent daemon is killed (%s)', async (fixture) => {
     // 父进程消失必须由 helper 自己触发收敛：专用 IPC 通道的内核 EOF，不依赖心跳或猜父 pid。
     if (process.platform === 'win32') {
       return
@@ -234,7 +235,7 @@ describe.skipIf(process.platform === 'win32')('native process supervisor (POSIX)
     const helperPidFile = join(workdir, 'helper.pid')
     const rootPidFile = join(workdir, 'root.pid')
     const escapedPidFile = join(workdir, 'escaped.pid')
-    const command = fixtureCommand('escape-fork.mjs', rootPidFile, escapedPidFile)
+    const command = fixtureCommand(fixture, rootPidFile, escapedPidFile)
     const owner = spawn(
       process.execPath,
       [fixturePath('parent-owner.mjs'), stateDir, resolveHelperPath(), helperPidFile, command.executable, ...command.args],
@@ -251,7 +252,7 @@ describe.skipIf(process.platform === 'win32')('native process supervisor (POSIX)
       root: null,
       escaped: null,
     }
-    context.onTestFailed(() => {
+    onTestFailed(() => {
       const present = (name: string): string =>
         existsSync(join(stateDir, name)) ? 'present' : 'absent'
       // 只接受字面 true/false（cleanup）或固定阶段代码（error），其余只记 unexpected。
@@ -299,6 +300,10 @@ describe.skipIf(process.platform === 'win32')('native process supervisor (POSIX)
       phase = 'wait-escaped-pid'
       const escaped = await waitForPid(escapedPidFile)
       observed.escaped = escaped
+      if (fixture === 'zombie-leader.mjs') {
+        phase = 'wait-zombie-leader'
+        await waitForFile(`${rootPidFile}.leader-dead`)
+      }
       expect([helperPid, root, escaped].every(isAlive)).toBe(true)
 
       // 强杀所有者（daemon）：helper 与后代此刻都还在，没有任何登记窗口。

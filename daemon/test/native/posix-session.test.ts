@@ -21,7 +21,7 @@ import {
   supportsSessionEnumeration,
   type SessionMember,
 } from '../../src/native/posix-session.js'
-import { awaitGone, fixturePath, isAlive, waitForPid } from './process-test-util.js'
+import { awaitGone, fixturePath, isAlive, waitForFile, waitForPid } from './process-test-util.js'
 
 const TEST_TIMEOUT = 30_000
 
@@ -94,6 +94,33 @@ describe.skipIf(process.platform === 'win32')('native posix session primitives',
     expect(await convergeSession(pid, -1, 200)).toBe(true)
     expect(await awaitGone(pid)).toBe(true)
     child.unref()
+  }, TEST_TIMEOUT)
+
+  test.skipIf(process.platform !== 'linux')('a zombie leader with live worker threads is not a converged process', async () => {
+    const pidFile = join(workdir, 'leader.pid')
+    const escapedPidFile = join(workdir, 'escaped.pid')
+    const child = spawn(process.execPath, [fixturePath('zombie-leader.mjs'), pidFile, escapedPidFile, 'new-session'], { stdio: 'ignore' })
+    const closed = new Promise<void>((resolve) => child.once('close', () => resolve()))
+    try {
+      const pid = await waitForPid(pidFile)
+      children.push(pid)
+      const escaped = await waitForPid(escapedPidFile)
+      children.push(escaped)
+      await waitForFile(`${pidFile}.leader-dead`)
+
+      // 首线程已是 Z，但线程组仍活着，必须保留身份与会话成员，不能发布假收敛。
+      expect(processIdentity(pid)).not.toBeNull()
+      expect(membersSnapshot(pid, process.pid)?.some((member) => member.pid === pid)).toBe(true)
+      expect(directChildren(process.pid, [])?.some((member) => member.pid === pid)).toBe(true)
+      expect(await convergeSession(pid, process.pid, 100)).toBe(true)
+      await closed
+      expect(await awaitGone(pid)).toBe(true)
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) {
+        child.kill('SIGKILL')
+      }
+      await closed
+    }
   }, TEST_TIMEOUT)
 
   test('a member that ignores SIGTERM is escalated to SIGKILL', async () => {

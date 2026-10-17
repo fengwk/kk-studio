@@ -511,14 +511,18 @@ function linuxProcessInfo(pid: number): ProcessInfo | null {
   const state = fields[0]
   const parentPid = Number(fields[1])
   const session = Number(fields[3])
+  const threads = Number(fields[17])
   const start = fields[19]
-  if (state === undefined || start === undefined || !Number.isFinite(parentPid) || !Number.isFinite(session)) {
+  if (state === undefined || start === undefined || !Number.isFinite(parentPid) || !Number.isFinite(session)
+      || !Number.isSafeInteger(threads) || threads < 1) {
     return null
   }
   return {
     session,
     parentPid,
-    live: state !== 'Z' && state !== 'X' && state !== 'x',
+    // stat 的状态属于线程组首线程：它先变为 Z 时，其余线程和未被收养的子进程仍可能存活。
+    // 只有线程组也只剩这一个死亡线程时，才能把进程当作已经退出。
+    live: threads > 1 || (state !== 'Z' && state !== 'X' && state !== 'x'),
     identity: start,
   }
 }
