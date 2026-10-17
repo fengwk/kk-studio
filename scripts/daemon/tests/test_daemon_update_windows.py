@@ -65,13 +65,53 @@ class TestWindowsUpdateSurface(unittest.TestCase):
         self.assertIn("$PermitWaitSeconds = 120", text)
         self.assertIn("$StopWaitSeconds = 30", text)
 
-    def test_failure_path_writes_one_receipt_then_reports_and_exits_nonzero(self):
+    def test_failure_reporting_and_cleanup_are_independent(self):
         text = script_text()
+        # One fail-closed entry point that throws, so the finally block always runs.
         self.assertIn("function Fail-Closed([string]$Message) {", text)
-        self.assertIn("Complete-Update -Phase 'FAILED' -Message $Message", text)
-        self.assertIn('Write-Error ("update " + $OperationId + " failed: " + $Message)', text)
-        self.assertIn("exit 1", text)
+        self.assertIn("throw [System.InvalidOperationException]::new($Message)", text)
         self.assertIn("operationId = $OperationId; phase = $Phase; message = $Message", text)
+        self.assertIn("if ($null -ne $failure) { exit 1 }", text)
+        # Write-Error is script-terminating under $ErrorActionPreference = 'Stop' and would skip
+        # the failure receipt and the cleanup; the diagnostic goes to stderr instead.
+        code = "\n".join(
+            line for line in text.splitlines() if not line.lstrip().startswith("#"))
+        self.assertNotIn("Write-Error", code)
+        self.assertIn('[Console]::Error.WriteLine("update ${OperationId} failed: $Message")', text)
+        # Reporting may itself fail: the failure receipt and the PrePARED receipt are both
+        # best effort and never abort the surrounding cleanup.
+        self.assertIn("could not write the failure receipt", text)
+        self.assertIn("could not write the PREPARED receipt", text)
+        # The one-shot task removal sits in its own finally and warns instead of swallowing.
+        self.assertIn(
+            "Unregister-ScheduledTask -TaskName $UpdateTaskName -Confirm:$false -ErrorAction Stop",
+            text)
+        self.assertIn("could not unregister its one-shot task", text)
+        self.assertNotIn("Unregister-ScheduledTask -TaskName $UpdateTaskName -Confirm:$false -ErrorAction SilentlyContinue", text)
+
+    def test_failure_receipt_is_written_before_the_cleanup_and_outside_the_diagnostic(self):
+        text = script_text()
+        failure_receipt = text.index("Write-Result 'FAILED' $failure")
+        diagnostic = text.index("Write-FailureDiagnostic $failure")
+        unregister = text.index("Unregister-ScheduledTask -TaskName $UpdateTaskName")
+        self.assertLess(failure_receipt, diagnostic)
+        self.assertLess(diagnostic, unregister)
+
+    def test_unexpected_failures_report_only_the_stage_and_the_exception_type(self):
+        text = script_text()
+        for stage in ("$Step = 'preflight'", "$Step = 'handoff'", "$Step = 'permit'",
+                      "$Step = 'stop'", "$Step = 'backup'", "$Step = 'replace'",
+                      "$Step = 'restart'"):
+            self.assertIn(stage, text, f"the script must pin the {stage} stage")
+        self.assertIn(
+            '$failure = "update failed during ${Step} ($($_.Exception.GetType().Name))"', text)
+
+    def test_receipt_write_is_bom_free_and_best_effort(self):
+        text = script_text()
+        # The daemon parses the receipt with JSON.parse, so a BOM would break it.
+        self.assertIn(
+            "[IO.File]::WriteAllText($ResultPath, ($payload | ConvertTo-Json -Compress))", text)
+        self.assertNotIn("Set-Content", text)
 
     def test_no_registration_elevation_or_arbitrary_command_execution(self):
         text = script_text()
@@ -93,14 +133,36 @@ class TestWindowsUpdateSurface(unittest.TestCase):
 class TestWindowsUpdateHandoffGate(unittest.TestCase):
     """The third argument is the installed distribution, never a user-supplied path."""
 
-    def test_handoff_is_required_parsed_and_identity_checked(self):
+    def test_handoff_identity_is_required_and_the_state_is_checked_later(self):
         text = script_text()
-        self.assertIn("if (-not (Test-Path -LiteralPath $HandoffPath -PathType Leaf))", text)
-        self.assertIn("Fail-Closed 'handoff metadata is missing'", text)
+        self.assertIn("if (-not (Test-ManagedFile -Path $HandoffPath)) { Fail-Closed 'handoff metadata is missing' }", text)
         self.assertIn("ConvertFrom-Json -ErrorAction Stop", text)
         self.assertIn("Fail-Closed 'handoff metadata is malformed'", text)
-        self.assertIn("if ($handoff.operationId -ne $OperationId) { Fail-Closed 'handoff metadata does not match the operation' }", text)
-        self.assertIn("if ($handoff.state -ne 'ACCEPTED') { Fail-Closed 'handoff metadata is not accepted' }", text)
+        self.assertIn("if ([string]$handoff.operationId -ne $OperationId) { Fail-Closed 'handoff metadata does not match the operation' }", text)
+        self.assertIn("if ([string]$handoff.state -ne 'ACCEPTED') { Fail-Closed 'handoff metadata is not accepted' }", text)
+
+    def test_the_state_gate_runs_after_the_permit_not_before(self):
+        # The one-shot task starts while the daemon still persists PREPARING, so the state gate
+        # must sit after the permit: only the operation identity may be checked up front.
+        text = script_text()
+        permit_wait = text.index("while (-not (Test-Path -LiteralPath $PermitPath -PathType Leaf))")
+        state = text.index("if ([string]$handoff.state -ne 'ACCEPTED')")
+        self.assertLess(permit_wait, state)
+        code = "\n".join(
+            line for line in text[:permit_wait].splitlines() if not line.lstrip().startswith("#"))
+        self.assertIn("handoff metadata does not match the operation", code)
+        self.assertNotIn("state", code)
+        self.assertNotIn("ACCEPTED", code)
+
+    def test_permit_must_be_a_regular_file_naming_this_operation(self):
+        text = script_text()
+        permit_wait = text.index("while (-not (Test-Path -LiteralPath $PermitPath -PathType Leaf))")
+        regular = text.index("if (-not (Test-ManagedFile -Path $PermitPath)) { Fail-Closed 'the update permit is not a regular file' }")
+        content = text.index("if ((Get-Content -LiteralPath $PermitPath -Raw).Trim() -ne $OperationId) { Fail-Closed 'the update permit does not match the operation' }")
+        stop = text.index("Stop-ScheduledTask -TaskName $TaskName")
+        self.assertLess(permit_wait, regular)
+        self.assertLess(regular, content)
+        self.assertLess(content, stop)
 
     def test_staged_and_installed_layout_is_checked_before_the_permit_wait(self):
         text = script_text()
@@ -108,7 +170,6 @@ class TestWindowsUpdateHandoffGate(unittest.TestCase):
         assert_in_order(
             self,
             text[:permit_wait],
-            "if ($handoff.state -ne 'ACCEPTED')",
             "if (-not (Test-Path -LiteralPath (Join-Path $StagedDir 'main.js') -PathType Leaf))",
             "if (-not (Test-Path -LiteralPath $InstalledDir))",
         )
@@ -135,17 +196,32 @@ class TestWindowsUpdateTaskOwnership(unittest.TestCase):
             text,
         )
 
-    def test_ownership_checks_cover_task_description_runtime_and_arguments(self):
+    def test_tasks_are_looked_up_at_the_scheduler_root_by_exact_identity(self):
         text = script_text()
-        self.assertIn("$task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue", text)
+        self.assertIn("$TaskPath = '\\'", text)
+        # Enumerating the root keeps an absent task distinguishable from a real CIM failure:
+        # a name-filtered Get-ScheduledTask reports absence as an error.
+        self.assertIn("Get-ScheduledTask -ErrorAction Stop |", text)
+        self.assertIn(
+            "Where-Object { $_.TaskPath -eq $TaskPath -and $_.TaskName -eq $TaskName }", text)
+        self.assertNotIn("Get-ScheduledTask -TaskName", text)
+        self.assertIn("function Find-ManagedTask([string]$TaskName) {", text)
+
+    def test_ownership_checks_cover_description_exactly_one_action_and_the_frozen_runtime(self):
+        text = script_text()
+        self.assertIn("$task = Find-ManagedTask $TaskName", text)
         self.assertIn("if ($null -eq $task) { Fail-Closed 'managed scheduled task is missing' }", text)
-        self.assertIn("if ($task.Description -ne $TaskDescription) { Fail-Closed 'managed scheduled task is not owned by the installer' }", text)
-        self.assertIn("$action = $task.Actions | Select-Object -First 1", text)
-        self.assertIn("if ($null -eq $action) { Fail-Closed 'managed scheduled task has no action' }", text)
+        self.assertIn("if ([string]$task.Description -ne $TaskDescription) { Fail-Closed 'managed scheduled task is not owned by the installer' }", text)
+        self.assertIn("$actions = @($task.Actions)", text)
+        self.assertIn("if ($actions.Count -ne 1) { Fail-Closed 'managed scheduled task does not have exactly one action' }", text)
         self.assertIn("$expectedNode = Join-Path $InstalledDir 'runtime\\code-server\\lib\\node.exe'", text)
-        self.assertIn("if ($action.Execute -ne $expectedNode) { Fail-Closed 'managed scheduled task does not run the managed runtime' }", text)
+        self.assertIn("if (-not (Test-SamePath -Left ([string]$action.Execute) -Right $expectedNode)) {", text)
+        self.assertIn("Fail-Closed 'managed scheduled task does not run the managed runtime'", text)
         self.assertIn('$expectedArguments = \'"main.js" "--config" "\' + $configPath + \'"\'', text)
-        self.assertIn("if ($action.Arguments -ne $expectedArguments) { Fail-Closed 'managed scheduled task arguments do not match the managed configuration' }", text)
+        self.assertIn("if ([string]$action.Arguments -ne $expectedArguments) {", text)
+        self.assertIn("Fail-Closed 'managed scheduled task arguments do not match the managed configuration'", text)
+        self.assertIn("if (-not (Test-SamePath -Left ([string]$action.WorkingDirectory) -Right $InstalledDir)) {", text)
+        self.assertIn("Fail-Closed 'managed scheduled task working directory does not match the managed installation'", text)
         self.assertIn("$configPath = Join-Path (Split-Path -Parent $InstalledDir) 'daemon.json'", text)
 
     def test_ownership_checks_precede_the_stop(self):
@@ -155,15 +231,20 @@ class TestWindowsUpdateTaskOwnership(unittest.TestCase):
             self,
             text[:stop],
             "if ($null -eq $task) { Fail-Closed 'managed scheduled task is missing' }",
-            "if ($task.Description -ne $TaskDescription)",
-            "if ($action.Execute -ne $expectedNode)",
-            "if ($action.Arguments -ne $expectedArguments)",
+            "if ([string]$task.Description -ne $TaskDescription)",
+            "if ($actions.Count -ne 1)",
+            "if (-not (Test-SamePath -Left ([string]$action.Execute) -Right $expectedNode))",
+            "if ([string]$action.Arguments -ne $expectedArguments)",
+            "if (-not (Test-SamePath -Left ([string]$action.WorkingDirectory) -Right $InstalledDir))",
         )
 
-    def test_stop_wait_only_accepts_a_task_that_is_not_running(self):
+    def test_stop_wait_requires_both_running_and_queued_to_clear(self):
         text = script_text()
-        self.assertIn("if ($null -eq $current -or $current.State -ne 'Running') { break }", text)
+        self.assertIn(
+            "if ($null -eq $current -or [string]$current.State -notin @('Running', 'Queued')) { break }",
+            text)
         self.assertIn("$stopDeadline = (Get-Date).AddSeconds($StopWaitSeconds)", text)
+        self.assertIn("Stop-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath", text)
 
 
 class TestWindowsUpdateBackup(unittest.TestCase):

@@ -43,7 +43,7 @@ class UpdateFixture:
     def __init__(self, root, operating_system="Linux", service_mode="ok",
                  mv_mode="ok", mktemp_mode="ok",
                  handoff_state="ACCEPTED", handoff_operation=None, permit="match",
-                 fast_sleep=False):
+                 fast_sleep=False, uname_mode="ok", result_mode="ok"):
         self.root = Path(root).resolve()
         self.home = self.root / "home"
         self.bin = self.root / "bin"
@@ -63,6 +63,8 @@ class UpdateFixture:
         self.handoff_state = handoff_state
         self.handoff_operation = handoff_operation
         self.permit_mode = permit
+        self.uname_mode = uname_mode
+        self.result_mode = result_mode
         self.unit = self.home / ".config/systemd/user" / SERVICE_NAME
         self.plist = self.home / "Library/LaunchAgents" / (LAUNCHD_LABEL + ".plist")
         self.domain = "gui/" + str(os.getuid())
@@ -74,7 +76,11 @@ class UpdateFixture:
         self.record.touch()
         self.script.write_text(node_export("UNIX_UPDATE_SCRIPT"), encoding="utf-8")
         self.script.chmod(0o755)
-        write_tool(self.bin / "uname", 'echo "${FAKE_UNAME:-Linux}"\n')
+        if self.uname_mode == "fail":
+            # An unguarded `os=$(uname -s)` failing under `set -e` aborts outside fail_closed.
+            write_tool(self.bin / "uname", "exit 1\n")
+        else:
+            write_tool(self.bin / "uname", 'echo "${FAKE_UNAME:-Linux}"\n')
         write_tool(self.bin / "systemctl", """\
 echo "systemctl $*" >> "$FAKE_RECORD"
 state="$FAKE_SERVICE_STATE"
@@ -134,6 +140,9 @@ exec /bin/mv "$@"
         # Placeholder distributions: the update script moves directories, never reads bytes.
         (self.staged / "main.js").write_text("staged-release-main-js\n", encoding="utf-8")
         (self.installed / "main.js").write_text("installed-release-main-js\n", encoding="utf-8")
+        if self.result_mode == "unwritable":
+            # A directory at the receipt path makes every receipt write fail.
+            self.result.mkdir()
         if self.handoff_state != "missing":
             self.write_handoff(self.handoff_state)
         if self.permit_mode == "match":
@@ -145,12 +154,12 @@ exec /bin/mv "$@"
             target.write_text(self.operation_id + "\n", encoding="utf-8")
             self.permit.symlink_to(target)
 
-    def write_handoff(self, state):
+    def write_handoff(self, state, operation=None):
         """(Re)write the handoff metadata, e.g. to simulate PREPARING -> ACCEPTED."""
         self.handoff.write_text(
             json.dumps({
                 "state": state,
-                "operationId": self.handoff_operation or self.operation_id,
+                "operationId": operation or self.handoff_operation or self.operation_id,
                 "targetVersion": "1.1.1",
             }),
             encoding="utf-8")
@@ -270,12 +279,60 @@ class TestHandoffGate(UpdateScriptTestCase):
         self.assert_failed(fixture, fixture.run(), "handoff metadata is not accepted")
         self.assert_no_destructive_action(fixture)
 
-    def test_handoff_is_checked_before_waiting_for_a_missing_permit(self):
-        # A handoff that is not yet (or never becomes) ACCEPTED must not park the job in the
-        # permit wait: the state gate comes first in the shipped script.
+    def test_early_preparing_without_a_permit_fails_closed_at_the_permit_wait(self):
+        # The job starts while the daemon still persists PREPARING, so the operation identity
+        # alone is checked first: an early PREPARING must reach the permit wait (and only the
+        # missing permit may fail) instead of being rejected as an identity mismatch.
         fixture = self.prepared(handoff_state="PREPARING", permit="absent", fast_sleep=True)
-        self.assert_failed(fixture, fixture.run(), "handoff metadata is not accepted")
+        self.assert_failed(
+            fixture, fixture.run(), "the daemon did not release the update permit in time")
         self.assert_no_destructive_action(fixture)
+
+    def test_permit_content_mismatch_performs_no_destructive_action(self):
+        # The permit names one operation: a readable permit for another operation is never
+        # treated as a release for this one.
+        fixture = self.prepared()
+        fixture.permit.write_text("22222222-2222-2222-2222-222222222222\n", encoding="utf-8")
+        self.assert_failed(fixture, fixture.run(), "the update permit does not match the operation")
+        self.assert_no_destructive_action(fixture)
+
+    def test_empty_permit_performs_no_destructive_action(self):
+        fixture = self.prepared()
+        fixture.permit.write_text("", encoding="utf-8")
+        self.assert_failed(fixture, fixture.run(), "the update permit does not match the operation")
+        self.assert_no_destructive_action(fixture)
+
+    def test_handoff_identity_change_during_the_permit_wait_is_rejected(self):
+        # The snapshot is re-read after the permit: an identity that changed while waiting must
+        # still fail closed with zero stop/backup/replace.
+        fixture = self.prepared(permit="absent")
+        process = fixture.start()
+        time.sleep(0.5)
+        fixture.write_handoff("ACCEPTED", operation="22222222-2222-2222-2222-222222222222")
+        fixture.permit.write_text(fixture.operation_id + "\n", encoding="utf-8")
+        stdout, stderr = process.communicate(timeout=30)
+        self.assertNotEqual(0, process.returncode, stdout + stderr)
+        self.assertEqual("FAILED", fixture.result_document()["phase"])
+        self.assertIn("handoff metadata does not match the operation",
+                      fixture.result_document()["message"])
+        self.assert_no_destructive_action(fixture)
+
+    def test_early_preparing_handoff_applies_once_the_permit_arrives_after_acceptance(self):
+        # The production sequence: the job starts with PREPARING, the daemon then freezes
+        # ACCEPTED and releases the permit, and only then does the job stop and replace.
+        fixture = self.prepared(handoff_state="PREPARING", permit="absent")
+        process = fixture.start()
+        time.sleep(0.5)
+        self.assertFalse(fixture.result.exists(), "an early PREPARING must not report a failure")
+        fixture.write_handoff("ACCEPTED")
+        fixture.permit.write_text(fixture.operation_id + "\n", encoding="utf-8")
+        stdout, stderr = process.communicate(timeout=30)
+        self.assertEqual(0, process.returncode, stdout + stderr)
+        self.assertEqual("PREPARED", fixture.result_document()["phase"])
+        self.assertIn(f"systemctl --user stop {SERVICE_NAME}", fixture.calls())
+        self.assertEqual(
+            "staged-release-main-js\n",
+            (fixture.installed / "main.js").read_text(encoding="utf-8"))
 
     def test_missing_permit_times_out_without_destructive_action(self):
         # Negative control for the permit gate: no permit means no replacement, even with an
@@ -425,6 +482,40 @@ class TestSystemdUpdate(UpdateScriptTestCase):
         self.assertTrue((fixture.staged / "main.js").exists())
         self.assertIn(f"systemctl --user stop {SERVICE_NAME}", fixture.calls())
         self.assertNotIn(f"systemctl --user start {SERVICE_NAME}", fixture.calls())
+
+    def test_unexpected_exit_leaves_a_durable_failed_receipt(self):
+        # `os=$(uname -s)` is outside fail_closed: an abort there must still leave a durable,
+        # de-sensitised FAILED receipt through the EXIT trap, with zero destructive action.
+        fixture = self.prepared(uname_mode="fail")
+        result = fixture.run()
+        self.assertNotEqual(0, result.returncode)
+        self.assertEqual("FAILED", fixture.result_document()["phase"])
+        self.assertIn("update aborted unexpectedly (exit", fixture.result_document()["message"])
+        self.assert_no_destructive_action(fixture)
+
+    def test_unwritable_failed_receipt_is_reported_without_masking_the_reason(self):
+        # A receipt that cannot be written must be reported, must not truncate the diagnostic
+        # and must not hide the fail-closed decision.
+        fixture = self.prepared(handoff_state="missing", result_mode="unwritable")
+        result = fixture.run()
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("could not write the FAILED receipt", result.stderr)
+        self.assertIn("failed: handoff metadata is missing", result.stderr)
+        self.assert_no_destructive_action(fixture)
+
+    def test_unwritable_prepared_receipt_does_not_falsify_a_completed_update(self):
+        # The distribution is already replaced and the service restarted, so a receipt that
+        # cannot be written is reported but never turned into a false failure.
+        fixture = self.prepared(result_mode="unwritable")
+        result = fixture.run()
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn("could not write the PREPARED receipt", result.stderr)
+        self.assertNotIn("aborted unexpectedly", result.stderr)
+        self.assertFalse(fixture.staged.exists(), "the staged distribution must be consumed")
+        self.assertEqual(
+            "staged-release-main-js\n",
+            (fixture.installed / "main.js").read_text(encoding="utf-8"))
+        self.assertIn(f"systemctl --user start {SERVICE_NAME}", fixture.calls())
 
     def test_restart_failure_reports_and_keeps_the_replaced_distribution(self):
         # The update never rolls back automatically: the new distribution is installed, the
