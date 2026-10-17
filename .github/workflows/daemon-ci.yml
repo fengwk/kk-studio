@@ -88,6 +88,8 @@ jobs:
       # 覆盖率是替换原 Java process-scope 门禁的核心证据：五个平台都真跑 native 进程范围、
       # 退出、Job/session 与能力层用例，任一平台失败即整体失败。
       - name: Test the daemon with coverage
+        env:
+          NODE_OPTIONS: ${{ runner.os == 'Linux' && format('--import={0}/scripts/daemon/tests/observe-v8-coverage.mjs', github.workspace) || '' }}
         run: npm --prefix daemon run coverage
       # macOS 上的安装器/归档测试只用系统 Bash 跑 fixture：不注册 launchd，也不把 Linux 归档
       # 当成 macOS 验收。真实 code-server 原生模块由发布作业在暂存归档上加载。
