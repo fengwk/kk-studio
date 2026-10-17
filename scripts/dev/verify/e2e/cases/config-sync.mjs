@@ -320,7 +320,8 @@ registerCase({
       assertInstallConfig(envelopeData(afterImportJson).installConfig)
 
       // 原子更新：新 token + 新配置在同一 environment 条目内一次导入生效。
-      const updatedConfig = { ...linuxInstallConfig(), javaHome: '/opt/jdk' }
+      const updatedConfig = linuxInstallConfig()
+      updatedConfig.daemon.note = 'e2e install config updated'
       const updateYaml = JSON.stringify({
         environments: [{ name: envName, registrationToken: newToken, installConfig: updatedConfig }],
       })
@@ -334,8 +335,8 @@ registerCase({
       )
       const { json: updatedCardJson } = await ctx.call('GET', cardPath(envId))
       assert(
-        envelopeData(updatedCardJson).installConfig?.javaHome === '/opt/jdk',
-        'atomic sync update must persist the new install config',
+        envelopeData(updatedCardJson).installConfig?.daemon?.note === 'e2e install config updated',
+        'atomic sync update must persist the new install config alongside the token',
       )
 
       // 缺少 installConfig 字段的条目必须清空已保存配置。
@@ -365,7 +366,7 @@ registerCase({
   id: 'config_sync.install_config_hard_invalid_precheck',
   level: 'L1',
   title: '配置同步 installConfig 硬错误预检查与零副作用',
-  docs: 'import/check 与 import 都必须深度校验 environment.installConfig：非法 studioUrl、未知字段、缺 operatingSystem 一律 400 硬拒绝（不得降级为 skipped 部分导入），不回显提交值，且不创建任何 Environment',
+  docs: 'import/check 与 import 都必须深度校验 environment.installConfig：非法 studioUrl、未知字段、退役 javaHome、缺 operatingSystem 一律 400 硬拒绝（不得降级为 skipped 部分导入），不回显提交值，且不创建任何 Environment',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
     const name = `e2e-sync-bad-${suffix}`
@@ -374,6 +375,11 @@ registerCase({
       { operatingSystem: 'linux', daemon: { studioUrl: 'ftp://invalid' } },
       { operatingSystem: 'linux', daemon: { studioUrl: 'http://127.0.0.1:18081', unknown: 1 } },
       { daemon: { studioUrl: 'http://127.0.0.1:18081' } },
+      {
+        operatingSystem: 'linux',
+        javaHome: '/opt/jdk',
+        daemon: { studioUrl: 'http://127.0.0.1:18081' },
+      },
     ]
 
     for (const installConfig of invalidConfigs) {
@@ -388,6 +394,7 @@ registerCase({
           !String(error.body).includes('http://127.0.0.1:18081'),
           'hard error must not echo submitted values',
         )
+        assert(!String(error.body).includes('/opt/jdk'), 'hard error must not echo submitted values')
       }
     }
 

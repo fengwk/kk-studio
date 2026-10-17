@@ -5,7 +5,6 @@ import { registerCase } from '../lib/registry.mjs'
 export function linuxInstallConfig() {
   return {
     operatingSystem: 'linux',
-    javaHome: null,
     daemon: {
       studioUrl: 'http://127.0.0.1:18081',
       note: 'e2e install config',
@@ -26,7 +25,10 @@ export function linuxInstallConfig() {
 export function assertInstallConfig(config) {
   assert(config && typeof config === 'object', `installConfig must be an object: ${JSON.stringify(config)}`)
   assert(config.operatingSystem === 'linux', `operatingSystem must be linux: ${config.operatingSystem}`)
-  assert(config.javaHome == null, `javaHome must stay unset: ${config.javaHome}`)
+  assert(
+    !Object.hasOwn(config, 'javaHome'),
+    `retired javaHome must not round-trip: ${JSON.stringify(config.javaHome)}`,
+  )
   assert(
     config.daemon?.studioUrl === 'http://127.0.0.1:18081',
     `studioUrl must round-trip: ${config.daemon?.studioUrl}`,
@@ -52,7 +54,7 @@ registerCase({
   id: 'environment.install_config_cas_roundtrip',
   level: 'L1',
   title: 'Environment installConfig PUT CAS 持久化与往返',
-  docs: 'PUT /api/harness/environments/{id}/install-config 用 expectedVersion CAS 保存嵌套 installConfig； stale 版本 409、相同配置 no-op 不推进版本；硬非法 studioUrl/未知字段/缺 operatingSystem/null 配置 400 且不写入、不回显提交值，随后 GET 仍为已保存配置',
+  docs: 'PUT /api/harness/environments/{id}/install-config 用 expectedVersion CAS 保存嵌套 installConfig； stale 版本 409、相同配置 no-op 不推进版本；硬非法 studioUrl/未知字段/退役 javaHome/缺 operatingSystem/null 配置 400 且不写入、不回显提交值，随后 GET 仍为已保存配置',
   async run(ctx) {
     const name = `e2e-install-cfg-${cid().slice(0, 8)}`
     const { json: createJson } = await ctx.call('POST', '/api/harness/environments', { name })
@@ -109,7 +111,15 @@ registerCase({
           expectedVersion: version,
           installConfig: { operatingSystem: 'linux', daemon: { studioUrl: 'http://127.0.0.1:18081', unknown: 1 } },
         },
-        { expectedVersion: version, installConfig: { javaHome: '/opt/jdk', daemon: { studioUrl: 'http://127.0.0.1:18081' } } },
+        { expectedVersion: version, installConfig: { daemon: { studioUrl: 'http://127.0.0.1:18081' } } },
+        {
+          expectedVersion: version,
+          installConfig: {
+            operatingSystem: 'linux',
+            javaHome: '/opt/jdk',
+            daemon: { studioUrl: 'http://127.0.0.1:18081' },
+          },
+        },
         { expectedVersion: version, installConfig: null },
       ]
       for (const body of invalidBodies) {

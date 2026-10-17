@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { HttpError } from '../lib/http.mjs'
 
-import { linuxInstallConfig, assertExpiresNearFiveMinutes } from '../cases/environment-install-config.mjs'
+import { linuxInstallConfig, assertInstallConfig, assertExpiresNearFiveMinutes } from '../cases/environment-install-config.mjs'
 import { ALL_CASES, getCase } from '../lib/registry.mjs'
 
 const CASE_ID = 'environment.install_config_cas_roundtrip'
@@ -13,6 +13,17 @@ test('environment install-config case is a free L1 matrix case', () => {
   assert.ok(ALL_CASES.some((c) => c.id === CASE_ID), `case ${CASE_ID} should be in ALL_CASES`)
   assert.equal(caseDef.level, 'L1')
   assert.deepEqual(Array.from(caseDef.requires), [])
+})
+
+test('canonical install config omits the retired javaHome field', () => {
+  // 测试意图：Backend 严格 schema 已退役 javaHome；canonical fixture 连 null 都不能携带，断言也必须拒绝该字段回流。
+  const config = linuxInstallConfig()
+  assert.equal(Object.hasOwn(config, 'javaHome'), false)
+  assert.doesNotThrow(() => assertInstallConfig(config))
+  assert.throws(
+    () => assertInstallConfig({ ...config, javaHome: null }),
+    /retired javaHome/,
+  )
 })
 
 test('environment install-config case exercises PUT CAS persistence, no-op and hard rejection', async () => {
@@ -37,6 +48,7 @@ test('environment install-config case exercises PUT CAS persistence, no-op and h
         if (
           config == null
           || config.operatingSystem !== 'linux'
+          || Object.hasOwn(config, 'javaHome')
           || config.daemon?.studioUrl !== 'http://127.0.0.1:18081'
           || Object.hasOwn(config.daemon ?? {}, 'unknown')
         ) {
