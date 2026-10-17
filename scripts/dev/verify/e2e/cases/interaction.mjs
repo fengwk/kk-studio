@@ -39,8 +39,11 @@ const INTERACTION_FIELDS = [
   'createTime',
 ]
 
-/** InteractionPageDTO 精确字段集合：total 是同一过滤条件下的真实待处理总数，与当前页长度无关。 */
-const INTERACTION_PAGE_FIELDS = ['items', 'nextCursor', 'total']
+/**
+ * InteractionPageDTO 精确字段集合：total 是同一过滤条件下的真实待处理总数，与当前页长度无关；
+ * freshnessAt 是 required-nullable 的权威回读时刻。
+ */
+const INTERACTION_PAGE_FIELDS = ['items', 'nextCursor', 'total', 'freshnessAt']
 
 const OWNER_FIELDS = ['type', 'chatId', 'issueId', 'agentName']
 const RECEIPT_FIELDS = ['threadId', 'interactionId', 'submissionId', 'actor', 'acceptedAt', 'materialized']
@@ -110,6 +113,10 @@ async function collectInteractions(ctx, { pageSize = 100, maxPages = 20, rootThr
     const query = `?limit=${pageSize}${filter}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`
     const page$ = envelopeData((await ctx.call('GET', `/api/interactions${query}`)).json)
     assertExactFields(page$, INTERACTION_PAGE_FIELDS, 'interaction page')
+    // freshnessAt 是 required-nullable 的权威回读时刻：无时间驱动变更时为 null，有值必须是合法服务端时刻。
+    if (page$.freshnessAt !== null) {
+      instantMillis(page$.freshnessAt)
+    }
     assert(Array.isArray(page$.items), JSON.stringify(page$))
     assert(page$.items.length <= pageSize, JSON.stringify(page$))
     // total 是同一过滤条件下的真实待处理总数，不是首页长度：页内、跨页都必须稳定且不小于已返回条数。
@@ -186,7 +193,7 @@ registerCase({
   // 本 case 把 Provider baseUrl 指向 case 内自建的宿主 127.0.0.1 mock；distributed 容器内无法回连宿主 loopback。
   requires: ['host-mock'],
   title: '统一人工交互 API：ask_user 待处理列表、答案物化与门禁',
-  docs: '本地 OpenAI SSE mock 触发内置 ask_user（Runtime 按 provenance 冻结为 WAITING_INPUT，不进审批）：GET /api/interactions 返回仅含 Chat/Issue+Agent 归属的 (createTime,interactionId) 升序 keyset 分页（limit 默认 50、[1,100]、非法参数 400），页内含与分页位置无关的真实可见待处理总数 total；可选 rootThreadId 按执行根过滤（返回该根及其后代，响应项保留来源 threadId/sessionId 并给出 rootThreadId；不存在的根 404、非法 canonical 400），非法 rootThreadId 或缺省过滤下的 total 与可见集一致；InteractionDTO 只暴露冻结问卷原文与归属，approvalJson 为 null；POST /api/interactions/{id}/input 严格校验 threadId/submissionId/declined/answers（缺失、未知字段、拒答携带答案 400；答案不满足冻结问卷 409；未知目标 409），接受后同 submissionId 精确重放 materialized=true，换 submissionId 409；回答物化为 ToolResult 后交互消失、Thread 以答案收敛',
+  docs: '本地 OpenAI SSE mock 触发内置 ask_user（Runtime 按 provenance 冻结为 WAITING_INPUT，不进审批）：GET /api/interactions 返回仅含 Chat/Issue+Agent 归属的 (createTime,interactionId) 升序 keyset 分页（limit 默认 50、[1,100]、非法参数 400），页内含与分页位置无关的真实可见待处理总数 total，并携带 required-nullable 的权威回读时刻 freshnessAt（本 case 无环境 Tool 等待时为 null）；可选 rootThreadId 按执行根过滤（返回该根及其后代，响应项保留来源 threadId/sessionId 并给出 rootThreadId；不存在的根 404、非法 canonical 400），非法 rootThreadId 或缺省过滤下的 total 与可见集一致；InteractionDTO 只暴露冻结问卷原文与归属，approvalJson 为 null；POST /api/interactions/{id}/input 严格校验 threadId/submissionId/declined/answers（缺失、未知字段、拒答携带答案 400；答案不满足冻结问卷 409；未知目标 409），接受后同 submissionId 精确重放 materialized=true，换 submissionId 409；回答物化为 ToolResult 后交互消失、Thread 以答案收敛',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
     const marker = `INTERACTION-PENDING-${suffix}`
@@ -313,6 +320,8 @@ registerCase({
         ).json,
       )
       assertExactFields(filtered, INTERACTION_PAGE_FIELDS, 'root-filtered interaction page')
+      // 本 case 的等待全部来自本地 ask_user，没有任何 Environment Tool 等待，因此不存在时间驱动的环境等待变更时刻。
+      assert(filtered.freshnessAt === null, JSON.stringify(filtered.freshnessAt))
       assert(
         filtered.items.length === 1
           && filtered.items[0].interactionId === pending.interactionId

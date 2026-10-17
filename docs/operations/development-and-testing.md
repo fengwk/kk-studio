@@ -461,17 +461,20 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
   不缓存的 UTF-8 纯文本；缺失、篡改或轮换后失效的 code 被拒绝，卸载脚本不含环境凭据。只下载检查，不执行主机安装。
 - `project.issue_lifecycle`：Project workflow JSON 与设置 CAS、Issue 按 workflow `next`
   白名单流转、BLOCKED 专用阻塞/恢复、pause(UNKNOWN)/resolve-unknown/resume 门禁、COMMENT
-  幂等与「无活动 Run 不得投递 INSTRUCTION」、Activity 有界窗口分页与 snapshot 投影。
+  幂等与「无活动 Run 不得投递 INSTRUCTION」、Activity 有界窗口分页与 snapshot 投影
+  （`referencedStateCodes` 汇总全部未归档及归档 Issue 的当前状态与阻塞恢复目标，归档不丢引用）。
 - `project.issue_stage_budget`：阶段额度只能授权给启用且有 Agent 的工作阶段，首次
   `budget-reset` 即授权、重放精确、CAS 过期 409、高水位不回退。
 - `canvas.command_revision_contract` / `canvas.command_conflict_contract`：11 种 typed
   command、`revision` 坐标与 patch 变化集、批量前置条件过期时整批 409 不写入。
 - `interaction.pending_input_contract`：内置 `ask_user` 冻结出 WAITING_INPUT 后，统一
   `GET /api/interactions` 与 `POST /api/interactions/{id}/input` 的归属、分页、答案校验与
-  物化门禁；该 case 需要 `host-mock`，不是 `requires=-`。
+  物化门禁；分页携带 required-nullable 的权威回读时刻 `freshnessAt`（本 case 无环境 Tool
+  等待时显式为 null）；该 case 需要 `host-mock`，不是 `requires=-`。
 - `thread_tree.query_contract` / `thread_tree.invalid_and_unknown_thread`：
   `GET /api/harness/threads/{threadId}/tree` 的最小节点投影、真实根关系、当前路径计数与终态，
-  查询不改变 head 或版本；非法 UUID 为 400，缺失 Thread 为 404。
+  节点 `updateTime` 只读投影 Thread 权威更新时刻且与 Thread 快照一致，
+  查询不改变 head、版本或 `updateTime`；非法 UUID 为 400，缺失 Thread 为 404。
   根节点由缺失 Agent 触发确定性规划失败，不调用真实 Provider；
   跨 Session 的多层父子树与锁序由内存及 PostgreSQL 契约测试覆盖。
 - `events.heartbeat_keepalive` / `events.project_invalidation`：应用事件 WebSocket 的周期
