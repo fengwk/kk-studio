@@ -325,10 +325,7 @@ class TestWindowsUpdateNativeFixture(unittest.TestCase):
             self.assertIn(needle, text, f"the native fixture must cover {needle!r}")
 
     def test_native_fixture_propagates_the_update_script_exit_code(self):
-        # The fixture must invoke the production script with the call operator: a dot-sourced
-        # script cannot propagate its fail-closed `exit 1` (the host still exits 0), which would
-        # make every "exits non-zero" assertion pass silently. The child exit code is relayed
-        # explicitly, so the runner cannot report a false success either.
+        # The fixture must report the update's failure, not the wrapper's default status 0.
         text = NATIVE_TEST_PATH.read_text(encoding="utf-8")
         self.assertIn(
             "& '__SCRIPT__' -StagedJar '__STAGED__' -InstalledJar '__INSTALLED__'", text)
