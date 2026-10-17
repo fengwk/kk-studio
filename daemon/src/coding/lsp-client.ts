@@ -175,8 +175,11 @@ export class LspClient {
   private readonly documents = new Map<string, DocumentRecord>()
 
   private stopped = false
-  /** 这次停止的收敛失败（终止没能证明完成）；非 null 时重复调用必须重新抛出同一条失败。 */
-  private stopFailure: unknown
+  /**
+   * 这次物理收尾的唯一 Promise：并发与重复调用都等待它，因此必然共享同一次终结和同一个结论（成功或失败），
+   * 不会因为「已经停过」而在收尾尚未收敛时提前报告成功。
+   */
+  private stopPromise: Promise<void> | null = null
   private hasExited = false
   private exitCode: number | null = null
   private capabilities: ServerCapabilities | null = null
@@ -585,20 +588,24 @@ export class LspClient {
   }
 
   /**
-   * 停止客户端：并发调用与重复调用必须看到同一次停止的同一结论，绝不能因为「已经停过」而报告成功。
+   * 停止客户端：并发调用与重复调用都等待同一次物理收尾，因此必然看到同一个结论，绝不会因为「已经停过」而报告成功。
    *
-   * <p>进程终止没能证明收敛时，该失败被保留为这次停止的结论，后续调用（含各自的清理路径）都会重新抛出同一条失败，
+   * <p>进程终止没能证明收敛时，该失败就是这次停止的结论，后续调用（含各自的清理路径）都会重新抛出同一条失败，
    * 因此池可以据此判定该 key 的旧实例可能仍然存活，绝不重新启动第二个服务器。
    */
-  async stop(graceMillis = 1000): Promise<void> {
-    if (this.stopped) {
-      if (this.stopFailure !== undefined) {
-        throw this.stopFailure
-      }
-      return
+  stop(graceMillis = 1000): Promise<void> {
+    if (this.stopPromise === null) {
+      this.stopped = true
+      this.stopPromise = this.finishStop(graceMillis)
     }
-    this.stopped = true
+    return this.stopPromise
+  }
 
+  /**
+   * 执行这次停止的物理收尾：连接释放与进程终结各自独立尝试，任何一项失败都不得跳过另一项，
+   * 两者的失败都保留在同一个结论里。
+   */
+  private async finishStop(graceMillis: number): Promise<void> {
     try {
       if (!this.hasExited) {
         const shutdownGrace = Math.max(0, graceMillis)
@@ -615,21 +622,38 @@ export class LspClient {
       }
     } finally {
       this.documents.clear()
-      this.connection.dispose()
+      const failures: unknown[] = []
       let cleanupError: unknown
       try {
-        await this.managed.terminate(graceMillis)
-      } catch (error) {
-        cleanupError = error
+        this.connection.dispose()
+      } catch (disposeError) {
+        // 连接释放失败绝不能跳过进程终结：旧实例是否存活必须靠终结来证明。
+        cleanupError = disposeError
       }
       if (cleanupError !== undefined) {
-        this.stopFailure = new LspError('LSP server process termination failed during shutdown', {
-          cause: cleanupError,
-        })
+        failures.push(
+          new LspError('LSP connection disposal failed during shutdown', { cause: cleanupError }),
+        )
       }
-    }
-    if (this.stopFailure !== undefined) {
-      throw this.stopFailure
+      cleanupError = undefined
+      try {
+        await this.managed.terminate(graceMillis)
+      } catch (terminateError) {
+        cleanupError = terminateError
+      }
+      if (cleanupError !== undefined) {
+        failures.push(
+          new LspError('LSP server process termination failed during shutdown', {
+            cause: cleanupError,
+          }),
+        )
+      }
+      if (failures.length === 1) {
+        throw failures[0]
+      }
+      if (failures.length > 1) {
+        throw new AggregateError(failures, 'LSP client shutdown failed')
+      }
     }
   }
 

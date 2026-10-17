@@ -914,8 +914,9 @@ export class Runtime {
     }
     void this.track(
       releasePermit().catch((error: unknown) => {
-        // 许可释放失败只留下安全诊断（固定阶段与异常类型），既不掩盖出站结果，也不伪装成停机失败。
-        reportReleaseFailure('update permit release', error)
+        // 许可释放失败只留下安全诊断（固定阶段与固定异常类型），既不掩盖出站结果，也不伪装成停机失败；
+        // 诊断输出本身失败也照样可见地并入停机失败聚合。
+        this.collectDiagnosticFailure('update permit release', error)
       }),
     )
   }
@@ -1053,10 +1054,23 @@ export class Runtime {
     }
   }
 
-  /** 记录一次停机失败：既进入供装配层聚合的失败集合，也留下安全诊断。 */
+  /**
+   * 记录一次停机失败：既进入供装配层聚合的失败集合，也留下安全诊断。
+   *
+   * <p>诊断输出本身失败同样是可见事实，因此并入同一个聚合；但它既不再触发第二次诊断（不递归），
+   * 也绝不阻断其余独立释放，更不会让终止闩悬空。
+   */
   private recordShutdownFailure(phase: string, error: unknown): void {
     this.shutdownFailures.push(error)
-    reportReleaseFailure(phase, error)
+    this.collectDiagnosticFailure(phase, error)
+  }
+
+  /** 落下一次释放失败的安全诊断；诊断输出失败只并入可见聚合，绝不再写诊断，也绝不抛出。 */
+  private collectDiagnosticFailure(phase: string, error: unknown): void {
+    const diagnosticFailure = reportReleaseFailure(phase, error)
+    if (diagnosticFailure !== null) {
+      this.shutdownFailures.push(diagnosticFailure)
+    }
   }
 
   /** 登记一个在途执行 Promise，并在其收敛后自动移除。 */
@@ -1185,14 +1199,46 @@ interface UpdateReceipt {
 }
 
 /**
- * 释放失败的安全诊断：固定阶段加异常类型，绝不输出 message、cause、路径或提交值。
+ * 释放失败的安全诊断：固定阶段加固定的异常类型，绝不输出 message、cause、路径、提交值或可写的 {@code error.name}。
  *
  * <p>停机释放失败同时进入 {@link Runtime.getShutdownFailures} 由装配层聚合；更新许可释放失败只留下这条诊断，
  * 因为更新器会 fail closed 并把失败回执写回平台，不需要把一次文件写入失败升级为 Daemon 停机失败。
+ *
+ * @returns 诊断输出自身的失败；{@code null} 表示诊断已写出。返回而不抛出，调用方据此把诊断失败并入可见聚合，
+ *     既不让一次写失败阻断收尾，也不为「写诊断失败」再写诊断（不递归）。
  */
-function reportReleaseFailure(phase: string, error: unknown): void {
-  const kind = error instanceof Error ? error.name : 'UnknownError'
-  process.stderr.write(`daemon ${phase} failed: ${kind}\n`)
+function reportReleaseFailure(phase: string, error: unknown): unknown {
+  try {
+    process.stderr.write(`daemon ${phase} failed: ${describeFailureType(error)}\n`)
+    return null
+  } catch (diagnosticFailure) {
+    return diagnosticFailure
+  }
+}
+
+/** 只按内建身份判定异常类型的固定枚举：诊断里输出的类型是这里写死的字面量，任何可写文本都无法注入。 */
+const BUILT_IN_FAILURE_TYPES: readonly (readonly [Function, string])[] = [
+  [AggregateError, 'AggregateError'],
+  [TypeError, 'TypeError'],
+  [RangeError, 'RangeError'],
+  [SyntaxError, 'SyntaxError'],
+  [ReferenceError, 'ReferenceError'],
+  [URIError, 'URIError'],
+  [EvalError, 'EvalError'],
+]
+
+/**
+ * 这次失败的固定类型名：只认内建类型身份与「是不是 Error」，其余一律泛化为 UnknownError。
+ *
+ * <p>{@code error.name} 是可写的任意文本（可能夹带 message、路径或凭据），因此在诊断里绝不回显它。
+ */
+function describeFailureType(error: unknown): string {
+  for (const [type, label] of BUILT_IN_FAILURE_TYPES) {
+    if (error instanceof type) {
+      return label
+    }
+  }
+  return error instanceof Error ? 'Error' : 'UnknownError'
 }
 
 function safeMessage(error: unknown): string {

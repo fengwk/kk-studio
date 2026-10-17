@@ -346,6 +346,129 @@ describe('LspClient Protocol & Handshake', () => {
     await awaitProcessGone(pid)
   })
 
+  it('shares one deferred termination between concurrent stop calls and never reports early success', async () => {
+    const { client } = await startClient('normal')
+    let terminateCalls = 0
+    let releaseTermination!: () => void
+    const terminationGate = new Promise<void>((resolve) => {
+      releaseTermination = resolve
+    })
+    const managed = (
+      client as unknown as { managed: { terminate: (graceMillis?: number) => Promise<void> } }
+    ).managed
+    managed.terminate = async (): Promise<void> => {
+      terminateCalls += 1
+      await terminationGate
+      throw new Error('deferred termination boom')
+    }
+
+    const first = client.stop(50)
+    const second = client.stop(50)
+    let firstSettled = false
+    let secondSettled = false
+    void first.then(
+      () => {
+        firstSettled = true
+      },
+      () => {
+        firstSettled = true
+      },
+    )
+    void second.then(
+      () => {
+        secondSettled = true
+      },
+      () => {
+        secondSettled = true
+      },
+    )
+
+    // 物理收尾仍被钉住：两次调用都必须等待同一次收尾，第二次绝不能凭「已经停过」提前报告成功。
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    expect(firstSettled).toBe(false)
+    expect(secondSettled).toBe(false)
+    expect(terminateCalls).toBe(1)
+
+    releaseTermination()
+    const firstFailure: unknown = await first.catch((error: unknown) => error)
+    const secondFailure: unknown = await second.catch((error: unknown) => error)
+    expect(firstFailure).toBeInstanceOf(LspError)
+    expect((firstFailure as LspError).message).toBe(
+      'LSP server process termination failed during shutdown',
+    )
+    // 同一次收尾的同一条失败：既没有各自终结一次，也没有各自的失败对象。
+    expect(secondFailure).toBe(firstFailure)
+    expect(terminateCalls).toBe(1)
+    // 该客户端的停止结论已被固化为失败，真实子进程由 supervisor 收尾。
+    clients.splice(clients.indexOf(client), 1)
+  })
+
+  it('still terminates the process and keeps the failure when disposing the connection throws', async () => {
+    const { client, transcript } = await startClient('stubborn')
+    const startEvent = await awaitEvent(transcript, (e) => e.event === 'start')
+    const pid = startEvent.pid!
+    let terminateCalls = 0
+    const managed = (
+      client as unknown as { managed: { terminate: (graceMillis?: number) => Promise<void> } }
+    ).managed
+    const realTerminate = managed.terminate.bind(managed)
+    managed.terminate = async (graceMillis?: number): Promise<void> => {
+      terminateCalls += 1
+      await realTerminate(graceMillis)
+    }
+    const connection = (client as unknown as { connection: { dispose: () => void } }).connection
+    const realDispose = connection.dispose.bind(connection)
+    let disposeFaultPending = true
+    connection.dispose = (): void => {
+      if (disposeFaultPending) {
+        disposeFaultPending = false
+        throw new Error('dispose boom')
+      }
+      realDispose()
+    }
+
+    const failure: unknown = await client.stop(100).catch((error: unknown) => error)
+    expect(failure).toBeInstanceOf(LspError)
+    expect((failure as LspError).message).toBe('LSP connection disposal failed during shutdown')
+    // 连接释放失败绝不能跳过进程终结：旧实例是否存活必须靠终结来证明。
+    expect(terminateCalls).toBe(1)
+    await awaitProcessGone(pid)
+    // 该客户端的停止结论已被固化为失败，真实子进程已经终结。
+    clients.splice(clients.indexOf(client), 1)
+  })
+
+  it('keeps both failures when the connection disposal and the termination both fail', async () => {
+    const { client } = await startClient('stubborn')
+    let terminateCalls = 0
+    const managed = (
+      client as unknown as { managed: { terminate: (graceMillis?: number) => Promise<void> } }
+    ).managed
+    managed.terminate = async (): Promise<void> => {
+      terminateCalls += 1
+      throw new Error('termination boom')
+    }
+    const connection = (client as unknown as { connection: { dispose: () => void } }).connection
+    const realDispose = connection.dispose.bind(connection)
+    let disposeFaultPending = true
+    connection.dispose = (): void => {
+      if (disposeFaultPending) {
+        disposeFaultPending = false
+        throw new Error('dispose boom')
+      }
+      realDispose()
+    }
+
+    const failure: unknown = await client.stop(50).catch((error: unknown) => error)
+    expect(failure).toBeInstanceOf(AggregateError)
+    expect(((failure as AggregateError).errors as Error[]).map((error) => error.message)).toEqual([
+      'LSP connection disposal failed during shutdown',
+      'LSP server process termination failed during shutdown',
+    ])
+    expect(terminateCalls).toBe(1)
+    // 该客户端的停止结论已被固化为失败，真实子进程由 supervisor 收尾。
+    clients.splice(clients.indexOf(client), 1)
+  })
+
   it('unchanged content does not send didChange notification', async () => {
     const { client, transcript } = await startClient('normal')
     const file = path.join(tempDir, 'App.java')

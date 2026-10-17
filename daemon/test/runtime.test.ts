@@ -484,6 +484,57 @@ describe('runtime update handling', () => {
     stderr.mockRestore()
   })
 
+  it('keeps independent releases and the completion latch when the diagnostic output itself fails', async () => {
+    const setup = buildRuntime()
+    await handshake(setup)
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => {
+      throw new Error('injected diagnostic write failure')
+    })
+    const connection = setup.transport.connection
+    expect(connection).not.toBeNull()
+    connection!.close = (): void => {
+      throw new Error('injected connection close failure')
+    }
+
+    setup.runtime.close()
+    stderr.mockRestore()
+
+    // 诊断写不出来也必须落定终止闩，绝不挂起 awaitCompletion，也绝不阻断后续独立释放。
+    await setup.runtime.awaitCompletion()
+
+    // connection 的失败与「写诊断失败」都可见，而之后的 transport 释放照常独立执行。
+    expect(setup.runtime.getShutdownFailures()).toHaveLength(2)
+    expect(setup.transport.closed).toBe(true)
+  })
+
+  it('never leaks a writable error name or a non-error value into the shutdown diagnostic', async () => {
+    const setup = buildRuntime()
+    await handshake(setup)
+    const stderr = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
+    const connection = setup.transport.connection
+    expect(connection).not.toBeNull()
+    const named = new Error('boom')
+    named.name = 's3cr3t-token=/home/dev/.ssh/id_rsa'
+    connection!.close = (): void => {
+      throw named
+    }
+    setup.transport.close = (): void => {
+      throw 's3cr3t-thrown-string'
+    }
+
+    setup.runtime.close()
+    await setup.runtime.awaitCompletion()
+
+    const diagnostics = stderr.mock.calls.map((call) => String(call[0])).join('')
+    expect(diagnostics).toContain('daemon connection close failed: Error')
+    expect(diagnostics).toContain('daemon transport close failed: UnknownError')
+    expect(diagnostics).not.toContain('s3cr3t')
+    expect(diagnostics).not.toContain('id_rsa')
+    expect(diagnostics).not.toContain('boom')
+    expect(setup.runtime.getShutdownFailures()).toEqual([named, 's3cr3t-thrown-string'])
+    stderr.mockRestore()
+  })
+
   it('reports FAILED when the updater throws', async () => {
     const update: UpdatePort = {
       async handleUpdate() {
