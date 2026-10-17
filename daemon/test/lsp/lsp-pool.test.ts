@@ -24,14 +24,43 @@ describe('LspClientPool Concurrency & Lifecycle', () => {
   })
 
   afterEach(async () => {
-    for (const pool of pools) {
-      await pool.close()
+    const cleanupErrors: unknown[] = []
+    // splice：池绝不残留到下一个测试。二次关闭的失败既不当成功，也不掩盖原测试结论。
+    const closing = pools.splice(0)
+    const poolResults = await Promise.allSettled(closing.map((pool) => pool.close()))
+    for (const result of poolResults) {
+      if (result.status === 'rejected') {
+        cleanupErrors.push(result.reason)
+      }
     }
-    await supervisor.close()
+    // supervisor 与临时目录独立收尾：池关闭失败绝不能跳过它们。
+    const supervisorResults = await Promise.allSettled([supervisor.close()])
+    for (const result of supervisorResults) {
+      if (result.status === 'rejected') {
+        cleanupErrors.push(result.reason)
+      }
+    }
     try {
       fs.rmSync(tempDir, { recursive: true, force: true })
-    } catch {}
+    } catch (error) {
+      cleanupErrors.push(error)
+    }
+    if (cleanupErrors.length > 0) {
+      throw new AggregateError(cleanupErrors, 'lsp-pool fixture cleanup failed')
+    }
   })
+
+  /**
+   * 池的 close 已被本测试有意毒化：拒绝由测试自己断言，afterEach 不再二次关闭它。
+   * 这不是吞掉失败——其余 cleanup 仍独立执行，且池的子进程仍由 supervisor 收尾。
+   */
+  async function expectPoolCloseFailure(pool: LspClientPool): Promise<void> {
+    const index = pools.indexOf(pool)
+    if (index >= 0) {
+      pools.splice(index, 1)
+    }
+    await expect(pool.close()).rejects.toThrow(/failed to release all resources/)
+  }
 
   /**
    * 终止永远失败的 supervisor：真实启动仍由 TestProcessSupervisor 管理（afterEach 能收尾），
@@ -49,6 +78,23 @@ describe('LspClientPool Concurrency & Lifecycle', () => {
         }
       },
       close: async (): Promise<void> => {},
+    }
+  }
+
+  /**
+   * 在失败终止 supervisor 外再加一层真实启动屏障：等假服务器写下 'start' 后才把 managed 交回池。
+   * 这样 50ms 的 initialize 预算从「进程已就绪」起算，macOS 冷启动不会与初始化超时抢时间；
+   * 池仍然真实地经历 no-init 超时，不使用 sleep 猜测。
+   */
+  function coldStartBarrierSupervisor(transcriptPath: string): ProcessSupervisor {
+    const failing = failingTerminateSupervisor()
+    return {
+      start: async (spec: ProcessSpec): Promise<ManagedProcess> => {
+        const managed = await failing.start(spec)
+        await awaitEvent(transcriptPath, (event) => event.event === 'start')
+        return managed
+      },
+      close: (): Promise<void> => failing.close(),
     }
   }
 
@@ -277,7 +323,7 @@ describe('LspClientPool Concurrency & Lifecycle', () => {
     const entry = await pool.lease(file)
     pool.release(entry)
 
-    await expect(pool.close()).rejects.toThrow(/failed to release all resources/)
+    await expectPoolCloseFailure(pool)
   })
 
   it('client(file) returns undefined when unsupported, unstarted, or client has died', async () => {
@@ -366,7 +412,7 @@ describe('LspClientPool Concurrency & Lifecycle', () => {
     expect(pool.activeCount()).toBe(0)
 
     // close() surfaces the failure that occurred during idle retirement
-    await expect(pool.close()).rejects.toThrow(/failed to release all resources/)
+    await expectPoolCloseFailure(pool)
   })
 
   it('fails closed for the retired key when the retirement could not be proven converged', async () => {
@@ -399,16 +445,21 @@ describe('LspClientPool Concurrency & Lifecycle', () => {
     // 同一条失败对象：既没有替换登记，也绝没有为同一个 key 启动第二个服务器。
     expect(second).toBe(first)
     expect(readEvents(transcript).filter((e) => e.event === 'start')).toHaveLength(1)
-    await expect(pool.close()).rejects.toThrow(/failed to release all resources/)
+    await expectPoolCloseFailure(pool)
   })
 
   it('keeps a key closed when a failed boot could not be proven cleaned up', async () => {
     const transcript = path.join(tempDir, 'boot-cleanup-fail-transcript.jsonl')
     const server = fakeServerConfig('java', 'no-init', transcript)
-    const pool = new LspClientPool(LspDiscovery.of([server]), failingTerminateSupervisor(), {
-      initializeTimeout: 50,
-      shutdownGrace: 50,
-    })
+    // 只有这个用例把 50ms 初始化预算压在冷启动上：先等真实的 'start' 屏障再交给池。
+    const pool = new LspClientPool(
+      LspDiscovery.of([server]),
+      coldStartBarrierSupervisor(transcript),
+      {
+        initializeTimeout: 50,
+        shutdownGrace: 50,
+      },
+    )
     pools.push(pool)
 
     const javaFile = path.join(tempDir, 'App.java')
@@ -427,6 +478,49 @@ describe('LspClientPool Concurrency & Lifecycle', () => {
     )
     expect(second).toBe(first)
     expect(readEvents(transcript).filter((e) => e.event === 'start')).toHaveLength(1)
-    await expect(pool.close()).rejects.toThrow(/failed to release all resources/)
+    await expectPoolCloseFailure(pool)
+  })
+})
+
+// Fixture contract: a test supervisor must prove real stdio teardown, not just 'exit'. A child
+// whose pipes are still open can keep a deleted distribution busy and delay coverage collection.
+describe('TestProcessSupervisor resource lifecycle', () => {
+  const spawnSpec = (): ProcessSpec => ({
+    executable: process.execPath,
+    args: ['-e', 'setInterval(() => {}, 1000)'],
+    cwd: os.tmpdir(),
+  })
+
+  it('resolves terminate and close only after the real stdio close', async () => {
+    const supervisor = new TestProcessSupervisor()
+
+    const managed = await supervisor.start(spawnSpec())
+    const terminatedChild = supervisor.children[0]!
+    let terminatedClosed = false
+    terminatedChild.on('close', () => {
+      terminatedClosed = true
+    })
+    await managed.terminate()
+    expect(terminatedChild.exitCode !== null || terminatedChild.signalCode !== null).toBe(true)
+    expect(terminatedClosed).toBe(true)
+
+    await supervisor.start(spawnSpec())
+    const closedChild = supervisor.children[1]!
+    let closed = false
+    closedChild.on('close', () => {
+      closed = true
+    })
+    await supervisor.close()
+    expect(closedChild.exitCode !== null || closedChild.signalCode !== null).toBe(true)
+    expect(closed).toBe(true)
+  })
+
+  it('settles a failed spawn so close never hangs', async () => {
+    const supervisor = new TestProcessSupervisor()
+    const missing = path.join(os.tmpdir(), `kk-missing-lsp-${process.pid}-${Date.now()}`)
+    const managed = await supervisor.start({ ...spawnSpec(), executable: missing })
+
+    await expect(managed.exit).resolves.toEqual({ exitCode: null, signal: null })
+    await expect(supervisor.close()).resolves.toBeUndefined()
   })
 })
