@@ -179,8 +179,11 @@ try {
   # The staged jar atomically replaces the installed jar on the same volume (both live under
   # the managed data directory): the installed jar is never deleted or moved aside first and
   # there is no non-atomic fallback, so a failure leaves it in place.
+  #
+  # The third argument is the optional backup file name. A `$null` literal binds to the empty
+  # string for the [string] parameter, which File.Replace rejects, so a genuine null is passed.
   $step = 'replace'
-  [IO.File]::Replace($StagedJar, $InstalledJar, $null)
+  [IO.File]::Replace($StagedJar, $InstalledJar, [NullString]::Value)
 
   $step = 'restart'
   Start-ScheduledTask -TaskName $taskName -TaskPath $taskPath

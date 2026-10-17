@@ -280,19 +280,32 @@ class TestWindowsUpdateBackup(unittest.TestCase):
 class TestWindowsUpdateReplacement(unittest.TestCase):
     """The staged jar must atomically replace the installed jar on the same volume."""
 
+    REPLACE = "[IO.File]::Replace($StagedJar, $InstalledJar, [NullString]::Value)"
+
     def test_staged_jar_atomically_replaces_the_installed_jar(self):
         text = script_text()
-        self.assertIn("[IO.File]::Replace($StagedJar, $InstalledJar, $null)", text)
+        self.assertIn(self.REPLACE, text)
         self.assertNotIn(
             "Move-Item", text, "the replacement must not move the installed jar aside")
         self.assertNotIn(
             "Remove-Item", text, "the installed jar must never be deleted before replacement")
         self.assertIn("$step = 'replace'", text)
 
+    def test_replacement_passes_a_genuine_null_backup_name(self):
+        # The third File.Replace argument is the optional backup file name. A `$null` literal
+        # binds to the empty string for the [string] parameter, which File.Replace rejects
+        # ("The value cannot be an empty string"), so only [NullString]::Value is a genuine null.
+        text = script_text()
+        self.assertIn(self.REPLACE, text)
+        self.assertNotIn(
+            "[IO.File]::Replace($StagedJar, $InstalledJar, $null)",
+            text,
+            "a $null literal is not a genuine null for the File.Replace backup argument")
+
     def test_replacement_keeps_the_installed_jar_untouched_until_it_succeeds(self):
         text = script_text()
         backup = text.index("Copy-Item -LiteralPath $InstalledJar")
-        replace = text.index("[IO.File]::Replace($StagedJar, $InstalledJar, $null)")
+        replace = text.index(self.REPLACE)
         restart = text.index("Start-ScheduledTask -TaskName $taskName -TaskPath $taskPath")
         self.assertLess(backup, replace)
         self.assertLess(replace, restart)
@@ -310,6 +323,29 @@ class TestWindowsUpdateNativeFixture(unittest.TestCase):
                        "managed scheduled task is missing",
                        "FileShare]::None", "CopyItem:"):
             self.assertIn(needle, text, f"the native fixture must cover {needle!r}")
+
+    def test_native_fixture_propagates_the_update_script_exit_code(self):
+        # The fixture must invoke the production script with the call operator: a dot-sourced
+        # script cannot propagate its fail-closed `exit 1` (the host still exits 0), which would
+        # make every "exits non-zero" assertion pass silently. The child exit code is relayed
+        # explicitly, so the runner cannot report a false success either.
+        text = NATIVE_TEST_PATH.read_text(encoding="utf-8")
+        self.assertIn(
+            "& '__SCRIPT__' -StagedJar '__STAGED__' -InstalledJar '__INSTALLED__'", text)
+        self.assertNotIn(". '__SCRIPT__'", text)
+        self.assertIn("$LASTEXITCODE = 0", text)
+        self.assertIn("exit $LASTEXITCODE", text)
+
+    def test_native_fixture_keeps_stub_state_out_of_the_callee_script_scope(self):
+        # Under the call operator the production script runs in a child scope, where `$script:`
+        # resolves to the callee's scope. Stub state that straddles the invocation must live in
+        # the global scope, or the queued-state wait and the locked-handle replace case would
+        # silently stop working.
+        text = NATIVE_TEST_PATH.read_text(encoding="utf-8")
+        self.assertNotIn("$script:stateIndex", text)
+        self.assertNotIn("$script:installedLock", text)
+        self.assertIn("$global:stateIndex", text)
+        self.assertIn("$global:installedLock", text)
 
     def test_native_fixture_does_not_register_or_touch_real_tasks(self):
         text = NATIVE_TEST_PATH.read_text(encoding="utf-8")
