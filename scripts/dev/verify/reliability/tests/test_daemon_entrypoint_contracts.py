@@ -112,6 +112,14 @@ class TestReliabilityDaemonBootstrapContracts(unittest.TestCase):
         )
         self.assertNotIn("FROM node:", dockerfile.split("---------- runtime ----------")[1])
 
+    def test_runtime_user_creation_uses_absolute_system_commands(self):
+        """运行期 PATH 不含 /usr/sbin；构建时必须仍能调用基础镜像自带的用户管理工具。"""
+        runtime = RELIABILITY_DOCKERFILE.read_text(encoding="utf-8").split(
+            "---------- runtime ----------"
+        )[1]
+        self.assertIn("/usr/sbin/groupadd --gid 10001 kkdaemon", runtime)
+        self.assertIn("/usr/sbin/useradd --uid 10001", runtime)
+
     def test_entrypoint_launches_the_node_distribution_entry_with_config_only(self):
         """入口必须物化共享 daemon.json/owner-only token，并用冻结 Node 运行发行根入口。"""
         with tempfile.TemporaryDirectory() as temporary:
