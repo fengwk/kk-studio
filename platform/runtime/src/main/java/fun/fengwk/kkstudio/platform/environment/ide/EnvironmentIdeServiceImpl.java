@@ -17,7 +17,6 @@ import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeOpenViewDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO;
 
 import java.time.Duration;
-import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -89,17 +88,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
             "environment IDE view capacity is exhausted", error);
       }
     }
-    IdeCommand command =
-        new IdeCommand(
-            IdeAction.OPEN_VIEW,
-            viewId,
-            request.getDirectory(),
-            null,
-            null,
-            null,
-            null,
-            null,
-            List.of());
+    IdeCommand command = directoryCommand(IdeAction.OPEN_VIEW, viewId, request.getDirectory());
     IdeCall result = call(environmentId, command);
     IdeReply reply = result.reply();
     EnvironmentIdeViewDTO dto =
@@ -130,17 +119,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     if (directory == null || directory.isBlank()) {
       throw new AiValidationException("environment", "directory must not be blank");
     }
-    IdeCommand command =
-        new IdeCommand(
-            IdeAction.CHANGE_DIRECTORY,
-            parsedViewId,
-            directory,
-            null,
-            null,
-            null,
-            null,
-            null,
-            List.of());
+    IdeCommand command = directoryCommand(IdeAction.CHANGE_DIRECTORY, parsedViewId, directory);
     IdeReply reply = call(environmentId, command).reply();
     // 无需更换 iframe URL：entryUrl 保持 null，同 workspace 身份继续。
     return toDto(
@@ -231,6 +210,18 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
       return IdeCommand.validateViewId(viewId);
     } catch (IllegalArgumentException | NullPointerException error) {
       throw new AiValidationException("environment", "viewId must be a canonical UUID");
+    }
+  }
+
+  /**
+   * 构造携带目录的视图命令。目录来自外部输入，{@link IdeCommand} 的 wire 校验（空白/长度/控制字符）必须翻译为类型化校验错误，而不是把 {@link
+   * IllegalArgumentException} 泄漏成未分类失败（HTTP 500）；错误只携带固定校验原因，不回显输入值。
+   */
+  private static IdeCommand directoryCommand(IdeAction action, String viewId, String directory) {
+    try {
+      return IdeCommand.view(action, viewId, directory);
+    } catch (IllegalArgumentException error) {
+      throw new AiValidationException("environment", error.getMessage());
     }
   }
 

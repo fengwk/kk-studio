@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.web.controller;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -19,13 +20,24 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.environment.daemon.IdeCommand;
+import fun.fengwk.kkstudio.harness.environment.daemon.IdeReply;
+import fun.fengwk.kkstudio.harness.environment.server.IdeCommandTransport;
+import fun.fengwk.kkstudio.harness.environment.server.IdeRequest;
+import fun.fengwk.kkstudio.harness.environment.server.IdeSessionIdentity;
 import fun.fengwk.kkstudio.platform.environment.ide.EnvironmentIdeService;
+import fun.fengwk.kkstudio.platform.environment.ide.EnvironmentIdeServiceImpl;
+import fun.fengwk.kkstudio.platform.environment.ide.IdeOriginProperties;
+import fun.fengwk.kkstudio.platform.environment.ide.InMemoryIdeBootstrapTicketService;
 import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeChangeDirectoryDTO;
@@ -35,8 +47,12 @@ import fun.fengwk.kkstudio.web.advice.StudioDomainErrorAdvice;
 import fun.fengwk.kkstudio.web.advice.StudioResponseStatusErrorAdvice;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 
+import java.time.Duration;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.stream.Stream;
 
 /**
  * Environment IDE 视图控制 API 的实际 HTTP 契约：成功路径映射与参数转发，以及 domain 错误（dirty 拒绝 400、IDE 通道不可用
@@ -48,6 +64,7 @@ class StudioEnvironmentIdeControllerTest {
   private static final String VIEW_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
   private static final String DIRTY_REJECTION =
       "save or discard unsaved changes before switching directory";
+  private static final ObjectMapper OBJECT_MAPPER = JsonMapper.builder().build();
 
   private EnvironmentIdeService environmentIdeService;
   private MockMvc mockMvc;
@@ -238,11 +255,102 @@ class StudioEnvironmentIdeControllerTest {
     verifyNoInteractions(environmentIdeService);
   }
 
+  /**
+   * 意图：坏目录（空白/超长/控制字符）在真实服务链路与统一 Advice 组合下必须是 400 {@code validation}，而不是穿透为 500；OPEN_VIEW 与
+   * CHANGE_DIRECTORY 共用同一 wire 事实源，且失败不产生任何 Daemon 命令（无 Native 视图副作用）。
+   */
+  @ParameterizedTest
+  @MethodSource("invalidDirectories")
+  void invalidDirectoryIsRejectedAsBadRequestWithoutDaemonCommand(String directory)
+      throws Exception {
+    RecordingIdeTransport transport = new RecordingIdeTransport();
+    IdeOriginProperties originProperties = new IdeOriginProperties();
+    originProperties.setOriginTemplate("http://{environmentId}.ide.test.localhost");
+    EnvironmentIdeService service =
+        new EnvironmentIdeServiceImpl(
+            transport,
+            originProperties,
+            new InMemoryIdeBootstrapTicketService(),
+            Duration.ofSeconds(5));
+    MockMvc realChain =
+        MockMvcBuilders.standaloneSetup(new StudioEnvironmentIdeController(service))
+            .setControllerAdvice(
+                new StudioDomainErrorAdvice(new StudioMessageService()),
+                new StudioResponseStatusErrorAdvice(new StudioMessageService()),
+                new ResultResponseBodyAdvice())
+            .build();
+
+    EnvironmentIdeOpenViewDTO openRequest = new EnvironmentIdeOpenViewDTO();
+    openRequest.setViewId(VIEW_ID);
+    openRequest.setDirectory(directory);
+    realChain
+        .perform(
+            post("/api/harness/environments/" + ENV_ID + "/ide/views")
+                .locale(Locale.US)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(OBJECT_MAPPER.writeValueAsString(openRequest)))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("validation"))
+        .andExpect(jsonPath("$.errors.resource").value("environment"))
+        .andExpect(jsonPath("$.errors.detail", containsString("directory")));
+
+    EnvironmentIdeChangeDirectoryDTO changeRequest = new EnvironmentIdeChangeDirectoryDTO();
+    changeRequest.setDirectory(directory);
+    realChain
+        .perform(
+            put("/api/harness/environments/" + ENV_ID + "/ide/views/" + VIEW_ID + "/directory")
+                .locale(Locale.US)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(OBJECT_MAPPER.writeValueAsString(changeRequest)))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("validation"))
+        .andExpect(jsonPath("$.errors.resource").value("environment"))
+        .andExpect(jsonPath("$.errors.detail", containsString("directory")));
+
+    assertNull(transport.command);
+  }
+
+  private static Stream<String> invalidDirectories() {
+    return Stream.of("   ", "a".repeat(4097), "/tmp/\u0001");
+  }
+
   private static EnvironmentIdeViewDTO view(String directory) {
     EnvironmentIdeViewDTO view = new EnvironmentIdeViewDTO();
     view.setViewId(VIEW_ID);
     view.setEnvironmentId(ENV_ID.toString());
     view.setDirectory(directory);
     return view;
+  }
+
+  /** 记录发出的 IDE 命令的传输替身：真实服务链路只需证明坏目录未产生任何命令。 */
+  private static final class RecordingIdeTransport implements IdeCommandTransport {
+
+    private static final String DAEMON_INSTANCE = "33333333-3333-3333-3333-333333333333";
+    private static final UUID LEASE = new UUID(0L, 77L);
+
+    IdeCommand command;
+
+    @Override
+    public IdeRequest requestIde(EnvironmentId environmentId, IdeCommand ideCommand) {
+      command = ideCommand;
+      CompletableFuture<IdeReply> reply = new CompletableFuture<>();
+      reply.complete(
+          IdeReply.ok(
+              ideCommand.viewId(),
+              ideCommand.directory(),
+              "/daemon/workspaces/" + ideCommand.viewId()));
+      return new IdeRequest(
+          new IdeSessionIdentity(environmentId, DAEMON_INSTANCE, LEASE), UUID.randomUUID(), reply);
+    }
+
+    @Override
+    public void abandonIde(UUID id) {
+      // 这里的替身不需要收敛语义：合法命令会立即成功回执。
+    }
+
+    @Override
+    public Optional<IdeSessionIdentity> ideSessionIdentity(EnvironmentId environmentId) {
+      return Optional.empty();
+    }
   }
 }
