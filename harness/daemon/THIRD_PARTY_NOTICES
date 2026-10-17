@@ -7,8 +7,8 @@ dependency-provided notices are also retained in the JAR.
 | Component | License |
 | --- | --- |
 | Jackson, OkHttp, Okio, Kotlin standard library | Apache License 2.0 |
-| LangChain4j, Apache OpenNLP, Apache Commons Codec | Apache License 2.0 |
-| JavaEWAH, JetBrains annotations, JSpecify | Apache License 2.0 |
+| Apache Commons Codec, Error Prone annotations | Apache License 2.0 |
+| JavaEWAH, JetBrains annotations | Apache License 2.0 |
 | Eclipse JGit | Eclipse Distribution License 1.0 |
 | Eclipse LSP4J (`org.eclipse.lsp4j`, `org.eclipse.lsp4j.jsonrpc`) | Eclipse Public License（版本声明不一致，见下节） |
 | Gson | Apache License 2.0 |
