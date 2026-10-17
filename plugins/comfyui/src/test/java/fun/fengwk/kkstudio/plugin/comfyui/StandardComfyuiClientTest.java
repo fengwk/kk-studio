@@ -43,6 +43,7 @@ import java.net.Proxy;
 import java.net.ProxySelector;
 import java.net.URI;
 import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -288,28 +289,24 @@ class StandardComfyuiClientTest {
     assertTrue(closed.get());
   }
 
-  /** HttpClient 的 executor 拒绝提交上传请求时调用方流仍必须被关闭，且不得继续读取内容。 */
+  /** HttpClient.send 拒绝上传请求时调用方流仍必须被关闭，且不得读取内容。 */
   @Test
-  void closesCallerStreamWhenExecutorRejectsUploadRequest() {
+  void closesCallerStreamWhenSendRejectsUploadRequest() throws Exception {
     AtomicBoolean closed = new AtomicBoolean();
+    AtomicInteger reads = new AtomicInteger();
     InputStream content =
         tracking(
             new InputStream() {
               @Override
               public int read() {
+                reads.incrementAndGet();
                 return 7;
               }
             },
             closed);
-    HttpClient cancelling =
-        HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(1))
-            .followRedirects(HttpClient.Redirect.NEVER)
-            .executor(
-                command -> {
-                  throw new SecurityException("cancelled before request");
-                })
-            .build();
+    SecurityException rejected = new SecurityException("cancelled before request");
+    HttpClient cancelling = mock(HttpClient.class);
+    when(cancelling.send(any(HttpRequest.class), any())).thenThrow(rejected);
     StandardComfyuiClient cancellingClient =
         new StandardComfyuiClient(
             "http://127.0.0.1:" + server.getAddress().getPort(),
@@ -318,11 +315,14 @@ class StandardComfyuiClientTest {
             new ObjectMapper(),
             null,
             cancelling);
-    assertThrows(
-        SecurityException.class,
-        () ->
-            cancellingClient.upload(
-                "cancel.bin", "application/octet-stream", 1024L, content, CANVAS));
+    SecurityException thrown =
+        assertThrows(
+            SecurityException.class,
+            () ->
+                cancellingClient.upload(
+                    "cancel.bin", "application/octet-stream", 1024L, content, CANVAS));
+    assertSame(rejected, thrown);
+    assertEquals(0, reads.get());
     assertTrue(closed.get());
     assertThrows(IOException.class, () -> content.read(new byte[1]));
   }
