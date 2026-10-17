@@ -271,7 +271,10 @@ class ProcessScopeCrossPlatformTest {
       assertSame(fatal, thrown.get(), "致命失败必须保持原身份");
       assertFalse(Files.exists(rootPid), "许可之前失败不得让命令产生任何副作用");
       assertFalse(helper.isAlive(), "启动失败返回时 helper 必须已经被收敛");
-      assertEquals(stateDirectories, countStateDirectories(), "启动失败收尾不得留下状态目录");
+      assertEquals(
+          stateDirectories,
+          countStateDirectories(),
+          "启动失败收尾不得留下状态目录；残留成员：" + remainingStateFiles());
     } finally {
       // 放行后先等生产收尾；兜底只使用捕获的进程身份，不重新按 PID 或子进程差集选择终止对象。
       release.countDown();
@@ -318,6 +321,24 @@ class ProcessScopeCrossPlatformTest {
           .filter(path -> path.getFileName().toString().startsWith(ProcessScope.STATE_DIR_PREFIX))
           .count();
     }
+  }
+
+  /** 失败诊断仅列握手文件名，不读取命令、私有路径或文件内容。 */
+  private static List<List<String>> remainingStateFiles() throws IOException {
+    List<List<String>> remaining = new ArrayList<>();
+    try (Stream<Path> entries = Files.list(Path.of(System.getProperty("java.io.tmpdir")))) {
+      for (Path directory :
+          entries
+              .filter(Files::isDirectory)
+              .filter(
+                  path -> path.getFileName().toString().startsWith(ProcessScope.STATE_DIR_PREFIX))
+              .toList()) {
+        try (Stream<Path> files = Files.list(directory)) {
+          remaining.add(files.map(path -> path.getFileName().toString()).sorted().toList());
+        }
+      }
+    }
+    return remaining;
   }
 
   /**
