@@ -5,6 +5,10 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonArchitecture;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateArtifact;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateCommand;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateResult;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentUpdateListener;
@@ -114,8 +118,26 @@ public class EnvironmentUpdateService implements EnvironmentUpdateListener {
     if (updateRepository.findActive(environmentId).isPresent()) {
       throw new AiInUseException(RESOURCE, "an update is already in progress for this environment");
     }
-    if (!isReadyNow(environmentId)) {
-      throw new AiInUseException(RESOURCE, "environment is not ready for update");
+    EnvironmentConnection connection =
+        registry
+            .find(environmentId)
+            .filter(
+                candidate ->
+                    candidate.isReady(
+                        clock.instant(),
+                        Duration.ofMillis(snapshot.get().environment().heartbeatTimeoutMillis())))
+            .orElseThrow(
+                () -> new AiInUseException(RESOURCE, "environment is not ready for update"));
+    DaemonEnvironmentInfo host = connection.daemonCapabilities().environment();
+    DaemonOperatingSystem operatingSystem = host.operatingSystem();
+    DaemonArchitecture architecture = canonicalArchitecture(host.architecture());
+    if (!DaemonUpdateArtifact.isSupported(operatingSystem, architecture)) {
+      throw new AiInUseException(
+          RESOURCE,
+          "no official daemon release for "
+              + DaemonUpdateArtifact.osSegment(operatingSystem)
+              + "-"
+              + architecture.wireValue());
     }
     if (gateway.server().activeInvocationCount(environmentId) > 0) {
       throw new AiInUseException(RESOURCE, "cannot update environment with in-flight invocations");
@@ -126,7 +148,7 @@ public class EnvironmentUpdateService implements EnvironmentUpdateListener {
     }
     DaemonReleaseTarget target =
         releaseProvider
-            .resolveTarget()
+            .resolveTarget(operatingSystem, architecture)
             .orElseThrow(
                 () ->
                     new AiInUseException(RESOURCE, "the official daemon release is not available"));
@@ -244,6 +266,22 @@ public class EnvironmentUpdateService implements EnvironmentUpdateListener {
       return EnvironmentUpdatePhase.UNKNOWN;
     }
     return operation.phase();
+  }
+
+  /**
+   * READY 上报的宿主架构解析为发布选择用的 canonical 架构：{@code null}（未上报）或未知取值一律拒绝，绝不猜测替代归档。
+   *
+   * <p>错误只说明拒绝，不回显上报取值。
+   */
+  private static DaemonArchitecture canonicalArchitecture(String architecture) {
+    if (architecture == null) {
+      throw new AiInUseException(RESOURCE, "host architecture is unknown for update");
+    }
+    try {
+      return DaemonArchitecture.fromWireValue(architecture);
+    } catch (IllegalArgumentException error) {
+      throw new AiInUseException(RESOURCE, "unsupported host architecture for update");
+    }
   }
 
   private boolean isReadyNow(EnvironmentId environmentId) {

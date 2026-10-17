@@ -4,6 +4,8 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonArchitecture;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateArtifact;
 import fun.fengwk.kkstudio.harness.environment.daemon.OfficialReleaseHttp;
 
@@ -21,9 +23,10 @@ import java.util.regex.Pattern;
  * 生产用官方发布解析器：目标版本取运行中 Platform 的打包版本，只接受官方 GitHub tag Release，且必须是完整、非草稿的发布。
  *
  * <p>完整性来自官方 tag 元数据（{@code api.github.com/repos/fengwk/kk-studio/releases/tags/<tag>}）：草稿、tag
- * 不匹配或五件套资产 缺一都判定为不可用。制品 URL 与 SHA256 只取自该元数据与官方校验文件，绝不接受任意版本、任意 URL 或 "latest"。
+ * 不匹配或五件套资产（本机 os/arch 归档、其校验文件、该平台元数据、LICENSE 与 THIRD_PARTY_NOTICES） 缺一都判定为不可用。制品 URL 与 SHA256
+ * 只取自该元数据与官方校验文件，绝不接受任意版本、任意 URL 或 "latest"。
  *
- * <p>没有可用打包版本时同样判定为不可用；Platform 升级时只需重新打包，无需在代码里重复维护版本号。
+ * <p>没有可用打包版本或目标平台不在官方发布矩阵内时同样判定为不可用；Platform 升级时只需重新打包，无需在代码里重复维护版本号。
  */
 public class OfficialDaemonReleaseProvider implements DaemonReleaseProvider {
 
@@ -48,8 +51,10 @@ public class OfficialDaemonReleaseProvider implements DaemonReleaseProvider {
   }
 
   @Override
-  public Optional<DaemonReleaseTarget> resolveTarget() {
-    if (targetVersion.isEmpty()) {
+  public Optional<DaemonReleaseTarget> resolveTarget(
+      DaemonOperatingSystem operatingSystem, DaemonArchitecture architecture) {
+    if (targetVersion.isEmpty()
+        || !DaemonUpdateArtifact.isSupported(operatingSystem, architecture)) {
       return Optional.empty();
     }
     String tag = DaemonUpdateArtifact.tag(targetVersion);
@@ -63,12 +68,15 @@ public class OfficialDaemonReleaseProvider implements DaemonReleaseProvider {
         || !tag.equals(text(release, "tag_name"))) {
       return Optional.empty();
     }
-    String artifactUrl = DaemonUpdateArtifact.artifactUrl(targetVersion);
-    if (!requiredAssetsPresent(release, tag, targetVersion)
+    String artifactUrl =
+        DaemonUpdateArtifact.artifactUrl(targetVersion, operatingSystem, architecture);
+    if (!requiredAssetsPresent(release, targetVersion, operatingSystem, architecture)
         || !artifactAssetMatches(release, artifactUrl)) {
       return Optional.empty();
     }
-    Optional<String> checksumText = feed.readAsset(DaemonUpdateArtifact.checksumUrl(targetVersion));
+    Optional<String> checksumText =
+        feed.readAsset(
+            DaemonUpdateArtifact.checksumUrl(targetVersion, operatingSystem, architecture));
     Optional<String> digest = checksumText.flatMap(OfficialDaemonReleaseProvider::parseDigest);
     if (digest.isEmpty()) {
       return Optional.empty();
@@ -76,8 +84,12 @@ public class OfficialDaemonReleaseProvider implements DaemonReleaseProvider {
     return Optional.of(new DaemonReleaseTarget(targetVersion, artifactUrl, digest.get()));
   }
 
-  /** 五件套资产必须齐全：jar、其校验文件、确定性元数据、LICENSE 与 THIRD_PARTY_NOTICES。 */
-  private static boolean requiredAssetsPresent(JsonNode release, String tag, String version) {
+  /** 五件套资产必须齐全：本机 os/arch 归档、其校验文件、该平台元数据、LICENSE 与 THIRD_PARTY_NOTICES。 */
+  private static boolean requiredAssetsPresent(
+      JsonNode release,
+      String version,
+      DaemonOperatingSystem operatingSystem,
+      DaemonArchitecture architecture) {
     Set<String> names = new HashSet<>();
     for (JsonNode asset : release.path("assets")) {
       names.add(asset.path("name").asText(""));
@@ -86,10 +98,11 @@ public class OfficialDaemonReleaseProvider implements DaemonReleaseProvider {
       return false;
     }
     names.removeAll(FIXED_ASSETS);
-    String jar = DaemonUpdateArtifact.jarName(version);
-    return names.contains(jar)
-        && names.contains(jar + ".sha256")
-        && names.contains("kk-studio-daemon-" + tag + ".json");
+    String artifact = DaemonUpdateArtifact.artifactName(version, operatingSystem, architecture);
+    return names.contains(artifact)
+        && names.contains(artifact + ".sha256")
+        && names.contains(
+            DaemonUpdateArtifact.metadataName(version, operatingSystem, architecture));
   }
 
   /** 制品资产的官方下载地址必须与本地构造的官方 URL 完全一致，防止元数据把下载指向别处。 */
