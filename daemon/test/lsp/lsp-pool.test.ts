@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { LspClientPool, poolKey } from '../../src/coding/lsp-pool.js'
 import { LspDiscovery } from '../../src/coding/lsp-discovery.js'
 import type { ManagedProcess, ProcessSpec, ProcessSupervisor } from '../../src/contracts.js'
@@ -405,14 +405,50 @@ describe('LspClientPool Concurrency & Lifecycle', () => {
     fs.writeFileSync(javaFile, 'class App {}\n')
 
     const entry = await pool.lease(javaFile)
-    pool.release(entry)
-
-    // Wait for idle eviction
-    await new Promise((resolve) => setTimeout(resolve, 200))
-    expect(pool.activeCount()).toBe(0)
-
-    // close() surfaces the failure that occurred during idle retirement
-    await expectPoolCloseFailure(pool)
+    const started = Promise.withResolvers<void>()
+    const releaseStop = Promise.withResolvers<void>()
+    const stopped = Promise.withResolvers<void>()
+    const originalStop = entry.client.stop.bind(entry.client)
+    const stop = vi.spyOn(entry.client, 'stop').mockImplementation(async (grace) => {
+      started.resolve()
+      try {
+        await releaseStop.promise
+        await originalStop(grace)
+      } finally {
+        stopped.resolve()
+      }
+    })
+    let closing: Promise<void> | undefined
+    let settled = false
+    try {
+      pool.release(entry)
+      // 仍由真实 idle timer 退休；只卡住已开始的 stop，不用固定 sleep 猜完成时间。
+      await started.promise
+      expect(pool.activeCount()).toBe(0)
+      closing = pool.close()
+      const observedClose = closing.then(
+        () => {
+          settled = true
+        },
+        () => {
+          settled = true
+        },
+      )
+      // 跨一个事件循环轮次排空微任务：stop gate 尚未放行，close 必须仍然等待。
+      await new Promise<void>((resolve) => setImmediate(resolve))
+      expect(settled).toBe(false)
+      expect(stop).toHaveBeenCalledTimes(1)
+      releaseStop.resolve()
+      await expect(closing).rejects.toThrow(/failed to release all resources/)
+      await observedClose
+      expect(stop).toHaveBeenCalledTimes(1)
+    } finally {
+      releaseStop.resolve()
+      // 成功/失败都等物理退休完成；子进程仍由 afterEach 的真实 supervisor 收尾。
+      await stopped.promise
+      await Promise.allSettled(closing ? [closing] : [])
+      stop.mockRestore()
+    }
   })
 
   it('fails closed for the retired key when the retirement could not be proven converged', async () => {
@@ -428,16 +464,29 @@ describe('LspClientPool Concurrency & Lifecycle', () => {
     fs.writeFileSync(javaFile, 'class App {}\n')
 
     const entry = await pool.lease(javaFile)
+    const started = Promise.withResolvers<void>()
+    const originalStop = entry.client.stop.bind(entry.client)
+    let stopFailure: unknown
+    const stop = vi.spyOn(entry.client, 'stop').mockImplementation(async (grace) => {
+      started.resolve()
+      try {
+        await originalStop(grace)
+      } catch (error) {
+        stopFailure = error
+        throw error
+      }
+    })
     pool.release(entry)
 
     // 空闲回收的终止失败：退休登记必须保留，等待者与后续租约共享同一条失败。
-    await new Promise((resolve) => setTimeout(resolve, 200))
+    await started.promise
     expect(pool.activeCount()).toBe(0)
     const first = await pool.lease(javaFile).then(
       () => null,
       (error: unknown) => error,
     )
     expect(first).toBeInstanceOf(Error)
+    expect(first).toBe(stopFailure)
     const second = await pool.lease(javaFile).then(
       () => null,
       (error: unknown) => error,
@@ -445,7 +494,9 @@ describe('LspClientPool Concurrency & Lifecycle', () => {
     // 同一条失败对象：既没有替换登记，也绝没有为同一个 key 启动第二个服务器。
     expect(second).toBe(first)
     expect(readEvents(transcript).filter((e) => e.event === 'start')).toHaveLength(1)
+    expect(stop).toHaveBeenCalledTimes(1)
     await expectPoolCloseFailure(pool)
+    stop.mockRestore()
   })
 
   it('keeps a key closed when a failed boot could not be proven cleaned up', async () => {
