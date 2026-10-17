@@ -5,7 +5,7 @@
 -- 第二个 OpenAI 兼容 provider：config 里保留字面量 openai_response，证明 provider_type 转换不是全局字符串替换。
 -- 第三个 provider 使用当前已知 wire 值，必须原样通过。
 insert into agent_provider (name, description, provider_type, base_url, credential, config, connection_generation_id, created_at, updated_at, version) values
-    ('legacy-openai-secondary', 'secondary legacy provider', 'openai_response', 'https://legacy-secondary.example.invalid/v1', null,
+    ('legacy-openai-secondary', 'secondary legacy provider', '${providerWire}', 'https://legacy-secondary.example.invalid/v1', null,
      '{"note":"openai_response literal must survive","provider":"openai_response","temperature":0.25}',
      '1e630000-0000-4000-8000-000000000001', timestamptz '2025-01-02 03:04:05.678+00', timestamptz '2025-01-02 03:04:05.678+00', 0),
     ('legacy-anthropic', 'legacy anthropic provider', 'anthropic', 'https://legacy-anthropic.example.invalid', null,

@@ -150,6 +150,12 @@ final class LegacyReferenceDataFixture {
 
   /** 在已经加载 provider / Agent / storage / chat 与旧 Harness 历史的源库上补齐全部密集行。 */
   static void load(DataSource source, String profile, SecretKey sourceKey) throws SQLException {
+    load(source, profile, sourceKey, "openai_response");
+  }
+
+  /** 同一条密集装配，但可显式给出该 provider 行写入的 wire 值（1.1.0 源只能写当前值）。 */
+  static void load(DataSource source, String profile, SecretKey sourceKey, String providerWire)
+      throws SQLException {
     insertHarness(source);
     execute(
         source,
@@ -157,6 +163,8 @@ final class LegacyReferenceDataFixture {
         Map.of(
             "runtimeInfo",
             runtimeInfo(profile),
+            "providerWire",
+            providerWire,
             "skillTokenHex",
             HexFormat.of().formatHex(legacySkillEnvelope(sourceKey))));
     Map<String, String> tokens = new LinkedHashMap<>();

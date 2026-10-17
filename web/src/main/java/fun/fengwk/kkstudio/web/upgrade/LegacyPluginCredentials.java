@@ -19,6 +19,7 @@ import java.sql.Statement;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * 旧 Plugin 凭据的重封装与新增静态密钥：同一张表、两种真实来源，绝不做增量合并或静默兜底。
@@ -43,6 +44,16 @@ final class LegacyPluginCredentials {
       """
       select plugin_id, encrypted_payload, region, expires_at, next_refresh_at, status,
              last_refreshed_at, last_refresh_error, version, create_time, update_time
+      from plugin_credential
+      order by plugin_id
+      """;
+
+  /** 1.1.0 已是 format 2：原 AAD 绑定源行自己的认证代际与上下文指纹。 */
+  private static final String CURRENT_ROWS =
+      """
+      select plugin_id, auth_generation, context_fingerprint, encrypted_payload, region,
+             expires_at, next_refresh_at, status, last_refreshed_at, last_refresh_error,
+             version, create_time, update_time
       from plugin_credential
       order by plugin_id
       """;
@@ -116,6 +127,72 @@ final class LegacyPluginCredentials {
       }
     } catch (SQLException error) {
       throw reject("cannot read legacy plugin credentials");
+    }
+    return rewritten;
+  }
+
+  /**
+   * 原样保留 1.1.0 的 format 2 凭据身份与状态，只按源 AAD 解密后用目标主密钥重封装。
+   *
+   * <p>认证代际、上下文指纹、region、过期/刷新时刻、状态、版本与时间都取自源行；任何一行不可读都 fail closed。
+   *
+   * @return 实际重封装的凭据行数
+   */
+  static long rewriteCurrent(
+      Connection source,
+      PluginCredentialRepository repository,
+      SecretKey sourceKey,
+      SecretKey targetKey) {
+    if (sourceKey == null || targetKey == null) {
+      throw reject("plugin credential keys are required to rewrite stored credentials");
+    }
+    long rewritten = 0;
+    try (Statement statement = source.createStatement();
+        ResultSet rows = statement.executeQuery(CURRENT_ROWS)) {
+      while (rows.next()) {
+        String pluginId = rows.getString("plugin_id");
+        UUID authGeneration = rows.getObject("auth_generation", UUID.class);
+        String contextFingerprint = rows.getString("context_fingerprint");
+        String region = rows.getString("region");
+        String plaintext;
+        try {
+          plaintext =
+              CODEC.decrypt(
+                  sourceKey,
+                  pluginId,
+                  authGeneration,
+                  contextFingerprint,
+                  region,
+                  rows.getBytes("encrypted_payload"));
+        } catch (RuntimeException error) {
+          throw reject("a stored plugin credential cannot be read with its source identity");
+        }
+        byte[] envelope =
+            CODEC.encrypt(
+                targetKey, pluginId, authGeneration, contextFingerprint, region, plaintext);
+        PluginCredentialRow row =
+            new PluginCredentialRow(
+                pluginId,
+                authGeneration,
+                contextFingerprint,
+                envelope,
+                region,
+                instant(rows, "expires_at"),
+                instant(rows, "next_refresh_at"),
+                status(rows.getString("status")),
+                instant(rows, "last_refreshed_at"),
+                rows.getString("last_refresh_error"),
+                null,
+                null,
+                rows.getLong("version"),
+                instant(rows, "create_time"),
+                instant(rows, "update_time"));
+        insert(repository, row);
+        verify(repository, pluginId, plaintext, targetKey);
+        rewritten++;
+      }
+    } catch (SQLException error) {
+      throw reject("cannot read stored plugin credentials");
     }
     return rewritten;
   }

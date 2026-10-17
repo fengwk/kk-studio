@@ -5,9 +5,9 @@ The runner loads exactly one versioned migration, `schema/src/main/resources/db/
 which is the single authoritative definition of the product schema: there is no second design DDL to keep
 in sync. It then proves three kinds of target facts:
 
-* the 45 business and infrastructure tables of that baseline are present and nothing else was added;
-* the 16 Canvas / Project / Chat-Session target tables expose exactly their declared columns, foreign-key
-  relations and indexes;
+* the 46 business and infrastructure tables of that baseline are present and nothing else was added;
+* the 17 IDE-routing / Canvas / Project / Chat-Session target tables expose exactly their declared
+  columns, foreign-key relations and indexes;
 * the shared contract probes (`fresh-install-probes.sql`, also executed by the schema module's Java
   contract test) reject invalid writes, with at least 135 positive and negative assertions.
 
@@ -38,7 +38,7 @@ PROBE_FILE = "schema/src/test/resources/fun/fengwk/kkstudio/schema/fresh-install
 MINIMUM_PROBE_ASSERTIONS = 135
 IMAGE = "postgres:17.10"
 
-# The 45 business and infrastructure tables of the sole production baseline. Flyway adds its own
+# The 46 business and infrastructure tables of the sole production baseline. Flyway adds its own
 # history table on top, so the accepted table set is exactly this list. `main` re-derives the set
 # from the baseline DDL and fails on any drift, so a new or removed table can never slip through
 # silently.
@@ -55,6 +55,7 @@ BUSINESS_TABLES = (
     "canvas_resource",
     "chat",
     "chat_session",
+    "cluster_node",
     "environment",
     "environment_connection",
     "environment_update_operation",
@@ -90,8 +91,8 @@ BUSINESS_TABLES = (
     "system_setting",
 )
 
-# The 16 target tables the Canvas / Project rewrite installs; only these are checked
-# down to their columns, relations and indexes.
+# The 17 target tables the IDE routing / Canvas / Project rewrite installs; only these are
+# checked down to their columns, relations and indexes.
 TARGET_TABLES = (
     "canvas_command_dedup",
     "canvas_document",
@@ -101,6 +102,7 @@ TARGET_TABLES = (
     "canvas_node",
     "canvas_resource",
     "chat_session",
+    "cluster_node",
     "project",
     "project_issue",
     "project_issue_activity",
@@ -163,6 +165,7 @@ TARGET_COLUMNS = {
         "created_at",
     ),
     "chat_session": ("session_id", "chat_id", "created_at"),
+    "cluster_node": ("instance_id", "internal_url", "lease_until", "last_seen"),
     "project": (
         "id",
         "title",
@@ -271,6 +274,7 @@ TARGET_RELATIONS = {
         "fk_canvas_resource_owner",
     ),
     "chat_session": ("fk_chat_session_chat", "fk_chat_session_session"),
+    "cluster_node": (),
     "project": (),
     "project_issue": ("project_issue_project_id_fkey",),
     "project_issue_activity": (
@@ -328,6 +332,7 @@ TARGET_INDEXES = {
         "uk_canvas_resource_slot",
     ),
     "chat_session": ("idx_chat_session_chat", "pk_chat_session"),
+    "cluster_node": ("cluster_node_pkey",),
     "project": ("idx_project_updated", "project_pkey"),
     "project_issue": (
         "idx_project_issue_board",
@@ -550,8 +555,8 @@ def main():
     probes = root / PROBE_FILE
     if not probes.is_file():
         raise RuntimeError(f"missing shared contract probes: {PROBE_FILE}")
-    if len(BUSINESS_TABLES) != 45 or len(TARGET_TABLES) != 16:
-        raise RuntimeError("the declared inventory must stay at 45 business and 16 target tables")
+    if len(BUSINESS_TABLES) != 46 or len(TARGET_TABLES) != 17:
+        raise RuntimeError("the declared inventory must stay at 46 business and 17 target tables")
     # Re-derive the inventory from the baseline DDL: a table added to (or removed from) the
     # baseline without updating BUSINESS_TABLES must fail before the isolated database runs.
     missing_from_inventory, not_created_by_baseline = inventory_mismatch(baseline_sql)
