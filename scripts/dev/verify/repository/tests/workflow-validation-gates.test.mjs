@@ -6,15 +6,16 @@ import test from 'node:test'
 const root = new URL('../../../../../', import.meta.url)
 const docker = readFileSync(new URL('.github/workflows/docker-publish.yml', root), 'utf8')
 const release = readFileSync(new URL('.github/workflows/daemon-release.yml', root), 'utf8')
+const daemonCi = readFileSync(new URL('.github/workflows/daemon-ci.yml', root), 'utf8')
 
-function jobBlock(name) {
-  const block = docker.match(new RegExp(`^  ${name}:\\n([\\s\\S]*?)(?=^  \\w+:|$(?![\\s\\S]))`, 'm'))?.[1]
+function jobBlock(source, name) {
+  const block = source.match(new RegExp(`^  ${name}:\\n([\\s\\S]*?)(?=^  \\w+:|$(?![\\s\\S]))`, 'm'))?.[1]
   assert.ok(block, `missing job ${name}`)
   return block
 }
 
-function jobCondition(name) {
-  const block = jobBlock(name)
+function jobCondition(source, name) {
+  const block = jobBlock(source, name)
   const condition = block.match(/^    if: (.+)$/m)?.[1]
   assert.ok(condition, `missing condition ${name}`)
   return condition === '>-'
@@ -24,7 +25,7 @@ function jobCondition(name) {
 
 function validationSteps() {
   // Parse actual step boundaries, not command mentions in comments or other jobs.
-  return [...jobBlock('validate').matchAll(/^      - ([\s\S]*?)(?=^      - |$(?![\s\S]))/gm)]
+  return [...jobBlock(docker, 'validate').matchAll(/^      - ([\s\S]*?)(?=^      - |$(?![\s\S]))/gm)]
     .map((match) => match[1])
 }
 
@@ -45,8 +46,7 @@ function evaluate(expression, branch, event, validateOnly, status = {}) {
     inputs: { validate_only: validateOnly },
     needs: {
       validate: { result: status.repository ?? 'success' },
-      validate_windows_daemon: { result: status.windows ?? 'success' },
-      validate_unix_daemon: { result: status.unix ?? 'success' },
+      daemon_ci: { result: status.daemon ?? 'success' },
     },
     always: () => true,
     cancelled: () => status.cancelled ?? false,
@@ -56,12 +56,12 @@ function evaluate(expression, branch, event, validateOnly, status = {}) {
 test('push gates stay main-only; explicit manual validation runs all gates on any branch', () => {
   // Evaluate the actual expressions, so changing just one job or accepting push inputs fails.
   assert.match(docker, /validate_only:\n\s+description: .+\n\s+type: boolean\n\s+default: false/u)
-  for (const job of ['validate', 'validate_windows_daemon', 'validate_unix_daemon']) {
+  for (const job of ['validate', 'daemon_ci']) {
     for (const branch of ['main', 'dev', 'worktree/repair']) {
       for (const event of ['push', 'workflow_dispatch']) {
         for (const optIn of [false, true]) {
           assert.equal(
-            evaluate(jobCondition(job), branch, event, optIn),
+            evaluate(jobCondition(docker, job), branch, event, optIn),
             branch === 'main' || (event === 'workflow_dispatch' && optIn),
             `${job}: ${branch}/${event}/${optIn}`,
           )
@@ -73,26 +73,25 @@ test('push gates stay main-only; explicit manual validation runs all gates on an
 
 test('validation-only never publishes; failed or cancelled gates cannot publish', () => {
   // A success-only happy path is insufficient: preserve the failure/cancellation barrier.
-  const expression = jobCondition('publish')
+  const expression = jobCondition(docker, 'publish')
   for (const branch of ['main', 'dev']) {
     for (const repository of ['success', 'failure', 'cancelled', 'skipped']) {
-      for (const windows of ['success', 'failure', 'cancelled', 'skipped']) {
-        for (const unix of ['success', 'failure', 'cancelled', 'skipped']) {
-          for (const cancelled of [false, true]) {
-            const state = { repository, windows, unix, cancelled }
-            assert.equal(evaluate(expression, branch, 'workflow_dispatch', true, state), false)
-            assert.equal(
-              evaluate(expression, branch, 'push', false, state),
-              !cancelled && ['success', 'skipped'].includes(repository)
-                && ['success', 'skipped'].includes(windows)
-                && ['success', 'skipped'].includes(unix),
-            )
-          }
+      for (const daemon of ['success', 'failure', 'cancelled', 'skipped']) {
+        for (const cancelled of [false, true]) {
+          const state = { repository, daemon, cancelled }
+          assert.equal(evaluate(expression, branch, 'workflow_dispatch', true, state), false)
+          const expected = branch === 'main'
+            ? !cancelled && repository === 'success' && daemon === 'success'
+            : !cancelled && repository === 'skipped' && daemon === 'skipped'
+          assert.equal(
+            evaluate(expression, branch, 'push', false, state),
+            expected,
+            `${branch}/${repository}/${daemon}/${cancelled}`,
+          )
         }
       }
     }
   }
-  assert.equal(evaluate(expression, 'dev', 'workflow_dispatch', false), true)
 })
 
 test('manual validation and image publishing have separate concurrency groups', () => {
@@ -133,7 +132,7 @@ test('frontend coverage and offline layout are required gates using the locked b
   assert.ok(playwright?.version)
   assert.equal(playwright.bin.playwright, 'cli.js')
   assert.equal(lock.packages['node_modules/@playwright/test'].dependencies.playwright, playwright.version)
-  assert.doesNotMatch(jobBlock('validate'), /continue-on-error:/u)
+  assert.doesNotMatch(jobBlock(docker, 'validate'), /continue-on-error:/u)
 })
 
 test('frontend diagnostics survive failed gates and upload only report directories', () => {
@@ -150,7 +149,8 @@ test('frontend diagnostics survive failed gates and upload only report directori
   assert.equal(stepField(upload, 'if-no-files-found', 10), 'ignore')
   const layout = steps.findIndex((step) => stepField(step, 'run') === 'npm --prefix frontend run test:layout')
   assert.ok(layout >= 0 && steps.indexOf(upload) > layout)
-  assert.match(jobBlock('publish'), /needs:\n      - validate\n/u)
+  assert.match(jobBlock(docker, 'publish'), /needs:\n      - validate\n/u)
+  assert.match(jobBlock(docker, 'publish'), /      - daemon_ci\n/u)
 })
 
 test('CI provisions and selects the PostgreSQL fixture client major before validation', () => {
@@ -161,7 +161,7 @@ test('CI provisions and selects the PostgreSQL fixture client major before valid
   assert.match(fixture, /f"postgres:\{POSTGRES_MAJOR\}-alpine"/u)
   for (const [source, validationName] of [
     [docker, 'Verify Java sources, tests and coverage'],
-    [release, 'Verify the daemon module'],
+    [release, 'Verify and build the Node daemon'],
   ]) {
     assert.ok(source.includes(`POSTGRES_VERSION: '${major}'`))
     const setup = source.indexOf('- name: Set up PostgreSQL client tools')
@@ -183,31 +183,57 @@ test('CI provisions and selects the PostgreSQL fixture client major before valid
   }
 })
 
-test('both release workflows run the second Windows host even after the first fails', () => {
-  // Do not use continue-on-error: either native host must still fail the release gate.
-  for (const [name, source] of [['docker', docker], ['release', release]]) {
-    for (const [suite, script] of [['installer', 'install'], ['updater', 'update']]) {
-      const block = source.match(new RegExp(`- name: Test ${suite} with PowerShell 7\\n([\\s\\S]*?)(?=\\n\\s+- name:|\\n  \\w+:)`))?.[1]
-      assert.ok(block, `${name}: missing ${suite} PS7 step`)
-      assert.match(block, /if: \$\{\{ !cancelled\(\) \}\}/u)
-      assert.match(block, /shell: pwsh/u)
-      assert.ok(block.includes(`run: .\\scripts\\daemon\\tests\\test_daemon_${script}_windows.ps1`))
+test('Windows installer gates run both PowerShell hosts and fail closed', () => {
+  // Do not use continue-on-error: PS 5.1 is the minimum supported host and PS 7 catches modern drift.
+  const block = jobBlock(daemonCi, 'windows_daemon_installer')
+  for (const [host, shell, condition] of [
+    ['5.1', 'powershell', undefined],
+    ['7', 'pwsh', 'if: ${{ !cancelled() }}'],
+  ]) {
+    const step = block.match(
+      new RegExp(`- name: Test installer with Windows PowerShell ${host.replace('.', '\\.')}\\n([\\s\\S]*?)(?=\\n\\s+- name:|$)`)
+    )?.[1]
+    assert.ok(step, `missing PowerShell ${host} installer step`)
+    assert.match(step, new RegExp(`shell: ${shell}`, 'u'))
+    assert.ok(step.includes('run: .\\scripts\\daemon\\tests\\test_daemon_install_windows.ps1'))
+    if (condition) {
+      assert.ok(step.includes(condition), `PowerShell ${host} must run even after a failed peer`)
     }
-    assert.doesNotMatch(source, /continue-on-error:/u)
   }
+  assert.doesNotMatch(daemonCi, /continue-on-error:/u)
+  assert.ok(daemonCi.includes('npm --prefix frontend run test:install:windows'))
 })
 
-test('managed update scripts are required native and Unix release gates', () => {
-  // Source-only checks cannot prove PowerShell failure handling or service cleanup.
-  for (const [name, source] of [['docker', docker], ['release', release]]) {
-    const block = source.match(/- name: Test updater with Windows PowerShell 5\.1\n([\s\S]*?)(?=\n\s+- name:|\n  \w+:)/)?.[1]
-    assert.ok(block, `${name}: missing PS5.1 update step`)
-    assert.match(block, /if: \$\{\{ !cancelled\(\) \}\}/u)
-    assert.match(block, /shell: powershell/u)
-    assert.ok(block.includes('run: .\\scripts\\daemon\\tests\\test_daemon_update_windows.ps1'))
-    assert.ok(source.includes("python3 -m unittest discover -s scripts/daemon/tests -p 'test_daemon_update*.py'"))
-    assert.doesNotMatch(block, /continue-on-error:|\|\|\s*true/u)
+test('the five-platform Node matrix builds and covers every official target', () => {
+  // 单个 runner 不能替代平台证据：五个官方平台都必须真跑类型检查、构建与覆盖率。
+  const included = [...jobBlock(daemonCi, 'node_daemon').matchAll(/^\s+- os: (\S+)\n\s+platform: (\S+)$/gm)]
+    .map((match) => `${match[1]}:${match[2]}`)
+  assert.deepEqual(included, [
+    'ubuntu-latest:linux-amd64',
+    'ubuntu-24.04-arm:linux-arm64',
+    'macos-14:macos-arm64',
+    'macos-15-intel:macos-amd64',
+    'windows-latest:windows-amd64',
+  ])
+  assert.ok(daemonCi.includes("NODE_VERSION: '24.21.0'"), 'must use the frozen bundled Node version')
+  for (const command of ['npm --prefix daemon run check', 'npm --prefix daemon run build', 'npm --prefix daemon run coverage']) {
+    assert.ok(jobBlock(daemonCi, 'node_daemon').includes(`run: ${command}`), command)
   }
+  const macos = jobBlock(daemonCi, 'node_daemon').match(/if: runner\.os == 'macOS'\n([\s\S]*?)(?=\n\s+- name:|$)/)?.[1]
+  assert.ok(macos, 'macOS must run the system-Bash installer/archive contract')
+  assert.ok(macos.includes('shell: /bin/bash --noprofile --norc -eo pipefail {0}'))
+  assert.ok(macos.includes('/bin/bash --version'))
+  assert.ok(macos.includes("python3 -m unittest discover -s scripts/daemon/tests -p 'test_*.py'"))
+})
+
+test('release reuses the same daemon matrix and gates on it before staging', () => {
+  // tag 发布不得绕过平台矩阵：release 复用 daemon-ci，stage 依赖它成功。
+  assert.match(jobBlock(release, 'daemon_ci'), /uses: \.\/\.github\/workflows\/daemon-ci\.yml/u)
+  assert.match(jobBlock(release, 'stage'), /needs:\n      - daemon_ci\n/u)
+  assert.match(jobBlock(release, 'smoke_archives'), /needs: stage\n/u)
+  // 五平台归档都必须在对应宿主上真跑烟测。
+  const smoke = [...jobBlock(release, 'smoke_archives').matchAll(/platform: (\S+)/g)].map((match) => match[1])
+  assert.deepEqual(smoke.sort(), ['linux-amd64', 'linux-arm64', 'macos-amd64', 'macos-arm64', 'windows-amd64'])
 })
 
 test('offline upgrade artifact-mode readback reuses the full-verify JAR and stays a required gate', () => {

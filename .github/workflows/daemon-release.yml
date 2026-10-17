@@ -1,19 +1,26 @@
 # kk-studio Daemon GitHub Release.
 #
-# 推送 `v*` tag 时发布 Environment Daemon 的可执行单文件 JAR 及其校验和、确定性元数据与
-# 法律文件。发布前必须通过仓库质量门禁，且 tag 必须落在 `main` 的历史上，确保发布物
-# 对应已经合入主分支、可精确追溯的提交。
+# 推送 `v*` tag 时发布 Environment Daemon 的多平台可运行发行归档及其校验和、确定性元数据
+# 与法律文件。发布前必须通过仓库质量门禁与五平台 Node 矩阵，且 tag 必须落在 `main` 的历史上，
+# 确保发布物对应已经合入主分支、可精确追溯的提交。
 #
 # 上传只使用 workflow 自带的 `github.token`（`contents: write`），不使用 PAT，也不读取
-# 任何其它 secret；发布物本身不含凭证。资产集合由
-# `scripts/daemon/prepare-release.sh` 唯一定义，本工作流只负责把它产出的文件
-# 原样上传：多一个或少一个都直接失败。
+# 任何其它 secret；发布物本身不含凭证。资产集合由 `scripts/daemon/prepare-release.sh`
+# 唯一定义，本工作流只负责把它产出的文件原样上传：多一个或少一个都直接失败。
 name: daemon-release
 
 on:
   push:
     tags:
       - 'v*'
+  # 手动触发只做候选验收：完整跑 stage 与五平台归档烟测，但 publish job 永不执行，
+  # 因此可以在正式打 tag 之前用真实归档验收宿主环境。
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 待验收版本标识（例如 v1.2.3）；只暂存与烟测，不创建标签或发布。
+        type: string
+        required: true
 
 # 发布不可并发：取消正在上传的 workflow 会留下半套资产。同一 ref 的重跑排队执行。
 # 已发布 Release 的资产不重写：校验和完全一致则跳过，否则失败。只有草稿可以补齐资产。
@@ -21,95 +28,33 @@ concurrency:
   group: daemon-release-${{ github.ref }}
   cancel-in-progress: false
 
+# 默认只读；只有真正写 Release 的 publish job 需要 contents: write。
 permissions:
-  contents: write
+  contents: read
 
 env:
   JAVA_VERSION: '21'
-  NODE_VERSION: '24.14.0'
+  NODE_VERSION: '24.21.0'
   POSTGRES_VERSION: '17'
-  # 暂存产物的唯一来源；工作流的资产校验与上传都只读这个目录。
-  RELEASE_DIR: harness/daemon/target/release
+  # push tag 用真实 tag，workflow_dispatch 用输入 tag 做候选验收。资产名、版本门禁与
+  # Release 命令都只通过它取值，input 绝不直接拼进 shell。
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+  # 每个平台在 daemon/release/<os>-<arch> 下产出一套资产；工作流的资产校验与上传只读这些目录。
+  RELEASE_ROOT: daemon/release
+  # 官方 Daemon 发行归档覆盖的平台矩阵（windows 只支持 amd64）。
+  RELEASE_PLATFORMS: linux-amd64 linux-arm64 macos-amd64 macos-arm64 windows-amd64
 
 jobs:
-  validate_unix_daemon:
-    name: validate Unix daemon installer (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
-      - name: Test installer with system Bash
-        # macOS /bin/bash is 3.2; fixtures never register real host services.
-        shell: /bin/bash --noprofile --norc -eo pipefail {0}
-        run: |
-          /bin/bash --version
-          python3 -m unittest discover -s scripts/daemon/tests -p test_daemon_install.py
-          python3 -m unittest discover -s scripts/daemon/tests -p test_daemon_install_macos.py
-          python3 -m unittest discover -s scripts/daemon/tests -p test_daemon_download.py
-          python3 -m unittest discover -s scripts/daemon/tests -p 'test_daemon_update*.py'
+  # 五平台 Node 矩阵由可复用工作流提供：tag 发布与 main/dev 推送上跑同一套门禁，发布不会因为
+  # tag 触发而绕过平台矩阵（替代原 Java process-scope 的三平台门禁）。
+  daemon_ci:
+    name: node daemon matrix
+    uses: ./.github/workflows/daemon-ci.yml
 
-  validate_windows_daemon:
-    name: validate Windows daemon installer
-    runs-on: windows-latest
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
-      - name: Set up JDK 21
-        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
-        with:
-          distribution: temurin
-          java-version: ${{ env.JAVA_VERSION }}
-      - name: Build real daemon fat JAR for Windows config compatibility
-        shell: bash
-        run: env JAVA_HOME="$JAVA_HOME" mvn -B -ntp -pl harness/daemon -am package -DskipTests "-Dmaven.repo.local=$RUNNER_TEMP/kk-studio-m2"
-      - name: Test generated Windows scripts with native ACLs
-        shell: bash
-        run: env JAVA_HOME="$JAVA_HOME" mvn -B -ntp -pl platform/runtime -am test -Dtest=EnvironmentInstallScriptsTest -Dsurefire.failIfNoSpecifiedTests=false "-Dmaven.repo.local=$RUNNER_TEMP/kk-studio-m2"
-      - name: Test installer with Windows PowerShell 5.1
-        shell: powershell
-        run: .\scripts\daemon\tests\test_daemon_install_windows.ps1
-      - name: Test installer with PowerShell 7
-        # A failed PS 5.1 test must not hide PS 7 failures; the job still fails closed.
-        if: ${{ !cancelled() }}
-        shell: pwsh
-        run: .\scripts\daemon\tests\test_daemon_install_windows.ps1
-      - name: Test updater with Windows PowerShell 5.1
-        if: ${{ !cancelled() }}
-        shell: powershell
-        run: .\scripts\daemon\tests\test_daemon_update_windows.ps1
-      - name: Test updater with PowerShell 7
-        if: ${{ !cancelled() }}
-        shell: pwsh
-        run: .\scripts\daemon\tests\test_daemon_update_windows.ps1
-      - name: Set up Node 24
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-      - name: Install frontend dependencies
-        shell: bash
-        run: npm --prefix frontend ci
-      - name: Test generated Windows install command natively
-        # Fetch and execute the one-line command in both supported PowerShell hosts.
-        shell: bash
-        run: npm --prefix frontend run test:install:windows
-
-  publish:
-    name: build, stage and publish daemon release
+  stage:
+    name: build and stage daemon release
     needs:
-      - validate_windows_daemon
-      - validate_unix_daemon
+      - daemon_ci
     runs-on: ubuntu-latest
     steps:
       # 全量历史：父提交必须可达，否则无法判定 tag 是否落在 main 上。
@@ -118,33 +63,53 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Set up JDK 21
+        # 仓库脚本测试使用 JDK 的 `jar` 工具；Daemon 本体已经不需要 JRE。
         uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
         with:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
           cache: maven
-      - name: Set up Node 24
+      - name: Set up Node 24.21
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: daemon/package-lock.json
 
-      # tag 名会进入资产文件名，因此只接受只含安全字符的版本 tag；tag 提交必须是
-      # origin/main 的祖先，未合入 main 的 tag 不能发布。
-      - name: Require a safe version tag on a main commit
+      # tag 名会进入资产文件名，因此只接受只含安全字符的版本 tag。提交约束分事件：
+      # tag push 必须在 origin/main 上（正式发布）；手动 dry run 的候选 HEAD 必须包含
+      # origin/main，但绝不发布。其它事件一律拒绝。
+      - name: Require a safe release tag on an approved commit
         id: tag
         run: |
           set -euo pipefail
-          tag="${GITHUB_REF_NAME}"
+          tag="${RELEASE_TAG}"
           if ! [[ "${tag}" =~ ^v[0-9A-Za-z._-]+$ ]]; then
             echo "unsupported release tag (expected ^v[0-9A-Za-z._-]+$): ${tag}" >&2
             exit 1
           fi
           commit=$(git rev-parse --verify 'HEAD^{commit}')
           git show-ref --verify --quiet refs/remotes/origin/main
-          if ! git merge-base --is-ancestor "${commit}" refs/remotes/origin/main; then
-            echo "release tag ${tag} (${commit}) is not an ancestor of origin/main" >&2
-            exit 1
-          fi
+          case "${GITHUB_EVENT_NAME}" in
+            push)
+              # 正式发布：tag 提交必须在 main 上，未合入 main 的 tag 不能发布。
+              if ! git merge-base --is-ancestor "${commit}" refs/remotes/origin/main; then
+                echo "release tag ${tag} (${commit}) is not an ancestor of origin/main" >&2
+                exit 1
+              fi
+              ;;
+            workflow_dispatch)
+              # 候选验收：不发布，但候选提交必须包含当前的 origin/main。
+              if ! git merge-base --is-ancestor refs/remotes/origin/main "${commit}"; then
+                echo "manual release dry run (${commit}) does not contain origin/main" >&2
+                exit 1
+              fi
+              ;;
+            *)
+              echo "unsupported release event: ${GITHUB_EVENT_NAME}" >&2
+              exit 1
+              ;;
+          esac
           source_date_epoch=$(git show -s --format=%ct "${commit}")
           echo "commit=${commit}" >>"${GITHUB_OUTPUT}"
           echo "source_date_epoch=${source_date_epoch}" >>"${GITHUB_OUTPUT}"
@@ -154,6 +119,60 @@ jobs:
         run: python3 scripts/dev/verify/repository/check-sensitive-data.py
       - name: Check documentation layout
         run: node scripts/dev/verify/repository/check.mjs
+      # 版本对齐以仓库里的真实文件为准：根 POM 的 <version>、kk-studio.version 属性、daemon 包
+      # 版本与发布 tag 必须完全一致。这里不写死任何版本号，因此改版本时不需要修改本工作流。
+      - name: Verify the repository version alignment
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+          import sys
+          import xml.etree.ElementTree as ElementTree
+
+          POM_NAMESPACE = '{http://maven.apache.org/POM/4.0.0}'
+
+          def required_text(element, label):
+              value = None if element is None or element.text is None else element.text.strip()
+              if not value:
+                  raise SystemExit(f'cannot read {label} from pom.xml')
+              return value
+
+          def required_string(value, label):
+              if not isinstance(value, str) or value.strip() == '':
+                  raise SystemExit(f'cannot read {label}')
+              return value.strip()
+
+          project = ElementTree.parse('pom.xml').getroot()
+          expected = required_text(project.find(f'{POM_NAMESPACE}version'), 'the root <version>')
+          properties = project.find(f'{POM_NAMESPACE}properties')
+          declared = required_text(
+              None if properties is None else properties.find(f'{POM_NAMESPACE}kk-studio.version'),
+              'the kk-studio.version property',
+          )
+          package = json.loads(pathlib.Path('daemon/package.json').read_text(encoding='utf-8'))
+          daemon_version = required_string(package.get('version'), 'the daemon package version')
+          tag = os.environ.get('RELEASE_TAG', '')
+          tag_version = tag[1:] if tag.startswith('v') else tag
+          sources = {
+              'pom.xml <version>': expected,
+              'pom.xml kk-studio.version': declared,
+              'daemon/package.json version': daemon_version,
+              f'release tag {tag!r}': tag_version,
+          }
+          mismatches = [
+              f'{label} is {value!r}, expected {expected!r}'
+              for label, value in sources.items()
+              if value != expected
+          ]
+          if mismatches:
+              print('repository version alignment failed:', file=sys.stderr)
+              for mismatch in mismatches:
+                  print(f'- {mismatch}', file=sys.stderr)
+              raise SystemExit(1)
+          print(f'repository version {expected} is aligned across pom.xml, kk-studio.version, daemon/package.json and {tag}')
+          PY
       - name: Set up PostgreSQL client tools
         run: |
           set -euo pipefail
@@ -173,6 +192,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends "postgresql-client-${POSTGRES_VERSION}"
           echo "/usr/lib/postgresql/${POSTGRES_VERSION}/bin" >> "${GITHUB_PATH}"
+      # 仓库脚本测试使用真实 daemon 归档解析器；先安装锁定依赖。
+      - name: Install daemon dependencies
+        run: npm --prefix daemon ci
       - name: Verify PostgreSQL client selection
         run: |
           set -euo pipefail
@@ -204,16 +226,102 @@ jobs:
             exit 1
           }
           node --test "${node_files[@]}"
-      - name: Verify the daemon module
-        run: >-
-          env JAVA_HOME="$JAVA_HOME" mvn -B -ntp -pl harness/daemon -am
-          -Dproject.build.outputTimestamp="${{ steps.tag.outputs.source_date_epoch }}"
-          clean verify
 
-      # 唯一资产暂存实现：校验可执行单文件 JAR 后，把资产写进 RELEASE_DIR。
+      # 编译 Node Daemon 的发行 JS；依赖已在上一步安装，生产依赖由 prepare-release.sh 按平台重装。
+      - name: Verify and build the Node daemon
+        run: |
+          npm --prefix daemon run check
+          npm --prefix daemon run build
+
+      # 唯一资产暂存实现：按平台矩阵产出归档，每个平台写进 daemon/release/<os>-<arch>。
       - name: Stage release assets
-        run: scripts/daemon/prepare-release.sh "${GITHUB_REF_NAME}"
+        run: |
+          set -euo pipefail
+          for platform in ${RELEASE_PLATFORMS}; do
+            scripts/daemon/prepare-release.sh "${RELEASE_TAG}" "${platform%-*}" "${platform#*-}"
+          done
 
+      - name: Upload staged release archives
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: daemon-release-archives
+          path: daemon/release
+          retention-days: 1
+          if-no-files-found: error
+
+  smoke_archives:
+    name: smoke staged archive (${{ matrix.platform }})
+    needs: stage
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-amd64
+          - os: ubuntu-24.04-arm
+            platform: linux-arm64
+          - os: macos-14
+            platform: macos-arm64
+          - os: macos-15-intel
+            platform: macos-amd64
+          - os: windows-latest
+            platform: windows-amd64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Download staged archives
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: daemon-release-archives
+          path: daemon/release
+      # code-server 的 MSAL native broker (microsoft-authentication/dist/msal-node-runtime.node)
+      # 链接 libmsalruntime.so，后者需要 WebKitGTK/libsecret 等宿主库；headless runner 默认缺少这些库。
+      # 这些只是本烟测宿主的依赖，不是 Daemon 启动的通用要求，因此只在 linux-amd64 安装，
+      # 且不因此缩小 .node 加载断言。
+      - name: Install Linux native broker host libraries
+        if: matrix.platform == 'linux-amd64'
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends libwebkit2gtk-4.1-0 libsecret-1-0
+      - name: Smoke-test this host archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="daemon/release/${{ matrix.platform }}/kk-studio-daemon-${RELEASE_TAG}-${{ matrix.platform }}.tar.gz"
+          test -f "${archive}"
+          case "${{ matrix.platform }}" in
+            windows-*)
+              powershell -NoProfile -NonInteractive -File scripts/daemon/smoke-archive.ps1 "${archive}"
+              ;;
+            *)
+              scripts/daemon/smoke-archive.sh "${archive}"
+              ;;
+          esac
+
+  publish:
+    name: publish daemon release
+    # 只有正式 tag push 才发布：workflow_dispatch 的候选验收必须跳过本 job。
+    if: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') }}
+    needs:
+      - stage
+      - smoke_archives
+    runs-on: ubuntu-latest
+    # 唯一需要写 Release 的 job；其它 job 继承工作流默认的只读权限。
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Download staged archives
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: daemon-release-archives
+          path: daemon/release
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -222,40 +330,70 @@ jobs:
           # 暂存目录刚被整体重建，因此这里列出的就是待上传的完整资产集合；集合必须与
           # 发布契约逐字相同，多一个或少一个都直接失败，绝不静默上传一部分。
           shopt -s nullglob
-          expected_names=(
-            LICENSE
-            THIRD_PARTY_NOTICES
-            "kk-studio-daemon-${GITHUB_REF_NAME}.jar"
-            "kk-studio-daemon-${GITHUB_REF_NAME}.jar.sha256"
-            "kk-studio-daemon-${GITHUB_REF_NAME}.json"
-          )
-          actual=()
-          for path in "${RELEASE_DIR}"/*; do
-            if [ -f "${path}" ]; then
-              actual+=("${path##*/}")
+          expected_names=()
+          assets=()
+          for platform in ${RELEASE_PLATFORMS}; do
+            dir="${RELEASE_ROOT}/${platform}"
+            if [ ! -d "${dir}" ]; then
+              echo "missing staged platform directory: ${dir}" >&2
+              exit 1
+            fi
+            actual=()
+            for path in "${dir}"/*; do
+              [ -f "${path}" ] && actual+=("${path##*/}")
+            done
+            actual=$(printf '%s\n' "${actual[@]}" | LC_ALL=C sort)
+            os=${platform%-*}
+            arch=${platform#*-}
+            platform_expected=$(printf '%s\n' \
+              "kk-studio-daemon-${RELEASE_TAG}-${os}-${arch}.tar.gz" \
+              "kk-studio-daemon-${RELEASE_TAG}-${os}-${arch}.tar.gz.sha256" \
+              "kk-studio-daemon-${RELEASE_TAG}-${os}-${arch}.json" \
+              LICENSE THIRD_PARTY_NOTICES | LC_ALL=C sort)
+            if [ "${actual}" != "${platform_expected}" ]; then
+              echo "staged assets for ${platform} do not match the release contract" >&2
+              printf 'actual:\n%s\nexpected:\n%s\n' "${actual}" "${platform_expected}" >&2
+              exit 1
             fi
           done
-          actual=$(printf '%s\n' "${actual[@]}" | LC_ALL=C sort)
-          expected=$(printf '%s\n' "${expected_names[@]}" | LC_ALL=C sort)
-          if [ "${actual}" != "${expected}" ]; then
-            echo "staged assets do not match the release contract" >&2
-            printf 'actual:\n%s\n' "${actual}" >&2
-            printf 'expected:\n%s\n' "${expected}" >&2
-            exit 1
-          fi
-          assets=()
-          for name in "${expected_names[@]}"; do
-            assets+=("${RELEASE_DIR}/${name}")
+
+          # LICENSE 与 THIRD_PARTY_NOTICES 在五个平台目录中内容一致，各只上传一份。
+          for name in LICENSE THIRD_PARTY_NOTICES; do
+            expected_names+=("${name}")
+            assets+=("${RELEASE_ROOT}/linux-amd64/${name}")
+          done
+          for platform in ${RELEASE_PLATFORMS}; do
+            os=${platform%-*}
+            arch=${platform#*-}
+            for suffix in ".tar.gz" ".tar.gz.sha256" ".json"; do
+              name="kk-studio-daemon-${RELEASE_TAG}-${os}-${arch}${suffix}"
+              expected_names+=("${name}")
+              assets+=("${RELEASE_ROOT}/${platform}/${name}")
+            done
           done
 
-          if gh release view "${GITHUB_REF_NAME}" --json isDraft,assets >/dev/null 2>&1; then
-            draft=$(gh release view "${GITHUB_REF_NAME}" --json isDraft --jq '.isDraft')
-            remote_names=$(gh release view "${GITHUB_REF_NAME}" --json assets \
+          expected=$(printf '%s\n' "${expected_names[@]}" | LC_ALL=C sort)
+
+          # 跨平台目录内同名的法律文件必须逐字一致，避免不同平台带上不同许可。
+          for platform in ${RELEASE_PLATFORMS}; do
+            for name in LICENSE THIRD_PARTY_NOTICES; do
+              local_digest=$(sha256sum "${RELEASE_ROOT}/${platform}/${name}" | awk '{ print $1 }')
+              canonical_digest=$(sha256sum "${RELEASE_ROOT}/linux-amd64/${name}" | awk '{ print $1 }')
+              if [ "${local_digest}" != "${canonical_digest}" ]; then
+                echo "${name} differs across platforms at ${platform}" >&2
+                exit 1
+              fi
+            done
+          done
+
+          if gh release view "${RELEASE_TAG}" --json isDraft,assets >/dev/null 2>&1; then
+            draft=$(gh release view "${RELEASE_TAG}" --json isDraft --jq '.isDraft')
+            remote_names=$(gh release view "${RELEASE_TAG}" --json assets \
               --jq '.assets[].name' | LC_ALL=C sort)
             compare_remote=true
             upload_names=()
             if [ "${draft}" != "true" ]; then
-              # 已发布资产不可替换。五个校验和都一致才是一次无操作重跑。
+              # 已发布资产不可替换。全部校验和一致才是一次无操作重跑。
               if [ "${remote_names}" != "${expected}" ]; then
                 echo "published release assets differ from the staged set; refusing to replace them" >&2
                 exit 1
@@ -293,7 +431,13 @@ jobs:
                     *) continue ;;
                   esac
                 fi
-                url=$(gh release view "${GITHUB_REF_NAME}" --json assets \
+                asset_path=$(
+                  for path in "${assets[@]}"; do
+                    case "${path}" in */"${name}") echo "${path}"; break ;; esac
+                  done
+                )
+                [ -n "${asset_path}" ] || { echo "cannot locate staged asset ${name}" >&2; exit 1; }
+                url=$(gh release view "${RELEASE_TAG}" --json assets \
                   --jq ".assets[] | select(.name == \"${name}\") | .url")
                 [ -n "${url}" ] || { echo "cannot read release asset ${name}" >&2; exit 1; }
                 checksum=$(mktemp)
@@ -304,7 +448,7 @@ jobs:
                 fi
                 remote=$(sha256sum "${checksum}" | awk '{ print $1 }')
                 rm -f "${checksum}"
-                local_digest=$(sha256sum "${RELEASE_DIR}/${name}" | awk '{ print $1 }')
+                local_digest=$(sha256sum "${asset_path}" | awk '{ print $1 }')
                 if [ "${remote}" != "${local_digest}" ]; then
                   echo "release asset ${name} differs from the staged asset; refusing to replace it" >&2
                   exit 1
@@ -318,17 +462,19 @@ jobs:
             if [ "${#upload_names[@]}" -gt 0 ]; then
               pending=()
               for name in "${upload_names[@]}"; do
-                pending+=("${RELEASE_DIR}/${name}")
+                for path in "${assets[@]}"; do
+                  case "${path}" in */"${name}") pending+=("${path}"); break ;; esac
+                done
               done
-              gh release upload "${GITHUB_REF_NAME}" "${pending[@]}"
+              gh release upload "${RELEASE_TAG}" "${pending[@]}"
             fi
-            gh release edit "${GITHUB_REF_NAME}" --draft=false
+            gh release edit "${RELEASE_TAG}" --draft=false
           else
-            gh release create "${GITHUB_REF_NAME}" \
+            gh release create "${RELEASE_TAG}" \
               --draft \
               --verify-tag \
-              --title "${GITHUB_REF_NAME}" \
+              --title "${RELEASE_TAG}" \
               --generate-notes \
               "${assets[@]}"
-            gh release edit "${GITHUB_REF_NAME}" --draft=false
+            gh release edit "${RELEASE_TAG}" --draft=false
           fi

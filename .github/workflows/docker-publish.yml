@@ -1,10 +1,11 @@
 # kk-studio Docker publish.
 #
 # 两个分支发布同一个已打包应用镜像 `deploy/local/Dockerfile`（Fat JAR + 内嵌前端），
-# 镜像仓库同为 `kk-studio`：`main` 先跑仓库质量门禁再发布用户使用的 `:main`，`dev`
-# 的检查在提交前完成，push 后直接发布 NAS 自迭代使用的 `:dev`。两者都以 linux/amd64
-# 推送 `:<branch>` 与 `:<commit-sha>` 两个 tag。质量门禁包含前端覆盖率与离线浏览器
-# 布局回归（不访问后端或模型）；真实模型 E2E、真实端到端 UI E2E 不在本文工作流内。
+# 镜像仓库同为 `kk-studio`：`main` 先跑全量仓库门禁与五平台 Daemon 矩阵再发布用户使用的
+# `:main`，`dev` 只发布 NAS 自迭代使用的 `:dev`（质量检查在提交前的独立工作流完成）。
+# 两者都以 linux/amd64 推送 `:<branch>` 与 `:<commit-sha>` 两个 tag。质量门禁包含前端
+# 覆盖率与离线浏览器布局回归（不访问后端或模型）；真实模型 E2E、真实端到端 UI E2E 不在
+# 本文工作流内。
 #
 # Registry credential 只来自 Actions secrets，不作为 build arg、不进入 image layer
 # 或 build log。
@@ -32,80 +33,16 @@ permissions:
 
 env:
   JAVA_VERSION: '21'
-  NODE_VERSION: '24.14.0'
+  NODE_VERSION: '24.21.0'
   POSTGRES_VERSION: '17'
 
 jobs:
-  validate_unix_daemon:
-    name: validate Unix daemon installer (${{ matrix.os }})
+  # 五平台 Daemon 平台门禁与安装器宿主验收由可复用工作流提供：main 发布镜像前必须通过，
+  # dev 只发布镜像，不需要等待该矩阵（改动 daemon/** 时 daemon-ci 仍会独立触发）。
+  daemon_ci:
+    name: node daemon matrix
     if: github.ref_name == 'main' || (github.event_name == 'workflow_dispatch' && inputs.validate_only)
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - name: Test installer with system Bash
-        # macOS /bin/bash is 3.2; neither the runner default nor Homebrew Bash is acceptable.
-        # Fixtures record service operations without registering systemd/launchd services.
-        shell: /bin/bash --noprofile --norc -eo pipefail {0}
-        run: |
-          /bin/bash --version
-          python3 -m unittest discover -s scripts/daemon/tests -p test_daemon_install.py
-          python3 -m unittest discover -s scripts/daemon/tests -p test_daemon_install_macos.py
-          python3 -m unittest discover -s scripts/daemon/tests -p test_daemon_download.py
-          python3 -m unittest discover -s scripts/daemon/tests -p 'test_daemon_update*.py'
-
-  validate_windows_daemon:
-    name: validate Windows daemon installer
-    if: github.ref_name == 'main' || (github.event_name == 'workflow_dispatch' && inputs.validate_only)
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - name: Set up JDK 21
-        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
-        with:
-          distribution: temurin
-          java-version: ${{ env.JAVA_VERSION }}
-      # PowerShell 5.1 is the minimum supported host; PowerShell 7 catches modern-host drift.
-      # The test constructs a real ScheduledTasks definition and probes Java argv without
-      # registering a task or changing the runner's service state.
-      - name: Build real daemon fat JAR for Windows config compatibility
-        shell: bash
-        run: env JAVA_HOME="$JAVA_HOME" mvn -B -ntp -pl harness/daemon -am package -DskipTests "-Dmaven.repo.local=$RUNNER_TEMP/kk-studio-m2"
-      - name: Test generated Windows scripts with native ACLs
-        shell: bash
-        run: env JAVA_HOME="$JAVA_HOME" mvn -B -ntp -pl platform/runtime -am test -Dtest=EnvironmentInstallScriptsTest -Dsurefire.failIfNoSpecifiedTests=false "-Dmaven.repo.local=$RUNNER_TEMP/kk-studio-m2"
-      - name: Test installer with Windows PowerShell 5.1
-        shell: powershell
-        run: .\scripts\daemon\tests\test_daemon_install_windows.ps1
-      - name: Test installer with PowerShell 7
-        # Collect both host results even if the PS 5.1 test fails; either failure blocks publish.
-        if: ${{ !cancelled() }}
-        shell: pwsh
-        run: .\scripts\daemon\tests\test_daemon_install_windows.ps1
-      - name: Test updater with Windows PowerShell 5.1
-        if: ${{ !cancelled() }}
-        shell: powershell
-        run: .\scripts\daemon\tests\test_daemon_update_windows.ps1
-      - name: Test updater with PowerShell 7
-        if: ${{ !cancelled() }}
-        shell: pwsh
-        run: .\scripts\daemon\tests\test_daemon_update_windows.ps1
-      - name: Set up Node 24
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-      - name: Install frontend dependencies
-        shell: bash
-        run: npm --prefix frontend ci
-      - name: Test generated Windows install command natively
-        # Fetch and execute the one-line command in both supported PowerShell hosts.
-        shell: bash
-        run: npm --prefix frontend run test:install:windows
+    uses: ./.github/workflows/daemon-ci.yml
 
   validate:
     name: validate repository
@@ -119,7 +56,7 @@ jobs:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
           cache: maven
-      - name: Set up Node 24
+      - name: Set up Node 24.21
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -226,23 +163,19 @@ jobs:
     name: build and push image
     needs:
       - validate
-      - validate_windows_daemon
-      - validate_unix_daemon
-    # `main` 只能在全量门禁成功后发布；`dev` 的 validate job 按设计为 skipped，
-    # 仍可直接发布。失败或取消的 Main 门禁绝不能被 `always()` 绕过。
+      - daemon_ci
+    # `main` 必须全量门禁与五平台 Daemon 矩阵都通过才发布；`dev` 的 validate/daemon_ci
+    # 按设计为 skipped，仍可直接发布。失败或取消的 Main 门禁绝不能被 `always()` 绕过。
     if: >-
       ${{
         always()
         && !cancelled()
         && !(github.event_name == 'workflow_dispatch' && inputs.validate_only)
-        && (needs.validate.result == 'success' || needs.validate.result == 'skipped')
         && (
-          needs.validate_windows_daemon.result == 'success'
-          || needs.validate_windows_daemon.result == 'skipped'
-        )
-        && (
-          needs.validate_unix_daemon.result == 'success'
-          || needs.validate_unix_daemon.result == 'skipped'
+          (needs.validate.result == 'success' && needs.daemon_ci.result == 'success')
+          || (github.ref_name == 'dev'
+              && needs.validate.result == 'skipped'
+              && needs.daemon_ci.result == 'skipped')
         )
       }}
     runs-on: ubuntu-latest
