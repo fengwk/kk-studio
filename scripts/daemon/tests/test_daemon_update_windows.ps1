@@ -104,7 +104,9 @@ $configPath = '__CONFIG__'
 $expectedArguments = '-jar kk-studio-daemon.jar --base64-args ' +
   [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes('--config')) + ' ' +
   [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($configPath))
-$script:stateIndex = 0
+# Stub state that straddles the invocation lives in the global scope: the call operator below
+# makes `$script:` inside a stub resolve to the callee's scope instead of this runner's.
+$global:stateIndex = 0
 function New-Action([string]$Execute, [string]$Arguments, [string]$WorkingDirectory) {
   return [pscustomobject]@{
     Execute          = $Execute
@@ -130,7 +132,12 @@ __STOP__
 __START__
 __UNREGISTER__
 __EXTRA__
-. '__SCRIPT__' -StagedJar '__STAGED__' -InstalledJar '__INSTALLED__'
+# The production script runs in a child scope through the call operator, so its fail-closed
+# `exit 1` sets $LASTEXITCODE here; a dot-sourced script cannot propagate it (the host still
+# exits 0) and every exit-code assertion would silently pass.
+$LASTEXITCODE = 0
+& '__SCRIPT__' -StagedJar '__STAGED__' -InstalledJar '__INSTALLED__'
+exit $LASTEXITCODE
 '@
 }
 
@@ -214,9 +221,9 @@ function Get-ScheduledTask {
   $state = $env:KK_TEST_STATE
   if ($env:KK_TEST_STATE_SEQUENCE) {
     $states = $env:KK_TEST_STATE_SEQUENCE.Split(',')
-    $index = [Math]::Min($script:stateIndex, $states.Count - 1)
+    $index = [Math]::Min($global:stateIndex, $states.Count - 1)
     $state = $states[$index]
-    $script:stateIndex++
+    $global:stateIndex++
   }
   Add-TestLog "GetScheduledTask:$state"
   return New-Task -Description $expectedDescription -State $state -Actions @(New-ManagedAction)
@@ -452,7 +459,7 @@ function Get-ScheduledTask {
   param([string]$ErrorAction)
   Add-TestLog 'GetScheduledTask:foreign-arguments'
   return New-Task -Description $expectedDescription -State 'Ready' `
-    -Actions @((New-Action -Execute $javaExecutable -Arguments $expectedArguments + ' --extra' `
+    -Actions @((New-Action -Execute $javaExecutable -Arguments ($expectedArguments + ' --extra') `
       -WorkingDirectory $installedDir))
 }
 '@
@@ -533,7 +540,8 @@ function Copy-Item {
   param([string]$LiteralPath, [string]$Destination, [switch]$Force)
   Add-TestLog "CopyItem:$LiteralPath"
   Microsoft.PowerShell.Management\Copy-Item -LiteralPath $LiteralPath -Destination $Destination -Force:$Force
-  $script:installedLock = [IO.File]::Open($LiteralPath, [IO.FileMode]::Open,
+  # The locked handle must outlive this stub call, so it is held in the global scope.
+  $global:installedLock = [IO.File]::Open($LiteralPath, [IO.FileMode]::Open,
     [IO.FileAccess]::Read, [IO.FileShare]::None)
 }
 '@
