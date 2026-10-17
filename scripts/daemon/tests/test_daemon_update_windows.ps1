@@ -5,6 +5,11 @@
 # in-process stubs. No real scheduled task is ever read, stopped, started or unregistered, and
 # no path outside the temporary fixture is touched.
 #
+# The import goes through the shared scripts/daemon/tests/export-update-script.mjs with a path and
+# an export name: Windows PowerShell 5.1 drops the quotes of an inline `-e '<source>'` when it
+# forwards native argv, and it decodes native stdout with the console code page. Both would corrupt
+# the shipped text, so the script body only ever travels as a UTF-8 file.
+#
 # The exported text keeps every production statement. Only the two wall-clock bounds are
 # shortened in the temporary copy so a missing permit fails within the test budget instead of
 # waiting the production 120 seconds.
@@ -26,21 +31,24 @@ $updateScripts = Join-Path $repoRoot 'daemon\src\update-scripts.ts'
 if (-not (Test-Path -LiteralPath $updateScripts)) {
   throw "update script source not found: $updateScripts"
 }
+$exporter = Join-Path $PSScriptRoot 'export-update-script.mjs'
+if (-not (Test-Path -LiteralPath $exporter)) {
+  throw "update script exporter not found: $exporter"
+}
 $nodeCommand = Get-Command 'node.exe' -CommandType Application -ErrorAction SilentlyContinue |
   Select-Object -First 1
 if ($null -eq $nodeCommand) {
   throw 'a real node.exe is required to import the shipped update script'
 }
-$exported = & $nodeCommand.Source --input-type=module -e `
-  'import { pathToFileURL } from "node:url"; const m = await import(pathToFileURL(process.argv[1])); process.stdout.write(m[process.argv[2]])' `
-  $updateScripts 'WINDOWS_UPDATE_SCRIPT'
-if ($LASTEXITCODE -ne 0) {
-  throw 'cannot import WINDOWS_UPDATE_SCRIPT from daemon/src/update-scripts.ts'
-}
 $sandbox = Join-Path ([IO.Path]::GetTempPath()) ('kk-update-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $sandbox -Force | Out-Null
+$exportedScript = Join-Path $sandbox 'exported-update-script.ps1'
+& $nodeCommand.Source $exporter $updateScripts 'WINDOWS_UPDATE_SCRIPT' $exportedScript
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $exportedScript)) {
+  throw 'cannot import WINDOWS_UPDATE_SCRIPT from daemon/src/update-scripts.ts'
+}
 $updateScript = Join-Path $sandbox 'kk-studio-daemon-update.ps1'
-$updateText = ($exported -join "`n").
+$updateText = [IO.File]::ReadAllText($exportedScript, [Text.UTF8Encoding]::new($false)).
   Replace('$PermitWaitSeconds = 120', '$PermitWaitSeconds = 2').
   Replace('$StopWaitSeconds = 30', '$StopWaitSeconds = 2')
 [IO.File]::WriteAllText($updateScript, $updateText, [Text.UTF8Encoding]::new($false))
