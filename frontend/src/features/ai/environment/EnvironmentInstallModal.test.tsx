@@ -330,7 +330,7 @@ describe('EnvironmentInstallModal', () => {
     expect(within(dialog).getByRole('heading', { name: '安装/覆盖环境' })).toBeInTheDocument()
     expect(dialog).not.toHaveTextContent(card.name)
     expect(dialog).toHaveTextContent('复制命令后，在目标主机的终端执行。')
-    expect(dialog).toHaveTextContent('需要 JDK 21 和 Bash。')
+    expect(dialog).toHaveTextContent('无需预装 JRE 或 Node；请确保 Bash 可用。')
     expect(dialog).toHaveTextContent('覆盖安装会重启服务并连接到此环境')
     expect(dialog).toHaveTextContent('中断当前工具调用；已有数据保留')
     expect(dialog).toHaveTextContent('命令含凭据，请勿分享。')
