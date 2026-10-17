@@ -7,7 +7,7 @@
     <parent>
         <groupId>fun.fengwk.kk-studio</groupId>
         <artifactId>kk-studio-parent</artifactId>
-        <version>1.1.0</version>
+        <version>1.1.1</version>
     </parent>
 
     <artifactId>kk-studio-harness</artifactId>
@@ -24,6 +24,5 @@
         <module>contributor-api</module>
         <module>builtin</module>
         <module>infra</module>
-        <module>daemon</module>
     </modules>
 </project>
