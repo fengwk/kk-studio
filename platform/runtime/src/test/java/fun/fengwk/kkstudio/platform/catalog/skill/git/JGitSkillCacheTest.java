@@ -7,7 +7,13 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.eclipse.jgit.api.Git;
 import org.eclipse.jgit.dircache.DirCache;
 import org.eclipse.jgit.dircache.DirCacheBuilder;
@@ -21,6 +27,7 @@ import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.revwalk.RevCommit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.slf4j.LoggerFactory;
 
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
 
@@ -29,10 +36,16 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFileAttributeView;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 
 public class JGitSkillCacheTest {
+
+  /** 合成秘密正文：注入的失败路径携带它，用于证明安全日志绝不回显路径或原始异常内容。 */
+  private static final String SYNTHETIC_SECRET = "synthetic-secret-value";
 
   private static final String DEV_SKILL_MD =
       """
@@ -300,6 +313,66 @@ public class JGitSkillCacheTest {
         commit2Id,
         Files.readString(cacheRoot.resolve("test-pkg/.kkstudio-commit"), StandardCharsets.UTF_8)
             .trim());
+  }
+
+  /** 测试意图：重新发布时旧目录的递归清理真实失败必须去敏可观察（固定阶段与异常类名，无路径/正文），且单个条目失败不得跳过同层其余可删除条目。 */
+  @Test
+  public void ensureCommit_failedStaleCleanupIsLoggedSafelyAndContinuesRemainingDeletions(
+      @TempDir Path tempDir) throws Exception {
+    assumeTrue(
+        Files.getFileStore(tempDir).supportsFileAttributeView(PosixFileAttributeView.class),
+        "requires POSIX permission semantics");
+
+    File remoteDir = tempDir.resolve("remote-repo").toFile();
+    RevCommit commit1 =
+        createRepo(
+            remoteDir, Map.of("dev/SKILL.md", DEV_SKILL_MD, "docs/intro.md", "# Documentation"));
+    String repoUrl = remoteDir.toURI().toString();
+
+    // 缓存根名称携带合成秘密：任何把路径或原始正文写进日志的实现都会在断言中暴露。
+    Path cacheRoot = tempDir.resolve(SYNTHETIC_SECRET + "-cache");
+    JGitSkillCache cache = new JGitSkillCache(cacheRoot);
+    cache.ensureCommit("test-pkg", repoUrl, commit1.getId().getName(), null);
+
+    // 已发布缓存内的子目录去掉写权限：非 root 环境下递归删除会在该目录真实失败。
+    Path readOnlyDir = cacheRoot.resolve("test-pkg/dev");
+    Files.setPosixFilePermissions(readOnlyDir, PosixFilePermissions.fromString("r-x------"));
+    assumeFalse(
+        Files.isWritable(readOnlyDir),
+        "read-only permissions cannot be enforced in this environment");
+
+    RevCommit commit2;
+    try (Git git = Git.open(remoteDir)) {
+      Files.writeString(remoteDir.toPath().resolve("README.md"), "# root", StandardCharsets.UTF_8);
+      git.add().addFilepattern(".").call();
+      commit2 = git.commit().setMessage("Second commit").setSign(false).call();
+    }
+
+    try (SkillCacheLogCapture logs = new SkillCacheLogCapture()) {
+      cache.ensureCommit("test-pkg", repoUrl, commit2.getId().getName(), null);
+      logs.assertOnlySafeDeleteFailures();
+    }
+
+    assertEquals(
+        commit2.getId().getName(),
+        Files.readString(cacheRoot.resolve("test-pkg/.kkstudio-commit"), StandardCharsets.UTF_8)
+            .trim());
+    Path staleDir = findStaleWorkDir(cacheRoot);
+    assertTrue(
+        Files.exists(staleDir.resolve("dev")), "the undeletable read-only subtree is retained");
+    assertFalse(
+        Files.exists(staleDir.resolve("docs")),
+        "cleanup must continue past a failing entry and delete the remaining writable subtree");
+  }
+
+  /** 定位重新发布留下的 {@code .old} 工作目录；清理失败时它必须存在。 */
+  private static Path findStaleWorkDir(Path cacheRoot) throws IOException {
+    try (Stream<Path> entries = Files.list(cacheRoot.resolve(".work"))) {
+      return entries
+          .filter(path -> path.getFileName().toString().endsWith(".old"))
+          .findFirst()
+          .orElseThrow();
+    }
   }
 
   @Test
@@ -653,6 +726,51 @@ public class JGitSkillCacheTest {
                     "test-pkg", remoteDir.toURI().toString(), commitId.name(), null));
         assertFalse(Files.exists(cacheRoot.resolve("test-pkg")));
       }
+    }
+  }
+
+  /**
+   * 捕获 {@link JGitSkillCache} 的 WARN 日志：清理失败是普通 slf4j 记录，只有挂接 appender 才能断言其去敏可观察性。
+   *
+   * <p>{@link #close()} 摘除 appender，避免影响其它测试。
+   */
+  private static final class SkillCacheLogCapture implements AutoCloseable {
+
+    private final Logger logger = (Logger) LoggerFactory.getLogger(JGitSkillCache.class);
+    private final ListAppender<ILoggingEvent> appender = new ListAppender<>();
+
+    private SkillCacheLogCapture() {
+      appender.start();
+      logger.addAppender(appender);
+    }
+
+    List<ILoggingEvent> events() {
+      return List.copyOf(appender.list);
+    }
+
+    /** 真实清理失败必须可观察；每条日志只含固定阶段与异常类名，没有原始 throwable，也不回显合成秘密正文。 */
+    void assertOnlySafeDeleteFailures() {
+      assertFalse(events().isEmpty(), "a real cleanup failure must be observable");
+      for (ILoggingEvent event : events()) {
+        assertEquals(Level.WARN, event.getLevel());
+        assertNull(event.getThrowableProxy(), "a raw throwable must never be logged");
+        assertTrue(
+            event
+                .getFormattedMessage()
+                .matches(
+                    "skill cache recursive delete failed: stage=(delete|traversal),"
+                        + " error=[A-Za-z0-9_.$]+"),
+            event.getFormattedMessage());
+        assertFalse(
+            event.getFormattedMessage().contains(SYNTHETIC_SECRET),
+            "the safe log must not echo the raw failure content");
+      }
+    }
+
+    @Override
+    public void close() {
+      logger.detachAppender(appender);
+      appender.stop();
     }
   }
 }

@@ -83,6 +83,17 @@ final class EnvironmentDaemonServerTestSupport {
 
   private EnvironmentDaemonServerTestSupport() {}
 
+  /** 按原始对象身份抛出测试注入的非受检失败，模拟 Error / RuntimeException。 */
+  static void throwUnchecked(Throwable failure) {
+    if (failure instanceof Error error) {
+      throw error;
+    }
+    if (failure instanceof RuntimeException runtime) {
+      throw runtime;
+    }
+    throw new IllegalStateException("tests may only inject unchecked failures", failure);
+  }
+
   static String readyPayload() {
     return CAPABILITIES_CODEC.encode(CAPABILITIES);
   }
@@ -166,6 +177,12 @@ final class EnvironmentDaemonServerTestSupport {
     final EnvironmentDaemonServer server;
     private boolean registrationDirectoryFails;
 
+    /** 注入的宿主 READY 通知失败；用于验证通知失败去敏可观察且不改变会话状态。 */
+    Throwable readyNotificationFailure;
+
+    /** 注入的宿主更新回执通知失败；用于验证同职责通知失败去敏可观察。 */
+    Throwable updateNotificationFailure;
+
     Fixture() {
       this.server =
           new EnvironmentDaemonServer(
@@ -182,8 +199,16 @@ final class EnvironmentDaemonServerTestSupport {
                 }
                 return Optional.empty();
               },
-              readyNotifications::add,
+              environmentId -> {
+                if (readyNotificationFailure != null) {
+                  throwUnchecked(readyNotificationFailure);
+                }
+                readyNotifications.add(environmentId);
+              },
               (environmentId, result) -> {
+                if (updateNotificationFailure != null) {
+                  throwUnchecked(updateNotificationFailure);
+                }
                 updateResultEnvironments.add(environmentId);
                 updateResults.add(result);
               },
@@ -282,6 +307,9 @@ final class EnvironmentDaemonServerTestSupport {
     boolean retryLater;
     DaemonCapabilities readyCapabilities;
 
+    /** 注入的租约解除失败；用于验证连接收尾的独立释放与 Error 语义。 */
+    Throwable disconnectFailure;
+
     @Override
     public LeaseBindResult tryAcquire(
         EnvironmentId environmentId, String registrationToken, Duration leaseDuration) {
@@ -324,6 +352,9 @@ final class EnvironmentDaemonServerTestSupport {
         EnvironmentId environmentId, UUID leaseToken, Duration graceDuration) {
       if (databaseUnavailable) {
         throw new IllegalStateException("database unavailable");
+      }
+      if (disconnectFailure != null) {
+        throwUnchecked(disconnectFailure);
       }
       disconnected = true;
       return true;
@@ -428,6 +459,9 @@ final class EnvironmentDaemonServerTestSupport {
     /** 下一次递交停在入口，直到 {@link #releaseOffer()}；用于制造代际替换窗口。 */
     volatile boolean holdNextOffer;
 
+    /** 注入的传输关闭失败；关闭动作本身仍被记录，用于验证独立释放与 Error 语义。 */
+    Throwable closeFailure;
+
     private final CountDownLatch offerEntered = new CountDownLatch(1);
     private final CountDownLatch offerReleased = new CountDownLatch(1);
 
@@ -491,6 +525,9 @@ final class EnvironmentDaemonServerTestSupport {
       open = false;
       closed = true;
       closeCount += 1;
+      if (closeFailure != null) {
+        throwUnchecked(closeFailure);
+      }
     }
 
     List<DaemonEnvelope> envelopes() {
