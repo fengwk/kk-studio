@@ -1,11 +1,15 @@
 package fun.fengwk.kkstudio.harness.daemon.coding;
 
+import fun.fengwk.kkstudio.harness.daemon.DaemonOperatingSystemDetector;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
+
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.Comparator;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
 /**
@@ -33,6 +37,9 @@ final class ProcessScopeState {
 
   /** helper 自身的诊断输出；绝不进入用户命令的输出流。 */
   static final String DIAGNOSTICS_FILE = "diagnostics";
+
+  private static final long WINDOWS_FILE_RELEASE_MILLIS = 500;
+  private static final long FILE_RELEASE_POLL_MILLIS = 5;
 
   private ProcessScopeState() {}
 
@@ -73,8 +80,36 @@ final class ProcessScopeState {
    *
    * <p>单条失败的清理绝不中断其余成员，也不把异常抛给调用方：目录只承载调用私有的握手文件，删除失败不改变调用结果。返回真实
    * 结果是为了让调用方能留下「没有清理干净」这一去敏诊断，而不是把「没删干净」静默吞掉。
+   *
+   * <p>Windows 在进程退出可见之后仍可能短暂拒绝删除诊断文件；只在该平台有界等待文件释放。持续拒绝仍返回失败，中断标记在收尾后恢复。
    */
   static boolean deleteQuietly(Path directory) {
+    boolean windows =
+        DaemonOperatingSystemDetector.detectCurrent() == DaemonOperatingSystem.WINDOWS;
+    long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(WINDOWS_FILE_RELEASE_MILLIS);
+    boolean interrupted = false;
+    try {
+      while (true) {
+        if (deleteOnce(directory)) {
+          return true;
+        }
+        if (!windows || System.nanoTime() >= deadline) {
+          return false;
+        }
+        try {
+          Thread.sleep(FILE_RELEASE_POLL_MILLIS);
+        } catch (InterruptedException error) {
+          interrupted = true;
+        }
+      }
+    } finally {
+      if (interrupted) {
+        Thread.currentThread().interrupt();
+      }
+    }
+  }
+
+  private static boolean deleteOnce(Path directory) {
     if (directory == null || !Files.exists(directory)) {
       return true;
     }

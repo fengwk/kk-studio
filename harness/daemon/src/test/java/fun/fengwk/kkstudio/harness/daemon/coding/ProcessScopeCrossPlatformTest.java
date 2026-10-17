@@ -334,18 +334,7 @@ class ProcessScopeCrossPlatformTest {
                   path -> path.getFileName().toString().startsWith(ProcessScope.STATE_DIR_PREFIX))
               .toList()) {
         try (Stream<Path> files = Files.list(directory)) {
-          remaining.add(
-              files
-                  .map(
-                      path ->
-                          path.getFileName()
-                              + (System.getProperty("os.name", "")
-                                      .toLowerCase(Locale.ROOT)
-                                      .contains("win")
-                                  ? WindowsFileLockProbe.owners(path)
-                                  : ""))
-                  .sorted()
-                  .toList());
+          remaining.add(files.map(path -> path.getFileName().toString()).sorted().toList());
         }
       }
     }

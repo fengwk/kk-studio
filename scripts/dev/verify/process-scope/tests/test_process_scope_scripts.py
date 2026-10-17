@@ -43,6 +43,10 @@ WINDOWS_REQUIRED_BASH_CASES = (
     "closesStdinSoCommandsWaitingForEofFinishNaturally",
     "unrepresentableTimeoutBudgetDoesNotDegradeIntoImmediateTimeout",
 )
+WINDOWS_REQUIRED_STATE_CASES = (
+    "deleteWaitsForAReleasedWindowsFileHandle",
+    "deleteReportsPersistentWindowsSharingFailureAndPreservesInterruption",
+)
 POSIX_OWNER_ONLY_CASES = (
     "ensureOwnerOnlyDirectoryCreatesAndConvergesToOwnerOnly",
     "createOwnerOnlyFileIsOwnerOnly",
@@ -120,6 +124,8 @@ def write_complete_reports(
             cases = tuple(bash_cases) + ("posixOnlyCase",)
         elif class_name == "OwnerOnlyFilesTest":
             cases = POSIX_OWNER_ONLY_CASES + ACL_OWNER_ONLY_CASES
+        elif class_name == "ProcessScopeStateTest":
+            cases = WINDOWS_REQUIRED_STATE_CASES
         else:
             cases = ("someCase",)
         write_surefire_report(
@@ -210,6 +216,38 @@ class AssertSurefireReportsTest(unittest.TestCase):
                         )
                     else:
                         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+
+    def test_windows_sharing_cases_cannot_be_missing_or_skipped(self):
+        """共享句柄回归必须在 Windows 真跑，不能靠平台前置条件误跳过。"""
+        for required in WINDOWS_REQUIRED_STATE_CASES:
+            for outcome in ("missing", "skipped"):
+                with self.subTest(required=required, outcome=outcome):
+                    with tempfile.TemporaryDirectory() as tmp:
+                        reports = Path(tmp)
+                        write_complete_reports(reports)
+                        cases = tuple(
+                            case for case in WINDOWS_REQUIRED_STATE_CASES
+                            if case != required or outcome != "missing"
+                        )
+                        skipped = (required,) if outcome == "skipped" else ()
+                        write_surefire_report(
+                            reports, "ProcessScopeStateTest", cases,
+                            skipped=len(skipped), skipped_cases=skipped,
+                        )
+                        result = run_script("assert-surefire-reports.py", reports, "windows-latest")
+                        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+                        self.assertIn(required, result.stdout)
+
+    def test_non_windows_platforms_allow_windows_sharing_cases_to_be_skipped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            reports = Path(tmp)
+            write_complete_reports(reports)
+            write_surefire_report(
+                reports, "ProcessScopeStateTest", WINDOWS_REQUIRED_STATE_CASES,
+                skipped=2, skipped_cases=WINDOWS_REQUIRED_STATE_CASES,
+            )
+            result = run_script("assert-surefire-reports.py", reports, "macos-latest")
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
 
     def test_non_windows_platforms_do_not_require_the_git_bash_cases(self):
         """点名的实证只在 Windows 腿生效：其它平台不因缺少这条要求而报错。"""
