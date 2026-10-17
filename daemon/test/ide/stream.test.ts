@@ -54,6 +54,54 @@ async function waitFor(predicate: () => boolean, timeoutMillis = 8000): Promise<
   }
 }
 
+interface ProgressBudget {
+  /** Maximum time without any observable progress before the wait reports a stall. */
+  idleMillis: number
+  /** Hard upper bound for the whole wait, regardless of progress. */
+  totalMillis: number
+}
+
+const DEFAULT_PROGRESS_BUDGET: ProgressBudget = { idleMillis: 8000, totalMillis: 60000 }
+
+/**
+ * Waits for observable progress rather than a fixed throughput deadline: every increase of
+ * `progress()` refreshes the idle deadline, while the total budget still bounds the whole wait.
+ * `diagnostics` must name the transfer counters so a timeout states whether bytes were still
+ * moving (slow) or had stopped entirely (deadlock).
+ */
+async function awaitProgress(
+  progress: () => number,
+  complete: () => boolean,
+  diagnostics: () => string,
+  budget: ProgressBudget = DEFAULT_PROGRESS_BUDGET,
+): Promise<void> {
+  const startedAt = Date.now()
+  let lastProgress = progress()
+  let lastProgressAt = startedAt
+  for (;;) {
+    if (complete()) {
+      return
+    }
+    const now = Date.now()
+    const current = progress()
+    if (current !== lastProgress) {
+      lastProgress = current
+      lastProgressAt = now
+    }
+    const idle = now - lastProgressAt
+    const elapsed = now - startedAt
+    if (idle > budget.idleMillis) {
+      throw new Error(`no progress for ${idle}ms (stalled): ${diagnostics()}`)
+    }
+    if (elapsed > budget.totalMillis) {
+      throw new Error(
+        `still progressing but exceeded ${budget.totalMillis}ms total budget after ${elapsed}ms: ${diagnostics()}`,
+      )
+    }
+    await delay(2)
+  }
+}
+
 async function listen(server: Server): Promise<number> {
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
   return (server.address() as AddressInfo).port
@@ -1127,21 +1175,43 @@ describe('WebSocket exchanges over the reverse stream', () => {
       upstream: upstreamOf(upstream.url),
       signal: newSignal().signal,
     })
+    // Observe the exchange immediately so cleanup-triggered aborts can never escape as unhandled
+    // rejections; the body's own assertion error remains the primary failure.
+    const exchangeSettled = exchange.then(
+      () => undefined,
+      () => undefined,
+    )
 
-    // While the browser withholds credit, the daemon must stop the upstream from producing.
-    await waitFor(() => produced > 0)
-    await delay(300)
-    const throttled = produced
-    expect(throttled).toBeLessThan(total / 2)
+    try {
+      // While the browser withholds credit, the daemon must stop the upstream from producing.
+      await waitFor(() => produced > 0)
+      await delay(300)
+      const throttled = produced
+      expect(throttled).toBeLessThan(total / 2)
 
-    ackEnabled = true
-    flushAck?.()
-    await waitFor(() => received >= total * messageSize, 20_000)
-    expect(produced).toBeGreaterThanOrEqual(total)
+      ackEnabled = true
+      flushAck?.()
+      const expected = total * messageSize
+      // Drain is bounded by observed byte progress, not by an assumed throughput: a slow machine
+      // keeps extending the idle deadline, while a deadlock and an absolute budget both fail with
+      // the transfer counters.
+      await awaitProgress(
+        () => received,
+        () => received >= expected && produced >= total,
+        () => `produced=${produced}/${total} received=${received}/${expected} unacked=${unacked}`,
+      )
+      expect(received).toBe(expected)
+      expect(produced).toBeGreaterThanOrEqual(total)
 
-    gatewaySocket?.terminate()
-    await exchange
-  }, 30_000)
+      gatewaySocket?.close()
+      await exchange
+    } finally {
+      gatewaySocket?.close()
+      // The exchange may already have settled (success or the failure above); never leave its
+      // rejection unobserved after cleanup.
+      await exchangeSettled
+    }
+  }, 90_000)
 
   it('forwards the upstream WebSocket close code to the stream', async () => {
     const upstream = await startWsUpstream((socket) => {
@@ -2444,3 +2514,42 @@ describe('stream failure boundaries', () => {
   })
 })
 
+describe('progress budget', () => {
+  it('reports a stall when observed progress stops', async () => {
+    await expect(
+      awaitProgress(() => 0, () => false, () => 'produced=0/1500 received=0/49152000 unacked=0', {
+        idleMillis: 20,
+        totalMillis: 5000,
+      }),
+    ).rejects.toThrow(/stalled.*produced=0\/1500 received=0\/49152000 unacked=0/)
+  })
+
+  it('reports continued progress when only the total budget is exhausted', async () => {
+    let observed = 0
+    await expect(
+      awaitProgress(
+        () => {
+          observed += 1
+          return observed
+        },
+        () => false,
+        () => `produced=${observed}`,
+        { idleMillis: 5000, totalMillis: 30 },
+      ),
+    ).rejects.toThrow(/still progressing.*produced=\d+/)
+  })
+
+  it('resolves once progress completes within the budget', async () => {
+    let observed = 0
+    await awaitProgress(
+      () => {
+        observed += 1
+        return observed
+      },
+      () => observed >= 5,
+      () => `observed=${observed}`,
+      { idleMillis: 1000, totalMillis: 1000 },
+    )
+    expect(observed).toBeGreaterThanOrEqual(5)
+  })
+})
