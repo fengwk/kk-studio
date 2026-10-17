@@ -1,10 +1,11 @@
 /* eslint-disable react-refresh/only-export-components */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createRoot } from 'react-dom/client'
-import { MemoryRouter } from 'react-router'
+import { createMemoryRouter, RouterProvider } from 'react-router'
 import '@/styles.css'
 import { setLocale } from '@/shared/i18n'
 import { ApplicationEventProvider } from '@/shared/app-events'
+import { IdeLifecycleProvider } from '@/features/ai/ide/IdeLifecycleProvider'
 import { AgentPane } from '@/features/ai/runtime/AgentPane'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 
@@ -29,50 +30,57 @@ const queryClient = new QueryClient({
   },
 })
 
+const router = createMemoryRouter([{
+  path: '*',
+  element: (
+    <IdeLifecycleProvider>
+      <div className="preview-harness-frame" data-testid="preview-harness-frame">
+        <AgentPane
+          paneId={PREVIEW_HARNESS_THREAD_ID}
+          focused
+          initialTarget={{ kind: 'BOUND_THREAD', threadId: PREVIEW_HARNESS_THREAD_ID }}
+          agents={[
+            {
+              name: 'assistant',
+              description: '通用助手',
+              systemPrompt: 'You are a precise coding assistant.',
+              type: 'BUILTIN',
+              model: 'minimax-m2.7',
+              variant: 'default',
+              config: {
+                inheritParentEnvironment: true,
+                tools: ['read', 'bash'],
+                skills: [],
+                subagents: [],
+              },
+              version: '1',
+              createTime: '2026-10-01T00:00:00Z',
+              updateTime: '2026-10-01T00:00:00Z',
+            },
+            ...['coder', 'broken-agent'].map((name): AgentDefinitionDTO => ({
+              name,
+              description: name,
+              systemPrompt: null,
+              type: 'USER',
+              model: name === 'coder' ? 'anthropic/Claude' : 'missing/model',
+              variant: 'fast',
+              config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
+              version: '1',
+              createTime: '2026-10-01T00:00:00Z',
+              updateTime: '2026-10-01T00:00:00Z',
+            })),
+          ]}
+        />
+      </div>
+    </IdeLifecycleProvider>
+  ),
+}])
+
 function DebugPreviewHarnessApp() {
   return (
     <QueryClientProvider client={queryClient}>
       <ApplicationEventProvider>
-        <MemoryRouter>
-          <div className="preview-harness-frame" data-testid="preview-harness-frame">
-            <AgentPane
-              paneId={PREVIEW_HARNESS_THREAD_ID}
-              focused
-              initialTarget={{ kind: 'BOUND_THREAD', threadId: PREVIEW_HARNESS_THREAD_ID }}
-              agents={[
-                {
-                  name: 'assistant',
-                  description: '通用助手',
-                  systemPrompt: 'You are a precise coding assistant.',
-                  type: 'BUILTIN',
-                  model: 'minimax-m2.7',
-                  variant: 'default',
-                  config: {
-                    inheritParentEnvironment: true,
-                    tools: ['read', 'bash'],
-                    skills: [],
-                    subagents: [],
-                  },
-                  version: '1',
-                  createTime: '2026-10-01T00:00:00Z',
-                  updateTime: '2026-10-01T00:00:00Z',
-                },
-                ...['coder', 'broken-agent'].map((name): AgentDefinitionDTO => ({
-                  name,
-                  description: name,
-                  systemPrompt: null,
-                  type: 'USER',
-                  model: name === 'coder' ? 'anthropic/Claude' : 'missing/model',
-                  variant: 'fast',
-                  config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
-                  version: '1',
-                  createTime: '2026-10-01T00:00:00Z',
-                  updateTime: '2026-10-01T00:00:00Z',
-                })),
-              ]}
-            />
-          </div>
-        </MemoryRouter>
+        <RouterProvider router={router} />
       </ApplicationEventProvider>
     </QueryClientProvider>
   )

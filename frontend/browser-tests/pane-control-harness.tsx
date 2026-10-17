@@ -1,10 +1,11 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createRoot } from 'react-dom/client'
 import { useEffect } from 'react'
-import { BrowserRouter, Route, Routes, useNavigate } from 'react-router'
+import { createBrowserRouter, RouterProvider, Route, Routes, useNavigate } from 'react-router'
 import '@/styles.css'
 import { setLocale } from '@/shared/i18n'
 import { ApplicationEventProvider } from '@/shared/app-events'
+import { IdeLifecycleProvider } from '@/features/ai/ide/IdeLifecycleProvider'
 import { AgentPane } from '@/features/ai/runtime/AgentPane'
 import { ThreadWorkspacePage } from '@/features/ai/thread/ThreadWorkspacePage'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
@@ -48,47 +49,52 @@ const queryClient = new QueryClient({
  * - `pane-child`：绑定子代理目标的 pane（不得出现 Composer）；
  * - `thread-child`：子代理独立地址 `/threads/{child}`。
  */
-export function PaneControlHarnessApp() {
+function PaneControlRoutes() {
   const scenario = new URLSearchParams(window.location.search).get('scenario') ?? 'pane-root'
   if (scenario === 'thread-child') {
     return (
-      <QueryClientProvider client={queryClient}>
-        <ApplicationEventProvider>
-          <BrowserRouter>
-            <Routes>
-              <Route path="/threads/:threadId" element={<ThreadWorkspacePage />} />
-              <Route path="*" element={<ChildThreadDeepLinkEntry />} />
-            </Routes>
-          </BrowserRouter>
-        </ApplicationEventProvider>
-      </QueryClientProvider>
+      <Routes>
+        <Route path="/threads/:threadId" element={<ThreadWorkspacePage />} />
+        <Route path="*" element={<ChildThreadDeepLinkEntry />} />
+      </Routes>
     )
   }
   const threadId = scenario === 'pane-child'
     ? HARNESS_CHILD_THREAD_ID
     : HARNESS_ROOT_THREAD_ID
   return (
+    <>
+      <Routes>
+        <Route
+          path="*"
+          element={(
+            <div className="pane-harness-frame" data-testid="pane-harness-frame">
+              <AgentPane
+                owner={{ type: 'CHAT', chatId: 'chat-pane-harness' }}
+                paneId="pane-harness"
+                focused
+                agents={[HARNESS_AGENT]}
+                initialTarget={{ kind: 'BOUND_THREAD', threadId }}
+              />
+            </div>
+          )}
+        />
+      </Routes>
+      <span data-testid="route-marker" />
+    </>
+  )
+}
+
+const router = createBrowserRouter([{
+  path: '*',
+  element: <IdeLifecycleProvider><PaneControlRoutes /></IdeLifecycleProvider>,
+}])
+
+export function PaneControlHarnessApp() {
+  return (
     <QueryClientProvider client={queryClient}>
       <ApplicationEventProvider>
-        <BrowserRouter>
-          <Routes>
-            <Route
-              path="*"
-              element={(
-                <div className="pane-harness-frame" data-testid="pane-harness-frame">
-                  <AgentPane
-                    owner={{ type: 'CHAT', chatId: 'chat-pane-harness' }}
-                    paneId="pane-harness"
-                    focused
-                    agents={[HARNESS_AGENT]}
-                    initialTarget={{ kind: 'BOUND_THREAD', threadId }}
-                  />
-                </div>
-              )}
-            />
-          </Routes>
-          <span data-testid="route-marker" />
-        </BrowserRouter>
+        <RouterProvider router={router} />
       </ApplicationEventProvider>
     </QueryClientProvider>
   )

@@ -1,10 +1,11 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createRoot } from 'react-dom/client'
 import { useState } from 'react'
-import { BrowserRouter, Route, Routes, useNavigate } from 'react-router'
+import { createBrowserRouter, RouterProvider, Route, Routes, useNavigate } from 'react-router'
 import '@/styles.css'
 import { setLocale } from '@/shared/i18n'
 import { ApplicationEventProvider } from '@/shared/app-events'
+import { IdeLifecycleProvider } from '@/features/ai/ide/IdeLifecycleProvider'
 import { ProjectsInvalidationBridge } from '@/features/projects/extensions/projects-extension'
 import { ProjectDetailPage } from '@/features/projects/ProjectDetailPage'
 import { ProjectsPage } from '@/features/projects/ProjectsPage'
@@ -40,13 +41,20 @@ function IssueVisualHarness() {
   </>
 }
 
+const router = createBrowserRouter([{
+  path: '*',
+  element: (
+    <IdeLifecycleProvider>
+      <ProjectsInvalidationBridge />
+      <HarnessRoutes />
+    </IdeLifecycleProvider>
+  ),
+}])
+
 createRoot(document.getElementById('root')!).render(
   <QueryClientProvider client={client}>
     <ApplicationEventProvider>
-      <BrowserRouter>
-        <ProjectsInvalidationBridge />
-        <HarnessRoutes />
-      </BrowserRouter>
+      <RouterProvider router={router} />
     </ApplicationEventProvider>
   </QueryClientProvider>,
 )
