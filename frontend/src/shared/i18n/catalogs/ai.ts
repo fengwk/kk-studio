@@ -3025,8 +3025,8 @@ export const aiCatalog = {
     'zh-CN': '复制命令后，在目标主机的终端执行。',
   },
   'ai.environment.install.noticeDetail': {
-    'en-US': 'Requires JDK 21 and Bash. Overwriting restarts the service and connects to this environment, interrupting tool calls in progress. Existing data is kept.',
-    'zh-CN': '需要 JDK 21 和 Bash。覆盖安装会重启服务并连接到此环境，中断当前工具调用；已有数据保留。',
+    'en-US': 'No JRE or Node installation is required; make sure Bash is available. Overwriting restarts the service and connects to this environment, interrupting tool calls in progress. Existing data is kept.',
+    'zh-CN': '无需预装 JRE 或 Node；请确保 Bash 可用。覆盖安装会重启服务并连接到此环境，中断当前工具调用；已有数据保留。',
   },
   'ai.environment.install.credentialNote': {
     'en-US': 'The command contains credentials. Do not share it.',

@@ -28,8 +28,8 @@ import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 /**
- * 守护 platform 与 framework-free Harness runtime API 的组合/应用边界：platform 提供应用能力与 Port 适配，不依赖
- * infra/web/daemon 下游模块；web 是唯一组合根，platform 不能成为 Spring Boot 启动入口。
+ * 守护 platform 与 framework-free Harness runtime API 的组合/应用边界：platform 提供应用能力与 Port 适配，不依赖 infra/web
+ * 下游模块；web 是唯一组合根，platform 不能成为 Spring Boot 启动入口。
  */
 class PlatformArchitectureTest {
 
@@ -38,12 +38,10 @@ class PlatformArchitectureTest {
       List.of(
           "fun.fengwk.kkstudio.harness.infra.",
           "fun.fengwk.kkstudio.canvas.infra.",
-          "fun.fengwk.kkstudio.web.",
-          "fun.fengwk.kkstudio.harness.daemon.");
+          "fun.fengwk.kkstudio.web.");
 
   /** platform/pom.xml 完全禁止声明的组合根模块：platform 永远不是启动入口。 */
-  private static final List<String> FORBIDDEN_POM_ARTIFACTS =
-      List.of("kk-studio-web", "kk-studio-harness-daemon");
+  private static final List<String> FORBIDDEN_POM_ARTIFACTS = List.of("kk-studio-web");
 
   /** 只允许 test scope 声明的下游基础设施模块：主产物不得依赖它们，测试可用真实实现做集成覆盖。 */
   private static final List<String> TEST_SCOPED_POM_ARTIFACTS =
@@ -59,11 +57,11 @@ class PlatformArchitectureTest {
           "KK_STUDIO_TRUSTED_CONTRIBUTOR_DIRECTORY");
 
   /**
-   * platform 不是组合根：main 源码禁止 import framework 基础设施与 web/daemon；pom 不得声明 web/daemon，infra 实现只能在 test
-   * scope 声明（主产物不依赖 infra，集成测试可用真实实现）。
+   * platform 不是组合根：main 源码禁止 import framework 基础设施与 web；pom 不得声明 web，infra 实现只能在 test scope
+   * 声明（主产物不依赖 infra，集成测试可用真实实现）。
    */
   @Test
-  void platformNeverDependsOnInfraOrWebOrDaemon() throws IOException {
+  void platformNeverDependsOnInfraOrWeb() throws IOException {
     Path main = locatePlatformMainJava();
     List<String> violations = new ArrayList<>();
     List<String> bootMainViolations = new ArrayList<>();
@@ -333,7 +331,7 @@ class PlatformArchitectureTest {
                 "1.19.0"),
             // 在非 harness/mcp 模块中引入 MCP
             new DeclaredDependency(
-                "harness/daemon/pom.xml",
+                "harness/tool/pom.xml",
                 "dependencies",
                 "dev.langchain4j",
                 "langchain4j-mcp",
@@ -357,7 +355,7 @@ class PlatformArchitectureTest {
     assertEquals(4, violations.size());
     assertTrue(violations.get(0).contains("platform/pom.xml"));
     assertTrue(violations.get(0).contains("langchain4j-open-ai"));
-    assertTrue(violations.get(1).contains("harness/daemon/pom.xml"));
+    assertTrue(violations.get(1).contains("harness/tool/pom.xml"));
     assertTrue(violations.get(1).contains("langchain4j-mcp"));
     assertTrue(violations.get(2).contains("share/pom.xml"));
     assertTrue(violations.get(2).contains("io.github.langchain4j"));

@@ -201,7 +201,7 @@ class TestAppImagePublishWorkflow(unittest.TestCase):
         workflow = PUBLISH_WORKFLOW.read_text()
 
         self.assertEqual(
-            3,
+            4,
             workflow.count(
                 "    if: github.ref_name == 'main' || "
                 "(github.event_name == 'workflow_dispatch' && inputs.validate_only)\n"
@@ -799,8 +799,6 @@ class TestRemovedDevTopology(unittest.TestCase):
         "scripts/dev/tests/test_shared_preview.py",
     }
     REMOVED_DAEMON_FLAG_ALLOWED = {
-        "harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/DaemonConfigTest.java",
-        "harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/DaemonMainTest.java",
         "scripts/dev/tests/test_shared_preview.py",
         "scripts/dev/verify/e2e/tests/test_daemon_bootstrap_contracts.py",
         "scripts/dev/verify/reliability/tests/test_daemon_entrypoint_contracts.py",
