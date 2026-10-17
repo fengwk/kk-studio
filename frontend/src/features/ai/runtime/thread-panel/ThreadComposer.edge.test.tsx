@@ -258,19 +258,22 @@ describe('ThreadComposer edge interactions', () => {
     rerender(<Harness onCommand={onCommand} commands={THREAD_COMMANDS} />)
   })
 
-  it('navigates the plus palette with ArrowUp wrapping to the last enabled command', async () => {
+  it.each([
+    { readOnly: false, expected: 'shell' },
+    { readOnly: true, expected: 'shortcuts' },
+  ])('wraps ArrowUp to $expected in the plus palette when readOnly=$readOnly', async ({ readOnly, expected }) => {
     const user = userEvent.setup()
     const onCommand = vi.fn()
-    // NEW_SESSION_DRAFT 目标：tree/stop/new/debug/compact 禁用，ArrowUp 从首项环绕到
-    // 最后一个可用项 shortcuts。
-    const commands = threadCommandsForTarget({ kind: 'NEW_SESSION_DRAFT' })
+    // 普通草稿环绕到 shell；只读草稿必须跳过末尾禁用项，落到 shortcuts。
+    const commands = threadCommandsForTarget({ kind: 'NEW_SESSION_DRAFT' }, { readOnly })
     render(<Harness onCommand={onCommand} commands={commands} />)
     await user.click(screen.getByRole('button', { name: '打开命令表' }))
     expect(await screen.findByLabelText('命令表')).toBeInTheDocument()
 
     await user.keyboard('{ArrowUp}')
     await user.keyboard('{Enter}')
-    expect(onCommand).toHaveBeenCalledWith(expect.objectContaining({ id: 'shortcuts' }))
+    expect(onCommand).toHaveBeenCalledTimes(1)
+    expect(onCommand).toHaveBeenCalledWith(expect.objectContaining({ id: expected }))
     expect(screen.queryByLabelText('命令表')).not.toBeInTheDocument()
   })
 

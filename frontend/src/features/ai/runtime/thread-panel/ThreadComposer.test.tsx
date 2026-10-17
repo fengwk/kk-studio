@@ -52,6 +52,8 @@ describe('ThreadComposer and commands', () => {
       'rename-session',
       'rename-thread',
       'goal',
+      'files',
+      'shell',
     ])
     // `/session`（全局 Session 重绑定）已彻底移除，不再出现在稳定命令表中。
     expect(THREAD_COMMANDS.map((command) => command.id)).not.toContain('session')
@@ -59,7 +61,7 @@ describe('ThreadComposer and commands', () => {
     const blank = threadCommandsForTarget({ kind: 'NEW_SESSION_DRAFT' })
     expect(blank.map((c) => c.id)).toEqual(THREAD_COMMANDS.map((c) => c.id))
     // 空面板还没有 Thread，因此 `/history`/`/stop`/`/new`/`/debug`/`/compact`
-    // 不可用，而 `/thread`（仅切换面板）与 `/shortcuts` 保持可用。
+    // 不可用；面板切换、快捷键以及文件/终端入口保持可用。
     expect(blank.filter((c) => !c.disabled).map((c) => c.id)).toEqual([
       'thread',
       'agent',
@@ -67,6 +69,8 @@ describe('ThreadComposer and commands', () => {
       'models',
       'upload',
       'shortcuts',
+      'files',
+      'shell',
     ])
     expect(blank.find((c) => c.id === 'new')?.disabled).toBe(true)
     expect(blank.find((c) => c.id === 'history')?.disabled).toBe(true)
