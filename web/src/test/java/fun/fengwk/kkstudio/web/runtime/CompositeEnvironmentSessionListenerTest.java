@@ -16,6 +16,7 @@ import fun.fengwk.kkstudio.harness.environment.server.EnvironmentSessionListener
 import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrchestrator;
 import fun.fengwk.kkstudio.platform.environment.update.EnvironmentUpdateService;
+import fun.fengwk.kkstudio.web.environment.ide.IdeLeaseCloseListener;
 
 import java.util.UUID;
 import java.util.function.Consumer;
@@ -32,6 +33,8 @@ class CompositeEnvironmentSessionListenerTest {
   private ObjectProvider<EnvironmentSkillSyncOrchestrator> orchestratorProvider;
   private EnvironmentUpdateService updateService;
   private ObjectProvider<EnvironmentUpdateService> updateServiceProvider;
+  private IdeLeaseCloseListener leaseCloseListener;
+  private ObjectProvider<IdeLeaseCloseListener> leaseCloseProvider;
   private EnvironmentSessionListener listener;
 
   @SuppressWarnings("unchecked")
@@ -71,9 +74,30 @@ class CompositeEnvironmentSessionListenerTest {
         .when(updateServiceProvider)
         .ifAvailable(any());
 
+    leaseCloseListener = mock(IdeLeaseCloseListener.class);
+    leaseCloseProvider = mock(ObjectProvider.class);
+    doAnswer(
+            invocation -> {
+              Consumer<IdeLeaseCloseListener> consumer = invocation.getArgument(0);
+              consumer.accept(leaseCloseListener);
+              return null;
+            })
+        .when(leaseCloseProvider)
+        .ifAvailable(any());
+
     listener =
         config.compositeEnvironmentSessionListener(
-            dispatcherProvider, orchestratorProvider, updateServiceProvider);
+            dispatcherProvider, orchestratorProvider, updateServiceProvider, leaseCloseProvider);
+  }
+
+  @Test
+  void forwardsLeaseCloseToIdeDataPlaneCleanup() {
+    EnvironmentId envId = EnvironmentId.of(UUID.randomUUID());
+    UUID leaseToken = UUID.randomUUID();
+
+    listener.onEnvironmentDisconnected(envId, leaseToken);
+
+    verify(leaseCloseListener).onLeaseClosed(envId, leaseToken);
   }
 
   @Test

@@ -10,6 +10,7 @@ import org.springframework.context.annotation.DependsOn;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 
+import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTransport;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentSessionListener;
 import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcher;
@@ -65,6 +66,7 @@ import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
+import fun.fengwk.kkstudio.web.environment.ide.IdeLeaseCloseListener;
 
 import javax.sql.DataSource;
 
@@ -506,21 +508,35 @@ public class HarnessRuntimeConfiguration {
   public EnvironmentSessionListener compositeEnvironmentSessionListener(
       ObjectProvider<HarnessWorkDispatcher> dispatcherProvider,
       ObjectProvider<EnvironmentSkillSyncOrchestrator> orchestratorProvider,
-      ObjectProvider<EnvironmentUpdateService> updateServiceProvider) {
-    return environmentId -> {
-      try {
-        dispatcherProvider.ifAvailable(HarnessWorkDispatcher::wake);
-      } catch (RuntimeException ignored) {
+      ObjectProvider<EnvironmentUpdateService> updateServiceProvider,
+      ObjectProvider<IdeLeaseCloseListener> ideLeaseCloseProvider) {
+    return new EnvironmentSessionListener() {
+      @Override
+      public void onEnvironmentReady(EnvironmentId environmentId) {
+        try {
+          dispatcherProvider.ifAvailable(HarnessWorkDispatcher::wake);
+        } catch (RuntimeException ignored) {
+        }
+        try {
+          orchestratorProvider.ifAvailable(
+              orchestrator -> orchestrator.onEnvironmentReady(environmentId));
+        } catch (RuntimeException ignored) {
+        }
+        try {
+          updateServiceProvider.ifAvailable(
+              updateService -> updateService.onEnvironmentReady(environmentId));
+        } catch (RuntimeException ignored) {
+        }
       }
-      try {
-        orchestratorProvider.ifAvailable(
-            orchestrator -> orchestrator.onEnvironmentReady(environmentId));
-      } catch (RuntimeException ignored) {
-      }
-      try {
-        updateServiceProvider.ifAvailable(
-            updateService -> updateService.onEnvironmentReady(environmentId));
-      } catch (RuntimeException ignored) {
+
+      @Override
+      public void onEnvironmentDisconnected(EnvironmentId environmentId, UUID leaseToken) {
+        // 租约失效/接管：关闭该代际的 IDE 反向流并撤销入口凭据，而不是只撤销票据。
+        try {
+          ideLeaseCloseProvider.ifAvailable(
+              listener -> listener.onLeaseClosed(environmentId, leaseToken));
+        } catch (RuntimeException ignored) {
+        }
       }
     };
   }
