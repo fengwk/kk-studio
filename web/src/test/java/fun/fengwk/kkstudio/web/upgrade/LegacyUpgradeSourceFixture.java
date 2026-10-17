@@ -42,9 +42,21 @@ final class LegacyUpgradeSourceFixture {
 
   static final String AGENT = "legacy-agent";
 
+  /**
+   * 旧 Agent 的真实可执行配置：DEV 基线 {@code 8126841e} 与 MAIN 基线 {@code cb367993} 的 {@code
+   * AgentDefinitionConfigDTO} 与 config codec/validator 都与当前逐字节一致（只有 Jackson 2→3 的 API 差异）。
+   *
+   * <p>三者都要求 tools/skills/subagents 存在，因此遗留行本来就是这个完整形状。
+   */
+  static final String AGENT_CONFIG =
+      "{\"tools\":[],\"skills\":[],\"subagents\":[],\"inheritParentEnvironment\":true}";
+
   static final String LEGACY_PLUGIN_ID = "minimax-mavis";
 
   static final String LEGACY_REGION = "CN";
+
+  /** 旧 Environment 的注册凭据：只允许出现在受保护输入与凭据端点，任何卡片投影都不得回显。 */
+  static final String LEGACY_REGISTRATION_TOKEN = "legacy-registration-token";
 
   static final String LEGACY_CREDENTIAL_PLAINTEXT = "legacy-mavis-refresh-token";
 
@@ -89,13 +101,17 @@ final class LegacyUpgradeSourceFixture {
               + PROVIDER
               + "', '"
               + MODEL
-              + "', null, '{}', timestamptz '2025-01-02 03:04:05.678+00',"
+              + "', null, '"
+              + AGENT_CONFIG
+              + "', timestamptz '2025-01-02 03:04:05.678+00',"
               + " timestamptz '2025-01-02 03:04:05.678+00', 1)");
       statement.execute(
           "insert into environment (id, name, registration_token, install_config, created_at,"
               + " updated_at, version) values"
               + " ('0e5a5f27-0f7c-4a3a-9a8f-3a1c2b4d5e6f', 'legacy-environment',"
-              + " 'legacy-registration-token', '{\"operatingSystem\":\"linux\","
+              + " '"
+              + LEGACY_REGISTRATION_TOKEN
+              + "', '{\"operatingSystem\":\"linux\","
               + "\"daemon\":{\"studioUrl\":\"https://legacy-studio.example.invalid\"}}',"
               + " timestamptz '2025-01-02 03:04:05.678+00',"
               + " timestamptz '2025-01-02 03:04:05.678+00', 3)");
@@ -196,6 +212,22 @@ final class LegacyUpgradeSourceFixture {
                 + " timestamptz '2025-01-01 00:00:00+00',"
                 + " timestamptz '2024-12-31 23:59:00+00')");
       }
+    }
+  }
+
+  /**
+   * 把已连接 Plugin 的下一次刷新推到远未来：正常 Web 入口启动时会立即扫描到期凭据，已到期的行会被真实领取并向外部网关发起刷新。
+   *
+   * <p>本方法只改这一列，转换仍按常规路径原样复制它。
+   */
+  static void deferPluginCredentialRefresh(DataSource dataSource) throws SQLException {
+    try (Connection connection = dataSource.getConnection();
+        Statement statement = connection.createStatement()) {
+      statement.execute(
+          "update plugin_credential set next_refresh_at = timestamptz '2099-01-01 00:00:00+00'"
+              + " where plugin_id = '"
+              + LEGACY_PLUGIN_ID
+              + "'");
     }
   }
 

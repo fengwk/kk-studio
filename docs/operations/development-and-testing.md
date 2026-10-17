@@ -84,6 +84,8 @@ Vite 默认只监听 `127.0.0.1` 并使用自带 Host allowlist。需要容器�
 | 编译 main/test 源码，不执行测试 | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp test-compile` |
 | 跑 Java 单元与集成测试 | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp test` |
 | 触发关键类覆盖率门禁 | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp verify` |
+| 离线升级子进程验收（默认 classpath 模式） | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl web -am test -Dtest=WebApplicationDatabaseUpgradeSubprocessTest -Dsurefire.failIfNoSpecifiedTests=false` |
+| 离线升级子进程验收（Fat JAR 产物模式） | 同上追加 `'-Dkkstudio.upgrade.test.jar=<absolute web/target/kk-studio-web-<version>.jar>'`；两种模式都要求全部用例真实通过 |
 | 只格式化本次改动的 Java 文件 | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl <module> spotless:apply '-DspotlessFiles=<file-regex>'` |
 | 前端单元测试 / lint / 类型与构建 / 覆盖率 | `npm --prefix frontend run test`、`run lint`、`run typecheck`、`run typecheck:test`、`run build`、`run coverage` |
 | 校验 Compose 配置 | `docker compose -f deploy/local/compose.yaml config --quiet` 等，见下文 |

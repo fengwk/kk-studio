@@ -184,6 +184,18 @@ jobs:
         run: python3 scripts/dev/verify/repository/check-sensitive-data.py
       - name: Verify Java sources, tests and coverage
         run: env JAVA_HOME="$JAVA_HOME" mvn -B -ntp verify
+      - name: Verify the offline upgrade Fat JAR serves converted data
+        # 全量 verify 之后追加同一 subprocess 测试的产物模式：真实 java -jar 启动正常 Web 入口并 HTTP 读回转换数据。
+        # JAR 路径只由根 POM 的当前版本决定，不另建版本事实源。
+        run: |
+          set -euo pipefail
+          version="$(python3 -c "import xml.etree.ElementTree as ET; print(ET.parse('pom.xml').getroot().find('{http://maven.apache.org/POM/4.0.0}version').text)")"
+          jar="$PWD/web/target/kk-studio-web-${version}.jar"
+          test -f "${jar}"
+          env JAVA_HOME="$JAVA_HOME" mvn -B -ntp -pl web -am test \
+            -Dtest=WebApplicationDatabaseUpgradeSubprocessTest \
+            -Dsurefire.failIfNoSpecifiedTests=false \
+            "-Dkkstudio.upgrade.test.jar=${jar}"
       - name: Install frontend dependencies
         run: npm --prefix frontend ci
       - name: Lint frontend
