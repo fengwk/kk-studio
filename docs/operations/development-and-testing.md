@@ -84,6 +84,8 @@ Vite 默认只监听 `127.0.0.1` 并使用自带 Host allowlist。需要容器�
 | 编译 main/test 源码，不执行测试 | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp test-compile` |
 | 跑 Java 单元与集成测试 | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp test` |
 | 触发关键类覆盖率门禁 | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp verify` |
+| 离线升级子进程验收（默认 classpath 模式） | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl web -am test -Dtest=WebApplicationDatabaseUpgradeSubprocessTest -Dsurefire.failIfNoSpecifiedTests=false` |
+| 离线升级子进程验收（Fat JAR 产物模式） | 同上追加 `'-Dkkstudio.upgrade.test.jar=<absolute web/target/kk-studio-web-<version>.jar>'`；两种模式都要求全部用例真实通过 |
 | 只格式化本次改动的 Java 文件 | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl <module> spotless:apply '-DspotlessFiles=<file-regex>'` |
 | 前端单元测试 / lint / 类型与构建 / 覆盖率 | `npm --prefix frontend run test`、`run lint`、`run typecheck`、`run typecheck:test`、`run build`、`run coverage` |
 | 校验 Compose 配置 | `docker compose -f deploy/local/compose.yaml config --quiet` 等，见下文 |
@@ -119,6 +121,9 @@ gh workflow run docker-publish.yml --ref dev -f validate_only=true
 
 该模式运行同一套 Java、前端、脚本、文档和敏感数据检查，以及 Linux、macOS、Windows 安装和更新回归，
 但整个镜像发布 job 会被跳过；它与发布使用独立并发组，不会取消同分支正在进行的镜像发布。
+离线升级测试使用可丢弃 PostgreSQL 17 与私有 MinIO，在 CLI prepare/dry-run/apply 与重复 apply 拒绝后，
+通过正常生产入口 HTTP 读回转换后的 agent/environment/skill。Maven verify 覆盖不含测试替身的生产
+classpath 入口，其后的必需步骤复用同次构建的 Fat JAR 验证产物入口。
 前端必须通过 lint、测试与浏览器基座严格类型检查、覆盖率、生产构建与 Chromium 离线布局回归；任一失败均阻断发布。
 无论门禁是否成功，`frontend-diagnostics` artifact 都保留覆盖率与布局诊断产物 7 天。
 Windows 两个 host 都会报告结果，前一个失败不会遮蔽后一个；任一失败仍阻断正常发布。
