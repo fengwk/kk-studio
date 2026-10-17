@@ -1,0 +1,18 @@
+{
+  "type": "object",
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "Absolute path on the target daemon's file system of any local `.java` file in the target workspace. This path is used to infer the workspace root and locate JDTLS. Relative paths are rejected."
+    },
+    "target": {
+      "type": "string",
+      "description": "A raw `jdt://` URI, a complete workspace symbol / definition output line that contains such a URI, a `file://` URI, or an absolute `.class` path on the target daemon's file system. Relative class paths are rejected."
+    }
+  },
+  "required": [
+    "path",
+    "target"
+  ],
+  "additionalProperties": false
+}

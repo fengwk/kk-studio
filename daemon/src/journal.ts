@@ -1,0 +1,122 @@
+/**
+ * Invocation 去重与终态重放的最小 journal 端口及其内存实现。
+ *
+ * <p>journal 是 Daemon 进程内的执行事实源：WebSocket 连接只是消息管道。断线后 journal 保留事实，同实例重连时若
+ * Platform 以相同 invocationId 重放 INVOKE，RUNNING 条目重放 STARTED、终态条目重放对应 terminal 报文，绝不重复执行
+ * 副作用。终态一旦写入不可逆（terminal-once）。
+ *
+ * <p>与 Java 的无界内存 journal 不同，这里的实现有明确上界：只保留最近 {@link DEFAULT_MAX_JOURNAL_ENTRIES} 条终态事实，
+ * 超出后按插入顺序淘汰最旧的终态条目；RUNNING 条目永不淘汰（其数量由运行时的并发上限约束）。
+ */
+
+export type InvocationState = 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED'
+
+export type TerminalMessageType = 'COMPLETED' | 'FAILED' | 'CANCELLED'
+
+/** 可在重复 INVOKE 或重连后重发的终态 wire 消息。 */
+export interface TerminalMessage {
+  messageType: TerminalMessageType
+  payloadJson: string
+}
+
+export interface JournalEntry {
+  invocationId: string
+  state: InvocationState
+  terminalMessage: TerminalMessage | null
+}
+
+export interface JournalStart {
+  created: boolean
+  entry: JournalEntry
+}
+
+export interface InvocationJournal {
+  /** 原子创建初始为 RUNNING 的条目，或返回既有条目。 */
+  start(invocationId: string): JournalStart
+  find(invocationId: string): JournalEntry | undefined
+  /** 仅把 RUNNING 原子跃迁为终态；已终态或不存在时返回 false。 */
+  complete(invocationId: string, terminalMessage: TerminalMessage): boolean
+}
+
+/** 内存 journal 默认保留的终态条目上界。 */
+export const DEFAULT_MAX_JOURNAL_ENTRIES = 1024
+
+export function isTerminalState(state: InvocationState): boolean {
+  return state !== 'RUNNING'
+}
+
+function stateFor(messageType: TerminalMessageType): InvocationState {
+  switch (messageType) {
+    case 'COMPLETED':
+      return 'COMPLETED'
+    case 'FAILED':
+      return 'FAILED'
+    case 'CANCELLED':
+      return 'CANCELLED'
+  }
+}
+
+/** 单进程、有界的线程安全（Node 单线程）内存 journal。 */
+export class InMemoryInvocationJournal implements InvocationJournal {
+  private readonly entries = new Map<string, JournalEntry>()
+  private readonly maxTerminalEntries: number
+
+  constructor(maxTerminalEntries: number = DEFAULT_MAX_JOURNAL_ENTRIES) {
+    if (!Number.isSafeInteger(maxTerminalEntries) || maxTerminalEntries <= 0) {
+      throw new Error('maxTerminalEntries must be a positive integer')
+    }
+    this.maxTerminalEntries = maxTerminalEntries
+  }
+
+  start(invocationId: string): JournalStart {
+    const existing = this.entries.get(invocationId)
+    if (existing !== undefined) {
+      return { created: false, entry: existing }
+    }
+    const entry: JournalEntry = { invocationId, state: 'RUNNING', terminalMessage: null }
+    this.entries.set(invocationId, entry)
+    return { created: true, entry }
+  }
+
+  find(invocationId: string): JournalEntry | undefined {
+    return this.entries.get(invocationId)
+  }
+
+  complete(invocationId: string, terminalMessage: TerminalMessage): boolean {
+    const entry = this.entries.get(invocationId)
+    if (entry === undefined || isTerminalState(entry.state)) {
+      return false
+    }
+    this.entries.set(invocationId, {
+      invocationId,
+      state: stateFor(terminalMessage.messageType),
+      terminalMessage,
+    })
+    this.evictTerminalIfNeeded()
+    return true
+  }
+
+  /** 仅淘汰最旧的终态条目；RUNNING 条目不计入上界、永不淘汰。 */
+  private evictTerminalIfNeeded(): void {
+    let terminalCount = 0
+    for (const entry of this.entries.values()) {
+      if (isTerminalState(entry.state)) {
+        terminalCount++
+      }
+    }
+    if (terminalCount <= this.maxTerminalEntries) {
+      return
+    }
+    for (const [id, entry] of this.entries) {
+      if (isTerminalState(entry.state)) {
+        this.entries.delete(id)
+        return
+      }
+    }
+  }
+
+  /** 当前条目数，供测试断言上界。 */
+  size(): number {
+    return this.entries.size
+  }
+}
