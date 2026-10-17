@@ -187,8 +187,13 @@ test('install config hard-invalid precheck rejects every endpoint without side e
     },
   }
   await getCase('config_sync.install_config_hard_invalid_precheck').run(ctx)
-  // 3 组非法配置 × 2 个端点，全部硬拒绝。
-  assert.equal(requests.length, 6)
+  // 4 组非法配置 × 2 个端点，全部硬拒绝。
+  assert.equal(requests.length, 8)
+  assert.equal(
+    requests.filter((request) => request.yaml.includes('"javaHome":"/opt/jdk"')).length,
+    2,
+    'retired javaHome must be probed at both import/check and import',
+  )
   for (const request of requests) {
     assert.equal(request.allowPartial, true)
     assert.ok(request.yaml.includes('environments'), 'probe yaml must target environments')
@@ -207,6 +212,7 @@ test('environment install-config roundtrip case wires PUT/export/import/clear/cl
   let deleteSnapshot = null
   const calls = []
   let atomicUpdateApplied = false
+  let atomicUpdateNote = null
 
   const parseEntry = (body) => JSON.parse(body.yaml).environments[0]
 
@@ -265,6 +271,7 @@ test('environment install-config roundtrip case wires PUT/export/import/clear/cl
         const nextConfig = entry.installConfig ?? null
         if (state.installConfig != null && nextConfig != null && entry.registrationToken !== state.registrationToken) {
           atomicUpdateApplied = true
+          atomicUpdateNote = nextConfig.daemon?.note
         }
         state = {
           ...state,
@@ -301,6 +308,7 @@ test('environment install-config roundtrip case wires PUT/export/import/clear/cl
   assert.ok(methods.includes(`GET ${base}/token`), 'case must read the rotated token')
   assert.equal(deleted, true, 'case must delete the environment it created')
   assert.equal(atomicUpdateApplied, true, 'new token+config must be applied in a single import entry')
+  assert.equal(atomicUpdateNote, 'e2e install config updated', 'atomic update must use a legal changed daemon.note')
   assert.ok(deleteSnapshot, 'cleanup must have observed persisted state')
   assert.equal(deleteSnapshot.config, null, 'absent installConfig must clear saved settings before cleanup')
   assert.notEqual(deleteSnapshot.token, 'e2e-token-original', 'cleanup must see the rotated token')

@@ -480,10 +480,10 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
   `config_sync.install_config_hard_invalid_precheck`：八类配置清单、凭据随 YAML 导出、导入前的
   新增/覆盖/跳过清单、硬错误拒绝与部分导入授权、同名 Provider 更新、Environment 身份与注册令牌保留，
   以及 `installConfig`（studioUrl、note、bashExecutable、内联 LSP servers）随注册令牌的导出导入往返、
-  token+配置原子更新与清除、installConfig 硬错误在预检查与导入阶段的零副作用拒绝，响应带 `no-store`。
+  token+配置原子更新与清除、installConfig 硬错误（含未知字段与退役 `javaHome`）在预检查与导入阶段的零副作用拒绝，响应带 `no-store`。
   这些 case 均无真实模型或 tool 成本；完整 Git/MCP 准备与整批事务回滚另由 Web 集成测试覆盖。
 - `environment.install_config_cas_roundtrip`：`PUT .../install-config` 以 `expectedVersion` CAS 保存
-  嵌套 `installConfig`，仅内容变化时推进版本，相同配置 no-op 不推进；硬非法值 400 且零写入、不回显提交值。
+  嵌套 `installConfig`，仅内容变化时推进版本，相同配置 no-op 不推进；硬非法值（含退役 `javaHome`）400 且零写入、不回显提交值。
 - `environment.install_script_code_roundtrip`：五分钟 code 签发不改变配置或版本，安装脚本响应为
   不缓存的 UTF-8 纯文本；缺失、篡改或轮换后失效的 code 被拒绝，卸载脚本不含环境凭据。只下载检查，不执行主机安装。
 - `project.issue_lifecycle`：Project workflow JSON 与设置 CAS、Issue 按 workflow `next`
