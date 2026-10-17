@@ -6,8 +6,8 @@ for the current Windows user.
 
 .DESCRIPTION
 The daemon runs as a per-user Scheduled Task while the installing user is logged in.
-It is not a Windows Service. The task executes java.exe directly: no cmd.exe,
-PowerShell runner, wrapper script, environment file, or registry entry is created.
+It is not a Windows Service. The task executes the frozen bundled node.exe directly:
+no cmd.exe, PowerShell runner, wrapper script, environment file, or registry entry is created.
 #>
 [CmdletBinding(PositionalBinding = $false)]
 param(
@@ -18,9 +18,7 @@ param(
     [AllowEmptyString()]
     [string] $ConfigFile,
     [AllowEmptyString()]
-    [string] $TokenFile,
-    [AllowEmptyString()]
-    [string] $JavaHome
+    [string] $TokenFile
 )
 
 Set-StrictMode -Version Latest
@@ -32,20 +30,20 @@ foreach ($key in $PSBoundParameters.Keys) {
 }
 
 $script:ManagedBy = "scripts/daemon/install.ps1"
-$script:InstallParameterNames = @("ConfigFile", "TokenFile", "JavaHome")
+$script:InstallParameterNames = @("ConfigFile", "TokenFile")
 $script:VerifyTimeoutSeconds = 30
 $script:VerifyStableSeconds = 3
 $script:HomePath = $null
 $script:InstallRoot = $null
-$script:InstalledJar = $null
+$script:InstalledLib = $null
+$script:InstalledNode = $null
 $script:InstalledConfig = $null
 $script:InstalledToken = $null
 $script:CurrentSid = $null
 $script:TaskName = $null
 $script:TaskDescription = $null
-$script:SelectedJavaHome = $null
-$script:SelectedJava = $null
-$script:BuiltJar = $null
+$script:DownloadedArchive = $null
+$script:StagedLib = $null
 $script:DownloadDirectory = $null
 $script:ResolvedReleaseTag = $null
 $script:BackupDirectory = $null
@@ -56,26 +54,27 @@ $script:ConfigFailureMaxLength = 512
 
 function Write-Usage {
     @'
-Usage: .\install.ps1 install -ConfigFile <absolute daemon.json> -TokenFile <absolute daemon.token> [-JavaHome <absolute JDK21>]
+Usage: .\install.ps1 install -ConfigFile <absolute daemon.json> -TokenFile <absolute daemon.token>
        .\install.ps1 status|uninstall|help
 
 Only the latest official fengwk/kk-studio GitHub release is installed.
 Inputs must be sibling, nonempty regular files with current-user-only protected ACLs.
 Token bytes are copied only; they never enter task arguments or environment variables.
-JDK 21 discovery: JAVA_HOME_21, JAVA_HOME, PATH. The read-only preflight resolves the
-configured (or default) Bash from the daemon config; no PATH Bash is assumed here.
+No user Node is required: the release archive bundles a frozen node.exe runtime.
 
 Fixed layout: %USERPROFILE%\.kk-studio\daemon.json, daemon.token, lib, logs, backups.
 Task: kk-studio-environment-daemon-<current-user-SID>
 Install replaces program/config/token and restarts, preserving runtime data.
+The release --check-config preflight validates the config and its sibling token before any change.
 Private backups precede replacement. Failures do not roll back automatically.
 Uninstall is idempotent and preserves config/token/data/backups.
 After install, return to Studio and confirm the environment reports READY.
 Status exits 0 when Running, 1 when absent, 3 otherwise.
 
-The task executes java.exe directly with only --config (UTF-8 Base64 machine encoding).
-It uses AtLogOn, Interactive logon and Limited run level: only while this user is logged in.
-Task Scheduler does not capture daemon stdout/stderr. Task state is not connection health.
+The task executes the frozen runtime node.exe directly with only main.js and --config.
+It uses AtLogOn, Interactive logon and Limited run level:
+only while this user is logged in. Task Scheduler does not capture daemon stdout/stderr.
+Task state is not connection health.
 RestartCount/RestartInterval are best effort settings, not Windows Service/systemd supervision.
 DAEMON_VERIFY_TIMEOUT_SECONDS=30 and DAEMON_VERIFY_STABLE_SECONDS=3 are nonnegative integers.
 '@ | Write-Host
@@ -314,17 +313,16 @@ function Publish-PrivateFile {
 
 function Assert-ManagedLayout {
     param([bool] $HasTask)
-    if (-not $HasTask -and (Test-Path -LiteralPath $script:InstalledJar)) {
-        $path = ConvertTo-PowerShellLiteral -Value $script:InstalledJar
-        Throw-Failure ("拒绝覆盖无受管任务的程序（$($script:InstalledJar)）。未自动回滚，未知文件未变更。" +
-            "`n检查：Get-FileHash -LiteralPath $path")
+    if (-not $HasTask -and (Test-Path -LiteralPath $script:InstalledLib)) {
+        Throw-Failure ("拒绝覆盖无受管任务的程序目录（$($script:InstalledLib)）。未自动回滚，未知文件未变更。" +
+            "`n检查：Get-ChildItem -LiteralPath $($script:InstallRoot)")
     }
-    foreach ($directory in @($script:InstallRoot, (Split-Path -Parent $script:InstalledJar),
+    foreach ($directory in @($script:InstallRoot, $script:InstalledLib,
         (Join-Path $script:InstallRoot "logs"), (Join-Path $script:InstallRoot "backups"))) {
         Assert-NoReparseAncestors -Path $directory
         if (Test-Path -LiteralPath $directory) { Assert-PrivateDirectory -Path $directory }
     }
-    foreach ($file in @($script:InstalledJar, $script:InstalledConfig, $script:InstalledToken)) {
+    foreach ($file in @($script:InstalledConfig, $script:InstalledToken)) {
         if (Test-Path -LiteralPath $file) {
             $null = Assert-PrivateFile -Path $file -ExpectedOwnerSid $script:CurrentSid
         }
@@ -338,9 +336,10 @@ function ConvertTo-PowerShellLiteral {
 
 function Backup-ManagedFiles {
     param([AllowNull()] $Task)
-    $files = @($script:InstalledJar, $script:InstalledConfig, $script:InstalledToken) |
+    $files = @($script:InstalledConfig, $script:InstalledToken) |
         Where-Object { Test-Path -LiteralPath $_ }
-    if (@($files).Count -eq 0 -and $null -eq $Task) { return }
+    $hasLib = Test-Path -LiteralPath $script:InstalledLib
+    if (@($files).Count -eq 0 -and -not $hasLib -and $null -eq $Task) { return }
     $root = Join-Path $script:InstallRoot "backups"
     New-PrivateDirectory -Path $root
     $script:BackupDirectory = Join-Path $root (
@@ -351,6 +350,8 @@ function Backup-ManagedFiles {
             $null = Assert-PrivateFile -Path $file -ExpectedOwnerSid $script:CurrentSid
             Copy-PrivateFile -Source $file -Destination (Join-Path $script:BackupDirectory (Split-Path -Leaf $file))
         }
+        # The program directory is moved (not copied) into the backup at publish time, so the
+        # previous program stays recoverable without duplicating a large runtime.
         if ($null -ne $Task) {
             $null = Get-RequiredManagedTask
             $xml = Export-ScheduledTask -TaskName $script:TaskName -TaskPath "\"
@@ -432,34 +433,11 @@ function Initialize-HostContext {
         [Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile)
     Assert-AbsoluteWindowsPath -Value $script:HomePath -Name "current user profile"
     $script:InstallRoot = Join-Path $script:HomePath ".kk-studio"
-    $script:InstalledJar = Join-Path $script:InstallRoot "lib\kk-studio-daemon.jar"
+    $script:InstalledLib = Join-Path $script:InstallRoot "lib"
+    $script:InstalledNode = Join-Path $script:InstalledLib "runtime\code-server\lib\node.exe"
     $script:InstalledConfig = Join-Path $script:InstallRoot "daemon.json"
     $script:InstalledToken = Join-Path $script:InstallRoot "daemon.token"
     Assert-ScheduledTasksAvailable
-}
-
-function Invoke-WithoutJavaOptionEnvironment {
-    param([Parameter(Mandatory = $true)][scriptblock] $Action)
-    $names = @("JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "JDK_JAVA_OPTIONS")
-    $saved = @{}
-    foreach ($name in $names) {
-        $saved[$name] = [Environment]::GetEnvironmentVariable($name, "Process")
-        # Preserve an actual .NET null instead of PowerShell converting it to an empty string.
-        [Environment]::SetEnvironmentVariable($name, [NullString]::Value, "Process")
-    }
-    try {
-        & $Action
-    }
-    finally {
-        foreach ($name in $names) {
-            $value = if ($null -eq $saved[$name]) {
-                [NullString]::Value
-            } else {
-                $saved[$name]
-            }
-            [Environment]::SetEnvironmentVariable($name, $value, "Process")
-        }
-    }
 }
 
 function Invoke-NativeProcess {
@@ -504,90 +482,39 @@ function Invoke-NativeProcess {
     }
 }
 
-function Assert-Jdk21 {
-    param([Parameter(Mandatory = $true)][string] $Candidate)
-    Assert-AbsoluteWindowsPath -Value $Candidate -Name "JDK 21 home"
-    $resolved = (Get-Item -LiteralPath $Candidate).FullName
-    $java = Join-Path $resolved "bin\java.exe"
-    $javac = Join-Path $resolved "bin\javac.exe"
-    if (-not (Test-Path -LiteralPath $java -PathType Leaf)) {
-        Throw-Failure "JDK 21 home must contain bin\java.exe: $resolved"
+function Assert-DownloadedArchive {
+    if (-not (Test-Path -LiteralPath $script:DownloadedArchive -PathType Leaf) -or
+        (Get-Item -LiteralPath $script:DownloadedArchive).Length -le 0) {
+        Throw-Failure "downloaded daemon archive not found or empty: $($script:DownloadedArchive)"
     }
-    if (-not (Test-Path -LiteralPath $javac -PathType Leaf)) {
-        Throw-Failure "JDK 21 home must contain bin\javac.exe: $resolved"
+    # Windows 10/11 ship tar.exe; it unpacks the release archive without a user Node.
+    $tar = Get-Command "tar.exe" -CommandType Application -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if ($null -eq $tar) {
+        Throw-Failure "tar.exe is required to unpack the daemon release archive"
     }
-
-    $result = Invoke-WithoutJavaOptionEnvironment {
-        Invoke-NativeProcess -Executable $java -Arguments @("-version")
+    New-PrivateDirectory -Path $script:StagedLib
+    $unpack = Invoke-NativeProcess -Executable $tar.Source `
+        -Arguments @("-xzf", $script:DownloadedArchive, "-C", $script:StagedLib) `
+        -WorkingDirectory $script:DownloadDirectory
+    if ($unpack.ExitCode -ne 0) {
+        Throw-Failure "downloaded daemon archive could not be unpacked"
     }
+    if (-not (Test-Path -LiteralPath (Join-Path $script:StagedLib "main.js") -PathType Leaf)) {
+        Throw-Failure "downloaded daemon archive is missing main.js"
+    }
+    $node = Join-Path $script:StagedLib "runtime\code-server\lib\node.exe"
+    if (-not (Test-Path -LiteralPath $node -PathType Leaf)) {
+        Throw-Failure "downloaded daemon archive is missing the bundled node.exe runtime"
+    }
+    # Probe the archive's own frozen runtime exactly as the task runs it: the ASCII leaf
+    # main.js is resolved against the working directory, so a non-ASCII install path can
+    # never corrupt the argument. Node receives the Unicode argv directly.
+    $result = Invoke-NativeProcess -Executable $node `
+        -Arguments @("main.js", "--version") `
+        -WorkingDirectory $script:StagedLib
     if ($result.ExitCode -ne 0) {
-        Throw-Failure "cannot execute $java (exit code $($result.ExitCode))"
-    }
-    $output = $result.Stdout + $result.Stderr
-    if ($output -notmatch 'version\s+"21(?:[.\-+][^"]*)?"') {
-        $firstLine = ($output -split "\r?\n", 2)[0]
-        Throw-Failure "需要 JDK 21（当前为：$firstLine）"
-    }
-    return $resolved
-}
-
-function Resolve-JavaHome {
-    param([AllowEmptyString()][string] $ExplicitJavaHome)
-    if (-not [string]::IsNullOrEmpty($ExplicitJavaHome)) {
-        Assert-NoControlCharacters -Value $ExplicitJavaHome -Name "-JavaHome"
-        return Assert-Jdk21 -Candidate $ExplicitJavaHome
-    }
-    foreach ($candidate in @($env:JAVA_HOME_21, $env:JAVA_HOME)) {
-        if (-not [string]::IsNullOrEmpty($candidate)) {
-            Assert-NoControlCharacters -Value $candidate -Name "JAVA_HOME_21/JAVA_HOME"
-            return Assert-Jdk21 -Candidate $candidate
-        }
-    }
-    $javaCommand = Get-Command "java.exe" -CommandType Application `
-        -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($null -ne $javaCommand) {
-        $bin = Split-Path -Parent $javaCommand.Source
-        return Assert-Jdk21 -Candidate (Split-Path -Parent $bin)
-    }
-    Throw-Failure "未找到 JDK 21。请设置 JAVA_HOME_21 或 JAVA_HOME，传入 -JavaHome，或将 java.exe 加入 PATH。"
-}
-
-function Resolve-InstallInputs {
-    $config = Assert-PrivateFile -Path $ConfigFile -ExpectedOwnerSid $script:CurrentSid `
-        -Name "-ConfigFile" -MaximumBytes 1048576
-    $token = Assert-PrivateFile -Path $TokenFile -ExpectedOwnerSid $script:CurrentSid `
-        -Name "-TokenFile" -MaximumBytes 65536
-    if (-not [string]::Equals((Split-Path -Parent $config), (Split-Path -Parent $token),
-        [StringComparison]::OrdinalIgnoreCase) -or
-        (Split-Path -Leaf $config) -cne "daemon.json" -or
-        (Split-Path -Leaf $token) -cne "daemon.token") {
-        Throw-Failure "-ConfigFile and -TokenFile must be siblings named daemon.json and daemon.token"
-    }
-    if ($script:InvocationParameters.ContainsKey("JavaHome")) {
-        Assert-RequiredValue -Value $JavaHome -Name "-JavaHome"
-    }
-    $script:SelectedJavaHome = Resolve-JavaHome -ExplicitJavaHome $JavaHome
-    $script:SelectedJava = Join-Path $script:SelectedJavaHome "bin\java.exe"
-}
-
-function Assert-BuiltJar {
-    if (-not (Test-Path -LiteralPath $script:BuiltJar -PathType Leaf) -or
-        (Get-Item -LiteralPath $script:BuiltJar).Length -le 0) {
-        Throw-Failure "downloaded daemon JAR not found or empty: $($script:BuiltJar)"
-    }
-    # Probe the JAR exactly as the task runs it: ASCII leaf resolved against a working
-    # directory, so a non-ASCII checkout path can never corrupt the -jar argument.
-    $jarDirectory = Split-Path -Parent $script:BuiltJar
-    $jarFileName = Split-Path -Leaf $script:BuiltJar
-    $arguments = @("-jar", $jarFileName) +
-        (ConvertTo-DaemonEncodedArguments -Arguments @("--version"))
-    $result = Invoke-WithoutJavaOptionEnvironment {
-        Invoke-NativeProcess -Executable $script:SelectedJava `
-            -Arguments $arguments `
-            -WorkingDirectory $jarDirectory
-    }
-    if ($result.ExitCode -ne 0) {
-        Throw-Failure "downloaded daemon JAR failed its --version check (exit code $($result.ExitCode))"
+        Throw-Failure "downloaded daemon archive failed its --version check (exit code $($result.ExitCode))"
     }
     $output = $result.Stdout
     if (-not [string]::IsNullOrEmpty($script:ResolvedReleaseTag) -and
@@ -600,6 +527,19 @@ function Assert-BuiltJar {
         [StringComparison]::Ordinal
     )) {
         Throw-Failure "unexpected daemon --version output"
+    }
+}
+
+function Resolve-InstallInputs {
+    $config = Assert-PrivateFile -Path $ConfigFile -ExpectedOwnerSid $script:CurrentSid `
+        -Name "-ConfigFile" -MaximumBytes 1048576
+    $token = Assert-PrivateFile -Path $TokenFile -ExpectedOwnerSid $script:CurrentSid `
+        -Name "-TokenFile" -MaximumBytes 65536
+    if (-not [string]::Equals((Split-Path -Parent $config), (Split-Path -Parent $token),
+        [StringComparison]::OrdinalIgnoreCase) -or
+        (Split-Path -Leaf $config) -cne "daemon.json" -or
+        (Split-Path -Leaf $token) -cne "daemon.token") {
+        Throw-Failure "-ConfigFile and -TokenFile must be siblings named daemon.json and daemon.token"
     }
 }
 
@@ -629,9 +569,9 @@ function Get-TrustedConfigFailureDetail {
     return $null
 }
 
-function Prepare-StagedJar {
-    Get-ReleaseJar
-    Assert-BuiltJar
+function Prepare-StagedArchive {
+    Get-ReleaseArchive
+    Assert-DownloadedArchive
     # Copy inputs to the private download directory, independent of any live installation.
     # Revalidate after the download; never copy from a path that became unsafe during preflight.
     $null = Assert-PrivateFile -Path $ConfigFile -ExpectedOwnerSid $script:CurrentSid -MaximumBytes 1048576
@@ -639,12 +579,10 @@ function Prepare-StagedJar {
     Copy-PrivateFile -Source $ConfigFile -Destination (Join-Path $script:DownloadDirectory "daemon.json")
     Copy-PrivateFile -Source $TokenFile -Destination (Join-Path $script:DownloadDirectory "daemon.token")
     $stagedConfig = Join-Path $script:DownloadDirectory "daemon.json"
-    $arguments = @("-jar", (Split-Path -Leaf $script:BuiltJar)) +
-        (ConvertTo-DaemonEncodedArguments -Arguments @("--check-config", $stagedConfig))
-    $result = Invoke-WithoutJavaOptionEnvironment {
-        Invoke-NativeProcess -Executable $script:SelectedJava -Arguments $arguments `
-            -WorkingDirectory $script:DownloadDirectory
-    }
+    $node = Join-Path $script:StagedLib "runtime\code-server\lib\node.exe"
+    $arguments = @("main.js", "--check-config", $stagedConfig)
+    $result = Invoke-NativeProcess -Executable $node -Arguments $arguments `
+        -WorkingDirectory $script:StagedLib
     if ($result.ExitCode -eq 0 -and
         $result.Stdout.TrimEnd([char[]] @("`r", "`n")) -ceq "Daemon configuration is valid") {
         return
@@ -669,7 +607,7 @@ function Assert-ReleaseTag {
     }
 }
 
-function Get-ReleaseJar {
+function Get-ReleaseArchive {
     # PS 5.1 otherwise negotiates obsolete TLS on some Windows installations.
     $savedProtocol = [Net.ServicePointManager]::SecurityProtocol
     try {
@@ -687,17 +625,20 @@ function Get-ReleaseJar {
         $tag = $release.tag_name
         Assert-ReleaseTag -Tag $tag
         $script:ResolvedReleaseTag = $tag
-        $asset = "kk-studio-daemon-$tag.jar"
+        # The release matrix publishes windows for amd64 only; the fixed asset name is the
+        # Windows daemon distribution for this host.
+        $asset = "kk-studio-daemon-$tag-windows-amd64.tar.gz"
         $baseUri = "https://github.com/fengwk/kk-studio/releases/download/$tag"
         $script:DownloadDirectory = Join-Path ([IO.Path]::GetTempPath()) (
             "kk-studio-release-" + [Guid]::NewGuid().ToString("N")
         )
         New-PrivateDirectory -Path $script:DownloadDirectory
-        $script:BuiltJar = Join-Path $script:DownloadDirectory $asset
-        $checksumPath = "$($script:BuiltJar).sha256"
+        $script:DownloadedArchive = Join-Path $script:DownloadDirectory $asset
+        $script:StagedLib = Join-Path $script:DownloadDirectory "lib"
+        $checksumPath = "$($script:DownloadedArchive).sha256"
         try {
             Invoke-WebRequest -UseBasicParsing -Uri "$baseUri/$asset" `
-                -OutFile $script:BuiltJar | Out-Null
+                -OutFile $script:DownloadedArchive | Out-Null
             Invoke-WebRequest -UseBasicParsing -Uri "$baseUri/$asset.sha256" `
                 -OutFile $checksumPath | Out-Null
         }
@@ -711,7 +652,7 @@ function Get-ReleaseJar {
             Throw-Failure "校验失败：SHA256 文件格式无效。"
         }
         $expectedHash = $Matches[1]
-        $actualHash = (Get-FileHash -LiteralPath $script:BuiltJar -Algorithm SHA256).Hash
+        $actualHash = (Get-FileHash -LiteralPath $script:DownloadedArchive -Algorithm SHA256).Hash
         if ($actualHash -ne $expectedHash) {
             Throw-Failure "校验失败：SHA256 与正式版本不一致。"
         }
@@ -727,10 +668,8 @@ function ConvertTo-WindowsCommandLineArgument {
         [AllowEmptyString()]
         [string] $Argument
     )
-    if ($Argument.Length -gt 0 -and $Argument -notmatch '[\s"]') {
-        return $Argument
-    }
-
+    # Always quote. The Scheduled Task argument string and the independently generated update
+    # script must match exactly, and an unquoted bypass would diverge on spaces or metacharacters.
     $builder = [Text.StringBuilder]::new()
     [void] $builder.Append('"')
     $backslashes = 0
@@ -774,30 +713,16 @@ function ConvertTo-WindowsCommandLine {
     return ($serialized -join " ")
 }
 
-function ConvertTo-DaemonEncodedArguments {
-    param(
-        [Parameter(Mandatory = $true)]
-        [AllowEmptyCollection()]
-        [AllowEmptyString()]
-        [string[]] $Arguments
-    )
-    # Windows JDK 21 converts the Unicode command line through the system ANSI code page,
-    # losing characters before Java sees argv. Each application value therefore travels as
-    # an ASCII UTF-8 Base64 token, decoded once by the daemon (encoding, not encryption).
-    $encoded = foreach ($argument in $Arguments) {
-        [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($argument))
-    }
-    return @("--base64-args") + $encoded
-}
-
 function New-DaemonArgumentList {
-    return @("-jar", "kk-studio-daemon.jar") +
-        (ConvertTo-DaemonEncodedArguments -Arguments @("--config", $script:InstalledConfig))
+    # The task runs `node.exe main.js --config <path>`; main.js is an ASCII leaf resolved
+    # against the working directory, so a non-ASCII install path never enters argv.
+    # Node receives Unicode arguments directly; no pre-encoding is applied.
+    return @("main.js", "--config", $script:InstalledConfig)
 }
 
 function New-DaemonScheduledTaskDefinition {
     param(
-        [Parameter(Mandatory = $true)][string] $JavaExecutable,
+        [Parameter(Mandatory = $true)][string] $NodeExecutable,
         [Parameter(Mandatory = $true)][string[]] $DaemonArguments,
         [Parameter(Mandatory = $true)][string] $WorkingDirectory,
         [Parameter(Mandatory = $true)][string] $UserSid,
@@ -805,7 +730,7 @@ function New-DaemonScheduledTaskDefinition {
     )
     $serializedArguments =
         ConvertTo-WindowsCommandLine -Arguments $DaemonArguments
-    $action = New-ScheduledTaskAction -Execute $JavaExecutable `
+    $action = New-ScheduledTaskAction -Execute $NodeExecutable `
         -Argument $serializedArguments -WorkingDirectory $WorkingDirectory
     $trigger = New-ScheduledTaskTrigger -AtLogOn -User $UserSid
     $principal = New-ScheduledTaskPrincipal -UserId $UserSid `
@@ -923,18 +848,17 @@ function Invoke-Install {
     if ($null -ne $existing) { Assert-ManagedTask -Task $existing }
     Assert-ManagedLayout -HasTask ($null -ne $existing)
     Resolve-InstallInputs
-    Prepare-StagedJar
+    Prepare-StagedArchive
     $definition = New-DaemonScheduledTaskDefinition `
-        -JavaExecutable $script:SelectedJava -DaemonArguments (New-DaemonArgumentList) `
-        -WorkingDirectory (Split-Path -Parent $script:InstalledJar) `
+        -NodeExecutable $script:InstalledNode -DaemonArguments (New-DaemonArgumentList) `
+        -WorkingDirectory $script:InstalledLib `
         -UserSid $script:CurrentSid -Description $script:TaskDescription
 
     # Recheck ownership and target safety after all potentially long-running preflight work.
     $existing = Find-DaemonTask
     if ($null -ne $existing) { Assert-ManagedTask -Task $existing }
     Assert-ManagedLayout -HasTask ($null -ne $existing)
-    foreach ($directory in @($script:InstallRoot, (Split-Path -Parent $script:InstalledJar),
-        (Join-Path $script:InstallRoot "logs"))) {
+    foreach ($directory in @($script:InstallRoot, (Join-Path $script:InstallRoot "logs"))) {
         New-PrivateDirectory -Path $directory
     }
     Backup-ManagedFiles -Task $existing
@@ -942,7 +866,14 @@ function Invoke-Install {
         if ($null -ne $existing) { Stop-DaemonTaskIfRunning -Task $existing }
         $current = Find-DaemonTask
         if ($null -ne $current) { Assert-ManagedTask -Task $current }
-        Publish-PrivateFile -Source $script:BuiltJar -Destination $script:InstalledJar
+        # Publish the whole program directory atomically: move the previous lib into the
+        # backup first, then move the freshly unpacked, private lib into place.
+        if (Test-Path -LiteralPath $script:InstalledLib) {
+            Move-Item -LiteralPath $script:InstalledLib `
+                -Destination (Join-Path $script:BackupDirectory "lib")
+        }
+        Move-Item -LiteralPath $script:StagedLib -Destination $script:InstalledLib
+        Set-Acl -LiteralPath $script:InstalledLib -AclObject (New-PrivateAcl -Directory)
         Publish-PrivateFile -Source (Join-Path $script:DownloadDirectory "daemon.json") -Destination $script:InstalledConfig
         Publish-PrivateFile -Source (Join-Path $script:DownloadDirectory "daemon.token") -Destination $script:InstalledToken
         $current = Find-DaemonTask
@@ -1018,9 +949,9 @@ function Invoke-Uninstall {
     Stop-DaemonTaskIfRunning -Task $task
     $null = Get-RequiredManagedTask
     Unregister-ScheduledTask -TaskName $script:TaskName -TaskPath "\" -Confirm:$false
-    if (Test-Path -LiteralPath $script:InstalledJar) {
-        $null = Assert-PrivateFile -Path $script:InstalledJar -ExpectedOwnerSid $script:CurrentSid
-        Remove-Item -LiteralPath $script:InstalledJar -Force
+    if (Test-Path -LiteralPath $script:InstalledLib) {
+        Assert-PrivateDirectory -Path $script:InstalledLib
+        Remove-Item -LiteralPath $script:InstalledLib -Recurse -Force
     }
     Write-Host "KK Studio 环境已卸载，受管服务和程序已移除。"
     Write-Host ""

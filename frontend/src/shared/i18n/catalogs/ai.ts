@@ -3072,10 +3072,6 @@ export const aiCatalog = {
     'en-US': "Studio address is invalid: use an http(s) base host without path, query or userinfo.",
     'zh-CN': "Studio 地址无效：请填写 http(s) base 主机，不含路径、查询或用户信息。",
   },
-  'ai.environment.install.invalidJavaHome': {
-    'en-US': "Java home is invalid: use an absolute path without $, % or ~.",
-    'zh-CN': "Java home 无效：需为绝对路径，且不含 $、% 或 ~。",
-  },
   'ai.environment.install.invalidNote': {
     'en-US': "Note is invalid: a single nonblank line of at most 512 characters.",
     'zh-CN': "备注无效：单行、非空、最多 512 字符。",

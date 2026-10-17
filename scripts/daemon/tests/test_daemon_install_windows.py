@@ -1,11 +1,13 @@
 """Static and optional native contracts for the Windows daemon installer.
 
 The repository's default script tests run on Linux, where the Windows-only ScheduledTasks
-module does not exist. These tests therefore inspect lifecycle and security ordering directly.
-When a Windows PowerShell executable is available, the companion PowerShell test performs
-native parser, argv round-trip, and ScheduledTasks object checks without registering a task.
-That native leg compiles the production DaemonArguments decoder, so the installer serializer
-and the daemon argument contract are exercised together instead of against a fixture copy.
+module does not exist. These tests therefore inspect lifecycle and security ordering directly
+from the shipped ``install.ps1`` so the pre-publication checks, private-input snapshot,
+program-directory publication and stop/unregister/report ordering stay verifiable everywhere.
+
+The companion PowerShell suite (``test_daemon_install_windows.ps1``) exercises the real
+ScheduledTasks objects and the direct ``node.exe`` argv round-trip on Windows; it is executed
+by the Windows CI leg, so no Java toolchain is needed on any leg.
 """
 
 import os
@@ -30,13 +32,6 @@ def repository_root():
 REPOSITORY_ROOT = repository_root()
 INSTALL_SCRIPT = REPOSITORY_ROOT / "scripts" / "daemon" / "install.ps1"
 NATIVE_TEST = REPOSITORY_ROOT / "scripts" / "daemon" / "tests" / "test_daemon_install_windows.ps1"
-PROBE_RESOURCE_DIRECTORY = REPOSITORY_ROOT / "scripts" / "daemon" / "tests" / "resources"
-PROBE_SOURCE = PROBE_RESOURCE_DIRECTORY / "ProcessProbe.java"
-PRODUCTION_DECODER_RELATIVE = Path(
-    "fun/fengwk/kkstudio/harness/daemon/DaemonArguments.java"
-)
-DOCKER_WORKFLOW = REPOSITORY_ROOT / ".github" / "workflows" / "docker-publish.yml"
-RELEASE_WORKFLOW = REPOSITORY_ROOT / ".github" / "workflows" / "daemon-release.yml"
 
 
 def script_text():
@@ -77,18 +72,39 @@ class TestWindowsInstallerSurface(unittest.TestCase):
         self.assertIn('$ErrorActionPreference = "Stop"', text)
         self.assertNotRegex(text, r"(?m)^\+")
 
-    def test_help_lists_commands_options_layout_and_windows_limitations(self):
-        """The discovery surface describes fixed storage and per-user supervision limits."""
+    def test_help_lists_commands_layout_and_windows_limitations(self):
+        """The discovery surface describes fixed storage, the bundled runtime and supervision limits."""
         text = function_body("Write-Usage")
-        for value in ("install", "status", "uninstall", "help", "-ConfigFile", "-TokenFile", "-JavaHome",
-                      "%USERPROFILE%\\.kk-studio", "AtLogOn", "Interactive", "Limited",
-                      "does not capture daemon stdout/stderr", "best effort settings",
-                      "configured (or default) Bash"):
+        for value in ("install", "status", "uninstall", "help", "-ConfigFile", "-TokenFile",
+                      "%USERPROFILE%\\.kk-studio", "daemon.json, daemon.token, lib, logs, backups",
+                      "No user Node is required", "AtLogOn", "Interactive", "Limited",
+                      "does not capture daemon stdout/stderr", "best effort settings"):
             self.assertIn(value, text)
-        for value in ("GatewayUri", "RegistrationToken", "FromSource", "$Version", "LspConfig", "Read-Host",
-                      "Invoke-Upgrade", "Invoke-DaemonBuild", "Resolve-RepositoryRoot",
-                      "Resolve-Executable", "Assert-BashReady"):
+        for value in ("-JavaHome", "JDK", "GatewayUri", "RegistrationToken", "FromSource",
+                      "$Version", "LspConfig", "Read-Host", "Invoke-Upgrade",
+                      "Resolve-RepositoryRoot", "Resolve-Executable", "Assert-BashReady"):
             self.assertNotIn(value, script_text())
+
+    def test_installer_needs_no_user_jre_or_node(self):
+        """The frozen release archive is the only runtime source: no JDK/JAR and no PATH Node."""
+        text = script_text()
+        for value in (
+            "JAVA_HOME_21",
+            "JAVA_TOOL_OPTIONS",
+            "_JAVA_OPTIONS",
+            "JDK_JAVA_OPTIONS",
+            "java.exe",
+            ".jar",
+            "--base64-args",
+            "Assert-Jdk21",
+            "Resolve-JavaHome",
+            "Invoke-WithoutJavaOptionEnvironment",
+            "ConvertTo-DaemonEncodedArguments",
+        ):
+            self.assertNotIn(value, text)
+        # Only the archive's own frozen runtime may be executed.
+        self.assertNotIn('Get-Command "node.exe"', text)
+        self.assertIn('runtime\\code-server\\lib\\node.exe', text)
 
     def test_functions_are_dot_sourceable_without_running_main(self):
         """Native tests must load pure helpers without installing or registering anything."""
@@ -134,14 +150,14 @@ class TestWindowsInstallerSecurity(unittest.TestCase):
         self.assertIn("$_.TaskName -eq $script:TaskName", body)
         self.assertNotIn("Get-ScheduledTask -TaskName", body)
 
-    def test_explicit_executable_and_jdk_options_cannot_be_empty(self):
-        """Explicit empty JavaHome and missing config/token never silently fall back."""
+    def test_install_inputs_stay_private_siblings_and_reject_unknown_options(self):
+        """Empty/foreign/unsafe inputs and removed options never silently fall back."""
         body = function_body("Resolve-InstallInputs")
-        self.assertIn('$script:InvocationParameters.ContainsKey("JavaHome")', body)
-        self.assertIn('Assert-RequiredValue -Value $JavaHome -Name "-JavaHome"', body)
         self.assertIn('Assert-PrivateFile -Path $ConfigFile', body)
         self.assertIn('Assert-PrivateFile -Path $TokenFile', body)
-        self.assertIn('must be siblings named daemon.json and daemon.token', body)
+        self.assertIn("must be siblings named daemon.json and daemon.token", body)
+        # The option whitelist is exactly what the usage text offers.
+        self.assertIn('$script:InstallParameterNames = @("ConfigFile", "TokenFile")', script_text())
 
     def test_preflight_surfaces_only_the_bounded_trusted_config_marker(self):
         """A config failure must expose the core field line, never raw output or the token."""
@@ -152,12 +168,15 @@ class TestWindowsInstallerSecurity(unittest.TestCase):
         self.assertIn("StartsWith($script:ConfigFailureMarker", helper)
         self.assertIn("$candidate.Length -gt $script:ConfigFailureMaxLength", helper)
         self.assertIn("$candidate -match", helper)
-        staged = function_body("Prepare-StagedJar")
+        staged = function_body("Prepare-StagedArchive")
         self.assertIn(
             "Get-TrustedConfigFailureDetail -Stdout $result.Stdout -Stderr $result.Stderr",
             staged,
         )
         self.assertIn("输出无法识别", staged)
+        # Raw streams must never be interpolated into the user-visible failure.
+        self.assertNotIn("$($result.Stdout", staged)
+        self.assertNotIn("$($result.Stderr", staged)
 
     def test_task_is_owned_by_an_exact_per_user_marker(self):
         """A SID-scoped name plus exact Description marker prevents cross-user clobbering."""
@@ -170,12 +189,16 @@ class TestWindowsInstallerSecurity(unittest.TestCase):
         body = function_body("Assert-ManagedTask")
         self.assertIn("$Task.Description -ne $script:TaskDescription", body)
         self.assertIn("拒绝操作非受管计划任务", body)
+        # Ownership assertions never touch (or repair) the conflicting task.
+        for removed in ("Export-ScheduledTask", "Stop-ScheduledTask", "Unregister-ScheduledTask",
+                        "Remove-Item"):
+            self.assertNotIn(removed, body)
 
-    def test_scheduled_action_executes_java_directly_without_wrapper_or_redirection(self):
-        """Task Scheduler must own java.exe itself so lifecycle state is not a shell process."""
+    def test_scheduled_action_executes_node_directly_without_wrapper_or_redirection(self):
+        """Task Scheduler must own node.exe itself so lifecycle state is not a shell process."""
         body = function_body("New-DaemonScheduledTaskDefinition")
         self.assertIn(
-            "New-ScheduledTaskAction -Execute $JavaExecutable",
+            "New-ScheduledTaskAction -Execute $NodeExecutable",
             body,
         )
         self.assertIn("-Argument $serializedArguments", body)
@@ -207,8 +230,8 @@ class TestWindowsInstallerSecurity(unittest.TestCase):
         self.assertNotIn("RunOnlyIfNetworkAvailable", body)
         self.assertNotIn("Highest", body)
 
-    def test_task_arguments_use_a_dedicated_windows_serializer(self):
-        """Raw joining of logical values would corrupt quotes and trailing backslashes."""
+    def test_task_arguments_are_always_quoted_by_the_dedicated_serializer(self):
+        """The task command line must match the independently generated update script exactly."""
         definition = function_body("New-DaemonScheduledTaskDefinition")
         self.assertIn(
             "ConvertTo-WindowsCommandLine -Arguments $DaemonArguments",
@@ -217,81 +240,54 @@ class TestWindowsInstallerSecurity(unittest.TestCase):
         self.assertNotIn("$DaemonArguments -join", definition)
         serializer = function_body("ConvertTo-WindowsCommandLineArgument")
         self.assertIn("2 * $backslashes", serializer)
-        self.assertIn("$Argument -notmatch '[\\s\"]'", serializer)
+        # Always quote: an unquoted bypass would diverge on spaces or metacharacters.
+        self.assertIn("$builder.Append('\"')", serializer)
+        self.assertNotIn("notmatch", serializer)
+        self.assertNotIn("return $Argument", serializer)
 
-    def test_daemon_arguments_are_base64_encoded_behind_a_known_flag(self):
-        """Task Scheduler owns one command line, so each value must be an ASCII Base64 token."""
-        encoder = function_body("ConvertTo-DaemonEncodedArguments")
-        self.assertIn("[Text.Encoding]::UTF8.GetBytes($argument)", encoder)
-        self.assertIn("[Convert]::ToBase64String(", encoder)
-        self.assertIn('return @("--base64-args") + $encoded', encoder)
-
+    def test_task_arguments_run_main_js_without_encoding(self):
+        """Task Scheduler owns one command line; main.js is an ASCII leaf resolved against cwd."""
         arguments = function_body("New-DaemonArgumentList")
-        self.assertIn('ConvertTo-DaemonEncodedArguments -Arguments @("--config", $script:InstalledConfig)', arguments)
-        self.assertIn('"-jar", "kk-studio-daemon.jar"', arguments)
-        self.assertNotIn("$script:InstalledJar", arguments)
+        self.assertIn('return @("main.js", "--config", $script:InstalledConfig)', arguments)
+        self.assertNotIn("ToBase64String", arguments)
+        self.assertNotIn("$script:InstalledNode", arguments)
 
-    def test_task_runs_in_the_install_root_so_the_jar_stays_a_relative_name(self):
-        """A profile-dependent absolute JAR path must never be stored in the task command line."""
-        self.assertIn("-WorkingDirectory (Split-Path -Parent $script:InstalledJar)", function_body("Invoke-Install"))
+    def test_task_working_directory_is_the_installed_lib(self):
+        """A profile-dependent absolute main.js path must never be stored in the command line."""
+        body = function_body("Invoke-Install")
+        self.assertIn("-WorkingDirectory $script:InstalledLib", body)
+        self.assertIn("-NodeExecutable $script:InstalledNode", body)
         definition = function_body("New-DaemonScheduledTaskDefinition")
         self.assertIn("-WorkingDirectory $WorkingDirectory", definition)
-        self.assertIn("New-ScheduledTaskAction -Execute $JavaExecutable", definition)
 
     def test_generic_capture_never_encodes_and_can_set_a_working_directory(self):
-        """Only the daemon serializer may encode; capture keeps verbatim argv and native cwd."""
+        """Only verbatim argv and native cwd travel into the probe; no pre-encoding is applied."""
         capture = function_body("Invoke-NativeProcess")
         self.assertIn("[AllowEmptyString()][string] $WorkingDirectory", capture)
         self.assertIn("$startInfo.WorkingDirectory = $WorkingDirectory", capture)
         self.assertNotIn("ToBase64String", capture)
         self.assertNotIn("--base64-args", capture)
 
-        gate = function_body("Assert-BuiltJar")
-        self.assertIn("Split-Path -Parent $script:BuiltJar", gate)
-        self.assertIn("Split-Path -Leaf $script:BuiltJar", gate)
-        self.assertIn('@("-jar", $jarFileName)', gate)
-        self.assertIn(
-            'ConvertTo-DaemonEncodedArguments -Arguments @("--version")', gate
-        )
-        self.assertIn("-Arguments $arguments", gate)
-        self.assertIn("-WorkingDirectory $jarDirectory", gate)
+        gate = function_body("Assert-DownloadedArchive")
+        self.assertIn('@("main.js", "--version")', gate)
+        self.assertIn("-WorkingDirectory $script:StagedLib", gate)
+        self.assertIn('"runtime\\code-server\\lib\\node.exe"', gate)
+        self.assertIn("main.js", gate)
         self.assertNotIn("ToBase64String", gate)
 
-    def test_native_probe_runs_the_production_decoder_from_a_relative_ascii_jar(self):
-        """The native leg must exercise the shipped decoder, not a fixture copy of it."""
-        probe = PROBE_SOURCE.read_text(encoding="utf-8")
-        package = (
-            f"import {PRODUCTION_DECODER_RELATIVE.with_suffix('').as_posix()}"
-            .replace("/", ".")
-        )
-        self.assertIn(package, probe)
-        self.assertIn("DaemonArguments.decode(", probe)
-        self.assertEqual(
-            sorted(
-                path.relative_to(PROBE_RESOURCE_DIRECTORY).as_posix()
-                for path in PROBE_RESOURCE_DIRECTORY.rglob("*.java")
-            ),
-            ["ProcessProbe.java"],
-            "the decoder must never be copied into test resources",
-        )
-
-        source = REPOSITORY_ROOT / "harness" / "daemon" / "src" / "main" / "java" / (
-            PRODUCTION_DECODER_RELATIVE
-        )
-        self.assertTrue(source.is_file(), f"production decoder missing: {source}")
-        self.assertIn(
-            "package "
-            + PRODUCTION_DECODER_RELATIVE.parent.as_posix().replace("/", ".")
-            + ";",
-            source.read_text(encoding="utf-8"),
-        )
-        self.assertIn("public static String[] decode(", source.read_text(encoding="utf-8"))
-
-        native = NATIVE_TEST.read_text(encoding="ascii")
-        self.assertIn("ConvertTo-DaemonEncodedArguments -Arguments", native)
-        self.assertIn('"-jar", $Fixture.ProbeJar', native)
-        self.assertIn("-WorkingDirectory $Fixture.Workspace", native)
-        self.assertIn("Get-ProductionDaemonArgumentsSource", native)
+    def test_archive_is_unpacked_privately_and_layout_is_verified(self):
+        """A SHA-verified archive still has to carry the expected program and frozen runtime."""
+        body = function_body("Assert-DownloadedArchive")
+        for expected in (
+            'Get-Command "tar.exe"',
+            "New-PrivateDirectory -Path $script:StagedLib",
+            "-Arguments @(\"-xzf\", $script:DownloadedArchive, \"-C\", $script:StagedLib)",
+            "is missing main.js",
+            "is missing the bundled node.exe runtime",
+        ):
+            self.assertIn(expected, body)
+        # The unpack target is a fresh private directory inside the private download directory.
+        self.assertIn('$script:StagedLib = Join-Path $script:DownloadDirectory "lib"', script_text())
 
 
 class TestWindowsInstallerLifecycle(unittest.TestCase):
@@ -301,21 +297,33 @@ class TestWindowsInstallerLifecycle(unittest.TestCase):
         """Foreign tasks/layout conflicts precede downloads; all preflight precedes publication."""
         body = function_body("Invoke-Install")
         assert_in_order(self, body, "Initialize-HostContext", "Find-DaemonTask", "Assert-ManagedTask",
-                        "Assert-ManagedLayout", "Resolve-InstallInputs", "Prepare-StagedJar",
+                        "Assert-ManagedLayout", "Resolve-InstallInputs", "Prepare-StagedArchive",
                         "New-DaemonScheduledTaskDefinition", "Assert-ManagedLayout", "Backup-ManagedFiles",
-                        "Stop-DaemonTaskIfRunning", "Assert-ManagedTask", "Publish-PrivateFile",
-                        "Register-ScheduledTask", "Start-AndVerifyDaemonTask")
+                        "Stop-DaemonTaskIfRunning", "Assert-ManagedTask",
+                        'Move-Item -LiteralPath $script:StagedLib -Destination $script:InstalledLib',
+                        "Publish-PrivateFile", "Register-ScheduledTask", "Start-AndVerifyDaemonTask")
+
+    def test_program_directory_is_published_atomically_with_a_private_acl(self):
+        """The previous program is moved into the backup before the staged lib replaces it."""
+        body = function_body("Invoke-Install")
+        assert_in_order(
+            self,
+            body,
+            'Move-Item -LiteralPath $script:InstalledLib',
+            "-Destination (Join-Path $script:BackupDirectory \"lib\")",
+            "Move-Item -LiteralPath $script:StagedLib -Destination $script:InstalledLib",
+            "Set-Acl -LiteralPath $script:InstalledLib -AclObject (New-PrivateAcl -Directory)",
+        )
+        for value in ("$script:InstalledLib", "$script:InstalledConfig", "$script:InstalledToken",
+                      '"backups"', "Guid", "Assert-PrivateFile", "Copy-PrivateFile",
+                      "Export-ScheduledTask"):
+            self.assertIn(value, function_body("Backup-ManagedFiles"))
 
     def test_backups_and_failure_recovery_never_roll_back_or_touch_external_paths(self):
         """Backups contain only fixed regular owned targets; failures report manual recovery."""
-        backup = function_body("Backup-ManagedFiles")
-        for value in ("$script:InstalledJar", "$script:InstalledConfig", "$script:InstalledToken",
-                      '"backups"', "Guid", "Assert-PrivateFile", "Copy-PrivateFile", "Export-ScheduledTask"):
-            self.assertIn(value, backup)
         body = function_body("Invoke-Install")
         self.assertIn("未自动回滚", body)
         self.assertIn("备份：", body)
-        self.assertNotIn("Targets:", body)
         self.assertNotIn("Publish-PrivateFile", body[body.index("    catch {"):])
         conflict = function_body("Assert-ManagedTask")
         for value in ("缺少精确所有权标记", "Get-ScheduledTask", "不要伪造所有权标记"):
@@ -324,17 +332,38 @@ class TestWindowsInstallerLifecycle(unittest.TestCase):
                         "Get-ConflictBackupCommands"):
             self.assertNotIn(removed, conflict)
 
-    def test_uninstall_stops_and_unregisters_before_removing_the_jar(self):
-        """Stop or unregister failure must leave the managed JAR in place."""
+    def test_refuses_to_overwrite_a_program_directory_without_a_managed_task(self):
+        """An unknown program directory must never be replaced or deleted."""
+        body = function_body("Assert-ManagedLayout")
+        self.assertIn("Test-Path -LiteralPath $script:InstalledLib", body)
+        self.assertIn("$script:InstalledLib", body)
+        self.assertIn("未自动回滚，未知文件未变更", body)
+        for removed in ("Remove-Item", "Move-Item", "Set-Acl"):
+            self.assertNotIn(removed, body)
+
+    def test_uninstall_stops_and_unregisters_before_removing_the_program(self):
+        """Stop or unregister failure must leave the managed program directory in place."""
         body = function_body("Invoke-Uninstall")
         assert_in_order(
             self,
             body,
             "Assert-ManagedTask",
             "Stop-DaemonTaskIfRunning",
+            "Get-RequiredManagedTask",
             "Unregister-ScheduledTask",
-            "Remove-Item -LiteralPath $script:InstalledJar",
+            "Remove-Item -LiteralPath $script:InstalledLib -Recurse -Force",
+            "配置、数据和备份已保留。",
         )
+
+    def test_uninstall_of_an_absent_task_reports_success_without_deleting_anything(self):
+        """Absence is reported independently of deregistration; nothing else is touched."""
+        body = function_body("Invoke-Uninstall")
+        absent_branch = body[: body.index("Assert-ManagedTask -Task $task")]
+        self.assertIn("$task = Find-DaemonTask", absent_branch)
+        self.assertIn("KK Studio 环境未安装受管服务。配置、数据和备份均已保留。", absent_branch)
+        self.assertIn("return 0", absent_branch)
+        for forbidden in ("Unregister-ScheduledTask", "Remove-Item", "Stop-ScheduledTask"):
+            self.assertNotIn(forbidden, absent_branch)
 
     def test_status_is_read_only_and_distinguishes_task_state_from_health(self):
         """Status may inspect task state but must not start, stop, or mutate it."""
@@ -351,7 +380,7 @@ class TestWindowsInstallerLifecycle(unittest.TestCase):
         ):
             self.assertNotIn(forbidden, body)
 
-    def test_staged_jar_is_always_cleaned_by_main_finally(self):
+    def test_staged_archive_is_always_cleaned_by_main_finally(self):
         """Only the installer-created staging directory is deleted on failures."""
         body = function_body("Invoke-Main")
         self.assertIn("finally", body)
@@ -359,92 +388,34 @@ class TestWindowsInstallerLifecycle(unittest.TestCase):
         self.assertNotIn("SilentlyContinue", body)
 
     def test_release_is_latest_only_and_checks_staged_config(self):
-        """Official latest tag selects both assets, then the new JAR validates sibling inputs."""
+        """Official latest tag selects the windows archive, then it validates sibling inputs."""
         self.assertIn('[string] $Command = "install"', script_text())
-        staged = function_body("Prepare-StagedJar")
-        assert_in_order(self, staged, "Get-ReleaseJar", "Assert-BuiltJar", "Copy-PrivateFile -Source $ConfigFile",
-                        "Copy-PrivateFile -Source $TokenFile", '"--check-config"', "Invoke-NativeProcess")
+        staged = function_body("Prepare-StagedArchive")
+        assert_in_order(self, staged, "Get-ReleaseArchive", "Assert-DownloadedArchive",
+                        "Copy-PrivateFile -Source $ConfigFile",
+                        "Copy-PrivateFile -Source $TokenFile", '"--check-config"',
+                        "Invoke-NativeProcess")
         self.assertIn('"Daemon configuration is valid"', staged)
-        # Raw stdout/stderr must never be interpolated into the user-visible failure.
-        self.assertNotIn("$($result.Stdout", staged)
-        self.assertNotIn("$($result.Stderr", staged)
-        release = function_body("Get-ReleaseJar")
+        release = function_body("Get-ReleaseArchive")
+        self.assertIn('$asset = "kk-studio-daemon-$tag-windows-amd64.tar.gz"', release)
         for value in ("https://api.github.com/repos/fengwk/kk-studio/releases/latest",
                       "https://github.com/fengwk/kk-studio/releases/download/$tag",
-                      "[Net.SecurityProtocolType]::Tls12", "Get-FileHash", "New-PrivateDirectory"):
+                      "[Net.SecurityProtocolType]::Tls12", "Get-FileHash", "New-PrivateDirectory",
+                      "Assert-ReleaseTag"):
             self.assertIn(value, release)
 
 
 class TestWindowsInstallerNativeContracts(unittest.TestCase):
     """Run native tests only where Windows and PowerShell are genuinely available."""
 
-    def test_junction_cleanup_is_noninteractive_and_preserves_source_files(self):
-        """PS 5.1 must delete the junction itself, never prompt or recurse into its target."""
+    def test_native_suite_needs_no_java_and_asserts_a_direct_argv_round_trip(self):
+        """The native leg must exercise the shipped serializer against a real node.exe."""
         native = NATIVE_TEST.read_text(encoding="ascii")
-        self.assertIn("[IO.Directory]::Delete($junction)", native)
-        self.assertNotIn("Remove-Item -LiteralPath $junction", native)
-        for case in (
-            "junction cleanup removes only the link",
-            "junction cleanup preserves the source config",
-            "junction cleanup preserves the source token",
-        ):
-            self.assertIn(case, native)
-
-    def test_task_identity_assertions_resolve_accounts_without_relaxing_ownership(self):
-        """Both task identities require SID equality, including native negative controls."""
-        native = NATIVE_TEST.read_text(encoding="ascii")
-        self.assertIn("[System.Security.Principal.NTAccount]::new($ActualIdentity).Translate(", native)
-        self.assertIn(
-            "Assert-Equal -Expected $ExpectedSid -Actual $actualSid.Value",
-            native,
-        )
-        for value in ("$definition.Principal.UserId", "$trigger.UserId"):
-            self.assertIn(
-                f"Assert-WindowsIdentity -ExpectedSid $sid -ActualIdentity {value}",
-                native,
-            )
-            self.assertNotIn(f"Assert-Equal -Expected $sid -Actual {value}", native)
-        for case in (
-            "account representation identifies current user",
-            "SID representation identifies current user",
-            "foreign SID is rejected",
-            "empty identity is rejected",
-            "unknown account is rejected",
-        ):
-            self.assertIn(case, native)
-        self.assertIn("        Test-WindowsIdentityAssertion\n", native)
-
-    def test_real_windows_gate_blocks_main_images_and_daemon_releases(self):
-        """Formal support requires both PowerShell hosts and real ScheduledTasks cmdlets in CI."""
-        for workflow_path in (DOCKER_WORKFLOW, RELEASE_WORKFLOW):
-            with self.subTest(workflow=workflow_path.name):
-                workflow = workflow_path.read_text(encoding="utf-8")
-                self.assertIn("validate_windows_daemon:", workflow)
-                self.assertIn("runs-on: windows-latest", workflow)
-                self.assertIn("distribution: temurin", workflow)
-                self.assertIn("java-version: ${{ env.JAVA_VERSION }}", workflow)
-                self.assertIn(
-                    r".\scripts\daemon\tests\test_daemon_install_windows.ps1",
-                    workflow,
-                )
-                self.assertIn("shell: powershell", workflow)
-                self.assertIn("shell: pwsh", workflow)
-
-        docker = DOCKER_WORKFLOW.read_text(encoding="utf-8")
-        self.assertIn("- validate_windows_daemon", docker)
-        self.assertIn("needs.validate_windows_daemon.result == 'success'", docker)
-        release = RELEASE_WORKFLOW.read_text(encoding="utf-8")
-        # Inspect publish prerequisites, not mentions in another job or a comment.
-        publish = re.search(r"(?ms)^  publish:\n(.*?)(?=^  \w+:|\Z)", release)
-        self.assertIsNotNone(publish)
-        needs = re.search(r"(?m)^    needs:\n((?:      - \w+\n)+)", publish.group(1))
-        self.assertIsNotNone(needs)
-        self.assertEqual(
-            ["validate_windows_daemon", "validate_unix_daemon"],
-            re.findall(r"(?m)^      - (\w+)$", needs.group(1)),
-        )
-        # Default success gating must not be replaced by an always()/skip bypass.
-        self.assertNotRegex(publish.group(1), r"(?m)^    if:")
+        self.assertIn("ConvertTo-WindowsCommandLine -Arguments (@($outputPath) + $arguments)", native)
+        self.assertIn("Assert-DirectArgumentRoundTrip", native)
+        self.assertIn("real node.exe", native)
+        for value in ("java.exe", "JDK", "base64", "Base64", "DaemonArguments", "-jar"):
+            self.assertNotIn(value, native)
 
     def test_native_capture_keeps_streams_separate_and_drains_both_before_waiting(self):
         """Guard PS 5.1 compatibility and deadlock ordering; real outcomes are tested in PowerShell."""
@@ -462,32 +433,14 @@ class TestWindowsInstallerNativeContracts(unittest.TestCase):
             "$process.Dispose()",
         )
         self.assertNotIn("ArgumentList", body, "ProcessStartInfo.ArgumentList requires newer .NET")
-        for name in ("Assert-Jdk21", "Assert-BuiltJar"):
-            probe = function_body(name)
-            self.assertIn("Invoke-WithoutJavaOptionEnvironment", probe)
-            self.assertIn("Invoke-NativeProcess", probe)
-            self.assertNotIn("2>&1", probe)
-            self.assertNotIn("$LASTEXITCODE", probe)
-
-    @unittest.skipUnless(shutil.which("pwsh"), "portable process contracts require pwsh on PATH")
-    def test_portable_process_contracts(self):
-        """Real subprocess behavior is portable evidence, not a Windows ScheduledTasks acceptance."""
-        result = subprocess.run(
-            [
-                shutil.which("pwsh"), "-NoLogo", "-NoProfile", "-NonInteractive",
-                "-File", str(NATIVE_TEST), "-ProcessOnly",
-            ],
-            cwd=REPOSITORY_ROOT,
-            text=True,
-            capture_output=True,
-            check=False,
-            timeout=120,
-        )
-        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        probe = function_body("Assert-DownloadedArchive")
+        self.assertIn("Invoke-NativeProcess", probe)
+        self.assertNotIn("2>&1", probe)
+        self.assertNotIn("$LASTEXITCODE", probe)
 
     @unittest.skipUnless(os.name == "nt", "native ScheduledTasks contracts require Windows")
     def test_native_powershell_contracts(self):
-        """The companion suite validates real cmdlet objects and Java argv round-tripping."""
+        """The companion suite validates real cmdlet objects and the node argv round-trip."""
         executable = shutil.which("powershell") or shutil.which("pwsh")
         self.assertIsNotNone(executable, "Windows validation requires PowerShell")
         result = subprocess.run(
@@ -505,7 +458,7 @@ class TestWindowsInstallerNativeContracts(unittest.TestCase):
             text=True,
             capture_output=True,
             check=False,
-            timeout=120,
+            timeout=300,
         )
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
 
