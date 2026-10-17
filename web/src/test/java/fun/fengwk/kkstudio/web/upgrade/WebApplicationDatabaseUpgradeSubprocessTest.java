@@ -46,8 +46,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -642,7 +640,7 @@ class WebApplicationDatabaseUpgradeSubprocessTest {
   }
 
   /**
-   * 本次启动的正常生产入口：只拥有自己那一个子进程、自己的 HTTP 客户端与它独占的 executor，{@link #close()} 有界回收全部资源。
+   * 本次启动的正常生产入口：只拥有自己那一个子进程与自己的 HTTP 客户端，{@link #close()} 有界回收全部资源。
    *
    * <p>就绪判定用现成就绪 API（{@code /actuator/health}，含数据库与 S3 探针），读回走真实业务端点；失败只报固定文案，不回显子进程日志或 响应原文。
    */
@@ -656,19 +654,12 @@ class WebApplicationDatabaseUpgradeSubprocessTest {
 
     private final int port;
 
-    private final ExecutorService httpExecutor;
-
     private final HttpClient http;
 
     private RunningWebEntry(Process process, int port) {
       this.process = process;
       this.port = port;
-      this.httpExecutor = Executors.newVirtualThreadPerTaskExecutor();
-      this.http =
-          HttpClient.newBuilder()
-              .executor(httpExecutor)
-              .connectTimeout(Duration.ofSeconds(5))
-              .build();
+      this.http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
     }
 
     /**
@@ -709,7 +700,14 @@ class WebApplicationDatabaseUpgradeSubprocessTest {
       removeJvmOptionVariables(environment);
       builder.redirectOutput(Files.createTempFile(workDir, "web-entry-out-", ".log").toFile());
       builder.redirectError(Files.createTempFile(workDir, "web-entry-err-", ".log").toFile());
-      return new RunningWebEntry(builder.start(), port);
+      Process process = builder.start();
+      try {
+        return new RunningWebEntry(process, port);
+      } catch (RuntimeException | Error failure) {
+        process.destroyForcibly();
+        awaitShutdown(process);
+        throw failure;
+      }
     }
 
     /** 有界等待现成就绪 API 报 UP；子进程提前退出立即失败，不把预算浪费在已经死掉的进程上。 */
@@ -755,10 +753,10 @@ class WebApplicationDatabaseUpgradeSubprocessTest {
     @Override
     public void close() {
       try {
-        http.close();
+        http.shutdownNow();
+        awaitHttpClientShutdown();
       } finally {
-        httpExecutor.shutdownNow();
-        awaitHttpExecutorShutdown();
+        // HTTP 收尾失败也必须独立回收子进程。
         if (process.isAlive()) {
           process.destroyForcibly();
         }
@@ -766,19 +764,28 @@ class WebApplicationDatabaseUpgradeSubprocessTest {
       }
     }
 
-    /** 有界等待自有 HTTP executor 终止；中断只被推迟到回收结束，绝不吞掉中断语义。 */
-    private void awaitHttpExecutorShutdown() {
+    /** 有界等待自有 HTTP 客户端终止；中断推迟到回收结束，不改写已经发布的完成事实。 */
+    private void awaitHttpClientShutdown() {
       boolean interrupted = Thread.interrupted();
+      long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(CHILD_SHUTDOWN_SECONDS);
       try {
-        httpExecutor.awaitTermination(CHILD_SHUTDOWN_SECONDS, TimeUnit.SECONDS);
-      } catch (InterruptedException error) {
-        interrupted = true;
+        while (!http.isTerminated()) {
+          long remaining = deadline - System.nanoTime();
+          if (remaining <= 0) {
+            assertTrue(http.isTerminated(), "the normal web entry HTTP client must terminate");
+            break;
+          }
+          try {
+            http.awaitTermination(Duration.ofNanos(remaining));
+          } catch (InterruptedException error) {
+            interrupted = true;
+          }
+        }
       } finally {
         if (interrupted) {
           Thread.currentThread().interrupt();
         }
       }
-      assertTrue(httpExecutor.isTerminated(), "the normal web entry HTTP executor must terminate");
     }
   }
 }

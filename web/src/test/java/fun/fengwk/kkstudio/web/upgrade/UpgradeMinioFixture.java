@@ -24,8 +24,9 @@ import java.util.UUID;
  * 正常 Web 入口验收的真实隔离 S3 基座：本次测试自有的 {@link GenericContainer} 启动与 {@code deploy/test/compose.yaml} 同一个
  * digest 的 MinIO，并用真实 {@link S3Client} 建一个私有桶。
  *
- * <p>容器只把 API 端口发布到回环上的随机端口（Docker 默认会发布到全部网卡），凭据是本次测试的固定可丢弃值。它不启动、不连接也不停止 任何已有 compose 栈，{@link
- * #close()} 只停止自己启动的那一个容器；测试进程异常退出时由 Testcontainers 按 container ID 回收。
+ * <p>API 端口只发布到回环的随机端口，凭据为固定可丢弃值。
+ *
+ * <p>不操作已有 Compose 栈；{@link #close()} 只停止自有容器，测试进程异常退出时由 Testcontainers 按 container ID 回收。
  *
  * <p>包内可见（package-private）：只是升级验收的物理 S3 基座，不是生产代码。
  */

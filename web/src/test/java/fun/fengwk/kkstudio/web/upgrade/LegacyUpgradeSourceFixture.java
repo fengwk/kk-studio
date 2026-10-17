@@ -42,12 +42,7 @@ final class LegacyUpgradeSourceFixture {
 
   static final String AGENT = "legacy-agent";
 
-  /**
-   * 旧 Agent 的真实可执行配置：DEV 基线 {@code 8126841e} 与 MAIN 基线 {@code cb367993} 的 {@code
-   * AgentDefinitionConfigDTO} 与 config codec/validator 都与当前逐字节一致（只有 Jackson 2→3 的 API 差异）。
-   *
-   * <p>三者都要求 tools/skills/subagents 存在，因此遗留行本来就是这个完整形状。
-   */
+  /** 两个受支持源版本与当前读侧都要求显式 tools/skills/subagents，使用共同合法的配置。 */
   static final String AGENT_CONFIG =
       "{\"tools\":[],\"skills\":[],\"subagents\":[],\"inheritParentEnvironment\":true}";
 
