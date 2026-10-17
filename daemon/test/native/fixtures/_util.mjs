@@ -1,0 +1,36 @@
+import { setTimeout as sleep } from 'node:timers/promises'
+
+/** 原子发布夹具 pid，默认为当前进程；读者只会看到完整的 pid。 */
+export function recordPid(file, pid = process.pid) {
+  return import('node:fs').then((fs) => {
+    const temporary = `${file}.tmp`
+    fs.writeFileSync(temporary, String(pid))
+    fs.renameSync(temporary, file)
+  })
+}
+
+/** 有界等待一个文件出现（或抛出），避免夹具无限阻塞。 */
+export async function waitForFile(file, budgetMillis = 20_000) {
+  const { existsSync } = await import('node:fs')
+  const deadline = Date.now() + budgetMillis
+  while (!existsSync(file)) {
+    if (Date.now() >= deadline) {
+      throw new Error(`fixture timed out waiting for ${file}`)
+    }
+    await sleep(5)
+  }
+}
+
+/** 让夹具长时间存活；存活时间远大于任何测试窗口，因此「已经消失」只能由收敛解释。 */
+export function holdForever() {
+  setInterval(() => {}, 1 << 30)
+}
+
+/** 读 stdin 直到 EOF。 */
+export function readUntilEof() {
+  return new Promise((resolve) => {
+    process.stdin.resume()
+    process.stdin.on('end', resolve)
+    process.stdin.on('close', resolve)
+  })
+}

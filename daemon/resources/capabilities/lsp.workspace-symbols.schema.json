@@ -1,0 +1,22 @@
+{
+  "type": "object",
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "Absolute path on the target daemon's file system of an existing source file used to resolve the workspace root. Relative paths are rejected."
+    },
+    "query": {
+      "type": "string",
+      "description": "Symbol search query."
+    },
+    "limit": {
+      "type": "integer",
+      "description": "Maximum number of results to display locally. Defaults to 50."
+    }
+  },
+  "required": [
+    "path",
+    "query"
+  ],
+  "additionalProperties": false
+}
