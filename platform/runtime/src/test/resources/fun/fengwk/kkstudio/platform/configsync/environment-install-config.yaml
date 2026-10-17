@@ -3,7 +3,6 @@ environments:
     registrationToken: token-env
     installConfig:
       operatingSystem: linux
-      javaHome: /opt/jdk21
       daemon:
         studioUrl: https://studio.example.com/
         note: "宿主 'quoted'"

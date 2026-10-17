@@ -38,7 +38,7 @@ class EnvironmentInstallScriptsTest {
   @ValueSource(strings = {"linux", "macos"})
   void executesUnixInstallWithExactBytesAndPrivateFiles(String operatingSystem) throws Exception {
     assumeFalse(isWindows());
-    EnvironmentInstallConfigDTO config = config(operatingSystem, "/opt/jdk-21/汉字 '`");
+    EnvironmentInstallConfigDTO config = config(operatingSystem);
     String token = "private-汉字'\"$`$(touch NEVER)";
     Execution execution = execute(EnvironmentInstallScripts.install(config, token), 0);
     assertEquals(0, execution.status());
@@ -54,9 +54,7 @@ class EnvironmentInstallScriptsTest {
             "--config-file",
             execution.record().get("stage").asText() + "/daemon.json",
             "--token-file",
-            execution.record().get("stage").asText() + "/daemon.token",
-            "--java-home",
-            config.getJavaHome()),
+            execution.record().get("stage").asText() + "/daemon.token"),
         texts(execution.record().get("args")));
     assertFalse(
         texts(execution.record().get("args")).stream().anyMatch(value -> value.contains(token)));
@@ -67,9 +65,9 @@ class EnvironmentInstallScriptsTest {
   }
 
   @Test
-  void cleansAfterInstallerFailureAndOmitsMissingJavaHome() throws Exception {
+  void cleansAfterInstallerFailureAndOmitsJavaHome() throws Exception {
     assumeFalse(isWindows());
-    EnvironmentInstallConfigDTO config = config("linux", null);
+    EnvironmentInstallConfigDTO config = config("linux");
     Execution execution = execute(EnvironmentInstallScripts.install(config, "private"), 17);
     assertEquals(17, execution.status());
     assertFalse(texts(execution.record().get("args")).contains("--java-home"));
@@ -83,10 +81,7 @@ class EnvironmentInstallScriptsTest {
     try {
       writeExecutable(dir.resolve("curl"), "#!/bin/bash\nexit 8\n");
       ProcessResult result =
-          run(
-              EnvironmentInstallScripts.install(config("linux", "/opt/jdk"), "private"),
-              dir,
-              Map.of());
+          run(EnvironmentInstallScripts.install(config("linux"), "private"), dir, Map.of());
       assertEquals(8, result.status());
       assertEquals(List.of("curl"), names(dir));
       assertFalse((result.stdout() + result.stderr()).contains("private"));
@@ -107,7 +102,7 @@ class EnvironmentInstallScriptsTest {
 
   @Test
   void windowsCommandProtectsAclBeforeWritingCredentials() {
-    EnvironmentInstallConfigDTO config = config("windows", "C:\\Program Files\\Java\\it's");
+    EnvironmentInstallConfigDTO config = config("windows");
     String command = EnvironmentInstallScripts.install(config, "private-'$`");
     assertTrue(command.contains("function Set-KkPrivateAcl"));
     assertTrue(command.contains("[Security.AccessControl.DirectorySecurity]::new()"));
@@ -135,16 +130,13 @@ class EnvironmentInstallScriptsTest {
     String invocation =
         command.lines().filter(line -> line.contains("& powershell")).findFirst().orElseThrow();
     assertTrue(
-        invocation.contains(
-            "-File $installer install -ConfigFile $config -TokenFile $token -JavaHome 'C:\\Program Files\\Java\\it''s'"));
+        invocation.contains("-File $installer install -ConfigFile $config -TokenFile $token"));
+    assertFalse(invocation.contains("-JavaHome"));
     assertFalse(invocation.contains("private"));
     String uninstall = EnvironmentInstallScripts.uninstall("windows");
     assertFalse(uninstall.contains("WriteAllText"));
     assertTrue(uninstall.contains("Set-KkPrivateAcl -Path $stage -Directory"));
     assertTrue(uninstall.contains("-File $installer uninstall"));
-    assertFalse(
-        EnvironmentInstallScripts.install(config("windows", null), "private")
-            .contains("-JavaHome"));
   }
 
   /** 只在 Windows 执行生成脚本。下载由同进程函数覆盖，不改生成文本、不访问网络； Linux 上的 PowerShell 不能代替 Windows SID ACL。 */
@@ -158,7 +150,7 @@ class EnvironmentInstallScriptsTest {
     Path recordPath = dir.resolve("record.json");
     Path fixture = dir.resolve("recorder.ps1");
     String token = "private-汉字'\"$`$(New-Item NEVER)";
-    EnvironmentInstallConfigDTO config = config("windows", "C:\\Program Files\\Java\\it's");
+    EnvironmentInstallConfigDTO config = config("windows");
     Files.writeString(fixture, WINDOWS_RECORDER);
     try {
       ProcessResult failed =
@@ -177,7 +169,6 @@ class EnvironmentInstallScriptsTest {
           Base64.getEncoder().encodeToString(token.getBytes(StandardCharsets.UTF_8)),
           record.get("bytes").asText());
       assertEquals(expectedDaemon(config), JSON.readTree(record.get("configRaw").asText()));
-      assertEquals(config.getJavaHome(), record.get("javaHome").asText());
       assertTrue(record.get("sibling").asBoolean());
       for (String facts : List.of("dir", "configFile", "tokenFile")) {
         JsonNode acl = record.get(facts);
@@ -200,7 +191,6 @@ class EnvironmentInstallScriptsTest {
       assertEquals("uninstall", uninstall.get("action").asText());
       assertFalse(uninstall.has("configRaw"));
       assertFalse(uninstall.has("token"));
-      assertEquals("", uninstall.get("javaHome").asText());
     } finally {
       delete(dir);
     }
@@ -208,7 +198,7 @@ class EnvironmentInstallScriptsTest {
 
   @Test
   void rejectsBlankTokenControlCharactersAndUnknownOperatingSystem() {
-    EnvironmentInstallConfigDTO config = config("linux", null);
+    EnvironmentInstallConfigDTO config = config("linux");
     assertThrows(
         AiValidationException.class, () -> EnvironmentInstallScripts.install(config, " \n"));
     assertThrows(
@@ -280,8 +270,7 @@ class EnvironmentInstallScriptsTest {
       param(
         [Parameter(Position = 0)][string]$Action,
         [string]$ConfigFile,
-        [string]$TokenFile,
-        [string]$JavaHome
+        [string]$TokenFile
       )
       $ErrorActionPreference = 'Stop'
       $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
@@ -295,7 +284,7 @@ class EnvironmentInstallScriptsTest {
           readable = @($rules | Where-Object { $_.IdentityReference.Value -eq $sid -and ($_.FileSystemRights -band [Security.AccessControl.FileSystemRights]::ReadData) -ne 0 }).Count
         }
       }
-      $data = @{ action = $Action; javaHome = $JavaHome; environment = @{} }
+      $data = @{ action = $Action; environment = @{} }
       Get-ChildItem Env: | ForEach-Object { $data.environment[$_.Name] = $_.Value }
       if ($Action -eq 'install') {
         $data.sid = $sid
@@ -364,10 +353,9 @@ class EnvironmentInstallScriptsTest {
     return false;
   }
 
-  private static EnvironmentInstallConfigDTO config(String operatingSystem, String javaHome) {
+  private static EnvironmentInstallConfigDTO config(String operatingSystem) {
     Map<String, Object> body = new LinkedHashMap<>();
     body.put("operatingSystem", operatingSystem);
-    body.put("javaHome", javaHome);
     body.put(
         "daemon",
         Map.of(

@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.platform.environment.update;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -19,6 +20,7 @@ import org.mockito.InOrder;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonArchitecture;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
@@ -41,6 +43,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -79,9 +82,12 @@ class EnvironmentUpdateServiceTest {
     environmentRepository = mock(EnvironmentRepository.class);
     updateRepository = new InMemoryUpdateRepository();
     releaseProvider =
-        () ->
+        (operatingSystem, architecture) ->
             Optional.of(
-                new DaemonReleaseTarget(TARGET, DaemonUpdateArtifact.artifactUrl(TARGET), SHA256));
+                new DaemonReleaseTarget(
+                    TARGET,
+                    DaemonUpdateArtifact.artifactUrl(TARGET, operatingSystem, architecture),
+                    SHA256));
     service = newService();
   }
 
@@ -111,7 +117,10 @@ class EnvironmentUpdateServiceTest {
     order.verify(server).beginUpdate(eq(ENV), eq(dto.getOperationId()));
     order.verify(server).sendUpdate(eq(ENV), command.capture());
     assertEquals(TARGET, command.getValue().targetVersion());
-    assertEquals(DaemonUpdateArtifact.artifactUrl(TARGET), command.getValue().artifactUrl());
+    assertEquals(
+        DaemonUpdateArtifact.artifactUrl(
+            TARGET, DaemonOperatingSystem.LINUX, DaemonArchitecture.AMD64),
+        command.getValue().artifactUrl());
     assertEquals(SHA256, command.getValue().artifactSha256());
   }
 
@@ -149,13 +158,46 @@ class EnvironmentUpdateServiceTest {
   @Test
   void startUpdateIsRejectedWhenOfficialReleaseIsUnavailable() {
     stubReady(TARGET);
-    releaseProvider = () -> Optional.empty();
+    releaseProvider = (operatingSystem, architecture) -> Optional.empty();
     service = newService();
 
     assertThrows(AiInUseException.class, () -> service.startUpdate(ENV));
 
     verify(server, never()).beginUpdate(any(), any());
     assertTrue(service.describe(ENV).isEmpty());
+  }
+
+  /** 宿主平台不在官方发布矩阵时必须明确报错，且不得下发任何更新命令。 */
+  @Test
+  void startUpdateIsRejectedForUnsupportedPlatform() {
+    EnvironmentConnection windowsArm =
+        connection(TARGET, DaemonOperatingSystem.WINDOWS, DaemonArchitecture.ARM64.wireValue());
+    when(environmentRepository.getById(ENV.value())).thenReturn(new Environment());
+    when(registry.find(ENV)).thenReturn(Optional.of(windowsArm));
+    when(server.activeInvocationCount(ENV)).thenReturn(0);
+
+    AiInUseException error = assertThrows(AiInUseException.class, () -> service.startUpdate(ENV));
+
+    assertTrue(error.getMessage().contains("windows-arm64"), error.getMessage());
+    verify(server, never()).beginUpdate(any(), any());
+    assertTrue(service.describe(ENV).isEmpty());
+  }
+
+  /** 宿主未上报架构或上报非 canonical 取值时同样拒绝，绝不猜测替代归档，也不回显上报取值。 */
+  @Test
+  void startUpdateIsRejectedWhenReportedArchitectureCannotBeResolved() {
+    when(environmentRepository.getById(ENV.value())).thenReturn(new Environment());
+    when(server.activeInvocationCount(ENV)).thenReturn(0);
+    for (String reported : Arrays.asList(null, "x86_64", "AMD64")) {
+      when(registry.find(ENV))
+          .thenReturn(Optional.of(connection(TARGET, DaemonOperatingSystem.LINUX, reported)));
+
+      AiInUseException error = assertThrows(AiInUseException.class, () -> service.startUpdate(ENV));
+
+      assertFalse(error.getMessage().contains("x86_64"), error.getMessage());
+      assertTrue(service.describe(ENV).isEmpty());
+    }
+    verify(server, never()).beginUpdate(any(), any());
   }
 
   @Test
@@ -218,6 +260,13 @@ class EnvironmentUpdateServiceTest {
   }
 
   private static EnvironmentConnection connection(String daemonVersion) {
+    return connection(
+        daemonVersion, DaemonOperatingSystem.LINUX, DaemonArchitecture.AMD64.wireValue());
+  }
+
+  private static EnvironmentConnection connection(
+      String daemonVersion, DaemonOperatingSystem operatingSystem, String architecture) {
+    boolean windows = operatingSystem == DaemonOperatingSystem.WINDOWS;
     return new EnvironmentConnection(
         ENV,
         UUID.randomUUID(),
@@ -227,13 +276,13 @@ class EnvironmentUpdateServiceTest {
             DaemonCapabilities.VERSION,
             daemonVersion,
             new DaemonEnvironmentInfo(
-                DaemonOperatingSystem.LINUX,
+                operatingSystem,
                 "Asia/Shanghai",
                 "dev",
-                "/home/dev",
+                windows ? "C:\\Users\\dev" : "/home/dev",
                 "Note",
-                "/tmp/kk-studio",
-                "amd64")),
+                windows ? "C:\\Temp" : "/tmp/kk-studio",
+                architecture)),
         List.of(),
         List.of(),
         NOW,
