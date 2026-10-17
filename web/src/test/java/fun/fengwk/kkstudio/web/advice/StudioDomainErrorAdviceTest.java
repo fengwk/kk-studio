@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
+import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
 import fun.fengwk.kkstudio.platform.error.AiInUseException;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
@@ -24,6 +25,7 @@ import fun.fengwk.kkstudio.web.controller.StudioAgentProviderController;
 import fun.fengwk.kkstudio.web.controller.StudioChatController;
 import fun.fengwk.kkstudio.web.controller.StudioConfigSyncController;
 import fun.fengwk.kkstudio.web.controller.StudioEnvironmentController;
+import fun.fengwk.kkstudio.web.controller.StudioEnvironmentIdeController;
 import fun.fengwk.kkstudio.web.controller.StudioMcpServerController;
 import fun.fengwk.kkstudio.web.controller.StudioSkillCatalogController;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
@@ -53,7 +55,8 @@ class StudioDomainErrorAdviceTest {
           StudioMcpServerController.class,
           StudioEnvironmentController.class,
           StudioSkillCatalogController.class,
-          StudioConfigSyncController.class
+          StudioConfigSyncController.class,
+          StudioEnvironmentIdeController.class
         },
         advice.assignableTypes());
   }
@@ -147,6 +150,14 @@ class StudioDomainErrorAdviceTest {
         "The cursor parameter is required.",
         "cursor",
         "cursor is required");
+    assertError(
+        advice.handleIdeUnavailable(
+            new AiEnvironmentIdeUnavailableException("environment IDE command timed out")),
+        409,
+        "ide_unavailable",
+        "The environment IDE is unavailable. Try again later.",
+        "environment",
+        "environment IDE command timed out");
   }
 
   private static void assertError(

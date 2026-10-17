@@ -14,6 +14,7 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 
 import fun.fengwk.kkstudio.platform.error.AiDomainException;
 import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
+import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
 import fun.fengwk.kkstudio.platform.error.AiInUseException;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
@@ -24,6 +25,7 @@ import fun.fengwk.kkstudio.web.controller.StudioAgentProviderController;
 import fun.fengwk.kkstudio.web.controller.StudioChatController;
 import fun.fengwk.kkstudio.web.controller.StudioConfigSyncController;
 import fun.fengwk.kkstudio.web.controller.StudioEnvironmentController;
+import fun.fengwk.kkstudio.web.controller.StudioEnvironmentIdeController;
 import fun.fengwk.kkstudio.web.controller.StudioMcpServerController;
 import fun.fengwk.kkstudio.web.controller.StudioSkillCatalogController;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
@@ -41,8 +43,8 @@ import java.util.Map;
  *   <li>{@link AiValidationException}, {@link MissingServletRequestParameterException}, {@link
  *       MethodArgumentTypeMismatchException} → 400
  *   <li>{@link AiResourceNotFoundException} → 404
- *   <li>{@link AiVersionConflictException}, {@link AiDuplicateException}, {@link AiInUseException}
- *       → 409
+ *   <li>{@link AiVersionConflictException}, {@link AiDuplicateException}, {@link AiInUseException},
+ *       {@link AiEnvironmentIdeUnavailableException} → 409
  * </ul>
  *
  * <p>数据库唯一性 / 完整性竞争条件有意不在此处翻译：相关服务自行包装 {@link org.springframework.dao.DuplicateKeyException}
@@ -58,7 +60,8 @@ import java.util.Map;
       StudioMcpServerController.class,
       StudioEnvironmentController.class,
       StudioSkillCatalogController.class,
-      StudioConfigSyncController.class
+      StudioConfigSyncController.class,
+      StudioEnvironmentIdeController.class
     })
 public class StudioDomainErrorAdvice {
 
@@ -90,6 +93,12 @@ public class StudioDomainErrorAdvice {
 
   @ExceptionHandler(AiInUseException.class)
   public ResponseEntity<Result<Void>> handleInUse(AiInUseException error) {
+    return build(HttpStatus.CONFLICT, error);
+  }
+
+  @ExceptionHandler(AiEnvironmentIdeUnavailableException.class)
+  public ResponseEntity<Result<Void>> handleIdeUnavailable(
+      AiEnvironmentIdeUnavailableException error) {
     return build(HttpStatus.CONFLICT, error);
   }
 
