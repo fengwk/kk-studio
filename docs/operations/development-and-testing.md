@@ -121,8 +121,8 @@ gh workflow run docker-publish.yml --ref dev -f validate_only=true
 
 该模式运行同一套 Java、前端、脚本、文档和敏感数据检查，以及 Linux、macOS、Windows 安装和更新回归，
 但整个镜像发布 job 会被跳过；它与发布使用独立并发组，不会取消同分支正在进行的镜像发布。
-离线升级测试使用可丢弃 PostgreSQL 17 与私有 MinIO，在 CLI prepare/dry-run/apply 与重复 apply 拒绝后，
-通过正常生产入口 HTTP 读回转换后的 agent/environment/skill。Maven verify 覆盖不含测试替身的生产
+离线升级测试使用可丢弃 PostgreSQL 17 与私有 MinIO，对旧 DEV、旧 MAIN 与已发行 Java 1.1.0 三种源分别执行
+CLI prepare/dry-run/apply 与重复 apply 拒绝，再通过正常生产入口 HTTP 读回转换后的 agent/environment/skill。Maven verify 覆盖不含测试替身的生产
 classpath 入口，其后的必需步骤复用同次构建的 Fat JAR 验证产物入口。
 前端必须通过 lint、测试与浏览器基座严格类型检查、覆盖率、生产构建与 Chromium 离线布局回归；任一失败均阻断发布。
 无论门禁是否成功，`frontend-diagnostics` artifact 都保留覆盖率与布局诊断产物 7 天。

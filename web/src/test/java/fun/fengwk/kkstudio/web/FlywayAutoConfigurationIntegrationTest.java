@@ -114,6 +114,25 @@ class FlywayAutoConfigurationIntegrationTest {
             chatSessionForeignKeys.getLong(1),
             "the chat_session association keeps the Harness Session FK and Chat FK");
       }
+      try (ResultSet businessTables =
+          st.executeQuery(
+              "select count(*) from information_schema.tables"
+                  + " where table_schema = 'public' and table_type = 'BASE TABLE'"
+                  + " and table_name <> 'flyway_schema_history'")) {
+        assertTrue(businessTables.next());
+        assertEquals(
+            46L,
+            businessTables.getLong(1),
+            "the canonical V1 baseline must expose exactly 46 business tables");
+      }
+      try (ResultSet clusterNode =
+          st.executeQuery(
+              "select count(*) from information_schema.tables"
+                  + " where table_schema = 'public' and table_name = 'cluster_node'")) {
+        assertTrue(clusterNode.next());
+        assertEquals(
+            1L, clusterNode.getLong(1), "the restored IDE routing registry must be part of V1");
+      }
     }
   }
 }

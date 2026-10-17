@@ -13,6 +13,7 @@ import org.springframework.jdbc.datasource.SimpleDriverDataSource;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.platform.environment.repo.impl.PostgresqlEnvironmentChangeNotifier;
 import fun.fengwk.kkstudio.platform.environment.repo.impl.PostgresqlEnvironmentRepository;
@@ -193,6 +194,12 @@ class WebApplicationDatabaseUpgradeSubprocessTest {
     assertUpgradeCycle("main");
   }
 
+  /** 已发行 Java 1.1.0 源同样走完整子进程链路：保留 catalog/凭据历史，删除 javaHome 后由正常入口读回。 */
+  @Test
+  void v110SourceRunsOfflineCycleAndNormalWebEntryReadback() throws Exception {
+    assertUpgradeCycle(LegacyV110SourceFixture.PROFILE);
+  }
+
   /**
    * 一个 profile 的完整真实链路：密集旧源 + 空目标 → CLI prepare/dry-run/apply → 再 apply 被拒绝 → 正常生产入口启动并 HTTP 读回 →
    * 源库不变。
@@ -200,12 +207,17 @@ class WebApplicationDatabaseUpgradeSubprocessTest {
   private void assertUpgradeCycle(String profile) throws Exception {
     SecretKey sourceKey = key(0x2a);
     SecretKey targetKey = key(0x3b);
+    boolean currentSource = LegacyV110SourceFixture.PROFILE.equals(profile);
     DataSource source = UpgradePostgresTestSupport.sourceDatabase(profile);
-    LegacyUpgradeSourceFixture.load(source, sourceKey);
-    LegacyHarnessHistoryFixture.insert(source);
-    LegacyReferenceDataFixture.load(source, profile, sourceKey);
-    // 正常入口启动会立刻扫描到期凭据；把遗留行的下一次刷新推到远未来，避免本次验收触发任何外部刷新。
-    LegacyUpgradeSourceFixture.deferPluginCredentialRefresh(source);
+    if (currentSource) {
+      LegacyV110SourceFixture.load(source, sourceKey);
+    } else {
+      LegacyUpgradeSourceFixture.load(source, sourceKey);
+      LegacyHarnessHistoryFixture.insert(source);
+      LegacyReferenceDataFixture.load(source, profile, sourceKey);
+      // 正常入口启动会立刻扫描到期凭据；把遗留行的下一次刷新推到远未来，避免本次验收触发任何外部刷新。
+      LegacyUpgradeSourceFixture.deferPluginCredentialRefresh(source);
+    }
     DataSource target = UpgradePostgresTestSupport.blankDatabase();
     Map<String, String> sourceDigests = sourceDigests(source, profile);
 
@@ -220,7 +232,7 @@ class WebApplicationDatabaseUpgradeSubprocessTest {
         UpgradeCliInputFixture.config(
             dir,
             profile + "-convert.json",
-            convertJson(source, target, sourceKeyFile, targetKeyFile));
+            convertJson(source, target, sourceKeyFile, targetKeyFile, !currentSource));
 
     ProcessResult prepared =
         runSubprocess("database-upgrade", "prepare", "--config", prepareConfig.toString());
@@ -359,6 +371,9 @@ class WebApplicationDatabaseUpgradeSubprocessTest {
         "https://legacy-studio.example.invalid",
         environment.path("installConfig").path("daemon").path("studioUrl").asText(),
         "the served install config must be preserved");
+    assertFalse(
+        environment.path("installConfig").has("javaHome"),
+        "the served install config must not carry the retired javaHome field");
     // 列表与普通详情永不返回注册凭据：卡片既不带 token 字段，也不出现 token 原文。
     assertFalse(
         environment.has("registrationToken"),
@@ -424,17 +439,20 @@ class WebApplicationDatabaseUpgradeSubprocessTest {
     return fail("the normal web entry must serve " + field + "=" + value);
   }
 
-  /** 提交后的目标必须能被常规读侧读回与源完全一致的 install config（不是镜像 SQL 计数）。 */
+  /** 提交后的目标必须能被常规读侧读回与源一致的 install config；离线转换只应删除退役的 javaHome。 */
   private static void assertTargetInstallConfigMatchesSource(DataSource source, DataSource target)
       throws SQLException {
     PostgresqlEnvironmentRepository environments =
         new PostgresqlEnvironmentRepository(
             new EnvironmentJdbcStore(JdbcClient.create(target)),
             new PostgresqlEnvironmentChangeNotifier(new JdbcTemplate(target)));
-    assertEquals(
-        EnvironmentInstallConfigs.read(
+    JsonNode expected =
+        MAPPER.readTree(
             UpgradePostgresTestSupport.text(
-                source, "select install_config::text from environment")),
+                source, "select install_config::text from environment"));
+    ((ObjectNode) expected).remove("javaHome");
+    assertEquals(
+        EnvironmentInstallConfigs.read(expected.toString()),
         environments.getById(LEGACY_ENVIRONMENT_ID).getInstallConfig());
   }
 
@@ -459,12 +477,15 @@ class WebApplicationDatabaseUpgradeSubprocessTest {
     return digests;
   }
 
-  /** 摘要覆盖的源表：全部共有表加 Flyway 历史；MAIN 源另有只存在于该基线的 cluster_node。 */
+  /** 摘要覆盖的源表：全部业务表加 Flyway 历史；MAIN 源另有只存在于该基线的 cluster_node。 */
   private static List<String> digestTables(String profile) {
-    List<String> tables = new ArrayList<>(LegacySchemaProfile.SHARED_TABLES);
+    List<String> tables =
+        LegacyV110SourceFixture.PROFILE.equals(profile)
+            ? new ArrayList<>(LegacySchemaProfile.V1_1_0_TABLES)
+            : new ArrayList<>(LegacySchemaProfile.SHARED_TABLES);
     tables.add(FLYWAY_HISTORY_TABLE);
     if ("main".equals(profile)) {
-      tables.add("cluster_node");
+      tables.add(LegacySchemaProfile.CLUSTER_NODE);
     }
     return tables;
   }
@@ -497,20 +518,30 @@ class WebApplicationDatabaseUpgradeSubprocessTest {
   }
 
   private static String convertJson(
-      DataSource source, DataSource target, Path sourceKeyFile, Path targetKeyFile) {
+      DataSource source,
+      DataSource target,
+      Path sourceKeyFile,
+      Path targetKeyFile,
+      boolean staticSecrets) {
     SimpleDriverDataSource sourceHandle = (SimpleDriverDataSource) source;
     SimpleDriverDataSource targetHandle = (SimpleDriverDataSource) target;
-    return "{\"source\":"
-        + UpgradeCliInputFixture.endpoint(
-            sourceHandle.getUrl(), sourceHandle.getUsername(), sourceHandle.getPassword())
-        + ",\"target\":"
-        + UpgradeCliInputFixture.endpoint(
-            targetHandle.getUrl(), targetHandle.getUsername(), targetHandle.getPassword())
-        + ",\"sourceKeyFile\":\""
-        + sourceKeyFile
-        + "\",\"targetKeyFile\":\""
-        + targetKeyFile
-        + "\",\"staticSecrets\":{\"comfyui\":{\"apiKey\":\""
+    String base =
+        "{\"source\":"
+            + UpgradeCliInputFixture.endpoint(
+                sourceHandle.getUrl(), sourceHandle.getUsername(), sourceHandle.getPassword())
+            + ",\"target\":"
+            + UpgradeCliInputFixture.endpoint(
+                targetHandle.getUrl(), targetHandle.getUsername(), targetHandle.getPassword())
+            + ",\"sourceKeyFile\":\""
+            + sourceKeyFile
+            + "\",\"targetKeyFile\":\""
+            + targetKeyFile
+            + "\"";
+    if (!staticSecrets) {
+      return base + "}";
+    }
+    return base
+        + ",\"staticSecrets\":{\"comfyui\":{\"apiKey\":\""
         + LegacyUpgradeSourceFixture.COMFYUI_API_KEY
         + "\"}}}";
   }

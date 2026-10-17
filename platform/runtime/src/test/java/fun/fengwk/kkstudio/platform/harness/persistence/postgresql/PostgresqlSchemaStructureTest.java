@@ -47,6 +47,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "canvas_resource",
           "chat",
           "chat_session",
+          "cluster_node",
           "environment",
           "environment_connection",
           "environment_update_operation",
@@ -243,6 +244,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "version",
         "archived_at");
     assertColumns("chat_session", "session_id", "chat_id", "created_at");
+    assertColumns("cluster_node", "instance_id", "internal_url", "lease_until", "last_seen");
     assertColumns(
         "environment",
         "id",
@@ -665,6 +667,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "chat.created_at",
             "chat.updated_at",
             "chat_session.created_at",
+            "cluster_node.last_seen",
+            "cluster_node.lease_until",
             "environment.created_at",
             "environment.updated_at",
             "environment_connection.last_seen_at",
@@ -731,7 +735,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "system_setting.created_at",
             "system_setting.updated_at"),
         temporalColumns,
-        "business schema temporal columns must exactly equal the 83 timestamptz(3) columns");
+        "business schema temporal columns must exactly equal the 85 timestamptz(3) columns");
 
     assertEquals(
         128L,

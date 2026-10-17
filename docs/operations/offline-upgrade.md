@@ -1,6 +1,6 @@
 # 离线数据库升级
 
-从旧的 DEV / MAIN 部署把业务数据离线转换进当前 V1 数据库，只由操作员在批准的停机窗口内手工执行。
+从旧的 DEV / MAIN 部署或已发行 Java 1.1.0 部署把业务数据离线转换进当前 V1 数据库，只由操作员在批准的停机窗口内手工执行。
 转换逻辑与 CLI 一起打包在同一个 Fat JAR 里：它作为一次性独占进程运行，不启动 Web 服务与 Worker，
 也不自动执行任何部署动作。
 
@@ -9,16 +9,22 @@
 
 ## 适用前提
 
-只支持与已发布版本逐字节一致的旧 DEV / MAIN 数据库：
+只支持与已发布版本逐字节一致的旧 DEV / MAIN 数据库或已发行 Java 1.1.0 数据库：
 
 | 旧部署 | DDL 版本 |
 | --- | --- |
 | DEV 基线 | `8126841e15cc166fa65f1de90c7313598f10044e` |
 | MAIN 基线 | `cb36799384c60f15119439276a8656efe303dc68` |
-| 当前目标 V1 | `f990606a115736e1e0a0ee411000e77c1174ae3d` |
+| 已发行 Java 1.1.0 源 | `02f7cd41b4f4e0e7244dd197ba45cc88e2174e49` 的 V1（blob `fc9238b6a6c2d6e02bf270a087cb9044fdb739f0`，冻结于 [web/src/test/resources/fun/fengwk/kkstudio/web/upgrade/source/java-v1.1.0/V1__schema.sql](../../web/src/test/resources/fun/fengwk/kkstudio/web/upgrade/source/java-v1.1.0/V1__schema.sql)） |
+| 当前目标 V1 | [schema/src/main/resources/db/migration/V1__schema.sql](../../schema/src/main/resources/db/migration/V1__schema.sql)（blob `70a241a1f9096abc83b56c254cb5f6c8574e6604`） |
 
 任何其它 schema、被人为改动的约束或未知的命名空间、表、视图、序列、独立类型、collation、operator、函数与扩展都会被拒绝，
 不会做幂等迁移或就地修补。
+
+DEV / MAIN 是当前 V1 之前的旧结构：CLI 只复制两边共有的业务表，并用目标推进出的 epoch 0 → 1 目录与显式静态密钥
+重建 Plugin 状态。Java 1.1.0 已经是当前 V1 之前的最后一版结构：CLI 逐字段复制完整 catalog epoch/revision/manifest、
+配置历史、当前 Harness 历史与 format 2 凭据（只按目标主密钥重封装），因此该来源拒绝配置里的 `staticSecrets`
+（凭据已经存在），并删除已退役的 `environment.install_config.javaHome`。两种来源都只读源库，绝不改写。
 
 运行环境必须满足：
 
@@ -46,7 +52,8 @@
 {"target": {"url": "jdbc:postgresql://<pg-host>:5432/<empty-db>", "username": "<user>", "password": "<password>"}}
 ```
 
-`dry-run` 与 `apply` 的配置给出旧源与目标，并按需给出主密钥与显式静态密钥材料：
+`dry-run` 与 `apply` 的配置给出旧源与目标，并按需给出主密钥与显式静态密钥材料（仅 DEV / MAIN 源需要
+`staticSecrets`）：
 
 ```json
 {
