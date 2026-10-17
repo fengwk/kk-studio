@@ -77,8 +77,19 @@ class DaemonUpdateCoordinatorTest {
   private final List<String> events = Collections.synchronizedList(new ArrayList<>());
 
   @AfterEach
-  void shutdownExecutors() {
+  void shutdownExecutors() throws InterruptedException {
     executors.forEach(ExecutorService::shutdownNow);
+    try {
+      for (ExecutorService executor : executors) {
+        // 回执先于 permit 落盘；必须等写入任务真正退出，才能由 TempDir 回收目录。
+        assertTrue(
+            executor.awaitTermination(ASYNC_TIMEOUT_SECONDS, TimeUnit.SECONDS),
+            "the owned update executor must terminate before temporary files are removed");
+      }
+    } catch (InterruptedException error) {
+      Thread.currentThread().interrupt();
+      throw error;
+    }
   }
 
   /** 未 READY（或未绑定 Environment）的连接不得接受更新命令。 */
