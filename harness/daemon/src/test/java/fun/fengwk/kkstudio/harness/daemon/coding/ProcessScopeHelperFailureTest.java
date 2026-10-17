@@ -106,8 +106,7 @@ class ProcessScopeHelperFailureTest {
    * <p>用一个全新 JVM 打开 {@code -verbose:class} 直接跑 helper 入口：类加载日志重定向到本用例私有的文件，既证明 helper 入口真的被
    * 加载，又能逐行证明 launcher 从未出现在日志里。
    *
-   * <p>命令的事实只来自 helper 原子发布的握手文件，helper 自己的退出码不是命令的退出码：收敛只能向整组广播强杀的平台（macOS）会把 helper 自己一起终结，这是
-   * {@link ProcessScope} 的明确约定，不是命令失败。因此这里按平台约定精确断言 helper 自己的去向，而不是把它 当成命令的结局，也不为了「退出码好看」而删掉成功断言。
+   * <p>命令退出码来自握手文件；macOS 的整组强杀会同时结束 helper，因此 helper 退出码按平台收敛语义独立断言。
    */
   @Test
   void helperNeverLoadsTheParentSideLauncher() throws Exception {
