@@ -273,3 +273,26 @@ test('offline upgrade artifact-mode readback reuses the full-verify JAR and stay
   assert.equal(stepField(step, 'if'), undefined, 'the artifact-mode subprocess must not be conditional')
   assert.doesNotMatch(step, /continue-on-error:|\|\|\s*true|--passWithNoTests|-DskipTests/u)
 })
+
+test('Java update commands are replayed through the built Node decoder as a required gate', () => {
+  // Java producer 产物必须由同 job 构建出的生产 Node decoder 真实解码：依赖 daemon 构建，且不得条件化或忽略失败。
+  const steps = validationSteps()
+  const verify = steps.findIndex((step) => stepField(step, 'run') === 'env JAVA_HOME="$JAVA_HOME" mvn -B -ntp verify')
+  assert.ok(verify >= 0, 'missing the full Java verify step')
+  const matching = steps.filter((step) => stepField(step, 'run')?.includes('scripts/daemon/verify-java-update-commands.mjs'))
+  assert.equal(matching.length, 1, 'expected exactly one Java-to-Node update decoder step')
+  const step = matching[0]
+  const index = steps.indexOf(step)
+  assert.ok(index > verify, 'the Java-to-Node decoder step must run after the Java producer verify')
+  const install = steps.findIndex((step) => stepField(step, 'run') === 'npm --prefix daemon ci')
+  assert.ok(install >= 0 && install < index, 'the daemon dependencies must be installed before the decoder step')
+  const run = stepField(step, 'run')
+  assert.match(run, /npm --prefix daemon run build/u)
+  assert.ok(
+    run.indexOf('npm --prefix daemon run build') < run.indexOf('node scripts/daemon/verify-java-update-commands.mjs'),
+    'the production decoder must be built before the CLI runs',
+  )
+  assert.match(run, /node scripts\/daemon\/verify-java-update-commands\.mjs harness\/environment\/target\/daemon-update-java-commands\.json/u)
+  assert.equal(stepField(step, 'if'), undefined, 'the Java-to-Node decoder step must not be conditional')
+  assert.doesNotMatch(step, /continue-on-error:|\|\|\s*true/u)
+})

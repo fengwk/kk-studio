@@ -182,6 +182,23 @@ Python 入口在发现 `pwsh` 时也会运行这一子集，设置 120 秒超时
 进程行为证据，不代替 Windows PowerShell 5.1 / PowerShell 7 的原生验收；镜像与 Daemon 发布 CI
 保留两个 Windows host 的完整门禁。
 
+### 跨语言 UPDATE 命令串联
+
+Java 制品生产方与 Node 协议入口共享
+[official-artifact-fixtures.json](../../daemon/test/resources/update/official-artifact-fixtures.json)，
+因此本地按顺序验证两端对同一批 UPDATE 命令的接受与拒绝一致：
+
+```bash
+env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl harness/environment -am test \
+  -Dtest=OfficialUpdateArtifactFixtureTest -Dsurefire.failIfNoSpecifiedTests=false
+npm --prefix daemon ci && npm --prefix daemon run build
+node scripts/daemon/verify-java-update-commands.mjs harness/environment/target/daemon-update-java-commands.json
+```
+
+Java producer 把生产 codec 的结果写入 `harness/environment/target/daemon-update-java-commands.json`，
+CLI 再用该产物驱动构建出的生产 decoder：五条官方平台命令必须可解，十二条错配必须被拒。
+CI 在 `mvn verify` 之后以同样的顺序运行这两步。
+
 ## Java 质量检查
 
 ### Spotless

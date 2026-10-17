@@ -189,6 +189,13 @@ jobs:
         run: python3 scripts/dev/verify/repository/check-sensitive-data.py
       - name: Verify Java sources, tests and coverage
         run: env JAVA_HOME="$JAVA_HOME" mvn -B -ntp verify
+      - name: Verify Java update commands with the Node decoder
+        # Java producer 的产物由上一步全量 verify 写入 harness/environment/target；这里用同一份产物驱动生产 Node
+        # decoder，两端对共享 fixture 的接受/拒绝集合不一致即阻断发布。
+        run: |
+          set -euo pipefail
+          npm --prefix daemon run build
+          node scripts/daemon/verify-java-update-commands.mjs harness/environment/target/daemon-update-java-commands.json
       - name: Verify the offline upgrade Fat JAR serves converted data
         # 全量 verify 之后追加同一 subprocess 测试的产物模式：真实 java -jar 启动正常 Web 入口并 HTTP 读回转换数据。
         # JAR 路径只由根 POM 的当前版本决定，不另建版本事实源。
