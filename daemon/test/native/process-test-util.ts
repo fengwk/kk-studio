@@ -38,8 +38,10 @@ export function isAlive(pid: number): boolean {
     try {
       const content = readFileSync(`/proc/${pid}/stat`, 'utf8')
       const closing = content.lastIndexOf(')')
-      const state = closing >= 0 ? content.slice(closing + 2).split(' ')[0] : undefined
-      return state !== 'Z' && state !== 'X' && state !== 'x'
+      const fields = closing >= 0 ? content.slice(closing + 2).split(' ') : []
+      const state = fields[0]
+      // 首线程已退出不代表线程组退出；真实进程回归必须把仍有其他线程的 Z leader 算作存活。
+      return Number(fields[17]) > 1 || (state !== 'Z' && state !== 'X' && state !== 'x')
     } catch {
       return false
     }
