@@ -1,5 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
+import { createMemoryRouter, RouterProvider } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '@/app/App'
 import { AppProviders } from '@/app/providers'
@@ -53,8 +54,12 @@ describe('App routes', () => {
   })
 
   it('redirects root to Chat console', async () => {
-    render(<AppProviders><App /></AppProviders>)
-    await waitFor(() => expect(window.location.pathname).toBe('/chats'))
+    const router = createMemoryRouter(
+      [{ path: '*', element: <AppProviders><App /></AppProviders> }],
+      { initialEntries: ['/'] },
+    )
+    render(<RouterProvider router={router} />)
+    await waitFor(() => expect(router.state.location.pathname).toBe('/chats'))
     // 路由重定向必须完成异步资源加载并渲染 Chat 控制台。
     expect(await screen.findByRole('button', { name: '新建 Chat' }, { timeout: 3000 })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'KK Studio' })).toHaveAttribute('href', '/chats')
@@ -63,8 +68,11 @@ describe('App routes', () => {
   it('renders lazy interactions page with workbench shell semantics', async () => {
     // 测试意图：验证 /interactions 路由通过 React.lazy 异步按需加载，
     // 在挂载完成后正确渲染 InteractionsPage 内容，并保持外层 WorkbenchShell 导航结构。
-    window.history.replaceState({}, '', '/interactions')
-    render(<AppProviders><App /></AppProviders>)
+    const router = createMemoryRouter(
+      [{ path: '*', element: <AppProviders><App /></AppProviders> }],
+      { initialEntries: ['/interactions'] },
+    )
+    render(<RouterProvider router={router} />)
 
     expect(await screen.findByRole('heading', { name: '待处理事项', level: 1 }, { timeout: 3000 })).toBeInTheDocument()
     expect(await screen.findByRole('heading', { name: '暂无待处理事项' })).toBeInTheDocument()
