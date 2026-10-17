@@ -1,0 +1,18 @@
+{
+  "type": "object",
+  "properties": {
+    "path": {
+      "type": "string",
+      "description": "Absolute path on the target daemon's file system of the text file to create or intentionally overwrite as a whole file. Relative paths are rejected; Windows targets use a drive-rooted or UNC path."
+    },
+    "content": {
+      "type": "string",
+      "description": "Complete file content, written exactly as provided: line endings are not rewritten, and an existing file's encoding and BOM are preserved."
+    }
+  },
+  "required": [
+    "path",
+    "content"
+  ],
+  "additionalProperties": false
+}
