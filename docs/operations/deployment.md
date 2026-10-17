@@ -279,19 +279,19 @@ Daemon 不发布宿主端口，只经 `ws://app:8080/api/harness/environment-dae
 `studioUrl` 自行派生上述 gateway。容器配置不含 `--gateway-uri`、`--data-dir` 或 `--lsp-config`
 等第二入口。
 
-[daemon.Dockerfile](../../deploy/reliability/daemon.Dockerfile) 以 JDK 21 builder 构建
-[`harness/daemon`](../../harness/daemon) 单文件 shaded JAR，runtime 使用
-`eclipse-temurin:21.0.8_9-jdk-jammy`，预装
-Node `22.19.0`/npm `11.19.0`、bash、git，创建 `kkdaemon` uid/gid `10001`，入口先物化凭证再
-`exec java -jar /opt/kk-studio/daemon.jar`。Daemon 只挂载一个 `/workspace` named volume，
+[daemon.Dockerfile](../../deploy/reliability/daemon.Dockerfile) 以 Node 24.21.0 builder 编译 Daemon，
+并通过 [`prepare-release.sh`](../../scripts/daemon/prepare-release.sh) 暂存目标架构的真实发行归档，runtime 使用
+`debian:bookworm-slim` 并安装 bash、ca-certificates、git、libstdc++，**不安装系统 Node，也不安装 JRE**。
+镜像中唯一的 Node 二进制是发行归档内置的冻结运行时（`runtime/code-server/lib/node`，链接为 `/usr/local/bin/node`；`npm`/`npx` 是由该运行时执行的包装脚本），程序发行目录位于 `/opt/kk-studio/daemon`，
+入口为 `/opt/kk-studio/daemon/main.js`，运行用户为 uid/gid `10001`。Daemon 只挂载一个 `/workspace` named volume，
 `workspace-init` 完成 owner 初始化（`chown 10001:10001`）后 Daemon 才启动。
 
 `up` 等待 PostgreSQL health、App `/actuator/health` 和公共 `GET /api/harness/environments` 的
 `status=READY`。`inspect` fail closed 检查：
 
-- Daemon uid 不是 root；
-- mount 只有 `volume -> /workspace` 且可写、没有 bind mount；
-- `java`/`javap`、Node/npm/git/bash 可执行，`rg`/`fd` 不存在；
+- Daemon uid 不是 root（10001）；
+- mount 只有 `volume -> /workspace` 且可写、没有 bind mount，且恰好只有一个挂载卷；
+- `node`、`npm`、`git`、`bash` 可执行，且 `node` 是冻结运行时，`rg`/`fd` 不存在，且**不含任何 JRE**；
 - workspace 可写、Environment `READY`；
 - Compose config 不含 provider credential 或 bind mount。
 

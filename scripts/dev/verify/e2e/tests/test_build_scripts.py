@@ -1,4 +1,4 @@
-"""Permanent guards for E2E clean package, runtime work directory, and daemon JAR contracts."""
+"""Permanent guards for E2E clean package, runtime work directory, and Node daemon contracts."""
 
 import os
 import re
@@ -49,7 +49,7 @@ def wait_for_exit(process, timeout_seconds):
 
 
 class TestE2EBuildScripts(unittest.TestCase):
-    """Deleted classes must not survive a script-requested backend or daemon rebuild."""
+    """Deleted classes must not survive a script-requested rebuild, and the daemon contract is now Node."""
 
     def assert_clean_package(self, script, function_name):
         body = function_body(script, function_name)
@@ -58,8 +58,13 @@ class TestE2EBuildScripts(unittest.TestCase):
     def test_e2e_backend_rebuild_uses_clean_package(self):
         self.assert_clean_package(E2E_LIB, "package_backend")
 
-    def test_e2e_daemon_rebuild_uses_clean_package(self):
-        self.assert_clean_package(E2E_LIB, "package_daemon")
+    def test_e2e_daemon_rebuild_installs_and_builds_the_node_product(self):
+        """Daemon 重建走 npm ci + build（无 JVM），并显式产出编译入口。"""
+        body = function_body(E2E_LIB, "package_daemon")
+        self.assertIn("npm --prefix daemon ci", body)
+        self.assertIn("npm --prefix daemon run build", body)
+        self.assertNotIn("mvn", body)
+        self.assertIn("$DAEMON_DIST/main.js", body)
 
     def test_e2e_runtime_work_directory_survives_maven_clean(self):
         """The E2E runtime directory must stay outside the Maven build output."""
@@ -70,38 +75,37 @@ class TestE2EBuildScripts(unittest.TestCase):
         self.assertIn("path.join(REPO_ROOT, 'runtime', 'e2e')", MATRIX_RUNNER.read_text())
 
     def test_e2e_maven_is_online_by_default_and_offline_only_by_opt_in(self):
-        """All E2E Maven rebuild paths must share one explicit offline switch."""
-        result, default_calls = run_e2e_maven("unset")
+        """E2E 唯一的 Maven 重建路径（backend）必须共享显式离线开关；Daemon 不再走 Maven。"""
+        result, default_calls = run_e2e_backend_maven("unset")
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
-        self.assertEqual(2, len(default_calls))
+        self.assertEqual(1, len(default_calls))
         self.assertTrue(all("-o" not in call.split() for call in default_calls))
         self.assertIn("-pl web", default_calls[0])
-        self.assertIn("-pl harness/daemon", default_calls[1])
-        self.assertIn("-am", default_calls[1].split())
 
-        result, offline_calls = run_e2e_maven("true")
+        result, offline_calls = run_e2e_backend_maven("true")
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
-        self.assertEqual(2, len(offline_calls))
+        self.assertEqual(1, len(offline_calls))
         self.assertTrue(all("-o" in call.split() for call in offline_calls))
 
-    def test_daemon_is_a_single_shaded_jar_without_lib_or_classpath_machinery(self):
-        """The daemon is one standalone JAR: no lib/ directory, no classpath file, no tool jar."""
+        daemon_body = function_body(E2E_LIB, "package_daemon")
+        self.assertNotIn("mvn", daemon_body)
+        self.assertNotIn("E2E_MAVEN_OFFLINE", daemon_body)
+
+    def test_daemon_distribution_is_a_node_entry_without_jvm_or_classpath_machinery(self):
+        """Daemon 是 Node 产品：没有 JAR/lib/classpath，只由 Node 启动编译入口。"""
         lib = E2E_LIB.read_text()
 
-        self.assertIn(
-            'DAEMON_JAR=${DAEMON_JAR:-"$REPO_ROOT/harness/daemon/target/kk-studio-daemon.jar"}',
-            lib,
-        )
-        for removed in ("DAEMON_TOOL_JAR", "DAEMON_CP_FILE", "daemon.classpath"):
+        self.assertIn('DAEMON_DIST=${DAEMON_DIST:-"$REPO_ROOT/daemon/dist"}', lib)
+        for removed in ("DAEMON_JAR", "DAEMON_TOOL_JAR", "DAEMON_CP_FILE", "daemon.classpath"):
             self.assertNotIn(removed, lib, removed)
         for removed_machinery in ("dependency:build-classpath", "dependency:copy-dependencies"):
             self.assertNotIn(removed_machinery, lib, removed_machinery)
 
-        # 启动逻辑集中在 bootstrap helper：daemon 只通过 `java -jar <jar> --config` 启动。
+        # 启动逻辑集中在 bootstrap helper：daemon 只通过 `node <dist>/main.js --config` 启动。
         bootstrap = E2E_DAEMON_BOOTSTRAP.read_text()
-        self.assertIn('exec "$java_bin" -jar "$jar" --config "$config_file"', bootstrap)
-        self.assertNotIn("-cp ", bootstrap)
-        self.assertNotIn("DaemonMain", bootstrap)
+        self.assertIn('exec "$node_bin" "$entry" --config "$config_file"', bootstrap)
+        for removed_jvm in ("-jar", "DaemonMain", "JAVA_HOME", "-cp "):
+            self.assertNotIn(removed_jvm, bootstrap, removed_jvm)
         # 旧 CLI/裸配置来源必须保持删除状态。
         for removed_flag in ("--gateway-uri", "--data-dir", "--registration-token-file", "--note "):
             self.assertNotIn(removed_flag, lib, removed_flag)
@@ -109,47 +113,31 @@ class TestE2EBuildScripts(unittest.TestCase):
 
         start_daemon = function_body(E2E_LIB, "start_daemon")
         self.assertIn("daemon-bootstrap.sh", start_daemon)
+        self.assertIn('DAEMON_DIST="$DAEMON_DIST"', start_daemon)
+        self.assertNotIn("JAVA_HOME", start_daemon)
 
-        # `kill_daemon` can no longer match the main class, so it must match the configured JAR.
+        # 进程命令行里只有编译入口，所以 `kill_daemon` 必须匹配配置的 `$DAEMON_DIST/main.js`。
         kill_daemon = function_body(E2E_LIB, "kill_daemon")
         self.assertIn("pgrep -f --", kill_daemon)
-        self.assertIn("$DAEMON_JAR", kill_daemon)
+        self.assertIn("$DAEMON_DIST/main.js", kill_daemon)
         self.assertNotIn("DaemonMain", kill_daemon)
+        self.assertNotIn("DAEMON_JAR", kill_daemon)
 
-    def test_daemon_pom_produces_a_shaded_main_artifact(self):
-        """Maven must publish the shaded standalone JAR as the ordinary main artifact."""
-        pom = (REPOSITORY_ROOT / "harness/daemon/pom.xml").read_text()
-
-        self.assertIn("<finalName>kk-studio-daemon</finalName>", pom)
-        self.assertIn("maven-shade-plugin", pom)
-        self.assertRegex(pom, r"<version>3\.6\.1</version>")
-        self.assertIn("<goal>shade</goal>", pom)
-        self.assertIn("<createDependencyReducedPom>false</createDependencyReducedPom>", pom)
-        # A classifier-only side artifact would leave the old non-standalone jar in place.
-        self.assertNotIn("shadedArtifactAttached", pom)
-        for manifest_entry in (
-            "<Main-Class>fun.fengwk.kkstudio.harness.daemon.DaemonMain</Main-Class>",
-            "<Implementation-Title>kk-studio-daemon</Implementation-Title>",
-            "<Implementation-Version>${project.version}</Implementation-Version>",
-            "<Multi-Release>true</Multi-Release>",
-        ):
-            self.assertIn(manifest_entry, pom, manifest_entry)
-        # Signature metadata is invalid once dependencies are merged.
-        for excluded in ("META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.RSA"):
-            self.assertIn(f"<exclude>{excluded}</exclude>", pom, excluded)
-
-    def test_kill_daemon_terminates_the_configured_jar_process_only(self):
-        """`kill_daemon` must find the `java -jar <DAEMON_JAR>` process and leave others alive."""
+    def test_kill_daemon_terminates_the_configured_entry_process_only(self):
+        """`kill_daemon` must find the `node <DAEMON_DIST>/main.js` process and leave others alive."""
         with tempfile.TemporaryDirectory() as temporary:
-            jar = Path(temporary) / "kk-studio-daemon.jar"
-            # Stand-in for the daemon: any process whose argv carries the configured JAR path.
-            daemon = subprocess.Popen(["python3", "-c", "import time; time.sleep(120)", str(jar)])
+            dist = Path(temporary) / "dist"
+            dist.mkdir()
+            entry = dist / "main.js"
+            entry.write_text("// daemon entry\n", encoding="utf-8")
+            # Stand-in for the daemon: any process whose argv carries the configured entry path.
+            daemon = subprocess.Popen(["python3", "-c", "import time; time.sleep(120)", str(entry)])
             bystander = subprocess.Popen(
-                ["python3", "-c", "import time; time.sleep(120)", str(Path(temporary) / "other.jar")]
+                ["python3", "-c", "import time; time.sleep(120)", str(Path(temporary) / "other-main.js")]
             )
             try:
                 env = os.environ.copy()
-                env["DAEMON_JAR"] = str(jar)
+                env["DAEMON_DIST"] = str(dist)
                 result = subprocess.run(
                     [
                         "bash",
@@ -165,11 +153,11 @@ class TestE2EBuildScripts(unittest.TestCase):
                 self.assertEqual(0, result.returncode, result.stdout + result.stderr)
                 self.assertTrue(
                     wait_for_exit(daemon, 30),
-                    "the process holding the configured JAR path must be terminated",
+                    "the process holding the configured entry path must be terminated",
                 )
                 self.assertIsNone(
                     bystander.poll(),
-                    "a process that does not carry the configured JAR path must survive",
+                    "a process that does not carry the configured entry path must survive",
                 )
             finally:
                 for process in (daemon, bystander):
@@ -179,7 +167,7 @@ class TestE2EBuildScripts(unittest.TestCase):
 
     def test_e2e_maven_rejects_ambiguous_offline_values(self):
         """An unsupported value must fail before a Maven child can run."""
-        result, calls = run_e2e_maven("yes")
+        result, calls = run_e2e_backend_maven("yes")
         self.assertNotEqual(0, result.returncode)
         self.assertRegex(
             result.stderr,
@@ -378,8 +366,8 @@ class TestE2ERuntimeCredentialScrubbing(unittest.TestCase):
         self.assertNotIn(("-u", "UNRELATED_API_KEY"), pairs)
 
 
-def run_e2e_maven(offline):
-    """Run the two E2E Maven paths against a recorder fixture."""
+def run_e2e_backend_maven(offline):
+    """Run the E2E backend Maven path against a recorder fixture."""
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
         bin_dir = root / "bin"
@@ -388,12 +376,10 @@ def run_e2e_maven(offline):
         work_dir.mkdir()
         maven_log = root / "maven.log"
         fake_maven = bin_dir / "mvn"
-        # The daemon path asserts that the reactor produced its single shaded JAR.
         fake_maven.write_text(
             """#!/usr/bin/env bash
 set -eu
 printf '%s\\n' "$*" >> "$MAVEN_LOG"
-printf 'fixture-daemon-jar\\n' > "$DAEMON_JAR"
 """
         )
         fake_maven.chmod(0o755)
@@ -402,7 +388,6 @@ printf 'fixture-daemon-jar\\n' > "$DAEMON_JAR"
         env["PATH"] = f"{bin_dir}{os.pathsep}{env['PATH']}"
         env["MAVEN_LOG"] = str(maven_log)
         env["E2E_WORK_DIR"] = str(work_dir)
-        env["DAEMON_JAR"] = str(work_dir / "kk-studio-daemon.jar")
         if offline == "unset":
             env.pop("E2E_MAVEN_OFFLINE", None)
         else:
@@ -414,8 +399,7 @@ printf 'fixture-daemon-jar\\n' > "$DAEMON_JAR"
                 "-c",
                 (
                     f"source {E2E_LIB}\n"
-                    "package_backend /fake/jdk\n"
-                    "package_daemon /fake/jdk"
+                    "package_backend /fake/jdk"
                 ),
             ],
             cwd=REPOSITORY_ROOT,

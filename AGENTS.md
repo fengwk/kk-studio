@@ -38,8 +38,8 @@
 
 ## Daemon Release
 
-- 修改 Daemon（包括影响其行为的共享模块、依赖或打包配置）时，必须升级项目版本；验证通过并合入 `main` 后，推送与 JAR 版本一致的 `v<version>` tag，触发 Daemon Release 自动发布。
-- 必须确认新版 GitHub Release 及其 JAR、SHA256 校验文件发布完成；仅推送 `main/dev` 或完成 Docker 构建不算完成 Daemon 发布，不覆盖已有版本资产。
+- 修改 Daemon（包括影响其行为的共享模块、依赖或打包配置）时，必须升级项目版本；验证通过并合入 `main` 后，推送与版本一致的 `v<version>` tag，触发 Daemon Release 自动发布。
+- 必须确认新版 GitHub Release 及其发行归档、SHA256 校验文件发布完成；仅推送 `main/dev` 或完成 Docker 构建不算完成 Daemon 发布，不覆盖已有版本资产。
 
 ## Docs
 

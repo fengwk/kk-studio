@@ -6,7 +6,8 @@
 # - 默认 backend=127.0.0.1:18081、frontend=127.0.0.1:5173、profile=e2e
 # - 使用 PostgreSQL durable 库；重启 backend 后由宿主 E2E runner 重新同步 provider credentials
 # - frontend Vite 代理必须指向当前 backend：API_PROXY_TARGET=http://$BACKEND_HOST:$BACKEND_PORT
-# - daemon 是 shaded 单文件 JAR（reactor 依赖已内嵌），只能用 `java -jar` 启动，不存在 lib/ 或 classpath 文件
+# - daemon 是 Node 产品：先 `npm --prefix daemon ci && npm --prefix daemon run build` 产出 `daemon/dist`，
+#   再由 bootstrap helper 用 Node 启动 `daemon/dist/main.js --config <daemon.json>`；没有 JVM/JAR/classpath
 
 set -euo pipefail
 
@@ -46,7 +47,9 @@ DAEMON_NOTE=${DAEMON_NOTE:-E2E daemon environment.}
 export DAEMON_ENV_ROOT
 
 BACKEND_JAR=${BACKEND_JAR:-"$REPO_ROOT/web/target/kk-studio-web-1.1.0.jar"}
-DAEMON_JAR=${DAEMON_JAR:-"$REPO_ROOT/harness/daemon/target/kk-studio-daemon.jar"}
+DAEMON_DIST=${DAEMON_DIST:-"$REPO_ROOT/daemon/dist"}
+# 开发 E2E 用宿主 Node 运行编译产物；发行验收使用归档自带的冻结 Node（由 smoke-archive 负责）。
+DAEMON_NODE=${DAEMON_NODE:-}
 
 step() { echo "==> $*"; }
 die() { echo "ERROR: $*" >&2; exit 1; }
@@ -155,8 +158,8 @@ kill_port() {
 
 kill_daemon() {
   local pids
-  # daemon 是 `java -jar <DAEMON_JAR>`：进程命令行里不再出现 main class，因此按配置的 JAR 路径匹配。
-  pids=$(pgrep -f -- "$DAEMON_JAR" || true)
+  # daemon 进程命令行携带编译入口 `$DAEMON_DIST/main.js`，按该路径匹配。
+  pids=$(pgrep -f -- "$DAEMON_DIST/main.js" || true)
   if [ -n "$pids" ]; then
     step "Stopping daemon ($pids)"
     # shellcheck disable=SC2086
@@ -175,14 +178,14 @@ package_backend() {
 }
 
 package_daemon() {
-  local java_home=$1
   mkdir -p "$WORK_DIR"
-  step "Clean packaging daemon (shaded single-file JAR, Java 21, online by default; E2E_MAVEN_OFFLINE=true opts into offline, skipTests)"
+  step "Building the Node daemon (npm ci + build -> $DAEMON_DIST, no JVM)"
   (
     cd "$REPO_ROOT"
-    run_maven "$java_home" -pl harness/daemon -am -DskipTests clean package
+    npm --prefix daemon ci
+    npm --prefix daemon run build
   )
-  [ -s "$DAEMON_JAR" ] || die "daemon jar missing: $DAEMON_JAR"
+  [ -s "$DAEMON_DIST/main.js" ] || die "daemon entry missing: $DAEMON_DIST/main.js"
 }
 
 start_backend() {
@@ -260,10 +263,9 @@ assert m and isinstance(m.get("config"), dict) and m["config"].get("defaultVaria
 }
 
 start_daemon() {
-  local java_home=$1
   mkdir -p "$WORK_DIR" "$DAEMON_ENV_ROOT"
   kill_daemon
-  package_daemon "$java_home"
+  package_daemon
   : >"$WORK_DIR/daemon.log"
   step "Starting daemon env=$DAEMON_ENV_NAME"
   if [ -z "$DAEMON_REGISTRATION_TOKEN" ]; then
@@ -275,11 +277,11 @@ start_daemon() {
   # 凭证经 assignment 前缀进入子进程环境（不出现在任何 argv），helper 在 exec 前 unset。
   DAEMON_REGISTRATION_TOKEN="$DAEMON_REGISTRATION_TOKEN" nohup env \
     "${test_env_unsets[@]}" \
-    JAVA_HOME="$java_home" \
     DAEMON_ROOT="$DAEMON_ROOT" \
     DAEMON_STUDIO_URL="http://$BACKEND_HOST:$BACKEND_PORT" \
     DAEMON_NOTE="$DAEMON_NOTE" \
-    DAEMON_JAR="$DAEMON_JAR" \
+    DAEMON_DIST="$DAEMON_DIST" \
+    DAEMON_NODE="$DAEMON_NODE" \
     bash "$SCRIPT_DIR/lib/daemon-bootstrap.sh" \
     >"$WORK_DIR/daemon.log" 2>&1 &
   echo $! >"$WORK_DIR/daemon.pid"
@@ -316,7 +318,7 @@ ensure_stack() {
     start_backend "$java_home"
     start_frontend
     if [ "$with_daemon" = "true" ]; then
-      start_daemon "$java_home"
+      start_daemon
     fi
     return
   fi
@@ -357,7 +359,7 @@ raise SystemExit(0 if m and isinstance(m.get("config"), dict) else 1)' 2>/dev/nu
 print(next((x.get("status") for x in arr if x.get("name")=="'"$DAEMON_ENV_NAME"'"), ""))' \
       2>/dev/null || true)
     if [ "$env_status" != "READY" ]; then
-      start_daemon "$java_home"
+      start_daemon
     else
       step "Reusing daemon env=$DAEMON_ENV_NAME status=READY"
     fi

@@ -2,7 +2,7 @@
 
 `harness-environment-server` 是 Platform 侧的环境会话核心，管理连接代际、路由租约围栏与按 `invocationId` 关联的在途调用。数据库、WebSocket 和对象存储由宿主通过窄端口接入。协议形状、字段语义与大小约束由
 [Harness Environment](harness-environment.md) 单独维护，本文件只描述服务端如何裁决；
-宿主进程侧的对应实现见 [Harness Daemon](harness-daemon.md)。
+宿主进程侧的对应实现见 [Environment Daemon](daemon.md)。
 
 生产依赖为 `harness-common`、`harness-environment` 与 Jackson。会话状态机通过 lease、registration、channel 和 ticket 端口消费宿主能力，可用内存 fake 在普通单元测试中驱动；生产装配见 [Platform](platform.md) 与 [Web](web.md)。
 
@@ -159,4 +159,4 @@ COMPLETED
 
 ---
 
-上级：[系统设计](../system-design.md)。相关文档：[Harness Environment](harness-environment.md)、[Harness Daemon](harness-daemon.md)、[Platform](platform.md)、[Web](web.md)。
+上级：[系统设计](../system-design.md)。相关文档：[Harness Environment](harness-environment.md)、[Environment Daemon](daemon.md)、[Platform](platform.md)、[Web](web.md)。

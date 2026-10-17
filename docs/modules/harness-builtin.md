@@ -11,7 +11,7 @@
 由用户输入面维护。校验
 ownership、WRITE 声明、effects 数量与原子落库由 [`harness-runtime`](harness-runtime.md)
 与 Contributor 目录承担；环境能力的网络传输与子进程执行由
-[`harness-environment`](harness-environment.md) 与 [`harness-daemon`](harness-daemon.md) 承担。
+[`harness-environment`](harness-environment.md) 与 [Daemon](daemon.md) 承担。
 Skill 由 System Prompt 提供稳定路径，读取统一交给
 `read`。生产依赖为 `harness-common`、`harness-contributor-api`、`harness-tool`、`harness-environment`
 与 Jackson 3（`tools.jackson`），见 [`pom.xml`](../../harness/builtin/pom.xml)，由

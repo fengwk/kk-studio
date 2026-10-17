@@ -69,9 +69,10 @@ Commands:
   case-deps <case-id>
       Run npm ci for one case in an ephemeral egress-enabled helper container.
   inspect
-      Fail-closed isolation, runtime-tooling, and Environment READY checks.
+      Fail-closed isolation, runtime-tooling, and Environment READY checks
+      (the frozen Node runtime is the only Node, and no JRE is present).
   tool-smoke
-      Compile and run direct Java find/grep/bash smoke assertions inside Daemon.
+      Run direct Node find/grep/bash smoke assertions inside the Daemon image.
   logs [postgres|app|workspace-init|daemon ...]
       Print the last RELIABILITY_LOG_TAIL lines (default 200).
   status
@@ -435,14 +436,20 @@ for command in rg fd; do
     exit 1
   fi
 done
-for command in java javap node npm git bash; do
+for command in node npm git bash; do
   command -v "$command" >/dev/null 2>&1 \
     || { echo "ERROR: required command is missing: $command" >&2; exit 1; }
 done
 test -w /workspace
-printf "rg=absent fd=absent workspace_writable=true\n"
-java -version 2>&1 | head -n 1
-javap -version
+# PATH 上的 node 必须就是发行目录里冻结的运行时（也是唯一一份 Node），不是镜像另装的一套。
+frozen=/opt/kk-studio/daemon/runtime/code-server/lib/node
+[ -x "$frozen" ] || { echo "ERROR: frozen runtime is missing: $frozen" >&2; exit 1; }
+[ "$(readlink -f "$(command -v node)")" = "$(readlink -f "$frozen")" ] \
+  || { echo "ERROR: node on PATH is not the frozen runtime" >&2; exit 1; }
+[ -f /opt/kk-studio/daemon/main.js ] \
+  || { echo "ERROR: daemon entry is missing: /opt/kk-studio/daemon/main.js" >&2; exit 1; }
+command -v java >/dev/null 2>&1 && { echo "ERROR: the daemon image must not ship a JRE" >&2; exit 1; }
+printf "rg=absent fd=absent jre=absent workspace_writable=true\n"
 node --version
 npm --version
 git --version
@@ -457,18 +464,18 @@ smoke_tools() {
   require_cmd docker
   local container_id
   container_id=$(daemon_container_id)
-  step "running direct Java coding-tool smoke inside the Daemon image"
-  # Daemon 是 shaded 单文件 JAR：smoke 只用它作为编译与运行 classpath。
-  docker exec --interactive --user 10001:10001 "$container_id" bash -c '
+  step "running direct Node coding-tool smoke inside the Daemon image"
+  # 镜像里唯一的 Node 就是发行目录冻结的运行时（PATH 上的 node 指向它）；smoke 直接
+  # 调用该发行目录里打包好的 coding/native 模块，因此验证的是真实发行物而不是源码。
+  docker exec --interactive --user 10001:10001 \
+    --env KK_STUDIO_DAEMON_DIST=/opt/kk-studio/daemon \
+    "$container_id" bash -c '
 set -euo pipefail
 tmp=$(mktemp -d)
 trap '"'"'rm -rf "$tmp"'"'"' EXIT
-source_file="$tmp/NativeToolSmoke.java"
-cat >"$source_file"
-javac -cp /opt/kk-studio/daemon.jar -d "$tmp" "$source_file"
-java -cp "$tmp:/opt/kk-studio/daemon.jar" \
-  fun.fengwk.kkstudio.harness.daemon.coding.NativeToolSmoke
-' <"$REPO_ROOT/scripts/dev/verify/reliability/fixtures/NativeToolSmoke.java"
+cat >"$tmp/NativeToolSmoke.mjs"
+node "$tmp/NativeToolSmoke.mjs"
+' <"$REPO_ROOT/scripts/dev/verify/reliability/fixtures/NativeToolSmoke.mjs"
 }
 
 safe_status() {
