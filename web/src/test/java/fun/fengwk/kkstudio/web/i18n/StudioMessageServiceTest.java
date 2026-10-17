@@ -108,7 +108,9 @@ class StudioMessageServiceTest {
             DomainErrorCode.RESOURCE_NOT_FOUND, "The agent was not found.",
             DomainErrorCode.VERSION_CONFLICT, "The agent was modified by another request.",
             DomainErrorCode.DUPLICATE, "The agent already exists.",
-            DomainErrorCode.IN_USE, "The agent is still in use.");
+            DomainErrorCode.IN_USE, "The agent is still in use.",
+            DomainErrorCode.IDE_UNAVAILABLE,
+                "The environment IDE is unavailable. Try again later.");
 
     LocaleContextHolder.setLocale(Locale.US);
     for (Map.Entry<DomainErrorCode, String> entry : expected.entrySet()) {
@@ -116,5 +118,21 @@ class StudioMessageServiceTest {
           entry.getValue(),
           messageService.domainMessage(entry.getKey(), Map.of("resource", "agent")));
     }
+  }
+
+  /** IDE 通道不可用是新增 domain 码：两种受支持语言都必须提供该 key，缺失会导致运行期解析失败。 */
+  @Test
+  void localizesIdeUnavailableDomainMessageInBothLocales() {
+    LocaleContextHolder.setLocale(Locale.US);
+    assertEquals(
+        "The environment IDE is unavailable. Try again later.",
+        messageService.domainMessage(
+            DomainErrorCode.IDE_UNAVAILABLE, Map.of("resource", "environment")));
+
+    LocaleContextHolder.setLocale(Locale.SIMPLIFIED_CHINESE);
+    assertEquals(
+        "环境 IDE 当前不可用，请稍后重试。",
+        messageService.domainMessage(
+            DomainErrorCode.IDE_UNAVAILABLE, Map.of("resource", "environment")));
   }
 }
