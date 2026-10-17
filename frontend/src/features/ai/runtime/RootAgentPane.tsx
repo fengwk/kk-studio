@@ -67,6 +67,7 @@ export function RootAgentPane({
   onFocusTargetChange,
   presentationSelected = true,
   onPresentation,
+  onOpenIde,
 }: {
   owner?: AgentRuntimeOwnerDTO
   paneId: string
@@ -89,6 +90,7 @@ export function RootAgentPane({
   onFocusTargetChange: (target: PaneTarget | null) => void
   presentationSelected?: boolean
   onPresentation?: (report: ThreadPresentation) => void
+  onOpenIde?: (options: { mode: 'files' | 'shell' }) => void
 }) {
   const { t } = useI18n()
   const pane = useRootThreadControl({
@@ -104,6 +106,7 @@ export function RootAgentPane({
     onRequestBranch,
     onReport,
     onValidateDraftName,
+    onOpenIde,
     target,
     setTarget,
     projection,
