@@ -27,7 +27,7 @@ V1 写入单行 SystemSettings 默认聚合；Java 解码与 profile 默认契�
 | Catalog | agent_provider/model/definition、skill_package | [Platform Catalog](platform.md#catalog) |
 | Plugin | plugin_catalog_state：当前 epoch 指针；plugin_catalog_revision：每个 epoch 的不可变完整 manifest；plugin_configuration_revision：不可变普通配置历史；plugin_credential：认证密文、认证代际、状态、refresh lease | [Plugin 配置存储](platform.md#plugin-配置存储)、[Plugin credential](platform.md#plugin-credential) |
 | MCP | mcp_server、mcp_tool：配置与原子发现快照 | [Platform MCP](platform.md#mcp-server-与运行时工具目录) |
-| Environment | environment、environment_connection：注册与路由租约、保存的安装设置（`install_config`）、宿主/Skill 投影 | [Environment](harness-environment.md) |
+| Environment | environment、environment_connection：注册与环境路由租约、保存的安装设置（`install_config`）、宿主/Skill 投影；cluster_node：App 节点内部 IDE 路由 origin 与心跳租约 | [Environment](harness-environment.md) |
 | Chat | chat、chat_session：owner 关系 | [Platform](platform.md#命令接受产品归属与派发) |
 | Canvas | canvas_document/group/node/resource、function_run、command_dedup、function_resource_pin | [Canvas Core](canvas-core.md)、[Canvas Infra](canvas-infra.md) |
 | Project | project、project_issue 与 agent_thread/stage_budget/run/activity/work/evidence | [Project](project.md) |

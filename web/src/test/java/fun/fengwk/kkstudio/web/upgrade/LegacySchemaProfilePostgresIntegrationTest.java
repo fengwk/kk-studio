@@ -7,7 +7,7 @@ import org.junit.jupiter.api.Test;
 import java.sql.Connection;
 import java.sql.SQLException;
 
-/** 真实 PostgreSQL 17 上三份冻结 DDL 的应用 schema 指纹实测：DEV / MAIN 冻结源资源与当前 V1 目标库都必须复现各自记录的固定指纹。 */
+/** 真实 PostgreSQL 17 上四份冻结 DDL 的应用 schema 指纹实测：DEV / MAIN / Java 1.1.0 源与当前 V1 目标库都复现各自记录的固定指纹。 */
 class LegacySchemaProfilePostgresIntegrationTest {
 
   /** DEV 冻结基线（与 Git blob 逐字节一致）的指纹。 */
@@ -26,6 +26,16 @@ class LegacySchemaProfilePostgresIntegrationTest {
         UpgradePostgresTestSupport.sourceDatabase("main").getConnection()) {
       String fingerprint = LegacySchemaProfile.fingerprint(connection);
       assertEquals(LegacySchemaProfile.MAIN, fingerprint, "MAIN=" + fingerprint);
+    }
+  }
+
+  /** 已发行 Java 1.1.0 的冻结 V1（与 02f7 Git blob 逐字节一致）的指纹。 */
+  @Test
+  void v110BaselineFingerprintMatchesTheRecordedProfile() throws SQLException {
+    try (Connection connection =
+        UpgradePostgresTestSupport.sourceDatabase("java-v1.1.0").getConnection()) {
+      String fingerprint = LegacySchemaProfile.fingerprint(connection);
+      assertEquals(LegacySchemaProfile.V1_1_0, fingerprint, "V1.1.0=" + fingerprint);
     }
   }
 
@@ -54,11 +64,11 @@ class LegacySchemaProfilePostgresIntegrationTest {
   void targetBaselineHistoryIsAccepted() throws SQLException {
     try (Connection connection =
         UpgradePostgresTestSupport.pristineTargetDatabase().getConnection()) {
-      LegacySchemaProfile.requireTarget(connection);
       assertEquals(
           LegacySchemaProfile.TARGET_V1_CHECKSUM,
           (int) UpgradePostgresTestSupport.v1Checksum(connection),
           "the recorded target checksum must equal the real Flyway checksum");
+      LegacySchemaProfile.requireTarget(connection);
     }
   }
 
@@ -70,6 +80,21 @@ class LegacySchemaProfilePostgresIntegrationTest {
       String profile = LegacySchemaProfile.identify(LegacySchemaProfile.fingerprint(connection));
       assertEquals("main", profile);
       LegacySchemaProfile.requireSourceHistory(connection, profile);
+    }
+  }
+
+  /** 已发行 Java 1.1.0 被识别为独立 profile，并使用自己的真实 Flyway V1 校验和。 */
+  @Test
+  void v110BaselineIsIdentifiedAndItsHistoryIsAccepted() throws SQLException {
+    try (Connection connection =
+        UpgradePostgresTestSupport.sourceDatabase("java-v1.1.0").getConnection()) {
+      String profile = LegacySchemaProfile.identify(LegacySchemaProfile.fingerprint(connection));
+      assertEquals("java-v1.1.0", profile);
+      LegacySchemaProfile.requireSourceHistory(connection, profile);
+      assertEquals(
+          LegacySchemaProfile.V1_1_0_V1_CHECKSUM,
+          (int) UpgradePostgresTestSupport.v1Checksum(connection),
+          "the recorded 1.1.0 checksum must equal the real Flyway checksum");
     }
   }
 }

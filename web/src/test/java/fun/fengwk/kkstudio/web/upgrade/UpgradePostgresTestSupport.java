@@ -46,7 +46,7 @@ final class UpgradePostgresTestSupport {
     return isolatedDatabase(SOURCE_LOCATIONS_ROOT + profile);
   }
 
-  /** 当前 V1 的 pristine 目标库：45 张表 + epoch 0 目录 seed，没有任何业务行或 dev seed。 */
+  /** 当前 V1 的 pristine 目标库：46 张业务表 + epoch 0 目录 seed，没有任何业务行或 dev seed。 */
   static DataSource pristineTargetDatabase() {
     return isolatedDatabase(MIGRATION_LOCATIONS);
   }
@@ -136,7 +136,7 @@ final class UpgradePostgresTestSupport {
     }
   }
 
-  /** 目标 pristine 形态：全部共有表为空（settings 除外）、目录只有 epoch 0 的唯一 state 与唯一空 manifest。 */
+  /** 目标 pristine 形态：全部业务表为空（settings 除外）、目录只有 epoch 0、cluster_node 初始空。 */
   static void assertPristine(DataSource target) throws SQLException {
     for (String table : LegacySchemaProfile.SHARED_TABLES) {
       if (!"system_setting".equals(table)) {
@@ -149,6 +149,7 @@ final class UpgradePostgresTestSupport {
       }
     }
     assertEquals(1L, count(target, "system_setting"));
+    assertEquals(0L, count(target, LegacySchemaProfile.CLUSTER_NODE));
     assertEquals(1L, count(target, "plugin_catalog_state"));
     assertEquals(0L, longValue(target, "select epoch from plugin_catalog_state where id = 1"));
     assertEquals(1L, count(target, "plugin_catalog_revision"));

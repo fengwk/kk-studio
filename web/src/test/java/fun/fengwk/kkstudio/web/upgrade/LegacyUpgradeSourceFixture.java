@@ -66,6 +66,13 @@ final class LegacyUpgradeSourceFixture {
   /** 往一个已迁移的遗留源库写入全部 fixture 行（源库每个用例独有，因此可以整体重放）。 */
   static LegacyUpgradeSourceFixture load(DataSource dataSource, SecretKey sourceKey)
       throws SQLException {
+    return load(dataSource, sourceKey, "openai_response", true);
+  }
+
+  /** 同一份业务行，但可显式给出 provider wire 与是否写入旧 format 1 凭据：当前 1.1.0 源只能写当前 wire，且已有自己的 format 2 凭据。 */
+  static LegacyUpgradeSourceFixture load(
+      DataSource dataSource, SecretKey sourceKey, String providerWire, boolean legacyCredential)
+      throws SQLException {
     try (Connection connection = dataSource.getConnection();
         Statement statement = connection.createStatement()) {
       statement.execute(
@@ -73,7 +80,9 @@ final class LegacyUpgradeSourceFixture {
               + " config, connection_generation_id, created_at, updated_at, version) values ("
               + "'"
               + PROVIDER
-              + "', 'legacy provider', 'openai_response', 'https://legacy.example.invalid/v1',"
+              + "', 'legacy provider', '"
+              + providerWire
+              + "', 'https://legacy.example.invalid/v1',"
               + " 'legacy-inline-credential', '{\"temperature\":0.5}',"
               + " '8f14e45f-ceea-467a-9c1d-2b0f5b5d5b01',"
               + " timestamptz '2025-01-02 03:04:05.678+00',"
@@ -135,21 +144,23 @@ final class LegacyUpgradeSourceFixture {
           "insert into mcp_tool (name, server_name, source_name, description, input_schema) values"
               + " ('legacyMcpEcho', 'legacy_mcp', 'echo', 'legacy echo tool',"
               + " '{\"type\":\"object\"}')");
-      statement.execute(
-          "insert into plugin_credential (plugin_id, encrypted_payload, region, expires_at,"
-              + " next_refresh_at, status, last_refreshed_at, last_refresh_error, version,"
-              + " create_time, update_time) values ('"
-              + LEGACY_PLUGIN_ID
-              + "', "
-              + "decode('"
-              + hex(legacyEnvelope(sourceKey))
-              + "', 'hex'), '"
-              + LEGACY_REGION
-              + "', timestamptz '2027-03-04 05:06:07.891+00',"
-              + " timestamptz '2026-03-04 05:06:07.891+00', 'CONNECTED',"
-              + " timestamptz '2026-01-02 03:04:05.678+00', null, 4,"
-              + " timestamptz '2025-01-02 03:04:05.678+00',"
-              + " timestamptz '2026-01-02 03:04:05.678+00')");
+      if (legacyCredential) {
+        statement.execute(
+            "insert into plugin_credential (plugin_id, encrypted_payload, region, expires_at,"
+                + " next_refresh_at, status, last_refreshed_at, last_refresh_error, version,"
+                + " create_time, update_time) values ('"
+                + LEGACY_PLUGIN_ID
+                + "', "
+                + "decode('"
+                + hex(legacyEnvelope(sourceKey))
+                + "', 'hex'), '"
+                + LEGACY_REGION
+                + "', timestamptz '2027-03-04 05:06:07.891+00',"
+                + " timestamptz '2026-03-04 05:06:07.891+00', 'CONNECTED',"
+                + " timestamptz '2026-01-02 03:04:05.678+00', null, 4,"
+                + " timestamptz '2025-01-02 03:04:05.678+00',"
+                + " timestamptz '2026-01-02 03:04:05.678+00')");
+      }
       // 源 settings 已经过一次真实写：version 与两个应用侧时间不是默认值，转换必须原样保留。
       statement.execute(
           "update system_setting set version = 12,"

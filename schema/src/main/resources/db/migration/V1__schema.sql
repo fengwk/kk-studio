@@ -879,6 +879,22 @@ create index idx_environment_connection_lease_until
 create index idx_environment_connection_owner
     on environment_connection (owner_node_id);
 
+create table cluster_node (
+    instance_id  uuid           primary key,
+    internal_url varchar(512)   not null,
+    lease_until  timestamptz(3) not null,
+    last_seen    timestamptz(3) not null,
+    constraint ck_cluster_node_lease check (
+        lease_until > last_seen
+    )
+);
+
+comment on table cluster_node is 'App 节点内部 IDE 路由注册表：节点可达 HTTP(S) origin 与心跳租约，只承载控制元数据，不保存环境存活字节';
+comment on column cluster_node.instance_id is '节点实例 UUID（PK），与 environment_connection.owner_node_id 对应';
+comment on column cluster_node.internal_url is '该节点对外可达的 HTTP(S) origin，仅用于内部单跳转发';
+comment on column cluster_node.lease_until is '注册租约到期时间（毫秒精度），过期节点的路由不被选中';
+comment on column cluster_node.last_seen is '最后一次心跳时间（毫秒精度），必须早于 lease_until';
+
 create table environment_update_operation (
     operation_id   uuid           primary key,
     environment_id uuid           not null,

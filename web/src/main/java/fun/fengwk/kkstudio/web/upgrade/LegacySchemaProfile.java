@@ -39,8 +39,11 @@ final class LegacySchemaProfile {
   /** MAIN 基线（{@code cb36799384c60f15119439276a8656efe303dc68}）的固定指纹。 */
   static final String MAIN = "3bc3946a899f87fc770b8f360dcf6bc11f75781319005e5135b934f61db093e3";
 
-  /** 当前目标 V1（{@code f990606a115736e1e0a0ee411000e77c1174ae3d}）的固定指纹。 */
-  static final String TARGET = "494eef80ad801d5067478ddb06e766c3c8a459934368f0575ef1f6094347daac";
+  /** 已发行 Java 1.1.0 的冻结 V1（源资源 {@code source/java-v1.1.0}）固定指纹。 */
+  static final String V1_1_0 = "494eef80ad801d5067478ddb06e766c3c8a459934368f0575ef1f6094347daac";
+
+  /** 当前目标 V1 的固定指纹（恢复 cluster_node 后由真实 PostgreSQL 17 目录实测）。 */
+  static final String TARGET = "d99491d8b76d7eaaf0e14303ebd845a2c1d51ed9b83e3fd8c18ac9bea2c0c3cd";
 
   /** DEV 基线 V1 的真实 Flyway 校验和（Flyway 11.14.1 对同一份 DDL 的固定计算）。 */
   static final int DEV_V1_CHECKSUM = 554066052;
@@ -48,10 +51,13 @@ final class LegacySchemaProfile {
   /** MAIN 基线 V1 的真实 Flyway 校验和（Flyway 11.14.1 对同一份 DDL 的固定计算）。 */
   static final int MAIN_V1_CHECKSUM = -1855380029;
 
-  /** 当前目标 V1 的真实 Flyway 校验和（Flyway 11.14.1 对同一份 DDL 的固定计算）。 */
-  static final int TARGET_V1_CHECKSUM = 113176549;
+  /** 已发行 Java 1.1.0 的冻结 V1 真实 Flyway 校验和（Flyway 11.14.1 对同一份 DDL 的固定计算）。 */
+  static final int V1_1_0_V1_CHECKSUM = 113176549;
 
-  /** 两边共有的 41 张应用表；这是本切片唯一的复制清单事实源。 */
+  /** 当前目标 V1 的真实 Flyway 校验和（Flyway 11.14.1 对同一份 DDL 的固定计算）。 */
+  static final int TARGET_V1_CHECKSUM = 1787125682;
+
+  /** 旧 DEV / MAIN 与当前目标共有的 41 张应用表；旧 profile 的唯一复制清单事实源。 */
   static final List<String> SHARED_TABLES =
       List.of(
           "agent_definition",
@@ -96,7 +102,7 @@ final class LegacySchemaProfile {
           "storage_upload",
           "system_setting");
 
-  /** 目标新增、只按真实 epoch0→1 初始化的目录/认证表；绝不复制或杜撰旧目录历史。 */
+  /** 旧 DEV / MAIN 没有、由目标推进到真实 epoch0→1 的目录/认证表；旧 profile 绝不复制或杜撰其历史。 */
   static final List<String> TARGET_ONLY_TABLES =
       List.of(
           "plugin_auth_attempt",
@@ -104,10 +110,14 @@ final class LegacySchemaProfile {
           "plugin_catalog_state",
           "plugin_configuration_revision");
 
+  /** 已发行 Java 1.1.0 源的全部 45 张表：旧 41 张共有表加 4 张目录/认证表。 */
+  static final List<String> V1_1_0_TABLES = v110Tables();
+
+  /** 目标恢复但 1.1.0 源没有的瞬时路由表；目标必须保持初始空，旧 MAIN 行只在 lease 全部到期后退休。 */
+  static final String CLUSTER_NODE = "cluster_node";
+
   /** 唯一被排除的工具表：Flyway 自己的历史表；它的 PK 索引/序列/类型都随该表一并排除。 */
   private static final String FLYWAY_TABLE = "flyway_schema_history";
-
-  private static final Set<String> SHARED_TABLE_SET = Set.copyOf(SHARED_TABLES);
 
   private static final String RELATIONS =
       """
@@ -286,6 +296,14 @@ final class LegacySchemaProfile {
 
   private LegacySchemaProfile() {}
 
+  /** 1.1.0 源表清单按表名排序，确保复制与对账顺序稳定。 */
+  private static List<String> v110Tables() {
+    List<String> tables = new ArrayList<>(SHARED_TABLES);
+    tables.addAll(TARGET_ONLY_TABLES);
+    tables.sort(null);
+    return List.copyOf(tables);
+  }
+
   /**
    * 计算一份连接的 public canonical 应用 schema 指纹。
    *
@@ -313,7 +331,7 @@ final class LegacySchemaProfile {
     return sha256Hex(String.join("\n", lines) + "\n");
   }
 
-  /** 把源指纹识别为固定的 DEV / MAIN profile；任何其它值都不是已知旧部署。 */
+  /** 把源指纹识别为固定的 DEV / MAIN / Java 1.1.0 profile；任何其它值都不是受支持来源。 */
   static String identify(String fingerprint) {
     if (DEV.equals(fingerprint)) {
       return "dev";
@@ -321,9 +339,17 @@ final class LegacySchemaProfile {
     if (MAIN.equals(fingerprint)) {
       return "main";
     }
+    if (V1_1_0.equals(fingerprint)) {
+      return "java-v1.1.0";
+    }
     throw new LegacyDatabaseUpgradeException(
         LegacyDatabaseUpgradeException.Stage.SOURCE_PROFILE,
         "legacy source schema is not a supported deployment profile");
+  }
+
+  /** 是否是已发行 Java 1.1.0 源；它已有完整的当前目录/认证历史，不再走七节 settings 初始化。 */
+  static boolean isV110(String profile) {
+    return "java-v1.1.0".equals(profile);
   }
 
   /** 要求目标恰好是当前 V1 应用 schema，并且带着当前唯一成功的 V1 迁移历史。 */
@@ -342,11 +368,20 @@ final class LegacySchemaProfile {
    * repeatable 数据 seed 只作为来源事实保留在源端，其历史绝不复制进目标。
    */
   static void requireSourceHistory(Connection connection, String profile) {
+    int expectedChecksum;
+    if ("dev".equals(profile)) {
+      expectedChecksum = DEV_V1_CHECKSUM;
+    } else if ("main".equals(profile)) {
+      expectedChecksum = MAIN_V1_CHECKSUM;
+    } else if (isV110(profile)) {
+      expectedChecksum = V1_1_0_V1_CHECKSUM;
+    } else {
+      throw new LegacyDatabaseUpgradeException(
+          LegacyDatabaseUpgradeException.Stage.SOURCE_PROFILE,
+          "legacy source schema is not a supported deployment profile");
+    }
     requireBaselineHistory(
-        connection,
-        LegacyDatabaseUpgradeException.Stage.SOURCE_HISTORY,
-        "main".equals(profile) ? MAIN_V1_CHECKSUM : DEV_V1_CHECKSUM,
-        true);
+        connection, LegacyDatabaseUpgradeException.Stage.SOURCE_HISTORY, expectedChecksum, true);
   }
 
   /**
@@ -398,13 +433,14 @@ final class LegacySchemaProfile {
   }
 
   /**
-   * 目标共有表的稳定 parent-first 顺序：只按 target 跨表 FK 分层（self-FK 不参与），同层按表名升序。
+   * 给定复制清单的稳定 parent-first 顺序：只按 target 跨表 FK 分层（self-FK 不参与），同层按表名升序。
    *
    * @throws LegacyDatabaseUpgradeException 目标 FK 图出现环时
    */
-  static List<String> parentFirstOrder(Connection target) {
+  static List<String> parentFirstOrder(Connection target, List<String> tables) {
+    Set<String> tableSet = Set.copyOf(tables);
     Map<String, Set<String>> parents = new TreeMap<>();
-    for (String table : SHARED_TABLES) {
+    for (String table : tables) {
       parents.put(table, new TreeSet<>());
     }
     try (Statement statement = target.createStatement();
@@ -412,7 +448,7 @@ final class LegacySchemaProfile {
       while (rows.next()) {
         String child = rows.getString(1);
         String parent = rows.getString(2);
-        if (SHARED_TABLE_SET.contains(child) && SHARED_TABLE_SET.contains(parent)) {
+        if (tableSet.contains(child) && tableSet.contains(parent)) {
           parents.get(child).add(parent);
         }
       }
@@ -450,7 +486,7 @@ final class LegacySchemaProfile {
           LegacyDatabaseUpgradeException.Stage.TARGET_SCHEMA,
           "target foreign key graph is not acyclic");
     }
-    List<String> ordered = new ArrayList<>(SHARED_TABLES);
+    List<String> ordered = new ArrayList<>(tables);
     ordered.sort(
         (left, right) -> {
           int byLayer = Integer.compare(layers.get(left), layers.get(right));
