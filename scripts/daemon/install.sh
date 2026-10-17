@@ -134,7 +134,7 @@ cleanup() {
     if [ "$HOST_OS" = Linux ]; then
       echo "下一步：运行 journalctl --user -u $SERVICE_NAME -n 50 --no-pager 查看原因。" >&2
     else
-      echo "下一步：查看日志 $STDERR_LOG。" >&2
+      echo "下一步：查看日志 ${STDERR_LOG}。" >&2
     fi
   fi
   exit "$code"
@@ -145,7 +145,7 @@ trap 'exit 143' TERM
 
 ownership_conflict() {
   local reason=$1 actual_path=${2:-$SERVICE_PATH}
-  echo "安装失败：拒绝操作非受管服务（$reason）。未自动回滚，未知文件未变更。" >&2
+  echo "安装失败：拒绝操作非受管服务（${reason}）。未自动回滚，未知文件未变更。" >&2
   echo "服务定义：$actual_path" >&2
   if [ "$HOST_OS" = Linux ]; then
     echo "下一步：运行 systemctl --user status $SERVICE_NAME 确认归属后再处理。不要伪造所有权标记，不要改动未知文件。" >&2
