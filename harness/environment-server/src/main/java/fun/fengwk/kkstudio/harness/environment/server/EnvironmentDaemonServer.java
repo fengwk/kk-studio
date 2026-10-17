@@ -1509,7 +1509,8 @@ public final class EnvironmentDaemonServer
   /**
    * 幂等清理连接代际：解绑路由租约并关闭传输；在途调用保留等待同实例重连重放。
    *
-   * <p>两项独立释放互不跳过：任一失败只记录固定阶段与异常类名，其余释放继续完成。Error 不吞：收尾完成后按原对象身份抛出首个 Error，后到的 Error 不得遮蔽首个。
+   * <p>两项独立释放互不跳过；诊断延后到两项实际释放之后，因此日志后端自身失败也不会跳过 transport close 或遮蔽业务 Error。 Error
+   * 不吞：收尾完成后按原对象身份抛出首个 Error；诊断失败作为 suppressed 保留，没有业务 Error 时直接传播，绝不静默吞掉。
    */
   private void closeConnectionState(ConnectionState state) {
     EnvironmentId environmentId;
@@ -1533,15 +1534,15 @@ public final class EnvironmentDaemonServer
       }
       connections.remove(state.connection.connectionId(), state);
     }
-    Error failure = null;
+    Throwable leaseFailure = null;
     if (environmentId != null && leaseToken != null) {
       try {
         leaseStore.disconnect(environmentId, leaseToken, timeout());
       } catch (Throwable error) {
-        logFailure("connection cleanup lease disconnect", error);
-        failure = recordCleanupFailure(failure, error);
+        leaseFailure = error;
       }
     }
+    Throwable closeFailure = null;
     try {
       if (closeAfterFlush) {
         state.connection.closeAfterFlush();
@@ -1549,11 +1550,27 @@ public final class EnvironmentDaemonServer
         state.connection.close();
       }
     } catch (Throwable error) {
-      logFailure("connection cleanup transport close", error);
-      failure = recordCleanupFailure(failure, error);
+      closeFailure = error;
     }
-    if (failure != null) {
-      throw failure;
+    Error cleanupError = recordCleanupFailure(null, leaseFailure);
+    cleanupError = recordCleanupFailure(cleanupError, closeFailure);
+    Throwable diagnosticFailure = null;
+    if (leaseFailure != null) {
+      diagnosticFailure =
+          logCleanupFailure("connection cleanup lease disconnect", leaseFailure, diagnosticFailure);
+    }
+    if (closeFailure != null) {
+      diagnosticFailure =
+          logCleanupFailure("connection cleanup transport close", closeFailure, diagnosticFailure);
+    }
+    if (cleanupError != null) {
+      if (diagnosticFailure != null && cleanupError != diagnosticFailure) {
+        cleanupError.addSuppressed(diagnosticFailure);
+      }
+      throw cleanupError;
+    }
+    if (diagnosticFailure != null) {
+      rethrowUnchecked(diagnosticFailure);
     }
   }
 
@@ -1563,6 +1580,9 @@ public final class EnvironmentDaemonServer
    * <p>没有 Error 时返回 {@code null}：普通异常只通过日志观察，不改变会话语义。
    */
   private static Error recordCleanupFailure(Error first, Throwable failure) {
+    if (failure == null) {
+      return first;
+    }
     if (first == null) {
       return failure instanceof Error error ? error : null;
     }
@@ -1570,6 +1590,38 @@ public final class EnvironmentDaemonServer
       first.addSuppressed(failure);
     }
     return first;
+  }
+
+  /**
+   * 记录一次收尾失败并返回诊断后端自身的首个失败；诊断失败只保留、不在日志路径内再次记录，避免无限递归。
+   *
+   * <p>普通 cleanup 异常且日志成功时保持只记录不抛。
+   */
+  private static Throwable logCleanupFailure(
+      String stage, Throwable failure, Throwable firstDiagnosticFailure) {
+    try {
+      logFailure(stage, failure);
+      return firstDiagnosticFailure;
+    } catch (Throwable diagnosticFailure) {
+      if (firstDiagnosticFailure == null) {
+        return diagnosticFailure;
+      }
+      if (firstDiagnosticFailure != diagnosticFailure) {
+        firstDiagnosticFailure.addSuppressed(diagnosticFailure);
+      }
+      return firstDiagnosticFailure;
+    }
+  }
+
+  /** 在全部释放完成后传播诊断后端失败；保持原对象身份，不写入日志以避免递归。 */
+  private static void rethrowUnchecked(Throwable failure) {
+    if (failure instanceof Error error) {
+      throw error;
+    }
+    if (failure instanceof RuntimeException runtime) {
+      throw runtime;
+    }
+    throw new IllegalStateException("cleanup diagnostic failure is not unchecked", failure);
   }
 
   /** 记录一次收尾/通知失败的固定阶段与异常类名；绝不附加原始异常、message、路径或凭据。 */

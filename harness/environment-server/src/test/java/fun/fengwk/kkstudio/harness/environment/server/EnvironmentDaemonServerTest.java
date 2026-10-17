@@ -1862,6 +1862,53 @@ class EnvironmentDaemonServerTest {
     assertTrue(channel.closed());
   }
 
+  /** 测试意图：诊断后端（JUL Handler）自身抛异常时收尾仍完成 transport close，并在全部释放后传播该诊断失败。 */
+  @Test
+  void connectionCleanupCompletesTransportCloseWhenDiagnosticsHandlerThrows() {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-cleanup-log-failure");
+    fixture.leaseStore.disconnectFailure =
+        new IllegalStateException("lease disconnect failed: " + SYNTHETIC_SECRET);
+    IllegalStateException diagnosticFailure =
+        new IllegalStateException("diagnostics backend failed: " + SYNTHETIC_SECRET);
+
+    IllegalStateException thrown;
+    try (ThrowingLogHandler logs = new ThrowingLogHandler(diagnosticFailure)) {
+      thrown =
+          assertThrows(
+              IllegalStateException.class, () -> fixture.server.close(channel.connectionId()));
+    }
+
+    assertSame(diagnosticFailure, thrown, "the diagnostic failure must keep its identity");
+    assertTrue(channel.closed(), "the transport close must run even when diagnostics fail");
+    assertEquals(Set.of(), fixture.server.readyEnvironments());
+  }
+
+  /** 测试意图：业务 Error 之后诊断后端再失败时，仍抛同一个业务 Error；诊断失败作为 suppressed 保留而非遮蔽原错误。 */
+  @Test
+  void connectionCleanupKeepsBusinessErrorIdentityWhenDiagnosticsHandlerThrows() {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-cleanup-error-log-failure");
+    AssertionError leaseFailure =
+        new AssertionError("lease disconnect failed: " + SYNTHETIC_SECRET);
+    IllegalStateException diagnosticFailure =
+        new IllegalStateException("diagnostics backend failed: " + SYNTHETIC_SECRET);
+    fixture.leaseStore.disconnectFailure = leaseFailure;
+
+    AssertionError thrown;
+    try (ThrowingLogHandler logs = new ThrowingLogHandler(diagnosticFailure)) {
+      thrown =
+          assertThrows(AssertionError.class, () -> fixture.server.close(channel.connectionId()));
+    }
+
+    assertSame(leaseFailure, thrown, "the business Error must keep its object identity");
+    assertArrayEquals(
+        new Throwable[] {diagnosticFailure},
+        thrown.getSuppressed(),
+        "the diagnostic failure must stay visible without masking the business Error");
+    assertTrue(channel.closed(), "the transport close must run even when diagnostics fail");
+  }
+
   /** 测试意图：普通 RuntimeException 收尾失败只记录固定阶段与异常类名后被吞掉，不改变关闭语义，另一项释放仍执行。 */
   @Test
   void connectionCleanupLogsRuntimeFailuresWithoutPropagating() {
@@ -2580,6 +2627,47 @@ class EnvironmentDaemonServerTest {
         descriptor,
         new EnvironmentCapabilityCall(callId.toString(), "{\"path\":\"README.md\"}"),
         Duration.ofSeconds(5));
+  }
+
+  /**
+   * 注入会抛异常的 JUL 处理器：验证诊断后端自身失败时收尾仍完成，且诊断失败在全部释放后可见。
+   *
+   * <p>{@link #close()} 恢复级别与父处理器设置，避免影响其它测试。
+   */
+  private static final class ThrowingLogHandler implements AutoCloseable {
+
+    private final Logger logger = Logger.getLogger(EnvironmentDaemonServer.class.getName());
+    private final Level previousLevel = logger.getLevel();
+    private final boolean previousUseParentHandlers = logger.getUseParentHandlers();
+    private final RuntimeException failure;
+    private final Handler handler =
+        new Handler() {
+          @Override
+          public void publish(LogRecord record) {
+            throw failure;
+          }
+
+          @Override
+          public void flush() {}
+
+          @Override
+          public void close() {}
+        };
+
+    private ThrowingLogHandler(RuntimeException failure) {
+      this.failure = failure;
+      handler.setLevel(Level.ALL);
+      logger.addHandler(handler);
+      logger.setLevel(Level.ALL);
+      logger.setUseParentHandlers(false);
+    }
+
+    @Override
+    public void close() {
+      logger.removeHandler(handler);
+      logger.setLevel(previousLevel);
+      logger.setUseParentHandlers(previousUseParentHandlers);
+    }
   }
 
   /**
