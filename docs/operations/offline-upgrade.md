@@ -87,11 +87,6 @@ java -jar web/target/kk-studio-web-<version>.jar database-upgrade apply --config
 4. **核验**。退出码为 0 且输出符合上述形态才算成功。任何失败只输出固定阶段、异常类型、
    `outcomeUncertain` 与安全建议；`outcomeUncertain=true` 表示目标事务是否生效无法确认，必须人工检查
    目标库的实际状态（迁移历史、逐表行数、目录 epoch）而不是盲目重试。
-5. **自动验收**。[`WebApplicationDatabaseUpgradeSubprocessTest`](../../web/src/test/java/fun/fengwk/kkstudio/web/upgrade/WebApplicationDatabaseUpgradeSubprocessTest.java)
-   在可丢弃的 PostgreSQL 17 与私有 MinIO 上跑完整链路：CLI 的 prepare/dry-run/apply 与再 apply 拒绝之后，用不带
-   `database-upgrade` 首参的正常入口（prod profile、仅当前 V1、关闭 worker、回环随机端口）启动同一个目标库，并通过
-   HTTP 读回转换后的 agent/environment/skill 元数据。默认 classpath 与 Fat JAR 两种入口都覆盖；CI 在全量
-   Maven verify 之后自动跑产物模式。
 
 CLI 在读取任何密钥前先关闭进程内实际 classpath 后端的全部现存 logger、根日志与 JUL（`LoggingSystem=none`
 也不会让它变成 no-op），因此第三方驱动、Flyway 与 Plugin 的诊断不会把连接信息或凭据打进终端；它自身也从不
@@ -113,3 +108,5 @@ CLI 在读取任何密钥前先关闭进程内实际 classpath 后端的全部�
 不创建/删除/清空/重置/修复数据库，不自动重试，不改写旧源，不覆盖或合并已提交的目标，不启动 Web 或
 Worker，不执行任何部署、切换或清理动作；这些都必须由操作员按本文与
 [部署与运行](deployment.md) 手工完成。
+
+开发与 CI 的隔离升级验收入口见 [开发与测试](development-and-testing.md#按意图选择检查)。
