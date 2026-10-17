@@ -30,6 +30,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
@@ -99,25 +100,44 @@ class LspClientQuiescenceTest {
     }
   }
 
-  /** 意图：启动失败发生在 stderr 任务已经开始之后时，这次启动已经提交的自有任务必须退出，进程与状态目录必须收敛。 */
+  /**
+   * 意图：启动失败发生在 stderr 任务已经开始之后时，这次启动已经提交的自有任务必须退出，进程与状态目录必须收敛。
+   *
+   * <p>同步：启动在调用线程之外异步进行，测试线程先等到 stderr 任务真正开始运行、致命提交已经进入闸门，再从真实 transcript 读到子进程自己写下的 pid，
+   * 之后才放行注入那条致命错误。「失败之前进程真的存在过」因此是观测事实而不是时序假设，同一 pid 消失才是回收证据。
+   */
   @Test
   void launchFailureAfterTheStderrTaskStartedStillStopsEveryOwnedResource() throws Exception {
     Path transcript = FakeLspServers.transcript(root);
     prepareRoot();
-    TrackingDispatch dispatch = tracking(2, null);
+    CountDownLatch gate = new CountDownLatch(1);
+    TrackingDispatch dispatch = tracking(2, gate);
     LspServerConfig server = FakeLspServers.javaServer("quiescence", "normal", root, transcript);
     long stateDirectories = countStateDirectories();
+    Future<Throwable> launching = callers.submit(() -> launchFailure(server, dispatch));
+    try {
+      assertTrue(dispatch.entered.await(WAIT.toSeconds(), TimeUnit.SECONDS), "致命提交必须进入等待闸门");
+      dispatch.awaitTaskStarted(1, WAIT);
 
-    Error error =
-        assertThrows(
-            AssertionError.class,
-            () ->
-                LspClient.launch(server, root, server.command().getFirst(), dispatch, () -> true));
+      long pid = FakeLspServers.startedPid(transcript);
+      gate.countDown();
 
-    assertSame(dispatch.fatal, error, "启动失败必须保持原身份");
-    dispatch.assertOwnedTasksExited(WAIT);
-    FakeLspServers.awaitProcessGone(FakeLspServers.startedPid(transcript), Duration.ofSeconds(10));
-    assertEquals(stateDirectories, countStateDirectories(), "启动失败不得留下进程范围状态目录");
+      Throwable error = awaitFailure(launching);
+      assertSame(dispatch.fatal, error, "启动失败必须保持原身份");
+      dispatch.assertOwnedTasksExited(WAIT);
+      FakeLspServers.awaitProcessGone(pid, Duration.ofSeconds(10));
+      assertEquals(stateDirectories, countStateDirectories(), "启动失败不得留下进程范围状态目录");
+    } finally {
+      gate.countDown();
+      // 故障路径下调用线程可能仍停在闸门上：有界结算启动结论，避免把在途启动留给 tearDown。
+      try {
+        launching.get(WAIT.toSeconds(), TimeUnit.SECONDS);
+      } catch (ExecutionException | TimeoutException ignored) {
+        // 启动结论由用例主体断言，这里只保证启动线程已经结算。
+      } catch (InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
+      }
+    }
   }
 
   /**
@@ -311,6 +331,18 @@ class LspClientQuiescenceTest {
     }
   }
 
+  /** 有界收集启动结论：致命失败原样返回，成功则登记实例供收尾释放，绝不吞掉失败。 */
+  private Throwable launchFailure(LspServerConfig server, ExecutorService dispatch) {
+    try {
+      LspClient client =
+          LspClient.launch(server, root, server.command().getFirst(), dispatch, () -> true);
+      clients.add(client);
+      return null;
+    } catch (Throwable error) {
+      return error;
+    }
+  }
+
   /** 有界收集：共享启动必须在给定时间内交付，否则是明确的失败而不是让测试悬挂。 */
   private static Throwable awaitFailure(Future<Throwable> result) throws Exception {
     return result.get(WAIT.toSeconds(), TimeUnit.SECONDS);
@@ -395,10 +427,10 @@ class LspClientQuiescenceTest {
   }
 
   /**
-   * 真实线程池：记录每个被提交任务的开始与结束，并可以让第 N 次提交在任务运行之前抛出固定的合成 {@link AssertionError}。
+   * 真实线程池：记录每个被受理任务真正开始与结束的时刻，并可以让第 N 次提交在任务运行之前抛出固定的合成 {@link AssertionError}。
    *
-   * <p>它让测试可以精确制造「已经有自有 IO 任务在跑时的启动失败」与「启动失败发生在关闭已经等待收敛之后」的窗口， 并据此断言这些任务真的退出了。抛出之前可以等测试放行（{@code
-   * gate}），使测试线程先观察到生产的等待同步点。
+   * <p>它让测试可以精确制造「已经有自有 IO 任务在跑时的启动失败」与「启动失败发生在关闭已经等待收敛之后」的窗口，
+   * 并据此断言这些任务真的退出了。致命提交在抛错之前等待测试放行（{@code gate}），测试线程因此可以先读到真实子进程写下的证据，再放行注入同一条致命错误。
    */
   private static final class TrackingDispatch extends ThreadPoolExecutor {
 
@@ -407,6 +439,7 @@ class LspClientQuiescenceTest {
 
     private final CountDownLatch gate;
     private final AtomicInteger submitted = new AtomicInteger();
+    private final List<CountDownLatch> starts = Collections.synchronizedList(new ArrayList<>());
     private final List<CountDownLatch> exits = Collections.synchronizedList(new ArrayList<>());
     private volatile int fatalSubmit;
 
@@ -425,10 +458,13 @@ class LspClientQuiescenceTest {
         awaitGate();
         throw fatal;
       }
+      CountDownLatch start = new CountDownLatch(1);
       CountDownLatch exit = new CountDownLatch(1);
+      starts.add(start);
       exits.add(exit);
       super.execute(
           () -> {
+            start.countDown();
             try {
               command.run();
             } finally {
@@ -446,6 +482,20 @@ class LspClientQuiescenceTest {
       return submitted.get();
     }
 
+    /** 有界等待第 {@code index}（从 1 开始）个自有任务真正开始运行：受理记录不等于已经开始。 */
+    private void awaitTaskStarted(int index, Duration timeout) throws InterruptedException {
+      CountDownLatch startedTask;
+      synchronized (starts) {
+        if (starts.size() < index) {
+          fail("owned LSP I/O task #" + index + " was never dispatched");
+        }
+        startedTask = starts.get(index - 1);
+      }
+      if (!startedTask.await(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
+        fail("an owned LSP I/O task did not start running");
+      }
+    }
+
     /** 有界断言：已经提交的每一个自有任务都真正结束了。 */
     private void assertOwnedTasksExited(Duration timeout) throws InterruptedException {
       long deadline = System.nanoTime() + timeout.toNanos();
@@ -461,9 +511,6 @@ class LspClientQuiescenceTest {
     }
 
     private void awaitGate() {
-      if (gate == null) {
-        return;
-      }
       try {
         gate.await();
       } catch (InterruptedException error) {
