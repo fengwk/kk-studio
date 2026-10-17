@@ -102,6 +102,21 @@ async function awaitProgress(
   }
 }
 
+/**
+ * Cleanup for an exchange whose body failed: abort the signal first, because an exchange stuck in
+ * its gateway handshake only settles once the signal is aborted; then close an assigned gateway
+ * and wait for the already-observed settlement.
+ */
+async function abortAndSettle(
+  controller: AbortController,
+  closeGateway: () => void,
+  settled: Promise<void>,
+): Promise<void> {
+  controller.abort()
+  closeGateway()
+  await settled
+}
+
 async function listen(server: Server): Promise<number> {
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
   return (server.address() as AddressInfo).port
@@ -1169,11 +1184,12 @@ describe('WebSocket exchanges over the reverse stream', () => {
       })
     })
 
+    const controller = newSignal()
     const exchange = openStreamExchange({
       streamUrl: gateway.url,
       request: { mode: 'WS', method: 'GET', path: '/ws', headers: [] },
       upstream: upstreamOf(upstream.url),
-      signal: newSignal().signal,
+      signal: controller.signal,
     })
     // Observe the exchange immediately so cleanup-triggered aborts can never escape as unhandled
     // rejections; the body's own assertion error remains the primary failure.
@@ -1206,10 +1222,10 @@ describe('WebSocket exchanges over the reverse stream', () => {
       gatewaySocket?.close()
       await exchange
     } finally {
-      gatewaySocket?.close()
-      // The exchange may already have settled (success or the failure above); never leave its
-      // rejection unobserved after cleanup.
-      await exchangeSettled
+      // Abort before waiting: if the body failed before the gateway was assigned (handshake still
+      // in flight), only the signal can settle the exchange; awaiting first would deadlock and
+      // defer the abort to afterEach.
+      await abortAndSettle(controller, () => gatewaySocket?.terminate(), exchangeSettled)
     }
   }, 90_000)
 
@@ -2551,5 +2567,27 @@ describe('progress budget', () => {
       { idleMillis: 1000, totalMillis: 1000 },
     )
     expect(observed).toBeGreaterThanOrEqual(5)
+  })
+})
+
+describe('exchange cleanup', () => {
+  it('aborts before awaiting settlement so an unfinished handshake cannot hang cleanup', async () => {
+    const controller = new AbortController()
+    const closed: string[] = []
+    let settle: () => void = () => undefined
+    const settled = new Promise<void>((resolve) => {
+      settle = resolve
+    })
+    // An exchange still in its gateway handshake settles only once the signal is aborted.
+    controller.signal.addEventListener('abort', () => settle(), { once: true })
+
+    const outcome = await Promise.race([
+      abortAndSettle(controller, () => closed.push('gateway'), settled).then(() => 'settled'),
+      delay(1000).then(() => 'hung'),
+    ])
+
+    expect(outcome).toBe('settled')
+    expect(controller.signal.aborted).toBe(true)
+    expect(closed).toEqual(['gateway'])
   })
 })
