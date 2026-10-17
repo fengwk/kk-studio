@@ -32,6 +32,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -254,39 +255,72 @@ class LspClientStopBoundaryTest {
     assertEveryCleanupAttempted(harness);
   }
 
-  /**
-   * 意图：停止线程在等待命令退出时被中断，必须如实报告「未证明收敛」，但范围、标准流与自有任务仍必须收敛。
-   *
-   * <p>同步点是停止线程真的阻塞在生产退出等待上（受控进程的闩锁），因此中断一定发生在 {@code waitForExit} 之内。
-   */
+  /** 意图：温和退出等待被中断后，已证明的范围与 IO 收敛仍是成功，中断标记和共享结论都必须保留。 */
   @Test
-  void interruptedExitWaitReportsUnprovenConvergenceAndStillConvergesScope() throws Exception {
+  void interruptedExitWaitKeepsProvedConvergenceAndInterrupt() throws Exception {
     RemoteStub remote = new RemoteStub();
     Harness harness = harness(remote);
-    harness.process().blockOnWait = true;
 
+    assertNull(interruptExitWait(harness), "范围和自有 IO 已证明静止，不得把等待中断伪造成停止失败");
+    harness.client().stop(STOP_GRACE);
+
+    assertFalse(harness.client().isAlive());
+    assertEquals(1, remote.exitCalls(), "重复停止必须复用已发布结论，不再执行关闭协议");
+    assertEveryCleanupAttempted(harness);
+  }
+
+  /** 意图：温和退出等待被中断后，真实的范围未收敛仍须失败，不能被已完成的共享等待改写成成功或中断。 */
+  @Test
+  void interruptedExitWaitKeepsUnprovenScopeFailureAndInterrupt() throws Exception {
+    RemoteStub remote = new RemoteStub();
+    Harness harness = harness(remote);
+    harness.process().exitsOnWait = false;
+
+    Throwable failure = interruptExitWait(harness);
+
+    assertTrue(
+        failure instanceof ToolServiceFailureException
+            && failure.getMessage().contains("process scope did not converge"),
+        "必须报告范围未收敛的真实失败，实际 " + failure);
+    assertSame(
+        failure,
+        assertThrows(ToolServiceFailureException.class, () -> harness.client().stop(STOP_GRACE)));
+    assertEquals(1, remote.exitCalls(), "重复停止必须复用已发布失败，不再执行关闭协议");
+    assertEveryCleanupAttempted(harness);
+  }
+
+  /** 在真实退出等待内中断停止线程；先证明 IO 静止，避免 IO 退出与中断竞争干扰范围结论。 */
+  private static Throwable interruptExitWait(Harness harness) throws Exception {
+    harness.process().blockOnWait = true;
+    AtomicBoolean interrupted = new AtomicBoolean();
     CompletableFuture<Throwable> result = new CompletableFuture<>();
     Thread stopper =
         new Thread(
             () -> {
+              Throwable failure = null;
               try {
                 harness.client().stop(STOP_GRACE);
-                result.complete(null);
-              } catch (Throwable failure) {
-                result.complete(failure);
+              } catch (Throwable stopFailure) {
+                failure = stopFailure;
               }
+              interrupted.set(Thread.currentThread().isInterrupted());
+              result.complete(failure);
             },
             "lsp-boundary-interrupted-stop");
     stopper.start();
-    assertTrue(harness.process().awaitWaitEntered(WAIT), "停止必须真的阻塞在等待命令退出上");
-    stopper.interrupt();
-
-    Throwable failure = result.get(WAIT.toSeconds(), TimeUnit.SECONDS);
-    assertTrue(
-        failure instanceof ToolServiceFailureException
-            && failure.getMessage().contains("interrupted"),
-        "被中断的停止必须如实报告未证明收敛，实际 " + failure);
-    assertEveryCleanupAttempted(harness);
+    try {
+      assertTrue(harness.process().awaitWaitEntered(WAIT), "停止必须真的阻塞在等待命令退出上");
+      harness.process().input().close();
+      assertNull(harness.ioTasks().closeAndAwait(WAIT.toMillis()), "自有 IO 必须真的静止");
+      stopper.interrupt();
+      Throwable failure = result.get(WAIT.toSeconds(), TimeUnit.SECONDS);
+      assertTrue(interrupted.get(), "停止线程必须保留中断标记");
+      return failure;
+    } finally {
+      stopper.interrupt();
+      stopper.join(WAIT.toMillis());
+      assertFalse(stopper.isAlive(), "停止线程必须真正退出");
+    }
   }
 
   /**
@@ -392,7 +426,7 @@ class LspClientStopBoundaryTest {
           }
         });
     assertTrue(started.await(WAIT.toSeconds(), TimeUnit.SECONDS), "自有 IO 任务必须真的开始");
-    return new Harness(client, process, stateDir, exited, remote);
+    return new Harness(client, process, stateDir, exited, remote, ioTasks);
   }
 
   /** 镜像生产的 stderr 排空：读阻塞在流上，只有流被关闭才可能退出。 */
@@ -467,7 +501,8 @@ class LspClientStopBoundaryTest {
       ControlledProcess process,
       Path stateDir,
       CountDownLatch taskExited,
-      RemoteStub remote) {}
+      RemoteStub remote,
+      LspClientOwnedTasks ioTasks) {}
 
   /** 受控远端：只回答关闭协议与初始化握手，其余方法一律视为「本次边界不涉及」。 */
   private static final class RemoteStub implements InvocationHandler {
