@@ -79,7 +79,7 @@ web -> harness-infra -> harness-runtime -> harness-tool / harness-environment
 platform-runtime -> platform-plugin-api
 platform-runtime -> Canvas / Harness contracts / harness-mcp
 platform-runtime -> project（实现宿主端口）
-harness-daemon -> harness-environment
+daemon -> harness-environment（通过 wire 协议消费共享契约）
 ```
 
 根 [`pom.xml`](../pom.xml) 聚合 `share`、`schema`、`canvas`、`project`、`harness`、
@@ -166,7 +166,7 @@ Skill 身份为 `(packageName, name)`。Package 保存仓库、branch、人工�
 name、description 与稳定 path。Daemon 已安装 commit 与当前发布 commit 一致时使用
 本地路径，否则使用 Platform URI。内容按 Package 当前安装版本读取，因此已打开的
 Turn 也可能观察到发布或同步后的内容。安装和发布细节见 [Platform](modules/platform.md)
-与 [Harness Daemon](modules/harness-daemon.md)。
+与 [Environment Daemon](modules/daemon.md)。
 
 Agent 的 subagents allowlist 决定可委派对象。`task` 将命令与 join 身份持久接受后立即
 返回可读英文接受说明 `Task accepted. thread_id: <uuid>.`（异步回报、继续独立工作或让出、按 thread_id 续做；结构化元数据在 details）；父 Thread 可以继续工作，root Join 在子执行
@@ -328,7 +328,7 @@ Environment 按数据类型使用四条路径：
 
 协议、路由租约与主机执行分别见 [Harness Environment](modules/harness-environment.md)、
 [Environment Server](modules/harness-environment-server.md)和
-[Harness Daemon](modules/harness-daemon.md)。
+[Environment Daemon](modules/daemon.md)。
 
 ## 部署与安全条件
 

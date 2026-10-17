@@ -7,109 +7,98 @@
 
 ## 选择验证入口
 
-从仓库根目录运行，使用 JDK 21。下面的测试会启动真实本地进程、创建临时文件并发送终止信号，
+运行测试时区分 Node Daemon 与后端 Java 模块。下面的测试会启动真实本地进程、创建临时文件并发送终止信号，
 不调用模型、不连接部署数据库。必须使用可供测试创建和收敛子进程的工作站或 CI runner。
 
 ```bash
-# Daemon：命令执行、范围收敛、输出发布与协议终态
-env JAVA_HOME="$JAVA_HOME_21" mvn -pl harness/daemon -am test
+# Daemon：类型检查、构建、命令执行、范围收敛、输出发布与协议终态（Node 24）
+npm --prefix daemon ci
+npm --prefix daemon run check
+npm --prefix daemon run build
+npm --prefix daemon run test -- test/coding/process.test.ts test/native/process-supervisor.test.ts
+npm --prefix daemon run coverage
 
-# 提示词与 capability schema
+# 后端：提示词与 capability schema（JDK 21）
 env JAVA_HOME="$JAVA_HOME_21" mvn -pl harness/builtin -am test \
   -Dtest='BuiltinHarnessContributorTest,EnvironmentCapabilityCatalogTest' \
   -Dsurefire.failIfNoSpecifiedTests=false
 
-# 静态权限面分析，不执行被分析的命令
+# 后端：静态权限面分析，不执行被分析的命令（JDK 21）
 env JAVA_HOME="$JAVA_HOME_21" mvn -pl harness/runtime -am test \
   -Dtest='BashSurfaceAnalyzerTest,BashSurfaceAnalyzerCoverageTest' \
   -Dsurefire.failIfNoSpecifiedTests=false
 ```
 
-Daemon 的重点类是 `BashCapabilityTest`、`ProcessScopeTest`、`ProcessScopeCrossPlatformTest`、
-`ProcessScopeHelperFailureTest`、`PosixProcessGroupTest`、`ProcessScopeStateTest`、`WindowsCommandLineTest`、`WindowsJobScopeTest`、
-`OutputSpoolTest`、`TextOutputStoreTest` 和 `DaemonRuntimeTest`。只筛选某类时仍保留 `-am` 与
-`-Dsurefire.failIfNoSpecifiedTests=false`，并检查目标模块的 Surefire XML 确实执行了目标用例；
-上游模块没有同名测试不应导致失败，但目标用例缺失也不能当作通过。
+Daemon 的重点测试文件位于 [`test/coding/process.test.ts`](../../daemon/test/coding/process.test.ts)、
+[`test/native/process-supervisor.test.ts`](../../daemon/test/native/process-supervisor.test.ts)、
+[`test/native/posix-session.test.ts`](../../daemon/test/native/posix-session.test.ts)、
+[`test/native/process-supervisor-windows.test.ts`](../../daemon/test/native/process-supervisor-windows.test.ts)、
+[`test/coding/output.test.ts`](../../daemon/test/coding/output.test.ts) 与
+[`test/runtime.test.ts`](../../daemon/test/runtime.test.ts)。
 
 矩阵 `daemon.ready` 是 L4 的 capability 登记验证，不执行 Bash；当前 E2E inventory 没有 Bash
 执行用例。隔离容器中的命令 smoke 由
-[`NativeToolSmoke.java`](../../scripts/dev/verify/reliability/fixtures/NativeToolSmoke.java) 承担，
+[`NativeToolSmoke.mjs`](../../scripts/dev/verify/reliability/fixtures/NativeToolSmoke.mjs) 承担，
 通过 `stack.sh tool-smoke` 运行，不经过 Agent、Provider 或 App command batch。
 它需要已经启动的可靠性栈，准备与清理边界见
 [开发与测试](development-and-testing.md#隔离栈与真实-agent-矩阵)，不能把它称为 Platform 调用端到端证据。
 
 ## 命令与退出结果
 
-[`BashCapability`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/BashCapability.java)
+[`process.ts`](../../daemon/src/coding/process.ts)
 以宿主配置的 `bash -lc <command>` 启动命令，`workdir` 每次必填，没有隐式 cwd 或 stdin 命令传输模式。
-捕获模式把 stdout/stderr 合到同一流：POSIX 在 helper 内执行 `dup2(1, 2)`，Windows 在创建标准句柄时合并，
-不是 Java `ProcessBuilder.redirectErrorStream`。stdin 写端立即关闭，等待 EOF 的命令必须能自然退出。
+捕获模式把 stdout/stderr 合到同一流，stdin 写端立即关闭，等待 EOF 的命令必须能自然退出。
 
 | 要验证的行为 | 主要断言 |
 | --- | --- |
-| 自然退出与非零退出码保真，非零退出标记错误 | `BashCapabilityTest.exitOutcomesCarryAuthoritativeExitCode`、`userExitTrapAndExactExitCodeSurviveTheScope`、`execReplacedShellKeepsTheCommandExitCode` |
-| stdin 确定性 EOF、两路大输出不死锁 | `closesStdinSoCommandsWaitingForEofFinishNaturally`、`keepsPayloadBeyondPipeBufferComplete`、`mergedStreamsBeyondPipeBufferCompleteWithoutDeadlock` |
-| 启动前取消或超时不运行命令、不触碰输出存储 | `preCancelledCallDoesNotStartShellOrTouchStore`、`preTimedOutCallDoesNotStartShellOrTouchStore` |
-| 启动失败不留下中转文件 | `startFailureIsReportedWithoutStagingResidue` |
-| 超时预算原样传递，零值无 deadline，极大值不变成立即超时 | `DaemonRuntimeTest.usesWireTimeoutVerbatimWithoutDescriptorFallback`、`zeroTimeoutMeansNoDeadlineAndIsNotAnImmediateTimeout`、`acceptsMaximumWireTimeoutWithoutOverflowingScheduler` |
-| 缺 workdir 不回退、未知字段在副作用之前拒绝 | `DaemonRuntimeTest.omittedWorkdirIsRejectedWithoutDefaultFallback`、`rejectsUnknownWorkspacePathFieldInV1InvokePayloadBeforeSideEffects` |
+| 自然退出与非零退出码保真，非零退出标记错误 | `process.test.ts` 验证自然退出携带权威退出码、用户 exit trap 与退出状态在会话结束后保留 |
+| stdin 确定性 EOF、大输出不死锁 | 验证写入端关闭使等待 EOF 的命令自然结束、大输出完整合并捕获不死锁 |
+| 启动前取消或超时不运行命令、不触碰输出存储 | `process.test.ts` 验证 pre-aborted 上下文立即失败，不启动 shell 或触碰存储 |
+| 启动失败不留下中转文件 | 进程启动失败时清理 staging 文件并报告错误 |
+| 超时预算原样传递，零值无 deadline，极大值不变成立即超时 | `runtime.test.ts` 验证 wire timeout 原样生效，0 表示无 deadline |
+| 缺 workdir 不回退、未知字段在副作用之前拒绝 | 缺少 workdir 或包含未知参数在发生副作用前被拒绝 |
 
 机器事实在 `detailsJson.process` 中：`outcome` 为 `EXITED`、`TIMED_OUT` 或 `CANCELLED`，
 只有自然退出报告权威 `exitCode`，不以 `128 + signal` 合成被杀进程的退出码。
 
 ## 进程范围与清理
 
-[`ProcessScope`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/ProcessScope.java)
-与 [`ProcessScopeHelper`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/ProcessScopeHelper.java)
+原生进程监管器（[`posix-supervisor.ts`](../../daemon/src/native/posix-supervisor.ts) 与
+[`process-supervisor-windows.ts`](../../daemon/src/native/process-supervisor-windows.ts)）
 使用 POSIX 进程组或 Windows 命名 Job Object。终态通知前必须确认整组收敛，首个进程退出并不充分。
 POSIX 先发 SIGTERM、等待宽限、再强杀；Windows 用 Job 的 `KILL_ON_JOB_CLOSE` 和活动成员计数确认收敛。
 
-- 自然退出、后台作业持有 stdout、`disown` 和嵌套 fork：由 `BashCapabilityTest` 的
-  `naturalExitReapsBackgroundDescendantsBeforeTerminalCallback`、
-  `naturalExitCompletesEvenWhenBackgroundJobHoldsStdout`、
-  `disownedBackgroundJobIsReapedOnNaturalExit`、`nestedForkDescendantsAreReapedOnNaturalExit` 验证。
-- 超时、取消、忽略温和信号和命令 trap：由 `timeoutTerminatesWholeProcessTree`、
-  `cancellationTerminatesWholeProcessTree`、`termIgnoringDescendantIsForceKilledOnTimeout`、
-  `commandCanTrapTerminationBeforeTheForceKill` 验证。超时夹具先等命令就绪屏障，再触发生产超时任务，
-  避免把 helper 冷启动速度误当成超时语义。
-- 许可前取消、许可与派生竞争、并发终止、状态损坏、身份核验和私有目录清理：由 `ProcessScopeTest`
-  验证；`ProcessScopeStateTest` 验证状态文件读写与失败处理。
-  检查终止后的存活状态与身份证据，无法判定收敛时报告失败。
-- 不依赖平台 shell 的进程层级与 stdin/duplex 语义：由 `ProcessScopeCrossPlatformTest`
-  使用真实 Java 进程和原生 pid 验证。LSP 使用同一个范围的 `startDuplex` 模式，stdin/stdout/stderr 保持独立，
-  相关启动失败与关闭清理由 `LspClientTest`、`LspClientPoolConcurrencyTest` 验证。
+- 自然退出、后台作业持有 stdout、`disown` 和嵌套 fork：由 `process.test.ts` 与 `process-supervisor.test.ts` 验证自然退出时收敛存活的后台子进程，后台持有流不阻塞退出结算。
+- 超时、取消、忽略温和信号和命令 trap：验证超时与取消终止整棵后代进程树，忽略 SIGTERM 的顽固进程在宽限期后被 SIGKILL 强制回收。
+- 许可前取消、并发终止与私有目录清理：由 `process-supervisor.test.ts` 验证终止后的存活状态，无法判定收敛时报告失败。
+- 不依赖平台 shell 的进程层级与 stdin/duplex 语义：由 `process-supervisor.test.ts` 使用真实 Node 夹具进程和原生 pid 验证。LSP 使用同一个 supervisor 的 duplex 模式，stdin/stdout/stderr 保持独立。
 
 范围不是恶意命令沙箱：命令主动 `setsid`、`set -m` 或交给其他 session 时不受这条边界约束。
-keeper 被外部强杀后的 POSIX 兜底依赖 Linux/WSL `/proc` 成员枚举，并逐个复核存活、启动时刻和组身份；
-没有身份信息的平台不能把未确认的范围报告为已收敛，也不能盲目按旧 pid 快照发信号。
 
 ## 输出与协议终态
 
-[`OutputSpool`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/OutputSpool.java)
-负责内联预算、有界预览和全文捕获；
-[`TextOutputStore`](../../harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/coding/TextOutputStore.java)
-负责私有存储与发布。
+[`output.ts`](../../daemon/src/coding/output.ts)
+负责内联预算、有界预览和全文捕获与存储发布。
 默认全文捕获预算为 1 GiB，耗尽后继续排空输出并计数。全文发布优先原子改名，不支持时使用普通改名；
 文件编辑提交的原子替换要求则见[文件变更验证](builtin-mutation-tests.md#原子提交权限并发和取消)。
 
 | 情况 | 主要证据与预期 |
 | --- | --- |
-| 小输出 | `OutputSpoolTest.staysInlineUnderLimitsAndPreservesErrorFlag`：正文不改写、不落盘 |
-| 字节或行数超阈值 | `spillsOnByteThresholdAndPublishesTextResultContentWithPath`、`spillsOnLineThresholdAndKeepsLocalFullText`：发布全文与可读路径 |
-| 预览与计数 | `previewIsBoundedAndMarksTheOmittedMiddle`、`previewCutsAtCharacterBoundaryWithoutReplacementCharacters`、`lineCountingMatchesTextStreamsForCrLfAndCrlf`：保留有界头尾，不破坏 UTF-8，计数包含 CR/LF/CRLF |
-| 捕获预算耗尽 | `captureBudgetStopsFileCaptureWithoutFailingTheCall`：停止文件捕获但继续计数，不终止命令 |
-| 存储或发布失败 | `localStorageFailureDegradesToBoundedPreviewWithoutThrowing`、`publishFailureDegradesToPreviewAndRemovesStagingFile`、`publishFailurePreviewStillReportsCaptureTruncation`：无路径预览、不留中转文件，分别报告捕获截断与发布失败 |
-| 超时/取消后的输出 | `BashCapabilityTest.timeoutPublishesSpilledOutputAndKeepsCountsFaithful`、`cancellationKeepsCapturedOutputAndIsIdempotent`：保留已捕获文本，终态说明不写入全文或字节/行计数 |
+| 小输出 | `output.test.ts` 验证阈值内输出保持内联，不落盘 |
+| 字节或行数超阈值 | 超过 50 KiB 或 2000 行时外化到本地文件并返回有界预览与绝对路径 |
+| 预览与计数 | 保留有界头尾，不破坏 UTF-8，计数包含 CR/LF/CRLF |
+| 捕获预算耗尽 | 停止文件捕获但继续计数，不终止命令 |
+| 存储或发布失败 | 降级为无路径预览、不留中转文件，分别报告捕获截断与发布失败 |
+| 超时/取消后的输出 | 保留已捕获文本，终态说明不写入全文或字节/行计数 |
 
 `detailsJson.textOutput` 的 `path`、`captureTruncated`、`captureFailed`、`totalBytes` 与 `totalLines`
 是判断结果是否完整的事实，不按文本里的 “limit” 等字样猜测截断。私有目录被外部删除时降级为预览；
 当前调用返回降级结果；排查时同时检查预览、捕获状态和 staging 清理。
-需要验证文件通道写入或 flush/close 异常时，使用能触发该分支的故障夹具并检查本次覆盖报告。
 
-[`DaemonRuntimeTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/DaemonRuntimeTest.java)
+[`runtime.test.ts`](../../daemon/test/runtime.test.ts)
 验证超时裁决仍为 `FAILED`、取消裁决仍为 `CANCELLED`，两者在收尾窗口携带捕获输出；
 能力未回调、调度器拒绝、收尾中停机和迟到回调都只能产生一个终态。
-`handoffDropsCapabilityTextBeyondWireLimit` 还固定超过 16 MiB wire 预算时整体丢弃能力文本，而非发送超大终态。
+超过 16 MiB wire 预算时整体丢弃能力文本，而非发送超大终态。
 
 ## 权限面分析
 
@@ -125,20 +114,8 @@ keeper 被外部强杀后的 POSIX 兜底依赖 Linux/WSL `/proc` 成员枚举�
 
 ## 平台证据与覆盖率
 
-Surefire 结果在各模块 `target/surefire-reports`，JaCoCo 报告在 `target/site/jacoco`。
-Daemon 不绑定 `jacoco:check`；Runtime 的固定核心类门禁不包含 `BashSurfaceAnalyzer`。
-报告中未覆盖行以当前运行产物为准，不把静态检查或未执行的平台测试称为覆盖率证据。
+后端 Java 模块 Surefire 结果在各模块 `target/surefire-reports`，JaCoCo 报告在 `target/site/jacoco`；Runtime 的固定核心类门禁不包含 `BashSurfaceAnalyzer`。
 
-跨平台入口是 [process-scope.yml](../../.github/workflows/process-scope.yml) 的 Linux/macOS/Windows 矩阵。
-Windows 必须在 Daemon 配置的 `bashExecutable`（Web 安装设置或 `daemon.json`）指定 Git Bash：裸名 `bash` 可能命中 `System32\bash.exe` 的 WSL 转发器。
-`BashCapabilityTest` 找不到 Git Bash 会跳过；矩阵额外要求 stdin EOF 与超时溢出两条必须真跑。
-用裸名 bash 的 `CodingCapabilitiesTest`、`CodingCapabilitiesEdgeTest` 不参与 Windows 腿。
-本机单平台测试不能代替其他平台的原生证据。
-
-helper 是独立 JVM，默认不进入主覆盖数据。矩阵启用
-`-Dkk-studio.process-scope.helper-coverage=true`，收集 `target/jacoco-helper/*.exec`。
-合并作业校验三平台 class 文件一致，再合并数据。核心类清单、合计行覆盖率计算与阈值由
-[gate-core-coverage.py](../../scripts/dev/verify/process-scope/gate-core-coverage.py) 定义；
-单平台数字与同一次矩阵的合并数字分别报告。
+Daemon 覆盖率由 Vitest 与 `@vitest/coverage-v8` 统计（`npm --prefix daemon run coverage`），并在 [.github/workflows/daemon-ci.yml](../../.github/workflows/daemon-ci.yml) 的多平台矩阵中执行（覆盖 Linux amd64/arm64、macOS arm64/amd64 与 Windows amd64）。Windows 必须在 Daemon 配置的 `bashExecutable`（Web 安装设置或 `daemon.json`）指定 Git Bash：裸名 `bash` 可能命中 `System32\bash.exe` 的 WSL 转发器。五个平台都真跑 native 进程范围、退出、Job/session 与能力层用例，任一平台失败即整体失败。本机单平台测试不能代替其他平台的原生证据。
 
 终端折叠、计时文案与渲染回退不是 Daemon 的职责，以上测试不提供前端展示证据。

@@ -517,8 +517,9 @@ test('honors a custom report root and publishes timestamped and latest reports',
         assert.equal(summary.mode, 'sbom')
         assert.equal(summary.checks.find(check => check.name === 'backend-sbom').status, 'PASS')
         assert.equal(summary.checks.find(check => check.name === 'frontend-sbom').status, 'PASS')
+        assert.equal(summary.checks.find(check => check.name === 'daemon-sbom').status, 'PASS')
         const summaryMarkdown = readFileSync(path.join(reportRoot, 'latest/summary.md'), 'utf8')
-        assert.match(summaryMarkdown, /requested backend and frontend SBOM checks completed/i)
+        assert.match(summaryMarkdown, /requested backend, frontend and daemon SBOM checks completed/i)
         assert.doesNotMatch(summaryMarkdown, /Dependency-Check JSON contains zero/)
         assert.doesNotMatch(summaryMarkdown, /image functional smokes passed/)
     } finally {
@@ -890,7 +891,8 @@ test('fails closed when Trivy exits zero but its JSON has a fixable vulnerabilit
 })
 
 test('keeps runtime apt upgrade before install in both image Dockerfiles', () => {
-    // Intent: every runtime build must absorb Ubuntu security updates before adding runtime packages.
+    // Intent: every runtime build must absorb the base distribution's security updates before adding
+    // runtime packages, and must not leave apt lists behind.
     for (const dockerfile of [
         path.join(REPOSITORY_ROOT, 'deploy/local/Dockerfile'),
         path.join(REPOSITORY_ROOT, 'deploy/reliability/daemon.Dockerfile'),
@@ -907,7 +909,6 @@ test('keeps runtime apt upgrade before install in both image Dockerfiles', () =>
         assert.equal(upgradeIndex < installIndex, true, dockerfile)
         assert.match(runtime, /apt-get clean/)
         assert.match(runtime, /rm -rf \/var\/lib\/apt\/lists\/\*/)
-        assert.match(runtime, /Ubuntu security updates/)
     }
 })
 
@@ -984,14 +985,17 @@ test('fails closed on an unfixed HIGH vulnerability', () => {
 })
 
 test('pins runtime versions and only overrides vulnerable npm bundles with upstream fixes', () => {
-    // Intent: keep Java21/Node22/Jammy and non-root identities while avoiding unnecessary or private patches.
+    // Intent: keep pinned bases and non-root identities while avoiding unnecessary or private patches.
+    // The daemon image ships the frozen Node 24.21.0 distribution (no JRE, one Node binary) and only
+    // refreshes the npm CLI's own bundled dependencies that have same-major upstream fixes.
     const app = readFileSync(path.join(REPOSITORY_ROOT, 'deploy/local/Dockerfile'), 'utf8')
     const daemon = readFileSync(path.join(REPOSITORY_ROOT, 'deploy/reliability/daemon.Dockerfile'), 'utf8')
     assert.match(app, /FROM eclipse-temurin:21\.0\.12\.1_1-jre-jammy/)
     assert.match(app, /--uid 10001/)
-    assert.match(daemon, /FROM eclipse-temurin:21\.0\.12\.1_1-jdk-jammy/)
-    assert.match(daemon, /FROM node:22\.23\.3-bookworm-slim AS node-runtime/)
-    assert.match(daemon, /npm install --global npm@11\.21\.0/)
+    assert.match(daemon, /ARG NODE_IMAGE=node:24\.21\.0-bookworm-slim/)
+    assert.match(daemon, /FROM \$\{NODE_IMAGE\} AS builder/)
+    assert.match(daemon, /FROM debian:bookworm-slim/)
+    assert.doesNotMatch(daemon, /eclipse-temurin|daemon\.jar/)
     for (const dependency of ['brace-expansion@5.0.12', 'ip-address@10.7.3', 'undici@6.28.1']) {
         assert.ok(daemon.includes(`npm pack ${dependency} `))
     }

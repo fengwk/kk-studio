@@ -134,13 +134,12 @@ shutil.copyfile(src, output)
 
 
 def _npm_shim() -> str:
-    # The archive validator uses the real parser; only npm selection and native payloads are fixtures.
-    override = os.environ.get("KK_STUDIO_TAR_PARSER")
-    parser = Path(override) if override else Path(__file__).resolve().parents[3] / "daemon" / "node_modules" / "tar"
+    # The archive validator uses the real parser shipped with the daemon's own dependencies.
+    parser = Path(__file__).resolve().parents[3] / "daemon" / "node_modules" / "tar"
     return (
         "#!/usr/bin/env python3\n"
         "import os\n"
-        f"TAR_PARSER = os.environ.get('KK_STUDIO_TAR_PARSER', {repr(str(parser))})\n"
+        f"TAR_PARSER = {repr(str(parser))}\n"
         + r"""import json
 import os
 import sys

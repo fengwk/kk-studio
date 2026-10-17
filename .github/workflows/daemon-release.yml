@@ -51,9 +51,78 @@ jobs:
     name: node daemon matrix
     uses: ./.github/workflows/daemon-ci.yml
 
+  # 发布前的安装器宿主验收：归档/安装器 fixture 必须在目标宿主系统 Bash 与两个 PowerShell
+  # 版本下真跑，避免只在 tag 触发时才绕过安装器契约。
+  validate_daemon:
+    name: validate Node daemon and Unix installer
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Set up JDK 21
+        # 仓库脚本测试使用 JDK 的 `jar` 工具；Daemon 本体不需要 JRE。
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: maven
+      - name: Set up Node 24.21
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: daemon/package-lock.json
+      - name: Install daemon dependencies
+        # fixture 使用真实 daemon 依赖（含 tar 解析器）与真实 Node 入口。
+        run: npm --prefix daemon ci
+      - name: Type-check and unit-test the daemon
+        run: |
+          npm --prefix daemon run check
+          npm --prefix daemon run build
+          npm --prefix daemon run coverage
+      - name: Test Unix installer and packaging with system Bash
+        # fixture 代替网络与服务管理命令：不注册真实 systemd/launchd 服务，也不下载真实运行时。
+        run: python3 -m unittest discover -s scripts/daemon/tests -p 'test_*.py'
+
+  validate_windows_daemon:
+    name: validate Windows daemon installer
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Set up Node 24.21
+        # Windows fixture 用 runner 上的真实 node.exe 构建归档。
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Test installer with Windows PowerShell 5.1
+        shell: powershell
+        run: .\scripts\daemon\tests\test_daemon_install_windows.ps1
+      - name: Test installer with PowerShell 7
+        # PS 5.1 失败不隐藏 PS 7 的结论；两个宿主任一失败都阻断发布。
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        run: .\scripts\daemon\tests\test_daemon_install_windows.ps1
+      - name: Install frontend dependencies
+        shell: bash
+        run: npm --prefix frontend ci
+      - name: Test generated Windows install command natively
+        shell: bash
+        run: npm --prefix frontend run test:install:windows
+
   stage:
     name: build and stage daemon release
     needs:
+      - validate_daemon
+      - validate_windows_daemon
       - daemon_ci
     runs-on: ubuntu-latest
     steps:
