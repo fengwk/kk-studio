@@ -44,6 +44,69 @@ jobs:
     if: github.ref_name == 'main' || (github.event_name == 'workflow_dispatch' && inputs.validate_only)
     uses: ./.github/workflows/daemon-ci.yml
 
+  # 安装器宿主验收：Daemon 本体由 daemon-ci 的五平台矩阵覆盖，安装器/归档 fixture 还必须在
+  # 目标宿主系统 Bash 与两个 PowerShell 版本下真跑一次，main 才允许发布镜像。
+  validate_unix_daemon:
+    name: validate Unix daemon installer (${{ matrix.os }})
+    if: github.ref_name == 'main' || (github.event_name == 'workflow_dispatch' && inputs.validate_only)
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Set up Node 24.21
+        # 安装器/归档 fixture 从 daemon 的锁定依赖里加载真实 tar 解析器。
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: daemon/package-lock.json
+      - name: Install daemon dependencies
+        shell: /bin/bash --noprofile --norc -eo pipefail {0}
+        run: npm --prefix daemon ci
+      - name: Test installer with system Bash
+        # macOS 的 /bin/bash 是 3.2：既不用 runner 默认 Bash，也不用 Homebrew Bash。
+        # fixture 只记录服务操作，不注册 systemd/launchd 服务，也不访问网络。
+        shell: /bin/bash --noprofile --norc -eo pipefail {0}
+        run: |
+          /bin/bash --version
+          python3 -m unittest discover -s scripts/daemon/tests -p 'test_*.py'
+
+  validate_windows_daemon:
+    name: validate Windows daemon installer
+    if: github.ref_name == 'main' || (github.event_name == 'workflow_dispatch' && inputs.validate_only)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Set up Node 24.21
+        # Windows fixture 用 runner 上的真实 node.exe 构建归档。
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Test installer with Windows PowerShell 5.1
+        shell: powershell
+        run: .\scripts\daemon\tests\test_daemon_install_windows.ps1
+      - name: Test installer with PowerShell 7
+        # 两个宿主的结论都要收集：PS 5.1 失败也不隐藏 PS 7 的失败，任一失败都阻断发布。
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        run: .\scripts\daemon\tests\test_daemon_install_windows.ps1
+      - name: Install frontend dependencies
+        shell: bash
+        run: npm --prefix frontend ci
+      - name: Test generated Windows install command natively
+        # 前端生成的单行安装命令在两种 PowerShell 宿主里真跑一次。
+        shell: bash
+        run: npm --prefix frontend run test:install:windows
+
   validate:
     name: validate repository
     if: github.ref_name == 'main' || (github.event_name == 'workflow_dispatch' && inputs.validate_only)
@@ -61,7 +124,9 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: |
+            frontend/package-lock.json
+            daemon/package-lock.json
       - name: Set up PostgreSQL client tools
         run: |
           set -euo pipefail
@@ -93,6 +158,9 @@ jobs:
       # Fail fast on tooling and script contracts before the full Java/frontend builds.
       - name: Check documentation layout
         run: node scripts/dev/verify/repository/check.mjs
+      - name: Install daemon dependencies
+        # 仓库脚本 fixture 使用真实 daemon 依赖（含 tar 解析器）与真实 Node 入口。
+        run: npm --prefix daemon ci
       - name: Run repository script tests
         run: |
           set -euo pipefail
@@ -164,18 +232,26 @@ jobs:
     needs:
       - validate
       - daemon_ci
-    # `main` 必须全量门禁与五平台 Daemon 矩阵都通过才发布；`dev` 的 validate/daemon_ci
-    # 按设计为 skipped，仍可直接发布。失败或取消的 Main 门禁绝不能被 `always()` 绕过。
+      - validate_unix_daemon
+      - validate_windows_daemon
+    # `main` 必须全量门禁、五平台 Daemon 矩阵与安装器宿主验收都通过才发布；其他分支的这四个
+    # 门禁按设计为 skipped，仍可直接发布。失败或取消的 Main 门禁绝不能被 `always()` 绕过。
     if: >-
       ${{
         always()
         && !cancelled()
         && !(github.event_name == 'workflow_dispatch' && inputs.validate_only)
         && (
-          (needs.validate.result == 'success' && needs.daemon_ci.result == 'success')
-          || (github.ref_name == 'dev'
+          (github.ref_name == 'main'
+            && needs.validate.result == 'success'
+            && needs.daemon_ci.result == 'success'
+            && needs.validate_unix_daemon.result == 'success'
+            && needs.validate_windows_daemon.result == 'success')
+          || (github.ref_name != 'main'
               && needs.validate.result == 'skipped'
-              && needs.daemon_ci.result == 'skipped')
+              && needs.daemon_ci.result == 'skipped'
+              && needs.validate_unix_daemon.result == 'skipped'
+              && needs.validate_windows_daemon.result == 'skipped')
         )
       }}
     runs-on: ubuntu-latest

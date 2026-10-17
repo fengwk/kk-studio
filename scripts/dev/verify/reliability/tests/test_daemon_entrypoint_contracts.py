@@ -1,8 +1,9 @@
-"""Permanent guards for the reliability stack's daemon bootstrap and token boundary."""
+"""Permanent guards for the reliability stack's Node daemon bootstrap and token boundary."""
 
 import json
 import os
 import shlex
+import shutil
 import stat
 import subprocess
 import tempfile
@@ -24,6 +25,42 @@ def repository_root():
 REPOSITORY_ROOT = repository_root()
 RELIABILITY_COMPOSE = REPOSITORY_ROOT / "deploy/reliability/compose.yaml"
 RELIABILITY_ENTRYPOINT = REPOSITORY_ROOT / "deploy/reliability/daemon-entrypoint.sh"
+RELIABILITY_DOCKERFILE = REPOSITORY_ROOT / "deploy/reliability/daemon.Dockerfile"
+
+
+def real_node():
+    node = shutil.which("node")
+    assert node is not None, "node is required to run the reliability entrypoint contract tests"
+    return node
+
+
+def write_node_dist(temporary, node_executable=None):
+    """按发行布局写一个最小 Daemon 目录：根目录入口 + 冻结运行时。
+
+    运行时是一个可执行包装脚本：`-e` 交给真实 Node（入口用它写 JSON），其它调用被记录成
+    daemon 启动参数，因此断言的是入口真实的 exec 行为而不是静态文本。
+    """
+    dist = Path(temporary) / "daemon-dist"
+    (dist / "runtime" / "code-server" / "lib").mkdir(parents=True)
+    (dist / "main.js").write_text("// daemon entry\n", encoding="utf-8")
+    if node_executable is None:
+        argv_file = Path(temporary) / "argv.txt"
+        environ_file = Path(temporary) / "environ.txt"
+        runtime = dist / "runtime" / "code-server" / "lib" / "node"
+        runtime.write_text(
+            "#!/bin/bash\n"
+            'if [ "$1" = "-e" ]; then exec "' + real_node() + '" "$@"; fi\n'
+            'printf \'%s\\n\' "$@" >"$PROBE_ARGV"\n'
+            'env >"$PROBE_ENVIRON"\n'
+        )
+        runtime.chmod(0o755)
+        return dist, argv_file, environ_file
+    runtime = dist / "runtime" / "code-server" / "lib" / "node"
+    runtime.write_text(
+        "#!/bin/bash\nexec " + shlex.quote(node_executable) + ' "$@"\n'
+    )
+    runtime.chmod(0o755)
+    return dist, None, None
 
 
 class TestReliabilityDaemonBootstrapContracts(unittest.TestCase):
@@ -45,12 +82,14 @@ class TestReliabilityDaemonBootstrapContracts(unittest.TestCase):
             "--environment-root",
         ):
             self.assertNotIn(removed, rel_content, removed)
+        # daemon 服务保留：镜像/uid/workspace named volume/健康依赖是现存自动化基础设施。
+        self.assertIn("dockerfile: deploy/reliability/daemon.Dockerfile", rel_content)
+        self.assertIn('user: "0:0"', rel_content)
+        self.assertIn("daemon-workspace:/workspace", rel_content)
 
-    def test_daemon_image_installs_the_token_file_entrypoint(self):
-        """Daemon 镜像入口必须是 bootstrap 脚本，而不是直接 exec java。"""
-        dockerfile = (REPOSITORY_ROOT / "deploy/reliability/daemon.Dockerfile").read_text(
-            encoding="utf-8"
-        )
+    def test_daemon_image_runs_the_frozen_node_distribution(self):
+        """Daemon 镜像只带冻结 Node 发行目录：没有 JRE/Maven，也没有第二个 Node。"""
+        dockerfile = RELIABILITY_DOCKERFILE.read_text(encoding="utf-8")
 
         self.assertIn("daemon-entrypoint.sh", dockerfile)
         self.assertEqual(
@@ -58,27 +97,25 @@ class TestReliabilityDaemonBootstrapContracts(unittest.TestCase):
             dockerfile.count("deploy/reliability/daemon-entrypoint.sh"),
             "入口脚本只能被 COPY 一次",
         )
-        self.assertNotIn(
-            'ENTRYPOINT ["java"',
+        self.assertNotIn('ENTRYPOINT ["java"', dockerfile, "直接 exec java 会绕过配置/凭证物化")
+        for removed_jvm in ("eclipse-temurin", "daemon.jar", "maven:"):
+            self.assertNotIn(removed_jvm, dockerfile, removed_jvm)
+        # 发行目录由真实打包脚本产出，运行入口是归档根的 main.js。
+        self.assertIn("scripts/daemon/prepare-release.sh", dockerfile)
+        self.assertIn("/distribution/main.js", dockerfile)
+        self.assertIn("runtime/code-server/lib/node", dockerfile)
+        self.assertIn("FROM debian:bookworm-slim", dockerfile)
+        # 只有一个 Node 二进制：/usr/local/bin/node 指向冻结运行时，npm/npx 跑在同一个 Node 上。
+        self.assertIn(
+            "ln -s /opt/kk-studio/daemon/runtime/code-server/lib/node /usr/local/bin/node",
             dockerfile,
-            "直接 exec java 会绕过配置/凭证物化，凭证重新出现在 argv",
         )
+        self.assertNotIn("FROM node:", dockerfile.split("---------- runtime ----------")[1])
 
-    def test_entrypoint_materializes_config_and_token_then_launches_with_config_only(self):
-        """入口必须物化共享 daemon.json/owner-only token，并只把 --config 交给 daemon。"""
+    def test_entrypoint_launches_the_node_distribution_entry_with_config_only(self):
+        """入口必须物化共享 daemon.json/owner-only token，并用冻结 Node 运行发行根入口。"""
         with tempfile.TemporaryDirectory() as temporary:
-            probe_dir = Path(temporary) / "bin"
-            probe_dir.mkdir()
-            argv_file = Path(temporary) / "argv.txt"
-            environ_file = Path(temporary) / "environ.txt"
-            probe = probe_dir / "java"
-            probe.write_text(
-                "#!/bin/bash\n"
-                'printf \'%s\\n\' "$@" >"$PROBE_ARGV"\n'
-                'env >"$PROBE_ENVIRON"\n'
-            )
-            probe.chmod(0o755)
-
+            dist, argv_file, environ_file = write_node_dist(temporary)
             root = Path(temporary) / "daemon-root"
             secret = "probe-secret-token"
             studio_url = "https://studio.example.com"
@@ -87,9 +124,9 @@ class TestReliabilityDaemonBootstrapContracts(unittest.TestCase):
             environment = dict(os.environ)
             environment.update(
                 {
-                    "PATH": f"{probe_dir}{os.pathsep}{environment.get('PATH', '')}",
                     "PROBE_ARGV": str(argv_file),
                     "PROBE_ENVIRON": str(environ_file),
+                    "KK_STUDIO_DAEMON_DIST": str(dist),
                     "KK_STUDIO_DAEMON_ROOT": str(root),
                     "KK_STUDIO_DAEMON_STUDIO_URL": studio_url,
                     "KK_STUDIO_DAEMON_NOTE": note,
@@ -108,11 +145,17 @@ class TestReliabilityDaemonBootstrapContracts(unittest.TestCase):
             argv = argv_file.read_text().splitlines()
             self.assertIn("--config", argv)
             config_path = Path(argv[argv.index("--config") + 1])
-            self.assertEqual(["-jar", "/opt/kk-studio/daemon.jar", "--config"], argv[:3])
+            self.assertEqual([str(dist / "main.js"), "--config"], argv[:2])
             self.assertTrue(config_path.is_absolute())
             self.assertEqual(root / "daemon.json", config_path)
-            # 旧 CLI 双源配置必须不再存在。
-            for removed in ("--gateway-uri", "--data-dir", "--registration-token-file", "--note"):
+            # 旧 CLI 双源配置与 JVM 启动形式必须不再存在。
+            for removed in (
+                "--gateway-uri",
+                "--data-dir",
+                "--registration-token-file",
+                "-jar",
+                "daemon.jar",
+            ):
                 self.assertNotIn(removed, argv)
             self.assertNotIn(secret, argv)
             self.assertNotIn(secret, environ_file.read_text())
@@ -134,17 +177,12 @@ class TestReliabilityDaemonBootstrapContracts(unittest.TestCase):
     def test_entrypoint_omits_note_when_unset(self):
         """未设置 note 时配置 JSON 不得出现 note 字段。"""
         with tempfile.TemporaryDirectory() as temporary:
-            probe_dir = Path(temporary) / "bin"
-            probe_dir.mkdir()
-            probe = probe_dir / "java"
-            probe.write_text("#!/bin/bash\nexit 0\n")
-            probe.chmod(0o755)
-
+            dist, _, _ = write_node_dist(temporary, node_executable=real_node())
             root = Path(temporary) / "daemon-root"
             environment = dict(os.environ)
             environment.update(
                 {
-                    "PATH": f"{probe_dir}{os.pathsep}{environment.get('PATH', '')}",
+                    "KK_STUDIO_DAEMON_DIST": str(dist),
                     "KK_STUDIO_DAEMON_ROOT": str(root),
                     "KK_STUDIO_DAEMON_STUDIO_URL": "http://app:8080",
                     "KK_STUDIO_DAEMON_REGISTRATION_TOKEN": "probe-secret-token",
@@ -215,6 +253,32 @@ class TestReliabilityDaemonBootstrapContracts(unittest.TestCase):
         self.assertIn("KK_STUDIO_DAEMON_ROOT", result.stderr)
         self.assertIn("absolute", result.stderr)
 
+    def test_entrypoint_rejects_a_distribution_without_entry_or_runtime(self):
+        """发行目录缺入口或缺冻结运行时时必须失败，而不是回退到 PATH 上的其它 Node。"""
+        for missing in ("main.js", "runtime/code-server/lib/node"):
+            with self.subTest(missing=missing):
+                with tempfile.TemporaryDirectory() as temporary:
+                    dist, _, _ = write_node_dist(temporary)
+                    (dist / missing).unlink()
+                    environment = dict(os.environ)
+                    environment.update(
+                        {
+                            "KK_STUDIO_DAEMON_DIST": str(dist),
+                            "KK_STUDIO_DAEMON_ROOT": str(Path(temporary) / "daemon-root"),
+                            "KK_STUDIO_DAEMON_STUDIO_URL": "http://app:8080",
+                            "KK_STUDIO_DAEMON_REGISTRATION_TOKEN": "probe-secret-token",
+                        }
+                    )
+                    result = subprocess.run(
+                        ["bash", str(RELIABILITY_ENTRYPOINT)],
+                        text=True,
+                        capture_output=True,
+                        check=False,
+                        env=environment,
+                    )
+                    self.assertNotEqual(0, result.returncode)
+                    self.assertIn(missing, result.stderr)
+
     def test_entrypoint_creates_config_owner_only_without_relying_on_chmod(self):
         """配置文件必须写入时即 owner-only：桩掉 chmod 并把 umask 全开也不能出现 world-readable 窗口。"""
         with tempfile.TemporaryDirectory() as temporary:
@@ -223,14 +287,14 @@ class TestReliabilityDaemonBootstrapContracts(unittest.TestCase):
             # chmod 桩为 no-op：只有 writeFileSync 的显式 mode 与 umask 能收敛权限。
             (probe_dir / "chmod").write_text("#!/bin/bash\nexit 0\n")
             (probe_dir / "chmod").chmod(0o755)
-            (probe_dir / "java").write_text("#!/bin/bash\nexit 0\n")
-            (probe_dir / "java").chmod(0o755)
+            dist, _, _ = write_node_dist(temporary, node_executable=real_node())
 
             root = Path(temporary) / "daemon-root"
             environment = dict(os.environ)
             environment.update(
                 {
                     "PATH": f"{probe_dir}{os.pathsep}{environment.get('PATH', '')}",
+                    "KK_STUDIO_DAEMON_DIST": str(dist),
                     "KK_STUDIO_DAEMON_ROOT": str(root),
                     "KK_STUDIO_DAEMON_STUDIO_URL": "http://app:8080",
                     "KK_STUDIO_DAEMON_REGISTRATION_TOKEN": "probe-secret-token",

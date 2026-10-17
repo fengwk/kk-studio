@@ -46,7 +46,7 @@
 | --- | --- |
 | [Harness Environment](modules/harness-environment.md) | Environment 身份、能力目录和 protocol v1 如何定义？ |
 | [Environment Server](modules/harness-environment-server.md) | Backend 如何管理 Daemon 会话、route lease、调用所有权和上传票据？ |
-| [Harness Daemon](modules/harness-daemon.md) | 独立主机进程如何执行文件、命令、LSP 与二进制上传？ |
+| [Environment Daemon](modules/daemon.md) | 独立主机进程如何执行文件、命令、LSP 与二进制上传？ |
 
 ### Canvas 与数据契约
 

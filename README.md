@@ -92,9 +92,9 @@ Catalog 将连接信息、模型能力和 Agent 行为分开管理：
 ## 让 Agent 使用本机工具
 
 1. 在 [Environment](http://localhost:8080/environments) 页面创建 Environment。
-2. 目标主机准备 **JDK 21 与 Bash**。Linux 使用 `systemctl --user`，macOS 使用当前用户图形
+2. 目标主机准备 **Bash**（发行归档自带冻结的运行时，无需宿主安装 Node 或 JDK）。Linux 使用 `systemctl --user`，macOS 使用当前用户图形
    登录域的 LaunchAgent，Windows 10/11 使用当前用户交互登录期间运行的 AtLogOn 计划任务。
-3. 在 Environment 卡片点击**“安装 / 覆盖”**，填写配置（Studio origin、可选的 Java home、
+3. 在 Environment 卡片点击**“安装 / 覆盖”**，填写配置（Studio origin、可选的
    Bash、备注与 LSP servers JSON），再点击**“保存并复制安装命令”**。配置保存在 Studio，
    命令包含凭据；到目标主机执行后才会部署。
 4. Studio 的 Environment 页面显示 `READY` 后，为 Agent 选择需要的 Tools 或 Skills，并在 Chat

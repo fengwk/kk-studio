@@ -39,15 +39,14 @@ function stepField(step, field, indent = 8) {
   return lines.trim().split('\n').map((line) => line.trim()).join('\n')
 }
 
+const PUBLISH_GATES = ['validate', 'daemon_ci', 'validate_unix_daemon', 'validate_windows_daemon']
+
 function evaluate(expression, branch, event, validateOnly, status = {}) {
   // These workflow gates use the shared JS/Actions boolean subset, with no implicit truthy strings.
   return runInNewContext(expression, {
     github: { ref_name: branch, event_name: event },
     inputs: { validate_only: validateOnly },
-    needs: {
-      validate: { result: status.repository ?? 'success' },
-      daemon_ci: { result: status.daemon ?? 'success' },
-    },
+    needs: Object.fromEntries(PUBLISH_GATES.map((gate) => [gate, { result: status[gate] ?? 'success' }])),
     always: () => true,
     cancelled: () => status.cancelled ?? false,
   }, { timeout: 100 })
@@ -56,7 +55,7 @@ function evaluate(expression, branch, event, validateOnly, status = {}) {
 test('push gates stay main-only; explicit manual validation runs all gates on any branch', () => {
   // Evaluate the actual expressions, so changing just one job or accepting push inputs fails.
   assert.match(docker, /validate_only:\n\s+description: .+\n\s+type: boolean\n\s+default: false/u)
-  for (const job of ['validate', 'daemon_ci']) {
+  for (const job of PUBLISH_GATES) {
     for (const branch of ['main', 'dev', 'worktree/repair']) {
       for (const event of ['push', 'workflow_dispatch']) {
         for (const optIn of [false, true]) {
@@ -72,26 +71,44 @@ test('push gates stay main-only; explicit manual validation runs all gates on an
 })
 
 test('validation-only never publishes; failed or cancelled gates cannot publish', () => {
-  // A success-only happy path is insufficient: preserve the failure/cancellation barrier.
+  // A success-only happy path is insufficient: preserve the failure/cancellation barrier, and keep
+  // the group uniform — main needs four successes, other refs need four skips, mixed never publishes.
   const expression = jobCondition(docker, 'publish')
-  for (const branch of ['main', 'dev']) {
-    for (const repository of ['success', 'failure', 'cancelled', 'skipped']) {
-      for (const daemon of ['success', 'failure', 'cancelled', 'skipped']) {
+  assert.match(jobBlock(docker, 'publish'), new RegExp(`needs:\\n${PUBLISH_GATES.map((gate) => `      - ${gate}\\n`).join('')}`, 'u'))
+  const publishes = (branch, cancelled, results) => {
+    if (cancelled) {
+      return false
+    }
+    const uniform = (value) => PUBLISH_GATES.every((gate) => results[gate] === value)
+    return branch === 'main' ? uniform('success') : uniform('skipped')
+  }
+  for (const branch of ['main', 'dev', 'worktree/repair']) {
+    for (const gate of PUBLISH_GATES) {
+      for (const result of ['success', 'failure', 'cancelled', 'skipped']) {
         for (const cancelled of [false, true]) {
-          const state = { repository, daemon, cancelled }
-          assert.equal(evaluate(expression, branch, 'workflow_dispatch', true, state), false)
-          const expected = branch === 'main'
-            ? !cancelled && repository === 'success' && daemon === 'success'
-            : !cancelled && repository === 'skipped' && daemon === 'skipped'
+          const results = Object.fromEntries(PUBLISH_GATES.map((name) => [name, name === gate ? result : 'success']))
           assert.equal(
-            evaluate(expression, branch, 'push', false, state),
-            expected,
-            `${branch}/${repository}/${daemon}/${cancelled}`,
+            evaluate(expression, branch, 'workflow_dispatch', true, { ...results, cancelled }),
+            false,
+            `${branch}/${gate}=${result}/cancelled=${cancelled}`,
+          )
+          assert.equal(
+            evaluate(expression, branch, 'push', false, { ...results, cancelled }),
+            publishes(branch, cancelled, results),
+            `${branch}/${gate}=${result}/cancelled=${cancelled}`,
           )
         }
       }
     }
   }
+  const allSkipped = Object.fromEntries(PUBLISH_GATES.map((gate) => [gate, 'skipped']))
+  assert.equal(publishes('main', false, allSkipped), false)
+  assert.equal(evaluate(expression, 'main', 'push', false, {}), true)
+  assert.equal(evaluate(expression, 'dev', 'push', false, {}), false)
+  assert.equal(evaluate(expression, 'dev', 'push', false, allSkipped), true)
+  assert.equal(evaluate(expression, 'worktree/repair', 'workflow_dispatch', false, allSkipped), true)
+  assert.equal(evaluate(expression, 'dev', 'workflow_dispatch', true, allSkipped), false)
+  assert.equal(evaluate(expression, 'main', 'push', false, { cancelled: true }), false)
 })
 
 test('manual validation and image publishing have separate concurrency groups', () => {
@@ -186,18 +203,18 @@ test('CI provisions and selects the PostgreSQL fixture client major before valid
 test('Windows installer gates run both PowerShell hosts and fail closed', () => {
   // Do not use continue-on-error: PS 5.1 is the minimum supported host and PS 7 catches modern drift.
   const block = jobBlock(daemonCi, 'windows_daemon_installer')
-  for (const [host, shell, condition] of [
-    ['5.1', 'powershell', undefined],
-    ['7', 'pwsh', 'if: ${{ !cancelled() }}'],
+  for (const [name, shell, condition] of [
+    ['Test installer with Windows PowerShell 5.1', 'powershell', undefined],
+    ['Test installer with PowerShell 7', 'pwsh', 'if: ${{ !cancelled() }}'],
   ]) {
     const step = block.match(
-      new RegExp(`- name: Test installer with Windows PowerShell ${host.replace('.', '\\.')}\\n([\\s\\S]*?)(?=\\n\\s+- name:|$)`)
+      new RegExp(`- name: ${name.replace(/[.()]/g, '\\$&')}\\n([\\s\\S]*?)(?=\\n\\s+- name:|$)`)
     )?.[1]
-    assert.ok(step, `missing PowerShell ${host} installer step`)
+    assert.ok(step, `missing step: ${name}`)
     assert.match(step, new RegExp(`shell: ${shell}`, 'u'))
     assert.ok(step.includes('run: .\\scripts\\daemon\\tests\\test_daemon_install_windows.ps1'))
     if (condition) {
-      assert.ok(step.includes(condition), `PowerShell ${host} must run even after a failed peer`)
+      assert.ok(step.includes(condition), `${name} must run even after a failed peer`)
     }
   }
   assert.doesNotMatch(daemonCi, /continue-on-error:/u)
@@ -227,9 +244,11 @@ test('the five-platform Node matrix builds and covers every official target', ()
 })
 
 test('release reuses the same daemon matrix and gates on it before staging', () => {
-  // tag 发布不得绕过平台矩阵：release 复用 daemon-ci，stage 依赖它成功。
+  // tag 发布不得绕过平台矩阵：release 复用 daemon-ci，stage 依赖它与两个安装器宿主门禁成功。
   assert.match(jobBlock(release, 'daemon_ci'), /uses: \.\/\.github\/workflows\/daemon-ci\.yml/u)
-  assert.match(jobBlock(release, 'stage'), /needs:\n      - daemon_ci\n/u)
+  for (const gate of ['validate_daemon', 'validate_windows_daemon', 'daemon_ci']) {
+    assert.match(jobBlock(release, 'stage'), new RegExp(`needs:\\n(?:      - \\w+\\n)*      - ${gate}\\n`, 'u'))
+  }
   assert.match(jobBlock(release, 'smoke_archives'), /needs: stage\n/u)
   // 五平台归档都必须在对应宿主上真跑烟测。
   const smoke = [...jobBlock(release, 'smoke_archives').matchAll(/platform: (\S+)/g)].map((match) => match[1])

@@ -7,23 +7,28 @@
 
 ## 运行入口与副作用
 
-从仓库根目录使用 JDK 21。共享核心与本地测试使用临时文件；Platform 集成测试可能启动
+运行测试时区分 Node Daemon 与后端 Java 模块。共享核心与本地测试使用临时文件；Platform 集成测试可能启动
 Testcontainers 的 PostgreSQL，需要 Docker，不能换成生产或共享数据面。
 这里的 Blob 物化测试使用内存 S3 替身，截止测试使用真实 SDK 连接本地 HTTP 服务，不启动真实 MinIO。
 
 ```bash
+# Daemon：本地文本窗口、编码、图片与目录分派（Node 24）
+npm --prefix daemon ci
+npm --prefix daemon run check
+npm --prefix daemon run build
+npm --prefix daemon run test -- test/coding/files.test.ts test/coding/text.test.ts
+npm --prefix daemon run coverage
+
+# 后端：共享文本窗口核心与 Platform 受管适配（JDK 21）
 env JAVA_HOME="$JAVA_HOME_21" mvn -pl harness/common -am verify
-env JAVA_HOME="$JAVA_HOME_21" mvn -pl harness/daemon -am test \
-  -Dtest='ReadCapabilityTest,LocalTextReadWindowTest,ReadWriteEditCapabilitiesTest,EnvironmentCapabilityCatalogTest' \
-  -Dsurefire.failIfNoSpecifiedTests=false
 env JAVA_HOME="$JAVA_HOME_21" mvn -pl platform/runtime -am test \
   -Dtest='ReadTextWindowTest,PlatformReadToolExecutorTest,PlatformResourceContentReaderTest,PlatformSkillContentReaderTest,S3StorageDeadlineIntegrationTest,ToolResultFinalizerTest,GlobalStorageToolResultHistoryMaterializerIntegrationTest' \
   -Dsurefire.failIfNoSpecifiedTests=false
 ```
 
-目标模块的 `target/surefire-reports` 必须证明用例实际运行；覆盖率报告在 `target/site/jacoco`。
-`harness/common` 与 `platform` 的 JaCoCo `check` 在 `verify` 阶段执行，`test` 只生成报告；
-Daemon 没有绑定该门禁。筛选测试得到的报告不能代表整个模块的覆盖率。
+Daemon 覆盖率由 Vitest 与 `@vitest/coverage-v8` 统计（`npm --prefix daemon run coverage`）；
+Java 目标模块的 `target/surefire-reports` 必须证明用例实际运行，覆盖率报告在 `target/site/jacoco`。
+`harness/common` 与 `platform` 的 JaCoCo `check` 在 `verify` 阶段执行，`test` 只生成报告。筛选测试得到的报告不能代表整个模块的覆盖率。
 
 真实审批与模型续接需要单独授权付费，并准备独立 Backend、数据库、S3 与 Daemon：
 
@@ -38,47 +43,40 @@ Daemon 没有绑定该门禁。筛选测试得到的报告不能代表整个模�
 
 [`TextReadWindowTest`](../../harness/common/src/test/java/fun/fengwk/kkstudio/harness/common/text/TextReadWindowTest.java)
 验证共享核心；
-[`LocalTextReadWindowTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/LocalTextReadWindowTest.java)
+[`test/coding/text.test.ts`](../../daemon/test/coding/text.test.ts)
 与 Platform 的
 [`ReadTextWindowTest`](../../platform/runtime/src/test/java/fun/fengwk/kkstudio/platform/harness/read/ReadTextWindowTest.java)
 验证两个适配器。同名近似的类不要混为一层。
 
 | 要验证的行为 | 主要证据 |
 | --- | --- |
-| offset/limit、准确总行数、右对齐行号、文件级 `ends_with_newline` | 核心 `windowMetadataAndRightAlignedLineNumbers`；本地 `ReadCapabilityTest.largeTextIsStreamedWithAccurateTotals`；受管 `offsetAndLimitProduceWindowAndLineLimitTruncation`、`largeStreamKeepsWindowWithAccurateLineCount` |
-| CR/LF/CRLF 作为边界，正文不包含行尾 | 核心与受管 `crlfAndLoneCrAreLineBoundaries`；本地 `mixedLineEndingsAreExactAndPreserveContent` |
-| 空文件与 EOF 后窗口 | 本地 `emptyFileAndOffsetBeyondEofReportEmptyRange`；受管 `emptyInputReportsEmptyRange` |
-| 长行不按 2000 字符裁剪，达到正文预算时能续读下一列 | 核心 `characterBudgetCutsMidLineAndPointsAtNextColumn`；本地 `longLineIsReturnedWithoutPerLineTruncation`；受管 `longLineIsNotTruncated` |
-| 参数错误先于文件访问，EOF 后偏移优先于列校验 | 本地 `windowArgumentsAreValidatedBeforeFileSystemAccess`、`offsetBeyondEofWinsOverColumnValidation`；受管 `invalidArgumentsAreRejected` |
-| BOM 仅在输入最开始剥一次 | 核心 `withoutLeadingBomStripsOnlyTheVeryFirstCharacter`；本地 `localEncodingReaderIsUsedAndBomIsNotStrippedTwice`；受管 `byteOrderMarkIsStrippedOnlyAtTheVeryStart` |
-| 取消、中断与 I/O 失败不返回半个成功窗口 | 核心 `checkpointRunsAroundEveryBlockAndAbortsTheScan`；本地与受管 `interruptedScanFailsInsteadOfReturningPartialWindow`；受管 `streamFailuresAreMappedToPlatformReadException` |
-| 可用的 LSP 状态是最后一行 header，不可用时省略 | 核心 `lspHeaderIsLastAndOmittedWhenUnavailable`；本地 `lspHeaderReflectsAvailableServerAndIsLast`；受管 `lspStatusIsLastHeaderLineAndOmittedWhenUnsupported` |
+| offset/limit、准确总行数、右对齐行号、文件级 `ends_with_newline` | 核心 `windowMetadataAndRightAlignedLineNumbers`；本地 `files.test.ts` 渲染有界窗口 header 与总行数；受管 `offsetAndLimitProduceWindowAndLineLimitTruncation`、`largeStreamKeepsWindowWithAccurateLineCount` |
+| CR/LF/CRLF 作为边界，正文不包含行尾 | 核心与受管 `crlfAndLoneCrAreLineBoundaries`；本地 `text.test.ts` 验证 CRLF 折叠与孤立 CR 边界 |
+| 空文件与 EOF 后窗口 | 本地 `text.test.ts` 与 `files.test.ts` 验证空文件与超 EOF 偏移输出 `range: empty`；受管 `emptyInputReportsEmptyRange` |
+| 长行不按 2000 字符裁剪，达到正文预算时能续读下一列 | 核心 `characterBudgetCutsMidLineAndPointsAtNextColumn`；本地 `text.test.ts` 验证码点预算耗尽报告 `character_limit`；受管 `longLineIsNotTruncated` |
+| 参数错误先于文件访问，EOF 后偏移优先于列校验 | 本地 `files.test.ts` 验证相对路径先于文件访问被拒绝；受管 `invalidArgumentsAreRejected` |
+| BOM 仅在输入最开始剥一次 | 核心 `withoutLeadingBomStripsOnlyTheVeryFirstCharacter`；本地 `text.test.ts` 验证 UTF-8 BOM 保留与 UTF-16LE/BE 往返；受管 `byteOrderMarkIsStrippedOnlyAtTheVeryStart` |
+| 取消、中断与 I/O 失败不返回半个成功窗口 | 核心 `checkpointRunsAroundEveryBlockAndAbortsTheScan`；本地支持取消中断；受管 `streamFailuresAreMappedToPlatformReadException` |
+| 可用的 LSP 状态是最后一行 header，不可用时省略 | 核心 `lspHeaderIsLastAndOmittedWhenUnavailable`；本地 `files.test.ts` 验证 lsp header 探测挂钩；受管 `lspStatusIsLastHeaderLineAndOmittedWhenUnsupported` |
 
 文本最多展示 2000 行、60000 码点正文，截断位置包含下一行/列坐标；`column_offset` 不限于 `limit=1`。
-内部按 long 计数，输出坐标超出 int 协议范围时显式失败，不截断成错误的续读位置。
+内部按长整型计数，输出坐标超出协议范围时显式失败，不截断成错误的续读位置。
 为给出准确总行数和末尾换行事实，读取必须扫描到 EOF：不存在 64 MiB 文件拒绝上限，
 成本由 Daemon 调用预算、Resource reader 的 30 秒预算和取消/中断控制。稀疏大文件也不是无成本读取。
 
 ## 本地路径、编码与文件类型
 
-[`ReadCapabilityTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/ReadCapabilityTest.java)
+[`test/coding/files.test.ts`](../../daemon/test/coding/files.test.ts)
 直接调用本地 `fs.read`，固定以下分派边界：
 
-- `path` 必填，由 `EnvironmentCapabilityCatalogTest` 冻结；空对象不是读取当前目录。
-  `path` 必须是绝对路径，相对路径直接拒绝且不接受 workdir（`relativePathIsRejected`），
-  文件名中的非 ASCII 空格保持原样（`nonAsciiSpacesInFileNamesArePreserved`）。
-- 本地文本只支持严格 UTF-8 与 BOM 标记的 UTF-16LE/BE（`bomEncodedTextIsDecodedWithoutBomInBody`）。
-  受管文本按严格 UTF-8；NUL、非法字节与无 BOM 的旧编码不做字符集猜测（`binaryContentIsRejected`、
-  受管 `binaryAndMalformedUtf8AreRejected`），有效的替换字符不能误判成二进制。
-- 目录有独立 `kind: directory` 语义，默认 2000 项、48 KiB 展示预算；续读用报告中的 offset，
-  合法 column offset 被忽略（`directoryPaginationDefaultsToTwoThousandAndIgnoresColumnOffset`、
-  `directoryListingKeepsByteCeilingAndContinuesFromReportedOffset`）。48 KiB 不是文本窗口的上限。
-- png/jpeg/gif/webp 按签名返回二进制结果，不通过文本窗口；bmp 不在支持集合。
-  合法 column offset 同样被忽略（`imageResultsStayBinaryAndIgnoreColumnOffset`）。
-- 特殊节点在读取前拒绝。`nonRegularFileNodesAreRejectedBeforeIo` 用 `/dev/null` 验证这条边界，
-  该证据是 POSIX 限定，不能宣称所有宿主文件类型都已原生验收。
-- 参数校验先于文件访问：非正 `column_offset` 在目录与图片上同样被拒绝，只有合法值才被忽略
-  （`readColumnOffsetValidationAndNonTextTargets`）。
+- `path` 必填；空对象不是读取当前目录。
+  `path` 必须是绝对路径，相对路径直接拒绝且不接受 workdir，文件名中的非 ASCII 空格保持原样。
+- 本地文本只支持严格 UTF-8 与 BOM 标记的 UTF-16LE/BE。
+  受管文本按严格 UTF-8；NUL、非法字节与无 BOM 的旧编码不做字符集猜测，以受控错误拒绝，有效的替换字符不能误判成二进制。
+- 目录有独立 `kind: directory` 语义，默认 2000 项、48 KiB 展示预算；续读用报告中的 offset，合法 column offset 被忽略。48 KiB 不是文本窗口的上限。
+- png/jpeg/gif/webp 按签名返回二进制结果，不通过文本窗口；bmp 不在支持集合。合法 column offset 同样被忽略。
+- 特殊节点在读取前拒绝。非普通文件节点在 I/O 前拒绝。
+- 参数校验先于文件访问：非正 `column_offset` 在目录与图片上同样被拒绝，只有合法值才被忽略。
 
 read 不等待进程内文件变更队列，也没有成功 observer 回调；原子替换避免半文件提交，但不提供跨调用
 陈旧读取保护。LSP 可用性由服务层或调用方提供，read 适配器不自行启动或猜测服务器。
@@ -99,4 +97,4 @@ read 不等待进程内文件变更队列，也没有成功 observer 回调；�
 E2E `tool.read_turn` 只证明非 YOLO 审批、ALLOW 后完整 canonical 文本内联进入 durable `tool_result`，
 以及后续模型轮次成功；它不提供真实模型 tool→blob 的端到端证据。
 
-相关文档：[Harness Daemon](../modules/harness-daemon.md)、[开发与测试](development-and-testing.md)。
+相关文档：[Environment Daemon](../modules/daemon.md)、[开发与测试](development-and-testing.md)。

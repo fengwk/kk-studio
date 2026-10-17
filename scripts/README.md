@@ -8,23 +8,23 @@ Compose、Dockerfile 与容器内 entrypoint 留在 [deploy](../deploy/local/REA
 
 | 平台 | 入口 | 所需环境与行为 |
 | --- | --- | --- |
-| Linux / macOS | [daemon/install.sh](daemon/install.sh) | JDK 21、Bash、curl、SHA-256 工具；Linux 需 `systemctl --user`，macOS 需当前用户 GUI 登录域 |
-| Windows 10/11 | [daemon/install.ps1](daemon/install.ps1) | JDK 21、PowerShell 5.1/7、ScheduledTasks、可用的 Bash（配置绝对可执行路径或服务 PATH 上可解析）；当前用户交互登录期间运行 AtLogOn 计划任务，不是 Windows Service |
+| Linux / macOS | [daemon/install.sh](daemon/install.sh) | Bash、curl、SHA-256 工具（官方发行归档自带冻结运行时，无需宿主安装 Node 或 JDK）；Linux 需 `systemctl --user`，macOS 需当前用户 GUI 登录域 |
+| Windows 10/11 | [daemon/install.ps1](daemon/install.ps1) | PowerShell 5.1/7、ScheduledTasks、可用的 Bash（官方发行归档自带冻结运行时，无需宿主安装 Node 或 JDK）；当前用户交互登录期间运行 AtLogOn 计划任务，不是 Windows Service |
 
 正常入口是 Studio 的 Web 安装弹窗：保存配置后复制命令，脚本会自行暂存 `daemon.json` 与
 `daemon.token`、下载安装器并执行。安装器只有 `install` / `status` / `uninstall` / `help`
 四个动作，稳定契约是
-`bash install.sh install --config-file <绝对 daemon.json> --token-file <绝对 daemon.token> [--java-home <绝对 JDK21>]`
-（Windows 为 `-ConfigFile` / `-TokenFile` / `-JavaHome`）。它默认下载官方 GitHub latest release
-的 JAR 与 SHA 文件、用新 JAR `--check-config` 预检暂存输入，再整体替换程序/配置/token 并重启，
+`bash install.sh install --config-file <绝对 daemon.json> --token-file <绝对 daemon.token>`
+（Windows 为 `-ConfigFile` / `-TokenFile`）。它默认下载官方 GitHub latest release
+的发行归档与 SHA 文件、用归档内置的运行时 `--check-config` 预检暂存输入，再整体替换程序/配置/token 并重启，
 保留数据；没有交互提示，也没有 from-source 或单独 upgrade 动作。`status` 只读；`uninstall`
-删除受管服务定义与 JAR，保留配置、token、数据与日志。详情与三平台排错见
+删除受管服务定义与程序发行目录，保留配置、token、数据与日志。详情与三平台排错见
 [Environment Daemon 安装与运行](../docs/operations/environment-daemon.md)。
 
 从 checkout 运行安装脚本只属于开发/CI fixture，用来验证脚本契约，**不是用户安装路径**；安装器
-从不构建，真实 shaded JAR 由 Maven 独立构建。Fixture 会替代网络与服务管理命令，不注册真实
+从不构建，发行归档由发布流程独立生成。Fixture 会替代网络与服务管理命令，不注册真实
 systemd/launchd 服务，测试入口见
-[开发与测试](../docs/operations/development-and-testing.md#daemon-安装脚本回归)。
+[开发与测试](../docs/operations/development-and-testing.md#daemon-安装与受管更新回归)。
 
 ## 日常开发
 
@@ -58,13 +58,13 @@ systemd/launchd 服务，测试入口见
 | 当前代码树敏感数据门禁 | [dev/verify/repository/check-sensitive-data.py](dev/verify/repository/check-sensitive-data.py) | python3、git，只读；命中只报告规则与位置，不回显敏感值 |
 | Git 历史敏感数据审计 | [dev/verify/repository/check-sensitive-history.py](dev/verify/repository/check-sensitive-history.py) | python3、git；扫描本地可见 refs 与当前树，可选抓取公开 PR refs 到隔离临时仓库；与当前树门禁分开使用 |
 
-E2E 的精确 case 列表以 `run.sh --list` / `--docs` 为准，分类与执行路径见[开发与测试](../docs/operations/development-and-testing.md)。覆盖率/进程矩阵的 CI 辅助脚本位于 [process-scope](dev/verify/process-scope/)，不用于启动应用。
+E2E 的精确 case 列表以 `run.sh --list` / `--docs` 为准，分类与执行路径见[开发与测试](../docs/operations/development-and-testing.md)。
 
 ## 发布与数据库维护
 
 | 任务 | 入口 | 前置条件与影响 |
 | --- | --- | --- |
-| 暂存 Daemon 发布资产 | [daemon/prepare-release.sh](daemon/prepare-release.sh) `<release-tag>` | checkout、JDK 21、git、sha256sum、已构建 shaded JAR；校验后替换 `harness/daemon/target/release`，生成 JAR、SHA、JSON、LICENSE、THIRD_PARTY_NOTICES，**不上传发布** |
+| 暂存 Daemon 发布资产 | [daemon/prepare-release.sh](daemon/prepare-release.sh) `<release-tag> <os> <arch>` | checkout、Node 24、npm、git、已编译 `daemon/dist`；按目标平台安装生产依赖并打包冻结 code-server 运行时，替换 `daemon/release/<os>-<arch>`，生成 tar.gz、SHA256、JSON 元数据、LICENSE、THIRD_PARTY_NOTICES 5 个资产，**不上传发布** |
 | 备份、冻结旧库、建空库 | [ops/reset-database.sh](ops/reset-database.sh) | psql/pg_dump/pg_restore/createdb、python3，owner 或 superuser 且有建库权限、无其它会话；完整备份与校验写仓库外，旧库改名禁连接，按原元数据建空库；非 `--yes` 需交互确认 |
 
 配置导出与导入在产品的“设置 → 同步”完成，YAML 始终包含所需凭据，不属于数据库脚本。

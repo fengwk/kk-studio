@@ -1,100 +1,77 @@
 # 内置检索的行为验证
 
-`fs.grep` 与 `fs.find` 由 Daemon 内的 Java 实现遍历、解码和匹配，不启动 ripgrep/fd。
+`fs.grep` 与 `fs.find` 由 Daemon 内的 Node 实现遍历、解码和匹配，不启动 ripgrep/fd。
 验证重点是“哪些路径真正搜索过、命中如何定位、遇到错误是否漏报”，而不是外部命令参数或退出码。
 能力契约见[内置工具设计](../modules/builtin-tools-design.md)，进程与输出存储见
 [Bash 行为验证](builtin-bash-tests.md)。
 
 ## 运行与证据
 
-从仓库根目录使用 JDK 21：
-
 ```bash
-env JAVA_HOME="$JAVA_HOME_21" mvn -pl harness/daemon -am test \
-  -Dtest='NativeSearchCapabilitiesTest,FindGrepCapabilitiesTest,GitIgnoreDiscoveryTest,WorkdirPathSemanticsTest' \
-  -Dsurefire.failIfNoSpecifiedTests=false
-env JAVA_HOME="$JAVA_HOME_21" mvn -pl harness/daemon -am validate
+npm --prefix daemon ci
+npm --prefix daemon run check
+npm --prefix daemon run build
+npm --prefix daemon run test -- test/coding/search.test.ts test/coding/search-core.test.ts
+npm --prefix daemon run coverage
 ```
 
-这些测试使用真实本地文件系统、临时文件、权限、符号链接与稀疏文件，不调用模型或部署数据库。
-上述定向集合不启动外部检索二进制；去掉 `-Dtest` 可跑完整 Daemon 套件，
-其中 Bash/LSP 测试会创建真实子进程。schema 与预算传递改动还应选择下表的 Coding 测试类。
-`validate` 只做 Checkstyle/Spotless 等静态检查，不编译、不执行检索。
+这些测试使用真实本地文件系统、临时文件、权限与符号链接，不调用模型或部署数据库。
+上述定向集合不启动外部检索二进制；去掉测试文件参数可跑完整 Daemon 套件。
+覆盖率由 Vitest 与 `@vitest/coverage-v8` 统计（`npm --prefix daemon run coverage`）。
 
-| 测试类 | 负责的证据 |
+| 测试文件 | 负责的证据 |
 | --- | --- |
-| [`NativeSearchCapabilitiesTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/NativeSearchCapabilitiesTest.java) | 匹配、编码、上限、特殊文件、未搜索路径、超时与取消 |
-| [`FindGrepCapabilitiesTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/FindGrepCapabilitiesTest.java) | glob、结果格式、全文落盘、`SearchFiles` 遍历 |
-| [`GitIgnoreDiscoveryTest`](../../harness/daemon/src/test/java/fun/fengwk/kkstudio/harness/daemon/coding/GitIgnoreDiscoveryTest.java) | 祖先 `.gitignore`、`info/exclude`、`.git` 文件与 linked worktree 的发现 |
-| `CodingCapabilitiesTest`、`CodingCapabilitiesEdgeTest` | schema 参数、有效调用预算、注入执行器与取消 |
-| `WorkdirPathSemanticsTest` | 每次调用独立的绝对路径解析、相对路径拒绝与不可用 workdir |
-
-只跑检索可用上述类名筛选 `-Dtest`，同时保留 `-am -Dsurefire.failIfNoSpecifiedTests=false`，
-并确认 Daemon 的 `target/surefire-reports` 有实际执行记录。`test` 生成
-`harness/daemon/target/site/jacoco`；Daemon 不绑定 `jacoco:check`。
-度量核心是 `GrepCapability`、`FindCapability`、`SearchFiles`、`SearchControl`、`GitIgnoreRules`、
-`GlobPattern`、`TextStreams`，按仓库关键路径目标检查本次行覆盖率与未覆盖路径，分支作为参考。
+| [`test/coding/search.test.ts`](../../daemon/test/coding/search.test.ts) | fs.find 与 fs.grep 能力入口、glob、.gitignore、正则、大小写与取消 |
+| [`test/coding/search-core.test.ts`](../../daemon/test/coding/search-core.test.ts) | findFiles、grepFiles、多行扫描、分层 gitignore、worktree exclude 与边界处理 |
+| [`test/coding/search-worker-lifecycle.test.ts`](../../daemon/test/coding/search-worker-lifecycle.test.ts) | 检索 worker 生命周期管理 |
 
 ## 先验证检索范围
 
 绝对 path 不需 workdir，相对 path 直接拒绝，不继承 Daemon cwd。
-`WorkdirPathSemanticsTest.eachInvocationUsesItsOwnAbsolutePath`、
-`relativePathIsRejectedWithoutDefaultFallback`、`relativeWorkdirIsRejected`、`unusableWorkdirIsRejected`
-与 `NativeSearchCapabilitiesTest.searchRejectsRelativePath`、`searchRejectsRelativePathsEvenIfExists`
-守卫这条边界。schema 必填、类型和未知参数由
-`CodingCapabilitiesEdgeTest.everyDescriptorRejectsWrongTypedAndUnknownArguments` 验证。
+`test/coding/search.test.ts` 验证相对路径被直接拒绝；
+`test/coding/search-core.test.ts` 验证非文件非目录路径在遍历前被拒绝。
 
 忽略规则从**检索目标自身**向上发现，与调用目录无关；`.git` 目录或文件界定仓库上界。
-`GitIgnoreDiscoveryTest` 是发现规则的直接证据，`NativeSearchCapabilitiesTest` 与
-`FindGrepCapabilitiesTest` 验证规则对实际结果的影响。
-符号链接的遍历行为由 `searchFilesIgnoresSymlinksAndValidatesDirectory` 固定；
-缺失或不可读根不是“空结果”（`searchRejectsMissingPath`、`searchRejectsUnreadableSearchRoot`）。
-起点自身已被祖先规则忽略时直接结束遍历，由 `searchFilesReturnsEarlyWhenSearchDirectoryItselfIsIgnored` 验证。
+`test/coding/search-core.test.ts` 验证 `.git/info/exclude`、linked worktree 的 `.git` 文件与 commondir 生效，
+以及嵌套 `.gitignore` 的否定规则可重新包含。
+符号链接在遍历时跳过；缺失或不可读根计入 skipped 而非静默忽略。
+检索目录本身已被祖先规则忽略时直接返回空结果。
 
 ## Grep 的成功、空结果与不完整结果
 
 | 行为 | 主要断言 |
 | --- | --- |
-| literal/regex、ignore_case、include，不重复输出同一行 | `NativeSearchCapabilitiesTest.grepSupportsLiteralRegexIgnoreCaseAndIncludeWithoutDuplicateLines`、`FindGrepCapabilitiesTest.grepIgnoreCaseAndIncludePatternFilter` |
-| 非法正则明确失败 | `grepRe2jRegexSyntaxValidAndInvalid`、`grepRejectsDirectBinarySkipsDirectoryBinaryAndReportsInvalidRegex` |
-| 单文件与目录的定位输出、长行命中附近摘录 | `grepDirectFileSearchAndErrors`、`grepMatchCenteredExcerptForLongLines`、`grepFindsMatchInSecondHalfOfOverLongLine` |
-| multiline 命中计数与覆盖行去重 | `grepMultilineHonorsLimit`、`grepMultilineReportsCoveredLinesOnce`、`grepMultilineSearch` |
-| 结果上限与长行截断说明 | `searchLimitsStayInlineAndTruncateLongLines`、`grepMatchCenteredExcerptForLongLines` |
-| 真正无匹配 | `grepReturnsNoMatchesFoundWhenEmpty`、`grepMultilineHandlesEmptyAndBinaryFiles` |
-| 未搜索路径有界枚举，不能伪装成无匹配 | `grepEnumeratesAndBoundsUnsearchedPaths`、`grepReportsUnreadableDirectFile` |
-| 大结果在共享输出层落盘，返回有界预览与路径 | `grepSpoolsLargeResultsToBoundedTextResultWithPath` |
+| literal/regex、ignore_case、include，不重复输出同一行 | `search.test.ts` 验证 literal 与默认正则、ignore_case 生效、include 过滤目录扫描 |
+| 非法正则明确失败 | `search-core.test.ts` 验证非法正则映射为 input 失败拒绝 |
+| 单文件与目录的定位输出、长行命中附近摘录 | 验证直接文件检索、短行摘录与长行按字符预算居中截取 |
+| multiline 命中计数与整段输出 | `search.test.ts` 验证 multiline 跨行匹配整段输出；空匹配安全推进 lastIndex |
+| 结果上限与长行截断说明 | `limit` 达到时明确标注结果不完整（moreMatches） |
+| 真正无匹配 | 无匹配时返回明确的无匹配文案 |
+| 二进制处理 | 目录扫描静默跳过二进制文件，直接检索二进制文件报错 |
+| 大结果在共享输出层落盘，返回有界预览与路径 | 超阈值结果通过共享输出层落盘并提供绝对路径 |
 
-定位结果包含可再次访问的绝对路径、行号与命中文本
-（`searchAcceptsAbsolutePathWithoutWorkdirAndReportsAbsolutePaths`、`searchAlwaysReportsAbsolutePaths`）。
-只支持严格 UTF-8 与 BOM 标记的 UTF-16LE/BE；直接二进制目标报错，目录中的二进制文件跳过。
-非法编码不能静默替换成乱码或漏报匹配（`grepRejectsInvalidTextEncodingInsteadOfMissingMatches`、
-`grepDetectsBinaryContentBeyondProbePrefix`）。单行保留上限为 1,048,576 个字符，超出时以无法完整搜索失败，
-由 `grepFailsExplicitlyWhenSingleLineExceedsRetentionLimit` 验证；这与命中后的有界摘录不同。
-多行扫描有独立整文件预算；`read` 没有文件大小上限，只有调用预算与取消。
+定位结果包含可再次访问的绝对路径、行号与命中文本。
+直接二进制目标报错，目录中的二进制文件跳过。
+单行超过字符上界的行按 skip 处理。
 
 ## Find 的路径匹配与停止条件
 
-- `findMatchesBasenameAndPathGlobPatternsDeterministically`、
-  `globPatternsArePlatformIndependentAndSegmentAware`、
-  `findMatchesBasenamesAndSearchRelativePathsInDeterministicOrder`：不含 `/` 的模式匹配 basename，
-  含 `/` 的模式匹配检索相对路径，结果顺序确定。
-- `findPreservesTrailingSpaceInMatchedFileName`：不 trim 文件名。
-- `findEarlyStopsAtLimitPlusOne`：达到结果上限后用额外一个结果确认截断，而非无界遍历。
-- `findReturnsNoFilesFoundWhenNoMatches` 与 `findReportsUnsearchedPathsWhenNothingMatches`：
-  空结果与不可搜索路径不同，后者不能当成功的无匹配。
-- `findSpoolsLargeResultsToBoundedTextResultWithPath`：字节预算由共享输出层负责，全文发布后才交付有界预览。
+- 不含 `/` 的模式匹配 basename，含 `/` 的模式匹配检索相对路径，结果顺序确定。
+- 达到结果上限后用额外计数确认截断，而非无界遍历。
+- 符号链接与 `.git` 目录自动排除。
+- 空结果与不可搜索路径明确区分，不可读目录计入 skipped。
+- 超阈值大结果写入本地文件，交付有界预览与绝对路径。
 
-全文发布的权限、原子性和存储失败降级由 `OutputSpoolTest`、`TextOutputStoreTest` 验证，
-见[Bash 输出与协议终态](builtin-bash-tests.md#输出与协议终态)；不能用一条检索落盘成功测试宣称所有存储失败已覆盖。
+全文发布的权限、原子性和存储失败降级由 [`output.ts`](../../daemon/src/coding/output.ts)
+与 [`test/coding/output.test.ts`](../../daemon/test/coding/output.test.ts) 验证，
+见[Bash 输出与协议终态](builtin-bash-tests.md#输出与协议终态)。
 
 ## 取消、超时与能力边界
 
-`searchCapabilitiesConsumeResolvedRequestTimeout` 固定有效预算进入检索。
-`grepSingleLineTimesOutWhileScanningManyLines`、`grepMultilineTimesOutDuringWholeFileScan`、
-`findTimesOutOnTinyDeadline` 验证扫描能截止；`deadlineCheckedSequenceEnforcesTimeoutMidScan`、
-`deadlineCheckedSequenceSurfacesCancellationAsInterruption`、`searchControlActivelyChecksTimeoutAndCancellation`
-验证扫描中的检查点。取消不能被误报成超时，已取消调用也不能继续遍历。
+有效超时预算在进入检索时受控。
+`test/coding/search.test.ts` 验证上下文取消信号被映射为 `CANCELLED`，
+`test/coding/search-core.test.ts` 验证 `SearchControl` 超时抛出稳定错误。
+取消不能被误报成超时，已取消调用也不能继续遍历。
 
-capability 注册与结果协议由 [`harness/environment`](../../harness/environment)、Daemon Runtime 负责，
-终端渲染由前端负责，需选择相应层的测试。权限、特殊文件与 symlink 测试的跳过项需按宿主平台报告；
-一个平台通过不等于全部原生文件系统已验收。
+capability 注册与结果协议由 [`harness/environment`](../../harness/environment) 与 Daemon Runtime 负责，
+终端渲染由前端负责，需选择相应层的测试。

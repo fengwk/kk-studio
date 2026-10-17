@@ -37,7 +37,7 @@
 | Backend | `http://127.0.0.1:18080`，`SPRING_PROFILES_ACTIVE=e2e` |
 | Frontend | `http://127.0.0.1:5173` |
 | 工作目录 | `runtime/dev`，可由 `DEV_WORK_DIR` 覆盖 |
-| Backend log / JAR | `runtime/dev/backend.log`、`web/target/kk-studio-web-1.1.0.jar` |
+| Backend log / JAR | `runtime/dev/backend.log`、`web/target/kk-studio-web-<version>.jar` |
 
 `start` 会先执行 stop 流程、检查端口占用、按需用 Maven 打包 Backend、按需安装前端依赖，等
 Backend API ready 后再启动 Vite；`restart` 等价于 `stop` 后再 `start`，`logs` 与 `tail` 接受可选
@@ -88,6 +88,8 @@ Vite 默认只监听 `127.0.0.1` 并使用自带 Host allowlist。需要容器�
 | 离线升级子进程验收（Fat JAR 产物模式） | 同上追加 `'-Dkkstudio.upgrade.test.jar=<absolute web/target/kk-studio-web-<version>.jar>'`；两种模式都要求全部用例真实通过 |
 | 只格式化本次改动的 Java 文件 | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl <module> spotless:apply '-DspotlessFiles=<file-regex>'` |
 | 前端单元测试 / lint / 类型与构建 / 覆盖率 | `npm --prefix frontend run test`、`run lint`、`run typecheck`、`run typecheck:test`、`run build`、`run coverage` |
+| Daemon 单元测试与覆盖率 | 先 `npm --prefix daemon ci`，再 `npm --prefix daemon run test`、`run coverage`（Node 24）
+| Daemon 发行归档打包与验收 | `bash scripts/daemon/prepare-release.sh v<version> <os> <arch>`，再 `bash scripts/daemon/smoke-archive.sh <archive>`；归档只在同宿主平台上通过验收 |
 | 校验 Compose 配置 | `docker compose -f deploy/local/compose.yaml config --quiet` 等，见下文 |
 | 隔离栈 smoke | `./scripts/dev/verify/smoke/offline-chat.sh`；`--with-app` 增加应用契约，见 [deploy/test](../../deploy/test/README.md) |
 | 免费 API 契约矩阵 | [`./scripts/dev/verify/e2e/run.sh`](../../scripts/dev/verify/e2e/run.sh) |
@@ -119,7 +121,8 @@ E2E 自身的 L1–L5 是 API case 的 level 分组，含义见下文 E2E 章节
 gh workflow run docker-publish.yml --ref dev -f validate_only=true
 ```
 
-该模式运行同一套 Java、前端、脚本、文档和敏感数据检查，以及 Linux、macOS、Windows 安装和更新回归，
+该模式运行同一套 Java、前端、脚本、文档和敏感数据检查，以及 Linux、macOS、Windows 安装和更新回归与
+Daemon 五平台矩阵，
 但整个镜像发布 job 会被跳过；它与发布使用独立并发组，不会取消同分支正在进行的镜像发布。
 离线升级测试使用可丢弃 PostgreSQL 17 与私有 MinIO，在 CLI prepare/dry-run/apply 与重复 apply 拒绝后，
 通过正常生产入口 HTTP 读回转换后的 agent/environment/skill。Maven verify 覆盖不含测试替身的生产
@@ -128,7 +131,12 @@ classpath 入口，其后的必需步骤复用同次构建的 Fat JAR 验证产�
 无论门禁是否成功，`frontend-diagnostics` artifact 都保留覆盖率与布局诊断产物 7 天。
 Windows 两个 host 都会报告结果，前一个失败不会遮蔽后一个；任一失败仍阻断正常发布。
 Unix 矩阵在 Ubuntu 与 macOS runner 上使用系统 `/bin/bash`，macOS 明确检查 Bash 3.2，
-不以 Homebrew Bash 的结果替代系统自带版本。Daemon Release 发布也依赖同一套三平台安装和更新门禁。
+不以 Homebrew Bash 的结果替代系统自带版本。
+[daemon-ci.yml](../../.github/workflows/daemon-ci.yml) 是 Daemon 的平台门禁：Node 固定 24.21.0 并按
+`daemon/package-lock.json` 安装，在 linux-amd64、linux-arm64、macos-arm64、macos-amd64、windows-amd64
+五个目标上真实执行 `npm --prefix daemon run check`、`run build` 与 `run coverage`；macOS 追加系统 Bash 下的
+安装与归档契约测试，Windows 另以 PowerShell 5.1 与 7 运行安装、更新回归。Docker 发布与 Daemon Release
+都要求该门禁成功，release 还要在对应宿主上逐一烟测五个平台归档后才上传 GitHub Release。
 
 数据库维护脚本的集成测试使用独立的 PostgreSQL 17 容器。CI 显式安装 17 版客户端并将其
 bin 目录置于 PATH 首位，不依赖 runner 默认版本。本地运行 [scripts/ops/tests](../../scripts/ops/tests) 时，
@@ -138,12 +146,13 @@ bin 目录置于 PATH 首位，不依赖 runner 默认版本。本地运行 [scr
 ### Daemon 安装与受管更新回归
 
 在仓库根运行 `python3 -m unittest discover -s scripts/daemon/tests -v`，覆盖安装、下载、受管更新与发布脚本契约。
-Unix fixtures 替代网络与服务管理命令，真实执行 SHA 校验、文件替换与暂存输入校验，验证 latest
-解析与 JAR 版本匹配、`--check-config` 预检失败保留现有安装、受管身份判定、覆盖安装的备份与替换，
+Unix fixtures 替代网络与服务管理命令，真实执行 SHA256 校验、文件替换与暂存输入校验，验证 latest
+解析与发行归档版本匹配、`--check-config` 预检失败保留现有安装、受管身份判定、覆盖安装的备份与替换，
 以及卸载只移除受管服务与程序。安装器没有交互提示、from-source 与单独 upgrade 入口；从 checkout
-运行安装脚本只是开发/CI fixture，不是用户安装路径，安装器自身从不构建、真实 shaded JAR 由 Maven
-独立构建。测试不注册真实 systemd/launchd 服务。
-Windows 原生验收要求 JDK 21 在 PATH 上，并分别运行两个 host：
+运行安装脚本只是开发/CI fixture，不是用户安装路径，安装器自身从不构建、真实发行归档由
+[scripts/daemon/prepare-release.sh](../../scripts/daemon/prepare-release.sh) 独立打包并上传 GitHub Release。
+安装器不要求宿主 JDK 或 Node：服务直接运行归档自带的冻结运行时。测试不注册真实 systemd/launchd 服务。
+Windows 原生验收分别运行两个 host：
 
 ```powershell
 powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/daemon/tests/test_daemon_install_windows.ps1
@@ -152,10 +161,11 @@ powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/daem
 pwsh -NoProfile -NonInteractive -File scripts/daemon/tests/test_daemon_update_windows.ps1
 ```
 
-该套件检查真实 ScheduledTasks 定义、ACL、Java argv 和进程捕获，但不注册任务。
-Windows 计划任务直接执行 Java，只以 UTF-8 Base64 传输唯一的 `--config` 参数；
-应用参数经安装器 serializer 与生产 `DaemonArguments.decode` 往返，
-验证中文、emoji、空参数、引号和尾随反斜杠保真；同时覆盖非零退出、双流大输出与选项环境恢复。
+该套件检查真实 ScheduledTasks 定义、ACL、Node argv 和进程捕获，但不注册任务。
+Windows 计划任务以发行归档内的冻结运行时直接执行 `main.js`，命令行只承载唯一的
+`--config <绝对 daemon.json>`；daemon 对未知或多余参数 fail closed，studioUrl、note、
+bashExecutable 与 lsp 等应用级选项全部来自 JSON 配置，因此不存在参数编码往返。
+套件在非 ASCII 工作目录下真实运行安装器，并覆盖非零退出、双流大输出与选项环境恢复。
 
 更新套件真实执行已打包的更新脚本，以隔离文件和服务管理桩验证所有权、停止、备份、替换和重启，
 以及失败回执或诊断输出失败后仍独立清理一次性任务。替换后重启失败不自动回滚；成功后的回执写入失败
@@ -166,7 +176,7 @@ Windows 原生还运行 `npm --prefix frontend run test:install:windows`，验�
 失败传播与调用方作用域隔离；后端 `EnvironmentInstallScriptsTest` 在 PowerShell 5.1/7 中
 验证实际生成脚本的 owner-only 暂存、凭据字节与失败清理。夹具不注册任务或访问网络。
 
-只有 Linux/macOS 时，可用 PS7 与 PATH 上的 JDK 21 运行
+只有 Linux/macOS 时，可用 PS7 运行
 `pwsh -NoProfile -NonInteractive -File scripts/daemon/tests/test_daemon_install_windows.ps1 -ProcessOnly`；
 Python 入口在发现 `pwsh` 时也会运行这一子集，设置 120 秒超时以发现管道死锁。它只提供可移植
 进程行为证据，不代替 Windows PowerShell 5.1 / PowerShell 7 的原生验收；镜像与 Daemon 发布 CI
@@ -425,7 +435,7 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 
 | Flag | 语义 |
 | --- | --- |
-| `--rebuild` | Java 21 clean package 并重启 backend/frontend；带 tools 时也处理 Daemon |
+| `--rebuild` | Java 21 clean package 并重启 backend/frontend；带 tools 时也用 `npm --prefix daemon ci && npm --prefix daemon run build` 重建并重启 Node Daemon |
 | `--real` | 启用真实 Provider case，要求四组完整 `TEST_*_BASE_URL` / `TEST_*_API_KEY` |
 | `--with-tools` | 启用 Daemon/Tool case |
 | `--with-branch` | 启用 branch case，并自动打开 `--real` |
@@ -654,8 +664,9 @@ XML 检查不是通用语法验证器，不能把这道门禁称为任意畸形 
 
 先把 `<case-id>` 替换为 inventory 中的实际值；`case-reset` 最后一项可选 `pi` 或 `pi-base`。
 `snapshot` 不猜测宿主目录，`PI_ANCHOR` 和 `PI_BASE_ANCHOR` 都必须显式指向 clean Git worktree。
-`tool-smoke` 把 [`NativeToolSmoke.java`](../../scripts/dev/verify/reliability/fixtures/NativeToolSmoke.java) 经 stdin 送入
-Daemon 容器编译并运行 find/grep/bash assertions，不经过 Agent、Provider 或 App command batch。
+`tool-smoke` 在 Daemon 容器内运行
+[`NativeToolSmoke.mjs`](../../scripts/dev/verify/reliability/fixtures/NativeToolSmoke.mjs)，
+直接对打包发行目录断言 find/grep 与子进程执行，不经过 Agent、Provider 或 App command batch。
 
 真实 Agent runner 只在显式执行时调用 Provider：
 
@@ -775,10 +786,15 @@ Netty、Jackson 2/3 与 Kotlin BOM 在 Boot BOM 前导入，以 Maven 首次声�
 | App | [`deploy/local/Dockerfile`](../../deploy/local/Dockerfile) | `kk-studio-app:supply-chain` | `SUPPLY_CHAIN_APP_IMAGE` |
 | Daemon | [`deploy/reliability/daemon.Dockerfile`](../../deploy/reliability/daemon.Dockerfile) | `kk-studio-daemon:supply-chain` | `SUPPLY_CHAIN_DAEMON_IMAGE` |
 
-App smoke 在默认 non-root user 下检查 Java、`ffmpeg`、`ffprobe`、`curl`；Daemon 额外检查 Node
-`v22.23.3`、npm `11.21.0`、bash、git，并用一次 `npm install --package-lock-only` 验证 npm 工具链。
-Daemon 使用 Java 21 / Jammy，并将 npm bundle 的 `brace-expansion`、`ip-address`、`undici`
-分别更新到 `5.0.12`、`10.7.3`、`6.28.1`；`tar` 使用 npm 自带的 `7.5.22`。
+App smoke 在默认 non-root user 下检查 Java、`ffmpeg`、`ffprobe`、`curl`；Daemon smoke 在默认 non-root
+user（UID `10001`）下检查 `/opt/kk-studio/daemon/main.js` 与冻结运行时
+`/opt/kk-studio/daemon/runtime/code-server/lib/node` 同时存在、PATH 上唯一的 `node` 就是该冻结运行时
+（Node 24.x）、`npm` 主版本 `11`、`bash` 与 `git` 可用、镜像不含任何 JRE，并断言
+`node main.js --version` 与 `daemon/package.json` 的版本一致；随后在 `/workspace` 内真实执行一次
+`npm install --package-lock-only` 并用 Node 解析 `package-lock.json`，验证 npm 工具链在默认 user 下可用。
+Daemon 镜像以 Node 24.21.0 为 builder、`debian:bookworm-slim` 为 runtime，并将 npm bundle 的
+`brace-expansion`、`ip-address`、`undici` 分别更新到 `5.0.12`、`10.7.3`、`6.28.1`；`tar` 使用 npm
+自带的 `7.5.22`。
 `http-cache-semantics<=4.2.0` 的 HIGH `CVE-2026-93748` 当前尚无上游补丁，保持原包并报告未解决风险，
 不能据此宣称镜像扫描通过。
 
