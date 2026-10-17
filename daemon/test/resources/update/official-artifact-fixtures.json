@@ -1,0 +1,105 @@
+{
+  "description": [
+    "受管更新命令的官方制品 fixture（跨语言共享，唯一事实源）。",
+    "正例是五个已发布平台的官方归档 URL；反例是必须被入口拒绝的错配形态。",
+    "消费方：Node 协议入口（daemon/src/release.ts + daemon/src/protocol.ts 的 decodeUpdateCommand）",
+    "与 Java 制品生产方/入口（DaemonUpdateArtifact、DaemonUpdateCommandCodec）。",
+    "artifactSha256 是形态合法的占位值（真实发布时由 Release 构建产物替换），它只用于校验长度与字符集，不是制品承诺。"
+  ],
+  "targetVersion": "1.1.1",
+  "operationId": "8f2a1c34-5b6d-4e7f-9a01-23c4d5e6f708",
+  "artifactSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "releaseBase": "https://github.com/fengwk/kk-studio/releases/download",
+  "accepted": [
+    {
+      "name": "linux-amd64",
+      "operatingSystem": "linux",
+      "architecture": "amd64",
+      "artifactFileName": "kk-studio-daemon-v1.1.1-linux-amd64.tar.gz",
+      "artifactUrl": "https://github.com/fengwk/kk-studio/releases/download/v1.1.1/kk-studio-daemon-v1.1.1-linux-amd64.tar.gz",
+      "checksumUrl": "https://github.com/fengwk/kk-studio/releases/download/v1.1.1/kk-studio-daemon-v1.1.1-linux-amd64.tar.gz.sha256"
+    },
+    {
+      "name": "linux-arm64",
+      "operatingSystem": "linux",
+      "architecture": "arm64",
+      "artifactFileName": "kk-studio-daemon-v1.1.1-linux-arm64.tar.gz",
+      "artifactUrl": "https://github.com/fengwk/kk-studio/releases/download/v1.1.1/kk-studio-daemon-v1.1.1-linux-arm64.tar.gz",
+      "checksumUrl": "https://github.com/fengwk/kk-studio/releases/download/v1.1.1/kk-studio-daemon-v1.1.1-linux-arm64.tar.gz.sha256"
+    },
+    {
+      "name": "macos-amd64",
+      "operatingSystem": "macos",
+      "architecture": "amd64",
+      "artifactFileName": "kk-studio-daemon-v1.1.1-macos-amd64.tar.gz",
+      "artifactUrl": "https://github.com/fengwk/kk-studio/releases/download/v1.1.1/kk-studio-daemon-v1.1.1-macos-amd64.tar.gz",
+      "checksumUrl": "https://github.com/fengwk/kk-studio/releases/download/v1.1.1/kk-studio-daemon-v1.1.1-macos-amd64.tar.gz.sha256"
+    },
+    {
+      "name": "macos-arm64",
+      "operatingSystem": "macos",
+      "architecture": "arm64",
+      "artifactFileName": "kk-studio-daemon-v1.1.1-macos-arm64.tar.gz",
+      "artifactUrl": "https://github.com/fengwk/kk-studio/releases/download/v1.1.1/kk-studio-daemon-v1.1.1-macos-arm64.tar.gz",
+      "checksumUrl": "https://github.com/fengwk/kk-studio/releases/download/v1.1.1/kk-studio-daemon-v1.1.1-macos-arm64.tar.gz.sha256"
+    },
+    {
+      "name": "windows-amd64",
+      "operatingSystem": "windows",
+      "architecture": "amd64",
+      "artifactFileName": "kk-studio-daemon-v1.1.1-windows-amd64.tar.gz",
+      "artifactUrl": "https://github.com/fengwk/kk-studio/releases/download/v1.1.1/kk-studio-daemon-v1.1.1-windows-amd64.tar.gz",
+      "checksumUrl": "https://github.com/fengwk/kk-studio/releases/download/v1.1.1/kk-studio-daemon-v1.1.1-windows-amd64.tar.gz.sha256"
+    }
+  ],
+  "rejected": [
+    {
+      "name": "legacy JVM jar product",
+      "artifactUrl": "https://github.com/fengwk/kk-studio/releases/download/v1.1.1/kk-studio-daemon-v1.1.1.jar"
+    },
+    {
+      "name": "release tag does not match the target version",
+      "artifactUrl": "https://github.com/fengwk/kk-studio/releases/download/v1.1.0/kk-studio-daemon-v1.1.1-linux-amd64.tar.gz"
+    },
+    {
+      "name": "artifact version does not match the target version",
+      "artifactUrl": "https://github.com/fengwk/kk-studio/releases/download/v1.1.1/kk-studio-daemon-v1.1.0-linux-amd64.tar.gz"
+    },
+    {
+      "name": "unpublished platform (windows arm64)",
+      "artifactUrl": "https://github.com/fengwk/kk-studio/releases/download/v1.1.1/kk-studio-daemon-v1.1.1-windows-arm64.tar.gz"
+    },
+    {
+      "name": "unknown operating system",
+      "artifactUrl": "https://github.com/fengwk/kk-studio/releases/download/v1.1.1/kk-studio-daemon-v1.1.1-freebsd-amd64.tar.gz"
+    },
+    {
+      "name": "foreign GitHub repository",
+      "artifactUrl": "https://github.com/evil/kk-studio/releases/download/v1.1.1/kk-studio-daemon-v1.1.1-linux-amd64.tar.gz"
+    },
+    {
+      "name": "arbitrary download host",
+      "artifactUrl": "https://downloads.example.com/kk-studio-daemon-v1.1.1-linux-amd64.tar.gz"
+    },
+    {
+      "name": "plain http scheme",
+      "artifactUrl": "http://github.com/fengwk/kk-studio/releases/download/v1.1.1/kk-studio-daemon-v1.1.1-linux-amd64.tar.gz"
+    },
+    {
+      "name": "extra path segment inside the release directory",
+      "artifactUrl": "https://github.com/fengwk/kk-studio/releases/download/v1.1.1/extra/kk-studio-daemon-v1.1.1-linux-amd64.tar.gz"
+    },
+    {
+      "name": "query string appended to the archive",
+      "artifactUrl": "https://github.com/fengwk/kk-studio/releases/download/v1.1.1/kk-studio-daemon-v1.1.1-linux-amd64.tar.gz?token=leak"
+    },
+    {
+      "name": "checksum file offered as the artifact",
+      "artifactUrl": "https://github.com/fengwk/kk-studio/releases/download/v1.1.1/kk-studio-daemon-v1.1.1-linux-amd64.tar.gz.sha256"
+    },
+    {
+      "name": "missing release tag segment",
+      "artifactUrl": "https://github.com/fengwk/kk-studio/releases/download/kk-studio-daemon-v1.1.1-linux-amd64.tar.gz"
+    }
+  ]
+}
