@@ -313,7 +313,15 @@ class LinuxInstallTest(TempDirTestCase):
         )
         shim.chmod(0o755)
         before = path.read_bytes()
-        result = self.install()
+        try:
+            result = self.install()
+        except UnicodeDecodeError as error:
+            # 本用例是 macOS Bash 3.2 严格 UTF-8 解码失败的唯一现场。仍以 AssertionError
+            # 严格失败，但带出原始 stderr 十六进制与出错位置，供真实 macOS CI 定位。
+            raise AssertionError(
+                f"installer stderr is not valid UTF-8: start={error.start} "
+                f"end={error.end} bytes={error.object.hex(' ')}"
+            ) from error
         self.assertNotEqual(result.returncode, 0)
         for text in ("belongs to another user", str(path), "不要伪造所有权标记"):
             self.assertIn(text, result.stderr)
