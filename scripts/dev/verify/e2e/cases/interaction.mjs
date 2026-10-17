@@ -26,6 +26,7 @@ const UUID_TEXT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}
 
 /** InteractionDTO 精确字段集合：Pane 跳转与回答所需的最小事实。 */
 const INTERACTION_FIELDS = [
+  'type',
   'interactionId',
   'status',
   'threadId',
@@ -36,6 +37,9 @@ const INTERACTION_FIELDS = [
   'toolName',
   'argumentsJson',
   'approvalJson',
+  'environmentId',
+  'environmentName',
+  'waitingCount',
   'createTime',
 ]
 
@@ -45,7 +49,7 @@ const INTERACTION_FIELDS = [
  */
 const INTERACTION_PAGE_FIELDS = ['items', 'nextCursor', 'total', 'freshnessAt']
 
-const OWNER_FIELDS = ['type', 'chatId', 'issueId', 'agentName']
+const OWNER_FIELDS = ['type', 'chatId', 'chatTitle', 'issueId', 'issueTitle', 'agentName', 'rootThreadName']
 const RECEIPT_FIELDS = ['threadId', 'interactionId', 'submissionId', 'actor', 'acceptedAt', 'materialized']
 
 function instantMillis(value) {
@@ -67,11 +71,12 @@ function parseArguments(interaction) {
 
 function assertInteraction(
   interaction,
-  { threadId, rootThreadId, sessionId, chatId, questionnaire, label },
+  { threadId, rootThreadId, sessionId, chatId, chatTitle, rootThreadName, questionnaire, label },
 ) {
   assertExactFields(interaction, INTERACTION_FIELDS, `${label} interaction`)
   assert(
-    UUID_TEXT.test(interaction.interactionId)
+    interaction.type === 'INPUT'
+      && UUID_TEXT.test(interaction.interactionId)
       && interaction.status === 'WAITING_INPUT'
       && interaction.threadId === threadId
       && interaction.sessionId === sessionId
@@ -81,6 +86,9 @@ function assertInteraction(
       && typeof interaction.toolCallId === 'string'
       && interaction.toolCallId.trim().length > 0
       && interaction.approvalJson === null
+      && interaction.environmentId === null
+      && interaction.environmentName === null
+      && interaction.waitingCount === null
       && instantMillis(interaction.createTime) >= 0,
     JSON.stringify(interaction),
   )
@@ -88,9 +96,16 @@ function assertInteraction(
   assert(
     interaction.owner.type === 'CHAT'
       && interaction.owner.chatId === chatId
+      && interaction.owner.chatTitle === chatTitle
       && interaction.owner.issueId === null
+      && interaction.owner.issueTitle === null
       && interaction.owner.agentName === null,
     JSON.stringify(interaction.owner),
+  )
+  assert(
+    typeof interaction.owner.rootThreadName === 'string'
+      && interaction.owner.rootThreadName === rootThreadName,
+    'interaction root display name must match the authoritative Thread snapshot',
   )
   assert(
     JSON.stringify(parseArguments(interaction)) === JSON.stringify(questionnaire),
@@ -193,7 +208,7 @@ registerCase({
   // 本 case 把 Provider baseUrl 指向 case 内自建的宿主 127.0.0.1 mock；distributed 容器内无法回连宿主 loopback。
   requires: ['host-mock'],
   title: '统一人工交互 API：ask_user 待处理列表、答案物化与门禁',
-  docs: '本地 OpenAI SSE mock 触发内置 ask_user（Runtime 按 provenance 冻结为 WAITING_INPUT，不进审批）：GET /api/interactions 返回仅含 Chat/Issue+Agent 归属的 (createTime,interactionId) 升序 keyset 分页（limit 默认 50、[1,100]、非法参数 400），页内含与分页位置无关的真实可见待处理总数 total，并携带 required-nullable 的权威回读时刻 freshnessAt（本 case 无环境 Tool 等待时为 null）；可选 rootThreadId 按执行根过滤（返回该根及其后代，响应项保留来源 threadId/sessionId 并给出 rootThreadId；不存在的根 404、非法 canonical 400），非法 rootThreadId 或缺省过滤下的 total 与可见集一致；InteractionDTO 只暴露冻结问卷原文与归属，approvalJson 为 null；POST /api/interactions/{id}/input 严格校验 threadId/submissionId/declined/answers（缺失、未知字段、拒答携带答案 400；答案不满足冻结问卷 409；未知目标 409），接受后同 submissionId 精确重放 materialized=true，换 submissionId 409；回答物化为 ToolResult 后交互消失、Thread 以答案收敛',
+  docs: '本地 OpenAI SSE mock 触发内置 ask_user（Runtime 按 provenance 冻结为 WAITING_INPUT，不进审批）：GET /api/interactions 返回仅含 Chat/Issue+Agent 归属的 (createTime,interactionId) 升序 keyset 分页（limit 默认 50、[1,100]、非法参数 400），页内含与分页位置无关的真实可见待处理总数 total，并携带 required-nullable 的权威回读时刻 freshnessAt（本 case 无环境 Tool 等待时为 null）；可选 rootThreadId 按执行根过滤（返回该根及其后代，响应项保留来源 threadId/sessionId 并给出 rootThreadId；不存在的根 404、非法 canonical 400），非法 rootThreadId 或缺省过滤下的 total 与可见集一致；INPUT 条目携带冻结问卷原文与归属，approvalJson 及环境聚合字段显式为 null，owner 展示名取自 Chat 与执行根 Thread 的权威数据；POST /api/interactions/{id}/input 严格校验 threadId/submissionId/declined/answers（缺失、未知字段、拒答携带答案 400；答案不满足冻结问卷 409；未知目标 409），接受后同 submissionId 精确重放 materialized=true，换 submissionId 409；回答物化为 ToolResult 后交互消失、Thread 以答案收敛',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
     const marker = `INTERACTION-PENDING-${suffix}`
@@ -301,6 +316,8 @@ registerCase({
           rootThreadId: threadId,
           sessionId: String(sessionId),
           chatId: chat.id,
+          chatTitle: chat.title,
+          rootThreadName: (await getThreadSnapshot(ctx, threadId)).thread.name,
           questionnaire,
           label: 'pending',
         },

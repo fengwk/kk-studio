@@ -469,7 +469,8 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
   command、`revision` 坐标与 patch 变化集、批量前置条件过期时整批 409 不写入。
 - `interaction.pending_input_contract`：内置 `ask_user` 冻结出 WAITING_INPUT 后，统一
   `GET /api/interactions` 与 `POST /api/interactions/{id}/input` 的归属、分页、答案校验与
-  物化门禁；分页携带 required-nullable 的权威回读时刻 `freshnessAt`（本 case 无环境 Tool
+  物化门禁；`INPUT` 条目的环境聚合字段显式为 null，owner 展示名与 Chat、执行根 Thread 的权威数据一致。
+  分页携带 required-nullable 的权威回读时刻 `freshnessAt`（本 case 无环境 Tool
   等待时显式为 null）；该 case 需要 `host-mock`，不是 `requires=-`。
 - `thread_tree.query_contract` / `thread_tree.invalid_and_unknown_thread`：
   `GET /api/harness/threads/{threadId}/tree` 的最小节点投影、真实根关系、当前路径计数与终态，
