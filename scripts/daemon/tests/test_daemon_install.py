@@ -14,7 +14,7 @@ import tarfile
 import unittest
 from pathlib import Path
 
-from daemon_fixture import RELEASE_TAG, InstallFixture, TempDirTestCase, sha256_of
+from release_fixture import RELEASE_TAG, InstallFixture, TempDirTestCase, sha256_of
 
 
 class LinuxInstallTest(TempDirTestCase):
@@ -187,6 +187,34 @@ class LinuxInstallTest(TempDirTestCase):
     def test_status_before_install_reports_absent(self) -> None:
         result = self.fixture.run("status")
         self.assertEqual(result.returncode, 1)
+
+    def test_status_distinguishes_active_inactive_and_absent(self) -> None:
+        # 0 = active, 3 = installed but inactive, 1 = not installed. This is the documented
+        # status contract and must not collapse "installed but stopped" into "absent".
+        self.assertEqual(self.install().returncode, 0)
+        self.assertEqual(self.fixture.run("status").returncode, 0)
+        (self.fixture.state / "active").unlink()
+        self.assertEqual(self.fixture.run("status").returncode, 3)
+        self.assertEqual(self.fixture.run("uninstall").returncode, 0)
+        self.assertEqual(self.fixture.run("status").returncode, 1)
+
+    def test_installer_output_never_echoes_the_registration_token(self) -> None:
+        result = self.install()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        (self.fixture.http_dir / (self.fixture.asset + ".sha256")).write_text(
+            f"{'0' * 64}  {self.fixture.asset}\n")
+        failed = self.install()
+        self.assertNotEqual(failed.returncode, 0)
+        for text in (result.stdout, result.stderr, failed.stdout, failed.stderr):
+            self.assertNotIn("token-value", text)
+
+    def test_installer_uses_the_system_bash_not_another_bash_on_path(self) -> None:
+        # The macOS gate runs under /bin/bash (3.2). A competing PATH bash must not replace it.
+        competing = self.fixture.bindir / "bash"
+        competing.write_text("#!/bin/sh\nexit 99\n")
+        competing.chmod(0o755)
+        result = self.install()
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_uninstall_removes_program_and_keeps_config(self) -> None:
         self.assertEqual(self.install().returncode, 0)
