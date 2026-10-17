@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
@@ -224,7 +224,7 @@ describe.skipIf(process.platform === 'win32')('native process supervisor (POSIX)
     expect(await awaitGone(child)).toBe(true)
   }, TEST_TIMEOUT)
 
-  test('the scope helper converges everything when its parent daemon is killed', async () => {
+  test('the scope helper converges everything when its parent daemon is killed', async (context) => {
     // 父进程消失必须由 helper 自己触发收敛：专用 IPC 通道的内核 EOF，不依赖心跳或猜父 pid。
     if (process.platform === 'win32') {
       return
@@ -240,18 +240,78 @@ describe.skipIf(process.platform === 'win32')('native process supervisor (POSIX)
       [fixturePath('parent-owner.mjs'), stateDir, resolveHelperPath(), helperPidFile, command.executable, ...command.args],
       { stdio: 'ignore' },
     )
+    // 在 spawn 时注册：晚挂监听可能错过已经发生的 close，而 exit 早于 stdio 拆除。
+    const ownerClosed = new Promise<void>((resolve) => {
+      owner.on('close', () => resolve())
+    })
+    // 诊断状态：只在本用例失败或超时时由 onTestFailed 读取，不参与等待与判定。
+    let phase = 'spawn-owner'
+    const observed: { helper: number | null; root: number | null; escaped: number | null } = {
+      helper: null,
+      root: null,
+      escaped: null,
+    }
+    context.onTestFailed(() => {
+      const present = (name: string): string =>
+        existsSync(join(stateDir, name)) ? 'present' : 'absent'
+      // 只接受字面 true/false（cleanup）或固定阶段代码（error），其余只记 unexpected。
+      const readRestricted = (name: string, accept: (value: string) => string): string => {
+        if (!existsSync(join(stateDir, name))) {
+          return 'absent'
+        }
+        try {
+          return accept(readFileSync(join(stateDir, name), 'utf8').trim())
+        } catch {
+          return 'unreadable'
+        }
+      }
+      const processState = (pid: number | null): { pid: number; alive: boolean } | null =>
+        pid === null ? null : { pid, alive: isAlive(pid) }
+      console.error(
+        '[ownerdeath-diagnostic] ' +
+          JSON.stringify({
+            phase,
+            owner: { exitCode: owner.exitCode, signalCode: owner.signalCode },
+            helper: processState(observed.helper),
+            root: processState(observed.root),
+            escaped: processState(observed.escaped),
+            state: {
+              scope: present('scope'),
+              permit: present('permit'),
+              exit: present('exit'),
+              cleanup: readRestricted('cleanup', (value) =>
+                value === 'true' || value === 'false' ? value : 'unexpected',
+              ),
+              error: readRestricted('error', (value) =>
+                /^helper-[a-z]+-failure$/.test(value) ? value : 'unexpected',
+              ),
+            },
+          }),
+      )
+    })
     try {
+      phase = 'wait-helper-pid'
       const helperPid = await waitForPid(helperPidFile)
+      observed.helper = helperPid
+      phase = 'wait-root-pid'
       const root = await waitForPid(rootPidFile)
+      observed.root = root
+      phase = 'wait-escaped-pid'
       const escaped = await waitForPid(escapedPidFile)
+      observed.escaped = escaped
       expect([helperPid, root, escaped].every(isAlive)).toBe(true)
 
       // 强杀所有者（daemon）：helper 与后代此刻都还在，没有任何登记窗口。
+      phase = 'kill-owner'
       process.kill(owner.pid as number, 'SIGKILL')
-      await new Promise<void>((resolve) => owner.on('exit', () => resolve()))
+      phase = 'await-owner-exit'
+      await ownerClosed
 
+      phase = 'await-gone-helper'
       expect(await awaitGone(helperPid, 30_000)).toBe(true)
+      phase = 'await-gone-root'
       expect(await awaitGone(root, 30_000)).toBe(true)
+      phase = 'await-gone-escaped'
       if (process.platform === 'linux') {
         expect(await awaitGone(escaped, 30_000)).toBe(true)
       } else {
@@ -262,6 +322,8 @@ describe.skipIf(process.platform === 'win32')('native process supervisor (POSIX)
       if (owner.exitCode === null && owner.signalCode === null) {
         owner.kill('SIGKILL')
       }
+      // 等待 spawn 时注册的 close：句柄真正释放后才删除状态目录，不靠晚挂监听猜时机。
+      await ownerClosed
       rmSync(stateDir, { recursive: true, force: true })
     }
   }, TEST_TIMEOUT)
