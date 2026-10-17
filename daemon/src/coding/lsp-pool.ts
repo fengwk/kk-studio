@@ -420,7 +420,8 @@ export class LspClientPool {
 
   private async stopRetirement(retirement: Retiring): Promise<void> {
     if (retirement.claimed) {
-      return
+      // 已有调用负责物理 stop；其它关闭者仍须等待它记录失败并完成退休。
+      return retirement.promise
     }
     retirement.claimed = true
     try {
