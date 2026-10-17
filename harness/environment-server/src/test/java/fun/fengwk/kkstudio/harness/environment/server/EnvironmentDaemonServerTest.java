@@ -14,6 +14,7 @@ import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonSe
 import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.partialPayload;
 import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.readyPayload;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -51,6 +52,8 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateCommand;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdatePhase;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateResult;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateResultCodec;
+import fun.fengwk.kkstudio.harness.environment.daemon.IdeAction;
+import fun.fengwk.kkstudio.harness.environment.daemon.IdeCommand;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.FakeChannel;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.Fixture;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.RecordingListener;
@@ -1932,6 +1935,102 @@ class EnvironmentDaemonServerTest {
     assertTrue(channel.closed(), "a failed lease release must not skip the transport close");
     assertFalse(fixture.leaseStore.disconnected);
     assertEquals(Set.of(), fixture.server.readyEnvironments());
+  }
+
+  /** 测试意图：租约解绑注入 Error 时收尾不跳过——在途 IDE 命令仍按结果不确定终结、断开通知仍发生、Error 以原身份抛出，且只记录固定阶段与异常类名。 */
+  @Test
+  void leaseErrorStillFailsPendingIdeAndNotifiesDisconnected() {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-cleanup-ide-lease-error");
+    IdeRequest request = fixture.server.requestIde(ENVIRONMENT_ID, openViewCommand());
+    AssertionError leaseFailure =
+        new AssertionError("lease disconnect failed: " + SYNTHETIC_SECRET);
+    fixture.leaseStore.disconnectFailure = leaseFailure;
+
+    AssertionError thrown;
+    try (CoreLogCapture logs = new CoreLogCapture()) {
+      thrown =
+          assertThrows(AssertionError.class, () -> fixture.server.close(channel.connectionId()));
+      logs.assertOnlySafeFailures(1, "connection cleanup lease disconnect");
+    }
+
+    assertSame(leaseFailure, thrown, "the lease Error must keep its object identity");
+    assertTrue(channel.closed(), "the transport close must run even when the lease release fails");
+    assertEquals(0, fixture.server.activeIdeCount(), "the pending IDE call must be settled");
+    assertTrue(request.reply().isCompletedExceptionally());
+    assertInstanceOf(
+        EnvironmentCapabilitySendUncertainException.class, request.reply().exceptionNow());
+    assertEquals(List.of(ENVIRONMENT_ID), fixture.disconnectedEnvironments);
+    assertEquals(List.of(request.identity().leaseToken()), fixture.disconnectedLeaseTokens);
+    assertFalse(fixture.server.isReady(ENVIRONMENT_ID));
+  }
+
+  /** 测试意图：传输关闭注入 Error 时收尾不跳过——租约已解绑、IDE 命令仍终结、断开通知仍发生，Error 以原身份抛出。 */
+  @Test
+  void transportErrorStillFailsPendingIdeAndNotifiesDisconnected() {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-cleanup-ide-transport-error");
+    IdeRequest request = fixture.server.requestIde(ENVIRONMENT_ID, openViewCommand());
+    AssertionError transportFailure =
+        new AssertionError("transport close failed: " + SYNTHETIC_SECRET);
+    channel.closeFailure = transportFailure;
+
+    AssertionError thrown;
+    try (CoreLogCapture logs = new CoreLogCapture()) {
+      thrown =
+          assertThrows(AssertionError.class, () -> fixture.server.close(channel.connectionId()));
+      logs.assertOnlySafeFailures(1, "connection cleanup transport close");
+    }
+
+    assertSame(transportFailure, thrown, "the transport Error must keep its object identity");
+    assertTrue(
+        fixture.leaseStore.disconnected, "the lease release must run before the transport close");
+    assertEquals(0, fixture.server.activeIdeCount(), "the pending IDE call must be settled");
+    assertTrue(request.reply().isCompletedExceptionally());
+    assertInstanceOf(
+        EnvironmentCapabilitySendUncertainException.class, request.reply().exceptionNow());
+    assertEquals(List.of(ENVIRONMENT_ID), fixture.disconnectedEnvironments);
+    assertEquals(List.of(request.identity().leaseToken()), fixture.disconnectedLeaseTokens);
+    assertFalse(fixture.server.isReady(ENVIRONMENT_ID));
+  }
+
+  /** 测试意图：断开通知自身的 RuntimeException 只记录固定阶段与异常类名，不改变已关闭状态；重复关闭是幂等 no-op，通知身份不因失败而放宽。 */
+  @Test
+  void disconnectedNotificationRuntimeFailureIsLoggedSafelyAndKeepsConnectionClosed() {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-disconnected-notify-runtime");
+    IdeRequest request = fixture.server.requestIde(ENVIRONMENT_ID, openViewCommand());
+    fixture.disconnectedNotificationFailure =
+        new IllegalStateException("disconnected notification failed: " + SYNTHETIC_SECRET);
+
+    try (CoreLogCapture logs = new CoreLogCapture()) {
+      assertDoesNotThrow(() -> fixture.server.close(channel.connectionId()));
+      logs.assertOnlySafeFailures(1, "environment disconnected notification");
+    }
+
+    assertTrue(channel.closed(), "a failing notification must not reopen the transport");
+    assertFalse(fixture.server.isReady(ENVIRONMENT_ID));
+    assertEquals(0, fixture.server.activeIdeCount());
+    assertTrue(request.reply().isCompletedExceptionally());
+    assertInstanceOf(
+        EnvironmentCapabilitySendUncertainException.class, request.reply().exceptionNow());
+    assertEquals(List.of(ENVIRONMENT_ID), fixture.disconnectedEnvironments);
+    assertEquals(List.of(request.identity().leaseToken()), fixture.disconnectedLeaseTokens);
+
+    try (CoreLogCapture logs = new CoreLogCapture()) {
+      assertDoesNotThrow(() -> fixture.server.close(channel.connectionId()));
+      assertEquals(
+          0, logs.records().size(), "an already closed connection must not be cleaned twice");
+    }
+    assertEquals(
+        1,
+        fixture.disconnectedEnvironments.size(),
+        "the disconnected notification must not repeat for an already closed connection");
+  }
+
+  private static IdeCommand openViewCommand() {
+    return IdeCommand.view(
+        IdeAction.OPEN_VIEW, "11111111-2222-3333-4444-555555555555", "/home/dev/project");
   }
 
   /** 测试意图：宿主 READY 与更新回执通知失败只记录固定阶段与异常类名，不改变会话状态，也不阻断后续帧处理。 */

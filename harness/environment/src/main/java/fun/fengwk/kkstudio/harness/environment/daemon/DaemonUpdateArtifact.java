@@ -8,40 +8,23 @@ import java.util.regex.Pattern;
  *
  * <p>Platform 与 Daemon 共享这一事实源：Platform 用它构造受管更新目标，Daemon 用同一模式在下载前校验 URL 是否就是本机 os/arch 的官方归档。
  * 它刻意不提供 "latest" 或任意 URL 解析——目标版本与平台必须由 Platform 明确给出。
- *
- * <p><b>确定性退役清单（最终不可保留）：</b>以下成员只为当前仍存活的旧 JAR 产品路径提供过渡期编译，必须在父合并 N4 更新服务并删除 JavaDaemon 后统一移除：
- *
- * <ul>
- *   <li>{@link #LEGACY_JAR_URL_PATTERN}
- *   <li>{@link #jarName(String)}
- *   <li>{@link #artifactUrl(String)}
- *   <li>{@link #checksumUrl(String)}
- * </ul>
- *
- * <p>退役后本类只剩五平台 tar.gz 形状；{@code DaemonUpdateCommand} 与 Node UPDATE 入口都只接受 {@link
- * #ARTIFACT_URL_PATTERN}。
  */
 public final class DaemonUpdateArtifact {
 
   /** 官方 Release 下载基址；只允许该仓库。 */
   public static final String RELEASE_BASE = "https://github.com/fengwk/kk-studio/releases/download";
 
-  /** 官方 Daemon 制品 URL：固定仓库 + tag + 按 os/arch 的归档名，且只覆盖发布矩阵内的平台。 */
+  /**
+   * 官方 Daemon 制品 URL：固定仓库 + tag + 按 os/arch 的归档名，且只覆盖发布矩阵内的平台。
+   *
+   * <p>Release tag 与归档文件名中的版本必须是同一事实（反向引用 {@code \1} 强制两者逐字相等），未知平台同样不被接受。 捕获组 1 即该制品版本，供 {@code
+   * DaemonUpdateCommand} 与 targetVersion 做一致性比较。
+   */
   public static final Pattern ARTIFACT_URL_PATTERN =
       Pattern.compile(
-          "^https://github\\.com/fengwk/kk-studio/releases/download/v[0-9A-Za-z._+-]{1,64}/"
-              + "kk-studio-daemon-v[0-9A-Za-z._+-]{1,64}-"
+          "^https://github\\.com/fengwk/kk-studio/releases/download/v([0-9A-Za-z._+-]{1,64})/"
+              + "kk-studio-daemon-v\\1-"
               + "((linux|macos)-(amd64|arm64)|windows-amd64)\\.tar\\.gz$");
-
-  /**
-   * 旧 JavaDaemon JAR 制品 URL 形状。
-   *
-   * <p>仅用于仍待删除的 JavaDaemon 产品路径的过渡期编译；正式 Node 更新只接受 {@link #ARTIFACT_URL_PATTERN} 的五平台归档。
-   */
-  public static final Pattern LEGACY_JAR_URL_PATTERN =
-      Pattern.compile(
-          "^https://github\\.com/fengwk/kk-studio/releases/download/v[0-9A-Za-z._+-]{1,64}/"
-              + "kk-studio-daemon-v[0-9A-Za-z._+-]{1,64}\\.jar$");
 
   /** SHA256 文本形状。 */
   public static final Pattern SHA256_PATTERN = Pattern.compile("[0-9a-fA-F]{64}");
@@ -121,21 +104,5 @@ public final class DaemonUpdateArtifact {
   public static String checksumUrl(
       String version, DaemonOperatingSystem operatingSystem, DaemonArchitecture architecture) {
     return artifactUrl(version, operatingSystem, architecture) + ".sha256";
-  }
-
-  /** 旧 JavaDaemon JAR 制品文件名；JavaDaemon 删除后随本方法一起移除。 */
-  public static String jarName(String version) {
-    DaemonCapabilities.validateDaemonVersion(version);
-    return "kk-studio-daemon-" + tag(version) + ".jar";
-  }
-
-  /** 旧 JavaDaemon JAR 制品 URL；JavaDaemon 删除后随本方法一起移除。 */
-  public static String artifactUrl(String version) {
-    return RELEASE_BASE + "/" + tag(version) + "/" + jarName(version);
-  }
-
-  /** 旧 JavaDaemon JAR 校验 URL；JavaDaemon 删除后随本方法一起移除。 */
-  public static String checksumUrl(String version) {
-    return artifactUrl(version) + ".sha256";
   }
 }

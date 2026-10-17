@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.environment.daemon;
 
 import java.util.Objects;
 import java.util.UUID;
+import java.util.regex.Matcher;
 
 /**
  * 一条受管更新命令：Platform 在专用管理通道上向 Daemon 下发唯一更新目标。
@@ -17,7 +18,7 @@ public record DaemonUpdateCommand(
   public DaemonUpdateCommand {
     operationId = validateOperationId(operationId);
     targetVersion = DaemonCapabilities.validateDaemonVersion(targetVersion);
-    artifactUrl = validateArtifactUrl(artifactUrl);
+    artifactUrl = validateArtifactUrl(targetVersion, artifactUrl);
     artifactSha256 = validateSha256(artifactSha256);
   }
 
@@ -42,17 +43,24 @@ public record DaemonUpdateCommand(
   }
 
   /**
-   * 校验官方发布制品 URL 形状：只接受固定官方 Release 仓库与 tag 前缀。
+   * 校验官方发布制品 URL：固定官方 Release 仓库、发布矩阵内的平台，且 Release tag、归档文件名版本与 {@code targetVersion} 必须是同一个版本事实。
    *
-   * <p>这是「不下载任意 URL」的 wire 边界防御：即使命令来自被攻破的 Platform，Daemon 也只连接官方发布地址的直接下载路径。
+   * <p>这是「不下载任意 URL / 不下错版本」的 wire 边界防御：即使命令来自被攻破的 Platform，Daemon 也只连接官方发布地址的直接下载路径，
+   * 且只下载与目标版本一致的归档。URL 形态由 {@link DaemonUpdateArtifact#ARTIFACT_URL_PATTERN} 强制 tag 与归档版本逐字相等；这里再与
+   * {@code targetVersion} 比较，使三者不一致在构造与 codec 边界同样被拒绝。
    */
-  public static String validateArtifactUrl(String value) {
+  public static String validateArtifactUrl(String targetVersion, String value) {
     if (value == null || value.isBlank()) {
       throw new IllegalArgumentException("artifactUrl must not be blank");
     }
-    if (!DaemonUpdateArtifact.ARTIFACT_URL_PATTERN.matcher(value).matches()) {
+    Matcher matcher = DaemonUpdateArtifact.ARTIFACT_URL_PATTERN.matcher(value);
+    if (!matcher.matches()) {
       throw new IllegalArgumentException(
           "artifactUrl must be the official fengwk/kk-studio daemon distribution archive");
+    }
+    if (!targetVersion.equals(matcher.group(1))) {
+      throw new IllegalArgumentException(
+          "artifactUrl release tag, artifact version and targetVersion must be the same version");
     }
     return value;
   }

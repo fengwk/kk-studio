@@ -115,7 +115,45 @@ class DaemonUpdateCommandCodecTest {
             + "kk-studio-daemon-v1.0.9-linux-amd64.tar.gz",
         DaemonUpdateArtifact.artifactUrl(
             VERSION, DaemonOperatingSystem.LINUX, DaemonArchitecture.AMD64));
-    assertEquals(URL, DaemonUpdateCommand.validateArtifactUrl(URL));
+    assertEquals(URL, DaemonUpdateCommand.validateArtifactUrl(VERSION, URL));
+  }
+
+  /** Release tag、归档文件名版本与 targetVersion 是同一个版本事实：任一不一致必须在构造与 codec 边界同样被拒绝。 */
+  @Test
+  void rejectsArtifactUrlWhoseVersionFactsDisagree() {
+    String tagMismatch =
+        "https://github.com/fengwk/kk-studio/releases/download/v1.0.8/"
+            + "kk-studio-daemon-v1.0.9-linux-amd64.tar.gz";
+    String artifactVersionMismatch =
+        "https://github.com/fengwk/kk-studio/releases/download/v1.0.9/"
+            + "kk-studio-daemon-v1.0.8-linux-amd64.tar.gz";
+    String targetVersionMismatch =
+        "https://github.com/fengwk/kk-studio/releases/download/v1.0.8/"
+            + "kk-studio-daemon-v1.0.8-linux-amd64.tar.gz";
+
+    for (String url : new String[] {tagMismatch, artifactVersionMismatch, targetVersionMismatch}) {
+      assertThrows(
+          IllegalArgumentException.class,
+          () -> new DaemonUpdateCommand(OP, VERSION, url, SHA),
+          "artifactUrl must be rejected: " + url);
+      assertThrows(
+          DaemonProtocolException.class,
+          () -> codec.decode(payload(OP, VERSION, url, SHA)),
+          "artifactUrl must be rejected by the codec: " + url);
+    }
+  }
+
+  private static String payload(
+      String operationId, String targetVersion, String artifactUrl, String artifactSha256) {
+    return "{\"operationId\":\""
+        + operationId
+        + "\",\"targetVersion\":\""
+        + targetVersion
+        + "\",\"artifactUrl\":\""
+        + artifactUrl
+        + "\",\"artifactSha256\":\""
+        + artifactSha256
+        + "\"}";
   }
 
   @Test
