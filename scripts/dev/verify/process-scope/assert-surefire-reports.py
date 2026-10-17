@@ -48,6 +48,10 @@ WINDOWS_REQUIRED_CASES = {
         "closesStdinSoCommandsWaitingForEofFinishNaturally",
         "unrepresentableTimeoutBudgetDoesNotDegradeIntoImmediateTimeout",
     },
+    "fun.fengwk.kkstudio.harness.daemon.coding.ProcessScopeStateTest": {
+        "deleteWaitsForAReleasedWindowsFileHandle",
+        "deleteReportsPersistentWindowsSharingFailureAndPreservesInterruption",
+    },
 }
 
 # 其余被选中的用例各自带平台前置条件（POSIX shell、Windows Job 语义），因此只要求真的执行过且没有失败。

@@ -11,6 +11,10 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import fun.fengwk.kkstudio.harness.daemon.DaemonOperatingSystemDetector;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
+
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -18,6 +22,8 @@ import java.nio.file.Path;
 import java.nio.file.attribute.PosixFileAttributeView;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 
 /**
@@ -115,6 +121,75 @@ class ProcessScopeStateTest {
     assertTrue(ProcessScopeState.deleteQuietly(directory), "现有目录必须被完整清理");
     assertFalse(Files.exists(directory));
     assertTrue(ProcessScopeState.deleteQuietly(directory), "重复清理仍然报告已经清理完成");
+  }
+
+  /** Windows 的真实共享句柄释放后，已经等待中的清理必须完成，而不是留下状态目录。 */
+  @Test
+  void deleteWaitsForAReleasedWindowsFileHandle() throws Exception {
+    assumeWindows();
+    Path directory = Files.createDirectory(stateDir.resolve("released-handle"));
+    Path file = directory.resolve(ProcessScopeState.DIAGNOSTICS_FILE);
+    AtomicReference<Boolean> deleted = new AtomicReference<>();
+    Thread cleanup = new Thread(() -> deleted.set(ProcessScopeState.deleteQuietly(directory)));
+    try (FileOutputStream held = new FileOutputStream(file.toFile())) {
+      held.write(1);
+      assertThrows(IOException.class, () -> Files.delete(file), "必须先证明真实文件句柄阻止删除");
+      cleanup.start();
+      awaitDeletionWait(cleanup);
+      assertNull(deleted.get(), "句柄未释放时不得报告清理完成");
+    } finally {
+      cleanup.join(TimeUnit.SECONDS.toMillis(2));
+    }
+    assertFalse(cleanup.isAlive(), "清理线程必须有界结束");
+    assertEquals(Boolean.TRUE, deleted.get());
+    assertFalse(Files.exists(directory));
+  }
+
+  /** 持续占用必须有界失败，保留中断标记，释放后的重复清理仍可成功。 */
+  @Test
+  void deleteReportsPersistentWindowsSharingFailureAndPreservesInterruption() throws Exception {
+    assumeWindows();
+    Path directory = Files.createDirectory(stateDir.resolve("held-handle"));
+    Path file = directory.resolve(ProcessScopeState.DIAGNOSTICS_FILE);
+    try (FileOutputStream held = new FileOutputStream(file.toFile())) {
+      held.write(1);
+      assertThrows(IOException.class, () -> Files.delete(file));
+      Thread.currentThread().interrupt();
+      long started = System.nanoTime();
+      try {
+        assertFalse(ProcessScopeState.deleteQuietly(directory), "持续共享冲突不得报告成功");
+        assertTrue(Thread.currentThread().isInterrupted(), "收尾必须恢复调用方的中断标记");
+        assertTrue(System.nanoTime() - started < TimeUnit.SECONDS.toNanos(2), "失败必须有界");
+      } finally {
+        Thread.interrupted();
+      }
+      assertTrue(Files.exists(file), "仍被占用的文件必须保留");
+    }
+    assertTrue(ProcessScopeState.deleteQuietly(directory));
+    assertFalse(Files.exists(directory));
+  }
+
+  private static void assumeWindows() {
+    assumeTrue(
+        DaemonOperatingSystemDetector.detectCurrent() == DaemonOperatingSystem.WINDOWS,
+        "需要 Windows 共享句柄语义");
+  }
+
+  /** 只在清理线程真正进入文件释放等待后才释放句柄，不依赖睡眠时长猜测同步点。 */
+  private static void awaitDeletionWait(Thread cleanup) throws InterruptedException {
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+    while (System.nanoTime() < deadline) {
+      if (cleanup.getState() == Thread.State.TIMED_WAITING) {
+        for (StackTraceElement frame : cleanup.getStackTrace()) {
+          if (frame.getClassName().equals(ProcessScopeState.class.getName())
+              && frame.getMethodName().equals("deleteQuietly")) {
+            return;
+          }
+        }
+      }
+      Thread.sleep(1);
+    }
+    throw new AssertionError("清理线程未进入文件释放等待");
   }
 
   private static final String MEMBER_FILE = "member";
