@@ -185,6 +185,9 @@ final class EnvironmentDaemonServerTestSupport {
     /** 注入的宿主更新回执通知失败；用于验证同职责通知失败去敏可观察。 */
     Throwable updateNotificationFailure;
 
+    /** 注入的宿主断开通知失败；用于验证断开通知失败去敏可观察且不改变已关闭状态。 */
+    Throwable disconnectedNotificationFailure;
+
     Fixture() {
       this.server =
           new EnvironmentDaemonServer(
@@ -215,6 +218,9 @@ final class EnvironmentDaemonServerTestSupport {
                     EnvironmentId environmentId, UUID leaseToken) {
                   disconnectedEnvironments.add(environmentId);
                   disconnectedLeaseTokens.add(leaseToken);
+                  if (disconnectedNotificationFailure != null) {
+                    throwUnchecked(disconnectedNotificationFailure);
+                  }
                 }
               },
               (environmentId, result) -> {
