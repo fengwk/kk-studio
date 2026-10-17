@@ -10,6 +10,9 @@ import static org.junit.jupiter.api.Assumptions.assumeFalse;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import fun.fengwk.kkstudio.harness.daemon.DaemonOperatingSystemDetector;
+import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
+
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -100,12 +103,16 @@ class ProcessScopeHelperFailureTest {
    * <p>这个类带父进程的 logger：helper 是执行范围的核心，任何在 helper 里意外的 JUL 初始化都可能把日志绑到命令的 stderr （双向模式下正是命令的 stderr
    * 管道）。因此属性名必须是编译期内联的字符串常量，而不是对 launcher 的运行时引用。
    *
-   * <p>用一个全新 JVM 打开 {@code -verbose:class} 直接跑 helper 入口：既证明 helper 入口真的被加载，又能逐行证明 launcher
-   * 从未出现在类加载日志里。
+   * <p>用一个全新 JVM 打开 {@code -verbose:class} 直接跑 helper 入口：类加载日志重定向到本用例私有的文件，既证明 helper 入口真的被
+   * 加载，又能逐行证明 launcher 从未出现在日志里。
+   *
+   * <p>命令的事实只来自 helper 原子发布的握手文件，helper 自己的退出码不是命令的退出码：收敛只能向整组广播强杀的平台（macOS）会把 helper 自己一起终结，这是
+   * {@link ProcessScope} 的明确约定，不是命令失败。因此这里按平台约定精确断言 helper 自己的去向，而不是把它 当成命令的结局，也不为了「退出码好看」而删掉成功断言。
    */
   @Test
   void helperNeverLoadsTheParentSideLauncher() throws Exception {
     Path stateDir = Files.createDirectories(workdir.resolve("state-class-load"));
+    Path verboseLog = workdir.resolve("state-class-load-verbose.log");
     List<String> command = new ArrayList<>();
     command.add(javaBinary());
     command.add("-verbose:class");
@@ -116,17 +123,45 @@ class ProcessScopeHelperFailureTest {
     command.add(stateDir.toString());
     command.add(workdir.toString());
     command.addAll(exitCommand());
-    Process helper = new ProcessBuilder(command).redirectErrorStream(true).start();
-    // 父进程放行；helper 读到许可后启动命令并自然收尾。
-    ProcessScopeState.publish(stateDir, ProcessScopeState.PERMIT_FILE, "permit");
-    // 先把类加载日志读到 EOF（等 helper 退出），再等进程结束：否则输出超过管道缓冲会让 helper 阻塞。
-    String verbose = new String(helper.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-    assertTrue(helper.waitFor(60, TimeUnit.SECONDS), "helper 必须在预算内结束");
-    assertEquals(0, helper.exitValue(), "命令自然退出后 helper 必须以 0 结束");
+    Process helper =
+        new ProcessBuilder(command)
+            .redirectErrorStream(true)
+            .redirectOutput(verboseLog.toFile())
+            .start();
+    boolean exited;
+    try {
+      // 父进程放行；helper 读到许可后启动命令并自然收尾。
+      ProcessScopeState.publish(stateDir, ProcessScopeState.PERMIT_FILE, "permit");
+      // 日志进文件，因此这里只做有界等待，不会因为输出超过管道缓冲而互相阻塞。
+      exited = helper.waitFor(60, TimeUnit.SECONDS);
+    } finally {
+      // 用例失败或 helper 卡住时都必须有界收尾：既不把 helper 留在后台，也不做无界读取。
+      if (helper.isAlive()) {
+        helper.destroyForcibly();
+        helper.waitFor(10, TimeUnit.SECONDS);
+      }
+    }
+    assertTrue(exited, "helper 必须在预算内结束");
+    assertEquals(expectedHelperExitCode(), helper.exitValue(), "helper 自己的去向必须符合平台的收敛约定");
+    String verbose = Files.readString(verboseLog, StandardCharsets.UTF_8);
     assertTrue(verbose.contains("ProcessScopeHelper source"), "verbose:class 必须先证明 helper 入口已被加载");
     assertFalse(
         verbose.contains("ProcessScopeHelperLauncher"),
         "helper 绝不能加载父进程侧的 launcher（启动契约常量必须编译期内联）");
+    // 命令的结局只由原子发布的握手文件说明：成功就是「退出码 0」加上「没有失败原因」。
+    assertEquals(
+        "0", ProcessScopeState.read(stateDir, ProcessScopeState.EXIT_FILE), "命令自然退出必须发布退出码 0");
+    assertNull(ProcessScopeState.read(stateDir, ProcessScopeState.ERROR_FILE), "自然退出不得发布失败原因");
+    if (isWindows()) {
+      assertEquals(
+          "true",
+          ProcessScopeState.read(stateDir, ProcessScopeState.CLEANUP_FILE),
+          "Windows Job 必须报告没有活动进程");
+    } else {
+      String scope = ProcessScopeState.read(stateDir, ProcessScopeState.SCOPE_FILE);
+      assertNotNull(scope, "helper 必须在放行之前发布自己的进程组");
+      awaitScopeConverged(Long.parseLong(scope));
+    }
   }
 
   private int runHelperWithPermit(
@@ -177,6 +212,35 @@ class ProcessScopeHelperFailureTest {
     try (var entries = Files.list(directory)) {
       return entries.map(path -> path.getFileName().toString()).sorted().toList();
     }
+  }
+
+  /**
+   * helper 自身退出码的平台约定：只有 Linux/WSL 与 Windows 能让 helper 明确收尾并以 0 结束；其它 POSIX 平台（macOS）只能向整组广播
+   * 强杀，helper 自己也被一并终结，因此是 128 + SIGKILL。
+   */
+  private static int expectedHelperExitCode() {
+    if (isWindows() || isLinuxLike()) {
+      return 0;
+    }
+    return 128 + PosixProcessGroup.SIGKILL;
+  }
+
+  /** 确认 helper 专有进程组已经收敛：helper 已退出并被回收，组里不该再有任何活着的成员；等待有界，等不到就显式失败。 */
+  private static void awaitScopeConverged(long processGroup) throws InterruptedException {
+    long deadline = System.nanoTime() + Duration.ofSeconds(10).toNanos();
+    while (PosixProcessGroup.hasLiveMember(processGroup, PosixProcessGroup.NO_PROCESS)) {
+      if (System.nanoTime() >= deadline) {
+        throw new AssertionError("helper 专有进程组必须已经收敛：" + processGroup);
+      }
+      Thread.sleep(20);
+    }
+  }
+
+  /** helper 侧能排除自己的收敛判定只在 Linux/WSL 成立。 */
+  private static boolean isLinuxLike() {
+    DaemonOperatingSystem operatingSystem = DaemonOperatingSystemDetector.detectCurrent();
+    return operatingSystem == DaemonOperatingSystem.LINUX
+        || operatingSystem == DaemonOperatingSystem.WSL;
   }
 
   private static String javaBinary() {
