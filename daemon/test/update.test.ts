@@ -298,13 +298,20 @@ describe('update handler', () => {
     const expected = `"main.js" "--config" "${configPath}"`
     expect(WINDOWS_UPDATE_SCRIPT).toContain(`$expectedArguments = '"main.js" "--config" "' + $configPath + '"'`)
     expect(WINDOWS_UPDATE_SCRIPT).toContain(
-      "if ($task.Description -ne $TaskDescription) { Fail-Closed 'managed scheduled task is not owned by the installer' }",
+      "if ([string]$task.Description -ne $TaskDescription) { Fail-Closed 'managed scheduled task is not owned by the installer' }",
+    )
+    // 运行时身份按规范化路径比较（Windows 大小写不敏感），但仍必须是冻结的受管 node.exe。
+    expect(WINDOWS_UPDATE_SCRIPT).toContain(
+      "if (-not (Test-SamePath -Left ([string]$action.Execute) -Right $expectedNode)) {",
     )
     expect(WINDOWS_UPDATE_SCRIPT).toContain(
-      "if ($action.Execute -ne $expectedNode) { Fail-Closed 'managed scheduled task does not run the managed runtime' }",
+      "Fail-Closed 'managed scheduled task does not run the managed runtime'",
     )
     expect(WINDOWS_UPDATE_SCRIPT).toContain(
-      "if ($action.Arguments -ne $expectedArguments) { Fail-Closed 'managed scheduled task arguments do not match the managed configuration' }",
+      "if ([string]$action.Arguments -ne $expectedArguments) {",
+    )
+    expect(WINDOWS_UPDATE_SCRIPT).toContain(
+      "Fail-Closed 'managed scheduled task arguments do not match the managed configuration'",
     )
     expect(installedDir.endsWith('\\lib')).toBe(true)
     expect(configPath.endsWith('daemon.json')).toBe(true)

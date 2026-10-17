@@ -9,10 +9,12 @@
 # shortened in the temporary copy so a missing permit fails within the test budget instead of
 # waiting the production 120 seconds.
 #
-# Covered: handoff identity/state, the permit gate, managed task ownership (description,
-# node.exe and direct argv), the Running stop wait, the unique backup and the
-# backup-before-replace ordering, replace/restart failures, and the absence of real service
-# actions in every rejected case.
+# Covered: the operation identity gate, the permit gate (missing, mismatched content and a
+# permit that arrives after ACCEPTED was frozen), the state gate that runs after the permit,
+# managed task ownership (description, exactly one action, frozen node.exe, direct argv and
+# working directory at the scheduler root), the Running/Queued stop wait, the unique backup and
+# the backup-before-replace ordering, stop/backup/replace/restart failures, receipt failures that
+# never skip the one-shot cleanup, and the absence of real service actions in every rejected case.
 #
 # This script needs Windows PowerShell 5.1 or PowerShell 7 on Windows: it reads the real
 # WindowsIdentity SID and drives ScheduledTasks-shaped objects.
@@ -158,8 +160,8 @@ exit $LASTEXITCODE
 '@
 }
 
-function Invoke-Case([object]$Case, [string]$Get, [string]$Stop, [string]$Start,
-                     [string]$Unregister, [string]$Extra = '', [hashtable]$Env = @{}) {
+function Write-Runner([object]$Case, [string]$Get, [string]$Stop, [string]$Start,
+                      [string]$Unregister, [string]$Extra = '') {
   $template = Get-RunnerTemplate
   $runner = $template.
     Replace('__GET__', $Get).
@@ -174,18 +176,43 @@ function Invoke-Case([object]$Case, [string]$Get, [string]$Stop, [string]$Start,
     Replace('__INSTALLEDDIR__', $Case.Installed).
     Replace('__CONFIG__', $Case.Config)
   [IO.File]::WriteAllText($Case.Runner, $runner, [Text.UTF8Encoding]::new($false))
+}
+
+function Start-Case([object]$Case, [string]$Get, [string]$Stop, [string]$Start,
+                    [string]$Unregister, [string]$Extra = '', [hashtable]$Env = @{}) {
+  Write-Runner -Case $Case -Get $Get -Stop $Stop -Start $Start -Unregister $Unregister -Extra $Extra
   $env:KK_TEST_LOG = $Case.Log
   $env:KK_TEST_STATE = 'Ready'
   $env:KK_TEST_STATE_SEQUENCE = ''
   foreach ($name in $Env.Keys) {
     Set-Item -Path ('env:' + $name) -Value $Env[$name]
   }
-  $process = Start-Process -FilePath $hostExe `
+  return Start-Process -FilePath $hostExe `
     -ArgumentList @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
                     '-File', ('"' + $Case.Runner + '"')) `
-    -NoNewWindow -Wait -PassThru `
+    -NoNewWindow -PassThru `
     -RedirectStandardOutput $Case.StdoutFile -RedirectStandardError $Case.StderrFile
-  return $process.ExitCode
+}
+
+function Wait-Case([object]$Case, $Process) {
+  $Process.WaitForExit()
+  # With -RedirectStandard* the copy into the files is asynchronous; give it a moment.
+  Start-Sleep -Milliseconds 300
+  return $Process.ExitCode
+}
+
+function Invoke-Case([object]$Case, [string]$Get, [string]$Stop, [string]$Start,
+                     [string]$Unregister, [string]$Extra = '', [hashtable]$Env = @{}) {
+  $process = Start-Case -Case $Case -Get $Get -Stop $Stop -Start $Start `
+    -Unregister $Unregister -Extra $Extra -Env $Env
+  return (Wait-Case -Case $Case -Process $process)
+}
+
+function Read-Stderr([object]$Case) {
+  if (-not (Test-Path -LiteralPath $Case.StderrFile)) {
+    return ''
+  }
+  return (Get-Content -LiteralPath $Case.StderrFile -Raw)
 }
 
 function Read-Result([object]$Case) {
@@ -286,15 +313,16 @@ try {
   Assert-True ($log -match 'StartScheduledTask') 'the update proceeds once the task is not Running'
 } finally { Remove-Case $case }
 
-# 3. A PREPARING handoff is refused before the permit wait (the state gate comes first).
+# 3. A PREPARING handoff is the normal start state: the identity alone is checked up front and
+#    only the missing permit fails the job.
 $case = New-Case 'early-preparing' -HandoffState 'PREPARING' -Permit 'absent'
 try {
   $exit = Invoke-Case $case $defaultGet $defaultStop $defaultStart $defaultUnregister
   $result = Read-Result $case
   Assert-True ($exit -ne 0) 'a transient PREPARING job exits non-zero'
   Assert-True ($result.phase -eq 'FAILED') 'a transient PREPARING job writes a FAILED receipt'
-  Assert-True ($result.message -eq 'handoff metadata is not accepted') `
-    'an unaccepted handoff is refused instead of waiting for a permit'
+  Assert-True ($result.message -eq 'the daemon did not release the update permit in time') `
+    'an early PREPARING reaches the permit gate instead of being rejected as a mismatch'
   Assert-True ((Read-Log $case) -notmatch 'StopScheduledTask') `
     'a transient PREPARING performs no destructive action'
 } finally { Remove-Case $case }
@@ -314,7 +342,8 @@ try {
     'a missing permit leaves the installed distribution untouched'
 } finally { Remove-Case $case }
 
-# 5. A PREPARING handoff with a permit present is still refused.
+# 5. A PREPARING handoff with a permit present is still refused: the state is re-read after the
+#    permit and must be ACCEPTED.
 $case = New-Case 'not-accepted' -HandoffState 'PREPARING'
 try {
   $exit = Invoke-Case $case $defaultGet $defaultStop $defaultStart $defaultUnregister
@@ -452,7 +481,11 @@ function Move-Item {
 '@
   $exit = Invoke-Case $case $defaultGet $defaultStop $defaultStart $defaultUnregister $replaceFails
   $log = Read-Log $case
+  $result = Read-Result $case
   Assert-True ($exit -ne 0) 'replace failure exits non-zero'
+  Assert-True ($result.phase -eq 'FAILED') 'replace failure writes a FAILED receipt'
+  Assert-True ((Read-Log $case) -match 'UnregisterScheduledTask') `
+    'replace failure still cleans up the one-shot update task'
   Assert-True ($log -match 'MoveItem:') 'the real backup move runs before the replacement'
   Assert-True ((Read-Log $case) -notmatch 'StartScheduledTask') `
     'replace failure never restarts the managed task'
@@ -476,11 +509,245 @@ function Start-ScheduledTask {
 '@
   $exit = Invoke-Case $case $defaultGet $defaultStop $startFails $defaultUnregister
   $backup = Read-Backup $case
+  $result = Read-Result $case
   Assert-True ($exit -ne 0) 'restart failure exits non-zero'
+  Assert-True ($result.phase -eq 'FAILED') 'restart failure writes a FAILED receipt'
+  Assert-True ((Read-Log $case) -match 'UnregisterScheduledTask') `
+    'restart failure still cleans up the one-shot update task'
   Assert-True ((Get-Content -LiteralPath (Join-Path $case.Installed 'main.js') -Raw) -eq 'staged-release-main-js') `
     'restart failure keeps the replaced distribution'
   Assert-True ($backup.Content -eq 'installed-release-main-js') `
     'restart failure keeps the previous distribution in its backup'
+} finally { Remove-Case $case }
+
+# 15. A queued task is still holding the binary: the stop wait must not accept it either.
+$case = New-Case 'queued'
+try {
+  $exit = Invoke-Case $case $defaultGet $defaultStop $defaultStart $defaultUnregister `
+    -Env @{ KK_TEST_STATE_SEQUENCE = 'Queued,Ready' }
+  $log = Read-Log $case
+  Assert-True ($exit -eq 0) 'a Queued task eventually clears without failing'
+  Assert-True ($log -match 'GetScheduledTask:Queued') 'the stop wait polls the Queued state'
+  Assert-True ($log -match 'StartScheduledTask') 'the update proceeds once the task is neither Running nor Queued'
+} finally { Remove-Case $case }
+
+# 16. A same-named task in another folder is not the managed task: only the scheduler root counts.
+$case = New-Case 'root-task-path'
+try {
+  $getOtherFolder = @'
+function Get-ScheduledTask {
+  param([string]$TaskName, [string]$ErrorAction)
+  Add-TestLog 'GetScheduledTask:other-folder'
+  return [pscustomobject]@{
+    TaskName    = $serviceTask
+    TaskPath    = '\Other\'
+    Description = $expectedDescription
+    State       = 'Ready'
+    Actions     = @(New-ManagedAction)
+  }
+}
+'@
+  $exit = Invoke-Case $case $getOtherFolder $defaultStop $defaultStart $defaultUnregister
+  $result = Read-Result $case
+  Assert-True ($exit -ne 0) 'a task outside the root exits non-zero'
+  Assert-True ($result.message -eq 'managed scheduled task is missing') `
+    'a task in another folder is not mistaken for the managed task'
+  Assert-True ((Read-Log $case) -notmatch 'StopScheduledTask') `
+    'a foreign-folder task is never stopped'
+  Assert-True ((Read-Log $case) -match 'UnregisterScheduledTask') `
+    'the one-shot update task is still cleaned up'
+} finally { Remove-Case $case }
+
+# 17. More than one action is not the installer's managed task.
+$case = New-Case 'multi-action'
+try {
+  $getMultiAction = @'
+function Get-ScheduledTask {
+  param([string]$TaskName, [string]$ErrorAction)
+  Add-TestLog 'GetScheduledTask:multi-action'
+  return New-Task -Description $expectedDescription -State 'Ready' `
+    -Actions @((New-ManagedAction), (New-ManagedAction))
+}
+'@
+  $exit = Invoke-Case $case $getMultiAction $defaultStop $defaultStart $defaultUnregister
+  $result = Read-Result $case
+  Assert-True ($exit -ne 0) 'a multi-action task exits non-zero'
+  Assert-True ($result.message -eq 'managed scheduled task does not have exactly one action') `
+    'exactly one action is required'
+  Assert-True ((Read-Log $case) -notmatch 'StopScheduledTask') `
+    'a multi-action task is never stopped'
+} finally { Remove-Case $case }
+
+# 18. A different working directory is not the installer's managed task.
+$case = New-Case 'foreign-working-directory'
+try {
+  $getForeignDirectory = @'
+function Get-ScheduledTask {
+  param([string]$TaskName, [string]$ErrorAction)
+  Add-TestLog 'GetScheduledTask:foreign-directory'
+  return New-Task -Description $expectedDescription -State 'Ready' `
+    -Actions @((New-Action -Execute $expectedNode -Arguments $expectedArguments -WorkingDirectory 'C:\other'))
+}
+'@
+  $exit = Invoke-Case $case $getForeignDirectory $defaultStop $defaultStart $defaultUnregister
+  $result = Read-Result $case
+  Assert-True ($exit -ne 0) 'a foreign working directory exits non-zero'
+  Assert-True ($result.message -eq 'managed scheduled task working directory does not match the managed installation') `
+    'the working directory is part of the ownership proof'
+  Assert-True ((Read-Log $case) -notmatch 'StopScheduledTask') `
+    'a foreign working directory performs no destructive action'
+} finally { Remove-Case $case }
+
+# 19. A permit naming another operation is not a release for this one.
+$case = New-Case 'permit-mismatch'
+try {
+  [IO.File]::WriteAllText($case.Permit, $otherOperationId)
+  $exit = Invoke-Case $case $defaultGet $defaultStop $defaultStart $defaultUnregister
+  $result = Read-Result $case
+  Assert-True ($exit -ne 0) 'a mismatched permit exits non-zero'
+  Assert-True ($result.phase -eq 'FAILED') 'a mismatched permit writes a FAILED receipt'
+  Assert-True ($result.message -eq 'the update permit does not match the operation') `
+    'the permit content must name this operation'
+  Assert-True ((Read-Log $case) -notmatch 'StopScheduledTask') `
+    'a mismatched permit performs no destructive action'
+  Assert-True ((Get-Content -LiteralPath (Join-Path $case.Installed 'main.js') -Raw) -eq 'installed-release-main-js') `
+    'a mismatched permit leaves the installed distribution untouched'
+} finally { Remove-Case $case }
+
+# 20. The production sequence: the job starts with PREPARING and the permit arrives only after
+#     the daemon froze ACCEPTED.
+$case = New-Case 'late-permit' -HandoffState 'PREPARING' -Permit 'absent'
+try {
+  $process = Start-Case -Case $case -Get $defaultGet -Stop $defaultStop -Start $defaultStart `
+    -Unregister $defaultUnregister
+  Start-Sleep -Seconds 1
+  Assert-True (-not (Test-Path -LiteralPath $case.Result)) `
+    'an early PREPARING must not report a failure while it waits'
+  Write-Handoff -Case $case -State 'ACCEPTED'
+  [IO.File]::WriteAllText($case.Permit, $operationId)
+  $exit = Wait-Case -Case $case -Process $process
+  $result = Read-Result $case
+  Assert-True ($exit -eq 0) 'the update applies once ACCEPTED and the permit arrive'
+  Assert-True ($result.phase -eq 'PREPARED') 'a late permit still produces the PREPARED receipt'
+  Assert-True ((Read-Log $case) -match 'StopScheduledTask') `
+    'the update stops the managed task after the permit arrives'
+} finally { Remove-Case $case }
+
+# 21. An identity that changes while waiting for the permit still fails closed.
+$case = New-Case 'identity-change' -HandoffState 'PREPARING' -Permit 'absent'
+try {
+  $process = Start-Case -Case $case -Get $defaultGet -Stop $defaultStop -Start $defaultStart `
+    -Unregister $defaultUnregister
+  Start-Sleep -Seconds 1
+  Write-Handoff -Case $case -State 'ACCEPTED' -Operation $otherOperationId
+  [IO.File]::WriteAllText($case.Permit, $operationId)
+  $exit = Wait-Case -Case $case -Process $process
+  $result = Read-Result $case
+  Assert-True ($exit -ne 0) 'a changed identity exits non-zero'
+  Assert-True ($result.message -eq 'handoff metadata does not match the operation') `
+    'the snapshot is re-read after the permit and must still match'
+  Assert-True ((Read-Log $case) -notmatch 'StopScheduledTask') `
+    'a changed identity performs no destructive action'
+} finally { Remove-Case $case }
+
+# 22. A genuine Task Scheduler/CIM failure is not an absent task: it fails with the stage.
+$case = New-Case 'cim-failure'
+try {
+  $getCimFailure = @'
+function Get-ScheduledTask {
+  param([string]$TaskName, [string]$ErrorAction)
+  Add-TestLog 'GetScheduledTask:cim-failure'
+  throw 'Task Scheduler service is unavailable'
+}
+'@
+  $exit = Invoke-Case $case $getCimFailure $defaultStop $defaultStart $defaultUnregister
+  $result = Read-Result $case
+  Assert-True ($exit -ne 0) 'a CIM failure exits non-zero'
+  Assert-True ($result.phase -eq 'FAILED') 'a CIM failure writes a FAILED receipt'
+  Assert-True ($result.message -match '^update failed during stop \(.+\)$') `
+    'a CIM failure reports only the stage and the exception type'
+  Assert-True ($result.message -notmatch 'unavailable') `
+    'the diagnostic never carries the failing command output'
+  Assert-True ((Read-Log $case) -match 'UnregisterScheduledTask') `
+    'a CIM failure still cleans up the one-shot update task'
+} finally { Remove-Case $case }
+
+# 23. A failing stop is reported and still cleans up the one-shot task.
+$case = New-Case 'stop-failure'
+try {
+  $stopFails = @'
+function Stop-ScheduledTask {
+  param([string]$TaskName, [string]$TaskPath, [string]$ErrorAction)
+  Add-TestLog "StopScheduledTask:$TaskName"
+  throw 'the managed task cannot be stopped'
+}
+'@
+  $exit = Invoke-Case $case $defaultGet $stopFails $defaultStart $defaultUnregister
+  $result = Read-Result $case
+  Assert-True ($exit -ne 0) 'a stop failure exits non-zero'
+  Assert-True ($result.message -match '^update failed during stop \(.+\)$') `
+    'a stop failure reports only the stage and the exception type'
+  Assert-True ((Read-Log $case) -match 'UnregisterScheduledTask') `
+    'a stop failure still cleans up the one-shot update task'
+  Assert-True (-not (Test-Path -LiteralPath (Join-Path $case.UpdateDir 'backup-*'))) `
+    'a stop failure performs no backup'
+} finally { Remove-Case $case }
+
+# 24. A failing backup is reported, never restarts the task and still cleans up.
+$case = New-Case 'backup-failure'
+try {
+  $backupFails = @'
+function Move-Item {
+  param([string]$LiteralPath, [string]$Destination)
+  Add-TestLog "MoveItem:$Destination"
+  throw 'the installed distribution cannot be moved'
+}
+'@
+  $exit = Invoke-Case $case $defaultGet $defaultStop $defaultStart $defaultUnregister $backupFails
+  $result = Read-Result $case
+  Assert-True ($exit -ne 0) 'a backup failure exits non-zero'
+  Assert-True ($result.message -match '^update failed during backup \(.+\)$') `
+    'a backup failure reports only the stage and the exception type'
+  Assert-True ((Read-Log $case) -notmatch 'StartScheduledTask') `
+    'a backup failure never restarts the managed task'
+  Assert-True ((Read-Log $case) -match 'UnregisterScheduledTask') `
+    'a backup failure still cleans up the one-shot update task'
+  Assert-True ((Get-Content -LiteralPath (Join-Path $case.Installed 'main.js') -Raw) -eq 'installed-release-main-js') `
+    'a backup failure leaves the installed distribution untouched'
+} finally { Remove-Case $case }
+
+# 25. A receipt that cannot be written is reported and never skips the one-shot cleanup.
+$case = New-Case 'unwritable-receipt' -HandoffState 'missing'
+try {
+  New-Item -ItemType Directory -Force -Path $case.Result | Out-Null
+  $exit = Invoke-Case $case $defaultGet $defaultStop $defaultStart $defaultUnregister
+  $stderr = Read-Stderr $case
+  Assert-True ($exit -ne 0) 'an unwritable receipt still exits non-zero'
+  Assert-True ($stderr -match 'could not write the failure receipt') `
+    'an unwritable failure receipt is reported'
+  Assert-True ($stderr -match 'failed: handoff metadata is missing') `
+    'the diagnostic is not truncated by the failing receipt'
+  Assert-True ((Read-Log $case) -match 'UnregisterScheduledTask') `
+    'cleanup is not skipped by a failing receipt'
+} finally { Remove-Case $case }
+
+# 26. Failing to remove the one-shot task is a warning: the update result is unaffected.
+$case = New-Case 'unregister-failure'
+try {
+  $unregisterFails = @'
+function Unregister-ScheduledTask {
+  param([string]$TaskName, [switch]$Confirm, [string]$ErrorAction)
+  Add-TestLog "UnregisterScheduledTask:$TaskName"
+  throw 'the one-shot task cannot be removed'
+}
+'@
+  $exit = Invoke-Case $case $defaultGet $defaultStop $defaultStart $unregisterFails
+  $result = Read-Result $case
+  Assert-True ($exit -eq 0) 'a failing cleanup does not change the update result'
+  Assert-True ($result.phase -eq 'PREPARED') 'the PREPARED receipt is still written'
+  Assert-True ((Read-Log $case) -match 'StartScheduledTask') 'the managed task is still restarted'
+  Assert-True ((Read-Stderr $case) -match 'could not unregister its one-shot task') `
+    'a failing cleanup is reported as a safe warning'
 } finally { Remove-Case $case }
 
 if ($script:failures -gt 0) {
