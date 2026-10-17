@@ -7,11 +7,15 @@ import com.sun.jna.WString;
 import com.sun.jna.ptr.IntByReference;
 import com.sun.jna.win32.StdCallLibrary;
 
+import java.io.IOException;
+import java.nio.file.FileSystemException;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.DosFileAttributes;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Read-only Restart Manager diagnostics for a locked test handshake file. */
+/** Restart Manager and post-failure deletion diagnostics for owned test handshake files. */
 public final class WindowsFileLockProbe {
 
   private static final int ERROR_MORE_DATA = 234;
@@ -20,6 +24,39 @@ public final class WindowsFileLockProbe {
   private WindowsFileLockProbe() {}
 
   static String owners(Path file) {
+    return lockOwners(file) + deletionState(file);
+  }
+
+  private static String deletionState(Path file) {
+    String attributes;
+    try {
+      DosFileAttributes dos = Files.readAttributes(file, DosFileAttributes.class);
+      attributes =
+          "[readonly="
+              + dos.isReadOnly()
+              + ",hidden="
+              + dos.isHidden()
+              + ",system="
+              + dos.isSystem()
+              + "]";
+    } catch (IOException failure) {
+      attributes = "[attributes=" + failure.getClass().getSimpleName() + "]";
+    }
+    try {
+      return attributes + "[post-failure-delete=" + Files.deleteIfExists(file) + "]";
+    } catch (IOException failure) {
+      String reason =
+          failure instanceof FileSystemException filesystem ? filesystem.getReason() : "";
+      return attributes
+          + "[post-failure-delete="
+          + failure.getClass().getSimpleName()
+          + ":"
+          + reason
+          + "]";
+    }
+  }
+
+  private static String lockOwners(Path file) {
     IntByReference session = new IntByReference();
     int started = RestartManager.INSTANCE.RmStartSession(session, 0, new char[33]);
     if (started != 0) {
