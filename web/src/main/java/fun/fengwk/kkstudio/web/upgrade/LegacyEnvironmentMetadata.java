@@ -63,7 +63,7 @@ final class LegacyEnvironmentMetadata {
       int sourceVersion =
           switch (profile) {
             case "dev" -> 4;
-            case "main" -> 5;
+            case "main", "java-v1.1.0" -> 5;
             default -> throw reject();
           };
       JsonNode value = MAPPER.readTree(json);

@@ -62,6 +62,12 @@ final class LegacySourceGuard {
       "select count(*) from plugin_credential"
           + " where refresh_lease_token is not null or refresh_lease_until is not null";
 
+  /** 1.1.0 的交互认证 nonce 只存在于 pending attempt，非零即仍有未完成认证；绝不把 nonce 当作可复制历史。 */
+  private static final String PENDING_AUTH_ATTEMPTS = "select count(*) from plugin_auth_attempt";
+
+  /** 1.1.0 的目录指针必须存在；单行/epoch 引用完整性由 id=1 与即时外键约束保证。 */
+  private static final String CATALOG_STATE_ROWS = "select count(*) from plugin_catalog_state";
+
   private static final String FUTURE_CONNECTION_LEASES =
       "select count(*) from environment_connection where lease_until > now()";
 
@@ -74,7 +80,7 @@ final class LegacySourceGuard {
   record SourceSettings(long id, String config, long version, String createdAt, String updatedAt) {}
 
   /** 要求源端已经真正排空：没有任何在执行的 Thread、执行事实、未决 Join、未交付 task、active run 或未到期 lease。 */
-  static void requireDrained(Connection source) {
+  static void requireDrained(Connection source, String profile) {
     requireZero(source, THREADS_NOT_STOPPED, "legacy source still has a runnable thread");
     requireZero(source, MODEL_INVOCATIONS, "legacy source still has model invocation facts");
     requireZero(source, TOOL_INVOCATIONS, "legacy source still has tool invocation facts");
@@ -95,6 +101,12 @@ final class LegacySourceGuard {
         source, FUTURE_CONNECTION_LEASES, "legacy source still leases an environment connection");
     requireZero(
         source, FUTURE_UPLOAD_CLEANUP_LEASES, "legacy source still leases an upload cleanup");
+    if (LegacySchemaProfile.isV110(profile)) {
+      // 1.1.0 已有当前 catalog/nonce/凭据代际；直接沿用旧 41 表清单会漏掉这些事实。
+      requireZero(source, PENDING_AUTH_ATTEMPTS, "legacy source still has a pending plugin auth");
+      requireExactly(
+          source, CATALOG_STATE_ROWS, 1, "legacy source catalog state is not the singleton row");
+    }
   }
 
   /**
@@ -151,6 +163,13 @@ final class LegacySourceGuard {
 
   private static void requireZero(Connection source, String sql, String reason) {
     if (count(source, sql) != 0) {
+      throw new LegacyDatabaseUpgradeException(
+          LegacyDatabaseUpgradeException.Stage.SOURCE_DRAIN, reason);
+    }
+  }
+
+  private static void requireExactly(Connection source, String sql, long expected, String reason) {
+    if (count(source, sql) != expected) {
       throw new LegacyDatabaseUpgradeException(
           LegacyDatabaseUpgradeException.Stage.SOURCE_DRAIN, reason);
     }

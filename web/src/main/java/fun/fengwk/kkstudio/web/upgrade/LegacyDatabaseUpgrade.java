@@ -79,6 +79,8 @@ final class LegacyDatabaseUpgrade {
 
   private static final String SKILL_PACKAGE = "skill_package";
 
+  private static final String ENVIRONMENT = "environment";
+
   private static final String ENVIRONMENT_CONNECTION = "environment_connection";
 
   private static final String AGENT_PROVIDER = "agent_provider";
@@ -166,25 +168,39 @@ final class LegacyDatabaseUpgrade {
       beginSourceSnapshot(source);
       String profile = LegacySchemaProfile.identify(LegacySchemaProfile.fingerprint(source));
       LegacySchemaProfile.requireSourceHistory(source, profile);
-      LegacySourceGuard.requireDrained(source);
+      LegacySourceGuard.requireDrained(source, profile);
       LegacySourceGuard.SourceSettings systemSetting = LegacySourceGuard.readSystemSetting(source);
+      boolean currentProfile = LegacySchemaProfile.isV110(profile);
+      if (currentProfile && !staticSecretsByPlugin.isEmpty()) {
+        throw new LegacyDatabaseUpgradeException(
+            LegacyDatabaseUpgradeException.Stage.CONVERT,
+            "a current source already carries its plugin credentials and rejects static material");
+      }
+      LegacySystemSettings legacySettings =
+          currentProfile ? null : parseSettings(systemSetting.config());
+      SystemSettings settings =
+          currentProfile ? parseCurrentSettings(systemSetting.config()) : legacySettings.settings();
       SourceFacts facts =
           new SourceFacts(
-              parseSettings(systemSetting.config()),
+              legacySettings,
+              settings,
               systemSetting,
               profile,
-              LegacySourceGuard.retiredClusterNodeRows(source));
+              LegacySourceGuard.retiredClusterNodeRows(source),
+              currentProfile ? readSourceCatalog(source) : null);
 
       // 候选装配与 prepared 在任何目标写事务之外完成：两者都不打开连接、不写库，也不依赖目标 session。
-      catalog = OfflinePluginCatalog.open(scoped, facts.settings().settings());
+      catalog = OfflinePluginCatalog.open(scoped, facts.settings());
       StudioPluginRegistry registry = catalog.registry();
       LegacyStaticCredentials staticCredentials =
           LegacyStaticCredentials.validate(registry, staticSecretsByPlugin);
       prepared =
-          prepareInitial(
-              catalog,
-              pluginValues(facts.settings(), registry, staticCredentials),
-              staticCredentials.configuredSecretFields(registry));
+          currentProfile
+              ? null
+              : prepareInitial(
+                  catalog,
+                  pluginValues(facts.legacySettings(), registry, staticCredentials),
+                  staticCredentials.configuredSecretFields(registry));
 
       // 候选就绪之后才真正开始写事务，再在同一事务里做 session 门禁、写入、目录 CAS 与回读校验。
       transaction = openTargetTransaction(transactionManager, target);
@@ -195,12 +211,13 @@ final class LegacyDatabaseUpgrade {
               target,
               scoped,
               transactionManager,
-              new CatalogCandidate(scoped, catalog, registry, prepared, staticCredentials),
+              new CatalogCandidate(
+                  scoped, catalog, registry, prepared, staticCredentials, facts.currentCatalog()),
               new CredentialKeys(sourceKey, targetKey),
               facts,
               clock);
       // 候选与离线装配的所有权在此交出：只有它们真的释放成功才允许提交。
-      PluginCatalogSnapshot pendingSnapshot = prepared.snapshot();
+      PluginCatalogSnapshot pendingSnapshot = prepared == null ? null : prepared.snapshot();
       OfflinePluginCatalog pendingCatalog = catalog;
       catalog = null;
       prepared = null;
@@ -241,18 +258,21 @@ final class LegacyDatabaseUpgrade {
 
   /** 目标写事务之外仍需的一组源端事实；只是参数收敛。 */
   private record SourceFacts(
-      LegacySystemSettings settings,
+      LegacySystemSettings legacySettings,
+      SystemSettings settings,
       LegacySourceGuard.SourceSettings systemSetting,
       String profile,
-      long retiredClusterNodeRows) {}
+      long retiredClusterNodeRows,
+      PluginCatalogRecord currentCatalog) {}
 
-  /** 一次转换的目录候选身份：epoch 1 的 manifest/revision 都从同一份真实装配与同一目标事务派生。 */
+  /** 一次转换的目录候选身份：旧 profile 从同一份真实装配派生 epoch 1；1.1.0 profile 保留源端完整 record。 */
   private record CatalogCandidate(
       DataSource scoped,
       OfflinePluginCatalog catalog,
       StudioPluginRegistry registry,
       PluginCatalogBootstrap.PreparedInitial prepared,
-      LegacyStaticCredentials staticCredentials) {}
+      LegacyStaticCredentials staticCredentials,
+      PluginCatalogRecord currentCatalog) {}
 
   private record CredentialKeys(SecretKey sourceKey, SecretKey targetKey) {}
 
@@ -277,13 +297,21 @@ final class LegacyDatabaseUpgrade {
       LegacySchemaProfile.requireTarget(target);
       requirePristineTarget(target);
 
+      boolean currentProfile = LegacySchemaProfile.isV110(facts.profile());
+      if (currentProfile) {
+        // 1.1.0 的 epoch 历史是源端事实，先移除目标的唯一 epoch0 seed，再原样复制完整 record。
+        clearTargetCatalogSeed(target);
+      }
+
+      List<String> copiedTables =
+          currentProfile ? LegacySchemaProfile.V1_1_0_TABLES : LegacySchemaProfile.SHARED_TABLES;
       Map<String, Long> counts = new LinkedHashMap<>();
       long legacyCredentialRows = 0;
       long rewrittenSkillTokens = 0;
-      for (String table : LegacySchemaProfile.parentFirstOrder(target)) {
+      for (String table : LegacySchemaProfile.parentFirstOrder(target, copiedTables)) {
         long sourceRows = count(source, "select count(*) from " + table);
         if (SYSTEM_SETTING.equals(table)) {
-          convertSystemSetting(target, facts.settings().settings(), facts.systemSetting());
+          convertSystemSetting(target, facts.settings(), facts.systemSetting());
           reconcile(counts, table, count(target, "select count(*) from " + table), sourceRows);
           continue;
         }
@@ -293,13 +321,17 @@ final class LegacyDatabaseUpgrade {
         }
         List<String> columns = copyColumns(source, target, table);
         long copied;
-        if (AGENT_PROVIDER.equals(table)) {
+        if (!currentProfile && AGENT_PROVIDER.equals(table)) {
           copied =
               LegacyTableCopy.text(
                   source, target, table, columns, LegacyDatabaseUpgrade::providerRow);
-        } else if (HARNESS_ENTRY.equals(table)) {
+        } else if (!currentProfile && HARNESS_ENTRY.equals(table)) {
           copied =
               LegacyTableCopy.text(source, target, table, columns, LegacyDatabaseUpgrade::entryRow);
+        } else if (ENVIRONMENT.equals(table)) {
+          copied =
+              LegacyTableCopy.text(
+                  source, target, table, columns, LegacyEnvironmentInstallConfig::row);
         } else if (ENVIRONMENT_CONNECTION.equals(table)) {
           copied =
               LegacyTableCopy.text(
@@ -326,31 +358,41 @@ final class LegacyDatabaseUpgrade {
         }
       }
 
-      initializeCatalog(candidate);
-      Map<String, PluginCredentialReference> references =
-          credentialReferences(candidate.prepared());
-      long rewritten =
-          LegacyPluginCredentials.rewriteLegacy(
-              source,
-              credentialRepository(scoped),
-              candidate.registry(),
-              references,
-              keys.sourceKey(),
-              keys.targetKey());
-      long installedStatic =
-          LegacyPluginCredentials.installStatic(
-              credentialRepository(scoped),
-              candidate.staticCredentials(),
-              references,
-              keys.targetKey(),
-              clock.instant().truncatedTo(ChronoUnit.MILLIS));
+      long rewritten;
+      long installedStatic;
+      if (currentProfile) {
+        verifyCurrentCatalog(candidate, scoped);
+        rewritten =
+            LegacyPluginCredentials.rewriteCurrent(
+                source, credentialRepository(scoped), keys.sourceKey(), keys.targetKey());
+        installedStatic = 0;
+      } else {
+        initializeCatalog(candidate);
+        Map<String, PluginCredentialReference> references =
+            credentialReferences(candidate.prepared());
+        rewritten =
+            LegacyPluginCredentials.rewriteLegacy(
+                source,
+                credentialRepository(scoped),
+                candidate.registry(),
+                references,
+                keys.sourceKey(),
+                keys.targetKey());
+        installedStatic =
+            LegacyPluginCredentials.installStatic(
+                credentialRepository(scoped),
+                candidate.staticCredentials(),
+                references,
+                keys.targetKey(),
+                clock.instant().truncatedTo(ChronoUnit.MILLIS));
+        verifyCatalogRestore(catalogRepository(scoped), candidate.catalog(), candidate.prepared());
+      }
       reconcile(
           counts,
           PLUGIN_CREDENTIAL,
           count(target, "select count(*) from " + PLUGIN_CREDENTIAL),
           legacyCredentialRows + installedStatic);
 
-      verifyCatalogRestore(catalogRepository(scoped), candidate.catalog(), candidate.prepared());
       verifyHarness(scoped, transactionManager, target);
       return new ConversionCounts(counts, rewritten, installedStatic, rewrittenSkillTokens);
     } catch (LegacyDatabaseUpgradeException error) {
@@ -362,6 +404,68 @@ final class LegacyDatabaseUpgrade {
       throw new LegacyDatabaseUpgradeException(
           LegacyDatabaseUpgradeException.Stage.CONVERT,
           "the converted data was rejected while writing the target");
+    }
+  }
+
+  /** 1.1.0 目录复制前移除目标唯一 epoch0 seed；state 先于 revision，满足即时外键。 */
+  private static void clearTargetCatalogSeed(Connection target) throws SQLException {
+    try (Statement statement = target.createStatement()) {
+      statement.execute("delete from plugin_catalog_state");
+      statement.execute("delete from plugin_catalog_revision");
+    }
+  }
+
+  /** 1.1.0 目录必须是源端完整 record 的逐字段副本；epoch&gt;0 还按真实启动 restore 重新核验安装集合、历史行与全部指纹。 */
+  private static void verifyCurrentCatalog(CatalogCandidate candidate, DataSource scoped) {
+    PluginCatalogRecord expected = candidate.currentCatalog();
+    if (expected == null) {
+      throw new LegacyDatabaseUpgradeException(
+          LegacyDatabaseUpgradeException.Stage.CATALOG,
+          "the current source catalog record is missing");
+    }
+    PluginCatalogRecord actual;
+    try {
+      actual = catalogRepository(scoped).readCatalog();
+    } catch (RuntimeException error) {
+      throw new LegacyDatabaseUpgradeException(
+          LegacyDatabaseUpgradeException.Stage.CATALOG,
+          "the converted target catalog cannot be read");
+    }
+    if (!expected.equals(actual)) {
+      throw new LegacyDatabaseUpgradeException(
+          LegacyDatabaseUpgradeException.Stage.CATALOG,
+          "the converted target catalog differs from the current source record");
+    }
+    if (actual.epoch() == UNINITIALIZED_EPOCH) {
+      if (countLoose(scoped, "plugin_configuration_revision") != 0) {
+        throw new LegacyDatabaseUpgradeException(
+            LegacyDatabaseUpgradeException.Stage.CATALOG,
+            "an uninitialized source catalog must not carry configuration history");
+      }
+      return;
+    }
+    try (PluginCatalogSnapshot ignored = candidate.catalog().restore(actual)) {
+      // restore 已重新读取每个 manifest 引用的历史行并核对 code/schema/capability/代际/上下文。
+    }
+  }
+
+  /** 读取 1.1.0 源端权威 catalog record；缺失或不可解码都拒绝，绝不推断默认目录。 */
+  private static PluginCatalogRecord readSourceCatalog(Connection source) {
+    try {
+      PluginCatalogRecord record =
+          catalogRepository(new SingleConnectionDataSource(source, true)).readCatalog();
+      if (record == null) {
+        throw new LegacyDatabaseUpgradeException(
+            LegacyDatabaseUpgradeException.Stage.CATALOG,
+            "the current source catalog record is missing");
+      }
+      return record;
+    } catch (LegacyDatabaseUpgradeException error) {
+      throw error;
+    } catch (RuntimeException error) {
+      throw new LegacyDatabaseUpgradeException(
+          LegacyDatabaseUpgradeException.Stage.CATALOG,
+          "the current source catalog record cannot be read");
     }
   }
 
@@ -607,6 +711,7 @@ final class LegacyDatabaseUpgrade {
   private static void lockCanonicalTables(Connection target) throws SQLException {
     List<String> tables = new ArrayList<>(LegacySchemaProfile.SHARED_TABLES);
     tables.addAll(LegacySchemaProfile.TARGET_ONLY_TABLES);
+    tables.add(LegacySchemaProfile.CLUSTER_NODE);
     tables.sort(null);
     try (Statement statement = target.createStatement()) {
       for (String table : tables) {
@@ -635,6 +740,9 @@ final class LegacyDatabaseUpgrade {
       if (count(target, "select count(*) from " + table) != 0) {
         throw notPristine();
       }
+    }
+    if (count(target, "select count(*) from " + LegacySchemaProfile.CLUSTER_NODE) != 0) {
+      throw notPristine();
     }
     if (count(target, "select count(*) from plugin_catalog_state") != 1
         || count(target, "select count(*) from plugin_catalog_state where id = 1 and epoch = 0")
@@ -736,6 +844,28 @@ final class LegacyDatabaseUpgrade {
   private static PluginCredentialRepository credentialRepository(DataSource scoped) {
     return new PostgresqlPluginCredentialRepository(
         new PluginCredentialJdbcStore(JdbcClient.create(scoped)));
+  }
+
+  private static SystemSettings parseCurrentSettings(String json) {
+    try {
+      return SETTINGS_CODEC.decode(json);
+    } catch (RuntimeException error) {
+      throw new LegacyDatabaseUpgradeException(
+          LegacyDatabaseUpgradeException.Stage.CONVERT, "current system settings cannot be read");
+    }
+  }
+
+  private static long countLoose(DataSource dataSource, String table) {
+    try (Connection connection = dataSource.getConnection();
+        Statement statement = connection.createStatement();
+        ResultSet rows = statement.executeQuery("select count(*) from " + table)) {
+      rows.next();
+      return rows.getLong(1);
+    } catch (SQLException error) {
+      throw new LegacyDatabaseUpgradeException(
+          LegacyDatabaseUpgradeException.Stage.CATALOG,
+          "the converted target catalog cannot be counted");
+    }
   }
 
   private static LegacySystemSettings parseSettings(String legacyJson) {

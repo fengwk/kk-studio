@@ -37,7 +37,7 @@ import java.util.regex.Pattern;
  * 仍然是「一次全新安装 = 当前全部结构」的声明：
  *
  * <ul>
- *   <li>public schema 的表集合恰好是保留的共享表加 16 张目标业务表，旧业务对象、旧函数、旧触发器与任何 sequence 都不存在；
+ *   <li>public schema 的表集合恰好是保留的共享表加 17 张目标业务表，旧业务对象、旧函数、旧触发器与任何 sequence 都不存在；
  *   <li>共享（Harness/Catalog/Chat/Environment/Storage/Settings）表的列、约束、索引与触发器与生成并提交的快照一致，即重写 V1
  *       只带入了声明的共享表变更（Harness Thread 复合唯一键、ToolInvocation WAITING_INPUT/input_receipt/pending 索引、
  *       chat.archived_at 与 chat_session 关联、ThreadJoin purpose/superseded
@@ -61,7 +61,7 @@ class FreshInstallSchemaContractTest {
   private static final String PROBE_RESOURCE =
       "fun/fengwk/kkstudio/schema/fresh-install-probes.sql";
   private static final String PROBE_CONTAINER_PATH = "/tmp/fresh-install-probes.sql";
-  private static final int PROBE_ASSERTION_COUNT = 195;
+  private static final int PROBE_ASSERTION_COUNT = 197;
 
   private static final String SNAPSHOT_RESOURCE =
       "fun/fengwk/kkstudio/schema/preserved-schema-snapshot.txt";
@@ -102,7 +102,7 @@ class FreshInstallSchemaContractTest {
           "storage_upload",
           "system_setting");
 
-  /** 16 张目标业务表：Canvas 7 张、Project/Issue 8 张、Chat Session 关联 1 张。 */
+  /** 17 张目标业务表：IDE 节点路由 1 张、Canvas 7 张、Project/Issue 8 张、Chat Session 关联 1 张。 */
   private static final List<String> TARGET_TABLES =
       List.of(
           "canvas_command_dedup",
@@ -113,6 +113,7 @@ class FreshInstallSchemaContractTest {
           "canvas_node",
           "canvas_resource",
           "chat_session",
+          "cluster_node",
           "project",
           "project_issue",
           "project_issue_activity",
@@ -273,7 +274,7 @@ class FreshInstallSchemaContractTest {
 
   @Test
   void publicSchemaHoldsExactlyThePreservedAndTargetInventory() throws SQLException {
-    assertEquals(16, TARGET_TABLES.size());
+    assertEquals(17, TARGET_TABLES.size());
     Set<String> expected = new LinkedHashSet<>(PRESERVED_TABLES);
     expected.addAll(TARGET_TABLES);
     assertEquals(
@@ -281,6 +282,69 @@ class FreshInstallSchemaContractTest {
         queryStrings(
             "select tablename from pg_tables where schemaname = 'public'"
                 + " and tablename <> 'flyway_schema_history'"));
+  }
+
+  /** 新目标必须真实包含 46 张业务表与 66 个立即外键；数字由 PG catalog 实测，不按迁移文本声明计数。 */
+  @Test
+  void businessInventoryCarriesTheExpectedTablesAndImmediateForeignKeys() throws SQLException {
+    try (Connection connection = open()) {
+      assertEquals(
+          46,
+          queryInt(
+              connection,
+              "select count(*) from pg_class c"
+                  + " where c.relnamespace = 'public'::regnamespace and c.relkind = 'r'"
+                  + " and c.relname <> 'flyway_schema_history'"));
+      assertEquals(
+          66,
+          queryInt(
+              connection,
+              "select count(*) from pg_constraint"
+                  + " where connamespace = 'public'::regnamespace and contype = 'f'"
+                  + " and not condeferrable"));
+    }
+  }
+
+  /** IDE 节点路由表只承载四个已记录的路由/租约字段，不引入任何外键耦合。 */
+  @Test
+  void clusterNodeCarriesOnlyDocumentedRouteMetadata() throws SQLException {
+    try (Connection connection = open()) {
+      assertEquals(
+          4,
+          queryInt(
+              connection,
+              "select count(*) from information_schema.columns"
+                  + " where table_schema = 'public' and table_name = 'cluster_node'"));
+      assertEquals(
+          "App 节点内部 IDE 路由注册表：节点可达 HTTP(S) origin 与心跳租约，只承载控制元数据，不保存环境存活字节",
+          queryString(connection, "select obj_description('cluster_node'::regclass)"));
+      assertEquals(
+          "节点实例 UUID（PK），与 environment_connection.owner_node_id 对应",
+          queryString(connection, "select col_description('cluster_node'::regclass, 1)"));
+      assertEquals(
+          "该节点对外可达的 HTTP(S) origin，仅用于内部单跳转发",
+          queryString(connection, "select col_description('cluster_node'::regclass, 2)"));
+      assertEquals(
+          "注册租约到期时间（毫秒精度），过期节点的路由不被选中",
+          queryString(connection, "select col_description('cluster_node'::regclass, 3)"));
+      assertEquals(
+          "最后一次心跳时间（毫秒精度），必须早于 lease_until",
+          queryString(connection, "select col_description('cluster_node'::regclass, 4)"));
+      assertEquals(
+          1,
+          queryInt(
+              connection,
+              "select count(*) from pg_constraint"
+                  + " where conrelid = 'cluster_node'::regclass and contype = 'p'"));
+      assertEquals(
+          0,
+          queryInt(
+              connection,
+              "select count(*) from pg_constraint"
+                  + " where contype = 'f'"
+                  + " and (conrelid = 'cluster_node'::regclass"
+                  + " or confrelid = 'cluster_node'::regclass)"));
+    }
   }
 
   @Test
