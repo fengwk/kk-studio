@@ -493,34 +493,42 @@ describe('TestProcessSupervisor resource lifecycle', () => {
 
   it('resolves terminate and close only after the real stdio close', async () => {
     const supervisor = new TestProcessSupervisor()
+    try {
+      const managed = await supervisor.start(spawnSpec())
+      const terminatedChild = supervisor.children[0]!
+      let terminatedClosed = false
+      terminatedChild.on('close', () => {
+        terminatedClosed = true
+      })
+      await managed.terminate()
+      expect(terminatedChild.exitCode !== null || terminatedChild.signalCode !== null).toBe(true)
+      expect(terminatedClosed).toBe(true)
 
-    const managed = await supervisor.start(spawnSpec())
-    const terminatedChild = supervisor.children[0]!
-    let terminatedClosed = false
-    terminatedChild.on('close', () => {
-      terminatedClosed = true
-    })
-    await managed.terminate()
-    expect(terminatedChild.exitCode !== null || terminatedChild.signalCode !== null).toBe(true)
-    expect(terminatedClosed).toBe(true)
-
-    await supervisor.start(spawnSpec())
-    const closedChild = supervisor.children[1]!
-    let closed = false
-    closedChild.on('close', () => {
-      closed = true
-    })
-    await supervisor.close()
-    expect(closedChild.exitCode !== null || closedChild.signalCode !== null).toBe(true)
-    expect(closed).toBe(true)
+      await supervisor.start(spawnSpec())
+      const closedChild = supervisor.children[1]!
+      let closed = false
+      closedChild.on('close', () => {
+        closed = true
+      })
+      await supervisor.close()
+      expect(closedChild.exitCode !== null || closedChild.signalCode !== null).toBe(true)
+      expect(closed).toBe(true)
+    } finally {
+      // An early assertion failure must still reap the child; close() is idempotent.
+      await supervisor.close()
+    }
   })
 
   it('settles a failed spawn so close never hangs', async () => {
     const supervisor = new TestProcessSupervisor()
-    const missing = path.join(os.tmpdir(), `kk-missing-lsp-${process.pid}-${Date.now()}`)
-    const managed = await supervisor.start({ ...spawnSpec(), executable: missing })
+    try {
+      const missing = path.join(os.tmpdir(), `kk-missing-lsp-${process.pid}-${Date.now()}`)
+      const managed = await supervisor.start({ ...spawnSpec(), executable: missing })
 
-    await expect(managed.exit).resolves.toEqual({ exitCode: null, signal: null })
-    await expect(supervisor.close()).resolves.toBeUndefined()
+      await expect(managed.exit).resolves.toEqual({ exitCode: null, signal: null })
+      await expect(supervisor.close()).resolves.toBeUndefined()
+    } finally {
+      await supervisor.close()
+    }
   })
 })

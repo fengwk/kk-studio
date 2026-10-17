@@ -50,16 +50,17 @@ export class TestProcessSupervisor implements ProcessSupervisor {
       child.on('error', () => settle({ exitCode: null, signal: null }))
     })
 
-    // Bounded grace: resolve the race's timer immediately so no stray timeout keeps the loop up.
+    // Bounded grace: true when the process exited, false when the grace timer won.
     const exitedWithin = async (graceMillis: number): Promise<boolean> => {
       let timer: ReturnType<typeof setTimeout> | undefined
       const timeout = new Promise<boolean>((resolve) => {
-        timer = setTimeout(() => resolve(true), graceMillis)
+        timer = setTimeout(() => resolve(false), graceMillis)
       })
       try {
-        return await Promise.race([exitPromise.then(() => false), timeout])
+        return await Promise.race([exitPromise.then(() => true), timeout])
       } finally {
         if (timer !== undefined) {
+          // Clear the losing grace timer so it cannot keep the event loop alive.
           clearTimeout(timer)
         }
       }
@@ -74,7 +75,7 @@ export class TestProcessSupervisor implements ProcessSupervisor {
       terminate: async (graceMillis = 1000) => {
         if (resolvedExit === null) {
           child.kill('SIGTERM')
-          if (await exitedWithin(graceMillis)) {
+          if (!(await exitedWithin(graceMillis))) {
             child.kill('SIGKILL')
             await exitPromise
           }
