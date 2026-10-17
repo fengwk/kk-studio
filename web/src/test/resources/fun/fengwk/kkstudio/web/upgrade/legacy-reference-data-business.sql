@@ -16,8 +16,9 @@ insert into agent_model (provider_name, name, model_id, description, config, cre
     ('legacy-openai', 'legacy-model-2', 'gpt-legacy-2', 'second legacy model', '{"reasoning":false}',
      timestamptz '2025-01-02 03:04:05.678+00', timestamptz '2025-01-02 03:04:05.678+00', 1);
 
+-- Agent config 用旧版与当前版共同支持的完整形状：两个旧基线的 config codec/validator 与当前一致，缺 tools/skills/subagents 会在普通读侧 fail closed。
 insert into agent_definition (name, type, description, system_prompt, model_provider_name, model_name, variant, config, created_at, updated_at, version) values
-    ('legacy-agent-2', 'USER', 'second legacy agent', 'You are the second legacy agent.', 'legacy-openai', 'legacy-model-2', 'default', '{}',
+    ('legacy-agent-2', 'USER', 'second legacy agent', 'You are the second legacy agent.', 'legacy-openai', 'legacy-model-2', 'default', '{"tools":[],"skills":[],"subagents":[],"inheritParentEnvironment":true}',
      timestamptz '2025-01-02 03:04:05.678+00', timestamptz '2025-01-02 03:04:05.678+00', 1);
 
 -- 已过期但非未来的 daemon 连接租约：READY 必须带该源 canonical 的完整 runtime_info（profile 令牌注入），
