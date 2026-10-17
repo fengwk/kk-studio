@@ -7,8 +7,8 @@ import java.util.UUID;
  * 一条受管更新命令：Platform 在专用管理通道上向 Daemon 下发唯一更新目标。
  *
  * <p>该命令只用于已受管安装：{@code artifactUrl} 被绑定到官方发布形态（ {@code
- * https://github.com/fengwk/kk-studio/releases/download/<tag>/kk-studio-daemon-<tag>.jar}），Daemon
- * 在下载前再次校验 URL 形状、SHA256 与 JAR manifest 版本；不接受浏览者提供的任意 URL 或 "latest"。{@code operationId} 是幂等键：同一
+ * https://github.com/fengwk/kk-studio/releases/download/<tag>/kk-studio-daemon-<tag>-<os>-<arch>.tar.gz}），Daemon
+ * 在下载前再次校验 URL 形状、SHA256 与本机 os/arch 对应的官方归档；不接受浏览者提供的任意 URL 或 "latest"。{@code operationId} 是幂等键：同一
  * operation 的重发不得产生第二次下载或第二次 handoff。
  */
 public record DaemonUpdateCommand(
@@ -52,7 +52,7 @@ public record DaemonUpdateCommand(
     }
     if (!DaemonUpdateArtifact.ARTIFACT_URL_PATTERN.matcher(value).matches()) {
       throw new IllegalArgumentException(
-          "artifactUrl must be the official fengwk/kk-studio release download for a daemon jar");
+          "artifactUrl must be the official fengwk/kk-studio daemon distribution archive");
     }
     return value;
   }

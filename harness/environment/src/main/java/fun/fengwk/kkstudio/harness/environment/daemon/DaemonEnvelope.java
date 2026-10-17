@@ -41,7 +41,9 @@ public record DaemonEnvelope(
           DaemonMessageType.RESOURCE_UPLOAD_TICKET,
           DaemonMessageType.RESOURCE_UPLOAD_COMMIT,
           DaemonMessageType.UPDATE,
-          DaemonMessageType.UPDATE_RESULT);
+          DaemonMessageType.UPDATE_RESULT,
+          DaemonMessageType.IDE_COMMAND,
+          DaemonMessageType.IDE_RESULT);
 
   private static final Set<DaemonMessageType> INVOCATION_MESSAGES =
       Set.of(
@@ -54,7 +56,9 @@ public record DaemonEnvelope(
           DaemonMessageType.CANCELLED,
           DaemonMessageType.RESOURCE_UPLOAD_REQUEST,
           DaemonMessageType.RESOURCE_UPLOAD_TICKET,
-          DaemonMessageType.RESOURCE_UPLOAD_COMMIT);
+          DaemonMessageType.RESOURCE_UPLOAD_COMMIT,
+          DaemonMessageType.IDE_COMMAND,
+          DaemonMessageType.IDE_RESULT);
 
   public DaemonEnvelope {
     if (protocolVersion != DaemonProtocol.VERSION) {
