@@ -1,8 +1,9 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter, Route, Routes, useNavigate } from 'react-router'
+import { createMemoryRouter, RouterProvider, useNavigate } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { IdeLifecycleProvider } from '@/features/ai/ide/IdeLifecycleProvider'
 import { ThreadWorkspacePage } from '@/features/ai/thread/ThreadWorkspacePage'
 import { agentService } from '@/shared/api/agent-service'
 import { chatService } from '@/shared/api/chat-service'
@@ -171,14 +172,26 @@ function renderPage(initialEntry: string) {
       },
     },
   })
+  const router = createMemoryRouter(
+    [
+      {
+        path: '/threads/:threadId',
+        element: (
+          <IdeLifecycleProvider>
+            <ThreadRouteHarness />
+          </IdeLifecycleProvider>
+        ),
+      },
+      {
+        path: '/chats',
+        element: <div data-testid="chats-page">Chats List</div>,
+      },
+    ],
+    { initialEntries: [initialEntry] },
+  )
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[initialEntry]}>
-        <Routes>
-          <Route path="/threads/:threadId" element={<ThreadRouteHarness />} />
-          <Route path="/chats" element={<div data-testid="chats-page">Chats List</div>} />
-        </Routes>
-      </MemoryRouter>
+      <RouterProvider router={router} />
     </QueryClientProvider>,
   )
 }

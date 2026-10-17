@@ -1,9 +1,34 @@
-import { useEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter } from 'react-router'
+import { createMemoryRouter, RouterProvider } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { IdeLifecycleProvider } from '@/features/ai/ide/IdeLifecycleProvider'
+
+function MemoryRouter({ children }: { children: ReactNode }) {
+  const [ctx] = useState(() => {
+    const ContentContext = createContext<ReactNode>(children)
+    function RouteContainer() {
+      const c = useContext(ContentContext)
+      return <IdeLifecycleProvider>{c}</IdeLifecycleProvider>
+    }
+    const router = createMemoryRouter([
+      {
+        path: '*',
+        Component: RouteContainer,
+      },
+    ])
+    return { ContentContext, router }
+  })
+
+  return (
+    <ctx.ContentContext.Provider value={children}>
+      <RouterProvider router={ctx.router} />
+    </ctx.ContentContext.Provider>
+  )
+}
+
 import { AgentPane } from '@/features/ai/runtime/AgentPane'
 import {
   branchDraftFromEntry,
@@ -20,6 +45,7 @@ import type { BranchDraft } from '@/features/ai/chat/branch-draft'
 import { createTextPart, partsToText } from '@/features/ai/composer/composer-parts'
 import { agentService } from '@/shared/api/agent-service'
 import { chatService } from '@/shared/api/chat-service'
+import { environmentService } from '@/shared/api/environment-service'
 import { interactionService } from '@/shared/api/interaction-service'
 import { ApiError } from '@/shared/api/client'
 import { harnessService } from '@/shared/api/harness-service'
@@ -196,6 +222,10 @@ vi.mock('@/shared/api/environment-service', () => ({
     listEnvironments: vi.fn(),
     getEnvironmentUpdate: vi.fn(),
     startEnvironmentUpdate: vi.fn(),
+    createIdeView: vi.fn().mockResolvedValue({}),
+    changeIdeViewDirectory: vi.fn().mockResolvedValue({}),
+    openIdeViewTerminal: vi.fn().mockResolvedValue(undefined),
+    closeIdeView: vi.fn().mockResolvedValue(undefined),
   },
 }))
 vi.mock('@/shared/api/chat-service', () => ({
@@ -873,12 +903,14 @@ describe('AgentPane orchestration', () => {
     )
     render(
       <QueryClientProvider client={client}>
-        <AgentPane
-          owner={{ type: 'CHAT', chatId: CHAT_ID }}
-          paneId="pane-1"
-          agents={agents}
-          focused
-        />
+        <MemoryRouter>
+          <AgentPane
+            owner={{ type: 'CHAT', chatId: CHAT_ID }}
+            paneId="pane-1"
+            agents={agents}
+            focused
+          />
+        </MemoryRouter>
       </QueryClientProvider>,
     )
     const composer = await screen.findByLabelText('给 AI 发送消息')
@@ -2236,13 +2268,15 @@ describe('AgentPane orchestration', () => {
 
     render(
       <QueryClientProvider client={client}>
-        <AgentPane
-          owner={issueOwner}
-          paneId="pane-issue"
-          agents={agents}
-          initialTarget={{ kind: 'BOUND_THREAD', threadId: issueThreadId }}
-          focused
-        />
+        <MemoryRouter>
+          <AgentPane
+            owner={issueOwner}
+            paneId="pane-issue"
+            agents={agents}
+            initialTarget={{ kind: 'BOUND_THREAD', threadId: issueThreadId }}
+            focused
+          />
+        </MemoryRouter>
       </QueryClientProvider>,
     )
 
@@ -3148,12 +3182,14 @@ function previewResponse(overrides: Partial<ProviderRequestPreviewDTO> = {}): Pr
       })
       render(
         <QueryClientProvider client={client}>
-          <AgentPane
-            paneId={THREAD_ID}
-            agents={agents}
-            environments={[]}
-            focused
-          />
+          <MemoryRouter>
+            <AgentPane
+              paneId={THREAD_ID}
+              agents={agents}
+              environments={[]}
+              focused
+            />
+          </MemoryRouter>
         </QueryClientProvider>,
       )
 
@@ -4645,5 +4681,253 @@ describe('AgentPane root control mounting', () => {
     const restored = await screen.findByLabelText('给 AI 发送消息')
     // 回到根：草稿从既有持久记录恢复，不需要任何额外接线。
     await waitFor(() => expect(restored).toHaveTextContent('root draft stays'))
+  })
+
+  it('opens IDE overlay via typed /files slash command in composer, uses canonical UUID, renders compact toolbar, and notifies onIdeMounted', async () => {
+    // 测试意图：验证真实 AgentPane 输入框键入 /files 回车触发 IDE，消费斜杠草稿且不发消息，渲染紧凑工具栏与环境目录 tooltip。
+    const user = userEvent.setup()
+    const envCard: EnvironmentCardDTO = {
+      id: 'a1000000-0000-4000-8000-000000000099',
+      name: 'local-node',
+      ready: true,
+      status: 'READY',
+      version: '1',
+      createTime: '2026-10-01T00:00:00Z',
+      updateTime: '2026-10-01T00:00:00Z',
+      capabilities: [],
+      statusExpiresAt: null,
+      lastSeen: null,
+      homeDirectory: '/home/user',
+    }
+
+    vi.mocked(environmentService.createIdeView).mockImplementationOnce(async (_envId, req) => ({
+      viewId: req.viewId,
+      environmentId: envCard.id,
+      directory: '/home/user',
+      entryUrl: 'https://ide.test/?workspace=1',
+    }))
+
+    const onIdeMounted = vi.fn()
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <AgentPane
+            owner={{ type: 'CHAT', chatId: CHAT_ID }}
+            paneId="pane-1"
+            agents={agents}
+            environments={[envCard]}
+            defaults={{ environmentName: 'local-node' }}
+            focused
+            onIdeMounted={onIdeMounted}
+          />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+    await user.click(composer)
+    await user.keyboard('/files{Enter}')
+
+    expect(composer).toHaveTextContent(/^$/)
+    expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
+    expect(harnessService.acceptThreadCommandBatch).not.toHaveBeenCalled()
+
+    // IDE overlay opens and creates view with environment UUID and canonical pane viewId
+    await waitFor(() => {
+      expect(environmentService.createIdeView).toHaveBeenCalledTimes(1)
+    })
+    const createdViewId = vi.mocked(environmentService.createIdeView).mock.calls[0]?.[1]?.viewId ?? ''
+    expect(createdViewId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i)
+    expect(environmentService.createIdeView).toHaveBeenCalledWith(envCard.id, { viewId: createdViewId })
+    expect(onIdeMounted).toHaveBeenCalledWith(true)
+
+    // Overlay is rendered inside chat-pane with compact toolbar and bound tooltip
+    const overlay = await screen.findByTestId('ide-overlay-panel')
+    expect(overlay).toBeInTheDocument()
+    expect(overlay).not.toHaveAttribute('hidden')
+    await screen.findByTestId('ide-iframe')
+    expect(screen.getByTestId('ide-open-directory-btn')).toHaveAttribute('title', 'local-node · /home/user')
+
+    // Escape collapses overlay while keeping iframe mounted
+    overlay.focus()
+    await user.keyboard('{Escape}')
+    expect(overlay).toHaveAttribute('hidden')
+    expect(environmentService.closeIdeView).not.toHaveBeenCalled()
+  })
+
+  it('opens IDE overlay via typed /shell slash command and via composer + menu, preserving view environment binding until explicit close', async () => {
+    // 测试意图：验证真实 AgentPane 的 /shell 斜杠入口与 composer + 命令表入口；已开视图保持环境绑定与同一 viewId，显式关闭后重开才切换环境。
+    const user = userEvent.setup()
+    const envCard: EnvironmentCardDTO = {
+      id: 'a1000000-0000-4000-8000-000000000099',
+      name: 'local-node',
+      ready: true,
+      status: 'READY',
+      version: '1',
+      createTime: '2026-10-01T00:00:00Z',
+      updateTime: '2026-10-01T00:00:00Z',
+      capabilities: [],
+      statusExpiresAt: null,
+      lastSeen: null,
+      homeDirectory: '/home/user',
+    }
+    const secondEnvCard: EnvironmentCardDTO = {
+      id: 'a1000000-0000-4000-8000-000000000088',
+      name: 'second-node',
+      ready: true,
+      status: 'READY',
+      version: '1',
+      createTime: '2026-10-01T00:00:00Z',
+      updateTime: '2026-10-01T00:00:00Z',
+      capabilities: [],
+      statusExpiresAt: null,
+      lastSeen: null,
+      homeDirectory: '/srv/second',
+    }
+
+    vi.mocked(environmentService.createIdeView)
+      .mockImplementationOnce(async (_envId, req) => ({
+        viewId: req.viewId,
+        environmentId: envCard.id,
+        directory: '/home/user',
+        entryUrl: 'https://ide.test/?workspace=shell',
+      }))
+      .mockImplementationOnce(async (_envId, req) => ({
+        viewId: req.viewId,
+        environmentId: secondEnvCard.id,
+        directory: '/srv/second',
+        entryUrl: 'https://ide.test/?workspace=second',
+      }))
+    vi.mocked(environmentService.changeIdeViewDirectory).mockImplementationOnce(async (_envId, viewId, req) => ({
+      viewId,
+      environmentId: envCard.id,
+      directory: req.directory,
+      entryUrl: null,
+    }))
+    vi.mocked(environmentService.closeIdeView).mockResolvedValue(undefined)
+
+    const onIdeMounted = vi.fn()
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const { rerender } = render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <AgentPane
+            owner={{ type: 'CHAT', chatId: CHAT_ID }}
+            paneId="pane-1"
+            agents={agents}
+            environments={[envCard, secondEnvCard]}
+            defaults={{ environmentName: 'local-node' }}
+            focused
+            onIdeMounted={onIdeMounted}
+          />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+
+    // 1. Type /shell{Enter} in composer editor
+    const composer = await screen.findByLabelText('给 AI 发送消息')
+    await user.click(composer)
+    await user.keyboard('/shell{Enter}')
+    expect(composer).toHaveTextContent(/^$/)
+
+    // Wait for iframe and trigger load -> terminal opens on envCard.id with the exact pane viewId
+    const iframe = await screen.findByTestId('ide-iframe')
+    const paneViewId = vi.mocked(environmentService.createIdeView).mock.calls[0]?.[1]?.viewId ?? ''
+    expect(paneViewId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i)
+    fireEvent.load(iframe)
+
+    await waitFor(() => {
+      expect(environmentService.openIdeViewTerminal).toHaveBeenCalledWith(
+        envCard.id,
+        paneViewId,
+      )
+    })
+
+    // 2. Change AgentPane defaults environmentName while view is open; view stays bound to local-node and paneViewId
+    rerender(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <AgentPane
+            owner={{ type: 'CHAT', chatId: CHAT_ID }}
+            paneId="pane-1"
+            agents={agents}
+            environments={[envCard, secondEnvCard]}
+            defaults={{ environmentName: 'second-node' }}
+            focused
+            onIdeMounted={onIdeMounted}
+          />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+    expect(screen.getByTestId('ide-open-directory-btn')).toHaveAttribute('title', 'local-node · /home/user')
+    expect(screen.getByTestId('ide-iframe')).toBe(iframe)
+    expect(environmentService.createIdeView).toHaveBeenCalledTimes(1)
+
+    // Directory change while open hits the same envCard.id and paneViewId without replacing the iframe
+    await user.click(screen.getByTestId('ide-open-directory-btn'))
+    const dirInput = screen.getByTestId('ide-directory-input')
+    await user.clear(dirInput)
+    await user.type(dirInput, '/home/user/sub')
+    await user.click(screen.getByTestId('ide-directory-confirm'))
+    await waitFor(() => {
+      expect(environmentService.changeIdeViewDirectory).toHaveBeenCalledWith(envCard.id, paneViewId, {
+        directory: '/home/user/sub',
+      })
+    })
+    expect(screen.getByTestId('ide-open-directory-btn')).toHaveAttribute('title', 'local-node · /home/user/sub')
+    expect(screen.getByTestId('ide-iframe')).toBe(iframe)
+
+    // 3. Explicitly close the view, then open via composer + ("打开命令表") -> files
+    await user.click(screen.getByTestId('ide-close-btn'))
+    await user.click(screen.getByTestId('ide-confirm-close-btn'))
+    await waitFor(() => {
+      expect(environmentService.closeIdeView).toHaveBeenCalledWith(envCard.id, paneViewId)
+    })
+    expect(onIdeMounted).toHaveBeenLastCalledWith(false)
+
+    const plusBtn = await screen.findByRole('button', { name: '打开命令表' })
+    await user.click(plusBtn)
+    const filesCmd = await screen.findByText('files')
+    await user.click(filesCmd)
+
+    await waitFor(() => {
+      expect(environmentService.createIdeView).toHaveBeenNthCalledWith(
+        2,
+        secondEnvCard.id,
+        { viewId: paneViewId },
+      )
+    })
+    expect(await screen.findByTestId('ide-open-directory-btn')).toHaveAttribute('title', 'second-node · /srv/second')
+  })
+
+  it('does not treat unknown environment name as UUID and shows selection state instead', async () => {
+    const user = userEvent.setup()
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <AgentPane
+            owner={{ type: 'CHAT', chatId: CHAT_ID }}
+            paneId="pane-1"
+            agents={agents}
+            environments={[]}
+            defaults={{ environmentName: 'unknown-env' }}
+            focused
+          />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+
+    const plusBtn = await screen.findByRole('button', { name: '打开命令表' })
+    await user.click(plusBtn)
+
+    const filesCmd = await screen.findByText('files')
+    await user.click(filesCmd)
+
+    // Should NOT call createIdeView with 'unknown-env' as id
+    expect(environmentService.createIdeView).not.toHaveBeenCalled()
+    // Shows inline select environment state
+    expect(await screen.findByTestId('ide-select-environment-state')).toBeInTheDocument()
   })
 })

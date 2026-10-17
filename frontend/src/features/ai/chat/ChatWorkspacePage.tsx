@@ -33,6 +33,7 @@ import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
 import { Select } from '@/shared/ui/controls/Select'
 import { Button } from '@/shared/ui/controls/Button'
+import { useIdeLifecycle } from '@/features/ai/ide/ide-lifecycle-context'
 import { ThreadPresentationActions } from '@/features/ai/runtime/ThreadPresentationActions'
 import type { ThreadPresentation } from '@/features/ai/runtime/thread-presentation'
 import { shouldDeferToBlockingModal } from '@/shared/ui/blocking-overlay'
@@ -116,6 +117,7 @@ function ChatWorkspaceContent({
         ? { paneId, viewKey: report.viewKey } : null
     })
   }, [])
+  const { isPaneActive } = useIdeLifecycle()
   const [deepLinkOwner, setDeepLinkOwner] = useState(() => ({
     navigationKey: location.key,
     paneId: paneState.focusedPaneId,
@@ -336,7 +338,9 @@ function ChatWorkspaceContent({
   })
   const visiblePanes = visibleChatPanes(paneState)
   const visiblePaneIds = new Set(visiblePanes.map((pane) => pane.id))
-  const mountedPanes = paneState.panes.filter((pane) => visiblePaneIds.has(pane.id) || paneReports[pane.id]?.pending)
+  const mountedPanes = paneState.panes.filter(
+    (pane) => visiblePaneIds.has(pane.id) || paneReports[pane.id]?.pending || isPaneActive(pane.id),
+  )
   const currentView = presentations[debugSource?.paneId ?? paneState.focusedPaneId] ?? null
   const focusedPaneVisible = visiblePaneIds.has(paneState.focusedPaneId)
   useLayoutEffect(() => {
