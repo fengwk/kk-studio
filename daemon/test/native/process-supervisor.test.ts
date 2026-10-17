@@ -9,6 +9,9 @@ import { awaitGone, fixtureCommand, fixturePath, isAlive, waitForFile, waitForPi
 
 const TEST_TIMEOUT = 30_000
 const STREAM_TIMEOUT = 10_000
+const OWNER_DEATH_FIXTURES = process.platform === 'linux'
+  ? ['escape-fork.mjs', 'zombie-leader.mjs']
+  : ['escape-fork.mjs']
 
 // 执行范围的跨平台真实进程验收：用只依赖 Node 的夹具造出真实父子/孙进程层级，并用原生 pid 断言收敛。
 //
@@ -224,8 +227,7 @@ describe.skipIf(process.platform === 'win32')('native process supervisor (POSIX)
     expect(await awaitGone(child)).toBe(true)
   }, TEST_TIMEOUT)
 
-  test.each(process.platform === 'linux' ? ['escape-fork.mjs', 'zombie-leader.mjs'] : ['escape-fork.mjs'])(
-    'the scope helper converges everything when its parent daemon is killed (%s)', async (fixture) => {
+  test.each(OWNER_DEATH_FIXTURES)('the scope helper converges everything when its parent daemon is killed (%s)', async (fixture) => {
     // 父进程消失必须由 helper 自己触发收敛：专用 IPC 通道的内核 EOF，不依赖心跳或猜父 pid。
     if (process.platform === 'win32') {
       return
