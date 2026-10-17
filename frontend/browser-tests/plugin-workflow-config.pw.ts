@@ -76,17 +76,49 @@ async function toggleValidateJson(editorBox: import('@playwright/test').Locator)
   await editorBox.getByText('按 JSON 校验', { exact: true }).click()
 }
 
-/** 横向溢出检查：文档与弹窗主体都不得出现横向滚动。 */
+/** 横向溢出检查：文档与弹窗主体都不得出现横向滚动，表单内深嵌套标题与动作亦不得溢出容器。 */
 async function expectNoHorizontalOverflow(page: Page) {
-  const overflow = await page.evaluate(() => {
+  const result = await page.evaluate(() => {
     const body = document.querySelector('.resource-modal-card .modal-body')
+    if (!body) {
+      throw new Error('expected the plugin configuration modal body')
+    }
+
+    // 同时检查内容宽度与真实边界，避免外层裁剪掩盖嵌套字段或按钮的越界。
+    const selectors = [
+      '.plugin-config-field-header',
+      '.plugin-config-field-actions',
+      '.plugin-config-array-actions',
+      '.plugin-config-array-item-actions',
+      '.plugin-config-text-editor-toolbar',
+    ].join(', ')
+    const nestedViolations = Array.from(body.querySelectorAll<HTMLElement>(selectors))
+      .map((element) => {
+        const parent = element.parentElement
+        if (!parent) {
+          throw new Error('expected a connected plugin configuration control')
+        }
+        const rect = element.getBoundingClientRect()
+        const parentRect = parent.getBoundingClientRect()
+        return {
+          item: element.className,
+          label: element.querySelector('.field-label, label')?.textContent?.trim() ?? '',
+          scrollOverflow: element.scrollWidth - element.clientWidth,
+          edgeOverflow: Math.max(parentRect.left - rect.left, rect.right - parentRect.right, 0),
+        }
+      })
+      .filter(({ scrollOverflow, edgeOverflow }) => scrollOverflow > 1 || edgeOverflow > 1)
+
     return {
       document: document.documentElement.scrollWidth - window.innerWidth,
-      body: body ? body.scrollWidth - body.clientWidth : 0,
+      body: body.scrollWidth - body.clientWidth,
+      nestedViolations,
     }
   })
-  expect(overflow.document).toBeLessThanOrEqual(0)
-  expect(overflow.body).toBeLessThanOrEqual(1)
+
+  expect(result.document).toBeLessThanOrEqual(0)
+  expect(result.body).toBeLessThanOrEqual(1)
+  expect(result.nestedViolations).toEqual([])
 }
 
 test('desktop: edits the real H3 preset workflow, imports a graph file and saves once', async ({
