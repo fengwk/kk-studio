@@ -195,18 +195,28 @@ function Start-Case([object]$Case, [string]$Get, [string]$Stop, [string]$Start,
   foreach ($name in $Env.Keys) {
     Set-Item -Path ('env:' + $name) -Value $Env[$name]
   }
-  return Start-Process -FilePath $hostExe `
+  $process = Start-Process -FilePath $hostExe `
     -ArgumentList @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
                     '-File', ('"' + $Case.Runner + '"')) `
     -NoNewWindow -PassThru `
     -RedirectStandardOutput $Case.StdoutFile -RedirectStandardError $Case.StderrFile
+  # Windows PowerShell 5.1 在 Process 对象离开函数作用域后丢掉原生句柄，之后 ExitCode 恒为
+  # $null（失败用例因 $null -ne 0 而假通过，成功用例全部失败）。立即读取 Handle 把句柄留住，
+  # 与安装器一致：退出码只能来自仍持有句柄的真实进程对象。
+  [void] $process.Handle
+  return $process
 }
 
 function Wait-Case([object]$Case, $Process) {
   $Process.WaitForExit()
   # With -RedirectStandard* the copy into the files is asynchronous; give it a moment.
   Start-Sleep -Milliseconds 300
-  return $Process.ExitCode
+  $Process.Refresh()
+  # 读不到退出码不等于成功：显式失败，绝不转成 0 或吞掉。
+  if ($null -eq $Process.ExitCode) {
+    throw "cannot read the exit code of case '$($Case.Name)'; the native process handle was lost"
+  }
+  return [int] $Process.ExitCode
 }
 
 function Invoke-Case([object]$Case, [string]$Get, [string]$Stop, [string]$Start,

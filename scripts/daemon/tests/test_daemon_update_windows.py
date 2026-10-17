@@ -296,6 +296,22 @@ class TestWindowsUpdateNativeFixture(unittest.TestCase):
         self.assertIn("exit $LASTEXITCODE", text)
         self.assertNotIn(". '__SCRIPT__'", text)
 
+    def test_native_fixture_keeps_the_process_handle_for_the_exit_code(self):
+        """PS 5.1 丢弃从函数返回的 Process 句柄，ExitCode 变 $null；失败用例会因此假通过。"""
+        text = NATIVE_TEST_PATH.read_text(encoding="utf-8")
+        start = text.index("function Start-Case(")
+        wait = text.index("function Wait-Case(")
+        invoke = text.index("function Invoke-Case(")
+        start_body = text[start:wait]
+        wait_body = text[wait:invoke]
+        self.assertIn("[void] $process.Handle", start_body)
+        self.assertNotIn("return Start-Process", start_body)
+        self.assertIn("$Process.WaitForExit()", wait_body)
+        self.assertIn("$Process.Refresh()", wait_body)
+        self.assertIn("if ($null -eq $Process.ExitCode)", wait_body)
+        self.assertIn("$Case.Name", wait_body)
+        self.assertIn("return [int] $Process.ExitCode", wait_body)
+
     def test_native_fixture_does_not_register_or_touch_real_tasks(self):
         text = NATIVE_TEST_PATH.read_text(encoding="utf-8")
         self.assertNotIn("Register-ScheduledTask", text)
