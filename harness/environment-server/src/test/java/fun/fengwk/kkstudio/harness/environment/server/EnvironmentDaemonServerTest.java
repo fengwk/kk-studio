@@ -13,11 +13,13 @@ import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonSe
 import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.helloPayload;
 import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.partialPayload;
 import static fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServerTestSupport.readyPayload;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -57,6 +59,8 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Set;
@@ -71,6 +75,10 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 
 /**
  * {@link EnvironmentDaemonServer} 的会话、并发、重连恢复与终态所有权契约测试。
@@ -85,6 +93,9 @@ class EnvironmentDaemonServerTest {
       "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
 
   private static final UUID TRANSFER_ONE = UUID.fromString("22222222-2222-2222-2222-222222222222");
+
+  /** 合成秘密正文：注入的失败携带它，用于证明安全日志绝不回显原始异常内容。 */
+  private static final String SYNTHETIC_SECRET = "synthetic-secret-value";
 
   private static final Charset UTF_8 = StandardCharsets.UTF_8;
 
@@ -1799,6 +1810,129 @@ class EnvironmentDaemonServerTest {
     assertEquals(Set.of(), fixture.server.readyEnvironments());
   }
 
+  /** 测试意图：连接收尾的租约解绑与传输关闭互不跳过；首个 Error 保持对象身份抛出、后到的 Error 不遮蔽首个；安全日志只含固定阶段与异常类名。 */
+  @Test
+  void connectionCleanupKeepsFirstErrorIdentityAndStillClosesTransport() {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-cleanup-fatal");
+    AssertionError leaseFailure =
+        new AssertionError("lease disconnect failed: " + SYNTHETIC_SECRET);
+    AssertionError transportFailure =
+        new AssertionError("transport close failed: " + SYNTHETIC_SECRET);
+    fixture.leaseStore.disconnectFailure = leaseFailure;
+    channel.closeFailure = transportFailure;
+
+    AssertionError thrown;
+    try (CoreLogCapture logs = new CoreLogCapture()) {
+      thrown =
+          assertThrows(AssertionError.class, () -> fixture.server.close(channel.connectionId()));
+      logs.assertOnlySafeFailures(2, "connection cleanup (lease disconnect|transport close)");
+    }
+
+    assertSame(leaseFailure, thrown, "the first Error must keep its object identity");
+    assertArrayEquals(
+        new Throwable[] {transportFailure},
+        thrown.getSuppressed(),
+        "a later Error must be retained without masking the first");
+    assertTrue(channel.closed(), "the transport close must run even when the lease release fails");
+    assertEquals(Set.of(), fixture.server.readyEnvironments());
+  }
+
+  /** 测试意图：先到的普通异常不吞掉后到的 Error：Error 以原身份传播，收尾不因前序失败而跳过。 */
+  @Test
+  void connectionCleanupPropagatesLaterErrorAboveEarlierRuntimeFailure() {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-cleanup-promote");
+    fixture.leaseStore.disconnectFailure =
+        new IllegalStateException("lease disconnect failed: " + SYNTHETIC_SECRET);
+    AssertionError transportFailure =
+        new AssertionError("transport close failed: " + SYNTHETIC_SECRET);
+    channel.closeFailure = transportFailure;
+
+    try (CoreLogCapture logs = new CoreLogCapture()) {
+      AssertionError thrown =
+          assertThrows(AssertionError.class, () -> fixture.server.close(channel.connectionId()));
+      assertSame(
+          transportFailure,
+          thrown,
+          "an Error must keep its identity even after an ordinary failure");
+      logs.assertOnlySafeFailures(2, "connection cleanup (lease disconnect|transport close)");
+    }
+
+    assertTrue(channel.closed());
+  }
+
+  /** 测试意图：普通 RuntimeException 收尾失败只记录固定阶段与异常类名后被吞掉，不改变关闭语义，另一项释放仍执行。 */
+  @Test
+  void connectionCleanupLogsRuntimeFailuresWithoutPropagating() {
+    Fixture fixture = new Fixture();
+    FakeChannel channel = fixture.connectReady("channel-cleanup-runtime");
+    fixture.leaseStore.disconnectFailure =
+        new IllegalStateException("lease disconnect failed: " + SYNTHETIC_SECRET);
+    channel.closeFailure = new IllegalStateException("transport close failed: " + SYNTHETIC_SECRET);
+
+    try (CoreLogCapture logs = new CoreLogCapture()) {
+      fixture.server.close(channel.connectionId());
+      logs.assertOnlySafeFailures(2, "connection cleanup (lease disconnect|transport close)");
+    }
+
+    assertTrue(channel.closed(), "a failed lease release must not skip the transport close");
+    assertFalse(fixture.leaseStore.disconnected);
+    assertEquals(Set.of(), fixture.server.readyEnvironments());
+  }
+
+  /** 测试意图：宿主 READY 与更新回执通知失败只记录固定阶段与异常类名，不改变会话状态，也不阻断后续帧处理。 */
+  @Test
+  void hostNotificationFailuresAreLoggedSafelyWithoutChangingSessionState() {
+    Fixture fixture = new Fixture();
+    fixture.readyNotificationFailure =
+        new IllegalStateException("ready notification failed: " + SYNTHETIC_SECRET);
+    fixture.updateNotificationFailure =
+        new IllegalStateException("update notification failed: " + SYNTHETIC_SECRET);
+    String operationId = UUID.randomUUID().toString();
+
+    try (CoreLogCapture logs = new CoreLogCapture()) {
+      FakeChannel channel = fixture.connectReady("channel-notify-failure");
+      fixture.receive(
+          channel,
+          DaemonMessageType.UPDATE_RESULT,
+          null,
+          new DaemonUpdateResultCodec().encode(DaemonUpdateResult.prepared(operationId)));
+
+      assertEquals(2, logs.records().size(), "each host notification failure must be logged once");
+      for (LogRecord record : logs.records()) {
+        assertEquals(Level.WARNING, record.getLevel());
+        assertNull(record.getThrown(), "a raw throwable must never be logged");
+        assertFalse(
+            record.getMessage().contains(SYNTHETIC_SECRET),
+            "the safe log must not echo the raw failure content");
+      }
+      assertTrue(
+          logs.records().stream()
+              .anyMatch(
+                  record ->
+                      record
+                          .getMessage()
+                          .matches(
+                              "environment daemon environment ready notification failed:"
+                                  + " [A-Za-z0-9_$]+")),
+          "the READY notification failure must be logged with a fixed stage");
+      assertTrue(
+          logs.records().stream()
+              .anyMatch(
+                  record ->
+                      record
+                          .getMessage()
+                          .matches(
+                              "environment daemon update result notification failed:"
+                                  + " [A-Za-z0-9_$]+")),
+          "the update result notification failure must be logged with a fixed stage");
+    }
+
+    assertTrue(fixture.server.isReady(ENVIRONMENT_ID));
+    assertFalse(fixture.readyNotifications.contains(ENVIRONMENT_ID));
+  }
+
   /** 测试意图：非 UUID 或非 canonical 的 call.id 与 invocationId 属于协议/调用方错误，必须在触碰 wire 之前被拒绝。 */
   @Test
   void malformedUuidFieldsAreRejectedBeforeWireSend() {
@@ -2446,5 +2580,66 @@ class EnvironmentDaemonServerTest {
         descriptor,
         new EnvironmentCapabilityCall(callId.toString(), "{\"path\":\"README.md\"}"),
         Duration.ofSeconds(5));
+  }
+
+  /**
+   * 捕获核心收尾/通知诊断日志的 JUL 端口：安全失败日志是普通 {@code System.Logger} 记录，只有挂接处理器才能断言其内容。
+   *
+   * <p>{@link #close()} 恢复接管前的级别与父处理器设置，避免影响其它测试。
+   */
+  private static final class CoreLogCapture implements AutoCloseable {
+
+    private final Logger logger = Logger.getLogger(EnvironmentDaemonServer.class.getName());
+    private final Level previousLevel = logger.getLevel();
+    private final boolean previousUseParentHandlers = logger.getUseParentHandlers();
+    private final List<LogRecord> records = Collections.synchronizedList(new ArrayList<>());
+    private final Handler handler =
+        new Handler() {
+          @Override
+          public void publish(LogRecord record) {
+            records.add(record);
+          }
+
+          @Override
+          public void flush() {}
+
+          @Override
+          public void close() {}
+        };
+
+    private CoreLogCapture() {
+      handler.setLevel(Level.ALL);
+      logger.addHandler(handler);
+      logger.setLevel(Level.ALL);
+      logger.setUseParentHandlers(false);
+    }
+
+    List<LogRecord> records() {
+      return List.copyOf(records);
+    }
+
+    /** 每条失败恰好一条 WARNING，且只含固定阶段与异常类名：没有原始 throwable，也不回显合成秘密正文。 */
+    void assertOnlySafeFailures(int expectedRecords, String stagePattern) {
+      assertEquals(expectedRecords, records.size(), "every cleanup failure must be logged once");
+      for (LogRecord record : records) {
+        assertEquals(Level.WARNING, record.getLevel());
+        assertNull(record.getThrown(), "a raw throwable must never be logged");
+        assertTrue(
+            record
+                .getMessage()
+                .matches("environment daemon " + stagePattern + " failed: [A-Za-z0-9_$]+"),
+            record.getMessage());
+        assertFalse(
+            record.getMessage().contains(SYNTHETIC_SECRET),
+            "the safe log must not echo the raw failure content");
+      }
+    }
+
+    @Override
+    public void close() {
+      logger.removeHandler(handler);
+      logger.setLevel(previousLevel);
+      logger.setUseParentHandlers(previousUseParentHandlers);
+    }
   }
 }

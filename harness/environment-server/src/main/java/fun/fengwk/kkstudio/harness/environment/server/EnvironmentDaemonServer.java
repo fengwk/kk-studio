@@ -38,6 +38,8 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateResult;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonUpdateResultCodec;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonWorkdirSyntax;
 
+import java.lang.System.Logger;
+import java.lang.System.Logger.Level;
 import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -99,6 +101,9 @@ public final class EnvironmentDaemonServer
 
   /** 票据服务异常时的固定失败说明：绝不复述异常原文，避免把存储内部事实泄漏到控制面。 */
   private static final String TRANSFER_FAILURE_MESSAGE = "resource upload is unavailable";
+
+  /** 收尾与宿主通知的诊断日志：只输出固定阶段与异常类名。 */
+  private static final Logger LOG = System.getLogger(EnvironmentDaemonServer.class.getName());
 
   private final DaemonLeaseStore leaseStore;
   private final DaemonRegistrationDirectory registrationDirectory;
@@ -662,7 +667,7 @@ public final class EnvironmentDaemonServer
     requireNoInvocationId(envelope);
     DaemonUpdateResult result = updateResultCodec.decode(envelope.payloadJson());
     EnvironmentId environmentId = state.environmentId;
-    deferred.add(() -> updateListener.onUpdateResult(environmentId, result));
+    deferred.add(() -> notifyUpdateResult(environmentId, result));
   }
 
   /** 处理 daemon 首帧 HELLO：解析实例身份与注册凭据、抢占路由租约并完成 WELCOME 回包。 */
@@ -1501,7 +1506,11 @@ public final class EnvironmentDaemonServer
     close(state.connection.connectionId());
   }
 
-  /** 幂等清理连接代际：解绑路由租约并关闭传输；在途调用保留等待同实例重连重放。 */
+  /**
+   * 幂等清理连接代际：解绑路由租约并关闭传输；在途调用保留等待同实例重连重放。
+   *
+   * <p>两项独立释放互不跳过：任一失败只记录固定阶段与异常类名，其余释放继续完成。Error 不吞：收尾完成后按原对象身份抛出首个 Error，后到的 Error 不得遮蔽首个。
+   */
   private void closeConnectionState(ConnectionState state) {
     EnvironmentId environmentId;
     UUID leaseToken;
@@ -1524,10 +1533,13 @@ public final class EnvironmentDaemonServer
       }
       connections.remove(state.connection.connectionId(), state);
     }
+    Error failure = null;
     if (environmentId != null && leaseToken != null) {
       try {
         leaseStore.disconnect(environmentId, leaseToken, timeout());
-      } catch (RuntimeException ignored) {
+      } catch (Throwable error) {
+        logFailure("connection cleanup lease disconnect", error);
+        failure = recordCleanupFailure(failure, error);
       }
     }
     try {
@@ -1536,14 +1548,50 @@ public final class EnvironmentDaemonServer
       } else {
         state.connection.close();
       }
-    } catch (RuntimeException ignored) {
+    } catch (Throwable error) {
+      logFailure("connection cleanup transport close", error);
+      failure = recordCleanupFailure(failure, error);
     }
+    if (failure != null) {
+      throw failure;
+    }
+  }
+
+  /**
+   * 保留首个 Error 的对象身份用于收尾后抛出：首个 Error 成为主因，其后失败作为 suppressed 保留，绝不遮蔽首个。
+   *
+   * <p>没有 Error 时返回 {@code null}：普通异常只通过日志观察，不改变会话语义。
+   */
+  private static Error recordCleanupFailure(Error first, Throwable failure) {
+    if (first == null) {
+      return failure instanceof Error error ? error : null;
+    }
+    if (first != failure) {
+      first.addSuppressed(failure);
+    }
+    return first;
+  }
+
+  /** 记录一次收尾/通知失败的固定阶段与异常类名；绝不附加原始异常、message、路径或凭据。 */
+  private static void logFailure(String stage, Throwable failure) {
+    LOG.log(
+        Level.WARNING,
+        "environment daemon " + stage + " failed: " + failure.getClass().getSimpleName());
   }
 
   private void notifyEnvironmentReady(EnvironmentId environmentId) {
     try {
       sessionListener.onEnvironmentReady(environmentId);
-    } catch (RuntimeException ignored) {
+    } catch (RuntimeException error) {
+      logFailure("environment ready notification", error);
+    }
+  }
+
+  private void notifyUpdateResult(EnvironmentId environmentId, DaemonUpdateResult result) {
+    try {
+      updateListener.onUpdateResult(environmentId, result);
+    } catch (RuntimeException error) {
+      logFailure("update result notification", error);
     }
   }
 

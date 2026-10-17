@@ -305,7 +305,7 @@ public class JGitSkillCache implements SkillGitCache {
         }
 
         if (backedUp) {
-          deleteRecursivelyQuietly(oldDir);
+          deleteRecursively(oldDir);
         }
       } catch (SkillGitException e) {
         throw e;
@@ -319,8 +319,8 @@ public class JGitSkillCache implements SkillGitCache {
                 + e.getMessage(),
             e);
       } finally {
-        deleteRecursivelyQuietly(cloneDir);
-        deleteRecursivelyQuietly(stagingDir);
+        deleteRecursively(cloneDir);
+        deleteRecursively(stagingDir);
       }
     }
   }
@@ -501,7 +501,12 @@ public class JGitSkillCache implements SkillGitCache {
     return publishedDir;
   }
 
-  private static void deleteRecursivelyQuietly(Path path) {
+  /**
+   * 尽力递归删除缓存目录：逐项删除互不跳过，普通删除失败时按只读权限修正后重试一次。
+   *
+   * <p>最终仍失败时只记录固定阶段与异常类名，绝不回显路径或原始正文，保证真实清理失败去敏可观察而非静默吞没。
+   */
+  private static void deleteRecursively(Path path) {
     if (path == null) {
       return;
     }
@@ -516,16 +521,28 @@ public class JGitSkillCache implements SkillGitCache {
                 p -> {
                   try {
                     Files.deleteIfExists(p);
-                  } catch (IOException e) {
-                    try {
-                      p.toFile().setWritable(true);
-                      Files.deleteIfExists(p);
-                    } catch (Exception ignored) {
-                    }
+                  } catch (IOException ignored) {
+                    // 只读目录/文件：按权限修正后重试一次。
+                    deleteAfterMakingWritable(p);
                   }
                 });
       }
-    } catch (Exception ignored) {
+    } catch (Exception traversalFailure) {
+      log.warn(
+          "skill cache recursive delete failed: stage=traversal, error={}",
+          traversalFailure.getClass().getName());
+    }
+  }
+
+  /** 只读项按权限修正后重试一次；仍然失败时按固定阶段记录异常类名，绝不回显路径或原始正文。 */
+  private static void deleteAfterMakingWritable(Path path) {
+    try {
+      path.toFile().setWritable(true);
+      Files.deleteIfExists(path);
+    } catch (Exception retryFailure) {
+      log.warn(
+          "skill cache recursive delete failed: stage=delete, error={}",
+          retryFailure.getClass().getName());
     }
   }
 }
