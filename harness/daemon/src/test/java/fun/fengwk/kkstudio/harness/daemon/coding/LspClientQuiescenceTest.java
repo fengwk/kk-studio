@@ -30,7 +30,6 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
@@ -129,14 +128,8 @@ class LspClientQuiescenceTest {
       assertEquals(stateDirectories, countStateDirectories(), "启动失败不得留下进程范围状态目录");
     } finally {
       gate.countDown();
-      // 故障路径下调用线程可能仍停在闸门上：有界结算启动结论，避免把在途启动留给 tearDown。
-      try {
-        launching.get(WAIT.toSeconds(), TimeUnit.SECONDS);
-      } catch (ExecutionException | TimeoutException ignored) {
-        // 启动结论由用例主体断言，这里只保证启动线程已经结算。
-      } catch (InterruptedException interrupted) {
-        Thread.currentThread().interrupt();
-      }
+      // 必须观察启动线程真正结束；等待失败同样使测试失败。
+      launching.get(WAIT.toSeconds(), TimeUnit.SECONDS);
     }
   }
 

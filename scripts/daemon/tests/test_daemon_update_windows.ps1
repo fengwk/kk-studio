@@ -132,9 +132,7 @@ __STOP__
 __START__
 __UNREGISTER__
 __EXTRA__
-# The production script runs in a child scope through the call operator, so its fail-closed
-# `exit 1` sets $LASTEXITCODE here; a dot-sourced script cannot propagate it (the host still
-# exits 0) and every exit-code assertion would silently pass.
+# Propagate the child script's exit status; dot-sourcing would leave the host status at 0.
 $LASTEXITCODE = 0
 & '__SCRIPT__' -StagedJar '__STAGED__' -InstalledJar '__INSTALLED__'
 exit $LASTEXITCODE
