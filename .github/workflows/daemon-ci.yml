@@ -1,0 +1,129 @@
+# kk-studio Node daemon platform matrix.
+#
+# Node Daemon 的平台行为不能只在一台 runner 上验证。矩阵覆盖五个官方目标：
+#   linux amd64（ubuntu-latest）、linux arm64（ubuntu-24.04-arm）、
+#   macOS arm64（macos-14）、macOS Intel（macos-15-intel）、
+#   windows amd64（windows-latest）。
+# 每个目标都真跑完整 Node 套件（类型检查、构建、native 进程范围与能力层、覆盖率），
+# 平台特有用例由用例自己决定是否执行，不做整体跳过。安装器 Python fixture 与 shell 替换
+# 只证明脚本契约，不是真实 code-server 归档或真实 launchd/systemd 验收。
+#
+# 本工作流既是 `push`/`pull_request` 上的独立门禁（替代原 Java process-scope 矩阵），也以
+# `workflow_call` 被 daemon-release 与 docker-publish 复用，保证 tag 发布、分支推送与主分支
+# 镜像发布跑的是同一套门禁。
+name: daemon-ci
+
+on:
+  workflow_call:
+  push:
+    branches:
+      - main
+      - dev
+    paths:
+      - 'daemon/**'
+      - 'scripts/daemon/**'
+      - '.github/workflows/daemon-ci.yml'
+      - '.github/workflows/daemon-release.yml'
+      - '.github/workflows/docker-publish.yml'
+  pull_request:
+    paths:
+      - 'daemon/**'
+      - 'scripts/daemon/**'
+      - '.github/workflows/daemon-ci.yml'
+      - '.github/workflows/daemon-release.yml'
+      - '.github/workflows/docker-publish.yml'
+  workflow_dispatch:
+
+# 只读仓库内容：本工作流不发布任何产物，也不读取 secrets。
+permissions:
+  contents: read
+
+concurrency:
+  # caller workflow 也纳入分组：daemon-ci 既被 daemon-release/docker-publish 复用，也独立运行。
+  # 只用 ref 会让两个 caller 在同一个 main 上互相取消共享矩阵；加上 caller 使不同工作流互不干扰，
+  # 同 caller 的新 revision 仍以 cancel-in-progress 覆盖旧 run。
+  group: ${{ github.workflow }}-daemon-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # 与实际发行物冻结的 bundled Node 一致（fork 的 code-server 运行时也自带该主版本）；
+  # 不允许回退到 runner 或宿主默认 Node。
+  NODE_VERSION: '24.21.0'
+
+jobs:
+  node_daemon:
+    name: node daemon (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-amd64
+          - os: ubuntu-24.04-arm
+            platform: linux-arm64
+          - os: macos-14
+            platform: macos-arm64
+          - os: macos-15-intel
+            platform: macos-amd64
+          - os: windows-latest
+            platform: windows-amd64
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Set up Node 24.21
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: daemon/package-lock.json
+      - name: Install daemon dependencies
+        run: npm --prefix daemon ci
+      - name: Type-check the daemon
+        run: npm --prefix daemon run check
+      # 构建必须先于测试与覆盖率：发行 JS 的加载/解析路径就是被测对象，缺 build 会让矩阵给出假绿。
+      - name: Build the daemon before testing
+        run: npm --prefix daemon run build
+      # 覆盖率是替换原 Java process-scope 门禁的核心证据：五个平台都真跑 native 进程范围、
+      # 退出、Job/session 与能力层用例，任一平台失败即整体失败。
+      - name: Test the daemon with coverage
+        run: npm --prefix daemon run coverage
+      # macOS 上的安装器/归档测试只用系统 Bash 跑 fixture：不注册 launchd，也不把 Linux 归档
+      # 当成 macOS 验收。真实 code-server 原生模块由发布作业在暂存归档上加载。
+      - name: Test the macOS installer and archive smoke with system Bash
+        if: runner.os == 'macOS'
+        shell: /bin/bash --noprofile --norc -eo pipefail {0}
+        run: |
+          /bin/bash --version
+          python3 -m unittest discover -s scripts/daemon/tests -p 'test_*.py'
+
+  windows_daemon_installer:
+    name: windows daemon installer (PS 5.1 and 7)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Set up Node 24.21
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      # Windows PowerShell 5.1 是最低支持宿主；PowerShell 7 捕获现代宿主的漂移。
+      # 两个宿主的结果都要收集：任一失败都会让 job 失败关闭。
+      - name: Test installer with Windows PowerShell 5.1
+        shell: powershell
+        run: .\scripts\daemon\tests\test_daemon_install_windows.ps1
+      - name: Test installer with PowerShell 7
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        run: .\scripts\daemon\tests\test_daemon_install_windows.ps1
+      - name: Install frontend dependencies
+        shell: bash
+        run: npm --prefix frontend ci
+      - name: Test generated Windows install command natively
+        # 在两种受支持的 PowerShell 宿主里真实拉取并执行一行安装命令。
+        shell: bash
+        run: npm --prefix frontend run test:install:windows

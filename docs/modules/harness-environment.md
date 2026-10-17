@@ -1,6 +1,6 @@
 # Harness Environment
 
-`harness-environment` 定义环境执行的共享契约：路由身份、原子能力目录、调用侧发送语义，以及 Gateway 与 Daemon 的 wire 消息。修改调用参数或协议时，以本模块的值对象、schema 与 codec 为准；连接和执行状态分别由 [Harness Environment Server](harness-environment-server.md) 与 [Harness Daemon](harness-daemon.md)维护。
+`harness-environment` 定义环境执行的共享契约：路由身份、原子能力目录、调用侧发送语义，以及 Gateway 与 Daemon 的 wire 消息。修改调用参数或协议时，以本模块的值对象、schema 与 codec 为准；连接和执行状态分别由 [Harness Environment Server](harness-environment-server.md) 与 [Environment Daemon](daemon.md)维护。
 
 ## Environment 身份
 
@@ -91,7 +91,7 @@ default void terminate(EnvironmentCapabilityTerminationCause cause) { cancel(); 
 default Duration terminationGrace() { return Duration.ZERO; }
 ```
 
-`cancel()` 是无条件取消，`isCancelled()` 是「已被请求终止」的协作式中断信号。需要区分原因的宿主能力覆盖 `terminate`，按 [`EnvironmentCapabilityTerminationCause`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityTerminationCause.java) 的 `TIMED_OUT`/`CANCELLED` 产出与原因一致的收尾事实，因此超时不会被报告成调用方取消。`terminationGrace()` 默认 `ZERO`（收尾立即由调用方裁决）；返回正数的能力承诺在该预算内自行提交终态，使 Daemon 能把终态提交让给它以携带失败日志，预算到期仍由调用方兜底收敛，见 [Harness Daemon 的超时与取消收尾](harness-daemon.md#超时与取消收尾)。
+`cancel()` 是无条件取消，`isCancelled()` 是「已被请求终止」的协作式中断信号。需要区分原因的宿主能力覆盖 `terminate`，按 [`EnvironmentCapabilityTerminationCause`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityTerminationCause.java) 的 `TIMED_OUT`/`CANCELLED` 产出与原因一致的收尾事实，因此超时不会被报告成调用方取消。`terminationGrace()` 默认 `ZERO`（收尾立即由调用方裁决）；返回正数的能力承诺在该预算内自行提交终态，使 Daemon 能把终态提交让给它以携带失败日志，预算到期仍由调用方兜底收敛，见 [Daemon 的超时与取消收尾](daemon.md#能力装配与运行时调度)。
 
 能力结果 [`EnvironmentCapabilityResult`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityResult.java) 是 `callId` 加 `contents`（至多 64 项）、`error` 与 `detailsJson`（至多 1 MiB UTF-8）。错误结果可以只带文本，也可以带稳定错误码：[`EnvironmentCapabilityResultCodes`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityResultCodes.java) 只冻结码的语法 `[A-Z][A-Z0-9_]*`（至多 64 字符），当前没有预置码常量。
 
@@ -154,13 +154,12 @@ daemonVersion=构建版本
 environment: operatingSystem / timeZone / userName / homeDirectory / note / tempDirectory / architecture
 ```
 
-READY 只公开宿主侧的七项环境元数据与 Daemon 自身构建版本，**不发送 capability descriptor 列表或 LSP 可用性**；能力集合由 HELLO 中的 catalog 版本与两端固定目录约定。`daemonVersion` 取自 shaded JAR manifest 的
-`Implementation-Version`，未打包运行时为固定标记 `development`（明确表示不是发布版本），与 Card 上的 CAS
+READY 只公开宿主侧的七项环境元数据与 Daemon 自身构建版本，**不发送 capability descriptor 列表或 LSP 可用性**；能力集合由 HELLO 中的 catalog 版本与两端固定目录约定。`daemonVersion` 取自 Daemon 构建版本（对齐 `package.json` 版本），未打包运行时为固定标记 `development`（明确表示不是发布版本），与 Card 上的 CAS
 `version` 是两个不同事实。七项数据为目标操作系统、时区、Daemon 进程用户、该用户的
 HOME、可信操作者备注、受控临时目录 `tempDirectory` 与宿主 CPU 架构 `architecture`（HOME 优先 canonical，无法解析时为绝对规范路径）。`operatingSystem` 是发送前路径词法校验的目标
 OS 依据；`userName`、`homeDirectory` 与 `architecture` 只用于 Card 和当前 Environment Prompt 展示，
 不构成 cwd、默认 workdir 或沙箱；`tempDirectory` 是受控临时 workspace 的 canonical 绝对路径，同样只是展示事实。`architecture` 是 Daemon 真实采集的宿主事实
-（`System.getProperty("os.arch")`），JSON `null` 明确表示该事实未知，绝不填造取值；Daemon 仍以单一 JAR 分发，不按它自动挑选发行归档。`environment` 是必填对象且字段固定；未知字段、必填
+（例如 `amd64`、`arm64`），JSON `null` 明确表示该事实未知，绝不填造取值。`environment` 是必填对象且字段固定；未知字段、必填
 字段缺失或类型错误都是协议错误，其中 `architecture` 的键必须存在且值允许明确 JSON `null`。
 
 载荷的硬约束：`userName` 与 `homeDirectory` 非空、单行且无控制字符，`note` 必填、非空白、无周边空白、单行且不超过 512 字符，`architecture` 是 `null` 或有界非空的单行标识；未指定 note 时 Daemon 按 OS 生成默认说明。当前 codec 只接受版本 5，不双读或兼容旧 V4 payload。凭证、请求头、环境变量、命令与 Git URL/ref 都不进入 READY；
@@ -252,4 +251,4 @@ harness-environment
 
 ---
 
-上级：[系统设计](../system-design.md)。相关文档：[Harness Common](harness-common.md)、[Harness Tool](harness-tool.md)、[Harness Environment Server](harness-environment-server.md)、[Harness Daemon](harness-daemon.md)、[Harness Runtime](harness-runtime.md)、[Platform](platform.md)。
+上级：[系统设计](../system-design.md)。相关文档：[Harness Common](harness-common.md)、[Harness Tool](harness-tool.md)、[Harness Environment Server](harness-environment-server.md)、[Environment Daemon](daemon.md)、[Harness Runtime](harness-runtime.md)、[Platform](platform.md)。

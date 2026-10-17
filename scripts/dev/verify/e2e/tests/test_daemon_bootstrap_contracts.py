@@ -4,6 +4,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import stat
 import subprocess
 import tempfile
@@ -73,17 +74,28 @@ class TestDaemonBootstrapContracts(unittest.TestCase):
         self.assertNotIn("environmentId", default_assistant_stmt)
         self.assertNotIn("11111111-1111-1111-1111-111111111111", default_assistant_stmt)
 
+    def _node_dist(self, temporary):
+        """建一个最小 Node 发行目录，并返回可用宿主 node 的绝对路径。"""
+        node = shutil.which("node")
+        assert node is not None, "node is required to test the daemon bootstrap contract"
+        dist = Path(temporary) / "dist"
+        dist.mkdir(parents=True)
+        (dist / "main.js").write_text("// daemon entry\n", encoding="utf-8")
+        return dist, node
+
     def test_e2e_daemon_bootstrap_materializes_config_and_launches_with_config_only(self):
-        """E2E must materialize the shared daemon.json/owner-only token and launch with --config only."""
+        """E2E must materialize the shared daemon.json/owner-only token and launch the Node entry with --config only."""
         lib_content = E2E_LIB_SH.read_text(encoding="utf-8")
         bootstrap = (E2E_ROOT / "lib" / "daemon-bootstrap.sh").read_text(encoding="utf-8")
 
-        # 旧 CLI/数据目录参数不得复活；启动路径只走 bootstrap helper。
+        # 旧 CLI/数据目录/JVM 参数不得复活；启动路径只走 bootstrap helper 启动 Node 入口。
         for removed in ("--gateway-uri", "--data-dir", "--registration-token-file", "--environment-root"):
             self.assertNotIn(removed, lib_content, removed)
         self.assertIn("daemon-bootstrap.sh", lib_content)
         self.assertIn("DAEMON_ROOT", lib_content)
         self.assertNotIn("DAEMON_DATA_DIR", lib_content)
+        self.assertNotIn("DAEMON_JAR", lib_content)
+        self.assertIn("DAEMON_DIST", lib_content)
         self.assertIn("Daemon 运行数据目录", lib_content)
         # 凭证经 assignment 前缀进入子进程环境，绝不作为 `env` 的 argv 参数出现。
         self.assertIn(
@@ -92,35 +104,39 @@ class TestDaemonBootstrapContracts(unittest.TestCase):
         )
         self.assertIn("--config", bootstrap)
         self.assertNotIn("--data-dir", bootstrap)
+        self.assertNotIn("-jar", bootstrap)
+        self.assertNotIn("JAVA_HOME", bootstrap)
+        self.assertIn("$DAEMON_DIST/main.js", lib_content)
 
         # 执行 recorder：证明 config/secret 落盘布局与 daemon 启动参数，而非静态假通过。
         with tempfile.TemporaryDirectory() as temporary:
-            probe_dir = Path(temporary) / "jdk" / "bin"
+            dist, node = self._node_dist(temporary)
+            probe_dir = Path(temporary) / "bin"
             probe_dir.mkdir(parents=True)
             argv_file = Path(temporary) / "argv.txt"
             environ_file = Path(temporary) / "environ.txt"
-            probe = probe_dir / "java"
+            probe = probe_dir / "node-recorder"
             probe.write_text(
                 "#!/bin/bash\n"
+                'if [ "$1" = "-e" ]; then exec "' + node + '" "$@"; fi\n'
                 'printf \'%s\\n\' "$@" >"$PROBE_ARGV"\n'
                 'env >"$PROBE_ENVIRON"\n'
             )
             probe.chmod(0o755)
 
             root = Path(temporary) / "daemon"
-            jar = Path(temporary) / "kk-studio-daemon.jar"
             secret = "e2e-token-host-tool"
             note = "E2E daemon environment — 日本語"
             env = os.environ.copy()
             env.update(
                 {
-                    "JAVA_HOME": str(probe_dir.parent),
                     "PROBE_ARGV": str(argv_file),
                     "PROBE_ENVIRON": str(environ_file),
                     "DAEMON_ROOT": str(root),
                     "DAEMON_STUDIO_URL": "http://127.0.0.1:18081",
                     "DAEMON_NOTE": note,
-                    "DAEMON_JAR": str(jar),
+                    "DAEMON_DIST": str(dist),
+                    "DAEMON_NODE": str(probe),
                     "DAEMON_REGISTRATION_TOKEN": secret,
                 }
             )
@@ -134,7 +150,7 @@ class TestDaemonBootstrapContracts(unittest.TestCase):
             self.assertEqual(0, result.returncode, result.stderr)
 
             argv = argv_file.read_text().splitlines()
-            self.assertEqual(["-jar", str(jar), "--config"], argv[:3])
+            self.assertEqual([str(dist / "main.js"), "--config"], argv[:2])
             config_path = Path(argv[argv.index("--config") + 1])
             self.assertTrue(config_path.is_absolute())
             self.assertEqual(root / "daemon.json", config_path)
@@ -156,14 +172,15 @@ class TestDaemonBootstrapContracts(unittest.TestCase):
     def test_e2e_daemon_bootstrap_fails_closed_without_a_token(self):
         """缺少注册凭证时 bootstrap 必须立即失败，而不是启动一个无法注册的 daemon。"""
         with tempfile.TemporaryDirectory() as temporary:
+            dist, node = self._node_dist(temporary)
             root = Path(temporary) / "daemon"
             env = os.environ.copy()
             env.update(
                 {
-                    "JAVA_HOME": temporary,
                     "DAEMON_ROOT": str(root),
                     "DAEMON_STUDIO_URL": "http://127.0.0.1:18081",
-                    "DAEMON_JAR": str(Path(temporary) / "daemon.jar"),
+                    "DAEMON_DIST": str(dist),
+                    "DAEMON_NODE": node,
                 }
             )
             env.pop("DAEMON_REGISTRATION_TOKEN", None)
@@ -180,18 +197,15 @@ class TestDaemonBootstrapContracts(unittest.TestCase):
     def test_e2e_daemon_bootstrap_rejects_a_relative_root(self):
         """DAEMON_ROOT 必须为绝对路径，否则拒绝启动。"""
         with tempfile.TemporaryDirectory() as temporary:
-            probe_dir = Path(temporary) / "jdk" / "bin"
-            probe_dir.mkdir(parents=True)
-            (probe_dir / "java").write_text("#!/bin/bash\nexit 0\n")
-            (probe_dir / "java").chmod(0o755)
+            dist, node = self._node_dist(temporary)
 
             env = os.environ.copy()
             env.update(
                 {
-                    "JAVA_HOME": str(probe_dir.parent),
                     "DAEMON_ROOT": "relative/daemon",
                     "DAEMON_STUDIO_URL": "http://127.0.0.1:18081",
-                    "DAEMON_JAR": str(Path(temporary) / "daemon.jar"),
+                    "DAEMON_DIST": str(dist),
+                    "DAEMON_NODE": node,
                     "DAEMON_REGISTRATION_TOKEN": "e2e-token-host-tool",
                 }
             )
@@ -214,20 +228,17 @@ class TestDaemonBootstrapContracts(unittest.TestCase):
             # chmod 桩为 no-op：只有 writeFileSync 的显式 mode 与 umask 能收敛权限。
             (bin_dir / "chmod").write_text("#!/bin/bash\nexit 0\n")
             (bin_dir / "chmod").chmod(0o755)
-            jdk_bin = Path(temporary) / "jdk" / "bin"
-            jdk_bin.mkdir(parents=True)
-            (jdk_bin / "java").write_text("#!/bin/bash\nexit 0\n")
-            (jdk_bin / "java").chmod(0o755)
+            dist, node = self._node_dist(temporary)
 
             root = Path(temporary) / "daemon"
             env = os.environ.copy()
             env.update(
                 {
                     "PATH": f"{bin_dir}{os.pathsep}{env.get('PATH', '')}",
-                    "JAVA_HOME": str(jdk_bin.parent),
                     "DAEMON_ROOT": str(root),
                     "DAEMON_STUDIO_URL": "http://127.0.0.1:18081",
-                    "DAEMON_JAR": str(Path(temporary) / "daemon.jar"),
+                    "DAEMON_DIST": str(dist),
+                    "DAEMON_NODE": node,
                     "DAEMON_REGISTRATION_TOKEN": "e2e-token-host-tool",
                 }
             )
