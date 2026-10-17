@@ -33,6 +33,7 @@ RELEASE_TAG = "v" + DAEMON_VERSION
 RELEASE_BASE = "https://github.com/fengwk/kk-studio/releases"
 PLATFORMS = ("linux-amd64", "linux-arm64", "macos-amd64", "macos-arm64", "windows-amd64")
 UPDATE_SCRIPTS_TS = Path(__file__).resolve().parents[3] / "daemon" / "src" / "update-scripts.ts"
+EXPORT_UPDATE_SCRIPT_MJS = Path(__file__).resolve().parent / "export-update-script.mjs"
 SYSTEM_BASH = "/bin/bash"
 
 _MAIN_JS = f'console.log("kk-studio-daemon {DAEMON_VERSION}")\n'
@@ -87,29 +88,28 @@ def node_export(name: str) -> str:
     The module has no imports and contains only exported template strings, so Node can load it
     directly with type stripping. Requiring a Java build or ``dist`` here would let the tests
     drift from the real source.
+
+    The export travels as a UTF-8 file produced by the same exporter the PowerShell fixtures use:
+    Windows PowerShell 5.1 corrupts an inline ``-e`` script (quote loss in native argv) and decodes
+    native stdout with the console code page, so neither command-line source nor stdout is used.
     """
     node = shutil.which("node")
     if node is None:
         raise RuntimeError("Node 24 is required to import daemon/src/update-scripts.ts")
-    result = subprocess.run(
-        [
-            node,
-            "--input-type=module",
-            "-e",
-            (
-                "import { pathToFileURL } from 'node:url';"
-                "const module = await import(pathToFileURL(process.argv[1]));"
-                "process.stdout.write(module[process.argv[2]])"
-            ),
-            str(UPDATE_SCRIPTS_TS),
-            name,
-        ],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"cannot import {name} from {UPDATE_SCRIPTS_TS}: {result.stderr}")
-    return result.stdout
+    with tempfile.TemporaryDirectory() as work_dir:
+        exported = Path(work_dir) / "update-script.txt"
+        result = subprocess.run(
+            [node, str(EXPORT_UPDATE_SCRIPT_MJS), str(UPDATE_SCRIPTS_TS), name, str(exported)],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0 or not exported.is_file():
+            raise RuntimeError(
+                f"cannot import {name} from {UPDATE_SCRIPTS_TS}: "
+                f"exit {result.returncode}: {result.stderr}"
+            )
+        # 逐字节 UTF-8 解码：不经过通用换行转换，得到的就是生产脚本文本本身。
+        return exported.read_bytes().decode("utf-8")
 
 
 def code_server_tar(path: Path, platform: str) -> None:
