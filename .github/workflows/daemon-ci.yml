@@ -89,18 +89,6 @@ jobs:
       # 退出、Job/session 与能力层用例，任一平台失败即整体失败。
       - name: Test the daemon with coverage
         run: npm --prefix daemon run coverage
-      # 临时 ARM64 取证：固定最多六轮全套覆盖率采样，首个失败立即终止，不重试到绿。
-      # 诊断结束后删除此步骤；本分支不作为正式候选。
-      - name: Sample the native owner-death failure on Linux ARM64
-        if: matrix.platform == 'linux-arm64'
-        shell: bash
-        run: |
-          set -euo pipefail
-          for sample in 1 2 3 4 5 6; do
-            echo "::group::ARM64 diagnostic sample ${sample}/6"
-            npm --prefix daemon run coverage
-            echo "::endgroup::"
-          done
       # macOS 上的安装器/归档测试只用系统 Bash 跑 fixture：不注册 launchd，也不把 Linux 归档
       # 当成 macOS 验收。真实 code-server 原生模块由发布作业在暂存归档上加载。
       - name: Test the macOS installer and archive smoke with system Bash
