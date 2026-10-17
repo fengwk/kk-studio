@@ -271,6 +271,9 @@ class TestWindowsUpdateNativeFixture(unittest.TestCase):
         text = NATIVE_TEST_PATH.read_text(encoding="utf-8")
         self.assertIn("daemon\\src\\update-scripts.ts", text)
         self.assertIn("WINDOWS_UPDATE_SCRIPT", text)
+        # PS 5.1 会丢掉内联 -e 源码的引号、按控制台代码页解码 stdout，正文只能走 UTF-8 文件。
+        self.assertIn("export-update-script.mjs", text)
+        self.assertNotIn("--input-type", text)
         self.assertNotIn("harness" + "/daemon", text)
         for forbidden in (".jar", "java.exe", "JAVA_HOME"):
             self.assertNotIn(forbidden, text)
