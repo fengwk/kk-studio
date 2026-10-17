@@ -354,4 +354,14 @@ finally {
 
 Write-Host ("Windows installer fixture: {0} checks, {1} failures" -f $script:Checks, $script:Failures)
 if ($script:Failures -gt 0) { exit 1 }
+
+# The Windows gate invokes this installer suite for both PowerShell hosts. Run the managed
+# update suite from the same gate so the update contract cannot silently fall out of CI.
+$hostExe = (Get-Process -Id $PID).Path
+$updateSuite = Join-Path $PSScriptRoot "test_daemon_update_windows.ps1"
+& $hostExe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $updateSuite
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "Windows managed-update fixture failed"
+    exit 1
+}
 exit 0

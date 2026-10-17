@@ -1,15 +1,18 @@
-"""Shared fixtures for the Node Daemon packaging and release tests.
+"""Shared fixtures for the Node Daemon packaging, installation and update tests.
 
-These fixtures never touch the network and never download the real code-server runtime.
-They build a tiny, self-contained fake repository plus PATH shims (curl / npm)
-that are behaviourally faithful to the contracts the scripts rely on:
+These fixtures never touch the network, never register a real service and never download the
+real code-server runtime. They build a tiny, self-contained fake repository plus PATH shims
+(curl / npm / uname / service managers) that are behaviourally faithful to the contracts the
+scripts rely on:
 
 * ``curl`` maps the official URLs onto local fixture files.
 * ``npm`` honours ``--os`` / ``--cpu`` by materialising only the matching
   ``@koromix/koffi-<os>-<cpu>`` optional prebuilt, and refuses any install that would
   run target lifecycle scripts without ``--ignore-scripts``.
 * the daemon entrypoint and the frozen ``lib/node`` are real executables with a controlled
-  ``--version`` contract.
+  ``--version`` / ``--check-config`` contract.
+* the managed update script is imported from the shipped TypeScript module, so the tests never
+  keep a second copy of the UNIX/Windows update facts.
 """
 
 from __future__ import annotations
@@ -29,6 +32,8 @@ CODE_SERVER_VERSION = "4.141.0-kk.1"
 RELEASE_TAG = "v" + DAEMON_VERSION
 RELEASE_BASE = "https://github.com/fengwk/kk-studio/releases"
 PLATFORMS = ("linux-amd64", "linux-arm64", "macos-amd64", "macos-arm64", "windows-amd64")
+UPDATE_SCRIPTS_TS = Path(__file__).resolve().parents[3] / "daemon" / "src" / "update-scripts.ts"
+SYSTEM_BASH = "/bin/bash"
 
 _MAIN_JS = f'console.log("kk-studio-daemon {DAEMON_VERSION}")\n'
 
@@ -74,6 +79,37 @@ def sha256_of(path: Path) -> str:
     digest = hashlib.sha256()
     digest.update(path.read_bytes())
     return digest.hexdigest()
+
+
+def node_export(name: str) -> str:
+    """Import one constant from the shipped ``update-scripts.ts`` through Node 24.
+
+    The module has no imports and contains only exported template strings, so Node can load it
+    directly with type stripping. Requiring a Java build or ``dist`` here would let the tests
+    drift from the real source.
+    """
+    node = shutil.which("node")
+    if node is None:
+        raise RuntimeError("Node 24 is required to import daemon/src/update-scripts.ts")
+    result = subprocess.run(
+        [
+            node,
+            "--input-type=module",
+            "-e",
+            (
+                "import { pathToFileURL } from 'node:url';"
+                "const module = await import(pathToFileURL(process.argv[1]));"
+                "process.stdout.write(module[process.argv[2]])"
+            ),
+            str(UPDATE_SCRIPTS_TS),
+            name,
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"cannot import {name} from {UPDATE_SCRIPTS_TS}: {result.stderr}")
+    return result.stdout
 
 
 def code_server_tar(path: Path, platform: str) -> None:
@@ -275,7 +311,7 @@ class ReleaseFixture:
             **(extra_env or {}),
         }
         return subprocess.run(
-            ["bash", str(self.script), *args],
+            [SYSTEM_BASH, str(self.script), *args],
             cwd=self.repo,
             env=env,
             capture_output=True,
@@ -284,6 +320,179 @@ class ReleaseFixture:
 
     def release_dir(self, platform: str) -> Path:
         return self.repo / "daemon" / "release" / platform
+
+
+class InstallFixture:
+    """A fake host for ``scripts/daemon/install.sh``.
+
+    The installer still performs its real ownership/permission checks, SHA256 verification,
+    ``--check-config`` preflight and atomic program publication; only the network and service
+    managers are local shims, so no real service is registered or touched.
+    """
+
+    def __init__(self, root: Path, host_os: str = "Linux", machine: str = "x86_64") -> None:
+        self.root = root
+        self.script = _scripts_dir() / "install.sh"
+        self.host_os = host_os
+        self.machine = machine
+        self.bindir = root / "bin"
+        self.http_dir = root / "http"
+        self.home = root / "home"
+        self.state = root / "state"
+        self.bindir.mkdir(parents=True, exist_ok=True)
+        self.http_dir.mkdir(parents=True, exist_ok=True)
+        self.home.mkdir(parents=True, exist_ok=True)
+        self.state.mkdir(parents=True, exist_ok=True)
+
+        write_executable(self.bindir / "curl", _curl_shim())
+        write_executable(self.bindir / "uname", self._uname_shim())
+        if host_os == "Linux":
+            write_executable(self.bindir / "systemctl", self._systemctl_shim())
+        else:
+            write_executable(self.bindir / "launchctl", self._launchctl_shim())
+            write_executable(self.bindir / "plutil", self._plutil_shim())
+
+        self.asset = f"kk-studio-daemon-{RELEASE_TAG}-{self.release_os}-{self.release_arch}.tar.gz"
+        archive = self.http_dir / self.asset
+        self._build_archive(archive)
+        write_text(self.http_dir / (self.asset + ".sha256"), f"{sha256_of(archive)}  {self.asset}\n", 0o644)
+
+    @property
+    def release_os(self) -> str:
+        return "linux" if self.host_os == "Linux" else "macos"
+
+    @property
+    def release_arch(self) -> str:
+        return "amd64" if self.machine in ("x86_64", "amd64") else "arm64"
+
+    def _build_archive(self, path: Path, platform: str | None = None) -> None:
+        work = self.root / "archive-src"
+        node_name = "node.exe" if (platform or f"{self.release_os}-{self.release_arch}").startswith("windows-") else "node"
+        write_executable(work / "runtime" / "code-server" / "lib" / node_name, _FAKE_NODE)
+        write_text(work / "runtime" / "code-server" / "out" / "node" / "entry.js", "// frozen entry\n", 0o644)
+        write_text(work / "main.js", _MAIN_JS, 0o644)
+        key = platform or f"{self.release_os}-{self.release_arch}"
+        write_text(
+            work / "runtime-manifest.json",
+            f'{{"schemaVersion":1,"daemonVersion":"{DAEMON_VERSION}","codeServer":{{"{key}":{{"url":"https://example.invalid"}}}}}}\n',
+            0o644,
+        )
+        with tarfile.open(path, "w:gz") as archive:
+            for item in sorted(work.rglob("*")):
+                archive.add(item, arcname=str(item.relative_to(work)))
+        shutil.rmtree(work)
+
+    def _uname_shim(self) -> str:
+        return f"""#!/bin/sh
+case "$1" in
+  -s) printf '{self.host_os}\\n' ;;
+  -m) printf '{self.machine}\\n' ;;
+  *) uname "$@" ;;
+esac
+"""
+
+    def _systemctl_shim(self) -> str:
+        return r"""#!/bin/sh
+state="$FAKE_SERVICE_STATE"
+case "$*" in
+  *"show-environment"*) exit 0 ;;
+  *"show --property=FragmentPath"*)
+    if [ -f "$state/unit.path" ]; then cat "$state/unit.path"; fi
+    exit 0
+    ;;
+  *"is-active --quiet"*)
+    [ -f "$state/active" ] && exit 0 || exit 3
+    ;;
+  *"restart"* | *"start"*)
+    : > "$state/active"
+    exit 0
+    ;;
+  *"stop"* | *"disable"*)
+    rm -f "$state/active"
+    exit 0
+    ;;
+  *"status"*)
+    [ -f "$state/active" ] && exit 0 || exit 3
+    ;;
+  *) exit 0 ;;
+esac
+"""
+
+    def _launchctl_shim(self) -> str:
+        return r"""#!/bin/sh
+state="$FAKE_SERVICE_STATE"
+case "$1" in
+  print)
+    last=""
+    for target in "$@"; do last="$target"; done
+    case "$last" in
+      gui/*/*) [ -f "$state/active" ] && exit 0 || exit 1 ;;
+      gui/*) exit 0 ;;
+      *) exit 0 ;;
+    esac
+    ;;
+  bootout)
+    rm -f "$state/active"
+    exit 0
+    ;;
+  bootstrap)
+    : > "$state/active"
+    exit 0
+    ;;
+  kickstart)
+    printf '%s\n' "$FAKE_KICKSTART_PID"
+    exit 0
+    ;;
+  *) exit 0 ;;
+esac
+"""
+
+    def _plutil_shim(self) -> str:
+        return r"""#!/bin/sh
+# plutil -lint <plist>: accept well-formed enough plists, reject garbage.
+if [ "$1" = "-lint" ]; then
+  if head -n 1 "$2" | grep -q '^<'; then exit 0; fi
+  exit 1
+fi
+exit 0
+"""
+
+    def make_inputs(self, config: str = '{"studioUrl":"https://studio.example.com"}', token: str = "token-value") -> tuple[Path, Path]:
+        directory = self.root / "inputs"
+        directory.mkdir(mode=0o700, exist_ok=True)
+        config_file = directory / "daemon.json"
+        token_file = directory / "daemon.token"
+        write_text(config_file, config, 0o600)
+        write_text(token_file, token, 0o600)
+        return config_file, token_file
+
+    def run(self, *args: str, extra_env: dict | None = None, record_service: bool = True) -> subprocess.CompletedProcess:
+        env = {
+            **os.environ,
+            "PATH": f"{self.bindir}:{os.environ['PATH']}",
+            "HOME": str(self.home),
+            "FAKE_RELEASE_BASE": RELEASE_BASE,
+            "FAKE_TAG": RELEASE_TAG,
+            "FAKE_HTTP_DIR": str(self.http_dir),
+            "FAKE_SERVICE_STATE": str(self.state),
+            "FAKE_KICKSTART_PID": str(os.getpid()),
+            "DAEMON_VERIFY_TIMEOUT_SECONDS": "1",
+            "DAEMON_VERIFY_STABLE_SECONDS": "0",
+            "TMPDIR": str(self.root / "tmp"),
+            **(extra_env or {}),
+        }
+        (self.root / "tmp").mkdir(mode=0o700, exist_ok=True)
+        return subprocess.run(
+            [SYSTEM_BASH, str(self.script), *args],
+            cwd=self.root,
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+
+    @property
+    def install_root(self) -> Path:
+        return self.home / ".kk-studio"
 
 
 class TempDirTestCase(unittest.TestCase):
