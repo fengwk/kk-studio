@@ -64,7 +64,7 @@ REQUIRED_ENTRIES=(
   "fun/fengwk/kkstudio/harness/daemon/DaemonMain.class"
   "okhttp3/OkHttpClient.class"
   "org/eclipse/jgit/ignore/FastIgnoreRule.class"
-  "com/fasterxml/jackson/databind/ObjectMapper.class"
+  "tools/jackson/databind/ObjectMapper.class"
   "META-INF/THIRD_PARTY_NOTICES"
 )
 

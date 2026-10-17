@@ -71,7 +71,7 @@ REQUIRED_JAR_ENTRIES = (
     "fun/fengwk/kkstudio/harness/daemon/DaemonMain.class",
     "okhttp3/OkHttpClient.class",
     "org/eclipse/jgit/ignore/FastIgnoreRule.class",
-    "com/fasterxml/jackson/databind/ObjectMapper.class",
+    "tools/jackson/databind/ObjectMapper.class",
     "META-INF/THIRD_PARTY_NOTICES",
 )
 DAEMON_MAIN_CLASS = "fun.fengwk.kkstudio.harness.daemon.DaemonMain"
@@ -288,6 +288,20 @@ class TestDaemonReleaseStaging(unittest.TestCase):
             JDK_HOME, self.root / "thin" / "kk-studio-daemon.jar", entries=()
         )
         self.assert_jar_is_rejected(thin, "missing a top-level entry")
+
+    def test_jar_with_only_jackson_2_is_rejected(self):
+        """A legacy mapper must not satisfy the current Jackson 3 runtime contract."""
+        legacy = write_fixture_jar(
+            JDK_HOME,
+            self.root / "legacy" / "kk-studio-daemon.jar",
+            entries=tuple(
+                "com/fasterxml/jackson/databind/ObjectMapper.class"
+                if entry == "tools/jackson/databind/ObjectMapper.class"
+                else entry
+                for entry in REQUIRED_JAR_ENTRIES
+            ),
+        )
+        self.assert_jar_is_rejected(legacy, "missing a top-level entry")
 
     def test_jar_with_nested_dependency_layout_is_rejected(self):
         """Spring Boot 布局把依赖放在 BOOT-INF/lib，因此归档根校验必须失败。"""
