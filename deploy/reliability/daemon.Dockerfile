@@ -104,8 +104,8 @@ RUN set -eux; \
       bash ca-certificates git libstdc++6; \
     apt-get clean; \
     rm -rf /var/lib/apt/lists/*; \
-    groupadd --gid 10001 kkdaemon; \
-    useradd --uid 10001 \
+    /usr/sbin/groupadd --gid 10001 kkdaemon; \
+    /usr/sbin/useradd --uid 10001 \
             --gid kkdaemon \
             --home-dir /home/kkdaemon \
             --create-home \
