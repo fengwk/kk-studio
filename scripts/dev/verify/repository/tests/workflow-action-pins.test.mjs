@@ -26,10 +26,13 @@ function repositoryRoot() {
 const REPOSITORY_ROOT = repositoryRoot()
 
 const WORKFLOWS = [
+  '.github/workflows/daemon-ci.yml',
   '.github/workflows/daemon-release.yml',
   '.github/workflows/docker-publish.yml',
-  '.github/workflows/process-scope.yml',
 ]
+
+/** 本地可复用工作流（`uses: ./.github/workflows/...`）不是第三方 action，不参与 SHA 固定。 */
+const LOCAL_REUSABLE_WORKFLOW = /^\.\/\.github\/workflows\/[A-Za-z0-9._-]+\.ya?ml$/u
 
 /**
  * 第三方 GitHub Action 的唯一事实源：每个 major tag 固定到它当前解析出的完整 commit SHA，
@@ -66,6 +69,10 @@ test('test intent: every third-party GitHub Action is pinned to a verified commi
     )
 
     for (const [, reference, versionComment] of references) {
+      // 本地可复用工作流不是第三方 action：它解析为仓库内文件，不参与 SHA 固定。
+      if (LOCAL_REUSABLE_WORKFLOW.test(reference)) {
+        continue
+      }
       const separator = reference.lastIndexOf('@')
       assert.ok(separator > 0, `${relativePath}: ${reference} must be <owner>/<repo>@<ref>`)
       const action = reference.slice(0, separator)

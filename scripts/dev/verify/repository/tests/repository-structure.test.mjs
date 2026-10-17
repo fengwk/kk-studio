@@ -63,6 +63,12 @@ function createRepositoryMirror() {
   }
   cpSync(path.join(REPOSITORY_ROOT, 'harness'), path.join(mirrorRoot, 'harness'), copyOptions)
   cpSync(path.join(REPOSITORY_ROOT, 'docs'), path.join(mirrorRoot, 'docs'), copyOptions)
+  // 目标图：Java Daemon 模块已经退役，只保留 Node Daemon 产品；mirror 据此模拟合并后的仓库，
+  // 使 structure/docs 守卫的逻辑可以独立于“父切片尚未删除 Java 模块”的过渡状态被验证。
+  rmSync(path.join(mirrorRoot, 'harness', 'daemon'), { recursive: true, force: true })
+  const harnessPomPath = path.join(mirrorRoot, 'harness', 'pom.xml')
+  const harnessPom = readFileSync(harnessPomPath, 'utf8')
+  writeFileSync(harnessPomPath, harnessPom.replace(/ *<module>daemon<\/module>\n/u, ''))
 
   return mirrorRoot
 }
@@ -118,7 +124,6 @@ test('repository structure guard verifies root and harness POM module lists', ()
     'contributor-api',
     'builtin',
     'infra',
-    'daemon',
   ])
 })
 
@@ -653,16 +658,6 @@ const CORE_STATE_ENUMS = [
     ],
   },
   {
-    path: 'harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/DaemonRuntimeState.java',
-    enumName: 'DaemonRuntimeState',
-    constants: ['STOPPED', 'CONNECTING', 'READY', 'DISCONNECTED', 'FAILED'],
-  },
-  {
-    path: 'harness/daemon/src/main/java/fun/fengwk/kkstudio/harness/daemon/journal/DaemonInvocationState.java',
-    enumName: 'DaemonInvocationState',
-    constants: ['RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED'],
-  },
-  {
     path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ModelExecution.java',
     enumName: 'PendingKind',
     constants: ['EVENT', 'SUCCEEDED', 'FAILED', 'UNKNOWN'],
@@ -1044,7 +1039,6 @@ test('opencli plugin must not depend on host implementation modules', () => {
     'kk-studio-harness-environment-server',
     'kk-studio-harness-builtin',
     'kk-studio-harness-infra',
-    'kk-studio-harness-daemon',
     'kk-studio-project',
     'kk-studio-canvas-infra',
   ]

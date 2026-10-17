@@ -38,12 +38,12 @@ const moduleDocuments = [
   'canvas-core.md',
   'canvas-infra.md',
   'canvas-plugin-api.md',
+  'daemon.md',
   'frontend-design-language.md',
   'frontend.md',
   'harness-builtin.md',
   'harness-common.md',
   'harness-contributor-api.md',
-  'harness-daemon.md',
   'harness-environment.md',
   'harness-environment-server.md',
   'harness-infra.md',
@@ -490,7 +490,6 @@ function checkRepositoryStructure() {
     'contributor-api',
     'builtin',
     'infra',
-    'daemon',
   ]
   const harnessRoot = path.join(repositoryRoot, 'harness')
   if (existsSync(harnessRoot)) {
@@ -602,7 +601,6 @@ const harnessProductionModules = [
   'builtin',
   'environment',
   'environment-server',
-  'daemon',
   'runtime',
   'provider',
   'infra',
@@ -773,7 +771,6 @@ function checkPluginsDependencyGuards() {
       'kk-studio-harness-environment-server',
       'kk-studio-harness-builtin',
       'kk-studio-harness-infra',
-      'kk-studio-harness-daemon',
       'kk-studio-project',
       'kk-studio-canvas-infra',
     ])
