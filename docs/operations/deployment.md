@@ -151,10 +151,6 @@ Flyway 校验失败时停止切换并查明差异；修改 `flyway_schema_histor
 会破坏校验依据。有数据的数据库不能重放 V1。需要空库时走独立的[共享数据库重建](development-and-testing.md#共享数据库重建)，
 它通过产品配置导出、数据库备份与重建、当前 Schema 初始化和产品导入恢复配置，不是自动迁移。
 
-停留在已发布 DEV / MAIN 基线、DDL 与当前 V1 不一致的旧部署既不能复用数据面，也不属于重建路径：
-由操作员在停机窗口按[离线数据库升级](offline-upgrade.md)依次执行 prepare、dry-run 与 apply，
-把旧库业务数据转换进一个新的空 V1 数据库，确认结果后再切换 App 与 Daemon。
-
 ## 恢复与重建
 
 恢复前停止所有 App/Worker、preview 写入和 Daemon，等待在途操作收敛。
