@@ -11,7 +11,7 @@ Environment 资源、daemon envelope scope、分支执行路由与 Harness Work 
 ## 原子能力目录
 
 [`EnvironmentCapabilityCatalog`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityCatalog.java)
-的 `VERSION = "2"`，它既是 catalog 版本（HELLO 的 `capabilityCatalogVersion` 必须
+的 `VERSION = "3"`，它既是 catalog 版本（HELLO 的 `capabilityCatalogVersion` 必须
 相等），也是全部 descriptor 的 capability 版本。
 [`EnvironmentCapabilityDescriptor`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityDescriptor.java)
 只有四个契约属性（INVOKE wire 上的 `capabilityId` / `capabilityVersion` 就是前两项）：
@@ -20,13 +20,14 @@ Environment 资源、daemon envelope scope、分支执行路由与 Harness Work 
 id / version / inputSchema / defaultTimeout
 ```
 
-目录按固定 canonical 顺序排列，共 10 项：
+目录按固定 canonical 顺序排列，共 11 项：
 
 | capabilityId | 默认超时 | `workdir` | 模型映射 |
 | --- | --- | --- | --- |
 | `fs.read` | 1 分钟 | 无 | `read` |
 | `fs.write` | 1 分钟 | 无 | `write` |
 | `fs.edit` | 1 分钟 | 无 | `edit` |
+| `fs.edit.preview` | 1 分钟 | 无 | 内部只读审查 |
 | `process.exec` | 5 分钟 | 必填 | `bash` |
 | `fs.grep` | 1 分钟 | 无 | `grep` |
 | `fs.find` | 1 分钟 | 无 | `find` |
@@ -35,7 +36,7 @@ id / version / inputSchema / defaultTimeout
 | `lsp.java-decompile` | 2 分钟 | 无 | `lsp_java_decompile` |
 | `skill.sync` | 不设总时限 | 无 | 内部控制面 |
 
-`skill.sync` 由 Platform 内部调用，其余 9 项由 Contributor 映射为模型工具。
+`skill.sync` 与 `fs.edit.preview` 由内部调用，不映射为模型工具；其余 9 项由 Contributor 映射为模型工具。
 [`EnvironmentCapabilityIds`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityIds.java)
 固化标识；Contributor 的 visibility 决定模型选择面。
 
@@ -43,7 +44,7 @@ capability 身份是 [`EnvironmentCapabilityId`](../../harness/environment/src/m
 的 canonical 形式：`[a-z0-9]+(?:[.-][a-z0-9]+)*`，最长 128 字符。
 
 各能力的 arguments schema 是冻结的 classpath 资源。只有 `process.exec` 要求每次显式提供绝对
-`workdir`；`fs.read`、`fs.write`、`fs.edit`、`fs.grep`、`fs.find` 与三个 `lsp.*` 能力的本地 `path`
+`workdir`；`fs.read`、`fs.write`、`fs.edit`、`fs.edit.preview`、`fs.grep`、`fs.find` 与三个 `lsp.*` 能力的本地 `path`
 必须是绝对路径，相对路径直接拒绝，且不接受 `workdir`。反编译 `target` 接受绝对 class 路径、`file:` 或 `jdt:` URI；
 `skill.sync` 不接受 `workdir`。`process.exec` 的 `workdir` 必须是目标 Daemon 文件系统上的绝对现存目录，
 绝不回退到 cwd、HOME、Environment 根或任何会话默认值。
@@ -97,7 +98,7 @@ default Duration terminationGrace() { return Duration.ZERO; }
 
 ## daemon wire 协议会话与消息流
 
-[`DaemonProtocol.VERSION`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonProtocol.java) 固定为 `3`，消息集合为：
+[`DaemonProtocol.VERSION`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonProtocol.java) 固定为 `4`，消息集合为：
 
 ```text
 HELLO / WELCOME / READY / HEARTBEAT
@@ -105,6 +106,7 @@ INVOKE / STARTED / PROGRESS / COMPLETED / FAILED
 CANCEL / CANCELLED / ERROR
 RESOURCE_UPLOAD_REQUEST / RESOURCE_UPLOAD_TICKET / RESOURCE_UPLOAD_COMMIT
 TEMPORARY_RESOURCE_POLICY / UPDATE / UPDATE_RESULT
+IDE_COMMAND / IDE_RESULT
 ```
 
 [`DaemonEnvelope`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonEnvelope.java) 的固定字段为：
@@ -113,14 +115,14 @@ TEMPORARY_RESOURCE_POLICY / UPDATE / UPDATE_RESULT
 protocolVersion / messageType / environmentId / invocationId? / payload
 ```
 
-`environmentId` 是可空 scope：`HELLO` 在认证前不知道目标 Environment，必须为 null；`WELCOME`、`READY`、`HEARTBEAT` 与全部调用消息由已绑定连接发出，必须非空；`ERROR` 在握手失败时可能没有绑定 scope。除 `HELLO`、`WELCOME`、`READY`、`HEARTBEAT`、`ERROR`、`TEMPORARY_RESOURCE_POLICY` 外的全部消息都必须携带非空的 `invocationId`；`TEMPORARY_RESOURCE_POLICY` 由已绑定连接发出，只携带非空 `environmentId`，`invocationId` 为 null。资源上传控制消息也以 `invocationId` 关联调用，`transferId` 只存在于 payload。`payload` 必须是 JSON 对象。
+`environmentId` 是可空 scope：`HELLO` 在认证前不知道目标 Environment，必须为 null；`WELCOME`、`READY`、`HEARTBEAT`、`IDE_COMMAND`、`IDE_RESULT` 与全部调用消息由已绑定连接发出，必须非空；`ERROR` 在握手失败时可能没有绑定 scope。除 `HELLO`、`WELCOME`、`READY`、`HEARTBEAT`、`ERROR`、`TEMPORARY_RESOURCE_POLICY` 外的全部消息都必须携带非空的 `invocationId`（IDE 消息携带 IDE 请求 UUID）；`TEMPORARY_RESOURCE_POLICY` 由已绑定连接发出，只携带非空 `environmentId`，`invocationId` 为 null。资源上传控制消息也以 `invocationId` 关联调用，`transferId` 只存在于 payload。`payload` 必须是 JSON 对象。
 
 重连去重以 invocationId 与 Daemon journal 关联消息，各调用沿自己的 STARTED/PROGRESS/终态推进。[`DaemonEnvelopeCodec`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonEnvelopeCodec.java) 严格拒绝未知字段、重复键、尾随字符、非 canonical scope 和错误 protocolVersion。同实例恢复的进程生命周期限制见下文。
 
 握手与调用时序：
 
 ```text
-Daemon -> HELLO(protocolVersion=3, registrationToken, capabilityCatalogVersion=2, daemonVersion, daemonInstanceId)
+Daemon -> HELLO(protocolVersion=4, registrationToken, capabilityCatalogVersion=3, daemonVersion, daemonInstanceId)
 Gateway -> WELCOME(environmentId, name, maxResourceBytes, temporaryResourceTtlSeconds, temporaryResourceCleanupIntervalSeconds)
 Daemon -> READY(version=5, daemonVersion, environment)
 Daemon -> HEARTBEAT*
@@ -136,6 +138,9 @@ Daemon -> COMPLETED | FAILED
 
 Gateway -> CANCEL
 Daemon -> CANCELLED | 已冻结的终态重放
+
+Gateway -> IDE_COMMAND
+Daemon -> IDE_RESULT
 ```
 
 `WELCOME` payload 携带认证结果 `environmentId`、展示用 `name`、本连接的资源字节预算 `maxResourceBytes` 与临时资源 `temporaryResourceTtlSeconds` / `temporaryResourceCleanupIntervalSeconds`（缺失或非正数是协议错误）；Daemon 在收到它之前不接受任何 resource/binary 结果。TTL 或扫描间隔变化时 Gateway 在同一心跳通道推送 `TEMPORARY_RESOURCE_POLICY`，热更只作用于尚未回收的 workspace。
@@ -168,9 +173,17 @@ Skill 安装状态通过内部 `skill.sync` 调用结果报告，MCP 目录完�
 [`DaemonCapabilityInvokeCodec`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilityInvokeCodec.java)
 规定 INVOKE payload 固定包含 `capabilityId`、`capabilityVersion`、`arguments` 与
 `timeoutMillis`，全部必填，`arguments` 必须是 JSON 对象，`timeoutMillis` 必须是非负
-整数毫秒。INVOKE 外壳不携带目录字段；能力自己的 arguments 若含 `workdir`，其值必须是
+整数毫秒。对于 `fs.edit` 能力，payload 允许携带可选内部元数据 `expectedFile`（包含 `path`
+与 64 位小写 SHA-256 摘要文本 `sha256`）；非 `fs.edit` 携带 `expectedFile` 或形状非法直接拒绝。
+`expectedFile` 仅供宿主核对文件版本一致性，绝不修改模型传入的 `arguments`。
+INVOKE 外壳不携带目录字段；能力自己的 arguments 若含 `workdir`，其值必须是
 目标 Daemon 上的绝对目录。`timeoutMillis` 是 Platform 解析完成的唯一有效超时，`0`
 表示没有 execution deadline，Daemon 原样消费它。
+
+[`DaemonIdeCodec`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonIdeCodec.java)
+编解码 IDE 控制面消息：`IDE_COMMAND`（Server → Daemon）承载打开视图、切换工作区目录或建立数据流命令；
+`IDE_RESULT`（Daemon → Server）承载执行回执。消息严格由已绑定 Environment 连接发出，`invocationId`
+携带关联的 IDE 请求 UUID，但不进入 Agent journal。
 
 [`DaemonCapabilityResultCodec`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilityResultCodec.java) 编解码流式与终态结果：
 
@@ -242,7 +255,7 @@ harness-environment
 测试守卫：
 
 - [`EnvironmentIdTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/EnvironmentIdTest.java) 与 [`EnvironmentCapabilityIdTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityIdTest.java)：身份与 capability id 的 canonical 解析与拒绝规则。
-- [`EnvironmentCapabilityCatalogTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityCatalogTest.java)：10 项能力的固定顺序与版本、workdir schema 边界与模型/内部能力映射。
+- [`EnvironmentCapabilityCatalogTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityCatalogTest.java)：11 项能力的固定顺序与版本、workdir schema 边界与模型/内部能力映射。
 - [`EnvironmentCapabilityContractTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityContractTest.java) 与 [`EnvironmentCapabilityTransportTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityTransportTest.java)：请求归一化与 timeout 原样传递、结果体积边界、发送异常分类、事件顺序与终态唯一。
 - [`DaemonEnvelopeCodecTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonEnvelopeCodecTest.java)、[`DaemonEnvelopeTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonEnvelopeTest.java)：协议版本、scope 与 invocationId 规则、未知/重复/尾随字段拒绝。
 - [`DaemonCapabilitiesCodecTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/daemon/DaemonCapabilitiesCodecTest.java)：READY 只接受 `{version, environment}` wire 形状，未知字段、缺失字段与非法值都被拒绝。
