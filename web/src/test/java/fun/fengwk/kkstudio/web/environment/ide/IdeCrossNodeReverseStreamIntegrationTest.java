@@ -93,10 +93,6 @@ class IdeCrossNodeReverseStreamIntegrationTest extends WebPostgresTestSupport {
   @DynamicPropertySource
   static void clusterProperties(DynamicPropertyRegistry registry) {
     registry.add("kk-studio.cluster.secret", () -> SECRET);
-    registry.add(
-        "kk-studio.harness.ide-gateway.stream-url-template",
-        () -> "wss://studio-lb" + IdeGatewayProperties.STREAM_PATH);
-    registry.add("kk-studio.harness.ide.origin-template", () -> "https://{environmentId}.ide.test");
   }
 
   @LocalServerPort private int ownerPort;
@@ -146,10 +142,10 @@ class IdeCrossNodeReverseStreamIntegrationTest extends WebPostgresTestSupport {
               .newCall(
                   new Request.Builder()
                       .url(
-                          "http://"
-                              + ENVIRONMENT
-                              + ".ide.test:"
+                          "http://localhost:"
                               + ownerPort
+                              + "/environment-ide/"
+                              + ENVIRONMENT
                               + "/workspace/cross-node.txt")
                       .header("Cookie", cookieHeader(cookie))
                       .build())

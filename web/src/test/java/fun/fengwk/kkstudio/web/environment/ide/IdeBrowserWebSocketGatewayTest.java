@@ -20,7 +20,7 @@ import java.time.Clock;
 import java.time.Duration;
 
 /**
- * 浏览器 WS 握手的同源准入：必须精确匹配 IDE Origin，堵住同站其它子域/跨站脚本对 IDE 数据面的 WS 劫持。
+ * 浏览器 WS 握手的同源准入：必须精确匹配 Studio Origin，堵住同站其它子域/跨站脚本对 IDE 数据面的 WS 劫持。
  *
  * <p>拒绝路径不建立任何反向连接，因此在握手前即返回 HTTP 状态码。
  */
@@ -29,11 +29,10 @@ class IdeBrowserWebSocketGatewayTest {
   private static final EnvironmentId ENV =
       EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
 
-  private static final String IDE_HOST = ENV + ".ide.test";
+  private static final String STUDIO_HOST = "studio.test";
 
   private IdeBrowserWebSocketGateway gateway() {
     IdeGatewayProperties properties = new IdeGatewayProperties();
-    properties.setStreamUrlTemplate("wss://gateway.test" + IdeGatewayProperties.STREAM_PATH);
     IdeBrowserSessionRegistry sessions =
         new IdeBrowserSessionRegistry(new SecureRandom(), Clock.systemUTC(), Duration.ofHours(1));
     return new IdeBrowserWebSocketGateway(
@@ -48,8 +47,9 @@ class IdeBrowserWebSocketGatewayTest {
   }
 
   private static MockHttpServletRequest request() {
-    MockHttpServletRequest request = new MockHttpServletRequest("GET", "/ws");
-    request.setServerName(IDE_HOST);
+    MockHttpServletRequest request =
+        new MockHttpServletRequest("GET", "/environment-ide/" + ENV + "/ws");
+    request.setServerName(STUDIO_HOST);
     request.setScheme("http");
     request.setServerPort(80);
     return request;
@@ -65,7 +65,7 @@ class IdeBrowserWebSocketGatewayTest {
   @Test
   void rejectsHandshakeFromSiblingSubdomain() throws Exception {
     MockHttpServletRequest request = request();
-    request.addHeader("Origin", "http://evil." + IDE_HOST);
+    request.addHeader("Origin", "http://evil." + STUDIO_HOST);
     MockHttpServletResponse response = new MockHttpServletResponse();
     gateway().handleUpgrade(ENV, "/ws", request, response);
     assertEquals(403, response.getStatus());
@@ -74,7 +74,7 @@ class IdeBrowserWebSocketGatewayTest {
   @Test
   void rejectsHandshakeWithDifferentScheme() throws Exception {
     MockHttpServletRequest request = request();
-    request.addHeader("Origin", "https://" + IDE_HOST);
+    request.addHeader("Origin", "https://" + STUDIO_HOST);
     MockHttpServletResponse response = new MockHttpServletResponse();
     gateway().handleUpgrade(ENV, "/ws", request, response);
     assertEquals(403, response.getStatus());
@@ -83,7 +83,7 @@ class IdeBrowserWebSocketGatewayTest {
   @Test
   void rejectsHandshakeWithDifferentPort() throws Exception {
     MockHttpServletRequest request = request();
-    request.addHeader("Origin", "http://" + IDE_HOST + ":8080");
+    request.addHeader("Origin", "http://" + STUDIO_HOST + ":8080");
     MockHttpServletResponse response = new MockHttpServletResponse();
     gateway().handleUpgrade(ENV, "/ws", request, response);
     assertEquals(403, response.getStatus());
@@ -92,32 +92,20 @@ class IdeBrowserWebSocketGatewayTest {
   @Test
   void rejectsHandshakeWithCrossSiteSecFetchSite() throws Exception {
     MockHttpServletRequest request = request();
-    request.addHeader("Origin", "http://" + IDE_HOST);
+    request.addHeader("Origin", "http://" + STUDIO_HOST);
     request.addHeader("Sec-Fetch-Site", "cross-site");
     MockHttpServletResponse response = new MockHttpServletResponse();
     gateway().handleUpgrade(ENV, "/ws", request, response);
     assertEquals(403, response.getStatus());
   }
 
-  /** 未配置数据面时明确不可用，绝不回退。 */
+  /** 同源网关无需额外显式配置，但未持有有效浏览器会话时必须以 401 明确拒绝握手。 */
   @Test
-  void rejectsWhenGatewayNotConfigured() throws Exception {
-    IdeGatewayProperties properties = new IdeGatewayProperties();
-    IdeBrowserWebSocketGateway gateway =
-        new IdeBrowserWebSocketGateway(
-            mock(IdeCommandTransport.class),
-            new InMemoryIdeStreamTicketService(),
-            new IdeStreamPairingRegistry<>(),
-            properties,
-            new IdeBrowserSessionRegistry(
-                new SecureRandom(), Clock.systemUTC(), Duration.ofHours(1)),
-            mock(ClusterNodeRegistry.class),
-            mock(ClusterInternalClient.class),
-            new StandardWebSocketClient());
+  void rejectsHandshakeWithoutValidSession() throws Exception {
     MockHttpServletRequest request = request();
-    request.addHeader("Origin", "http://" + IDE_HOST);
+    request.addHeader("Origin", "http://" + STUDIO_HOST);
     MockHttpServletResponse response = new MockHttpServletResponse();
-    gateway.handleUpgrade(ENV, "/ws", request, response);
-    assertEquals(503, response.getStatus());
+    gateway().handleUpgrade(ENV, "/ws", request, response);
+    assertEquals(401, response.getStatus());
   }
 }

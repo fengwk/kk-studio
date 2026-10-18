@@ -19,8 +19,6 @@ import okio.ByteString;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.web.server.LocalServerPort;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
@@ -58,14 +56,6 @@ class IdeReverseStreamEndpointIntegrationTest extends WebPostgresTestSupport {
 
   private static final int BODY_BYTES = 20 * 1024 * 1024;
 
-  @DynamicPropertySource
-  static void ideGatewayProperties(DynamicPropertyRegistry registry) {
-    registry.add(
-        "kk-studio.harness.ide-gateway.stream-url-template",
-        () -> "wss://gateway.test" + IdeGatewayProperties.STREAM_PATH);
-    registry.add("kk-studio.harness.ide.origin-template", () -> "https://{environmentId}.ide.test");
-  }
-
   @LocalServerPort private int port;
 
   @MockitoBean private EnvironmentDaemonServer endpoint;
@@ -99,7 +89,12 @@ class IdeReverseStreamEndpointIntegrationTest extends WebPostgresTestSupport {
           browser
               .newCall(
                   new Request.Builder()
-                      .url("http://" + ENVIRONMENT + ".ide.test:" + port + "/workspace/file.txt")
+                      .url(
+                          "http://localhost:"
+                              + port
+                              + "/environment-ide/"
+                              + ENVIRONMENT
+                              + "/workspace/file.txt")
                       .header("Cookie", cookieHeader(cookie))
                       .build())
               .execute();

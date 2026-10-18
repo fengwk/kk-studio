@@ -170,6 +170,12 @@ public record IdeCommand(
     } catch (URISyntaxException error) {
       throw new IllegalArgumentException("streamUrl must be a valid absolute URI");
     }
+    if (value.startsWith("/") && !value.startsWith("//")) {
+      if (uri.getFragment() != null) {
+        throw new IllegalArgumentException("streamUrl must not contain a fragment");
+      }
+      return value;
+    }
     String scheme = uri.getScheme();
     if (scheme == null || !(scheme.equalsIgnoreCase("ws") || scheme.equalsIgnoreCase("wss"))) {
       throw new IllegalArgumentException("streamUrl scheme must be ws or wss");

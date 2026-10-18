@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.web.environment.ide;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
@@ -17,8 +16,6 @@ import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -26,7 +23,6 @@ import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.environment.ide.EnvironmentIdeService;
-import fun.fengwk.kkstudio.platform.environment.ide.IdeOriginProperties;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeOpenViewDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO;
@@ -34,7 +30,6 @@ import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
 import java.io.File;
 import java.io.IOException;
-import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
@@ -85,7 +80,6 @@ class IdeRealBrowserAcceptanceTest extends WebPostgresTestSupport {
   private static final String REGISTRATION_TOKEN = "ide-browser-acceptance-token";
   private static final String VIEW_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
   private static final String VIEW_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
-  private static final String BROWSER_SUFFIX = ".ide.browser.localhost";
   private static final String SCOPE_DIR_PREFIX = "kk-studio-daemon-process-scope-";
   private static final ObjectMapper OBJECT_MAPPER = JsonMapper.builder().build();
   private static final DateTimeFormatter STAMP = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss-SSS");
@@ -107,20 +101,12 @@ class IdeRealBrowserAcceptanceTest extends WebPostgresTestSupport {
           "closeViewB",
           "closeViewA");
 
-  @DynamicPropertySource
-  static void ideOriginTemplate(DynamicPropertyRegistry registry) {
-    // 启动期为端口无关模板以免上下文 fail-closed；真实端口在测试体内按 @LocalServerPort 覆盖到同一单例 bean。
-    registry.add(
-        "kk-studio.harness.ide.origin-template", () -> "http://{environmentId}" + BROWSER_SUFFIX);
-  }
-
   @LocalServerPort private int port;
 
   @Autowired private EnvironmentIdeService environmentIdeService;
   @Autowired private EnvironmentRegistry registry;
   @Autowired private JdbcTemplate jdbcTemplate;
   @Autowired private IdeGatewayProperties gatewayProperties;
-  @Autowired private IdeOriginProperties originProperties;
 
   private Path tempRoot;
   private Path workspaceDirectory;
@@ -174,12 +160,6 @@ class IdeRealBrowserAcceptanceTest extends WebPostgresTestSupport {
   @Timeout(value = 5, unit = TimeUnit.MINUTES)
   void drivesTwoRealViewsThroughRealDaemonAndBrowser() throws Exception {
     assumeLinuxPosix();
-    int realPort = port;
-    // Origin 必须携带真实端口：bootstrap entryUrl、303 Location、host-only cookie 与 WS Origin 都以它为准。
-    originProperties.setOriginTemplate("http://{environmentId}" + BROWSER_SUFFIX + ":" + realPort);
-    gatewayProperties.setStreamUrlTemplate(
-        "ws://localhost:" + realPort + IdeGatewayProperties.STREAM_PATH);
-
     tempRoot = Files.createTempDirectory("kk-ide-browser-acceptance-");
     Files.setPosixFilePermissions(tempRoot, PosixFilePermissions.fromString("rwx------"));
     // 私有临时目录承载 Daemon/Playwright 的 native scope，Java 只扫描自己这个目录，
@@ -571,25 +551,24 @@ class IdeRealBrowserAcceptanceTest extends WebPostgresTestSupport {
         value.path("embedded").asBoolean(false),
         step + " must prove the workbench was driven inside a real iframe: " + value);
     assertEquals(
-        "http",
+        "browser-fixture",
         value.path("parentTransport").asText(""),
-        step + " parent harness must be served over real HTTP, not a route: " + value);
+        step + " parent harness must be served as same-origin browser fixture: " + value);
     String parentOrigin = value.path("parentOrigin").asText("");
-    URI parent = URI.create(parentOrigin);
-    assertEquals("http", parent.getScheme(), step + " parent scheme must be http: " + value);
     assertEquals(
-        "studio.browser.localhost",
-        parent.getHost(),
-        step + " parent host must be the Studio host: " + value);
-    assertTrue(
-        parent.getPort() > 0, step + " parent must expose a real bound positive port: " + value);
+        "http://localhost:" + port,
+        parentOrigin,
+        step + " parent origin must be Studio host: " + value);
     String ideOrigin = value.path("ideOrigin").asText("");
     assertEquals(
-        "http://" + ENVIRONMENT + BROWSER_SUFFIX + ":" + port,
+        "http://localhost:" + port,
         ideOrigin,
-        step + " IDE Origin must be the exact real backend Origin: " + value);
-    assertNotEquals(
-        parentOrigin, ideOrigin, step + " must be cross-Origin (parent != IDE): " + value);
+        step + " IDE Origin must be the same Studio Origin: " + value);
+    assertEquals(parentOrigin, ideOrigin, step + " parent and IDE must be same-origin: " + value);
+    String frameUrl = value.path("frameUrl").asText("");
+    assertTrue(
+        frameUrl.contains("/environment-ide/" + ENVIRONMENT),
+        step + " iframe must be routed under /environment-ide/{id}: " + frameUrl);
   }
 
   private long readTerminalPid(String name, String expectedViewId) throws IOException {
