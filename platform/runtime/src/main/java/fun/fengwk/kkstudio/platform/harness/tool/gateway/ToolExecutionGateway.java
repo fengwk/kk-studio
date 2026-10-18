@@ -113,9 +113,9 @@ public final class ToolExecutionGateway implements ToolGateway {
           ExecutionFact.NOT_EXECUTED,
           "Request approval or adjust the tool permission policy");
 
-  /** 冻结定义与当前 catalog 不一致时的确定性下一步：模型无法原地修复，只能以新冻结重开。 */
+  /** 冻结定义与当前 catalog 不一致时的确定性下一步：下一轮按当前目录重新冻结工具定义。 */
   private static final String DEFINITION_MISMATCH_NEXT_ACTION =
-      "Start a new thread so the frozen tool definition is re-frozen against the current catalog";
+      "Call the tool again; the next turn uses its current definition";
 
   /** 确定性拒绝的下一步：同一调用在修复前会得到同样结果，不构成自动重试建议。 */
   private static final String DETERMINISTIC_REJECTION_NEXT_ACTION =

@@ -417,13 +417,6 @@ public class SystemSettingsCodec {
     return dto;
   }
 
-  private static boolean requiredBoolean(Boolean value, String field) {
-    if (value == null) {
-      throw new IllegalArgumentException(field + " is required");
-    }
-    return value;
-  }
-
   private static long requiredMillis(Long value, String field) {
     if (value == null) {
       throw new IllegalArgumentException(field + " is required");

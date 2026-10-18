@@ -1,5 +1,5 @@
 /**
- * 七表 Harness Runtime durable protocol、lossy Work wake hints 与 realtime notification overlay 的
+ * Harness Runtime durable protocol、lossy Work wake hints 与 realtime notification overlay 的
  * PostgreSQL 适配。
  *
  * <p>Store 只实现 {@link HarnessStore} typed primitives，不承载用例逻辑。事务模型具备严格的单线程约束、首个数据库故障 poisoning 防护、

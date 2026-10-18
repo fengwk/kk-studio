@@ -27,8 +27,8 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * 最终 11 类 history Entry payload 的严格、确定性 JSON codec：{@link RootPayload} / {@link TurnStartPayload} /
- * {@link MessagePayload} / {@link CustomEntryPayload} / {@link ModelAttemptFailurePayload} / {@link
+ * history Entry payload 的严格、确定性 JSON codec：{@link RootPayload} / {@link TurnStartPayload} / {@link
+ * MessagePayload} / {@link CustomEntryPayload} / {@link ModelAttemptFailurePayload} / {@link
  * CustomMessagePayload} / {@link AssistantErrorPayload} / {@link AssistantAbortedPayload} / {@link
  * CompactionPayload} / {@link TurnEndPayload} / {@link SettingsPayload}。直接对应 {@link EntryType}；其它
  * {@link EntryPayload} 实现显式拒绝。
@@ -100,7 +100,7 @@ public final class HistoryEntryPayloadJsonCodec {
 
   public HistoryEntryPayloadJsonCodec() {}
 
-  /** 把 {@link EntryPayload} 编码为 canonical JSON 文本；仅支持最终 11 类 history payload，其它实现显式拒绝。 */
+  /** 把 {@link EntryPayload} 编码为 canonical JSON 文本；覆盖全部 sealed payload。 */
   public String encode(EntryPayload payload) {
     Objects.requireNonNull(payload, "payload");
     return write(encodeNode(payload));
