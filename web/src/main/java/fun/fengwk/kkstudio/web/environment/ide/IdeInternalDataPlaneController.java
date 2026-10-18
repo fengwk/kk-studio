@@ -17,7 +17,6 @@ import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthentic
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthenticationException;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalPaths;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
-import fun.fengwk.kkstudio.platform.environment.ide.IdeOriginProperties;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.web.environment.cluster.ClusterInternalRequests;
 
@@ -36,19 +35,18 @@ import java.util.Map;
 @RestController
 public final class IdeInternalDataPlaneController {
 
+  private static final String BOOTSTRAP_PATH = "/__ide/bootstrap";
+
   private final ClusterInternalAuthentication authentication;
   private final ClusterNodeRegistry clusterNodeRegistry;
-  private final IdeOriginProperties originProperties;
   private final IdeGatewayDataPlane dataPlane;
 
   public IdeInternalDataPlaneController(
       ClusterInternalAuthentication authentication,
       ClusterNodeRegistry clusterNodeRegistry,
-      IdeOriginProperties originProperties,
       IdeGatewayDataPlane dataPlane) {
     this.authentication = authentication;
     this.clusterNodeRegistry = clusterNodeRegistry;
-    this.originProperties = originProperties;
     this.dataPlane = dataPlane;
   }
 
@@ -87,8 +85,7 @@ public final class IdeInternalDataPlaneController {
   private boolean isBootstrapPath(String rawPathAndQuery) {
     int question = rawPathAndQuery.indexOf('?');
     String path = question < 0 ? rawPathAndQuery : rawPathAndQuery.substring(0, question);
-    String bootstrapPath = originProperties.getBootstrapPath();
-    return bootstrapPath != null && !bootstrapPath.isBlank() && bootstrapPath.equals(path);
+    return BOOTSTRAP_PATH.equals(path);
   }
 
   /** 原始 path 必须存在；缺失即 fail-closed（认证通过也不放行）。 */

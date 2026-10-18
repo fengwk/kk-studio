@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.web.environment.ide;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
@@ -17,8 +16,6 @@ import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -26,7 +23,6 @@ import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.environment.ide.EnvironmentIdeService;
-import fun.fengwk.kkstudio.platform.environment.ide.IdeOriginProperties;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeOpenViewDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO;
@@ -34,7 +30,6 @@ import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
 import java.io.File;
 import java.io.IOException;
-import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
@@ -66,14 +61,13 @@ import java.util.stream.Stream;
  * PostgreSQL 容器 之前即被跳过。
  *
  * <p>链路全部真实、无 mock：Daemon 以真实 {@code node dist/main.js --config <private>} 子进程连接真实 Daemon WebSocket
- * 端点 （HELLO/WELCOME/READY）；视图由真实 {@code EnvironmentIdeService.OPEN_VIEW} 铸造一次性 bootstrap 入口；每个视图由一个
- * Studio 父页面（{@code studio.browser.localhost}，与 IDE host 同 site 但不同 Origin）按生产 {@code
- * IdeOverlayPanel} 的 sandbox/allow 契约嵌入 iframe，浏览器经 {@code *.browser.localhost} host-resolver
- * 规则访问独立 IDE Origin，再经真实数据面到达 code-server；驱动走真实子 Frame，键盘发往所属父 Page。真实终端由 {@code FOCUS_TERMINAL}
- * 建立，并由浏览器 shell 回写真实 OS pid 供收敛断言。
+ * 端点 （HELLO/WELCOME/READY）；视图由真实 {@code EnvironmentIdeService.OPEN_VIEW} 铸造一次性 bootstrap 入口；每个视图由
+ * Studio 父页面按生产 {@code IdeOverlayPanel} 的 sandbox/allow 契约嵌入同源 iframe，浏览器经 {@code
+ * /environment-ide/{environmentId}/...} 路径访问同源 IDE 网关，再经真实数据面到达 code-server；驱动走真实子 Frame，键盘发往所属父
+ * Page。真实终端由 {@code FOCUS_TERMINAL} 建立，并由浏览器 shell 回写真实 OS pid 供收敛断言。
  *
- * <p>真实 random port 只有运行期可知：Origin 模板、gateway 反向流模板与 Daemon {@code studioUrl} 必须使用同一真实端口， 否则
- * bootstrap 的 Location、host-only cookie 与 WS Origin 会与入参 URL 不一致。本机仅验证 Linux + POSIX 权限模型；其它平台显式跳过。
+ * <p>真实 random port 只有运行期可知：Daemon {@code studioUrl} 必须使用同一真实端口， bootstrap 的 Location、Path 限定的
+ * cookie 与 WS 连接均工作在 Studio 同源路径下。本机仅验证 Linux + POSIX 权限模型；其它平台显式跳过。
  */
 @Slf4j
 @EnabledIfEnvironmentVariable(named = "KK_STUDIO_IDE_ACCEPTANCE_DIR", matches = ".+")
@@ -85,7 +79,6 @@ class IdeRealBrowserAcceptanceTest extends WebPostgresTestSupport {
   private static final String REGISTRATION_TOKEN = "ide-browser-acceptance-token";
   private static final String VIEW_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
   private static final String VIEW_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
-  private static final String BROWSER_SUFFIX = ".ide.browser.localhost";
   private static final String SCOPE_DIR_PREFIX = "kk-studio-daemon-process-scope-";
   private static final ObjectMapper OBJECT_MAPPER = JsonMapper.builder().build();
   private static final DateTimeFormatter STAMP = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss-SSS");
@@ -107,20 +100,12 @@ class IdeRealBrowserAcceptanceTest extends WebPostgresTestSupport {
           "closeViewB",
           "closeViewA");
 
-  @DynamicPropertySource
-  static void ideOriginTemplate(DynamicPropertyRegistry registry) {
-    // 启动期为端口无关模板以免上下文 fail-closed；真实端口在测试体内按 @LocalServerPort 覆盖到同一单例 bean。
-    registry.add(
-        "kk-studio.harness.ide.origin-template", () -> "http://{environmentId}" + BROWSER_SUFFIX);
-  }
-
   @LocalServerPort private int port;
 
   @Autowired private EnvironmentIdeService environmentIdeService;
   @Autowired private EnvironmentRegistry registry;
   @Autowired private JdbcTemplate jdbcTemplate;
   @Autowired private IdeGatewayProperties gatewayProperties;
-  @Autowired private IdeOriginProperties originProperties;
 
   private Path tempRoot;
   private Path workspaceDirectory;
@@ -174,12 +159,6 @@ class IdeRealBrowserAcceptanceTest extends WebPostgresTestSupport {
   @Timeout(value = 5, unit = TimeUnit.MINUTES)
   void drivesTwoRealViewsThroughRealDaemonAndBrowser() throws Exception {
     assumeLinuxPosix();
-    int realPort = port;
-    // Origin 必须携带真实端口：bootstrap entryUrl、303 Location、host-only cookie 与 WS Origin 都以它为准。
-    originProperties.setOriginTemplate("http://{environmentId}" + BROWSER_SUFFIX + ":" + realPort);
-    gatewayProperties.setStreamUrlTemplate(
-        "ws://localhost:" + realPort + IdeGatewayProperties.STREAM_PATH);
-
     tempRoot = Files.createTempDirectory("kk-ide-browser-acceptance-");
     Files.setPosixFilePermissions(tempRoot, PosixFilePermissions.fromString("rwx------"));
     // 私有临时目录承载 Daemon/Playwright 的 native scope，Java 只扫描自己这个目录，
@@ -230,7 +209,7 @@ class IdeRealBrowserAcceptanceTest extends WebPostgresTestSupport {
     for (String required : REQUIRED_STEPS) {
       assertStep(reportJson, required);
     }
-    // 两个 workbench 必须真的是跨 Origin iframe 内加载的真实 workbench；父 Origin 与 IDE Origin 不同可防止驱动退回顶层
+    // 两个 workbench 必须真的是同源 iframe 内加载的真实 workbench；通过校验嵌入状态与路径前缀防止驱动退回顶层
     // page.goto 的等价假通过。
     assertEmbeddedView(reportJson, "workbenchA");
     assertEmbeddedView(reportJson, "workbenchB");
@@ -562,8 +541,8 @@ class IdeRealBrowserAcceptanceTest extends WebPostgresTestSupport {
   }
 
   /**
-   * 断言某个 workbench 步骤确实驱动于跨 Origin iframe 内：报告值须明确 {@code embedded=true}、父 harness 由真实 HTTP （非
-   * route 构造）提供，且 IDE Origin 精确等于真实后端端口拼出的 Origin。退回顶层 {@code page.goto} 的驱动无法满足。
+   * 断言某个 workbench 步骤确实驱动于同源 iframe 内：报告值须明确 {@code embedded=true}、父 harness 为同源 browser-fixture
+   * 提供，且 IDE origin 与 parentOrigin 均精确等于当前 Studio 端口。退回顶层 {@code page.goto} 的驱动无法满足。
    */
   private void assertEmbeddedView(JsonNode report, String step) {
     JsonNode value = report.path("steps").path(step).path("value");
@@ -571,25 +550,24 @@ class IdeRealBrowserAcceptanceTest extends WebPostgresTestSupport {
         value.path("embedded").asBoolean(false),
         step + " must prove the workbench was driven inside a real iframe: " + value);
     assertEquals(
-        "http",
+        "browser-fixture",
         value.path("parentTransport").asText(""),
-        step + " parent harness must be served over real HTTP, not a route: " + value);
+        step + " parent harness must be served as same-origin browser fixture: " + value);
     String parentOrigin = value.path("parentOrigin").asText("");
-    URI parent = URI.create(parentOrigin);
-    assertEquals("http", parent.getScheme(), step + " parent scheme must be http: " + value);
     assertEquals(
-        "studio.browser.localhost",
-        parent.getHost(),
-        step + " parent host must be the Studio host: " + value);
-    assertTrue(
-        parent.getPort() > 0, step + " parent must expose a real bound positive port: " + value);
+        "http://localhost:" + port,
+        parentOrigin,
+        step + " parent origin must be Studio host: " + value);
     String ideOrigin = value.path("ideOrigin").asText("");
     assertEquals(
-        "http://" + ENVIRONMENT + BROWSER_SUFFIX + ":" + port,
+        "http://localhost:" + port,
         ideOrigin,
-        step + " IDE Origin must be the exact real backend Origin: " + value);
-    assertNotEquals(
-        parentOrigin, ideOrigin, step + " must be cross-Origin (parent != IDE): " + value);
+        step + " IDE origin must match Studio origin: " + value);
+    assertEquals(parentOrigin, ideOrigin, step + " parent and IDE must be same-origin: " + value);
+    String frameUrl = value.path("frameUrl").asText("");
+    assertTrue(
+        frameUrl.contains("/environment-ide/" + ENVIRONMENT),
+        step + " iframe must be routed under /environment-ide/{id}: " + frameUrl);
   }
 
   private long readTerminalPid(String name, String expectedViewId) throws IOException {

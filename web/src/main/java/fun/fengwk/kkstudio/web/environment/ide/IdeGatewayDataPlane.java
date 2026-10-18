@@ -46,7 +46,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * IDE 独立 Origin 的数据面：把浏览器 HTTP exchange 经一次性 ticket 与 Daemon 反向连接配对后双向转发。
+ * IDE 同源网关的数据面：把浏览器 HTTP exchange 经一次性 ticket 与 Daemon 反向连接配对后双向转发。
  *
  * <p>每个请求：解析 host-only 会话 cookie → 复核其绑定代际仍是当前 READY 代际 → 铸造一次性 stream ticket 并登记 pending 配对 → 通过
  * {@code OPEN_STREAM} 命令把 ticket + 受控 streamUrl 交给 Daemon → 等待反向连接后按 credit 双向转发请求体与响应。 请求/响应头都过滤
@@ -125,7 +125,7 @@ public final class IdeGatewayDataPlane {
   }
 
   /**
-   * 处理一个 IDE Origin 上的浏览器 HTTP exchange。
+   * 处理一个 IDE 网关路径上的浏览器 HTTP exchange。
    *
    * @param rawPathAndQuery 原始 path（含 query），直接转发给 Daemon 侧的 code-server
    */
@@ -161,10 +161,6 @@ public final class IdeGatewayDataPlane {
       throws IOException {
     Objects.requireNonNull(environmentId, "environmentId");
     Objects.requireNonNull(rawPathAndQuery, "rawPathAndQuery");
-    if (!properties.configured()) {
-      sendError(response, HttpServletResponse.SC_SERVICE_UNAVAILABLE);
-      return;
-    }
     if (requireOrigin && !IdeOriginPolicy.httpRequestAllowed(request)) {
       sendError(response, HttpServletResponse.SC_FORBIDDEN);
       return;
@@ -223,7 +219,11 @@ public final class IdeGatewayDataPlane {
       peer = pairing.awaitPeer();
       Exchange exchange =
           new Exchange(
-              response, peer, System.nanoTime() + properties.requireRequestTimeout().toNanos());
+              request,
+              response,
+              environmentId,
+              peer,
+              System.nanoTime() + properties.requireRequestTimeout().toNanos());
       exchange.run(request);
     } catch (IdeStreamPairingException error) {
       sendError(response, HttpServletResponse.SC_GATEWAY_TIMEOUT);
@@ -253,12 +253,17 @@ public final class IdeGatewayDataPlane {
   public void handleBootstrap(
       EnvironmentId environmentId, HttpServletRequest request, HttpServletResponse response)
       throws IOException {
+    handleBootstrap(environmentId, rawPathAndQuery(request), request, response);
+  }
+
+  public void handleBootstrap(
+      EnvironmentId environmentId,
+      String rawPathAndQuery,
+      HttpServletRequest request,
+      HttpServletResponse response)
+      throws IOException {
     Objects.requireNonNull(environmentId, "environmentId");
-    if (!properties.configured()) {
-      sendError(response, HttpServletResponse.SC_SERVICE_UNAVAILABLE);
-      return;
-    }
-    if (forwardRemote(environmentId, rawPathAndQuery(request), request, response)) {
+    if (forwardRemote(environmentId, rawPathAndQuery, request, response)) {
       return;
     }
     Optional<IdeBootstrapTicketService.Ticket> consumed =
@@ -281,11 +286,14 @@ public final class IdeGatewayDataPlane {
       sendError(response, HttpServletResponse.SC_GONE);
       return;
     }
+    String routeBase = routeBase(request, environmentId);
     StringBuilder cookie =
         new StringBuilder(properties.requireSessionCookieName())
             .append('=')
             .append(cookieValue)
-            .append("; Path=/; HttpOnly; SameSite=Strict");
+            .append("; Path=")
+            .append(routeBase)
+            .append("; HttpOnly; SameSite=Strict");
     if (request.isSecure()) {
       cookie.append("; Secure");
     }
@@ -293,7 +301,31 @@ public final class IdeGatewayDataPlane {
     response.setStatus(HttpServletResponse.SC_SEE_OTHER);
     response.setHeader(
         "Location",
-        "/?workspace=" + URLEncoder.encode(ticket.workspacePath(), StandardCharsets.UTF_8));
+        routeBase
+            + "?workspace="
+            + URLEncoder.encode(ticket.workspacePath(), StandardCharsets.UTF_8));
+  }
+
+  public static String routeBase(HttpServletRequest request, EnvironmentId environmentId) {
+    String contextPath = request.getContextPath();
+    if (contextPath == null || contextPath.isEmpty()) {
+      return "/environment-ide/" + environmentId + "/";
+    }
+    return contextPath.endsWith("/")
+        ? contextPath + "environment-ide/" + environmentId + "/"
+        : contextPath + "/environment-ide/" + environmentId + "/";
+  }
+
+  public static String rebaseLocation(
+      String location, HttpServletRequest request, EnvironmentId environmentId) {
+    if (location == null || location.isBlank()) {
+      return location;
+    }
+    if (location.startsWith("/") && !location.startsWith("//")) {
+      String base = routeBase(request, environmentId);
+      return base + location.substring(1);
+    }
+    return location;
   }
 
   /** 非 owner 节点把整个浏览器 exchange 单跳到 READY owner；本地 owner 或未配置集群时返回 false 走本地交付。 */
@@ -437,7 +469,9 @@ public final class IdeGatewayDataPlane {
   /** 单条 exchange 的转发状态：请求体发送与响应读取共用同一入站泵，保证 credit 与顺序一致。 */
   private final class Exchange {
 
+    private final HttpServletRequest request;
     private final HttpServletResponse response;
+    private final EnvironmentId environmentId;
     private final IdeStreamRelay relay;
     private final IdeStreamPeer peer;
     private final long deadlineNanos;
@@ -446,8 +480,15 @@ public final class IdeGatewayDataPlane {
     private boolean failed;
     private boolean closed;
 
-    private Exchange(HttpServletResponse response, IdeStreamPeer peer, long deadlineNanos) {
+    private Exchange(
+        HttpServletRequest request,
+        HttpServletResponse response,
+        EnvironmentId environmentId,
+        IdeStreamPeer peer,
+        long deadlineNanos) {
+      this.request = request;
       this.response = response;
+      this.environmentId = environmentId;
       this.peer = peer;
       this.deadlineNanos = deadlineNanos;
       this.relay =
@@ -603,7 +644,11 @@ public final class IdeGatewayDataPlane {
         if (isHopByHop(header.name()) || "content-length".equalsIgnoreCase(header.name())) {
           continue;
         }
-        response.addHeader(header.name(), header.value());
+        if ("location".equalsIgnoreCase(header.name())) {
+          response.addHeader(header.name(), rebaseLocation(header.value(), request, environmentId));
+        } else {
+          response.addHeader(header.name(), header.value());
+        }
       }
       responseStarted = true;
     }

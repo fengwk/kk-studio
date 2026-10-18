@@ -137,7 +137,6 @@ class IdeForwardedHeaderSanitizationTest {
 
   private static IdeGatewayProperties properties() {
     IdeGatewayProperties properties = new IdeGatewayProperties();
-    properties.setStreamUrlTemplate("wss://gateway.test/api/harness/environment-stream/v1");
     properties.setSessionCookieName(IDE_COOKIE);
     return properties;
   }
