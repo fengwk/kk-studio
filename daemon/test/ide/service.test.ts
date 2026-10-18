@@ -14,7 +14,7 @@ import type {
   ProcessSpec,
   ProcessSupervisor,
 } from '../../src/contracts.js'
-import { createIdeService } from '../../src/ide/service.js'
+import { createIdeService, resolveRelativeStream } from '../../src/ide/service.js'
 import { decodeBinaryFrame, decodeTextFrame } from '../../src/ide/wire.js'
 
 const cleanups: (() => Promise<void> | void)[] = []
@@ -624,7 +624,7 @@ describe('managed code-server IDE service', () => {
     await mkdir(directory, { recursive: true })
     await service.handle({ action: 'OPEN_VIEW', directory }, signal())
 
-    const streamUrl = `ws://127.0.0.1:${gatewayPort}/api/harness/environment-stream/v1/ticket-1`
+    const streamUrl = `/api/harness/environment-stream/v1/ticket-1`
     const reply = await service.handle(
       { action: 'OPEN_STREAM', streamUrl, ticket: 'ticket-1', mode: 'HTTP', method: 'GET', path: '/echo', headers: [] },
       signal(),
@@ -650,17 +650,17 @@ describe('managed code-server IDE service', () => {
       signal(),
     )
     expect(credentialed.ok).toBe(false)
-    expect(credentialed.message).toBe('streamUrl must not contain credentials')
+    expect(credentialed.message).toBe('streamUrl is invalid')
 
     // A traversal-looking path is not a stream endpoint.
     const traversal = await service.handle(
-      { ...base, streamUrl: 'ws://127.0.0.1:1/api/harness/environment-stream/v1..evil' },
+      { ...base, streamUrl: '/api/harness/environment-stream/v1..evil' },
       signal(),
     )
     expect(traversal.ok).toBe(false)
     expect(traversal.message).toBe('streamUrl is not a stream endpoint')
 
-    // The host may differ from the gateway, but the transport may not downgrade a secure gateway.
+    // Absolute URLs with wrong host are rejected.
     const secureConfig = { ...makeConfig(distribution, '127.0.0.1:1'), gatewayUri: 'wss://gateway.example.com/api/harness/environment-daemon/v1' }
     const secureService = await createIdeService(secureConfig, supervisor)
     cleanups.push(() => secureService.close())
@@ -669,7 +669,7 @@ describe('managed code-server IDE service', () => {
       signal(),
     )
     expect(downgraded.ok).toBe(false)
-    expect(downgraded.message).toBe('streamUrl must use a secure websocket endpoint')
+    expect(downgraded.message).toBe('streamUrl is invalid')
   })
 
   it('rejects an unsafe IDE path', async () => {
@@ -680,7 +680,7 @@ describe('managed code-server IDE service', () => {
     cleanups.push(() => service.close())
 
     const reply = await service.handle(
-      { action: 'OPEN_STREAM', streamUrl: 'ws://127.0.0.1:1/api/harness/environment-stream/v1/t', mode: 'HTTP', method: 'GET', path: 'http://evil', headers: [] },
+      { action: 'OPEN_STREAM', streamUrl: '/api/harness/environment-stream/v1/t', mode: 'HTTP', method: 'GET', path: 'http://evil', headers: [] },
       signal(),
     )
     expect(reply.ok).toBe(false)
@@ -776,7 +776,7 @@ describe('managed code-server IDE service', () => {
     cleanups.push(() => service.close())
 
     const mode = await service.handle(
-      { action: 'OPEN_STREAM', streamUrl: 'ws://127.0.0.1:1/api/harness/environment-stream/v1/t', mode: 'FTP' as never, path: '/' },
+      { action: 'OPEN_STREAM', streamUrl: '/api/harness/environment-stream/v1/t', mode: 'FTP' as never, path: '/' },
       signal(),
     )
     expect(mode.ok).toBe(false)
@@ -785,7 +785,7 @@ describe('managed code-server IDE service', () => {
     const headers = await service.handle(
       {
         action: 'OPEN_STREAM',
-        streamUrl: 'ws://127.0.0.1:1/api/harness/environment-stream/v1/t',
+        streamUrl: '/api/harness/environment-stream/v1/t',
         mode: 'HTTP',
         method: 'GET',
         path: '/',
@@ -821,12 +821,12 @@ describe('managed code-server IDE service', () => {
     cleanups.push(() => service.close())
 
     const base = { action: 'OPEN_STREAM' as const, mode: 'HTTP' as const, method: 'GET', path: '/' }
-    const stream = 'ws://127.0.0.1:1/api/harness/environment-stream/v1/t'
+    const stream = '/api/harness/environment-stream/v1/t'
     expect((await service.handle({ ...base, streamUrl: 'not a url' }, signal())).message).toBe('streamUrl is invalid')
     expect((await service.handle({ ...base, streamUrl: 'http://127.0.0.1:1/x' }, signal())).message).toBe(
-      'streamUrl must use a secure websocket endpoint',
+      'streamUrl is invalid',
     )
-    expect((await service.handle({ ...base, streamUrl: 'ws://127.0.0.1:1/other' }, signal())).message).toBe(
+    expect((await service.handle({ ...base, streamUrl: '/api/harness/environment-stream/v1/other..bad' }, signal())).message).toBe(
       'streamUrl is not a stream endpoint',
     )
     const tooMany = Array.from({ length: 129 }, (_value, index) => [`x${index}`, 'v'] as [string, string])
@@ -844,7 +844,7 @@ describe('managed code-server IDE service', () => {
     const attempted = await service.handle(
       {
         ...base,
-        streamUrl: 'ws://127.0.0.1:1/api/harness/environment-stream/v1/',
+        streamUrl: '/api/harness/environment-stream/v1/',
         ticket: 'tk',
         headers: [
           ['sec-websocket-protocol', 'vscode-remote'],
@@ -854,6 +854,57 @@ describe('managed code-server IDE service', () => {
       signal(),
     )
     expect(attempted.ok).toBe(false)
+  })
+
+  it('resolves relative stream url and validates tls, contextpath, wronghost, credential and fragment', () => {
+    const config = makeConfig('/dummy', 'gateway.example.com:8443')
+    config.gatewayUri = 'wss://gateway.example.com:8443/api/harness/environment-daemon/v1'
+
+    // validtls (wss)
+    const secureResolved = resolveRelativeStream(config, '/api/harness/environment-stream/v1/ticket-1?environment=env-uuid')
+    expect(secureResolved).toBe('wss://gateway.example.com:8443/api/harness/environment-stream/v1/ticket-1?environment=env-uuid')
+
+    // validtls (ws)
+    const plainConfig = { ...config, gatewayUri: 'ws://127.0.0.1:8080/api/harness/environment-daemon/v1' }
+    const plainResolved = resolveRelativeStream(plainConfig, '/api/harness/environment-stream/v1/ticket-1?environment=env-uuid')
+    expect(plainResolved).toBe('ws://127.0.0.1:8080/api/harness/environment-stream/v1/ticket-1?environment=env-uuid')
+
+    // 连接地址的部署前缀只保留一次；stream 命令不提供第二份网络权威。
+    const ctxConfig = {
+      ...config,
+      studioUrl: 'https://gateway.example.com:8443/studio/subpath',
+      gatewayUri: 'wss://gateway.example.com:8443/studio/subpath/api/harness/environment-daemon/v1',
+    }
+    const ctxResolved = resolveRelativeStream(ctxConfig, '/api/harness/environment-stream/v1/ticket-1?environment=env-uuid')
+    expect(ctxResolved).toBe('wss://gateway.example.com:8443/studio/subpath/api/harness/environment-stream/v1/ticket-1?environment=env-uuid')
+
+    // wronghost: off-origin absolute URL rejected
+    expect(() =>
+      resolveRelativeStream(config, 'ws://wrong-host.example.com/api/harness/environment-stream/v1/t'),
+    ).toThrow('streamUrl is invalid')
+
+    // credential: rejected
+    expect(() =>
+      resolveRelativeStream(config, 'ws://user:pass@gateway.example.com:8443/api/harness/environment-stream/v1/t'),
+    ).toThrow('streamUrl is invalid')
+    expect(() =>
+      resolveRelativeStream(config, '/api/harness/environment-stream/v1/t@user'),
+    ).toThrow('streamUrl is not a stream endpoint')
+
+    // fragment: rejected
+    expect(() =>
+      resolveRelativeStream(config, '/api/harness/environment-stream/v1/t#section'),
+    ).toThrow('streamUrl is not a stream endpoint')
+
+    // network path: rejected
+    expect(() =>
+      resolveRelativeStream(config, '//gateway.example.com/api/harness/environment-stream/v1/t'),
+    ).toThrow('streamUrl is invalid')
+
+    // ticket append
+    expect(resolveRelativeStream(config, '/api/harness/environment-stream/v1/', 'ticket-abc')).toBe(
+      'wss://gateway.example.com:8443/api/harness/environment-stream/v1/ticket-abc',
+    )
   })
 
   it('reports code-server startup and login failures', async () => {

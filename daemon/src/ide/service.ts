@@ -174,7 +174,7 @@ export async function createIdeService(config: DaemonConfig, processes: ProcessS
     if (command.streamUrl === undefined || command.path === undefined) {
       throw new IdeError('streamUrl and path are required')
     }
-    const streamUrl = resolveStreamUrl(config, command.streamUrl, command.ticket)
+    const streamUrl = resolveRelativeStream(config, command.streamUrl, command.ticket)
     let path: string
     try {
       path = validateIdePath(command.path)
@@ -239,32 +239,31 @@ export async function createIdeService(config: DaemonConfig, processes: ProcessS
   }
 }
 
-function resolveStreamUrl(config: DaemonConfig, streamUrl: string, ticket: string | undefined): string {
-  let url: URL
-  try {
-    url = new URL(streamUrl)
-  } catch {
+/** 只接受固定的根相对 stream 端点；网络权威与 TLS 只来自已有的控制连接配置。 */
+export function resolveRelativeStream(config: DaemonConfig, streamUrl: string, ticket?: string): string {
+  if (!streamUrl.startsWith('/') || streamUrl.startsWith('//') || /[\\\s]/.test(streamUrl)) {
     throw new IdeError('streamUrl is invalid')
   }
-  // The endpoint is issued by the authenticated control server and may point at a load
-  // balancer or the current owner node, so its host need not match the control gateway.
-  // The transport security must still match the gateway so the URL can never downgrade it.
-  const gatewayProtocol = new URL(config.gatewayUri).protocol
-  const secureGateway = gatewayProtocol === 'https:' || gatewayProtocol === 'wss:'
-  if (secureGateway ? url.protocol !== 'wss:' : url.protocol !== 'ws:' && url.protocol !== 'wss:') {
-    throw new IdeError('streamUrl must use a secure websocket endpoint')
-  }
-  // It must be a clean, credential-free stream path and never carry a registration token.
-  if (url.username.length > 0 || url.password.length > 0) {
-    throw new IdeError('streamUrl must not contain credentials')
-  }
-  if (!url.pathname.startsWith(STREAM_PATH_PREFIX) || url.pathname.includes('..') || url.hash.length > 0) {
+  const match = /^\/api\/harness\/environment-stream\/v1\/([A-Za-z0-9_-]*)(\?environment=[A-Za-z0-9-]+)?$/.exec(streamUrl)
+  if (!match) {
     throw new IdeError('streamUrl is not a stream endpoint')
   }
-  if (ticket !== undefined && ticket.length > 0 && !url.pathname.endsWith(`/${ticket}`)) {
-    url.pathname = `${url.pathname.replace(/\/$/, '')}/${encodeURIComponent(ticket)}`
+  const streamTicket = match[1] || ticket
+  if (!streamTicket || !/^[A-Za-z0-9_-]+$/.test(streamTicket) || (ticket && ticket !== streamTicket)) {
+    throw new IdeError('streamUrl ticket does not match')
   }
-  return url.toString()
+  const gateway = new URL(config.gatewayUri)
+  const endpoint = '/api/harness/environment-daemon/v1'
+  if (
+    !['ws:', 'wss:'].includes(gateway.protocol) || !gateway.pathname.endsWith(endpoint)
+    || gateway.username || gateway.password || gateway.search || gateway.hash
+  ) {
+    throw new IdeError('gatewayUri is invalid')
+  }
+  const contextPath = gateway.pathname.slice(0, -endpoint.length)
+  gateway.pathname = `${contextPath}${STREAM_PATH_PREFIX}${streamTicket}`
+  gateway.search = match[2] ?? ''
+  return gateway.toString()
 }
 
 function validateHeaders(headers: [string, string][]): [string, string][] {
