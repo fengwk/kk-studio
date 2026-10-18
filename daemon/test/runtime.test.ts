@@ -36,7 +36,7 @@ const welcomePayload = {
 }
 
 function invokePayload(capabilityId = 'fs.read', timeoutMillis = 0, args: Record<string, unknown> = {}): Record<string, unknown> {
-  return JSON.parse(encodeInvoke({ capabilityId, capabilityVersion: '2', arguments: args, timeoutMillis })) as Record<string, unknown>
+  return JSON.parse(encodeInvoke({ capabilityId, capabilityVersion: '3', arguments: args, timeoutMillis })) as Record<string, unknown>
 }
 
 function sent(transport: FakeTransport): Envelope[] {
@@ -101,7 +101,7 @@ describe('runtime handshake', () => {
     expect(hello).toBeDefined()
     expect(hello?.environmentId).toBeNull()
     expect(hello?.payload.protocolVersion).toBe(4)
-    expect(hello?.payload.capabilityCatalogVersion).toBe('2')
+    expect(hello?.payload.capabilityCatalogVersion).toBe('3')
     expect(hello?.payload.daemonVersion).toBe(DAEMON_VERSION)
     expect(hello?.payload.registrationToken).toBe('test-registration-token')
     expect(typeof hello?.payload.daemonInstanceId).toBe('string')

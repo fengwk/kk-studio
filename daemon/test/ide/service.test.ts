@@ -840,11 +840,11 @@ describe('managed code-server IDE service', () => {
       'invalid request headers',
     )
 
-    // A ticket is appended and a subprotocol is forwarded; the dead gateway fails safely.
+    // A complete ticket endpoint forwards its subprotocol; the dead gateway fails safely.
     const attempted = await service.handle(
       {
         ...base,
-        streamUrl: '/api/harness/environment-stream/v1/',
+        streamUrl: '/api/harness/environment-stream/v1/tk',
         ticket: 'tk',
         headers: [
           ['sec-websocket-protocol', 'vscode-remote'],
@@ -860,14 +860,15 @@ describe('managed code-server IDE service', () => {
     const config = makeConfig('/dummy', 'gateway.example.com:8443')
     config.gatewayUri = 'wss://gateway.example.com:8443/api/harness/environment-daemon/v1'
 
-    // validtls (wss)
-    const secureResolved = resolveRelativeStream(config, '/api/harness/environment-stream/v1/ticket-1?environment=env-uuid')
-    expect(secureResolved).toBe('wss://gateway.example.com:8443/api/harness/environment-stream/v1/ticket-1?environment=env-uuid')
+    const relativeStream = '/api/harness/environment-stream/v1/ticket-1?environment=11111111-2222-4333-8444-555555555555'
+    // TLS and authority come only from the authenticated control gateway.
+    const secureResolved = resolveRelativeStream(config, relativeStream, 'ticket-1')
+    expect(secureResolved).toBe(`wss://gateway.example.com:8443${relativeStream}`)
 
     // validtls (ws)
     const plainConfig = { ...config, gatewayUri: 'ws://127.0.0.1:8080/api/harness/environment-daemon/v1' }
-    const plainResolved = resolveRelativeStream(plainConfig, '/api/harness/environment-stream/v1/ticket-1?environment=env-uuid')
-    expect(plainResolved).toBe('ws://127.0.0.1:8080/api/harness/environment-stream/v1/ticket-1?environment=env-uuid')
+    const plainResolved = resolveRelativeStream(plainConfig, relativeStream)
+    expect(plainResolved).toBe(`ws://127.0.0.1:8080${relativeStream}`)
 
     // 连接地址的部署前缀只保留一次；stream 命令不提供第二份网络权威。
     const ctxConfig = {
@@ -875,8 +876,8 @@ describe('managed code-server IDE service', () => {
       studioUrl: 'https://gateway.example.com:8443/studio/subpath',
       gatewayUri: 'wss://gateway.example.com:8443/studio/subpath/api/harness/environment-daemon/v1',
     }
-    const ctxResolved = resolveRelativeStream(ctxConfig, '/api/harness/environment-stream/v1/ticket-1?environment=env-uuid')
-    expect(ctxResolved).toBe('wss://gateway.example.com:8443/studio/subpath/api/harness/environment-stream/v1/ticket-1?environment=env-uuid')
+    const ctxResolved = resolveRelativeStream(ctxConfig, relativeStream)
+    expect(ctxResolved).toBe(`wss://gateway.example.com:8443/studio/subpath${relativeStream}`)
 
     // wronghost: off-origin absolute URL rejected
     expect(() =>
@@ -901,10 +902,18 @@ describe('managed code-server IDE service', () => {
       resolveRelativeStream(config, '//gateway.example.com/api/harness/environment-stream/v1/t'),
     ).toThrow('streamUrl is invalid')
 
-    // ticket append
-    expect(resolveRelativeStream(config, '/api/harness/environment-stream/v1/', 'ticket-abc')).toBe(
-      'wss://gateway.example.com:8443/api/harness/environment-stream/v1/ticket-abc',
-    )
+    // A command cannot supply a second ticket authority or an incomplete endpoint.
+    expect(() => resolveRelativeStream(config, relativeStream, 'different-ticket'))
+      .toThrow('streamUrl ticket does not match')
+    for (const invalid of [
+      '/api/harness/environment-stream/v1/',
+      `${relativeStream}&environment=11111111-2222-4333-8444-555555555555`,
+      relativeStream.replace('11111111-2222-4333-8444-555555555555', 'not-a-uuid'),
+      `${relativeStream}&extra=1`,
+    ]) {
+      expect(() => resolveRelativeStream(config, invalid, 'ticket-1'))
+        .toThrow('streamUrl is not a stream endpoint')
+    }
   })
 
   it('reports code-server startup and login failures', async () => {

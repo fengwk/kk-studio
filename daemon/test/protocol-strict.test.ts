@@ -88,7 +88,7 @@ describe('envelope field validation branches', () => {
 
   it('rejects blank required text in INVOKE payloads', () => {
     expect(() =>
-      decodeInvoke(JSON.stringify({ capabilityId: '', capabilityVersion: '2', arguments: {}, timeoutMillis: 0 })),
+      decodeInvoke(JSON.stringify({ capabilityId: '', capabilityVersion: '3', arguments: {}, timeoutMillis: 0 })),
     ).toThrow(/capabilityId must be non-blank text/)
   })
 })

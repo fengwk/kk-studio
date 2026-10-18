@@ -330,7 +330,7 @@ describe('daemon main real assembly', () => {
       const helloPayload = hello.payload as Record<string, unknown>
       expect(hello.environmentId).toBeNull()
       expect(helloPayload.registrationToken).toBe(TOKEN)
-      expect(helloPayload.capabilityCatalogVersion).toBe('2')
+      expect(helloPayload.capabilityCatalogVersion).toBe('3')
       expect(helloPayload.daemonVersion).toBe(DAEMON_VERSION)
       expect(typeof helloPayload.daemonInstanceId).toBe('string')
 
@@ -429,7 +429,7 @@ describe('daemon main real assembly', () => {
   )
 
   it(
-    'assembles exactly the ten capability schemas and fails closed on registration rejection',
+    'assembles exactly the eleven capability schemas and fails closed on registration rejection',
     async () => {
       const fixture = await createControlServer()
       cleans.push(() => fixture.dispose())
@@ -437,13 +437,14 @@ describe('daemon main real assembly', () => {
       const harness = startMain(fixture.configPath)
       await waitFor(() => fixture.received.some((envelope) => envelope.messageType === 'READY'), 30_000)
 
-      // 资源 schema 目录就是能力目录的事实源：十项都必须被真实 main 装配。
+      // 资源 schema 目录就是能力目录的事实源：包含只读 edit preview 的十一项都必须被真实 main 装配。
       const schemaDir = fileURLToPath(new URL('../resources/capabilities', import.meta.url))
       const schemaIds = readdirSync(schemaDir)
         .filter((name) => name.endsWith('.schema.json'))
         .map((name) => name.replace(/\.schema\.json$/, ''))
         .sort()
-      expect(schemaIds).toHaveLength(10)
+      expect(schemaIds).toHaveLength(11)
+      expect(schemaIds).toContain('fs.edit.preview')
 
       for (const capabilityId of schemaIds) {
         fixture.send('INVOKE', { invocationId: capabilityId, payload: invoke(capabilityId, {}) })
