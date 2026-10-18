@@ -106,6 +106,7 @@ public final class ToolExecutionGateway implements ToolGateway {
   static final String EXECUTION_FAILED_KIND = "EXECUTION_FAILED";
   static final String INVALID_PARTIAL_KIND = "INVALID_PARTIAL";
   static final String CONTRIBUTOR_CONTRACT_VIOLATION_KIND = "CONTRIBUTOR_CONTRACT_VIOLATION";
+  static final String EDIT_REVIEW_REQUIRED_KIND = "EDIT_REVIEW_REQUIRED";
 
   /** 回调桥缓冲队列的保守上限：gate 打开前的同步回调绝不能无界缓冲。 */
   static final int MAX_BUFFERED_SIGNALS = 256;
@@ -115,6 +116,9 @@ public final class ToolExecutionGateway implements ToolGateway {
           "Tool permission was denied",
           ExecutionFact.NOT_EXECUTED,
           "Request approval or adjust the tool permission policy");
+
+  private static final String EDIT_REVIEW_REQUIRED_NEXT_ACTION =
+      "Request approval with an edit review before calling the tool again";
 
   /** 冻结定义与当前 catalog 不一致时的确定性下一步：模型无法原地修复，只能以新冻结重开。 */
   private static final String DEFINITION_MISMATCH_NEXT_ACTION =
@@ -302,6 +306,21 @@ public final class ToolExecutionGateway implements ToolGateway {
           environmentNotSelected(execution.request().binding());
       if (environmentNotSelected != null) {
         return reject(resources, lease, environmentNotSelected);
+      }
+
+      if (tool instanceof EnvironmentCapabilityTool environmentTool
+          && EnvironmentCapabilityIds.FS_EDIT.equals(environmentTool.capability().id())
+          && execution.approval().required()
+          && execution.expectedFile() == null) {
+        return reject(
+            resources,
+            lease,
+            new ToolInvocationError(
+                EDIT_REVIEW_REQUIRED_KIND,
+                ToolErrorGuidance.message(
+                    "Required edit approval must include a valid edit review",
+                    ExecutionFact.NOT_EXECUTED,
+                    EDIT_REVIEW_REQUIRED_NEXT_ACTION)));
       }
 
       BranchView branch =
