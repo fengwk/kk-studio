@@ -199,7 +199,7 @@ describe.skipIf(!ACCEPTANCE_DIR)('real code-server acceptance', () => {
       )
       expect(JSON.parse(await readFile(extensionManifest, 'utf8')).name).toBe('kk-studio-ide-bridge')
 
-      const endpoint = `ws://127.0.0.1:${gatewayPort}/api/harness/environment-stream/v1/ticket-real`
+      const endpoint = `/api/harness/environment-stream/v1/ticket-real`
 
       // A real health probe is proxied back through the stream.
       const healthy = await service.handle(
