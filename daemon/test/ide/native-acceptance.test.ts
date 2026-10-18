@@ -154,7 +154,7 @@ async function createGateway(): Promise<Gateway> {
   const host = `127.0.0.1:${port}`
   const gateway: Gateway = {
     host,
-    endpoint: `ws://${host}/api/harness/environment-stream/v1/ticket-native`,
+    endpoint: `/api/harness/environment-stream/v1/ticket-native`,
     captured,
     sockets,
     async close() {
