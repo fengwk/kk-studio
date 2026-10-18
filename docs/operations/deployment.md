@@ -182,13 +182,17 @@ reset 不删除 S3 对象；这些对象仍受备份恢复策略保护，不能�
 Studio 当前没有内置登录鉴权。向局域网或公网暴露前，必须在外部入口配置 TLS 和访问控制；
 容器本身保持 `127.0.0.1` 或内部网络绑定，由反向代理承担对外职责。
 
-反向代理需要覆盖三类流量：
+反向代理需要覆盖四类流量：
 
 | 流量 | 端点 | 要求 |
 | --- | --- | --- |
 | UI 与 REST API | 全部路径，含 SPA 深层路径 | 透传到 App `8080`；App 自行返回 `index.html` fallback |
 | Environment Daemon gateway | `/api/harness/environment-daemon/v1` | 透传 WebSocket，并协商 `permessage-deflate`；未协商时 Daemon 以 RFC 6455 close code `1010` 断开，不会退化为未压缩会话 |
 | 浏览器 Application Event WebSocket | `/api/events/v1` | 透传 WebSocket；断线后客户端靠 REST snapshot 重新同步 |
+| 同源 IDE 数据面与固定入口 | `/environment-ide/{environmentId}/` | 透传 HTTP 与 WebSocket upgrade；Studio 与受管环境在可信浏览器边界（非沙箱）内协作，不需独立域名；保持 route base 与 Host/Origin 转发 |
+
+Daemon 建立的 IDE 反向 stream 端点固定为根相对路径 `/api/harness/environment-stream/v1/{ticket}?environment={id}`，
+由 Daemon 按既有 gateway 相对解析，不需配置独立的公共 stream URL 模板。
 
 `prod` profile 启用 `server.forward-headers-strategy=framework`，因此代理必须正确设置
 `X-Forwarded-Proto`/`X-Forwarded-Host`，否则重定向与 cookies 会指向内部地址。
