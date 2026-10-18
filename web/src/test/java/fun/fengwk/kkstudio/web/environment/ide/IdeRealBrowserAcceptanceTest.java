@@ -61,14 +61,13 @@ import java.util.stream.Stream;
  * PostgreSQL 容器 之前即被跳过。
  *
  * <p>链路全部真实、无 mock：Daemon 以真实 {@code node dist/main.js --config <private>} 子进程连接真实 Daemon WebSocket
- * 端点 （HELLO/WELCOME/READY）；视图由真实 {@code EnvironmentIdeService.OPEN_VIEW} 铸造一次性 bootstrap 入口；每个视图由一个
- * Studio 父页面（{@code studio.browser.localhost}，与 IDE host 同 site 但不同 Origin）按生产 {@code
- * IdeOverlayPanel} 的 sandbox/allow 契约嵌入 iframe，浏览器经 {@code *.browser.localhost} host-resolver
- * 规则访问独立 IDE Origin，再经真实数据面到达 code-server；驱动走真实子 Frame，键盘发往所属父 Page。真实终端由 {@code FOCUS_TERMINAL}
- * 建立，并由浏览器 shell 回写真实 OS pid 供收敛断言。
+ * 端点 （HELLO/WELCOME/READY）；视图由真实 {@code EnvironmentIdeService.OPEN_VIEW} 铸造一次性 bootstrap 入口；每个视图由
+ * Studio 父页面按生产 {@code IdeOverlayPanel} 的 sandbox/allow 契约嵌入同源 iframe，浏览器经 {@code
+ * /environment-ide/{environmentId}/...} 路径访问同源 IDE 网关，再经真实数据面到达 code-server；驱动走真实子 Frame，键盘发往所属父
+ * Page。真实终端由 {@code FOCUS_TERMINAL} 建立，并由浏览器 shell 回写真实 OS pid 供收敛断言。
  *
- * <p>真实 random port 只有运行期可知：Origin 模板、gateway 反向流模板与 Daemon {@code studioUrl} 必须使用同一真实端口， 否则
- * bootstrap 的 Location、host-only cookie 与 WS Origin 会与入参 URL 不一致。本机仅验证 Linux + POSIX 权限模型；其它平台显式跳过。
+ * <p>真实 random port 只有运行期可知：Daemon {@code studioUrl} 必须使用同一真实端口， bootstrap 的 Location、Path 限定的
+ * cookie 与 WS 连接均工作在 Studio 同源路径下。本机仅验证 Linux + POSIX 权限模型；其它平台显式跳过。
  */
 @Slf4j
 @EnabledIfEnvironmentVariable(named = "KK_STUDIO_IDE_ACCEPTANCE_DIR", matches = ".+")
@@ -210,7 +209,7 @@ class IdeRealBrowserAcceptanceTest extends WebPostgresTestSupport {
     for (String required : REQUIRED_STEPS) {
       assertStep(reportJson, required);
     }
-    // 两个 workbench 必须真的是跨 Origin iframe 内加载的真实 workbench；父 Origin 与 IDE Origin 不同可防止驱动退回顶层
+    // 两个 workbench 必须真的是同源 iframe 内加载的真实 workbench；通过校验嵌入状态与路径前缀防止驱动退回顶层
     // page.goto 的等价假通过。
     assertEmbeddedView(reportJson, "workbenchA");
     assertEmbeddedView(reportJson, "workbenchB");
@@ -542,8 +541,8 @@ class IdeRealBrowserAcceptanceTest extends WebPostgresTestSupport {
   }
 
   /**
-   * 断言某个 workbench 步骤确实驱动于跨 Origin iframe 内：报告值须明确 {@code embedded=true}、父 harness 由真实 HTTP （非
-   * route 构造）提供，且 IDE Origin 精确等于真实后端端口拼出的 Origin。退回顶层 {@code page.goto} 的驱动无法满足。
+   * 断言某个 workbench 步骤确实驱动于同源 iframe 内：报告值须明确 {@code embedded=true}、父 harness 为同源 browser-fixture
+   * 提供，且 IDE origin 与 parentOrigin 均精确等于当前 Studio 端口。退回顶层 {@code page.goto} 的驱动无法满足。
    */
   private void assertEmbeddedView(JsonNode report, String step) {
     JsonNode value = report.path("steps").path(step).path("value");
@@ -563,7 +562,7 @@ class IdeRealBrowserAcceptanceTest extends WebPostgresTestSupport {
     assertEquals(
         "http://localhost:" + port,
         ideOrigin,
-        step + " IDE Origin must be the same Studio Origin: " + value);
+        step + " IDE origin must match Studio origin: " + value);
     assertEquals(parentOrigin, ideOrigin, step + " parent and IDE must be same-origin: " + value);
     String frameUrl = value.path("frameUrl").asText("");
     assertTrue(

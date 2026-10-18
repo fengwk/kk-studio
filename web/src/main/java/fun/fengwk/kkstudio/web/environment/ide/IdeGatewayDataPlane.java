@@ -46,7 +46,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * IDE 独立 Origin 的数据面：把浏览器 HTTP exchange 经一次性 ticket 与 Daemon 反向连接配对后双向转发。
+ * IDE 同源网关的数据面：把浏览器 HTTP exchange 经一次性 ticket 与 Daemon 反向连接配对后双向转发。
  *
  * <p>每个请求：解析 host-only 会话 cookie → 复核其绑定代际仍是当前 READY 代际 → 铸造一次性 stream ticket 并登记 pending 配对 → 通过
  * {@code OPEN_STREAM} 命令把 ticket + 受控 streamUrl 交给 Daemon → 等待反向连接后按 credit 双向转发请求体与响应。 请求/响应头都过滤
@@ -125,7 +125,7 @@ public final class IdeGatewayDataPlane {
   }
 
   /**
-   * 处理一个 IDE Origin 上的浏览器 HTTP exchange。
+   * 处理一个 IDE 网关路径上的浏览器 HTTP exchange。
    *
    * @param rawPathAndQuery 原始 path（含 query），直接转发给 Daemon 侧的 code-server
    */

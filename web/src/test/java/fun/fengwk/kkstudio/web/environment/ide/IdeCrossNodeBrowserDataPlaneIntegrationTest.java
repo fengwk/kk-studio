@@ -106,11 +106,11 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * 跨节点浏览器数据面的真实两节点一跳集成：浏览器落在非 owner 节点 A 的 IDE Origin，A 用内部 HMAC 单跳转发给 READY owner B。
+ * 跨节点浏览器数据面的真实两节点一跳集成：浏览器落在非 owner 节点 A 的 IDE 网关路径，A 用内部 HMAC 单跳转发给 READY owner B。
  *
- * <p>B 是真实应用上下文（PostgreSQL 控制面、真实内部 REST/WS 端点、真实数据面）；A 是独立内嵌 Tomcat，只承载 IDE Origin 入口（host guard +
- * 数据面 + 浏览器 WS 网关）与公开反向 stream 端点，经真实 HTTP/WS 一跳连到 B。覆盖：20 MiB HTTP 与 WS echo 经 A→B 完整传输、
- * bootstrap/cookie 在 owner 消费并复用同一 cookie、两面板并存、内部 HMAC 无效、owner 切换/租约失效 fail-closed、peer 断开不自动重放。
+ * <p>B 是真实应用上下文（PostgreSQL 控制面、真实内部 REST/WS 端点、真实数据面）；A 是独立内嵌 Tomcat，只承载 IDE 网关入口（网关过滤器 + 数据面 + 浏览器
+ * WS 网关）与公开反向 stream 端点，经真实 HTTP/WS 一跳连到 B。覆盖：20 MiB HTTP 与 WS echo 经 A→B 完整传输、 bootstrap/cookie 在
+ * owner 消费并复用同一 cookie、两面板并存、内部 HMAC 无效、owner 切换/租约失效 fail-closed、peer 断开不自动重放。
  */
 class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport {
 
@@ -155,7 +155,7 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
     }
   }
 
-  /** 20 MiB 响应体经「浏览器 → A 的 IDE Origin → B 的内部数据面 → Daemon 反向连接」完整回到浏览器。 */
+  /** 20 MiB 响应体经「浏览器 → A 的 IDE 网关路径 → B 的内部数据面 → Daemon 反向连接」完整回到浏览器。 */
   @Test
   void forwardsTwentyMiBHttpThroughNonOwnerOrigin() throws Exception {
     startForwarderNode(nodeRegistry.localNodeId(), ownerPort);
@@ -500,7 +500,7 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
                   new ClientEndpointConfig.Configurator() {
                     @Override
                     public void beforeRequest(Map<String, List<String>> headers) {
-                      // TCP 目标是 localhost，但 IDE Origin 的 Host/Origin 与浏览器完全一致。
+                      // TCP 目标是 localhost，Studio 同源路径下的 Host/Origin 与浏览器完全一致。
                       headers.put("Host", List.of("localhost:" + forwarderPort));
                       headers.put("Cookie", List.of(cookieHeader(cookie)));
                       headers.put("Origin", List.of("http://localhost:" + forwarderPort));
@@ -985,10 +985,9 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
   }
 
   /**
-   * 启动非 owner 节点 A：独立内嵌 Tomcat，承载 IDE Origin 入口（host guard + 数据面 + 浏览器 WS 网关）与公开反向 stream 端点。
+   * 启动非 owner 节点 A：独立内嵌 Tomcat，承载 IDE 网关入口（网关过滤器 + 数据面 + 浏览器 WS 网关）与公开反向 stream 端点。
    *
-   * <p>A 自己不做 cookie/代际鉴权，全部单跳交给 owner B；这正是「非 owner 的 IDE Origin 请求先单跳到 owner 再消费
-   * bootstrap/cookie」。
+   * <p>A 自己不做 cookie/代际鉴权，全部单跳交给 owner B；这正是「非 owner 的 IDE 网关请求先单跳到 owner 再消费 bootstrap/cookie」。
    */
   private static synchronized void startForwarderNode(UUID ownerNodeId, int ownerPort)
       throws Exception {

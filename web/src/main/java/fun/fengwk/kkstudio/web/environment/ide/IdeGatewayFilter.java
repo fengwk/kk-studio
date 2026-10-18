@@ -79,17 +79,14 @@ public final class IdeGatewayFilter extends OncePerRequestFilter {
       return;
     }
 
-    if (isBootstrapPath(remainder)) {
-      String query = request.getQueryString();
-      String rawPathAndQuery =
-          (query == null || query.isEmpty()) ? remainder : remainder + "?" + query;
-      dataPlane.handleBootstrap(environmentId, rawPathAndQuery, request, response);
-      return;
-    }
-
     String query = request.getQueryString();
     String rawPathAndQuery =
         (query == null || query.isEmpty()) ? remainder : remainder + "?" + query;
+
+    if (BOOTSTRAP_ENDPOINT.equals(remainder)) {
+      dataPlane.handleBootstrap(environmentId, rawPathAndQuery, request, response);
+      return;
+    }
 
     if (IdeBrowserWebSocketGateway.isWebSocketUpgrade(request)) {
       browserGateway.handleUpgrade(environmentId, rawPathAndQuery, request, response);
@@ -97,12 +94,6 @@ public final class IdeGatewayFilter extends OncePerRequestFilter {
     }
 
     dataPlane.handleHttp(environmentId, rawPathAndQuery, request, response);
-  }
-
-  private static boolean isBootstrapPath(String remainder) {
-    int question = remainder.indexOf('?');
-    String path = question < 0 ? remainder : remainder.substring(0, question);
-    return BOOTSTRAP_ENDPOINT.equals(path);
   }
 
   private static String relativePath(HttpServletRequest request) {

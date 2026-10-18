@@ -384,6 +384,74 @@ class IdeGatewayDataPlaneTest {
         response.getHeader("Location"));
   }
 
+  @Test
+  void bootstrapCookieContainsSecureWhenRequestIsSecureAndAppliesContextPathToPathAndLocation()
+      throws Exception {
+    Harness harness = new Harness();
+    String view = UUID.randomUUID().toString();
+    harness.sessions.viewOpened(harness.identity, view, "/managed/workspace");
+    String ticket = harness.bootstrap.issue(harness.identity, view, "/managed/workspace");
+
+    MockHttpServletRequest request = new MockHttpServletRequest("GET", "/studio/__ide/bootstrap");
+    request.setContextPath("/studio");
+    request.setSecure(true);
+    request.setQueryString("token=" + ticket);
+    request.setParameter("token", ticket);
+    MockHttpServletResponse response = new MockHttpServletResponse();
+
+    harness.dataPlane.handleBootstrap(ENV, request, response);
+
+    assertEquals(303, response.getStatus());
+    String setCookie = response.getHeader("Set-Cookie");
+    assertNotNull(setCookie);
+    assertTrue(setCookie.contains("Path=/studio/environment-ide/" + ENV + "/"));
+    assertTrue(setCookie.contains("; Secure"));
+    assertEquals(
+        "/studio/environment-ide/" + ENV + "/?workspace=%2Fmanaged%2Fworkspace",
+        response.getHeader("Location"));
+  }
+
+  @Test
+  void bootstrapCookieOmitsSecureWhenRequestIsNotSecure() throws Exception {
+    Harness harness = new Harness();
+    String view = UUID.randomUUID().toString();
+    harness.sessions.viewOpened(harness.identity, view, "/managed/workspace");
+    String ticket = harness.bootstrap.issue(harness.identity, view, "/managed/workspace");
+
+    MockHttpServletRequest request = new MockHttpServletRequest("GET", "/__ide/bootstrap");
+    request.setSecure(false);
+    request.setQueryString("token=" + ticket);
+    request.setParameter("token", ticket);
+    MockHttpServletResponse response = new MockHttpServletResponse();
+
+    harness.dataPlane.handleBootstrap(ENV, request, response);
+
+    assertEquals(303, response.getStatus());
+    String setCookie = response.getHeader("Set-Cookie");
+    assertNotNull(setCookie);
+    assertFalse(setCookie.contains("; Secure"));
+  }
+
+  @Test
+  void rejectsSessionCookieFromDifferentEnvironment() throws Exception {
+    Harness harness = new Harness();
+    EnvironmentId foreignEnv = EnvironmentId.parse("22222222-2222-2222-2222-222222222222");
+    IdeSessionIdentity foreignIdentity =
+        new IdeSessionIdentity(foreignEnv, "instance", UUID.randomUUID());
+    String foreignView = UUID.randomUUID().toString();
+    harness.sessions.viewOpened(foreignIdentity, foreignView, "/managed/workspace");
+    String foreignCookie =
+        harness.sessions.open(foreignIdentity, foreignView, "/managed/workspace");
+
+    MockHttpServletRequest request = new MockHttpServletRequest("GET", "/");
+    request.setCookies(new Cookie(harness.properties.requireSessionCookieName(), foreignCookie));
+    MockHttpServletResponse response = new MockHttpServletResponse();
+
+    harness.dataPlane.handleHttp(ENV, "/", request, response);
+
+    assertEquals(401, response.getStatus());
+  }
+
   /** 视图关闭后旧票据必须失效（410），且绝不因此重新授权视图。 */
   @Test
   void bootstrapRejectsTicketOfClosedView() throws Exception {
