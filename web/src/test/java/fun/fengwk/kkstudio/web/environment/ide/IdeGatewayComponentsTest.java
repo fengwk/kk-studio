@@ -37,7 +37,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 /**
- * 意图：IDE Origin 识别必须严格（只有模板形状的 Host 才算 IDE Origin），浏览器会话必须绑定代际且随租约关闭而失效，且 IDE Origin
+ * 意图：IDE 同源网关路由（/environment-ide/{environmentId}/...）必须严格校验环境标识，浏览器会话必须绑定代际且随租约关闭而失效，且 IDE
  * 请求必须由数据面本地处理、绝不进入 Studio REST 管线。
  */
 class IdeGatewayComponentsTest {
@@ -251,6 +251,54 @@ class IdeGatewayComponentsTest {
     filter.doFilter(request, response, new MockFilterChain());
 
     assertEquals(404, response.getStatus());
+  }
+
+  @Test
+  void ideFilterWithContextPathStripsRouteBaseOnlyOnceForBootstrapResourceAndWebSocket()
+      throws Exception {
+    IdeGatewayDataPlane dataPlane = mock(IdeGatewayDataPlane.class);
+    IdeBrowserWebSocketGateway browserGateway = mock(IdeBrowserWebSocketGateway.class);
+    IdeGatewayFilter filter = new IdeGatewayFilter(dataPlane, browserGateway);
+
+    // 1. bootstrap: /studio/environment-ide/{ENV}/__ide/bootstrap?token=test-tok -> remainder is
+    // /__ide/bootstrap
+    MockHttpServletRequest bootstrapReq =
+        new MockHttpServletRequest("GET", "/studio/environment-ide/" + ENV + "/__ide/bootstrap");
+    bootstrapReq.setContextPath("/studio");
+    bootstrapReq.setQueryString("token=test-tok");
+    MockHttpServletResponse bootstrapResp = new MockHttpServletResponse();
+    filter.doFilter(bootstrapReq, bootstrapResp, new MockFilterChain());
+    verify(dataPlane).handleBootstrap(eq(ENV), eq("/__ide/bootstrap?token=test-tok"), any(), any());
+
+    // 2. resource whose path contains a nested /environment-ide/: strip prefix only once
+    MockHttpServletRequest resourceReq =
+        new MockHttpServletRequest(
+            "GET", "/studio/environment-ide/" + ENV + "/environment-ide/main.js");
+    resourceReq.setContextPath("/studio");
+    resourceReq.setQueryString("v=1");
+    MockHttpServletResponse resourceResp = new MockHttpServletResponse();
+    filter.doFilter(resourceReq, resourceResp, new MockFilterChain());
+    verify(dataPlane).handleHttp(eq(ENV), eq("/environment-ide/main.js?v=1"), any(), any());
+
+    // 3. web socket upgrade: strip prefix only once
+    MockHttpServletRequest wsReq =
+        new MockHttpServletRequest("GET", "/studio/environment-ide/" + ENV + "/ws/channel");
+    wsReq.setContextPath("/studio");
+    wsReq.addHeader("Upgrade", "websocket");
+    wsReq.addHeader("Connection", "Upgrade");
+    MockHttpServletResponse wsResp = new MockHttpServletResponse();
+    filter.doFilter(wsReq, wsResp, new MockFilterChain());
+    verify(browserGateway).handleUpgrade(eq(ENV), eq("/ws/channel"), any(), any());
+
+    // 4. missing trailing slash redirect preserves contextPath
+    MockHttpServletRequest redirectReq =
+        new MockHttpServletRequest("GET", "/studio/environment-ide/" + ENV);
+    redirectReq.setContextPath("/studio");
+    redirectReq.setQueryString("k=v");
+    MockHttpServletResponse redirectResp = new MockHttpServletResponse();
+    filter.doFilter(redirectReq, redirectResp, new MockFilterChain());
+    assertEquals(301, redirectResp.getStatus());
+    assertEquals("/studio/environment-ide/" + ENV + "/?k=v", redirectResp.getHeader("Location"));
   }
 
   @Test

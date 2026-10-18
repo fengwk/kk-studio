@@ -1,10 +1,9 @@
 package fun.fengwk.kkstudio.harness.environment.daemon;
 
-import java.net.URI;
-import java.net.URISyntaxException;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 /**
  * 一条 IDE 控制命令（Server → Daemon，{@code IDE_COMMAND} 的 payload）。
@@ -13,9 +12,9 @@ import java.util.UUID;
  * UUID、合法 URL/路径/header、未知组合拒绝），不解释宿主文件系统事实——目录是否可访问、文档是否 dirty 一律由 Daemon 按 Node 标准失败回执，Server
  * 不伪造结果。
  *
- * <p>{@code OPEN_STREAM} 的 {@code streamUrl} 是 Server 当前实例受控的 WebSocket endpoint；客户端（浏览器）不得指定任意
- * proxy 地址，因此这里拒绝 userinfo、非 ws(s) scheme 与 fragment，只保留受控 origin + path + query（与 Node 契约一致：Daemon
- * 以 ws/wss 直连该 endpoint）。
+ * <p>{@code OPEN_STREAM} 的 {@code streamUrl} 统一使用受控的根相对路径 {@code
+ * /api/harness/environment-stream/v1/{ticket}?environment={canonicalUuid}}；拒绝
+ * authority、fragment、反斜杠、traversal 与非受控 endpoint（Daemon 结合已配置的 Studio 网关解析并建立直连）。
  */
 public record IdeCommand(
     IdeAction action,
@@ -36,6 +35,10 @@ public record IdeCommand(
   private static final int MAX_METHOD_CHARS = 16;
   private static final int MAX_PATH_CHARS = 8192;
   private static final int MAX_HEADERS = 64;
+  private static final Pattern STREAM_URL =
+      Pattern.compile(
+          "/api/harness/environment-stream/v1/[A-Za-z0-9_-]+"
+              + "(?:\\?environment=[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?");
 
   public IdeCommand {
     action = Objects.requireNonNull(action, "action");
@@ -164,30 +167,9 @@ public record IdeCommand(
     if (value.length() > MAX_URL_CHARS) {
       throw new IllegalArgumentException("streamUrl exceeds " + MAX_URL_CHARS + " characters");
     }
-    URI uri;
-    try {
-      uri = new URI(value);
-    } catch (URISyntaxException error) {
-      throw new IllegalArgumentException("streamUrl must be a valid absolute URI");
-    }
-    if (value.startsWith("/") && !value.startsWith("//")) {
-      if (uri.getFragment() != null) {
-        throw new IllegalArgumentException("streamUrl must not contain a fragment");
-      }
-      return value;
-    }
-    String scheme = uri.getScheme();
-    if (scheme == null || !(scheme.equalsIgnoreCase("ws") || scheme.equalsIgnoreCase("wss"))) {
-      throw new IllegalArgumentException("streamUrl scheme must be ws or wss");
-    }
-    if (!uri.isAbsolute() || uri.getHost() == null) {
-      throw new IllegalArgumentException("streamUrl must be an absolute ws(s) origin with a host");
-    }
-    if (uri.getUserInfo() != null) {
-      throw new IllegalArgumentException("streamUrl must not contain userinfo");
-    }
-    if (uri.getFragment() != null) {
-      throw new IllegalArgumentException("streamUrl must not contain a fragment");
+    if (!STREAM_URL.matcher(value).matches()) {
+      throw new IllegalArgumentException(
+          "streamUrl must be a controlled root-relative stream endpoint");
     }
     return value;
   }

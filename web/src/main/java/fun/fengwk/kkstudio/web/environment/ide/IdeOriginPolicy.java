@@ -7,7 +7,7 @@ import java.net.URISyntaxException;
 import java.util.Locale;
 
 /**
- * IDE 独立 Origin 的同源策略：HTTP 数据面与浏览器 WS 握手都必须来自**精确**的 IDE Origin。
+ * IDE 同源网关的源保护策略：HTTP 数据面与浏览器 WS 握手都必须来自**精确**的 Studio 同源 Origin。
  *
  * <p>比较按 URL 规范进行：scheme、host、effective port 三者都必须一致，且 Origin 不得携带 userinfo/query/fragment。默认端口按
  * scheme 归一（http/ws=80，https/wss=443），因此 {@code https://env.ide.test} 与 {@code
@@ -43,7 +43,7 @@ final class IdeOriginPolicy {
     return sameOriginExact(origin, request);
   }
 
-  /** 浏览器 WS 握手准入：Origin 必须存在且精确等于本请求的 IDE Origin。 */
+  /** 浏览器 WS 握手准入：Origin 必须存在且精确等于本请求的 Studio 同源 Origin。 */
   static boolean webSocketHandshakeAllowed(HttpServletRequest request) {
     String site = request.getHeader("Sec-Fetch-Site");
     if (site != null && !isSameSite(site)) {

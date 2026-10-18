@@ -14,7 +14,7 @@ import java.util.function.Predicate;
 /**
  * 通用一次性令牌存储：256-bit {@link SecureRandom} 值、base64url（无 padding）编码，消费即删除、读取时判定过期。
  *
- * <p>反向数据面的 stream ticket 与 IDE 独立 Origin 的 bootstrap ticket 语义一致（一次性、短时、绑定当前实例/租约），
+ * <p>反向数据面的 stream ticket 与 IDE 同源网关的 bootstrap ticket 语义一致（一次性、短时、绑定当前实例/租约），
  * 因此共享本实现。它只在本节点内有效：跨节点请求先由 owner 定位再本地消费，不做复制。无后台任务，过期由读取时判定。
  *
  * @param <T> 令牌绑定的值（如 Environment+租约+模式，或 Environment+workspace 路径）

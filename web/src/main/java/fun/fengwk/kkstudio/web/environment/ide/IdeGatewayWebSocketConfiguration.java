@@ -18,7 +18,7 @@ import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
  *
  * <p>三个端点都在网关自身 Origin 上：{@code /api/harness/environment-stream/v1/{ticket}} 由 Daemon 握手消费一次性
  * ticket； {@code /internal/environment-ide/{env}/reverse?ticket=...} 只接受已通过 HMAC 认证的其它节点，并在任何握手前校验
- * owner 归属；{@code /internal/environment-ide/{env}/ws?path=...} 同样先认证再作为浏览器数据面执行。浏览器 IDE Origin 的流量由
+ * owner 归属；{@code /internal/environment-ide/{env}/ws?path=...} 同样先认证再作为浏览器数据面执行。浏览器 IDE 网关路径的流量由
  * {@link IdeGatewayFilter} 在更早处截获，不会到达这里。
  */
 @Configuration(proxyBeanMethods = false)
