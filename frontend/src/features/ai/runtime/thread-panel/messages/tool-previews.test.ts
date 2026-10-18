@@ -2,21 +2,24 @@ import { describe, expect, it } from 'vitest'
 import {
   formatEditPreview,
   formatWritePreview,
-  generateSimpleDiffLines,
   parseToolArguments,
   previewForToolCall,
 } from '@/features/ai/runtime/thread-panel/messages/tool-previews'
 
 describe('tool previews', () => {
-  it('parses complete write arguments and keeps the full content', () => {
+  const validSha = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+
+  it('parses complete write arguments and keeps the full content and workdir', () => {
     const parsed = parseToolArguments(JSON.stringify({
       path: 'SortingAlgorithms.java',
+      workdir: '/home/user/project',
       content: 'line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\n',
     }))
     const preview = formatWritePreview(parsed)
 
     expect(parsed.complete).toBe(true)
     expect(preview.path).toBe('SortingAlgorithms.java')
+    expect(preview.workdir).toBe('/home/user/project')
     expect(preview.lines).toEqual([
       'line1',
       'line2',
@@ -38,28 +41,81 @@ describe('tool previews', () => {
     expect(preview.lines).toEqual(['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight'])
   })
 
-  it('renders an edit preview as a numbered-style diff instead of raw JSON', () => {
+  it('renders streamed edit input as explicit input rather than diff', () => {
+    const parsed = parseToolArguments('{"path":"App.java","old_string":"alpha\\nbeta","new_string":"alpha\\nBETA')
+    const preview = formatEditPreview(parsed, { streaming: true })
+
+    expect(preview?.kind).toBe('edit')
+    if (preview && preview.kind === 'edit') {
+      expect(preview.mode).toBe('input')
+      if (preview.mode === 'input') {
+        expect(preview.path).toBe('App.java')
+        expect(preview.oldText).toBe('alpha\nbeta')
+        expect(preview.newText).toBe('alpha\nBETA')
+      }
+    }
+  })
+
+  it('renders preparing state after arguments finish while waiting for review', () => {
     const parsed = parseToolArguments(JSON.stringify({
       path: 'App.java',
-      old_string: 'alpha\nbeta\ngamma',
-      new_string: 'alpha\nBETA\ngamma',
+      old_string: 'alpha\nbeta',
+      new_string: 'alpha\nBETA',
     }))
-    const preview = formatEditPreview(parsed)
+    const preview = formatEditPreview(parsed, { isWaitingReview: true })
 
-    expect(previewForToolCall('edit', parsed.raw)?.kind).toBe('edit')
-    expect(preview.path).toBe('App.java')
-    expect(generateSimpleDiffLines('alpha\nbeta\ngamma', 'alpha\nBETA\ngamma')).toEqual([
-      ' alpha',
-      '-beta',
-      '+BETA',
-      ' gamma',
-    ])
-    expect(preview.lines).toEqual([
-      ' alpha',
-      '-beta',
-      '+BETA',
-      ' gamma',
-    ])
+    expect(preview?.kind).toBe('edit')
+    if (preview && preview.kind === 'edit') {
+      expect(preview.mode).toBe('preparing')
+      if (preview.mode === 'preparing') {
+        expect(preview.path).toBe('App.java')
+      }
+    }
+  })
+
+  it('replaces input with real multi-hunk numbered file diff from editReview', () => {
+    const parsed = parseToolArguments(JSON.stringify({
+      path: 'App.java',
+      old_string: 'alpha\nbeta',
+      new_string: 'alpha\nBETA',
+    }))
+    const realDiff = '@@ -10,3 +10,3 @@\n 10|context\n-11|alpha\n-12|beta\n+11|alpha\n+12|BETA\n 13|context'
+    const preview = formatEditPreview(parsed, {
+      editReview: {
+        path: '/canonical/App.java',
+        diff: realDiff,
+        sha256: validSha,
+      },
+    })
+
+    expect(preview?.kind).toBe('edit')
+    if (preview && preview.kind === 'edit') {
+      expect(preview.mode).toBe('review')
+      if (preview.mode === 'review') {
+        expect(preview.path).toBe('/canonical/App.java')
+        expect(preview.diff).toBe(realDiff)
+        expect(preview.sha256).toBe(validSha)
+        expect(preview.lines).toEqual([
+          '@@ -10,3 +10,3 @@',
+          ' 10|context',
+          '-11|alpha',
+          '-12|beta',
+          '+11|alpha',
+          '+12|BETA',
+          ' 13|context',
+        ])
+      }
+    }
+  })
+
+  it('returns null for historical terminal calls without a review instead of eternal spinner', () => {
+    const parsed = parseToolArguments(JSON.stringify({
+      path: 'App.java',
+      old_string: 'a',
+      new_string: 'b',
+    }))
+    const preview = formatEditPreview(parsed, { isTerminalWithoutReview: true })
+    expect(preview).toBeNull()
   })
 
   it('returns null for unknown tools and matches tool names case-insensitively', () => {
@@ -109,22 +165,6 @@ describe('tool previews', () => {
     expect(parsed.values.path).toBe('App.java')
     expect(parsed.values.content).toBe('unclosed')
     expect(parsed.values.garbage).toBeUndefined()
-  })
-
-  it('builds a full diff with context and an empty diff for empty inputs', () => {
-    expect(generateSimpleDiffLines('', '')).toEqual([])
-    expect(generateSimpleDiffLines('keep\na\nb', 'keep\nX\nY')).toEqual([
-      ' keep',
-      '-a',
-      '-b',
-      '+X',
-      '+Y',
-    ])
-    // 只有 new_string 时全部新增；只有 old_string 时全部删除。
-    expect(generateSimpleDiffLines('', 'added')).toEqual(['+added'])
-    expect(generateSimpleDiffLines('removed', '')).toEqual(['-removed'])
-    // 完全相同的内容没有 diff 行。
-    expect(generateSimpleDiffLines('same', 'same')).toEqual([' same'])
   })
 
   it('drops the trailing empty line produced by a content that ends with a newline', () => {

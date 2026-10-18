@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight } from 'lucide-react'
+import { Check, ChevronDown, ChevronRight } from 'lucide-react'
 import type { ComponentType } from 'react'
 import { useState } from 'react'
 import { AskUserRecord } from '@/features/ai/runtime/thread-panel/messages/AskUserRecord'
@@ -69,8 +69,12 @@ export function ToolMessageBlock({
       : approval.decision === 'DENIED'
         ? t('ai.runtime.approval.denied')
         : t('ai.runtime.approval.requested')
+  const rawState = approvalState ? approvalState.replace(/[:：]\s*$/, '') : ''
+  const translatedReason = approval?.reason === 'Permission rules require approval'
+    ? t('ai.interaction.defaultApprovalReason')
+    : approval?.reason
   const notice = approvalState
-    ? (approval?.reason ? `${approvalState} — ${approval.reason}` : approvalState)
+    ? (translatedReason ? `${rawState} — ${translatedReason}` : approvalState)
     : null
   const errorNotice = view.errorText
   const bodyTexts = view.contents.flatMap((content) =>
@@ -167,12 +171,34 @@ function ToolBody({
   Renderer?: ComponentType<ToolRendererProps>
   expanded: boolean
 }) {
+  const { t } = useI18n()
   // 只有 bash 的持续日志跟随尾部；其余静态正文（结果 Text/JSON、write/edit/task
   // 参数）一律从顶部读，内容增长也不强拉到底部。
   const followTail = view.toolName.trim().toLowerCase() === 'bash' && view.contentsStreaming
   if (view.toolName === 'ask_user') {
     return <AskUserRecord arguments={view.arguments} contents={view.contents} />
   }
+
+  // write/edit 成功终态去重：reviewed content/diff 留在 preview 中，
+  // 结果正文仅展示简短本地化成功提示，不重复输出 body/diff。
+  if (view.isMutationSuccess) {
+    const isWrite = view.toolName.trim().toLowerCase() === 'write'
+    const successText = isWrite
+      ? t('ai.runtime.mutation.writeSuccess')
+      : t('ai.runtime.mutation.editSuccess')
+    return (
+      <>
+        {view.hasCallPreview && view.preview ? (
+          <ToolCallPreview preview={view.preview} streaming={view.argumentsStreaming} />
+        ) : null}
+        <div className="thread-tool-mutation-success">
+          <Check size={14} aria-hidden="true" className="mutation-success-icon" />
+          <span>{successText}</span>
+        </div>
+      </>
+    )
+  }
+
   return (
     <>
       {view.hasCallPreview && view.preview ? (
