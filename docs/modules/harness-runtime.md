@@ -213,7 +213,23 @@ Dispatcher 认领 Work 后把 `ClaimedWork` 交给对应 Processor。Thread clai
 
 成功的 terminal 响应在成为 durable 事实之前先冻结 Tool 历史语义：`ModelExecution` 用本次调用的冻结 `toolBindings` 与注入的 [`ToolHistoryActionResolver`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/ToolHistoryActionResolver.java)（Platform 实现按冻结贡献身份与完整定义查不可变 `HarnessCatalog`，再调用 Tool 的 `historyRenderer()`）算出每个 READY 调用的自然语言动作，写入 `ProviderToolCall.historyAction` 后再持久化。解析与渲染在 execution monitor 和状态事务之外完成，动态 MCP Tool 不触发数据库查询；任何缺失、blank、异常或定义变化都退化为不冻结 action——历史语义渲染绝不阻断模型调用，也绝不改写 durable arguments。
 
-[`ToolProcessor`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ToolProcessor.java) 驱动一次工具调用：`READY` 且无审批记录时，在执行树锁内沿祖先链核对 YOLO policy；仅真实根的 `ENABLE` 跳过 preflight 直接 Allow，错根 Follow 立即拒绝。其余调用在事务外执行 `ToolGateway.preflight`（期间 heartbeat 续租），`Allow` 记录免审批并进入 dispatch，`Ask` 转为 `WAITING_APPROVAL` 并完成 TOOL claim（不唤醒 THREAD），`Deny` 标记 `FAILED` 并唤醒 THREAD。preflight 抛异常时保持 `READY` / 无审批 / version 不变，按失败延迟 reschedule。两阶段激活与回调门控协议与 Model 一致；超期租约（`DISPATCHING` 消费 proposed attempt、`RUNNING` 保留）同样收敛为 `UNKNOWN`，绝不对非幂等工具重放。`UNKNOWN` 是终态：与其它终态一样物化为失败 `ToolResult` 并唤醒 THREAD，作为 loop 反馈交给下一轮模型，不阻塞 Thread、也不升级为人工核查门禁。工具增量只支持文本与 JSON 格式。
+[`ToolProcessor`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ToolProcessor.java) 驱动一次工具调用：`READY` 且无审批记录时，在执行树锁内沿祖先链核对 YOLO policy；仅真实根的 `ENABLE` 跳过 preflight 直接 Allow，错根 Follow 立即拒绝。其余调用在事务外执行 `ToolGateway.preflight`（期间 heartbeat 续租）：
+
+- `Allow` 记录免审批并进入 dispatch；
+- `Ask` 转为 `WAITING_APPROVAL`，携带可选的 `ToolEditReview`（含 canonical 绝对路径、全量 diff 与原始 bytes SHA-256）并持久化到 `approvalJson.editReview`，随后完成 TOOL claim（不唤醒 THREAD）；
+- `Deny` 标记 `FAILED` 并唤醒 THREAD。
+
+preflight 抛异常时保持 `READY` / 无审批 / version 不变，按失败延迟 reschedule。
+
+两阶段激活与回调门控协议与 Model 一致；超期租约（`DISPATCHING` 消费 proposed attempt、`RUNNING` 保留）同样收敛为 `UNKNOWN`，绝不对非幂等工具重放。`UNKNOWN` 是终态：与其它终态一样物化为失败 `ToolResult` 并唤醒 THREAD，作为 loop 反馈交给下一轮模型，不阻塞 Thread、也不升级为人工核查门禁。工具增量只支持文本与 JSON 格式。
+
+### 审批决议与受管文件变更保护
+
+审批由 `decideToolApproval` 驱动，只在 Thread 处于 `ToolActive` 且目标工具处于 `WAITING_APPROVAL` 时接受。客户端提交 `ALLOW` / `DENY`，服务端冻结为 `ALLOWED` / `DENIED`：前者转 `READY` 并安排 TOOL Work，后者标记 `FAILED` 并唤醒 THREAD Work，两者都推进一次 Thread version。相同决策幂等重放，不同决策抛 `APPROVAL_DECISION_MISMATCH`。决议保留原 `editReview`，客户端只提交决策身份与原因。
+
+`ToolGateway.start` 的 `Execution` 携带非空 `ToolApproval` 快照。对于需要人工审批的环境 `fs.edit`，平台先核对已租用目录中的真实工具贡献身份；若缺少有效审查，则在加载分支或调用 transport 前以 `EDIT_REVIEW_REQUIRED` 拒绝，执行事实为 `NOT_EXECUTED`，并释放已获取的并发与目录租约。存在有效审查时，从同一快照提取 `expectedFile`（`{path, sha256}`），作为 INVOKE 顶层内部元数据下发，不改变模型 arguments。
+
+Daemon 在文件修改锁内核对路径与原始字节哈希；审查后文件变化即拒绝写入。完整 diff 连同结果超过 1 MiB UTF-8 预算时，在预览或提交前明确拒绝。执行成功后，权威变更事实保存在 `resultJson.details.editReview`（Java 内部为 `detailsJson`）。自动 ALLOW / YOLO 不要求人工审查快照，使用实际执行结果展示变更。
 
 三个 Processor 共用 [`WorkHeartbeat`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/WorkHeartbeat.java) 的两层模型：注入的 scheduler 只做固定周期唤醒、单在途合并与非阻塞分派，绝不阻塞在数据库上；独立的 heartbeat worker 执行 `renewWork` 短事务与所有权丢失回调。续租事务异常、调度器启动拒绝或分派执行器拒绝都视为所有权无法维系，统一触发一次 `onLostOwnership`；`stop()` 返回前保证不会再有排队的续租事务开始。
 
@@ -255,7 +271,7 @@ Stop 在树锁与有序行锁内校验目标 version 和 `stopRequestId`，按�
 派生身份被当作新 root 请求复用时返回 `STOP_REQUEST_ID_REUSED`。
 本地执行取消仅在物理提交后的 `afterCommit` 执行，其成败不改变已提交的停止事实。
 
-审批由 `decideToolApproval` 驱动，只在 Thread 处于 `ToolActive` 且目标工具处于 `WAITING_APPROVAL` 时接受：`ALLOWED` 转 `READY` 并安排 TOOL Work，`DENIED` 标记 `FAILED` 并唤醒 THREAD Work，两者都推进一次 Thread version；相同决策幂等重放，不同决策抛 `APPROVAL_DECISION_MISMATCH`。
+审批流转详见上文[审批决议与受管文件变更保护](#审批决议与受管文件变更保护)。
 
 内部人工输入工具 `ask_user` 的等待走独立状态：`ToolProcessor` 在锁内把 `READY` 冻结为 `WAITING_INPUT`（version +1、complete TOOL Work、不唤醒 THREAD，也不进入 preflight 或 Gateway），问卷由 Assistant ToolCall 的 arguments 冻结。`submitToolInput` 在单事务内锁定当前真实调用，校验它仍处于当前 `TOOL_ACTIVE` 上下文且为 `WAITING_INPUT`，按冻结问卷校验并规范化答案，答案与 submissionId / actor / acceptedAt 回执同事务落盘（答复或明确拒答都收敛为 `SUCCEEDED` 加 inputReceipt，且该回执引入后不可变），随后请求 THREAD Work 物化 ToolResult。答案非法、目标不适用、另一提交身份或不同答案分别抛 `INPUT_SUBMISSION_INVALID`、`INPUT_SUBMISSION_NOT_APPLICABLE` 与 `INPUT_SUBMISSION_MISMATCH`；本入口绝不接受 approval，provenance 由触发 `WAITING_INPUT` 时冻结的 binding 决定。`listPendingInteractions` 是只读投影：按 `(createdAt, id)` 稳定升序的 keyset 游标分页读取 `WAITING_INPUT` / `WAITING_APPROVAL` 两态，不新增持久化事实，产品 owner 与跳转由上层按 Session/Thread 解析。
 
@@ -308,7 +324,7 @@ terminalEntryId / finalAnswerEntryId / deliveryCommandSequence / createdAt / upd
 | --- | --- |
 | [`TurnResolver`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/TurnResolver.java) | 同步、无副作用、事务外的 turn 解析；输入 candidate `EntryPath`，输出冻结 spec 与 contextWindow / maxOutputTokens，或确定性 `Rejected`；异常表示临时基础设施故障，由 Processor reschedule |
 | [`ModelGateway`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/ModelGateway.java) | 准入 `Started` / `Busy` / `Rejected` / `Indeterminate` + 两阶段激活 `start -> activate` |
-| [`ToolGateway`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/ToolGateway.java) | `preflight` 返回 `Allow` / `Ask` / `Deny`，`start` 返回 `Started` / `RetryLater` / `Rejected` / `Indeterminate` |
+| [`ToolGateway`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/ToolGateway.java) | `preflight` 返回 `Allow` / `Ask(reason, editReview)` / `Deny`；`start` 接收携带非空 `ToolApproval` 的 `Execution`（含可选 `expectedFile`），返回 `Started` / `RetryLater` / `Rejected` / `Indeterminate` |
 | [`ToolResultHistoryMaterializer`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/ToolResultHistoryMaterializer.java) | 在 Tool outcome Entry 插入前、同一事务内把瞬时 Resource 外部化为 durable 内容；缺失时资源结果降级为 metadata-only 文本 |
 | [`RealtimeEventSink`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/RealtimeEventSink.java) | 有损 `MODEL_DELTA` / `TOOL_PARTIAL` 投影写入，`append` 与 `appendAll` 同为 best-effort，失败不回滚 checkpoint 或终态 |
 | [`ResourceStore`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/resource/ResourceStore.java) | 内容寻址二进制对象存取；不是运行时正确性的一部分 |

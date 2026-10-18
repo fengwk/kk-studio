@@ -31,10 +31,10 @@ POSIX 目录权限为 0700、敏感文件为 0600。`tmp/workspaces` 由受控�
 
 ## 能力装配与运行时调度
 
-装配阶段将静态能力集合冻结并注入运行时：
-- 编码能力：文件读写编辑（`fs.read`、`fs.write`、`fs.edit`）、文件与内容检索（`fs.find`、`fs.grep`）、命令执行（`process.exec`）；
+装配阶段冻结 11 项原子能力（9 项模型工具与 2 项内部能力）；IDE 是独立受管服务。能力目录版本为 3，envelope wire 版本为 4，READY payload 版本为 5：
+- 编码能力：文件读写编辑（`fs.read`、`fs.write`、`fs.edit`、内部审查能力 `fs.edit.preview`）、文件与内容检索（`fs.find`、`fs.grep`）、命令执行（`process.exec`）；
 - 语言服务：`lsp.goto-definition`、`lsp.workspace-symbols`、`lsp.java-decompile`；
-- 扩展与受管服务：内部 `skill.sync` 以及 IDE 服务（code-server）。
+- 扩展与受管服务：内部 `skill.sync` 以及受管 IDE 服务（code-server，通过 `IDE_COMMAND` 与 `IDE_RESULT` 进行生命周期与流控制）。
 
 运行时 [`Runtime`](../../daemon/src/runtime.ts) 通过 WebSocket 保持控制连接：
 - 连接握手强制协商 `permessage-deflate`，缺失时以 1010 关闭；仅传输文本帧，超阈值单帧以 1008 关闭。
@@ -71,7 +71,17 @@ POSIX 目录权限为 0700、敏感文件为 0600。`tmp/workspaces` 由受控�
 ### 文件与检索
 
 文件写入与编辑（[`files.ts`](../../daemon/src/coding/files.ts)）保留原有编码、BOM 与行尾，并通过 64-stripe 细粒度分段锁串行化同文件修改；原子写入临时文件后再替换目标文件（[`commit.ts`](../../daemon/src/coding/commit.ts)）。
+内部只读审查能力 `fs.edit.preview` 与 `fs.edit` 共享参数校验、解码、行尾检测与 diff 计算：
+
+- `fs.edit.preview` 在文件锁内读取原文件原始字节，计算 canonical 绝对路径、原始字节 SHA-256 与真实全量变更 diff（带行号），返回 `{path, diff, sha256}`；完整 diff 连同结果在序列化后若超过 details 上限（1 MiB），在 preview/commit 前直接拒绝，决不静默截断变更。
+- `fs.edit` 在文件锁内执行时，若 INVOKE 携带内部元数据 `expectedFile`（`{path, sha256}`），核对其与当前磁盘文件的绝对路径和 SHA-256；若文件在审查后已被变动，直接拒绝写入，防止授权陈旧变更；执行成功后在结果 `details.editReview` 携带 `{path, diff, sha256}`，供自动放行/YOLO 模式展示真实变更。
+
 检索（[`search.ts`](../../daemon/src/coding/search.ts)）在进程内直接完成遍历与匹配，支持分层 `.gitignore` 与 `.git/info/exclude`，不依赖外部 ripgrep/fd 二进制。
+
+### 受管 IDE 与反向数据流
+
+Daemon 受管运行内置的 code-server，响应 `IDE_COMMAND` 的 `OPEN_VIEW`、`CHANGE_DIRECTORY`、`FOCUS_TERMINAL`、`CLOSE_VIEW` 与 `OPEN_STREAM`，返回 `IDE_RESULT`。
+`OPEN_STREAM` 使用根相对路径 `/api/harness/environment-stream/v1/{ticket}?environment={id}`；Daemon 基于由 `studioUrl` 派生的 `gatewayUri` 解析目标地址与 TLS 端点，在 code-server 与 Studio 之间透传 HTTP 和 WebSocket 数据。
 
 ### LSP 语言服务
 

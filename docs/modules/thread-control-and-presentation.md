@@ -107,23 +107,25 @@ AgentPane：目标绑定、身份分流、pane 内查看路径、一次只读投
 Header 已展示的参数不在展开区重复；不添加“参数/输入/结果/输出”标题或重复成功说明。
 
 前端保留有序 Text/JSON/Resource 内容，不能压平为所有文本再附加所有附件。
-Text 忠实显示，JSON 格式化，Resource 按权威 MIME 渲染。原始 Entry/Invocation 封装只在
+Text 忠实显示，JSON 格式化，Resource 按权威 MIME 渲染；write/edit 的成功结果只显示本地化短提示，正文或 diff 留在调用审查区。原始 Entry/Invocation 封装只在
 Debug。展示不改变模型正文、Provider 协议、资源安全边界或既有结果大小限制。
 
 | 工具/结果 | 默认展示 |
 | --- | --- |
 | read 文本/目录、grep、find、LSP | Header；展开完整结果，过长滚动 |
 | read 图片 | Header 和图片预览；点击查看原件 |
-| write | Header 和写入正文；正文过长滚动 |
-| edit | Header 和执行前 diff；长 diff 滚动 |
+| write | Header 与完整写入正文默认展开；正文过长滚动，成功结果为“写入成功” |
+| edit | Header 与审查区默认展开；真实 diff 过长滚动，成功结果为“编辑成功” |
 | bash | Header 和输出滚动窗口 |
 | task | Header、prompt、可读执行链接 |
 | ask_user | 只读问题/回答记录；人工操作在根交互区 |
 | 其他工具/MCP | Header 内紧凑参数 JSON；结果默认折叠 |
 
-短参数只在 Header；必要大参数下移后不再重复。edit 用 old/new 生成拟执行修改预览，
-不另铺两份原文，不冒充已经执行成功的修改。根审批区复用该 diff 组件；`replace_all`
-等影响范围的参数可见。参数尚未完整不能当成最终审查材料。
+短参数只在 Header；必要大参数下移后不再重复。edit 参数流式生成时，old/new 明确标注为输入；
+流结束后等待服务端读取真实文件生成 `approvalJson.editReview`，再展示冻结的路径、行号与全部变更。
+根审批区复用同一审查组件；缺少或非法审查信息时禁止“允许”，仍可“拒绝”。`replace_all` 等影响范围的参数可见。
+时间线优先展示冻结的审批快照；自动放行/YOLO 使用实际结果的 `details.editReview`，不由前端合成真实 diff。
+write/edit 正文保留空白、只在审查区出现一次，成功结果不重复正文或 diff；真实失败仍展示原始错误信息。
 
 未知工具无需自定义 renderer。紧凑 JSON 不改变字符串内容，超长值限制在 Header 参数区域
 内查看和复制，不撑宽 pane。真实 false/0/空值不能被摘要过滤，不补未传入默认值。
