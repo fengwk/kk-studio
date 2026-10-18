@@ -164,7 +164,7 @@
   flex: 0 0 280px;
   display: flex;
   flex-direction: column;
-  background: var(--bg-subtle, rgba(255, 255, 255, 0.02));
+  background: var(--white-02);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   max-height: 100%;
@@ -277,7 +277,7 @@
 .issue-card-title-btn:focus-visible {
   outline: none;
   box-shadow: 0 0 0 2px var(--focus-ring);
-  border-radius: var(--radius-xs);
+  border-radius: var(--radius-sm);
 }
 
 .issue-title {
@@ -344,33 +344,33 @@
 }
 
 .badge-blocked {
-  background: var(--danger-soft, rgba(239, 68, 68, 0.15));
+  background: var(--danger-soft);
   color: var(--danger);
   border: 1px solid var(--danger);
 }
 
 .badge-waiting,
 .badge-paused {
-  background: var(--warning-soft, rgba(245, 158, 11, 0.15));
+  background: var(--warning-soft);
   color: var(--warning);
   border: 1px solid var(--warning);
 }
 
 .badge-failed {
-  background: var(--danger-soft, rgba(239, 68, 68, 0.2));
+  background: var(--danger-soft);
   color: var(--danger);
   border: 1px solid var(--danger);
 }
 
 .badge-unknown {
-  background: var(--info-soft, rgba(168, 85, 247, 0.15));
+  background: var(--info-soft);
   color: var(--info);
   border: 1px solid var(--info);
 }
 
 .badge-run,
 .badge-state {
-  background: var(--info-soft, rgba(14, 165, 233, 0.12));
+  background: var(--info-soft);
   color: var(--info);
   border: 1px solid var(--info);
 }
@@ -380,7 +380,7 @@
 }
 
 .badge-agent {
-  background: var(--accent-soft, rgba(99, 102, 241, 0.12));
+  background: var(--green-soft);
   color: var(--accent);
   border: 1px solid var(--accent);
 }
@@ -395,7 +395,7 @@
   margin-bottom: 12px;
   border: 1px solid var(--warning);
   border-radius: var(--radius-sm);
-  background: var(--warning-soft, rgba(245, 158, 11, 0.12));
+  background: var(--warning-soft);
   color: var(--fg);
   font-size: 13px;
 }
@@ -471,7 +471,7 @@
   padding: 16px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background: var(--bg-subtle);
+  background: var(--white-02);
 }
 
 .edit-project-section-title {
@@ -522,7 +522,7 @@
   padding: 8px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background: var(--bg-subtle);
+  background: var(--white-02);
 }
 
 .workflow-stage-row {
@@ -535,7 +535,7 @@
 
 .workflow-stage-row.is-active {
   border-color: var(--accent);
-  background: var(--surface-active, var(--surface-hover));
+  background: var(--surface-active);
 }
 
 .workflow-stage-select {
@@ -713,7 +713,7 @@
 }
 
 .activity-item.kind-comment {
-  border-left: 3px solid var(--success, var(--accent));
+  border-left: 3px solid var(--accent);
 }
 
 .activity-item-header {
