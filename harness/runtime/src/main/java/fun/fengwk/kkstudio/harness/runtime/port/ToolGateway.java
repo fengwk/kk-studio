@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.port;
 
 import fun.fengwk.kkstudio.harness.environment.capability.ExpectedFile;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEditReview;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
@@ -46,7 +47,7 @@ public interface ToolGateway {
       UUID assistantEntryId,
       int proposedAttempt,
       ToolInvocationRequest request,
-      ExpectedFile expectedFile) {
+      ToolApproval approval) {
 
     public Execution(
         UUID invocationId,
@@ -54,7 +55,13 @@ public interface ToolGateway {
         UUID assistantEntryId,
         int proposedAttempt,
         ToolInvocationRequest request) {
-      this(invocationId, threadId, assistantEntryId, proposedAttempt, request, null);
+      this(
+          invocationId,
+          threadId,
+          assistantEntryId,
+          proposedAttempt,
+          request,
+          ToolApproval.notRequired());
     }
 
     public Execution {
@@ -65,6 +72,12 @@ public interface ToolGateway {
         throw new IllegalArgumentException("proposedAttempt must be positive");
       }
       request = Objects.requireNonNull(request, "request");
+      approval = Objects.requireNonNull(approval, "approval");
+    }
+
+    public ExpectedFile expectedFile() {
+      ToolEditReview editReview = approval.editReview();
+      return editReview == null ? null : editReview.expectedFile();
     }
   }
 

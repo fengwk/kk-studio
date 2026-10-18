@@ -15,6 +15,10 @@ import static org.mockito.Mockito.spy;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.environment.capability.ExpectedFile;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEditReview;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
@@ -262,6 +266,67 @@ class ToolProcessorPreflightTest {
     assertEquals(
         ToolInvocationStatus.RUNNING,
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
+  }
+
+  /**
+   * Processor Ask(review) 冻结后 ALLOWED 第二次 process： Gateway Execution 持有相同 approval 与 expectedFile。
+   */
+  @Test
+  void askWithEditReviewFrozenThenAllowedDispatchesWithSameApprovalAndExpectedFile() {
+    ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.fixture();
+    ExpectedFile expectedFile =
+        new ExpectedFile(
+            "/workspace/src/App.java",
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+    ToolEditReview editReview = new ToolEditReview(expectedFile, "-old\n+new");
+    fixture.gateway.queuePreflightAsk("needs review", editReview);
+
+    assertEquals(
+        ProcessResult.TERMINATED,
+        fixture.processor.process(
+            ToolProcessorTestSupport.claim(
+                fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW)));
+
+    ToolInvocation toolWaiting =
+        ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
+    assertEquals(ToolInvocationStatus.WAITING_APPROVAL, toolWaiting.status());
+    assertNotNull(toolWaiting.approval());
+    assertTrue(toolWaiting.approval().required());
+    assertEquals(editReview, toolWaiting.approval().editReview());
+
+    UUID decisionId = UUID.randomUUID();
+    ToolProcessorTestSupport.transition(
+        fixture.store,
+        fixture.toolInvocationId,
+        tool ->
+            tool.decideApproval(
+                ToolApprovalDecision.ALLOWED,
+                decisionId,
+                "user",
+                "looks good",
+                ToolProcessorTestSupport.NOW.plusSeconds(1),
+                ToolProcessorTestSupport.NOW.plusSeconds(2)));
+    ToolProcessorTestSupport.requestToolWork(fixture, ToolProcessorTestSupport.NOW.plusSeconds(2));
+
+    ToolInvocation toolReady =
+        ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
+    assertEquals(ToolInvocationStatus.READY, toolReady.status());
+    ToolApproval frozenApproval = toolReady.approval();
+    assertNotNull(frozenApproval);
+
+    fixture.gateway.queueStart(new ToolGateway.Started(new ToolProcessorTestSupport.FakeHandle()));
+    assertEquals(
+        ProcessResult.STARTED,
+        fixture.processor.process(
+            ToolProcessorTestSupport.claim(
+                fixture.store,
+                fixture.toolInvocationId,
+                ToolProcessorTestSupport.NOW.plusSeconds(3))));
+
+    assertEquals(1, fixture.gateway.executions.size());
+    ToolGateway.Execution execution = fixture.gateway.executions.get(0);
+    assertEquals(frozenApproval, execution.approval());
+    assertEquals(expectedFile, execution.expectedFile());
   }
 
   /**
