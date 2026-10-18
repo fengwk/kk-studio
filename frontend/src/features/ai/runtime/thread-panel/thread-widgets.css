@@ -2,9 +2,9 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
-  border: 1px solid var(--border-subtle, rgba(148, 163, 184, 0.25));
+  border: 1px solid var(--border);
   border-radius: 10px;
-  background: var(--surface-raised, rgba(148, 163, 184, 0.06));
+  background: var(--surface-raised);
   overflow: hidden;
 }
 
@@ -14,7 +14,7 @@
   justify-content: space-between;
   gap: 8px;
   padding: 6px 10px;
-  border-bottom: 1px solid var(--border-subtle, rgba(148, 163, 184, 0.18));
+  border-bottom: 1px solid var(--border);
 }
 
 .thread-widget-panel-title {
@@ -22,7 +22,7 @@
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.02em;
-  color: var(--text-muted, #94a3b8);
+  color: var(--fg-muted);
 }
 
 .thread-widget-panel-actions {
@@ -30,7 +30,7 @@
   align-items: center;
   gap: 6px;
   font-size: 12px;
-  color: var(--text-muted, #94a3b8);
+  color: var(--fg-muted);
 }
 
 .thread-widget-panel-body {

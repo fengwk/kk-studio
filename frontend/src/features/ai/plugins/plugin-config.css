@@ -4,19 +4,19 @@
 }
 
 .plugin-config-modal > .modal-footer {
-  gap: var(--space-2, 8px);
+  gap: var(--space-2);
 }
 
 .plugin-config-mode-switch {
   display: flex;
   justify-content: flex-end;
-  margin-bottom: var(--space-3, 12px);
+  margin-bottom: var(--space-3);
 }
 
 .plugin-config-section {
-  margin-bottom: var(--space-4, 16px);
-  padding-bottom: var(--space-4, 16px);
-  border-bottom: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+  margin-bottom: var(--space-4);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--border);
 }
 
 .plugin-config-section:last-of-type {
@@ -24,10 +24,10 @@
 }
 
 .plugin-config-section-title {
-  font-size: var(--font-size-base, 14px);
+  font-size: var(--font-size-base);
   font-weight: 600;
-  margin-bottom: var(--space-3, 12px);
-  color: var(--text-primary, #fff);
+  margin-bottom: var(--space-3);
+  color: var(--fg);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -36,22 +36,22 @@
 .plugin-config-field-group {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3, 12px);
+  gap: var(--space-3);
 }
 
 .plugin-config-fieldset {
-  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
-  border-radius: var(--radius-md, 8px);
-  padding: var(--space-3, 12px);
-  margin-bottom: var(--space-3, 12px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  margin-bottom: var(--space-3);
   min-width: 0;
 }
 
 .plugin-config-fieldset legend {
-  font-size: var(--font-size-sm, 12px);
+  font-size: var(--font-size-sm);
   font-weight: 500;
-  color: var(--text-secondary, #a1a1aa);
-  padding: 0 var(--space-2, 8px);
+  color: var(--fg-muted);
+  padding: 0 var(--space-2);
   max-width: 100%;
   overflow-wrap: anywhere;
 }
@@ -59,11 +59,11 @@
 .plugin-config-secret-item {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2, 8px);
-  padding: var(--space-3, 12px);
-  background: var(--surface-subtle, rgba(255, 255, 255, 0.03));
-  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
-  border-radius: var(--radius-md, 8px);
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--white-04);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
 }
 
 .plugin-config-secret-header {
@@ -74,28 +74,28 @@
 
 .plugin-config-secret-name {
   font-weight: 600;
-  font-size: var(--font-size-sm, 13px);
-  color: var(--text-primary, #fff);
+  font-size: var(--font-size-base);
+  color: var(--fg);
 }
 
 .plugin-config-secret-desc {
-  font-size: var(--font-size-xs, 12px);
-  color: var(--text-secondary, #a1a1aa);
+  font-size: var(--font-size-sm);
+  color: var(--fg-muted);
 }
 
 .plugin-config-secret-actions {
   display: flex;
-  gap: var(--space-2, 8px);
+  gap: var(--space-2);
   align-items: center;
 }
 
 .plugin-config-secret-input {
-  margin-top: var(--space-2, 8px);
+  margin-top: var(--space-2);
 }
 
 .plugin-config-json-textarea {
-  font-family: var(--font-mono, monospace);
-  font-size: var(--font-size-xs, 12px);
+  font-family: var(--mono);
+  font-size: var(--font-size-sm);
   line-height: 1.5;
   width: 100%;
   min-height: 220px;
@@ -103,23 +103,23 @@
 }
 
 .plugin-config-conflict-banner {
-  background: var(--surface-danger-subtle, rgba(239, 68, 68, 0.1));
-  border: 1px solid var(--border-danger, rgba(239, 68, 68, 0.3));
-  color: var(--text-danger, #ef4444);
-  padding: var(--space-3, 12px);
-  border-radius: var(--radius-md, 8px);
-  margin-bottom: var(--space-3, 12px);
-  font-size: var(--font-size-sm, 13px);
+  background: var(--danger-soft);
+  border: 1px solid var(--danger-border);
+  color: var(--danger);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-3);
+  font-size: var(--font-size-base);
 }
 
 .plugin-config-warning-banner {
-  background: var(--surface-warning-subtle, rgba(245, 158, 11, 0.1));
-  border: 1px solid var(--border-warning, rgba(245, 158, 11, 0.3));
-  color: var(--text-warning, #f59e0b);
-  padding: var(--space-3, 12px);
-  border-radius: var(--radius-md, 8px);
-  margin-bottom: var(--space-3, 12px);
-  font-size: var(--font-size-sm, 13px);
+  background: var(--warning-soft);
+  border: 1px solid var(--warning-border);
+  color: var(--warning);
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-3);
+  font-size: var(--font-size-base);
 }
 
 /* 字段标题行：左侧是标签，右侧是该字段的显式动作（省略、展开编辑器）。 */
@@ -128,7 +128,7 @@
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-1, 4px) var(--space-2, 8px);
+  gap: var(--space-1) var(--space-2);
   min-width: 0;
 }
 
@@ -141,7 +141,7 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-1, 4px);
+  gap: var(--space-1);
   flex: 0 0 auto;
   margin-left: auto;
   max-width: 100%;
@@ -151,13 +151,13 @@
 .plugin-config-text-editor {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2, 8px);
+  gap: var(--space-2);
   min-width: 0;
 }
 
 .plugin-config-text-editor-area {
-  font-family: var(--font-mono, monospace);
-  font-size: var(--font-size-xs, 12px);
+  font-family: var(--mono);
+  font-size: var(--font-size-sm);
   max-height: 320px;
   resize: vertical;
 }
@@ -166,7 +166,7 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-2, 8px);
+  gap: var(--space-2);
   min-width: 0;
 }
 
@@ -182,22 +182,22 @@
 .plugin-config-array-items {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3, 12px);
+  gap: var(--space-3);
   min-width: 0;
 }
 
 .plugin-config-array-item {
-  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
-  border-radius: var(--radius-sm, 6px);
-  padding: var(--space-3, 12px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
   min-width: 0;
 }
 
 .plugin-config-array-item legend {
-  font-size: var(--font-size-xs, 12px);
-  font-family: var(--font-mono, monospace);
-  color: var(--text-secondary, #a1a1aa);
-  padding: 0 var(--space-1, 4px);
+  font-size: var(--font-size-sm);
+  font-family: var(--mono);
+  color: var(--fg-muted);
+  padding: 0 var(--space-1);
   max-width: 100%;
   overflow-wrap: anywhere;
 }
@@ -205,15 +205,15 @@
 .plugin-config-array-item-actions {
   display: flex;
   justify-content: flex-end;
-  margin-bottom: var(--space-2, 8px);
+  margin-bottom: var(--space-2);
 }
 
 .plugin-config-array-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-2, 8px);
-  margin-top: var(--space-3, 12px);
+  gap: var(--space-2);
+  margin-top: var(--space-3);
 }
 
 /* 操作名包含 schema 字段名：窄屏时在按钮内换行，保持文字与点击区域完整。 */
@@ -222,6 +222,6 @@
   min-width: 0;
   height: auto;
   min-height: 28px;
-  padding-block: var(--space-1, 4px);
+  padding-block: var(--space-1);
   overflow-wrap: anywhere;
 }

@@ -6,8 +6,8 @@
 .plugin-check-facts {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-3, 12px);
-  margin-bottom: var(--space-3, 12px);
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
 }
 
 .plugin-check-fact {
@@ -18,21 +18,21 @@
 }
 
 .plugin-check-fact-label {
-  font-size: var(--font-size-sm, 12px);
-  color: var(--text-secondary, #a1a1aa);
+  font-size: var(--font-size-sm);
+  color: var(--fg-muted);
 }
 
 .plugin-check-fact-value {
-  font-size: var(--font-size-base, 14px);
-  color: var(--text-primary, #fff);
+  font-size: var(--font-size-base);
+  color: var(--fg);
   overflow-wrap: anywhere;
 }
 
 .plugin-check-dimensions {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2, 8px);
-  margin: var(--space-3, 12px) 0 0;
+  gap: var(--space-2);
+  margin: var(--space-3) 0 0;
   padding: 0;
 }
 
@@ -40,39 +40,39 @@
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: var(--space-3, 12px);
-  padding: var(--space-2, 8px) var(--space-3, 12px);
-  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
-  border-radius: var(--radius-md, 8px);
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
 }
 
 .plugin-check-dimension dt {
-  font-size: var(--font-size-sm, 12px);
-  color: var(--text-secondary, #a1a1aa);
+  font-size: var(--font-size-sm);
+  color: var(--fg-muted);
 }
 
 .plugin-check-dimension dd {
   margin: 0;
-  font-size: var(--font-size-base, 14px);
-  color: var(--text-primary, #fff);
+  font-size: var(--font-size-base);
+  color: var(--fg);
   text-align: right;
   overflow-wrap: anywhere;
 }
 
 .plugin-check-conflict {
-  padding: var(--space-3, 12px);
-  margin-bottom: var(--space-3, 12px);
-  border: 1px solid var(--border-warning, rgba(245, 158, 11, 0.3));
-  border-radius: var(--radius-md, 8px);
-  background: var(--surface-warning-subtle, rgba(245, 158, 11, 0.1));
-  color: var(--text-warning, #f59e0b);
-  font-size: var(--font-size-sm, 13px);
+  padding: var(--space-3);
+  margin-bottom: var(--space-3);
+  border: 1px solid var(--warning-border);
+  border-radius: var(--radius-md);
+  background: var(--warning-soft);
+  color: var(--warning);
+  font-size: var(--font-size-base);
   line-height: 1.5;
 }
 
 .plugin-check-stale {
-  margin-bottom: var(--space-3, 12px);
-  color: var(--text-secondary, #a1a1aa);
-  font-size: var(--font-size-sm, 13px);
+  margin-bottom: var(--space-3);
+  color: var(--fg-muted);
+  font-size: var(--font-size-base);
   line-height: 1.5;
 }

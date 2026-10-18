@@ -19,8 +19,8 @@
 .thread-readonly-badge {
   margin-inline-start: 8px;
   padding: 1px 6px;
-  border: 1px solid var(--border-subtle, rgba(128, 128, 128, 0.35));
+  border: 1px solid var(--border);
   border-radius: 999px;
   font-size: 11px;
-  color: var(--text-muted, rgba(128, 128, 128, 1));
+  color: var(--fg-muted);
 }
