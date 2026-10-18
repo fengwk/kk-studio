@@ -86,6 +86,7 @@ Vite 默认只监听 `127.0.0.1` 并使用自带 Host allowlist。需要容器�
 | 触发关键类覆盖率门禁 | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp verify` |
 | 离线升级子进程验收（默认 classpath 模式） | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl web -am test -Dtest=WebApplicationDatabaseUpgradeSubprocessTest -Dsurefire.failIfNoSpecifiedTests=false` |
 | 离线升级子进程验收（Fat JAR 产物模式） | 同上追加 `'-Dkkstudio.upgrade.test.jar=<absolute web/target/kk-studio-web-<version>.jar>'`；两种模式都要求全部用例真实通过 |
+| 同源 IDE 真实整链验收（需独立 Postgres 与受控 code-server） | `env JAVA_HOME="$JAVA_HOME_21" KK_STUDIO_IDE_ACCEPTANCE_DIR=<dir> KK_STUDIO_PLAYWRIGHT_MODULE_DIR=<dir> mvn -B -ntp -pl web -am test -Dtest=IdeRealBrowserAcceptanceTest -Dsurefire.failIfNoSpecifiedTests=false` |
 | 只格式化本次改动的 Java 文件 | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl <module> spotless:apply '-DspotlessFiles=<file-regex>'` |
 | 前端单元测试 / lint / 类型与构建 / 覆盖率 | `npm --prefix frontend run test`、`run lint`、`run typecheck`、`run typecheck:test`、`run build`、`run coverage` |
 | Daemon 单元测试与覆盖率 | 先 `npm --prefix daemon ci`，再 `npm --prefix daemon run test`、`run coverage`（Node 24）
@@ -313,12 +314,15 @@ npm --prefix frontend run build:layout
     browser-tests/chat-defaults.pw.ts browser-tests/composer-focus.pw.ts \
     browser-tests/debug-responsive-layout.pw.ts browser-tests/debug-preview-title.pw.ts \
     browser-tests/loading-skeleton.pw.ts browser-tests/retry-controls.pw.ts \
-    browser-tests/canvas-library.pw.ts browser-tests/interactions.pw.ts
+    browser-tests/canvas-library.pw.ts browser-tests/interactions.pw.ts \
+    browser-tests/mutation-review.pw.ts browser-tests/ide-overlay.pw.ts
 )
 ```
 
 这些用例验证新建/编辑默认值与显式清空、首次接受后的编辑器重挂载与临时禁用恢复、
-模态框和多 pane 防抢焦、等宽 Debug 列与 Subagent 配置详情，以及骨架屏、按钮忙碌状态和窄屏布局。
+模态框和多 pane 防抢焦、等宽 Debug 列与 Subagent 配置详情、骨架屏、按钮忙碌状态和窄屏布局，
+以及 write/edit 审查卡片（完整正文展示、准备中 spinner、真实文件 diff 与成功短文案呈现）和
+同源 IDE 覆盖层面板的显示、折叠与焦点恢复。
 API 规划与代理切换由后端定向测试验证，不以静态浏览器基座替代真实服务契约。
 
 Thread 控制与消息展示有独立的离线 Chromium 入口，可按改动范围选择：
