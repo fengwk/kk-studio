@@ -193,6 +193,6 @@ describe('real websocket transport', () => {
 
 function invokeJson(args: Record<string, unknown>): Record<string, unknown> {
   return JSON.parse(
-    encodeInvoke({ capabilityId: 'fs.read', capabilityVersion: '2', arguments: args, timeoutMillis: 0 }),
+    encodeInvoke({ capabilityId: 'fs.read', capabilityVersion: '3', arguments: args, timeoutMillis: 0 }),
   ) as Record<string, unknown>
 }

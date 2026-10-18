@@ -201,16 +201,16 @@ describe('capability INVOKE codec', () => {
 
   it('rejects unknown fields, bad capability ids and negative timeouts', () => {
     expect(() =>
-      decodeInvoke(JSON.stringify({ capabilityId: 'fs.read', capabilityVersion: '2', arguments: {}, timeoutMillis: 1, extra: 1 })),
+      decodeInvoke(JSON.stringify({ capabilityId: 'fs.read', capabilityVersion: '3', arguments: {}, timeoutMillis: 1, extra: 1 })),
     ).toThrow(/unknown field/)
     expect(() =>
-      decodeInvoke(JSON.stringify({ capabilityId: 'FS READ', capabilityVersion: '2', arguments: {}, timeoutMillis: 1 })),
+      decodeInvoke(JSON.stringify({ capabilityId: 'FS READ', capabilityVersion: '3', arguments: {}, timeoutMillis: 1 })),
     ).toThrow(/canonical syntax/)
     expect(() =>
-      decodeInvoke(JSON.stringify({ capabilityId: 'fs.read', capabilityVersion: '2', arguments: [], timeoutMillis: 1 })),
+      decodeInvoke(JSON.stringify({ capabilityId: 'fs.read', capabilityVersion: '3', arguments: [], timeoutMillis: 1 })),
     ).toThrow(/must be a JSON object/)
     expect(() =>
-      decodeInvoke(JSON.stringify({ capabilityId: 'fs.read', capabilityVersion: '2', arguments: {}, timeoutMillis: -1 })),
+      decodeInvoke(JSON.stringify({ capabilityId: 'fs.read', capabilityVersion: '3', arguments: {}, timeoutMillis: -1 })),
     ).toThrow(/non-negative/)
   })
 

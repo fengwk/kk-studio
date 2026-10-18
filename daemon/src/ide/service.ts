@@ -244,12 +244,12 @@ export function resolveRelativeStream(config: DaemonConfig, streamUrl: string, t
   if (!streamUrl.startsWith('/') || streamUrl.startsWith('//') || /[\\\s]/.test(streamUrl)) {
     throw new IdeError('streamUrl is invalid')
   }
-  const match = /^\/api\/harness\/environment-stream\/v1\/([A-Za-z0-9_-]*)(\?environment=[A-Za-z0-9-]+)?$/.exec(streamUrl)
+  const match = /^\/api\/harness\/environment-stream\/v1\/([A-Za-z0-9_-]+)(\?environment=[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?$/.exec(streamUrl)
   if (!match) {
     throw new IdeError('streamUrl is not a stream endpoint')
   }
-  const streamTicket = match[1] || ticket
-  if (!streamTicket || !/^[A-Za-z0-9_-]+$/.test(streamTicket) || (ticket && ticket !== streamTicket)) {
+  const streamTicket = match[1]
+  if (ticket !== undefined && ticket !== streamTicket) {
     throw new IdeError('streamUrl ticket does not match')
   }
   const gateway = new URL(config.gatewayUri)
