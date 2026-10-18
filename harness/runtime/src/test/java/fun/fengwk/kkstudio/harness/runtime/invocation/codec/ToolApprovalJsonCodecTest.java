@@ -7,8 +7,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.environment.capability.ExpectedFile;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEditReview;
 
 import java.time.Instant;
 
@@ -50,6 +52,38 @@ class ToolApprovalJsonCodecTest {
         codec.encode(decided));
     assertEquals(decided, codec.decode(codec.encode(decided)));
     assertEquals(decided, codec.decodeNode(codec.encodeNode(decided)));
+
+    ToolEditReview review =
+        new ToolEditReview(
+            new ExpectedFile(
+                "/srv/app.java",
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"),
+            "-old\n+new");
+    ToolApproval undecidedWithReview = ToolApproval.request(REQUESTED_AT, "Review edit", review);
+    assertEquals(
+        "{\"required\":true,\"decision\":null,\"decisionId\":null,\"actor\":null,"
+            + "\"reason\":\"Review edit\",\"requestedAt\":\"2026-08-04T00:00:00Z\","
+            + "\"decidedAt\":null,\"editReview\":{\"path\":\"/srv/app.java\","
+            + "\"diff\":\"-old\\n+new\","
+            + "\"sha256\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"}}",
+        codec.encode(undecidedWithReview));
+    assertEquals(undecidedWithReview, codec.decode(codec.encode(undecidedWithReview)));
+    assertEquals(undecidedWithReview, codec.decodeNode(codec.encodeNode(undecidedWithReview)));
+
+    ToolApproval decidedWithReview =
+        undecidedWithReview.decide(
+            ToolApprovalDecision.ALLOWED, id(1L), "alice", "Approved", DECIDED_AT);
+    assertEquals(
+        "{\"required\":true,\"decision\":\"ALLOWED\","
+            + "\"decisionId\":\"00000000-0000-0000-0000-000000000001\","
+            + "\"actor\":\"alice\",\"reason\":\"Approved\","
+            + "\"requestedAt\":\"2026-08-04T00:00:00Z\","
+            + "\"decidedAt\":\"2026-08-04T00:00:01.123456Z\","
+            + "\"editReview\":{\"path\":\"/srv/app.java\","
+            + "\"diff\":\"-old\\n+new\","
+            + "\"sha256\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"}}",
+        codec.encode(decidedWithReview));
+    assertEquals(decidedWithReview, codec.decode(codec.encode(decidedWithReview)));
   }
 
   /** 严格 parser 设置独立于 approval 语义拒绝畸形文档。 */
@@ -101,6 +135,26 @@ class ToolApprovalJsonCodecTest {
         "{\"required\":true,\"decision\":\"DENIED\",\"decisionId\":\"d\",\"actor\":null,"
             + "\"reason\":null,\"requestedAt\":\"2026-08-04T00:00:00Z\","
             + "\"decidedAt\":\"2026-08-04T00:00:01Z\"}");
+    assertInvalid(
+        "{\"required\":false,\"decision\":null,\"decisionId\":null,\"actor\":null,"
+            + "\"reason\":null,\"requestedAt\":null,\"decidedAt\":null,\"editReview\":null}");
+    assertInvalid(
+        "{\"required\":false,\"decision\":null,\"decisionId\":null,\"actor\":null,"
+            + "\"reason\":null,\"requestedAt\":null,\"decidedAt\":null,"
+            + "\"editReview\":{\"path\":\"/a\",\"diff\":\"d\","
+            + "\"sha256\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"}}");
+    assertInvalid(
+        "{\"required\":true,\"decision\":null,\"decisionId\":null,\"actor\":null,"
+            + "\"reason\":null,\"requestedAt\":\"2026-08-04T00:00:00Z\",\"decidedAt\":null,"
+            + "\"editReview\":{\"path\":\"/a\",\"diff\":\"d\",\"sha256\":\"invalid-sha\"}}");
+    assertInvalid(
+        "{\"required\":true,\"decision\":null,\"decisionId\":null,\"actor\":null,"
+            + "\"reason\":null,\"requestedAt\":\"2026-08-04T00:00:00Z\",\"decidedAt\":null,"
+            + "\"editReview\":{\"path\":\"/a\",\"diff\":\"d\"}}");
+    assertInvalid(
+        "{\"required\":true,\"decision\":null,\"decisionId\":null,\"actor\":null,"
+            + "\"reason\":null,\"requestedAt\":\"2026-08-04T00:00:00Z\",\"decidedAt\":null,"
+            + "\"editReview\":[]}");
   }
 
   private void assertInvalid(String json) {
