@@ -1799,6 +1799,42 @@ export const aiCatalog = {
     'en-US': 'Permission rules require approval',
     'zh-CN': '权限规则要求审批',
   },
+  'ai.runtime.mutation.writeSuccess': {
+    'en-US': 'Write succeeded',
+    'zh-CN': '写入成功',
+  },
+  'ai.runtime.mutation.editSuccess': {
+    'en-US': 'Edit succeeded',
+    'zh-CN': '编辑成功',
+  },
+  'ai.runtime.mutation.preparing': {
+    'en-US': 'Preparing diff review…',
+    'zh-CN': '正在准备审查 Diff…',
+  },
+  'ai.runtime.mutation.inputLabel': {
+    'en-US': 'Streamed input (awaiting review)',
+    'zh-CN': '流式输入内容（等待审查）',
+  },
+  'ai.runtime.mutation.oldString': {
+    'en-US': 'Original text (old_string):',
+    'zh-CN': '原文本 (old_string)：',
+  },
+  'ai.runtime.mutation.newString': {
+    'en-US': 'New text (new_string):',
+    'zh-CN': '新文本 (new_string)：',
+  },
+  'ai.runtime.mutation.targetPath': {
+    'en-US': 'Target file:',
+    'zh-CN': '目标文件：',
+  },
+  'ai.runtime.mutation.workdir': {
+    'en-US': 'Working directory:',
+    'zh-CN': '工作目录：',
+  },
+  'ai.runtime.mutation.reviewMissing': {
+    'en-US': 'Edit review missing or invalid; cannot allow.',
+    'zh-CN': '未获取到有效的编辑审查信息，无法允许。',
+  },
   'ai.interaction.viewSource': { 'en-US': 'View source', 'zh-CN': '查看来源' },
   'ai.runtime.thread.status.STOPPED': {
     'en-US': 'Stopped',
