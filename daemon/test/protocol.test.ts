@@ -213,6 +213,89 @@ describe('capability INVOKE codec', () => {
       decodeInvoke(JSON.stringify({ capabilityId: 'fs.read', capabilityVersion: '2', arguments: {}, timeoutMillis: -1 })),
     ).toThrow(/non-negative/)
   })
+
+  it('round-trips expectedFile for fs.edit', () => {
+    const validSha256 = 'a'.repeat(64)
+    const text = encodeInvoke({
+      capabilityId: 'fs.edit',
+      capabilityVersion: CAPABILITY_CATALOG_VERSION,
+      arguments: { path: '/tmp/test.txt', old_string: 'a', new_string: 'b' },
+      timeoutMillis: 1000,
+      expectedFile: { path: '/tmp/test.txt', sha256: validSha256 },
+    })
+    const decoded = decodeInvoke(text)
+    expect(decoded.capabilityId).toBe('fs.edit')
+    expect(decoded.expectedFile).toEqual({ path: '/tmp/test.txt', sha256: validSha256 })
+  })
+
+  it('rejects expectedFile on non-fs.edit, bad shapes, unknown fields and invalid sha256', () => {
+    const validSha256 = 'f'.repeat(64)
+
+    // 1. non-fs.edit capability
+    expect(() =>
+      decodeInvoke(JSON.stringify({
+        capabilityId: 'fs.write',
+        capabilityVersion: '3',
+        arguments: {},
+        timeoutMillis: 0,
+        expectedFile: { path: '/tmp/a', sha256: validSha256 },
+      })),
+    ).toThrow(/expectedFile is only valid for fs\.edit/)
+
+    // 2. null / non-object expectedFile
+    expect(() =>
+      decodeInvoke(JSON.stringify({
+        capabilityId: 'fs.edit',
+        capabilityVersion: '3',
+        arguments: {},
+        timeoutMillis: 0,
+        expectedFile: null,
+      })),
+    ).toThrow(/must be a JSON object/)
+
+    // 3. unknown fields in expectedFile
+    expect(() =>
+      decodeInvoke(JSON.stringify({
+        capabilityId: 'fs.edit',
+        capabilityVersion: '3',
+        arguments: {},
+        timeoutMillis: 0,
+        expectedFile: { path: '/tmp/a', sha256: validSha256, extra: 'bad' },
+      })),
+    ).toThrow(/unknown field/)
+
+    // 4. uppercase or non-hex sha256 syntax
+    expect(() =>
+      decodeInvoke(JSON.stringify({
+        capabilityId: 'fs.edit',
+        capabilityVersion: '3',
+        arguments: {},
+        timeoutMillis: 0,
+        expectedFile: { path: '/tmp/a', sha256: 'A'.repeat(64) },
+      })),
+    ).toThrow(/lowercase SHA-256/)
+
+    expect(() =>
+      decodeInvoke(JSON.stringify({
+        capabilityId: 'fs.edit',
+        capabilityVersion: '3',
+        arguments: {},
+        timeoutMillis: 0,
+        expectedFile: { path: '/tmp/a', sha256: 'g'.repeat(64) },
+      })),
+    ).toThrow(/lowercase SHA-256/)
+
+    // 5. bad length sha256
+    expect(() =>
+      decodeInvoke(JSON.stringify({
+        capabilityId: 'fs.edit',
+        capabilityVersion: '3',
+        arguments: {},
+        timeoutMillis: 0,
+        expectedFile: { path: '/tmp/a', sha256: 'abc' },
+      })),
+    ).toThrow(/lowercase SHA-256/)
+  })
 })
 
 describe('capability result codec', () => {
