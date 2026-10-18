@@ -31,6 +31,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class CanvasFunctionWorker {
 
   private static final String PUBLIC_FAILURE = "Function execution failed";
+  private static final String CATALOG_CHANGED =
+      "Function is no longer available or its definition changed; start it again";
   private static final String AMBIGUOUS_SUBMISSION =
       "external submission outcome is unknown; manual verification required";
 
@@ -118,16 +120,27 @@ public class CanvasFunctionWorker {
   }
 
   /**
-   * 按冻结绑定的目录 epoch 取得租用，并持有整个 submit/query/checkpoint/complete 期间。
+   * 在当前目录租用中执行，租用持有整个 submit/query/checkpoint/complete 期间。
    *
-   * <p>恢复路径只能通过 {@link CanvasFunctionCatalogSource.Lease#require} 取回同一 epoch、同一完整定义与来源的 adapter 实例；
-   * epoch 已不可用或绑定漂移都会拒绝执行，而不是按函数名换用当前版本。
+   * <p>尚未提交的 Run 要求函数定义与冻结定义一致，否则失败、不发出外部请求；已提交的 Run 只需同名函数仍存在，用于继续查询外部任务结果，绝不重新提交。
    */
   private void execute(
       ClaimedRun claim, AtomicBoolean ownershipLost, CanvasFunctionFrozenRun frozen) {
-    try (CanvasFunctionCatalogSource.Lease lease =
-        catalogSource.acquire(frozen.binding().catalogEpoch())) {
-      CanvasFunctionCatalog.RegisteredFunction registered = lease.require(frozen.binding());
+    try (CanvasFunctionCatalogSource.Lease lease = catalogSource.acquire()) {
+      CanvasFunctionCatalog.RegisteredFunction registered =
+          frozen.submitted()
+              ? lease
+                  .catalog()
+                  .find(frozen.binding().definition().name())
+                  .orElseThrow(
+                      () ->
+                          new CanvasFunctionUnknownException(
+                              "Canvas Function was removed after submission; verify the external"
+                                  + " result manually"))
+              : requireUnchanged(lease, claim, frozen);
+      if (registered == null) {
+        return;
+      }
       registered.requireAvailable();
       CanvasFunctionExecutionContextImpl context =
           new CanvasFunctionExecutionContextImpl(
@@ -155,6 +168,18 @@ public class CanvasFunctionWorker {
             "adapter result must equal the frozen output plan, in order");
       }
       transactions.completeSuccess(context.currentRun(), claim.leaseToken(), result);
+    }
+  }
+
+  /** 未提交的 Run 遇到函数被移除或定义变化时直接失败，并给出可操作的说明。 */
+  private CanvasFunctionCatalog.RegisteredFunction requireUnchanged(
+      CanvasFunctionCatalogSource.Lease lease, ClaimedRun claim, CanvasFunctionFrozenRun frozen) {
+    try {
+      return lease.require(frozen.binding());
+    } catch (IllegalStateException changed) {
+      transactions.failIfRunning(
+          claim.nodeId(), claim.requestId().toString(), claim.leaseToken(), CATALOG_CHANGED);
+      return null;
     }
   }
 

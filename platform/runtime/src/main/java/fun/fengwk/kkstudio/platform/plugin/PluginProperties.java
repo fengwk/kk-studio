@@ -24,9 +24,6 @@ public class PluginProperties {
   /** 单次暂存的硬上限：1 GiB。超过它的配置被拒绝，避免把部署变成无界磁盘写入。 */
   public static final long MAX_BYTES_LIMIT = 1024L * 1024L * 1024L;
 
-  /** Plugin 凭据 AES-256-GCM 主密钥的 owner-only 绝对文件；留空表示本部署不提供凭据能力，读写 fail closed。 */
-  private String credentialKeyFile;
-
   /** 凭据刷新扫描与互斥 lease。 */
   private Refresh refresh = new Refresh();
 

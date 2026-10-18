@@ -613,7 +613,6 @@ class ModelRequestDebugServiceTest {
 
   private static ModelRequestSpec requestSpec() {
     return new ModelRequestSpec(
-        1L,
         ProviderType.OPENAI,
         new UUID(0L, 42L),
         new ModelDescriptor(

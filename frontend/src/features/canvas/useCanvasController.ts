@@ -743,7 +743,6 @@ export function useCanvasController(initialCanvasId?: UUIDString) {
     const version = modelsQuery.data?.find((item) => item.name === functionName)?.version
     return version
       ? {
-          catalogEpoch: version.catalogEpoch,
           definitionFingerprint: version.definitionFingerprint,
         }
       : null

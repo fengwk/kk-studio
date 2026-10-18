@@ -557,7 +557,7 @@ class MediaFunctionAdapterTest {
         UUID.randomUUID(),
         "CropNode",
         UUID.randomUUID(),
-        new CanvasFunctionBinding(1L, definition, null),
+        new CanvasFunctionBinding(definition),
         args,
         manifest,
         outputs,

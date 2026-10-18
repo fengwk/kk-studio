@@ -28,7 +28,7 @@ class PlatformHarnessTestConfigurationTest {
     RuntimeToolCatalogSource source =
         new PlatformHarnessTestConfiguration()
             .runtimeToolCatalogSource(HarnessCatalog.from(List.of()), mcpCatalog);
-    try (RuntimeToolCatalogSource.Lease before = source.acquireCurrent()) {
+    try (RuntimeToolCatalogSource.Lease before = source.acquire()) {
       assertTrue(before.catalog().selectableTools().isEmpty());
     }
 
@@ -46,11 +46,11 @@ class PlatformHarnessTestConfigurationTest {
         "{\"type\":\"object\",\"properties\":{},\"required\":[],\"additionalProperties\":false}");
     when(repository.listAllServers()).thenReturn(List.of(server));
     when(repository.listTools(server.getName())).thenReturn(List.of(tool));
-    try (RuntimeToolCatalogSource.Lease frozen = source.acquireCurrent()) {
+    try (RuntimeToolCatalogSource.Lease frozen = source.acquire()) {
       assertTrue(frozen.catalog().findTool(tool.getName()).isPresent());
       when(repository.listTools(server.getName())).thenReturn(List.of());
       assertTrue(frozen.catalog().findTool(tool.getName()).isPresent());
-      try (RuntimeToolCatalogSource.Lease current = source.acquireCurrent()) {
+      try (RuntimeToolCatalogSource.Lease current = source.acquire()) {
         assertFalse(current.catalog().findTool(tool.getName()).isPresent());
       }
     }

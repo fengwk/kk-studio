@@ -29,7 +29,6 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
-import fun.fengwk.kkstudio.platform.plugin.PluginKeyUnavailableException;
 import fun.fengwk.kkstudio.platform.plugin.service.PluginManagementService;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginAuthKindDTO;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginAuthPrepareDTO;
@@ -231,46 +230,20 @@ class StudioPluginControllerTest {
   }
 
   /**
-   * 测试意图：验证当主密钥不可用导致抛出 PluginKeyUnavailableException 时返回 503 Service Unavailable 且 code 为
-   * plugin_key_unavailable。
-   */
-  @Test
-  void pluginKeyUnavailableReturnsServiceUnavailable() throws Exception {
-    when(pluginManagementService.getPlugin("my-plugin"))
-        .thenThrow(
-            new PluginKeyUnavailableException(
-                "plugin credential key is unavailable at /secrets/key"));
-
-    mockMvc
-        .perform(get("/api/plugins/my-plugin"))
-        .andExpect(status().isServiceUnavailable())
-        .andExpect(jsonPath("$.code").value("plugin_key_unavailable"))
-        .andExpect(jsonPath("$.errors.resource").value("plugin"))
-        // 固定去敏文案：异常原文（可能含主密钥文件路径）不得进入响应。
-        .andExpect(jsonPath("$.errors.detail").value("Plugin credential key is unavailable"))
-        .andExpect(content().string(not(containsString("/secrets"))))
-        .andExpect(content().string(not(containsString("password"))))
-        .andExpect(content().string(not(containsString("secretToken"))));
-
-    verify(pluginManagementService).getPlugin("my-plugin");
-  }
-
-  /**
-   * 测试意图：验证 PUT /api/plugins/{pluginId}/configuration 当权威坐标或凭据行 CAS 冲突时返回 409
-   * Conflict，且响应体绝不回显请求正文里的秘密值。
+   * 测试意图：验证 PUT /api/plugins/{pluginId}/configuration 当配置修订冲突时返回 409 Conflict，且响应体绝不回显请求正文里的秘密值。
    */
   @Test
   void updateConfigurationVersionConflictReturnsConflict() throws Exception {
     String secretMarker = "SECRET_PATCH_VALUE_ABC123456";
-    when(pluginManagementService.updateConfiguration(eq("my-plugin"), eq(4L), eq(7L), any(), any()))
-        .thenThrow(new AiVersionConflictException("plugin", "epoch=4", "epoch=5"));
+    when(pluginManagementService.updateConfiguration(eq("my-plugin"), eq(7L), any(), any()))
+        .thenThrow(new AiVersionConflictException("plugin", "revision=7", "revision=8"));
 
     mockMvc
         .perform(
             put("/api/plugins/my-plugin/configuration")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
-                    "{\"expectedEpoch\":\"4\",\"expectedRevision\":\"7\","
+                    "{\"expectedRevision\":\"7\","
                         + "\"valuesJson\":\"{}\",\"secretPatch\":{\"apiKey\":"
                         + "{\"operation\":\"SET\",\"value\":\""
                         + secretMarker
@@ -280,8 +253,7 @@ class StudioPluginControllerTest {
         .andExpect(jsonPath("$.errors.resource").value("plugin"))
         .andExpect(content().string(not(containsString(secretMarker))));
 
-    verify(pluginManagementService)
-        .updateConfiguration(eq("my-plugin"), eq(4L), eq(7L), any(), any());
+    verify(pluginManagementService).updateConfiguration(eq("my-plugin"), eq(7L), any(), any());
   }
 
   /** 测试意图：验证带秘密补丁的请求体无法解析时返回 400，且固定去敏文案绝不回显正文中的秘密值。 */
@@ -294,7 +266,7 @@ class StudioPluginControllerTest {
             put("/api/plugins/my-plugin/configuration")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
-                    "{\"expectedEpoch\":\"4\",\"valuesJson\":\"{\"secret\":\""
+                    "{\"expectedRevision\":\"7\",\"valuesJson\":\"{\"secret\":\""
                         + secretMarker
                         + "\"}"))
         .andExpect(status().isBadRequest())
@@ -306,11 +278,11 @@ class StudioPluginControllerTest {
   /** 测试意图：保存不等于发布。本节点尚未应用新 desired 状态时必须返回 202 Accepted，已应用时返回 200 OK，两者都禁止缓存。 */
   @Test
   void updateConfigurationReportsPendingApplicationAsAccepted() throws Exception {
-    String body = "{\"expectedEpoch\":\"4\",\"expectedRevision\":\"7\",\"valuesJson\":\"{}\"}";
+    String body = "{\"expectedRevision\":\"7\",\"valuesJson\":\"{}\"}";
 
     PluginDTO pending = samplePluginDTO("my-plugin");
     pending.setApplicationError("configuration is saved but this node has not applied it yet");
-    when(pluginManagementService.updateConfiguration(eq("my-plugin"), eq(4L), eq(7L), any(), any()))
+    when(pluginManagementService.updateConfiguration(eq("my-plugin"), eq(7L), any(), any()))
         .thenReturn(pending);
 
     mockMvc
@@ -325,7 +297,7 @@ class StudioPluginControllerTest {
                 .value("configuration is saved but this node has not applied it yet"));
 
     PluginDTO applied = samplePluginDTO("my-plugin");
-    when(pluginManagementService.updateConfiguration(eq("my-plugin"), eq(4L), eq(7L), any(), any()))
+    when(pluginManagementService.updateConfiguration(eq("my-plugin"), eq(7L), any(), any()))
         .thenReturn(applied);
 
     mockMvc
@@ -338,7 +310,7 @@ class StudioPluginControllerTest {
         .andExpect(jsonPath("$.data.applicationError").doesNotExist());
 
     verify(pluginManagementService, times(2))
-        .updateConfiguration(eq("my-plugin"), eq(4L), eq(7L), any(), any());
+        .updateConfiguration(eq("my-plugin"), eq(7L), any(), any());
   }
 
   /** 测试意图：期望坐标与 SET 值只接受 JSON 字符串，数字/布尔不做标量强制转换；KEEP/CLEAR 的显式 null 同样被拒绝，且错误绝不回显请求 正文里的标记值。 */
@@ -350,7 +322,7 @@ class StudioPluginControllerTest {
         .perform(
             put("/api/plugins/my-plugin/configuration")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"expectedEpoch\":4,\"expectedRevision\":\"7\",\"valuesJson\":\"{}\"}"))
+                .content("{\"expectedRevision\":7,\"valuesJson\":\"{}\"}"))
         .andExpect(status().isBadRequest());
 
     mockMvc
@@ -358,7 +330,7 @@ class StudioPluginControllerTest {
             put("/api/plugins/my-plugin/configuration")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
-                    "{\"expectedEpoch\":\"4\",\"expectedRevision\":\"7\",\"valuesJson\":\"{}\""
+                    "{\"expectedRevision\":\"7\",\"valuesJson\":\"{}\""
                         + ",\"secretPatch\":{\"apiKey\":{\"operation\":\"SET\",\"value\":12345678}}}"))
         .andExpect(status().isBadRequest());
 
@@ -367,7 +339,7 @@ class StudioPluginControllerTest {
             put("/api/plugins/my-plugin/configuration")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
-                    "{\"expectedEpoch\":\"4\",\"expectedRevision\":\"7\",\"valuesJson\":\"{}\""
+                    "{\"expectedRevision\":\"7\",\"valuesJson\":\"{}\""
                         + ",\"secretPatch\":{\"apiKey\":{\"operation\":\"CLEAR\",\"value\":null}}}"))
         .andExpect(status().isBadRequest());
 
@@ -376,10 +348,7 @@ class StudioPluginControllerTest {
         .perform(
             put("/api/plugins/my-plugin/configuration")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content(
-                    "{\"expectedEpoch\":\""
-                        + marker
-                        + "\",\"expectedRevision\":\"7\",\"valuesJson\":\"{}\"}"))
+                .content("{\"expectedRevision\":\"" + marker + "\",\"valuesJson\":\"{}\"}"))
         .andExpect(status().isBadRequest())
         .andExpect(content().string(not(containsString(marker))));
 
@@ -389,18 +358,17 @@ class StudioPluginControllerTest {
   /** 测试意图：显式连接检查返回类型化维度、已应用坐标与 no-store，且绝不回显远端材料。 */
   @Test
   void checkConnectionReturnsTypedResultWithNoStore() throws Exception {
-    when(pluginManagementService.checkConnection("my-plugin", 14L, 8L))
+    when(pluginManagementService.checkConnection("my-plugin", 8L))
         .thenReturn(sampleCheckDTO("my-plugin"));
 
     mockMvc
         .perform(
             post("/api/plugins/my-plugin/connection-check")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"expectedEpoch\":\"14\",\"expectedRevision\":\"8\"}"))
+                .content("{\"expectedRevision\":\"8\"}"))
         .andExpect(status().isOk())
         .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
         .andExpect(jsonPath("$.data.pluginId").value("my-plugin"))
-        .andExpect(jsonPath("$.data.appliedEpoch").value("14"))
         .andExpect(jsonPath("$.data.appliedRevision").value("8"))
         .andExpect(jsonPath("$.data.reachability").value("REACHABLE"))
         .andExpect(jsonPath("$.data.authentication").value("ACCEPTED"))
@@ -409,17 +377,17 @@ class StudioPluginControllerTest {
         .andExpect(jsonPath("$.data.detail").doesNotExist())
         .andExpect(content().string(not(containsString("https://"))));
 
-    verify(pluginManagementService).checkConnection("my-plugin", 14L, 8L);
+    verify(pluginManagementService).checkConnection("my-plugin", 8L);
   }
 
   /** 测试意图：尚未应用或坐标不匹配是 409，无能力是 400，未安装是 404，错误一律去敏。 */
   @Test
   void checkConnectionTranslatesDomainOutcomes() throws Exception {
-    String body = "{\"expectedEpoch\":\"14\",\"expectedRevision\":\"8\"}";
+    String body = "{\"expectedRevision\":\"8\"}";
 
     // 同一调用的连续三次失败：按顺序消费，避免重复 `when()` 在既有异常桩上再次求值。
-    when(pluginManagementService.checkConnection("my-plugin", 14L, 8L))
-        .thenThrow(new AiVersionConflictException("plugin", "epoch=14", "epoch=13"))
+    when(pluginManagementService.checkConnection("my-plugin", 8L))
+        .thenThrow(new AiVersionConflictException("plugin", "revision=8", "revision=7"))
         .thenThrow(new AiValidationException("plugin", "plugin does not support connection checks"))
         .thenThrow(new AiResourceNotFoundException("plugin"));
 
@@ -457,14 +425,14 @@ class StudioPluginControllerTest {
         .perform(
             post("/api/plugins/my-plugin/connection-check")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"expectedEpoch\":14,\"expectedRevision\":\"8\"}"))
+                .content("{\"expectedRevision\":8}"))
         .andExpect(status().isBadRequest());
 
     mockMvc
         .perform(
             post("/api/plugins/my-plugin/connection-check")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"expectedEpoch\":\"14\",\"expectedRevision\":\"8\",\"extra\":\"x\"}"))
+                .content("{\"expectedRevision\":\"8\",\"extra\":\"x\"}"))
         .andExpect(status().isBadRequest())
         .andExpect(content().string(not(containsString("extra"))));
 
@@ -472,7 +440,7 @@ class StudioPluginControllerTest {
         .perform(
             post("/api/plugins/my-plugin/connection-check")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"expectedEpoch\":\"" + marker + "\",\"expectedRevision\":\"8\"}"))
+                .content("{\"expectedRevision\":\"" + marker + "\"}"))
         .andExpect(status().isBadRequest())
         .andExpect(content().string(not(containsString(marker))));
 
@@ -482,7 +450,6 @@ class StudioPluginControllerTest {
   private static PluginConnectionCheckDTO sampleCheckDTO(String pluginId) {
     PluginConnectionCheckDTO dto = new PluginConnectionCheckDTO();
     dto.setPluginId(pluginId);
-    dto.setAppliedEpoch("14");
     dto.setAppliedRevision("8");
     dto.setCheckedAt(Instant.parse("2026-03-01T12:00:00Z"));
     dto.setReachability(PluginConnectionCheckDTO.Reachability.REACHABLE);

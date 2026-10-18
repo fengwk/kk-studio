@@ -49,8 +49,8 @@ import java.util.Set;
  * <p>外部准备失败绝不降级为成功：MCP 发现失败时跳过该 Server 及其依赖 Agent，Git 失败时不使用最新 HEAD 兜底也不重试。文件内声明但
  * 被跳过（失败/不支持）的同名条目会被从可用依赖池中剔除，避免依赖借此绕过 skip；文件未声明的既有依赖仍可满足。
  *
- * <p>插件条目与其它类别同一规则：安装身份与普通值已在解析期校验，这里只判定其声明的 Agent 依赖是否由导入后将生效的 Agent 池满足，并记录该插件当时的目录 epoch 与
- * 修订作为导入事务内的 CAS 坐标。
+ * <p>插件条目与其它类别同一规则：安装身份与普通值已在解析期校验，这里只判定其声明的 Agent 依赖是否由导入后将生效的 Agent 池满足，并记录该插件当时的配置修订作为导入事务内的 CAS
+ * 坐标。
  */
 @AllArgsConstructor
 @Component
@@ -76,8 +76,8 @@ public final class ConfigSyncPlanner {
   /** 在给定快照上校验并构建可写入计划；预检查与执行复用同一套规则。 */
   public ConfigSyncPlan plan(
       ConfigSyncParser.ParsedDocument document, ConfigSyncSnapshot snapshot) {
-    // 一次 current 租用包住完整规划：工具 schema 与可选择性来自同一个冻结目录 epoch。
-    try (RuntimeToolCatalogSource.Lease lease = toolCatalogSource.acquireCurrent()) {
+    // 一次租用包住完整规划：工具 schema 与可选择性来自同一份目录快照。
+    try (RuntimeToolCatalogSource.Lease lease = toolCatalogSource.acquire()) {
       return plan(document, snapshot, lease.catalog());
     }
   }
@@ -384,7 +384,6 @@ public final class ConfigSyncPlanner {
         environments,
         agents,
         pluginImports,
-        snapshot.pluginCatalogEpoch(),
         settingsUpdate,
         imported,
         skipped);

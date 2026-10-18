@@ -46,7 +46,7 @@ class BuiltinHarnessContributorWiringTest extends PostgresSpringTestSupport {
     assertEquals(1, context.getBeansOfType(RuntimeToolCatalogSource.class).size());
     RuntimeToolCatalogSource source = context.getBean(RuntimeToolCatalogSource.class);
     assertSame(context.getBean("runtimeToolCatalogSource"), source);
-    try (RuntimeToolCatalogSource.Lease lease = source.acquireCurrent()) {
+    try (RuntimeToolCatalogSource.Lease lease = source.acquire()) {
       assertTrue(lease.catalog().findTool(ReadTool.NAME).isPresent());
       assertTrue(lease.harnessCatalog().findTool(TaskTool.NAME).isPresent());
     }

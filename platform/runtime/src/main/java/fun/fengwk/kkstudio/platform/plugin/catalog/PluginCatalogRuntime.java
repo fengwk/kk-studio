@@ -4,235 +4,127 @@ import lombok.extern.slf4j.Slf4j;
 
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
+import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
 import fun.fengwk.kkstudio.platform.plugin.PluginContext;
-import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialReference;
+import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
+import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRepository;
+import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRow;
 
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.function.BiFunction;
+import java.util.function.Function;
 
 /**
- * 完整两域 Plugin 快照的运行期所有者，负责权威 epoch 对账、原子发布与租用退役。
+ * 本节点当前 Plugin 快照的所有者。
  *
- * <p>{@link #refresh()} 串行回读权威状态，只在 epoch 前进时通过 {@link PluginCatalogBootstrap#restore}
- * 构建并校验完整候选。候选构建不占生命周期锁；发布前再次回读，过期候选独立关闭，等待下次对账。任一插件应用失败时保留整个旧视图，不部分发布。
- *
- * <p>发布、退役与租用同锁。每个已发布快照持有一个所有者引用和若干活动租用，最后一个引用释放时才在锁外关闭。 {@link #close()}
- * 禁止新租用并释放所有者引用，不强杀活动使用者；通知、调度与消费者装配由组合根负责。
- *
- * <p>{@link #acquire(long)} 为已持久接受的旧 epoch 任务重建对应快照：同一生命周期锁内先复用已加载的当前或历史视图，未加载时才在 {@link
- * #refreshLock} 内严格回读指定历史并 {@link PluginCatalogBootstrap#restore}，因此绝不把当前其它插件拼到旧任务上，也不修改
- * desired/applied、不发布旧 epoch。历史视图没有所有者引用，仅由租用持有，最后一个租用释放即移除并关闭。
- *
- * <p>{@link RuntimeException} 转为固定受控错误码，日志只记录 epoch、阶段与异常类型；{@link Error} 保持原样传播，候选回收失败不得替代原始致命错误。
+ * <p>启动时为新安装的 Plugin 写入默认配置并构建首个快照；{@link #refresh()} 回读全部配置，修订有变化时构建新快照并原子替换，构建失败时保留旧快照并记录 {@link
+ * #applicationError()}。快照按引用计数退役：被替换的快照在最后一个租用释放后才关闭，因此在途调用不会看到实例被关闭。
  */
 @Slf4j
 public final class PluginCatalogRuntime implements AutoCloseable {
 
-  /** 权威回读失败、权威行缺失或仍为未初始化形态时的固定受控错误码。 */
-  public static final String ERROR_AUTHORITY_UNAVAILABLE = "authority-unavailable";
-
-  /** 候选构建失败时的固定受控错误码。 */
-  public static final String ERROR_APPLY_FAILED = "apply-failed";
-
-  private final PluginCatalogBootstrap bootstrap;
-
+  private final StudioPluginRegistry registry;
   private final PluginConfigurationRepository repository;
-
-  private final BiFunction<String, PluginCredentialReference, PluginContext> contexts;
-
+  private final Function<String, PluginContext> contexts;
   private final List<HarnessContributor> builtins;
-
   private final List<CanvasFunctionAdapter> builtinAdapters;
 
-  /** 生命周期锁：保护当前视图的引用计数、发布/退役、关闭标志与对外状态，只做短临界区。 */
   private final Object lifecycleLock = new Object();
-
-  /** 对账串行锁：整个权威对账一次只跑一个，构建期只持有本锁，绝不持有生命周期锁。 */
   private final Object refreshLock = new Object();
 
   private View current;
-
-  /** 仅由租用持有的历史 epoch 视图；没有所有者引用，最后一个租用释放时移除并关闭。 */
-  private final Map<Long, View> retained = new LinkedHashMap<>();
-
-  private long desiredEpoch;
-
   private String applicationError;
-
   private boolean closed;
 
-  /**
-   * @param initialSnapshot 启动期 {@link PluginCatalogBootstrap#bootstrap} 已冻结的完整快照，必须对应已初始化 epoch
-   */
   public PluginCatalogRuntime(
-      PluginCatalogBootstrap bootstrap,
+      StudioPluginRegistry registry,
       PluginConfigurationRepository repository,
-      BiFunction<String, PluginCredentialReference, PluginContext> contexts,
+      Function<String, PluginContext> contexts,
       List<HarnessContributor> builtins,
-      List<CanvasFunctionAdapter> builtinAdapters,
-      PluginCatalogSnapshot initialSnapshot) {
-    this.bootstrap = Objects.requireNonNull(bootstrap, "bootstrap");
+      List<CanvasFunctionAdapter> builtinAdapters) {
+    this.registry = Objects.requireNonNull(registry, "registry");
     this.repository = Objects.requireNonNull(repository, "repository");
     this.contexts = Objects.requireNonNull(contexts, "contexts");
-    this.builtins = List.copyOf(Objects.requireNonNull(builtins, "builtins"));
-    this.builtinAdapters = List.copyOf(Objects.requireNonNull(builtinAdapters, "builtinAdapters"));
-    Objects.requireNonNull(initialSnapshot, "initialSnapshot");
-    if (initialSnapshot.epoch() <= PluginCatalogBootstrap.UNINITIALIZED_EPOCH) {
-      throw new IllegalArgumentException("the initial snapshot must be an initialized epoch");
+    this.builtins = List.copyOf(builtins);
+    this.builtinAdapters = List.copyOf(builtinAdapters);
+    for (StudioPlugin plugin : registry.plugins()) {
+      repository.insertIfMissing(
+          plugin.descriptor().pluginId(), plugin.configurationSchema().defaultsJson());
     }
-    this.current = new View(initialSnapshot);
-    this.desiredEpoch = initialSnapshot.epoch();
+    this.current = new View(build(readConfigurations()));
   }
 
-  /**
-   * 做一次权威对账：权威 epoch 前进时全量校验并一次发布，否则保持当前视图。
-   *
-   * <p>整个对账由 {@link #refreshLock} 串行：并发刷新只会有一次构建，后到的刷新看到已推进的权威 epoch 便不再
-   * configure，因此不会用较旧的失败覆盖较新的已发布状态。 构建期只持有对账锁，租用、状态读取与关闭只走生命周期锁，绝不因此阻塞。
-   *
-   * <p>失败不改变已发布视图，只更新 {@link #state()} 的固定受控错误码；{@link Error} 原样传播。已 {@link #close()} 时不做任何发布。
-   */
+  /** 回读配置；有修订变化时重建并替换当前快照。失败保留旧快照。 */
   public void refresh() {
     synchronized (refreshLock) {
-      refreshSerialized();
+      Map<String, PluginConfig> configurations;
+      PluginCatalogSnapshot candidate;
+      try {
+        configurations = readConfigurations();
+        if (revisionsOf(configurations).equals(currentRevisions())) {
+          recordError(null);
+          return;
+        }
+        candidate = build(configurations);
+      } catch (RuntimeException error) {
+        log.warn("Plugin catalog refresh failed: {}", error.getClass().getSimpleName());
+        recordError("plugin configuration could not be applied on this node");
+        return;
+      }
+      publish(candidate);
     }
   }
 
-  private void refreshSerialized() {
-    PluginCatalogRecord authority;
-    try {
-      authority = repository.readCatalog();
-    } catch (RuntimeException error) {
-      log.warn(
-          "Plugin catalog refresh failed: stage=authority error={}",
-          error.getClass().getSimpleName());
-      recordError(ERROR_AUTHORITY_UNAVAILABLE);
-      return;
+  /** 租用当前快照；租用期间该快照不会被关闭。 */
+  public Lease acquire() {
+    synchronized (lifecycleLock) {
+      if (closed) {
+        throw new IllegalStateException("plugin catalog runtime is closed");
+      }
+      current.holders++;
+      return new Lease(current);
     }
-    if (authority == null || authority.epoch() == PluginCatalogBootstrap.UNINITIALIZED_EPOCH) {
-      log.warn("Plugin catalog refresh rejected: stage=authority epoch=uninitialized");
-      recordError(ERROR_AUTHORITY_UNAVAILABLE);
-      return;
-    }
+  }
 
+  /** 最近一次刷新失败的说明；已同步时为 {@code null}。 */
+  public String applicationError() {
+    synchronized (lifecycleLock) {
+      return applicationError;
+    }
+  }
+
+  @Override
+  public void close() {
+    PluginCatalogSnapshot released;
     synchronized (lifecycleLock) {
       if (closed) {
         return;
       }
-      desiredEpoch = Math.max(desiredEpoch, authority.epoch());
-      if (authority.epoch() <= current.snapshot.epoch()) {
-        // 相同 epoch 不 configure；乱序回读绝不降级已发布视图。只有确实已同步时才清掉旧错误，
-        // 以免抹掉已知更高 desired 上的应用失败。
-        if (desiredEpoch == current.snapshot.epoch()) {
-          applicationError = null;
-        }
-        return;
-      }
+      closed = true;
+      released = current.release();
     }
-
-    PluginCatalogSnapshot candidate;
-    try {
-      candidate = bootstrap.restore(authority, contexts, builtins, builtinAdapters);
-    } catch (RuntimeException error) {
-      log.warn(
-          "Plugin catalog refresh failed: stage=apply epoch={} error={}",
-          authority.epoch(),
-          error.getClass().getSimpleName());
-      recordError(ERROR_APPLY_FAILED);
-      return;
+    if (released != null) {
+      released.close();
     }
-
-    // 构建不占生命周期锁：发布前复核权威 epoch，期间权威推进意味着本次候选已经过期。
-    PluginCatalogRecord latest;
-    try {
-      latest = repository.readCatalog();
-    } catch (RuntimeException error) {
-      log.warn(
-          "Plugin catalog refresh failed: stage=recheck epoch={} error={}",
-          candidate.epoch(),
-          error.getClass().getSimpleName());
-      recordError(ERROR_AUTHORITY_UNAVAILABLE);
-      candidate.close();
-      return;
-    } catch (Error error) {
-      // 复核期致命错误：候选仍必须独立回收，回收期的次要 Error 绝不能遮蔽它。
-      log.error(
-          "Plugin catalog refresh failed fatally: stage=recheck epoch={} error={}",
-          candidate.epoch(),
-          error.getClass().getSimpleName());
-      recordError(ERROR_AUTHORITY_UNAVAILABLE);
-      throw closePreservingPrimary(candidate, error);
-    }
-    if (latest == null || latest.epoch() != candidate.epoch()) {
-      log.info(
-          "Plugin catalog refresh discarded a stale candidate: epoch={} authorityEpoch={}",
-          candidate.epoch(),
-          latest == null ? null : latest.epoch());
-      if (latest != null) {
-        recordDesired(latest.epoch());
-      }
-      candidate.close();
-      return;
-    }
-    publish(candidate);
   }
 
-  /**
-   * 在短锁内一次发布候选：同/更旧 epoch 已存在或已关闭时关闭候选而不采纳，退役快照在锁外关闭。
-   *
-   * <p>若该 epoch 已有仅由租用持有的历史视图（{@link #acquire(long)} 先于对账加载），直接把该视图提升为当前视图并关闭重复构建的候选， 避免同一 epoch
-   * 出现两套活动实例。被替换的旧当前视图只在最后一个引用释放时关闭；仍有活动租用时按 epoch 保留，供同 epoch 的 {@link #acquire(long)} 复用。
-   */
+  private PluginCatalogSnapshot build(Map<String, PluginConfig> configurations) {
+    return PluginCatalogSnapshot.build(
+        registry, configurations, contexts, builtins, builtinAdapters);
+  }
+
   private void publish(PluginCatalogSnapshot candidate) {
-    PluginCatalogSnapshot retired = null;
-    PluginCatalogSnapshot discarded = null;
-    boolean published = false;
+    PluginCatalogSnapshot retired;
     synchronized (lifecycleLock) {
-      if (!closed && candidate.epoch() > current.snapshot.epoch()) {
-        View promoted = retained.remove(candidate.epoch());
-        View next;
-        if (promoted == null) {
-          // 新候选自带一个所有者引用，不再额外加计数。
-          next = new View(candidate);
-        } else {
-          next = promoted;
-          // 提升为当前视图：为已加载的仅租用历史视图补上所有者引用，并回收重复构建的候选。
-          next.holders++;
-          discarded = candidate;
-        }
-        View previous = current;
-        current = next;
-        previous.holders--;
-        if (previous.holders == 0) {
-          retired = previous.snapshot;
-        } else {
-          // 仍被活动租用钉住：保留该 epoch 的视图，使同 epoch 的后续 acquire 复用同一套实例。
-          retained.put(previous.snapshot.epoch(), previous);
-        }
-        desiredEpoch = Math.max(desiredEpoch, candidate.epoch());
+      if (closed) {
+        retired = candidate;
+      } else {
+        retired = current.release();
+        current = new View(candidate);
         applicationError = null;
-        published = true;
-      }
-    }
-    if (!published) {
-      log.info(
-          "Plugin catalog refresh discarded an already applied candidate: epoch={}",
-          candidate.epoch());
-      candidate.close();
-      return;
-    }
-    if (discarded != null) {
-      try {
-        discarded.close();
-      } catch (Error primary) {
-        if (retired != null) {
-          throw closePreservingPrimary(retired, primary);
-        }
-        throw primary;
       }
     }
     if (retired != null) {
@@ -240,229 +132,78 @@ public final class PluginCatalogRuntime implements AutoCloseable {
     }
   }
 
-  /**
-   * 租用当前已发布的完整快照。
-   *
-   * @return 幂等关闭的租用；租用期间该快照不会被退役关闭
-   * @throws IllegalStateException 已 {@link #close()} 关闭时（关闭后不再授予新租用）
-   */
-  public Lease acquireCurrent() {
+  private Map<String, PluginConfig> readConfigurations() {
+    Map<String, PluginConfig> configurations = new LinkedHashMap<>();
+    for (PluginConfigurationRow row : repository.findAll()) {
+      if (registry.find(row.pluginId()).isPresent()) {
+        configurations.put(row.pluginId(), new PluginConfig(row.revision(), row.valuesJson()));
+      }
+    }
+    return configurations;
+  }
+
+  private Map<String, Long> currentRevisions() {
     synchronized (lifecycleLock) {
-      if (closed) {
-        throw new IllegalStateException("plugin catalog runtime is closed");
-      }
-      View view = current;
-      view.holders++;
-      return new Lease(view);
+      return current.snapshot.revisions();
     }
   }
 
-  /**
-   * 租用指定已持久 epoch 的完整快照，供已接受但尚未执行完的任务精确重建其目录。
-   *
-   * <p>已加载的 epoch（当前视图或仍被租用钉住的历史视图）直接复用并加引用。未加载时在 {@link #refreshLock} 内串行回读该 epoch 的不可变完整 manifest
-   * 并走 {@link PluginCatalogBootstrap#restore} 严格重建：绝不修改 desired/applied、不发布旧 epoch、也不把当前其它插件拼到旧任务上。
-   * 历史视图没有所有者引用，最后一个租用释放即移除并关闭。
-   *
-   * @return 幂等关闭的租用；租用期间该 epoch 的快照不会被关闭
-   * @throws IllegalArgumentException epoch 为未初始化形态（{@code <= 0}）
-   * @throws IllegalStateException 已 {@link #close()}，或该 epoch 缺少历史、代码/身份漂移、权威不可读时（只带受控诊断）
-   */
-  public Lease acquire(long epoch) {
-    if (epoch <= PluginCatalogBootstrap.UNINITIALIZED_EPOCH) {
-      throw new IllegalArgumentException("epoch must be an initialized epoch");
-    }
-    View loaded = retainLoaded(epoch);
-    if (loaded != null) {
-      return new Lease(loaded);
-    }
-
-    synchronized (refreshLock) {
-      // 串行窗口内可能有并发 acquire/refresh 已经加载该 epoch：只复用，不重复构建。
-      loaded = retainLoaded(epoch);
-      if (loaded != null) {
-        return new Lease(loaded);
-      }
-      PluginCatalogSnapshot candidate = restoreHistory(epoch);
-      Lease lease = null;
-      synchronized (lifecycleLock) {
-        if (!closed) {
-          View view = new View(candidate);
-          retained.put(epoch, view);
-          lease = new Lease(view);
-        }
-      }
-      if (lease == null) {
-        // 关闭后不再授予新租用：候选独立回收，绝不让租用访问已关闭实例。
-        candidate.close();
-        throw new IllegalStateException("plugin catalog runtime is closed");
-      }
-      return lease;
-    }
+  private static Map<String, Long> revisionsOf(Map<String, PluginConfig> configurations) {
+    Map<String, Long> revisions = new LinkedHashMap<>();
+    configurations.forEach((pluginId, config) -> revisions.put(pluginId, config.revision()));
+    return revisions;
   }
 
-  /** 在短锁内返回已加载的 epoch 视图并加一个引用；未加载返回 null，已关闭抛出。 */
-  private View retainLoaded(long epoch) {
-    synchronized (lifecycleLock) {
-      if (closed) {
-        throw new IllegalStateException("plugin catalog runtime is closed");
-      }
-      View view = current.snapshot.epoch() == epoch ? current : retained.get(epoch);
-      if (view != null) {
-        view.holders++;
-      }
-      return view;
-    }
-  }
-
-  /** 严格重建指定 epoch 的完整快照：回读不可变历史，缺失或恢复失败都明确拒绝，不做任何 current/default 兜底。 */
-  private PluginCatalogSnapshot restoreHistory(long epoch) {
-    PluginCatalogRecord record;
-    try {
-      record = repository.readCatalog(epoch).orElse(null);
-    } catch (RuntimeException error) {
-      log.warn(
-          "Plugin catalog history acquire failed: stage=history epoch={} error={}",
-          epoch,
-          error.getClass().getSimpleName());
-      throw new IllegalStateException(
-          "plugin catalog history acquire failed: stage=history epoch=" + epoch);
-    }
-    if (record == null) {
-      log.warn("Plugin catalog history acquire rejected: stage=history-missing epoch={}", epoch);
-      throw new IllegalStateException(
-          "plugin catalog history acquire failed: stage=history-missing epoch=" + epoch);
-    }
-    try {
-      return bootstrap.restore(record, contexts, builtins, builtinAdapters);
-    } catch (RuntimeException error) {
-      log.warn(
-          "Plugin catalog history acquire failed: stage=restore epoch={} error={}",
-          epoch,
-          error.getClass().getSimpleName());
-      throw error;
-    }
-  }
-
-  /** 不含实例与秘密的目录同步状态：最近一次权威回读的 epoch、当前已发布 epoch 与固定受控错误码。 */
-  public RuntimeState state() {
-    synchronized (lifecycleLock) {
-      return new RuntimeState(desiredEpoch, current.snapshot.epoch(), applicationError);
-    }
-  }
-
-  /**
-   * 停止运行：撤销当前快照的所有者引用并禁止新的租用，但绝不强杀仍在使用中的实例。
-   *
-   * <p>已有租用不受影响；最后一个引用释放时关闭快照。幂等，关闭动作在短锁外执行。
-   */
-  @Override
-  public void close() {
-    PluginCatalogSnapshot released = null;
-    synchronized (lifecycleLock) {
-      if (closed) {
-        return;
-      }
-      closed = true;
-      View view = current;
-      view.holders--;
-      if (view.holders == 0) {
-        released = view.snapshot;
-      }
-    }
-    if (released != null) {
-      released.close();
-    }
-  }
-
-  /**
-   * 独立回收候选并保留原始致命错误：快照自身保证全部实例都被回收，回收期的次要 {@link Error} 绝不遮蔽原始致命错误。
-   *
-   * @return 调用方必须原样抛出的原始致命错误
-   */
-  private static Error closePreservingPrimary(PluginCatalogSnapshot candidate, Error primary) {
-    try {
-      candidate.close();
-    } catch (Error cleanup) {
-      log.error(
-          "Plugin catalog candidate cleanup failed fatally: {}",
-          cleanup.getClass().getSimpleName());
-    }
-    return primary;
-  }
-
-  /** 单调记录最近一次权威回读看到的 epoch：乱序回读绝不把对外状态回退。 */
-  private void recordDesired(long epoch) {
-    synchronized (lifecycleLock) {
-      desiredEpoch = Math.max(desiredEpoch, epoch);
-    }
-  }
-
-  /** 记录固定受控错误码；成功发布或已同步时由调用方清空。 */
   private void recordError(String error) {
     synchronized (lifecycleLock) {
       applicationError = error;
     }
   }
 
-  /** 一次发布的活跃视图：1 个所有者引用加若干活动租用，计数归零时快照恰好关闭一次。 */
+  /** 一个已发布快照：1 个所有者引用加若干租用，计数归零时恰好关闭一次。 */
   private static final class View {
 
     private final PluginCatalogSnapshot snapshot;
-
     private int holders = 1;
 
-    View(PluginCatalogSnapshot snapshot) {
+    private View(PluginCatalogSnapshot snapshot) {
       this.snapshot = snapshot;
+    }
+
+    /** 释放一个引用；归零时返回需要在锁外关闭的快照。 */
+    private PluginCatalogSnapshot release() {
+      holders--;
+      return holders == 0 ? snapshot : null;
     }
   }
 
-  /** 已发布快照的租用：{@link #close()} 幂等，最后一个引用释放时快照关闭。 */
+  /** 快照租用：{@link #close()} 幂等，最后一个引用释放时快照关闭。 */
   public final class Lease implements AutoCloseable {
 
     private final View view;
-
-    private boolean closedLease;
+    private boolean released;
 
     private Lease(View view) {
       this.view = view;
     }
 
-    /**
-     * 租用期内完整的两域快照：其 epoch 是取租用当时的已发布 epoch，发布更新的 epoch 后本租用仍钉住旧快照，因此它可能落后于 {@link #state()} 最新的
-     * {@code appliedEpoch}。
-     */
     public PluginCatalogSnapshot snapshot() {
       return view.snapshot;
     }
 
     @Override
     public void close() {
-      PluginCatalogSnapshot released = null;
+      PluginCatalogSnapshot retired;
       synchronized (lifecycleLock) {
-        if (closedLease) {
+        if (released) {
           return;
         }
-        closedLease = true;
-        view.holders--;
-        if (view.holders == 0) {
-          // 历史视图没有所有者引用：最后一个租用释放时从加载集合移除并关闭；当前视图由 publish/close 自行退役。
-          retained.remove(view.snapshot.epoch(), view);
-          released = view.snapshot;
-        }
+        released = true;
+        retired = view.release();
       }
-      if (released != null) {
-        released.close();
+      if (retired != null) {
+        retired.close();
       }
     }
   }
-
-  /**
-   * 不含实例与秘密的目录同步状态。
-   *
-   * <p>{@code desiredEpoch} 是最近一次权威回读看到的 epoch，{@code appliedEpoch} 是当前已发布快照的 epoch；二者相等即已同步。
-   * {@code applicationError} 只在最近一次对账失败时取 {@link #ERROR_AUTHORITY_UNAVAILABLE} 或 {@link
-   * #ERROR_APPLY_FAILED}，其余为 {@code null}。
-   */
-  public record RuntimeState(long desiredEpoch, long appliedEpoch, String applicationError) {}
 }

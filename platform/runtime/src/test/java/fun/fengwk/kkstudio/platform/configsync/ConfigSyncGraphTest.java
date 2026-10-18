@@ -59,7 +59,6 @@ class ConfigSyncGraphTest {
         List.of(),
         List.of(),
         List.of(),
-        5L,
         List.of(
             ConfigSyncFixtures.pluginRow(
                 PLUGIN_ID, 3L, "{\"promptAgentName\":\"" + requiredAgent + "\"}")));
@@ -219,7 +218,6 @@ class ConfigSyncGraphTest {
             List.of(),
             List.of(),
             List.of(),
-            5L,
             List.of(
                 ConfigSyncFixtures.pluginRow(
                     PLUGIN_ID, 3L, "{\"promptAgentName\":\"" + BUILTIN_AGENT + "\"}")));
@@ -247,7 +245,6 @@ class ConfigSyncGraphTest {
             List.of(),
             List.of(),
             List.of(),
-            1L,
             List.of());
     ConfigSyncGraph.Graph prepared = graph.graph(snapshot);
 
@@ -271,7 +268,6 @@ class ConfigSyncGraphTest {
             List.of(),
             List.of(),
             List.of(),
-            1L,
             List.of());
     ConfigSyncGraph.Graph prepared = graph.graph(snapshot);
 
@@ -331,7 +327,6 @@ class ConfigSyncGraphTest {
         List.of(),
         List.of(),
         List.of(),
-        1L,
         List.of());
   }
 
@@ -349,7 +344,6 @@ class ConfigSyncGraphTest {
             List.of(),
             List.of(),
             ConfigSyncFixtures.settings(1L),
-            1L,
             List.of());
     ConfigSyncGraph.Graph prepared = graph.graph(snapshot);
 

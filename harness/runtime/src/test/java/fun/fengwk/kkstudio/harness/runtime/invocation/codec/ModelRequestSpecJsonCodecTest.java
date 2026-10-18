@@ -33,7 +33,7 @@ class ModelRequestSpecJsonCodecTest {
   void roundTripsEnvironmentRequestWithCanonicalJson() {
     ModelRequestSpec requestSpec = environmentModelRequest();
     String expected =
-        "{\"catalogEpoch\":1,\"providerType\":\"OPENAI\",\"providerConnectionGenerationId\":\""
+        "{\"providerType\":\"OPENAI\",\"providerConnectionGenerationId\":\""
             + requestSpec.providerConnectionGenerationId()
             + "\",\"model\":"
             + modelCodec.encodeDescriptor(requestSpec.model())
@@ -62,7 +62,6 @@ class ModelRequestSpecJsonCodecTest {
     ModelRequestSpec base = hostModelRequest();
     ModelRequestSpec requestSpec =
         new ModelRequestSpec(
-            1L,
             base.providerType(),
             base.providerConnectionGenerationId(),
             base.model(),
@@ -89,7 +88,6 @@ class ModelRequestSpecJsonCodecTest {
     String longDescription = "d".repeat(4096);
     ModelRequestSpec requestSpec =
         new ModelRequestSpec(
-            1L,
             base.providerType(),
             base.providerConnectionGenerationId(),
             base.model(),
@@ -111,7 +109,6 @@ class ModelRequestSpecJsonCodecTest {
     encoded.propertyNames().forEach(fieldNames::add);
     assertEquals(
         Set.of(
-            "catalogEpoch",
             "providerType",
             "providerConnectionGenerationId",
             "model",
@@ -134,7 +131,6 @@ class ModelRequestSpecJsonCodecTest {
     String instruction = "You are a careful reviewer.\n\n<rules>\n- be terse\n</rules>";
     ModelRequestSpec requestSpec =
         new ModelRequestSpec(
-            1L,
             base.providerType(),
             base.providerConnectionGenerationId(),
             base.model(),
@@ -181,27 +177,6 @@ class ModelRequestSpecJsonCodecTest {
     legacySkills.putArray("skillBindings");
     assertInvalid(legacySkills);
 
-    // 缺少或非法 catalogEpoch
-    ObjectNode missingEpoch = encodedNode();
-    missingEpoch.remove("catalogEpoch");
-    assertInvalid(missingEpoch);
-
-    ObjectNode zeroEpoch = encodedNode();
-    zeroEpoch.put("catalogEpoch", 0);
-    assertInvalid(zeroEpoch);
-
-    ObjectNode negativeEpoch = encodedNode();
-    negativeEpoch.put("catalogEpoch", -1);
-    assertInvalid(negativeEpoch);
-
-    ObjectNode stringEpoch = encodedNode();
-    stringEpoch.put("catalogEpoch", "1");
-    assertInvalid(stringEpoch);
-
-    ObjectNode floatEpoch = encodedNode();
-    floatEpoch.put("catalogEpoch", 1.5);
-    assertInvalid(floatEpoch);
-
     ObjectNode missing = encodedNode();
     missing.remove("toolBindings");
     assertInvalid(missing);
@@ -238,7 +213,6 @@ class ModelRequestSpecJsonCodecTest {
     ModelRequestSpec base = hostModelRequest();
     ModelRequestSpec specWithSubagent =
         new ModelRequestSpec(
-            1L,
             base.providerType(),
             base.providerConnectionGenerationId(),
             base.model(),
@@ -283,7 +257,6 @@ class ModelRequestSpecJsonCodecTest {
     String rawOptions = "{\"big\":1e309,\"tiny\":1e-324,\"exact\":0.1234567890123456789012345678}";
     ModelRequestSpec requestSpec =
         new ModelRequestSpec(
-            1L,
             base.providerType(),
             base.providerConnectionGenerationId(),
             base.model(),

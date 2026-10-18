@@ -183,11 +183,9 @@ final class ToolGatewayTestSupport {
     return new ToolInvocationRequest(
         new ToolCall(callId, descriptor.name(), "{}"),
         new ToolBinding(
-            1L,
             new AgentToolDefinition(descriptor, ToolVisibility.SELECTABLE),
             new ContributorBinding("test", "host-tool", List.of()),
             EnvironmentSupport.NONE,
-            null,
             null,
             null));
   }
@@ -211,13 +209,11 @@ final class ToolGatewayTestSupport {
     return new ToolInvocationRequest(
         new ToolCall(callId, "bash", argumentsJson),
         new ToolBinding(
-            1L,
             bashContribution.definition(),
             contributor,
             EnvironmentSupport.REQUIRED,
             environmentId,
-            "test-env",
-            null));
+            "test-env"));
   }
 
   /** branch 未选择 Environment 的环境工具请求：environmentRequired=true 但路由身份为 null。 */
@@ -230,7 +226,6 @@ final class ToolGatewayTestSupport {
             bashContribution.id().localName(),
             List.of());
     ToolBinding binding = mock(ToolBinding.class);
-    when(binding.catalogEpoch()).thenReturn(1L);
     when(binding.definition()).thenReturn(bashContribution.definition());
     when(binding.descriptor()).thenReturn(bashContribution.definition().descriptor());
     when(binding.contributor()).thenReturn(contributor);

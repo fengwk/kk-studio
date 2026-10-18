@@ -82,8 +82,7 @@ docker compose -f deploy/test/compose.yaml --profile app down -v --remove-orphan
 
 没有 app 时，不要对全部服务直接 `up --wait`：成功退出的 `minio-init` 没有常驻 health 状态，
 此时也没有 app 的 `service_completed_successfully` 依赖承接它。上面的两步与 smoke 脚本一致。
-启动 app 时它会等待 `minio-init` 与一次性 `plugin-credential-init` 成功退出。
-`plugin-credential-init` 沿用一次性 init 模式，在测试专用 named volume `plugin-credential-key` 中动态生成 32 字节随机主密钥（属主 `10001:10001`、权限 `0400`，owner-only 且 app 用户可读），app 以只读挂载并通过 `KK_STUDIO_PLUGINS_CREDENTIAL_KEY_FILE` 注入，主密钥绝不明文进入 seed 或 schema，`down -v` 自动释放。手动启动默认保留已有数据；需要构建时 Compose 使用
+启动 app 时它会等待 `minio-init` 成功退出。手动启动默认保留已有数据；需要构建时 Compose 使用
 [deploy/local/Dockerfile](../local/Dockerfile)，也可先自行构建镜像。
 
 默认宿主地址：
@@ -99,9 +98,8 @@ docker compose -f deploy/test/compose.yaml --profile app down -v --remove-orphan
 `CANVAS_TEST_APP_PORT` 覆盖，应用镜像 tag 用 `CANVAS_TEST_APP_IMAGE` 覆盖；容器内端口固定。应用以 `dev,canvas-test` profile 启动，
 `KK_STUDIO_STORAGE_S3_*` 指向容器内 `minio:9000`，public endpoint 指向
 `http://127.0.0.1:19000`，媒体进程使用容器内 `ffprobe`/`ffmpeg`，临时目录 `/tmp`。
-Compose 卷键为 `minio-data`、`postgres-data` 与 `plugin-credential-key`；默认 Docker 卷名为
-`kk-studio-canvas-test_minio-data`、`kk-studio-canvas-test_postgres-data` 与
-`kk-studio-canvas-test_plugin-credential-key`。
+Compose 卷键为 `minio-data` 与 `postgres-data`；默认 Docker 卷名为
+`kk-studio-canvas-test_minio-data` 与 `kk-studio-canvas-test_postgres-data`。
 
 应用 seed 后 `default-assistant` 指向 `stub/acceptance-stub`，stub provider 的 `base_url` 是
 `http://stub.local:8080/v1`；本栈把 `stub.local` 配成 HTTP mock 的网络别名，由其内置的

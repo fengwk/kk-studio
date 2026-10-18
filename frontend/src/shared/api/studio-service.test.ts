@@ -19,7 +19,7 @@ const CANVAS_ID: UUIDString = '22222222-2222-4222-8222-222222222222'
 const NODE_ID: UUIDString = '33333333-3333-4333-8333-333333333333'
 const REQUEST_ID: UUIDString = '55555555-5555-4555-8555-555555555555'
 /** 目录版本夹具：start 必须回传同形状 expectedVersion，cancel 只发 requestId。 */
-const FUNCTION_VERSION = { catalogEpoch: '9', definitionFingerprint: 'e'.repeat(64) }
+const FUNCTION_VERSION = { definitionFingerprint: 'e'.repeat(64) }
 
 const fetchMock = vi.fn<typeof fetch>()
 

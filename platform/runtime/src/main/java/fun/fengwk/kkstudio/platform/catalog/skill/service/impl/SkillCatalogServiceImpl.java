@@ -7,7 +7,6 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.harness.common.skill.SkillNames;
-import fun.fengwk.kkstudio.platform.catalog.skill.SkillTokenCipher;
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitCache;
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitException;
 import fun.fengwk.kkstudio.platform.catalog.skill.repo.SkillPackageRepository;
@@ -71,7 +70,6 @@ public class SkillCatalogServiceImpl implements SkillCatalogService {
   private final SkillPackageGuard guard;
   private final AgentEditableSupport editableSupport;
   private final SkillCatalogWrites writes;
-  private final SkillTokenCipher tokenCipher;
 
   @Override
   public List<SkillPackageDTO> listPackages() {
@@ -126,7 +124,7 @@ public class SkillCatalogServiceImpl implements SkillCatalogService {
     created.setSkills(skills);
     created.setVersion(0L);
     if (token != null) {
-      created.setEncryptedToken(tokenCipher.encrypt(packageName, token));
+      created.setToken(token);
     }
     return writes.execute(
         () -> {
@@ -156,16 +154,15 @@ public class SkillCatalogServiceImpl implements SkillCatalogService {
     String branch = requireBranch(editDTO.getBranch());
     // token 三态：省略保留、显式 null 清除、非空替换；非法空白串拒绝。
     boolean tokenChanged = false;
-    byte[] encryptedToken = current.getEncryptedToken();
+    String storedToken = current.getToken();
     if (editDTO.isTokenProvided()) {
       String token = editDTO.getToken();
       if (token == null) {
-        tokenChanged = current.getEncryptedToken() != null;
-        encryptedToken = null;
+        tokenChanged = current.getToken() != null;
+        storedToken = null;
       } else {
-        String canonicalToken = requireToken(token);
-        encryptedToken = tokenCipher.encrypt(current.getPackageName(), canonicalToken);
-        tokenChanged = true;
+        storedToken = requireToken(token);
+        tokenChanged = !storedToken.equals(current.getToken());
       }
     }
     // repository URL 是不可变身份：编辑只可能改变 description、branch 与访问令牌，事实未变化就不推进 version。
@@ -176,7 +173,7 @@ public class SkillCatalogServiceImpl implements SkillCatalogService {
     }
     current.setDescription(description);
     current.setBranch(branch);
-    current.setEncryptedToken(encryptedToken);
+    current.setToken(storedToken);
     casUpdate(current, expected);
     return getPackage(packageName);
   }
@@ -208,7 +205,7 @@ public class SkillCatalogServiceImpl implements SkillCatalogService {
     try {
       observedHeadCommit =
           skillGitCache.resolveBranchHead(
-              current.getRepositoryUrl(), current.getBranch(), resolveStoredToken(current));
+              current.getRepositoryUrl(), current.getBranch(), current.getToken());
       headCheckError = null;
     } catch (SkillGitException error) {
       // 检查失败只记录有界错误：current commit、manifest 与上一次成功观察值全部保持不变。
@@ -251,7 +248,7 @@ public class SkillCatalogServiceImpl implements SkillCatalogService {
           "targetCommit must equal the observed branch head of this package version: "
               + current.getObservedHeadCommit());
     }
-    String token = resolveStoredToken(current);
+    String token = current.getToken();
     List<SkillManifestEntry> skills =
         git(
             () -> {
@@ -324,8 +321,6 @@ public class SkillCatalogServiceImpl implements SkillCatalogService {
     List<SkillManifestEntry> manifest = List.copyOf(skills);
     // 导入按文件事实整体覆盖：null/空白令牌表示清除既有令牌，非空表示替换。
     String canonicalToken = canonicalImportToken(token);
-    byte[] encryptedToken =
-        canonicalToken == null ? null : tokenCipher.encrypt(name, canonicalToken);
     SkillPackage current = skillPackageRepository.lockPackage(name);
     if (current == null) {
       SkillPackage created = new SkillPackage();
@@ -338,7 +333,7 @@ public class SkillCatalogServiceImpl implements SkillCatalogService {
       created.setHeadCheckError(null);
       created.setSkills(manifest);
       created.setVersion(0L);
-      created.setEncryptedToken(encryptedToken);
+      created.setToken(canonicalToken);
       try {
         if (!skillPackageRepository.insertPackage(created)) {
           throw new IllegalStateException("create skill package failed");
@@ -360,7 +355,7 @@ public class SkillCatalogServiceImpl implements SkillCatalogService {
             .filter(skillName -> !published.contains(skillName))
             .toList();
     guard.ensureSkillsRemovable(name, removed);
-    boolean tokenChanged = current.getEncryptedToken() != null || canonicalToken != null;
+    boolean tokenChanged = !Objects.equals(current.getToken(), canonicalToken);
     if (commit.equals(current.getCurrentCommit())
         && Objects.equals(manifest, current.getSkills())
         && Objects.equals(canonicalDescription, current.getDescription())
@@ -374,7 +369,7 @@ public class SkillCatalogServiceImpl implements SkillCatalogService {
     current.setSkills(manifest);
     current.setObservedHeadCommit(commit);
     current.setHeadCheckError(null);
-    current.setEncryptedToken(encryptedToken);
+    current.setToken(canonicalToken);
     casUpdate(current, current.getVersion());
     return getPackage(name);
   }
@@ -436,15 +431,6 @@ public class SkillCatalogServiceImpl implements SkillCatalogService {
       throw new AiValidationException(
           SkillPackageGuard.RESOURCE, failure + ": " + error.getMessage(), error);
     }
-  }
-
-  /** 解密已存令牌用于 Git 鉴权；未配置令牌时返回 null。令牌绝不进入日志或响应。 */
-  private String resolveStoredToken(SkillPackage skillPackage) {
-    byte[] encryptedToken = skillPackage.getEncryptedToken();
-    if (encryptedToken == null) {
-      return null;
-    }
-    return tokenCipher.decrypt(skillPackage.getPackageName(), encryptedToken);
   }
 
   /** 请求或导入携带的非空白令牌；null 表示未提供。 */

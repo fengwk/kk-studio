@@ -1,4 +1,4 @@
-import { Activity, Key, LogIn, LogOut, Plug, Settings } from 'lucide-react'
+import { Activity, LogIn, LogOut, Plug, Settings } from 'lucide-react'
 import { useI18n, type AppLocale } from '@/shared/i18n'
 import { Button } from '@/shared/ui/controls/Button'
 import { ResourceCard, type ResourceCardMetaRow } from '@/shared/ui/cards/ResourceCard'
@@ -25,7 +25,6 @@ function statusPillClass(status: PluginStatus): string {
     case 'REFRESH_UNCERTAIN':
       return 'status-pill is-pending'
     case 'REAUTH_REQUIRED':
-    case 'KEY_UNAVAILABLE':
       return 'status-pill is-failed'
     case 'NOT_CONNECTED':
     default:
@@ -53,13 +52,11 @@ export function PluginCard({
 
   const isDeepLink = plugin.authKind?.type === 'DEEP_LINK'
   const isConnected = plugin.status === 'CONNECTED'
-  const isKeyUnavailable = plugin.status === 'KEY_UNAVAILABLE'
   const isNotConnected = plugin.status === 'NOT_CONNECTED'
 
-  // 坐标不同或存在 applicationError 即为待应用状态，不能展示为全局已生效
+  // 修订不同或存在 applicationError 即为待应用状态，不能展示为全局已生效
   const isPendingApplication =
     plugin.applicationError !== null ||
-    plugin.desiredEpoch !== plugin.appliedEpoch ||
     plugin.desiredRevision !== plugin.appliedRevision
 
   // 能力来自实例 metadata；未应用或坐标缺失时不提供可提交的检查坐标。
@@ -72,12 +69,12 @@ export function PluginCard({
 
   const rows: ResourceCardMetaRow[] = [
     [
-      t('plugins.desiredEpoch'),
-      `Epoch ${plugin.desiredEpoch} · Rev ${plugin.desiredRevision}`,
+      t('plugins.desiredRevision'),
+      `Rev ${plugin.desiredRevision}`,
     ],
     [
-      t('plugins.appliedEpoch'),
-      `Epoch ${plugin.appliedEpoch ?? '—'} · Rev ${plugin.appliedRevision ?? '—'}`,
+      t('plugins.appliedRevision'),
+      `Rev ${plugin.appliedRevision ?? '—'}`,
     ],
     [
       t('plugins.capabilities'),
@@ -187,7 +184,6 @@ export function PluginCard({
                 size="compact"
                 danger
                 aria-label={`${t('plugins.disconnect')} ${plugin.name}`}
-                disabled={isKeyUnavailable}
                 onClick={onDisconnect}
               >
                 <LogOut aria-hidden="true" />
@@ -197,7 +193,6 @@ export function PluginCard({
               <Button
                 size="compact"
                 aria-label={`${isNotConnected ? t('plugins.connect') : t('plugins.reconnect')} ${plugin.name}`}
-                disabled={isKeyUnavailable}
                 onClick={onConnect}
               >
                 <LogIn aria-hidden="true" />
@@ -208,11 +203,6 @@ export function PluginCard({
         </div>
       }
     >
-      {isKeyUnavailable ? (
-        <p className="inline-hint danger" role="status">
-          <Key aria-hidden="true" size={14} /> {t('plugins.connectDialog.keyUnavailableHint')}
-        </p>
-      ) : null}
       {plugin.connectionCheckSupported && !connectionCheckAvailable ? (
         <p
           className="inline-hint"

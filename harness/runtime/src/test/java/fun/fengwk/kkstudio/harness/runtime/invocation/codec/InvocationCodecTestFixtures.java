@@ -72,13 +72,11 @@ final class InvocationCodecTestFixtures {
             : new ContributorBinding("core", "bash", List.of());
     boolean hasEnv = environmentSupport == EnvironmentSupport.REQUIRED;
     return new ToolBinding(
-        1L,
         definition(hasEnv ? "fs" : "bash"),
         contributor,
         environmentSupport,
         hasEnv ? ENVIRONMENT_ID : null,
-        hasEnv ? "dev" : null,
-        null);
+        hasEnv ? "dev" : null);
   }
 
   private static AgentToolDefinition definition(String name) {
@@ -107,7 +105,6 @@ final class InvocationCodecTestFixtures {
     ToolBinding binding = binding(EnvironmentSupport.REQUIRED);
     ProviderRequest provider = providerRequest(binding.descriptor());
     return new ModelRequestSpec(
-        1L,
         ProviderType.OPENAI,
         new UUID(0L, 1L),
         provider.model(),
@@ -123,7 +120,6 @@ final class InvocationCodecTestFixtures {
     ToolBinding binding = binding(EnvironmentSupport.NONE);
     ProviderRequest provider = providerRequest(binding.descriptor());
     return new ModelRequestSpec(
-        1L,
         ProviderType.OPENAI,
         new UUID(0L, 1L),
         provider.model(),

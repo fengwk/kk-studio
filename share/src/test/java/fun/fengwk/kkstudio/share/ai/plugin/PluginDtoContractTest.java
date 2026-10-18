@@ -23,7 +23,7 @@ class PluginDtoContractTest {
   private static final JsonMapper MAPPER = JsonMapper.builder().build();
 
   private static String configurationRequest(String secretPatchJson) {
-    return "{\"expectedEpoch\":\"4\",\"expectedRevision\":\"7\",\"valuesJson\":\"{}\" ,"
+    return "{\"expectedRevision\":\"7\",\"valuesJson\":\"{}\" ,"
         + "\"secretPatch\":"
         + secretPatchJson
         + "}";
@@ -98,7 +98,6 @@ class PluginDtoContractTest {
         MAPPER.readValue(
             configurationRequest("{\"apiKey\":{\"operation\":\"SET\",\"value\":\"s\"}}"),
             PluginConfigurationUpdateRequestDTO.class);
-    assertEquals("4", accepted.getExpectedEpoch());
     assertEquals("7", accepted.getExpectedRevision());
     assertEquals("s", accepted.getSecretPatch().get("apiKey").getValue());
 
@@ -106,13 +105,13 @@ class PluginDtoContractTest {
         Exception.class,
         () ->
             MAPPER.readValue(
-                "{\"expectedEpoch\":4,\"expectedRevision\":\"7\",\"valuesJson\":\"{}\"}",
+                "{\"expectedRevision\":7,\"valuesJson\":\"{}\"}",
                 PluginConfigurationUpdateRequestDTO.class));
     assertThrows(
         Exception.class,
         () ->
             MAPPER.readValue(
-                "{\"expectedEpoch\":\"4\",\"expectedRevision\":true,\"valuesJson\":\"{}\"}",
+                "{\"expectedRevision\":true,\"valuesJson\":\"{}\"}",
                 PluginConfigurationUpdateRequestDTO.class));
     assertThrows(
         Exception.class,

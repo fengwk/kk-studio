@@ -43,8 +43,8 @@ public class SkillPackage {
   /** 从 {@code currentCommit} 派生的 Skill manifest，按 name 排序。 */
   private List<SkillManifestEntry> skills;
 
-  /** 私有仓库访问令牌的 AES-GCM 密文；null 表示匿名访问。明文绝不回显、绝不进入日志或模型上下文。 */
-  @ToString.Exclude private byte[] encryptedToken;
+  /** 私有仓库访问令牌；null 表示匿名访问。令牌绝不回显、绝不进入日志或模型上下文。 */
+  @ToString.Exclude private String token;
 
   /** CAS 乐观锁版本：非负，实际事实变化时 +1。 */
   private long version;

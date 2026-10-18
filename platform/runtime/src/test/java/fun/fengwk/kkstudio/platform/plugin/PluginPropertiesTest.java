@@ -2,16 +2,13 @@ package fun.fengwk.kkstudio.platform.plugin;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.context.properties.bind.Bindable;
 import org.springframework.boot.context.properties.bind.Binder;
-import org.springframework.boot.context.properties.source.ConfigurationPropertySources;
 import org.springframework.core.env.ConfigurableEnvironment;
 import org.springframework.core.env.MapPropertySource;
 import org.springframework.core.env.StandardEnvironment;
-import org.springframework.core.env.SystemEnvironmentPropertySource;
 
 import java.time.Duration;
 import java.util.Map;
@@ -19,38 +16,14 @@ import java.util.Map;
 /**
  * 部署配置的 wire 名称契约。
  *
- * <p>运维文档只承诺 {@code KK_STUDIO_PLUGINS_CREDENTIAL_KEY_FILE} 等环境变量名，因此这里同时锁定环境变量形态（Spring relaxed
- * binding）与 kebab-case 属性形态：任一边被重命名都会让生产配置静默失效，属于必须被测试守住的部署边界。
+ * <p>kebab-case 属性名是 {@code application.yml} 占位符的绑定目标：重命名会让生产配置静默失效，属于必须被测试守住的部署边界。
  */
 class PluginPropertiesTest {
-
-  private static Binder bindWithEnvironmentVariable(String name, String value) {
-    ConfigurableEnvironment environment = new StandardEnvironment();
-    // 环境变量属性源必须优先，模拟真实部署：容器只注入 KK_STUDIO_* 变量。
-    environment
-        .getPropertySources()
-        .addFirst(new SystemEnvironmentPropertySource("env", Map.of(name, value)));
-    // Spring Boot 启动时会把 environment 包装为 canonical 视图，relaxed binding 依赖这一步。
-    ConfigurationPropertySources.attach(environment);
-    return Binder.get(environment);
-  }
 
   private static Binder bindWithProperty(String name, String value) {
     ConfigurableEnvironment environment = new StandardEnvironment();
     environment.getPropertySources().addFirst(new MapPropertySource("test", Map.of(name, value)));
     return Binder.get(environment);
-  }
-
-  /** 环境变量 `KK_STUDIO_PLUGINS_CREDENTIAL_KEY_FILE` 必须绑定到 credentialKeyFile。 */
-  @Test
-  void bindsCredentialKeyFileFromEnvironmentVariable() {
-    PluginProperties properties =
-        bindWithEnvironmentVariable(
-                "KK_STUDIO_PLUGINS_CREDENTIAL_KEY_FILE", "/run/secrets/plugin-credential.key")
-            .bind("kk-studio.plugins", Bindable.of(PluginProperties.class))
-            .get();
-
-    assertEquals("/run/secrets/plugin-credential.key", properties.getCredentialKeyFile());
   }
 
   /**
@@ -82,16 +55,14 @@ class PluginPropertiesTest {
     assertEquals(Duration.ofSeconds(45), properties.getRefresh().getLeaseDuration());
   }
 
-  /** 未配置时主密钥为空（本部署不提供凭据能力），刷新节奏回落到文档承诺的 1h / 2m。 */
+  /** 未配置时刷新节奏回落到文档承诺的 1h / 2m。 */
   @Test
-  void defaultsKeepCredentialCapabilityOffAndDocumentedRefreshCadence() {
+  void defaultsToTheDocumentedRefreshCadence() {
     PluginProperties properties =
         bindWithProperty("unused", "value")
             .bind("kk-studio.plugins", Bindable.of(PluginProperties.class))
             .orElseGet(PluginProperties::new);
 
-    assertTrue(
-        properties.getCredentialKeyFile() == null || properties.getCredentialKeyFile().isEmpty());
     assertEquals(Duration.ofHours(1), properties.getRefresh().getPollDelay());
     assertEquals(Duration.ofMinutes(2), properties.getRefresh().getLeaseDuration());
   }

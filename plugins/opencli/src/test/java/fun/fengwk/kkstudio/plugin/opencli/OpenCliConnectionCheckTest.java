@@ -32,7 +32,6 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -394,12 +393,9 @@ class OpenCliConnectionCheckTest {
     PluginCredentialSnapshot snapshot =
         new PluginCredentialSnapshot(
             "opencli",
-            UUID.randomUUID(),
-            "context",
             null,
             null,
             1L,
-            new byte[0],
             "{\"apiKey\":\"" + API_KEY + "\",\"instanceId\":\"" + INSTANCE_ID + "\"}");
     return new PluginCredentialAccess() {
       @Override

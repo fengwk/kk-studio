@@ -2441,11 +2441,9 @@ class ModelExecutionStreamFlushTest {
             Duration.ofSeconds(30));
     ToolBinding binding =
         new ToolBinding(
-            1L,
             new AgentToolDefinition(descriptor, ToolVisibility.SELECTABLE),
             new ContributorBinding("core", "bash", List.of()),
             EnvironmentSupport.NONE,
-            null,
             null,
             null);
     return spec(List.of(binding));
@@ -2453,7 +2451,6 @@ class ModelExecutionStreamFlushTest {
 
   private static ModelRequestSpec spec(List<ToolBinding> bindings) {
     return new ModelRequestSpec(
-        1L,
         ProviderType.OPENAI,
         new UUID(0L, 1L),
         modelDescriptor(),

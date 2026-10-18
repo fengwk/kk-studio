@@ -30,9 +30,8 @@ public class PluginDTO {
   private PluginAuthKindDTO authKind;
 
   /**
-   * 认证状态投影，取 {@code NOT_CONNECTED / KEY_UNAVAILABLE / CONNECTED / REFRESH_FAILED /
-   * REFRESH_UNCERTAIN / REAUTH_REQUIRED}：{@code NOT_CONNECTED} 表示尚无凭据行，{@code KEY_UNAVAILABLE}
-   * 表示部署主密钥不可用（读写 fail closed）。
+   * 认证状态投影，取 {@code NOT_CONNECTED / CONNECTED / REFRESH_FAILED / REFRESH_UNCERTAIN /
+   * REAUTH_REQUIRED}：{@code NOT_CONNECTED} 表示尚无可用认证。
    */
   private String status;
 
@@ -53,12 +52,6 @@ public class PluginDTO {
 
   /** 权威 catalog 当前 desired 配置的普通值、schema 与秘密录入状态投影；本节点实际应用的坐标另见 {@code applied*}。 */
   private PluginConfigurationDTO configuration;
-
-  /** 权威 catalog 当前 epoch（canonical 非负十进制字符串）。 */
-  private String desiredEpoch;
-
-  /** 本节点运行实例构建时的 epoch（canonical 非负十进制字符串）。 */
-  private String appliedEpoch;
 
   /** 权威 catalog 中该插件的当前配置修订（canonical 非负十进制字符串）。 */
   private String desiredRevision;

@@ -81,11 +81,9 @@ class HistoryPayloadMapperTest {
             List.of(
                 binding(),
                 new ToolBinding(
-                    1L,
                     definition("grep"),
                     new ContributorBinding("core", "grep", List.of()),
                     EnvironmentSupport.NONE,
-                    null,
                     null,
                     null)));
     assertEquals(4, payload.message().contents().size());
@@ -211,11 +209,9 @@ class HistoryPayloadMapperTest {
             response,
             List.of(
                 new ToolBinding(
-                    1L,
                     definition("grep"),
                     new ContributorBinding("core", "grep", List.of()),
                     EnvironmentSupport.NONE,
-                    null,
                     null,
                     null)));
     ToolCallMessageContent unboundCall =
@@ -243,13 +239,11 @@ class HistoryPayloadMapperTest {
             "{}");
     ToolBinding environmentBinding =
         new ToolBinding(
-            1L,
             definition("fs_read"),
             new ContributorBinding("core", "fs.read", List.of()),
             EnvironmentSupport.REQUIRED,
             new EnvironmentId(id(1)),
-            "dev",
-            null);
+            "dev");
 
     MessagePayload payload = MAPPER.assistantPayload(response, List.of(environmentBinding));
 
@@ -587,11 +581,9 @@ class HistoryPayloadMapperTest {
 
   private static ToolBinding binding() {
     return new ToolBinding(
-        1L,
         definition("bash"),
         new ContributorBinding("core", "bash", List.of()),
         EnvironmentSupport.NONE,
-        null,
         null,
         null);
   }

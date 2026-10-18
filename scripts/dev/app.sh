@@ -34,9 +34,6 @@ SHARED_PREVIEW_ENV_REQUIRED_KEYS=(
   KK_STUDIO_STORAGE_S3_ACCESS_KEY
   KK_STUDIO_STORAGE_S3_SECRET_KEY
 )
-SHARED_PREVIEW_ENV_OPTIONAL_KEYS=(
-  KK_STUDIO_PLUGINS_CREDENTIAL_KEY_FILE
-)
 
 fail() {
   echo "ERROR: $1" >&2
@@ -58,7 +55,7 @@ file_mode() {
 
 shared_preview_env_key_allowed() {
   local key=$1 candidate
-  for candidate in "${SHARED_PREVIEW_ENV_REQUIRED_KEYS[@]}" "${SHARED_PREVIEW_ENV_OPTIONAL_KEYS[@]}"; do
+  for candidate in "${SHARED_PREVIEW_ENV_REQUIRED_KEYS[@]}"; do
     if [ "$key" = "$candidate" ]; then
       return 0
     fi
@@ -96,7 +93,7 @@ load_shared_preview_env_file() {
 
   # 配置文件是这组键的唯一事实源，不能与调用 shell 偶然继承的同名变量混用。先清空，再把
   # 解析值保留为未导出的 shell 变量；只有 Backend fork 的瞬间才向子进程导出。
-  for candidate in "${SHARED_PREVIEW_ENV_REQUIRED_KEYS[@]}" "${SHARED_PREVIEW_ENV_OPTIONAL_KEYS[@]}"; do
+  for candidate in "${SHARED_PREVIEW_ENV_REQUIRED_KEYS[@]}"; do
     unset "$candidate"
   done
   while IFS= read -r line || [ -n "$line" ]; do
@@ -387,7 +384,7 @@ set_loaded_shared_preview_env_exported() {
   if [ -z "$SHARED_PREVIEW_ENV_FILE" ]; then
     return
   fi
-  for key in "${SHARED_PREVIEW_ENV_REQUIRED_KEYS[@]}" "${SHARED_PREVIEW_ENV_OPTIONAL_KEYS[@]}"; do
+  for key in "${SHARED_PREVIEW_ENV_REQUIRED_KEYS[@]}"; do
     if [[ ! -v $key ]]; then
       continue
     fi

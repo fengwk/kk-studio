@@ -8,15 +8,12 @@ import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
 import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
 import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
-import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogManifest;
-import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRecord;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRow;
 
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
@@ -119,19 +116,12 @@ public class PluginAgentDependencies {
    */
   public Set<String> pluginsDeclaringAgent(String agentName) {
     Objects.requireNonNull(agentName, "agentName");
-    PluginCatalogRecord catalog = configurationRepository.readCatalog();
-    if (catalog == null) {
-      throw new IllegalStateException("plugin catalog is unavailable");
-    }
     TreeSet<String> referencing = new TreeSet<>();
-    for (Map.Entry<String, PluginCatalogManifest.Entry> entry :
-        catalog.manifest().plugins().entrySet()) {
-      PluginConfigurationRow row =
-          PluginConfigurationHistory.require(
-              configurationRepository, entry.getKey(), entry.getValue());
-      if (declaredAgentNames(entry.getKey(), row.revision(), row.valuesJson())
-          .contains(agentName)) {
-        referencing.add(entry.getKey());
+    for (PluginConfigurationRow row : configurationRepository.findAll()) {
+      if (registry.find(row.pluginId()).isPresent()
+          && declaredAgentNames(row.pluginId(), row.revision(), row.valuesJson())
+              .contains(agentName)) {
+        referencing.add(row.pluginId());
       }
     }
     return Collections.unmodifiableSortedSet(referencing);

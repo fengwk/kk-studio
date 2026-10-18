@@ -22,7 +22,7 @@ const NODE_OUTPUT = '00000000-0000-4000-8000-000000000004' as UUIDString
 const NODE_VIDEO = '00000000-0000-4000-8000-000000000005' as UUIDString
 const NODE_TARGET = '00000000-0000-4000-8000-000000000009' as UUIDString
 
-const FUNCTION_VERSION = { catalogEpoch: '1', definitionFingerprint: '0'.repeat(64) }
+const FUNCTION_VERSION = { definitionFingerprint: '0'.repeat(64) }
 
 const imageModel: CanvasFunctionDefinitionDTO = {
   version: FUNCTION_VERSION,

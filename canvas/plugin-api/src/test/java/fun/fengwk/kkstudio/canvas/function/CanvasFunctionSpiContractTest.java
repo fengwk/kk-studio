@@ -207,7 +207,7 @@ class CanvasFunctionSpiContractTest {
         NODE_ID,
         "node",
         REQUEST_ID,
-        new CanvasFunctionBinding(1L, definition, null),
+        new CanvasFunctionBinding(definition),
         CanvasJson.parseObject("{}"),
         List.of(),
         List.of(new CanvasFunctionFrozenOutput(TARGET_ID, 0, CanvasResourceKind.IMAGE, "out.png")),

@@ -17,7 +17,6 @@ const POSITIVE_DECIMAL = /^[1-9]\d*$/
 
 export interface PluginConnectionCheckRun {
   pluginId: string
-  expectedEpoch: string
   expectedRevision: string
   phase: PluginConnectionCheckPhase
   result: PluginConnectionCheckResult | null
@@ -35,18 +34,18 @@ export function pluginConnectionCheckExpected(
   if (!plugin.connectionCheckSupported) {
     return null
   }
-  const { appliedEpoch, appliedRevision } = plugin
-  if (appliedEpoch === null || appliedRevision === null) {
+  const { appliedRevision } = plugin
+  if (appliedRevision === null) {
     return null
   }
   // 已应用实例的配置修订恒为正；0 表示尚无已应用配置，不得作为检查坐标提交。
   if (!POSITIVE_DECIMAL.test(appliedRevision)) {
     return null
   }
-  if (plugin.desiredEpoch !== appliedEpoch || plugin.desiredRevision !== appliedRevision) {
+  if (plugin.desiredRevision !== appliedRevision) {
     return null
   }
-  return { expectedEpoch: appliedEpoch, expectedRevision: appliedRevision }
+  return { expectedRevision: appliedRevision }
 }
 
 /**
@@ -62,7 +61,6 @@ export function pluginConnectionCheckIsStale(
   }
   return (
     current === null
-    || current.expectedEpoch !== run.result.appliedEpoch
     || current.expectedRevision !== run.result.appliedRevision
   )
 }

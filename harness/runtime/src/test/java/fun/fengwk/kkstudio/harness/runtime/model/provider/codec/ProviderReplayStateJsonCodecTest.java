@@ -184,7 +184,6 @@ class ProviderReplayStateJsonCodecTest {
             UUID.randomUUID(),
             UUID.randomUUID(),
             new ModelRequestSpec(
-                1L,
                 ProviderType.OPENAI,
                 new UUID(0L, 1L),
                 new ModelDescriptor(

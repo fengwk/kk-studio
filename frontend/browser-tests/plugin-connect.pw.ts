@@ -36,8 +36,6 @@ const deepLinkPlugin: PluginDTO = {
       },
     },
   },
-  desiredEpoch: '1',
-  appliedEpoch: '1',
   desiredRevision: '1',
   appliedRevision: '1',
   connectionCheckSupported: false,
@@ -76,8 +74,6 @@ const staticKeyPlugin: PluginDTO = {
       },
     },
   },
-  desiredEpoch: '2',
-  appliedEpoch: '2',
   desiredRevision: '2',
   appliedRevision: '2',
   connectionCheckSupported: false,
@@ -111,8 +107,6 @@ const noAuthPlugin: PluginDTO = {
     defaultsJson: '{"debug":false}',
     secrets: {},
   },
-  desiredEpoch: '0',
-  appliedEpoch: null,
   desiredRevision: '0',
   appliedRevision: null,
   connectionCheckSupported: false,
@@ -151,8 +145,6 @@ const checkPlugin: PluginDTO = {
       },
     },
   },
-  desiredEpoch: '21',
-  appliedEpoch: '21',
   desiredRevision: '3',
   appliedRevision: '3',
   connectionCheckSupported: true,
@@ -184,10 +176,9 @@ async function transport(
         await gate
       }
       const postData = route.request().postDataJSON() as {
-        expectedEpoch: string
         expectedRevision: string
       }
-      if (!postData || typeof postData.expectedEpoch !== 'string') {
+      if (!postData || typeof postData.expectedRevision !== 'string') {
         throw new Error(`Connection check must submit the applied coordinates: ${path}`)
       }
       await route.fulfill({
@@ -195,7 +186,6 @@ async function transport(
           status: 200,
           data: {
             pluginId: decodeURIComponent(path.split('/')[3] ?? ''),
-            appliedEpoch: postData.expectedEpoch,
             appliedRevision: postData.expectedRevision,
             checkedAt: 1772366400,
             reachability: 'REACHABLE',
@@ -229,30 +219,20 @@ async function transport(
       })
     } else if (path.endsWith('/configuration') && route.request().method() === 'PUT') {
       requests.push(path)
-      const postData = route.request().postDataJSON() as {
-        expectedEpoch: string
-        valuesJson: string
-      }
-      if (postData?.expectedEpoch === '409') {
-        await route.fulfill({
-          status: 409,
-          json: { status: 409, code: 'version_conflict', message: 'Conflict' },
-        })
-      } else {
-        await route.fulfill({
+      const postData = route.request().postDataJSON() as { valuesJson: string }
+      await route.fulfill({
+        status: 200,
+        json: {
           status: 200,
-          json: {
-            status: 200,
-            data: {
-              ...deepLinkPlugin,
-              configuration: {
-                ...deepLinkPlugin.configuration,
-                valuesJson: postData.valuesJson,
-              },
+          data: {
+            ...deepLinkPlugin,
+            configuration: {
+              ...deepLinkPlugin.configuration,
+              valuesJson: postData.valuesJson,
             },
           },
-        })
-      }
+        },
+      })
     } else {
       throw new Error(`Unexpected offline request: ${path}`)
     }
@@ -439,7 +419,7 @@ test('connection check runs only on explicit click and reports the three typed d
   await expect(dialog.getByTestId('plugin-check-browser-session')).toHaveText(
     '未知（本检查不核验浏览器登录态）',
   )
-  await expect(dialog.getByTestId('plugin-check-coordinates')).toHaveText('Epoch 21 · Rev 3')
+  await expect(dialog.getByTestId('plugin-check-coordinates')).toHaveText('Rev 3')
   expect(await dialog.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
   await page.screenshot({ path: info.outputPath('connection-check-result-320.png') })
 

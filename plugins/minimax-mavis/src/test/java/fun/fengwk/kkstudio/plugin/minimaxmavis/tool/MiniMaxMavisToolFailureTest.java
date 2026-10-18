@@ -73,12 +73,6 @@ import java.util.concurrent.TimeUnit;
  */
 class MiniMaxMavisToolFailureTest {
 
-  /** 本测试使用的固定认证代际：仓库/CAS 断言只要求同代际内一致。 */
-  private static final UUID AUTH_GENERATION =
-      UUID.fromString("00000000-0000-0000-0000-0000000000b1");
-
-  private static final String AUTH_CONTEXT = "a1".repeat(32);
-
   private static final String IDENTIFIABLE_SECRET_TOKEN = "super-secret-mavis-token-xyz-98765";
   private static final String CLIENT_UUID = "11111111-2222-3333-4444-555555555555";
   private static final String VALID_BLOB_UUID = "11111111-2222-3333-4444-555555555555";
@@ -599,10 +593,8 @@ class MiniMaxMavisToolFailureTest {
   /** 同代际刷新：目录后 POST 前重新解析出更新的行版本，POST 必须使用新快照而不是目录快照。 */
   @Test
   void capabilityPostResolvesFreshSnapshotAfterSameGenerationRefresh() {
-    PluginCredentialSnapshot catalogSnapshot =
-        snapshot("token-catalog-generation", 7L, new byte[] {1, 2, 3});
-    PluginCredentialSnapshot refreshedSnapshot =
-        snapshot("token-post-refresh", 8L, new byte[] {4, 5, 6, 7});
+    PluginCredentialSnapshot catalogSnapshot = snapshot("token-catalog-generation", 7L);
+    PluginCredentialSnapshot refreshedSnapshot = snapshot("token-post-refresh", 8L);
     SequencedCredentialAccess credentialAccess =
         new SequencedCredentialAccess(catalogSnapshot, refreshedSnapshot);
 
@@ -617,20 +609,15 @@ class MiniMaxMavisToolFailureTest {
         "Bearer token-post-refresh",
         postRequest.headers().get("Authorization"),
         "能力 POST 必须使用本次 POST 前重新解析出的新快照");
-    // 实际用于 POST 的快照是新行版本，且与目录快照属于同一认证代际。
+    // 实际用于 POST 的快照是新行版本。
     assertEquals(8L, credentialAccess.resolved().get(1).version());
-    assertEquals(
-        credentialAccess.resolved().get(0).authGeneration(),
-        credentialAccess.resolved().get(1).authGeneration());
   }
 
   /** POST 被认证拒绝时只作废实际发起 POST 的快照，目录快照不受影响。 */
   @Test
   void postRejectionInvalidatesOnlyThePostSnapshot() {
-    PluginCredentialSnapshot catalogSnapshot =
-        snapshot("token-catalog-only", 7L, new byte[] {1, 2, 3});
-    PluginCredentialSnapshot postSnapshot =
-        snapshot("token-post-only", 8L, new byte[] {4, 5, 6, 7});
+    PluginCredentialSnapshot catalogSnapshot = snapshot("token-catalog-only", 7L);
+    PluginCredentialSnapshot postSnapshot = snapshot("token-post-only", 8L);
     transport.setInvokeResponse(new MavisHttpResponse(401, "{}"));
     SequencedCredentialAccess credentialAccess =
         new SequencedCredentialAccess(catalogSnapshot, postSnapshot);
@@ -646,12 +633,10 @@ class MiniMaxMavisToolFailureTest {
   /** 目录请求本身被认证拒绝时作废目录快照，且不再发送能力 POST。 */
   @Test
   void catalogRejectionInvalidatesTheCatalogSnapshot() {
-    PluginCredentialSnapshot catalogSnapshot =
-        snapshot("token-catalog-rejected", 7L, new byte[] {1, 2, 3});
+    PluginCredentialSnapshot catalogSnapshot = snapshot("token-catalog-rejected", 7L);
     transport.setCatalogResponse(401, "{}");
     SequencedCredentialAccess credentialAccess =
-        new SequencedCredentialAccess(
-            catalogSnapshot, snapshot("token-post-unused", 8L, new byte[] {4, 5, 6, 7}));
+        new SequencedCredentialAccess(catalogSnapshot, snapshot("token-post-unused", 8L));
 
     ToolResult result = executeWebSearch(credentialAccess);
 
@@ -1078,20 +1063,16 @@ class MiniMaxMavisToolFailureTest {
   }
 
   private static PluginCredentialSnapshot snapshot() {
-    return snapshot(IDENTIFIABLE_SECRET_TOKEN, 7L, new byte[] {1, 2, 3});
+    return snapshot(IDENTIFIABLE_SECRET_TOKEN, 7L);
   }
 
-  /** 指定 token、行版本与密文的快照：用于构造同代际下「已刷新」的新版本。 */
-  private static PluginCredentialSnapshot snapshot(
-      String token, long version, byte[] encryptedPayload) {
+  /** 指定 token 与行版本的快照：用于构造「已刷新」的新版本。 */
+  private static PluginCredentialSnapshot snapshot(String token, long version) {
     return new PluginCredentialSnapshot(
         MiniMaxMavisPlugin.PLUGIN_ID,
-        AUTH_GENERATION,
-        AUTH_CONTEXT,
         MavisRegion.CN.id().toUpperCase(),
         Instant.now().plusSeconds(3600),
         version,
-        encryptedPayload,
         new MiniMaxMavisCredentialPayload(token, CLIENT_UUID, Instant.now()).toJson());
   }
 
@@ -1150,12 +1131,9 @@ class MiniMaxMavisToolFailureTest {
     PluginCredentialSnapshot snapshot =
         new PluginCredentialSnapshot(
             MiniMaxMavisPlugin.PLUGIN_ID,
-            AUTH_GENERATION,
-            AUTH_CONTEXT,
             MavisRegion.CN.id().toUpperCase(),
             Instant.now().plusSeconds(3600),
             0L,
-            new byte[0],
             new MiniMaxMavisCredentialPayload(IDENTIFIABLE_SECRET_TOKEN, CLIENT_UUID, Instant.now())
                 .toJson());
     return new MiniMaxMavisToolExecutionTest.FakeCredentialAccess(snapshot);

@@ -562,7 +562,6 @@ class ConfigSyncPlannerTest {
                 List.of(),
                 List.of(),
                 ConfigSyncFixtures.settings(5L),
-                0L,
                 List.of()));
     when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
 
@@ -808,14 +807,12 @@ class ConfigSyncPlannerTest {
                 List.of(),
                 List.of(),
                 List.of(),
-                4L,
                 List.of(
                     ConfigSyncFixtures.pluginRow(PLUGIN_ID, 7L, "{\"promptAgentName\":\"h3\"}"))));
     when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
 
     ConfigSyncPlan plan = pluginPlanner().plan(pluginParser().parse(pluginEntry("h3")));
 
-    assertEquals(4L, plan.pluginCatalogEpoch());
     assertEquals(
         List.of(new ConfigSyncPlan.PluginImport(PLUGIN_ID, 7L, "{\"promptAgentName\":\"h3\"}")),
         plan.plugins());
@@ -837,7 +834,6 @@ class ConfigSyncPlannerTest {
                 List.of(),
                 List.of(),
                 List.of(),
-                4L,
                 List.of(
                     ConfigSyncFixtures.pluginRow(
                         PLUGIN_ID, 7L, "{\"promptAgentName\":\"ghost\"}"))));
@@ -865,7 +861,6 @@ class ConfigSyncPlannerTest {
                 List.of(),
                 List.of(),
                 List.of(),
-                4L,
                 List.of(
                     ConfigSyncFixtures.pluginRow(PLUGIN_ID, 7L, "{\"promptAgentName\":\"a\"}"))));
     when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
@@ -903,7 +898,6 @@ class ConfigSyncPlannerTest {
                 List.of(),
                 List.of(),
                 List.of(),
-                4L,
                 List.of(
                     ConfigSyncFixtures.pluginRow(
                         PLUGIN_ID, 7L, "{\"promptAgentName\":\"" + BUILTIN_AGENT + "\"}"))));
@@ -933,7 +927,6 @@ class ConfigSyncPlannerTest {
                 List.of(),
                 List.of(),
                 List.of(),
-                1L,
                 List.of()));
     when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
     when(toolCatalog.findTool(anyString())).thenReturn(Optional.empty());
@@ -970,7 +963,6 @@ class ConfigSyncPlannerTest {
                 List.of(),
                 List.of(),
                 List.of(),
-                4L,
                 List.of(
                     ConfigSyncFixtures.pluginRow(PLUGIN_ID, 7L, "{\"promptAgentName\":\"h3\"}"))));
     when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
@@ -998,7 +990,6 @@ class ConfigSyncPlannerTest {
                 List.of(),
                 List.of(),
                 List.of(),
-                1L,
                 List.of(ConfigSyncFixtures.pluginRow(PLUGIN_ID, 1L, "{}"))));
     when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
     ConfigSyncPlanner failingPlanner =

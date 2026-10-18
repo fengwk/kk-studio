@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.canvas.infra.function;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -26,7 +25,6 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionDefinition;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenOutput;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenReference;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionPluginSource;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionSubmitState;
 
@@ -37,7 +35,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
-/** Versioned state codec 冻结完整 binding（目录 epoch、完整定义与插件来源），并严格拒绝 schema 与类型漂移。 */
+/** State codec 冻结完整函数定义，并严格拒绝 schema 与类型漂移。 */
 class CanvasFunctionRunStateCodecTest {
 
   private static final UUID CANVAS = UUID.fromString("00000000-0000-0000-0000-000000000001");
@@ -47,12 +45,6 @@ class CanvasFunctionRunStateCodecTest {
   private static final UUID BLOB = UUID.fromString("00000000-0000-0000-0000-000000000005");
   private static final UUID REQUEST = UUID.fromString("00000000-0000-0000-0000-000000000006");
   private static final UUID TARGET = UUID.fromString("00000000-0000-0000-0000-000000000007");
-  private static final UUID AUTH_GENERATION =
-      UUID.fromString("00000000-0000-0000-0000-0000000000aa");
-  private static final long CATALOG_EPOCH = 9L;
-  private static final CanvasFunctionPluginSource PLUGIN_SOURCE =
-      new CanvasFunctionPluginSource(
-          "mini-max", "1.2.3", 7L, "a".repeat(64), AUTH_GENERATION, "b".repeat(64));
 
   private ObjectMapper mapper;
   private CanvasFunctionRunStateCodec codec;
@@ -89,7 +81,7 @@ class CanvasFunctionRunStateCodecTest {
                 Set.of(CanvasResourceKind.IMAGE, CanvasResourceKind.AUDIO),
                 3,
                 Map.of(CanvasResourceKind.AUDIO, 1)));
-    binding = new CanvasFunctionBinding(CATALOG_EPOCH, definition, PLUGIN_SOURCE);
+    binding = new CanvasFunctionBinding(definition);
     JsonObject args =
         CanvasJson.parseObject(
             """
@@ -132,16 +124,14 @@ class CanvasFunctionRunStateCodecTest {
             Map.of("jobId", "job-1", "attempt", 1));
   }
 
-  /** round-trip 编解码完整 binding（epoch/完整定义/来源）与冻结计划，并覆盖 stage/functionName/transition。 */
+  /** round-trip 编解码完整定义与冻结计划，并覆盖 stage/functionName/transition。 */
   @Test
   void roundTripsTheTypedFrozenPlan() {
     String json = codec.encode(run);
     CanvasFunctionFrozenRun decoded = codec.decode(json);
 
     assertEquals(run, decoded);
-    assertEquals(CATALOG_EPOCH, decoded.binding().catalogEpoch());
     assertEquals(definition, decoded.definition());
-    assertEquals(PLUGIN_SOURCE, decoded.binding().pluginSource());
     assertEquals("SUBMITTED", codec.stage(json));
     assertEquals("test.video", codec.functionName(json));
     assertEquals(json, codec.initial(run));
@@ -153,47 +143,9 @@ class CanvasFunctionRunStateCodecTest {
                 run, CanvasFunctionSubmitState.SUBMITTING, "SUBMITTING", Map.of("jobId", "job-2"))
             .submitState());
 
-    // 线文本必须完整携带定义与来源，而不是只留名称或摘要。
-    assertTrue(json.contains("\"version\":5"));
+    // 线文本必须完整携带定义，而不是只留名称或摘要。
     assertTrue(json.contains("\"description\":\"Test Video\""));
     assertTrue(json.contains("\"maxReferences\":3"));
-    assertTrue(json.contains("\"pluginId\":\"mini-max\""));
-    assertTrue(json.contains("\"configRevision\":7"));
-    assertTrue(json.contains("\"capabilityFingerprint\":\"" + "a".repeat(64) + "\""));
-  }
-
-  /** 内置函数的 pluginSource 为 null，round-trip 后必须仍是内置身份。 */
-  @Test
-  void roundTripsBuiltinFunctionWithoutPluginSource() {
-    CanvasFunctionFrozenRun builtin =
-        new CanvasFunctionFrozenRun(
-            run.canvasId(),
-            run.nodeId(),
-            run.nodeName(),
-            run.requestId(),
-            new CanvasFunctionBinding(1L, definition, null),
-            run.args(),
-            run.manifest(),
-            run.outputs(),
-            run.submitState(),
-            run.stage(),
-            run.adapterState());
-
-    CanvasFunctionFrozenRun decoded = codec.decode(codec.encode(builtin));
-
-    assertEquals(builtin, decoded);
-    assertNull(decoded.binding().pluginSource());
-    assertEquals(1L, decoded.binding().catalogEpoch());
-  }
-
-  /** state 版本必须精确匹配，不能把超宽整数截断后当作 VERSION 5。 */
-  @Test
-  void rejectsVersionNumbersThatWrapToTheSupportedVersion() {
-    ObjectNode root = encodedRoot();
-    root.put("version", 4294967301L);
-    String wrappedVersion = root.toString();
-
-    assertThrows(IllegalArgumentException.class, () -> codec.decode(wrappedVersion));
   }
 
   /** 未类型化 checkpoint 数字也须保留 BigDecimal 精度、scale、极值与宽整数。 */
@@ -217,63 +169,13 @@ class CanvasFunctionRunStateCodecTest {
     assertEquals(decoded, codec.decode(codec.encode(decoded)));
   }
 
-  /** 拒绝非 VERSION 5（含旧 4）、未知字段、非法 epoch/来源以及损坏的完整定义。 */
+  /** 拒绝未知字段与损坏的完整定义。 */
   @Test
-  void rejectsSchemaVersionSourceAndDefinitionDrift() throws Exception {
+  void rejectsSchemaAndDefinitionDrift() throws Exception {
     ObjectNode root = (ObjectNode) mapper.readTree(codec.encode(run));
     root.put("extra", true);
     String unknownField = root.toString();
     assertThrows(IllegalArgumentException.class, () -> codec.decode(unknownField));
-
-    root.remove("extra");
-    root.put("version", 3);
-    String unsupportedVersion = root.toString();
-    assertThrows(IllegalArgumentException.class, () -> codec.decode(unsupportedVersion));
-
-    // 旧 VERSION 4 不再双读：必须按新格式拒绝，而不是回退解释。
-    root = encodedRoot();
-    root.put("version", 4);
-    String legacyVersion = root.toString();
-    assertThrows(IllegalArgumentException.class, () -> codec.decode(legacyVersion));
-
-    root = encodedRoot();
-    ((ObjectNode) root.get("plan")).put("catalogEpoch", 0);
-    String nonPositiveEpoch = root.toString();
-    assertThrows(IllegalArgumentException.class, () -> codec.decode(nonPositiveEpoch));
-
-    root = encodedRoot();
-    ((ObjectNode) root.get("plan")).remove("catalogEpoch");
-    String missingEpoch = root.toString();
-    assertThrows(IllegalArgumentException.class, () -> codec.decode(missingEpoch));
-
-    root = encodedRoot();
-    firstPlan(root).remove("pluginSource");
-    String missingSource = root.toString();
-    assertThrows(IllegalArgumentException.class, () -> codec.decode(missingSource));
-
-    root = encodedRoot();
-    firstPlan(root).put("pluginSource", 7);
-    String scalarSource = root.toString();
-    assertThrows(IllegalArgumentException.class, () -> codec.decode(scalarSource));
-
-    root = encodedRoot();
-    ObjectNode source = (ObjectNode) firstPlan(root).get("pluginSource");
-    source.put("configRevision", 0);
-    String invalidRevision = root.toString();
-    assertThrows(IllegalArgumentException.class, () -> codec.decode(invalidRevision));
-
-    // binding 约束：configRevision 不得晚于 binding 的 catalogEpoch。
-    root = encodedRoot();
-    root.put("version", 5);
-    ObjectNode plan = firstPlan(root);
-    plan.put("catalogEpoch", 3);
-    String revisionAheadOfEpoch = root.toString();
-    assertThrows(IllegalArgumentException.class, () -> codec.decode(revisionAheadOfEpoch));
-
-    root = encodedRoot();
-    ((ObjectNode) firstPlan(root).get("pluginSource")).put("capabilityFingerprint", "not-a-digest");
-    String invalidFingerprint = root.toString();
-    assertThrows(IllegalArgumentException.class, () -> codec.decode(invalidFingerprint));
 
     root = encodedRoot();
     ObjectNode definitionNode = (ObjectNode) firstPlan(root).get("definition");
@@ -336,8 +238,7 @@ class CanvasFunctionRunStateCodecTest {
     String invalidSubmitState = root.toString();
     assertThrows(IllegalArgumentException.class, () -> codec.decode(invalidSubmitState));
 
-    String duplicate =
-        codec.encode(run).replaceFirst("\"version\":5", "\"version\":5,\"version\":5");
+    String duplicate = codec.encode(run).replaceFirst("\\{\"plan\":", "{\"stage\":\"X\",\"plan\":");
     assertThrows(IllegalArgumentException.class, () -> codec.decode(duplicate));
     assertThrows(IllegalArgumentException.class, () -> codec.stage("{"));
     assertThrows(IllegalArgumentException.class, () -> codec.functionName("{}"));

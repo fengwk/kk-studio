@@ -477,7 +477,6 @@ class HistoryEntryPayloadTest {
 
     ToolBinding sampleBinding =
         new ToolBinding(
-            1L,
             new AgentToolDefinition(
                 new ToolDescriptor(
                     "bash",
@@ -489,7 +488,6 @@ class HistoryEntryPayloadTest {
                 ToolVisibility.SELECTABLE),
             new ContributorBinding("core", "bash", List.of()),
             EnvironmentSupport.NONE,
-            null,
             null,
             null);
 

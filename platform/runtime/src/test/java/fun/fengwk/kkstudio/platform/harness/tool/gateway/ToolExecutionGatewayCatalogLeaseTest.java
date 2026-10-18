@@ -53,7 +53,7 @@ class ToolExecutionGatewayCatalogLeaseTest {
   void cancelBeforeStartReleasesLeaseAndRefusesStart() {
     TestRuntimeToolCatalogSource source = source();
     ToolExecutionGateway.ToolResourceLease resources =
-        new ToolExecutionGateway.ToolResourceLease(source.acquireCurrent());
+        new ToolExecutionGateway.ToolResourceLease(source.acquire());
 
     resources.resolve();
 
@@ -67,7 +67,7 @@ class ToolExecutionGatewayCatalogLeaseTest {
   void startWinsSoReleaseWaitsForRunnerExitAndQuiescence() {
     TestRuntimeToolCatalogSource source = source();
     ToolExecutionGateway.ToolResourceLease resources =
-        new ToolExecutionGateway.ToolResourceLease(source.acquireCurrent());
+        new ToolExecutionGateway.ToolResourceLease(source.acquire());
     ControllableHandle handle = new ControllableHandle();
 
     assertTrue(resources.tryStart(), "未决议时执行获准进入");
@@ -92,7 +92,7 @@ class ToolExecutionGatewayCatalogLeaseTest {
   void releaseWithoutHandleHappensAtRunnerExit() {
     TestRuntimeToolCatalogSource source = source();
     ToolExecutionGateway.ToolResourceLease resources =
-        new ToolExecutionGateway.ToolResourceLease(source.acquireCurrent());
+        new ToolExecutionGateway.ToolResourceLease(source.acquire());
 
     assertTrue(resources.tryStart());
     resources.resolve();
@@ -106,7 +106,7 @@ class ToolExecutionGatewayCatalogLeaseTest {
   void brokenHandleNeverReportsQuiescence() {
     TestRuntimeToolCatalogSource source = source();
     ToolExecutionGateway.ToolResourceLease resources =
-        new ToolExecutionGateway.ToolResourceLease(source.acquireCurrent());
+        new ToolExecutionGateway.ToolResourceLease(source.acquire());
     ToolExecutionHandle nullStage =
         new ToolExecutionHandle() {
           @Override

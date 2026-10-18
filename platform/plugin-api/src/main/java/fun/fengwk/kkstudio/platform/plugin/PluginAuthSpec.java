@@ -16,8 +16,8 @@ import java.util.regex.Pattern;
  * 的密钥由平台秘密存取提供，其字段必须由 {@link PluginConfigSchema#secrets()} 声明。三态与 {@link
  * StudioPlugin#authHandler()} 强一致：只有 {@link DeepLink} 允许存在交互式登录处理器。
  *
- * <p>{@link #contextFields()} 是「普通配置里决定认证目标与权限的字段」：它们的严格规范值参与认证上下文指纹派生，因此这些字段变化会推进认证代际。 只有 {@link
- * StaticKey} 声明它；{@link None} 与 {@link DeepLink} 的目标由固定协议（region 候选）控制，当前为空集合。
+ * <p>{@link #contextFields()} 是「普通配置里决定认证目标与权限的字段」：这些字段变化而没有同时重新录入密钥时，已保存的密钥被丢弃，避免把密钥发往新目标。只有
+ * {@link StaticKey} 声明它；{@link None} 与 {@link DeepLink} 的目标由固定协议（region 候选）控制，当前为空集合。
  */
 public sealed interface PluginAuthSpec
     permits PluginAuthSpec.None, PluginAuthSpec.StaticKey, PluginAuthSpec.DeepLink {
@@ -32,7 +32,7 @@ public sealed interface PluginAuthSpec
     }
   }
 
-  /** 参与认证上下文指纹的普通配置字段；默认空集合，只有 {@link StaticKey} 声明。 */
+  /** 决定认证目标的普通配置字段；默认空集合，只有 {@link StaticKey} 声明。 */
   default Set<String> contextFields() {
     return Set.of();
   }
@@ -47,7 +47,7 @@ public sealed interface PluginAuthSpec
    * 静态密钥认证：密钥由平台秘密存取提供，没有交互式登录步骤，因此没有过期与自动刷新。
    *
    * @param secretField 必须与 {@link PluginConfigSchema#secrets()} 声明的秘密字段同名
-   * @param contextFields 决定认证目标/权限的普通顶层配置字段（可为空集合）；必须是 {@code valuesSchema} 声明的字段，字段值变化推进认证代际
+   * @param contextFields 决定认证目标/权限的普通顶层配置字段（可为空集合）；必须是 {@code valuesSchema} 声明的字段，字段值变化使已保存密钥失效
    */
   record StaticKey(String secretField, Set<String> contextFields) implements PluginAuthSpec {
 
@@ -74,7 +74,7 @@ public sealed interface PluginAuthSpec
       }
       copied.add(field);
     }
-    // 保留声明顺序：contextFields 参与确定性指纹派生，迭代顺序不能随机化。
+    // 保留声明顺序，使比较与展示顺序确定。
     return Collections.unmodifiableSet(copied);
   }
 

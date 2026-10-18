@@ -43,8 +43,6 @@ function samplePlugin(overrides: Partial<PluginDTO> = {}): PluginDTO {
       defaultsJson: '{"enabled":true}',
       secrets: {},
     },
-    desiredEpoch: '1',
-    appliedEpoch: '1',
     desiredRevision: '1',
     appliedRevision: '1',
     connectionCheckSupported: false,
@@ -101,7 +99,7 @@ describe('PluginsTab', () => {
       // Active capabilities rendered
       expect(screen.getByText('search, draw')).toBeInTheDocument()
       // Epoch & revision coordinates rendered (desired and applied)
-      expect(screen.getAllByText('Epoch 1 · Rev 1').length).toBe(2)
+      expect(screen.getAllByText('Rev 1').length).toBe(2)
     })
 
     // Confirm no secret tokens exist in document
@@ -190,8 +188,6 @@ describe('PluginsTab', () => {
   it('shows pending application warning when coordinates differ or applicationError is present', async () => {
     vi.mocked(pluginsService.listPlugins).mockResolvedValue([
       samplePlugin({
-        desiredEpoch: '5',
-        appliedEpoch: '4',
         applicationError: 'configuration is saved but this node has not applied it yet',
       }),
     ])
@@ -239,25 +235,6 @@ describe('PluginsTab', () => {
     await waitFor(() => {
       expect(screen.getByText('Failed to load plugins')).toBeInTheDocument()
     })
-  })
-
-  it('shows error state when KEY_UNAVAILABLE and disables actions', async () => {
-    vi.mocked(pluginsService.listPlugins).mockResolvedValue([
-      samplePlugin({
-        status: 'KEY_UNAVAILABLE',
-      }),
-    ])
-
-    renderTab()
-
-    await waitFor(() => {
-      expect(screen.getByText('MiniMax Mavis')).toBeInTheDocument()
-    })
-
-    const connectBtn = screen.getByRole('button', {
-      name: /连接.*MiniMax Mavis|Connect.*MiniMax Mavis/i,
-    })
-    expect(connectBtn).toBeDisabled()
   })
 
   it('shows warnings and error details for REFRESH_FAILED and REFRESH_UNCERTAIN', async () => {
@@ -497,8 +474,6 @@ describe('PluginsTab', () => {
       status: 'CONNECTED',
       region: 'CN',
       connectionCheckSupported: true,
-      desiredEpoch: '14',
-      appliedEpoch: '14',
       desiredRevision: '8',
       appliedRevision: '8',
       ...overrides,
@@ -510,7 +485,6 @@ describe('PluginsTab', () => {
   ): PluginConnectionCheckResult {
     return {
       pluginId: 'opencli',
-      appliedEpoch: '14',
       appliedRevision: '8',
       checkedAt: 1772366400,
       reachability: 'REACHABLE',
@@ -565,11 +539,10 @@ describe('PluginsTab', () => {
   it('disables the entry with an explanation while the local coordinates are unusable', async () => {
     const user = userEvent.setup()
     vi.mocked(pluginsService.listPlugins).mockResolvedValue([
-      checkablePlugin({ desiredEpoch: '15', applicationError: 'configuration is not applied yet' }),
+      checkablePlugin({ desiredRevision: '9', applicationError: 'configuration is not applied yet' }),
       checkablePlugin({
         pluginId: 'no-applied',
         name: 'No Applied Plugin',
-        appliedEpoch: null,
         appliedRevision: null,
       }),
       checkablePlugin({
@@ -613,14 +586,13 @@ describe('PluginsTab', () => {
 
     expect(pluginsService.checkConnection).toHaveBeenCalledTimes(1)
     expect(pluginsService.checkConnection).toHaveBeenCalledWith('opencli', {
-      expectedEpoch: '14',
       expectedRevision: '8',
     })
 
     const dialog = await screen.findByRole('dialog')
     expect(within(dialog).getByRole('heading', { name: '连接检查：OpenCLI Probe' })).toBeInTheDocument()
     expect(within(dialog).getByTestId('plugin-check-pending')).toBeInTheDocument()
-    expect(within(dialog).getByTestId('plugin-check-coordinates')).toHaveTextContent('Epoch 14 · Rev 8')
+    expect(within(dialog).getByTestId('plugin-check-coordinates')).toHaveTextContent('Rev 8')
 
     // 进行中的检查禁用入口并阻止关闭，重复激活不产生第二次请求。
     expect(opener).toBeDisabled()
@@ -667,7 +639,6 @@ describe('PluginsTab', () => {
     await user.click(checkButton('OpenCLI Probe'))
     await user.click(checkButton('Other Plugin'))
     expect(pluginsService.checkConnection).toHaveBeenNthCalledWith(2, 'other', {
-      expectedEpoch: '14',
       expectedRevision: '8',
     })
 
@@ -712,7 +683,7 @@ describe('PluginsTab', () => {
     await user.click(within(dialog).getByTestId('plugin-check-close'))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     vi.mocked(pluginsService.checkConnection).mockResolvedValueOnce(
-      checkResult({ appliedEpoch: '99' }),
+      checkResult({ appliedRevision: '99' }),
     )
     await user.click(checkButton('OpenCLI Probe'))
 
@@ -746,11 +717,9 @@ describe('PluginsTab', () => {
     await user.click(checkButton('Other Plugin'))
     expect(pluginsService.checkConnection).toHaveBeenCalledTimes(2)
     expect(pluginsService.checkConnection).toHaveBeenNthCalledWith(1, 'opencli', {
-      expectedEpoch: '14',
       expectedRevision: '8',
     })
     expect(pluginsService.checkConnection).toHaveBeenNthCalledWith(2, 'other', {
-      expectedEpoch: '14',
       expectedRevision: '8',
     })
 
@@ -808,7 +777,7 @@ describe('PluginsTab', () => {
 
     // 异步换版：列表刷新为新的已应用坐标。
     vi.mocked(pluginsService.listPlugins).mockResolvedValue([
-      checkablePlugin({ desiredEpoch: '15', appliedEpoch: '15', desiredRevision: '9', appliedRevision: '9' }),
+      checkablePlugin({ desiredRevision: '9', appliedRevision: '9' }),
     ])
     await act(async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.plugins.all })
@@ -842,7 +811,7 @@ describe('PluginsTab', () => {
     expect(screen.queryByTestId('plugin-check-reachability')).toBeNull()
 
     // 关闭后列表换版：既不复活旧结果，也不自动重新检查。
-    vi.mocked(pluginsService.listPlugins).mockResolvedValue([checkablePlugin({ appliedEpoch: '15', desiredEpoch: '15' })])
+    vi.mocked(pluginsService.listPlugins).mockResolvedValue([checkablePlugin({ desiredRevision: '9' })])
     await act(async () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.plugins.all })
     })

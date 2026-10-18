@@ -61,11 +61,10 @@ function PluginConnection({
   }, [])
 
   const pending = preparePending || completePending
-  const isKeyUnavailable = plugin.status === 'KEY_UNAVAILABLE'
   const hasNoCandidates = candidates.length === 0
 
   async function handleOpenLogin() {
-    if (pending || busyRef.current || isKeyUnavailable || hasNoCandidates || !selectedRegion) {
+    if (pending || busyRef.current || hasNoCandidates || !selectedRegion) {
       return
     }
     busyRef.current = true
@@ -96,7 +95,7 @@ function PluginConnection({
 
   async function handleComplete(event: React.FormEvent) {
     event.preventDefault()
-    if (pending || busyRef.current || isKeyUnavailable) return
+    if (pending || busyRef.current) return
     const trimmed = callbackUrl.trim()
     if (!trimmed) {
       return
@@ -149,11 +148,6 @@ function PluginConnection({
       className="plugin-connect-modal"
     >
       <div className="plugin-connect-body">
-        {isKeyUnavailable ? (
-          <div className="callout callout-warning" role="alert">
-            {t('plugins.connectDialog.keyUnavailableHint')}
-          </div>
-        ) : null}
 
         {hasNoCandidates ? (
           <div className="callout callout-warning" role="alert">
@@ -172,7 +166,7 @@ function PluginConnection({
                 setAuthAttemptId(null)
                 setLoginOpened(false)
               }}
-              disabled={pending || isKeyUnavailable}
+              disabled={pending}
               aria-label={t('plugins.region')}
             />
           </div>
@@ -189,7 +183,7 @@ function PluginConnection({
               type="button"
               variant="ghost"
               className="btn-outline"
-              disabled={pending || isKeyUnavailable || hasNoCandidates || !selectedRegion}
+              disabled={pending || hasNoCandidates || !selectedRegion}
               onClick={handleOpenLogin}
               aria-label={
                 preparePending
@@ -227,7 +221,7 @@ function PluginConnection({
                 aria-label={t('plugins.connectDialog.step2')}
                 placeholder={t('plugins.connectDialog.callbackPlaceholder')}
                 value={callbackUrl}
-                disabled={pending || isKeyUnavailable}
+                disabled={pending}
                 onChange={(e) => {
                   setCallbackUrl(e.target.value)
                   setCompleteError(null)
@@ -263,7 +257,6 @@ function PluginConnection({
                 variant="primary"
                 disabled={
                   pending ||
-                  isKeyUnavailable ||
                   !callbackUrl.trim() ||
                   !authAttemptId
                 }

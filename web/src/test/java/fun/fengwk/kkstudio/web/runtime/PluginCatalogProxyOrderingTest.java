@@ -12,7 +12,6 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.parallel.ResourceLock;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
-import org.springframework.transaction.PlatformTransactionManager;
 
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
@@ -29,6 +28,7 @@ import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRuntime;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogSnapshot;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialStore;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRepository;
+import fun.fengwk.kkstudio.platform.plugin.service.PluginContextFactory;
 import fun.fengwk.kkstudio.platform.settings.SystemNetworkConfiguration;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
@@ -43,7 +43,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * 宿主组合根的代理装配顺序回归：{@link PluginCatalogConfiguration#pluginCatalogRuntime} 必须在 {@code
  * systemProxySelector} 安装之后才构建插件实例。
  *
- * <p>不加载 ComfyUI/H3，仅使用真实目录组合根、真实全局代理和探测插件；内存仓储替代与装配顺序无关的持久化。
+ * <p>不加载 ComfyUI/H3，仅使用真实目录组合根、真实全局代理和探测插件；仓储替身替代与装配顺序无关的持久化。
  */
 @ResourceLock("jvm-proxy-selector")
 class PluginCatalogProxyOrderingTest {
@@ -59,9 +59,14 @@ class PluginCatalogProxyOrderingTest {
         .withBean(
             StudioPluginRegistry.class,
             () -> new StudioPluginRegistry(List.of(new ProbePlugin(observed))))
-        .withBean(PluginCredentialStore.class, () -> mock(PluginCredentialStore.class))
-        .withBean(PluginConfigurationRepository.class, InMemoryPluginCatalogFakes::repository)
-        .withBean(PlatformTransactionManager.class, InMemoryPluginCatalogFakes::transactionManager)
+        .withBean(
+            PluginContextFactory.class,
+            () ->
+                new PluginContextFactory(
+                    mock(PluginCredentialStore.class), () -> null, () -> null, () -> null))
+        .withBean(
+            PluginConfigurationRepository.class,
+            () -> PluginConfigurationFakes.repository(ProbePlugin.PLUGIN_ID))
         // 后注册 selector，使顺序保证来自宿主声明的依赖，而非 Bean 注册顺序。
         .withBean(
             "systemProxySelector",
@@ -80,9 +85,8 @@ class PluginCatalogProxyOrderingTest {
               assertSame(installed, observed.get(), "插件实例必须使用已安装的全局代理");
 
               PluginCatalogRuntime runtime = context.getBean(PluginCatalogRuntime.class);
-              try (PluginCatalogRuntime.Lease lease = runtime.acquireCurrent()) {
+              try (PluginCatalogRuntime.Lease lease = runtime.acquire()) {
                 PluginCatalogSnapshot snapshot = lease.snapshot();
-                assertEquals(1L, snapshot.epoch());
                 assertTrue(
                     snapshot.configuredPlugins().stream()
                         .anyMatch(

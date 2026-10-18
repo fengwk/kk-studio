@@ -222,8 +222,6 @@
                                         <include>fun.fengwk.kkstudio.platform.plugin.resource.PublicAddressPolicy</include>
                                         <include>fun.fengwk.kkstudio.platform.plugin.resource.PublicAddressDnsResolver</include>
                                         <include>fun.fengwk.kkstudio.platform.plugin.resource.HttpRemoteMediaTransport</include>
-                                        <include>fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogSnapshot*</include>
-                                        <include>fun.fengwk.kkstudio.platform.plugin.credential.ScopedPluginCredentialAccess</include>
                                         <include>fun.fengwk.kkstudio.platform.persistence.PostgresqlPersistenceConfiguration</include>
                                     </includes>
                                     <limits>
@@ -251,8 +249,8 @@
                         </configuration>
                     </execution>
                     <execution>
-                        <!-- 配置版本、完整目录与恢复逻辑的定向覆盖率门禁。 -->
-                        <id>check-plugin-configuration-class-line-coverage</id>
+                        <!-- Plugin 配置、凭据、目录快照与管理面的类级覆盖率门禁。 -->
+                        <id>check-plugin-class-line-coverage</id>
                         <phase>verify</phase>
                         <goals>
                             <goal>check</goal>
@@ -263,133 +261,17 @@
                                     <element>CLASS</element>
                                     <includes>
                                         <include>fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogSnapshot*</include>
-                                        <include>fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogBootstrap</include>
-                                        <include>fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogFingerprint</include>
-                                        <include>fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogManifest*</include>
-                                        <include>fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRecord</include>
-                                        <include>fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRow</include>
-                                        <include>fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.PostgresqlPluginConfigurationRepository</include>
-                                        <include>fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.PostgresqlPluginCatalogChangeNotifier</include>
-                                        <include>fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.store.PluginConfigurationJdbcStore</include>
-                                    </includes>
-                                    <limits>
-                                        <limit>
-                                            <counter>LINE</counter>
-                                            <value>COVEREDRATIO</value>
-                                            <minimum>0.90</minimum>
-                                        </limit>
-                                    </limits>
-                                </rule>
-                            </rules>
-                        </configuration>
-                    </execution>
-                    <execution>
-                        <!-- 权威 epoch 对账、原子发布与租用退役的类级覆盖率门禁。 -->
-                        <id>check-plugin-epoch-runtime-class-line-coverage</id>
-                        <phase>verify</phase>
-                        <goals>
-                            <goal>check</goal>
-                        </goals>
-                        <configuration>
-                            <rules>
-                                <rule>
-                                    <element>CLASS</element>
-                                    <includes>
-                                        <include>fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRuntime</include>
-                                    </includes>
-                                    <limits>
-                                        <limit>
-                                            <counter>LINE</counter>
-                                            <value>COVEREDRATIO</value>
-                                            <minimum>0.90</minimum>
-                                        </limit>
-                                    </limits>
-                                </rule>
-                            </rules>
-                        </configuration>
-                    </execution>
-                    <execution>
-                        <id>check-plugin-live-wiring-class-line-coverage</id>
-                        <phase>verify</phase>
-                        <goals>
-                            <goal>check</goal>
-                        </goals>
-                        <configuration>
-                            <rules>
-                                <rule>
-                                    <element>CLASS</element>
-                                    <includes>
-                                        <include>fun.fengwk.kkstudio.platform.canvas.function.PluginCanvasFunctionCatalogSource*</include>
-                                        <include>fun.fengwk.kkstudio.platform.plugin.service.PluginConfigurationCommitService*</include>
-                                        <include>fun.fengwk.kkstudio.platform.plugin.service.PluginManagementService*</include>
-                                    </includes>
-                                    <limits>
-                                        <limit>
-                                            <counter>LINE</counter>
-                                            <value>COVEREDRATIO</value>
-                                            <minimum>0.90</minimum>
-                                        </limit>
-                                    </limits>
-                                </rule>
-                            </rules>
-                        </configuration>
-                    </execution>
-                    <execution>
-                        <!-- S3-B2 秘密与配置管理的定向覆盖率门禁：唯一提交入口、管理面用例、候选上下文与 attempt 单次消费。 -->
-                        <id>check-plugin-secret-management-class-line-coverage</id>
-                        <phase>verify</phase>
-                        <goals>
-                            <goal>check</goal>
-                        </goals>
-                        <configuration>
-                            <rules>
-                                <rule>
-                                    <element>CLASS</element>
-                                    <includes>
-                                        <include>fun.fengwk.kkstudio.platform.plugin.service.PluginConfigurationCommitService</include>
-                                        <include>fun.fengwk.kkstudio.platform.plugin.service.PluginManagementService</include>
-                                        <include>fun.fengwk.kkstudio.platform.plugin.service.PluginConfigurationHistory</include>
-                                        <include>fun.fengwk.kkstudio.platform.plugin.service.PluginContextFactory</include>
-                                        <include>fun.fengwk.kkstudio.platform.plugin.service.PluginAuthNonce</include>
-                                        <include>fun.fengwk.kkstudio.platform.plugin.service.PluginSecretPatch</include>
-                                        <include>fun.fengwk.kkstudio.platform.plugin.credential.FixedPluginCredentialAccess</include>
-                                        <include>fun.fengwk.kkstudio.platform.plugin.catalog.PluginAuthContextFingerprint</include>
-                                        <include>fun.fengwk.kkstudio.platform.plugin.persistence.PluginAuthAttemptRow</include>
-                                        <include>fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.PostgresqlPluginAuthAttemptRepository</include>
-                                        <include>fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.store.PluginAuthAttemptJdbcStore</include>
-                                    </includes>
-                                    <limits>
-                                        <limit>
-                                            <counter>LINE</counter>
-                                            <value>COVEREDRATIO</value>
-                                            <minimum>0.90</minimum>
-                                        </limit>
-                                    </limits>
-                                </rule>
-                            </rules>
-                        </configuration>
-                    </execution>
-                    <execution>
-                        <!-- 凭据认证代际与共享 crypto 原语的定向覆盖率门禁。 -->
-                        <id>check-plugin-credential-class-line-coverage</id>
-                        <phase>verify</phase>
-                        <goals>
-                            <goal>check</goal>
-                        </goals>
-                        <configuration>
-                            <rules>
-                                <rule>
-                                    <element>CLASS</element>
-                                    <includes>
-                                        <include>fun.fengwk.kkstudio.platform.crypto.AesGcmEnvelope</include>
-                                        <include>fun.fengwk.kkstudio.platform.crypto.LengthPrefixedAad</include>
-                                        <include>fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialCodec</include>
+                                        <include>fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRuntime*</include>
+                                        <include>fun.fengwk.kkstudio.platform.plugin.persistence.*</include>
                                         <include>fun.fengwk.kkstudio.platform.plugin.credential.DatabasePluginCredentialStore</include>
+                                        <include>fun.fengwk.kkstudio.platform.plugin.credential.FixedPluginCredentialAccess</include>
                                         <include>fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialRefreshService</include>
                                         <include>fun.fengwk.kkstudio.platform.plugin.credential.ScopedPluginCredentialAccess</include>
-                                        <include>fun.fengwk.kkstudio.platform.plugin.persistence.PluginCredentialRow</include>
-                                        <include>fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.PostgresqlPluginCredentialRepository</include>
-                                        <include>fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.store.PluginCredentialJdbcStore</include>
+                                        <include>fun.fengwk.kkstudio.platform.plugin.service.PluginConfigurationService*</include>
+                                        <include>fun.fengwk.kkstudio.platform.plugin.service.PluginManagementService*</include>
+                                        <include>fun.fengwk.kkstudio.platform.plugin.service.PluginContextFactory</include>
+                                        <include>fun.fengwk.kkstudio.platform.plugin.service.PluginSecretPatch</include>
+                                        <include>fun.fengwk.kkstudio.platform.canvas.function.PluginCanvasFunctionCatalogSource*</include>
                                     </includes>
                                     <limits>
                                         <limit>

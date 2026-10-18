@@ -143,7 +143,6 @@ final class StableTsContractGenerator {
               Direction.RESPONSE,
               List.of(
                   "pluginId",
-                  "appliedEpoch",
                   "appliedRevision",
                   "checkedAt",
                   "reachability",
@@ -153,12 +152,12 @@ final class StableTsContractGenerator {
               "PluginConnectionCheckRequestDTO",
               PluginConnectionCheckRequestDTO.class,
               Direction.REQUEST,
-              List.of("expectedEpoch", "expectedRevision")),
+              List.of("expectedRevision")),
           new ObjectSpec(
               "CanvasFunctionVersionDTO",
               CanvasFunctionVersionDTO.class,
               Direction.BOTH,
-              List.of("catalogEpoch", "definitionFingerprint")),
+              List.of("definitionFingerprint")),
           new ObjectSpec(
               "CanvasFunctionRunRequestDTO",
               CanvasFunctionRunRequestDTO.class,

@@ -24,7 +24,6 @@ import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfigSchema;
-import fun.fengwk.kkstudio.platform.plugin.PluginConfigurationState;
 import fun.fengwk.kkstudio.platform.plugin.PluginContext;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialSnapshot;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableException;
@@ -34,7 +33,6 @@ import fun.fengwk.kkstudio.platform.plugin.PluginInstance;
 import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
 import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialAccess;
-import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialReference;
 import fun.fengwk.kkstudio.platform.plugin.testing.TestPluginFixtures;
 
 import java.util.ArrayList;
@@ -58,9 +56,6 @@ class PluginCatalogSnapshotTest {
   private static final String PLUGIN_ALPHA = "alpha.plugin";
   private static final String PLUGIN_BETA = "beta.plugin";
   private static final String PLUGIN_GAMMA = "gamma.plugin";
-  private static final UUID GENERATION = UUID.fromString("11111111-1111-1111-1111-111111111111");
-  private static final String CONTEXT =
-      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
   /** 真实两域聚合：按安装 id 顺序冻结实例，并合并插件贡献与容器内置贡献。 */
   @Test
@@ -80,7 +75,6 @@ class PluginCatalogSnapshotTest {
 
     PluginCatalogSnapshot snapshot =
         PluginCatalogSnapshot.build(
-            1L,
             registry,
             initialConfigurations(registry),
             PluginCatalogSnapshotTest::contexts,
@@ -97,22 +91,12 @@ class PluginCatalogSnapshotTest {
     assertTrue(
         snapshot.harnessCatalog().findDescriptor(new ContributorId("builtin.contrib")).isPresent());
     assertEquals(Set.of("alpha.run", "beta.run", "builtin.run"), canvasFunctionNames(snapshot));
-    assertEquals(1, snapshot.epoch());
+    // 归属只记录插件贡献，内置贡献不归属任何插件。
     assertEquals(
-        Map.of(
-            PLUGIN_ALPHA,
-            new PluginCatalogSnapshot.PluginOwnership(
-                Set.of(new ContributorId("alpha.contrib")), Set.of("alpha.run")),
-            PLUGIN_BETA,
-            new PluginCatalogSnapshot.PluginOwnership(
-                Set.of(new ContributorId("beta.contrib")), Set.of("beta.run"))),
-        snapshot.pluginOwnership(),
-        "builtins must not be attributed to a plugin");
-    assertTrue(PluginCatalogFingerprint.isFingerprint(snapshot.catalogFingerprint()));
-    assertEquals(Set.of(PLUGIN_ALPHA, PLUGIN_BETA), snapshot.capabilityFingerprints().keySet());
-    assertThrows(UnsupportedOperationException.class, () -> snapshot.pluginOwnership().clear());
-    assertThrows(
-        UnsupportedOperationException.class, () -> snapshot.capabilityFingerprints().clear());
+        Set.of(new ContributorId("alpha.contrib")),
+        snapshot.configuredPlugins().get(0).contributorIds());
+    assertEquals(Set.of("beta.run"), snapshot.configuredPlugins().get(1).functionNames());
+    assertEquals(Map.of(PLUGIN_ALPHA, 0L, PLUGIN_BETA, 0L), snapshot.revisions());
     snapshot.close();
   }
 
@@ -129,9 +113,8 @@ class PluginCatalogSnapshotTest {
     StudioPluginRegistry registry = new StudioPluginRegistry(List.of(plugin));
     try (PluginCatalogSnapshot snapshot =
         PluginCatalogSnapshot.build(
-            7L,
             registry,
-            Map.of(PLUGIN_ALPHA, state(PLUGIN_ALPHA, new PluginConfig(7, "{}"))),
+            Map.of(PLUGIN_ALPHA, new PluginConfig(7, "{}")),
             PluginCatalogSnapshotTest::contexts,
             List.of(),
             List.of())) {
@@ -140,31 +123,7 @@ class PluginCatalogSnapshotTest {
     }
   }
 
-  /** 配置 revision 不得晚于快照 epoch：领先 epoch 说明记录已损坏。 */
-  @Test
-  void buildRejectsConfigurationRevisionBeyondEpoch() {
-    TestPlugin alpha = new TestPlugin(PLUGIN_ALPHA);
-    RecordingInstance alphaInstance = new RecordingInstance(List.of(), List.of());
-    alpha.configure = () -> alphaInstance;
-    StudioPluginRegistry registry = new StudioPluginRegistry(List.of(alpha));
-
-    IllegalStateException failure =
-        assertThrows(
-            IllegalStateException.class,
-            () ->
-                PluginCatalogSnapshot.build(
-                    1L,
-                    registry,
-                    Map.of(PLUGIN_ALPHA, state(PLUGIN_ALPHA, new PluginConfig(2, "{}"))),
-                    PluginCatalogSnapshotTest::contexts,
-                    List.of(),
-                    List.of()));
-
-    assertTrue(failure.getMessage().contains("stage=configuration"), failure.getMessage());
-    assertEquals(0, alphaInstance.closeCount, "no instance may be built for a corrupt revision");
-  }
-
-  /** 配置必须精确覆盖安装集合：缺少已安装 id 或带有未知 id 都固定失败。 */
+  /** 缺少已安装 Plugin 的配置时固定失败。 */
   @Test
   void buildRejectsConfigurationCoverageGaps() {
     TestPlugin alpha = new TestPlugin(PLUGIN_ALPHA);
@@ -176,29 +135,12 @@ class PluginCatalogSnapshotTest {
             IllegalStateException.class,
             () ->
                 PluginCatalogSnapshot.build(
-                    1L,
                     registry,
-                    Map.of(PLUGIN_ALPHA, state(PLUGIN_ALPHA, PluginConfig.initial(SCHEMA))),
+                    Map.of(PLUGIN_ALPHA, PluginConfig.initial(SCHEMA)),
                     PluginCatalogSnapshotTest::contexts,
                     List.of(),
                     List.of()));
-    assertTrue(missing.getMessage().contains("stage=configuration"), missing.getMessage());
-
-    Map<String, PluginConfigurationState> withUnknown =
-        new LinkedHashMap<>(initialConfigurations(registry));
-    withUnknown.put("ghost.plugin", state("ghost.plugin", PluginConfig.initial(SCHEMA)));
-    IllegalStateException unknown =
-        assertThrows(
-            IllegalStateException.class,
-            () ->
-                PluginCatalogSnapshot.build(
-                    1L,
-                    registry,
-                    withUnknown,
-                    PluginCatalogSnapshotTest::contexts,
-                    List.of(),
-                    List.of()));
-    assertTrue(unknown.getMessage().contains("ghost.plugin"), unknown.getMessage());
+    assertTrue(missing.getMessage().contains("stage=configure"), missing.getMessage());
   }
 
   /** 读取贡献失败时，先前与当前实例都必须回收，半成品绝不外泄。 */
@@ -220,7 +162,6 @@ class PluginCatalogSnapshotTest {
             IllegalStateException.class,
             () ->
                 PluginCatalogSnapshot.build(
-                    1L,
                     registry,
                     initialConfigurations(registry),
                     PluginCatalogSnapshotTest::contexts,
@@ -251,7 +192,6 @@ class PluginCatalogSnapshotTest {
             IllegalStateException.class,
             () ->
                 PluginCatalogSnapshot.build(
-                    1L,
                     registry,
                     initialConfigurations(registry),
                     PluginCatalogSnapshotTest::contexts,
@@ -278,7 +218,6 @@ class PluginCatalogSnapshotTest {
         IllegalStateException.class,
         () ->
             PluginCatalogSnapshot.build(
-                1L,
                 canvasRegistry,
                 initialConfigurations(canvasRegistry),
                 PluginCatalogSnapshotTest::contexts,
@@ -304,7 +243,6 @@ class PluginCatalogSnapshotTest {
             IllegalStateException.class,
             () ->
                 PluginCatalogSnapshot.build(
-                    1L,
                     registry,
                     initialConfigurations(registry),
                     PluginCatalogSnapshotTest::contexts,
@@ -334,7 +272,6 @@ class PluginCatalogSnapshotTest {
             Error.class,
             () ->
                 PluginCatalogSnapshot.build(
-                    1L,
                     registry,
                     initialConfigurations(registry),
                     PluginCatalogSnapshotTest::contexts,
@@ -358,7 +295,6 @@ class PluginCatalogSnapshotTest {
             Error.class,
             () ->
                 PluginCatalogSnapshot.build(
-                    1L,
                     secondRegistry,
                     initialConfigurations(secondRegistry),
                     PluginCatalogSnapshotTest::contexts,
@@ -384,7 +320,6 @@ class PluginCatalogSnapshotTest {
             Error.class,
             () ->
                 PluginCatalogSnapshot.build(
-                    1L,
                     registry,
                     initialConfigurations(registry),
                     PluginCatalogSnapshotTest::contexts,
@@ -411,7 +346,6 @@ class PluginCatalogSnapshotTest {
 
     PluginCatalogSnapshot snapshot =
         PluginCatalogSnapshot.build(
-            1L,
             registry,
             initialConfigurations(registry),
             PluginCatalogSnapshotTest::contexts,
@@ -481,24 +415,16 @@ class PluginCatalogSnapshotTest {
     };
   }
 
-  private static Map<String, PluginConfigurationState> initialConfigurations(
-      StudioPluginRegistry registry) {
-    Map<String, PluginConfigurationState> configurations = new LinkedHashMap<>();
+  private static Map<String, PluginConfig> initialConfigurations(StudioPluginRegistry registry) {
+    Map<String, PluginConfig> configurations = new LinkedHashMap<>();
     for (StudioPlugin plugin : registry.plugins()) {
       String pluginId = plugin.descriptor().pluginId();
-      configurations.put(
-          pluginId, state(pluginId, PluginConfig.initial(plugin.configurationSchema())));
+      configurations.put(pluginId, PluginConfig.initial(plugin.configurationSchema()));
     }
     return configurations;
   }
 
-  private static PluginConfigurationState state(String pluginId, PluginConfig config) {
-    return new PluginConfigurationState(
-        config, new PluginCredentialReference(pluginId, GENERATION, CONTEXT));
-  }
-
-  private static PluginContext contexts(String pluginId, PluginCredentialReference reference) {
-    assertEquals(pluginId, reference.pluginId(), "contexts must be keyed by the frozen plugin id");
+  private static PluginContext contexts(String pluginId) {
     return new PluginContext(
         new PluginCredentialAccess() {
           @Override

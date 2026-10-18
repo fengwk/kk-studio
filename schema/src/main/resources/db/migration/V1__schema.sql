@@ -183,7 +183,7 @@ create table skill_package (
     head_checked_at      timestamptz(3),
     head_check_error     text,
     skills               jsonb         not null default '[]'::jsonb,
-    encrypted_token      bytea,
+    token                text,
     version              bigint        not null default 0,
     create_time          timestamptz(3) not null default current_timestamp,
     update_time          timestamptz(3) not null default current_timestamp,
@@ -229,9 +229,9 @@ create table skill_package (
         )
     ),
     constraint ck_skill_package_skills check (jsonb_typeof(skills) = 'array'),
-    constraint ck_skill_package_encrypted_token check (
-        encrypted_token is null
-        or octet_length(encrypted_token) > 0
+    constraint ck_skill_package_token check (
+        token is null
+        or length(token) > 0
     ),
     constraint ck_skill_package_version check (version >= 0),
     constraint ck_skill_package_time_order check (update_time >= create_time)
@@ -247,54 +247,65 @@ comment on column skill_package.observed_head_commit is '最近一次成功检�
 comment on column skill_package.head_checked_at is '最近一次检查时间（毫秒精度）；从未检查时为 null';
 comment on column skill_package.head_check_error is '最近一次检查的有界错误摘要（非空、无环绕空白、≤4096 字节）；检查成功时为 null';
 comment on column skill_package.skills is '从 current_commit 派生的 Skill manifest（JSON array，元素为 {name, description} 并按 name 排序）；元素形状由应用严格验证';
-comment on column skill_package.encrypted_token is '私有仓库访问令牌的 AES-256-GCM 二进制 envelope（格式版本 + 96-bit 随机 nonce + 认证密文，AAD 绑定命名空间与 packageName）；null 表示匿名访问，任何常规 DTO/预览/日志/模型上下文都不得返回';
+comment on column skill_package.token is '私有仓库访问令牌；null 表示匿名访问，任何常规 DTO/预览/日志/模型上下文都不得返回';
 comment on column skill_package.version is 'CAS 乐观锁版本：非负，从 0 开始，实际事实变化时 +1';
 comment on column skill_package.create_time is '创建时间（毫秒精度）';
 comment on column skill_package.update_time is '最后更新时间（毫秒精度），应用侧维护';
 
 -- -----------------------------------------------------------------------------
--- 构建期 Plugin 凭据
+-- 构建期 Plugin 的普通配置与凭据
 --
--- 所有构建期 Plugin 共用一行一凭据存储：plugin_id 与 classpath 中的 StudioPlugin.pluginId
--- 对齐；encrypted_payload 是 AES-256-GCM 二进制 envelope（格式版本 2 + 随机 nonce + 认证
--- 密文，AAD 绑定 pluginId/region/authGeneration/formatVersion）。auth_generation 是应用
--- 每次人工完整替换都重新生成的认证代际。加密主密钥来自部署侧 owner-only key
--- file，绝不进入本表、SystemSettings、DTO 或日志；管理查询永远不返回 encrypted_payload。
--- 断连以删除行表达，迟到 finalize 由认证代际、lease token 与 version 围栏拒绝。
+-- plugin_configuration 每个已安装 Plugin 一行当前普通配置；revision 每次保存 +1，供写入 CAS。
+-- plugin_credential 每个已认证 Plugin 一行凭据（静态密钥或交互凭据），未认证时无行，断连即删除。
+-- 凭据载荷按可信单用户部署模型明文保存；管理查询永不返回 payload_json。
 -- -----------------------------------------------------------------------------
 
+create table plugin_configuration (
+    plugin_id   varchar(64)    primary key,
+    revision    bigint         not null,
+    values_json text           not null,
+    created_at  timestamptz(3) not null default current_timestamp,
+    updated_at  timestamptz(3) not null default current_timestamp,
+    constraint ck_plugin_configuration_plugin_id check (
+        plugin_id ~ '^[a-z0-9]+([.-][a-z0-9]+)*$'
+    ),
+    constraint ck_plugin_configuration_revision check (revision > 0),
+    constraint ck_plugin_configuration_values_object check (
+        values_json is json object with unique keys
+    ),
+    constraint ck_plugin_configuration_values_budget check (
+        octet_length(values_json) <= 65536
+    ),
+    constraint ck_plugin_configuration_time_order check (updated_at >= created_at)
+);
+
+comment on table plugin_configuration is '已安装 Plugin 的当前普通配置：每个 Plugin 一行，秘密不进入本表';
+comment on column plugin_configuration.plugin_id is 'Plugin 安装身份，与 classpath 中的 StudioPlugin.pluginId 对齐';
+comment on column plugin_configuration.revision is '配置修订：首次写入为 1，每次保存 +1，写入以它做 CAS';
+comment on column plugin_configuration.values_json is '按插件 Schema 归一化后的严格 JSON object 文本（≤64 KiB）';
+
 create table plugin_credential (
-    plugin_id           varchar(64)   not null,
-    auth_generation     uuid          not null,
-    context_fingerprint char(64)      not null,
-    encrypted_payload   bytea         not null,
+    plugin_id           varchar(64)    primary key,
+    payload_json        text           not null,
     region              varchar(64),
     expires_at          timestamptz(3),
     next_refresh_at     timestamptz(3),
-    status              varchar(32)   not null,
+    status              varchar(32)    not null,
     last_refreshed_at   timestamptz(3),
     last_refresh_error  text,
     refresh_lease_token varchar(128),
     refresh_lease_until timestamptz(3),
-    version             bigint        not null default 0,
-    create_time         timestamptz(3) not null default current_timestamp,
-    update_time         timestamptz(3) not null default current_timestamp,
-    constraint pk_plugin_credential primary key (plugin_id),
+    version             bigint         not null default 0,
+    created_at          timestamptz(3) not null default current_timestamp,
+    updated_at          timestamptz(3) not null default current_timestamp,
     constraint ck_plugin_credential_plugin_id check (
         plugin_id ~ '^[a-z0-9]+([.-][a-z0-9]+)*$'
     ),
-    constraint ck_plugin_credential_context_fingerprint check (
-        context_fingerprint ~ '^[0-9a-f]{64}$'
+    constraint ck_plugin_credential_payload_object check (
+        payload_json is json object
     ),
-    constraint ck_plugin_credential_encrypted_payload check (
-        octet_length(encrypted_payload) > 0
-    ),
-    constraint ck_plugin_credential_region check (
-        region is null
-        or (
-            region = btrim(region)
-            and char_length(region) > 0
-        )
+    constraint ck_plugin_credential_payload_budget check (
+        octet_length(payload_json) <= 65536
     ),
     constraint ck_plugin_credential_route_metadata check (
         (region is null) = (expires_at is null)
@@ -304,202 +315,40 @@ create table plugin_credential (
         status in ('CONNECTED', 'REFRESH_FAILED', 'REFRESH_UNCERTAIN', 'REAUTH_REQUIRED')
     ),
     constraint ck_plugin_credential_last_refresh_error check (
-        last_refresh_error is null
-        or (
-            last_refresh_error = btrim(last_refresh_error)
-            and char_length(last_refresh_error) > 0
-            and octet_length(last_refresh_error) <= 4096
-        )
+        last_refresh_error is null or octet_length(last_refresh_error) <= 4096
     ),
     constraint ck_plugin_credential_refresh_lease check (
         (refresh_lease_token is null) = (refresh_lease_until is null)
-        and (
-            refresh_lease_token is null
-            or (
-                refresh_lease_token = btrim(refresh_lease_token)
-                and char_length(refresh_lease_token) > 0
-            )
-        )
     ),
     constraint ck_plugin_credential_version check (version >= 0),
-    constraint ck_plugin_credential_time_order check (update_time >= create_time)
+    constraint ck_plugin_credential_time_order check (updated_at >= created_at)
 );
 
-comment on table plugin_credential is '构建期 Plugin 的加密凭据权威行：每个已认证 Plugin 一行，未认证时无行，断连即删除行；交互凭据与静态密钥共用本表';
-comment on column plugin_credential.plugin_id is 'Plugin 全局唯一不可变安装身份（canonical 小写点划线标识符，≤64），与 classpath 中的 StudioPlugin.pluginId 对齐';
-comment on column plugin_credential.auth_generation is '认证代际（应用生成 UUID）：每次人工完整替换凭据、SET/CLEAR 或 context 字段变化都重新生成，用于区分断连重建后的同 version 新行与旧上下文；finalize/release/reject 必须匹配它';
-comment on column plugin_credential.context_fingerprint is '认证上下文指纹（64 位小写 SHA-256）：绑定 plugin id/code version/schema 身份与 contextFields 严格规范值；与 auth_generation 一起作为旧引用拒读与 CAS 围栏';
-comment on column plugin_credential.encrypted_payload is 'AES-256-GCM 二进制 envelope（格式版本 2 + 96-bit 随机 nonce + 认证密文，AAD 绑定 pluginId/authGeneration/contextFingerprint/region 存在性与值/formatVersion）；任何查询投影都不得返回';
-comment on column plugin_credential.region is '非秘密 region 路由元数据（无环绕空白、≤64），只允许 Plugin descriptor 声明的固定 region 候选；静态密钥行为 null';
-comment on column plugin_credential.expires_at is 'access token 失效时刻（毫秒精度）；静态密钥行为 null（没有本地过期语义）';
-comment on column plugin_credential.next_refresh_at is '下一次 refresh claim 时刻（毫秒精度）；仅当该时刻已到且 lease 为空或过期时可被 claim；静态密钥行为 null，因此永不被领取';
+comment on table plugin_credential is '已认证 Plugin 的凭据：每个 Plugin 至多一行，断连即删除；交互凭据与静态密钥共用本表';
+comment on column plugin_credential.payload_json is '凭据载荷 JSON object（静态密钥为声明的秘密字段，交互凭据为插件不透明载荷）；任何查询投影都不得返回';
+comment on column plugin_credential.region is '交互凭据的 region 路由元数据；静态密钥为 null';
+comment on column plugin_credential.expires_at is '交互凭据的本地失效时刻；静态密钥为 null';
+comment on column plugin_credential.next_refresh_at is '下一次刷新时刻；静态密钥为 null，因此永不被领取';
 comment on column plugin_credential.status is '状态：CONNECTED, REFRESH_FAILED, REFRESH_UNCERTAIN, REAUTH_REQUIRED';
-comment on column plugin_credential.last_refreshed_at is '最近一次成功刷新时刻（毫秒精度）；从未成功刷新时为 null';
-comment on column plugin_credential.last_refresh_error is '最近一次刷新失败的有界去敏错误摘要（非空、无环绕空白、≤4096 字节）；成功时为 null';
-comment on column plugin_credential.refresh_lease_token is '跨节点 refresh lease 令牌（与 refresh_lease_until 同时存在或同时缺失）';
-comment on column plugin_credential.refresh_lease_until is 'refresh lease 到期时刻（毫秒精度）；过期 lease 视为结果未知';
-comment on column plugin_credential.version is 'CAS 乐观锁版本：非负，从 0 开始，每次写入 +1；finalize 必须匹配认证代际、上下文指纹、lease token 与 version';
-comment on column plugin_credential.create_time is '创建时间（毫秒精度）';
-comment on column plugin_credential.update_time is '最后更新时间（毫秒精度），应用侧维护';
+comment on column plugin_credential.refresh_lease_token is '跨节点刷新租约令牌，与 refresh_lease_until 成对';
+comment on column plugin_credential.version is 'CAS 版本：每次写入 +1；调用期拒绝与刷新终结都匹配它';
 
 create index idx_plugin_credential_refresh_due
     on plugin_credential (next_refresh_at);
 
-comment on index idx_plugin_credential_refresh_due is 'refresh dispatcher 按 next_refresh_at 扫描到期行；静态密钥行的 null 不参与扫描';
-
--- -----------------------------------------------------------------------------
--- Plugin 配置权威存储
---
--- plugin_catalog_revision 保存每个全局 epoch 的不可变完整 manifest（唯一新建入口，历史行不可更新）；
--- plugin_catalog_state 恒单行 id=1，只保存指向某个 revision 的 epoch 指针与时间，因此 epoch 与 manifest
--- 不双来源。epoch=0、空 plugins 与 null catalogFingerprint 是唯一未初始化形态。
--- state.epoch 对 revision.epoch 的外键即时校验：提交用单条语句同时 CAS 指针并新建该 epoch 的 revision，
--- 语句末校验时两者已经同时成立；CAS 未命中则不插入任何历史。
--- -----------------------------------------------------------------------------
-
-create table plugin_catalog_revision (
-    epoch         bigint         primary key,
-    manifest_json jsonb          not null,
-    created_at    timestamptz(3) not null default current_timestamp,
-    constraint ck_plugin_catalog_revision_epoch check (epoch >= 0),
-    constraint ck_plugin_catalog_revision_manifest_object check (
-        jsonb_typeof(manifest_json) = 'object'
-    )
-);
-
-comment on table plugin_catalog_revision is 'Plugin catalog 的不可变完整 manifest 历史：每个全局 epoch 恰好一行，只有插入入口，不回写历史行';
-comment on column plugin_catalog_revision.epoch is '唯一全局修订（非负 bigint）：每次成功提交恰好新增一行；历史行不更新也不删除';
-comment on column plugin_catalog_revision.manifest_json is '完整冻结两域目录的 catalog manifest JSON object：plugins 是按 pluginId 排序的冻结映射，catalogFingerprint 绑定完整两域目录；epoch=0 时为 {"plugins":{},"catalogFingerprint":null}';
-comment on column plugin_catalog_revision.created_at is '创建时间（毫秒精度）';
-
-create table plugin_catalog_state (
-    id            bigint         primary key,
-    epoch         bigint         not null,
-    created_at    timestamptz(3) not null default current_timestamp,
-    updated_at    timestamptz(3) not null default current_timestamp,
-    constraint ck_plugin_catalog_state_id check (id = 1),
-    constraint ck_plugin_catalog_state_epoch check (epoch >= 0),
-    constraint ck_plugin_catalog_state_time_order check (updated_at >= created_at),
-    constraint fk_plugin_catalog_state_revision foreign key (epoch)
-        references plugin_catalog_revision (epoch)
-);
-
-comment on table plugin_catalog_state is 'Plugin catalog 权威单行指针（id=1）：epoch 指向 plugin_catalog_revision 中当前生效的完整 manifest';
-comment on column plugin_catalog_state.id is '恒为 1 的单行聚合键';
-comment on column plugin_catalog_state.epoch is '唯一全局修订（非负 bigint）：每次成功提交 +1；CAS 与 manifest 历史新建在同一条语句内完成，且只通过 where epoch = :expectedEpoch 的 epoch = epoch + 1 推进';
-comment on column plugin_catalog_state.created_at is '创建时间（毫秒精度）';
-comment on column plugin_catalog_state.updated_at is '最后更新时间（毫秒精度），应用侧维护';
-
-insert into plugin_catalog_revision (epoch, manifest_json)
-values (0, '{"plugins":{},"catalogFingerprint":null}'::jsonb);
-
-insert into plugin_catalog_state (id, epoch)
-values (1, 0);
-
--- -----------------------------------------------------------------------------
--- Plugin 普通配置历史的不可变权威存储
---
--- 每个 (plugin_id, revision) 保存一份不可变普通配置，revision 取写入时的全局 epoch。
--- values_json 按严格 JSON 文本保存，保留数值表示与 UTF-8 预算；SQL/JSON 谓词兜底对象与唯一键。
--- code/schema/capability 身份用于恢复核验；秘密不进入普通配置。
--- -----------------------------------------------------------------------------
-
-create table plugin_configuration_revision (
-    plugin_id               varchar(64)  not null,
-    revision                bigint       not null,
-    code_version            varchar(64)  not null,
-    schema_fingerprint      char(64)     not null,
-    capability_fingerprint  char(64)     not null,
-    auth_generation         uuid         not null,
-    context_fingerprint     char(64)     not null,
-    configured_secret_fields text[]      not null default '{}',
-    values_json             text         not null,
-    created_at              timestamptz(3) not null default current_timestamp,
-    constraint pk_plugin_configuration_revision primary key (plugin_id, revision),
-    constraint ck_plugin_configuration_revision_plugin_id check (
-        plugin_id ~ '^[a-z0-9]+([.-][a-z0-9]+)*$'
-    ),
-    constraint ck_plugin_configuration_revision_revision check (revision > 0),
-    constraint ck_plugin_configuration_revision_code_version check (
-        code_version = btrim(code_version) and char_length(code_version) > 0
-    ),
-    constraint ck_plugin_configuration_revision_schema_fingerprint check (
-        schema_fingerprint ~ '^[0-9a-f]{64}$'
-    ),
-    constraint ck_plugin_configuration_revision_capability_fingerprint check (
-        capability_fingerprint ~ '^[0-9a-f]{64}$'
-    ),
-    constraint ck_plugin_configuration_revision_context_fingerprint check (
-        context_fingerprint ~ '^[0-9a-f]{64}$'
-    ),
-    constraint ck_plugin_configuration_revision_configured_secret_fields check (
-        array_position(configured_secret_fields, null) is null
-    ),
-    constraint ck_plugin_configuration_revision_values_object check (
-        values_json is json object with unique keys
-    ),
-    constraint ck_plugin_configuration_revision_values_budget check (
-        octet_length(values_json) <= 65536
-    )
-);
-
-comment on table plugin_configuration_revision is 'Plugin 普通配置的不可变 append-only 历史：每个 (plugin_id, revision) 一行，revision 即该插件最后一次写入的全局 epoch；同时冻结该 revision 的凭据身份与已录入秘密字段名';
-comment on column plugin_configuration_revision.plugin_id is 'Plugin 全局唯一不可变安装身份（canonical 小写点划线标识符，≤64），与 classpath 中的 StudioPlugin.pluginId 对齐';
-comment on column plugin_configuration_revision.revision is '配置修订号：正整数，等于撰写该 revision 时的全局 epoch';
-comment on column plugin_configuration_revision.code_version is '撰写该 revision 时 StudioPlugin descriptor.version 的快照，启动恢复据此比对当前 JAR';
-comment on column plugin_configuration_revision.schema_fingerprint is '撰写该 revision 时的配置定义指纹（values schema + defaults + secrets + authSpec），64 位小写 SHA-256';
-comment on column plugin_configuration_revision.capability_fingerprint is '撰写该 revision 时该插件冻结两域贡献的能力指纹，64 位小写 SHA-256';
-comment on column plugin_configuration_revision.auth_generation is '该 revision 的认证代际：与 manifest entry 逐字段相等；初始插件即使无凭据也持有新 UUID，绝不用 0 UUID 或 rowVersion 模拟身份';
-comment on column plugin_configuration_revision.context_fingerprint is '该 revision 的认证上下文指纹（64 位小写 SHA-256）：恢复时重新派生并逐字段核对';
-comment on column plugin_configuration_revision.configured_secret_fields is '该 revision 已录入的声明秘密字段名（text[]，排序去重）：只有字段名，绝无明文值或长度；管理投影的 configured 布尔由此派生，主密钥不可用也不谎称未录入';
-comment on column plugin_configuration_revision.values_json is '严格 JSON object 的普通配置值原文（不含秘密）：text 存储以整段原样读回，DB 只强制 object、唯一键与 ≤65536 字节，不做 jsonb 规范化';
-comment on column plugin_configuration_revision.created_at is '创建时间（毫秒精度）';
-
--- -----------------------------------------------------------------------------
--- Plugin 交互式认证的待完成 attempt
---
--- 每个 Plugin 至多一个 pending attempt：plugin_id 即主键，新的 prepare 直接替换旧的。
--- 只存 nonce 的 SHA-256 摘要、期望的认证身份（代际 + 上下文指纹）、期望配置修订、
--- 选定 region 与过期时刻；绝不保存回调地址、token、明文秘密或登录 URL。
--- complete 以带摘要与未过期条件的单条 delete ... returning 原子单次消费，重放、
--- 过期与已被新 prepare 取代的旧 attempt 都只能消费失败。
--- -----------------------------------------------------------------------------
-
+-- Plugin 交互式认证的待完成 attempt：每个 Plugin 至多一个，新的 prepare 直接替换旧的。
+-- 只存 nonce 的 SHA-256 摘要与 prepare 时的配置修订；complete 以单条条件删除原子消费。
 create table plugin_auth_attempt (
-    plugin_id           varchar(64)    not null,
-    nonce_hash          char(64)       not null,
-    auth_generation     uuid           not null,
-    context_fingerprint char(64)       not null,
-    config_revision     bigint         not null,
-    region              varchar(64)    not null,
-    expires_at          timestamptz(3) not null,
-    created_at          timestamptz(3) not null default current_timestamp,
-    constraint pk_plugin_auth_attempt primary key (plugin_id),
-    constraint ck_plugin_auth_attempt_plugin_id check (
-        plugin_id ~ '^[a-z0-9]+([.-][a-z0-9]+)*$'
-    ),
-    constraint ck_plugin_auth_attempt_nonce_hash check (
-        nonce_hash ~ '^[0-9a-f]{64}$'
-    ),
-    constraint ck_plugin_auth_attempt_context_fingerprint check (
-        context_fingerprint ~ '^[0-9a-f]{64}$'
-    ),
+    plugin_id       varchar(64)    primary key,
+    nonce_hash      char(64)       not null,
+    config_revision bigint         not null,
+    region          varchar(64)    not null,
+    expires_at      timestamptz(3) not null,
+    created_at      timestamptz(3) not null default current_timestamp,
+    constraint ck_plugin_auth_attempt_nonce_hash check (nonce_hash ~ '^[0-9a-f]{64}$'),
     constraint ck_plugin_auth_attempt_config_revision check (config_revision > 0),
-    constraint ck_plugin_auth_attempt_region check (
-        region = btrim(region)
-        and char_length(region) between 1 and 64
-    )
+    constraint ck_plugin_auth_attempt_region check (char_length(region) between 1 and 64)
 );
-
-comment on table plugin_auth_attempt is 'Plugin 交互式认证的唯一 pending attempt（每个 Plugin 至多一行，新的 prepare 替换旧的）：只承载一次性 nonce 摘要、期望认证身份与配置修订、选定 region 与过期时刻，不保存回调、token 或明文秘密';
-comment on column plugin_auth_attempt.plugin_id is 'Plugin 全局唯一不可变安装身份（canonical 小写点划线标识符，≤64），同时是主键：每个 Plugin 至多一个 pending attempt';
-comment on column plugin_auth_attempt.nonce_hash is '一次性认证 nonce 的 64 位小写 SHA-256 摘要：complete 必须提供同一 nonce 才算命中，原始 nonce 不落库，数据库泄露也无法伪造或重放已完成 attempt';
-comment on column plugin_auth_attempt.auth_generation is 'prepare 时该 Plugin 的认证代际：complete 前必须仍与当前 manifest 一致，否则迟到回调被拒';
-comment on column plugin_auth_attempt.context_fingerprint is 'prepare 时该 Plugin 的认证上下文指纹（64 位小写 SHA-256）：与代际一起绑定 prepare 时的认证上下文';
-comment on column plugin_auth_attempt.config_revision is 'prepare 时该 Plugin 的配置修订：complete 前配置已变化即拒绝迟到回调';
-comment on column plugin_auth_attempt.region is 'prepare 时用户选定的 region：complete 返回的材料必须与它逐字相等，不接受 handler 自行改写';
-comment on column plugin_auth_attempt.expires_at is 'attempt 失效时刻（毫秒精度）：消费语句要求它严格晚于当前时刻，过期 attempt 不可再消费';
-comment on column plugin_auth_attempt.created_at is '创建时间（毫秒精度）';
 
 -- Platform MCP Server 配置：name 是主键与唯一路由身份，创建后不可变。Backend 只通过
 -- Streamable HTTP 连接 Server；请求 header 可能内嵌凭据，绝不进入列表投影与日志。

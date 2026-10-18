@@ -49,8 +49,8 @@ const BLOB_IMAGE = 'ffffffff-0000-4000-8000-000000000002' as UUIDString
 const { FAKE_SHA256 } = vi.hoisted(() => ({ FAKE_SHA256: 'a'.repeat(64) }))
 
 /** 目录版本夹具：同 epoch 下定义指纹不同，代表目录已推进到新版本。 */
-const FUNCTION_VERSION_A = { catalogEpoch: '7', definitionFingerprint: 'a'.repeat(64) }
-const FUNCTION_VERSION_B = { catalogEpoch: '8', definitionFingerprint: 'b'.repeat(64) }
+const FUNCTION_VERSION_A = { definitionFingerprint: 'a'.repeat(64) }
+const FUNCTION_VERSION_B = { definitionFingerprint: 'b'.repeat(64) }
 
 const { fakeApplicationEvents, canvasEventSubscriptions } = vi.hoisted(() => {
   const subscriptions: Array<{
@@ -1064,8 +1064,7 @@ describe('useCanvasController real snapshot runtime', () => {
     // flush 已把配置命令发往服务端且仍被阻塞
     await waitFor(() => expect(postCanvasCommands).toHaveBeenCalled())
 
-    // 阻塞期间原地换版：改写查询缓存里同一个 version 对象的两个字段
-    catalogVersion.catalogEpoch = FUNCTION_VERSION_B.catalogEpoch
+    // 阻塞期间原地换版：改写查询缓存里同一个 version 对象
     catalogVersion.definitionFingerprint = FUNCTION_VERSION_B.definitionFingerprint
 
     await act(async () => {

@@ -10,8 +10,8 @@ public interface CanvasFunctionService {
   /**
    * 接受一次 Function 执行；{@code expectedVersion} 是客户端从目录看到的函数版本，必须非空。
    *
-   * <p>精确 {@code requestId} 重放即使 expectedVersion 过期也直接返回已接受结果；非重放在同一目录租用内比较 epoch 与该函数定义
-   * fingerprint，不一致返回 409，绝不按函数名静默换成当前版本。
+   * <p>精确 {@code requestId} 重放即使 expectedVersion 过期也直接返回已接受结果；非重放在同一目录租用内比较该函数定义 fingerprint，不一致返回
+   * 409，绝不按函数名静默换成当前版本。
    */
   CanvasFunctionRun start(
       UUID canvasId, UUID nodeId, String requestId, CanvasFunctionVersion expectedVersion);

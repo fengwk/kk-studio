@@ -108,9 +108,8 @@ public class CanvasFunctionRunTransactions {
   /**
    * 启动新的 FunctionRun；相同 {@code requestId} 已存在时直接返回。
    *
-   * <p>事务内从一次 {@code acquireCurrent} 冻结目录 epoch、完整定义与函数来源，先以同一租用校验客户端 {@code expectedVersion} 的
-   * epoch（早于按名绑定：新 epoch 已移除该函数时旧版本仍是版本冲突），再校验该函数定义 fingerprint，然后才冻结输入清单、创建输入 pin 并构造 {@code
-   * PENDING} 提交事实，同时将画布版本推进一次。未安装的插件函数无法解析，因此保持节点内容只读且不会产生新的队列事实。
+   * <p>事务内从一次目录租用冻结完整函数定义，校验客户端 {@code expectedVersion} 的定义 fingerprint（函数已移除同样是版本冲突），
+   * 然后才冻结输入清单、创建输入 pin 并构造 {@code PENDING} 提交事实，同时将画布版本推进一次。未安装的插件函数无法解析，因此保持节点内容只读且不会产生新的队列事实。
    *
    * <p>目录租用一直持有到真实事务的 {@code afterCompletion}（提交与回滚都释放），而不是在方法返回前关闭：外部提交前的 preflight 与
    * 冻结计划必须始终锚定同一目录实例。
@@ -142,16 +141,16 @@ public class CanvasFunctionRunTransactions {
       throw conflict("another requestId is already active or awaiting verification for this node");
     }
 
-    CanvasFunctionCatalogSource.Lease lease = catalogSource.acquireCurrent();
+    CanvasFunctionCatalogSource.Lease lease = catalogSource.acquire();
     registerLeaseReleaseAfterCompletion(lease);
-    // 版本围栏（一）：同一租用内先比较客户端看到的 epoch，必须早于按名绑定：
-    // 新 epoch 已停用或移除该函数时，旧客户端的 expectedVersion 是版本冲突，而不是「未知函数」。
-    requireExpectedEpoch(lease.epoch(), expectedVersion);
-    CanvasFunctionBinding binding = lease.bind(node.function().name());
-    CanvasFunctionCatalog.RegisteredFunction registered = lease.require(binding);
+    // 版本围栏：函数已被停用或移除、或定义与客户端看到的不一致，都是版本冲突；先于 pin、Run 写入与任何外部请求。
+    CanvasFunctionCatalog.RegisteredFunction registered =
+        lease
+            .catalog()
+            .find(node.function().name())
+            .orElseThrow(() -> conflict(CATALOG_CHANGED_MESSAGE));
+    CanvasFunctionBinding binding = new CanvasFunctionBinding(registered.function());
     CanvasFunctionDefinition definition = binding.definition();
-    // 版本围栏（二）：同一租用内再比较该函数完整定义 fingerprint。
-    // 两段围栏都先于 pin、Run 写入、task submit 与任何外部请求。
     requireExpectedFingerprint(definition, expectedVersion);
     registered.requireAvailable();
     CanvasFunctionAdapter adapter = registered.adapter();
@@ -205,19 +204,7 @@ public class CanvasFunctionRunTransactions {
     return new CanvasFunctionStartResult(ready, true);
   }
 
-  /**
-   * 同一租用内的两段版本围栏，失败给同一条固定 409 消息。
-   *
-   * <p>先比较 epoch 再按名绑定：新 epoch 已停用或移除该函数时，旧客户端的 expectedVersion 是版本冲突，而不是「未知函数」。绑定后再比较该函数完整定义
-   * fingerprint。两段都不重读目录、不自动重试，也不按函数名退回当前版本。
-   */
-  private static void requireExpectedEpoch(
-      long catalogEpoch, CanvasFunctionVersion expectedVersion) {
-    if (expectedVersion.catalogEpoch() != catalogEpoch) {
-      throw conflict(CATALOG_CHANGED_MESSAGE);
-    }
-  }
-
+  /** 客户端看到的函数定义必须与即将执行的定义一致，失败给固定 409 消息。 */
   private static void requireExpectedFingerprint(
       CanvasFunctionDefinition definition, CanvasFunctionVersion expectedVersion) {
     if (!expectedVersion

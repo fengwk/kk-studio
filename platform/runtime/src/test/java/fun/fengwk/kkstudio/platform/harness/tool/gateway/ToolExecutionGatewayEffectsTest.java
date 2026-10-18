@@ -207,7 +207,7 @@ class ToolExecutionGatewayEffectsTest {
         new ToolInvocationRequest(
             new ToolCall("call-1", "effects_tool", "{}"),
             new ToolBinding(
-                1L, DEFINITION, mismatchedContributor, EnvironmentSupport.NONE, null, null, null));
+                DEFINITION, mismatchedContributor, EnvironmentSupport.NONE, null, null));
     ToolGateway.Execution execution =
         new ToolGateway.Execution(
             ToolGatewayTestSupport.INVOCATION_ID,
@@ -288,7 +288,7 @@ class ToolExecutionGatewayEffectsTest {
     ToolInvocationRequest request =
         new ToolInvocationRequest(
             new ToolCall("call-1", "effects_tool", "{}"),
-            new ToolBinding(1L, DEFINITION, binding, EnvironmentSupport.NONE, null, null, null));
+            new ToolBinding(DEFINITION, binding, EnvironmentSupport.NONE, null, null));
     ToolGateway.Execution exec =
         new ToolGateway.Execution(
             ToolGatewayTestSupport.INVOCATION_ID,
@@ -377,7 +377,7 @@ class ToolExecutionGatewayEffectsTest {
     ToolInvocationRequest request =
         new ToolInvocationRequest(
             new ToolCall("call-1", "effects_tool", "{}"),
-            new ToolBinding(1L, DEFINITION, binding, EnvironmentSupport.NONE, null, null, null));
+            new ToolBinding(DEFINITION, binding, EnvironmentSupport.NONE, null, null));
     ToolGateway.Execution exec =
         new ToolGateway.Execution(
             ToolGatewayTestSupport.INVOCATION_ID,
@@ -505,8 +505,7 @@ class ToolExecutionGatewayEffectsTest {
       ToolInvocationRequest request =
           new ToolInvocationRequest(
               new ToolCall("call-1", "effects_tool", "{}"),
-              new ToolBinding(
-                  1L, DEFINITION, contributor, EnvironmentSupport.NONE, null, null, null));
+              new ToolBinding(DEFINITION, contributor, EnvironmentSupport.NONE, null, null));
       return new ToolGateway.Execution(
           ToolGatewayTestSupport.INVOCATION_ID,
           ToolGatewayTestSupport.THREAD_ID,

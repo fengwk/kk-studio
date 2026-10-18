@@ -24,12 +24,8 @@ import java.util.UUID;
  * Environment、YOLO、contextWindow 与压缩元数据（压缩调用由 basis EntryPath 末尾 owned TURN_START.compaction
  * 识别）都不进入本对象；每次 attempt 由 {@link ModelRequestMaterializer} 从 EntryPath 重建内存 {@code
  * ProviderRequest}。
- *
- * <p>{@code catalogEpoch} 是本请求冻结工具面所租用的目录 epoch，即使 {@code toolBindings} 为空也必须冻结；所有 binding 必须 与它同
- * epoch，执行或历史恢复都只能按该 epoch 取回同一份冻结目录。
  */
 public record ModelRequestSpec(
-    long catalogEpoch,
     ProviderType providerType,
     UUID providerConnectionGenerationId,
     ModelDescriptor model,
@@ -41,9 +37,6 @@ public record ModelRequestSpec(
     ProviderCacheControl cacheControl) {
 
   public ModelRequestSpec {
-    if (catalogEpoch <= 0) {
-      throw new IllegalArgumentException("catalogEpoch must be positive");
-    }
     providerType = Objects.requireNonNull(providerType, "providerType");
     providerConnectionGenerationId =
         Objects.requireNonNull(providerConnectionGenerationId, "providerConnectionGenerationId");
@@ -61,18 +54,6 @@ public record ModelRequestSpec(
     requireUniqueToolBindings(toolBindings);
     requireUniqueSubagentNames(subagentBindings);
     requireConsistentEnvironments(toolBindings);
-    requireConsistentCatalogEpoch(toolBindings, catalogEpoch);
-  }
-
-  /** 一次模型调用的工具面只来自一个目录 epoch：任何 binding 都必须与 spec 同 epoch。 */
-  private static void requireConsistentCatalogEpoch(
-      List<ToolBinding> toolBindings, long catalogEpoch) {
-    for (ToolBinding binding : toolBindings) {
-      if (binding.catalogEpoch() != catalogEpoch) {
-        throw new IllegalArgumentException(
-            "tool binding catalogEpoch must match the model request catalogEpoch");
-      }
-    }
   }
 
   private static void requireUniqueToolBindings(List<ToolBinding> toolBindings) {

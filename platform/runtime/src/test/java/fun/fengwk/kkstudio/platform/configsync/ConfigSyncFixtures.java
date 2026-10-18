@@ -23,7 +23,6 @@ import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.provider.configuration.AgentProviderConfigurationCodec;
 import fun.fengwk.kkstudio.platform.catalog.provider.service.impl.AgentProviderMutationFactory;
 import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
-import fun.fengwk.kkstudio.platform.catalog.skill.SkillTokenCipher;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.SkillCatalogService;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.impl.SkillCatalogTestFixtures;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
@@ -38,7 +37,6 @@ import fun.fengwk.kkstudio.platform.plugin.PluginDescriptor;
 import fun.fengwk.kkstudio.platform.plugin.PluginInstance;
 import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
 import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
-import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialKeyLoader;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRow;
 import fun.fengwk.kkstudio.platform.plugin.service.PluginAgentDependencies;
@@ -61,9 +59,6 @@ import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -228,19 +223,6 @@ final class ConfigSyncFixtures {
     return pkg;
   }
 
-  /** 以一次性 owner-only 主密钥构建真实 {@link SkillTokenCipher}，用于凭据导出等真实加解密断言。 */
-  static SkillTokenCipher tokenCipher() {
-    try {
-      Path keyFile = Files.createTempFile("kkstudio-configsync-token", ".key");
-      Files.write(keyFile, "0123456789abcdef0123456789abcdef".getBytes(StandardCharsets.UTF_8));
-      Files.setPosixFilePermissions(keyFile, PosixFilePermissions.fromString("rw-------"));
-      return new SkillTokenCipher(
-          new PluginCredentialKeyLoader(keyFile.toAbsolutePath().toString()));
-    } catch (IOException error) {
-      throw new UncheckedIOException(error);
-    }
-  }
-
   static Environment environment(String name) {
     Environment environment = new Environment();
     environment.setId(UUID.randomUUID());
@@ -289,7 +271,6 @@ final class ConfigSyncFixtures {
         environments,
         mcpServers,
         mcpTools,
-        0L,
         List.of());
   }
 
@@ -302,7 +283,6 @@ final class ConfigSyncFixtures {
       List<Environment> environments,
       List<McpServer> mcpServers,
       List<McpTool> mcpTools,
-      long pluginCatalogEpoch,
       List<PluginConfigurationRow> plugins) {
     return new ConfigSyncSnapshot(
         providers,
@@ -314,26 +294,11 @@ final class ConfigSyncFixtures {
         mcpServers,
         mcpTools,
         settings(1L),
-        pluginCatalogEpoch,
         plugins);
   }
 
-  /** 合法 64 位小写 SHA-256 占位指纹；插件历史行的身份字段只需形状正确，不参与 configsync 语义。 */
-  static final String FINGERPRINT =
-      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-
-  /** 权威配置历史行：pluginId + 修订 + 普通值文本；身份字段用占位指纹。 */
   static PluginConfigurationRow pluginRow(String pluginId, long revision, String valuesJson) {
-    return new PluginConfigurationRow(
-        pluginId,
-        revision,
-        "1.0.0",
-        FINGERPRINT,
-        FINGERPRINT,
-        UUID.fromString("00000000-0000-0000-0000-0000000000ff"),
-        FINGERPRINT,
-        List.of(),
-        valuesJson);
+    return new PluginConfigurationRow(pluginId, revision, valuesJson);
   }
 
   static StudioPluginRegistry registry(StudioPlugin... plugins) {

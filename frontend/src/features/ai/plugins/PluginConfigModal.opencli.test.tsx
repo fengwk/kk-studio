@@ -115,7 +115,6 @@ describe('PluginConfigModal OpenCLI regression coverage', () => {
       expect(pluginsService.updateConfiguration).toHaveBeenCalledWith(
         'opencli',
         expect.objectContaining({
-          expectedEpoch: opencliPluginFixture.desiredEpoch,
           expectedRevision: opencliPluginFixture.configuration.revision,
           secretPatch: {
             apiKey: { operation: 'KEEP' },
@@ -168,7 +167,6 @@ describe('PluginConfigModal OpenCLI regression coverage', () => {
       expect(pluginsService.updateConfiguration).toHaveBeenCalledWith(
         'opencli',
         expect.objectContaining({
-          expectedEpoch: opencliPluginFixture.desiredEpoch,
           expectedRevision: opencliPluginFixture.configuration.revision,
           secretPatch: {
             apiKey: {
@@ -254,7 +252,6 @@ describe('PluginConfigModal OpenCLI regression coverage', () => {
       expect(pluginsService.updateConfiguration).toHaveBeenCalledWith(
         'opencli',
         expect.objectContaining({
-          expectedEpoch: opencliPluginFixture.desiredEpoch,
           expectedRevision: opencliPluginFixture.configuration.revision,
           secretPatch: {
             apiKey: { operation: 'KEEP' },

@@ -16,11 +16,9 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * 基于冻结目录 epoch 的 {@link ToolHistoryActionResolver}：按 binding 冻结的 epoch 取得同 epoch 租用并严格取回其 Tool，
- * 再调用可选渲染器。
+ * 基于当前目录的 {@link ToolHistoryActionResolver}：按 binding 严格取回其 Tool，再调用可选渲染器。
  *
- * <p>这里只用 binding 自己的 {@code catalogEpoch} 取租用，绝不按当前目录重新解释旧参数；epoch、完整定义、贡献身份、requirements 或插件 来源与
- * binding 不一致时返回 empty，让 Runtime 回退到中性描述。没有渲染器的工具直接返回 empty。
+ * <p>工具已不存在或定义与 binding 不一致时返回 empty，让 Runtime 回退到中性描述；没有渲染器的工具同样返回 empty。
  */
 @Slf4j
 @Component
@@ -36,7 +34,7 @@ public class CatalogToolHistoryActionResolver implements ToolHistoryActionResolv
   public Optional<String> resolve(ToolBinding binding, ToolCall call) {
     Objects.requireNonNull(binding, "binding");
     Objects.requireNonNull(call, "call");
-    try (RuntimeToolCatalogSource.Lease lease = toolCatalogSource.acquire(binding.catalogEpoch())) {
+    try (RuntimeToolCatalogSource.Lease lease = toolCatalogSource.acquire()) {
       if (!call.toolName().equals(binding.descriptor().name())) {
         return Optional.empty();
       }

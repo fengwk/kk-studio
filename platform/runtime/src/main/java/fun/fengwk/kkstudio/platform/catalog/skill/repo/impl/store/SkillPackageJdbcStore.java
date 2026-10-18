@@ -23,21 +23,21 @@ public class SkillPackageJdbcStore {
 
   private static final String COLUMNS =
       "package_name, description, repository_url, branch, current_commit,"
-          + " observed_head_commit, head_checked_at, head_check_error, skills, encrypted_token, version,"
+          + " observed_head_commit, head_checked_at, head_check_error, skills, token, version,"
           + " create_time, update_time";
 
   private static final String INSERT_SQL =
       """
       insert into skill_package (
           package_name, description, repository_url, branch, current_commit,
-          observed_head_commit, head_checked_at, head_check_error, skills, encrypted_token, version,
+          observed_head_commit, head_checked_at, head_check_error, skills, token, version,
           create_time, update_time
       ) values (
           :packageName, :description, :repositoryUrl,
           :branch, :currentCommit, :observedHeadCommit,
           :headCheckedAt, :headCheckError,
           cast(:skillsJson as jsonb),
-          :encryptedToken, :version,
+          :token, :version,
           current_timestamp, current_timestamp
       )
       """;
@@ -52,7 +52,7 @@ public class SkillPackageJdbcStore {
           head_checked_at = :headCheckedAt,
           head_check_error = :headCheckError,
           skills = cast(:skillsJson as jsonb),
-          encrypted_token = :encryptedToken,
+          token = :token,
           version = version + 1,
           update_time = greatest(update_time, current_timestamp)
       where package_name = :packageName and version = :expectedVersion
@@ -102,7 +102,7 @@ public class SkillPackageJdbcStore {
         .param("headCheckedAt", PostgresJdbcTypes.toOffsetDateTime(skillPackage.getHeadCheckedAt()))
         .param("headCheckError", skillPackage.getHeadCheckError())
         .param("skillsJson", skillPackage.getSkillsJson())
-        .param("encryptedToken", skillPackage.getEncryptedToken())
+        .param("token", skillPackage.getToken())
         .param("version", skillPackage.getVersion())
         .update();
   }
@@ -117,7 +117,7 @@ public class SkillPackageJdbcStore {
         .param("headCheckedAt", PostgresJdbcTypes.toOffsetDateTime(skillPackage.getHeadCheckedAt()))
         .param("headCheckError", skillPackage.getHeadCheckError())
         .param("skillsJson", skillPackage.getSkillsJson())
-        .param("encryptedToken", skillPackage.getEncryptedToken())
+        .param("token", skillPackage.getToken())
         .param("packageName", skillPackage.getPackageName())
         .param("expectedVersion", expectedVersion)
         .update();
@@ -153,7 +153,7 @@ public class SkillPackageJdbcStore {
         PostgresJdbcTypes.toInstant(rs.getObject("head_checked_at", OffsetDateTime.class)));
     row.setHeadCheckError(rs.getString("head_check_error"));
     row.setSkillsJson(rs.getString("skills"));
-    row.setEncryptedToken(rs.getBytes("encrypted_token"));
+    row.setToken(rs.getString("token"));
     row.setVersion(rs.getLong("version"));
     row.setCreateTime(
         PostgresJdbcTypes.toInstant(rs.getObject("create_time", OffsetDateTime.class)));

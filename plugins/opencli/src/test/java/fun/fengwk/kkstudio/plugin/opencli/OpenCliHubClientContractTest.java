@@ -805,15 +805,7 @@ class OpenCliHubClientContractTest {
     }
 
     PluginCredentialSnapshot badSnapshot =
-        new PluginCredentialSnapshot(
-            "opencli",
-            UUID.randomUUID(),
-            "context",
-            null,
-            null,
-            1L,
-            new byte[] {1, 2, 3},
-            payloadJson);
+        new PluginCredentialSnapshot("opencli", null, null, 1L, payloadJson);
 
     PluginCredentialAccess badAccess =
         new PluginCredentialAccess() {
@@ -1163,11 +1155,9 @@ class OpenCliHubClientContractTest {
     UUID gen1 = UUID.randomUUID();
     UUID gen2 = UUID.randomUUID();
     PluginCredentialSnapshot snapshot1 =
-        new PluginCredentialSnapshot(
-            "opencli", gen1, "ctx", null, null, 1L, new byte[] {1}, "{\"apiKey\":\"key-1\"}");
+        new PluginCredentialSnapshot("opencli", null, null, 1L, "{\"apiKey\":\"key-1\"}");
     PluginCredentialSnapshot snapshot2 =
-        new PluginCredentialSnapshot(
-            "opencli", gen2, "ctx", null, null, 2L, new byte[] {2}, "{\"apiKey\":\"key-2\"}");
+        new PluginCredentialSnapshot("opencli", null, null, 2L, "{\"apiKey\":\"key-2\"}");
 
     AtomicReference<PluginCredentialSnapshot> authoritativeStore = new AtomicReference<>(snapshot1);
     AtomicInteger rejectAttemptCount = new AtomicInteger();
@@ -1185,9 +1175,7 @@ class OpenCliHubClientContractTest {
             rejectAttemptCount.incrementAndGet();
             PluginCredentialSnapshot current = authoritativeStore.get();
             // 忠实 CAS：仅当权威 store 当前的代际和版本与传入的 snapshot 完全相同时才作废
-            if (current != null
-                && current.authGeneration().equals(target.authGeneration())
-                && current.version() == target.version()) {
+            if (current != null && current.version() == target.version()) {
               rejectedCount.incrementAndGet();
               authoritativeStore.set(null);
               return true;
@@ -1251,15 +1239,7 @@ class OpenCliHubClientContractTest {
 
     for (String badPayload : badPayloads) {
       PluginCredentialSnapshot badSnapshot =
-          new PluginCredentialSnapshot(
-              "opencli",
-              UUID.randomUUID(),
-              "context",
-              null,
-              null,
-              1L,
-              new byte[] {1, 2, 3},
-              badPayload);
+          new PluginCredentialSnapshot("opencli", null, null, 1L, badPayload);
       PluginCredentialAccess access =
           new PluginCredentialAccess() {
             @Override
@@ -1552,12 +1532,9 @@ class OpenCliHubClientContractTest {
   private static PluginCredentialSnapshot snapshot(String apiKey, String instanceId) {
     return new PluginCredentialSnapshot(
         "opencli",
-        UUID.randomUUID(),
-        "context",
         null,
         null,
         1L,
-        new byte[] {1, 2, 3},
         instanceId == null
             ? "{\"apiKey\":\"" + apiKey + "\"}"
             : "{\"apiKey\":\"" + apiKey + "\",\"instanceId\":\"" + instanceId + "\"}");

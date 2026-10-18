@@ -1,137 +1,265 @@
 package fun.fengwk.kkstudio.platform.plugin.persistence;
 
+import static fun.fengwk.kkstudio.platform.persistence.PostgresJdbcTypes.toInstant;
+import static fun.fengwk.kkstudio.platform.persistence.PostgresJdbcTypes.toOffsetDateTime;
+
+import org.springframework.jdbc.core.RowMapper;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.stereotype.Repository;
+
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialStatus;
 
 import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
-import java.util.UUID;
 
 /**
- * {@code plugin_credential} 的原子 SQL 契约：一行一凭据，写入必须是单条条件语句，并发靠 CAS version、lease token 与认证身份（代际 +
- * 上下文）围栏。
+ * {@code plugin_credential} 存取：每个已认证 Plugin 至多一行。
  *
- * <p>没有无条件 upsert：整行写入只通过 {@link #insert(PluginCredentialRow)}（要求当前无行）与 {@link
- * #replace(PluginCredentialRow, UUID, String, long)}（要求当前行匹配认证代际、上下文指纹与 version）两条条件路径，因此旧引用绝不可能
- * 「复活」一行已被替换或解除的凭据。所有 finalize / release / reject 都要求同时匹配 lease token、version
- * 与认证身份，因此迟到或来自另一节点的写入只能 失败，不能覆盖新凭据、新状态、新上下文或断连重建后的新代际行。
+ * <p>所有写入都以 {@code version} 做 CAS 并让它 +1；刷新路径额外要求持有自己的刷新租约，因此迟到的终结、调用期拒绝与人工替换互不覆盖。
  */
-public interface PluginCredentialRepository {
+@Repository
+public class PluginCredentialRepository {
 
-  /** 读取权威行；不存在时返回空。 */
-  Optional<PluginCredentialRow> find(String pluginId);
+  private static final String COLUMNS =
+      "plugin_id, payload_json, region, expires_at, next_refresh_at, status, last_refreshed_at,"
+          + " last_refresh_error, refresh_lease_token, refresh_lease_until, version";
 
-  /** 条件插入整行：当前已存在该 pluginId 的行时不写入并返回 false。 */
-  boolean insert(PluginCredentialRow row);
+  private static final RowMapper<PluginCredentialRow> ROW_MAPPER =
+      (rs, row) ->
+          new PluginCredentialRow(
+              rs.getString("plugin_id"),
+              rs.getString("payload_json"),
+              rs.getString("region"),
+              toInstant(rs.getObject("expires_at", OffsetDateTime.class)),
+              toInstant(rs.getObject("next_refresh_at", OffsetDateTime.class)),
+              PluginCredentialStatus.valueOf(rs.getString("status")),
+              toInstant(rs.getObject("last_refreshed_at", OffsetDateTime.class)),
+              rs.getString("last_refresh_error"),
+              rs.getString("refresh_lease_token"),
+              toInstant(rs.getObject("refresh_lease_until", OffsetDateTime.class)),
+              rs.getLong("version"));
 
-  /**
-   * 条件整行替换：只有当前行的认证代际、上下文指纹与 version 三者都匹配时才覆盖载荷、元数据与 lease，并把 {@code version + 1}。
-   *
-   * @return 是否实际替换了该行
-   */
-  boolean replace(
-      PluginCredentialRow row,
-      UUID expectedAuthGeneration,
-      String expectedContextFingerprint,
-      long expectedVersion);
+  private final JdbcClient jdbc;
 
-  /**
-   * 条件删除：只有当前行的认证代际、上下文指纹与 version 三者都匹配时才删除。
-   *
-   * @return 是否实际删除了一行
-   */
-  boolean delete(
+  public PluginCredentialRepository(JdbcClient jdbc) {
+    this.jdbc = Objects.requireNonNull(jdbc, "jdbc");
+  }
+
+  public Optional<PluginCredentialRow> find(String pluginId) {
+    return jdbc.sql("select " + COLUMNS + " from plugin_credential where plugin_id = :pluginId")
+        .param("pluginId", pluginId)
+        .query(ROW_MAPPER)
+        .optional();
+  }
+
+  /** 写入一份新的已连接凭据：没有行时插入，有行时整体替换并清空刷新状态。 */
+  public void upsertConnected(
       String pluginId,
-      UUID expectedAuthGeneration,
-      String expectedContextFingerprint,
-      long expectedVersion);
+      String payloadJson,
+      String region,
+      Instant expiresAt,
+      Instant nextRefreshAt) {
+    jdbc.sql(
+            """
+            insert into plugin_credential (
+                plugin_id, payload_json, region, expires_at, next_refresh_at, status)
+            values (:pluginId, :payloadJson, :region, :expiresAt, :nextRefreshAt, 'CONNECTED')
+            on conflict (plugin_id) do update
+            set payload_json = excluded.payload_json,
+                region = excluded.region,
+                expires_at = excluded.expires_at,
+                next_refresh_at = excluded.next_refresh_at,
+                status = 'CONNECTED',
+                last_refreshed_at = null,
+                last_refresh_error = null,
+                refresh_lease_token = null,
+                refresh_lease_until = null,
+                version = plugin_credential.version + 1,
+                updated_at = current_timestamp
+            """)
+        .param("pluginId", pluginId)
+        .param("payloadJson", payloadJson)
+        .param("region", region)
+        .param("expiresAt", toOffsetDateTime(expiresAt))
+        .param("nextRefreshAt", toOffsetDateTime(nextRefreshAt))
+        .update();
+  }
 
-  /**
-   * 把已经过期的 in-flight lease 原子收敛为 {@code REFRESH_UNCERTAIN} 并清空 lease。
-   *
-   * <p>过期 lease 表示持有节点在外部请求前后崩溃，没有任何节点能证明请求是否已经发出，因此这些行既不能重新 claim 也不能重放， 只能永久收敛为结果未知。
-   *
-   * @return 收敛的行数
-   */
-  int markExpiredLeasesUncertain(List<String> pluginIds, Instant now, String error);
+  public void delete(String pluginId) {
+    jdbc.sql("delete from plugin_credential where plugin_id = :pluginId")
+        .param("pluginId", pluginId)
+        .update();
+  }
 
-  /**
-   * 在短事务内领取到期行：只领取给定已安装 Plugin、状态为 {@code CONNECTED / REFRESH_FAILED}、{@code next_refresh_at} 已到且
-   * lease 为空或已过期的行，并写入新 lease token 与 {@code version + 1}。
-   *
-   * <p>静态密钥行没有 {@code next_refresh_at}，因此天然不会被领取。{@code SKIP LOCKED} 保证多节点并发扫描不会互相阻塞或重复领取。
-   */
-  List<PluginCredentialRow> claimDue(
-      List<String> pluginIds, Instant now, Instant leaseUntil, String leaseToken, int limit);
+  /** 调用期确定性拒绝：只作废读取时的那一版凭据。 */
+  public boolean rejectUsed(String pluginId, long version, String error) {
+    return jdbc.sql(
+                """
+                update plugin_credential
+                set status = 'REAUTH_REQUIRED', last_refresh_error = :error,
+                    version = version + 1, updated_at = current_timestamp
+                where plugin_id = :pluginId and version = :version
+                """)
+            .param("error", error)
+            .param("pluginId", pluginId)
+            .param("version", version)
+            .update()
+        == 1;
+  }
 
-  /** 成功终结：替换密文与时间、回到 {@code CONNECTED}，要求认证身份、lease token 与 version 都匹配。 */
-  boolean finalizeSuccess(
-      String pluginId,
-      UUID authGeneration,
-      String contextFingerprint,
-      String leaseToken,
-      long version,
-      byte[] encryptedPayload,
+  /** 租约过期而未终结的刷新结果未知：收敛为 {@code REFRESH_UNCERTAIN}。 */
+  public int markExpiredLeasesUncertain(List<String> pluginIds, Instant now, String error) {
+    return jdbc.sql(
+            """
+            update plugin_credential
+            set status = 'REFRESH_UNCERTAIN', last_refresh_error = :error,
+                refresh_lease_token = null, refresh_lease_until = null,
+                version = version + 1, updated_at = current_timestamp
+            where plugin_id in (:pluginIds)
+              and refresh_lease_token is not null and refresh_lease_until <= :now
+            """)
+        .param("pluginIds", pluginIds)
+        .param("now", toOffsetDateTime(now))
+        .param("error", error)
+        .update();
+  }
+
+  /** 领取一条到期的交互凭据并签发刷新租约。 */
+  public Optional<PluginCredentialRow> claimDue(
+      List<String> pluginIds, Instant now, Instant leaseUntil, String leaseToken) {
+    return jdbc.sql(
+            """
+            with claimable as (
+                select plugin_id from plugin_credential
+                where plugin_id in (:pluginIds)
+                  and status in ('CONNECTED', 'REFRESH_FAILED')
+                  and next_refresh_at <= :now
+                  and (refresh_lease_token is null or refresh_lease_until <= :now)
+                order by next_refresh_at, plugin_id
+                limit 1
+                for update skip locked
+            )
+            update plugin_credential credential
+            set refresh_lease_token = :leaseToken, refresh_lease_until = :leaseUntil,
+                version = credential.version + 1, updated_at = current_timestamp
+            from claimable
+            where credential.plugin_id = claimable.plugin_id
+            returning credential.*
+            """)
+        .param("pluginIds", pluginIds)
+        .param("now", toOffsetDateTime(now))
+        .param("leaseUntil", toOffsetDateTime(leaseUntil))
+        .param("leaseToken", leaseToken)
+        .query(ROW_MAPPER)
+        .optional();
+  }
+
+  public boolean finalizeSuccess(
+      PluginCredentialRow claimed,
+      String payloadJson,
       String region,
       Instant expiresAt,
       Instant nextRefreshAt,
-      Instant refreshedAt,
-      Instant now);
+      Instant refreshedAt) {
+    return jdbc.sql(
+                """
+                update plugin_credential
+                set payload_json = :payloadJson, region = :region, expires_at = :expiresAt,
+                    next_refresh_at = :nextRefreshAt, status = 'CONNECTED',
+                    last_refreshed_at = :refreshedAt, last_refresh_error = null,
+                    refresh_lease_token = null, refresh_lease_until = null,
+                    version = version + 1, updated_at = current_timestamp
+                where plugin_id = :pluginId and refresh_lease_token = :leaseToken
+                  and version = :version
+                """)
+            .param("payloadJson", payloadJson)
+            .param("region", region)
+            .param("expiresAt", toOffsetDateTime(expiresAt))
+            .param("nextRefreshAt", toOffsetDateTime(nextRefreshAt))
+            .param("refreshedAt", toOffsetDateTime(refreshedAt))
+            .param("pluginId", claimed.pluginId())
+            .param("leaseToken", claimed.refreshLeaseToken())
+            .param("version", claimed.version())
+            .update()
+        == 1;
+  }
 
-  /** 失败终结：写入终态、下一刷新时刻与有界去敏错误，清空 lease，要求认证身份、lease token 与 version 都匹配。 */
-  boolean finalizeFailure(
-      String pluginId,
-      UUID authGeneration,
-      String contextFingerprint,
-      String leaseToken,
-      long version,
+  public boolean finalizeFailure(
+      PluginCredentialRow claimed,
       PluginCredentialStatus status,
       Instant nextRefreshAt,
-      String error,
-      Instant now);
+      String error) {
+    return jdbc.sql(
+                """
+                update plugin_credential
+                set status = :status, next_refresh_at = :nextRefreshAt,
+                    last_refresh_error = :error,
+                    refresh_lease_token = null, refresh_lease_until = null,
+                    version = version + 1, updated_at = current_timestamp
+                where plugin_id = :pluginId and refresh_lease_token = :leaseToken
+                  and version = :version
+                """)
+            .param("status", status.name())
+            .param("nextRefreshAt", toOffsetDateTime(nextRefreshAt))
+            .param("error", error)
+            .param("pluginId", claimed.pluginId())
+            .param("leaseToken", claimed.refreshLeaseToken())
+            .param("version", claimed.version())
+            .update()
+        == 1;
+  }
 
-  /** 释放 lease 且不改状态：无法解析凭据或 Plugin 无刷新能力时使用，要求认证身份、lease token 与 version 都匹配。 */
-  boolean releaseLease(
-      String pluginId,
-      UUID authGeneration,
-      String contextFingerprint,
-      String leaseToken,
-      long version,
-      Instant now);
+  public boolean releaseLease(PluginCredentialRow claimed) {
+    return jdbc.sql(
+                """
+                update plugin_credential
+                set refresh_lease_token = null, refresh_lease_until = null,
+                    version = version + 1, updated_at = current_timestamp
+                where plugin_id = :pluginId and refresh_lease_token = :leaseToken
+                  and version = :version
+                """)
+            .param("pluginId", claimed.pluginId())
+            .param("leaseToken", claimed.refreshLeaseToken())
+            .param("version", claimed.version())
+            .update()
+        == 1;
+  }
 
-  /**
-   * 当前 lease 是否仍由该 token 与 version 持有、认证身份一致且截止时刻晚于 {@code now}。
-   *
-   * <p>外部刷新只能在这个条件成立时发出：lease 过期、被另一节点收敛、重新登录替换或断连后被同版本新代际行取代后都必须返回 false。
-   */
-  boolean ownsUnexpiredLease(
-      String pluginId,
-      UUID authGeneration,
-      String contextFingerprint,
-      String leaseToken,
-      long version,
-      Instant now);
+  /** 刷新器发出请求前确认租约仍属于自己且未过期。 */
+  public boolean ownsUnexpiredLease(PluginCredentialRow claimed, Instant now) {
+    return jdbc.sql(
+                """
+                select count(*) from plugin_credential
+                where plugin_id = :pluginId and refresh_lease_token = :leaseToken
+                  and version = :version and refresh_lease_until > :now
+                """)
+            .param("pluginId", claimed.pluginId())
+            .param("leaseToken", claimed.refreshLeaseToken())
+            .param("version", claimed.version())
+            .param("now", toOffsetDateTime(now))
+            .query(Long.class)
+            .single()
+        == 1L;
+  }
 
-  /**
-   * 已安装 Plugin 中最早的可调度刷新时刻。
-   *
-   * <p>只看 {@code CONNECTED} / {@code REFRESH_FAILED} 且没有未过期 lease 的行；{@code now} 之前的时刻原样返回，表示已经到期。
-   */
-  Optional<Instant> earliestRefreshAt(List<String> pluginIds, Instant now);
-
-  /**
-   * 调用期认证拒绝只作废本次已用凭据：认证代际与上下文指纹匹配，且 version 或原始密文匹配才把该行置为 {@code REAUTH_REQUIRED}。
-   *
-   * <p>并发重新登录写入的新 version、新密文与新代际都不会命中；断连后被同 version 的新代际行取代也不会命中，因此不会误杀新 token。
-   *
-   * @return 是否实际作废了当前行
-   */
-  boolean rejectUsedCredential(
-      String pluginId,
-      UUID authGeneration,
-      String contextFingerprint,
-      long version,
-      byte[] encryptedPayload,
-      String error,
-      Instant now);
+  /** 未被刷新租约持有的最早下一次刷新时刻，用于调度下一次扫描。 */
+  public Optional<Instant> earliestRefreshAt(List<String> pluginIds, Instant now) {
+    return jdbc
+        .sql(
+            """
+            select min(next_refresh_at) from plugin_credential
+            where plugin_id in (:pluginIds) and status in ('CONNECTED', 'REFRESH_FAILED')
+              and (refresh_lease_token is null or refresh_lease_until <= :now)
+            """)
+        .param("pluginIds", pluginIds)
+        .param("now", toOffsetDateTime(now))
+        .query((rs, row) -> toInstant(rs.getObject(1, OffsetDateTime.class)))
+        .list()
+        .stream()
+        .filter(Objects::nonNull)
+        .findFirst();
+  }
 }

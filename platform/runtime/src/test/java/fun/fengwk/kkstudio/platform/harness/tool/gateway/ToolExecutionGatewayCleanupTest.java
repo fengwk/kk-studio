@@ -72,7 +72,7 @@ class ToolExecutionGatewayCleanupTest {
   void catalogAcquisitionFailureReleasesQuotaWithoutClosingUnacquiredCatalog() {
     Fixture fixture = new Fixture(new AssertionError("must not close"));
     IllegalStateException primary = new IllegalStateException("acquire");
-    doThrow(primary).when(fixture.source).acquire(1L);
+    doThrow(primary).when(fixture.source).acquire();
     assertSame(primary, assertThrows(IllegalStateException.class, fixture::start));
     fixture.assertQuotaAvailable();
     assertEquals(0, fixture.catalog.closedLeases());
@@ -431,7 +431,7 @@ class ToolExecutionGatewayCleanupTest {
     final ToolGatewayTestSupport.FakeTool tool = new ToolGatewayTestSupport.FakeTool(DESCRIPTOR);
     final TestRuntimeToolCatalogSource catalog =
         TestRuntimeToolCatalogSource.of(ToolGatewayTestSupport.defaultCatalog(tool));
-    final RuntimeToolCatalogSource.Lease catalogLease = spy(catalog.acquireCurrent());
+    final RuntimeToolCatalogSource.Lease catalogLease = spy(catalog.acquire());
     final ConcurrencyAdmission admission = spy(new ConcurrencyAdmission(1));
     final ToolGatewayTestSupport.DirectQueueExecutor executor =
         new ToolGatewayTestSupport.DirectQueueExecutor();
@@ -448,7 +448,7 @@ class ToolExecutionGatewayCleanupTest {
               })
           .when(catalogLease)
           .close();
-      when(source.acquire(1L)).thenReturn(catalogLease);
+      when(source.acquire()).thenReturn(catalogLease);
       gateway =
           ToolGatewayTestSupport.gateway(
               source,

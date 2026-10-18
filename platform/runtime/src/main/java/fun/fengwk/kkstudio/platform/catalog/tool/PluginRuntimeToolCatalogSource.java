@@ -1,15 +1,11 @@
 package fun.fengwk.kkstudio.platform.catalog.tool;
 
-import fun.fengwk.kkstudio.harness.contributor.api.ContributionId;
-import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolPluginSource;
 import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRuntime;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogSnapshot;
-import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialReference;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -24,10 +20,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * 或缓存。
  *
  * <p>每次租用把同一 snapshot 的完整 Harness 工具（含内部工具）与一次性读取的全部 MCP 工具冻成只读索引：模型可见 name 就是身份， 因此同名即同一身份，重复一律
- * fail-closed。Harness 工具被 epoch 钉住，历史 epoch 的旧目录不漂移；MCP 是独立的数据库动态事实， 本次租用只读一次库即冻结 planning
- * 面与选择面，不假造可恢复旧版本，调用期 server 可用性仍由执行边界 fail closed。
- *
- * <p>插件来源按 snapshot 的 owner map 解析：只有插件实例产出的 ContributorId 才有来源，内置与 MCP 贡献恒为 null。
+ * fail-closed。MCP 是独立的数据库动态事实，本次租用只读一次库即冻结 planning 面与选择面，调用期 server 可用性仍由执行边界 fail closed。
  */
 public final class PluginRuntimeToolCatalogSource implements RuntimeToolCatalogSource {
 
@@ -40,13 +33,8 @@ public final class PluginRuntimeToolCatalogSource implements RuntimeToolCatalogS
   }
 
   @Override
-  public Lease acquireCurrent() {
-    return open(runtime.acquireCurrent());
-  }
-
-  @Override
-  public Lease acquire(long catalogEpoch) {
-    return open(runtime.acquire(catalogEpoch));
+  public Lease acquire() {
+    return open(runtime.acquire());
   }
 
   /**
@@ -69,26 +57,18 @@ public final class PluginRuntimeToolCatalogSource implements RuntimeToolCatalogS
     }
   }
 
-  /** 单次目录租用：冻结同 epoch 的 Harness 目录、一次性读取的 MCP 事实与按贡献身份解析的插件来源。 */
+  /** 单次目录租用：当前快照的 Harness 目录与一次性读取的 MCP 事实。 */
   static final class Lease implements RuntimeToolCatalogSource.Lease {
 
     private final PluginCatalogRuntime.Lease snapshotLease;
     private final PluginCatalogSnapshot snapshot;
     private final FrozenRuntimeToolCatalog catalog;
-    private final Map<ContributorId, ToolPluginSource> pluginSourcesByContributor;
     private final AtomicBoolean closed = new AtomicBoolean();
 
     Lease(PluginCatalogRuntime.Lease snapshotLease, McpToolCatalog mcpCatalog) {
       this.snapshotLease = Objects.requireNonNull(snapshotLease, "snapshotLease");
       this.snapshot = snapshotLease.snapshot();
       this.catalog = FrozenRuntimeToolCatalog.freeze(snapshot.harnessCatalog(), mcpCatalog);
-      this.pluginSourcesByContributor = pluginSources(snapshot);
-    }
-
-    @Override
-    public long epoch() {
-      requireOpen();
-      return snapshot.epoch();
     }
 
     @Override
@@ -104,17 +84,9 @@ public final class PluginRuntimeToolCatalogSource implements RuntimeToolCatalogS
     }
 
     @Override
-    public ToolPluginSource pluginSource(ContributionId contributionId) {
-      requireOpen();
-      Objects.requireNonNull(contributionId, "contributionId");
-      return pluginSourcesByContributor.get(contributionId.contributorId());
-    }
-
-    @Override
     public ToolContribution require(ToolBinding binding) {
       requireOpen();
-      return FrozenToolBindingVerifier.require(
-          snapshot.epoch(), catalog, pluginSourcesByContributor, binding);
+      return FrozenToolBindingVerifier.require(catalog, binding);
     }
 
     @Override
@@ -128,41 +100,6 @@ public final class PluginRuntimeToolCatalogSource implements RuntimeToolCatalogS
       if (closed.get()) {
         throw new IllegalStateException("runtime tool catalog lease is closed");
       }
-    }
-
-    /** 按 snapshot 的 owner map 解析每个插件贡献的冻结来源；非插件贡献没有来源。 */
-    private static Map<ContributorId, ToolPluginSource> pluginSources(
-        PluginCatalogSnapshot snapshot) {
-      Map<ContributorId, ToolPluginSource> sources = new LinkedHashMap<>();
-      for (PluginCatalogSnapshot.ConfiguredPlugin configured : snapshot.configuredPlugins()) {
-        String pluginId = configured.descriptor().pluginId();
-        PluginCatalogSnapshot.PluginOwnership ownership = snapshot.pluginOwnership().get(pluginId);
-        if (ownership == null || ownership.contributorIds().isEmpty()) {
-          continue;
-        }
-        String capabilityFingerprint = snapshot.capabilityFingerprints().get(pluginId);
-        if (capabilityFingerprint == null) {
-          throw new IllegalStateException(
-              "plugin capability fingerprint is missing for " + pluginId);
-        }
-        PluginCredentialReference credentialReference = configured.credentialReference();
-        ToolPluginSource source =
-            new ToolPluginSource(
-                pluginId,
-                configured.descriptor().version(),
-                configured.config().revision(),
-                capabilityFingerprint,
-                credentialReference.contextFingerprint(),
-                credentialReference.authGeneration());
-        for (ContributorId contributorId : ownership.contributorIds()) {
-          ToolPluginSource previous = sources.putIfAbsent(contributorId, source);
-          if (previous != null) {
-            throw new IllegalStateException(
-                "contributor " + contributorId + " is owned by more than one plugin");
-          }
-        }
-      }
-      return Map.copyOf(sources);
     }
   }
 

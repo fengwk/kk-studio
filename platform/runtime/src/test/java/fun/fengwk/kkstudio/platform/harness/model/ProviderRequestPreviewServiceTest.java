@@ -911,7 +911,6 @@ class ProviderRequestPreviewServiceTest {
 
   private static ModelRequestSpec spec() {
     return new ModelRequestSpec(
-        1L,
         ProviderType.OPENAI,
         GENERATION_ID,
         new ModelDescriptor(

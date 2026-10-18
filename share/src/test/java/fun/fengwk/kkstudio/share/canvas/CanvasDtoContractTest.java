@@ -42,10 +42,7 @@ class CanvasDtoContractTest {
 
   /** durable 位置与版本游标在 wire 上永远是十进制字符串，避免 JS 丢精度。 */
   private static final String[] VERSION_STRING_FIELDS = {
-    "CanvasDocumentDTO.revision",
-    "CanvasPatchDTO.revision",
-    "CanvasVersionEventDTO.revision",
-    "CanvasFunctionVersionDTO.catalogEpoch"
+    "CanvasDocumentDTO.revision", "CanvasPatchDTO.revision", "CanvasVersionEventDTO.revision"
   };
 
   /** typed command 的 wire 名与核心命令一一对应；缺失或改名都会让前端错位。 */
@@ -147,8 +144,7 @@ class CanvasDtoContractTest {
             "version", "CanvasFunctionVersionDTO"),
         componentTypes(CanvasFunctionDefinitionDTO.class));
     assertEquals(
-        Map.of("catalogEpoch", "String", "definitionFingerprint", "String"),
-        componentTypes(CanvasFunctionVersionDTO.class));
+        Map.of("definitionFingerprint", "String"), componentTypes(CanvasFunctionVersionDTO.class));
     assertEquals(
         Map.of("kind", "String", "name", "String"), componentTypes(CanvasFunctionOutputDTO.class));
     for (String removed :
@@ -173,28 +169,24 @@ class CanvasDtoContractTest {
   /**
    * 版本字段只接受 JSON 字符串：数字/布尔/数组绝不被强制转换成文本。
    *
-   * <p>否则 {@code {"catalogEpoch":1}} 会被读成 {@code "1"}，start 就会接受一个客户端从未以 canonical 形式表达过的版本。 显式
-   * {@code null} 由边界必填校验拒绝（见 Studio Canvas Function controller 契约测试）。
+   * <p>否则数字会被读成文本，start 就会接受一个客户端从未以 canonical 形式表达过的版本。显式 {@code null} 由边界必填校验拒绝（见 Studio Canvas
+   * Function controller 契约测试）。
    */
   @Test
   void versionFieldsOnlyAcceptJsonStrings() throws Exception {
     String fingerprint = "a".repeat(64);
     CanvasFunctionVersionDTO accepted =
         MAPPER.readValue(
-            "{\"catalogEpoch\":\"1\",\"definitionFingerprint\":\"" + fingerprint + "\"}",
-            CanvasFunctionVersionDTO.class);
-    assertEquals("1", accepted.getCatalogEpoch());
+            "{\"definitionFingerprint\":\"" + fingerprint + "\"}", CanvasFunctionVersionDTO.class);
     assertEquals(fingerprint, accepted.getDefinitionFingerprint());
 
     for (String body :
         new String[] {
-          "{\"catalogEpoch\":1,\"definitionFingerprint\":\"" + fingerprint + "\"}",
-          "{\"catalogEpoch\":true,\"definitionFingerprint\":\"" + fingerprint + "\"}",
-          "{\"catalogEpoch\":[\"1\"],\"definitionFingerprint\":\"" + fingerprint + "\"}",
-          "{\"catalogEpoch\":\"1\",\"definitionFingerprint\":12345}",
-          "{\"catalogEpoch\":\"1\",\"definitionFingerprint\":\""
-              + fingerprint
-              + "\",\"extra\":true}"
+          "{\"definitionFingerprint\":12345}",
+          "{\"definitionFingerprint\":true}",
+          "{\"definitionFingerprint\":[\"" + fingerprint + "\"]}",
+          "{\"definitionFingerprint\":\"" + fingerprint + "\",\"catalogEpoch\":\"1\"}",
+          "{\"definitionFingerprint\":\"" + fingerprint + "\",\"extra\":true}"
         }) {
       assertThrows(
           Exception.class, () -> MAPPER.readValue(body, CanvasFunctionVersionDTO.class), body);
@@ -210,10 +202,7 @@ class CanvasDtoContractTest {
         Exception.class,
         () ->
             MAPPER.readValue(
-                "{\"requestId\":\"r\",\"expectedVersion\":{\"catalogEpoch\":1,"
-                    + "\"definitionFingerprint\":\""
-                    + fingerprint
-                    + "\"}}",
+                "{\"requestId\":\"r\",\"expectedVersion\":{\"definitionFingerprint\":1}}",
                 CanvasFunctionRunRequestDTO.class));
   }
 

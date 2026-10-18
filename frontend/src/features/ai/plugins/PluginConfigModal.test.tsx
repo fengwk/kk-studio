@@ -65,8 +65,6 @@ const samplePlugin: PluginDTO = {
       },
     },
   },
-  desiredEpoch: '5',
-  appliedEpoch: '5',
   desiredRevision: '3',
   appliedRevision: '3',
   connectionCheckSupported: false,

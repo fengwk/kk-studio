@@ -287,7 +287,7 @@ export interface CanvasFunctionDefinitionDTO {
   referencePolicy?: CanvasFunctionReferencePolicyDTO | null
   available?: boolean
   unavailableReason?: string | null
-  /** 目录项版本身份：epoch 与该函数定义指纹一起从同一次目录响应取得。 */
+  /** 目录项版本身份：该函数完整定义的指纹。 */
   version: CanvasFunctionVersionDTO
 }
 

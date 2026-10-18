@@ -36,7 +36,6 @@ import fun.fengwk.kkstudio.harness.common.schema.SchemaElement;
 import fun.fengwk.kkstudio.harness.common.schema.SchemaJsonCodec;
 import fun.fengwk.kkstudio.harness.common.schema.StringSchema;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfigSchema;
-import fun.fengwk.kkstudio.platform.plugin.service.PluginConfigurationCommitService;
 import fun.fengwk.kkstudio.platform.plugin.service.PluginManagementService;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginAuthKindDTO;
 import fun.fengwk.kkstudio.share.ai.plugin.PluginAuthPrepareDTO;
@@ -209,9 +208,7 @@ class PluginHttpWireContractTest {
     assertInstantToken(connected.get("nextRefreshAt"), DEEP_CONNECTED_NEXT_REFRESH_AT);
     assertInstantToken(connected.get("lastRefreshedAt"), DEEP_CONNECTED_LAST_REFRESHED_AT);
 
-    assertEquals(JsonNodeType.STRING, connected.get("desiredEpoch").getNodeType());
-    assertEquals("14", connected.get("desiredEpoch").asString());
-    assertEquals("14", connected.get("appliedEpoch").asString());
+    assertEquals(JsonNodeType.STRING, connected.get("desiredRevision").getNodeType());
     assertEquals("8", connected.get("desiredRevision").asString());
     assertEquals("8", connected.get("appliedRevision").asString());
   }
@@ -224,12 +221,10 @@ class PluginHttpWireContractTest {
     JsonNode pending = responseBody(listPlugins()).get("data").get(3);
 
     assertEquals("beta-deep-pending", pending.get("pluginId").asString());
-    assertEquals("12", pending.get("desiredEpoch").asString());
-    assertEquals("11", pending.get("appliedEpoch").asString());
     assertEquals("2", pending.get("desiredRevision").asString());
     assertEquals("1", pending.get("appliedRevision").asString());
     assertEquals(
-        PluginConfigurationCommitService.PENDING_APPLICATION_ERROR,
+        PluginManagementService.PENDING_APPLICATION_ERROR,
         pending.get("applicationError").asString());
   }
 
@@ -327,15 +322,15 @@ class PluginHttpWireContractTest {
   /** 测试意图：POST connection-check 的真实响应体（含 no-store 头）必须与已提交的共用 golden 逐值一致。 */
   @Test
   void checkConnectionResponseMatchesCommittedHttpWireGolden() throws Exception {
-    when(pluginManagementService.checkConnection("beta-deep-connected", 14L, 8L))
-        .thenReturn(connectionCheck("beta-deep-connected", "14", "8"));
+    when(pluginManagementService.checkConnection("beta-deep-connected", 8L))
+        .thenReturn(connectionCheck("beta-deep-connected", "8"));
 
     MockHttpServletResponse response =
         mockMvc
             .perform(
                 post("/api/plugins/beta-deep-connected/connection-check")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"expectedEpoch\":\"14\",\"expectedRevision\":\"8\"}"))
+                    .content("{\"expectedRevision\":\"8\"}"))
             .andReturn()
             .getResponse();
 
@@ -347,15 +342,15 @@ class PluginHttpWireContractTest {
   /** 测试意图：检查结果只含类型化维度与已应用坐标，绝不回显远端地址、正文、凭据或异常文本。 */
   @Test
   void checkConnectionBodyNeverCarriesRemoteMaterial() throws Exception {
-    when(pluginManagementService.checkConnection("beta-deep-connected", 14L, 8L))
-        .thenReturn(connectionCheck("beta-deep-connected", "14", "8"));
+    when(pluginManagementService.checkConnection("beta-deep-connected", 8L))
+        .thenReturn(connectionCheck("beta-deep-connected", "8"));
 
     MockHttpServletResponse response =
         mockMvc
             .perform(
                 post("/api/plugins/beta-deep-connected/connection-check")
                     .contentType(MediaType.APPLICATION_JSON)
-                    .content("{\"expectedEpoch\":\"14\",\"expectedRevision\":\"8\"}"))
+                    .content("{\"expectedRevision\":\"8\"}"))
             .andReturn()
             .getResponse();
 
@@ -520,8 +515,6 @@ class PluginHttpWireContractTest {
                 false,
                 "1"),
             false));
-    dto.setDesiredEpoch("1");
-    dto.setAppliedEpoch("1");
     dto.setDesiredRevision("1");
     dto.setAppliedRevision("1");
     return dto;
@@ -545,8 +538,6 @@ class PluginHttpWireContractTest {
                 false,
                 "2"),
             true));
-    dto.setDesiredEpoch("7");
-    dto.setAppliedEpoch("7");
     dto.setDesiredRevision("3");
     dto.setAppliedRevision("3");
     return dto;
@@ -571,8 +562,6 @@ class PluginHttpWireContractTest {
                 true,
                 "3"),
             false));
-    dto.setDesiredEpoch("9");
-    dto.setAppliedEpoch("9");
     dto.setDesiredRevision("5");
     dto.setAppliedRevision("5");
     return dto;
@@ -600,11 +589,9 @@ class PluginHttpWireContractTest {
                 false,
                 "4"),
             true));
-    dto.setDesiredEpoch("12");
-    dto.setAppliedEpoch("11");
     dto.setDesiredRevision("2");
     dto.setAppliedRevision("1");
-    dto.setApplicationError(PluginConfigurationCommitService.PENDING_APPLICATION_ERROR);
+    dto.setApplicationError(PluginManagementService.PENDING_APPLICATION_ERROR);
     return dto;
   }
 
@@ -622,19 +609,15 @@ class PluginHttpWireContractTest {
     dto.setCanvasFunctionNames(List.of("beta-deep-connected-fn"));
     dto.setConfiguration(configuration("8", PROBE_VALUES_JSON, true));
     dto.setConnectionCheckSupported(true);
-    dto.setDesiredEpoch("14");
-    dto.setAppliedEpoch("14");
     dto.setDesiredRevision("8");
     dto.setAppliedRevision("8");
     return dto;
   }
 
   /** 显式连接检查的响应 fixture：只有类型化维度与本次已应用坐标。 */
-  private static PluginConnectionCheckDTO connectionCheck(
-      String pluginId, String appliedEpoch, String appliedRevision) {
+  private static PluginConnectionCheckDTO connectionCheck(String pluginId, String appliedRevision) {
     PluginConnectionCheckDTO dto = new PluginConnectionCheckDTO();
     dto.setPluginId(pluginId);
-    dto.setAppliedEpoch(appliedEpoch);
     dto.setAppliedRevision(appliedRevision);
     dto.setCheckedAt(CHECKED_AT);
     dto.setReachability(PluginConnectionCheckDTO.Reachability.REACHABLE);

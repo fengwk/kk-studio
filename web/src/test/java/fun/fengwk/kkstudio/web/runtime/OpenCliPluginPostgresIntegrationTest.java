@@ -2,9 +2,7 @@ package fun.fengwk.kkstudio.web.runtime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -17,15 +15,14 @@ import fun.fengwk.convention4j.springboot.starter.web.result.ResultResponseBodyA
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.http.converter.json.JacksonJsonHttpMessageConverter;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.mock.web.MockHttpServletResponse;
@@ -53,28 +50,15 @@ import fun.fengwk.kkstudio.harness.common.network.HttpProxySelector;
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialStatus;
-import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableException;
 import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
 import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRuntime;
-import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogSnapshot;
 import fun.fengwk.kkstudio.platform.plugin.credential.DatabasePluginCredentialStore;
-import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialCodec;
-import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialKeyLoader;
-import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialReference;
-import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialStore;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginAuthAttemptRepository;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRepository;
-import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRow;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginCredentialRepository;
-import fun.fengwk.kkstudio.platform.plugin.persistence.PluginCredentialRow;
-import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.PostgresqlPluginCatalogChangeNotifier;
-import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.PostgresqlPluginConfigurationRepository;
-import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.PostgresqlPluginCredentialRepository;
-import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.store.PluginConfigurationJdbcStore;
-import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.store.PluginCredentialJdbcStore;
 import fun.fengwk.kkstudio.platform.plugin.service.PluginAgentDependencies;
-import fun.fengwk.kkstudio.platform.plugin.service.PluginConfigurationCommitService;
+import fun.fengwk.kkstudio.platform.plugin.service.PluginConfigurationService;
 import fun.fengwk.kkstudio.platform.plugin.service.PluginContextFactory;
 import fun.fengwk.kkstudio.platform.plugin.service.PluginManagementService;
 import fun.fengwk.kkstudio.platform.plugin.service.PluginSecretPatch;
@@ -94,25 +78,19 @@ import java.io.UncheckedIOException;
 import java.net.InetSocketAddress;
 import java.net.ProxySelector;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
- * 真实隔离 PostgreSQL 上 OpenCLI 插件的契约与生命周期集成测试。
+ * 真实隔离 PostgreSQL 与真实 HTTP 上 OpenCLI 插件的凭据与生命周期集成测试。
  *
- * <p>验证： 1. 独占隔离数据库，runtime-only 插件通过反射加载配置； 2. 真实凭据加密落库，HTTP 请求携带 Bearer； 3. 密钥轮换演进宿主代际并 fence
- * 旧实例，新 lease 实例使用新密钥； 4. baseUrl 变更重新派生 contextFingerprint 并 fence 旧上下文； 5. 在途旧实例在 baseUrl
- * 变更或密钥撤销（CLEAR）后出网前 fail-closed； 6. 历史 epoch 恢复后旧代际实例在调用时 fail-closed； 7. 真实管理服务到 HTTP 的响应体与共用
- * golden 一致。
+ * <p>验证：启动只写入默认配置；保存的密钥以 Bearer 出网；轮换密钥后已租用的旧实例也立即使用新密钥（凭据每次调用现读）；目标地址变化而未重新录入密钥、或 撤销密钥后，新旧实例都在出网前
+ * fail closed；连接检查只对本节点已应用的修订执行；真实管理服务到 HTTP 的响应体与共用 golden 一致；私有身份是受保护秘密，单独存在时不显示 CONNECTED。
  */
 class OpenCliPluginPostgresIntegrationTest {
 
@@ -134,43 +112,25 @@ class OpenCliPluginPostgresIntegrationTest {
   private static final JacksonJsonHttpMessageConverter HTTP_CONVERTER =
       new JacksonJsonHttpMessageConverter(HTTP_MAPPER);
 
-  @TempDir Path tempDir;
-
   private DataSource dataSource;
-  private JdbcClient jdbcClient;
   private PluginConfigurationRepository configurationRepository;
   private PluginCredentialRepository credentialRepository;
-  private PluginCredentialCodec codec;
-  private PluginCredentialKeyLoader keyLoader;
   private DatabasePluginCredentialStore credentialStore;
   private PlatformTransactionManager transactionManager;
+  private final CanvasFunctionExecutionContext execContext =
+      mock(CanvasFunctionExecutionContext.class);
 
   private final List<HttpServer> runningServers = new ArrayList<>();
 
   @BeforeEach
-  void setUp() throws IOException {
+  void setUp() {
     dataSource = WebPostgresTestSupport.createIsolatedDatabase();
-    jdbcClient = JdbcClient.create(dataSource);
-    configurationRepository =
-        new PostgresqlPluginConfigurationRepository(
-            new PluginConfigurationJdbcStore(jdbcClient),
-            new PostgresqlPluginCatalogChangeNotifier(new JdbcTemplate(dataSource)));
-    credentialRepository =
-        new PostgresqlPluginCredentialRepository(new PluginCredentialJdbcStore(jdbcClient));
-    codec = new PluginCredentialCodec();
-
-    Path keyFile = tempDir.resolve("opencli-integration-master.key");
-    Files.write(keyFile, "12345678901234567890123456789012".getBytes(StandardCharsets.UTF_8));
-    try {
-      Files.setPosixFilePermissions(keyFile, PosixFilePermissions.fromString("rw-------"));
-    } catch (UnsupportedOperationException ignored) {
-      // 兼容不支持 POSIX 文件权限的运行环境
-    }
-    keyLoader = new PluginCredentialKeyLoader(keyFile.toAbsolutePath().toString());
-    credentialStore =
-        new DatabasePluginCredentialStore(
-            credentialRepository, configurationRepository, codec, keyLoader, Clock.systemUTC());
+    JdbcClient jdbcClient = JdbcClient.create(dataSource);
+    configurationRepository = new PluginConfigurationRepository(jdbcClient);
+    credentialRepository = new PluginCredentialRepository(jdbcClient);
+    credentialStore = new DatabasePluginCredentialStore(credentialRepository, Clock.systemUTC());
     transactionManager = new DataSourceTransactionManager(dataSource);
+    when(execContext.isRunning()).thenReturn(true);
   }
 
   @AfterEach
@@ -181,605 +141,218 @@ class OpenCliPluginPostgresIntegrationTest {
     runningServers.clear();
   }
 
+  /** 首次启动写入默认配置（未启用），全部函数不可用且不创建凭据行。 */
   @Test
-  void bootstrapInitializesDisabledStateInIsolatedDatabase() {
+  void startupSeedsDisabledDefaults() {
     createContextRunner()
         .run(
             context -> {
               PluginCatalogRuntime runtime = context.getBean(PluginCatalogRuntime.class);
               StudioPluginRegistry registry = context.getBean(StudioPluginRegistry.class);
+              assertEquals("OpenCLI", registry.find(PLUGIN_ID).orElseThrow().descriptor().name());
 
-              Optional<StudioPlugin> plugin = registry.find(PLUGIN_ID);
-              assertTrue(
-                  plugin.isPresent(), "opencli plugin must be registered via auto-configuration");
-              assertEquals("OpenCLI", plugin.get().descriptor().name());
-              assertEquals("1.0.0", plugin.get().descriptor().version());
-
-              try (PluginCatalogRuntime.Lease lease = runtime.acquireCurrent()) {
-                PluginCatalogSnapshot snapshot = lease.snapshot();
-                assertEquals(1L, snapshot.epoch(), "first bootstrap must advance epoch to 1");
-
-                CanvasFunctionCatalog catalog = snapshot.canvasFunctionCatalog();
+              try (PluginCatalogRuntime.Lease lease = runtime.acquire()) {
+                CanvasFunctionCatalog catalog = lease.snapshot().canvasFunctionCatalog();
                 assertEquals(
                     5, catalog.list().size(), "opencli must contribute 5 canvas functions");
                 for (CanvasFunctionCatalog.RegisteredFunction fn : catalog.list()) {
                   assertFalse(fn.enabled(), "functions must be disabled by default");
-                  assertNotNull(fn.unavailableReason(), "unavailableReason must be specified");
+                  assertNotNull(fn.unavailableReason());
                 }
               }
-
-              assertEquals(1L, readEpoch(jdbcClient));
-              assertEquals(1, countConfigurationRevisions(jdbcClient));
-              assertTrue(
-                  credentialRepository.find(PLUGIN_ID).isEmpty(), "no credentials at bootstrap");
+              assertEquals(1L, configurationRepository.find(PLUGIN_ID).orElseThrow().revision());
+              assertTrue(credentialRepository.find(PLUGIN_ID).isEmpty());
             });
   }
 
+  /** 保存的密钥以 Bearer 随真实 HTTP 请求发出。 */
   @Test
-  void secretSetPersistsEncryptedCredentialAndSendsBearerOverRealHttp() throws IOException {
+  void savedKeyIsSentAsBearerOverRealHttp() throws IOException {
     List<RecordedRequest> requests = new CopyOnWriteArrayList<>();
-    HttpServer server = createControlledServer(requests);
-    String baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
-    String secretKey = "synthetic-opencli-key-13579";
+    String values = enabledValues(createControlledServer(requests));
 
     createContextRunner()
         .run(
             context -> {
               PluginCatalogRuntime runtime = context.getBean(PluginCatalogRuntime.class);
-              StudioPluginRegistry registry = context.getBean(StudioPluginRegistry.class);
-              PluginConfigurationCommitService commitService =
-                  createCommitService(registry, runtime);
+              PluginConfigurationService configuration = configurationService(context, runtime);
 
-              String valuesJson =
-                  "{\"enabled\":true,\"baseUrl\":\""
-                      + baseUrl
-                      + "\",\"gptImage2\":{\"paidEnabled\":true}}";
+              configuration.configure(
+                  PLUGIN_ID, 1L, values, Map.of("apiKey", PluginSecretPatch.set("key-1")));
 
-              commitService.configure(
-                  PLUGIN_ID,
-                  1L,
-                  1L,
-                  valuesJson,
-                  Map.of("apiKey", PluginSecretPatch.set(secretKey)));
-              runtime.refresh();
-
-              // 验证真实 PostgreSQL 落库
-              assertEquals(2L, readEpoch(jdbcClient));
-              PluginCredentialRow credentialRow =
-                  credentialRepository.find(PLUGIN_ID).orElseThrow();
-              assertEquals(PluginCredentialStatus.CONNECTED, credentialRow.status());
-              assertNotNull(credentialRow.authGeneration());
-              assertNotNull(credentialRow.contextFingerprint());
-              assertFalse(
-                  containsBytes(
-                      credentialRow.encryptedPayload(), secretKey.getBytes(StandardCharsets.UTF_8)),
-                  "plaintext secret must not exist in database");
-
-              PluginConfigurationRow history =
-                  configurationRepository.readConfiguration(PLUGIN_ID, 2L).orElseThrow();
-              assertEquals(List.of("apiKey"), history.configuredSecretFields());
-
-              // 验证当前快照与真实 HTTP 出网
-              try (PluginCatalogRuntime.Lease lease = runtime.acquireCurrent()) {
-                PluginCatalogSnapshot snapshot = lease.snapshot();
-                assertEquals(2L, snapshot.epoch());
-
-                CanvasFunctionCatalog.RegisteredFunction registered =
-                    snapshot.canvasFunctionCatalog().require(GPT_IMAGE_FUNCTION);
-                assertTrue(registered.enabled());
-                assertNull(registered.unavailableReason());
-
-                CanvasFunctionAdapter adapter = registered.adapter();
-                CanvasFunctionExecutionContext executionContext =
-                    mock(CanvasFunctionExecutionContext.class);
-                when(executionContext.isRunning()).thenReturn(true);
-                CanvasFunctionFrozenRun run =
-                    createTestRun(2L, adapter.functions().get(0), "generate portrait");
-
-                adapter.submit(executionContext, run);
-
-                assertEquals(1, requests.size(), "one HTTP request must reach local server");
-                RecordedRequest request = requests.get(0);
-                assertEquals("POST", request.method());
-                assertEquals("/api/opencli/execute", request.path());
-                assertEquals("Bearer " + secretKey, request.authorization());
-              }
-            });
-  }
-
-  @Test
-  void secretRotationAdvancesGenerationFencesOldInstanceAndAppliesNewKey() throws IOException {
-    List<RecordedRequest> requests = new CopyOnWriteArrayList<>();
-    HttpServer server = createControlledServer(requests);
-    String baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
-    String keyV1 = "synthetic-key-generation-alpha";
-    String keyV2 = "synthetic-key-generation-beta";
-
-    createContextRunner()
-        .run(
-            context -> {
-              PluginCatalogRuntime runtime = context.getBean(PluginCatalogRuntime.class);
-              StudioPluginRegistry registry = context.getBean(StudioPluginRegistry.class);
-              PluginConfigurationCommitService commitService =
-                  createCommitService(registry, runtime);
-
-              String valuesJson =
-                  "{\"enabled\":true,\"baseUrl\":\""
-                      + baseUrl
-                      + "\",\"gptImage2\":{\"paidEnabled\":true}}";
-
-              // 1. 设置 keyV1
-              commitService.configure(
-                  PLUGIN_ID, 1L, 1L, valuesJson, Map.of("apiKey", PluginSecretPatch.set(keyV1)));
-              runtime.refresh();
-
-              UUID generationV1 =
-                  credentialRepository.find(PLUGIN_ID).orElseThrow().authGeneration();
-
-              CanvasFunctionExecutionContext execContext =
-                  mock(CanvasFunctionExecutionContext.class);
-              when(execContext.isRunning()).thenReturn(true);
-
-              // 2. 租用并持有旧实例 leaseV1
-              try (PluginCatalogRuntime.Lease leaseV1 = runtime.acquireCurrent()) {
-                CanvasFunctionAdapter oldAdapter =
-                    leaseV1
-                        .snapshot()
-                        .canvasFunctionCatalog()
-                        .require(GPT_IMAGE_FUNCTION)
-                        .adapter();
-
-                oldAdapter.submit(
-                    execContext, createTestRun(2L, oldAdapter.functions().get(0), "prompt 1"));
-                assertEquals(1, requests.size());
-                assertEquals("Bearer " + keyV1, requests.get(0).authorization());
-
-                // 3. 轮换为 keyV2
-                commitService.configure(
-                    PLUGIN_ID, 2L, 2L, valuesJson, Map.of("apiKey", PluginSecretPatch.set(keyV2)));
-                runtime.refresh();
-
-                PluginCredentialRow rowV2 = credentialRepository.find(PLUGIN_ID).orElseThrow();
-                assertNotEquals(
-                    generationV1, rowV2.authGeneration(), "auth generation must rotate");
-
-                // 4. 验证旧实例被 fence，拒绝出网
-                CanvasFunctionFrozenRun staleRun =
-                    createTestRun(2L, oldAdapter.functions().get(0), "prompt with stale lease");
-                assertThrows(
-                    CanvasFunctionUnknownException.class,
-                    () -> oldAdapter.submit(execContext, staleRun),
-                    "old instance with stale auth generation must be fenced");
-                assertEquals(
-                    1, requests.size(), "fenced old instance must not emit network request");
-
-                // 5. 获取新 lease，新实例绑定新 generation 并使用 keyV2 出网
-                try (PluginCatalogRuntime.Lease leaseV2 = runtime.acquireCurrent()) {
-                  CanvasFunctionAdapter newAdapter =
-                      leaseV2
-                          .snapshot()
-                          .canvasFunctionCatalog()
-                          .require(GPT_IMAGE_FUNCTION)
-                          .adapter();
-                  newAdapter.submit(
-                      execContext, createTestRun(3L, newAdapter.functions().get(0), "prompt 2"));
-
-                  assertEquals(2, requests.size());
-                  assertEquals("Bearer " + keyV2, requests.get(1).authorization());
-                }
-              }
-            });
-  }
-
-  @Test
-  void baseUrlChangeRegeneratesAuthContextFingerprintAndFencesOldContext() throws IOException {
-    List<RecordedRequest> requestsA = new CopyOnWriteArrayList<>();
-    List<RecordedRequest> requestsB = new CopyOnWriteArrayList<>();
-    HttpServer serverA = createControlledServer(requestsA);
-    HttpServer serverB = createControlledServer(requestsB);
-    String baseUrlA = "http://127.0.0.1:" + serverA.getAddress().getPort();
-    String baseUrlB = "http://127.0.0.1:" + serverB.getAddress().getPort();
-    String key = "persistent-key-across-hosts";
-
-    createContextRunner()
-        .run(
-            context -> {
-              PluginCatalogRuntime runtime = context.getBean(PluginCatalogRuntime.class);
-              StudioPluginRegistry registry = context.getBean(StudioPluginRegistry.class);
-              PluginConfigurationCommitService commitService =
-                  createCommitService(registry, runtime);
-
-              // 1. 在 baseUrlA 上配置并提交 key
-              String valuesA =
-                  "{\"enabled\":true,\"baseUrl\":\""
-                      + baseUrlA
-                      + "\",\"gptImage2\":{\"paidEnabled\":true}}";
-              commitService.configure(
-                  PLUGIN_ID, 1L, 1L, valuesA, Map.of("apiKey", PluginSecretPatch.set(key)));
-              runtime.refresh();
-
-              PluginCredentialRow rowA = credentialRepository.find(PLUGIN_ID).orElseThrow();
-              UUID generationA = rowA.authGeneration();
-              String contextFingerprintA = rowA.contextFingerprint();
-              PluginCredentialReference refA =
-                  new PluginCredentialReference(PLUGIN_ID, generationA, contextFingerprintA);
-
-              // 2. 更改 baseUrl 为 baseUrlB 并 KEEP 密钥
-              String valuesB =
-                  "{\"enabled\":true,\"baseUrl\":\""
-                      + baseUrlB
-                      + "\",\"gptImage2\":{\"paidEnabled\":true}}";
-              commitService.configure(
-                  PLUGIN_ID, 2L, 2L, valuesB, Map.of("apiKey", PluginSecretPatch.keep()));
-              runtime.refresh();
-
-              PluginCredentialRow rowB = credentialRepository.find(PLUGIN_ID).orElseThrow();
-              UUID generationB = rowB.authGeneration();
-              String contextFingerprintB = rowB.contextFingerprint();
-              PluginCredentialReference refB =
-                  new PluginCredentialReference(PLUGIN_ID, generationB, contextFingerprintB);
-
-              assertNotEquals(
-                  generationA, generationB, "auth generation must rotate when context changes");
-              assertNotEquals(
-                  contextFingerprintA,
-                  contextFingerprintB,
-                  "baseUrl is a scopeKey, so contextFingerprint must change");
-
-              // 旧引用无法再从凭据库中读取（STALE_REFERENCE_ERROR / fail-closed）
-              assertThrows(
-                  PluginCredentialUnavailableException.class,
-                  () -> credentialStore.resolve(refA),
-                  "old context reference must be rejected");
-
-              // 新引用能正常解密出原密钥
               assertEquals(
-                  "{\"apiKey\":\"" + key + "\"}",
-                  credentialStore.resolve(refB).payloadJson(),
-                  "re-encrypted credential under new context must yield same secret");
-            });
-  }
-
-  @Test
-  void pinnedOldInstanceIsFencedBeforeEgressAfterBaseUrlChange() throws IOException {
-    List<RecordedRequest> requestsA = new CopyOnWriteArrayList<>();
-    List<RecordedRequest> requestsB = new CopyOnWriteArrayList<>();
-    HttpServer serverA = createControlledServer(requestsA);
-    HttpServer serverB = createControlledServer(requestsB);
-    String baseUrlA = "http://127.0.0.1:" + serverA.getAddress().getPort();
-    String baseUrlB = "http://127.0.0.1:" + serverB.getAddress().getPort();
-    String key = "fenced-instance-secret-key";
-
-    createContextRunner()
-        .run(
-            context -> {
-              PluginCatalogRuntime runtime = context.getBean(PluginCatalogRuntime.class);
-              StudioPluginRegistry registry = context.getBean(StudioPluginRegistry.class);
-              PluginConfigurationCommitService commitService =
-                  createCommitService(registry, runtime);
-
-              String valuesA =
-                  "{\"enabled\":true,\"baseUrl\":\""
-                      + baseUrlA
-                      + "\",\"gptImage2\":{\"paidEnabled\":true}}";
-              commitService.configure(
-                  PLUGIN_ID, 1L, 1L, valuesA, Map.of("apiKey", PluginSecretPatch.set(key)));
-              runtime.refresh();
-
-              CanvasFunctionExecutionContext execContext =
-                  mock(CanvasFunctionExecutionContext.class);
-              when(execContext.isRunning()).thenReturn(true);
-
-              // 租用并持有旧实例 leaseA
-              try (PluginCatalogRuntime.Lease leaseA = runtime.acquireCurrent()) {
-                CanvasFunctionAdapter oldAdapter =
-                    leaseA.snapshot().canvasFunctionCatalog().require(GPT_IMAGE_FUNCTION).adapter();
-
-                // 验证旧实例首次正常出网
-                CanvasFunctionFrozenRun run1 =
-                    createTestRun(2L, oldAdapter.functions().get(0), "in-flight prompt 1");
-                oldAdapter.submit(execContext, run1);
-                assertEquals(1, requestsA.size());
-                assertEquals(0, requestsB.size());
-
-                // 后台提交更新：切换 baseUrl 至 Server B
-                String valuesB =
-                    "{\"enabled\":true,\"baseUrl\":\""
-                        + baseUrlB
-                        + "\",\"gptImage2\":{\"paidEnabled\":true}}";
-                commitService.configure(
-                    PLUGIN_ID, 2L, 2L, valuesB, Map.of("apiKey", PluginSecretPatch.keep()));
-                runtime.refresh();
-
-                // 尝试继续使用旧实例发送请求：出网前被拦截
-                CanvasFunctionFrozenRun run2 =
-                    createTestRun(2L, oldAdapter.functions().get(0), "in-flight prompt 2");
-                assertThrows(
-                    CanvasFunctionUnknownException.class,
-                    () -> oldAdapter.submit(execContext, run2),
-                    "old instance must fail when its credentials are fenced");
-
-                assertEquals(1, requestsA.size(), "no new network request should reach server A");
-                assertEquals(0, requestsB.size(), "old instance must never reach server B");
+                  PluginCredentialStatus.CONNECTED,
+                  credentialRepository.find(PLUGIN_ID).orElseThrow().status());
+              try (PluginCatalogRuntime.Lease lease = runtime.acquire()) {
+                CanvasFunctionCatalog.RegisteredFunction registered =
+                    lease.snapshot().canvasFunctionCatalog().require(GPT_IMAGE_FUNCTION);
+                assertTrue(registered.enabled());
+                submit(registered.adapter(), "generate portrait");
               }
+              assertEquals(1, requests.size());
+              assertEquals("POST", requests.get(0).method());
+              assertEquals("/api/opencli/execute", requests.get(0).path());
+              assertEquals("Bearer key-1", requests.get(0).authorization());
             });
   }
 
+  /** 轮换密钥后，已租用的旧实例与新实例都立即使用新密钥。 */
   @Test
-  void secretClearDeletesCredentialRowAndFencesAllSubsequentEgress() throws IOException {
+  void rotatedKeyIsUsedImmediatelyByLeasedInstances() throws IOException {
     List<RecordedRequest> requests = new CopyOnWriteArrayList<>();
-    HttpServer server = createControlledServer(requests);
-    String baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
-    String key = "secret-to-be-cleared";
+    String values = enabledValues(createControlledServer(requests));
 
     createContextRunner()
         .run(
             context -> {
               PluginCatalogRuntime runtime = context.getBean(PluginCatalogRuntime.class);
-              StudioPluginRegistry registry = context.getBean(StudioPluginRegistry.class);
-              PluginConfigurationCommitService commitService =
-                  createCommitService(registry, runtime);
+              PluginConfigurationService configuration = configurationService(context, runtime);
+              configuration.configure(
+                  PLUGIN_ID, 1L, values, Map.of("apiKey", PluginSecretPatch.set("key-1")));
 
-              String values =
-                  "{\"enabled\":true,\"baseUrl\":\""
-                      + baseUrl
-                      + "\",\"gptImage2\":{\"paidEnabled\":true}}";
+              try (PluginCatalogRuntime.Lease oldLease = runtime.acquire()) {
+                CanvasFunctionAdapter oldAdapter = adapter(oldLease);
+                configuration.configure(
+                    PLUGIN_ID, 2L, values, Map.of("apiKey", PluginSecretPatch.set("key-2")));
 
-              // 1. 设置密钥并发布
-              commitService.configure(
-                  PLUGIN_ID, 1L, 1L, values, Map.of("apiKey", PluginSecretPatch.set(key)));
-              runtime.refresh();
-              assertTrue(credentialRepository.find(PLUGIN_ID).isPresent());
-
-              CanvasFunctionExecutionContext execContext =
-                  mock(CanvasFunctionExecutionContext.class);
-              when(execContext.isRunning()).thenReturn(true);
-
-              // 2. CLEAR 前租用并保留旧 lease，验证旧实例正常出网
-              try (PluginCatalogRuntime.Lease oldLease = runtime.acquireCurrent()) {
-                CanvasFunctionAdapter oldAdapter =
-                    oldLease
-                        .snapshot()
-                        .canvasFunctionCatalog()
-                        .require(GPT_IMAGE_FUNCTION)
-                        .adapter();
-                CanvasFunctionFrozenRun run1 =
-                    createTestRun(2L, oldAdapter.functions().get(0), "prompt before clear");
-                oldAdapter.submit(execContext, run1);
-                assertEquals(1, requests.size(), "request before CLEAR must succeed");
-                assertEquals("Bearer " + key, requests.get(0).authorization());
-
-                // 3. 执行 CLEAR 密钥
-                commitService.configure(
-                    PLUGIN_ID, 2L, 2L, values, Map.of("apiKey", PluginSecretPatch.clear()));
-                runtime.refresh();
-
-                // 数据库凭据行已被物理删除
-                assertTrue(
-                    credentialRepository.find(PLUGIN_ID).isEmpty(),
-                    "credential row must be deleted upon CLEAR");
-                PluginConfigurationRow historyRow =
-                    configurationRepository.readConfiguration(PLUGIN_ID, 3L).orElseThrow();
-                assertTrue(historyRow.configuredSecretFields().isEmpty());
-
-                // 4. 验证 CLEAR 前保留的旧实例在 CLEAR 后被 fence 拦截，拒绝出网
-                CanvasFunctionFrozenRun run2 =
-                    createTestRun(
-                        2L, oldAdapter.functions().get(0), "prompt with old lease after clear");
-                assertThrows(
-                    CanvasFunctionUnknownException.class,
-                    () -> oldAdapter.submit(execContext, run2),
-                    "old instance must fail-closed after secret CLEAR");
-                assertEquals(
-                    1,
-                    requests.size(),
-                    "old instance must not emit network request after secret CLEAR");
-
-                // 5. 验证新 lease 获取的实例同样 fail-closed 且不出网
-                try (PluginCatalogRuntime.Lease newLease = runtime.acquireCurrent()) {
-                  CanvasFunctionAdapter newAdapter =
-                      newLease
-                          .snapshot()
-                          .canvasFunctionCatalog()
-                          .require(GPT_IMAGE_FUNCTION)
-                          .adapter();
-                  CanvasFunctionFrozenRun run3 =
-                      createTestRun(
-                          3L, newAdapter.functions().get(0), "prompt with new lease after clear");
-
-                  assertThrows(
-                      CanvasFunctionUnknownException.class,
-                      () -> newAdapter.submit(execContext, run3));
-                  assertEquals(
-                      1,
-                      requests.size(),
-                      "new lease instance must not emit network request after CLEAR");
+                submit(oldAdapter, "leased instance");
+                try (PluginCatalogRuntime.Lease newLease = runtime.acquire()) {
+                  submit(adapter(newLease), "fresh instance");
                 }
               }
+              assertEquals(
+                  List.of("Bearer key-2", "Bearer key-2"),
+                  requests.stream().map(RecordedRequest::authorization).toList());
             });
   }
 
+  /** 目标地址变化而没有重新录入密钥时，旧密钥被删除，旧实例在出网前 fail closed。 */
   @Test
-  void restoreHistoricalEpochFromPostgresAndPreservesIsolation() throws IOException {
+  void endpointChangeWithoutNewKeyDropsTheKeyBeforeEgress() throws IOException {
     List<RecordedRequest> requests = new CopyOnWriteArrayList<>();
     HttpServer server = createControlledServer(requests);
-    String baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
+    String values = enabledValues(server);
+    String moved =
+        "{\"enabled\":true,\"baseUrl\":\"http://localhost:"
+            + server.getAddress().getPort()
+            + "\",\"gptImage2\":{\"paidEnabled\":true}}";
 
     createContextRunner()
         .run(
             context -> {
               PluginCatalogRuntime runtime = context.getBean(PluginCatalogRuntime.class);
-              StudioPluginRegistry registry = context.getBean(StudioPluginRegistry.class);
-              PluginConfigurationCommitService commitService =
-                  createCommitService(registry, runtime);
+              PluginConfigurationService configuration = configurationService(context, runtime);
+              configuration.configure(
+                  PLUGIN_ID, 1L, values, Map.of("apiKey", PluginSecretPatch.set("key-1")));
 
-              // 推进到 epoch 2：设置 key-epoch-2，启用 paidEnabled
-              String values2 =
-                  "{\"enabled\":true,\"baseUrl\":\""
-                      + baseUrl
-                      + "\",\"gptImage2\":{\"paidEnabled\":true}}";
-              commitService.configure(
-                  PLUGIN_ID,
-                  1L,
-                  1L,
-                  values2,
-                  Map.of("apiKey", PluginSecretPatch.set("key-epoch-2")));
-              runtime.refresh();
+              try (PluginCatalogRuntime.Lease oldLease = runtime.acquire()) {
+                CanvasFunctionAdapter oldAdapter = adapter(oldLease);
+                configuration.configure(PLUGIN_ID, 2L, moved, Map.of());
 
-              // 推进到 epoch 3：轮换 key 演进 authGeneration，并禁用 paidEnabled
-              String values3 =
-                  "{\"enabled\":true,\"baseUrl\":\""
-                      + baseUrl
-                      + "\",\"gptImage2\":{\"paidEnabled\":false}}";
-              commitService.configure(
-                  PLUGIN_ID,
-                  2L,
-                  2L,
-                  values3,
-                  Map.of("apiKey", PluginSecretPatch.set("key-epoch-3")));
-              runtime.refresh();
-
-              try (PluginCatalogRuntime.Lease lease = runtime.acquireCurrent()) {
-                assertEquals(3L, lease.snapshot().epoch());
+                assertTrue(credentialRepository.find(PLUGIN_ID).isEmpty());
+                assertThrows(
+                    CanvasFunctionUnknownException.class, () -> submit(oldAdapter, "old target"));
               }
+              assertEquals(0, requests.size(), "the old key must never reach any target");
             });
+  }
 
-    // 模拟全新启动的上下文（新节点），从同一个隔离数据库恢复
+  /** 撤销密钥后新旧实例都在出网前 fail closed。 */
+  @Test
+  void clearedKeyFailsClosedBeforeEgress() throws IOException {
+    List<RecordedRequest> requests = new CopyOnWriteArrayList<>();
+    String values = enabledValues(createControlledServer(requests));
+
     createContextRunner()
         .run(
             context -> {
-              PluginCatalogRuntime restartedRuntime = context.getBean(PluginCatalogRuntime.class);
+              PluginCatalogRuntime runtime = context.getBean(PluginCatalogRuntime.class);
+              PluginConfigurationService configuration = configurationService(context, runtime);
+              configuration.configure(
+                  PLUGIN_ID, 1L, values, Map.of("apiKey", PluginSecretPatch.set("key-1")));
 
-              // 1. 当前快照是权威最新版本 (epoch 3)
-              try (PluginCatalogRuntime.Lease currentLease = restartedRuntime.acquireCurrent()) {
-                assertEquals(3L, currentLease.snapshot().epoch());
-                assertFalse(
-                    currentLease
-                        .snapshot()
-                        .canvasFunctionCatalog()
-                        .require(GPT_IMAGE_FUNCTION)
-                        .enabled());
-              }
+              try (PluginCatalogRuntime.Lease oldLease = runtime.acquire()) {
+                CanvasFunctionAdapter oldAdapter = adapter(oldLease);
+                submit(oldAdapter, "before clear");
+                configuration.configure(
+                    PLUGIN_ID, 2L, values, Map.of("apiKey", PluginSecretPatch.clear()));
 
-              // 2. 从 PostgreSQL 恢复历史 epoch 2
-              try (PluginCatalogRuntime.Lease historicalLease = restartedRuntime.acquire(2L)) {
-                PluginCatalogSnapshot historicalSnapshot = historicalLease.snapshot();
-                assertEquals(2L, historicalSnapshot.epoch());
-                CanvasFunctionCatalog.RegisteredFunction registered =
-                    historicalSnapshot.canvasFunctionCatalog().require(GPT_IMAGE_FUNCTION);
-                assertTrue(registered.enabled(), "historical epoch 2 had paidEnabled=true");
-
-                // 核心断言：历史 epoch 恢复的实例因持有旧代际凭据引用，调用前被 fence 拦截拒绝出网
-                CanvasFunctionAdapter historicalAdapter = registered.adapter();
-                CanvasFunctionExecutionContext execContext =
-                    mock(CanvasFunctionExecutionContext.class);
-                when(execContext.isRunning()).thenReturn(true);
-                CanvasFunctionFrozenRun historicalRun =
-                    createTestRun(2L, historicalAdapter.functions().get(0), "prompt historical");
-
+                assertTrue(credentialRepository.find(PLUGIN_ID).isEmpty());
                 assertThrows(
-                    CanvasFunctionUnknownException.class,
-                    () -> historicalAdapter.submit(execContext, historicalRun),
-                    "historical epoch instance with stale generation must be fenced before network egress");
-                assertEquals(
-                    0,
-                    requests.size(),
-                    "no HTTP request should reach server from fenced historical instance");
+                    CanvasFunctionUnknownException.class, () -> submit(oldAdapter, "after clear"));
+                try (PluginCatalogRuntime.Lease newLease = runtime.acquire()) {
+                  CanvasFunctionAdapter newAdapter = adapter(newLease);
+                  assertThrows(
+                      CanvasFunctionUnknownException.class, () -> submit(newAdapter, "fresh"));
+                }
               }
-
-              // 3. 租用结束后历史实例释放，当前快照保持最新
-              try (PluginCatalogRuntime.Lease currentLease = restartedRuntime.acquireCurrent()) {
-                assertEquals(3L, currentLease.snapshot().epoch());
-              }
+              assertEquals(1, requests.size(), "only the request before CLEAR reaches the Hub");
             });
   }
 
   /**
-   * 显式只读连接检查的真实 PG 集成：坐标门禁、真实只读 GET 与凭据撤销后的类型化投影。
+   * 显式连接检查只对本节点已应用的修订执行。
    *
-   * <p>权威 epoch 已前进但本节点尚未应用、以及 epoch/revision 与请求不一致都是 409 且零 HTTP；坐标命中后只发出一条只读 GET
-   * /api/resources/dates 并携带当前 scoped 凭据；撤销认证密钥后本地凭据不可用，只投影为 NOT_CHECKED/UNAVAILABLE，
-   * 绝不出网，也绝不把远端故障说成缺少凭据。
+   * <p>已保存但本节点尚未应用、以及修订与请求不一致都是 409 且零 HTTP；修订命中后只发出一条只读 GET /api/resources/dates 并携带当前凭据；撤销密钥后只投影为
+   * NOT_CHECKED/UNAVAILABLE，绝不出网。
    */
   @Test
-  void explicitConnectionCheckHonoursCoordinatesAndReadsOnlyResourceDates() throws IOException {
+  void explicitConnectionCheckHonoursTheAppliedRevision() throws IOException {
     List<RecordedRequest> requests = new CopyOnWriteArrayList<>();
-    HttpServer server = createControlledServer(requests);
-    String baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
-    String apiKey = "synthetic-opencli-check-key-13579";
-    String valuesJson = "{\"enabled\":true,\"baseUrl\":\"" + baseUrl + "\"}";
+    String values =
+        "{\"enabled\":true,\"baseUrl\":\"http://127.0.0.1:"
+            + createControlledServer(requests).getAddress().getPort()
+            + "\"}";
 
     createContextRunner()
         .run(
             context -> {
               PluginCatalogRuntime runtime = context.getBean(PluginCatalogRuntime.class);
               StudioPluginRegistry registry = context.getBean(StudioPluginRegistry.class);
-              PluginConfigurationCommitService commitService =
-                  createPendingCommitService(registry, runtime);
-              PluginManagementService management = createManagementService(registry, runtime);
+              // 只保存、不立即应用：refresh 之前真实存在「已保存但未应用」的窗口。
+              PluginConfigurationService pending =
+                  configurationService(registry, context, () -> {});
+              PluginManagementService management = managementService(registry, runtime, pending);
 
-              commitService.configure(
-                  PLUGIN_ID, 1L, 1L, valuesJson, Map.of("apiKey", PluginSecretPatch.set(apiKey)));
-
-              // 权威 epoch 已到 2 但本节点尚未应用：pending 交付必须 409 且零 HTTP
+              pending.configure(
+                  PLUGIN_ID, 1L, values, Map.of("apiKey", PluginSecretPatch.set("check-key")));
               assertThrows(
                   AiVersionConflictException.class,
-                  () -> management.checkConnection(PLUGIN_ID, 2L, 2L));
-              assertEquals(0, requests.size(), "pending 配置不得触网");
+                  () -> management.checkConnection(PLUGIN_ID, 2L));
 
               runtime.refresh();
-              assertEquals(2L, readEpoch(jdbcClient));
-
-              // 坐标不匹配（旧 epoch / 错误 revision）同样 409 零 HTTP
               assertThrows(
                   AiVersionConflictException.class,
-                  () -> management.checkConnection(PLUGIN_ID, 2L, 1L));
-              assertThrows(
-                  AiVersionConflictException.class,
-                  () -> management.checkConnection(PLUGIN_ID, 1L, 1L));
-              assertEquals(0, requests.size(), "坐标不匹配不得触网");
+                  () -> management.checkConnection(PLUGIN_ID, 1L));
+              assertEquals(
+                  0, requests.size(), "unapplied or mismatched revisions must not reach out");
 
-              // 坐标完全命中：真实只读 GET，携带同一次 scoped 凭据
-              PluginConnectionCheckDTO checked = management.checkConnection(PLUGIN_ID, 2L, 2L);
-              assertEquals(PLUGIN_ID, checked.getPluginId());
-              assertEquals("2", checked.getAppliedEpoch());
+              PluginConnectionCheckDTO checked = management.checkConnection(PLUGIN_ID, 2L);
               assertEquals("2", checked.getAppliedRevision());
               assertEquals(
                   PluginConnectionCheckDTO.Reachability.REACHABLE, checked.getReachability());
               assertEquals(
                   PluginConnectionCheckDTO.Authentication.ACCEPTED, checked.getAuthentication());
-              assertEquals(
-                  PluginConnectionCheckDTO.BrowserSession.UNKNOWN, checked.getBrowserSession());
-              assertEquals(1, requests.size(), "一次检查只发出一条请求");
-              RecordedRequest probe = requests.get(0);
-              assertEquals("GET", probe.method());
-              assertEquals("/api/resources/dates", probe.path());
-              assertEquals("Bearer " + apiKey, probe.authorization());
-              assertTrue(
-                  requests.stream().noneMatch(request -> request.path().contains("/execute")),
-                  "连接检查绝不触发任何生成执行");
+              assertEquals(1, requests.size());
+              assertEquals("GET", requests.get(0).method());
+              assertEquals("/api/resources/dates", requests.get(0).path());
+              assertEquals("Bearer check-key", requests.get(0).authorization());
 
-              // 撤销认证密钥：本地凭据不可用是唯一的 UNAVAILABLE 语义，绝不触网
-              commitService.configure(
-                  PLUGIN_ID, 2L, 2L, valuesJson, Map.of("apiKey", PluginSecretPatch.clear()));
+              pending.configure(PLUGIN_ID, 2L, values, Map.of("apiKey", PluginSecretPatch.clear()));
               runtime.refresh();
-
-              PluginConnectionCheckDTO revoked = management.checkConnection(PLUGIN_ID, 3L, 3L);
+              PluginConnectionCheckDTO revoked = management.checkConnection(PLUGIN_ID, 3L);
               assertEquals(
                   PluginConnectionCheckDTO.Reachability.NOT_CHECKED, revoked.getReachability());
               assertEquals(
                   PluginConnectionCheckDTO.Authentication.UNAVAILABLE, revoked.getAuthentication());
-              assertEquals(
-                  PluginConnectionCheckDTO.BrowserSession.UNKNOWN, revoked.getBrowserSession());
-              assertEquals(1, requests.size(), "撤销认证密钥后不得触网");
+              assertEquals(1, requests.size(), "a revoked key must not reach out");
             });
   }
 
   /**
    * 真实插件与真实管理服务到 HTTP 的共用 golden：GET /api/plugins/opencli 的响应体必须与已提交资源逐值一致。
    *
-   * <p>配置只给出 baseUrl 与 seedance.workspaceId，其余取值由真实 schema 补齐，因此 golden 锁定的就是生产派生文本（默认值与
-   * valuesSchema）； 前端直接消费同一份资源，不再手写镜像。
+   * <p>配置只给出 baseUrl 与 seedance.workspaceId，其余取值由真实 schema 补齐，因此 golden 锁定的就是生产派生文本；前端直接消费同一份资源。
    */
   @Test
   void pluginProjectionMatchesCommittedHttpWireGolden() {
@@ -788,21 +361,18 @@ class OpenCliPluginPostgresIntegrationTest {
             context -> {
               PluginCatalogRuntime runtime = context.getBean(PluginCatalogRuntime.class);
               StudioPluginRegistry registry = context.getBean(StudioPluginRegistry.class);
-              PluginConfigurationCommitService commitService =
-                  createCommitService(registry, runtime);
-              PluginManagementService management = createManagementService(registry, runtime);
+              PluginConfigurationService configuration = configurationService(context, runtime);
+              PluginManagementService management =
+                  managementService(registry, runtime, configuration);
 
-              commitService.configure(
+              configuration.configure(
                   PLUGIN_ID,
-                  1L,
                   1L,
                   "{\"baseUrl\":\"http://127.0.0.1:8080\","
                       + "\"seedance\":{\"workspaceId\":\"workspace-main\"}}",
                   Map.of(
                       "apiKey", PluginSecretPatch.set(HTTP_GOLDEN_API_KEY),
                       "instanceId", PluginSecretPatch.set(HTTP_GOLDEN_INSTANCE_ID)));
-              runtime.refresh();
-              assertEquals(2L, readEpoch(jdbcClient));
 
               assertSame(HTTP_MAPPER, HTTP_CONVERTER.getMapper());
               MockMvc mockMvc =
@@ -810,12 +380,12 @@ class OpenCliPluginPostgresIntegrationTest {
                       .setMessageConverters(HTTP_CONVERTER)
                       .setControllerAdvice(new ResultResponseBodyAdvice())
                       .build();
-
               MockHttpServletResponse response =
                   mockMvc.perform(get("/api/plugins/" + PLUGIN_ID)).andReturn().getResponse();
 
               assertEquals(200, response.getStatus());
               String body = new String(response.getContentAsByteArray(), StandardCharsets.UTF_8);
+              assertFalse(body.contains(HTTP_GOLDEN_API_KEY));
               assertEquals(
                   wireView(goldenText(HTTP_GOLDEN)),
                   wireView(body),
@@ -824,146 +394,76 @@ class OpenCliPluginPostgresIntegrationTest {
   }
 
   /**
-   * 私有身份与认证密钥同为受保护秘密：只有 instanceId 不得显示 CONNECTED，取值不进入普通配置/历史/投影，并且执行请求只从同次 scoped snapshot 取用两者。
-   *
-   * <p>覆盖三段状态：只录入私有身份（NOT_CONNECTED 但仍以秘密落库）、补齐认证密钥（CONNECTED 且出网携带两者）、仅撤销认证密钥而保留私有身份 （回到
-   * NOT_CONNECTED 且出网前 fail closed）。
+   * 私有身份与认证密钥同为受保护秘密：只有 instanceId 时不得显示 CONNECTED，取值不进入普通配置与投影；执行请求从同一次凭据读取两者；只撤销认证密钥后回到
+   * NOT_CONNECTED 且出网前 fail closed。
    */
   @Test
   void privateIdentityIsAProtectedSecretAndNeverReportsConnectedOnItsOwn() throws IOException {
     List<RecordedRequest> requests = new CopyOnWriteArrayList<>();
-    HttpServer server = createControlledServer(requests);
-    String baseUrl = "http://127.0.0.1:" + server.getAddress().getPort();
+    String values = enabledValues(createControlledServer(requests));
     String privateIdentity = "private-instance-identity";
-    String apiKey = "synthetic-opencli-key-24680";
-    String valuesJson =
-        "{\"enabled\":true,\"baseUrl\":\"" + baseUrl + "\",\"gptImage2\":{\"paidEnabled\":true}}";
 
     createContextRunner()
         .run(
             context -> {
               PluginCatalogRuntime runtime = context.getBean(PluginCatalogRuntime.class);
               StudioPluginRegistry registry = context.getBean(StudioPluginRegistry.class);
-              PluginConfigurationCommitService commitService =
-                  createCommitService(registry, runtime);
-              PluginManagementService management = createManagementService(registry, runtime);
+              PluginConfigurationService configuration = configurationService(context, runtime);
+              PluginManagementService management =
+                  managementService(registry, runtime, configuration);
 
-              // 1. 只录入私有身份：凭据行存在且可解密，但没有任何可用认证
-              commitService.configure(
+              configuration.configure(
                   PLUGIN_ID,
                   1L,
-                  1L,
-                  valuesJson,
+                  values,
                   Map.of("instanceId", PluginSecretPatch.set(privateIdentity)));
-              runtime.refresh();
-
-              PluginCredentialRow row =
-                  credentialRepository
-                      .find(PLUGIN_ID)
-                      .orElseThrow(() -> new AssertionError("private identity must be stored"));
-              assertFalse(
-                  containsBytes(
-                      row.encryptedPayload(), privateIdentity.getBytes(StandardCharsets.UTF_8)),
-                  "plaintext private identity must not exist in database");
-
               PluginDTO privateOnly = management.getPlugin(PLUGIN_ID);
-              assertEquals(
-                  PluginCredentialStatus.NOT_CONNECTED.name(),
-                  privateOnly.getStatus(),
-                  "只有私有身份时不得显示认证 CONNECTED");
+              assertEquals(PluginCredentialStatus.NOT_CONNECTED.name(), privateOnly.getStatus());
+              PluginConfigurationDTO projected = privateOnly.getConfiguration();
+              assertFalse(projected.getValuesJson().contains(privateIdentity));
+              assertTrue(projected.getSecrets().get("instanceId").isConfigured());
+              assertFalse(projected.getSecrets().get("apiKey").isConfigured());
 
-              PluginConfigurationDTO configuration = privateOnly.getConfiguration();
-              assertFalse(configuration.getValuesJson().contains(privateIdentity));
-              assertTrue(configuration.getSecrets().get("instanceId").isConfigured());
-              assertFalse(configuration.getSecrets().get("apiKey").isConfigured());
-
-              PluginConfigurationRow privateHistory =
-                  configurationRepository.readConfiguration(PLUGIN_ID, 2L).orElseThrow();
-              assertEquals(List.of("instanceId"), privateHistory.configuredSecretFields());
-              assertFalse(privateHistory.valuesJson().contains(privateIdentity));
-
-              String resolved =
-                  credentialStore
-                      .resolve(
-                          new PluginCredentialReference(
-                              PLUGIN_ID, row.authGeneration(), row.contextFingerprint()))
-                      .payloadJson();
-              assertEquals("{\"instanceId\":\"" + privateIdentity + "\"}", resolved);
-
-              // 2. 补齐认证密钥：状态变为 CONNECTED，出网同时携带同一 snapshot 的 Bearer 与私有身份
-              commitService.configure(
-                  PLUGIN_ID, 2L, 2L, valuesJson, Map.of("apiKey", PluginSecretPatch.set(apiKey)));
-              runtime.refresh();
-
+              configuration.configure(
+                  PLUGIN_ID, 2L, values, Map.of("apiKey", PluginSecretPatch.set("key-1")));
               assertEquals(
                   PluginCredentialStatus.CONNECTED.name(),
                   management.getPlugin(PLUGIN_ID).getStatus());
-
-              CanvasFunctionExecutionContext execContext =
-                  mock(CanvasFunctionExecutionContext.class);
-              when(execContext.isRunning()).thenReturn(true);
-              try (PluginCatalogRuntime.Lease lease = runtime.acquireCurrent()) {
-                CanvasFunctionAdapter adapter =
-                    lease.snapshot().canvasFunctionCatalog().require(GPT_IMAGE_FUNCTION).adapter();
-                adapter.submit(
-                    execContext,
-                    createTestRun(3L, adapter.functions().get(0), "generate portrait"));
+              try (PluginCatalogRuntime.Lease lease = runtime.acquire()) {
+                submit(adapter(lease), "generate portrait");
               }
-
               assertEquals(1, requests.size());
-              assertEquals("Bearer " + apiKey, requests.get(0).authorization());
+              assertEquals("Bearer key-1", requests.get(0).authorization());
               assertTrue(
-                  requests.get(0).body().contains("\"instanceId\":\"" + privateIdentity + "\""),
-                  "执行请求必须携带同次 snapshot 的私有身份");
+                  requests.get(0).body().contains("\"instanceId\":\"" + privateIdentity + "\""));
 
-              // 3. 只撤销认证密钥、保留私有身份：不得回到 CONNECTED，且新旧实例都 fail closed 不出网
-              try (PluginCatalogRuntime.Lease staleLease = runtime.acquireCurrent()) {
-                CanvasFunctionAdapter staleAdapter =
-                    staleLease
-                        .snapshot()
-                        .canvasFunctionCatalog()
-                        .require(GPT_IMAGE_FUNCTION)
-                        .adapter();
-
-                commitService.configure(
-                    PLUGIN_ID, 3L, 3L, valuesJson, Map.of("apiKey", PluginSecretPatch.clear()));
-                runtime.refresh();
-
-                assertTrue(credentialRepository.find(PLUGIN_ID).isPresent(), "保留的私有身份仍是受保护秘密行");
-                PluginConfigurationRow partialHistory =
-                    configurationRepository.readConfiguration(PLUGIN_ID, 4L).orElseThrow();
-                assertEquals(List.of("instanceId"), partialHistory.configuredSecretFields());
-                assertEquals(
-                    PluginCredentialStatus.NOT_CONNECTED.name(),
-                    management.getPlugin(PLUGIN_ID).getStatus(),
-                    "撤销认证密钥后只凭私有身份不得显示 CONNECTED");
-
+              configuration.configure(
+                  PLUGIN_ID, 3L, values, Map.of("apiKey", PluginSecretPatch.clear()));
+              assertTrue(credentialRepository.find(PLUGIN_ID).isPresent());
+              assertEquals(
+                  PluginCredentialStatus.NOT_CONNECTED.name(),
+                  management.getPlugin(PLUGIN_ID).getStatus());
+              try (PluginCatalogRuntime.Lease lease = runtime.acquire()) {
+                CanvasFunctionAdapter adapter = adapter(lease);
                 assertThrows(
-                    CanvasFunctionUnknownException.class,
-                    () ->
-                        staleAdapter.submit(
-                            execContext,
-                            createTestRun(3L, staleAdapter.functions().get(0), "stale prompt")),
-                    "撤销认证密钥后旧实例必须 fail closed");
-
-                try (PluginCatalogRuntime.Lease freshLease = runtime.acquireCurrent()) {
-                  CanvasFunctionAdapter freshAdapter =
-                      freshLease
-                          .snapshot()
-                          .canvasFunctionCatalog()
-                          .require(GPT_IMAGE_FUNCTION)
-                          .adapter();
-                  assertThrows(
-                      CanvasFunctionUnknownException.class,
-                      () ->
-                          freshAdapter.submit(
-                              execContext,
-                              createTestRun(4L, freshAdapter.functions().get(0), "fresh prompt")),
-                      "缺少认证密钥的载荷必须在出网前被拒绝");
-                }
+                    CanvasFunctionUnknownException.class, () -> submit(adapter, "no api key"));
               }
-              assertEquals(1, requests.size(), "撤销认证密钥后不得再有请求到达 Hub");
+              assertEquals(1, requests.size(), "no request may reach the Hub without an api key");
             });
+  }
+
+  private static String enabledValues(HttpServer server) {
+    return "{\"enabled\":true,\"baseUrl\":\"http://127.0.0.1:"
+        + server.getAddress().getPort()
+        + "\",\"gptImage2\":{\"paidEnabled\":true}}";
+  }
+
+  private static CanvasFunctionAdapter adapter(PluginCatalogRuntime.Lease lease) {
+    return lease.snapshot().canvasFunctionCatalog().require(GPT_IMAGE_FUNCTION).adapter();
+  }
+
+  private void submit(CanvasFunctionAdapter adapter, String prompt) {
+    adapter.submit(execContext, createTestRun(adapter.functions().get(0), prompt));
   }
 
   /**
@@ -1058,122 +558,70 @@ class OpenCliPluginPostgresIntegrationTest {
     return new ApplicationContextRunner()
         .withUserConfiguration(PluginCatalogConfiguration.class, RegistryConfiguration.class)
         .withConfiguration(AutoConfigurations.of(openCliConfigClass))
-        // PluginCatalogRuntime 显式依赖 systemProxySelector：隔离组合根提供直接连接的合法 selector 依赖，
-        // 不安装 JVM 全局代理，保持与其他测试的全局代理隔离。
+        // 隔离组合根提供直连的 selector 依赖，不安装 JVM 全局代理。
         .withBean(
             "systemProxySelector", ProxySelector.class, () -> HttpProxySelector.fixed(null, ""))
-        .withBean(PluginCredentialStore.class, () -> credentialStore)
-        .withBean(PluginConfigurationRepository.class, () -> configurationRepository)
-        .withBean(PlatformTransactionManager.class, () -> transactionManager);
+        .withBean(
+            PluginContextFactory.class,
+            () -> new PluginContextFactory(credentialStore, () -> null, () -> null, () -> null))
+        .withBean(PluginConfigurationRepository.class, () -> configurationRepository);
   }
 
-  private PluginManagementService createManagementService(
-      StudioPluginRegistry registry, PluginCatalogRuntime runtime) {
+  /** 与生产一致的写入口；提交后立即在本节点应用，使断言不依赖后台对账。 */
+  private PluginConfigurationService configurationService(
+      ApplicationContext context, PluginCatalogRuntime runtime) {
+    return configurationService(
+        context.getBean(StudioPluginRegistry.class), context, runtime::refresh);
+  }
+
+  private PluginConfigurationService configurationService(
+      StudioPluginRegistry registry, ApplicationContext context, Runnable catalogChanged) {
+    return new PluginConfigurationService(
+        registry,
+        configurationRepository,
+        credentialRepository,
+        context.getBean(PluginContextFactory.class),
+        new PluginAgentDependencies(
+            registry, configurationRepository, mock(AgentDefinitionRepository.class)),
+        transactionManager,
+        catalogChanged,
+        () -> {});
+  }
+
+  private PluginManagementService managementService(
+      StudioPluginRegistry registry,
+      PluginCatalogRuntime runtime,
+      PluginConfigurationService configuration) {
     return new PluginManagementService(
         registry,
         () -> runtime,
         configurationRepository,
-        credentialStore,
-        createCommitService(registry, runtime),
+        credentialRepository,
+        configuration,
         mock(PluginAuthAttemptRepository.class),
         Duration.ofMinutes(5),
         Clock.systemUTC());
   }
 
-  private PluginConfigurationCommitService createCommitService(
-      StudioPluginRegistry registry, PluginCatalogRuntime runtime) {
-    return new PluginConfigurationCommitService(
-        registry,
-        configurationRepository,
-        credentialRepository,
-        codec,
-        keyLoader,
-        new PluginContextFactory(credentialStore, () -> null, () -> null, () -> null),
-        List::of,
-        List::of,
-        transactionManager,
-        Clock.systemUTC(),
-        () -> {},
-        runtime::refresh,
-        pluginAgentDependencies(registry));
-  }
-
-  /** 提交后只请求对账、不立即应用的提交服务：生产里提交只唤醒本节点对账，因此在 refresh 之前真实存在「已提交但未应用」的 pending 窗口。 */
-  private PluginConfigurationCommitService createPendingCommitService(
-      StudioPluginRegistry registry, PluginCatalogRuntime runtime) {
-    return new PluginConfigurationCommitService(
-        registry,
-        configurationRepository,
-        credentialRepository,
-        codec,
-        keyLoader,
-        new PluginContextFactory(credentialStore, () -> null, () -> null, () -> null),
-        List::of,
-        List::of,
-        transactionManager,
-        Clock.systemUTC(),
-        () -> {},
-        () -> {},
-        pluginAgentDependencies(registry));
-  }
-
-  /** 宿主依赖服务：OpenCLI 插件不声明 Agent 依赖，定义仓库替身不会被调用；声明解析仍走真实实现。 */
-  private PluginAgentDependencies pluginAgentDependencies(StudioPluginRegistry registry) {
-    return new PluginAgentDependencies(
-        registry, configurationRepository, mock(AgentDefinitionRepository.class));
-  }
-
   private static CanvasFunctionFrozenRun createTestRun(
-      long epoch, CanvasFunctionDefinition definition, String prompt) {
+      CanvasFunctionDefinition definition, String prompt) {
     CanvasFunctionOutputSpec spec = definition.outputs().get(0);
     CanvasFunctionFrozenOutput output =
         new CanvasFunctionFrozenOutput(
             UUID.randomUUID(), 0, spec.kind(), spec.resolveName("output"));
-    CanvasFunctionBinding binding = new CanvasFunctionBinding(epoch, definition, null);
     JsonObject args = new JsonObject(Map.of("prompt", new JsonText(prompt)));
     return new CanvasFunctionFrozenRun(
         UUID.randomUUID(),
         UUID.randomUUID(),
         "output",
         UUID.randomUUID(),
-        binding,
+        new CanvasFunctionBinding(definition),
         args,
         List.of(),
         List.of(output),
         CanvasFunctionSubmitState.PENDING,
         "INITIAL",
         Map.of());
-  }
-
-  private static long readEpoch(JdbcClient jdbc) {
-    return jdbc.sql("select epoch from plugin_catalog_state where id = 1")
-        .query(Long.class)
-        .single();
-  }
-
-  private static int countConfigurationRevisions(JdbcClient jdbc) {
-    return jdbc.sql("select count(*) from plugin_configuration_revision")
-        .query(Integer.class)
-        .single();
-  }
-
-  private static boolean containsBytes(byte[] source, byte[] target) {
-    if (source == null || target == null || target.length == 0 || source.length < target.length) {
-      return false;
-    }
-    for (int i = 0; i <= source.length - target.length; i++) {
-      boolean match = true;
-      for (int j = 0; j < target.length; j++) {
-        if (source[i + j] != target[j]) {
-          match = false;
-          break;
-        }
-      }
-      if (match) {
-        return true;
-      }
-    }
-    return false;
   }
 
   private record RecordedRequest(String method, String path, String authorization, String body) {}

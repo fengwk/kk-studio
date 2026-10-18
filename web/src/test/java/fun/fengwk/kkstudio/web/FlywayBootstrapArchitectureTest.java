@@ -41,25 +41,6 @@ class FlywayBootstrapArchitectureTest {
   /** schema 模块测试资源目录：除唯一探针外不允许再引入任何其它 SQL。 */
   private static final String SCHEMA_TEST_SQL_PREFIX = "schema/src/test/";
 
-  /**
-   * 升级测试自己的固定 SQL 夹具：三份与 Git blob 逐字节一致的冻结源 V1 DDL（旧 DEV、旧 MAIN 与 Java 1.1.0），以及四份业务/拷贝探针脚本。
-   *
-   * <p>它们只允许出现在这个固定的升级 test fixture 目录，既不是第二份 DDL，也不属于任何生产引导路径；任何新增 SQL 都必须同时更新本清单。
-   */
-  private static final List<String> UPGRADE_TEST_SQL_FIXTURES =
-      List.of(
-          "web/src/test/resources/fun/fengwk/kkstudio/web/upgrade/legacy-reference-data-business.sql",
-          "web/src/test/resources/fun/fengwk/kkstudio/web/upgrade/legacy-reference-data-project.sql",
-          "web/src/test/resources/fun/fengwk/kkstudio/web/upgrade/legacy-table-copy-probe-schema.sql",
-          "web/src/test/resources/fun/fengwk/kkstudio/web/upgrade/legacy-table-copy-probe-target.sql",
-          "web/src/test/resources/fun/fengwk/kkstudio/web/upgrade/source/dev/V1__schema.sql",
-          "web/src/test/resources/fun/fengwk/kkstudio/web/upgrade/source/java-v1.1.0/V1__schema.sql",
-          "web/src/test/resources/fun/fengwk/kkstudio/web/upgrade/source/main/V1__schema.sql");
-
-  /** 升级测试 SQL 夹具的唯一允许目录前缀。 */
-  private static final String UPGRADE_TEST_SQL_PREFIX =
-      "web/src/test/resources/fun/fengwk/kkstudio/web/upgrade/";
-
   private static final Pattern VERSIONED_MIGRATION =
       Pattern.compile("^V(?<version>\\d+)__(?<description>[A-Za-z0-9_]+)\\.sql$");
   private static final Pattern REPEATABLE_SEED = Pattern.compile("^R__[a-z0-9_]+\\.sql$");
@@ -95,15 +76,8 @@ class FlywayBootstrapArchitectureTest {
         repositorySqlFiles.stream().filter(path -> !path.startsWith(MIGRATION_DIR + "/")).toList();
     List<String> testFixtureSqlFiles =
         otherSqlFiles.stream().filter(path -> path.startsWith(SCHEMA_TEST_SQL_PREFIX)).toList();
-    List<String> upgradeFixtureSqlFiles =
-        otherSqlFiles.stream().filter(path -> path.startsWith(UPGRADE_TEST_SQL_PREFIX)).toList();
     List<String> seedSqlFiles =
-        otherSqlFiles.stream()
-            .filter(
-                path ->
-                    !path.startsWith(SCHEMA_TEST_SQL_PREFIX)
-                        && !path.startsWith(UPGRADE_TEST_SQL_PREFIX))
-            .toList();
+        otherSqlFiles.stream().filter(path -> !path.startsWith(SCHEMA_TEST_SQL_PREFIX)).toList();
 
     assertEquals(
         List.of(BASELINE_MIGRATION),
@@ -120,10 +94,6 @@ class FlywayBootstrapArchitectureTest {
         List.of(SCHEMA_TEST_PROBE),
         testFixtureSqlFiles,
         "schema test SQL is limited to the single fresh-install contract probe fixture");
-    assertEquals(
-        UPGRADE_TEST_SQL_FIXTURES,
-        upgradeFixtureSqlFiles,
-        "upgrade test SQL is limited to the three frozen source baselines and the four business/copy probes");
     assertEquals(
         SEED_RESOURCES,
         seedSqlFiles,
@@ -145,29 +115,6 @@ class FlywayBootstrapArchitectureTest {
       assertFalse(
           text.contains("fresh-install-probes"),
           () -> config + " must not reference the schema test-only SQL probe fixture");
-    }
-  }
-
-  /** 升级测试的 SQL 夹具同样只能被升级测试自己执行：任何 bootstrap 配置都不得引用目录或具体脚本。 */
-  @Test
-  void upgradeTestSqlFixturesAreNeverReferencedByBootstrap() throws IOException {
-    Path root = repositoryRoot();
-    for (String config : BOOTSTRAP_CONFIGS) {
-      String text = Files.readString(root.resolve(config), StandardCharsets.UTF_8);
-      assertFalse(
-          text.contains(UPGRADE_TEST_SQL_PREFIX),
-          () -> config + " must not reference the upgrade test-only SQL fixture directory");
-      for (String fixture : UPGRADE_TEST_SQL_FIXTURES) {
-        assertFalse(
-            text.contains(fixture),
-            () -> config + " must not reference the upgrade test-only SQL fixture " + fixture);
-        String filename = Path.of(fixture).getFileName().toString();
-        if (!BASELINE_MIGRATION.endsWith(filename)) {
-          assertFalse(
-              text.contains(filename),
-              () -> config + " must not reference the upgrade test-only SQL fixture " + filename);
-        }
-      }
     }
   }
 

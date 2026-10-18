@@ -1153,7 +1153,6 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
             Set.of("questions"),
             false);
     return new ToolBinding(
-        1L,
         new AgentToolDefinition(
             new ToolDescriptor(
                 "ask_user",
@@ -1166,13 +1165,11 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
         new ContributorBinding("builtin", "ask-user", List.of()),
         EnvironmentSupport.NONE,
         null,
-        null,
         null);
   }
 
   private static ToolBinding bashBinding() {
     return new ToolBinding(
-        1L,
         new AgentToolDefinition(
             new ToolDescriptor(
                 "bash",
@@ -1185,13 +1182,11 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
         new ContributorBinding("core", "bash", List.of()),
         EnvironmentSupport.NONE,
         null,
-        null,
         null);
   }
 
   private static ModelRequestSpec requestSpec(ToolBinding binding) {
     return new ModelRequestSpec(
-        1L,
         ProviderType.OPENAI,
         new UUID(0L, 1L),
         modelDescriptor(),

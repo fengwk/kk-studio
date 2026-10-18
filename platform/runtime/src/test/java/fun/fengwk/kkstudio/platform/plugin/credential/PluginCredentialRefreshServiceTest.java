@@ -1,14 +1,20 @@
 package fun.fengwk.kkstudio.platform.plugin.credential;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
+import fun.fengwk.kkstudio.platform.plugin.PluginAuthHandler;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthRejectedException;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
@@ -23,1071 +29,199 @@ import fun.fengwk.kkstudio.platform.plugin.PluginProperties;
 import fun.fengwk.kkstudio.platform.plugin.PluginRenewalNotSentException;
 import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
 import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
+import fun.fengwk.kkstudio.platform.plugin.persistence.PluginCredentialRepository;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginCredentialRow;
-import fun.fengwk.kkstudio.platform.plugin.testing.InMemoryPluginCredentialRepository;
 import fun.fengwk.kkstudio.platform.plugin.testing.TestPluginFixtures;
 
-import javax.crypto.SecretKey;
-
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.ZoneId;
 import java.time.ZoneOffset;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
-import java.util.UUID;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 
-/**
- * Plugin 凭据自动刷新服务测试。
- *
- * <p>覆盖刷新编排的核心契约：只领取已安装 Plugin 的行、刷新成功原子替换密文与时间、认证拒绝转为 REAUTH_REQUIRED、
- * 未发出异常（PluginRenewalNotSentException）延迟重试、未知异常收敛为 REFRESH_UNCERTAIN 并永久阻断、 过期 lease 自动收敛、CAS
- * 围栏防并发覆写、有界去敏错误摘要以及批次上限语义。
- */
+/** {@link PluginCredentialRefreshService} 按类型化结果终结刷新，并以租约与版本防止迟到覆盖。 */
 class PluginCredentialRefreshServiceTest {
 
-  /** 本测试使用的固定认证代际与上下文指纹：仓库/CAS 断言只要求同代际同上下文内一致。 */
-  private static final UUID AUTH_GENERATION =
-      UUID.fromString("00000000-0000-0000-0000-0000000000b1");
+  private static final String PLUGIN_ID = "deeplink.plugin";
+  private static final Instant NOW = Instant.parse("2026-10-01T12:00:00Z");
+  private static final String OLD_PAYLOAD = "{\"token\":\"old\"}";
+  private static final String NEW_PAYLOAD = "{\"token\":\"new\"}";
 
-  private static final String AUTH_CONTEXT = "a1".repeat(32);
+  private final PluginCredentialRepository repository = mock(PluginCredentialRepository.class);
+  private final PluginProperties properties = new PluginProperties();
+  private PluginCredentialRefresher refresher;
 
-  @TempDir Path tempDir;
-
-  private static final String PLUGIN_ID = "test-plugin";
-  private static final String REGION = "CN";
-  private static final String OLD_PAYLOAD = "{\"token\":\"old-token-12345\"}";
-  private static final String NEW_PAYLOAD = "{\"token\":\"new-token-67890\"}";
-
-  private final Instant baseTime = Instant.parse("2026-09-21T12:00:00Z");
-  private MutableClock clock;
-  private InMemoryPluginCredentialRepository repository;
-  private PluginCredentialCodec codec;
-  private PluginCredentialKeyLoader keyLoader;
-  private PluginProperties properties;
-
-  @BeforeEach
-  void setUp() throws IOException {
-    clock = new MutableClock(baseTime);
-    repository = new InMemoryPluginCredentialRepository();
-    codec = new PluginCredentialCodec();
-
-    Path keyFile = tempDir.resolve("master-refresh.key");
-    byte[] keyBytes = "12345678901234567890123456789012".getBytes(StandardCharsets.UTF_8);
-    Files.write(keyFile, keyBytes);
-    Files.setPosixFilePermissions(keyFile, PosixFilePermissions.fromString("rw-------"));
-
-    keyLoader = new PluginCredentialKeyLoader(keyFile.toAbsolutePath().toString());
-    properties = new PluginProperties();
-    properties.getRefresh().setPollDelay(Duration.ofMinutes(10));
-    properties.getRefresh().setLeaseDuration(Duration.ofMinutes(2));
-  }
-
-  private PluginCredentialRow createRow(
-      String pluginId,
-      String region,
-      String payload,
-      PluginCredentialStatus status,
-      Instant expiresAt,
-      Instant nextRefreshAt) {
-    SecretKey key = keyLoader.load().orElseThrow();
-    byte[] encrypted = codec.encrypt(key, pluginId, AUTH_GENERATION, AUTH_CONTEXT, region, payload);
-    return new PluginCredentialRow(
-        pluginId,
-        AUTH_GENERATION,
-        AUTH_CONTEXT,
-        encrypted,
-        region,
-        expiresAt,
-        nextRefreshAt,
-        status,
-        null,
-        null,
-        null,
-        null,
-        0L,
-        clock.instant(),
-        clock.instant());
-  }
-
-  private TestStudioPlugin createPlugin(
-      String pluginId, String region, PluginCredentialRefresher refresher) {
-    PluginDescriptor descriptor = new PluginDescriptor(pluginId, "Plugin " + pluginId, "1.0");
-    return new TestStudioPlugin(
-        descriptor, new PluginAuthSpec.DeepLink(List.of(region)), refresher);
-  }
-
-  /** 只领取已安装 Plugin 的行：未安装 Plugin 的到期行不被 claim，后续仍保持 dormant（status/version/lease 不变）。 */
+  /** 没有可刷新 Plugin 时不访问数据库。 */
   @Test
-  void dormantRowsOfUninstalledPluginsAreNotClaimed() {
-    PluginCredentialRow dormantRow =
-        createRow(
-            "uninstalled-plugin",
-            REGION,
-            OLD_PAYLOAD,
-            PluginCredentialStatus.CONNECTED,
-            clock.instant().plusSeconds(3600),
-            clock.instant().minusSeconds(10));
-    repository.setDirect(dormantRow);
-
-    TestStudioPlugin installedPlugin =
-        createPlugin(
-            PLUGIN_ID,
-            REGION,
-            snapshot ->
-                new PluginCredentialMaterial(
-                    REGION,
-                    clock.instant().plusSeconds(3600),
-                    clock.instant().plusSeconds(1800),
-                    NEW_PAYLOAD));
-    StudioPluginRegistry registry = new StudioPluginRegistry(List.of(installedPlugin));
-
+  void skipsTheDatabaseWhenNoPluginRefreshes() {
     PluginCredentialRefreshService service =
         new PluginCredentialRefreshService(
-            registry, repository, codec, keyLoader, properties, clock);
+            new StudioPluginRegistry(List.of()), repository, properties, clock());
 
-    int claimed = service.refreshOnce();
-    assertEquals(0, claimed, "uninstalled plugin row must not be claimed");
-
-    PluginCredentialRow current = repository.getDirect("uninstalled-plugin");
-    assertEquals(PluginCredentialStatus.CONNECTED, current.status());
-    assertEquals(0L, current.version());
-    assertNull(current.refreshLeaseToken());
-  }
-
-  /**
-   * 成功流程：claim 后 refresher 只被调用一次，行被 finalizeSuccess 终结（新密文可解出新材料、 status=CONNECTED、lease
-   * 清空、version 前进、last_refreshed_at/next_refresh_at/replaced payload 正确）； 下一次扫描由于 next_refresh_at
-   * 在未来而不再被 claim。
-   */
-  @Test
-  void refreshSuccessReplacesPayloadAdvancesVersionAndClearsLease() {
-    AtomicInteger callCount = new AtomicInteger(0);
-    Instant newExpiresAt = clock.instant().plusSeconds(7200);
-    Instant newNextRefresh = clock.instant().plusSeconds(3600);
-
-    TestStudioPlugin plugin =
-        createPlugin(
-            PLUGIN_ID,
-            REGION,
-            snapshot -> {
-              callCount.incrementAndGet();
-              assertEquals(OLD_PAYLOAD, snapshot.payloadJson());
-              assertEquals(AUTH_GENERATION, snapshot.authGeneration());
-              return new PluginCredentialMaterial(
-                  REGION, newExpiresAt, newNextRefresh, NEW_PAYLOAD);
-            });
-    StudioPluginRegistry registry = new StudioPluginRegistry(List.of(plugin));
-
-    PluginCredentialRow initialRow =
-        createRow(
-            PLUGIN_ID,
-            REGION,
-            OLD_PAYLOAD,
-            PluginCredentialStatus.CONNECTED,
-            clock.instant().plusSeconds(3600),
-            clock.instant().minusSeconds(10));
-    repository.setDirect(initialRow);
-
-    PluginCredentialRefreshService service =
-        new PluginCredentialRefreshService(
-            registry, repository, codec, keyLoader, properties, clock);
-
-    int claimed = service.refreshOnce();
-    assertEquals(1, claimed);
-    assertEquals(1, callCount.get(), "refresher must be called exactly once");
-
-    PluginCredentialRow updated = repository.getDirect(PLUGIN_ID);
-    assertEquals(PluginCredentialStatus.CONNECTED, updated.status());
-    assertEquals(initialRow.authGeneration(), updated.authGeneration());
-    assertNull(updated.refreshLeaseToken());
-    assertNull(updated.refreshLeaseUntil());
-    assertEquals(
-        2L, updated.version(), "version advances from claim (+1) and finalizeSuccess (+1)");
-    assertEquals(clock.instant(), updated.lastRefreshedAt());
-    assertEquals(newNextRefresh, updated.nextRefreshAt());
-    assertNull(updated.lastRefreshError());
-
-    // 验证新密文解密出新载荷
-    SecretKey key = keyLoader.load().orElseThrow();
-    String decrypted =
-        codec.decrypt(
-            key, PLUGIN_ID, AUTH_GENERATION, AUTH_CONTEXT, REGION, updated.encryptedPayload());
-    assertEquals(NEW_PAYLOAD, decrypted);
-
-    // 下一次扫描该行不再被 claim
-    int secondScanClaimed = service.refreshOnce();
-    assertEquals(
-        0,
-        secondScanClaimed,
-        "due row must not be claimed again when next_refresh_at is in future");
-    assertEquals(1, callCount.get(), "refresher must not be called again");
-  }
-
-  /**
-   * 认证拒绝（PluginAuthRejectedException）：转为 REAUTH_REQUIRED，next_refresh_at 保持原值， lease
-   * 清空，错误摘要来自异常消息且去敏有界。
-   */
-  @Test
-  void authRejectionTransitionsToReauthRequiredAndPreservesNextRefreshAt() {
-    Instant originalRefreshAt = clock.instant().minusSeconds(10);
-    PluginCredentialRow initialRow =
-        createRow(
-            PLUGIN_ID,
-            REGION,
-            OLD_PAYLOAD,
-            PluginCredentialStatus.CONNECTED,
-            clock.instant().plusSeconds(3600),
-            originalRefreshAt);
-    repository.setDirect(initialRow);
-
-    TestStudioPlugin plugin =
-        createPlugin(
-            PLUGIN_ID,
-            REGION,
-            snapshot -> {
-              throw new PluginAuthRejectedException(
-                  "token_revoked: refresh token expired\r\nserver rejected");
-            });
-    StudioPluginRegistry registry = new StudioPluginRegistry(List.of(plugin));
-
-    PluginCredentialRefreshService service =
-        new PluginCredentialRefreshService(
-            registry, repository, codec, keyLoader, properties, clock);
-
-    int claimed = service.refreshOnce();
-    assertEquals(1, claimed);
-
-    PluginCredentialRow row = repository.getDirect(PLUGIN_ID);
-    assertEquals(PluginCredentialStatus.REAUTH_REQUIRED, row.status());
-    assertNull(row.refreshLeaseToken());
-    assertEquals(originalRefreshAt, row.nextRefreshAt(), "next_refresh_at must be preserved");
-    assertTrue(
-        row.lastRefreshError().contains("token_revoked: refresh token expired  server rejected"));
-  }
-
-  /**
-   * 可证明未发出（PluginRenewalNotSentException）：收敛为 REFRESH_FAILED， next_refresh_at = now + pollDelay；当
-   * pollDelay 到达后再次扫描会重试并调用 refresher。
-   */
-  @Test
-  void definitelyNotSentTransitionsToRefreshFailedAndRetriesAfterPollDelay() {
-    AtomicInteger callCount = new AtomicInteger(0);
-    PluginCredentialRow initialRow =
-        createRow(
-            PLUGIN_ID,
-            REGION,
-            OLD_PAYLOAD,
-            PluginCredentialStatus.CONNECTED,
-            clock.instant().plusSeconds(3600),
-            clock.instant().minusSeconds(10));
-    repository.setDirect(initialRow);
-
-    TestStudioPlugin plugin =
-        createPlugin(
-            PLUGIN_ID,
-            REGION,
-            snapshot -> {
-              int count = callCount.incrementAndGet();
-              if (count == 1) {
-                throw new PluginRenewalNotSentException(
-                    "local signature failed before network connect");
-              }
-              return new PluginCredentialMaterial(
-                  REGION,
-                  clock.instant().plusSeconds(3600),
-                  clock.instant().plusSeconds(1800),
-                  NEW_PAYLOAD);
-            });
-    StudioPluginRegistry registry = new StudioPluginRegistry(List.of(plugin));
-
-    PluginCredentialRefreshService service =
-        new PluginCredentialRefreshService(
-            registry, repository, codec, keyLoader, properties, clock);
-
-    // 第一次扫描：抛出 PluginRenewalNotSentException
-    int claimed1 = service.refreshOnce();
-    assertEquals(1, claimed1);
-    assertEquals(1, callCount.get());
-
-    PluginCredentialRow rowAfterFail = repository.getDirect(PLUGIN_ID);
-    assertEquals(PluginCredentialStatus.REFRESH_FAILED, rowAfterFail.status());
-    assertNull(rowAfterFail.refreshLeaseToken());
-    assertEquals(
-        clock.instant().plus(properties.getRefresh().getPollDelay()), rowAfterFail.nextRefreshAt());
-    assertTrue(
-        rowAfterFail.lastRefreshError().contains("local signature failed before network connect"));
-
-    // 时间尚未到达 pollDelay 时再次扫描，不被 claim
     assertEquals(0, service.refreshOnce());
-    assertEquals(1, callCount.get());
-
-    // 推进时钟到达 pollDelay
-    clock.advance(properties.getRefresh().getPollDelay());
-
-    // 第二次扫描：应重试并成功
-    int claimed2 = service.refreshOnce();
-    assertEquals(1, claimed2);
-    assertEquals(2, callCount.get());
-
-    PluginCredentialRow rowAfterRetry = repository.getDirect(PLUGIN_ID);
-    assertEquals(PluginCredentialStatus.CONNECTED, rowAfterRetry.status());
-    assertNull(rowAfterRetry.lastRefreshError());
+    assertEquals(Optional.empty(), service.earliestRefreshAt());
+    verifyNoInteractions(repository);
   }
 
-  /** 结果未知（普通 RuntimeException）：转为 REFRESH_UNCERTAIN，且此后永不再 claim、refresher 永不再被调用。 */
+  /** 成功刷新以租约和版本 CAS 替换凭据；没有到期行时结束扫描。 */
   @Test
-  void uncertainOutcomeTransitionsToRefreshUncertainAndNeverClaimsAgain() {
-    AtomicInteger callCount = new AtomicInteger(0);
-    PluginCredentialRow initialRow =
-        createRow(
-            PLUGIN_ID,
-            REGION,
-            OLD_PAYLOAD,
-            PluginCredentialStatus.CONNECTED,
-            clock.instant().plusSeconds(3600),
-            clock.instant().minusSeconds(10));
-    repository.setDirect(initialRow);
+  void successReplacesTheCredential() {
+    PluginCredentialMaterial material =
+        new PluginCredentialMaterial(
+            "CN", NOW.plusSeconds(3600), NOW.plusSeconds(1800), NEW_PAYLOAD);
+    refresher = snapshot -> material;
+    PluginCredentialRow claimed = claimed();
+    when(repository.claimDue(eq(List.of(PLUGIN_ID)), eq(NOW), any(), anyString()))
+        .thenReturn(Optional.of(claimed), Optional.empty());
+    when(repository.ownsUnexpiredLease(claimed, NOW)).thenReturn(true);
+    when(repository.finalizeSuccess(
+            claimed, NEW_PAYLOAD, "CN", NOW.plusSeconds(3600), NOW.plusSeconds(1800), NOW))
+        .thenReturn(true);
 
-    TestStudioPlugin plugin =
-        createPlugin(
-            PLUGIN_ID,
-            REGION,
-            snapshot -> {
-              callCount.incrementAndGet();
-              throw new RuntimeException("connection reset by peer mid-stream");
-            });
-    StudioPluginRegistry registry = new StudioPluginRegistry(List.of(plugin));
+    assertEquals(1, service().refreshOnce());
+    verify(repository)
+        .markExpiredLeasesUncertain(
+            List.of(PLUGIN_ID),
+            NOW,
+            "plugin credential refresh lease expired before a result was observed");
+    verify(repository, times(2))
+        .claimDue(
+            eq(List.of(PLUGIN_ID)),
+            eq(NOW),
+            eq(NOW.plus(properties.getRefresh().getLeaseDuration())),
+            anyString());
+  }
 
-    PluginCredentialRefreshService service =
-        new PluginCredentialRefreshService(
-            registry, repository, codec, keyLoader, properties, clock);
+  /** 认证拒绝转为需重新登录，未发出延迟重试，其余异常收敛为结果未知。 */
+  @Test
+  void typedFailuresMapToTheirStatus() {
+    assertFailure(
+        snapshot -> {
+          throw new PluginAuthRejectedException("revoked");
+        },
+        PluginCredentialStatus.REAUTH_REQUIRED,
+        NOW.plusSeconds(60),
+        "revoked");
+    assertFailure(
+        snapshot -> {
+          throw new PluginRenewalNotSentException("offline");
+        },
+        PluginCredentialStatus.REFRESH_FAILED,
+        NOW.plus(properties.getRefresh().getPollDelay()),
+        "offline");
+    assertFailure(
+        snapshot -> {
+          throw new IllegalStateException();
+        },
+        PluginCredentialStatus.REFRESH_UNCERTAIN,
+        NOW.plusSeconds(60),
+        "plugin credential renewal failed with an unknown outcome");
+  }
 
-    int claimed = service.refreshOnce();
-    assertEquals(1, claimed);
-    assertEquals(1, callCount.get());
-
-    PluginCredentialRow row = repository.getDirect(PLUGIN_ID);
-    assertEquals(PluginCredentialStatus.REFRESH_UNCERTAIN, row.status());
-    assertNull(row.refreshLeaseToken());
-    assertTrue(row.lastRefreshError().contains("connection reset by peer mid-stream"));
-
-    // 推进时钟多次扫描，确认永不再 claim 和调用 refresher
-    for (int i = 0; i < 5; i++) {
-      clock.advance(Duration.ofDays(10));
-      assertEquals(0, service.refreshOnce());
+  /** 已收到但不可用的结果（换了 region、已过期或非交互）不替换旧凭据。 */
+  @Test
+  void unusableRenewalsAreRetriedWithoutReplacingTheCredential() {
+    for (PluginCredentialMaterial material :
+        List.of(
+            new PluginCredentialMaterial(
+                "US", NOW.plusSeconds(3600), NOW.plusSeconds(1800), NEW_PAYLOAD),
+            new PluginCredentialMaterial("CN", NOW, NOW, NEW_PAYLOAD),
+            PluginCredentialMaterial.staticKey(NEW_PAYLOAD))) {
+      assertFailure(
+          snapshot -> material,
+          PluginCredentialStatus.REFRESH_FAILED,
+          NOW.plus(properties.getRefresh().getPollDelay()),
+          "plugin credential renewal returned an unusable credential");
     }
-    assertEquals(
-        1, callCount.get(), "refresher must never be called again after REFRESH_UNCERTAIN");
   }
 
-  /**
-   * 刷新返回非法凭据材料（material 为 null、region 不一致或 expiresAt 不晚于 now）： 必须按「已收到但不可用」收敛为 {@code
-   * REFRESH_FAILED} + 有界延迟重试，且**绝不替换**旧凭据。
-   *
-   * <p>这不是结果未知（响应是确定的），也不应永久阻断（可能是服务端瞬时异常）：因此既不能写成 {@code REFRESH_UNCERTAIN}，也不能让旧密文被覆盖。
-   * 重试仍然只用旧凭据，若旧 token 已失效则下一次会以认证拒绝收敛为 {@code REAUTH_REQUIRED}，仍然 fail closed。
-   */
+  /** 发出请求前租约已不属于自己时不调用刷新器。 */
   @Test
-  void invalidRenewalMaterialConvergesToBoundedRetryWithoutReplacingPayload() {
-    PluginCredentialRow initialRow =
-        createRow(
-            PLUGIN_ID,
-            REGION,
-            OLD_PAYLOAD,
-            PluginCredentialStatus.CONNECTED,
-            clock.instant().plusSeconds(3600),
-            clock.instant().minusSeconds(10));
-    repository.setDirect(initialRow);
+  void lostLeaseStopsBeforeCallingTheRefresher() {
+    refresher = mock(PluginCredentialRefresher.class);
+    PluginCredentialRow claimed = claimed();
+    when(repository.claimDue(any(), any(), any(), anyString())).thenReturn(Optional.of(claimed));
 
-    // 场景 1: material 为 null，requireUsable 抛出 IllegalArgumentException
-    TestStudioPlugin nullMaterialPlugin = createPlugin(PLUGIN_ID, REGION, snapshot -> null);
-    StudioPluginRegistry registry1 = new StudioPluginRegistry(List.of(nullMaterialPlugin));
-    PluginCredentialRefreshService service1 =
-        new PluginCredentialRefreshService(
-            registry1, repository, codec, keyLoader, properties, clock);
-
-    service1.refreshOnce();
-    PluginCredentialRow updated1 = repository.getDirect(PLUGIN_ID);
-    assertEquals(PluginCredentialStatus.REFRESH_FAILED, updated1.status());
-    assertEquals(
-        "plugin credential renewal returned an unusable credential", updated1.lastRefreshError());
-    assertEquals(
-        clock.instant().plus(properties.getRefresh().getPollDelay()),
-        updated1.nextRefreshAt(),
-        "不可用结果必须落在有界延迟重试窗口，而不是永久阻断");
-    assertNull(updated1.refreshLeaseToken(), "终结后必须清空 lease");
-
-    // 验证旧密文未被替换，依然可以解出 OLD_PAYLOAD
-    SecretKey key = keyLoader.load().orElseThrow();
-    assertEquals(
-        OLD_PAYLOAD,
-        codec.decrypt(
-            key, PLUGIN_ID, AUTH_GENERATION, AUTH_CONTEXT, REGION, updated1.encryptedPayload()));
-
-    // 场景 2: region 不一致，验证旧密文绝对没有被替换
-    repository.setDirect(initialRow);
-    TestStudioPlugin wrongRegionPlugin =
-        createPlugin(
-            PLUGIN_ID,
-            REGION,
-            snapshot ->
-                new PluginCredentialMaterial(
-                    "US",
-                    clock.instant().plusSeconds(3600),
-                    clock.instant().plusSeconds(1800),
-                    NEW_PAYLOAD));
-    StudioPluginRegistry registry2 = new StudioPluginRegistry(List.of(wrongRegionPlugin));
-    PluginCredentialRefreshService service2 =
-        new PluginCredentialRefreshService(
-            registry2, repository, codec, keyLoader, properties, clock);
-
-    service2.refreshOnce();
-    PluginCredentialRow updated2 = repository.getDirect(PLUGIN_ID);
-    assertEquals(PluginCredentialStatus.REFRESH_FAILED, updated2.status());
-    assertEquals(REGION, updated2.region(), "不可用材料绝不能改变行的 region 元数据");
-    assertEquals(
-        OLD_PAYLOAD,
-        codec.decrypt(
-            key, PLUGIN_ID, AUTH_GENERATION, AUTH_CONTEXT, REGION, updated2.encryptedPayload()));
-
-    // 场景 3: expiresAt 不晚于 now
-    repository.setDirect(initialRow);
-    TestStudioPlugin expiredMaterialPlugin =
-        createPlugin(
-            PLUGIN_ID,
-            REGION,
-            snapshot ->
-                new PluginCredentialMaterial(
-                    REGION,
-                    clock.instant().minusSeconds(1),
-                    clock.instant().plusSeconds(1800),
-                    NEW_PAYLOAD));
-    StudioPluginRegistry registry3 = new StudioPluginRegistry(List.of(expiredMaterialPlugin));
-    PluginCredentialRefreshService service3 =
-        new PluginCredentialRefreshService(
-            registry3, repository, codec, keyLoader, properties, clock);
-
-    service3.refreshOnce();
-    PluginCredentialRow updated3 = repository.getDirect(PLUGIN_ID);
-    assertEquals(PluginCredentialStatus.REFRESH_FAILED, updated3.status());
-    assertEquals(
-        OLD_PAYLOAD,
-        codec.decrypt(
-            key, PLUGIN_ID, AUTH_GENERATION, AUTH_CONTEXT, REGION, updated3.encryptedPayload()));
-
-    // 延迟到达后必须真的重试一次（有界重试而不是静默丢弃），且仍然不替换旧凭据。
-    clock.advance(properties.getRefresh().getPollDelay());
-    service3.refreshOnce();
-    PluginCredentialRow retried = repository.getDirect(PLUGIN_ID);
-    assertEquals(PluginCredentialStatus.REFRESH_FAILED, retried.status());
-    assertEquals(
-        OLD_PAYLOAD,
-        codec.decrypt(
-            key, PLUGIN_ID, AUTH_GENERATION, AUTH_CONTEXT, REGION, retried.encryptedPayload()));
+    assertEquals(0, service().refreshOnce());
+    verifyNoInteractions(refresher);
   }
 
-  /** 主密钥不可用：只 releaseLease，status 不变、lease 清空、refresher 未被调用； 随后主密钥恢复可用时，同一行可被重新 claim 并成功刷新。 */
+  /** 单次扫描最多终结固定数量的行；最早刷新时刻来自仓储。 */
   @Test
-  void keyUnavailableReleasesLeaseWithoutChangingStatusAndCanRetryWhenKeyAvailable()
-      throws IOException {
-    Path dynamicKeyFile = tempDir.resolve("dynamic-toggle.key");
-    // 初始状态：文件不存在
-    PluginCredentialKeyLoader dynamicKeyLoader =
-        new PluginCredentialKeyLoader(dynamicKeyFile.toAbsolutePath().toString());
-
-    AtomicInteger callCount = new AtomicInteger(0);
-    TestStudioPlugin plugin =
-        createPlugin(
-            PLUGIN_ID,
-            REGION,
-            snapshot -> {
-              callCount.incrementAndGet();
-              return new PluginCredentialMaterial(
-                  REGION,
-                  clock.instant().plusSeconds(3600),
-                  clock.instant().plusSeconds(1800),
-                  NEW_PAYLOAD);
-            });
-    StudioPluginRegistry registry = new StudioPluginRegistry(List.of(plugin));
-
-    PluginCredentialRow initialRow =
-        createRow(
-            PLUGIN_ID,
-            REGION,
-            OLD_PAYLOAD,
-            PluginCredentialStatus.CONNECTED,
-            clock.instant().plusSeconds(3600),
-            clock.instant().minusSeconds(10));
-    repository.setDirect(initialRow);
-
-    PluginCredentialRefreshService service =
-        new PluginCredentialRefreshService(
-            registry, repository, codec, dynamicKeyLoader, properties, clock);
-
-    // 首次扫描：密钥文件尚不存在；整轮扫描没有产生任何终态写入，因此返回 0。
-    int finalized = service.refreshOnce();
-    assertEquals(0, finalized, "a released lease is not a finalized row");
-    assertEquals(0, callCount.get(), "refresher must not be called when key is unavailable");
-
-    PluginCredentialRow rowAfterRelease = repository.getDirect(PLUGIN_ID);
-    assertEquals(
-        PluginCredentialStatus.CONNECTED, rowAfterRelease.status(), "status must remain unchanged");
-    assertNull(rowAfterRelease.refreshLeaseToken(), "lease must be released");
-    assertEquals(2L, rowAfterRelease.version(), "claim (+1) then releaseLease (+1)");
-
-    // 写入合法密钥文件
-    byte[] keyBytes = "12345678901234567890123456789012".getBytes(StandardCharsets.UTF_8);
-    Files.write(dynamicKeyFile, keyBytes);
-    Files.setPosixFilePermissions(dynamicKeyFile, PosixFilePermissions.fromString("rw-------"));
-
-    // 再次扫描：密钥就绪，应能正常重新 claim 并成功刷新
-    int finalizedSecond = service.refreshOnce();
-    assertEquals(1, finalizedSecond);
-    assertEquals(1, callCount.get(), "refresher must be called after key becomes available");
-
-    PluginCredentialRow rowAfterSuccess = repository.getDirect(PLUGIN_ID);
-    assertEquals(PluginCredentialStatus.CONNECTED, rowAfterSuccess.status());
-    assertNull(rowAfterSuccess.refreshLeaseToken());
-  }
-
-  /** 行密文不可认证（被篡改）：直接终结为 REAUTH_REQUIRED，refresher 绝不被调用。 */
-  @Test
-  void corruptedRowPayloadTransitionsToReauthRequiredWithoutCallingRefresher() {
-    AtomicInteger callCount = new AtomicInteger(0);
-    TestStudioPlugin plugin =
-        createPlugin(
-            PLUGIN_ID,
-            REGION,
-            snapshot -> {
-              callCount.incrementAndGet();
-              return new PluginCredentialMaterial(
-                  REGION,
-                  clock.instant().plusSeconds(3600),
-                  clock.instant().plusSeconds(1800),
-                  NEW_PAYLOAD);
-            });
-    StudioPluginRegistry registry = new StudioPluginRegistry(List.of(plugin));
-
-    PluginCredentialRow initialRow =
-        createRow(
-            PLUGIN_ID,
-            REGION,
-            OLD_PAYLOAD,
-            PluginCredentialStatus.CONNECTED,
-            clock.instant().plusSeconds(3600),
-            clock.instant().minusSeconds(10));
-
-    byte[] tampered = initialRow.encryptedPayload();
-    tampered[12] = (byte) (tampered[12] ^ 0x55);
-    repository.setDirect(
-        new PluginCredentialRow(
-            initialRow.pluginId(),
-            initialRow.authGeneration(),
-            initialRow.contextFingerprint(),
-            tampered,
-            initialRow.region(),
-            initialRow.expiresAt(),
-            initialRow.nextRefreshAt(),
-            initialRow.status(),
-            null,
-            null,
-            null,
-            null,
-            0L,
-            clock.instant(),
-            clock.instant()));
-
-    PluginCredentialRefreshService service =
-        new PluginCredentialRefreshService(
-            registry, repository, codec, keyLoader, properties, clock);
-
-    service.refreshOnce();
-    assertEquals(0, callCount.get(), "refresher must not be called when ciphertext is corrupted");
-
-    PluginCredentialRow row = repository.getDirect(PLUGIN_ID);
-    assertEquals(PluginCredentialStatus.REAUTH_REQUIRED, row.status());
-    assertNull(row.refreshLeaseToken());
-    assertEquals(
-        "plugin credential payload cannot be authenticated; re-authenticate the plugin",
-        row.lastRefreshError());
-  }
-
-  /**
-   * 过期 in-flight lease：行被另一节点留下 lease_until <= now，refreshOnce() 先收敛为 REFRESH_UNCERTAIN，且本轮与后续轮次都不
-   * claim 该行（不重放）。
-   */
-  @Test
-  void expiredInFlightLeaseConvergesToRefreshUncertainAndIsNeverReclaimed() {
-    AtomicInteger callCount = new AtomicInteger(0);
-    TestStudioPlugin plugin =
-        createPlugin(
-            PLUGIN_ID,
-            REGION,
-            snapshot -> {
-              callCount.incrementAndGet();
-              return new PluginCredentialMaterial(
-                  REGION,
-                  clock.instant().plusSeconds(3600),
-                  clock.instant().plusSeconds(1800),
-                  NEW_PAYLOAD);
-            });
-    StudioPluginRegistry registry = new StudioPluginRegistry(List.of(plugin));
-
-    PluginCredentialRow expiredLeaseRow =
-        new PluginCredentialRow(
-            PLUGIN_ID,
-            AUTH_GENERATION,
-            AUTH_CONTEXT,
-            createRow(
-                    PLUGIN_ID,
-                    REGION,
-                    OLD_PAYLOAD,
-                    PluginCredentialStatus.CONNECTED,
-                    clock.instant().plusSeconds(3600),
-                    clock.instant().minusSeconds(100))
-                .encryptedPayload(),
-            REGION,
-            clock.instant().plusSeconds(3600),
-            clock.instant().minusSeconds(100),
-            PluginCredentialStatus.CONNECTED,
-            null,
-            null,
-            "foreign-node-lease-token",
-            clock.instant().minusSeconds(1), // lease 已过期
-            5L,
-            clock.instant().minusSeconds(500),
-            clock.instant().minusSeconds(100));
-    repository.setDirect(expiredLeaseRow);
-
-    PluginCredentialRefreshService service =
-        new PluginCredentialRefreshService(
-            registry, repository, codec, keyLoader, properties, clock);
-
-    int claimed = service.refreshOnce();
-    assertEquals(0, claimed, "expired in-flight lease row must not be claimed in this cycle");
-    assertEquals(0, callCount.get(), "refresher must not be called");
-
-    PluginCredentialRow row = repository.getDirect(PLUGIN_ID);
-    assertEquals(PluginCredentialStatus.REFRESH_UNCERTAIN, row.status());
-    assertNull(row.refreshLeaseToken());
-    assertNull(row.refreshLeaseUntil());
-    assertEquals(6L, row.version());
-    assertEquals(
-        "plugin credential refresh lease expired before a result was observed",
-        row.lastRefreshError());
-
-    // 后续轮次继续推进时间，依然不被 claim
-    clock.advance(Duration.ofHours(1));
-    assertEquals(0, service.refreshOnce());
-    assertEquals(0, callCount.get());
-  }
-
-  /**
-   * late fence：claim 之后（refresher 返回前）模拟竞争操作（偷 version 或重新登录 upsert）， finalizeSuccess 必须返回 false
-   * 且不覆盖竞争者的新凭据与状态。
-   */
-  @Test
-  void lateFenceRejectsSuccessWhenVersionStolenOrUpsertOccurred() {
-    String competitorPayload = "{\"token\":\"competitor-login-token\"}";
-    AtomicReference<PluginCredentialRow> competitorRow = new AtomicReference<>();
-
-    TestStudioPlugin plugin =
-        createPlugin(
-            PLUGIN_ID,
-            REGION,
-            snapshot -> {
-              // 在 refresher 内部模拟并发重新登录 upsert：推进 version 并写入新载荷
-              PluginCredentialRow reLoginRow =
-                  createRow(
-                      PLUGIN_ID,
-                      REGION,
-                      competitorPayload,
-                      PluginCredentialStatus.CONNECTED,
-                      clock.instant().plusSeconds(7200),
-                      clock.instant().plusSeconds(3600));
-              PluginCredentialRow claimed = repository.getDirect(PLUGIN_ID);
-              repository.replace(
-                  reLoginRow,
-                  claimed.authGeneration(),
-                  claimed.contextFingerprint(),
-                  claimed.version());
-              competitorRow.set(repository.getDirect(PLUGIN_ID));
-              return new PluginCredentialMaterial(
-                  REGION,
-                  clock.instant().plusSeconds(5000),
-                  clock.instant().plusSeconds(2500),
-                  NEW_PAYLOAD);
-            });
-    StudioPluginRegistry registry = new StudioPluginRegistry(List.of(plugin));
-
-    PluginCredentialRow initialRow =
-        createRow(
-            PLUGIN_ID,
-            REGION,
-            OLD_PAYLOAD,
-            PluginCredentialStatus.CONNECTED,
-            clock.instant().plusSeconds(3600),
-            clock.instant().minusSeconds(10));
-    repository.setDirect(initialRow);
-
-    PluginCredentialRefreshService service =
-        new PluginCredentialRefreshService(
-            registry, repository, codec, keyLoader, properties, clock);
-
-    int finalized = service.refreshOnce();
-    assertEquals(
-        0, finalized, "a CAS-losing finalizer writes no terminal state and reports no progress");
-
-    // 校验 repository 维持并发重新登录的数据，未被迟到的 refresh 结果覆盖
-    PluginCredentialRow finalRow = repository.getDirect(PLUGIN_ID);
-    assertEquals(
-        competitorRow.get().version(),
-        finalRow.version(),
-        "version must not be altered by stale finalizer");
-    SecretKey key = keyLoader.load().orElseThrow();
-    String decrypted =
-        codec.decrypt(
-            key, PLUGIN_ID, AUTH_GENERATION, AUTH_CONTEXT, REGION, finalRow.encryptedPayload());
-    assertEquals(competitorPayload, decrypted, "payload must belong to the competitor re-login");
-  }
-
-  /**
-   * just-in-time 外呼前围栏（两节点 + 短 lease）：claim 之后、调用 refresher 之前 lease 已被其它节点换走时，绝不允许发出外呼， 也不写任何终态。
-   */
-  @Test
-  void lostLeaseBeforeExternalCallNeverCallsRefresher() {
-    AtomicInteger callCount = new AtomicInteger(0);
-    TestStudioPlugin plugin =
-        createPlugin(
-            PLUGIN_ID,
-            REGION,
-            snapshot -> {
-              callCount.incrementAndGet();
-              return new PluginCredentialMaterial(
-                  REGION,
-                  clock.instant().plusSeconds(3600),
-                  clock.instant().plusSeconds(1800),
-                  NEW_PAYLOAD);
-            });
-    StudioPluginRegistry registry = new StudioPluginRegistry(List.of(plugin));
-    PluginCredentialRow initialRow =
-        createRow(
-            PLUGIN_ID,
-            REGION,
-            OLD_PAYLOAD,
-            PluginCredentialStatus.CONNECTED,
-            clock.instant().plusSeconds(3600),
-            clock.instant().minusSeconds(10));
-
-    // 领取成功后立刻由另一节点换走 lease：本节点已失去所有权。
-    InMemoryPluginCredentialRepository convergingRepository =
-        new InMemoryPluginCredentialRepository() {
-          @Override
-          public synchronized List<PluginCredentialRow> claimDue(
-              List<String> pluginIds,
-              Instant now,
-              Instant leaseUntil,
-              String leaseToken,
-              int limit) {
-            List<PluginCredentialRow> claimed =
-                super.claimDue(pluginIds, now, leaseUntil, leaseToken, limit);
-            if (!claimed.isEmpty()) {
-              changeLeaseToken(claimed.get(0).pluginId(), "foreign-owner-token");
-            }
-            return claimed;
-          }
+  void boundsPassesAndReportsTheEarliestRefresh() {
+    refresher =
+        snapshot -> {
+          throw new PluginRenewalNotSentException("offline");
         };
-    convergingRepository.setDirect(initialRow);
+    PluginCredentialRow claimed = claimed();
+    when(repository.claimDue(any(), any(), any(), anyString())).thenReturn(Optional.of(claimed));
+    when(repository.ownsUnexpiredLease(claimed, NOW)).thenReturn(true);
+    when(repository.finalizeFailure(eq(claimed), any(), any(), anyString())).thenReturn(true);
+    when(repository.earliestRefreshAt(List.of(PLUGIN_ID), NOW))
+        .thenReturn(Optional.of(NOW.plusSeconds(5)));
 
-    PluginCredentialRefreshService service =
-        new PluginCredentialRefreshService(
-            registry, convergingRepository, codec, keyLoader, properties, clock);
-
-    assertEquals(0, service.refreshOnce(), "a lost lease finalizes nothing");
-    assertEquals(0, callCount.get(), "a lost lease must never produce an external refresh call");
-    assertEquals(
-        "foreign-owner-token",
-        convergingRepository.getDirect(PLUGIN_ID).refreshLeaseToken(),
-        "this node must not finalize or release a lease it no longer owns");
+    PluginCredentialRefreshService service = service();
+    assertEquals(PluginCredentialRefreshService.MAX_REFRESH_PASSES, service.refreshOnce());
+    assertEquals(Optional.of(NOW.plusSeconds(5)), service.earliestRefreshAt());
   }
 
-  /** just-in-time 外呼前围栏：claim 后 lease 在 checks 之前到期（慢 refresher / 短 lease）同样不得外呼。 */
+  /** 错误摘要去除首尾空白与换行，并按 UTF-8 字节截断。 */
   @Test
-  void expiredLeaseBeforeExternalCallNeverCallsRefresher() {
-    AtomicInteger callCount = new AtomicInteger(0);
-    TestStudioPlugin plugin =
-        createPlugin(
-            PLUGIN_ID,
-            REGION,
-            snapshot -> {
-              callCount.incrementAndGet();
-              return new PluginCredentialMaterial(
-                  REGION,
-                  clock.instant().plusSeconds(3600),
-                  clock.instant().plusSeconds(1800),
-                  NEW_PAYLOAD);
-            });
-    StudioPluginRegistry registry = new StudioPluginRegistry(List.of(plugin));
-    repository.setDirect(
-        createRow(
-            PLUGIN_ID,
-            REGION,
-            OLD_PAYLOAD,
-            PluginCredentialStatus.CONNECTED,
-            clock.instant().plusSeconds(3600),
-            clock.instant().minusSeconds(10)));
-
-    InMemoryPluginCredentialRepository expiringRepository =
-        new InMemoryPluginCredentialRepository() {
-          @Override
-          public synchronized List<PluginCredentialRow> claimDue(
-              List<String> pluginIds,
-              Instant now,
-              Instant leaseUntil,
-              String leaseToken,
-              int limit) {
-            List<PluginCredentialRow> claimed =
-                super.claimDue(pluginIds, now, leaseUntil, leaseToken, limit);
-            // 模拟本条外部调用被拖到 lease（2 分钟）之后才真正开始。
-            clock.advance(Duration.ofMinutes(5));
-            return claimed;
-          }
-        };
-    expiringRepository.setDirect(repository.getDirect(PLUGIN_ID));
-
-    PluginCredentialRefreshService service =
-        new PluginCredentialRefreshService(
-            registry, expiringRepository, codec, keyLoader, properties, clock);
-
-    assertEquals(0, service.refreshOnce(), "an expired lease finalizes nothing");
-    assertEquals(
-        0, callCount.get(), "an expired lease must never produce an external refresh call");
-  }
-
-  /** earliestRefreshAt()：只报告可调度行的最早 next_refresh_at，被未过期 lease 占用的行不参与。 */
-  @Test
-  void earliestRefreshAtReportsNextSchedulableInstant() {
-    TestStudioPlugin plugin =
-        createPlugin(
-            PLUGIN_ID,
-            REGION,
-            snapshot ->
-                new PluginCredentialMaterial(
-                    REGION,
-                    clock.instant().plusSeconds(3600),
-                    clock.instant().plusSeconds(1800),
-                    NEW_PAYLOAD));
-    StudioPluginRegistry registry = new StudioPluginRegistry(List.of(plugin));
-    PluginCredentialRefreshService service =
-        new PluginCredentialRefreshService(
-            registry, repository, codec, keyLoader, properties, clock);
-
-    assertEquals(Optional.empty(), service.earliestRefreshAt(), "no row means no schedule");
-
-    Instant firstDue = clock.instant().plusSeconds(600);
-    repository.setDirect(
-        createRow(
-            PLUGIN_ID,
-            REGION,
-            OLD_PAYLOAD,
-            PluginCredentialStatus.CONNECTED,
-            clock.instant().plusSeconds(3600),
-            firstDue));
-    assertEquals(Optional.of(firstDue), service.earliestRefreshAt());
-
-    // 未过期 lease 占用的行不属于本节点可调度集合。
-    PluginCredentialRow leasedRow =
-        new PluginCredentialRow(
-            PLUGIN_ID,
-            AUTH_GENERATION,
-            AUTH_CONTEXT,
-            repository.getDirect(PLUGIN_ID).encryptedPayload(),
-            REGION,
-            clock.instant().plusSeconds(3600),
-            clock.instant().minusSeconds(100),
-            PluginCredentialStatus.CONNECTED,
-            null,
-            null,
-            "other-node-token",
-            clock.instant().plusSeconds(120),
-            1L,
-            clock.instant(),
-            clock.instant());
-    repository.setDirect(leasedRow);
-    assertEquals(
-        Optional.empty(),
-        service.earliestRefreshAt(),
-        "in-flight lease held elsewhere must not be scheduled locally");
-  }
-
-  /** registry 为空时 refreshOnce() 返回 0，且绝不触碰 repository。 */
-  @Test
-  void refreshOnceWithEmptyRegistryDoesNotTouchRepository() {
-    StudioPluginRegistry emptyRegistry = new StudioPluginRegistry(List.of());
-    PluginCredentialRefreshService service =
-        new PluginCredentialRefreshService(
-            emptyRegistry, repository, codec, keyLoader, properties, clock);
-
-    assertEquals(0, service.refreshOnce());
-    assertEquals(0, repository.size());
-  }
-
-  /** 单行刷新失败不阻塞同一批次其它行的刷新。 */
-  @Test
-  void singleRowFailureDoesNotBlockOtherRowsInSameBatch() {
-    String pluginA = "plugin-a";
-    String pluginB = "plugin-b";
-
-    TestStudioPlugin pA =
-        createPlugin(
-            pluginA,
-            REGION,
-            snapshot -> {
-              throw new RuntimeException("plugin A unexpected error");
-            });
-    TestStudioPlugin pB =
-        createPlugin(
-            pluginB,
-            REGION,
-            snapshot ->
-                new PluginCredentialMaterial(
-                    REGION,
-                    clock.instant().plusSeconds(3600),
-                    clock.instant().plusSeconds(1800),
-                    NEW_PAYLOAD));
-
-    StudioPluginRegistry registry = new StudioPluginRegistry(List.of(pA, pB));
-
-    repository.setDirect(
-        createRow(
-            pluginA,
-            REGION,
-            OLD_PAYLOAD,
-            PluginCredentialStatus.CONNECTED,
-            clock.instant().plusSeconds(3600),
-            clock.instant().minusSeconds(10)));
-    repository.setDirect(
-        createRow(
-            pluginB,
-            REGION,
-            OLD_PAYLOAD,
-            PluginCredentialStatus.CONNECTED,
-            clock.instant().plusSeconds(3600),
-            clock.instant().minusSeconds(10)));
-
-    PluginCredentialRefreshService service =
-        new PluginCredentialRefreshService(
-            registry, repository, codec, keyLoader, properties, clock);
-
-    int claimed = service.refreshOnce();
-    assertEquals(2, claimed);
-
-    PluginCredentialRow rowA = repository.getDirect(pluginA);
-    PluginCredentialRow rowB = repository.getDirect(pluginB);
-
-    assertEquals(PluginCredentialStatus.REFRESH_UNCERTAIN, rowA.status());
-    assertEquals(PluginCredentialStatus.CONNECTED, rowB.status());
-    SecretKey key = keyLoader.load().orElseThrow();
-    assertEquals(
-        NEW_PAYLOAD,
-        codec.decrypt(
-            key, pluginB, AUTH_GENERATION, AUTH_CONTEXT, REGION, rowB.encryptedPayload()));
-  }
-
-  /** boundedError() 去敏错误摘要契约：4096 字节上限、换行转空格、空/空白回退为 fallback。 */
-  @Test
-  void boundedErrorEnforcesLengthLimitAndSanitization() {
+  void boundedErrorNormalizesAndTruncates() {
+    assertEquals("a b", PluginCredentialRefreshService.boundedError(" a\nb ", "fallback"));
     assertEquals("fallback", PluginCredentialRefreshService.boundedError(null, "fallback"));
-    assertEquals("fallback", PluginCredentialRefreshService.boundedError("", "fallback"));
-    assertEquals("fallback", PluginCredentialRefreshService.boundedError("   \n\r  ", "fallback"));
-
-    String withNewlines = "line1\nline2\r\nline3\rline4";
-    assertEquals(
-        "line1 line2  line3 line4",
-        PluginCredentialRefreshService.boundedError(withNewlines, "fb"));
-
-    // 超过 4096 字节的长文本截断
-    String longMessage = "A".repeat(5000);
-    String bounded = PluginCredentialRefreshService.boundedError(longMessage, "fb");
-    assertEquals(4096, bounded.getBytes(StandardCharsets.UTF_8).length);
-    assertEquals("A".repeat(4096), bounded);
-
-    // 多字节 UTF-8 字符（汉字占 3 字节）边界截断安全，不得产生乱码
-    String chinese = "中".repeat(2000); // 6000 字节
-    String boundedChinese = PluginCredentialRefreshService.boundedError(chinese, "fb");
-    assertTrue(boundedChinese.getBytes(StandardCharsets.UTF_8).length <= 4096);
-    assertFalse(boundedChinese.isEmpty());
+    String bounded = PluginCredentialRefreshService.boundedError("界".repeat(2000), "fallback");
+    assertTrue(bounded.getBytes(StandardCharsets.UTF_8).length <= 4096);
   }
 
-  /** MAX_CLAIM_BATCH 语义：多于 16 行到期时单次扫描只 claim 16 行，下一次扫描继续处理剩余行。 */
-  @Test
-  void maxClaimBatchRespectsSixteenLimit() {
-    List<StudioPlugin> plugins = new ArrayList<>();
-    for (int i = 1; i <= 20; i++) {
-      String pid = String.format("plugin-%02d", i);
-      plugins.add(
-          createPlugin(
-              pid,
-              REGION,
-              snapshot ->
-                  new PluginCredentialMaterial(
-                      REGION,
-                      clock.instant().plusSeconds(3600),
-                      clock.instant().plusSeconds(1800),
-                      NEW_PAYLOAD)));
-      repository.setDirect(
-          createRow(
-              pid,
-              REGION,
-              OLD_PAYLOAD,
-              PluginCredentialStatus.CONNECTED,
-              clock.instant().plusSeconds(3600),
-              clock.instant().minusSeconds(100 - i)));
-    }
+  private void assertFailure(
+      PluginCredentialRefresher failing,
+      PluginCredentialStatus status,
+      Instant nextRefreshAt,
+      String error) {
+    refresher = failing;
+    PluginCredentialRow claimed = claimed();
+    when(repository.claimDue(any(), any(), any(), anyString()))
+        .thenReturn(Optional.of(claimed), Optional.empty());
+    when(repository.ownsUnexpiredLease(claimed, NOW)).thenReturn(true);
+    when(repository.finalizeFailure(claimed, status, nextRefreshAt, error)).thenReturn(true);
 
-    StudioPluginRegistry registry = new StudioPluginRegistry(plugins);
-    PluginCredentialRefreshService service =
-        new PluginCredentialRefreshService(
-            registry, repository, codec, keyLoader, properties, clock);
-
-    // 第一次扫描：正好 claim 16 行
-    int claimedBatch1 = service.refreshOnce();
-    assertEquals(PluginCredentialRefreshService.MAX_REFRESH_PASSES, claimedBatch1);
-    assertEquals(16, claimedBatch1);
-
-    // 第二次扫描：claim 剩余的 4 行
-    int claimedBatch2 = service.refreshOnce();
-    assertEquals(4, claimedBatch2);
-
-    // 第三次扫描：没有剩余到期行
-    assertEquals(0, service.refreshOnce());
+    assertEquals(1, service().refreshOnce());
+    verify(repository, never()).finalizeSuccess(any(), any(), any(), any(), any(), any());
   }
 
-  private static class TestStudioPlugin implements StudioPlugin {
-    private final PluginDescriptor descriptor;
-    private final PluginAuthSpec authSpec;
-    private final PluginCredentialRefresher refresher;
+  private PluginCredentialRefreshService service() {
+    return new PluginCredentialRefreshService(
+        new StudioPluginRegistry(List.of(new DeepLinkPlugin())), repository, properties, clock());
+  }
 
-    TestStudioPlugin(
-        PluginDescriptor descriptor, PluginAuthSpec authSpec, PluginCredentialRefresher refresher) {
-      this.descriptor = descriptor;
-      this.authSpec = authSpec;
-      this.refresher = refresher;
-    }
+  private static Clock clock() {
+    return Clock.fixed(NOW, ZoneOffset.UTC);
+  }
+
+  private static PluginCredentialRow claimed() {
+    return new PluginCredentialRow(
+        PLUGIN_ID,
+        OLD_PAYLOAD,
+        "CN",
+        NOW.plusSeconds(120),
+        NOW.plusSeconds(60),
+        PluginCredentialStatus.CONNECTED,
+        null,
+        null,
+        "lease",
+        NOW.plus(Duration.ofMinutes(2)),
+        4L);
+  }
+
+  /** 声明 DeepLink 认证与刷新器的最小 Plugin。 */
+  private final class DeepLinkPlugin implements StudioPlugin {
 
     @Override
     public PluginDescriptor descriptor() {
-      return descriptor;
+      return new PluginDescriptor(PLUGIN_ID, "DeepLink", "1.0");
     }
 
     @Override
@@ -1097,45 +231,22 @@ class PluginCredentialRefreshServiceTest {
 
     @Override
     public PluginAuthSpec authenticationSpec() {
-      return authSpec;
+      return new PluginAuthSpec.DeepLink(List.of("CN", "US"));
+    }
+
+    @Override
+    public Optional<PluginAuthHandler> authHandler() {
+      return Optional.of(mock(PluginAuthHandler.class));
+    }
+
+    @Override
+    public Optional<PluginCredentialRefresher> refresher() {
+      return Optional.of(snapshot -> refresher.refresh(snapshot));
     }
 
     @Override
     public PluginInstance configure(PluginConfig config, PluginContext context) {
       return TestPluginFixtures.emptyInstance();
-    }
-
-    @Override
-    public Optional<PluginCredentialRefresher> refresher() {
-      return Optional.ofNullable(refresher);
-    }
-  }
-
-  private static class MutableClock extends Clock {
-    private Instant current;
-    private final ZoneId zone = ZoneOffset.UTC;
-
-    MutableClock(Instant initial) {
-      this.current = initial;
-    }
-
-    void advance(Duration duration) {
-      this.current = current.plus(duration);
-    }
-
-    @Override
-    public ZoneId getZone() {
-      return zone;
-    }
-
-    @Override
-    public Clock withZone(ZoneId zone) {
-      return this;
-    }
-
-    @Override
-    public Instant instant() {
-      return current;
     }
   }
 }

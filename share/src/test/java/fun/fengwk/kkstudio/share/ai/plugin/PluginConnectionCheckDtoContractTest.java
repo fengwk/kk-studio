@@ -39,7 +39,6 @@ class PluginConnectionCheckDtoContractTest {
   void responseRoundTripsThroughTheRealJacksonWire() throws Exception {
     PluginConnectionCheckDTO dto = new PluginConnectionCheckDTO();
     dto.setPluginId("opencli");
-    dto.setAppliedEpoch("2");
     dto.setAppliedRevision("2");
     dto.setCheckedAt(Instant.parse("2026-03-01T12:00:00Z"));
     dto.setReachability(PluginConnectionCheckDTO.Reachability.REACHABLE);
@@ -79,7 +78,6 @@ class PluginConnectionCheckDtoContractTest {
     // 意图：响应里物理上不存在自由文本字段（异常消息、远端 URI/正文、凭据）可供回显。
     assertEquals(
         List.of(
-            "appliedEpoch",
             "appliedRevision",
             "authentication",
             "browserSession",

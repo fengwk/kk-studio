@@ -107,16 +107,17 @@ URL 与 headers 仅在显式配置查询中以 `no-store` 返回，变量占位�
 原子替换该 server 的工具行；失败保留整批旧目录，Agent 引用保护仍生效。
 
 [`RuntimeToolCatalogConfiguration`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/catalog/tool/RuntimeToolCatalogConfiguration.java)
-发布 `RuntimeToolCatalogSource` 与动态 `McpToolCatalog`。每次 current 或历史 epoch 租用
-钉住 `PluginCatalogRuntime` 的同版本快照，同时一次读取 MCP 的 planning 与 selectable 事实，
-冻结为不可变目录；后续查找不再读库。Harness 插件来源来自该快照的 owner map、配置及凭据身份。
+发布 `RuntimeToolCatalogSource` 与动态 `McpToolCatalog`。每次租用钉住 `PluginCatalogRuntime`
+的当前快照，同时一次读取 MCP 的 planning 与 selectable 事实，冻结为不可变目录；后续查找不再读库。
 重复模型可见工具名使查询失败关闭。MCP 可选面要求 server enabled 且 AVAILABLE；
 查找面按已持久化工具行返回定义，调用前再复验 server 状态与归属。
 远端 MCP 工具使用 `EnvironmentSupport.NONE`、`NON_IDEMPOTENT`，deadline 覆盖初始化和调用。
 客户端行为见 [Harness MCP](harness-mcp.md)。
 
-执行网关按 binding 的 epoch 取历史租用，逐项校验完整定义、贡献身份、requirements 与插件来源；
-不会按当前同名工具替换旧执行语义。MCP 没有独立历史快照，旧 binding 与现读定义不一致时拒绝执行。
+执行网关从当前租用取回 binding 冻结的工具，逐项校验完整定义、贡献身份与 requirements，
+不会按当前同名工具替换旧执行语义。工具所属插件已停用或移除时，调用以确定性失败返回模型：
+说明工具已不可用且未执行，建议不用它继续或询问用户；定义已变化时说明工具在规划后发生变化，
+提示重新调用（下一轮使用当前定义）。MCP 工具同样按现读定义校验。
 成功启动后，目录租用持续到终态或取消决议、执行体退出及句柄静止同时成立；
 取消先于启动时不进入工具执行体。违反静止契约的句柄产生 UNKNOWN，无法确认静止时保留资源租用。
 
@@ -131,7 +132,7 @@ Runtime 在自己的 lease 所有权短事务内直接持久 `READY -> DISPATCHI
 
 ## Model 与 Tool 执行
 
-`DatabaseTurnResolver` 每个 live turn 持有一次 current epoch 租用完成全部规划，只按该分支冻结/提交的 Agent、Model、Variant、
+`DatabaseTurnResolver` 每个 live turn 持有一次目录租用完成全部规划，只按该分支冻结/提交的 Agent、Model、Variant、
 Environment、工具、Skill 和 subagents 规划；它不判断 Thread 属于哪个 Issue/Chat，也不据此覆写
 Environment 或注入工具——Issue Run 的 Agent/Model/Environment、业务工具与身份上下文都在接受 Run 时
 显式提交或冻结到 branch state。缺失引用返回规划失败。
@@ -211,52 +212,31 @@ Platform 适配注册、租约和资源票据；会话代际、在途调用和�
 [Platform Plugin API](platform-plugin-api.md)。
 
 `PluginCatalogSnapshot` 逐个配置实例，聚合内置贡献，并在返回前验证两域完整目录；
-任一配置、贡献或目录失败时释放全部已建实例。Web 从同一快照提供两域 Catalog，
-配置由权威 manifest 指定，每个 epoch 内目录冻结，运行期通过完整快照原子切换。
+任一配置、贡献或目录失败时释放全部已建实例，错误只携带阶段与 pluginId。Web 从同一快照提供两域 Catalog。
 
 ### Plugin 配置存储
 
-[`PluginCatalogBootstrap`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/plugin/catalog/PluginCatalogBootstrap.java)
-从单行 `plugin_catalog_state` 读取当前 epoch 指针，再按该 epoch 读取不可变完整 manifest
-（`plugin_catalog_revision`）与其中 revision 指定的 `plugin_configuration_revision`。
-全新库的 epoch 0 只表示未初始化：
-宿主以所有安装定义的 Schema 默认值构建完整候选，通过 CAS 写入 epoch 1 与配置历史；
-首次启动的竞争败方释放候选、回读赢家，不重复初始化。
-
-配置 revision 取该插件最后一次写入的全局 epoch，不另设插件计数器。
-[`PluginConfigurationRepository`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/plugin/persistence/PluginConfigurationRepository.java)
-在同一短事务中核验权威基线、用一条语句同时推进 epoch 指针并新建该 epoch 的 manifest 历史、
-插入配置历史、复核完整 manifest 引用，
-最后发出 `plugin_catalog_changed` 提示。未修改条目必须与基线相同，不能丢失已登记插件或回退到旧 revision；
-任何失败都回滚 epoch、历史与通知，CAS 败方不留下 manifest 或配置历史。
-
+每个已安装 Plugin 在 `plugin_configuration` 中有一行当前普通配置（`revision` + `values_json`）。
 普通值以受 64 KiB UTF-8 预算约束的严格 JSON 文本保存，数据库同时拒绝非对象与重复键；
-不经 jsonb 数值展开，精度、scale 与指数表示保持可恢复。秘密不进入普通配置历史。
-manifest 保存代码版本、Schema 与实际能力指纹，全局指纹覆盖完整两域目录及内置贡献；
-指纹只由冻结定义派生，不序列化运行实例。
+不经 jsonb 数值展开，精度、scale 与指数表示保持可恢复。秘密不进入普通配置。
+启动时为新安装的 Plugin 写入 Schema 默认值（revision 1），已有行保持不变；已卸载 Plugin 的残留行被忽略。
 
-重启必须按持久版本恢复：安装集合、历史引用、代码/Schema 身份及两域能力指纹均须一致，
-缺失或漂移直接启动失败，不采用新 defaults 替换旧配置。
+[`PluginConfigurationService`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/plugin/service/PluginConfigurationService.java)
+是普通配置与凭据的唯一写入口。保存以 expectedRevision 做 CAS：先按 Schema 归一普通值，
+用候选配置与候选凭据 configure 一次目标插件（被拒绝即 400，不写入），再在同一事务内核验声明依赖的 Agent、
+更新配置、写入或删除凭据行并发出 `plugin_changed` 提示。提交后唤醒本节点目录刷新，
+凭据被改写时额外唤醒凭据刷新调度器；回滚不触发任何唤醒。
 
 [`PluginCatalogRuntime`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/plugin/catalog/PluginCatalogRuntime.java)
-持有当前已发布快照，并把最近一次权威回读的 `desiredEpoch`、已发布 `appliedEpoch` 与固定受控错误码报给节点。
-已持久接受但尚未执行完的任务用 `acquire(epoch)` 取该 epoch 的完整两域目录：已加载的当前视图或仍被租用钉住的
-历史视图直接复用；未加载时按该 epoch 的不可变完整 manifest 与配置在刷新锁内严格重建一次，
-因此绝不把当前其它插件拼进旧任务，也不修改 desired/applied、不发布旧 epoch。历史视图只由租约持有，
-最后一个租约释放即移除并关闭，重启后旧 epoch 仍按持久历史重建。
-配置写入接口以 expectedEpoch 和 expectedRevision 做 CAS，普通值、秘密变更及 manifest
-在同一事务中提交。唯一 afterCommit 同步始终唤醒本节点目录对账，仅秘密写入或删除时
-额外唤醒凭据刷新调度器；KEEP 不唤醒凭据调度器，回滚不触发任何唤醒。
-Web 合并通知、重连提示与每 5 秒的权威回读，应用失败时保留整个旧视图。
-管理面一次投影先取得当前 applied 租用，持有到完整 DTO 构造结束，再将权威 desired
-与该租用的 applied 坐标一起报告；仅当运行期错误状态的两端 epoch 都匹配时暴露
-`authority-unavailable` 或 `apply-failed`，不匹配或尚未应用时报告 pending。
+持有本节点当前快照。刷新回读全部配置，修订有变化时构建新快照并原子替换；构建失败保留旧快照，
+并暴露固定的 `applicationError`。快照按引用计数退役：被替换的快照在最后一个租用释放后才关闭，
+因此在途调用继续使用自己租到的实例完成。Web 合并通知、重连提示与每 5 秒的回读。
+管理面投影把数据库中的 desired 修订与本节点快照的 applied 修订一起报告，二者不一致时附带应用说明；
 数据库提交提示不代表所有节点已经应用。
 
-`PluginCanvasFunctionCatalogSource` 将 current/history 租用直接绑定到该运行期。
-函数绑定的 epoch、完整定义与插件来源必须逐项匹配，内置函数来源为 null；
-来源中的能力指纹、配置修订及认证引用只取自同一冻结快照，不读取凭据内容。
-失败即释放租用，关闭幂等且关闭后不可访问，不按同名函数回退到当前版本。
+`PluginCanvasFunctionCatalogSource` 把租用绑定到同一运行期。函数绑定冻结完整定义；
+尚未提交外部任务的 Run 只在当前同名函数定义完全一致时执行，否则以「函数已不可用或定义已变化，请重新启动」失败，
+不按新定义执行旧输入；已提交的 Run 只需同名函数仍存在以继续查询结果。失败即释放租用，关闭幂等。
 
 ### 新增 Plugin
 
@@ -272,26 +252,21 @@ Web 合并通知、重连提示与每 5 秒的权威回读，应用失败时保�
 配置 Schema 与安全秘密投影由插件声明派生；秘密仅支持 KEEP、SET、CLEAR，不回读明文。
 无认证插件不提供登录操作；STATIC_KEY 通过配置接口更新密钥。
 DEEP_LINK 的 prepare 请求为 `{region}`，返回 loginUrl 与单次 authAttemptId；
-complete 请求为 `{authAttemptId, callbackUrl}`，仅消费仍匹配当前配置及认证身份的未过期尝试。
+complete 请求为 `{authAttemptId, callbackUrl}`，仅消费 prepare 之后配置修订未变、region 一致的未过期尝试。
 认证响应 no-store。新增交互需同步 Share DTO、前端和测试；管理 UI 见
 [Plugin 设置](frontend.md#plugin-设置)。
 
 ### Plugin credential
 
-`PluginCredentialStore` 用部署级 owner-only 32-byte key 做 AES-256-GCM 加密，
-每次写入新 nonce，AAD 绑定 pluginId、认证代际、上下文指纹、region 的存在性和值及格式版本（当前 fmt2）。
-登录、秘密 SET/CLEAR 和认证目标变更会换发认证代际；普通配置 KEEP 不改凭据行，
-刷新只沿用当前行代际。静态密钥没有 region、过期或刷新时刻，不参与刷新扫描。
-代际随之写入快照、加密 AAD 与所有 CAS 条件，因此断连删除后按 version 0 重建的行
-不会被旧调用或迟到 finalize 误伤。主密钥留在部署文件，
-Plugin 只通过绑定认证引用的 `PluginCredentialAccess` 获得本次请求快照，不持有完整 Store。
-每次解析都回读权威 manifest 并核对凭据行身份，旧代际或旧上下文不能取得新秘密。
-key 缺失或解密失败为 KEY_UNAVAILABLE，读路径不返回未认证载荷；主密钥不可用时禁止写入。
-Plugin fmt1 密文不再兼容读取，已有凭据须在备份并批准迁移后离线转换。
-Skill 令牌共用 AES-GCM 与 AAD 编码原语，但独立保持既有 fmt1 与 Package 身份绑定，不引入插件认证代际。
+`plugin_credential` 每个已认证 Plugin 一行，载荷以明文 JSON 保存，数据库访问控制与备份加密是其保护边界；
+载荷绝不进入 API 响应、日志、配置同步或模型上下文。所有写入以 `version` 做 CAS 并推进版本。
+Plugin 只通过作用域 `PluginCredentialAccess` 读取本插件凭据：每次调用现读当前行，因此登录、轮换或撤销
+立即对已配置实例生效，不需要重建实例。刷新在途、需要重新认证、刷新结果未知或已过期时以对应原因拒绝。
+静态密钥的认证目标字段（`contextFields`）变化而本次没有重新录入密钥时，旧密钥被删除，避免把密钥发往新目标。
+静态密钥没有 region、过期或刷新时刻，不参与刷新扫描。
 
-刷新以短事务 claim lease，请求前核验代际、token、version 与有效截止时刻，
-事务外只执行一次 renewal，再按代际、token、version finalize。
+刷新以短事务 claim lease，请求前核验 token、version 与有效截止时刻，
+事务外只执行一次 renewal，再按 token、version finalize。
 只扫描已声明刷新器的插件，按最早 nextRefreshAt 安排，保存后唤醒，poll 是最慢兜底。
 确定认证拒绝为 REAUTH_REQUIRED，确定未发或确定无效响应为 REFRESH_FAILED；
 已发而无确定响应、过期在途 lease 为 REFRESH_UNCERTAIN，要求重新认证。
@@ -322,9 +297,9 @@ Platform 提供 Blob facts、原件流、presign、输出物化和 Blob 释放�
 决议见 [Canvas Infra](canvas-infra.md)。
 
 Platform 仅提供内置 fake adapter；本地 `image.crop` 由 Media 插件提供（默认启用，停用后该函数不再进入目录），ComfyUI/H3 以及 OpenCLI（`gpt-image-2` 与 Seedance 四函数）均由构建期 Plugin 提供。
-Function Catalog 每个 epoch 一份不可变快照，运行期以租用对外提供：任务按创建时的 `catalogEpoch` 取得租用并校验完整 binding，
-`submit` 记录外部任务身份，`execute` 在同一份租用上查询同一任务并物化预分配槽位，
-因此热更新与在途旧任务互不串目录。
+Function Catalog 随插件快照一起替换，运行期以租用对外提供：任务启动时冻结完整函数定义，
+`submit` 记录外部任务身份，`execute` 在同一份租用上查询同一任务并物化预分配槽位；
+尚未提交的任务遇到定义变化直接失败，已提交的任务继续按同名函数查询结果。
 
 OpenCLI 作为独立构建期 Plugin，每次 HTTP send 前解析局部单 Bearer 凭据并冻结单调时钟 deadline，同一预算覆盖握手和完整响应体读取，
 不会随 read 重置。资源响应要求正数 Content-Length 与 metadata size 一致，并在读流时
@@ -340,12 +315,12 @@ EOF、失败和显式 close 均注销 watchdog。客户端拿到流后负责关�
 OpenCLI 的配置完全归属于插件：受控 schema 声明字段、结构与默认值，配置模型校验取值区间和跨字段必填关系。
 管理面与配置同步按同一份 schema 读写，未声明的字段一律被拒绝。使用者只需要关心三类输入：
 
-- Hub 接入：`baseUrl` 给出 OpenCLI Hub 的 HTTP(S) origin，启用时必填；连接、请求、长轮询与响应体上限等预算参数有明确取值范围，默认值由 schema 给出。改动 `baseUrl` 会换发认证代际并 fence 旧实例，旧实例在出网前失败。
+- Hub 接入：`baseUrl` 给出 OpenCLI Hub 的 HTTP(S) origin，启用时必填；连接、请求、长轮询与响应体上限等预算参数有明确取值范围，默认值由 schema 给出。改动 `baseUrl` 而不重新录入 `apiKey` 会删除已保存的密钥，新旧实例都在出网前失败。
 - 认证与私有身份：唯一认证密钥 `apiKey` 是静态密钥，通过统一 Plugin Secret API 的 KEEP/SET/CLEAR 管理，不读环境变量也不设外部优先级。可选私有身份 `instanceId` 是第二个受保护秘密字段，与 `apiKey` 同属一次 scoped snapshot，只在真正发送执行请求前取出并填入请求体，不进入普通值、配置历史、管理面投影或导出；未配置时不发送该字段，由 Hub 自由路由。
 - 业务开关与任务预算：`enabled` 决定整个插件是否参与，`gptImage2.paidEnabled` 放开付费图片执行，`seedance.enabled`（配合 `seedance.workspaceId`）放开 Seedance 视频执行；两类任务的执行等待与重试预算也由插件配置模型统一校验。
 
 管理面状态只表达凭据在本地是否可用：静态认证在必需认证字段已录入时才是 `CONNECTED`，只录入私有身份
-（或撤销 `apiKey` 后只留私有身份）显示 `NOT_CONNECTED`，`KEY_UNAVAILABLE` 等真实故障如实上报。
+（或撤销 `apiKey` 后只留私有身份）显示 `NOT_CONNECTED`，刷新失败等真实故障如实上报。
 本地秘密已配置不等于 Hub 可达或浏览器侧账号已登录，这两件事只在真正发起请求时才会暴露。
 
 ## 配置
@@ -369,12 +344,12 @@ Skill exact commit 获取、manifest 扫描和 MCP 发现先在写事务外完�
 时拒绝写入。Environment 的注册令牌与安装设置在同一次 CAS 更新中生效，同名更新保持其 UUID 身份。
 预览不冻结状态，执行时同名配置以文件为准，不维护跨步骤检查状态。
 可恢复配置在一个事务中写入，复用现有校验、引用保护和 CAS；循环 Agent 用同事务两阶段写入。
-插件是第八类：条目只含 `pluginId` 与普通值文本，秘密、认证代际、目录 epoch 与配置修订都不进入文件。
+插件是第八类：条目只含 `pluginId` 与普通值文本，秘密与配置修订都不进入文件。
 导出只覆盖已安装插件，并按插件在代码里声明的所需 Agent 补齐插件→Agent 闭包，缺失 Agent 时拒绝导出，
 内置 Agent 只满足依赖、从不作为条目导出；导入时未安装的 id 按条目级跳过，已安装插件按本插件的
 configurationSchema 归一化普通值，非法值整份拒绝。普通值可随文件往返，秘密与受保护身份不进入文件，
 导入后仍需在 Plugin Secret API 或登录流程录入。
-插件写入复用唯一提交服务：计划期的 epoch 与各插件修订只作为导入事务内的 CAS 坐标，按返回的权威目录链式推进，
+插件写入复用唯一写入口：计划期的各插件修订作为导入事务内的 CAS 坐标，
 秘密补丁恒为 KEEP，因此导入既不创建也不恢复任何凭据；任一条目（含插件与其它类别）失败都整份回滚。
 系统设置按当前完整六节契约直接校验，不合并局部字段；文件里的未知设置字段（含已退役的 `integrations` 段）
 被移除并作为跳过项列出，不做别名或双读，其余六节按 `allowPartial` 语义导入；以执行准备时版本 CAS，
@@ -409,7 +384,7 @@ null 表示强制直连；`noProxyHosts` 为逗号分隔绕过规则，默认 `l
 | `kk-studio.catalog.skill` | Git Skill cache 根（`cache-root`） |
 | `kk-studio.project.controller` | Issue dispatcher、worker、预算和调谐节奏 |
 | `kk-studio.storage` | S3 端点/凭据/bucket、maintenance 与对象清理 |
-| `kk-studio.plugins` | 主密钥文件、refresh 与远端媒体预算 |
+| `kk-studio.plugins` | 认证尝试有效期、refresh 与远端媒体预算 |
 | `kk-studio.canvas` | ffmpeg/ffprobe、本地路径和 Function runtime |
 | `kk-studio.harness.environment-gateway` | Daemon 帧、出站队列和发送预算，由 Web 拥有 |
 

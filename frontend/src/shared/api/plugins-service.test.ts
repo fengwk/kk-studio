@@ -32,8 +32,6 @@ const validPluginPayload = {
     defaultsJson: '{"enabled":true}',
     secrets: {},
   },
-  desiredEpoch: '1',
-  appliedEpoch: '1',
   desiredRevision: '1',
   appliedRevision: '1',
   connectionCheckSupported: true,
@@ -88,7 +86,6 @@ describe('pluginsService', () => {
     expect(completeResp.pluginId).toBe('minimax-mavis')
 
     const updateData = {
-      expectedEpoch: '1',
       expectedRevision: '1',
       valuesJson: '{"enabled":false}',
       secretPatch: {
@@ -107,10 +104,9 @@ describe('pluginsService', () => {
     expect(client.delete).toHaveBeenCalledWith('/plugins/minimax-mavis/auth')
 
     // 显式连接检查只向该 Plugin 的固定端点提交一次期望坐标，不重试也不拼接任何其它路径。
-    const checkRequest = { expectedEpoch: '1', expectedRevision: '1' }
+    const checkRequest = { expectedRevision: '1' }
     const checkResult = {
       pluginId: 'minimax-mavis',
-      appliedEpoch: '1',
       appliedRevision: '1',
       checkedAt: 1772366400,
       reachability: 'REACHABLE',
@@ -138,7 +134,6 @@ describe('pluginsService', () => {
     const service = createPluginsService(client)
     vi.mocked(client.post).mockResolvedValue({
       pluginId: 'minimax-mavis',
-      appliedEpoch: '1',
       appliedRevision: '1',
       checkedAt: 1772366400,
       reachability: 'CONNECTED',
@@ -147,7 +142,7 @@ describe('pluginsService', () => {
     })
 
     await expect(
-      service.checkConnection('minimax-mavis', { expectedEpoch: '1', expectedRevision: '1' }),
+      service.checkConnection('minimax-mavis', { expectedRevision: '1' }),
     ).rejects.toThrowError(/reachability must be one of/)
     expect(client.post).toHaveBeenCalledTimes(1)
   })

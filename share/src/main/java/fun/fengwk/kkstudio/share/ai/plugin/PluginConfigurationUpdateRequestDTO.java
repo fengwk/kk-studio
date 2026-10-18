@@ -10,8 +10,7 @@ import java.util.Map;
 /**
  * {@code PUT /api/plugins/{pluginId}/configuration} 请求体：期望坐标 + 普通值 + 秘密补丁。
  *
- * <p>两个期望坐标都不可省略：{@code expectedEpoch} 是全局 catalog 修订、{@code expectedRevision} 是该插件的配置修订，两者都是
- * canonical 非负十进制字符串（仓库既有的 Long wire 约定），不可解析即 400，任何不匹配都是 409。
+ * <p>{@code expectedRevision} 是该插件的当前配置修订，canonical 非负十进制字符串，不可解析即 400，不匹配即 409。
  *
  * <p>{@code valuesJson} 是严格 JSON object 文本，保持调用方的数字精度并按 64 KiB UTF-8 预算校验；服务端只做 schema
  * 归一化与校验，不重新序列化。 {@code secretPatch} 的键必须是被 schema 声明的秘密字段；未知字段、非法操作或带值的 KEEP/CLEAR 都 fail
@@ -19,10 +18,6 @@ import java.util.Map;
  */
 @Data
 public class PluginConfigurationUpdateRequestDTO {
-
-  /** 期望的全局 catalog epoch（canonical 非负十进制字符串，必填）；数字/布尔/null 一律拒绝，绝不做标量强制转换。 */
-  @JsonDeserialize(using = PluginWireTextDeserializer.class)
-  private String expectedEpoch;
 
   /** 期望的该插件配置修订（canonical 非负十进制字符串，必填）；数字/布尔/null 一律拒绝，绝不做标量强制转换。 */
   @JsonDeserialize(using = PluginWireTextDeserializer.class)

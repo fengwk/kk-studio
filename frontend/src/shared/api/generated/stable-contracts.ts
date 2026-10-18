@@ -47,7 +47,6 @@ export const PLUGIN_CONNECTION_BROWSER_SESSION_VALUES: readonly PluginConnection
 /** Java：fun.fengwk.kkstudio.share.ai.plugin.PluginConnectionCheckDTO */
 export interface PluginConnectionCheckDTO {
   pluginId: string
-  appliedEpoch: string
   appliedRevision: string
   checkedAt: number
   reachability: PluginConnectionReachability
@@ -57,13 +56,11 @@ export interface PluginConnectionCheckDTO {
 
 /** Java：fun.fengwk.kkstudio.share.ai.plugin.PluginConnectionCheckRequestDTO */
 export interface PluginConnectionCheckRequestDTO {
-  expectedEpoch: string
   expectedRevision: string
 }
 
 /** Java：fun.fengwk.kkstudio.share.canvas.CanvasFunctionVersionDTO */
 export interface CanvasFunctionVersionDTO {
-  catalogEpoch: string
   definitionFingerprint: string
 }
 

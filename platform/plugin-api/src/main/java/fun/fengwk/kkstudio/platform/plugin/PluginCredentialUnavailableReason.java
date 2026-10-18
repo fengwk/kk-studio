@@ -6,9 +6,6 @@ public enum PluginCredentialUnavailableReason {
   /** 该 Plugin 尚无凭据行，用户必须先完成登录。 */
   NOT_CONNECTED,
 
-  /** 部署主密钥不可用或密文认证解密失败，读写 fail closed。 */
-  KEY_UNAVAILABLE,
-
   /** 刷新正在持有 lease，Tool 侧暂停凭据解析；调用方可稍后重试。 */
   AUTH_REFRESHING,
 
