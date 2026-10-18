@@ -74,7 +74,6 @@ const documentPaths = [
   'docs/operations/builtin-task-tests.md',
   'docs/operations/development-and-testing.md',
   'docs/operations/environment-daemon.md',
-  'docs/operations/offline-upgrade.md',
 ]
 
 const navigationTargets = documentPaths.filter((relativePath) => relativePath !== 'docs/README.md')

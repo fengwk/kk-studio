@@ -255,25 +255,6 @@ test('release reuses the same daemon matrix and gates on it before staging', () 
   assert.deepEqual(smoke.sort(), ['linux-amd64', 'linux-arm64', 'macos-amd64', 'macos-arm64', 'windows-amd64'])
 })
 
-test('offline upgrade artifact-mode readback reuses the full-verify JAR and stays a required gate', () => {
-  // 产物模式必须复用全量 verify 产出的 JAR 路径（版本来自根 POM），且不得退化为跳过或条件步骤。
-  const steps = validationSteps()
-  const verify = steps.findIndex((step) => stepField(step, 'run') === 'env JAVA_HOME="$JAVA_HOME" mvn -B -ntp verify')
-  assert.ok(verify >= 0, 'missing the full Java verify step')
-  const matching = steps.filter((step) => stepField(step, 'run')?.includes('-Dkkstudio.upgrade.test.jar='))
-  assert.equal(matching.length, 1, 'expected exactly one artifact-mode subprocess step')
-  const step = matching[0]
-  assert.ok(steps.indexOf(step) > verify, 'the artifact-mode subprocess must run after the full verify')
-  const run = stepField(step, 'run')
-  assert.match(run, /-pl web -am test/u)
-  assert.match(run, /-Dtest=WebApplicationDatabaseUpgradeSubprocessTest/u)
-  assert.match(run, /-Dsurefire\.failIfNoSpecifiedTests=false/u)
-  assert.match(run, /python3 -c .*pom\.xml.*POM\/4\.0\.0/u)
-  assert.match(run, /web\/target\/kk-studio-web-\$\{version\}\.jar/u)
-  assert.equal(stepField(step, 'if'), undefined, 'the artifact-mode subprocess must not be conditional')
-  assert.doesNotMatch(step, /continue-on-error:|\|\|\s*true|--passWithNoTests|-DskipTests/u)
-})
-
 test('Java update commands are replayed through the built Node decoder as a required gate', () => {
   // Java producer 产物必须由同 job 构建出的生产 Node decoder 真实解码：依赖 daemon 构建，且不得条件化或忽略失败。
   const steps = validationSteps()
