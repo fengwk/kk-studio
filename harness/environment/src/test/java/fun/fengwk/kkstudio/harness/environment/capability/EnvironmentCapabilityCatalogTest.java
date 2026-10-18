@@ -16,7 +16,7 @@ import java.util.Set;
 /** 固定 atomic capability ID 与 descriptor 顺序的契约测试。 */
 class EnvironmentCapabilityCatalogTest {
 
-  /** 10 个 ID 必须按 wire/执行契约固定顺序出现且全局唯一。 */
+  /** 11 个 ID 必须按 wire/执行契约固定顺序出现且全局唯一。 */
   @Test
   void exposesStableIdsInFixedOrder() {
     List<EnvironmentCapabilityId> expected =
@@ -24,6 +24,7 @@ class EnvironmentCapabilityCatalogTest {
             EnvironmentCapabilityIds.FS_READ,
             EnvironmentCapabilityIds.FS_WRITE,
             EnvironmentCapabilityIds.FS_EDIT,
+            EnvironmentCapabilityIds.FS_EDIT_PREVIEW,
             EnvironmentCapabilityIds.PROCESS_EXEC,
             EnvironmentCapabilityIds.FS_GREP,
             EnvironmentCapabilityIds.FS_FIND,
@@ -32,12 +33,13 @@ class EnvironmentCapabilityCatalogTest {
             EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE,
             EnvironmentCapabilityIds.SKILL_SYNC);
 
-    assertEquals("2", EnvironmentCapabilityCatalog.version());
+    assertEquals("3", EnvironmentCapabilityCatalog.version());
     assertEquals(
         List.of(
             "fs.read",
             "fs.write",
             "fs.edit",
+            "fs.edit.preview",
             "process.exec",
             "fs.grep",
             "fs.find",
@@ -60,7 +62,7 @@ class EnvironmentCapabilityCatalogTest {
     assertEquals(
         expected.size(), EnvironmentCapabilityCatalog.descriptors().stream().distinct().count());
     for (EnvironmentCapabilityDescriptor descriptor : EnvironmentCapabilityCatalog.descriptors()) {
-      assertEquals("2", descriptor.version(), descriptor.id().value());
+      assertEquals("3", descriptor.version(), descriptor.id().value());
     }
     // Schema 是参数必填性的唯一事实源；只有无目标 path 的进程执行始终需要 workdir。
     assertEquals(
@@ -91,6 +93,10 @@ class EnvironmentCapabilityCatalogTest {
         EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_EDIT)
             .inputSchema()
             .required());
+    assertEquals(
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_EDIT).inputSchema(),
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_EDIT_PREVIEW)
+            .inputSchema());
     assertEquals(
         Set.of("path", "pattern"),
         EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_GREP)
@@ -215,6 +221,7 @@ class EnvironmentCapabilityCatalogTest {
             EnvironmentCapabilityIds.FS_READ,
             EnvironmentCapabilityIds.FS_WRITE,
             EnvironmentCapabilityIds.FS_EDIT,
+            EnvironmentCapabilityIds.FS_EDIT_PREVIEW,
             EnvironmentCapabilityIds.FS_GREP,
             EnvironmentCapabilityIds.FS_FIND,
             EnvironmentCapabilityIds.LSP_GOTO_DEFINITION,
@@ -226,7 +233,8 @@ class EnvironmentCapabilityCatalogTest {
           switch (id.value()) {
             case "fs.read" -> "{\"path\":\"/app/file.txt\"}";
             case "fs.write" -> "{\"path\":\"/app/file.txt\",\"content\":\"hello\"}";
-            case "fs.edit" -> "{\"path\":\"/app/file.txt\",\"old_string\":\"a\",\"new_string\":\"b\"}";
+            case "fs.edit",
+                "fs.edit.preview" -> "{\"path\":\"/app/file.txt\",\"old_string\":\"a\",\"new_string\":\"b\"}";
             case "fs.grep" -> "{\"pattern\":\"foo\",\"path\":\"/app\"}";
             case "fs.find" -> "{\"pattern\":\"*.java\",\"path\":\"/app\"}";
             case "lsp.goto-definition" -> "{\"path\":\"/app/file.ts\",\"line\":1}";

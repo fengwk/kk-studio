@@ -6,6 +6,11 @@ public final class EnvironmentCapabilityIds {
   public static final EnvironmentCapabilityId FS_READ = new EnvironmentCapabilityId("fs.read");
   public static final EnvironmentCapabilityId FS_WRITE = new EnvironmentCapabilityId("fs.write");
   public static final EnvironmentCapabilityId FS_EDIT = new EnvironmentCapabilityId("fs.edit");
+
+  /** 内部只读审查能力，不向模型注册为工具。 */
+  public static final EnvironmentCapabilityId FS_EDIT_PREVIEW =
+      new EnvironmentCapabilityId("fs.edit.preview");
+
   public static final EnvironmentCapabilityId PROCESS_EXEC =
       new EnvironmentCapabilityId("process.exec");
   public static final EnvironmentCapabilityId FS_GREP = new EnvironmentCapabilityId("fs.grep");

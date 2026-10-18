@@ -11,7 +11,6 @@ import {
   normalizeToLf,
   parseLineEndingDocument,
   serializeLineEndingDocument,
-  truncateInline,
 } from '../../src/coding/files.js'
 import {
   createUtf16Decoder,
@@ -153,11 +152,11 @@ describe('edit 行尾/ diff 辅助', () => {
     expect(diff).toContain('|n0')
   })
 
-  it('truncateInline 在代理对边界截断', () => {
-    const long = `${'a'.repeat(30 * 1024 - 1)}\ud83d\ude00`
-    const truncated = truncateInline(long)
-    expect(truncated.endsWith('... (diff truncated to fit inline limit)')).toBe(true)
-    expect(truncated).not.toContain('\ud83d\ude00')
+  it('审查 diff 完整保留超过旧内联长度的变更和代理对', () => {
+    const long = `${'a'.repeat(30 * 1024 - 1)}😀`
+    const diff = buildDiff(parseLineEndingDocument('old\n'), parseLineEndingDocument(`${long}\n`))
+    expect(diff).toContain(`+ 1|${long}`)
+    expect(diff).not.toContain('diff truncated')
   })
 })
 

@@ -631,6 +631,7 @@ export class Runtime {
         capabilityId: invoke.capabilityId,
         arguments: invoke.arguments,
         timeoutMillis: invoke.timeoutMillis,
+        ...(invoke.expectedFile === undefined ? {} : { expectedFile: invoke.expectedFile }),
       }
       void this.track(this.execute(invocation, executor, call))
     } catch (error) {

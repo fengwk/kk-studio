@@ -633,7 +633,8 @@ public final class EnvironmentDaemonServer
                 descriptor.id(),
                 descriptor.version(),
                 request.call().argumentsJson(),
-                request.timeout()));
+                request.timeout(),
+                request.expectedFile()));
     ActiveInvocation active =
         new ActiveInvocation(environmentId, invocationId, listener, invokePayload);
     DaemonOfferResult outcome = null;

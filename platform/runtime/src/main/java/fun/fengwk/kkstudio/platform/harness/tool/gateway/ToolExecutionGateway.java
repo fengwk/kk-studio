@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.harness.tool.gateway;
 import lombok.extern.slf4j.Slf4j;
 
 import fun.fengwk.kkstudio.harness.builtin.CompletedToolExecutionHandle;
+import fun.fengwk.kkstudio.harness.builtin.environment.EnvironmentCapabilityTool;
 import fun.fengwk.kkstudio.harness.common.result.BinaryResultContent;
 import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.harness.common.result.ResultContent;
@@ -29,10 +30,12 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityE
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionListener;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionRequest;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityFailedException;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilitySendUncertainException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTransport;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
+import fun.fengwk.kkstudio.harness.environment.capability.ExpectedFile;
 import fun.fengwk.kkstudio.harness.runtime.admission.ConcurrencyAdmission;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAccess;
@@ -76,7 +79,7 @@ import java.util.function.Supplier;
 /**
  * 生产工具执行网关，连接 Harness Runtime、运行时工具目录和 Contributor {@link Tool} SPI。
  *
- * <p>{@link #preflight} 只校验冻结绑定与当前目录是否一致，拒绝未选择 Environment 的环境工具，然后执行权限判定。{@link #start}
+ * <p>{@link #preflight} 校验冻结绑定、Environment 与权限；需要审批的文件编辑还会只读生成真实文件审查。{@link #start}
  * 获取并发租约，装配分支视图与可选环境绑定，再提交异步执行。
  *
  * <p>{@link #preflight} 与 {@link #start} 都按 {@code binding.catalogEpoch()} 取得该 epoch
@@ -243,7 +246,13 @@ public final class ToolExecutionGateway implements ToolGateway {
       PermissionAction action = evaluation.action();
       return switch (action) {
         case ALLOW -> new ToolGateway.Allow();
-        case ASK -> new ToolGateway.Ask("Permission rules require approval");
+        case ASK -> {
+          String reason = "Permission rules require approval";
+          yield resolved.contribution().tool() instanceof EnvironmentCapabilityTool environmentTool
+                  && EnvironmentCapabilityIds.FS_EDIT.equals(environmentTool.capability().id())
+              ? EditReviewPreflight.prepare(capabilityTransport, request, reason)
+              : new ToolGateway.Ask(reason);
+        }
         case DENY -> new ToolGateway.Deny(
             new ToolInvocationError(PERMISSION_DENIED_KIND, PERMISSION_DENIED_MESSAGE));
       };
@@ -304,7 +313,8 @@ public final class ToolExecutionGateway implements ToolGateway {
                   execution.request().binding().environmentId(),
                   capabilityTransport,
                   execution.invocationId().toString(),
-                  execution.request().call().id())
+                  execution.request().call().id(),
+                  execution.expectedFile())
               : null;
       ToolExecutionContext context =
           new ToolExecutionContext(
@@ -536,16 +546,19 @@ public final class ToolExecutionGateway implements ToolGateway {
     private final EnvironmentCapabilityTransport capabilityTransport;
     private final String invocationId;
     private final String modelCallId;
+    private final ExpectedFile expectedFile;
 
     private PlatformBoundEnvironment(
         EnvironmentId environmentId,
         EnvironmentCapabilityTransport capabilityTransport,
         String invocationId,
-        String modelCallId) {
+        String modelCallId,
+        ExpectedFile expectedFile) {
       this.environmentId = Objects.requireNonNull(environmentId, "environmentId");
       this.capabilityTransport = Objects.requireNonNull(capabilityTransport, "capabilityTransport");
       this.invocationId = Objects.requireNonNull(invocationId, "invocationId");
       this.modelCallId = Objects.requireNonNull(modelCallId, "modelCallId");
+      this.expectedFile = expectedFile;
     }
 
     @Override
@@ -568,7 +581,7 @@ public final class ToolExecutionGateway implements ToolGateway {
             new EnvironmentCapabilityCall(invocationId, request.call().argumentsJson());
         EnvironmentCapabilityExecutionRequest capabilityRequest =
             new EnvironmentCapabilityExecutionRequest(
-                capability, capabilityCall, request.timeout());
+                capability, capabilityCall, request.timeout(), expectedFile);
         EnvironmentCapabilityExecutionHandle transportHandle =
             capabilityTransport.invoke(environmentId, capabilityRequest, capabilityListener);
         if (transportHandle == null) {

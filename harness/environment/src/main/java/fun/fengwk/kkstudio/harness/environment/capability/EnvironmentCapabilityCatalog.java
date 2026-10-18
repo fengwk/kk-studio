@@ -24,7 +24,7 @@ import java.util.stream.Collectors;
 public final class EnvironmentCapabilityCatalog {
 
   /** 基础 capability 与 catalog 版本。 */
-  public static final String VERSION = "2";
+  public static final String VERSION = "3";
 
   private static final String RESOURCE_PREFIX =
       "/fun/fengwk/kkstudio/harness/environment/capability/schemas/";
@@ -63,6 +63,7 @@ public final class EnvironmentCapabilityCatalog {
         descriptor(EnvironmentCapabilityIds.FS_READ, Duration.ofMinutes(1)),
         descriptor(EnvironmentCapabilityIds.FS_WRITE, Duration.ofMinutes(1)),
         descriptor(EnvironmentCapabilityIds.FS_EDIT, Duration.ofMinutes(1)),
+        descriptor(EnvironmentCapabilityIds.FS_EDIT_PREVIEW, Duration.ofMinutes(1)),
         descriptor(EnvironmentCapabilityIds.PROCESS_EXEC, Duration.ofMinutes(5)),
         descriptor(EnvironmentCapabilityIds.FS_GREP, Duration.ofMinutes(1)),
         descriptor(EnvironmentCapabilityIds.FS_FIND, Duration.ofMinutes(1)),
