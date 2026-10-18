@@ -10,6 +10,6 @@ public class EnvironmentIdeViewDTO {
   private String environmentId;
   private String directory;
 
-  /** IDE 独立 Origin 上的短时一次性 bootstrap 入口；CHANGE_DIRECTORY 无需更换 iframe URL 时为 null。 */
+  /** Studio 根相对的短时一次性 bootstrap 入口；CHANGE_DIRECTORY 无需更换 iframe URL 时为 null。 */
   private String entryUrl;
 }

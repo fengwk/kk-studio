@@ -17,7 +17,6 @@ import fun.fengwk.kkstudio.harness.environment.server.IdeCommandTransport;
 import fun.fengwk.kkstudio.harness.environment.server.IdeRequest;
 import fun.fengwk.kkstudio.harness.environment.server.IdeSessionIdentity;
 import fun.fengwk.kkstudio.platform.environment.ide.EnvironmentIdeServiceImpl;
-import fun.fengwk.kkstudio.platform.environment.ide.IdeOriginProperties;
 import fun.fengwk.kkstudio.platform.environment.ide.InMemoryIdeBootstrapTicketService;
 import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
@@ -55,11 +54,8 @@ class ClusterEnvironmentIdeServiceTest {
 
   @BeforeEach
   void setUp() {
-    IdeOriginProperties origin = new IdeOriginProperties();
-    origin.setOriginTemplate("https://{environmentId}.ide.example.com");
     EnvironmentIdeServiceImpl local =
-        new EnvironmentIdeServiceImpl(
-            localTransport, origin, new InMemoryIdeBootstrapTicketService());
+        new EnvironmentIdeServiceImpl(localTransport, new InMemoryIdeBootstrapTicketService());
     service = new ClusterEnvironmentIdeService(registry, client, local);
   }
 

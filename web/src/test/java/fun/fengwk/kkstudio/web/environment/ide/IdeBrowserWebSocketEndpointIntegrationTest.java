@@ -15,8 +15,6 @@ import okio.ByteString;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.web.server.LocalServerPort;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
@@ -50,14 +48,6 @@ class IdeBrowserWebSocketEndpointIntegrationTest extends WebPostgresTestSupport 
 
   private static final EnvironmentId ENVIRONMENT =
       EnvironmentId.parse("22222222-2222-2222-2222-222222222222");
-
-  @DynamicPropertySource
-  static void ideGatewayProperties(DynamicPropertyRegistry registry) {
-    registry.add(
-        "kk-studio.harness.ide-gateway.stream-url-template",
-        () -> "wss://gateway.test" + IdeGatewayProperties.STREAM_PATH);
-    registry.add("kk-studio.harness.ide.origin-template", () -> "https://{environmentId}.ide.test");
-  }
 
   @LocalServerPort private int port;
 
@@ -94,9 +84,9 @@ class IdeBrowserWebSocketEndpointIntegrationTest extends WebPostgresTestSupport 
       WebSocket socket =
           browser.newWebSocket(
               new Request.Builder()
-                  .url("ws://" + ENVIRONMENT + ".ide.test:" + port + "/ws/echo")
+                  .url("ws://localhost:" + port + "/environment-ide/" + ENVIRONMENT + "/ws/echo")
                   .header("Cookie", cookieHeader(cookie))
-                  .header("Origin", "http://" + ENVIRONMENT + ".ide.test:" + port)
+                  .header("Origin", "http://localhost:" + port)
                   .build(),
               new WebSocketListener() {
                 @Override

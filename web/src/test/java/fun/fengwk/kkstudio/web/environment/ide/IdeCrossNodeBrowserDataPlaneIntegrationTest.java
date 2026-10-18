@@ -66,7 +66,6 @@ import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.environment.cluster.HmacClusterInternalAuthentication;
 import fun.fengwk.kkstudio.platform.environment.cluster.JdbcClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.environment.ide.IdeBootstrapTicketService;
-import fun.fengwk.kkstudio.platform.environment.ide.IdeOriginProperties;
 import fun.fengwk.kkstudio.platform.environment.ide.InMemoryIdeBootstrapTicketService;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
@@ -107,11 +106,11 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * 跨节点浏览器数据面的真实两节点一跳集成：浏览器落在非 owner 节点 A 的 IDE Origin，A 用内部 HMAC 单跳转发给 READY owner B。
+ * 跨节点浏览器数据面的真实两节点一跳集成：浏览器落在非 owner 节点 A 的 IDE 网关路径，A 用内部 HMAC 单跳转发给 READY owner B。
  *
- * <p>B 是真实应用上下文（PostgreSQL 控制面、真实内部 REST/WS 端点、真实数据面）；A 是独立内嵌 Tomcat，只承载 IDE Origin 入口（host guard +
- * 数据面 + 浏览器 WS 网关）与公开反向 stream 端点，经真实 HTTP/WS 一跳连到 B。覆盖：20 MiB HTTP 与 WS echo 经 A→B 完整传输、
- * bootstrap/cookie 在 owner 消费并复用同一 cookie、两面板并存、内部 HMAC 无效、owner 切换/租约失效 fail-closed、peer 断开不自动重放。
+ * <p>B 是真实应用上下文（PostgreSQL 控制面、真实内部 REST/WS 端点、真实数据面）；A 是独立内嵌 Tomcat，只承载 IDE 网关入口（网关过滤器 + 数据面 + 浏览器
+ * WS 网关）与公开反向 stream 端点，经真实 HTTP/WS 一跳连到 B。覆盖：20 MiB HTTP 与 WS echo 经 A→B 完整传输、 bootstrap/cookie 在
+ * owner 消费并复用同一 cookie、两面板并存、内部 HMAC 无效、owner 切换/租约失效 fail-closed、peer 断开不自动重放。
  */
 class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport {
 
@@ -122,8 +121,6 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
 
   private static final int BODY_BYTES = 20 * 1024 * 1024;
 
-  private static final String ORIGIN_TEMPLATE = "https://{environmentId}.ide.test";
-
   private static Tomcat forwarderNode;
 
   private static int forwarderPort;
@@ -131,10 +128,6 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
   @DynamicPropertySource
   static void clusterProperties(DynamicPropertyRegistry registry) {
     registry.add("kk-studio.cluster.secret", () -> SECRET);
-    registry.add(
-        "kk-studio.harness.ide-gateway.stream-url-template",
-        () -> "wss://studio-lb" + IdeGatewayProperties.STREAM_PATH);
-    registry.add("kk-studio.harness.ide.origin-template", () -> ORIGIN_TEMPLATE);
   }
 
   @LocalServerPort private int ownerPort;
@@ -162,7 +155,7 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
     }
   }
 
-  /** 20 MiB 响应体经「浏览器 → A 的 IDE Origin → B 的内部数据面 → Daemon 反向连接」完整回到浏览器。 */
+  /** 20 MiB 响应体经「浏览器 → A 的 IDE 网关路径 → B 的内部数据面 → Daemon 反向连接」完整回到浏览器。 */
   @Test
   void forwardsTwentyMiBHttpThroughNonOwnerOrigin() throws Exception {
     startForwarderNode(nodeRegistry.localNodeId(), ownerPort);
@@ -233,12 +226,16 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
       assertEquals(303, first.code());
       String firstCookie = sessionCookieOf(first);
       assertNotNull(firstCookie, "owner must set the host-only IDE session cookie");
-      assertEquals("/?workspace=%2Fmanaged%2Fone", first.header("Location"));
+      assertEquals(
+          "/environment-ide/" + ENVIRONMENT + "/?workspace=%2Fmanaged%2Fone",
+          first.header("Location"));
 
       Response second = bootstrap(browser, secondTicket);
       assertEquals(303, second.code());
       assertEquals(firstCookie, sessionCookieOf(second), "same generation must reuse one cookie");
-      assertEquals("/?workspace=%2Fmanaged%2Ftwo", second.header("Location"));
+      assertEquals(
+          "/environment-ide/" + ENVIRONMENT + "/?workspace=%2Fmanaged%2Ftwo",
+          second.header("Location"));
 
       // 两面板并存：同一 cookie 对两个受管 workspace 都已授权。
       assertEquals(1, sessions.size());
@@ -503,10 +500,10 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
                   new ClientEndpointConfig.Configurator() {
                     @Override
                     public void beforeRequest(Map<String, List<String>> headers) {
-                      // TCP 目标是 localhost，但 IDE Origin 的 Host/Origin 与浏览器完全一致。
-                      headers.put("Host", List.of(ENVIRONMENT + ".ide.test:" + forwarderPort));
+                      // TCP 目标是 localhost，Studio 同源路径下的 Host/Origin 与浏览器完全一致。
+                      headers.put("Host", List.of("localhost:" + forwarderPort));
                       headers.put("Cookie", List.of(cookieHeader(cookie)));
-                      headers.put("Origin", List.of(ideOriginUrl(forwarderPort, "")));
+                      headers.put("Origin", List.of("http://localhost:" + forwarderPort));
                     }
                   })
               .build();
@@ -532,7 +529,7 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
                 }
               },
               config,
-              URI.create("ws://localhost:" + forwarderPort + path));
+              URI.create(ideWsUrl(forwarderPort, path)));
     }
 
     boolean awaitOpen() throws InterruptedException {
@@ -932,11 +929,16 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
   }
 
   private String ideOriginUrl(int port, String path) {
-    return "http://" + ENVIRONMENT + ".ide.test:" + port + path;
+    if (path == null || path.isEmpty()) {
+      return "http://localhost:" + port;
+    }
+    String p = path.startsWith("/") ? path : "/" + path;
+    return "http://localhost:" + port + "/environment-ide/" + ENVIRONMENT + p;
   }
 
   private String ideWsUrl(int port, String path) {
-    return "ws://" + ENVIRONMENT + ".ide.test:" + port + path;
+    String p = path.startsWith("/") ? path : "/" + path;
+    return "ws://localhost:" + port + "/environment-ide/" + ENVIRONMENT + p;
   }
 
   /** 建立本 Environment 的 READY owner 行：owner 为给定节点实例，租约在未来。 */
@@ -983,10 +985,9 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
   }
 
   /**
-   * 启动非 owner 节点 A：独立内嵌 Tomcat，承载 IDE Origin 入口（host guard + 数据面 + 浏览器 WS 网关）与公开反向 stream 端点。
+   * 启动非 owner 节点 A：独立内嵌 Tomcat，承载 IDE 网关入口（网关过滤器 + 数据面 + 浏览器 WS 网关）与公开反向 stream 端点。
    *
-   * <p>A 自己不做 cookie/代际鉴权，全部单跳交给 owner B；这正是「非 owner 的 IDE Origin 请求先单跳到 owner 再消费
-   * bootstrap/cookie」。
+   * <p>A 自己不做 cookie/代际鉴权，全部单跳交给 owner B；这正是「非 owner 的 IDE 网关请求先单跳到 owner 再消费 bootstrap/cookie」。
    */
   private static synchronized void startForwarderNode(UUID ownerNodeId, int ownerPort)
       throws Exception {
@@ -1006,10 +1007,6 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
                 ClusterIdeOwnerRoute.remote(
                     ownerNodeId, URI.create("http://localhost:" + ownerPort)));
     IdeGatewayProperties properties = new IdeGatewayProperties();
-    properties.setStreamUrlTemplate("wss://studio-lb" + IdeGatewayProperties.STREAM_PATH);
-    IdeOriginProperties originProperties = new IdeOriginProperties();
-    originProperties.setOriginTemplate(ORIGIN_TEMPLATE);
-    IdeHostResolver hostResolver = new IdeHostResolver(originProperties);
     IdeBrowserSessionRegistry registry =
         new IdeBrowserSessionRegistry(new SecureRandom(), Clock.systemUTC(), Duration.ofHours(1));
     IdeRemoteDataPlaneForwarder forwarder = new IdeRemoteDataPlaneForwarder(client, properties);
@@ -1033,6 +1030,7 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
             remoteRegistry,
             client,
             ideWebSocketClient(properties));
+    IdeGatewayFilter filter = new IdeGatewayFilter(dataPlane, browserGateway);
     IdeReverseStreamWebSocketHandler reverseHandler =
         new IdeReverseStreamWebSocketHandler(
             new InMemoryIdeStreamTicketService(),
@@ -1050,28 +1048,16 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
     context.addServletContainerInitializer(new WsSci(), null);
     Tomcat.addServlet(
         context,
-        "ideOrigin",
+        "ideGateway",
         new HttpServlet() {
           @Override
           protected void service(HttpServletRequest request, HttpServletResponse response)
               throws ServletException, IOException {
-            Optional<EnvironmentId> environmentId = hostResolver.resolve(request.getHeader("Host"));
-            if (environmentId.isEmpty()) {
-              response.sendError(HttpServletResponse.SC_NOT_FOUND);
-              return;
-            }
-            String path = request.getRequestURI();
-            if (path.equals(originProperties.getBootstrapPath())) {
-              dataPlane.handleBootstrap(environmentId.get(), request, response);
-              return;
-            }
-            String query = request.getQueryString();
-            String rawPathAndQuery = query == null ? path : path + "?" + query;
-            if (IdeBrowserWebSocketGateway.isWebSocketUpgrade(request)) {
-              browserGateway.handleUpgrade(environmentId.get(), rawPathAndQuery, request, response);
-              return;
-            }
-            dataPlane.handleHttp(environmentId.get(), rawPathAndQuery, request, response);
+            filter.doFilter(
+                request,
+                response,
+                (req, resp) ->
+                    ((HttpServletResponse) resp).sendError(HttpServletResponse.SC_NOT_FOUND));
           }
         });
     Tomcat.addServlet(
@@ -1087,7 +1073,7 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
                 .handleRequest(request, response);
           }
         });
-    context.addServletMappingDecoded("/", "ideOrigin");
+    context.addServletMappingDecoded("/environment-ide/*", "ideGateway");
     context.addServletMappingDecoded(IdeGatewayProperties.STREAM_PATH + "/*", "ideReverseStream");
     tomcat.start();
     ServerContainer serverContainer =

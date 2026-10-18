@@ -38,8 +38,8 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * IDE 独立 Origin 上浏览器原生 WebSocket 的数据面：本节点是 READY owner 时直接配对 Daemon 反向连接；不是 owner 时把浏览器 WS 单跳到
- * owner 的内部数据端点（owner 侧做 cookie/代际鉴权与 Daemon 配对），本节点只做有界原生分段桥接。
+ * IDE 网关上浏览器原生 WebSocket 的数据面：本节点是 READY owner 时直接配对 Daemon 反向连接；不是 owner 时把浏览器 WS 单跳到 owner
+ * 的内部数据端点（owner 侧做 cookie/代际鉴权与 Daemon 配对），本节点只做有界原生分段桥接。
  *
  * <p>两条路径都保持原生分段语义（partial + FIN、≤64 KiB），因此大文件/长连接编辑不会造成整包内存峰值。握手前一律完成精确同源校验； 本地路径额外校验 host-only
  * 会话 cookie 与代际，远端路径由 owner 完成同样的校验。任何失败都以 HTTP 状态码 fail-closed，绝不回退到本地或 其它节点。
@@ -96,7 +96,7 @@ public final class IdeBrowserWebSocketGateway {
   }
 
   /**
-   * 处理一个 IDE Origin 上的浏览器 WS 升级：先做精确同源校验（本地路径还要 cookie/代际），再执行容器级握手。
+   * 处理一个 IDE 网关路径上的浏览器 WS 升级：先做精确同源校验（本地路径还要 cookie/代际），再执行容器级握手。
    *
    * <p>校验失败直接以 HTTP 状态码拒绝，不建立任何反向连接。
    */
@@ -107,10 +107,6 @@ public final class IdeBrowserWebSocketGateway {
       HttpServletResponse response)
       throws ServletException, IOException {
     Objects.requireNonNull(environmentId, "environmentId");
-    if (!properties.configured()) {
-      response.sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
-      return;
-    }
     if (!IdeOriginPolicy.webSocketHandshakeAllowed(request)) {
       response.sendError(HttpServletResponse.SC_FORBIDDEN);
       return;
