@@ -22,9 +22,23 @@ describe('mutation-review parser and extractor', () => {
       sha256: validSha,
     })
 
-    // Missing or invalid path
+    // Missing or blank path
     expect(parseEditReview({ path: '', diff: '+a', sha256: validSha })).toBeNull()
+    expect(parseEditReview({ path: '   ', diff: '+a', sha256: validSha })).toBeNull()
     expect(parseEditReview({ diff: '+a', sha256: validSha })).toBeNull()
+
+    // Extra unknown fields rejected
+    expect(parseEditReview({ path: '/foo', diff: '+a', sha256: validSha, extra: true })).toBeNull()
+    expect(parseEditReview({ path: '/foo', diff: '+a', sha256: validSha, reason: 'test' })).toBeNull()
+
+    // Preserves path without trimming (e.g. spaces in path)
+    expect(
+      parseEditReview({ path: '/path with spaces/App.java', diff: '+a', sha256: validSha }),
+    ).toEqual({
+      path: '/path with spaces/App.java',
+      diff: '+a',
+      sha256: validSha,
+    })
 
     // Missing, empty or non-string diff (diff must be non-empty)
     expect(parseEditReview({ path: '/foo', diff: '', sha256: validSha })).toBeNull()

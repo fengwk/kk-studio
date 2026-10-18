@@ -1767,6 +1767,182 @@ describe('thread timeline', () => {
       ),
     ).toBe(true)
   })
+
+  it('projects editReview from pending ToolInvocation approvalJson.editReview onto call message', () => {
+    const validSha = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+    const review = {
+      path: '/canonical/src/App.tsx',
+      diff: '-1|old\n+1|new',
+      sha256: validSha,
+    }
+    const timeline = buildThreadTimeline(
+      [
+        entry('asst-1', 'MESSAGE', messagePayload('ASSISTANT', [{
+          type: 'tool_call',
+          toolCallId: 'call-edit-1',
+          toolName: 'edit',
+          rendererKey: 'edit',
+          argumentsJson: '{"path":"/canonical/src/App.tsx","old_string":"old","new_string":"new"}',
+        }])),
+      ],
+      [],
+      [
+        invocation('inv-edit-1', 'asst-1', 'call-edit-1', {
+          toolName: 'edit',
+          rendererKey: 'edit',
+          status: 'WAITING_APPROVAL',
+          approvalJson: JSON.stringify({
+            required: true,
+            editReview: review,
+          }),
+        }),
+      ],
+    )
+
+    const callMsg = timeline.messages.find(
+      (m): m is ToolDialogueMessage => m.role === 'tool' && m.phase === 'call',
+    )
+    expect(callMsg?.approval?.editReview).toEqual(review)
+    expect(callMsg?.editReview).toEqual(review)
+  })
+
+  it('projects editReview from terminal invocation resultJson details.editReview', () => {
+    const validSha = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+    const resultReview = {
+      path: '/canonical/src/AutoAllowed.tsx',
+      diff: '-10|before\n+10|after',
+      sha256: validSha,
+    }
+    const timeline = buildThreadTimeline(
+      [
+        entry('asst-2', 'MESSAGE', messagePayload('ASSISTANT', [{
+          type: 'tool_call',
+          toolCallId: 'call-edit-2',
+          toolName: 'edit',
+          rendererKey: 'edit',
+          argumentsJson: '{"path":"/canonical/src/AutoAllowed.tsx"}',
+        }])),
+      ],
+      [],
+      [
+        invocation('inv-edit-2', 'asst-2', 'call-edit-2', {
+          toolName: 'edit',
+          rendererKey: 'edit',
+          status: 'SUCCEEDED',
+          resultJson: JSON.stringify({
+            toolCallId: 'call-edit-2',
+            contents: [{ type: 'text', text: 'ok' }],
+            error: false,
+            details: { editReview: resultReview },
+          }),
+        }),
+      ],
+    )
+
+    const callMsg = timeline.messages.find(
+      (m): m is ToolDialogueMessage => m.role === 'tool' && m.phase === 'call',
+    )
+    const resultMsg = timeline.messages.find(
+      (m): m is ToolDialogueMessage => m.role === 'tool' && m.phase === 'result',
+    )
+    expect(callMsg?.editReview).toEqual(resultReview)
+    expect(resultMsg?.editReview).toEqual(resultReview)
+  })
+
+  it('projects editReview from durable tool_result entry without pending invocations', () => {
+    const validSha = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+    const durableReview = {
+      path: '/canonical/src/Durable.tsx',
+      diff: '-20|durableOld\n+20|durableNew',
+      sha256: validSha,
+    }
+    const timeline = buildThreadTimeline(
+      [
+        entry('asst-3', 'MESSAGE', messagePayload('ASSISTANT', [{
+          type: 'tool_call',
+          toolCallId: 'call-edit-3',
+          toolName: 'edit',
+          rendererKey: 'edit',
+          argumentsJson: '{"path":"/canonical/src/Durable.tsx"}',
+        }])),
+        entry('result-3', 'MESSAGE', {
+          ...messagePayload('TOOL', [{
+            type: 'tool_result',
+            toolCallId: 'call-edit-3',
+            toolName: 'edit',
+            rendererKey: 'edit',
+            error: false,
+            details: { editReview: durableReview },
+            contents: [{ type: 'text', text: 'durable applied' }],
+          }]),
+          toolResultMetadata: {
+            assistantEntryId: 'asst-3',
+            toolCallId: 'call-edit-3',
+            callIndex: 0,
+            status: 'SUCCEEDED',
+            synthetic: false,
+            reason: null,
+          },
+        }),
+      ],
+      [],
+      [],
+    )
+
+    const resultMsg = timeline.messages.find(
+      (m): m is ToolDialogueMessage => m.role === 'tool' && m.phase === 'result',
+    )
+    expect(resultMsg?.editReview).toEqual(durableReview)
+  })
+
+  it('prioritizes approved review snapshot on call message when approval and result conflict', () => {
+    const validSha = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
+    const approvalReview = {
+      path: '/canonical/src/Conflict.tsx',
+      diff: '-1|approvedDiff\n+1|approvedDiff',
+      sha256: validSha,
+    }
+    const resultReview = {
+      path: '/canonical/src/Conflict.tsx',
+      diff: '-1|resultDiff\n+1|resultDiff',
+      sha256: validSha,
+    }
+    const timeline = buildThreadTimeline(
+      [
+        entry('asst-4', 'MESSAGE', messagePayload('ASSISTANT', [{
+          type: 'tool_call',
+          toolCallId: 'call-edit-4',
+          toolName: 'edit',
+          rendererKey: 'edit',
+          argumentsJson: '{"path":"/canonical/src/Conflict.tsx"}',
+        }])),
+      ],
+      [],
+      [
+        invocation('inv-edit-4', 'asst-4', 'call-edit-4', {
+          toolName: 'edit',
+          rendererKey: 'edit',
+          status: 'SUCCEEDED',
+          approvalJson: JSON.stringify({
+            required: true,
+            decision: 'ALLOWED',
+            editReview: approvalReview,
+          }),
+          resultJson: JSON.stringify({
+            toolCallId: 'call-edit-4',
+            contents: [{ type: 'text', text: 'applied' }],
+            error: false,
+            details: { editReview: resultReview },
+          }),
+        }),
+      ],
+    )
+
+    const callMsg = timeline.messages.find(
+      (m): m is ToolDialogueMessage => m.role === 'tool' && m.phase === 'call',
+    )
+    expect(callMsg?.editReview).toEqual(approvalReview)
+  })
 })
 
 function entry(entryId: string, entryType: EntryType, payload: Record<string, unknown>): HarnessSessionEntryDTO {

@@ -1823,13 +1823,9 @@ export const aiCatalog = {
     'en-US': 'New text (new_string):',
     'zh-CN': '新文本 (new_string)：',
   },
-  'ai.runtime.mutation.targetPath': {
-    'en-US': 'Target file:',
-    'zh-CN': '目标文件：',
-  },
-  'ai.runtime.mutation.workdir': {
-    'en-US': 'Working directory:',
-    'zh-CN': '工作目录：',
+  'ai.runtime.mutation.emptyFile': {
+    'en-US': '(empty file)',
+    'zh-CN': '（空文件）',
   },
   'ai.runtime.mutation.reviewMissing': {
     'en-US': 'Edit review missing or invalid; cannot allow.',

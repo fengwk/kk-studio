@@ -11,6 +11,7 @@ export interface WriteCallPreview {
   path: string
   workdir?: string
   content: string
+  hasContent: boolean
   lines: string[]
 }
 
@@ -82,6 +83,7 @@ export function previewForToolCall(
 }
 
 export function formatWritePreview(parsed: ParsedToolArguments): WriteCallPreview {
+  const hasContent = 'content' in parsed.values
   const content = stringField(parsed.values.content)
   const workdir = stringField(parsed.values.workdir)
   return {
@@ -89,6 +91,7 @@ export function formatWritePreview(parsed: ParsedToolArguments): WriteCallPrevie
     path: stringField(parsed.values.path),
     workdir: workdir || undefined,
     content,
+    hasContent,
     lines: splitContentLines(content),
   }
 }
@@ -98,13 +101,14 @@ export function formatEditPreview(
   options?: EditPreviewOptions,
 ): EditCallPreview | null {
   if (options?.editReview) {
+    const diff = options.editReview.diff
     return {
       kind: 'edit',
       mode: 'review',
       path: options.editReview.path,
-      diff: options.editReview.diff,
+      diff,
       sha256: options.editReview.sha256,
-      lines: splitContentLines(options.editReview.diff),
+      lines: diff.split('\n'),
     }
   }
 

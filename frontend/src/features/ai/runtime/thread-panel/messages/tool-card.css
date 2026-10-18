@@ -287,6 +287,11 @@
   margin-top: 6px;
 }
 
+.thread-tool-empty-content {
+  color: var(--fg-muted);
+  font-style: italic;
+}
+
 .thread-tool-pre {
   margin: 0;
   padding: 0;

@@ -1,12 +1,13 @@
 import { useI18n } from '@/shared/i18n'
 import { ToolOutputViewport } from '@/features/ai/runtime/thread-panel/messages/ToolOutputViewport'
 import type { ToolCallPreview as ToolCallPreviewData } from '@/features/ai/runtime/thread-panel/messages/tool-previews'
+import './tool-card.css'
 
 /**
  * Shared mutation review component used by chat tool cards and actionable ApprovalCard.
  *
  * - write: shows target path/workdir and exact complete content before approval in bounded scroll default expanded,
- *   preserving all whitespace and newlines without line truncation.
+ *   preserving all whitespace and newlines without line truncation (including explicit empty files).
  * - edit: streamed incoming old/new input explicitly labeled as input, then real persisted
  *   approvalJson.editReview / result details.editReview with real multi-hunk diff, or preparing state while waiting.
  */
@@ -20,7 +21,7 @@ export function ToolCallPreview({
   const { t } = useI18n()
 
   if (preview.kind === 'write') {
-    if (!preview.content && preview.lines.length === 0) {
+    if (!preview.hasContent && !preview.content && !preview.path) {
       return null
     }
     return (
@@ -39,7 +40,11 @@ export function ToolCallPreview({
             streaming ? 'is-streaming' : '',
           ].filter(Boolean).join(' ')}
         >
-          {preview.content}
+          {preview.content.length > 0 ? (
+            preview.content
+          ) : (
+            <span className="thread-tool-empty-content">{t('ai.runtime.mutation.emptyFile')}</span>
+          )}
         </ToolOutputViewport>
       </div>
     )

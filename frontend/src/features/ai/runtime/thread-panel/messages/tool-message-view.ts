@@ -129,11 +129,11 @@ export function buildToolMessageView({
   const executionState = facts.hasError && rawExecutionState === 'succeeded' ? 'failed' : rawExecutionState
 
   const editReview =
-    result?.editReview
-    ?? message.editReview
-    ?? message.approval?.editReview
-    ?? callMessage?.editReview
+    message.approval?.editReview
     ?? callMessage?.approval?.editReview
+    ?? message.editReview
+    ?? callMessage?.editReview
+    ?? result?.editReview
     ?? null
 
   const isTerminal =
@@ -158,7 +158,7 @@ export function buildToolMessageView({
     && preview != null
     && (
       preview.kind === 'write'
-        ? (preview.content.length > 0 || preview.lines.length > 0)
+        ? (preview.hasContent || preview.content.length > 0 || preview.path.length > 0)
         : (
           preview.mode === 'preparing'
           || (preview.mode === 'input' && (preview.oldText.length > 0 || preview.newText.length > 0))

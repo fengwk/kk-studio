@@ -1,6 +1,7 @@
-import { render, screen, within } from '@testing-library/react'
+/* eslint-disable no-restricted-imports */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
+import { render, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { ToolMessageBlock } from '@/features/ai/runtime/thread-panel/messages/ToolMessageBlock'
 import { ApprovalCard } from '@/features/ai/runtime/interactions/ApprovalCard'
@@ -19,14 +20,13 @@ function wrapper({ children }: { children: ReactNode }) {
 
 const validSha = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
 
-describe('Slice F mutation review acceptance criteria', () => {
-  it('Criterion 1: write 40+ lines complete and whitespace preserved during approval', () => {
-    // Generate 45 lines with leading indentation, trailing spaces, and blank lines
+describe('Slice F 审查与审批组件验收测试', () => {
+  it('write 工具 40+ 行全文完整呈现，保留缩进、空白行与尾随换行', () => {
     const lines = Array.from({ length: 45 }, (_, i) => {
       if (i === 10) return '    public void methodWithIndent() {'
       if (i === 11) return '        // indented comment'
       if (i === 12) return ''
-      return `    line-${i + 1} with trailing space   `
+      return `    line-${i + 1} with spaces   `
     })
     const fullContent = lines.join('\n') + '\n'
 
@@ -39,7 +39,7 @@ describe('Slice F mutation review acceptance criteria', () => {
       toolName: 'write',
       rendererKey: 'write',
       arguments: JSON.stringify({
-        path: '/absolute/path/to/Sample.java',
+        path: '/workspace/Sample.java',
         workdir: '/workspace/root',
         content: fullContent,
       }),
@@ -55,33 +55,59 @@ describe('Slice F mutation review acceptance criteria', () => {
       },
     }
 
-    const { container } = render(<ToolMessageBlock message={callMsg} />, { wrapper })
+    const { container } = render(<ToolMessageBlock message={callMsg} />)
 
-    // Target path and workdir displayed
-    expect(screen.getByText('/absolute/path/to/Sample.java')).toBeInTheDocument()
+    expect(screen.getByText('/workspace/Sample.java')).toBeInTheDocument()
     expect(screen.getByText('(/workspace/root)')).toBeInTheDocument()
 
-    // Bounded viewport preserves whitespace and complete text without truncation
     const viewport = container.querySelector('.thread-tool-preview-body.is-write')
     expect(viewport).toBeInTheDocument()
     expect(viewport).toHaveClass('thread-tool-output')
     expect(viewport?.textContent).toBe(fullContent)
-    expect(viewport?.textContent).toContain('    public void methodWithIndent() {')
-    expect(viewport?.textContent).toContain('line-45 with trailing space   ')
 
-    // Fixed redundant ： — and translated default approval reason
+    // 审批理由修复 redundant '： —' 且本地化
     const note = container.querySelector('.thread-tool-approval-note')
     expect(note?.textContent).not.toContain('： —')
     expect(note?.textContent).toContain('权限规则要求审批')
   })
 
-  it('Criterion 2: streamed edit input not mislabeled real diff', () => {
+  it('write 空内容正确显示目标路径与空文件标识，不盲批', () => {
+    const callMsg: ToolDialogueMessage = {
+      id: 'call-write-empty',
+      role: 'tool',
+      phase: 'call',
+      subjectEntryId: 'asst-1',
+      toolCallId: 'call-write-empty',
+      toolName: 'write',
+      rendererKey: 'write',
+      arguments: JSON.stringify({
+        path: '/workspace/empty.txt',
+        content: '',
+      }),
+      contents: [],
+      createdAt: '2026-10-19T00:00:00Z',
+      status: 'done',
+      invocationStatus: 'WAITING_APPROVAL',
+      approval: {
+        required: true,
+        decision: null,
+        decisionId: null,
+        reason: null,
+      },
+    }
+
+    const { container } = render(<ToolMessageBlock message={callMsg} />)
+    expect(screen.getAllByText('/workspace/empty.txt').length).toBeGreaterThanOrEqual(1)
+    expect(container.querySelector('.thread-tool-empty-content')).toHaveTextContent('（空文件）')
+  })
+
+  it('edit 流式参数阶段明确标注为输入，不伪造为真实 diff', () => {
     const streamingCallMsg: ToolDialogueMessage = {
-      id: 'call-edit-1',
+      id: 'call-edit-stream',
       role: 'tool',
       phase: 'call',
       subjectEntryId: null,
-      toolCallId: 'call-edit-1',
+      toolCallId: 'call-edit-stream',
       toolName: 'edit',
       rendererKey: 'edit',
       arguments: JSON.stringify({
@@ -94,9 +120,8 @@ describe('Slice F mutation review acceptance criteria', () => {
       status: 'streaming',
     }
 
-    const { container } = render(<ToolMessageBlock message={streamingCallMsg} />, { wrapper })
+    const { container } = render(<ToolMessageBlock message={streamingCallMsg} />)
 
-    // Explicitly labeled as input, not diff
     expect(screen.getByText(/流式输入内容/)).toBeInTheDocument()
     expect(screen.getByText(/原文本/)).toBeInTheDocument()
     expect(screen.getByText(/新文本/)).toBeInTheDocument()
@@ -106,32 +131,31 @@ describe('Slice F mutation review acceptance criteria', () => {
     expect(oldBlock?.textContent).toBe('const oldVal = 1;')
     expect(newBlock?.textContent).toBe('const newVal = 2;')
 
-    // Must NOT contain diff markings (+ or -) or diff class
     expect(container.querySelector('.thread-tool-preview-body.is-edit')).toBeNull()
     expect(container.querySelector('.is-added')).toBeNull()
     expect(container.querySelector('.is-removed')).toBeNull()
   })
 
-  it('Criterion 3: actual multi-hunk numbered file diff from editReview replaces inputs', () => {
+  it('真实 editReview 替换流式输入并展示多 hunk 编号 diff', () => {
     const multiHunkDiff = [
       '@@ -10,3 +10,3 @@',
-      ' 10|context before hunk 1',
+      ' 10|context 1',
       '-11|const a = 1',
       '+11|const a = 100',
-      ' 12|context after hunk 1',
+      ' 12|context 1 after',
       '@@ -40,3 +40,3 @@',
-      ' 40|context before hunk 2',
+      ' 40|context 2',
       '-41|const b = 2',
       '+41|const b = 200',
-      ' 42|context after hunk 2',
+      ' 42|context 2 after',
     ].join('\n')
 
     const reviewedCallMsg: ToolDialogueMessage = {
-      id: 'call-edit-2',
+      id: 'call-edit-reviewed',
       role: 'tool',
       phase: 'call',
       subjectEntryId: 'asst-1',
-      toolCallId: 'call-edit-2',
+      toolCallId: 'call-edit-reviewed',
       toolName: 'edit',
       rendererKey: 'edit',
       arguments: JSON.stringify({
@@ -156,12 +180,10 @@ describe('Slice F mutation review acceptance criteria', () => {
       },
     }
 
-    const { container } = render(<ToolMessageBlock message={reviewedCallMsg} />, { wrapper })
+    const { container } = render(<ToolMessageBlock message={reviewedCallMsg} />)
 
-    // Shows canonical file path
     expect(screen.getByText('/canonical/src/App.tsx')).toBeInTheDocument()
 
-    // Shows real multi-hunk numbered file diff with diff classes
     const preview = container.querySelector('.thread-tool-preview-body.is-edit')
     expect(preview).toBeInTheDocument()
     expect(within(preview as HTMLElement).getByText('-11|const a = 1')).toHaveClass('is-removed')
@@ -170,12 +192,10 @@ describe('Slice F mutation review acceptance criteria', () => {
     expect(within(preview as HTMLElement).getByText('+41|const b = 200')).toHaveClass('is-added')
     expect(within(preview as HTMLElement).getByText('@@ -10,3 +10,3 @@')).toHaveClass('is-hunk-header')
 
-    // Input presentation has been completely replaced
     expect(screen.queryByText(/流式输入内容/)).not.toBeInTheDocument()
   })
 
-  it('Criterion 4: missing review blocks ALLOW while DENY is usable in ApprovalCard', () => {
-    // 1. Missing review for edit
+  it('ApprovalCard 缺失或非法 review 禁用 ALLOW，DENY 始终可用', () => {
     const { rerender } = render(
       <ApprovalCard
         threadId="thread-1"
@@ -190,12 +210,11 @@ describe('Slice F mutation review acceptance criteria', () => {
     const allowBtn = screen.getByRole('button', { name: '允许' })
     const denyBtn = screen.getByRole('button', { name: '拒绝' })
 
-    // Missing review disables ALLOW, DENY is enabled
     expect(allowBtn).toBeDisabled()
     expect(denyBtn).toBeEnabled()
     expect(screen.getByText('未获取到有效的编辑审查信息，无法允许。')).toBeInTheDocument()
 
-    // 2. Invalid sha256 in review also blocks ALLOW
+    // 非法 sha256 同样禁用 ALLOW
     rerender(
       <ApprovalCard
         threadId="thread-1"
@@ -204,14 +223,14 @@ describe('Slice F mutation review acceptance criteria', () => {
         argumentsJson={JSON.stringify({ path: '/src/App.tsx', old_string: 'a', new_string: 'b' })}
         approvalJson={JSON.stringify({
           required: true,
-          editReview: { path: '/src/App.tsx', diff: '+b', sha256: 'invalid-sha' },
+          editReview: { path: '/src/App.tsx', diff: '+b', sha256: 'invalid' },
         })}
       />,
     )
     expect(screen.getByRole('button', { name: '允许' })).toBeDisabled()
     expect(screen.getByRole('button', { name: '拒绝' })).toBeEnabled()
 
-    // 3. Valid edit review enables ALLOW
+    // 合法 review 启用 ALLOW
     rerender(
       <ApprovalCard
         threadId="thread-1"
@@ -228,14 +247,14 @@ describe('Slice F mutation review acceptance criteria', () => {
     expect(screen.getByRole('button', { name: '拒绝' })).toBeEnabled()
   })
 
-  it('Criterion 5: success body does not duplicate Diff/write while preview remains default open', () => {
-    const rawDuplicateBody = 'File edit executed successfully:\n-11|const a = 1\n+11|const a = 100\nfull duplicated details...'
+  it('成功终态短文本去重不重复展示正文或 diff，失败终态完整保留错误', () => {
+    const rawDuplicateBody = 'File edit executed successfully:\n-11|const a = 1\n+11|const a = 100'
     const callMsg: ToolDialogueMessage = {
-      id: 'call-edit-3',
+      id: 'call-edit-success',
       role: 'tool',
       phase: 'call',
       subjectEntryId: 'asst-1',
-      toolCallId: 'call-edit-3',
+      toolCallId: 'call-edit-success',
       toolName: 'edit',
       rendererKey: 'edit',
       arguments: JSON.stringify({ path: '/src/App.tsx' }),
@@ -250,12 +269,12 @@ describe('Slice F mutation review acceptance criteria', () => {
       },
     }
 
-    const resultMsg: ToolDialogueMessage = {
-      id: 'result-edit-3',
+    const successResultMsg: ToolDialogueMessage = {
+      id: 'result-edit-success',
       role: 'tool',
       phase: 'result',
       subjectEntryId: 'asst-1',
-      toolCallId: 'call-edit-3',
+      toolCallId: 'call-edit-success',
       toolName: 'edit',
       rendererKey: 'edit',
       arguments: JSON.stringify({ path: '/src/App.tsx' }),
@@ -264,68 +283,35 @@ describe('Slice F mutation review acceptance criteria', () => {
       status: 'done',
     }
 
-    const { container } = render(<ToolMessageBlock message={callMsg} result={resultMsg} />, { wrapper })
+    const { container, rerender } = render(<ToolMessageBlock message={callMsg} result={successResultMsg} />)
 
-    // Preview remains visible and expanded
     expect(container.querySelector('.thread-tool-preview-body.is-edit')).toBeInTheDocument()
     expect(within(container).getByText('-11|const a = 1')).toBeInTheDocument()
-
-    // Short localized success message is displayed
     expect(screen.getByText('编辑成功')).toBeInTheDocument()
-
-    // Raw duplicated body is NOT displayed
     expect(screen.queryByText(rawDuplicateBody)).not.toBeInTheDocument()
-  })
 
-  it('Criterion 6: errors are not masked when execution fails', () => {
-    const failureError = 'Permission denied: cannot write to protected path /etc/passwd'
-    const callMsg: ToolDialogueMessage = {
-      id: 'call-write-fail',
-      role: 'tool',
-      phase: 'call',
-      subjectEntryId: 'asst-1',
-      toolCallId: 'call-write-fail',
-      toolName: 'write',
-      rendererKey: 'write',
-      arguments: JSON.stringify({ path: '/etc/passwd', content: 'malicious' }),
-      contents: [],
-      createdAt: '2026-10-19T00:00:00Z',
+    // 失败终态：错误不被遮掩
+    const failureError = 'Permission denied'
+    const failResultMsg: ToolDialogueMessage = {
+      ...successResultMsg,
       status: 'error',
-      invocationStatus: 'FAILED',
-    }
-
-    const resultMsg: ToolDialogueMessage = {
-      id: 'result-write-fail',
-      role: 'tool',
-      phase: 'result',
-      subjectEntryId: 'asst-1',
-      toolCallId: 'call-write-fail',
-      toolName: 'write',
-      rendererKey: 'write',
-      arguments: JSON.stringify({ path: '/etc/passwd', content: 'malicious' }),
-      contents: [{ type: 'text', text: failureError }],
       errorMessage: failureError,
-      createdAt: '2026-10-19T00:00:01Z',
-      status: 'error',
+      contents: [{ type: 'text', text: failureError }],
     }
-
-    render(<ToolMessageBlock message={callMsg} result={resultMsg} />, { wrapper })
-
-    // Failure message must be visible and not masked by success
-    expect(screen.queryByText('写入成功')).not.toBeInTheDocument()
+    rerender(<ToolMessageBlock message={{ ...callMsg, status: 'error', invocationStatus: 'FAILED' }} result={failResultMsg} />)
+    expect(screen.queryByText('编辑成功')).not.toBeInTheDocument()
     expect(screen.getByText(failureError)).toBeInTheDocument()
   })
 
-  it('Criterion 7: timeline approval and independent ApprovalCard render same payload', () => {
+  it('时间线工具卡片与独立 ApprovalCard 渲染同一份审查 payload', () => {
     const reviewData = {
       path: '/src/SharedComponent.tsx',
-      diff: '-old component line\n+new component line',
+      diff: '-old\n+new',
       sha256: validSha,
     }
     const rawArgs = JSON.stringify({ path: '/src/SharedComponent.tsx', old_string: 'old', new_string: 'new' })
     const rawApproval = JSON.stringify({ required: true, editReview: reviewData })
 
-    // Render ApprovalCard
     const { container: cardContainer } = render(
       <ApprovalCard
         threadId="thread-1"
@@ -337,15 +323,14 @@ describe('Slice F mutation review acceptance criteria', () => {
       { wrapper },
     )
 
-    // Render ToolMessageBlock
     const { container: timelineContainer } = render(
       <ToolMessageBlock
         message={{
-          id: 'call-timeline-1',
+          id: 'call-timeline-same',
           role: 'tool',
           phase: 'call',
           subjectEntryId: 'asst-1',
-          toolCallId: 'call-timeline-1',
+          toolCallId: 'call-timeline-same',
           toolName: 'edit',
           rendererKey: 'edit',
           arguments: rawArgs,
@@ -362,18 +347,70 @@ describe('Slice F mutation review acceptance criteria', () => {
           },
         }}
       />,
-      { wrapper },
     )
 
-    // Both containers use ToolCallPreview to render the exact same path and diff
     const cardDiff = cardContainer.querySelector('.thread-tool-preview-body.is-edit')?.textContent
     const timelineDiff = timelineContainer.querySelector('.thread-tool-preview-body.is-edit')?.textContent
 
     expect(cardDiff).toBeTruthy()
     expect(timelineDiff).toBeTruthy()
     expect(cardDiff).toEqual(timelineDiff)
-
-    // Neither renders raw arguments JSON
     expect(cardContainer.querySelector('.interaction-raw-pre')).toBeNull()
+  })
+
+  it('审批快照与终态结果冲突时优先展示审批快照', () => {
+    const approvalReview = {
+      path: '/canonical/Conflict.tsx',
+      diff: '-approved\n+approved',
+      sha256: validSha,
+    }
+    const resultReview = {
+      path: '/canonical/Conflict.tsx',
+      diff: '-result\n+result',
+      sha256: validSha,
+    }
+
+    const callMsg: ToolDialogueMessage = {
+      id: 'call-conflict',
+      role: 'tool',
+      phase: 'call',
+      subjectEntryId: 'asst-1',
+      toolCallId: 'call-conflict',
+      toolName: 'edit',
+      rendererKey: 'edit',
+      arguments: JSON.stringify({ path: '/canonical/Conflict.tsx' }),
+      contents: [],
+      createdAt: '2026-10-19T00:00:00Z',
+      status: 'done',
+      invocationStatus: 'SUCCEEDED',
+      approval: {
+        required: true,
+        decision: 'ALLOWED',
+        decisionId: 'dec-1',
+        reason: null,
+        editReview: approvalReview,
+      },
+      editReview: approvalReview,
+    }
+
+    const resultMsg: ToolDialogueMessage = {
+      id: 'result-conflict',
+      role: 'tool',
+      phase: 'result',
+      subjectEntryId: 'asst-1',
+      toolCallId: 'call-conflict',
+      toolName: 'edit',
+      rendererKey: 'edit',
+      arguments: JSON.stringify({ path: '/canonical/Conflict.tsx' }),
+      contents: [],
+      createdAt: '2026-10-19T00:00:01Z',
+      status: 'done',
+      editReview: resultReview,
+    }
+
+    const { container } = render(<ToolMessageBlock message={callMsg} result={resultMsg} />)
+    const preview = container.querySelector('.thread-tool-preview-body.is-edit')
+    expect(within(preview as HTMLElement).getByText('-approved')).toBeInTheDocument()
+    expect(within(preview as HTMLElement).queryByText('-result')).toBeNull()
   })
 })

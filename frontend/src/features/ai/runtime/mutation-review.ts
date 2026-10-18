@@ -10,11 +10,12 @@ export interface EditReview {
 }
 
 const SHA256_HEX_REGEX = /^[0-9a-f]{64}$/
+const ALLOWED_KEYS = new Set(['path', 'diff', 'sha256'])
 
 /**
- * Strictly parses and validates an EditReview object.
- * Returns null if the value is missing or invalid according to wire contract:
- * - path must be non-empty string without silent trimming
+ * Strictly parses and validates an EditReview object with canonical parity:
+ * - Reject extra/unknown fields
+ * - path must be non-empty and non-blank (path.trim() !== '') but preserved as raw string without silent trimming
  * - diff must be non-empty string
  * - sha256 must be exact 64 lowercase hex characters without silent trimming
  */
@@ -23,8 +24,12 @@ export function parseEditReview(value: unknown): EditReview | null {
     return null
   }
   const record = value as Record<string, unknown>
+  const keys = Object.keys(record)
+  if (keys.length !== 3 || keys.some((key) => !ALLOWED_KEYS.has(key))) {
+    return null
+  }
   const path = record.path
-  if (typeof path !== 'string' || path.length === 0) {
+  if (typeof path !== 'string' || path.length === 0 || path.trim().length === 0) {
     return null
   }
   const diff = record.diff
