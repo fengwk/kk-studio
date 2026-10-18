@@ -9,6 +9,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.environment.capability.ExpectedFile;
+
 import java.time.Instant;
 
 /** ToolApproval 在 required/undecided/decided 下的精确不变式。 */
@@ -86,6 +88,21 @@ class ToolApprovalTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> new ToolApproval(false, null, null, null, null, null, DECIDED));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ToolApproval(
+                false,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                new ToolEditReview(
+                    new ExpectedFile(
+                        "/a", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"),
+                    "diff")));
   }
 
   @Test
@@ -189,6 +206,27 @@ class ToolApprovalTest {
     assertEquals(REQUESTED, requested.requestedAt());
     assertEquals("why", requested.reason());
     assertNull(requested.decisionId());
+    assertNull(requested.editReview());
+
+    ToolEditReview review =
+        new ToolEditReview(
+            new ExpectedFile(
+                "/srv/app.java",
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"),
+            "-old\n+new");
+    ToolApproval requestedWithReview = ToolApproval.request(REQUESTED, "why", review);
+    assertTrue(requestedWithReview.required());
+    assertTrue(requestedWithReview.isUndecided());
+    assertEquals(review, requestedWithReview.editReview());
+
+    ToolApproval decidedWithReview =
+        requestedWithReview.decide(ToolApprovalDecision.ALLOWED, id(1L), "actor", null, DECIDED);
+    assertEquals(review, decidedWithReview.editReview());
+
+    ToolApproval replayedWithReview =
+        decidedWithReview.decide(ToolApprovalDecision.ALLOWED, id(1L), "actor", null, DECIDED);
+    assertEquals(decidedWithReview, replayedWithReview);
+    assertEquals(review, replayedWithReview.editReview());
   }
 
   @Test
