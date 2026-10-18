@@ -165,7 +165,7 @@ export function IdeOverlayPanel({
 
           // 校验 entryUrl 安全契约；校验失败必须主动释放已在后端创建的视图
           try {
-            validateIdeEntryUrl(res.entryUrl)
+            res.entryUrl = validateIdeEntryUrl(res.entryUrl, targetEnv.id)
           } catch (valErr) {
             try {
               await environmentService.closeIdeView(targetEnv.id, res.viewId)
