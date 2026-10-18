@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { expect, test, type Locator, type Page } from './fixture'
+import { LONG_WRITE_CONTENT, MULTI_HUNK_DIFF } from './mutation-review-fixtures'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -80,6 +81,9 @@ test.describe('Mutation Review UI Acceptance & Browser Regression', () => {
     await expect(writeViewport).toContainText('public void longMethodWithIndent() {')
     await expect(writeViewport).toContainText('// indented comment')
     await expect(writeViewport).toContainText('line-48 with code and spaces')
+    // 逐字核对，避免 toHaveText 默认归一化空白掩盖缩进、空行或末尾换行丢失。
+    expect(await writeViewport.textContent()).toBe(LONG_WRITE_CONTENT)
+    await expect(writeViewport).toHaveCSS('white-space', 'pre-wrap')
 
     // 审批理由修复冗余 "： —" 且完成本地化
     const note = toolPane.locator('.thread-tool-approval-note')
@@ -105,12 +109,19 @@ test.describe('Mutation Review UI Acceptance & Browser Regression', () => {
     )
     await expect(approvalPane.getByRole('button', { name: '允许' })).toBeEnabled()
     await expect(approvalPane.getByRole('button', { name: '拒绝' })).toBeEnabled()
+    const approvalWriteViewport = approvalPane.locator('.thread-tool-preview-body.is-write')
+    expect(await approvalWriteViewport.textContent()).toBe(LONG_WRITE_CONTENT)
+    await expect(approvalWriteViewport).toHaveCSS('white-space', 'pre-wrap')
+    await verifyBoundedScrollAndNoBlowout(approvalWriteViewport)
 
     await page.screenshot({ path: path.join(REPORTS_DIR, 'desktop-write-pending.png') })
 
     // 2. 窄屏移动视口 390px
     await page.setViewportSize({ width: 390, height: 800 })
     await verifyBoundedScrollAndNoBlowout(writeViewport)
+    await verifyBoundedScrollAndNoBlowout(approvalWriteViewport)
+    expect(await writeViewport.textContent()).toBe(LONG_WRITE_CONTENT)
+    expect(await approvalWriteViewport.textContent()).toBe(LONG_WRITE_CONTENT)
 
     const contentBox = await page.locator('.mutation-harness-content').boundingBox()
     expect(contentBox?.width).toBeLessThanOrEqual(390)
@@ -159,6 +170,12 @@ test.describe('Mutation Review UI Acceptance & Browser Regression', () => {
     )
     const editViewport = toolPane.locator('.thread-tool-preview-body.is-edit')
     await expect(editViewport).toBeVisible()
+    expect(await editViewport.textContent()).toBe(MULTI_HUNK_DIFF)
+    await expect(editViewport).toHaveCSS('white-space', 'pre-wrap')
+    const approvalEditViewport = page.locator(
+      '[data-testid="approval-card-pane"] .thread-tool-preview-body.is-edit',
+    )
+    expect(await approvalEditViewport.textContent()).toBe(MULTI_HUNK_DIFF)
 
     // 权威 hunk 与增删行 class 断言
     await expect(editViewport.locator('.is-hunk-header').first()).toContainText('@@ -10,6 +10,6 @@')
@@ -187,6 +204,8 @@ test.describe('Mutation Review UI Acceptance & Browser Regression', () => {
     await page.setViewportSize({ width: 390, height: 800 })
     await harness(page, 'renderEditReviewed')
     await verifyBoundedScrollAndNoBlowout(toolPane.locator('.thread-tool-preview-body.is-edit'))
+    await verifyBoundedScrollAndNoBlowout(approvalEditViewport)
+    expect(await approvalEditViewport.textContent()).toBe(MULTI_HUNK_DIFF)
     await page.screenshot({ path: path.join(REPORTS_DIR, 'mobile-edit-reviewed.png') })
   })
 
@@ -223,7 +242,7 @@ test.describe('Mutation Review UI Acceptance & Browser Regression', () => {
 
     await page.screenshot({ path: path.join(REPORTS_DIR, 'approval-malformed-review.png') })
 
-    // 3. 有效 review: ALLOW 与 DENY 皆启用；点击 DENY 通过 route mock 验证提交契约与卡片完结态
+    // 3. 有效 review: ALLOW 与 DENY 皆启用；点击 DENY 验证提交契约。
     await harness(page, 'renderApprovalValid')
     await expect(page.locator('[data-testid="active-scenario"]')).toHaveText('approval-valid')
     await expect(allowBtn).toBeEnabled()
@@ -253,6 +272,34 @@ test.describe('Mutation Review UI Acceptance & Browser Regression', () => {
 
     await page.screenshot({ path: path.join(REPORTS_DIR, 'approval-denied-success.png') })
   })
+
+  for (const [action, invocationId] of [
+    ['renderApprovalMissingReview', 'inv-missing-review'],
+    ['renderApprovalMalformedReview', 'inv-malformed-review'],
+  ] as const) {
+    test(`缺少有效审查仍可提交拒绝：${action}`, async ({ page }) => {
+      await harness(page, action)
+      const approvalPane = page.locator('[data-testid="approval-card-pane"]')
+      await expect(approvalPane.getByRole('button', { name: '允许' })).toBeDisabled()
+
+      await page.route(`**/api/harness/threads/thread-1/tool-invocations/${invocationId}/approval`, (route) =>
+        route.fulfill({ status: 200, contentType: 'application/json', body: '{"status":200,"data":{}}' }),
+      )
+      const submitted = page.waitForRequest((request) =>
+        request.url().endsWith(`/tool-invocations/${invocationId}/approval`),
+      )
+      await approvalPane.getByRole('button', { name: '拒绝' }).click()
+      const request = await submitted
+      expect(request.method()).toBe('PUT')
+      expect(request.postDataJSON()).toEqual({
+        decision: 'DENY',
+        decisionId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+        reason: null,
+      })
+      await expect(approvalPane.getByRole('button', { name: '拒绝' })).toBeEnabled()
+      await expect(approvalPane.getByRole('button', { name: '允许' })).toBeDisabled()
+    })
+  }
 
   test('Case 4: Write 与 Edit 成功终态去重（仅短中文成功文案，正文/diff 仅在 preview 出现一次，不重复 raw JSON/body）', async ({
     page,
