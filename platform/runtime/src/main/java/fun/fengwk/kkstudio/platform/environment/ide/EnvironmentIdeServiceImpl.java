@@ -34,35 +34,32 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
   /** 单条 IDE 命令的默认等待上限；超时后放弃在途登记（迟到回执被安静忽略）。 */
   public static final Duration DEFAULT_COMMAND_TIMEOUT = Duration.ofSeconds(30);
 
+  public static final String IDE_ROUTE_PREFIX = "/environment-ide/";
+  public static final String BOOTSTRAP_PATH = "__ide/bootstrap";
+
   private final IdeCommandTransport transport;
-  private final IdeOriginProperties originProperties;
   private final IdeBootstrapTicketService bootstrapTickets;
   private final Duration commandTimeout;
   private final IdeViewAuthorizationListener viewAuthorization;
 
   public EnvironmentIdeServiceImpl(
-      IdeCommandTransport transport,
-      IdeOriginProperties originProperties,
-      IdeBootstrapTicketService bootstrapTickets) {
-    this(transport, originProperties, bootstrapTickets, DEFAULT_COMMAND_TIMEOUT, null);
+      IdeCommandTransport transport, IdeBootstrapTicketService bootstrapTickets) {
+    this(transport, bootstrapTickets, DEFAULT_COMMAND_TIMEOUT, null);
   }
 
   public EnvironmentIdeServiceImpl(
       IdeCommandTransport transport,
-      IdeOriginProperties originProperties,
       IdeBootstrapTicketService bootstrapTickets,
       Duration commandTimeout) {
-    this(transport, originProperties, bootstrapTickets, commandTimeout, null);
+    this(transport, bootstrapTickets, commandTimeout, null);
   }
 
   public EnvironmentIdeServiceImpl(
       IdeCommandTransport transport,
-      IdeOriginProperties originProperties,
       IdeBootstrapTicketService bootstrapTickets,
       Duration commandTimeout,
       IdeViewAuthorizationListener viewAuthorization) {
     this.transport = Objects.requireNonNull(transport, "transport");
-    this.originProperties = Objects.requireNonNull(originProperties, "originProperties");
     this.bootstrapTickets = Objects.requireNonNull(bootstrapTickets, "bootstrapTickets");
     this.commandTimeout = Objects.requireNonNull(commandTimeout, "commandTimeout");
     this.viewAuthorization = viewAuthorization;
@@ -77,9 +74,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     Objects.requireNonNull(environmentId, "environmentId");
     Objects.requireNonNull(request, "request");
     String viewId = parseViewId(request.getViewId());
-    // 先校验独立 Origin 配置：缺配置时在任何 Daemon 副作用之前 fail-closed，不回退 Studio 同源。
-    requireConfiguredOrigin(environmentId);
-    // 容量预检同样在任何 Daemon 副作用之前：视图/代际额度耗尽时显式失败，绝不先建 Native 视图再静默不授权。
+    // 容量预检在任何 Daemon 副作用之前：视图/代际额度耗尽时显式失败，绝不先建 Native 视图再静默不授权。
     if (viewAuthorization != null) {
       try {
         viewAuthorization.ensureViewCapacity(environmentId);
@@ -105,7 +100,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     }
     // 入口凭据绑定命令的代际；租约失效/接管时由 host/router 依代际关闭并 revoke。
     String ticket = bootstrapTickets.issue(result.identity(), dto.getViewId(), workspacePath);
-    dto.setEntryUrl(originProperties.bootstrapEntryUrl(environmentId, ticket));
+    dto.setEntryUrl(IDE_ROUTE_PREFIX + environmentId + "/" + BOOTSTRAP_PATH + "?token=" + ticket);
     return dto;
   }
 
@@ -176,15 +171,6 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
       throw new AiValidationException("environment", message);
     }
     return new IdeCall(reply, request.identity());
-  }
-
-  private void requireConfiguredOrigin(EnvironmentId environmentId) {
-    try {
-      originProperties.requireOrigin(environmentId);
-    } catch (IllegalStateException error) {
-      throw new AiEnvironmentIdeUnavailableException(
-          "environment IDE origin is not configured", error);
-    }
   }
 
   private static EnvironmentIdeViewDTO toDto(

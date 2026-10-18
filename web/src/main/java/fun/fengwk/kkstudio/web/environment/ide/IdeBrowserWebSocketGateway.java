@@ -107,10 +107,6 @@ public final class IdeBrowserWebSocketGateway {
       HttpServletResponse response)
       throws ServletException, IOException {
     Objects.requireNonNull(environmentId, "environmentId");
-    if (!properties.configured()) {
-      response.sendError(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
-      return;
-    }
     if (!IdeOriginPolicy.webSocketHandshakeAllowed(request)) {
       response.sendError(HttpServletResponse.SC_FORBIDDEN);
       return;

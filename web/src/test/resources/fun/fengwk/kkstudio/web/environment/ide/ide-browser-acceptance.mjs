@@ -1,16 +1,13 @@
 // Real-browser IDE acceptance driver (opt-in).
 //
 // Browser half of the Spring acceptance test: drives the real frozen code-server workbench served
-// through the Java IDE Origin data plane, in Chromium launched with `--host-resolver-rules` so
-// `*.browser.localhost` resolves to the loopback Spring host. Every view is opened by the Java
+// through the Java Studio same-origin data plane. Every view is opened by the Java
 // `EnvironmentIdeService`; the window reaches code-server only through the real bootstrap -> cookie
 // -> reverse-stream path. No daemon or data plane is faked.
 //
-// Each view is driven the way the product embeds it: a Studio parent page (hostname
-// `studio.browser.localhost`, same site as the IDE host but a different Origin) embeds the real
+// Each view is driven the way the product embeds it: a same-origin Studio parent fixture embeds the real
 // one-time entry URL in an `<iframe>` that reproduces the production `IdeOverlayPanel` sandbox/allow
-// contract. The parent page is a single minimal harness served by a tiny loopback HTTP server (real
-// socket, so no browser network-privacy check is disabled); it fakes no Gateway, Daemon, code-server,
+// contract. Playwright fulfills only that parent document; it fakes no Gateway, Daemon, code-server,
 // API or file result. The workbench is then driven through the real child `Frame`
 // (locators/evaluate) with keystrokes sent to the owning `Page`.
 //
@@ -22,7 +19,6 @@
 
 import { createRequire } from 'node:module'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import http from 'node:http'
 import { dirname, join } from 'node:path'
 
 const require = createRequire(import.meta.url)
@@ -247,9 +243,8 @@ function escapeAttribute(value) {
  * Minimal Studio parent page that only embeds the real one-time entry URL. It reproduces the
  * production `IdeOverlayPanel` iframe contract verbatim (same `sandbox` and `allow`), is pinned to a
  * 1280x720 viewport, and fakes no data plane: the child frame still navigates the real bootstrap ->
- * cookie -> reverse-stream path. It is served over real loopback HTTP (see `startHarnessServer`) so
- * the parent document keeps a real `local` address space and no browser network-privacy check is
- * disabled.
+ * cookie -> reverse-stream path. Only this parent HTML is fulfilled by the browser fixture;
+ * all IDE requests, including bootstrap, assets and WebSockets, use the real Studio gateway.
  */
 function harnessHtml(entryUrl) {
   return `<!doctype html>
@@ -267,23 +262,25 @@ iframe.ide-panel-iframe { display: block; width: 1280px; height: 720px; border: 
 </body></html>`
 }
 
-/** Host (authority) of a frame's current URL, or null while it is still `about:blank`. */
-function frameHost(frame) {
-  try {
-    return new URL(frame.url()).host
-  } catch {
-    return null
-  }
-}
-
-/** Waits for the real IDE child frame to become the frame whose URL host is the IDE origin. */
-async function waitForIdeFrame(ownerPage, ideHost) {
+/** Waits for the real IDE child frame to become the frame whose URL contains the environment IDE route. */
+async function waitForIdeFrame(ownerPage, expectedPathPrefix) {
   await waitFor(
-    () => ownerPage.frames().some((frame) => frameHost(frame) === ideHost),
+    () =>
+      ownerPage
+        .frames()
+        .some(
+          (frame) =>
+            frame !== ownerPage.mainFrame() && frame.url().includes(expectedPathPrefix),
+        ),
     60_000,
-    `IDE iframe on ${ideHost}`,
+    `IDE iframe with path ${expectedPathPrefix}`,
   )
-  return ownerPage.frames().find((frame) => frameHost(frame) === ideHost)
+  return ownerPage
+    .frames()
+    .find(
+      (frame) =>
+        frame !== ownerPage.mainFrame() && frame.url().includes(expectedPathPrefix),
+    )
 }
 
 /** Best-effort failure evidence for an embedded workbench: parent screenshot plus explorer DOM state. */
@@ -309,41 +306,8 @@ async function captureExplorerDiagnostics(report, ide, name, config) {
   }
 }
 
-/** Fixed path whitelist for the tiny parent harness HTTP server. */
+/** Only this parent document is a fixture; no IDE/data-plane request matches it. */
 const HARNESS_PATH = '/ide-acceptance-harness'
-
-/**
- * Serves the minimal parent harness pages over real loopback HTTP on `127.0.0.1:0`. Binding a real
- * socket keeps the parent document in Chromium's `local` address space, so embedding the real
- * loopback IDE iframe needs no browser network-privacy bypass. Only the whitelisted harness paths are
- * served; every other request (including any favicon) gets a 404. No Daemon, Gateway, code-server,
- * API or file result is produced here.
- */
-async function startHarnessServer(pages) {
-  const server = http.createServer((request, response) => {
-    const html = request.method === 'GET' ? pages.get(new URL(request.url, 'http://localhost').pathname) : undefined
-    if (!html) {
-      response.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
-      response.end('not found')
-      return
-    }
-    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
-    response.end(html)
-  })
-  await new Promise((resolve, reject) => {
-    server.once('error', reject)
-    server.listen(0, '127.0.0.1', resolve)
-  })
-  return server
-}
-
-/** Closes the harness server and rejects on a real close error (never swallowed). */
-function closeHarnessServer(server) {
-  if (typeof server.closeAllConnections === 'function') {
-    server.closeAllConnections()
-  }
-  return new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())))
-}
 
 async function main() {
   const configPath = parseArgs(process.argv)
@@ -354,7 +318,6 @@ async function main() {
   await mkdir(dirname(config.reportPath), { recursive: true })
   await flush(report, config.reportPath)
 
-  let server = null
   let browser = null
   let primaryError = null
   /** Redacted network trace: path (query removed) plus status/content-encoding or failure reason. */
@@ -386,19 +349,9 @@ async function main() {
     })
   }
   try {
-    // Parent harness pages served by a real loopback HTTP server, one whitelisted path per view. The
-    // host is still `studio.browser.localhost` (same site as the IDE host, so the host-only session
-    // cookie flows); the ephemeral port is unrelated to same-site and keeps the parent a real `local`
-    // document, so no browser network-privacy check is disabled.
-    const harnessPages = new Map()
-    for (const view of config.views) {
-      harnessPages.set(`${HARNESS_PATH}/${view.name}`, harnessHtml(view.entryUrl))
-    }
-    server = await startHarnessServer(harnessPages)
-    const parentOrigin = `http://studio.browser.localhost:${server.address().port}`
+    const parentOrigin = new URL(config.baseUrl).origin
     browser = await chromium.launch({
       args: [
-        '--host-resolver-rules=MAP *.browser.localhost 127.0.0.1',
         '--no-sandbox',
         '--disable-dev-shm-usage',
       ],
@@ -409,6 +362,9 @@ async function main() {
         ignoreHTTPSErrors: true,
         viewport: { width: 1280, height: 720 },
       })
+      await context.route(`${parentOrigin}${HARNESS_PATH}/${view.name}`, (route) =>
+        route.fulfill({ contentType: 'text/html; charset=utf-8', body: harnessHtml(view.entryUrl) }),
+      )
       const ownerPage = await context.newPage()
       attachNetworkTrace(ownerPage, view.name)
       ownerPage.on('console', (message) => {
@@ -416,17 +372,15 @@ async function main() {
           report.notes.push(`[${view.name}] console: ${redact(message.text())}`)
         }
       })
-      // The parent harness is served over real loopback HTTP; only the embedded workbench reaches
-      // code-server through the real bootstrap -> cookie -> reverse-stream path.
       const ide = { name: view.name, ownerPage, frame: null }
-      const ideHost = new URL(view.entryUrl).host
+      const idePath = `/environment-ide/${config.environmentId}/`
       await runStep(report, config.reportPath, `workbench${view.name}`, true, async () => {
         const response = await ownerPage.goto(`${parentOrigin}${HARNESS_PATH}/${view.name}`, {
           waitUntil: 'domcontentloaded',
           timeout: 60_000,
         })
         report.notes.push(`[${view.name}] parent harness status ${response ? response.status() : 'none'}`)
-        ide.frame = await waitForIdeFrame(ownerPage, ideHost)
+        ide.frame = await waitForIdeFrame(ownerPage, idePath)
         await ide.frame.waitForSelector('.monaco-workbench', { timeout: 60_000 })
         report.notes.push(`[${view.name}] embedded ${redactUrl(ide.frame.url())}`)
         await dismissTrustDialogIfPresent(ide, report)
@@ -441,9 +395,10 @@ async function main() {
         }
         return {
           embedded: true,
-          parentTransport: 'http',
+          parentTransport: 'browser-fixture',
           parentOrigin,
           ideOrigin: new URL(ide.frame.url()).origin,
+          frameUrl: redactUrl(ide.frame.url()),
         }
       })
       ideViews[view.name] = ide
@@ -737,17 +692,10 @@ async function main() {
   } finally {
     report.network = network
     const cleanupErrors = []
-    // Close the browser first so its sockets drop, then await the harness server close.
+    // Browser shutdown also releases its real HTTP and WebSocket connections.
     if (browser) {
       try {
         await browser.close()
-      } catch (error) {
-        cleanupErrors.push(error)
-      }
-    }
-    if (server) {
-      try {
-        await closeHarnessServer(server)
       } catch (error) {
         cleanupErrors.push(error)
       }

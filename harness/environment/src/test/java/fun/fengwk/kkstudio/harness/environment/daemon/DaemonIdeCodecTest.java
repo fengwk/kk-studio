@@ -229,10 +229,18 @@ class DaemonIdeCodecTest {
     }
     for (String url :
         new String[] {
-          "ftp://x.example/s", "wss://user:pw@x.example/s", "wss://x.example/s#frag", "/relative"
+          "ftp://x.example/s",
+          "wss://user:pw@x.example/s",
+          "wss://x.example/s#frag",
+          "//evil.example/s",
+          "relative",
+          "/relative#frag"
         }) {
       assertThrows(IllegalArgumentException.class, () -> IdeCommand.validateStreamUrl(url), url);
     }
+    assertEquals(
+        "/api/harness/environment-stream/v1/abc?environment=1",
+        IdeCommand.validateStreamUrl("/api/harness/environment-stream/v1/abc?environment=1"));
   }
 
   @Test

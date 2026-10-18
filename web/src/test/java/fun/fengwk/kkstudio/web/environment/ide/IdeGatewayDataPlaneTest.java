@@ -63,9 +63,7 @@ class IdeGatewayDataPlaneTest {
   private static final DaemonIdeStreamCodec CODEC = new DaemonIdeStreamCodec();
 
   private static IdeGatewayProperties properties() {
-    IdeGatewayProperties properties = new IdeGatewayProperties();
-    properties.setStreamUrlTemplate("wss://gateway.test/api/harness/environment-stream/v1");
-    return properties;
+    return new IdeGatewayProperties();
   }
 
   private static final class Harness {
@@ -379,8 +377,11 @@ class IdeGatewayDataPlaneTest {
     assertNotNull(setCookie);
     assertTrue(setCookie.contains("HttpOnly"));
     assertTrue(setCookie.contains("SameSite=Strict"));
+    assertTrue(setCookie.contains("Path=/environment-ide/" + ENV + "/"));
     assertTrue(setCookie.startsWith("kk_ide_session="));
-    assertEquals("/?workspace=%2Fmanaged%2Fworkspace", response.getHeader("Location"));
+    assertEquals(
+        "/environment-ide/" + ENV + "/?workspace=%2Fmanaged%2Fworkspace",
+        response.getHeader("Location"));
   }
 
   /** 视图关闭后旧票据必须失效（410），且绝不因此重新授权视图。 */
@@ -419,10 +420,26 @@ class IdeGatewayDataPlaneTest {
   void streamUrlCarriesTicketUnderControlledPath() {
     IdeGatewayProperties properties = properties();
     assertEquals(
-        "wss://gateway.test/api/harness/environment-stream/v1/abc?environment=" + ENV,
+        "/api/harness/environment-stream/v1/abc?environment=" + ENV,
         properties.streamUrl(ENV, "abc"));
-    properties.setStreamUrlTemplate("https://gateway.test/api/harness/environment-stream/v1");
-    assertThrows(IllegalStateException.class, () -> properties.streamUrl(ENV, "abc"));
+  }
+
+  @Test
+  void rebaseUpstreamRedirectLocationKeepsRouteBase() {
+    MockHttpServletRequest request =
+        new MockHttpServletRequest("GET", "/environment-ide/" + ENV + "/");
+    request.setContextPath("/my-studio");
+    assertEquals(
+        "/my-studio/environment-ide/" + ENV + "/login?a=1",
+        IdeGatewayDataPlane.rebaseLocation("/login?a=1", request, ENV));
+    assertEquals(
+        "/my-studio/environment-ide/" + ENV + "/?workspace=x",
+        IdeGatewayDataPlane.rebaseLocation("/?workspace=x", request, ENV));
+    // 外部绝对 URL 或相对路径不重写
+    assertEquals(
+        "https://example.com/external",
+        IdeGatewayDataPlane.rebaseLocation("https://example.com/external", request, ENV));
+    assertEquals("subpath/foo", IdeGatewayDataPlane.rebaseLocation("subpath/foo", request, ENV));
   }
 
   /**
