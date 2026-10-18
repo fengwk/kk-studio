@@ -73,11 +73,18 @@ export interface CapabilityResult {
   contents: ResultContent[]
 }
 
+/** File snapshot approved by the user; not part of the model-visible arguments. */
+export interface ExpectedFile {
+  path: string
+  sha256: string
+}
+
 export interface CapabilityCall {
   invocationId: string
   capabilityId: string
   arguments: Record<string, unknown>
   timeoutMillis: number
+  expectedFile?: ExpectedFile
 }
 
 export interface ResourceUploader {

@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.port;
 
+import fun.fengwk.kkstudio.harness.environment.capability.ExpectedFile;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEditReview;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
@@ -43,7 +45,17 @@ public interface ToolGateway {
       UUID threadId,
       UUID assistantEntryId,
       int proposedAttempt,
-      ToolInvocationRequest request) {
+      ToolInvocationRequest request,
+      ExpectedFile expectedFile) {
+
+    public Execution(
+        UUID invocationId,
+        UUID threadId,
+        UUID assistantEntryId,
+        int proposedAttempt,
+        ToolInvocationRequest request) {
+      this(invocationId, threadId, assistantEntryId, proposedAttempt, request, null);
+    }
 
     public Execution {
       Objects.requireNonNull(invocationId, "invocationId");
@@ -63,7 +75,12 @@ public interface ToolGateway {
   record Allow() implements PreflightResult {}
 
   /** 需要用户确认；reason 是人类可读的 canonical 提示。 */
-  record Ask(String reason) implements PreflightResult {
+  record Ask(String reason, ToolEditReview editReview) implements PreflightResult {
+
+    public Ask(String reason) {
+      this(reason, null);
+    }
+
     public Ask {
       reason = requireCanonicalReason(reason);
     }

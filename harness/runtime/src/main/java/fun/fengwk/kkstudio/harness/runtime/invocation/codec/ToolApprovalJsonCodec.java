@@ -5,6 +5,7 @@ import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEditReview;
 
 import java.time.Instant;
 import java.util.Objects;
@@ -14,6 +15,7 @@ import java.util.UUID;
 public final class ToolApprovalJsonCodec {
 
   private static final String CONTEXT = "toolApproval";
+  private static final ToolEditReviewJsonCodec EDIT_REVIEW_JSON = new ToolEditReviewJsonCodec();
 
   public String encode(ToolApproval approval) {
     return InvocationJsonSupport.write(encodeNode(approval), CONTEXT);
@@ -29,6 +31,9 @@ public final class ToolApprovalJsonCodec {
     InvocationJsonSupport.putNullable(node, "reason", approval.reason());
     InvocationJsonSupport.putNullable(node, "requestedAt", approval.requestedAt());
     InvocationJsonSupport.putNullable(node, "decidedAt", approval.decidedAt());
+    if (approval.editReview() != null) {
+      node.set("editReview", EDIT_REVIEW_JSON.encodeNode(approval.editReview()));
+    }
     return node;
   }
 
@@ -38,8 +43,14 @@ public final class ToolApprovalJsonCodec {
 
   public ToolApproval decodeNode(JsonNode value) {
     ObjectNode node = InvocationJsonSupport.object(value, CONTEXT);
+    ToolEditReview editReview = null;
+    if (node.has("editReview")) {
+      editReview = EDIT_REVIEW_JSON.decodeNode(node.get("editReview"));
+    }
+    ObjectNode facts = node.deepCopy();
+    facts.remove("editReview");
     InvocationJsonSupport.requireFields(
-        node,
+        facts,
         CONTEXT,
         "required",
         "decision",
@@ -56,6 +67,7 @@ public final class ToolApprovalJsonCodec {
     String reason = InvocationJsonSupport.nullableText(node, "reason", CONTEXT);
     Instant requestedAt = InvocationJsonSupport.nullableInstant(node, "requestedAt", CONTEXT);
     Instant decidedAt = InvocationJsonSupport.nullableInstant(node, "decidedAt", CONTEXT);
-    return new ToolApproval(required, decision, decisionId, actor, reason, requestedAt, decidedAt);
+    return new ToolApproval(
+        required, decision, decisionId, actor, reason, requestedAt, decidedAt, editReview);
   }
 }

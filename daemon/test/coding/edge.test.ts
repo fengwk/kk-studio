@@ -279,7 +279,7 @@ describe('fs.edit 边界', () => {
     expect(decoded.text).toBe('a\nc\n')
   })
 
-  it('行级 diff 输出包含上下文与变更标记', async () => {
+  it('行级 diff 保留在结果审查详情，成功正文不重复输出', async () => {
     const dir = await tempDir()
     const file = join(dir, 'd.txt')
     await writeFile(file, 'a\nb\nc\n')
@@ -289,10 +289,12 @@ describe('fs.edit 边界', () => {
       { path: file, old_string: 'b', new_string: 'B' },
       makeContext(dir),
     )
-    const text = textOf(result)
-    expect(text).toContain('diff:')
-    expect(text).toContain('- 2|b')
-    expect(text).toContain('+ 2|B')
+    expect(textOf(result)).toBe('Edited successfully.\nReplacements: 1')
+    expect(result.details.editReview).toMatchObject({
+      path: file,
+      diff: expect.stringContaining('- 2|b'),
+    })
+    expect(result.details.editReview).toMatchObject({ diff: expect.stringContaining('+ 2|B') })
   })
 
   it('规范化后无变化时拒绝', async () => {

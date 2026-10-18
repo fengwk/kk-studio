@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { readdir, stat } from 'node:fs/promises'
 import type {
   CapabilityCall,
@@ -6,6 +7,7 @@ import type {
   CapabilityResult,
 } from '../contracts.js'
 import { textResult } from '../contracts.js'
+import { MAX_DETAILS_JSON_UTF8_BYTES } from '../protocol.js'
 import {
   CancelledError,
   ToolInputRejectedError,
@@ -273,8 +275,15 @@ const writeExecutor: CapabilityExecutor = async (call, context) => {
   }
 }
 
-/** 在保留文件表示形式（编码/BOM/未修改区域的行尾分隔符）的前提下执行确定性的精确文本替换。 */
-const editExecutor: CapabilityExecutor = async (call, context) => {
+/** Preview and commit share the same file read, matching and encoding computation. */
+const editExecutor: CapabilityExecutor = (call, context) => editFile(call, context, false)
+const editPreviewExecutor: CapabilityExecutor = (call, context) => editFile(call, context, true)
+
+async function editFile(
+  call: CapabilityCall,
+  context: CapabilityContext,
+  preview: boolean,
+): Promise<CapabilityResult> {
   try {
     const args = call.arguments
     const rawPath = requiredString(args, 'path')
@@ -306,6 +315,15 @@ const editExecutor: CapabilityExecutor = async (call, context) => {
     try {
       requireNotCancelled(context)
       const originalBytes = await readAllBytes(path)
+      const sha256 = createHash('sha256').update(originalBytes).digest('hex')
+      if (
+        call.expectedFile !== undefined
+        && (call.expectedFile.path !== path || call.expectedFile.sha256 !== sha256)
+      ) {
+        throw new ToolInputRejectedError(
+          'File changed since edit review; nothing was written. Review a new edit before approving it.',
+        )
+      }
       const decoded = decodeText(originalBytes)
       const source = decoded.text
       const lineEndingStyle = detectLineEnding(source)
@@ -347,16 +365,38 @@ const editExecutor: CapabilityExecutor = async (call, context) => {
         throw new ToolInputRejectedError('No changes to apply: edit would not change the file')
       }
 
-      const diffText = buildDiff(document, nextDocument)
+      const editReview = { path, diff: buildDiff(document, nextDocument), sha256 }
+      const completed = textResult(
+        call.invocationId,
+        `Edited successfully.\nReplacements: ${pending.length}`,
+        { editReview },
+      )
+      // Reserve the complete result, not just the diff, inside the existing 1 MiB JSON
+      // budget before preview/commit. Changed lines are never silently truncated.
+      const persistedResult = {
+        toolCallId: completed.callId,
+        contents: completed.contents,
+        error: completed.error,
+        details: completed.details,
+      }
+      if (Buffer.byteLength(JSON.stringify(persistedResult), 'utf8') > MAX_DETAILS_JSON_UTF8_BYTES) {
+        throw new ToolInputRejectedError(
+          'Complete edit diff exceeds the review transport limit; split this edit into smaller changes.',
+        )
+      }
       requireNotCancelled(context)
+      if (preview) {
+        return {
+          callId: call.invocationId,
+          error: false,
+          details: {},
+          contents: [{ type: 'json', json: editReview }],
+        }
+      }
       await commitTextFile(path, encoded)
       fileHooks.fileChanged?.(path)
 
-      const summary = `Edited ${display} successfully.\nReplacements: ${pending.length}`
-      return textResult(
-        call.invocationId,
-        diffText.trim().length === 0 ? summary : `${summary}\n\ndiff:\n${diffText}`,
-      )
+      return completed
     } finally {
       release()
     }
@@ -410,7 +450,6 @@ function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
 
 const DIFF_CONTEXT_LINES = 4
 const DIFF_MAX_CELLS = 2_000_000
-const DIFF_MAX_CHARS = 30 * 1024
 
 interface LineEndingDocument {
   lines: string[]
@@ -651,22 +690,7 @@ interface DiffPart {
 export function buildDiff(originalDoc: LineEndingDocument, nextDoc: LineEndingDocument): string {
   const originalLines = diffLines(originalDoc)
   const nextLines = diffLines(nextDoc)
-  return truncateInline(renderDiff(originalLines, nextLines, diffParts(originalLines, nextLines)))
-}
-
-export function truncateInline(diff: string): string {
-  if (diff.length <= DIFF_MAX_CHARS) {
-    return diff
-  }
-  let end = DIFF_MAX_CHARS
-  if (isHighSurrogate(diff.charCodeAt(end - 1))) {
-    end--
-  }
-  return `${diff.slice(0, end)}\n... (diff truncated to fit inline limit)`
-}
-
-function isHighSurrogate(value: number): boolean {
-  return value >= 0xd800 && value <= 0xdbff
+  return renderDiff(originalLines, nextLines, diffParts(originalLines, nextLines))
 }
 
 function diffLines(document: LineEndingDocument): string[] {
@@ -917,4 +941,5 @@ export const fileCapabilities: Record<string, CapabilityExecutor> = {
   'fs.read': readExecutor,
   'fs.write': writeExecutor,
   'fs.edit': editExecutor,
+  'fs.edit.preview': editPreviewExecutor,
 }

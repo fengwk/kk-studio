@@ -13,7 +13,18 @@ import java.util.Objects;
  * 但不把它提升为通用执行状态。
  */
 public record EnvironmentCapabilityExecutionRequest(
-    EnvironmentCapabilityDescriptor descriptor, EnvironmentCapabilityCall call, Duration timeout) {
+    EnvironmentCapabilityDescriptor descriptor,
+    EnvironmentCapabilityCall call,
+    Duration timeout,
+    ExpectedFile expectedFile) {
+
+  /** 普通能力调用不携带文件前置条件。 */
+  public EnvironmentCapabilityExecutionRequest(
+      EnvironmentCapabilityDescriptor descriptor,
+      EnvironmentCapabilityCall call,
+      Duration timeout) {
+    this(descriptor, call, timeout, null);
+  }
 
   public EnvironmentCapabilityExecutionRequest {
     descriptor = Objects.requireNonNull(descriptor, "descriptor");
@@ -21,6 +32,9 @@ public record EnvironmentCapabilityExecutionRequest(
     timeout = Objects.requireNonNull(timeout, "timeout");
     if (timeout.isNegative()) {
       throw new IllegalArgumentException("timeout must not be negative");
+    }
+    if (expectedFile != null && !EnvironmentCapabilityIds.FS_EDIT.equals(descriptor.id())) {
+      throw new IllegalArgumentException("expectedFile is only valid for fs.edit");
     }
   }
 }

@@ -53,11 +53,11 @@ class EnvironmentCapabilityContractTest {
     assertEquals(Duration.class, components[3].getType());
   }
 
-  /** 反射锁定执行请求只包含 descriptor、call 与已解析 timeout：workdir 只存在于具体 arguments。 */
+  /** 文件前置条件属于执行元数据；不把 workdir 或模型参数提升为第二份执行状态。 */
   @Test
   void requestContainsOnlyCapabilityExecutionFields() {
     assertArrayEquals(
-        new String[] {"descriptor", "call", "timeout"},
+        new String[] {"descriptor", "call", "timeout", "expectedFile"},
         componentNames(EnvironmentCapabilityExecutionRequest.class.getRecordComponents()));
   }
 
@@ -160,7 +160,7 @@ class EnvironmentCapabilityContractTest {
                 new EnvironmentCapabilityCall("call-1", "{\"path\":\"/srv/a\"}"),
                 Duration.ofSeconds(-1)));
     assertEquals(
-        List.of("descriptor", "call", "timeout"),
+        List.of("descriptor", "call", "timeout", "expectedFile"),
         Arrays.stream(EnvironmentCapabilityExecutionRequest.class.getRecordComponents())
             .map(RecordComponent::getName)
             .toList());

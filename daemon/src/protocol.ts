@@ -1,10 +1,10 @@
 import { visit as jsoncVisit, type JSONPath } from 'jsonc-parser'
 
-import type { CapabilityResult, IdeCommand, IdeReply, ResultContent } from './contracts.js'
+import type { CapabilityResult, ExpectedFile, IdeCommand, IdeReply, ResultContent } from './contracts.js'
 import { parseReleaseArtifactUrl } from './release.js'
 
 /**
- * Daemon wire 协议的严格 codec（v4 envelope / READY v5 / capability catalog v2）。
+ * Daemon wire 协议的严格 codec（v4 envelope / READY v5 / capability catalog v3）。
  *
  * <p>这是 Java Environment Daemon codec 的 Node 等价实现，wire 形状逐字段对齐 harness/environment 的
  * DaemonEnvelopeCodec / DaemonCapabilitiesCodec / DaemonCapabilityInvokeCodec /
@@ -17,7 +17,7 @@ import { parseReleaseArtifactUrl } from './release.js'
 export const PROTOCOL_VERSION = 4
 
 /** capability catalog 版本；HELLO 上报、Platform 据此判定能否执行普通能力调用。 */
-export const CAPABILITY_CATALOG_VERSION = '2'
+export const CAPABILITY_CATALOG_VERSION = '3'
 
 /** READY capabilities 协议版本。 */
 export const READY_CAPABILITIES_VERSION = 5
@@ -529,9 +529,10 @@ export interface InvokeRequest {
   capabilityVersion: string
   arguments: Record<string, unknown>
   timeoutMillis: number
+  expectedFile?: ExpectedFile
 }
 
-const INVOKE_FIELDS = new Set(['capabilityId', 'capabilityVersion', 'arguments', 'timeoutMillis'])
+const INVOKE_FIELDS = new Set(['capabilityId', 'capabilityVersion', 'arguments', 'timeoutMillis', 'expectedFile'])
 const CAPABILITY_ID_PATTERN = /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/
 
 export function decodeInvoke(text: string): InvokeRequest {
@@ -544,7 +545,20 @@ export function decodeInvoke(text: string): InvokeRequest {
   const capabilityVersion = requiredText(root, 'capabilityVersion', 'capability INVOKE payload')
   const args = requiredObject(root, 'arguments', 'capability INVOKE payload')
   const timeoutMillis = requiredNonNegativeSafeInteger(root, 'timeoutMillis', 'capability INVOKE payload')
-  return { capabilityId, capabilityVersion, arguments: args, timeoutMillis }
+  if (root.expectedFile === undefined) {
+    return { capabilityId, capabilityVersion, arguments: args, timeoutMillis }
+  }
+  if (capabilityId !== 'fs.edit') {
+    throw new ProtocolError('capability INVOKE payload.expectedFile is only valid for fs.edit')
+  }
+  const expected = requiredObject(root, 'expectedFile', 'capability INVOKE payload')
+  rejectUnknownFields(expected, new Set(['path', 'sha256']), 'capability INVOKE payload.expectedFile')
+  const path = requiredText(expected, 'path', 'capability INVOKE payload.expectedFile')
+  const sha256 = requiredText(expected, 'sha256', 'capability INVOKE payload.expectedFile')
+  if (!SHA256_PATTERN.test(sha256)) {
+    throw new ProtocolError('capability INVOKE payload.expectedFile.sha256 must be lowercase SHA-256')
+  }
+  return { capabilityId, capabilityVersion, arguments: args, timeoutMillis, expectedFile: { path, sha256 } }
 }
 
 export function encodeInvoke(request: InvokeRequest): string {
@@ -553,6 +567,7 @@ export function encodeInvoke(request: InvokeRequest): string {
     capabilityVersion: request.capabilityVersion,
     arguments: request.arguments,
     timeoutMillis: request.timeoutMillis,
+    ...(request.expectedFile === undefined ? {} : { expectedFile: request.expectedFile }),
   })
 }
 
