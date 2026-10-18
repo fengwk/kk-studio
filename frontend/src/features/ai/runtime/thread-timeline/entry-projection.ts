@@ -1,3 +1,4 @@
+import { extractResultEditReview } from '@/features/ai/runtime/mutation-review'
 import type { HarnessSessionEntryDTO } from '@/shared/api/contracts/ai-runtime'
 import { asRecord, getRecordList, getString, parsePayload } from '@/features/ai/runtime/payload-json'
 import type {
@@ -397,6 +398,7 @@ function projectToolResult(
     errorMessage: projected.errorMessage,
     createdAt: entry.createTime,
     status: projected.status,
+    editReview: projected.editReview,
     callIdentity: assistantEntryId && metadataCallIndex != null
       ? strictToolCallIdentity(assistantEntryId, metadataCallIndex)
       : undefined,
@@ -410,7 +412,7 @@ function projectToolResult(
 export function projectToolResultContent(
   content: Record<string, unknown>,
   argumentsJson: string,
-): Pick<ToolDialogueMessage, 'arguments' | 'contents' | 'errorMessage' | 'status'> {
+): Pick<ToolDialogueMessage, 'arguments' | 'contents' | 'errorMessage' | 'status' | 'editReview'> {
   const error = content.error === true
   const contents = toToolContents(getRecordList(content.contents))
   // 错误直接使用工具结果原文：不再套用通用「工具执行失败」文案；没有可展示原文时
@@ -419,11 +421,13 @@ export function projectToolResultContent(
     .flatMap((item) => (item.type === 'text' ? [item.text] : []))
     .join('\n')
     .trim()
+  const editReview = extractResultEditReview(content) ?? undefined
   return {
     arguments: argumentsJson,
     contents,
     errorMessage: error && rawError ? rawError : undefined,
     status: error ? 'error' : 'done',
+    editReview,
   }
 }
 
