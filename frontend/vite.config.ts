@@ -28,6 +28,12 @@ export default defineConfig({
         // 应用事件 WebSocket（/api/events/v1）经同一代理转发。
         ws: true,
       },
+      '/environment-ide': {
+        target: process.env.API_PROXY_TARGET || 'http://127.0.0.1:8080',
+        // 保留浏览器原始 Host 与 Origin，对齐后端 IdeOriginPolicy 的同源严格校验。
+        changeOrigin: false,
+        ws: true,
+      },
     },
   },
   test: {
