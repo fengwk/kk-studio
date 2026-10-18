@@ -19,7 +19,7 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 
 /**
- * 七表 {@link HarnessStore} durable protocol 的 PostgreSQL 实现。
+ * {@link HarnessStore} durable protocol 的 PostgreSQL 实现。
  *
  * <p>每个 store callback 在 {@code READ_COMMITTED} 事务内执行。{@code PROPAGATION_REQUIRED}
  * 边界允许调用方已有的外层事务加入（同连接同事务），禁止 {@code REQUIRES_NEW}，以便 owner 锁与 harness 写入保持同一物理事务。

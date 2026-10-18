@@ -9,7 +9,7 @@
 -- ON UPDATE CURRENT_TIMESTAMP.
 --
 -- Harness execution state is the exact infra protocol: section 2 below
--- (the eight tables + their indexes) is the single authoritative definition of
+-- (the harness_* tables and their indexes) is the single authoritative definition of
 -- the durable Harness protocol schema. There is no separate infra
 -- schema file; this block is the only copy. HarnessRuntime owns every execution
 -- id via the injected Supplier<UUID> (production: UUID::randomUUID) and owns
@@ -987,7 +987,7 @@ insert into system_setting (id, config) values (
 ------------------------------------------------------------------------------
 -- 2. Harness runtime execution protocol
 --
--- The block below (the eight tables + their indexes, including comments) is the
+-- The block below (the harness_* tables and their indexes, including comments) is the
 -- single authoritative definition of the durable Harness protocol schema.
 -- Columns, checks, FKs and indexes must never drift; HarnessRuntime allocates
 -- ids via the injected Supplier<UUID> (production: UUID::randomUUID) and

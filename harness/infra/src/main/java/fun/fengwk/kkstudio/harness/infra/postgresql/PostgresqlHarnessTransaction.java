@@ -72,7 +72,7 @@ import java.util.UUID;
 import java.util.function.Supplier;
 
 /**
- * 七表 {@link HarnessStore.Transaction} typed primitives 的 PostgreSQL 实现。
+ * {@link HarnessStore.Transaction} typed primitives 的 PostgreSQL 实现。
  *
  * <p>本类仅实现底层持久化原语的精确映射，绝不包含 Thread 下一步决策、重试策略、权限判定或 Tool 聚合等用例逻辑。
  *
@@ -3058,14 +3058,6 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   /** PostgreSQL interval 字面量：duration 已限定为正的整毫秒。 */
   private static String leaseInterval(Duration leaseDuration) {
     return leaseDuration.toMillis() + " milliseconds";
-  }
-
-  private Work lockedWork(WorkTarget target) {
-    return lockWork(target)
-        .orElseThrow(
-            () ->
-                new IllegalStateException(
-                    "work does not exist for target " + target + " (lost ownership)"));
   }
 
   private void updateWork(Work work) {

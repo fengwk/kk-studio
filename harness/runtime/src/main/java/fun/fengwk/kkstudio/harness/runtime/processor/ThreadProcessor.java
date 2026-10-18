@@ -32,9 +32,6 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAccess;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAccessMode;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
@@ -57,7 +54,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CommandHarvestReducer;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
@@ -1072,45 +1068,6 @@ public final class ThreadProcessor {
             maxOutputTokens,
             compactionStart != null ? compactionStart : start.compaction()),
         entry.createdAt());
-  }
-
-  /**
-   * 同一 Assistant 的 sibling 都读取相同冻结 branch。若某 state key 已出现 WRITE，后续 READ/WRITE 必然读取陈旧快照， 因而在
-   * dispatch 前确定性拒绝；READ 后 WRITE 与不同 key 保持并发。
-   */
-  private static ToolInvocationError siblingStateConflict(
-      ContributorBinding contributor, Map<ContributorStateKey, ContributorStateAccessMode> seen) {
-    if (contributor == null || contributor.stateAccesses().isEmpty()) {
-      return null;
-    }
-    for (ContributorStateAccess access : contributor.stateAccesses()) {
-      ContributorStateKey key =
-          new ContributorStateKey(contributor.contributorId(), access.customType());
-      if (seen.get(key) == ContributorStateAccessMode.WRITE) {
-        return new ToolInvocationError(
-            "SIBLING_STATE_CONFLICT",
-            "A previous sibling tool writes contributor state "
-                + key
-                + "; call this tool in the next model turn.");
-      }
-    }
-    for (ContributorStateAccess access : contributor.stateAccesses()) {
-      ContributorStateKey key =
-          new ContributorStateKey(contributor.contributorId(), access.customType());
-      if (access.mode() == ContributorStateAccessMode.WRITE) {
-        seen.put(key, ContributorStateAccessMode.WRITE);
-      } else {
-        seen.putIfAbsent(key, ContributorStateAccessMode.READ);
-      }
-    }
-    return null;
-  }
-
-  private record ContributorStateKey(String contributorId, String customType) {
-    @Override
-    public String toString() {
-      return contributorId + ":" + customType;
-    }
   }
 
   /** Work-only 前置校验：仅锁 Work 行验证 claim 当前真实 owned。 */
