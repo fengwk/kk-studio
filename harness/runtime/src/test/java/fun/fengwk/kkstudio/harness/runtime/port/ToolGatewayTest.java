@@ -3,16 +3,23 @@ package fun.fengwk.kkstudio.harness.runtime.port;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.environment.capability.ExpectedFile;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEditReview;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -53,6 +60,8 @@ class ToolGatewayTest {
         UUID.fromString("00000000-0000-0000-0000-00000000000b"), execution.assistantEntryId());
     assertEquals(2, execution.proposedAttempt());
     assertEquals(PortTestData.toolRequest(), execution.request());
+    assertEquals(ToolApproval.notRequired(), execution.approval());
+    assertNull(execution.expectedFile());
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -71,6 +80,41 @@ class ToolGatewayTest {
                 UUID.fromString("00000000-0000-0000-0000-000000000001"),
                 1,
                 null));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new ToolGateway.Execution(
+                UUID.fromString("00000000-0000-0000-0000-000000000001"),
+                UUID.fromString("00000000-0000-0000-0000-000000000001"),
+                UUID.fromString("00000000-0000-0000-0000-000000000001"),
+                1,
+                PortTestData.toolRequest(),
+                null));
+
+    ExpectedFile expectedFile =
+        new ExpectedFile(
+            "/tmp/file.txt", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+    ToolEditReview review = new ToolEditReview(expectedFile, "diff");
+    ToolApproval reviewedApproval =
+        new ToolApproval(
+            true,
+            ToolApprovalDecision.ALLOWED,
+            UUID.fromString("00000000-0000-0000-0000-000000000002"),
+            "user",
+            "approved",
+            Instant.parse("2026-07-01T00:00:00Z"),
+            Instant.parse("2026-07-01T00:00:01Z"),
+            review);
+    ToolGateway.Execution reviewedExecution =
+        new ToolGateway.Execution(
+            UUID.fromString("00000000-0000-0000-0000-000000000009"),
+            UUID.fromString("00000000-0000-0000-0000-000000000007"),
+            UUID.fromString("00000000-0000-0000-0000-00000000000b"),
+            2,
+            PortTestData.toolRequest(),
+            reviewedApproval);
+    assertSame(reviewedApproval, reviewedExecution.approval());
+    assertEquals(expectedFile, reviewedExecution.expectedFile());
   }
 
   @Test

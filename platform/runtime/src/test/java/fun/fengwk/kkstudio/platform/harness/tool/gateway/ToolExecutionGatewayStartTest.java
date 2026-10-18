@@ -3,12 +3,14 @@ package fun.fengwk.kkstudio.platform.harness.tool.gateway;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
+import fun.fengwk.kkstudio.harness.common.tool.ToolErrorGuidance;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorDescriptor;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
@@ -21,8 +23,13 @@ import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
+import fun.fengwk.kkstudio.harness.environment.capability.ExpectedFile;
+import fun.fengwk.kkstudio.harness.runtime.admission.ConcurrencyAdmission;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEditReview;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
@@ -30,14 +37,18 @@ import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
+import fun.fengwk.kkstudio.platform.harness.contributor.ContributorBranchViewLoader;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 /** {@link ToolExecutionGateway#start}：统一单路径执行、requirements 校验、admission 分类与两阶段门控测试。 */
@@ -841,6 +852,282 @@ class ToolExecutionGatewayStartTest {
     ToolGatewayTestSupport.RecordingListener.Event.Succeeded succeeded =
         (ToolGatewayTestSupport.RecordingListener.Event.Succeeded) listener.events.get(0);
     assertEquals("call-1", succeeded.result().toolCallId());
+  }
+
+  /**
+   * 定向测试 1（契约测试点 2）：required edit 无 review 时 gateway 拒绝，kind 为 EDIT_REVIEW_REQUIRED， 引导明确
+   * NOT_EXECUTED 并引导重新请求 edit 审查，branch loader 与 transport 均不触达且 admission lease 释放。
+   */
+  @Test
+  void
+      requiredEditWithoutReviewIsRejectedWithoutTouchingBranchLoaderOrTransportAndReleasesLeases() {
+    HarnessCatalog catalog = ToolGatewayTestSupport.defaultCatalog();
+    ToolContribution editContribution = catalog.findTool("edit").orElseThrow();
+    ContributorBinding contributor =
+        new ContributorBinding(
+            editContribution.id().contributorId().value(),
+            editContribution.id().localName(),
+            List.of());
+    ToolBinding binding =
+        new ToolBinding(
+            1L,
+            editContribution.definition(),
+            contributor,
+            EnvironmentSupport.REQUIRED,
+            ToolGatewayTestSupport.ENV_A,
+            "test-env",
+            null);
+    ToolInvocationRequest request =
+        new ToolInvocationRequest(
+            new ToolCall(
+                "call-edit-1",
+                "edit",
+                "{\"path\":\"/workspace/a.txt\",\"old_string\":\"old\",\"new_string\":\"new\"}"),
+            binding);
+
+    ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
+    ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
+    ConcurrencyAdmission admission = new ConcurrencyAdmission(1);
+    AtomicBoolean branchLoaderCalled = new AtomicBoolean(false);
+    ContributorBranchViewLoader branchLoader =
+        (assistantEntryId, contributorId) -> {
+          branchLoaderCalled.set(true);
+          return ToolGatewayTestSupport.EMPTY_BRANCH_VIEW;
+        };
+    ExecutorService executor = Executors.newSingleThreadExecutor();
+    try {
+      ToolExecutionGateway gateway =
+          ToolGatewayTestSupport.gateway(
+              catalog, branchLoader, transport, store, executor, admission);
+
+      Instant now = ToolGatewayTestSupport.TEST_CLOCK.instant();
+      ToolApproval requiredAllowedWithoutReview =
+          ToolApproval.request(now, "review required")
+              .decide(
+                  ToolApprovalDecision.ALLOWED,
+                  UUID.randomUUID(),
+                  "actor",
+                  "approved",
+                  now.plusSeconds(1));
+
+      ToolGateway.Execution execution =
+          new ToolGateway.Execution(
+              ToolGatewayTestSupport.INVOCATION_ID,
+              ToolGatewayTestSupport.THREAD_ID,
+              ToolGatewayTestSupport.ASSISTANT_ENTRY_ID,
+              1,
+              request,
+              requiredAllowedWithoutReview);
+
+      ToolGateway.StartResult result =
+          gateway.start(execution, new ToolGatewayTestSupport.RecordingListener());
+      ToolGateway.Rejected rejected = assertInstanceOf(ToolGateway.Rejected.class, result);
+      assertEquals(ToolExecutionGateway.EDIT_REVIEW_REQUIRED_KIND, rejected.error().kind());
+      assertTrue(
+          rejected.error().message().contains(ToolErrorGuidance.ExecutionFact.NOT_EXECUTED.fact()));
+      assertTrue(
+          rejected
+              .error()
+              .message()
+              .contains("Request approval with an edit review before calling the tool again"));
+
+      assertFalse(branchLoaderCalled.get());
+      assertTrue(transport.invocations.isEmpty());
+
+      ConcurrencyAdmission.Lease recovered = admission.tryAcquire().orElseThrow();
+      recovered.close();
+    } finally {
+      executor.shutdownNow();
+    }
+  }
+
+  /**
+   * 定向测试 2（契约测试点 3）：valid required edit 时，exact canonical ExpectedFile 正确进入
+   * EnvironmentCapabilityExecutionRequest。
+   */
+  @Test
+  void validRequiredEditPropagatesExactCanonicalExpectedFileToTransport() {
+    HarnessCatalog catalog = ToolGatewayTestSupport.defaultCatalog();
+    ToolContribution editContribution = catalog.findTool("edit").orElseThrow();
+    ContributorBinding contributor =
+        new ContributorBinding(
+            editContribution.id().contributorId().value(),
+            editContribution.id().localName(),
+            List.of());
+    ToolBinding binding =
+        new ToolBinding(
+            1L,
+            editContribution.definition(),
+            contributor,
+            EnvironmentSupport.REQUIRED,
+            ToolGatewayTestSupport.ENV_A,
+            "test-env",
+            null);
+    ToolInvocationRequest request =
+        new ToolInvocationRequest(
+            new ToolCall(
+                "call-edit-2",
+                "edit",
+                "{\"path\":\"/workspace/a.txt\",\"old_string\":\"old\",\"new_string\":\"new\"}"),
+            binding);
+
+    ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
+    ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
+    ExecutorService executor = Executors.newSingleThreadExecutor();
+    try {
+      ToolExecutionGateway gateway =
+          ToolGatewayTestSupport.gateway(catalog, transport, store, executor);
+
+      Instant now = ToolGatewayTestSupport.TEST_CLOCK.instant();
+      ExpectedFile expectedFile =
+          new ExpectedFile(
+              "/canonical/workspace/a.txt",
+              "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+      ToolEditReview editReview = new ToolEditReview(expectedFile, "-old\n+new");
+      ToolApproval validApproval =
+          ToolApproval.request(now, "review required", editReview)
+              .decide(
+                  ToolApprovalDecision.ALLOWED,
+                  UUID.randomUUID(),
+                  "actor",
+                  "approved",
+                  now.plusSeconds(1));
+
+      ToolGateway.Execution execution =
+          new ToolGateway.Execution(
+              ToolGatewayTestSupport.INVOCATION_ID,
+              ToolGatewayTestSupport.THREAD_ID,
+              ToolGatewayTestSupport.ASSISTANT_ENTRY_ID,
+              1,
+              request,
+              validApproval);
+
+      ToolGateway.StartResult result =
+          gateway.start(execution, new ToolGatewayTestSupport.RecordingListener());
+      ToolGateway.Started started = assertInstanceOf(ToolGateway.Started.class, result);
+      started.handle().activate();
+
+      awaitSize(transport.invocations, 1);
+      assertEquals(expectedFile, transport.invocations.get(0).request().expectedFile());
+    } finally {
+      executor.shutdownNow();
+    }
+  }
+
+  /** 定向测试 3（契约测试点 4）：notRequired 自动 edit 无 expectedFile 仍正常执行。 */
+  @Test
+  void notRequiredAutoEditExecutesWithoutExpectedFile() {
+    HarnessCatalog catalog = ToolGatewayTestSupport.defaultCatalog();
+    ToolContribution editContribution = catalog.findTool("edit").orElseThrow();
+    ContributorBinding contributor =
+        new ContributorBinding(
+            editContribution.id().contributorId().value(),
+            editContribution.id().localName(),
+            List.of());
+    ToolBinding binding =
+        new ToolBinding(
+            1L,
+            editContribution.definition(),
+            contributor,
+            EnvironmentSupport.REQUIRED,
+            ToolGatewayTestSupport.ENV_A,
+            "test-env",
+            null);
+    ToolInvocationRequest request =
+        new ToolInvocationRequest(
+            new ToolCall(
+                "call-edit-3",
+                "edit",
+                "{\"path\":\"/workspace/a.txt\",\"old_string\":\"old\",\"new_string\":\"new\"}"),
+            binding);
+
+    ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
+    ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
+    ExecutorService executor = Executors.newSingleThreadExecutor();
+    try {
+      ToolExecutionGateway gateway =
+          ToolGatewayTestSupport.gateway(catalog, transport, store, executor);
+
+      ToolGateway.Execution execution = ToolGatewayTestSupport.execution(request);
+      assertFalse(execution.approval().required());
+      assertNull(execution.expectedFile());
+
+      ToolGateway.StartResult result =
+          gateway.start(execution, new ToolGatewayTestSupport.RecordingListener());
+      ToolGateway.Started started = assertInstanceOf(ToolGateway.Started.class, result);
+      started.handle().activate();
+
+      awaitSize(transport.invocations, 1);
+      assertNull(transport.invocations.get(0).request().expectedFile());
+    } finally {
+      executor.shutdownNow();
+    }
+  }
+
+  /** 定向测试 4（契约测试点 5）：非环境同名 edit 不被误拦截（基于真实 contribution 识别，而非仅看 toolName）。 */
+  @Test
+  void nonEnvironmentSameNamedEditIsNotBlockedByGuard() {
+    ToolDescriptor hostEditDescriptor = ToolGatewayTestSupport.hostDescriptor("edit");
+    ToolGatewayTestSupport.FakeTool hostEditTool =
+        new ToolGatewayTestSupport.FakeTool(hostEditDescriptor);
+    HarnessContributor hostContributor =
+        HarnessContributor.of(
+            new ContributorDescriptor(
+                new ContributorId("host-contrib"), "HostContrib", "1", Set.of()),
+            registrar ->
+                registrar.registerTool("edit", hostEditTool, ToolVisibility.SELECTABLE, 0));
+    HarnessCatalog catalog = HarnessCatalog.from(List.of(hostContributor));
+
+    ToolContribution hostEditContribution = catalog.findTool("edit").orElseThrow();
+    ToolBinding binding =
+        new ToolBinding(
+            1L,
+            hostEditContribution.definition(),
+            new ContributorBinding("host-contrib", "edit", List.of()),
+            EnvironmentSupport.NONE,
+            null,
+            null,
+            null);
+    ToolInvocationRequest request =
+        new ToolInvocationRequest(new ToolCall("call-host-edit", "edit", "{}"), binding);
+
+    ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
+    ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
+    ExecutorService executor = Executors.newSingleThreadExecutor();
+    try {
+      ToolExecutionGateway gateway =
+          ToolGatewayTestSupport.gateway(catalog, transport, store, executor);
+
+      Instant now = ToolGatewayTestSupport.TEST_CLOCK.instant();
+      ToolApproval requiredAllowedWithoutReview =
+          ToolApproval.request(now, "review required")
+              .decide(
+                  ToolApprovalDecision.ALLOWED,
+                  UUID.randomUUID(),
+                  "actor",
+                  "approved",
+                  now.plusSeconds(1));
+
+      ToolGateway.Execution execution =
+          new ToolGateway.Execution(
+              ToolGatewayTestSupport.INVOCATION_ID,
+              ToolGatewayTestSupport.THREAD_ID,
+              ToolGatewayTestSupport.ASSISTANT_ENTRY_ID,
+              1,
+              request,
+              requiredAllowedWithoutReview);
+
+      ToolGateway.StartResult result =
+          gateway.start(execution, new ToolGatewayTestSupport.RecordingListener());
+      ToolGateway.Started started = assertInstanceOf(ToolGateway.Started.class, result);
+      started.handle().activate();
+
+      awaitSize(hostEditTool.requests, 1);
+      assertEquals("edit", hostEditTool.requests.get(0).descriptor().name());
+      assertTrue(transport.invocations.isEmpty());
+    } finally {
+      executor.shutdownNow();
+    }
   }
 
   private static ToolDescriptor hostDriftedDescriptor(String version) {
