@@ -21,10 +21,10 @@ import java.util.UUID;
  * 因此已接受回答的 submissionId / actor / acceptedAt 随结果一起迁入 Entry 元数据，绝不写入业务 {@code detailsJson}。synthetic
  * 结果不携带回执。
  *
- * <p>{@code binding} 是产生本结果的原 Tool invocation 冻结的 {@link ToolBinding}（含目录 epoch、完整定义、requirements 与
- * 插件来源）：真实终态（SUCCEEDED/FAILED/CANCELLED/UNKNOWN，含人工 resolve 后的结果）即使 invocation 行被物理删除也必须保留
- * binding，使同代码重启后仍能核查原 epoch/definition/source，绝不静默按当前版本重放。模型调用未命中冻结 binding 的 unknown-tool 槽位与
- * synthetic 结果为 null。离线导入的旧版历史没有保存 binding，也以 null 表达缺失；这些记录仅保留历史事实，不由当前同名工具补造执行身份。
+ * <p>{@code binding} 是产生本结果的原 Tool invocation 冻结的 {@link
+ * ToolBinding}（完整定义、贡献身份与环境路由）：真实终态（SUCCEEDED/FAILED/CANCELLED/UNKNOWN，含人工 resolve 后的结果）即使
+ * invocation 行被物理删除也必须保留 binding，使历史始终记录产生结果的定义，绝不静默按当前版本补造。模型调用未命中冻结 binding 的 unknown-tool 槽位与
+ * synthetic 结果为 null。
  */
 public record ToolResultMetadata(
     UUID invocationId,

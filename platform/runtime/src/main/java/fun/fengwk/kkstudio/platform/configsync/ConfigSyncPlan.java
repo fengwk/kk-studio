@@ -14,8 +14,7 @@ import java.util.Map;
  *
  * <p>{@code imported} 是最终会实际写入的引用，{@code skipped} 是被明确跳过的条目；两者都已在计划阶段定性。
  *
- * <p>{@code pluginCatalogEpoch} 是计划期权威插件目录的全局 epoch，{@code plugins} 每项携带该插件当时的配置修订；两者只作为导入事务内的 CAS
- * 坐标，绝不进入 portable 导出。
+ * <p>{@code plugins} 每项携带该插件计划期的配置修订，只作为导入事务内的 CAS 坐标，绝不进入 portable 导出。
  */
 public record ConfigSyncPlan(
     List<ConfigSyncParser.ProviderSpec> providers,
@@ -25,7 +24,6 @@ public record ConfigSyncPlan(
     List<ConfigSyncParser.EnvironmentSpec> environments,
     List<ConfigSyncParser.AgentSpec> agents,
     List<PluginImport> plugins,
-    long pluginCatalogEpoch,
     SettingsUpdate settings,
     List<ConfigSyncRef> imported,
     List<ConfigSyncSkipped> skipped) {

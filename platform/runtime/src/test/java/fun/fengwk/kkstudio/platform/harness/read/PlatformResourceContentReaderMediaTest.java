@@ -263,7 +263,6 @@ class PlatformResourceContentReaderMediaTest {
         new ModelDescriptor("provider", "model", "model-id", modalities, true, false);
     ModelRequestSpec spec =
         new ModelRequestSpec(
-            1L,
             type,
             UUID.randomUUID(),
             descriptor,

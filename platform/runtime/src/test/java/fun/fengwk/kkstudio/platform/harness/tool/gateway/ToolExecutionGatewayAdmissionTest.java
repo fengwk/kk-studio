@@ -307,11 +307,9 @@ class ToolExecutionGatewayAdmissionTest {
         new ToolInvocationRequest(
             new ToolCall("effects", descriptor.name(), "{}"),
             new ToolBinding(
-                1L,
                 new AgentToolDefinition(descriptor, ToolVisibility.SELECTABLE),
                 new ContributorBinding("goal", "tool", List.of()),
                 EnvironmentSupport.NONE,
-                null,
                 null,
                 null));
     return ToolGatewayTestSupport.execution(request);

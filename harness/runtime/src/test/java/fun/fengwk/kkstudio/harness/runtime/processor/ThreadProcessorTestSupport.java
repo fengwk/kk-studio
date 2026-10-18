@@ -854,7 +854,6 @@ final class ThreadProcessorTestSupport {
 
   static ModelRequestSpec requestWithBindings(List<ToolBinding> bindings) {
     return new ModelRequestSpec(
-        1L,
         ProviderType.OPENAI,
         new UUID(0L, 1L),
         modelDescriptor("provider", "model"),
@@ -869,7 +868,6 @@ final class ThreadProcessorTestSupport {
   /** 按 candidate BranchSettings 构造机械一致的 Resolved spec（model / variant）。 */
   static ModelRequestSpec requestFor(BranchSettings settings) {
     return new ModelRequestSpec(
-        1L,
         ProviderType.OPENAI,
         new UUID(0L, 1L),
         modelDescriptor(settings.model().providerName(), settings.model().modelName()),
@@ -888,7 +886,6 @@ final class ThreadProcessorTestSupport {
   /** 按指定模型构造机械一致的压缩 Resolved 请求（零 bindings、缓存 none）。 */
   static ModelRequestSpec compactionRequest(ModelSelection model) {
     return new ModelRequestSpec(
-        1L,
         ProviderType.OPENAI,
         new UUID(0L, 1L),
         modelDescriptor(model.providerName(), model.modelName()),
@@ -1097,11 +1094,9 @@ final class ThreadProcessorTestSupport {
 
   private static ToolBinding hostBinding(String name) {
     return new ToolBinding(
-        1L,
         toolDefinition(name),
         new ContributorBinding("core", name, List.of()),
         EnvironmentSupport.NONE,
-        null,
         null,
         null);
   }
@@ -1118,11 +1113,9 @@ final class ThreadProcessorTestSupport {
             Duration.ofSeconds(30));
     AgentToolDefinition definition = new AgentToolDefinition(descriptor, ToolVisibility.SELECTABLE);
     return new ToolBinding(
-        1L,
         definition,
         new ContributorBinding("core", name, List.of()),
         EnvironmentSupport.NONE,
-        null,
         null,
         null);
   }
@@ -1130,11 +1123,9 @@ final class ThreadProcessorTestSupport {
   static ToolBinding declarativeBinding(
       String name, String contributorId, String localName, List<ContributorStateAccess> accesses) {
     return new ToolBinding(
-        1L,
         toolDefinition(name),
         new ContributorBinding(contributorId, localName, accesses),
         EnvironmentSupport.NONE,
-        null,
         null,
         null);
   }

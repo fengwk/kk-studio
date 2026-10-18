@@ -29,11 +29,9 @@ const REQUEST_C = 'eeeeeeee-0000-4000-8000-000000000003'
 
 /** 目录版本夹具：同 epoch 下定义指纹变化，代表「函数定义已推进」。 */
 const FUNCTION_VERSION_A: CanvasFunctionVersionDTO = {
-  catalogEpoch: '1',
   definitionFingerprint: 'a'.repeat(64),
 }
 const FUNCTION_VERSION_B: CanvasFunctionVersionDTO = {
-  catalogEpoch: '1',
   definitionFingerprint: 'b'.repeat(64),
 }
 
@@ -439,15 +437,7 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
     write({ requestId: crypto.randomUUID() })
     expect(() => loadPendingFunctionRun(canvasId, nodeId)).toThrow(/schema validation failed/)
 
-    // 5. expectedVersion.catalogEpoch 前导零 -> 必须 throw
-    write({ ...validRequest, expectedVersion: { ...FUNCTION_VERSION_A, catalogEpoch: '01' } })
-    expect(() => loadPendingFunctionRun(canvasId, nodeId)).toThrow(/schema validation failed/)
-
-    // 6. expectedVersion.catalogEpoch 超出 Java long -> 必须 throw
-    write({ ...validRequest, expectedVersion: { ...FUNCTION_VERSION_A, catalogEpoch: '9223372036854775808' } })
-    expect(() => loadPendingFunctionRun(canvasId, nodeId)).toThrow(/schema validation failed/)
-
-    // 7. expectedVersion.catalogEpoch 为 number（绝不 coerce 成文本）-> 必须 throw
+    // 5. expectedVersion 含未知字段（例如旧缓存的 catalogEpoch）-> 必须 throw
     write({ ...validRequest, expectedVersion: { ...FUNCTION_VERSION_A, catalogEpoch: 1 } })
     expect(() => loadPendingFunctionRun(canvasId, nodeId)).toThrow(/schema validation failed/)
 
@@ -480,14 +470,12 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
     window.localStorage.setItem(storageKey, 'invalid-json{{{')
     expect(() => loadPendingFunctionRun(canvasId, nodeId)).toThrow(/invalid JSON/)
 
-    // 13. 合法规范结构（含超 Number.MAX_SAFE_INTEGER 的 epoch）-> 原值解析
+    // 13. 合法规范结构 -> 原值解析
     const validReqId = crypto.randomUUID() as UUIDString
-    const bigEpoch = '9223372036854775807'
-    write({ requestId: validReqId, expectedVersion: { ...FUNCTION_VERSION_A, catalogEpoch: bigEpoch } })
+    write({ requestId: validReqId, expectedVersion: { ...FUNCTION_VERSION_A } })
     const loaded = loadPendingFunctionRun(canvasId, nodeId)
     expect(loaded?.request.requestId).toBe(validReqId)
     expect(loaded?.request.expectedVersion).toEqual({
-      catalogEpoch: bigEpoch,
       definitionFingerprint: FUNCTION_VERSION_A.definitionFingerprint,
     })
   })
@@ -977,7 +965,6 @@ describe('I06: Function Run 幂等 Attempt 全量持久化与重试对账', () =
     })
     await Promise.resolve()
     expect(flushFunctionConfig).toHaveBeenCalledTimes(1)
-    liveVersion.catalogEpoch = FUNCTION_VERSION_B.catalogEpoch
     liveVersion.definitionFingerprint = FUNCTION_VERSION_B.definitionFingerprint
 
     await act(async () => {

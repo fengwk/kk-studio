@@ -253,7 +253,6 @@ class ToolHistoryActionsTest {
   private static List<ToolBinding> bindings() {
     return List.of(
         new ToolBinding(
-            1L,
             new AgentToolDefinition(
                 new ToolDescriptor(
                     "fs_read",
@@ -265,7 +264,6 @@ class ToolHistoryActionsTest {
                 ToolVisibility.SELECTABLE),
             new ContributorBinding("core", "fs.read", List.of()),
             EnvironmentSupport.NONE,
-            null,
             null,
             null));
   }

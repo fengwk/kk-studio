@@ -27,20 +27,15 @@ import fun.fengwk.kkstudio.platform.catalog.provider.repo.AgentProviderRepositor
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogQueryService;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
-import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogManifest;
-import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRecord;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRow;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsRepository;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionType;
 
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 
-/** 测试意图：锁定一次性快照读取装配八类事实，settings 行缺失时给出资源不存在错误，插件配置取自权威目录并与其配置历史逐字段核对。 */
+/** 测试意图：锁定一次性快照读取装配八类事实，settings 行缺失时给出资源不存在错误，插件配置只取已安装 Plugin 的当前行。 */
 class ConfigSyncSnapshotReaderTest {
 
   private static final String PLUGIN_VALUES = "{\"promptAgentName\":\"h3-agent\"}";
@@ -67,30 +62,10 @@ class ConfigSyncSnapshotReaderTest {
           environmentRepository,
           mcpServerRepository,
           systemSettingsRepository,
-          pluginConfigurationRepository);
-
-  /** 空目录：epoch 与 manifest 指纹形状合法，但没有插件条目。 */
-  private static PluginCatalogRecord emptyCatalog() {
-    return new PluginCatalogRecord(
-        1L, new PluginCatalogManifest(Map.of(), ConfigSyncFixtures.FINGERPRINT));
-  }
-
-  private static PluginCatalogManifest.Entry entryOf(PluginConfigurationRow row) {
-    return new PluginCatalogManifest.Entry(
-        row.revision(),
-        row.codeVersion(),
-        row.schemaFingerprint(),
-        row.capabilityFingerprint(),
-        row.authGeneration(),
-        row.contextFingerprint());
-  }
-
-  private static PluginCatalogRecord catalogOf(long epoch, PluginConfigurationRow row) {
-    Map<String, PluginCatalogManifest.Entry> plugins = new LinkedHashMap<>();
-    plugins.put(row.pluginId(), entryOf(row));
-    return new PluginCatalogRecord(
-        epoch, new PluginCatalogManifest(plugins, ConfigSyncFixtures.FINGERPRINT));
-  }
+          pluginConfigurationRepository,
+          ConfigSyncFixtures.registry(
+              new ConfigSyncFixtures.AgentDependencyPlugin("acme.plugin"),
+              new ConfigSyncFixtures.AgentDependencyPlugin("beta.plugin")));
 
   private void stubBaseFacts() {
     when(skillCatalogQueryService.listPackages()).thenReturn(List.of());
@@ -119,8 +94,6 @@ class ConfigSyncSnapshotReaderTest {
     when(environmentRepository.listAll()).thenReturn(List.of(environment));
     when(mcpServerRepository.listAllServers()).thenReturn(List.of(server));
     when(mcpServerRepository.listAllTools()).thenReturn(List.of(tool));
-    when(pluginConfigurationRepository.readCatalog()).thenReturn(emptyCatalog());
-
     ConfigSyncSnapshot snapshot = reader.read();
 
     assertSame(settings, snapshot.settings());
@@ -132,44 +105,21 @@ class ConfigSyncSnapshotReaderTest {
     assertEquals(List.of(tool), snapshot.mcpTools());
     assertTrue(snapshot.agents().isEmpty());
     assertTrue(snapshot.plugins().isEmpty());
-    assertEquals(1L, snapshot.pluginCatalogEpoch());
   }
 
-  /** 插件配置只能来自权威目录坐标 + 逐字段一致的配置历史；这里同时锁定 epoch 随目录一起进入快照。 */
+  /** 插件配置只取已安装 Plugin 的当前行并按 pluginId 排序；已卸载 Plugin 的残留行被忽略。 */
   @Test
-  void readsPluginConfigurationFromAuthoritativeCatalogAndHistory() {
+  void readsCurrentConfigurationOfInstalledPluginsOnly() {
     stubBaseFacts();
     when(systemSettingsRepository.get()).thenReturn(settings(1L));
-    PluginConfigurationRow row = ConfigSyncFixtures.pluginRow("acme.plugin", 7L, PLUGIN_VALUES);
-    when(pluginConfigurationRepository.readCatalog()).thenReturn(catalogOf(9L, row));
-    when(pluginConfigurationRepository.readConfiguration("acme.plugin", 7L))
-        .thenReturn(Optional.of(row));
+    PluginConfigurationRow beta = ConfigSyncFixtures.pluginRow("beta.plugin", 2L, PLUGIN_VALUES);
+    PluginConfigurationRow acme = ConfigSyncFixtures.pluginRow("acme.plugin", 7L, PLUGIN_VALUES);
+    when(pluginConfigurationRepository.findAll())
+        .thenReturn(List.of(beta, ConfigSyncFixtures.pluginRow("removed.plugin", 1L, "{}"), acme));
 
     ConfigSyncSnapshot snapshot = reader.read();
 
-    assertEquals(List.of(row), snapshot.plugins());
-    assertEquals(9L, snapshot.pluginCatalogEpoch());
-  }
-
-  /** 目录 entry 与历史行身份漂移时必须 fail closed，绝不用任意旧修订的普通值冒充当前配置。 */
-  @Test
-  void driftingPluginHistoryFailsClosed() {
-    stubBaseFacts();
-    when(systemSettingsRepository.get()).thenReturn(settings(1L));
-    PluginConfigurationRow row = ConfigSyncFixtures.pluginRow("acme.plugin", 7L, PLUGIN_VALUES);
-    when(pluginConfigurationRepository.readCatalog()).thenReturn(catalogOf(9L, row));
-    PluginConfigurationRow drifted = ConfigSyncFixtures.pluginRow("acme.plugin", 8L, PLUGIN_VALUES);
-    when(pluginConfigurationRepository.readConfiguration("acme.plugin", 7L))
-        .thenReturn(Optional.of(drifted));
-
-    assertThrows(IllegalStateException.class, () -> reader.read());
-  }
-
-  @Test
-  void missingPluginCatalogIsAResourceError() {
-    when(systemSettingsRepository.get()).thenReturn(settings(1L));
-    when(pluginConfigurationRepository.readCatalog()).thenReturn(null);
-    assertThrows(AiResourceNotFoundException.class, () -> reader.read());
+    assertEquals(List.of(acme, beta), snapshot.plugins());
   }
 
   /** 测试意图：系统内置 Agent 由系统持有身份，不参与配置同步，读取快照时被排除；其名称作为「已由系统满足」的依赖单独带出。 */
@@ -177,7 +127,6 @@ class ConfigSyncSnapshotReaderTest {
   void excludesBuiltinAgentsFromTheSnapshot() {
     when(systemSettingsRepository.get()).thenReturn(settings(1L));
     when(skillCatalogQueryService.listPackages()).thenReturn(List.of());
-    when(pluginConfigurationRepository.readCatalog()).thenReturn(emptyCatalog());
     AgentDefinition user =
         agent("user-agent", "p", "m", agentConfig(List.of(), List.of(), List.of()));
     user.setType(AgentDefinitionType.USER);

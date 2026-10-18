@@ -394,25 +394,9 @@ function decodeFunctionOutput(value: unknown, path: string): CanvasFunctionOutpu
   }
 }
 
-const FUNCTION_VERSION_FIELDS = ['catalogEpoch', 'definitionFingerprint'] as const
-
-/** Java long 上界：catalogEpoch 的合法上界（按长度/字典序比较，绝不转 number）。 */
-const JAVA_LONG_MAX = '9223372036854775807'
+const FUNCTION_VERSION_FIELDS = ['definitionFingerprint'] as const
 
 const FINGERPRINT_PATTERN = /^[0-9a-f]{64}$/
-
-/**
- * canonical 非负十进制 Java long 文本：先按 canonical 规则（无前导零/符号/空白），
- * 再按长度与字典序核上界，任何位置都不做 Number 转换，因此超 Number.MAX_SAFE_INTEGER
- * 的合法 epoch 仍被精确保留。
- */
-function isCanonicalJavaLong(value: unknown): value is string {
-  if (!isCanvasRevision(value)) {
-    return false
-  }
-  return value.length < JAVA_LONG_MAX.length
-    || (value.length === JAVA_LONG_MAX.length && value <= JAVA_LONG_MAX)
-}
 
 function isDefinitionFingerprint(value: unknown): value is string {
   return typeof value === 'string' && FINGERPRINT_PATTERN.test(value)
@@ -427,17 +411,12 @@ export function isCanvasFunctionVersion(value: unknown): value is CanvasFunction
   const keys = Object.keys(candidate)
   return keys.length === FUNCTION_VERSION_FIELDS.length
     && FUNCTION_VERSION_FIELDS.every((field) => keys.includes(field))
-    && isCanonicalJavaLong(candidate.catalogEpoch)
     && isDefinitionFingerprint(candidate.definitionFingerprint)
 }
 
 export function decodeCanvasFunctionVersion(value: unknown): CanvasFunctionVersionDTO {
   const candidate = requireRecord(value, 'functionVersion')
   rejectUnknownFields(candidate, FUNCTION_VERSION_FIELDS, 'functionVersion')
-  const catalogEpoch = requireString(candidate.catalogEpoch, 'functionVersion.catalogEpoch')
-  if (!isCanonicalJavaLong(catalogEpoch)) {
-    throw invalidPayload('functionVersion.catalogEpoch must be a canonical non-negative Java long decimal string')
-  }
   const definitionFingerprint = requireString(
     candidate.definitionFingerprint,
     'functionVersion.definitionFingerprint',
@@ -445,7 +424,7 @@ export function decodeCanvasFunctionVersion(value: unknown): CanvasFunctionVersi
   if (!isDefinitionFingerprint(definitionFingerprint)) {
     throw invalidPayload('functionVersion.definitionFingerprint must be a lowercase 64-char hex SHA-256')
   }
-  return { catalogEpoch, definitionFingerprint }
+  return { definitionFingerprint }
 }
 
 export function decodeCanvasFunctionDefinition(value: unknown): CanvasFunctionDefinitionDTO {
@@ -467,7 +446,7 @@ export function decodeCanvasFunctionDefinition(value: unknown): CanvasFunctionDe
     available: requireBoolean(candidate.available, 'function.available'),
     // unavailableReason 带 @JsonInclude(ALWAYS)：键必然存在，available 时必须显式 null。
     unavailableReason: decodeNullableString(candidate.unavailableReason, 'function.unavailableReason'),
-    // version 必填：目录项的 epoch 与定义指纹一起从同一次目录响应取得。
+    // version 必填：目录项的定义指纹。
     version: decodeCanvasFunctionVersion(candidate.version),
   }
 }

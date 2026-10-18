@@ -363,7 +363,7 @@ describe('studio codec', () => {
         },
         available: true,
         unavailableReason: null,
-        version: { catalogEpoch: '12', definitionFingerprint: 'b'.repeat(64) },
+        version: { definitionFingerprint: 'b'.repeat(64) },
       }
       const decoded = decodeCanvasFunctionDefinition(canonical)
       expect(decoded.name).toBe('test-fn')
@@ -380,7 +380,7 @@ describe('studio codec', () => {
       })
       expect(decoded.available).toBe(true)
       expect(decoded.unavailableReason).toBeNull()
-      expect(decoded.version).toEqual({ catalogEpoch: '12', definitionFingerprint: 'b'.repeat(64) })
+      expect(decoded.version).toEqual({ definitionFingerprint: 'b'.repeat(64) })
     })
 
     it('accepts real NON_NULL wire that omits nullable function fields entirely', () => {
@@ -394,7 +394,7 @@ describe('studio codec', () => {
         referencePolicy: { allowedKinds: ['IMAGE'], maxByKind: {} },
         available: true,
         unavailableReason: null,
-        version: { catalogEpoch: '0', definitionFingerprint: 'a'.repeat(64) },
+        version: { definitionFingerprint: 'a'.repeat(64) },
       }
       const decoded = decodeCanvasFunctionDefinition(canonical)
       expect(decoded.description).toBeNull()
@@ -413,14 +413,12 @@ describe('studio codec', () => {
         outputs: [{ kind: 'IMAGE', name: 'crop.png' }],
         available: false,
         unavailableReason: 'disabled',
-        version: { catalogEpoch: '9223372036854775807', definitionFingerprint: 'c'.repeat(64) },
+        version: { definitionFingerprint: 'c'.repeat(64) },
       }
       const decodedWithoutPolicy = decodeCanvasFunctionDefinition(withoutPolicy)
       expect(decodedWithoutPolicy.referencePolicy).toBeNull()
       expect(decodedWithoutPolicy.outputs).toEqual([{ kind: 'IMAGE', name: 'crop.png' }])
       expect(decodedWithoutPolicy.available).toBe(false)
-      // 目录只能暴露 Java long 文本，不能转成 JS number
-      expect(decodedWithoutPolicy.version.catalogEpoch).toBe('9223372036854775807')
     })
 
     it('fails closed when canonical non-nullable function fields are missing', () => {
@@ -435,45 +433,28 @@ describe('studio codec', () => {
         .toThrow('referencePolicy.maxByKind must be an object')
     })
 
-    it('decodes the required function version strictly and preserves Java long epoch text', () => {
-      // 测试意图：catalogEpoch 只接受 canonical Java long 文本（含超过 Number.MAX_SAFE_INTEGER 的值），
-      // definitionFingerprint 只接受 64 位小写 hex；解码输出必须原值保留，绝不转成 JS number。
+    it('decodes the required function version strictly', () => {
+      // 测试意图：definitionFingerprint 只接受 64 位小写 hex，解码输出原值保留；任何额外字段都不是合法版本。
       expect(decodeCanvasFunctionVersion({
-        catalogEpoch: '9223372036854775807',
         definitionFingerprint: 'a'.repeat(64),
-      })).toEqual({ catalogEpoch: '9223372036854775807', definitionFingerprint: 'a'.repeat(64) })
-      expect(decodeCanvasFunctionVersion({ catalogEpoch: '0', definitionFingerprint: '0'.repeat(64) }))
-        .toEqual({ catalogEpoch: '0', definitionFingerprint: '0'.repeat(64) })
-      expect(isCanvasFunctionVersion({ catalogEpoch: '7', definitionFingerprint: 'd'.repeat(64) })).toBe(true)
-      expect(isCanvasFunctionVersion({ catalogEpoch: '7', definitionFingerprint: 'd'.repeat(64), extra: 1 })).toBe(false)
+      })).toEqual({ definitionFingerprint: 'a'.repeat(64) })
+      expect(decodeCanvasFunctionVersion({ definitionFingerprint: '0'.repeat(64) }))
+        .toEqual({ definitionFingerprint: '0'.repeat(64) })
+      expect(isCanvasFunctionVersion({ definitionFingerprint: 'd'.repeat(64) })).toBe(true)
+      expect(isCanvasFunctionVersion({ definitionFingerprint: 'd'.repeat(64), extra: 1 })).toBe(false)
       expect(isCanvasFunctionVersion({ catalogEpoch: 7, definitionFingerprint: 'd'.repeat(64) })).toBe(false)
     })
 
     it('fails closed on every non-canonical, non-textual, or unknown-function-version token', () => {
-      const ok = { catalogEpoch: '7', definitionFingerprint: 'd'.repeat(64) }
+      const ok = { definitionFingerprint: 'd'.repeat(64) }
       // 缺失/非对象
       expect(() => decodeCanvasFunctionVersion(undefined)).toThrow('functionVersion must be an object')
       expect(() => decodeCanvasFunctionVersion(null)).toThrow('functionVersion must be an object')
-      expect(() => decodeCanvasFunctionVersion({ catalogEpoch: '7' }))
+      expect(() => decodeCanvasFunctionVersion({}))
         .toThrow('functionVersion.definitionFingerprint must be a string')
-      expect(() => decodeCanvasFunctionVersion({ definitionFingerprint: 'd'.repeat(64) }))
-        .toThrow('functionVersion.catalogEpoch must be a string')
-      // number / boolean / null 一律拒绝（绝不 coerce 成文本）
-      expect(() => decodeCanvasFunctionVersion({ ...ok, catalogEpoch: 7 }))
-        .toThrow('functionVersion.catalogEpoch must be a string')
-      expect(() => decodeCanvasFunctionVersion({ ...ok, catalogEpoch: null }))
-        .toThrow('functionVersion.catalogEpoch must be a string')
-      expect(() => decodeCanvasFunctionVersion({ ...ok, catalogEpoch: true }))
-        .toThrow('functionVersion.catalogEpoch must be a string')
-      // 前导零 / 负数 / 非十进制 / 溢出 Java long
-      expect(() => decodeCanvasFunctionVersion({ ...ok, catalogEpoch: '07' }))
-        .toThrow('canonical non-negative Java long')
-      expect(() => decodeCanvasFunctionVersion({ ...ok, catalogEpoch: '-1' }))
-        .toThrow('canonical non-negative Java long')
-      expect(() => decodeCanvasFunctionVersion({ ...ok, catalogEpoch: '1e3' }))
-        .toThrow('canonical non-negative Java long')
-      expect(() => decodeCanvasFunctionVersion({ ...ok, catalogEpoch: '9223372036854775808' }))
-        .toThrow('canonical non-negative Java long')
+      // 旧版本坐标不再是合法字段
+      expect(() => decodeCanvasFunctionVersion({ ...ok, catalogEpoch: '7' }))
+        .toThrow('functionVersion has unknown field: catalogEpoch')
       // 指纹：大写 / 长度不符 / 非 hex / 非字符串
       expect(() => decodeCanvasFunctionVersion({ ...ok, definitionFingerprint: 'D'.repeat(64) }))
         .toThrow('lowercase 64-char hex')

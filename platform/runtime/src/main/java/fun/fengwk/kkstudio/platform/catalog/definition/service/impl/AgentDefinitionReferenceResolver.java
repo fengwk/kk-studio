@@ -92,8 +92,8 @@ final class AgentDefinitionReferenceResolver {
    */
   void requireReferencedLifecycles(List<SkillRefDTO> skills, List<String> toolNames) {
     Map<String, TreeSet<String>> skillNames = skillNames(skills);
-    // 一次 current 租用包住完整引用重读：锁前后与选择面都来自同一个冻结目录 epoch。
-    try (RuntimeToolCatalogSource.Lease lease = toolCatalogSource.acquireCurrent()) {
+    // 一次租用包住完整引用重读：锁前后与选择面都来自同一份目录快照。
+    try (RuntimeToolCatalogSource.Lease lease = toolCatalogSource.acquire()) {
       RuntimeToolCatalog toolCatalog = lease.catalog();
       Map<String, TreeSet<String>> mcpServers = mcpServers(toolCatalog, toolNames);
       for (String packageName : new TreeSet<>(skillNames.keySet())) {

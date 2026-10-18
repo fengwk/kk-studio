@@ -338,9 +338,9 @@ Environment 按数据类型使用四条路径：
 
 - HTTP 边界严格校验 UUID、cursor、sealed union 和 JSON 形状，拒绝未知或重复字段及错误类型。
 - Resource 访问按业务持有关系授权；UUID、URI 与跳转地址仅用于定位。
-- Provider、MCP、Daemon 与 Plugin 凭据经受控入口写入，普通 DTO、日志和 Debug 保持脱敏。
-  Plugin credential 以部署级主密钥加密存入 PostgreSQL。
-- registration token 和主密钥文件要求 owner-only 权限。主机 user/home 用于描述环境，
+- Provider、MCP、Daemon 与 Plugin 凭据经受控入口写入，普通 DTO、日志和 Debug 保持脱敏；
+  它们以明文存入 PostgreSQL，保护依赖数据库访问控制与备份加密。
+- registration token 文件要求 owner-only 权限。主机 user/home 用于描述环境，
   路径操作要求显式绝对路径；只有进程执行要求显式绝对 workdir。
 - Skill 安装内容由人工确认的 exact commit 决定，branch 检查只提供候选更新。
 - 生产变更需经过审批并准备可恢复备份；备份同时覆盖 PostgreSQL 与 S3 数据及部署密钥。

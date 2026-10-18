@@ -962,7 +962,7 @@ Environment 保留注册令牌，同名更新保持其身份；新库生成新�
 文件省略 `installConfig` 即清空，token 与安装设置在同一次原子更新中生效。
 
 配置文件不保存 Chat、Session、Thread、Canvas、Project、Issue、执行历史、Blob 引用、
-连接租约和发现快照，也不包含部署级数据库/S3 参数、Plugin 认证或主密钥。
+连接租约和发现快照，也不包含部署级数据库/S3 参数或 Plugin 秘密。
 需要完整恢复时使用全库备份及匹配的对象存储备份，而不是配置 YAML。
 
 数据库脚本只有 [scripts/ops/reset-database.sh](../../scripts/ops/reset-database.sh)：

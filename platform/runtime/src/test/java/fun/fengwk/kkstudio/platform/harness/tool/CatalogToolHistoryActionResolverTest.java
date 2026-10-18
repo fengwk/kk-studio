@@ -5,7 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -440,7 +439,7 @@ class CatalogToolHistoryActionResolverTest {
     AgentToolDefinition definition = new AgentToolDefinition(descriptor, ToolVisibility.SELECTABLE);
     ContributorBinding contributor = new ContributorBinding(contributorId, localName, List.of());
     return new ToolBinding(
-        1L, definition, contributor, environmentSupport, environmentId, environmentName, null);
+        definition, contributor, environmentSupport, environmentId, environmentName);
   }
 
   /** 单租用替身：resolver 只按 binding 冻结 epoch 取租用并严格取回贡献，因此测试只需固定 {@code require} 的事实。 */
@@ -450,7 +449,7 @@ class CatalogToolHistoryActionResolverTest {
     private final RuntimeToolCatalogSource.Lease lease = mock(RuntimeToolCatalogSource.Lease.class);
 
     SourceFixture() {
-      when(source.acquire(anyLong())).thenReturn(lease);
+      when(source.acquire()).thenReturn(lease);
     }
 
     CatalogToolHistoryActionResolver resolver() {

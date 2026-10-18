@@ -51,9 +51,7 @@ public class StudioCanvasFunctionController {
 
   @GetMapping("/canvas-functions")
   public Result<List<CanvasFunctionDefinitionDTO>> listFunctions() {
-    // 目录只反映一次 acquireCurrent 的冻结快照：列表、可用性与每项的 version 来自同一 epoch，不混用两个目录实例。
-    try (CanvasFunctionCatalogSource.Lease lease = catalogSource.acquireCurrent()) {
-      long catalogEpoch = lease.epoch();
+    try (CanvasFunctionCatalogSource.Lease lease = catalogSource.acquire()) {
       return Results.ok(
           lease.catalog().list().stream()
               .map(
@@ -61,8 +59,7 @@ public class StudioCanvasFunctionController {
                       mapper.toDto(
                           registered.function(),
                           registered.enabled(),
-                          registered.unavailableReason(),
-                          catalogEpoch))
+                          registered.unavailableReason()))
               .toList());
     }
   }

@@ -39,7 +39,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 
-/** 执行与取消都按冻结 binding 的 epoch 选实例：current 已漂移到新 epoch 时，旧 Run 仍用旧 epoch 的定义与 adapter。 */
+/** 执行与取消都按函数名取当前目录：未提交的 Run 要求定义未变，已提交的 Run 与取消只需同名函数仍存在。 */
 class CanvasFunctionBindingExecutionTest {
 
   private static final Instant NOW = Instant.parse("2026-02-03T04:05:06.123Z");
@@ -48,95 +48,96 @@ class CanvasFunctionBindingExecutionTest {
   private static final UUID REQUEST = UUID.randomUUID();
   private static final UUID TARGET = UUID.randomUUID();
 
-  /** worker 按冻结 epoch 取租用，并在整个 submit/execute 期间持有；漂移后的 current 版本不参与执行。 */
+  /** worker 在整个 execute 期间持有目录租用，结束后释放。 */
   @Test
-  void workerAcquiresFrozenEpochLeaseAndHoldsItThroughExecution() {
+  void workerHoldsLeaseThroughExecution() {
     CanvasFunctionDefinition definition = definition("test.function", "Base Definition");
-    CanvasFunctionAdapter frozenAdapter = enabledAdapter(definition);
-    CanvasFunctionAdapter currentAdapter =
-        enabledAdapter(definition("test.function", "Drifted Definition"));
+    CanvasFunctionAdapter adapter = enabledAdapter(definition);
     FixedCanvasFunctionCatalogSource catalogSource =
-        new FixedCanvasFunctionCatalogSource(
-            1L, CanvasFunctionCatalog.from(List.of(frozenAdapter)));
-    catalogSource.register(2L, CanvasFunctionCatalog.from(List.of(currentAdapter)));
-    catalogSource.currentEpoch(2L);
+        new FixedCanvasFunctionCatalogSource(CanvasFunctionCatalog.from(List.of(adapter)));
 
-    CanvasFunctionFrozenRun frozen = frozenRun(new CanvasFunctionBinding(1L, definition, null));
+    CanvasFunctionFrozenRun frozen =
+        frozenRun(new CanvasFunctionBinding(definition), CanvasFunctionSubmitState.SUBMITTED);
     CanvasFunctionRun claimRun = runningRun();
     ClaimedRun claim = new ClaimedRun(claimRun);
     CanvasFunctionRunStateCodecPort stateCodec = mock(CanvasFunctionRunStateCodecPort.class);
     when(stateCodec.decode(claimRun.stateJson())).thenReturn(frozen);
     CanvasFunctionRunTransactions transactions = mock(CanvasFunctionRunTransactions.class);
-    when(frozenAdapter.execute(any(), any()))
+    when(adapter.execute(any(), any()))
         .thenAnswer(
             ignored -> {
-              // 执行期间租用仍然打开，且用的是旧 epoch 的 adapter。
               assertEquals(1, catalogSource.openLeases());
-              verify(currentAdapter, never()).execute(any(), any());
               return List.of(TARGET);
             });
-    ScheduledThreadPoolExecutor scheduler = new ScheduledThreadPoolExecutor(1);
-    CanvasFunctionWorker worker = worker(catalogSource, stateCodec, transactions, scheduler);
 
-    try {
-      worker.run(claim);
-    } finally {
-      scheduler.shutdownNow();
-    }
+    runWorker(catalogSource, stateCodec, transactions, claim);
 
-    verify(frozenAdapter).execute(any(), eq(frozen));
-    verify(currentAdapter, never()).execute(any(), any());
+    verify(adapter).execute(any(), eq(frozen));
     verify(transactions).completeSuccess(any(), eq(claim.leaseToken()), eq(List.of(TARGET)));
     assertEquals(0, catalogSource.openLeases());
   }
 
-  /** 冻结 epoch 已不可用时拒绝执行：绝不按函数名换成 current 版本，收敛为有界公开失败。 */
+  /** 尚未提交的 Run 遇到定义变化直接失败并提示重新开始，绝不按新定义发出外部请求。 */
   @Test
-  void workerFailsWhenFrozenEpochIsNoLongerAvailable() {
+  void workerFailsPendingRunWhenDefinitionChanged() {
     CanvasFunctionDefinition definition = definition("test.function", "Base Definition");
     CanvasFunctionAdapter currentAdapter =
         enabledAdapter(definition("test.function", "Drifted Definition"));
     FixedCanvasFunctionCatalogSource catalogSource =
-        new FixedCanvasFunctionCatalogSource(
-            2L, CanvasFunctionCatalog.from(List.of(currentAdapter)));
+        new FixedCanvasFunctionCatalogSource(CanvasFunctionCatalog.from(List.of(currentAdapter)));
 
-    CanvasFunctionFrozenRun frozen = frozenRun(new CanvasFunctionBinding(1L, definition, null));
+    CanvasFunctionFrozenRun frozen =
+        frozenRun(new CanvasFunctionBinding(definition), CanvasFunctionSubmitState.PENDING);
     CanvasFunctionRun claimRun = runningRun();
     ClaimedRun claim = new ClaimedRun(claimRun);
     CanvasFunctionRunStateCodecPort stateCodec = mock(CanvasFunctionRunStateCodecPort.class);
     when(stateCodec.decode(claimRun.stateJson())).thenReturn(frozen);
     CanvasFunctionRunTransactions transactions = mock(CanvasFunctionRunTransactions.class);
-    ScheduledThreadPoolExecutor scheduler = new ScheduledThreadPoolExecutor(1);
-    CanvasFunctionWorker worker = worker(catalogSource, stateCodec, transactions, scheduler);
 
-    try {
-      worker.run(claim);
-    } finally {
-      scheduler.shutdownNow();
-    }
+    runWorker(catalogSource, stateCodec, transactions, claim);
 
+    verify(currentAdapter, never()).submit(any(), any());
     verify(currentAdapter, never()).execute(any(), any());
     verify(transactions)
         .failIfRunning(
             claim.nodeId(),
             claim.requestId().toString(),
             claim.leaseToken(),
-            "Function execution failed");
+            "Function is no longer available or its definition changed; start it again");
     assertEquals(0, catalogSource.openLeases());
   }
 
-  /** best-effort cancel 只按冻结 binding 的 epoch 取实例，current 漂移不会取消错对象。 */
+  /** 已提交的 Run 在函数被移除后进入人工核查，绝不重新提交。 */
   @Test
-  void runtimeServiceCancelUsesFrozenEpochInsteadOfCurrent() {
+  void workerMarksSubmittedRunUnknownWhenFunctionRemoved() {
     CanvasFunctionDefinition definition = definition("test.function", "Base Definition");
-    CanvasFunctionAdapter frozenAdapter = enabledAdapter(definition);
+    FixedCanvasFunctionCatalogSource catalogSource =
+        new FixedCanvasFunctionCatalogSource(CanvasFunctionCatalog.from(List.of()));
+
+    CanvasFunctionFrozenRun frozen =
+        frozenRun(new CanvasFunctionBinding(definition), CanvasFunctionSubmitState.SUBMITTED);
+    CanvasFunctionRun claimRun = runningRun();
+    ClaimedRun claim = new ClaimedRun(claimRun);
+    CanvasFunctionRunStateCodecPort stateCodec = mock(CanvasFunctionRunStateCodecPort.class);
+    when(stateCodec.decode(claimRun.stateJson())).thenReturn(frozen);
+    CanvasFunctionRunTransactions transactions = mock(CanvasFunctionRunTransactions.class);
+
+    runWorker(catalogSource, stateCodec, transactions, claim);
+
+    verify(transactions)
+        .markUnknown(
+            eq(claim.nodeId()), eq(claim.requestId().toString()), eq(claim.leaseToken()), any());
+    assertEquals(0, catalogSource.openLeases());
+  }
+
+  /** best-effort cancel 按函数名取当前实例。 */
+  @Test
+  void runtimeServiceCancelUsesCurrentFunctionByName() {
+    CanvasFunctionDefinition definition = definition("test.function", "Base Definition");
     CanvasFunctionAdapter currentAdapter =
         enabledAdapter(definition("test.function", "Drifted Definition"));
     FixedCanvasFunctionCatalogSource catalogSource =
-        new FixedCanvasFunctionCatalogSource(
-            1L, CanvasFunctionCatalog.from(List.of(frozenAdapter)));
-    catalogSource.register(2L, CanvasFunctionCatalog.from(List.of(currentAdapter)));
-    catalogSource.currentEpoch(2L);
+        new FixedCanvasFunctionCatalogSource(CanvasFunctionCatalog.from(List.of(currentAdapter)));
 
     CanvasFunctionRun cancelled =
         new CanvasFunctionRun(
@@ -154,7 +155,7 @@ class CanvasFunctionBindingExecutionTest {
             NOW);
     CanvasFunctionRunStateCodecPort stateCodec = mock(CanvasFunctionRunStateCodecPort.class);
     CanvasFunctionFrozenRun frozen = mock(CanvasFunctionFrozenRun.class);
-    when(frozen.binding()).thenReturn(new CanvasFunctionBinding(1L, definition, null));
+    when(frozen.binding()).thenReturn(new CanvasFunctionBinding(definition));
     when(stateCodec.decode(cancelled.stateJson())).thenReturn(frozen);
     CanvasFunctionRunTransactions transactions = mock(CanvasFunctionRunTransactions.class);
     when(transactions.cancel(CANVAS, NODE, REQUEST.toString())).thenReturn(cancelled);
@@ -168,9 +169,21 @@ class CanvasFunctionBindingExecutionTest {
 
     assertEquals(cancelled, service.cancel(CANVAS, NODE, REQUEST.toString()));
 
-    verify(frozenAdapter).cancel(frozen);
-    verify(currentAdapter, never()).cancel(any());
+    verify(currentAdapter).cancel(frozen);
     assertEquals(0, catalogSource.openLeases());
+  }
+
+  private static void runWorker(
+      FixedCanvasFunctionCatalogSource catalogSource,
+      CanvasFunctionRunStateCodecPort stateCodec,
+      CanvasFunctionRunTransactions transactions,
+      ClaimedRun claim) {
+    ScheduledThreadPoolExecutor scheduler = new ScheduledThreadPoolExecutor(1);
+    try {
+      worker(catalogSource, stateCodec, transactions, scheduler).run(claim);
+    } finally {
+      scheduler.shutdownNow();
+    }
   }
 
   private static CanvasFunctionWorker worker(
@@ -199,7 +212,8 @@ class CanvasFunctionBindingExecutionTest {
         scheduler);
   }
 
-  private static CanvasFunctionFrozenRun frozenRun(CanvasFunctionBinding binding) {
+  private static CanvasFunctionFrozenRun frozenRun(
+      CanvasFunctionBinding binding, CanvasFunctionSubmitState submitState) {
     return new CanvasFunctionFrozenRun(
         CANVAS,
         NODE,
@@ -209,8 +223,8 @@ class CanvasFunctionBindingExecutionTest {
         CanvasJson.parseObject("{}"),
         List.of(),
         List.of(new CanvasFunctionFrozenOutput(TARGET, 0, CanvasResourceKind.IMAGE, "output.png")),
-        CanvasFunctionSubmitState.SUBMITTED,
-        "SUBMITTED",
+        submitState,
+        submitState.name(),
         Map.of());
   }
 

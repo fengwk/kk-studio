@@ -142,16 +142,14 @@ class ToolExecutionGatewayPreflightTest {
                 new ToolInvocationRequest(
                     new ToolCall("unknown", "missing", "{}"),
                     new ToolBinding(
-                        1L,
                         new AgentToolDefinition(unknown, ToolVisibility.SELECTABLE),
                         new ContributorBinding("test", "missing", List.of()),
                         EnvironmentSupport.NONE,
                         null,
-                        null,
                         null))));
     assertEquals(ToolExecutionGateway.TOOL_NOT_FOUND_KIND, unknownDeny.error().kind());
     assertTrue(
-        unknownDeny.error().message().contains("Frozen tool definition missing is not registered"),
+        unknownDeny.error().message().contains("Tool missing is no longer available"),
         unknownDeny.error().message());
     assertTrue(
         unknownDeny.error().message().contains("The tool was not executed."),
@@ -165,19 +163,14 @@ class ToolExecutionGatewayPreflightTest {
                 new ToolInvocationRequest(
                     new ToolCall("mismatch", "demo", "{}"),
                     new ToolBinding(
-                        1L,
                         hostDefinition(mismatched),
                         new ContributorBinding("test", "host-tool", List.of()),
                         EnvironmentSupport.NONE,
                         null,
-                        null,
                         null))));
     assertEquals(ToolExecutionGateway.TOOL_DEFINITION_MISMATCH_KIND, mismatchDeny.error().kind());
     assertTrue(
-        mismatchDeny
-            .error()
-            .message()
-            .contains("Frozen tool definition demo does not match its catalog definition"),
+        mismatchDeny.error().message().contains("Tool demo changed after this call was planned"),
         mismatchDeny.error().message());
     assertTrue(
         mismatchDeny.error().message().contains("The tool was not executed."),
@@ -234,11 +227,9 @@ class ToolExecutionGatewayPreflightTest {
         new ToolInvocationRequest(
             new ToolCall("call-1", PREFLIGHT_DESCRIPTOR.name(), argumentsJson),
             new ToolBinding(
-                1L,
                 hostDefinition(PREFLIGHT_DESCRIPTOR),
                 new ContributorBinding("test", "host-tool", List.of()),
                 EnvironmentSupport.NONE,
-                null,
                 null,
                 null));
     ToolExecutionGateway gateway =
@@ -367,13 +358,11 @@ class ToolExecutionGatewayPreflightTest {
         new ToolInvocationRequest(
             new ToolCall("call-1", "read", argumentsJson),
             new ToolBinding(
-                1L,
                 contribution.definition(),
                 contributor,
                 EnvironmentSupport.OPTIONAL,
                 environmentId,
-                "test-env",
-                null));
+                "test-env"));
     return gateway.preflight(request);
   }
 
@@ -397,11 +386,9 @@ class ToolExecutionGatewayPreflightTest {
         new ToolInvocationRequest(
             new ToolCall("call-1", PREFLIGHT_DESCRIPTOR.name(), argumentsJson),
             new ToolBinding(
-                1L,
                 hostDefinition(PREFLIGHT_DESCRIPTOR),
                 new ContributorBinding("test", "host-tool", List.of()),
                 EnvironmentSupport.NONE,
-                null,
                 null,
                 null));
     return gateway.preflight(request);
@@ -451,14 +438,12 @@ class ToolExecutionGatewayPreflightTest {
         new ToolInvocationRequest(
             new ToolCall("call-mcp", "mcp_mcp_server_echo", "{}"),
             new ToolBinding(
-                1L,
                 contribution.definition(),
                 new ContributorBinding(
                     contribution.id().contributorId().value(),
                     contribution.id().localName(),
                     List.of()),
                 EnvironmentSupport.NONE,
-                null,
                 null,
                 null));
 

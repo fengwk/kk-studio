@@ -20,9 +20,7 @@ class PluginCredentialExceptionTest {
         List.of(
             new PluginCredentialException("msg", CAUSE),
             new PluginAuthRejectedException("msg", CAUSE),
-            new PluginRenewalNotSentException("msg", CAUSE),
-            new PluginKeyUnavailableException("msg", CAUSE),
-            new PluginCredentialIntegrityException("msg", CAUSE));
+            new PluginRenewalNotSentException("msg", CAUSE));
 
     for (PluginCredentialException exception : exceptions) {
       assertEquals("msg", exception.getMessage());
@@ -36,9 +34,7 @@ class PluginCredentialExceptionTest {
         List.of(
             new PluginCredentialException("msg"),
             new PluginAuthRejectedException("msg"),
-            new PluginRenewalNotSentException("msg"),
-            new PluginKeyUnavailableException("msg"),
-            new PluginCredentialIntegrityException("msg"));
+            new PluginRenewalNotSentException("msg"));
 
     for (PluginCredentialException exception : exceptions) {
       assertEquals("msg", exception.getMessage());

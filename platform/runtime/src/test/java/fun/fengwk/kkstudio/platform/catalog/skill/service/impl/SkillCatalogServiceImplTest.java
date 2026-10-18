@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.platform.catalog.skill.service.impl;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -24,8 +23,6 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.catalog.skill.SkillTokenCipher;
-import fun.fengwk.kkstudio.platform.catalog.skill.SkillTokenCipherTestSupport;
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitCache;
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitException;
 import fun.fengwk.kkstudio.platform.catalog.skill.repo.SkillPackageRepository;
@@ -182,15 +179,12 @@ public class SkillCatalogServiceImplTest {
 
     assertTrue(created.isHasToken());
     assertFalse(created.toString().contains("ghp_plain_secret"));
-    byte[] encrypted = fixture.repository.getPackage("dev-package").getEncryptedToken();
-    assertNotNull(encrypted);
-    assertFalse(new String(encrypted, StandardCharsets.ISO_8859_1).contains("ghp_plain_secret"));
-    assertEquals("ghp_plain_secret", fixture.tokenCipher.decrypt("dev-package", encrypted));
+    assertEquals("ghp_plain_secret", fixture.repository.getPackage("dev-package").getToken());
     // resolveBranchHead 与 ensureCommit 都必须携带同一令牌。
     assertEquals(List.of("ghp_plain_secret", "ghp_plain_secret"), fixture.git.observedTokens);
   }
 
-  /** 测试意图：未提供令牌时匿名访问，hasToken=false 且不产生密文。 */
+  /** 测试意图：未提供令牌时匿名访问，hasToken=false 且不保存令牌。 */
   @Test
   public void shouldCreateAnonymouslyWithoutToken() {
     Fixture fixture = new Fixture();
@@ -200,7 +194,7 @@ public class SkillCatalogServiceImplTest {
     SkillPackageDTO created = fixture.service.createPackage(create("dev-package"));
 
     assertFalse(created.isHasToken());
-    assertNull(fixture.repository.getPackage("dev-package").getEncryptedToken());
+    assertNull(fixture.repository.getPackage("dev-package").getToken());
     assertTrue(fixture.git.observedTokens.stream().allMatch(Objects::isNull));
   }
 
@@ -229,10 +223,7 @@ public class SkillCatalogServiceImplTest {
     replace.applyToken("second-token");
     SkillPackageDTO replaced = fixture.service.editPackage("dev-package", replace);
     assertEquals("1", replaced.getVersion());
-    assertEquals(
-        "second-token",
-        fixture.tokenCipher.decrypt(
-            "dev-package", fixture.repository.getPackage("dev-package").getEncryptedToken()));
+    assertEquals("second-token", fixture.repository.getPackage("dev-package").getToken());
 
     SkillPackageEditDTO clear = new SkillPackageEditDTO();
     clear.setExpectedVersion(replaced.getVersion());
@@ -241,7 +232,7 @@ public class SkillCatalogServiceImplTest {
     clear.applyToken(null);
     SkillPackageDTO cleared = fixture.service.editPackage("dev-package", clear);
     assertFalse(cleared.isHasToken());
-    assertNull(fixture.repository.getPackage("dev-package").getEncryptedToken());
+    assertNull(fixture.repository.getPackage("dev-package").getToken());
 
     SkillPackageEditDTO blank = new SkillPackageEditDTO();
     blank.setExpectedVersion(cleared.getVersion());
@@ -281,10 +272,7 @@ public class SkillCatalogServiceImplTest {
         List.of(entry("dev", "developer skill")),
         "imported-token");
     assertTrue(fixture.service.getPackage("dev-package").isHasToken());
-    assertEquals(
-        "imported-token",
-        fixture.tokenCipher.decrypt(
-            "dev-package", fixture.repository.getPackage("dev-package").getEncryptedToken()));
+    assertEquals("imported-token", fixture.repository.getPackage("dev-package").getToken());
   }
 
   /** 测试意图：Check 使用已存储的令牌访问私有仓库。 */
@@ -706,7 +694,6 @@ public class SkillCatalogServiceImplTest {
 
     private final FakeRepository repository = new FakeRepository();
     private final FakeGitCache git = new FakeGitCache();
-    private final SkillTokenCipher tokenCipher = SkillTokenCipherTestSupport.newCipher();
     private final AgentDefinitionRepository agentDefinitionRepository =
         mock(AgentDefinitionRepository.class);
     private final SkillCatalogServiceImpl service;
@@ -736,8 +723,7 @@ public class SkillCatalogServiceImplTest {
                   new SkillCatalogConverter(),
                   new SkillPackageGuard(repository, agentDefinitionRepository),
                   new AgentEditableSupport(JsonMapper.builder().build()),
-                  transactional(new SkillCatalogWrites(), transactions),
-                  tokenCipher),
+                  transactional(new SkillCatalogWrites(), transactions)),
               transactions);
     }
 
@@ -853,7 +839,7 @@ public class SkillCatalogServiceImplTest {
       target.setHeadCheckedAt(source.getHeadCheckedAt());
       target.setHeadCheckError(source.getHeadCheckError());
       target.setSkills(List.copyOf(source.getSkills()));
-      target.setEncryptedToken(source.getEncryptedToken());
+      target.setToken(source.getToken());
       target.setVersion(source.getVersion());
       target.setCreateTime(source.getCreateTime());
       target.setUpdateTime(source.getUpdateTime());

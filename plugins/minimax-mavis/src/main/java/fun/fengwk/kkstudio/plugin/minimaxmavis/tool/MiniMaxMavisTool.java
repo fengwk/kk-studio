@@ -70,7 +70,6 @@ public final class MiniMaxMavisTool implements Tool {
   private static final String CODE_NOT_CONNECTED = "MAVIS_CREDENTIAL_NOT_CONNECTED";
 
   /** 主密钥不可用或密文不可解。 */
-  private static final String CODE_KEY_UNAVAILABLE = "MAVIS_CREDENTIAL_KEY_UNAVAILABLE";
 
   /** 刷新在途，稍后可重试。 */
   private static final String CODE_AUTH_REFRESHING = "MAVIS_CREDENTIAL_AUTH_REFRESHING";
@@ -405,7 +404,6 @@ public final class MiniMaxMavisTool implements Tool {
   private static String codeFor(PluginCredentialUnavailableReason reason) {
     return switch (reason) {
       case NOT_CONNECTED -> CODE_NOT_CONNECTED;
-      case KEY_UNAVAILABLE -> CODE_KEY_UNAVAILABLE;
       case AUTH_REFRESHING -> CODE_AUTH_REFRESHING;
       case REAUTH_REQUIRED -> CODE_REAUTH_REQUIRED;
       case REFRESH_UNCERTAIN -> CODE_REFRESH_UNCERTAIN;
@@ -416,7 +414,6 @@ public final class MiniMaxMavisTool implements Tool {
   private static String credentialDetail(PluginCredentialUnavailableReason reason) {
     return switch (reason) {
       case NOT_CONNECTED -> "the MiniMax Mavis plugin is not connected";
-      case KEY_UNAVAILABLE -> "this deployment cannot read MiniMax Mavis credentials";
       case AUTH_REFRESHING -> "MiniMax Mavis credentials are being refreshed; retry shortly";
       case REAUTH_REQUIRED -> "MiniMax Mavis credentials were rejected; sign in again";
       case REFRESH_UNCERTAIN -> "MiniMax Mavis credential refresh outcome is unknown; sign in again";

@@ -36,10 +36,8 @@ import fun.fengwk.kkstudio.platform.environment.service.EnvironmentService;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
-import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogManifest;
-import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRecord;
 import fun.fengwk.kkstudio.platform.plugin.service.PluginAgentDependencies;
-import fun.fengwk.kkstudio.platform.plugin.service.PluginConfigurationCommitService;
+import fun.fengwk.kkstudio.platform.plugin.service.PluginConfigurationService;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsService;
@@ -77,8 +75,8 @@ class ConfigSyncApplierTest {
   private final EnvironmentRepository environmentRepository = mock(EnvironmentRepository.class);
   private final EnvironmentService environmentService = mock(EnvironmentService.class);
   private final SystemSettingsService systemSettingsService = mock(SystemSettingsService.class);
-  private final PluginConfigurationCommitService pluginCommitService =
-      mock(PluginConfigurationCommitService.class);
+  private final PluginConfigurationService pluginConfigurationService =
+      mock(PluginConfigurationService.class);
 
   /** 计划里出现的插件都必须是安装目录中的插件：事务内重检直接复用插件自身的依赖声明。 */
   private final PluginAgentDependencies pluginAgentDependencies =
@@ -101,7 +99,7 @@ class ConfigSyncApplierTest {
           environmentRepository,
           environmentService,
           systemSettingsService,
-          pluginCommitService,
+          pluginConfigurationService,
           pluginAgentDependencies);
 
   private static ConfigSyncPlan plan(
@@ -113,7 +111,7 @@ class ConfigSyncApplierTest {
       List<ConfigSyncParser.AgentSpec> agents,
       ConfigSyncPlan.SettingsUpdate settings) {
     return planWithPlugins(
-        providers, models, skills, mcps, environments, agents, List.of(), 0L, settings);
+        providers, models, skills, mcps, environments, agents, List.of(), settings);
   }
 
   private static ConfigSyncPlan planWithPlugins(
@@ -124,7 +122,6 @@ class ConfigSyncApplierTest {
       List<ConfigSyncParser.EnvironmentSpec> environments,
       List<ConfigSyncParser.AgentSpec> agents,
       List<ConfigSyncPlan.PluginImport> plugins,
-      long pluginCatalogEpoch,
       ConfigSyncPlan.SettingsUpdate settings) {
     return new ConfigSyncPlan(
         providers,
@@ -134,16 +131,9 @@ class ConfigSyncApplierTest {
         environments,
         agents,
         plugins,
-        pluginCatalogEpoch,
         settings,
         List.of(),
         List.of());
-  }
-
-  /** epoch 与 plugins 直接取形状合法的记录：Applier 只读返回的 epoch，不关心 manifest 内容。 */
-  private static PluginCatalogRecord catalogAt(long epoch) {
-    return new PluginCatalogRecord(
-        epoch, new PluginCatalogManifest(Map.of(), ConfigSyncFixtures.FINGERPRINT));
   }
 
   /** 合成依赖插件：普通值里的 Agent 名称字段由测试显式给出。 */
@@ -286,15 +276,11 @@ class ConfigSyncApplierTest {
     assertEquals("m", captor.getValue().getName());
   }
 
-  /** 意图：插件按计划顺序经唯一提交入口写入，第一项比较计划 epoch，后续用前一成功的新 epoch，各自仍携带计划期修订。 */
+  /** 意图：插件按计划顺序经唯一写入口保存，各自比较计划期修订。 */
   @Test
-  void pluginsAreAppliedInOrderWithChainedEpochs() {
+  void pluginsAreAppliedInOrderWithTheirPlannedRevisions() {
     String values = "{\"promptAgentName\":\"h3\"}";
     when(definitionRepository.getByNameForUpdate("h3")).thenReturn(existingAgent("h3"));
-    when(pluginCommitService.configure("a.plugin", 10L, 1L, values, Map.of()))
-        .thenReturn(catalogAt(11L));
-    when(pluginCommitService.configure("b.plugin", 11L, 2L, values, Map.of()))
-        .thenReturn(catalogAt(12L));
 
     applier.apply(
         planWithPlugins(
@@ -307,19 +293,18 @@ class ConfigSyncApplierTest {
             List.of(
                 new ConfigSyncPlan.PluginImport("a.plugin", 1L, values),
                 new ConfigSyncPlan.PluginImport("b.plugin", 2L, values)),
-            10L,
             null));
 
-    InOrder order = Mockito.inOrder(pluginCommitService);
-    order.verify(pluginCommitService).configure("a.plugin", 10L, 1L, values, Map.of());
-    order.verify(pluginCommitService).configure("b.plugin", 11L, 2L, values, Map.of());
+    InOrder order = Mockito.inOrder(pluginConfigurationService);
+    order.verify(pluginConfigurationService).configure("a.plugin", 1L, values, Map.of());
+    order.verify(pluginConfigurationService).configure("b.plugin", 2L, values, Map.of());
   }
 
   /** 意图：插件提交冲突必须原样上抛（不吞异常），由外层事务整体回滚；不携带任何秘密补丁。 */
   @Test
   void pluginCommitFailurePropagatesWithoutSecretPatch() {
-    when(pluginCommitService.configure(anyString(), anyLong(), anyLong(), anyString(), any()))
-        .thenThrow(new AiVersionConflictException("plugin", "epoch=10", "epoch=13"));
+    when(pluginConfigurationService.configure(anyString(), anyLong(), anyString(), any()))
+        .thenThrow(new AiVersionConflictException("plugin", "revision=1", "revision=2"));
 
     assertThrows(
         AiVersionConflictException.class,
@@ -333,14 +318,13 @@ class ConfigSyncApplierTest {
                     List.of(),
                     List.of(),
                     List.of(new ConfigSyncPlan.PluginImport("a.plugin", 1L, "{}")),
-                    10L,
                     null)));
 
-    verify(pluginCommitService).configure("a.plugin", 10L, 1L, "{}", Map.of());
+    verify(pluginConfigurationService).configure("a.plugin", 1L, "{}", Map.of());
   }
 
   /**
-   * 意图：计划到写入之间被删除的 Agent 不会改变插件目录 epoch，必须靠事务内的依赖重检发现：缺失即固定安全校验失败， 且在任何 plugin configure
+   * 意图：计划到写入之间被删除的 Agent 不会改变插件配置修订，必须靠事务内的依赖重检发现：缺失即固定安全校验失败， 且在任何 plugin configure
    * 之前抛出（外层事务因此整体回滚）。
    */
   @Test
@@ -361,11 +345,10 @@ class ConfigSyncApplierTest {
                         List.of(),
                         List.of(),
                         List.of(new ConfigSyncPlan.PluginImport(DEPENDENT_PLUGIN_ID, 1L, values)),
-                        10L,
                         null)));
 
     assertTrue(error.getMessage().contains("missing agent"));
-    verify(pluginCommitService, never()).configure(anyString(), anyLong(), anyLong(), any(), any());
+    verify(pluginConfigurationService, never()).configure(anyString(), anyLong(), any(), any());
   }
 
   /** 意图：依赖池里的既有（含系统内置）Agent 满足插件依赖；重检按稳定顺序去重，每个名称只锁一次。 */
@@ -373,8 +356,6 @@ class ConfigSyncApplierTest {
   void pluginAgentDependenciesAcceptExistingAgentsInStableOrder() {
     when(definitionRepository.getByNameForUpdate(anyString()))
         .thenAnswer(invocation -> existingAgent(invocation.getArgument(0)));
-    when(pluginCommitService.configure(anyString(), anyLong(), anyLong(), anyString(), any()))
-        .thenReturn(catalogAt(11L));
     String values = "{\"promptAgentName\":\"%s\"}";
 
     applier.apply(
@@ -390,7 +371,6 @@ class ConfigSyncApplierTest {
                     DEPENDENT_PLUGIN_ID, 1L, String.format(values, "zeta")),
                 new ConfigSyncPlan.PluginImport("a.plugin", 1L, String.format(values, "alpha")),
                 new ConfigSyncPlan.PluginImport("b.plugin", 2L, String.format(values, "alpha"))),
-            10L,
             null));
 
     InOrder order = Mockito.inOrder(definitionRepository);
@@ -405,9 +385,6 @@ class ConfigSyncApplierTest {
     AgentDefinition existing = existingAgent("dep-agent");
     when(definitionRepository.getByName("dep-agent")).thenReturn(existing);
     when(definitionRepository.getByNameForUpdate("dep-agent")).thenReturn(existing);
-    when(pluginCommitService.configure(
-            DEPENDENT_PLUGIN_ID, 10L, 1L, "{\"promptAgentName\":\"dep-agent\"}", Map.of()))
-        .thenReturn(catalogAt(11L));
 
     applier.apply(
         planWithPlugins(
@@ -425,15 +402,15 @@ class ConfigSyncApplierTest {
             List.of(
                 new ConfigSyncPlan.PluginImport(
                     DEPENDENT_PLUGIN_ID, 1L, "{\"promptAgentName\":\"dep-agent\"}")),
-            10L,
             null));
 
-    InOrder order = Mockito.inOrder(definitionService, definitionRepository, pluginCommitService);
+    InOrder order =
+        Mockito.inOrder(definitionService, definitionRepository, pluginConfigurationService);
     order.verify(definitionService).updateAgent(eq("dep-agent"), any());
     order.verify(definitionRepository).getByNameForUpdate("dep-agent");
     order
-        .verify(pluginCommitService)
-        .configure(DEPENDENT_PLUGIN_ID, 10L, 1L, "{\"promptAgentName\":\"dep-agent\"}", Map.of());
+        .verify(pluginConfigurationService)
+        .configure(DEPENDENT_PLUGIN_ID, 1L, "{\"promptAgentName\":\"dep-agent\"}", Map.of());
   }
 
   /** 意图：插件拒绝自身普通配置（已知输入边界）收敛为固定去敏校验失败，不回显配置值、不串联 cause。 */
@@ -454,12 +431,11 @@ class ConfigSyncApplierTest {
                         List.of(),
                         List.of(),
                         List.of(new ConfigSyncPlan.PluginImport(DEPENDENT_PLUGIN_ID, 1L, values)),
-                        10L,
                         null)));
 
     assertEquals("plugin configuration is invalid: " + DEPENDENT_PLUGIN_ID, error.getMessage());
     assertTrue(error.getCause() == null, "the input boundary must not chain the plugin cause");
-    verify(pluginCommitService, never()).configure(anyString(), anyLong(), anyLong(), any(), any());
+    verify(pluginConfigurationService, never()).configure(anyString(), anyLong(), any(), any());
   }
 
   /** 意图：插件声明解析抛出的未知/致命错误绝不伪装成校验失败或 skip，必须原样上抛。 */
@@ -477,9 +453,8 @@ class ConfigSyncApplierTest {
                     List.of(),
                     List.of(),
                     List.of(new ConfigSyncPlan.PluginImport("broken.plugin", 1L, "{}")),
-                    10L,
                     null)));
-    verify(pluginCommitService, never()).configure(anyString(), anyLong(), anyLong(), any(), any());
+    verify(pluginConfigurationService, never()).configure(anyString(), anyLong(), any(), any());
   }
 
   private static AgentDefinitionEditablePropertiesDTO agentProperties(

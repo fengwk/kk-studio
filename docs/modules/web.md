@@ -11,23 +11,21 @@ Controller 解析 DTO、调用用例、映射结果；领域行为与事务由�
 Builtin/Common 经 Platform compile 依赖传递进入发行物。
 Plugin JAR 通过自己的 AutoConfiguration.imports 创建 bean，
 [`PluginCatalogConfiguration`](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/PluginCatalogConfiguration.java)
-通过 Platform 的 `PluginCatalogBootstrap` 初始化或按持久 manifest 恢复插件配置，
-并收集真正内置的 Contributor / Adapter，构建一个完整 `PluginCatalogSnapshot`；
-HarnessCatalog 与 CanvasFunctionCatalog 来自同一 epoch。安装集合、版本身份与两域目录
-指纹全部通过后才提供给运行时，失败会释放已建插件实例；缺失历史不回退到默认值。
-初始快照立即交给唯一 `PluginCatalogRuntime` 拥有，不向容器暴露静态快照或目录 bean。
-`PluginCatalogRefresher` 用单线程每 5 秒回读权威目录，并合并本节点提交后的唤醒和共享
-`PostgresqlNotificationLoop` 的 `plugin_catalog_changed` 通知；建连/重连同样触发对账。
+装配唯一的 `PluginCatalogRuntime`：它为新安装的 Plugin 写入默认配置，收集真正内置的
+Contributor / Adapter，按当前配置构建完整 `PluginCatalogSnapshot`，HarnessCatalog 与 CanvasFunctionCatalog
+来自同一快照；构建失败会释放已建插件实例。容器不暴露静态快照或目录 bean。
+`PluginCatalogRefresher` 用单线程每 5 秒回读配置，并合并本节点提交后的唤醒和共享
+`PostgresqlNotificationLoop` 的 `plugin_changed` 通知；建连/重连同样触发对账。
 通知只排队，不信任 payload，也不在 LISTEN 线程上配置插件；漏通知由周期回读追平。
-候选全量验证后原子发布，旧快照直到最后一个活动租用释放才关闭。
-权威存取见 [Plugin 配置存储](platform.md#plugin-配置存储)。
+修订变化时整体重建并原子发布，旧快照直到最后一个活动租用释放才关闭。
+存取见 [Plugin 配置存储](platform.md#plugin-配置存储)。
 Platform 的 RuntimeToolCatalogConfiguration 加入现读数据库的 MCP 目录。
-Canvas HTTP 目录查询在一次 `CanvasFunctionCatalogSource` 租用内完成，输出定义与可用性来自同一 epoch；
-Run 的完整定义与认证引用只保存在受保护执行状态中，普通 Run DTO 不回显它们。
-目录每项都携带 `version`（`catalogEpoch` + `definitionFingerprint`，都是字符串）；
+Canvas HTTP 目录查询在一次 `CanvasFunctionCatalogSource` 租用内完成，输出定义与可用性来自同一快照；
+Run 的完整定义只保存在执行状态中，普通 Run DTO 不回显它。
+目录每项都携带 `version`（`definitionFingerprint` 字符串）；
 `POST /api/canvases/{canvasId}/nodes/{nodeId}/function-run` 必带同形状 `expectedVersion`，
-缺失、非 canonical 的非负十进制 epoch 文本或非法 fingerprint 一律 400，
-目录已前进或该函数定义已变化一律 409，且不产生 Run、pin 或外部调用；cancel 只带 `requestId`。
+缺失或非法 fingerprint 一律 400，
+该函数已移除或定义已变化一律 409，且不产生 Run、pin 或外部调用；cancel 只带 `requestId`。
 
 [`HarnessRuntimeConfiguration`](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/HarnessRuntimeConfiguration.java)
 将 datasource/transaction manager 接入 PostgresqlHarnessStore，
@@ -42,7 +40,7 @@ timer 只唤醒和分派，heartbeat worker 执行续租事务，flush executor 
 | PostgresqlNotificationLoop | 专用连接 LISTEN，断线重连/resync，关闭 abort、interrupt、有界等待 |
 | ApplicationEventHub、sender 与 heartbeat scheduler | 关闭订阅与发送围栏，释放连接和 timer |
 | StorageMaintenance、PluginCredentialRefreshDispatcher | 各自持有调度器与在途任务的收尾责任 |
-| PluginCatalogRuntime | 唯一拥有当前 epoch 与配置实例，关闭禁止新租用，已有租用释放后回收实例 |
+| PluginCatalogRuntime | 唯一拥有当前快照与插件实例，关闭禁止新租用，已有租用释放后回收实例 |
 | PluginCatalogRefresher | 启动立即对账，周期与通知合并排队；停止后不开始待执行对账，有界等待在途任务，前代退出前禁止重启 |
 
 ## HTTP 入口
@@ -135,13 +133,13 @@ required-nullable 字段由 DTO 显式 ALWAYS。未知字段由 DTO 的 JsonAnyS
 领域 codec 另有严格语法校验；HTTP mapper 的 trailing-token 行为保持 Jackson 配置本身的边界。
 
 advice 按 Controller 范围映射 validation 400、not found 404、version/duplicate/in-use 409，
-以及设施不可用/不变量异常；Project 不变量异常为 500，Plugin 主密钥不可用为 503。
+以及设施不可用/不变量异常；Project 不变量异常为 500。
 locale 支持 en-US/zh-CN，其他回退英文。字段契约见 [Share](share.md)。
 
 用户认证、TLS 和 ingress 访问控制由部署边界提供。
 配置同步导出包含所需凭据；三个端点的成功和错误响应均为 `no-store`，请求体与 YAML 不记日志。
 Daemon registration token 在 HELLO 中绑定 Environment，通用 Card 只返回安全投影。
-Plugin auth 请求 no-store，数据库保存认证密文，主密钥缺失时凭据读写失败关闭。
+Plugin auth 请求 no-store，凭据只在数据库中保存，任何响应都不回显。
 Storage/Canvas 签发有限期 URL，客户端使用受控存储入口。
 Provider 上游错误正文沿其协议契约进入持久记录与客户端，可能包含上游回显的敏感信息；
 处理边界见 [Harness Provider](harness-provider.md#上游错误原样透传)。

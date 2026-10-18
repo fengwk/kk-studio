@@ -103,7 +103,7 @@ Environment 时才进入模型工具面。`requiredEnvironmentId` 用于把 `REQ
 环境，`OPTIONAL` 可携带当前选择，`REQUIRED` 只会在存在选择时被正常规划。Platform 在
 构造模型工具列表前过滤无 Environment 的 `REQUIRED` 工具；[`ToolExecutionGateway`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/gateway/ToolExecutionGateway.java)
 仍用冻结 definition、Contributor provenance、support 与 `requiredEnvironmentId` 逐项
-比对 binding 所属 epoch 的租用目录，并对陈旧或伪造的缺环境调用稳定返回 `ENVIRONMENT_NOT_SELECTED`。
+比对当前租用目录，并对陈旧或伪造的缺环境调用稳定返回 `ENVIRONMENT_NOT_SELECTED`。
 `environmentName` 与 `environmentId` 同源，继续作为历史投影判定 native 资格的
 durable 事实。
 

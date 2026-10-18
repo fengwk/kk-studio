@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.platform.configsync;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -12,9 +11,7 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 import org.postgresql.Driver;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.SimpleDriverDataSource;
@@ -41,28 +38,16 @@ import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfigSchema;
 import fun.fengwk.kkstudio.platform.plugin.PluginContext;
-import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableException;
 import fun.fengwk.kkstudio.platform.plugin.PluginDescriptor;
 import fun.fengwk.kkstudio.platform.plugin.PluginInstance;
 import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
 import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
-import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogBootstrap;
-import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogSnapshot;
 import fun.fengwk.kkstudio.platform.plugin.credential.DatabasePluginCredentialStore;
-import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialCodec;
-import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialKeyLoader;
-import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialReference;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRow;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginCredentialRepository;
-import fun.fengwk.kkstudio.platform.plugin.persistence.PluginCredentialRow;
-import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.PostgresqlPluginCatalogChangeNotifier;
-import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.PostgresqlPluginConfigurationRepository;
-import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.PostgresqlPluginCredentialRepository;
-import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.store.PluginConfigurationJdbcStore;
-import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.store.PluginCredentialJdbcStore;
 import fun.fengwk.kkstudio.platform.plugin.service.PluginAgentDependencies;
-import fun.fengwk.kkstudio.platform.plugin.service.PluginConfigurationCommitService;
+import fun.fengwk.kkstudio.platform.plugin.service.PluginConfigurationService;
 import fun.fengwk.kkstudio.platform.plugin.service.PluginContextFactory;
 import fun.fengwk.kkstudio.platform.plugin.service.PluginSecretPatch;
 import fun.fengwk.kkstudio.platform.plugin.testing.TestPluginFixtures;
@@ -72,16 +57,11 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderEditablePropertiesDTO;
 
 import javax.sql.DataSource;
 
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.attribute.PosixFilePermissions;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -95,10 +75,9 @@ import java.util.concurrent.atomic.AtomicInteger;
  * <p>只在这里对真实库、真实事务管理器与真实提交服务成立：
  *
  * <ol>
- *   <li>计划到写入之间被删除的依赖 Agent 不会改变插件目录 epoch，必须由事务内的依赖重检发现；此时此前写入的 provider 行、插件配置历史与 catalog
- *       全部回滚，且没有任何 afterCommit 通知。
- *   <li>普通配置导入（秘密补丁恒为空）承载的上下文变化会合法推进认证代际并按新上下文重写密文，但保持同一份秘密载荷：旧 scoped
- *       引用被围栏拒绝，新引用取回同一合成载荷。通知只在提交后触发，事务内不可观测。
+ *   <li>计划到写入之间被删除的依赖 Agent 不会改变插件配置修订，必须由事务内的依赖重检发现；此时此前写入的 provider 行与插件配置全部回滚，且没有任何 afterCommit
+ *       通知。
+ *   <li>普通配置导入（秘密补丁恒为空）改变静态密钥的目标地址时，已保存的密钥被删除，绝不把它带到新目标。通知只在提交后触发，事务内不可观测。
  * </ol>
  *
  * <p>合成 StudioPlugin 只用公共 API 声明普通值、秘密与依赖，不引用任何具体插件实现，也不访问网络或真实凭据。
@@ -113,7 +92,7 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
   private static final String MODEL_PROVIDER = "configsync-model-provider";
   private static final String MODEL_NAME = "configsync-model";
 
-  /** 已补齐默认值的规范普通值文本：与 schema.resolveValues 输出恒等，可直接作为权威历史值。 */
+  /** 已补齐默认值的规范普通值文本：与 schema.resolveValues 输出恒等。 */
   private static final String VALUES_V1 =
       "{\"endpoint\":\"https://v1.example.com\",\"label\":\"default\"}";
 
@@ -125,19 +104,15 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
 
   private final Instant now = Instant.parse("2026-10-01T12:00:00Z");
   private final Clock clock = Clock.fixed(now, ZoneOffset.UTC);
-  private final PluginCredentialCodec codec = new PluginCredentialCodec();
   private final AtomicInteger dispatcherWakes = new AtomicInteger();
   private final AtomicInteger catalogWakes = new AtomicInteger();
-
-  @TempDir Path tempDir;
 
   private StudioPluginRegistry registry;
   private PluginAgentDependencies pluginAgentDependencies;
   private PlatformTransactionManager transactionManager;
   private PluginConfigurationRepository configurationRepository;
   private PluginCredentialRepository credentialRepository;
-  private DatabasePluginCredentialStore credentialStore;
-  private PluginConfigurationCommitService commitService;
+  private PluginConfigurationService configurationService;
   private AgentDefinitionRepository definitionRepository;
   private ConfigSyncApplier applier;
   private AgentProviderService providerService;
@@ -170,40 +145,27 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
             new ConfigSyncFixtures.AgentDependencyPlugin(DEPENDENT_PLUGIN_ID),
             new StaticKeyPlugin());
     transactionManager = new DataSourceTransactionManager(dataSource);
-    configurationRepository =
-        new PostgresqlPluginConfigurationRepository(
-            new PluginConfigurationJdbcStore(jdbcClient),
-            new PostgresqlPluginCatalogChangeNotifier(new JdbcTemplate(dataSource)));
-    credentialRepository =
-        new PostgresqlPluginCredentialRepository(new PluginCredentialJdbcStore(jdbcClient));
+    configurationRepository = new PluginConfigurationRepository(jdbcClient);
+    credentialRepository = new PluginCredentialRepository(jdbcClient);
     definitionRepository =
         new PostgresqlAgentDefinitionRepository(new AgentDefinitionJdbcStore(jdbcClient));
 
-    Path keyFile = tempDir.resolve("configsync-import.key");
-    Files.write(keyFile, "12345678901234567890123456789012".getBytes(StandardCharsets.UTF_8));
-    Files.setPosixFilePermissions(keyFile, PosixFilePermissions.fromString("rw-------"));
-    PluginCredentialKeyLoader keyLoader =
-        new PluginCredentialKeyLoader(keyFile.toAbsolutePath().toString());
-    credentialStore =
-        new DatabasePluginCredentialStore(
-            credentialRepository, configurationRepository, codec, keyLoader, clock);
     pluginAgentDependencies =
         new PluginAgentDependencies(registry, configurationRepository, definitionRepository);
-    commitService =
-        new PluginConfigurationCommitService(
+    configurationService =
+        new PluginConfigurationService(
             registry,
             configurationRepository,
             credentialRepository,
-            codec,
-            keyLoader,
-            new PluginContextFactory(credentialStore, () -> null, () -> null, () -> null),
-            List::of,
-            List::of,
+            new PluginContextFactory(
+                new DatabasePluginCredentialStore(credentialRepository, clock),
+                () -> null,
+                () -> null,
+                () -> null),
+            pluginAgentDependencies,
             transactionManager,
-            clock,
-            dispatcherWakes::incrementAndGet,
             catalogWakes::incrementAndGet,
-            pluginAgentDependencies);
+            dispatcherWakes::incrementAndGet);
 
     // provider 服务是唯一真实库写入的替身：只在同一事务内真插一行 provider，用于证明它随插件失败一起回滚。
     providerService = mock(AgentProviderService.class);
@@ -233,13 +195,13 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
             mock(EnvironmentRepository.class),
             mock(EnvironmentService.class),
             mock(SystemSettingsService.class),
-            commitService,
+            configurationService,
             pluginAgentDependencies);
   }
 
-  /** 计划形成后依赖 Agent 消失：事务内重检必须让此前写入与插件目录一起回滚，且不触发任何提交后回调。 */
+  /** 计划形成后依赖 Agent 消失：事务内重检必须让此前写入与插件配置一起回滚，且不触发任何提交后回调。 */
   @Test
-  void deletedDependencyRollsBackProvidersPluginsAndCatalog() {
+  void deletedDependencyRollsBackProvidersAndPlugins() {
     seedCatalog();
 
     seedAgentModel();
@@ -249,10 +211,11 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
             List.of(providerSpec(PROVIDER_NAME)),
             List.of(
                 new ConfigSyncPlan.PluginImport(
-                    DEPENDENT_PLUGIN_ID, 1L, "{\"promptAgentName\":\"" + DEPENDENCY_AGENT + "\"}")),
-            1L);
+                    DEPENDENT_PLUGIN_ID,
+                    1L,
+                    "{\"promptAgentName\":\"" + DEPENDENCY_AGENT + "\"}")));
 
-    // 计划与写入之间删除依赖：插件目录 epoch 不变，CAS 无法发现它。
+    // 计划与写入之间删除依赖：插件配置修订不变，CAS 无法发现它。
     assertTrue(definitionRepository.deleteByName(DEPENDENCY_AGENT, 0L));
 
     AiValidationException error =
@@ -262,44 +225,32 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
     assertEquals(null, error.getCause(), "the recheck must not leak a cause");
     assertEquals(
         0L, count("select count(*) from agent_provider where name = '" + PROVIDER_NAME + "'"));
-    assertEquals(1L, configurationRepository.readCatalog().epoch());
-    assertEquals(1L, pluginHistoryCount(DEPENDENT_PLUGIN_ID));
+    assertEquals(1L, configurationRepository.find(DEPENDENT_PLUGIN_ID).orElseThrow().revision());
     assertEquals(0, dispatcherWakes.get());
     assertEquals(0, catalogWakes.get(), "a rolled back import must not notify the catalog");
   }
 
-  /** 普通导入的上下文变化推进代际并按新上下文重写密文，但保持同一合成秘密载荷；通知只在提交后发生。 */
+  /** 普通导入改变静态密钥的目标地址：已保存的密钥被删除；通知只在提交后各发生一次。 */
   @Test
-  void ordinaryImportKeepsTheSyntheticSecretAndFencesTheOldContext() {
+  void ordinaryImportWithAChangedEndpointDropsTheStaticKey() {
     seedCatalog();
-    // 与生产一致：首次 SET 在事务内提交，提交后通知可确定观测。
     new TransactionTemplate(transactionManager)
         .execute(
-            status -> {
-              commitService.configure(
-                  STATIC_PLUGIN_ID,
-                  1L,
-                  1L,
-                  VALUES_V1,
-                  Map.of("apiKey", PluginSecretPatch.set(SYNTHETIC_SECRET)));
-              return null;
-            });
-    int catalogWakesBeforeImport = catalogWakes.get();
-    int dispatcherWakesBeforeImport = dispatcherWakes.get();
-    PluginCredentialRow seeded = credentialRepository.find(STATIC_PLUGIN_ID).orElseThrow();
-    PluginCredentialReference oldReference =
-        new PluginCredentialReference(
-            STATIC_PLUGIN_ID, seeded.authGeneration(), seeded.contextFingerprint());
+            status ->
+                configurationService.configure(
+                    STATIC_PLUGIN_ID,
+                    1L,
+                    VALUES_V1,
+                    Map.of("apiKey", PluginSecretPatch.set(SYNTHETIC_SECRET))));
     assertEquals(
         "{\"apiKey\":\"" + SYNTHETIC_SECRET + "\"}",
-        credentialStore.resolve(oldReference).payloadJson());
+        credentialRepository.find(STATIC_PLUGIN_ID).orElseThrow().payloadJson());
+    int catalogWakesBeforeImport = catalogWakes.get();
+    int dispatcherWakesBeforeImport = dispatcherWakes.get();
 
-    // 导入只带普通值（无秘密字段）且秘密补丁恒为空：不得复制、恢复或清除任何凭据。
+    // 导入只带普通值（无秘密字段）且秘密补丁恒为空：不复制、不恢复任何凭据。
     ConfigSyncPlan plan =
-        plan(
-            List.of(),
-            List.of(new ConfigSyncPlan.PluginImport(STATIC_PLUGIN_ID, 2L, VALUES_V2)),
-            2L);
+        plan(List.of(), List.of(new ConfigSyncPlan.PluginImport(STATIC_PLUGIN_ID, 2L, VALUES_V2)));
     AtomicBoolean notifiedInsideTransaction = new AtomicBoolean();
     new TransactionTemplate(transactionManager)
         .execute(
@@ -314,49 +265,19 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
     assertFalse(
         notifiedInsideTransaction.get(),
         "afterCommit callbacks must not be observable inside the import transaction");
-    assertEquals(
-        catalogWakesBeforeImport + 1,
-        catalogWakes.get(),
-        "a committed import must request exactly one catalog refresh");
-    assertEquals(
-        dispatcherWakesBeforeImport + 1,
-        dispatcherWakes.get(),
-        "a rewritten credential must wake the refresh dispatcher once");
-
-    PluginCredentialRow after = credentialRepository.find(STATIC_PLUGIN_ID).orElseThrow();
-    assertNotEquals(seeded.authGeneration(), after.authGeneration());
-    assertNotEquals(seeded.contextFingerprint(), after.contextFingerprint());
-    assertFalse(
-        Arrays.equals(seeded.encryptedPayload(), after.encryptedPayload()),
-        "the credential must be rewritten under the new authentication context");
-    PluginCredentialReference newReference =
-        new PluginCredentialReference(
-            STATIC_PLUGIN_ID, after.authGeneration(), after.contextFingerprint());
-    assertEquals(
-        "{\"apiKey\":\"" + SYNTHETIC_SECRET + "\"}",
-        credentialStore.resolve(newReference).payloadJson(),
-        "the import must keep the exact same secret payload");
-    assertThrows(
-        PluginCredentialUnavailableException.class, () -> credentialStore.resolve(oldReference));
-
-    PluginConfigurationRow history =
-        configurationRepository.readConfiguration(STATIC_PLUGIN_ID, 3L).orElseThrow();
-    assertEquals(VALUES_V2, history.valuesJson());
-    assertEquals(List.of("apiKey"), history.configuredSecretFields());
-    assertEquals(newReference.authGeneration(), history.authGeneration());
-    assertEquals(newReference.contextFingerprint(), history.contextFingerprint());
+    assertEquals(catalogWakesBeforeImport + 1, catalogWakes.get());
+    assertEquals(dispatcherWakesBeforeImport + 1, dispatcherWakes.get());
+    assertTrue(credentialRepository.find(STATIC_PLUGIN_ID).isEmpty());
+    PluginConfigurationRow current = configurationRepository.find(STATIC_PLUGIN_ID).orElseThrow();
+    assertEquals(3L, current.revision());
+    assertEquals(VALUES_V2, current.valuesJson());
   }
 
-  /** 以真实 Bootstrap 在 epoch 0 上初始化 epoch 1 的权威目录：安装定义与默认普通值直接来自合成插件。 */
+  /** 为已安装 Plugin 写入默认配置（revision 1）。 */
   private void seedCatalog() {
-    PluginCatalogBootstrap bootstrap =
-        new PluginCatalogBootstrap(registry, configurationRepository, transactionManager);
-    try (PluginCatalogSnapshot ignored =
-        bootstrap.bootstrap(
-            new PluginContextFactory(credentialStore, () -> null, () -> null, () -> null)::create,
-            List.of(),
-            List.of())) {
-      // 初始化即已落库 epoch 1；快照本身不参与本测试的读写断言。
+    for (StudioPlugin plugin : registry.plugins()) {
+      configurationRepository.insertIfMissing(
+          plugin.descriptor().pluginId(), plugin.configurationSchema().defaultsJson());
     }
   }
 
@@ -371,20 +292,9 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
   }
 
   private static ConfigSyncPlan plan(
-      List<ConfigSyncParser.ProviderSpec> providers,
-      List<ConfigSyncPlan.PluginImport> plugins,
-      long pluginCatalogEpoch) {
+      List<ConfigSyncParser.ProviderSpec> providers, List<ConfigSyncPlan.PluginImport> plugins) {
     return new ConfigSyncPlan(
-        providers,
-        List.of(),
-        List.of(),
-        List.of(),
-        List.of(),
-        List.of(),
-        plugins,
-        pluginCatalogEpoch,
-        null,
-        List.of(),
+        providers, List.of(), List.of(), List.of(), List.of(), List.of(), plugins, null, List.of(),
         List.of());
   }
 
@@ -432,12 +342,7 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
     return jdbcClient.sql(sql).query(Long.class).single();
   }
 
-  private static long pluginHistoryCount(String pluginId) {
-    return count(
-        "select count(*) from plugin_configuration_revision where plugin_id = '" + pluginId + "'");
-  }
-
-  /** 合成静态密钥插件：普通值含一个认证上下文字段，秘密字段由部署主密钥加密。 */
+  /** 合成静态密钥插件：普通值含一个认证目标字段。 */
   private static final class StaticKeyPlugin implements StudioPlugin {
 
     private static final PluginConfigSchema SCHEMA =

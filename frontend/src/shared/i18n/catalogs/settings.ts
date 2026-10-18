@@ -77,10 +77,6 @@ export const settingsCatalog = {
     'en-US': 'Connected',
     'zh-CN': '已连接',
   },
-  'plugins.status.KEY_UNAVAILABLE': {
-    'en-US': 'Master Key Unavailable',
-    'zh-CN': '主密钥不可用',
-  },
   'plugins.status.REFRESH_FAILED': {
     'en-US': 'Refresh Failed',
     'zh-CN': '刷新失败',
@@ -156,10 +152,6 @@ export const settingsCatalog = {
   'plugins.connectDialog.afterLoginHint': {
     'en-US': 'After login, copy the callback deep link from the browser and paste it here.',
     'zh-CN': '登录后，从浏览器复制回调 Deep Link 并粘贴到这里。',
-  },
-  'plugins.connectDialog.keyUnavailableHint': {
-    'en-US': 'Deployment master key is unavailable. Credential operations are locked.',
-    'zh-CN': '部署主密钥不可用，凭据操作已锁定。',
   },
   'plugins.noRegionsAvailable': {
     'en-US': 'No regions available for this plugin',
@@ -377,18 +369,6 @@ export const settingsCatalog = {
     'en-US': 'Resolve draft errors before removing {{name}} items',
     'zh-CN': '请先解决草稿错误，再删除 {{name}} 条目',
   },
-  'plugins.epochAndRevision': {
-    'en-US': 'Epoch & Revision',
-    'zh-CN': '版本坐标',
-  },
-  'plugins.desiredEpoch': {
-    'en-US': 'Desired Epoch',
-    'zh-CN': '期望 Epoch',
-  },
-  'plugins.appliedEpoch': {
-    'en-US': 'Applied Epoch',
-    'zh-CN': '已应用 Epoch',
-  },
   'plugins.desiredRevision': {
     'en-US': 'Desired Revision',
     'zh-CN': '期望修订',
@@ -447,8 +427,8 @@ export const settingsCatalog = {
     'zh-CN': '仅对远端服务执行一次只读探测，不修改配置与凭据，也不会自行重复检查。',
   },
   'plugins.connectionCheck.coordinates': {
-    'en-US': 'Applied Coordinates',
-    'zh-CN': '已应用坐标',
+    'en-US': 'Applied Revision',
+    'zh-CN': '已应用修订',
   },
   'plugins.connectionCheck.checkedAt': {
     'en-US': 'Checked At',

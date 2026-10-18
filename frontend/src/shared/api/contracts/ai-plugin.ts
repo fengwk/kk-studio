@@ -21,7 +21,6 @@ export type PluginAuthKindDTO = PluginAuthKindDeepLinkDTO | PluginAuthKindStatic
  */
 export type PluginStatus =
   | 'NOT_CONNECTED'
-  | 'KEY_UNAVAILABLE'
   | 'CONNECTED'
   | 'REFRESH_FAILED'
   | 'REFRESH_UNCERTAIN'
@@ -36,7 +35,7 @@ export interface PluginSecretProjectionDTO {
 }
 
 /**
- * 权威 catalog 当前 desired 配置的安全投影。
+ * 当前保存配置（desired）的安全投影。
  */
 export interface PluginConfigurationDTO {
   revision: string | null
@@ -48,7 +47,7 @@ export interface PluginConfigurationDTO {
 
 /**
  * 已安装 Plugin 的安全投影。
- * 绝不包含密文、token、密钥或 client identity。
+ * 绝不包含 token、密钥或 client identity。
  */
 export interface PluginDTO {
   pluginId: string
@@ -62,8 +61,6 @@ export interface PluginDTO {
   lastRefreshedAt: InstantTimestamp
   lastRefreshError: string | null
   configuration: PluginConfigurationDTO
-  desiredEpoch: string
-  appliedEpoch: string | null
   desiredRevision: string
   appliedRevision: string | null
   /** 当前已应用实例是否声明显式只读连接检查能力；能力来自实例本身，绝不按 pluginId 推断。 */
@@ -95,7 +92,6 @@ export interface PluginSecretPatchDTO {
 }
 
 export interface PluginConfigurationUpdateRequestDTO {
-  expectedEpoch: string
   expectedRevision: string
   valuesJson: string
   secretPatch?: Record<string, PluginSecretPatchDTO>

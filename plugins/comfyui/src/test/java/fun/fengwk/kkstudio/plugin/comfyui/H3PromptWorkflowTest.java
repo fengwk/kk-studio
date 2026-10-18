@@ -77,7 +77,7 @@ class H3PromptWorkflowTest {
             NODE,
             "h3",
             REQUEST,
-            new CanvasFunctionBinding(1L, videoDefinition(), null),
+            new CanvasFunctionBinding(videoDefinition()),
             CanvasJson.parseObject(
                 "{\"prompt\":\"Use <Picture 1> then <Video 1>\",\"ratio\":\"16:9\",\"duration\":5}"),
             references,

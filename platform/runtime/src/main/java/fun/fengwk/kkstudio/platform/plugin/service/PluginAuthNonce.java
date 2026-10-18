@@ -1,10 +1,11 @@
 package fun.fengwk.kkstudio.platform.plugin.service;
 
-import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogFingerprint;
-
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.util.Base64;
+import java.util.HexFormat;
 import java.util.regex.Pattern;
 
 /**
@@ -54,8 +55,13 @@ public final class PluginAuthNonce {
     if (!isValidHandle(authAttemptId)) {
       throw new IllegalArgumentException("authAttemptId must be a canonical attempt handle");
     }
-    // 领域分隔前缀与句柄一起进入同一份字节流，复用目录指纹的 SHA-256 原语。
-    return PluginCatalogFingerprint.sha256Hex(
-        (HASH_DOMAIN + authAttemptId).getBytes(StandardCharsets.UTF_8));
+    try {
+      byte[] digest =
+          MessageDigest.getInstance("SHA-256")
+              .digest((HASH_DOMAIN + authAttemptId).getBytes(StandardCharsets.UTF_8));
+      return HexFormat.of().formatHex(digest);
+    } catch (NoSuchAlgorithmException error) {
+      throw new IllegalStateException("SHA-256 is unavailable", error);
+    }
   }
 }

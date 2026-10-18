@@ -80,8 +80,6 @@ const workflowPlugin: PluginDTO = {
     defaultsJson: '{"entries":[]}',
     secrets: { apiKey: { description: 'workflow credential', configured: true } },
   },
-  desiredEpoch: '7',
-  appliedEpoch: '7',
   desiredRevision: '4',
   appliedRevision: '4',
   connectionCheckSupported: false,

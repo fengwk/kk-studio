@@ -56,8 +56,6 @@ class PluginApiArchitectureTest {
           "fun.fengwk.kkstudio.platform.runtime.",
           OWN_PACKAGE_PREFIX + "PluginProperties",
           OWN_PACKAGE_PREFIX + "PluginConfiguration",
-          OWN_PACKAGE_PREFIX + "credential.PluginCredentialCodec",
-          OWN_PACKAGE_PREFIX + "credential.PluginCredentialKeyLoader",
           OWN_PACKAGE_PREFIX + "credential.DatabasePluginCredentialStore",
           OWN_PACKAGE_PREFIX + "credential.PluginCredentialRefresh");
 

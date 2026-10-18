@@ -10,7 +10,6 @@ import {
 /** 合法连接检查 payload 基线；只覆写待验证维度。 */
 const CONNECTION_CHECK = {
   pluginId: 'beta-deep-connected',
-  appliedEpoch: '14',
   appliedRevision: '8',
   checkedAt: 1772366400,
   reachability: 'REACHABLE',

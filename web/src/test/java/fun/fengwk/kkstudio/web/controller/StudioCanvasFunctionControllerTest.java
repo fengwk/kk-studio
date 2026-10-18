@@ -89,7 +89,7 @@ class StudioCanvasFunctionControllerTest {
             .build();
   }
 
-  /** 测试意图：目录以函数名 + args schema 为身份，并暴露同一次租用取得的 epoch 与该函数定义版本。 */
+  /** 测试意图：目录以函数名 + args schema 为身份，并暴露该函数定义版本。 */
   @Test
   void listsFunctionsByNameAndArgsSchema() throws Exception {
     mockMvc
@@ -106,8 +106,7 @@ class StudioCanvasFunctionControllerTest {
         .andExpect(jsonPath("$.data[0].referencePolicy.allowedKinds[0]").value("IMAGE"))
         .andExpect(jsonPath("$.data[0].available").value(true))
         .andExpect(jsonPath("$.data[0].unavailableReason").value(nullValue()))
-        // 版本身份来自同一次 acquireCurrent：epoch 与该函数完整定义 fingerprint 一起输出。
-        .andExpect(jsonPath("$.data[0].version.catalogEpoch").value("1"))
+        .andExpect(jsonPath("$.data[0].version.catalogEpoch").doesNotExist())
         .andExpect(
             jsonPath("$.data[0].version.definitionFingerprint")
                 .value(expectedVersion().definitionFingerprint()))
@@ -116,28 +115,24 @@ class StudioCanvasFunctionControllerTest {
         .andExpect(jsonPath("$.data[0].parameters").doesNotExist())
         .andExpect(jsonPath("$.data[0].endpoint").doesNotExist())
         .andExpect(jsonPath("$.data[0].workflow").doesNotExist());
-    // 目录读取必须是一次 acquireCurrent 的租用，并在响应前释放。
+    // 目录读取必须是一次租用，并在响应前释放。
     assertEquals(0, catalogSource.openLeases());
   }
 
-  /** 测试意图：expectedVersion 必填且形状严格；非法 epoch/fingerprint 都在边界处 400，不触达应用服务。 */
+  /** 测试意图：expectedVersion 必填且形状严格；非法 fingerprint 或未知字段都在边界处 400，不触达应用服务。 */
   @Test
   void startRequiresWellFormedExpectedVersion() throws Exception {
     for (String body :
         new String[] {
           "{\"requestId\":\"request-1\"}",
           "{\"requestId\":\"request-1\",\"expectedVersion\":null}",
-          "{\"requestId\":\"request-1\",\"expectedVersion\":{\"catalogEpoch\":\"01\","
-              + "\"definitionFingerprint\":\""
-              + "a".repeat(64)
-              + "\"}}",
-          "{\"requestId\":\"request-1\",\"expectedVersion\":{\"catalogEpoch\":\"1\","
-              + "\"definitionFingerprint\":\""
+          "{\"requestId\":\"request-1\",\"expectedVersion\":{}}",
+          "{\"requestId\":\"request-1\",\"expectedVersion\":{\"definitionFingerprint\":\""
               + "A".repeat(64)
               + "\"}}",
+          "{\"requestId\":\"request-1\",\"expectedVersion\":{\"definitionFingerprint\":\"abc\"}}",
           "{\"requestId\":\"request-1\",\"expectedVersion\":{\"catalogEpoch\":\"1\","
-              + "\"definitionFingerprint\":\"abc\"}}",
-          "{\"requestId\":\"request-1\",\"expectedVersion\":{\"definitionFingerprint\":\""
+              + "\"definitionFingerprint\":\""
               + "a".repeat(64)
               + "\"}}",
         }) {
@@ -151,46 +146,18 @@ class StudioCanvasFunctionControllerTest {
     verify(runtimeService, never()).start(any(), any(), any(), any());
   }
 
-  /** 测试意图：expectedVersion 的 epoch 只能是 JSON 字符串；number/bool/array 一律不得被读成 "1" 之类的文本。 */
+  /** 测试意图：expectedVersion 的 fingerprint 只能是 JSON 字符串；number/bool/array/null 一律在边界拒绝。 */
   @Test
-  void expectedVersionRejectsNonStringEpoch() throws Exception {
-    String fingerprint = expectedVersion().definitionFingerprint();
-    when(runtimeService.start(any(), any(), anyString(), any()))
-        .thenReturn(run(CanvasFunctionRunStatus.READY, "QUEUED"));
-    for (String body :
-        new String[] {
-          "{\"requestId\":\"request-1\",\"expectedVersion\":{\"catalogEpoch\":1,"
-              + "\"definitionFingerprint\":\""
-              + fingerprint
-              + "\"}}",
-          "{\"requestId\":\"request-1\",\"expectedVersion\":{\"catalogEpoch\":true,"
-              + "\"definitionFingerprint\":\""
-              + fingerprint
-              + "\"}}",
-          "{\"requestId\":\"request-1\",\"expectedVersion\":{\"catalogEpoch\":[\"1\"],"
-              + "\"definitionFingerprint\":\""
-              + fingerprint
-              + "\"}}",
-          "{\"requestId\":\"request-1\",\"expectedVersion\":{\"catalogEpoch\":\"1\","
-              + "\"definitionFingerprint\":123}}",
-          "{\"requestId\":\"request-1\",\"expectedVersion\":{\"catalogEpoch\":null,"
-              + "\"definitionFingerprint\":\""
-              + fingerprint
-              + "\"}}",
-          "{\"requestId\":\"request-1\",\"expectedVersion\":{\"catalogEpoch\":\"1\","
-              + "\"definitionFingerprint\":null}}",
-          // 超出 long 范围但仍是 canonical 十进制文本：必须在边界拒绝，不能靠溢出行为兜底。
-          "{\"requestId\":\"request-1\",\"expectedVersion\":{\"catalogEpoch\":\""
-              + "9".repeat(30)
-              + "\",\"definitionFingerprint\":\""
-              + fingerprint
-              + "\"}}",
-        }) {
+  void expectedVersionRejectsNonStringFingerprint() throws Exception {
+    for (String value : new String[] {"123", "true", "[\"x\"]", "null"}) {
       mockMvc
           .perform(
               post("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/function-run")
                   .contentType(MediaType.APPLICATION_JSON)
-                  .content(body))
+                  .content(
+                      "{\"requestId\":\"request-1\",\"expectedVersion\":{\"definitionFingerprint\":"
+                          + value
+                          + "}}"))
           .andExpect(status().isBadRequest());
     }
     verify(runtimeService, never()).start(any(), any(), any(), any());
@@ -211,7 +178,7 @@ class StudioCanvasFunctionControllerTest {
             post("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/function-run")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
-                    "{\"requestId\":\"request-1\",\"expectedVersion\":{\"catalogEpoch\":\"1\","
+                    "{\"requestId\":\"request-1\",\"expectedVersion\":{"
                         + "\"definitionFingerprint\":\""
                         + expectedVersion().definitionFingerprint()
                         + "\"}}"))
@@ -238,7 +205,7 @@ class StudioCanvasFunctionControllerTest {
             post("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/function-run/cancel")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
-                    "{\"requestId\":\"request-1\",\"expectedVersion\":{\"catalogEpoch\":\"1\","
+                    "{\"requestId\":\"request-1\",\"expectedVersion\":{"
                         + "\"definitionFingerprint\":\""
                         + expectedVersion().definitionFingerprint()
                         + "\"}}"))
@@ -277,7 +244,7 @@ class StudioCanvasFunctionControllerTest {
             post("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/function-run")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
-                    "{\"requestId\":\"request-1\",\"expectedVersion\":{\"catalogEpoch\":\"1\","
+                    "{\"requestId\":\"request-1\",\"expectedVersion\":{"
                         + "\"definitionFingerprint\":\""
                         + version.definitionFingerprint()
                         + "\"}}"))
@@ -404,7 +371,7 @@ class StudioCanvasFunctionControllerTest {
             post("/api/canvases/not-a-uuid/nodes/" + NODE + "/function-run")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
-                    "{\"requestId\":\"r\",\"expectedVersion\":{\"catalogEpoch\":\"1\","
+                    "{\"requestId\":\"r\",\"expectedVersion\":{"
                         + "\"definitionFingerprint\":\""
                         + expectedVersion().definitionFingerprint()
                         + "\"}}"))
@@ -415,7 +382,7 @@ class StudioCanvasFunctionControllerTest {
             post("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/function-run")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
-                    "{\"requestId\":\"r\",\"expectedVersion\":{\"catalogEpoch\":\"1\","
+                    "{\"requestId\":\"r\",\"expectedVersion\":{"
                         + "\"definitionFingerprint\":\""
                         + expectedVersion().definitionFingerprint()
                         + "\",\"extra\":true}}"))
@@ -449,7 +416,7 @@ class StudioCanvasFunctionControllerTest {
             post("/api/canvases/" + CANVAS + "/nodes/" + NODE + "/function-run")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
-                    "{\"requestId\":\"r\",\"expectedVersion\":{\"catalogEpoch\":\"1\","
+                    "{\"requestId\":\"r\",\"expectedVersion\":{"
                         + "\"definitionFingerprint\":\""
                         + expectedVersion().definitionFingerprint()
                         + "\"}}"))
@@ -534,12 +501,10 @@ class StudioCanvasFunctionControllerTest {
             new CanvasJson.JsonBool(false)));
   }
 
-  /** 目录替身固定 epoch=1，因此「客户端看到的版本」可由此确定性构造。 */
+  /** 「客户端看到的版本」由同一函数定义确定性构造。 */
   private static CanvasFunctionVersion expectedVersion() {
     CanvasFunctionDefinition definition = adapter("fake-image", true, null).functions().get(0);
-    return new CanvasFunctionVersion(
-        TestCanvasFunctionCatalogSource.EPOCH,
-        CanvasFunctionCatalog.definitionFingerprint(definition));
+    return new CanvasFunctionVersion(CanvasFunctionCatalog.definitionFingerprint(definition));
   }
 
   /** 以函数名声明能力的适配器；执行细节与本测试无关。 */
@@ -582,11 +547,9 @@ class StudioCanvasFunctionControllerTest {
     };
   }
 
-  /** 测试替身：单 epoch 冻结目录，函数都是内置来源，并记录未关闭的租用数。 */
+  /** 测试替身：固定目录，并记录未关闭的租用数。 */
   private static final class TestCanvasFunctionCatalogSource
       implements CanvasFunctionCatalogSource {
-
-    private static final long EPOCH = 1L;
 
     private final CanvasFunctionCatalog catalog;
     private int openLeases;
@@ -600,23 +563,10 @@ class StudioCanvasFunctionControllerTest {
     }
 
     @Override
-    public Lease acquireCurrent() {
-      return acquire(EPOCH);
-    }
-
-    @Override
-    public Lease acquire(long catalogEpoch) {
-      if (catalogEpoch != EPOCH) {
-        throw new IllegalArgumentException("catalog epoch is not available: " + catalogEpoch);
-      }
+    public Lease acquire() {
       openLeases++;
       return new Lease() {
         private boolean closed;
-
-        @Override
-        public long epoch() {
-          return EPOCH;
-        }
 
         @Override
         public CanvasFunctionCatalog catalog() {
@@ -625,19 +575,15 @@ class StudioCanvasFunctionControllerTest {
 
         @Override
         public CanvasFunctionBinding bind(String functionName) {
-          return new CanvasFunctionBinding(EPOCH, catalog.require(functionName).function(), null);
+          return new CanvasFunctionBinding(catalog.require(functionName).function());
         }
 
         @Override
         public CanvasFunctionCatalog.RegisteredFunction require(CanvasFunctionBinding binding) {
-          if (binding.catalogEpoch() != EPOCH) {
-            throw new IllegalArgumentException("binding epoch does not match the acquired catalog");
-          }
           CanvasFunctionCatalog.RegisteredFunction registered =
               catalog.require(binding.definition().name());
-          if (!registered.function().equals(binding.definition())
-              || binding.pluginSource() != null) {
-            throw new IllegalArgumentException("binding does not match the acquired catalog");
+          if (!registered.function().equals(binding.definition())) {
+            throw new IllegalStateException("binding does not match the acquired catalog");
           }
           return registered;
         }

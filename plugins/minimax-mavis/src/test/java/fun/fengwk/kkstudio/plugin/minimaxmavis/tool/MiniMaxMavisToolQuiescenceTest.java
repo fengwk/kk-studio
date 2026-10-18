@@ -32,7 +32,6 @@ import fun.fengwk.kkstudio.plugin.minimaxmavis.MiniMaxMavisResourceAccess;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
-import java.util.UUID;
 import java.util.concurrent.AbstractExecutorService;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CountDownLatch;
@@ -57,9 +56,6 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 class MiniMaxMavisToolQuiescenceTest {
 
-  private static final UUID AUTH_GENERATION =
-      UUID.fromString("00000000-0000-0000-0000-0000000000b1");
-  private static final String AUTH_CONTEXT = "a1".repeat(32);
   private static final String TOKEN = "mavis-quiescence-test-token";
   private static final String CLIENT_UUID = "11111111-2222-3333-4444-555555555555";
   private static final String CATALOG_RESPONSE = "{\"tools\":[{\"endpoint\":\"web_search\"}]}";
@@ -239,12 +235,9 @@ class MiniMaxMavisToolQuiescenceTest {
   private static PluginCredentialSnapshot snapshot() {
     return new PluginCredentialSnapshot(
         MiniMaxMavisPlugin.PLUGIN_ID,
-        AUTH_GENERATION,
-        AUTH_CONTEXT,
         MavisRegion.CN.id().toUpperCase(),
         Instant.now().plusSeconds(3600),
         0L,
-        new byte[0],
         new MiniMaxMavisCredentialPayload(TOKEN, CLIENT_UUID, Instant.now()).toJson());
   }
 

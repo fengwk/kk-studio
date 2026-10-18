@@ -16,6 +16,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.TreeMap;
 
 /** 启动时冻结的 Canvas Function 定义与 adapter 注册目录，键是全局唯一的函数名。 */
@@ -65,12 +66,13 @@ public final class CanvasFunctionCatalog {
     return ordered;
   }
 
+  public Optional<RegisteredFunction> find(String name) {
+    return Optional.ofNullable(byName.get(name));
+  }
+
   public RegisteredFunction require(String name) {
-    RegisteredFunction registered = byName.get(name);
-    if (registered == null) {
-      throw new IllegalArgumentException("unknown Canvas Function: " + name);
-    }
-    return registered;
+    return find(name)
+        .orElseThrow(() -> new IllegalArgumentException("unknown Canvas Function: " + name));
   }
 
   /**

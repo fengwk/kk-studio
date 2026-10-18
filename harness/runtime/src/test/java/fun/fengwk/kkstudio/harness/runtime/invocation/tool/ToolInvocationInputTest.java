@@ -73,11 +73,9 @@ class ToolInvocationInputTest {
   /** 内置 contributor 贡献的 {@code ask_user}：descriptor 名与调用名一致，localName 可与其不同。 */
   private static ToolBinding askUserBinding() {
     return new ToolBinding(
-        1L,
         new AgentToolDefinition(descriptor("ask_user"), ToolVisibility.SELECTABLE),
         new ContributorBinding("builtin", "ask-user", List.of()),
         EnvironmentSupport.NONE,
-        null,
         null,
         null);
   }

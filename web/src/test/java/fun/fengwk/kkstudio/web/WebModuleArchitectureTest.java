@@ -122,7 +122,6 @@ class WebModuleArchitectureTest {
    */
   private static final List<String> REQUIRED_PLUGIN_CONFIGURATION_LINES =
       List.of(
-          "credential-key-file: ${KK_STUDIO_PLUGINS_CREDENTIAL_KEY_FILE:}",
           "poll-delay: ${KK_STUDIO_PLUGINS_REFRESH_POLL_DELAY:1h}",
           "lease-duration: ${KK_STUDIO_PLUGINS_REFRESH_LEASE_DURATION:2m}");
 

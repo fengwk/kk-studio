@@ -43,7 +43,6 @@
                                     <element>CLASS</element>
                                     <includes>
                                         <include>fun.fengwk.kkstudio.canvas.function.CanvasFunctionBinding</include>
-                                        <include>fun.fengwk.kkstudio.canvas.function.CanvasFunctionPluginSource</include>
                                         <include>fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun</include>
                                     </includes>
                                     <limits>

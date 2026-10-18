@@ -730,7 +730,6 @@ class PostgresqlCompactionChildTest {
       return base;
     }
     return new ModelRequestSpec(
-        1L,
         base.providerType(),
         base.providerConnectionGenerationId(),
         base.model(),
@@ -1253,7 +1252,6 @@ class PostgresqlCompactionChildTest {
 
   private static ModelRequestSpec requestFor(BranchSettings settings) {
     return new ModelRequestSpec(
-        1L,
         ProviderType.OPENAI,
         new UUID(0L, 1L),
         new ModelDescriptor(

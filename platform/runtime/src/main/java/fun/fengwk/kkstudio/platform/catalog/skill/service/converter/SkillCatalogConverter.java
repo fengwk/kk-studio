@@ -35,7 +35,7 @@ public class SkillCatalogConverter {
     dto.setDescription(skillPackage.getDescription());
     dto.setRepositoryUrl(skillPackage.getRepositoryUrl());
     dto.setBranch(skillPackage.getBranch());
-    dto.setHasToken(skillPackage.getEncryptedToken() != null);
+    dto.setHasToken(skillPackage.getToken() != null);
     dto.setCurrentCommit(skillPackage.getCurrentCommit());
     dto.setObservedHeadCommit(skillPackage.getObservedHeadCommit());
     dto.setHeadCheckedAt(skillPackage.getHeadCheckedAt());

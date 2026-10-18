@@ -35,7 +35,6 @@ final class PortTestData {
 
   static ModelRequestSpec modelRequest() {
     return new ModelRequestSpec(
-        1L,
         ProviderType.OPENAI,
         new UUID(0L, 1L),
         modelDescriptor(),
@@ -64,11 +63,9 @@ final class PortTestData {
 
   private static ToolBinding toolBinding() {
     return new ToolBinding(
-        1L,
         new AgentToolDefinition(toolDescriptor("bash"), ToolVisibility.SELECTABLE),
         new ContributorBinding("core", "bash", List.of()),
         EnvironmentSupport.NONE,
-        null,
         null,
         null);
   }

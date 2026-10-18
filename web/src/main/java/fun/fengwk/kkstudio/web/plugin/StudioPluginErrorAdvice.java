@@ -15,7 +15,6 @@ import fun.fengwk.kkstudio.platform.error.AiDomainException;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
-import fun.fengwk.kkstudio.platform.plugin.PluginKeyUnavailableException;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 
 import java.util.LinkedHashMap;
@@ -31,9 +30,6 @@ import java.util.Map;
 public class StudioPluginErrorAdvice {
 
   private static final String DEFAULT_READABLE_ERROR_DETAIL = "Failed to read request";
-  private static final String CODE_PLUGIN_KEY_UNAVAILABLE = "plugin_key_unavailable";
-  private static final String DEFAULT_PLUGIN_KEY_UNAVAILABLE_MESSAGE =
-      "Plugin credential key is unavailable";
 
   private final StudioMessageService messageService;
 
@@ -55,23 +51,6 @@ public class StudioPluginErrorAdvice {
   @ExceptionHandler(AiVersionConflictException.class)
   public ResponseEntity<Result<Void>> handleVersionConflict(AiVersionConflictException error) {
     return build(HttpStatus.CONFLICT, error);
-  }
-
-  @ExceptionHandler(PluginKeyUnavailableException.class)
-  public ResponseEntity<Result<Void>> handlePluginKeyUnavailable(
-      PluginKeyUnavailableException error) {
-    int status = HttpStatus.SERVICE_UNAVAILABLE.getStatus();
-    Map<String, Object> errorContext = new LinkedHashMap<>();
-    errorContext.put("resource", "plugin");
-    // 只返回固定去敏文案：异常消息可能携带主密钥文件路径等部署细节，不属于调用方可见信息。
-    errorContext.put("detail", DEFAULT_PLUGIN_KEY_UNAVAILABLE_MESSAGE);
-    ImmutableResolvedConventionErrorCode code =
-        new ImmutableResolvedConventionErrorCode(
-            status,
-            CODE_PLUGIN_KEY_UNAVAILABLE,
-            DEFAULT_PLUGIN_KEY_UNAVAILABLE_MESSAGE,
-            errorContext);
-    return ResponseEntity.status(status).body(Results.error(code));
   }
 
   @ExceptionHandler(HttpMessageNotReadableException.class)

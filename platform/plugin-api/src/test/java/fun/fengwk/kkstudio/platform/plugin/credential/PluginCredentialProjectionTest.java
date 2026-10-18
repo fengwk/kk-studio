@@ -30,16 +30,6 @@ class PluginCredentialProjectionTest {
   }
 
   @Test
-  void keyUnavailableProjectionIsOpaque() {
-    PluginCredentialProjection projection = PluginCredentialProjection.keyUnavailable();
-
-    assertEquals(PluginCredentialStatus.KEY_UNAVAILABLE, projection.status());
-    assertNull(projection.region());
-    assertNull(projection.lastRefreshError());
-    assertFalse(projection.connected());
-  }
-
-  @Test
   void connectedOnlyForConnectedStatus() {
     PluginCredentialProjection connected =
         new PluginCredentialProjection(

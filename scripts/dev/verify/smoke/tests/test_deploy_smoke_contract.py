@@ -745,8 +745,8 @@ class TestCanvasTestComposeContract(unittest.TestCase):
         )
         return json.loads(result.stdout)
 
-    def test_default_profile_omits_app_and_credential_init(self):
-        """默认依赖启动不拉起 app 和 plugin-credential-init，保持最小常驻栈。"""
+    def test_default_profile_omits_app(self):
+        """默认依赖启动不拉起 app，保持最小常驻栈。"""
         config = self.run_compose_config()
         services = config.get("services", {})
         self.assertIn("postgres", services)
@@ -754,66 +754,15 @@ class TestCanvasTestComposeContract(unittest.TestCase):
         self.assertIn("minio-init", services)
         self.assertIn("http-mock", services)
         self.assertNotIn("app", services)
-        self.assertNotIn("plugin-credential-init", services)
 
-    def test_app_profile_wires_isolated_plugin_credential_key_volume_and_init(self):
-        """--profile app 必须通过一次性 init 在专用测试 volume 生成 32 字节主密钥，app 只读挂载。"""
+    def test_app_profile_waits_only_for_the_data_plane(self):
+        """--profile app 只依赖数据面与 HTTP mock，不需要任何凭据主密钥。"""
         config = self.run_compose_config("--profile", "app")
-        services = config.get("services", {})
-
-        # 1. 验证 plugin-credential-init 一次性服务契约
-        self.assertIn("plugin-credential-init", services)
-        init_svc = services["plugin-credential-init"]
-        self.assertEqual(init_svc.get("image"), "python:3.12-alpine")
-        self.assertEqual(init_svc.get("restart"), "no")
-        self.assertEqual(init_svc.get("user"), "0:0")
-        command_str = " ".join(init_svc.get("command", []))
-        self.assertIn("os.urandom(32)", command_str)
-        self.assertIn("10001", command_str)
-        self.assertIn("0o400", command_str)
-        self.assertIn("/secrets/plugin-credential-key", command_str)
-        init_volumes = init_svc.get("volumes", [])
-        self.assertTrue(
-            any(
-                v.get("source") == "plugin-credential-key" and v.get("target") == "/secrets"
-                for v in init_volumes
-            ),
-            f"plugin-credential-init must mount plugin-credential-key volume: {init_volumes}",
-        )
-
-        # 2. 验证 app 服务依赖与挂载契约
-        self.assertIn("app", services)
-        app_svc = services["app"]
-        env = app_svc.get("environment", {})
+        app_svc = config.get("services", {})["app"]
         self.assertEqual(
-            env.get("KK_STUDIO_PLUGINS_CREDENTIAL_KEY_FILE"),
-            "/secrets/plugin-credential-key",
-            "app must configure KK_STUDIO_PLUGINS_CREDENTIAL_KEY_FILE to point to the mounted key file",
+            set(app_svc.get("depends_on", {})), {"postgres", "minio", "minio-init", "http-mock"}
         )
-        depends_on = app_svc.get("depends_on", {})
-        self.assertIn("plugin-credential-init", depends_on)
-        self.assertEqual(
-            depends_on["plugin-credential-init"].get("condition"),
-            "service_completed_successfully",
-        )
-        app_volumes = app_svc.get("volumes", [])
-        key_mount = next(
-            (
-                v
-                for v in app_volumes
-                if v.get("source") == "plugin-credential-key" and v.get("target") == "/secrets"
-            ),
-            None,
-        )
-        self.assertIsNotNone(key_mount, "app must mount plugin-credential-key to /secrets")
-        self.assertTrue(
-            key_mount.get("read_only"),
-            "app volume mount for plugin-credential-key must be read-only",
-        )
-
-        # 3. 验证卷声明
-        volumes = config.get("volumes", {})
-        self.assertIn("plugin-credential-key", volumes)
+        self.assertFalse(app_svc.get("volumes"))
 
 
 if __name__ == "__main__":

@@ -32,9 +32,6 @@ class CanvasFunctionWireContractTest {
 
   private static final String GOLDEN_DIR = "fun/fengwk/kkstudio/web/canvas/";
 
-  /** canonical 非负十进制 long 文本（Java long 的 wire 形态），不是数字。 */
-  private static final String CATALOG_EPOCH = "1";
-
   /** lowercase 64 位 SHA-256 定义指纹。 */
   private static final String DEFINITION_FINGERPRINT =
       "3c9a6c2b5f1d4e8a7b0c9d2e3f4a5b6c7d8e9f0a1b2c3d4e5f60718293a4b5c6";
@@ -42,20 +39,17 @@ class CanvasFunctionWireContractTest {
   /** canonical lowercase UUID：run/cancel 只按该 requestId 收敛终态。 */
   private static final String REQUEST_ID = "c0ffee00-0000-4000-8000-000000000001";
 
-  /** 测试意图：目录版本身份的 wire 文本与已提交 golden 逐字符一致，epoch 是 Java long 文本。 */
+  /** 测试意图：目录版本身份的 wire 文本与已提交 golden 一致，只含定义指纹。 */
   @Test
   void functionVersionMatchesCommittedWireGolden() throws Exception {
     CanvasFunctionVersionDTO version = new CanvasFunctionVersionDTO();
-    version.setCatalogEpoch(CATALOG_EPOCH);
     version.setDefinitionFingerprint(DEFINITION_FINGERPRINT);
 
     String json = HTTP_MAPPER.writeValueAsString(version);
     assertWireMatchesGolden("canvas-function-version-http.json", json);
 
     JsonNode node = HTTP_MAPPER.readTree(json);
-    assertTrue(
-        node.get("catalogEpoch").isString(), "catalogEpoch must be a canonical long text token");
-    assertEquals(CATALOG_EPOCH, node.get("catalogEpoch").asString());
+    assertEquals(1, node.size());
     assertEquals(DEFINITION_FINGERPRINT, node.get("definitionFingerprint").asString());
   }
 
@@ -101,7 +95,6 @@ class CanvasFunctionWireContractTest {
 
   private static CanvasFunctionVersionDTO version() {
     CanvasFunctionVersionDTO version = new CanvasFunctionVersionDTO();
-    version.setCatalogEpoch(CATALOG_EPOCH);
     version.setDefinitionFingerprint(DEFINITION_FINGERPRINT);
     return version;
   }

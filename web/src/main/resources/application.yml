@@ -116,8 +116,6 @@ kk-studio:
         poll-interval-millis: ${KK_STUDIO_CANVAS_FUNCTION_POLL_INTERVAL_MILLIS:1000}
         rejection-delay-millis: ${KK_STUDIO_CANVAS_FUNCTION_REJECTION_DELAY_MILLIS:1000}
   plugins:
-    # owner-only 绝对路径、32 bytes 原始 AES-256 主密钥、多节点必须一致、不进数据库/DTO/日志、留空表示本部署不提供凭据能力且读写 fail closed
-    credential-key-file: ${KK_STUDIO_PLUGINS_CREDENTIAL_KEY_FILE:}
     refresh:
       poll-delay: ${KK_STUDIO_PLUGINS_REFRESH_POLL_DELAY:1h}
       lease-duration: ${KK_STUDIO_PLUGINS_REFRESH_LEASE_DURATION:2m}

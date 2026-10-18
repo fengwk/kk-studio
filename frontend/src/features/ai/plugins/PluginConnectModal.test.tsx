@@ -29,8 +29,6 @@ const plugin: PluginDTO = {
     defaultsJson: '{}',
     secrets: {},
   },
-  desiredEpoch: '1',
-  appliedEpoch: '1',
   desiredRevision: '1',
   appliedRevision: '1',
   connectionCheckSupported: false,
@@ -252,16 +250,14 @@ describe('PluginConnectModal lifecycle', () => {
     expect(client.getMutationCache().getAll()).toHaveLength(0)
   })
 
-  it('locks unavailable credentials and warns when region candidates empty', () => {
+  it('warns when region candidates are empty', () => {
     setLocale('en-US')
     render(
       view({
         ...plugin,
-        status: 'KEY_UNAVAILABLE',
         authKind: { type: 'DEEP_LINK', regionCandidates: [] },
       }),
     )
-    expect(screen.getByText(/Deployment master key is unavailable/)).toBeInTheDocument()
     expect(screen.getByText('No regions available for this plugin')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeEnabled()
     fireEvent.submit(input().closest('form')!)

@@ -49,7 +49,7 @@ public class PlatformHarnessTestConfiguration {
   }
 
   /**
-   * Platform 测试宿主的运行时工具目录 source：Harness 固定在单 epoch，MCP 每次租用现读并冻结。
+   * Platform 测试宿主的运行时工具目录 source：Harness 目录固定，MCP 每次租用现读并冻结。
    *
    * <p>生产 source 需要 web 组合根发布的 {@code PluginCatalogRuntime}；platform 测试上下文不装配插件运行时，因此测试宿主只冻结自己的
    * Harness 目录和实际 MCP 事实。冻结索引与严格校验仍复用生产实现，租用内不受后续 MCP 变化影响。
@@ -58,88 +58,44 @@ public class PlatformHarnessTestConfiguration {
   @ConditionalOnMissingBean(name = "runtimeToolCatalogSource")
   public RuntimeToolCatalogSource runtimeToolCatalogSource(
       HarnessCatalog harnessCatalog, McpToolCatalog mcpCatalog) {
-    return new RuntimeToolCatalogSource() {
-      @Override
-      public Lease acquireCurrent() {
-        return acquire(TestRuntimeToolCatalogSource.EPOCH);
-      }
-
-      @Override
-      public Lease acquire(long catalogEpoch) {
-        return TestRuntimeToolCatalogSource.of(harnessCatalog, mcpCatalog).acquire(catalogEpoch);
-      }
-    };
+    return () -> TestRuntimeToolCatalogSource.of(harnessCatalog, mcpCatalog).acquire();
   }
 
   /**
-   * Platform 测试宿主的 Canvas 目录 source：单 epoch 冻结目录，测试 adapter 都是内置（pluginSource 为 null）。
+   * Platform 测试宿主的 Canvas 目录 source：按容器内 adapter 冻结固定目录，严格按完整定义绑定。
    *
-   * <p>生产 source 由 web 组合根提供；platform 不再是组合根后，测试上下文只求满足 canvas runtime 的构造依赖，因此这里只冻结固定 epoch 并严格按
-   * epoch/完整定义绑定，不做插件来源推导。
+   * <p>生产 source 由 web 组合根提供；测试上下文只求满足 canvas runtime 的构造依赖。
    */
   @Bean
   public CanvasFunctionCatalogSource canvasFunctionCatalogSource(
       ObjectProvider<CanvasFunctionAdapter> adapters) {
-    return new SingleEpochCanvasFunctionCatalogSource(
-        CanvasFunctionCatalog.from(adapters.orderedStream().toList()));
-  }
-
-  /** 测试替身：只暴露一个固定 epoch，bind 冻结内置来源，require 严格校验 epoch 与完整定义。 */
-  private static final class SingleEpochCanvasFunctionCatalogSource
-      implements CanvasFunctionCatalogSource {
-
-    private static final long EPOCH = 1L;
-
-    private final CanvasFunctionCatalog catalog;
-
-    private SingleEpochCanvasFunctionCatalogSource(CanvasFunctionCatalog catalog) {
-      this.catalog = catalog;
-    }
-
-    @Override
-    public Lease acquireCurrent() {
-      return acquire(EPOCH);
-    }
-
-    @Override
-    public Lease acquire(long catalogEpoch) {
-      if (catalogEpoch != EPOCH) {
-        throw new IllegalArgumentException("catalog epoch is not available: " + catalogEpoch);
-      }
-      return new Lease() {
-        @Override
-        public long epoch() {
-          return EPOCH;
-        }
-
-        @Override
-        public CanvasFunctionCatalog catalog() {
-          return catalog;
-        }
-
-        @Override
-        public CanvasFunctionBinding bind(String functionName) {
-          return new CanvasFunctionBinding(EPOCH, catalog.require(functionName).function(), null);
-        }
-
-        @Override
-        public CanvasFunctionCatalog.RegisteredFunction require(CanvasFunctionBinding binding) {
-          if (binding.catalogEpoch() != EPOCH) {
-            throw new IllegalArgumentException("binding epoch does not match the acquired catalog");
+    CanvasFunctionCatalog catalog = CanvasFunctionCatalog.from(adapters.orderedStream().toList());
+    return () ->
+        new CanvasFunctionCatalogSource.Lease() {
+          @Override
+          public CanvasFunctionCatalog catalog() {
+            return catalog;
           }
-          CanvasFunctionCatalog.RegisteredFunction registered =
-              catalog.require(binding.definition().name());
-          if (!registered.function().equals(binding.definition())
-              || binding.pluginSource() != null) {
-            throw new IllegalArgumentException("binding does not match the acquired catalog");
-          }
-          return registered;
-        }
 
-        @Override
-        public void close() {}
-      };
-    }
+          @Override
+          public CanvasFunctionBinding bind(String functionName) {
+            return new CanvasFunctionBinding(catalog.require(functionName).function());
+          }
+
+          @Override
+          public CanvasFunctionCatalog.RegisteredFunction require(CanvasFunctionBinding binding) {
+            CanvasFunctionCatalog.RegisteredFunction registered =
+                catalog
+                    .find(binding.definition().name())
+                    .filter(found -> found.function().equals(binding.definition()))
+                    .orElseThrow(
+                        () -> new IllegalStateException("binding does not match the catalog"));
+            return registered;
+          }
+
+          @Override
+          public void close() {}
+        };
   }
 
   /**

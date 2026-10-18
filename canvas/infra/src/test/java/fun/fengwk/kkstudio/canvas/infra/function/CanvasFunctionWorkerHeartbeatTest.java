@@ -309,7 +309,7 @@ class CanvasFunctionWorkerHeartbeatTest {
       when(adapter.enabled()).thenReturn(true);
       when(adapter.unavailableReason()).thenReturn(null);
       catalogSource =
-          new FixedCanvasFunctionCatalogSource(1L, CanvasFunctionCatalog.from(List.of(adapter)));
+          new FixedCanvasFunctionCatalogSource(CanvasFunctionCatalog.from(List.of(adapter)));
 
       CanvasFunctionRun run =
           new CanvasFunctionRun(
@@ -328,7 +328,7 @@ class CanvasFunctionWorkerHeartbeatTest {
       claim = new ClaimedRun(run);
       when(runRepository.findByNodeId(run.nodeId())).thenReturn(Optional.of(run));
 
-      CanvasFunctionBinding binding = new CanvasFunctionBinding(1L, definition, null);
+      CanvasFunctionBinding binding = new CanvasFunctionBinding(definition);
       frozen =
           new CanvasFunctionFrozenRun(
               UUID.randomUUID(),

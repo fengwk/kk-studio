@@ -11,7 +11,6 @@ import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfi
 import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.provider.configuration.AgentProviderConfigurationCodec;
 import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
-import fun.fengwk.kkstudio.platform.catalog.skill.SkillTokenCipher;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRow;
@@ -31,7 +30,7 @@ import java.util.Set;
  * 把一次快照按引用选择导出为纯结构 YAML 文档。
  *
  * <p>只导出可编辑业务字段：不含 UUID、时间戳、乐观锁版本、Provider generation、连接/发现状态等运行态事实；凭据、registrationToken 与 MCP
- * headers 按原值导出，{@code ${VAR}} 不解析。插件只导出安装身份与普通值文本，其秘密与认证/代理解密事实一律不进入文件。
+ * headers 按原值导出，{@code ${VAR}} 不解析。插件只导出安装身份与普通值文本，其秘密一律不进入文件。
  */
 @AllArgsConstructor
 @Component
@@ -42,7 +41,6 @@ public final class ConfigSyncExporter {
   private final AgentDefinitionConfigCodec agentConfigCodec;
   private final SystemSettingsCodec systemSettingsCodec;
   private final ConfigSyncYaml yaml;
-  private final SkillTokenCipher tokenCipher;
 
   /** 按已补齐闭包的引用集合构建 YAML 文本。 */
   public String export(ConfigSyncSnapshot snapshot, List<ConfigSyncRef> refs) {
@@ -118,7 +116,7 @@ public final class ConfigSyncExporter {
   /**
    * 插件条目只带安装身份与普通值文本。
    *
-   * <p>秘密、受保护 instanceId、认证历史/代际/状态、代码与能力指纹、任务与 catalog 历史都不属于普通值，绝不进入文件。
+   * <p>秘密、受保护 instanceId 与凭据状态都不属于普通值，绝不进入文件。
    */
   private Map<String, Object> exportPlugin(PluginConfigurationRow plugin) {
     Map<String, Object> map = new LinkedHashMap<>();
@@ -174,8 +172,8 @@ public final class ConfigSyncExporter {
     map.put("branch", pkg.getBranch());
     map.put("currentCommit", pkg.getCurrentCommit());
     // 与 provider credential、registrationToken 一致：按既有“凭据原值导出”策略，令牌不隐式遗失。
-    if (pkg.getEncryptedToken() != null) {
-      map.put("token", tokenCipher.decrypt(pkg.getPackageName(), pkg.getEncryptedToken()));
+    if (pkg.getToken() != null) {
+      map.put("token", pkg.getToken());
     }
     return map;
   }

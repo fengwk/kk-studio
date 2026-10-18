@@ -557,7 +557,6 @@ final class HarnessRuntimeTestSupport {
   static ModelRequestSpec askUserModelRequest() {
     ProviderRequest provider = providerRequest();
     return new ModelRequestSpec(
-        1L,
         ProviderType.OPENAI,
         new UUID(0L, 1L),
         provider.model(),
@@ -586,7 +585,6 @@ final class HarnessRuntimeTestSupport {
             Set.of("questions"),
             false);
     return new ToolBinding(
-        1L,
         new AgentToolDefinition(
             new ToolDescriptor(
                 "ask_user",
@@ -598,7 +596,6 @@ final class HarnessRuntimeTestSupport {
             ToolVisibility.SELECTABLE),
         new ContributorBinding("builtin", "ask-user", List.of()),
         EnvironmentSupport.NONE,
-        null,
         null,
         null);
   }
@@ -1165,16 +1162,13 @@ final class HarnessRuntimeTestSupport {
     for (String name : toolNames) {
       bindings.add(
           new ToolBinding(
-              1L,
               toolDefinition(name),
               new ContributorBinding("core", name, List.of()),
               EnvironmentSupport.NONE,
               null,
-              null,
               null));
     }
     return new ModelRequestSpec(
-        1L,
         ProviderType.OPENAI,
         new UUID(0L, 1L),
         modelDescriptor(),
@@ -1232,7 +1226,6 @@ final class HarnessRuntimeTestSupport {
   static ModelRequestSpec modelRequest() {
     ProviderRequest provider = providerRequest();
     return new ModelRequestSpec(
-        1L,
         ProviderType.OPENAI,
         new UUID(0L, 1L),
         provider.model(),
@@ -1299,11 +1292,9 @@ final class HarnessRuntimeTestSupport {
 
   private static ToolBinding hostBinding() {
     return new ToolBinding(
-        1L,
         toolDefinition("bash"),
         new ContributorBinding("core", "bash", List.of()),
         EnvironmentSupport.NONE,
-        null,
         null,
         null);
   }

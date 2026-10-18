@@ -160,7 +160,6 @@ export function PluginConfigModal({
     }
 
     const payload: PluginConfigurationUpdateRequestDTO = {
-      expectedEpoch: plugin.desiredEpoch,
       expectedRevision: plugin.configuration.revision!,
       valuesJson,
       secretPatch: Object.keys(secretPatch).length > 0 ? secretPatch : undefined,

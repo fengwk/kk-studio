@@ -81,7 +81,6 @@ export function PluginsTab() {
         // 结果必须与本次请求的安装身份和坐标完全一致，跨 ID/跨坐标结果一律拒绝。
         const matches =
           result.pluginId === plugin.pluginId
-          && result.appliedEpoch === expected.expectedEpoch
           && result.appliedRevision === expected.expectedRevision
         setConnectionCheck({
           pluginId: plugin.pluginId,

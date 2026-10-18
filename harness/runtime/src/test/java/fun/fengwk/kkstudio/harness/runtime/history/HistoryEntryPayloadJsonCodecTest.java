@@ -22,7 +22,6 @@ import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInputReceipt;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolPluginSource;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
@@ -254,20 +253,11 @@ class HistoryEntryPayloadJsonCodecTest {
     assertTrue(CODEC.encode(withoutReceipt).contains("\"inputReceipt\":null"));
   }
 
-  /** 测试意图：真实 ToolResult 必须能携带完整的冻结 ToolBinding（含 pluginSource）完整往返，并作为 metadata 严格编码。 */
+  /** 测试意图：真实 ToolResult 必须能携带完整的冻结 ToolBinding 完整往返，并作为 metadata 严格编码。 */
   @Test
-  void roundTripsToolResultWithDurableBindingAndPluginSource() {
-    ToolPluginSource pluginSource =
-        new ToolPluginSource(
-            "my-plugin",
-            "1.0.0",
-            1L,
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-            "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
-            UUID.fromString("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"));
-    ToolBinding bindingWithPlugin =
+  void roundTripsToolResultWithDurableBinding() {
+    ToolBinding binding =
         new ToolBinding(
-            1L,
             new AgentToolDefinition(
                 new ToolDescriptor(
                     "custom_tool",
@@ -280,8 +270,7 @@ class HistoryEntryPayloadJsonCodecTest {
             new ContributorBinding("core", "custom-tool", List.of()),
             EnvironmentSupport.NONE,
             null,
-            null,
-            pluginSource);
+            null);
 
     ToolResultMetadata metadata =
         new ToolResultMetadata(
@@ -293,7 +282,7 @@ class HistoryEntryPayloadJsonCodecTest {
             false,
             null,
             null,
-            bindingWithPlugin);
+            binding);
 
     MessagePayload payload =
         new MessagePayload(
@@ -311,13 +300,11 @@ class HistoryEntryPayloadJsonCodecTest {
             metadata);
 
     String encoded = CODEC.encode(payload);
-    assertTrue(encoded.contains("\"binding\":{\"catalogEpoch\":1"));
-    assertTrue(encoded.contains("\"pluginSource\":{\"pluginId\":\"my-plugin\""));
+    assertTrue(encoded.contains("\"binding\":{\"definition\":"));
 
     MessagePayload decoded = (MessagePayload) CODEC.decode(EntryType.MESSAGE, encoded);
     assertEquals(payload, decoded);
-    assertEquals(bindingWithPlugin, decoded.toolResultMetadata().binding());
-    assertEquals(pluginSource, decoded.toolResultMetadata().binding().pluginSource());
+    assertEquals(binding, decoded.toolResultMetadata().binding());
   }
 
   /** 意图：decodeDurationMillis 的严格边界——非负整数与显式 null 合法，负值、非整数、非数字类型与未知字段一律拒绝。 */
@@ -942,11 +929,11 @@ class HistoryEntryPayloadJsonCodecTest {
 
     // synthetic 结果携带非空 binding 被拒绝
     String validBindingJson =
-        "{\"catalogEpoch\":1,\"definition\":{\"descriptor\":{\"name\":\"read\",\"description\":\"read\","
+        "{\"definition\":{\"descriptor\":{\"name\":\"read\",\"description\":\"read\","
             + "\"rendererKey\":\"read\",\"sideEffect\":\"READ_ONLY\",\"defaultTimeoutMillis\":30000,"
             + "\"inputSchema\":{\"type\":\"object\",\"description\":\"arguments\",\"properties\":{},\"required\":[],\"additionalProperties\":false}},"
             + "\"visibility\":\"SELECTABLE\"},\"contributor\":{\"contributorId\":\"core\",\"localName\":\"read\",\"stateAccesses\":[]},"
-            + "\"environmentSupport\":\"NONE\",\"environmentId\":null,\"environmentName\":null,\"pluginSource\":null}";
+            + "\"environmentSupport\":\"NONE\",\"environmentId\":null,\"environmentName\":null}";
     assertThrows(
         IllegalArgumentException.class,
         () ->

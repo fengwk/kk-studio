@@ -304,13 +304,11 @@ class ToolExecutionGatewayStartTest {
         new ToolInvocationRequest(
             new ToolCall("call-1", "no_such_daemon_tool", "{}"),
             new ToolBinding(
-                1L,
                 unknownDefinition,
                 new ContributorBinding("test", "missing", List.of()),
                 EnvironmentSupport.REQUIRED,
                 ToolGatewayTestSupport.ENV_A,
-                "test-env",
-                null));
+                "test-env"));
     ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(),
@@ -348,13 +346,11 @@ class ToolExecutionGatewayStartTest {
         new ToolInvocationRequest(
             new ToolCall("call-1", "bash", "{}"),
             new ToolBinding(
-                1L,
                 driftedDefinition,
                 contributor,
                 EnvironmentSupport.REQUIRED,
                 ToolGatewayTestSupport.ENV_A,
-                "test-env",
-                null));
+                "test-env"));
     ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(),
@@ -423,11 +419,9 @@ class ToolExecutionGatewayStartTest {
 
     ToolBinding mismatchedContributorBinding =
         new ToolBinding(
-            1L,
             new AgentToolDefinition(DESCRIPTOR, ToolVisibility.SELECTABLE),
             new ContributorBinding("wrong-contributor", "host-tool", List.of()),
             EnvironmentSupport.NONE,
-            null,
             null,
             null);
     ToolGateway.StartResult result =
@@ -438,7 +432,7 @@ class ToolExecutionGatewayStartTest {
             new ToolGatewayTestSupport.RecordingListener());
     ToolGateway.Rejected rejected = assertInstanceOf(ToolGateway.Rejected.class, result);
     assertEquals("TOOL_DEFINITION_MISMATCH", rejected.error().kind());
-    assertTrue(rejected.error().message().contains("Frozen contributor binding"));
+    assertTrue(rejected.error().message().contains("changed after this call was planned"));
   }
 
   @Test
@@ -454,13 +448,11 @@ class ToolExecutionGatewayStartTest {
         ToolGatewayTestSupport.defaultCatalog().findTool("bash").orElseThrow();
     ToolBinding mismatchedBinding =
         new ToolBinding(
-            1L,
             bashContribution.definition(),
             new ContributorBinding("wrong-contributor", "environment.bash", List.of()),
             EnvironmentSupport.REQUIRED,
             ToolGatewayTestSupport.ENV_A,
-            "test-env",
-            null);
+            "test-env");
     ToolGateway.StartResult result =
         gateway.start(
             ToolGatewayTestSupport.execution(
@@ -471,7 +463,7 @@ class ToolExecutionGatewayStartTest {
             new ToolGatewayTestSupport.RecordingListener());
     ToolGateway.Rejected rejected = assertInstanceOf(ToolGateway.Rejected.class, result);
     assertEquals("TOOL_DEFINITION_MISMATCH", rejected.error().kind());
-    assertTrue(rejected.error().message().contains("Frozen contributor binding"));
+    assertTrue(rejected.error().message().contains("changed after this call was planned"));
   }
 
   /** 未选择 Environment 的 branch：start 必须在提交执行前以稳定 kind 拒绝，且不触碰 transport。 */

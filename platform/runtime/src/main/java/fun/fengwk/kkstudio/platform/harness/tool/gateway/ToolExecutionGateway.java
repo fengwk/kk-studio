@@ -79,8 +79,8 @@ import java.util.function.Supplier;
  * <p>{@link #preflight} 只校验冻结绑定与当前目录是否一致，拒绝未选择 Environment 的环境工具，然后执行权限判定。{@link #start}
  * 获取并发租约，装配分支视图与可选环境绑定，再提交异步执行。
  *
- * <p>{@link #preflight} 与 {@link #start} 都按 {@code binding.catalogEpoch()} 取得该 epoch
- * 的目录租用并严格取回冻结贡献：epoch、 定义、贡献身份、requirements 与插件来源都必须一致，绝不按当前同名工具重放。
+ * <p>{@link #preflight} 与 {@link #start} 都在当前目录租用中严格取回冻结贡献：工具已移除（例如插件被关闭）或定义、贡献身份、 requirements
+ * 变化时以确定性错误告知模型，绝不按新定义执行旧参数。
  *
  * <p>工具在句柄 {@link ToolGateway.Handle#activate()} 前不会开始执行。回调桥以有界 FIFO
  * 串行派发信号，并保证单次终态；取消、拒绝、启动失败或终态都会释放并发租约。目录租用则贯穿校验与执行，只有在终态/取消决议完成且该调用的 {@link
@@ -112,6 +112,10 @@ public final class ToolExecutionGateway implements ToolGateway {
           "Tool permission was denied",
           ExecutionFact.NOT_EXECUTED,
           "Request approval or adjust the tool permission policy");
+
+  /** 工具已不可用时的下一步：不要重试，由模型改用其它方式或询问用户。 */
+  private static final String TOOL_UNAVAILABLE_NEXT_ACTION =
+      "Continue without this tool or ask the user";
 
   /** 冻结定义与当前 catalog 不一致时的确定性下一步：下一轮按当前目录重新冻结工具定义。 */
   private static final String DEFINITION_MISMATCH_NEXT_ACTION =
@@ -171,7 +175,7 @@ public final class ToolExecutionGateway implements ToolGateway {
   private record ResolvedContribution(ToolContribution contribution, ToolInvocationError error) {}
 
   /**
-   * 严格从本次租用取回冻结贡献：epoch、完整定义、贡献身份、requirements 与插件来源都必须一致。
+   * 严格从本次租用取回冻结贡献：完整定义、贡献身份与 requirements 都必须一致。
    *
    * <p>任何不一致都映射为确定性拒绝，绝不按当前同名工具重放，也绝不因此产生任何外部副作用。
    */
@@ -180,18 +184,25 @@ public final class ToolExecutionGateway implements ToolGateway {
     try {
       return new ResolvedContribution(lease.require(binding), null);
     } catch (ToolBindingMismatchException mismatch) {
-      String kind =
+      String toolName = binding.descriptor().name();
+      ToolInvocationError error =
           mismatch.reason() == ToolBindingMismatchException.Reason.NOT_FOUND
-              ? TOOL_NOT_FOUND_KIND
-              : TOOL_DEFINITION_MISMATCH_KIND;
-      return new ResolvedContribution(
-          null,
-          new ToolInvocationError(
-              kind,
-              ToolErrorGuidance.message(
-                  mismatch.getMessage(),
-                  ExecutionFact.NOT_EXECUTED,
-                  DEFINITION_MISMATCH_NEXT_ACTION)));
+              ? new ToolInvocationError(
+                  TOOL_NOT_FOUND_KIND,
+                  ToolErrorGuidance.message(
+                      "Tool "
+                          + toolName
+                          + " is no longer available; its plugin may have been"
+                          + " disabled or removed",
+                      ExecutionFact.NOT_EXECUTED,
+                      TOOL_UNAVAILABLE_NEXT_ACTION))
+              : new ToolInvocationError(
+                  TOOL_DEFINITION_MISMATCH_KIND,
+                  ToolErrorGuidance.message(
+                      "Tool " + toolName + " changed after this call was planned",
+                      ExecutionFact.NOT_EXECUTED,
+                      DEFINITION_MISMATCH_NEXT_ACTION));
+      return new ResolvedContribution(null, error);
     }
   }
 
@@ -220,9 +231,8 @@ public final class ToolExecutionGateway implements ToolGateway {
   @Override
   public PreflightResult preflight(ToolInvocationRequest request) {
     Objects.requireNonNull(request, "request");
-    // 校验全程持有 binding 冻结 epoch 的目录租用：工具定义、权限身份与 state access 都来自同一冻结目录。
-    try (RuntimeToolCatalogSource.Lease lease =
-        toolCatalogSource.acquire(request.binding().catalogEpoch())) {
+    // 校验全程持有一次目录租用：工具定义、权限身份与 state access 都来自同一份快照。
+    try (RuntimeToolCatalogSource.Lease lease = toolCatalogSource.acquire()) {
       ResolvedContribution resolved = requireContribution(lease, request.binding());
       if (resolved.error() != null) {
         return new ToolGateway.Deny(resolved.error());
@@ -263,9 +273,7 @@ public final class ToolExecutionGateway implements ToolGateway {
     ToolResourceLease acquiredResources = null;
     try {
       // Start 成功的目录租用必须转移到执行生命周期：它钉住本次调用仍可能访问的 Plugin 实例，绝不在 start 返回时释放。
-      acquiredResources =
-          new ToolResourceLease(
-              toolCatalogSource.acquire(execution.request().binding().catalogEpoch()));
+      acquiredResources = new ToolResourceLease(toolCatalogSource.acquire());
       final ToolResourceLease resources = acquiredResources;
       ResolvedContribution resolved =
           requireContribution(resources.lease(), execution.request().binding());

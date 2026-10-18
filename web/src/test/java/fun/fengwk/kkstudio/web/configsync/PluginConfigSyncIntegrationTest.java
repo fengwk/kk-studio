@@ -35,9 +35,6 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionType;
 
 import javax.sql.DataSource;
 
-import java.sql.Connection;
-import java.sql.ResultSet;
-import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -47,12 +44,11 @@ import java.util.Set;
 /**
  * 普通插件配置作为 ConfigSync 第八类的真实 PostgreSQL 集成契约。
  *
- * <p>校验只在这里对真实数据库、真实 Spring 写事务与真实 HTTP 边界成立：portable 导出条目只含安装身份与普通值文本（不含秘密、代际、epoch 与
- * revision），插件与其它类别在同一次导入事务内写入，任一条目失败（第二个插件的陈旧修订、并发推进的目录 epoch）都完整回滚本次导入的全部事实，
- * 且普通导入绝不会为已安装插件创建凭据行。插件权威表的 FK 必须保持立即约束：坏行立刻失败，而不是被推迟到提交。
+ * <p>校验只在这里对真实数据库、真实 Spring 写事务与真实 HTTP 边界成立：portable 导出条目只含安装身份与普通值文本（不含秘密与修订），插件与其它类别在
+ * 同一次导入事务内写入，任一条目失败（第二个插件的陈旧修订、并发保存）都完整回滚本次导入的全部事实，且普通导入绝不会为已安装插件创建凭据行。
  *
- * <p>每个用例都推进真实插件目录 epoch，因此必须 {@link DirtiesContext} 逐方法重建 Context：共享支持基座按「Context 冻结快照」重建权威
- * catalog，只有在 Context 与库内目录同身份时成立，本类的写入会故意打破该身份。
+ * <p>每个用例都推进真实插件配置修订，因此必须 {@link DirtiesContext} 逐方法重建 Context：共享支持基座按 Context 当前快照写回插件配置，本类的写入会
+ * 故意让两者不一致。
  */
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_EACH_TEST_METHOD)
 class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
@@ -103,18 +99,16 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
         valuesJson,
         entries.get(0).get("valuesJson"),
         "the portable entry must carry the authoritative ordinary values verbatim");
-    assertFalse(
-        yamlText.contains("authGeneration"), "authentication generations never leave the host");
     assertFalse(yamlText.contains("credential"), "credentials never leave the host");
     assertFalse(yamlText.contains("secrets"), "secret projections never leave the host");
   }
 
-  /** 一次导入把插件与 settings 放进同一事务：导入后目录 epoch 恰好前进一次且不产生任何凭据。 */
+  /** 一次导入把插件与 settings 放进同一事务：导入后插件修订恰好前进一次且不产生任何凭据。 */
   @Test
   void importAppliesPluginsTogetherWithOtherKinds() throws Exception {
     Map<String, String> plugins = installedPluginValues();
     String pluginId = plugins.keySet().iterator().next();
-    long epochBefore = snapshotReader.read().pluginCatalogEpoch();
+    long revisionBefore = pluginRow(snapshotReader.read(), pluginId).revision();
 
     String yaml =
         mutateYaml(
@@ -130,12 +124,8 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     assertTrue(references(result.path("imported")).contains("settings/settings"));
 
     ConfigSyncSnapshot after = snapshotReader.read();
-    assertEquals(
-        epochBefore + 1,
-        after.pluginCatalogEpoch(),
-        "exactly one plugin write must advance the global catalog epoch once");
     PluginConfigurationRow row = pluginRow(after, pluginId);
-    assertEquals(after.pluginCatalogEpoch(), row.revision());
+    assertEquals(revisionBefore + 1, row.revision(), "exactly one plugin write");
     assertEquals(plugins.get(pluginId), row.valuesJson());
     assertNotEquals(
         "CONNECTED",
@@ -159,35 +149,33 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
 
     ConfigSyncSnapshot after = snapshotReader.read();
     assertEquals(
-        before.pluginCatalogEpoch(),
-        after.pluginCatalogEpoch(),
-        "the first plugin already committed in this transaction must be rolled back with the failing one");
-    assertEquals(pluginRow(before, first), pluginRow(after, first));
+        pluginRow(before, first),
+        pluginRow(after, first),
+        "the first plugin already written in this transaction must be rolled back with the failing one");
     assertFalse(
         providerNames(after).contains(ROLLBACK_PROVIDER),
         "an earlier provider write must be rolled back with the failing plugin");
   }
 
-  /** 导入事务外并发推进目录 epoch 时，插件的 epoch CAS 失败必须回滚本次导入已写入的 providers。 */
+  /** 导入事务外并发保存插件配置时，插件的修订 CAS 失败必须回滚本次导入已写入的 providers。 */
   @Test
-  void concurrentCatalogAdvanceRollsBackEveryKind() throws Exception {
+  void concurrentPluginSaveRollsBackEveryKind() throws Exception {
     String pluginId = installedPluginValues().keySet().iterator().next();
     ConfigSyncPlan plan = planFor(CAS_PROVIDER, List.of(pluginId));
     ConfigSyncSnapshot before = snapshotReader.read();
-    long epoch = before.pluginCatalogEpoch();
     PluginConfigurationRow row = pluginRow(before, pluginId);
 
-    // 并发写入：按计划期的 epoch/revision 保存一次普通配置，真实推进权威目录。
+    // 并发写入：按计划期的修订保存一次普通配置。
     pluginManagementService.updateConfiguration(
-        pluginId, epoch, row.revision(), row.valuesJson(), Map.of());
+        pluginId, row.revision(), row.valuesJson(), Map.of());
 
     assertThrows(AiVersionConflictException.class, () -> applier.apply(plan));
 
     ConfigSyncSnapshot after = snapshotReader.read();
-    assertEquals(epoch + 1, after.pluginCatalogEpoch());
+    assertEquals(row.revision() + 1, pluginRow(after, pluginId).revision());
     assertFalse(
         providerNames(after).contains(CAS_PROVIDER),
-        "the earlier provider write must be rolled back when the plugin epoch CAS fails");
+        "the earlier provider write must be rolled back when the plugin revision CAS fails");
   }
 
   /**
@@ -241,28 +229,6 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     assertEquals(before.getVersion(), after.getVersion());
     assertEquals(before.getConfigJson(), after.getConfigJson());
     assertEquals(before.getSystemPrompt(), after.getSystemPrompt());
-  }
-
-  /** 插件权威表的 FK 必须保持立即约束：任何坏行立刻失败，而不是被推迟到事务提交。 */
-  @Test
-  void pluginForeignKeysStayImmediate() throws Exception {
-    try (Connection connection = dataSource.getConnection();
-        Statement statement = connection.createStatement();
-        ResultSet rows =
-            statement.executeQuery(
-                "select c.conname, c.condeferrable, c.condeferred"
-                    + " from pg_constraint c join pg_class t on t.oid = c.conrelid"
-                    + " where c.contype = 'f' and t.relname like 'plugin%'")) {
-      boolean found = false;
-      while (rows.next()) {
-        found = true;
-        assertFalse(
-            rows.getBoolean("condeferrable"), rows.getString("conname") + " must stay immediate");
-        assertFalse(
-            rows.getBoolean("condeferred"), rows.getString("conname") + " must stay immediate");
-      }
-      assertTrue(found, "the plugin tables must declare at least one foreign key");
-    }
   }
 
   /** 以系统持有身份落一行 BUILTIN Agent：只用于证明内置身份满足引用却绝不进入 portable 范围。 */
@@ -355,7 +321,6 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
         plan.environments(),
         plan.agents(),
         plugins,
-        plan.pluginCatalogEpoch(),
         plan.settings(),
         plan.imported(),
         plan.skipped());

@@ -59,21 +59,19 @@ public class StudioPluginController {
   }
 
   /**
-   * 保存普通配置与秘密补丁：期望 epoch 与 revision 都不可省略，冲突返回 409。
+   * 保存普通配置与秘密补丁：期望 revision 不可省略，冲突返回 409。
    *
-   * <p>保存不是发布：本节点尚未应用本次保存时返回 {@code 202 Accepted}（响应体仍携带权威 desired 坐标与本节点 applied 视图），已应用时返回 {@code
-   * 200 OK}；两者都强制 {@code Cache-Control: no-store}。
+   * <p>本节点应用本次保存失败时返回 {@code 202 Accepted}（响应体携带 desired/applied revision 与应用错误），已应用时返回 {@code 200
+   * OK}；两者都强制 {@code Cache-Control: no-store}。
    */
   @PutMapping("/{pluginId}/configuration")
   public ResponseEntity<Result<PluginDTO>> updateConfiguration(
       @PathVariable("pluginId") String pluginId,
       @RequestBody PluginConfigurationUpdateRequestDTO request) {
-    long expectedEpoch = parseCoordinate(request.getExpectedEpoch(), "expectedEpoch");
     long expectedRevision = parseCoordinate(request.getExpectedRevision(), "expectedRevision");
     PluginDTO pluginDTO =
         pluginManagementService.updateConfiguration(
             pluginId,
-            expectedEpoch,
             expectedRevision,
             request.getValuesJson(),
             toSecretPatch(request.getSecretPatch()));
@@ -93,10 +91,9 @@ public class StudioPluginController {
   public ResponseEntity<Result<PluginConnectionCheckDTO>> checkConnection(
       @PathVariable("pluginId") String pluginId,
       @RequestBody PluginConnectionCheckRequestDTO request) {
-    long expectedEpoch = parseCoordinate(request.getExpectedEpoch(), "expectedEpoch");
     long expectedRevision = parseCoordinate(request.getExpectedRevision(), "expectedRevision");
     PluginConnectionCheckDTO checkDTO =
-        pluginManagementService.checkConnection(pluginId, expectedEpoch, expectedRevision);
+        pluginManagementService.checkConnection(pluginId, expectedRevision);
     return ResponseEntity.ok()
         .header(HttpHeaders.CACHE_CONTROL, NO_STORE)
         .body(Results.ok(checkDTO));

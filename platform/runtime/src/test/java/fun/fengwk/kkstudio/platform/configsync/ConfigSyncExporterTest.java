@@ -17,7 +17,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
-import fun.fengwk.kkstudio.platform.catalog.skill.SkillTokenCipher;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncKind;
@@ -31,15 +30,13 @@ import java.util.Set;
 class ConfigSyncExporterTest {
 
   private final ConfigSyncYaml yaml = new ConfigSyncYaml();
-  private final SkillTokenCipher tokenCipher = ConfigSyncFixtures.tokenCipher();
   private final ConfigSyncExporter exporter =
       new ConfigSyncExporter(
           ConfigSyncFixtures.PROVIDER_CONFIG_CODEC,
           ConfigSyncFixtures.MODEL_CONFIG_PARSER,
           ConfigSyncFixtures.AGENT_CONFIG_CODEC,
           new SystemSettingsCodec(),
-          yaml,
-          tokenCipher);
+          yaml);
 
   private ConfigSyncSnapshot buildSnapshot() {
     return snapshot(
@@ -130,7 +127,7 @@ class ConfigSyncExporterTest {
   @Test
   void exportIncludesSkillAccessTokenVerbatim() {
     SkillPackage pkg = skillPackage("pkg", "s");
-    pkg.setEncryptedToken(tokenCipher.encrypt("pkg", "pkg-token"));
+    pkg.setToken("pkg-token");
     ConfigSyncSnapshot snapshot =
         snapshot(List.of(), List.of(), List.of(), List.of(pkg), List.of(), List.of(), List.of());
 
@@ -193,7 +190,6 @@ class ConfigSyncExporterTest {
             List.of(),
             List.of(),
             List.of(),
-            9L,
             List.of(ConfigSyncFixtures.pluginRow("acme.plugin", 7L, values)));
 
     String yamlText =
@@ -224,7 +220,6 @@ class ConfigSyncExporterTest {
             List.of(),
             List.of(),
             List.of(),
-            4L,
             List.of(
                 ConfigSyncFixtures.pluginRow("acme.plugin", 2L, values),
                 ConfigSyncFixtures.pluginRow("other.plugin", 2L, "{}")));

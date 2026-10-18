@@ -34,7 +34,6 @@ import fun.fengwk.kkstudio.plugin.minimaxmavis.MiniMaxMavisResourceAccess;
 
 import java.time.Duration;
 import java.time.Instant;
-import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -50,12 +49,6 @@ import java.util.function.BooleanSupplier;
  * 伪装成取消。取消通过中断正在阻塞的传输发出，与 MCP 工具「取消无需完成回调」的语义一致。
  */
 class MiniMaxMavisToolCancellationTest {
-
-  /** 本测试使用的固定认证代际：仓库/CAS 断言只要求同代际内一致。 */
-  private static final UUID AUTH_GENERATION =
-      UUID.fromString("00000000-0000-0000-0000-0000000000b1");
-
-  private static final String AUTH_CONTEXT = "a1".repeat(32);
 
   private static final String TOKEN = "mavis-cancel-test-token-98765";
   private static final String CLIENT_UUID = "11111111-2222-3333-4444-555555555555";
@@ -181,12 +174,9 @@ class MiniMaxMavisToolCancellationTest {
   private static PluginCredentialSnapshot snapshot() {
     return new PluginCredentialSnapshot(
         MiniMaxMavisPlugin.PLUGIN_ID,
-        AUTH_GENERATION,
-        AUTH_CONTEXT,
         MavisRegion.CN.id().toUpperCase(),
         Instant.now().plusSeconds(3600),
         0L,
-        new byte[0],
         new MiniMaxMavisCredentialPayload(TOKEN, CLIENT_UUID, Instant.now()).toJson());
   }
 

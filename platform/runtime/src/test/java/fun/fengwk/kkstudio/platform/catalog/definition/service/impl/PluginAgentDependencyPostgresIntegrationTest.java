@@ -11,9 +11,7 @@ import fun.fengwk.convention4j.api.page.PageQuery;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 import org.postgresql.Driver;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.SimpleDriverDataSource;
@@ -48,32 +46,17 @@ import fun.fengwk.kkstudio.platform.plugin.PluginDescriptor;
 import fun.fengwk.kkstudio.platform.plugin.PluginInstance;
 import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
 import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
-import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogBootstrap;
-import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRecord;
-import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogSnapshot;
 import fun.fengwk.kkstudio.platform.plugin.credential.DatabasePluginCredentialStore;
-import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialCodec;
-import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialKeyLoader;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginCredentialRepository;
-import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.PostgresqlPluginCatalogChangeNotifier;
-import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.PostgresqlPluginConfigurationRepository;
-import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.PostgresqlPluginCredentialRepository;
-import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.store.PluginConfigurationJdbcStore;
-import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.store.PluginCredentialJdbcStore;
 import fun.fengwk.kkstudio.platform.plugin.service.PluginAgentDependencies;
-import fun.fengwk.kkstudio.platform.plugin.service.PluginConfigurationCommitService;
-import fun.fengwk.kkstudio.platform.plugin.service.PluginConfigurationHistory;
+import fun.fengwk.kkstudio.platform.plugin.service.PluginConfigurationService;
 import fun.fengwk.kkstudio.platform.plugin.service.PluginContextFactory;
 import fun.fengwk.kkstudio.platform.plugin.testing.TestPluginFixtures;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionType;
 
 import javax.sql.DataSource;
 
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.attribute.PosixFilePermissions;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.time.Clock;
@@ -96,8 +79,8 @@ import java.util.concurrent.atomic.AtomicInteger;
  * <p>只在这里对真实库、真实事务管理器与真实提交服务成立：
  *
  * <ol>
- *   <li>常规保存先在最终写事务内按声明取 Agent 行锁并核验存在，再做 epoch CAS：缺 Agent 时 epoch、历史、凭据与通知一概不变。
- *   <li>Agent 删除在自己行锁之后、真实删除之前读权威 desired manifest 与匹配历史：被插件的普通配置引用即拒绝。
+ *   <li>常规保存先在写事务内按声明取 Agent 行锁并核验存在，再做 revision CAS：缺 Agent 时修订、凭据与通知一概不变。
+ *   <li>Agent 删除在自己行锁之后、真实删除之前读插件当前配置：被插件的普通配置引用即拒绝。
  *   <li>并发 save-vs-delete 的两个锁顺序都不能提交悬空引用：谁先取得 Agent 行锁谁成功，另一方确定性失败。
  * </ol>
  *
@@ -117,17 +100,14 @@ class PluginAgentDependencyPostgresIntegrationTest {
   private static JdbcClient jdbcClient;
 
   private final Clock clock = Clock.fixed(Instant.parse("2026-10-01T12:00:00Z"), ZoneOffset.UTC);
-  private final PluginCredentialCodec codec = new PluginCredentialCodec();
   private final AtomicInteger dispatcherWakes = new AtomicInteger();
   private final AtomicInteger catalogWakes = new AtomicInteger();
-
-  @TempDir Path tempDir;
 
   private StudioPluginRegistry registry;
   private PlatformTransactionManager transactionManager;
   private PluginConfigurationRepository configurationRepository;
   private PluginCredentialRepository credentialRepository;
-  private PluginConfigurationCommitService commitService;
+  private PluginConfigurationService configurationService;
   private AgentDefinitionRepository definitionRepository;
   private PluginAgentDependencies pluginAgentDependencies;
   private AgentDefinitionServiceImpl definitionService;
@@ -157,40 +137,14 @@ class PluginAgentDependencyPostgresIntegrationTest {
     catalogWakes.set(0);
     registry = new StudioPluginRegistry(List.of(new DeclaringPlugin(DECLARING_PLUGIN_ID)));
     transactionManager = new DataSourceTransactionManager(dataSource);
-    configurationRepository =
-        new PostgresqlPluginConfigurationRepository(
-            new PluginConfigurationJdbcStore(jdbcClient),
-            new PostgresqlPluginCatalogChangeNotifier(new JdbcTemplate(dataSource)));
-    credentialRepository =
-        new PostgresqlPluginCredentialRepository(new PluginCredentialJdbcStore(jdbcClient));
+    configurationRepository = new PluginConfigurationRepository(jdbcClient);
+    credentialRepository = new PluginCredentialRepository(jdbcClient);
     definitionRepository =
         new PostgresqlAgentDefinitionRepository(new AgentDefinitionJdbcStore(jdbcClient));
     pluginAgentDependencies =
         new PluginAgentDependencies(registry, configurationRepository, definitionRepository);
 
-    Path keyFile = tempDir.resolve("plugin-agent-dependencies.key");
-    Files.write(keyFile, "12345678901234567890123456789012".getBytes(StandardCharsets.UTF_8));
-    Files.setPosixFilePermissions(keyFile, PosixFilePermissions.fromString("rw-------"));
-    PluginCredentialKeyLoader keyLoader =
-        new PluginCredentialKeyLoader(keyFile.toAbsolutePath().toString());
-    DatabasePluginCredentialStore credentialStore =
-        new DatabasePluginCredentialStore(
-            credentialRepository, configurationRepository, codec, keyLoader, clock);
-    commitService =
-        new PluginConfigurationCommitService(
-            registry,
-            configurationRepository,
-            credentialRepository,
-            codec,
-            keyLoader,
-            new PluginContextFactory(credentialStore, () -> null, () -> null, () -> null),
-            List::of,
-            List::of,
-            transactionManager,
-            clock,
-            dispatcherWakes::incrementAndGet,
-            catalogWakes::incrementAndGet,
-            pluginAgentDependencies);
+    configurationService = configurationServiceWith(pluginAgentDependencies);
 
     AgentDefinitionReferenceResolver resolver =
         new AgentDefinitionReferenceResolver(
@@ -211,25 +165,22 @@ class PluginAgentDependencyPostgresIntegrationTest {
             new AgentDefinitionConfigCodec(JsonMapper.builder().build()),
             pluginAgentDependencies);
 
-    seedCatalog();
+    configurationRepository.insertIfMissing(DECLARING_PLUGIN_ID, VALUES_NO_DECLARATION);
   }
 
-  /** 缺 Agent 的保存：固定去敏 400，epoch/历史/凭据与 afterCommit 通知一概不变。 */
+  /** 缺 Agent 的保存：固定去敏 400，修订、凭据与 afterCommit 通知一概不变。 */
   @Test
   void configureRejectsAMissingDeclaredAgentWithoutAnyWrite() {
-    long epoch = catalog().epoch();
-
     AiValidationException error =
         assertThrows(
             AiValidationException.class,
             () ->
-                commitService.configure(
-                    DECLARING_PLUGIN_ID, epoch, 1L, VALUES_DECLARING_GHOST, Map.of()));
+                configurationService.configure(
+                    DECLARING_PLUGIN_ID, 1L, VALUES_DECLARING_GHOST, Map.of()));
 
     assertEquals("plugins reference a missing agent", error.getMessage());
     assertTrue(error.getCause() == null, "the dependency failure must not carry a cause");
-    assertEquals(epoch, catalog().epoch(), "a rejected save must not advance the catalog epoch");
-    assertEquals(1L, configurationHistoryCount(), "a rejected save must not add history");
+    assertEquals(1L, currentRevision(), "a rejected save must not advance the revision");
     assertEquals(0L, credentialRowCount(), "a rejected save must not create a credential row");
     assertEquals(0, catalogWakes.get());
     assertEquals(0, dispatcherWakes.get());
@@ -240,46 +191,36 @@ class PluginAgentDependencyPostgresIntegrationTest {
   void configureAcceptsAnExistingDeclaredAgent() {
     seedAgentModel();
     assertTrue(definitionRepository.create(agentDefinition(DECLARED_AGENT)));
-    long epoch = catalog().epoch();
+    assertEquals(
+        2L, configurationService.configure(DECLARING_PLUGIN_ID, 1L, VALUES_DECLARING, Map.of()));
 
-    PluginCatalogRecord committed =
-        commitService.configure(DECLARING_PLUGIN_ID, epoch, 1L, VALUES_DECLARING, Map.of());
-
-    assertEquals(epoch + 1, committed.epoch());
     assertEquals(VALUES_DECLARING, currentValues());
     assertEquals(1, catalogWakes.get());
     assertEquals(0, dispatcherWakes.get());
   }
 
-  /** desired 声明引用了该 Agent 时拒绝删除：Agent 行与插件目录历史都不变。 */
+  /** 当前配置引用了该 Agent 时拒绝删除：Agent 行与插件配置都不变。 */
   @Test
   void deleteRejectsAnAgentReferencedByTheDesiredPluginConfiguration() {
     seedAgentModel();
     assertTrue(definitionRepository.create(agentDefinition(DECLARED_AGENT)));
-    long epoch = catalog().epoch();
-    commitService.configure(DECLARING_PLUGIN_ID, epoch, 1L, VALUES_DECLARING, Map.of());
-    long declaredEpoch = catalog().epoch();
-    long historyBefore = configurationHistoryCount();
+    configurationService.configure(DECLARING_PLUGIN_ID, 1L, VALUES_DECLARING, Map.of());
 
     AiInUseException error =
         assertThrows(AiInUseException.class, () -> deleteInTransaction(DECLARED_AGENT, 0L));
 
     assertTrue(error.getMessage().contains("referenced by plugin configuration"));
     assertNotNull(definitionRepository.getByName(DECLARED_AGENT), "the agent must survive");
-    assertEquals(declaredEpoch, catalog().epoch());
-    assertEquals(historyBefore, configurationHistoryCount());
+    assertEquals(2L, currentRevision());
   }
 
-  /** 停用/移除引用后允许删除：desired 声明为空即不再保护该 Agent。 */
+  /** 移除引用后允许删除：当前配置不再声明即不再保护该 Agent。 */
   @Test
   void deleteSucceedsAfterTheDeclaringConfigurationIsRemoved() {
     seedAgentModel();
     assertTrue(definitionRepository.create(agentDefinition(DECLARED_AGENT)));
-    long epoch = catalog().epoch();
-    commitService.configure(DECLARING_PLUGIN_ID, epoch, 1L, VALUES_DECLARING, Map.of());
-    long declaredEpoch = catalog().epoch();
-    commitService.configure(
-        DECLARING_PLUGIN_ID, declaredEpoch, 2L, VALUES_NO_DECLARATION, Map.of());
+    configurationService.configure(DECLARING_PLUGIN_ID, 1L, VALUES_DECLARING, Map.of());
+    configurationService.configure(DECLARING_PLUGIN_ID, 2L, VALUES_NO_DECLARATION, Map.of());
 
     deleteInTransaction(DECLARED_AGENT, 0L);
 
@@ -303,11 +244,11 @@ class PluginAgentDependencyPostgresIntegrationTest {
     ExecutorService executor = Executors.newFixedThreadPool(2);
     try {
       // 保存侧被闸门停在「已持有 Agent 行锁、尚未提交」的位置，删除才有确定的相反锁顺序。
-      Future<PluginCatalogRecord> save =
+      Future<Long> save =
           executor.submit(
               () ->
-                  commitServiceWith(gatedDependencies)
-                      .configure(DECLARING_PLUGIN_ID, 1L, 1L, VALUES_DECLARING, Map.of()));
+                  configurationServiceWith(gatedDependencies)
+                      .configure(DECLARING_PLUGIN_ID, 1L, VALUES_DECLARING, Map.of()));
       awaitLatch(saveLockHeld, "the save must reach the Agent row lock before the delete starts");
 
       Future<AiInUseException> delete =
@@ -324,8 +265,7 @@ class PluginAgentDependencyPostgresIntegrationTest {
       awaitUngrantedRowLock();
 
       releaseSave.countDown();
-      PluginCatalogRecord committed = save.get(30, TimeUnit.SECONDS);
-      assertNotNull(committed);
+      assertEquals(2L, save.get(30, TimeUnit.SECONDS));
       AiInUseException rejection = delete.get(30, TimeUnit.SECONDS);
       assertNotNull(rejection, "the delete must reject an agent the committed save references");
       assertTrue(rejection.getMessage().contains("referenced by plugin configuration"));
@@ -337,8 +277,7 @@ class PluginAgentDependencyPostgresIntegrationTest {
     assertNotNull(definitionRepository.getByName(DECLARED_AGENT), "the agent must survive");
     assertEquals(
         VALUES_DECLARING, currentValues(), "the committed reference must be the desired one");
-    assertEquals(
-        2L, configurationHistoryCount(), "the committed save must own exactly one revision");
+    assertEquals(2L, currentRevision(), "the committed save must own exactly one revision");
   }
 
   /** 并发方向二：删除先取得 Agent 行锁并在保存真的等待该锁后才提交，保存必须固定失败且零写。 */
@@ -370,7 +309,8 @@ class PluginAgentDependencyPostgresIntegrationTest {
           executor.submit(
               () -> {
                 try {
-                  commitService.configure(DECLARING_PLUGIN_ID, 1L, 1L, VALUES_DECLARING, Map.of());
+                  configurationService.configure(
+                      DECLARING_PLUGIN_ID, 1L, VALUES_DECLARING, Map.of());
                   return null;
                 } catch (AiValidationException error) {
                   return error;
@@ -391,12 +331,9 @@ class PluginAgentDependencyPostgresIntegrationTest {
     }
 
     assertEquals(null, definitionRepository.getByName(DECLARED_AGENT));
-    assertEquals(1L, catalog().epoch(), "a rejected save must leave the catalog epoch untouched");
-    assertEquals(1L, configurationHistoryCount(), "a rejected save must not add history");
+    assertEquals(1L, currentRevision(), "a rejected save must leave the revision untouched");
     assertEquals(
-        VALUES_NO_DECLARATION,
-        currentValues(),
-        "the desired values must stay the bootstrap default");
+        VALUES_NO_DECLARATION, currentValues(), "the values must stay the installed default");
     assertEquals(0L, credentialRowCount());
     assertEquals(0, catalogWakes.get());
     assertEquals(0, dispatcherWakes.get());
@@ -441,28 +378,22 @@ class PluginAgentDependencyPostgresIntegrationTest {
     }
   }
 
-  /** 与生产装配一致、只替换依赖服务的提交服务：其余依赖原样复用。 */
-  private PluginConfigurationCommitService commitServiceWith(PluginAgentDependencies dependencies) {
-    Path keyFile = tempDir.resolve("plugin-agent-dependencies.key");
-    PluginCredentialKeyLoader keyLoader =
-        new PluginCredentialKeyLoader(keyFile.toAbsolutePath().toString());
-    DatabasePluginCredentialStore credentialStore =
-        new DatabasePluginCredentialStore(
-            credentialRepository, configurationRepository, codec, keyLoader, clock);
-    return new PluginConfigurationCommitService(
+  /** 与生产装配一致、只替换依赖服务的写入口：其余依赖原样复用。 */
+  private PluginConfigurationService configurationServiceWith(
+      PluginAgentDependencies dependencies) {
+    return new PluginConfigurationService(
         registry,
         configurationRepository,
         credentialRepository,
-        codec,
-        keyLoader,
-        new PluginContextFactory(credentialStore, () -> null, () -> null, () -> null),
-        List::of,
-        List::of,
+        new PluginContextFactory(
+            new DatabasePluginCredentialStore(credentialRepository, clock),
+            () -> null,
+            () -> null,
+            () -> null),
+        dependencies,
         transactionManager,
-        clock,
-        dispatcherWakes::incrementAndGet,
         catalogWakes::incrementAndGet,
-        dependencies);
+        dispatcherWakes::incrementAndGet);
   }
 
   /** 与生产一致的事务边界：删除入口自身在真实事务内运行。 */
@@ -473,36 +404,6 @@ class PluginAgentDependencyPostgresIntegrationTest {
               definitionService.deleteAgent(name, String.valueOf(expectedVersion));
               return null;
             });
-  }
-
-  /** 以真实 Bootstrap 在 epoch 0 上初始化 epoch 1 的权威目录。 */
-  private void seedCatalog() {
-    Path keyFile = tempDir.resolve("plugin-agent-dependencies.key");
-    DatabasePluginCredentialStore credentialStore;
-    try {
-      if (!Files.exists(keyFile)) {
-        Files.write(keyFile, "12345678901234567890123456789012".getBytes(StandardCharsets.UTF_8));
-        Files.setPosixFilePermissions(keyFile, PosixFilePermissions.fromString("rw-------"));
-      }
-      credentialStore =
-          new DatabasePluginCredentialStore(
-              credentialRepository,
-              configurationRepository,
-              codec,
-              new PluginCredentialKeyLoader(keyFile.toAbsolutePath().toString()),
-              clock);
-    } catch (Exception error) {
-      throw new IllegalStateException(error);
-    }
-    PluginCatalogBootstrap bootstrap =
-        new PluginCatalogBootstrap(registry, configurationRepository, transactionManager);
-    try (PluginCatalogSnapshot ignored =
-        bootstrap.bootstrap(
-            new PluginContextFactory(credentialStore, () -> null, () -> null, () -> null)::create,
-            List.of(),
-            List.of())) {
-      // 初始化即已落库 epoch 1；快照本身不参与本测试的读写断言。
-    }
   }
 
   private void seedAgentModel() {
@@ -558,27 +459,12 @@ class PluginAgentDependencyPostgresIntegrationTest {
     throw new AssertionError("no transaction was waiting for the Agent row lock");
   }
 
-  private PluginCatalogRecord catalog() {
-    PluginCatalogRecord catalog = configurationRepository.readCatalog();
-    assertNotNull(catalog, "the plugin catalog must be initialized");
-    return catalog;
+  private long currentRevision() {
+    return configurationRepository.find(DECLARING_PLUGIN_ID).orElseThrow().revision();
   }
 
   private String currentValues() {
-    PluginCatalogRecord catalog = catalog();
-    return PluginConfigurationHistory.require(
-            configurationRepository,
-            DECLARING_PLUGIN_ID,
-            catalog.manifest().plugins().get(DECLARING_PLUGIN_ID))
-        .valuesJson();
-  }
-
-  private long configurationHistoryCount() {
-    return jdbcClient
-        .sql("select count(*) from plugin_configuration_revision where plugin_id = :id")
-        .param("id", DECLARING_PLUGIN_ID)
-        .query(Long.class)
-        .single();
+    return configurationRepository.find(DECLARING_PLUGIN_ID).orElseThrow().valuesJson();
   }
 
   private long credentialRowCount() {

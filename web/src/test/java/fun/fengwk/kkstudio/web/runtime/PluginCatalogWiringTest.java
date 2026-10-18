@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.web.runtime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
@@ -13,7 +14,6 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.transaction.PlatformTransactionManager;
 
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionAdapter;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
@@ -37,6 +37,7 @@ import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRuntime;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogSnapshot;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialStore;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRepository;
+import fun.fengwk.kkstudio.platform.plugin.service.PluginContextFactory;
 
 import java.net.ProxySelector;
 import java.util.List;
@@ -68,7 +69,7 @@ class PluginCatalogWiringTest {
       }
       context.refresh();
       try (PluginCatalogRuntime.Lease lease =
-          context.getBean(PluginCatalogRuntime.class).acquireCurrent()) {
+          context.getBean(PluginCatalogRuntime.class).acquire()) {
         HarnessCatalog catalog = lease.snapshot().harnessCatalog();
         assertEquals(2, catalog.descriptors().size());
         assertTrue(
@@ -85,7 +86,7 @@ class PluginCatalogWiringTest {
       registerHost(context);
       context.refresh();
       try (PluginCatalogRuntime.Lease lease =
-          context.getBean(PluginCatalogRuntime.class).acquireCurrent()) {
+          context.getBean(PluginCatalogRuntime.class).acquire()) {
         HarnessCatalog catalog = lease.snapshot().harnessCatalog();
         assertTrue(catalog.descriptors().isEmpty());
         assertTrue(catalog.tools().isEmpty());
@@ -132,11 +133,10 @@ class PluginCatalogWiringTest {
       assertTrue(context.getBeansOfType(PluginCatalogSnapshot.class).isEmpty());
       assertTrue(context.getBeansOfType(HarnessCatalog.class).isEmpty());
       assertTrue(context.getBeansOfType(CanvasFunctionCatalog.class).isEmpty());
-      assertEquals(new PluginCatalogRuntime.RuntimeState(1, 1, null), runtime.state());
+      assertNull(runtime.applicationError());
       assertTrue(refresher.isRunning(), "the refresher must be started with the context");
 
-      try (CanvasFunctionCatalogSource.Lease lease = source.acquireCurrent()) {
-        assertEquals(1L, lease.epoch());
+      try (CanvasFunctionCatalogSource.Lease lease = source.acquire()) {
         assertTrue(lease.catalog().list().isEmpty());
         context.close();
         assertEquals(0, plugin.closes.get(), "shutdown must not kill a leased instance");
@@ -145,10 +145,10 @@ class PluginCatalogWiringTest {
       assertEquals(1, plugin.closes.get(), "the last lease must release the instance");
 
       assertFalse(refresher.isRunning(), "closing the context must stop the refresher");
-      assertThrows(IllegalStateException.class, runtime::acquireCurrent);
+      assertThrows(IllegalStateException.class, runtime::acquire);
       assertThrows(
           IllegalStateException.class,
-          source::acquireCurrent,
+          source::acquire,
           "the production canvas source must be bound to the closed runtime, not to a static catalog");
     }
   }
@@ -168,12 +168,12 @@ class PluginCatalogWiringTest {
                     "systemProxySelector",
                     ProxySelector.class,
                     () -> HttpProxySelector.fixed(null, ""))
-                .withBean(PluginCredentialStore.class, () -> credentials)
                 .withBean(
-                    PluginConfigurationRepository.class, InMemoryPluginCatalogFakes::repository)
+                    PluginContextFactory.class,
+                    () -> new PluginContextFactory(credentials, () -> null, () -> null, () -> null))
                 .withBean(
-                    PlatformTransactionManager.class,
-                    InMemoryPluginCatalogFakes::transactionManager),
+                    PluginConfigurationRepository.class,
+                    () -> PluginConfigurationFakes.repository("minimax-mavis")),
             requests)
         .run(
             context -> {
@@ -182,9 +182,9 @@ class PluginCatalogWiringTest {
               PluginCanvasFunctionCatalogSource source =
                   context.getBean(PluginCanvasFunctionCatalogSource.class);
               assertTrue(context.getBean(PluginCatalogRefresher.class).isRunning());
-              assertEquals(new PluginCatalogRuntime.RuntimeState(1, 1, null), runtime.state());
+              assertNull(runtime.applicationError());
 
-              try (PluginCatalogRuntime.Lease lease = runtime.acquireCurrent()) {
+              try (PluginCatalogRuntime.Lease lease = runtime.acquire()) {
                 assertEquals(1, lease.snapshot().configuredPlugins().size());
                 assertEquals(
                     15, lease.snapshot().harnessCatalog().tools().size(), "Mavis tools are frozen");
@@ -196,8 +196,8 @@ class PluginCatalogWiringTest {
                         .isPresent());
                 assertTrue(lease.snapshot().canvasFunctionCatalog().list().isEmpty());
               }
-              try (CanvasFunctionCatalogSource.Lease lease = source.acquireCurrent()) {
-                assertEquals(1L, lease.epoch());
+              try (CanvasFunctionCatalogSource.Lease lease = source.acquire()) {
+                assertTrue(lease.catalog().list().isEmpty());
               }
               assertTrue(context.getBeansOfType(HarnessContributor.class).isEmpty());
               assertEquals(0, requests.get());
@@ -211,11 +211,13 @@ class PluginCatalogWiringTest {
     // 不安装 JVM 全局代理，保持与其他用例的全局代理隔离。
     context.registerBean(
         "systemProxySelector", ProxySelector.class, () -> HttpProxySelector.fixed(null, ""));
-    context.registerBean(PluginCredentialStore.class, () -> mock(PluginCredentialStore.class));
     context.registerBean(
-        PluginConfigurationRepository.class, InMemoryPluginCatalogFakes::repository);
+        PluginContextFactory.class,
+        () ->
+            new PluginContextFactory(
+                mock(PluginCredentialStore.class), () -> null, () -> null, () -> null));
     context.registerBean(
-        PlatformTransactionManager.class, InMemoryPluginCatalogFakes::transactionManager);
+        PluginConfigurationRepository.class, () -> PluginConfigurationFakes.repository(PLUGIN_ID));
   }
 
   @Configuration(proxyBeanMethods = false)

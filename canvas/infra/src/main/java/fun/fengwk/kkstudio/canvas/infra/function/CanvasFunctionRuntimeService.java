@@ -8,7 +8,6 @@ import fun.fengwk.kkstudio.canvas.CanvasFunctionRun;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunRepository;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunStatus;
 import fun.fengwk.kkstudio.canvas.CanvasStore;
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalog;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionCatalogSource;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunException;
@@ -77,14 +76,15 @@ public class CanvasFunctionRuntimeService implements CanvasFunctionService {
     return result;
   }
 
-  /** best-effort 取消：只按冻结 binding 取对应 epoch 的租用，绝不按当前同名函数找实例。 */
+  /** best-effort 取消：交给当前目录中同名函数的 adapter；外部任务可能已提交，取消不要求定义未变。 */
   private void bestEffortAdapterCancel(CanvasFunctionRun run) {
     try {
       CanvasFunctionFrozenRun frozen = stateCodec.decode(run.stateJson());
-      try (CanvasFunctionCatalogSource.Lease lease =
-          catalogSource.acquire(frozen.binding().catalogEpoch())) {
-        CanvasFunctionCatalog.RegisteredFunction registered = lease.require(frozen.binding());
-        registered.adapter().cancel(frozen);
+      try (CanvasFunctionCatalogSource.Lease lease = catalogSource.acquire()) {
+        lease
+            .catalog()
+            .find(frozen.binding().definition().name())
+            .ifPresent(registered -> registered.adapter().cancel(frozen));
       }
     } catch (RuntimeException error) {
       log.warn(

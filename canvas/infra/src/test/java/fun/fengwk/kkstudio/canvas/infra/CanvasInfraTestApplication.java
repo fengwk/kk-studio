@@ -17,14 +17,14 @@ import java.util.List;
 public class CanvasInfraTestApplication {
 
   /**
-   * 能力目录由宿主组合；模块测试用显式固定 epoch 的可切换替身，使「冻结绑定只按同 epoch 实例执行」可被真实断言。
+   * 能力目录由宿主组合；模块测试用可替换目录的替身，使「冻结绑定只按同一定义执行」可被真实断言。
    *
    * <p>生产 source Bean 由 Platform 组合根提供，本替身只服务模块测试。
    */
   @Bean
   FixedCanvasFunctionCatalogSource canvasFunctionCatalogSource(
       List<CanvasFunctionAdapter> adapters) {
-    return new FixedCanvasFunctionCatalogSource(1L, CanvasFunctionCatalog.from(adapters));
+    return new FixedCanvasFunctionCatalogSource(CanvasFunctionCatalog.from(adapters));
   }
 
   /**

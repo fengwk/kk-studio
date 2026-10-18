@@ -14,7 +14,7 @@ import java.util.Objects;
 /**
  * 统一运行时工具目录的 Platform 查询边界，提供所有可用工具的列表。
  *
- * <p>每次查询取得一次 current 租用：列表与可用性来自同一 epoch 的冻结目录。
+ * <p>每次查询取得一次租用：列表与可用性来自同一份目录快照。
  */
 @Service
 public class ToolCatalogQueryService {
@@ -26,7 +26,7 @@ public class ToolCatalogQueryService {
   }
 
   public List<ToolCatalogEntryDTO> listTools() {
-    try (RuntimeToolCatalogSource.Lease lease = toolCatalogSource.acquireCurrent()) {
+    try (RuntimeToolCatalogSource.Lease lease = toolCatalogSource.acquire()) {
       return lease.catalog().selectableTools().stream()
           .map(ToolCatalogQueryService::toDto)
           .toList();

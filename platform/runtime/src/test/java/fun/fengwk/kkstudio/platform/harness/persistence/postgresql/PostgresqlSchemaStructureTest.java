@@ -64,9 +64,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
           "mcp_server",
           "mcp_tool",
           "plugin_auth_attempt",
-          "plugin_catalog_revision",
-          "plugin_catalog_state",
-          "plugin_configuration_revision",
+          "plugin_configuration",
           "plugin_credential",
           "project",
           "project_issue",
@@ -277,36 +275,20 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "updated_at",
         "version");
     assertColumns("mcp_tool", "name", "server_name", "source_name", "description", "input_schema");
-    assertColumns("plugin_catalog_revision", "epoch", "manifest_json", "created_at");
-    assertColumns("plugin_catalog_state", "id", "epoch", "created_at", "updated_at");
     assertColumns(
         "plugin_auth_attempt",
         "plugin_id",
         "nonce_hash",
-        "auth_generation",
-        "context_fingerprint",
         "config_revision",
         "region",
         "expires_at",
         "created_at");
     assertColumns(
-        "plugin_configuration_revision",
-        "plugin_id",
-        "revision",
-        "code_version",
-        "schema_fingerprint",
-        "capability_fingerprint",
-        "auth_generation",
-        "context_fingerprint",
-        "configured_secret_fields",
-        "values_json",
-        "created_at");
+        "plugin_configuration", "plugin_id", "revision", "values_json", "created_at", "updated_at");
     assertColumns(
         "plugin_credential",
         "plugin_id",
-        "auth_generation",
-        "context_fingerprint",
-        "encrypted_payload",
+        "payload_json",
         "region",
         "expires_at",
         "next_refresh_at",
@@ -316,8 +298,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "refresh_lease_token",
         "refresh_lease_until",
         "version",
-        "create_time",
-        "update_time");
+        "created_at",
+        "updated_at");
     assertColumns(
         "project",
         "id",
@@ -420,7 +402,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         "head_checked_at",
         "head_check_error",
         "skills",
-        "encrypted_token",
+        "token",
         "version",
         "create_time",
         "update_time");
@@ -582,16 +564,16 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "harness_tool_invocation.result",
             "mcp_server.headers",
             "mcp_tool.input_schema",
-            "plugin_catalog_revision.manifest_json",
             "project.workflow",
             "project_issue_activity.data",
             "skill_package.skills",
             "system_setting.config"),
         jsonbColumns,
-        "jsonb columns must exactly match the 33 declared structured payloads");
+        "jsonb columns must exactly match the 32 declared structured payloads");
 
     // 文本保存指数与字节预算，不触发 jsonb 数值展开。
-    assertColumnType("text", "plugin_configuration_revision", "values_json");
+    assertColumnType("text", "plugin_configuration", "values_json");
+    assertColumnType("text", "plugin_credential", "payload_json");
 
     // 自由文本字段不受列宽限制，使用 text
     assertColumnType("text", "agent_provider", "description");
@@ -603,9 +585,8 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
   }
 
   @Test
-  void noTableStoresByteaFileBlobsExceptEncryptedCredentialPayload() throws SQLException {
-    // 文件正文与媒体字节只存在于 S3；public schema 中唯一允许的 bytea 是 plugin_credential 的
-    // AES-256-GCM 加密凭据信封，它不是文件正文。
+  void noTableStoresByteaColumns() throws SQLException {
+    // 文件正文与媒体字节只存在于对象存储；public schema 不保存任何 bytea。
     Set<String> byteaColumns = new TreeSet<>();
     try (Connection conn = newConnection();
         Statement st = conn.createStatement();
@@ -617,10 +598,7 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
         byteaColumns.add(rs.getString(1));
       }
     }
-    assertEquals(
-        Set.of("plugin_credential.encrypted_payload", "skill_package.encrypted_token"),
-        byteaColumns,
-        "only encrypted credential/token envelopes may use bytea; file and media content lives outside the database");
+    assertEquals(Set.of(), byteaColumns, "file and media content lives outside the database");
   }
 
   @Test
@@ -694,16 +672,14 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "mcp_server.updated_at",
             "plugin_auth_attempt.created_at",
             "plugin_auth_attempt.expires_at",
-            "plugin_catalog_revision.created_at",
-            "plugin_catalog_state.created_at",
-            "plugin_catalog_state.updated_at",
-            "plugin_configuration_revision.created_at",
-            "plugin_credential.create_time",
+            "plugin_configuration.created_at",
+            "plugin_configuration.updated_at",
+            "plugin_credential.created_at",
             "plugin_credential.expires_at",
             "plugin_credential.last_refreshed_at",
             "plugin_credential.next_refresh_at",
             "plugin_credential.refresh_lease_until",
-            "plugin_credential.update_time",
+            "plugin_credential.updated_at",
             "project.archived_at",
             "project.created_at",
             "project.updated_at",
@@ -1004,7 +980,6 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "fk_harness_tool_invocation_model",
             "fk_harness_work_environment",
             "fk_mcp_tool_server",
-            "fk_plugin_catalog_state_revision",
             "fk_project_issue_activity_agent",
             "fk_project_issue_activity_issue",
             "fk_project_issue_activity_run",
@@ -1130,10 +1105,9 @@ class PostgresqlSchemaStructureTest extends PostgresSchemaSupport {
             "fk_harness_thread_stop_receipt_turn_end",
             "fk_harness_thread_yolo_root",
             "fk_harness_tool_invocation_assistant",
-            "fk_harness_tool_invocation_model",
-            "fk_plugin_catalog_state_revision"),
+            "fk_harness_tool_invocation_model"),
         noActionFks,
-        "exact set of 27 NO ACTION foreign keys");
+        "exact set of 26 NO ACTION foreign keys");
   }
 
   @Test

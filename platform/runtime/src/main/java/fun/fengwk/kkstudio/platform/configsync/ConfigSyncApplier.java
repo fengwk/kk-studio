@@ -18,9 +18,8 @@ import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentService;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.platform.error.CatalogVersions;
-import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRecord;
 import fun.fengwk.kkstudio.platform.plugin.service.PluginAgentDependencies;
-import fun.fengwk.kkstudio.platform.plugin.service.PluginConfigurationCommitService;
+import fun.fengwk.kkstudio.platform.plugin.service.PluginConfigurationService;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsService;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
@@ -42,17 +41,13 @@ import java.util.Map;
  * Settings。新增 Agent 先以空 subagent allowlist 创建，再在同一事务内统一更新为完整列表，使循环引用可解且事务外不可见中间态。任何写入失败都随异常整体回滚，绝不
  * 捕获后继续。
  *
- * <p>插件复用唯一的 {@link PluginConfigurationCommitService}：每次 configure 都在本事务内做 catalog epoch
- * CAS，第一项比较计划 epoch，后续用同事务前一成功提交的新 epoch，同时各自比较该插件计划期的配置修订；任一项冲突或失败都让整份导入回滚，afterCommit 才在本节点应用与通知。
+ * <p>插件复用唯一写入口 {@link PluginConfigurationService}：每项都比较该插件计划期的配置修订；任一项冲突或失败都让整份导入回滚，提交后才在本节点应用。
  *
- * <p>计划在写事务外形成，因此事务内必须先按同一份插件声明重新核验依赖的 Agent 仍然存在：否则计划到写入之间被删除的 Agent 不会改变插件目录
- * epoch，导入会提交悬空依赖。核验用行锁读取，锁一直持有到外层事务结束。
+ * <p>计划在写事务外形成，因此事务内先按同一份插件声明重新核验依赖的 Agent 仍然存在（行锁读取，锁持有到外层事务结束），避免提交悬空依赖。
  */
 @AllArgsConstructor
 @Component
 public class ConfigSyncApplier {
-
-  private static final String RESOURCE = "config_sync";
 
   private final AgentProviderService providerService;
   private final AgentModelRepository modelRepository;
@@ -64,7 +59,7 @@ public class ConfigSyncApplier {
   private final EnvironmentRepository environmentRepository;
   private final EnvironmentService environmentService;
   private final SystemSettingsService systemSettingsService;
-  private final PluginConfigurationCommitService pluginCommitService;
+  private final PluginConfigurationService pluginConfigurationService;
   private final PluginAgentDependencies pluginAgentDependencies;
 
   /** 事务内写入计划中的全部事实。 */
@@ -158,12 +153,12 @@ public class ConfigSyncApplier {
   }
 
   /**
-   * 插件按计划顺序串行写入唯一提交入口：第一项比较计划 epoch，后续用同事务前一成功的新 epoch，各自仍比较计划期配置修订。
+   * 插件按计划顺序串行写入唯一提交入口，各自比较计划期配置修订。
    *
-   * <p>导入只承载普通值，秘密补丁恒为空（全部 KEEP），因此绝不复制或恢复任何凭据；普通配置变化可能合法推进认证代际，但秘密载荷保持原状。
+   * <p>导入只承载普通值，秘密补丁恒为空（全部 KEEP），因此绝不复制或恢复任何凭据。
    */
   private void applyPlugins(ConfigSyncPlan plan) {
-    // 计划到写入之间删除的 Agent 不会改变插件目录 epoch，CAS 无法发现它；先按同一声明批量预锁，再开始任何插件写入。
+    // 计划到写入之间删除的 Agent 无法被配置修订 CAS 发现：先按同一声明批量预锁，再开始任何插件写入。
     pluginAgentDependencies.requireDeclaredAgents(
         plan.plugins().stream()
             .map(
@@ -171,12 +166,9 @@ public class ConfigSyncApplier {
                     new PluginAgentDependencies.Declaration(
                         plugin.pluginId(), plugin.expectedRevision(), plugin.valuesJson()))
             .toList());
-    long epoch = plan.pluginCatalogEpoch();
     for (ConfigSyncPlan.PluginImport plugin : plan.plugins()) {
-      PluginCatalogRecord committed =
-          pluginCommitService.configure(
-              plugin.pluginId(), epoch, plugin.expectedRevision(), plugin.valuesJson(), Map.of());
-      epoch = committed.epoch();
+      pluginConfigurationService.configure(
+          plugin.pluginId(), plugin.expectedRevision(), plugin.valuesJson(), Map.of());
     }
   }
 

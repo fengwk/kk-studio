@@ -384,13 +384,12 @@ export function useCanvasFunctionRun(options: {
     }
     inFlightNodesRef.current.add(nodeId)
     try {
-      // 1. 点击瞬间同步捕获「用户实际看到的目录版本」，并在任何 await 之前立即复制两个
-      //    坐标：之后目录对象即使被原地改写也绝不污染本次请求。缺失定义时保持 null。
+      // 1. 点击瞬间同步捕获「用户实际看到的目录版本」，并在任何 await 之前立即复制版本
+      //    指纹：之后目录对象即使被原地改写也绝不污染本次请求。缺失定义时保持 null。
       const resolvedVersion = resolveFunctionVersion(nodeId)
       const clickedVersion: CanvasFunctionVersionDTO | null = resolvedVersion === null
         ? null
         : {
-            catalogEpoch: resolvedVersion.catalogEpoch,
             definitionFingerprint: resolvedVersion.definitionFingerprint,
           }
 

@@ -14,27 +14,21 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
-import fun.fengwk.kkstudio.platform.plugin.PluginContext;
 import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
-import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogBootstrap;
-import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogManifest;
-import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRecord;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRuntime;
-import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialReference;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRow;
 
 import java.time.Duration;
 import java.util.List;
-import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.BiFunction;
 import java.util.function.Supplier;
 
 /**
@@ -254,24 +248,17 @@ class PluginCatalogRefresherTest {
     }
   }
 
-  /** 真实启动装配（空安装集合）：启动初始化自身会回读一次，因此计数从装配完成后开始。 */
+  /** 真实运行期（空安装集合）：构造期自身会回读一次，因此计数从装配完成后开始。 */
   private static PluginCatalogRuntime runtime(GatedRepository repository) {
-    StudioPluginRegistry registry = new StudioPluginRegistry(List.of());
-    PluginCatalogBootstrap bootstrap =
-        new PluginCatalogBootstrap(
-            registry, repository, InMemoryPluginCatalogFakes.transactionManager());
-    BiFunction<String, PluginCredentialReference, PluginContext> contexts =
-        (pluginId, reference) -> {
-          throw new AssertionError("no plugin is installed");
-        };
     PluginCatalogRuntime runtime =
         new PluginCatalogRuntime(
-            bootstrap,
+            new StudioPluginRegistry(List.of()),
             repository,
-            contexts,
+            pluginId -> {
+              throw new AssertionError("no plugin is installed");
+            },
             List.of(),
-            List.of(),
-            bootstrap.bootstrap(contexts, List.of(), List.of()));
+            List.of());
     repository.resetReads();
     return runtime;
   }
@@ -317,9 +304,7 @@ class PluginCatalogRefresherTest {
   }
 
   /** 可门控的权威仓储：每次读取都可先阻塞在测试持有的闩上，并记录读取、阻塞与被中断的次数。 */
-  private static final class GatedRepository implements PluginConfigurationRepository {
-
-    private final PluginConfigurationRepository delegate = InMemoryPluginCatalogFakes.repository();
+  private static final class GatedRepository extends PluginConfigurationRepository {
 
     private final AtomicInteger reads = new AtomicInteger();
 
@@ -330,6 +315,10 @@ class PluginCatalogRefresherTest {
     private volatile CountDownLatch entered;
 
     private volatile CountDownLatch release;
+
+    GatedRepository() {
+      super(mock(JdbcClient.class));
+    }
 
     /** 之后每次读取都先 countDown {@code entered} 再等待 {@code release}。 */
     void gate(CountDownLatch entered, CountDownLatch release) {
@@ -355,7 +344,7 @@ class PluginCatalogRefresherTest {
     }
 
     @Override
-    public PluginCatalogRecord readCatalog() {
+    public List<PluginConfigurationRow> findAll() {
       CountDownLatch gateEntered = entered;
       CountDownLatch gateRelease = release;
       if (gateEntered != null && gateRelease != null) {
@@ -366,30 +355,11 @@ class PluginCatalogRefresherTest {
         } catch (InterruptedException error) {
           interruptions.incrementAndGet();
           Thread.currentThread().interrupt();
-          throw new IllegalStateException("gated authority read was interrupted", error);
+          throw new IllegalStateException("gated configuration read was interrupted", error);
         }
       }
-      PluginCatalogRecord record = delegate.readCatalog();
       reads.incrementAndGet();
-      return record;
-    }
-
-    @Override
-    public Optional<PluginCatalogRecord> readCatalog(long epoch) {
-      return delegate.readCatalog(epoch);
-    }
-
-    @Override
-    public Optional<PluginConfigurationRow> readConfiguration(String pluginId, long revision) {
-      return delegate.readConfiguration(pluginId, revision);
-    }
-
-    @Override
-    public boolean commit(
-        long expectedEpoch,
-        List<PluginConfigurationRow> changedConfigurations,
-        PluginCatalogManifest manifest) {
-      return delegate.commit(expectedEpoch, changedConfigurations, manifest);
+      return List.of();
     }
   }
 }

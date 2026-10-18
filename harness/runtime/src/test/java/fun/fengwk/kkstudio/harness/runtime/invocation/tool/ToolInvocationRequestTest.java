@@ -50,11 +50,9 @@ class ToolInvocationRequestTest {
             Duration.ofSeconds(30));
     ToolBinding binding =
         new ToolBinding(
-            1L,
             new AgentToolDefinition(descriptor, ToolVisibility.SELECTABLE),
             new ContributorBinding("core", "read", List.of()),
             EnvironmentSupport.NONE,
-            null,
             null,
             null);
     ToolCall durable = new ToolCall("call-1", "read", "{\"path\":null,\"offset\":\"10\"}");

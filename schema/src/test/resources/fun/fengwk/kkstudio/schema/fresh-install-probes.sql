@@ -985,14 +985,14 @@ select pg_temp.assert_true('storage_upload no longer persists an expiry fact',
     and exists(select 1 from pg_indexes where schemaname = 'public'
         and indexname = 'idx_storage_upload_cleanup_claim'
         and strpos(indexdef, 'created_at') > 0));
-select pg_temp.assert_true('skill_package stores an optional encrypted token envelope',
+select pg_temp.assert_true('skill_package stores an optional access token',
     exists(select 1 from information_schema.columns
-        where table_name = 'skill_package' and column_name = 'encrypted_token'
-        and data_type = 'bytea' and is_nullable = 'YES'));
-select pg_temp.rejects('an empty encrypted token envelope is rejected',
-    $$insert into skill_package(package_name,repository_url,branch,current_commit,encrypted_token)
-      values('probe-pkg','https://example.invalid/repo.git','main',repeat('a',40),''::bytea)$$,
-    '23514', 'ck_skill_package_encrypted_token');
+        where table_name = 'skill_package' and column_name = 'token'
+        and data_type = 'text' and is_nullable = 'YES'));
+select pg_temp.rejects('an empty access token is rejected',
+    $$insert into skill_package(package_name,repository_url,branch,current_commit,token)
+      values('probe-pkg','https://example.invalid/repo.git','main',repeat('a',40),'')$$,
+    '23514', 'ck_skill_package_token');
 select pg_temp.assert_true('environment update activity is uniquely indexed per environment',
     exists(select 1 from pg_indexes where schemaname = 'public'
         and indexname = 'uk_environment_update_active'

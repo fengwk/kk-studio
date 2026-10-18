@@ -94,16 +94,15 @@ class CanvasFunctionRuntimeServiceTest {
     when(adapter.enabled()).thenReturn(true);
     when(adapter.unavailableReason()).thenReturn(null);
     CanvasFunctionCatalog catalog = CanvasFunctionCatalog.from(List.of(adapter));
-    FixedCanvasFunctionCatalogSource catalogSource =
-        new FixedCanvasFunctionCatalogSource(1L, catalog);
-    when(frozen.binding()).thenReturn(new CanvasFunctionBinding(1L, definition, null));
+    FixedCanvasFunctionCatalogSource catalogSource = new FixedCanvasFunctionCatalogSource(catalog);
+    when(frozen.binding()).thenReturn(new CanvasFunctionBinding(definition));
     Fixture cancelFixture = new Fixture(catalogSource);
     when(cancelFixture.transactions.cancel(CANVAS, NODE, REQUEST.toString())).thenReturn(cancelled);
     when(cancelFixture.stateCodec.decode(cancelled.stateJson())).thenReturn(frozen);
 
     assertEquals(cancelled, cancelFixture.service.cancel(CANVAS, NODE, REQUEST.toString()));
     verify(adapter).cancel(frozen);
-    // cancel 只按冻结 binding 取一次同 epoch 租用，并在返回前释放。
+    // cancel 只按函数名取一次当前目录租用，并在返回前释放。
     assertEquals(0, catalogSource.openLeases());
   }
 
@@ -119,8 +118,8 @@ class CanvasFunctionRuntimeServiceTest {
     when(adapter.unavailableReason()).thenReturn(null);
     doThrow(new IllegalStateException("hook failed")).when(adapter).cancel(frozen);
     FixedCanvasFunctionCatalogSource catalogSource =
-        new FixedCanvasFunctionCatalogSource(1L, CanvasFunctionCatalog.from(List.of(adapter)));
-    when(frozen.binding()).thenReturn(new CanvasFunctionBinding(1L, definition, null));
+        new FixedCanvasFunctionCatalogSource(CanvasFunctionCatalog.from(List.of(adapter)));
+    when(frozen.binding()).thenReturn(new CanvasFunctionBinding(definition));
     Fixture fixture = new Fixture(catalogSource);
     when(fixture.transactions.cancel(CANVAS, NODE, REQUEST.toString())).thenReturn(cancelled);
     when(fixture.stateCodec.decode(cancelled.stateJson())).thenReturn(frozen);
@@ -140,7 +139,7 @@ class CanvasFunctionRuntimeServiceTest {
     when(adapter.functions()).thenReturn(List.of(definition("test.function")));
     when(adapter.enabled()).thenReturn(true);
     FixedCanvasFunctionCatalogSource catalogSource =
-        new FixedCanvasFunctionCatalogSource(1L, CanvasFunctionCatalog.from(List.of(adapter)));
+        new FixedCanvasFunctionCatalogSource(CanvasFunctionCatalog.from(List.of(adapter)));
     Fixture fixture = new Fixture(catalogSource);
     when(fixture.transactions.cancel(CANVAS, NODE, REQUEST.toString())).thenReturn(cancelled);
     when(fixture.stateCodec.decode(cancelled.stateJson()))
@@ -163,7 +162,7 @@ class CanvasFunctionRuntimeServiceTest {
     when(adapter.enabled()).thenReturn(true);
     when(adapter.unavailableReason()).thenReturn(null);
     CanvasFunctionCatalog catalog = CanvasFunctionCatalog.from(List.of(adapter));
-    Fixture fixture = new Fixture(new FixedCanvasFunctionCatalogSource(1L, catalog));
+    Fixture fixture = new Fixture(new FixedCanvasFunctionCatalogSource(catalog));
 
     // 1. RESUME -> READY (不调 adapter.cancel)
     CanvasFunctionRun resumed = run(CanvasFunctionRunStatus.READY);
@@ -179,7 +178,7 @@ class CanvasFunctionRuntimeServiceTest {
     // 2. CANCELLED -> CANCELLED (调用 adapter.cancel)
     CanvasFunctionRun cancelled = run(CanvasFunctionRunStatus.CANCELLED);
     CanvasFunctionFrozenRun frozen = mock(CanvasFunctionFrozenRun.class);
-    when(frozen.binding()).thenReturn(new CanvasFunctionBinding(1L, definition, null));
+    when(frozen.binding()).thenReturn(new CanvasFunctionBinding(definition));
     when(fixture.transactions.resolve(
             CANVAS,
             NODE,
@@ -259,7 +258,7 @@ class CanvasFunctionRuntimeServiceTest {
 
   private static CanvasFunctionVersion version() {
     return new CanvasFunctionVersion(
-        1L, CanvasFunctionCatalog.definitionFingerprint(definition("dummy.fn")));
+        CanvasFunctionCatalog.definitionFingerprint(definition("dummy.fn")));
   }
 
   private static final class Fixture {
@@ -275,7 +274,7 @@ class CanvasFunctionRuntimeServiceTest {
     private Fixture() {
       this(
           new FixedCanvasFunctionCatalogSource(
-              1L, CanvasFunctionCatalog.from(List.of(dummyAdapter()))));
+              CanvasFunctionCatalog.from(List.of(dummyAdapter()))));
     }
 
     private Fixture(CanvasFunctionCatalogSource catalogSource) {

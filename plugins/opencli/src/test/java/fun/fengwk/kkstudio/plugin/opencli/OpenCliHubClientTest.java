@@ -38,7 +38,6 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -440,8 +439,7 @@ class OpenCliHubClientTest {
             ? "{\"apiKey\":\"" + apiKey + "\"}"
             : "{\"apiKey\":\"" + apiKey + "\",\"instanceId\":\"" + instanceId + "\"}";
     PluginCredentialSnapshot snapshot =
-        new PluginCredentialSnapshot(
-            "opencli", UUID.randomUUID(), "context", null, null, 0L, new byte[0], payload);
+        new PluginCredentialSnapshot("opencli", null, null, 0L, payload);
     return new PluginCredentialAccess() {
       @Override
       public PluginCredentialSnapshot resolve() {

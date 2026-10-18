@@ -131,8 +131,7 @@ PostgreSQL 与已配置 bucket 必须先可达，启动失败先诊断连接而�
 用于浏览器预签名上传/下载；两者都须可达，bucket 在 App 启动前准备好。
 空库初始化只由一个 Flyway owner 执行，Worker、Plugin 集合与密钥在节点间保持一致。
 
-真实连接与凭据由仓库外 owner-only 文件或编排 secret 注入。使用已保存的 Plugin 凭据时，
-所有 App 挂载同一份原始 32-byte 主密钥；替换为空文件或新密钥会使已有凭据无法读取。
+真实连接与凭据由仓库外 owner-only 文件或编排 secret 注入。
 Dispatcher、admission、gateway 上限属于启动配置，subagent 预算由运行时 SystemSettings 管理。
 完整变量分类与凭据文件要求见[运行配置与凭据](#运行配置与凭据)，
 对外入口要求见[生产部署与反向代理](#生产部署与反向代理)。
@@ -140,7 +139,7 @@ Dispatcher、admission、gateway 上限属于启动配置，subagent 预算由�
 ## 升级
 
 部署前核对目标镜像与数据库 schema、持久 JSON、Work wire 和 Plugin 集合的兼容性，
-保存当前镜像标识、运行配置、Plugin 主密钥与可恢复的数据备份。镜像构建成功只证明产物生成，
+保存当前镜像标识、运行配置与可恢复的数据备份。镜像构建成功只证明产物生成，
 发布前的验证入口见[开发与测试](development-and-testing.md)。
 
 兼容的数据面继续复用。停止 Worker 领取新 Work，排空在途调用，在批准的窗口替换 App 镜像；
@@ -154,12 +153,12 @@ Flyway 校验失败时停止切换并查明差异；修改 `flyway_schema_histor
 ## 恢复与重建
 
 恢复前停止所有 App/Worker、preview 写入和 Daemon，等待在途操作收敛。
-先验证备份摘要、可恢复性、权限、S3 对象保留范围以及匹配的镜像与 Plugin 主密钥。
+先验证备份摘要、可恢复性、权限、S3 对象保留范围以及匹配的镜像。
 数据库与对象存储的备份应能恢复同一业务状态；仅恢复数据库不能补回已删除的对象。
 
 已执行数据库重建时，原库以 `<db>_pre_<UTCstamp>` 冻结保留，全库 dump 另存仓库之外。
 在停机窗口保留并移开当前库、让原库名空闲，再由数据库管理员恢复冻结库的连接权限与原名，
-配合对应镜像、配置、主密钥和 S3 数据恢复入口。也可在隔离目标用经过验证的全库 dump 恢复并验收后切换。
+配合对应镜像、配置和 S3 数据恢复入口。也可在隔离目标用经过验证的全库 dump 恢复并验收后切换。
 新库中的写入不会自动合并回冻结库，切换前由数据所有者决定其保护方式。
 
 若目标是建立新的空数据面，按[共享数据库重建](development-and-testing.md#共享数据库重建)
@@ -308,10 +307,9 @@ PI_BASE_ANCHOR=/path/to/pi-base \
 | --- | --- | --- |
 | local | host mapping/database/S3/profile | `KK_STUDIO_APP_*`、`KK_STUDIO_PG_*`、`KK_STUDIO_S3_*`、`KK_STUDIO_STORAGE_S3_*`、`KK_STUDIO_SPRING_PROFILES_ACTIVE` |
 | local | Harness dispatcher | `KK_STUDIO_HARNESS_DISPATCHER_*` |
-| NAS App 节点 | prod 数据面与异步执行 | `KK_STUDIO_DB_*`、`KK_STUDIO_STORAGE_S3_*`、`KK_STUDIO_PLUGINS_CREDENTIAL_KEY_FILE` |
+| NAS App 节点 | prod 数据面与异步执行 | `KK_STUDIO_DB_*`、`KK_STUDIO_STORAGE_S3_*` |
 | 本机 preview | 外部数据面配置文件 | `SHARED_PREVIEW_ENV_FILE` 指向的文件内的同一组 `KK_STUDIO_DB_*` / `KK_STUDIO_STORAGE_S3_*` |
 | local/reliability | admission/gateway | `KK_STUDIO_MODEL_MAX_CONCURRENCY`、`KK_STUDIO_TOOL_MAX_CONCURRENCY`、`KK_STUDIO_ENVIRONMENT_GATEWAY_*`（subagent 并发上限不经环境变量配置，只由运行时 SystemSettings 的 `aiRuntime.subagent*` 持有） |
-| production with authenticated Plugin | encrypted credential | `KK_STUDIO_PLUGINS_CREDENTIAL_KEY_FILE`（所有 App 节点挂载同一 owner-only 文件） |
 | production with authenticated Plugin | resource staging bounds | `KK_STUDIO_PLUGINS_RESOURCE_CONNECT_TIMEOUT`、`KK_STUDIO_PLUGINS_RESOURCE_REQUEST_TIMEOUT`、`KK_STUDIO_PLUGINS_RESOURCE_UPLOAD_TIMEOUT`、`KK_STUDIO_PLUGINS_RESOURCE_MAX_BYTES`、`KK_STUDIO_PLUGINS_RESOURCE_TEMP_DIRECTORY` |
 | test | ports/build/mock | `CANVAS_TEST_*` |
 | test | S3/media/fake runtime | `KK_STUDIO_STORAGE_S3_*`、`KK_STUDIO_CANVAS_RESOURCE_*`、`KK_STUDIO_CANVAS_FUNCTION_FAKE_ENABLED` |
@@ -340,10 +338,9 @@ Canvas Function runtime 变量也只在启动期读取。
   command 或报告。reliability 栈独立使用 `TEST_MINIMAX_BASE_URL`/`TEST_MINIMAX_API_KEY`。
 - 各测试栈的 registration token 是栈内隔离配置；`NVD_API_KEY` 只由供应链脚本写入临时
   mode `600` 的 Maven settings，二者都不进 command line、POM、image 或报告。
-- Plugin credential 主密钥是原始 32-byte 随机值（不是 Base64 文本），只通过
-  `KK_STUDIO_PLUGINS_CREDENTIAL_KEY_FILE` 指向的只读 secret file 注入，不能把密钥正文放进
-  environment、Compose 文件、数据库或 image。多 App 节点必须使用同一内容；缺失或错误时
-  已保存凭据读取与新认证 fail closed，未连接 Plugin 不阻止 App 启动。
+- Plugin 凭据、Provider 密钥与 Skill 仓库令牌以明文保存在数据库中，其保护依赖数据库本身的访问控制与备份加密；
+  它们绝不出现在 API 响应、日志或模型上下文中。配置同步导出会携带 Provider 凭据、Skill 令牌与 registration token
+  原值（Plugin 秘密不导出），导出文件必须按秘密保管。
 - Plugin 资源端口只在需要时接受外部内容：会话资源下载以调用方的 Harness Thread 归属授权，
   远端媒体暂存只允许公网 HTTPS 目标（私网/保留/环回等地址一律拒绝，因此节点必须能对目标
   主机做正向解析）、受默认 `256MiB` 与 `1GiB` 硬上限的字节预算约束，并在成功后立即删除
@@ -440,9 +437,7 @@ Logback 配置与运行环境共同决定。排查时先看 `docker logs vps-kk-
 需要跨容器替换保留日志时，由外部 Compose 为日志目录设置持久挂载与 UID/GID `10001` 的写权限，
 宿主权限按部署策略收紧；首次挂载不会自动迁移旧容器里的文件，需在替换前另行保存。
 共享 PostgreSQL 与 S3/MinIO 已在各自容器持久化；App 的媒体转码与上传暂存目录仍是可清理的临时空间，
-不应挂成跨容器重启保留的数据卷。使用加密 Plugin 凭据时另需持久化的主密钥文件，并以只读方式挂入
-容器、设置 `KK_STUDIO_PLUGINS_CREDENTIAL_KEY_FILE`；文件内容必须是恰好 32 bytes 的原始 AES-256
-密钥（不是 Base64 文本），由容器用户 UID `10001` 可读，权限不得允许组或其他用户读取。不能用自动创建的空文件或新密钥替代已有密钥。
+不应挂成跨容器重启保留的数据卷。
 
 ### 本机 preview 与 NAS 数据面
 
@@ -474,7 +469,7 @@ Environment Daemon 不属于 NAS App 容器：需要主机能力时，在目标�
 可能得到不同镜像。Docker Hub 凭据只来自 Actions secrets，不作为 build arg 或 image layer。
 
 外部 Compose 和 Gateway 配置只引用环境变量名。真实 database、S3、Provider、Gateway、
-registration credential 和 Plugin 主密钥不进入本仓库、Docker build context、image layer、日志
+registration credential 不进入本仓库、Docker build context、image layer、日志
 或报告；registration token 只经 owner-only 的 `daemon.token` 兄弟文件传递，由 `install` 的
 `--config-file` / `--token-file` 读取，不出现在 Daemon argv 或环境变量中。本机 preview 的配置文件同样
 留在仓库之外、只有 owner 可读，脚本

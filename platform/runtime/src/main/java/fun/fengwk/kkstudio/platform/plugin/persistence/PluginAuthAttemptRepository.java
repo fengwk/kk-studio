@@ -1,33 +1,76 @@
 package fun.fengwk.kkstudio.platform.plugin.persistence;
 
+import static fun.fengwk.kkstudio.platform.persistence.PostgresJdbcTypes.toInstant;
+import static fun.fengwk.kkstudio.platform.persistence.PostgresJdbcTypes.toOffsetDateTime;
+
+import org.springframework.jdbc.core.RowMapper;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.stereotype.Repository;
+
 import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.util.Objects;
 import java.util.Optional;
 
-/**
- * {@code plugin_auth_attempt} 的原子 SQL 契约：每个 Plugin 至多一个 pending attempt，消费必须是单条条件语句。
- *
- * <p>{@link #replace(PluginAuthAttemptRow)} 是唯一的写入路径，新的 prepare 直接替换旧 attempt，因此旧 attemptId 立即失效；
- * {@link #consume(String, String, Instant, long)} 是唯一的消费路径：它必须在同一条语句里同时要求摘要命中、未过期、全局 epoch
- * 仍等于调用方读到的值，且该 Plugin 在当前 manifest 中的代际/上下文指纹/配置修订仍与 attempt 逐字段相等。因此重放、过期、已被取代的 attemptId，以及任何在
- * prepare 之后发生的提交（配置变更、登录完成、断连撤销）都只能得到空结果，「先检查后按 nonce 单独删除」的窗口不存在。
- */
-public interface PluginAuthAttemptRepository {
+/** {@code plugin_auth_attempt} 存取：每个 Plugin 至多一个待完成 attempt，complete 以单条条件删除原子消费。 */
+@Repository
+public class PluginAuthAttemptRepository {
 
-  /** 写入或替换该 Plugin 当前唯一的 pending attempt（要求非空）。 */
-  void replace(PluginAuthAttemptRow attempt);
+  private static final RowMapper<PluginAuthAttemptRow> ROW_MAPPER =
+      (rs, row) ->
+          new PluginAuthAttemptRow(
+              rs.getString("plugin_id"),
+              rs.getString("nonce_hash"),
+              rs.getLong("config_revision"),
+              rs.getString("region"),
+              toInstant(rs.getObject("expires_at", OffsetDateTime.class)));
 
-  /** 读取该 Plugin 当前的 pending attempt；不存在时返回空。 */
-  Optional<PluginAuthAttemptRow> find(String pluginId);
+  private final JdbcClient jdbc;
+
+  public PluginAuthAttemptRepository(JdbcClient jdbc) {
+    this.jdbc = Objects.requireNonNull(jdbc, "jdbc");
+  }
+
+  /** 写入新的 attempt，同一 Plugin 的旧 attempt 立即失效。 */
+  public void replace(PluginAuthAttemptRow attempt) {
+    jdbc.sql(
+            """
+            insert into plugin_auth_attempt (
+                plugin_id, nonce_hash, config_revision, region, expires_at)
+            values (:pluginId, :nonceHash, :configRevision, :region, :expiresAt)
+            on conflict (plugin_id) do update
+            set nonce_hash = excluded.nonce_hash, config_revision = excluded.config_revision,
+                region = excluded.region, expires_at = excluded.expires_at,
+                created_at = current_timestamp
+            """)
+        .param("pluginId", attempt.pluginId())
+        .param("nonceHash", attempt.nonceHash())
+        .param("configRevision", attempt.configRevision())
+        .param("region", attempt.region())
+        .param("expiresAt", toOffsetDateTime(attempt.expiresAt()))
+        .update();
+  }
 
   /**
-   * 原子单次消费：只有摘要命中、{@code expires_at} 严格晚于 {@code now}、全局 epoch 仍等于 {@code expectedEpoch}，且当前
-   * manifest 中该 Plugin 的代际/上下文指纹/配置修订与 attempt 逐字段相等时才删除并返回该行。
+   * 原子消费：摘要命中、未过期且 prepare 时的配置修订仍是当前修订才删除并返回；否则返回空。
    *
-   * <p>所有条件都在同一条语句里判定，因此 revoked/已变更的坐标绝不会换来一次性回调许可。
-   *
-   * @param expectedEpoch 调用方读到的权威全局 epoch；其间任何提交都会让 epoch 前进从而使本次消费失败
-   * @return 被消费的 attempt；任一条件不满足时为空
+   * <p>修订条件让配置在 prepare 之后发生的任何变化都使迟到回调失效。
    */
-  Optional<PluginAuthAttemptRow> consume(
-      String pluginId, String nonceHash, Instant now, long expectedEpoch);
+  public Optional<PluginAuthAttemptRow> consume(String pluginId, String nonceHash, Instant now) {
+    return jdbc.sql(
+            """
+            delete from plugin_auth_attempt attempt
+            using plugin_configuration configuration
+            where attempt.plugin_id = :pluginId and attempt.nonce_hash = :nonceHash
+              and attempt.expires_at > :now
+              and configuration.plugin_id = attempt.plugin_id
+              and configuration.revision = attempt.config_revision
+            returning attempt.*
+            """)
+        .param("pluginId", pluginId)
+        .param("nonceHash", nonceHash)
+        .param("now", toOffsetDateTime(now))
+        .query(ROW_MAPPER)
+        .optional();
+  }
 }

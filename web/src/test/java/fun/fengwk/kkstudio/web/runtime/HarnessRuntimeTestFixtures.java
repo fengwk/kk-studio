@@ -286,11 +286,9 @@ public final class HarnessRuntimeTestFixtures {
         new ToolInvocationRequest(
             new ToolCall("call-1", "web_search", "{}"),
             new ToolBinding(
-                1L,
                 new AgentToolDefinition(descriptor, ToolVisibility.SELECTABLE),
                 new ContributorBinding("test", "web-search", List.of()),
                 EnvironmentSupport.NONE,
-                null,
                 null,
                 null));
     return new ToolInvocation(

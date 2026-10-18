@@ -4,7 +4,6 @@ import static org.mockito.Mockito.mock;
 
 import tools.jackson.databind.json.JsonMapper;
 
-import fun.fengwk.kkstudio.platform.catalog.skill.SkillTokenCipherTestSupport;
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitCache;
 import fun.fengwk.kkstudio.platform.catalog.skill.repo.SkillPackageRepository;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.SkillCatalogService;
@@ -27,7 +26,6 @@ public final class SkillCatalogTestFixtures {
         mock(SkillCatalogConverter.class),
         mock(SkillPackageGuard.class),
         new AgentEditableSupport(JsonMapper.builder().build()),
-        mock(SkillCatalogWrites.class),
-        SkillTokenCipherTestSupport.newCipher());
+        mock(SkillCatalogWrites.class));
   }
 }

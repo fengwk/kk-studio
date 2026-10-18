@@ -300,9 +300,8 @@ class CanvasFunctionFrozenTest {
         Map.of());
   }
 
-  /** 内置函数绑定：目录 epoch 固定为 1，插件来源为 null。 */
   private static CanvasFunctionBinding binding(CanvasFunctionDefinition definition) {
-    return new CanvasFunctionBinding(1L, definition, null);
+    return new CanvasFunctionBinding(definition);
   }
 
   private static CanvasFunctionFrozenOutput frozenOutput(int index) {

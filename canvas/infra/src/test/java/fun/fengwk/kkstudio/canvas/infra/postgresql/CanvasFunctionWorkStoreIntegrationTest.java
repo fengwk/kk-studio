@@ -272,7 +272,7 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
             });
     CanvasFunctionCatalog catalog = CanvasFunctionCatalog.from(List.of(adapter));
     CanvasFunctionRunStateCodecPort stateCodec = mock(CanvasFunctionRunStateCodecPort.class);
-    when(frozen.binding()).thenReturn(new CanvasFunctionBinding(1L, definition, null));
+    when(frozen.binding()).thenReturn(new CanvasFunctionBinding(definition));
     when(stateCodec.decode(claim.run().stateJson())).thenReturn(frozen);
     CanvasFunctionRunTransactions runTransactions = mock(CanvasFunctionRunTransactions.class);
     ObjectProvider<CanvasResourceMaterializer> materializers = mock(ObjectProvider.class);
@@ -284,7 +284,7 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
     CanvasFunctionWorker worker =
         new CanvasFunctionWorker(
             runs,
-            new FixedCanvasFunctionCatalogSource(1L, catalog),
+            new FixedCanvasFunctionCatalogSource(catalog),
             stateCodec,
             runTransactions,
             mock(CanvasFunctionBlobAccess.class),

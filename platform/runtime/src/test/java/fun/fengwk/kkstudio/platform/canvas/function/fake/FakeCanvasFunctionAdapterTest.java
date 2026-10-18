@@ -166,7 +166,7 @@ class FakeCanvasFunctionAdapterTest {
 
   /** 内置函数绑定：目录 epoch 固定为 1，无插件来源。 */
   private static CanvasFunctionBinding binding(CanvasFunctionDefinition definition) {
-    return new CanvasFunctionBinding(1L, definition, null);
+    return new CanvasFunctionBinding(definition);
   }
 
   private static final class RecordingContext implements CanvasFunctionExecutionContext {

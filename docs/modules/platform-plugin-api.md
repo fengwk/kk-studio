@@ -16,7 +16,7 @@
 
 [`PluginConfigSchema`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginConfigSchema.java) 复用受控 `InputSchema` 类型，普通字段、唯一默认值与秘密字段分离。每层对象拒绝未知字段；只为缺失字段递归补默认，显式 null 不视作缺失，数字和布尔字符串不做容错，用户数组不与默认数组逐项合并。原始、默认和归一化 JSON 均受 64 KiB UTF-8 预算约束，严格拒绝重复键与尾随内容，数值按 BigDecimal / BigInteger 保真。
 
-[`PluginConfig`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginConfig.java) 只保存普通值和非负修订号；秘密不进入普通配置。宿主在全新库以 Schema 默认值初始化为 revision 1，已有库按完整 manifest 指定的持久 revision 恢复；revision 取该插件最后一次写入的全局 epoch。目录仍在启动时冻结，存取与身份校验见 [Plugin 配置存储](platform.md#plugin-配置存储)。
+[`PluginConfig`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginConfig.java) 只保存普通值和非负修订号；秘密不进入普通配置。宿主为新安装的 Plugin 以 Schema 默认值写入 revision 1，此后每次保存推进修订；修订变化时宿主重建插件快照，存取见 [Plugin 配置存储](platform.md#plugin-配置存储)。
 
 [`PluginAuthSpec`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginAuthSpec.java) 的封闭形态为 None、StaticKey 和 DeepLink。只有 DeepLink 声明 region 候选并提供 [`PluginAuthHandler`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginAuthHandler.java)；StaticKey 必须引用 Schema 声明的秘密字段。当前 HTTP 交互入口采用 DeepLink。[`PluginCredentialRefresher`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginCredentialRefresher.java) 是独立可选能力，宿主只领取实际声明刷新器的插件凭据。
 
@@ -36,7 +36,7 @@
 
 ## 凭据契约
 
-[`PluginCredentialMaterial`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginCredentialMaterial.java) 是 Plugin 交还的待加密材料（region 路由元数据加 opaque `payloadJson`），`toString` 有意省略秘密载荷；[`PluginCredentialSnapshot`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginCredentialSnapshot.java) 是本次调用所需的解密快照，携带行版本、认证代际与原始密文供调用期 CAS，数组访问做防御性拷贝。
+[`PluginCredentialMaterial`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginCredentialMaterial.java) 是 Plugin 交还的凭据材料（region 路由元数据加 opaque `payloadJson`），`toString` 有意省略秘密载荷；[`PluginCredentialSnapshot`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginCredentialSnapshot.java) 是本次调用读取到的凭据快照，携带行版本供调用期按该版本作废（`rejectUsed`）。
 
 [`PluginContext`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/PluginContext.java) 只暴露本插件的 [`PluginCredentialAccess`](../../platform/plugin-api/src/main/java/fun/fengwk/kkstudio/platform/plugin/credential/PluginCredentialAccess.java)、可选资源网关与 Prompt 任务/媒体端口。凭据访问没有 pluginId 参数，只能取得本插件快照或作废本次已用凭据；宿主拒绝跨插件快照。
 

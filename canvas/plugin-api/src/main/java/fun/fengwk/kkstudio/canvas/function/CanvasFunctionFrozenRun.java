@@ -14,8 +14,8 @@ import java.util.UUID;
 /**
  * Adapter 每次执行或恢复时读取的完整冻结计划与 checkpoint。
  *
- * <p>{@code binding} 是启动时冻结的目录 epoch、完整函数定义与插件来源，执行与恢复都只能按它选择同 epoch 的实例。{@code args} 是启动时按函数
- * schema 校验并补齐默认值后的 canonical 输入，{@code manifest} 是启动时冻结的输入资源事实，两者在执行期间都不再随 节点配置变化。{@code outputs}
+ * <p>{@code binding} 是启动时冻结的完整函数定义；尚未提交的 Run 只在当前目录中同名函数定义未变时执行。{@code args} 是启动时按函数 schema
+ * 校验并补齐默认值后的 canonical 输入，{@code manifest} 是启动时冻结的输入资源事实，两者在执行期间都不再随 节点配置变化。{@code outputs}
  * 是启动时冻结的有界输出计划：每个槽位已预分配 Resource ID、节点内位置、类型与资源名，adapter 只能物化计划内槽位。 {@code submitState} 是 Runtime
  * 持久化的外部提交事实：只有 {@link CanvasFunctionSubmitState#PENDING} 才允许发起外部提交， {@link
  * CanvasFunctionSubmitState#SUBMITTING} 表示提交意图已持久化但结果不明，{@link CanvasFunctionSubmitState#SUBMITTED}

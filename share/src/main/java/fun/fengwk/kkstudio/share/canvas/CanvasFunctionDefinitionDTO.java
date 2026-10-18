@@ -23,7 +23,7 @@ public class CanvasFunctionDefinitionDTO {
   private CanvasFunctionReferencePolicyDTO referencePolicy;
   private Boolean available;
 
-  /** 目录暴露的版本身份：epoch 与该函数定义 fingerprint 一起从同一次目录租用取得。 */
+  /** 目录暴露的版本身份：该函数完整定义的 fingerprint。 */
   private CanvasFunctionVersionDTO version;
 
   /** required-nullable：available 时必须显式输出 null。 */

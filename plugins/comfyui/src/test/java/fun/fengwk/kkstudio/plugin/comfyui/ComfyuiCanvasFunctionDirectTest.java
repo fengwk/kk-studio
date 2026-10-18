@@ -662,7 +662,7 @@ class ComfyuiCanvasFunctionDirectTest {
         NODE,
         "direct",
         REQUEST,
-        new CanvasFunctionBinding(1L, adapter.functions().get(0), null),
+        new CanvasFunctionBinding(adapter.functions().get(0)),
         new JsonObject(args),
         List.of(imageReference()),
         outputs(adapter),
@@ -686,14 +686,7 @@ class ComfyuiCanvasFunctionDirectTest {
 
   private static PluginCredentialSnapshot snapshot(String apiKeyLiteral) {
     return new PluginCredentialSnapshot(
-        "comfyui",
-        UUID.randomUUID(),
-        "context-fingerprint",
-        null,
-        null,
-        1L,
-        new byte[] {1},
-        "{\"apiKey\":\"" + apiKeyLiteral + "\"}");
+        "comfyui", null, null, 1L, "{\"apiKey\":\"" + apiKeyLiteral + "\"}");
   }
 
   private static CanvasFunctionFrozenReference imageReference() {

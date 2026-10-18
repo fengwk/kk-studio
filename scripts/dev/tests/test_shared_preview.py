@@ -50,17 +50,16 @@ REQUIRED_KEYS = (
     "KK_STUDIO_STORAGE_S3_ACCESS_KEY",
     "KK_STUDIO_STORAGE_S3_SECRET_KEY",
 )
-OPTIONAL_KEYS = ("KK_STUDIO_PLUGINS_CREDENTIAL_KEY_FILE",)
 PREVIEW_MARKER = "KK_STUDIO_SHARED_PREVIEW"
 
 # 配置值统一带这个前缀，便于断言任何失败路径都没有回显过真实内容。
 VALUE_PREFIX = "fixture-value-"
 
 
-def placeholder_config(omit=(), empty=(), optional=False):
+def placeholder_config(omit=(), empty=()):
     """Render a syntactically valid owner-only config fixture with marker values."""
     lines = ["# kk-studio shared-preview fixture", ""]
-    keys = REQUIRED_KEYS + (OPTIONAL_KEYS if optional else ())
+    keys = REQUIRED_KEYS
     for key in keys:
         if key in omit:
             continue
@@ -98,7 +97,7 @@ def clean_environment():
         "FRONTEND_HOST",
     ):
         environment.pop(name, None)
-    for key in REQUIRED_KEYS + OPTIONAL_KEYS:
+    for key in REQUIRED_KEYS:
         environment.pop(key, None)
     return environment
 
@@ -520,7 +519,7 @@ class TestSharedPreviewConfigLoader(unittest.TestCase):
         """Every success and failure path keeps the external data-plane values out of output."""
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            good = write_config(root, placeholder_config(optional=True), name="good.env")
+            good = write_config(root, placeholder_config(), name="good.env")
             scenarios = [
                 {"SHARED_PREVIEW_ENV_FILE": str(good)},
                 {"SHARED_PREVIEW_ENV_FILE": str(good), PREVIEW_MARKER: "true",
@@ -546,7 +545,7 @@ class TestSharedPreviewConfigLoader(unittest.TestCase):
         """The tracked template must contain names only, never a host or a credential."""
         template = SHARED_PREVIEW_TEMPLATE.read_text()
 
-        for key in REQUIRED_KEYS + OPTIONAL_KEYS:
+        for key in REQUIRED_KEYS:
             self.assertRegex(template, rf"(?m)^{key}=$", f"{key} must be an empty placeholder")
         self.assertIn(".config/kk-studio/shared-preview.env", template)
         self.assertIn("SHARED_PREVIEW_ENV_FILE", template)

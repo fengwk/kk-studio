@@ -24,7 +24,6 @@ import fun.fengwk.kkstudio.platform.plugin.PluginRenewalNotSentException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
-import java.util.UUID;
 
 /**
  * MiniMax Mavis 凭据自动刷新器（MiniMaxMavisCredentialRefresher）测试。
@@ -35,12 +34,6 @@ import java.util.UUID;
  * PluginCredentialException（结果未知，永不重放）。
  */
 class MiniMaxMavisCredentialRefresherTest {
-
-  /** 本测试使用的固定认证代际：仓库/CAS 断言只要求同代际内一致。 */
-  private static final UUID AUTH_GENERATION =
-      UUID.fromString("00000000-0000-0000-0000-0000000000b1");
-
-  private static final String AUTH_CONTEXT = "a1".repeat(32);
 
   private static final Instant FIXED_NOW = Instant.ofEpochSecond(1_700_000_000L);
   private static final Clock CLOCK = Clock.fixed(FIXED_NOW, ZoneOffset.UTC);
@@ -55,14 +48,7 @@ class MiniMaxMavisCredentialRefresherTest {
         new MiniMaxMavisCredentialPayload(OLD_TOKEN, CLIENT_UUID, FIXED_NOW).toJson();
     this.snapshotCn =
         new PluginCredentialSnapshot(
-            MiniMaxMavisPlugin.PLUGIN_ID,
-            AUTH_GENERATION,
-            AUTH_CONTEXT,
-            "CN",
-            FIXED_NOW.plusSeconds(3600),
-            0L,
-            new byte[0],
-            payloadJson);
+            MiniMaxMavisPlugin.PLUGIN_ID, "CN", FIXED_NOW.plusSeconds(3600), 0L, payloadJson);
   }
 
   /** 验证刷新成功时，新材料的 region 与快照严格一致，且携带新 token 与更新的刷新计划。 */
@@ -181,12 +167,9 @@ class MiniMaxMavisCredentialRefresherTest {
     PluginCredentialSnapshot badRegionSnapshot =
         new PluginCredentialSnapshot(
             MiniMaxMavisPlugin.PLUGIN_ID,
-            AUTH_GENERATION,
-            AUTH_CONTEXT,
             "UNKNOWN_REGION",
             FIXED_NOW.plusSeconds(3600),
             0L,
-            new byte[0],
             snapshotCn.payloadJson());
 
     MavisClient mockClient = mock(MavisClient.class);

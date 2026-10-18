@@ -68,7 +68,6 @@ describe('plugin HTTP contract', () => {
     const raw = httpGoldenData('connection-check-http.json')
     expect(decodePluginConnectionCheckDTO(raw)).toEqual({
       pluginId: 'beta-deep-connected',
-      appliedEpoch: '14',
       appliedRevision: '8',
       checkedAt: 1772366400,
       reachability: 'REACHABLE',

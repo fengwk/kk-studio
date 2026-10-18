@@ -15,11 +15,11 @@ public final class TestCatalogSources {
 
   private TestCatalogSources() {}
 
-  /** 单租用 source：{@code acquireCurrent()} 返回固定租用。 */
+  /** 单租用 source：{@code acquire()} 返回固定租用。 */
   public static RuntimeToolCatalogSource singleLease(RuntimeToolCatalog catalog) {
     RuntimeToolCatalogSource catalogSource = mock(RuntimeToolCatalogSource.class);
     RuntimeToolCatalogSource.Lease lease = mock(RuntimeToolCatalogSource.Lease.class);
-    when(catalogSource.acquireCurrent()).thenReturn(lease);
+    when(catalogSource.acquire()).thenReturn(lease);
     when(lease.catalog()).thenReturn(catalog);
     return catalogSource;
   }

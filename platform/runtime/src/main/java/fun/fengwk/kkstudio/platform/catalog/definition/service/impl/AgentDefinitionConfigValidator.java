@@ -38,8 +38,8 @@ public final class AgentDefinitionConfigValidator {
   }
 
   private void validateToolNames(List<String> values) {
-    // 一次 current 租用包住完整校验：存在性与可见性来自同一个冻结目录 epoch。
-    try (RuntimeToolCatalogSource.Lease lease = toolCatalogSource.acquireCurrent()) {
+    // 一次租用包住完整校验：存在性与可见性来自同一份目录快照。
+    try (RuntimeToolCatalogSource.Lease lease = toolCatalogSource.acquire()) {
       for (String toolName : values) {
         ToolContribution contribution = lease.catalog().findTool(toolName).orElse(null);
         if (contribution == null) {

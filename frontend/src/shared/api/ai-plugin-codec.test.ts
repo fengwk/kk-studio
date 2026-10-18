@@ -34,8 +34,6 @@ describe('ai-plugin-codec', () => {
         },
       },
     },
-    desiredEpoch: '10',
-    appliedEpoch: '10',
     desiredRevision: '5',
     appliedRevision: '5',
     connectionCheckSupported: true,
@@ -71,8 +69,6 @@ describe('ai-plugin-codec', () => {
         },
       },
     },
-    desiredEpoch: '1',
-    appliedEpoch: '1',
     desiredRevision: '1',
     appliedRevision: '1',
     connectionCheckSupported: false,
@@ -100,8 +96,6 @@ describe('ai-plugin-codec', () => {
       defaultsJson: '{}',
       secrets: {},
     },
-    desiredEpoch: '0',
-    appliedEpoch: '0',
     desiredRevision: '1',
     appliedRevision: '1',
     connectionCheckSupported: false,
@@ -148,7 +142,7 @@ describe('ai-plugin-codec', () => {
     expect(() =>
       decodePluginDTO({
         ...sampleDeepLinkDTO,
-        desiredEpoch: '9223372036854775808', // Long.MAX_VALUE + 1
+        desiredRevision: '9223372036854775808', // Long.MAX_VALUE + 1
       }),
     ).toThrowError(/exceeds 64-bit signed integer range/)
   })
@@ -245,7 +239,6 @@ describe('ai-plugin-codec', () => {
 
   const connectionCheckDTO = {
     pluginId: 'opencli',
-    appliedEpoch: '14',
     appliedRevision: '8',
     checkedAt: 1772366400,
     reachability: 'REACHABLE',
@@ -268,7 +261,7 @@ describe('ai-plugin-codec', () => {
       remoteHealth: 'HEALTHY',
     })).toThrowError(/Unknown property at connectionCheck/)
 
-    for (const field of ['pluginId', 'appliedEpoch', 'appliedRevision', 'checkedAt', 'reachability', 'authentication', 'browserSession']) {
+    for (const field of ['pluginId', 'appliedRevision', 'checkedAt', 'reachability', 'authentication', 'browserSession']) {
       const withoutField: Record<string, unknown> = { ...connectionCheckDTO }
       delete withoutField[field]
       expect(() => decodePluginConnectionCheckDTO(withoutField), field).toThrowError(
@@ -278,13 +271,11 @@ describe('ai-plugin-codec', () => {
 
     expect(() => decodePluginConnectionCheckDTO({ ...connectionCheckDTO, pluginId: '' }))
       .toThrowError(/pluginId must be a non-empty string/)
-    expect(() => decodePluginConnectionCheckDTO({ ...connectionCheckDTO, appliedEpoch: null }))
-      .toThrowError(/appliedEpoch must be a string/)
     expect(() => decodePluginConnectionCheckDTO({ ...connectionCheckDTO, appliedRevision: '08' }))
       .toThrowError(/canonical non-negative decimal string/)
     expect(() => decodePluginConnectionCheckDTO({
       ...connectionCheckDTO,
-      appliedEpoch: '9223372036854775808',
+      appliedRevision: '9223372036854775808',
     })).toThrowError(/exceeds 64-bit signed integer range/)
     expect(() => decodePluginConnectionCheckDTO({ ...connectionCheckDTO, checkedAt: null }))
       .toThrowError(/checkedAt must not be null/)
@@ -292,14 +283,10 @@ describe('ai-plugin-codec', () => {
       .toThrowError(/epoch seconds or an ISO date-time string/)
   })
 
-  it('rejects a zero applied revision while still accepting a zero applied epoch', () => {
+  it('rejects a zero applied revision', () => {
     // 响应中的已应用修订必须为正：0 表示本节点没有已应用配置，绝不被当作可用坐标。
     expect(() => decodePluginConnectionCheckDTO({ ...connectionCheckDTO, appliedRevision: '0' }))
       .toThrowError(/appliedRevision must be a positive decimal string/)
-    // epoch 从 0 起是合法的。
-    expect(
-      decodePluginConnectionCheckDTO({ ...connectionCheckDTO, appliedEpoch: '0' }).appliedEpoch,
-    ).toBe('0')
     expect(
       decodePluginConnectionCheckDTO({ ...connectionCheckDTO, appliedRevision: '1' }).appliedRevision,
     ).toBe('1')

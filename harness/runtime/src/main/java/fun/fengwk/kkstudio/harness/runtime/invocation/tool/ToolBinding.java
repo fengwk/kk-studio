@@ -9,13 +9,12 @@ import java.util.Objects;
 
 /**
  * 单次 Tool invocation 的冻结 binding：完整 Agent tool definition、Contributor provenance、环境支持级别、可选
- * Environment 路由身份 / 名称，以及冻结该 binding 的目录 epoch 与可空插件来源。
+ * Environment 路由身份 / 名称。
  *
  * <p>{@link AgentToolDefinition#descriptor()} 的 name 同时是 model contract、durable registry 与
  * permission identity。Contributor 必须非空。
  *
- * <p>{@code catalogEpoch} 是规划该 binding 时租用目录的 epoch：执行与恢复只能按该 epoch 重新取得同一份冻结目录，绝不按当前同名工具
- * 静默重放。{@code pluginSource} 记录插件工具的安装身份、代码版本、配置修订与能力/凭据指纹；内置与 MCP 工具没有插件来源，恒为 {@code null}。
+ * <p>执行时按工具名在当前目录中取回贡献，并要求完整定义一致；工具已移除或定义已变化时调用以确定性错误失败，绝不按新定义执行旧参数。
  *
  * <p>环境组合规则是封闭的：{@link EnvironmentSupport#NONE} 不得携带环境；{@link EnvironmentSupport#OPTIONAL}
  * 可以携带当前选择，也可以完全不携带；{@link EnvironmentSupport#REQUIRED} 的正常规划结果必须携带环境——无选择的 {@code REQUIRED} 工具在
@@ -26,18 +25,13 @@ import java.util.Objects;
  * environment-bound 调用必须降级。
  */
 public record ToolBinding(
-    long catalogEpoch,
     AgentToolDefinition definition,
     ContributorBinding contributor,
     EnvironmentSupport environmentSupport,
     EnvironmentId environmentId,
-    String environmentName,
-    ToolPluginSource pluginSource) {
+    String environmentName) {
 
   public ToolBinding {
-    if (catalogEpoch <= 0) {
-      throw new IllegalArgumentException("catalogEpoch must be positive");
-    }
     definition = Objects.requireNonNull(definition, "definition");
     contributor = Objects.requireNonNull(contributor, "contributor");
     environmentSupport = Objects.requireNonNull(environmentSupport, "environmentSupport");

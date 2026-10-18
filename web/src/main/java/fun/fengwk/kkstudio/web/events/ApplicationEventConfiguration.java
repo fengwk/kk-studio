@@ -11,7 +11,7 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessThreadChangeSource;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEventJsonCodec;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrchestrator;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRefreshTrigger;
-import fun.fengwk.kkstudio.platform.plugin.persistence.postgresql.PostgresqlPluginCatalogChangeNotifier;
+import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsChangeHandler;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
@@ -160,7 +160,7 @@ public class ApplicationEventConfiguration {
   public PostgresqlNotificationHandler pluginCatalogNotificationHandler(
       PluginCatalogRefreshTrigger trigger) {
     return new PostgresqlNotificationHandler(
-        PostgresqlPluginCatalogChangeNotifier.CHANNEL,
+        PluginConfigurationRepository.CHANNEL,
         ignored -> trigger.requestRefresh(),
         trigger::requestRefresh);
   }

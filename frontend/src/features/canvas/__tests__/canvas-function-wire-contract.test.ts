@@ -23,15 +23,13 @@ function golden(filename: string): Record<string, unknown> {
 }
 
 describe('canvas function HTTP contract', () => {
-  // 版本身份的 epoch 是 Java long 文本、指纹是 lowercase SHA-256；严格解码器逐值接受。
+  // 版本身份只有 lowercase SHA-256 定义指纹；严格解码器逐值接受。
   it('decodes the production-mapper version golden strictly', () => {
     const raw = golden('canvas-function-version-http.json')
     expect(isCanvasFunctionVersion(raw)).toBe(true)
     expect(decodeCanvasFunctionVersion(raw)).toEqual({
-      catalogEpoch: '1',
       definitionFingerprint: '3c9a6c2b5f1d4e8a7b0c9d2e3f4a5b6c7d8e9f0a1b2c3d4e5f60718293a4b5c6',
     })
-    expect(raw.catalogEpoch).toBe('1')
   })
 
   // start 请求恰好是 {requestId, expectedVersion}；expectedVersion 是同一份严格版本片段。

@@ -259,8 +259,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
   }
 
   private LiveTurnPlan.Planned plan(EntryPath path, BranchSettings settings, Instant now) {
-    // 一次 current 租用包住 complete resolve：工具 schema、插件来源与 contributor 元数据都来自同一个冻结 epoch。
-    try (RuntimeToolCatalogSource.Lease lease = toolCatalogSource.acquireCurrent()) {
+    // 一次租用包住 complete resolve：工具 schema 与 contributor 元数据都来自同一份快照。
+    try (RuntimeToolCatalogSource.Lease lease = toolCatalogSource.acquire()) {
       return plan(path, settings, now, lease);
     }
   }
@@ -372,7 +372,6 @@ public final class DatabaseTurnResolver implements TurnResolver {
                 sessionId.toString());
     return new LiveTurnPlan.Planned(
         new ModelRequestSpec(
-            lease.epoch(),
             providerType,
             providerConnectionGenerationId,
             descriptor,
@@ -590,7 +589,6 @@ public final class DatabaseTurnResolver implements TurnResolver {
     List<LiveTurnPlan.CandidateTool> sent = new ArrayList<>(toolNames.size());
     List<LiveTurnPlan.CandidateTool> filtered = new ArrayList<>();
     RuntimeToolCatalog catalog = lease.catalog();
-    long catalogEpoch = lease.epoch();
     for (String toolName : toolNames) {
       ToolContribution contribution = catalog.findTool(toolName).orElse(null);
       if (contribution == null) {
@@ -640,13 +638,11 @@ public final class DatabaseTurnResolver implements TurnResolver {
           environmentSupport == EnvironmentSupport.NONE ? null : environmentName;
       bindings.add(
           new ToolBinding(
-              catalogEpoch,
               contribution.definition(),
               contributor,
               environmentSupport,
               boundEnvironmentId,
-              boundEnvironmentName,
-              lease.pluginSource(contribution.id())));
+              boundEnvironmentName));
       sent.add(candidateTool(contribution, inputSchemaJson, LiveTurnPlan.ToolState.SENT, null));
     }
     List<LiveTurnPlan.CandidateTool> candidates = new ArrayList<>(sent.size() + filtered.size());

@@ -29,7 +29,6 @@ import java.net.http.HttpResponse;
 import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -293,15 +292,7 @@ class OpenCliResponseDeadlineTest {
 
   private static PluginCredentialAccess fakeCredentialAccess(String apiKey) {
     PluginCredentialSnapshot snapshot =
-        new PluginCredentialSnapshot(
-            "opencli",
-            UUID.randomUUID(),
-            "context",
-            null,
-            null,
-            0L,
-            new byte[0],
-            "{\"apiKey\":\"" + apiKey + "\"}");
+        new PluginCredentialSnapshot("opencli", null, null, 0L, "{\"apiKey\":\"" + apiKey + "\"}");
     return new PluginCredentialAccess() {
       @Override
       public PluginCredentialSnapshot resolve() {

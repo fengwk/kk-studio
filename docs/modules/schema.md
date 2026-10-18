@@ -25,7 +25,7 @@ V1 写入单行 SystemSettings 默认聚合；Java 解码与 profile 默认契�
 | 区域 | 表与事实 | 语义事实源 |
 | --- | --- | --- |
 | Catalog | agent_provider/model/definition、skill_package | [Platform Catalog](platform.md#catalog) |
-| Plugin | plugin_catalog_state：当前 epoch 指针；plugin_catalog_revision：每个 epoch 的不可变完整 manifest；plugin_configuration_revision：不可变普通配置历史；plugin_credential：认证密文、认证代际、状态、refresh lease | [Plugin 配置存储](platform.md#plugin-配置存储)、[Plugin credential](platform.md#plugin-credential) |
+| Plugin | plugin_configuration：每个 Plugin 的当前普通配置与修订；plugin_credential：凭据载荷、状态、refresh lease；plugin_auth_attempt：待完成的交互式认证 | [Plugin 配置存储](platform.md#plugin-配置存储)、[Plugin credential](platform.md#plugin-credential) |
 | MCP | mcp_server、mcp_tool：配置与原子发现快照 | [Platform MCP](platform.md#mcp-server-与运行时工具目录) |
 | Environment | environment、environment_connection：注册与环境路由租约、保存的安装设置（`install_config`）、宿主/Skill 投影；cluster_node：App 节点内部 IDE 路由 origin 与心跳租约 | [Environment](harness-environment.md) |
 | Chat | chat、chat_session：owner 关系 | [Platform](platform.md#命令接受产品归属与派发) |
@@ -44,15 +44,10 @@ V1 写入单行 SystemSettings 默认聚合；Java 解码与 profile 默认契�
 Run 区间和节点资源属于同一聚合；CHECK 约束防御形状，业务授权与转换由 service 决定。
 所有外键为即时校验，删除依赖由应用按明确顺序处理；MCP 工具随所属 server 级联删除。
 
-Plugin catalog 恒为 `id = 1` 单行，只保存指向 `plugin_catalog_revision` 的 epoch 指针、时间与
-外键，因此 epoch 与 manifest 不双来源；`plugin_catalog_revision` 按 epoch 永久保存不可变完整
-manifest，包含初始化的 epoch 0。epoch 0、空 manifest 只表示未初始化。提交用同一条语句同时推进
-指针并新建该 epoch 的 manifest 历史，语句末的即时外键校验保证两者同时成立，CAS 未命中则不留下任何历史。
-配置历史主键为 `(plugin_id, revision)`，
-revision 是写入时的全局 epoch，只有插入入口。`values_json` 是 text：
+Plugin 配置每个 pluginId 一行，`revision` 为正并以 CAS 推进。`values_json` 是 text：
 数据库要求严格 JSON object、每层对象键唯一及最多 65,536 UTF-8 字节，
-避免 jsonb 数值展开改变普通值的字节预算和恢复形态。manifest 引用、代码/Schema/能力身份、
-未修改条目的基线一致性由应用在同一提交事务核验；秘密仍只在 credential 密文中。
+避免 jsonb 数值展开改变普通值的字节预算和恢复形态。秘密只在 `plugin_credential.payload_json` 中，
+其每次写入推进 `version`。`plugin_auth_attempt` 只保存 nonce 摘要与 prepare 时的配置修订。
 
 Canvas Resource 的 blob/text 恰好一个非空，owner/index 成对且槽位唯一。
 Run 以 node_id 保存当前/最后执行，状态与 lease/available/error 字段组合匹配；
@@ -73,7 +68,7 @@ PENDING upload 的 candidate id 在 complete 创建 Blob 后才绑定真实外�
 存储写入本身的阻断仍属于对象存储能力边界。
 
 通知只作提交后回读/唤醒提示。应用推进 Thread/Canvas 版本与 Project/Issue 事实，并由该写路径在同一事务内对数据库连接执行内建 `pg_notify`（提交后才投递，回滚静默）。
-Plugin 配置提交也在同一事务发出 `plugin_catalog_changed`，通知不推进 epoch。
+Plugin 配置与凭据写入也在同一事务发出 `plugin_changed`。
 执行树与工具交互提示（`harness_thread_tree`、`harness_tool_interaction`）的 payload 定位真实执行根；环境失效提示 `environment_changed` 的 payload 是 Environment ID。它们同样由写入口发布，通知本身不推进、也不伪造任何 Thread version。恢复依赖权威行、poll 和租约，而非通知保存。
 
 ## 修改结构

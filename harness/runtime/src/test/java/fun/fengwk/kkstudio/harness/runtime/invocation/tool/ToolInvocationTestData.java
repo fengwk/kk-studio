@@ -34,24 +34,20 @@ final class ToolInvocationTestData {
 
   static ToolBinding host(String name) {
     return new ToolBinding(
-        1L,
         definition(name),
         new ContributorBinding("core", name, List.of()),
         EnvironmentSupport.NONE,
-        null,
         null,
         null);
   }
 
   static ToolBinding environment(String name) {
     return new ToolBinding(
-        1L,
         definition(name),
         new ContributorBinding("base", name, List.of()),
         EnvironmentSupport.REQUIRED,
         ENV_ID,
-        "dev",
-        null);
+        "dev");
   }
 
   private static AgentToolDefinition definition(String name) {

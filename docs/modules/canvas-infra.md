@@ -41,10 +41,9 @@ Snapshot 读路径是 [`PostgresqlCanvasQueryService.findSnapshot`](../../canvas
 lock document (FOR UPDATE) -> lock node -> lock current run (FOR UPDATE)
   -> requestId 与现有 Run 相同：直接返回既有 Run（不推进 revision）
   -> 现有 Run 处于 READY/RUNNING/UNKNOWN 且 requestId 不同：conflict
-  -> acquireCurrent
-  -> 版本围栏（一）：expectedVersion 的 epoch 必须等于本次租用冻结的 epoch，早于按名绑定（新 epoch 已移除该函数时旧版本仍是 conflict）
-  -> bind(name) + require(binding)
-  -> 版本围栏（二）：绑定后比较该函数完整定义 fingerprint
+  -> acquire
+  -> 按名查找当前函数：已移除即 conflict
+  -> 版本围栏：比较该函数完整定义 fingerprint 与 expectedVersion
   -> requireAvailable；严格解码 args
   -> 冻结 manifest：每个引用节点必须存在、index 必须在资源范围内且必须是 blob
   -> 校验 frozen blob facts 与 function reference policy
@@ -56,9 +55,9 @@ lock document (FOR UPDATE) -> lock node -> lock current run (FOR UPDATE)
   -> advanceRevision(revision + 1)
 ```
 
-客户端在启动时必须回传它从目录读到的 `expectedVersion`（epoch + 该函数定义 fingerprint）。围栏在同一租用内、在 pin、Run 写入、task submit 与任何外部调用之前比较，因此目录已前进或同名函数换了定义都只会得到 conflict，既不自动重试，也不退回当前同名定义。精确 requestId 重放优先于该比较：已接受的请求即使版本已陈旧也返回既有 Run，不重新取租用或提交。
+客户端在启动时必须回传它从目录读到的 `expectedVersion`（该函数定义 fingerprint）。围栏在同一租用内、在 pin、Run 写入、task submit 与任何外部调用之前比较，因此函数已移除或同名函数换了定义都只会得到 conflict，既不自动重试，也不退回当前同名定义。精确 requestId 重放优先于该比较：已接受的请求即使版本已陈旧也返回既有 Run，不重新取租用或提交。
 
-目录租用从取得一直保持到事务 `afterCompletion`，提交与回滚均释放，不能在事务提交前关闭 adapter。持久状态格式为版本 5，保存完整函数定义与来源绑定，不只保存函数名；解码不需要当前目录。引用在启动瞬间取 source node 的 resource identity、blob id 与权威媒体事实。之后无论用户改了配置、解除引用还是替换了源资源，这个 Run 的输入都不变。`preflight` 在事务内、在写入 READY 之前执行，因此被拒绝的配置不会留下队列事实。
+目录租用从取得一直保持到事务 `afterCompletion`，提交与回滚均释放，不能在事务提交前关闭 adapter。持久状态保存完整函数定义，不只保存函数名；解码不需要当前目录。引用在启动瞬间取 source node 的 resource identity、blob id 与权威媒体事实。之后无论用户改了配置、解除引用还是替换了源资源，这个 Run 的输入都不变。`preflight` 在事务内、在写入 READY 之前执行，因此被拒绝的配置不会留下队列事实。
 
 ### claim：数据库就是队列
 
@@ -83,9 +82,9 @@ update canvas_function_run
 postgres 的 NOTIFY 由组合根接进同一个共享 `LISTEN` 连接：[`ApplicationEventConfiguration`](../../web/src/main/java/fun/fengwk/kkstudio/web/events/ApplicationEventConfiguration.java) 把 `CanvasFunctionDispatcher.CHANNEL`（即 `canvas_function_work`）的 handler 指向 `dispatcher.wake()`，断连后由 `dispatcher::wake` 兜底。也就是说 NOTIFY 只提供低延迟，**正确性来自 poll 与 lease**：通知丢失、listener 重连、应用重启都能在下一次 poll 或租约过期后重新 claim。[`PostgresqlCanvasChangeNotifier#functionWorkChanged`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasChangeNotifier.java) 在写事务内于提交后行立刻可认领（`READY`、无 lease、`available_at <= now()`）时发空 payload；`canvas_revision` 通道只提示 document revision，客户端据此回读 Snapshot。
 
 [`CanvasFunctionWorker.run`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/function/CanvasFunctionWorker.java) 执行两阶段协议：
-1. 从版本 5 state JSON 解码完整冻结计划，不查询当前目录；
+1. 从 state JSON 解码完整冻结计划，不查询当前目录；
 2. 若 `submitState == SUBMITTING`，说明提交意图已持久化但进程曾崩溃导致状态不明，绝不重试提交，调用 `markUnknown` 将 Run 转换为 `UNKNOWN` 状态，退出自动调度并保留 pin 与目标资源等待人工核对；
-3. 按冻结的 `catalogEpoch` 取得租用并校验完整 binding，持有至本次执行结束；若 `submitState == PENDING`，在独立事务调用 `beginSubmit` 先行持久化 `SUBMITTING` 意图，随后调用 adapter 的 `submit`，外部确认后再经 `confirmSubmitted` 持久化 `SUBMITTED`；
+3. 取得当前目录租用并持有至本次执行结束：尚未提交的 Run 要求同名函数定义与冻结定义完全一致，否则以「函数已不可用或定义已变化，请重新启动」失败；已提交的 Run 只需同名函数仍存在（已移除则转 `UNKNOWN` 待人工核查）。若 `submitState == PENDING`，在独立事务调用 `beginSubmit` 先行持久化 `SUBMITTING` 意图，随后调用 adapter 的 `submit`，外部确认后再经 `confirmSubmitted` 持久化 `SUBMITTED`；
 4. 调用 adapter 的 `execute`（仅查询和物化预分配目标 resource id），确认返回值恰好是冻结目标 id，最后 `completeSuccess`。
 
 执行期间 heartbeat 按固定间隔续租，**只**更新 `lease_until`，不触碰 document revision、Run state 或其他业务事实；续租返回 false 或抛 `RuntimeException` 时把 `ownershipLost` 置位，worker 随即停止新的 checkpoint 与 terminal 写入。Run 被 cancel、node/document 被删或租约被新 owner 接管则表现为短事务 CAS 失败，被转成 `CanvasFunctionInternalCancellation` 后静默退出。adapter 抛出普通异常时，worker 在仍持有所有权时用固定文案走 `failIfRunning`，Run 进入业务 `FAILED`；抛出 `CanvasFunctionUnknownException` 时改走 `markUnknown`。`Error` 不在此处吞掉而是上抛，交由进程外失败处理，其 Run 由租约到期后的恢复路径重新 claim。无论走哪条路径，worker 都在 `finally` 中取消 heartbeat 调度任务，不留下续租残留。
@@ -129,7 +128,7 @@ pollIntervalMillis      = 1000     rejectionDelayMillis    = 1000
 - 改 SQL 或加列：先看 [`V1__schema.sql`](../../schema/src/main/resources/db/migration/V1__schema.sql) 的 canvas 段与 [Schema](schema.md) 的重建规则，再改对应 JdbcStore 与集成测试；`canvas_*` 的外键全部 RESTRICT，删除顺序不能靠 cascade。
 - 改命令写路径与读模型：[`PostgresqlCanvasCommandService.java`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasCommandService.java)、[`PostgresqlCanvasQueryService.java`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasQueryService.java)、[`PostgresqlCanvasStore.java`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasStore.java) 与 [`PostgresqlCanvasResourceLifecycle.java`](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/postgresql/PostgresqlCanvasResourceLifecycle.java)。
 - 改 Runtime：[`function` 目录](../../canvas/infra/src/main/java/fun/fengwk/kkstudio/canvas/infra/function/) 下的 dispatcher、worker、transactions、properties、codec 是一个整体；改动 lease 语义时同步检查 `claimNext` 的 `where` 与 `CanvasFunctionRunTransactions` 的 lock order。
-- 新增模型能力：在插件模块实现 `CanvasFunctionAdapter`，由 [Platform](platform.md) 发布到不可变 epoch 快照；任务持久绑定目录版本，并在执行期间持有对应租用。
+- 新增模型能力：在插件模块实现 `CanvasFunctionAdapter`，由 [Platform](platform.md) 发布到插件快照；任务冻结完整函数定义，并在执行期间持有目录租用。
 
 测试入口（标出「纯 JUnit」的不需要数据库，其余使用 Testcontainers PostgreSQL）：
 

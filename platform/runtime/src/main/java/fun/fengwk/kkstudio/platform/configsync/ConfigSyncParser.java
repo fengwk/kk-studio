@@ -539,7 +539,7 @@ public final class ConfigSyncParser {
   /**
    * 已安装插件的普通配置条目：安装身份加该插件 schema 归一化后的普通值文本。
    *
-   * <p>只承载 wire 上的两个字段；epoch、修订、秘密与其它身份事实都不属于 portable 条目。
+   * <p>只承载 wire 上的两个字段；修订、秘密与其它身份事实都不属于 portable 条目。
    */
   public record PluginSpec(String pluginId, String valuesJson) {}
 

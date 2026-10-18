@@ -23,7 +23,6 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenOutput;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenReference;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionOutputSpec;
-import fun.fengwk.kkstudio.canvas.function.CanvasFunctionPluginSource;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunStateCodecPort;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionSubmitState;
@@ -39,36 +38,25 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
-/** FunctionRun typed/versioned stateJson 的唯一 codec：冻结完整 binding（目录 epoch、完整定义与插件来源）加 checkpoint。 */
+/** FunctionRun stateJson 的唯一 codec：冻结完整函数定义与执行计划，加 checkpoint。 */
 @Component
 public final class CanvasFunctionRunStateCodec implements CanvasFunctionRunStateCodecPort {
 
-  public static final int VERSION = 5;
   public static final int MAX_ADAPTER_STATE_BYTES = 64 * 1024;
 
   private static final Pattern STAGE = Pattern.compile("[A-Z][A-Z0-9_]{0,63}");
-  private static final Set<String> ROOT_FIELDS = Set.of("version", "plan", "stage", "adapterState");
+  private static final Set<String> ROOT_FIELDS = Set.of("plan", "stage", "adapterState");
   private static final Set<String> PLAN_FIELDS =
       Set.of(
           "canvasId",
           "nodeId",
           "nodeName",
           "requestId",
-          "catalogEpoch",
-          "pluginSource",
           "definition",
           "args",
           "manifest",
           "outputs",
           "submitState");
-  private static final Set<String> SOURCE_FIELDS =
-      Set.of(
-          "pluginId",
-          "pluginCodeVersion",
-          "configRevision",
-          "capabilityFingerprint",
-          "authGeneration",
-          "contextFingerprint");
   private static final Set<String> DEFINITION_FIELDS =
       Set.of("name", "description", "argsSchema", "outputs", "referencePolicy");
   private static final Set<String> DEFINITION_OUTPUT_FIELDS = Set.of("kind", "name");
@@ -113,19 +101,11 @@ public final class CanvasFunctionRunStateCodec implements CanvasFunctionRunState
   public String encode(CanvasFunctionFrozenRun run) {
     validateStage(run.stage());
     ObjectNode root = MAPPER.createObjectNode();
-    root.put("version", VERSION);
     ObjectNode plan = root.putObject("plan");
     plan.put("canvasId", run.canvasId().toString());
     plan.put("nodeId", run.nodeId().toString());
     plan.put("nodeName", run.nodeName());
     plan.put("requestId", run.requestId().toString());
-    plan.put("catalogEpoch", run.binding().catalogEpoch());
-    CanvasFunctionPluginSource pluginSource = run.binding().pluginSource();
-    if (pluginSource == null) {
-      plan.putNull("pluginSource");
-    } else {
-      plan.set("pluginSource", sourceNode(pluginSource));
-    }
     plan.set("definition", definitionNode(run.binding().definition()));
     plan.set("args", argsNode(run.args()));
     ArrayNode manifest = plan.putArray("manifest");
@@ -175,17 +155,11 @@ public final class CanvasFunctionRunStateCodec implements CanvasFunctionRunState
     try {
       ObjectNode root = object(MAPPER.readTree(json), "state");
       requireExactFields(root, ROOT_FIELDS, "state");
-      JsonNode version = required(root, "version");
-      if (!version.isIntegralNumber() || version.intValue() != VERSION) {
-        throw invalid("state.version must be " + VERSION);
-      }
       ObjectNode plan = object(required(root, "plan"), "state.plan");
       requireExactFields(plan, PLAN_FIELDS, "state.plan");
       CanvasFunctionBinding binding =
           new CanvasFunctionBinding(
-              positiveLong(plan, "catalogEpoch"),
-              definition(object(required(plan, "definition"), "state.plan.definition")),
-              source(plan.get("pluginSource")));
+              definition(object(required(plan, "definition"), "state.plan.definition")));
       CanvasFunctionDefinition definition = binding.definition();
       // args 在 state 里是 JSON object（与 adapterState 一致），复用 Core 的严格解析与上限校验。
       JsonObject args =
@@ -262,32 +236,6 @@ public final class CanvasFunctionRunStateCodec implements CanvasFunctionRunState
         submitState,
         stage,
         adapterState);
-  }
-
-  private ObjectNode sourceNode(CanvasFunctionPluginSource source) {
-    ObjectNode node = MAPPER.createObjectNode();
-    node.put("pluginId", source.pluginId());
-    node.put("pluginCodeVersion", source.pluginCodeVersion());
-    node.put("configRevision", source.configRevision());
-    node.put("capabilityFingerprint", source.capabilityFingerprint());
-    node.put("authGeneration", source.authGeneration().toString());
-    node.put("contextFingerprint", source.contextFingerprint());
-    return node;
-  }
-
-  private CanvasFunctionPluginSource source(JsonNode value) {
-    if (value == null || value.isNull()) {
-      return null;
-    }
-    ObjectNode node = object(value, "state.plan.pluginSource");
-    requireExactFields(node, SOURCE_FIELDS, "state.plan.pluginSource");
-    return new CanvasFunctionPluginSource(
-        text(node, "pluginId"),
-        text(node, "pluginCodeVersion"),
-        positiveLong(node, "configRevision"),
-        text(node, "capabilityFingerprint"),
-        uuid(node, "authGeneration"),
-        text(node, "contextFingerprint"));
   }
 
   private ObjectNode definitionNode(CanvasFunctionDefinition definition) {
@@ -478,14 +426,6 @@ public final class CanvasFunctionRunStateCodec implements CanvasFunctionRunState
     } catch (IllegalArgumentException exception) {
       throw invalid(field + " must be a canonical UUID string", exception);
     }
-  }
-
-  private static long positiveLong(ObjectNode node, String field) {
-    JsonNode value = required(node, field);
-    if (!value.isIntegralNumber() || !value.canConvertToLong() || value.longValue() <= 0L) {
-      throw invalid(field + " must be a positive integer");
-    }
-    return value.longValue();
   }
 
   private static long nonnegativeLong(ObjectNode node, String field) {

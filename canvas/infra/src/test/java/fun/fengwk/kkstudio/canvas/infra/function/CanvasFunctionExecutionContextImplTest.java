@@ -97,7 +97,7 @@ class CanvasFunctionExecutionContextImplTest {
             NODE,
             "output",
             REQUEST,
-            new CanvasFunctionBinding(1L, definition, null),
+            new CanvasFunctionBinding(definition),
             CanvasJson.parseObject("{}"),
             List.of(reference),
             List.of(
@@ -210,15 +210,13 @@ class CanvasFunctionExecutionContextImplTest {
             "output",
             REQUEST,
             new CanvasFunctionBinding(
-                1L,
                 CanvasFunctionDefinition.of(
                     "test.text",
                     "Text",
                     frozen.definition().argsSchema(),
                     CanvasResourceKind.TEXT,
                     new CanvasFunctionReferencePolicy(
-                        Set.of(CanvasResourceKind.IMAGE), 1, Map.of())),
-                null),
+                        Set.of(CanvasResourceKind.IMAGE), 1, Map.of()))),
             frozen.args(),
             frozen.manifest(),
             List.of(output),
