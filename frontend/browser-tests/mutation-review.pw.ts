@@ -34,14 +34,21 @@ function harness(page: Page, action: keyof HarnessApi, arg?: 'write' | 'edit'): 
 }
 
 async function verifyBoundedScrollAndNoBlowout(locator: Locator): Promise<void> {
-  const metrics = await locator.evaluate((el) => ({
-    clientHeight: el.clientHeight,
-    scrollHeight: el.scrollHeight,
-    clientWidth: el.clientWidth,
-    scrollWidth: el.scrollWidth,
-  }))
+  const metrics = await locator.evaluate((el) => {
+    const pane = el.closest('.mutation-pane, .mutation-approval-pane')!
+    return {
+      clientHeight: el.clientHeight,
+      scrollHeight: el.scrollHeight,
+      clientWidth: el.clientWidth,
+      scrollWidth: el.scrollWidth,
+      bottom: el.getBoundingClientRect().bottom,
+      paneBottom: pane.getBoundingClientRect().bottom,
+    }
+  })
 
   expect(metrics.scrollHeight).toBeGreaterThan(metrics.clientHeight)
+  // 不能由 flex 收缩和外层裁切伪装成有界视口，否则滚到底仍读不到末尾。
+  expect(metrics.bottom).toBeLessThanOrEqual(metrics.paneBottom)
   // 横向无溢出（允许 1px 亚像素抖动）
   expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth + 1)
 }
