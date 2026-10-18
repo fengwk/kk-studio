@@ -92,7 +92,7 @@ describe('IdeLifecycleProvider & DataRouter navigation blocker', () => {
       viewId: 'v-lifecycle',
       environmentId: readyEnv.id,
       directory: '/home/user',
-      entryUrl: 'https://ide.test/?workspace=1',
+      entryUrl: `/environment-ide/${readyEnv.id}/__ide/bootstrap?token=1`,
     })
 
     const { user, router } = renderTestHarness()
@@ -127,7 +127,7 @@ describe('IdeLifecycleProvider & DataRouter navigation blocker', () => {
       viewId: 'v-lifecycle',
       environmentId: readyEnv.id,
       directory: '/home/user',
-      entryUrl: 'https://ide.test/?workspace=1',
+      entryUrl: `/environment-ide/${readyEnv.id}/__ide/bootstrap?token=1`,
     })
     // Mock DIRTY error with internal path that should be sanitized
     vi.mocked(environmentService.closeIdeView).mockRejectedValueOnce(
@@ -183,7 +183,7 @@ describe('IdeLifecycleProvider & DataRouter navigation blocker', () => {
         viewId: 'v-lifecycle',
         environmentId: readyEnv.id,
         directory: '/home/user',
-        entryUrl: 'https://ide.test/?workspace=late',
+        entryUrl: `/environment-ide/${readyEnv.id}/__ide/bootstrap?token=late`,
       })
     })
 
@@ -204,7 +204,7 @@ describe('IdeLifecycleProvider & DataRouter navigation blocker', () => {
       viewId: 'v-lifecycle',
       environmentId: readyEnv.id,
       directory: '/home/user',
-      entryUrl: 'https://ide.test/?workspace=lock',
+      entryUrl: `/environment-ide/${readyEnv.id}/__ide/bootstrap?token=lock`,
     })
     let resolveClose: () => void = () => {}
     const closePromise = new Promise<void>((resolve) => {
@@ -303,7 +303,7 @@ describe('IdeLifecycleProvider & DataRouter navigation blocker', () => {
       viewId: 'v-lifecycle',
       environmentId: readyEnv.id,
       directory: '/home/user',
-      entryUrl: 'https://ide.test/?workspace=back',
+      entryUrl: `/environment-ide/${readyEnv.id}/__ide/bootstrap?token=back`,
     })
 
     function Workspace() {
