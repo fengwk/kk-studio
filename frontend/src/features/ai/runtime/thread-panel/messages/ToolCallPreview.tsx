@@ -1,11 +1,14 @@
+import { useI18n } from '@/shared/i18n'
 import { ToolOutputViewport } from '@/features/ai/runtime/thread-panel/messages/ToolOutputViewport'
 import type { ToolCallPreview as ToolCallPreviewData } from '@/features/ai/runtime/thread-panel/messages/tool-previews'
 
 /**
- * call 阶段下移的大参数正文：write 写入内容与 edit 执行前 diff。
+ * Shared mutation review component used by chat tool cards and actionable ApprovalCard.
  *
- * 默认即完整可见并可内部回看（不再按行截断或省略行数）；参数仍在流式生成时标记为
- * streaming，提醒这不是最终审查材料。edit 用 old/new 生成拟执行修改预览，绝不重复原文。
+ * - write: shows target path/workdir and exact complete content before approval in bounded scroll default expanded,
+ *   preserving all whitespace and newlines without line truncation.
+ * - edit: streamed incoming old/new input explicitly labeled as input, then real persisted
+ *   approvalJson.editReview / result details.editReview with real multi-hunk diff, or preparing state while waiting.
  */
 export function ToolCallPreview({
   preview,
@@ -14,23 +17,115 @@ export function ToolCallPreview({
   preview: ToolCallPreviewData
   streaming: boolean
 }) {
+  const { t } = useI18n()
+
+  if (preview.kind === 'write') {
+    if (!preview.content && preview.lines.length === 0) {
+      return null
+    }
+    return (
+      <div className="thread-tool-call-body">
+        <div className="thread-tool-preview-target">
+          <span className="thread-tool-preview-target-path">{preview.path}</span>
+          {preview.workdir ? (
+            <span className="thread-tool-preview-target-workdir">({preview.workdir})</span>
+          ) : null}
+        </div>
+        <ToolOutputViewport
+          followKey={preview.content}
+          className={[
+            'thread-tool-preview-body',
+            'is-write',
+            streaming ? 'is-streaming' : '',
+          ].filter(Boolean).join(' ')}
+        >
+          {preview.content}
+        </ToolOutputViewport>
+      </div>
+    )
+  }
+
+  // Edit tool: preparing state while preflight computes editReview
+  if (preview.mode === 'preparing') {
+    return (
+      <div className="thread-tool-call-body">
+        {preview.path ? (
+          <div className="thread-tool-preview-target">
+            <span className="thread-tool-preview-target-path">{preview.path}</span>
+          </div>
+        ) : null}
+        <div className="thread-tool-preview-preparing">
+          <span className="thread-tool-spinner" aria-hidden="true">⏳</span>
+          <span>{t('ai.runtime.mutation.preparing')}</span>
+        </div>
+      </div>
+    )
+  }
+
+  // Edit tool: streamed input (old_string / new_string) explicitly labeled as input
+  if (preview.mode === 'input') {
+    if (!preview.oldText && !preview.newText) {
+      return null
+    }
+    return (
+      <div className="thread-tool-call-body">
+        {preview.path ? (
+          <div className="thread-tool-preview-target">
+            <span className="thread-tool-preview-target-path">{preview.path}</span>
+          </div>
+        ) : null}
+        <div className="thread-tool-preview-input-section">
+          <div className="thread-tool-preview-input-label">{t('ai.runtime.mutation.inputLabel')}</div>
+          {preview.oldText ? (
+            <div className="thread-tool-preview-input-block">
+              <span className="thread-tool-preview-input-sublabel">{t('ai.runtime.mutation.oldString')}</span>
+              <ToolOutputViewport
+                followKey={preview.oldText}
+                className="thread-tool-preview-body is-input-old"
+              >
+                {preview.oldText}
+              </ToolOutputViewport>
+            </div>
+          ) : null}
+          {preview.newText ? (
+            <div className="thread-tool-preview-input-block">
+              <span className="thread-tool-preview-input-sublabel">{t('ai.runtime.mutation.newString')}</span>
+              <ToolOutputViewport
+                followKey={preview.newText}
+                className="thread-tool-preview-body is-input-new"
+              >
+                {preview.newText}
+              </ToolOutputViewport>
+            </div>
+          ) : null}
+        </div>
+      </div>
+    )
+  }
+
+  // Edit tool: real multi-hunk numbered file diff from editReview
   if (preview.lines.length === 0) {
     return null
   }
   return (
     <div className="thread-tool-call-body">
+      {preview.path ? (
+        <div className="thread-tool-preview-target">
+          <span className="thread-tool-preview-target-path">{preview.path}</span>
+        </div>
+      ) : null}
       <ToolOutputViewport
-        followKey={preview.lines.join('\n')}
+        followKey={preview.diff}
         className={[
           'thread-tool-preview-body',
-          `is-${preview.kind}`,
+          'is-edit',
           streaming ? 'is-streaming' : '',
         ].filter(Boolean).join(' ')}
       >
         {preview.lines.map((line, index) => (
           <span
-            key={`${preview.kind}-${index}`}
-            className={preview.kind === 'edit' ? diffLineClass(line) : undefined}
+            key={`diff-${index}`}
+            className={diffLineClass(line)}
           >
             {line}
             {index < preview.lines.length - 1 ? '\n' : ''}
@@ -47,6 +142,9 @@ function diffLineClass(line: string): string {
   }
   if (line.startsWith('-')) {
     return 'is-removed'
+  }
+  if (line.startsWith('@')) {
+    return 'is-hunk-header'
   }
   return 'is-context'
 }
