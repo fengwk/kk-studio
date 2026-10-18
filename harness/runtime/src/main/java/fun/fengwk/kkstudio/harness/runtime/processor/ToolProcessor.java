@@ -2,10 +2,10 @@ package fun.fengwk.kkstudio.harness.runtime.processor;
 
 import lombok.extern.slf4j.Slf4j;
 
-import fun.fengwk.kkstudio.harness.environment.capability.ExpectedFile;
 import fun.fengwk.kkstudio.harness.runtime.input.HumanInputJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.input.HumanInputTool;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
@@ -255,11 +255,7 @@ public final class ToolProcessor implements AutoCloseable {
     tx.updateToolInvocations(List.of(tool.beginDispatch(now)));
     tx.updateThread(thread.touchVersion(now));
     return new Prepare.Dispatched(
-        thread.id(),
-        tool.assistantEntryId(),
-        tool.attempt(),
-        request,
-        tool.approval().editReview() == null ? null : tool.approval().editReview().expectedFile());
+        thread.id(), tool.assistantEntryId(), tool.attempt(), request, tool.approval());
   }
 
   /**
@@ -492,7 +488,8 @@ public final class ToolProcessor implements AutoCloseable {
     }
     return dispatch(
         claim,
-        new Prepare.Dispatched(threadId, assistantEntryId, attempt, request, null),
+        new Prepare.Dispatched(
+            threadId, assistantEntryId, attempt, request, ToolApproval.notRequired()),
         execution);
   }
 
@@ -686,7 +683,7 @@ public final class ToolProcessor implements AutoCloseable {
                   dispatched.assistantEntryId(),
                   Math.addExact(dispatched.attempt(), 1),
                   dispatched.request(),
-                  dispatched.expectedFile()),
+                  dispatched.approval()),
               execution);
     } catch (RuntimeException failure) {
       // 契约：抛异常表示 Gateway 肯定未接受，可安全转 READY 并 reschedule（attempt 不变）。
@@ -941,7 +938,7 @@ public final class ToolProcessor implements AutoCloseable {
         UUID assistantEntryId,
         int attempt,
         ToolInvocationRequest request,
-        ExpectedFile expectedFile)
+        ToolApproval approval)
         implements Prepare {}
 
     record Terminated() implements Prepare {}

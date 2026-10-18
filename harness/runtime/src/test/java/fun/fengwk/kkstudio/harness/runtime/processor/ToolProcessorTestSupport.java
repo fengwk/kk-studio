@@ -25,6 +25,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEditReview;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
@@ -826,6 +827,10 @@ final class ToolProcessorTestSupport {
 
     void queuePreflightAsk(String reason) {
       preflightResults.add(new ToolGateway.Ask(reason));
+    }
+
+    void queuePreflightAsk(String reason, ToolEditReview editReview) {
+      preflightResults.add(new ToolGateway.Ask(reason, editReview));
     }
 
     void queuePreflightDeny(ToolInvocationError error) {
