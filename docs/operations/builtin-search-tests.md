@@ -11,7 +11,9 @@
 npm --prefix daemon ci
 npm --prefix daemon run check
 npm --prefix daemon run build
-npm --prefix daemon run test -- test/coding/search.test.ts test/coding/search-core.test.ts
+npm --prefix daemon run test -- test/runtime-search.test.ts test/coding/search.test.ts \
+  test/coding/search-core.test.ts test/coding/search-worker-lifecycle.test.ts \
+  test/coding/worker-location.test.ts
 npm --prefix daemon run coverage
 ```
 
@@ -23,7 +25,9 @@ npm --prefix daemon run coverage
 | --- | --- |
 | [`test/coding/search.test.ts`](../../daemon/test/coding/search.test.ts) | fs.find 与 fs.grep 能力入口、glob、.gitignore、正则、大小写与取消 |
 | [`test/coding/search-core.test.ts`](../../daemon/test/coding/search-core.test.ts) | findFiles、grepFiles、多行扫描、分层 gitignore、worktree exclude 与边界处理 |
-| [`test/coding/search-worker-lifecycle.test.ts`](../../daemon/test/coding/search-worker-lifecycle.test.ts) | 检索 worker 生命周期管理 |
+| [`test/coding/search-worker-lifecycle.test.ts`](../../daemon/test/coding/search-worker-lifecycle.test.ts) | 协作停止、退出门禁、清理宽限与清理失败 |
+| [`test/coding/worker-location.test.ts`](../../daemon/test/coding/worker-location.test.ts) | 编译入口定位、主线程响应性与真实 Worker 协作停止后自然退出 |
+| [`test/runtime-search.test.ts`](../../daemon/test/runtime-search.test.ts) | Runtime 唯一计时器及取消信号到搜索停止标记、partial 结果与单次终态的整合 |
 
 ## 先验证检索范围
 
@@ -74,6 +78,8 @@ worker 在目录、行与 8KiB 数据块等检查点通过共享原子 flag 协�
 遇到非响应 stop 时，提供 5 秒清理宽限才 await terminate（非额外更短执行预算），清理失败明确暴露。
 `test/coding/search.test.ts` 验证上下文取消信号被映射为 `CANCELLED`，
 `test/coding/search-core.test.ts` 通过可控检查点触发停止，验证 find/grep 保留已有匹配，并明确标记结果不完整。
+`test/runtime-search.test.ts` 推进受控时钟或发送取消请求，验证 Worker 退出前保持 RUNNING，
+退出后通过唯一的 `COMPLETED` 帧交付 `error=true` 与已有匹配；真实 Worker 的自然退出由 `worker-location.test.ts` 验证。
 取消不能被误报成超时，已取消调用也不能继续遍历。
 
 capability 注册与结果协议由 [`harness/environment`](../../harness/environment) 与 Daemon Runtime 负责，

@@ -22,7 +22,7 @@ async function tempDir(): Promise<string> {
   return dir
 }
 
-/** Worker 超时用例硬终止真实 Worker：teardown 先 await terminate 完成（真实 Worker exit），再清理临时资源。 */
+/** 若失败路径请求强制清理，teardown 等待真实 Worker 退出后再删除临时资源。 */
 const pendingTerminations: Array<Promise<number>> = []
 
 beforeEach(() => {
@@ -41,6 +41,12 @@ afterEach(async () => {
 })
 
 describe('搜索 Worker 定位', () => {
+  it('禁止将 Worker 入口作为主线程模块启动', async () => {
+    await expect(import('../../src/coding/search-worker.js')).rejects.toThrow(
+      'search worker must be started with a parent port',
+    )
+  })
+
   it('默认定位到本项目编译产物 dist/coding/search-worker.js', () => {
     const entry = resolveSearchWorkerEntry()
     expect(entry, '缺少编译产物，请先构建 daemon（dist/coding/search-worker.js）').not.toBeNull()
@@ -72,7 +78,7 @@ describe('搜索 Worker 定位', () => {
 })
 
 describe('搜索 Worker 执行', () => {
-  it('搜索在 Worker 中执行：主线程事件循环保持响应，超时仍硬终止', async () => {
+  it('搜索在真实 Worker 中执行，主线程事件循环保持响应', async () => {
     const dir = await tempDir()
     for (let index = 0; index < 3000; index++) {
       await writeFile(join(dir, `f${index}.txt`), 'x\n')
@@ -88,15 +94,47 @@ describe('搜索 Worker 执行', () => {
         'fs.grep',
         { pattern: 'zzz', path: dir },
         makeContext(dir),
-        1,
       )
-      expect(result.error).toBe(true)
-      expect(result.details).toMatchObject({ code: 'TIMEOUT' })
-      expect(textOf(result)).toContain('timed out')
+      expect(result.error).toBe(false)
+      expect(textOf(result)).toBe('No matches found')
     } finally {
       clearInterval(interval)
     }
     // 同步扫描会独占主线程：若退回同步实现，搜索期间该定时器不可能推进。
     expect(ticks).toBeGreaterThan(0)
+  })
+
+  it('真实 Worker 在收到超时信号后协作停止，自然退出并明确标记结果不完整', async () => {
+    const dir = await tempDir()
+    await writeFile(join(dir, 'a.txt'), 'needle\n')
+    const controller = new AbortController()
+    const realPostMessage = Worker.prototype.postMessage
+    let exited = false
+    // 在真实任务下发边界请求停止，不依赖 Worker 启动速度或短墙钟预算。
+    const posted = vi.spyOn(Worker.prototype, 'postMessage').mockImplementation(function (this: Worker, ...args) {
+      this.once('exit', () => {
+        exited = true
+      })
+      controller.abort('TIMED_OUT')
+      return realPostMessage.apply(this, args)
+    })
+
+    const result = await callCapability(
+      searchCapabilities['fs.grep']!,
+      'fs.grep',
+      { pattern: 'needle', path: dir },
+      makeContext(dir, { signal: controller.signal }),
+    )
+
+    expect(posted).toHaveBeenCalledOnce()
+    expect(result.error).toBe(true)
+    expect(result.details).toMatchObject({
+      code: 'TIMEOUT',
+      search: { outcome: 'TIMED_OUT', incomplete: true },
+    })
+    expect(textOf(result)).toContain('[Search timed out; results are incomplete.]')
+    expect(textOf(result)).not.toContain('No matches found')
+    expect(exited).toBe(true)
+    expect(Worker.prototype.terminate).not.toHaveBeenCalled()
   })
 })

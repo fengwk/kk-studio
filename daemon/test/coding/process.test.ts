@@ -459,15 +459,18 @@ describe('process.exec', () => {
     expect(textOf(result)).toContain('was not executed')
   })
 
-  it('启动 await 期间的取消被围栏并收敛', async () => {
+  it.each(['CANCELLED', 'TIMED_OUT'] as const)('启动 await 期间的 %s 被围栏并收敛', async (reason) => {
     const dir = await tempDir()
     const controller = new AbortController()
     const handle = fakeManagedProcess({ holdUntilTerminate: true })
+    const started = Promise.withResolvers<void>()
+    const allowStartReturn = Promise.withResolvers<void>()
     let startedSpec: ProcessSpec | undefined
     const supervisor = {
       start: async (spec: ProcessSpec): Promise<ManagedProcess> => {
         startedSpec = spec
-        await new Promise((resolve) => setTimeout(resolve, 20))
+        started.resolve()
+        await allowStartReturn.promise
         return handle.process
       },
       close: async () => {},
@@ -478,42 +481,20 @@ describe('process.exec', () => {
       { command: 'x', workdir: dir },
       makeContext(dir, { processes: supervisor, signal: controller.signal }),
     )
-    setTimeout(() => controller.abort(), 5)
-    const result = await pending
-    expect(result.error).toBe(true)
-    expect(result.details).toMatchObject({ process: { outcome: 'CANCELLED' } })
-    // start 收到取消信号，且放行后立即收敛，不留下运行中的 shell。
-    expect(startedSpec?.signal).toBe(controller.signal)
-    expect(handle.terminated()).toBe(true)
-  })
-
-  /** 验证在 processes.start 的 await 期间发生超时，进程同样被围栏截断并收敛。 */
-  it('启动 await 期间的超时被围栏并收敛', async () => {
-    const dir = await tempDir()
-    const controller = new AbortController()
-    const handle = fakeManagedProcess({ holdUntilTerminate: true })
-    let startedSpec: ProcessSpec | undefined
-    const supervisor = {
-      start: async (spec: ProcessSpec): Promise<ManagedProcess> => {
-        startedSpec = spec
-        await new Promise((resolve) => setTimeout(resolve, 20))
-        return handle.process
-      },
-      close: async () => {},
+    try {
+      await started.promise
+      controller.abort(reason)
+      allowStartReturn.resolve()
+      const result = await pending
+      expect(result.error).toBe(true)
+      expect(result.details).toMatchObject({ process: { outcome: reason } })
+      // start 收到停止信号，且放行后立即收敛，不留下运行中的 shell。
+      expect(startedSpec?.signal).toBe(controller.signal)
+      expect(handle.terminated()).toBe(true)
+    } finally {
+      controller.abort(reason)
+      allowStartReturn.resolve()
     }
-    const pending = callCapability(
-      processCapability,
-      'process.exec',
-      { command: 'x', workdir: dir },
-      makeContext(dir, { processes: supervisor, signal: controller.signal }),
-      30,
-    )
-    setTimeout(() => controller.abort('TIMED_OUT'), 5)
-    const result = await pending
-    expect(result.error).toBe(true)
-    expect(result.details).toMatchObject({ process: { outcome: 'TIMED_OUT' } })
-    expect(startedSpec?.signal).toBe(controller.signal)
-    expect(handle.terminated()).toBe(true)
   })
 
   it('live partial 携带精确区间', async () => {
@@ -565,7 +546,7 @@ describe('process.exec', () => {
     const dir = await tempDir()
     const stdout = Readable.from([Buffer.from('boom\n')])
     const stderr = Readable.from([])
-    const exit = new Promise<ProcessExit>((resolve) => setTimeout(() => resolve({ exitCode: 0, signal: null }), 10))
+    const exit = Promise.resolve<ProcessExit>({ exitCode: 0, signal: null })
     const proc: ManagedProcess = {
       pid: 7,
       stdin: new PassThrough(),
@@ -589,31 +570,45 @@ describe('process.exec', () => {
   it('自然读取 EIO 返回 FAILED 并保留已读前缀', async () => {
     const dir = await tempDir()
     const stdout = new Readable({ read() {} })
-    stdout.push(Buffer.from('prefix\n'))
+    stdout.push(Buffer.from('prefix\n' + 'x'.repeat(70_000) + '\n'))
     const stderr = Readable.from([])
-    const exit = new Promise<ProcessExit>((resolve) =>
-      setTimeout(() => resolve({ exitCode: 0, signal: null }), 30),
-    )
+    const exit = Promise.withResolvers<ProcessExit>()
+    const capturedProgress = Promise.withResolvers<void>()
     const proc: ManagedProcess = {
       pid: 9,
       stdin: new PassThrough(),
       stdout,
       stderr,
-      exit,
+      exit: exit.promise,
       async terminate() {
         stdout.destroy()
+        exit.resolve({ exitCode: 0, signal: null })
       },
     }
-    setTimeout(() => stdout.destroy(new Error('EIO')), 10)
-    const result = await callCapability(
+    const pending = callCapability(
       processCapability,
       'process.exec',
       { command: 'x', workdir: dir },
-      makeContext(dir, { processes: { start: async () => proc, close: async () => {} } }),
+      makeContext(dir, {
+        processes: { start: async () => proc, close: async () => {} },
+        progress: async () => {
+          capturedProgress.resolve()
+        },
+      }),
     )
-    expect(result.error).toBe(true)
-    expect(textOf(result)).toContain('prefix')
-    expect(textOf(result)).toContain('failed while reading')
+    try {
+      // 确认前缀已捕获后再触发读取错误，避免与宿主调度及进程退出速度竞态。
+      await capturedProgress.promise
+      stdout.destroy(new Error('EIO'))
+      exit.resolve({ exitCode: 0, signal: null })
+      const result = await pending
+      expect(result.error).toBe(true)
+      expect(textOf(result)).toContain('prefix')
+      expect(textOf(result)).toContain('failed while reading')
+    } finally {
+      stdout.destroy()
+      exit.resolve({ exitCode: 0, signal: null })
+    }
   })
 
   it('取消导致的 premature close 仍为 CANCELLED 且保留前缀', async () => {

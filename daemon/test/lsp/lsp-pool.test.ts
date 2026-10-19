@@ -756,39 +756,35 @@ describe('LspClientPool Concurrency & Lifecycle', () => {
     const ac1 = new AbortController()
     const ac2 = new AbortController()
 
-    // 1. p1 发起 lease，创建 boot 并开始启动进程
-    const p1 = pool.lease(file, ac1.signal).catch((err: unknown) => err)
-    await awaitEvent(transcript, (event) => event.event === 'recv' && event.message?.method === 'initialize')
-
-    // 2. p1 abort，触发 boot.cancelled = true 并进入 terminate 清理
-    ac1.abort()
-    await terminateStartedGate.promise
-    expect(terminateStarted).toBe(true)
-
-    // 3. 在旧 boot 还存在且正在清理时，p2 发起 lease：命中 boot && boot.cancelled 分支，进入等待
-    let p2Settled = false
-    const p2 = pool.lease(file, ac2.signal).catch((err: unknown) => {
-      p2Settled = true
-      return err
-    })
-    await new Promise<void>((resolve) => setImmediate(resolve))
-    expect(p2Settled).toBe(false)
-
-    // 4. p2 abort：raceAbort 应该让 p2 立即返回（先返回），而 p1 依然因为 cleanupGate 挂起而 pending
-    ac2.abort()
-    const err2 = await p2
-    expect(err2).toBeInstanceOf(Error)
-    expect((err2 as Error).name).toBe('AbortError')
-    expect(p2Settled).toBe(true)
-
-    let p1Settled = false
-    void p1.then(() => {
-      p1Settled = true
-    })
-    await new Promise<void>((resolve) => setImmediate(resolve))
-    expect(p1Settled).toBe(false)
-
     try {
+      // 首个 waiter 取消后，旧进程的清理门禁阻止 boot 提前收敛。
+      const p1 = pool.lease(file, ac1.signal).catch((err: unknown) => err)
+      await awaitEvent(transcript, (event) => event.event === 'recv' && event.message?.method === 'initialize')
+      ac1.abort()
+      await terminateStartedGate.promise
+      expect(terminateStarted).toBe(true)
+
+      // 新 waiter 等待旧 boot 的清理，但它自身取消不必等共享清理门禁。
+      let p2Settled = false
+      const p2 = pool.lease(file, ac2.signal).catch((err: unknown) => {
+        p2Settled = true
+        return err
+      })
+      await new Promise<void>((resolve) => setImmediate(resolve))
+      expect(p2Settled).toBe(false)
+      ac2.abort()
+      const err2 = await p2
+      expect(err2).toBeInstanceOf(Error)
+      expect((err2 as Error).name).toBe('AbortError')
+      expect(p2Settled).toBe(true)
+
+      let p1Settled = false
+      void p1.then(() => {
+        p1Settled = true
+      })
+      await new Promise<void>((resolve) => setImmediate(resolve))
+      expect(p1Settled).toBe(false)
+
       // 5. 释放 cleanupGate，让 p1 的底层 terminate 和 boot 清理彻底完成
       cleanupGate.resolve()
       const err1 = await p1
@@ -812,6 +808,8 @@ describe('LspClientPool Concurrency & Lifecycle', () => {
 
       pool.release(entry)
     } finally {
+      ac1.abort()
+      ac2.abort()
       cleanupGate.resolve()
     }
   })
