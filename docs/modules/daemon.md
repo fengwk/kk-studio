@@ -73,7 +73,7 @@ POSIX 目录权限为 0700、敏感文件为 0600。`tmp/workspaces` 由受控�
 文件写入与编辑（[`files.ts`](../../daemon/src/coding/files.ts)）保留原有编码、BOM 与行尾，并通过 64-stripe 细粒度分段锁串行化同文件修改；原子写入临时文件后再替换目标文件（[`commit.ts`](../../daemon/src/coding/commit.ts)）。
 内部只读审查能力 `fs.edit.preview` 与 `fs.edit` 共享参数校验、解码、行尾检测与 diff 计算：
 
-- `fs.edit.preview` 基于 `diff@9.0.0` 的 `diffArrays` 计算稀疏编辑真实 changedlines、4 行上下文与 EOF 缺换行显式标记，不设 diff 独立的 timeout 与 maxEditLength；在文件锁内读取原文件原始字节，计算 canonical 绝对路径、原始字节 SHA-256 与真实变更 diff（带行号），返回 `{path, diff, sha256}`；完整 review 连同结果在序列化后若超过 details 上限（1 MiB），在 preview/commit 前直接拒绝，决不截断变更。
+- `fs.edit.preview` 使用 `diff@9.0.0` 的 `diffArrays` 计算所有变更行、4 行上下文与 EOF 缺换行标记，不设独立的计算超时或 `maxEditLength`；在文件锁内读取原文件原始字节，计算 canonical 绝对路径、原始字节 SHA-256 与带行号的 diff，返回 `{path, diff, sha256}`；完整 review 连同结果序列化后超过 1 MiB 时，在预览或提交前拒绝，不截断变更。
 - `fs.edit` 在文件锁内执行时，若 INVOKE 携带内部元数据 `expectedFile`（`{path, sha256}`），核对其与当前磁盘文件的绝对路径和 SHA-256；若文件在审查后已被变动，直接拒绝写入，防止授权陈旧变更；执行成功后在结果 `details.editReview` 携带 `{path, diff, sha256}`，作为唯一权威 canonical 持久化 diff，供自动放行/YOLO 模式展示真实变更。
 
 检索（[`search.ts`](../../daemon/src/coding/search.ts)）在进程内直接完成遍历与匹配，默认超时 15 秒（可由 `timeout_seconds` 覆盖），worker 共享原子 flag 在目录、行与 8KiB 块等检查点协作检查中断，超时保留 partial 匹配并标记 `search.incomplete`；非响应 stop 给予 5 秒清理宽限才 await terminate（非额外更短执行预算），清理失败明确暴露；支持分层 `.gitignore` 与 `.git/info/exclude`，不依赖外部 ripgrep/fd 二进制。

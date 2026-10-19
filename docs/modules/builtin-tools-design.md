@@ -39,7 +39,9 @@ Platform 终态化器另有内联预算：普通工具为 50 KiB / 2000 行，�
 
 现有文件原子替换保持文件系统支持的权限；edit 保持编码、BOM 和换行风格，write 按完整内容写入。无法无损编码则拒绝。提交成功后，通知或展示故障单独报告。设备、FIFO 等非普通文件在 I/O 前拒绝。
 
-需要人工批准的 edit 先通过内部 `fs.edit.preview` 只读计算真实文件 diff，冻结 canonical 路径、原始字节 SHA-256 与全部变更行。审批后的执行在文件修改锁内校验同一 `expectedFile`，文件变化即拒绝写入。diff 基于 diff@9.0.0 的 diffArrays 计算，保留真实行号、稀疏编辑的真实 changedlines、4 行上下文与 EOF 缺失换行显式标记，不设 diff 独立的 timeout 与 maxEditLength。完整 review 连同结果在 1 MiB 前置限制内完整校验，超过 1 MiB UTF-8 预算时在预览或提交前明确拒绝，不截断变更行。协议和验证入口见 [Harness Environment](harness-environment.md) 与[文件变更验证](../operations/builtin-mutation-tests.md)。
+需要人工批准的 edit 先通过内部 `fs.edit.preview` 只读计算真实文件 diff，冻结 canonical 路径、原始字节 SHA-256 与全部变更行。审批后的执行在文件修改锁内校验同一 `expectedFile`，文件变化即拒绝写入。
+diff 使用 `diff@9.0.0` 的 `diffArrays`，保留真实行号、所有变更行、4 行上下文与 EOF 缺失换行标记，不设独立的计算超时或 `maxEditLength`。
+完整 review 连同结果超过 1 MiB UTF-8 预算时，在预览或提交前明确拒绝，不截断变更行。协议和验证入口见 [Harness Environment](harness-environment.md) 与[文件变更验证](../operations/builtin-mutation-tests.md)。
 
 grep 与 find 默认超时为 15 秒，可由正数 `timeout_seconds` 覆盖。搜索过程由 worker 在目录、行及 8KiB 块检查点共享原子 flag 检查中断；超时保留已收集的 partial 匹配，并显式标记 error 与 `search.incomplete`。非响应 stop 给予 5 秒清理宽限才 await terminate（非额外更短执行预算），清理失败明确暴露。
 

@@ -96,8 +96,10 @@ POSIX 先发 SIGTERM、等待宽限、再强杀；Windows 用 Job 的 `KILL_ON_J
 当前调用返回降级结果；排查时同时检查预览、捕获状态和 staging 清理。
 
 [`runtime.test.ts`](../../daemon/test/runtime.test.ts)
-验证单一 invoke timer 到期时只请求停止，不提前抢占终态；超时裁决仍为 `FAILED`、取消裁决仍为 `CANCELLED`，两者在收尾窗口携带捕获输出并在 `details.process.outcome` 中收敛；
-能力未回调、调度器拒绝、收尾中停机和迟到回调都只能产生一个终态，已完成的文件修改提交成功决不被 late abort 覆盖；系统不承诺 OS 阻塞可在 60 秒内硬中止。
+验证唯一的 invoke timer 到期时只请求停止，不提前派发终态。process 返回的真实结果通过 `COMPLETED` 帧交付；
+超时或取消时结果标记 `error=true`，同时保留已捕获输出与 `details.process.outcome`。
+执行器抛错且无法返回结果时，Runtime 才以 `FAILED` 或 `CANCELLED` 帧收敛。
+收尾中停机、迟到回调与重复请求不能改变已冻结终态；已完成文件提交的成功结果不能被迟到的停止请求覆盖。
 超过 16 MiB wire 预算时整体丢弃能力文本，而非发送超大终态。
 
 ## 权限面分析

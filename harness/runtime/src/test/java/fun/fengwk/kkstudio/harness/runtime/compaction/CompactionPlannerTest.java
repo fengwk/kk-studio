@@ -693,7 +693,7 @@ class CompactionPlannerTest {
   }
 
   @Test
-  void compactionTurnAssistantAfterLatestToolBatchDoesNotCountAsConsumption() {
+  void stoppedCompactionDoesNotConsumeLatestToolBatch() {
     PathBuilder path = new PathBuilder();
     path.root();
     path.turn("turn 1");
@@ -711,7 +711,7 @@ class CompactionPlannerTest {
         "{\"editReview\":{\"path\":\"src/App.java\",\"diff\":\"@@ -1 +1 @@\\n-old\\n+new\",\"sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\"}}");
     path.closeTurn();
 
-    // 随后出现一个 STOPPED COMPACTION turn，内部包含 ASSISTANT 消息 (AssistantAbortedPayload)
+    // 压缩停止时的 assistant aborted 屏障不是工具结果的普通续接。
     path.stoppedCompaction("stopped compaction assistant text");
 
     CompactionPreparation preparation = plan(path, 20L).orElseThrow();
@@ -784,6 +784,27 @@ class CompactionPlannerTest {
     // 摘要消息列表中绝不包含该巨大 diff 工具结果
     List<AgentMessage> summarized = preparation.messagesToSummarize();
     assertFalse(summarized.stream().anyMatch(m -> m.role() == AgentMessageRole.TOOL));
+  }
+
+  @Test
+  void previousCompleteCompactionDefinesTheVisibleBatchBoundary() {
+    PathBuilder path = new PathBuilder();
+    path.root();
+    path.turn("old task");
+    path.assistant("old tool call", "call-1");
+    path.toolResult(id(4L), "call-1");
+    path.closeTurn();
+    path.turn("retained request");
+    path.cancelTurn();
+    path.completedCompaction(fullStart(id(8L)), "previous context");
+    path.turn("latest request");
+
+    // 已由 complete 摘要替代的前缀不再进入模型投影，不能反向阻止当前可见尾部的切分。
+    CompactionPreparation preparation = plan(path, 20L).orElseThrow();
+    assertEquals(id(14L), preparation.cutEntryId());
+    assertFalse(
+        preparation.messagesToSummarize().stream()
+            .anyMatch(message -> message.role() == AgentMessageRole.TOOL));
   }
 
   private static PathBuilder closedTurnPath() {
@@ -1064,6 +1085,23 @@ class CompactionPlannerTest {
               parentId(),
               new TurnEndPayload(
                   lastTurnStart, TurnEndOutcome.COMPLETED, continueModel, null, null),
+              BASE));
+      return this;
+    }
+
+    /** 模型尚未续接时取消输入回合，保留 USER，但不伪造已消费工具结果的 assistant。 */
+    PathBuilder cancelTurn() {
+      entries.add(
+          new Entry(
+              id(nextId++),
+              id(100L),
+              parentId(),
+              new TurnEndPayload(
+                  findLastOpenTurnStart(),
+                  TurnEndOutcome.CANCELLED,
+                  false,
+                  TurnEndReason.CANCELLED,
+                  null),
               BASE));
       return this;
     }

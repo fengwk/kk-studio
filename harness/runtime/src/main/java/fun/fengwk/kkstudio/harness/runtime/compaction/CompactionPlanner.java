@@ -110,12 +110,11 @@ public final class CompactionPlanner {
         break;
       }
     }
-    int unconsumedAssistantIndex = unconsumedToolBatchAssistantIndex(entries, visible);
-    if (unconsumedAssistantIndex >= 0 && cutIndex > unconsumedAssistantIndex) {
-      cutIndex = lastAtOrBefore(cutPoints, unconsumedAssistantIndex);
-      if (cutIndex < 0) {
-        return Optional.empty();
-      }
+    int unconsumedAssistantIndex =
+        unconsumedToolBatchAssistantIndex(entries, visible, boundaryStart);
+    if (unconsumedAssistantIndex >= 0) {
+      // 可见的普通 assistant 本身就是合法 cut，无需再次搜索或引入备用切点。
+      cutIndex = Math.min(cutIndex, unconsumedAssistantIndex);
     }
     UUID cutEntryId = entries.get(cutIndex).id();
 
@@ -537,9 +536,10 @@ public final class CompactionPlanner {
    * <p>若存在，返回发起该批次调用的普通 assistant 在 entries 中的索引；否则返回 -1。 USER / CUSTOM / NOTIFICATION 不是普通
    * assistant 续接消费 tool results 的证据。
    */
-  private static int unconsumedToolBatchAssistantIndex(List<Entry> entries, boolean[] visible) {
+  private static int unconsumedToolBatchAssistantIndex(
+      List<Entry> entries, boolean[] visible, int boundaryStart) {
     int lastAssistantIndex = -1;
-    for (int i = entries.size() - 1; i >= 0; i--) {
+    for (int i = entries.size() - 1; i >= boundaryStart; i--) {
       if (!visible[i]) {
         continue;
       }
@@ -564,17 +564,5 @@ public final class CompactionPlanner {
       }
     }
     return -1;
-  }
-
-  private static int lastAtOrBefore(List<Integer> cutPoints, int index) {
-    int candidate = -1;
-    for (int cutPoint : cutPoints) {
-      if (cutPoint <= index) {
-        candidate = cutPoint;
-      } else {
-        break;
-      }
-    }
-    return candidate;
   }
 }

@@ -65,7 +65,7 @@ edit 读取当前文件；需要人工审批时，执行必须匹配审查时冻
 [`files.ts`](../../daemon/src/coding/files.ts) 与 [`test/coding/edit-review.test.ts`](../../daemon/test/coding/edit-review.test.ts)
 验证文件编辑审查、哈希保护与真实 diff 契约：
 
-- **只读审查能力 `fs.edit.preview`**：与 `fs.edit` 共享参数校验、解码与 diff 渲染逻辑；基于 `diff@9.0.0` 的 `diffArrays` 计算真实 changedlines、4 行上下文与 EOF 缺换行显式标记，不设 diff 独立的 timeout 与 maxEditLength；在 64-stripe 文件锁内读取真实原文件原始字节，计算 canonical 绝对路径、原始 bytes SHA-256 与带真实行号的变更 diff，返回 `{path, diff, sha256}`；不执行文件写入。
+- **只读审查能力 `fs.edit.preview`**：与 `fs.edit` 共享参数校验、解码与 diff 渲染逻辑；使用 `diff@9.0.0` 的 `diffArrays` 计算所有变更行、4 行上下文与 EOF 缺换行标记，不设独立的计算超时或 `maxEditLength`；在 64-stripe 文件锁内读取原文件字节，计算 canonical 绝对路径、原始字节 SHA-256 与带真实行号的 diff，返回 `{path, diff, sha256}`；不执行写入。
 - **全量 Diff 边界守卫**：在预览及 commit 前执行 1 MiB 完整 review 尺寸前置限制，若包含完整 diff 的结果序列化 UTF-8 字节数超过 details 限制（1 MiB），直接抛出 `ToolInputRejectedError` 明确拒绝，决不截断变更内容。
 - **审批冻结与保护**：服务端将 review 结果冻结在 `approvalJson.editReview`（`{path, diff, sha256}`）；客户端 ALLOW/DENY 接口保持不变。
 - **执行期 `expectedFile` 守卫**：用户审批通过后，平台在 INVOKE 顶层携带 `expectedFile`（`{path, sha256}`）元数据下发给 Daemon（不修改模型参数 arguments）。Daemon 在文件 mutation 锁内核对当前磁盘文件的路径与 SHA-256：若文件在审查后被篡改或变动，立即拒绝写入（"File changed since edit review; nothing was written. Review a new edit before approving it."），决不将陈旧授权应用到新内容上。
