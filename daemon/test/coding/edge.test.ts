@@ -430,18 +430,17 @@ describe('fs.find / fs.grep 边界', () => {
 
   it('grep 超时映射为 TIMEOUT', async () => {
     const dir = await tempDir()
-    for (let index = 0; index < 3000; index++) {
-      await writeFile(join(dir, `f${index}.txt`), 'x\n')
-    }
+    const controller = new AbortController()
+    controller.abort('TIMED_OUT')
     const result = await callCapability(
       grep,
       'fs.grep',
       { pattern: 'zzz', path: dir },
-      makeContext(dir),
-      1,
+      makeContext(dir, { signal: controller.signal }),
     )
     expect(result.error).toBe(true)
     expect(result.details).toMatchObject({ code: 'TIMEOUT' })
+    expect(textOf(result)).toBe('[Search timed out; results are incomplete.]')
   })
 
   it('matchCenteredExcerpt 对超长行居中截取', () => {
