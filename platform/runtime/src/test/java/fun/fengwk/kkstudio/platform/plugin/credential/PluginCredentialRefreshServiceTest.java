@@ -73,9 +73,9 @@ class PluginCredentialRefreshServiceTest {
             "CN", NOW.plusSeconds(3600), NOW.plusSeconds(1800), NEW_PAYLOAD);
     refresher = snapshot -> material;
     PluginCredentialRow claimed = claimed();
-    when(repository.claimDue(eq(List.of(PLUGIN_ID)), eq(NOW), any(), anyString()))
+    when(repository.claimDue(eq(List.of(PLUGIN_ID)), any(), anyString()))
         .thenReturn(Optional.of(claimed), Optional.empty());
-    when(repository.ownsUnexpiredLease(claimed, NOW)).thenReturn(true);
+    when(repository.ownsUnexpiredLease(claimed)).thenReturn(true);
     when(repository.finalizeSuccess(
             claimed, NEW_PAYLOAD, "CN", NOW.plusSeconds(3600), NOW.plusSeconds(1800), NOW))
         .thenReturn(true);
@@ -84,14 +84,10 @@ class PluginCredentialRefreshServiceTest {
     verify(repository)
         .markExpiredLeasesUncertain(
             List.of(PLUGIN_ID),
-            NOW,
             "plugin credential refresh lease expired before a result was observed");
     verify(repository, times(2))
         .claimDue(
-            eq(List.of(PLUGIN_ID)),
-            eq(NOW),
-            eq(NOW.plus(properties.getRefresh().getLeaseDuration())),
-            anyString());
+            eq(List.of(PLUGIN_ID)), eq(properties.getRefresh().getLeaseDuration()), anyString());
   }
 
   /** 认证拒绝转为需重新登录，未发出延迟重试，其余异常收敛为结果未知。 */
@@ -142,7 +138,7 @@ class PluginCredentialRefreshServiceTest {
   void lostLeaseStopsBeforeCallingTheRefresher() {
     refresher = mock(PluginCredentialRefresher.class);
     PluginCredentialRow claimed = claimed();
-    when(repository.claimDue(any(), any(), any(), anyString())).thenReturn(Optional.of(claimed));
+    when(repository.claimDue(any(), any(), anyString())).thenReturn(Optional.of(claimed));
 
     assertEquals(0, service().refreshOnce());
     verifyNoInteractions(refresher);
@@ -156,10 +152,10 @@ class PluginCredentialRefreshServiceTest {
           throw new PluginRenewalNotSentException("offline");
         };
     PluginCredentialRow claimed = claimed();
-    when(repository.claimDue(any(), any(), any(), anyString())).thenReturn(Optional.of(claimed));
-    when(repository.ownsUnexpiredLease(claimed, NOW)).thenReturn(true);
+    when(repository.claimDue(any(), any(), anyString())).thenReturn(Optional.of(claimed));
+    when(repository.ownsUnexpiredLease(claimed)).thenReturn(true);
     when(repository.finalizeFailure(eq(claimed), any(), any(), anyString())).thenReturn(true);
-    when(repository.earliestRefreshAt(List.of(PLUGIN_ID), NOW))
+    when(repository.earliestRefreshAt(List.of(PLUGIN_ID)))
         .thenReturn(Optional.of(NOW.plusSeconds(5)));
 
     PluginCredentialRefreshService service = service();
@@ -183,9 +179,9 @@ class PluginCredentialRefreshServiceTest {
       String error) {
     refresher = failing;
     PluginCredentialRow claimed = claimed();
-    when(repository.claimDue(any(), any(), any(), anyString()))
+    when(repository.claimDue(any(), any(), anyString()))
         .thenReturn(Optional.of(claimed), Optional.empty());
-    when(repository.ownsUnexpiredLease(claimed, NOW)).thenReturn(true);
+    when(repository.ownsUnexpiredLease(claimed)).thenReturn(true);
     when(repository.finalizeFailure(claimed, status, nextRefreshAt, error)).thenReturn(true);
 
     assertEquals(1, service().refreshOnce());

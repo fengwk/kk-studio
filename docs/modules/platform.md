@@ -265,7 +265,7 @@ Plugin 只通过作用域 `PluginCredentialAccess` 读取本插件凭据：每�
 静态密钥的认证目标字段（`contextFields`）变化而本次没有重新录入密钥时，旧密钥被删除，避免把密钥发往新目标。
 静态密钥没有 region、过期或刷新时刻，不参与刷新扫描。
 
-刷新以短事务 claim lease，请求前核验 token、version 与有效截止时刻，
+刷新以短事务 claim lease（到期与租约有效性都以数据库时钟判定），请求前核验 token、version 与有效截止时刻，
 事务外只执行一次 renewal，再按 token、version finalize。
 只扫描已声明刷新器的插件，按最早 nextRefreshAt 安排，保存后唤醒，poll 是最慢兜底。
 确定认证拒绝为 REAUTH_REQUIRED，确定未发或确定无效响应为 REFRESH_FAILED；

@@ -17,7 +17,10 @@ import fun.fengwk.kkstudio.platform.plugin.PluginCredentialStatus;
 
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.time.Duration;
 import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Optional;
@@ -28,6 +31,7 @@ class PluginPersistencePostgresIntegrationTest {
   private static final String PLUGIN = "alpha.plugin";
   private static final String OTHER = "beta.plugin";
   private static final Instant NOW = Instant.parse("2026-10-01T12:00:00Z");
+  private static final Duration LEASE = Duration.ofMinutes(2);
   private static final String HASH_1 = "1".repeat(64);
   private static final String HASH_2 = "2".repeat(64);
   private static final String HASH_3 = "3".repeat(64);
@@ -110,15 +114,14 @@ class PluginPersistencePostgresIntegrationTest {
   void refreshLeaseLifecycle() {
     credentials.upsertConnected(PLUGIN, "{\"token\":\"a\"}", "CN", at(60), at(-1));
     credentials.upsertConnected(OTHER, "{\"token\":\"b\"}", "CN", at(60), at(-2));
-    assertEquals(Optional.of(at(-1)), credentials.earliestRefreshAt(List.of(PLUGIN), NOW));
+    assertEquals(Optional.of(at(-1)), credentials.earliestRefreshAt(List.of(PLUGIN)));
 
     PluginCredentialRow claimed =
-        credentials.claimDue(List.of(PLUGIN), NOW, at(120), "lease-1").orElseThrow();
+        credentials.claimDue(List.of(PLUGIN), LEASE, "lease-1").orElseThrow();
     assertEquals("lease-1", claimed.refreshLeaseToken());
-    assertTrue(credentials.claimDue(List.of(PLUGIN), NOW, at(120), "lease-2").isEmpty());
-    assertTrue(credentials.earliestRefreshAt(List.of(PLUGIN), NOW).isEmpty());
-    assertTrue(credentials.ownsUnexpiredLease(claimed, NOW));
-    assertFalse(credentials.ownsUnexpiredLease(claimed, at(120)));
+    assertTrue(credentials.claimDue(List.of(PLUGIN), LEASE, "lease-2").isEmpty());
+    assertTrue(credentials.earliestRefreshAt(List.of(PLUGIN)).isEmpty());
+    assertTrue(credentials.ownsUnexpiredLease(claimed));
 
     assertTrue(
         credentials.finalizeSuccess(claimed, "{\"token\":\"c\"}", "CN", at(600), at(300), NOW));
@@ -130,15 +133,18 @@ class PluginPersistencePostgresIntegrationTest {
     assertEquals(NOW, refreshed.lastRefreshedAt());
 
     PluginCredentialRow other =
-        credentials.claimDue(List.of(OTHER), NOW, at(120), "lease-3").orElseThrow();
+        credentials.claimDue(List.of(OTHER), LEASE, "lease-3").orElseThrow();
     assertTrue(
         credentials.finalizeFailure(
             other, PluginCredentialStatus.REFRESH_FAILED, at(3600), "offline"));
     assertEquals(
         PluginCredentialStatus.REFRESH_FAILED, credentials.find(OTHER).orElseThrow().status());
 
+    jdbc.sql("update plugin_credential set next_refresh_at = ? where plugin_id = ?")
+        .params(OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC), OTHER)
+        .update();
     PluginCredentialRow again =
-        credentials.claimDue(List.of(OTHER), at(3600), at(3720), "lease-4").orElseThrow();
+        credentials.claimDue(List.of(OTHER), LEASE, "lease-4").orElseThrow();
     assertTrue(credentials.releaseLease(again));
     assertFalse(credentials.releaseLease(again));
   }
@@ -147,14 +153,22 @@ class PluginPersistencePostgresIntegrationTest {
   @Test
   void expiredLeasesConvergeToUncertain() {
     credentials.upsertConnected(PLUGIN, "{\"token\":\"a\"}", "CN", at(60), at(-1));
-    credentials.claimDue(List.of(PLUGIN), NOW, at(10), "lease").orElseThrow();
+    PluginCredentialRow claimed =
+        credentials.claimDue(List.of(PLUGIN), LEASE, "lease").orElseThrow();
 
-    assertEquals(0, credentials.markExpiredLeasesUncertain(List.of(PLUGIN), NOW, "lost"));
-    assertEquals(1, credentials.markExpiredLeasesUncertain(List.of(PLUGIN), at(10), "lost"));
+    assertEquals(0, credentials.markExpiredLeasesUncertain(List.of(PLUGIN), "lost"));
+    // 租约在数据库时钟下过期：旧持有者失去所有权，结果收敛为未知。
+    jdbc.sql(
+            "update plugin_credential set refresh_lease_until = statement_timestamp()"
+                + " - interval '1 second' where plugin_id = ?")
+        .params(PLUGIN)
+        .update();
+    assertFalse(credentials.ownsUnexpiredLease(claimed));
+    assertEquals(1, credentials.markExpiredLeasesUncertain(List.of(PLUGIN), "lost"));
     PluginCredentialRow uncertain = credentials.find(PLUGIN).orElseThrow();
     assertEquals(PluginCredentialStatus.REFRESH_UNCERTAIN, uncertain.status());
     assertNull(uncertain.refreshLeaseToken());
-    assertTrue(credentials.claimDue(List.of(PLUGIN), at(20), at(30), "next").isEmpty());
+    assertTrue(credentials.claimDue(List.of(PLUGIN), LEASE, "next").isEmpty());
   }
 
   /** attempt 只在摘要命中、未过期且配置修订未变时被消费一次；新 attempt 覆盖旧 attempt。 */
