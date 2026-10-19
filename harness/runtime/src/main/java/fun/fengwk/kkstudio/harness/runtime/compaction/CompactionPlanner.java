@@ -8,6 +8,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.NotificationPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.ToolResultModelContents;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
@@ -107,6 +108,13 @@ public final class CompactionPlanner {
       if (accumulated >= keepRecentTokens) {
         cutIndex = firstAtOrAfter(cutPoints, i);
         break;
+      }
+    }
+    int unconsumedAssistantIndex = unconsumedToolBatchAssistantIndex(entries, visible);
+    if (unconsumedAssistantIndex >= 0 && cutIndex > unconsumedAssistantIndex) {
+      cutIndex = lastAtOrBefore(cutPoints, unconsumedAssistantIndex);
+      if (cutIndex < 0) {
+        return Optional.empty();
       }
     }
     UUID cutEntryId = entries.get(cutIndex).id();
@@ -477,7 +485,7 @@ public final class CompactionPlanner {
       } else if (content instanceof ToolCallMessageContent call) {
         chars += call.toolName().length() + call.argumentsJson().length();
       } else if (content instanceof ToolResultMessageContent result) {
-        chars += contentChars(result.contents());
+        chars += contentChars(ToolResultModelContents.contentsOf(result));
       } else if (content instanceof ImageMessageContent
           || content instanceof AudioMessageContent
           || content instanceof VideoMessageContent
@@ -521,5 +529,52 @@ public final class CompactionPlanner {
       }
     }
     return cutPoints.get(cutPoints.size() - 1);
+  }
+
+  /**
+   * 检查最后一个非 compaction 普通 assistant 之后是否存在未被普通 assistant 续接消费的 tool results。
+   *
+   * <p>若存在，返回发起该批次调用的普通 assistant 在 entries 中的索引；否则返回 -1。 USER / CUSTOM / NOTIFICATION 不是普通
+   * assistant 续接消费 tool results 的证据。
+   */
+  private static int unconsumedToolBatchAssistantIndex(List<Entry> entries, boolean[] visible) {
+    int lastAssistantIndex = -1;
+    for (int i = entries.size() - 1; i >= 0; i--) {
+      if (!visible[i]) {
+        continue;
+      }
+      Entry entry = entries.get(i);
+      if (entry.payload() instanceof MessagePayload message
+          && message.message().role() == AgentMessageRole.ASSISTANT) {
+        lastAssistantIndex = i;
+        break;
+      }
+    }
+    if (lastAssistantIndex < 0) {
+      return -1;
+    }
+    for (int i = lastAssistantIndex + 1; i < entries.size(); i++) {
+      if (!visible[i]) {
+        continue;
+      }
+      Entry entry = entries.get(i);
+      if (entry.payload() instanceof MessagePayload message
+          && message.message().role() == AgentMessageRole.TOOL) {
+        return lastAssistantIndex;
+      }
+    }
+    return -1;
+  }
+
+  private static int lastAtOrBefore(List<Integer> cutPoints, int index) {
+    int candidate = -1;
+    for (int cutPoint : cutPoints) {
+      if (cutPoint <= index) {
+        candidate = cutPoint;
+      } else {
+        break;
+      }
+    }
+    return candidate;
   }
 }
