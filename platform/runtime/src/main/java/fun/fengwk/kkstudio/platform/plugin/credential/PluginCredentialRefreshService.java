@@ -66,8 +66,7 @@ public final class PluginCredentialRefreshService {
     if (refreshable.isEmpty()) {
       return 0;
     }
-    int recovered =
-        repository.markExpiredLeasesUncertain(refreshable, clock.instant(), LEASE_EXPIRED_ERROR);
+    int recovered = repository.markExpiredLeasesUncertain(refreshable, LEASE_EXPIRED_ERROR);
     if (recovered > 0) {
       log.warn(
           "Converged {} expired plugin credential refresh lease(s) to REFRESH_UNCERTAIN",
@@ -75,12 +74,10 @@ public final class PluginCredentialRefreshService {
     }
     int finalized = 0;
     for (int pass = 0; pass < MAX_REFRESH_PASSES; pass++) {
-      Instant now = clock.instant();
       Optional<PluginCredentialRow> claimed =
           repository.claimDue(
               refreshable,
-              now,
-              now.plus(properties.getRefresh().getLeaseDuration()),
+              properties.getRefresh().getLeaseDuration(),
               UUID.randomUUID().toString());
       if (claimed.isEmpty() || !refreshClaimed(claimed.get())) {
         return finalized;
@@ -93,9 +90,7 @@ public final class PluginCredentialRefreshService {
   /** 未被租约持有的最早下一次刷新时刻。 */
   public Optional<Instant> earliestRefreshAt() {
     List<String> refreshable = refreshablePluginIds();
-    return refreshable.isEmpty()
-        ? Optional.empty()
-        : repository.earliestRefreshAt(refreshable, clock.instant());
+    return refreshable.isEmpty() ? Optional.empty() : repository.earliestRefreshAt(refreshable);
   }
 
   private List<String> refreshablePluginIds() {
@@ -108,7 +103,7 @@ public final class PluginCredentialRefreshService {
   private boolean refreshClaimed(PluginCredentialRow row) {
     StudioPlugin plugin = registry.find(row.pluginId()).orElseThrow();
     PluginCredentialRefresher refresher = plugin.refresher().orElseThrow();
-    if (!repository.ownsUnexpiredLease(row, clock.instant())) {
+    if (!repository.ownsUnexpiredLease(row)) {
       return false;
     }
     PluginCredentialSnapshot snapshot =

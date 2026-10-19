@@ -9,6 +9,7 @@ import org.springframework.stereotype.Repository;
 
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialStatus;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -110,8 +111,8 @@ public class PluginCredentialRepository {
         == 1;
   }
 
-  /** 租约过期而未终结的刷新结果未知：收敛为 {@code REFRESH_UNCERTAIN}。 */
-  public int markExpiredLeasesUncertain(List<String> pluginIds, Instant now, String error) {
+  /** 租约在数据库时钟下已过期而未终结的刷新结果未知：收敛为 {@code REFRESH_UNCERTAIN}。 */
+  public int markExpiredLeasesUncertain(List<String> pluginIds, String error) {
     return jdbc.sql(
             """
             update plugin_credential
@@ -119,39 +120,39 @@ public class PluginCredentialRepository {
                 refresh_lease_token = null, refresh_lease_until = null,
                 version = version + 1, updated_at = current_timestamp
             where plugin_id in (:pluginIds)
-              and refresh_lease_token is not null and refresh_lease_until <= :now
+              and refresh_lease_token is not null and refresh_lease_until <= statement_timestamp()
             """)
         .param("pluginIds", pluginIds)
-        .param("now", toOffsetDateTime(now))
         .param("error", error)
         .update();
   }
 
-  /** 领取一条到期的交互凭据并签发刷新租约。 */
+  /** 领取一条到期的交互凭据并签发刷新租约；到期与租约都以数据库时钟判定。 */
   public Optional<PluginCredentialRow> claimDue(
-      List<String> pluginIds, Instant now, Instant leaseUntil, String leaseToken) {
+      List<String> pluginIds, Duration leaseDuration, String leaseToken) {
     return jdbc.sql(
             """
             with claimable as (
                 select plugin_id from plugin_credential
                 where plugin_id in (:pluginIds)
                   and status in ('CONNECTED', 'REFRESH_FAILED')
-                  and next_refresh_at <= :now
-                  and (refresh_lease_token is null or refresh_lease_until <= :now)
+                  and next_refresh_at <= statement_timestamp()
+                  and (refresh_lease_token is null or refresh_lease_until <= statement_timestamp())
                 order by next_refresh_at, plugin_id
                 limit 1
                 for update skip locked
             )
             update plugin_credential credential
-            set refresh_lease_token = :leaseToken, refresh_lease_until = :leaseUntil,
+            set refresh_lease_token = :leaseToken,
+                refresh_lease_until = date_trunc('milliseconds', statement_timestamp())
+                    + :leaseMillis * interval '1 millisecond',
                 version = credential.version + 1, updated_at = current_timestamp
             from claimable
             where credential.plugin_id = claimable.plugin_id
             returning credential.*
             """)
         .param("pluginIds", pluginIds)
-        .param("now", toOffsetDateTime(now))
-        .param("leaseUntil", toOffsetDateTime(leaseUntil))
+        .param("leaseMillis", leaseDuration.toMillis())
         .param("leaseToken", leaseToken)
         .query(ROW_MAPPER)
         .optional();
@@ -229,33 +230,31 @@ public class PluginCredentialRepository {
   }
 
   /** 刷新器发出请求前确认租约仍属于自己且未过期。 */
-  public boolean ownsUnexpiredLease(PluginCredentialRow claimed, Instant now) {
+  public boolean ownsUnexpiredLease(PluginCredentialRow claimed) {
     return jdbc.sql(
                 """
                 select count(*) from plugin_credential
                 where plugin_id = :pluginId and refresh_lease_token = :leaseToken
-                  and version = :version and refresh_lease_until > :now
+                  and version = :version and refresh_lease_until > statement_timestamp()
                 """)
             .param("pluginId", claimed.pluginId())
             .param("leaseToken", claimed.refreshLeaseToken())
             .param("version", claimed.version())
-            .param("now", toOffsetDateTime(now))
             .query(Long.class)
             .single()
         == 1L;
   }
 
   /** 未被刷新租约持有的最早下一次刷新时刻，用于调度下一次扫描。 */
-  public Optional<Instant> earliestRefreshAt(List<String> pluginIds, Instant now) {
+  public Optional<Instant> earliestRefreshAt(List<String> pluginIds) {
     return jdbc
         .sql(
             """
             select min(next_refresh_at) from plugin_credential
             where plugin_id in (:pluginIds) and status in ('CONNECTED', 'REFRESH_FAILED')
-              and (refresh_lease_token is null or refresh_lease_until <= :now)
+              and (refresh_lease_token is null or refresh_lease_until <= statement_timestamp())
             """)
         .param("pluginIds", pluginIds)
-        .param("now", toOffsetDateTime(now))
         .query((rs, row) -> toInstant(rs.getObject(1, OffsetDateTime.class)))
         .list()
         .stream()
