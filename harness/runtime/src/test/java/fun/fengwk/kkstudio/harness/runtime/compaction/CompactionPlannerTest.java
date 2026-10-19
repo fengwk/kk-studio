@@ -805,6 +805,11 @@ class CompactionPlannerTest {
     assertFalse(
         preparation.messagesToSummarize().stream()
             .anyMatch(message -> message.role() == AgentMessageRole.TOOL));
+    // 模型预算同样只计算摘要与 cut 后两条 USER，不重复计入已被摘要替代的 tool batch。
+    long summaryTokens =
+        CompactionPlanner.estimateTextTokens(
+            CompactionPrompts.compactedContext("previous context"));
+    assertEquals(summaryTokens + 50L, CompactionPlanner.estimateProjectionTokens(path.path()));
   }
 
   private static PathBuilder closedTurnPath() {
