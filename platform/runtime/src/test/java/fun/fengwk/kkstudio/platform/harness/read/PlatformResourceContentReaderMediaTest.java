@@ -29,6 +29,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderResourceMaterializer;
 import fun.fengwk.kkstudio.platform.harness.read.PlatformResourceContentReader.ResourceRead;
+import fun.fengwk.kkstudio.platform.storage.ReadDeadline;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
@@ -38,6 +39,7 @@ import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -110,7 +112,8 @@ class PlatformResourceContentReaderMediaTest {
             null,
             null,
             null,
-            "kkstudio:/resources/" + blobId);
+            "kkstudio:/resources/" + blobId,
+            deadline());
 
     ResourceRead.Media media = assertInstanceOf(ResourceRead.Media.class, read);
     assertEquals(blobId, media.resource().sessionBlobId());
@@ -130,7 +133,15 @@ class PlatformResourceContentReaderMediaTest {
             PlatformReadException.class,
             () ->
                 reader.readResource(
-                    threadId, invocationId, CALL_ID, blobId, null, null, null, "resource"));
+                    threadId,
+                    invocationId,
+                    CALL_ID,
+                    blobId,
+                    null,
+                    null,
+                    null,
+                    "resource",
+                    deadline()));
     assertTrue(error.getMessage().contains("does not declare IMAGE"), error.getMessage());
     verifyNoInteractions(blobs);
   }
@@ -147,7 +158,15 @@ class PlatformResourceContentReaderMediaTest {
             PlatformReadException.class,
             () ->
                 reader.readResource(
-                    threadId, invocationId, CALL_ID, blobId, null, null, null, "resource"));
+                    threadId,
+                    invocationId,
+                    CALL_ID,
+                    blobId,
+                    null,
+                    null,
+                    null,
+                    "resource",
+                    deadline()));
     assertTrue(
         error.getMessage().contains("neither user messages nor tool results"), error.getMessage());
     verifyNoInteractions(blobs);
@@ -165,7 +184,15 @@ class PlatformResourceContentReaderMediaTest {
             PlatformReadException.class,
             () ->
                 reader.readResource(
-                    threadId, invocationId, CALL_ID, blobId, null, null, null, "resource"));
+                    threadId,
+                    invocationId,
+                    CALL_ID,
+                    blobId,
+                    null,
+                    null,
+                    null,
+                    "resource",
+                    deadline()));
     assertTrue(error.getMessage().contains("exceeds"), error.getMessage());
     verifyNoInteractions(blobs);
   }
@@ -180,7 +207,15 @@ class PlatformResourceContentReaderMediaTest {
             PlatformReadException.class,
             () ->
                 reader.readResource(
-                    threadId, invocationId, CALL_ID, blobId, null, null, null, "resource"));
+                    threadId,
+                    invocationId,
+                    CALL_ID,
+                    blobId,
+                    null,
+                    null,
+                    null,
+                    "resource",
+                    deadline()));
     assertTrue(error.getMessage().contains("not referenced"), error.getMessage());
     verifyNoInteractions(blobManager, blobs);
   }
@@ -196,7 +231,15 @@ class PlatformResourceContentReaderMediaTest {
             PlatformReadException.class,
             () ->
                 reader.readResource(
-                    threadId, invocationId, "other-call", blobId, null, null, null, "resource"));
+                    threadId,
+                    invocationId,
+                    "other-call",
+                    blobId,
+                    null,
+                    null,
+                    null,
+                    "resource",
+                    deadline()));
     assertTrue(error.getMessage().contains("does not match"), error.getMessage());
     verifyNoInteractions(blobs);
   }
@@ -213,13 +256,22 @@ class PlatformResourceContentReaderMediaTest {
                   new ByteArrayInputStream("blob-content".getBytes(StandardCharsets.UTF_8)));
             });
 
+    ReadDeadline deadline = deadline();
     ResourceRead read =
         reader.readResource(
-            threadId, null, null, blobId, null, null, null, "kkstudio:/resources/" + blobId);
+            threadId,
+            null,
+            null,
+            blobId,
+            null,
+            null,
+            null,
+            "kkstudio:/resources/" + blobId,
+            deadline);
 
     ResourceRead.Text text = assertInstanceOf(ResourceRead.Text.class, read);
     assertTrue(text.text().contains("1|blob-content"), text.text());
-    verify(blobs).withBlobStream(eq(blobId), any(), any());
+    verify(blobs).withBlobStream(eq(blobId), eq(deadline), any());
   }
 
   /** 文本读取时任何底层 S3/OS 原始错误都必须收敛为固定安全英文消息，原始 cause 只留在异常链，绝不进入模型可见文本。 */
@@ -241,11 +293,16 @@ class PlatformResourceContentReaderMediaTest {
                     null,
                     null,
                     null,
-                    "kkstudio:/resources/" + blobId));
+                    "kkstudio:/resources/" + blobId,
+                    deadline()));
 
     assertEquals("failed to read resource: " + blobId, error.getMessage());
     assertFalse(error.getMessage().contains("sentinel-secret-7f3a"));
     assertSame(raw, error.getCause());
+  }
+
+  private static ReadDeadline deadline() {
+    return ReadDeadline.after(Duration.ofSeconds(60));
   }
 
   private void stubBlob(String mediaType, long sizeBytes) {

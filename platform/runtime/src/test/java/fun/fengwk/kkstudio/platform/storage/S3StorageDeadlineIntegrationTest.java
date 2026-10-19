@@ -241,12 +241,19 @@ class S3StorageDeadlineIntegrationTest {
 
   /** 走受管资源文本读取的完整边界：读取预算在入口冻结，超时由读取边界翻译。 */
   private static void readResourceText(StorageBlobContentServiceImpl contentService, UUID blobId) {
+    ReadDeadline deadline = ReadDeadline.after(Duration.ofSeconds(1L));
     contentService.withBlobStream(
         blobId,
-        ReadDeadline.after(Duration.ofSeconds(1L)),
+        deadline,
         stream ->
             ReadTextWindow.format(
-                stream, null, null, null, "kkstudio:/resources/" + blobId, "unsupported"));
+                stream,
+                null,
+                null,
+                null,
+                "kkstudio:/resources/" + blobId,
+                "unsupported",
+                deadline));
   }
 
   private static boolean awaitTrue(AtomicBoolean flag, long timeoutMillis) {

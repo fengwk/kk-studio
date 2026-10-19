@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.harness.read;
 
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -79,10 +80,26 @@ class PlatformResourceContentReaderTest {
                 PlatformReadException.class,
                 () ->
                     unavailable.readResourceText(
-                        UUID.randomUUID(), UUID.randomUUID(), null, null, null, "resource"))
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        null,
+                        null,
+                        null,
+                        "resource",
+                        ReadDeadline.after(PlatformResourceContentReader.READ_TIMEOUT)))
             .getMessage()
             .contains("harness store is unavailable"));
     verifyNoInteractions(blobs);
+  }
+
+  /** 测试意图：deadline 为 null 时在入口直接拒绝。 */
+  @Test
+  void rejectsNullDeadline() {
+    UUID threadId = UUID.randomUUID();
+    UUID blobId = UUID.randomUUID();
+    assertThrows(
+        NullPointerException.class,
+        () -> reader.readResourceText(threadId, blobId, null, null, null, "resource", null));
   }
 
   /** 测试意图：没有会话引用的 URI 不暴露 Blob 是否存在或内容。 */
@@ -159,13 +176,14 @@ class PlatformResourceContentReaderTest {
     assertTrue(read(threadId, blobId).contains("1|blob-content"));
   }
 
-  /** 测试意图：读取预算在请求入口冻结，后续会话鉴权耗时也占用同一预算（不是拿到流之后才起算）。 */
+  /** 测试意图：读取预算由入口传入并在各阶段复用同一对象，会话鉴权耗时计入同一预算。 */
   @Test
-  void freezesReadDeadlineAtEntry() {
+  void passesSameDeadlineAndMeasuresAuthCost() {
     UUID threadId = UUID.randomUUID();
     UUID sessionId = UUID.randomUUID();
     UUID blobId = UUID.randomUUID();
     authorize(threadId, sessionId, blobId, true);
+    ReadDeadline entryDeadline = ReadDeadline.after(Duration.ofSeconds(60));
     // 会话引用校验耗时也必须计入同一读取预算。
     when(refs.contains(sessionId, blobId))
         .thenAnswer(
@@ -173,17 +191,18 @@ class PlatformResourceContentReaderTest {
               sleepQuietly(300L);
               return true;
             });
-    when(blobs.withBlobStream(eq(blobId), any(), any()))
+    when(blobs.withBlobStream(eq(blobId), eq(entryDeadline), any()))
         .thenAnswer(
             invocation -> {
               ReadDeadline deadline = invocation.getArgument(1);
+              assertSame(entryDeadline, deadline, "必须原样传递同一个 deadline 对象");
               assertTrue(
-                  deadline.remaining().compareTo(Duration.ofMillis(29_900L)) <= 0,
-                  "截止时间必须在会话查询之前冻结，实际剩余 " + deadline.remaining());
+                  deadline.remaining().compareTo(Duration.ofMillis(59_900L)) <= 0,
+                  "截止时间必须覆盖会话鉴权耗时，实际剩余 " + deadline.remaining());
               return "1|blob-content";
             });
 
-    assertTrue(read(threadId, blobId).contains("1|blob-content"));
+    assertTrue(read(threadId, blobId, entryDeadline).contains("1|blob-content"));
   }
 
   /** 测试意图：超时与取消以可区分消息对外表达，不能退化成通用读取失败。 */
@@ -224,6 +243,10 @@ class PlatformResourceContentReaderTest {
   }
 
   private String read(UUID threadId, UUID blobId) {
-    return reader.readResourceText(threadId, blobId, null, null, null, "resource");
+    return read(threadId, blobId, ReadDeadline.after(PlatformResourceContentReader.READ_TIMEOUT));
+  }
+
+  private String read(UUID threadId, UUID blobId, ReadDeadline deadline) {
+    return reader.readResourceText(threadId, blobId, null, null, null, "resource", deadline);
   }
 }
