@@ -96,7 +96,7 @@ jobs:
         shell: /bin/bash --noprofile --norc -eo pipefail {0}
         run: |
           /bin/bash --version
-          python3 -m unittest discover -s scripts/daemon/tests -p 'test_*.py'
+          node --test scripts/daemon/tests/*.test.mjs
 
   windows_daemon_installer:
     name: windows daemon installer (PS 5.1 and 7)

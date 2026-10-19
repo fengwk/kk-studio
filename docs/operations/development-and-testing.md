@@ -13,7 +13,6 @@
 | Node 与 npm | Frontend 依赖由 [`package-lock.json`](../../frontend/package-lock.json) 固定；`distribution` profile 会自动安装 Node `v24.14.0` 与 npm `11.9.0` |
 | Docker 与 Compose v2 | 本地栈、测试栈、性能基线和镜像扫描需要 |
 | `curl`、`jq`、`lsof` | [scripts/dev/app.sh](../../scripts/dev/app.sh) 的启动硬依赖；端口与健康探测使用 lsof/curl |
-| Python 3 | E2E 与测试栈的 smoke 脚本 |
 
 数据库与服务由容器提供：[deploy/local](../../deploy/local/README.md) 覆盖主要本地路径，
 [deploy/test](../../deploy/test/README.md) 提供隔离离线栈。开发循环默认连接 PostgreSQL，
@@ -136,7 +135,7 @@ bin 目录置于 PATH 首位，不依赖 runner 默认版本。本地运行 [scr
 
 ### Daemon 安装与受管更新回归
 
-在仓库根运行 `python3 -m unittest discover -s scripts/daemon/tests -v`，覆盖安装、下载、受管更新与发布脚本契约。
+在仓库根运行 `node --test scripts/daemon/tests/*.test.mjs`，覆盖安装、下载、受管更新与发布脚本契约。
 Unix fixtures 替代网络与服务管理命令，真实执行 SHA256 校验、文件替换与暂存输入校验，验证 latest
 解析与发行归档版本匹配、`--check-config` 预检失败保留现有安装、受管身份判定、覆盖安装的备份与替换，
 以及卸载只移除受管服务与程序。安装器没有交互提示、from-source 与单独 upgrade 入口；从 checkout
@@ -169,7 +168,7 @@ Windows 原生还运行 `npm --prefix frontend run test:install:windows`，验�
 
 只有 Linux/macOS 时，可用 PS7 运行
 `pwsh -NoProfile -NonInteractive -File scripts/daemon/tests/test_daemon_install_windows.ps1 -ProcessOnly`；
-Python 入口在发现 `pwsh` 时也会运行这一子集，设置 120 秒超时以发现管道死锁。它只提供可移植
+它只提供可移植
 进程行为证据，不代替 Windows PowerShell 5.1 / PowerShell 7 的原生验收；镜像与 Daemon 发布 CI
 保留两个 Windows host 的完整门禁。
 
@@ -1048,7 +1047,7 @@ dump 之后、冻结之前提交的写入。冻结后的 `<db>_pre_<UTCstamp>` �
 5. 检查 App 健康、配置、Daemon 重连、关键业务和既有 bucket。
    验收结束前保留完整备份、冻结库和对象存储数据；失败时保持停写，按部署恢复流程决定回退。
 
-维护脚本的自动化入口是 `python3 -m unittest discover -s scripts/ops/tests`，验证备份、
+维护脚本的自动化入口是 `node --test scripts/ops/tests/*.test.mjs`，验证备份、
 重建回滚、快照清理范围与确认、元数据保留、连接保护、owner-only 产物与敏感值不外泄。集成测试使用一次性 PostgreSQL 容器；
 Docker 不可用时跳过的结果不能当作数据库流程通过。
 

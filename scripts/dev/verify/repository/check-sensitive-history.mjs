@@ -1259,13 +1259,13 @@ export function renderMarkdown(report) {
     `  已证明为公开示例：${countGroups(history, 'high', STATUS_PUBLIC_EXAMPLE)} 组。`,
     `- 历史中置信度（通用/凭据 URL）待核查值组：${pending.length} 组，累计 ` +
       `${pending.reduce((sum, group) => sum + group.count, 0)} 处（按唯一 blob/消息去重）；未证明为夹具的一律列在“值分级”中。`,
-    `- 扫描完整性：scan_incomplete=${pythonBool(degraded.incomplete)}` +
+    `- 扫描完整性：scan_incomplete=${titleBool(degraded.incomplete)}` +
       `（未读全项 ${degraded.items.length}，省略 ${degraded.omitted}）；` +
       'incomplete=true 时不得视为“已覆盖全部内容”。',
     '',
     '## 覆盖范围（coverage）',
     '',
-    `- shallow 仓库：${pythonBool(coverage.shallow)}`,
+    `- shallow 仓库：${titleBool(coverage.shallow)}`,
     `- refs 总数：${coverage.refs_total}` +
       `（heads=${coverage.refs_heads}, remotes=${coverage.refs_remotes},` +
       ` tags=${coverage.refs_tags}, other=${coverage.refs_other}）`,
@@ -1373,8 +1373,8 @@ export function renderMarkdown(report) {
   return lines.join('\n') + '\n'
 }
 
-/** The report text keeps its historical `True`/`False` spelling. */
-function pythonBool(value) {
+/** The report text keeps its historical capitalized `True`/`False` spelling. */
+function titleBool(value) {
   return value ? 'True' : 'False'
 }
 
