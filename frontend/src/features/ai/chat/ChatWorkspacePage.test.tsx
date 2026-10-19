@@ -970,7 +970,7 @@ describe('ChatWorkspacePage 新建分支路由', () => {
       viewId: 'v-pane-2',
       environmentId: 'a1000000-0000-4000-8000-000000000001',
       directory: '/home/user',
-      entryUrl: 'https://ide.test/?workspace=p2',
+      entryUrl: '/environment-ide/a1000000-0000-4000-8000-000000000001/__ide/bootstrap?token=p2',
     })
 
     renderWorkspace()
@@ -988,9 +988,7 @@ describe('ChatWorkspacePage 新建分支路由', () => {
     await user.click(confirmBtn)
 
     // Wait for pane-2 IDE view to mount
-    await waitFor(() => {
-      expect(environmentService.createIdeView).toHaveBeenCalled()
-    })
+    await screen.findByTestId('ide-iframe')
 
     // Switch layout to 1 pane
     const layoutTrigger = screen.getByRole('button', { name: '布局' })
@@ -1039,7 +1037,7 @@ describe('ChatWorkspacePage 新建分支路由', () => {
       viewId: 'v-pane-2',
       environmentId: 'a1000000-0000-4000-8000-000000000001',
       directory: '/home/user',
-      entryUrl: 'https://ide.test/?workspace=p2',
+      entryUrl: '/environment-ide/a1000000-0000-4000-8000-000000000001/__ide/bootstrap?token=p2',
     })
 
     renderWorkspace()
@@ -1054,9 +1052,7 @@ describe('ChatWorkspacePage 新建分支路由', () => {
     const confirmBtn = await screen.findByRole('button', { name: '确认' })
     await user.click(confirmBtn)
 
-    await waitFor(() => {
-      expect(environmentService.createIdeView).toHaveBeenCalled()
-    })
+    await screen.findByTestId('ide-iframe')
 
     // Click back to conversation ("回到对话")
     const backBtn = screen.getByRole('link', { name: '回到对话' })
