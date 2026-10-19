@@ -148,21 +148,48 @@ describe('process.exec', () => {
     expect(textOutput?.path?.endsWith('.log')).toBe(true)
     expect(textOutput?.totalBytes).toBe(60_000)
   })
+  /**
+   * 验证直接调用 processCapability 时的超时处理：
+   * 执行器本身不再自建内部定时器，由调用方通过 signal 发出 TIMED_OUT 终止信号；
+   * 测试通过局部 AbortController 显式 abort('TIMED_OUT')，验证进程能够收敛并返回 outcome 为 TIMED_OUT 的结果。
+   */
   it('超时终止并给出稳定说明', async () => {
     const dir = await tempDir()
+    const controller = new AbortController()
     const handle = fakeManagedProcess({ holdUntilTerminate: true })
     const supervisor = fakeSupervisor(handle)
-    const result = await callCapability(
+    const pending = callCapability(
       processCapability,
       'process.exec',
       { command: 'sleep 100', workdir: dir },
-      makeContext(dir, { processes: supervisor }),
+      makeContext(dir, { processes: supervisor, signal: controller.signal }),
       30,
     )
+    setTimeout(() => controller.abort('TIMED_OUT'), 10)
+    const result = await pending
     expect(result.error).toBe(true)
     expect(textOf(result)).toContain('timed out after 30 ms')
     expect(result.details).toMatchObject({ process: { outcome: 'TIMED_OUT' } })
     expect(handle.terminated()).toBe(true)
+  })
+
+  /** 验证启动前已被 TIMED_OUT 中止时直接返回 TIMED_OUT 结果且不启动 shell 进程。 */
+  it('启动前已超时不启动进程', async () => {
+    const dir = await tempDir()
+    const controller = new AbortController()
+    controller.abort('TIMED_OUT')
+    const supervisor = fakeSupervisor(fakeManagedProcess({ exitCode: 0 }))
+    const result = await callCapability(
+      processCapability,
+      'process.exec',
+      { command: 'echo hi', workdir: dir },
+      makeContext(dir, { processes: supervisor, signal: controller.signal }),
+      30,
+    )
+    expect(result.error).toBe(true)
+    expect(supervisor.started).toEqual([])
+    expect(result.details).toMatchObject({ process: { outcome: 'TIMED_OUT' } })
+    expect(textOf(result)).toContain('timed out after 30 ms')
   })
 
   it('取消终止并返回 cancelled 结果', async () => {
@@ -288,6 +315,35 @@ describe('process.exec', () => {
     expect(result.error).toBe(true)
     expect(result.details).toMatchObject({ process: { outcome: 'CANCELLED' } })
     // start 收到取消信号，且放行后立即收敛，不留下运行中的 shell。
+    expect(startedSpec?.signal).toBe(controller.signal)
+    expect(handle.terminated()).toBe(true)
+  })
+
+  /** 验证在 processes.start 的 await 期间发生超时，进程同样被围栏截断并收敛。 */
+  it('启动 await 期间的超时被围栏并收敛', async () => {
+    const dir = await tempDir()
+    const controller = new AbortController()
+    const handle = fakeManagedProcess({ holdUntilTerminate: true })
+    let startedSpec: ProcessSpec | undefined
+    const supervisor = {
+      start: async (spec: ProcessSpec): Promise<ManagedProcess> => {
+        startedSpec = spec
+        await new Promise((resolve) => setTimeout(resolve, 20))
+        return handle.process
+      },
+      close: async () => {},
+    }
+    const pending = callCapability(
+      processCapability,
+      'process.exec',
+      { command: 'x', workdir: dir },
+      makeContext(dir, { processes: supervisor, signal: controller.signal }),
+      30,
+    )
+    setTimeout(() => controller.abort('TIMED_OUT'), 5)
+    const result = await pending
+    expect(result.error).toBe(true)
+    expect(result.details).toMatchObject({ process: { outcome: 'TIMED_OUT' } })
     expect(startedSpec?.signal).toBe(controller.signal)
     expect(handle.terminated()).toBe(true)
   })

@@ -39,7 +39,6 @@ type ProcessOutcome = 'EXITED' | 'TIMED_OUT' | 'CANCELLED'
 const processExecutor: CapabilityExecutor = async (call, context) => {
   let spool: OutputSpool | null = null
   let managed: ManagedProcess | null = null
-  let timer: NodeJS.Timeout | null = null
   let cancelled = false
   let timedOut = false
   let terminationFailure: unknown = null
@@ -67,7 +66,11 @@ const processExecutor: CapabilityExecutor = async (call, context) => {
     return termination
   }
   const onAbort = (): void => {
-    cancelled = true
+    if (context.signal.reason === 'TIMED_OUT') {
+      timedOut = true
+    } else {
+      cancelled = true
+    }
     void requestTermination()
   }
 
@@ -76,25 +79,31 @@ const processExecutor: CapabilityExecutor = async (call, context) => {
     const command = requiredString(args, 'command')
     const workdir = await resolveWorkdir(requiredString(args, 'workdir'))
     const timeoutMillis = call.timeoutMillis
+    const store = await textOutputStoreFor(context.config.dataDir)
 
+    context.signal.addEventListener('abort', onAbort, { once: true })
     if (context.signal.aborted) {
-      // 取消早于执行线程开始：不启动 shell、不产生任何本地文件。
-      return terminatedBeforeStart(call.invocationId, 'CANCELLED', timeoutMillis)
+      onAbort()
+      await requestTermination()
+      return terminatedBeforeStart(
+        call.invocationId,
+        timedOut ? 'TIMED_OUT' : 'CANCELLED',
+        timeoutMillis,
+      )
     }
 
-    const store = await textOutputStoreFor(context.config.dataDir)
     spool = new OutputSpool(store, call.invocationId)
     const emitter = new LiveEmitter(call.invocationId, context, () => cancelled || timedOut)
     const decoder = new ProcessUtf8Decoder()
 
-    // deadline 覆盖 shell 冷启动预算；取消/超时在 shell 放行前也生效。
-    if (timeoutMillis > 0) {
-      timer = setTimeout(() => {
-        timedOut = true
-        void requestTermination()
-      }, timeoutMillis)
+    if (cancelled || timedOut) {
+      await requestTermination()
+      return terminatedBeforeStart(
+        call.invocationId,
+        cancelled ? 'CANCELLED' : 'TIMED_OUT',
+        timeoutMillis,
+      )
     }
-    context.signal.addEventListener('abort', onAbort, { once: true })
 
     try {
       managed = await context.processes.start({
@@ -173,9 +182,6 @@ const processExecutor: CapabilityExecutor = async (call, context) => {
     }
     return toErrorResult(call.invocationId, error)
   } finally {
-    if (timer !== null) {
-      clearTimeout(timer)
-    }
     context.signal.removeEventListener('abort', onAbort)
     // 兜底：返回前收敛执行范围并释放全部中转资源；收敛是幂等的。
     await requestTermination()
