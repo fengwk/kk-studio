@@ -809,4 +809,78 @@ class ProviderMessageProjectorTest {
             ProviderType.ANTHROPIC, "anthropic", UUID.randomUUID(), "claude-3-5-sonnet"),
         JsonNodeFactory.instance.objectNode().put("k", "v"));
   }
+
+  @Test
+  void nativeToolResultProjectsDerivedDiffAndPreservesDetailsJson() {
+    ProviderMessageProjector projector = ProviderMessageProjector.byNames(Set.of("edit"));
+    String sha256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+    String detailsJson =
+        "{\"editReview\":{\"path\":\"src/App.java\",\"diff\":\"@@ -1 +1 @@\\n-old\\n+new\",\"sha256\":\""
+            + sha256
+            + "\"}}";
+
+    List<ProviderMessage> projected =
+        projector.project(
+            List.of(
+                assistantToolCall("call-edit", "edit", "{}"),
+                new AgentMessage(
+                    AgentMessageRole.TOOL,
+                    List.of(
+                        new ToolResultMessageContent(
+                            "call-edit",
+                            "edit",
+                            "edit",
+                            List.of(new TextMessageContent("Edited successfully.")),
+                            false,
+                            detailsJson)))));
+
+    assertEquals(
+        List.of(ProviderMessageRole.ASSISTANT, ProviderMessageRole.TOOL),
+        projected.stream().map(ProviderMessage::role).toList());
+    ProviderToolResultBlock result = toolResultOf(projected.get(1));
+    assertEquals("call-edit", result.toolCallId());
+    assertEquals("edit", result.toolName());
+    assertFalse(result.error());
+    assertEquals(detailsJson, result.detailsJson());
+    assertEquals(2, result.contents().size());
+    assertEquals("Edited successfully.", textOf(result.contents().get(0)));
+    assertEquals(
+        "\n\nFile: src/App.java\nDiff:\n@@ -1 +1 @@\n-old\n+new", textOf(result.contents().get(1)));
+  }
+
+  @Test
+  void downgradedToolResultProjectsDerivedDiffIntoPreviousContextUserMessage() {
+    ProviderMessageProjector projector = ProviderMessageProjector.byNames(Set.of());
+    String sha256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+    String detailsJson =
+        "{\"editReview\":{\"path\":\"src/App.java\",\"diff\":\"@@ -1 +1 @@\\n-old\\n+new\",\"sha256\":\""
+            + sha256
+            + "\"}}";
+
+    List<ProviderMessage> projected =
+        projector.project(
+            List.of(
+                new AgentMessage(
+                    AgentMessageRole.ASSISTANT,
+                    List.of(toolCall("call-edit", "edit", "edit", "{}", "update app", null))),
+                new AgentMessage(
+                    AgentMessageRole.TOOL,
+                    List.of(
+                        new ToolResultMessageContent(
+                            "call-edit",
+                            "edit",
+                            "edit",
+                            List.of(new TextMessageContent("Edited successfully.")),
+                            false,
+                            detailsJson)))));
+
+    assertEquals(
+        List.of(ProviderMessageRole.USER), projected.stream().map(ProviderMessage::role).toList());
+    String userText = textOf(projected.get(0));
+    assertTrue(userText.contains("Previous context:\nupdate app:"));
+    assertTrue(userText.contains("```\nEdited successfully.\n```"));
+    assertTrue(
+        userText.contains("```\n\n\nFile: src/App.java\nDiff:\n@@ -1 +1 @@\n-old\n+new\n```"));
+    assertFalse(userText.contains(sha256));
+  }
 }

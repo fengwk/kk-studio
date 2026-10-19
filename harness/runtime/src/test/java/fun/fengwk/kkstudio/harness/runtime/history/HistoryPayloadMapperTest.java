@@ -312,6 +312,33 @@ class HistoryPayloadMapperTest {
   }
 
   @Test
+  void toolResultPayloadForEditKeepsPersistedContentsShortAndDetailsUnchanged() {
+    String sha256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+    String diff = "@@ -1 +1 @@\n-old\n+new";
+    String detailsJson =
+        "{\"editReview\":{\"path\":\"src/Main.java\",\"diff\":\""
+            + diff.replace("\n", "\\n")
+            + "\",\"sha256\":\""
+            + sha256
+            + "\"}}";
+    String shortText = "Edited successfully. Replacements: 1";
+
+    ToolInvocation invocation =
+        succeededInvocation(
+            new ToolResult(
+                "call-1", List.of(new TextResultContent(shortText)), false, detailsJson));
+
+    MessagePayload payload = MAPPER.toolResultPayload(invocation);
+    ToolResultMessageContent result =
+        (ToolResultMessageContent) payload.message().contents().get(0);
+
+    assertEquals(1, result.contents().size());
+    assertEquals(shortText, ((TextMessageContent) result.contents().get(0)).text());
+    assertFalse(((TextMessageContent) result.contents().get(0)).text().contains("Diff:"));
+    assertEquals(detailsJson, result.detailsJson());
+  }
+
+  @Test
   void toolResultPayloadSucceededDegradesResourceWithoutMaterializer() {
     ResourceRef resource =
         new ResourceRef(
