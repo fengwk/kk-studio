@@ -46,7 +46,7 @@ DAEMON_NOTE=${DAEMON_NOTE:-E2E daemon environment.}
 
 export DAEMON_ENV_ROOT
 
-BACKEND_JAR=${BACKEND_JAR:-"$REPO_ROOT/web/target/kk-studio-web-1.1.2.jar"}
+BACKEND_JAR=${BACKEND_JAR:-"$REPO_ROOT/web/target/kk-studio-web-1.1.3.jar"}
 DAEMON_DIST=${DAEMON_DIST:-"$REPO_ROOT/daemon/dist"}
 # 开发 E2E 用宿主 Node 运行编译产物；发行验收使用归档自带的冻结 Node（由 smoke-archive 负责）。
 DAEMON_NODE=${DAEMON_NODE:-}

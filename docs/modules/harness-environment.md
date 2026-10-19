@@ -29,11 +29,11 @@ id / version / inputSchema / defaultTimeout
 | `fs.edit` | 1 分钟 | 无 | `edit` |
 | `fs.edit.preview` | 1 分钟 | 无 | 内部只读审查 |
 | `process.exec` | 5 分钟 | 必填 | `bash` |
-| `fs.grep` | 1 分钟 | 无 | `grep` |
-| `fs.find` | 1 分钟 | 无 | `find` |
-| `lsp.goto-definition` | 2 分钟 | 无 | `lsp_goto_definition` |
-| `lsp.workspace-symbols` | 2 分钟 | 无 | `lsp_workspace_symbols` |
-| `lsp.java-decompile` | 2 分钟 | 无 | `lsp_java_decompile` |
+| `fs.grep` | 15 秒 | 无 | `grep` |
+| `fs.find` | 15 秒 | 无 | `find` |
+| `lsp.goto-definition` | 3 分钟 | 无 | `lsp_goto_definition` |
+| `lsp.workspace-symbols` | 3 分钟 | 无 | `lsp_workspace_symbols` |
+| `lsp.java-decompile` | 3 分钟 | 无 | `lsp_java_decompile` |
 | `skill.sync` | 不设总时限 | 无 | 内部控制面 |
 
 `skill.sync` 与 `fs.edit.preview` 由内部调用，不映射为模型工具；其余 9 项由 Contributor 映射为模型工具。
@@ -92,7 +92,7 @@ default void terminate(EnvironmentCapabilityTerminationCause cause) { cancel(); 
 default Duration terminationGrace() { return Duration.ZERO; }
 ```
 
-`cancel()` 是无条件取消，`isCancelled()` 是「已被请求终止」的协作式中断信号。需要区分原因的宿主能力覆盖 `terminate`，按 [`EnvironmentCapabilityTerminationCause`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityTerminationCause.java) 的 `TIMED_OUT`/`CANCELLED` 产出与原因一致的收尾事实，因此超时不会被报告成调用方取消。`terminationGrace()` 默认 `ZERO`（收尾立即由调用方裁决）；返回正数的能力承诺在该预算内自行提交终态，使 Daemon 能把终态提交让给它以携带失败日志，预算到期仍由调用方兜底收敛，见 [Daemon 的超时与取消收尾](daemon.md#能力装配与运行时调度)。
+`cancel()` 是无条件取消，`isCancelled()` 是「已被请求终止」的协作式中断信号。需要区分原因的宿主能力覆盖 `terminate`，按 [`EnvironmentCapabilityTerminationCause`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityTerminationCause.java) 的 `TIMED_OUT`/`CANCELLED` 产出与原因一致的收尾事实，因此超时不会被报告成调用方取消。Runtime 单一 invoke timer 在超时或取消时仅请求停止，不提前抢占终态；能力实现通过 `terminate` 在 cleanup 后交付真实结果，见 [Daemon 的超时与取消收尾](daemon.md#能力装配与运行时调度)。
 
 能力结果 [`EnvironmentCapabilityResult`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityResult.java) 是 `callId` 加 `contents`（至多 64 项）、`error` 与 `detailsJson`（至多 1 MiB UTF-8）。错误结果可以只带文本，也可以带稳定错误码：[`EnvironmentCapabilityResultCodes`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityResultCodes.java) 只冻结码的语法 `[A-Z][A-Z0-9_]*`（至多 64 字符），当前没有预置码常量。
 

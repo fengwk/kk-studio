@@ -211,8 +211,7 @@ Chat 工具卡片与 ApprovalCard 共享文件变更审查组件：
 - **展开与结果呈现**：write 与 edit 默认保持展开并有界滚动；执行成功后，可见结果仅呈现简洁的本地化提示
   （中文“写入成功”/“编辑成功”，英文“Write succeeded”/“Edit succeeded”），不再在成功结果中重复回显文件正文或 diff；
   执行失败时不隐藏错误详情，也不在产生真实终态前虚假展示成功。
-- **来源优先级**：优先从持久化的 `approvalJson.editReview` 获取真实 diff；对于自动放行（无需审批）或 YOLO 模式的编辑调用，
-  从成功结果的 `details.editReview` 读取真实变更；决不从旧/新参数在前端伪造 diff。其他工具的折叠与展示策略保持不变。
+- **来源优先级与持久化结构**：优先从持久化的 `approvalJson.editReview` 获取真实 diff（freeze approval 优先）；对于自动放行（无需审批）、YOLO 模式或页面刷新与 GC 后的结果恢复，从持久化结果的 `details.editReview` 读取真实变更（durable entry 显式解码 `detailsJson`，invocation 从 `resultJson.details` 对象读取）；决不从旧/新参数在前端伪造 diff。其他工具的折叠与展示策略保持不变。
 
 根面板自动查询执行树，在 Widget 区以单行节点展示 processing 后代及其必要祖先；
 不重复根节点，不绘制无活跃后代的空壳。根本地空闲仍继续查询，整树 Stop 仍然可用。

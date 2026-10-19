@@ -55,11 +55,11 @@ Daemon 的重点测试文件位于 [`test/coding/process.test.ts`](../../daemon/
 | stdin 确定性 EOF、大输出不死锁 | 验证写入端关闭使等待 EOF 的命令自然结束、大输出完整合并捕获不死锁 |
 | 启动前取消或超时不运行命令、不触碰输出存储 | `process.test.ts` 验证 pre-aborted 上下文立即失败，不启动 shell 或触碰存储 |
 | 启动失败不留下中转文件 | 进程启动失败时清理 staging 文件并报告错误 |
-| 超时预算原样传递，零值无 deadline，极大值不变成立即超时 | `runtime.test.ts` 验证 wire timeout 原样生效，0 表示无 deadline |
+| 超时预算原样传递，默认 300 秒不变（无独立起表），零值无 deadline，极大值不变成立即超时 | `runtime.test.ts` 与 `process.test.ts` 验证 wire timeout 原样生效，0 表示无 deadline |
 | 缺 workdir 不回退、未知字段在副作用之前拒绝 | 缺少 workdir 或包含未知参数在发生副作用前被拒绝 |
 
 机器事实在 `detailsJson.process` 中：`outcome` 为 `EXITED`、`TIMED_OUT` 或 `CANCELLED`，
-只有自然退出报告权威 `exitCode`，不以 `128 + signal` 合成被杀进程的退出码。
+与捕获输出统一收敛；只有自然退出报告权威 `exitCode`，不以 `128 + signal` 合成被杀进程的退出码。
 
 ## 进程范围与清理
 
@@ -96,8 +96,8 @@ POSIX 先发 SIGTERM、等待宽限、再强杀；Windows 用 Job 的 `KILL_ON_J
 当前调用返回降级结果；排查时同时检查预览、捕获状态和 staging 清理。
 
 [`runtime.test.ts`](../../daemon/test/runtime.test.ts)
-验证超时裁决仍为 `FAILED`、取消裁决仍为 `CANCELLED`，两者在收尾窗口携带捕获输出；
-能力未回调、调度器拒绝、收尾中停机和迟到回调都只能产生一个终态。
+验证单一 invoke timer 到期时只请求停止，不提前抢占终态；超时裁决仍为 `FAILED`、取消裁决仍为 `CANCELLED`，两者在收尾窗口携带捕获输出并在 `details.process.outcome` 中收敛；
+能力未回调、调度器拒绝、收尾中停机和迟到回调都只能产生一个终态，已完成的文件修改提交成功决不被 late abort 覆盖；系统不承诺 OS 阻塞可在 60 秒内硬中止。
 超过 16 MiB wire 预算时整体丢弃能力文本，而非发送超大终态。
 
 ## 权限面分析
