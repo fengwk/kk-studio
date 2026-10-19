@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { resolveSearchWorkerEntry, searchCapabilities } from '../../src/coding/search.js'
 import { toPosix } from '../../src/coding/support.js'
 import { callCapability, makeContext, textOf } from './helpers.js'
@@ -251,7 +252,9 @@ describe('fs.grep', () => {
     expect(textOf(result)).toContain('Invalid regex')
   })
 
-  it('resolveSearchWorkerEntry 在无效 base 下回落并返回 null', () => {
-    expect(resolveSearchWorkerEntry(new URL('file:///tmp/not-exist/entry.js'))).toBeNull()
+  it('resolveSearchWorkerEntry 在缺失编译产物时回落并返回 null', async () => {
+    const dir = await tempDir()
+    const base = pathToFileURL(join(dir, 'missing', 'coding', 'entry.js'))
+    expect(resolveSearchWorkerEntry(base)).toBeNull()
   })
 })
