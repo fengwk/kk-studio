@@ -39,23 +39,23 @@ Platform 终态化器另有内联预算：普通工具为 50 KiB / 2000 行，�
 
 现有文件原子替换保持文件系统支持的权限；edit 保持编码、BOM 和换行风格，write 按完整内容写入。无法无损编码则拒绝。提交成功后，通知或展示故障单独报告。设备、FIFO 等非普通文件在 I/O 前拒绝。
 
-需要人工批准的 edit 先通过内部 `fs.edit.preview` 只读计算真实文件 diff，冻结 canonical 路径、原始字节 SHA-256 与全部变更行。审批后的执行在文件修改锁内校验同一 `expectedFile`，文件变化即拒绝写入。diff 保留真实行号与末尾换行变化，只省略未改变的远端上下文；裁去公共前后缀后，变更区域的原行数乘新行数超过 2,000,000 时改用完整整段删除/新增。完整 diff 连同结果超过 1 MiB UTF-8 预算时，在预览或提交前明确拒绝，不截断变更行。协议和验证入口见 [Harness Environment](harness-environment.md) 与[文件变更验证](../operations/builtin-mutation-tests.md)。
+需要人工批准的 edit 先通过内部 `fs.edit.preview` 只读计算真实文件 diff，冻结 canonical 路径、原始字节 SHA-256 与全部变更行。审批后的执行在文件修改锁内校验同一 `expectedFile`，文件变化即拒绝写入。diff 基于 diff@9.0.0 的 diffArrays 计算，保留真实行号、稀疏编辑的真实 changedlines、4 行上下文与 EOF 缺失换行显式标记，不设 diff 独立的 timeout 与 maxEditLength。完整 review 连同结果在 1 MiB 前置限制内完整校验，超过 1 MiB UTF-8 预算时在预览或提交前明确拒绝，不截断变更行。协议和验证入口见 [Harness Environment](harness-environment.md) 与[文件变更验证](../operations/builtin-mutation-tests.md)。
 
-grep 对完整搜索内容匹配，展示缩略与搜索完整性分开。超时、资源限制和读失败各自报告；搜索范围、正则支持与输出上限按能力 schema 和 Daemon 实现校验，取消收尾须等待实际计算终止。
+grep 与 find 默认超时为 15 秒，可由正数 `timeout_seconds` 覆盖。搜索过程由 worker 在目录、行及 8KiB 块检查点共享原子 flag 检查中断；超时保留已收集的 partial 匹配，并显式标记 error 与 `search.incomplete`。非响应 stop 给予 5 秒清理宽限才 await terminate（非额外更短执行预算），清理失败明确暴露。
 
 grep/find 共享仓库忽略解析：从搜索位置解析祖先 .gitignore、分层规则、否定规则和 .git/info/exclude，支持 .git 文件形式的 worktree。不因调用目录变化而改变同一目标的忽略行为。不引入 Environment 根目录。
 
 ## 命令执行
 
-bash 在显式 workdir 中执行一次命令。成功、非零退出、超时和取消都收尾并保留已捕获输出；大输出保存本地日志，结果区分捕获限制和保存失败。取消或失败后已发生的副作用仍需核查。终止先温和停止再强制收敛，平台差异见 [Daemon 原生进程监管](daemon.md#原生进程监管)。
+bash 在显式 workdir 中执行一次命令，默认超时保持 300 秒不变，由唯一的 invoke 信号驱动，无独立起表；成功、非零退出、超时和取消都收尾并保留已捕获输出，并在 `details.process.outcome` 中收敛进程终态（`EXITED`、`TIMED_OUT`、`CANCELLED`）。大输出保存本地日志，结果区分捕获限制和保存失败。取消或失败后已发生的副作用仍需核查。终止先温和停止再强制收敛，平台差异见 [Daemon 原生进程监管](daemon.md#原生进程监管)。
 
 ## LSP 生命周期
 
 根据目标文件自动选择服务器并发现项目根；调用方不提供额外 cwd。项目根用于 rootUri/workspaceFolders 和服务器进程目录，不改变文件工具路径规则。仓库边界内选择构建根或最近标记，没有标记回退文件目录，不能跨 worktree 边界错误复用。
 
-LSP 客户端按项目根、server ID 和配置指纹复用，去重并发初始化。查询前同步文件，处理 JSON-RPC、服务能力、服务器请求及位置编码。write/edit 的提交与后续同步分别报告。查询提供 definition、workspace symbols 和 JDTLS Java 反编译，正文按语言服务器返回的源码展示。
+LSP 客户端按项目根、server ID 和配置指纹复用，去重并发初始化。查询前同步文件，处理 JSON-RPC、服务能力、服务器请求及位置编码。write/edit 的提交与后续同步分别报告。查询提供 definition、workspace symbols 和 JDTLS Java 反编译，正文按语言服务器返回的源码展示。LSP 三项工具（`lsp_goto_definition`、`lsp_workspace_symbols`、`lsp_java_decompile`）默认超时为 180 秒，覆盖等待启动、initialize 与 query 全程，全程消费同一 `context.signal`。
 
-客户端归 Daemon 所有，无在途请求且闲置 5 分钟回收；同一复用键的新实例只在旧实例停止之后启动；回收与关闭的清理在派发被拒时同步兜底，关闭同时收尾已登记退休的实例，队列不执行也不会留下进程或悬挂的等待者。Thread 结束不关闭共享实例。Daemon 退出全部关闭；配置失效停止旧实例接收新请求并有界收尾；异常退出使当前请求失败，后续可重建。关闭顺序为 shutdown、exit、有界等待和必要的强制终止；初始化中实例也必须能清理。外部语言服务器需要预先配置，不自动安装。
+客户端归 Daemon 所有，无在途请求且闲置 5 分钟回收；共享池初始化生命周期默认 180 秒（独立资源生命周期，不重起查询 timer），一个 waiter 停止不影响其他，最后退出等待 cleanup；同一复用键的新实例只在旧实例停止之后启动；回收与关闭的清理在派发被拒时同步兜底，关闭同时收尾已登记退休的实例，队列不执行也不会留下进程或悬挂的等待者。Thread 结束不关闭共享实例。Daemon 退出全部关闭；配置失效停止旧实例接收新请求并有界收尾；异常退出使当前请求失败，后续可重建。关闭顺序为 shutdown（1 秒）、exit、有界等待和必要的强制终止；初始化中实例也必须能清理。外部语言服务器需要预先配置，不自动安装。
 
 ## 异步 task
 

@@ -62,7 +62,7 @@ Java 目标模块的 `target/surefire-reports` 必须证明用例实际运行，
 文本最多展示 2000 行、60000 码点正文，截断位置包含下一行/列坐标；`column_offset` 不限于 `limit=1`。
 内部按长整型计数，输出坐标超出协议范围时显式失败，不截断成错误的续读位置。
 为给出准确总行数和末尾换行事实，读取必须扫描到 EOF：不存在 64 MiB 文件拒绝上限，
-成本由 Daemon 调用预算、Resource reader 的 30 秒预算和取消/中断控制。稀疏大文件也不是无成本读取。
+成本由 Daemon 调用预算（60 秒，不新增 schema 参数）、受管资源 `managedresource read` 从 effective `request.timeout` 产生的唯一 `ReadDeadline`（默认 60 秒，I/O、鉴权与流式扫描共用该预算，无 30 秒子期限；skill 扫描同 deadline）和取消/中断控制。稀疏大文件也不是无成本读取。
 
 ## 本地路径、编码与文件类型
 
@@ -87,7 +87,7 @@ read 不等待进程内文件变更队列，也没有成功 observer 回调；�
 验证 Resource/Skill 读取进入同一窗口投影；
 [`S3StorageDeadlineIntegrationTest`](../../platform/runtime/src/test/java/fun/fengwk/kkstudio/platform/storage/S3StorageDeadlineIntegrationTest.java)
 验证响应头前与响应体内阻塞时存储截止时间生效及错误翻译。
-`PlatformResourceContentReader` 的 30 秒预算与线程中断是两种约束，应分别观察超时与取消路径。
+`PlatformResourceContentReader` 的 `ReadDeadline` 预算（继承自请求的有效超时，默认 60 秒）与线程中断是两种约束，应分别观察超时与取消路径；I/O、鉴权、对象流与扫描共用同一截止时间，不存在独立的 30 秒子期限。
 `ToolResultFinalizerTest` 验证可信 read 身份专属的 **320 KiB / 2020 物理行**内联预算：
 2000 行与 60000 码点的最坏文本窗口连同行号、header 仍在预算内，因此文本不产生 resource 预览。
 图片等二进制结果的外部化不是这条内联保证。

@@ -37,7 +37,7 @@
 | Backend | `http://127.0.0.1:18080`，`SPRING_PROFILES_ACTIVE=e2e` |
 | Frontend | `http://127.0.0.1:5173` |
 | 工作目录 | `runtime/dev`，可由 `DEV_WORK_DIR` 覆盖 |
-| Backend log / JAR | `runtime/dev/backend.log`、`web/target/kk-studio-web-1.1.2.jar` |
+| Backend log / JAR | `runtime/dev/backend.log`、`web/target/kk-studio-web-1.1.3.jar` |
 
 `start` 会先执行 stop 流程、检查端口占用、按需用 Maven 打包 Backend、按需安装前端依赖，等
 Backend API ready 后再启动 Vite；`restart` 等价于 `stop` 后再 `start`，`logs` 与 `tail` 接受可选
@@ -323,6 +323,12 @@ npm --prefix frontend run build:layout
 模态框和多 pane 防抢焦、等宽 Debug 列与 Subagent 配置详情、骨架屏、按钮忙碌状态和窄屏布局，
 以及 write/edit 审查卡片（完整正文展示、准备中 spinner、真实文件 diff 与成功短文案呈现）和
 同源 IDE 覆盖层面板的显示、折叠与焦点恢复。
+文件变更审查卡片另提供独立的局部组件级浏览器回归入口（非 E2E 矩阵正式 case，独立 Chromium 端口 5178，不修改矩阵 inventory）：
+
+```bash
+npm --prefix frontend run test:mutation:browser
+```
+
 API 规划与代理切换由后端定向测试验证，不以静态浏览器基座替代真实服务契约。
 
 Thread 控制与消息展示有独立的离线 Chromium 入口，可按改动范围选择：
