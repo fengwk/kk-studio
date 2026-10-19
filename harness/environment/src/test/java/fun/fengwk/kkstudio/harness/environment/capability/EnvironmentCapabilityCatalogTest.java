@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.environment.capability;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -10,6 +11,12 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
 import java.util.Set;
 
@@ -252,5 +259,104 @@ class EnvironmentCapabilityCatalogTest {
               id.value() + " should reject workdir");
       assertTrue(error.getMessage().contains("workdir is not allowed"), error.getMessage());
     }
+  }
+
+  /** 测试意图：验证全量 capability 的默认超时契约。 */
+  @Test
+  void enforcesStandardDefaultTimeouts() {
+    assertEquals(
+        Duration.ofSeconds(60),
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_READ).defaultTimeout());
+    assertEquals(
+        Duration.ofSeconds(60),
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_WRITE).defaultTimeout());
+    assertEquals(
+        Duration.ofSeconds(60),
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_EDIT).defaultTimeout());
+    assertEquals(
+        Duration.ofSeconds(60),
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_EDIT_PREVIEW)
+            .defaultTimeout());
+    assertEquals(
+        Duration.ofSeconds(300),
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.PROCESS_EXEC)
+            .defaultTimeout());
+    assertEquals(
+        Duration.ofSeconds(15),
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_GREP).defaultTimeout());
+    assertEquals(
+        Duration.ofSeconds(15),
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_FIND).defaultTimeout());
+    assertEquals(
+        Duration.ofSeconds(180),
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.LSP_GOTO_DEFINITION)
+            .defaultTimeout());
+    assertEquals(
+        Duration.ofSeconds(180),
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.LSP_WORKSPACE_SYMBOLS)
+            .defaultTimeout());
+    assertEquals(
+        Duration.ofSeconds(180),
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE)
+            .defaultTimeout());
+    assertEquals(
+        Duration.ZERO,
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.SKILL_SYNC).defaultTimeout());
+  }
+
+  /** 测试意图：验证 fs.grep 与 fs.find 的 schema 文案如实说明默认超时为 15 秒。 */
+  @Test
+  void grepAndFindSchemasDocumentFifteenSecondDefaultTimeout() {
+    String grepDescription =
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_GREP)
+            .inputSchema()
+            .properties()
+            .get("timeout_seconds")
+            .description();
+    assertTrue(grepDescription.contains("Defaults to 15."), grepDescription);
+
+    String findDescription =
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_FIND)
+            .inputSchema()
+            .properties()
+            .get("timeout_seconds")
+            .description();
+    assertTrue(findDescription.contains("Defaults to 15."), findDescription);
+  }
+
+  /** 测试意图：验证 Java classpath 加载的 schema 与 Daemon capabilities 镜像文件完全一致。 */
+  @Test
+  void javaSchemasMirrorDaemonCapabilitySchemas() throws IOException {
+    Path projectRoot = findProjectRootDir();
+    Path daemonCapabilitiesDir = projectRoot.resolve("daemon/resources/capabilities");
+    for (EnvironmentCapabilityDescriptor descriptor : EnvironmentCapabilityCatalog.descriptors()) {
+      String fileName = descriptor.id().value() + ".schema.json";
+      Path daemonSchemaPath = daemonCapabilitiesDir.resolve(fileName);
+      assertTrue(Files.exists(daemonSchemaPath), "daemon schema must exist: " + daemonSchemaPath);
+      String daemonSchema =
+          Files.readString(daemonSchemaPath, StandardCharsets.UTF_8).stripTrailing();
+      String javaSchemaResource =
+          "/fun/fengwk/kkstudio/harness/environment/capability/schemas/" + fileName;
+      try (InputStream input =
+          EnvironmentCapabilityCatalog.class.getResourceAsStream(javaSchemaResource)) {
+        assertNotNull(input, "missing java schema resource: " + javaSchemaResource);
+        String javaSchema =
+            new String(input.readAllBytes(), StandardCharsets.UTF_8).stripTrailing();
+        assertEquals(
+            daemonSchema, javaSchema, "Java and daemon schemas must match for " + fileName);
+      }
+    }
+  }
+
+  private static Path findProjectRootDir() {
+    Path current = Path.of("").toAbsolutePath();
+    while (current != null) {
+      if (Files.isDirectory(current.resolve("daemon/resources/capabilities"))) {
+        return current;
+      }
+      current = current.getParent();
+    }
+    throw new IllegalStateException(
+        "cannot find project root containing daemon/resources/capabilities");
   }
 }

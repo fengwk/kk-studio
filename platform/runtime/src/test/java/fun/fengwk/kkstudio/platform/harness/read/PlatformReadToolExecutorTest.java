@@ -40,8 +40,10 @@ import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitCache;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
 import fun.fengwk.kkstudio.platform.harness.read.PlatformResourceContentReader.ResourceRead;
+import fun.fengwk.kkstudio.platform.storage.ReadDeadline;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -209,7 +211,15 @@ class PlatformReadToolExecutorTest {
     when(context.threadId()).thenReturn(threadId);
 
     when(resourceReader.readResource(
-            threadId, null, "call-1", blobId, null, null, null, "kkstudio:/resources/" + blobId))
+            eq(threadId),
+            eq(null),
+            eq("call-1"),
+            eq(blobId),
+            eq(null),
+            eq(null),
+            eq(null),
+            eq("kkstudio:/resources/" + blobId),
+            any(ReadDeadline.class)))
         .thenReturn(
             new ResourceRead.Text("path: kkstudio:/resources/" + blobId + "\n\n1|blob-data"));
 
@@ -242,7 +252,15 @@ class PlatformReadToolExecutorTest {
             3L,
             "0".repeat(64));
     when(resourceReader.readResource(
-            threadId, null, "call-1", blobId, null, null, null, "kkstudio:/resources/" + blobId))
+            eq(threadId),
+            eq(null),
+            eq("call-1"),
+            eq(blobId),
+            eq(null),
+            eq(null),
+            eq(null),
+            eq("kkstudio:/resources/" + blobId),
+            any(ReadDeadline.class)))
         .thenReturn(new ResourceRead.Media(ref, null));
 
     executor.read(
@@ -460,7 +478,16 @@ class PlatformReadToolExecutorTest {
 
     UUID threadId = UUID.randomUUID();
     when(context.threadId()).thenReturn(threadId);
-    when(resourceReader.readResource(threadId, null, "call-1", blobId, null, null, null, uri))
+    when(resourceReader.readResource(
+            eq(threadId),
+            eq(null),
+            eq("call-1"),
+            eq(blobId),
+            eq(null),
+            eq(null),
+            eq(null),
+            eq(uri),
+            any(ReadDeadline.class)))
         .thenThrow(new PlatformReadException("resource not authorized"));
     ToolExecutionListener deniedListener = mock(ToolExecutionListener.class);
     executor.read(mockRequest("{\"path\":\"" + uri + "\"}", context), deniedListener);
@@ -469,7 +496,17 @@ class PlatformReadToolExecutorTest {
     verifyNoMoreInteractions(deniedListener);
     assertTrue(denied.getValue().error());
     assertTrue(firstText(denied.getValue()).contains("resource not authorized"));
-    verify(resourceReader).readResource(threadId, null, "call-1", blobId, null, null, null, uri);
+    verify(resourceReader)
+        .readResource(
+            eq(threadId),
+            eq(null),
+            eq("call-1"),
+            eq(blobId),
+            eq(null),
+            eq(null),
+            eq(null),
+            eq(uri),
+            any(ReadDeadline.class));
     verifyNoMoreInteractions(resourceReader);
   }
 
@@ -551,7 +588,16 @@ class PlatformReadToolExecutorTest {
         List.of(new IllegalStateException("blob failure"), new IllegalStateException())) {
       doThrow(failure)
           .when(resourceReader)
-          .readResource(threadId, null, "call-1", blobId, null, null, null, uri);
+          .readResource(
+              eq(threadId),
+              eq(null),
+              eq("call-1"),
+              eq(blobId),
+              eq(null),
+              eq(null),
+              eq(null),
+              eq(uri),
+              any(ReadDeadline.class));
       ToolExecutionListener completion = mock(ToolExecutionListener.class);
       executor.read(mockRequest("{\"path\":\"" + uri + "\"}", context), completion);
       ArgumentCaptor<ToolResult> captor = ArgumentCaptor.forClass(ToolResult.class);
@@ -565,12 +611,96 @@ class PlatformReadToolExecutorTest {
     }
   }
 
+  /** 测试意图：受管资源读取以 request.timeout 构造 ReadDeadline 并完整传递给下游。 */
+  @Test
+  void kkstudioResourcePassesConfiguredDeadline() {
+    UUID threadId = UUID.randomUUID();
+    UUID blobId = UUID.randomUUID();
+    ToolExecutionContext context = mock(ToolExecutionContext.class);
+    when(context.threadId()).thenReturn(threadId);
+
+    ArgumentCaptor<ReadDeadline> deadlineCaptor = ArgumentCaptor.forClass(ReadDeadline.class);
+    when(resourceReader.readResource(
+            eq(threadId),
+            eq(null),
+            eq("call-1"),
+            eq(blobId),
+            eq(null),
+            eq(null),
+            eq(null),
+            eq("kkstudio:/resources/" + blobId),
+            deadlineCaptor.capture()))
+        .thenReturn(new ResourceRead.Text("1|data"));
+
+    Duration customTimeout = Duration.ofSeconds(45);
+    ToolExecutionRequest request =
+        mockRequest("{\"path\":\"kkstudio:/resources/" + blobId + "\"}", context, customTimeout);
+
+    executor.read(request, listener);
+
+    verify(listener).onComplete(any(ToolResult.class));
+    ReadDeadline captured = deadlineCaptor.getValue();
+    assertNotNull(captured);
+    assertTrue(captured.remaining().compareTo(Duration.ofSeconds(40)) >= 0);
+    assertTrue(captured.remaining().compareTo(customTimeout) <= 0);
+  }
+
+  /** 测试意图：Skill 读取若在读取或扫描时超过入口 deadline，必须以超时错误返回，不静默 fallback。 */
+  @Test
+  void skillUriTimesOutWhenDeadlineExceeded() {
+    byte[] bytes = "line1\nline2\n".getBytes(StandardCharsets.UTF_8);
+    when(skillReader.readSkillFile("pkg", "dev", "SKILL.md"))
+        .thenAnswer(
+            invocation -> {
+              Thread.sleep(20L);
+              return bytes;
+            });
+
+    ToolExecutionRequest request =
+        mockRequest(
+            "{\"path\":\"kkstudio:/skills/pkg/dev/SKILL.md\"}", null, Duration.ofMillis(10));
+
+    executor.read(request, listener);
+
+    ArgumentCaptor<ToolResult> captor = ArgumentCaptor.forClass(ToolResult.class);
+    verify(listener).onComplete(captor.capture());
+    ToolResult result = captor.getValue();
+    assertTrue(result.error());
+    assertTrue(firstText(result).contains("interrupted or timed out"));
+  }
+
+  /** 测试意图：Duration.ZERO 无期限语义按 ReadDeadline 现有可表达能力处理（抛出 budget must be positive），不静默回退为 60s。 */
+  @Test
+  void zeroTimeoutRejectsAccordingToExistingReadDeadlineCapability() {
+    UUID blobId = UUID.randomUUID();
+    ToolExecutionContext context = mock(ToolExecutionContext.class);
+    when(context.threadId()).thenReturn(UUID.randomUUID());
+
+    ToolExecutionRequest request =
+        mockRequest("{\"path\":\"kkstudio:/resources/" + blobId + "\"}", context, Duration.ZERO);
+
+    executor.read(request, listener);
+
+    ArgumentCaptor<ToolResult> captor = ArgumentCaptor.forClass(ToolResult.class);
+    verify(listener).onComplete(captor.capture());
+    ToolResult result = captor.getValue();
+    assertTrue(result.error());
+    assertTrue(firstText(result).contains("budget must be positive"));
+    verifyNoInteractions(resourceReader);
+  }
+
   private static ToolExecutionRequest mockRequest(
       String argumentsJson, ToolExecutionContext context) {
+    return mockRequest(argumentsJson, context, Duration.ofSeconds(60));
+  }
+
+  private static ToolExecutionRequest mockRequest(
+      String argumentsJson, ToolExecutionContext context, Duration timeout) {
     ToolExecutionRequest request = mock(ToolExecutionRequest.class);
     ToolCall call = new ToolCall("call-1", "read", argumentsJson);
     when(request.call()).thenReturn(call);
     when(request.context()).thenReturn(context);
+    when(request.timeout()).thenReturn(timeout);
     return request;
   }
 
