@@ -1,4 +1,5 @@
 import { useEffect, useRef, type KeyboardEvent, type Ref, type RefObject } from 'react'
+import { KeyValue, KeyValueRow } from '@/shared/ui/data/KeyValue'
 import { Eye, LoaderCircle, X } from 'lucide-react'
 import type { ThreadEventRecord } from '@/features/ai/runtime/thread-events'
 import { useI18n } from '@/shared/i18n'
@@ -88,14 +89,13 @@ export function ThreadEventDetail({
         </IconButton>
       </header>
       {record.details.length > 0 ? (
-        <dl className="thread-event-detail-rows">
+        <KeyValue>
           {record.details.map((row, index) => (
-            <div key={`${row.label}-${index}`} className="thread-event-detail-row">
-              <dt>{row.label}</dt>
-              <dd>{row.value}</dd>
-            </div>
+            <KeyValueRow key={`${row.label}-${index}`} label={row.label}>
+              {row.value}
+            </KeyValueRow>
           ))}
-        </dl>
+        </KeyValue>
       ) : null}
       {canPreviewHistoricalRequest ? (
         <div className="thread-event-detail-actions">

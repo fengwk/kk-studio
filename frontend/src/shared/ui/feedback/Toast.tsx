@@ -2,6 +2,7 @@ import { AlertCircle, CheckCircle2, X } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useI18n } from '@/shared/i18n'
+import { IconButton } from '@/shared/ui/controls/IconButton'
 import './feedback.css'
 
 export type ToastTone = 'success' | 'error'
@@ -41,14 +42,14 @@ export function Toast({ message, tone = 'success', onDismiss, duration = 4000 }:
         {tone === 'error' ? <AlertCircle /> : <CheckCircle2 />}
       </span>
       <span className="ui-toast-message">{message}</span>
-      <button
-        type="button"
+      <IconButton
         className="ui-toast-dismiss"
-        aria-label={t('shared.dismissNotification')}
+        size="compact"
+        label={t('shared.dismissNotification')}
         onClick={onDismiss}
       >
         <X aria-hidden="true" />
-      </button>
+      </IconButton>
     </div>,
     document.body,
   )

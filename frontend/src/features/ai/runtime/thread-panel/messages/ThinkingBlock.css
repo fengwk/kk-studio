@@ -16,9 +16,9 @@
 }
 
 .thread-block-thinking .thread-block-body.thread-thinking-text {
-  color: var(--fg-dim);
+  color: var(--fg-muted);
   font-style: italic;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   line-height: 1.55;
   /* Markdown 思考块：段落空白为 normal，段落间空行由 Markdown 自己折叠，代码块/公式由自身预格式化接管 */
   white-space: normal;
@@ -49,7 +49,7 @@
   border: 0;
   border-radius: 4px;
   background: transparent;
-  color: var(--fg-dim);
+  color: var(--fg-muted);
   cursor: pointer;
 }
 

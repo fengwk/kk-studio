@@ -71,11 +71,11 @@ describe('ThreadEventDetail', () => {
   })
 
   it('omits details list when details array is empty', () => {
-    // 意图：验证当 details 数组为空时，不渲染空的 .thread-event-detail-rows 元素。
+    // 意图：验证当 details 数组为空时，不渲染空的 .ui-kv 元素。
     const record = createRecord({ details: [] })
     render(<ThreadEventDetail record={record} onClose={vi.fn()} />)
 
-    expect(document.querySelector('.thread-event-detail-rows')).toBeNull()
+    expect(document.querySelector('.ui-kv')).toBeNull()
     expect(document.querySelector('.thread-event-detail-payload')).not.toBeNull()
   })
 

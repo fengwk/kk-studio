@@ -3,12 +3,12 @@
   top: 0;
   right: 0;
   bottom: 0;
-  z-index: 20;
+  z-index: var(--z-raised);
   display: flex;
   flex-direction: column;
   background: var(--surface);
   border-left: 1px solid var(--border);
-  box-shadow: -4px 0 16px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--shadow-drawer);
   width: min(640px, 60%);
   max-width: 100%;
   overflow: hidden;
@@ -32,7 +32,7 @@
   padding: 1px 4px;
   min-height: 32px;
   border-bottom: 1px solid var(--border);
-  background: var(--surface-soft);
+  background: var(--surface-hover);
   flex-shrink: 0;
 }
 
@@ -46,7 +46,7 @@
 
 .ide-toolbar-title {
   padding: 0 4px;
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   color: var(--fg-muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -68,7 +68,7 @@
 }
 
 .ide-toolbar-dir {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   font-family: var(--mono);
   color: var(--fg-muted);
   overflow: hidden;
@@ -141,7 +141,7 @@
 
 .ide-directory-error {
   color: var(--danger);
-  font-size: 13px;
+  font-size: var(--font-size-sm);
 }
 
 .ide-directory-actions {
@@ -155,7 +155,7 @@
   padding: 6px 12px;
   background: var(--danger-soft);
   color: var(--danger);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   border-bottom: 1px solid var(--border);
 }
 
@@ -163,7 +163,7 @@
   padding: 6px 12px;
   background: var(--danger-soft);
   color: var(--danger);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   border-bottom: 1px solid var(--border);
 }
 

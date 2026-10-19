@@ -299,19 +299,19 @@ describe('SkillPackagesPage', () => {
     // 1. zh-CN 状态断言与 CSS class 保持
     const pill1 = within(cards[0]!).getByTestId('check-status-pill')
     expect(pill1).toHaveTextContent('未检查')
-    expect(pill1).toHaveClass('status-pill is-offline')
+    expect(pill1).toHaveClass('ui-badge is-warning')
 
     const pill2 = within(cards[1]!).getByTestId('check-status-pill')
     expect(pill2).toHaveTextContent('已是最新')
-    expect(pill2).toHaveClass('status-pill is-ready')
+    expect(pill2).toHaveClass('ui-badge is-success')
 
     const pill3 = within(cards[2]!).getByTestId('check-status-pill')
     expect(pill3).toHaveTextContent('有更新可用')
-    expect(pill3).toHaveClass('status-pill is-pending')
+    expect(pill3).toHaveClass('ui-badge is-warning')
 
     const pill4 = within(cards[3]!).getByTestId('check-status-pill')
     expect(pill4).toHaveTextContent('检查失败')
-    expect(pill4).toHaveClass('status-pill is-failed')
+    expect(pill4).toHaveClass('ui-badge is-danger')
 
     // 2. 实时切 en-US
     act(() => {

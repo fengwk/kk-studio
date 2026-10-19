@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { Badge } from '@/shared/ui/data/Badge'
 import { useI18n } from '@/shared/i18n'
 import type { ProjectIssueSnapshotDTO, ProjectWorkflowDTO } from '../types'
 import { IssueCard } from './IssueCard'
@@ -97,7 +98,7 @@ export function IssueBoard({
               <div className="column-header">
                 <div className="column-header-left">
                   <h3 className="column-title">{st.name}</h3>
-                  <span className="badge badge-state">{st.state}</span>
+                  <Badge tone="info" mono>{st.state}</Badge>
                 </div>
                 <span className="column-count">{colIssues.length}</span>
               </div>

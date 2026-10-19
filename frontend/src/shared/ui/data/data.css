@@ -1,0 +1,130 @@
+/* 数据展示原语：Badge / Mono / Code / KeyValue / Table。只消费语义 token。 */
+
+.ui-badge {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: var(--space-1);
+  padding: 2px var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface-raised);
+  color: var(--fg-muted);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.ui-badge.is-mono {
+  font-family: var(--mono);
+}
+
+.ui-badge.is-accent {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.ui-badge.is-success {
+  border-color: var(--success-border);
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.ui-badge.is-warning {
+  border-color: var(--warning-border);
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.ui-badge.is-danger {
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.ui-badge.is-info {
+  border-color: var(--info-border);
+  background: var(--info-soft);
+  color: var(--info);
+}
+
+.ui-mono {
+  font-family: var(--mono);
+  overflow-wrap: anywhere;
+}
+
+.ui-code {
+  max-width: 100%;
+  margin: 0;
+  padding: var(--space-3);
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-active);
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: var(--font-size-xs);
+  line-height: 1.5;
+  white-space: pre;
+}
+
+.ui-kv {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+}
+
+.ui-kv-row {
+  display: grid;
+  grid-template-columns: minmax(90px, auto) minmax(0, 1fr);
+  align-items: baseline;
+  gap: var(--space-3);
+}
+
+.ui-kv-row dt {
+  color: var(--fg-muted);
+  font-size: var(--font-size-xs);
+}
+
+.ui-kv-row dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--fg);
+  font-size: var(--font-size-xs);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ui-table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.ui-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-sm);
+}
+
+.ui-table th,
+.ui-table td {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: baseline;
+}
+
+.ui-table th {
+  color: var(--fg-muted);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.ui-table tbody tr:hover {
+  background: var(--surface-hover);
+}

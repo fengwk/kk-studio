@@ -1,4 +1,5 @@
 import { X } from 'lucide-react'
+import { IconButton } from '@/shared/ui/controls/IconButton'
 import { useI18n } from '@/shared/i18n'
 
 /** Pi 风格的内联错误面板：消息留在 thread 中；错误展示为可关闭的横幅。 */
@@ -20,14 +21,14 @@ export function ThreadErrorPanel({
         <p>{message}</p>
       </div>
       {onDismiss ? (
-        <button
-          type="button"
+        <IconButton
           className="thread-error-dismiss"
-          aria-label={t('ai.runtime.thread.dismissError')}
+          size="compact"
+          label={t('ai.runtime.thread.dismissError')}
           onClick={onDismiss}
         >
           <X aria-hidden="true" />
-        </button>
+        </IconButton>
       ) : null}
     </div>
   )

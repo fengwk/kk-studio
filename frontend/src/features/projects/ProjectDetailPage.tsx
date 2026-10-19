@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
+import { Toolbar, ToolbarActions } from '@/shared/ui/layout/Toolbar'
+import { Badge } from '@/shared/ui/data/Badge'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useLocation, useSearchParams } from 'react-router'
 import {
@@ -399,15 +401,15 @@ export function ProjectDetailPage({
             )}
             <h1 className="project-detail-title">{project.title}</h1>
             {project.archivedAt && (
-              <span className="badge badge-archived">{t('projects.archived')}</span>
+              <Badge tone="neutral">{t('projects.archived')}</Badge>
             )}
-            <span className="badge" title={t('projects.detail.yoloBadge')}>
+            <Badge tone="neutral" title={t('projects.detail.yoloBadge')}>
               YOLO {project.yoloEnabled ? t('projects.yoloEnabled') : t('projects.yoloDisabled')}
-            </span>
+            </Badge>
           </div>
         </div>
 
-        <div className="project-detail-toolbar">
+        <Toolbar className="project-detail-toolbar">
           <SearchField
             value={searchQuery}
             onChange={setSearchQuery}
@@ -419,7 +421,7 @@ export function ProjectDetailPage({
             onChange={setIncludeArchived}
             label={t('projects.includeArchived')}
           />
-          <div className="project-detail-toolbar-actions">
+          <ToolbarActions>
             <Button onClick={() => setIsCreateIssueOpen(true)}>
               <Plus size={14} aria-hidden="true" />
               <span>{t('projects.issue.create')}</span>
@@ -438,8 +440,8 @@ export function ProjectDetailPage({
               <Trash2 size={14} aria-hidden="true" />
               <span>{t('projects.detail.deleteAction')}</span>
             </Button>
-          </div>
-        </div>
+          </ToolbarActions>
+        </Toolbar>
       </header>
 
       {errorMessage && (
@@ -472,7 +474,7 @@ export function ProjectDetailPage({
                 <span className="project-agent-dock-title">
                   {issueDetail?.issue.title ?? t('projects.detail.threadTitle')}
                 </span>
-                {matchedAgentName && <span className="badge badge-agent">{matchedAgentName}</span>}
+                {matchedAgentName && <Badge tone="accent">{matchedAgentName}</Badge>}
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                 <Button

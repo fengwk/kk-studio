@@ -9,7 +9,7 @@
   outline: 0;
   background: transparent;
   color: var(--fg);
-  font-size: 14px;
+  font-size: var(--font-size-sm);
   line-height: 20px;
   padding: 8px 6px;
   white-space: pre-wrap;
@@ -23,7 +23,7 @@
   top: 8px;
   right: 6px;
   left: 7px;
-  color: var(--fg-dim);
+  color: var(--fg-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -45,7 +45,7 @@
   color: var(--info);
   background: transparent;
   font-family: var(--mono);
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   line-height: 20px;
   user-select: none;
 }
