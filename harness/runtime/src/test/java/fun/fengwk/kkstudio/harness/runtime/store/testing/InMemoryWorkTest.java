@@ -13,14 +13,17 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.runtime.store.EnvironmentToolWaitRow;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -28,7 +31,7 @@ import java.util.UUID;
 
 class InMemoryWorkTest extends HarnessStoreWorkContract {
 
-  /** 内存实现的权威时间域：调用方传入的 now 同时就是它的时钟；契约测试统一用这个固定「此刻」。 */
+  /** 内存实现的权威时间域：store 的固定测试时钟；契约测试统一用这个「此刻」。 */
   private static final Instant CLOCK = Instant.ofEpochMilli(1_700_000_000_000L);
 
   /** 当前持有有效 READY 连接租约的环境；由契约 hook 改写，供读取投影判定环境是否上线。 */
@@ -38,6 +41,7 @@ class InMemoryWorkTest extends HarnessStoreWorkContract {
   HarnessStore createStore() {
     readyEnvironments.clear();
     InMemoryHarnessStore store = new InMemoryHarnessStore();
+    store.setClock(Clock.fixed(CLOCK, ZoneOffset.UTC));
     store.setEnvironmentReadyLeasePredicate(
         (environmentId, now) -> readyEnvironments.contains(environmentId.value()));
     return store;
@@ -48,7 +52,7 @@ class InMemoryWorkTest extends HarnessStoreWorkContract {
     return CLOCK;
   }
 
-  /** 内存实现没有独立时钟：lease deadline 只能以传入的 {@code now} 为权威时间域，过期也直接改写内存 deadline。 */
+  /** 内存时钟固定不前进：过期直接改写内存 lease deadline。 */
   @Override
   protected void expireLease(WorkTarget target) {
     ((InMemoryHarnessStore) store).forceLeaseUntil(target, Instant.EPOCH);
@@ -86,28 +90,19 @@ class InMemoryWorkTest extends HarnessStoreWorkContract {
         store,
         tx -> {
           tx.lockThread(seeded.threadId()).orElseThrow();
-          tx.requestWork(target, CLOCK, environment);
+          tx.requestWork(target, environment);
         });
     seedReadyEnvironmentLease(environment);
-    var online =
-        store
-            .transaction(tx -> tx.listEnvironmentToolWaits(CLOCK, List.of(seeded.toolId())))
-            .getFirst();
+    var online = toolWait(seeded);
     assertEquals("frozen-environment", online.environmentName());
     assertFalse(online.waitingForEnvironment());
     assertNull(online.freshnessAt());
     Instant due = CLOCK.plusSeconds(60);
     memory.forceAvailableAt(target, due);
-    var future =
-        store
-            .transaction(tx -> tx.listEnvironmentToolWaits(CLOCK, List.of(seeded.toolId())))
-            .getFirst();
-    assertEquals(due, future.freshnessAt());
+    assertEquals(due, toolWait(seeded).freshnessAt());
     expireReadyEnvironmentLease(environment);
-    var expired =
-        store
-            .transaction(tx -> tx.listEnvironmentToolWaits(due, List.of(seeded.toolId())))
-            .getFirst();
+    memory.setNow(due);
+    var expired = toolWait(seeded);
     assertTrue(expired.waitingForEnvironment());
     assertNull(expired.freshnessAt());
     memory.setRouteReadyPredicate((node, env, now) -> true);
@@ -117,69 +112,64 @@ class InMemoryWorkTest extends HarnessStoreWorkContract {
             .transaction(
                 tx ->
                     tx.claimNextWork(
-                        WorkTargetType.TOOL,
-                        due,
-                        "projection-lease",
-                        CLAIM_LEASE,
-                        UUID.randomUUID()))
+                        WorkTargetType.TOOL, "projection-lease", CLAIM_LEASE, UUID.randomUUID()))
             .orElseThrow();
     expireReadyEnvironmentLease(environment);
     Instant nextDue = due.plusSeconds(120);
     memory.forceAvailableAt(target, nextDue);
-    assertEquals(
-        nextDue,
-        store
-            .transaction(tx -> tx.listEnvironmentToolWaits(due, List.of(seeded.toolId())))
-            .getFirst()
-            .freshnessAt());
+    assertEquals(nextDue, toolWait(seeded).freshnessAt());
     memory.forceAvailableAt(target, Instant.EPOCH);
-    var leased =
-        store
-            .transaction(tx -> tx.listEnvironmentToolWaits(due, List.of(seeded.toolId())))
-            .getFirst();
+    var leased = toolWait(seeded);
     assertFalse(leased.waitingForEnvironment());
     assertEquals(claim.leaseUntil(), leased.freshnessAt());
-    var leaseExpired =
-        store
-            .transaction(
-                tx -> tx.listEnvironmentToolWaits(claim.leaseUntil(), List.of(seeded.toolId())))
-            .getFirst();
+    memory.setNow(claim.leaseUntil());
+    var leaseExpired = toolWait(seeded);
     assertTrue(leaseExpired.waitingForEnvironment());
     assertNull(leaseExpired.freshnessAt());
   }
 
+  private EnvironmentToolWaitRow toolWait(SeededTool seeded) {
+    return store
+        .transaction(tx -> tx.listEnvironmentToolWaits(List.of(seeded.toolId())))
+        .getFirst();
+  }
+
   /**
-   * 测试意图：内存实现的权威时间域就是传入的 {@code now}——claim / renew 的 deadline 必须精确等于 {@code now + 传入 duration}，
-   * 且现有 lease 已覆盖目标时点时不得缩短。
+   * 测试意图：内存实现的权威时间域是事务时间——claim / renew 的 deadline 必须精确等于 {@code now + 传入 duration}， 且现有 lease
+   * 已覆盖目标时点时不得缩短。
    */
   @Test
-  void claimAndRenewDeadlinesAreAnchoredToTheInjectedNow() {
+  void claimAndRenewDeadlinesAreAnchoredToTheTransactionTime() {
+    InMemoryHarnessStore memory = (InMemoryHarnessStore) store;
     Duration claimLease = Duration.ofMinutes(5);
     Duration renewLease = Duration.ofMinutes(7);
     Baseline baseline = seedThreadBaseline(store);
     WorkTarget target = new WorkTarget(WorkTargetType.THREAD, baseline.threadId());
+    memory.setNow(T0);
     inTransaction(
         store,
         tx -> {
           tx.lockThread(baseline.threadId()).orElseThrow();
-          tx.requestWork(target, T0);
+          tx.requestWork(target);
         });
 
+    memory.setNow(T1);
     ClaimedWork claim =
         store
-            .transaction(tx -> tx.claimNextWork(WorkTargetType.THREAD, T1, "token", claimLease))
+            .transaction(tx -> tx.claimNextWork(WorkTargetType.THREAD, "token", claimLease))
             .orElseThrow();
     assertEquals(T1.plus(claimLease), claim.leaseUntil());
 
     // 现有 lease（T1+5min）已覆盖 T2 之后 1 秒的目标时点：不缩短、返回 false
-    boolean shortened = store.transaction(tx -> tx.renewWork(claim, T2, Duration.ofSeconds(1)));
+    memory.setNow(T2);
+    boolean shortened = store.transaction(tx -> tx.renewWork(claim, Duration.ofSeconds(1)));
     assertFalse(shortened);
     assertEquals(
         T1.plus(claimLease),
         store.transaction(tx -> tx.findWork(target)).orElseThrow().leaseUntil());
 
     // 目标时点更晚：延展到 now + duration
-    boolean extended = store.transaction(tx -> tx.renewWork(claim, T2, renewLease));
+    boolean extended = store.transaction(tx -> tx.renewWork(claim, renewLease));
     assertTrue(extended);
     assertEquals(
         T2.plus(renewLease),

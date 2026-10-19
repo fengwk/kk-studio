@@ -335,23 +335,6 @@ public abstract class HarnessStoreEntryTreeContract {
   }
 
   @Test
-  void entryCreatedAtMustNotPrecedeItsParent() {
-    Baseline baseline = seedThreadBaseline(store);
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            inTransaction(
-                store,
-                tx ->
-                    tx.insertEntry(
-                        turnStartEntry(
-                            TestIds.id(10),
-                            baseline.sessionId(),
-                            baseline.rootEntryId(),
-                            T0.minusMillis(1)))));
-  }
-
-  @Test
   void loadEntryPathWalksFromHeadToRoot() {
     Baseline baseline = seedThreadBaseline(store);
     UUID turnStartEntryId =

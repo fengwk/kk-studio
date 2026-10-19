@@ -13,7 +13,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NotificationCommandPayload;
@@ -144,8 +143,7 @@ public final class ThreadLifecycleCoordinator {
           continue;
         }
       }
-      Instant joinNow = HarnessStoreTime.notBefore(now, join.updatedAt());
-      ThreadJoin current = join.match(terminalEntryId, finalAnswerEntryId, joinNow);
+      ThreadJoin current = join.match(terminalEntryId, finalAnswerEntryId, now);
       tx.updateJoin(current);
       if (current.purpose() == JoinPurpose.COMPACTION) {
         compactionMatches.add(current);
@@ -225,14 +223,13 @@ public final class ThreadLifecycleCoordinator {
         deliveriesByParent.entrySet()) {
       ThreadState parent = parents.get(entry.getKey());
       int count = deliveryCounts.get(entry.getKey());
-      Instant parentNow = HarnessStoreTime.notBefore(now, parent.updatedAt());
       List<ThreadJoinCompletion.Delivery> deliveries = entry.getValue();
       if (parent.executionControl().isStopped()) {
-        materializeNotifications(tx, parent, deliveries, count, parentNow);
+        materializeNotifications(tx, parent, deliveries, count, now);
       } else {
-        ThreadState advanced = parent.reserveCommandSequences(count, parentNow);
+        ThreadState advanced = parent.reserveCommandSequences(count, now);
         tx.updateThread(advanced);
-        tx.requestWork(new WorkTarget(WorkTargetType.THREAD, parent.id()), now);
+        tx.requestWork(new WorkTarget(WorkTargetType.THREAD, parent.id()));
       }
     }
   }
@@ -282,7 +279,7 @@ public final class ThreadLifecycleCoordinator {
       }
     }
     for (UUID parentId : parents) {
-      tx.requestWork(new WorkTarget(WorkTargetType.THREAD, parentId), now);
+      tx.requestWork(new WorkTarget(WorkTargetType.THREAD, parentId));
     }
   }
 
@@ -315,8 +312,6 @@ public final class ThreadLifecycleCoordinator {
       if (containsNotification(currentPath, notificationId)) {
         continue;
       }
-      Instant mutationNow =
-          HarnessStoreTime.notBefore(now, current.updatedAt(), currentPath.head().createdAt());
       UUID entryId = tx.nextId();
       Entry entry =
           new Entry(
@@ -330,15 +325,14 @@ public final class ThreadLifecycleCoordinator {
                   new AgentMessage(
                       AgentMessageRole.USER,
                       List.of(new TextMessageContent(DEFAULT_MAX_TURNS_REMINDER_TEXT)))),
-              mutationNow);
+              now);
       tx.insertEntry(entry);
-      current = current.advanceHead(entryId, mutationNow);
+      current = current.advanceHead(entryId, now);
       tx.updateThread(current);
       List<Entry> extended = new ArrayList<>(currentPath.entries());
       extended.add(entry);
       currentPath = new EntryPath(extended);
-      Instant joinNow = HarnessStoreTime.notBefore(mutationNow, join.updatedAt());
-      tx.updateJoin(join.remind(actualTurns, joinNow));
+      tx.updateJoin(join.remind(actualTurns, now));
     }
     return current;
   }

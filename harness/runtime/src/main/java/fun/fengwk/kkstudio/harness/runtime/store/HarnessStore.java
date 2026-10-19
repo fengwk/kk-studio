@@ -49,8 +49,9 @@ import java.util.function.Function;
  * <p>读取约定：所有 find/lock 返回 {@link Optional}；所有 list 返回不可变列表；list 入参被防御性拷贝且拒绝 null 元素。唯一键 / 引用完整性违反抛
  * {@link IllegalArgumentException}；未锁定即更新抛 {@link IllegalStateException}。
  *
- * <p>时间精度：映射到 SQL timestamp 列的持久化时间，以及 Work primitive 的 {@link Instant} 参数，统一使用毫秒精度；任何非 null
- * 值若包含亚毫秒部分，实现必须以 {@link IllegalArgumentException} 拒绝，禁止静默截断或四舍五入。
+ * <p>时间：唯一权威时间是 {@link Transaction#now()}——生产实现取数据库时钟，同一事务内保持不变。所有持久化时间戳都取自它，
+ * 时间只记录事实发生的时刻，不承担排序或单调性约束（顺序由父链、序号与版本表达）。映射到 SQL timestamp 列的时间统一使用毫秒精度； 任何非 null 值若包含亚毫秒部分，实现必须以
+ * {@link IllegalArgumentException} 拒绝，禁止静默截断或四舍五入。
  */
 public interface HarnessStore {
 
@@ -87,6 +88,9 @@ public interface HarnessStore {
   /** 一次事务内的 typed persistence 句柄。 */
   interface Transaction {
 
+    /** 本事务的权威时间（毫秒精度）：首次调用时取数据库时钟，之后在本事务内返回同一值。 */
+    Instant now();
+
     /** 分配下一个 durable UUID id：只保证全局唯一；事务失败可能已消耗 ID，不要求 rollback 复用。 */
     UUID nextId();
 
@@ -120,8 +124,8 @@ public interface HarnessStore {
 
     /**
      * 追加一个不可变 Entry。约束：session 必须存在；每个 Session 至多一个 ROOT 且 ROOT 必须先于其他 Entry；写入前用 ROOT 单元素链或 {@code
-     * parent path + new entry} 构造完整 {@link EntryPath} 校验（parent 连续、同 Session、 createdAt 顺序与 turn /
-     * tool-prefix 结构），非法序列不能进入 store。违反抛 {@link IllegalArgumentException}。
+     * parent path + new entry} 构造完整 {@link EntryPath} 校验（parent 连续、同 Session 与 turn / tool-prefix
+     * 结构），非法序列不能进入 store。违反抛 {@link IllegalArgumentException}。
      */
     void insertEntry(Entry entry);
 
@@ -369,9 +373,9 @@ public interface HarnessStore {
     /**
      * 更新 ModelInvocation current state。要求行存在且已在本事务锁定，并通过共享 transition validation（{@link
      * ModelInvocation#validateTransition}）：threadId / turnStartEntryId / requestHeadEntryId /
-     * requestSpec / createdAt 不得 改变，updatedAt 不回退，attempt 只在确认 start / DISPATCHING stop 窗口时
-     * +1，terminal facts 不可变（resultEntryId 仅允许 null-&gt;non-null），checkpoint 允许在 RUNNING-&gt;RUNNING
-     * 或 RUNNING-&gt;terminal 单调新增/增长、进入 terminal 或 retry 时保留 exact 或清空。分支校验不重复依赖 Thread 当前 head /
+     * requestSpec / createdAt 不得 改变，attempt 只在确认 start / DISPATCHING stop 窗口时 +1，terminal facts
+     * 不可变（resultEntryId 仅允许 null-&gt;non-null），checkpoint 允许在 RUNNING-&gt;RUNNING 或
+     * RUNNING-&gt;terminal 单调新增/增长、进入 terminal 或 retry 时保留 exact 或清空。分支校验不重复依赖 Thread 当前 head /
      * session（relocation 后 terminal exact replay 仍合法）；仅当 resultEntryId 出现时校验其类型、path 同时包含 request
      * head 与 turnStart、全局唯一。未锁定抛 {@link IllegalStateException}，身份改变、非法 transition 或行不存在抛 {@link
      * IllegalArgumentException}。
@@ -406,16 +410,12 @@ public interface HarnessStore {
      * TOOL Work 已到期且无有效执行 lease、冻结了非空 {@code required_environment_id}，且该环境没有有效 READY 连接租约。
      *
      * <p>分组键是 {@code (真实执行根, 所需环境)}：根沿不可变祖先链解析，代表取组内最早的 {@code (createdAt, id)}，{@code
-     * waitingCount} 是组内调用数。时间条件在各自实现的权威时间域内判定：生产实现使用数据库时钟（{@code statement_timestamp()}），{@code
-     * now} 只做毫秒精度校验；内存实现以 {@code now} 为同一时间域。{@code afterRepresentativeCreatedAt} / {@code
-     * afterRepresentativeInvocationId} 是分组代表的游标下界（严格大于），首屏使用 {@link Instant#EPOCH} 与全零 UUID；{@code
-     * limit} 必须为正，实现按 {@code limit} 截断。本查询只读、不产生锁，不新增任何持久等待 状态；返回不可变列表。
+     * waitingCount} 是组内调用数。时间条件按本事务的 {@link #now()} 判定。{@code afterRepresentativeCreatedAt} /
+     * {@code afterRepresentativeInvocationId} 是分组代表的游标下界（严格大于），首屏使用 {@link Instant#EPOCH} 与全零
+     * UUID；{@code limit} 必须为正，实现按 {@code limit} 截断。本查询只读、不产生锁，不新增任何持久等待 状态；返回不可变列表。
      */
     List<PendingEnvironmentWaitRow> listPendingEnvironmentWaits(
-        Instant now,
-        Instant afterRepresentativeCreatedAt,
-        UUID afterRepresentativeInvocationId,
-        int limit);
+        Instant afterRepresentativeCreatedAt, UUID afterRepresentativeInvocationId, int limit);
 
     /**
      * 按工具调用读取「环境等待」只读快照（工具行投影）：每个调用给出其 TOOL Work 冻结的 {@code requiredEnvironmentId}（server-side 工具为
@@ -426,8 +426,7 @@ public interface HarnessStore {
      * 冻结身份读取环境目录；时效边界只取该 READY 环境调用未来的有效 READY 连接租约、Work availableAt 和 leaseUntil 的最小值；非
      * READY、server-side 或无未来边界为 null，不使用全局截止点。
      */
-    List<EnvironmentToolWaitRow> listEnvironmentToolWaits(
-        Instant now, Collection<UUID> invocationIds);
+    List<EnvironmentToolWaitRow> listEnvironmentToolWaits(Collection<UUID> invocationIds);
 
     /**
      * 返回待处理读模型仅因时间推移（没有任何数据库写事件、因此不会有通知）最早可能改变的权威时刻。
@@ -436,7 +435,7 @@ public interface HarnessStore {
      * {@code available_at}）。读取方据此安排一次回读，不需要轮询，也不新增通知来源。没有任何此类时刻时返回 {@link Optional#empty()}。时间语义与
      * {@link #listPendingEnvironmentWaits} 完全一致。
      */
-    Optional<Instant> findNextEnvironmentWaitChange(Instant now);
+    Optional<Instant> findNextEnvironmentWaitChange();
 
     /**
      * 在指定 Session 的不可变 Entry 历史中，按原 ToolInvocation ID 查找已物化的 ToolResult MESSAGE Entry。
@@ -460,9 +459,9 @@ public interface HarnessStore {
     /**
      * 批量更新 ToolInvocation current state。要求每行存在且已在本事务锁定，并通过共享 transition validation（{@link
      * ToolInvocation#validateTransition}）：id / modelInvocationId / assistantEntryId / callIndex /
-     * call / binding / createdAt 不得改变，updatedAt 不回退，attempt 只在确认 start 时 +1，approval
-     * 一旦决定不可变，terminal facts（result/effects/error）不可变。未锁定抛 {@link IllegalStateException}，身份改变、非法
-     * transition 或行不存在抛 {@link IllegalArgumentException}。
+     * call / binding / createdAt 不得改变，attempt 只在确认 start 时 +1，approval 一旦决定不可变，terminal
+     * facts（result/effects/error）不可变。未锁定抛 {@link IllegalStateException}，身份改变、非法 transition 或行不存在抛
+     * {@link IllegalArgumentException}。
      */
     void updateToolInvocations(List<ToolInvocation> invocations);
 
@@ -474,11 +473,11 @@ public interface HarnessStore {
 
     /**
      * 锁定 Work 行并校验 claim ownership：仅当行存在、leaseToken 匹配且 {@code leaseUntil} 严格晚于实现的权威时间时返回当前
-     * Work。生产实现的权威时间是数据库时钟，{@code now} 不参与该比较；内存实现以 {@code now} 为同一时间域。行缺失、token 不匹配或 lease 已过期均返回
-     * {@link Optional#empty()}（lost / stale ownership 是正常竞态，不以异常表达）。持有 claim 期间 wakeVersion 增长（新
-     * wake 到达）不导致 ownership 丢失，返回的 Work 可能带更新后的 wakeVersion。未锁定行不产生锁。
+     * Work。时间按本事务的 {@link #now()} 判定。行缺失、token 不匹配或 lease 已过期均返回 {@link Optional#empty()}（lost /
+     * stale ownership 是正常竞态，不以异常表达）。持有 claim 期间 wakeVersion 增长（新 wake 到达）不导致 ownership 丢失，返回的 Work
+     * 可能带更新后的 wakeVersion。未锁定行不产生锁。
      */
-    Optional<Work> lockClaimedWork(ClaimedWork claim, Instant now);
+    Optional<Work> lockClaimedWork(ClaimedWork claim);
 
     /**
      * 控制面强制锁定并删除 Work 行：行存在时删除并返回 true，不存在返回 false；无需 claim token（Stop 用它 fence 旧 callback）。Work
@@ -488,67 +487,59 @@ public interface HarnessStore {
 
     /**
      * 请求一次 wake（upsert 调度原语）：target 必须存在；新 target 写入 wakeVersion=1，已有行递增 wakeVersion，并把 availableAt
-     * 设为实现的权威时间「此刻」——本原语只表达一次立即可处理的唤醒，绝不把调用方的 JVM 绝对时刻写成持久化 due。生产实现的权威时间是数据库 时钟，{@code now}
-     * 不参与该写入；内存实现以 {@code now} 为同一时间域。已有行保留当前 lease。要求 owning Thread 已在本事务锁定； target 不存在抛 {@link
+     * 设为实现的权威时间「此刻」——本原语只表达一次立即可处理的唤醒，绝不把调用方的 JVM 绝对时刻写成持久化 due。「此刻」即本事务的 {@link #now()}。已有行保留当前
+     * lease。要求 owning Thread 已在本事务锁定； target 不存在抛 {@link IllegalArgumentException}。
+     */
+    void requestWork(WorkTarget target);
+
+    /**
+     * 请求一次带环境亲和性的 wake（TOOL 专用）：调度语义与 {@link #requestWork(WorkTarget)} 完全相同，并在新 target 上 冻结
+     * requiredEnvironmentId。non-null 仅允许 TOOL 类型；要求 owning Thread 已在本事务锁定；target 不存在或亲和性冲突抛 {@link
      * IllegalArgumentException}。
      */
-    void requestWork(WorkTarget target, Instant now);
+    void requestWork(WorkTarget target, EnvironmentId requiredEnvironmentId);
 
     /**
-     * 请求一次带环境亲和性的 wake（TOOL 专用）：调度语义与 {@link #requestWork(WorkTarget, Instant)} 完全相同，并在新 target 上
-     * 冻结 requiredEnvironmentId。non-null 仅允许 TOOL 类型；要求 owning Thread 已在本事务锁定；target 不存在或亲和性冲突抛
-     * {@link IllegalArgumentException}。
-     */
-    void requestWork(WorkTarget target, Instant now, EnvironmentId requiredEnvironmentId);
-
-    /**
-     * 领取 targetType 中下一个 due 的 Work（无 node 亲和性）。due / 旧 lease 是否过期、以及新 deadline，都由实现的权威时钟决定：
-     * 生产实现使用数据库时钟，{@code now} 不参与比较；新 deadline 为权威时间加上 {@code leaseDuration}。返回的 {@link Work} 携带该权威
-     * deadline。
+     * 领取 targetType 中下一个 due 的 Work（无 node 亲和性）。due / 旧 lease 是否过期、以及新 deadline，都由实现的权威时钟决定： 均按本事务的
+     * {@link #now()}；新 deadline 为权威时间加上 {@code leaseDuration}。返回的 {@link Work} 携带该权威 deadline。
      */
     Optional<ClaimedWork> claimNextWork(
-        WorkTargetType targetType, Instant now, String leaseToken, Duration leaseDuration);
+        WorkTargetType targetType, String leaseToken, Duration leaseDuration);
 
     /**
      * 领取 targetType 中下一个 due 的 Work。候选为权威时间下已 due（{@code availableAt} 不晚于权威时间）且 lease 为空或已过期，
      * 并满足环境亲和性（requiredEnvironmentId 为空或当前 nodeInstanceId 持有有效 READY 连接租约）的行，按 (availableAt,
      * targetId) 升序确定性选取第一条。新 {@code leaseUntil} 由权威时间加上正的整毫秒 {@code leaseDuration} 计算，而不是写入调用方 的绝对
-     * Instant；返回值使用该真实 deadline。生产权威时间是数据库时钟，内存实现以 {@code now} 为同一时间域。该 dispatcher primitive
-     * 必须是本事务首个 Work 锁操作；无候选返回 {@link Optional#empty()}。
+     * Instant；返回值使用该真实 deadline。权威时间是本事务的 {@link #now()}。该 dispatcher primitive 必须是本事务首个 Work
+     * 锁操作；无候选返回 {@link Optional#empty()}。
      */
     Optional<ClaimedWork> claimNextWork(
-        WorkTargetType targetType,
-        Instant now,
-        String leaseToken,
-        Duration leaseDuration,
-        UUID nodeInstanceId);
+        WorkTargetType targetType, String leaseToken, Duration leaseDuration, UUID nodeInstanceId);
 
     /**
-     * 延长 claim 的 lease，使其至少覆盖权威时间加上 {@code leaseDuration}。生产权威时间是数据库时钟，{@code now} 不参与有效性比较； 内存实现以
-     * {@code now} 为同一时间域。
+     * 延长 claim 的 lease，使其至少覆盖权威时间加上 {@code leaseDuration}。权威时间是本事务的 {@link #now()}。
      *
      * <p>内部先锁定 Work 行：行不存在抛 {@link IllegalStateException}（lost ownership），token 不匹配或该时间域下租约已过期抛
      * {@link IllegalArgumentException}。若当前 lease 已不早于目标时点则保持不变并返回 {@code false}；否则延展到目标时点并返回 {@code
      * true}。
      */
-    boolean renewWork(ClaimedWork claim, Instant now, Duration leaseDuration);
+    boolean renewWork(ClaimedWork claim, Duration leaseDuration);
 
     /**
      * 完成 claim：内部先锁定 Work 行；Work 行不存在时抛 {@link IllegalStateException}（lost ownership：没有可验证 的
      * lease，不能幂等吞掉终态），否则按权威时间校验 lease 仍然有效，再按 {@link Work#complete} 校验 token /
      * claimedWakeVersion：返回 {@link Optional#empty()} 表示删除匹配当前 wake 的行，返回保留的 {@link Work} 表示处理期间出现新
-     * wake，仅清除 lease。生产权威时间是数据库时钟；内存实现以 {@code now} 为同一时间域。token / version 违反抛 {@link
-     * IllegalArgumentException}。
+     * wake，仅清除 lease。权威时间是本事务的 {@link #now()}。token / version 违反抛 {@link IllegalArgumentException}。
      */
-    Optional<Work> completeWork(ClaimedWork claim, Instant now);
+    Optional<Work> completeWork(ClaimedWork claim);
 
     /**
      * 重排 claim 的 Work：内部先锁定 Work 行（行不存在抛 {@link IllegalStateException}），再按权威时间校验 lease 仍然有效，然后按
      * {@link Work#reschedule} 校验 token / claimedWakeVersion，把 availableAt 设为实现的权威时间加上 {@code delay}
-     * 并清除 lease。 {@code delay} 必须是非负整毫秒 {@link Duration}（零表示立即可用）；生产实现的权威时间是数据库时钟，{@code now}
-     * 只做毫秒精度校验， 内存实现以 {@code now} 为同一时间域。违反抛 {@link IllegalArgumentException}。
+     * 并清除 lease。 {@code delay} 必须是非负整毫秒 {@link Duration}（零表示立即可用）；权威时间是本事务的 {@link #now()}。违反抛
+     * {@link IllegalArgumentException}。
      */
-    void rescheduleWork(ClaimedWork claim, Instant now, Duration delay);
+    void rescheduleWork(ClaimedWork claim, Duration delay);
 
     // ---------- 应用侧深删除原语（Chat 深删除专用） ----------
 

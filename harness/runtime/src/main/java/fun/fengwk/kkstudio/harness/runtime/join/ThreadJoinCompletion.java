@@ -5,7 +5,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NotificationCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
@@ -61,9 +60,6 @@ public final class ThreadJoinCompletion {
             new AgentMessage(
                 AgentMessageRole.USER,
                 List.of(new TextMessageContent(receipt.renderCompletionXml()))));
-    Instant parentMutationNow = HarnessStoreTime.notBefore(now, parent.updatedAt());
-    Instant deliveryMutationNow =
-        HarnessStoreTime.notBefore(parentMutationNow, matched.updatedAt());
     ThreadCommand command =
         new ThreadCommand(
             parent.id(),
@@ -74,8 +70,8 @@ public final class ThreadJoinCompletion {
             null,
             null,
             null,
-            parentMutationNow);
-    return new Delivery(command, matched.delivered(sequence, deliveryMutationNow));
+            now);
+    return new Delivery(command, matched.delivered(sequence, now));
   }
 
   /** 由 Join invocationId 确定派生的通知 identity（同一 Join 重复交付幂等）。 */

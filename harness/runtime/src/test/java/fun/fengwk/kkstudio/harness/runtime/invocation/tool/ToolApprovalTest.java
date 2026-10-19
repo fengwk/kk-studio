@@ -126,17 +126,6 @@ class ToolApprovalTest {
         () ->
             new ToolApproval(
                 true, ToolApprovalDecision.ALLOWED, id(1L), "actor", null, REQUESTED, null));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ToolApproval(
-                true,
-                ToolApprovalDecision.ALLOWED,
-                id(1L),
-                "actor",
-                null,
-                DECIDED.plusSeconds(1),
-                DECIDED));
   }
 
   @Test
@@ -263,10 +252,5 @@ class ToolApprovalTest {
     ToolApproval requested = ToolApproval.request(REQUESTED, null);
     assertThrows(
         NullPointerException.class, () -> requested.decide(null, id(1L), "actor", null, DECIDED));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            requested.decide(
-                ToolApprovalDecision.ALLOWED, id(1L), "actor", null, REQUESTED.minusSeconds(1)));
   }
 }

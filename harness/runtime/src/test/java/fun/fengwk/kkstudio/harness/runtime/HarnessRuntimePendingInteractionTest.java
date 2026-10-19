@@ -79,7 +79,7 @@ class HarnessRuntimePendingInteractionTest {
     store.transaction(
         tx -> {
           tx.lockThread(seeded.threadId()).orElseThrow();
-          tx.requestWork(target, T5, environment);
+          tx.requestWork(target, environment);
           return null;
         });
     Instant future = T5.plusSeconds(60);

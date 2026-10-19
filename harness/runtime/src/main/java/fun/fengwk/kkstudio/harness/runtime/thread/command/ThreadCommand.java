@@ -53,9 +53,6 @@ public record ThreadCommand(
       throw new IllegalArgumentException("stopRequestId must be present when cancelled");
     }
     createdAt = Objects.requireNonNull(createdAt, "createdAt");
-    if (cancelledAt != null && cancelledAt.isBefore(createdAt)) {
-      throw new IllegalArgumentException("cancelledAt must not precede createdAt");
-    }
   }
 
   /** 从 durable marker 派生 QUEUED/APPLIED/CANCELLED。 */
@@ -98,7 +95,7 @@ public record ThreadCommand(
 
   /**
    * 纯 QUEUED -&gt; CANCELLED 迁移：附加取消该 command 的 stopRequestId 与取消时间并清空 applied marker。只有 QUEUED 状态
-   * 的 command 可被 cancel；{@code cancelledAt} 不得早于 command 的创建时间。
+   * 的 command 可被 cancel。
    */
   public ThreadCommand cancel(UUID stopRequestId, Instant cancelledAt) {
     if (state() != ThreadCommandState.QUEUED) {
@@ -106,9 +103,6 @@ public record ThreadCommand(
     }
     Objects.requireNonNull(stopRequestId, "stopRequestId");
     Objects.requireNonNull(cancelledAt, "cancelledAt");
-    if (cancelledAt.isBefore(createdAt)) {
-      throw new IllegalArgumentException("cancelledAt must not precede createdAt");
-    }
     return new ThreadCommand(
         threadId,
         sequence,

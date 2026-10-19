@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
-import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T0;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T2;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.assistantPayload;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.insertChildEntry;
@@ -33,8 +32,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayl
 
 import javax.sql.DataSource;
 
-import java.time.Clock;
-import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -58,11 +55,7 @@ class PostgresqlAcceptCommandsRootQueryTest {
             PostgresqlHarnessStoreFixture.dataSource(), cteCounter);
     store = PostgresqlHarnessStoreFixture.create(countingDs);
     runtime =
-        new HarnessRuntime(
-            store,
-            Clock.fixed(T0, ZoneOffset.UTC),
-            (threadId, path, prep) -> null,
-            () -> CompactionConfig.DEFAULT);
+        new HarnessRuntime(store, (threadId, path, prep) -> null, () -> CompactionConfig.DEFAULT);
   }
 
   /** 测试意图：具有非 ROOT head 的 Thread 接受全新 batch 或 exact ordered replay 时只查询 ROOT，不回溯完整 EntryPath。 */

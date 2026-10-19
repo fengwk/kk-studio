@@ -1077,19 +1077,6 @@ class EntryPathTest {
   }
 
   @Test
-  void rejectsCreatedAtBeforeParent() {
-    Entry root = root(settings("root"));
-    Entry child =
-        new Entry(
-            id(2L),
-            SESSION_ID,
-            id(1L),
-            new TurnStartPayload(TurnStartReason.INPUT, settings("turn"), OWNER_THREAD_ID),
-            BASE.minusSeconds(1));
-    assertThrows(IllegalArgumentException.class, () -> new EntryPath(List.of(root, child)));
-  }
-
-  @Test
   void rejectsSecondOpenTurnStart() {
     Entry root = root(settings("root"));
     Entry first = turnStart(id(2L), id(1L), TurnStartReason.INPUT, settings("first"));

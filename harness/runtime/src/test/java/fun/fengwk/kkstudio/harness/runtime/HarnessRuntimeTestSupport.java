@@ -119,7 +119,8 @@ final class HarnessRuntimeTestSupport {
 
   /** 创建仅带默认/未使用依赖的测试 Runtime 控制面。 */
   static HarnessRuntime runtime(HarnessStore store, Clock clock) {
-    return new HarnessRuntime(store, clock, UNUSED_RESOLVER, DEFAULT_COMPACTION_PROVIDER);
+    useClock(store, clock);
+    return new HarnessRuntime(store, UNUSED_RESOLVER, DEFAULT_COMPACTION_PROVIDER);
   }
 
   /** 创建带指定 resolver 与 compaction provider 的测试 Runtime。 */
@@ -128,7 +129,8 @@ final class HarnessRuntimeTestSupport {
       Clock clock,
       TurnResolver resolver,
       CompactionConfigProvider compactionConfigProvider) {
-    return new HarnessRuntime(store, clock, resolver, compactionConfigProvider);
+    useClock(store, clock);
+    return new HarnessRuntime(store, resolver, compactionConfigProvider);
   }
 
   /** 创建带 local execution canceller 的测试 Runtime。 */
@@ -137,14 +139,9 @@ final class HarnessRuntimeTestSupport {
       Clock clock,
       Consumer<UUID> modelCanceller,
       Consumer<UUID> toolCanceller) {
+    useClock(store, clock);
     return new HarnessRuntime(
-        store,
-        clock,
-        UNUSED_RESOLVER,
-        DEFAULT_COMPACTION_PROVIDER,
-        null,
-        modelCanceller,
-        toolCanceller);
+        store, UNUSED_RESOLVER, DEFAULT_COMPACTION_PROVIDER, null, modelCanceller, toolCanceller);
   }
 
   /** 创建带 materializer 与 local execution canceller 的测试 Runtime。 */
@@ -154,14 +151,21 @@ final class HarnessRuntimeTestSupport {
       ToolResultHistoryMaterializer materializer,
       Consumer<UUID> modelCanceller,
       Consumer<UUID> toolCanceller) {
+    useClock(store, clock);
     return new HarnessRuntime(
         store,
-        clock,
         UNUSED_RESOLVER,
         DEFAULT_COMPACTION_PROVIDER,
         materializer,
         modelCanceller,
         toolCanceller);
+  }
+
+  /** 测试时钟驱动内存 store 的事务时间（生产实现取数据库时钟）。 */
+  static void useClock(HarnessStore store, Clock clock) {
+    if (store instanceof InMemoryHarnessStore memory) {
+      memory.setClock(clock);
+    }
   }
 
   /** 固定 UTC 的测试时钟，可推进 instant 用于 replay/竞态测试。 */
@@ -878,41 +882,6 @@ final class HarnessRuntimeTestSupport {
             });
   }
 
-  /**
-   * 仅测试用的委托 store：其事务在任意 Work 行被锁定的那一刻推进可变 {@code clock}， 因此测试可证明 Stop 仅在整个 Work 预锁之后才读取时间戳（若使用锁前
-   * instant 会让 Stop 事务写入的 updatedAt 倒退）。
-   */
-  static HarnessStore storeAdvancingClockOnWorkLock(
-      InMemoryHarnessStore delegate, TestClock clock, Instant advanceTo) {
-    return (HarnessStore)
-        Proxy.newProxyInstance(
-            HarnessStore.class.getClassLoader(),
-            new Class<?>[] {HarnessStore.class},
-            (proxy, method, args) -> {
-              if (method.getName().equals("transaction")) {
-                @SuppressWarnings("unchecked")
-                Function<HarnessStore.Transaction, Object> callback =
-                    (Function<HarnessStore.Transaction, Object>) args[0];
-                return delegate.transaction(
-                    tx -> {
-                      HarnessStore.Transaction wrapped =
-                          (HarnessStore.Transaction)
-                              Proxy.newProxyInstance(
-                                  HarnessStore.Transaction.class.getClassLoader(),
-                                  new Class<?>[] {HarnessStore.Transaction.class},
-                                  (transactionProxy, transactionMethod, transactionArgs) -> {
-                                    if (transactionMethod.getName().equals("lockWork")) {
-                                      clock.advance(advanceTo);
-                                    }
-                                    return transactionMethod.invoke(tx, transactionArgs);
-                                  });
-                      return callback.apply(wrapped);
-                    });
-              }
-              return method.invoke(delegate, args);
-            });
-  }
-
   /** 在 thread 上插入一条 QUEUED command（必须是尚无 command 的全新 thread）。 */
   static void seedQueuedCommand(
       InMemoryHarnessStore store,
@@ -944,7 +913,7 @@ final class HarnessRuntimeTestSupport {
     store.transaction(
         tx -> {
           tx.lockThread(threadId).orElseThrow();
-          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId), T0);
+          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId));
           return null;
         });
   }
@@ -955,7 +924,7 @@ final class HarnessRuntimeTestSupport {
         tx -> {
           ModelInvocation model = tx.findModelInvocation(modelId).orElseThrow();
           tx.lockThread(model.threadId()).orElseThrow();
-          tx.requestWork(new WorkTarget(WorkTargetType.MODEL, modelId), T0);
+          tx.requestWork(new WorkTarget(WorkTargetType.MODEL, modelId));
           return null;
         });
   }
@@ -967,7 +936,7 @@ final class HarnessRuntimeTestSupport {
           ToolInvocation tool = tx.findToolInvocation(toolId).orElseThrow();
           ModelInvocation model = tx.findModelInvocation(tool.modelInvocationId()).orElseThrow();
           tx.lockThread(model.threadId()).orElseThrow();
-          tx.requestWork(new WorkTarget(WorkTargetType.TOOL, toolId), T0);
+          tx.requestWork(new WorkTarget(WorkTargetType.TOOL, toolId));
           return null;
         });
   }
@@ -977,7 +946,7 @@ final class HarnessRuntimeTestSupport {
     seedThreadWork(store, threadId);
     store.transaction(
         tx -> {
-          tx.claimNextWork(WorkTargetType.THREAD, T0, "lease-1", Duration.between(T0, T3));
+          tx.claimNextWork(WorkTargetType.THREAD, "lease-1", Duration.between(T0, T3));
           return null;
         });
   }

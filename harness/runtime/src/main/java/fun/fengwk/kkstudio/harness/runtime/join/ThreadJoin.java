@@ -70,9 +70,6 @@ public record ThreadJoin(
         throw new IllegalArgumentException("a matched join cannot be superseded");
       }
     }
-    if (updatedAt.isBefore(createdAt)) {
-      throw new IllegalArgumentException("updatedAt precedes createdAt");
-    }
   }
 
   public boolean matched() {
@@ -193,7 +190,6 @@ public record ThreadJoin(
         || !old.agent.equals(next.agent)
         || !Objects.equals(old.maxTurns, next.maxTurns)
         || !old.createdAt.equals(next.createdAt)
-        || next.updatedAt.isBefore(old.updatedAt)
         || next.reminderTurn < old.reminderTurn
         || old.purpose != next.purpose
         || (old.matched()

@@ -47,8 +47,8 @@ import java.util.UUID;
 /**
  * Work mailbox 协议：target 存在性、立即唤醒、due 排序、lease fence 与 rollback。
  *
- * <p>所有时间断言都表达为「权威时间域」不变量：内存实现的权威时间就是调用方传入的 {@code now}（即 {@link #authorityNow()}
- * 返回的测试时钟），生产实现的权威时间是数据库时钟。契约不假设任何 JVM 绝对时刻，因此 accept（{@link
+ * <p>所有时间断言都表达为「权威时间域」不变量：权威时间是事务的 {@link HarnessStore.Transaction#now()}（内存实现为测试时钟，
+ * 生产实现为数据库时钟），{@link #authorityNow()} 返回同一时间域的参照。契约不假设任何 JVM 绝对时刻，因此 accept（{@link
  * HarnessStore.Transaction#requestWork}）总是「立即」，而未来重试只能通过 {@link
  * HarnessStore.Transaction#rescheduleWork} 的相对 {@link Duration} 表达。
  */
@@ -92,7 +92,7 @@ public abstract class HarnessStoreWorkContract {
   protected abstract void forceWorkAvailable(WorkTarget target);
 
   /**
-   * 让 target 的 available_at 落在权威时间域内的未来 {@code delay} 之后（验证未到期 Work 不进入等待环境投影）。
+   * 让 target 的 available_at 落在权威时间域「此刻」加 {@code delay}（可为负，表示已到期的过去时刻）。
    *
    * <p>PostgreSQL 直接改写持久化行的 available_at，内存实现改写内存 available_at；两者都不依赖 JVM 与数据库的时钟关系。
    */
@@ -108,9 +108,9 @@ public abstract class HarnessStoreWorkContract {
   /** 让环境的 READY 连接租约在权威时间域内失效（自然到期或离开 READY），表征环境离线。 */
   protected abstract void expireReadyEnvironmentLease(EnvironmentId environmentId);
 
-  protected ClaimedWork claimNext(WorkTargetType type, Instant now) {
+  protected ClaimedWork claimNext(WorkTargetType type) {
     return store
-        .transaction(tx -> tx.claimNextWork(type, now, "lease-token", CLAIM_LEASE))
+        .transaction(tx -> tx.claimNextWork(type, "lease-token", CLAIM_LEASE))
         .orElseThrow();
   }
 
@@ -120,20 +120,11 @@ public abstract class HarnessStoreWorkContract {
   }
 
   private void requestWork(WorkTarget target, EnvironmentId requiredEnvironmentId) {
-    requestWorkAt(target, authorityNow(), requiredEnvironmentId);
-  }
-
-  /** 用显式 now 调用 requestWork，用于毫秒精度等边界断言。 */
-  private void requestWorkAt(WorkTarget target, Instant now) {
-    requestWorkAt(target, now, null);
-  }
-
-  private void requestWorkAt(WorkTarget target, Instant now, EnvironmentId requiredEnvironmentId) {
     inTransaction(
         store,
         tx -> {
           lockWorkOwner(tx, target);
-          tx.requestWork(target, now, requiredEnvironmentId);
+          tx.requestWork(target, requiredEnvironmentId);
         });
   }
 
@@ -224,26 +215,17 @@ public abstract class HarnessStoreWorkContract {
         IllegalArgumentException.class,
         () ->
             inTransaction(
-                store,
-                tx ->
-                    tx.requestWork(
-                        new WorkTarget(WorkTargetType.THREAD, TestIds.id(1)), authorityNow())));
+                store, tx -> tx.requestWork(new WorkTarget(WorkTargetType.THREAD, TestIds.id(1)))));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             inTransaction(
-                store,
-                tx ->
-                    tx.requestWork(
-                        new WorkTarget(WorkTargetType.MODEL, TestIds.id(1)), authorityNow())));
+                store, tx -> tx.requestWork(new WorkTarget(WorkTargetType.MODEL, TestIds.id(1)))));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             inTransaction(
-                store,
-                tx ->
-                    tx.requestWork(
-                        new WorkTarget(WorkTargetType.TOOL, TestIds.id(1)), authorityNow())));
+                store, tx -> tx.requestWork(new WorkTarget(WorkTargetType.TOOL, TestIds.id(1)))));
   }
 
   @Test
@@ -268,10 +250,9 @@ public abstract class HarnessStoreWorkContract {
 
     assertThrows(
         IllegalStateException.class,
-        () -> inTransaction(store, tx -> tx.requestWork(threadTarget, authorityNow())));
+        () -> inTransaction(store, tx -> tx.requestWork(threadTarget)));
     assertThrows(
-        IllegalStateException.class,
-        () -> inTransaction(store, tx -> tx.requestWork(modelTarget, authorityNow())));
+        IllegalStateException.class, () -> inTransaction(store, tx -> tx.requestWork(modelTarget)));
 
     requestWork(threadTarget);
     requestWork(modelTarget);
@@ -345,61 +326,35 @@ public abstract class HarnessStoreWorkContract {
   }
 
   @Test
-  void workTemporalArgumentsRejectSubMillisecondPrecision() {
+  void workDurationArgumentsRejectSubMillisecondPrecision() {
     Baseline baseline = seedThreadBaseline(store);
     WorkTarget target = new WorkTarget(WorkTargetType.THREAD, baseline.threadId());
-    assertThrows(
-        IllegalArgumentException.class, () -> requestWorkAt(target, authorityNow().plusNanos(1)));
-
     requestWork(target);
     assertThrows(
         IllegalArgumentException.class,
         () ->
             store.transaction(
                 tx ->
-                    tx.claimNextWork(
-                        WorkTargetType.THREAD,
-                        authorityNow().plusNanos(1),
-                        "token-a",
-                        CLAIM_LEASE)));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            store.transaction(
-                tx ->
-                    tx.claimNextWork(
-                        WorkTargetType.THREAD,
-                        authorityNow(),
-                        "token-b",
-                        CLAIM_LEASE.plusNanos(1))));
+                    tx.claimNextWork(WorkTargetType.THREAD, "token-b", CLAIM_LEASE.plusNanos(1))));
 
     ClaimedWork claim =
         store
-            .transaction(
-                tx ->
-                    tx.claimNextWork(WorkTargetType.THREAD, authorityNow(), "token-c", CLAIM_LEASE))
+            .transaction(tx -> tx.claimNextWork(WorkTargetType.THREAD, "token-c", CLAIM_LEASE))
             .orElseThrow();
     assertThrows(
         IllegalArgumentException.class,
-        () -> store.transaction(tx -> tx.completeWork(claim, authorityNow().plusNanos(1))));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> store.transaction(tx -> tx.lockClaimedWork(claim, authorityNow().plusNanos(1))));
-    assertThrows(
-        IllegalArgumentException.class,
         () ->
             store.transaction(
                 tx -> {
-                  tx.renewWork(claim, authorityNow(), CLAIM_LEASE.plusNanos(1));
+                  tx.renewWork(claim, CLAIM_LEASE.plusNanos(1));
                   return null;
                 }));
-    requestWork(target);
     assertThrows(
         IllegalArgumentException.class,
         () ->
             store.transaction(
                 tx -> {
-                  tx.rescheduleWork(claim, authorityNow(), Duration.ofMillis(1).plusNanos(1));
+                  tx.rescheduleWork(claim, Duration.ofMillis(1).plusNanos(1));
                   return null;
                 }));
     // 负 delay 必须被拒绝，且失败不改变 lease（随后仍可锁定）。
@@ -408,10 +363,10 @@ public abstract class HarnessStoreWorkContract {
         () ->
             store.transaction(
                 tx -> {
-                  tx.rescheduleWork(claim, authorityNow(), Duration.ofMillis(-1));
+                  tx.rescheduleWork(claim, Duration.ofMillis(-1));
                   return null;
                 }));
-    assertTrue(store.transaction(tx -> tx.lockClaimedWork(claim, authorityNow())).isPresent());
+    assertTrue(store.transaction(tx -> tx.lockClaimedWork(claim)).isPresent());
   }
 
   /** 零 delay 是合法的「立即重排」：清除 lease 并把 availableAt 设为权威此刻，随即可以 claim。 */
@@ -420,12 +375,12 @@ public abstract class HarnessStoreWorkContract {
     Baseline baseline = seedThreadBaseline(store);
     WorkTarget target = new WorkTarget(WorkTargetType.THREAD, baseline.threadId());
     requestWork(target);
-    ClaimedWork claim = claimNext(WorkTargetType.THREAD, authorityNow());
-    inTransaction(store, tx -> tx.rescheduleWork(claim, authorityNow(), Duration.ZERO));
+    ClaimedWork claim = claimNext(WorkTargetType.THREAD);
+    inTransaction(store, tx -> tx.rescheduleWork(claim, Duration.ZERO));
     Work work = store.transaction(tx -> tx.findWork(target)).orElseThrow();
     assertEquals(1L, work.wakeVersion());
     assertNull(work.leaseToken());
-    assertEquals(1L, claimNext(WorkTargetType.THREAD, authorityNow()).claimedWakeVersion());
+    assertEquals(1L, claimNext(WorkTargetType.THREAD).claimedWakeVersion());
   }
 
   @Test
@@ -438,7 +393,7 @@ public abstract class HarnessStoreWorkContract {
     assertNull(work.leaseToken());
     assertNull(work.leaseUntil());
     // accept 表示「立即」：无需 JVM 侧推进时钟，权威时间域此刻即可 claim。
-    assertEquals(1L, claimNext(WorkTargetType.THREAD, authorityNow()).claimedWakeVersion());
+    assertEquals(1L, claimNext(WorkTargetType.THREAD).claimedWakeVersion());
   }
 
   @Test
@@ -446,20 +401,18 @@ public abstract class HarnessStoreWorkContract {
     Baseline baseline = seedThreadBaseline(store);
     WorkTarget target = new WorkTarget(WorkTargetType.THREAD, baseline.threadId());
     requestWork(target);
-    ClaimedWork claim = claimNext(WorkTargetType.THREAD, authorityNow());
+    ClaimedWork claim = claimNext(WorkTargetType.THREAD);
     // 一次相对延迟的重试把 Work 推到权威时间之后：此刻不可 claim。
-    inTransaction(store, tx -> tx.rescheduleWork(claim, authorityNow(), Duration.ofHours(1)));
+    inTransaction(store, tx -> tx.rescheduleWork(claim, Duration.ofHours(1)));
     assertTrue(
         store
-            .transaction(
-                tx ->
-                    tx.claimNextWork(WorkTargetType.THREAD, authorityNow(), "token-x", CLAIM_LEASE))
+            .transaction(tx -> tx.claimNextWork(WorkTargetType.THREAD, "token-x", CLAIM_LEASE))
             .isEmpty());
     // 新的 wake 仍表示「立即」：把 availableAt 拉回权威时间并递增 wakeVersion。
     requestWork(target);
     Work work = store.transaction(tx -> tx.findWork(target)).orElseThrow();
     assertEquals(2L, work.wakeVersion());
-    assertEquals(2L, claimNext(WorkTargetType.THREAD, authorityNow()).claimedWakeVersion());
+    assertEquals(2L, claimNext(WorkTargetType.THREAD).claimedWakeVersion());
   }
 
   @Test
@@ -485,10 +438,10 @@ public abstract class HarnessStoreWorkContract {
         store,
         tx -> {
           tx.lockThread(baseline.threadId()).orElseThrow();
-          tx.requestWork(threadTarget, authorityNow());
-          tx.requestWork(modelTarget, authorityNow());
+          tx.requestWork(threadTarget);
+          tx.requestWork(modelTarget);
         });
-    ClaimedWork claimed = claimNext(WorkTargetType.THREAD, authorityNow());
+    ClaimedWork claimed = claimNext(WorkTargetType.THREAD);
     assertEquals(threadTarget, claimed.target());
     Work modelWork = store.transaction(tx -> tx.findWork(modelTarget)).orElseThrow();
     assertNull(modelWork.leaseToken());
@@ -526,25 +479,23 @@ public abstract class HarnessStoreWorkContract {
           tx.lockThread(baseline.threadId()).orElseThrow();
           tx.lockThread(thread2).orElseThrow();
           tx.lockThread(thread3).orElseThrow();
-          tx.requestWork(
-              new WorkTarget(WorkTargetType.THREAD, baseline.threadId()), authorityNow());
-          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread2), authorityNow());
-          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread3), authorityNow());
+          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, baseline.threadId()));
+          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread2));
+          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread3));
         });
-    ClaimedWork a = claimNext(WorkTargetType.THREAD, authorityNow());
-    ClaimedWork b = claimNext(WorkTargetType.THREAD, authorityNow());
-    ClaimedWork c = claimNext(WorkTargetType.THREAD, authorityNow());
-    inTransaction(store, tx -> tx.rescheduleWork(a, authorityNow(), Duration.ofSeconds(30)));
-    inTransaction(store, tx -> tx.rescheduleWork(b, authorityNow(), Duration.ofSeconds(10)));
-    inTransaction(store, tx -> tx.rescheduleWork(c, authorityNow(), Duration.ofSeconds(20)));
+    // 在权威时间域内制造确定的过去 due 顺序：baseline(-11s) < thread3(-10s) < thread2(-5s)。
+    forceWorkAvailableAfter(
+        new WorkTarget(WorkTargetType.THREAD, baseline.threadId()), Duration.ofSeconds(-11));
+    forceWorkAvailableAfter(
+        new WorkTarget(WorkTargetType.THREAD, thread3), Duration.ofSeconds(-10));
+    forceWorkAvailableAfter(new WorkTarget(WorkTargetType.THREAD, thread2), Duration.ofSeconds(-5));
 
-    Instant due = authorityNow().plus(Duration.ofSeconds(30));
-    assertEquals(b.target(), claimNext(WorkTargetType.THREAD, due).target());
-    assertEquals(c.target(), claimNext(WorkTargetType.THREAD, due).target());
-    assertEquals(a.target(), claimNext(WorkTargetType.THREAD, due).target());
+    assertEquals(baseline.threadId(), claimNext(WorkTargetType.THREAD).target().id());
+    assertEquals(thread3, claimNext(WorkTargetType.THREAD).target().id());
+    assertEquals(thread2, claimNext(WorkTargetType.THREAD).target().id());
     assertTrue(
         store
-            .transaction(tx -> tx.claimNextWork(WorkTargetType.THREAD, due, "token", CLAIM_LEASE))
+            .transaction(tx -> tx.claimNextWork(WorkTargetType.THREAD, "token", CLAIM_LEASE))
             .isEmpty());
   }
 
@@ -554,37 +505,29 @@ public abstract class HarnessStoreWorkContract {
     WorkTarget target = new WorkTarget(WorkTargetType.THREAD, baseline.threadId());
     requestWork(target);
     // 一次 claim + 相对延迟 reschedule 把 Work 推到权威时间之后。
-    ClaimedWork scheduled = claimNext(WorkTargetType.THREAD, authorityNow());
-    inTransaction(store, tx -> tx.rescheduleWork(scheduled, authorityNow(), Duration.ofHours(1)));
+    ClaimedWork scheduled = claimNext(WorkTargetType.THREAD);
+    inTransaction(store, tx -> tx.rescheduleWork(scheduled, Duration.ofHours(1)));
     // 尚未可用
     assertTrue(
         store
-            .transaction(
-                tx ->
-                    tx.claimNextWork(WorkTargetType.THREAD, authorityNow(), "token-1", CLAIM_LEASE))
+            .transaction(tx -> tx.claimNextWork(WorkTargetType.THREAD, "token-1", CLAIM_LEASE))
             .isEmpty());
     // 权威时间域内到期后可 claim
     forceWorkAvailable(target);
     ClaimedWork claimed =
         store
-            .transaction(
-                tx ->
-                    tx.claimNextWork(WorkTargetType.THREAD, authorityNow(), "token-1", CLAIM_LEASE))
+            .transaction(tx -> tx.claimNextWork(WorkTargetType.THREAD, "token-1", CLAIM_LEASE))
             .orElseThrow();
     // 活跃 lease 阻塞其他 claim
     assertTrue(
         store
-            .transaction(
-                tx ->
-                    tx.claimNextWork(WorkTargetType.THREAD, authorityNow(), "token-2", CLAIM_LEASE))
+            .transaction(tx -> tx.claimNextWork(WorkTargetType.THREAD, "token-2", CLAIM_LEASE))
             .isEmpty());
     // lease 在权威时间域内过期后，可用新 token reclaim
     expireLease(target);
     ClaimedWork reclaimed =
         store
-            .transaction(
-                tx ->
-                    tx.claimNextWork(WorkTargetType.THREAD, authorityNow(), "token-3", CLAIM_LEASE))
+            .transaction(tx -> tx.claimNextWork(WorkTargetType.THREAD, "token-3", CLAIM_LEASE))
             .orElseThrow();
     assertNotEquals(claimed.leaseToken(), reclaimed.leaseToken());
     assertEquals(1L, reclaimed.claimedWakeVersion());
@@ -595,18 +538,18 @@ public abstract class HarnessStoreWorkContract {
     Baseline baseline = seedThreadBaseline(store);
     WorkTarget target = new WorkTarget(WorkTargetType.THREAD, baseline.threadId());
     requestWork(target);
-    ClaimedWork claim = claimNext(WorkTargetType.THREAD, authorityNow());
+    ClaimedWork claim = claimNext(WorkTargetType.THREAD);
     // 在 lease 持有期间发生新的 wake
     requestWork(target);
     // 过期的 completion 仅清掉 lease，保留 row
-    Optional<Work> kept = store.transaction(tx -> tx.completeWork(claim, authorityNow()));
+    Optional<Work> kept = store.transaction(tx -> tx.completeWork(claim));
     assertTrue(kept.isPresent());
     Work work = store.transaction(tx -> tx.findWork(target)).orElseThrow();
     assertEquals(2L, work.wakeVersion());
     assertNull(work.leaseToken());
     assertNull(work.leaseUntil());
     // 较新的 wake 仍可被 claim
-    assertEquals(2L, claimNext(WorkTargetType.THREAD, authorityNow()).claimedWakeVersion());
+    assertEquals(2L, claimNext(WorkTargetType.THREAD).claimedWakeVersion());
   }
 
   @Test
@@ -614,8 +557,8 @@ public abstract class HarnessStoreWorkContract {
     Baseline baseline = seedThreadBaseline(store);
     WorkTarget target = new WorkTarget(WorkTargetType.THREAD, baseline.threadId());
     requestWork(target);
-    ClaimedWork claim = claimNext(WorkTargetType.THREAD, authorityNow());
-    assertTrue(store.transaction(tx -> tx.completeWork(claim, authorityNow())).isEmpty());
+    ClaimedWork claim = claimNext(WorkTargetType.THREAD);
+    assertTrue(store.transaction(tx -> tx.completeWork(claim)).isEmpty());
     assertTrue(store.<Boolean>transaction(tx -> tx.findWork(target).isEmpty()));
   }
 
@@ -624,12 +567,11 @@ public abstract class HarnessStoreWorkContract {
     Baseline baseline = seedThreadBaseline(store);
     WorkTarget target = new WorkTarget(WorkTargetType.THREAD, baseline.threadId());
     requestWork(target);
-    ClaimedWork claim = claimNext(WorkTargetType.THREAD, authorityNow());
-    store.transaction(tx -> tx.completeWork(claim, authorityNow()));
+    ClaimedWork claim = claimNext(WorkTargetType.THREAD);
+    store.transaction(tx -> tx.completeWork(claim));
     // row 已消失，ownership 无法验证，属于 lost ownership，绝不静默接受
     assertThrows(
-        IllegalStateException.class,
-        () -> store.transaction(tx -> tx.completeWork(claim, authorityNow())));
+        IllegalStateException.class, () -> store.transaction(tx -> tx.completeWork(claim)));
     // 对从未存在 work 的 target 的 claim 也是 lost ownership
     WorkTarget never = new WorkTarget(WorkTargetType.THREAD, TestIds.id(42));
     assertThrows(
@@ -638,8 +580,8 @@ public abstract class HarnessStoreWorkContract {
             store.transaction(
                 tx ->
                     tx.completeWork(
-                        new ClaimedWork(never, 1L, "lease-token", authorityNow().plusSeconds(60)),
-                        authorityNow())));
+                        new ClaimedWork(
+                            never, 1L, "lease-token", authorityNow().plusSeconds(60)))));
   }
 
   @Test
@@ -647,7 +589,7 @@ public abstract class HarnessStoreWorkContract {
     Baseline baseline = seedThreadBaseline(store);
     WorkTarget target = new WorkTarget(WorkTargetType.THREAD, baseline.threadId());
     requestWork(target);
-    ClaimedWork claim = claimNext(WorkTargetType.THREAD, authorityNow());
+    ClaimedWork claim = claimNext(WorkTargetType.THREAD);
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -655,8 +597,10 @@ public abstract class HarnessStoreWorkContract {
                 tx ->
                     tx.completeWork(
                         new ClaimedWork(
-                            target, claim.claimedWakeVersion(), "wrong-token", claim.leaseUntil()),
-                        authorityNow())));
+                            target,
+                            claim.claimedWakeVersion(),
+                            "wrong-token",
+                            claim.leaseUntil()))));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -667,8 +611,7 @@ public abstract class HarnessStoreWorkContract {
                             target,
                             claim.claimedWakeVersion() + 1,
                             claim.leaseToken(),
-                            claim.leaseUntil()),
-                        authorityNow())));
+                            claim.leaseUntil()))));
   }
 
   /** 测试意图：renew 只在目标时点严格晚于现有 lease 时延展 deadline 并保留 token；不缩短（返回 false）且不改动 row。 */
@@ -677,18 +620,16 @@ public abstract class HarnessStoreWorkContract {
     Baseline baseline = seedThreadBaseline(store);
     WorkTarget target = new WorkTarget(WorkTargetType.THREAD, baseline.threadId());
     requestWork(target);
-    ClaimedWork claim = claimNext(WorkTargetType.THREAD, authorityNow());
+    ClaimedWork claim = claimNext(WorkTargetType.THREAD);
     Instant before = claim.leaseUntil();
 
     // 目标时点未超过现有 lease：保持不变并返回 false，避免把更长的 lease 缩短。
-    boolean shortened =
-        store.transaction(tx -> tx.renewWork(claim, authorityNow(), Duration.ofSeconds(1)));
+    boolean shortened = store.transaction(tx -> tx.renewWork(claim, Duration.ofSeconds(1)));
     assertFalse(shortened);
     assertEquals(before, store.transaction(tx -> tx.findWork(target)).orElseThrow().leaseUntil());
 
     // 目标时点严格晚于现有 lease：延展并保留 token。
-    boolean extended =
-        store.transaction(tx -> tx.renewWork(claim, authorityNow(), CLAIM_LEASE.plusSeconds(120)));
+    boolean extended = store.transaction(tx -> tx.renewWork(claim, CLAIM_LEASE.plusSeconds(120)));
     assertTrue(extended);
     Work work = store.transaction(tx -> tx.findWork(target)).orElseThrow();
     assertTrue(work.leaseUntil().isAfter(before));
@@ -700,7 +641,7 @@ public abstract class HarnessStoreWorkContract {
     Baseline baseline = seedThreadBaseline(store);
     WorkTarget target = new WorkTarget(WorkTargetType.THREAD, baseline.threadId());
     requestWork(target);
-    ClaimedWork claim = claimNext(WorkTargetType.THREAD, authorityNow());
+    ClaimedWork claim = claimNext(WorkTargetType.THREAD);
     // 错误的 token
     assertThrows(
         IllegalArgumentException.class,
@@ -711,15 +652,12 @@ public abstract class HarnessStoreWorkContract {
                     tx.renewWork(
                         new ClaimedWork(
                             target, claim.claimedWakeVersion(), "wrong", claim.leaseUntil()),
-                        authorityNow(),
                         CLAIM_LEASE.plusSeconds(60))));
     // lease 在权威时间域内过期后再 renew 是 lost lease
     expireLease(target);
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            inTransaction(
-                store, tx -> tx.renewWork(claim, authorityNow(), CLAIM_LEASE.plusSeconds(60))));
+        () -> inTransaction(store, tx -> tx.renewWork(claim, CLAIM_LEASE.plusSeconds(60))));
   }
 
   @Test
@@ -727,9 +665,9 @@ public abstract class HarnessStoreWorkContract {
     Baseline baseline = seedThreadBaseline(store);
     WorkTarget target = new WorkTarget(WorkTargetType.THREAD, baseline.threadId());
     requestWork(target);
-    ClaimedWork claim = claimNext(WorkTargetType.THREAD, authorityNow());
+    ClaimedWork claim = claimNext(WorkTargetType.THREAD);
     Instant before = authorityNow();
-    inTransaction(store, tx -> tx.rescheduleWork(claim, before, Duration.ofMinutes(30)));
+    inTransaction(store, tx -> tx.rescheduleWork(claim, Duration.ofMinutes(30)));
     Work work = store.transaction(tx -> tx.findWork(target)).orElseThrow();
     assertEquals(1L, work.wakeVersion());
     assertNull(work.leaseToken());
@@ -738,15 +676,13 @@ public abstract class HarnessStoreWorkContract {
     assertTrue(work.availableAt().isAfter(before));
     assertTrue(
         store
-            .transaction(
-                tx -> tx.claimNextWork(WorkTargetType.THREAD, authorityNow(), "token", CLAIM_LEASE))
+            .transaction(tx -> tx.claimNextWork(WorkTargetType.THREAD, "token", CLAIM_LEASE))
             .isEmpty());
     // 权威时间域内到期后即可 claim。
     forceWorkAvailable(target);
     assertTrue(
         store
-            .transaction(
-                tx -> tx.claimNextWork(WorkTargetType.THREAD, authorityNow(), "token", CLAIM_LEASE))
+            .transaction(tx -> tx.claimNextWork(WorkTargetType.THREAD, "token", CLAIM_LEASE))
             .isPresent());
   }
 
@@ -755,14 +691,14 @@ public abstract class HarnessStoreWorkContract {
     Baseline baseline = seedThreadBaseline(store);
     WorkTarget target = new WorkTarget(WorkTargetType.THREAD, baseline.threadId());
     requestWork(target);
-    ClaimedWork claim = claimNext(WorkTargetType.THREAD, authorityNow());
+    ClaimedWork claim = claimNext(WorkTargetType.THREAD);
     requestWork(target);
     // 过期 claim 的 reschedule：lease 清掉，保留 wakeVersion 2；availableAt 取 min，不会把更新的 wake 推后。
-    inTransaction(store, tx -> tx.rescheduleWork(claim, authorityNow(), Duration.ofMinutes(30)));
+    inTransaction(store, tx -> tx.rescheduleWork(claim, Duration.ofMinutes(30)));
     Work work = store.transaction(tx -> tx.findWork(target)).orElseThrow();
     assertEquals(2L, work.wakeVersion());
     assertNull(work.leaseToken());
-    assertEquals(2L, claimNext(WorkTargetType.THREAD, authorityNow()).claimedWakeVersion());
+    assertEquals(2L, claimNext(WorkTargetType.THREAD).claimedWakeVersion());
   }
 
   @Test
@@ -770,7 +706,7 @@ public abstract class HarnessStoreWorkContract {
     Baseline baseline = seedThreadBaseline(store);
     WorkTarget target = new WorkTarget(WorkTargetType.THREAD, baseline.threadId());
     requestWork(target);
-    ClaimedWork claim = claimNext(WorkTargetType.THREAD, authorityNow());
+    ClaimedWork claim = claimNext(WorkTargetType.THREAD);
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -780,7 +716,6 @@ public abstract class HarnessStoreWorkContract {
                     tx.rescheduleWork(
                         new ClaimedWork(
                             target, claim.claimedWakeVersion(), "wrong", claim.leaseUntil()),
-                        authorityNow(),
                         Duration.ofSeconds(1))));
   }
 
@@ -794,7 +729,7 @@ public abstract class HarnessStoreWorkContract {
         () ->
             store.transaction(
                 tx -> {
-                  tx.claimNextWork(WorkTargetType.THREAD, authorityNow(), "token-1", CLAIM_LEASE);
+                  tx.claimNextWork(WorkTargetType.THREAD, "token-1", CLAIM_LEASE);
                   throw new IllegalStateException("boom");
                 }));
     // 失败事务中的 lease 不可见
@@ -804,9 +739,7 @@ public abstract class HarnessStoreWorkContract {
     // 同一 row 之后仍可被 claim
     assertTrue(
         store
-            .transaction(
-                tx ->
-                    tx.claimNextWork(WorkTargetType.THREAD, authorityNow(), "token-2", CLAIM_LEASE))
+            .transaction(tx -> tx.claimNextWork(WorkTargetType.THREAD, "token-2", CLAIM_LEASE))
             .isPresent());
   }
 
@@ -822,8 +755,8 @@ public abstract class HarnessStoreWorkContract {
     Baseline baseline = seedThreadBaseline(store);
     WorkTarget target = new WorkTarget(WorkTargetType.THREAD, baseline.threadId());
     requestWork(target);
-    ClaimedWork claim = claimNext(WorkTargetType.THREAD, authorityNow());
-    Work work = store.transaction(tx -> tx.lockClaimedWork(claim, authorityNow())).orElseThrow();
+    ClaimedWork claim = claimNext(WorkTargetType.THREAD);
+    Work work = store.transaction(tx -> tx.lockClaimedWork(claim)).orElseThrow();
     assertEquals(target, work.target());
     assertEquals(1L, work.wakeVersion());
     assertEquals(claim.leaseToken(), work.leaseToken());
@@ -835,7 +768,7 @@ public abstract class HarnessStoreWorkContract {
     Baseline baseline = seedThreadBaseline(store);
     WorkTarget target = new WorkTarget(WorkTargetType.THREAD, baseline.threadId());
     requestWork(target);
-    ClaimedWork claim = claimNext(WorkTargetType.THREAD, authorityNow());
+    ClaimedWork claim = claimNext(WorkTargetType.THREAD);
     // 对从未存在 work 的 target 的 claim 即 lost ownership
     WorkTarget never = new WorkTarget(WorkTargetType.THREAD, TestIds.id(42));
     assertTrue(
@@ -843,8 +776,7 @@ public abstract class HarnessStoreWorkContract {
             .transaction(
                 tx ->
                     tx.lockClaimedWork(
-                        new ClaimedWork(never, 1L, "lease-token", authorityNow().plusSeconds(60)),
-                        authorityNow()))
+                        new ClaimedWork(never, 1L, "lease-token", authorityNow().plusSeconds(60))))
             .isEmpty());
     // 错误 token 是 stale ownership
     assertTrue(
@@ -853,8 +785,7 @@ public abstract class HarnessStoreWorkContract {
                 tx ->
                     tx.lockClaimedWork(
                         new ClaimedWork(
-                            target, claim.claimedWakeVersion(), "wrong-token", claim.leaseUntil()),
-                        authorityNow()))
+                            target, claim.claimedWakeVersion(), "wrong-token", claim.leaseUntil())))
             .isEmpty());
     // 失败的 ownership 检查不会改动 row
     Work work = store.transaction(tx -> tx.findWork(target)).orElseThrow();
@@ -862,7 +793,7 @@ public abstract class HarnessStoreWorkContract {
     assertEquals(claim.leaseUntil(), work.leaseUntil());
     // lease 在权威时间域内过期属 stale ownership（用实现自己的过期方式，不依赖 JVM 与数据库的时钟关系）
     expireLease(target);
-    assertTrue(store.transaction(tx -> tx.lockClaimedWork(claim, authorityNow())).isEmpty());
+    assertTrue(store.transaction(tx -> tx.lockClaimedWork(claim)).isEmpty());
   }
 
   @Test
@@ -870,10 +801,10 @@ public abstract class HarnessStoreWorkContract {
     Baseline baseline = seedThreadBaseline(store);
     WorkTarget target = new WorkTarget(WorkTargetType.THREAD, baseline.threadId());
     requestWork(target);
-    ClaimedWork claim = claimNext(WorkTargetType.THREAD, authorityNow());
+    ClaimedWork claim = claimNext(WorkTargetType.THREAD);
     // lease 持有期间发生新的 wake
     requestWork(target);
-    Work work = store.transaction(tx -> tx.lockClaimedWork(claim, authorityNow())).orElseThrow();
+    Work work = store.transaction(tx -> tx.lockClaimedWork(claim)).orElseThrow();
     // ownership 未丢失：返回的 row 带有新的 wakeVersion，availableAt 仍不晚于权威时间（requestWork 是立即唤醒）
     assertEquals(2L, work.wakeVersion());
     assertEquals(claim.leaseToken(), work.leaseToken());
@@ -885,21 +816,18 @@ public abstract class HarnessStoreWorkContract {
     Baseline baseline = seedThreadBaseline(store);
     WorkTarget target = new WorkTarget(WorkTargetType.THREAD, baseline.threadId());
     requestWork(target);
-    ClaimedWork claim = claimNext(WorkTargetType.THREAD, authorityNow());
+    ClaimedWork claim = claimNext(WorkTargetType.THREAD);
     assertTrue(deleteWork(target));
     assertTrue(store.<Boolean>transaction(tx -> tx.findWork(target).isEmpty()));
     // 被删除的 row 对旧 callback 形成 fence：所有基于 claim 的 mutation 都成为 lost ownership
     assertThrows(
-        IllegalStateException.class,
-        () -> store.transaction(tx -> tx.completeWork(claim, authorityNow())));
+        IllegalStateException.class, () -> store.transaction(tx -> tx.completeWork(claim)));
     assertThrows(
         IllegalStateException.class,
-        () -> inTransaction(store, tx -> tx.renewWork(claim, authorityNow(), CLAIM_LEASE)));
+        () -> inTransaction(store, tx -> tx.renewWork(claim, CLAIM_LEASE)));
     assertThrows(
         IllegalStateException.class,
-        () ->
-            inTransaction(
-                store, tx -> tx.rescheduleWork(claim, authorityNow(), Duration.ofSeconds(1))));
+        () -> inTransaction(store, tx -> tx.rescheduleWork(claim, Duration.ofSeconds(1))));
   }
 
   @Test
@@ -962,7 +890,7 @@ public abstract class HarnessStoreWorkContract {
     EnvironmentId env = EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
     requestWork(toolTarget, env);
 
-    ClaimedWork claimed = claimNext(WorkTargetType.TOOL, authorityNow());
+    ClaimedWork claimed = claimNext(WorkTargetType.TOOL);
     assertEquals(toolTarget, claimed.target());
     assertEquals(env, claimed.requiredEnvironmentId());
   }
@@ -980,8 +908,7 @@ public abstract class HarnessStoreWorkContract {
   protected record SeededTools(UUID threadId, UUID modelId, List<UUID> toolIds) {}
 
   private List<PendingEnvironmentWaitRow> environmentWaits(Instant afterCreatedAt, UUID afterId) {
-    return store.transaction(
-        tx -> tx.listPendingEnvironmentWaits(authorityNow(), afterCreatedAt, afterId, 10));
+    return store.transaction(tx -> tx.listPendingEnvironmentWaits(afterCreatedAt, afterId, 10));
   }
 
   /** 在同一 root thread 播种 {@code count} 个 READY TOOL 调用，用于验证按根聚合计数。 */
@@ -1128,18 +1055,14 @@ public abstract class HarnessStoreWorkContract {
 
     // 同一根不同环境是两个独立分组，不会合并；按代表游标翻页不重不漏。
     List<PendingEnvironmentWaitRow> firstPage =
-        store.transaction(
-            tx -> tx.listPendingEnvironmentWaits(authorityNow(), Instant.EPOCH, CURSOR_ZERO, 2));
+        store.transaction(tx -> tx.listPendingEnvironmentWaits(Instant.EPOCH, CURSOR_ZERO, 2));
     assertEquals(all.subList(0, 2), firstPage);
     PendingEnvironmentWaitRow cursor = firstPage.get(firstPage.size() - 1);
     List<PendingEnvironmentWaitRow> secondPage =
         store.transaction(
             tx ->
                 tx.listPendingEnvironmentWaits(
-                    authorityNow(),
-                    cursor.representativeCreatedAt(),
-                    cursor.representativeInvocationId(),
-                    2));
+                    cursor.representativeCreatedAt(), cursor.representativeInvocationId(), 2));
     assertEquals(List.of(all.get(2)), secondPage);
   }
 
@@ -1156,7 +1079,7 @@ public abstract class HarnessStoreWorkContract {
     requestWork(new WorkTarget(WorkTargetType.TOOL, server));
     forceWorkAvailableAfter(futureTarget, Duration.ofMinutes(5));
     List<EnvironmentToolWaitRow> rows =
-        store.transaction(tx -> tx.listEnvironmentToolWaits(authorityNow(), seeded.toolIds()));
+        store.transaction(tx -> tx.listEnvironmentToolWaits(seeded.toolIds()));
     EnvironmentToolWaitRow waitingRow =
         rows.stream().filter(row -> row.invocationId().equals(waiting)).findFirst().orElseThrow();
     assertEquals(WAITING_ENVIRONMENT, waitingRow.environmentId());
@@ -1170,18 +1093,16 @@ public abstract class HarnessStoreWorkContract {
         store.transaction(tx -> tx.findWork(futureTarget)).orElseThrow().availableAt(),
         futureRow.freshnessAt());
     assertTrue(rows.contains(new EnvironmentToolWaitRow(server, null, false, null, null)));
-    Instant horizon =
-        store.transaction(tx -> tx.findNextEnvironmentWaitChange(authorityNow())).orElseThrow();
+    Instant horizon = store.transaction(tx -> tx.findNextEnvironmentWaitChange()).orElseThrow();
     assertTrue(horizon.isAfter(authorityNow()));
     assertTrue(horizon.isBefore(authorityNow().plus(Duration.ofMinutes(6))));
     seedReadyEnvironmentLease(WAITING_ENVIRONMENT);
     assertFalse(
         store
-            .transaction(tx -> tx.listEnvironmentToolWaits(authorityNow(), List.of(waiting)))
+            .transaction(tx -> tx.listEnvironmentToolWaits(List.of(waiting)))
             .get(0)
             .waitingForEnvironment());
-    assertEquals(
-        List.of(), store.transaction(tx -> tx.listEnvironmentToolWaits(authorityNow(), List.of())));
+    assertEquals(List.of(), store.transaction(tx -> tx.listEnvironmentToolWaits(List.of())));
   }
 
   /** RUNNING/terminal 即使保留有未来 Work 和在线环境租约也不等待、不安排到期回读。 */
@@ -1204,10 +1125,7 @@ public abstract class HarnessStoreWorkContract {
           tx.updateToolInvocations(List.of(dispatching.markRunning(T1)));
         });
     EnvironmentToolWaitRow running =
-        store
-            .transaction(
-                tx -> tx.listEnvironmentToolWaits(authorityNow(), List.of(seeded.toolId())))
-            .getFirst();
+        store.transaction(tx -> tx.listEnvironmentToolWaits(List.of(seeded.toolId()))).getFirst();
     assertFalse(running.waitingForEnvironment());
     assertNull(running.freshnessAt());
     inTransaction(
@@ -1219,10 +1137,7 @@ public abstract class HarnessStoreWorkContract {
               List.of(runningTool.fail(new ToolInvocationError("FAILED", "test failure"), T1)));
         });
     EnvironmentToolWaitRow terminal =
-        store
-            .transaction(
-                tx -> tx.listEnvironmentToolWaits(authorityNow(), List.of(seeded.toolId())))
-            .getFirst();
+        store.transaction(tx -> tx.listEnvironmentToolWaits(List.of(seeded.toolId()))).getFirst();
     assertFalse(terminal.waitingForEnvironment());
     assertNull(terminal.freshnessAt());
   }

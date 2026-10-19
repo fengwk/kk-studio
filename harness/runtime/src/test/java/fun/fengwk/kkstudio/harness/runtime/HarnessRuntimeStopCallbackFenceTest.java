@@ -38,13 +38,13 @@ class HarnessRuntimeStopCallbackFenceTest {
     ClaimedWork claim =
         store.transaction(
             tx ->
-                tx.claimNextWork(WorkTargetType.MODEL, T3, "model-lease", Duration.between(T3, T6))
+                tx.claimNextWork(WorkTargetType.MODEL, "model-lease", Duration.between(T3, T6))
                     .orElseThrow());
 
     runtime(store, Clock.fixed(T5, ZoneOffset.UTC))
         .stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
 
-    assertTrue(store.transaction(tx -> tx.lockClaimedWork(claim, T5)).isEmpty());
+    assertTrue(store.transaction(tx -> tx.lockClaimedWork(claim)).isEmpty());
     // stopModel 关闭 turn 后 Model 行被物理删除；迟到 callback 的 claim 也因 Work 已删而 no-op。
     assertTrue(store.transaction(tx -> tx.findModelInvocation(baseline.modelId())).isEmpty());
   }
@@ -60,13 +60,13 @@ class HarnessRuntimeStopCallbackFenceTest {
     ClaimedWork claim =
         store.transaction(
             tx ->
-                tx.claimNextWork(WorkTargetType.TOOL, T3, "tool-lease", Duration.between(T3, T6))
+                tx.claimNextWork(WorkTargetType.TOOL, "tool-lease", Duration.between(T3, T6))
                     .orElseThrow());
 
     runtime(store, Clock.fixed(T5, ZoneOffset.UTC))
         .stop(new StopCommand(baseline.threadId(), TestIds.id(1), 1));
 
-    assertTrue(store.transaction(tx -> tx.lockClaimedWork(claim, T5)).isEmpty());
+    assertTrue(store.transaction(tx -> tx.lockClaimedWork(claim)).isEmpty());
     // stopTools 关闭 turn 后全部 Tool 行与 parent Model 行被物理删除；迟到 callback 的 claim 也因 Work 已删而 no-op。
     assertTrue(store.transaction(tx -> tx.findToolInvocation(baseline.toolId())).isEmpty());
   }

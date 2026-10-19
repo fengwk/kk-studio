@@ -5,6 +5,7 @@ import static fun.fengwk.kkstudio.harness.infra.dispatch.DispatcherTestSupport.R
 import static fun.fengwk.kkstudio.harness.infra.dispatch.DispatcherTestSupport.awaitTrue;
 import static fun.fengwk.kkstudio.harness.infra.dispatch.DispatcherTestSupport.clock;
 import static fun.fengwk.kkstudio.harness.infra.dispatch.DispatcherTestSupport.config;
+import static fun.fengwk.kkstudio.harness.infra.dispatch.DispatcherTestSupport.newStore;
 import static fun.fengwk.kkstudio.harness.infra.dispatch.DispatcherTestSupport.seedModel;
 import static fun.fengwk.kkstudio.harness.infra.dispatch.DispatcherTestSupport.seedThread;
 import static fun.fengwk.kkstudio.harness.infra.dispatch.DispatcherTestSupport.seedTool;
@@ -78,13 +79,16 @@ class HarnessWorkDispatcherDrainTest {
       ScheduledExecutorService poll,
       int maxDispatchTasks,
       Consumer<ClaimedWork> handler) {
+    if (store instanceof InMemoryHarnessStore memory) {
+      memory.setClock(clock);
+    }
     return new HarnessWorkDispatcher(
-        store, config(maxDispatchTasks), clock, drain, worker, poll, handler, handler, handler);
+        store, config(maxDispatchTasks), drain, worker, poll, handler, handler, handler);
   }
 
   @Test
   void concurrentWakesMergeIntoTheRunningDrainAndLoseNothing() throws InterruptedException {
-    InMemoryHarnessStore inner = new InMemoryHarnessStore();
+    InMemoryHarnessStore inner = newStore();
     BlockingStore store = new BlockingStore(inner);
     ThreadSeed threadSeed = seedThread(store);
     ModelSeed modelSeed = seedModel(store);
@@ -136,7 +140,7 @@ class HarnessWorkDispatcherDrainTest {
 
   @Test
   void maxOneStillRoundRobinsAcrossTypesOverMultipleDrains() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryHarnessStore store = newStore();
     ThreadSeed thread1 = seedThread(store);
     ThreadSeed thread2 = seedThread(store);
     ModelSeed model1 = seedModel(store);
@@ -149,7 +153,7 @@ class HarnessWorkDispatcherDrainTest {
           claims.add(claim);
           store.transaction(
               tx -> {
-                tx.completeWork(claim, NOW);
+                tx.completeWork(claim);
                 return null;
               });
         };
@@ -188,7 +192,7 @@ class HarnessWorkDispatcherDrainTest {
   /** THREAD 无 due 时，round-robin 必须跳过空类型而不偏置紧随其后的类型：maxDispatchTasks=1 下按 MODEL / TOOL 交替。 */
   @Test
   void roundRobinSkipsEmptyThreadWithoutBiasingTowardTheNextType() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryHarnessStore store = newStore();
     seedModel(store);
     seedModel(store);
     seedModel(store);
@@ -201,7 +205,7 @@ class HarnessWorkDispatcherDrainTest {
           claims.add(claim);
           store.transaction(
               tx -> {
-                tx.completeWork(claim, NOW);
+                tx.completeWork(claim);
                 return null;
               });
         };
@@ -231,7 +235,7 @@ class HarnessWorkDispatcherDrainTest {
 
   @Test
   void capacityIsBoundedByMaxDispatchTasks() throws InterruptedException {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryHarnessStore store = newStore();
     ThreadSeed threadSeed = seedThread(store);
     ModelSeed modelSeed = seedModel(store);
     ToolSeed toolSeed = seedTool(store);
@@ -287,7 +291,7 @@ class HarnessWorkDispatcherDrainTest {
 
   @Test
   void drainExecutorRejectionRecoversOnTheNextWake() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryHarnessStore store = newStore();
     ThreadSeed seed = seedThread(store);
     ControlledExecutor drain = new ControlledExecutor(singleThread());
     CopyOnWriteArrayList<ClaimedWork> claims = new CopyOnWriteArrayList<>();
@@ -310,7 +314,7 @@ class HarnessWorkDispatcherDrainTest {
 
   @Test
   void drainExecutorErrorRestoresTheSubmissionGateBeforePropagating() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryHarnessStore store = newStore();
     seedThread(store);
     ControlledExecutor drain = new ControlledExecutor(Runnable::run);
     AssertionError failure = new AssertionError("drain failed");
@@ -328,7 +332,7 @@ class HarnessWorkDispatcherDrainTest {
 
   @Test
   void workerRejectionReturnsTheOwnedClaimWithThePositiveDelay() throws InterruptedException {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryHarnessStore store = newStore();
     ThreadSeed seed = seedThread(store);
     ControlledExecutor worker = new ControlledExecutor(singleThread());
     CopyOnWriteArrayList<ClaimedWork> claims = new CopyOnWriteArrayList<>();
@@ -354,7 +358,7 @@ class HarnessWorkDispatcherDrainTest {
 
   @Test
   void workerSubmissionRuntimeFailureReturnsTheClaimAndReleasesCapacity() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryHarnessStore store = newStore();
     ThreadSeed threadSeed = seedThread(store);
     ModelSeed modelSeed = seedModel(store);
     ControlledExecutor worker = new ControlledExecutor(Runnable::run);
@@ -383,7 +387,7 @@ class HarnessWorkDispatcherDrainTest {
 
   @Test
   void workerSubmissionErrorReturnsTheClaimBeforePropagating() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryHarnessStore store = newStore();
     ThreadSeed seed = seedThread(store);
     ControlledExecutor worker = new ControlledExecutor(Runnable::run);
     AssertionError failure = new AssertionError("worker failed");
@@ -400,7 +404,7 @@ class HarnessWorkDispatcherDrainTest {
 
   @Test
   void workerRejectionWithLostOwnershipIsANoOp() throws InterruptedException {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryHarnessStore store = newStore();
     ThreadSeed seed = seedThread(store);
     ControlledExecutor worker = new ControlledExecutor(singleThread());
     CopyOnWriteArrayList<ClaimedWork> claims = new CopyOnWriteArrayList<>();
@@ -431,7 +435,7 @@ class HarnessWorkDispatcherDrainTest {
 
   @Test
   void workerRejectionEndsTheDrainWithoutAClaimRejectHotLoop() throws InterruptedException {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryHarnessStore store = newStore();
     ThreadSeed threadSeed = seedThread(store);
     ModelSeed modelSeed = seedModel(store);
     Executor rejectingWorker =
@@ -491,7 +495,6 @@ class HarnessWorkDispatcherDrainTest {
             otherNodeId,
             store,
             config(1),
-            clock(),
             singleThread(),
             singleThread(),
             new RecordingScheduler(),
@@ -513,7 +516,6 @@ class HarnessWorkDispatcherDrainTest {
             allowedNodeId,
             store,
             config(1),
-            clock(),
             singleThread(),
             singleThread(),
             new RecordingScheduler(),

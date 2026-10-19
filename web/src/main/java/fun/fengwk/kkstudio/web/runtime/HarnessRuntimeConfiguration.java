@@ -272,7 +272,7 @@ public class HarnessRuntimeConfiguration {
       @Qualifier("harnessHeartbeatWorkerExecutor") Executor heartbeatWorker,
       ToolResultHistoryMaterializer materializer) {
     return new ThreadProcessor(
-        store, turnResolver, config, clock, scheduler, heartbeatWorker, materializer);
+        store, turnResolver, config, scheduler, heartbeatWorker, materializer);
   }
 
   @Bean(destroyMethod = "close")
@@ -324,13 +324,7 @@ public class HarnessRuntimeConfiguration {
       ToolProcessor toolProcessor,
       ToolResultHistoryMaterializer materializer) {
     return new HarnessRuntime(
-        store,
-        clock,
-        turnResolver,
-        compactionConfigProvider,
-        materializer,
-        modelProcessor,
-        toolProcessor);
+        store, turnResolver, compactionConfigProvider, materializer, modelProcessor, toolProcessor);
   }
 
   /** 结构化 Model Request Debug 只读服务：依赖完整 Runtime，因此只在 Web 组合根创建。 */
@@ -424,7 +418,6 @@ public class HarnessRuntimeConfiguration {
         nodeInstanceId,
         store,
         config,
-        clock,
         drainExecutor,
         workerExecutor,
         pollScheduler,

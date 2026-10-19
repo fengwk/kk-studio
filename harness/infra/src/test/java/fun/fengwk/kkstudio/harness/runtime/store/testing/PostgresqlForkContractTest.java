@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
-import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T0;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedThreadBaseline;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -35,8 +34,6 @@ import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.time.Clock;
-import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 
@@ -66,10 +63,7 @@ class PostgresqlForkContractTest {
     store = PostgresqlHarnessStoreFixture.create();
     runtime =
         new HarnessRuntime(
-            store,
-            Clock.fixed(T0, ZoneOffset.UTC),
-            (threadId, path, preparation) -> null,
-            () -> CompactionConfig.DEFAULT);
+            store, (threadId, path, preparation) -> null, () -> CompactionConfig.DEFAULT);
   }
 
   /** 会话 fork：ROOT + FORK 往返保真，branch settings 从来源切点推导，且 initial creation replay 幂等。 */

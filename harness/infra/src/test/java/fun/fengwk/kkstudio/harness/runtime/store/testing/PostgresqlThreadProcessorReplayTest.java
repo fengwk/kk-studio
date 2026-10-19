@@ -39,10 +39,8 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
-import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
@@ -162,7 +160,7 @@ class PostgresqlThreadProcessorReplayTest {
                             sibling.call().id(), List.of(new TextResultContent("ok")), false, "{}"),
                         T3)));
           }
-          tx.requestWork(target, now);
+          tx.requestWork(target);
           return null;
         });
     assertNull(
@@ -186,7 +184,6 @@ class PostgresqlThreadProcessorReplayTest {
                   new ProcessorLeaseConfig(Duration.ofSeconds(30), Duration.ofSeconds(5)),
                   Duration.ofSeconds(5),
                   () -> new CompactionConfig(20_000)),
-              Clock.fixed(now, ZoneOffset.UTC),
               scheduler,
               Runnable::run);
       ClaimedWork first =
@@ -194,7 +191,7 @@ class PostgresqlThreadProcessorReplayTest {
               .transaction(
                   tx ->
                       tx.claimNextWork(
-                          WorkTargetType.THREAD, now, "first-claim", Duration.ofSeconds(30)))
+                          WorkTargetType.THREAD, "first-claim", Duration.ofSeconds(30)))
               .orElseThrow();
       assertEquals(ThreadProcessResult.COMPLETED, processor.process(first));
       var applied =
@@ -225,7 +222,7 @@ class PostgresqlThreadProcessorReplayTest {
               .transaction(
                   tx ->
                       tx.claimNextWork(
-                          WorkTargetType.THREAD, now, "continuation-claim", Duration.ofSeconds(30)))
+                          WorkTargetType.THREAD, "continuation-claim", Duration.ofSeconds(30)))
               .orElseThrow();
       assertEquals(ThreadProcessResult.COMPLETED, processor.process(second));
       var continued =

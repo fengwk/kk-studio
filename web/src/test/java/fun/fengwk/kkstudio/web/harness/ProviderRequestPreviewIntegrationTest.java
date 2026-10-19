@@ -161,7 +161,6 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
         new HarnessWorkDispatcher(
             harnessStore,
             fixtureDispatcherConfig(),
-            clock,
             Runnable::run,
             Runnable::run,
             fixturePollScheduler,

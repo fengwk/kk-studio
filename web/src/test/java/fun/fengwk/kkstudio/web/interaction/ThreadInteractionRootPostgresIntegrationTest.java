@@ -832,7 +832,6 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
                 tx ->
                     tx.claimNextWork(
                         WorkTargetType.TOOL,
-                        nextTime(),
                         "lease-" + invocationId,
                         Duration.ofMinutes(30),
                         ownerNodeId))
@@ -1125,7 +1124,7 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
     }
     tx.updateThread(afterTurnStart.advanceHead(assistantEntryId, now));
     if (requestToolWork) {
-      tx.requestWork(new WorkTarget(WorkTargetType.TOOL, toolId), now, requiredEnvironmentId);
+      tx.requestWork(new WorkTarget(WorkTargetType.TOOL, toolId), requiredEnvironmentId);
     }
     return toolId;
   }
@@ -1297,7 +1296,6 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
             UUID.randomUUID(),
             store,
             config,
-            clock,
             drainExecutor,
             workerExecutor,
             pollScheduler,

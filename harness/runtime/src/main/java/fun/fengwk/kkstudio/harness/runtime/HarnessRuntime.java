@@ -29,7 +29,6 @@ import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.store.EnvironmentToolWaitRow;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.store.PendingEnvironmentWaitRow;
 import fun.fengwk.kkstudio.harness.runtime.store.PendingToolInvocationRow;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
@@ -40,7 +39,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
-import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -60,9 +58,7 @@ import java.util.function.Consumer;
  * ToolInvocation siblings -&gt; Work 保证 durable 状态一致；需要外部解析的手动压缩采用短事务 plan、事务外 resolve、第二短事务 CAS
  * commit。所有业务拒绝均为类型化 {@link HarnessRuntimeConflictException} / {@link
  * HarnessRuntimeNotFoundException}；被破坏 的持久化不变量（所有权错误、sibling 混合挂接、callIndex 不连续）仍为 {@link
- * IllegalStateException}。对已存在 Thread 的 mutation 在相关 durable 锁之后读取时间戳，因此 lock-wait 不会让过期的 pre-lock
- * instant 让 {@code updatedAt} 回退； Stop 与未决 Approval 还会把 mutation 时间钳制到最新的已锁定 durable
- * fact，以容忍本地时钟回滚与跨节点时钟偏差，而 Work request 始终使用未抬升的本地调度时钟。
+ * IllegalStateException}。所有持久化时间取自事务的 {@link HarnessStore.Transaction#now()}。
  *
  * <p>本类实现 {@link #acceptCommands}（NEW_SESSION / NEW_THREAD / THREAD 单原语）、{@link #stop}、{@link
  * #submitToolInput}、{@link #decideToolApproval}、{@link #setThreadYolo}、{@link #renameThread}、{@link
@@ -77,7 +73,6 @@ public final class HarnessRuntime {
   private static final ToolApprovalJsonCodec APPROVAL_JSON = new ToolApprovalJsonCodec();
 
   private final HarnessStore store;
-  private final Clock clock;
   private final AcceptCommandsControl acceptCommandsControl;
   private final StopControl stopControl;
   private final ToolInputControl toolInputControl;
@@ -88,10 +83,9 @@ public final class HarnessRuntime {
   /** 创建仅含 control 面的 Runtime，不承载本地 Model/Tool execution。 */
   public HarnessRuntime(
       HarnessStore store,
-      Clock clock,
       TurnResolver resolver,
       CompactionConfigProvider compactionConfigProvider) {
-    this(store, clock, resolver, compactionConfigProvider, null, NO_OP_CANCELLER, NO_OP_CANCELLER);
+    this(store, resolver, compactionConfigProvider, null, NO_OP_CANCELLER, NO_OP_CANCELLER);
   }
 
   /**
@@ -100,7 +94,6 @@ public final class HarnessRuntime {
    */
   public HarnessRuntime(
       HarnessStore store,
-      Clock clock,
       TurnResolver resolver,
       CompactionConfigProvider compactionConfigProvider,
       ToolResultHistoryMaterializer toolResultHistoryMaterializer,
@@ -108,7 +101,6 @@ public final class HarnessRuntime {
       ToolProcessor toolProcessor) {
     this(
         store,
-        clock,
         resolver,
         compactionConfigProvider,
         toolResultHistoryMaterializer,
@@ -119,21 +111,18 @@ public final class HarnessRuntime {
   /** 由具体 Processor wiring 与 local execution adapter 共用的内部构造方法。 */
   HarnessRuntime(
       HarnessStore store,
-      Clock clock,
       TurnResolver resolver,
       CompactionConfigProvider compactionConfigProvider,
       ToolResultHistoryMaterializer toolResultHistoryMaterializer,
       Consumer<UUID> modelExecutionCanceller,
       Consumer<UUID> toolExecutionCanceller) {
     this.store = Objects.requireNonNull(store, "store");
-    this.clock = HarnessStoreTime.millisecondClock(clock);
-    this.acceptCommandsControl = new AcceptCommandsControl(store, this.clock);
-    this.stopControl = new StopControl(store, this.clock, toolResultHistoryMaterializer);
-    this.toolInputControl = new ToolInputControl(this.store, this.clock);
+    this.acceptCommandsControl = new AcceptCommandsControl(store);
+    this.stopControl = new StopControl(store, toolResultHistoryMaterializer);
+    this.toolInputControl = new ToolInputControl(this.store);
     this.manualCompactionControl =
         new ManualCompactionControl(
             this.store,
-            this.clock,
             Objects.requireNonNull(resolver, "resolver"),
             Objects.requireNonNull(compactionConfigProvider, "compactionConfigProvider"));
     this.modelExecutionCanceller =
@@ -326,7 +315,7 @@ public final class HarnessRuntime {
           if (thread.name().equals(command.name())) {
             return thread;
           }
-          ThreadState updated = thread.renameThread(command.name(), clock.instant());
+          ThreadState updated = thread.renameThread(command.name(), tx.now());
           tx.updateThread(updated);
           return updated;
         });
@@ -360,7 +349,7 @@ public final class HarnessRuntime {
           if (thread.yoloPolicy().isEnabled() == command.enabled()) {
             return thread;
           }
-          ThreadState updated = thread.setRootYolo(command.enabled(), clock.instant());
+          ThreadState updated = thread.setRootYolo(command.enabled(), tx.now());
           tx.updateThread(updated);
           return updated;
         });
@@ -479,10 +468,7 @@ public final class HarnessRuntime {
         tx -> {
           List<PendingEnvironmentWaitRow> rows =
               tx.listPendingEnvironmentWaits(
-                  clock.instant(),
-                  afterRepresentativeCreatedAt,
-                  afterRepresentativeInvocationId,
-                  probeSize);
+                  afterRepresentativeCreatedAt, afterRepresentativeInvocationId, probeSize);
           boolean hasMore = rows.size() > limit;
           List<PendingEnvironmentWait> waits = new ArrayList<>(Math.min(rows.size(), limit));
           for (PendingEnvironmentWaitRow row : rows) {
@@ -517,7 +503,7 @@ public final class HarnessRuntime {
     List<UUID> ids = List.copyOf(invocationIds);
     return store.transaction(
         tx -> {
-          List<EnvironmentToolWaitRow> rows = tx.listEnvironmentToolWaits(clock.instant(), ids);
+          List<EnvironmentToolWaitRow> rows = tx.listEnvironmentToolWaits(ids);
           List<EnvironmentToolWait> waits = new ArrayList<>(rows.size());
           for (EnvironmentToolWaitRow row : rows) {
             waits.add(
@@ -538,7 +524,7 @@ public final class HarnessRuntime {
    * <p>浏览器据此安排一次回读，因此租约自然到期不需要周期轮询或新的通知来源。
    */
   public Optional<Instant> findNextEnvironmentWaitChange() {
-    return store.transaction(tx -> tx.findNextEnvironmentWaitChange(clock.instant()));
+    return store.transaction(tx -> tx.findNextEnvironmentWaitChange());
   }
 
   /**
@@ -754,7 +740,7 @@ public final class HarnessRuntime {
           "tool invocation " + tool.id() + " lost its required decided approval during replay");
     }
     try {
-      Instant now = clock.instant();
+      Instant now = tx.now();
       ToolApproval replayed =
           approval.decide(
               command.decision(), command.decisionId(), command.actor(), command.reason(), now);
@@ -802,17 +788,7 @@ public final class HarnessRuntime {
       throw new IllegalStateException(
           "tool invocation " + tool.id() + " changed its approval state before being decided");
     }
-    Instant workNow = clock.instant();
-    Instant mutationNow =
-        HarnessStoreTime.notBefore(
-            workNow,
-            thread.updatedAt(),
-            locked.path().head().createdAt(),
-            active.model().updatedAt(),
-            approval.requestedAt());
-    for (ToolInvocation sibling : active.siblings()) {
-      mutationNow = HarnessStoreTime.notBefore(mutationNow, sibling.updatedAt());
-    }
+    Instant mutationNow = tx.now();
     ToolInvocation updated =
         tool.decideApproval(
             command.decision(),
@@ -825,9 +801,9 @@ public final class HarnessRuntime {
     tx.updateThread(thread.touchVersion(mutationNow));
     if (command.decision() == ToolApprovalDecision.ALLOWED) {
       EnvironmentId environmentId = tool.binding() == null ? null : tool.binding().environmentId();
-      tx.requestWork(new WorkTarget(WorkTargetType.TOOL, tool.id()), workNow, environmentId);
+      tx.requestWork(new WorkTarget(WorkTargetType.TOOL, tool.id()), environmentId);
     } else {
-      tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), workNow);
+      tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()));
     }
     return updated;
   }

@@ -375,8 +375,7 @@ class HarnessRuntimeTreeLockTest {
     List<String> locks = new ArrayList<>();
     HarnessStore recording = recordingStore(fixture.store, locks);
     HarnessRuntime recordingRuntime =
-        new HarnessRuntime(
-            recording, fixture.clock, fixture.resolver, fixture.compactionConfigProvider);
+        new HarnessRuntime(recording, fixture.resolver, fixture.compactionConfigProvider);
 
     CompactThreadResult result =
         recordingRuntime.compactThread(new CompactThreadCommand(baseline.threadId(), 0L));

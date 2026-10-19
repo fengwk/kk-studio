@@ -964,8 +964,7 @@ create table harness_thread (
     ),
     constraint ck_harness_thread_input_through check (
         input_through_sequence < next_command_sequence
-    ),
-    constraint ck_harness_thread_time_order check (updated_at >= created_at)
+    )
 );
 
 comment on table harness_thread is 'Thread：指向 head Entry 的游标状态机，version 随每次对外字段变化精确 +1；session_id 与 creation_request_hash 创建后不可变，head 必须与 session 同 Session；parent_thread_id 记录不可变执行父关系，yolo_mode/yolo_root_thread_id 记录根开关或子代理不可变 Follow 目标，execution_control 区分 RUNNABLE/STOPPED；input_through_sequence 记录已接纳的水位；(session_id, id) 唯一供同 Session 复合引用';
@@ -1039,9 +1038,6 @@ create table harness_thread_command (
     constraint ck_harness_thread_command_cancel_pair check (
         (stop_request_id is null and cancelled_at is null)
         or (stop_request_id is not null and cancelled_at is not null)
-    ),
-    constraint ck_harness_thread_command_cancel_time check (
-        cancelled_at is null or cancelled_at >= created_at
     )
 );
 
@@ -1110,7 +1106,6 @@ create table harness_model_invocation (
     constraint ck_harness_model_invocation_terminal_facts check (
         result is null or error is null
     ),
-    constraint ck_harness_model_invocation_time_order check (updated_at >= created_at),
     constraint ck_harness_model_invocation_provider_replay_state check (
         provider_replay_state is null
         or (
@@ -1205,8 +1200,7 @@ create table harness_tool_invocation (
     constraint ck_harness_tool_invocation_effects_status check (
         status = 'SUCCEEDED'
         or effects = '{"version": 1, "customEntries": []}'::jsonb
-    ),
-    constraint ck_harness_tool_invocation_time_order check (updated_at >= created_at)
+    )
 );
 
 comment on table harness_tool_invocation is 'ToolInvocation：一次 tool 调用的 durable 生命周期记录，按 (assistant_entry_id, call_index) 与 assistant 消息对齐；WAITING_INPUT 冻结 binding 等待人输入，batch apply 后行被物理删除';
@@ -1347,9 +1341,6 @@ create table harness_thread_join (
     constraint ck_harness_thread_join_delivery check (
         delivery_command_sequence is null
         or (delivery_command_sequence > 0 and terminal_entry_id is not null and parent_thread_id is not null)
-    ),
-    constraint ck_harness_thread_join_time_order check (
-        updated_at >= created_at
     )
 );
 

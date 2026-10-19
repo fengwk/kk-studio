@@ -21,6 +21,6 @@ final class ProcessorLeaseSupport {
       ClaimedWork claim,
       ProcessorLeaseConfig leaseConfig,
       Instant now) {
-    tx.renewWork(claim, now, leaseConfig.leaseDuration());
+    tx.renewWork(claim, leaseConfig.leaseDuration());
   }
 }

@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.CREATION_REQUEST_HASH;
-import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T0;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T1;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T3;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.resolvedTurnStartPayload;
@@ -58,10 +57,8 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
 import java.lang.reflect.Proxy;
-import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -101,11 +98,7 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
   void setUp() {
     store = PostgresqlHarnessStoreFixture.resetAndCreate();
     runtime =
-        new HarnessRuntime(
-            store,
-            Clock.fixed(T0, ZoneOffset.UTC),
-            (threadId, path, prep) -> null,
-            () -> CompactionConfig.DEFAULT);
+        new HarnessRuntime(store, (threadId, path, prep) -> null, () -> CompactionConfig.DEFAULT);
   }
 
   private static EntryPayload userMessagePayload(String text) {
@@ -242,7 +235,7 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
                   JoinPurpose.TASK,
                   null));
 
-          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, childThreadId), now);
+          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, childThreadId));
 
           return new ExecutionTreeFixture(
               sessionId,
@@ -268,7 +261,6 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
             new ProcessorLeaseConfig(Duration.ofSeconds(30), Duration.ofSeconds(5)),
             Duration.ofSeconds(5),
             () -> new CompactionConfig(20_000)),
-        Clock.fixed(now, ZoneOffset.UTC),
         scheduler,
         Runnable::run);
   }
@@ -334,8 +326,7 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
         store
             .transaction(
                 tx ->
-                    tx.claimNextWork(
-                        WorkTargetType.THREAD, now, "child-lease", Duration.ofSeconds(30)))
+                    tx.claimNextWork(WorkTargetType.THREAD, "child-lease", Duration.ofSeconds(30)))
             .orElseThrow();
 
     CountDownLatch parentTreeLocked = new CountDownLatch(1);
@@ -346,11 +337,7 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
     HarnessStore latchingStore =
         latchingTreeLockStore(store, fixture.parentThreadId(), parentTreeLocked, parentCanCommit);
     HarnessRuntime latchingRuntime =
-        new HarnessRuntime(
-            latchingStore,
-            Clock.fixed(now, ZoneOffset.UTC),
-            (t, p, c) -> null,
-            () -> CompactionConfig.DEFAULT);
+        new HarnessRuntime(latchingStore, (t, p, c) -> null, () -> CompactionConfig.DEFAULT);
 
     ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
     try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
@@ -456,8 +443,7 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
         store
             .transaction(
                 tx ->
-                    tx.claimNextWork(
-                        WorkTargetType.THREAD, now, "child-lease", Duration.ofSeconds(30)))
+                    tx.claimNextWork(WorkTargetType.THREAD, "child-lease", Duration.ofSeconds(30)))
             .orElseThrow();
 
     ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
@@ -552,8 +538,7 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
         store
             .transaction(
                 tx ->
-                    tx.claimNextWork(
-                        WorkTargetType.THREAD, now, "child-lease", Duration.ofSeconds(30)))
+                    tx.claimNextWork(WorkTargetType.THREAD, "child-lease", Duration.ofSeconds(30)))
             .orElseThrow();
 
     ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
@@ -689,8 +674,7 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
         store
             .transaction(
                 tx ->
-                    tx.claimNextWork(
-                        WorkTargetType.THREAD, now, "child-lease", Duration.ofSeconds(30)))
+                    tx.claimNextWork(WorkTargetType.THREAD, "child-lease", Duration.ofSeconds(30)))
             .orElseThrow();
 
     ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();

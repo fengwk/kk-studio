@@ -10,6 +10,7 @@ import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 
 import java.lang.reflect.Method;
+import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
@@ -98,7 +99,8 @@ class HarnessStoreContractTest {
               "deleteModelInvocation",
               "deleteThreads",
               "deleteEntries",
-              "deleteSession"));
+              "deleteSession",
+              "now"));
 
   @Test
   void storeRootExposesOnlyTheTransactionEntryPoint() {
@@ -142,7 +144,8 @@ class HarnessStoreContractTest {
           || returnType == int.class
           || returnType == boolean.class
           || returnType == int.class
-          || returnType == UUID.class) {
+          || returnType == UUID.class
+          || returnType == Instant.class) {
         continue;
       }
       assertTrue(

@@ -35,9 +35,7 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
 import java.math.BigDecimal;
-import java.time.Clock;
 import java.time.Instant;
-import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 
@@ -71,9 +69,7 @@ class ManualCompactionLifecycleRegressionTest {
   void twoLevelDescendantManualCompactionAdvancesChildWithoutMutatingRoot() {
     InMemoryHarnessStore store = new InMemoryHarnessStore();
     FakeTurnResolver resolver = new FakeTurnResolver();
-    HarnessRuntime runtime =
-        new HarnessRuntime(
-            store, Clock.fixed(NOW, ZoneOffset.UTC), resolver, () -> CompactionConfig.DEFAULT);
+    HarnessRuntime runtime = new HarnessRuntime(store, resolver, () -> CompactionConfig.DEFAULT);
 
     TwoLevelBaseline baseline = seedTwoLevelTree(store);
 
@@ -112,9 +108,7 @@ class ManualCompactionLifecycleRegressionTest {
   void threeLevelDescendantManualCompactionDoesNotMutateAncestors() {
     InMemoryHarnessStore store = new InMemoryHarnessStore();
     FakeTurnResolver resolver = new FakeTurnResolver();
-    HarnessRuntime runtime =
-        new HarnessRuntime(
-            store, Clock.fixed(NOW, ZoneOffset.UTC), resolver, () -> CompactionConfig.DEFAULT);
+    HarnessRuntime runtime = new HarnessRuntime(store, resolver, () -> CompactionConfig.DEFAULT);
 
     ThreeLevelBaseline baseline = seedThreeLevelTree(store);
 

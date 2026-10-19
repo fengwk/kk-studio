@@ -57,11 +57,7 @@ class ToolProcessorRecoveryTest {
             .store
             .transaction(
                 tx ->
-                    tx.claimNextWork(
-                        WorkTargetType.THREAD,
-                        ToolProcessorTestSupport.NOW,
-                        "thread-token",
-                        Duration.ofSeconds(60)))
+                    tx.claimNextWork(WorkTargetType.THREAD, "thread-token", Duration.ofSeconds(60)))
             .orElseThrow();
     assertThrows(IllegalArgumentException.class, () -> fixture.processor.process(threadClaim));
   }

@@ -431,6 +431,9 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   /** 事务 handle 关闭状态标识。 */
   private boolean closed;
 
+  /** 本事务首次读取的数据库时间；之后的 {@link #now()} 返回同一值。 */
+  private Instant transactionNow;
+
   PostgresqlHarnessTransaction(JdbcTemplate jdbc, Supplier<UUID> idGenerator) {
     this.jdbc = Objects.requireNonNull(jdbc, "jdbc");
     this.idGenerator = Objects.requireNonNull(idGenerator, "idGenerator");
@@ -447,6 +450,15 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     if (databaseFailure != null) {
       throw databaseFailure;
     }
+  }
+
+  @Override
+  public Instant now() {
+    checkOpen();
+    if (transactionNow == null) {
+      transactionNow = databaseNow();
+    }
+    return transactionNow;
   }
 
   @Override
@@ -1865,15 +1877,10 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
 
   @Override
   public List<PendingEnvironmentWaitRow> listPendingEnvironmentWaits(
-      Instant now,
-      Instant afterRepresentativeCreatedAt,
-      UUID afterRepresentativeInvocationId,
-      int limit) {
+      Instant afterRepresentativeCreatedAt, UUID afterRepresentativeInvocationId, int limit) {
     checkOpen();
-    Objects.requireNonNull(now, "now");
     Objects.requireNonNull(afterRepresentativeCreatedAt, "afterRepresentativeCreatedAt");
     Objects.requireNonNull(afterRepresentativeInvocationId, "afterRepresentativeInvocationId");
-    PostgresqlHarnessRows.requireMillisecondPrecision(now);
     if (limit <= 0) {
       throw new IllegalArgumentException("limit must be positive");
     }
@@ -1886,12 +1893,9 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   }
 
   @Override
-  public List<EnvironmentToolWaitRow> listEnvironmentToolWaits(
-      Instant now, Collection<UUID> invocationIds) {
+  public List<EnvironmentToolWaitRow> listEnvironmentToolWaits(Collection<UUID> invocationIds) {
     checkOpen();
-    Objects.requireNonNull(now, "now");
     Objects.requireNonNull(invocationIds, "invocationIds");
-    PostgresqlHarnessRows.requireMillisecondPrecision(now);
     List<UUID> ids = List.copyOf(invocationIds);
     if (ids.isEmpty()) {
       return List.of();
@@ -1935,10 +1939,8 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   }
 
   @Override
-  public Optional<Instant> findNextEnvironmentWaitChange(Instant now) {
+  public Optional<Instant> findNextEnvironmentWaitChange() {
     checkOpen();
-    Objects.requireNonNull(now, "now");
-    PostgresqlHarnessRows.requireMillisecondPrecision(now);
     Timestamp nextChangeAt = queryForObject(NEXT_ENVIRONMENT_WAIT_CHANGE, Timestamp.class);
     return Optional.ofNullable(nextChangeAt).map(Timestamp::toInstant);
   }
@@ -2123,15 +2125,12 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   /**
    * Work 所有权围栏校验：获取行级排他锁并校验 {@code lease_token} 匹配且 {@code lease_until > statement_timestamp()}。
    *
-   * <p>{@code now} 只校验毫秒精度，不参与有效性比较，避免 JVM 时钟偏差把数据库仍有效的租约判过期，或把数据库已过期的租约判有效。 若租约已过期或被其他 Dispatcher
-   * 接管，返回 empty，调用方绝不能推进该 Work 状态。
+   * <p>有效性按数据库时间判定。若租约已过期或被其他 Dispatcher 接管，返回 empty，调用方绝不能推进该 Work 状态。
    */
   @Override
-  public Optional<Work> lockClaimedWork(ClaimedWork claim, Instant now) {
+  public Optional<Work> lockClaimedWork(ClaimedWork claim) {
     checkOpen();
     Objects.requireNonNull(claim, "claim");
-    Objects.requireNonNull(now, "now");
-    PostgresqlHarnessRows.requireMillisecondPrecision(now);
     requireCanLockWork(claim.target());
     Optional<Work> work =
         queryOne(
@@ -2448,8 +2447,8 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   }
 
   @Override
-  public void requestWork(WorkTarget target, Instant now) {
-    requestWork(target, now, null);
+  public void requestWork(WorkTarget target) {
+    requestWork(target, null);
   }
 
   /**
@@ -2460,7 +2459,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
    * <ul>
    *   <li>若 Work 不存在则新建，初始 wake_version 为 1，available_at 取数据库权威时间「此刻」；
    *   <li>若已存在则更新 {@code available_at = least(current, statement_timestamp())} 且递增 {@code
-   *       wake_version}；本原语只表达一次 立即可处理的唤醒，{@code now} 只做毫秒精度校验，不参与 due 写入；
+   *       wake_version}；本原语只表达一次立即可处理的唤醒；
    *   <li>{@code requiredEnvironmentId} 仅允许用于 TOOL Work；
    *   <li><b>已冻结 Affinity 冲突拒绝：</b>upsert WHERE 子句要求传入的 {@code requiredEnvironmentId} 与既有值一致或传入为
    *       null； 若已存在的 Work 绑定的环境与新传入的值冲突，更新 0 行并抛出 {@link IllegalArgumentException} 明确拒绝，防止环境亲和性漂移；
@@ -2468,11 +2467,9 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
    * </ul>
    */
   @Override
-  public void requestWork(WorkTarget target, Instant now, EnvironmentId requiredEnvironmentId) {
+  public void requestWork(WorkTarget target, EnvironmentId requiredEnvironmentId) {
     checkOpen();
     Objects.requireNonNull(target, "target");
-    Objects.requireNonNull(now, "now");
-    PostgresqlHarnessRows.requireMillisecondPrecision(now);
     if (requiredEnvironmentId != null && target.type() != WorkTargetType.TOOL) {
       throw new IllegalArgumentException(
           "requiredEnvironmentId must be null for target type " + target.type());
@@ -2498,8 +2495,8 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
 
   @Override
   public Optional<ClaimedWork> claimNextWork(
-      WorkTargetType targetType, Instant now, String leaseToken, Duration leaseDuration) {
-    return claimNextWork(targetType, now, leaseToken, leaseDuration, null);
+      WorkTargetType targetType, String leaseToken, Duration leaseDuration) {
+    return claimNextWork(targetType, leaseToken, leaseDuration, null);
   }
 
   /**
@@ -2518,17 +2515,11 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
    */
   @Override
   public Optional<ClaimedWork> claimNextWork(
-      WorkTargetType targetType,
-      Instant now,
-      String leaseToken,
-      Duration leaseDuration,
-      UUID nodeInstanceId) {
+      WorkTargetType targetType, String leaseToken, Duration leaseDuration, UUID nodeInstanceId) {
     checkOpen();
     Objects.requireNonNull(targetType, "targetType");
-    Objects.requireNonNull(now, "now");
     Objects.requireNonNull(leaseToken, "leaseToken");
     HarnessStoreTime.requireWholeMillisecondDuration(leaseDuration, "leaseDuration");
-    PostgresqlHarnessRows.requireMillisecondPrecision(now);
     requireCanonicalLeaseToken(leaseToken);
     requireCanClaimWork();
     Optional<Work> claimed =
@@ -2559,18 +2550,15 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   /**
    * 延长 claim 的 lease，使其至少覆盖数据库时间加上 {@code leaseDuration}。
    *
-   * <p>有效性与新 deadline 都在 {@code statement_timestamp()} 时间域内计算：{@code now} 不参与比较，避免 JVM 时钟把数据库仍有效的
-   * 租约拒绝、把已过期租约延展，或把一个更长的 lease 缩短。
+   * <p>有效性与新 deadline 都在 {@code statement_timestamp()} 时间域内计算；已覆盖目标的更长 lease 不会被缩短。
    */
   @Override
-  public boolean renewWork(ClaimedWork claim, Instant now, Duration leaseDuration) {
+  public boolean renewWork(ClaimedWork claim, Duration leaseDuration) {
     checkOpen();
     Objects.requireNonNull(claim, "claim");
-    Objects.requireNonNull(now, "now");
     HarnessStoreTime.requireWholeMillisecondDuration(leaseDuration, "leaseDuration");
-    PostgresqlHarnessRows.requireMillisecondPrecision(now);
     Instant databaseNow = databaseNow();
-    Work work = lockOwnedWorkAtDatabaseTime(claim, databaseNow);
+    Work work = lockOwnedWorkAtDatabaseTime(claim);
     Instant target = databaseNow.plus(leaseDuration);
     if (!target.isAfter(work.leaseUntil())) {
       // 现有 lease 已覆盖目标 margin：保持不变，避免把更长的 lease 缩短。
@@ -2587,13 +2575,11 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
    * 并发送唤醒通知待后续调度；若租约丢失则抛错回滚事务。
    */
   @Override
-  public Optional<Work> completeWork(ClaimedWork claim, Instant now) {
+  public Optional<Work> completeWork(ClaimedWork claim) {
     checkOpen();
     Objects.requireNonNull(claim, "claim");
-    Objects.requireNonNull(now, "now");
-    PostgresqlHarnessRows.requireMillisecondPrecision(now);
     Instant databaseNow = databaseNow();
-    Work work = lockOwnedWorkAtDatabaseTime(claim, databaseNow);
+    Work work = lockOwnedWorkAtDatabaseTime(claim);
     Optional<Work> next =
         work.complete(claim.leaseToken(), claim.claimedWakeVersion(), databaseNow);
     if (next.isEmpty()) {
@@ -2615,18 +2601,15 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   /**
    * 重排 Work 调度时间：清除租约，并把 availableAt 设为数据库权威时间加上 {@code delay}，保留当前 wakeVersion。
    *
-   * <p>{@code delay} 必须是非负整毫秒 Duration（零表示立即）；{@code now} 只做毫秒精度校验，due 完全由数据库时间域计算，避免 JVM 时钟偏差把
-   * 重试提前或推迟。
+   * <p>{@code delay} 必须是非负整毫秒 Duration（零表示立即）；due 由数据库时间加 delay 计算。
    */
   @Override
-  public void rescheduleWork(ClaimedWork claim, Instant now, Duration delay) {
+  public void rescheduleWork(ClaimedWork claim, Duration delay) {
     checkOpen();
     Objects.requireNonNull(claim, "claim");
-    Objects.requireNonNull(now, "now");
     HarnessStoreTime.requireNonNegativeWholeMillisecondDuration(delay, "delay");
-    PostgresqlHarnessRows.requireMillisecondPrecision(now);
     Instant databaseNow = databaseNow();
-    Work work = lockOwnedWorkAtDatabaseTime(claim, databaseNow);
+    Work work = lockOwnedWorkAtDatabaseTime(claim);
     Work next =
         work.reschedule(
             claim.leaseToken(), claim.claimedWakeVersion(), databaseNow, databaseNow.plus(delay));
@@ -3035,10 +3018,10 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
    * 锁定 Work 行并按数据库时间校验 claim ownership。
    *
    * <p>行不存在抛 {@link IllegalStateException}（lost ownership）；token 不匹配或数据库时间下租约已过期抛 {@link
-   * IllegalArgumentException}。有效性判定完全在数据库时间域，不依赖 JVM {@code now}。
+   * IllegalArgumentException}。有效性判定完全在数据库时间域。
    */
-  private Work lockOwnedWorkAtDatabaseTime(ClaimedWork claim, Instant now) {
-    Optional<Work> locked = lockClaimedWork(claim, now);
+  private Work lockOwnedWorkAtDatabaseTime(ClaimedWork claim) {
+    Optional<Work> locked = lockClaimedWork(claim);
     if (locked.isPresent()) {
       return locked.get();
     }

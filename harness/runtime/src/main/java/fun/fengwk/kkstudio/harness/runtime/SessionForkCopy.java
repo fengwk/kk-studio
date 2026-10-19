@@ -13,7 +13,6 @@ import fun.fengwk.kkstudio.harness.runtime.history.ToolResultMetadata;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 
 import java.time.Instant;
 import java.util.HashMap;
@@ -49,25 +48,21 @@ final class SessionForkCopy {
     int copyStartIndex = effectiveStartIndex(sourceCutPath, entries, forkCutIndex);
     Map<UUID, UUID> newIds = new HashMap<>();
     UUID parentId = newRootEntryId;
-    Instant previousCreatedAt = now;
     Entry lastCopied = null;
     for (int i = copyStartIndex; i <= forkCutIndex; i++) {
       Entry source = entries.get(i);
       UUID newId = tx.nextId();
       newIds.put(source.id(), newId);
-      Instant createdAt =
-          HarnessStoreTime.notBefore(previousCreatedAt.plusMillis(1L), source.createdAt());
       Entry copied =
           new Entry(
               newId,
               newSessionId,
               parentId,
               remapPayload(source.payload(), newIds),
-              createdAt,
+              now,
               source.providerReplayState());
       tx.insertEntry(copied);
       parentId = newId;
-      previousCreatedAt = createdAt;
       lastCopied = copied;
     }
     return lastCopied;

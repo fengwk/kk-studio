@@ -51,9 +51,7 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
 import java.math.BigDecimal;
-import java.time.Clock;
 import java.time.Instant;
-import java.time.ZoneOffset;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.List;
@@ -274,11 +272,7 @@ class HarnessRuntimeManualCompactionTest {
   private static Fixture fixture(InMemoryHarnessStore store, HarnessStore runtimeStore) {
     FakeTurnResolver resolver = new FakeTurnResolver();
     HarnessRuntime runtime =
-        new HarnessRuntime(
-            runtimeStore,
-            Clock.fixed(NOW, ZoneOffset.UTC),
-            resolver,
-            () -> CompactionConfig.DEFAULT);
+        new HarnessRuntime(runtimeStore, resolver, () -> CompactionConfig.DEFAULT);
     return new Fixture(store, resolver, runtime);
   }
 

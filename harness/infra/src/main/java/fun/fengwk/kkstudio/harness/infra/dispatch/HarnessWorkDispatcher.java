@@ -8,12 +8,9 @@ import fun.fengwk.kkstudio.harness.runtime.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
-import java.time.Clock;
-import java.time.Instant;
 import java.util.Collections;
 import java.util.EnumMap;
 import java.util.List;
@@ -31,13 +28,12 @@ import java.util.function.Consumer;
  * 生命周期。它绝不解释 Processor 的 typed 结果改写 durable 状态 —— handoff 类型是 {@link Consumer}，Processor 的 complete
  * / reschedule / delete 由 Processor 自己在所有权围栏保护下决定。
  *
- * <p>Work claim 协议：每次 claim 使用 {@link HarnessStoreTime#millisecondClock} 包装后的新毫秒 now、新 UUID token
- * 与对应类型的 leaseDuration，并向底层传递当前 dispatcher 实例的 {@link #nodeInstanceId}，以驱动 Environment route
- * 亲和性路由围栏； THREAD / MODEL / TOOL 按固定显式列表 round-robin 轮询，cursor 是实例字段并跨 wake / drain
- * 保留（maxDispatchTasks=1 时也不会持续偏爱 THREAD）。 每个 claim 成功后必须二选一：worker executor 已接受 handoff
- * task；或通过所有权围栏归还（同一短事务先由 {@code lockClaimedWork} 确认仍 owned，才按正 {@code executorRejectionDelay} 执行
- * {@code rescheduleWork}，lost 则 no-op；清理失败只 log，保留 lease 待过期后由其他实例恢复）。 executor rejection 后立即结束当前
- * drain，禁止 claim-&gt;reject 热循环。
+ * <p>Work claim 协议：每次 claim 使用新 UUID token 与对应类型的 leaseDuration，并向底层传递当前 dispatcher 实例的 {@link
+ * #nodeInstanceId}，以驱动 Environment route 亲和性路由围栏； THREAD / MODEL / TOOL 按固定显式列表 round-robin
+ * 轮询，cursor 是实例字段并跨 wake / drain 保留（maxDispatchTasks=1 时也不会持续偏爱 THREAD）。 每个 claim 成功后必须二选一：worker
+ * executor 已接受 handoff task；或通过所有权围栏归还（同一短事务先由 {@code lockClaimedWork} 确认仍 owned，才按正 {@code
+ * executorRejectionDelay} 执行 {@code rescheduleWork}，lost 则 no-op；清理失败只 log，保留 lease 待过期后由其他实例恢复）。
+ * executor rejection 后立即结束当前 drain，禁止 claim-&gt;reject 热循环。
  *
  * <p>调度骨架（合并 wake 的单 drain、bounded handoff、stop 回收、容量计数与 fail-fast executor 契约）由共享的 {@link
  * BoundedWorkDispatcher} 提供；本类只注入 Harness 专有的 claim 轮转、Processor handoff 与 ownership-fenced 归还。
@@ -69,7 +65,6 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
 
   private final HarnessStore store;
   private final HarnessWorkDispatcherConfig config;
-  private final Clock clock;
   private final Map<WorkTargetType, Consumer<ClaimedWork>> handlers;
   private final BoundedWorkDispatcher<ClaimedWork> dispatcher;
   private int roundRobinCursor;
@@ -81,7 +76,6 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
   public HarnessWorkDispatcher(
       HarnessStore store,
       HarnessWorkDispatcherConfig config,
-      Clock clock,
       Executor drainExecutor,
       Executor workerExecutor,
       ScheduledExecutorService pollScheduler,
@@ -92,7 +86,6 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
         UUID.randomUUID(),
         store,
         config,
-        clock,
         drainExecutor,
         workerExecutor,
         pollScheduler,
@@ -106,7 +99,6 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
       UUID nodeInstanceId,
       HarnessStore store,
       HarnessWorkDispatcherConfig config,
-      Clock clock,
       Executor drainExecutor,
       Executor workerExecutor,
       ScheduledExecutorService pollScheduler,
@@ -117,7 +109,6 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
         nodeInstanceId,
         store,
         config,
-        clock,
         drainExecutor,
         workerExecutor,
         pollScheduler,
@@ -131,7 +122,6 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
   HarnessWorkDispatcher(
       HarnessStore store,
       HarnessWorkDispatcherConfig config,
-      Clock clock,
       Executor drainExecutor,
       Executor workerExecutor,
       ScheduledExecutorService pollScheduler,
@@ -142,7 +132,6 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
         UUID.randomUUID(),
         store,
         config,
-        clock,
         drainExecutor,
         workerExecutor,
         pollScheduler,
@@ -156,7 +145,6 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
       UUID nodeInstanceId,
       HarnessStore store,
       HarnessWorkDispatcherConfig config,
-      Clock clock,
       Executor drainExecutor,
       Executor workerExecutor,
       ScheduledExecutorService pollScheduler,
@@ -167,7 +155,6 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
         nodeInstanceId,
         store,
         config,
-        clock,
         drainExecutor,
         workerExecutor,
         pollScheduler,
@@ -181,7 +168,6 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
       UUID nodeInstanceId,
       HarnessStore store,
       HarnessWorkDispatcherConfig config,
-      Clock clock,
       Executor drainExecutor,
       Executor workerExecutor,
       ScheduledExecutorService pollScheduler,
@@ -189,7 +175,6 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
     this.nodeInstanceId = Objects.requireNonNull(nodeInstanceId, "nodeInstanceId");
     this.store = Objects.requireNonNull(store, "store");
     this.config = Objects.requireNonNull(config, "config");
-    this.clock = HarnessStoreTime.millisecondClock(Objects.requireNonNull(clock, "clock"));
     this.handlers = handlers;
     this.dispatcher =
         new BoundedWorkDispatcher<>(
@@ -262,12 +247,10 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
   }
 
   private ClaimedWork claimNext(WorkTargetType type) {
-    Instant now = clock.instant();
     String token = UUID.randomUUID().toString();
     return store.transaction(
         tx ->
-            tx.claimNextWork(type, now, token, config.leaseDuration(type), nodeInstanceId)
-                .orElse(null));
+            tx.claimNextWork(type, token, config.leaseDuration(type), nodeInstanceId).orElse(null));
   }
 
   private void runHandoff(ClaimedWork claim) {
@@ -295,11 +278,10 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
     try {
       store.transaction(
           tx -> {
-            Instant now = clock.instant();
-            if (tx.lockClaimedWork(claim, now).isEmpty()) {
+            if (tx.lockClaimedWork(claim).isEmpty()) {
               return null;
             }
-            tx.rescheduleWork(claim, now, config.executorRejectionDelay());
+            tx.rescheduleWork(claim, config.executorRejectionDelay());
             return null;
           });
     } catch (RuntimeException error) {

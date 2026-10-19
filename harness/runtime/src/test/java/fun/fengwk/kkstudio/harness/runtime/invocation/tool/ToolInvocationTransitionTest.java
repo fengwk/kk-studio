@@ -124,16 +124,6 @@ class ToolInvocationTransitionTest {
   }
 
   @Test
-  void requestApprovalUsesTheClampedTimestampForRequestAndInvocation() {
-    ToolInvocation stored = withUpdatedAt(ready(0, null), T2);
-
-    // approval.requestedAt 与 invocation.updatedAt 必须来自同一个 durable effective timestamp。
-    ToolInvocation next = stored.requestApproval("needs ok", T1);
-    assertEquals(T2, next.approval().requestedAt());
-    assertEquals(T2, next.updatedAt());
-  }
-
-  @Test
   void decideApprovalAllowsBackToReady() {
     ToolInvocation next =
         waiting().decideApproval(ToolApprovalDecision.ALLOWED, id(1L), "actor", null, DECIDED, T1);
@@ -244,15 +234,6 @@ class ToolInvocationTransitionTest {
     assertThrows(IllegalArgumentException.class, () -> ready(0, null).succeed(result(), T1));
     assertThrows(
         IllegalArgumentException.class, () -> dispatching(0, allowed()).succeed(result(), T1));
-  }
-
-  @Test
-  void terminalTransitionClampsWallClockRollbackToCurrentUpdatedAt() {
-    ToolInvocation stored = withUpdatedAt(running(1, allowed()), T2);
-
-    ToolInvocation next = stored.succeed(result(), T1);
-    assertEquals(ToolInvocationStatus.SUCCEEDED, next.status());
-    assertEquals(T2, next.updatedAt());
   }
 
   @Test
@@ -432,7 +413,7 @@ class ToolInvocationTransitionTest {
   }
 
   @Test
-  void validateTransitionAcceptsExactReplayAndRejectsIdentityAndTimeRegression() {
+  void validateTransitionAcceptsExactReplayAndRejectsIdentityChanges() {
     ToolInvocation stored = withUpdatedAt(ready(0, null), T1);
     ToolInvocation.validateTransition(stored, stored);
     assertThrows(
@@ -444,9 +425,6 @@ class ToolInvocationTransitionTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> ToolInvocation.validateTransition(stored, withCreatedAt(stored)));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> ToolInvocation.validateTransition(stored, withUpdatedAt(stored, CREATED)));
   }
 
   @Test
@@ -463,12 +441,6 @@ class ToolInvocationTransitionTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> ToolInvocation.validateTransition(dispatching(1, allowed()), running(3, allowed())));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            ToolInvocation.validateTransition(
-                dispatching(1, allowed()),
-                invocation(ToolInvocationStatus.UNKNOWN, 1, allowed(), null, error())));
     assertThrows(
         IllegalArgumentException.class,
         () -> ToolInvocation.validateTransition(running(1, allowed()), succeeded(2)));

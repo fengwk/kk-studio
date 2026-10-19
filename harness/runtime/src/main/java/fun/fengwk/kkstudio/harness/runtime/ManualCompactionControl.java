@@ -19,7 +19,6 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextProbe;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
@@ -27,7 +26,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
-import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -47,7 +45,6 @@ import java.util.UUID;
 final class ManualCompactionControl {
 
   private final HarnessStore store;
-  private final Clock clock;
   private final TurnResolver resolver;
   private final CompactionConfigProvider compactionConfigProvider;
   private final ThreadContextProbe threadContextProbe = new ThreadContextProbe();
@@ -55,11 +52,9 @@ final class ManualCompactionControl {
 
   ManualCompactionControl(
       HarnessStore store,
-      Clock clock,
       TurnResolver resolver,
       CompactionConfigProvider compactionConfigProvider) {
     this.store = Objects.requireNonNull(store, "store");
-    this.clock = HarnessStoreTime.millisecondClock(clock);
     this.resolver = Objects.requireNonNull(resolver, "resolver");
     this.compactionConfigProvider =
         Objects.requireNonNull(compactionConfigProvider, "compactionConfigProvider");
@@ -102,9 +97,7 @@ final class ManualCompactionControl {
       throw manualUnavailable(thread, decision.availability().disabledReason());
     }
     List<ThreadCommand> queued = tx.loadQueuedCommands(thread.id());
-    Instant now = clock.instant();
-    Instant createdAt =
-        HarnessStoreTime.notBefore(now, thread.updatedAt(), path.head().createdAt());
+    Instant now = tx.now();
     UUID turnStartEntryId = tx.nextId();
     Entry candidateEntry =
         new Entry(
@@ -119,7 +112,7 @@ final class ManualCompactionControl {
                 null,
                 decision.preparation().pendingStart(),
                 null),
-            createdAt);
+            now);
     List<Entry> candidateEntries = new ArrayList<>(path.entries());
     candidateEntries.add(candidateEntry);
     EntryPath candidatePath = new EntryPath(candidateEntries);
@@ -196,7 +189,7 @@ final class ManualCompactionControl {
       CompactThreadCommand command,
       ManualPlan plan,
       TurnResolver.Result result) {
-    Instant now = clock.instant();
+    Instant now = tx.now();
     ThreadState thread = ThreadLifecycleCoordinator.lockThreadWithAncestors(tx, command.threadId());
     if (thread == null) {
       throw new HarnessRuntimeNotFoundException("thread " + command.threadId() + " does not exist");
@@ -209,18 +202,10 @@ final class ManualCompactionControl {
     if (!snapshotMatches(plan.queuedSnapshot(), queued)) {
       throw staleManualVersion(command, thread);
     }
-    Instant mutationNow =
-        HarnessStoreTime.notBefore(
-            now, thread.updatedAt(), plan.candidateTurnStartEntry().createdAt());
     if (result instanceof TurnResolver.CompactionResolved compactionResolved) {
       CompactionChildStarter.CompactionChild child =
           CompactionChildStarter.start(
-              tx,
-              thread,
-              plan.candidatePath(),
-              compactionResolved,
-              plan.preparation(),
-              mutationNow);
+              tx, thread, plan.candidatePath(), compactionResolved, plan.preparation(), now);
       TurnStartPayload startPayload = (TurnStartPayload) plan.candidateTurnStartEntry().payload();
       TurnStartPayload resolvedPayload =
           new TurnStartPayload(
@@ -237,8 +222,8 @@ final class ManualCompactionControl {
               plan.sessionId(),
               plan.sourceHeadEntryId(),
               resolvedPayload,
-              mutationNow));
-      ThreadState advanced = thread.advanceHead(plan.turnStartEntryId(), mutationNow);
+              now));
+      ThreadState advanced = thread.advanceHead(plan.turnStartEntryId(), now);
       tx.updateThread(advanced);
       return new CompactThreadResult(advanced, plan.turnStartEntryId(), child.childThreadId());
     }
@@ -249,7 +234,7 @@ final class ManualCompactionControl {
             plan.sessionId(),
             plan.sourceHeadEntryId(),
             plan.candidateTurnStartEntry().payload(),
-            mutationNow));
+            now));
     UUID errorEntryId = tx.nextId();
     tx.insertEntry(
         new Entry(
@@ -257,7 +242,7 @@ final class ManualCompactionControl {
             plan.sessionId(),
             plan.turnStartEntryId(),
             new AssistantErrorPayload(rejected.error(), null),
-            mutationNow));
+            now));
     UUID turnEndId = tx.nextId();
     tx.insertEntry(
         new Entry(
@@ -270,11 +255,11 @@ final class ManualCompactionControl {
                 false,
                 TurnEndReason.TURN_FAILED,
                 null),
-            mutationNow));
-    ThreadState advanced = thread.advanceHead(turnEndId, mutationNow);
+            now));
+    ThreadState advanced = thread.advanceHead(turnEndId, now);
     tx.updateThread(advanced);
     if (plan.hasDeferredUserMessages()) {
-      tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), now);
+      tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()));
     }
     return new CompactThreadResult(advanced, plan.turnStartEntryId(), null);
   }

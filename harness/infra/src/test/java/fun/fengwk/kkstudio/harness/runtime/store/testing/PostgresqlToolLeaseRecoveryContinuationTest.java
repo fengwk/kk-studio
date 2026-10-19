@@ -46,8 +46,6 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
 import java.time.Clock;
 import java.time.Duration;
-import java.time.Instant;
-import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -189,7 +187,6 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
             new ProcessorLeaseConfig(LEASE, Duration.ofSeconds(5)),
             Duration.ofSeconds(5),
             () -> new CompactionConfig(20_000)),
-        Clock.systemUTC(),
         scheduler,
         Runnable::run);
   }
@@ -283,14 +280,13 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
     store.transaction(
         tx -> {
           tx.lockThread(ownerThreadId).orElseThrow();
-          tx.requestWork(target, Instant.now().truncatedTo(ChronoUnit.MILLIS).minusSeconds(1));
+          tx.requestWork(target);
           return null;
         });
   }
 
   private Optional<ClaimedWork> claim(WorkTargetType type, String token) {
-    return store.transaction(
-        tx -> tx.claimNextWork(type, Instant.now().truncatedTo(ChronoUnit.MILLIS), token, LEASE));
+    return store.transaction(tx -> tx.claimNextWork(type, token, LEASE));
   }
 
   private ToolInvocation findTool(UUID toolId) {

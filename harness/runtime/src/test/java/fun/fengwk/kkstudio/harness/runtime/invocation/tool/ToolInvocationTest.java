@@ -148,7 +148,7 @@ class ToolInvocationTest {
   }
 
   @Test
-  void rejectsInvalidIdentityOrdinalAttemptAndTimeFacts() {
+  void rejectsInvalidIdentityOrdinalAndAttemptFacts() {
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -183,23 +183,6 @@ class ToolInvocationTest {
                 null,
                 CREATED,
                 UPDATED));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ToolInvocation(
-                id(1L),
-                id(1L),
-                id(1L),
-                0,
-                call("bash", "{}"),
-                host("bash"),
-                ToolInvocationStatus.READY,
-                0,
-                null,
-                null,
-                null,
-                CREATED,
-                CREATED.minusSeconds(1)));
     assertThrows(
         NullPointerException.class,
         () ->

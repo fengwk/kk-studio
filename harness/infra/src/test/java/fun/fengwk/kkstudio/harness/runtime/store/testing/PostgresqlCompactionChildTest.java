@@ -156,7 +156,7 @@ class PostgresqlCompactionChildTest {
               CONTEXT_WINDOW,
               resolvedOutputTokens != null ? resolvedOutputTokens : MAX_OUTPUT_TOKENS);
         };
-    runtime = new HarnessRuntime(store, clock, resolver, () -> CompactionConfig.DEFAULT);
+    runtime = new HarnessRuntime(store, resolver, () -> CompactionConfig.DEFAULT);
     processor =
         new ThreadProcessor(
             store,
@@ -165,7 +165,6 @@ class PostgresqlCompactionChildTest {
                 new ProcessorLeaseConfig(Duration.ofSeconds(30), Duration.ofSeconds(5)),
                 Duration.ofSeconds(5),
                 () -> CompactionConfig.DEFAULT),
-            clock,
             scheduler,
             Runnable::run);
     gateway = new ScriptedChildGateway();
@@ -865,7 +864,7 @@ class PostgresqlCompactionChildTest {
                   .orElseThrow();
           tx.updateCommands(List.of(childCommand.markApplied(startId)));
           tx.updateThread(child.advanceHeadAndInputThroughSequence(endId, 1L, T1));
-          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, childThreadId), T1);
+          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, childThreadId));
           return null;
         });
   }
@@ -877,10 +876,7 @@ class PostgresqlCompactionChildTest {
             .transaction(
                 tx ->
                     tx.claimNextWork(
-                        WorkTargetType.MODEL,
-                        now,
-                        UUID.randomUUID().toString(),
-                        Duration.ofSeconds(30)))
+                        WorkTargetType.MODEL, UUID.randomUUID().toString(), Duration.ofSeconds(30)))
             .orElseThrow();
     assertEquals(invocationId, claim.target().id());
     return modelProcessor.process(claim);
@@ -1155,7 +1151,7 @@ class PostgresqlCompactionChildTest {
     store.transaction(
         tx -> {
           tx.lockThread(threadId).orElseThrow();
-          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId), T1);
+          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId));
           return null;
         });
   }
@@ -1167,7 +1163,6 @@ class PostgresqlCompactionChildTest {
                 tx ->
                     tx.claimNextWork(
                         WorkTargetType.THREAD,
-                        T1,
                         UUID.randomUUID().toString(),
                         Duration.ofSeconds(30)))
             .orElseThrow();
@@ -1214,7 +1209,7 @@ class PostgresqlCompactionChildTest {
                   null,
                   "{}");
           tx.updateModelInvocation(model.succeed(response, T1));
-          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId), T1);
+          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId));
           return null;
         });
   }

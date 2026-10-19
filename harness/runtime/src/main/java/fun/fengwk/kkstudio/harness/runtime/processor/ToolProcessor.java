@@ -125,7 +125,7 @@ public final class ToolProcessor implements AutoCloseable {
         releaseExecution(active);
       }
       try {
-        Prepare prepare = store.transaction(tx -> prepareLocked(tx, claim, clock.instant()));
+        Prepare prepare = store.transaction(tx -> prepareLocked(tx, claim, tx.now()));
         return switch (prepare) {
           case Prepare.Lost ignored -> ProcessResult.LOST_OWNERSHIP;
           case Prepare.Terminated ignored -> ProcessResult.TERMINATED;
@@ -182,8 +182,7 @@ public final class ToolProcessor implements AutoCloseable {
    * claim 的 leaseToken 与 leaseUntil 当前仍真实 owned。不触碰 Thread / Invocation，无任何 mutation。
    */
   private boolean claimOwned(ClaimedWork claim) {
-    Instant now = clock.instant();
-    return Boolean.TRUE.equals(store.transaction(tx -> !tx.lockClaimedWork(claim, now).isEmpty()));
+    return Boolean.TRUE.equals(store.transaction(tx -> !tx.lockClaimedWork(claim).isEmpty()));
   }
 
   /** 按锁序 Thread -&gt; Model -&gt; Tool -&gt; Work 读取并分支当前 durable 状态；不重放、不重复 bump version。 */
@@ -233,7 +232,7 @@ public final class ToolProcessor implements AutoCloseable {
       ModelInvocation model,
       ToolInvocation tool,
       Instant now) {
-    Optional<Work> claimed = tx.lockClaimedWork(claim, now);
+    Optional<Work> claimed = tx.lockClaimedWork(claim);
     if (claimed.isEmpty()) {
       return new Prepare.Lost();
     }
@@ -261,10 +260,10 @@ public final class ToolProcessor implements AutoCloseable {
    * request THREAD。两类等待都由用户侧显式决策/作答唤醒，不占用 Worker、不重排执行。
    */
   private Prepare waitingForHuman(HarnessStore.Transaction tx, ClaimedWork claim, Instant now) {
-    if (tx.lockClaimedWork(claim, now).isEmpty()) {
+    if (tx.lockClaimedWork(claim).isEmpty()) {
       return new Prepare.Lost();
     }
-    tx.completeWork(claim, now);
+    tx.completeWork(claim);
     return new Prepare.Terminated();
   }
 
@@ -278,14 +277,14 @@ public final class ToolProcessor implements AutoCloseable {
       ThreadState thread,
       ToolInvocation tool,
       Instant now) {
-    tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), now);
-    if (tx.lockClaimedWork(claim, now).isEmpty()) {
+    tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()));
+    if (tx.lockClaimedWork(claim).isEmpty()) {
       throw new ClaimLostSignal();
     }
     ToolInvocationError error = leaseLostError(tool.status());
     tx.updateToolInvocations(List.of(tool.unknown(error, now)));
     tx.updateThread(thread.touchVersion(now));
-    tx.completeWork(claim, now);
+    tx.completeWork(claim);
     return new Prepare.Terminated();
   }
 
@@ -309,11 +308,11 @@ public final class ToolProcessor implements AutoCloseable {
    * 锁序锁定后二次校验 claim + READY + attempt 0 + approval null，lost 完整 no-op。错误信息只报告原因，不回显问卷原文。
    */
   private ProcessResult requestInput(ClaimedWork claim, UUID threadId) {
-    Instant now = clock.instant();
     boolean committed =
         Boolean.TRUE.equals(
             store.transaction(
                 tx -> {
+                  Instant now = tx.now();
                   ThreadState thread = lockThreadWithSession(tx, threadId);
                   if (thread == null) {
                     return false;
@@ -325,9 +324,9 @@ public final class ToolProcessor implements AutoCloseable {
                   // 破坏契约的问卷以失败收敛并唤醒 Thread；Work 锁必须按 (type, id) 升序获取，因此先 request THREAD。
                   boolean answerable = isFrozenQuestionnaire(tool);
                   if (!answerable) {
-                    tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), now);
+                    tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()));
                   }
-                  if (tx.lockClaimedWork(claim, now).isEmpty()) {
+                  if (tx.lockClaimedWork(claim).isEmpty()) {
                     throw new ClaimLostSignal();
                   }
                   tx.updateToolInvocations(
@@ -340,7 +339,7 @@ public final class ToolProcessor implements AutoCloseable {
                                       "ask_user invocation does not carry a valid questionnaire"),
                                   now)));
                   tx.updateThread(thread.touchVersion(now));
-                  tx.completeWork(claim, now);
+                  tx.completeWork(claim);
                   return true;
                 }));
     return committed ? ProcessResult.TERMINATED : ProcessResult.LOST_OWNERSHIP;
@@ -374,11 +373,11 @@ public final class ToolProcessor implements AutoCloseable {
       ToolInvocation tool,
       Instant now) {
     // requestWork 同时 upsert 并锁定 THREAD Work；即使原行不存在，也能建立正确锁序。
-    tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), now);
-    if (tx.lockClaimedWork(claim, now).isEmpty()) {
+    tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()));
+    if (tx.lockClaimedWork(claim).isEmpty()) {
       throw new ClaimLostSignal();
     }
-    tx.completeWork(claim, now);
+    tx.completeWork(claim);
     return new Prepare.Terminated();
   }
 
@@ -474,10 +473,9 @@ public final class ToolProcessor implements AutoCloseable {
       int attempt,
       ToolInvocationRequest request,
       ToolExecution execution) {
-    Instant now = clock.instant();
     boolean dispatched =
         Boolean.TRUE.equals(
-            store.transaction(tx -> allowIntent(tx, claim, threadId, attempt, now)));
+            store.transaction(tx -> allowIntent(tx, claim, threadId, attempt, tx.now())));
     if (!dispatched) {
       if (execution != null) {
         execution.abandon();
@@ -499,7 +497,7 @@ public final class ToolProcessor implements AutoCloseable {
       return false;
     }
     ToolInvocation tool = tx.lockToolInvocation(claim.target().id()).orElse(null);
-    if (tool == null || tx.lockClaimedWork(claim, now).isEmpty()) {
+    if (tool == null || tx.lockClaimedWork(claim).isEmpty()) {
       return false;
     }
     if (tool.status() != ToolInvocationStatus.READY
@@ -519,17 +517,17 @@ public final class ToolProcessor implements AutoCloseable {
    */
   private ProcessResult applyPreflightAsk(
       ClaimedWork claim, Prepare.Preflight preflight, ToolExecution execution, String reason) {
-    Instant now = clock.instant();
     boolean committed =
         Boolean.TRUE.equals(
             store.transaction(
                 tx -> {
+                  Instant now = tx.now();
                   ThreadState thread = lockThreadWithSession(tx, preflight.threadId());
                   if (thread == null) {
                     return false;
                   }
                   ToolInvocation tool = tx.lockToolInvocation(claim.target().id()).orElse(null);
-                  if (tool == null || tx.lockClaimedWork(claim, now).isEmpty()) {
+                  if (tool == null || tx.lockClaimedWork(claim).isEmpty()) {
                     return false;
                   }
                   if (tool.status() != ToolInvocationStatus.READY
@@ -539,7 +537,7 @@ public final class ToolProcessor implements AutoCloseable {
                   }
                   tx.updateToolInvocations(List.of(tool.requestApproval(reason, now)));
                   tx.updateThread(thread.touchVersion(now));
-                  tx.completeWork(claim, now);
+                  tx.completeWork(claim);
                   return true;
                 }));
     execution.abandon();
@@ -552,13 +550,13 @@ public final class ToolProcessor implements AutoCloseable {
       Prepare.Preflight preflight,
       ToolExecution execution,
       ToolInvocationError error) {
-    Instant now = clock.instant();
     boolean committed;
     try {
       committed =
           Boolean.TRUE.equals(
               store.transaction(
                   tx -> {
+                    Instant now = tx.now();
                     ThreadState thread = lockThreadWithSession(tx, preflight.threadId());
                     if (thread == null) {
                       return false;
@@ -572,14 +570,13 @@ public final class ToolProcessor implements AutoCloseable {
                         || tool.approval() != null) {
                       return false;
                     }
-                    tx.requestWork(
-                        new WorkTarget(WorkTargetType.THREAD, preflight.threadId()), now);
-                    if (tx.lockClaimedWork(claim, now).isEmpty()) {
+                    tx.requestWork(new WorkTarget(WorkTargetType.THREAD, preflight.threadId()));
+                    if (tx.lockClaimedWork(claim).isEmpty()) {
                       throw new ClaimLostSignal();
                     }
                     tx.updateToolInvocations(List.of(tool.fail(error, now)));
                     tx.updateThread(thread.touchVersion(now));
-                    tx.completeWork(claim, now);
+                    tx.completeWork(claim);
                     return true;
                   }));
     } catch (ClaimLostSignal ignored) {
@@ -594,7 +591,6 @@ public final class ToolProcessor implements AutoCloseable {
    */
   private boolean reschedulePreflight(
       ClaimedWork claim, Prepare.Preflight preflight, Duration delay) {
-    Instant now = clock.instant();
     return Boolean.TRUE.equals(
         store.transaction(
             tx -> {
@@ -603,7 +599,7 @@ public final class ToolProcessor implements AutoCloseable {
                 return false;
               }
               ToolInvocation tool = tx.lockToolInvocation(claim.target().id()).orElse(null);
-              if (tool == null || tx.lockClaimedWork(claim, now).isEmpty()) {
+              if (tool == null || tx.lockClaimedWork(claim).isEmpty()) {
                 return false;
               }
               if (tool.status() != ToolInvocationStatus.READY
@@ -611,7 +607,7 @@ public final class ToolProcessor implements AutoCloseable {
                   || tool.approval() != null) {
                 return false;
               }
-              tx.rescheduleWork(claim, now, delay);
+              tx.rescheduleWork(claim, delay);
               return true;
             }));
   }
@@ -742,12 +738,11 @@ public final class ToolProcessor implements AutoCloseable {
    * Stop 已获胜），调用方不得启动 Gateway。
    */
   private boolean checkStartBoundary(ClaimedWork claim, Prepare.Dispatched dispatched) {
-    Instant now = clock.instant();
     return Boolean.TRUE.equals(
         store.transaction(
             tx -> {
               ToolInvocation tool = tx.lockToolInvocation(claim.target().id()).orElse(null);
-              if (tool == null || tx.lockClaimedWork(claim, now).isEmpty()) {
+              if (tool == null || tx.lockClaimedWork(claim).isEmpty()) {
                 return false;
               }
               return tool.status() == ToolInvocationStatus.DISPATCHING
@@ -760,16 +755,16 @@ public final class ToolProcessor implements AutoCloseable {
    * Work（attempt 不变）。
    */
   private boolean bounceDispatch(ClaimedWork claim, Prepare.Dispatched dispatched, Duration delay) {
-    Instant now = clock.instant();
     return Boolean.TRUE.equals(
         store.transaction(
             tx -> {
+              Instant now = tx.now();
               ThreadState thread = lockThreadWithSession(tx, dispatched.threadId());
               if (thread == null) {
                 return false;
               }
               ToolInvocation tool = tx.lockToolInvocation(claim.target().id()).orElse(null);
-              if (tool == null || tx.lockClaimedWork(claim, now).isEmpty()) {
+              if (tool == null || tx.lockClaimedWork(claim).isEmpty()) {
                 return false;
               }
               if (tool.status() != ToolInvocationStatus.DISPATCHING
@@ -778,7 +773,7 @@ public final class ToolProcessor implements AutoCloseable {
               }
               tx.updateToolInvocations(List.of(tool.dispatchBusy(now)));
               tx.updateThread(thread.touchVersion(now));
-              tx.rescheduleWork(claim, now, delay);
+              tx.rescheduleWork(claim, delay);
               return true;
             }));
   }
@@ -803,11 +798,11 @@ public final class ToolProcessor implements AutoCloseable {
       ClaimedWork claim,
       Prepare.Dispatched dispatched,
       BiFunction<ToolInvocation, Instant, ToolInvocation> transition) {
-    Instant now = clock.instant();
     try {
       return Boolean.TRUE.equals(
           store.transaction(
               tx -> {
+                Instant now = tx.now();
                 ThreadState thread = lockThreadWithSession(tx, dispatched.threadId());
                 if (thread == null) {
                   return false;
@@ -820,13 +815,13 @@ public final class ToolProcessor implements AutoCloseable {
                     || tool.attempt() != dispatched.attempt()) {
                   return false;
                 }
-                tx.requestWork(new WorkTarget(WorkTargetType.THREAD, dispatched.threadId()), now);
-                if (tx.lockClaimedWork(claim, now).isEmpty()) {
+                tx.requestWork(new WorkTarget(WorkTargetType.THREAD, dispatched.threadId()));
+                if (tx.lockClaimedWork(claim).isEmpty()) {
                   throw new ClaimLostSignal();
                 }
                 tx.updateToolInvocations(List.of(transition.apply(tool, now)));
                 tx.updateThread(thread.touchVersion(now));
-                tx.completeWork(claim, now);
+                tx.completeWork(claim);
                 return true;
               }));
     } catch (ClaimLostSignal ignored) {

@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
-import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T0;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T1;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T2;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.assistantResponse;
@@ -107,7 +106,7 @@ class PostgresqlHarnessStoreConcurrencyTest {
         store,
         tx -> {
           tx.lockThread(baseline.threadId());
-          tx.requestWork(target, T0);
+          tx.requestWork(target);
         });
 
     CountDownLatch ready = new CountDownLatch(2);
@@ -146,13 +145,13 @@ class PostgresqlHarnessStoreConcurrencyTest {
         store,
         tx -> {
           tx.lockThread(baseline.threadId());
-          tx.requestWork(firstTarget, T0);
+          tx.requestWork(firstTarget);
         });
     inTransaction(
         store,
         tx -> {
           tx.lockThread(secondThreadId);
-          tx.requestWork(secondTarget, T0);
+          tx.requestWork(secondTarget);
         });
 
     CountDownLatch firstLocked = new CountDownLatch(1);
@@ -176,7 +175,7 @@ class PostgresqlHarnessStoreConcurrencyTest {
                   store.transaction(
                       tx ->
                           tx.claimNextWork(
-                              WorkTargetType.THREAD, T0, "lease-next", Duration.ofSeconds(60))));
+                              WorkTargetType.THREAD, "lease-next", Duration.ofSeconds(60))));
       try {
         ClaimedWork claimed = claimer.get(3, TimeUnit.SECONDS).orElseThrow();
         assertEquals(secondTarget, claimed.target());
@@ -320,16 +319,14 @@ class PostgresqlHarnessStoreConcurrencyTest {
         store,
         tx -> {
           tx.lockThread(baseline.threadId());
-          tx.requestWork(target, T0);
+          tx.requestWork(target);
         });
     // accept 的 due 由数据库权威时间写入，先记录初始值用于断言后置 min 语义（不在 JVM 侧假设绝对时刻）。
     Work initial = store.transaction(tx -> tx.findWork(target)).orElseThrow();
     ClaimedWork claim =
         store
             .transaction(
-                tx ->
-                    tx.claimNextWork(
-                        WorkTargetType.THREAD, T0, "lease-old", Duration.ofSeconds(60)))
+                tx -> tx.claimNextWork(WorkTargetType.THREAD, "lease-old", Duration.ofSeconds(60)))
             .orElseThrow();
 
     CountDownLatch wakeWritten = new CountDownLatch(1);
@@ -342,7 +339,7 @@ class PostgresqlHarnessStoreConcurrencyTest {
                   store.transaction(
                       tx -> {
                         tx.lockThread(baseline.threadId()).orElseThrow();
-                        tx.requestWork(target, T1);
+                        tx.requestWork(target);
                         wakeWritten.countDown();
                         await(releaseWake);
                         return null;
@@ -355,7 +352,7 @@ class PostgresqlHarnessStoreConcurrencyTest {
                   store.transaction(
                       tx -> {
                         completionStarted.countDown();
-                        return tx.completeWork(claim, T2);
+                        return tx.completeWork(claim);
                       }));
       assertTrue(completionStarted.await(10, TimeUnit.SECONDS));
       try {
@@ -384,7 +381,7 @@ class PostgresqlHarnessStoreConcurrencyTest {
         store,
         tx -> {
           tx.lockThread(baseline.threadId()).orElseThrow();
-          tx.requestWork(target, T0);
+          tx.requestWork(target);
         });
 
     CountDownLatch deleted = new CountDownLatch(1);
@@ -408,7 +405,7 @@ class PostgresqlHarnessStoreConcurrencyTest {
               () ->
                   store.transaction(
                       tx -> {
-                        tx.requestWork(target, T1);
+                        tx.requestWork(target);
                         return null;
                       }));
       try {
@@ -442,14 +439,13 @@ class PostgresqlHarnessStoreConcurrencyTest {
                   ModelInvocationStatus.READY,
                   null,
                   T1));
-          tx.requestWork(target, T1);
+          tx.requestWork(target);
         });
     ClaimedWork claim =
         store
             .transaction(
                 tx ->
-                    tx.claimNextWork(
-                        WorkTargetType.MODEL, T1, "lease-delete", Duration.ofSeconds(60)))
+                    tx.claimNextWork(WorkTargetType.MODEL, "lease-delete", Duration.ofSeconds(60)))
             .orElseThrow();
 
     CountDownLatch modelLocked = new CountDownLatch(1);
@@ -463,7 +459,7 @@ class PostgresqlHarnessStoreConcurrencyTest {
                         tx.lockModelInvocation(modelId).orElseThrow();
                         modelLocked.countDown();
                         await(continueToWork);
-                        return tx.lockClaimedWork(claim, T2).isPresent();
+                        return tx.lockClaimedWork(claim).isPresent();
                       }));
       assertTrue(modelLocked.await(10, TimeUnit.SECONDS));
 
@@ -595,7 +591,7 @@ class PostgresqlHarnessStoreConcurrencyTest {
     ready.countDown();
     await(start);
     return store.transaction(
-        tx -> tx.claimNextWork(WorkTargetType.THREAD, T0, token, Duration.ofSeconds(60)));
+        tx -> tx.claimNextWork(WorkTargetType.THREAD, token, Duration.ofSeconds(60)));
   }
 
   private static void await(CountDownLatch latch) {

@@ -486,34 +486,6 @@ public abstract class HarnessStoreJoinContract {
   }
 
   @Test
-  void updateJoinRejectsUpdatedAtRegression() {
-    // 测试意图：验证 updateJoin 拒绝 updatedAt 时间回退。
-    UUID childId =
-        createChildThread(baseline.threadId(), baseline.sessionId(), baseline.rootEntryId());
-    insertCommand(childId, 1L, TestIds.id(1));
-    UUID invocationId = TestIds.id(112);
-    ThreadJoin join = initialJoin(invocationId, baseline.threadId(), childId, 1L, T1, T2);
-
-    inTransaction(
-        store,
-        tx -> {
-          tx.lockThread(childId);
-          tx.insertJoin(join);
-        });
-
-    ThreadJoin regressedTime = join.remind(1L, T1);
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            inTransaction(
-                store,
-                tx -> {
-                  tx.lockThread(childId);
-                  tx.updateJoin(regressedTime);
-                }));
-  }
-
-  @Test
   void updateJoinMatchAndDeliveryRoundTrip() {
     // 测试意图：验证 Join 完整的生命周期推进：创建 -> match 冻结结果 -> delivery 交付给父线程。
     UUID childId =

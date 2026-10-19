@@ -549,7 +549,7 @@ public abstract class HarnessStoreCommandContract {
                 tx -> {
                   tx.lockTree(baseline.threadId());
                   tx.lockThread(other.threadId());
-                  tx.requestWork(otherWork, T0);
+                  tx.requestWork(otherWork);
                   tx.insertCommands(List.of(command(other.threadId(), 1, TestIds.id(11))));
                 }));
     assertTrue(store.transaction(tx -> tx.findCommand(other.threadId(), 1)).isEmpty());
@@ -565,7 +565,7 @@ public abstract class HarnessStoreCommandContract {
             tx.lockTree(root);
           }
           tx.lockThread(other.threadId());
-          tx.requestWork(otherWork, T0);
+          tx.requestWork(otherWork);
           tx.insertCommands(List.of(command(other.threadId(), 1, TestIds.id(11))));
         });
     assertTrue(store.transaction(tx -> tx.findCommand(other.threadId(), 1)).isPresent());
@@ -580,7 +580,7 @@ public abstract class HarnessStoreCommandContract {
         tx -> {
           tx.lockTree(baseline.threadId());
           tx.lockThread(other.threadId());
-          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, other.threadId()), T0);
+          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, other.threadId()));
           assertThrows(
               IllegalStateException.class,
               () -> tx.insertCommands(List.of(command(other.threadId(), 1, TestIds.id(11)))));

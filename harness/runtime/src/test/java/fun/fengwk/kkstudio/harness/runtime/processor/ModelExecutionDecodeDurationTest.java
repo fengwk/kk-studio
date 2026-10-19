@@ -304,7 +304,7 @@ class ModelExecutionDecodeDurationTest {
                         List.of(),
                         NOW,
                         NOW));
-                tx.requestWork(new WorkTarget(WorkTargetType.MODEL, id), NOW);
+                tx.requestWork(new WorkTarget(WorkTargetType.MODEL, id));
                 return id;
               });
       ClaimedWork claim =
@@ -312,10 +312,7 @@ class ModelExecutionDecodeDurationTest {
               .transaction(
                   tx ->
                       tx.claimNextWork(
-                          WorkTargetType.MODEL,
-                          NOW,
-                          "token-" + invocationId,
-                          Duration.ofSeconds(60)))
+                          WorkTargetType.MODEL, "token-" + invocationId, Duration.ofSeconds(60)))
               .orElseThrow();
       // 模拟 ModelProcessor prepare：READY -> DISPATCHING。
       store.transaction(

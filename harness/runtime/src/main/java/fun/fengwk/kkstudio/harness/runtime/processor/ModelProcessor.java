@@ -137,7 +137,7 @@ public final class ModelProcessor implements AutoCloseable {
         releaseExecution(active);
       }
       try {
-        Prepare prepare = store.transaction(tx -> prepareLocked(tx, claim, clock.instant()));
+        Prepare prepare = store.transaction(tx -> prepareLocked(tx, claim, tx.now()));
         return switch (prepare) {
           case Prepare.Lost ignored -> ProcessResult.LOST_OWNERSHIP;
           case Prepare.Terminated ignored -> ProcessResult.TERMINATED;
@@ -186,8 +186,7 @@ public final class ModelProcessor implements AutoCloseable {
    * claim 的 leaseToken 与 leaseUntil 当前仍真实 owned。不触碰 Thread / Invocation，无任何 mutation。
    */
   private boolean claimOwned(ClaimedWork claim) {
-    Instant now = clock.instant();
-    return Boolean.TRUE.equals(store.transaction(tx -> !tx.lockClaimedWork(claim, now).isEmpty()));
+    return Boolean.TRUE.equals(store.transaction(tx -> !tx.lockClaimedWork(claim).isEmpty()));
   }
 
   /**
@@ -376,7 +375,7 @@ public final class ModelProcessor implements AutoCloseable {
       ThreadState thread,
       ModelInvocation model,
       Instant now) {
-    Optional<Work> claimed = tx.lockClaimedWork(claim, now);
+    Optional<Work> claimed = tx.lockClaimedWork(claim);
     if (claimed.isEmpty()) {
       return new Prepare.Lost();
     }
@@ -409,11 +408,10 @@ public final class ModelProcessor implements AutoCloseable {
 
   /** 在 MODEL claim 仍 owned 期间加载不可变 basis EntryPath，并纯重建内存 ProviderRequest。 */
   private ProviderRequest materializeRequest(ClaimedWork claim, Prepare.Dispatched dispatched) {
-    Instant now = clock.instant();
     EntryPath path =
         store.transaction(
             tx -> {
-              if (tx.lockClaimedWork(claim, now).isEmpty()) {
+              if (tx.lockClaimedWork(claim).isEmpty()) {
                 throw new ClaimLostSignal();
               }
               return tx.loadEntryPath(dispatched.requestHeadEntryId());
@@ -432,12 +430,11 @@ public final class ModelProcessor implements AutoCloseable {
    * Stop 已获胜），调用方不得启动 Provider。
    */
   private boolean checkStartBoundary(ClaimedWork claim, Prepare.Dispatched dispatched) {
-    Instant now = clock.instant();
     return Boolean.TRUE.equals(
         store.transaction(
             tx -> {
               ModelInvocation model = tx.lockModelInvocation(claim.target().id()).orElse(null);
-              if (model == null || tx.lockClaimedWork(claim, now).isEmpty()) {
+              if (model == null || tx.lockClaimedWork(claim).isEmpty()) {
                 return false;
               }
               return model.status() == ModelInvocationStatus.DISPATCHING
@@ -474,8 +471,8 @@ public final class ModelProcessor implements AutoCloseable {
         InvocationRetryDecision.decide(
             config.retryPolicyProvider().retryPolicy(), true, chargeableAttempt);
     if (decision.retry()) {
-      Instant failedAt = durableFailedAt(now, thread, model);
-      Instant retryAt = failedAt.plus(decision.delay());
+      Instant failedAt = now;
+      Instant retryAt = now.plus(decision.delay());
       ModelAttemptFailure failure =
           attemptFailure(model, chargeableAttempt, error, failedAt, retryAt);
       tx.updateModelInvocation(
@@ -483,21 +480,21 @@ public final class ModelProcessor implements AutoCloseable {
               ? model.retryDispatched(failure, failedAt)
               : model.retryReady(failure, failedAt));
       tx.updateThread(thread.touchVersion(failedAt));
-      if (tx.lockClaimedWork(claim, now).isEmpty()) {
+      if (tx.lockClaimedWork(claim).isEmpty()) {
         throw new ClaimLostSignal();
       }
-      tx.rescheduleWork(claim, now, Duration.between(now, retryAt));
+      tx.rescheduleWork(claim, decision.delay());
       return new Prepare.Retry();
     }
     // 预算耗尽：如实终止并唤醒 THREAD，不通过无限重试伪装持续推进。
-    tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), now);
-    if (tx.lockClaimedWork(claim, now).isEmpty()) {
+    tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()));
+    if (tx.lockClaimedWork(claim).isEmpty()) {
       throw new ClaimLostSignal();
     }
     tx.updateModelInvocation(
         unconfirmedDispatch ? model.failDispatched(error, now) : model.fail(error, now));
     tx.updateThread(thread.touchVersion(now));
-    tx.completeWork(claim, now);
+    tx.completeWork(claim);
     return new Prepare.Terminated();
   }
 
@@ -519,24 +516,6 @@ public final class ModelProcessor implements AutoCloseable {
         retryAt);
   }
 
-  /** 失败审计时间下界：max(now, thread.updatedAt, model.updatedAt, 上一 retryAt)，与运行时重试记账一致。 */
-  private static Instant durableFailedAt(Instant now, ThreadState thread, ModelInvocation model) {
-    Instant effective = now;
-    if (effective.isBefore(thread.updatedAt())) {
-      effective = thread.updatedAt();
-    }
-    if (effective.isBefore(model.updatedAt())) {
-      effective = model.updatedAt();
-    }
-    if (!model.failedAttempts().isEmpty()) {
-      Instant previousRetryAt = model.failedAttempts().getLast().retryAt();
-      if (effective.isBefore(previousRetryAt)) {
-        effective = previousRetryAt;
-      }
-    }
-    return effective;
-  }
-
   /** terminal 行：resultEntryId 仍 null 时确保 THREAD Work 请求，然后 complete MODEL Work；不重复 bump version。 */
   private Prepare cleanupTerminal(
       HarnessStore.Transaction tx,
@@ -547,27 +526,27 @@ public final class ModelProcessor implements AutoCloseable {
     boolean needsThreadWake = model.resultEntryId() == null;
     if (needsThreadWake) {
       // requestWork 同时 upsert 并锁定 THREAD Work；即使原行不存在，也能建立正确锁序。
-      tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), now);
+      tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()));
     }
-    if (tx.lockClaimedWork(claim, now).isEmpty()) {
+    if (tx.lockClaimedWork(claim).isEmpty()) {
       throw new ClaimLostSignal();
     }
-    tx.completeWork(claim, now);
+    tx.completeWork(claim);
     return new Prepare.Terminated();
   }
 
   /** admission 肯定未开始（Busy / 异常）：DISPATCHING -&gt; READY + version+1 + 按延迟 reschedule MODEL Work。 */
   private boolean bounceDispatch(ClaimedWork claim, Prepare.Dispatched dispatched, Duration delay) {
-    Instant now = clock.instant();
     return Boolean.TRUE.equals(
         store.transaction(
             tx -> {
+              Instant now = tx.now();
               ThreadState thread = lockThreadWithSession(tx, dispatched.threadId());
               if (thread == null) {
                 return false;
               }
               ModelInvocation model = tx.lockModelInvocation(claim.target().id()).orElse(null);
-              if (model == null || tx.lockClaimedWork(claim, now).isEmpty()) {
+              if (model == null || tx.lockClaimedWork(claim).isEmpty()) {
                 return false;
               }
               if (model.status() != ModelInvocationStatus.DISPATCHING
@@ -576,7 +555,7 @@ public final class ModelProcessor implements AutoCloseable {
               }
               tx.updateModelInvocation(model.dispatchBusy(now));
               tx.updateThread(thread.touchVersion(now));
-              tx.rescheduleWork(claim, now, delay);
+              tx.rescheduleWork(claim, delay);
               return true;
             }));
   }
@@ -598,11 +577,11 @@ public final class ModelProcessor implements AutoCloseable {
       ClaimedWork claim,
       Prepare.Dispatched dispatched,
       BiFunction<ModelInvocation, Instant, ModelInvocation> transition) {
-    Instant now = clock.instant();
     try {
       return Boolean.TRUE.equals(
           store.transaction(
               tx -> {
+                Instant now = tx.now();
                 ThreadState thread = lockThreadWithSession(tx, dispatched.threadId());
                 if (thread == null) {
                   return false;
@@ -615,13 +594,13 @@ public final class ModelProcessor implements AutoCloseable {
                     || model.attempt() != dispatched.attempt()) {
                   return false;
                 }
-                tx.requestWork(new WorkTarget(WorkTargetType.THREAD, dispatched.threadId()), now);
-                if (tx.lockClaimedWork(claim, now).isEmpty()) {
+                tx.requestWork(new WorkTarget(WorkTargetType.THREAD, dispatched.threadId()));
+                if (tx.lockClaimedWork(claim).isEmpty()) {
                   throw new ClaimLostSignal();
                 }
                 tx.updateModelInvocation(transition.apply(model, now));
                 tx.updateThread(thread.touchVersion(now));
-                tx.completeWork(claim, now);
+                tx.completeWork(claim);
                 return true;
               }));
     } catch (ClaimLostSignal ignored) {

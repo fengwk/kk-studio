@@ -33,6 +33,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
@@ -112,6 +113,13 @@ final class DispatcherTestSupport {
     return new MutableClock(NOW);
   }
 
+  /** 事务时间固定在 {@link #NOW} 的内存 store，与 {@link #clock()} 同一时间域。 */
+  static InMemoryHarnessStore newStore() {
+    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    store.setNow(NOW);
+    return store;
+  }
+
   /** 一次最小 THREAD 链：Session + ROOT + Thread(head=ROOT) + THREAD Work。 */
   record ThreadSeed(UUID threadId) {}
 
@@ -124,7 +132,7 @@ final class DispatcherTestSupport {
           tx.insertSession(session(sessionId));
           tx.insertEntry(rootEntry(rootEntryId, sessionId));
           tx.insertThread(thread(threadId, sessionId, rootEntryId));
-          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId), NOW);
+          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId));
           return new ThreadSeed(threadId);
         });
   }
@@ -160,7 +168,7 @@ final class DispatcherTestSupport {
                   List.of(),
                   NOW,
                   NOW));
-          tx.requestWork(new WorkTarget(WorkTargetType.MODEL, modelId), NOW);
+          tx.requestWork(new WorkTarget(WorkTargetType.MODEL, modelId));
           return new ModelSeed(threadId, modelId);
         });
   }
@@ -232,7 +240,7 @@ final class DispatcherTestSupport {
                       null,
                       NOW,
                       NOW)));
-          tx.requestWork(new WorkTarget(WorkTargetType.TOOL, toolId), NOW, ENV_ID);
+          tx.requestWork(new WorkTarget(WorkTargetType.TOOL, toolId), ENV_ID);
           return new ToolSeed(threadId, modelId, toolId);
         });
   }

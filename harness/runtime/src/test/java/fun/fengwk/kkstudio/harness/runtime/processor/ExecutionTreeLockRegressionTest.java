@@ -90,7 +90,7 @@ class ExecutionTreeLockRegressionTest {
         tx -> {
           tx.lockThread(openTurn.threadId());
           ModelInvocation model = tx.lockModelInvocation(invocationId).orElseThrow();
-          tx.requestWork(new WorkTarget(WorkTargetType.MODEL, invocationId), NOW);
+          tx.requestWork(new WorkTarget(WorkTargetType.MODEL, invocationId));
           tx.updateModelInvocation(model.beginDispatch(NOW));
           return null;
         });
@@ -99,8 +99,7 @@ class ExecutionTreeLockRegressionTest {
         store
             .transaction(
                 tx ->
-                    tx.claimNextWork(
-                        WorkTargetType.MODEL, NOW, "token-model-1", Duration.ofSeconds(60)))
+                    tx.claimNextWork(WorkTargetType.MODEL, "token-model-1", Duration.ofSeconds(60)))
             .orElseThrow();
 
     ModelExecution execution =
@@ -183,7 +182,7 @@ class ExecutionTreeLockRegressionTest {
         tx -> {
           tx.lockThread(openTurn.threadId());
           ModelInvocation model = tx.lockModelInvocation(invocationId).orElseThrow();
-          tx.requestWork(new WorkTarget(WorkTargetType.MODEL, invocationId), NOW);
+          tx.requestWork(new WorkTarget(WorkTargetType.MODEL, invocationId));
           tx.updateModelInvocation(model.beginDispatch(NOW));
           return null;
         });
@@ -192,8 +191,7 @@ class ExecutionTreeLockRegressionTest {
         store
             .transaction(
                 tx ->
-                    tx.claimNextWork(
-                        WorkTargetType.MODEL, NOW, "token-model-2", Duration.ofSeconds(60)))
+                    tx.claimNextWork(WorkTargetType.MODEL, "token-model-2", Duration.ofSeconds(60)))
             .orElseThrow();
 
     StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 2, 1024 * 1024);
