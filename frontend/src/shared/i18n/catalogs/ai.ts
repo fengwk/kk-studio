@@ -425,6 +425,42 @@ export const aiCatalog = {
     'en-US': 'Pricing',
     'zh-CN': 'Pricing',
   },
+  'ai.catalog.form.pricingRules': {
+    'en-US': 'Conditional prices',
+    'zh-CN': '条件价格',
+  },
+  'ai.catalog.form.pricingRulesHint': {
+    'en-US': 'Each rule can limit a daily time window and/or a minimum context size. The first matching rule replaces the prices above; requests that match no rule use the prices above.',
+    'zh-CN': '每条规则可限定每天的时段和/或最小上下文长度。计费时用第一条满足的规则替换上面的价格，都不满足时按上面的价格计费。',
+  },
+  'ai.catalog.form.addPricingRule': {
+    'en-US': 'Add rule',
+    'zh-CN': '添加规则',
+  },
+  'ai.catalog.form.deletePricingRule': {
+    'en-US': 'Delete rule',
+    'zh-CN': '删除规则',
+  },
+  'ai.catalog.form.pricingTimeWindow': {
+    'en-US': 'Only during a daily time window',
+    'zh-CN': '仅在每天的指定时段',
+  },
+  'ai.catalog.form.pricingTimeZone': {
+    'en-US': 'Time zone',
+    'zh-CN': '时区',
+  },
+  'ai.catalog.form.pricingStart': {
+    'en-US': 'From',
+    'zh-CN': '开始',
+  },
+  'ai.catalog.form.pricingEnd': {
+    'en-US': 'Until',
+    'zh-CN': '结束',
+  },
+  'ai.catalog.form.pricingMinContext': {
+    'en-US': 'Minimum context tokens',
+    'zh-CN': '最小上下文 tokens',
+  },
   'ai.catalog.form.inputPrice': {
     'en-US': 'Input',
     'zh-CN': 'Input',

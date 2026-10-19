@@ -23,6 +23,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -416,6 +417,52 @@ class AgentModelRuntimeConfigParserTest {
             .replace(
                 "\"reasoningEffort\":\"high\"", "\"reasoningEffort\":\"" + "a".repeat(65) + "\""),
         "reasoningEffort must not exceed 64 characters");
+  }
+
+  /** 条件价格随配置往返；时段、门槛与单价都按与基础价格同一套规则校验，错误指出具体规则下标。 */
+  @Test
+  void parsesAndValidatesPricingRules() {
+    String rule =
+        "{\"timeWindow\":{\"timeZone\":\"Asia/Shanghai\",\"start\":\"00:30\",\"end\":\"08:30\"},\"minContextTokens\":null,\"inputPerMillionTokens\":0.5,\"outputPerMillionTokens\":1,\"cacheReadPerMillionTokens\":0.1,\"cacheWritePerMillionTokens\":0,\"cacheWriteLongPerMillionTokens\":0,\"reasoningPerMillionTokens\":1}";
+    var parsed = parser.parse(withPricingRules(validConfig(), rule));
+    assertEquals(1, parsed.pricing().rules().size());
+    assertEquals(new BigDecimal("0.5"), parsed.pricing().rules().get(0).inputPerMillionTokens());
+    assertEquals("Asia/Shanghai", parsed.pricing().rules().get(0).timeWindow().zone().getId());
+
+    assertInvalid(
+        withPricingRules(validConfig(), rule.replace("Asia/Shanghai", "Mars/Base")),
+        "rules[0].timeWindow.timeZone must be an IANA time zone");
+    assertInvalid(
+        withPricingRules(validConfig(), rule.replace("08:30", "8:30")),
+        "rules[0].timeWindow.end must be HH:mm");
+    assertInvalid(
+        withPricingRules(validConfig(), rule.replace("08:30", "00:30")),
+        "rules[0].timeWindow start and end must differ");
+    assertInvalid(
+        withPricingRules(
+            validConfig(),
+            rule.replace(
+                "\"timeWindow\":{\"timeZone\":\"Asia/Shanghai\",\"start\":\"00:30\",\"end\":\"08:30\"}",
+                "\"timeWindow\":null")),
+        "rules[0] needs a timeWindow or minContextTokens");
+    assertInvalid(
+        withPricingRules(
+            validConfig(), rule.replace("\"minContextTokens\":null", "\"minContextTokens\":0")),
+        "rules[0].minContextTokens must be positive");
+    assertInvalid(
+        withPricingRules(
+            validConfig(),
+            rule.replace("\"inputPerMillionTokens\":0.5", "\"inputPerMillionTokens\":-1")),
+        "rules[0].inputPerMillionTokens must not be negative");
+    assertInvalid(
+        withPricingRules(validConfig(), String.join(",", Collections.nCopies(17, rule))),
+        "rules must not exceed 16 entries");
+  }
+
+  private static String withPricingRules(String config, String rules) {
+    return config.replace(
+        "\"reasoningPerMillionTokens\":3.6}",
+        "\"reasoningPerMillionTokens\":3.6,\"rules\":[" + rules + "]}");
   }
 
   /**

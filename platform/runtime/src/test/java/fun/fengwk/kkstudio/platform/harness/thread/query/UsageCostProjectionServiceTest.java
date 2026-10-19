@@ -39,6 +39,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelInputModality;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelLimitDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingRuleDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelVariantDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessUsageCostDTO;
 
@@ -176,6 +177,36 @@ class UsageCostProjectionServiceTest {
     assertEquals("1", costs.get(ASSISTANT_A_ID).getAmount());
     verify(modelRepository).getByProviderNameAndName("provider-b", "model-b");
     verifyNoMoreInteractions(modelRepository);
+  }
+
+  /** 测试意图：长上下文档位按该次请求的提示 token 选定，未达门槛的请求仍按基础价格计价。 */
+  @Test
+  void appliesTheLongContextTierByPromptTokens() {
+    AgentModelPricingDTO tiered = pricing(BigDecimal.ONE, BigDecimal.ZERO, BigDecimal.ZERO);
+    AgentModelPricingRuleDTO longContext = new AgentModelPricingRuleDTO();
+    longContext.setMinContextTokens(1_000_000L);
+    longContext.setInputPerMillionTokens(BigDecimal.valueOf(2));
+    longContext.setOutputPerMillionTokens(BigDecimal.ZERO);
+    longContext.setCacheReadPerMillionTokens(BigDecimal.ZERO);
+    longContext.setCacheWritePerMillionTokens(BigDecimal.ZERO);
+    longContext.setCacheWriteLongPerMillionTokens(BigDecimal.ZERO);
+    longContext.setReasoningPerMillionTokens(BigDecimal.ZERO);
+    tiered.setRules(List.of(longContext));
+    stubModel("provider-a", "model-a", tiered);
+
+    Map<UUID, HarnessUsageCostDTO> costs =
+        service.project(
+            List.of(
+                root(settings("provider-a", "model-a")),
+                turnStart(TURN_A_ID, ROOT_ID, settings("provider-a", "model-a")),
+                assistant(
+                    ASSISTANT_A_ID, TURN_A_ID, new ModelUsage(1_000_000, 0, 0, 0, 0, 0, 1_000_000)),
+                turnStart(TURN_B_ID, ASSISTANT_A_ID, settings("provider-a", "model-a")),
+                assistant(
+                    ASSISTANT_B_ID, TURN_B_ID, new ModelUsage(999_999, 0, 0, 0, 0, 0, 999_999))));
+
+    assertEquals("2", costs.get(ASSISTANT_A_ID).getAmount());
+    assertEquals("0.999999", costs.get(ASSISTANT_B_ID).getAmount());
   }
 
   /** 测试意图：模型回退的 turn 按实际调用的 Agent 默认模型计价，而不是 Thread 设置里已失效的型号。 */

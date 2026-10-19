@@ -14,6 +14,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 
 import java.math.BigDecimal;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 /** 模型描述、用量与成本公共契约测试。 */
@@ -114,7 +115,8 @@ class ModelContractTest {
             new BigDecimal("0.5"),
             new BigDecimal("3"),
             new BigDecimal("3.5"),
-            new BigDecimal("6"));
+            new BigDecimal("6"),
+            List.of());
     ModelUsage usage = new ModelUsage(800_000, 500_000, 200_000, 100_000, 0, 300_000, 1_900_000);
 
     ModelCost cost = ModelCost.calculate(pricing, usage);
@@ -146,7 +148,8 @@ class ModelContractTest {
             new BigDecimal("0.000000000001"),
             BigDecimal.ZERO,
             BigDecimal.ZERO,
-            BigDecimal.ZERO);
+            BigDecimal.ZERO,
+            List.of());
     ModelUsage usage = new ModelUsage(1, 0, 1, 0, 0, 0, 2);
 
     ModelCost cost = ModelCost.calculate(pricing, usage);
@@ -221,7 +224,8 @@ class ModelContractTest {
             new BigDecimal("0.5"),
             new BigDecimal("3"),
             new BigDecimal("3.5"),
-            new BigDecimal("6"));
+            new BigDecimal("6"),
+            List.of());
     ModelUsage usage = new ModelUsage(800_000, 500_000, 200_000, 100_000, 0, 300_000, 1_900_000);
 
     ModelCost cost = ModelCost.calculate(pricing, usage);
@@ -260,7 +264,8 @@ class ModelContractTest {
                 BigDecimal.ZERO,
                 BigDecimal.ZERO,
                 BigDecimal.ZERO,
-                BigDecimal.ZERO));
+                BigDecimal.ZERO,
+                List.of()));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -275,7 +280,8 @@ class ModelContractTest {
                 BigDecimal.ZERO,
                 BigDecimal.ZERO,
                 BigDecimal.ZERO,
-                BigDecimal.ZERO));
+                BigDecimal.ZERO,
+                List.of()));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -290,7 +296,8 @@ class ModelContractTest {
                 BigDecimal.ZERO,
                 BigDecimal.ZERO,
                 BigDecimal.ZERO,
-                BigDecimal.ZERO));
+                BigDecimal.ZERO,
+                List.of()));
   }
 
   /** ProviderCacheControl 只保留 retention 与 session key：NONE 时 key 必须为空/null，非 NONE 时 key 必须非空白。 */

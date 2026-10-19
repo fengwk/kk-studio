@@ -1,4 +1,9 @@
-import type { ModelDraft, ModelPricingDraft, VariantDraft } from '@/features/ai/catalog/ai-console-types'
+import type {
+  ModelDraft,
+  ModelPricingDraft,
+  PricingRuleDraft,
+  VariantDraft,
+} from '@/features/ai/catalog/ai-console-types'
 import {
   newVariantDraft,
   numberToNull,
@@ -11,6 +16,8 @@ import type {
   AgentModelEditablePropertiesDTO,
   AgentModelInputModality,
   AgentModelPricingDTO,
+  AgentModelPricingRuleDTO,
+  AgentModelPricingWindowDTO,
   AgentModelVariantDTO,
 } from '@/shared/api/contracts/ai-catalog'
 
@@ -40,7 +47,46 @@ function defaultPricingDraft(): ModelPricingDraft {
     cacheWritePerMillionTokens: '0',
     cacheWriteLongPerMillionTokens: '0',
     reasoningPerMillionTokens: '0',
+    rules: [],
   }
+}
+
+let pricingRuleSequence = 0
+
+/** 新的条件价格草稿：默认按本地时区设置分时段，单价从 0 开始。 */
+export function newPricingRuleDraft(overrides: Partial<PricingRuleDraft> = {}): PricingRuleDraft {
+  pricingRuleSequence += 1
+  return {
+    key: `pricing-rule-${pricingRuleSequence}`,
+    timeWindowEnabled: true,
+    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+    start: '00:00',
+    end: '08:00',
+    minContextTokens: '',
+    inputPerMillionTokens: '0',
+    outputPerMillionTokens: '0',
+    cacheReadPerMillionTokens: '0',
+    cacheWritePerMillionTokens: '0',
+    cacheWriteLongPerMillionTokens: '0',
+    reasoningPerMillionTokens: '0',
+    ...overrides,
+  }
+}
+
+function parsePricingRule(rule: AgentModelPricingRuleDTO): PricingRuleDraft {
+  return newPricingRuleDraft({
+    timeWindowEnabled: rule.timeWindow != null,
+    timeZone: rule.timeWindow?.timeZone ?? newPricingRuleDraft().timeZone,
+    start: rule.timeWindow?.start ?? '00:00',
+    end: rule.timeWindow?.end ?? '08:00',
+    minContextTokens: rule.minContextTokens == null ? '' : String(rule.minContextTokens),
+    inputPerMillionTokens: String(rule.inputPerMillionTokens),
+    outputPerMillionTokens: String(rule.outputPerMillionTokens),
+    cacheReadPerMillionTokens: String(rule.cacheReadPerMillionTokens),
+    cacheWritePerMillionTokens: String(rule.cacheWritePerMillionTokens),
+    cacheWriteLongPerMillionTokens: String(rule.cacheWriteLongPerMillionTokens),
+    reasoningPerMillionTokens: String(rule.reasoningPerMillionTokens),
+  })
 }
 
 export function emptyModelDraft(
@@ -107,6 +153,7 @@ function parsePricing(pricing: AgentModelPricingDTO): ModelPricingDraft {
     cacheWritePerMillionTokens: String(pricing.cacheWritePerMillionTokens),
     cacheWriteLongPerMillionTokens: String(pricing.cacheWriteLongPerMillionTokens),
     reasoningPerMillionTokens: String(pricing.reasoningPerMillionTokens),
+    rules: (pricing.rules ?? []).map(parsePricingRule),
   }
 }
 
@@ -272,6 +319,52 @@ function pricingFromDraft(draft: ModelPricingDraft): AgentModelPricingDTO {
       draft.reasoningPerMillionTokens,
       'config.pricing.reasoningPerMillionTokens',
     ),
+    ...(draft.rules.length === 0
+      ? {}
+      : {
+          rules: draft.rules.map((rule, index) =>
+            pricingRuleFromDraft(rule, `config.pricing.rules[${index}]`),
+          ),
+        }),
+  }
+}
+
+const CLOCK_TIME = /^([01][0-9]|2[0-3]):[0-5][0-9]$/
+
+function pricingRuleFromDraft(draft: PricingRuleDraft, path: string): AgentModelPricingRuleDTO {
+  let timeWindow: AgentModelPricingWindowDTO | null = null
+  if (draft.timeWindowEnabled) {
+    const timeZone = requireNonBlank(draft.timeZone, `${path}.timeWindow.timeZone`)
+    for (const [field, value] of [['start', draft.start], ['end', draft.end]] as const) {
+      if (!CLOCK_TIME.test(value)) {
+        throw new Error(`${path}.timeWindow.${field} must be HH:mm`)
+      }
+    }
+    if (draft.start === draft.end) {
+      throw new Error(`${path}.timeWindow start and end must differ`)
+    }
+    timeWindow = { timeZone, start: draft.start, end: draft.end }
+  }
+  const minContext = trimToNull(draft.minContextTokens)
+  let minContextTokens: number | null = null
+  if (minContext !== null) {
+    minContextTokens = requirePositiveNumber(minContext, `${path}.minContextTokens`)
+    if (!Number.isSafeInteger(minContextTokens)) {
+      throw new Error(`${path}.minContextTokens must be a whole number`)
+    }
+  }
+  if (timeWindow === null && minContextTokens === null) {
+    throw new Error(`${path} needs a time window or a minimum context size`)
+  }
+  return {
+    timeWindow,
+    minContextTokens,
+    inputPerMillionTokens: requireNonNegativeNumber(draft.inputPerMillionTokens, `${path}.inputPerMillionTokens`),
+    outputPerMillionTokens: requireNonNegativeNumber(draft.outputPerMillionTokens, `${path}.outputPerMillionTokens`),
+    cacheReadPerMillionTokens: requireNonNegativeNumber(draft.cacheReadPerMillionTokens, `${path}.cacheReadPerMillionTokens`),
+    cacheWritePerMillionTokens: requireNonNegativeNumber(draft.cacheWritePerMillionTokens, `${path}.cacheWritePerMillionTokens`),
+    cacheWriteLongPerMillionTokens: requireNonNegativeNumber(draft.cacheWriteLongPerMillionTokens, `${path}.cacheWriteLongPerMillionTokens`),
+    reasoningPerMillionTokens: requireNonNegativeNumber(draft.reasoningPerMillionTokens, `${path}.reasoningPerMillionTokens`),
   }
 }
 

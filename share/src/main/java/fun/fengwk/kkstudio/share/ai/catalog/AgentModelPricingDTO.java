@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.share.ai.catalog;
 import lombok.Data;
 
 import java.math.BigDecimal;
+import java.util.List;
 
 /** Agent 模型携带的定价快照，用于每次调用的确定性成本计算。 */
 @Data
@@ -40,4 +41,7 @@ public class AgentModelPricingDTO {
 
   /** 每百万 reasoning Token 价格（非负 BigDecimal）。 */
   private BigDecimal reasoningPerMillionTokens;
+
+  /** 可空：按顺序匹配的条件价格（分时段、长上下文档位），第一条满足的规则替换上述分项单价，最多 16 条。 */
+  private List<AgentModelPricingRuleDTO> rules;
 }

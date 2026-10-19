@@ -63,7 +63,9 @@ public class UsageCostProjectionService {
       if (pricing == null) {
         continue;
       }
-      costs.put(entry.id(), usageCost(ModelCost.calculate(pricing, usage)));
+      // 分时段与长上下文档位按该次输出落库的时刻和请求的提示 token 选定。
+      ModelPricing effective = pricing.effective(entry.createdAt(), usage.promptTokens());
+      costs.put(entry.id(), usageCost(ModelCost.calculate(effective, usage)));
     }
     return Map.copyOf(costs);
   }

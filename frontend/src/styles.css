@@ -892,6 +892,13 @@ div.is-error {
   gap: 10px;
 }
 
+.pricing-rules {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+}
+
 .editor-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 32px;

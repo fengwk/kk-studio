@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { ModelDraft } from '@/features/ai/catalog/ai-console-types'
 import type { AgentModelInputModality } from '@/shared/api/contracts/ai-catalog'
 import {
+  newPricingRuleDraft,
   emptyModelDraft,
   extractContextWindow,
   extractDefaultVariantFromModel,
@@ -339,6 +340,47 @@ describe('ai-model-draft-codec', () => {
       cacheWritePerMillionTokens: 2.5,
       cacheWriteLongPerMillionTokens: 3.5,
       reasoningPerMillionTokens: 4.5,
+    })
+  })
+
+  /** 条件价格随编辑往返；时段与上下文门槛按服务端同一套规则校验。 */
+  it('round-trips pricing rules and validates their conditions', () => {
+    const rule = {
+      timeWindow: { timeZone: 'Asia/Shanghai', start: '00:30', end: '08:30' },
+      minContextTokens: null,
+      inputPerMillionTokens: 0.5,
+      outputPerMillionTokens: 2,
+      cacheReadPerMillionTokens: 0.1,
+      cacheWritePerMillionTokens: 0,
+      cacheWriteLongPerMillionTokens: 0,
+      reasoningPerMillionTokens: 2,
+    }
+    const longContext = { ...rule, timeWindow: null, minContextTokens: 200000 }
+    const source = model({
+      ...fullConfig(),
+      pricing: { ...fullConfig().pricing, rules: [rule, longContext] },
+    })
+    const rebuilt = buildModelConfig(toModelDraft(source))
+    expect(rebuilt.pricing.rules).toEqual([rule, longContext])
+
+    const base = draft()
+    const valid = newPricingRuleDraft({ timeZone: 'UTC', start: '01:00', end: '02:00' })
+    const build = (overrides: Partial<typeof valid>) =>
+      buildModelConfig({ ...base, pricing: { ...base.pricing, rules: [{ ...valid, ...overrides }] } })
+    expect(build({}).pricing.rules?.[0]?.timeWindow).toEqual({
+      timeZone: 'UTC',
+      start: '01:00',
+      end: '02:00',
+    })
+    expect(() => build({ start: '25:00' })).toThrow(/rules\[0\]\.timeWindow\.start must be HH:mm/)
+    expect(() => build({ end: '01:00' })).toThrow(/start and end must differ/)
+    expect(() => build({ timeWindowEnabled: false })).toThrow(/needs a time window/)
+    expect(() => build({ timeWindowEnabled: false, minContextTokens: '0' })).toThrow(
+      /minContextTokens must be positive/,
+    )
+    expect(build({ timeWindowEnabled: false, minContextTokens: '128000' }).pricing.rules?.[0]).toMatchObject({
+      timeWindow: null,
+      minContextTokens: 128000,
     })
   })
 
