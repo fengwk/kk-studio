@@ -21,6 +21,7 @@
     "test:install": "vitest run --config vite.install.config.ts --coverage",
     "test:install:windows": "vitest run --config vite.install.config.ts src/features/ai/environment/install-command.windows.test.ts",
     "test:install:browser": "playwright test --config playwright.install.config.ts",
+    "test:mutation:browser": "playwright test --config playwright.mutation-review.config.ts",
     "e2e": "../scripts/dev/verify/e2e/run.sh",
     "e2e:ui": "../scripts/dev/verify/e2e/run.sh --ui",
     "e2e:matrix": "node ../scripts/dev/verify/e2e/run-matrix.mjs --frontend-url http://127.0.0.1:5173",
