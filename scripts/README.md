@@ -50,8 +50,8 @@ systemd/launchd 服务，测试入口见
 | 可靠性隔离栈 | [dev/verify/reliability/stack.sh](dev/verify/reliability/stack.sh) | Docker、curl、python3；snapshot 需 `PI_ANCHOR` 与 `PI_BASE_ANCHOR` Git worktree，创建/删除隔离栈与数据卷 |
 | Agent 可靠性矩阵 | [dev/verify/reliability/run-agent-matrix.mjs](dev/verify/reliability/run-agent-matrix.mjs) | Node、Docker、可靠性栈与 `TEST_MINIMAX_*`；真实付费模型调用 |
 | SBOM、依赖与镜像漏洞检查 | [dev/verify/supply-chain/run.sh](dev/verify/supply-chain/run.sh) `sbom` / `audit` / `image` / `all` | 按子命令需 JDK 21/Maven、Node/npm、Docker、git 与网络；访问 registry、NVD/漏洞库，报告在 `reports/supply-chain`；`test` 只运行脚本测试 |
-| 隔离栈应用 smoke | [dev/verify/smoke/offline-chat.sh](dev/verify/smoke/offline-chat.sh) | Docker，`--with-app` 另需 python3，覆盖 Blob、Canvas revision/typed commands、fake Function 与 Chat；创建/删除栈与数据卷 |
-| Seedance prepare-only smoke | [dev/verify/smoke/seedance-prepare.sh](dev/verify/smoke/seedance-prepare.sh) | 显式 `RUN_REAL_SEEDANCE_PREPARE_SMOKE=1`、`SEEDANCE_WORKSPACE_ID`、`OPENCLI_HUB_BASE_URL`；只做页面准备，不提交生成或下载视频 |
+| 隔离栈应用 smoke | [dev/verify/smoke/offline-chat.sh](dev/verify/smoke/offline-chat.sh) | Docker，`--with-app` 另需 Node，覆盖 Blob、Canvas revision/typed commands、fake Function 与 Chat；创建/删除栈与数据卷 |
+| Seedance prepare-only smoke | [dev/verify/smoke/seedance-prepare.mjs](dev/verify/smoke/seedance-prepare.mjs) | 显式 `RUN_REAL_SEEDANCE_PREPARE_SMOKE=1`、`SEEDANCE_WORKSPACE_ID`、`OPENCLI_HUB_BASE_URL`；只做页面准备，不提交生成或下载视频 |
 | 文档与仓库结构 | [dev/verify/repository/check.mjs](dev/verify/repository/check.mjs) | Node，只读 |
 | 稳定传输契约生成/漂移 | [dev/verify/generated-contracts/check.sh](dev/verify/generated-contracts/check.sh)（更新用 [write.sh](dev/verify/generated-contracts/write.sh)） | JDK 21、Maven；用真实 HTTP Jackson mapper 生成/比对 [frontend/src/shared/api/generated/stable-contracts.ts](../frontend/src/shared/api/generated/stable-contracts.ts)，只跑 `-pl web -am` 定向 reactor；`check.sh` 只读，`write.sh` 会改源码需人工审阅 diff；`mvn verify` 执行同一 check |
 | Canvas/Project V1 库表验证 | [dev/verify/repository/check-canvas-project-schema.mjs](dev/verify/repository/check-canvas-project-schema.mjs) | Node、本机 Docker socket、已有 `postgres:17.10`；无网络/无宿主端口的临时容器，加载 V1、检查 46 张业务表、17 张目标表与 SQL 探针，不访问部署库 |
