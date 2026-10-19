@@ -79,14 +79,16 @@ class PlatformResourceContentReaderTest {
         assertThrows(
                 PlatformReadException.class,
                 () ->
-                    unavailable.readResourceText(
+                    unavailable.readResource(
                         UUID.randomUUID(),
+                        null,
+                        "call-1",
                         UUID.randomUUID(),
                         null,
                         null,
                         null,
                         "resource",
-                        ReadDeadline.after(PlatformResourceContentReader.READ_TIMEOUT)))
+                        ReadDeadline.after(Duration.ofSeconds(60))))
             .getMessage()
             .contains("harness store is unavailable"));
     verifyNoInteractions(blobs);
@@ -99,7 +101,9 @@ class PlatformResourceContentReaderTest {
     UUID blobId = UUID.randomUUID();
     assertThrows(
         NullPointerException.class,
-        () -> reader.readResourceText(threadId, blobId, null, null, null, "resource", null));
+        () ->
+            reader.readResource(
+                threadId, null, "call-1", blobId, null, null, null, "resource", null));
   }
 
   /** 测试意图：没有会话引用的 URI 不暴露 Blob 是否存在或内容。 */
@@ -243,10 +247,17 @@ class PlatformResourceContentReaderTest {
   }
 
   private String read(UUID threadId, UUID blobId) {
-    return read(threadId, blobId, ReadDeadline.after(PlatformResourceContentReader.READ_TIMEOUT));
+    return read(threadId, blobId, ReadDeadline.after(Duration.ofSeconds(60)));
   }
 
   private String read(UUID threadId, UUID blobId, ReadDeadline deadline) {
-    return reader.readResourceText(threadId, blobId, null, null, null, "resource", deadline);
+    PlatformResourceContentReader.ResourceRead result =
+        reader.readResource(
+            threadId, null, "call-1", blobId, null, null, null, "resource", deadline);
+    return switch (result) {
+      case PlatformResourceContentReader.ResourceRead.Text text -> text.text();
+      case PlatformResourceContentReader.ResourceRead.Media media -> throw new AssertionError(
+          "expected text result but got media");
+    };
   }
 }
