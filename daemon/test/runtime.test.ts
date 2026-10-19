@@ -1,9 +1,24 @@
 import { describe, expect, it, vi } from 'vitest'
+import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { PassThrough } from 'node:stream'
 
-import type { CapabilityExecutor, CapabilityResult, DaemonConfig, IdeService, ResourceUploader } from '../src/contracts.js'
+import type {
+  CapabilityExecutor,
+  CapabilityResult,
+  DaemonConfig,
+  IdeService,
+  ManagedProcess,
+  ProcessExit,
+  ProcessSupervisor,
+  ResourceUploader,
+} from '../src/contracts.js'
 import { DAEMON_VERSION } from '../src/config.js'
-import { encodeInvoke, decodeEnvelope, type Envelope } from '../src/protocol.js'
+import { CAPABILITY_CATALOG_VERSION, encodeInvoke, decodeEnvelope, type Envelope } from '../src/protocol.js'
 import { Runtime, type TemporaryResourceSweeper, type UpdatePort } from '../src/runtime.js'
+import { fileCapabilities } from '../src/coding/files.js'
+import { processCapabilities } from '../src/coding/process.js'
 import { artifactFixture } from './support/update-fixture.js'
 import {
   FakeTransport,
@@ -55,6 +70,7 @@ interface Setup {
 
 function buildRuntime(options: {
   capabilities?: Record<string, CapabilityExecutor>
+  processes?: ProcessSupervisor
   resources?: ResourceUploader
   update?: UpdatePort
   ide?: IdeService
@@ -69,7 +85,7 @@ function buildRuntime(options: {
     config,
     transport,
     capabilities: options.capabilities ?? { 'fs.read': async (call) => textResult(call.invocationId) },
-    processes: fakeProcessSupervisor,
+    processes: options.processes ?? fakeProcessSupervisor,
     environment,
     resources: options.resources,
     update: options.update,
@@ -237,20 +253,288 @@ describe('runtime invocation lifecycle', () => {
     setup.runtime.close()
   })
 
-  it('times out a long-running invocation', async () => {
+  /**
+   * 验证超时机制：Runtime在timer到期时仅发出abort('TIMED_OUT')信号，不提前抢先终态；
+   * 在执行器的异步cleanup门禁未放行前，journal始终维持RUNNING且不发出terminal报文；
+   * 此时重复发送INVOKE不会重复执行，而只会重放STARTED；放行cleanup并抛错后，完成一次终态跃迁并发送FAILED。
+   */
+  it('times out a long-running invocation with cooperative cleanup and deferred terminal', async () => {
+    let observedSignal: AbortSignal | null = null
+    let execCount = 0
+    let releaseCleanup: () => void = () => {}
+    const cleanupGate = new Promise<void>((resolve) => {
+      releaseCleanup = resolve
+    })
+
     const setup = buildRuntime({
       capabilities: {
-        'fs.read': async () => new Promise<CapabilityResult>(() => {}),
+        'fs.read': async (call, context) => {
+          execCount++
+          observedSignal = context.signal
+          await new Promise<void>((resolve) =>
+            context.signal.addEventListener('abort', () => resolve(), { once: true }),
+          )
+          // 观测到 abort 后，在 cleanupGate 未释放前模拟执行器正在异步清理资源
+          await cleanupGate
+          throw new Error('timed out cleanup failure')
+        },
       },
     })
     await handshake(setup)
     setup.transport.receive(
       serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-1', payload: invokePayload('fs.read', 20) }),
     )
-    await waitFor(() => sent(setup.transport).some((envelope) => envelope.messageType === 'FAILED'))
-    const failed = sent(setup.transport).find((envelope) => envelope.messageType === 'FAILED')
-    expect(String((failed?.payload as { message: string }).message)).toContain('timed out')
+    // 等待 abort 信号触发
+    await waitFor(() => observedSignal?.aborted === true)
+    expect(observedSignal?.reason).toBe('TIMED_OUT')
+
+    // 在 cleanupGate 释放之前，验证：
+    // 1. journal 仍处于 RUNNING
+    expect(setup.runtime.getJournal().find('inv-1')?.state).toBe('RUNNING')
+    // 2. 无 terminal 报文发送（既没有 COMPLETED 也没有 FAILED / CANCELLED）
+    expect(sent(setup.transport).some((env) => ['COMPLETED', 'FAILED', 'CANCELLED'].includes(env.messageType))).toBe(false)
+
+    // 3. 发送重复的 INVOKE，不会重复触发执行器，只会重放 STARTED
+    setup.transport.receive(
+      serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-1', payload: invokePayload('fs.read', 20) }),
+    )
+    await tick()
+    expect(execCount).toBe(1)
+    const replayedStarted = sent(setup.transport).filter((env) => env.messageType === 'STARTED')
+    expect(replayedStarted.length).toBe(2)
+
+    // 释放 cleanupGate，执行器抛错退出
+    releaseCleanup()
+
+    // 4. release 后完成一次 terminal，收到 FAILED 报文且 message 包含 timed out
+    await waitFor(() => sent(setup.transport).some((env) => env.messageType === 'FAILED'))
+    const failedEnvelopes = sent(setup.transport).filter((env) => env.messageType === 'FAILED')
+    expect(failedEnvelopes.length).toBe(1)
+    expect(setup.runtime.getJournal().find('inv-1')?.state).toBe('FAILED')
+    const failedPayload = failedEnvelopes[0]?.payload as { message: string }
+    expect(String(failedPayload.message)).toContain('timed out after 20ms')
+
     setup.runtime.close()
+  })
+
+  /**
+   * 验证可信成功结果在 stop/timeout 竞态后仍保留：
+   * 封装真实 fileCapabilities['fs.edit']，在真实 edit 已经完成（文件已落盘）后通过 gate 挂起；
+   * 等待 Runtime 的 invoke timer 到期（触发 TIMED_OUT abort 信号）；
+   * 随后释放 gate 返回真实的 CapabilityResult；
+   * 验证文件确实已变更，且 Runtime 照常发送 COMPLETED（非 FAILED/CANCELLED），包含完整的 editReview 细节。
+   */
+  it('preserves credible success result when stop/timeout races after side effect commit', async () => {
+    const dir = await realpath(await mkdtemp(join(tmpdir(), 'kk-runtime-edit-')))
+    const filePath = join(dir, 'test.txt')
+    await writeFile(filePath, 'hello world\n', 'utf8')
+
+    let releaseGate: () => void = () => {}
+    const gate = new Promise<void>((resolve) => {
+      releaseGate = resolve
+    })
+    let observedSignal: AbortSignal | null = null
+
+    const realEdit = fileCapabilities['fs.edit']!
+    const wrappedEdit: CapabilityExecutor = async (call, context) => {
+      observedSignal = context.signal
+      const realResult = await realEdit(call, context)
+      // 此时底层文件已经编辑完成；等待外部超时触发
+      await gate
+      return realResult
+    }
+
+    const setup = buildRuntime({
+      capabilities: {
+        'fs.edit': wrappedEdit,
+      },
+    })
+    await handshake(setup)
+
+    const editArgs = {
+      path: filePath,
+      old_string: 'hello world',
+      new_string: 'hello kk-studio',
+    }
+    const payload = JSON.parse(
+      encodeInvoke({
+        capabilityId: 'fs.edit',
+        capabilityVersion: CAPABILITY_CATALOG_VERSION,
+        arguments: editArgs,
+        timeoutMillis: 30,
+      }),
+    ) as Record<string, unknown>
+
+    setup.transport.receive(serverMessage('INVOKE', { environmentId: ENV, invocationId: 'inv-edit-1', payload }))
+
+    // 等待 invoke timer 到期并发出 TIMED_OUT 终止信号
+    await waitFor(() => observedSignal?.aborted === true)
+    expect(observedSignal?.reason).toBe('TIMED_OUT')
+
+    // 释放门禁，让 executor 返回真实的编辑成功结果
+    releaseGate()
+
+    // 验证：收到的终态是 COMPLETED 报文，绝不被 TIMED_OUT 覆盖
+    await waitFor(() =>
+      sent(setup.transport).some((env) => env.invocationId === 'inv-edit-1' && env.messageType === 'COMPLETED'),
+    )
+    const completed = sent(setup.transport).find(
+      (env) => env.invocationId === 'inv-edit-1' && env.messageType === 'COMPLETED',
+    )
+    expect(completed).toBeDefined()
+    expect(
+      sent(setup.transport).some((env) => env.invocationId === 'inv-edit-1' && env.messageType === 'FAILED'),
+    ).toBe(false)
+
+    // 校验结果内容与文件真实事实
+    const body = completed?.payload as {
+      result: {
+        error: boolean
+        details: { editReview?: { diff?: string; path?: string } }
+      }
+    }
+    const resultPayload = body.result
+    expect(resultPayload.error).toBe(false)
+    expect(resultPayload.details.editReview?.path).toBe(filePath)
+    expect(resultPayload.details.editReview?.diff).toContain('+ 1|hello kk-studio')
+
+    // 校验物理文件内容
+    const updatedContent = await readFile(filePath, 'utf8')
+    expect(updatedContent).toBe('hello kk-studio\n')
+
+    setup.runtime.close()
+    await rm(dir, { recursive: true, force: true }).catch(() => {})
+  })
+
+  /**
+   * 验证 Runtime + process 真实集成：
+   * 1. 真实注册 processCapabilities['process.exec']；
+   * 2. 进程启动并产生输出，Runtime 派发 PROGRESS 报文确认输出捕获；
+   * 3. 触发一次 invoke timer，process 响应 abort('TIMED_OUT') 并请求 terminate；
+   * 4. terminate 的异步清理门禁未释放前，Runtime 绝不提前发送 terminal 报文，journal 维持 RUNNING；
+   * 5. 释放清理门禁后，Runtime 发送 COMPLETED 报文（error: true），details.process.outcome 为 'TIMED_OUT'，
+   *    且完整保留此前捕获的输出与超时说明；进程最终收敛。
+   */
+  it('integrates Runtime and process capability with truthful output preservation, deferred terminal and final convergence', async () => {
+    const dir = await realpath(await mkdtemp(join(tmpdir(), 'kk-runtime-proc-')))
+
+    let releaseCleanupGate: () => void = () => {}
+    const cleanupGate = new Promise<void>((resolve) => {
+      releaseCleanupGate = resolve
+    })
+
+    const stdoutStream = new PassThrough()
+    const stderrStream = new PassThrough()
+
+    let resolveExit!: (exit: ProcessExit) => void
+    const exitPromise = new Promise<ProcessExit>((resolve) => {
+      resolveExit = resolve
+    })
+
+    let terminateStarted = false
+    let terminated = false
+
+    const managedProcess: ManagedProcess = {
+      pid: 9999,
+      stdin: new PassThrough(),
+      stdout: stdoutStream,
+      stderr: stderrStream,
+      exit: exitPromise,
+      terminate: async () => {
+        terminateStarted = true
+        // 门禁控制：模拟受控的进程树清理耗时
+        await cleanupGate
+        terminated = true
+        stdoutStream.end()
+        stderrStream.end()
+        resolveExit({ exitCode: null, signal: 'SIGTERM' })
+      },
+    }
+
+    const supervisor: ProcessSupervisor = {
+      start: async () => managedProcess,
+      close: async () => {},
+    }
+
+    const setup = buildRuntime({
+      capabilities: processCapabilities,
+      processes: supervisor,
+    })
+    await handshake(setup)
+
+    const invoke = JSON.parse(
+      encodeInvoke({
+        capabilityId: 'process.exec',
+        capabilityVersion: CAPABILITY_CATALOG_VERSION,
+        arguments: { command: 'sleep 100', workdir: dir },
+        timeoutMillis: 80,
+      }),
+    ) as Record<string, unknown>
+
+    setup.transport.receive(
+      serverMessage('INVOKE', { environmentId: ENV, invocationId: 'proc-inv-1', payload: invoke }),
+    )
+
+    // 等待 STARTED 报文
+    await waitFor(() =>
+      sent(setup.transport).some((env) => env.invocationId === 'proc-inv-1' && env.messageType === 'STARTED'),
+    )
+
+    // 进程产生足量输出以跨过 live partial 阈值，验证输出捕获与 PROGRESS 派发
+    stdoutStream.write('initial output line before timeout\n' + 'x'.repeat(70_000) + '\n')
+    await waitFor(() =>
+      sent(setup.transport).some((env) => env.invocationId === 'proc-inv-1' && env.messageType === 'PROGRESS'),
+    )
+    const progressEnvelope = sent(setup.transport).find(
+      (env) => env.invocationId === 'proc-inv-1' && env.messageType === 'PROGRESS',
+    )
+    expect(JSON.stringify(progressEnvelope?.payload)).toContain('initial output line before timeout')
+
+    // 等待 Runtime 的 invoke timer 到期，触发 terminate
+    await waitFor(() => terminateStarted)
+
+    // 在 cleanupGate 释放之前：
+    // 1. Runtime 绝不发送 terminal 报文
+    expect(
+      sent(setup.transport).some(
+        (env) => env.invocationId === 'proc-inv-1' && ['COMPLETED', 'FAILED', 'CANCELLED'].includes(env.messageType),
+      ),
+    ).toBe(false)
+    // 2. journal 仍维持 RUNNING
+    expect(setup.runtime.getJournal().find('proc-inv-1')?.state).toBe('RUNNING')
+
+    // 释放清理门禁，让进程退出并完成收敛
+    releaseCleanupGate()
+
+    // 验证收到终态报文（按契约，CapabilityResult 以 COMPLETED 帧承载）
+    await waitFor(() =>
+      sent(setup.transport).some((env) => env.invocationId === 'proc-inv-1' && env.messageType === 'COMPLETED'),
+    )
+    const terminalCompleted = sent(setup.transport).find(
+      (env) => env.invocationId === 'proc-inv-1' && env.messageType === 'COMPLETED',
+    )
+    expect(terminalCompleted).toBeDefined()
+
+    const body = terminalCompleted?.payload as {
+      result: {
+        error: boolean
+        details: { process?: { outcome?: string } }
+        contents: Array<{ type: string; text?: string }>
+      }
+    }
+    const resultPayload = body.result
+    expect(resultPayload.error).toBe(true)
+    expect(resultPayload.details.process?.outcome).toBe('TIMED_OUT')
+    const combinedText = resultPayload.contents.map((c) => c.text ?? '').join('\n')
+    expect(combinedText).toContain('initial output line before timeout')
+    expect(combinedText).toContain('timed out after 80 ms')
+
+    // 验证进程最终已收敛
+    expect(terminated).toBe(true)
+    expect(setup.runtime.getJournal().find('proc-inv-1')?.state).toBe('COMPLETED')
+
+    setup.runtime.close()
+    await rm(dir, { recursive: true, force: true }).catch(() => {})
   })
 
   it('fails unknown capabilities and mismatched capability versions', async () => {
