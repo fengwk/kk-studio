@@ -54,7 +54,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
@@ -561,7 +560,8 @@ class ModelRequestDebugServiceTest {
         headEntryId,
         CREATION_REQUEST_HASH,
         "thread",
-        ThreadYoloPolicy.root(false),
+        THREAD_ID,
+        false,
         ThreadExecutionControl.RUNNABLE,
         0L,
         1L,

@@ -24,7 +24,6 @@ import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 
 import java.lang.reflect.Modifier;
 import java.time.Clock;
@@ -46,7 +45,8 @@ class StopRecordsTest {
           id(3L),
           CREATION_REQUEST_HASH,
           "main",
-          ThreadYoloPolicy.root(false),
+          id(1L),
+          false,
           ThreadExecutionControl.RUNNABLE,
           0,
           1,

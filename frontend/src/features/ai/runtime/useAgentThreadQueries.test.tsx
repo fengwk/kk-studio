@@ -19,7 +19,7 @@ function snapshot(id = ROOT, overrides: Partial<ToolInvocationDTO> = {}): Harnes
     thread: {
       threadId: id, name: 'Thread', sessionId: 'session', headEntryId: 'head',
       parentThreadId: id === ROOT ? null : ROOT,
-      yoloPolicy: { mode: id === ROOT ? 'DISABLE' : 'FOLLOW', rootThreadId: id === ROOT ? null : ROOT },
+      rootThreadId: ROOT, yoloEnabled: false,
       nextCommandSequence: '1', version: '1', status: 'TOOL_READY', processing: true,
       executionControl: 'RUNNABLE',
       branchSettings: { agentName: 'agent', model: { providerName: 'p', modelName: 'm', variant: 'default' },

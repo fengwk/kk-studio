@@ -26,7 +26,7 @@ const mockThread: HarnessThreadDTO = {
   sessionId: 's-123',
   headEntryId: 'e-1',
   parentThreadId: null,
-  yoloPolicy: { mode: 'DISABLE', rootThreadId: null },
+  rootThreadId: 't-123', yoloEnabled: false,
   nextCommandSequence: '1',
   version: '1',
   status: 'IDLE',

@@ -9,7 +9,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.ThreadLifecycleCoordinator;
-import fun.fengwk.kkstudio.harness.runtime.ThreadTreeLocks;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
 
@@ -43,44 +42,6 @@ class PostgresqlHarnessConcurrencyIntegrationTest {
   }
 
   @Test
-  void lockForThreadTreatsConcurrentSessionDeletionDuringTreeLockWaitAsMissing() throws Exception {
-    Baseline baseline = seedThreadBaseline(store);
-    CountDownLatch firstReadDone = new CountDownLatch(1);
-    CountDownLatch deletionCommitted = new CountDownLatch(1);
-    PausingStore pausing =
-        new PausingStore(store, baseline.threadId(), firstReadDone, deletionCommitted);
-
-    List<UUID> confirmed;
-    try (ExecutorService executor = Executors.newSingleThreadExecutor()) {
-      Future<List<UUID>> waiting =
-          executor.submit(
-              () ->
-                  pausing.transaction(
-                      tx -> ThreadTreeLocks.lockForThread(tx, baseline.threadId())));
-      assertTrue(firstReadDone.await(10, TimeUnit.SECONDS), "first ancestor read must complete");
-      try {
-        deleteSessionAndThread(baseline);
-      } finally {
-        deletionCommitted.countDown();
-      }
-      confirmed = waiting.get(10, TimeUnit.SECONDS);
-    }
-
-    assertTrue(confirmed.isEmpty(), "concurrently deleted thread must be a legal missing chain");
-    // 完整操作序列：首次读取 -> 树锁 -> 加锁后确认读取；全程无任何业务行锁，故不出现 lock 秩乱。
-    assertEquals(
-        List.of(
-            "findAncestorChain:" + baseline.threadId(),
-            "lockTree:" + baseline.threadId(),
-            "findAncestorChain:" + baseline.threadId()),
-        pausing.operations(),
-        "helper must re-read after the tree lock without taking any business row lock");
-    assertTrue(
-        store.transaction(tx -> tx.findThread(baseline.threadId())).isEmpty(),
-        "fixture must have deleted the thread");
-  }
-
-  @Test
   void lockThreadWithAncestorsReturnsNullWhenSessionDeletedDuringTreeLockWait() throws Exception {
     Baseline baseline = seedThreadBaseline(store);
     CountDownLatch firstReadDone = new CountDownLatch(1);
@@ -97,7 +58,7 @@ class PostgresqlHarnessConcurrencyIntegrationTest {
                       tx ->
                           ThreadLifecycleCoordinator.lockThreadWithAncestors(
                               tx, baseline.threadId())));
-      assertTrue(firstReadDone.await(10, TimeUnit.SECONDS), "first ancestor read must complete");
+      assertTrue(firstReadDone.await(10, TimeUnit.SECONDS), "first thread read must complete");
       try {
         deleteSessionAndThread(baseline);
       } finally {
@@ -109,7 +70,7 @@ class PostgresqlHarnessConcurrencyIntegrationTest {
     assertNull(locked, "concurrently deleted thread must yield null, not a drift failure");
     assertEquals(
         List.of(
-            "findAncestorChain:" + baseline.threadId(),
+            "findThread:" + baseline.threadId(),
             "lockTree:" + baseline.threadId(),
             "findAncestorChain:" + baseline.threadId()),
         pausing.operations(),
@@ -179,19 +140,19 @@ class PostgresqlHarnessConcurrencyIntegrationTest {
                           new Class<?>[] {Transaction.class},
                           (proxy, method, args) -> {
                             String name = method.getName();
-                            // 记录全部 lock* 与每次 ancestor 读取：任何业务行锁都会出现在完整操作序列里。
-                            if (name.startsWith("lock") || name.equals("findAncestorChain")) {
+                            // 记录全部 lock*、Thread 与 ancestor 读取：任何业务行锁都会出现在完整操作序列里。
+                            if (name.startsWith("lock")
+                                || name.equals("findAncestorChain")
+                                || name.equals("findThread")) {
                               operations.add(name + ":" + args[0]);
                             }
-                            if (name.equals("findAncestorChain")
-                                && pausedThreadId.equals(args[0])) {
-                              @SuppressWarnings("unchecked")
-                              List<UUID> chain = (List<UUID>) invoke(tx, method, args);
+                            if (name.equals("findThread") && pausedThreadId.equals(args[0])) {
+                              Object thread = invoke(tx, method, args);
                               if (paused.compareAndSet(false, true)) {
                                 firstReadDone.countDown();
                                 await(deletionCommitted);
                               }
-                              return chain;
+                              return thread;
                             }
                             return invoke(tx, method, args);
                           })));

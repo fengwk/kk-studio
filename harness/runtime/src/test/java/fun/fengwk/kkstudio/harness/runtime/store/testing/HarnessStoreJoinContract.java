@@ -30,7 +30,6 @@ import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 
 import java.time.Instant;
@@ -59,14 +58,11 @@ public abstract class HarnessStoreJoinContract {
     return store.transaction(
         tx -> {
           UUID childId = tx.nextId();
-          // 子代理恒 FOLLOW 真实执行根：从不可变 parent 链取最顶层线程（parent 为 null），而非中间父节点。
-          ThreadYoloPolicy yoloPolicy;
-          if (parentThreadId == null) {
-            yoloPolicy = ThreadYoloPolicy.root(false);
-          } else {
-            List<UUID> chain = tx.findAncestorChain(parentThreadId);
-            yoloPolicy = ThreadYoloPolicy.follow(chain.get(chain.size() - 1));
-          }
+          // 子代理记录父 Thread 的不可变执行根，而非中间父节点。
+          UUID rootThreadId =
+              parentThreadId == null
+                  ? childId
+                  : tx.findThread(parentThreadId).orElseThrow().rootThreadId();
           tx.insertThread(
               new ThreadState(
                   childId,
@@ -75,7 +71,8 @@ public abstract class HarnessStoreJoinContract {
                   rootEntryId,
                   CREATION_REQUEST_HASH,
                   "child-thread",
-                  yoloPolicy,
+                  rootThreadId,
+                  false,
                   ThreadExecutionControl.RUNNABLE,
                   0L,
                   1L,
@@ -1436,16 +1433,6 @@ public abstract class HarnessStoreJoinContract {
           tx.lockTree(rootId);
           tx.lockTree(rootId); // 重复获取合法
         });
-  }
-
-  @Test
-  void lockTreeRejectsNonRootThread() {
-    // 测试意图：验证 lockTree 在非根线程（具有 parentThreadId 的子线程）上加锁时抛出 IllegalStateException。
-    UUID rootId = baseline.threadId();
-    UUID childId = createChildThread(rootId, baseline.sessionId(), baseline.rootEntryId());
-
-    assertThrows(
-        IllegalStateException.class, () -> inTransaction(store, tx -> tx.lockTree(childId)));
   }
 
   @Test

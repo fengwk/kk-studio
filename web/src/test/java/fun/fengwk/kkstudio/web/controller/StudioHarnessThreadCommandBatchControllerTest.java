@@ -36,6 +36,7 @@ import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeTestFixtures;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -264,7 +265,7 @@ class StudioHarnessThreadCommandBatchControllerTest {
   void rejectsChildThreadManualBatchAsConflictBeforeAcceptance() throws Exception {
     UUID child = UUID.fromString(THREAD_ID);
     UUID root = UUID.randomUUID();
-    when(runtime.findAncestorChain(child)).thenReturn(List.of(child, root));
+    when(runtime.findRootThreadId(child)).thenReturn(Optional.of(root));
 
     postBatch(THREAD_ID, batch(userMessageCommand(COMMAND_KEY))).andExpect(status().isConflict());
 

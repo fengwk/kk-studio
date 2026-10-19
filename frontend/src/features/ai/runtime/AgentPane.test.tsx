@@ -67,7 +67,6 @@ import type {
   ProviderRequestPreviewDTO,
   ToolInvocationDTO,
 } from '@/shared/api/contracts/ai-runtime'
-import { rootYoloPolicy } from '@/test-support/thread-yolo-policy'
 import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 import type { ThreadCommand } from '@/features/ai/runtime/thread-panel/thread-commands'
 import {
@@ -311,7 +310,7 @@ function thread(
     sessionId: 'session-1',
     headEntryId: 'head-1',
     parentThreadId: null,
-    yoloPolicy: rootYoloPolicy(yoloEnabled),
+    rootThreadId: THREAD_ID, yoloEnabled,
     nextCommandSequence: '1',
     version: '0',
     status: 'IDLE',
@@ -4180,7 +4179,7 @@ describe('AgentPane root control mounting', () => {
     await waitFor(() => expect(
       view.client.getQueryData(queryKeys.threads.snapshot(NEW_ROOT_ID)),
     ).toBeTruthy())
-    // 种进缓存的是权威 Thread 的完整快照 DTO（含 yoloPolicy），不是裁剪过的 Thread：
+    // 种进缓存的是权威 Thread 的完整快照 DTO（含 yoloEnabled），不是裁剪过的 Thread：
     // 服务端快照 schema 的每个字段都在，后续投影不会读到半个对象。
     const seeded = view.client.getQueryData<HarnessThreadSnapshotDTO>(
       queryKeys.threads.snapshot(NEW_ROOT_ID),
@@ -4197,7 +4196,7 @@ describe('AgentPane root control mounting', () => {
       'version',
     ])
     expect(seeded?.thread.threadId).toBe(NEW_ROOT_ID)
-    expect(seeded?.thread.yoloPolicy).toEqual({ mode: 'DISABLE', rootThreadId: null })
+    expect(seeded?.thread.yoloEnabled).toBe(false)
     expect(seeded?.version).toBe(seeded?.thread.version)
     expect(screen.getByLabelText('给 AI 发送消息')).toBeInTheDocument()
     expect(screen.queryByText('只读查看')).not.toBeInTheDocument()

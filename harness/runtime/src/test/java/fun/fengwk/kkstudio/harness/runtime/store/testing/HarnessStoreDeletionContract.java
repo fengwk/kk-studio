@@ -33,7 +33,6 @@ import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseli
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.TurnBaseline;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
@@ -248,7 +247,8 @@ abstract class HarnessStoreDeletionContract {
                   headEntryId,
                   "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
                   "child-branch",
-                  ThreadYoloPolicy.follow(parentThreadId),
+                  parentThreadId,
+                  false,
                   executionControl,
                   0L,
                   1L,

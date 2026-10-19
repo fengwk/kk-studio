@@ -31,7 +31,6 @@ import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
@@ -668,7 +667,8 @@ class StudioHarnessCommandBatchControllerTest {
             UUID.fromString(ENTRY_ID),
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
             "thread",
-            ThreadYoloPolicy.root(true),
+            sourceThreadId,
+            true,
             ThreadExecutionControl.RUNNABLE,
             0L,
             4,

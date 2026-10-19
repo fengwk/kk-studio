@@ -755,11 +755,9 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
         childReceipt.report().contains(grandChildThreadId.toString()), childReceipt.report());
     assertTrue(childReceipt.report().contains("ACK:grandchild work"), childReceipt.report());
 
-    // 执行树事实来自不可变 parent 链（head-to-root，包含自身）。
-    assertEquals(
-        List.of(grandChildThreadId, childThreadId, rootThreadId),
-        runtime.findAncestorChain(grandChildThreadId));
-    assertEquals(List.of(childThreadId, rootThreadId), runtime.findAncestorChain(childThreadId));
+    // 孙代与子代都记录同一个不可变执行根。
+    assertEquals(rootThreadId, runtime.findRootThreadId(grandChildThreadId).orElseThrow());
+    assertEquals(rootThreadId, runtime.findRootThreadId(childThreadId).orElseThrow());
     assertEquals(grandChildThreadId, threadState(grandChildThreadId).id());
     assertEquals(childThreadId, threadState(grandChildThreadId).parentThreadId());
 

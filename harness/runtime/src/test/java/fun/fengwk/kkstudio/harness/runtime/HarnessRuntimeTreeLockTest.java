@@ -43,7 +43,6 @@ import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
@@ -54,8 +53,8 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
 /**
@@ -128,51 +127,26 @@ class HarnessRuntimeTreeLockTest {
 
   @Test
   void lockForThreadOnNonExistentThreadLocksTargetId() {
-    // 测试意图：验证 ThreadTreeLocks.lockForThread 在不存在的线程 ID 上加锁时，回退到目标 ID 自身加锁，并返回空链表示合法缺失。
+    // 测试意图：验证 ThreadTreeLocks.lockForThread 在不存在的线程 ID 上加锁时，回退到目标 ID 自身加锁，并返回空表示合法缺失。
     UUID nonExistentId = TestIds.id(999);
     List<String> locks = new ArrayList<>();
     HarnessStore recording = recordingStore(store, locks);
 
-    List<UUID> confirmed =
+    Optional<ThreadState> found =
         recording.transaction(tx -> ThreadTreeLocks.lockForThread(tx, nonExistentId));
 
-    assertTrue(confirmed.isEmpty());
+    assertTrue(found.isEmpty());
     assertEquals(List.of("lockTree:" + nonExistentId), locks);
   }
 
-  /** 构造「首次读取到 ancestors、加树锁后已被删空」的 Store，模拟持树锁的并发深删除在锁等待期间提交。 */
-  private HarnessStore threadDeletedWhileAcquiringTreeLockStore(List<UUID> firstChain) {
-    AtomicInteger chainReads = new AtomicInteger();
-    return sabotagingStore(
-        store,
-        Map.of(
-            "findAncestorChain",
-            args -> chainReads.getAndIncrement() == 0 ? firstChain : List.of()));
-  }
-
-  @Test
-  void lockForThreadReturnsEmptyWhenThreadDeletedWhileAcquiringTreeLock() {
-    // 测试意图：首次读取到 ancestors、加树锁后线程已被并发删除（confirmed 为空）时返回空链，不把合法并发删除当作结构漂移抛出。
-    Baseline baseline = seedBaseline(store);
-    UUID childId =
-        createChildThread(
-            store,
-            baseline.threadId(),
-            baseline.sessionId(),
-            baseline.rootEntryId(),
-            baseline.threadId());
-    HarnessStore deletingStore =
-        threadDeletedWhileAcquiringTreeLockStore(List.of(childId, baseline.threadId()));
-
-    List<UUID> confirmed =
-        deletingStore.transaction(tx -> ThreadTreeLocks.lockForThread(tx, childId));
-
-    assertTrue(confirmed.isEmpty(), "deleted thread must yield an empty confirmed chain");
+  /** 构造「加树锁后行锁读不到 Thread」的 Store，模拟持树锁的并发深删除在锁等待期间提交。 */
+  private HarnessStore threadDeletedWhileAcquiringTreeLockStore() {
+    return sabotagingStore(store, Map.of("lockThread", args -> Optional.empty()));
   }
 
   @Test
   void lockThreadWithAncestorsReturnsNullWhenThreadDeletedWhileAcquiringTreeLock() {
-    // 测试意图：协调器在取得唯一 helper 的空链后立即返回 null，不再按当前线程状态报结构漂移异常。
+    // 测试意图：取得树锁后 Thread 已被并发删除时协调器返回 null，而不是抛异常。
     Baseline baseline = seedBaseline(store);
     UUID childId =
         createChildThread(
@@ -181,72 +155,13 @@ class HarnessRuntimeTreeLockTest {
             baseline.sessionId(),
             baseline.rootEntryId(),
             baseline.threadId());
-    HarnessStore deletingStore =
-        threadDeletedWhileAcquiringTreeLockStore(List.of(childId, baseline.threadId()));
+    HarnessStore deletingStore = threadDeletedWhileAcquiringTreeLockStore();
 
     ThreadState locked =
         deletingStore.transaction(
             tx -> ThreadLifecycleCoordinator.lockThreadWithAncestors(tx, childId));
 
     assertNull(locked);
-  }
-
-  @Test
-  void getThreadTreeThrowsNotFoundWhenThreadDeletedWhileAcquiringTreeLock() {
-    // 测试意图：getThreadTree 对并发删除（空链）映射为 typed NotFound，而不是按结构漂移报 IllegalStateException。
-    Baseline baseline = seedBaseline(store);
-    UUID childId =
-        createChildThread(
-            store,
-            baseline.threadId(),
-            baseline.sessionId(),
-            baseline.rootEntryId(),
-            baseline.threadId());
-    HarnessRuntime deletingRuntime =
-        HarnessRuntimeTestSupport.runtime(
-            threadDeletedWhileAcquiringTreeLockStore(List.of(childId, baseline.threadId())), clock);
-
-    assertThrows(
-        HarnessRuntimeNotFoundException.class, () -> deletingRuntime.getThreadTree(childId));
-  }
-
-  @Test
-  void lockForThreadFailsWhenExecutionTreeChangesDuringLockAcquisition() {
-    // 测试意图：验证加锁后二次读取 ancestor chain 不一致时抛出 IllegalStateException，防止执行树漂移。
-    Baseline baseline = seedBaseline(store);
-    UUID childId =
-        createChildThread(
-            store,
-            baseline.threadId(),
-            baseline.sessionId(),
-            baseline.rootEntryId(),
-            baseline.threadId());
-
-    AtomicInteger chainCallCount = new AtomicInteger();
-    HarnessStore sabotagedStore =
-        sabotagingStore(
-            store,
-            Map.of(
-                "findAncestorChain",
-                args -> {
-                  int call = chainCallCount.incrementAndGet();
-                  if (call == 1) {
-                    return List.of(childId, baseline.threadId());
-                  }
-                  // 第二次读取模拟祖先链变化
-                  return List.of(childId, TestIds.id(888));
-                }));
-
-    IllegalStateException error =
-        assertThrows(
-            IllegalStateException.class,
-            () ->
-                sabotagedStore.transaction(
-                    tx -> {
-                      ThreadTreeLocks.lockForThread(tx, childId);
-                      return null;
-                    }));
-    assertTrue(error.getMessage().contains("execution tree changed"));
   }
 
   @Test
@@ -274,7 +189,7 @@ class HarnessRuntimeTreeLockTest {
   @Test
   void setThreadYoloAcquiresTreeLockBeforeThreadLock() {
     // 测试意图：验证 setThreadYolo 严格先获取 root 的 tree lock，再获取目标 thread 的行锁。
-    // 只有执行根拥有独立 YOLO 开关（子代理恒 Follow 执行根），因此目标必须是根线程本身。
+    // 只有执行根拥有独立 YOLO 开关（子代理的开关取自执行根 执行根），因此目标必须是根线程本身。
     Baseline baseline = seedBaseline(store);
 
     List<String> locks = new ArrayList<>();
@@ -283,7 +198,7 @@ class HarnessRuntimeTreeLockTest {
 
     ThreadState updated =
         recordingRuntime.setThreadYolo(new SetThreadYoloCommand(baseline.threadId(), true));
-    assertTrue(updated.yoloPolicy().isEnabled());
+    assertTrue(updated.yoloEnabled());
     assertEquals(
         List.of("lockTree:" + baseline.threadId(), "lockThread:" + baseline.threadId()), locks);
   }
@@ -454,7 +369,8 @@ class HarnessRuntimeTreeLockTest {
                   headEntryId,
                   CREATION_REQUEST_HASH,
                   "child-branch",
-                  ThreadYoloPolicy.follow(rootThreadId),
+                  rootThreadId,
+                  false,
                   ThreadExecutionControl.RUNNABLE,
                   0L,
                   1L,
@@ -697,7 +613,8 @@ class HarnessRuntimeTreeLockTest {
                   secondEndId,
                   CREATION_REQUEST_HASH,
                   "main",
-                  ThreadYoloPolicy.root(false),
+                  threadId,
+                  false,
                   ThreadExecutionControl.RUNNABLE,
                   0L,
                   1L,

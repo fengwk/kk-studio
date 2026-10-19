@@ -39,7 +39,6 @@ import type {
   ToolInvocationDTO,
 } from '@/shared/api/contracts/ai-runtime'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
-import { rootYoloPolicy } from '@/test-support/thread-yolo-policy'
 
 /** 控制器 Thread id：资源订阅经严格 codec，必须是 canonical UUID。 */
 const THREAD_ID = '11111111-2222-4333-8444-555555555555'
@@ -96,7 +95,7 @@ function threadFixture(
     sessionId: 's1',
     headEntryId: 'h1',
     parentThreadId: null,
-    yoloPolicy: rootYoloPolicy(yoloEnabled),
+    rootThreadId: THREAD_ID, yoloEnabled,
     nextCommandSequence: '1',
     version: '0',
     status: 'IDLE',

@@ -577,9 +577,8 @@ public final class InMemoryHarnessStore implements HarnessStore {
       if (lockedTrees.isEmpty()) {
         return false;
       }
-      List<UUID> chain = findAncestorChain(threadId);
-      UUID root = chain.isEmpty() ? threadId : chain.get(chain.size() - 1);
-      return lockedTrees.contains(root);
+      ThreadState thread = state.threads.get(threadId);
+      return lockedTrees.contains(thread == null ? threadId : thread.rootThreadId());
     }
 
     private void requireCanClaimWork() {
@@ -922,20 +921,20 @@ public final class InMemoryHarnessStore implements HarnessStore {
         return List.of();
       }
       List<UUID> chain = new ArrayList<>();
-      Set<UUID> visited = new HashSet<>();
-      UUID current = threadId;
-      while (current != null) {
-        if (!visited.add(current)) {
-          throw new IllegalStateException("thread parent cycle at " + current);
-        }
-        ThreadState thread = state.threads.get(current);
-        if (thread == null) {
-          throw new IllegalStateException("thread ancestor chain is incomplete");
-        }
+      for (UUID current = threadId; current != null; ) {
         chain.add(current);
-        current = thread.parentThreadId();
+        current = state.threads.get(current).parentThreadId();
       }
       return List.copyOf(chain);
+    }
+
+    @Override
+    public List<ThreadState> listThreadsByRoot(UUID rootThreadId) {
+      checkOpen();
+      Objects.requireNonNull(rootThreadId, "rootThreadId");
+      return state.threads.values().stream()
+          .filter(thread -> thread.rootThreadId().equals(rootThreadId))
+          .toList();
     }
 
     @Override
@@ -953,10 +952,6 @@ public final class InMemoryHarnessStore implements HarnessStore {
                   rootThreadId, lockedTrees.stream().max(UuidOrder.COMPARATOR).orElseThrow())
               <= 0) {
         throw new IllegalStateException("tree locks must be acquired in ascending root order");
-      }
-      List<UUID> chain = findAncestorChain(rootThreadId);
-      if (!chain.isEmpty() && (chain.size() != 1 || !chain.get(0).equals(rootThreadId))) {
-        throw new IllegalStateException("tree root changed while acquiring lock");
       }
       lockedTrees.add(rootThreadId);
     }
@@ -1910,12 +1905,7 @@ public final class InMemoryHarnessStore implements HarnessStore {
           throw new IllegalStateException(
               "pending environment tool invocation " + invocation.id() + " lost its owning thread");
         }
-        List<UUID> chain = findAncestorChain(thread.id());
-        if (chain.isEmpty()) {
-          throw new IllegalStateException(
-              "tool invocation thread is not persisted: " + thread.id());
-        }
-        UUID rootThreadId = chain.get(chain.size() - 1);
+        UUID rootThreadId = thread.rootThreadId();
         groups
             .computeIfAbsent(
                 new EnvironmentWaitGroupKey(rootThreadId, environmentId),

@@ -383,7 +383,7 @@ comment on column mcp_server.enabled is '公共启用开关：默认 true；fals
 comment on column mcp_server.timeout_millis is '正整数毫秒超时：连接、发现与 tools/call 共用';
 comment on column mcp_server.discovery_status is '发现状态：UNVERIFIED（未验证）、AVAILABLE（可用）、FAILED（失败）；仅 enabled 且 AVAILABLE 进入运行时目录';
 comment on column mcp_server.created_at is '创建时间（毫秒精度）';
-comment on column mcp_server.updated_at is '最后更新时间（毫秒精度），应用侧维护，不得早于 created_at';
+comment on column mcp_server.updated_at is '最后更新时间（毫秒精度），应用侧维护';
 comment on column mcp_server.version is '乐观锁行版本：非负，从 0 开始，每次写操作 +1；CAS 更新依据';
 
 -- MCP Server 当前发现结果的工具行：成功发现整体物理替换，不存在 tombstone 或修订版本。
@@ -918,8 +918,8 @@ create table harness_thread (
     head_entry_id uuid not null,
     creation_request_hash char(64) not null,
     name varchar(256) not null,
-    yolo_mode varchar(16) not null,
-    yolo_root_thread_id uuid,
+    root_thread_id uuid not null,
+    yolo_enabled boolean not null default false,
     execution_control varchar(16) not null,
     input_through_sequence bigint not null default 0 check (input_through_sequence >= 0),
     next_command_sequence bigint not null check (next_command_sequence >= 1),
@@ -930,7 +930,7 @@ create table harness_thread (
         references harness_session (id),
     constraint fk_harness_thread_parent foreign key (parent_thread_id)
         references harness_thread (id),
-    constraint fk_harness_thread_yolo_root foreign key (yolo_root_thread_id)
+    constraint fk_harness_thread_root foreign key (root_thread_id)
         references harness_thread (id),
     constraint fk_harness_thread_head foreign key (session_id, head_entry_id)
         references harness_entry (session_id, id),
@@ -940,18 +940,12 @@ create table harness_thread (
     constraint ck_harness_thread_parent_not_self check (
         parent_thread_id is null or parent_thread_id <> id
     ),
-    -- FOLLOW 只能用于子代理，且必须携带真实执行根；执行根不能 Follow，也不能跟其他执行树。
-    constraint ck_harness_thread_yolo_mode check (
-        yolo_mode in ('ENABLE', 'DISABLE', 'FOLLOW')
+    -- 只有无父 Thread 是自身的执行根；YOLO 开关只属于执行根。
+    constraint ck_harness_thread_root check (
+        (parent_thread_id is null) = (root_thread_id = id)
     ),
-    constraint ck_harness_thread_yolo_root check (
-        (yolo_mode = 'FOLLOW') = (yolo_root_thread_id is not null)
-    ),
-    constraint ck_harness_thread_parent_yolo check (
-        (parent_thread_id is null) = (yolo_mode <> 'FOLLOW')
-    ),
-    constraint ck_harness_thread_yolo_root_not_self check (
-        yolo_root_thread_id is null or yolo_root_thread_id <> id
+    constraint ck_harness_thread_yolo_root_only check (
+        not yolo_enabled or parent_thread_id is null
     ),
     constraint ck_harness_thread_creation_request_hash check (
         creation_request_hash ~ '^[0-9a-f]{64}$'
@@ -967,21 +961,21 @@ create table harness_thread (
     )
 );
 
-comment on table harness_thread is 'Thread：指向 head Entry 的游标状态机，version 随每次对外字段变化精确 +1；session_id 与 creation_request_hash 创建后不可变，head 必须与 session 同 Session；parent_thread_id 记录不可变执行父关系，yolo_mode/yolo_root_thread_id 记录根开关或子代理不可变 Follow 目标，execution_control 区分 RUNNABLE/STOPPED；input_through_sequence 记录已接纳的水位；(session_id, id) 唯一供同 Session 复合引用';
+comment on table harness_thread is 'Thread：指向 head Entry 的游标状态机，version 随每次对外字段变化精确 +1；session_id 与 creation_request_hash 创建后不可变，head 必须与 session 同 Session；parent_thread_id 记录不可变执行父关系，root_thread_id 记录不可变执行根，yolo_enabled 是执行根的 YOLO 开关，execution_control 区分 RUNNABLE/STOPPED；input_through_sequence 记录已接纳的水位；(session_id, id) 唯一供同 Session 复合引用';
 comment on column harness_thread.id is 'Thread 的全局唯一 UUID';
 comment on column harness_thread.session_id is '所属 Session（创建后不可变）';
 comment on column harness_thread.parent_thread_id is '不可变父 Thread UUID（无父/根 Thread 为 null，禁止指向自身）';
 comment on column harness_thread.head_entry_id is '当前 head Entry（必须存在且属于 thread.session_id 的 Session）';
 comment on column harness_thread.creation_request_hash is 'NEW_SESSION/NEW_THREAD 初始创建请求指纹：服务端 64 位小写 SHA-256 身份键（创建后不可变，不对产品 DTO 暴露）';
 comment on column harness_thread.name is 'Thread 显示名称：应用保证非空、单行且至多 256 个 Unicode 码点，并由应用生成默认名或手动重命名（check 只防御空白串）';
-comment on column harness_thread.yolo_mode is 'YOLO 策略模式：根为 ENABLE/DISABLE，子代理恒为 FOLLOW 且必须携带 yolo_root_thread_id';
-comment on column harness_thread.yolo_root_thread_id is 'FOLLOW 的真实执行根 UUID（子代理创建后不可变）；根 Thread 为 null';
+comment on column harness_thread.root_thread_id is '不可变执行根 UUID（根 Thread 指向自身），供树锁与整树读取';
+comment on column harness_thread.yolo_enabled is '执行根的 YOLO 开关；子代理恒为 false，有效值取自执行根';
 comment on column harness_thread.execution_control is '持久执行控制状态（RUNNABLE/STOPPED）';
 comment on column harness_thread.input_through_sequence is '已被普通 INPUT 接纳或确定性拒绝的输入序号水位（>= 0，初值 0，< next_command_sequence）';
 comment on column harness_thread.next_command_sequence is '下一条 Command 的 sequence（从 1 递增）';
 comment on column harness_thread.version is '并发控制版本：任何对外字段变化必须 +1';
 comment on column harness_thread.created_at is 'Thread 创建时间（毫秒精度）';
-comment on column harness_thread.updated_at is 'Thread 最后更新时间（毫秒精度），不得早于 created_at';
+comment on column harness_thread.updated_at is 'Thread 最后更新时间（毫秒精度）';
 
 create index idx_harness_thread_parent
     on harness_thread (parent_thread_id);
@@ -989,7 +983,11 @@ create index idx_harness_thread_parent
 create index idx_harness_thread_session
     on harness_thread (session_id, created_at, id);
 
+create index idx_harness_thread_root
+    on harness_thread (root_thread_id);
+
 comment on index idx_harness_thread_parent is 'parent 回溯与子 Thread 树遍历索引';
+comment on index idx_harness_thread_root is '按执行根读取整棵执行树';
 comment on index idx_harness_thread_session is 'listThreadsBySession 按 (session_id, created_at, id) 读取 Session 的 Thread 列表';
 
 -- 同一 Session 内执行根（parent_thread_id 为 null）名称唯一；子代理与跨 Session 同名不受限。
@@ -1050,7 +1048,7 @@ comment on column harness_thread_command.idempotency_key is '客户端幂等键�
 comment on column harness_thread_command.request_hash is '客户端 raw 命令（含 ordered contents 与 uploadId）的 canonical SHA-256（64 小写 hex）；同 idempotencyKey 重放必须精确匹配';
 comment on column harness_thread_command.applied_entry_id is 'APPLIED 时应用的 Entry；与 cancelled_at 互斥';
 comment on column harness_thread_command.stop_request_id is 'CANCELLED 时取消它的 Stop stopRequestId（queued-only receipt 幂等键）；与 cancelled_at 成对';
-comment on column harness_thread_command.cancelled_at is 'CANCELLED 时间；不得早于 created_at';
+comment on column harness_thread_command.cancelled_at is 'CANCELLED 时间';
 comment on column harness_thread_command.created_at is 'Command 创建时间（毫秒精度）';
 
 create index idx_harness_thread_command_queued
@@ -1131,7 +1129,7 @@ comment on column harness_model_invocation.error is 'terminal 失败错误（JSO
 comment on column harness_model_invocation.result_entry_id is '结果 Entry（Assistant/AssistantError/AssistantAborted/COMPACTION），全局唯一';
 comment on column harness_model_invocation.failed_attempts is '由 retry policy 驱动的 append-only TRANSIENT 失败 attempt 历史（JSON array）';
 comment on column harness_model_invocation.created_at is '创建时间（毫秒精度）';
-comment on column harness_model_invocation.updated_at is '最后更新时间（毫秒精度），不得早于 created_at';
+comment on column harness_model_invocation.updated_at is '最后更新时间（毫秒精度）';
 comment on column harness_model_invocation.provider_replay_state is 'Provider native terminal replay 状态（JSON object，仅未物化结果的 SUCCEEDED 状态，可空）';
 
 create unique index uk_harness_model_invocation_result
@@ -1217,7 +1215,7 @@ comment on column harness_tool_invocation.result is 'terminal 成功结果（JSO
 comment on column harness_tool_invocation.effects is '副作用批（JSON object；非 SUCCEEDED 时必须为空批）';
 comment on column harness_tool_invocation.error is 'terminal 失败错误（JSON object，与 result 互斥）';
 comment on column harness_tool_invocation.created_at is '创建时间（毫秒精度）';
-comment on column harness_tool_invocation.updated_at is '最后更新时间（毫秒精度），不得早于 created_at';
+comment on column harness_tool_invocation.updated_at is '最后更新时间（毫秒精度）';
 comment on column harness_tool_invocation.input_receipt is '交互回执（JSON object，可空）：仅在 SUCCEEDED 且 result 非空时存在，携带 submissionId/actor/acceptedAt，历史物化前由 runtime 持有';
 
 create index idx_harness_tool_invocation_model_nonterminal
@@ -1359,7 +1357,7 @@ comment on column harness_thread_join.terminal_entry_id is '冻结的 terminal E
 comment on column harness_thread_join.final_answer_entry_id is '可空的最终回答 Entry UUID（仅 terminal_entry_id 非空时可非空）';
 comment on column harness_thread_join.delivery_command_sequence is '向父 Thread 投递结果 NOTIFICATION 的 command sequence（非空必须已 matched 且 parent_thread_id 非空）';
 comment on column harness_thread_join.created_at is '创建时间（毫秒精度）';
-comment on column harness_thread_join.updated_at is '最后更新时间（毫秒精度），不得早于 created_at';
+comment on column harness_thread_join.updated_at is '最后更新时间（毫秒精度）';
 
 create index idx_harness_thread_join_child_pending
     on harness_thread_join (child_thread_id)

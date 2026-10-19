@@ -14,7 +14,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
@@ -74,11 +73,6 @@ public final class CompactionChildStarter {
     tx.insertEntry(
         new Entry(rootEntryId, childSessionId, null, new RootPayload(childSettings), mutationNow));
 
-    List<UUID> ancestors = tx.findAncestorChain(parentThread.id());
-    UUID rootThreadId =
-        ancestors.isEmpty() ? parentThread.id() : ancestors.get(ancestors.size() - 1);
-    ThreadYoloPolicy yoloPolicy = ThreadYoloPolicy.follow(rootThreadId);
-
     String prompt;
     if (preparation.phase() == CompactionPhase.TURN_PREFIX) {
       prompt = CompactionPrompts.turnPrefixUserPrompt(preparation.messagesToSummarize());
@@ -99,7 +93,7 @@ public final class CompactionChildStarter {
             childThreadId,
             childSettings,
             parentThread.id(),
-            yoloPolicy,
+            false,
             List.of(newThreadCommand));
 
     ThreadState child =
@@ -110,7 +104,8 @@ public final class CompactionChildStarter {
             rootEntryId,
             creationRequestHash,
             Names.rootThreadName(),
-            yoloPolicy,
+            parentThread.rootThreadId(),
+            false,
             ThreadExecutionControl.RUNNABLE,
             0L,
             1L,

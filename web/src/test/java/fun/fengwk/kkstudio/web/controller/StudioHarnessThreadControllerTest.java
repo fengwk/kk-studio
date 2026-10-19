@@ -62,6 +62,7 @@ import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeTestFixtures;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -748,7 +749,7 @@ class StudioHarnessThreadControllerTest {
   void manualControlsRejectChildThreadAsConflictAndAllowExecutionRoot() throws Exception {
     UUID child = id(7);
     UUID root = id(1);
-    when(runtime.findAncestorChain(child)).thenReturn(List.of(child, root));
+    when(runtime.findRootThreadId(child)).thenReturn(Optional.of(root));
 
     mockMvc
         .perform(
@@ -780,8 +781,8 @@ class StudioHarnessThreadControllerTest {
     verify(runtime, never()).setThreadYolo(any(SetThreadYoloCommand.class));
     verify(runtime, never()).stop(any());
 
-    // 根目标照常放行：findAncestorChain 返回单元素链。
-    when(runtime.findAncestorChain(root)).thenReturn(List.of(root));
+    // 根目标照常放行：执行根即自身。
+    when(runtime.findRootThreadId(root)).thenReturn(Optional.of(root));
     when(runtime.setThreadYolo(any(SetThreadYoloCommand.class)))
         .thenReturn(HarnessRuntimeTestFixtures.thread(root));
     when(runtime.getThreadSnapshot(root)).thenReturn(HarnessRuntimeTestFixtures.idleSnapshot());

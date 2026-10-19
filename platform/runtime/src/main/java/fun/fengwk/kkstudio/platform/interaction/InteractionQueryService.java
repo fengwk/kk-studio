@@ -42,8 +42,8 @@ import java.util.UUID;
  * {@link HarnessRuntime#listPendingEnvironmentWaits} 提供的「READY 调用 + 到期且无有效执行 lease 的 TOOL Work +
  * 所需环境无有效 READY 连接租约」聚合（环境等待）。两者都不复制待办台账、不落地持久等待状态。
  *
- * <p>产品 owner 与根由服务端沿来源 Thread 的不可变祖先链解析：人工等待先用 {@link HarnessRuntime#findAncestorChain}
- * 定位真实执行根，环境等待的根 已由 storage 递归解析；随后读取根的 Session（Chat）或根 Thread
+ * <p>产品 owner 与根由服务端按来源 Thread 不可变的执行根解析：人工等待用 {@link HarnessRuntime#findRootThreadId}
+ * 定位真实执行根，环境等待的根已由 storage 按同一列给出；随后读取根的 Session（Chat）或根 Thread
  * 绑定（Issue+Agent）。两者都无法解析的根不对外暴露，绝不信任客户端传入归属。
  *
  * <p>两种来源共享同一 {@code (createdAt, id)} 排序键域：人工等待用调用自身坐标，环境等待用组内最早调用的坐标。本用例对两条升序流做 k 路归并，因此可以跨来源、

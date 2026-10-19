@@ -65,7 +65,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
@@ -937,7 +936,8 @@ class ProviderRequestPreviewServiceTest {
         headEntryId,
         REQUEST_HASH,
         "thread",
-        ThreadYoloPolicy.root(false),
+        THREAD_ID,
+        false,
         ThreadExecutionControl.RUNNABLE,
         0L,
         nextCommandSequence,

@@ -18,7 +18,6 @@ import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
@@ -127,8 +126,8 @@ final class AcceptCommandsControl {
   }
 
   /**
-   * NEW_CHILD_SESSION：在树锁内派生真实执行根，创建执行子代理 Thread 并写入不可变的 {@code FOLLOW(rootThreadId)}。调用方不提供任何 YOLO
-   * 输入，Follow 目标绝不由调用者指定。子 Session 准入沿用同一全局 Join 准入锁与树锁顺序。
+   * NEW_CHILD_SESSION：创建执行子代理 Thread，执行根继承自父 Thread。调用方不提供任何 YOLO 输入。子 Session 准入沿用同一全局 Join
+   * 准入锁与树锁顺序。
    */
   private AcceptedCommands acceptNewChildSession(
       AcceptCommandsTarget.NewChildSession target,
@@ -149,8 +148,7 @@ final class AcceptCommandsControl {
 
   /**
    * NEW_ROOT_SESSION / NEW_CHILD_SESSION 的共性创建：{@code parentThreadId} 为空表示独立执行根，使用 {@code
-   * rootYoloEnabled} 初始化自身开关；否则在树锁内把 {@code parentThreadId} 的真实执行根派生为不可变 {@code
-   * FOLLOW(rootThreadId)}。creation request hash 由稳定 Follow 目标派生，不冻结解析时的 effective 开关值。
+   * rootYoloEnabled} 初始化自身开关；否则继承父 Thread 的不可变执行根，自身不持有开关。
    */
   private AcceptedCommands acceptNewSession(
       UUID sessionId,
@@ -173,16 +171,14 @@ final class AcceptCommandsControl {
               parentThreadId != null
                   ? lockTreeAndAncestors(tx, parentThreadId, true, Set.of(threadId))
                   : lockTreeAndAncestors(tx, threadId, false, null);
-          ThreadYoloPolicy yoloPolicy;
-          if (parentThreadId == null) {
-            yoloPolicy = ThreadYoloPolicy.root(rootYoloEnabled);
-          } else {
-            UUID executionRootId = validateLockedAncestorsYolo(lockedAncestors);
-            yoloPolicy = ThreadYoloPolicy.follow(executionRootId);
-          }
+          UUID rootThreadId =
+              parentThreadId == null
+                  ? threadId
+                  : lockedAncestors.threads.get(parentThreadId).rootThreadId();
+          boolean yoloEnabled = parentThreadId == null && rootYoloEnabled;
           String creationRequestHash =
               ThreadCreationRequestHash.forNewSession(
-                  sessionId, threadId, rootSettings, parentThreadId, yoloPolicy, commands);
+                  sessionId, threadId, rootSettings, parentThreadId, yoloEnabled, commands);
           ThreadState existing = lockedAncestors.threads.get(threadId);
           if (existing != null) {
             return attachJoin(
@@ -205,7 +201,8 @@ final class AcceptCommandsControl {
                   rootEntryId,
                   creationRequestHash,
                   Names.rootThreadName(),
-                  yoloPolicy,
+                  rootThreadId,
+                  yoloEnabled,
                   ThreadExecutionControl.RUNNABLE,
                   0L,
                   1L,
@@ -217,37 +214,6 @@ final class AcceptCommandsControl {
           return attachJoin(
               tx, acceptNewCommandsOnThread(tx, thread, commands, preflight, now), join);
         });
-  }
-
-  /**
-   * 子 Session 创建边界的一致性校验：已锁定的祖先链必须与链末位真实执行根一致——根自身不得 FOLLOW，任何祖先的不可变 Follow 目标必须等于该根。 祖先链存在历史错根
-   * policy 时立即 fail closed，避免在损坏树上静默创建子代理并扩散错误。只使用当前事务已锁定的祖先结果，不额外加锁。
-   */
-  private static UUID validateLockedAncestorsYolo(LockedAncestors lockedAncestors) {
-    List<UUID> chain = lockedAncestors.chain;
-    UUID executionRootId = chain.get(chain.size() - 1);
-    ThreadState executionRoot =
-        Objects.requireNonNull(
-            lockedAncestors.threads.get(executionRootId), "locked execution root");
-    if (executionRoot.yoloPolicy().isFollow()) {
-      throw new IllegalStateException(
-          "execution root " + executionRootId + " must not follow another thread");
-    }
-    for (UUID ancestorId : chain) {
-      ThreadState ancestor =
-          Objects.requireNonNull(lockedAncestors.threads.get(ancestorId), "locked ancestor thread");
-      if (ancestor.yoloPolicy().isFollow()
-          && !executionRootId.equals(ancestor.yoloPolicy().rootThreadId())) {
-        throw new IllegalStateException(
-            "thread "
-                + ancestorId
-                + " follows "
-                + ancestor.yoloPolicy().rootThreadId()
-                + " which is not its execution root "
-                + executionRootId);
-      }
-    }
-    return executionRootId;
   }
 
   /**
@@ -264,7 +230,6 @@ final class AcceptCommandsControl {
       ThreadJoinRequest join,
       AcceptancePreflight preflight) {
     validateBatchShape(target, commands);
-    ThreadYoloPolicy yoloPolicy = ThreadYoloPolicy.root(target.yoloEnabled());
     return store.transaction(
         tx -> {
           // 与创建执行根相同：复用既有 Thread id 时先按真实执行树完成规范加锁，避免 replay 阶段逆序补锁。
@@ -277,7 +242,7 @@ final class AcceptCommandsControl {
                     target.startEntryId(),
                     target.threadId(),
                     target.threadName(),
-                    yoloPolicy,
+                    target.yoloEnabled(),
                     commands);
             return attachJoin(
                 tx,
@@ -317,7 +282,7 @@ final class AcceptCommandsControl {
                   target.startEntryId(),
                   target.threadId(),
                   target.threadName(),
-                  yoloPolicy,
+                  target.yoloEnabled(),
                   commands);
           Instant now = tx.now();
           // fork 事实节点：作为新 Thread head 的第一个 Entry，只记录模式与切点，不复制共享前缀、不移动源 Thread。
@@ -337,7 +302,8 @@ final class AcceptCommandsControl {
                   forkEntryId,
                   creationRequestHash,
                   target.threadName(),
-                  yoloPolicy,
+                  target.threadId(),
+                  target.yoloEnabled(),
                   ThreadExecutionControl.RUNNABLE,
                   0L,
                   1L,
@@ -383,7 +349,6 @@ final class AcceptCommandsControl {
       ThreadJoinRequest join,
       AcceptancePreflight preflight) {
     validateBatchShape(target, commands);
-    ThreadYoloPolicy yoloPolicy = ThreadYoloPolicy.root(target.yoloEnabled());
     return store.transaction(
         tx -> {
           // initial creation replay 必须先于来源校验：已接受的 fork 不依赖来源是否仍然存在。
@@ -393,7 +358,7 @@ final class AcceptCommandsControl {
                   target.startEntryId(),
                   target.sessionId(),
                   target.threadId(),
-                  yoloPolicy,
+                  target.yoloEnabled(),
                   commands);
           LockedAncestors locked = lockTreeAndAncestors(tx, target.threadId(), false, null);
           ThreadState existing = locked.threads.get(target.threadId());
@@ -478,7 +443,8 @@ final class AcceptCommandsControl {
                   forkEntryId,
                   creationRequestHash,
                   Names.rootThreadName(),
-                  yoloPolicy,
+                  target.threadId(),
+                  target.yoloEnabled(),
                   ThreadExecutionControl.RUNNABLE,
                   0L,
                   1L,
@@ -611,20 +577,14 @@ final class AcceptCommandsControl {
       UUID anchorThreadId,
       boolean anchorIsParent,
       Set<UUID> additionalThreadIds) {
-    List<UUID> hint = tx.findAncestorChain(anchorThreadId);
-    if (anchorIsParent && hint.isEmpty()) {
+    ThreadState anchor = tx.findThread(anchorThreadId).orElse(null);
+    if (anchorIsParent && anchor == null) {
       throw new IllegalArgumentException("join parent does not exist");
     }
-    UUID root = hint.isEmpty() ? anchorThreadId : hint.get(hint.size() - 1);
-    tx.lockTree(root);
+    tx.lockTree(anchor == null ? anchorThreadId : anchor.rootThreadId());
     List<UUID> chain = tx.findAncestorChain(anchorThreadId);
     if (anchorIsParent && chain.isEmpty()) {
       throw new HarnessRuntimeNotFoundException("join parent no longer exists");
-    }
-    if (!chain.isEmpty() && !root.equals(chain.get(chain.size() - 1))) {
-      throw conflict(
-          HarnessRuntimeConflictException.Reason.THREAD_ID_REUSED,
-          "thread execution parent differs from the requested tree");
     }
     Set<UUID> allThreadIds = new LinkedHashSet<>(chain);
     if (additionalThreadIds != null) {
@@ -644,7 +604,6 @@ final class AcceptCommandsControl {
     for (ThreadJoin pending : tx.loadPendingDeliveries(anchorThreadId)) {
       allThreadIds.add(pending.childThreadId());
     }
-    Map<UUID, ThreadState> immutableThreads = new HashMap<>();
     Set<UUID> sessionIds = new LinkedHashSet<>();
     for (UUID id : allThreadIds) {
       ThreadState state =
@@ -655,7 +614,6 @@ final class AcceptCommandsControl {
                           ? new IllegalArgumentException("join parent does not exist")
                           : new HarnessRuntimeNotFoundException(
                               "thread " + id + " does not exist"));
-      immutableThreads.put(id, state);
       sessionIds.add(state.sessionId());
     }
     List<UUID> sortedSessionIds = sessionIds.stream().sorted(UuidOrder.COMPARATOR).toList();
@@ -677,10 +635,6 @@ final class AcceptCommandsControl {
                           ? new IllegalArgumentException("join parent does not exist")
                           : new HarnessRuntimeNotFoundException(
                               "thread " + id + " does not exist"));
-      if (!locked.sessionId().equals(immutableThreads.get(id).sessionId())) {
-        throw new IllegalStateException(
-            "thread " + id + " relocated while acquiring its session lock");
-      }
       lockedThreads.put(id, locked);
     }
     return new LockedAncestors(chain, lockedThreads);

@@ -44,7 +44,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
@@ -512,9 +511,8 @@ class PostgresqlHarnessTransactionNotificationTest {
                   turnStartId,
                   CREATION_REQUEST_HASH,
                   "main",
-                  parentThreadId == null
-                      ? ThreadYoloPolicy.root(false)
-                      : ThreadYoloPolicy.follow(rootThreadId),
+                  parentThreadId == null ? threadId : rootThreadId,
+                  false,
                   ThreadExecutionControl.RUNNABLE,
                   0L,
                   1L,
@@ -589,7 +587,8 @@ class PostgresqlHarnessTransactionNotificationTest {
         headEntryId,
         CREATION_REQUEST_HASH,
         "child",
-        ThreadYoloPolicy.follow(parentThreadId),
+        parentThreadId,
+        false,
         ThreadExecutionControl.RUNNABLE,
         0L,
         1L,

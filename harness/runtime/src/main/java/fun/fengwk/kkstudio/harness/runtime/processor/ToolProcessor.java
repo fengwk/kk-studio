@@ -13,7 +13,6 @@ import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
@@ -42,8 +41,8 @@ import java.util.function.BiFunction;
  * stale 一律完整 no-op。
  *
  * <p>状态机：READY + approval null 在 ensure 完整 lease margin 后于事务外执行 {@link ToolGateway#preflight}
- * （preflight 期间由本地 heartbeat 维持 lease）；锁内解析实际 YOLO 开关（执行根读自身，子代理 Follow 真实执行根）为 true 时跳过 preflight
- * 直接 Allow（不调用 evaluator / gateway），Allow 在同一短事务顺序转换 markApprovalNotRequired -&gt;
+ * （preflight 期间由本地 heartbeat 维持 lease）；锁内解析实际 YOLO 开关（执行根读自身，子代理读执行根）为 true 时跳过 preflight 直接
+ * Allow（不调用 evaluator / gateway），Allow 在同一短事务顺序转换 markApprovalNotRequired -&gt;
  * beginDispatch（Thread version 只 +1）后进入 Gateway 派发；Ask 转 WAITING_APPROVAL（version+1 + complete，不
  * request THREAD）；Deny 转 FAILED（version+1 + THREAD wake + complete）；preflight 抛异常保持 READY /
  * approval null / version 不变，按 {@code preflightFailureDelay} reschedule。READY + completed approval
@@ -833,46 +832,12 @@ public final class ToolProcessor implements AutoCloseable {
     return ThreadProcessor.lockThreadWithSession(tx, threadId);
   }
 
-  /**
-   * 在已按 {@link #lockThreadWithSession} 持有执行树锁并锁定完整祖先链的事务内解析实际 YOLO 开关：执行根读自身 mode，子代理跟随其不可变 {@code
-   * FOLLOW(rootThreadId)} 读取真实执行根的 mode。
-   *
-   * <p>Follow 目标必须等于当前事务已锁定的真实执行根（祖先链末位）；指向无关树或中间节点都是权限一致性破坏，显式抛出而不静默兜底，也绝不 为无关根额外加锁。根缺失或根策略异常同样
-   * fail closed。
-   */
+  /** 有效 YOLO 只由执行根的开关决定；子代理读取其不可变执行根。 */
   private static boolean effectiveYoloEnabled(HarnessStore.Transaction tx, ThreadState thread) {
-    ThreadYoloPolicy policy = thread.yoloPolicy();
-    if (!policy.isFollow()) {
-      return policy.isEnabled();
+    if (thread.rootThreadId().equals(thread.id())) {
+      return thread.yoloEnabled();
     }
-    List<UUID> chain = tx.findAncestorChain(thread.id());
-    UUID executionRootId = chain.isEmpty() ? thread.id() : chain.get(chain.size() - 1);
-    if (!executionRootId.equals(policy.rootThreadId())) {
-      throw new IllegalStateException(
-          "thread "
-              + thread.id()
-              + " follows "
-              + policy.rootThreadId()
-              + " which is not its execution root "
-              + executionRootId);
-    }
-    ThreadState root =
-        tx.findThread(executionRootId)
-            .orElseThrow(
-                () ->
-                    new IllegalStateException(
-                        "yolo execution root "
-                            + executionRootId
-                            + " does not exist for thread "
-                            + thread.id()));
-    if (root.yoloPolicy().isFollow()) {
-      throw new IllegalStateException(
-          "thread "
-              + root.id()
-              + " follows another thread and cannot be the execution root of "
-              + thread.id());
-    }
-    return root.yoloPolicy().isEnabled();
+    return tx.findThread(thread.rootThreadId()).orElseThrow().yoloEnabled();
   }
 
   private void release(ToolExecution execution) {

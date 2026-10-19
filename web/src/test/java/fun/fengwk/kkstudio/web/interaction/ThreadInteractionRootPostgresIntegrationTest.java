@@ -73,8 +73,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloMode;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
@@ -211,8 +209,8 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
     assertEquals(QUESTIONNAIRE, item.getArgumentsJson());
     assertNull(item.getApprovalJson());
 
-    // 祖先链是归属事实源：C -> A -> R。
-    assertEquals(List.of(tree.c(), tree.a(), tree.root()), runtime.findAncestorChain(tree.c()));
+    // 执行根是归属事实源：C -> A -> R。
+    assertEquals(tree.root(), runtime.findRootThreadId(tree.c()).orElseThrow());
 
     // 非 canonical 执行根（中间父/自身）被拒为非法参数，而不是静默返回别的树。
     assertThrows(
@@ -434,7 +432,7 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
     UUID chatId = bindChat(seed.sessionId());
 
     // 前置事实：根 YOLO = ENABLE，问卷调用仍是 READY 且已有 TOOL Work（尚未被处理）。
-    assertEquals(ThreadYoloMode.ENABLE, threadState(seed.threadId()).yoloPolicy().mode());
+    assertTrue(threadState(seed.threadId()).yoloEnabled());
     assertEquals(ToolInvocationStatus.READY, toolInvocation(seed.invocationId()).status());
     assertTrue(hasWork(WorkTargetType.TOOL, seed.invocationId()));
 
@@ -448,7 +446,7 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
     assertNull(frozen.approval());
     assertNull(frozen.inputReceipt());
     assertNull(frozen.result());
-    assertEquals(ThreadYoloMode.ENABLE, threadState(seed.threadId()).yoloPolicy().mode());
+    assertTrue(threadState(seed.threadId()).yoloEnabled());
 
     InteractionPageDTO page = queryService.listInteractions(seed.threadId(), null, 50);
     assertEquals(1, page.getItems().size());
@@ -988,7 +986,8 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
                   rootEntryId,
                   HASH,
                   "standalone",
-                  ThreadYoloPolicy.root(yoloEnabled),
+                  threadId,
+                  yoloEnabled,
                   ThreadExecutionControl.RUNNABLE,
                   0L,
                   1L,

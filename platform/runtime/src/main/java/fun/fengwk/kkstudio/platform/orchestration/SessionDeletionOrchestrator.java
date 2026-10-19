@@ -20,6 +20,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.UUID;
@@ -218,9 +219,9 @@ public class SessionDeletionOrchestrator {
     }
     List<UUID> roots =
         threads.stream()
-            .map(tx::findAncestorChain)
-            .filter(chain -> !chain.isEmpty())
-            .map(chain -> chain.get(chain.size() - 1))
+            .map(tx::findThread)
+            .flatMap(Optional::stream)
+            .map(ThreadState::rootThreadId)
             .distinct()
             .sorted(UuidOrder.COMPARATOR)
             .toList();

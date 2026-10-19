@@ -34,7 +34,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.SystemReminder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatRepository;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatSessionRepository;
 import fun.fengwk.kkstudio.platform.chat.service.model.Chat;
@@ -307,7 +306,8 @@ class HarnessOwnerQueryServiceTest {
             entry.id(),
             "0".repeat(64),
             root.name(),
-            ThreadYoloPolicy.follow(rootId),
+            rootId,
+            false,
             ThreadExecutionControl.RUNNABLE,
             0L,
             1L,
@@ -443,7 +443,8 @@ class HarnessOwnerQueryServiceTest {
         headEntryId,
         "0".repeat(64),
         "thread",
-        ThreadYoloPolicy.root(false),
+        threadId,
+        false,
         ThreadExecutionControl.RUNNABLE,
         0L,
         1L,

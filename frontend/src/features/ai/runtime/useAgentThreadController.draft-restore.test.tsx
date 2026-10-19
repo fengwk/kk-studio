@@ -12,7 +12,6 @@ import type {
   HarnessThreadStopResultDTO,
 } from '@/shared/api/contracts/ai-runtime'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
-import { rootYoloPolicy } from '@/test-support/thread-yolo-policy'
 import { createTextPart, partsToText } from '@/features/ai/composer/composer-parts'
 import { useAgentThreadController } from '@/features/ai/runtime/useAgentThreadController'
 import {
@@ -136,7 +135,7 @@ function threadFixture(
     sessionId: 's1',
     headEntryId: 'h1',
     parentThreadId: null,
-    yoloPolicy: rootYoloPolicy(yoloEnabled),
+    rootThreadId: THREAD_ID, yoloEnabled,
     nextCommandSequence: '1',
     version: '0',
     status: 'IDLE',

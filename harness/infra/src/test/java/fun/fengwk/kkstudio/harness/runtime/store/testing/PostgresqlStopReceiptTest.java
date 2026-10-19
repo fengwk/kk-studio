@@ -29,7 +29,6 @@ import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetContributorStateCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
@@ -128,9 +127,8 @@ class PostgresqlStopReceiptTest {
         headEntryId,
         HASH,
         name,
-        parentThreadId == null
-            ? ThreadYoloPolicy.root(false)
-            : ThreadYoloPolicy.follow(rootThreadId),
+        parentThreadId == null ? id : rootThreadId,
+        false,
         ThreadExecutionControl.RUNNABLE,
         0L,
         1L,

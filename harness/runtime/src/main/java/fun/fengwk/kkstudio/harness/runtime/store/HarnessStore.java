@@ -218,13 +218,15 @@ public interface HarnessStore {
      */
     void updateThread(ThreadState thread);
 
-    /**
-     * 由不可变 parent 链派生 head-to-root 祖先（包含自身）。不存在返回空列表；环路必须 fail closed。 PG 实现在加锁前可用此查询发现 root，但获取
-     * tree lock 后必须重新读取确认。
-     */
+    /** 由不可变 parent 链派生 head-to-root 祖先（包含自身）。不存在返回空列表。 */
     List<UUID> findAncestorChain(UUID threadId);
 
-    /** 在 Join 准入锁之后、任何 Session/Thread/Work 锁之前获取执行树事务级锁；root 必须为真实根。 */
+    /** 读取执行根为 {@code rootThreadId} 的全部 Thread（含根自身），不产生锁，顺序不保证。 */
+    List<ThreadState> listThreadsByRoot(UUID rootThreadId);
+
+    /**
+     * 在 Join 准入锁之后、任何 Session/Thread/Work 锁之前获取执行树事务级锁；root 取自 Thread 不可变的 {@code rootThreadId}。
+     */
     void lockTree(UUID rootThreadId);
 
     /**
@@ -409,10 +411,11 @@ public interface HarnessStore {
      * 按 {@code (representativeCreatedAt, representativeInvocationId)} 升序读取「等待环境」分组：一组调用已 READY、其
      * TOOL Work 已到期且无有效执行 lease、冻结了非空 {@code required_environment_id}，且该环境没有有效 READY 连接租约。
      *
-     * <p>分组键是 {@code (真实执行根, 所需环境)}：根沿不可变祖先链解析，代表取组内最早的 {@code (createdAt, id)}，{@code
-     * waitingCount} 是组内调用数。时间条件按本事务的 {@link #now()} 判定。{@code afterRepresentativeCreatedAt} /
-     * {@code afterRepresentativeInvocationId} 是分组代表的游标下界（严格大于），首屏使用 {@link Instant#EPOCH} 与全零
-     * UUID；{@code limit} 必须为正，实现按 {@code limit} 截断。本查询只读、不产生锁，不新增任何持久等待 状态；返回不可变列表。
+     * <p>分组键是 {@code (真实执行根, 所需环境)}：根取自 Thread 不可变的 rootThreadId，代表取组内最早的 {@code (createdAt,
+     * id)}，{@code waitingCount} 是组内调用数。时间条件按本事务的 {@link #now()} 判定。{@code
+     * afterRepresentativeCreatedAt} / {@code afterRepresentativeInvocationId} 是分组代表的游标下界（严格大于），首屏使用
+     * {@link Instant#EPOCH} 与全零 UUID；{@code limit} 必须为正，实现按 {@code limit} 截断。本查询只读、不产生锁，不新增任何持久等待
+     * 状态；返回不可变列表。
      */
     List<PendingEnvironmentWaitRow> listPendingEnvironmentWaits(
         Instant afterRepresentativeCreatedAt, UUID afterRepresentativeInvocationId, int limit);

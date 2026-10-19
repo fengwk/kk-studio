@@ -60,7 +60,6 @@ import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -349,7 +348,8 @@ class HarnessRuntimeForkTest {
                   sharedRootEntryId,
                   HarnessRuntimeTestSupport.CREATION_REQUEST_HASH,
                   "child",
-                  ThreadYoloPolicy.follow(parentThreadId),
+                  parentThreadId,
+                  false,
                   ThreadExecutionControl.RUNNABLE,
                   0L,
                   1L,

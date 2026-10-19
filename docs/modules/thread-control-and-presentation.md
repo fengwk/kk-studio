@@ -10,31 +10,21 @@
 Thread 的 `status` 和 `processing` 仅描述自身；根空闲而后代活跃是合法状态。
 根 Stop 覆盖全部后代，不能按根本地状态或 Join 是否已结算缩小范围。
 
-Thread 持久化 `ThreadYoloPolicy`：
-
-| Thread | 策略 |
-| --- | --- |
-| 根 | `ENABLE` 或 `DISABLE` |
-| 子代理 | `FOLLOW(rootThreadId)`，直接指向真实执行根 |
-
-存储字段为 `yolo_mode` 和 `yolo_root_thread_id`。根不能 Follow；子代理不能维护独立开关，
-也不能 Follow 中间父节点或其他执行树。Follow 目标创建后不可变。
+每个 Thread 持久化不可变的执行根 `root_thread_id`（根指向自身，子代理继承父 Thread 的执行根）
+和 `yolo_enabled`。开关只属于执行根，子代理恒为 false，其有效值取自执行根。
 根开关只修改根行，不递归修改子行或子行版本。Chat/Project 开关仅初始化新根。
 
-创建、权限预检和开关更新遵循既有树锁及业务行锁顺序。权限判定在树锁内核对不可变
-祖先链与 Follow 目标；目标不是真实根时立即拒绝，不能读取另一棵树的开关。创建幂等
-指纹包含稳定的 Follow 目标，不包含当时解析出的开关值。YOLO 影响尚未完成权限决定的调用，不自动批准
+创建、权限预检和开关更新遵循既有树锁及业务行锁顺序。权限判定读取执行根的开关；创建幂等
+指纹只包含创建请求携带的根开关。YOLO 影响尚未完成权限决定的调用，不自动批准
 `WAITING_APPROVAL`，不回答问卷，也不回滚已经派发的工具。
 
-Thread 查询 DTO 的 `yoloPolicy` 为 `{mode, rootThreadId}`，根的 `rootThreadId` 为 null。
-该字段取代 Thread 查询投影的 `yoloEnabled`。新根创建请求、产品默认值和根开关命令仍可
-使用 boolean，因为这些输入不表达 Follow。只读子面板不提供独立开关，根开关显示根的权威策略；
-返回导航基于当前快照的不可变直接父 `parentThreadId` 定点打开父级，不依赖 Follow 根目标。
+Thread 查询 DTO 携带 `rootThreadId` 与 `yoloEnabled`。只读子面板不提供独立开关，根开关显示根的权威值；
+返回导航基于当前快照的不可变直接父 `parentThreadId` 定点打开父级。
 
 ## 人工交互与产品边界
 
 待办事实只有 ToolInvocation 的 `WAITING_APPROVAL` 与 `WAITING_INPUT`，不复制待办表。
-归属解析沿来源 Thread 的不可变祖先链定位根，再读取根的 Chat 或 Issue Agent 绑定。
+归属解析按来源 Thread 不可变的执行根定位根，再读取根的 Chat 或 Issue Agent 绑定。
 查询和提交共用归属规则；没有直接产品绑定的后代不能因此消失。
 
 交互查询支持 `rootThreadId` 过滤，并在服务端正确完成过滤和 keyset 分页。

@@ -4,13 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.AdditionalAnswers.delegatesTo;
-import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.doReturn;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.spy;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -18,10 +12,6 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
@@ -31,15 +21,11 @@ import java.lang.reflect.Proxy;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Function;
-import java.util.function.IntFunction;
 
 /**
  * ToolProcessor preflight 阶段行为：READY + approval null 时事务外 preflight（期间 heartbeat 维持 lease），Allow /
@@ -446,10 +432,10 @@ class ToolProcessorPreflightTest {
     assertFalse(fixture.processor.hasActiveExecution());
   }
 
-  /** FOLLOW 子代理读取真实执行根：root ENABLE 时子代理同样 Allow，且绝不调用 gateway.preflight。 */
+  /** 子代理读取真实执行根：root 开启时子代理同样 Allow，且绝不调用 gateway.preflight。 */
   @Test
-  void followChildReadsEnabledRootWithoutGatewayPreflight() {
-    ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.followChildFixture(true, 1);
+  void childReadsEnabledRootWithoutGatewayPreflight() {
+    ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.childFixture(true, 1);
     fixture.gateway.queueStart(new ToolGateway.Started(new ToolProcessorTestSupport.FakeHandle()));
 
     assertEquals(
@@ -465,11 +451,10 @@ class ToolProcessorPreflightTest {
     assertEquals(fixture.baseline.threadId(), fixture.gateway.executions.get(0).threadId());
   }
 
-  /** FOLLOW 子代理读取真实执行根：root DISABLE 时子代理走正常 gateway preflight，不因自身无开关而静默 Allow。 */
+  /** 子代理读取真实执行根：root 关闭时子代理走正常 gateway preflight，不因自身无开关而静默 Allow。 */
   @Test
-  void followChildReadsDisabledRootAndPreflights() {
-    ToolProcessorTestSupport.Fixture fixture =
-        ToolProcessorTestSupport.followChildFixture(false, 1);
+  void childReadsDisabledRootAndPreflights() {
+    ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.childFixture(false, 1);
     fixture.gateway.queuePreflightAllow();
     fixture.gateway.queueStart(new ToolGateway.Started(new ToolProcessorTestSupport.FakeHandle()));
 
@@ -482,249 +467,6 @@ class ToolProcessorPreflightTest {
     assertEquals(1, fixture.gateway.preflightCallsCount);
     assertEquals(1, fixture.gateway.startCalls);
     assertEquals(fixture.request, fixture.gateway.preflightCalls.get(0).request());
-  }
-
-  /** FOLLOW 目标不是执行根（跟随中间节点）时 fail closed：显式抛错，绝不 preflight / dispatch。 */
-  @Test
-  void followChainTargetingNonRootFailsClosed() {
-    ToolProcessorTestSupport.Fixture fixture =
-        ToolProcessorTestSupport.followChildFixture(false, 2);
-
-    assertThrows(
-        IllegalStateException.class,
-        () ->
-            fixture.processor.process(
-                ToolProcessorTestSupport.claim(
-                    fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW)));
-
-    assertEquals(0, fixture.gateway.preflightCallsCount);
-    assertEquals(0, fixture.gateway.startCalls);
-    assertFalse(fixture.processor.hasActiveExecution());
-  }
-
-  /**
-   * 权限一致性反例：child 的真实执行根 DISABLE，但 policy 错指另一棵 ENABLE 的无关根。必须 fail closed——不得读取无关根开关作为 Allow 依据，不得
-   * preflight / dispatch，也不得变更 invocation、child 或无关根行。
-   */
-  @Test
-  void followChildTargetingUnrelatedEnabledRootFailsClosed() {
-    ToolProcessorTestSupport.MisrootedFixture fixture =
-        ToolProcessorTestSupport.misrootedFollowChildFixture(null);
-    long childVersionBefore =
-        ToolProcessorTestSupport.thread(fixture.store(), fixture.child().threadId()).version();
-    long unrelatedRootVersionBefore =
-        ToolProcessorTestSupport.thread(fixture.store(), fixture.unrelatedRoot().threadId())
-            .version();
-
-    assertThrows(
-        IllegalStateException.class,
-        () ->
-            fixture
-                .processor()
-                .process(
-                    ToolProcessorTestSupport.claim(
-                        fixture.store(),
-                        fixture.seeded().toolInvocationId(),
-                        ToolProcessorTestSupport.NOW)));
-
-    assertEquals(0, fixture.gateway().preflightCallsCount);
-    assertEquals(0, fixture.gateway().startCalls);
-    assertFalse(fixture.processor().hasActiveExecution());
-    ToolInvocation tool =
-        ToolProcessorTestSupport.tool(fixture.store(), fixture.seeded().toolInvocationId());
-    assertEquals(ToolInvocationStatus.READY, tool.status());
-    assertEquals(0, tool.attempt());
-    assertNull(tool.approval());
-    assertEquals(
-        childVersionBefore,
-        ToolProcessorTestSupport.thread(fixture.store(), fixture.child().threadId()).version());
-    ThreadState unrelatedRoot =
-        ToolProcessorTestSupport.thread(fixture.store(), fixture.unrelatedRoot().threadId());
-    assertEquals(unrelatedRootVersionBefore, unrelatedRoot.version());
-    assertTrue(unrelatedRoot.yoloPolicy().isEnabled());
-  }
-
-  /** Follow 目标（根）不存在时同样 fail closed：不 preflight / dispatch，invocation 仍保持 READY。 */
-  @Test
-  void followChildTargetingMissingRootFailsClosed() {
-    ToolProcessorTestSupport.MisrootedFixture fixture =
-        ToolProcessorTestSupport.misrootedFollowChildFixture(new UUID(0L, 999L));
-
-    assertThrows(
-        IllegalStateException.class,
-        () ->
-            fixture
-                .processor()
-                .process(
-                    ToolProcessorTestSupport.claim(
-                        fixture.store(),
-                        fixture.seeded().toolInvocationId(),
-                        ToolProcessorTestSupport.NOW)));
-
-    assertEquals(0, fixture.gateway().preflightCallsCount);
-    assertEquals(0, fixture.gateway().startCalls);
-    assertFalse(fixture.processor().hasActiveExecution());
-    assertEquals(
-        ToolInvocationStatus.READY,
-        ToolProcessorTestSupport.tool(fixture.store(), fixture.seeded().toolInvocationId())
-            .status());
-  }
-
-  /**
-   * 坏存储读投影（fail-closed）：FOLLOW 子代理的祖先链与取锁步骤全部成功，但事务内读取真实执行根返回 empty。 判定必须以 root missing
-   * 显式抛出，绝不把缺失根当作 DISABLE 继续 preflight / dispatch。
-   */
-  @Test
-  void followChildMissingRootReadFailsClosed() {
-    ToolProcessorTestSupport.Fixture fixture =
-        ToolProcessorTestSupport.followChildFixture(false, 1);
-    UUID childThreadId = fixture.baseline.threadId();
-    UUID rootThreadId = executionRoot(fixture.store, childThreadId);
-    ThreadState realRoot =
-        fixture.store.transaction(tx -> tx.findThread(rootThreadId).orElseThrow());
-    long childVersionBefore =
-        ToolProcessorTestSupport.thread(fixture.store, childThreadId).version();
-    long rootVersionBefore = ToolProcessorTestSupport.thread(fixture.store, rootThreadId).version();
-    // 同一事务内第一次 root findThread 供祖先锁复核，随后真实根读取返回 empty。
-    ToolProcessor processor =
-        injectedProcessor(
-            fixture,
-            wrapFindThread(
-                fixture.store,
-                rootThreadId,
-                index -> index == 0 ? Optional.of(realRoot) : Optional.empty()));
-
-    IllegalStateException failure =
-        assertThrows(
-            IllegalStateException.class,
-            () ->
-                processor.process(
-                    ToolProcessorTestSupport.claim(
-                        fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW)));
-
-    assertEquals(
-        "yolo execution root " + rootThreadId + " does not exist for thread " + childThreadId,
-        failure.getMessage());
-    assertFailClosedWithoutDispatch(
-        fixture, processor, childThreadId, rootThreadId, childVersionBefore, rootVersionBefore);
-  }
-
-  /**
-   * 坏存储读投影（fail-closed）：真实执行根读取返回一个 {@code yoloPolicy=FOLLOW} 的根投影（存储读不一致）。判定必须拒绝 FOLLOW 根，绝不
-   * preflight / dispatch / 写版本。
-   */
-  @Test
-  void followChildRootReadProjectedAsFollowFailsClosed() {
-    ToolProcessorTestSupport.Fixture fixture =
-        ToolProcessorTestSupport.followChildFixture(false, 1);
-    UUID childThreadId = fixture.baseline.threadId();
-    UUID rootThreadId = executionRoot(fixture.store, childThreadId);
-    ThreadState realRoot =
-        fixture.store.transaction(tx -> tx.findThread(rootThreadId).orElseThrow());
-    ThreadState projectedRoot = spy(realRoot);
-    doReturn(ThreadYoloPolicy.follow(new UUID(0L, 42L))).when(projectedRoot).yoloPolicy();
-    long childVersionBefore =
-        ToolProcessorTestSupport.thread(fixture.store, childThreadId).version();
-    long rootVersionBefore = ToolProcessorTestSupport.thread(fixture.store, rootThreadId).version();
-    ToolProcessor processor =
-        injectedProcessor(
-            fixture,
-            wrapFindThread(fixture.store, rootThreadId, index -> Optional.of(projectedRoot)));
-
-    IllegalStateException failure =
-        assertThrows(
-            IllegalStateException.class,
-            () ->
-                processor.process(
-                    ToolProcessorTestSupport.claim(
-                        fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW)));
-
-    assertEquals(
-        "thread "
-            + rootThreadId
-            + " follows another thread and cannot be the execution root of "
-            + childThreadId,
-        failure.getMessage());
-    assertFailClosedWithoutDispatch(
-        fixture, processor, childThreadId, rootThreadId, childVersionBefore, rootVersionBefore);
-  }
-
-  /** FOLLOW 子代理的真实执行根：祖先链末位（head-to-root）。 */
-  private static UUID executionRoot(InMemoryHarnessStore store, UUID threadId) {
-    List<UUID> chain = store.transaction(tx -> tx.findAncestorChain(threadId));
-    return chain.get(chain.size() - 1);
-  }
-
-  /**
-   * 坏存储读投影注入：委托真实 store 与事务，仅对 {@code threadId} 的 {@code findThread} 读取按调用序号返回不一致投影；取锁与其余读取
-   * 全部走真实委托，保证不破坏实际锁流程、也不在更早 guard 抛错。
-   */
-  private static HarnessStore wrapFindThread(
-      InMemoryHarnessStore store, UUID threadId, IntFunction<Optional<ThreadState>> projection) {
-    return new HarnessStore() {
-      @Override
-      public <T> T transaction(Function<HarnessStore.Transaction, T> callback) {
-        AtomicInteger reads = new AtomicInteger();
-        return store.transaction(
-            realTx -> {
-              HarnessStore.Transaction injected =
-                  mock(HarnessStore.Transaction.class, delegatesTo(realTx));
-              doAnswer(ignored -> projection.apply(reads.getAndIncrement()))
-                  .when(injected)
-                  .findThread(threadId);
-              return callback.apply(injected);
-            });
-      }
-
-      @Override
-      public void afterCommit(Runnable action) {
-        store.afterCommit(action);
-      }
-
-      @Override
-      public void assertNoAmbientTransaction() {
-        store.assertNoAmbientTransaction();
-      }
-    };
-  }
-
-  /** 复用既有 fixture 状态，仅替换 store 为带坏读投影的窄委托。 */
-  private static ToolProcessor injectedProcessor(
-      ToolProcessorTestSupport.Fixture fixture, HarnessStore wrappedStore) {
-    return new ToolProcessor(
-        wrappedStore,
-        fixture.gateway,
-        fixture.sink,
-        new ToolProcessorConfig(
-            ToolProcessorTestSupport.LEASE_CONFIG,
-            () -> ToolProcessorTestSupport.NO_RETRY,
-            ToolProcessorTestSupport.PREFLIGHT_FAILURE_DELAY,
-            ToolProcessorTestSupport.BUSY_FALLBACK_DELAY),
-        fixture.clock,
-        fixture.scheduler,
-        Runnable::run);
-  }
-
-  /** 零派发、零写入断言：无 gateway 副作用、无 version 漂移、无活跃 execution、Tool 仍 READY。 */
-  private static void assertFailClosedWithoutDispatch(
-      ToolProcessorTestSupport.Fixture fixture,
-      ToolProcessor processor,
-      UUID childThreadId,
-      UUID rootThreadId,
-      long childVersionBefore,
-      long rootVersionBefore) {
-    assertEquals(0, fixture.gateway.preflightCallsCount);
-    assertEquals(0, fixture.gateway.startCalls);
-    assertFalse(processor.hasActiveExecution());
-    ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
-    assertEquals(ToolInvocationStatus.READY, tool.status());
-    assertEquals(0, tool.attempt());
-    assertNull(tool.approval());
-    assertEquals(
-        childVersionBefore,
-        ToolProcessorTestSupport.thread(fixture.store, childThreadId).version());
-    assertEquals(
-        rootVersionBefore, ToolProcessorTestSupport.thread(fixture.store, rootThreadId).version());
   }
 
   /** preflight 期间 ownership 丢失（Stop deleteWork）：二次校验失败，完整 no-op，绝不 start。 */

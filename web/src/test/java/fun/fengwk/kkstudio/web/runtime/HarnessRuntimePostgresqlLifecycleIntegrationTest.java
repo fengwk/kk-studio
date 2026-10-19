@@ -158,14 +158,15 @@ class HarnessRuntimePostgresqlLifecycleIntegrationTest {
         ROOT_PAYLOAD_JSON);
     jdbc.update(
         "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id,"
-            + " creation_request_hash, name, yolo_mode, yolo_root_thread_id, execution_control,"
+            + " creation_request_hash, name, root_thread_id, yolo_enabled, execution_control,"
             + " input_through_sequence, next_command_sequence, version, created_at, updated_at)"
-            + " values (?, ?, null, ?, ?, ?, 'DISABLE', null, 'RUNNABLE', 0, 1, 0, now(), now())",
+            + " values (?, ?, null, ?, ?, ?, ?, false, 'RUNNABLE', 0, 1, 0, now(), now())",
         THREAD_ID,
         SESSION_ID,
         ROOT_ENTRY_ID,
         CREATION_REQUEST_HASH,
-        "lifecycle-test-thread");
+        "lifecycle-test-thread",
+        THREAD_ID);
     jdbc.update(
         "insert into durable_work (target_type, target_id, available_at, wake_version)"
             + " values ('THREAD', ?, now(), 1)",

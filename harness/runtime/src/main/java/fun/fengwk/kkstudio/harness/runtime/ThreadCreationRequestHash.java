@@ -11,7 +11,6 @@ import tools.jackson.databind.node.ObjectNode;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryEntryPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 
 import java.nio.charset.StandardCharsets;
@@ -27,8 +26,8 @@ import java.util.UUID;
  *
  * <p>哈希覆盖 target 语义、预分配 ID（session/thread/start entry）、NEW_SESSION 的 root settings + parent + YOLO
  * policy，以及 ordered {@code (idempotencyKey, requestHash)} 对；同一 raw 请求永远得到同一 hash，不同内容（含 id
- * 或命令顺序变化）得到不同 hash。YOLO 只包含稳定的策略描述：执行根的请求开关，或子代理不可变的 {@code FOLLOW(rootThreadId)} 目标；绝不包含创建时解析出的
- * effective 开关值（根后续 toggle 不能改变既有创建请求的身份）。该 hash 只作持久化身份键，不对产品 DTO 暴露。
+ * 或命令顺序变化）得到不同 hash。YOLO 只包含创建请求携带的执行根开关（子代理恒为 false，其执行根由不可变父关系决定）；根后续 toggle 不改变既有创建请求的身份。该 hash
+ * 只作持久化身份键，不对产品 DTO 暴露。
  */
 public final class ThreadCreationRequestHash {
 
@@ -43,7 +42,7 @@ public final class ThreadCreationRequestHash {
       UUID threadId,
       BranchSettings rootSettings,
       UUID parentThreadId,
-      ThreadYoloPolicy yoloPolicy,
+      boolean yoloEnabled,
       List<NewThreadCommand> commands) {
     ObjectNode envelope = envelope("NEW_SESSION");
     envelope.put("sessionId", requireId(sessionId, "sessionId").toString());
@@ -54,7 +53,7 @@ public final class ThreadCreationRequestHash {
     } else {
       envelope.put("parentThreadId", parentThreadId.toString());
     }
-    envelope.set("yolo", yoloNode(yoloPolicy));
+    envelope.put("yoloEnabled", yoloEnabled);
     envelope.set("commands", commandsNode(commands));
     return digest(envelope);
   }
@@ -68,49 +67,37 @@ public final class ThreadCreationRequestHash {
       UUID startEntryId,
       UUID threadId,
       String threadName,
-      ThreadYoloPolicy yoloPolicy,
+      boolean yoloEnabled,
       List<NewThreadCommand> commands) {
     ObjectNode envelope = envelope("NEW_THREAD");
     envelope.put("sessionId", requireId(sessionId, "sessionId").toString());
     envelope.put("startEntryId", requireId(startEntryId, "startEntryId").toString());
     envelope.put("threadId", requireId(threadId, "threadId").toString());
     envelope.put("threadName", requireNonNull(threadName, "threadName"));
-    envelope.set("yolo", yoloNode(yoloPolicy));
+    envelope.put("yoloEnabled", yoloEnabled);
     envelope.set("commands", commandsNode(commands));
     return digest(envelope);
   }
 
   /**
-   * 计算 NEW_FORKED_SESSION target 的 creation request hash：来源 Thread、切点、新 Session/Thread、YOLO policy
-   * 与 ordered 命令对。同一 raw 请求稳定得到同一 hash，内容变化（含切点或命令顺序）得到不同 hash。
+   * 计算 NEW_FORKED_SESSION target 的 creation request hash：来源 Thread、切点、新 Session/Thread、YOLO 开关 与
+   * ordered 命令对。同一 raw 请求稳定得到同一 hash，内容变化（含切点或命令顺序）得到不同 hash。
    */
   public static String forNewForkedSession(
       UUID sourceThreadId,
       UUID startEntryId,
       UUID sessionId,
       UUID threadId,
-      ThreadYoloPolicy yoloPolicy,
+      boolean yoloEnabled,
       List<NewThreadCommand> commands) {
     ObjectNode envelope = envelope("NEW_FORKED_SESSION");
     envelope.put("sourceThreadId", requireId(sourceThreadId, "sourceThreadId").toString());
     envelope.put("startEntryId", requireId(startEntryId, "startEntryId").toString());
     envelope.put("sessionId", requireId(sessionId, "sessionId").toString());
     envelope.put("threadId", requireId(threadId, "threadId").toString());
-    envelope.set("yolo", yoloNode(yoloPolicy));
+    envelope.put("yoloEnabled", yoloEnabled);
     envelope.set("commands", commandsNode(commands));
     return digest(envelope);
-  }
-
-  /** 稳定的 YOLO policy 描述：根为 mode，子代理额外带不可变 Follow 目标。 */
-  private static JsonNode yoloNode(ThreadYoloPolicy yoloPolicy) {
-    ObjectNode node = NODES.objectNode();
-    node.put("mode", requireNonNull(yoloPolicy, "yoloPolicy").mode().name());
-    if (yoloPolicy.rootThreadId() == null) {
-      node.putNull("rootThreadId");
-    } else {
-      node.put("rootThreadId", yoloPolicy.rootThreadId().toString());
-    }
-    return node;
   }
 
   private static ObjectNode envelope(String target) {

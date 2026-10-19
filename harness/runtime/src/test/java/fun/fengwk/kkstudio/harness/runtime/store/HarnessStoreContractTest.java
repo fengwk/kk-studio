@@ -100,7 +100,8 @@ class HarnessStoreContractTest {
               "deleteThreads",
               "deleteEntries",
               "deleteSession",
-              "now"));
+              "now",
+              "listThreadsByRoot"));
 
   @Test
   void storeRootExposesOnlyTheTransactionEntryPoint() {

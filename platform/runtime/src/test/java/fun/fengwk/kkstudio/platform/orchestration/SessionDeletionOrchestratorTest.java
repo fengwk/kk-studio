@@ -19,7 +19,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatRepository;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatSessionRepository;
 import fun.fengwk.kkstudio.platform.chat.service.model.Chat;
@@ -430,10 +429,6 @@ class SessionDeletionOrchestratorTest {
 
   private static ThreadState thread(UUID threadId, UUID sessionId, UUID parentThreadId) {
     // 根线程使用独立开关；子线程恒 FOLLOW 传入的执行根（fixture 的 parent 即执行根）。
-    ThreadYoloPolicy yoloPolicy =
-        parentThreadId == null
-            ? ThreadYoloPolicy.root(false)
-            : ThreadYoloPolicy.follow(parentThreadId);
     return new ThreadState(
         threadId,
         sessionId,
@@ -441,7 +436,8 @@ class SessionDeletionOrchestratorTest {
         id(100),
         "0".repeat(64),
         "thread",
-        yoloPolicy,
+        parentThreadId == null ? threadId : parentThreadId,
+        false,
         ThreadExecutionControl.RUNNABLE,
         0L,
         1L,

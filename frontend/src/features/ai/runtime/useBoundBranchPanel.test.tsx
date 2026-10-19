@@ -19,7 +19,6 @@ import type {
   HarnessThreadSnapshotDTO,
 } from '@/shared/api/contracts/ai-runtime'
 import type { AgentDefinitionDTO, AgentModelDTO } from '@/shared/api/contracts/ai-catalog'
-import { rootYoloPolicy } from '@/test-support/thread-yolo-policy'
 
 const THREAD_ID = '11111111-2222-4333-8444-555555555555'
 const THREAD_ID_2 = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'
@@ -84,7 +83,8 @@ function threadFixture(
     sessionId: 's1',
     headEntryId: 'e-assistant',
     parentThreadId: null,
-    yoloPolicy: rootYoloPolicy(yoloEnabled),
+    rootThreadId: threadId,
+    yoloEnabled,
     nextCommandSequence: '1',
     version: '0',
     status: 'IDLE',

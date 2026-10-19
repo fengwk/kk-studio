@@ -33,6 +33,7 @@ import fun.fengwk.kkstudio.project.repo.ProjectRepository;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 /** 人工交互统一写入口 {@link InteractionService} 的单元测试。 */
@@ -59,9 +60,9 @@ class InteractionServiceTest {
     runtime = mock(HarnessRuntime.class);
 
     when(runtimes.getIfAvailable()).thenReturn(runtime);
-    // 默认：任意存在的 Thread 自身即执行根（链含自身）；后代/不存在场景在具体测试中覆盖该 stub。
-    when(runtime.findAncestorChain(any()))
-        .thenAnswer(invocation -> List.of(invocation.<UUID>getArgument(0)));
+    // 默认：任意存在的 Thread 自身即执行根；后代/不存在场景在具体测试中覆盖该 stub。
+    when(runtime.findRootThreadId(any()))
+        .thenAnswer(invocation -> Optional.of(invocation.<UUID>getArgument(0)));
     service =
         new InteractionService(
             issueAgentThreadRepository, issueRepository, projectRepository, runtimes);
@@ -78,7 +79,7 @@ class InteractionServiceTest {
     UUID projectId = id(300);
 
     IssueAgentThread binding = new IssueAgentThread(issueId, "coder", threadId);
-    when(runtime.findAncestorChain(threadId)).thenReturn(List.of(threadId));
+    when(runtime.findRootThreadId(threadId)).thenReturn(Optional.of(threadId));
     when(issueAgentThreadRepository.findByThreadId(threadId)).thenReturn(binding);
 
     Issue initialIssue = Issue.builder().id(issueId).projectId(projectId).build();
@@ -101,7 +102,7 @@ class InteractionServiceTest {
     assertSame(expectedAcceptance, actual);
 
     InOrder inOrder = inOrder(issueRepository, projectRepository, runtime);
-    inOrder.verify(runtime).findAncestorChain(threadId);
+    inOrder.verify(runtime).findRootThreadId(threadId);
     inOrder.verify(issueRepository).getById(issueId);
     inOrder.verify(projectRepository).lockForKeyShare(projectId);
     inOrder.verify(issueRepository).lockById(issueId);
@@ -120,7 +121,7 @@ class InteractionServiceTest {
     UUID projectId = id(300);
 
     IssueAgentThread binding = new IssueAgentThread(issueId, "reviewer", threadId);
-    when(runtime.findAncestorChain(threadId)).thenReturn(List.of(threadId));
+    when(runtime.findRootThreadId(threadId)).thenReturn(Optional.of(threadId));
     when(issueAgentThreadRepository.findByThreadId(threadId)).thenReturn(binding);
 
     Issue initialIssue = Issue.builder().id(issueId).projectId(projectId).build();
@@ -143,7 +144,7 @@ class InteractionServiceTest {
     assertSame(expectedInvocation, actual);
 
     InOrder inOrder = inOrder(issueRepository, projectRepository, runtime);
-    inOrder.verify(runtime).findAncestorChain(threadId);
+    inOrder.verify(runtime).findRootThreadId(threadId);
     inOrder.verify(issueRepository).getById(issueId);
     inOrder.verify(projectRepository).lockForKeyShare(projectId);
     inOrder.verify(issueRepository).lockById(issueId);
@@ -162,7 +163,7 @@ class InteractionServiceTest {
     UUID issueId = id(200);
     UUID projectId = id(300);
 
-    when(runtime.findAncestorChain(childThreadId)).thenReturn(List.of(childThreadId, rootThreadId));
+    when(runtime.findRootThreadId(childThreadId)).thenReturn(Optional.of(rootThreadId));
     when(issueAgentThreadRepository.findByThreadId(childThreadId)).thenReturn(null);
     when(issueAgentThreadRepository.findByThreadId(rootThreadId))
         .thenReturn(new IssueAgentThread(issueId, "coder", rootThreadId));
@@ -183,7 +184,7 @@ class InteractionServiceTest {
     assertSame(expectedAcceptance, actual);
 
     InOrder inOrder = inOrder(issueRepository, projectRepository, runtime);
-    inOrder.verify(runtime).findAncestorChain(childThreadId);
+    inOrder.verify(runtime).findRootThreadId(childThreadId);
     inOrder.verify(issueRepository).getById(issueId);
     inOrder.verify(projectRepository).lockForKeyShare(projectId);
     inOrder.verify(issueRepository).lockById(issueId);
@@ -399,7 +400,7 @@ class InteractionServiceTest {
   @Test
   void missingThreadFailsWithNotFoundBeforeProductScopeAndRuntime() {
     UUID threadId = id(999);
-    when(runtime.findAncestorChain(threadId)).thenReturn(List.of());
+    when(runtime.findRootThreadId(threadId)).thenReturn(Optional.empty());
 
     ToolInputSubmissionCommand submit =
         new ToolInputSubmissionCommand(threadId, id(101), id(102), "alice", true, List.of());

@@ -36,7 +36,6 @@ import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
@@ -634,7 +633,8 @@ final class DispatcherTestSupport {
         headEntryId,
         CREATION_REQUEST_HASH,
         "main",
-        ThreadYoloPolicy.root(false),
+        id,
+        false,
         ThreadExecutionControl.RUNNABLE,
         0L,
         1,

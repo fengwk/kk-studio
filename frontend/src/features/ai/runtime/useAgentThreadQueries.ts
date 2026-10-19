@@ -45,9 +45,7 @@ export function useAgentThreadQueries(threadId: string) {
   const environmentTools = toolInvocations.filter(
     (invocation) => invocation.status === 'READY' && invocation.requiredEnvironmentId != null,
   )
-  const rootThreadId = thread?.parentThreadId == null
-    ? thread?.threadId
-    : thread.yoloPolicy.rootThreadId
+  const rootThreadId = thread?.rootThreadId
   const hasEnvironmentTools = environmentTools.length > 0
   const deadlines = environmentTools.flatMap((invocation) => {
     const at = invocation.environmentWaitFreshnessAt

@@ -26,7 +26,6 @@ import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -245,7 +244,8 @@ class HarnessRuntimeThreadSemanticsScenarioTest {
                   headEntryId,
                   CREATION_REQUEST_HASH,
                   "child-branch",
-                  ThreadYoloPolicy.follow(rootThreadId),
+                  rootThreadId,
+                  false,
                   ThreadExecutionControl.RUNNABLE,
                   0L,
                   1L,

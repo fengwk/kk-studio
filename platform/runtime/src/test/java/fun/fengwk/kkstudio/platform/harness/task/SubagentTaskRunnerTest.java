@@ -40,7 +40,6 @@ import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
@@ -97,7 +96,8 @@ class SubagentTaskRunnerTest {
                 parentHeadEntryId,
                 "0".repeat(64),
                 "main",
-                ThreadYoloPolicy.root(true),
+                parentThreadId,
+                true,
                 ThreadExecutionControl.RUNNABLE,
                 0L,
                 5L,
@@ -216,7 +216,8 @@ class SubagentTaskRunnerTest {
                 UUID.randomUUID(),
                 "0".repeat(64),
                 "child",
-                ThreadYoloPolicy.follow(parentThreadId),
+                parentThreadId,
+                false,
                 ThreadExecutionControl.RUNNABLE,
                 0L,
                 2L,
@@ -302,7 +303,8 @@ class SubagentTaskRunnerTest {
                 UUID.randomUUID(),
                 "0".repeat(64),
                 "child",
-                ThreadYoloPolicy.follow(parentThreadId),
+                parentThreadId,
+                false,
                 ThreadExecutionControl.RUNNABLE,
                 0L,
                 2L,
@@ -435,7 +437,8 @@ class SubagentTaskRunnerTest {
                 UUID.randomUUID(),
                 "0".repeat(64),
                 "child",
-                ThreadYoloPolicy.follow(parentThreadId),
+                parentThreadId,
+                false,
                 ThreadExecutionControl.RUNNABLE,
                 0L,
                 2L,
@@ -661,7 +664,8 @@ class SubagentTaskRunnerTest {
                 headEntryId,
                 "0".repeat(64),
                 "child",
-                ThreadYoloPolicy.follow(parentThreadId),
+                parentThreadId,
+                false,
                 ThreadExecutionControl.RUNNABLE,
                 0L,
                 nextSequence,

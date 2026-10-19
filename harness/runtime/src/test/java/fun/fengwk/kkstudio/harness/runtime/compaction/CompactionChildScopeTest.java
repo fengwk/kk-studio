@@ -18,7 +18,6 @@ import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 
 import java.time.Instant;
 import java.util.List;
@@ -72,7 +71,8 @@ class CompactionChildScopeTest {
             head,
             HASH,
             "parent",
-            ThreadYoloPolicy.root(false),
+            PARENT,
+            false,
             ThreadExecutionControl.RUNNABLE,
             0,
             1,

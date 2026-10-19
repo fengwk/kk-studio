@@ -38,6 +38,7 @@ import fun.fengwk.kkstudio.share.ai.interaction.InteractionPageDTO;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -99,7 +100,7 @@ class InteractionRootAttributionConsistencyTest {
     UUID issueId = id(200);
     UUID projectId = id(300);
 
-    when(runtime.findAncestorChain(childThreadId)).thenReturn(List.of(childThreadId, rootThreadId));
+    when(runtime.findRootThreadId(childThreadId)).thenReturn(Optional.of(rootThreadId));
     IssueAgentThread binding = new IssueAgentThread(issueId, "coder", rootThreadId);
     when(issueAgentThreadRepository.findByThreadId(rootThreadId)).thenReturn(binding);
 
@@ -151,7 +152,7 @@ class InteractionRootAttributionConsistencyTest {
     interactionService.submitInput(command);
 
     // 两个入口对同一后代各做一次同源根解析，命中同一真实根；提交按该根加产品锁。
-    verify(runtime, times(2)).findAncestorChain(childThreadId);
+    verify(runtime, times(2)).findRootThreadId(childThreadId);
     InOrder lockOrder = inOrder(projectRepository, issueRepository);
     lockOrder.verify(issueRepository).getById(issueId);
     lockOrder.verify(projectRepository).lockForKeyShare(projectId);

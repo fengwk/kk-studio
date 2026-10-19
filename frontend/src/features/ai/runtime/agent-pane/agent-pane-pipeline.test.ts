@@ -37,7 +37,7 @@ const thread: HarnessThreadDTO = {
   sessionId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
   headEntryId: '99999999-8888-4777-8666-555555555555',
   parentThreadId: null,
-  yoloPolicy: { mode: 'DISABLE', rootThreadId: null },
+  rootThreadId: '11111111-2222-4333-8444-555555555555', yoloEnabled: false,
   nextCommandSequence: '9',
   version: '7',
   status: 'IDLE',

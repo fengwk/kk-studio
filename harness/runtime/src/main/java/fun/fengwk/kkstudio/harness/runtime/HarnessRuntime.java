@@ -43,9 +43,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -187,30 +185,33 @@ public final class HarnessRuntime {
                 .flatMap(join -> ThreadJoinProjector.INSTANCE.project(tx, join)));
   }
 
-  /** 当前不可变执行关系的 head-to-root 祖先链。 */
-  public List<UUID> findAncestorChain(UUID threadId) {
+  /** Thread 的不可变执行根；Thread 不存在时为空。 */
+  public Optional<UUID> findRootThreadId(UUID threadId) {
     Objects.requireNonNull(threadId, "threadId");
-    return store.transaction(tx -> tx.findAncestorChain(threadId));
+    return store.transaction(tx -> tx.findThread(threadId).map(ThreadState::rootThreadId));
   }
 
   /**
-   * 读取目标 Thread 所属执行树的一致快照：从任意节点回溯真实根，再按不可变 {@code parentThreadId} 收集全部后代。
+   * 读取目标 Thread 所属执行树的一致快照：按不可变 {@code rootThreadId} 取同根全部 Thread。
    *
-   * <p>一次事务先取该根的树锁并重读确认，再按 UUID 升序锁定全部 Thread 后生成快照；不按 Session 成员替代永久父子关系。目标不存在抛 {@link
+   * <p>一次事务先取该根的树锁，再按 UUID 升序锁定全部 Thread 后生成快照；不按 Session 成员替代永久父子关系。目标不存在抛 {@link
    * HarnessRuntimeNotFoundException}。兄弟顺序为 {@code createdAt} 再 UUID。纯查询，不写入、不推进 version。
    */
   public List<ThreadSnapshot> getThreadTree(UUID threadId) {
     Objects.requireNonNull(threadId, "threadId");
     return store.transaction(
         tx -> {
-          List<UUID> confirmed = ThreadTreeLocks.lockForThread(tx, threadId);
-          if (confirmed.isEmpty()) {
-            throw new HarnessRuntimeNotFoundException("thread " + threadId + " does not exist");
-          }
-          Map<UUID, ThreadState> discovered = new LinkedHashMap<>();
-          collectTree(tx, confirmed.get(confirmed.size() - 1), discovered);
-          List<UUID> lockOrder = new ArrayList<>(discovered.keySet());
-          lockOrder.sort(UuidOrder.COMPARATOR);
+          ThreadState target =
+              ThreadTreeLocks.lockForThread(tx, threadId)
+                  .orElseThrow(
+                      () ->
+                          new HarnessRuntimeNotFoundException(
+                              "thread " + threadId + " does not exist"));
+          List<UUID> lockOrder =
+              tx.listThreadsByRoot(target.rootThreadId()).stream()
+                  .map(ThreadState::id)
+                  .sorted(UuidOrder.COMPARATOR)
+                  .toList();
           List<ThreadState> locked = new ArrayList<>(lockOrder.size());
           for (UUID id : lockOrder) {
             locked.add(
@@ -322,12 +323,12 @@ public final class HarnessRuntime {
   }
 
   /**
-   * 在一个短 transaction 内直接更新执行根的 YOLO runtime policy。
+   * 在一个短 transaction 内直接更新执行根的 YOLO 开关。
    *
-   * <p>锁树与目标行后先校验目标必须是执行根（{@code parentThreadId} 为 null）；子代理恒 Follow 执行根，不能维护独立开关。比较当前根
-   * mode：与请求值相同即按原样返回当前 Thread（网络重试 no-op，不触碰 version、不创建 Command/Entry/Work、不请求 Work），否则在最新锁定行上更新
-   * {@code yolo_mode} 且 version 精确 +1，只修改根行——不递归修改子行、子行版本或子行 Follow 目标。无关的执行 version
-   * 推进不会拒绝本次写入，最后一次序列化写入生效。本操作绝不唤醒 processors，也不改写已冻结的 WAITING_APPROVAL、不回答问卷、不回滚已派发的工具。
+   * <p>锁树与目标行后先校验目标必须是执行根（{@code parentThreadId} 为 null）；子代理的有效开关取自执行根，不能维护独立开关。与请求值 相同即按原样返回当前
+   * Thread（网络重试 no-op，不触碰 version、不创建 Command/Entry/Work、不请求 Work），否则在最新锁定行上更新开关且 version 精确
+   * +1，只修改根行。无关的执行 version 推进不会拒绝本次写入，最后一次序列化写入生效。本操作绝不唤醒 processors，也不改写已冻结的
+   * WAITING_APPROVAL、不回答问卷、不回滚已派发的工具。
    */
   public ThreadState setThreadYolo(SetThreadYoloCommand command) {
     Objects.requireNonNull(command, "command");
@@ -346,7 +347,7 @@ public final class HarnessRuntime {
                     + command.threadId()
                     + " follows its execution root and does not own a yolo switch");
           }
-          if (thread.yoloPolicy().isEnabled() == command.enabled()) {
+          if (thread.yoloEnabled() == command.enabled()) {
             return thread;
           }
           ThreadState updated = thread.setRootYolo(command.enabled(), tx.now());
@@ -639,23 +640,6 @@ public final class HarnessRuntime {
   }
 
   /** 按永久 {@code parentThreadId} 深度优先收集整棵树；重复出现即环路，fail closed。 */
-  private static void collectTree(
-      HarnessStore.Transaction tx, UUID threadId, Map<UUID, ThreadState> discovered) {
-    if (discovered.containsKey(threadId)) {
-      throw new IllegalStateException("thread parent cycle at " + threadId);
-    }
-    ThreadState thread =
-        tx.findThread(threadId)
-            .orElseThrow(
-                () ->
-                    new IllegalStateException(
-                        "thread " + threadId + " disappeared while reading its execution tree"));
-    discovered.put(threadId, thread);
-    for (ThreadState child : tx.listChildren(threadId)) {
-      collectTree(tx, child.id(), discovered);
-    }
-  }
-
   /** 读取 Session 的全部不可变 Entry（含非当前 head 路径上的历史分支）；Session 不存在抛 NotFound。 */
   public List<Entry> getSessionEntries(UUID sessionId) {
     Objects.requireNonNull(sessionId, "sessionId");

@@ -39,7 +39,6 @@ import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.SessionFirstThreadLockStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
@@ -374,7 +373,8 @@ class HarnessRuntimeManualCompactionTest {
                   secondEndId,
                   HarnessRuntimeTestSupport.CREATION_REQUEST_HASH,
                   "main",
-                  ThreadYoloPolicy.root(false),
+                  threadId,
+                  false,
                   ThreadExecutionControl.RUNNABLE,
                   0L,
                   1,
@@ -505,7 +505,8 @@ class HarnessRuntimeManualCompactionTest {
                   rootEntryId,
                   HarnessRuntimeTestSupport.CREATION_REQUEST_HASH,
                   "child-" + purpose.name().toLowerCase(),
-                  ThreadYoloPolicy.follow(rootThreadId),
+                  rootThreadId,
+                  false,
                   ThreadExecutionControl.RUNNABLE,
                   0L,
                   2L,

@@ -20,7 +20,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
@@ -306,7 +305,8 @@ class HarnessRuntimeApiRecordsTest {
                 thread.headEntryId(),
                 "not-a-hash",
                 thread.name(),
-                ThreadYoloPolicy.root(false),
+                thread.id(),
+                false,
                 thread.executionControl(),
                 0L,
                 1,
@@ -322,7 +322,8 @@ class HarnessRuntimeApiRecordsTest {
             thread.headEntryId(),
             thread.creationRequestHash(),
             thread.name(),
-            thread.yoloPolicy(),
+            thread.rootThreadId(),
+            thread.yoloEnabled(),
             thread.executionControl(),
             0L,
             1,
@@ -342,7 +343,8 @@ class HarnessRuntimeApiRecordsTest {
                     thread.headEntryId(),
                     thread.creationRequestHash(),
                     thread.name(),
-                    thread.yoloPolicy(),
+                    thread.rootThreadId(),
+                    thread.yoloEnabled(),
                     thread.executionControl(),
                     0L,
                     1,
@@ -361,7 +363,8 @@ class HarnessRuntimeApiRecordsTest {
                     thread.headEntryId(),
                     "9999999999999999999999999999999999999999999999999999999999999999",
                     thread.name(),
-                    thread.yoloPolicy(),
+                    thread.rootThreadId(),
+                    thread.yoloEnabled(),
                     thread.executionControl(),
                     0L,
                     1,
@@ -385,7 +388,8 @@ class HarnessRuntimeApiRecordsTest {
                     thread.headEntryId(),
                     thread.creationRequestHash(),
                     thread.name(),
-                    ThreadYoloPolicy.root(true),
+                    thread.id(),
+                    true,
                     thread.executionControl(),
                     0L,
                     1,
