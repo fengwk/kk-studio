@@ -8,6 +8,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.common.prompt.PromptTemplate;
 import fun.fengwk.kkstudio.harness.common.prompt.PromptTemplateLoader;
+import fun.fengwk.kkstudio.harness.runtime.history.ToolResultModelContents;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AudioMessageContent;
@@ -137,7 +138,7 @@ public final class CompactionPrompts {
         case TOOL -> {
           AgentMessageContent content = message.contents().get(0);
           if (content instanceof ToolResultMessageContent result) {
-            String text = contentText(result.contents());
+            String text = contentText(ToolResultModelContents.contentsOf(result));
             if (!text.isEmpty()) {
               parts.add("[Tool result]: " + truncateForSummary(text, TOOL_RESULT_MAX_CHARS));
             }
