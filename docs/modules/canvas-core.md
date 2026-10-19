@@ -66,16 +66,7 @@ applyCommands(canvasId, idempotencyKey, commands)
 
 Function 节点持有 [`CanvasFunction`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasFunction.java)（`{name,args}`）。能力声明、adapter、冻结运行计划、codec 端口与执行上下文由 [Canvas Plugin API](canvas-plugin-api.md) 提供；本模块只定义 Run 投影与资源保护。
 
-[`CanvasFunctionRun`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasFunctionRun.java) 的状态由 [`CanvasFunctionRunStatus`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasFunctionRunStatus.java) 表达，字段组合由构造期校验固定：
-
-| status | 允许的字段组合 |
-| --- | --- |
-| `READY` | 必须有 `availableAt`，不得持有 lease |
-| `RUNNING` | 必须持有 `leaseToken`/`leaseUntil`，`availableAt` 为空 |
-| `SUCCEEDED` / `CANCELLED` | lease 与 availableAt 皆空，终态不可再被 claim；`SUCCEEDED` 不得带 `error`，`CANCELLED` 可以带 |
-| `FAILED` / `UNKNOWN` | lease 与 availableAt 皆空，必须持有非空 `error` |
-
-`attempt` 非负，lease token 为 1～128 字符。Run 对资源生命周期的保护由 [`CanvasFunctionResourcePin`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasFunctionResourcePin.java) 表达：`INPUT` 保护启动时冻结的引用资源，`OUTPUT` 在预分配目标资源实际物化后写入；pin 按 `(canvasId, nodeId, requestId)` 整体释放，不引入通用引用计数。执行中若提交意图已持久化（`SUBMITTING`）但进程崩溃，租约到期后转为 `UNKNOWN` 状态并保留 pin 与目标资源，退出自动调度，绝不重试提交。人工核对入口见 [Canvas Plugin API](canvas-plugin-api.md)。
+[`CanvasFunctionRun`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasFunctionRun.java) 只描述业务状态：状态由 [`CanvasFunctionRunStatus`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasFunctionRunStatus.java) 表达，`READY` / `RUNNING` 可被调度，`SUCCEEDED` / `CANCELLED` / `FAILED` / `UNKNOWN` 退出自动调度；`FAILED` 与 `UNKNOWN` 必须持有非空 `error`，`SUCCEEDED` 不得带 `error`，`CANCELLED` 可以带。`attempt` 非负，记录成功领取的次数。何时可领取、谁持有执行租约不属于 Run，而由共享的 [Durable Work](work.md) 管理，持有者凭 lease token 写入（见 [Canvas Infra](canvas-infra.md)）。Run 对资源生命周期的保护由 [`CanvasFunctionResourcePin`](../../canvas/core/src/main/java/fun/fengwk/kkstudio/canvas/CanvasFunctionResourcePin.java) 表达：`INPUT` 保护启动时冻结的引用资源，`OUTPUT` 在预分配目标资源实际物化后写入；pin 按 `(canvasId, nodeId, requestId)` 整体释放，不引入通用引用计数。执行中若提交意图已持久化（`SUBMITTING`）但进程崩溃，租约到期后转为 `UNKNOWN` 状态并保留 pin 与目标资源，退出自动调度，绝不重试提交。人工核对入口见 [Canvas Plugin API](canvas-plugin-api.md)。
 
 ## 不变量
 

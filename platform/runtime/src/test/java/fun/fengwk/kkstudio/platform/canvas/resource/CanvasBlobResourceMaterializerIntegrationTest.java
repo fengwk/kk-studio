@@ -69,13 +69,15 @@ class CanvasBlobResourceMaterializerIntegrationTest extends PostgresSpringTestSu
         nodeId,
         canvasId);
     jdbc.update(
-        "insert into canvas_function_run"
-            + " (node_id, request_id, status, available_at, state_json)"
-            + " values (?, ?, 'READY', clock_timestamp() - interval '1 second',"
-            + " '{\"stage\":\"QUEUED\"}')",
+        "insert into canvas_function_run (node_id, request_id, status, state_json)"
+            + " values (?, ?, 'READY', '{\"stage\":\"QUEUED\"}')",
         nodeId,
         requestId);
-    claim = workStore.claimNext(databaseNow(), Duration.ofMinutes(5), "owner-a").orElseThrow();
+    jdbc.update(
+        "insert into durable_work (target_type, target_id, available_at, wake_version)"
+            + " values ('CANVAS_RUN', ?, clock_timestamp() - interval '1 second', 1)",
+        nodeId);
+    claim = workStore.claimNext(Duration.ofMinutes(5), "owner-a").orElseThrow();
   }
 
   /** A 已进入读流、尚未提交；B 真实 claim 同 request，A 必须失败并释放 upload，B 随后正常物化。 */
@@ -89,7 +91,7 @@ class CanvasBlobResourceMaterializerIntegrationTest extends PostgresSpringTestSu
         assertTrue(reading.await(10, TimeUnit.SECONDS));
         expireLease();
         ClaimedRun replacement =
-            workStore.claimNext(databaseNow(), Duration.ofMinutes(5), "owner-b").orElseThrow();
+            workStore.claimNext(Duration.ofMinutes(5), "owner-b").orElseThrow();
         assertEquals(requestId, replacement.requestId());
         resume.countDown();
         ExecutionException failure =
@@ -165,7 +167,7 @@ class CanvasBlobResourceMaterializerIntegrationTest extends PostgresSpringTestSu
     CanvasResource winner = media ? blob(new ByteArrayInputStream(new byte[] {1})) : text("cached");
     String oldToken = claim.leaseToken();
     expireLease();
-    claim = workStore.claimNext(databaseNow(), Duration.ofMinutes(5), "owner-b").orElseThrow();
+    claim = workStore.claimNext(Duration.ofMinutes(5), "owner-b").orElseThrow();
     assertThrows(
         IllegalStateException.class,
         () ->
@@ -215,9 +217,7 @@ class CanvasBlobResourceMaterializerIntegrationTest extends PostgresSpringTestSu
     switch (change) {
       case "expired" -> expireLease();
       case "cancelled" -> jdbc.update(
-          "update canvas_function_run set status = 'CANCELLED', lease_token = null,"
-              + " lease_until = null where node_id = ?",
-          nodeId);
+          "update canvas_function_run set status = 'CANCELLED' where node_id = ?", nodeId);
       case "replaced" -> {
         // 真实 FK 不允许替换仍有 pin 的 run；模拟 lifecycle 先清旧 pin，再替换 request。
         jdbc.update("delete from canvas_function_resource_pin where node_id = ?", nodeId);
@@ -232,8 +232,8 @@ class CanvasBlobResourceMaterializerIntegrationTest extends PostgresSpringTestSu
 
   private void expireLease() {
     jdbc.update(
-        "update canvas_function_run set lease_until = clock_timestamp() - interval '1 second'"
-            + " where node_id = ?",
+        "update durable_work set lease_until = clock_timestamp() - interval '1 second'"
+            + " where target_type = 'CANVAS_RUN' and target_id = ?",
         nodeId);
   }
 

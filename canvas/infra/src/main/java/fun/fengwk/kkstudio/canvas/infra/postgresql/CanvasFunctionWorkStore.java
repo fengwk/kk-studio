@@ -1,138 +1,100 @@
 package fun.fengwk.kkstudio.canvas.infra.postgresql;
 
 import org.springframework.stereotype.Repository;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRun;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunStatus;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunStateCodecPort;
 import fun.fengwk.kkstudio.canvas.infra.function.ClaimedRun;
+import fun.fengwk.kkstudio.work.DurableWorkQueue;
+import fun.fengwk.kkstudio.work.WorkClaim;
 
+import java.time.Clock;
 import java.time.Duration;
-import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
-import java.time.temporal.ChronoUnit;
 import java.util.Objects;
 import java.util.Optional;
 
-/** Canvas Function durable work store；所有 ownership 变更都由单条 PostgreSQL 原子语句完成。 */
+/**
+ * Canvas Function 的调度适配：在共享 CANVAS_RUN Work 之上领取、续租与归还 Run。
+ *
+ * <p>领取分两步：先从队列领取一条到期 Work，再在短事务内把 READY（或租约过期遗留的 RUNNING）Run 推进为新一次尝试。Run 已终态、UNKNOWN 或已删除时完成该
+ * Work 并继续领取下一条。租约与 due 全部由数据库时钟判定。
+ */
 @Repository
 public class CanvasFunctionWorkStore {
 
-  private final CanvasFunctionLeaseJdbcStore leaseStore;
+  private final DurableWorkQueue canvasRunWorkQueue;
+  private final CanvasFunctionRunJdbcStore runStore;
   private final CanvasFunctionRunStateCodecPort stateCodec;
-  private final PostgresqlCanvasChangeNotifier notifier;
+  private final TransactionTemplate transactions;
+  private final Clock clock;
 
   public CanvasFunctionWorkStore(
-      CanvasFunctionLeaseJdbcStore leaseStore,
+      DurableWorkQueue canvasRunWorkQueue,
+      CanvasFunctionRunJdbcStore runStore,
       CanvasFunctionRunStateCodecPort stateCodec,
-      PostgresqlCanvasChangeNotifier notifier) {
-    this.leaseStore = Objects.requireNonNull(leaseStore, "leaseStore");
+      PlatformTransactionManager transactionManager,
+      Clock clock) {
+    this.canvasRunWorkQueue = Objects.requireNonNull(canvasRunWorkQueue, "canvasRunWorkQueue");
+    this.runStore = Objects.requireNonNull(runStore, "runStore");
     this.stateCodec = Objects.requireNonNull(stateCodec, "stateCodec");
-    this.notifier = Objects.requireNonNull(notifier, "notifier");
+    this.transactions = new TransactionTemplate(transactionManager);
+    this.clock = Clock.tick(Objects.requireNonNull(clock, "clock"), Duration.ofMillis(1));
   }
 
-  public Optional<ClaimedRun> claimNext(Instant now, Duration leaseDuration, String ownerToken) {
-    requireToken(ownerToken);
-    now = normalize(now);
-    Instant leaseUntil = now.plus(requirePositiveMillis(leaseDuration));
-    return leaseStore
-        .claimNext(toOffsetDateTime(now), ownerToken, toOffsetDateTime(leaseUntil))
-        .map(this::toClaimedRun);
-  }
-
-  public boolean renew(ClaimedRun claim, Instant now, Duration leaseDuration) {
-    Objects.requireNonNull(claim, "claim");
-    now = normalize(now);
-    Instant leaseUntil = now.plus(requirePositiveMillis(leaseDuration));
-    return leaseStore.renew(
-            claim.nodeId(),
-            claim.requestId(),
-            claim.leaseToken(),
-            toOffsetDateTime(now),
-            toOffsetDateTime(leaseUntil))
-        == 1;
-  }
-
-  /**
-   * 归还正在处理的 claim：以真实短事务把 RUNNING 重排为 READY，并在提交前按数据库时间判断是否需要唤醒。
-   *
-   * <p>dispatcher 线程不持有事务；围栏 SQL 与 {@code pg_notify} 必须落在同一事务，否则会出现「事实已提交、通知尚未发送」的额外失败窗口。
-   */
-  @Transactional
-  public boolean reschedule(ClaimedRun claim, Instant now, Duration delay) {
-    Objects.requireNonNull(claim, "claim");
-    now = normalize(now);
-    Instant availableAt = now.plus(requirePositiveMillis(delay));
-    if (leaseStore.reschedule(
-            claim.nodeId(),
-            claim.requestId(),
-            claim.leaseToken(),
-            toOffsetDateTime(now),
-            toOffsetDateTime(availableAt))
-        != 1) {
-      return false;
+  public Optional<ClaimedRun> claimNext(Duration leaseDuration, String ownerToken) {
+    while (true) {
+      Optional<WorkClaim> work = canvasRunWorkQueue.claimNext(ownerToken, leaseDuration);
+      if (work.isEmpty()) {
+        return Optional.empty();
+      }
+      ClaimedRun started = transactions.execute(status -> startAttempt(work.get()));
+      if (started != null) {
+        return Optional.of(started);
+      }
     }
-    notifier.functionWorkChanged(claim.nodeId());
-    return true;
   }
 
-  public boolean isOwned(ClaimedRun claim, Instant now) {
+  public boolean renew(ClaimedRun claim, Duration leaseDuration) {
+    return canvasRunWorkQueue.renew(Objects.requireNonNull(claim, "claim").work(), leaseDuration);
+  }
+
+  /** 归还仍持有的 claim：Run 退回 READY，Work 推迟 {@code delay} 后可再领取；已失去租约时不写入。 */
+  public boolean reschedule(ClaimedRun claim, Duration delay) {
     Objects.requireNonNull(claim, "claim");
-    return leaseStore.countOwned(
-            claim.nodeId(), claim.requestId(), claim.leaseToken(), toOffsetDateTime(normalize(now)))
-        == 1;
+    return Boolean.TRUE.equals(
+        transactions.execute(
+            status ->
+                runStore.returnToReady(claim.nodeId(), claim.leaseToken(), now()) == 1
+                    && canvasRunWorkQueue.reschedule(claim.work(), delay)));
   }
 
-  private ClaimedRun toClaimedRun(CanvasFunctionRunDO run) {
+  private ClaimedRun startAttempt(WorkClaim work) {
+    Optional<CanvasFunctionRunDO> started = runStore.startAttempt(work.targetId(), now());
+    if (started.isEmpty()) {
+      canvasRunWorkQueue.complete(work);
+      return null;
+    }
+    CanvasFunctionRunDO run = started.get();
     CanvasFunctionRun domain =
         new CanvasFunctionRun(
             run.getNodeId(),
             run.getRequestId(),
             CanvasFunctionRunStatus.valueOf(run.getStatus()),
             run.getAttempt(),
-            toInstant(run.getAvailableAt()),
-            run.getLeaseToken(),
-            toInstant(run.getLeaseUntil()),
             stateCodec.stage(run.getStateJson()),
             run.getStateJson(),
             run.getError(),
             run.getUpdatedAt().toInstant(),
             run.getCreatedAt().toInstant());
-    return new ClaimedRun(domain);
+    return new ClaimedRun(domain, work);
   }
 
-  private static Duration requirePositiveMillis(Duration value) {
-    Objects.requireNonNull(value, "duration");
-    long millis;
-    try {
-      millis = value.toMillis();
-    } catch (ArithmeticException error) {
-      throw new IllegalArgumentException("duration is outside millisecond range", error);
-    }
-    if (millis <= 0 || !value.equals(Duration.ofMillis(millis))) {
-      throw new IllegalArgumentException(
-          "duration must be a positive whole number of milliseconds");
-    }
-    return value;
-  }
-
-  private static void requireToken(String token) {
-    if (token == null || token.isBlank() || token.length() > 128) {
-      throw new IllegalArgumentException("ownerToken must contain 1 to 128 characters");
-    }
-  }
-
-  private static OffsetDateTime toOffsetDateTime(Instant value) {
-    return OffsetDateTime.ofInstant(value, ZoneOffset.UTC);
-  }
-
-  private static Instant normalize(Instant value) {
-    return Objects.requireNonNull(value, "now").truncatedTo(ChronoUnit.MILLIS);
-  }
-
-  private static Instant toInstant(OffsetDateTime value) {
-    return value == null ? null : value.toInstant();
+  private OffsetDateTime now() {
+    return OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
   }
 }

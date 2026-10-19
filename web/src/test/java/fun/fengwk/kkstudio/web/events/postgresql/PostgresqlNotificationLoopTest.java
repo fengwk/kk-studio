@@ -10,7 +10,6 @@ import org.junit.jupiter.api.Test;
 import org.postgresql.PGConnection;
 import org.postgresql.PGNotification;
 
-import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionDispatcher;
 import fun.fengwk.kkstudio.work.DurableWorkQueue;
 
 import javax.sql.DataSource;
@@ -37,7 +36,7 @@ import java.util.logging.Logger;
 class PostgresqlNotificationLoopTest {
 
   private static final String WORK_CHANNEL = DurableWorkQueue.CHANNEL;
-  private static final String CANVAS_FUNCTION_WORK_CHANNEL = CanvasFunctionDispatcher.CHANNEL;
+  private static final String PROJECT_CHANNEL = "project_issue_changed";
   private static final String THREAD_CHANNEL = "harness_thread_version";
   private static final String CANVAS_CHANNEL = "canvas_revision";
 
@@ -48,13 +47,13 @@ class PostgresqlNotificationLoopTest {
     connection.notifications.add(
         new PGNotification[] {
           notification(WORK_CHANNEL, ""),
-          notification(CANVAS_FUNCTION_WORK_CHANNEL, ""),
+          notification(PROJECT_CHANNEL, ""),
           notification(THREAD_CHANNEL, "thread:1"),
           notification(CANVAS_CHANNEL, "canvas:1")
         });
     SequencedDataSource dataSource = new SequencedDataSource(connection::connection);
     AtomicInteger workNotifications = new AtomicInteger();
-    AtomicInteger canvasFunctionWorkNotifications = new AtomicInteger();
+    AtomicInteger projectNotifications = new AtomicInteger();
     AtomicInteger threadNotifications = new AtomicInteger();
     AtomicInteger canvasNotifications = new AtomicInteger();
     AtomicInteger threadResyncs = new AtomicInteger();
@@ -73,9 +72,7 @@ class PostgresqlNotificationLoopTest {
                       throw new IllegalStateException("injected work resync failure");
                     }),
                 new PostgresqlNotificationHandler(
-                    CANVAS_FUNCTION_WORK_CHANNEL,
-                    ignored -> canvasFunctionWorkNotifications.incrementAndGet(),
-                    () -> {}),
+                    PROJECT_CHANNEL, ignored -> projectNotifications.incrementAndGet(), () -> {}),
                 new PostgresqlNotificationHandler(
                     THREAD_CHANNEL,
                     ignored -> threadNotifications.incrementAndGet(),
@@ -98,14 +95,14 @@ class PostgresqlNotificationLoopTest {
     assertEquals(
         List.of(
             "LISTEN " + WORK_CHANNEL,
-            "LISTEN " + CANVAS_FUNCTION_WORK_CHANNEL,
+            "LISTEN " + PROJECT_CHANNEL,
             "LISTEN " + THREAD_CHANNEL,
             "LISTEN " + CANVAS_CHANNEL),
         connection.executedSql);
     assertTrue(connection.autoCommit.get());
     assertEquals(10, connection.notificationPollMillis.get());
     assertEquals(1, workNotifications.get());
-    assertEquals(1, canvasFunctionWorkNotifications.get());
+    assertEquals(1, projectNotifications.get());
     assertEquals(1, threadNotifications.get());
     assertEquals(1, canvasNotifications.get());
     assertEquals(1, threadResyncs.get());

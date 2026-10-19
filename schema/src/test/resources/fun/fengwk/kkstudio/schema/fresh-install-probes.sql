@@ -647,14 +647,17 @@ select pg_temp.rejects('a Resource name is bounded to 512 characters',
     $$insert into canvas_resource(id,canvas_id,name,text_content)
       values(pg_temp.uid(903),pg_temp.uid(800),repeat('n',513),'x')$$, '22001');
 
-insert into canvas_function_run (node_id, request_id, status, available_at, state_json)
-    values (pg_temp.uid(700), pg_temp.uid(1000), 'READY', now(), '{"plan":[]}');
-select pg_temp.rejects('READY cannot carry an execution lease',
-    $$update canvas_function_run set lease_token='fixture',lease_until=now() where node_id=pg_temp.uid(700)$$,
-    '23514', 'ck_canvas_function_run_status_shape');
-select pg_temp.rejects('a lease token and its deadline are stored together',
-    $$update canvas_function_run set status='RUNNING',available_at=null,lease_token='fixture'
-      where node_id=pg_temp.uid(700)$$, '23514', 'ck_canvas_function_run_lease_pair');
+insert into canvas_function_run (node_id, request_id, status, state_json)
+    values (pg_temp.uid(700), pg_temp.uid(1000), 'READY', '{"plan":[]}');
+select pg_temp.rejects('a work lease token and its deadline are stored together',
+    $$insert into durable_work (target_type, target_id, available_at, wake_version, lease_token)
+      values ('CANVAS_RUN', pg_temp.uid(700), now(), 1, 'fixture')$$, '23514',
+    'ck_durable_work_lease_pair');
+select pg_temp.rejects('only TOOL work may require an Environment',
+    $$insert into durable_work (target_type, target_id, available_at, wake_version,
+          required_environment_id)
+      values ('CANVAS_RUN', pg_temp.uid(700), now(), 1, pg_temp.uid(9000))$$, '23514',
+    'ck_durable_work_required_environment');
 insert into canvas_function_resource_pin (canvas_id, node_id, request_id, role, resource_id)
     values (pg_temp.uid(800), pg_temp.uid(700), pg_temp.uid(1000), 'INPUT', pg_temp.uid(900));
 select pg_temp.rejects('a pin cannot reference a missing Resource',
@@ -673,16 +676,15 @@ select pg_temp.rejects('a pinned Resource cannot be deleted',
 -- Canvas UNKNOWN stays a terminal, lease-free shape whose failure reason is
 -- persisted; the database only proves the representation, not the recovery
 -- state machine, and a safely confirmed task remains READY/RUNNING instead.
-update canvas_function_run set status='UNKNOWN', available_at=null, error='provider state unconfirmed'
+update canvas_function_run set status='UNKNOWN', error='provider state unconfirmed'
     where node_id = pg_temp.uid(700);
-select pg_temp.assert_true('UNKNOWN is a terminal lease-free shape with a persisted reason',
-    (select status='UNKNOWN' and available_at is null and lease_token is null and error is not null
+select pg_temp.assert_true('UNKNOWN is a terminal shape with a persisted reason',
+    (select status='UNKNOWN' and error is not null
         from canvas_function_run where node_id = pg_temp.uid(700)));
 
 -- Represent explicit reconciliation followed by a fenced publication. Runtime
 -- authorization and crash-safe transaction ordering are separate app tests.
-update canvas_function_run set status='RUNNING', error=null,
-    lease_token='fixture-publish', lease_until=now()+interval '1 minute'
+update canvas_function_run set status='RUNNING', error=null
     where node_id=pg_temp.uid(700);
 insert into canvas_resource (id, canvas_id, name, text_content) values
     (pg_temp.uid(920), pg_temp.uid(800), 'new-c', 'C'),

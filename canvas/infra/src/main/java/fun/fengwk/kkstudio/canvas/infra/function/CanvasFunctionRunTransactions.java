@@ -181,9 +181,6 @@ public class CanvasFunctionRunTransactions {
             UUID.fromString(validatedRequestId),
             CanvasFunctionRunStatus.READY,
             0,
-            now,
-            null,
-            null,
             frozen.stage(),
             stateJson,
             null,
@@ -495,9 +492,6 @@ public class CanvasFunctionRunTransactions {
             current.requestId(),
             CanvasFunctionRunStatus.READY,
             current.attempt(),
-            now,
-            null,
-            null,
             resumed.stage(),
             stateCodec.encode(resumed),
             null,
@@ -628,9 +622,6 @@ public class CanvasFunctionRunTransactions {
             current.requestId(),
             CanvasFunctionRunStatus.RUNNING,
             current.attempt(),
-            null,
-            current.leaseToken(),
-            current.leaseUntil(),
             next.stage(),
             stateCodec.encode(next),
             null,
@@ -681,9 +672,6 @@ public class CanvasFunctionRunTransactions {
         current.requestId(),
         status,
         current.attempt(),
-        null,
-        null,
-        null,
         frozen.stage(),
         stateCodec.encode(frozen),
         error,
@@ -751,11 +739,11 @@ public class CanvasFunctionRunTransactions {
     throw new IllegalArgumentException("unsupported blob mediaType: " + mediaType);
   }
 
-  private static boolean matchesClaim(CanvasFunctionRun run, String requestId, String leaseToken) {
+  private boolean matchesClaim(CanvasFunctionRun run, String requestId, String leaseToken) {
     return run != null
         && run.status() == CanvasFunctionRunStatus.RUNNING
         && run.requestId().toString().equals(requestId)
-        && Objects.equals(run.leaseToken(), leaseToken);
+        && runRepository.holdsLease(run.nodeId(), leaseToken);
   }
 
   /**

@@ -3,10 +3,12 @@ package fun.fengwk.kkstudio.canvas.infra.function;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.transaction.PlatformTransactionManager;
 
 import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasFunctionWorkStore;
+import fun.fengwk.kkstudio.work.DurableWorkQueue;
 
-import java.time.Clock;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -61,12 +63,19 @@ public class CanvasFunctionRuntimeConfiguration {
   public CanvasFunctionDispatcher canvasFunctionDispatcher(
       CanvasFunctionWorkStore workStore,
       CanvasFunctionRuntimeProperties properties,
-      Clock clock,
       @Qualifier("canvasFunctionDrainExecutor") Executor drainExecutor,
       @Qualifier("canvasFunctionWorkerExecutor") Executor workerExecutor,
       @Qualifier("canvasFunctionPollScheduler") ScheduledExecutorService pollScheduler,
       CanvasFunctionWorker worker) {
     return new CanvasFunctionDispatcher(
-        workStore, properties, clock, drainExecutor, workerExecutor, pollScheduler, worker);
+        workStore, properties, drainExecutor, workerExecutor, pollScheduler, worker);
+  }
+
+  /** Function Run 的调度邮箱：{@code durable_work} 中 target type 为 CANVAS_RUN 的行。 */
+  @Bean
+  public DurableWorkQueue canvasRunWorkQueue(
+      JdbcClient jdbcClient, PlatformTransactionManager transactionManager) {
+    return new DurableWorkQueue(
+        jdbcClient, transactionManager, CanvasFunctionDispatcher.TARGET_TYPE);
   }
 }

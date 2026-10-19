@@ -8,16 +8,15 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * 在持久化事务内发送 Canvas revision 与 Function work 的失效/唤醒信号。
+ * 在持久化事务内发送 Canvas revision 失效信号。
  *
- * <p>两类信号都必须在持有事实的同一事务内发送：PostgreSQL 只在提交时投递 {@code pg_notify}，回滚不投递、未提交不可见。通知只是唤醒/失效提示， 权威事实仍由
- * {@code canvas_document.revision} 与 {@code canvas_function_run} 回读。
+ * <p>信号必须在持有事实的同一事务内发送：PostgreSQL 只在提交时投递 {@code pg_notify}，回滚不投递、未提交不可见。通知只是失效提示，权威事实仍由 {@code
+ * canvas_document.revision} 回读。Function Run 的唤醒由共享的 durable work 通道负责。
  */
 @Component
 public class PostgresqlCanvasChangeNotifier {
 
   static final String REVISION_CHANNEL = "canvas_revision";
-  static final String FUNCTION_WORK_CHANNEL = "canvas_function_work";
 
   private final JdbcClient jdbc;
 
@@ -32,27 +31,6 @@ public class PostgresqlCanvasChangeNotifier {
     jdbc.sql("select pg_notify(:channel, :payload)")
         .param("channel", REVISION_CHANNEL)
         .param("payload", canvasId + ":" + revision)
-        .query((resultSet, rowNumber) -> null)
-        .list();
-  }
-
-  /**
-   * 成功写入后若最终持久事实是可立即领取的 READY work，则发布空 payload 唤醒提示。
-   *
-   * <p>是否可领取以数据库 {@code current_timestamp} 判定，不使用应用机器时钟；未来 {@code available_at} 与过期 RUNNING 由既有
-   * poll 恢复，因此条件不满足时保持静默。
-   */
-  public void functionWorkChanged(UUID nodeId) {
-    Objects.requireNonNull(nodeId, "nodeId");
-    requireTransaction();
-    jdbc.sql(
-            "select pg_notify(:channel, '') from canvas_function_run"
-                + " where node_id = :nodeId"
-                + " and status = 'READY'"
-                + " and lease_token is null"
-                + " and available_at <= current_timestamp")
-        .param("channel", FUNCTION_WORK_CHANNEL)
-        .param("nodeId", nodeId)
         .query((resultSet, rowNumber) -> null)
         .list();
   }

@@ -419,8 +419,7 @@ class PostgresqlCanvasCommandServiceIntegrationTest extends PostgresCanvasInfraT
             new CanvasCommand.SetNodeGroup(node.nodeId, null, groupId)));
     UUID requestId = addPinnedRun(canvasId, node.nodeId, node.resourceId);
     jdbc.update(
-        "update canvas_function_run set status = 'READY', available_at = current_timestamp,"
-            + " lease_token = null, lease_until = null where node_id = ? and request_id = ?",
+        "update canvas_function_run set status = 'READY' where node_id = ? and request_id = ?",
         node.nodeId,
         requestId);
 
@@ -428,8 +427,7 @@ class PostgresqlCanvasCommandServiceIntegrationTest extends PostgresCanvasInfraT
     assertNotNull(canvasStore.findDocument(canvasId).orElse(null));
 
     jdbc.update(
-        "update canvas_function_run set status = 'CANCELLED', available_at = null where node_id = ?",
-        node.nodeId);
+        "update canvas_function_run set status = 'CANCELLED' where node_id = ?", node.nodeId);
     commandService.deleteCanvas(canvasId);
 
     assertTrue(canvasStore.findDocument(canvasId).isEmpty());

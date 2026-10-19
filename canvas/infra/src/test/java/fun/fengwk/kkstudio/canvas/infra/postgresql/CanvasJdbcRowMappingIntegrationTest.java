@@ -118,9 +118,9 @@ class CanvasJdbcRowMappingIntegrationTest extends PostgresCanvasInfraTestSupport
     assertNull(cleared.function());
   }
 
-  /** Run 的时间列与可空 lease/error 列：READY 行读回 available_at 而 lease 与 error 为 null。 */
+  /** Run 的时间列与可空 error 列：READY 行读回 attempt、stage 而 error 为 null。 */
   @Test
-  void functionRunNullableLeaseAndErrorColumnsReadBackAsNull() {
+  void functionRunNullableErrorColumnReadsBackAsNull() {
     UUID canvasId = addDocument();
     NodeRecord node = addNode(canvasId, true);
     UUID requestId = UUID.randomUUID();
@@ -130,9 +130,6 @@ class CanvasJdbcRowMappingIntegrationTest extends PostgresCanvasInfraTestSupport
             requestId,
             CanvasFunctionRunStatus.READY,
             0,
-            T0,
-            null,
-            null,
             "QUEUED",
             minimalRunState("QUEUED"),
             null,
@@ -140,11 +137,8 @@ class CanvasJdbcRowMappingIntegrationTest extends PostgresCanvasInfraTestSupport
             T0));
 
     CanvasFunctionRun stored = runs.findByNodeId(node.id()).orElseThrow();
-    assertEquals(T0, stored.availableAt());
     assertEquals(0, stored.attempt());
     assertEquals("QUEUED", stored.stage());
-    assertNull(stored.leaseToken());
-    assertNull(stored.leaseUntil());
     assertNull(stored.error());
   }
 
@@ -160,9 +154,6 @@ class CanvasJdbcRowMappingIntegrationTest extends PostgresCanvasInfraTestSupport
             requestId,
             CanvasFunctionRunStatus.READY,
             0,
-            T0,
-            null,
-            null,
             "QUEUED",
             minimalRunState("QUEUED"),
             null,

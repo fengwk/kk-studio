@@ -12,9 +12,6 @@ public class CanvasFunctionRunDO {
   private UUID requestId;
   private String status;
   private int attempt;
-  private OffsetDateTime availableAt;
-  private String leaseToken;
-  private OffsetDateTime leaseUntil;
   private String stateJson;
   private String error;
   private OffsetDateTime updatedAt;

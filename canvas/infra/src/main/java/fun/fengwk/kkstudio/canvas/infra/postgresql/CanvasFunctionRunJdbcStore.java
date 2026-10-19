@@ -10,13 +10,24 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
-/** {@code canvas_function_run} 的原子 SQL 入口。 */
+/**
+ * {@code canvas_function_run} 的原子 SQL 入口。
+ *
+ * <p>Run 行只保存业务状态；调度与执行所有权在共享的 {@code durable_work}（target type {@code CANVAS_RUN}）。持有者的写入都以 {@link
+ * #OWNED} 围栏：同一 lease token 在数据库时钟下仍有效，节点时钟不参与判断。
+ */
 @Repository
 public class CanvasFunctionRunJdbcStore {
 
+  /** 持有者写入的所有权围栏：本 Run 的 CANVAS_RUN Work 仍由 {@code :leaseToken} 持有且租约未过期。 */
+  static final String OWNED =
+      " exists (select 1 from durable_work w"
+          + " where w.target_type = 'CANVAS_RUN' and w.target_id = canvas_function_run.node_id"
+          + " and w.lease_token = :leaseToken"
+          + " and w.lease_until > date_trunc('milliseconds', statement_timestamp()))";
+
   private static final String COLUMNS =
-      "node_id, request_id, status, attempt, available_at, lease_token, lease_until,"
-          + " state_json, error, updated_at, created_at";
+      "node_id, request_id, status, attempt, state_json, error, updated_at, created_at";
 
   /** {@code canvas_function_run} 行的唯一映射：claim/lease 语句复用同一投影，不定义第二份行形状。 */
   static final RowMapper<CanvasFunctionRunDO> ROW_MAPPER =
@@ -26,9 +37,6 @@ public class CanvasFunctionRunJdbcStore {
         run.setRequestId(resultSet.getObject("request_id", UUID.class));
         run.setStatus(resultSet.getString("status"));
         run.setAttempt(resultSet.getInt("attempt"));
-        run.setAvailableAt(resultSet.getObject("available_at", OffsetDateTime.class));
-        run.setLeaseToken(resultSet.getString("lease_token"));
-        run.setLeaseUntil(resultSet.getObject("lease_until", OffsetDateTime.class));
         run.setStateJson(resultSet.getString("state_json"));
         run.setError(resultSet.getString("error"));
         run.setUpdatedAt(resultSet.getObject("updated_at", OffsetDateTime.class));
@@ -46,19 +54,15 @@ public class CanvasFunctionRunJdbcStore {
     return jdbc.sql(
             """
             insert into canvas_function_run (
-                node_id, request_id, status, attempt, available_at, lease_token, lease_until,
-                state_json, error, updated_at, created_at)
+                node_id, request_id, status, attempt, state_json, error, updated_at, created_at)
             values (
-                :nodeId, :requestId, :status, :attempt, :availableAt, :leaseToken,
-                :leaseUntil, cast(:stateJson as jsonb), :error, :updatedAt, :createdAt)
+                :nodeId, :requestId, :status, :attempt, cast(:stateJson as jsonb), :error,
+                :updatedAt, :createdAt)
             """)
         .param("nodeId", run.getNodeId())
         .param("requestId", run.getRequestId())
         .param("status", run.getStatus())
         .param("attempt", run.getAttempt())
-        .param("availableAt", run.getAvailableAt())
-        .param("leaseToken", run.getLeaseToken())
-        .param("leaseUntil", run.getLeaseUntil())
         .param("stateJson", run.getStateJson())
         .param("error", run.getError())
         .param("updatedAt", run.getUpdatedAt())
@@ -85,11 +89,14 @@ public class CanvasFunctionRunJdbcStore {
     return jdbc.sql(
             """
             select exists (
-              select 1 from canvas_function_run r
-              join canvas_node n on n.id = r.node_id
-              where n.canvas_id = :canvasId and r.node_id = :nodeId
-                and r.request_id = :requestId and r.status = 'RUNNING'
-                and r.lease_token = :leaseToken and r.lease_until > clock_timestamp()
+              select 1 from canvas_function_run
+              join canvas_node n on n.id = canvas_function_run.node_id
+              where n.canvas_id = :canvasId and canvas_function_run.node_id = :nodeId
+                and canvas_function_run.request_id = :requestId
+                and canvas_function_run.status = 'RUNNING'
+                and """
+                + OWNED
+                + """
             )
             """)
         .param("canvasId", canvasId)
@@ -100,11 +107,23 @@ public class CanvasFunctionRunJdbcStore {
         .single();
   }
 
+  /** 以数据库时钟判断 {@code leaseToken} 是否仍持有该 Run 的 CANVAS_RUN Work 租约。 */
+  public boolean holdsLease(UUID nodeId, String leaseToken) {
+    return jdbc.sql(
+            "select exists (select 1 from canvas_function_run where node_id = :nodeId and "
+                + OWNED
+                + ")")
+        .param("nodeId", nodeId)
+        .param("leaseToken", leaseToken)
+        .query((resultSet, rowNumber) -> resultSet.getBoolean(1))
+        .single();
+  }
+
   public List<CanvasFunctionRunDO> listByCanvas(UUID canvasId) {
     return jdbc.sql(
             """
-            select r.node_id, r.request_id, r.status, r.attempt, r.available_at, r.lease_token,
-                   r.lease_until, r.state_json, r.error, r.updated_at, r.created_at
+            select r.node_id, r.request_id, r.status, r.attempt, r.state_json, r.error,
+                   r.updated_at, r.created_at
             from canvas_function_run r
             join canvas_node n on n.id = r.node_id
             where n.canvas_id = :canvasId
@@ -120,7 +139,6 @@ public class CanvasFunctionRunJdbcStore {
             """
             update canvas_function_run
             set request_id = :requestId, status = :status, attempt = :attempt,
-                available_at = :availableAt, lease_token = :leaseToken, lease_until = :leaseUntil,
                 state_json = cast(:stateJson as jsonb), error = :error, updated_at = :updatedAt,
                 created_at = :createdAt
             where node_id = :nodeId and status in ('SUCCEEDED', 'FAILED', 'CANCELLED')
@@ -129,9 +147,6 @@ public class CanvasFunctionRunJdbcStore {
         .param("requestId", run.getRequestId())
         .param("status", run.getStatus())
         .param("attempt", run.getAttempt())
-        .param("availableAt", run.getAvailableAt())
-        .param("leaseToken", run.getLeaseToken())
-        .param("leaseUntil", run.getLeaseUntil())
         .param("stateJson", run.getStateJson())
         .param("error", run.getError())
         .param("updatedAt", run.getUpdatedAt())
@@ -148,9 +163,8 @@ public class CanvasFunctionRunJdbcStore {
             where node_id = :nodeId
               and request_id = :requestId
               and status = 'RUNNING'
-              and lease_token = :leaseToken
-              and lease_until > :updatedAt
-            """)
+              and """
+                + OWNED)
         .param("nodeId", nodeId)
         .param("requestId", requestId)
         .param("leaseToken", leaseToken)
@@ -164,14 +178,12 @@ public class CanvasFunctionRunJdbcStore {
             """
             update canvas_function_run
             set status = :status, state_json = cast(:stateJson as jsonb),
-                error = :error, available_at = null, lease_token = null, lease_until = null,
-                updated_at = :updatedAt
+                error = :error, updated_at = :updatedAt
             where node_id = :nodeId
               and request_id = :requestId
               and status = 'RUNNING'
-              and lease_token = :leaseToken
-              and lease_until > :updatedAt
-            """)
+              and """
+                + OWNED)
         .param("nodeId", run.getNodeId())
         .param("requestId", run.getRequestId())
         .param("status", run.getStatus())
@@ -187,13 +199,12 @@ public class CanvasFunctionRunJdbcStore {
             """
             update canvas_function_run
             set status = 'UNKNOWN', state_json = cast(:stateJson as jsonb), error = :error,
-                available_at = null, lease_token = null, lease_until = null, updated_at = :updatedAt
+                updated_at = :updatedAt
             where node_id = :nodeId
               and request_id = :requestId
               and status = 'RUNNING'
-              and lease_token = :leaseToken
-              and lease_until > :updatedAt
-            """)
+              and """
+                + OWNED)
         .param("nodeId", run.getNodeId())
         .param("requestId", run.getRequestId())
         .param("stateJson", run.getStateJson())
@@ -204,16 +215,11 @@ public class CanvasFunctionRunJdbcStore {
   }
 
   public int resumeUnknown(
-      UUID nodeId,
-      UUID requestId,
-      String stateJson,
-      OffsetDateTime availableAt,
-      OffsetDateTime updatedAt) {
+      UUID nodeId, UUID requestId, String stateJson, OffsetDateTime updatedAt) {
     return jdbc.sql(
             """
             update canvas_function_run
             set status = 'READY', state_json = cast(:stateJson as jsonb), error = null,
-                available_at = :availableAt, lease_token = null, lease_until = null,
                 updated_at = :updatedAt
             where node_id = :nodeId
               and request_id = :requestId
@@ -222,7 +228,6 @@ public class CanvasFunctionRunJdbcStore {
         .param("nodeId", nodeId)
         .param("requestId", requestId)
         .param("stateJson", stateJson)
-        .param("availableAt", availableAt)
         .param("updatedAt", updatedAt)
         .update();
   }
@@ -232,7 +237,7 @@ public class CanvasFunctionRunJdbcStore {
             """
             update canvas_function_run
             set status = :status, state_json = cast(:stateJson as jsonb), error = :error,
-                available_at = null, lease_token = null, lease_until = null, updated_at = :updatedAt
+                updated_at = :updatedAt
             where node_id = :nodeId
               and request_id = :requestId
               and status = 'UNKNOWN'
@@ -251,7 +256,7 @@ public class CanvasFunctionRunJdbcStore {
             """
             update canvas_function_run
             set status = :status, state_json = cast(:stateJson as jsonb), error = :error,
-                available_at = null, lease_token = null, lease_until = null, updated_at = :updatedAt
+                updated_at = :updatedAt
             where node_id = :nodeId
               and request_id = :requestId
               and status in ('READY', 'RUNNING')
@@ -262,6 +267,51 @@ public class CanvasFunctionRunJdbcStore {
         .param("stateJson", run.getStateJson())
         .param("error", run.getError())
         .param("updatedAt", run.getUpdatedAt())
+        .update();
+  }
+
+  /** 领取后开始新一次尝试：READY 或租约过期遗留的 RUNNING 进入 RUNNING 并递增 attempt；其余状态不写入。 */
+  public Optional<CanvasFunctionRunDO> startAttempt(UUID nodeId, OffsetDateTime updatedAt) {
+    return jdbc.sql(
+            """
+            update canvas_function_run
+            set status = 'RUNNING', attempt = attempt + 1, updated_at = :updatedAt
+            where node_id = :nodeId and status in ('READY', 'RUNNING')
+            returning
+            """
+                + COLUMNS)
+        .param("nodeId", nodeId)
+        .param("updatedAt", updatedAt)
+        .query(ROW_MAPPER)
+        .optional();
+  }
+
+  /** 持有者归还 claim 时把 RUNNING 退回 READY，等待下一次领取。 */
+  public int returnToReady(UUID nodeId, String leaseToken, OffsetDateTime updatedAt) {
+    return jdbc.sql(
+            """
+            update canvas_function_run
+            set status = 'READY', updated_at = :updatedAt
+            where node_id = :nodeId
+              and status = 'RUNNING'
+              and """
+                + OWNED)
+        .param("nodeId", nodeId)
+        .param("leaseToken", leaseToken)
+        .param("updatedAt", updatedAt)
+        .update();
+  }
+
+  /** 删除 Canvas 时先删除其全部 Run 的调度行。 */
+  public int deleteWorkByCanvas(UUID canvasId) {
+    return jdbc.sql(
+            """
+            delete from durable_work w
+            using canvas_function_run r, canvas_node n
+            where w.target_type = 'CANVAS_RUN' and w.target_id = r.node_id
+              and r.node_id = n.id and n.canvas_id = :canvasId
+            """)
+        .param("canvasId", canvasId)
         .update();
   }
 
