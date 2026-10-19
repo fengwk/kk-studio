@@ -99,32 +99,12 @@
   overflow-wrap: anywhere;
 }
 
-.ui-table-scroll {
-  max-width: 100%;
-  overflow-x: auto;
 }
 
-.ui-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: var(--font-size-sm);
 }
 
-.ui-table th,
-.ui-table td {
-  padding: var(--space-2) var(--space-3);
-  border-bottom: 1px solid var(--border);
-  text-align: left;
-  vertical-align: baseline;
 }
 
-.ui-table th {
-  color: var(--fg-muted);
-  font-size: var(--font-size-xs);
-  font-weight: 600;
-  white-space: nowrap;
 }
 
-.ui-table tbody tr:hover {
-  background: var(--surface-hover);
 }
