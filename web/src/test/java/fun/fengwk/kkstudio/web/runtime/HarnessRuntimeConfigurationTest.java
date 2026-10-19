@@ -5,7 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.flywaydb.core.Flyway;
@@ -28,13 +27,11 @@ import fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlHarnessStore;
 import fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlRealtimeEventSink;
 import fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlRealtimeEventSource;
 import fun.fengwk.kkstudio.harness.infra.realtime.RealtimeEventSource;
-import fun.fengwk.kkstudio.harness.infra.resource.LocalFileResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.runtime.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
-import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryBackoffStrategy;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicyProvider;
@@ -46,8 +43,6 @@ import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.web.WebTestApplication;
 import fun.fengwk.kkstudio.web.events.postgresql.PostgresqlNotificationLoop;
 
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
@@ -111,7 +106,6 @@ class HarnessRuntimeConfigurationTest {
 
   @Autowired private HarnessRuntimeProperties properties;
   @Autowired private HarnessStore harnessStore;
-  @Autowired private ResourceStore resourceStore;
   @Autowired private SystemSettingsSnapshot systemSettingsSnapshot;
   @Autowired private RealtimeEventSink realtimeEventSink;
   @Autowired private RealtimeEventSource realtimeEventSource;
@@ -154,7 +148,6 @@ class HarnessRuntimeConfigurationTest {
   @Test
   void composesTheFullRuntimeBeanGraph() {
     assertInstanceOf(PostgresqlHarnessStore.class, harnessStore);
-    assertInstanceOf(LocalFileResourceStore.class, resourceStore);
     assertInstanceOf(PostgresqlRealtimeEventSource.class, realtimeEventSource);
     assertInstanceOf(PostgresqlRealtimeEventSink.class, realtimeEventSink);
     assertNotNull(threadProcessor);
@@ -181,21 +174,6 @@ class HarnessRuntimeConfigurationTest {
             Duration.ofSeconds(2),
             Duration.ofSeconds(60)),
         invocationRetryPolicyProvider.retryPolicy());
-  }
-
-  @Test
-  void resourceStoreRootIsCreatedAtStartup() {
-    Path root = properties.resolvedResourceRoot();
-    assertTrue(Files.isDirectory(root), "resource store root must exist: " + root);
-  }
-
-  @Test
-  void resourceStoreRejectsOverBudgetContent() {
-    int resourceMaxBytes =
-        Math.toIntExact(systemSettingsSnapshot.get().advanced().resourceMaxBytes());
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> resourceStore.put("text/plain", "too-big.bin", new byte[resourceMaxBytes + 1]));
   }
 
   @Test

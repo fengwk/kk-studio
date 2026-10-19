@@ -444,7 +444,7 @@ describe('ToolMessageBlock per-tool bodies', () => {
           arguments: '{"path":"/app/file.ts"}',
           contents: [
             text('first text'),
-            resource({ type: 'file', name: 'out.txt', mime: 'text/plain', data: 'file:///tmp/out.txt' }),
+            resource({ type: 'file', name: 'out.txt', mime: 'text/plain', data: 'https://example.test/out.txt' }),
             { type: 'json', value: '{"nested":true,"n":1}' },
             text('last text'),
           ],
@@ -880,7 +880,6 @@ describe('ToolMessageBlock resources and approvals', () => {
               name: 'remote.png',
               mime: 'image/png',
               data: 'https://example.com/remote.png',
-              downloadHref: 'https://example.com/remote.png',
             }),
           ],
         })}
@@ -914,14 +913,14 @@ describe('ToolMessageBlock resources and approvals', () => {
             type: 'file',
             name: 'manifest.json',
             mime: 'application/json',
-            data: 'file:///tmp/manifest.json',
+            data: 'https://example.test/manifest.json',
             preview: '{"version":1,"tools":["web-search"]}',
           })],
         })}
       />,
     )
 
-    expect(screen.getByText('file:///tmp/manifest.json')).toBeInTheDocument()
+    expect(screen.getByText('https://example.test/manifest.json')).toBeInTheDocument()
     expect(screen.getByText('{"version":1,"tools":["web-search"]}')).toBeInTheDocument()
     expect(screen.queryByRole('img')).not.toBeInTheDocument()
   })

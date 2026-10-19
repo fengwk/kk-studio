@@ -34,7 +34,7 @@ import java.util.UUID;
  * <p>在 Tool outcome Entry 插入前、同一 store 事务内：
  *
  * <ul>
- *   <li>只接受 Gateway 已准备的 {@code blob-upload} 引用，不读取 ResourceStore 或执行对象 I/O；
+ *   <li>只接受 Gateway 已准备的 {@code blob-upload} 引用，不执行对象 I/O；
  *   <li>引用走 {@code lockReady → retainRef → delete} 原子转移；
  *   <li>以权威 blob 事实复核 ref size/sha/mediaType，并保留宿主已验证的文本 metadata；
  *   <li>构造并返回携带完整结构化 facts 的 durable {@link ResourceMessageContent}；

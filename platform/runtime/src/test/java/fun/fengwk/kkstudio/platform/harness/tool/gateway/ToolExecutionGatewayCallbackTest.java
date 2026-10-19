@@ -78,7 +78,7 @@ class ToolExecutionGatewayCallbackTest {
         (ToolGatewayTestSupport.RecordingListener.Event.Succeeded) listener.events.get(0);
     // store 收到一次 put：mediaType 原样、内容精确；展示名稳定有用。
     assertEquals(1, listener.store.puts.size());
-    ToolGatewayTestSupport.FakeResourceStore.PutRecord put = listener.store.puts.get(0);
+    ToolGatewayTestSupport.FakeResourceStager.PutRecord put = listener.store.puts.get(0);
     assertEquals("image/png", put.mediaType());
     assertEquals("demo-result-1", put.name());
     assertArrayEquals(BINARY_BYTES, put.content());
@@ -108,7 +108,7 @@ class ToolExecutionGatewayCallbackTest {
         (ToolGatewayTestSupport.RecordingListener.Event.Succeeded) listener.events.get(0);
     assertEquals(1, listener.store.puts.size());
     // 多个文本块由 \n\n 聚合为一个 text/plain + .txt managed resource
-    ToolGatewayTestSupport.FakeResourceStore.PutRecord textPut = listener.store.puts.get(0);
+    ToolGatewayTestSupport.FakeResourceStager.PutRecord textPut = listener.store.puts.get(0);
     assertEquals("text/plain", textPut.mediaType());
     assertEquals("demo-result.txt", textPut.name());
     String expectedJoined = "small\n\n" + LARGE_TEXT + "\n\n" + LARGE_JSON;
@@ -247,22 +247,38 @@ class ToolExecutionGatewayCallbackTest {
   }
 
   @Test
-  void existingManagedResourceIsStagedBeforeDelivery() {
+  void uploadedResourcePassesThroughWithoutRestaging() {
     byte[] existing = new byte[] {1, 2, 3};
-    ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
-    ResourceRef ref = store.seed("text/plain", "existing", existing);
+    ResourceRef ref =
+        new ResourceRef(
+            ResourceRef.blobUploadUri(UUID.randomUUID()),
+            "text/plain",
+            "existing",
+            (long) existing.length,
+            ToolGatewayTestSupport.sha256(existing));
     ResourceResultContent existingContent = new ResourceResultContent(ref, "existing preview");
     ToolResult result =
         new ToolResult(
             "call-1", List.of(existingContent, new TextResultContent("inline")), false, "{}");
-    ToolGatewayTestSupport.RecordingListener listener = runHostSyncComplete(result, store);
-    assertEquals(1, listener.store.puts.size());
+    ToolGatewayTestSupport.RecordingListener listener = runHostSyncComplete(result);
+    assertTrue(listener.store.puts.isEmpty(), "已上传的资源不得重新 staging");
     ToolGatewayTestSupport.RecordingListener.Event.Succeeded succeeded =
         (ToolGatewayTestSupport.RecordingListener.Event.Succeeded) listener.events.get(0);
-    ResourceResultContent staged =
-        assertInstanceOf(ResourceResultContent.class, succeeded.result().contents().get(0));
-    assertTrue(staged.resource().uri().startsWith("blob-upload:"));
-    assertEquals(existingContent.preview(), staged.preview());
+    assertEquals(existingContent, succeeded.result().contents().get(0));
+  }
+
+  @Test
+  void resourceOutsideStorageIsRejectedAsInvalidResult() {
+    // 工具只能交付已进入对象存储的资源；任意外部 URI 不会被平台拉取或转存。
+    ResourceRef external =
+        new ResourceRef("https://example.com/out.txt", "text/plain", null, 3L, "a".repeat(64));
+    ToolResult result =
+        new ToolResult("call-1", List.of(new ResourceResultContent(external)), false, "{}");
+    ToolGatewayTestSupport.RecordingListener listener = runHostSyncComplete(result);
+    ToolGatewayTestSupport.RecordingListener.Event.Failed failed =
+        (ToolGatewayTestSupport.RecordingListener.Event.Failed) listener.events.get(0);
+    assertEquals("INVALID_RESULT", failed.failure().error().kind());
+    assertTrue(listener.store.puts.isEmpty());
   }
 
   @Test
@@ -298,7 +314,7 @@ class ToolExecutionGatewayCallbackTest {
     byte[] existing = new byte[] {1, 2, 3};
     ResourceRef ref =
         new ResourceRef(
-            "file:///resources/" + ToolGatewayTestSupport.sha256(existing),
+            ResourceRef.blobUploadUri(UUID.randomUUID()),
             "text/plain",
             null,
             (long) existing.length,
@@ -324,7 +340,8 @@ class ToolExecutionGatewayCallbackTest {
 
   @Test
   void storeIoFailureAfterAdmissionMapsToUnknown() {
-    ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
+    ToolGatewayTestSupport.FakeResourceStager store =
+        new ToolGatewayTestSupport.FakeResourceStager();
     store.putFailure = new IllegalStateException("disk full");
     ToolResult result =
         new ToolResult(
@@ -337,7 +354,8 @@ class ToolExecutionGatewayCallbackTest {
 
   @Test
   void uploadReferenceWithTextMetadataIsDeterministicInvalidResult() {
-    ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
+    ToolGatewayTestSupport.FakeResourceStager store =
+        new ToolGatewayTestSupport.FakeResourceStager();
     ResourceRef upload =
         new ResourceRef(
             ResourceRef.blobUploadUri(UUID.randomUUID()),
@@ -363,7 +381,8 @@ class ToolExecutionGatewayCallbackTest {
 
   @Test
   void storePutIllegalArgumentAfterPlanningMapsToUnknown() {
-    ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
+    ToolGatewayTestSupport.FakeResourceStager store =
+        new ToolGatewayTestSupport.FakeResourceStager();
     store.putFailure = new IllegalArgumentException("store contract violation");
     ToolResult result =
         new ToolResult(
@@ -469,7 +488,7 @@ class ToolExecutionGatewayCallbackTest {
           ToolGatewayTestSupport.gateway(
               ToolGatewayTestSupport.defaultCatalog(tool),
               new ToolGatewayTestSupport.FakeTransport(),
-              new ToolGatewayTestSupport.FakeResourceStore(),
+              new ToolGatewayTestSupport.FakeResourceStager(),
               executor);
       ToolGateway.StartResult started =
           gateway.start(
@@ -510,7 +529,8 @@ class ToolExecutionGatewayCallbackTest {
     ToolGatewayTestSupport.RecordingListener listener =
         new ToolGatewayTestSupport.RecordingListener();
     ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
-    ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
+    ToolGatewayTestSupport.FakeResourceStager store =
+        new ToolGatewayTestSupport.FakeResourceStager();
     ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(tool),
@@ -552,7 +572,7 @@ class ToolExecutionGatewayCallbackTest {
           ToolGatewayTestSupport.gateway(
               ToolGatewayTestSupport.defaultCatalog(tool),
               new ToolGatewayTestSupport.FakeTransport(),
-              new ToolGatewayTestSupport.FakeResourceStore(),
+              new ToolGatewayTestSupport.FakeResourceStager(),
               executor);
       ToolGateway.StartResult started =
           gateway.start(
@@ -587,7 +607,7 @@ class ToolExecutionGatewayCallbackTest {
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(),
             transport,
-            new ToolGatewayTestSupport.FakeResourceStore(),
+            new ToolGatewayTestSupport.FakeResourceStager(),
             executor);
     ToolGateway.StartResult started =
         gateway.start(
@@ -636,7 +656,7 @@ class ToolExecutionGatewayCallbackTest {
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
-            new ToolGatewayTestSupport.FakeResourceStore(),
+            new ToolGatewayTestSupport.FakeResourceStager(),
             executor);
     ToolGateway.StartResult started =
         gateway.start(
@@ -669,7 +689,8 @@ class ToolExecutionGatewayCallbackTest {
     ToolGatewayTestSupport.RecordingListener listener =
         new ToolGatewayTestSupport.RecordingListener();
     ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
-    ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
+    ToolGatewayTestSupport.FakeResourceStager store =
+        new ToolGatewayTestSupport.FakeResourceStager();
     ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(tool),
@@ -732,7 +753,8 @@ class ToolExecutionGatewayCallbackTest {
     ToolGatewayTestSupport.RecordingListener listener =
         new ToolGatewayTestSupport.RecordingListener();
     ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
-    ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
+    ToolGatewayTestSupport.FakeResourceStager store =
+        new ToolGatewayTestSupport.FakeResourceStager();
     ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(tool),
@@ -797,7 +819,8 @@ class ToolExecutionGatewayCallbackTest {
     ToolGatewayTestSupport.RecordingListener listener =
         new ToolGatewayTestSupport.RecordingListener();
     ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
-    ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
+    ToolGatewayTestSupport.FakeResourceStager store =
+        new ToolGatewayTestSupport.FakeResourceStager();
     ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(tool),
@@ -892,7 +915,7 @@ class ToolExecutionGatewayCallbackTest {
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
-            new ToolGatewayTestSupport.FakeResourceStore(),
+            new ToolGatewayTestSupport.FakeResourceStager(),
             executor);
     ToolGateway.StartResult started =
         gateway.start(
@@ -918,7 +941,7 @@ class ToolExecutionGatewayCallbackTest {
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
-            new ToolGatewayTestSupport.FakeResourceStore(),
+            new ToolGatewayTestSupport.FakeResourceStager(),
             executor);
     ToolGateway.StartResult started =
         gateway.start(
@@ -1004,7 +1027,8 @@ class ToolExecutionGatewayCallbackTest {
     transport.syncPartialCount = ToolExecutionGateway.MAX_BUFFERED_SIGNALS;
     ToolGatewayTestSupport.RecordingListener listener =
         new ToolGatewayTestSupport.RecordingListener();
-    ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
+    ToolGatewayTestSupport.FakeResourceStager store =
+        new ToolGatewayTestSupport.FakeResourceStager();
     ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
     ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
@@ -1037,7 +1061,8 @@ class ToolExecutionGatewayCallbackTest {
     transport.syncResult = ToolGatewayTestSupport.result("call-1", "done");
     ToolGatewayTestSupport.RecordingListener listener =
         new ToolGatewayTestSupport.RecordingListener();
-    ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
+    ToolGatewayTestSupport.FakeResourceStager store =
+        new ToolGatewayTestSupport.FakeResourceStager();
     listener.store = store;
     ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
     ToolExecutionGateway gateway =
@@ -1073,7 +1098,8 @@ class ToolExecutionGatewayCallbackTest {
             "call-1", List.of(new BinaryResultContent("image/png", BINARY_BYTES)), false, "{}");
     ToolGatewayTestSupport.RecordingListener listener =
         new ToolGatewayTestSupport.RecordingListener();
-    ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
+    ToolGatewayTestSupport.FakeResourceStager store =
+        new ToolGatewayTestSupport.FakeResourceStager();
     listener.store = store;
     ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
     ToolExecutionGateway gateway =
@@ -1105,7 +1131,8 @@ class ToolExecutionGatewayCallbackTest {
     ToolGatewayTestSupport.FakeTool tool = new ToolGatewayTestSupport.FakeTool(descriptor);
     ToolGatewayTestSupport.RecordingListener listener =
         new ToolGatewayTestSupport.RecordingListener();
-    ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
+    ToolGatewayTestSupport.FakeResourceStager store =
+        new ToolGatewayTestSupport.FakeResourceStager();
     ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
     ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
@@ -1155,7 +1182,7 @@ class ToolExecutionGatewayCallbackTest {
             false,
             "{}");
     ToolGatewayTestSupport.RecordingListener listener =
-        runHostSyncComplete(result, new ToolGatewayTestSupport.FakeResourceStore());
+        runHostSyncComplete(result, new ToolGatewayTestSupport.FakeResourceStager());
     ToolGatewayTestSupport.RecordingListener.Event.Failed failed =
         (ToolGatewayTestSupport.RecordingListener.Event.Failed) listener.events.get(0);
     assertEquals("INVALID_RESULT", failed.failure().error().kind());
@@ -1179,7 +1206,8 @@ class ToolExecutionGatewayCallbackTest {
     ToolGatewayTestSupport.RecordingListener listener =
         new ToolGatewayTestSupport.RecordingListener();
     ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
-    ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
+    ToolGatewayTestSupport.FakeResourceStager store =
+        new ToolGatewayTestSupport.FakeResourceStager();
     ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(tool),
@@ -1228,7 +1256,8 @@ class ToolExecutionGatewayCallbackTest {
     ToolGatewayTestSupport.RecordingListener listener =
         new ToolGatewayTestSupport.RecordingListener();
     ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
-    ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
+    ToolGatewayTestSupport.FakeResourceStager store =
+        new ToolGatewayTestSupport.FakeResourceStager();
     ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(tool),
@@ -1260,7 +1289,7 @@ class ToolExecutionGatewayCallbackTest {
         new ToolResult(
             "wrong-call", List.of(new BinaryResultContent("image/png", BINARY_BYTES)), false, "{}");
     ToolGatewayTestSupport.RecordingListener listener =
-        runHostSyncComplete(complete, new ToolGatewayTestSupport.FakeResourceStore());
+        runHostSyncComplete(complete, new ToolGatewayTestSupport.FakeResourceStager());
     ToolGatewayTestSupport.RecordingListener.Event.Failed failed =
         (ToolGatewayTestSupport.RecordingListener.Event.Failed) listener.events.get(0);
     assertEquals("INVALID_RESULT", failed.failure().error().kind());
@@ -1283,7 +1312,7 @@ class ToolExecutionGatewayCallbackTest {
     String details = "{\"data\":\"" + "y".repeat(padding) + "\"}";
     ToolResult result = new ToolResult("call-1", contents, false, details);
     ToolGatewayTestSupport.RecordingListener listener =
-        runHostSyncComplete(result, new ToolGatewayTestSupport.FakeResourceStore());
+        runHostSyncComplete(result, new ToolGatewayTestSupport.FakeResourceStager());
     ToolGatewayTestSupport.RecordingListener.Event.Failed failed =
         (ToolGatewayTestSupport.RecordingListener.Event.Failed) listener.events.get(0);
     assertEquals("INVALID_RESULT", failed.failure().error().kind());
@@ -1295,7 +1324,8 @@ class ToolExecutionGatewayCallbackTest {
 
   @Test
   void plannedRefMismatchAfterPutMapsToUnknown() {
-    ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
+    ToolGatewayTestSupport.FakeResourceStager store =
+        new ToolGatewayTestSupport.FakeResourceStager();
     store.mismatchReturnedRef = true;
     ToolResult result =
         new ToolResult(
@@ -1325,7 +1355,7 @@ class ToolExecutionGatewayCallbackTest {
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
-            new ToolGatewayTestSupport.FakeResourceStore(),
+            new ToolGatewayTestSupport.FakeResourceStager(),
             executor);
     ToolGateway.StartResult started =
         gateway.start(
@@ -1366,7 +1396,7 @@ class ToolExecutionGatewayCallbackTest {
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
-            new ToolGatewayTestSupport.FakeResourceStore(),
+            new ToolGatewayTestSupport.FakeResourceStager(),
             executor);
     ToolGateway.StartResult started =
         gateway.start(
@@ -1396,7 +1426,7 @@ class ToolExecutionGatewayCallbackTest {
             false,
             "{}");
     ToolGatewayTestSupport.RecordingListener listener =
-        runHostSyncComplete(result, new ToolGatewayTestSupport.FakeResourceStore(), maxBytes);
+        runHostSyncComplete(result, new ToolGatewayTestSupport.FakeResourceStager(), maxBytes);
     ToolGatewayTestSupport.RecordingListener.Event.Failed failed =
         (ToolGatewayTestSupport.RecordingListener.Event.Failed) listener.events.get(0);
     assertEquals(ToolResultFinalizer.OUTPUT_TOO_LARGE_KIND, failed.failure().error().kind());
@@ -1415,7 +1445,7 @@ class ToolExecutionGatewayCallbackTest {
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
-            new ToolGatewayTestSupport.FakeResourceStore(),
+            new ToolGatewayTestSupport.FakeResourceStager(),
             executor);
     ToolGateway.StartResult started =
         gateway.start(
@@ -1445,7 +1475,7 @@ class ToolExecutionGatewayCallbackTest {
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
-            new ToolGatewayTestSupport.FakeResourceStore(),
+            new ToolGatewayTestSupport.FakeResourceStager(),
             executor);
     ToolGateway.StartResult started =
         gateway.start(
@@ -1460,16 +1490,16 @@ class ToolExecutionGatewayCallbackTest {
   }
 
   private static ToolGatewayTestSupport.RecordingListener runHostSyncComplete(ToolResult result) {
-    return runHostSyncComplete(result, new ToolGatewayTestSupport.FakeResourceStore());
+    return runHostSyncComplete(result, new ToolGatewayTestSupport.FakeResourceStager());
   }
 
   private static ToolGatewayTestSupport.RecordingListener runHostSyncComplete(
-      ToolResult result, ToolGatewayTestSupport.FakeResourceStore store) {
+      ToolResult result, ToolGatewayTestSupport.FakeResourceStager store) {
     return runHostSyncComplete(result, store, ToolGatewayTestSupport.RESOURCE_MAX_BYTES);
   }
 
   private static ToolGatewayTestSupport.RecordingListener runHostSyncComplete(
-      ToolResult result, ToolGatewayTestSupport.FakeResourceStore store, int resourceMaxBytes) {
+      ToolResult result, ToolGatewayTestSupport.FakeResourceStager store, int resourceMaxBytes) {
     ToolGatewayTestSupport.FakeTool tool = new ToolGatewayTestSupport.FakeTool(DESCRIPTOR);
     tool.handler = (request, listener) -> listener.onComplete(result);
     ToolGatewayTestSupport.RecordingListener listener =
@@ -1496,11 +1526,11 @@ class ToolExecutionGatewayCallbackTest {
   }
 
   private static ToolGatewayTestSupport.RecordingListener runHostPartial(ToolResult partial) {
-    return runHostPartial(partial, new ToolGatewayTestSupport.FakeResourceStore());
+    return runHostPartial(partial, new ToolGatewayTestSupport.FakeResourceStager());
   }
 
   private static ToolGatewayTestSupport.RecordingListener runHostPartial(
-      ToolResult partial, ToolGatewayTestSupport.FakeResourceStore store) {
+      ToolResult partial, ToolGatewayTestSupport.FakeResourceStager store) {
     ToolGatewayTestSupport.FakeTool tool = new ToolGatewayTestSupport.FakeTool(DESCRIPTOR);
     tool.handler = (request, listener) -> listener.onPartial(partial);
     ToolGatewayTestSupport.RecordingListener listener =
@@ -1535,7 +1565,7 @@ class ToolExecutionGatewayCallbackTest {
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
-            new ToolGatewayTestSupport.FakeResourceStore(),
+            new ToolGatewayTestSupport.FakeResourceStager(),
             executor);
     ToolGateway.StartResult started =
         gateway.start(
@@ -1551,7 +1581,7 @@ class ToolExecutionGatewayCallbackTest {
 
   private record RejectedTerminalRun(
       ToolGatewayTestSupport.RecordingListener listener,
-      ToolGatewayTestSupport.FakeResourceStore store,
+      ToolGatewayTestSupport.FakeResourceStager store,
       AtomicReference<ToolExecutionListener> bridge) {}
 
   private static RejectedTerminalRun runRejectedTerminal(
@@ -1568,7 +1598,8 @@ class ToolExecutionGatewayCallbackTest {
         new ToolGatewayTestSupport.RecordingListener();
     configure.accept(listener);
     ToolGatewayTestSupport.ManualExecutor executor = new ToolGatewayTestSupport.ManualExecutor();
-    ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
+    ToolGatewayTestSupport.FakeResourceStager store =
+        new ToolGatewayTestSupport.FakeResourceStager();
     ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(tool),

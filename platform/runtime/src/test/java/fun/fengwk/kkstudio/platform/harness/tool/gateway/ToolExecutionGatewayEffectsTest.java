@@ -260,8 +260,8 @@ class ToolExecutionGatewayEffectsTest {
     HarnessCatalog catalog = HarnessCatalog.from(List.of(contributor));
     ToolGatewayTestSupport.DirectQueueExecutor executor =
         new ToolGatewayTestSupport.DirectQueueExecutor();
-    ToolGatewayTestSupport.FakeResourceStore resourceStore =
-        new ToolGatewayTestSupport.FakeResourceStore();
+    ToolGatewayTestSupport.FakeResourceStager stager =
+        new ToolGatewayTestSupport.FakeResourceStager();
     ToolExecutionGateway gateway =
         new ToolExecutionGateway(
             TestRuntimeToolCatalogSource.of(catalog),
@@ -270,8 +270,7 @@ class ToolExecutionGatewayEffectsTest {
             new PermissionEvaluator(new BashSurfaceAnalyzer()),
             new ToolGatewayTestSupport.FixedToolSettingsProvider(
                 ToolGatewayTestSupport.settings(PermissionAction.ALLOW)),
-            resourceStore,
-            resourceStore,
+            stager,
             ToolGatewayTestSupport.RESOURCE_MAX_BYTES,
             executor,
             ToolGatewayTestSupport.OVERLOAD_RETRY_DELAY,
@@ -307,7 +306,7 @@ class ToolExecutionGatewayEffectsTest {
             ToolGatewayTestSupport.RecordingListener.Event.Failed.class, listener.events.get(0));
     assertEquals(
         ToolExecutionGateway.CONTRIBUTOR_CONTRACT_VIOLATION_KIND, failed.failure().error().kind());
-    assertTrue(resourceStore.puts.isEmpty(), "must not perform any ResourceStore write");
+    assertTrue(stager.puts.isEmpty(), "must not stage any resource");
   }
 
   @Test
@@ -349,8 +348,8 @@ class ToolExecutionGatewayEffectsTest {
     HarnessCatalog catalog = HarnessCatalog.from(List.of(contributor));
     ToolGatewayTestSupport.DirectQueueExecutor executor =
         new ToolGatewayTestSupport.DirectQueueExecutor();
-    ToolGatewayTestSupport.FakeResourceStore resourceStore =
-        new ToolGatewayTestSupport.FakeResourceStore();
+    ToolGatewayTestSupport.FakeResourceStager stager =
+        new ToolGatewayTestSupport.FakeResourceStager();
     ToolExecutionGateway gateway =
         new ToolExecutionGateway(
             TestRuntimeToolCatalogSource.of(catalog),
@@ -359,8 +358,7 @@ class ToolExecutionGatewayEffectsTest {
             new PermissionEvaluator(new BashSurfaceAnalyzer()),
             new ToolGatewayTestSupport.FixedToolSettingsProvider(
                 ToolGatewayTestSupport.settings(PermissionAction.ALLOW)),
-            resourceStore,
-            resourceStore,
+            stager,
             ToolGatewayTestSupport.RESOURCE_MAX_BYTES,
             executor,
             ToolGatewayTestSupport.OVERLOAD_RETRY_DELAY,
@@ -396,7 +394,7 @@ class ToolExecutionGatewayEffectsTest {
             ToolGatewayTestSupport.RecordingListener.Event.Failed.class, listener.events.get(0));
     assertEquals(
         ToolExecutionGateway.CONTRIBUTOR_CONTRACT_VIOLATION_KIND, failed.failure().error().kind());
-    assertTrue(resourceStore.puts.isEmpty(), "must not perform any ResourceStore write");
+    assertTrue(stager.puts.isEmpty(), "must not stage any resource");
   }
 
   private static Tool statefulTool(ToolOutcome outcome) {
@@ -447,8 +445,8 @@ class ToolExecutionGatewayEffectsTest {
         };
     ToolGatewayTestSupport.DirectQueueExecutor executor =
         new ToolGatewayTestSupport.DirectQueueExecutor();
-    ToolGatewayTestSupport.FakeResourceStore resourceStore =
-        new ToolGatewayTestSupport.FakeResourceStore();
+    ToolGatewayTestSupport.FakeResourceStager stager =
+        new ToolGatewayTestSupport.FakeResourceStager();
     ToolExecutionGateway gateway =
         new ToolExecutionGateway(
             TestRuntimeToolCatalogSource.of(catalog),
@@ -457,8 +455,7 @@ class ToolExecutionGatewayEffectsTest {
             new PermissionEvaluator(new BashSurfaceAnalyzer()),
             new ToolGatewayTestSupport.FixedToolSettingsProvider(
                 ToolGatewayTestSupport.settings(PermissionAction.ALLOW)),
-            resourceStore,
-            resourceStore,
+            stager,
             ToolGatewayTestSupport.RESOURCE_MAX_BYTES,
             executor,
             ToolGatewayTestSupport.OVERLOAD_RETRY_DELAY,
@@ -466,8 +463,8 @@ class ToolExecutionGatewayEffectsTest {
             admission);
     ToolGatewayTestSupport.RecordingListener listener =
         new ToolGatewayTestSupport.RecordingListener();
-    listener.store = resourceStore;
-    return new Fixture(gateway, executor, resourceStore, listener, loadedAssistantId);
+    listener.store = stager;
+    return new Fixture(gateway, executor, stager, listener, loadedAssistantId);
   }
 
   private static BranchView emptyBranch() {
@@ -492,7 +489,7 @@ class ToolExecutionGatewayEffectsTest {
   private record Fixture(
       ToolExecutionGateway gateway,
       ToolGatewayTestSupport.DirectQueueExecutor executor,
-      ToolGatewayTestSupport.FakeResourceStore resourceStore,
+      ToolGatewayTestSupport.FakeResourceStager stager,
       ToolGatewayTestSupport.RecordingListener listener,
       AtomicReference<UUID> loadedAssistantId) {
 

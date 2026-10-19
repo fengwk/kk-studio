@@ -40,13 +40,14 @@
 
 ## Resource 引用与 URI 校验
 
-[`ResourceRef`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/resource/ResourceRef.java) 是 `uri / mediaType / name? / size? / sha256?` 的不可变记录，允许 `data`、`file`、`s3`、`https`、`http`、`blob-upload` 六类 scheme。构造时先做全局约束，再按 scheme 校验；直接构造与 JSON 反序列化走同一入口，因此不会出现两种宽松度：
+[`ResourceRef`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/resource/ResourceRef.java) 是 `uri / mediaType / name? / size? / sha256?` 的不可变记录，允许 `data`、`https`、`http`、`blob-upload`、`kkstudio` 五类 scheme。构造时先做全局约束，再按 scheme 校验；直接构造与 JSON 反序列化走同一入口，因此不会出现两种宽松度：
 
 - URI 必须是不超过 128 KiB 的 canonical ASCII：非 ASCII、控制字符、反斜杠、相对 URI、大写 scheme 一律拒绝，且 `URI.create(uri).toASCIIString()` 必须与原串相等；百分号转义必须是大写 hex，且不得编码 NUL、`/`、`\` 与 unreserved 字符。
 - `mediaType` 必须是小写 `type/subtype`、不带参数、不超过 255 ASCII 字节；`name` 不得为空白、不得含控制字符、不超过 512 UTF-8 字节；`sha256` 必须是 64 位小写 hex；`size` 不得为负。
-- `data` / `file` / `s3` / `blob-upload` 必须携带非空 `size` 与 `sha256`，`http` / `https` 不要求。`data` 的 header 必须精确等于 `<mediaType>,` 或 `<mediaType>;base64,`，解码载荷不超过 64 KiB，且 `size` 必须等于解码长度、`sha256` 必须等于解码摘要；base64 载荷拒绝非规范 pad bits，非 base64 载荷必须使用 frozen 表示（原始 ASCII 仅限 unreserved 与 `/`，其余字节用大写 `%XX`）。
-- `file` 必须精确为 `file:///…` 空 authority、单前导斜杠、无 dot 或空 segment，且路径不得使用百分号编码；`s3` bucket 为 3–63 字符小写字母、数字、`-` 与 `.`，首尾必须是字母或数字、无连续点、不得形如 IP，key 不得为空、不得使用百分号编码、不得含 `.` 或 `..` segment；`http` / `https` 要求小写 host、不携带 userinfo/query/fragment、不显式声明默认端口、不含 dot segment。
+- `data` / `blob-upload` / `kkstudio` 必须携带非空 `size` 与 `sha256`，`http` / `https` 不要求。`data` 的 header 必须精确等于 `<mediaType>,` 或 `<mediaType>;base64,`，解码载荷不超过 64 KiB，且 `size` 必须等于解码长度、`sha256` 必须等于解码摘要；base64 载荷拒绝非规范 pad bits，非 base64 载荷必须使用 frozen 表示（原始 ASCII 仅限 unreserved 与 `/`，其余字节用大写 `%XX`）。
+- `http` / `https` 要求小写 host、不携带 userinfo/query/fragment、不显式声明默认端口、不含 dot segment。
 - `blob-upload:<uploadId>` 是 Environment Daemon 已把字节直传对象存储后的瞬时引用，不是可解引用地址：`blobUploadUri(UUID)` 构造、`blobUploadId()` 解析，消费方只能通过全局 Blob 上传契约把它转移为会话引用。
+- `kkstudio:/resources/<blobId>` 是 Session 已持有的全局 Blob 的 durable 引用：`sessionResourceUri(UUID)` 构造、`sessionBlobId()` 解析，消费方只能按 Session 引用权限复用同一 blob。
 
 [`ResourceUriValidator`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/resource/ResourceUriValidator.java) 是承载逐 scheme 规则的包私有实现，也是新增 scheme 时唯一需要改动的地方。
 

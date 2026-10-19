@@ -34,7 +34,7 @@ class ToolExecutionGatewayAdmissionTest {
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
-            new ToolGatewayTestSupport.FakeResourceStore(),
+            new ToolGatewayTestSupport.FakeResourceStager(),
             executor,
             ToolGatewayTestSupport.RESOURCE_MAX_BYTES,
             ToolGatewayTestSupport.settings(PermissionAction.ALLOW),
@@ -81,7 +81,7 @@ class ToolExecutionGatewayAdmissionTest {
               ToolGatewayTestSupport.defaultCatalog(
                   new ToolGatewayTestSupport.FakeTool(hostDescriptor)),
               transport,
-              new ToolGatewayTestSupport.FakeResourceStore(),
+              new ToolGatewayTestSupport.FakeResourceStager(),
               new ToolGatewayTestSupport.DirectQueueExecutor(),
               ToolGatewayTestSupport.RESOURCE_MAX_BYTES,
               ToolGatewayTestSupport.settings(PermissionAction.ALLOW),
@@ -118,7 +118,7 @@ class ToolExecutionGatewayAdmissionTest {
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(),
             new ToolGatewayTestSupport.FakeTransport(),
-            new ToolGatewayTestSupport.FakeResourceStore(),
+            new ToolGatewayTestSupport.FakeResourceStager(),
             new ToolGatewayTestSupport.DirectQueueExecutor(),
             ToolGatewayTestSupport.RESOURCE_MAX_BYTES,
             ToolGatewayTestSupport.settings(PermissionAction.ALLOW),
@@ -152,7 +152,7 @@ class ToolExecutionGatewayAdmissionTest {
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
-            new ToolGatewayTestSupport.FakeResourceStore(),
+            new ToolGatewayTestSupport.FakeResourceStager(),
             executor,
             ToolGatewayTestSupport.RESOURCE_MAX_BYTES,
             ToolGatewayTestSupport.settings(PermissionAction.ALLOW),
@@ -190,7 +190,7 @@ class ToolExecutionGatewayAdmissionTest {
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(),
             transport,
-            new ToolGatewayTestSupport.FakeResourceStore(),
+            new ToolGatewayTestSupport.FakeResourceStager(),
             new ToolGatewayTestSupport.DirectQueueExecutor(),
             ToolGatewayTestSupport.RESOURCE_MAX_BYTES,
             ToolGatewayTestSupport.settings(PermissionAction.ALLOW),
@@ -235,7 +235,7 @@ class ToolExecutionGatewayAdmissionTest {
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(),
             transport,
-            new ToolGatewayTestSupport.FakeResourceStore(),
+            new ToolGatewayTestSupport.FakeResourceStager(),
             executor,
             ToolGatewayTestSupport.RESOURCE_MAX_BYTES,
             ToolGatewayTestSupport.settings(PermissionAction.ALLOW),
@@ -284,7 +284,7 @@ class ToolExecutionGatewayAdmissionTest {
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
-            new ToolGatewayTestSupport.FakeResourceStore(),
+            new ToolGatewayTestSupport.FakeResourceStager(),
             executor,
             ToolGatewayTestSupport.RESOURCE_MAX_BYTES,
             ToolGatewayTestSupport.settings(PermissionAction.ALLOW),

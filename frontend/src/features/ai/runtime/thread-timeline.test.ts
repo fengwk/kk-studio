@@ -1374,7 +1374,7 @@ describe('thread timeline', () => {
           resultJson: JSON.stringify({
             contents: [
               { type: 'text', text: 'listed files' },
-              { type: 'resource', uri: 'file:///tmp/out.txt', mediaType: 'text/plain', name: 'out.txt', size: 4, sha256: 'a'.repeat(64) },
+              { type: 'resource', uri: 'blob-upload:00000000-0000-4000-8000-000000000001', mediaType: 'text/plain', name: 'out.txt', size: 4, sha256: 'a'.repeat(64) },
             ],
             error: false,
           }),

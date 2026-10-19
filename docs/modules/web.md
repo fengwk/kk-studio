@@ -29,7 +29,7 @@ Run 的完整定义只保存在执行状态中，普通 Run DTO 不回显它。
 
 [`HarnessRuntimeConfiguration`](../../web/src/main/java/fun/fengwk/kkstudio/web/runtime/HarnessRuntimeConfiguration.java)
 将 datasource/transaction manager 接入 PostgresqlHarnessStore，
-装配 ResourceStore、realtime source/sink、三个 Processor 与 Work dispatcher。
+装配 realtime source/sink、三个 Processor 与 Work dispatcher。
 timer 只唤醒和分派，heartbeat worker 执行续租事务，flush executor 执行 checkpoint 提交。
 该组合根还装配 Skill 同步和 PluginResourceGateway，因为它们需要 Harness 会话能力。
 
@@ -60,7 +60,6 @@ health、资源下载和 WebSocket 使用各自传输形式。公开路由如下
 | Session | `/api/harness/sessions/{sessionId}` | threads、entries（含读取时 `usageCost`）、name、草稿/历史请求预览 |
 | Thread | `/api/harness/threads/{threadId}` | Snapshot、执行树、name、Debug、协议预览、compact、yolo、stop、tool approval |
 | Interaction | `/api/interactions` | 等待分页（`total` 是同一过滤条件下真实可见的待处理计数）与 `/{interactionId}/input` 人工提交 |
-| Harness resource | `/api/harness/resources/{sha256}` | 内容寻址 Resource 下载 |
 | Canvas | `/api/canvases` | CRUD、Snapshot、commands、resource download/preview URL、节点 Function Run |
 | Function catalog | `/api/canvas-functions` | 函数 schema、输出计划、可用性 |
 | Storage | `/api/storage/uploads`、`/api/storage/blobs/{blobId}` | reserve/complete/delete 与短期 download/preview URL |

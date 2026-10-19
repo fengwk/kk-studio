@@ -116,8 +116,8 @@ class ToolExecutionGatewayPreflightTest {
     HarnessCatalog catalog =
         ToolGatewayTestSupport.defaultCatalog(
             new ToolGatewayTestSupport.FakeTool(PREFLIGHT_DESCRIPTOR));
-    ToolGatewayTestSupport.FakeResourceStore resourceStore =
-        new ToolGatewayTestSupport.FakeResourceStore();
+    ToolGatewayTestSupport.FakeResourceStager stager =
+        new ToolGatewayTestSupport.FakeResourceStager();
     ToolExecutionGateway gateway =
         new ToolExecutionGateway(
             TestRuntimeToolCatalogSource.of(catalog),
@@ -126,8 +126,7 @@ class ToolExecutionGatewayPreflightTest {
             evaluator,
             new ToolGatewayTestSupport.FixedToolSettingsProvider(
                 ToolGatewayTestSupport.settings(PermissionAction.ALLOW)),
-            resourceStore,
-            resourceStore,
+            stager,
             ToolGatewayTestSupport.RESOURCE_MAX_BYTES,
             new ToolGatewayTestSupport.DirectQueueExecutor(),
             ToolGatewayTestSupport.OVERLOAD_RETRY_DELAY,
@@ -186,8 +185,8 @@ class ToolExecutionGatewayPreflightTest {
         new ToolGatewayTestSupport.CountingToolSettingsProvider(
             ToolGatewayTestSupport.settings(PermissionAction.ASK));
     HarnessCatalog catalog = ToolGatewayTestSupport.defaultCatalog();
-    ToolGatewayTestSupport.FakeResourceStore resourceStore =
-        new ToolGatewayTestSupport.FakeResourceStore();
+    ToolGatewayTestSupport.FakeResourceStager stager =
+        new ToolGatewayTestSupport.FakeResourceStager();
     ToolExecutionGateway gateway =
         new ToolExecutionGateway(
             TestRuntimeToolCatalogSource.of(catalog),
@@ -195,8 +194,7 @@ class ToolExecutionGatewayPreflightTest {
             new ToolGatewayTestSupport.FakeTransport(),
             evaluator,
             settingsProvider,
-            resourceStore,
-            resourceStore,
+            stager,
             ToolGatewayTestSupport.RESOURCE_MAX_BYTES,
             new ToolGatewayTestSupport.DirectQueueExecutor(),
             ToolGatewayTestSupport.OVERLOAD_RETRY_DELAY,
@@ -237,7 +235,7 @@ class ToolExecutionGatewayPreflightTest {
             ToolGatewayTestSupport.defaultCatalog(
                 new ToolGatewayTestSupport.FakeTool(PREFLIGHT_DESCRIPTOR)),
             new ToolGatewayTestSupport.FakeTransport(),
-            new ToolGatewayTestSupport.FakeResourceStore(),
+            new ToolGatewayTestSupport.FakeResourceStager(),
             new ToolGatewayTestSupport.DirectQueueExecutor(),
             ToolGatewayTestSupport.settings(PermissionAction.ASK));
 
@@ -256,7 +254,8 @@ class ToolExecutionGatewayPreflightTest {
   void preflightIsSideEffectFreeAndKeepsFrozenRequestUntouched() {
     ToolGatewayTestSupport.FakeTool tool = new ToolGatewayTestSupport.FakeTool(DESCRIPTOR);
     ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
-    ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
+    ToolGatewayTestSupport.FakeResourceStager store =
+        new ToolGatewayTestSupport.FakeResourceStager();
     HarnessCatalog catalog = ToolGatewayTestSupport.defaultCatalog(tool);
     ExecutorService executor = Executors.newSingleThreadExecutor();
     try {
@@ -303,7 +302,7 @@ class ToolExecutionGatewayPreflightTest {
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
-            new ToolGatewayTestSupport.FakeResourceStore(),
+            new ToolGatewayTestSupport.FakeResourceStager(),
             new ToolGatewayTestSupport.DirectQueueExecutor(),
             ToolGatewayTestSupport.settings(PermissionAction.ASK));
     ToolGateway.PreflightResult result =
@@ -348,7 +347,7 @@ class ToolExecutionGatewayPreflightTest {
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(),
             new ToolGatewayTestSupport.FakeTransport(),
-            new ToolGatewayTestSupport.FakeResourceStore(),
+            new ToolGatewayTestSupport.FakeResourceStager(),
             new ToolGatewayTestSupport.DirectQueueExecutor(),
             settings);
     ContributorBinding contributor =
@@ -379,7 +378,7 @@ class ToolExecutionGatewayPreflightTest {
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
-            new ToolGatewayTestSupport.FakeResourceStore(),
+            new ToolGatewayTestSupport.FakeResourceStager(),
             new ToolGatewayTestSupport.DirectQueueExecutor(),
             settings);
     ToolInvocationRequest request =
@@ -427,7 +426,7 @@ class ToolExecutionGatewayPreflightTest {
         ToolGatewayTestSupport.gateway(
             TestRuntimeToolCatalogSource.of(harnessCatalog, mcpCatalog),
             new ToolGatewayTestSupport.FakeTransport(),
-            new ToolGatewayTestSupport.FakeResourceStore(),
+            new ToolGatewayTestSupport.FakeResourceStager(),
             new ToolGatewayTestSupport.DirectQueueExecutor(),
             ToolGatewayTestSupport.RESOURCE_MAX_BYTES,
             ToolGatewayTestSupport.settings(PermissionAction.ALLOW),

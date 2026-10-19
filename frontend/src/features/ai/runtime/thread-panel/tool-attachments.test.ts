@@ -46,12 +46,6 @@ describe('tool-attachments', () => {
       mime: 'image/png',
       data: 'https://example.test/image.png',
     })).toBe(false)
-    expect(isPreviewableAttachment({
-      type: 'image',
-      name: 'local',
-      mime: 'image/png',
-      data: 'file:///tmp/cover.png',
-    })).toBe(false)
     // http(s) 仍保持为规范的 LINK 目标（只能显式打开原始内容）。
     expect(getToolAttachmentHref({
       type: 'image',
@@ -61,45 +55,7 @@ describe('tool-attachments', () => {
     })).toBe('https://example.test/image.png')
   })
 
-  it('routes managed file:/s3: resources through the content-addressed download endpoint', () => {
-    const fileAttachment = {
-      type: 'file' as const,
-      name: 'result.json',
-      mime: 'application/json',
-      data: 'file:///tmp/result.json',
-      size: 12,
-      sha256: 'a'.repeat(64),
-      downloadHref:
-        `/api/harness/resources/${'a'.repeat(64)}`
-        + '?mediaType=application%2Fjson&size=12&name=result.json',
-    }
-    expect(toToolAttachmentSrc(fileAttachment)).toBeNull()
-    expect(isPreviewableAttachment(fileAttachment)).toBe(false)
-    expect(getToolAttachmentHref(fileAttachment)).toBe(
-      `/api/harness/resources/${'a'.repeat(64)}?mediaType=application%2Fjson&size=12&name=result.json`,
-    )
-    expect(formatToolAttachmentFallback(fileAttachment)).toBe('[file] result.json')
-
-    const s3Attachment = {
-      type: 'file' as const,
-      name: 'blob.bin',
-      mime: 'application/octet-stream',
-      data: 's3://bucket/obj',
-      size: 4,
-      sha256: 'b'.repeat(64),
-      downloadHref:
-        `/api/harness/resources/${'b'.repeat(64)}`
-        + '?mediaType=application%2Foctet-stream&size=4&name=blob.bin',
-    }
-    expect(toToolAttachmentSrc(s3Attachment)).toBeNull()
-    expect(isPreviewableAttachment(s3Attachment)).toBe(false)
-    expect(getToolAttachmentHref(s3Attachment)).toBe(
-      `/api/harness/resources/${'b'.repeat(64)}?mediaType=application%2Foctet-stream&size=4&name=blob.bin`,
-    )
-    expect(formatToolAttachmentFallback(s3Attachment)).toBe('[file] blob.bin')
-  })
-
-  it('only links direct safe schemes or complete managed resource identities', () => {
+  it('only links direct safe schemes', () => {
     expect(getToolAttachmentHref({ type: 'file', name: 'a', mime: '', data: 'https://x/y' })).toBe('https://x/y')
     expect(getToolAttachmentHref({ type: 'file', name: 'a', mime: '', data: 'file:///tmp/a' })).toBeNull()
     expect(getToolAttachmentHref({ type: 'file', name: 'a', mime: '', data: 's3://b/a' })).toBeNull()

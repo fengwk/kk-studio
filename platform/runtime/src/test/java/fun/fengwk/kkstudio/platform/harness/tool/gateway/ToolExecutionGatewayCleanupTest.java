@@ -453,7 +453,7 @@ class ToolExecutionGatewayCleanupTest {
           ToolGatewayTestSupport.gateway(
               source,
               new ToolGatewayTestSupport.FakeTransport(),
-              new ToolGatewayTestSupport.FakeResourceStore(),
+              new ToolGatewayTestSupport.FakeResourceStager(),
               executor,
               ToolGatewayTestSupport.RESOURCE_MAX_BYTES,
               ToolGatewayTestSupport.settings(PermissionAction.ALLOW),

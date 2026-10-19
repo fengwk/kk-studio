@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.platform.harness.tool.gateway;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -11,9 +10,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.platform.harness.configuration.HarnessRuntimeProperties;
 
-import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -21,28 +18,19 @@ import java.util.concurrent.RejectedExecutionHandler;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
-/**
- * {@link ToolExecutionGateway} 构造：生产 {@link HarnessRuntimeProperties} 构造器与路径解析、unsafe executor
- * 策略（inline / CallerRuns / 静默丢弃）的拒绝。
- */
+/** {@link ToolExecutionGateway} 构造：不注入默认目录、unsafe executor 策略（inline / CallerRuns / 静默丢弃）的拒绝。 */
 class ToolExecutionGatewayConstructionTest {
 
   private static final ToolDescriptor DESCRIPTOR = ToolGatewayTestSupport.hostDescriptor("demo");
 
-  /**
-   * 测试意图：生产 {@link HarnessRuntimeProperties} 构造器只承载 resourceRoot，不再向 gateway 注入任何默认目录；展开 host 调用时
-   * 也不得凭空出现 backend 侧默认路径。
-   */
+  /** 测试意图：gateway 不持有任何默认目录；展开 host 调用时也不得凭空出现 backend 侧默认路径。 */
   @Test
-  void productionPropertiesConstructorInjectsNoDefaultWorkdir() {
-    HarnessRuntimeProperties properties = new HarnessRuntimeProperties();
-    properties.setResourceRoot(Path.of(".kkstudio/resources"));
+  void gatewayInjectsNoDefaultWorkdir() {
     ToolExecutionGateway gateway =
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(new ToolGatewayTestSupport.FakeTool(DESCRIPTOR)),
             new ToolGatewayTestSupport.FakeTransport(),
-            new ToolGatewayTestSupport.FakeResourceStore(),
-            properties,
+            new ToolGatewayTestSupport.FakeResourceStager(),
             new ToolGatewayTestSupport.DirectQueueExecutor(),
             ToolGatewayTestSupport.settings(PermissionAction.ASK));
     ToolGateway.Ask ask =
@@ -51,7 +39,6 @@ class ToolExecutionGatewayConstructionTest {
             gateway.preflight(ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR)));
     assertFalse(ask.reason().contains("(default)"), ask.reason());
     assertFalse(ask.reason().contains(" in "), ask.reason());
-    assertEquals(Path.of(".kkstudio/resources"), properties.getResourceRoot());
   }
 
   @Test
@@ -72,7 +59,7 @@ class ToolExecutionGatewayConstructionTest {
                   ToolGatewayTestSupport.gateway(
                       ToolGatewayTestSupport.defaultCatalog(),
                       new ToolGatewayTestSupport.FakeTransport(),
-                      new ToolGatewayTestSupport.FakeResourceStore(),
+                      new ToolGatewayTestSupport.FakeResourceStager(),
                       executor));
       assertTrue(error.getMessage().contains("non-inline executor"), error.getMessage());
     } finally {
@@ -97,7 +84,7 @@ class ToolExecutionGatewayConstructionTest {
                     ToolGatewayTestSupport.gateway(
                         ToolGatewayTestSupport.defaultCatalog(),
                         new ToolGatewayTestSupport.FakeTransport(),
-                        new ToolGatewayTestSupport.FakeResourceStore(),
+                        new ToolGatewayTestSupport.FakeResourceStager(),
                         executor));
         assertTrue(error.getMessage().contains("silent discard"), error.getMessage());
       } finally {
@@ -117,7 +104,7 @@ class ToolExecutionGatewayConstructionTest {
                 ToolGatewayTestSupport.gateway(
                     ToolGatewayTestSupport.defaultCatalog(),
                     new ToolGatewayTestSupport.FakeTransport(),
-                    new ToolGatewayTestSupport.FakeResourceStore(),
+                    new ToolGatewayTestSupport.FakeResourceStager(),
                     executor));
     assertTrue(error.getMessage().contains("non-inline executor"), error.getMessage());
   }
@@ -132,7 +119,7 @@ class ToolExecutionGatewayConstructionTest {
           ToolGatewayTestSupport.gateway(
               ToolGatewayTestSupport.defaultCatalog(tool),
               new ToolGatewayTestSupport.FakeTransport(),
-              new ToolGatewayTestSupport.FakeResourceStore(),
+              new ToolGatewayTestSupport.FakeResourceStager(),
               executor);
       ToolGateway.StartResult started =
           gateway.start(

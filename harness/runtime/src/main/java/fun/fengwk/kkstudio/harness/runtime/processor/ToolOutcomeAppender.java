@@ -25,8 +25,8 @@ import java.util.UUID;
  * <p>SUCCEEDED 的 CUSTOM effects 按冻结顺序位于 ToolResult 之前；返回的 {@code headEntryId} 即 ToolResult Entry。本
  * appender 绝不 attach/更新 ToolInvocation 行：Terminal Tool 行始终表示 outcome 尚未进入 ToolResult
  * Entry，调用方在同一事务完成 Entry append 后物理删除子行与父 ModelInvocation。注入 {@link ToolResultHistoryMaterializer}
- * 时（可为 null），SUCCEEDED 结果在 Entry 插入前、同一事务内物化为 blob-backed durable 内容：持久化 message 绝不携带 瞬时 Resource
- * URI / ResourceStore 引用。
+ * 时（可为 null），SUCCEEDED 结果在 Entry 插入前、同一事务内物化为 blob-backed durable 内容：持久化 message 绝不携带瞬时 {@code
+ * blob-upload} 引用。
  */
 @Slf4j
 public final class ToolOutcomeAppender {

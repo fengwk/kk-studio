@@ -19,7 +19,6 @@ import fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlHarnessStore;
 import fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlRealtimeEventSink;
 import fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlRealtimeEventSource;
 import fun.fengwk.kkstudio.harness.infra.postgresql.RealtimeNotificationCodec;
-import fun.fengwk.kkstudio.harness.infra.resource.LocalFileResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
 import fun.fengwk.kkstudio.harness.runtime.port.ModelGateway;
@@ -36,7 +35,6 @@ import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorConfig;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessorConfig;
-import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicyProvider;
 import fun.fengwk.kkstudio.harness.runtime.retry.ModelHttpErrorPolicy;
@@ -55,7 +53,6 @@ import fun.fengwk.kkstudio.platform.harness.configuration.HarnessExecutionAdmiss
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.platform.harness.model.DatabaseProviderResolutionService;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewService;
-import fun.fengwk.kkstudio.platform.harness.resource.ManagedResourceDownloadService;
 import fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseTurnResolver;
 import fun.fengwk.kkstudio.platform.harness.thread.query.ModelRequestDebugService;
 import fun.fengwk.kkstudio.platform.plugin.PluginProperties;
@@ -70,9 +67,6 @@ import fun.fengwk.kkstudio.web.environment.ide.IdeLeaseCloseListener;
 
 import javax.sql.DataSource;
 
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
@@ -123,29 +117,6 @@ public class HarnessRuntimeConfiguration {
   public HarnessStore harnessStore(
       DataSource dataSource, PlatformTransactionManager transactionManager) {
     return new PostgresqlHarnessStore(dataSource, transactionManager, UUID::randomUUID);
-  }
-
-  /**
-   * 内容寻址的本地文件 {@link ResourceStore}，根目录取自 {@code kk-studio.harness.runtime.resource-root}，单对象上限由数据库
-   * SystemSettings.Advanced 的 {@code resourceMaxBytes} 控制（共享启动快照，DB 变更需重启生效）。启动时安全创建根目录。
-   */
-  @Bean
-  public ResourceStore harnessResourceStore(
-      HarnessRuntimeProperties properties, SystemSettingsSnapshot systemSettingsSnapshot) {
-    Path root = properties.resolvedResourceRoot();
-    int maxBytes = Math.toIntExact(systemSettingsSnapshot.get().advanced().resourceMaxBytes());
-    try {
-      Files.createDirectories(root);
-    } catch (IOException error) {
-      throw new IllegalStateException("cannot create resource store root: " + root, error);
-    }
-    return new LocalFileResourceStore(root, maxBytes);
-  }
-
-  @Bean
-  public ManagedResourceDownloadService managedResourceDownloadService(
-      ResourceStore resourceStore) {
-    return new ManagedResourceDownloadService(resourceStore);
   }
 
   /** Plugin 资源端口依赖 HarnessStore，因此由完整 Harness Runtime 的组合根创建；媒体传输构造前先安装统一代理。 */

@@ -309,7 +309,7 @@ class HistoryPayloadMapperTest {
   void toolResultPayloadSucceededDegradesResourceWithoutMaterializer() {
     ResourceRef resource =
         new ResourceRef(
-            "file:///report.txt",
+            "blob-upload:00000000-0000-4000-8000-000000000001",
             "text/plain",
             "report.txt",
             3L,
@@ -329,7 +329,7 @@ class HistoryPayloadMapperTest {
     assertEquals(
         "[Resource result available as metadata only: report.txt (text/plain)]\ncomplete preview",
         text);
-    assertFalse(text.contains("file:///report.txt"));
+    assertFalse(text.contains("blob-upload:00000000-0000-4000-8000-000000000001"));
   }
 
   @Test

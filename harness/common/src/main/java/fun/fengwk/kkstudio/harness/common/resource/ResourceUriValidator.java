@@ -65,14 +65,6 @@ final class ResourceUriValidator {
     }
     return switch (scheme) {
       case "data" -> validateData(parsed, mediaType, size, sha256);
-      case "file" -> {
-        validateFile(parsed, size, sha256);
-        yield null;
-      }
-      case "s3" -> {
-        validateS3(parsed, size, sha256);
-        yield null;
-      }
       case "blob-upload" -> {
         validateBlobUpload(parsed, size, sha256);
         yield null;
@@ -173,66 +165,6 @@ final class ResourceUriValidator {
     return decoded;
   }
 
-  /** file URI：精确 {@code file:///...}、无 authority/query/fragment、恰好一个前导斜杠、非空绝对路径、无 dot/空 segment。 */
-  private static void validateFile(URI parsed, Long size, String sha256) {
-    requireSizeAndSha(size, sha256, "file");
-    // java.net.URI 对空 authority 返回 null，无法区分 file:/x 与 file:///x；用 raw SSP 的前导 "///" 精确判定。
-    String ssp = parsed.getRawSchemeSpecificPart();
-    if (ssp == null || !ssp.startsWith("///")) {
-      throw new IllegalArgumentException("file uri must use exactly file:/// with empty authority");
-    }
-    if (parsed.getQuery() != null || parsed.getFragment() != null) {
-      throw new IllegalArgumentException("file uri must not carry query or fragment");
-    }
-    String rawPath = parsed.getRawPath();
-    if (rawPath == null || !rawPath.startsWith("/") || rawPath.startsWith("//")) {
-      throw new IllegalArgumentException("file uri must declare exactly one leading slash");
-    }
-    if (rawPath.indexOf('%') >= 0) {
-      throw new IllegalArgumentException("file uri path must not use percent encoding");
-    }
-    if (rawPath.length() == 1) {
-      throw new IllegalArgumentException("file uri path must not be empty");
-    }
-    String[] segments = rawPath.split("/", -1);
-    for (int index = 1; index < segments.length; index++) {
-      String segment = segments[index];
-      if (segment.isEmpty() || segment.equals(".") || segment.equals("..")) {
-        throw new IllegalArgumentException("file uri path segments must not be empty, '.' or '..'");
-      }
-    }
-  }
-
-  /** s3 URI：无 userinfo/port/query/fragment、小写合法 bucket、非空 key、无 dot/空 segment、原始 key 无百分号。 */
-  private static void validateS3(URI parsed, Long size, String sha256) {
-    requireSizeAndSha(size, sha256, "s3");
-    if (parsed.getUserInfo() != null || parsed.getPort() != -1) {
-      throw new IllegalArgumentException("s3 uri must not carry userinfo or port");
-    }
-    if (parsed.getQuery() != null || parsed.getFragment() != null) {
-      throw new IllegalArgumentException("s3 uri must not carry query or fragment");
-    }
-    // 用 raw authority 而非 getHost()：getHost() 对不合法 reg-name（如连续点）返回 null，会掩盖 bucket 具体错误。
-    validateBucket(parsed.getRawAuthority());
-    String rawPath = parsed.getRawPath();
-    if (rawPath == null || !rawPath.startsWith("/")) {
-      throw new IllegalArgumentException("s3 uri must declare a key path");
-    }
-    String key = rawPath.substring(1);
-    if (key.isEmpty()) {
-      throw new IllegalArgumentException("s3 uri key must not be empty");
-    }
-    if (key.indexOf('%') >= 0) {
-      throw new IllegalArgumentException("s3 uri key must not use percent encoding");
-    }
-    // URI.create + toASCIIString 一致性已把原始 key 字符限制在保守 ASCII（pchar + '/'）。
-    for (String segment : key.split("/", -1)) {
-      if (segment.isEmpty() || segment.equals(".") || segment.equals("..")) {
-        throw new IllegalArgumentException("s3 uri key segments must not be empty, '.' or '..'");
-      }
-    }
-  }
-
   /**
    * blob-upload URI：精确 {@code blob-upload:<canonical-uuid>} 的 opaque URI，无
    * authority/query/fragment，必须携带 非空 size/sha。
@@ -321,45 +253,6 @@ final class ResourceUriValidator {
     }
   }
 
-  /** 小写 DNS 风格 bucket：3-63 字符、字母/数字开头结尾、仅小写字母/数字/连字符/点、无连续点、不得形如 IP 地址。 */
-  private static void validateBucket(String bucket) {
-    if (bucket == null || bucket.length() < 3 || bucket.length() > 63) {
-      throw new IllegalArgumentException("s3 uri bucket must be 3-63 characters");
-    }
-    for (int index = 0; index < bucket.length(); index++) {
-      char character = bucket.charAt(index);
-      boolean legal =
-          (character >= 'a' && character <= 'z')
-              || (character >= '0' && character <= '9')
-              || character == '-'
-              || character == '.';
-      if (!legal) {
-        throw new IllegalArgumentException(
-            "s3 uri bucket must be lowercase letters, digits, '-' or '.'");
-      }
-    }
-    if (!isLowerAlnum(bucket.charAt(0)) || !isLowerAlnum(bucket.charAt(bucket.length() - 1))) {
-      throw new IllegalArgumentException("s3 uri bucket must start and end with a letter or digit");
-    }
-    if (bucket.contains("..")) {
-      throw new IllegalArgumentException("s3 uri bucket must not contain consecutive dots");
-    }
-    String[] segments = bucket.split("\\.");
-    boolean ipLike = segments.length > 1;
-    for (String segment : segments) {
-      if (!isLowerAlnum(segment.charAt(0)) || !isLowerAlnum(segment.charAt(segment.length() - 1))) {
-        throw new IllegalArgumentException(
-            "s3 uri bucket labels must start and end with a letter or digit");
-      }
-      if (!segment.chars().allMatch(Character::isDigit)) {
-        ipLike = false;
-      }
-    }
-    if (ipLike) {
-      throw new IllegalArgumentException("s3 uri bucket must not be formatted as an IP address");
-    }
-  }
-
   private static void requireSizeAndSha(Long size, String sha256, String scheme) {
     if (size == null || sha256 == null) {
       throw new IllegalArgumentException(scheme + " uri requires non-null size and sha256");
@@ -424,9 +317,5 @@ final class ResourceUriValidator {
     } catch (NoSuchAlgorithmException error) {
       throw new IllegalStateException("SHA-256 unavailable", error);
     }
-  }
-
-  private static boolean isLowerAlnum(char character) {
-    return (character >= 'a' && character <= 'z') || (character >= '0' && character <= '9');
   }
 }
