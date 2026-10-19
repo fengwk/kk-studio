@@ -10,6 +10,8 @@
  * to the parsed JSON response (GET without a body, PUT with one), so tests never need a server.
  */
 
+import { isValidPort, splitUrl } from './url-split.mjs'
+
 export const DEFAULT_MODEL_CALL_TIMEOUT_MILLIS = 1800000
 export const DEFAULT_MODEL_CALL_IDLE_TIMEOUT_MILLIS = 120000
 
@@ -40,17 +42,6 @@ export class HttpError extends Error {
  * @property {string} defaultDescription
  */
 
-/** Split a URL the way a generic RFC 3986 parser does, without WHATWG special-scheme rewriting. */
-function splitUrl(raw) {
-  const match = /^(?:([A-Za-z][A-Za-z0-9+.-]*):)?(?:\/\/([^/?#]*))?([^?#]*)(?:\?([^#]*))?(?:#(.*))?$/s.exec(raw)
-  const [, scheme = '', netloc = '', , query = '', fragment = ''] = match
-  const hostPort = netloc.slice(netloc.lastIndexOf('@') + 1)
-  const bracketed = /^\[([^\]]*)\](?::(.*))?$/.exec(hostPort)
-  const hostname = bracketed ? bracketed[1] : hostPort.replace(/:[^:]*$/, '')
-  const port = bracketed ? bracketed[2] : hostPort.includes(':') ? hostPort.slice(hostPort.lastIndexOf(':') + 1) : undefined
-  return { scheme, netloc, hostname, port, query, fragment }
-}
-
 /** Validate and normalize a provider base URL safely without leaking URL values. */
 export function normalizeBaseUrl(baseUrlRaw, requiresV1Suffix, envName = '', providerName = '') {
   const context = (
@@ -70,7 +61,7 @@ export function normalizeBaseUrl(baseUrlRaw, requiresV1Suffix, envName = '', pro
   }
 
   const parsed = splitUrl(cleaned)
-  if (parsed.port !== undefined && parsed.port !== '' && !(/^\d+$/.test(parsed.port) && Number(parsed.port) <= 65535)) {
+  if (!isValidPort(parsed.port)) {
     throw new ValidationError(`Invalid base URL format${prefix}`)
   }
   if (!['http', 'https'].includes(parsed.scheme.toLowerCase())) {

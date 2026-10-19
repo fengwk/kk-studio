@@ -104,7 +104,7 @@ command -v docker >/dev/null 2>&1 || die "docker is required"
 docker info >/dev/null 2>&1 || die "Docker daemon is not available"
 docker compose version >/dev/null 2>&1 || die "docker compose is required"
 if [[ "$WITH_APP" == "true" ]]; then
-  command -v python3 >/dev/null 2>&1 || die "python3 is required for the Canvas API smoke"
+  command -v node >/dev/null 2>&1 || die "node is required for the Canvas API smoke"
 fi
 
 configure_build_proxy
@@ -175,509 +175,54 @@ step "Initializing and checking the MinIO bucket"
 "${COMPOSE[@]}" run --rm --no-deps minio-init
 
 step "Checking HTTP mock"
-"${COMPOSE[@]}" exec -T http-mock python -c '
-import json
-import urllib.request
+"${COMPOSE[@]}" exec -T http-mock node -e '
+const assert = require("node:assert/strict")
 
-with urllib.request.urlopen("http://127.0.0.1:8080/health", timeout=2) as response:
-    assert response.status == 200
-    assert json.load(response) == {"status": "ok"}
+async function main() {
+  const health = await fetch("http://127.0.0.1:8080/health", { signal: AbortSignal.timeout(2000) })
+  assert.equal(health.status, 200)
+  assert.deepEqual(await health.json(), { status: "ok" })
 
-request = urllib.request.Request(
-    "http://127.0.0.1:8080/v1/chat/completions",
-    data=json.dumps(
-        {"model": "acceptance-stub", "messages": [{"role": "user", "content": "probe"}]}
-    ).encode(),
-    headers={"Content-Type": "application/json"},
-    method="POST",
-)
-with urllib.request.urlopen(request, timeout=5) as response:
-    assert response.status == 200
-    assert response.headers.get_content_type() == "text/event-stream"
-    body = response.read().decode()
-    assert body.endswith("data: [DONE]\n\n"), body
-    chunks = []
-    for event in body.split("\n\n"):
-        if not event:
-            continue
-        assert event.startswith("data: "), event
-        data = event.removeprefix("data: ")
-        if data == "[DONE]":
-            continue
-        chunks.append(json.loads(data))
-    assert chunks, "no chat completion chunks"
-    assert all(chunk["object"] == "chat.completion.chunk" for chunk in chunks), chunks
-    assert chunks[0]["choices"][0]["delta"]["role"] == "assistant", chunks[0]
-    text = "".join(
-        chunk["choices"][0]["delta"].get("content", "") for chunk in chunks
-    )
-    assert text == "This is a deterministic offline acceptance stub response.", text
-    assert chunks[-1]["choices"][0]["finish_reason"] == "stop", chunks[-1]
+  const response = await fetch("http://127.0.0.1:8080/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model: "acceptance-stub", messages: [{ role: "user", content: "probe" }] }),
+    signal: AbortSignal.timeout(5000),
+  })
+  assert.equal(response.status, 200)
+  assert.equal(response.headers.get("content-type"), "text/event-stream")
+  const body = await response.text()
+  assert.ok(body.endsWith("data: [DONE]\n\n"), body)
+  const chunks = []
+  for (const event of body.split("\n\n")) {
+    if (!event) {
+      continue
+    }
+    assert.ok(event.startsWith("data: "), event)
+    const data = event.slice("data: ".length)
+    if (data !== "[DONE]") {
+      chunks.push(JSON.parse(data))
+    }
+  }
+  assert.ok(chunks.length > 0, "no chat completion chunks")
+  assert.ok(chunks.every((chunk) => chunk.object === "chat.completion.chunk"), JSON.stringify(chunks))
+  assert.equal(chunks[0].choices[0].delta.role, "assistant")
+  const text = chunks.map((chunk) => chunk.choices[0].delta.content ?? "").join("")
+  assert.equal(text, "This is a deterministic offline acceptance stub response.")
+  assert.equal(chunks.at(-1).choices[0].finish_reason, "stop")
+}
+
+main().catch((error) => {
+  console.error(error)
+  process.exit(1)
+})
 '
 
 if [[ "$WITH_APP" == "true" ]]; then
   step "Checking global Blob upload, Canvas consumption, Function runs, signed media GET, and offline Chat"
   CANVAS_TEST_APP_URL="http://127.0.0.1:${CANVAS_TEST_APP_PORT:-18088}" \
   CANVAS_TEST_IMAGE_FIXTURE="$REPO_ROOT/platform/runtime/src/test/resources/fun/fengwk/kkstudio/platform/canvas/resource/tiny.png" \
-  PYTHONPATH="$SCRIPT_DIR:${PYTHONPATH:-}" \
-    python3 - <<'PY'
-import base64
-import hashlib
-import json
-import os
-import time
-import urllib.error
-import urllib.request
-import uuid
-from pathlib import Path
-from offline_chat_payload import build_offline_chat_batch_request
-from offline_canvas_contract import (
-    assert_completed_run, assert_function_definitions, assert_patch,
-    assert_run_revision, definition_version, document_revision, function_batch,
-    resource_batch,
-)
-
-base_url = os.environ["CANVAS_TEST_APP_URL"]
-image = Path(os.environ["CANVAS_TEST_IMAGE_FIXTURE"]).read_bytes()
-
-
-def json_call(method: str, path: str, body: dict | None = None) -> dict:
-    data = None if body is None else json.dumps(body).encode()
-    headers = {} if data is None else {"Content-Type": "application/json"}
-    request = urllib.request.Request(
-        base_url + path, data=data, headers=headers, method=method
-    )
-    with urllib.request.urlopen(request, timeout=30) as response:
-        assert 200 <= response.status < 300
-        return json.load(response)["data"]
-
-
-def new_id() -> str:
-    return str(uuid.uuid4())
-
-
-def header(headers: dict, name: str) -> str:
-    return next(value for key, value in headers.items() if key.lower() == name.lower())
-
-
-def upserted_node(patch: dict, node_id: str) -> dict:
-    return next(
-        item["node"]
-        for item in patch["nodes"]
-        if item["op"] == "UPSERT" and item["node"]["id"] == node_id
-    )
-
-
-canvas = json_call("POST", "/api/canvases", {"title": "container-resource-smoke"})
-assert uuid.UUID(canvas["id"]).version == 4
-assert document_revision(canvas) == 0
-sha256 = hashlib.sha256(image).hexdigest()
-reservation = json_call(
-    "POST",
-    "/api/storage/uploads",
-    {
-        "filename": "tiny.png",
-        "mediaType": "image/png",
-        "sizeBytes": len(image),
-        "sha256": sha256,
-    },
-)
-assert "bucket" not in reservation and "key" not in reservation
-assert reservation["state"] == "PENDING"
-assert reservation["blobId"] is None
-assert uuid.UUID(reservation["id"]).version == 4
-presigned_put = reservation["presignedPut"]
-assert header(presigned_put["headers"], "if-none-match") == "*"
-assert header(presigned_put["headers"], "x-amz-checksum-sha256") == base64.b64encode(
-    bytes.fromhex(sha256)
-).decode()
-put = urllib.request.Request(
-    presigned_put["url"],
-    data=image,
-    headers=presigned_put.get("headers") or {},
-    method=presigned_put["method"],
-)
-with urllib.request.urlopen(put, timeout=30) as response:
-    assert response.status == 200
-
-# 同内容重放验证 create-only；不同内容重放同时受 create-only 与 checksum 保护。
-duplicate = urllib.request.Request(
-    presigned_put["url"],
-    data=image,
-    headers=presigned_put.get("headers") or {},
-    method=presigned_put["method"],
-)
-try:
-    urllib.request.urlopen(duplicate, timeout=30)
-except urllib.error.HTTPError as error:
-    assert error.code in (409, 412), error.code
-else:
-    raise AssertionError("create-only presigned PUT unexpectedly accepted a duplicate")
-
-replacement = bytes([image[0] ^ 0xFF]) + image[1:]
-overwrite = urllib.request.Request(
-    presigned_put["url"],
-    data=replacement,
-    headers=presigned_put.get("headers") or {},
-    method=presigned_put["method"],
-)
-try:
-    urllib.request.urlopen(overwrite, timeout=30)
-except urllib.error.HTTPError as error:
-    assert error.code in (400, 409, 412), error.code
-else:
-    raise AssertionError("create-only presigned PUT unexpectedly overwrote original")
-
-completed = json_call(
-    "POST",
-    f"/api/storage/uploads/{reservation['id']}/complete",
-)
-assert completed["id"] == reservation["id"]
-assert completed["state"] == "READY"
-assert completed["presignedPut"] is None
-assert uuid.UUID(completed["blobId"]).version == 4
-
-resource_node_id = new_id()
-resource_request = resource_batch(resource_node_id, completed["blobId"], new_id())
-resource_patch = json_call(
-    "POST",
-    f"/api/canvases/{canvas['id']}/commands",
-    resource_request,
-)
-assert_patch(resource_patch, 0)
-# 精确 replay 是空变化集，不再次创建资源或推进 revision。
-assert_patch(
-    json_call("POST", f"/api/canvases/{canvas['id']}/commands", resource_request),
-    1,
-    replay=True,
-)
-resource_node = upserted_node(resource_patch, resource_node_id)
-resource = resource_node["resources"][0]
-assert resource["blobId"] == completed["blobId"]
-assert resource["mediaType"] == "image/png"
-assert resource["width"] > 0 and resource["height"] > 0
-assert resource["sizeBytes"] == str(len(image))
-
-resource_snapshot = json_call("GET", f"/api/canvases/{canvas['id']}")
-assert document_revision(resource_snapshot["document"]) == 1
-assert len(resource_snapshot["nodes"]) == 1
-snapshot_resource_node = next(
-    node for node in resource_snapshot["nodes"] if node["id"] == resource_node_id
-)
-assert snapshot_resource_node["resources"][0]["id"] == resource["id"]
-
-original = json_call(
-    "POST",
-    f"/api/canvases/{canvas['id']}/resources/{resource['id']}/download-url",
-)
-with urllib.request.urlopen(original["url"], timeout=30) as response:
-    assert response.status == 200
-    assert response.read() == image
-
-preview = json_call(
-    "POST",
-    f"/api/canvases/{canvas['id']}/resources/{resource['id']}/preview-url",
-)
-assert "bucket" not in preview and "key" not in preview
-with urllib.request.urlopen(preview["url"], timeout=30) as response:
-    body = response.read()
-    assert response.status == 200
-    assert body.startswith(b"RIFF") and b"WEBP" in body[:16]
-
-function_node_id = new_id()
-function_patch = json_call(
-    "POST",
-    f"/api/canvases/{canvas['id']}/commands",
-    function_batch(
-        function_node_id, "generated", "fake-image",
-        {"prompt": "free deterministic image", "ratio": "16:9"}, new_id(),
-    ),
-)
-assert_patch(function_patch, 1)
-function_node = upserted_node(function_patch, function_node_id)
-request_id = new_id()
-# start 的 expectedVersion 只能来自真实目录项，绝不硬编码 epoch 或 fingerprint。
-fake_image_version = definition_version(
-    json_call("GET", "/api/canvas-functions"), "fake-image"
-)
-started = json_call(
-    "POST",
-    f"/api/canvases/{canvas['id']}/nodes/{function_node['id']}/function-run",
-    {"requestId": request_id, "expectedVersion": fake_image_version},
-)
-assert started["requestId"] == request_id
-for _ in range(120):
-    current = json_call(
-        "GET",
-        f"/api/canvases/{canvas['id']}/nodes/{function_node['id']}/function-run",
-    )
-    if current["status"] not in ("READY", "RUNNING"):
-        break
-    time.sleep(0.25)
-else:
-    raise AssertionError("fake-image FunctionRun did not reach terminal state")
-assert_completed_run(current, function_node_id, request_id)
-
-generated_snapshot = json_call("GET", f"/api/canvases/{canvas['id']}")
-generated_node = next(
-    node for node in generated_snapshot["nodes"] if node["id"] == function_node["id"]
-)
-assert assert_run_revision(generated_snapshot["document"], 2, 2) == 8
-assert len(generated_node["resources"]) == 1
-generated_resource = generated_node["resources"][0]
-assert generated_resource["kind"] == "IMAGE"
-assert generated_resource["name"] == "generated.png"
-generated_preview = json_call(
-    "POST",
-    f"/api/canvases/{canvas['id']}/resources/{generated_resource['id']}/preview-url",
-)
-with urllib.request.urlopen(generated_preview["url"], timeout=30) as response:
-    body = response.read()
-    assert response.status == 200
-    assert body.startswith(b"RIFF") and b"WEBP" in body[:16]
-
-# Offline seed/smoke: initialize opencli plugin through unified plugin configuration + secret API.
-# Secrets never enter seed or schema. Coordinates expectedEpoch/expectedRevision are obtained from GET.
-opencli_descriptor = json_call("GET", "/api/plugins/opencli")
-json_call(
-    "PUT",
-    "/api/plugins/opencli/configuration",
-    {
-        "expectedEpoch": opencli_descriptor["desiredEpoch"],
-        "expectedRevision": opencli_descriptor["desiredRevision"],
-        "valuesJson": json.dumps(
-            {
-                "enabled": True,
-                "baseUrl": "http://opencli-hub:8080",
-                "gptImage2": {
-                    "paidEnabled": True,
-                },
-                "seedance": {
-                    "enabled": True,
-                    "workspaceId": "mock-workspace",
-                    "statusPollIntervalMillis": 10,
-                    "maxWaitMillis": 30000,
-                },
-            },
-            separators=(",", ":"),
-        ),
-        "secretPatch": {
-            "apiKey": {
-                "operation": "SET",
-                "value": "synthetic-opencli-key",
-            },
-        },
-    },
-)
-for _ in range(80):
-    current_opencli = json_call("GET", "/api/plugins/opencli")
-    if (
-        current_opencli.get("status") == "CONNECTED"
-        and current_opencli.get("appliedEpoch") == current_opencli.get("desiredEpoch")
-        and current_opencli.get("appliedRevision") == current_opencli.get("desiredRevision")
-        and current_opencli.get("applicationError") is None
-    ):
-        break
-    time.sleep(0.1)
-else:
-    raise AssertionError(
-        f"opencli plugin configuration did not converge to applied CONNECTED state: {current_opencli}"
-    )
-
-assert_function_definitions(json_call("GET", "/api/canvas-functions"))
-
-
-def create_and_run(
-    function_name: str, name: str, parameters: dict, expected_checkpoint_count: int
-) -> dict:
-    version = definition_version(json_call("GET", "/api/canvas-functions"), function_name)
-    current = json_call("GET", f"/api/canvases/{canvas['id']}")
-    current_revision = document_revision(current["document"])
-    node_id = new_id()
-    patch = json_call(
-        "POST",
-        f"/api/canvases/{canvas['id']}/commands",
-        function_batch(
-            node_id, name, function_name,
-            {"prompt": f"mock {function_name}", **parameters}, new_id(),
-        ),
-    )
-    patch_revision = assert_patch(patch, current_revision)
-    node = upserted_node(patch, node_id)
-    request_id = new_id()
-    run = json_call(
-        "POST",
-        f"/api/canvases/{canvas['id']}/nodes/{node['id']}/function-run",
-        {"requestId": request_id, "expectedVersion": version},
-    )
-    for _ in range(160):
-        if run["status"] not in ("READY", "RUNNING"):
-            break
-        time.sleep(0.1)
-        run = json_call(
-            "GET", f"/api/canvases/{canvas['id']}/nodes/{node['id']}/function-run"
-        )
-    assert_completed_run(run, node_id, request_id)
-    snapshot = json_call("GET", f"/api/canvases/{canvas['id']}")
-    assert_run_revision(snapshot["document"], patch_revision, expected_checkpoint_count)
-    # 收尾后相同 requestId 重放不能启动新运行或改写资源；重放优先于版本校验。
-    replay = json_call(
-        "POST", f"/api/canvases/{canvas['id']}/nodes/{node_id}/function-run",
-        {"requestId": request_id, "expectedVersion": version},
-    )
-    assert replay == run, replay
-    assert json_call("GET", f"/api/canvases/{canvas['id']}") == snapshot
-    return next(item for item in snapshot["nodes"] if item["id"] == node["id"])
-
-
-gpt_node = create_and_run("gpt-image-2", "mock-gpt", {"ratio": "1:1"}, 4)
-assert len(gpt_node["resources"]) == 1
-assert gpt_node["resources"][0]["kind"] == "IMAGE"
-
-seedance_node = create_and_run(
-    # 默认 routes 为空；fake Hub 的首次 status 即 ready，无 generating 重试。
-    "seedance2.0fast", "mock-seedance", {"ratio": "16:9", "duration": 4}, 6
-)
-assert len(seedance_node["resources"]) == 1
-assert seedance_node["resources"][0]["kind"] == "VIDEO"
-
-# Offline Chat smoke: the stack starts with an empty catalog, so the smoke creates a
-# stub provider/model/agent through the catalog API. The provider endpoint resolves
-# to the in-stack http-mock SSE stub.
-stub = json_call(
-    "POST",
-    "/api/providers",
-    {
-        "name": "stub",
-        "description": "offline smoke stub",
-        "providerType": "openai",
-        "baseUrl": "http://stub.local:8080/v1",
-        "credential": "stub-key",
-        "modelCallTimeoutMillis": 1_800_000,
-        "modelCallIdleTimeoutMillis": 120_000,
-    },
-)
-assert stub["configured"] is True, stub
-zero = {
-    "inputPerMillionTokens": 0,
-    "outputPerMillionTokens": 0,
-    "cacheReadPerMillionTokens": 0,
-    "cacheWritePerMillionTokens": 0,
-    "cacheWriteLongPerMillionTokens": 0,
-    "reasoningPerMillionTokens": 0,
-}
-json_call(
-    "POST",
-    "/api/models",
-    {
-        "providerName": "stub",
-        "name": "acceptance-stub",
-        "modelId": "acceptance-stub",
-        "description": "offline smoke stub model",
-        "config": {
-            "limit": {"context": 128000, "output": 4096},
-            "abilities": {"tools": True, "reasoning": False, "inputModalities": ["TEXT"]},
-            "pricing": {
-                "currency": "USD",
-                "pricingTier": "default",
-                "serviceTier": "default",
-                "serviceTierMultiplier": 1,
-                "version": "v1",
-                **zero,
-            },
-            "defaultVariant": "default",
-            "variants": [{"id": "default"}],
-        },
-    },
-)
-json_call(
-    "POST",
-    "/api/agents",
-    {
-        "name": "default-assistant",
-        "description": "offline smoke stub agent",
-        "systemPrompt": "You are the offline smoke assistant.",
-        "model": "stub/acceptance-stub",
-        "variant": "default",
-        "config": {"tools": [], "skills": [], "subagents": []},
-    },
-)
-
-chat = json_call(
-    "POST",
-    "/api/chats",
-    {"title": "offline-chat-smoke", "agentName": "default-assistant", "yoloEnabled": False},
-)
-assert chat["agentName"] == "default-assistant", chat
-marker = "offline-chat-smoke-" + uuid.uuid4().hex[:8]
-# 唯一产品写入口：NEW_SESSION 一次原子创建 Session + ROOT + Thread 并接受首条 USER_MESSAGE。
-session_id = str(uuid.uuid4())
-thread_id = str(uuid.uuid4())
-accepted = json_call(
-    "POST",
-    "/api/command-batches",
-    build_offline_chat_batch_request(
-        chat_id=chat["id"],
-        session_id=session_id,
-        thread_id=thread_id,
-        command_id=new_id(),
-        marker=marker,
-    ),
-)
-thread = accepted["thread"]
-assert accepted["replayed"] is False, accepted
-assert accepted["acceptedCommands"][0]["type"] == "USER_MESSAGE", accepted
-# 不锁定 accepted 快照的瞬时 status（processor 可能已异步消费）；只锁定 threadId 归属，
-# 随后轮询等待 quiescent 收敛。
-assert thread["threadId"] == thread_id, thread
-for _ in range(240):
-    current = json_call(
-        "GET", f"/api/threads/{thread_id}"
-    )
-    candidate = current["thread"]
-    if (
-        candidate["status"] == "IDLE"
-        and candidate["processing"] is False
-        and len(current["queuedCommands"]) == 0
-        and current["modelInvocation"] is None
-        and len(current["toolInvocations"]) == 0
-    ):
-        break
-    time.sleep(0.25)
-else:
-    raise AssertionError(
-        f"offline Chat thread did not become quiescent: {json.dumps(current)}"
-    )
-assert current["thread"]["status"] == "IDLE", current
-assert not any(
-    entry["entryType"].upper() == "ASSISTANT_ERROR" for entry in current["entries"]
-), current["entries"]
-user_entries = [
-    entry
-    for entry in current["entries"]
-    if entry["entryType"].upper() == "MESSAGE"
-    and json.loads(entry["payloadJson"])["message"]["role"] == "USER"
-]
-assert user_entries, f"no durable USER entry: {json.dumps(current['entries'])}"
-assert marker in json.dumps(user_entries[-1]), current["entries"]
-assistant_entries = [
-    entry
-    for entry in current["entries"]
-    if entry["entryType"].upper() == "MESSAGE"
-    and json.loads(entry["payloadJson"])["message"]["role"] == "ASSISTANT"
-]
-assert assistant_entries, f"no durable assistant reply: {json.dumps(current['entries'])}"
-assistant_text = "".join(
-    content.get("text", "")
-    for content in json.loads(assistant_entries[-1]["payloadJson"])["message"]["contents"]
-    if content.get("type") == "text"
-)
-assert "offline acceptance stub" in assistant_text, assistant_text
-turn_end = next(
-    entry for entry in current["entries"] if entry["entryType"].upper() == "TURN_END"
-)
-assert json.loads(turn_end["payloadJson"])["outcome"] == "COMPLETED", turn_end
-PY
+    node "$SCRIPT_DIR/offline-smoke.mjs"
 fi
 
 step "All isolated container checks passed"

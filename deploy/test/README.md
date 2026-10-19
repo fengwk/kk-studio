@@ -153,7 +153,7 @@ route 文件格式：
 `http://opencli-hub:8080` 与 `http://comfyui:8080` 两个容器内地址访问。内置 fake Hub 只接受
 合成单 Bearer（默认 `synthetic-opencli-key`），上传、执行、查询、取消与资源下载各受保护端点均严格验证；
 offline smoke 经统一插件配置与 secret API 初始化，不将秘密明文写入 seed 或 schema。细粒度异常、
-origin、multipart 与状态边界由 [server.py](mock/server.py) 的 contract tests 覆盖。
+origin、multipart 与状态边界由 [server.mjs](mock/server.mjs) 的 contract tests 覆盖。
 
 ## 真实 Seedance prepare-only 边界
 
@@ -164,10 +164,10 @@ RUN_REAL_SEEDANCE_PREPARE_SMOKE=1 \
 SEEDANCE_WORKSPACE_ID=... \
 OPENCLI_HUB_BASE_URL=https://your-opencli-hub.example \
 OPENCLI_API_KEY=... \
-  ./scripts/dev/verify/smoke/seedance-prepare.sh --confirm-prepare-only
+  ./scripts/dev/verify/smoke/seedance-prepare.mjs --confirm-prepare-only
 ```
 
-[scripts/dev/verify/smoke/seedance-prepare.sh](../../scripts/dev/verify/smoke/seedance-prepare.sh) 硬编码 `seedance2.0fast`、
+[scripts/dev/verify/smoke/seedance-prepare.mjs](../../scripts/dev/verify/smoke/seedance-prepare.mjs) 硬编码 `seedance2.0fast`、
 `duration=4`、`submit=0`、`retry=0`，只验证页面准备与 checkpoint，不点击真实生成、不创建
 FunctionRun、不下载或导入视频。`--confirm-prepare-only` 必须是唯一参数，同时要求
 `RUN_REAL_SEEDANCE_PREPARE_SMOKE=1`、非空 `SEEDANCE_WORKSPACE_ID`、非空
