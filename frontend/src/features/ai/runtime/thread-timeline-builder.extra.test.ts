@@ -819,12 +819,14 @@ describe('thread timeline edge branches', () => {
       decision: 'DENIED',
       decisionId: null,
       reason: null,
+      editReview: null,
     })
     expect(parseApproval(JSON.stringify({ decision: 'ALLOW' }))).toEqual({
       required: false,
       decision: null,
       decisionId: null,
       reason: null,
+      editReview: null,
     })
     expect(
       parseApproval(
@@ -840,12 +842,14 @@ describe('thread timeline edge branches', () => {
       decision: 'ALLOWED',
       decisionId: null,
       reason: null,
+      editReview: null,
     })
     expect(parseApproval('{"required":true}')).toEqual({
       required: true,
       decision: null,
       decisionId: null,
       reason: null,
+      editReview: null,
     })
   })
 })
