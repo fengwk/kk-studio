@@ -689,6 +689,29 @@ describe('LspClientPool Concurrency & Lifecycle', () => {
     expect(readEvents(transcript).filter((e) => e.event === 'start')).toHaveLength(1)
     await expectPoolCloseFailure(pool)
   })
+
+  it('surfaces last-waiter cleanup failure and never reopens the cancelled key', async () => {
+    const transcript = path.join(tempDir, 'cancelled-boot-cleanup-fail.jsonl')
+    const server = fakeServerConfig('java', 'no-init', transcript)
+    const pool = new LspClientPool(LspDiscovery.of([server]), failingTerminateSupervisor(), {
+      shutdownGrace: 0,
+    })
+    pools.push(pool)
+    const file = path.join(tempDir, 'App.java')
+    fs.writeFileSync(file, 'class App {}\n')
+    const controller = new AbortController()
+    const first = pool.lease(file, controller.signal).catch((error: unknown) => error)
+    await awaitEvent(transcript, (event) => event.event === 'recv' && event.message?.method === 'initialize')
+    controller.abort('TIMED_OUT')
+
+    // 取消不能掩盖物理清理失败，也不能在已拒绝的 boot 上忙循环或启动第二个实例。
+    const failure = await first
+    expect(failure).toBeInstanceOf(AggregateError)
+    expect((failure as Error).message).toContain('cleanup failed')
+    await expect(pool.lease(file)).rejects.toBe(failure)
+    expect(readEvents(transcript).filter((event) => event.event === 'start')).toHaveLength(1)
+    await expectPoolCloseFailure(pool)
+  })
 })
 
 // Fixture contract: a test supervisor must prove real stdio teardown, not just 'exit'. A child

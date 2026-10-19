@@ -18,7 +18,6 @@ import { OutputSpool, textOutputStoreFor } from './output.js'
 import {
   MAX_SKIP_DETAIL,
   STOP_CANCELLED,
-  STOP_NORMAL,
   STOP_TIMED_OUT,
   type SearchJob,
   type SearchReply,
@@ -29,9 +28,8 @@ import {
 /**
  * 搜索能力（fs.find / fs.grep）。
  *
- * <p>真实搜索在 Worker 线程执行（RE2/picomatch/ignore 的同步扫描不会阻塞主线程的事件循环），因此 AbortSignal、超时与心跳始终可响应；取消或超时对
- * Worker 执行硬终止（{@code terminate()}），返回稳定的 cancelled/timeout 结果。正常完成也要等 Worker 线程退出后再交付结果，确保搜索线程已释放。Worker
- * 只读文件并回传纯数据，输出 spool 与持久化状态只在主线程共享一份。
+ * <p>Worker 在扫描检查点观察调用停止信号，保留已收集结果并自然退出；只有停止后的清理宽限耗尽才强制终止。
+ * 父线程等待退出后再交付结果，输出 spool 与持久化状态只在主线程共享一份。
  */
 
 export { matchCenteredExcerpt, MAX_SKIP_DETAIL } from './search-core.js'
@@ -50,8 +48,14 @@ function applyStoppedDetails(result: CapabilityResult, reason: SearchStopReason)
   }
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+function searchFailure(callId: string, error: unknown, signal: AbortSignal): CapabilityResult {
+  const result = toErrorResult(callId, error)
+  if (signal.aborted) {
+    const reason = signal.reason === 'TIMED_OUT' ? 'TIMED_OUT' : 'CANCELLED'
+    result.details = { ...result.details, search: { outcome: reason, incomplete: true } }
+    result.contents.push({ type: 'text', text: stopNoticeFor(reason) })
+  }
+  return result
 }
 
 const findExecutor: CapabilityExecutor = async (call, context) => {
@@ -61,19 +65,18 @@ const findExecutor: CapabilityExecutor = async (call, context) => {
     const path = await resolveExistingPath(requiredString(args, 'path'))
     const limit = optionalPositiveInt(args, 'limit', 1000, 100000)
     const stopBuffer = new SharedArrayBuffer(4)
-    Atomics.store(new Int32Array(stopBuffer), 0, STOP_NORMAL)
     const job: SearchJob = { kind: 'find', pattern, path, limit, stopBuffer }
 
     const reply = await runSearchInWorker(job, context.signal)
     if (!reply.ok) {
-      return toErrorResult(call.invocationId, replyError(reply))
+      throw replyError(reply)
     }
     if (reply.kind !== 'find') {
       throw new ToolRunFailureError('search worker returned a mismatched result', 'INTERNAL')
     }
 
     const stopReason = reply.stopReason
-    const isStopped = stopReason === 'TIMED_OUT' || stopReason === 'CANCELLED'
+    const isStopped = stopReason !== null
     if (!isStopped && reply.matches.length === 0) {
       if (reply.skipped.length > 0) {
         return errorResult(
@@ -122,15 +125,7 @@ const findExecutor: CapabilityExecutor = async (call, context) => {
       await spool.close()
     }
   } catch (error) {
-    const result = toErrorResult(call.invocationId, error)
-    if (context.signal.aborted) {
-      const stopReason = context.signal.reason === 'TIMED_OUT' ? 'TIMED_OUT' : 'CANCELLED'
-      result.details = {
-        ...result.details,
-        search: { outcome: stopReason, incomplete: true },
-      }
-    }
-    return result
+    return searchFailure(call.invocationId, error, context.signal)
   }
 }
 
@@ -145,7 +140,6 @@ const grepExecutor: CapabilityExecutor = async (call, context) => {
     const ignoreCase = optionalBoolean(args, 'ignore_case')
     const include = optionalString(args, 'include')
     const stopBuffer = new SharedArrayBuffer(4)
-    Atomics.store(new Int32Array(stopBuffer), 0, STOP_NORMAL)
     const job: SearchJob = {
       kind: 'grep',
       pattern,
@@ -160,14 +154,14 @@ const grepExecutor: CapabilityExecutor = async (call, context) => {
 
     const reply = await runSearchInWorker(job, context.signal)
     if (!reply.ok) {
-      return toErrorResult(call.invocationId, replyError(reply))
+      throw replyError(reply)
     }
     if (reply.kind !== 'grep') {
       throw new ToolRunFailureError('search worker returned a mismatched result', 'INTERNAL')
     }
 
     const stopReason = reply.stopReason
-    const isStopped = stopReason === 'TIMED_OUT' || stopReason === 'CANCELLED'
+    const isStopped = stopReason !== null
     if (!isStopped && reply.lines.length === 0) {
       if (reply.skipped.length > 0) {
         return errorResult(
@@ -215,15 +209,7 @@ const grepExecutor: CapabilityExecutor = async (call, context) => {
       await spool.close()
     }
   } catch (error) {
-    const result = toErrorResult(call.invocationId, error)
-    if (context.signal.aborted) {
-      const stopReason = context.signal.reason === 'TIMED_OUT' ? 'TIMED_OUT' : 'CANCELLED'
-      result.details = {
-        ...result.details,
-        search: { outcome: stopReason, incomplete: true },
-      }
-    }
-    return result
+    return searchFailure(call.invocationId, error, context.signal)
   }
 }
 
@@ -275,37 +261,33 @@ function runSearchInWorker(job: SearchJob, signal: AbortSignal): Promise<SearchR
       }
     }
 
+    const failAfterCleanup = async (error: unknown): Promise<void> => {
+      if (settled) {
+        return
+      }
+      settled = true
+      clearGraceTimer()
+      signal.removeEventListener('abort', triggerStop)
+      try {
+        await worker.terminate()
+      } catch {
+        reject(new ToolRunFailureError('search worker cleanup failed; results incomplete', 'INTERNAL'))
+        return
+      }
+      reject(error)
+    }
+
     const triggerStop = (): void => {
       const code = signal.reason === 'TIMED_OUT' ? STOP_TIMED_OUT : STOP_CANCELLED
       Atomics.store(new Int32Array(job.stopBuffer), 0, code)
       if (graceTimer === null && !settled) {
         graceTimer = setTimeout(() => {
-          void (async () => {
-            if (settled) {
-              return
-            }
-            settled = true
-            clearGraceTimer()
-            signal.removeEventListener('abort', triggerStop)
-            try {
-              await worker.terminate()
-            } catch (termError) {
-              reject(
-                new ToolRunFailureError(
-                  `cleanup failed; results incomplete: ${errorMessage(termError)}`,
-                  'INTERNAL',
-                ),
-              )
-              return
-            }
-            const stopReason = code === STOP_TIMED_OUT ? 'TIMED_OUT' : 'CANCELLED'
-            reject(
-              new ToolRunFailureError(
-                `search worker did not respond within cleanup grace period after ${stopReason}; results incomplete`,
-                stopReason === 'TIMED_OUT' ? 'TIMEOUT' : 'CANCELLED',
-              ),
-            )
-          })()
+          void failAfterCleanup(
+            new ToolRunFailureError(
+              'search worker did not respond within cleanup grace period; results incomplete',
+              code === STOP_TIMED_OUT ? 'TIMEOUT' : 'CANCELLED',
+            ),
+          )
         }, CLEANUP_GRACE_MILLIS)
       }
     }
@@ -316,34 +298,15 @@ function runSearchInWorker(job: SearchJob, signal: AbortSignal): Promise<SearchR
       signal.addEventListener('abort', triggerStop, { once: true })
     }
 
-    worker.on('message', (reply: SearchReply) => {
+    worker.once('message', (reply: SearchReply) => {
       receivedReply = reply
     })
 
-    worker.on('error', (error: Error) => {
-      void (async () => {
-        if (settled) {
-          return
-        }
-        settled = true
-        clearGraceTimer()
-        signal.removeEventListener('abort', triggerStop)
-        try {
-          await worker.terminate()
-        } catch (termError) {
-          reject(
-            new ToolRunFailureError(
-              `cleanup failed; results incomplete: ${errorMessage(termError)}`,
-              'INTERNAL',
-            ),
-          )
-          return
-        }
-        reject(error)
-      })()
+    worker.once('error', (error: Error) => {
+      void failAfterCleanup(error)
     })
 
-    worker.on('exit', (code: number) => {
+    worker.once('exit', (code: number) => {
       if (settled) {
         return
       }
@@ -366,30 +329,7 @@ function runSearchInWorker(job: SearchJob, signal: AbortSignal): Promise<SearchR
     try {
       worker.postMessage(job)
     } catch (postError) {
-      void (async () => {
-        if (settled) {
-          return
-        }
-        settled = true
-        clearGraceTimer()
-        signal.removeEventListener('abort', triggerStop)
-        try {
-          await worker.terminate()
-        } catch (termError) {
-          reject(
-            new ToolRunFailureError(
-              `cleanup failed; results incomplete: ${errorMessage(termError)}`,
-              'INTERNAL',
-            ),
-          )
-          return
-        }
-        reject(
-          postError instanceof Error
-            ? postError
-            : new ToolRunFailureError(String(postError), 'INTERNAL'),
-        )
-      })()
+      void failAfterCleanup(postError)
     }
   })
 }

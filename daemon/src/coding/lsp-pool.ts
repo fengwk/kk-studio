@@ -20,6 +20,7 @@ interface Boot {
   published: boolean
   cancelled: boolean
   waiters: number
+  cleanupFailure: Error | null
 }
 
 interface Retiring {
@@ -168,6 +169,9 @@ export class LspClientPool {
       }
 
       let boot = this.boots.get(key)
+      if (boot?.cleanupFailure) {
+        throw boot.cleanupFailure
+      }
       if (boot && boot.cancelled) {
         // A cancelled boot is converging; wait for it to clear, then start a fresh one.
         await raceAbort(boot.promise.catch(() => {}), signal)
@@ -197,6 +201,9 @@ export class LspClientPool {
             boot.cancelled = true
             boot.abort.abort()
             await boot.promise.catch(() => {})
+            if (boot.cleanupFailure !== null) {
+              throw boot.cleanupFailure
+            }
           }
           throw stopError
         }
@@ -304,6 +311,7 @@ export class LspClientPool {
       published: false,
       cancelled: false,
       waiters: 0,
+      cleanupFailure: null,
     }
   }
 
@@ -318,10 +326,10 @@ export class LspClientPool {
     try {
       client = await LspClient.launch(server, root, executable, this.processes)
       boot.client = client
-      this.requireUsable(key, boot)
+      this.requireUsable(boot)
 
       await client.initialize(this.initializeTimeout, boot.abort.signal)
-      this.requireUsable(key, boot)
+      this.requireUsable(boot)
 
       const entry: PoolEntry = {
         key,
@@ -345,9 +353,10 @@ export class LspClientPool {
           // later lease for the same key shares this failure instead of launching a second server.
           const failure = toError(cleanupError)
           this.cleanupFailures.push(failure)
-          boot.reject(
-            new AggregateError([error, failure], 'LSP client startup failed and cleanup failed'),
+          boot.cleanupFailure = new AggregateError(
+            [error, failure], 'LSP client startup failed and cleanup failed',
           )
+          boot.reject(boot.cleanupFailure)
           return
         }
       }
@@ -358,8 +367,8 @@ export class LspClientPool {
     }
   }
 
-  /** Throws when the boot may no longer publish; the caller removes the registration and stops. */
-  private requireUsable(_key: string, boot: Boot): void {
+  /** Startup owns its registration until the process has stopped, including cancellation. */
+  private requireUsable(boot: Boot): void {
     if (this.closed || boot.generation !== this.generation || boot.cancelled) {
       throw new Error('LSP client startup cancelled')
     }

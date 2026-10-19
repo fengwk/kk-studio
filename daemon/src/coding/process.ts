@@ -79,6 +79,13 @@ const processExecutor: CapabilityExecutor = async (call, context) => {
     const command = requiredString(args, 'command')
     const workdir = await resolveWorkdir(requiredString(args, 'workdir'))
     const timeoutMillis = call.timeoutMillis
+    if (context.signal.aborted) {
+      return terminatedBeforeStart(
+        call.invocationId,
+        context.signal.reason === 'TIMED_OUT' ? 'TIMED_OUT' : 'CANCELLED',
+        timeoutMillis,
+      )
+    }
     const store = await textOutputStoreFor(context.config.dataDir)
 
     context.signal.addEventListener('abort', onAbort, { once: true })
@@ -95,15 +102,6 @@ const processExecutor: CapabilityExecutor = async (call, context) => {
     spool = new OutputSpool(store, call.invocationId)
     const emitter = new LiveEmitter(call.invocationId, context, () => cancelled || timedOut)
     const decoder = new ProcessUtf8Decoder()
-
-    if (cancelled || timedOut) {
-      await requestTermination()
-      return terminatedBeforeStart(
-        call.invocationId,
-        cancelled ? 'CANCELLED' : 'TIMED_OUT',
-        timeoutMillis,
-      )
-    }
 
     try {
       managed = await context.processes.start({
@@ -126,6 +124,9 @@ const processExecutor: CapabilityExecutor = async (call, context) => {
     // 启动 await 之后再次设围栏：取消/超时窗口内绝不继续排空，先收敛再给出明确去向。
     if (cancelled || timedOut) {
       await requestTermination()
+      if (terminationFailure !== null) {
+        return convergenceFailure(call.invocationId, spool)
+      }
       return terminatedBeforeStart(
         call.invocationId,
         cancelled ? 'CANCELLED' : 'TIMED_OUT',
