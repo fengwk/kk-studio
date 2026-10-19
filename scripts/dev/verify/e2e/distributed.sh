@@ -121,14 +121,7 @@ wait_http() {
 environment_status() {
   local app_url=$1
   local env_name=$2
-  curl -fsS "$app_url/api/environments" 2>/dev/null | node -e '
-let input = ""
-process.stdin.on("data", (chunk) => { input += chunk }).on("end", () => {
-  const rows = JSON.parse(input).data || []
-  const match = rows.find((row) => row.name === process.argv[1])
-  console.log(match ? (match.status ?? "None") : "MISSING")
-})
-' "$env_name"
+  curl -fsS "$app_url/api/environments" 2>/dev/null | node "$SCRIPT_DIR/lib/json-probe.mjs" environment-status "$env_name"
 }
 
 wait_environment_ready() {

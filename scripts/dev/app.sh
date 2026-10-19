@@ -306,7 +306,7 @@ test_env_unset_args() {
 
 # Synchronize complete real-provider credential pairs after backend readiness.
 sync_e2e_provider_credentials() {
-  require_cmd python3
+  require_cmd node
   step "Syncing provider E2E credentials from env (secrets not printed)"
   env \
     -u TEST_MINIMAX_BASE_URL -u TEST_MINIMAX_API_KEY \
