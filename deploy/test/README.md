@@ -10,7 +10,7 @@ Resource/Blob、fake Canvas Function、OpenCLI fake Hub adapter 和离线 Chat �
 ## 前置条件
 
 - Docker Engine 与 Docker Compose v2。
-- `--with-app` 还需要 Python 3（宿主侧 smoke 脚本）。
+- `--with-app` 还需要 Node（宿主侧 smoke 脚本）。
 - 所有宿主端口只绑定 `127.0.0.1`，服务位于本 Compose project 的独立 bridge 网络，不会加入
   生产或其它本地栈的网络。
 - Compose 中的账号都是固定、可丢弃的测试值，不要替换成生产凭据。默认流程不配置也不调用

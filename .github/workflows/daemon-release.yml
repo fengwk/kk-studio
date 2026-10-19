@@ -77,7 +77,7 @@ jobs:
           npm --prefix daemon run coverage
       - name: Test Unix installer and packaging with system Bash
         # fixture 代替网络与服务管理命令：不注册真实 systemd/launchd 服务，也不下载真实运行时。
-        run: python3 -m unittest discover -s scripts/daemon/tests -p 'test_*.py'
+        run: node --test scripts/daemon/tests/*.test.mjs
 
   validate_windows_daemon:
     name: validate Windows daemon installer
@@ -178,55 +178,7 @@ jobs:
       - name: Verify the repository version alignment
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          import json
-          import os
-          import pathlib
-          import sys
-          import xml.etree.ElementTree as ElementTree
-
-          POM_NAMESPACE = '{http://maven.apache.org/POM/4.0.0}'
-
-          def required_text(element, label):
-              value = None if element is None or element.text is None else element.text.strip()
-              if not value:
-                  raise SystemExit(f'cannot read {label} from pom.xml')
-              return value
-
-          def required_string(value, label):
-              if not isinstance(value, str) or value.strip() == '':
-                  raise SystemExit(f'cannot read {label}')
-              return value.strip()
-
-          project = ElementTree.parse('pom.xml').getroot()
-          expected = required_text(project.find(f'{POM_NAMESPACE}version'), 'the root <version>')
-          properties = project.find(f'{POM_NAMESPACE}properties')
-          declared = required_text(
-              None if properties is None else properties.find(f'{POM_NAMESPACE}kk-studio.version'),
-              'the kk-studio.version property',
-          )
-          package = json.loads(pathlib.Path('daemon/package.json').read_text(encoding='utf-8'))
-          daemon_version = required_string(package.get('version'), 'the daemon package version')
-          tag = os.environ.get('RELEASE_TAG', '')
-          tag_version = tag[1:] if tag.startswith('v') else tag
-          sources = {
-              'pom.xml <version>': expected,
-              'pom.xml kk-studio.version': declared,
-              'daemon/package.json version': daemon_version,
-              f'release tag {tag!r}': tag_version,
-          }
-          mismatches = [
-              f'{label} is {value!r}, expected {expected!r}'
-              for label, value in sources.items()
-              if value != expected
-          ]
-          if mismatches:
-              print('repository version alignment failed:', file=sys.stderr)
-              for mismatch in mismatches:
-                  print(f'- {mismatch}', file=sys.stderr)
-              raise SystemExit(1)
-          print(f'repository version {expected} is aligned across pom.xml, kk-studio.version, daemon/package.json and {tag}')
-          PY
+          node scripts/dev/verify/repository/check-version-alignment.mjs
       - name: Set up PostgreSQL client tools
         run: |
           set -euo pipefail
@@ -260,25 +212,12 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          # 每个能力的测试都放在自己的 tests/ 目录；CI 只发现目录，不维护能力清单。
-          python_dirs=(scripts/*/tests scripts/dev/verify/*/tests)
-          node_files=(scripts/*/tests/*.test.mjs scripts/dev/verify/*/tests/*.test.mjs)
-          if [ "${#python_dirs[@]}" -eq 0 ] || [ "${#node_files[@]}" -eq 0 ]; then
+          # 每个能力的测试都放在自己的 tests/ 目录；CI 只发现 *.test.mjs，不维护能力清单。
+          node_files=(scripts/*/tests/*.test.mjs scripts/dev/verify/*/tests/*.test.mjs deploy/test/mock/*.test.mjs)
+          if [ "${#node_files[@]}" -eq 0 ]; then
             echo "no script tests discovered below scripts/" >&2
             exit 1
           fi
-          python_ran=0
-          for dir in "${python_dirs[@]}"; do
-            if [ -z "$(find "${dir}" -name 'test_*.py' -print -quit)" ]; then
-              continue
-            fi
-            python3 -m unittest discover -s "${dir}"
-            python_ran=1
-          done
-          [ "${python_ran}" -eq 1 ] || {
-            echo "no python script tests discovered below scripts/" >&2
-            exit 1
-          }
           node --test "${node_files[@]}"
 
       # 编译 Node Daemon 的发行 JS；依赖已在上一步安装，生产依赖由 prepare-release.sh 按平台重装。
