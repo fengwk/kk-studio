@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.runtime.compaction;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -556,6 +557,141 @@ class CompactionPlannerTest {
             .anyMatch(m -> contentText(m).contains("aborted")));
   }
 
+  @Test
+  void editReviewDiffIncludedInBudgetEstimationWithoutDuplicatingDetails() {
+    String sha256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+    String extraDetails = "x".repeat(300);
+    String diff = "@@ -1 +1 @@\n-old\n+new";
+    String path = "src/A.java";
+    String detailsJson =
+        "{\"editReview\":{\"path\":\""
+            + path
+            + "\",\"diff\":\""
+            + diff.replace("\n", "\\n")
+            + "\",\"sha256\":\""
+            + sha256
+            + "\"},\"extra\":\""
+            + extraDetails
+            + "\"}";
+
+    ToolResultMetadata metadata =
+        new ToolResultMetadata(
+            id(1L), id(100L), "call-1", 0, ToolResultStatus.SUCCEEDED, false, null, null, null);
+    Entry plainEntry =
+        new Entry(
+            id(1L),
+            id(100L),
+            id(99L),
+            new MessagePayload(
+                new AgentMessage(
+                    AgentMessageRole.TOOL,
+                    List.of(
+                        new ToolResultMessageContent(
+                            "call-1",
+                            "read",
+                            "read",
+                            List.of(new TextMessageContent("ok")),
+                            false,
+                            "{}"))),
+                null,
+                metadata),
+            BASE);
+
+    Entry editEntry =
+        new Entry(
+            id(2L),
+            id(100L),
+            id(99L),
+            new MessagePayload(
+                new AgentMessage(
+                    AgentMessageRole.TOOL,
+                    List.of(
+                        new ToolResultMessageContent(
+                            "call-1",
+                            "edit",
+                            "edit",
+                            List.of(new TextMessageContent("ok")),
+                            false,
+                            detailsJson))),
+                null,
+                metadata),
+            BASE);
+
+    long plainTokens = CompactionPlanner.estimateTokens(plainEntry);
+    long editTokens = CompactionPlanner.estimateTokens(editEntry);
+
+    assertEquals(1L, plainTokens);
+    assertEquals(12L, editTokens);
+  }
+
+  @Test
+  void latestToolBatchProtectedWhenFollowedByNewUserMessage() {
+    String sha256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+    String detailsJson =
+        "{\"editReview\":{\"path\":\"src/App.java\",\"diff\":\"@@ -1 +1 @@\\n-old\\n+new\",\"sha256\":\""
+            + sha256
+            + "\"}}";
+
+    PathBuilder path = new PathBuilder();
+    path.root();
+    path.turn("turn 1 request");
+    path.assistantWithTool("calling edit", "call-1", "edit", "edit");
+    path.toolResult(
+        id(4L),
+        "call-1",
+        "edit",
+        "edit",
+        List.of(new TextMessageContent("Edited successfully.")),
+        detailsJson);
+    path.closeTurn();
+    path.turn("turn 2 user input");
+
+    CompactionPreparation preparation = plan(path, 20L).orElseThrow();
+
+    assertEquals(id(4L), preparation.cutEntryId());
+    List<AgentMessage> summarized = preparation.messagesToSummarize();
+    assertFalse(summarized.isEmpty());
+    for (AgentMessage message : summarized) {
+      assertNotEquals(AgentMessageRole.TOOL, message.role());
+      assertFalse(contentText(message).contains("calling edit"));
+    }
+  }
+
+  @Test
+  void nextAssistantConsumesPreviousToolBatchAllowingSubsequentCompaction() {
+    PathBuilder path = new PathBuilder();
+    path.root();
+    path.turn("task 1");
+    path.assistant("calling read 1", "call-1");
+    path.toolResult(id(4L), "call-1");
+    path.closeTurn();
+    path.turn("task 2");
+    path.assistant("calling read 2", "call-2");
+    path.toolResult(id(9L), "call-2");
+    path.closeTurn();
+
+    CompactionPreparation preparation = plan(path, 50L).orElseThrow();
+
+    assertEquals(id(9L), preparation.cutEntryId());
+    List<AgentMessage> summarized = preparation.messagesToSummarize();
+    assertTrue(summarized.stream().anyMatch(m -> m.role() == AgentMessageRole.TOOL));
+  }
+
+  @Test
+  void subsequentNotificationOrUserIsNotModelContinuation() {
+    PathBuilder path = new PathBuilder();
+    path.root();
+    path.turn("request");
+    path.assistant("call tool", "call-1");
+    path.toolResult(id(4L), "call-1");
+    path.closeTurn();
+    path.turn("user comment");
+
+    CompactionPreparation preparation = plan(path, 20L).orElseThrow();
+
+    assertEquals(id(4L), preparation.cutEntryId());
+  }
+
   private static PathBuilder closedTurnPath() {
     PathBuilder path = new PathBuilder();
     path.root();
@@ -682,6 +818,26 @@ class CompactionPlannerTest {
       return this;
     }
 
+    PathBuilder assistantWithTool(
+        String assistantText, String callId, String toolName, String rendererKey) {
+      List<AgentMessageContent> contents = new ArrayList<>();
+      contents.add(
+          new ToolCallMessageContent(callId, toolName, rendererKey, "{\"path\":\"a.txt\"}"));
+      contents.add(new TextMessageContent(text(assistantText)));
+      entries.add(
+          new Entry(
+              id(nextId++),
+              id(100L),
+              parentId(),
+              new MessagePayload(
+                  new AgentMessage(AgentMessageRole.ASSISTANT, contents),
+                  new AssistantMessageMetadata(
+                      GenerationStopReason.COMPLETE, new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L)),
+                  null),
+              BASE));
+      return this;
+    }
+
     /** 为最后一个（assistant）Entry 的每个 call 追加严格 callIndex 前缀的 TOOL result。 */
     PathBuilder toolResults() {
       UUID assistantEntryId = entries.get(entries.size() - 1).id();
@@ -740,6 +896,39 @@ class CompactionPlannerTest {
                               List.of(new TextMessageContent("ok")),
                               false,
                               "{}"))),
+                  null,
+                  new ToolResultMetadata(
+                      id(9304L),
+                      assistantEntryId,
+                      toolCallId,
+                      0,
+                      ToolResultStatus.SUCCEEDED,
+                      false,
+                      null,
+                      null,
+                      null)),
+              BASE));
+      return this;
+    }
+
+    PathBuilder toolResult(
+        UUID assistantEntryId,
+        String toolCallId,
+        String toolName,
+        String rendererKey,
+        List<AgentMessageContent> contents,
+        String detailsJson) {
+      entries.add(
+          new Entry(
+              id(nextId++),
+              id(100L),
+              parentId(),
+              new MessagePayload(
+                  new AgentMessage(
+                      AgentMessageRole.TOOL,
+                      List.of(
+                          new ToolResultMessageContent(
+                              toolCallId, toolName, rendererKey, contents, false, detailsJson))),
                   null,
                   new ToolResultMetadata(
                       id(9304L),

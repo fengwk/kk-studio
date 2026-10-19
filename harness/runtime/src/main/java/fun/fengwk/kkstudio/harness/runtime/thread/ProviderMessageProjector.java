@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.thread;
 
+import fun.fengwk.kkstudio.harness.runtime.history.ToolResultModelContents;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderJsonBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
@@ -189,7 +190,7 @@ public final class ProviderMessageProjector {
     return new ProviderToolResultBlock(
         content.toolCallId(),
         content.toolName(),
-        projectContents(content.contents()),
+        projectContents(ToolResultModelContents.contentsOf(content)),
         content.error(),
         content.detailsJson());
   }
