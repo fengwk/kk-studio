@@ -57,12 +57,12 @@ afterEach(async () => {
   )
 })
 
-const noTimeout = (name = 'find'): SearchControl => new SearchControl(null, name)
 const createStopBuffer = (initial = STOP_NORMAL): SharedArrayBuffer => {
   const buf = new SharedArrayBuffer(4)
   Atomics.store(new Int32Array(buf), 0, initial)
   return buf
 }
+const noTimeout = (): SearchControl => new SearchControl(createStopBuffer())
 
 const defaultGrep: GrepOptions = {
   multiline: false,
@@ -137,17 +137,17 @@ describe('grepFiles', () => {
     const dir = await tempDir()
     await writeFile(join(dir, 'a.txt'), 'Hello\nworld\n')
     await writeFile(join(dir, 'b.ts'), 'Hello\n')
-    const plain = await grepFiles('world', dir, 100, defaultGrep, noTimeout('grep'))
+    const plain = await grepFiles('world', dir, 100, defaultGrep, noTimeout())
     expect(plain.lines[0]?.endsWith('a.txt:2:world')).toBe(true)
 
-    const ignoreCase = await grepFiles('hello', dir, 100, { ...defaultGrep, ignoreCase: true }, noTimeout('grep'))
+    const ignoreCase = await grepFiles('hello', dir, 100, { ...defaultGrep, ignoreCase: true }, noTimeout())
     expect(ignoreCase.lines.length).toBe(2)
 
-    const include = await grepFiles('Hello', dir, 100, { ...defaultGrep, include: '*.ts' }, noTimeout('grep'))
+    const include = await grepFiles('Hello', dir, 100, { ...defaultGrep, include: '*.ts' }, noTimeout())
     expect(include.lines).toHaveLength(1)
     expect(include.lines[0]?.includes('b.ts')).toBe(true)
 
-    const literal = await grepFiles('wor.d', dir, 100, { ...defaultGrep, literal: true }, noTimeout('grep'))
+    const literal = await grepFiles('wor.d', dir, 100, { ...defaultGrep, literal: true }, noTimeout())
     expect(literal.lines).toEqual([])
   })
 
@@ -155,7 +155,7 @@ describe('grepFiles', () => {
     const dir = await tempDir()
     await writeFile(join(dir, 'bin.dat'), Buffer.from([0x00, 0x01, 0x02]))
     await writeFile(join(dir, 'a.txt'), 'x\n')
-    const outcome = await grepFiles('x', dir, 100, defaultGrep, noTimeout('grep'))
+    const outcome = await grepFiles('x', dir, 100, defaultGrep, noTimeout())
     expect(outcome.lines).toHaveLength(1)
     expect(outcome.skipped).toEqual([])
   })
@@ -164,7 +164,7 @@ describe('grepFiles', () => {
     const dir = await tempDir()
     const file = join(dir, 'bin.dat')
     await writeFile(file, Buffer.from([0x00, 0x01]))
-    await expect(grepFiles('x', file, 100, defaultGrep, noTimeout('grep'))).rejects.toThrowError(
+    await expect(grepFiles('x', file, 100, defaultGrep, noTimeout())).rejects.toThrowError(
       /binary/,
     )
   })
@@ -178,7 +178,7 @@ describe('grepFiles', () => {
       file,
       100,
       { ...defaultGrep, multiline: true },
-      noTimeout('grep'),
+      noTimeout(),
     )
     expect(outcome.lines).toEqual([`${toPosix(file)}:1:a`, `${toPosix(file)}:2:b`])
   })
@@ -191,7 +191,7 @@ describe('grepFiles', () => {
       join(dir, 'm.txt'),
       100,
       { ...defaultGrep, multiline: true },
-      noTimeout('grep'),
+      noTimeout(),
     )
     expect(outcome.lines.length).toBeGreaterThan(0)
   })
@@ -199,7 +199,7 @@ describe('grepFiles', () => {
   it('limit 达到时标注 moreMatches', async () => {
     const dir = await tempDir()
     await writeFile(join(dir, 'a.txt'), 'x\nx\nx\n')
-    const outcome = await grepFiles('x', dir, 1, defaultGrep, noTimeout('grep'))
+    const outcome = await grepFiles('x', dir, 1, defaultGrep, noTimeout())
     expect(outcome.moreMatches).toBe(true)
     expect(outcome.lines).toHaveLength(1)
   })
@@ -208,7 +208,7 @@ describe('grepFiles', () => {
     const dir = await tempDir()
     const line = `${'a'.repeat(600)}match${'b'.repeat(600)}`
     await writeFile(join(dir, 'long.txt'), `${line}\n`)
-    const outcome = await grepFiles('match', dir, 100, defaultGrep, noTimeout('grep'))
+    const outcome = await grepFiles('match', dir, 100, defaultGrep, noTimeout())
     expect(outcome.lines[0]).toContain('match')
     expect(outcome.lines[0]).toContain('line truncated to 500 chars')
   })
@@ -216,7 +216,7 @@ describe('grepFiles', () => {
   it('超过单行字符上界的行按 skip 处理', async () => {
     const dir = await tempDir()
     await writeFile(join(dir, 'huge.txt'), `${'a'.repeat(1024 * 1024 + 1)}\n`)
-    const outcome = await grepFiles('a', dir, 100, defaultGrep, noTimeout('grep'))
+    const outcome = await grepFiles('a', dir, 100, defaultGrep, noTimeout())
     expect(outcome.skipped.some((entry) => entry.reason.includes('1048576'))).toBe(true)
   })
 
@@ -227,7 +227,7 @@ describe('grepFiles', () => {
     await writeFile(join(blocked, 'a.txt'), 'x\n')
     blockedReads.add(blocked)
     try {
-      const outcome = await grepFiles('zzz', dir, 100, defaultGrep, noTimeout('grep'))
+      const outcome = await grepFiles('zzz', dir, 100, defaultGrep, noTimeout())
       expect(outcome.skipped.length).toBe(1)
     } finally {
       blockedReads.delete(blocked)
@@ -237,7 +237,7 @@ describe('grepFiles', () => {
   it('非文件非目录路径被拒绝', async () => {
     const dir = await tempDir()
     await expect(
-      grepFiles('x', join(dir, 'missing'), 100, defaultGrep, noTimeout('grep')),
+      grepFiles('x', join(dir, 'missing'), 100, defaultGrep, noTimeout()),
     ).rejects.toThrowError()
   })
 })
@@ -352,7 +352,7 @@ describe('runSearchJob 与辅助', () => {
   it('SearchControl 遇原子标记抛出 SearchStoppedError', () => {
     const buffer = new SharedArrayBuffer(4)
     const view = new Int32Array(buffer)
-    const control = new SearchControl(buffer, 'find')
+    const control = new SearchControl(buffer)
     // 初始状态 0 不抛错
     expect(() => control.check()).not.toThrow()
 
@@ -393,7 +393,7 @@ describe('确定性 control 注入与 partial 结果保留', () => {
       private readonly stopAtCheck: number = Infinity,
       private readonly reason: 'TIMED_OUT' | 'CANCELLED' = 'TIMED_OUT',
     ) {
-      super(null)
+      super(createStopBuffer())
     }
     override check(): void {
       this.checks++

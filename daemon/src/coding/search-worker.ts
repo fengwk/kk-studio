@@ -13,12 +13,12 @@ if (port === null) {
 }
 
 port.on('message', (job: SearchJob) => {
-  void runSearchJob(job)
-    .then((reply) => {
+  void (async () => {
+    try {
+      const reply = await runSearchJob(job)
       port.postMessage(reply)
+    } finally {
       port.close()
-    })
-    .catch(() => {
-      port.close()
-    })
+    }
+  })()
 })
