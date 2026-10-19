@@ -166,9 +166,9 @@ export async function main(argv = process.argv.slice(2)) {
 
 async function validatePreflight(ctx, daemonEnv) {
   const [providersResponse, modelsResponse, toolsResponse, environments] = await Promise.all([
-    ctx.call('GET', '/api/ai/catalog/providers?pageNumber=1&pageSize=100'),
-    ctx.call('GET', '/api/ai/catalog/models?pageNumber=1&pageSize=100'),
-    ctx.call('GET', '/api/ai/catalog/tools'),
+    ctx.call('GET', '/api/providers?pageNumber=1&pageSize=100'),
+    ctx.call('GET', '/api/models?pageNumber=1&pageSize=100'),
+    ctx.call('GET', '/api/tools'),
     listEnvironments(ctx),
   ])
   const providers = pageResults(providersResponse.json)
@@ -244,7 +244,7 @@ async function createTemporaryAgent(ctx, model, systemPrompt, runId, environment
       inheritParentEnvironment: true,
     },
   }
-  const { status, json } = await ctx.call('POST', '/api/ai/catalog/agents', body)
+  const { status, json } = await ctx.call('POST', '/api/agents', body)
   assert(status === 201, `create Agent status ${status}`)
   const agent = envelopeData(json)
   assert(agent?.name === name, `created Agent identity mismatch: ${JSON.stringify(agent)}`)
@@ -261,7 +261,7 @@ async function createTemporaryAgent(ctx, model, systemPrompt, runId, environment
 async function deleteAgent(ctx, agent) {
   await ctx.call(
     'DELETE',
-    `/api/ai/catalog/agents/${encodeURIComponent(agent.name)}?expectedVersion=${encodeURIComponent(agent.version)}`,
+    `/api/agents/${encodeURIComponent(agent.name)}?expectedVersion=${encodeURIComponent(agent.version)}`,
   )
 }
 
@@ -402,7 +402,7 @@ async function executeCase({ ctx, docker, runDir, testCase, agent, daemonEnv }) 
       try {
         await ctx.call(
           'DELETE',
-          `/api/ai/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
+          `/api/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
         )
       } catch (error) {
         if (result.status !== 'fail') {

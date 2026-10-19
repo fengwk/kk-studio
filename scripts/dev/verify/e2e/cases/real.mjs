@@ -82,7 +82,7 @@ export function buildTextCacheSystemPrompt() {
 export async function resolveRealModel(ctx, modelDef) {
   const { json: providersJson } = await ctx.call(
     'GET',
-    '/api/ai/catalog/providers?pageNumber=1&pageSize=50',
+    '/api/providers?pageNumber=1&pageSize=50',
   )
   const providers = pageResults(providersJson)
   const provider = providers.find((candidate) => candidate.name === modelDef.providerName)
@@ -105,7 +105,7 @@ export async function resolveRealModel(ctx, modelDef) {
 
   const { json: modelsJson } = await ctx.call(
     'GET',
-    '/api/ai/catalog/models?pageNumber=1&pageSize=50',
+    '/api/models?pageNumber=1&pageSize=50',
   )
   const models = pageResults(modelsJson)
   const model = models.find(
@@ -634,7 +634,7 @@ async function cleanupChat(ctx, chat) {
   try {
     await ctx.call(
       'DELETE',
-      `/api/ai/chats/${chat.id}?expectedVersion=${encodeURIComponent(chat.version ?? '0')}`,
+      `/api/chats/${chat.id}?expectedVersion=${encodeURIComponent(chat.version ?? '0')}`,
     )
   } catch {
     // 尽力 cleanup，保留主断言失败
@@ -646,7 +646,7 @@ async function cleanupAgent(ctx, agent) {
   try {
     await ctx.call(
       'DELETE',
-      `/api/ai/catalog/agents/${encodeURIComponent(agent.name)}?expectedVersion=${encodeURIComponent(agent.version ?? '0')}`,
+      `/api/agents/${encodeURIComponent(agent.name)}?expectedVersion=${encodeURIComponent(agent.version ?? '0')}`,
     )
   } catch {
     // 尽力 cleanup，保留主断言失败
@@ -691,7 +691,7 @@ for (const def of REAL_MODEL_DEFINITIONS) {
       let agent = null
       let chat = null
       try {
-        const { json: agentJson } = await ctx.call('POST', '/api/ai/catalog/agents', {
+        const { json: agentJson } = await ctx.call('POST', '/api/agents', {
           name: `e2e-cache-${def.idSuffix}-${suffix}`,
           description: `Temporary text cache agent for ${def.title}.`,
           systemPrompt,
@@ -912,7 +912,7 @@ export async function runRealReasoningLevelsSmoke(ctx, def) {
     try {
       const varSuffix = cid().slice(0, 8)
       const varMarker = `REASON-${def.idSuffix}-${variant}-${varSuffix}`
-      const { json: varAgentJson } = await ctx.call('POST', '/api/ai/catalog/agents', {
+      const { json: varAgentJson } = await ctx.call('POST', '/api/agents', {
         name: `e2e-reason-${def.idSuffix}-${variant}-${varSuffix}`,
         description: `Temporary reasoning agent for ${def.title} ${variant}.`,
         systemPrompt:
@@ -1048,7 +1048,7 @@ for (const def of REAL_MODEL_DEFINITIONS) {
       let agent = null
       let chat = null
       try {
-        const { json: agentJson } = await ctx.call('POST', '/api/ai/catalog/agents', {
+        const { json: agentJson } = await ctx.call('POST', '/api/agents', {
           name: `e2e-tool-${def.idSuffix}-${suffix}`,
           description: `Temporary tool agent for ${def.title}.`,
           systemPrompt:
@@ -1304,7 +1304,7 @@ registerCase({
     try {
       childAgent = envelopeData(
         (
-          await ctx.call('POST', '/api/ai/catalog/agents', {
+          await ctx.call('POST', '/api/agents', {
             name: `e2e-task-child-${suffix}`,
             description: 'Return the requested marker without using tools.',
             systemPrompt:
@@ -1317,7 +1317,7 @@ registerCase({
       )
       parentAgent = envelopeData(
         (
-          await ctx.call('POST', '/api/ai/catalog/agents', {
+          await ctx.call('POST', '/api/agents', {
             name: `e2e-task-parent-${suffix}`,
             description: 'Always delegates once to the configured child.',
             systemPrompt:
@@ -1479,7 +1479,7 @@ registerCase({
   level: 'L2',
   title: '真实流式 /stop 持久化 partial、exact replay 并继续新一轮',
   requires: ['real'],
-  docs: '使用 minimax-anthropic/MiniMax-M3：bootstrap 用 missing Agent 确定性 PLANNING_FAILED 创建空闲 Thread（不调用真实 Provider）；随后经 owner-free POST /api/harness/threads/{threadId}/command-batches 提交 SET_AGENT/SET_MODEL + initialPrompt 启动真实 turn；首个非空 text/thinking delta 后 stop（stopRequestId + version CAS）=> status STOPPED、thread.executionControl STOPPED、version+1、stoppedThreads[] 目标回执 stoppedTurnEndEntryId 非空、durable ASSISTANT_ABORTED 关闭旧 turn；同 stopRequestId + 原 expectedVersion exact replay => status REPLAYED、同回执 stoppedTurnEndEntryId、version 不再变化；真实 turn 区间（initialMarker 之后）无 ASSISTANT_ERROR/无 normal assistant；follow-up 位于 barrier 后并仅产生一个新 assistant MESSAGE',
+  docs: '使用 minimax-anthropic/MiniMax-M3：bootstrap 用 missing Agent 确定性 PLANNING_FAILED 创建空闲 Thread（不调用真实 Provider）；随后经 owner-free POST /api/threads/{threadId}/command-batches 提交 SET_AGENT/SET_MODEL + initialPrompt 启动真实 turn；首个非空 text/thinking delta 后 stop（stopRequestId + version CAS）=> status STOPPED、thread.executionControl STOPPED、version+1、stoppedThreads[] 目标回执 stoppedTurnEndEntryId 非空、durable ASSISTANT_ABORTED 关闭旧 turn；同 stopRequestId + 原 expectedVersion exact replay => status REPLAYED、同回执 stoppedTurnEndEntryId、version 不再变化；真实 turn 区间（initialMarker 之后）无 ASSISTANT_ERROR/无 normal assistant；follow-up 位于 barrier 后并仅产生一个新 assistant MESSAGE',
   async run(ctx) {
     const minimaxModel = await requireRealMiniMaxM3(ctx)
 
@@ -1496,7 +1496,7 @@ registerCase({
     let tempAgent = null
     let chat = null
     try {
-      const { json: agentJson } = await ctx.call('POST', '/api/ai/catalog/agents', {
+      const { json: agentJson } = await ctx.call('POST', '/api/agents', {
         name: `e2e-stop-agent-${suffix}`,
         description: 'Temporary agent for stop partial test.',
         systemPrompt: 'Follow instructions strictly.',
@@ -1723,7 +1723,7 @@ registerCase({
     let agent = null
     let chat = null
     try {
-      const { json: agentJson } = await ctx.call('POST', '/api/ai/catalog/agents', {
+      const { json: agentJson } = await ctx.call('POST', '/api/agents', {
         name: `e2e-branch-agent-${suffix}`,
         description: 'Temporary agent for branch entry thread testing.',
         systemPrompt: 'Follow user instructions strictly.',
@@ -1936,7 +1936,7 @@ registerCase({
     const model = await requireBuiltinModel(ctx)
     const modelChoice = builtinModelChoice(model)
     const suffix = cid().slice(0, 8)
-    const { json: agentJson } = await ctx.call('POST', '/api/ai/catalog/agents', {
+    const { json: agentJson } = await ctx.call('POST', '/api/agents', {
       name: `e2e-tool-agent-${suffix}`,
       description: 'Temporary E2E agent with the daemon read tool.',
       systemPrompt:

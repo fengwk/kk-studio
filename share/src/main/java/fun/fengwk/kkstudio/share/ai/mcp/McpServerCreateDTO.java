@@ -6,7 +6,7 @@ import lombok.Data;
 import java.util.Map;
 
 /**
- * {@code POST /api/ai/mcp-servers} 请求体。
+ * {@code POST /api/mcp-servers} 请求体。
  *
  * <p>只接受 Streamable HTTP 传输参数：配置保存不发起任何网络 I/O。headers 值可写 {@code ${VAR}}，由 Backend
  * 在发起请求或发现前从进程环境整值替换。

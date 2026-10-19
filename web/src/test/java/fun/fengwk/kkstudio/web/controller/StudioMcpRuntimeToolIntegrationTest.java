@@ -122,7 +122,7 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
         """;
     fakeServer.addTool("echo", "Echo text", schemaJson);
 
-    // 2. 通过 HTTP POST /api/ai/mcp-servers 创建 Server，再显式发现入库
+    // 2. 通过 HTTP POST /api/mcp-servers 创建 Server，再显式发现入库
     String serverName = "mcp_prod_" + (System.currentTimeMillis() % 1_000_000_000L);
 
     McpServerCreateDTO createMcp = new McpServerCreateDTO();
@@ -134,7 +134,7 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
 
     mockMvc
         .perform(
-            post("/api/ai/mcp-servers")
+            post("/api/mcp-servers")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(createMcp)))
         .andExpect(status().isCreated())
@@ -143,8 +143,7 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
         .andExpect(jsonPath("$.data.discoveryStatus").value("UNVERIFIED"));
 
     mockMvc
-        .perform(
-            post("/api/ai/mcp-servers/{name}/discover", serverName).param("expectedVersion", "0"))
+        .perform(post("/api/mcp-servers/{name}/discover", serverName).param("expectedVersion", "0"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.discoveryStatus").value("AVAILABLE"))
         .andExpect(jsonPath("$.data.toolCount").value(1));
@@ -160,9 +159,9 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
     // 校验生产 RuntimeToolCatalog 也立即按该 name 查询到该工具
     assertTrue(runtimeToolCatalog.findTool(modelName).isPresent());
 
-    // 3. 验证 GET /api/ai/catalog/tools 只按 name 暴露该动态工具元数据（不含 id/version）
+    // 3. 验证 GET /api/tools 只按 name 暴露该动态工具元数据（不含 id/version）
     mockMvc
-        .perform(get("/api/ai/catalog/tools"))
+        .perform(get("/api/tools"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data[?(@.name == '" + modelName + "')].name").value(modelName))
         .andExpect(
@@ -188,7 +187,7 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
 
     mockMvc
         .perform(
-            post("/api/ai/catalog/providers")
+            post("/api/providers")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(providerBody.toString()))
         .andExpect(status().isCreated())
@@ -201,7 +200,7 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
 
     mockMvc
         .perform(
-            post("/api/ai/catalog/models")
+            post("/api/models")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(modelDto)))
         .andExpect(status().isCreated())
@@ -220,7 +219,7 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
 
     mockMvc
         .perform(
-            post("/api/ai/catalog/agents")
+            post("/api/agents")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(invalidAgent)))
         .andExpect(status().isBadRequest())
@@ -239,7 +238,7 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
 
     mockMvc
         .perform(
-            post("/api/ai/catalog/agents")
+            post("/api/agents")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(agentDto)))
         .andExpect(status().isCreated())

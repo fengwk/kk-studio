@@ -46,9 +46,9 @@ import java.util.stream.Stream;
 /**
  * Platform 全局 Git Skill Package Web REST API 的 HTTP 契约测试。
  *
- * <p>验证 {@code /api/ai/catalog/skill-packages} 下 list/get/create/edit/check/update/delete
- * 的端到端契约：Create 发布当时解析出的 branch HEAD；Check 只更新观察值、失败时保留已发布内容；Update 只接受该 version 展示过的 exact
- * commit；陈旧 Card、重复名与 Agent 引用保护映射到稳定的 HTTP 状态码。技能仓库与 Platform bare cache 都落在进程临时目录，测试不接触模块工作树。
+ * <p>验证 {@code /api/skill-packages} 下 list/get/create/edit/check/update/delete 的端到端契约：Create
+ * 发布当时解析出的 branch HEAD；Check 只更新观察值、失败时保留已发布内容；Update 只接受该 version 展示过的 exact commit；陈旧 Card、重复名与
+ * Agent 引用保护映射到稳定的 HTTP 状态码。技能仓库与 Platform bare cache 都落在进程临时目录，测试不接触模块工作树。
  */
 @AutoConfigureMockMvc
 class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
@@ -110,7 +110,7 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
     // 列表与单读回读同一条权威事实。
     assertTrue(packageNames().contains(name), "created package must appear in the list");
     mockMvc
-        .perform(get("/api/ai/catalog/skill-packages/{name}", name))
+        .perform(get("/api/skill-packages/{name}", name))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.currentCommit").value(firstCommit))
         .andExpect(jsonPath("$.data.version").value("0"));
@@ -129,7 +129,7 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
     edit.setBranch("release");
     mockMvc
         .perform(
-            put("/api/ai/catalog/skill-packages/{name}", name)
+            put("/api/skill-packages/{name}", name)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(edit)))
         .andExpect(status().isOk())
@@ -162,16 +162,12 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
 
     // 陈旧 Card 的删除必须冲突，命中当前 version 才删除。
     mockMvc
-        .perform(
-            delete("/api/ai/catalog/skill-packages/{name}", name).param("expectedVersion", "2"))
+        .perform(delete("/api/skill-packages/{name}", name).param("expectedVersion", "2"))
         .andExpect(status().isConflict());
     mockMvc
-        .perform(
-            delete("/api/ai/catalog/skill-packages/{name}", name).param("expectedVersion", "3"))
+        .perform(delete("/api/skill-packages/{name}", name).param("expectedVersion", "3"))
         .andExpect(status().isNoContent());
-    mockMvc
-        .perform(get("/api/ai/catalog/skill-packages/{name}", name))
-        .andExpect(status().isNotFound());
+    mockMvc.perform(get("/api/skill-packages/{name}", name)).andExpect(status().isNotFound());
   }
 
   /** 测试意图：重复 package 名、非法 repository URL 与无法解析的 branch 都被拒绝且不留下半成品行。 */
@@ -191,7 +187,7 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
     badBranch.setBranch("no-such-branch");
     mockMvc
         .perform(
-            post("/api/ai/catalog/skill-packages")
+            post("/api/skill-packages")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(badBranch)))
         .andExpect(status().isBadRequest());
@@ -208,12 +204,12 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
     mockMvc.perform(createRequest(name, git.url())).andExpect(status().isCreated());
 
     mockMvc
-        .perform(get("/api/ai/catalog/skill-packages/{name}", packageName("missing")))
+        .perform(get("/api/skill-packages/{name}", packageName("missing")))
         .andExpect(status().isNotFound());
     mockMvc.perform(checkRequest(packageName("missing"), "0")).andExpect(status().isNotFound());
     mockMvc
         .perform(
-            delete("/api/ai/catalog/skill-packages/{name}", packageName("missing"))
+            delete("/api/skill-packages/{name}", packageName("missing"))
                 .param("expectedVersion", "0"))
         .andExpect(status().isNotFound());
 
@@ -223,7 +219,7 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
     stale.setBranch("main");
     mockMvc
         .perform(
-            put("/api/ai/catalog/skill-packages/{name}", name)
+            put("/api/skill-packages/{name}", name)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(stale)))
         .andExpect(status().isConflict());
@@ -258,11 +254,10 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
     referencingAgent(name, "dev");
 
     mockMvc
-        .perform(
-            delete("/api/ai/catalog/skill-packages/{name}", name).param("expectedVersion", "0"))
+        .perform(delete("/api/skill-packages/{name}", name).param("expectedVersion", "0"))
         .andExpect(status().isConflict());
     mockMvc
-        .perform(get("/api/ai/catalog/skill-packages/{name}", name))
+        .perform(get("/api/skill-packages/{name}", name))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.version").value("0"))
         .andExpect(jsonPath("$.data.currentCommit").value(git.firstCommit()));
@@ -285,7 +280,7 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.data.observedHeadCommit").value(removingCommit));
     mockMvc.perform(publishRequest(name, "1", removingCommit)).andExpect(status().isConflict());
     mockMvc
-        .perform(get("/api/ai/catalog/skill-packages/{name}", name))
+        .perform(get("/api/skill-packages/{name}", name))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.currentCommit").value(firstCommit))
         .andExpect(jsonPath("$.data.skills[0].name").value("dev"))
@@ -306,7 +301,7 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
     agent.setConfig(config);
     mockMvc
         .perform(
-            post("/api/ai/catalog/agents")
+            post("/api/agents")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(agent)))
         .andExpect(status().isCreated());
@@ -314,14 +309,14 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
 
   private MockHttpServletRequestBuilder createRequest(String packageName, String repositoryUrl)
       throws Exception {
-    return json(post("/api/ai/catalog/skill-packages"), create(packageName, repositoryUrl));
+    return json(post("/api/skill-packages"), create(packageName, repositoryUrl));
   }
 
   private MockHttpServletRequestBuilder checkRequest(String packageName, String expectedVersion)
       throws Exception {
     SkillPackageCheckDTO check = new SkillPackageCheckDTO();
     check.setExpectedVersion(expectedVersion);
-    return json(post("/api/ai/catalog/skill-packages/{name}/check", packageName), check);
+    return json(post("/api/skill-packages/{name}/check", packageName), check);
   }
 
   private MockHttpServletRequestBuilder publishRequest(
@@ -329,7 +324,7 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
     SkillPackagePublishDTO publish = new SkillPackagePublishDTO();
     publish.setExpectedVersion(expectedVersion);
     publish.setTargetCommit(targetCommit);
-    return json(post("/api/ai/catalog/skill-packages/{name}/update", packageName), publish);
+    return json(post("/api/skill-packages/{name}/update", packageName), publish);
   }
 
   private MockHttpServletRequestBuilder json(MockHttpServletRequestBuilder builder, Object body)
@@ -361,11 +356,7 @@ class StudioSkillCatalogControllerTest extends WebPostgresTestSupport {
 
   private List<String> packageNames() throws Exception {
     JsonNode list =
-        data(
-            mockMvc
-                .perform(get("/api/ai/catalog/skill-packages"))
-                .andExpect(status().isOk())
-                .andReturn());
+        data(mockMvc.perform(get("/api/skill-packages")).andExpect(status().isOk()).andReturn());
     List<String> names = new ArrayList<>();
     list.forEach(node -> names.add(node.path("packageName").asText()));
     return names;

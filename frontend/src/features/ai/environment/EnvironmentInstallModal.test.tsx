@@ -93,7 +93,7 @@ describe('EnvironmentInstallModal', () => {
       .toBeLessThan(vi.mocked(environmentService.createInstallCode).mock.invocationCallOrder[0]!)
     const copied = vi.mocked(copyTextToClipboard).mock.calls[0]![0]
     expect(copied).toBe(
-      `(set -o pipefail; curl -fsSL $'${window.location.origin}/api/harness/environments/env-1/install?code=${encodeURIComponent("short-code'汉字").replaceAll("'", "\\'")}' | bash)`,
+      `(set -o pipefail; curl -fsSL $'${window.location.origin}/api/environments/env-1/install?code=${encodeURIComponent("short-code'汉字").replaceAll("'", "\\'")}' | bash)`,
     )
     expect(copied).not.toContain('canonical.example.com')
     expect(copied).not.toContain('registrationToken')
@@ -481,7 +481,7 @@ describe('EnvironmentInstallModal', () => {
     await user.click(screen.getByRole('button', { name: '复制卸载命令' }))
     expect(await screen.findByText('卸载命令已复制。')).toBeInTheDocument()
     expect(vi.mocked(copyTextToClipboard).mock.calls[0]![0]).toContain(
-      `${window.location.origin}/api/harness/environments/uninstall/windows`,
+      `${window.location.origin}/api/environments/uninstall/windows`,
     )
     expect(environmentService.getEnvironment).not.toHaveBeenCalled()
     expect(environmentService.saveInstallConfig).not.toHaveBeenCalled()

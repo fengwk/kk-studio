@@ -22,7 +22,7 @@ registerCase({
   title: '配置矩阵前置：创建临时 Provider',
   docs: '供 config.model.* 复用，避免每行都建 provider',
   async run(ctx) {
-    const { json } = await ctx.call('POST', '/api/ai/catalog/providers', providerCreateBody(`mx-${cid().slice(0, 6)}`))
+    const { json } = await ctx.call('POST', '/api/providers', providerCreateBody(`mx-${cid().slice(0, 6)}`))
     const provider = envelopeData(json)
     sharedProviderName = String(provider.name)
     sharedProviderExpectedVersion = String(provider.version)
@@ -53,7 +53,7 @@ for (const row of modelConfigMatrix()) {
             config: row.build(),
           }
       if (row.ok) {
-        const { status, json } = await ctx.call('POST', '/api/ai/catalog/models', body)
+        const { status, json } = await ctx.call('POST', '/api/models', body)
         assert([200, 201].includes(status), `status ${status}`)
         const model = envelopeData(json)
         assert(model?.name, JSON.stringify(json))
@@ -61,10 +61,10 @@ for (const row of modelConfigMatrix()) {
         // cleanup model immediately to keep list small
         await ctx.call(
           'DELETE',
-          `/api/ai/catalog/models/${encodeURIComponent(model.providerName)}/${encodeURIComponent(model.name)}?expectedVersion=${encodeURIComponent(model.version)}`,
+          `/api/models/${encodeURIComponent(model.providerName)}/${encodeURIComponent(model.name)}?expectedVersion=${encodeURIComponent(model.version)}`,
         )
       } else {
-        const err = await expectHttpError(() => ctx.call('POST', '/api/ai/catalog/models', body), {
+        const err = await expectHttpError(() => ctx.call('POST', '/api/models', body), {
           status: row.expectStatus || 400,
           messageIncludes: row.messageIncludes,
         })
@@ -83,7 +83,7 @@ registerCase({
     if (sharedProviderName) {
       await ctx.call(
         'DELETE',
-        `/api/ai/catalog/providers/${encodeURIComponent(sharedProviderName)}?expectedVersion=${encodeURIComponent(sharedProviderExpectedVersion)}`,
+        `/api/providers/${encodeURIComponent(sharedProviderName)}?expectedVersion=${encodeURIComponent(sharedProviderExpectedVersion)}`,
       )
       sharedProviderName = null
       sharedProviderExpectedVersion = null
@@ -99,14 +99,14 @@ registerCase({
   async run(ctx) {
     const { json: pCreate } = await ctx.call(
       'POST',
-      '/api/ai/catalog/providers',
+      '/api/providers',
       providerCreateBody(`ag-${cid().slice(0, 6)}`),
     )
     const provider = envelopeData(pCreate)
     const providerName = String(provider.name)
     ctx.vars.agentMatrixProviderName = providerName
     ctx.vars.agentMatrixProviderExpectedVersion = String(provider.version)
-    const { json: mCreate } = await ctx.call('POST', '/api/ai/catalog/models', {
+    const { json: mCreate } = await ctx.call('POST', '/api/models', {
       providerName,
       name: `agent-matrix-model-${cid().slice(0, 4)}`,
       modelId: 'wire-agent-matrix',
@@ -137,7 +137,7 @@ for (const row of agentConfigMatrix()) {
         config: row.build(),
       }
       if (row.ok) {
-        const { status, json } = await ctx.call('POST', '/api/ai/catalog/agents', body)
+        const { status, json } = await ctx.call('POST', '/api/agents', body)
         assert([200, 201].includes(status), `status ${status} ${JSON.stringify(json)}`)
         const agent = envelopeData(json)
         assert(agent?.name, JSON.stringify(json))
@@ -145,10 +145,10 @@ for (const row of agentConfigMatrix()) {
         ctx.writeArtifact(`agent-${row.id}.json`, JSON.stringify(agent, null, 2))
         await ctx.call(
           'DELETE',
-          `/api/ai/catalog/agents/${encodeURIComponent(agent.name)}?expectedVersion=${encodeURIComponent(agent.version)}`,
+          `/api/agents/${encodeURIComponent(agent.name)}?expectedVersion=${encodeURIComponent(agent.version)}`,
         )
       } else {
-        const err = await expectHttpError(() => ctx.call('POST', '/api/ai/catalog/agents', body), {
+        const err = await expectHttpError(() => ctx.call('POST', '/api/agents', body), {
           status: row.expectStatus || 400,
           messageIncludes: row.messageIncludes,
         })
@@ -166,7 +166,7 @@ registerCase({
   async run(ctx) {
     // best-effort cleanup of leftover matrix agents that block model delete
     try {
-      const { json } = await ctx.call('GET', '/api/ai/catalog/agents?pageNumber=1&pageSize=100')
+      const { json } = await ctx.call('GET', '/api/agents?pageNumber=1&pageSize=100')
       const agents = (json?.data?.results || [])
       for (const agent of agents) {
         const name = String(agent.name || '')
@@ -174,7 +174,7 @@ registerCase({
           try {
             await ctx.call(
               'DELETE',
-              `/api/ai/catalog/agents/${encodeURIComponent(name)}?expectedVersion=${encodeURIComponent(agent.version)}`,
+              `/api/agents/${encodeURIComponent(name)}?expectedVersion=${encodeURIComponent(agent.version)}`,
             )
           } catch {
             // ignore
@@ -190,7 +190,7 @@ registerCase({
       const modelName = sharedModelRefForAgent.slice(separator + 1)
       await ctx.call(
         'DELETE',
-        `/api/ai/catalog/models/${encodeURIComponent(providerName)}/${encodeURIComponent(modelName)}?expectedVersion=${encodeURIComponent(sharedModelVersionForAgent)}`,
+        `/api/models/${encodeURIComponent(providerName)}/${encodeURIComponent(modelName)}?expectedVersion=${encodeURIComponent(sharedModelVersionForAgent)}`,
       )
       sharedModelRefForAgent = null
       sharedModelVersionForAgent = null
@@ -198,7 +198,7 @@ registerCase({
     if (ctx.vars.agentMatrixProviderName) {
       await ctx.call(
         'DELETE',
-        `/api/ai/catalog/providers/${encodeURIComponent(ctx.vars.agentMatrixProviderName)}?expectedVersion=${encodeURIComponent(
+        `/api/providers/${encodeURIComponent(ctx.vars.agentMatrixProviderName)}?expectedVersion=${encodeURIComponent(
           ctx.vars.agentMatrixProviderExpectedVersion,
         )}`,
       )

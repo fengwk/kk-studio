@@ -274,7 +274,7 @@ class StudioHarnessThreadCommandBatchControllerTest {
 
   private ResultActions postBatch(String threadId, String body) throws Exception {
     return mockMvc.perform(
-        post("/api/harness/threads/" + threadId + "/command-batches")
+        post("/api/threads/" + threadId + "/command-batches")
             .contentType(MediaType.APPLICATION_JSON)
             .content(body));
   }

@@ -232,13 +232,13 @@ export function generateInstallCommand(
   if (!(operatingSystems as readonly string[]).includes(os)) fail('operatingSystem')
   const url = scriptUrl(
     origin,
-    `/api/harness/environments/${encodeURIComponent(environmentId)}/install?code=${encodeURIComponent(code)}`,
+    `/api/environments/${encodeURIComponent(environmentId)}/install?code=${encodeURIComponent(code)}`,
   )
   return os === 'windows' ? windowsCommand(url) : unixCommand(url)
 }
 
 export function generateUninstallCommand(os: InstallOperatingSystem, origin: string): string {
   if (!(operatingSystems as readonly string[]).includes(os)) fail('operatingSystem')
-  const url = scriptUrl(origin, `/api/harness/environments/uninstall/${encodeURIComponent(os)}`)
+  const url = scriptUrl(origin, `/api/environments/uninstall/${encodeURIComponent(os)}`)
   return os === 'windows' ? windowsCommand(url) : unixCommand(url)
 }

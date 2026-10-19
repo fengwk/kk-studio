@@ -203,7 +203,7 @@ async function installPreviewApiMock(
       const path = url.pathname
       const method = route.request().method()
 
-      if (path === `/api/harness/threads/${THREAD_ID}/provider-request-preview` && method === 'POST') {
+      if (path === `/api/threads/${THREAD_ID}/provider-request-preview` && method === 'POST') {
         const body = route.request().postDataJSON() as PreviewRequest['body']
         recorded.push({ kind: 'preview', body })
         if (options.onPreview) {
@@ -218,7 +218,7 @@ async function installPreviewApiMock(
         })
         return
       }
-      if (path === `/api/harness/threads/${THREAD_ID}/model-request-debug`) {
+      if (path === `/api/threads/${THREAD_ID}/model-request-debug`) {
         // 只读调试预览是 POST-only：GET 等其它方法必须被拒绝，且每次 POST 的草稿选择都要录制。
         if (method !== 'POST') {
           await route.fulfill({
@@ -232,7 +232,7 @@ async function installPreviewApiMock(
         await route.fulfill({ json: modelRequestDebug(body) })
         return
       }
-      if (path === `/api/harness/threads/${THREAD_ID}/tree`) {
+      if (path === `/api/threads/${THREAD_ID}/tree`) {
         const thread = threadSnapshot(INITIAL_CURSOR).data.thread
         await route.fulfill({
           json: {
@@ -254,13 +254,13 @@ async function installPreviewApiMock(
         })
         return
       }
-      if (path === `/api/harness/threads/${THREAD_ID}`) {
+      if (path === `/api/threads/${THREAD_ID}`) {
         const cursor = options.cursor()
         recorded.push({ kind: 'snapshot', ...cursor })
         await route.fulfill({ json: threadSnapshot(cursor, options.entries ?? []) })
         return
       }
-      if (path === '/api/ai/catalog/agents') {
+      if (path === '/api/agents') {
         const results = options.agentSelection ? ['coder', 'broken-agent'].map((name) => ({
           name,
           model: name === 'coder' ? 'anthropic/Claude' : 'missing/model',
@@ -273,7 +273,7 @@ async function installPreviewApiMock(
         })
         return
       }
-      if (path === '/api/ai/catalog/models') {
+      if (path === '/api/models') {
         const results = options.agentSelection ? [{
           providerName: 'anthropic',
           name: 'Claude',

@@ -494,7 +494,7 @@ export async function runWorkspaceContractMatrix(ui) {
             resolveApproval = resolve
           })
 
-          const snapshotMatcher = (url) => url.pathname === `/api/harness/threads/${childThreadId}`
+          const snapshotMatcher = (url) => url.pathname === `/api/threads/${childThreadId}`
           const snapshotHandler = async (route) => {
             await route.fulfill({
               status: 200,
@@ -507,7 +507,7 @@ export async function runWorkspaceContractMatrix(ui) {
           }
 
           const approvalMatcher = (url) =>
-            url.pathname.startsWith(`/api/harness/threads/${childThreadId}/tool-invocations/`)
+            url.pathname.startsWith(`/api/threads/${childThreadId}/tool-invocations/`)
             && url.pathname.endsWith('/approval')
           const approvalHandler = async (route) => {
             const request = route.request()
@@ -774,7 +774,7 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
   }
   try {
     await mock.start()
-    const environmentResponse = await apiCtx.call('POST', '/api/harness/environments', {
+    const environmentResponse = await apiCtx.call('POST', '/api/environments', {
       name: `offline-${suffix}`,
     })
     assert(
@@ -783,7 +783,7 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
     )
     state.environment = envelopeData(environmentResponse.json)
 
-    const providerResponse = await apiCtx.call('POST', '/api/ai/catalog/providers', {
+    const providerResponse = await apiCtx.call('POST', '/api/providers', {
       name: `e2e-ui-usage-provider-${suffix}`,
       description: 'Local completion provider for free Footer usage tests.',
       providerType: 'openai',
@@ -795,7 +795,7 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
     assert(providerResponse.status === 201, `create usage provider: ${JSON.stringify(providerResponse)}`)
     state.provider = envelopeData(providerResponse.json)
 
-    const modelResponse = await apiCtx.call('POST', '/api/ai/catalog/models', {
+    const modelResponse = await apiCtx.call('POST', '/api/models', {
       providerName: state.provider.name,
       name: `e2e-ui-usage-model-${suffix}`,
       modelId: `wire-ui-usage-${suffix}`,
@@ -813,7 +813,7 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
     assert(modelResponse.status === 201, `create usage model: ${JSON.stringify(modelResponse)}`)
     state.model = envelopeData(modelResponse.json)
 
-    const agentResponse = await apiCtx.call('POST', '/api/ai/catalog/agents', {
+    const agentResponse = await apiCtx.call('POST', '/api/agents', {
       name: `e2e-ui-usage-agent-${suffix}`,
       description: 'Local completion agent for free Footer usage tests.',
       systemPrompt: 'Return the deterministic local response.',
@@ -855,7 +855,7 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
       intervalMs: 100,
     })
     // 切换只读 Footer 的 Environment 事实通过 branch settings 的 setEnvironmentCommand 表达。
-    const otherEnvironmentResponse = await apiCtx.call('POST', '/api/harness/environments', {
+    const otherEnvironmentResponse = await apiCtx.call('POST', '/api/environments', {
       name: `offline-alt-${suffix}`,
     })
     assert(
@@ -863,7 +863,7 @@ async function createCompletedUsageFixture(apiCtx, stamp) {
       `create alt usage environment: ${JSON.stringify(otherEnvironmentResponse)}`,
     )
     state.otherEnvironment = envelopeData(otherEnvironmentResponse.json)
-    const otherAgentResponse = await apiCtx.call('POST', '/api/ai/catalog/agents', {
+    const otherAgentResponse = await apiCtx.call('POST', '/api/agents', {
       name: `e2e-ui-usage-alt-agent-${suffix}`,
       description: 'Second environment-bound agent for Footer projection tests.',
       systemPrompt: 'Return the deterministic local response.',
@@ -1011,7 +1011,7 @@ async function createActiveTaskFixture(apiCtx, stamp) {
   }
   try {
     await mock.start()
-    const providerResponse = await apiCtx.call('POST', '/api/ai/catalog/providers', {
+    const providerResponse = await apiCtx.call('POST', '/api/providers', {
       name: `e2e-ui-task-provider-${suffix}`,
       description: 'Local task provider for free TaskStatus UI tests.',
       providerType: 'openai',
@@ -1023,7 +1023,7 @@ async function createActiveTaskFixture(apiCtx, stamp) {
     assert(providerResponse.status === 201, `create task provider: ${JSON.stringify(providerResponse)}`)
     state.provider = envelopeData(providerResponse.json)
 
-    const modelResponse = await apiCtx.call('POST', '/api/ai/catalog/models', {
+    const modelResponse = await apiCtx.call('POST', '/api/models', {
       providerName: state.provider.name,
       name: `e2e-ui-task-model-${suffix}`,
       modelId: `wire-ui-task-${suffix}`,
@@ -1041,7 +1041,7 @@ async function createActiveTaskFixture(apiCtx, stamp) {
     assert(modelResponse.status === 201, `create task model: ${JSON.stringify(modelResponse)}`)
     state.model = envelopeData(modelResponse.json)
 
-    const childResponse = await apiCtx.call('POST', '/api/ai/catalog/agents', {
+    const childResponse = await apiCtx.call('POST', '/api/agents', {
       name: childName,
       description: 'Held child used by the TaskStatus browser fixture.',
       systemPrompt: 'Stay in the deterministic local model call.',
@@ -1052,7 +1052,7 @@ async function createActiveTaskFixture(apiCtx, stamp) {
     assert(childResponse.status === 201, `create task child: ${JSON.stringify(childResponse)}`)
     state.childAgent = envelopeData(childResponse.json)
 
-    const parentResponse = await apiCtx.call('POST', '/api/ai/catalog/agents', {
+    const parentResponse = await apiCtx.call('POST', '/api/agents', {
       name: `e2e-ui-task-parent-${suffix}`,
       description: 'Parent used by the TaskStatus browser fixture.',
       systemPrompt: 'Call the configured task subagent exactly once.',
@@ -1177,7 +1177,7 @@ async function createToolCardFixture(apiCtx, stamp, daemonEnv) {
   }
   try {
     await mock.start()
-    const providerResponse = await apiCtx.call('POST', '/api/ai/catalog/providers', {
+    const providerResponse = await apiCtx.call('POST', '/api/providers', {
       name: `e2e-ui-tool-card-provider-${suffix}`,
       description: 'Local streaming provider for Tool card browser contracts.',
       providerType: 'openai',
@@ -1189,7 +1189,7 @@ async function createToolCardFixture(apiCtx, stamp, daemonEnv) {
     assert(providerResponse.status === 201, `create tool-card provider: ${JSON.stringify(providerResponse)}`)
     state.provider = envelopeData(providerResponse.json)
 
-    const modelResponse = await apiCtx.call('POST', '/api/ai/catalog/models', {
+    const modelResponse = await apiCtx.call('POST', '/api/models', {
       providerName: state.provider.name,
       name: `e2e-ui-tool-card-model-${suffix}`,
       modelId: `wire-ui-tool-card-${suffix}`,
@@ -1208,7 +1208,7 @@ async function createToolCardFixture(apiCtx, stamp, daemonEnv) {
     state.model = envelopeData(modelResponse.json)
 
 
-    const agentResponse = await apiCtx.call('POST', '/api/ai/catalog/agents', {
+    const agentResponse = await apiCtx.call('POST', '/api/agents', {
       name: `e2e-ui-tool-card-agent-${suffix}`,
       description: 'Agent used by deterministic Tool card browser contracts.',
       systemPrompt: 'Follow each deterministic Tool request exactly once.',
@@ -1303,7 +1303,7 @@ async function cleanupCompletedUsageFixture(state) {
     if (state.chat?.id) {
       await state.apiCtx.call(
         'DELETE',
-        `/api/ai/chats/${encodeURIComponent(state.chat.id)}?expectedVersion=${encodeURIComponent(state.chat.version)}`,
+        `/api/chats/${encodeURIComponent(state.chat.id)}?expectedVersion=${encodeURIComponent(state.chat.version)}`,
       )
     }
   })
@@ -1311,7 +1311,7 @@ async function cleanupCompletedUsageFixture(state) {
     if (state.agent?.name) {
       await state.apiCtx.call(
         'DELETE',
-        `/api/ai/catalog/agents/${encodeURIComponent(state.agent.name)}?expectedVersion=${encodeURIComponent(state.agent.version)}`,
+        `/api/agents/${encodeURIComponent(state.agent.name)}?expectedVersion=${encodeURIComponent(state.agent.version)}`,
       )
     }
   })
@@ -1320,7 +1320,7 @@ async function cleanupCompletedUsageFixture(state) {
     if (state.otherAgent?.name) {
       await state.apiCtx.call(
         'DELETE',
-        `/api/ai/catalog/agents/${encodeURIComponent(state.otherAgent.name)}?expectedVersion=${encodeURIComponent(state.otherAgent.version)}`,
+        `/api/agents/${encodeURIComponent(state.otherAgent.name)}?expectedVersion=${encodeURIComponent(state.otherAgent.version)}`,
       )
     }
   })
@@ -1328,7 +1328,7 @@ async function cleanupCompletedUsageFixture(state) {
     if (state.environment?.id) {
       await state.apiCtx.call(
         'DELETE',
-        `/api/harness/environments/${encodeURIComponent(state.environment.id)}?expectedVersion=${encodeURIComponent(state.environment.version)}`,
+        `/api/environments/${encodeURIComponent(state.environment.id)}?expectedVersion=${encodeURIComponent(state.environment.version)}`,
       )
     }
   })
@@ -1336,7 +1336,7 @@ async function cleanupCompletedUsageFixture(state) {
     if (state.otherEnvironment?.id) {
       await state.apiCtx.call(
         'DELETE',
-        `/api/harness/environments/${encodeURIComponent(state.otherEnvironment.id)}?expectedVersion=${encodeURIComponent(state.otherEnvironment.version)}`,
+        `/api/environments/${encodeURIComponent(state.otherEnvironment.id)}?expectedVersion=${encodeURIComponent(state.otherEnvironment.version)}`,
       )
     }
   })
@@ -1344,7 +1344,7 @@ async function cleanupCompletedUsageFixture(state) {
     if (state.model?.providerName && state.model?.name) {
       await state.apiCtx.call(
         'DELETE',
-        `/api/ai/catalog/models/${encodeURIComponent(state.model.providerName)}/${encodeURIComponent(state.model.name)}?expectedVersion=${encodeURIComponent(state.model.version)}`,
+        `/api/models/${encodeURIComponent(state.model.providerName)}/${encodeURIComponent(state.model.name)}?expectedVersion=${encodeURIComponent(state.model.version)}`,
       )
     }
   })
@@ -1352,7 +1352,7 @@ async function cleanupCompletedUsageFixture(state) {
     if (state.provider?.name) {
       await state.apiCtx.call(
         'DELETE',
-        `/api/ai/catalog/providers/${encodeURIComponent(state.provider.name)}?expectedVersion=${encodeURIComponent(state.provider.version)}`,
+        `/api/providers/${encodeURIComponent(state.provider.name)}?expectedVersion=${encodeURIComponent(state.provider.version)}`,
       )
     }
   })
@@ -1372,7 +1372,7 @@ async function cleanupActiveTaskFixture(state) {
     if (state.chat?.id) {
       await state.apiCtx.call(
         'DELETE',
-        `/api/ai/chats/${encodeURIComponent(state.chat.id)}?expectedVersion=${encodeURIComponent(state.chat.version)}`,
+        `/api/chats/${encodeURIComponent(state.chat.id)}?expectedVersion=${encodeURIComponent(state.chat.version)}`,
       )
     }
   })
@@ -1384,7 +1384,7 @@ async function cleanupActiveTaskFixture(state) {
       if (agent?.name) {
         await state.apiCtx.call(
           'DELETE',
-          `/api/ai/catalog/agents/${encodeURIComponent(agent.name)}?expectedVersion=${encodeURIComponent(agent.version)}`,
+          `/api/agents/${encodeURIComponent(agent.name)}?expectedVersion=${encodeURIComponent(agent.version)}`,
         )
       }
     })
@@ -1393,7 +1393,7 @@ async function cleanupActiveTaskFixture(state) {
     if (state.model?.providerName && state.model?.name) {
       await state.apiCtx.call(
         'DELETE',
-        `/api/ai/catalog/models/${encodeURIComponent(state.model.providerName)}/${encodeURIComponent(state.model.name)}?expectedVersion=${encodeURIComponent(state.model.version)}`,
+        `/api/models/${encodeURIComponent(state.model.providerName)}/${encodeURIComponent(state.model.name)}?expectedVersion=${encodeURIComponent(state.model.version)}`,
       )
     }
   })
@@ -1401,7 +1401,7 @@ async function cleanupActiveTaskFixture(state) {
     if (state.provider?.name) {
       await state.apiCtx.call(
         'DELETE',
-        `/api/ai/catalog/providers/${encodeURIComponent(state.provider.name)}?expectedVersion=${encodeURIComponent(state.provider.version)}`,
+        `/api/providers/${encodeURIComponent(state.provider.name)}?expectedVersion=${encodeURIComponent(state.provider.version)}`,
       )
     }
   })
@@ -1421,7 +1421,7 @@ async function cleanupToolCardFixture(state) {
     if (state.chat?.id) {
       await state.apiCtx.call(
         'DELETE',
-        `/api/ai/chats/${encodeURIComponent(state.chat.id)}?expectedVersion=${encodeURIComponent(state.chat.version)}`,
+        `/api/chats/${encodeURIComponent(state.chat.id)}?expectedVersion=${encodeURIComponent(state.chat.version)}`,
       )
     }
   })
@@ -1429,7 +1429,7 @@ async function cleanupToolCardFixture(state) {
     if (state.agent?.name) {
       await state.apiCtx.call(
         'DELETE',
-        `/api/ai/catalog/agents/${encodeURIComponent(state.agent.name)}?expectedVersion=${encodeURIComponent(state.agent.version)}`,
+        `/api/agents/${encodeURIComponent(state.agent.name)}?expectedVersion=${encodeURIComponent(state.agent.version)}`,
       )
     }
   })
@@ -1437,7 +1437,7 @@ async function cleanupToolCardFixture(state) {
     if (state.model?.providerName && state.model?.name) {
       await state.apiCtx.call(
         'DELETE',
-        `/api/ai/catalog/models/${encodeURIComponent(state.model.providerName)}/${encodeURIComponent(state.model.name)}?expectedVersion=${encodeURIComponent(state.model.version)}`,
+        `/api/models/${encodeURIComponent(state.model.providerName)}/${encodeURIComponent(state.model.name)}?expectedVersion=${encodeURIComponent(state.model.version)}`,
       )
     }
   })
@@ -1445,7 +1445,7 @@ async function cleanupToolCardFixture(state) {
     if (state.provider?.name) {
       await state.apiCtx.call(
         'DELETE',
-        `/api/ai/catalog/providers/${encodeURIComponent(state.provider.name)}?expectedVersion=${encodeURIComponent(state.provider.version)}`,
+        `/api/providers/${encodeURIComponent(state.provider.name)}?expectedVersion=${encodeURIComponent(state.provider.version)}`,
       )
     }
   })

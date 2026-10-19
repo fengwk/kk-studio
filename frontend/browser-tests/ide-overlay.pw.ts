@@ -27,7 +27,7 @@ async function setupStrictIdeRoutes(page: Page): Promise<MockAudit> {
   }
 
   // 1. 严格拦截创建 IDE 视图 API：契约字段与 UUID 必须精确匹配，不使用兜底
-  await page.route('**/api/harness/environments/*/ide/views', async (route) => {
+  await page.route('**/api/environments/*/ide/views', async (route) => {
     const req = route.request()
     if (req.method() !== 'POST') {
       await route.fulfill({ status: 405, body: 'Method Not Allowed' })
@@ -105,7 +105,7 @@ async function setupStrictIdeRoutes(page: Page): Promise<MockAudit> {
   })
 
   // 3. 辅助 API 终端创建与显式关闭精确放行，其余路径 404
-  await page.route('**/api/harness/environments/*/ide/views/**/terminal', async (route) => {
+  await page.route('**/api/environments/*/ide/views/**/terminal', async (route) => {
     if (route.request().method() === 'POST') {
       await route.fulfill({
         status: 200,
@@ -117,7 +117,7 @@ async function setupStrictIdeRoutes(page: Page): Promise<MockAudit> {
     await route.fulfill({ status: 404 })
   })
 
-  await page.route('**/api/harness/environments/*/ide/views/*', async (route) => {
+  await page.route('**/api/environments/*/ide/views/*', async (route) => {
     if (route.request().method() === 'DELETE') {
       await route.fulfill({
         status: 200,

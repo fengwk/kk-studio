@@ -92,7 +92,7 @@ class StudioEnvironmentIdeControllerTest {
 
     mockMvc
         .perform(
-            post("/api/harness/environments/" + ENV_ID + "/ide/views")
+            post("/api/environments/" + ENV_ID + "/ide/views")
                 .locale(Locale.US)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"viewId\":\"" + VIEW_ID + "\",\"directory\":\"/workspace\"}"))
@@ -122,7 +122,7 @@ class StudioEnvironmentIdeControllerTest {
 
     mockMvc
         .perform(
-            put("/api/harness/environments/" + ENV_ID + "/ide/views/" + VIEW_ID + "/directory")
+            put("/api/environments/" + ENV_ID + "/ide/views/" + VIEW_ID + "/directory")
                 .locale(Locale.US)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"directory\":\"/workspace/subdir\"}"))
@@ -142,7 +142,7 @@ class StudioEnvironmentIdeControllerTest {
 
     mockMvc
         .perform(
-            put("/api/harness/environments/" + ENV_ID + "/ide/views/" + VIEW_ID + "/directory")
+            put("/api/environments/" + ENV_ID + "/ide/views/" + VIEW_ID + "/directory")
                 .locale(Locale.US)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"directory\":\"/workspace/subdir\"}"))
@@ -174,7 +174,7 @@ class StudioEnvironmentIdeControllerTest {
 
     mockMvc
         .perform(
-            put("/api/harness/environments/" + ENV_ID + "/ide/views/" + VIEW_ID + "/directory")
+            put("/api/environments/" + ENV_ID + "/ide/views/" + VIEW_ID + "/directory")
                 .locale(Locale.forLanguageTag(languageTag))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"directory\":\"/workspace/subdir\"}"))
@@ -191,7 +191,7 @@ class StudioEnvironmentIdeControllerTest {
   void invalidEnvironmentIdIsRejectedWithoutTouchingService() throws Exception {
     mockMvc
         .perform(
-            post("/api/harness/environments/not-a-uuid/ide/views")
+            post("/api/environments/not-a-uuid/ide/views")
                 .locale(Locale.US)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"viewId\":\"" + VIEW_ID + "\"}"))
@@ -207,7 +207,7 @@ class StudioEnvironmentIdeControllerTest {
   void malformedJsonBodyUsesCanonicalBadRequestEnvelope() throws Exception {
     mockMvc
         .perform(
-            put("/api/harness/environments/" + ENV_ID + "/ide/views/" + VIEW_ID + "/directory")
+            put("/api/environments/" + ENV_ID + "/ide/views/" + VIEW_ID + "/directory")
                 .locale(Locale.US)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{ invalid json"))
@@ -225,12 +225,12 @@ class StudioEnvironmentIdeControllerTest {
   void focusTerminalAndCloseViewReturnNoContent() throws Exception {
     mockMvc
         .perform(
-            post("/api/harness/environments/" + ENV_ID + "/ide/views/" + VIEW_ID + "/terminal")
+            post("/api/environments/" + ENV_ID + "/ide/views/" + VIEW_ID + "/terminal")
                 .locale(Locale.US))
         .andExpect(status().isNoContent());
     mockMvc
         .perform(
-            delete("/api/harness/environments/" + ENV_ID + "/ide/views/" + VIEW_ID)
+            delete("/api/environments/" + ENV_ID + "/ide/views/" + VIEW_ID)
                 .locale(Locale.US)
                 .content(""))
         .andExpect(status().isNoContent());
@@ -244,7 +244,7 @@ class StudioEnvironmentIdeControllerTest {
   void rejectsUnknownRequestFields() throws Exception {
     mockMvc
         .perform(
-            put("/api/harness/environments/" + ENV_ID + "/ide/views/" + VIEW_ID + "/directory")
+            put("/api/environments/" + ENV_ID + "/ide/views/" + VIEW_ID + "/directory")
                 .locale(Locale.US)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"directory\":\"/workspace\",\"unknown\":true}"))
@@ -285,7 +285,7 @@ class StudioEnvironmentIdeControllerTest {
     openRequest.setDirectory(directory);
     realChain
         .perform(
-            post("/api/harness/environments/" + ENV_ID + "/ide/views")
+            post("/api/environments/" + ENV_ID + "/ide/views")
                 .locale(Locale.US)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(OBJECT_MAPPER.writeValueAsString(openRequest)))
@@ -298,7 +298,7 @@ class StudioEnvironmentIdeControllerTest {
     changeRequest.setDirectory(directory);
     realChain
         .perform(
-            put("/api/harness/environments/" + ENV_ID + "/ide/views/" + VIEW_ID + "/directory")
+            put("/api/environments/" + ENV_ID + "/ide/views/" + VIEW_ID + "/directory")
                 .locale(Locale.US)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(OBJECT_MAPPER.writeValueAsString(changeRequest)))

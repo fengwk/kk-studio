@@ -439,7 +439,7 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
   void httpPreviewRecoversFromStaleCursorByReadingFreshSnapshot() throws Exception {
     Fixture fixture = fixtureWithCompletedTurn();
     MockMvc mvc = MockMvcBuilders.webAppContextSetup(webContext).build();
-    String snapshotPath = "/api/harness/threads/" + fixture.threadId();
+    String snapshotPath = "/api/threads/" + fixture.threadId();
     String previewPath = snapshotPath + "/provider-request-preview";
     Map<String, Object> before = durableState(fixture, null);
     int requestsBefore = providerRequests.get();

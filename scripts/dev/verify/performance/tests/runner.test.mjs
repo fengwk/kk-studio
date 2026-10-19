@@ -332,7 +332,7 @@ test(
       }
       if (
         request.method === 'GET' &&
-        requestUrl.pathname === '/api/ai/catalog/models' &&
+        requestUrl.pathname === '/api/models' &&
         requestUrl.search === '?pageNumber=1&pageSize=20'
       ) {
         sendJson(response, 200, {

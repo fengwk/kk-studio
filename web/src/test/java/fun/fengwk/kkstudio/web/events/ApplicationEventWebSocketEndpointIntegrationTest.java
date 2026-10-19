@@ -91,7 +91,7 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
     HttpClient http = HttpClient.newHttpClient();
     HttpResponse<String> chatResponse =
         http.send(
-            HttpRequest.newBuilder(uri("/api/ai/chats"))
+            HttpRequest.newBuilder(uri("/api/chats"))
                 .timeout(Duration.ofSeconds(10))
                 .header("Content-Type", "application/json")
                 .POST(
@@ -134,7 +134,7 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
             .formatted(chatId, sessionId, threadId, idempotencyKey);
     HttpResponse<String> threadResponse =
         http.send(
-            HttpRequest.newBuilder(uri("/api/harness/command-batches"))
+            HttpRequest.newBuilder(uri("/api/command-batches"))
                 .timeout(Duration.ofSeconds(10))
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(createBody))

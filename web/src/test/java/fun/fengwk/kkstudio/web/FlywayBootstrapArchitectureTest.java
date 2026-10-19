@@ -55,7 +55,8 @@ class FlywayBootstrapArchitectureTest {
   private static final List<String> FORBIDDEN_BOOTSTRAPS =
       List.of("spring.sql.init", "schema-locations", "docker-entrypoint-initdb.d");
   private static final Set<String> GENERATED_DIRS =
-      Set.of(".git", ".workspace", "target", "node_modules", "dist", "coverage", "reports");
+      Set.of(
+          ".git", ".claude", ".workspace", "target", "node_modules", "dist", "coverage", "reports");
 
   @Test
   void onlySchemaModuleOwnsFlywaySqlResources() throws IOException {
@@ -213,7 +214,9 @@ class FlywayBootstrapArchitectureTest {
     }
   }
 
-  /** 路径任一段命中生成或依赖目录名（.git/.workspace/target/node_modules/dist/coverage/reports 等）时不算源码。 */
+  /**
+   * 路径任一段命中生成、依赖或工具目录名（.git/.claude/.workspace/target/node_modules/dist/coverage/reports 等）时不算源码。
+   */
   private static boolean isRepositorySource(Path root, Path path) {
     for (Path segment : root.relativize(path)) {
       if (GENERATED_DIRS.contains(segment.toString())) {

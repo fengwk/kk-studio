@@ -14,7 +14,7 @@ import java.util.List;
 
 /** 只读、可离线选用的 runtime tool catalog。 */
 @AllArgsConstructor
-@RequestMapping("/api/ai/catalog/tools")
+@RequestMapping("/api/tools")
 @RestController
 public class StudioToolCatalogController {
 

@@ -80,7 +80,7 @@ class StudioHarnessSessionControllerTest {
 
     mockMvc
         .perform(
-            put("/api/harness/sessions/" + SESSION_ID + "/name")
+            put("/api/sessions/" + SESSION_ID + "/name")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"name\":\"  canonical name  \"}"))
         .andExpect(status().isOk())
@@ -99,25 +99,25 @@ class StudioHarnessSessionControllerTest {
     // 意图：name missing / 显式 null / 非字符串 / blank 都在到达 Runtime 前被拒绝（400），绝不回显非法名称值。
     mockMvc
         .perform(
-            put("/api/harness/sessions/" + SESSION_ID + "/name")
+            put("/api/sessions/" + SESSION_ID + "/name")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{}"))
         .andExpect(status().isBadRequest());
     mockMvc
         .perform(
-            put("/api/harness/sessions/" + SESSION_ID + "/name")
+            put("/api/sessions/" + SESSION_ID + "/name")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"name\":null}"))
         .andExpect(status().isBadRequest());
     mockMvc
         .perform(
-            put("/api/harness/sessions/" + SESSION_ID + "/name")
+            put("/api/sessions/" + SESSION_ID + "/name")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"name\":42}"))
         .andExpect(status().isBadRequest());
     mockMvc
         .perform(
-            put("/api/harness/sessions/" + SESSION_ID + "/name")
+            put("/api/sessions/" + SESSION_ID + "/name")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"name\":\"   \"}"))
         .andExpect(status().isBadRequest());
@@ -132,7 +132,7 @@ class StudioHarnessSessionControllerTest {
     String response =
         mockMvc
             .perform(
-                put("/api/harness/sessions/" + SESSION_ID + "/name")
+                put("/api/sessions/" + SESSION_ID + "/name")
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(body))
             .andExpect(status().isBadRequest())
@@ -149,7 +149,7 @@ class StudioHarnessSessionControllerTest {
     // 意图：未知字段（strict DTO）与不存在的 Session 分别映射 400 / 404。
     mockMvc
         .perform(
-            put("/api/harness/sessions/" + SESSION_ID + "/name")
+            put("/api/sessions/" + SESSION_ID + "/name")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"name\":\"ok\",\"extra\":true}"))
         .andExpect(status().isBadRequest());
@@ -158,7 +158,7 @@ class StudioHarnessSessionControllerTest {
         .thenThrow(new HarnessRuntimeNotFoundException("session is missing"));
     mockMvc
         .perform(
-            put("/api/harness/sessions/" + SESSION_ID + "/name")
+            put("/api/sessions/" + SESSION_ID + "/name")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"name\":\"ok\"}"))
         .andExpect(status().isNotFound());
@@ -190,7 +190,7 @@ class StudioHarnessSessionControllerTest {
     when(harnessQueryService.listThreadSummaries(SESSION_ID)).thenReturn(List.of(thread, child));
 
     mockMvc
-        .perform(get("/api/harness/sessions/" + SESSION_ID + "/threads"))
+        .perform(get("/api/sessions/" + SESSION_ID + "/threads"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.length()").value(2))
         .andExpect(jsonPath("$.data[0].threadId").value(thread.getThreadId()))
@@ -235,7 +235,7 @@ class StudioHarnessSessionControllerTest {
     when(usageCostProjectionService.project(entries)).thenReturn(Map.of(user.id(), cost));
 
     mockMvc
-        .perform(get("/api/harness/sessions/" + SESSION_ID + "/entries"))
+        .perform(get("/api/sessions/" + SESSION_ID + "/entries"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data[0].entryId").value(root.id().toString()))
         .andExpect(jsonPath("$.data[0].sessionId").value(SESSION_ID.toString()))
@@ -256,7 +256,7 @@ class StudioHarnessSessionControllerTest {
         .thenThrow(new HarnessRuntimeNotFoundException("session is missing"));
 
     mockMvc
-        .perform(get("/api/harness/sessions/" + SESSION_ID + "/threads"))
+        .perform(get("/api/sessions/" + SESSION_ID + "/threads"))
         .andExpect(status().isNotFound());
   }
 }

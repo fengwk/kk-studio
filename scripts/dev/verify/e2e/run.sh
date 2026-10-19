@@ -189,7 +189,7 @@ if [ "$REAL" = "true" ]; then
   sync_e2e_provider_credentials
 fi
 if [ "$REAL" = "true" ]; then
-  providers_ready=$(curl -fsS "$BACKEND_URL/api/ai/catalog/providers?pageNumber=1&pageSize=50" \
+  providers_ready=$(curl -fsS "$BACKEND_URL/api/providers?pageNumber=1&pageSize=50" \
     | python3 -c 'import sys,json
 d=json.load(sys.stdin)
 rows=((d.get("data") or {}).get("results") or [])

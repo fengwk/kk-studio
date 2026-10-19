@@ -185,7 +185,7 @@ registerCase({
       // Issue+Agent 命令由 Issue 业务工作流拥有，都不能借该端点伪造命令。
       const projectOwnerBatch = await expectHttpError(
         () =>
-          ctx.call('POST', '/api/harness/command-batches', {
+          ctx.call('POST', '/api/command-batches', {
             owner: { type: 'PROJECT' },
             target: {
               type: 'NEW_SESSION',
@@ -204,7 +204,7 @@ registerCase({
       )
       const issueOwnerBatch = await expectHttpError(
         () =>
-          ctx.call('POST', '/api/harness/command-batches', {
+          ctx.call('POST', '/api/command-batches', {
             owner: { type: 'ISSUE_AGENT', issueId: cid(), agentName: 'e2e-agent-owner' },
             target: {
               type: 'NEW_SESSION',

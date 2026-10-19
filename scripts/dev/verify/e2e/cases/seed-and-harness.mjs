@@ -56,9 +56,9 @@ registerCase({
   id: 'seed.structured_model_config',
   level: 'L1',
   title: 'Model 公开契约与 Pi 默认目录一致',
-  docs: 'GET /api/ai/catalog/models：按 providerName/name 完整匹配 Pi 0.82.1 快照与公开字段集合；种子持久化形态的 variant 省略 protocolOptionsJson，公开契约返回 canonical 字符串（null/空 ≡ "{}"）',
+  docs: 'GET /api/models：按 providerName/name 完整匹配 Pi 0.82.1 快照与公开字段集合；种子持久化形态的 variant 省略 protocolOptionsJson，公开契约返回 canonical 字符串（null/空 ≡ "{}"）',
   async run(ctx) {
-    const { json } = await ctx.call('GET', '/api/ai/catalog/models?pageNumber=1&pageSize=50')
+    const { json } = await ctx.call('GET', '/api/models?pageNumber=1&pageSize=50')
     const models = pageResults(json)
     const actualCatalog = models
       .map((model) => ({
@@ -113,7 +113,7 @@ registerCase({
   async run(ctx) {
     const { json: agentsJson } = await ctx.call(
       'GET',
-      '/api/ai/catalog/agents?pageNumber=1&pageSize=50',
+      '/api/agents?pageNumber=1&pageSize=50',
     )
     const agents = pageResults(agentsJson)
     assert(agents.length > 0, 'no agents')
@@ -141,7 +141,7 @@ registerCase({
 
     const { json: providersJson } = await ctx.call(
       'GET',
-      '/api/ai/catalog/providers?pageNumber=1&pageSize=50',
+      '/api/providers?pageNumber=1&pageSize=50',
     )
     const providers = pageResults(providersJson)
     const expectedProviderTypes = new Map([
@@ -188,9 +188,9 @@ registerCase({
   id: 'catalog.internal_tools_hidden',
   level: 'L1',
   title: '内部 HOST Tool 不进入 Agent 可选目录',
-  docs: 'GET /api/ai/catalog/tools 只返回 SELECTABLE Tool；load_skill/task 由 skills/subagents 派生激活，不能直接写入 Agent config.tools；Goal contributor 只贡献 get_goal/update_goal（目标正文由用户维护，无创建工具）',
+  docs: 'GET /api/tools 只返回 SELECTABLE Tool；load_skill/task 由 skills/subagents 派生激活，不能直接写入 Agent config.tools；Goal contributor 只贡献 get_goal/update_goal（目标正文由用户维护，无创建工具）',
   async run(ctx) {
-    const tools = envelopeData((await ctx.call('GET', '/api/ai/catalog/tools')).json)
+    const tools = envelopeData((await ctx.call('GET', '/api/tools')).json)
     assert(Array.isArray(tools), JSON.stringify(tools))
     const names = tools.map((tool) => String(tool.name))
     assert(!names.includes('load_skill'), `load_skill must be internal: ${JSON.stringify(names)}`)
@@ -211,7 +211,7 @@ registerCase({
   id: 'thread.new_session_submission_atomic',
   level: 'L1',
   title: 'NEW_SESSION 原子创建返回完整 accepted 快照',
-  docs: 'POST /api/harness/command-batches owner={CHAT,id} target=NEW_SESSION{sessionId,threadId,rootSettings,yoloEnabled} => 202 HarnessAcceptedCommandsDTO{session,rootEntry,thread,acceptedCommands,replayed=false}；首 Command sequence=1 已接受 => thread.nextCommandSequence 精确 2、version >= 1；accepted command 的 sequence=1；thread/entry/session/command 标识全为 canonical UUID string；rootEntry 即 head 或其后继（processor 可能已消费）；Chat owner Session 摘要包含新 Session',
+  docs: 'POST /api/command-batches owner={CHAT,id} target=NEW_SESSION{sessionId,threadId,rootSettings,yoloEnabled} => 202 HarnessAcceptedCommandsDTO{session,rootEntry,thread,acceptedCommands,replayed=false}；首 Command sequence=1 已接受 => thread.nextCommandSequence 精确 2、version >= 1；accepted command 的 sequence=1；thread/entry/session/command 标识全为 canonical UUID string；rootEntry 即 head 或其后继（processor 可能已消费）；Chat owner Session 摘要包含新 Session',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -277,7 +277,7 @@ registerCase({
     // 清理：删除 owner Chat（连带其 Session/Thread/Entry 资源）。
     await ctx.call(
       'DELETE',
-      `/api/ai/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
+      `/api/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
     )
   },
 })
@@ -286,7 +286,7 @@ registerCase({
   id: 'thread.provider_request_preview_guard',
   level: 'L1',
   title: '发送前请求预览不接受不准确的游标或无法规划的草稿',
-  docs: 'POST /api/harness/threads/{threadId}/provider-request-preview 使用 owner-free 的 HarnessThreadCommandBatchDTO wire（{expectedHeadEntryId,expectedNextCommandSequence,commands}，无 owner/target）；陈旧 head/sequence 返回 409；无法解析 Agent 的空闲 Thread 返回 409，且预览不入队、不推进游标。完整 wire body/附件等价性由有 S3 与 Provider 编码器的自动化集成测试覆盖。',
+  docs: 'POST /api/threads/{threadId}/provider-request-preview 使用 owner-free 的 HarnessThreadCommandBatchDTO wire（{expectedHeadEntryId,expectedNextCommandSequence,commands}，无 owner/target）；陈旧 head/sequence 返回 409；无法解析 Agent 的空闲 Thread 返回 409，且预览不入队、不推进游标。完整 wire body/附件等价性由有 S3 与 Provider 编码器的自动化集成测试覆盖。',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -308,7 +308,7 @@ registerCase({
       commands: [userMessageCommand('establish history', cid())],
     })
     const thread = await waitForQuiescentThread(ctx, threadId, { timeoutMs: 60_000, intervalMs: 100 })
-    const endpoint = `/api/harness/threads/${encodeURIComponent(threadId)}/provider-request-preview`
+    const endpoint = `/api/threads/${encodeURIComponent(threadId)}/provider-request-preview`
     // 预览面 owner-free：body 只带精确 cursor 与有序命令，不携带 owner/target。
     const draft = {
       expectedHeadEntryId: thread.headEntryId,
@@ -335,7 +335,7 @@ registerCase({
   // 本 case 把专用 Provider 的 baseUrl 指向 case 内自建的宿主 127.0.0.1 trap；distributed 容器内无法回连宿主 loopback。
   requires: ['host-mock'],
   title: '草稿与历史请求预览只读且边界严格',
-  docs: 'POST /api/harness/sessions/{sessionId}/provider-request-preview（body 只有 {startEntryId,commands}，无 cursor）返回 200 DRAFT_REQUEST_PREVIEW；GET /api/harness/sessions/{sessionId}/entries/{entryId}/provider-request-preview 返回 200 HISTORICAL_REQUEST_PREVIEW；两者都是精确 8 字段、固定 notice、bodyByteSize==UTF-8 字节数、bodyJson 不泄漏 endpoint/credential；草稿起点只接受 ROOT 或已闭合 TURN_END（消息/中间 Entry 400），跨 Session 或不属于该 Session 的 Entry 400，Session 缺失 404，非 canonical 路径 400；历史预览只接受携带 assistantMetadata 的模型输出（其它 Entry 400）；全部预览不写任何 durable 状态（Entry Tree/Thread cursor/Thread 列表不变）。本 case 自建专用 Provider（endpoint/凭据均缺省）先覆盖 409 PREVIEW_PROVIDER_UNAVAILABLE，再把 endpoint 指向宿主 127.0.0.1 trap，证明只读预览只编码请求体、绝不触达 transport。历史预览的正向 200 由 interaction.pending_input_contract 在真实模型输出上覆盖。',
+  docs: 'POST /api/sessions/{sessionId}/provider-request-preview（body 只有 {startEntryId,commands}，无 cursor）返回 200 DRAFT_REQUEST_PREVIEW；GET /api/sessions/{sessionId}/entries/{entryId}/provider-request-preview 返回 200 HISTORICAL_REQUEST_PREVIEW；两者都是精确 8 字段、固定 notice、bodyByteSize==UTF-8 字节数、bodyJson 不泄漏 endpoint/credential；草稿起点只接受 ROOT 或已闭合 TURN_END（消息/中间 Entry 400），跨 Session 或不属于该 Session 的 Entry 400，Session 缺失 404，非 canonical 路径 400；历史预览只接受携带 assistantMetadata 的模型输出（其它 Entry 400）；全部预览不写任何 durable 状态（Entry Tree/Thread cursor/Thread 列表不变）。本 case 自建专用 Provider（endpoint/凭据均缺省）先覆盖 409 PREVIEW_PROVIDER_UNAVAILABLE，再把 endpoint 指向宿主 127.0.0.1 trap，证明只读预览只编码请求体、绝不触达 transport。历史预览的正向 200 由 interaction.pending_input_contract 在真实模型输出上覆盖。',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
     const trap = new ProviderPreviewTrap()
@@ -355,7 +355,7 @@ registerCase({
     }
     try {
       // 专用 Provider：endpoint 与凭据都缺省，ProviderDescriptor 要求 endpoint 非空白，因此该配置下预览必定无法解析 Provider。
-      const providerResponse = await ctx.call('POST', '/api/ai/catalog/providers', {
+      const providerResponse = await ctx.call('POST', '/api/providers', {
         name: `e2e-provider-preview-${suffix}`,
         description: 'Local trap provider for readonly request preview E2E.',
         providerType: 'openai',
@@ -367,7 +367,7 @@ registerCase({
       provider = envelopeData(providerResponse.json)
       assert(provider?.name && provider?.version, JSON.stringify(providerResponse.json))
 
-      const modelResponse = await ctx.call('POST', '/api/ai/catalog/models', {
+      const modelResponse = await ctx.call('POST', '/api/models', {
         providerName: provider.name,
         name: `e2e-model-preview-${suffix}`,
         modelId: `wire-preview-${suffix}`,
@@ -380,7 +380,7 @@ registerCase({
         JSON.stringify(modelResponse.json),
       )
 
-      const agentResponse = await ctx.call('POST', '/api/ai/catalog/agents', {
+      const agentResponse = await ctx.call('POST', '/api/agents', {
         name: `e2e-agent-preview-${suffix}`,
         description: 'Local readonly preview E2E agent.',
         systemPrompt: 'Reply with a short deterministic acknowledgement.',
@@ -463,7 +463,7 @@ registerCase({
       await trap.start()
       const providerUpdate = await ctx.call(
         'PUT',
-        `/api/ai/catalog/providers/${encodeURIComponent(provider.name)}`,
+        `/api/providers/${encodeURIComponent(provider.name)}`,
         {
           expectedVersion: provider.version,
           providerType: 'openai',
@@ -534,7 +534,7 @@ registerCase({
         () =>
           ctx.call(
             'GET',
-            `/api/harness/sessions/${encodeURIComponent(String(sessionId))}/entries/not-a-uuid/provider-request-preview`,
+            `/api/sessions/${encodeURIComponent(String(sessionId))}/entries/not-a-uuid/provider-request-preview`,
           ),
         { status: 400 },
       )
@@ -585,7 +585,7 @@ registerCase({
         if (chat?.id) {
           await ctx.call(
             'DELETE',
-            `/api/ai/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(
+            `/api/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(
               chat.version,
             )}`,
           )
@@ -595,7 +595,7 @@ registerCase({
         if (agent?.name) {
           await ctx.call(
             'DELETE',
-            `/api/ai/catalog/agents/${encodeURIComponent(agent.name)}?expectedVersion=${encodeURIComponent(
+            `/api/agents/${encodeURIComponent(agent.name)}?expectedVersion=${encodeURIComponent(
               agent.version,
             )}`,
           )
@@ -605,7 +605,7 @@ registerCase({
         if (model?.providerName && model?.name) {
           await ctx.call(
             'DELETE',
-            `/api/ai/catalog/models/${encodeURIComponent(
+            `/api/models/${encodeURIComponent(
               model.providerName,
             )}/${encodeURIComponent(model.name)}?expectedVersion=${encodeURIComponent(
               model.version,
@@ -617,7 +617,7 @@ registerCase({
         if (provider?.name) {
           await ctx.call(
             'DELETE',
-            `/api/ai/catalog/providers/${encodeURIComponent(
+            `/api/providers/${encodeURIComponent(
               provider.name,
             )}?expectedVersion=${encodeURIComponent(provider.version)}`,
           )
@@ -641,7 +641,7 @@ registerCase({
   id: 'thread.model_request_debug_draft_settings',
   level: 'L1',
   title: 'Model Request Debug 草稿设置只读投影',
-  docs: 'POST /api/harness/threads/{threadId}/model-request-debug 以 UI 草稿 {model, environmentName}（environmentName 可空，null 表示未选 Environment）在真实 snapshot 上只读现算；本 case 以缺失 Agent 的既有 Thread 让规划确定性 PLANNING_FAILED（不调用真实 Provider）：响应回显草稿 model/env，planningError 只回显稳定 error code 且不泄漏缺失 Agent 名，tools/skills/subagents 安全为空；frozenInvocation 与草稿选择相互独立（本 Thread 无活动 Invocation 时显式 null）；缺 model 或非 canonical environmentName => 400，GET => 405；查询不改变 head/version/nextCommandSequence、不入队命令、不启动 Invocation',
+  docs: 'POST /api/threads/{threadId}/model-request-debug 以 UI 草稿 {model, environmentName}（environmentName 可空，null 表示未选 Environment）在真实 snapshot 上只读现算；本 case 以缺失 Agent 的既有 Thread 让规划确定性 PLANNING_FAILED（不调用真实 Provider）：响应回显草稿 model/env，planningError 只回显稳定 error code 且不泄漏缺失 Agent 名，tools/skills/subagents 安全为空；frozenInvocation 与草稿选择相互独立（本 Thread 无活动 Invocation 时显式 null）；缺 model 或非 canonical environmentName => 400，GET => 405；查询不改变 head/version/nextCommandSequence、不入队命令、不启动 Invocation',
   async run(ctx) {
     const target = await resolveAnyCatalogTarget(ctx)
     const missingAgentName = `missing-debug-agent-${cid().slice(0, 8)}`
@@ -663,7 +663,7 @@ registerCase({
       })
       await waitForQuiescentThread(ctx, threadId, { timeoutMs: 60_000, intervalMs: 100 })
       const before = await getThreadSnapshot(ctx, threadId)
-      const endpoint = `/api/harness/threads/${encodeURIComponent(threadId)}/model-request-debug`
+      const endpoint = `/api/threads/${encodeURIComponent(threadId)}/model-request-debug`
 
       const { status, json } = await ctx.call('POST', endpoint, {
         model: target.model,
@@ -713,7 +713,7 @@ registerCase({
     } finally {
       await ctx.call(
         'DELETE',
-        `/api/ai/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
+        `/api/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
       )
     }
   },
@@ -1409,7 +1409,7 @@ registerCase({
         { status: 400 },
       )
       // 拒绝必须是零写入：预分配 Thread 未创建、Session Entry Tree 与源 Thread head 一字不动。
-      await expectHttpError(() => ctx.call('GET', `/api/harness/threads/${rejectedThreadId}`), {
+      await expectHttpError(() => ctx.call('GET', `/api/threads/${rejectedThreadId}`), {
         status: 404,
       })
     }
@@ -1446,7 +1446,7 @@ registerCase({
     // 清理：删除 owner Chat（连带其 Session/Thread/Entry 资源）。
     await ctx.call(
       'DELETE',
-      `/api/ai/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
+      `/api/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
     )
   },
 })
@@ -1455,7 +1455,7 @@ registerCase({
   id: 'thread.session_entry_tree',
   level: 'L1',
   title: '完整 Session Entry Tree 保留非当前历史分支',
-  docs: 'GET /api/harness/sessions/{sessionId}/entries 返回 Session 全部 immutable Entries；NEW_THREAD 创建新 Thread 形成分叉后，snapshot 仅含当前 root-to-head，而 entries 同时保留原分支与当前分支及稳定 parent 关系；listSessionThreads 反映两条 Thread',
+  docs: 'GET /api/sessions/{sessionId}/entries 返回 Session 全部 immutable Entries；NEW_THREAD 创建新 Thread 形成分叉后，snapshot 仅含当前 root-to-head，而 entries 同时保留原分支与当前分支及稳定 parent 关系；listSessionThreads 反映两条 Thread',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -1572,7 +1572,7 @@ registerCase({
     // 清理：删除 owner Chat（连带其 Session/Thread/Entry 资源）。
     await ctx.call(
       'DELETE',
-      `/api/ai/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
+      `/api/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
     )
   },
 })
@@ -1683,13 +1683,13 @@ registerCase({
     )
     // rejectedThreadId 未创建：snapshot 404。
     await expectHttpError(
-      () => ctx.call('GET', `/api/harness/threads/${rejectedThreadId}`),
+      () => ctx.call('GET', `/api/threads/${rejectedThreadId}`),
       { status: 404 },
     )
     // 清理：删除 owner Chat（连带两个 Session/Thread/Entry 资源）。
     await ctx.call(
       'DELETE',
-      `/api/ai/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
+      `/api/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
     )
   },
 })
@@ -1877,7 +1877,7 @@ registerCase({
       await waitForQuiescentThread(ctx, threadId, { timeoutMs: 60_000, intervalMs: 100 }).catch(() => {})
       await ctx.call(
         'DELETE',
-        `/api/ai/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
+        `/api/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
       )
     }
   },
@@ -1887,7 +1887,7 @@ registerCase({
   id: 'thread.session_thread_rename_persistence',
   level: 'L1',
   title: 'Session/Thread 重命名持久化：UUID 不变、Thread version 精确 +1、规范同名 no-op',
-  docs: 'PUT /api/harness/sessions/{id}/name {name} 与 PUT /api/harness/threads/{id}/name {name} 返回权威 DTO：Session（sessionId/name/createdAt）UUID/createdAt 不变、owner 摘要 fresh 持久；Thread 本体 UUID/head/session 不变、实际改名 version 精确 +1，snapshot 可观测的 queuedCommands/modelInvocation/toolInvocations 与 entries 均不变、Thread 摘要 fresh 持久；规范化同名（空白变体）no-op：返回 canonical name 且 version 零触碰；不依赖真实 Provider（缺失 Agent 确定性 PLANNING_FAILED）',
+  docs: 'PUT /api/sessions/{id}/name {name} 与 PUT /api/threads/{id}/name {name} 返回权威 DTO：Session（sessionId/name/createdAt）UUID/createdAt 不变、owner 摘要 fresh 持久；Thread 本体 UUID/head/session 不变、实际改名 version 精确 +1，snapshot 可观测的 queuedCommands/modelInvocation/toolInvocations 与 entries 均不变、Thread 摘要 fresh 持久；规范化同名（空白变体）no-op：返回 canonical name 且 version 零触碰；不依赖真实 Provider（缺失 Agent 确定性 PLANNING_FAILED）',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -1974,7 +1974,7 @@ registerCase({
       await waitForQuiescentThread(ctx, threadId, { timeoutMs: 60_000, intervalMs: 100 }).catch(() => {})
       await ctx.call(
         'DELETE',
-        `/api/ai/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
+        `/api/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
       )
     }
   },
@@ -2261,7 +2261,7 @@ registerCase({
   id: 'thread.yolo_direct_update',
   level: 'L1',
   title: 'Thread YOLO 直接控制面（单字段幂等与同值 no-op）',
-  docs: 'PUT /api/harness/threads/{id}/yolo {yoloEnabled} => 200 权威 Thread；同值请求 no-op 且 version 零触碰；值变化时 version 精确 +1，不与完整 Thread version 做 CAS；不创建 Command/Entry/Work',
+  docs: 'PUT /api/threads/{id}/yolo {yoloEnabled} => 200 权威 Thread；同值请求 no-op 且 version 零触碰；值变化时 version 精确 +1，不与完整 Thread version 做 CAS；不创建 Command/Entry/Work',
   async run(ctx) {
     if (!ctx.vars.agent) await getCase('seed.agent_and_provider').run(ctx)
     if (!ctx.vars.seedModel) await getCase('seed.structured_model_config').run(ctx)
@@ -2321,7 +2321,7 @@ registerCase({
     // 清理：删除 owner Chat（连带其 Session/Thread/Entry 资源）。
     await ctx.call(
       'DELETE',
-      `/api/ai/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
+      `/api/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
     )
   },
 })
@@ -2330,7 +2330,7 @@ registerCase({
   id: 'thread_tree.query_contract',
   level: 'L1',
   title: 'Agent 关系树最小只读投影',
-  docs: 'GET /api/harness/threads/{id}/tree：真实根 parentThreadId 与未结束 outcome 显式可空；状态、回合与工具数来源于当前 head，查询不推进版本；updateTime 为只读的 Thread 权威更新时刻且与 Thread 快照一致；缺失 Agent 确定性失败，无真实 Provider 调用',
+  docs: 'GET /api/threads/{id}/tree：真实根 parentThreadId 与未结束 outcome 显式可空；状态、回合与工具数来源于当前 head，查询不推进版本；updateTime 为只读的 Thread 权威更新时刻且与 Thread 快照一致；缺失 Agent 确定性失败，无真实 Provider 调用',
   async run(ctx) {
     const target = await resolveAnyCatalogTarget(ctx)
     const chat = await createChat(ctx, {
@@ -2350,7 +2350,7 @@ registerCase({
       })
       await waitForQuiescentThread(ctx, threadId, { timeoutMs: 60_000, intervalMs: 100 })
       const before = await getThreadSnapshot(ctx, threadId)
-      const { json } = await ctx.call('GET', `/api/harness/threads/${threadId}/tree`)
+      const { json } = await ctx.call('GET', `/api/threads/${threadId}/tree`)
       const nodes = envelopeData(json)
       assert(Array.isArray(nodes) && nodes.length === 1, JSON.stringify(nodes))
       const root = nodes[0]
@@ -2378,7 +2378,7 @@ registerCase({
     } finally {
       await ctx.call(
         'DELETE',
-        `/api/ai/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
+        `/api/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
       )
     }
   },
@@ -2388,14 +2388,14 @@ registerCase({
   id: 'thread_tree.invalid_and_unknown_thread',
   level: 'L1',
   title: 'Agent 关系树 UUID 与缺失节点校验',
-  docs: 'GET /api/harness/threads/{id}/tree：非 canonical UUID 为 400，未知 Thread 为 404',
+  docs: 'GET /api/threads/{id}/tree：非 canonical UUID 为 400，未知 Thread 为 404',
   async run(ctx) {
     await expectHttpError(
-      () => ctx.call('GET', '/api/harness/threads/1-1-1-1-1/tree'),
+      () => ctx.call('GET', '/api/threads/1-1-1-1-1/tree'),
       { status: 400 },
     )
     await expectHttpError(
-      () => ctx.call('GET', '/api/harness/threads/00000000-0000-0000-0000-000000000999/tree'),
+      () => ctx.call('GET', '/api/threads/00000000-0000-0000-0000-000000000999/tree'),
       { status: 404 },
     )
   },
@@ -2405,11 +2405,11 @@ registerCase({
   id: 'thread_snapshot.unknown_thread_404',
   level: 'L1',
   title: '未知 Thread snapshot 404',
-  docs: 'GET /api/harness/threads/{canonical unknown UUID} => 404 unknown thread',
+  docs: 'GET /api/threads/{canonical unknown UUID} => 404 unknown thread',
   async run(ctx) {
     const unknownThreadId = '00000000-0000-0000-0000-000000000999'
     await expectHttpError(
-      () => ctx.call('GET', `/api/harness/threads/${unknownThreadId}`),
+      () => ctx.call('GET', `/api/threads/${unknownThreadId}`),
       { status: 404, messageIncludes: new RegExp(`thread ${unknownThreadId} does not exist`) },
     )
   },
@@ -2419,13 +2419,13 @@ registerCase({
   id: 'frontend.proxy_model_contract',
   level: 'L1',
   title: 'Frontend 代理 model 契约',
-  docs: '5173 /api/ai/catalog/models 返回 name-based 结构化 config',
+  docs: '5173 /api/models 返回 name-based 结构化 config',
   async run(ctx) {
     assert(ctx.vars.frontendUrl, 'frontendUrl required')
     const { json } = await httpJson(
       ctx.vars.frontendUrl,
       'GET',
-      '/api/ai/catalog/models?pageNumber=1&pageSize=1',
+      '/api/models?pageNumber=1&pageSize=1',
     )
     const model = pageResults(json)[0]
     assert(model?.providerName && model?.name && model?.config?.defaultVariant, JSON.stringify(model))
@@ -2469,10 +2469,10 @@ function modelSelectionOf(ctx) {
 /** 免费控制面 case 只需一个当前 Catalog 可解析的 Agent/Model，不依赖完整 E2E seed。 */
 async function resolveAnyCatalogTarget(ctx) {
   const agents = pageResults(
-    (await ctx.call('GET', '/api/ai/catalog/agents?pageNumber=1&pageSize=50')).json,
+    (await ctx.call('GET', '/api/agents?pageNumber=1&pageSize=50')).json,
   )
   const models = pageResults(
-    (await ctx.call('GET', '/api/ai/catalog/models?pageNumber=1&pageSize=50')).json,
+    (await ctx.call('GET', '/api/models?pageNumber=1&pageSize=50')).json,
   )
   for (const agent of agents) {
     const separator = String(agent.model || '').indexOf('/')

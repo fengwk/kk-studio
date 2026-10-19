@@ -42,10 +42,10 @@ function chatDefaultEnvironmentFixture() {
   const call = async (method, path, body) => {
     requests.push({ method, path, body })
     const pathname = new URL(path, 'http://fixture.local').pathname
-    if (method === 'GET' && pathname === '/api/ai/catalog/agents') {
+    if (method === 'GET' && pathname === '/api/agents') {
       return { status: 200, json: { data: { results: [agent] } } }
     }
-    if (method === 'POST' && pathname === '/api/harness/environments') {
+    if (method === 'POST' && pathname === '/api/environments') {
       const environment = {
         id: nextId(),
         name: body.name,
@@ -55,7 +55,7 @@ function chatDefaultEnvironmentFixture() {
       environments.set(environment.id, environment)
       return { status: 201, json: { data: environment } }
     }
-    if (method === 'POST' && pathname === '/api/ai/chats') {
+    if (method === 'POST' && pathname === '/api/chats') {
       const chat = {
         id: nextId(),
         title: body.title,
@@ -67,7 +67,7 @@ function chatDefaultEnvironmentFixture() {
       chats.set(chat.id, chat)
       return { status: 201, json: { data: { ...chat } } }
     }
-    const chatMatch = pathname.match(/^\/api\/ai\/chats\/([^/]+)$/)
+    const chatMatch = pathname.match(/^\/api\/chats\/([^/]+)$/)
     if (chatMatch) {
       const id = decodeURIComponent(chatMatch[1])
       const chat = chats.get(id)
@@ -108,7 +108,7 @@ function chatDefaultEnvironmentFixture() {
         return { status: 204, json: null }
       }
     }
-    const environmentMatch = pathname.match(/^\/api\/harness\/environments\/([^/]+)$/)
+    const environmentMatch = pathname.match(/^\/api\/environments\/([^/]+)$/)
     if (environmentMatch) {
       const id = decodeURIComponent(environmentMatch[1])
       if (method === 'GET') {
@@ -204,17 +204,17 @@ test('chat default environment case executes the create/retain/clear wire with o
   await getCase('crud.chat.default_environment').run(fake.ctx)
 
   const create = fake.requests.find(
-    (request) => request.method === 'POST' && request.path === '/api/ai/chats',
+    (request) => request.method === 'POST' && request.path === '/api/chats',
   )
   const environmentCreate = fake.requests.find(
-    (request) => request.method === 'POST' && request.path === '/api/harness/environments',
+    (request) => request.method === 'POST' && request.path === '/api/environments',
   )
   // 创建请求必须真的省略 yoloEnabled：只有服务端默认才产生响应里的 false。
   assert.equal(Object.hasOwn(create.body, 'yoloEnabled'), false)
   assert.equal(create.body.environmentName, environmentCreate.body.name)
 
   const chatPuts = fake.requests.filter(
-    (request) => request.method === 'PUT' && request.path.startsWith('/api/ai/chats/'),
+    (request) => request.method === 'PUT' && request.path.startsWith('/api/chats/'),
   )
   // 只改 title 的 PUT 省略 environmentName：键必须缺席（部分更新保留当前默认环境）。
   assert.equal(Object.hasOwn(chatPuts[0].body, 'environmentName'), false)

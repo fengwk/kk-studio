@@ -34,7 +34,7 @@ import fun.fengwk.kkstudio.share.ai.runtime.HarnessSessionSummaryDTO;
 import java.util.List;
 import java.util.UUID;
 
-/** {@link StudioChatController} HTTP 契约测试：验证 /api/ai/chats 路由复数化、path/method/query CAS 与状态码。 */
+/** {@link StudioChatController} HTTP 契约测试：验证 /api/chats 路由复数化、path/method/query CAS 与状态码。 */
 class StudioChatControllerTest {
 
   private ChatService chatService;
@@ -59,7 +59,7 @@ class StudioChatControllerTest {
             .build();
   }
 
-  /** 测试意图：验证 GET /api/ai/chats 集合列表查询契约与 200 OK 状态码。 */
+  /** 测试意图：验证 GET /api/chats 集合列表查询契约与 200 OK 状态码。 */
   @Test
   void listChatsReturnsAllChats() throws Exception {
     ChatDTO chat = new ChatDTO();
@@ -68,14 +68,14 @@ class StudioChatControllerTest {
     when(chatService.listChats()).thenReturn(List.of(chat));
 
     mockMvc
-        .perform(get("/api/ai/chats"))
+        .perform(get("/api/chats"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data[0].id").value(idText(1)))
         .andExpect(jsonPath("$.data[0].title").value("chat-1"));
     verify(chatService).listChats();
   }
 
-  /** 测试意图：验证 GET /api/ai/chats/{chatId} 单资源查询契约，明确 path variable 传递与 200 OK 状态码。 */
+  /** 测试意图：验证 GET /api/chats/{chatId} 单资源查询契约，明确 path variable 传递与 200 OK 状态码。 */
   @Test
   void getChatForwardsPathIdAndReturnsChat() throws Exception {
     ChatDTO chat = new ChatDTO();
@@ -84,25 +84,23 @@ class StudioChatControllerTest {
     when(chatService.getChat(idText(5))).thenReturn(chat);
 
     mockMvc
-        .perform(get("/api/ai/chats/{chatId}", idText(5)))
+        .perform(get("/api/chats/{chatId}", idText(5)))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.id").value(idText(5)))
         .andExpect(jsonPath("$.data.title").value("chat-5"));
     verify(chatService).getChat(idText(5));
   }
 
-  /**
-   * 测试意图：验证 DELETE /api/ai/chats/{chatId} 使用 query 参数 expectedVersion 实施 CAS 删除，返回 204 NoContent。
-   */
+  /** 测试意图：验证 DELETE /api/chats/{chatId} 使用 query 参数 expectedVersion 实施 CAS 删除，返回 204 NoContent。 */
   @Test
   void deleteChatRequiresExpectedVersionQueryAndReturnsNoContent() throws Exception {
     mockMvc
-        .perform(delete("/api/ai/chats/{chatId}", idText(9)).param("expectedVersion", "3"))
+        .perform(delete("/api/chats/{chatId}", idText(9)).param("expectedVersion", "3"))
         .andExpect(status().isNoContent());
     verify(chatService).deleteChat(idText(9), "3");
   }
 
-  /** 测试意图：验证 GET /api/ai/chats/{chatId}/sessions 正确传递 chatId 并返回会话摘要（含权威 name）与 200 OK 状态码。 */
+  /** 测试意图：验证 GET /api/chats/{chatId}/sessions 正确传递 chatId 并返回会话摘要（含权威 name）与 200 OK 状态码。 */
   @Test
   void listChatSessionsForwardsChatIdAndReturnsResults() throws Exception {
     HarnessSessionSummaryDTO summary = new HarnessSessionSummaryDTO();
@@ -114,7 +112,7 @@ class StudioChatControllerTest {
     when(harnessQueryService.listChatSessions(id(7))).thenReturn(List.of(summary));
 
     mockMvc
-        .perform(get("/api/ai/chats/" + idText(7) + "/sessions"))
+        .perform(get("/api/chats/" + idText(7) + "/sessions"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data[0].sessionId").value(idText(2)))
         .andExpect(jsonPath("$.data[0].name").value("session name"))
@@ -139,7 +137,7 @@ class StudioChatControllerTest {
 
     mockMvc
         .perform(
-            post("/api/ai/chats")
+            post("/api/chats")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"title\":\"t\",\"agentName\":\"default-assistant\"}"))
         .andExpect(status().isCreated())
@@ -156,7 +154,7 @@ class StudioChatControllerTest {
   void createChatRejectsLegacyWorkspacePath() throws Exception {
     mockMvc
         .perform(
-            post("/api/ai/chats")
+            post("/api/chats")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     "{\"title\":\"t\",\"agentName\":\"default-assistant\","
@@ -178,7 +176,7 @@ class StudioChatControllerTest {
 
     mockMvc
         .perform(
-            put("/api/ai/chats/7")
+            put("/api/chats/7")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"expectedVersion\":\"2\"}"))
         .andExpect(status().isOk())
@@ -193,7 +191,7 @@ class StudioChatControllerTest {
   void updateChatRejectsLegacyWorkspacePath() throws Exception {
     mockMvc
         .perform(
-            put("/api/ai/chats/7")
+            put("/api/chats/7")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"workspacePath\":null,\"expectedVersion\":\"2\"}"))
         .andExpect(status().isBadRequest());
@@ -217,7 +215,7 @@ class StudioChatControllerTest {
 
     mockMvc
         .perform(
-            post("/api/ai/chats")
+            post("/api/chats")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     "{\"title\":\"t\",\"agentName\":\"default-assistant\","
@@ -242,7 +240,7 @@ class StudioChatControllerTest {
 
     mockMvc
         .perform(
-            put("/api/ai/chats/7")
+            put("/api/chats/7")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"environmentName\":null,\"expectedVersion\":\"2\"}"))
         .andExpect(status().isOk());

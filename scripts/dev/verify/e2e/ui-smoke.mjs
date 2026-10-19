@@ -95,7 +95,7 @@ async function apiJson(backendUrl, method, requestPath, body) {
 }
 
 async function apiDeleteByName(backendUrl, resource, name) {
-  const resourcePath = resource === 'chats' ? '/api/ai/chats' : `/api/ai/catalog/${resource}`
+  const resourcePath = resource === 'chats' ? '/api/chats' : `/api/${resource}`
   const listPath = resource === 'chats' ? resourcePath : `${resourcePath}?pageNumber=1&pageSize=100`
   const { json } = await apiJson(backendUrl, 'GET', listPath)
   const list = json?.data?.results || json?.data || []
@@ -122,8 +122,8 @@ async function apiDeleteByName(backendUrl, resource, name) {
 }
 
 async function requireRealMiniMaxM3(backendUrl, modelDef = MINIMAX_ANTHROPIC_M3) {
-  const { json: modelsJson } = await apiJson(backendUrl, 'GET', '/api/ai/catalog/models?pageNumber=1&pageSize=50')
-  const { json: providersJson } = await apiJson(backendUrl, 'GET', '/api/ai/catalog/providers?pageNumber=1&pageSize=50')
+  const { json: modelsJson } = await apiJson(backendUrl, 'GET', '/api/models?pageNumber=1&pageSize=50')
+  const { json: providersJson } = await apiJson(backendUrl, 'GET', '/api/providers?pageNumber=1&pageSize=50')
   const models = modelsJson?.data?.results || []
   const providers = providersJson?.data?.results || []
   const model = models.find(
@@ -148,7 +148,7 @@ async function requireProviderExecutionBoundary(backendUrl, real) {
   const { json } = await apiJson(
     backendUrl,
     'GET',
-    '/api/ai/catalog/providers?pageNumber=1&pageSize=50',
+    '/api/providers?pageNumber=1&pageSize=50',
   )
   const providers = json?.data?.results || []
   assertProviderExecutionBoundary({ real: false, providers })
@@ -1295,7 +1295,7 @@ async function main(argv) {
       const tempAgentName = `e2e-ui-agent-${stamp}`
 
       // Environment 由运行分支显式绑定，不属于 Agent Definition。
-      const agentCreateRes = await apiJson(args.backendUrl, 'POST', '/api/ai/catalog/agents', {
+      const agentCreateRes = await apiJson(args.backendUrl, 'POST', '/api/agents', {
         name: tempAgentName,
         description: `Temporary e2e agent for ${args.daemonEnv}`,
         systemPrompt: 'You are an e2e test agent.',
@@ -1354,7 +1354,7 @@ async function main(argv) {
 
         // Chat 持久化显式投影 required-nullable environmentName（未选择时为 null），
         // 且绝不携带已删除的 workspace/environment 字段。
-        const { json } = await apiJson(args.backendUrl, 'GET', '/api/ai/chats')
+        const { json } = await apiJson(args.backendUrl, 'GET', '/api/chats')
         const created = (json?.data || []).find((chat) => chat.title === title)
         assert(created != null, `Create Chat did not persist the chat: ${JSON.stringify(json)}`)
         for (const field of ['workspacePath', 'environment', 'environmentId']) {
@@ -1395,7 +1395,7 @@ async function main(argv) {
     await run('ui.chat.blank_first_send_real', 'Blank pane 首发真实消息并出现用户气泡', async (caseArt) => {
       const title = `e2e-ui-send-${stamp}`
       const realAgentName = `e2e-ui-real-agent-${stamp}`
-      const agentCreateRes = await apiJson(args.backendUrl, 'POST', '/api/ai/catalog/agents', {
+      const agentCreateRes = await apiJson(args.backendUrl, 'POST', '/api/agents', {
         name: realAgentName,
         description: 'Temporary real UI E2E agent.',
         systemPrompt: 'Reply concisely and never call tools.',

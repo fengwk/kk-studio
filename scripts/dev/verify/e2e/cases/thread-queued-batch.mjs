@@ -80,7 +80,7 @@ registerCase({
     }
     try {
       await mock.start()
-      const providerResponse = await ctx.call('POST', '/api/ai/catalog/providers', {
+      const providerResponse = await ctx.call('POST', '/api/providers', {
         name: `e2e-provider-queue-${suffix}`,
         description: 'Local controlled hold mock for queued command batch E2E.',
         providerType: 'openai',
@@ -91,7 +91,7 @@ registerCase({
       })
       provider = envelopeData(providerResponse.json)
       assert(provider?.name && provider?.version, JSON.stringify(providerResponse.json))
-      const modelResponse = await ctx.call('POST', '/api/ai/catalog/models', {
+      const modelResponse = await ctx.call('POST', '/api/models', {
         providerName: provider.name,
         name: `e2e-model-queue-${suffix}`,
         modelId: `wire-queue-${suffix}`,
@@ -107,7 +107,7 @@ registerCase({
         model?.providerName === provider.name && model?.name,
         JSON.stringify(modelResponse.json),
       )
-      const agentResponse = await ctx.call('POST', '/api/ai/catalog/agents', {
+      const agentResponse = await ctx.call('POST', '/api/agents', {
         name: `e2e-agent-queue-${suffix}`,
         description: 'Local queued command batch E2E agent.',
         systemPrompt: 'Reply with the exact mock response. Do not call tools.',
@@ -327,7 +327,7 @@ registerCase({
         if (chat?.id) {
           await ctx.call(
             'DELETE',
-            `/api/ai/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(
+            `/api/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(
               chat.version,
             )}`,
           )
@@ -337,7 +337,7 @@ registerCase({
         if (agent?.name) {
           await ctx.call(
             'DELETE',
-            `/api/ai/catalog/agents/${encodeURIComponent(agent.name)}?expectedVersion=${encodeURIComponent(
+            `/api/agents/${encodeURIComponent(agent.name)}?expectedVersion=${encodeURIComponent(
               agent.version,
             )}`,
           )
@@ -347,7 +347,7 @@ registerCase({
         if (model?.providerName && model?.name) {
           await ctx.call(
             'DELETE',
-            `/api/ai/catalog/models/${encodeURIComponent(
+            `/api/models/${encodeURIComponent(
               model.providerName,
             )}/${encodeURIComponent(model.name)}?expectedVersion=${encodeURIComponent(
               model.version,
@@ -359,7 +359,7 @@ registerCase({
         if (provider?.name) {
           await ctx.call(
             'DELETE',
-            `/api/ai/catalog/providers/${encodeURIComponent(
+            `/api/providers/${encodeURIComponent(
               provider.name,
             )}?expectedVersion=${encodeURIComponent(provider.version)}`,
           )

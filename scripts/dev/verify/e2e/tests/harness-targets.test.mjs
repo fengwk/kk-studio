@@ -174,7 +174,7 @@ test('Session summaries preserve same-named root and child parent identities', a
   const ctx = {
     call: async (method, path) => {
       assert.equal(method, 'GET')
-      assert.equal(path, `/api/harness/sessions/${sampleId()}/threads`)
+      assert.equal(path, `/api/sessions/${sampleId()}/threads`)
       return { json: { data: [root, child] } }
     },
   }
@@ -309,7 +309,7 @@ test('createChat sends a nullable environmentName and requires the projected fie
   const chat = await createChat(ctx, { title: 't', agentName: 'agent' })
   assert.equal(chat.environmentName, null)
   assert.equal(calls[0].method, 'POST')
-  assert.equal(calls[0].path, '/api/ai/chats')
+  assert.equal(calls[0].path, '/api/chats')
   assert.equal(Object.hasOwn(calls[0].body, 'environmentName'), true)
   assert.equal(calls[0].body.environmentName, null)
   assert.equal(calls[0].body.yoloEnabled, false)

@@ -18,7 +18,7 @@ registerCase({
   id: 'crud.provider.invalid_name',
   level: 'L1',
   title: 'Provider 非法 name 拒绝',
-  docs: 'POST /api/ai/catalog/providers name 空白或包含 / => 400',
+  docs: 'POST /api/providers name 空白或包含 / => 400',
   async run(ctx) {
     for (const [name, messageIncludes] of [
       ['', /name must not be blank/i],
@@ -26,7 +26,7 @@ registerCase({
     ]) {
       await expectHttpError(
         () =>
-          ctx.call('POST', '/api/ai/catalog/providers', {
+          ctx.call('POST', '/api/providers', {
             name,
             description: 'x',
             providerType: 'openai',
@@ -45,11 +45,11 @@ registerCase({
   id: 'crud.provider.invalid_missing_type',
   level: 'L1',
   title: 'Provider 缺少 providerType 拒绝',
-  docs: 'POST /api/ai/catalog/providers 无 providerType => 400',
+  docs: 'POST /api/providers 无 providerType => 400',
   async run(ctx) {
     await expectHttpError(
       () =>
-        ctx.call('POST', '/api/ai/catalog/providers', {
+        ctx.call('POST', '/api/providers', {
           name: `e2e-missing-type-${cid().slice(0, 6)}`,
           description: 'x',
           baseUrl: 'https://example.com/v1',
@@ -70,12 +70,12 @@ registerCase({
   async run(ctx) {
     const suffix = cid().slice(0, 8)
     const provider = envelopeData(
-      (await ctx.call('POST', '/api/ai/catalog/providers', providerCreateBody(suffix))).json,
+      (await ctx.call('POST', '/api/providers', providerCreateBody(suffix))).json,
     )
     const modelName = `e2e-model-invupd-${suffix}`
     const model = envelopeData(
       (
-        await ctx.call('POST', '/api/ai/catalog/models', {
+        await ctx.call('POST', '/api/models', {
           providerName: provider.name,
           name: modelName,
           modelId: `wire-invupd-${suffix}`,
@@ -115,7 +115,7 @@ registerCase({
   id: 'crud.agent.invalid_name',
   level: 'L1',
   title: 'Agent 非法 name 拒绝',
-  docs: 'POST /api/ai/catalog/agents name 空白或包含 / => 400',
+  docs: 'POST /api/agents name 空白或包含 / => 400',
   async run(ctx) {
     const model = await firstModel(ctx)
     for (const [name, messageIncludes] of [
@@ -124,7 +124,7 @@ registerCase({
     ]) {
       await expectHttpError(
         () =>
-          ctx.call('POST', '/api/ai/catalog/agents', {
+          ctx.call('POST', '/api/agents', {
             name,
             description: 'd',
             systemPrompt: 's',
@@ -142,12 +142,12 @@ registerCase({
   id: 'crud.agent.invalid_variant',
   level: 'L1',
   title: 'Agent 不存在的 Variant 拒绝',
-  docs: 'POST /api/ai/catalog/agents variant 不属于所选 Model => 400',
+  docs: 'POST /api/agents variant 不属于所选 Model => 400',
   async run(ctx) {
     const model = await firstModel(ctx)
     await expectHttpError(
       () =>
-        ctx.call('POST', '/api/ai/catalog/agents', {
+        ctx.call('POST', '/api/agents', {
           name: `e2e-invalid-variant-${cid().slice(0, 8)}`,
           description: 'd',
           systemPrompt: 's',
@@ -168,11 +168,11 @@ registerCase({
   async run(ctx) {
     const suffix = cid().slice(0, 8)
     const created = envelopeData(
-      (await ctx.call('POST', '/api/ai/catalog/providers', providerCreateBody(suffix))).json,
+      (await ctx.call('POST', '/api/providers', providerCreateBody(suffix))).json,
     )
     assert(created?.name && !('id' in created), JSON.stringify(created))
     const listed = pageResults(
-      (await ctx.call('GET', '/api/ai/catalog/providers?pageNumber=1&pageSize=100')).json,
+      (await ctx.call('GET', '/api/providers?pageNumber=1&pageSize=100')).json,
     )
     assert(listed.some((provider) => provider.name === created.name), 'created Provider not listed')
 
@@ -180,7 +180,7 @@ registerCase({
       (
         await ctx.call(
           'PUT',
-          `/api/ai/catalog/providers/${encodeURIComponent(created.name)}`,
+          `/api/providers/${encodeURIComponent(created.name)}`,
           {
             description: 'e2e provider updated',
             providerType: 'openai',
@@ -198,14 +198,14 @@ registerCase({
     assert(updated.configured === true, 'empty credential should keep configured')
     await deleteProvider(ctx, updated)
     const after = pageResults(
-      (await ctx.call('GET', '/api/ai/catalog/providers?pageNumber=1&pageSize=100')).json,
+      (await ctx.call('GET', '/api/providers?pageNumber=1&pageSize=100')).json,
     )
     assert(!after.some((provider) => provider.name === created.name), 'Provider still listed')
 
     // 硬删除后同名可重建：version 从 0 重新开始，且严格使用新请求体属性。
     const recreated = envelopeData(
       (
-        await ctx.call('POST', '/api/ai/catalog/providers', {
+        await ctx.call('POST', '/api/providers', {
           ...providerCreateBody(suffix),
           description: 'e2e provider recreated',
           baseUrl: 'https://example.com/v3',
@@ -220,7 +220,7 @@ registerCase({
       JSON.stringify(recreated),
     )
     const relisted = pageResults(
-      (await ctx.call('GET', '/api/ai/catalog/providers?pageNumber=1&pageSize=100')).json,
+      (await ctx.call('GET', '/api/providers?pageNumber=1&pageSize=100')).json,
     )
     assert(
       relisted.some((provider) => provider.name === created.name),
@@ -238,7 +238,7 @@ registerCase({
   async run(ctx) {
     const suffix = cid().slice(0, 8)
     const provider = envelopeData(
-      (await ctx.call('POST', '/api/ai/catalog/providers', providerCreateBody(suffix))).json,
+      (await ctx.call('POST', '/api/providers', providerCreateBody(suffix))).json,
     )
     const name = `vendor/e2e-model-${suffix}`
     // 文本必须跨 HTTP/持久化往返不变，不能被 JS 的 Number 舍入。
@@ -246,7 +246,7 @@ registerCase({
     const updatedOptions = '{"large":9223372036854775808,"nested":{"ratio":1.234567890123456789e+45}}'
     const model = envelopeData(
       (
-        await ctx.call('POST', '/api/ai/catalog/models', {
+        await ctx.call('POST', '/api/models', {
           providerName: provider.name,
           name,
           modelId: `wire-lifecycle-${suffix}`,
@@ -295,7 +295,7 @@ registerCase({
     // 硬删除后同名可重建：version 从 0 重新开始，且严格使用新请求体配置。
     const recreated = envelopeData(
       (
-        await ctx.call('POST', '/api/ai/catalog/models', {
+        await ctx.call('POST', '/api/models', {
           providerName: provider.name,
           name,
           modelId: `wire-recreated-${suffix}`,
@@ -330,7 +330,7 @@ registerCase({
     const name = `e2e-agent-${cid().slice(0, 8)}`
     const agent = envelopeData(
       (
-        await ctx.call('POST', '/api/ai/catalog/agents', {
+        await ctx.call('POST', '/api/agents', {
           name,
           description: 'create',
           systemPrompt: 'you are e2e',
@@ -343,7 +343,7 @@ registerCase({
     assert(agent?.name === name && agent.model === modelRef(model) && !('id' in agent), JSON.stringify(agent))
     const updated = envelopeData(
       (
-        await ctx.call('PUT', `/api/ai/catalog/agents/${encodeURIComponent(name)}`, {
+        await ctx.call('PUT', `/api/agents/${encodeURIComponent(name)}`, {
           description: 'updated',
           systemPrompt: 'updated prompt',
           model: modelRef(updatedModel),
@@ -361,17 +361,17 @@ registerCase({
     assert(updated.config?.inheritParentEnvironment === false, JSON.stringify(updated))
     await ctx.call(
       'DELETE',
-      `/api/ai/catalog/agents/${encodeURIComponent(name)}?expectedVersion=${encodeURIComponent(updated.version)}`,
+      `/api/agents/${encodeURIComponent(name)}?expectedVersion=${encodeURIComponent(updated.version)}`,
     )
     const agents = pageResults(
-      (await ctx.call('GET', '/api/ai/catalog/agents?pageNumber=1&pageSize=100')).json,
+      (await ctx.call('GET', '/api/agents?pageNumber=1&pageSize=100')).json,
     )
     assert(!agents.some((candidate) => candidate.name === name), 'Agent still listed')
 
     // 硬删除后同名可重建：version 从 0 重新开始，且严格使用新请求体 prompt。
     const recreated = envelopeData(
       (
-        await ctx.call('POST', '/api/ai/catalog/agents', {
+        await ctx.call('POST', '/api/agents', {
           name,
           description: 'recreated',
           systemPrompt: 'recreated prompt',
@@ -385,12 +385,12 @@ registerCase({
     assert(String(recreated.version) === '0', JSON.stringify(recreated))
     assert(recreated.systemPrompt === 'recreated prompt', JSON.stringify(recreated))
     const relisted = pageResults(
-      (await ctx.call('GET', '/api/ai/catalog/agents?pageNumber=1&pageSize=100')).json,
+      (await ctx.call('GET', '/api/agents?pageNumber=1&pageSize=100')).json,
     )
     assert(relisted.some((candidate) => candidate.name === name), 'recreated Agent not listed')
     await ctx.call(
       'DELETE',
-      `/api/ai/catalog/agents/${encodeURIComponent(name)}?expectedVersion=${encodeURIComponent(recreated.version)}`,
+      `/api/agents/${encodeURIComponent(name)}?expectedVersion=${encodeURIComponent(recreated.version)}`,
     )
   },
 })
@@ -408,7 +408,7 @@ registerCase({
     try {
       child = envelopeData(
         (
-          await ctx.call('POST', '/api/ai/catalog/agents', {
+          await ctx.call('POST', '/api/agents', {
             name: `e2e-child-${suffix}`,
             description: 'subagent child',
             systemPrompt: 'return a concise report',
@@ -420,7 +420,7 @@ registerCase({
       )
       parent = envelopeData(
         (
-          await ctx.call('POST', '/api/ai/catalog/agents', {
+          await ctx.call('POST', '/api/agents', {
             name: `e2e-parent-${suffix}`,
             description: 'subagent parent',
             systemPrompt: 'delegate when needed',
@@ -448,7 +448,7 @@ registerCase({
         () =>
           ctx.call(
             'DELETE',
-            `/api/ai/catalog/agents/${encodeURIComponent(child.name)}?expectedVersion=${encodeURIComponent(child.version)}`,
+            `/api/agents/${encodeURIComponent(child.name)}?expectedVersion=${encodeURIComponent(child.version)}`,
           ),
         { status: 409, messageIncludes: /in use|subagent|referenc/i },
       )
@@ -456,7 +456,7 @@ registerCase({
         (
           await ctx.call(
             'PUT',
-            `/api/ai/catalog/agents/${encodeURIComponent(parent.name)}`,
+            `/api/agents/${encodeURIComponent(parent.name)}`,
             {
               description: parent.description,
               systemPrompt: parent.systemPrompt,
@@ -475,12 +475,12 @@ registerCase({
       )
       await ctx.call(
         'DELETE',
-        `/api/ai/catalog/agents/${encodeURIComponent(child.name)}?expectedVersion=${encodeURIComponent(child.version)}`,
+        `/api/agents/${encodeURIComponent(child.name)}?expectedVersion=${encodeURIComponent(child.version)}`,
       )
       child = null
       await ctx.call(
         'DELETE',
-        `/api/ai/catalog/agents/${encodeURIComponent(parent.name)}?expectedVersion=${encodeURIComponent(parent.version)}`,
+        `/api/agents/${encodeURIComponent(parent.name)}?expectedVersion=${encodeURIComponent(parent.version)}`,
       )
       parent = null
     } finally {
@@ -489,7 +489,7 @@ registerCase({
         try {
           await ctx.call(
             'DELETE',
-            `/api/ai/catalog/agents/${encodeURIComponent(agent.name)}?expectedVersion=${encodeURIComponent(agent.version)}`,
+            `/api/agents/${encodeURIComponent(agent.name)}?expectedVersion=${encodeURIComponent(agent.version)}`,
           )
         } catch {
           // 保留主断言失败；隔离 E2E schema 会在下一次 rebuild 清理。
@@ -503,11 +503,11 @@ registerCase({
   id: 'crud.chat.invalid_agent_name',
   level: 'L1',
   title: 'Chat 不存在 Agent name 拒绝',
-  docs: 'POST /api/ai/chats 请求体中的 agentName 必须引用现有 Agent，否则返回 400 validation',
+  docs: 'POST /api/chats 请求体中的 agentName 必须引用现有 Agent，否则返回 400 validation',
   async run(ctx) {
     await expectHttpError(
       () =>
-        ctx.call('POST', '/api/ai/chats', {
+        ctx.call('POST', '/api/chats', {
           title: 'bad-agent',
           agentName: `missing-${cid().slice(0, 8)}`,
           yoloEnabled: false,
@@ -575,7 +575,7 @@ registerCase({
       environment = await createEnvironment(ctx, `e2e-chat-independent-env-${suffix}`)
       const updated = envelopeData(
         (
-          await ctx.call('PUT', `/api/ai/chats/${chat.id}`, {
+          await ctx.call('PUT', `/api/chats/${chat.id}`, {
             yoloEnabled: true,
             environmentName: environment.name,
             expectedVersion: chat.version,
@@ -602,7 +602,7 @@ registerCase({
       // 缺 rootSettings 的 NEW_SESSION => 400（mapper requireNonNull）。
       await expectHttpError(
         () =>
-          ctx.call('POST', '/api/harness/command-batches', {
+          ctx.call('POST', '/api/command-batches', {
             owner: chatOwner(chat.id),
             target: { type: 'NEW_SESSION', sessionId: cid(), threadId: cid(), yoloEnabled: false },
             commands: [userMessageCommand('missing root settings', cid())],
@@ -620,7 +620,7 @@ registerCase({
   id: 'crud.chat.default_environment',
   level: 'L1',
   title: 'Chat 默认 Environment 的创建/保留/清空与拒绝',
-  docs: 'POST /api/ai/chats 省略 yoloEnabled 默认 false，携带已存在 Environment name 作为默认环境；PUT 省略 environmentName 保留当前默认环境，显式 null 清空；未知或非 canonical Environment name => 400 且当前值/version 不变',
+  docs: 'POST /api/chats 省略 yoloEnabled 默认 false，携带已存在 Environment name 作为默认环境；PUT 省略 environmentName 保留当前默认环境，显式 null 清空；未知或非 canonical Environment name => 400 且当前值/version 不变',
   async run(ctx) {
     const agent = await firstAgent(ctx)
     const suffix = cid().slice(0, 8)
@@ -629,7 +629,7 @@ registerCase({
     try {
       environment = await createEnvironment(ctx, `e2e-chat-default-env-${suffix}`)
       // 创建：请求体显式省略 yoloEnabled（服务端默认 false），并携带已存在 Environment 作为默认环境。
-      const created = await ctx.call('POST', '/api/ai/chats', {
+      const created = await ctx.call('POST', '/api/chats', {
         title: `e2e-chat-default-${suffix}`,
         agentName: agent.name,
         environmentName: environment.name,
@@ -645,7 +645,7 @@ registerCase({
       // PUT 省略 environmentName（只改 title）：保留当前默认环境。
       chat = envelopeData(
         (
-          await ctx.call('PUT', `/api/ai/chats/${chat.id}`, {
+          await ctx.call('PUT', `/api/chats/${chat.id}`, {
             title: `e2e-chat-default-upd-${suffix}`,
             expectedVersion: chat.version,
           })
@@ -656,7 +656,7 @@ registerCase({
       const beforeRejected = chat
       await expectHttpError(
         () =>
-          ctx.call('PUT', `/api/ai/chats/${chat.id}`, {
+          ctx.call('PUT', `/api/chats/${chat.id}`, {
             environmentName: `missing-env-${suffix}`,
             expectedVersion: chat.version,
           }),
@@ -665,13 +665,13 @@ registerCase({
       // 非 canonical（含 '/'）=> 400。
       await expectHttpError(
         () =>
-          ctx.call('PUT', `/api/ai/chats/${chat.id}`, {
+          ctx.call('PUT', `/api/chats/${chat.id}`, {
             environmentName: 'bad/name',
             expectedVersion: chat.version,
           }),
         { status: 400, messageIncludes: /environmentName/i },
       )
-      const still = envelopeData((await ctx.call('GET', `/api/ai/chats/${chat.id}`)).json)
+      const still = envelopeData((await ctx.call('GET', `/api/chats/${chat.id}`)).json)
       assert(
         still.environmentName === beforeRejected.environmentName
           && String(still.version) === String(beforeRejected.version),
@@ -680,7 +680,7 @@ registerCase({
       // 显式 null 清空默认环境。
       chat = envelopeData(
         (
-          await ctx.call('PUT', `/api/ai/chats/${chat.id}`, {
+          await ctx.call('PUT', `/api/chats/${chat.id}`, {
             environmentName: null,
             expectedVersion: still.version,
           })
@@ -704,7 +704,7 @@ registerCase({
       () =>
         ctx.call(
           'DELETE',
-          '/api/ai/catalog/models/missing-provider/missing-model?expectedVersion=0',
+          '/api/models/missing-provider/missing-model?expectedVersion=0',
         ),
       { status: 404, messageIncludes: /not found|unknown|model/i },
     )
@@ -720,7 +720,7 @@ registerCase({
     const agent = await firstAgent(ctx)
     const chat = envelopeData(
       (
-        await ctx.call('POST', '/api/ai/chats', {
+        await ctx.call('POST', '/api/chats', {
           title: 'e2e-chat',
           agentName: agent.name,
           yoloEnabled: false,
@@ -729,7 +729,7 @@ registerCase({
     )
     const updated = envelopeData(
       (
-        await ctx.call('PUT', `/api/ai/chats/${chat.id}`, {
+        await ctx.call('PUT', `/api/chats/${chat.id}`, {
           title: 'e2e-chat-upd',
           expectedVersion: chat.version,
         })
@@ -738,14 +738,14 @@ registerCase({
     assert(updated.title === 'e2e-chat-upd' && updated.agentName === agent.name, JSON.stringify(updated))
     await expectHttpError(
       () =>
-        ctx.call('PUT', `/api/ai/chats/${chat.id}`, {
+        ctx.call('PUT', `/api/chats/${chat.id}`, {
           title: '   ',
           expectedVersion: updated.version,
         }),
       { status: 400, messageIncludes: /title.*blank/i },
     )
     await deleteChat(ctx, updated)
-    await expectHttpError(() => ctx.call('GET', `/api/ai/chats/${chat.id}`), { status: 404 })
+    await expectHttpError(() => ctx.call('GET', `/api/chats/${chat.id}`), { status: 404 })
   },
 })
 
@@ -753,7 +753,7 @@ registerCase({
   id: 'crud.chat.session_ownership_list',
   level: 'L1',
   title: 'Chat Session 摘要与 Session Thread 列表',
-  docs: 'NEW_SESSION 原子创建即建立 Chat owner 归属；GET /api/ai/chats/{chatId}/sessions 返回 Session 摘要（新到旧，firstMessagePreview 精确等于首条 USER 文本、threadCount=1）；同批 NEW_SESSION 幂等重放 replayed=true 且不新增 Session/Thread relation；GET /api/harness/sessions/{sessionId}/threads 返回 Thread 摘要；未知 Chat sessions => 404',
+  docs: 'NEW_SESSION 原子创建即建立 Chat owner 归属；GET /api/chats/{chatId}/sessions 返回 Session 摘要（新到旧，firstMessagePreview 精确等于首条 USER 文本、threadCount=1）；同批 NEW_SESSION 幂等重放 replayed=true 且不新增 Session/Thread relation；GET /api/sessions/{sessionId}/threads 返回 Thread 摘要；未知 Chat sessions => 404',
   async run(ctx) {
     const agent = await firstAgent(ctx)
     const suffix = cid().slice(0, 8)
@@ -861,7 +861,7 @@ registerCase({
       // canonical 但未知的 Chat sessions => 404。
       const unknownChatId = '00000000-0000-0000-0000-000000000999'
       await expectHttpError(
-        () => ctx.call('GET', `/api/ai/chats/${unknownChatId}/sessions`),
+        () => ctx.call('GET', `/api/chats/${unknownChatId}/sessions`),
         { status: 404, messageIncludes: /unknown|not found/i },
       )
     } finally {
@@ -881,7 +881,7 @@ registerCase({
 /** 列出全部 Provider（分页足够大），用于读回持久化事实。 */
 async function listProviders(ctx) {
   return pageResults(
-    (await ctx.call('GET', '/api/ai/catalog/providers?pageNumber=1&pageSize=100')).json,
+    (await ctx.call('GET', '/api/providers?pageNumber=1&pageSize=100')).json,
   )
 }
 
@@ -889,15 +889,15 @@ registerCase({
   id: 'crud.provider.http_retry_override',
   level: 'L1',
   title: 'Provider HTTP 重试白名单三态覆盖与严格整数校验',
-  docs: 'POST/PUT /api/ai/catalog/providers 的 modelHttpRetryStatusCodes 为 number[]|null：无覆盖显式输出 null（继承系统名单）；数组完全替代系统名单；显式 null 清除覆盖；空数组禁用；省略字段保留既有覆盖；非 400–599 整数/越界/重复/非数组/字符串/小数/null 元素一律 400 且不推进版本；测试结束前按 CAS 删除临时 Provider',
+  docs: 'POST/PUT /api/providers 的 modelHttpRetryStatusCodes 为 number[]|null：无覆盖显式输出 null（继承系统名单）；数组完全替代系统名单；显式 null 清除覆盖；空数组禁用；省略字段保留既有覆盖；非 400–599 整数/越界/重复/非数组/字符串/小数/null 元素一律 400 且不推进版本；测试结束前按 CAS 删除临时 Provider',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
     const created = envelopeData(
-      (await ctx.call('POST', '/api/ai/catalog/providers', providerCreateBody(suffix))).json,
+      (await ctx.call('POST', '/api/providers', providerCreateBody(suffix))).json,
     )
     let current = created
     const put = (overrides) =>
-      ctx.call('PUT', `/api/ai/catalog/providers/${encodeURIComponent(created.name)}`, {
+      ctx.call('PUT', `/api/providers/${encodeURIComponent(created.name)}`, {
         ...providerUpdateBody(overrides),
         expectedVersion: String(current.version),
       })
@@ -969,10 +969,10 @@ registerCase({
   id: 'crud.agent.builtin_identity',
   level: 'L1',
   title: '内置 Compaction Agent identity 只读与改名/删除拒绝',
-  docs: 'GET /api/ai/catalog/agents 必含内置 Compaction：type=BUILTIN，model 字段显式输出（未配置为 null，已配置为合法 provider/model 引用，本 case 绝不改写其 model/config）；PUT 携带由系统持有的 name 字段 => 400；DELETE => 409；拒绝后 identity/version 不变',
+  docs: 'GET /api/agents 必含内置 Compaction：type=BUILTIN，model 字段显式输出（未配置为 null，已配置为合法 provider/model 引用，本 case 绝不改写其 model/config）；PUT 携带由系统持有的 name 字段 => 400；DELETE => 409；拒绝后 identity/version 不变',
   async run(ctx) {
     const agents = pageResults(
-      (await ctx.call('GET', '/api/ai/catalog/agents?pageNumber=1&pageSize=100')).json,
+      (await ctx.call('GET', '/api/agents?pageNumber=1&pageSize=100')).json,
     )
     const compaction = agents.find((agent) => agent.name === 'Compaction')
     assert(
@@ -992,7 +992,7 @@ registerCase({
     for (const identity of [{ name: 'compaction-renamed' }, { type: 'USER' }]) {
       await expectHttpError(
         () =>
-        ctx.call('PUT', '/api/ai/catalog/agents/Compaction', {
+        ctx.call('PUT', '/api/agents/Compaction', {
           ...identity,
           description: compaction.description,
           systemPrompt: compaction.systemPrompt,
@@ -1009,13 +1009,13 @@ registerCase({
       () =>
         ctx.call(
           'DELETE',
-          `/api/ai/catalog/agents/Compaction?expectedVersion=${encodeURIComponent(compaction.version)}`,
+          `/api/agents/Compaction?expectedVersion=${encodeURIComponent(compaction.version)}`,
         ),
       { status: 409 },
     )
     // 拒绝后 identity/version 严格不变。
     const after = pageResults(
-      (await ctx.call('GET', '/api/ai/catalog/agents?pageNumber=1&pageSize=100')).json,
+      (await ctx.call('GET', '/api/agents?pageNumber=1&pageSize=100')).json,
     ).find((agent) => agent.name === 'Compaction')
     assert(
       after && after.type === 'BUILTIN' && String(after.version) === String(compaction.version),
@@ -1041,7 +1041,7 @@ function modelSelectionFor(agent) {
 
 async function firstModel(ctx) {
   const models = pageResults(
-    (await ctx.call('GET', '/api/ai/catalog/models?pageNumber=1&pageSize=10')).json,
+    (await ctx.call('GET', '/api/models?pageNumber=1&pageSize=10')).json,
   )
   assert(models[0]?.providerName && models[0]?.name, 'need seeded Model')
   return models[0]
@@ -1049,7 +1049,7 @@ async function firstModel(ctx) {
 
 async function firstTwoModels(ctx) {
   const models = pageResults(
-    (await ctx.call('GET', '/api/ai/catalog/models?pageNumber=1&pageSize=10')).json,
+    (await ctx.call('GET', '/api/models?pageNumber=1&pageSize=10')).json,
   )
   assert(
     models[0]?.providerName
@@ -1063,7 +1063,7 @@ async function firstTwoModels(ctx) {
 
 async function firstAgent(ctx) {
   const agents = pageResults(
-    (await ctx.call('GET', '/api/ai/catalog/agents?pageNumber=1&pageSize=10')).json,
+    (await ctx.call('GET', '/api/agents?pageNumber=1&pageSize=10')).json,
   )
   const agent = agents.find((candidate) => candidate.type === 'USER' && candidate.model)
   assert(agent?.name, 'need a configured USER Agent')
@@ -1072,7 +1072,7 @@ async function firstAgent(ctx) {
 
 async function findModel(ctx, providerName, name) {
   const models = pageResults(
-    (await ctx.call('GET', '/api/ai/catalog/models?pageNumber=1&pageSize=100')).json,
+    (await ctx.call('GET', '/api/models?pageNumber=1&pageSize=100')).json,
   )
   return models.find(
     (model) => model.providerName === providerName && model.name === name,
@@ -1085,7 +1085,7 @@ function modelRef(model) {
 
 function modelPath(providerName, name) {
   const encodedName = name.split('/').map(encodeURIComponent).join('/')
-  return `/api/ai/catalog/models/${encodeURIComponent(providerName)}/${encodedName}`
+  return `/api/models/${encodeURIComponent(providerName)}/${encodedName}`
 }
 
 async function deleteModel(ctx, model) {
@@ -1098,21 +1098,21 @@ async function deleteModel(ctx, model) {
 async function deleteProvider(ctx, provider) {
   await ctx.call(
     'DELETE',
-    `/api/ai/catalog/providers/${encodeURIComponent(provider.name)}?expectedVersion=${encodeURIComponent(provider.version)}`,
+    `/api/providers/${encodeURIComponent(provider.name)}?expectedVersion=${encodeURIComponent(provider.version)}`,
   )
 }
 
 async function deleteChat(ctx, chat) {
   await ctx.call(
     'DELETE',
-    `/api/ai/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
+    `/api/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
   )
 }
 
 /** 创建一次性 Environment Card（dedicated 资源，随 case 清理），返回权威 Card。 */
 async function createEnvironment(ctx, name) {
   const environment = envelopeData(
-    (await ctx.call('POST', '/api/harness/environments', { name })).json,
+    (await ctx.call('POST', '/api/environments', { name })).json,
   )
   assert(
     environment?.id && environment?.name === name && environment?.version != null,
@@ -1124,11 +1124,11 @@ async function createEnvironment(ctx, name) {
 /** 删除一次性 Environment Card：先读回权威版本，再用它做 CAS 删除（GET 失败直接失败，不静默回退陈旧版本）。 */
 async function deleteEnvironment(ctx, environment) {
   const card = envelopeData(
-    (await ctx.call('GET', `/api/harness/environments/${encodeURIComponent(environment.id)}`)).json,
+    (await ctx.call('GET', `/api/environments/${encodeURIComponent(environment.id)}`)).json,
   )
   const version = String(card.version)
   await ctx.call(
     'DELETE',
-    `/api/harness/environments/${encodeURIComponent(environment.id)}?expectedVersion=${encodeURIComponent(version)}`,
+    `/api/environments/${encodeURIComponent(environment.id)}?expectedVersion=${encodeURIComponent(version)}`,
   )
 }

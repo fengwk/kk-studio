@@ -25,7 +25,7 @@ import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO;
  * {@code FOCUS_TERMINAL} 只新建/显示人工终端，不模拟输入；{@code CLOSE_VIEW} 幂等清理该 view，不影响其它 view 或 Agent。
  */
 @AllArgsConstructor
-@RequestMapping("/api/harness/environments/{environmentId}/ide/views")
+@RequestMapping("/api/environments/{environmentId}/ide/views")
 @RestController
 public class StudioEnvironmentIdeController {
 

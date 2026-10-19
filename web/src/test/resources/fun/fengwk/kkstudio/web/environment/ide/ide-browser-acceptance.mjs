@@ -476,7 +476,7 @@ async function main() {
       // Only the exact DIRTY refusal is pending; all other errors fail immediately.
       await waitFor(async () => {
         const response = await fetch(
-          `${config.baseUrl}/api/harness/environments/${config.environmentId}/ide/views/${view.viewId}`,
+          `${config.baseUrl}/api/environments/${config.environmentId}/ide/views/${view.viewId}`,
           { method: 'DELETE' },
         )
         const body = redact(await response.text())
@@ -531,7 +531,7 @@ async function main() {
 
     // Required: one real terminal per view; the browser shells write their real OS pid.
     for (const view of config.views) {
-      const viewUrl = `${config.baseUrl}/api/harness/environments/${config.environmentId}/ide/views/${view.viewId}/terminal`
+      const viewUrl = `${config.baseUrl}/api/environments/${config.environmentId}/ide/views/${view.viewId}/terminal`
       const response = await fetch(viewUrl, { method: 'POST' })
       if (!response.ok) {
         throw new Error(`terminal ${view.name} HTTP ${response.status}`)
@@ -572,7 +572,7 @@ async function main() {
         'unsaved edit reflected in the editor buffer',
       )
       const response = await fetch(
-        `${config.baseUrl}/api/harness/environments/${config.environmentId}/ide/views/${first.viewId}/directory`,
+        `${config.baseUrl}/api/environments/${config.environmentId}/ide/views/${first.viewId}/directory`,
         {
           method: 'PUT',
           headers: { 'content-type': 'application/json' },
@@ -684,7 +684,7 @@ async function main() {
     await runStep(report, config.reportPath, 'dirtyCloseRejected', true, async () => {
       await dismissDialogsIfAny(ideB)
       const response = await fetch(
-        `${config.baseUrl}/api/harness/environments/${config.environmentId}/ide/views/${second.viewId}`,
+        `${config.baseUrl}/api/environments/${config.environmentId}/ide/views/${second.viewId}`,
         { method: 'DELETE' },
       )
       const body = redact(await response.text().catch(() => ''))

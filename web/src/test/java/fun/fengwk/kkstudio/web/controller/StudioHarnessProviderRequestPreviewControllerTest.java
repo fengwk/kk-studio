@@ -97,7 +97,7 @@ class StudioHarnessProviderRequestPreviewControllerTest {
     String response =
         mockMvc
             .perform(
-                post("/api/harness/threads/" + THREAD_ID + "/provider-request-preview")
+                post("/api/threads/" + THREAD_ID + "/provider-request-preview")
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(batch(draftCommands())))
             .andExpect(status().isOk())
@@ -130,7 +130,7 @@ class StudioHarnessProviderRequestPreviewControllerTest {
         .thenReturn(new HarnessProviderRequestPreviewDTO());
     mockMvc
         .perform(
-            post("/api/harness/threads/" + THREAD_ID + "/provider-request-preview")
+            post("/api/threads/" + THREAD_ID + "/provider-request-preview")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(batch(draftCommands())))
         .andExpect(status().isOk());
@@ -193,7 +193,7 @@ class StudioHarnessProviderRequestPreviewControllerTest {
 
     mockMvc
         .perform(
-            post("/api/harness/threads/" + THREAD_ID + "/provider-request-preview")
+            post("/api/threads/" + THREAD_ID + "/provider-request-preview")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(batch(draftCommands())))
         .andExpect(status().isConflict())
@@ -216,7 +216,7 @@ class StudioHarnessProviderRequestPreviewControllerTest {
     String response =
         mockMvc
             .perform(
-                post("/api/harness/threads/" + THREAD_ID + "/provider-request-preview")
+                post("/api/threads/" + THREAD_ID + "/provider-request-preview")
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(batch(draftCommands())))
             .andExpect(status().isConflict())
@@ -237,7 +237,7 @@ class StudioHarnessProviderRequestPreviewControllerTest {
 
     mockMvc
         .perform(
-            post("/api/harness/threads/" + THREAD_ID + "/provider-request-preview")
+            post("/api/threads/" + THREAD_ID + "/provider-request-preview")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(batch(draftCommands())))
         .andExpect(status().isNotFound())
@@ -250,7 +250,7 @@ class StudioHarnessProviderRequestPreviewControllerTest {
     // 非 canonical UUID path：与其它 thread 端点一致地 400。
     mockMvc
         .perform(
-            post("/api/harness/threads/not-a-uuid/provider-request-preview")
+            post("/api/threads/not-a-uuid/provider-request-preview")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(batch(draftCommands())))
         .andExpect(status().isBadRequest());
@@ -258,7 +258,7 @@ class StudioHarnessProviderRequestPreviewControllerTest {
     // CUSTOM_MESSAGE 属于内部 steering，绝不能出现在产品 HTTP 请求体里。
     mockMvc
         .perform(
-            post("/api/harness/threads/" + THREAD_ID + "/provider-request-preview")
+            post("/api/threads/" + THREAD_ID + "/provider-request-preview")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     batch(
@@ -290,7 +290,7 @@ class StudioHarnessProviderRequestPreviewControllerTest {
             .formatted(OWNER_ID, THREAD_ID, HEAD_ENTRY_ID, HEAD_ENTRY_ID, draftCommands());
     mockMvc
         .perform(
-            post("/api/harness/threads/" + THREAD_ID + "/provider-request-preview")
+            post("/api/threads/" + THREAD_ID + "/provider-request-preview")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(legacyOwnerAndTargetShape))
         .andExpect(status().isBadRequest())
@@ -309,7 +309,7 @@ class StudioHarnessProviderRequestPreviewControllerTest {
 
     mockMvc
         .perform(
-            post("/api/harness/threads/" + THREAD_ID + "/provider-request-preview")
+            post("/api/threads/" + THREAD_ID + "/provider-request-preview")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     batch(
@@ -338,7 +338,7 @@ class StudioHarnessProviderRequestPreviewControllerTest {
         .thenReturn(new HarnessProviderRequestPreviewDTO());
     mockMvc
         .perform(
-            post("/api/harness/threads/" + THREAD_ID + "/provider-request-preview")
+            post("/api/threads/" + THREAD_ID + "/provider-request-preview")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(batch(draftCommands())))
         .andExpect(status().isOk());

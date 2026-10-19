@@ -375,8 +375,8 @@ payload 只含 settings、不物化任何委派运行树元数据。
 独立根提供人工控制，独立子代理只读并可定点返回 `/threads/{parentId}`，
 不依赖 Chat 归属。消息、设置、Goal、预览和 Stop 只允许执行根；根面板汇聚后代审批和问卷，
 操作写回原始调用 Thread；
-已有 Thread 的命令使用 `/api/harness/threads/{threadId}/command-batches`，body 不带 owner/target，
-创建 Session/Thread 才使用 owner-aware 的 `/api/harness/command-batches`。
+已有 Thread 的命令使用 `/api/threads/{threadId}/command-batches`，body 不带 owner/target，
+创建 Session/Thread 才使用 owner-aware 的 `/api/command-batches`。
 同一 tool batch 中，某个调用已经成功而另一个仍在等待审批时，成功调用按其自身结果展示，
 等待审批的调用保持未决；durable 工具结果到达后只保留这一权威结果。
 [`ThreadWorkspacePage.test.tsx`](../../frontend/src/features/ai/thread/ThreadWorkspacePage.test.tsx)
@@ -495,7 +495,7 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
   分页携带 required-nullable 的权威回读时刻 `freshnessAt`（本 case 无环境 Tool
   等待时显式为 null）；该 case 需要 `host-mock`，不是 `requires=-`。
 - `thread_tree.query_contract` / `thread_tree.invalid_and_unknown_thread`：
-  `GET /api/harness/threads/{threadId}/tree` 的最小节点投影、真实根关系、当前路径计数与终态，
+  `GET /api/threads/{threadId}/tree` 的最小节点投影、真实根关系、当前路径计数与终态，
   节点 `updateTime` 只读投影 Thread 权威更新时刻且与 Thread 快照一致，
   查询不改变 head、版本或 `updateTime`；非法 UUID 为 400，缺失 Thread 为 404。
   根节点由缺失 Agent 触发确定性规划失败，不调用真实 Provider；
@@ -509,7 +509,7 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 - `crud.chat.default_environment`：Chat 默认 Environment 是 required-nullable（未选择时显式 null），创建省略
   `yoloEnabled` 时为 `false`；携带已存在 Environment 作为默认环境，PUT 省略 `environmentName` 保留当前默认环境、
   显式 null 清空，未知或非 canonical Environment 名 400 且当前值/version 不变。
-- `thread.model_request_debug_draft_settings`：`POST /api/harness/threads/{threadId}/model-request-debug` 以 UI 草稿
+- `thread.model_request_debug_draft_settings`：`POST /api/threads/{threadId}/model-request-debug` 以 UI 草稿
   `{model, environmentName}`（可空）在真实 snapshot 上只读现算；缺失 Agent 的既有 Thread 让规划确定性 `PLANNING_FAILED`
   （不调用真实 Provider），响应回显草稿 model/env、`planningError` 只回显稳定 code、tools/skills/subagents 安全为空、
   `frozenInvocation` 与草稿选择独立；缺 model 或非 canonical environmentName 400、GET 405，查询不改变 head/version/sequence。
@@ -731,7 +731,7 @@ Daemon。
 | 场景 | 并发 | 请求 | error | p95 | throughput RPS | 最少样本 |
 | --- | ---: | --- | ---: | ---: | ---: | ---: |
 | `health` | 16 | `GET /actuator/health`，验证 `status=UP` | 0 | `<=250ms` | `>=50` | 20 |
-| `catalog` | 16 | `GET /api/ai/catalog/models?pageNumber=1&pageSize=20`，验证严格 catalog fields | 0 | `<=500ms` | `>=25` | 20 |
+| `catalog` | 16 | `GET /api/models?pageNumber=1&pageSize=20`，验证严格 catalog fields | 0 | `<=500ms` | `>=25` | 20 |
 | `canvas` | 4 | `POST /api/canvases` 后 `DELETE /api/canvases/{id}`，验证 UUID/规范十进制 revision | 0 | `<=1500ms` | `>=5` | 20 |
 
 阈值与响应校验由 [`runner.mjs`](../../scripts/dev/verify/performance/runner.mjs) 定义。

@@ -173,12 +173,12 @@ test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
         const method = route.request().method()
         const path = new URL(url).pathname
 
-        if (path === `/api/harness/threads/${VALID_THREAD_ID}/command-batches` && method === 'POST') {
+        if (path === `/api/threads/${VALID_THREAD_ID}/command-batches` && method === 'POST') {
           commandBatches.push(route.request().postDataJSON())
           await route.fulfill({ json: { status: 200, data: { accepted: true, thread: createThreadSnapshot().data.thread } } })
           return
         }
-        if (path === `/api/harness/threads/${VALID_THREAD_ID}/stop` && method === 'POST') {
+        if (path === `/api/threads/${VALID_THREAD_ID}/stop` && method === 'POST') {
           const body = route.request().postDataJSON()
           stopRequests.push(body)
           stopCount += 1
@@ -216,15 +216,15 @@ test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
           })
           return
         }
-        if (path === `/api/harness/threads/${VALID_THREAD_ID}`) {
+        if (path === `/api/threads/${VALID_THREAD_ID}`) {
           await route.fulfill({ json: createThreadSnapshot() })
           return
         }
-        if (path === `/api/harness/threads/${VALID_THREAD_ID}/tree`) {
+        if (path === `/api/threads/${VALID_THREAD_ID}/tree`) {
           await route.fulfill({ json: { status: 200, data: [] } })
           return
         }
-        if (path === `/api/harness/environments`) {
+        if (path === `/api/environments`) {
           await route.fulfill({ json: { status: 200, data: [] } })
           return
         }
@@ -258,7 +258,7 @@ test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
           await route.fulfill({ json: createIssueDetail() })
           return
         }
-        if (path === '/api/ai/catalog/agents') {
+        if (path === '/api/agents') {
           await route.fulfill({
             json: {
               status: 200,
@@ -275,7 +275,7 @@ test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
           })
           return
         }
-        if (path === '/api/ai/catalog/models') {
+        if (path === '/api/models') {
           await route.fulfill({
             json: {
               status: 200,

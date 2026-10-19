@@ -1348,7 +1348,7 @@ async function createHoldingQueueFixture(
     await mock.start()
     const providerResponse = await apiCtx.call(
       'POST',
-      '/api/ai/catalog/providers',
+      '/api/providers',
       {
         name: `e2e-ui-hold-provider-${suffix}`,
         description: 'Local hold provider for free UI queue tests.',
@@ -1367,7 +1367,7 @@ async function createHoldingQueueFixture(
 
     const modelResponse = await apiCtx.call(
       'POST',
-      '/api/ai/catalog/models',
+      '/api/models',
       {
         providerName: state.provider.name,
         name: `e2e-ui-hold-model-${suffix}`,
@@ -1392,7 +1392,7 @@ async function createHoldingQueueFixture(
 
     const agentResponse = await apiCtx.call(
       'POST',
-      '/api/ai/catalog/agents',
+      '/api/agents',
       {
         name: `e2e-ui-hold-agent-${suffix}`,
         description: 'Local hold agent for free UI queue tests.',
@@ -1528,7 +1528,7 @@ async function cleanupFixture(state) {
     if (!state.agent) return
     await deleteCatalogResource(
       state.apiCtx,
-      `/api/ai/catalog/agents/${encodeURIComponent(state.agent.name)}`
+      `/api/agents/${encodeURIComponent(state.agent.name)}`
         + `?expectedVersion=${encodeURIComponent(state.agent.version)}`,
     )
   })
@@ -1536,7 +1536,7 @@ async function cleanupFixture(state) {
     if (!state.model) return
     await deleteCatalogResource(
       state.apiCtx,
-      `/api/ai/catalog/models/${encodeURIComponent(state.model.providerName)}/${encodeURIComponent(state.model.name)}`
+      `/api/models/${encodeURIComponent(state.model.providerName)}/${encodeURIComponent(state.model.name)}`
         + `?expectedVersion=${encodeURIComponent(state.model.version)}`,
     )
   })
@@ -1544,7 +1544,7 @@ async function cleanupFixture(state) {
     if (!state.provider) return
     await deleteCatalogResource(
       state.apiCtx,
-      `/api/ai/catalog/providers/${encodeURIComponent(state.provider.name)}`
+      `/api/providers/${encodeURIComponent(state.provider.name)}`
         + `?expectedVersion=${encodeURIComponent(state.provider.version)}`,
     )
   })
@@ -1565,7 +1565,7 @@ async function deleteChat(apiCtx, chat) {
   if (!chat?.id) return
   const currentResponse = await apiCtx.call(
     'GET',
-    `/api/ai/chats/${encodeURIComponent(chat.id)}`,
+    `/api/chats/${encodeURIComponent(chat.id)}`,
   )
   if (currentResponse.status === 404) return
   assert(
@@ -1575,7 +1575,7 @@ async function deleteChat(apiCtx, chat) {
   const current = envelopeData(currentResponse.json)
   const response = await apiCtx.call(
     'DELETE',
-    `/api/ai/chats/${encodeURIComponent(chat.id)}`
+    `/api/chats/${encodeURIComponent(chat.id)}`
       + `?expectedVersion=${encodeURIComponent(current.version)}`,
   )
   assert(
@@ -1619,11 +1619,11 @@ async function clearBrowserFixtureState(page, fixture) {
 async function resolveCatalogTarget(apiCtx) {
   const agentsResponse = await apiCtx.call(
     'GET',
-    '/api/ai/catalog/agents?pageNumber=1&pageSize=50',
+    '/api/agents?pageNumber=1&pageSize=50',
   )
   const modelsResponse = await apiCtx.call(
     'GET',
-    '/api/ai/catalog/models?pageNumber=1&pageSize=50',
+    '/api/models?pageNumber=1&pageSize=50',
   )
   assert(
     agentsResponse.status === 200 && modelsResponse.status === 200,

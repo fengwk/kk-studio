@@ -191,7 +191,7 @@ registerCase({
       { status: 400 },
     )
     await expectHttpError(
-      () => ctx.call('GET', `/api/harness/threads/${rejectedThreadId}`),
+      () => ctx.call('GET', `/api/threads/${rejectedThreadId}`),
       { status: 404 },
     )
 
@@ -284,7 +284,7 @@ registerCase({
     try {
       provider = envelopeData(
         (
-          await ctx.call('POST', '/api/ai/catalog/providers', {
+          await ctx.call('POST', '/api/providers', {
             name: `e2e-provider-image-${suffix}`,
             description: 'Local Responses probe for attachment materialization.',
             providerType: 'openai_responses',
@@ -297,7 +297,7 @@ registerCase({
       )
       model = envelopeData(
         (
-          await ctx.call('POST', '/api/ai/catalog/models', {
+          await ctx.call('POST', '/api/models', {
             providerName: provider.name,
             name: `e2e-model-image-${suffix}`,
             modelId: `wire-image-${suffix}`,
@@ -316,7 +316,7 @@ registerCase({
       )
       agent = envelopeData(
         (
-          await ctx.call('POST', '/api/ai/catalog/agents', {
+          await ctx.call('POST', '/api/agents', {
             name: `e2e-agent-image-${suffix}`,
             description: 'Agent starts with one environment-independent tool.',
             systemPrompt: 'Complete without calling tools.',
@@ -388,7 +388,7 @@ registerCase({
       // Goal tools 是无需 Environment 的真实可选工具，避免把本 Canvas-only case 错绑到 live daemon。
       agent = envelopeData(
         (
-          await ctx.call('PUT', `/api/ai/catalog/agents/${encodeURIComponent(agent.name)}`, {
+          await ctx.call('PUT', `/api/agents/${encodeURIComponent(agent.name)}`, {
             description: 'Agent now has the latest tools.',
             systemPrompt: 'Complete without calling tools.',
             model: agent.model,
@@ -498,28 +498,28 @@ registerCase({
         if (!chat?.id) return
         await ctx.call(
           'DELETE',
-          `/api/ai/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
+          `/api/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
         )
       })
       await cleanup('agent', cleanupErrors, async () => {
         if (!agent?.name) return
         await ctx.call(
           'DELETE',
-          `/api/ai/catalog/agents/${encodeURIComponent(agent.name)}?expectedVersion=${encodeURIComponent(agent.version)}`,
+          `/api/agents/${encodeURIComponent(agent.name)}?expectedVersion=${encodeURIComponent(agent.version)}`,
         )
       })
       await cleanup('model', cleanupErrors, async () => {
         if (!model?.providerName || !model?.name) return
         await ctx.call(
           'DELETE',
-          `/api/ai/catalog/models/${encodeURIComponent(model.providerName)}/${encodeURIComponent(model.name)}?expectedVersion=${encodeURIComponent(model.version)}`,
+          `/api/models/${encodeURIComponent(model.providerName)}/${encodeURIComponent(model.name)}?expectedVersion=${encodeURIComponent(model.version)}`,
         )
       })
       await cleanup('provider', cleanupErrors, async () => {
         if (!provider?.name) return
         await ctx.call(
           'DELETE',
-          `/api/ai/catalog/providers/${encodeURIComponent(provider.name)}?expectedVersion=${encodeURIComponent(provider.version)}`,
+          `/api/providers/${encodeURIComponent(provider.name)}?expectedVersion=${encodeURIComponent(provider.version)}`,
         )
       })
       if (cleanupErrors.length > 0 && primaryError == null) {

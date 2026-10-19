@@ -515,7 +515,7 @@ start_all() {
     --server.port="$BACKEND_PORT"
   echo "$DETACHED_PID" > "$BACKEND_PID_FILE"
   if ! wait_http \
-    "$BACKEND_URL/api/ai/catalog/agents?pageNumber=1&pageSize=1" \
+    "$BACKEND_URL/api/agents?pageNumber=1&pageSize=1" \
     backend \
     "$BACKEND_PID_FILE"; then
     print_logs all >&2

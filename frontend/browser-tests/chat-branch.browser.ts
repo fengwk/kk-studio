@@ -182,11 +182,11 @@ async function installChatApi(
     const path = new URL(request.url()).pathname
     const method = request.method()
 
-    if (path === `/api/ai/chats/${CHAT_ID}`) {
+    if (path === `/api/chats/${CHAT_ID}`) {
       await route.fulfill({ json: { status: 200, data: chat() } })
       return
     }
-    if (path === `/api/ai/chats/${CHAT_ID}/sessions`) {
+    if (path === `/api/chats/${CHAT_ID}/sessions`) {
       await route.fulfill({
         json: {
           status: 200,
@@ -202,7 +202,7 @@ async function installChatApi(
       })
       return
     }
-    if (path === '/api/ai/catalog/agents') {
+    if (path === '/api/agents') {
       await route.fulfill({
         json: {
           status: 200,
@@ -226,7 +226,7 @@ async function installChatApi(
       })
       return
     }
-    if (path === '/api/ai/catalog/models') {
+    if (path === '/api/models') {
       await route.fulfill({
         json: {
           status: 200,
@@ -284,15 +284,15 @@ async function installChatApi(
       })
       return
     }
-    if (path === '/api/harness/environments') {
+    if (path === '/api/environments') {
       await route.fulfill({ json: { status: 200, data: [] } })
       return
     }
-    if (path === `/api/harness/sessions/${SESSION_ID}/entries`) {
+    if (path === `/api/sessions/${SESSION_ID}/entries`) {
       await route.fulfill({ json: { status: 200, data: entryList } })
       return
     }
-    if (path === `/api/harness/sessions/${SESSION_ID}/threads`) {
+    if (path === `/api/sessions/${SESSION_ID}/threads`) {
       await route.fulfill({ json: { status: 200, data: [{
         threadId: THREAD_ID, parentThreadId: null, name: boundThread.name,
         createdAt: boundThread.createTime, updatedAt: boundThread.updateTime, status: 'IDLE',
@@ -300,7 +300,7 @@ async function installChatApi(
       }] } })
       return
     }
-    if (path === `/api/harness/sessions/${SESSION_ID}/provider-request-preview` && method === 'POST') {
+    if (path === `/api/sessions/${SESSION_ID}/provider-request-preview` && method === 'POST') {
       // 本地分支草稿预检：只读会话前缀 + 命令，回包是最终请求体预览。
       const body = request.postDataJSON() as {
         startEntryId: string
@@ -323,7 +323,7 @@ async function installChatApi(
       })
       return
     }
-    if (path === `/api/harness/threads/${CHILD_ID}` || path === `/api/harness/threads/${GRANDCHILD_ID}`) {
+    if (path === `/api/threads/${CHILD_ID}` || path === `/api/threads/${GRANDCHILD_ID}`) {
       const grandchild = path.endsWith(GRANDCHILD_ID)
       await route.fulfill({ json: { status: 200, data: {
         version: grandchild && grandCompleted ? '1' : '0',
@@ -352,7 +352,7 @@ async function installChatApi(
       } } })
       return
     }
-    if (path === `/api/harness/threads/${THREAD_ID}` || (createdThread != null && path === `/api/harness/threads/${createdThread.threadId}`)) {
+    if (path === `/api/threads/${THREAD_ID}` || (createdThread != null && path === `/api/threads/${createdThread.threadId}`)) {
       const isCreated = createdThread != null && path.endsWith(createdThread.threadId)
       const currentThread = isCreated ? createdThread! : { ...boundThread, version: String(boundVersion) }
       await route.fulfill({
@@ -373,7 +373,7 @@ async function installChatApi(
       })
       return
     }
-    if (path === `/api/harness/threads/${THREAD_ID}/tree`) {
+    if (path === `/api/threads/${THREAD_ID}/tree`) {
       recorded.treeReads += 1
       await route.fulfill({ json: { status: 200, data: [
         { threadId: THREAD_ID, parentThreadId: null, name: boundThread.name, agentName: 'assistant',
@@ -746,7 +746,7 @@ test('selecting a Thread waits for readiness, preserves its text and never steal
   let release!: () => void
   const gate = new Promise<void>((resolve) => { release = resolve })
   let requested = false
-  await page.route(`**/api/harness/threads/${THREAD_ID}`, async (route) => {
+  await page.route(`**/api/threads/${THREAD_ID}`, async (route) => {
     requested = true
     await gate
     await route.fallback()

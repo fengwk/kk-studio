@@ -30,7 +30,7 @@ import java.util.Objects;
  * 业务工作流（Run/stage 门禁与身份校验都在那里），因此不允许借本公共端点以 ownerId 伪造命令；Canvas 不持有 Harness Session，没有 owner 形态。
  */
 @RestController
-@RequestMapping("/api/harness/command-batches")
+@RequestMapping("/api/command-batches")
 public class StudioHarnessCommandBatchController {
 
   /** Issue+Agent 的命令由 Issue 工作流拥有，公共 batch 端点不提供该入口。 */

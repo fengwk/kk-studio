@@ -257,7 +257,7 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     dto.setModel("stub/acceptance-stub");
     dto.setVariant("default");
     dto.setConfig(config);
-    postData("/api/ai/catalog/agents", dto);
+    postData("/api/agents", dto);
   }
 
   /** 导出文档里的 Agent 条目名，用于断言内置身份没有变成独立条目。 */

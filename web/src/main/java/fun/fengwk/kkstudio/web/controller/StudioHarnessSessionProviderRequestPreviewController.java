@@ -40,7 +40,7 @@ import java.util.UUID;
  * 409。预览不写任何 durable 状态、不消费 upload、不触发 transport，因此响应不含任何「已接受」语义。
  */
 @RestController
-@RequestMapping("/api/harness/sessions")
+@RequestMapping("/api/sessions")
 public class StudioHarnessSessionProviderRequestPreviewController {
 
   private final ProviderRequestPreviewService previewService;

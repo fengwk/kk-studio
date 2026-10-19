@@ -3,7 +3,7 @@ import { expect, test, type Page } from './fixture'
 const HARNESS_URL = '/browser-tests/chat-defaults-harness.html'
 
 async function setupEnvironmentRoute(page: Page) {
-  await page.route('**/api/harness/environments**', async (route) => {
+  await page.route('**/api/environments**', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',

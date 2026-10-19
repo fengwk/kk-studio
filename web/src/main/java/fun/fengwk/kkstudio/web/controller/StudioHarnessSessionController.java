@@ -35,7 +35,7 @@ import java.util.function.Supplier;
 
 /** Runtime Session 的 Thread 摘要 / Entry tree 查询与 Session 名称重命名。 */
 @RestController
-@RequestMapping("/api/harness/sessions")
+@RequestMapping("/api/sessions")
 public class StudioHarnessSessionController {
 
   private final HarnessOwnerQueryService harnessQueryService;

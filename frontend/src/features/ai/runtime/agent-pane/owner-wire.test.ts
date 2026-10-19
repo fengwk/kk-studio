@@ -72,7 +72,7 @@ describe('owner-free HTTP wire', () => {
     })
     await harnessService.acceptCommandBatch(created.request)
     const { url, data } = wireAt(0)
-    expect(url).toBe('/harness/command-batches')
+    expect(url).toBe('/command-batches')
     const body = JSON.parse(data) as {
       owner: unknown
       target: { type: string }
@@ -95,7 +95,7 @@ describe('owner-free HTTP wire', () => {
     })
     await harnessService.acceptThreadCommandBatch('thread-1', plan.request)
     const { url, data } = wireAt(0)
-    expect(url).toBe('/harness/threads/thread-1/command-batches')
+    expect(url).toBe('/threads/thread-1/command-batches')
     const body = JSON.parse(data) as Record<string, unknown>
     expect(Object.keys(body).sort()).toEqual([
       'commands',
@@ -121,7 +121,7 @@ describe('owner-free HTTP wire', () => {
     })
     await harnessService.acceptThreadCommandBatch('thread-1', plan.request)
     const { url, data } = wireAt(0)
-    expect(url).toBe('/harness/threads/thread-1/command-batches')
+    expect(url).toBe('/threads/thread-1/command-batches')
     const body = JSON.parse(data) as {
       commands: Array<{ type: string }>
     } & Record<string, unknown>
@@ -177,6 +177,6 @@ describe('owner-free HTTP wire', () => {
       createCommandId: () => 'cmd-1',
     })
     await harnessService.acceptThreadCommandBatch('thread /1', plan.request)
-    expect(wireAt(0).url).toBe('/harness/threads/thread%20%2F1/command-batches')
+    expect(wireAt(0).url).toBe('/threads/thread%20%2F1/command-batches')
   })
 })

@@ -16,7 +16,7 @@ async function api(page: Page) {
     statusExpiresAt: null, lastSeen: null, capabilities: [], createTime: '', updateTime: '', installConfig: initialConfig }
   let conflict = false
   const calls: string[] = []
-  await page.route('**/api/harness/environments**', async route => {
+  await page.route('**/api/environments**', async route => {
     const request = route.request()
     const path = new URL(request.url()).pathname
     const method = request.method()
@@ -80,7 +80,7 @@ for (const width of [1280, 390, 320]) {
     await page.screenshot({ path: testInfo.outputPath(`install-toast-${width}.png`), fullPage: true })
     const command = await page.evaluate(() => navigator.clipboard.readText())
     const pageOrigin = new URL(page.url()).origin
-    const url = `${pageOrigin}/api/harness/environments/env-1/install?code=browser-install-code`
+    const url = `${pageOrigin}/api/environments/env-1/install?code=browser-install-code`
     expect(command).toBe(`(set -o pipefail; curl -fsSL $'${url}' | bash)`)
     expect(command).not.toContain(token)
     expect(mock.calls.filter(c => c.endsWith('/install-code'))).toHaveLength(1)
@@ -406,7 +406,7 @@ test('keeps event history out of the card and inside the management modal', asyn
     id: 'env-1', name: 'recovered-box', version: '1', status: 'READY', ready: true,
     statusExpiresAt: null, lastSeen: '2026-07-20T00:01:00.000Z', capabilities: [], createTime: '', updateTime: '',
   }
-  await page.route('**/api/harness/environments**', async route => {
+  await page.route('**/api/environments**', async route => {
     const path = new URL(route.request().url()).pathname
     if (path.endsWith('/events')) {
       return route.fulfill({ json: history })

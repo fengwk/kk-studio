@@ -58,7 +58,7 @@ registerCase({
     let providerName = null
     let latestVersion = null
 
-    const { json: createJson } = await ctx.call('POST', '/api/ai/catalog/providers', body)
+    const { json: createJson } = await ctx.call('POST', '/api/providers', body)
     const created = envelopeData(createJson)
     providerName = created.name
     latestVersion = String(created.version)
@@ -79,7 +79,7 @@ registerCase({
       assertImportCheck(check)
       assert(check.created.length === 0 && check.skipped.length === 0, 'same-name check must only update')
       assert(check.updated.some((item) => item.kind === 'providers' && item.name === providerName), 'check must list provider overwrite')
-      const { json: listJson } = await ctx.call('GET', '/api/ai/catalog/providers?pageNumber=1&pageSize=100')
+      const { json: listJson } = await ctx.call('GET', '/api/providers?pageNumber=1&pageSize=100')
       const found = envelopeData(listJson).results.find((provider) => provider.name === providerName)
       assert(String(found?.version) === latestVersion, 'precheck must not advance provider version')
 
@@ -101,7 +101,7 @@ registerCase({
         try {
           let versionToDelete = latestVersion
           try {
-            const { json } = await ctx.call('GET', '/api/ai/catalog/providers?pageNumber=1&pageSize=100')
+            const { json } = await ctx.call('GET', '/api/providers?pageNumber=1&pageSize=100')
             const listData = envelopeData(json)
             const list = Array.isArray(listData?.results)
               ? listData.results
@@ -118,7 +118,7 @@ registerCase({
           if (versionToDelete) {
             await ctx.call(
               'DELETE',
-              `/api/ai/catalog/providers/${encodeURIComponent(providerName)}?expectedVersion=${encodeURIComponent(versionToDelete)}`,
+              `/api/providers/${encodeURIComponent(providerName)}?expectedVersion=${encodeURIComponent(versionToDelete)}`,
             )
           }
         } catch {
@@ -140,7 +140,7 @@ registerCase({
     let envId = null
     let latestVersion = null
 
-    const { json: createJson } = await ctx.call('POST', '/api/harness/environments', {
+    const { json: createJson } = await ctx.call('POST', '/api/environments', {
       name: envName,
     })
     const created = envelopeData(createJson)
@@ -187,7 +187,7 @@ registerCase({
         'import must keep the original registration token hash',
       )
 
-      const { json: listJson } = await ctx.call('GET', '/api/harness/environments')
+      const { json: listJson } = await ctx.call('GET', '/api/environments')
       const envList = envelopeData(listJson)
       assert(Array.isArray(envList), 'environment list must be an array')
       const matching = envList.filter((e) => e.name === envName)
@@ -199,7 +199,7 @@ registerCase({
           try {
             const { json } = await ctx.call(
               'GET',
-              `/api/harness/environments/${encodeURIComponent(envId)}`,
+              `/api/environments/${encodeURIComponent(envId)}`,
             )
             const card = envelopeData(json)
             if (card?.version != null) {
@@ -211,7 +211,7 @@ registerCase({
           if (versionToDelete) {
             await ctx.call(
               'DELETE',
-              `/api/harness/environments/${encodeURIComponent(envId)}?expectedVersion=${encodeURIComponent(versionToDelete)}`,
+              `/api/environments/${encodeURIComponent(envId)}?expectedVersion=${encodeURIComponent(versionToDelete)}`,
             )
           }
         } catch {
@@ -232,7 +232,7 @@ registerCase({
     const yaml = `providers:\n  - name: ${name}\n    providerType: openai\n    credential: ${secret}\nfutureConfig: []\n`
     const invalidYaml = `providers:\n  - name: ${name}\n    credential: ${secret}\n`
     const providerList = async () => {
-      const { json } = await ctx.call('GET', '/api/ai/catalog/providers?pageNumber=1&pageSize=100')
+      const { json } = await ctx.call('GET', '/api/providers?pageNumber=1&pageSize=100')
       return envelopeData(json).results
     }
     try {
@@ -261,7 +261,7 @@ registerCase({
     } finally {
       const provider = (await providerList()).find((item) => item.name === name)
       if (provider) {
-        await ctx.call('DELETE', `/api/ai/catalog/providers/${encodeURIComponent(name)}?expectedVersion=${encodeURIComponent(provider.version)}`)
+        await ctx.call('DELETE', `/api/providers/${encodeURIComponent(name)}?expectedVersion=${encodeURIComponent(provider.version)}`)
       }
     }
   },
@@ -276,10 +276,10 @@ registerCase({
     const suffix = cid().slice(0, 8)
     const envName = `e2e-sync-cfg-${suffix}`
     const newToken = `e2e-sync-cfg-token-${suffix}`
-    const cardPath = (id) => `/api/harness/environments/${encodeURIComponent(id)}`
+    const cardPath = (id) => `/api/environments/${encodeURIComponent(id)}`
     let envId = null
 
-    const { json: createJson } = await ctx.call('POST', '/api/harness/environments', { name: envName })
+    const { json: createJson } = await ctx.call('POST', '/api/environments', { name: envName })
     const created = envelopeData(createJson)
     envId = created.id
     const originalToken = created.registrationToken
@@ -401,7 +401,7 @@ registerCase({
       }
     }
 
-    const { json: listJson } = await ctx.call('GET', '/api/harness/environments')
+    const { json: listJson } = await ctx.call('GET', '/api/environments')
     const list = envelopeData(listJson)
     assert(Array.isArray(list), 'environment list must be an array')
     assert(
