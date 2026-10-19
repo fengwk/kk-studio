@@ -513,18 +513,18 @@ public final class ConfigSyncPlanner {
     return names;
   }
 
-  /** Environment 只判定与快照身份相关的 registrationToken 冲突；token 格式已由解析期校验，不回显 token。 */
+  /** Environment 只判定与快照身份相关的凭证摘要冲突；摘要格式已由解析期校验。 */
   private static void rejectEnvironmentTokenConflicts(
       List<ConfigSyncParser.EnvironmentSpec> specs, ConfigSyncSnapshot snapshot) {
     Map<String, String> ownerByToken = new LinkedHashMap<>();
     for (ConfigSyncParser.EnvironmentSpec spec : specs) {
-      String owner = ownerByToken.putIfAbsent(spec.registrationToken(), spec.name());
+      String owner = ownerByToken.putIfAbsent(spec.registrationTokenHash(), spec.name());
       if (owner != null && !owner.equals(spec.name())) {
         throw new AiValidationException(
             RESOURCE, "environment registrationToken is used by multiple entries");
       }
       for (Environment existing : snapshot.environments()) {
-        if (spec.registrationToken().equals(existing.getRegistrationToken())
+        if (spec.registrationTokenHash().equals(existing.getRegistrationTokenHash())
             && !spec.name().equals(existing.getName())) {
           throw new AiValidationException(
               RESOURCE, "environment registrationToken is already in use");

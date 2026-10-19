@@ -773,7 +773,7 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
   private UUID bindEnvironment(String name) {
     UUID environmentId = UUID.randomUUID();
     jdbc.update(
-        "insert into environment (id, name, registration_token) values (?, ?, ?)",
+        "insert into environment (id, name, registration_token_hash) values (?, ?, encode(sha256(convert_to(?, 'UTF8')), 'hex'))",
         environmentId,
         name,
         "token-" + environmentId);

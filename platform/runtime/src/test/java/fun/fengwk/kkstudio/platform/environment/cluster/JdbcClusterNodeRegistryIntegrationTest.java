@@ -49,8 +49,8 @@ class JdbcClusterNodeRegistryIntegrationTest extends PostgresSchemaSupport {
     this.jdbcClient = JdbcClient.create(dataSource);
     jdbcClient
         .sql(
-            "insert into environment (id, name, registration_token, version)"
-                + " values (?, 'cluster-env', 'token', 0)")
+            "insert into environment (id, name, registration_token_hash, version)"
+                + " values (?, 'cluster-env', repeat('a', 64), 0)")
         .params(ENV.value())
         .update();
   }

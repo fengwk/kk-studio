@@ -28,6 +28,7 @@ import fun.fengwk.kkstudio.platform.catalog.skill.service.impl.SkillCatalogTestF
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
+import fun.fengwk.kkstudio.platform.environment.RegistrationTokens;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
@@ -227,7 +228,7 @@ final class ConfigSyncFixtures {
     Environment environment = new Environment();
     environment.setId(UUID.randomUUID());
     environment.setName(name);
-    environment.setRegistrationToken("token-" + name);
+    environment.setRegistrationTokenHash(RegistrationTokens.hash("token-" + name));
     return environment;
   }
 

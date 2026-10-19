@@ -179,9 +179,9 @@ class IdeCrossNodeReverseStreamIntegrationTest extends WebPostgresTestSupport {
                 sharedJdbcUrl(), sharedJdbcUsername(), sharedJdbcPassword());
         Statement st = conn.createStatement()) {
       st.execute(
-          "insert into environment (id, name, registration_token) values ('"
+          "insert into environment (id, name, registration_token_hash) values ('"
               + ENVIRONMENT
-              + "', 'cross-node-env', 'cross-node-token') on conflict (id) do nothing");
+              + "', 'cross-node-env', repeat('a', 64)) on conflict (id) do nothing");
       st.execute(
           "insert into environment_connection"
               + " (environment_id, owner_node_id, lease_token, status, runtime_info, last_seen_at,"

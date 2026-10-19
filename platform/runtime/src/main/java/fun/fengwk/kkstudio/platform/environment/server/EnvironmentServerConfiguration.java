@@ -11,6 +11,7 @@ import fun.fengwk.kkstudio.harness.environment.server.EnvironmentDaemonServer;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentServerSettings;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentSessionListener;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentUpdateListener;
+import fun.fengwk.kkstudio.platform.environment.RegistrationTokens;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
@@ -56,7 +57,9 @@ public class EnvironmentServerConfiguration {
 
   private static Optional<DaemonRegistration> toRegistration(
       EnvironmentRepository environmentRepository, String registrationToken) {
-    Environment environment = environmentRepository.getByRegistrationToken(registrationToken);
+    Environment environment =
+        environmentRepository.getByRegistrationTokenHash(
+            RegistrationTokens.hash(registrationToken));
     if (environment == null) {
       return Optional.empty();
     }

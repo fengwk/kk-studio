@@ -45,21 +45,6 @@ describe('environmentService', () => {
   })
 
   /**
-   * 测试意图：验证按需读取当前 registration token 使用 GET /harness/environments/{id}/token，
-   * 且该调用是普通只读 GET（不携带 expectedVersion、不触发轮换）。
-   */
-  it('reads the current registration token via GET /harness/environments/{id}/token', async () => {
-    const client = createMockHttpClient()
-    client.get.mockResolvedValue({ id: 'env-1', registrationToken: 'tok-current', version: '3' })
-    const service = createEnvironmentService(client)
-    const result = await service.getRegistrationToken('env-1')
-    expect(client.get).toHaveBeenCalledWith('/harness/environments/env-1/token')
-    expect(client.post).not.toHaveBeenCalled()
-    expect(result.registrationToken).toBe('tok-current')
-    expect(result.version).toBe('3')
-  })
-
-  /**
    * 测试意图：签发 5 分钟安装 code 使用 POST /harness/environments/{id}/install-code，
    * body 只有 expectedVersion，返回解包后的 code 与 expiresAt，不轮换长期 token。
    */

@@ -946,9 +946,9 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
                 sharedJdbcUrl(), sharedJdbcUsername(), sharedJdbcPassword());
         Statement st = conn.createStatement()) {
       st.execute(
-          "insert into environment (id, name, registration_token) values ('"
+          "insert into environment (id, name, registration_token_hash) values ('"
               + ENVIRONMENT
-              + "', 'cross-node-browser-env', 'cross-node-browser-token')"
+              + "', 'cross-node-browser-env', repeat('a', 64))"
               + " on conflict (id) do nothing");
       st.execute(
           "insert into environment_connection"

@@ -14,7 +14,7 @@ public interface ConfigSyncService {
   /** 返回全部可同步条目及其依赖闭包；不含配置值与凭据。 */
   ConfigSyncInventoryDTO inventory();
 
-  /** 按选择补齐依赖闭包后导出完整 YAML（含凭据、registrationToken 与 MCP headers 原值）。 */
+  /** 按选择补齐依赖闭包后导出完整 YAML（含凭据与 MCP headers 原值、Environment 凭证摘要）。 */
   ConfigSyncExportDTO export(ConfigSyncExportRequestDTO request);
 
   /** 不写数据库，预览将新增、覆盖与跳过的条目；非法文件直接拒绝。 */

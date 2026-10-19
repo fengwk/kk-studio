@@ -50,7 +50,8 @@ stdout/stderr。
 
 Windows 命令先完整下载脚本，再在 PowerShell 的局部作用域执行；下载或安装失败都会返回失败。
 下载执行前会关闭调试回显，避免脚本中的长期凭据进入终端输出。
-code 在有效期内可重复使用；过期后重新复制命令，已经下载的脚本不会因 code 到期而中断。
+Studio 只保存注册令牌的摘要，下载脚本时为本次安装签发新令牌写入脚本，因此 code 只能使用一次：
+再次安装请重新复制命令。新令牌生效后，用旧令牌连接的 Daemon 下次握手会被拒绝；已经下载的脚本不会因 code 到期而中断。
 安装成功会提示服务已启动，再回 Studio 确认 `READY`。
 
 保存失败时不会签发 code 或复制命令。保存成功但签发或复制失败时，提示会明确说明
@@ -197,17 +198,17 @@ Web 保存的 `EnvironmentInstallConfigDTO`：
 | `GET /api/harness/environments/uninstall/{operatingSystem}` | 返回对应 OS 的卸载脚本，不含环境配置或凭据 |
 
 签发与脚本响应均禁止缓存。code 以当前 registration token 对安装用途、环境 ID 和到期时间做
-HMAC-SHA256 签名，无独立存储；到期、篡改、错环境或 token 轮换后，下载被拒绝。
+HMAC-SHA256 签名，无独立存储；到期、篡改、错环境、已被兑换或 token 轮换后，下载被拒绝。
 
 ### 配置同步
 
-“设置 → 同步”导出的 `environments` 条目把 `installConfig` 与 `name`、`registrationToken`
-并列嵌套：
+“设置 → 同步”导出的 `environments` 条目把 `installConfig` 与 `name`、`registrationTokenHash`（注册令牌的
+SHA-256）并列嵌套：
 
 ```yaml
 environments:
   - name: env
-    registrationToken: token-env
+    registrationTokenHash: f21d92ece713505af79fce6804dafd72b239be0d023924c022006c892bdf4d42
     installConfig:
       operatingSystem: linux
       daemon:
@@ -223,8 +224,8 @@ environments:
 ```
 
 条目没有 `installConfig` 表示该 Environment 未保存安装设置。导入支持新增、覆盖、清空（文件
-省略该键即清空现有设置）与 token+配置的原子更新；预检查会用同一套 codec 深度校验，已知非法值
-不会被条目级跳过。凭据导出策略不变，YAML 仍包含注册令牌，请保存在私密位置。
+省略该键即清空现有设置）与令牌摘要+配置的原子更新；预检查会用同一套 codec 深度校验，已知非法值
+不会被条目级跳过。文件只含令牌摘要，不能用来冒充 Daemon；导入后已安装的 Daemon 用原令牌继续连接。
 
 ## 可选 LSP
 

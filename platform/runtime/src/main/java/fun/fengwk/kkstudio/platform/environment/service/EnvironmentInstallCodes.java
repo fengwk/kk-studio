@@ -14,7 +14,7 @@ import java.time.Instant;
 import java.util.Base64;
 import java.util.UUID;
 
-/** 用当前 registrationToken 签发五分钟安装 code；不存储、不缓存，token 轮换后旧签名自然失效。 */
+/** 用当前凭证摘要签发五分钟安装 code；不存储、不缓存，token 轮换后旧签名自然失效。 */
 public final class EnvironmentInstallCodes {
   static final Duration LIFETIME = Duration.ofMinutes(5);
   private static final String PURPOSE = "kk-studio-environment-install";
@@ -24,16 +24,16 @@ public final class EnvironmentInstallCodes {
   private EnvironmentInstallCodes() {}
 
   public static EnvironmentInstallCodeDTO issue(
-      UUID environmentId, String registrationToken, Instant now) {
+      UUID environmentId, String registrationTokenHash, Instant now) {
     long expires = now.plus(LIFETIME).getEpochSecond();
     EnvironmentInstallCodeDTO dto = new EnvironmentInstallCodeDTO();
-    dto.setCode(expires + "." + sign(environmentId, registrationToken, expires));
+    dto.setCode(expires + "." + sign(environmentId, registrationTokenHash, expires));
     dto.setExpiresAt(Instant.ofEpochSecond(expires));
     return dto;
   }
 
   public static void verify(
-      UUID environmentId, String registrationToken, String code, Instant now) {
+      UUID environmentId, String registrationTokenHash, String code, Instant now) {
     int split = code == null ? -1 : code.indexOf('.');
     if (split <= 0 || split != code.lastIndexOf('.')) {
       throw invalid();
@@ -46,20 +46,21 @@ public final class EnvironmentInstallCodes {
     } catch (IllegalArgumentException error) {
       throw invalid();
     }
-    byte[] expected = signBytes(environmentId, registrationToken, expires);
+    byte[] expected = signBytes(environmentId, registrationTokenHash, expires);
     if (!MessageDigest.isEqual(signature, expected) || now.getEpochSecond() >= expires) {
       throw invalid();
     }
   }
 
-  private static String sign(UUID environmentId, String registrationToken, long expires) {
-    return ENCODER.encodeToString(signBytes(environmentId, registrationToken, expires));
+  private static String sign(UUID environmentId, String registrationTokenHash, long expires) {
+    return ENCODER.encodeToString(signBytes(environmentId, registrationTokenHash, expires));
   }
 
-  private static byte[] signBytes(UUID environmentId, String registrationToken, long expires) {
+  private static byte[] signBytes(UUID environmentId, String registrationTokenHash, long expires) {
     try {
       Mac mac = Mac.getInstance("HmacSHA256");
-      mac.init(new SecretKeySpec(registrationToken.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+      mac.init(
+          new SecretKeySpec(registrationTokenHash.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
       return mac.doFinal(payload(environmentId, expires).getBytes(StandardCharsets.UTF_8));
     } catch (GeneralSecurityException error) {
       throw new IllegalStateException("cannot sign install code", error);

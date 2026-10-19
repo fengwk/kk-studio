@@ -473,8 +473,8 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
   `config_sync.import_precheck_and_partial_confirmation` /
   `config_sync.environment_install_config_roundtrip` /
   `config_sync.install_config_hard_invalid_precheck`：八类配置清单、凭据随 YAML 导出、导入前的
-  新增/覆盖/跳过清单、硬错误拒绝与部分导入授权、同名 Provider 更新、Environment 身份与注册令牌保留，
-  以及 `installConfig`（studioUrl、note、bashExecutable、内联 LSP servers）随注册令牌的导出导入往返、
+  新增/覆盖/跳过清单、硬错误拒绝与部分导入授权、同名 Provider 更新、Environment 身份与注册令牌摘要保留，
+  以及 `installConfig`（studioUrl、note、bashExecutable、内联 LSP servers）随注册令牌摘要的导出导入往返、
   token+配置原子更新与清除、installConfig 硬错误（含未知字段与退役 `javaHome`）在预检查与导入阶段的零副作用拒绝，响应带 `no-store`。
   这些 case 均无真实模型或 tool 成本；完整 Git/MCP 准备与整批事务回滚另由 Web 集成测试覆盖。
 - `environment.install_config_cas_roundtrip`：`PUT .../install-config` 以 `expectedVersion` CAS 保存
@@ -920,12 +920,12 @@ Environment Daemon 不属于 NAS App 容器。需要在某台主机上执行文�
 
 设置页的“同步”位于“高级”之后，提供“导入”和“导出”。
 导出默认选择全部配置，也可只选具体条目；依赖自动加入，无需另选开关。
-文件会携带 Provider 的凭据与 Environment 的注册令牌，请保存在私密位置，不提交到 Git、不粘贴到日志；
+文件会携带 Provider 的凭据与 Environment 注册令牌的摘要，请保存在私密位置，不提交到 Git、不粘贴到日志；
 插件秘密（如 OpenCLI 的 `apiKey`）与受保护私有身份（如 `instanceId`）永不导出，只能在统一的 Plugin Secret API
 或登录流程里录入。
 
 可导出 Provider、Model、Agent、Skill Package、Environment、MCP 服务、插件普通配置与系统设置。
-Environment 条目把保存的安装设置 `installConfig` 与 `name`、`registrationToken` 并列嵌套，缺失
+Environment 条目把保存的安装设置 `installConfig` 与 `name`、`registrationTokenHash` 并列嵌套，缺失
 该键表示没有安装设置。Agent 自动包含 Model、Provider、引用的 Skill Package、MCP 服务和 Subagent；
 Model 包含 Provider；插件条目只带 `pluginId` 与普通值，并按插件在代码里声明的所需 Agent 补齐依赖。
 内置 Agent（如 `Compaction`）只满足依赖，不作为条目导出；导入节点用自身内置定义满足引用，不会因此被覆盖。
@@ -938,7 +938,7 @@ Model 包含 Provider；插件条目只带 `pluginId` 与普通值，并按插�
 没有可导入项时不提供执行按钮。不支持的条目及依赖它们的配置不会被悄悄改写。
 
 YAML 结构、类型、有效值错误或当前必填字段缺失，会直接拒绝整份文件。
-条目名称须非空且没有首尾空白，重复名称不会依次覆盖；注册令牌被不同 Environment 占用、
+条目名称须非空且没有首尾空白，重复名称不会依次覆盖；注册令牌摘要被不同 Environment 占用、
 同名 Skill Package 更换仓库地址、移除仍被引用的 Skill 或 MCP 工具也会整份拒绝。
 文件未包含的类别保持原样，但包含系统设置时必须提供当前完整设置结构，不能只提供局部字段。
 系统设置的 `integrations` 段整体退役：HTTP 写入携带该段一律 400；配置同步文件里的未知设置字段会被移除
@@ -957,9 +957,9 @@ Skill Package 文件保存仓库地址、分支和已发布的 exact commit，�
 目标节点须能获取该 commit，失败时跳过，不用最新 HEAD 替代。检查与执行都会准备 Git commit
 并重新发现 MCP 工具，外部服务状态变化可能使实际结果与预览不同；
 发现失败明确报告；`${VAR}` 形式的 header 保持原值，目标部署仍须提供所需变量。
-Environment 保留注册令牌，同名更新保持其身份；新库生成新的 UUID，已安装 Daemon 可用原令牌重新连接。
+Environment 保留注册令牌摘要，同名更新保持其身份；新库生成新的 UUID，已安装 Daemon 可用原令牌重新连接。
 导入会深度校验 `installConfig`，已知非法设置不会被条目级跳过；同名更新以文件为准覆盖安装设置，
-文件省略 `installConfig` 即清空，token 与安装设置在同一次原子更新中生效。
+文件省略 `installConfig` 即清空，令牌摘要与安装设置在同一次原子更新中生效。
 
 配置文件不保存 Chat、Session、Thread、Canvas、Project、Issue、执行历史、Blob 引用、
 连接租约和发现快照，也不包含部署级数据库/S3 参数或 Plugin 秘密。

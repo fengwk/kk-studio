@@ -12,7 +12,7 @@ import java.util.UUID;
 public class Environment {
   private UUID id;
   private String name;
-  private String registrationToken;
+  private String registrationTokenHash;
   private EnvironmentInstallConfigDTO installConfig;
   private Long version;
   private Instant createTime;

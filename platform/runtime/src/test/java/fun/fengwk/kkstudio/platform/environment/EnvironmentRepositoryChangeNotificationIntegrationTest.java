@@ -92,17 +92,18 @@ class EnvironmentRepositoryChangeNotificationIntegrationTest
       Environment created = new Environment();
       created.setId(UUID.randomUUID());
       created.setName("require-tx-created");
-      created.setRegistrationToken("require-tx-created-token");
+      created.setRegistrationTokenHash(RegistrationTokens.hash("require-tx-created-token"));
       assertThrows(IllegalStateException.class, () -> environmentRepository.create(created));
       assertNull(environmentRepository.getById(created.getId()));
       listener.assertSilent();
 
       Environment update = environmentRepository.getById(seededId);
-      update.setRegistrationToken("require-tx-rotated");
+      update.setRegistrationTokenHash(RegistrationTokens.hash("require-tx-rotated"));
       assertThrows(IllegalStateException.class, () -> environmentRepository.updateById(update, 7));
       Environment unchanged = environmentRepository.getById(seededId);
       assertEquals(7, unchanged.getVersion());
-      assertEquals("require-tx-token", unchanged.getRegistrationToken());
+      assertEquals(
+          RegistrationTokens.hash("require-tx-token"), unchanged.getRegistrationTokenHash());
       listener.assertSilent();
 
       assertThrows(
@@ -131,7 +132,7 @@ class EnvironmentRepositoryChangeNotificationIntegrationTest
       Environment created = new Environment();
       created.setId(UUID.randomUUID());
       created.setName("notify-failure-created");
-      created.setRegistrationToken("notify-failure-created-token");
+      created.setRegistrationTokenHash(RegistrationTokens.hash("notify-failure-created-token"));
       assertThrows(
           DataAccessResourceFailureException.class,
           () -> transaction.executeWithoutResult(status -> failingRepository.create(created)));
@@ -139,7 +140,7 @@ class EnvironmentRepositoryChangeNotificationIntegrationTest
       listener.assertSilent();
 
       Environment update = environmentRepository.getById(seededId);
-      update.setRegistrationToken("notify-failure-rotated");
+      update.setRegistrationTokenHash(RegistrationTokens.hash("notify-failure-rotated"));
       assertThrows(
           DataAccessResourceFailureException.class,
           () ->
@@ -147,7 +148,8 @@ class EnvironmentRepositoryChangeNotificationIntegrationTest
                   status -> failingRepository.updateById(update, update.getVersion())));
       Environment unchanged = environmentRepository.getById(seededId);
       assertEquals(7, unchanged.getVersion());
-      assertEquals("notify-failure-token", unchanged.getRegistrationToken());
+      assertEquals(
+          RegistrationTokens.hash("notify-failure-token"), unchanged.getRegistrationTokenHash());
       listener.assertSilent();
     }
   }
@@ -160,13 +162,13 @@ class EnvironmentRepositoryChangeNotificationIntegrationTest
       TransactionTemplate transaction = new TransactionTemplate(transactionManager);
 
       Environment update = environmentRepository.getById(seededId);
-      update.setRegistrationToken("cas-miss-rotated");
+      update.setRegistrationTokenHash(RegistrationTokens.hash("cas-miss-rotated"));
       boolean updated = transaction.execute(status -> environmentRepository.updateById(update, 6));
       assertFalse(updated);
       listener.assertSilent();
       Environment unchanged = environmentRepository.getById(seededId);
       assertEquals(7, unchanged.getVersion());
-      assertEquals("cas-miss-token", unchanged.getRegistrationToken());
+      assertEquals(RegistrationTokens.hash("cas-miss-token"), unchanged.getRegistrationTokenHash());
 
       boolean deleted =
           transaction.execute(status -> environmentRepository.deleteById(seededId, 6));
@@ -217,7 +219,7 @@ class EnvironmentRepositoryChangeNotificationIntegrationTest
   private UUID seedEnvironment(String name, String token, long version) {
     UUID id = UUID.randomUUID();
     jdbcTemplate.update(
-        "insert into environment (id, name, registration_token, version) values (?, ?, ?, ?)",
+        "insert into environment (id, name, registration_token_hash, version) values (?, ?, encode(sha256(convert_to(?, 'UTF8')), 'hex'), ?)",
         id,
         name,
         token,

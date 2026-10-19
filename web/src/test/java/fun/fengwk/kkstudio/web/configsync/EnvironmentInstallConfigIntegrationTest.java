@@ -14,6 +14,8 @@ import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import tools.jackson.databind.JsonNode;
 
+import fun.fengwk.kkstudio.platform.environment.RegistrationTokens;
+
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -44,9 +46,8 @@ class EnvironmentInstallConfigIntegrationTest extends ConfigSyncTestSupport {
             "select install_config->>'operatingSystem' from environment where id = ?",
             String.class,
             UUID.fromString(id)));
-    assertEquals(token, getData(path + "/token").path("registrationToken").asText());
-    // token 端点是只读最新快照：返回当前最新 version，与 PUT 保存响应同源但独立读取。
-    assertEquals("1", getData(path + "/token").path("version").asText());
+    // 库内只保存凭证摘要。
+    assertEquals(RegistrationTokens.hash(token), storedTokenHash(id));
 
     perform(
         put(path + "/install-config")
@@ -59,10 +60,10 @@ class EnvironmentInstallConfigIntegrationTest extends ConfigSyncTestSupport {
     JsonNode rotated = postData(path + "/registration-token", Map.of("expectedVersion", "1"));
     assertEquals(saved.path("installConfig"), rotated.path("installConfig"));
     assertEquals("2", rotated.path("version").asText());
-    // 轮换后 token 端点是独立的最新读：返回 v2 的新 token，而非 PUT 保存时的 v1；调用方不得假定与保存响应同版本。
-    JsonNode latestToken = getData(path + "/token");
-    assertEquals("2", latestToken.path("version").asText());
-    assertFalse(token.equals(latestToken.path("registrationToken").asText()));
+    // 轮换只在本次响应中返回新明文，库内摘要随之替换。
+    String rotatedToken = rotated.path("registrationToken").asText();
+    assertFalse(token.equals(rotatedToken));
+    assertEquals(RegistrationTokens.hash(rotatedToken), storedTokenHash(id));
     perform(delete(path).param("expectedVersion", "2"), 204);
     assertEquals(0, jdbc.queryForObject("select count(*) from environment", Integer.class));
   }
@@ -103,7 +104,9 @@ class EnvironmentInstallConfigIntegrationTest extends ConfigSyncTestSupport {
             .path("yaml")
             .asText();
     assertTrue(yaml.contains("installConfig:"));
-    assertTrue(yaml.contains(created.path("registrationToken").asText()));
+    String createdToken = created.path("registrationToken").asText();
+    assertTrue(yaml.contains(RegistrationTokens.hash(createdToken)));
+    assertFalse(yaml.contains(createdToken), "the export never carries the plaintext token");
     postData("/api/settings/sync/import", Map.of("yaml", yaml));
     assertEquals(saved.path("version"), getData(path).path("version"));
     perform(delete(path).param("expectedVersion", "1"), 204);
@@ -116,7 +119,7 @@ class EnvironmentInstallConfigIntegrationTest extends ConfigSyncTestSupport {
             yaml,
             doc -> {
               Map<String, Object> env = environment(doc);
-              env.put("registrationToken", "replacement-token");
+              env.put("registrationTokenHash", RegistrationTokens.hash("replacement-token"));
               env.put(
                   "installConfig",
                   Map.of(
@@ -130,7 +133,8 @@ class EnvironmentInstallConfigIntegrationTest extends ConfigSyncTestSupport {
     assertEquals("1", updated.path("version").asText());
     assertEquals("macos", updated.at("/installConfig/operatingSystem").asText());
     assertEquals(
-        "replacement-token", getData(importedPath + "/token").path("registrationToken").asText());
+        RegistrationTokens.hash("replacement-token"),
+        storedTokenHash(imported.path("id").asText()));
     String cleared = mutateYaml(changed, doc -> environment(doc).remove("installConfig"));
     postData("/api/settings/sync/import", Map.of("yaml", cleared));
     assertFalse(getData(importedPath).hasNonNull("installConfig"));
@@ -145,9 +149,9 @@ class EnvironmentInstallConfigIntegrationTest extends ConfigSyncTestSupport {
         """
         environments:
           - name: valid-new
-            registrationToken: valid-token
+            registrationTokenHash: 397a2a9c5bf5e2ccec38c2596b682bb1bd05fe6e4ecea6c10cf42755ff225403
           - name: invalid-new
-            registrationToken: invalid-token
+            registrationTokenHash: 644d0c3b82bfe5e0665a116b2eb139d6abd6c9083ede0891237b1723e0010a14
             bogus: ignored
             installConfig:
               operatingSystem: linux
@@ -192,9 +196,9 @@ class EnvironmentInstallConfigIntegrationTest extends ConfigSyncTestSupport {
         """
         environments:
           - name: first
-            registrationToken: replacement-first
+            registrationTokenHash: db70c4f22c232494e302150033a78b411494e643892c2d1dd103b6a28b518a12
           - name: second
-            registrationToken: replacement-second
+            registrationTokenHash: 6b6b195ea8ce1af86716bbb107d907975de15a3f6a339623e46c4dd7c08ef702
         """;
     try {
       perform(
@@ -206,7 +210,8 @@ class EnvironmentInstallConfigIntegrationTest extends ConfigSyncTestSupport {
       assertEquals("1", current.path("version").asText());
       assertEquals("linux", current.at("/installConfig/operatingSystem").asText());
       assertEquals(
-          first.path("registrationToken"), getData(firstPath + "/token").path("registrationToken"));
+          RegistrationTokens.hash(first.path("registrationToken").asText()),
+          storedTokenHash(first.path("id").asText()));
     } finally {
       jdbc.execute("drop trigger reject_second_install on environment");
       jdbc.execute("drop function reject_second_install()");
@@ -250,5 +255,12 @@ class EnvironmentInstallConfigIntegrationTest extends ConfigSyncTestSupport {
   @SuppressWarnings("unchecked")
   private static Map<String, Object> environment(Map<String, Object> document) {
     return ((List<Map<String, Object>>) document.get("environments")).get(0);
+  }
+
+  private String storedTokenHash(String id) {
+    return jdbc.queryForObject(
+        "select registration_token_hash from environment where id = ?",
+        String.class,
+        UUID.fromString(id));
   }
 }

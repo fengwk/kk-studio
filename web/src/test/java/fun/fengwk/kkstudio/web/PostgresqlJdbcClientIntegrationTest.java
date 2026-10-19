@@ -34,7 +34,7 @@ class PostgresqlJdbcClientIntegrationTest extends WebPostgresTestSupport {
     EnvironmentDO row = new EnvironmentDO();
     row.setId(UUID.randomUUID());
     row.setName("jdbc-client-test");
-    row.setRegistrationToken("disposable-jdbc-test-token");
+    row.setRegistrationTokenHash("0".repeat(64));
     row.setInstallConfigJson("{}");
     assertEquals(1, store.insert(row));
     assertNotNull(store.getById(row.getId()));

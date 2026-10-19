@@ -39,23 +39,21 @@
 create table environment (
     id                  uuid          primary key,
     name                varchar(64)   not null,
-    registration_token  varchar(128)  not null,
+    registration_token_hash char(64)  not null,
     install_config      jsonb,
     created_at          timestamptz(3) not null default current_timestamp,
     updated_at          timestamptz(3) not null default current_timestamp,
     version             bigint        not null default 0,
     constraint uk_environment_name unique (name),
-    constraint uk_environment_registration_token unique (registration_token),
+    constraint uk_environment_registration_token_hash unique (registration_token_hash),
     constraint ck_environment_name check (
         name !~ '^[[:space:]]'
         and name !~ '[[:space:]]$'
         and char_length(name) > 0
         and position('/' in name) = 0
     ),
-    constraint ck_environment_registration_token check (
-        btrim(registration_token) <> ''
-        and char_length(registration_token) <= 128
-        and registration_token = btrim(registration_token)
+    constraint ck_environment_registration_token_hash check (
+        registration_token_hash ~ '^[0-9a-f]{64}$'
     ),
     constraint ck_environment_version_nonneg check (version >= 0),
     constraint ck_environment_install_config_object check (
@@ -63,10 +61,10 @@ create table environment (
     )
 );
 
-comment on table environment is '稳定 Environment 注册表：UUID 主键跨重启不变，name 是唯一展示与配置标识，registration_token 是 Daemon 握手凭证';
+comment on table environment is '稳定 Environment 注册表：UUID 主键跨重启不变，name 是唯一展示与配置标识，registration_token_hash 是 Daemon 握手凭证的 SHA-256';
 comment on column environment.id is 'Environment 的全局唯一 UUID（服务端生成，永不变更）';
 comment on column environment.name is 'Environment 唯一名称（NFKC trim，<= 64 字符，不含空白或斜杠）';
-comment on column environment.registration_token is 'Daemon HELLO 握手的注册凭证（部署侧秘密，仅 create/rotate 响应一次性返回，正常查询绝不泄露）';
+comment on column environment.registration_token_hash is 'Daemon HELLO 注册凭证的 SHA-256（小写十六进制）；明文只在创建、轮换与安装脚本中出现一次，不落库';
 comment on column environment.install_config is '保存的安装设置（不含 token，不表示已部署）';
 comment on column environment.created_at is '创建时间（毫秒精度）';
 comment on column environment.updated_at is '最后更新时间（毫秒精度），应用侧维护';

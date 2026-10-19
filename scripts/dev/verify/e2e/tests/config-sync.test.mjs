@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
@@ -14,6 +15,9 @@ const CASE_IDS = [
   'config_sync.install_config_hard_invalid_precheck',
   'config_sync.import_precheck_and_partial_confirmation',
 ]
+
+
+const sha256 = (value) => createHash('sha256').update(value, 'utf8').digest('hex')
 
 test('config sync cases are registered as free L1 cases and run-matrix imports the module', () => {
   // 配置同步用例均无需模型或外部工具，且由矩阵入口注册。
@@ -224,11 +228,11 @@ test('environment install-config roundtrip case wires PUT/export/import/clear/cl
         state = {
           id: environmentId,
           name: body.name,
-          registrationToken: 'e2e-token-original',
+          registrationTokenHash: sha256('e2e-token-original'),
           installConfig: null,
           version: '0',
         }
-        return { json: { data: { ...state } } }
+        return { json: { data: { ...state, registrationToken: 'e2e-token-original' } } }
       }
       if (method === 'PUT' && path === `${base}/install-config`) {
         assert.equal(body.expectedVersion, state.version, 'PUT must CAS on the current version')
@@ -243,7 +247,7 @@ test('environment install-config roundtrip case wires PUT/export/import/clear/cl
                 environments: [
                   {
                     name: state.name,
-                    registrationToken: state.registrationToken,
+                    registrationTokenHash: state.registrationTokenHash,
                     installConfig: state.installConfig,
                   },
                 ],
@@ -269,20 +273,17 @@ test('environment install-config roundtrip case wires PUT/export/import/clear/cl
         const entry = parseEntry(body)
         assert.equal(entry.name, state.name)
         const nextConfig = entry.installConfig ?? null
-        if (state.installConfig != null && nextConfig != null && entry.registrationToken !== state.registrationToken) {
+        if (state.installConfig != null && nextConfig != null && entry.registrationTokenHash !== state.registrationTokenHash) {
           atomicUpdateApplied = true
           atomicUpdateNote = nextConfig.daemon?.note
         }
         state = {
           ...state,
-          registrationToken: entry.registrationToken,
+          registrationTokenHash: entry.registrationTokenHash,
           installConfig: nextConfig,
           version: String(Number(state.version) + 1),
         }
         return { json: { data: { imported: [{ kind: 'environments', name: state.name }], skipped: [] } } }
-      }
-      if (method === 'GET' && path === `${base}/token`) {
-        return { json: { data: { id: environmentId, registrationToken: state.registrationToken } } }
       }
       if (method === 'GET' && path === base) {
         return { json: { data: { id: environmentId, installConfig: state.installConfig, version: state.version } } }
@@ -290,7 +291,7 @@ test('environment install-config roundtrip case wires PUT/export/import/clear/cl
       if (method === 'DELETE' && path.startsWith(base)) {
         const expected = new URLSearchParams(path.slice(path.indexOf('?') + 1)).get('expectedVersion')
         assert.equal(expected, state.version, 'DELETE must use the freshest persisted version')
-        deleteSnapshot = { token: state.registrationToken, config: state.installConfig }
+        deleteSnapshot = { tokenHash: state.registrationTokenHash, config: state.installConfig }
         deleted = true
         return { json: { data: null } }
       }
@@ -305,11 +306,11 @@ test('environment install-config roundtrip case wires PUT/export/import/clear/cl
   assert.ok(methods.includes('POST /api/settings/sync/export'), 'case must export the environment')
   assert.equal(methods.filter((m) => m === 'POST /api/settings/sync/import/check').length, 2, 'roundtrip plus atomic update precheck')
   assert.equal(methods.filter((m) => m === 'POST /api/settings/sync/import').length, 3, 'roundtrip, atomic update, and clearing import')
-  assert.ok(methods.includes(`GET ${base}/token`), 'case must read the rotated token')
+  assert.equal(methods.filter((m) => m === 'POST /api/settings/sync/export').length, 2, 'roundtrip export plus re-export after the atomic update')
   assert.equal(deleted, true, 'case must delete the environment it created')
   assert.equal(atomicUpdateApplied, true, 'new token+config must be applied in a single import entry')
   assert.equal(atomicUpdateNote, 'e2e install config updated', 'atomic update must use a legal changed daemon.note')
   assert.ok(deleteSnapshot, 'cleanup must have observed persisted state')
   assert.equal(deleteSnapshot.config, null, 'absent installConfig must clear saved settings before cleanup')
-  assert.notEqual(deleteSnapshot.token, 'e2e-token-original', 'cleanup must see the rotated token')
+  assert.notEqual(deleteSnapshot.tokenHash, sha256('e2e-token-original'), 'cleanup must see the replaced token hash')
 })

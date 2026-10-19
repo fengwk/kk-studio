@@ -65,7 +65,9 @@ class EnvironmentDaemonWebSocketLargeCapabilitiesIntegrationTest extends WebPost
   @BeforeEach
   void seedEnvironment() {
     jdbcTemplate.update(
-        "insert into environment (id, name, registration_token, version) values (?, 'env-large-caps', ?, 0) on conflict (id) do nothing",
+        "insert into environment (id, name, registration_token_hash, version)"
+            + " values (?, 'env-large-caps', encode(sha256(convert_to(?, 'UTF8')), 'hex'), 0)"
+            + " on conflict (id) do nothing",
         ENVIRONMENT_ID.value(),
         REGISTRATION_TOKEN);
   }

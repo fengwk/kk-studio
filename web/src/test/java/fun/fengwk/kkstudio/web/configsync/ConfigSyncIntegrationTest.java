@@ -21,6 +21,7 @@ import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MvcResult;
 import tools.jackson.databind.JsonNode;
 
@@ -29,6 +30,7 @@ import fun.fengwk.kkstudio.platform.configsync.ConfigSyncParser;
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncPlan;
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncPlanner;
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncYaml;
+import fun.fengwk.kkstudio.platform.environment.RegistrationTokens;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsVersionConflictException;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionUpdateDTO;
@@ -61,6 +63,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
   @Autowired private ConfigSyncParser parser;
   @Autowired private ConfigSyncPlanner planner;
   @Autowired private ConfigSyncApplier applier;
+  @Autowired private JdbcTemplate jdbcTemplate;
 
   private static final String DEV_SKILL_MD =
       """
@@ -289,7 +292,12 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
         createEnvironment("ck_env_existing_" + UUID.randomUUID().toString().substring(0, 8));
     String token = envDto.path("registrationToken").asText();
     String name = "ck_env_new_" + unique();
-    String yaml = "environments:\n  - name: " + name + "\n    registrationToken: " + token + "\n";
+    String yaml =
+        "environments:\n  - name: "
+            + name
+            + "\n    registrationTokenHash: "
+            + RegistrationTokens.hash(token)
+            + "\n";
 
     MvcResult result = checkRejected(yaml);
     assertFalse(body(result).contains(token), "check error must not echo the token");
@@ -409,10 +417,10 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     importRejected(nestedMissing, true);
     assertNull(findProvider(nestedMissingProvider), "rejected import must not write provider");
 
-    // 未知条目字段 + known 非法值：Environment 空 registrationToken 必须硬拒绝，而不是被未知字段掩盖后 skip。
+    // 未知条目字段 + known 非法值：Environment 空 registrationTokenHash 必须硬拒绝，而不是被未知字段掩盖后 skip。
     String envName = "uv_env_" + suffix;
     String invalidEnv =
-        "environments:\n  - name: " + envName + "\n    registrationToken: ''\n    bogus: 1\n";
+        "environments:\n  - name: " + envName + "\n    registrationTokenHash: ''\n    bogus: 1\n";
     checkRejected(invalidEnv);
     importRejected(invalidEnv, true);
     assertNull(findEnvironment(envName), "rejected import must not write environment");
@@ -508,11 +516,13 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
             ref("settings", "settings"));
     String yaml =
         postData("/api/settings/sync/export", exportRequest(selection)).path("yaml").asText();
-    // 凭据/registrationToken/MCP header 原值随导出。
+    // 凭据与 MCP header 原值随导出；Environment 只导出凭证摘要。
     assertTrue(yaml.contains("sk-configsync-" + provider), "provider credential must be exported");
     assertTrue(yaml.contains("Bearer literal-secret"), "MCP credential headers must be exported");
     assertTrue(
-        yaml.contains(token), "export must carry the environment registrationToken original value");
+        yaml.contains(RegistrationTokens.hash(token)),
+        "export must carry the environment registration token hash");
+    assertFalse(yaml.contains(token), "export must never carry the plaintext registration token");
 
     // 删除全部已建资源，证明导入是真创建而不是 upsert 空操作。
     // Agent 互相引用形成循环：先把 A 的 subagents 清空，再依次删除 B、A。
@@ -574,7 +584,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     assertFalse(
         envDto.path("id").asText().equals(reEnv.path("id").asText()),
         "re-created environment must receive a new UUID");
-    assertEquals(token, getEnvironmentToken(reEnv.path("id").asText()));
+    assertEquals(RegistrationTokens.hash(token), storedTokenHash(reEnv.path("id").asText()));
     JsonNode reMcp = getData("/api/ai/mcp-servers/" + mcpName);
     assertEquals("AVAILABLE", reMcp.path("discoveryStatus").asText());
     assertEquals(1, reMcp.path("toolCount").asInt());
@@ -982,32 +992,34 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
             + "    baseUrl: https://example.com/v1\n"
             + "environments:\n"
             + "  - name: rb_env_new\n"
-            + "    registrationToken: "
-            + collidingToken
+            + "    registrationTokenHash: "
+            + RegistrationTokens.hash(collidingToken)
             + "\n";
 
     MvcResult result = importRejected(yaml);
-    assertFalse(body(result).contains(collidingToken), "error must not echo the token");
+    assertFalse(
+        body(result).contains(RegistrationTokens.hash(collidingToken)),
+        "error must not echo the token hash");
     assertNull(findProvider("rb_provider"), "rejected file must not write earlier entries");
     assertNull(findEnvironment("rb_env_new"), "rejected environment must not be created");
     assertEquals(settingsBefore, getData("/api/settings"), "settings must not change");
   }
 
-  /** 同一文件内不同身份共用 registrationToken 同样是硬错误。 */
+  /** 同一文件内不同身份共用凭证摘要同样是硬错误。 */
   @Test
   void duplicateEnvironmentTokenWithinFileIsRejected() throws Exception {
     String suffix = unique();
-    String token = "shared-token-" + suffix;
+    String token = RegistrationTokens.hash("shared-token-" + suffix);
     String yaml =
         "environments:\n"
             + "  - name: dup_a_"
             + suffix
-            + "\n    registrationToken: "
+            + "\n    registrationTokenHash: "
             + token
             + "\n"
             + "  - name: dup_b_"
             + suffix
-            + "\n    registrationToken: "
+            + "\n    registrationTokenHash: "
             + token
             + "\n";
 
@@ -1287,8 +1299,11 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     return (Map<String, Object>) settingsMap(document).get(section);
   }
 
-  private String getEnvironmentToken(String id) throws Exception {
-    return getData("/api/harness/environments/" + id + "/token").path("registrationToken").asText();
+  private String storedTokenHash(String id) {
+    return jdbcTemplate.queryForObject(
+        "select registration_token_hash from environment where id = ?",
+        String.class,
+        UUID.fromString(id));
   }
 
   private void deleteOk(String path, String expectedVersion) throws Exception {

@@ -124,11 +124,11 @@ public class ConfigSyncApplier {
       Environment existing = environmentRepository.getByName(spec.name());
       if (existing == null) {
         environmentService.importEnvironment(
-            spec.name(), spec.registrationToken(), spec.installConfig());
+            spec.name(), spec.registrationTokenHash(), spec.installConfig());
       } else {
         environmentService.updateImportedEnvironment(
             EnvironmentId.of(existing.getId()),
-            spec.registrationToken(),
+            spec.registrationTokenHash(),
             spec.installConfig(),
             CatalogVersions.format(existing.getVersion()));
       }

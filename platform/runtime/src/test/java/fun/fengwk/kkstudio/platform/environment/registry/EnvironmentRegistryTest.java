@@ -83,11 +83,11 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
 
     // 播种底层 environment 卡片行
     jdbcTemplate.update(
-        "insert into environment (id, name, registration_token, version) values (?, 'dev', ?, 0)",
+        "insert into environment (id, name, registration_token_hash, version) values (?, 'dev', encode(sha256(convert_to(?, 'UTF8')), 'hex'), 0)",
         DEV.value(),
         DEV_TOKEN);
     jdbcTemplate.update(
-        "insert into environment (id, name, registration_token, version) values (?, 'prod', ?, 0)",
+        "insert into environment (id, name, registration_token_hash, version) values (?, 'prod', encode(sha256(convert_to(?, 'UTF8')), 'hex'), 0)",
         PROD.value(),
         PROD_TOKEN);
   }

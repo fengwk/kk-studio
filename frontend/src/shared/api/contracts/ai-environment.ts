@@ -72,8 +72,8 @@ export interface EnvironmentUpdateDTO {
  * Environment Card DTO（包含稳定 Card 属性与当前 live 连接投影）。
  *
  * id 是 canonical UUID；name 是全局唯一、创建后不可变身份。
- * registrationToken 在 create / rotate-token 响应中返回刚生成的新值，列表与详情查询始终为 null；
- * 按需读取当前值走 `GET /harness/environments/{id}/token`（no-store，不进入 query cache）。
+ * registrationToken 只在 create / rotate-token 响应中返回刚生成的明文，服务端只保存其摘要，
+ * 列表与详情查询始终为 null，之后无法再次读取。
  */
 export interface EnvironmentCardDTO {
   id: string
@@ -116,19 +116,6 @@ export interface EnvironmentCardDTO {
   version: CatalogVersion
   createTime: InstantTimestamp
   updateTime: InstantTimestamp
-}
-
-/**
- * 当前 registrationToken 的只读投影。
- *
- * 每次读取返回当前存储值且不轮换：连续读取的 registrationToken 与 version 保持一致，
- * updateTime 也不会推进。响应禁止缓存，调用方不得写入 LocalStorage 或 URL。
- */
-export interface EnvironmentRegistrationTokenDTO {
-  id: string
-  registrationToken: string
-  /** 读取时刻的 CAS 版本。 */
-  version: CatalogVersion
 }
 
 /**

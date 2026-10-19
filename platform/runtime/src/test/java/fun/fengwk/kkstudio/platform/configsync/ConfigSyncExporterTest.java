@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
+import fun.fengwk.kkstudio.platform.environment.RegistrationTokens;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncKind;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncRef;
@@ -26,7 +27,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-/** 测试意图：锁定导出只包含可编辑业务字段且保留原始凭据/registrationToken，不泄露运行态（UUID/时间戳/版本/发现状态），settings 以对象导出。 */
+/** 测试意图：锁定导出只包含可编辑业务字段且保留原始凭据与 Environment 凭证摘要，不泄露运行态（UUID/时间戳/版本/发现状态），settings 以对象导出。 */
 class ConfigSyncExporterTest {
 
   private final ConfigSyncYaml yaml = new ConfigSyncYaml();
@@ -113,7 +114,8 @@ class ConfigSyncExporterTest {
     @SuppressWarnings("unchecked")
     List<Map<String, Object>> environments =
         (List<Map<String, Object>>) document.get("environments");
-    assertEquals("token-env", environments.get(0).get("registrationToken"));
+    assertEquals(
+        RegistrationTokens.hash("token-env"), environments.get(0).get("registrationTokenHash"));
     assertFalse(environments.get(0).containsKey("installConfig"));
 
     @SuppressWarnings("unchecked")
@@ -170,10 +172,10 @@ class ConfigSyncExporterTest {
         exporter.export(state, List.of(new ConfigSyncRef(ConfigSyncKind.ENVIRONMENTS, "env")));
     var imported = parser.parse(exported).environments().get(0);
     assertEquals(spec.installConfig(), imported.installConfig());
-    assertEquals(spec.registrationToken(), imported.registrationToken());
+    assertEquals(spec.registrationTokenHash(), imported.registrationTokenHash());
     assertEquals("https://studio.example.com", imported.installConfig().getDaemon().getStudioUrl());
     assertFalse(
-        yaml.toMap(imported.installConfig(), "installConfig").containsKey("registrationToken"));
+        yaml.toMap(imported.installConfig(), "installConfig").containsKey("registrationTokenHash"));
   }
 
   /** 插件条目只导出安装身份与普通值文本：epoch、修订、认证代际/上下文指纹与任何秘密/身份事实都不进入文件。 */
