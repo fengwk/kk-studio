@@ -144,7 +144,7 @@ describe('fs.grep', () => {
     expect(textOf(result)).toBe('No matches found')
   })
 
-  it('取消信号映射为 CANCELLED', async () => {
+  it('取消信号映射为 CANCELLED 且空匹配时给出未完整提示', async () => {
     const dir = await tempDir()
     const file = join(dir, 'a.txt')
     await writeFile(file, 'x\n')
@@ -153,11 +153,93 @@ describe('fs.grep', () => {
     const result = await callCapability(
       grep,
       'fs.grep',
-      { pattern: 'x', path: file },
+      { pattern: 'z', path: file },
       makeContext(dir, { signal: controller.signal }),
     )
     expect(result.error).toBe(true)
-    expect(result.details).toMatchObject({ code: 'CANCELLED' })
+    expect(result.details).toMatchObject({
+      code: 'CANCELLED',
+      search: { outcome: 'CANCELLED', incomplete: true },
+    })
+    expect(textOf(result)).toBe('[Search cancelled; results are incomplete.]')
+  })
+
+  it('find 在 empty timeout 时返回超时提示而非 No files found', async () => {
+    const dir = await tempDir()
+    await writeFile(join(dir, 'a.txt'), '')
+    const controller = new AbortController()
+    controller.abort('TIMED_OUT')
+    const result = await callCapability(
+      find,
+      'fs.find',
+      { pattern: '*.zzz', path: dir },
+      makeContext(dir, { signal: controller.signal }),
+    )
+    expect(result.error).toBe(true)
+    expect(result.details).toMatchObject({
+      code: 'TIMEOUT',
+      search: { outcome: 'TIMED_OUT', incomplete: true },
+    })
+    expect(textOf(result)).toBe('[Search timed out; results are incomplete.]')
+  })
+
+  it('grep 在 empty timeout 时返回超时提示而非 No matches found', async () => {
+    const dir = await tempDir()
+    await writeFile(join(dir, 'a.txt'), 'hello\n')
+    const controller = new AbortController()
+    controller.abort('TIMED_OUT')
+    const result = await callCapability(
+      grep,
+      'fs.grep',
+      { pattern: 'zzz', path: dir },
+      makeContext(dir, { signal: controller.signal }),
+    )
+    expect(result.error).toBe(true)
+    expect(result.details).toMatchObject({
+      code: 'TIMEOUT',
+      search: { outcome: 'TIMED_OUT', incomplete: true },
+    })
+    expect(textOf(result)).toBe('[Search timed out; results are incomplete.]')
+  })
+
+  it('真实 worker 收到超时信号后停止退出并返回明确未完整结果', async () => {
+    const dir = await tempDir()
+    await writeFile(join(dir, 'a.txt'), 'match line\n')
+    await writeFile(join(dir, 'b.txt'), 'match line\n')
+    const controller = new AbortController()
+    controller.abort('TIMED_OUT')
+    const result = await callCapability(
+      grep,
+      'fs.grep',
+      { pattern: 'match line', path: dir },
+      makeContext(dir, { signal: controller.signal }),
+    )
+    expect(result.error).toBe(true)
+    expect(result.details).toMatchObject({
+      code: 'TIMEOUT',
+      search: { outcome: 'TIMED_OUT', incomplete: true },
+    })
+    expect(textOf(result)).toContain('[Search timed out; results are incomplete.]')
+  })
+
+  it('超长无换行文件 (longline) 搜索中收到停止信号正常退出并返回未完整结果', async () => {
+    const dir = await tempDir()
+    const longFile = join(dir, 'long.txt')
+    await writeFile(longFile, 'a'.repeat(64 * 1024))
+    const controller = new AbortController()
+    controller.abort('TIMED_OUT')
+    const result = await callCapability(
+      grep,
+      'fs.grep',
+      { pattern: 'needle', path: longFile },
+      makeContext(dir, { signal: controller.signal }),
+    )
+    expect(result.error).toBe(true)
+    expect(result.details).toMatchObject({
+      code: 'TIMEOUT',
+      search: { outcome: 'TIMED_OUT', incomplete: true },
+    })
+    expect(textOf(result)).toContain('[Search timed out; results are incomplete.]')
   })
 
   it('非法正则被拒绝', async () => {

@@ -8,8 +8,8 @@ import { FakeWorker } from './fake-search-worker.js'
 import { callCapability, makeContext } from './helpers.js'
 
 /**
- * 直接锁定 Worker 生命周期契约：正常回传只在 Worker 真正退出后交付（避免其覆盖率刷写与主进程收集竞争），
- * 取消/超时/异常则立即交付稳定结果，绝不等待可能被同步 FS 阻塞的 terminate()。
+ * 直接锁定 Worker 生命周期契约：正常回传和协作停止都只在 Worker 真正退出后交付，
+ * 收到 stop 后启动单个 5s 清理宽限，5s 仍无响应才 await terminate()；异常也 await terminate()。
  */
 
 vi.mock('node:worker_threads', async () => {
@@ -98,35 +98,118 @@ describe('Worker 正常回传生命周期', () => {
   })
 })
 
-describe('Worker 取消/超时/异常生命周期', () => {
-  it('取消立即 reject，不等待未完成的 terminate()', async () => {
+describe('Worker 协作停止与宽限超时生命周期', () => {
+  it('signal abort 协作停止：Worker 回传 partial 并在 exit 后交付', async () => {
     const dir = await tempDir()
     const controller = new AbortController()
     const tracked = track(
       callCapability(grep, 'fs.grep', { pattern: 'zzz', path: dir }, makeContext(dir, { signal: controller.signal })),
     )
     const worker = await waitForWorker()
+    // 触发取消
     controller.abort()
+
+    // 检查 job 中下发的 stopBuffer 是否已经被 store 设为 2 (CANCELLED)
+    const job = worker.posted[0] as { stopBuffer: SharedArrayBuffer }
+    expect(job.stopBuffer).toBeDefined()
+    expect(Atomics.load(new Int32Array(job.stopBuffer), 0)).toBe(2)
+
+    // 模拟 worker 协作停止，回传 partial 结果带 stopReason='CANCELLED'
+    worker.emit('message', {
+      ok: true,
+      kind: 'grep',
+      lines: [`${dir}/a.txt:1:match`],
+      moreMatches: false,
+      skipped: [],
+      stopReason: 'CANCELLED',
+    })
+
+    await new Promise((resolve) => setImmediate(resolve))
+    // 关键：worker 尚未 exit 时，保持 pending
+    expect(tracked.settled()).toBe(false)
+    expect(worker.terminated).toBe(false)
+
+    // worker 自然退出
+    worker.emit('exit', 0)
     const result = await tracked.promise
     expect(result.error).toBe(true)
-    expect(result.details).toMatchObject({ code: 'CANCELLED' })
-    // terminate() 被调用但其 Promise 尚未完成，调用却已返回稳定结果。
-    expect(worker.terminated).toBe(true)
-    expect(worker.terminateSettled).toBe(false)
+    expect(result.details).toMatchObject({
+      code: 'CANCELLED',
+      search: { outcome: 'CANCELLED', incomplete: true },
+    })
+    expect(result.contents[0]).toMatchObject({
+      type: 'text',
+      text: `${dir}/a.txt:1:match\n\n[Search cancelled; results are incomplete.]`,
+    })
+    // 协作停止未触发 terminate()
+    expect(worker.terminated).toBe(false)
   })
 
-  it('超时立即 reject，不等待未完成的 terminate()', async () => {
+  it('signal TIMED_OUT 协作停止：保留 partial 结果并追加超时提示', async () => {
     const dir = await tempDir()
-    const tracked = track(callCapability(grep, 'fs.grep', { pattern: 'zzz', path: dir }, makeContext(dir), 5))
+    const controller = new AbortController()
+    const tracked = track(
+      callCapability(find, 'fs.find', { pattern: '*.ts', path: dir }, makeContext(dir, { signal: controller.signal })),
+    )
     const worker = await waitForWorker()
+    controller.abort('TIMED_OUT')
+
+    const job = worker.posted[0] as { stopBuffer: SharedArrayBuffer }
+    expect(Atomics.load(new Int32Array(job.stopBuffer), 0)).toBe(1)
+
+    worker.emit('message', {
+      ok: true,
+      kind: 'find',
+      matches: [`${dir}/a.ts`],
+      limitReached: false,
+      skipped: [],
+      stopReason: 'TIMED_OUT',
+    })
+    worker.emit('exit', 0)
+
     const result = await tracked.promise
     expect(result.error).toBe(true)
-    expect(result.details).toMatchObject({ code: 'TIMEOUT' })
-    expect(worker.terminated).toBe(true)
-    expect(worker.terminateSettled).toBe(false)
+    expect(result.details).toMatchObject({
+      code: 'TIMEOUT',
+      search: { outcome: 'TIMED_OUT', incomplete: true },
+    })
+    expect(result.contents[0]).toMatchObject({
+      type: 'text',
+      text: `${dir}/a.ts\n\n[Search timed out; results are incomplete.]`,
+    })
   })
 
-  it('Worker error 事件直接以该错误失败', async () => {
+  it('5s 清理宽限超时仍无响应时 await terminate() 并以错误交付', async () => {
+    const dir = await tempDir()
+    const controller = new AbortController()
+    const tracked = track(
+      callCapability(grep, 'fs.grep', { pattern: 'zzz', path: dir }, makeContext(dir, { signal: controller.signal })),
+    )
+    const worker = await waitForWorker()
+
+    vi.useFakeTimers()
+    try {
+      controller.abort('TIMED_OUT')
+
+      // 在 5s 宽限期前未 terminate
+      await vi.advanceTimersByTimeAsync(4000)
+      expect(worker.terminated).toBe(false)
+      expect(tracked.settled()).toBe(false)
+
+      // 宽限期满 5s
+      await vi.advanceTimersByTimeAsync(1000)
+      expect(worker.terminated).toBe(true)
+      expect(worker.terminateSettled).toBe(true)
+
+      const result = await tracked.promise
+      expect(result.error).toBe(true)
+      expect(result.details).toMatchObject({ code: 'TIMEOUT' })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('Worker error 事件直接以该错误失败并 await terminate()', async () => {
     const dir = await tempDir()
     const tracked = track(callCapability(find, 'fs.find', { pattern: '*', path: dir }, makeContext(dir)))
     const worker = await waitForWorker()
@@ -136,6 +219,7 @@ describe('Worker 取消/超时/异常生命周期', () => {
     expect(result.error).toBe(true)
     expect(result.details).toMatchObject({ code: 'INTERNAL' })
     expect(worker.terminated).toBe(true)
+    expect(worker.terminateSettled).toBe(true)
   })
 
   it('Worker 未回传即退出报告 INTERNAL 异常退出', async () => {
