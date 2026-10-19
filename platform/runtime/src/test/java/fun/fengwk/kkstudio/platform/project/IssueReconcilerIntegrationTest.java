@@ -47,15 +47,15 @@ import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.platform.project.tool.IssueTransitionService;
 import fun.fengwk.kkstudio.project.controller.IssueReconcileOutcome;
 import fun.fengwk.kkstudio.project.controller.IssueReconciler;
-import fun.fengwk.kkstudio.project.controller.IssueReconciler.IssueWorkClaim;
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueRun;
-import fun.fengwk.kkstudio.project.model.IssueWork;
 import fun.fengwk.kkstudio.project.model.PauseReason;
 import fun.fengwk.kkstudio.project.model.Project;
-import fun.fengwk.kkstudio.project.service.IssueWorkStore;
 import fun.fengwk.kkstudio.project.turn.ProjectRunScope;
+import fun.fengwk.kkstudio.work.DurableWork;
+import fun.fengwk.kkstudio.work.DurableWorkQueue;
+import fun.fengwk.kkstudio.work.WorkClaim;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -76,7 +76,7 @@ import java.util.concurrent.ConcurrentHashMap;
 class IssueReconcilerIntegrationTest extends ProjectTestSupport {
 
   @Autowired private IssueReconciler reconciler;
-  @Autowired private IssueWorkStore issueWorkStore;
+  @Autowired private DurableWorkQueue issueWorkQueue;
   @Autowired private IssueTransitionService issueTransitionService;
   @Autowired private HarnessRuntime harnessRuntime;
 
@@ -148,19 +148,11 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
   }
 
   /** 获取指定 Issue 的调度工作 Claim，保证在调谐前该工作已到期并被成功锁定。 */
-  private IssueWorkClaim claimWork(UUID issueId) {
-    issueWorkStore.requestWork(issueId, Duration.ZERO);
-    String leaseToken = key("lease");
-    IssueWork claimed =
-        issueWorkStore
-            .claimNext(leaseToken, Duration.ofSeconds(30))
-            .orElseThrow(
-                () -> new IllegalStateException("Failed to claim work for issue " + issueId));
-    return new IssueWorkClaim(
-        claimed.getIssueId(),
-        claimed.getLeaseToken(),
-        claimed.getLeaseUntil(),
-        claimed.getWakeVersion());
+  private WorkClaim claimWork(UUID issueId) {
+    issueWorkQueue.request(issueId, Duration.ZERO);
+    return issueWorkQueue
+        .claimNext(key("lease"), Duration.ofSeconds(30))
+        .orElseThrow(() -> new IllegalStateException("Failed to claim work for issue " + issueId));
   }
 
   private void insertStorageBlob(UUID blobId) {
@@ -269,12 +261,14 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
   void claimValidationRejectsNullFields() {
     assertThrows(NullPointerException.class, () -> reconciler.reconcile(null));
     assertThrows(
-        NullPointerException.class, () -> new IssueWorkClaim(null, "token", Instant.now(), 1L));
+        NullPointerException.class,
+        () -> reconciler.reconcile(new WorkClaim(null, 1L, "token", Instant.now())));
     assertThrows(
         NullPointerException.class,
-        () -> new IssueWorkClaim(UUID.randomUUID(), null, Instant.now(), 1L));
+        () -> reconciler.reconcile(new WorkClaim(UUID.randomUUID(), 1L, null, Instant.now())));
     assertThrows(
-        NullPointerException.class, () -> new IssueWorkClaim(UUID.randomUUID(), "token", null, 1L));
+        NullPointerException.class,
+        () -> reconciler.reconcile(new WorkClaim(UUID.randomUUID(), 1L, "token", null)));
   }
 
   /** 测试意图：已归档的 Issue 不会继续派发执行，reconcile 返回 CONVERGED_ARCHIVED 并清除 mailbox 工作行。 */
@@ -287,12 +281,15 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     issue = issueService.getIssue(issue.getId());
     issueService.archiveIssue(issue.getId(), issue.getVersion());
 
-    IssueWorkClaim claim = claimWork(issue.getId());
+    WorkClaim claim = claimWork(issue.getId());
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
 
     assertEquals(IssueReconcileOutcome.CONVERGED_ARCHIVED, outcome);
     assertEquals(
-        0L, count("select count(*) from project_issue_work where issue_id = ?", issue.getId()));
+        0L,
+        count(
+            "select count(*) from durable_work where target_type = 'ISSUE' and target_id = ?",
+            issue.getId()));
     assertEquals(
         1L,
         count(
@@ -314,12 +311,15 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     issue = issueService.getIssue(issue.getId());
     issueService.transition(issue.getId(), issue.getVersion(), key("t3"), "DONE");
 
-    IssueWorkClaim claim = claimWork(issue.getId());
+    WorkClaim claim = claimWork(issue.getId());
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
 
     assertEquals(IssueReconcileOutcome.CONVERGED_ARCHIVED, outcome);
     assertEquals(
-        0L, count("select count(*) from project_issue_work where issue_id = ?", issue.getId()));
+        0L,
+        count(
+            "select count(*) from durable_work where target_type = 'ISSUE' and target_id = ?",
+            issue.getId()));
     assertEquals("DONE", issueService.getIssue(issue.getId()).getState());
     assertEquals(
         0L, count("select count(*) from project_issue_run where issue_id = ?", issue.getId()));
@@ -333,7 +333,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     Issue issue = createIssue(projectId);
     issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
 
-    IssueWorkClaim claim = claimWork(issue.getId());
+    WorkClaim claim = claimWork(issue.getId());
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
 
     assertEquals(IssueReconcileOutcome.RUN_ACCEPTED, outcome);
@@ -362,7 +362,10 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
             issue.getId(),
             agent));
     assertEquals(
-        1L, count("select count(*) from project_issue_work where issue_id = ?", issue.getId()));
+        1L,
+        count(
+            "select count(*) from durable_work where target_type = 'ISSUE' and target_id = ?",
+            issue.getId()));
     assertEquals(
         2L,
         (long)
@@ -379,12 +382,15 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     UUID projectId = createProjectWithStages("INIT保留阶段", agent, agent, 3);
     Issue issue = createIssue(projectId);
 
-    IssueWorkClaim claim = claimWork(issue.getId());
+    WorkClaim claim = claimWork(issue.getId());
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
 
     assertEquals(IssueReconcileOutcome.CONVERGED_NO_AGENT, outcome);
     assertEquals(
-        0L, count("select count(*) from project_issue_work where issue_id = ?", issue.getId()));
+        0L,
+        count(
+            "select count(*) from durable_work where target_type = 'ISSUE' and target_id = ?",
+            issue.getId()));
     assertEquals(
         0L, count("select count(*) from project_issue_run where issue_id = ?", issue.getId()));
     assertEquals("INIT", issueService.getIssue(issue.getId()).getState());
@@ -405,12 +411,15 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     Issue issue = createIssue(project.getId());
     issueService.transition(issue.getId(), issue.getVersion(), key("t"), "MANUAL");
 
-    IssueWorkClaim claim = claimWork(issue.getId());
+    WorkClaim claim = claimWork(issue.getId());
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
 
     assertEquals(IssueReconcileOutcome.CONVERGED_NO_AGENT, outcome);
     assertEquals(
-        0L, count("select count(*) from project_issue_work where issue_id = ?", issue.getId()));
+        0L,
+        count(
+            "select count(*) from durable_work where target_type = 'ISSUE' and target_id = ?",
+            issue.getId()));
     assertEquals(
         0L, count("select count(*) from project_issue_run where issue_id = ?", issue.getId()));
     assertEquals("MANUAL", issueService.getIssue(issue.getId()).getState());
@@ -429,12 +438,15 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
             + " where id = ?",
         projectId);
 
-    IssueWorkClaim claim = claimWork(issue.getId());
+    WorkClaim claim = claimWork(issue.getId());
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
 
     assertEquals(IssueReconcileOutcome.CONVERGED_NO_AGENT, outcome);
     assertEquals(
-        0L, count("select count(*) from project_issue_work where issue_id = ?", issue.getId()));
+        0L,
+        count(
+            "select count(*) from durable_work where target_type = 'ISSUE' and target_id = ?",
+            issue.getId()));
     assertEquals(
         0L, count("select count(*) from project_issue_run where issue_id = ?", issue.getId()));
   }
@@ -450,12 +462,15 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     issueService.pauseIssue(
         issue.getId(), issue.getVersion(), key("pause"), PauseReason.USER, "人工暂停");
 
-    IssueWorkClaim claim = claimWork(issue.getId());
+    WorkClaim claim = claimWork(issue.getId());
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
 
     assertEquals(IssueReconcileOutcome.CONVERGED_UNDISPATCHABLE, outcome);
     assertEquals(
-        0L, count("select count(*) from project_issue_work where issue_id = ?", issue.getId()));
+        0L,
+        count(
+            "select count(*) from durable_work where target_type = 'ISSUE' and target_id = ?",
+            issue.getId()));
     assertEquals(
         0L, count("select count(*) from project_issue_run where issue_id = ?", issue.getId()));
     assertTrue(issueService.getIssue(issue.getId()).isPaused());
@@ -475,12 +490,15 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     issueRunService.completeRun(
         run.getId(), run.getVersion(), key("complete"), endEntry, null, null);
 
-    IssueWorkClaim claim = claimWork(issue.getId());
+    WorkClaim claim = claimWork(issue.getId());
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
 
     assertEquals(IssueReconcileOutcome.CONVERGED_BUDGET_EXHAUSTED, outcome);
     assertEquals(
-        1L, count("select count(*) from project_issue_work where issue_id = ?", issue.getId()));
+        1L,
+        count(
+            "select count(*) from durable_work where target_type = 'ISSUE' and target_id = ?",
+            issue.getId()));
     assertEquals(
         1L, count("select count(*) from project_issue_run where issue_id = ?", issue.getId()));
   }
@@ -504,7 +522,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
         jdbc.queryForObject(
             "select head_entry_id from harness_thread where id = ?", UUID.class, run.getThreadId());
 
-    IssueWorkClaim claim = claimWork(issue.getId());
+    WorkClaim claim = claimWork(issue.getId());
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
 
     assertEquals(IssueReconcileOutcome.RUN_BUDGET_EXHAUSTED, outcome);
@@ -556,7 +574,10 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
             "select count(*) from project_issue_activity where issue_id = ? and kind = 'CONTROL'",
             issue.getId()));
     assertEquals(
-        1L, count("select count(*) from project_issue_work where issue_id = ?", issue.getId()));
+        1L,
+        count(
+            "select count(*) from durable_work where target_type = 'ISSUE' and target_id = ?",
+            issue.getId()));
   }
 
   /** 测试意图：即使在途模型仍 RUNNING，预算耗尽也必须先 Stop 再失败收尾，绝不能像旧实现那样 pause 后无限期停在 DEFERRED。 */
@@ -617,7 +638,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
         frozenRunScopeJson(run.getThreadId()),
         "REVIEW");
 
-    IssueWorkClaim claim = claimWork(issue.getId());
+    WorkClaim claim = claimWork(issue.getId());
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
 
     assertEquals(IssueReconcileOutcome.RUN_HANDED_OFF, outcome);
@@ -643,7 +664,10 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
                 + " 'STATE_CHANGE'",
             issue.getId()));
     assertEquals(
-        1L, count("select count(*) from project_issue_work where issue_id = ?", issue.getId()));
+        1L,
+        count(
+            "select count(*) from durable_work where target_type = 'ISSUE' and target_id = ?",
+            issue.getId()));
   }
 
   /** 测试意图：已冻结 root Join 的 Run 必须收尾；本 Thread 之后又出现的普通对话与在途模型不能把它重新拉回 DEFERRED_PROCESSING。 */
@@ -844,7 +868,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
         "update project_issue set state = 'REVIEW', version = version + 1 where id = ?",
         issue.getId());
 
-    IssueWorkClaim claim = claimWork(issue.getId());
+    WorkClaim claim = claimWork(issue.getId());
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
 
     assertEquals(IssueReconcileOutcome.STALE_RUN_CLOSED, outcome);
@@ -870,7 +894,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
         "update project_issue set state = 'REVIEW', version = version + 1 where id = ?",
         issue.getId());
 
-    IssueWorkClaim claim = claimWork(issue.getId());
+    WorkClaim claim = claimWork(issue.getId());
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
 
     assertEquals(IssueReconcileOutcome.STALE_RUN_CLOSED, outcome);
@@ -906,7 +930,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
         workflowJson(designAgent2, reviewAgent, 3),
         projectId);
 
-    IssueWorkClaim claim = claimWork(issue.getId());
+    WorkClaim claim = claimWork(issue.getId());
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
 
     assertEquals(IssueReconcileOutcome.STALE_RUN_CLOSED, outcome);
@@ -937,7 +961,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
             Long.class,
             issue.getId());
 
-    IssueWorkClaim claim = claimWork(issue.getId());
+    WorkClaim claim = claimWork(issue.getId());
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
 
     assertEquals(IssueReconcileOutcome.INSTRUCTION_DELIVERED, outcome);
@@ -948,7 +972,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
             Long.class,
             run.getId()));
 
-    IssueWorkClaim secondClaim = claimWork(issue.getId());
+    WorkClaim secondClaim = claimWork(issue.getId());
     IssueReconcileOutcome secondOutcome = reconciler.reconcile(secondClaim);
 
     assertEquals(IssueReconcileOutcome.DEFERRED_IDLE, secondOutcome);
@@ -976,7 +1000,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
             Long.class,
             issue.getId());
 
-    IssueWorkClaim claim = claimWork(issue.getId());
+    WorkClaim claim = claimWork(issue.getId());
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
 
     assertEquals(IssueReconcileOutcome.DEFERRED_IDLE, outcome);
@@ -1000,7 +1024,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     issueService.pauseIssue(
         issue.getId(), issue.getVersion(), key("pause"), PauseReason.USER, "人工暂停");
 
-    IssueWorkClaim claim = claimWork(issue.getId());
+    WorkClaim claim = claimWork(issue.getId());
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
 
     assertEquals(IssueReconcileOutcome.DEFERRED_IDLE, outcome);
@@ -1012,7 +1036,10 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
                 + " active_since is not null",
             run.getId()));
     assertEquals(
-        1L, count("select count(*) from project_issue_work where issue_id = ?", issue.getId()));
+        1L,
+        count(
+            "select count(*) from durable_work where target_type = 'ISSUE' and target_id = ?",
+            issue.getId()));
   }
 
   /** 测试意图：处于 WAITING 状态且 Issue 仍然暂停的 Run，reconcile 返回 WAITING_FOR_GATE 并继续延后检查。 */
@@ -1028,7 +1055,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
         issue.getId(), issue.getVersion(), key("pause"), PauseReason.USER, "人工暂停");
     issueRunService.waitRun(run.getId(), run.getVersion());
 
-    IssueWorkClaim claim = claimWork(issue.getId());
+    WorkClaim claim = claimWork(issue.getId());
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
 
     assertEquals(IssueReconcileOutcome.WAITING_FOR_GATE, outcome);
@@ -1054,7 +1081,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     issue = issueService.getIssue(issue.getId());
     issueService.resumeIssue(issue.getId(), issue.getVersion(), key("resume"));
 
-    IssueWorkClaim claim = claimWork(issue.getId());
+    WorkClaim claim = claimWork(issue.getId());
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
 
     assertEquals(IssueReconcileOutcome.RUN_RESUMED, outcome);
@@ -1077,7 +1104,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     UUID newHead = appendHistoryEntry(run.getThreadId());
     matchRunJoin(run.getId(), newHead);
 
-    IssueWorkClaim claim = claimWork(issue.getId());
+    WorkClaim claim = claimWork(issue.getId());
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
 
     assertEquals(IssueReconcileOutcome.RUN_COMPLETED, outcome);
@@ -1100,7 +1127,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
 
-    IssueWorkClaim claim = claimWork(issue.getId());
+    WorkClaim claim = claimWork(issue.getId());
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
 
     assertEquals(IssueReconcileOutcome.DEFERRED_IDLE, outcome);
@@ -1110,7 +1137,10 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
             "select count(*) from project_issue_run where id = ? and status = 'RUNNING'",
             run.getId()));
     assertEquals(
-        1L, count("select count(*) from project_issue_work where issue_id = ?", issue.getId()));
+        1L,
+        count(
+            "select count(*) from durable_work where target_type = 'ISSUE' and target_id = ?",
+            issue.getId()));
   }
 
   /**
@@ -1183,7 +1213,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
         overlay(run.getThreadId(), List.of(mock(ThreadCommand.class)), null, List.of());
     when(harnessRuntime.getThreadSnapshot(run.getThreadId())).thenReturn(processing);
 
-    IssueWorkClaim claim = claimWork(issue.getId());
+    WorkClaim claim = claimWork(issue.getId());
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
 
     assertEquals(IssueReconcileOutcome.DEFERRED_PROCESSING, outcome);
@@ -1208,7 +1238,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     ThreadSnapshot processing = overlay(run.getThreadId(), List.of(), model, List.of());
     when(harnessRuntime.getThreadSnapshot(run.getThreadId())).thenReturn(processing);
 
-    IssueWorkClaim claim = claimWork(issue.getId());
+    WorkClaim claim = claimWork(issue.getId());
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
 
     assertEquals(IssueReconcileOutcome.DEFERRED_PROCESSING, outcome);
@@ -1240,7 +1270,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
             new ThreadExecutionFacts(true, false, false));
     when(harnessRuntime.getThreadSnapshot(run.getThreadId())).thenReturn(continuable);
 
-    IssueWorkClaim claim = claimWork(issue.getId());
+    WorkClaim claim = claimWork(issue.getId());
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
 
     assertEquals(IssueReconcileOutcome.DEFERRED_PROCESSING, outcome);
@@ -1260,21 +1290,17 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
     IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
 
-    issueWorkStore.requestWork(issue.getId(), Duration.ZERO);
-    String token = key("lease");
-    IssueWork claimed = issueWorkStore.claimNext(token, Duration.ofSeconds(5)).orElseThrow();
-    IssueWorkClaim claim =
-        new IssueWorkClaim(issue.getId(), token, claimed.getLeaseUntil(), claimed.getWakeVersion());
+    issueWorkQueue.request(issue.getId(), Duration.ZERO);
+    WorkClaim claim = issueWorkQueue.claimNext(key("lease"), Duration.ofSeconds(5)).orElseThrow();
 
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
 
     assertEquals(IssueReconcileOutcome.DEFERRED_IDLE, outcome);
-    // reconcile 结束后 rescheduleWork 释放了 lease_token 与 lease_until，并保留 due_at
-    IssueWork work = issueWorkStore.getWork(issue.getId());
-    assertNull(work.getLeaseToken());
-    assertNull(work.getLeaseUntil());
-    assertNotNull(work.getDueAt());
-    assertEquals(work.getUpdatedAt().plusSeconds(1), work.getDueAt());
+    // reconcile 结束后重排释放了租约，并把下一次检查推迟 activeDelay（claim 时刻 = leaseUntil - 5s）
+    DurableWork work = issueWorkQueue.find(issue.getId()).orElseThrow();
+    assertNull(work.leaseToken());
+    assertNull(work.leaseUntil());
+    assertFalse(work.availableAt().isBefore(claim.leaseUntil().minusSeconds(4)));
   }
 
   /** 测试意图：不存在的 Issue 在 lockIssue 返回 null 后安全收敛，完成不存在的 work 不导致事务回滚。 */
@@ -1286,8 +1312,8 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     issueService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
 
     // 不存在的 Issue 触发 lockIssue == null 路径，并经 finish(completeWork) 安全处理
-    IssueWorkClaim nonExistentClaim =
-        new IssueWorkClaim(UUID.randomUUID(), key("token"), Instant.now().plusSeconds(30), 1L);
+    WorkClaim nonExistentClaim =
+        new WorkClaim(UUID.randomUUID(), 1L, key("token"), Instant.now().plusSeconds(30));
     IssueReconcileOutcome outcome = reconciler.reconcile(nonExistentClaim);
     assertEquals(IssueReconcileOutcome.CONVERGED_ARCHIVED, outcome);
   }
@@ -1311,7 +1337,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
         withTools(run.getThreadId(), List.of(mockTool(ToolInvocationStatus.WAITING_INPUT)));
     when(harnessRuntime.getThreadSnapshot(run.getThreadId())).thenReturn(waiting);
 
-    IssueWorkClaim claim = claimWork(issue.getId());
+    WorkClaim claim = claimWork(issue.getId());
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
 
     assertEquals(IssueReconcileOutcome.WAITING_FOR_GATE, outcome);
@@ -1321,7 +1347,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     long remainingBudget = waitingRun.getRemainingExecutionMs();
 
     // 再次调谐：工具仍处于等待，Run 维持 WAITING，剩余执行时长不变
-    IssueWorkClaim secondClaim = claimWork(issue.getId());
+    WorkClaim secondClaim = claimWork(issue.getId());
     IssueReconcileOutcome secondOutcome = reconciler.reconcile(secondClaim);
     assertEquals(IssueReconcileOutcome.WAITING_FOR_GATE, secondOutcome);
     assertEquals(remainingBudget, issueRunService.getRun(run.getId()).getRemainingExecutionMs());
@@ -1329,7 +1355,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     // 工具回答完成，进入普通静止点
     ThreadSnapshot settled = createSnapshot(run.getThreadId());
     when(harnessRuntime.getThreadSnapshot(run.getThreadId())).thenReturn(settled);
-    IssueWorkClaim resumeClaim = claimWork(issue.getId());
+    WorkClaim resumeClaim = claimWork(issue.getId());
     IssueReconcileOutcome resumeOutcome = reconciler.reconcile(resumeClaim);
     assertEquals(IssueReconcileOutcome.RUN_RESUMED, resumeOutcome);
     IssueRun resumedRun = issueRunService.getRun(run.getId());
@@ -1354,7 +1380,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     issueRunService.waitRun(run.getId(), run.getVersion());
 
     // 调谐：此时 stage budget used == 1 (maxRuns == 1)，但 WAITING 的 Run 必须成功 resume 同一 Run
-    IssueWorkClaim claim = claimWork(issue.getId());
+    WorkClaim claim = claimWork(issue.getId());
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
 
     assertEquals(IssueReconcileOutcome.RUN_RESUMED, outcome);
@@ -1384,7 +1410,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     assertTrue(issueService.getIssue(issue.getId()).isGateClosed());
 
     // 处于 BLOCKED 时调谐，必须维持 WAITING_FOR_GATE，禁止 resume
-    IssueWorkClaim claim = claimWork(issue.getId());
+    WorkClaim claim = claimWork(issue.getId());
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
     assertEquals(IssueReconcileOutcome.WAITING_FOR_GATE, outcome);
     assertEquals(IssueRunStatus.WAITING, issueRunService.getRun(run.getId()).getStatus());
@@ -1395,7 +1421,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     assertFalse(issueService.getIssue(issue.getId()).isGateClosed());
 
     // 恢复后调谐：Run 恢复为 RUNNING
-    IssueWorkClaim resumeClaim = claimWork(issue.getId());
+    WorkClaim resumeClaim = claimWork(issue.getId());
     IssueReconcileOutcome resumeOutcome = reconciler.reconcile(resumeClaim);
     assertEquals(IssueReconcileOutcome.RUN_RESUMED, resumeOutcome);
     assertEquals(IssueRunStatus.RUNNING, issueRunService.getRun(run.getId()).getStatus());
@@ -1411,11 +1437,14 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     issue = issueService.getIssue(issue.getId());
     issueService.blockIssue(issue.getId(), issue.getVersion(), key("b"), "业务阻断");
 
-    IssueWorkClaim claim = claimWork(issue.getId());
+    WorkClaim claim = claimWork(issue.getId());
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
     assertEquals(IssueReconcileOutcome.CONVERGED_UNDISPATCHABLE, outcome);
     assertEquals(
-        0L, count("select count(*) from project_issue_work where issue_id = ?", issue.getId()));
+        0L,
+        count(
+            "select count(*) from durable_work where target_type = 'ISSUE' and target_id = ?",
+            issue.getId()));
   }
 
   /**
@@ -1457,7 +1486,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     assertEquals("REVIEW", run.getNextState());
 
     // 调谐：必须优先投递指示，绝不能直接交接收尾！
-    IssueWorkClaim claim = claimWork(issue.getId());
+    WorkClaim claim = claimWork(issue.getId());
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
 
     assertEquals(IssueReconcileOutcome.INSTRUCTION_DELIVERED, outcome);
@@ -1474,7 +1503,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     // 指示投递后，模拟生成产出并完全静止
     UUID newHead = appendHistoryEntry(run.getThreadId());
     matchRunJoin(run.getId(), newHead);
-    IssueWorkClaim secondClaim = claimWork(issue.getId());
+    WorkClaim secondClaim = claimWork(issue.getId());
     IssueReconcileOutcome secondOutcome = reconciler.reconcile(secondClaim);
 
     // 此时才安全交接
@@ -1507,7 +1536,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
             ResourceMessageContent.media(blobId, "architecture-design.pdf")));
 
     matchRunJoin(run.getId(), assistantEntryId);
-    IssueWorkClaim claim = claimWork(issue.getId());
+    WorkClaim claim = claimWork(issue.getId());
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
 
     assertEquals(IssueReconcileOutcome.RUN_COMPLETED, outcome);
@@ -1591,7 +1620,10 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
             issue.getId(),
             blobId));
     assertEquals(
-        1L, count("select count(*) from project_issue_work where issue_id = ?", issue.getId()));
+        1L,
+        count(
+            "select count(*) from durable_work where target_type = 'ISSUE' and target_id = ?",
+            issue.getId()));
   }
 
   /**
@@ -1746,7 +1778,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
         withTools(run.getThreadId(), List.of(mockTool(ToolInvocationStatus.RUNNING)));
     when(harnessRuntime.getThreadSnapshot(run.getThreadId())).thenReturn(inFlightSnapshot);
 
-    IssueWorkClaim claim = claimWork(issue.getId());
+    WorkClaim claim = claimWork(issue.getId());
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
 
     // 1. 在途时不收尾，返回 DEFERRED_PROCESSING
@@ -1759,7 +1791,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     matchRunJoin(run.getId(), newHead);
     when(harnessRuntime.getThreadSnapshot(run.getThreadId()))
         .thenAnswer(inv -> createSnapshot(run.getThreadId()));
-    IssueWorkClaim secondClaim = claimWork(issue.getId());
+    WorkClaim secondClaim = claimWork(issue.getId());
     IssueReconcileOutcome secondOutcome = reconciler.reconcile(secondClaim);
 
     // 3. 静止后安全收尾，next_state 被丢弃，Issue 状态依然保持在 REVIEW（未被推进到 DONE）
@@ -1781,12 +1813,15 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
 
     jdbc.update("update project set archived_at = current_timestamp where id = ?", projectId);
 
-    IssueWorkClaim claim = claimWork(issue.getId());
+    WorkClaim claim = claimWork(issue.getId());
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
 
     assertEquals(IssueReconcileOutcome.CONVERGED_ARCHIVED, outcome);
     assertEquals(
-        0L, count("select count(*) from project_issue_work where issue_id = ?", issue.getId()));
+        0L,
+        count(
+            "select count(*) from durable_work where target_type = 'ISSUE' and target_id = ?",
+            issue.getId()));
     assertEquals(
         0L, count("select count(*) from project_issue_run where issue_id = ?", issue.getId()));
   }
@@ -1807,7 +1842,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     issueService.transition(issue.getId(), issue.getVersion(), key("t"), "MANUAL");
 
     // 验证空闲派发安全收敛为 CONVERGED_NO_AGENT
-    IssueWorkClaim claim = claimWork(issue.getId());
+    WorkClaim claim = claimWork(issue.getId());
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
     assertEquals(IssueReconcileOutcome.CONVERGED_NO_AGENT, outcome);
   }
@@ -1825,7 +1860,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     // 删除 agent_definition 模拟数据损坏或环境异常，验证异常向外传播而不是被吞为 CONVERGED_UNDISPATCHABLE
     jdbc.update("delete from agent_definition where name = ?", agent);
 
-    IssueWorkClaim claim = claimWork(issue.getId());
+    WorkClaim claim = claimWork(issue.getId());
     assertThrows(RuntimeException.class, () -> reconciler.reconcile(claim));
   }
 
@@ -1853,7 +1888,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
             ResourceMessageContent.media(unpublishableBlobId, "missing-file.pdf")));
 
     matchRunJoin(run.getId(), assistantEntryId);
-    IssueWorkClaim claim = claimWork(issue.getId());
+    WorkClaim claim = claimWork(issue.getId());
     // 调谐必须正常完成，绝不能因为内部异常或 rollback-only 抛出 UnexpectedRollbackException
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
 
@@ -1872,7 +1907,7 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
             unpublishableBlobId));
 
     // 再次调谐已收敛的 Issue，确保状态机和 mailbox 完全健康可重复调用
-    IssueWorkClaim secondClaim = claimWork(issue.getId());
+    WorkClaim secondClaim = claimWork(issue.getId());
     IssueReconcileOutcome secondOutcome = reconciler.reconcile(secondClaim);
     assertEquals(IssueReconcileOutcome.CONVERGED_BUDGET_EXHAUSTED, secondOutcome);
   }

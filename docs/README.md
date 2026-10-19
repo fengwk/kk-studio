@@ -55,6 +55,7 @@
 | [Canvas Plugin API](modules/canvas-plugin-api.md) | Function adapter、Catalog、codec 端口与冻结运行计划约定什么契约？ |
 | [Canvas Infra](modules/canvas-infra.md) | Graph 如何持久化，Function run 如何 claim、heartbeat 和终结？ |
 | [Schema](modules/schema.md) | 唯一 Flyway baseline、表关系、seed 与数据库约束是什么？ |
+| [Durable Work](modules/work.md) | 后台调度如何共用一张 mailbox 表、数据库时钟租约与唤醒通道？ |
 | [Project](modules/project.md) | 配置化阶段、Issue 预算、稳定 Agent Thread 与 Run 如何调度和交接？ |
 | [Share](modules/share.md) | 浏览器与服务端共享的 DTO 和 JSON wire 如何保持严格、稳定？ |
 

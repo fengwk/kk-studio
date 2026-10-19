@@ -270,7 +270,10 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
     Issue issue = createIssue(projectId);
 
     assertEquals(
-        0L, count("select count(*) from project_issue_work where issue_id = ?", issue.getId()));
+        0L,
+        count(
+            "select count(*) from durable_work where target_type = 'ISSUE' and target_id = ?",
+            issue.getId()));
     assertEquals(
         0L, count("select count(*) from project_issue_activity where issue_id = ?", issue.getId()));
 
@@ -287,7 +290,10 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
             "select count(*) from project_issue_activity where issue_id = ? and kind = 'COMMENT'",
             issue.getId()));
     assertEquals(
-        0L, count("select count(*) from project_issue_work where issue_id = ?", issue.getId()));
+        0L,
+        count(
+            "select count(*) from durable_work where target_type = 'ISSUE' and target_id = ?",
+            issue.getId()));
 
     Map<String, Object> activityRow =
         jdbc.queryForMap(
@@ -319,7 +325,7 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
 
     long initialWorkWakeVersion =
         jdbc.queryForObject(
-            "select wake_version from project_issue_work where issue_id = ?",
+            "select wake_version from durable_work where target_type = 'ISSUE' and target_id = ?",
             Long.class,
             issue.getId());
 
@@ -352,7 +358,7 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
 
     long newWorkWakeVersion =
         jdbc.queryForObject(
-            "select wake_version from project_issue_work where issue_id = ?",
+            "select wake_version from durable_work where target_type = 'ISSUE' and target_id = ?",
             Long.class,
             issue.getId());
     assertTrue(newWorkWakeVersion > initialWorkWakeVersion, "Work 邮箱应被唤醒以投递指示");
@@ -375,7 +381,10 @@ class IssueEditingIntegrationTest extends ProjectTestSupport {
     assertEquals(
         0L, count("select count(*) from project_issue_activity where issue_id = ?", issue.getId()));
     assertEquals(
-        0L, count("select count(*) from project_issue_work where issue_id = ?", issue.getId()));
+        0L,
+        count(
+            "select count(*) from durable_work where target_type = 'ISSUE' and target_id = ?",
+            issue.getId()));
   }
 
   // =========================================================================

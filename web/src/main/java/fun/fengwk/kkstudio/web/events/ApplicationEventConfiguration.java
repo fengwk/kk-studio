@@ -19,6 +19,7 @@ import fun.fengwk.kkstudio.project.controller.IssueControllerDispatcher;
 import fun.fengwk.kkstudio.web.events.postgresql.PostgresqlNotificationHandler;
 import fun.fengwk.kkstudio.web.events.postgresql.PostgresqlNotificationLoop;
 import fun.fengwk.kkstudio.web.project.ProjectInvalidationHub;
+import fun.fengwk.kkstudio.work.DurableWorkQueue;
 
 import javax.sql.DataSource;
 
@@ -83,15 +84,17 @@ public class ApplicationEventConfiguration {
     return new PostgresqlNotificationLoop(
         dataSource,
         List.of(
-            // 1. 任务调度唤醒：广播提示有新的 Harness 任务 (THREAD/MODEL/TOOL) 就绪，唤醒调度器执行 drain 排空；调度器通过 FOR UPDATE
-            // SKIP LOCKED 并发抢占，无锁竞争
+            // 1. Durable Work 唤醒：payload 是就绪行的 target type，只唤醒负责该类型的调度器；调度器通过 FOR UPDATE SKIP
+            // LOCKED
+            // 并发抢占。重连后无法得知漏掉了哪些类型，全部唤醒一次。
             new PostgresqlNotificationHandler(
-                HarnessWorkDispatcher.CHANNEL, ignored -> dispatcher.wake(), dispatcher::wake),
-            // 2. Issue Controller 任务调度唤醒：广播提示有新的 Issue Controller 任务就绪，唤醒调度器执行 drain 排空
-            new PostgresqlNotificationHandler(
-                IssueControllerDispatcher.CHANNEL,
-                ignored -> issueControllerDispatcher.wake(),
-                issueControllerDispatcher::wake),
+                DurableWorkQueue.CHANNEL,
+                targetType ->
+                    durableWorkDispatcher(targetType, dispatcher, issueControllerDispatcher).run(),
+                () -> {
+                  dispatcher.wake();
+                  issueControllerDispatcher.wake();
+                }),
             // 3. 画布函数唤醒：广播提示有新的 Canvas 异步函数计算任务就绪，唤醒画布函数调度器
             new PostgresqlNotificationHandler(
                 CanvasFunctionDispatcher.CHANNEL,
@@ -191,5 +194,14 @@ public class ApplicationEventConfiguration {
   public ScheduledExecutorService applicationEventHeartbeatScheduler() {
     return Executors.newSingleThreadScheduledExecutor(
         Thread.ofPlatform().name("application-event-heartbeat").daemon(true).factory());
+  }
+
+  private static Runnable durableWorkDispatcher(
+      String targetType,
+      HarnessWorkDispatcher harnessDispatcher,
+      IssueControllerDispatcher issueControllerDispatcher) {
+    return IssueControllerDispatcher.TARGET_TYPE.equals(targetType)
+        ? issueControllerDispatcher::wake
+        : harnessDispatcher::wake;
   }
 }

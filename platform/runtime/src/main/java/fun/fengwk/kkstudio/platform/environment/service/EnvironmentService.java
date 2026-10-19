@@ -74,7 +74,7 @@ public interface EnvironmentService {
   EnvironmentCardDTO rotateToken(EnvironmentId id, String expectedVersion);
 
   /**
-   * CAS 删除 Environment Card。必须校验： 1. 无活跃连接（OFFLINE）； 2. 无 AgentDefinition 引用； 3. 无活跃 harness_work。
+   * CAS 删除 Environment Card。必须校验： 1. 无活跃连接（OFFLINE）； 2. 无 AgentDefinition 引用； 3. 无活跃 durable_work。
    */
   void delete(EnvironmentId id, String expectedVersion);
 }

@@ -37,13 +37,12 @@ import fun.fengwk.kkstudio.project.repo.IssueAgentThreadRepository;
 import fun.fengwk.kkstudio.project.repo.IssueRepository;
 import fun.fengwk.kkstudio.project.repo.IssueRunRepository;
 import fun.fengwk.kkstudio.project.repo.IssueStageBudgetRepository;
-import fun.fengwk.kkstudio.project.repo.IssueWorkRepository;
 import fun.fengwk.kkstudio.project.repo.ProjectRepository;
 import fun.fengwk.kkstudio.project.service.IssueEvidenceService;
 import fun.fengwk.kkstudio.project.service.IssueRunService;
 import fun.fengwk.kkstudio.project.service.IssueService;
-import fun.fengwk.kkstudio.project.service.IssueWorkStore;
 import fun.fengwk.kkstudio.project.service.impl.IssueActivityIdempotency.Identity;
+import fun.fengwk.kkstudio.work.DurableWorkQueue;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -77,8 +76,7 @@ public class IssueServiceImpl implements IssueService {
   private final IssueStageBudgetRepository stageBudgetRepository;
   private final IssueActivityRepository issueActivityRepository;
   private final IssueAgentThreadRepository issueAgentThreadRepository;
-  private final IssueWorkRepository issueWorkRepository;
-  private final IssueWorkStore issueWorkStore;
+  private final DurableWorkQueue issueWorkQueue;
   private final ProjectWorkflowJsonCodec workflowCodec;
   private final ObjectMapper objectMapper;
   private final IssueRunService issueRunService;
@@ -266,7 +264,7 @@ public class IssueServiceImpl implements IssueService {
         objectMapper.createObjectNode());
     persist(locked, expectedVersion);
     // 指示已持久接受，由 mailbox 在安全点投递给明确的当前 Run。
-    issueWorkStore.requestWork(issueId, Duration.ZERO);
+    issueWorkQueue.request(issueId, Duration.ZERO);
     return issueRepository.getById(issueId);
   }
 
@@ -535,7 +533,7 @@ public class IssueServiceImpl implements IssueService {
     }
     issueEvidenceService.releaseAll(issueId);
     issueActivityRepository.deleteByIssueId(issueId);
-    issueWorkRepository.deleteByIssueId(issueId);
+    issueWorkQueue.delete(issueId);
     issueRunRepository.deleteByIssueId(issueId);
     stageBudgetRepository.deleteByIssueId(issueId);
     List<IssueAgentThread> bindings = issueAgentThreadRepository.listByIssueId(issueId);
@@ -929,7 +927,7 @@ public class IssueServiceImpl implements IssueService {
     if (stage == null || !stage.enabled() || !stage.hasAgent()) {
       return;
     }
-    issueWorkStore.requestWork(issue.getId(), Duration.ZERO);
+    issueWorkQueue.request(issue.getId(), Duration.ZERO);
   }
 
   private Issue persist(Locked locked, long expectedVersion) {

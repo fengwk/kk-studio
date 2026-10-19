@@ -11,7 +11,7 @@ import org.postgresql.PGConnection;
 import org.postgresql.PGNotification;
 
 import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionDispatcher;
-import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcher;
+import fun.fengwk.kkstudio.work.DurableWorkQueue;
 
 import javax.sql.DataSource;
 
@@ -36,7 +36,7 @@ import java.util.logging.Logger;
 
 class PostgresqlNotificationLoopTest {
 
-  private static final String WORK_CHANNEL = HarnessWorkDispatcher.CHANNEL;
+  private static final String WORK_CHANNEL = DurableWorkQueue.CHANNEL;
   private static final String CANVAS_FUNCTION_WORK_CHANNEL = CanvasFunctionDispatcher.CHANNEL;
   private static final String THREAD_CHANNEL = "harness_thread_version";
   private static final String CANVAS_CHANNEL = "canvas_revision";

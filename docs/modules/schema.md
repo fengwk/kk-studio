@@ -30,13 +30,14 @@ V1 写入单行 SystemSettings 默认聚合；Java 解码与 profile 默认契�
 | Environment | environment、environment_connection：注册与环境路由租约、保存的安装设置（`install_config`）、宿主/Skill 投影；cluster_node：App 节点内部 IDE 路由 origin 与心跳租约 | [Environment](harness-environment.md) |
 | Chat | chat、chat_session：owner 关系 | [Platform](platform.md#命令接受产品归属与派发) |
 | Canvas | canvas_document/group/node/resource、function_run、command_dedup、function_resource_pin | [Canvas Core](canvas-core.md)、[Canvas Infra](canvas-infra.md) |
-| Project | project、project_issue 与 agent_thread/stage_budget/run/activity/work/evidence | [Project](project.md) |
-| Harness | harness_session/entry/thread/thread_command/model_invocation/tool_invocation/work/thread_join/thread_stop_receipt | [Harness Runtime](harness-runtime.md)、[Harness Infra](harness-infra.md) |
+| Project | project、project_issue 与 agent_thread/stage_budget/run/activity/evidence | [Project](project.md) |
+| Harness | harness_session/entry/thread/thread_command/model_invocation/tool_invocation/thread_join/thread_stop_receipt | [Harness Runtime](harness-runtime.md)、[Harness Infra](harness-infra.md) |
+| Durable Work | durable_work：全部后台调度（THREAD/MODEL/TOOL/ISSUE/CANVAS_RUN）共用的 mailbox | [Durable Work](work.md) |
 | Storage | storage_blob/upload/object_cleanup、session_blob_ref | [Storage](platform.md#storageblob-与-resource) |
 | Settings | system_setting，`id = 1` | [配置](platform.md#配置) |
 
 表、列的准确清单与约束名直接查 V1；跨域关系与事务职责见 [Canvas / Project](../canvas-project.md)。
-结构测试分别核对业务表与 Flyway 元数据表，计数口径以测试的 expected set 为准。
+约束行为由 schema 模块的 fresh-install 探针在真实 PostgreSQL 上逐条验证。
 
 ## 数据库兜底的不变量
 

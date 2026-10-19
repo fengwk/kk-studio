@@ -17,7 +17,8 @@ import java.util.UUID;
 class PostgresqlHarnessSchemaTest {
 
   /**
-   * Harness runtime 协议恰好九张表；业务表不使用 harness_ 前缀，因此 {@code harness_%} 全量查询结果必须精确等于该九表。
+   * Harness runtime 协议的专有表恰好八张，Work 位于共享的 {@code durable_work}；业务表不使用 harness_ 前缀，因此 {@code
+   * harness_%} 全量查询结果必须精确等于这八张表。
    *
    * <p>{@code harness_thread_join} 是原子源 prompt 接受与 join 契约的持久事实（无独立状态枚举，无 prompt/report 冗余）， {@code
    * harness_thread_stop_receipt} 是 Stop 回执集合的持久事实，属于 runtime 协议空间。
@@ -31,8 +32,7 @@ class PostgresqlHarnessSchemaTest {
           "harness_thread_command",
           "harness_thread_join",
           "harness_thread_stop_receipt",
-          "harness_tool_invocation",
-          "harness_work");
+          "harness_tool_invocation");
 
   private JdbcTemplate jdbc;
 
@@ -43,8 +43,8 @@ class PostgresqlHarnessSchemaTest {
   }
 
   @Test
-  void schemaContainsExactlyTheNineHarnessTables() {
-    // 精确查询全部 harness_% 表：任何业务表（如 session_blob_ref）不得混入 runtime 协议空间。
+  void schemaContainsExactlyTheEightHarnessTables() {
+    // 精确查询全部 harness_% 表：任何业务表（如 session_blob_ref）不得混入 runtime 协议空间；Work 在共享的 durable_work 表。
     List<String> tables =
         jdbc.queryForList(
             """
@@ -225,8 +225,6 @@ class PostgresqlHarnessSchemaTest {
             "idx_harness_thread_stop_receipt_root",
             "idx_harness_tool_invocation_model_nonterminal",
             "idx_harness_tool_invocation_pending",
-            "idx_harness_work_available",
-            "idx_harness_work_lease_until",
             "pk_harness_thread_stop_receipt",
             "uk_harness_entry_session_id",
             "uk_harness_entry_single_root",
@@ -239,8 +237,8 @@ class PostgresqlHarnessSchemaTest {
         indexes);
 
     String modelResult = indexDefinition("uk_harness_model_invocation_result");
-    String workAvailable = indexDefinition("idx_harness_work_available");
-    String workLease = indexDefinition("idx_harness_work_lease_until");
+    String workAvailable = indexDefinition("idx_durable_work_available");
+    String workLease = indexDefinition("idx_durable_work_lease_until");
     String threadParent = indexDefinition("idx_harness_thread_parent");
     String threadSession = indexDefinition("idx_harness_thread_session");
     String stopRequest = indexDefinition("idx_harness_thread_command_stop_request");

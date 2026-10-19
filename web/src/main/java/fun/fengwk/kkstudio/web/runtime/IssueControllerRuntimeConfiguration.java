@@ -10,7 +10,7 @@ import fun.fengwk.kkstudio.platform.harness.configuration.HarnessRuntimeProperti
 import fun.fengwk.kkstudio.project.controller.IssueControllerDispatcher;
 import fun.fengwk.kkstudio.project.controller.IssueControllerProperties;
 import fun.fengwk.kkstudio.project.controller.IssueReconciler;
-import fun.fengwk.kkstudio.project.service.IssueWorkStore;
+import fun.fengwk.kkstudio.work.DurableWorkQueue;
 
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
@@ -64,14 +64,14 @@ public class IssueControllerRuntimeConfiguration {
 
   @Bean
   public IssueControllerDispatcher issueControllerDispatcher(
-      IssueWorkStore workStore,
+      DurableWorkQueue issueWorkQueue,
       IssueReconciler reconciler,
       IssueControllerProperties properties,
       @Qualifier("issueControllerDispatcherDrainExecutor") Executor drainExecutor,
       @Qualifier("issueControllerDispatcherWorkerExecutor") Executor workerExecutor,
       @Qualifier("issueControllerDispatcherPollScheduler") ScheduledExecutorService pollScheduler) {
     return new IssueControllerDispatcher(
-        workStore, reconciler, properties, drainExecutor, workerExecutor, pollScheduler);
+        issueWorkQueue, reconciler, properties, drainExecutor, workerExecutor, pollScheduler);
   }
 
   @Bean

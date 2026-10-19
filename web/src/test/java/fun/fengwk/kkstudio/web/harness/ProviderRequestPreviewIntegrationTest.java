@@ -669,7 +669,7 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
   }
 
   private boolean quiescent(UUID threadId) {
-    return count("harness_work") == 0
+    return count("durable_work") == 0
         && jdbc.queryForObject(
                 "select count(*) from harness_thread_command where thread_id = ?"
                     + " and applied_entry_id is null and cancelled_at is null",
@@ -787,7 +787,7 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
     state.put("harness_thread", count("harness_thread", "id", fixture.threadId()));
     state.put(
         "harness_thread_command", count("harness_thread_command", "thread_id", fixture.threadId()));
-    state.put("harness_work", count("harness_work"));
+    state.put("durable_work", count("durable_work"));
     state.put("session_blob_ref", count("session_blob_ref", "session_id", fixture.sessionId()));
     state.put("storage_blob", count("storage_blob"));
     state.put("storage_upload", count("storage_upload"));

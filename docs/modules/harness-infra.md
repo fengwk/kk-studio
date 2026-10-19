@@ -39,11 +39,11 @@ Tool siblings 按 assistantEntryId/callIndex、Work 按 type/UUID 排序。
 | `harness_thread_command` | 有序命令邮箱、请求哈希与 `applied_entry_id`（APPLIED 时指向应用的 Entry，未应用为 null）；CANCELLED 用 `stop_request_id` + `cancelled_at` 成对标记 |
 | `harness_model_invocation` | Model 请求规格、状态、attempt、流式 checkpoint、结果与错误 |
 | `harness_tool_invocation` | Tool 调用参数、绑定、审批记录、状态、副作用批与错误 |
-| `harness_work` | THREAD / MODEL / TOOL 调度邮箱、`wake_version` 与租约 |
+| `durable_work` | 全部后台调度共用的邮箱；Harness 只读写 THREAD / MODEL / TOOL 行 |
 | `harness_thread_join` | 一次委派的 join 凭据：源命令 `(child_thread_id, source_command_sequence)`、`terminal_entry_id` / `final_answer_entry_id` 冻结回执与 `delivery_command_sequence` |
 | `harness_thread_stop_receipt` | 一次 Stop 在每个受影响 Thread 上的持久回执：`stop_request_id`、`stopped_turn_end_entry_id`、`cancelled_command_count` 与 `cancelled_inputs`；集合身份为 `(root_thread_id, root_stop_request_id)` |
 
-数据库只做形状防御，语义由应用层负责：`(session_id, parent_entry_id)` 外键保证父子同 Session，部分唯一索引 `uk_harness_entry_single_root` 保证每个 Session 至多一个 ROOT；`harness_thread_command` 以 `(thread_id, sequence)` 为主键、`(thread_id, idempotency_key)` 唯一；`harness_model_invocation` 以 `(thread_id, turn_start_entry_id)` 唯一；`harness_tool_invocation` 以 `(assistant_entry_id, call_index)` 唯一，且非 `SUCCEEDED` 时 `effects` 必须为空批 `{"version": 1, "customEntries": []}`；`harness_work` 要求租约 token 与租约到期时刻同空同非空、且 `required_environment_id` 只允许出现在 `TOOL` 行。`harness_thread` 要求 `execution_control` 取 `RUNNABLE` / `STOPPED` 且 `input_through_sequence < next_command_sequence`；`harness_thread_command` 的 `applied_entry_id` 与 `cancelled_at` 互斥、CANCELLED 必须 `stop_request_id` 与 `cancelled_at` 成对；`harness_thread_join` 的 `final_answer_entry_id` 只在 `terminal_entry_id` 非空时可非空、`delivery_command_sequence` 非空必须已 matched 且父 Thread 非空；`harness_thread_stop_receipt` 以 `(thread_id, stop_request_id)` 为主键、集合身份为 `(root_thread_id, root_stop_request_id)`，`cancelled_inputs` 必须是 JSON array。所有时间列是 `timestamptz(3)` 毫秒精度，version 与业务 ID 完全由应用生成。
+数据库只做形状防御，语义由应用层负责：`(session_id, parent_entry_id)` 外键保证父子同 Session，部分唯一索引 `uk_harness_entry_single_root` 保证每个 Session 至多一个 ROOT；`harness_thread_command` 以 `(thread_id, sequence)` 为主键、`(thread_id, idempotency_key)` 唯一；`harness_model_invocation` 以 `(thread_id, turn_start_entry_id)` 唯一；`harness_tool_invocation` 以 `(assistant_entry_id, call_index)` 唯一，且非 `SUCCEEDED` 时 `effects` 必须为空批 `{"version": 1, "customEntries": []}`；`durable_work` 要求租约 token 与租约到期时刻同空同非空、且 `required_environment_id` 只允许出现在 `TOOL` 行。`harness_thread` 要求 `execution_control` 取 `RUNNABLE` / `STOPPED` 且 `input_through_sequence < next_command_sequence`；`harness_thread_command` 的 `applied_entry_id` 与 `cancelled_at` 互斥、CANCELLED 必须 `stop_request_id` 与 `cancelled_at` 成对；`harness_thread_join` 的 `final_answer_entry_id` 只在 `terminal_entry_id` 非空时可非空、`delivery_command_sequence` 非空必须已 matched 且父 Thread 非空；`harness_thread_stop_receipt` 以 `(thread_id, stop_request_id)` 为主键、集合身份为 `(root_thread_id, root_stop_request_id)`，`cancelled_inputs` 必须是 JSON array。所有时间列是 `timestamptz(3)` 毫秒精度，version 与业务 ID 完全由应用生成。
 
 YOLO 形状约束要求根为 `ENABLE/DISABLE` 且目标为空，子代理为 `FOLLOW` 且目标非空、
 不等于自身；目标有 Thread 外键。目标必须是真实执行根的语义由 Runtime 在树锁内复验。
@@ -57,7 +57,7 @@ YOLO 形状约束要求根为 `ENABLE/DISABLE` 且目标为空，子代理为 `F
 
 ## Work 的 claim / lease / wake
 
-`harness_work` 以 `(target_type, target_id)` 为主键，列含 `available_at`、`wake_version`、`lease_token`、`lease_until` 与 `required_environment_id`。
+`durable_work` 以 `(target_type, target_id)` 为主键，列含 `available_at`、`wake_version`、`lease_token`、`lease_until` 与 `required_environment_id`。同一张表还承载 Project 的 `ISSUE` 与 Canvas 的 `CANVAS_RUN` 行，它们由 [`DurableWorkQueue`](../../work/src/main/java/fun/fengwk/kkstudio/work/DurableWorkQueue.java) 读写；Harness 的每条语句都按 `target_type` 过滤。行变为可领取时在同一事务内向共享通道 `durable_work` 发送 payload 为 target type 的提示，组合根按类型只唤醒对应的 dispatcher。
 
 `requestWork` 必须在持有所属 Thread 锁的事务内调用，upsert 语义是纯函数式推进；一次 request 只表达「立即唤醒」，due 由数据库权威时间写入，调用方传入的 `now` 只做毫秒精度校验：
 
@@ -70,13 +70,13 @@ conflict: available_at = least(current, statement_timestamp())
 
 `rescheduleWork` 接收非负整毫秒 Duration。实现读取数据库当前时刻，在 Java 中计算 databaseNow.plus(delay) 并调用 Work.reschedule，再更新行；零表示立即。它清空租约、保留 wake_version：认领后未产生新 wake 时采用目标时刻，已有新 wake 时保留较早 available_at。数据库时间域决定相对延迟，调用方 now 只校验精度。
 
-环境亲和性一旦绑定即冻结：upsert 的更新条件为 `harness_work.required_environment_id is not distinct from excluded.required_environment_id or excluded.required_environment_id is null`，因此既有行绑定了 `required_environment_id` 时，后续传入不一致的非空环境 ID 会让 UPDATE 命中 0 行，实现层随即抛 `IllegalArgumentException` 拒绝，执行环境不会漂移。
+环境亲和性一旦绑定即冻结：upsert 的更新条件为 `durable_work.required_environment_id is not distinct from excluded.required_environment_id or excluded.required_environment_id is null`，因此既有行绑定了 `required_environment_id` 时，后续传入不一致的非空环境 ID 会让 UPDATE 命中 0 行，实现层随即抛 `IllegalArgumentException` 拒绝，执行环境不会漂移。
 
 `claimNextWork` 是独立短事务，用一条 `FOR UPDATE SKIP LOCKED` 语句选候选并原子签发新租约，筛选条件是 `target_type` 匹配、`available_at <= statement_timestamp()` 且 `lease_until is null or lease_until <= statement_timestamp()`，排序为 `available_at, target_id` 升序。claim 与 heartbeat/lease 续租是系统内仅有的两类只取单条 Work 行锁的调度事务；`claimNextWork` 额外要求它必须是该事务中的第一次 Work 锁获取，运行时的业务事务则一律先锁 owning Thread。
 
 环境路由围栏就嵌在这条 claim 之上：当 `required_environment_id` 为空时任何活跃 Dispatcher 节点都可认领；非空时用 `exists` 检查 `environment_connection` 中存在 `environment_id` 匹配、`owner_node_id` 等于当前 Dispatcher 的 `nodeInstanceId`、状态为 `READY` 且 `lease_until > statement_timestamp()` 的连接记录。断开、未就绪、归属他人或租约过期的环境一律不返回候选（fail closed），底层数据库故障则让整个 claim 事务回滚。这条路由围栏与 `FOR UPDATE SKIP LOCKED` 的行级并发控制、应用层 `lease_token` / `lease_until` 的所有权围栏分属三个层次，互不替代——路由回答「哪台机器该做」，行锁回答「谁先抢到」，租约回答「谁还在拥有」。
 
-围栏原语沿同一层次展开，且全部以数据库时钟为唯一权威时间域（JVM 传入的 `now` 只校验毫秒精度，不参与有效性比较）：`lockClaimedWork` 校验 token 与数据库一致且 `lease_until > statement_timestamp()`；`renewWork` 在持锁前提下把 `lease_until` 延展到「`statement_timestamp()` + 传入 `Duration`」，现有租约已覆盖目标时点则保持不变并返回 `false`，绝不缩短。事务实现的 `notifyWorkAvailable` 向 [`PostgresqlWorkChannel`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/postgresql/PostgresqlWorkChannel.java) 定义的 `harness_runtime_work` 通道执行 `pg_notify`：`requestWork`、保留新 wake 的 `completeWork` 与 `rescheduleWork` 都在各自事务内发通知，仅提交后投递。
+围栏原语沿同一层次展开，且全部以数据库时钟为唯一权威时间域（JVM 传入的 `now` 只校验毫秒精度，不参与有效性比较）：`lockClaimedWork` 校验 token 与数据库一致且 `lease_until > statement_timestamp()`；`renewWork` 在持锁前提下把 `lease_until` 延展到「`statement_timestamp()` + 传入 `Duration`」，现有租约已覆盖目标时点则保持不变并返回 `false`，绝不缩短。事务实现的 `notifyWorkAvailable` 向共享的 `durable_work` 通道执行 payload 为 target type 的 `pg_notify`：`requestWork`、保留新 wake 的 `completeWork` 与 `rescheduleWork` 都在各自事务内发通知，仅提交后投递。
 
 ## Dispatcher 生命周期
 
@@ -128,7 +128,7 @@ PostgreSQL `jsonb` 会按自身规则规范化极端量级的数字文本（例�
 | 包名 | 职责 | 边界 |
 | --- | --- | --- |
 | `infra.dispatch` | `HarnessWorkDispatcher` 与 `HarnessWorkDispatcherConfig`：Work 调度循环、类型轮转、有界 handoff、wake 合并与 stop | claim-only 短事务；不读业务状态、不解释 Processor 结果 |
-| `infra.postgresql` | `PostgresqlHarnessStore`、`PostgresqlHarnessTransaction`、`PostgresqlHarnessRows`、`PostgresqlWorkChannel`、`PostgresqlRealtimeEventSink` / `PostgresqlRealtimeEventSource` / `PostgresqlRealtimeChannel` / `RealtimeNotificationCodec` | 九表 durable 协议、树锁与锁序防御、poisoning、事务内 EntryPath 缓存、claim / lease / wake 与环境路由围栏、NOTIFY 编解码 |
+| `infra.postgresql` | `PostgresqlHarnessStore`、`PostgresqlHarnessTransaction`、`PostgresqlHarnessRows`、`PostgresqlRealtimeEventSink` / `PostgresqlRealtimeEventSource` / `PostgresqlRealtimeChannel` / `RealtimeNotificationCodec` | 九表 durable 协议、树锁与锁序防御、poisoning、事务内 EntryPath 缓存、claim / lease / wake 与环境路由围栏、NOTIFY 编解码 |
 | `infra.realtime` | `RealtimeEventSource` 实时事件订阅端口 | 只定义 live overlay 订阅与完成围栏；durable snapshot 是唯一恢复事实源 |
 
 ## 源码与测试

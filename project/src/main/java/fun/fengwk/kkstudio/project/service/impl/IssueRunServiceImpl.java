@@ -59,10 +59,10 @@ import fun.fengwk.kkstudio.project.repo.IssueRunRepository;
 import fun.fengwk.kkstudio.project.repo.IssueStageBudgetRepository;
 import fun.fengwk.kkstudio.project.repo.ProjectRepository;
 import fun.fengwk.kkstudio.project.service.IssueRunService;
-import fun.fengwk.kkstudio.project.service.IssueWorkStore;
 import fun.fengwk.kkstudio.project.service.impl.IssueActivityIdempotency.Identity;
 import fun.fengwk.kkstudio.project.turn.ProjectRunScope;
 import fun.fengwk.kkstudio.project.turn.ProjectRunScopeJsonCodec;
+import fun.fengwk.kkstudio.work.DurableWorkQueue;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -106,7 +106,7 @@ public class IssueRunServiceImpl implements IssueRunService {
   private final IssueStageBudgetRepository stageBudgetRepository;
   private final IssueAgentThreadRepository issueAgentThreadRepository;
   private final IssueActivityRepository issueActivityRepository;
-  private final IssueWorkStore issueWorkStore;
+  private final DurableWorkQueue issueWorkQueue;
   private final ProjectWorkflowJsonCodec workflowCodec;
   private final AgentBranchSettingsPort agentBranchSettingsPort;
   private final ObjectProvider<IssueThreadExecutionPort> threadExecutions;
@@ -273,7 +273,7 @@ public class IssueRunServiceImpl implements IssueRunService {
       throw new ProjectVersionConflictException(
           "issue", Long.toString(issue.getVersion()), Long.toString(issue.getVersion()));
     }
-    issueWorkStore.requestWork(issueId, Duration.ZERO);
+    issueWorkQueue.request(issueId, Duration.ZERO);
     return issueRunRepository.getById(run.getId());
   }
 

@@ -3,8 +3,8 @@ package fun.fengwk.kkstudio.project.controller;
 import lombok.extern.slf4j.Slf4j;
 
 import fun.fengwk.kkstudio.harness.common.concurrent.BoundedWorkDispatcher;
-import fun.fengwk.kkstudio.project.controller.IssueReconciler.IssueWorkClaim;
-import fun.fengwk.kkstudio.project.service.IssueWorkStore;
+import fun.fengwk.kkstudio.work.DurableWorkQueue;
+import fun.fengwk.kkstudio.work.WorkClaim;
 
 import java.util.Objects;
 import java.util.UUID;
@@ -15,34 +15,35 @@ import java.util.function.Function;
 /**
  * Issue Controller 的有界 Work 调度器。
  *
- * <p>职责边界：dispatcher 只负责 {@code project_issue_work} 的 claim、bounded handoff、合并 wake、periodic poll 与
- * stop 生命周期，绝不读取 Issue/Project 业务状态；业务状态由 {@link IssueReconciler} 在行锁与租约 fencing 保护下推进。
+ * <p>职责边界：dispatcher 只负责 {@code durable_work} 中 ISSUE 行的 claim、bounded handoff、合并 wake、periodic
+ * poll 与 stop 生命周期，绝不读取 Issue/Project 业务状态；业务状态由 {@link IssueReconciler} 在行锁与租约 fencing 保护下推进。
  *
- * <p>claim 是短的 claim-only 写；归还与延迟一律通过 {@code rescheduleWork} 的 lease 围栏完成，因此 worker 拒绝、reconciler
- * 失败与进程重启都只留 lease 自愈，不会吞掉新唤醒。合并 wake 的单 drain、bounded handoff、容量计数与 stop 生命周期由共享的 {@link
- * BoundedWorkDispatcher} 提供；本类只注入 Issue 专有的 claim、reconciler handoff 与 lease 围栏归还。
+ * <p>claim 是短的 claim-only 写；归还与延迟一律通过 lease 围栏的重排完成，因此 worker 拒绝、reconciler 失败与进程重启都只留 lease
+ * 自愈，不会吞掉新唤醒。合并 wake 的单 drain、bounded handoff、容量计数与 stop 生命周期由共享的 {@link BoundedWorkDispatcher}
+ * 提供；本类只注入 Issue 专有的 claim、reconciler handoff 与 lease 围栏归还。
  */
 @Slf4j
 public final class IssueControllerDispatcher implements AutoCloseable {
 
-  public static final String CHANNEL = "project_issue_work_due";
+  /** Issue Controller 在 {@code durable_work} 上的 target type。 */
+  public static final String TARGET_TYPE = "ISSUE";
 
   private static final String NAME = "issue controller dispatcher";
 
-  private final IssueWorkStore workStore;
-  private final Function<IssueWorkClaim, IssueReconcileOutcome> reconciler;
+  private final DurableWorkQueue workQueue;
+  private final Function<WorkClaim, IssueReconcileOutcome> reconciler;
   private final IssueControllerProperties properties;
-  private final BoundedWorkDispatcher<IssueWorkClaim> dispatcher;
+  private final BoundedWorkDispatcher<WorkClaim> dispatcher;
 
   public IssueControllerDispatcher(
-      IssueWorkStore workStore,
+      DurableWorkQueue workQueue,
       IssueReconciler reconciler,
       IssueControllerProperties properties,
       Executor drainExecutor,
       Executor workerExecutor,
       ScheduledExecutorService pollScheduler) {
     this(
-        workStore,
+        workQueue,
         Objects.requireNonNull(reconciler, "reconciler")::reconcile,
         properties,
         drainExecutor,
@@ -51,13 +52,13 @@ public final class IssueControllerDispatcher implements AutoCloseable {
   }
 
   IssueControllerDispatcher(
-      IssueWorkStore workStore,
-      Function<IssueWorkClaim, IssueReconcileOutcome> reconciler,
+      DurableWorkQueue workQueue,
+      Function<WorkClaim, IssueReconcileOutcome> reconciler,
       IssueControllerProperties properties,
       Executor drainExecutor,
       Executor workerExecutor,
       ScheduledExecutorService pollScheduler) {
-    this.workStore = Objects.requireNonNull(workStore, "workStore");
+    this.workQueue = Objects.requireNonNull(workQueue, "workQueue");
     this.reconciler = Objects.requireNonNull(reconciler, "reconciler");
     this.properties = Objects.requireNonNull(properties, "properties");
     this.dispatcher =
@@ -100,51 +101,43 @@ public final class IssueControllerDispatcher implements AutoCloseable {
     return dispatcher.inFlightCount();
   }
 
-  private IssueWorkClaim claimNext() {
+  private WorkClaim claimNext() {
     String token = UUID.randomUUID().toString();
-    return workStore
-        .claimNext(token, properties.getLeaseDuration())
-        .map(
-            work ->
-                new IssueWorkClaim(
-                    work.getIssueId(), token, work.getLeaseUntil(), work.getWakeVersion()))
-        .orElse(null);
+    return workQueue.claimNext(token, properties.getLeaseDuration()).orElse(null);
   }
 
-  private void runHandoff(IssueWorkClaim claim) {
+  private void runHandoff(WorkClaim claim) {
     try {
       reconciler.apply(claim);
     } catch (RuntimeException error) {
       log.error(
           "Reconciler failed for issueId={}; failure={}",
-          claim.issueId(),
+          claim.targetId(),
           error.getClass().getName());
       tryRescheduleOnFailure(claim);
     }
   }
 
   /** 归还 claim：延后 rejectionDelay 并交还 lease；归还失败仅留 lease 自愈。 */
-  private void returnClaim(IssueWorkClaim claim) {
+  private void returnClaim(WorkClaim claim) {
     try {
-      workStore.rescheduleWork(
-          claim.issueId(), claim.leaseToken(), claim.wakeVersion(), properties.getRejectionDelay());
+      workQueue.reschedule(claim, properties.getRejectionDelay());
     } catch (RuntimeException error) {
       log.warn(
           "Failed to return claim for issueId={}; failure={}",
-          claim.issueId(),
+          claim.targetId(),
           error.getClass().getName());
     }
   }
 
   /** reconciler 失败重试：延后 retryDelay 后重检；失败则留 lease 过期。 */
-  private void tryRescheduleOnFailure(IssueWorkClaim claim) {
+  private void tryRescheduleOnFailure(WorkClaim claim) {
     try {
-      workStore.rescheduleWork(
-          claim.issueId(), claim.leaseToken(), claim.wakeVersion(), properties.getRetryDelay());
+      workQueue.reschedule(claim, properties.getRetryDelay());
     } catch (RuntimeException error) {
       log.warn(
           "Failed to reschedule work after reconciler failure for issueId={}; failure={}",
-          claim.issueId(),
+          claim.targetId(),
           error.getClass().getName());
     }
   }

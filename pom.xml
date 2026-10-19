@@ -11,6 +11,7 @@
     <modules>
         <module>share</module>
         <module>schema</module>
+        <module>work</module>
         <module>canvas</module>
         <module>project</module>
         <module>harness</module>
@@ -198,6 +199,11 @@
             <dependency>
                 <groupId>fun.fengwk.kk-studio</groupId>
                 <artifactId>kk-studio-schema</artifactId>
+                <version>${kk-studio.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>fun.fengwk.kk-studio</groupId>
+                <artifactId>kk-studio-work</artifactId>
                 <version>${kk-studio.version}</version>
             </dependency>
             <dependency>

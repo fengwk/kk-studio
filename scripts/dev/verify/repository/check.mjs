@@ -58,6 +58,7 @@ const moduleDocuments = [
   'share.md',
   'thread-control-and-presentation.md',
   'web.md',
+  'work.md',
 ]
 
 const documentPaths = [
@@ -455,6 +456,7 @@ function checkRepositoryStructure() {
   const expectedRootModules = [
     'share',
     'schema',
+    'work',
     'canvas',
     'project',
     'harness',

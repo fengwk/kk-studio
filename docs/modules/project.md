@@ -99,19 +99,18 @@ root Join 冻结的 `terminalEntryId` / `finalAnswerEntryId`（`COMPLETED` / `ER
 
 [`ProjectServiceImpl`](../../project/src/main/java/fun/fengwk/kkstudio/project/service/impl/ProjectServiceImpl.java)、
 [`IssueServiceImpl`](../../project/src/main/java/fun/fengwk/kkstudio/project/service/impl/IssueServiceImpl.java)、
-[`IssueRunServiceImpl`](../../project/src/main/java/fun/fengwk/kkstudio/project/service/impl/IssueRunServiceImpl.java)、
-[`IssueEvidenceServiceImpl`](../../project/src/main/java/fun/fengwk/kkstudio/project/service/impl/IssueEvidenceServiceImpl.java) 与
-[`IssueWorkStoreImpl`](../../project/src/main/java/fun/fengwk/kkstudio/project/service/impl/IssueWorkStoreImpl.java)
+[`IssueRunServiceImpl`](../../project/src/main/java/fun/fengwk/kkstudio/project/service/impl/IssueRunServiceImpl.java)
+与 [`IssueEvidenceServiceImpl`](../../project/src/main/java/fun/fengwk/kkstudio/project/service/impl/IssueEvidenceServiceImpl.java)
 是写用例的事务边界，`IssueReconciler.reconcile` 在 controller 内以单事务推进一个有界动作；
 `repo/impl` 的 PostgreSQL 实现只做单表读写与 CAS 行数判定。
 写入或删除 Project、Issue、Run、Activity、阶段预算、公开证据与 Agent Thread 绑定时，仓库在同一事务内
 用 `pg_notify('project_issue_changed', projectId)` 发送快照失效提示；PostgreSQL 提交后投递、回滚不投递，
 同一事务内相同 payload 合并。删除 Issue 前读取其 Project id；通知不依赖 HTTP 入口，调度与 worker
-写入也会覆盖。Work 租约/唤醒只影响内部调度，走独立通道 `project_issue_work_due`，不产生项目快照失效信号。
+写入也会覆盖。Work 租约/唤醒只影响内部调度，走共享的 `durable_work` 通道，不产生项目快照失效信号。
 幂等事实落在 `project_issue_activity`（`idempotencyKey` 精确重放；`body` 的非空性按 `kind` 固定：
 COMMENT/INSTRUCTION 必须非空白且不超过 1 MiB，RUN、SPEC_CHANGE、STATE_CHANGE、CONTROL 必须为空）；
-Stage 预算、Work 邮箱与 Evidence 分别落在 `project_issue_stage_budget`、
-`project_issue_work`、`project_issue_evidence`。
+Stage 预算与 Evidence 分别落在 `project_issue_stage_budget`、`project_issue_evidence`；
+Work 邮箱是共享 `durable_work` 表中 target type 为 `ISSUE` 的行。
 
 [`IssueEvidenceServiceImpl`](../../project/src/main/java/fun/fengwk/kkstudio/project/service/impl/IssueEvidenceServiceImpl.java)
 管 Issue **自有的**公开证据：`project_issue_evidence` 一行是 Issue 持有的一个已发布 Blob 引用，
@@ -127,7 +126,7 @@ Issue 与 Project 行用 `version` CAS 删除并检查受影响行数。
 ## REST 调度
 
 [`controller`](../../project/src/main/java/fun/fengwk/kkstudio/project/controller/package-info.java)
-承载 Issue 的部署级配置与确定性推进：`IssueControllerDispatcher` 只做 `project_issue_work` 的
+承载 Issue 的部署级配置与确定性推进：`IssueControllerDispatcher` 只做 `durable_work` 中 `ISSUE` 行的
 claim、bounded handoff 与 poll 生命周期，合并 wake 的单 drain、容量计数、stop 收尾与 executor
 拒绝/失败分型复用 [`harness/common`](../../harness/common/) 的
 [`BoundedWorkDispatcher`](../../harness/common/src/main/java/fun/fengwk/kkstudio/harness/common/concurrent/BoundedWorkDispatcher.java)，
@@ -135,14 +134,11 @@ claim、bounded handoff 与 poll 生命周期，合并 wake 的单 drain、容�
 在固定锁序下一次推进一个有界动作。调度只依赖数据库中的 work 行与 lease token，通知与 poll
 提供发现入口；租约参数见 [Platform](platform.md) 的配置表。
 
-Work 请求、claim、续租、完成与重排统一以数据库 `statement_timestamp()` 为权威时间，
-截断到毫秒；调用方传相对 `Duration`，Dispatcher 不持有 Clock。
-请求在冲突时用 SQL least 保留较早 due_at 并增加 wake_version。
-重排同时校验 lease token 与有效租约、清空租约：wake_version 未变时采用数据库当前时间
-加延迟，不保留本次 claim 的旧 past-due；有新 wake 时才取现有 due_at 与目标时刻的较早值。
-实现见 [`IssueControllerDispatcher`](../../project/src/main/java/fun/fengwk/kkstudio/project/controller/IssueControllerDispatcher.java)、
-[`IssueWorkStoreImpl`](../../project/src/main/java/fun/fengwk/kkstudio/project/service/impl/IssueWorkStoreImpl.java)
-及 [`IssueWorkJdbcStore`](../../project/src/main/java/fun/fengwk/kkstudio/project/repo/impl/store/IssueWorkJdbcStore.java)。
+Work 的请求、claim、续租、完成与重排由共享的
+[`DurableWorkQueue`](../../work/src/main/java/fun/fengwk/kkstudio/work/DurableWorkQueue.java)
+完成，Project 只持有 target type 为 `ISSUE` 的实例 `issueWorkQueue`：时间一律取数据库
+`statement_timestamp()` 并截断到毫秒，调用方传相对 `Duration`，Dispatcher 不持有 Clock；请求合并较早 due
+并递增 wake_version，完成与重排以 lease token 围栏，处理期间到达的新 wake 不会被吞掉。
 Harness 的调度时间域见 [Harness Infra](harness-infra.md#work-的-claim--lease--wake)。
 
 ## 错误映射

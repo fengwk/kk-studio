@@ -343,7 +343,7 @@ public class EnvironmentServiceImpl implements EnvironmentService {
   private boolean hasActiveWork(EnvironmentId id) {
     Integer count =
         jdbcTemplate.queryForObject(
-            "select count(1) from harness_work where required_environment_id = ?",
+            "select count(1) from durable_work where required_environment_id = ?",
             Integer.class,
             id.value());
     return count != null && count > 0;

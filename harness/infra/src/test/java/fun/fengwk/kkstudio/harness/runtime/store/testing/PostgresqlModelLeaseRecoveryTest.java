@@ -360,7 +360,7 @@ class PostgresqlModelLeaseRecoveryTest {
         1,
         jdbc.update(
             """
-            update harness_work
+            update durable_work
             set available_at = statement_timestamp() - interval '1 second'
             where target_type = ? and target_id = ?
             """,
@@ -374,7 +374,7 @@ class PostgresqlModelLeaseRecoveryTest {
         1,
         jdbc.update(
             """
-            update harness_work
+            update durable_work
             set lease_until = statement_timestamp() - interval '1 second'
             where target_type = ? and target_id = ?
             """,

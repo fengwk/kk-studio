@@ -100,7 +100,7 @@ import java.util.stream.Collectors;
  *
  * <p>测试意图：把只有真实事务、真实 advisory 锁、真实 work 调度与真实 Processor 才能证明的事情钉死在集成层。本类完全替换了旧的 {@code
  * SubagentTaskDelegationPostgresIntegrationTest}：不再有 task 表、结算扫描器或 {@code settleOnce} 轮询——推进只由
- * durable work 行驱动（{@link HarnessWorkDispatcher} 从 {@code harness_work} claim 并交给真实 Processor），join
+ * durable work 行驱动（{@link HarnessWorkDispatcher} 从 {@code durable_work} claim 并交给真实 Processor），join
  * 的首次 idle 匹配与父消息交付都在 Processor 的事务里完成。
  *
  * <ul>

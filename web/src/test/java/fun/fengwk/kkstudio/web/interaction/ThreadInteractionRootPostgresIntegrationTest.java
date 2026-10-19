@@ -817,7 +817,7 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
   private void forceFutureAvailable(UUID invocationId) {
     jdbc.update(
         """
-        update harness_work
+        update durable_work
         set available_at = statement_timestamp() + interval '1 hour'
         where target_type = 'TOOL' and target_id = ?
         """,

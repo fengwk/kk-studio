@@ -43,6 +43,7 @@ class ProjectArchitectureTest {
           "tools.jackson.",
           "com.fasterxml.jackson.annotation.",
           "fun.fengwk.kkstudio.harness.runtime.",
+          "fun.fengwk.kkstudio.work.",
           "lombok.",
           "org.springframework.");
 
@@ -51,6 +52,7 @@ class ProjectArchitectureTest {
       List.of(
           "fun.fengwk.kk-studio:kk-studio-harness-common",
           "fun.fengwk.kk-studio:kk-studio-harness-runtime",
+          "fun.fengwk.kk-studio:kk-studio-work",
           "org.springframework.boot:spring-boot-starter-jdbc",
           "tools.jackson.core:jackson-databind");
 
