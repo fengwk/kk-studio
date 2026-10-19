@@ -692,6 +692,100 @@ class CompactionPlannerTest {
     assertEquals(id(4L), preparation.cutEntryId());
   }
 
+  @Test
+  void compactionTurnAssistantAfterLatestToolBatchDoesNotCountAsConsumption() {
+    PathBuilder path = new PathBuilder();
+    path.root();
+    path.turn("turn 1");
+    path.assistant("reply 1");
+    path.closeTurn();
+
+    path.turn("turn 2");
+    path.assistantWithTool("calling edit", "call-edit", "edit", "edit");
+    path.toolResult(
+        id(8L),
+        "call-edit",
+        "edit",
+        "edit",
+        List.of(new TextMessageContent("ok")),
+        "{\"editReview\":{\"path\":\"src/App.java\",\"diff\":\"@@ -1 +1 @@\\n-old\\n+new\",\"sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\"}}");
+    path.closeTurn();
+
+    // 随后出现一个 STOPPED COMPACTION turn，内部包含 ASSISTANT 消息 (AssistantAbortedPayload)
+    path.stoppedCompaction("stopped compaction assistant text");
+
+    CompactionPreparation preparation = plan(path, 20L).orElseThrow();
+
+    // 压缩内部的 assistant 不算普通消费，最新的 tool batch 仍受保护，cut 必须 <= 调用它的 assistant (id 8)
+    assertEquals(id(8L), preparation.cutEntryId());
+  }
+
+  @Test
+  void nextAssistantWithToolCallConsumesPreviousBatchAndProtectsNextBatch() {
+    PathBuilder path = new PathBuilder();
+    path.root();
+    path.turn("task 1");
+    path.assistantWithTool("calling edit 1", "call-1", "edit", "edit");
+    path.toolResult(
+        id(4L),
+        "call-1",
+        "edit",
+        "edit",
+        List.of(new TextMessageContent("ok 1")),
+        "{\"editReview\":{\"path\":\"src/A.java\",\"diff\":\"@@ -1 +1 @@\\n-1\\n+1b\",\"sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\"}}");
+    path.closeTurn();
+
+    path.turn("task 2");
+    // assistant 2 携带了新的 tool call，它消费了 batch 1，同时发起了 batch 2
+    path.assistantWithTool("calling edit 2", "call-2", "edit", "edit");
+    path.toolResult(
+        id(9L),
+        "call-2",
+        "edit",
+        "edit",
+        List.of(new TextMessageContent("ok 2")),
+        "{\"editReview\":{\"path\":\"src/B.java\",\"diff\":\"@@ -1 +1 @@\\n-2\\n+2b\",\"sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\"}}");
+    path.closeTurn();
+
+    CompactionPreparation preparation = plan(path, 50L).orElseThrow();
+
+    // batch 1 已被 assistant 2 消费，因此 cut 可以推移到 assistant 2 (id 9)，且受限于未消费的 batch 2
+    assertEquals(id(9L), preparation.cutEntryId());
+    List<AgentMessage> summarized = preparation.messagesToSummarize();
+    assertTrue(summarized.stream().anyMatch(m -> m.role() == AgentMessageRole.TOOL));
+  }
+
+  @Test
+  void unconsumedLargeDiffBatchRetainedInRecentTailAndNotSummarized() {
+    PathBuilder path = new PathBuilder();
+    path.root();
+    path.turn("turn 1");
+    path.assistant("reply 1");
+    path.closeTurn();
+
+    path.turn("turn 2");
+    path.assistantWithTool("calling edit", "call-edit", "edit", "edit");
+    // 巨大 diff（占大量 token）
+    String hugeDiff = "+line\\n".repeat(4000);
+    path.toolResult(
+        id(8L),
+        "call-edit",
+        "edit",
+        "edit",
+        List.of(new TextMessageContent("ok")),
+        "{\"editReview\":{\"path\":\"src/Big.java\",\"diff\":\""
+            + hugeDiff
+            + "\",\"sha256\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\"}}");
+    path.closeTurn();
+
+    // 即使窗口很小，累计 token 迅速越过 effectiveKeep，cut 也绝不能越过 calling assistant
+    CompactionPreparation preparation = plan(path, 20L).orElseThrow();
+    assertEquals(id(8L), preparation.cutEntryId());
+    // 摘要消息列表中绝不包含该巨大 diff 工具结果
+    List<AgentMessage> summarized = preparation.messagesToSummarize();
+    assertFalse(summarized.stream().anyMatch(m -> m.role() == AgentMessageRole.TOOL));
+  }
+
   private static PathBuilder closedTurnPath() {
     PathBuilder path = new PathBuilder();
     path.root();

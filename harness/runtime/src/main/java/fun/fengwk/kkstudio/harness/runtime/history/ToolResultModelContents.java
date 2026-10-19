@@ -38,11 +38,10 @@ public final class ToolResultModelContents {
       return result.contents();
     }
     JsonNode detailsNode = JsonObjects.parseObject(result.detailsJson(), "detailsJson");
-    JsonNode reviewNode = detailsNode.get(EDIT_REVIEW_FIELD);
-    if (reviewNode == null || reviewNode.isNull()) {
+    if (!detailsNode.has(EDIT_REVIEW_FIELD)) {
       return result.contents();
     }
-    ToolEditReview review = REVIEW_CODEC.decodeNode(reviewNode);
+    ToolEditReview review = REVIEW_CODEC.decodeNode(detailsNode.get(EDIT_REVIEW_FIELD));
     List<AgentMessageContent> derived = new ArrayList<>(result.contents().size() + 1);
     derived.addAll(result.contents());
     derived.add(
