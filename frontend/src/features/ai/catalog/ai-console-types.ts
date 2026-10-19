@@ -47,6 +47,23 @@ export interface ModelPricingDraft {
   cacheWritePerMillionTokens: string
   cacheWriteLongPerMillionTokens: string
   reasoningPerMillionTokens: string
+  rules: PricingRuleDraft[]
+}
+
+/** 条件价格草稿；key 只用于列表渲染，不进入 wire。 */
+export interface PricingRuleDraft {
+  key: string
+  timeWindowEnabled: boolean
+  timeZone: string
+  start: string
+  end: string
+  minContextTokens: string
+  inputPerMillionTokens: string
+  outputPerMillionTokens: string
+  cacheReadPerMillionTokens: string
+  cacheWritePerMillionTokens: string
+  cacheWriteLongPerMillionTokens: string
+  reasoningPerMillionTokens: string
 }
 
 /** model 资源的表单草稿。输入保持字符串类型以获得可预测的编辑体验。 */

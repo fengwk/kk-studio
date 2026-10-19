@@ -2171,7 +2171,8 @@ class DatabaseTurnResolverTest {
         BigDecimal.ZERO,
         BigDecimal.ZERO,
         BigDecimal.ZERO,
-        BigDecimal.ZERO);
+        BigDecimal.ZERO,
+        List.of());
   }
 
   @Test

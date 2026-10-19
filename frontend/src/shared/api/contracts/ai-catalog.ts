@@ -70,6 +70,27 @@ export interface AgentModelPricingDTO {
   cacheWritePerMillionTokens: number | string
   cacheWriteLongPerMillionTokens: number | string
   reasoningPerMillionTokens: number | string
+  /** 按顺序匹配的条件价格（分时段、长上下文档位）；第一条满足的规则替换上述单价。 */
+  rules?: AgentModelPricingRuleDTO[] | null
+}
+
+/** 每天重复的价格时段：timeZone 本地时间 [start, end)，end 早于 start 表示跨越午夜。 */
+export interface AgentModelPricingWindowDTO {
+  timeZone: string
+  start: string
+  end: string
+}
+
+/** 条件价格：时段与上下文门槛至少一项，全部满足时生效。 */
+export interface AgentModelPricingRuleDTO {
+  timeWindow: AgentModelPricingWindowDTO | null
+  minContextTokens: number | null
+  inputPerMillionTokens: number | string
+  outputPerMillionTokens: number | string
+  cacheReadPerMillionTokens: number | string
+  cacheWritePerMillionTokens: number | string
+  cacheWriteLongPerMillionTokens: number | string
+  reasoningPerMillionTokens: number | string
 }
 
 /** Variant 表达 reasoning effort 与厂商原生协议请求选项；`off` 为显式关闭，缺省表示协议默认。 */

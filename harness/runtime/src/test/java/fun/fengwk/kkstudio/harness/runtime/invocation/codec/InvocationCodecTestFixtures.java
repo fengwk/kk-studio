@@ -143,6 +143,7 @@ final class InvocationCodecTestFixtures {
         BigDecimal.ZERO,
         BigDecimal.ZERO,
         BigDecimal.ZERO,
-        BigDecimal.ZERO);
+        BigDecimal.ZERO,
+        List.of());
   }
 }

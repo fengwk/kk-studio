@@ -1,11 +1,13 @@
 import type {
   AgentModelInputModality,
 } from '@/shared/api/contracts/ai-catalog'
-import type { ModelDraft, ModelPricingDraft, VariantDraft } from '@/features/ai/catalog/ai-console-types'
+import type { ModelDraft, VariantDraft } from '@/features/ai/catalog/ai-console-types'
 import { variantOptionsFromDraft } from '@/features/ai/catalog/ai-draft-normalizers'
 import { sanitizeDecimalInput } from '@/shared/lib/numeric-input'
 import type { ResourceFieldKey } from '@/features/ai/catalog/ai-resource-form-validation'
 import { VariantListEditor } from '@/features/ai/catalog/AiVariantListEditor'
+import { PricingRuleEditor } from '@/features/ai/catalog/AiPricingRuleEditor'
+import { PRICING_UNIT_FIELDS, type PriceField } from '@/features/ai/catalog/ai-pricing-fields'
 import { Checkbox } from '@/shared/ui/controls/Checkbox'
 import { NumberInput } from '@/shared/ui/controls/NumberInput'
 import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
@@ -20,19 +22,6 @@ const AGENT_MODEL_INPUT_MODALITIES: AgentModelInputModality[] = [
   'AUDIO',
   'VIDEO',
   'DOCUMENT',
-]
-
-/** 用户可编辑的每百万 token 价格；币种 / 档位元数据由 wire 契约固定。 */
-const PRICING_UNIT_FIELDS: ReadonlyArray<{
-  field: keyof ModelPricingDraft
-  labelKey: string
-}> = [
-  { field: 'inputPerMillionTokens', labelKey: 'ai.catalog.form.inputPrice' },
-  { field: 'outputPerMillionTokens', labelKey: 'ai.catalog.form.outputPrice' },
-  { field: 'cacheReadPerMillionTokens', labelKey: 'ai.catalog.form.cacheReadPrice' },
-  { field: 'cacheWritePerMillionTokens', labelKey: 'ai.catalog.form.cacheWritePrice' },
-  { field: 'cacheWriteLongPerMillionTokens', labelKey: 'ai.catalog.form.longCacheWritePrice' },
-  { field: 'reasoningPerMillionTokens', labelKey: 'ai.catalog.form.reasoningPrice' },
 ]
 
 export function ModelForm({
@@ -93,7 +82,7 @@ export function ModelForm({
     onChange({ ...draft, reasoning: enabled })
   }
 
-  function updatePricing(field: keyof ModelPricingDraft, value: string) {
+  function updatePricing(field: PriceField, value: string) {
     onChange({
       ...draft,
       pricing: {
@@ -279,6 +268,10 @@ export function ModelForm({
             )
           })}
         </div>
+        <PricingRuleEditor
+          rules={draft.pricing.rules}
+          onChange={(rules) => onChange({ ...draft, pricing: { ...draft.pricing, rules } })}
+        />
         {fieldErrors.pricing ? <span className="field-error">{fieldErrors.pricing}</span> : null}
       </section>
 

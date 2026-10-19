@@ -13,6 +13,8 @@ import tools.jackson.databind.type.LogicalType;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelPricingRule;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelPricingWindow;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.ProviderProtocolOptions;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelAbilitiesDTO;
@@ -20,14 +22,21 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelInputModality;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelLimitDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingRuleDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingWindowDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelVariantDTO;
 
 import java.math.BigDecimal;
+import java.time.DateTimeException;
+import java.time.LocalTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.regex.Pattern;
+import java.util.stream.IntStream;
 
 /**
  * Agent model 配置的唯一类型化 codec/parser。
@@ -44,6 +53,10 @@ import java.util.Set;
  */
 @Component
 public final class AgentModelRuntimeConfigParser {
+
+  private static final int MAX_PRICING_RULES = 16;
+
+  private static final Pattern CLOCK_TIME = Pattern.compile("([01][0-9]|2[0-3]):[0-5][0-9]");
 
   private final ObjectMapper objectMapper;
   private final ObjectReader configReader;
@@ -259,6 +272,79 @@ public final class AgentModelRuntimeConfigParser {
         pricing.getCacheWriteLongPerMillionTokens(), path + ".cacheWriteLongPerMillionTokens");
     requireNonNegativeBigDecimal(
         pricing.getReasoningPerMillionTokens(), path + ".reasoningPerMillionTokens");
+    List<AgentModelPricingRuleDTO> rules = pricing.getRules();
+    if (rules == null) {
+      return;
+    }
+    if (rules.size() > MAX_PRICING_RULES) {
+      throw invalid(path + ".rules must not exceed " + MAX_PRICING_RULES + " entries");
+    }
+    for (int index = 0; index < rules.size(); index++) {
+      toPricingRule(rules.get(index), path + ".rules[" + index + "]");
+    }
+  }
+
+  /** 校验并转换一条条件价格；时段与上下文门槛至少一项，六项单价都必填。 */
+  private static ModelPricingRule toPricingRule(AgentModelPricingRuleDTO rule, String path) {
+    if (rule == null) {
+      throw invalid(path + " must not be null");
+    }
+    ModelPricingWindow window = null;
+    AgentModelPricingWindowDTO timeWindow = rule.getTimeWindow();
+    if (timeWindow != null) {
+      ZoneId zone;
+      try {
+        zone = ZoneId.of(requireText(timeWindow.getTimeZone(), path + ".timeWindow.timeZone"));
+      } catch (DateTimeException error) {
+        throw invalid(path + ".timeWindow.timeZone must be an IANA time zone", error);
+      }
+      LocalTime start = clockTime(timeWindow.getStart(), path + ".timeWindow.start");
+      LocalTime end = clockTime(timeWindow.getEnd(), path + ".timeWindow.end");
+      if (start.equals(end)) {
+        throw invalid(path + ".timeWindow start and end must differ");
+      }
+      window = new ModelPricingWindow(zone, start, end);
+    }
+    if (window == null && rule.getMinContextTokens() == null) {
+      throw invalid(path + " needs a timeWindow or minContextTokens");
+    }
+    if (rule.getMinContextTokens() != null && rule.getMinContextTokens() <= 0) {
+      throw invalid(path + ".minContextTokens must be positive");
+    }
+    requireNonNegativeBigDecimal(rule.getInputPerMillionTokens(), path + ".inputPerMillionTokens");
+    requireNonNegativeBigDecimal(
+        rule.getOutputPerMillionTokens(), path + ".outputPerMillionTokens");
+    requireNonNegativeBigDecimal(
+        rule.getCacheReadPerMillionTokens(), path + ".cacheReadPerMillionTokens");
+    requireNonNegativeBigDecimal(
+        rule.getCacheWritePerMillionTokens(), path + ".cacheWritePerMillionTokens");
+    requireNonNegativeBigDecimal(
+        rule.getCacheWriteLongPerMillionTokens(), path + ".cacheWriteLongPerMillionTokens");
+    requireNonNegativeBigDecimal(
+        rule.getReasoningPerMillionTokens(), path + ".reasoningPerMillionTokens");
+    return new ModelPricingRule(
+        window,
+        rule.getMinContextTokens(),
+        rule.getInputPerMillionTokens(),
+        rule.getOutputPerMillionTokens(),
+        rule.getCacheReadPerMillionTokens(),
+        rule.getCacheWritePerMillionTokens(),
+        rule.getCacheWriteLongPerMillionTokens(),
+        rule.getReasoningPerMillionTokens());
+  }
+
+  private static String requireText(String value, String path) {
+    if (value == null || value.isBlank()) {
+      throw invalid(path + " is required");
+    }
+    return value;
+  }
+
+  private static LocalTime clockTime(String value, String path) {
+    if (value == null || !CLOCK_TIME.matcher(value).matches()) {
+      throw invalid(path + " must be HH:mm");
+    }
+    return LocalTime.parse(value);
   }
 
   private void validateReasoningEffort(String reasoningEffort, String path) {
@@ -367,7 +453,15 @@ public final class AgentModelRuntimeConfigParser {
           pricing.getCacheReadPerMillionTokens(),
           pricing.getCacheWritePerMillionTokens(),
           pricing.getCacheWriteLongPerMillionTokens(),
-          pricing.getReasoningPerMillionTokens());
+          pricing.getReasoningPerMillionTokens(),
+          pricing.getRules() == null
+              ? List.of()
+              : IntStream.range(0, pricing.getRules().size())
+                  .mapToObj(
+                      index ->
+                          toPricingRule(
+                              pricing.getRules().get(index), "config.pricing.rules[" + index + "]"))
+                  .toList());
     } catch (IllegalArgumentException error) {
       throw invalid("config.pricing is invalid: " + error.getMessage(), error);
     }

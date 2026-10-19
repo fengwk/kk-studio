@@ -75,7 +75,8 @@ Agent 被其它 Agent 的 subagents、插件普通配置或未归档 Project 的
 Provider credential 在显式写入口接收，常规响应给出安全投影；配置同步导出显式包含原值。运行时类型取自
 [`ProviderType`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderType.java)：
 `openai`、`openai_responses`、`anthropic`、`google`，按精确 wire value 解析。
-Model 配置保存 limit、abilities、variants、pricing 和 default variant。
+Model 配置保存 limit、abilities、variants、pricing 和 default variant。pricing 可带最多 16 条按顺序匹配的条件价格
+`rules`：每条限定每天的时段（IANA 时区下 `[start, end)`，可跨越午夜）和/或最小上下文 token，并给出完整的六项单价。
 Agent 配置保存工具名、`SkillRef(packageName, name)`、subagents 与 `inheritParentEnvironment`
 （默认 true）；工具候选和 Skill 引用在写入时校验。
 
@@ -166,7 +167,7 @@ requirements 复验目录；有效超时仅经 `Tool.resolveTimeout` 解析一�
 历史入口按该输出记录的显式时间重建普通模型输出；父 COMPACTION 输出以 `PREVIEW_UNSUPPORTED` 拒绝（其真实请求属于压缩子 Thread），结果不等于原始发送字节。
 入口、`kind` 与冲突契约见 [Web](web.md)。
 
-用量与费用只在读取时投影：durable 只保存 ASSISTANT `MESSAGE` 与 COMPACTION 结果的真实 `assistantMetadata`（`stopReason` / `usage` / 可选 `decodeDurationMillis`），绝不持久化金额。`UsageCostProjectionService` 沿 Entry 父链取最近一次调用的 `ModelSelection`（压缩用 `TURN_START.compaction().executionModel`，否则该 Turn 的 branch settings，未进入 Turn 回落 ROOT），按当前 catalog pricing 用纯 `BigDecimal` 现算并输出精确十进制字符串 `amount`；模型已删除则费用缺席，定义损坏则抛错，绝不伪装成 0。同一投影内每个出现过的模型至多查一次 catalog。
+用量与费用只在读取时投影：durable 只保存 ASSISTANT `MESSAGE` 与 COMPACTION 结果的真实 `assistantMetadata`（`stopReason` / `usage` / 可选 `decodeDurationMillis`），绝不持久化金额。`UsageCostProjectionService` 沿 Entry 父链取最近一次调用的 `ModelSelection`（压缩用 `TURN_START.compaction().executionModel`，模型回退的 Turn 用 `fallbackModel`，否则该 Turn 的 branch settings，未进入 Turn 回落 ROOT），按当前 catalog pricing 选出适用单价：以该 Entry 的创建时刻与本次请求的提示 token（输入加各类缓存读写）匹配第一条条件价格，都不满足时用基础单价，再用纯 `BigDecimal` 现算并输出精确十进制字符串 `amount`；模型已删除则费用缺席，定义损坏则抛错，绝不伪装成 0。同一投影内每个出现过的模型至多查一次 catalog。
 
 ## Storage、Blob 与 Resource
 

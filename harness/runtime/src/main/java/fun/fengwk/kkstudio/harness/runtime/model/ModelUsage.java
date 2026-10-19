@@ -39,6 +39,13 @@ public record ModelUsage(
     return providerTotalTokens;
   }
 
+  /** 请求的提示 token 数：输入与各类缓存读写之和，用于匹配长上下文价格档位。 */
+  public long promptTokens() {
+    return Math.addExact(
+        Math.addExact(inputTokens, cacheReadTokens),
+        Math.addExact(cacheWriteTokens, cacheWriteLongTokens));
+  }
+
   /** 返回前六类计费类别之和，使用 {@link Math#addExact(long, long)} 检测溢出。 */
   public long categorizedTokens() {
     long sum = inputTokens;
