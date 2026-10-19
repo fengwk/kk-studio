@@ -25,26 +25,26 @@ import type {
 
 /**
  * Harness runtime 客户端调用统一收敛：
- * - POST /harness/command-batches（NEW_SESSION / NEW_THREAD / NEW_FORKED_SESSION 创建）
- * - POST /harness/threads/{id}/command-batches（既有 Thread 的通用写入口）
- * - GET /harness/sessions/{id}/threads
- * - GET /harness/sessions/{id}/entries
- * - PUT /harness/sessions/{id}/name
- * - GET /harness/threads/{id}（Thread snapshot 查询）
- * - GET /harness/threads/{id}/tree（真实 root 的父子 Agent 关系树）
- * - PUT /harness/threads/{id}/name
- * - POST /harness/threads/{id}/compact
- * - GET /harness/threads/{id}/system-prompt
- * - PUT /harness/threads/{id}/yolo
- * - POST /harness/threads/{id}/stop
- * - PUT /harness/threads/{threadId}/tool-invocations/{invocationId}/approval
+ * - POST /command-batches（NEW_SESSION / NEW_THREAD / NEW_FORKED_SESSION 创建）
+ * - POST /threads/{id}/command-batches（既有 Thread 的通用写入口）
+ * - GET /sessions/{id}/threads
+ * - GET /sessions/{id}/entries
+ * - PUT /sessions/{id}/name
+ * - GET /threads/{id}（Thread snapshot 查询）
+ * - GET /threads/{id}/tree（真实 root 的父子 Agent 关系树）
+ * - PUT /threads/{id}/name
+ * - POST /threads/{id}/compact
+ * - GET /threads/{id}/system-prompt
+ * - PUT /threads/{id}/yolo
+ * - POST /threads/{id}/stop
+ * - PUT /threads/{threadId}/tool-invocations/{invocationId}/approval
  */
 export function createHarnessService(client: HttpClient = apiClient) {
   return {
     acceptCommandBatch: (
       data: AgentCommandBatchRequestDTO,
     ): Promise<AgentCommandBatchResponseDTO> =>
-      client.post('/harness/command-batches', data),
+      client.post('/command-batches', data),
 
     /**
      * 既有 Thread 的通用命令写入口：服务端从 path 解析 Session 与 owner 之外的授权，
@@ -55,62 +55,62 @@ export function createHarnessService(client: HttpClient = apiClient) {
       data: ThreadCommandBatchRequestDTO,
     ): Promise<AgentCommandBatchResponseDTO> =>
       client.post(
-        `/harness/threads/${encodeURIComponent(threadId)}/command-batches`,
+        `/threads/${encodeURIComponent(threadId)}/command-batches`,
         data,
       ),
 
     listSessionThreads: (sessionId: string): Promise<RuntimeThreadSummaryDTO[]> =>
-      client.get(`/harness/sessions/${encodeURIComponent(sessionId)}/threads`),
+      client.get(`/sessions/${encodeURIComponent(sessionId)}/threads`),
 
     listSessionEntries: (sessionId: string): Promise<HarnessSessionEntryDTO[]> =>
-      client.get(`/harness/sessions/${encodeURIComponent(sessionId)}/entries`),
+      client.get(`/sessions/${encodeURIComponent(sessionId)}/entries`),
 
     renameSession: (
       sessionId: string,
       data: HarnessSessionRenameDTO,
     ): Promise<HarnessSessionDTO> =>
-      client.put(`/harness/sessions/${encodeURIComponent(sessionId)}/name`, data),
+      client.put(`/sessions/${encodeURIComponent(sessionId)}/name`, data),
 
     getThreadSnapshot: (threadId: string): Promise<HarnessThreadSnapshotDTO> =>
-      client.get(`/harness/threads/${encodeURIComponent(threadId)}`),
+      client.get(`/threads/${encodeURIComponent(threadId)}`),
 
     getThreadTree: (threadId: string): Promise<HarnessThreadTreeNodeDTO[]> =>
-      client.get(`/harness/threads/${encodeURIComponent(threadId)}/tree`),
+      client.get(`/threads/${encodeURIComponent(threadId)}/tree`),
 
     renameThread: (threadId: string, data: HarnessThreadRenameDTO): Promise<HarnessThreadDTO> =>
-      client.put(`/harness/threads/${encodeURIComponent(threadId)}/name`, data),
+      client.put(`/threads/${encodeURIComponent(threadId)}/name`, data),
 
     compactThread: (
       threadId: string,
       data: ManualCompactionRequestDTO,
     ): Promise<ManualCompactionResponseDTO> =>
-      client.post(`/harness/threads/${encodeURIComponent(threadId)}/compact`, data),
+      client.post(`/threads/${encodeURIComponent(threadId)}/compact`, data),
 
     getModelRequestDebug: (
       threadId: string,
       data: HarnessModelRequestDebugRequestDTO,
     ): Promise<HarnessModelRequestDebugDTO> =>
-      client.post(`/harness/threads/${encodeURIComponent(threadId)}/model-request-debug`, data),
+      client.post(`/threads/${encodeURIComponent(threadId)}/model-request-debug`, data),
 
     previewHistoricalRequest: (
       sessionId: string,
       entryId: string,
     ): Promise<ProviderRequestPreviewDTO> =>
       client.get(
-        `/harness/sessions/${encodeURIComponent(sessionId)}/entries/${encodeURIComponent(entryId)}/provider-request-preview`,
+        `/sessions/${encodeURIComponent(sessionId)}/entries/${encodeURIComponent(entryId)}/provider-request-preview`,
       ),
 
     setThreadYolo: (
       threadId: string,
       data: HarnessThreadYoloUpdateDTO,
     ): Promise<HarnessThreadDTO> =>
-      client.put(`/harness/threads/${encodeURIComponent(threadId)}/yolo`, data),
+      client.put(`/threads/${encodeURIComponent(threadId)}/yolo`, data),
 
     stopThread: (
       threadId: string,
       data: HarnessThreadStopDTO,
     ): Promise<HarnessThreadStopResultDTO> =>
-      client.post(`/harness/threads/${encodeURIComponent(threadId)}/stop`, data),
+      client.post(`/threads/${encodeURIComponent(threadId)}/stop`, data),
 
     decideApproval: (
       threadId: string,
@@ -118,7 +118,7 @@ export function createHarnessService(client: HttpClient = apiClient) {
       data: HarnessToolApprovalDTO,
     ): Promise<ToolInvocationDTO> =>
       client.put(
-        `/harness/threads/${encodeURIComponent(threadId)}/tool-invocations/${encodeURIComponent(toolInvocationId)}/approval`,
+        `/threads/${encodeURIComponent(threadId)}/tool-invocations/${encodeURIComponent(toolInvocationId)}/approval`,
         data,
       ),
   }

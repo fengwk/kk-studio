@@ -546,7 +546,7 @@ assert seedance_node["resources"][0]["kind"] == "VIDEO"
 # to the in-stack http-mock SSE stub.
 stub = json_call(
     "POST",
-    "/api/ai/catalog/providers",
+    "/api/providers",
     {
         "name": "stub",
         "description": "offline smoke stub",
@@ -568,7 +568,7 @@ zero = {
 }
 json_call(
     "POST",
-    "/api/ai/catalog/models",
+    "/api/models",
     {
         "providerName": "stub",
         "name": "acceptance-stub",
@@ -592,7 +592,7 @@ json_call(
 )
 json_call(
     "POST",
-    "/api/ai/catalog/agents",
+    "/api/agents",
     {
         "name": "default-assistant",
         "description": "offline smoke stub agent",
@@ -605,7 +605,7 @@ json_call(
 
 chat = json_call(
     "POST",
-    "/api/ai/chats",
+    "/api/chats",
     {"title": "offline-chat-smoke", "agentName": "default-assistant", "yoloEnabled": False},
 )
 assert chat["agentName"] == "default-assistant", chat
@@ -615,7 +615,7 @@ session_id = str(uuid.uuid4())
 thread_id = str(uuid.uuid4())
 accepted = json_call(
     "POST",
-    "/api/harness/command-batches",
+    "/api/command-batches",
     build_offline_chat_batch_request(
         chat_id=chat["id"],
         session_id=session_id,
@@ -632,7 +632,7 @@ assert accepted["acceptedCommands"][0]["type"] == "USER_MESSAGE", accepted
 assert thread["threadId"] == thread_id, thread
 for _ in range(240):
     current = json_call(
-        "GET", f"/api/harness/threads/{thread_id}"
+        "GET", f"/api/threads/{thread_id}"
     )
     candidate = current["thread"]
     if (

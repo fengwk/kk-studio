@@ -41,7 +41,7 @@ import java.util.Map;
  * 返回，因此没有独立端点；最近 200 条以内的运维事件走只读 events 端点，Card 只投影最近一条 WARN/ERROR。
  */
 @AllArgsConstructor
-@RequestMapping("/api/harness/environments")
+@RequestMapping("/api/environments")
 @RestController
 public class StudioEnvironmentController {
 

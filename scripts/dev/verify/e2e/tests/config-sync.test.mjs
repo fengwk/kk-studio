@@ -142,7 +142,7 @@ test('precheck case enforces read-only checking and explicit partial import befo
   const ctx = {
     async call(method, path, body) {
       if (method === 'GET') {
-        assert.equal(path, '/api/ai/catalog/providers?pageNumber=1&pageSize=100')
+        assert.equal(path, '/api/providers?pageNumber=1&pageSize=100')
         return { json: { data: { results: provider ? [provider] : [] } } }
       }
       if (method === 'DELETE') {
@@ -181,7 +181,7 @@ test('install config hard-invalid precheck rejects every endpoint without side e
   const ctx = {
     async call(method, path, body) {
       if (method === 'GET') {
-        assert.equal(path, '/api/harness/environments')
+        assert.equal(path, '/api/environments')
         return { json: { data: [] } }
       }
       assert.equal(method, 'POST')
@@ -210,7 +210,7 @@ test('environment install-config roundtrip case wires PUT/export/import/clear/cl
   // 严格限定 method 合法，任何把 path 当 method 的调用会立即失败（回归先前的参数顺序缺陷）。
   const LEGAL_METHODS = new Set(['GET', 'POST', 'PUT', 'DELETE'])
   const environmentId = '00000000-0000-4000-8000-0000000000cf'
-  const base = `/api/harness/environments/${environmentId}`
+  const base = `/api/environments/${environmentId}`
   let state = null
   let deleted = false
   let deleteSnapshot = null
@@ -224,7 +224,7 @@ test('environment install-config roundtrip case wires PUT/export/import/clear/cl
     async call(method, path, body) {
       assert.ok(LEGAL_METHODS.has(method), `illegal method ${JSON.stringify(method)} for ${path}`)
       calls.push({ method, path, body })
-      if (method === 'POST' && path === '/api/harness/environments') {
+      if (method === 'POST' && path === '/api/environments') {
         state = {
           id: environmentId,
           name: body.name,

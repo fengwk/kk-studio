@@ -61,7 +61,7 @@ describe('execution tree HTTP Instant contract', () => {
     const { client, sockets } = renderPanel()
     expect(await screen.findByRole('link', { name: /Explorer/ })).toHaveTextContent('turns: 3 · tools: 5')
     expect(transport.mock.calls[0][0]).toMatchObject({
-      url: `/harness/threads/${CHILD}/tree`, method: 'get', baseURL: '/api',
+      url: `/threads/${CHILD}/tree`, method: 'get', baseURL: '/api',
     })
     expect(client.getQueryData(['threads', 'tree', CHILD])).toEqual([node(ROOT, null), node(CHILD, ROOT)])
     const socket = sockets.openLatest()

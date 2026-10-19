@@ -8,10 +8,10 @@ function createClient() {
 
 describe('chatService', () => {
   /**
-   * 测试意图：验证 Chat 集合与详情 CRUD API 使用规范化复数路径 /ai/chats/**，
+   * 测试意图：验证 Chat 集合与详情 CRUD API 使用规范化复数路径 /chats/**，
    * 确保列表、创建、详情、更新和删除端点与最新契约一致。
    */
-  it('keeps Chat collection/detail CRUD and update under /ai/chats/**', async () => {
+  it('keeps Chat collection/detail CRUD and update under /chats/**', async () => {
     const client = createClient()
     const service = createChatService(client)
     await service.listChats()
@@ -20,18 +20,18 @@ describe('chatService', () => {
     await service.updateChat('chat /1', { title: 'B', expectedVersion: '2' })
     await service.deleteChat('chat /1', '5')
 
-    expect(client.get).toHaveBeenNthCalledWith(1, '/ai/chats')
-    expect(client.post).toHaveBeenCalledWith('/ai/chats', {
+    expect(client.get).toHaveBeenNthCalledWith(1, '/chats')
+    expect(client.post).toHaveBeenCalledWith('/chats', {
       title: 'A',
       agentName: 'assistant',
     })
-    expect(client.get).toHaveBeenNthCalledWith(2, '/ai/chats/chat%20%2F1')
-    expect(client.put).toHaveBeenCalledWith('/ai/chats/chat%20%2F1', {
+    expect(client.get).toHaveBeenNthCalledWith(2, '/chats/chat%20%2F1')
+    expect(client.put).toHaveBeenCalledWith('/chats/chat%20%2F1', {
       title: 'B',
       expectedVersion: '2',
     })
     expect(client.delete).toHaveBeenCalledWith(
-      '/ai/chats/chat%20%2F1',
+      '/chats/chat%20%2F1',
       { params: { expectedVersion: '5' } },
     )
   })
@@ -48,7 +48,7 @@ describe('chatService', () => {
       yoloEnabled: true,
     })
 
-    expect(client.post).toHaveBeenCalledWith('/ai/chats', {
+    expect(client.post).toHaveBeenCalledWith('/chats', {
       title: 'A',
       agentName: 'assistant',
       yoloEnabled: true,
@@ -57,13 +57,13 @@ describe('chatService', () => {
 
   /**
    * 测试意图：验证 Chat owner 的 Session 列表查询收敛移入 chat-service，
-   * 且端点使用规范化的 /ai/chats/{chatId}/sessions。
+   * 且端点使用规范化的 /chats/{chatId}/sessions。
    */
-  it('queries chat sessions via GET /ai/chats/{chatId}/sessions', async () => {
+  it('queries chat sessions via GET /chats/{chatId}/sessions', async () => {
     const client = createClient()
     const service = createChatService(client)
     await service.listChatSessions('chat /1')
 
-    expect(client.get).toHaveBeenCalledWith('/ai/chats/chat%20%2F1/sessions')
+    expect(client.get).toHaveBeenCalledWith('/chats/chat%20%2F1/sessions')
   })
 })

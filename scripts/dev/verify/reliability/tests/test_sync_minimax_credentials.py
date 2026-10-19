@@ -82,7 +82,7 @@ class TestReliabilityMiniMaxCredentialSync(unittest.TestCase):
 
         self.assertEqual(2, len(calls))
         self.assertEqual(
-            "http://backend/api/ai/catalog/providers/minimax",
+            "http://backend/api/providers/minimax",
             calls[1][0],
         )
         self.assertEqual("https://api.minimax.example/v1", calls[1][1]["baseUrl"])

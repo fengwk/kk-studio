@@ -724,7 +724,7 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
   }
 
   private JsonNode snapshotHttp(MockMvc mvc, UUID threadId) throws Exception {
-    var response = mvc.perform(get("/api/harness/threads/" + threadId)).andReturn().getResponse();
+    var response = mvc.perform(get("/api/threads/" + threadId)).andReturn().getResponse();
     assertEquals(200, response.getStatus());
     return jsonMapper.readTree(response.getContentAsString()).path("data");
   }

@@ -28,7 +28,7 @@ registerCase({
   title: 'HTTP 错误响应按 Accept-Language 返回英文或中文',
   docs: 'Domain error 与 ResponseStatusException 保持 status/code/context/detail，仅本地化 message/title；不支持语言回退英文',
   async run(ctx) {
-    const unknownChatPath = '/api/ai/chats/00000000-0000-0000-0000-000000000999'
+    const unknownChatPath = '/api/chats/00000000-0000-0000-0000-000000000999'
     const englishDomain = errorEnvelope(await localizedGet(ctx, unknownChatPath, 'en-US', 404))
     const chineseDomain = errorEnvelope(await localizedGet(ctx, unknownChatPath, 'zh-CN', 404))
     assert(englishDomain.code === 'resource_not_found', JSON.stringify(englishDomain))
@@ -39,7 +39,7 @@ registerCase({
     assert(chineseDomain.errors?.detail === 'chat not found', JSON.stringify(chineseDomain))
 
     // Catalog controller 的类型不匹配由 Domain advice 归一为 validation。
-    const mismatchPath = '/api/ai/catalog/models?pageNumber=abc&pageSize=1'
+    const mismatchPath = '/api/models?pageNumber=abc&pageSize=1'
     const englishValidation = errorEnvelope(await localizedGet(ctx, mismatchPath, 'en-US'))
     const chineseValidation = errorEnvelope(await localizedGet(ctx, mismatchPath, 'zh-CN'))
     const fallbackValidation = errorEnvelope(await localizedGet(ctx, mismatchPath, 'fr-FR'))
@@ -63,7 +63,7 @@ registerCase({
     )
 
     // Controller-originated ResponseStatusException 保持 HTTP code/context，仅本地化 message/title。
-    const responseStatusPath = '/api/harness/threads/not-a-number'
+    const responseStatusPath = '/api/threads/not-a-number'
     const englishHttp = errorEnvelope(await localizedGet(ctx, responseStatusPath, 'en-US'))
     const chineseHttp = errorEnvelope(await localizedGet(ctx, responseStatusPath, 'zh-CN'))
     const fallbackHttp = errorEnvelope(await localizedGet(ctx, responseStatusPath, 'fr-FR'))

@@ -4,15 +4,15 @@ import type { RuntimeSessionSummaryDTO } from '@/shared/api/contracts/ai-runtime
 
 export function createChatService(client: HttpClient = apiClient) {
   return {
-    listChats: (): Promise<ChatDTO[]> => client.get('/ai/chats'),
-    createChat: (data: ChatCreateDTO): Promise<ChatDTO> => client.post('/ai/chats', data),
-    getChat: (chatId: string): Promise<ChatDTO> => client.get(`/ai/chats/${encodeURIComponent(chatId)}`),
+    listChats: (): Promise<ChatDTO[]> => client.get('/chats'),
+    createChat: (data: ChatCreateDTO): Promise<ChatDTO> => client.post('/chats', data),
+    getChat: (chatId: string): Promise<ChatDTO> => client.get(`/chats/${encodeURIComponent(chatId)}`),
     updateChat: (chatId: string, data: ChatUpdateDTO): Promise<ChatDTO> =>
-      client.put(`/ai/chats/${encodeURIComponent(chatId)}`, data),
+      client.put(`/chats/${encodeURIComponent(chatId)}`, data),
     deleteChat: (chatId: string, expectedVersion: string): Promise<void> =>
-      client.delete(`/ai/chats/${encodeURIComponent(chatId)}`, { params: { expectedVersion } }),
+      client.delete(`/chats/${encodeURIComponent(chatId)}`, { params: { expectedVersion } }),
     listChatSessions: (chatId: string): Promise<RuntimeSessionSummaryDTO[]> =>
-      client.get(`/ai/chats/${encodeURIComponent(chatId)}/sessions`),
+      client.get(`/chats/${encodeURIComponent(chatId)}/sessions`),
   }
 }
 

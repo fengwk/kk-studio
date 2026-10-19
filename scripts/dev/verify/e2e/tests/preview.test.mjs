@@ -16,10 +16,10 @@ function fixture(reasons = ['PREVIEW_STALE_CURSOR', 'PREVIEW_PLANNING_FAILED']) 
       seedModel: { config: { defaultVariant: 'default' } },
     },
     async call(method, path, body) {
-      if (method === 'POST' && path === '/api/ai/chats') {
+      if (method === 'POST' && path === '/api/chats') {
         return { status: 201, json: { data: { id: id(1), agentName: body.agentName, environmentName: body.environmentName ?? null } } }
       }
-      if (method === 'POST' && path === '/api/harness/command-batches') {
+      if (method === 'POST' && path === '/api/command-batches') {
         assert.match(body.target.rootSettings.agentName, /^e2e-preview-missing-/)
         const { threadId, sessionId } = body.target
         thread = {
@@ -38,7 +38,7 @@ function fixture(reasons = ['PREVIEW_STALE_CURSOR', 'PREVIEW_PLANNING_FAILED']) 
           })),
         } } }
       }
-      if (method === 'GET' && path === `/api/harness/threads/${thread.threadId}`) {
+      if (method === 'GET' && path === `/api/threads/${thread.threadId}`) {
         return { status: 200, json: { data: {
           thread, queuedCommands: [], modelInvocation: null, toolInvocations: [],
         } } }
@@ -98,14 +98,14 @@ test('readonly preview builds its local model config and cleans up a failed fixt
   let deleted = false
   const ctx = {
     async call(method, path, body) {
-      if (method === 'POST' && path === '/api/ai/catalog/providers') {
+      if (method === 'POST' && path === '/api/providers') {
         return { json: { data: { name: body.name, version: '1' } } }
       }
-      if (method === 'POST' && path === '/api/ai/catalog/models') {
+      if (method === 'POST' && path === '/api/models') {
         config = body.config
         throw stopped
       }
-      if (method === 'DELETE' && path.startsWith('/api/ai/catalog/providers/')) {
+      if (method === 'DELETE' && path.startsWith('/api/providers/')) {
         deleted = true
         return { json: null }
       }
@@ -145,13 +145,13 @@ function modelRequestDebugFixture() {
   const call = async (method, path, body) => {
     requests.push({ method, path, body })
     const pathname = new URL(path, 'http://fixture.local').pathname
-    if (method === 'GET' && pathname === '/api/ai/catalog/agents') {
+    if (method === 'GET' && pathname === '/api/agents') {
       return { status: 200, json: { data: { results: [agent] } } }
     }
-    if (method === 'GET' && pathname === '/api/ai/catalog/models') {
+    if (method === 'GET' && pathname === '/api/models') {
       return { status: 200, json: { data: { results: [model] } } }
     }
-    if (method === 'POST' && pathname === '/api/ai/chats') {
+    if (method === 'POST' && pathname === '/api/chats') {
       chat = {
         id: id(1),
         title: body.title,
@@ -162,7 +162,7 @@ function modelRequestDebugFixture() {
       }
       return { status: 201, json: { data: { ...chat } } }
     }
-    if (method === 'POST' && pathname === '/api/harness/command-batches') {
+    if (method === 'POST' && pathname === '/api/command-batches') {
       assert.match(body.target.rootSettings.agentName, /^missing-debug-agent-/)
       const { threadId, sessionId } = body.target
       thread = {
@@ -196,7 +196,7 @@ function modelRequestDebugFixture() {
         },
       }
     }
-    if (method === 'GET' && pathname === `/api/harness/threads/${thread.threadId}`) {
+    if (method === 'GET' && pathname === `/api/threads/${thread.threadId}`) {
       return {
         status: 200,
         json: {
@@ -212,7 +212,7 @@ function modelRequestDebugFixture() {
         },
       }
     }
-    if (pathname === `/api/harness/threads/${thread.threadId}/model-request-debug`) {
+    if (pathname === `/api/threads/${thread.threadId}/model-request-debug`) {
       if (method === 'GET') {
         throw new HttpError(405, JSON.stringify({ message: 'Method Not Allowed' }), pathname)
       }
@@ -246,7 +246,7 @@ function modelRequestDebugFixture() {
         },
       }
     }
-    if (method === 'DELETE' && pathname === `/api/ai/chats/${chat.id}`) {
+    if (method === 'DELETE' && pathname === `/api/chats/${chat.id}`) {
       return { status: 204, json: null }
     }
     throw new Error(`unexpected call ${method} ${pathname}`)

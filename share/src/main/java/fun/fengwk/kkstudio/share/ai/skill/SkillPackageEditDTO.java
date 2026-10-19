@@ -9,7 +9,7 @@ import lombok.Setter;
 import lombok.ToString;
 
 /**
- * {@code PUT /api/ai/catalog/skill-packages/{packageName}} 请求体：只编辑可编辑字段。
+ * {@code PUT /api/skill-packages/{packageName}} 请求体：只编辑可编辑字段。
  *
  * <p>repository URL 是不可变身份，更换仓库要新建 Package；发布内容由 {@link SkillPackagePublishDTO} 的 exact commit
  * 决定，本请求不改变 current commit 或 manifest。

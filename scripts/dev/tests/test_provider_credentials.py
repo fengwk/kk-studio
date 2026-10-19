@@ -196,7 +196,7 @@ class TestProviderHttpPrimitives(unittest.TestCase):
 
         self.assertEqual(1, len(calls))
         url, data, _ = calls[0]
-        self.assertTrue(url.startswith("http://backend:18080/api/ai/catalog/providers?"))
+        self.assertTrue(url.startswith("http://backend:18080/api/providers?"))
         self.assertIsNone(data)
         self.assertEqual([{"name": "test-p"}], res["data"]["results"])
 
@@ -219,7 +219,7 @@ class TestProviderHttpPrimitives(unittest.TestCase):
         self.assertEqual(1, len(calls))
         url, payload, headers = calls[0]
         self.assertEqual(
-            "http://backend:18080/api/ai/catalog/providers/custom%2Fprovider%3Av1",
+            "http://backend:18080/api/providers/custom%2Fprovider%3Av1",
             url,
         )
         self.assertEqual("application/json", headers.get("Content-Type"))
@@ -372,7 +372,7 @@ class TestSyncProviderSpecs(unittest.TestCase):
         self.assertEqual(2, len(calls))
         self.assertIsNone(calls[0][1])  # GET
         self.assertEqual(
-            "http://backend:18080/api/ai/catalog/providers/prov-b",
+            "http://backend:18080/api/providers/prov-b",
             calls[1][0],
         )
         put_payload = calls[1][1]

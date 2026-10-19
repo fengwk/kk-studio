@@ -5,7 +5,7 @@ import lombok.Data;
 import lombok.ToString;
 
 /**
- * {@code POST /api/ai/catalog/skill-packages} 请求体：创建 Package 并发布当时的 branch HEAD。
+ * {@code POST /api/skill-packages} 请求体：创建 Package 并发布当时的 branch HEAD。
  *
  * <p>服务端读取 {@code branch} 的当前 HEAD，把解析出的 exact commit 作为首个 current commit，并从该 commit 派生
  * manifest；创建请求本身不接收 commit。

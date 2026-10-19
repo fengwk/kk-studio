@@ -31,7 +31,7 @@ for (const scenario of ['pane-root', 'pane-child']) {
       const path = new URL(route.request().url()).pathname
       if (route.request().method() !== 'GET') writes.push(path)
       let data: unknown = { results: [], totalCount: 0, pageNumber: 1, pageSize: 50 }
-      if (path === `/api/harness/threads/${id}`) {
+      if (path === `/api/threads/${id}`) {
         reads += 1
         data = {
           version: '1',
@@ -84,7 +84,7 @@ for (const scenario of ['pane-root', 'pane-child']) {
           status: 'IDLE', processing: false, turnCount: 1, toolCallCount: 1,
           outcome: null, updateTime: now / 1000,
         }))
-      } else if (path === '/api/harness/environments') {
+      } else if (path === '/api/environments') {
         data = []
       }
       await route.fulfill({ json: { status: 200, data } })

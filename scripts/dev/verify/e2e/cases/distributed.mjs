@@ -10,7 +10,7 @@ const ENV_B_ID = '44444444-4444-4444-4444-444444444444'
 async function waitForEnvironmentReady(callNode, node, envId, maxAttempts = 30) {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      const res = await callNode(node, 'GET', `/api/harness/environments/${encodeURIComponent(envId)}`)
+      const res = await callNode(node, 'GET', `/api/environments/${encodeURIComponent(envId)}`)
       const card = envelopeData(res.json)
       if (card?.ready === true && card?.status === 'READY') {
         return card
@@ -38,7 +38,7 @@ registerCase({
 
     try {
       // 1. 在 node A 创建临时 Environment Card
-      const createRes = await ctx.callNode('a', 'POST', '/api/harness/environments', { name: envName })
+      const createRes = await ctx.callNode('a', 'POST', '/api/environments', { name: envName })
       const created = envelopeData(createRes.json)
       assert(created?.id, 'expected created environment id')
       assert(created.name === envName, `expected name ${envName}, got ${created.name}`)
@@ -51,7 +51,7 @@ registerCase({
       latestVersion = created.version
 
       // 2. 在 node B 读取并验证一致性（注意 registrationToken 不再暴露）
-      const getBRes = await ctx.callNode('b', 'GET', `/api/harness/environments/${encodeURIComponent(createdId)}`)
+      const getBRes = await ctx.callNode('b', 'GET', `/api/environments/${encodeURIComponent(createdId)}`)
       const fromB = envelopeData(getBRes.json)
       assert(fromB.id === createdId, 'node B get: id mismatch')
       assert(fromB.name === envName, 'node B get: name mismatch')
@@ -62,7 +62,7 @@ registerCase({
       const rotateOnBRes = await ctx.callNode(
         'b',
         'POST',
-        `/api/harness/environments/${encodeURIComponent(createdId)}/registration-token`,
+        `/api/environments/${encodeURIComponent(createdId)}/registration-token`,
         { expectedVersion: latestVersion },
       )
       const rotatedOnB = envelopeData(rotateOnBRes.json)
@@ -82,7 +82,7 @@ registerCase({
           ctx.callNode(
             'a',
             'POST',
-            `/api/harness/environments/${encodeURIComponent(createdId)}/registration-token`,
+            `/api/environments/${encodeURIComponent(createdId)}/registration-token`,
             { expectedVersion: created.version },
           ),
         { status: 409 },
@@ -90,7 +90,7 @@ registerCase({
       const rotateOnARes = await ctx.callNode(
         'a',
         'POST',
-        `/api/harness/environments/${encodeURIComponent(createdId)}/registration-token`,
+        `/api/environments/${encodeURIComponent(createdId)}/registration-token`,
         { expectedVersion: latestVersion },
       )
       const rotatedOnA = envelopeData(rotateOnARes.json)
@@ -107,7 +107,7 @@ registerCase({
       const tokenOnBRes = await ctx.callNode(
         'b',
         'GET',
-        `/api/harness/environments/${encodeURIComponent(createdId)}/token`,
+        `/api/environments/${encodeURIComponent(createdId)}/token`,
       )
       const tokenOnB = envelopeData(tokenOnBRes.json)
       assert(tokenOnB.id === createdId, 'node B token read: id mismatch')
@@ -127,12 +127,12 @@ registerCase({
           ctx.callNode(
             'a',
             'PUT',
-            `/api/harness/environments/${encodeURIComponent(createdId)}?expectedVersion=${encodeURIComponent(latestVersion)}`,
+            `/api/environments/${encodeURIComponent(createdId)}?expectedVersion=${encodeURIComponent(latestVersion)}`,
             { name: `${envName}-renamed` },
           ),
         { status: 405 },
       )
-      const getARes = await ctx.callNode('a', 'GET', `/api/harness/environments/${encodeURIComponent(createdId)}`)
+      const getARes = await ctx.callNode('a', 'GET', `/api/environments/${encodeURIComponent(createdId)}`)
       const fromA = envelopeData(getARes.json)
       assert(fromA.name === envName, 'node A verify: name must stay immutable')
       assert(fromA.version === latestVersion, 'node A verify: version mismatch')
@@ -141,14 +141,14 @@ registerCase({
       await ctx.callNode(
         'b',
         'DELETE',
-        `/api/harness/environments/${encodeURIComponent(createdId)}?expectedVersion=${encodeURIComponent(latestVersion)}`,
+        `/api/environments/${encodeURIComponent(createdId)}?expectedVersion=${encodeURIComponent(latestVersion)}`,
       )
       await expectHttpError(
-        () => ctx.callNode('a', 'GET', `/api/harness/environments/${encodeURIComponent(createdId)}`),
+        () => ctx.callNode('a', 'GET', `/api/environments/${encodeURIComponent(createdId)}`),
         { status: 404 },
       )
       await expectHttpError(
-        () => ctx.callNode('b', 'GET', `/api/harness/environments/${encodeURIComponent(createdId)}`),
+        () => ctx.callNode('b', 'GET', `/api/environments/${encodeURIComponent(createdId)}`),
         { status: 404 },
       )
 
@@ -172,13 +172,13 @@ registerCase({
       // 尽力清理临时环境卡片
       if (createdId) {
         try {
-          const probe = await ctx.callNode('a', 'GET', `/api/harness/environments/${encodeURIComponent(createdId)}`)
+          const probe = await ctx.callNode('a', 'GET', `/api/environments/${encodeURIComponent(createdId)}`)
           const card = envelopeData(probe.json)
           if (card?.version) {
             await ctx.callNode(
               'a',
               'DELETE',
-              `/api/harness/environments/${encodeURIComponent(createdId)}?expectedVersion=${encodeURIComponent(card.version)}`,
+              `/api/environments/${encodeURIComponent(createdId)}?expectedVersion=${encodeURIComponent(card.version)}`,
             )
           }
         } catch {
@@ -297,7 +297,7 @@ registerCase({
         ctx.callNode(
           'a',
           'GET',
-          `/api/harness/environments/${encodeURIComponent(ENV_A_ID)}`,
+          `/api/environments/${encodeURIComponent(ENV_A_ID)}`,
           undefined,
           10_000,
         ),

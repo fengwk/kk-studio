@@ -37,10 +37,10 @@ test('environment install-config case exercises PUT CAS persistence, no-op and h
 
   const ctx = {
     async call(method, path, body) {
-      if (method === 'POST' && path === '/api/harness/environments') {
+      if (method === 'POST' && path === '/api/environments') {
         return { json: { data: { id: environmentId, name: body.name, installConfig: null, version } } }
       }
-      if (method === 'PUT' && path === `/api/harness/environments/${environmentId}/install-config`) {
+      if (method === 'PUT' && path === `/api/environments/${environmentId}/install-config`) {
         if (body.expectedVersion !== version) {
           throw new HttpError(409, 'version conflict', path)
         }
@@ -61,10 +61,10 @@ test('environment install-config case exercises PUT CAS persistence, no-op and h
         version = String(Number(version) + 1)
         return { json: { data: { id: environmentId, installConfig: saved, version } } }
       }
-      if (method === 'GET' && path === `/api/harness/environments/${environmentId}`) {
+      if (method === 'GET' && path === `/api/environments/${environmentId}`) {
         return { json: { data: { id: environmentId, installConfig: saved, version } } }
       }
-      if (method === 'DELETE' && path.startsWith(`/api/harness/environments/${environmentId}`)) {
+      if (method === 'DELETE' && path.startsWith(`/api/environments/${environmentId}`)) {
         assert.ok(path.includes(`expectedVersion=${version}`), `delete must use current version: ${path}`)
         deleted = true
         return { json: null }
@@ -133,7 +133,7 @@ test('environment install-script case checks code, headers and rotation without 
     },
     async call(method, path, body) {
       calls.push(`${method} ${path.split('?')[0]}`)
-      if (method === 'POST' && path === '/api/harness/environments') {
+      if (method === 'POST' && path === '/api/environments') {
         return {
           json: {
             data: {
@@ -146,13 +146,13 @@ test('environment install-script case checks code, headers and rotation without 
           },
         }
       }
-      if (method === 'PUT' && path === `/api/harness/environments/${environmentId}/install-config`) {
+      if (method === 'PUT' && path === `/api/environments/${environmentId}/install-config`) {
         if (body.expectedVersion !== version) throw new HttpError(409, 'version conflict', path)
         saved = body.installConfig
         version = String(Number(version) + 1)
         return { json: { data: { id: environmentId, installConfig: saved, version } } }
       }
-      if (method === 'POST' && path === `/api/harness/environments/${environmentId}/install-code`) {
+      if (method === 'POST' && path === `/api/environments/${environmentId}/install-code`) {
         if (body.expectedVersion !== version) throw new HttpError(409, 'version conflict', path)
         activeCode = `code-v${version}`
         return {
@@ -166,15 +166,15 @@ test('environment install-script case checks code, headers and rotation without 
           headers: new Headers({ 'cache-control': 'no-store' }),
         }
       }
-      if (method === 'GET' && path === `/api/harness/environments/${environmentId}`) {
+      if (method === 'GET' && path === `/api/environments/${environmentId}`) {
         return { json: { data: { id: environmentId, installConfig: saved, version } } }
       }
-      if (method === 'GET' && path.startsWith(`/api/harness/environments/${environmentId}/install`)) {
+      if (method === 'GET' && path.startsWith(`/api/environments/${environmentId}/install`)) {
         const code = new URL(path, 'http://matrix.local').searchParams.get('code')
         if (!code || code !== activeCode) throw new HttpError(400, 'install code is invalid', path)
         return { json: installScript(token), headers: scriptHeaders() }
       }
-      if (method === 'POST' && path === `/api/harness/environments/${environmentId}/registration-token`) {
+      if (method === 'POST' && path === `/api/environments/${environmentId}/registration-token`) {
         if (body.expectedVersion !== version) throw new HttpError(409, 'version conflict', path)
         token = rotatedToken
         activeCode = null
@@ -186,16 +186,16 @@ test('environment install-script case checks code, headers and rotation without 
           headers: new Headers({ 'cache-control': 'no-store' }),
         }
       }
-      if (method === 'GET' && path === '/api/harness/environments/uninstall/linux') {
+      if (method === 'GET' && path === '/api/environments/uninstall/linux') {
         return { json: "bash <<'KK'\nbash \"$stage/install.sh\" uninstall\nKK\n", headers: scriptHeaders() }
       }
-      if (method === 'GET' && path === '/api/harness/environments/uninstall/windows') {
+      if (method === 'GET' && path === '/api/environments/uninstall/windows') {
         return { json: "powershell -File $installer uninstall\n", headers: scriptHeaders() }
       }
-      if (method === 'GET' && path === '/api/harness/environments/uninstall/solaris') {
+      if (method === 'GET' && path === '/api/environments/uninstall/solaris') {
         throw new HttpError(400, 'operatingSystem must be linux, macos or windows', path)
       }
-      if (method === 'DELETE' && path.startsWith(`/api/harness/environments/${environmentId}`)) {
+      if (method === 'DELETE' && path.startsWith(`/api/environments/${environmentId}`)) {
         assert.ok(path.includes(`expectedVersion=${version}`), 'delete must use current version')
         deleted = true
         return { json: null }
@@ -210,12 +210,12 @@ test('environment install-script case checks code, headers and rotation without 
   assert.equal(version, '2', 'config save and token rotation should each advance version once')
   assert.equal(token, rotatedToken)
   assert.deepEqual(secretWrites, [], 'case must not write script, token or code artifacts')
-  assert.ok(calls.includes('GET /api/harness/environments/uninstall/linux'))
-  assert.ok(calls.includes('GET /api/harness/environments/uninstall/windows'))
-  assert.ok(calls.includes('GET /api/harness/environments/uninstall/solaris'))
+  assert.ok(calls.includes('GET /api/environments/uninstall/linux'))
+  assert.ok(calls.includes('GET /api/environments/uninstall/windows'))
+  assert.ok(calls.includes('GET /api/environments/uninstall/solaris'))
   assert.equal(calls.filter((call) => call.endsWith('/install-code')).length, 3)
   assert.equal(
-    calls.filter((call) => call === `GET /api/harness/environments/${environmentId}/install`).length,
+    calls.filter((call) => call === `GET /api/environments/${environmentId}/install`).length,
     5,
     'case must download once, reject a missing code, a tampered code and the rotated code, then download the new script',
   )
@@ -231,11 +231,11 @@ for (const failure of ['http', 'timeout']) {
     }
     const token = 'synthetic-registration-token'
     const code = 'synthetic-install-code'
-    const cardPath = `/api/harness/environments/${card.id}`
+    const cardPath = `/api/environments/${card.id}`
     let deleted = false
     const ctx = {
       async call(method, path, body) {
-        if (method === 'POST' && path === '/api/harness/environments') {
+        if (method === 'POST' && path === '/api/environments') {
           return { json: { data: { ...card, registrationToken: token } } }
         }
         if (method === 'PUT' && path === `${cardPath}/install-config`) {

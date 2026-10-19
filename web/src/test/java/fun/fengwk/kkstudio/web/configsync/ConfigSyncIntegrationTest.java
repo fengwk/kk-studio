@@ -187,10 +187,8 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     assertFalse(body(parseError).contains(credential));
 
     // 清理本用例新建资源，避免污染同库后续断言。
-    deleteOk(
-        "/api/harness/environments/" + envDto.path("id").asText(), envDto.path("version").asText());
-    deleteOk(
-        "/api/ai/catalog/providers/" + provider, findProvider(provider).path("version").asText());
+    deleteOk("/api/environments/" + envDto.path("id").asText(), envDto.path("version").asText());
+    deleteOk("/api/providers/" + provider, findProvider(provider).path("version").asText());
   }
 
   // ---------------------------------------------------------------- import precheck
@@ -223,8 +221,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     assertTrue(newCheck.path("updated").isEmpty());
     assertNull(findProvider(created), "check must not write");
 
-    deleteOk(
-        "/api/ai/catalog/providers/" + existing, findProvider(existing).path("version").asText());
+    deleteOk("/api/providers/" + existing, findProvider(existing).path("version").asText());
   }
 
   /** 预检查与执行都严格拒绝未知请求字段与错误字段类型。 */
@@ -391,8 +388,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     assertTrue(imported.path("skipped").findValuesAsString("kind").contains("unknownThing"));
     assertNotNull(findProvider(provider));
 
-    deleteOk(
-        "/api/ai/catalog/providers/" + provider, findProvider(provider).path("version").asText());
+    deleteOk("/api/providers/" + provider, findProvider(provider).path("version").asText());
   }
 
   /**
@@ -448,8 +444,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     assertNull(
         findProvider(unknownProvider),
         "entry carrying an unknown field must be skipped, not imported");
-    deleteOk(
-        "/api/ai/catalog/providers/" + provider, findProvider(provider).path("version").asText());
+    deleteOk("/api/providers/" + provider, findProvider(provider).path("version").asText());
   }
 
   // ---------------------------------------------------------------- seven kinds round trip
@@ -502,7 +497,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     link.setVariant("default");
     link.setConfig(agentConfig(List.of(mcpTool), List.of(skillRef(pkg, "dev")), List.of(agentA)));
     link.setExpectedVersion(agentBPage.path("version").asText());
-    putData("/api/ai/catalog/agents/" + agentB, link);
+    putData("/api/agents/" + agentB, link);
 
     List<Map<String, String>> selection =
         List.of(
@@ -533,15 +528,14 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     unlinkA.setVariant("default");
     unlinkA.setConfig(agentConfig(List.of(mcpTool), List.of(skillRef(pkg, "dev")), List.of()));
     unlinkA.setExpectedVersion(agentADto.path("version").asText());
-    JsonNode unlinkedA = putData("/api/ai/catalog/agents/" + agentA, unlinkA);
-    deleteOk("/api/ai/catalog/agents/" + agentB, findAgent(agentB).path("version").asText());
-    deleteOk("/api/ai/catalog/agents/" + agentA, unlinkedA.path("version").asText());
-    deleteOk("/api/ai/catalog/models/" + provider + "/" + model, modelDto.path("version").asText());
-    deleteOk("/api/ai/catalog/skill-packages/" + pkg, skillDto.path("version").asText());
-    deleteOk("/api/ai/mcp-servers/" + mcpName, discoveredMcp.path("version").asText());
-    deleteOk(
-        "/api/harness/environments/" + envDto.path("id").asText(), envDto.path("version").asText());
-    deleteOk("/api/ai/catalog/providers/" + provider, providerDto.path("version").asText());
+    JsonNode unlinkedA = putData("/api/agents/" + agentA, unlinkA);
+    deleteOk("/api/agents/" + agentB, findAgent(agentB).path("version").asText());
+    deleteOk("/api/agents/" + agentA, unlinkedA.path("version").asText());
+    deleteOk("/api/models/" + provider + "/" + model, modelDto.path("version").asText());
+    deleteOk("/api/skill-packages/" + pkg, skillDto.path("version").asText());
+    deleteOk("/api/mcp-servers/" + mcpName, discoveredMcp.path("version").asText());
+    deleteOk("/api/environments/" + envDto.path("id").asText(), envDto.path("version").asText());
+    deleteOk("/api/providers/" + provider, providerDto.path("version").asText());
     assertNull(findAgent(agentA), "agent must be gone before import");
 
     JsonNode importResult = importYaml(yaml);
@@ -585,12 +579,12 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
         envDto.path("id").asText().equals(reEnv.path("id").asText()),
         "re-created environment must receive a new UUID");
     assertEquals(RegistrationTokens.hash(token), storedTokenHash(reEnv.path("id").asText()));
-    JsonNode reMcp = getData("/api/ai/mcp-servers/" + mcpName);
+    JsonNode reMcp = getData("/api/mcp-servers/" + mcpName);
     assertEquals("AVAILABLE", reMcp.path("discoveryStatus").asText());
     assertEquals(1, reMcp.path("toolCount").asInt());
 
     // Skill exact commit 恢复。
-    JsonNode reSkill = getData("/api/ai/catalog/skill-packages/" + pkg);
+    JsonNode reSkill = getData("/api/skill-packages/" + pkg);
     assertEquals(commit1, reSkill.path("currentCommit").asText());
     assertEquals(1, reSkill.path("skills").size());
 
@@ -691,13 +685,13 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
         git.commit(Map.of("dev/SKILL.md", DEV_SKILL_MD, "review/SKILL.md", REVIEW_SKILL_MD));
     assertFalse(commit2.equals(commit1));
 
-    deleteOk("/api/ai/catalog/skill-packages/" + pkg, skillDto.path("version").asText());
+    deleteOk("/api/skill-packages/" + pkg, skillDto.path("version").asText());
     JsonNode importResult = importYaml(yaml);
     assertTrue(
         importResult.path("imported").findValuesAsString("name").contains(pkg),
         "skill package must be imported");
 
-    JsonNode reSkill = getData("/api/ai/catalog/skill-packages/" + pkg);
+    JsonNode reSkill = getData("/api/skill-packages/" + pkg);
     assertEquals(
         commit1, reSkill.path("currentCommit").asText(), "must restore exact commit, not HEAD");
     assertEquals(1, reSkill.path("skills").size(), "manifest must come from the exact commit");
@@ -766,7 +760,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
             .path("yaml")
             .asText();
     putData(
-        "/api/ai/catalog/providers/" + name,
+        "/api/providers/" + name,
         Map.of(
             "providerType", "openai",
             "baseUrl", "https://example.com/v1",
@@ -1117,7 +1111,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
         postData("/api/settings/sync/export", exportRequest(ref("models", provider + "/" + model)))
             .path("yaml")
             .asText();
-    deleteOk("/api/ai/catalog/models/" + provider + "/" + model, modelDto.path("version").asText());
+    deleteOk("/api/models/" + provider + "/" + model, modelDto.path("version").asText());
     importYaml(yaml);
     JsonNode reModel = findModel(provider, model);
     assertEquals(
@@ -1145,7 +1139,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
   private JsonNode createProvider(String name, String description) throws Exception {
     // credential 为 WRITE_ONLY；测试请求不能通过响应侧 DTO 序列化，否则会悄悄丢掉待验证的凭据。
     return postData(
-        "/api/ai/catalog/providers",
+        "/api/providers",
         Map.of(
             "name",
             name,
@@ -1174,7 +1168,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     update.put("modelCallTimeoutMillis", source.getModelCallTimeoutMillis());
     update.put("modelCallIdleTimeoutMillis", source.getModelCallIdleTimeoutMillis());
     update.put("expectedVersion", expectedVersion);
-    putData("/api/ai/catalog/providers/" + name, update);
+    putData("/api/providers/" + name, update);
   }
 
   private JsonNode createModel(
@@ -1186,7 +1180,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     dto.setModelId("wire-" + name);
     dto.setDescription("model " + name);
     dto.setConfig(modelConfig(protocolOptionsJson, inputPrice));
-    return postData("/api/ai/catalog/models", dto);
+    return postData("/api/models", dto);
   }
 
   private JsonNode createAgent(
@@ -1203,7 +1197,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     dto.setModel(model);
     dto.setVariant("default");
     dto.setConfig(agentConfig(tools, skills, subagents));
-    return postData("/api/ai/catalog/agents", dto);
+    return postData("/api/agents", dto);
   }
 
   private JsonNode createSkill(GitFixture git, String pkg, String description) throws Exception {
@@ -1212,7 +1206,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     dto.setDescription(description);
     dto.setRepositoryUrl(git.url());
     dto.setBranch("main");
-    return postData("/api/ai/catalog/skill-packages", dto);
+    return postData("/api/skill-packages", dto);
   }
 
   private JsonNode createMcp(String name, String url, Map<String, String> headers)
@@ -1223,18 +1217,18 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     dto.setHeaders(headers);
     dto.setEnabled(true);
     dto.setTimeoutMillis(10000L);
-    return postData("/api/ai/mcp-servers", dto);
+    return postData("/api/mcp-servers", dto);
   }
 
   private JsonNode discover(String name, String expectedVersion) throws Exception {
     return postData(
-        "/api/ai/mcp-servers/" + name + "/discover?expectedVersion=" + expectedVersion, null);
+        "/api/mcp-servers/" + name + "/discover?expectedVersion=" + expectedVersion, null);
   }
 
   private JsonNode createEnvironment(String name) throws Exception {
     EnvironmentCreateDTO dto = new EnvironmentCreateDTO();
     dto.setName(name);
-    return postData("/api/harness/environments", dto);
+    return postData("/api/environments", dto);
   }
 
   private JsonNode importYaml(String yaml) throws Exception {
@@ -1311,13 +1305,11 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
   }
 
   private JsonNode findProvider(String name) throws Exception {
-    return findByName(
-        getData("/api/ai/catalog/providers?pageNumber=1&pageSize=100").path("results"), name);
+    return findByName(getData("/api/providers?pageNumber=1&pageSize=100").path("results"), name);
   }
 
   private JsonNode findModel(String providerName, String name) throws Exception {
-    for (JsonNode node :
-        getData("/api/ai/catalog/models?pageNumber=1&pageSize=100").path("results")) {
+    for (JsonNode node : getData("/api/models?pageNumber=1&pageSize=100").path("results")) {
       if (name.equals(node.path("name").asText())
           && providerName.equals(node.path("providerName").asText())) {
         return node;
@@ -1327,12 +1319,11 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
   }
 
   private JsonNode findAgent(String name) throws Exception {
-    return findByName(
-        getData("/api/ai/catalog/agents?pageNumber=1&pageSize=100").path("results"), name);
+    return findByName(getData("/api/agents?pageNumber=1&pageSize=100").path("results"), name);
   }
 
   private JsonNode findEnvironment(String name) throws Exception {
-    return findByName(getData("/api/harness/environments"), name);
+    return findByName(getData("/api/environments"), name);
   }
 
   private static JsonNode findByName(JsonNode results, String name) {

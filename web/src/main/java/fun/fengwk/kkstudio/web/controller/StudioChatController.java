@@ -31,7 +31,7 @@ import java.util.function.Supplier;
 
 /** Chat 集合 CRUD 与 Chat owner 的 Harness Session 摘要查询。 */
 @AllArgsConstructor
-@RequestMapping("/api/ai/chats")
+@RequestMapping("/api/chats")
 @RestController
 public class StudioChatController {
 

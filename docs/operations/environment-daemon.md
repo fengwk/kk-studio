@@ -45,7 +45,7 @@ stdout/stderr。
 命令从当前 Studio 地址下载脚本，不在终端粘贴配置或长期注册令牌。Linux/macOS 命令形如：
 
 ```bash
-(set -o pipefail; curl -fsSL 'https://studio.example.com/api/harness/environments/<id>/install?code=<code>' | bash)
+(set -o pipefail; curl -fsSL 'https://studio.example.com/api/environments/<id>/install?code=<code>' | bash)
 ```
 
 Windows 命令先完整下载脚本，再在 PowerShell 的局部作用域执行；下载或安装失败都会返回失败。
@@ -71,8 +71,8 @@ Environment 卡片上的“卸载”按钮复制一行卸载命令，从 Studio 
 
 如果外部入口要求浏览器登录，需允许目标主机访问这两个 GET 脚本下载路径：
 
-- `/api/harness/environments/{environmentId}/install`
-- `/api/harness/environments/uninstall/{operatingSystem}`
+- `/api/environments/{environmentId}/install`
+- `/api/environments/uninstall/{operatingSystem}`
 
 安装下载由 code 校验授权；签发 code 的 POST 与其它管理 API 仍须受入口访问控制保护。
 
@@ -187,15 +187,15 @@ Web 保存的 `EnvironmentInstallConfigDTO`：
   `rootMarkers` / `firstMatchMarkers` 是项目相对路径、不得为绝对路径或含 `..`。**未声明的字段
   一律拒绝**，包括 `requestTimeoutMs`。
 
-`PUT /api/harness/environments/{id}/install-config` 以 `{expectedVersion, installConfig}` 保存，
+`PUT /api/environments/{id}/install-config` 以 `{expectedVersion, installConfig}` 保存，
 `installConfig` 不可为 null；版本不匹配返回冲突，配置未变则幂等不写行。响应 Card 不包含 token。
 安装 UI 不读取长期 token，只请求安装 code：
 
 | 入口 | 契约 |
 | --- | --- |
-| `POST /api/harness/environments/{id}/install-code` | `{expectedVersion}` 校验已保存版本，返回 `{code, expiresAt}`；不改变环境版本或配置 |
-| `GET /api/harness/environments/{id}/install?code=...` | 校验 code 后，按当前保存的 OS、配置和 token 返回 UTF-8 纯文本脚本 |
-| `GET /api/harness/environments/uninstall/{operatingSystem}` | 返回对应 OS 的卸载脚本，不含环境配置或凭据 |
+| `POST /api/environments/{id}/install-code` | `{expectedVersion}` 校验已保存版本，返回 `{code, expiresAt}`；不改变环境版本或配置 |
+| `GET /api/environments/{id}/install?code=...` | 校验 code 后，按当前保存的 OS、配置和 token 返回 UTF-8 纯文本脚本 |
+| `GET /api/environments/uninstall/{operatingSystem}` | 返回对应 OS 的卸载脚本，不含环境配置或凭据 |
 
 签发与脚本响应均禁止缓存。code 以当前 registration token 对安装用途、环境 ID 和到期时间做
 HMAC-SHA256 签名，无独立存储；到期、篡改、错环境、已被兑换或 token 轮换后，下载被拒绝。
@@ -365,8 +365,8 @@ HOME 也不是默认工作目录。
 
 | 入口 | 契约 |
 | --- | --- |
-| `POST /api/harness/environments/{id}/update` | 发起一次受管更新；目标版本由运行中 Platform 的打包版本决定。目标不可用、已有更新在途或存在在途调用/工作时以冲突拒绝 |
-| `GET /api/harness/environments/{id}/update` | 只读最近一次更新投影（`operationId`、`targetVersion`、`phase`、可选 `error`、时间戳）；从未更新时为 null |
+| `POST /api/environments/{id}/update` | 发起一次受管更新；目标版本由运行中 Platform 的打包版本决定。目标不可用、已有更新在途或存在在途调用/工作时以冲突拒绝 |
+| `GET /api/environments/{id}/update` | 只读最近一次更新投影（`operationId`、`targetVersion`、`phase`、可选 `error`、时间戳）；从未更新时为 null |
 
 更新目标不是“最新版”也不是浏览者提供的 URL，而是 **运行中 Platform 版本对应的官方 GitHub Release**：
 必须是非草稿、tag 匹配、五件套资产齐全（`kk-studio-daemon-<tag>-<os>-<arch>.tar.gz`、其 `.tar.gz.sha256`、确定性元数据、`LICENSE`、

@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.share.ai.chat;
 import com.fasterxml.jackson.annotation.JsonAnySetter;
 import lombok.Data;
 
-/** {@code /api/ai/chats} 的创建请求体。 */
+/** {@code /api/chats} 的创建请求体。 */
 @Data
 public class ChatCreateDTO {
 

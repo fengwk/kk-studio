@@ -29,7 +29,7 @@ import java.util.List;
  * commit。所有写操作都携带客户端已展示的 CAS {@code expectedVersion}，陈旧 Card 统一得到 version conflict。
  */
 @AllArgsConstructor
-@RequestMapping("/api/ai/catalog")
+@RequestMapping("/api")
 @RestController
 public class StudioSkillCatalogController {
 

@@ -22,7 +22,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentModelUpdateDTO;
 
 /** model 全局 CRUD API。 */
 @AllArgsConstructor
-@RequestMapping("/api/ai/catalog/models")
+@RequestMapping("/api/models")
 @RestController
 public class StudioAgentModelController {
 

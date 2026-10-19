@@ -34,21 +34,21 @@ function mockContext(def, { hitAt = 2, fault } = {}) {
         deleted.push(url)
         return response(null)
       }
-      if (url.startsWith('/api/ai/catalog/providers?')) {
+      if (url.startsWith('/api/providers?')) {
         return response([{ name: def.providerName, providerType: def.providerType,
           configured: true, baseUrl: 'https://mock.invalid', config: { private: 'excluded' } }])
       }
-      if (url.startsWith('/api/ai/catalog/models?')) {
+      if (url.startsWith('/api/models?')) {
         return response([{ providerName: def.providerName, name: def.modelName,
           config: { variants: def.variants.map((id) => ({ id })), private: 'excluded' } }])
       }
-      if (method === 'POST' && url === '/api/ai/catalog/agents') {
+      if (method === 'POST' && url === '/api/agents') {
         assert.deepEqual(body.config.tools, [])
         assert.equal(body.model, `${def.providerName}/${def.modelName}`)
         assert.equal(body.variant, def.variant)
         return response({ name: body.name, version: '0' }, 201)
       }
-      if (method === 'POST' && url === '/api/ai/chats') {
+      if (method === 'POST' && url === '/api/chats') {
         return response(
           { id: chatId, agentName: body.agentName, environmentName: body.environmentName ?? null, version: '0' },
           201,
@@ -56,12 +56,12 @@ function mockContext(def, { hitAt = 2, fault } = {}) {
       }
       if (
         method === 'POST'
-        && (url === '/api/harness/command-batches'
-          || url === `/api/harness/threads/${thread?.threadId}/command-batches`)
+        && (url === '/api/command-batches'
+          || url === `/api/threads/${thread?.threadId}/command-batches`)
       ) {
         requestCount++
         snapshotReads = 0
-        if (url === '/api/harness/command-batches') {
+        if (url === '/api/command-batches') {
           assert.equal(body.target.type, 'NEW_SESSION')
           thread = { threadId: body.target.threadId, sessionId: body.target.sessionId,
             name: 'cache-test', parentThreadId: null, status: 'IDLE', processing: false,
@@ -100,7 +100,7 @@ function mockContext(def, { hitAt = 2, fault } = {}) {
           })),
         }, 202)
       }
-      if (method === 'GET' && url === `/api/harness/threads/${thread?.threadId}`) {
+      if (method === 'GET' && url === `/api/threads/${thread?.threadId}`) {
         snapshotReads++
         const snapshot = { thread, entries, modelInvocation: null, queuedCommands: [], toolInvocations: [] }
         // 稳定轮询之后的独立快照发生变化，验证 case 自身也会拒绝新出现的 active work。

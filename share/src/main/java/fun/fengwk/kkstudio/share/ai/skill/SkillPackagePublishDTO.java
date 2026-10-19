@@ -4,7 +4,7 @@ import com.fasterxml.jackson.annotation.JsonAnySetter;
 import lombok.Data;
 
 /**
- * {@code POST /api/ai/catalog/skill-packages/{packageName}/update} 请求体：发布一个 exact commit。
+ * {@code POST /api/skill-packages/{packageName}/update} 请求体：发布一个 exact commit。
  *
  * <p>{@code targetCommit} 必须是 Card 已展示的完整 commit：即使 branch 随后又前进，也不会暗中切换到用户未确认的 HEAD。服务端要求它等于该
  * {@code expectedVersion} 快照中的 observedHeadCommit，并在一次 CAS 中原子替换 current commit 与 manifest。

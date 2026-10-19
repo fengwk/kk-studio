@@ -51,7 +51,7 @@ export const SCENARIOS = Object.freeze([
     id: 'catalog',
     name: 'Catalog models',
     concurrency: 16,
-    path: '/api/ai/catalog/models?pageNumber=1&pageSize=20',
+    path: '/api/models?pageNumber=1&pageSize=20',
   }),
   Object.freeze({
     id: 'canvas',
@@ -871,7 +871,7 @@ function operationFor(scenarioId, manager, state) {
   if (scenarioId === 'catalog') {
     return async () => {
       validateCatalogResponse(
-        await manager.request('GET', '/api/ai/catalog/models?pageNumber=1&pageSize=20'),
+        await manager.request('GET', '/api/models?pageNumber=1&pageSize=20'),
       )
     }
   }

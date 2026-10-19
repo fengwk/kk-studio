@@ -56,7 +56,7 @@ if ($ErrorActionPreference -ne 'Continue' -or $script -ne 'outer') { throw 'call
       expect(record.marker).toBe('执行-汉字')
       expect(record.token).toBe('private-synthetic-token')
       expect(record.url).toBe(
-        `https://studio.example.com/api/harness/environments/${encodeURIComponent(environmentId)}/install?code=${encodeURIComponent(installCode)}`,
+        `https://studio.example.com/api/environments/${encodeURIComponent(environmentId)}/install?code=${encodeURIComponent(installCode)}`,
       )
       expect(downloaded.stdout + downloaded.stderr).not.toContain('private-synthetic-token')
       expect(existsSync(join(dir, 'NEVER'))).toBe(false)
@@ -72,7 +72,7 @@ if ($ErrorActionPreference -ne 'Continue' -or $script -ne 'outer') { throw 'call
       const removed = run(uninstall, 'ok')
       expect(removed.status).toBe(0)
       expect(JSON.parse(readFileSync(recordPath, 'utf8')).url).toBe(
-        'https://studio.example.com/api/harness/environments/uninstall/windows',
+        'https://studio.example.com/api/environments/uninstall/windows',
       )
     } finally {
       rmSync(dir, { recursive: true, force: true })

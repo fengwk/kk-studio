@@ -156,7 +156,7 @@ class TestSyncProviderCredentials(unittest.TestCase):
         # 1 GET + 4 PUTs = 5 calls
         self.assertEqual(5, len(calls))
         get_url, get_payload, _ = calls[0]
-        self.assertTrue(get_url.endswith("/api/ai/catalog/providers?pageNumber=1&pageSize=50"))
+        self.assertTrue(get_url.endswith("/api/providers?pageNumber=1&pageSize=50"))
         self.assertIsNone(get_payload)
 
         put_calls = calls[1:]
@@ -172,7 +172,7 @@ class TestSyncProviderCredentials(unittest.TestCase):
 
         for i, (name, p_type, base, secret) in enumerate(expected_puts):
             put_url, payload, headers = put_calls[i]
-            self.assertEqual(f"http://backend/api/ai/catalog/providers/{name}", put_url)
+            self.assertEqual(f"http://backend/api/providers/{name}", put_url)
             self.assertEqual("application/json", headers["Content-Type"])
             self.assertEqual(p_type, payload["providerType"])
             self.assertEqual(base, payload["baseUrl"])

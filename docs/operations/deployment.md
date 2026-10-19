@@ -281,7 +281,7 @@ Daemon 不发布宿主端口，只经 `ws://app:8080/api/harness/environment-dae
 入口为 `/opt/kk-studio/daemon/main.js`，运行用户为 uid/gid `10001`。Daemon 只挂载一个 `/workspace` named volume，
 `workspace-init` 完成 owner 初始化（`chown 10001:10001`）后 Daemon 才启动。
 
-`up` 等待 PostgreSQL health、App `/actuator/health` 和公共 `GET /api/harness/environments` 的
+`up` 等待 PostgreSQL health、App `/actuator/health` 和公共 `GET /api/environments` 的
 `status=READY`。`inspect` fail closed 检查：
 
 - Daemon uid 不是 root（10001）；

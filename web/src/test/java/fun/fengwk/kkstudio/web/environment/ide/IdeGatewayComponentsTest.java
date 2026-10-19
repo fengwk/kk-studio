@@ -262,7 +262,7 @@ class IdeGatewayComponentsTest {
             dataPlane,
             mock(IdeBrowserWebSocketGateway.class));
 
-    MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/harness/environments");
+    MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/environments");
     request.addHeader("Host", "studio.test");
     MockHttpServletResponse response = new MockHttpServletResponse();
     MockFilterChain chain = new MockFilterChain();

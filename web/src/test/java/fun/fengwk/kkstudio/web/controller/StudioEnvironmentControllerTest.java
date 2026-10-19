@@ -62,7 +62,7 @@ class StudioEnvironmentControllerTest {
             .build();
   }
 
-  /** 意图：验证 GET /api/harness/environments 列表查询返回 200 与卡片列表。 */
+  /** 意图：验证 GET /api/environments 列表查询返回 200 与卡片列表。 */
   @Test
   void listEnvironmentsReturnsOk() throws Exception {
     EnvironmentCardDTO card = new EnvironmentCardDTO();
@@ -72,14 +72,14 @@ class StudioEnvironmentControllerTest {
     when(environmentService.list()).thenReturn(List.of(card));
 
     mockMvc
-        .perform(get("/api/harness/environments"))
+        .perform(get("/api/environments"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data[0].id").value(ENV_ID.toString()))
         .andExpect(jsonPath("$.data[0].name").value("dev"))
         .andExpect(jsonPath("$.data[0].skills").doesNotExist());
   }
 
-  /** 意图：验证 GET /api/harness/environments/{environmentId} 查询已存在的环境返回 200 与对应的卡片信息。 */
+  /** 意图：验证 GET /api/environments/{environmentId} 查询已存在的环境返回 200 与对应的卡片信息。 */
   @Test
   void getEnvironmentReturnsOk() throws Exception {
     EnvironmentCardDTO card = new EnvironmentCardDTO();
@@ -88,7 +88,7 @@ class StudioEnvironmentControllerTest {
     when(environmentService.get(eq(EnvironmentId.of(ENV_ID)))).thenReturn(card);
 
     mockMvc
-        .perform(get("/api/harness/environments/" + ENV_ID))
+        .perform(get("/api/environments/" + ENV_ID))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.id").value(ENV_ID.toString()))
         .andExpect(jsonPath("$.data.name").value("dev"))
@@ -105,7 +105,7 @@ class StudioEnvironmentControllerTest {
         .thenThrow(new AiResourceNotFoundException("environment"));
 
     mockMvc
-        .perform(get("/api/harness/environments/" + ENV_ID))
+        .perform(get("/api/environments/" + ENV_ID))
         .andExpect(status().isNotFound())
         .andExpect(jsonPath("$.status").value(404))
         .andExpect(jsonPath("$.code").value("resource_not_found"))
@@ -113,7 +113,7 @@ class StudioEnvironmentControllerTest {
         .andExpect(jsonPath("$.errors.detail").value("environment not found"));
   }
 
-  /** 意图：验证 POST /api/harness/environments 创建环境成功返回 HTTP 201 Created，且携带凭据的响应禁止缓存。 */
+  /** 意图：验证 POST /api/environments 创建环境成功返回 HTTP 201 Created，且携带凭据的响应禁止缓存。 */
   @Test
   void createEnvironmentReturnsCreated() throws Exception {
     EnvironmentCardDTO card = new EnvironmentCardDTO();
@@ -124,7 +124,7 @@ class StudioEnvironmentControllerTest {
 
     mockMvc
         .perform(
-            post("/api/harness/environments")
+            post("/api/environments")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"name\":\"new-env\"}"))
         .andExpect(status().isCreated())
@@ -133,7 +133,7 @@ class StudioEnvironmentControllerTest {
         .andExpect(jsonPath("$.data.registrationToken").value("secret-token"));
   }
 
-  /** 意图：验证 GET /api/harness/environments/{id}/events 按时间正序返回事件窗口。 */
+  /** 意图：验证 GET /api/environments/{id}/events 按时间正序返回事件窗口。 */
   @Test
   void listEnvironmentEventsReturnsChronologicalWindow() throws Exception {
     EnvironmentEventDTO connecting = new EnvironmentEventDTO();
@@ -150,7 +150,7 @@ class StudioEnvironmentControllerTest {
         .thenReturn(List.of(connecting, failed));
 
     mockMvc
-        .perform(get("/api/harness/environments/" + ENV_ID + "/events"))
+        .perform(get("/api/environments/" + ENV_ID + "/events"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.length()").value(2))
         .andExpect(jsonPath("$.data[0].type").value("CONNECTING"))
@@ -166,15 +166,12 @@ class StudioEnvironmentControllerTest {
         .thenThrow(new AiResourceNotFoundException("environment"));
 
     mockMvc
-        .perform(get("/api/harness/environments/" + ENV_ID + "/events"))
+        .perform(get("/api/environments/" + ENV_ID + "/events"))
         .andExpect(status().isNotFound())
         .andExpect(jsonPath("$.code").value("resource_not_found"));
   }
 
-  /**
-   * 意图：验证 GET /api/harness/environments/{id} 普通详情只返回 Card 投影，绝不返回 registrationToken（凭据不进入列表/详情
-   * 缓存路径）。
-   */
+  /** 意图：验证 GET /api/environments/{id} 普通详情只返回 Card 投影，绝不返回 registrationToken（凭据不进入列表/详情 缓存路径）。 */
   @Test
   void getEnvironmentNeverReturnsRegistrationToken() throws Exception {
     EnvironmentCardDTO card = new EnvironmentCardDTO();
@@ -183,15 +180,15 @@ class StudioEnvironmentControllerTest {
     when(environmentService.get(eq(EnvironmentId.of(ENV_ID)))).thenReturn(card);
 
     mockMvc
-        .perform(get("/api/harness/environments/" + ENV_ID))
+        .perform(get("/api/environments/" + ENV_ID))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.id").value(ENV_ID.toString()))
         .andExpect(jsonPath("$.data.registrationToken").doesNotExist());
   }
 
   /**
-   * 意图：验证 POST /api/harness/environments/{environmentId}/registration-token 从请求体读取
-   * {expectedVersion} 并轮换 token，返回 200 且禁止缓存。
+   * 意图：验证 POST /api/environments/{environmentId}/registration-token 从请求体读取 {expectedVersion} 并轮换
+   * token，返回 200 且禁止缓存。
    */
   @Test
   void rotateTokenReturnsOk() throws Exception {
@@ -202,7 +199,7 @@ class StudioEnvironmentControllerTest {
 
     mockMvc
         .perform(
-            post("/api/harness/environments/" + ENV_ID + "/registration-token")
+            post("/api/environments/" + ENV_ID + "/registration-token")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"expectedVersion\":\"0\"}"))
         .andExpect(status().isOk())
@@ -217,20 +214,20 @@ class StudioEnvironmentControllerTest {
   void environmentUpdateEndpointIsGone() throws Exception {
     mockMvc
         .perform(
-            put("/api/harness/environments/" + ENV_ID)
+            put("/api/environments/" + ENV_ID)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"name\":\"renamed\",\"expectedVersion\":\"0\"}"))
         .andExpect(status().isMethodNotAllowed());
   }
 
   /**
-   * 意图：验证 DELETE /api/harness/environments/{environmentId} 依然通过 query param 传递 expectedVersion，并返回
-   * HTTP 204 No Content。
+   * 意图：验证 DELETE /api/environments/{environmentId} 依然通过 query param 传递 expectedVersion，并返回 HTTP 204
+   * No Content。
    */
   @Test
   void deleteEnvironmentReturnsNoContent() throws Exception {
     mockMvc
-        .perform(delete("/api/harness/environments/" + ENV_ID).param("expectedVersion", "0"))
+        .perform(delete("/api/environments/" + ENV_ID).param("expectedVersion", "0"))
         .andExpect(status().isNoContent());
 
     verify(environmentService).delete(EnvironmentId.of(ENV_ID), "0");
@@ -250,7 +247,7 @@ class StudioEnvironmentControllerTest {
     when(environmentService.get(eq(EnvironmentId.of(ENV_ID)))).thenReturn(card);
 
     mockMvc
-        .perform(get("/api/harness/environments/" + ENV_ID))
+        .perform(get("/api/environments/" + ENV_ID))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.operatingSystem").value("linux"))
         .andExpect(jsonPath("$.data.timeZone").value("UTC"))
@@ -268,7 +265,7 @@ class StudioEnvironmentControllerTest {
     when(environmentService.get(eq(EnvironmentId.of(ENV_ID)))).thenReturn(card);
 
     mockMvc
-        .perform(get("/api/harness/environments/" + ENV_ID))
+        .perform(get("/api/environments/" + ENV_ID))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.operatingSystem").doesNotExist())
         .andExpect(jsonPath("$.data.timeZone").doesNotExist())
@@ -286,7 +283,7 @@ class StudioEnvironmentControllerTest {
 
     mockMvc
         .perform(
-            post("/api/harness/environments/" + ENV_ID + "/install-code")
+            post("/api/environments/" + ENV_ID + "/install-code")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"expectedVersion\":\"4\"}"))
         .andExpect(status().isOk())
@@ -305,8 +302,7 @@ class StudioEnvironmentControllerTest {
             new AiValidationException("code", "install code is missing, expired or invalid"));
 
     mockMvc
-        .perform(
-            get("/api/harness/environments/" + ENV_ID + "/install").param("code", "expired-code"))
+        .perform(get("/api/environments/" + ENV_ID + "/install").param("code", "expired-code"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.errors.resource").value("code"))
         .andExpect(content().string(not(containsString("expired-code"))));
@@ -320,8 +316,7 @@ class StudioEnvironmentControllerTest {
     when(environmentService.uninstallationScript("windows")).thenReturn("uninstall windows");
 
     mockMvc
-        .perform(
-            get("/api/harness/environments/" + ENV_ID + "/install").param("code", "valid-code"))
+        .perform(get("/api/environments/" + ENV_ID + "/install").param("code", "valid-code"))
         .andExpect(status().isOk())
         .andExpect(header().string(HttpHeaders.CONTENT_TYPE, "text/plain;charset=UTF-8"))
         .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
@@ -329,7 +324,7 @@ class StudioEnvironmentControllerTest {
         .andExpect(content().string("echo 汉字 ' $ `"))
         .andExpect(content().string(not(containsString("\"data\""))));
     mockMvc
-        .perform(get("/api/harness/environments/uninstall/windows"))
+        .perform(get("/api/environments/uninstall/windows"))
         .andExpect(status().isOk())
         .andExpect(header().string(HttpHeaders.CONTENT_TYPE, "text/plain;charset=UTF-8"))
         .andExpect(content().string("uninstall windows"));
@@ -346,18 +341,18 @@ class StudioEnvironmentControllerTest {
                 "operatingSystem", "operatingSystem must be linux, macos or windows"));
 
     mockMvc
-        .perform(get("/api/harness/environments/" + ENV_ID + "/install").param("code", "bad-code"))
+        .perform(get("/api/environments/" + ENV_ID + "/install").param("code", "bad-code"))
         .andExpect(status().isNotFound())
         .andExpect(content().string(not(containsString(ENV_ID.toString()))));
     mockMvc
-        .perform(get("/api/harness/environments/" + ENV_ID + "/install"))
+        .perform(get("/api/environments/" + ENV_ID + "/install"))
         .andExpect(status().isBadRequest());
     mockMvc
-        .perform(get("/api/harness/environments/not-a-uuid/install").param("code", "x"))
+        .perform(get("/api/environments/not-a-uuid/install").param("code", "x"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.errors.resource").value("environmentId"));
     mockMvc
-        .perform(get("/api/harness/environments/uninstall/bad"))
+        .perform(get("/api/environments/uninstall/bad"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.errors.resource").value("operatingSystem"));
   }
@@ -366,7 +361,7 @@ class StudioEnvironmentControllerTest {
   @Test
   void runtimeEndpointIsGone() throws Exception {
     mockMvc
-        .perform(get("/api/harness/environments/" + ENV_ID + "/runtime"))
+        .perform(get("/api/environments/" + ENV_ID + "/runtime"))
         .andExpect(status().isNotFound());
   }
 
@@ -374,19 +369,16 @@ class StudioEnvironmentControllerTest {
   @Test
   void operationsEndpointsAreGone() throws Exception {
     mockMvc
-        .perform(get("/api/harness/environments/" + ENV_ID + "/operations"))
+        .perform(get("/api/environments/" + ENV_ID + "/operations"))
         .andExpect(status().isNotFound());
     mockMvc
         .perform(
-            get(
-                "/api/harness/environments/"
-                    + ENV_ID
-                    + "/operations/33333333-3333-3333-3333-333333333333"))
+            get("/api/environments/" + ENV_ID + "/operations/33333333-3333-3333-3333-333333333333"))
         .andExpect(status().isNotFound());
     mockMvc
         .perform(
             post(
-                "/api/harness/environments/"
+                "/api/environments/"
                     + ENV_ID
                     + "/operations/33333333-3333-3333-3333-333333333333/cancel"))
         .andExpect(status().isNotFound());

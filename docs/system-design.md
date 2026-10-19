@@ -119,7 +119,7 @@ Goal 由用户通过 typed `GOAL` 命令设置或清除。Agent 使用 `get_goal
 目标事实，Agent 进度供用户判断完成情况。压缩后仍生效的 Goal 作为 USER 级历史背景恢复。
 
 YOLO 是一棵执行树共享的即时策略：每个 Thread 记录不可变的执行根 `rootThreadId`（根指向自身），
-开关只保存在执行根上。`PUT /api/harness/threads/{threadId}/yolo`
+开关只保存在执行根上。`PUT /api/threads/{threadId}/yolo`
 只更新根，不与完整 Thread version 做 CAS；同值不推进 version，变化时只推进根 version
 精确 +1，最后一次序列化写入生效。子代理在权限决定时读取其执行根的开关，
 不复制开关，也不因根切换而更新自身 version。开启时跳过普通工具 preflight；
@@ -217,8 +217,8 @@ MCP 由 Backend 使用 Streamable HTTP 发现和执行，调用预算与取消�
 ### Agent Loop
 
 ```text
-创建型 POST /api/harness/command-batches
-  或 owner-free POST /api/harness/threads/{threadId}/command-batches
+创建型 POST /api/command-batches
+  或 owner-free POST /api/threads/{threadId}/command-batches
   -> Web 校验 owner/target 或 path threadId、UUID 与 cursor
   -> Platform 授权、附件物化与归属校验
   -> HarnessRuntime.acceptCommands / acceptOnThread

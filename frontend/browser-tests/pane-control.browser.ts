@@ -153,7 +153,7 @@ async function installPaneApi(
     const path = new URL(request.url()).pathname
     const method = request.method()
 
-    if (path === `/api/harness/threads/${ROOT_ID}/stop` && method === 'POST') {
+    if (path === `/api/threads/${ROOT_ID}/stop` && method === 'POST') {
       recorded.stopRequests.push(request.postDataJSON())
       await route.fulfill({
         json: {
@@ -167,16 +167,16 @@ async function installPaneApi(
       })
       return
     }
-    if (path === `/api/harness/threads/${ROOT_ID}/command-batches` && method === 'POST') {
+    if (path === `/api/threads/${ROOT_ID}/command-batches` && method === 'POST') {
       recorded.commandRequests.push(request.postDataJSON())
       await route.fulfill({ json: { status: 200, data: { accepted: true, thread: rootThread() } } })
       return
     }
-    if (path === `/api/harness/threads/${ROOT_ID}/tree`) {
+    if (path === `/api/threads/${ROOT_ID}/tree`) {
       await route.fulfill({ json: { status: 200, data: treeNodes() } })
       return
     }
-    if (path === `/api/harness/threads/${ROOT_ID}`) {
+    if (path === `/api/threads/${ROOT_ID}`) {
       const thread = rootThread(options.rootThreadOverrides)
       const data = {
         ...snapshot(thread),
@@ -185,7 +185,7 @@ async function installPaneApi(
       await route.fulfill({ json: { status: 200, data } })
       return
     }
-    if (path === `/api/harness/threads/${CHILD_ID}`) {
+    if (path === `/api/threads/${CHILD_ID}`) {
       await route.fulfill({ json: { status: 200, data: snapshot(childThread()) } })
       return
     }
@@ -193,13 +193,13 @@ async function installPaneApi(
       await route.fulfill({ json: { status: 200, data: interactionItems() } })
       return
     }
-    if (path === '/api/ai/catalog/agents' || path === '/api/ai/catalog/models') {
+    if (path === '/api/agents' || path === '/api/models') {
       await route.fulfill({
         json: { status: 200, data: { pageNumber: 1, pageSize: 50, totalCount: 0, results: [] } },
       })
       return
     }
-    if (path === '/api/harness/environments') {
+    if (path === '/api/environments') {
       await route.fulfill({ json: { status: 200, data: [] } })
       return
     }

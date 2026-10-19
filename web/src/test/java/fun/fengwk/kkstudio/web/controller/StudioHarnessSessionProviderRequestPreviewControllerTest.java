@@ -85,7 +85,7 @@ class StudioHarnessSessionProviderRequestPreviewControllerTest {
     String response =
         mockMvc
             .perform(
-                post("/api/harness/sessions/" + SESSION_ID + "/provider-request-preview")
+                post("/api/sessions/" + SESSION_ID + "/provider-request-preview")
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(draftBody()))
             .andExpect(status().isOk())
@@ -126,7 +126,7 @@ class StudioHarnessSessionProviderRequestPreviewControllerTest {
 
     mockMvc
         .perform(
-            post("/api/harness/sessions/" + SESSION_ID + "/provider-request-preview")
+            post("/api/sessions/" + SESSION_ID + "/provider-request-preview")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(draftBody()))
         .andExpect(status().isOk());
@@ -167,7 +167,7 @@ class StudioHarnessSessionProviderRequestPreviewControllerTest {
     mockMvc
         .perform(
             get(
-                "/api/harness/sessions/"
+                "/api/sessions/"
                     + SESSION_ID
                     + "/entries/"
                     + OUTPUT_ENTRY_ID
@@ -188,20 +188,17 @@ class StudioHarnessSessionProviderRequestPreviewControllerTest {
   void rejectsMalformedRequestsBeforeTouchingTheService() throws Exception {
     mockMvc
         .perform(
-            post("/api/harness/sessions/not-a-uuid/provider-request-preview")
+            post("/api/sessions/not-a-uuid/provider-request-preview")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(draftBody()))
         .andExpect(status().isBadRequest());
     mockMvc
         .perform(
-            get(
-                "/api/harness/sessions/"
-                    + SESSION_ID
-                    + "/entries/not-a-uuid/provider-request-preview"))
+            get("/api/sessions/" + SESSION_ID + "/entries/not-a-uuid/provider-request-preview"))
         .andExpect(status().isBadRequest());
     mockMvc
         .perform(
-            post("/api/harness/sessions/" + SESSION_ID + "/provider-request-preview")
+            post("/api/sessions/" + SESSION_ID + "/provider-request-preview")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     """
@@ -213,7 +210,7 @@ class StudioHarnessSessionProviderRequestPreviewControllerTest {
     // 命令顺序与终止输入必须与正式接受一致：SET_* 前缀 + 恰好一条末尾 USER_MESSAGE。
     mockMvc
         .perform(
-            post("/api/harness/sessions/" + SESSION_ID + "/provider-request-preview")
+            post("/api/sessions/" + SESSION_ID + "/provider-request-preview")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     """
@@ -240,7 +237,7 @@ class StudioHarnessSessionProviderRequestPreviewControllerTest {
                 Reason.PREVIEW_ATTACHMENT_NOT_READY, "attachment upload is not READY for preview"));
     mockMvc
         .perform(
-            post("/api/harness/sessions/" + SESSION_ID + "/provider-request-preview")
+            post("/api/sessions/" + SESSION_ID + "/provider-request-preview")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(draftBody()))
         .andExpect(status().isConflict())
@@ -256,7 +253,7 @@ class StudioHarnessSessionProviderRequestPreviewControllerTest {
         mockMvc
             .perform(
                 get(
-                    "/api/harness/sessions/"
+                    "/api/sessions/"
                         + SESSION_ID
                         + "/entries/"
                         + OUTPUT_ENTRY_ID
@@ -276,7 +273,7 @@ class StudioHarnessSessionProviderRequestPreviewControllerTest {
         .thenThrow(new HarnessRuntimeNotFoundException("session is missing"));
     mockMvc
         .perform(
-            post("/api/harness/sessions/" + SESSION_ID + "/provider-request-preview")
+            post("/api/sessions/" + SESSION_ID + "/provider-request-preview")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(draftBody()))
         .andExpect(status().isNotFound())
@@ -289,7 +286,7 @@ class StudioHarnessSessionProviderRequestPreviewControllerTest {
     mockMvc
         .perform(
             get(
-                "/api/harness/sessions/"
+                "/api/sessions/"
                     + SESSION_ID
                     + "/entries/"
                     + OUTPUT_ENTRY_ID

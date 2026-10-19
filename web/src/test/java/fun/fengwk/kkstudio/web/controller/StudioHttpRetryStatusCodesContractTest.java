@@ -75,7 +75,7 @@ class StudioHttpRetryStatusCodesContractTest {
 
     mockMvc
         .perform(
-            post("/api/ai/catalog/providers")
+            post("/api/providers")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"providerType\":\"openai\",\"credential\":\"k\"}"))
         .andExpect(status().is2xxSuccessful())
@@ -89,7 +89,7 @@ class StudioHttpRetryStatusCodesContractTest {
 
     mockMvc
         .perform(
-            post("/api/ai/catalog/providers")
+            post("/api/providers")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     "{\"providerType\":\"openai\",\"credential\":\"k\","
@@ -110,13 +110,13 @@ class StudioHttpRetryStatusCodesContractTest {
 
     mockMvc
         .perform(
-            post("/api/ai/catalog/providers")
+            post("/api/providers")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"providerType\":\"openai\",\"credential\":\"k\"}"))
         .andExpect(status().is2xxSuccessful());
     mockMvc
         .perform(
-            post("/api/ai/catalog/providers")
+            post("/api/providers")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(
                     "{\"providerType\":\"openai\",\"credential\":\"k\","
@@ -138,7 +138,7 @@ class StudioHttpRetryStatusCodesContractTest {
     for (String token : INVALID_LISTS) {
       mockMvc
           .perform(
-              post("/api/ai/catalog/providers")
+              post("/api/providers")
                   .contentType(MediaType.APPLICATION_JSON)
                   .content(
                       "{\"providerType\":\"openai\",\"credential\":\"k\","
@@ -149,7 +149,7 @@ class StudioHttpRetryStatusCodesContractTest {
 
       mockMvc
           .perform(
-              put("/api/ai/catalog/providers/p")
+              put("/api/providers/p")
                   .contentType(MediaType.APPLICATION_JSON)
                   .content(
                       "{\"providerType\":\"openai\",\"modelHttpRetryStatusCodes\":" + token + "}"))

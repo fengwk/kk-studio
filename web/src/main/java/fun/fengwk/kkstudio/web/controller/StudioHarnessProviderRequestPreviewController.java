@@ -29,7 +29,7 @@ import java.util.UUID;
  * 之类的「已接受」语义。预览不再要求客户端伪造产品 owner。
  */
 @RestController
-@RequestMapping("/api/harness/threads")
+@RequestMapping("/api/threads")
 public class StudioHarnessProviderRequestPreviewController {
 
   private final ProviderRequestPreviewService previewService;

@@ -10,20 +10,20 @@ import {
  * Harness Runtime 单轨契约 helper（创建型 owner-aware batch + owner-free Thread 续写 + Session/Thread 查询）。
  *
  * 端点事实源（web 模块）：
- * - POST /api/harness/command-batches                 创建型产品写入口：owner + NEW_SESSION/NEW_THREAD（202 accepted）
- * - POST /api/harness/threads/{id}/command-batches    既有 Thread 续写：owner-free，body 只带 cursor 与 commands
- * - POST /api/harness/threads/{id}/provider-request-preview  同一 owner-free body，200 返回发送前请求体
- * - GET  /api/ai/chats/{chatId}/sessions       Chat owner 的 Session 摘要（新到旧）
- * - GET  /api/harness/sessions/{sessionId}/threads   Session 下 Thread 摘要
- * - GET  /api/harness/sessions/{sessionId}/entries   完整不可变 Entry Tree
- * - GET  /api/harness/threads/{id}             一致快照（单事务，含 stopReceipts）
- * - PUT  /api/harness/threads/{id}/yolo        {yoloEnabled}（单字段幂等，不与 Thread version 做 CAS）
- * - POST /api/harness/threads/{id}/stop        {stopRequestId,expectedVersion}（同 id 幂等 replay，返回每 Thread 回执）
- * - PUT  /api/harness/threads/{id}/tool-invocations/{toolInvocationId}/approval
- * - PUT  /api/harness/sessions/{id}/name       {name}（200 权威 HarnessSessionDTO）
- * - PUT  /api/harness/threads/{id}/name        {name}（200 权威 HarnessThreadDTO）
+ * - POST /api/command-batches                 创建型产品写入口：owner + NEW_SESSION/NEW_THREAD（202 accepted）
+ * - POST /api/threads/{id}/command-batches    既有 Thread 续写：owner-free，body 只带 cursor 与 commands
+ * - POST /api/threads/{id}/provider-request-preview  同一 owner-free body，200 返回发送前请求体
+ * - GET  /api/chats/{chatId}/sessions       Chat owner 的 Session 摘要（新到旧）
+ * - GET  /api/sessions/{sessionId}/threads   Session 下 Thread 摘要
+ * - GET  /api/sessions/{sessionId}/entries   完整不可变 Entry Tree
+ * - GET  /api/threads/{id}             一致快照（单事务，含 stopReceipts）
+ * - PUT  /api/threads/{id}/yolo        {yoloEnabled}（单字段幂等，不与 Thread version 做 CAS）
+ * - POST /api/threads/{id}/stop        {stopRequestId,expectedVersion}（同 id 幂等 replay，返回每 Thread 回执）
+ * - PUT  /api/threads/{id}/tool-invocations/{toolInvocationId}/approval
+ * - PUT  /api/sessions/{id}/name       {name}（200 权威 HarnessSessionDTO）
+ * - PUT  /api/threads/{id}/name        {name}（200 权威 HarnessThreadDTO）
  * - WS   /api/events/v1                        应用级 Thread/Canvas 事件订阅
- * - GET  /api/harness/environments             只读 Environment 注册表（Card UUID id = canonical 路由身份）
+ * - GET  /api/environments             只读 Environment 注册表（Card UUID id = canonical 路由身份）
  *
  * 创建型 owner 只接受 CHAT（ISSUE_AGENT 由 Issue 业务工作流拥有）；已有 Thread 的 Continue/Preview 不再需要 owner：
  * - NEW_SESSION{sessionId,threadId,rootSettings,yoloEnabled}：新建 Session + ROOT + Thread
@@ -182,7 +182,7 @@ export async function createChat(
   { title, agentName, yoloEnabled = false, environmentName = null },
 ) {
   canonicalEnvironmentName(environmentName, 'environmentName')
-  const { status, json } = await ctx.call('POST', '/api/ai/chats', {
+  const { status, json } = await ctx.call('POST', '/api/chats', {
     title,
     agentName,
     yoloEnabled,
@@ -271,7 +271,7 @@ export function newThreadTarget({ sessionId, startEntryId, threadId, threadName,
 /**
  * THREAD target：既有 Thread 续写的 helper 路由描述符（内部转为 owner-free body）。
  *
- * <p>它不是 HTTP wire：真实请求发往 {@code POST /api/harness/threads/{threadId}/command-batches}，body 只含
+ * <p>它不是 HTTP wire：真实请求发往 {@code POST /api/threads/{threadId}/command-batches}，body 只含
  * {@code {expectedHeadEntryId, expectedNextCommandSequence, commands}}，不带 owner/target/type。cursor 由服务端做精确 CAS。
  */
 export function threadTarget({ threadId, expectedHeadEntryId, expectedNextCommandSequence }) {
@@ -344,7 +344,7 @@ export async function acceptCommandBatch(ctx, { owner, target, commands }) {
     }
     const { status, json } = await ctx.call(
       'POST',
-      `/api/harness/threads/${encodeURIComponent(threadId)}/command-batches`,
+      `/api/threads/${encodeURIComponent(threadId)}/command-batches`,
       body,
     )
     assert(status === 202, `accept thread command batch status ${status}: ${JSON.stringify(json)}`)
@@ -367,7 +367,7 @@ export async function acceptCommandBatch(ctx, { owner, target, commands }) {
     Object.keys(owner).sort().join(',') === 'chatId,type',
     `owner must contain only type and chatId: ${JSON.stringify(owner)}`,
   )
-  const { status, json } = await ctx.call('POST', '/api/harness/command-batches', {
+  const { status, json } = await ctx.call('POST', '/api/command-batches', {
     owner,
     target,
     commands,
@@ -535,7 +535,7 @@ export function assertProviderPreview(preview, expectedKind) {
 }
 
 /**
- * 发送前请求预览：owner-free POST /api/harness/threads/{threadId}/provider-request-preview。
+ * 发送前请求预览：owner-free POST /api/threads/{threadId}/provider-request-preview。
  *
  * <p>body 与既有 Thread 续写面同形（{@link HarnessThreadCommandBatchDTO} 的
  * {@code {expectedHeadEntryId, expectedNextCommandSequence, commands}}），不写 durable 状态、不消费 upload。
@@ -550,7 +550,7 @@ export async function previewProviderRequest(
   assert(Array.isArray(commands) && commands.length > 0, 'commands required')
   const { status, json } = await ctx.call(
     'POST',
-    `/api/harness/threads/${encodeURIComponent(id)}/provider-request-preview`,
+    `/api/threads/${encodeURIComponent(id)}/provider-request-preview`,
     {
       expectedHeadEntryId: canonicalUuid(expectedHeadEntryId, 'expectedHeadEntryId'),
       expectedNextCommandSequence: positiveDecimal(
@@ -565,7 +565,7 @@ export async function previewProviderRequest(
 }
 
 /**
- * 本地分支草稿预览：POST /api/harness/sessions/{sessionId}/provider-request-preview，body 只有
+ * 本地分支草稿预览：POST /api/sessions/{sessionId}/provider-request-preview，body 只有
  * {@code {startEntryId, commands}}。草稿尚未落库，因此不携带任何 cursor；同样不写 durable 状态、不消费 upload。
  */
 export async function previewSessionDraftRequest(ctx, sessionId, { startEntryId, commands }) {
@@ -573,7 +573,7 @@ export async function previewSessionDraftRequest(ctx, sessionId, { startEntryId,
   assert(Array.isArray(commands) && commands.length > 0, 'commands required')
   const { status, json } = await ctx.call(
     'POST',
-    `/api/harness/sessions/${encodeURIComponent(id)}/provider-request-preview`,
+    `/api/sessions/${encodeURIComponent(id)}/provider-request-preview`,
     { startEntryId: canonicalUuid(startEntryId, 'startEntryId'), commands },
   )
   assert(status === 200, `session draft preview status ${status}: ${JSON.stringify(json)}`)
@@ -581,7 +581,7 @@ export async function previewSessionDraftRequest(ctx, sessionId, { startEntryId,
 }
 
 /**
- * 历史请求预览：GET /api/harness/sessions/{sessionId}/entries/{entryId}/provider-request-preview。
+ * 历史请求预览：GET /api/sessions/{sessionId}/entries/{entryId}/provider-request-preview。
  *
  * <p>按当前 catalog 与 Provider 配置重建该模型输出之前的请求前缀；响应 MUST 是 HISTORICAL_REQUEST_PREVIEW，
  * 不得冒充当时的原始发送字节。
@@ -591,7 +591,7 @@ export async function previewHistoricalRequest(ctx, sessionId, entryId) {
   const entry = canonicalUuid(entryId, 'entryId')
   const { status, json } = await ctx.call(
     'GET',
-    `/api/harness/sessions/${encodeURIComponent(id)}/entries/${encodeURIComponent(entry)}/provider-request-preview`,
+    `/api/sessions/${encodeURIComponent(id)}/entries/${encodeURIComponent(entry)}/provider-request-preview`,
   )
   assert(status === 200, `historical preview status ${status}: ${JSON.stringify(json)}`)
   return assertProviderPreview(envelopeData(json), 'HISTORICAL_REQUEST_PREVIEW')
@@ -625,7 +625,7 @@ function assertSessionSummary(item) {
 
 /** Chat owner 的 Session 摘要数组（归属时间新到旧）。 */
 export async function listChatSessions(ctx, chatId) {
-  const { json } = await ctx.call('GET', `/api/ai/chats/${encodeURIComponent(chatId)}/sessions`)
+  const { json } = await ctx.call('GET', `/api/chats/${encodeURIComponent(chatId)}/sessions`)
   const sessions = envelopeData(json)
   assert(Array.isArray(sessions), `expected Session summary array: ${JSON.stringify(json)}`)
   for (const item of sessions) assertSessionSummary(item)
@@ -636,7 +636,7 @@ export async function listChatSessions(ctx, chatId) {
 export async function listSessionThreads(ctx, sessionId) {
   const { json } = await ctx.call(
     'GET',
-    `/api/harness/sessions/${encodeURIComponent(sessionId)}/threads`,
+    `/api/sessions/${encodeURIComponent(sessionId)}/threads`,
   )
   const threads = envelopeData(json)
   assert(Array.isArray(threads), `expected Thread summary array: ${JSON.stringify(json)}`)
@@ -715,7 +715,7 @@ export function assertSessionEntry(entry, { sessionId } = {}) {
 export async function listSessionEntries(ctx, sessionId) {
   const { json } = await ctx.call(
     'GET',
-    `/api/harness/sessions/${encodeURIComponent(sessionId)}/entries`,
+    `/api/sessions/${encodeURIComponent(sessionId)}/entries`,
   )
   const entries = envelopeData(json)
   assert(Array.isArray(entries), `expected Session Entry array: ${JSON.stringify(json)}`)
@@ -728,7 +728,7 @@ export async function listSessionEntries(ctx, sessionId) {
 export async function getThreadSnapshot(ctx, threadId) {
   const { json } = await ctx.call(
     'GET',
-    `/api/harness/threads/${encodeURIComponent(threadId)}`,
+    `/api/threads/${encodeURIComponent(threadId)}`,
   )
   const snapshot = envelopeData(json)
   assert(snapshot?.thread, `expected Thread snapshot: ${JSON.stringify(json)}`)
@@ -786,7 +786,7 @@ export async function snapshotEntries(ctx, threadId) {
  * 无连接或失效时显式为 null，只提示浏览器按权威数据回读一次，不是固定轮询。
  */
 export async function listEnvironments(ctx) {
-  const { json } = await ctx.call('GET', '/api/harness/environments')
+  const { json } = await ctx.call('GET', '/api/environments')
   const environments = envelopeData(json)
   assert(Array.isArray(environments), `expected Environment array: ${JSON.stringify(json)}`)
   for (const environment of environments) {
@@ -857,7 +857,7 @@ export async function setThreadYolo(ctx, threadId, { yoloEnabled }) {
   assert(typeof yoloEnabled === 'boolean', 'yoloEnabled must be boolean')
   const { status, json } = await ctx.call(
     'PUT',
-    `/api/harness/threads/${encodeURIComponent(threadId)}/yolo`,
+    `/api/threads/${encodeURIComponent(threadId)}/yolo`,
     { yoloEnabled },
   )
   assert(status === 200, `set thread yolo status ${status}: ${JSON.stringify(json)}`)
@@ -875,7 +875,7 @@ export async function renameSession(ctx, sessionId, name) {
   canonicalUuid(sessionId, 'sessionId')
   const { status, json } = await ctx.call(
     'PUT',
-    `/api/harness/sessions/${encodeURIComponent(sessionId)}/name`,
+    `/api/sessions/${encodeURIComponent(sessionId)}/name`,
     { name },
   )
   assert(status === 200, `rename session status ${status}: ${JSON.stringify(json)}`)
@@ -898,7 +898,7 @@ export async function renameThread(ctx, threadId, name) {
   canonicalUuid(threadId, 'threadId')
   const { status, json } = await ctx.call(
     'PUT',
-    `/api/harness/threads/${encodeURIComponent(threadId)}/name`,
+    `/api/threads/${encodeURIComponent(threadId)}/name`,
     { name },
   )
   assert(status === 200, `rename thread status ${status}: ${JSON.stringify(json)}`)
@@ -949,7 +949,7 @@ export async function stopThread(ctx, threadId, { stopRequestId, expectedVersion
   canonicalUuid(stopRequestId, 'stopRequestId')
   const { status, json } = await ctx.call(
     'POST',
-    `/api/harness/threads/${encodeURIComponent(targetThreadId)}/stop`,
+    `/api/threads/${encodeURIComponent(targetThreadId)}/stop`,
     {
       stopRequestId,
       expectedVersion: nonNegativeDecimal(expectedVersion, 'expectedVersion'),
@@ -1041,7 +1041,7 @@ export async function approveToolInvocation(
   assert(reason == null || typeof reason === 'string', 'reason must be string|null')
   const { status, json } = await ctx.call(
     'PUT',
-    `/api/harness/threads/${encodeURIComponent(threadId)}/tool-invocations/${encodeURIComponent(toolInvocationId)}/approval`,
+    `/api/threads/${encodeURIComponent(threadId)}/tool-invocations/${encodeURIComponent(toolInvocationId)}/approval`,
     { decision, decisionId, reason },
   )
   assert(status === 200, `approval status ${status}: ${JSON.stringify(json)}`)

@@ -27,7 +27,7 @@ import java.util.Objects;
  * <p>服务端从 Thread 解析 Session，身份认证、资源授权与附件引用校验照常完成；Issue/Chat 等业务规则由对应工作流在自身边界显式编排，本入口不按 owner 伪造或拒绝。
  */
 @RestController
-@RequestMapping("/api/harness/threads")
+@RequestMapping("/api/threads")
 public class StudioHarnessThreadCommandBatchController {
 
   private final HarnessCommandAcceptanceOrchestrator acceptanceService;

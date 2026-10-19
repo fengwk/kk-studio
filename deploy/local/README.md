@@ -55,7 +55,7 @@ docker compose -f deploy/local/compose.yaml logs -f minio
 | 资源 | 地址 |
 | --- | --- |
 | Web UI | <http://localhost:8080/> |
-| Canvas / Catalog API | <http://localhost:8080/api/canvases>、<http://localhost:8080/api/ai/catalog/providers> 等 |
+| Canvas / Catalog API | <http://localhost:8080/api/canvases>、<http://localhost:8080/api/providers> 等 |
 | Health | <http://localhost:8080/actuator/health> |
 | PostgreSQL | `jdbc:postgresql://localhost:5432/kk_studio`（用户 / 密码 `kk_studio`） |
 | MinIO S3 API | <http://localhost:9000> |

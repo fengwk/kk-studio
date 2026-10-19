@@ -21,7 +21,7 @@ class StudioToolCatalogControllerTest extends WebPostgresTestSupport {
   void exposesOnlySelectableToolMetadataByName() throws Exception {
     // 工具条目的唯一身份是模型可见 name，不再暴露任何 id / version 等内部身份字段。
     mockMvc
-        .perform(get("/api/ai/catalog/tools"))
+        .perform(get("/api/tools"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data[?(@.name == 'read')].name").value("read"))
         .andExpect(jsonPath("$.data[?(@.name == 'read')].id").doesNotExist())

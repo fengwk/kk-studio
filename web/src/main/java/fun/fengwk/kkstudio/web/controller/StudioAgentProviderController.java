@@ -24,7 +24,7 @@ import java.util.List;
 
 /** provider 全局 CRUD API。 */
 @AllArgsConstructor
-@RequestMapping("/api/ai/catalog/providers")
+@RequestMapping("/api/providers")
 @RestController
 public class StudioAgentProviderController {
 

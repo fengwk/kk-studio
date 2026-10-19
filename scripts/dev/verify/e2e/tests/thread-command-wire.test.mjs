@@ -66,7 +66,7 @@ test('THREAD continuation routes to the owner-free thread command-batches endpoi
   assert.equal(calls.length, 1)
   const [method, url, body] = calls[0]
   assert.equal(method, 'POST')
-  assert.equal(url, `/api/harness/threads/${threadId}/command-batches`)
+  assert.equal(url, `/api/threads/${threadId}/command-batches`)
   assert.deepEqual(Object.keys(body).sort(), [
     'commands',
     'expectedHeadEntryId',
@@ -90,7 +90,7 @@ test('THREAD continuation surfaces the public rejection of NOTIFICATION commands
   }
   const ctx = {
     async call(method, url, body) {
-      assert.equal(url, `/api/harness/threads/${threadId}/command-batches`)
+      assert.equal(url, `/api/threads/${threadId}/command-batches`)
       assert.equal(body.commands[0].type, 'NOTIFICATION')
       throw new HttpError(400, JSON.stringify({ errors: { detail: 'NOTIFICATION is internal-only' } }), url)
     },
@@ -142,7 +142,7 @@ test('previewProviderRequest posts the owner-free cursor body and validates the 
 
   const [method, url, body] = calls[0]
   assert.equal(method, 'POST')
-  assert.equal(url, `/api/harness/threads/${threadId}/provider-request-preview`)
+  assert.equal(url, `/api/threads/${threadId}/provider-request-preview`)
   assert.deepEqual(Object.keys(body).sort(), [
     'commands',
     'expectedHeadEntryId',

@@ -74,7 +74,7 @@ describe('install command', () => {
     os => {
       const input = { ...config(), operatingSystem: os }
       const command = generateInstallCommand(origin, environmentId, os, installCode)
-      const expected = `https://studio.example.com/api/harness/environments/${encodeURIComponent(environmentId)}/install?code=${encodeURIComponent(installCode)}`
+      const expected = `https://studio.example.com/api/environments/${encodeURIComponent(environmentId)}/install?code=${encodeURIComponent(installCode)}`
       expect(command).toBe(`(set -o pipefail; curl -fsSL $'${expected.replaceAll("'", "\\'")}' | bash)`)
       expect(command).not.toContain('\n')
       expect(command).not.toContain(input.daemon.studioUrl)
@@ -116,11 +116,11 @@ describe('install command', () => {
     os => {
       const command = generateUninstallCommand(os, origin)
       expect(command).toBe(
-        `(set -o pipefail; curl -fsSL $'https://studio.example.com/api/harness/environments/uninstall/${os}' | bash)`,
+        `(set -o pipefail; curl -fsSL $'https://studio.example.com/api/environments/uninstall/${os}' | bash)`,
       )
       const { run, url } = execute(command, 'echo uninstalled\n')
       expect(run.status).toBe(0)
-      expect(url).toBe(`https://studio.example.com/api/harness/environments/uninstall/${os}`)
+      expect(url).toBe(`https://studio.example.com/api/environments/uninstall/${os}`)
     },
   )
 
@@ -136,14 +136,14 @@ describe('install command', () => {
     expect(command).toContain('Invoke-WebRequest -UseBasicParsing')
     expect(command).toContain('-ErrorAction Stop')
     expect(command).toContain('[scriptblock]::Create($script)')
-    expect(command).toContain(`'https://studio.example.com/api/harness/environments/${encoded}/install?code=${encodedCode}'`)
+    expect(command).toContain(`'https://studio.example.com/api/environments/${encoded}/install?code=${encodedCode}'`)
     expect(command).not.toContain('registrationToken')
     expect(command).not.toContain('WriteAllText')
     expect(command).not.toContain('Set-Acl')
     expect(command).not.toContain('-JavaHome')
     const uninstall = generateUninstallCommand('windows', origin)
     expect(uninstall).toContain(
-      "'https://studio.example.com/api/harness/environments/uninstall/windows'",
+      "'https://studio.example.com/api/environments/uninstall/windows'",
     )
     expect(uninstall).not.toContain('registrationToken')
   })

@@ -61,7 +61,7 @@ import java.util.function.Supplier;
  * {@literal ->} 400。控制面不再按 Thread 的产品归属（Issue/Chat）拒绝：认证、实际资源权限与请求格式仍是硬边界，业务规则由对应业务工作流显式编排。
  */
 @RestController
-@RequestMapping("/api/harness/threads")
+@RequestMapping("/api/threads")
 public class StudioHarnessThreadController {
 
   /** 单用户部署边界下没有认证主体时使用的固定操作者，与问卷输入使用同一服务端身份来源。 */

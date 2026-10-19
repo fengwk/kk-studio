@@ -30,7 +30,7 @@ import fun.fengwk.kkstudio.share.ai.mcp.McpServerUpdateDTO;
  * no-store}。
  */
 @AllArgsConstructor
-@RequestMapping("/api/ai/mcp-servers")
+@RequestMapping("/api/mcp-servers")
 @RestController
 public class StudioMcpServerController {
 

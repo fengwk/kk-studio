@@ -120,18 +120,18 @@ async function installAgentTreeMock(page: Page) {
   await page.routeWebSocket(/\/api\/events\/v1$/, () => {})
   await page.route((url) => new URL(url).pathname.startsWith('/api/'), async (route: Route) => {
     const path = new URL(route.request().url()).pathname
-    if (path === `/api/harness/threads/${THREAD_ID}/tree`) {
+    if (path === `/api/threads/${THREAD_ID}/tree`) {
       treeCalls.push(path)
       await route.fulfill({ json: { status: 200, data: nodes } })
       return
     }
-    if (path === `/api/harness/threads/${THREAD_ID}`) {
+    if (path === `/api/threads/${THREAD_ID}`) {
       await route.fulfill({
         json: { status: 200, data: snapshot(THREAD_ID, null, 'Preview Thread', 'IDLE') },
       })
       return
     }
-    if (path === `/api/harness/threads/${CHILD_ID}`) {
+    if (path === `/api/threads/${CHILD_ID}`) {
       await route.fulfill({
         json: {
           status: 200,
@@ -140,7 +140,7 @@ async function installAgentTreeMock(page: Page) {
       })
       return
     }
-    if (path === `/api/harness/threads/${GRAND_ID}`) {
+    if (path === `/api/threads/${GRAND_ID}`) {
       await route.fulfill({
         json: { status: 200, data: snapshot(GRAND_ID, CHILD_ID, 'Grand Worker', 'MODEL_RUNNING') },
       })
@@ -152,7 +152,7 @@ async function installAgentTreeMock(page: Page) {
       })
       return
     }
-    if (path === '/api/ai/catalog/agents' || path === '/api/ai/catalog/models') {
+    if (path === '/api/agents' || path === '/api/models') {
       await route.fulfill({
         json: { status: 200, data: { pageNumber: 1, pageSize: 50, totalCount: 0, results: [] } },
       })

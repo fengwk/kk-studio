@@ -148,7 +148,7 @@ export interface HarnessModelRequestDebugDTO {
 }
 
 /**
- * 草稿请求预览 (POST /api/harness/threads/{threadId}/provider-request-preview)。
+ * 草稿请求预览 (POST /api/threads/{threadId}/provider-request-preview)。
  */
 export interface ProviderRequestPreviewDTO {
   kind: 'DRAFT_REQUEST_PREVIEW' | 'HISTORICAL_REQUEST_PREVIEW'
@@ -203,7 +203,7 @@ export interface HarnessThreadTreeNodeDTO {
  * HarnessThread 查询投影；id 均为 canonical UUID string，version 是持久快照游标。
  *
  * name 是 Thread 的必需非空展示名称（服务端生成默认值，如 root=main、
- * branch=branch-<uuid 前 8 位>；可经 PUT /harness/threads/{id}/name 修改）；
+ * branch=branch-<uuid 前 8 位>；可经 PUT /threads/{id}/name 修改）；
  * status/processing 是派生的展示字段：status 描述该 Thread 自身执行阶段
  * （IDLE / STOPPED / QUEUED / CONTINUATION_DUE / MODEL_* / TOOL_* / APPLYING），
  * 不递归投影子树忙碌；processing 对 IDLE/STOPPED 为 false，其余为 true。
@@ -484,7 +484,7 @@ export type AgentCommandTargetDTO =
   | NewThreadCommandTargetDTO
   | NewForkedSessionCommandTargetDTO
 
-/** 创建型命令批次请求（POST /harness/command-batches）。 */
+/** 创建型命令批次请求（POST /command-batches）。 */
 export interface AgentCommandBatchRequestDTO {
   owner: AgentRuntimeOwnerDTO
   target: AgentCommandTargetDTO
@@ -494,8 +494,8 @@ export interface AgentCommandBatchRequestDTO {
 /**
  * 既有 Thread 的通用命令写请求：只携带精确 CAS 游标与有序命令。
  *
- * POST /harness/threads/{threadId}/command-batches
- * POST /harness/threads/{threadId}/provider-request-preview
+ * POST /threads/{threadId}/command-batches
+ * POST /threads/{threadId}/provider-request-preview
  *
  * 不携带 owner 或 target：服务端从 path 解析 Session，owner 只用于 NEW_SESSION /
  * NEW_THREAD 创建与容器列表。

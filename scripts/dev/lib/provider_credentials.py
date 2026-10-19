@@ -89,7 +89,7 @@ def get_providers(backend_url: str, urlopen=None):
         urlopen = _default_urlopen
     backend_url = backend_url.rstrip("/")
     try:
-        return urlopen(f"{backend_url}/api/ai/catalog/providers?pageNumber=1&pageSize=50")
+        return urlopen(f"{backend_url}/api/providers?pageNumber=1&pageSize=50")
     except Exception:
         raise RuntimeError("Failed to fetch existing providers from backend") from None
 
@@ -104,7 +104,7 @@ def put_provider(backend_url: str, provider_name: str, payload: dict, urlopen=No
     encoded_name = urllib.parse.quote(provider_name, safe="")
     try:
         return urlopen(
-            f"{backend_url}/api/ai/catalog/providers/{encoded_name}",
+            f"{backend_url}/api/providers/{encoded_name}",
             data=data,
             headers=headers,
         )

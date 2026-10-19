@@ -26,7 +26,7 @@ export interface McpServerDTO {
 }
 
 /**
- * GET /api/ai/mcp-servers/{name}/config 显式配置响应 DTO。
+ * GET /api/mcp-servers/{name}/config 显式配置响应 DTO。
  * 强制 Cache-Control: no-store，绝不放入通用 React Query 缓存或 LocalStorage。
  */
 export interface McpServerConfigDTO {
@@ -45,7 +45,7 @@ export interface McpServerConfigDTO {
 }
 
 /**
- * POST /api/ai/mcp-servers 请求体。
+ * POST /api/mcp-servers 请求体。
  */
 export interface McpServerCreateDTO {
   /** 必填唯一名：^[a-z][a-z0-9_]*$ 且 <=32 字符，创建后不可变。 */
@@ -61,7 +61,7 @@ export interface McpServerCreateDTO {
 }
 
 /**
- * PUT /api/ai/mcp-servers/{name} 请求体。
+ * PUT /api/mcp-servers/{name} 请求体。
  */
 export interface McpServerUpdateDTO {
   /** 必填非负十进制字符串；必须与当前 Server 版本一致。 */

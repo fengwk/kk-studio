@@ -212,7 +212,7 @@ start_backend() {
   local pid=$!
   echo "$pid" >"$WORK_DIR/backend.pid"
   wait_http_process \
-    "$BACKEND_URL/api/ai/catalog/agents?pageNumber=1&pageSize=1" \
+    "$BACKEND_URL/api/agents?pageNumber=1&pageSize=1" \
     backend \
     "$pid" \
     "$WORK_DIR/backend.log" \
@@ -257,7 +257,7 @@ start_frontend() {
   pid=$(cat "$WORK_DIR/frontend.pid")
   wait_http_process "$FRONTEND_URL/" frontend "$pid" "$WORK_DIR/frontend.log"
   # 额外确认代理已打到当前 backend 契约（结构化 config）
-  curl -fsS "$FRONTEND_URL/api/ai/catalog/models?pageNumber=1&pageSize=1" \
+  curl -fsS "$FRONTEND_URL/api/models?pageNumber=1&pageSize=1" \
     | python3 -c 'import sys,json; d=json.load(sys.stdin); m=((d.get("data") or {}).get("results") or [None])[0];
 assert m and isinstance(m.get("config"), dict) and m["config"].get("defaultVariant"), m; print("frontend proxy model.config.defaultVariant=", m["config"]["defaultVariant"])'
 }
@@ -288,7 +288,7 @@ start_daemon() {
   local _ env_status=""
   # Disconnect retains the default 60s route grace lease; leave takeover headroom.
   for _ in $(seq 1 180); do
-    env_status=$(curl -fsS "$BACKEND_URL/api/harness/environments" \
+    env_status=$(curl -fsS "$BACKEND_URL/api/environments" \
       | python3 -c 'import sys,json; d=json.load(sys.stdin); arr=d.get("data") or [];
 print(next((x.get("status") for x in arr if x.get("name")=="'"$DAEMON_ENV_NAME"'"), ""))' \
       2>/dev/null || true)
@@ -327,12 +327,12 @@ ensure_stack() {
     package_backend "$java_home"
   fi
 
-  if ! curl -fsS "$BACKEND_URL/api/ai/catalog/agents?pageNumber=1&pageSize=1" >/dev/null 2>&1; then
+  if ! curl -fsS "$BACKEND_URL/api/agents?pageNumber=1&pageSize=1" >/dev/null 2>&1; then
     start_backend "$java_home"
   else
     step "Reusing backend $BACKEND_URL"
     # Reused processes must expose the current structured model contract.
-    if ! curl -fsS "$BACKEND_URL/api/ai/catalog/models?pageNumber=1&pageSize=1" \
+    if ! curl -fsS "$BACKEND_URL/api/models?pageNumber=1&pageSize=1" \
       | python3 -c 'import sys,json; d=json.load(sys.stdin); m=((d.get("data") or {}).get("results") or [None])[0];
 raise SystemExit(0 if m and isinstance(m.get("config"), dict) else 1)' 2>/dev/null; then
       step "Backend contract stale (missing model.config); rebuilding and restarting"
@@ -345,7 +345,7 @@ raise SystemExit(0 if m and isinstance(m.get("config"), dict) else 1)' 2>/dev/nu
     start_frontend
   else
     step "Reusing frontend $FRONTEND_URL"
-    if ! curl -fsS "$FRONTEND_URL/api/ai/catalog/models?pageNumber=1&pageSize=1" \
+    if ! curl -fsS "$FRONTEND_URL/api/models?pageNumber=1&pageSize=1" \
       | python3 -c 'import sys,json; d=json.load(sys.stdin); m=((d.get("data") or {}).get("results") or [None])[0];
 raise SystemExit(0 if m and isinstance(m.get("config"), dict) else 1)' 2>/dev/null; then
       step "Frontend proxy contract stale; restarting frontend with API_PROXY_TARGET"
@@ -354,7 +354,7 @@ raise SystemExit(0 if m and isinstance(m.get("config"), dict) else 1)' 2>/dev/nu
   fi
 
   if [ "$with_daemon" = "true" ]; then
-    env_status=$(curl -fsS "$BACKEND_URL/api/harness/environments" \
+    env_status=$(curl -fsS "$BACKEND_URL/api/environments" \
       | python3 -c 'import sys,json; d=json.load(sys.stdin); arr=d.get("data") or [];
 print(next((x.get("status") for x in arr if x.get("name")=="'"$DAEMON_ENV_NAME"'"), ""))' \
       2>/dev/null || true)

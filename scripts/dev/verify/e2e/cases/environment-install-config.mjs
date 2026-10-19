@@ -54,10 +54,10 @@ registerCase({
   id: 'environment.install_config_cas_roundtrip',
   level: 'L1',
   title: 'Environment installConfig PUT CAS 持久化与往返',
-  docs: 'PUT /api/harness/environments/{id}/install-config 用 expectedVersion CAS 保存嵌套 installConfig； stale 版本 409、相同配置 no-op 不推进版本；硬非法 studioUrl/未知字段/退役 javaHome/缺 operatingSystem/null 配置 400 且不写入、不回显提交值，随后 GET 仍为已保存配置',
+  docs: 'PUT /api/environments/{id}/install-config 用 expectedVersion CAS 保存嵌套 installConfig； stale 版本 409、相同配置 no-op 不推进版本；硬非法 studioUrl/未知字段/退役 javaHome/缺 operatingSystem/null 配置 400 且不写入、不回显提交值，随后 GET 仍为已保存配置',
   async run(ctx) {
     const name = `e2e-install-cfg-${cid().slice(0, 8)}`
-    const { json: createJson } = await ctx.call('POST', '/api/harness/environments', { name })
+    const { json: createJson } = await ctx.call('POST', '/api/environments', { name })
     const created = envelopeData(createJson)
     const environmentId = created.id
     assert(environmentId, `created environment must have id: ${JSON.stringify(createJson)}`)
@@ -66,7 +66,7 @@ registerCase({
       `new environment must not preconfigure install settings: ${JSON.stringify(created.installConfig)}`,
     )
     let version = String(created.version)
-    const path = `/api/harness/environments/${encodeURIComponent(environmentId)}/install-config`
+    const path = `/api/environments/${encodeURIComponent(environmentId)}/install-config`
 
     try {
       // stale expectedVersion must conflict before any write
@@ -101,7 +101,7 @@ registerCase({
 
       const { json: getJson } = await ctx.call(
         'GET',
-        `/api/harness/environments/${encodeURIComponent(environmentId)}`,
+        `/api/environments/${encodeURIComponent(environmentId)}`,
       )
       assertInstallConfig(envelopeData(getJson).installConfig)
 
@@ -130,7 +130,7 @@ registerCase({
 
       const { json: afterJson } = await ctx.call(
         'GET',
-        `/api/harness/environments/${encodeURIComponent(environmentId)}`,
+        `/api/environments/${encodeURIComponent(environmentId)}`,
       )
       const after = envelopeData(afterJson)
       assert(
@@ -147,12 +147,12 @@ registerCase({
     } finally {
       const { json } = await ctx.call(
         'GET',
-        `/api/harness/environments/${encodeURIComponent(environmentId)}`,
+        `/api/environments/${encodeURIComponent(environmentId)}`,
       )
       const current = envelopeData(json)
       await ctx.call(
         'DELETE',
-        `/api/harness/environments/${encodeURIComponent(environmentId)}?expectedVersion=${encodeURIComponent(String(current.version))}`,
+        `/api/environments/${encodeURIComponent(environmentId)}?expectedVersion=${encodeURIComponent(String(current.version))}`,
       )
     }
   },
@@ -260,17 +260,17 @@ registerCase({
   id: 'environment.install_script_code_roundtrip',
   level: 'L1',
   title: 'Environment 五分钟安装 code 签发、脚本下载与 token 轮换失效',
-  docs: 'POST /api/harness/environments/{id}/install-code 用 expectedVersion 签发 {code,expiresAt}（no-store、无 registrationToken、约 5 分钟到期且不改 version/配置，stale 版本 409）；GET /{id}/install?code= 返回含已保存配置与当前 token 的 UTF-8 纯文本（no-store、nosniff，不执行）；缺 code/篡改 code 400；POST /{id}/registration-token 轮换后旧 code 400、新 code 脚本含新 token 且环境 id 不变；GET /uninstall/{linux,windows} 无环境 token/配置且不需要 code，非法 OS 400',
+  docs: 'POST /api/environments/{id}/install-code 用 expectedVersion 签发 {code,expiresAt}（no-store、无 registrationToken、约 5 分钟到期且不改 version/配置，stale 版本 409）；GET /{id}/install?code= 返回含已保存配置与当前 token 的 UTF-8 纯文本（no-store、nosniff，不执行）；缺 code/篡改 code 400；POST /{id}/registration-token 轮换后旧 code 400、新 code 脚本含新 token 且环境 id 不变；GET /uninstall/{linux,windows} 无环境 token/配置且不需要 code，非法 OS 400',
   async run(ctx) {
     const name = `e2e-install-code-${cid().slice(0, 8)}`
-    const { json: createJson } = await ctx.call('POST', '/api/harness/environments', { name })
+    const { json: createJson } = await ctx.call('POST', '/api/environments', { name })
     const created = envelopeData(createJson)
     const environmentId = created.id
     const token = created.registrationToken
     assert(environmentId, 'created environment must have id')
     assert(typeof token === 'string' && token.length > 0, 'create must return a registration token')
     let version = String(created.version)
-    const cardPath = `/api/harness/environments/${encodeURIComponent(environmentId)}`
+    const cardPath = `/api/environments/${encodeURIComponent(environmentId)}`
     const config = linuxInstallConfig()
 
     try {
@@ -388,7 +388,7 @@ registerCase({
       for (const operatingSystem of ['linux', 'windows']) {
         const { json: uninstall, headers: uninstallHeaders } = await ctx.call(
           'GET',
-          `/api/harness/environments/uninstall/${operatingSystem}`,
+          `/api/environments/uninstall/${operatingSystem}`,
         )
         assert(typeof uninstall === 'string', 'uninstall download must be text')
         assert(
@@ -407,7 +407,7 @@ registerCase({
         assertUninstallScript(uninstall, secrets)
       }
       await expectHttpError(
-        () => ctx.call('GET', '/api/harness/environments/uninstall/solaris'),
+        () => ctx.call('GET', '/api/environments/uninstall/solaris'),
         { status: 400 },
       )
     } finally {

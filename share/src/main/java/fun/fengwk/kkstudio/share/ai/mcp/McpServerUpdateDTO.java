@@ -6,7 +6,7 @@ import lombok.Data;
 import java.util.Map;
 
 /**
- * {@code PUT /api/ai/mcp-servers/{name}} 请求体；{@link #expectedVersion} 必填。
+ * {@code PUT /api/mcp-servers/{name}} 请求体；{@link #expectedVersion} 必填。
  *
  * <p>name 不可编辑；更新是对 URL、headers、enabled 与 timeout 的全量替换，并把状态重置为 UNVERIFIED。
  *
