@@ -995,4 +995,149 @@ describe('真实 AgentMessageJsonCodec 历史生命周期与真实组件验收�
     const markerLine = within(preview as HTMLElement).getByText('\\ No newline at end of file')
     expect(markerLine).toHaveClass('is-context')
   })
+
+  it('durable 边界仅认 detailsJson：携带 details 对象但无 detailsJson 不会恢复 review', () => {
+    const asstEntry = createEntry('asst-details-only', 'MESSAGE', {
+      message: {
+        role: 'ASSISTANT',
+        contents: [
+          {
+            type: 'tool_call',
+            toolCallId: 'call-details-only',
+            toolName: 'edit',
+            rendererKey: 'edit',
+            argumentsJson: '{"path":"/workspace/src/App.tsx"}',
+          },
+        ],
+      },
+    })
+
+    const toolResultEntry = createEntry('result-details-only', 'MESSAGE', {
+      message: {
+        role: 'TOOL',
+        contents: [
+          {
+            type: 'tool_result',
+            toolCallId: 'call-details-only',
+            toolName: 'edit',
+            rendererKey: 'edit',
+            contents: [{ type: 'text', text: 'Edited' }],
+            error: false,
+            // 违规/旧对象直接放在 content.details，无 detailsJson
+            details: { editReview: validReview },
+          },
+        ],
+      },
+      toolResultMetadata: {
+        assistantEntryId: 'asst-details-only',
+        callIndex: 0,
+      },
+    })
+
+    const timeline = buildThreadTimeline([asstEntry, toolResultEntry], [], [])
+    const { container } = renderTimelineTool(timeline.messages)
+    // 严格禁止多形状兼容：没有 detailsJson 时 details 为 undefined，不恢复 review
+    expect(container.querySelector('.thread-tool-preview-body.is-edit')).toBeNull()
+  })
+
+  it('durable 边界 details 与 detailsJson 冲突时 detailsJson 严格胜出', () => {
+    const bypassedReview = {
+      path: '/workspace/src/App.tsx',
+      diff: '-bypassed\n+bypassed',
+      sha256: validSha,
+    }
+    const authoritativeReview = {
+      path: '/workspace/src/App.tsx',
+      diff: '-authoritative\n+authoritative',
+      sha256: validSha,
+    }
+
+    const asstEntry = createEntry('asst-conflict-fields', 'MESSAGE', {
+      message: {
+        role: 'ASSISTANT',
+        contents: [
+          {
+            type: 'tool_call',
+            toolCallId: 'call-conflict-fields',
+            toolName: 'edit',
+            rendererKey: 'edit',
+            argumentsJson: '{"path":"/workspace/src/App.tsx"}',
+          },
+        ],
+      },
+    })
+
+    const toolResultEntry = createEntry('result-conflict-fields', 'MESSAGE', {
+      message: {
+        role: 'TOOL',
+        contents: [
+          {
+            type: 'tool_result',
+            toolCallId: 'call-conflict-fields',
+            toolName: 'edit',
+            rendererKey: 'edit',
+            contents: [{ type: 'text', text: 'Edited' }],
+            error: false,
+            details: { editReview: bypassedReview },
+            detailsJson: JSON.stringify({ editReview: authoritativeReview }),
+          },
+        ],
+      },
+      toolResultMetadata: {
+        assistantEntryId: 'asst-conflict-fields',
+        callIndex: 0,
+      },
+    })
+
+    const timeline = buildThreadTimeline([asstEntry, toolResultEntry], [], [])
+    const { container } = renderTimelineTool(timeline.messages)
+    const preview = container.querySelector('.thread-tool-preview-body.is-edit')
+    expect(preview).toBeInTheDocument()
+    expect(preview?.textContent).toContain('authoritative')
+    expect(preview?.textContent).not.toContain('bypassed')
+  })
+
+  it('损坏的 detailsJson 严格拒绝回退到未知 details 对象，绝不旁路权威数据', () => {
+    const asstEntry = createEntry('asst-corrupt-no-fallback', 'MESSAGE', {
+      message: {
+        role: 'ASSISTANT',
+        contents: [
+          {
+            type: 'tool_call',
+            toolCallId: 'call-corrupt-no-fallback',
+            toolName: 'edit',
+            rendererKey: 'edit',
+            argumentsJson: '{"path":"/workspace/src/App.tsx"}',
+          },
+        ],
+      },
+    })
+
+    const toolResultEntry = createEntry('result-corrupt-no-fallback', 'MESSAGE', {
+      message: {
+        role: 'TOOL',
+        contents: [
+          {
+            type: 'tool_result',
+            toolCallId: 'call-corrupt-no-fallback',
+            toolName: 'edit',
+            rendererKey: 'edit',
+            contents: [{ type: 'text', text: 'Edited' }],
+            error: false,
+            details: { editReview: validReview },
+            detailsJson: '{ invalid json syntax',
+          },
+        ],
+      },
+      toolResultMetadata: {
+        assistantEntryId: 'asst-corrupt-no-fallback',
+        callIndex: 0,
+      },
+    })
+
+    const timeline = buildThreadTimeline([asstEntry, toolResultEntry], [], [])
+    const { container } = renderTimelineTool(timeline.messages)
+    // 损坏的 detailsJson 解析失败后 details 为 undefined，绝不能回退透传 content.details
+    expect(container.querySelector('.thread-tool-preview-body.is-edit')).toBeNull()
+  })
 })

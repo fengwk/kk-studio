@@ -408,28 +408,26 @@ function projectToolResult(
 
 /**
  * 在 durable Entry 边界将持久化的 ToolResultMessageContent 解码为规范共享结果语义。
- * 保持 extractResultEditReview 只接受规范 details 对象，不加多字段 fallback。
+ * durable 边界只认 detailsJson 字段；缺 detailsJson 或损坏时 details 均为 undefined，
+ * 绝不透传或旁路未知的 details 对象。
  */
 function decodeDurableToolResultContent(content: Record<string, unknown>): Record<string, unknown> {
-  if (content.details && typeof content.details === 'object' && !Array.isArray(content.details)) {
-    return content
-  }
+  let details: Record<string, unknown> | undefined
   const rawDetailsJson = content.detailsJson
-  if (typeof rawDetailsJson !== 'string' || !rawDetailsJson.trim()) {
-    return content
-  }
-  try {
-    const parsed = JSON.parse(rawDetailsJson)
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      return {
-        ...content,
-        details: parsed as Record<string, unknown>,
+  if (typeof rawDetailsJson === 'string' && rawDetailsJson.trim()) {
+    try {
+      const parsed = JSON.parse(rawDetailsJson)
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        details = parsed as Record<string, unknown>
       }
+    } catch {
+      // 损坏的 detailsJson 解析失败，details 保持 undefined，不假造或旁路未知对象
     }
-  } catch {
-    // 损坏的 detailsJson 保持原样，不伪造 details 对象
   }
-  return content
+  return {
+    ...content,
+    details,
+  }
 }
 
 /**
