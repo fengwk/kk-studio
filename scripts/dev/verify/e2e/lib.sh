@@ -221,7 +221,7 @@ start_backend() {
 
 # Synchronize provider credential pairs into the seeded providers after backend readiness.
 sync_e2e_provider_credentials() {
-  require_cmd python3
+  require_cmd node
   step "Syncing provider E2E credentials from env (secrets not printed)"
   env \
     -u TEST_MINIMAX_BASE_URL -u TEST_MINIMAX_API_KEY \
@@ -258,8 +258,7 @@ start_frontend() {
   wait_http_process "$FRONTEND_URL/" frontend "$pid" "$WORK_DIR/frontend.log"
   # 额外确认代理已打到当前 backend 契约（结构化 config）
   curl -fsS "$FRONTEND_URL/api/models?pageNumber=1&pageSize=1" \
-    | python3 -c 'import sys,json; d=json.load(sys.stdin); m=((d.get("data") or {}).get("results") or [None])[0];
-assert m and isinstance(m.get("config"), dict) and m["config"].get("defaultVariant"), m; print("frontend proxy model.config.defaultVariant=", m["config"]["defaultVariant"])'
+    | node "$SCRIPT_DIR/lib/json-probe.mjs" model-config-print
 }
 
 start_daemon() {
@@ -289,8 +288,7 @@ start_daemon() {
   # Disconnect retains the default 60s route grace lease; leave takeover headroom.
   for _ in $(seq 1 180); do
     env_status=$(curl -fsS "$BACKEND_URL/api/environments" \
-      | python3 -c 'import sys,json; d=json.load(sys.stdin); arr=d.get("data") or [];
-print(next((x.get("status") for x in arr if x.get("name")=="'"$DAEMON_ENV_NAME"'"), ""))' \
+      | node "$SCRIPT_DIR/lib/json-probe.mjs" environment-status "$DAEMON_ENV_NAME" \
       2>/dev/null || true)
     if [ "$env_status" = "READY" ]; then
       step "Daemon READY"
@@ -306,7 +304,7 @@ ensure_stack() {
   local with_daemon=${2:-false}
   local java_home
   require_cmd curl
-  require_cmd python3
+  require_cmd node
   require_cmd lsof
   require_cmd mvn
   require_cmd npm
@@ -333,8 +331,7 @@ ensure_stack() {
     step "Reusing backend $BACKEND_URL"
     # Reused processes must expose the current structured model contract.
     if ! curl -fsS "$BACKEND_URL/api/models?pageNumber=1&pageSize=1" \
-      | python3 -c 'import sys,json; d=json.load(sys.stdin); m=((d.get("data") or {}).get("results") or [None])[0];
-raise SystemExit(0 if m and isinstance(m.get("config"), dict) else 1)' 2>/dev/null; then
+      | node "$SCRIPT_DIR/lib/json-probe.mjs" model-config-check 2>/dev/null; then
       step "Backend contract stale (missing model.config); rebuilding and restarting"
       package_backend "$java_home"
       start_backend "$java_home"
@@ -346,8 +343,7 @@ raise SystemExit(0 if m and isinstance(m.get("config"), dict) else 1)' 2>/dev/nu
   else
     step "Reusing frontend $FRONTEND_URL"
     if ! curl -fsS "$FRONTEND_URL/api/models?pageNumber=1&pageSize=1" \
-      | python3 -c 'import sys,json; d=json.load(sys.stdin); m=((d.get("data") or {}).get("results") or [None])[0];
-raise SystemExit(0 if m and isinstance(m.get("config"), dict) else 1)' 2>/dev/null; then
+      | node "$SCRIPT_DIR/lib/json-probe.mjs" model-config-check 2>/dev/null; then
       step "Frontend proxy contract stale; restarting frontend with API_PROXY_TARGET"
       start_frontend
     fi
@@ -355,8 +351,7 @@ raise SystemExit(0 if m and isinstance(m.get("config"), dict) else 1)' 2>/dev/nu
 
   if [ "$with_daemon" = "true" ]; then
     env_status=$(curl -fsS "$BACKEND_URL/api/environments" \
-      | python3 -c 'import sys,json; d=json.load(sys.stdin); arr=d.get("data") or [];
-print(next((x.get("status") for x in arr if x.get("name")=="'"$DAEMON_ENV_NAME"'"), ""))' \
+      | node "$SCRIPT_DIR/lib/json-probe.mjs" environment-status "$DAEMON_ENV_NAME" \
       2>/dev/null || true)
     if [ "$env_status" != "READY" ]; then
       start_daemon
