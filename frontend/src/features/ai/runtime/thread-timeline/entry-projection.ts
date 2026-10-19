@@ -382,7 +382,8 @@ function projectToolResult(
   callIndex: number,
   metadata: Record<string, unknown>,
 ): ToolDialogueMessage {
-  const projected = projectToolResultContent(content, argumentsJson)
+  const canonicalContent = decodeDurableToolResultContent(content)
+  const projected = projectToolResultContent(canonicalContent, argumentsJson)
   const assistantEntryId = getString(metadata.assistantEntryId)
   const metadataCallIndex = integerValue(metadata.callIndex)
   return {
@@ -402,6 +403,30 @@ function projectToolResult(
     callIdentity: assistantEntryId && metadataCallIndex != null
       ? strictToolCallIdentity(assistantEntryId, metadataCallIndex)
       : undefined,
+  }
+}
+
+/**
+ * 在 durable Entry 边界将持久化的 ToolResultMessageContent 解码为规范共享结果语义。
+ * durable 边界只认 detailsJson 字段；缺 detailsJson 或损坏时 details 均为 undefined，
+ * 绝不透传或旁路未知的 details 对象。
+ */
+function decodeDurableToolResultContent(content: Record<string, unknown>): Record<string, unknown> {
+  let details: Record<string, unknown> | undefined
+  const rawDetailsJson = content.detailsJson
+  if (typeof rawDetailsJson === 'string' && rawDetailsJson.trim()) {
+    try {
+      const parsed = JSON.parse(rawDetailsJson)
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        details = parsed as Record<string, unknown>
+      }
+    } catch {
+      // 损坏的 detailsJson 解析失败，details 保持 undefined，不假造或旁路未知对象
+    }
+  }
+  return {
+    ...content,
+    details,
   }
 }
 

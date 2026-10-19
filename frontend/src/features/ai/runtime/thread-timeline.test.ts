@@ -1872,7 +1872,7 @@ describe('thread timeline', () => {
             toolName: 'edit',
             rendererKey: 'edit',
             error: false,
-            details: { editReview: durableReview },
+            detailsJson: JSON.stringify({ editReview: durableReview }),
             contents: [{ type: 'text', text: 'durable applied' }],
           }]),
           toolResultMetadata: {
