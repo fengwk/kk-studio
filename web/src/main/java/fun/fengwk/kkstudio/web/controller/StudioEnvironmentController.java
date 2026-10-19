@@ -26,7 +26,6 @@ import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCreateDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentEventDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallCodeDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallCodeRequestDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRegistrationTokenDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRotateTokenDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentUpdateDTO;
 
@@ -110,7 +109,7 @@ public class StudioEnvironmentController {
                 parseEnvironmentId(environmentId), expectedVersion)));
   }
 
-  /** 校验 code 后按稳定 Environment 身份返回完整安装脚本。响应不经 Result 包装。 */
+  /** 校验 code 后签发新凭证并返回完整安装脚本；code 随即失效。响应不经 Result 包装。 */
   @GetMapping(value = "/{environmentId}/install", produces = MediaType.TEXT_PLAIN_VALUE)
   public ResponseEntity<String> installationScript(
       @PathVariable String environmentId, @RequestParam String code) {
@@ -121,14 +120,6 @@ public class StudioEnvironmentController {
   @GetMapping(value = "/uninstall/{operatingSystem}", produces = MediaType.TEXT_PLAIN_VALUE)
   public ResponseEntity<String> uninstallationScript(@PathVariable String operatingSystem) {
     return script(environmentService.uninstallationScript(operatingSystem));
-  }
-
-  /** 幂等只读当前 registrationToken；不轮换、不改变 version/updateTime。 */
-  @GetMapping("/{environmentId}/token")
-  public ResponseEntity<Result<EnvironmentRegistrationTokenDTO>> getRegistrationToken(
-      @PathVariable String environmentId) {
-    return noStore(
-        Results.ok(environmentService.getRegistrationToken(parseEnvironmentId(environmentId))));
   }
 
   @PostMapping("/{environmentId}/registration-token")

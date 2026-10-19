@@ -13,6 +13,7 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilitiesCodec;
 import fun.fengwk.kkstudio.harness.environment.server.DaemonLeaseStore;
 import fun.fengwk.kkstudio.harness.environment.server.LeaseBindResult;
+import fun.fengwk.kkstudio.platform.environment.RegistrationTokens;
 import fun.fengwk.kkstudio.platform.environment.repo.impl.PostgresqlEnvironmentChangeNotifier;
 
 import java.sql.ResultSet;
@@ -50,7 +51,7 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
   private static final String TRY_ACQUIRE_SQL =
       """
       with locked_env as (
-          select id, (registration_token = ?) as token_valid
+          select id, (registration_token_hash = ?) as token_valid
           from environment
           where id = ?
           for update
@@ -330,7 +331,7 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
                               (UUID) rs.getObject("lease_token"),
                               rs.getBoolean("acquired"),
                               rs.getString("result_type")),
-                      registrationToken,
+                      RegistrationTokens.hash(registrationToken),
                       environmentId.value(),
                       ownerNodeId,
                       newLeaseToken,

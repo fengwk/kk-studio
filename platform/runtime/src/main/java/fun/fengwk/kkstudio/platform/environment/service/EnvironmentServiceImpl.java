@@ -9,6 +9,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
+import fun.fengwk.kkstudio.platform.environment.RegistrationTokens;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentEvent;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
@@ -27,7 +28,6 @@ import fun.fengwk.kkstudio.share.ai.environment.EnvironmentEventDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallCodeDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallConfigDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallConfigUpdateDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRegistrationTokenDTO;
 import fun.fengwk.kkstudio.share.ai.environment.LiveEnvironmentCapabilityDTO;
 
 import java.time.Clock;
@@ -68,7 +68,8 @@ public class EnvironmentServiceImpl implements EnvironmentService {
     Environment env = new Environment();
     env.setId(UUID.randomUUID());
     env.setName(name);
-    env.setRegistrationToken(UUID.randomUUID().toString());
+    String token = RegistrationTokens.generate();
+    env.setRegistrationTokenHash(RegistrationTokens.hash(token));
     try {
       if (!environmentRepository.create(env)) {
         throw new IllegalStateException("create environment failed");
@@ -77,7 +78,7 @@ public class EnvironmentServiceImpl implements EnvironmentService {
       throw new AiDuplicateException(RESOURCE, "environment name already exists: " + name, error);
     }
     Environment created = environmentRepository.getById(env.getId());
-    return toCardDto(created, true);
+    return toCardDto(created, token);
   }
 
   @Override
@@ -87,7 +88,7 @@ public class EnvironmentServiceImpl implements EnvironmentService {
     if (env == null) {
       throw new AiResourceNotFoundException(RESOURCE);
     }
-    return toCardDto(env, false);
+    return toCardDto(env, null);
   }
 
   @Override
@@ -95,7 +96,7 @@ public class EnvironmentServiceImpl implements EnvironmentService {
     List<Environment> envs = environmentRepository.listNewestFirst();
     List<EnvironmentCardDTO> results = new ArrayList<>(envs.size());
     for (Environment env : envs) {
-      results.add(toCardDto(env, false));
+      results.add(toCardDto(env, null));
     }
     return List.copyOf(results);
   }
@@ -103,22 +104,21 @@ public class EnvironmentServiceImpl implements EnvironmentService {
   @Override
   @Transactional
   public EnvironmentCardDTO importEnvironment(
-      String name, String registrationToken, EnvironmentInstallConfigDTO installConfig) {
+      String name, String registrationTokenHash, EnvironmentInstallConfigDTO installConfig) {
     String canonicalName = validateName(name);
-    String token = validateRegistrationToken(registrationToken);
+    String tokenHash = validateRegistrationTokenHash(registrationTokenHash);
     EnvironmentInstallConfigDTO config =
         installConfig == null ? null : EnvironmentInstallConfigs.validate(installConfig);
     if (environmentRepository.existsByName(canonicalName)) {
       throw new AiDuplicateException(RESOURCE, "environment name already exists: " + canonicalName);
     }
-    if (environmentRepository.getByRegistrationToken(token) != null) {
-      // 不回显 token 值，只报告冲突资源。
+    if (environmentRepository.getByRegistrationTokenHash(tokenHash) != null) {
       throw new AiDuplicateException(RESOURCE, "environment registrationToken already in use");
     }
     Environment env = new Environment();
     env.setId(UUID.randomUUID());
     env.setName(canonicalName);
-    env.setRegistrationToken(token);
+    env.setRegistrationTokenHash(tokenHash);
     env.setInstallConfig(config);
     try {
       if (!environmentRepository.create(env)) {
@@ -129,18 +129,18 @@ public class EnvironmentServiceImpl implements EnvironmentService {
           RESOURCE, "environment name or registrationToken already exists", error);
     }
     Environment created = environmentRepository.getById(env.getId());
-    return toCardDto(created, true);
+    return toCardDto(created, null);
   }
 
   @Override
   @Transactional
   public EnvironmentCardDTO updateImportedEnvironment(
       EnvironmentId id,
-      String registrationToken,
+      String registrationTokenHash,
       EnvironmentInstallConfigDTO installConfig,
       String expectedVersion) {
     Objects.requireNonNull(id, "id");
-    String token = validateRegistrationToken(registrationToken);
+    String tokenHash = validateRegistrationTokenHash(registrationTokenHash);
     EnvironmentInstallConfigDTO config =
         installConfig == null ? null : EnvironmentInstallConfigs.validate(installConfig);
     long expected = CatalogVersions.parse(expectedVersion, "expectedVersion");
@@ -152,11 +152,11 @@ public class EnvironmentServiceImpl implements EnvironmentService {
       throw new AiVersionConflictException(
           RESOURCE, expectedVersion, CatalogVersions.format(env.getVersion()));
     }
-    if (token.equals(env.getRegistrationToken())
+    if (tokenHash.equals(env.getRegistrationTokenHash())
         && Objects.equals(config, env.getInstallConfig())) {
-      return toCardDto(env, true);
+      return toCardDto(env, null);
     }
-    env.setRegistrationToken(token);
+    env.setRegistrationTokenHash(tokenHash);
     env.setInstallConfig(config);
     try {
       if (!environmentRepository.updateById(env, expected)) {
@@ -172,7 +172,7 @@ public class EnvironmentServiceImpl implements EnvironmentService {
           RESOURCE, "environment registrationToken already in use", error);
     }
     Environment updated = environmentRepository.getById(id.value());
-    return toCardDto(updated, true);
+    return toCardDto(updated, null);
   }
 
   @Override
@@ -195,7 +195,7 @@ public class EnvironmentServiceImpl implements EnvironmentService {
           RESOURCE, request.getExpectedVersion(), CatalogVersions.format(env.getVersion()));
     }
     if (Objects.equals(config, env.getInstallConfig())) {
-      return toCardDto(env, false);
+      return toCardDto(env, null);
     }
     env.setInstallConfig(config);
     if (!environmentRepository.updateById(env, expected)) {
@@ -206,7 +206,7 @@ public class EnvironmentServiceImpl implements EnvironmentService {
       throw new AiVersionConflictException(
           RESOURCE, request.getExpectedVersion(), CatalogVersions.format(reread.getVersion()));
     }
-    return toCardDto(environmentRepository.getById(id.value()), false);
+    return toCardDto(environmentRepository.getById(id.value()), null);
   }
 
   @Override
@@ -228,33 +228,36 @@ public class EnvironmentServiceImpl implements EnvironmentService {
   }
 
   @Override
-  public EnvironmentRegistrationTokenDTO getRegistrationToken(EnvironmentId id) {
-    Objects.requireNonNull(id, "id");
-    Environment env = environmentRepository.getById(id.value());
-    if (env == null) {
-      throw new AiResourceNotFoundException(RESOURCE);
-    }
-    EnvironmentRegistrationTokenDTO dto = new EnvironmentRegistrationTokenDTO();
-    dto.setId(env.getId().toString());
-    dto.setRegistrationToken(env.getRegistrationToken());
-    dto.setVersion(CatalogVersions.format(env.getVersion()));
-    return dto;
-  }
-
-  @Override
   public EnvironmentInstallCodeDTO issueInstallCode(EnvironmentId id, String expectedVersion) {
     Environment env = requireInstallable(id, expectedVersion);
-    return EnvironmentInstallCodes.issue(env.getId(), env.getRegistrationToken(), clock.instant());
+    return EnvironmentInstallCodes.issue(
+        env.getId(), env.getRegistrationTokenHash(), clock.instant());
   }
 
+  /**
+   * 兑换安装 code：为本次安装签发新凭证并写入脚本。
+   *
+   * <p>库内只有摘要，脚本必须携带明文，因此兑换即轮换；code 以兑换前的摘要签名，轮换后随即失效，天然只能使用一次。旧凭证的 Daemon 下次握手被拒绝。
+   */
   @Override
+  @Transactional
   public String installationScript(EnvironmentId id, String code) {
-    Environment env = readableInstallTarget(id);
-    EnvironmentInstallCodes.verify(env.getId(), env.getRegistrationToken(), code, clock.instant());
-    return EnvironmentInstallScripts.install(env.getInstallConfig(), env.getRegistrationToken());
+    Objects.requireNonNull(id, "id");
+    Environment env = environmentRepository.lockById(id.value());
+    if (env == null || env.getInstallConfig() == null) {
+      throw new AiResourceNotFoundException(RESOURCE);
+    }
+    EnvironmentInstallCodes.verify(
+        env.getId(), env.getRegistrationTokenHash(), code, clock.instant());
+    String token = RegistrationTokens.generate();
+    env.setRegistrationTokenHash(RegistrationTokens.hash(token));
+    if (!environmentRepository.updateById(env, env.getVersion())) {
+      throw new IllegalStateException("locked environment changed while issuing a token");
+    }
+    return EnvironmentInstallScripts.install(env.getInstallConfig(), token);
   }
 
-  /** 签发必须校验期望版本；下载只读取当前行，不接收版本。 */
+  /** 签发必须校验期望版本；兑换只校验 code，不接收版本。 */
   private Environment requireInstallable(EnvironmentId id, String expectedVersion) {
     Environment env = readableInstallTarget(id);
     if (env.getVersion() != CatalogVersions.parse(expectedVersion, "expectedVersion")) {
@@ -291,7 +294,8 @@ public class EnvironmentServiceImpl implements EnvironmentService {
       throw new AiVersionConflictException(
           RESOURCE, expectedVersion, CatalogVersions.format(env.getVersion()));
     }
-    env.setRegistrationToken(UUID.randomUUID().toString());
+    String token = RegistrationTokens.generate();
+    env.setRegistrationTokenHash(RegistrationTokens.hash(token));
     if (!environmentRepository.updateById(env, expected)) {
       Environment reread = environmentRepository.getById(id.value());
       if (reread == null) {
@@ -301,7 +305,7 @@ public class EnvironmentServiceImpl implements EnvironmentService {
           RESOURCE, expectedVersion, CatalogVersions.format(reread.getVersion()));
     }
     Environment updated = environmentRepository.getById(id.value());
-    return toCardDto(updated, true);
+    return toCardDto(updated, token);
   }
 
   @Override
@@ -380,26 +384,22 @@ public class EnvironmentServiceImpl implements EnvironmentService {
     return trimmed;
   }
 
-  /** 导入 token 与 register 行约束一致：非空白、无环绕空白、≤128。 */
-  public static String validateRegistrationToken(String raw) {
-    if (raw == null || raw.isBlank() || !raw.equals(raw.strip())) {
+  /** 导入的凭证摘要必须是规范 SHA-256（64 位小写十六进制）。 */
+  public static String validateRegistrationTokenHash(String raw) {
+    if (!RegistrationTokens.isHash(raw)) {
       throw new AiValidationException(
-          RESOURCE, "registrationToken must be a non-blank, unpadded string");
-    }
-    if (raw.length() > 128) {
-      throw new AiValidationException(RESOURCE, "registrationToken must be <= 128 characters");
+          RESOURCE, "registrationTokenHash must be a lowercase hex SHA-256 digest");
     }
     return raw;
   }
 
-  private EnvironmentCardDTO toCardDto(Environment env, boolean exposeToken) {
+  /** {@code token} 只在刚签发明文凭证的响应中非空。 */
+  private EnvironmentCardDTO toCardDto(Environment env, String token) {
     EnvironmentCardDTO dto = new EnvironmentCardDTO();
     dto.setId(env.getId().toString());
     dto.setName(env.getName());
     dto.setInstallConfig(env.getInstallConfig());
-    if (exposeToken) {
-      dto.setRegistrationToken(env.getRegistrationToken());
-    }
+    dto.setRegistrationToken(token);
     dto.setVersion(CatalogVersions.format(env.getVersion()));
     dto.setCreateTime(env.getCreateTime());
     dto.setUpdateTime(env.getUpdateTime());

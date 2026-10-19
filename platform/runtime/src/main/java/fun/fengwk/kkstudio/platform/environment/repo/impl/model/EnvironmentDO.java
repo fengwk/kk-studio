@@ -10,7 +10,7 @@ import java.util.UUID;
 public class EnvironmentDO {
   private UUID id;
   private String name;
-  private String registrationToken;
+  private String registrationTokenHash;
   private String installConfigJson;
   private Long version;
   private Instant createTime;

@@ -17,7 +17,6 @@ vi.mock('@/shared/api/environment-service', () => ({
     startEnvironmentUpdate: vi.fn(),
     saveInstallConfig: vi.fn(),
     createEnvironment: vi.fn(),
-    getRegistrationToken: vi.fn(),
     rotateToken: vi.fn(),
     deleteEnvironment: vi.fn(),
     listEnvironmentEvents: vi.fn(),
@@ -175,7 +174,6 @@ describe('EnvironmentsPage', () => {
       expect(within(card).getByRole('button', { name: /重新生成 Token/ })).toBeInTheDocument()
       expect(within(card).getByRole('button', { name: /删除环境/ })).toBeInTheDocument()
     }
-    expect(environmentService.getRegistrationToken).not.toHaveBeenCalled()
   })
 
   it('shows empty state when no environments configured', async () => {
@@ -247,7 +245,6 @@ describe('EnvironmentsPage', () => {
     expect(await screen.findByRole('dialog', { name: '安装/覆盖环境' })).toBeInTheDocument()
     expect(screen.queryByText('secret-token-12345')).not.toBeInTheDocument()
     expect(clipboard.writeText).not.toHaveBeenCalled()
-    expect(environmentService.getRegistrationToken).not.toHaveBeenCalled()
     expect(JSON.stringify(queryClient.getMutationCache().getAll().map(mutation => mutation.state.data))).not.toContain('secret-token-12345')
   })
 
@@ -276,7 +273,6 @@ describe('EnvironmentsPage', () => {
     await waitFor(() => expect(screen.queryByRole('alertdialog', { name: '重新生成 Token' })).toBeNull())
     expect(screen.queryByText('rotated-tok-999')).not.toBeInTheDocument()
     // 轮换不应顺带读取 token
-    expect(environmentService.getRegistrationToken).not.toHaveBeenCalled()
     await waitFor(() => expect(environmentService.listEnvironments).toHaveBeenCalledTimes(2))
     expect(JSON.stringify(queryClient.getMutationCache().getAll().map(mutation => mutation.state.data))).not.toContain('rotated-tok-999')
   })

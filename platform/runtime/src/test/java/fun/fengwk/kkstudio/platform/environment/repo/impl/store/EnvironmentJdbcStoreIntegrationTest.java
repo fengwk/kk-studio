@@ -9,6 +9,7 @@ import org.postgresql.Driver;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.datasource.SimpleDriverDataSource;
 
+import fun.fengwk.kkstudio.platform.environment.RegistrationTokens;
 import fun.fengwk.kkstudio.platform.environment.repo.impl.model.EnvironmentDO;
 import fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport;
 
@@ -51,7 +52,8 @@ class EnvironmentJdbcStoreIntegrationTest {
 
     assertThat(store.getById(alpha).getName()).isEqualTo("alpha");
     assertThat(store.getByName("beta").getId()).isEqualTo(beta);
-    assertThat(store.getByRegistrationToken("token-alpha").getId()).isEqualTo(alpha);
+    assertThat(store.getByRegistrationTokenHash(RegistrationTokens.hash("token-alpha")).getId())
+        .isEqualTo(alpha);
     assertThat(store.lockById(beta).getName()).isEqualTo("beta");
     assertThat(store.lockForKeyShare(alpha).getName()).isEqualTo("alpha");
     assertThat(store.existsByName("alpha")).isTrue();
@@ -81,7 +83,7 @@ class EnvironmentJdbcStoreIntegrationTest {
     EnvironmentDO row = new EnvironmentDO();
     row.setId(UUID.randomUUID());
     row.setName(name);
-    row.setRegistrationToken(token);
+    row.setRegistrationTokenHash(RegistrationTokens.hash(token));
     row.setInstallConfigJson("{}");
     assertThat(store.insert(row)).isEqualTo(1);
     return row.getId();

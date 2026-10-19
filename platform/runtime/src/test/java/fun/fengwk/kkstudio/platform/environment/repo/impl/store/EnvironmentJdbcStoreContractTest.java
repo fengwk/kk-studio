@@ -19,7 +19,7 @@ class EnvironmentJdbcStoreContractTest {
   void updateByIdNeverWritesName() {
     String sql = EnvironmentJdbcStore.UPDATE_BY_ID_SQL;
 
-    assertTrue(sql.contains("registration_token = :registrationToken"), sql);
+    assertTrue(sql.contains("registration_token_hash = :registrationTokenHash"), sql);
     assertTrue(sql.contains("install_config = cast(:installConfigJson as jsonb)"), sql);
     assertTrue(sql.contains("version = version + 1"), sql);
     assertFalse(sql.contains("name"), "environment name must never be updated: " + sql);

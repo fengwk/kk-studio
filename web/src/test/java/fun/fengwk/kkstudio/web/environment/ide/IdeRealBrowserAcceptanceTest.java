@@ -135,8 +135,9 @@ class IdeRealBrowserAcceptanceTest extends WebPostgresTestSupport {
   @BeforeEach
   void seedEnvironment() {
     jdbcTemplate.update(
-        "insert into environment (id, name, registration_token, version)"
-            + " values (?, 'env-ide-browser', ?, 0) on conflict (id) do nothing",
+        "insert into environment (id, name, registration_token_hash, version)"
+            + " values (?, 'env-ide-browser', encode(sha256(convert_to(?, 'UTF8')), 'hex'), 0)"
+            + " on conflict (id) do nothing",
         ENVIRONMENT.value(),
         REGISTRATION_TOKEN);
   }

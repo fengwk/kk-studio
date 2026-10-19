@@ -1,6 +1,6 @@
 environments:
   - name: env
-    registrationToken: token-env
+    registrationTokenHash: f21d92ece713505af79fce6804dafd72b239be0d023924c022006c892bdf4d42
     installConfig:
       operatingSystem: linux
       daemon:

@@ -49,8 +49,8 @@ public class PostgresqlEnvironmentRepository implements EnvironmentRepository {
   }
 
   @Override
-  public Environment getByRegistrationToken(String registrationToken) {
-    return toModel(environmentJdbcStore.getByRegistrationToken(registrationToken));
+  public Environment getByRegistrationTokenHash(String registrationTokenHash) {
+    return toModel(environmentJdbcStore.getByRegistrationTokenHash(registrationTokenHash));
   }
 
   @Override
@@ -106,7 +106,7 @@ public class PostgresqlEnvironmentRepository implements EnvironmentRepository {
     EnvironmentDO target = new EnvironmentDO();
     target.setId(model.getId());
     target.setName(model.getName());
-    target.setRegistrationToken(model.getRegistrationToken());
+    target.setRegistrationTokenHash(model.getRegistrationTokenHash());
     target.setInstallConfigJson(EnvironmentInstallConfigs.write(model.getInstallConfig()));
     target.setVersion(model.getVersion());
     target.setCreateTime(model.getCreateTime());
@@ -121,7 +121,7 @@ public class PostgresqlEnvironmentRepository implements EnvironmentRepository {
     Environment target = new Environment();
     target.setId(row.getId());
     target.setName(row.getName());
-    target.setRegistrationToken(row.getRegistrationToken());
+    target.setRegistrationTokenHash(row.getRegistrationTokenHash());
     target.setInstallConfig(EnvironmentInstallConfigs.read(row.getInstallConfigJson()));
     target.setVersion(row.getVersion());
     target.setCreateTime(row.getCreateTime());

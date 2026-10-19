@@ -171,7 +171,7 @@ public final class ConfigSyncExporter {
     map.put("repositoryUrl", pkg.getRepositoryUrl());
     map.put("branch", pkg.getBranch());
     map.put("currentCommit", pkg.getCurrentCommit());
-    // 与 provider credential、registrationToken 一致：按既有“凭据原值导出”策略，令牌不隐式遗失。
+    // 与 provider credential 一致：按既有“凭据原值导出”策略，令牌不隐式遗失。
     if (pkg.getToken() != null) {
       map.put("token", pkg.getToken());
     }
@@ -181,7 +181,8 @@ public final class ConfigSyncExporter {
   private Map<String, Object> exportEnvironment(Environment env) {
     Map<String, Object> map = new LinkedHashMap<>();
     map.put("name", env.getName());
-    map.put("registrationToken", env.getRegistrationToken());
+    // 只导出凭证摘要：导入后已安装的 Daemon 继续用原明文握手，导出文件本身不能冒充 Daemon。
+    map.put("registrationTokenHash", env.getRegistrationTokenHash());
     if (env.getInstallConfig() != null) {
       map.put("installConfig", yaml.toMap(env.getInstallConfig(), "installConfig"));
     }

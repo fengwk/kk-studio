@@ -7,7 +7,6 @@ import fun.fengwk.kkstudio.share.ai.environment.EnvironmentEventDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallCodeDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallConfigDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallConfigUpdateDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRegistrationTokenDTO;
 
 import java.util.List;
 
@@ -18,13 +17,13 @@ public interface EnvironmentService {
   EnvironmentCardDTO create(EnvironmentCreateDTO dto);
 
   /**
-   * 配置同步导入：以新 UUID 与显式 registrationToken 创建 Environment。
+   * 配置同步导入：以新 UUID 与导出的 registrationToken 摘要创建 Environment。
    *
    * <p>与 {@link #create(EnvironmentCreateDTO)} 的区别是不生成随机 token，而是保留导入文件中的 token，使 Daemon HELLO 可继续按
    * token 注册。同名 Environment 由调用方按名称走 {@link #updateImportedEnvironment}。
    */
   EnvironmentCardDTO importEnvironment(
-      String name, String registrationToken, EnvironmentInstallConfigDTO installConfig);
+      String name, String registrationTokenHash, EnvironmentInstallConfigDTO installConfig);
 
   /** CAS 保存安装设置，响应不含注册凭据。 */
   EnvironmentCardDTO updateInstallConfig(
@@ -43,13 +42,10 @@ public interface EnvironmentService {
    */
   List<EnvironmentEventDTO> listEvents(EnvironmentId id);
 
-  /** 幂等只读当前 registrationToken；不轮换、不更新 version/updateTime。 */
-  EnvironmentRegistrationTokenDTO getRegistrationToken(EnvironmentId id);
-
-  /** 签发五分钟安装 code。校验当前版本和已保存安装设置，不写库、不轮换 token。 */
+  /** 签发五分钟安装 code。校验当前版本和已保存安装设置，不写库、不轮换凭证。 */
   EnvironmentInstallCodeDTO issueInstallCode(EnvironmentId id, String expectedVersion);
 
-  /** 校验安装 code 后按稳定身份渲染安装命令。每次读取当前配置与 token；code 缺失、到期、篡改或 token 已轮换均失败。 */
+  /** 校验安装 code 后签发新凭证并渲染安装脚本；兑换即轮换，因此 code 只能使用一次，旧凭证的 Daemon 下次握手被拒绝。 */
   String installationScript(EnvironmentId id, String code);
 
   /** 按操作系统返回卸载脚本；不需要 token，也不读取或修改 Environment。 */
@@ -62,7 +58,7 @@ public interface EnvironmentService {
    */
   EnvironmentCardDTO updateImportedEnvironment(
       EnvironmentId id,
-      String registrationToken,
+      String registrationTokenHash,
       EnvironmentInstallConfigDTO installConfig,
       String expectedVersion);
 

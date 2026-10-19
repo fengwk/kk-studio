@@ -250,9 +250,9 @@ class IdeInternalBrowserWebSocketEndpointIntegrationTest extends WebPostgresTest
                 sharedJdbcUrl(), sharedJdbcUsername(), sharedJdbcPassword());
         Statement st = conn.createStatement()) {
       st.execute(
-          "insert into environment (id, name, registration_token) values ('"
+          "insert into environment (id, name, registration_token_hash) values ('"
               + ENVIRONMENT
-              + "', 'internal-browser-ws-env', 'internal-browser-ws-token')"
+              + "', 'internal-browser-ws-env', repeat('a', 64))"
               + " on conflict (id) do nothing");
       st.execute(
           "insert into environment_connection"

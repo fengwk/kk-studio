@@ -1,7 +1,13 @@
+import { createHash } from 'node:crypto'
 import { assert, envelopeData, assertExactFields, cid, expectHttpError } from '../lib/http.mjs'
 import { registerCase } from '../lib/registry.mjs'
 import { providerCreateBody } from '../lib/fixtures.mjs'
 import { assertInstallConfig, linuxInstallConfig } from './environment-install-config.mjs'
+
+/** 服务端只保存注册令牌的 SHA-256；导出与导入都使用这一摘要。 */
+function tokenHash(token) {
+  return createHash('sha256').update(token, 'utf8').digest('hex')
+}
 
 function assertImportCheck(data) {
   assertExactFields(data, ['created', 'updated', 'skipped'], 'import check')
@@ -127,7 +133,7 @@ registerCase({
   id: 'config_sync.environment_identity_and_token',
   level: 'L1',
   title: '配置同步 Environment 身份稳定性与凭据保留',
-  docs: '同名 Environment 导出包含 registrationToken；预检查只列覆盖引用，确认导入不生成新 UUID 且保留原令牌与单行唯一性',
+  docs: '同名 Environment 导出只含 registrationTokenHash 而不含明文；预检查只列覆盖引用，确认导入不生成新 UUID 且保留原令牌摘要与单行唯一性',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
     const envName = `e2e-sync-env-${suffix}`
@@ -156,7 +162,8 @@ registerCase({
       const yaml = exportData?.yaml
       assert(typeof yaml === 'string' && yaml.trim().length > 0, 'export yaml must be non-empty string')
       assert(yaml.includes(envName), `export yaml must contain environment name ${envName}`)
-      assert(yaml.includes(originalToken), 'export yaml must contain environment registrationToken')
+      assert(yaml.includes(tokenHash(originalToken)), 'export yaml must contain the registration token hash')
+      assert(!yaml.includes(originalToken), 'export yaml must never contain the plaintext registration token')
 
       const { json: checkJson } = await ctx.call('POST', '/api/settings/sync/import/check', { yaml })
       const check = envelopeData(checkJson)
@@ -172,18 +179,12 @@ registerCase({
       )
       assert(importedEnv, `imported must contain {kind:'environments',name:${envName}}`)
 
-      const { json: tokenJson } = await ctx.call(
-        'GET',
-        `/api/harness/environments/${encodeURIComponent(envId)}/token`,
-      )
-      const tokenData = envelopeData(tokenJson)
+      const { json: reexportJson } = await ctx.call('POST', '/api/settings/sync/export', {
+        items: [{ kind: 'environments', name: envName }],
+      })
       assert(
-        tokenData?.id === envId,
-        `environment id must match original id: expected ${envId}, got ${tokenData?.id}`,
-      )
-      assert(
-        tokenData?.registrationToken === originalToken,
-        'environment registrationToken must equal original token',
+        envelopeData(reexportJson).yaml.includes(tokenHash(originalToken)),
+        'import must keep the original registration token hash',
       )
 
       const { json: listJson } = await ctx.call('GET', '/api/harness/environments')
@@ -270,7 +271,7 @@ registerCase({
   id: 'config_sync.environment_install_config_roundtrip',
   level: 'L1',
   title: '配置同步 Environment installConfig 导出导入往返、原子更新与清除',
-  docs: 'Environment 导出在 registrationToken 旁嵌套 installConfig；导入预检查只列覆盖引用且不回显 token；确认导入保留配置；以新 token+新配置的条目可原子更新（token 端点读到新值、Card 读到新配置）；缺少 installConfig 字段的条目清空已保存配置',
+  docs: 'Environment 导出在 registrationTokenHash 旁嵌套 installConfig；导入预检查只列覆盖引用；确认导入保留配置；以新摘要+新配置的条目可原子更新（重新导出得到新摘要、Card 读到新配置）；缺少 installConfig 字段的条目清空已保存配置',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
     const envName = `e2e-sync-cfg-${suffix}`
@@ -297,7 +298,7 @@ registerCase({
       const yaml = envelopeData(exportJson)?.yaml
       assert(typeof yaml === 'string' && yaml.trim().length > 0, 'export yaml must be non-empty string')
       assert(yaml.includes(envName), 'export yaml must contain environment name')
-      assert(yaml.includes(originalToken), 'export yaml must contain environment registrationToken')
+      assert(yaml.includes(tokenHash(originalToken)), 'export yaml must contain the registration token hash')
       assert(yaml.includes('installConfig'), 'export yaml must contain nested installConfig')
       assert(yaml.includes('http://127.0.0.1:18081'), 'export yaml must contain studioUrl')
       assert(yaml.includes('jdtls'), 'export yaml must contain nested LSP server')
@@ -323,15 +324,17 @@ registerCase({
       const updatedConfig = linuxInstallConfig()
       updatedConfig.daemon.note = 'e2e install config updated'
       const updateYaml = JSON.stringify({
-        environments: [{ name: envName, registrationToken: newToken, installConfig: updatedConfig }],
+        environments: [{ name: envName, registrationTokenHash: tokenHash(newToken), installConfig: updatedConfig }],
       })
       await ctx.call('POST', '/api/settings/sync/import/check', { yaml: updateYaml })
       await ctx.call('POST', '/api/settings/sync/import', { yaml: updateYaml, allowPartial: false })
 
-      const { json: tokenJson } = await ctx.call('GET', `${cardPath(envId)}/token`)
+      const { json: updatedExportJson } = await ctx.call('POST', '/api/settings/sync/export', {
+        items: [{ kind: 'environments', name: envName }],
+      })
       assert(
-        envelopeData(tokenJson).registrationToken === newToken,
-        'atomic sync update must rotate the registration token',
+        envelopeData(updatedExportJson).yaml.includes(tokenHash(newToken)),
+        'atomic sync update must replace the registration token hash',
       )
       const { json: updatedCardJson } = await ctx.call('GET', cardPath(envId))
       assert(
@@ -341,7 +344,7 @@ registerCase({
 
       // 缺少 installConfig 字段的条目必须清空已保存配置。
       const clearYaml = JSON.stringify({
-        environments: [{ name: envName, registrationToken: newToken }],
+        environments: [{ name: envName, registrationTokenHash: tokenHash(newToken) }],
       })
       await ctx.call('POST', '/api/settings/sync/import', { yaml: clearYaml, allowPartial: false })
       const { json: clearedJson } = await ctx.call('GET', cardPath(envId))
@@ -383,7 +386,7 @@ registerCase({
     ]
 
     for (const installConfig of invalidConfigs) {
-      const yaml = JSON.stringify({ environments: [{ name, registrationToken: token, installConfig }] })
+      const yaml = JSON.stringify({ environments: [{ name, registrationTokenHash: tokenHash(token), installConfig }] })
       for (const path of ['/api/settings/sync/import/check', '/api/settings/sync/import']) {
         const error = await expectHttpError(
           () => ctx.call('POST', path, { yaml, allowPartial: true }),

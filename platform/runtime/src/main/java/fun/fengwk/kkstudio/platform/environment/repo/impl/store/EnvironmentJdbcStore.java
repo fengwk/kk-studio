@@ -19,13 +19,13 @@ import java.util.UUID;
 public class EnvironmentJdbcStore {
 
   private static final String COLUMNS =
-      "id, name, registration_token, install_config::text as install_config_json, version, "
+      "id, name, registration_token_hash, install_config::text as install_config_json, version, "
           + "created_at as create_time, updated_at as update_time";
 
   static final String UPDATE_BY_ID_SQL =
       """
       update environment
-      set registration_token = :registrationToken,
+      set registration_token_hash = :registrationTokenHash,
           install_config = cast(:installConfigJson as jsonb),
           updated_at = greatest(updated_at, current_timestamp),
           version = version + 1
@@ -35,9 +35,9 @@ public class EnvironmentJdbcStore {
   private static final String INSERT_SQL =
       """
       insert into environment (
-          id, name, registration_token, install_config, created_at, updated_at, version
+          id, name, registration_token_hash, install_config, created_at, updated_at, version
       ) values (
-          :id, :name, :registrationToken, cast(:installConfigJson as jsonb), current_timestamp, current_timestamp, 0
+          :id, :name, :registrationTokenHash, cast(:installConfigJson as jsonb), current_timestamp, current_timestamp, 0
       )
       """;
 
@@ -74,11 +74,13 @@ public class EnvironmentJdbcStore {
     return findOne("select " + COLUMNS + " from environment where name = :name", "name", name);
   }
 
-  public EnvironmentDO getByRegistrationToken(String registrationToken) {
+  public EnvironmentDO getByRegistrationTokenHash(String registrationTokenHash) {
     return findOne(
-        "select " + COLUMNS + " from environment where registration_token = :registrationToken",
-        "registrationToken",
-        registrationToken);
+        "select "
+            + COLUMNS
+            + " from environment where registration_token_hash = :registrationTokenHash",
+        "registrationTokenHash",
+        registrationTokenHash);
   }
 
   public EnvironmentDO lockById(UUID id) {
@@ -103,7 +105,7 @@ public class EnvironmentJdbcStore {
         .sql(INSERT_SQL)
         .param("id", environment.getId())
         .param("name", environment.getName())
-        .param("registrationToken", environment.getRegistrationToken())
+        .param("registrationTokenHash", environment.getRegistrationTokenHash())
         .param("installConfigJson", environment.getInstallConfigJson())
         .update();
   }
@@ -111,7 +113,7 @@ public class EnvironmentJdbcStore {
   public int updateById(EnvironmentDO environment, long expectedVersion) {
     return jdbcClient
         .sql(UPDATE_BY_ID_SQL)
-        .param("registrationToken", environment.getRegistrationToken())
+        .param("registrationTokenHash", environment.getRegistrationTokenHash())
         .param("installConfigJson", environment.getInstallConfigJson())
         .param("id", environment.getId())
         .param("expectedVersion", expectedVersion)
@@ -139,7 +141,7 @@ public class EnvironmentJdbcStore {
     EnvironmentDO row = new EnvironmentDO();
     row.setId(rs.getObject("id", UUID.class));
     row.setName(rs.getString("name"));
-    row.setRegistrationToken(rs.getString("registration_token"));
+    row.setRegistrationTokenHash(rs.getString("registration_token_hash"));
     row.setInstallConfigJson(rs.getString("install_config_json"));
     row.setVersion(rs.getLong("version"));
     row.setCreateTime(

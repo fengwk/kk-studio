@@ -123,7 +123,7 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
 
     // 播种稳定 environment 卡片
     jdbcTemplate.update(
-        "insert into environment (id, name, registration_token, version) values (?, 'dev-env', ?, 0)",
+        "insert into environment (id, name, registration_token_hash, version) values (?, 'dev-env', encode(sha256(convert_to(?, 'UTF8')), 'hex'), 0)",
         DEV.value(),
         REGISTRATION_TOKEN);
 
@@ -143,12 +143,12 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
           public Environment getById(UUID id) {
             List<Environment> list =
                 jdbcTemplate.query(
-                    "select id, name, registration_token, version, created_at as create_time, updated_at as update_time from environment where id = ?",
+                    "select id, name, registration_token_hash, version, created_at as create_time, updated_at as update_time from environment where id = ?",
                     (rs, rowNum) -> {
                       Environment e = new Environment();
                       e.setId((UUID) rs.getObject("id"));
                       e.setName(rs.getString("name"));
-                      e.setRegistrationToken(rs.getString("registration_token"));
+                      e.setRegistrationTokenHash(rs.getString("registration_token_hash"));
                       e.setVersion(rs.getLong("version"));
                       return e;
                     },
@@ -162,19 +162,19 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
           }
 
           @Override
-          public Environment getByRegistrationToken(String token) {
+          public Environment getByRegistrationTokenHash(String tokenHash) {
             List<Environment> list =
                 jdbcTemplate.query(
-                    "select id, name, registration_token, version, created_at as create_time, updated_at as update_time from environment where registration_token = ?",
+                    "select id, name, registration_token_hash, version, created_at as create_time, updated_at as update_time from environment where registration_token_hash = ?",
                     (rs, rowNum) -> {
                       Environment e = new Environment();
                       e.setId((UUID) rs.getObject("id"));
                       e.setName(rs.getString("name"));
-                      e.setRegistrationToken(rs.getString("registration_token"));
+                      e.setRegistrationTokenHash(rs.getString("registration_token_hash"));
                       e.setVersion(rs.getLong("version"));
                       return e;
                     },
-                    token);
+                    tokenHash);
             return list.isEmpty() ? null : list.get(0);
           }
 

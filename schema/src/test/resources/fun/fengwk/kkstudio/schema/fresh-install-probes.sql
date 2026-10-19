@@ -50,8 +50,8 @@ $$;
 -- Fixtures: Catalog identity, workflow projects, Harness Session/Thread/Entry,
 -- Issue+Agent Thread bindings, stage budgets and Runs.
 -- ---------------------------------------------------------------------------
-insert into environment (id, name, registration_token)
-    values (pg_temp.uid(9000), 'install-fixture', 'install-fixture-token');
+insert into environment (id, name, registration_token_hash)
+    values (pg_temp.uid(9000), 'install-fixture', repeat('a', 64));
 select pg_temp.assert_true('environment install settings default null',
     (select install_config is null from environment where id = pg_temp.uid(9000)));
 update environment set install_config = '{"operatingSystem":"linux"}'::jsonb

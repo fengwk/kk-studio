@@ -7,7 +7,6 @@ import type {
   EnvironmentEventDTO,
   EnvironmentInstallCodeDTO,
   EnvironmentInstallConfigDTO,
-  EnvironmentRegistrationTokenDTO,
   EnvironmentUpdateDTO,
   IdeViewDTO,
 } from '@/shared/api/contracts/ai-environment'
@@ -34,16 +33,8 @@ export function createEnvironmentService(client: HttpClient = apiClient) {
       client.post('/harness/environments', data),
 
     /**
-     * 按需读取当前 registrationToken（不轮换、幂等、响应 no-store）。
-     *
-     * 仅在用户显式生成安装命令时读取，不进入 query cache、LocalStorage 或 URL。
-     */
-    getRegistrationToken: (id: string): Promise<EnvironmentRegistrationTokenDTO> =>
-      client.get(`/harness/environments/${encodeURIComponent(id)}/token`),
-
-    /**
      * 签发 5 分钟安装 code。客户端按现有 Result 解包得到 {code, expiresAt}。
-     * 不轮换 registrationToken，也不自动重试。
+     * 签发不轮换 registrationToken；下载安装脚本时服务端签发新凭证，code 随即失效。不自动重试。
      */
     createInstallCode: (id: string, expectedVersion: string): Promise<EnvironmentInstallCodeDTO> =>
       client.post(`/harness/environments/${encodeURIComponent(id)}/install-code`, {

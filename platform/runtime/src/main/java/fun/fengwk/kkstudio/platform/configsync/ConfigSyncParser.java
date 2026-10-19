@@ -344,10 +344,10 @@ public final class ConfigSyncParser {
       Entry entry, List<ConfigSyncSkipped> skipped, List<String> declared) {
     String name = entry.reqName("name");
     declared.add(name);
-    String token = entry.reqString("registrationToken");
+    String tokenHash = entry.reqString("registrationTokenHash");
     // 与 register/update 共用静态校验：known 非法值必须硬拒绝，未知字段不能绕过。
     EnvironmentServiceImpl.validateName(name);
-    EnvironmentServiceImpl.validateRegistrationToken(token);
+    EnvironmentServiceImpl.validateRegistrationTokenHash(tokenHash);
     Object configNode = entry.node("installConfig");
     EnvironmentInstallConfigDTO config =
         configNode == null
@@ -356,7 +356,7 @@ public final class ConfigSyncParser {
     if (skipUnknown(entry, ConfigSyncKind.ENVIRONMENTS, name, skipped)) {
       return null;
     }
-    return new EnvironmentSpec(name, token, config);
+    return new EnvironmentSpec(name, tokenHash, config);
   }
 
   private McpSpec parseMcpServer(
@@ -532,7 +532,7 @@ public final class ConfigSyncParser {
       String token) {}
 
   public record EnvironmentSpec(
-      String name, String registrationToken, EnvironmentInstallConfigDTO installConfig) {}
+      String name, String registrationTokenHash, EnvironmentInstallConfigDTO installConfig) {}
 
   public record McpSpec(String name, McpServerMutationValidator.HttpConfig config) {}
 

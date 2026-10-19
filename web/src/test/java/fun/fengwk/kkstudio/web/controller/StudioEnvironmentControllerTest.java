@@ -5,7 +5,6 @@ import static org.hamcrest.Matchers.not;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -34,7 +33,6 @@ import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCardDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCreateDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentEventDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallCodeDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRegistrationTokenDTO;
 import fun.fengwk.kkstudio.web.advice.StudioDomainErrorAdvice;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 
@@ -171,30 +169,6 @@ class StudioEnvironmentControllerTest {
         .perform(get("/api/harness/environments/" + ENV_ID + "/events"))
         .andExpect(status().isNotFound())
         .andExpect(jsonPath("$.code").value("resource_not_found"));
-  }
-
-  /**
-   * 意图：验证 GET /api/harness/environments/{id}/token 是幂等只读端点，返回当前 token 与版本，并通过 Cache-Control:
-   * no-store 明确禁止任何缓存；它不得调用 rotateToken。
-   */
-  @Test
-  void getRegistrationTokenReturnsCurrentTokenWithNoStore() throws Exception {
-    EnvironmentRegistrationTokenDTO token = new EnvironmentRegistrationTokenDTO();
-    token.setId(ENV_ID.toString());
-    token.setRegistrationToken("current-token");
-    token.setVersion("4");
-    when(environmentService.getRegistrationToken(eq(EnvironmentId.of(ENV_ID)))).thenReturn(token);
-
-    mockMvc
-        .perform(get("/api/harness/environments/" + ENV_ID + "/token"))
-        .andExpect(status().isOk())
-        .andExpect(header().string(HttpHeaders.CACHE_CONTROL, "no-store"))
-        .andExpect(jsonPath("$.data.id").value(ENV_ID.toString()))
-        .andExpect(jsonPath("$.data.registrationToken").value("current-token"))
-        .andExpect(jsonPath("$.data.version").value("4"));
-
-    verify(environmentService).getRegistrationToken(EnvironmentId.of(ENV_ID));
-    verify(environmentService, never()).rotateToken(any(), any());
   }
 
   /**

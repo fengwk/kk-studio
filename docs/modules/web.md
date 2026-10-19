@@ -67,7 +67,7 @@ health、资源下载和 WebSocket 使用各自传输形式。公开路由如下
 | Issue | `/api/issues/{issueId}` | CRUD、活动/证据、流转、阻塞/恢复、暂停/继续、stop、UNKNOWN 核查、额度重置、归档 |
 | Settings | `/api/settings`、`/api/settings/schema` | 聚合 GET/CAS PUT、编辑 schema |
 | Configuration sync | `/api/settings/sync`、`/export`、`/import/check`、`/import` | GET 清单、POST 选择导出、导入检查与确认执行；响应禁止缓存 |
-| Environment | `/api/harness/environments`、`/{id}/update` | Card、注册令牌查询/轮换、安装设置保存、受管二进制在线更新（POST 发起、GET 只读投影）、运维 events |
+| Environment | `/api/harness/environments`、`/{id}/update` | Card、注册令牌轮换（明文只在创建与轮换响应中返回一次）、安装设置保存、受管二进制在线更新（POST 发起、GET 只读投影）、运维 events |
 
 `POST /api/ai/chats` 省略 `yoloEnabled` 时为 `false`；创建请求的 `environmentName` 可省略或为 null（都表示无默认环境），
 携带时必须为已存在的 Environment 名；响应中的 `environmentName` 是始终存在的 required-nullable 字段（未选择时为 null）。

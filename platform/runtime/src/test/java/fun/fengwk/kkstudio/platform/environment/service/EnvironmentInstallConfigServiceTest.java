@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.platform.environment.RegistrationTokens;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
@@ -55,7 +56,7 @@ class EnvironmentInstallConfigServiceTest {
     assertEquals("1", result.getVersion());
     assertEquals(request().getInstallConfig(), result.getInstallConfig());
     assertNull(result.getRegistrationToken());
-    assertEquals("private-token", env.getRegistrationToken());
+    assertEquals(RegistrationTokens.hash("private-token"), env.getRegistrationTokenHash());
     verify(repo).updateById(env, 0);
   }
 
@@ -105,7 +106,7 @@ class EnvironmentInstallConfigServiceTest {
     Environment env = new Environment();
     env.setId(id);
     env.setName("install");
-    env.setRegistrationToken("private-token");
+    env.setRegistrationTokenHash(RegistrationTokens.hash("private-token"));
     env.setVersion(version);
     return env;
   }

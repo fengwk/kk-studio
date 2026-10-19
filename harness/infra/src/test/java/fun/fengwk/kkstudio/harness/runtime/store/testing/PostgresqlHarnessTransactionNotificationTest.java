@@ -641,8 +641,8 @@ class PostgresqlHarnessTransactionNotificationTest {
       JdbcTemplate jdbc, EnvironmentId environment, UUID node) {
     jdbc.update(
         """
-        insert into environment (id, name, registration_token, version)
-        values (?, ?, ?, 0)
+        insert into environment (id, name, registration_token_hash, version)
+        values (?, ?, encode(sha256(convert_to(?, 'UTF8')), 'hex'), 0)
         on conflict (id) do nothing
         """,
         environment.value(),

@@ -16,6 +16,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -28,6 +29,7 @@ import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
+import fun.fengwk.kkstudio.platform.environment.RegistrationTokens;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentEvent;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
@@ -47,7 +49,6 @@ import fun.fengwk.kkstudio.share.ai.environment.EnvironmentCreateDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentEventDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallCodeDTO;
 import fun.fengwk.kkstudio.share.ai.environment.EnvironmentInstallConfigDTO;
-import fun.fengwk.kkstudio.share.ai.environment.EnvironmentRegistrationTokenDTO;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -57,6 +58,8 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 class EnvironmentServiceImplTest {
 
@@ -98,7 +101,7 @@ class EnvironmentServiceImplTest {
               Environment env = new Environment();
               env.setId(invocation.getArgument(0));
               env.setName("local-env");
-              env.setRegistrationToken("secret-token");
+              env.setRegistrationTokenHash(h("secret-token"));
               env.setVersion(0L);
               env.setCreateTime(NOW);
               env.setUpdateTime(NOW);
@@ -163,7 +166,7 @@ class EnvironmentServiceImplTest {
               Environment env = new Environment();
               env.setId(id);
               env.setName("local-env");
-              env.setRegistrationToken("secret-token");
+              env.setRegistrationTokenHash(h("secret-token"));
               env.setVersion(0L);
               env.setCreateTime(NOW);
               env.setUpdateTime(NOW);
@@ -179,7 +182,9 @@ class EnvironmentServiceImplTest {
     EnvironmentCardDTO result = service.create(create);
 
     assertEquals("local-env", result.getName());
-    assertEquals("secret-token", result.getRegistrationToken());
+    ArgumentCaptor<Environment> created = ArgumentCaptor.forClass(Environment.class);
+    verify(repo).create(created.capture());
+    assertEquals(h(result.getRegistrationToken()), created.getValue().getRegistrationTokenHash());
     assertEquals("0", result.getVersion());
   }
 
@@ -195,7 +200,7 @@ class EnvironmentServiceImplTest {
     Environment env = new Environment();
     env.setId(ENV_ID);
     env.setName("local-env");
-    env.setRegistrationToken("secret-token");
+    env.setRegistrationTokenHash(h("secret-token"));
     env.setVersion(0L);
     env.setCreateTime(NOW);
     env.setUpdateTime(NOW);
@@ -259,7 +264,7 @@ class EnvironmentServiceImplTest {
     Environment env = new Environment();
     env.setId(ENV_ID);
     env.setName("local-env");
-    env.setRegistrationToken("secret-token");
+    env.setRegistrationTokenHash(h("secret-token"));
     env.setVersion(0L);
     env.setCreateTime(NOW);
     env.setUpdateTime(NOW);
@@ -299,7 +304,7 @@ class EnvironmentServiceImplTest {
     Environment env = new Environment();
     env.setId(ENV_ID);
     env.setName("local-env");
-    env.setRegistrationToken("secret-token");
+    env.setRegistrationTokenHash(h("secret-token"));
     env.setVersion(0L);
     env.setCreateTime(NOW);
     env.setUpdateTime(NOW);
@@ -342,46 +347,9 @@ class EnvironmentServiceImplTest {
     assertEquals("/home/dev", card.getHomeDirectory());
   }
 
-  /** 测试意图：registrationToken 只读端点幂等——连续读取返回同一 token，且不推进 version / updateTime（不轮换、不写库）。 */
+  /** 测试意图：兑换安装 code 即签发新凭证写入脚本，库内只更新摘要，同一 code 无法再次兑换。 */
   @Test
-  void getRegistrationTokenReturnsStableValueWithoutRotating() {
-    EnvironmentRepository repo = mock(EnvironmentRepository.class);
-    EnvironmentRegistry registry = mock(EnvironmentRegistry.class);
-    AgentDefinitionRepository agents = mock(AgentDefinitionRepository.class);
-    JdbcTemplate jdbc = mock(JdbcTemplate.class);
-    SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
-    when(snapshot.get()).thenReturn(SystemSettings.DEFAULT);
-
-    Environment env = new Environment();
-    env.setId(ENV_ID);
-    env.setName("local-env");
-    env.setRegistrationToken("stable-token");
-    env.setVersion(3L);
-    env.setCreateTime(NOW);
-    env.setUpdateTime(NOW);
-    when(repo.getById(ENV_ID)).thenReturn(env);
-
-    EnvironmentServiceImpl service =
-        new EnvironmentServiceImpl(repo, registry, jdbc, snapshot, CLOCK);
-
-    EnvironmentRegistrationTokenDTO first = service.getRegistrationToken(EnvironmentId.of(ENV_ID));
-    EnvironmentRegistrationTokenDTO second = service.getRegistrationToken(EnvironmentId.of(ENV_ID));
-
-    assertEquals("stable-token", first.getRegistrationToken());
-    assertEquals("stable-token", second.getRegistrationToken());
-    assertEquals("3", first.getVersion());
-    assertEquals("3", second.getVersion());
-    // 只读路径不得写库，也不得触碰租约
-    verify(repo, never()).updateById(any(), anyLong());
-    verify(registry, never()).hasActiveLease(any());
-    assertEquals("stable-token", env.getRegistrationToken());
-    assertEquals(3L, env.getVersion());
-    assertEquals(NOW, env.getUpdateTime());
-  }
-
-  /** 测试意图：同一 Environment 身份的安装命令在轮换前后仍按 id 读取，但渲染当前 token，且不额外写库。 */
-  @Test
-  void installationScriptUsesCurrentTokenForStableEnvironmentId() {
+  void installationScriptIssuesAFreshTokenAndConsumesTheCode() {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     EnvironmentServiceImpl service = service(repo);
     Environment env = environment("secret-token", 4L);
@@ -392,30 +360,27 @@ class EnvironmentServiceImplTest {
     config.setDaemon(daemon);
     env.setInstallConfig(config);
     when(repo.getById(ENV_ID)).thenReturn(env);
+    when(repo.lockById(ENV_ID)).thenReturn(env);
+    when(repo.updateById(env, 4L)).thenReturn(true);
 
     assertThrows(
         AiVersionConflictException.class,
         () -> service.issueInstallCode(EnvironmentId.of(ENV_ID), "3"));
     EnvironmentInstallCodeDTO issued = service.issueInstallCode(EnvironmentId.of(ENV_ID), "4");
-    String before = service.installationScript(EnvironmentId.of(ENV_ID), issued.getCode());
-    env.setRegistrationToken("rotated-token");
-    env.setVersion(5L);
+    assertEquals(NOW.plus(Duration.ofMinutes(5)), issued.getExpiresAt());
+    String script = service.installationScript(EnvironmentId.of(ENV_ID), issued.getCode());
+
+    assertFalse(script.contains("secret-token"), "the old token is never recoverable");
+    assertNotEquals(h("secret-token"), env.getRegistrationTokenHash());
+    verify(repo).updateById(env, 4L);
+    assertTrue(
+        script.contains(tokenFor(env.getRegistrationTokenHash(), script)),
+        "the script carries the plaintext whose hash is now stored");
     assertThrows(
         AiValidationException.class,
-        () -> service.installationScript(EnvironmentId.of(ENV_ID), issued.getCode()));
-    String after =
-        service.installationScript(
-            EnvironmentId.of(ENV_ID),
-            service.issueInstallCode(EnvironmentId.of(ENV_ID), "5").getCode());
-
-    assertTrue(before.contains("secret-token"));
-    assertFalse(before.contains("rotated-token"));
-    assertTrue(after.contains("rotated-token"));
-    assertFalse(after.contains("secret-token"));
-    assertEquals(ENV_ID, env.getId());
-    assertEquals(NOW.plus(Duration.ofMinutes(5)), issued.getExpiresAt());
-    verify(repo, never()).updateById(any(), anyLong());
-    verify(repo, never()).getByRegistrationToken(any());
+        () -> service.installationScript(EnvironmentId.of(ENV_ID), issued.getCode()),
+        "a redeemed code is bound to the old hash and cannot be reused");
+    verify(repo, never()).getByRegistrationTokenHash(any());
     assertThrows(
         AiValidationException.class,
         () -> service.installationScript(EnvironmentId.of(ENV_ID), null));
@@ -435,13 +400,13 @@ class EnvironmentServiceImplTest {
   void installationScriptRejectsUnknownIdAndMissingConfig() {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     EnvironmentServiceImpl service = service(repo);
-    when(repo.getById(ENV_ID)).thenReturn(null);
+    when(repo.lockById(ENV_ID)).thenReturn(null);
     assertThrows(
         AiResourceNotFoundException.class,
         () -> service.installationScript(EnvironmentId.of(ENV_ID), "1.bad"));
 
     Environment env = environment("saved", 1L);
-    when(repo.getById(ENV_ID)).thenReturn(env);
+    when(repo.lockById(ENV_ID)).thenReturn(env);
     assertThrows(
         AiResourceNotFoundException.class,
         () -> service.installationScript(EnvironmentId.of(ENV_ID), "1.bad"));
@@ -456,7 +421,7 @@ class EnvironmentServiceImplTest {
 
     assertTrue(service.uninstallationScript("macos").contains("uninstall"));
     assertThrows(AiValidationException.class, () -> service.uninstallationScript("unknown"));
-    verify(repo, never()).getByRegistrationToken(any());
+    verify(repo, never()).getByRegistrationTokenHash(any());
   }
 
   private static EnvironmentServiceImpl service(EnvironmentRepository repo) {
@@ -466,25 +431,6 @@ class EnvironmentServiceImplTest {
         mock(JdbcTemplate.class),
         mock(SystemSettingsSnapshot.class),
         CLOCK);
-  }
-
-  /** 测试意图：读取不存在的 Environment 时抛出稳定的 404 语义错误，而不是返回空 token。 */
-  @Test
-  void getRegistrationTokenRejectsMissingEnvironment() {
-    EnvironmentRepository repo = mock(EnvironmentRepository.class);
-    EnvironmentRegistry registry = mock(EnvironmentRegistry.class);
-    AgentDefinitionRepository agents = mock(AgentDefinitionRepository.class);
-    JdbcTemplate jdbc = mock(JdbcTemplate.class);
-    SystemSettingsSnapshot snapshot = mock(SystemSettingsSnapshot.class);
-    when(snapshot.get()).thenReturn(SystemSettings.DEFAULT);
-    when(repo.getById(ENV_ID)).thenReturn(null);
-
-    EnvironmentServiceImpl service =
-        new EnvironmentServiceImpl(repo, registry, jdbc, snapshot, CLOCK);
-
-    assertThrows(
-        AiResourceNotFoundException.class,
-        () -> service.getRegistrationToken(EnvironmentId.of(ENV_ID)));
   }
 
   /** 测试意图：在线轮换必须被允许——不再查询/拒绝活跃 lease，既有连接不被主动断开；轮换只改变 token 并推进版本。 */
@@ -500,7 +446,7 @@ class EnvironmentServiceImplTest {
     Environment env = new Environment();
     env.setId(ENV_ID);
     env.setName("local-env");
-    env.setRegistrationToken("old-token");
+    env.setRegistrationTokenHash(h("old-token"));
     env.setVersion(0L);
     env.setCreateTime(NOW);
     env.setUpdateTime(NOW);
@@ -518,6 +464,7 @@ class EnvironmentServiceImplTest {
 
     assertNotNull(rotated.getRegistrationToken());
     assertNotEquals("old-token", rotated.getRegistrationToken());
+    assertEquals(h(rotated.getRegistrationToken()), env.getRegistrationTokenHash());
     verify(registry, never()).hasActiveLease(any());
     verify(registry, never()).disconnect(any(), any(), any());
   }
@@ -534,7 +481,7 @@ class EnvironmentServiceImplTest {
     Environment env = new Environment();
     env.setId(ENV_ID);
     env.setName("local-env");
-    env.setRegistrationToken("token");
+    env.setRegistrationTokenHash(h("token"));
     env.setVersion(0L);
 
     when(repo.lockById(ENV_ID)).thenReturn(env);
@@ -659,12 +606,12 @@ class EnvironmentServiceImplTest {
         AiResourceNotFoundException.class, () -> service.listEvents(EnvironmentId.of(ENV_ID)));
   }
 
-  /** 意图：导入新 Environment 使用新 UUID 并保留 token，仅在新建响应中暴露 token。 */
+  /** 意图：导入新 Environment 使用新 UUID 并保留导出的凭证摘要；导入不产生可回显的明文。 */
   @Test
-  void importEnvironmentCreatesNewUuidAndExposesTokenOnce() {
+  void importEnvironmentCreatesNewUuidAndKeepsTheTokenHash() {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     when(repo.existsByName("imported")).thenReturn(false);
-    when(repo.getByRegistrationToken("token-1")).thenReturn(null);
+    when(repo.getByRegistrationTokenHash(h("token-1"))).thenReturn(null);
     when(repo.create(any())).thenReturn(true);
     when(repo.getById(any()))
         .thenAnswer(
@@ -672,7 +619,7 @@ class EnvironmentServiceImplTest {
               Environment env = new Environment();
               env.setId(invocation.getArgument(0));
               env.setName("imported");
-              env.setRegistrationToken("token-1");
+              env.setRegistrationTokenHash(h("token-1"));
               env.setVersion(0L);
               env.setCreateTime(NOW);
               env.setUpdateTime(NOW);
@@ -686,10 +633,10 @@ class EnvironmentServiceImplTest {
             mock(SystemSettingsSnapshot.class),
             CLOCK);
 
-    EnvironmentCardDTO card = service.importEnvironment("imported", "token-1", null);
+    EnvironmentCardDTO card = service.importEnvironment("imported", h("token-1"), null);
 
     assertEquals("imported", card.getName());
-    assertEquals("token-1", card.getRegistrationToken());
+    assertNull(card.getRegistrationToken());
     assertEquals("0", card.getVersion());
   }
 
@@ -706,7 +653,8 @@ class EnvironmentServiceImplTest {
             mock(SystemSettingsSnapshot.class),
             CLOCK);
 
-    assertThrows(AiDuplicateException.class, () -> service.importEnvironment("dup", "token", null));
+    assertThrows(
+        AiDuplicateException.class, () -> service.importEnvironment("dup", h("token"), null));
   }
 
   /** 意图：registrationToken 已被占用时拒绝，且错误文本不回显 token 值。 */
@@ -714,7 +662,7 @@ class EnvironmentServiceImplTest {
   void importEnvironmentRejectsTokenConflictWithoutLeakingToken() {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     when(repo.existsByName("fresh")).thenReturn(false);
-    when(repo.getByRegistrationToken("secret-token")).thenReturn(new Environment());
+    when(repo.getByRegistrationTokenHash(h("secret-token"))).thenReturn(new Environment());
     EnvironmentServiceImpl service =
         new EnvironmentServiceImpl(
             repo,
@@ -726,7 +674,7 @@ class EnvironmentServiceImplTest {
     AiDuplicateException error =
         assertThrows(
             AiDuplicateException.class,
-            () -> service.importEnvironment("fresh", "secret-token", null));
+            () -> service.importEnvironment("fresh", h("secret-token"), null));
 
     assertFalse(error.getMessage().contains("secret-token"));
   }
@@ -738,7 +686,7 @@ class EnvironmentServiceImplTest {
     Environment env = new Environment();
     env.setId(ENV_ID);
     env.setName("local-env");
-    env.setRegistrationToken("old-token");
+    env.setRegistrationTokenHash(h("old-token"));
     env.setVersion(0L);
     env.setCreateTime(NOW);
     env.setUpdateTime(NOW);
@@ -750,7 +698,7 @@ class EnvironmentServiceImplTest {
               Environment updated = new Environment();
               updated.setId(ENV_ID);
               updated.setName("local-env");
-              updated.setRegistrationToken("new-token");
+              updated.setRegistrationTokenHash(h("new-token"));
               updated.setVersion(1L);
               updated.setCreateTime(NOW);
               updated.setUpdateTime(NOW);
@@ -765,21 +713,22 @@ class EnvironmentServiceImplTest {
             CLOCK);
 
     EnvironmentCardDTO card =
-        service.updateImportedEnvironment(EnvironmentId.of(ENV_ID), "new-token", null, "0");
-    assertEquals("new-token", card.getRegistrationToken());
+        service.updateImportedEnvironment(EnvironmentId.of(ENV_ID), h("new-token"), null, "0");
+    assertNull(card.getRegistrationToken());
     assertEquals("1", card.getVersion());
 
     // 过期版本：既有行版本 2，预期 0，必须冲突。
     Environment stale = new Environment();
     stale.setId(ENV_ID);
     stale.setName("local-env");
-    stale.setRegistrationToken("newer-token");
+    stale.setRegistrationTokenHash(h("newer-token"));
     stale.setVersion(2L);
     when(repo.lockById(ENV_ID)).thenReturn(stale);
     assertThrows(
         AiVersionConflictException.class,
         () ->
-            service.updateImportedEnvironment(EnvironmentId.of(ENV_ID), "other-token", null, "0"));
+            service.updateImportedEnvironment(
+                EnvironmentId.of(ENV_ID), h("other-token"), null, "0"));
   }
 
   /** 意图：导入 create 返回 false 时冒泡，不留下半成品。 */
@@ -787,7 +736,7 @@ class EnvironmentServiceImplTest {
   void importEnvironmentPropagatesCreateFailure() {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     when(repo.existsByName("imported")).thenReturn(false);
-    when(repo.getByRegistrationToken("token-1")).thenReturn(null);
+    when(repo.getByRegistrationTokenHash(h("token-1"))).thenReturn(null);
     when(repo.create(any())).thenReturn(false);
     EnvironmentServiceImpl service =
         new EnvironmentServiceImpl(
@@ -798,7 +747,8 @@ class EnvironmentServiceImplTest {
             CLOCK);
 
     assertThrows(
-        IllegalStateException.class, () -> service.importEnvironment("imported", "token-1", null));
+        IllegalStateException.class,
+        () -> service.importEnvironment("imported", h("token-1"), null));
   }
 
   /** 意图：并发插入触发唯一约束竞争时映射为业务重复错误。 */
@@ -806,7 +756,7 @@ class EnvironmentServiceImplTest {
   void importEnvironmentMapsDuplicateKeyToDuplicate() {
     EnvironmentRepository repo = mock(EnvironmentRepository.class);
     when(repo.existsByName("imported")).thenReturn(false);
-    when(repo.getByRegistrationToken("token-1")).thenReturn(null);
+    when(repo.getByRegistrationTokenHash(h("token-1"))).thenReturn(null);
     when(repo.create(any())).thenThrow(new DuplicateKeyException("dup"));
     EnvironmentServiceImpl service =
         new EnvironmentServiceImpl(
@@ -817,7 +767,8 @@ class EnvironmentServiceImplTest {
             CLOCK);
 
     assertThrows(
-        AiDuplicateException.class, () -> service.importEnvironment("imported", "token-1", null));
+        AiDuplicateException.class,
+        () -> service.importEnvironment("imported", h("token-1"), null));
   }
 
   /** 意图：目标行不存在时 lockById 返回 null 必须 404。 */
@@ -835,7 +786,8 @@ class EnvironmentServiceImplTest {
 
     assertThrows(
         AiResourceNotFoundException.class,
-        () -> service.updateImportedEnvironment(EnvironmentId.of(ENV_ID), "new-token", null, "0"));
+        () ->
+            service.updateImportedEnvironment(EnvironmentId.of(ENV_ID), h("new-token"), null, "0"));
   }
 
   /** 意图：token 与当前值一致时幂等成功返回，且不写库。 */
@@ -852,9 +804,9 @@ class EnvironmentServiceImplTest {
             CLOCK);
 
     EnvironmentCardDTO card =
-        service.updateImportedEnvironment(EnvironmentId.of(ENV_ID), "old-token", null, "0");
+        service.updateImportedEnvironment(EnvironmentId.of(ENV_ID), h("old-token"), null, "0");
 
-    assertEquals("old-token", card.getRegistrationToken());
+    assertNull(card.getRegistrationToken());
     verify(repo, never()).updateById(any(), anyLong());
   }
 
@@ -876,7 +828,8 @@ class EnvironmentServiceImplTest {
 
     assertThrows(
         AiResourceNotFoundException.class,
-        () -> service.updateImportedEnvironment(EnvironmentId.of(ENV_ID), "new-token", null, "0"));
+        () ->
+            service.updateImportedEnvironment(EnvironmentId.of(ENV_ID), h("new-token"), null, "0"));
   }
 
   /** 意图：CAS 失败但行仍在（版本已前进）时按版本冲突失败。 */
@@ -897,7 +850,8 @@ class EnvironmentServiceImplTest {
 
     assertThrows(
         AiVersionConflictException.class,
-        () -> service.updateImportedEnvironment(EnvironmentId.of(ENV_ID), "new-token", null, "0"));
+        () ->
+            service.updateImportedEnvironment(EnvironmentId.of(ENV_ID), h("new-token"), null, "0"));
   }
 
   /** 意图：唯一 token 竞争触发约束异常时映射为业务重复错误。 */
@@ -917,7 +871,8 @@ class EnvironmentServiceImplTest {
 
     assertThrows(
         AiDuplicateException.class,
-        () -> service.updateImportedEnvironment(EnvironmentId.of(ENV_ID), "new-token", null, "0"));
+        () ->
+            service.updateImportedEnvironment(EnvironmentId.of(ENV_ID), h("new-token"), null, "0"));
   }
 
   /** 意图：CRUD 与配置同步共用的静态校验覆盖全部拒绝分支。 */
@@ -927,12 +882,12 @@ class EnvironmentServiceImplTest {
       assertThrows(AiValidationException.class, () -> EnvironmentServiceImpl.validateName(invalid));
     }
     assertEquals("ok", EnvironmentServiceImpl.validateName("ok"));
-    for (String invalid : new String[] {null, "", "   ", " t", "t ", "x".repeat(129)}) {
+    for (String invalid : new String[] {null, "", "token", "A".repeat(64), "a".repeat(63)}) {
       assertThrows(
           AiValidationException.class,
-          () -> EnvironmentServiceImpl.validateRegistrationToken(invalid));
+          () -> EnvironmentServiceImpl.validateRegistrationTokenHash(invalid));
     }
-    assertEquals("t", EnvironmentServiceImpl.validateRegistrationToken("t"));
+    assertEquals(h("t"), EnvironmentServiceImpl.validateRegistrationTokenHash(h("t")));
   }
 
   /** 意图：create 拒绝 null 请求与重名，并把并发唯一约束竞争映射为重复错误。 */
@@ -1102,11 +1057,28 @@ class EnvironmentServiceImplTest {
     assertEquals(NOW.plusSeconds(30), connecting.getStatusExpiresAt());
   }
 
+  private static String h(String token) {
+    return RegistrationTokens.hash(token);
+  }
+
+  /** 从脚本中找出摘要与 {@code hash} 相符的明文凭证（UUID 形态）。 */
+  private static String tokenFor(String hash, String script) {
+    Matcher matcher =
+        Pattern.compile("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+            .matcher(script);
+    while (matcher.find()) {
+      if (h(matcher.group()).equals(hash)) {
+        return matcher.group();
+      }
+    }
+    throw new AssertionError("script does not carry the issued token");
+  }
+
   private static Environment environment(String registrationToken, long version) {
     Environment env = new Environment();
     env.setId(ENV_ID);
     env.setName("local-env");
-    env.setRegistrationToken(registrationToken);
+    env.setRegistrationTokenHash(h(registrationToken));
     env.setVersion(version);
     env.setCreateTime(NOW);
     env.setUpdateTime(NOW);

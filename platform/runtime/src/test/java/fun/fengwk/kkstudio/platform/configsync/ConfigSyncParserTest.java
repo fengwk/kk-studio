@@ -44,7 +44,8 @@ class ConfigSyncParserTest {
   void absentInstallConfigMeansClearAndDeepKnownInvalidIsNotSkipped() {
     assertNull(
         parser
-            .parse("environments:\n  - name: env\n    registrationToken: token-env\n")
+            .parse(
+                "environments:\n  - name: env\n    registrationTokenHash: f21d92ece713505af79fce6804dafd72b239be0d023924c022006c892bdf4d42\n")
             .environments()
             .get(0)
             .installConfig());
@@ -364,7 +365,7 @@ class ConfigSyncParserTest {
         parser.parse(
             "environments:\n"
                 + "  - name: env\n"
-                + "    registrationToken: tok\n"
+                + "    registrationTokenHash: 1a7674eb4ee78df7e1ac439a93c3fa8e3c945784d4dec9fd8e3011738b2f1d62\n"
                 + "    bogus: 1\n");
     assertTrue(environment.environments().isEmpty());
 
@@ -399,7 +400,7 @@ class ConfigSyncParserTest {
         AiValidationException.class,
         () ->
             parser.parse(
-                "environments:\n  - name: env\n    registrationToken: ''\n    bogus: 1\n"));
+                "environments:\n  - name: env\n    registrationTokenHash: ''\n    bogus: 1\n"));
     assertThrows(
         AiValidationException.class,
         () -> parser.parse("mcpServers:\n  - name: mcp\n    url: not-a-url\n    bogus: 1\n"));

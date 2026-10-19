@@ -416,7 +416,7 @@ class ConfigSyncPlannerTest {
                 "      tools: []\n      skills: []\n      subagents: [ghost]\n")
             + "environments:\n"
             + "  - name: env\n"
-            + "    registrationToken: tok\n";
+            + "    registrationTokenHash: 1a7674eb4ee78df7e1ac439a93c3fa8e3c945784d4dec9fd8e3011738b2f1d62\n";
     ConfigSyncPlan plan = plan(yamlText);
 
     assertEquals("missing model: q/x", reason(plan.skipped(), "agents", "missing_model"));
