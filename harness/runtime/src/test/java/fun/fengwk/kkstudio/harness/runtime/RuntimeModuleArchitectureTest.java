@@ -143,6 +143,7 @@ class RuntimeModuleArchitectureTest {
             "fun.fengwk.kk-studio:kk-studio-harness-runtime",
             "fun.fengwk.kk-studio:kk-studio-harness-tool",
             "fun.fengwk.kk-studio:kk-studio-harness-environment",
+            "fun.fengwk.kk-studio:kk-studio-work",
             "org.postgresql:postgresql",
             "org.springframework:spring-jdbc"));
     List<String> violations = scanViolations(main);
