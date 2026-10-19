@@ -31,7 +31,7 @@ import java.util.UUID;
  * web 模块 SpringBoot 测试的共享 PostgreSQL 支持。
  *
  * <p>使用进程级单例容器（而非 {@code @Container}），从而跨测试类复用缓存 Spring 上下文时 JDBC URL 保持稳定。本类在静态初始化阶段 即执行 baseline
- * 与 dev seed 迁移，保证任何 Spring 上下文创建前 {@code system_setting} 等表与默认行已经存在 （SystemSettingsSnapshot
+ * 与 fixture seed 迁移，保证任何 Spring 上下文创建前 {@code system_setting} 等表与默认行已经存在 （SystemSettingsSnapshot
  * 在上下文启动时读取权威配置）。
  *
  * <p>共享库的状态边界有两处，二者共同保证「一个 Context 只看见自己的插件配置」：
@@ -59,7 +59,7 @@ public abstract class WebPostgresTestSupport {
   static {
     POSTGRES.start();
     // SystemSettingsSnapshot 作为共享启动快照，在上下文创建期读取一次 system_setting 默认行；任何 Spring 测试上下文加载前
-    // 都必须先有 baseline + dev seed 迁移，否则缺行上下文启动失败。@BeforeEach 仍负责每个测试前的
+    // 都必须先有 baseline + fixture seed 迁移，否则缺行上下文启动失败。@BeforeEach 仍负责每个测试前的
     // reset+remigrate。
     try (Connection conn = newConnection()) {
       resetAndMigrateDevDatabase(conn);
@@ -111,7 +111,7 @@ public abstract class WebPostgresTestSupport {
   }
 
   /**
-   * 同物理容器上的独立数据库：全新 UUID 库 + baseline/dev seed，供不加载 Web 上下文的 Runner 测试取得自己的 {@link
+   * 同物理容器上的独立数据库：全新 UUID 库 + baseline/fixture seed，供不加载 Web 上下文的 Runner 测试取得自己的 {@link
    * DataSource}；该库与共享 web 库互不可见。
    */
   public static DataSource createIsolatedDatabase() {
@@ -184,7 +184,7 @@ public abstract class WebPostgresTestSupport {
                 "select count(*) from agent_definition where name = 'default-assistant'")) {
       if (!rs.next() || rs.getLong(1) != 1L) {
         throw new IllegalStateException(
-            "dev seed did not insert agent_definition default-assistant");
+            "fixture seed did not insert agent_definition default-assistant");
       }
     }
   }
@@ -197,7 +197,7 @@ public abstract class WebPostgresTestSupport {
   private static void migrateDevDatabase(DataSource dataSource) {
     Flyway.configure()
         .dataSource(dataSource)
-        .locations("classpath:db/migration", "classpath:db/seed/dev")
+        .locations("classpath:db/migration", "classpath:db/seed/fixture")
         .validateMigrationNaming(true)
         .load()
         .migrate();

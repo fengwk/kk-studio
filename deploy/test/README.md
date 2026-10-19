@@ -101,8 +101,9 @@ docker compose -f deploy/test/compose.yaml --profile app down -v --remove-orphan
 Compose 卷键为 `minio-data` 与 `postgres-data`；默认 Docker 卷名为
 `kk-studio-canvas-test_minio-data` 与 `kk-studio-canvas-test_postgres-data`。
 
-应用 seed 后 `default-assistant` 指向 `stub/acceptance-stub`，stub provider 的 `base_url` 是
-`http://stub.local:8080/v1`；本栈把 `stub.local` 配成 HTTP mock 的网络别名，由其内置的
+本栈不预置 Catalog。离线对话 smoke 通过 Catalog API 创建 `stub` Provider
+（`base_url` 为 `http://stub.local:8080/v1`）、`acceptance-stub` Model 和指向它的
+`default-assistant` Agent；本栈把 `stub.local` 配成 HTTP mock 的网络别名，由其内置的
 `POST /v1/chat/completions` 确定性 SSE 应答。ComfyUI 保持禁用，OpenCLI adapters 只在该隔离栈中
 指向内置 fake Hub。
 

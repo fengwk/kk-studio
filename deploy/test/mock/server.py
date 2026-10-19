@@ -8,8 +8,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
 
-# Deterministic OpenAI Chat Completions stub: the offline dev-seed agent
-# (default-assistant -> stub/acceptance-stub) resolves to this endpoint through
+# Deterministic OpenAI Chat Completions stub: the offline smoke agent
+# (default-assistant -> stub/acceptance-stub, created through the Catalog API) resolves to this endpoint through
 # the Compose network alias (http://stub.local:8080/v1).
 CHAT_COMPLETIONS_STUB_TEXT = "This is a deterministic offline acceptance stub response."
 CHAT_COMPLETIONS_ID = "chatcmpl-acceptance-stub-1"

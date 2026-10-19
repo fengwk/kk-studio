@@ -48,12 +48,13 @@ class FlywayAutoConfigurationIntegrationTest {
     registry.add("spring.datasource.username", POSTGRES::getUsername);
     registry.add("spring.datasource.password", POSTGRES::getPassword);
     registry.add("spring.flyway.enabled", () -> "true");
-    registry.add("spring.flyway.locations", () -> "classpath:db/migration,classpath:db/seed/dev");
+    registry.add(
+        "spring.flyway.locations", () -> "classpath:db/migration,classpath:db/seed/fixture");
     registry.add("kk-studio.harness.runtime.workers-enabled", () -> "false");
   }
 
   @Test
-  void webContextAutoMigratesBaselineAndDevSeedThroughDataSource() throws Exception {
+  void webContextAutoMigratesBaselineAndFixtureSeedThroughDataSource() throws Exception {
     // 启动真实 web 上下文走的是 Boot 自动配置，而不是直接操作 Flyway 测试基座。
     assertTrue(serverPort > 0);
     try (Connection conn = dataSource.getConnection();
@@ -62,10 +63,10 @@ class FlywayAutoConfigurationIntegrationTest {
           st.executeQuery(
               "select count(*) from flyway_schema_history"
                   + " where success = true and ((version = '1')"
-                  + " or (version is null and description = 'dev seed'))")) {
+                  + " or (version is null and description = 'fixture seed'))")) {
         assertTrue(history.next());
         assertEquals(
-            2L, history.getLong(1), "the canonical V1 baseline and dev seed must be recorded");
+            2L, history.getLong(1), "the canonical V1 baseline and fixture seed must be recorded");
       }
       try (ResultSet unexpectedMigration =
           st.executeQuery(
@@ -89,7 +90,7 @@ class FlywayAutoConfigurationIntegrationTest {
           st.executeQuery(
               "select count(*) from agent_definition where name = 'default-assistant'")) {
         assertTrue(seed.next());
-        assertEquals(1L, seed.getLong(1), "dev seed must be visible through the data-source");
+        assertEquals(1L, seed.getLong(1), "fixture seed must be visible through the data-source");
       }
       try (ResultSet chatSessionTable =
           st.executeQuery(
@@ -121,9 +122,9 @@ class FlywayAutoConfigurationIntegrationTest {
                   + " and table_name <> 'flyway_schema_history'")) {
         assertTrue(businessTables.next());
         assertEquals(
-            46L,
+            43L,
             businessTables.getLong(1),
-            "the canonical V1 baseline must expose exactly 46 business tables");
+            "the canonical V1 baseline must expose exactly 43 business tables");
       }
       try (ResultSet clusterNode =
           st.executeQuery(

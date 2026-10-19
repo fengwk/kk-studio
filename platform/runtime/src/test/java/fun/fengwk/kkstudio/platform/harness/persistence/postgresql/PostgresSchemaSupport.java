@@ -46,9 +46,9 @@ public abstract class PostgresSchemaSupport {
     migrate(conn, "classpath:db/migration");
   }
 
-  /** 在调用方持有的连接上执行 baseline schema 与 dev seed 迁移。 */
-  public static void applyDevDatabase(Connection conn) {
-    migrate(conn, "classpath:db/migration", "classpath:db/seed/dev");
+  /** 在调用方持有的连接上执行 baseline schema 与测试 fixture seed 迁移。 */
+  public static void applyFixtureDatabase(Connection conn) {
+    migrate(conn, "classpath:db/migration", "classpath:db/seed/fixture");
   }
 
   /** 在调用方持有的连接上执行 baseline schema 与 e2e seed 迁移。 */
@@ -56,10 +56,9 @@ public abstract class PostgresSchemaSupport {
     migrate(conn, "classpath:db/migration", "classpath:db/seed/e2e");
   }
 
-  /** 在调用方持有的连接上执行 baseline、dev seed 与 Docker Canvas test 专用设置迁移。 */
+  /** 与 canvas-test profile 一致：baseline 与 Docker Canvas test 专用设置迁移。 */
   public static void applyCanvasTestDatabase(Connection conn) {
-    migrate(
-        conn, "classpath:db/migration", "classpath:db/seed/dev", "classpath:db/seed/canvas-test");
+    migrate(conn, "classpath:db/migration", "classpath:db/seed/canvas-test");
   }
 
   public static void migrate(Connection conn, String... locations) {

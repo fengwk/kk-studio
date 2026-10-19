@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.platform.chat;
 
-import static fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport.applyDevDatabase;
+import static fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport.applyFixtureDatabase;
 import static fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport.newConnection;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -71,7 +71,7 @@ class ChatServiceIntegrationTest extends PostgresSpringTestSupport {
 
   @Override
   protected void migrateDatabase(Connection conn) {
-    applyDevDatabase(conn);
+    applyFixtureDatabase(conn);
   }
 
   @Test

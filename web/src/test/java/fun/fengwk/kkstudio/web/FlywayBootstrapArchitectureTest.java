@@ -26,8 +26,8 @@ class FlywayBootstrapArchitectureTest {
   private static final List<String> SEED_RESOURCES =
       List.of(
           "schema/src/main/resources/db/seed/canvas-test/R__canvas_test_seed.sql",
-          "schema/src/main/resources/db/seed/dev/R__dev_seed.sql",
-          "schema/src/main/resources/db/seed/e2e/R__e2e_seed.sql");
+          "schema/src/main/resources/db/seed/e2e/R__e2e_seed.sql",
+          "schema/src/main/resources/db/seed/fixture/R__fixture_seed.sql");
 
   /**
    * 唯一允许的非 seed SQL：schema 模块测试自己的 fresh-install 契约探针。
@@ -97,7 +97,7 @@ class FlywayBootstrapArchitectureTest {
     assertEquals(
         SEED_RESOURCES,
         seedSqlFiles,
-        "every non-migration sql file must be one of the three constrained profile seeds");
+        "every non-migration sql file must be one of the three constrained seeds");
     for (String seed : seedSqlFiles) {
       String filename = Path.of(seed).getFileName().toString();
       assertTrue(

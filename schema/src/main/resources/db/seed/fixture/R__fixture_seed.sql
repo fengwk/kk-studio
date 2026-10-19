@@ -1,4 +1,6 @@
--- PostgreSQL dev seed.
+-- PostgreSQL test fixture seed: a deterministic stub provider, model and agent
+-- for automated tests. No runtime profile applies it; a real installation starts
+-- from an empty catalog and the first-run guide.
 --
 -- Deterministic replacement: seed-owned catalog rows are synchronized to the
 -- exact definitions in this file on every repeatable migration run.

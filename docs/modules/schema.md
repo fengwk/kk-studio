@@ -7,17 +7,18 @@ Web 和集成测试使用同一份 Flyway 资源。模块提供 SQL 与契约测
 
 ## 加载 baseline 与 seed
 
-versioned migration 为 V1，三个 repeatable seed 按 profile 加载：
+versioned migration 为 V1，repeatable seed 按 profile 加载：
 
 | profile | Flyway 资源 |
 | --- | --- |
-| prod | `classpath:db/migration` |
-| dev | migration + [dev seed](../../schema/src/main/resources/db/seed/dev/R__dev_seed.sql) |
+| prod、dev | `classpath:db/migration` |
 | e2e | migration + [e2e seed](../../schema/src/main/resources/db/seed/e2e/R__e2e_seed.sql) |
-| canvas-test | migration + dev seed + [canvas-test seed](../../schema/src/main/resources/db/seed/canvas-test/R__canvas_test_seed.sql) |
+| canvas-test | migration + [canvas-test seed](../../schema/src/main/resources/db/seed/canvas-test/R__canvas_test_seed.sql) |
 
-dev seed 提供离线 stub Catalog，e2e seed 提供模型目录与受控审批规则，
-canvas-test seed 提供测试栈设置。seed 重复执行保持确定性，凭据从环境注入。
+运行时 profile 不预置 Catalog：新库从空 Provider 开始，由 Studio 引导用户添加 Provider、
+模型与 Agent。e2e seed 提供模型目录与受控审批规则，canvas-test seed 提供测试栈设置。
+[fixture seed](../../schema/src/main/resources/db/seed/fixture/R__fixture_seed.sql)
+只供集成测试显式加载，提供离线 stub Catalog。seed 重复执行保持确定性。
 V1 写入单行 SystemSettings 默认聚合；Java 解码与 profile 默认契约由测试校验。
 
 ## 数据区域与维护入口
