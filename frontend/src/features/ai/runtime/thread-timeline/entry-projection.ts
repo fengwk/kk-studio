@@ -382,7 +382,8 @@ function projectToolResult(
   callIndex: number,
   metadata: Record<string, unknown>,
 ): ToolDialogueMessage {
-  const projected = projectToolResultContent(content, argumentsJson)
+  const canonicalContent = decodeDurableToolResultContent(content)
+  const projected = projectToolResultContent(canonicalContent, argumentsJson)
   const assistantEntryId = getString(metadata.assistantEntryId)
   const metadataCallIndex = integerValue(metadata.callIndex)
   return {
@@ -403,6 +404,32 @@ function projectToolResult(
       ? strictToolCallIdentity(assistantEntryId, metadataCallIndex)
       : undefined,
   }
+}
+
+/**
+ * 在 durable Entry 边界将持久化的 ToolResultMessageContent 解码为规范共享结果语义。
+ * 保持 extractResultEditReview 只接受规范 details 对象，不加多字段 fallback。
+ */
+function decodeDurableToolResultContent(content: Record<string, unknown>): Record<string, unknown> {
+  if (content.details && typeof content.details === 'object' && !Array.isArray(content.details)) {
+    return content
+  }
+  const rawDetailsJson = content.detailsJson
+  if (typeof rawDetailsJson !== 'string' || !rawDetailsJson.trim()) {
+    return content
+  }
+  try {
+    const parsed = JSON.parse(rawDetailsJson)
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return {
+        ...content,
+        details: parsed as Record<string, unknown>,
+      }
+    }
+  } catch {
+    // 损坏的 detailsJson 保持原样，不伪造 details 对象
+  }
+  return content
 }
 
 /**

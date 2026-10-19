@@ -9,6 +9,7 @@ import { setLocale } from '@/shared/i18n'
 import { ToolMessageBlock } from '@/features/ai/runtime/thread-panel/messages/ToolMessageBlock'
 import { ApprovalCard, type ApprovalCardProps } from '@/features/ai/runtime/interactions/ApprovalCard'
 import type { ToolDialogueMessage } from '@/features/ai/runtime/thread-timeline-types'
+import { buildThreadTimeline } from '@/features/ai/runtime/thread-timeline'
 import { LONG_WRITE_CONTENT, MULTI_HUNK_DIFF, VALID_SHA } from './mutation-review-fixtures'
 
 setLocale('zh-CN')
@@ -477,6 +478,80 @@ const mutationReviewHarness = {
         }),
       },
     })
+  },
+
+  renderEditDurableHistory() {
+    const asstEntry = {
+      entryId: 'asst-durable-pw',
+      sessionId: 'sess-pw',
+      parentEntryId: null,
+      entryType: 'MESSAGE' as const,
+      payloadJson: JSON.stringify({
+        message: {
+          role: 'ASSISTANT',
+          contents: [
+            {
+              type: 'tool_call',
+              toolCallId: 'call-durable-pw',
+              toolName: 'edit',
+              rendererKey: 'edit',
+              argumentsJson: JSON.stringify({ path: '/canonical/src/App.tsx' }),
+            },
+          ],
+        },
+      }),
+      createTime: '2026-10-19T00:00:00Z',
+    }
+
+    const toolResultEntry = {
+      entryId: 'result-durable-pw',
+      sessionId: 'sess-pw',
+      parentEntryId: null,
+      entryType: 'MESSAGE' as const,
+      payloadJson: JSON.stringify({
+        message: {
+          role: 'TOOL',
+          contents: [
+            {
+              type: 'tool_result',
+              toolCallId: 'call-durable-pw',
+              toolName: 'edit',
+              rendererKey: 'edit',
+              contents: [{ type: 'text', text: 'Edited successfully.\nReplacements: 1' }],
+              error: false,
+              detailsJson: JSON.stringify({
+                editReview: {
+                  path: '/canonical/src/App.tsx',
+                  diff: MULTI_HUNK_DIFF,
+                  sha256: VALID_SHA,
+                },
+              }),
+            },
+          ],
+        },
+        toolResultMetadata: {
+          assistantEntryId: 'asst-durable-pw',
+          callIndex: 0,
+        },
+      }),
+      createTime: '2026-10-19T00:00:01Z',
+    }
+
+    const timeline = buildThreadTimeline([asstEntry, toolResultEntry], [], [])
+    const callMsg = timeline.messages.find(
+      (m): m is ToolDialogueMessage => m.role === 'tool' && m.phase === 'call',
+    )
+    const resultMsg = timeline.messages.find(
+      (m): m is ToolDialogueMessage => m.role === 'tool' && m.phase === 'result',
+    )
+
+    if (callMsg) {
+      updateState({
+        scenario: 'edit-durable-history',
+        toolBlock: { message: callMsg, result: resultMsg },
+        approvalCard: null,
+      })
+    }
   },
 }
 
