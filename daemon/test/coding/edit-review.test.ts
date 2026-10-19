@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { createHash } from 'node:crypto'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileCapabilities } from '../../src/coding/files.js'
@@ -10,7 +10,8 @@ import { makeContext, textOf } from './helpers.js'
 const tempDirs: string[] = []
 
 async function tempDir(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), 'kk-edit-review-'))
+  // Match the canonical review path even when the OS temp directory is an alias.
+  const dir = await realpath(await mkdtemp(join(tmpdir(), 'kk-edit-review-')))
   tempDirs.push(dir)
   return dir
 }

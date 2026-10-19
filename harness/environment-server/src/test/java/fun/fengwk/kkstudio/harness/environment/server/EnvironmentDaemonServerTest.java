@@ -1208,7 +1208,7 @@ class EnvironmentDaemonServerTest {
       String fields =
           switch (descriptor.id().value()) {
             case "fs.write" -> ",\"content\":\"text\"";
-            case "fs.edit" -> ",\"old_string\":\"old\",\"new_string\":\"new\"";
+            case "fs.edit", "fs.edit.preview" -> ",\"old_string\":\"old\",\"new_string\":\"new\"";
             case "fs.find", "fs.grep" -> ",\"pattern\":\"text\"";
             case "lsp.goto-definition" -> ",\"line\":1";
             case "lsp.workspace-symbols" -> ",\"query\":\"Symbol\"";
