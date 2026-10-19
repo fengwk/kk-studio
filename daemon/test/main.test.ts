@@ -396,7 +396,20 @@ describe('daemon main real assembly', () => {
       const cancelledPid = Number(readFileSync(cancelledPidFile, 'utf8').trim())
       expect(isAlive(cancelledPid)).toBe(true)
       fixture.send('CANCEL', { invocationId: 'long-cancel', payload: {} })
-      await waitFor(() => lastTerminal(fixture, 'long-cancel') === 'CANCELLED', 30_000)
+      // process 返回已完成清理的真实取消结果，由 COMPLETED 帧承载，不提前抢占成 CANCELLED。
+      await waitFor(() => lastTerminal(fixture, 'long-cancel') === 'COMPLETED', 30_000)
+      expect(response(fixture, 'long-cancel', ['COMPLETED'])?.payload.result).toMatchObject({
+        error: true,
+        details: { process: { outcome: 'CANCELLED' } },
+      })
+      expect(
+        fixture.received
+          .filter((envelope) =>
+            envelope.invocationId === 'long-cancel' &&
+            ['COMPLETED', 'FAILED', 'CANCELLED'].includes(envelope.messageType),
+          )
+          .map((envelope) => envelope.messageType),
+      ).toEqual(['COMPLETED'])
       expect(await awaitGone(cancelledPid, 30_000)).toBe(true)
 
       // 再起一个长进程，用信号事件停机：runtime 中止在途执行后才发布终止。

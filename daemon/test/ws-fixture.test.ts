@@ -119,20 +119,30 @@ describe('real websocket transport', () => {
   it('runs INVOKE, dedups a resent INVOKE and cancels a running one', async () => {
     const fixture = await createFixture()
     let calls = 0
-    let release: (() => void) | null = null
+    const aborted = Promise.withResolvers<void>()
+    const cleanupGate = Promise.withResolvers<void>()
     const runtime = createRuntime(fixture, {
-      'fs.read': async (call) => {
+      'fs.read': async (call, context) => {
         calls++
         if (call.arguments.wait === true) {
           await new Promise<void>((resolve) => {
-            release = resolve
+            if (context.signal.aborted) {
+              resolve()
+            } else {
+              context.signal.addEventListener('abort', () => resolve(), { once: true })
+            }
           })
+          aborted.resolve()
+          await cleanupGate.promise
+          context.signal.throwIfAborted()
         }
         return { callId: call.invocationId, error: false, details: {}, contents: [{ type: 'text', text: 'ok' }] }
       },
     })
     cleanup = async () => {
       runtime.close()
+      cleanupGate.resolve()
+      await runtime.awaitCompletion()
       await fixture.close()
     }
     runtime.start()
@@ -146,8 +156,27 @@ describe('real websocket transport', () => {
     expect(fixture.received.filter((envelope) => envelope.messageType === 'STARTED')[1]?.payload).toEqual({ replayed: true })
 
     fixture.send('CANCEL', { invocationId: 'inv-1', payload: {} })
+    await aborted.promise
+    // 真实 WebSocket 路径也必须等待执行器清理，取消期间不能提前发终态或重复执行。
+    expect(runtime.getJournal().find('inv-1')?.state).toBe('RUNNING')
+    expect(fixture.received.some((envelope) =>
+      envelope.invocationId === 'inv-1' &&
+      ['COMPLETED', 'FAILED', 'CANCELLED'].includes(envelope.messageType),
+    )).toBe(false)
+    fixture.send('INVOKE', { invocationId: 'inv-1', payload: invokeJson({ wait: true }) })
+    await waitFor(() => fixture.received.filter((envelope) => envelope.messageType === 'STARTED').length === 3)
+    expect(calls).toBe(1)
+
+    cleanupGate.resolve()
     await waitFor(() => fixture.received.some((envelope) => envelope.messageType === 'CANCELLED'))
-    release?.()
+    expect(runtime.getJournal().find('inv-1')?.state).toBe('CANCELLED')
+    expect(fixture.received
+      .filter((envelope) =>
+        envelope.invocationId === 'inv-1' &&
+        ['COMPLETED', 'FAILED', 'CANCELLED'].includes(envelope.messageType),
+      )
+      .map((envelope) => envelope.messageType),
+    ).toEqual(['CANCELLED'])
   })
 
   it('enforces the announced resource byte budget', async () => {
