@@ -62,8 +62,8 @@ function track<T>(promise: Promise<T>): { promise: Promise<T>; settled: () => bo
   return { promise: tracked, settled: () => settled }
 }
 
-const noFind: SearchReply = { ok: true, kind: 'find', matches: [], limitReached: false, skipped: [] }
-const noGrep: SearchReply = { ok: true, kind: 'grep', lines: [], moreMatches: false, skipped: [] }
+const noFind: SearchReply = { ok: true, kind: 'find', matches: [], limitReached: false, skipped: [], stopReason: null }
+const noGrep: SearchReply = { ok: true, kind: 'grep', lines: [], moreMatches: false, skipped: [], stopReason: null }
 
 describe('Worker 正常回传生命周期', () => {
   it('find 回传后保持 pending，直到 Worker 退出才交付结果', async () => {
@@ -230,6 +230,116 @@ describe('Worker 协作停止与宽限超时生命周期', () => {
     const result = await tracked.promise
     expect(result.error).toBe(true)
     expect(result.details).toMatchObject({ code: 'INTERNAL' })
-    expect(JSON.stringify(result.contents)).toContain('exited unexpectedly (code 3)')
+    expect(JSON.stringify(result.contents)).toContain('exited unexpectedly (code 3); results incomplete')
+  })
+
+  it('Worker 回传数据后异常退出（code 非 0）必须失败且标记 results incomplete', async () => {
+    const dir = await tempDir()
+    const tracked = track(callCapability(find, 'fs.find', { pattern: '*', path: dir }, makeContext(dir)))
+    const worker = await waitForWorker()
+    worker.emit('message', {
+      ok: true,
+      kind: 'find',
+      matches: [`${dir}/a.ts`],
+      limitReached: false,
+      skipped: [],
+      stopReason: null,
+    })
+    worker.emit('exit', 1)
+    const result = await tracked.promise
+    expect(result.error).toBe(true)
+    expect(result.details).toMatchObject({ code: 'INTERNAL' })
+    expect(JSON.stringify(result.contents)).toContain('the search worker exited unexpectedly (code 1); results incomplete')
+  })
+
+  it('postMessage 同步抛出时 await terminate 并以 INTERNAL 失败', async () => {
+    const dir = await tempDir()
+    FakeWorker.nextPostMessageError = new Error('structured clone failure')
+    const result = await callCapability(find, 'fs.find', { pattern: '*', path: dir }, makeContext(dir))
+    expect(result.error).toBe(true)
+    expect(result.details).toMatchObject({ code: 'INTERNAL' })
+    const worker = FakeWorker.instances.at(-1)!
+    expect(worker.terminated).toBe(true)
+  })
+
+  it('worker.terminate 失败时明确交付 cleanup failed; results incomplete', async () => {
+    const dir = await tempDir()
+    FakeWorker.nextTerminateError = new Error('kill permission denied')
+    const tracked = track(callCapability(find, 'fs.find', { pattern: '*', path: dir }, makeContext(dir)))
+    const worker = await waitForWorker()
+    worker.emit('error', new Error('worker crashed'))
+    const result = await tracked.promise
+    expect(result.error).toBe(true)
+    expect(result.details).toMatchObject({ code: 'INTERNAL' })
+    expect(JSON.stringify(result.contents)).toContain('cleanup failed; results incomplete')
+  })
+
+  it('context abort 遇到 worker 内部错误时保留原 INTERNAL 错误码并补充 search incomplete', async () => {
+    const dir = await tempDir()
+    const controller = new AbortController()
+    controller.abort('TIMED_OUT')
+    const tracked = track(
+      callCapability(find, 'fs.find', { pattern: '*', path: dir }, makeContext(dir, { signal: controller.signal })),
+    )
+    const worker = await waitForWorker()
+    worker.emit('error', new Error('disk read failed'))
+    const result = await tracked.promise
+    expect(result.error).toBe(true)
+    expect(result.details).toMatchObject({
+      code: 'INTERNAL',
+      search: { outcome: 'TIMED_OUT', incomplete: true },
+    })
+  })
+  it('Worker 回传 kind 不匹配时以 INTERNAL 报错', async () => {
+    const dir = await tempDir()
+    const tracked = track(callCapability(find, 'fs.find', { pattern: '*', path: dir }, makeContext(dir)))
+    const worker = await waitForWorker()
+    worker.emit('message', noGrep)
+    worker.emit('exit', 0)
+    const result = await tracked.promise
+    expect(result.error).toBe(true)
+    expect(result.details).toMatchObject({ code: 'INTERNAL' })
+    expect(JSON.stringify(result.contents)).toContain('mismatched result')
+  })
+
+  it('无匹配但存在 skipped 路径时返回警告型错误', async () => {
+    const dir = await tempDir()
+    const tracked = track(callCapability(find, 'fs.find', { pattern: '*', path: dir }, makeContext(dir)))
+    const worker = await waitForWorker()
+    worker.emit('message', {
+      ok: true,
+      kind: 'find',
+      matches: [],
+      limitReached: false,
+      skipped: [{ path: '/blocked', reason: 'denied' }],
+      stopReason: null,
+    })
+    worker.emit('exit', 0)
+    const result = await tracked.promise
+    expect(result.error).toBe(true)
+    expect(JSON.stringify(result.contents)).toContain('path(s) could not be searched')
+  })
+})
+
+describe('参数校验与 Worker 创建隔离', () => {
+  it('非法参数在能力入口直接被拒绝且不创建 Worker', async () => {
+    const dir = await tempDir()
+    // 缺少必填参数 pattern
+    const result1 = await callCapability(find, 'fs.find', { path: dir }, makeContext(dir))
+    expect(result1.error).toBe(true)
+    expect(result1.details).toMatchObject({ code: 'INVALID_ARGUMENT' })
+    expect(FakeWorker.instances).toHaveLength(0)
+
+    // 非法 limit (<= 0)
+    const result2 = await callCapability(grep, 'fs.grep', { pattern: 'x', path: dir, limit: 0 }, makeContext(dir))
+    expect(result2.error).toBe(true)
+    expect(result2.details).toMatchObject({ code: 'INVALID_ARGUMENT' })
+    expect(FakeWorker.instances).toHaveLength(0)
+
+    // 不存在的 path
+    const result3 = await callCapability(find, 'fs.find', { pattern: '*.ts', path: join(dir, 'missing') }, makeContext(dir))
+    expect(result3.error).toBe(true)
+    expect(result3.details).toMatchObject({ code: 'NOT_FOUND' })
+    expect(FakeWorker.instances).toHaveLength(0)
   })
 })

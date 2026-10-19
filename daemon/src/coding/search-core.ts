@@ -49,7 +49,7 @@ export interface FindOutcome {
   matches: string[]
   limitReached: boolean
   skipped: SkippedEntry[]
-  stopReason?: SearchStopReason | null
+  stopReason: SearchStopReason | null
 }
 
 /** fs.grep 的纯结果。 */
@@ -57,7 +57,7 @@ export interface GrepOutcome {
   lines: string[]
   moreMatches: boolean
   skipped: SkippedEntry[]
-  stopReason?: SearchStopReason | null
+  stopReason: SearchStopReason | null
 }
 
 export interface GrepOptions {
@@ -98,19 +98,13 @@ export type SearchReply =
 
 /** 统一检查 stop 标记；由 Atomics.load 原子读取主线程下发的停止状态。 */
 export class SearchControl {
-  protected readonly stopView: Int32Array | null
+  private readonly stopView: Int32Array
 
-  constructor(
-    stopBuffer?: SharedArrayBuffer | null,
-    protected readonly capabilityName = 'search',
-  ) {
-    this.stopView = stopBuffer ? new Int32Array(stopBuffer) : null
+  constructor(stopBuffer: SharedArrayBuffer) {
+    this.stopView = new Int32Array(stopBuffer)
   }
 
   check(): void {
-    if (this.stopView === null) {
-      return
-    }
     const state = Atomics.load(this.stopView, 0)
     if (state === STOP_TIMED_OUT) {
       throw new SearchStoppedError('TIMED_OUT')
@@ -383,21 +377,15 @@ async function walk(
   searchDirectory: string,
   control: SearchControl,
   consumer: FileConsumer,
-  onUnreadable?: (path: string) => void,
-): Promise<{ unreadable: string[] }> {
+  onUnreadable: (path: string) => void,
+): Promise<void> {
   await requireReadableDirectory(searchDirectory)
   const target = resolve(searchDirectory)
   const prepared = await GitIgnoreRules.prepare(target, control)
   if (prepared.searchDirectoryIgnored) {
-    return { unreadable: [] }
+    return
   }
-  const unreadable: string[] = []
-  const recordUnreadable = (path: string): void => {
-    unreadable.push(path)
-    onUnreadable?.(path)
-  }
-  await walkDirectory(target, prepared.rules, control, consumer, recordUnreadable)
-  return { unreadable }
+  await walkDirectory(target, prepared.rules, control, consumer, onUnreadable)
 }
 
 async function walkDirectory(
@@ -491,7 +479,7 @@ export async function findFiles(
     const matcher = compileGlob(sourcePattern)
     control.check()
 
-    const report = await walk(
+    await walk(
       path,
       control,
       async (file) => {
@@ -511,11 +499,6 @@ export async function findFiles(
         }
       },
     )
-    for (const unreadable of report.unreadable) {
-      if (!skipped.has(toPosix(unreadable))) {
-        skipped.set(toPosix(unreadable), 'could not be read')
-      }
-    }
   } catch (error) {
     if (error instanceof SearchStoppedError) {
       stopReason = error.reason
@@ -561,7 +544,7 @@ export async function grepFiles(
       if (!(await isDirectoryNoFollow(path))) {
         throw new ToolInputRejectedError('path must be a regular file or directory')
       }
-      const report = await walk(
+      await walk(
         path,
         control,
         async (file) => {
@@ -573,9 +556,6 @@ export async function grepFiles(
           results.skip(toPosix(unreadable), 'could not be read')
         },
       )
-      for (const unreadable of report.unreadable) {
-        results.skip(toPosix(unreadable), 'could not be read')
-      }
     }
   } catch (error) {
     if (error instanceof SearchStoppedError) {
@@ -595,7 +575,7 @@ export async function grepFiles(
 
 /** Worker 入口：把作业映射为可结构化克隆的稳定结果。 */
 export async function runSearchJob(job: SearchJob): Promise<SearchReply> {
-  const control = new SearchControl(job.stopBuffer, job.kind)
+  const control = new SearchControl(job.stopBuffer)
   try {
     if (job.kind === 'find') {
       const outcome = await findFiles(job.pattern, job.path, job.limit, control)

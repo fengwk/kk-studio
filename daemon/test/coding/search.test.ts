@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { searchCapabilities } from '../../src/coding/search.js'
+import { resolveSearchWorkerEntry, searchCapabilities } from '../../src/coding/search.js'
 import { toPosix } from '../../src/coding/support.js'
 import { callCapability, makeContext, textOf } from './helpers.js'
 
@@ -249,5 +249,9 @@ describe('fs.grep', () => {
     const result = await callCapability(grep, 'fs.grep', { pattern: '(', path: file }, makeContext(dir))
     expect(result.error).toBe(true)
     expect(textOf(result)).toContain('Invalid regex')
+  })
+
+  it('resolveSearchWorkerEntry 在无效 base 下回落并返回 null', () => {
+    expect(resolveSearchWorkerEntry(new URL('file:///tmp/not-exist/entry.js'))).toBeNull()
   })
 })
