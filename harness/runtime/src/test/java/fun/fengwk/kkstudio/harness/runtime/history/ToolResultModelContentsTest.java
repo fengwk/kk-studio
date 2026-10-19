@@ -75,11 +75,24 @@ class ToolResultModelContentsTest {
   }
 
   @Test
-  void nullEditReviewFieldPreservesOriginalContents() {
+  void nullEditReviewFieldThrowsIllegalArgumentException() {
     List<AgentMessageContent> original = List.of(new TextMessageContent("Edited successfully."));
     ToolResultMessageContent result =
         new ToolResultMessageContent(
             "call-1", "edit", "edit", original, false, "{\"editReview\":null}");
+
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class, () -> ToolResultModelContents.contentsOf(result));
+    assertTrue(error.getMessage().contains("editReview must be an object"));
+  }
+
+  @Test
+  void detailsWithoutEditReviewPreservesOriginalContents() {
+    List<AgentMessageContent> original = List.of(new TextMessageContent("Edited successfully."));
+    ToolResultMessageContent result =
+        new ToolResultMessageContent(
+            "call-1", "edit", "edit", original, false, "{\"somethingElse\":\"value\"}");
 
     List<AgentMessageContent> contents = ToolResultModelContents.contentsOf(result);
 

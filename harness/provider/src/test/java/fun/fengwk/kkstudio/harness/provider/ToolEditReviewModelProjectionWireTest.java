@@ -62,6 +62,42 @@ class ToolEditReviewModelProjectionWireTest {
           + "\"}}";
   private static final String EDIT_OUTPUT_TEXT = "File edited successfully. Replacements: 1.";
 
+  private interface AdapterFactory {
+    ProviderAdapter create(JdkHttpSseTransport transport, String apiKey);
+  }
+
+  private enum Protocol {
+    OPENAI_CHAT("openai-chat", ProviderType.OPENAI, OpenAiChatProviderAdapter::new),
+    OPENAI_RESPONSES(
+        "openai-responses", ProviderType.OPENAI_RESPONSES, OpenAiResponsesProviderAdapter::new),
+    ANTHROPIC("anthropic", ProviderType.ANTHROPIC, AnthropicProviderAdapter::new),
+    GEMINI("gemini", ProviderType.GOOGLE, GeminiProviderAdapter::new);
+
+    private final String label;
+    private final ProviderType providerType;
+    private final AdapterFactory adapterFactory;
+
+    Protocol(String label, ProviderType providerType, AdapterFactory adapterFactory) {
+      this.label = label;
+      this.providerType = providerType;
+      this.adapterFactory = adapterFactory;
+    }
+
+    ProviderAdapter createAdapter(JdkHttpSseTransport transport) {
+      return adapterFactory.create(transport, API_KEY);
+    }
+
+    ModelDescriptor model() {
+      return new ModelDescriptor(
+          label, "synthetic-model", "synthetic-model", Set.of(ModelInputModality.TEXT), true, true);
+    }
+
+    ProviderDescriptor descriptor() {
+      return new ProviderDescriptor(
+          label, providerType, "https://example.invalid/v1", TIMEOUT_POLICY);
+    }
+  }
+
   private HttpClient client;
   private ExecutorService workers;
   private ScheduledExecutorService scheduler;
@@ -157,23 +193,17 @@ class ToolEditReviewModelProjectionWireTest {
 
   private void verifyWireAcrossFourProtocols(List<ProviderMessage> messages, boolean isNative)
       throws Exception {
-    JsonNode chatWire = encode(chatAdapter(), request(chatModel(), messages), chatDescriptor());
-    assertWireRequirements(chatWire, "OpenAI Chat");
+    for (Protocol protocol : Protocol.values()) {
+      ProviderAdapter adapter = protocol.createAdapter(transport());
+      ProviderRequest request = request(protocol.model(), messages);
+      JsonNode wire = MAPPER.readTree(adapter.encodeRequestBody(request, protocol.descriptor()));
 
-    JsonNode responsesWire =
-        encode(responsesAdapter(), request(responsesModel(), messages), responsesDescriptor());
-    assertWireRequirements(responsesWire, "OpenAI Responses");
-
-    JsonNode anthropicWire =
-        encode(anthropicAdapter(), request(anthropicModel(), messages), anthropicDescriptor());
-    assertWireRequirements(anthropicWire, "Anthropic");
-
-    JsonNode geminiWire =
-        encode(geminiAdapter(), request(geminiModel(), messages), geminiDescriptor());
-    assertWireRequirements(geminiWire, "Gemini");
-
-    if (isNative) {
-      assertNativeSpecificStructure(chatWire, responsesWire, anthropicWire, geminiWire);
+      assertWireRequirements(wire, protocol.name());
+      if (isNative) {
+        assertNativeSpecificStructure(wire, protocol);
+      } else {
+        assertFallbackSpecificStructure(wire, protocol);
+      }
     }
   }
 
@@ -203,49 +233,66 @@ class ToolEditReviewModelProjectionWireTest {
         protocolName + " wire must not serialize raw editReview object");
   }
 
-  private void assertNativeSpecificStructure(
-      JsonNode chatWire, JsonNode responsesWire, JsonNode anthropicWire, JsonNode geminiWire) {
-    JsonNode chatTool = itemWithRole(chatWire.path("messages"), "tool");
-    String chatContent = chatTool.path("content").asString("");
-    assertTrue(chatContent.contains(EDIT_OUTPUT_TEXT));
-    assertTrue(chatContent.contains("File: " + TARGET_PATH));
-    assertTrue(chatContent.contains(DIFF_CONTENT));
-
-    JsonNode responsesInput = responsesWire.path("input");
-    JsonNode functionCallOutput = itemOfType(responsesInput, "function_call_output");
-    String outputString = functionCallOutput.path("output").toString();
-    assertTrue(outputString.contains(EDIT_OUTPUT_TEXT));
-    assertTrue(outputString.contains("File: " + TARGET_PATH));
-    assertTrue(outputString.contains("-line1"));
-
-    JsonNode toolResult = null;
-    for (JsonNode message : anthropicWire.path("messages")) {
-      for (JsonNode item : message.path("content")) {
-        if ("tool_result".equals(item.path("type").asString(""))) {
-          toolResult = item;
-          break;
+  private void assertNativeSpecificStructure(JsonNode wire, Protocol protocol) {
+    switch (protocol) {
+      case OPENAI_CHAT -> {
+        JsonNode chatTool = itemWithRole(wire.path("messages"), "tool");
+        String chatContent = chatTool.path("content").asString("");
+        assertTrue(chatContent.contains(EDIT_OUTPUT_TEXT));
+        assertTrue(chatContent.contains("File: " + TARGET_PATH));
+        assertTrue(chatContent.contains(DIFF_CONTENT));
+      }
+      case OPENAI_RESPONSES -> {
+        JsonNode responsesInput = wire.path("input");
+        JsonNode functionCallOutput = itemOfType(responsesInput, "function_call_output");
+        String outputString = functionCallOutput.path("output").toString();
+        assertTrue(outputString.contains(EDIT_OUTPUT_TEXT));
+        assertTrue(outputString.contains("File: " + TARGET_PATH));
+        assertTrue(outputString.contains("-line1"));
+      }
+      case ANTHROPIC -> {
+        JsonNode toolResult = null;
+        for (JsonNode message : wire.path("messages")) {
+          for (JsonNode item : message.path("content")) {
+            if ("tool_result".equals(item.path("type").asString(""))) {
+              toolResult = item;
+              break;
+            }
+          }
         }
+        assertTrue(toolResult != null, "Anthropic wire must contain tool_result");
+        String toolResultString = toolResult.path("content").toString();
+        assertTrue(toolResultString.contains(EDIT_OUTPUT_TEXT));
+        assertTrue(toolResultString.contains("File: " + TARGET_PATH));
+        assertTrue(toolResultString.contains("-line1"));
+      }
+      case GEMINI -> {
+        boolean foundFunctionResponse = false;
+        for (JsonNode content : wire.path("contents")) {
+          for (JsonNode part : content.path("parts")) {
+            if (part.has("functionResponse")) {
+              String partStr = part.toString();
+              assertTrue(partStr.contains(EDIT_OUTPUT_TEXT));
+              assertTrue(partStr.contains("File: " + TARGET_PATH));
+              assertTrue(partStr.contains("-line1"));
+              foundFunctionResponse = true;
+            }
+          }
+        }
+        assertTrue(foundFunctionResponse, "Gemini wire must contain functionResponse");
       }
     }
-    assertTrue(toolResult != null, "Anthropic wire must contain tool_result");
-    String toolResultString = toolResult.path("content").toString();
-    assertTrue(toolResultString.contains(EDIT_OUTPUT_TEXT));
-    assertTrue(toolResultString.contains("File: " + TARGET_PATH));
-    assertTrue(toolResultString.contains("-line1"));
+  }
 
-    boolean foundFunctionResponse = false;
-    for (JsonNode content : geminiWire.path("contents")) {
-      for (JsonNode part : content.path("parts")) {
-        if (part.has("functionResponse")) {
-          String partStr = part.toString();
-          assertTrue(partStr.contains(EDIT_OUTPUT_TEXT));
-          assertTrue(partStr.contains("File: " + TARGET_PATH));
-          assertTrue(partStr.contains("-line1"));
-          foundFunctionResponse = true;
-        }
-      }
-    }
-    assertTrue(foundFunctionResponse, "Gemini wire must contain functionResponse");
+  private void assertFallbackSpecificStructure(JsonNode wire, Protocol protocol) {
+    String wireText = wire.toString();
+    assertTrue(
+        wireText.contains("Previous context:"),
+        protocol.name() + " wire must contain fallback context header");
+    assertTrue(
+        wireText.contains("File: " + TARGET_PATH),
+        protocol.name() + " fallback wire must contain file path");
+    assertTrue(wireText.contains("-line1"), protocol.name() + " fallback wire must contain diff");
   }
 
   private static int countOccurrences(String haystack, String needle) {
@@ -262,63 +309,6 @@ class ToolEditReviewModelProjectionWireTest {
     return new JdkHttpSseTransport(client, workers, scheduler);
   }
 
-  private ProviderAdapter chatAdapter() {
-    return new OpenAiChatProviderAdapter(transport(), API_KEY);
-  }
-
-  private ProviderAdapter responsesAdapter() {
-    return new OpenAiResponsesProviderAdapter(transport(), API_KEY);
-  }
-
-  private ProviderAdapter anthropicAdapter() {
-    return new AnthropicProviderAdapter(transport(), API_KEY);
-  }
-
-  private ProviderAdapter geminiAdapter() {
-    return new GeminiProviderAdapter(transport(), API_KEY);
-  }
-
-  private static ModelDescriptor chatModel() {
-    return model("openai_chat_synthetic", "gpt-synthetic");
-  }
-
-  private static ModelDescriptor responsesModel() {
-    return model("responses_synthetic", "gpt-synthetic");
-  }
-
-  private static ModelDescriptor anthropicModel() {
-    return model("anthropic_synthetic", "claude-synthetic");
-  }
-
-  private static ModelDescriptor geminiModel() {
-    return model("gemini_synthetic", "gemini-synthetic");
-  }
-
-  private static ModelDescriptor model(String providerName, String modelId) {
-    return new ModelDescriptor(
-        providerName, modelId, modelId, Set.of(ModelInputModality.TEXT), true, true);
-  }
-
-  private static ProviderDescriptor descriptor(ProviderType type, String providerName) {
-    return new ProviderDescriptor(providerName, type, "https://example.invalid/v1", TIMEOUT_POLICY);
-  }
-
-  private static ProviderDescriptor chatDescriptor() {
-    return descriptor(ProviderType.OPENAI, chatModel().providerName());
-  }
-
-  private static ProviderDescriptor responsesDescriptor() {
-    return descriptor(ProviderType.OPENAI_RESPONSES, responsesModel().providerName());
-  }
-
-  private static ProviderDescriptor anthropicDescriptor() {
-    return descriptor(ProviderType.ANTHROPIC, anthropicModel().providerName());
-  }
-
-  private static ProviderDescriptor geminiDescriptor() {
-    return descriptor(ProviderType.GOOGLE, geminiModel().providerName());
-  }
-
   private static ProviderRequest request(ModelDescriptor model, List<ProviderMessage> messages) {
     return new ProviderRequest(
         model,
@@ -328,12 +318,6 @@ class ToolEditReviewModelProjectionWireTest {
         messages,
         List.of(),
         ProviderCacheControl.none());
-  }
-
-  private static JsonNode encode(
-      ProviderAdapter adapter, ProviderRequest request, ProviderDescriptor descriptor)
-      throws Exception {
-    return MAPPER.readTree(adapter.encodeRequestBody(request, descriptor));
   }
 
   private static JsonNode itemOfType(JsonNode array, String type) {
