@@ -72,7 +72,7 @@ public class EnvironmentUpdateService implements EnvironmentUpdateListener {
   private static final int MAX_ERROR_CHARS = 500;
 
   private static final String ACTIVE_WORK_SQL =
-      "select count(1) from harness_work where required_environment_id = ?";
+      "select count(1) from durable_work where required_environment_id = ?";
 
   private final EnvironmentDaemonGateway gateway;
   private final EnvironmentRegistry registry;

@@ -186,8 +186,8 @@ class PostgresqlJoinAcceptanceRollbackTest {
 
     int workCount =
         jdbcTemplate.queryForObject(
-            "select count(*) from harness_work where target_id = ?", Integer.class, childThreadId);
-    assertEquals(0, workCount, "harness_work must not contain rolled-back work");
+            "select count(*) from durable_work where target_id = ?", Integer.class, childThreadId);
+    assertEquals(0, workCount, "durable_work must not contain rolled-back work");
 
     // 父级状态完全不受影响
     ThreadState parentAfter =
@@ -476,7 +476,7 @@ class PostgresqlJoinAcceptanceRollbackTest {
     assertSingleRow("harness_thread", "id", childThreadId);
     assertSingleRow("harness_thread_command", "thread_id", childThreadId);
     assertSingleRow("harness_thread_join", "invocation_id", joinInvocationId);
-    assertSingleRow("harness_work", "target_id", childThreadId);
+    assertSingleRow("durable_work", "target_id", childThreadId);
     assertEquals(List.of(childThreadId, parentThreadId), runtime.findAncestorChain(childThreadId));
   }
 
@@ -535,7 +535,7 @@ class PostgresqlJoinAcceptanceRollbackTest {
     assertSingleRow("harness_thread", "id", threadId);
     assertSingleRow("harness_thread_command", "thread_id", threadId);
     assertSingleRow("harness_thread_join", "invocation_id", joinInvocationId);
-    assertSingleRow("harness_work", "target_id", threadId);
+    assertSingleRow("durable_work", "target_id", threadId);
   }
 
   private static AcceptCommandsCommand newSession(
@@ -798,7 +798,7 @@ class PostgresqlJoinAcceptanceRollbackTest {
     assertNoRow("harness_thread", "id", childBThreadId);
     assertNoRow("harness_thread_command", "thread_id", childBThreadId);
     assertNoRow("harness_thread_join", "invocation_id", joinBInvocationId);
-    assertNoRow("harness_work", "target_id", childBThreadId);
+    assertNoRow("durable_work", "target_id", childBThreadId);
 
     // 释放额度：冻结 childA 未完成 Join 的 terminal 结果（新模型按未完成 Join 计数，不再依赖 IDLE）
     store.transaction(

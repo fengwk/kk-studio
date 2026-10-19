@@ -50,9 +50,9 @@ import fun.fengwk.kkstudio.project.repo.IssueRepository;
 import fun.fengwk.kkstudio.project.repo.IssueRunRepository;
 import fun.fengwk.kkstudio.project.repo.IssueStageBudgetRepository;
 import fun.fengwk.kkstudio.project.repo.ProjectRepository;
-import fun.fengwk.kkstudio.project.service.IssueWorkStore;
 import fun.fengwk.kkstudio.project.turn.ProjectRunScope;
 import fun.fengwk.kkstudio.project.turn.ProjectRunScopeJsonCodec;
+import fun.fengwk.kkstudio.work.DurableWorkQueue;
 
 import java.time.Instant;
 import java.util.List;
@@ -88,7 +88,7 @@ class IssueRunServiceImplTest {
       mock(IssueAgentThreadRepository.class);
   private final IssueActivityRepository issueActivityRepository =
       mock(IssueActivityRepository.class);
-  private final IssueWorkStore issueWorkStore = mock(IssueWorkStore.class);
+  private final DurableWorkQueue issueWorkQueue = mock(DurableWorkQueue.class);
   private final ProjectWorkflowJsonCodec workflowCodec = new ProjectWorkflowJsonCodec();
   private final AgentBranchSettingsPort agentBranchSettingsPort =
       mock(AgentBranchSettingsPort.class);
@@ -105,7 +105,7 @@ class IssueRunServiceImplTest {
           stageBudgetRepository,
           issueAgentThreadRepository,
           issueActivityRepository,
-          issueWorkStore,
+          issueWorkQueue,
           workflowCodec,
           agentBranchSettingsPort,
           executions,

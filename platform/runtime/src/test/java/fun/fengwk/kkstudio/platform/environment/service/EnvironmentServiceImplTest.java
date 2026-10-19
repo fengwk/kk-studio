@@ -547,7 +547,7 @@ class EnvironmentServiceImplTest {
     when(registry.hasActiveLease(EnvironmentId.of(ENV_ID))).thenReturn(true);
     assertThrows(AiInUseException.class, () -> service.delete(EnvironmentId.of(ENV_ID), "0"));
 
-    // 2. Offline, but active work in harness_work -> rejects
+    // 2. Offline, but active work in durable_work -> rejects
     when(registry.hasActiveLease(EnvironmentId.of(ENV_ID))).thenReturn(false);
     when(jdbc.queryForObject(any(String.class), eq(Integer.class), eq(ENV_ID))).thenReturn(1);
     assertThrows(AiInUseException.class, () -> service.delete(EnvironmentId.of(ENV_ID), "0"));

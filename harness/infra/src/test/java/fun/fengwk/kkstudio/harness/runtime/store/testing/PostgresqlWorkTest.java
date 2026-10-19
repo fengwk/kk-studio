@@ -59,7 +59,7 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
     forceWorkAvailableAfter(new WorkTarget(WorkTargetType.TOOL, leased), Duration.ofMinutes(15));
     jdbc.update(
         """
-        update harness_work set lease_token = 'projection-lease',
+        update durable_work set lease_token = 'projection-lease',
             lease_until = statement_timestamp() + interval '10 minutes'
         where target_type = 'TOOL' and target_id = ?
         """,
@@ -148,7 +148,7 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
         1,
         jdbc.update(
             """
-            update harness_work
+            update durable_work
             set lease_until = statement_timestamp() - interval '1 second'
             where target_type = ? and target_id = ?
             """,
@@ -163,7 +163,7 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
         1,
         jdbc.update(
             """
-            update harness_work
+            update durable_work
             set available_at = statement_timestamp() - interval '1 second'
             where target_type = ? and target_id = ?
             """,
@@ -177,7 +177,7 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
         1,
         jdbc.update(
             """
-            update harness_work
+            update durable_work
             set available_at = statement_timestamp() + ?::interval
             where target_type = ? and target_id = ?
             """,
@@ -280,7 +280,7 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
         1,
         jdbc.update(
             """
-            update harness_work
+            update durable_work
             set available_at = statement_timestamp() - make_interval(secs => ?)
             where target_type = 'THREAD' and target_id = ?
             """,
@@ -559,7 +559,7 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
         jdbc.queryForObject(
             """
             select extract(epoch from (lease_until - statement_timestamp())) * 1000
-            from harness_work
+            from durable_work
             where target_type = 'THREAD' and target_id = ?
             """,
             Double.class,
@@ -573,7 +573,7 @@ class PostgresqlWorkTest extends HarnessStoreWorkContract {
         jdbc.queryForObject(
             """
             select extract(epoch from (available_at - statement_timestamp())) * 1000
-            from harness_work
+            from durable_work
             where target_type = 'THREAD' and target_id = ?
             """,
             Double.class,

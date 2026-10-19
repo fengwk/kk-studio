@@ -22,7 +22,6 @@ import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.project.controller.IssueReconcileOutcome;
 import fun.fengwk.kkstudio.project.controller.IssueReconciler;
-import fun.fengwk.kkstudio.project.controller.IssueReconciler.IssueWorkClaim;
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.error.ProjectValidationException;
 import fun.fengwk.kkstudio.project.error.ProjectVersionConflictException;
@@ -30,11 +29,11 @@ import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueActivity;
 import fun.fengwk.kkstudio.project.model.IssueActivityKind;
 import fun.fengwk.kkstudio.project.model.IssueRun;
-import fun.fengwk.kkstudio.project.model.IssueWork;
 import fun.fengwk.kkstudio.project.model.PauseReason;
 import fun.fengwk.kkstudio.project.model.Project;
 import fun.fengwk.kkstudio.project.service.IssueEvidenceService;
-import fun.fengwk.kkstudio.project.service.IssueWorkStore;
+import fun.fengwk.kkstudio.work.DurableWorkQueue;
+import fun.fengwk.kkstudio.work.WorkClaim;
 
 import java.time.Duration;
 import java.util.List;
@@ -60,7 +59,7 @@ import java.util.UUID;
 class IssueLifecycleIntegrationTest extends ProjectTestSupport {
 
   @Autowired private IssueReconciler reconciler;
-  @Autowired private IssueWorkStore workStore;
+  @Autowired private DurableWorkQueue issueWorkQueue;
   @Autowired private IssueEvidenceService evidenceService;
   @Autowired private StorageUploadService uploadService;
   @Autowired private StorageBlobManager blobManager;
@@ -89,8 +88,8 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
     assertTrue(hasStopActivity);
 
     // Reconciler 认领 work 并调谐，判定门禁关闭直接收敛，绝不创建新 Run
-    workStore.requestWork(issue.getId(), Duration.ZERO);
-    IssueWorkClaim claim = claimWork();
+    issueWorkQueue.request(issue.getId(), Duration.ZERO);
+    WorkClaim claim = claimWork();
     assertNotNull(claim);
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
     assertEquals(IssueReconcileOutcome.CONVERGED_UNDISPATCHABLE, outcome);
@@ -119,8 +118,8 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
     assertEquals(IssueRunStatus.CANCELLED, cancelledRun.getStatus());
     assertNotNull(cancelledRun.getEndedAt());
 
-    workStore.requestWork(issue.getId(), Duration.ZERO);
-    IssueWorkClaim claim = claimWork();
+    issueWorkQueue.request(issue.getId(), Duration.ZERO);
+    WorkClaim claim = claimWork();
     assertNotNull(claim);
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
     assertEquals(IssueReconcileOutcome.CONVERGED_UNDISPATCHABLE, outcome);
@@ -324,7 +323,10 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
     assertTrue(
         count("select count(*) from project_issue_activity where issue_id = ?", issue.getId()) > 0);
     assertEquals(
-        1L, count("select count(*) from project_issue_work where issue_id = ?", issue.getId()));
+        1L,
+        count(
+            "select count(*) from durable_work where target_type = 'ISSUE' and target_id = ?",
+            issue.getId()));
     assertEquals(
         2L,
         count("select count(*) from project_issue_stage_budget where issue_id = ?", issue.getId()));
@@ -344,7 +346,10 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
     assertEquals(
         0L, count("select count(*) from project_issue_activity where issue_id = ?", issue.getId()));
     assertEquals(
-        0L, count("select count(*) from project_issue_work where issue_id = ?", issue.getId()));
+        0L,
+        count(
+            "select count(*) from durable_work where target_type = 'ISSUE' and target_id = ?",
+            issue.getId()));
     assertEquals(
         0L,
         count("select count(*) from project_issue_stage_budget where issue_id = ?", issue.getId()));
@@ -636,14 +641,9 @@ class IssueLifecycleIntegrationTest extends ProjectTestSupport {
         ProjectVersionConflictException.class, () -> projectService.deleteProject(projectId, 999L));
   }
 
-  private IssueWorkClaim claimWork() {
+  private WorkClaim claimWork() {
     String leaseToken = UUID.randomUUID().toString();
-    IssueWork work = workStore.claimNext(leaseToken, Duration.ofMinutes(1)).orElse(null);
-    if (work == null) {
-      return null;
-    }
-    return new IssueWorkClaim(
-        work.getIssueId(), work.getLeaseToken(), work.getLeaseUntil(), work.getWakeVersion());
+    return issueWorkQueue.claimNext(leaseToken, Duration.ofMinutes(1)).orElse(null);
   }
 
   private void insertStorageBlob(UUID blobId) {

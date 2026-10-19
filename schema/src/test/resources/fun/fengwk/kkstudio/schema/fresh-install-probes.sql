@@ -176,10 +176,10 @@ insert into project_issue_run (id, issue_id, ordinal, state, session_id, thread_
 update project_issue set next_run_ordinal = 2 where id in (pg_temp.uid(10), pg_temp.uid(11), pg_temp.uid(13));
 
 -- ---------------------------------------------------------------------------
--- Structure: exactly the 16 target tables, no removed product object survives.
+-- Structure: exactly the 15 target tables, no removed product object survives.
 -- ---------------------------------------------------------------------------
-select pg_temp.assert_true('exactly the 16 target domain tables exist',
-    (select count(*) = 16 from pg_tables where schemaname = 'public'
+select pg_temp.assert_true('exactly the 15 target domain tables exist',
+    (select count(*) = 15 from pg_tables where schemaname = 'public'
         and (tablename like 'canvas_%' or tablename = 'project' or tablename like 'project_%'
             or tablename = 'chat_session')));
 select pg_temp.assert_true('removed product tables and pointers are gone',
@@ -1032,12 +1032,9 @@ select pg_temp.assert_true('a later active operation is admitted after the termi
 -- ---------------------------------------------------------------------------
 -- Explicit dependency-ordered deletion; no cascade bypasses a reference.
 -- ---------------------------------------------------------------------------
-insert into project_issue (id, project_id, number, title, state)
-    values (pg_temp.uid(14), pg_temp.uid(2), 2, 'mailbox only', 'INIT');
-insert into project_issue_work (issue_id, wake_version, due_at) values (pg_temp.uid(14), 1, now());
-select pg_temp.rejects('the Work mailbox alone blocks deleting its Issue',
-    $$delete from project_issue where id=pg_temp.uid(14)$$, '23503', 'fk_project_issue_work_issue');
-insert into project_issue_work (issue_id, wake_version, due_at) values (pg_temp.uid(10), 1, now());
+select pg_temp.rejects('durable work accepts only the known target types',
+    $$insert into durable_work (target_type, target_id, available_at, wake_version)
+      values ('BOGUS', pg_temp.uid(14), now(), 1)$$, '23514', 'ck_durable_work_target_type');
 
 -- The dedicated run-free, call-free Thread of Issue 11: only the Agent Thread
 -- binding keeps it alive.
@@ -1062,7 +1059,6 @@ delete from project_issue_agent_thread where issue_id = pg_temp.uid(10);
 delete from harness_thread where session_id in (select session_id from deleting_sessions);
 delete from harness_entry where session_id in (select session_id from deleting_sessions);
 delete from harness_session where id in (select session_id from deleting_sessions);
-delete from project_issue_work where issue_id = pg_temp.uid(10);
 delete from project_issue where id = pg_temp.uid(10);
 select pg_temp.assert_true('relational cleanup removes every Session and Thread of the Issue',
     not exists(select 1 from project_issue where id = pg_temp.uid(10))

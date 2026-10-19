@@ -59,8 +59,6 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
 
   private static final Logger log = LoggerFactory.getLogger(HarnessWorkDispatcher.class);
 
-  public static final String CHANNEL = "harness_runtime_work";
-
   private static final String NAME = "harness work dispatcher";
 
   private static final List<WorkTargetType> ROUND_ROBIN_TYPES =

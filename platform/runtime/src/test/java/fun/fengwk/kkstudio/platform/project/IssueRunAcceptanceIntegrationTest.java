@@ -110,7 +110,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     assertEquals(
         1L,
         count(
-            "select count(*) from project_issue_work where issue_id = ? and wake_version >= 1",
+            "select count(*) from durable_work where target_type = 'ISSUE' and target_id = ? and wake_version >= 1",
             issue.getId()));
   }
 
@@ -156,7 +156,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
             "select next_run_ordinal from project_issue where id = ?", Long.class, issue.getId());
     long wakeVersionAfterAccept =
         jdbc.queryForObject(
-            "select wake_version from project_issue_work where issue_id = ?",
+            "select wake_version from durable_work where target_type = 'ISSUE' and target_id = ?",
             Long.class,
             issue.getId());
 
@@ -181,7 +181,7 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
     assertEquals(
         wakeVersionAfterAccept,
         jdbc.queryForObject(
-            "select wake_version from project_issue_work where issue_id = ?",
+            "select wake_version from durable_work where target_type = 'ISSUE' and target_id = ?",
             Long.class,
             issue.getId()));
     assertEquals(
@@ -334,11 +334,14 @@ class IssueRunAcceptanceIntegrationTest extends ProjectTestSupport {
         count("select count(*) from project_issue_stage_budget where issue_id = ?", issue.getId()));
     // 接受失败整体回滚：不新增 mailbox，也不推进阶段转移已经登记的那一行。
     assertEquals(
-        1L, count("select count(*) from project_issue_work where issue_id = ?", issue.getId()));
+        1L,
+        count(
+            "select count(*) from durable_work where target_type = 'ISSUE' and target_id = ?",
+            issue.getId()));
     assertEquals(
         1L,
         jdbc.queryForObject(
-            "select wake_version from project_issue_work where issue_id = ?",
+            "select wake_version from durable_work where target_type = 'ISSUE' and target_id = ?",
             Long.class,
             issue.getId()));
     assertEquals(

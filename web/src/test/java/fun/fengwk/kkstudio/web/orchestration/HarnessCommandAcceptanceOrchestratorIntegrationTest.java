@@ -95,7 +95,7 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends WebPostgresTes
     assertEquals(1, count("harness_entry", "session_id", chatSessionId));
     assertEquals(1, count("harness_thread", "id", chatThreadId));
     assertEquals(1, count("harness_thread_command", "thread_id", chatThreadId));
-    assertEquals(1, count("harness_work", "target_id", chatThreadId));
+    assertEquals(1, count("durable_work", "target_id", chatThreadId));
   }
 
   /** 既有 Thread 的继续写入不再经 owner 授权，但必须保持产品合法的 SET_* 前缀与末尾用户消息。 */
@@ -206,7 +206,7 @@ class HarnessCommandAcceptanceOrchestratorIntegrationTest extends WebPostgresTes
     assertEquals(0, count("session_blob_ref", "session_id", sessionId));
     assertEquals(0, count("harness_thread", "id", threadId));
     assertEquals(0, count("harness_thread_command", "thread_id", threadId));
-    assertEquals(0, count("harness_work", "target_id", threadId));
+    assertEquals(0, count("durable_work", "target_id", threadId));
   }
 
   @Test

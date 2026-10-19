@@ -44,7 +44,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 class PostgresqlWorkNotificationTest {
 
-  private static final String WORK_CHANNEL = "harness_runtime_work";
+  private static final String WORK_CHANNEL = "durable_work";
 
   private HarnessStore store;
   private DataSource dataSource;

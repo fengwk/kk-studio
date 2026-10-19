@@ -47,7 +47,8 @@ import fun.fengwk.kkstudio.project.repo.IssueStageBudgetRepository;
 import fun.fengwk.kkstudio.project.repo.ProjectRepository;
 import fun.fengwk.kkstudio.project.service.IssueEvidenceService;
 import fun.fengwk.kkstudio.project.service.IssueRunService;
-import fun.fengwk.kkstudio.project.service.IssueWorkStore;
+import fun.fengwk.kkstudio.work.DurableWorkQueue;
+import fun.fengwk.kkstudio.work.WorkClaim;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
@@ -102,7 +103,7 @@ public class IssueReconciler {
   private final IssueRunService issueRunService;
   private final IssueEvidenceService issueEvidenceService;
   private final EvidenceBlobPort evidenceBlobPort;
-  private final IssueWorkStore issueWorkStore;
+  private final DurableWorkQueue issueWorkQueue;
   private final ObjectProvider<IssueThreadExecutionPort> threadExecutions;
   private final ProjectWorkflowJsonCodec workflowCodec;
   private final IssueControllerProperties properties;
@@ -119,7 +120,7 @@ public class IssueReconciler {
       IssueRunService issueRunService,
       IssueEvidenceService issueEvidenceService,
       EvidenceBlobPort evidenceBlobPort,
-      IssueWorkStore issueWorkStore,
+      DurableWorkQueue issueWorkQueue,
       ObjectProvider<IssueThreadExecutionPort> threadExecutions,
       ProjectWorkflowJsonCodec workflowCodec,
       IssueControllerProperties properties) {
@@ -133,7 +134,7 @@ public class IssueReconciler {
         issueRunService,
         issueEvidenceService,
         evidenceBlobPort,
-        issueWorkStore,
+        issueWorkQueue,
         threadExecutions,
         workflowCodec,
         properties,
@@ -150,7 +151,7 @@ public class IssueReconciler {
       IssueRunService issueRunService,
       IssueEvidenceService issueEvidenceService,
       EvidenceBlobPort evidenceBlobPort,
-      IssueWorkStore issueWorkStore,
+      DurableWorkQueue issueWorkQueue,
       ObjectProvider<IssueThreadExecutionPort> threadExecutions,
       ProjectWorkflowJsonCodec workflowCodec,
       IssueControllerProperties properties,
@@ -168,7 +169,7 @@ public class IssueReconciler {
     this.issueEvidenceService =
         Objects.requireNonNull(issueEvidenceService, "issueEvidenceService");
     this.evidenceBlobPort = Objects.requireNonNull(evidenceBlobPort, "evidenceBlobPort");
-    this.issueWorkStore = Objects.requireNonNull(issueWorkStore, "issueWorkStore");
+    this.issueWorkQueue = Objects.requireNonNull(issueWorkQueue, "issueWorkQueue");
     this.threadExecutions = Objects.requireNonNull(threadExecutions, "threadExecutions");
     this.workflowCodec = Objects.requireNonNull(workflowCodec, "workflowCodec");
     this.properties = Objects.requireNonNull(properties, "properties");
@@ -177,10 +178,10 @@ public class IssueReconciler {
 
   /** 调谐一次已领取的 work；整个动作在单个物理事务内完成，外部执行从不在锁内发生。 */
   @Transactional
-  public IssueReconcileOutcome reconcile(IssueWorkClaim claim) {
+  public IssueReconcileOutcome reconcile(WorkClaim claim) {
     validateClaim(claim);
     Instant now = clock.instant();
-    LockedIssue locked = lockIssue(claim.issueId());
+    LockedIssue locked = lockIssue(claim.targetId());
     if (locked == null) {
       return finish(claim, false, Duration.ZERO, IssueReconcileOutcome.CONVERGED_ARCHIVED);
     }
@@ -201,7 +202,7 @@ public class IssueReconciler {
   }
 
   private IssueReconcileOutcome reconcileActiveRun(
-      Project project, Issue issue, IssueRun run, IssueWorkClaim claim, Instant now) {
+      Project project, Issue issue, IssueRun run, WorkClaim claim, Instant now) {
     IssueThreadView view = requireThreadExecution().readThread(run.getThreadId());
     IssueAgentThread binding = issueAgentThreadRepository.findByThreadId(run.getThreadId());
     boolean bindingValid = binding != null && binding.issueId().equals(issue.getId());
@@ -318,7 +319,7 @@ public class IssueReconciler {
       IssueThreadView view,
       ThreadJoin join,
       boolean current,
-      IssueWorkClaim claim) {
+      WorkClaim claim) {
     ThreadJoinReceipt receipt =
         requireThreadExecution()
             .projectJoinReceipt(run.getId())
@@ -377,7 +378,7 @@ public class IssueReconciler {
     }
   }
 
-  private IssueReconcileOutcome reconcileIdle(Project project, Issue issue, IssueWorkClaim claim) {
+  private IssueReconcileOutcome reconcileIdle(Project project, Issue issue, WorkClaim claim) {
     if (project.isArchived()
         || issue.isArchived()
         || ProjectWorkflowReservedState.DONE.code().value().equals(issue.getState())) {
@@ -425,24 +426,21 @@ public class IssueReconciler {
    * 处理，因此只记录而不抛出。
    */
   private IssueReconcileOutcome finish(
-      IssueWorkClaim claim, boolean keepPolling, Duration delay, IssueReconcileOutcome outcome) {
+      WorkClaim claim, boolean keepPolling, Duration delay, IssueReconcileOutcome outcome) {
     boolean applied =
-        keepPolling
-            ? issueWorkStore.rescheduleWork(
-                claim.issueId(), claim.leaseToken(), claim.wakeVersion(), delay)
-            : issueWorkStore.completeWork(claim.issueId(), claim.leaseToken(), claim.wakeVersion());
+        keepPolling ? issueWorkQueue.reschedule(claim, delay) : issueWorkQueue.complete(claim);
     if (!applied) {
       log.debug(
           "Issue work claim was already superseded; issueId={}, leaseToken={}",
-          claim.issueId(),
+          claim.targetId(),
           claim.leaseToken());
     }
     return outcome;
   }
 
-  private void validateClaim(IssueWorkClaim claim) {
+  private void validateClaim(WorkClaim claim) {
     Objects.requireNonNull(claim, "claim");
-    Objects.requireNonNull(claim.issueId(), "claim.issueId");
+    Objects.requireNonNull(claim.targetId(), "claim.targetId");
     Objects.requireNonNull(claim.leaseToken(), "claim.leaseToken");
     Objects.requireNonNull(claim.leaseUntil(), "claim.leaseUntil");
   }
@@ -464,8 +462,10 @@ public class IssueReconciler {
   }
 
   /** 领取即续租：由数据库保证至少剩余一个完整租期且不缩短当前 lease，并持有 work 行锁到 finish。 */
-  private void heartbeat(IssueWorkClaim claim) {
-    issueWorkStore.renewLease(claim.issueId(), claim.leaseToken(), properties.getLeaseDuration());
+  private void heartbeat(WorkClaim claim) {
+    if (!issueWorkQueue.renew(claim, properties.getLeaseDuration())) {
+      throw new IllegalStateException("issue work lease is no longer held: " + claim.targetId());
+    }
   }
 
   /** 判断本次 Run 的活动执行时长是否已耗尽。 */
@@ -497,7 +497,7 @@ public class IssueReconciler {
       IssueRun run,
       UUID endEntryId,
       String reason,
-      IssueWorkClaim claim,
+      WorkClaim claim,
       IssueReconcileOutcome outcome) {
     issueRunService.failRun(
         run.getId(), run.getVersion(), failKey(run, endEntryId), endEntryId, reason);
@@ -689,21 +689,6 @@ public class IssueReconciler {
   private static UUID budgetStopRequestId(UUID runId) {
     return UUID.nameUUIDFromBytes(
         ("issue-run-budget-stop:" + runId).getBytes(StandardCharsets.UTF_8));
-  }
-
-  /**
-   * 一次 claim 的最小事实：Issue、租约令牌、到期时间与领取到的唤醒版本。
-   *
-   * <p>{@code wakeVersion} 只用于「完成并删除」的围栏；归还 lease 用 {@code leaseToken} 围栏，因此处理期间到达的新唤醒不会丢。
-   */
-  public record IssueWorkClaim(
-      UUID issueId, String leaseToken, Instant leaseUntil, long wakeVersion) {
-
-    public IssueWorkClaim {
-      Objects.requireNonNull(issueId, "issueId");
-      Objects.requireNonNull(leaseToken, "leaseToken");
-      Objects.requireNonNull(leaseUntil, "leaseUntil");
-    }
   }
 
   private record LockedIssue(Project project, Issue issue) {}

@@ -397,7 +397,6 @@ project
           +--< project_issue_run >-- harness_thread / harness_entry
           +--< project_issue_activity --? project_issue_run
           +--< project_issue_evidence >-- storage_blob
-          +--0..1 project_issue_work
 
 chat --< chat_session >-- harness_session
 harness_thread >-- harness_session --< harness_entry

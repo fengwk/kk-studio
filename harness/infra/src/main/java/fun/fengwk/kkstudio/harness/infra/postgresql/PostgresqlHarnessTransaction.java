@@ -53,6 +53,7 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
+import fun.fengwk.kkstudio.work.DurableWorkQueue;
 
 import java.sql.Timestamp;
 import java.time.Duration;
@@ -116,7 +117,7 @@ import java.util.function.Supplier;
  * 选取待处理任务：
  *
  * <ul>
- *   <li>{@code harness_work.required_environment_id} 仅用于 TOOL Work；为空时无亲和性要求；
+ *   <li>{@code durable_work.required_environment_id} 仅用于 TOOL Work；为空时无亲和性要求；
  *   <li>非空时，只有在 {@code environment_connection} 中存在匹配的 {@code environment_id}、所有者为当前 Dispatcher 的
  *       {@code nodeInstanceId}、连接状态为 {@code READY} 且租约有效的记录时，当前节点才可 claim；
  *   <li>路由不确定或底层查询失败时严格 fail closed；
@@ -150,7 +151,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
       """
       with candidate as (
           select target_type, target_id
-          from harness_work
+          from durable_work
           where target_type = ?
             and available_at <= statement_timestamp()
             and (lease_until is null or lease_until <= statement_timestamp())
@@ -159,7 +160,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
                 or exists (
                     select 1
                     from environment_connection ec
-                    where ec.environment_id = harness_work.required_environment_id
+                    where ec.environment_id = durable_work.required_environment_id
                       and ec.owner_node_id = ?
                       and ec.status = 'READY'
                       and ec.lease_until > statement_timestamp()
@@ -169,7 +170,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
           for update skip locked
           limit 1
       )
-      update harness_work work
+      update durable_work work
       set lease_token = ?,
           lease_until = date_trunc('milliseconds', statement_timestamp() + ?::interval)
       from candidate
@@ -194,13 +195,13 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
    */
   private static final String REQUEST_WORK =
       """
-      insert into harness_work (
+      insert into durable_work (
           target_type, target_id, available_at, wake_version, lease_token, lease_until, required_environment_id
       ) values (?, ?, date_trunc('milliseconds', statement_timestamp()), 1, null, null, ?)
       on conflict (target_type, target_id) do update
-      set available_at = least(harness_work.available_at, excluded.available_at),
-          wake_version = harness_work.wake_version + 1
-      where (harness_work.required_environment_id is not distinct from excluded.required_environment_id
+      set available_at = least(durable_work.available_at, excluded.available_at),
+          wake_version = durable_work.wake_version + 1
+      where (durable_work.required_environment_id is not distinct from excluded.required_environment_id
              or excluded.required_environment_id is null)
       returning *
       """;
@@ -221,7 +222,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
                  w.required_environment_id as environment_id
           from harness_tool_invocation i
           join harness_model_invocation m on m.id = i.model_invocation_id
-          join harness_work w on w.target_type = 'TOOL' and w.target_id = i.id
+          join durable_work w on w.target_type = 'TOOL' and w.target_id = i.id
           where i.status = 'READY'
             and w.required_environment_id is not null
             and w.available_at <= statement_timestamp()
@@ -274,7 +275,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
                  min(case when w.lease_until > statement_timestamp() then w.lease_until end)
              ) as next_change_at
       from harness_tool_invocation i
-      join harness_work w on w.target_type = 'TOOL' and w.target_id = i.id
+      join durable_work w on w.target_type = 'TOOL' and w.target_id = i.id
       left join environment_connection ec
         on ec.environment_id = w.required_environment_id and ec.status = 'READY'
       where i.status = 'READY'
@@ -1924,7 +1925,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
                        and ec.lease_until > statement_timestamp()
                  ) as waiting_for_environment
         from harness_tool_invocation i
-        left join harness_work w on w.target_type = 'TOOL' and w.target_id = i.id
+        left join durable_work w on w.target_type = 'TOOL' and w.target_id = i.id
         left join environment e on e.id = w.required_environment_id
         where i.id in (%s)
         """
@@ -2088,7 +2089,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     checkOpen();
     Objects.requireNonNull(target, "target");
     return queryOne(
-        "select * from harness_work where target_type = ? and target_id = ?",
+        "select * from durable_work where target_type = ? and target_id = ?",
         PostgresqlHarnessRows.WORK,
         target.type().name(),
         target.id());
@@ -2108,7 +2109,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
         queryOne(
             """
             select *
-            from harness_work
+            from durable_work
             where target_type = ? and target_id = ?
             for update
             """,
@@ -2136,7 +2137,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
         queryOne(
             """
             select *
-            from harness_work
+            from durable_work
             where target_type = ?
               and target_id = ?
               and lease_token = ?
@@ -2166,7 +2167,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     }
     int deleted =
         update(
-            "delete from harness_work where target_type = ? and target_id = ?",
+            "delete from durable_work where target_type = ? and target_id = ?",
             target.type().name(),
             target.id());
     requireSingleUpdate(deleted, "work", target.id());
@@ -2490,7 +2491,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
                     new IllegalArgumentException(
                         "conflicting requiredEnvironmentId for work target " + target));
     recordWorkLock(work.target());
-    notifyWorkAvailable();
+    notifyWorkAvailable(work.target().type());
     // 新建/重置冻结了环境亲和性的 TOOL Work：新增或提前了「待领取环境等待」事实，需失效待处理读模型。
     notifyEnvironmentWorkChanged(work);
   }
@@ -2598,13 +2599,13 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     if (next.isEmpty()) {
       int deleted =
           update(
-              "delete from harness_work where target_type = ? and target_id = ?",
+              "delete from durable_work where target_type = ? and target_id = ?",
               claim.target().type().name(),
               claim.target().id());
       requireSingleUpdate(deleted, "work", claim.target().id());
     } else {
       updateWork(next.get());
-      notifyWorkAvailable();
+      notifyWorkAvailable(claim.target().type());
     }
     // Work 终态变更（删除或清租约保留）都会改变「待领取环境等待」集合，需失效待处理读模型。
     notifyEnvironmentWorkChanged(work);
@@ -2630,7 +2631,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
         work.reschedule(
             claim.leaseToken(), claim.claimedWakeVersion(), databaseNow, databaseNow.plus(delay));
     updateWork(next);
-    notifyWorkAvailable();
+    notifyWorkAvailable(claim.target().type());
     // 清租约重排使 Work 可能重新进入「待领取环境等待」，需失效待处理读模型。
     notifyEnvironmentWorkChanged(work);
   }
@@ -3064,7 +3065,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     int updated =
         update(
             """
-            update harness_work
+            update durable_work
             set available_at = ?,
                 wake_version = ?,
                 lease_token = ?,
@@ -3130,8 +3131,8 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
         : PostgresqlHarnessRows.TOOL_ERRORS.encode(invocation.error());
   }
 
-  private void notifyWorkAvailable() {
-    notifyChannel(PostgresqlWorkChannel.NAME, "");
+  private void notifyWorkAvailable(WorkTargetType type) {
+    notifyChannel(DurableWorkQueue.CHANNEL, type.name());
   }
 
   /** Thread version 失效：payload 为 {@code {threadId}:{version}}，与既有协议一致。 */

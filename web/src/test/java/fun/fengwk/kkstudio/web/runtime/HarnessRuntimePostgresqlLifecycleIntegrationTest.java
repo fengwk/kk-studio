@@ -90,7 +90,7 @@ class HarnessRuntimePostgresqlLifecycleIntegrationTest {
 
   @BeforeEach
   void cleanSeededRows() {
-    jdbc.update("delete from harness_work");
+    jdbc.update("delete from durable_work");
     jdbc.update("delete from harness_thread where id = ?", THREAD_ID);
     jdbc.update("delete from harness_entry where id = ?", ROOT_ENTRY_ID);
     jdbc.update("delete from harness_session where id = ?", SESSION_ID);
@@ -103,7 +103,7 @@ class HarnessRuntimePostgresqlLifecycleIntegrationTest {
     assertTrue(postgresqlNotificationLoop.isRunning(), "notification loop must be running");
 
     seedDueThreadWork();
-    jdbc.execute("select pg_notify('harness_runtime_work', '" + THREAD_ID + "')");
+    jdbc.execute("select pg_notify('durable_work', 'THREAD')");
 
     awaitTrue(
         () -> workRowCount(THREAD_ID) == 0,
@@ -167,14 +167,14 @@ class HarnessRuntimePostgresqlLifecycleIntegrationTest {
         CREATION_REQUEST_HASH,
         "lifecycle-test-thread");
     jdbc.update(
-        "insert into harness_work (target_type, target_id, available_at, wake_version)"
+        "insert into durable_work (target_type, target_id, available_at, wake_version)"
             + " values ('THREAD', ?, now(), 1)",
         THREAD_ID);
   }
 
   private int workRowCount(UUID threadId) {
     return jdbc.queryForObject(
-        "select count(*) from harness_work where target_type = 'THREAD' and target_id = ?",
+        "select count(*) from durable_work where target_type = 'THREAD' and target_id = ?",
         Integer.class,
         threadId);
   }

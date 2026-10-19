@@ -22,10 +22,10 @@ import fun.fengwk.kkstudio.project.repo.IssueAgentThreadRepository;
 import fun.fengwk.kkstudio.project.repo.IssueRepository;
 import fun.fengwk.kkstudio.project.repo.IssueRunRepository;
 import fun.fengwk.kkstudio.project.repo.IssueStageBudgetRepository;
-import fun.fengwk.kkstudio.project.repo.IssueWorkRepository;
 import fun.fengwk.kkstudio.project.repo.ProjectRepository;
 import fun.fengwk.kkstudio.project.service.IssueEvidenceService;
 import fun.fengwk.kkstudio.project.service.ProjectService;
+import fun.fengwk.kkstudio.work.DurableWorkQueue;
 
 import java.time.Instant;
 import java.util.List;
@@ -88,7 +88,7 @@ public class ProjectServiceImpl implements ProjectService {
   private final IssueRunRepository issueRunRepository;
   private final IssueEvidenceService issueEvidenceService;
   private final IssueActivityRepository issueActivityRepository;
-  private final IssueWorkRepository issueWorkRepository;
+  private final DurableWorkQueue issueWorkQueue;
   private final IssueStageBudgetRepository issueStageBudgetRepository;
   private final IssueAgentThreadRepository issueAgentThreadRepository;
   private final IssueAgentSessionDeletionPort sessionDeletionPort;
@@ -233,7 +233,7 @@ public class ProjectServiceImpl implements ProjectService {
     for (Issue issue : issues) {
       issueEvidenceService.releaseAll(issue.getId());
       issueActivityRepository.deleteByIssueId(issue.getId());
-      issueWorkRepository.deleteByIssueId(issue.getId());
+      issueWorkQueue.delete(issue.getId());
       issueRunRepository.deleteByIssueId(issue.getId());
       issueStageBudgetRepository.deleteByIssueId(issue.getId());
       List<IssueAgentThread> bindings = issueAgentThreadRepository.listByIssueId(issue.getId());

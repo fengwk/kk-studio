@@ -3,8 +3,12 @@ package fun.fengwk.kkstudio.project;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.transaction.PlatformTransactionManager;
 
+import fun.fengwk.kkstudio.project.controller.IssueControllerDispatcher;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
+import fun.fengwk.kkstudio.work.DurableWorkQueue;
 
 /**
  * Project 模块的自动装配入口：把 Project 领域 Bean、领域编解码器与 Spring JDBC 持久化组件注册到宿主应用。
@@ -21,5 +25,13 @@ public class ProjectAutoConfiguration {
   @Bean
   public ProjectWorkflowJsonCodec projectWorkflowJsonCodec() {
     return new ProjectWorkflowJsonCodec();
+  }
+
+  /** Issue 调度邮箱：{@code durable_work} 中 target type 为 ISSUE 的行，Worker 领取后重新检查当前 Issue。 */
+  @Bean
+  public DurableWorkQueue issueWorkQueue(
+      JdbcClient jdbcClient, PlatformTransactionManager transactionManager) {
+    return new DurableWorkQueue(
+        jdbcClient, transactionManager, IssueControllerDispatcher.TARGET_TYPE);
   }
 }
