@@ -411,6 +411,62 @@ describe('Lsp Capabilities Group End-to-End', () => {
     })
   })
 
+  it('context signal aborted with TIMED_OUT returns Operation timed out and never reports cancelled', async () => {
+    const transcript = path.join(tempDir, 'timeout-cap-transcript.jsonl')
+    const config = createConfig(fakeDaemonLspConfig('java', 'slow-definition', transcript))
+    group = createLspCapabilities(config, supervisor)
+
+    const file = path.join(tempDir, 'App.java')
+    fs.writeFileSync(file, 'class App {}\n')
+
+    // 1. Pre-aborted with TIMED_OUT
+    const preTimeoutAc = new AbortController()
+    preTimeoutAc.abort('TIMED_OUT')
+
+    const preResult = await group.capabilities['lsp.goto-definition']!(
+      {
+        invocationId: 'call-pretimeout',
+        capabilityId: 'lsp.goto-definition',
+        arguments: { path: file, line: 1 },
+        timeoutMillis: 5000,
+      },
+      createContext(config, preTimeoutAc.signal),
+    )
+
+    expect(preResult.error).toBe(true)
+    expect(preResult.details).toEqual({})
+    expect(preResult.contents[0]).toEqual({
+      type: 'text',
+      text: 'Error: Operation timed out',
+    })
+
+    // 2. In-flight abort with TIMED_OUT
+    const inFlightAc = new AbortController()
+    const p = group.capabilities['lsp.goto-definition']!(
+      {
+        invocationId: 'call-inflight-timeout',
+        capabilityId: 'lsp.goto-definition',
+        arguments: { path: file, line: 1 },
+        timeoutMillis: 5000,
+      },
+      createContext(config, inFlightAc.signal),
+    )
+
+    await awaitEvent(
+      transcript,
+      (e) => e.event === 'recv' && e.message?.method === 'textDocument/definition',
+    )
+    inFlightAc.abort('TIMED_OUT')
+
+    const inFlightResult = await p
+    expect(inFlightResult.error).toBe(true)
+    expect(inFlightResult.details).toEqual({})
+    expect(inFlightResult.contents[0]).toEqual({
+      type: 'text',
+      text: 'Error: Operation timed out',
+    })
+  })
+
   it('rejects non-object arguments and unexpected errors across all capabilities', async () => {
     const config = createConfig(fakeDaemonLspConfig('java', 'normal', path.join(tempDir, 't.jsonl')))
     group = createLspCapabilities(config, supervisor)
@@ -511,6 +567,32 @@ describe('Lsp Capabilities Group End-to-End', () => {
     )
     expect(r7.error).toBe(true)
     expect((r7.contents[0] as any).text).toBe('Error: Operation cancelled')
+
+    const timeoutAc = new AbortController()
+    timeoutAc.abort('TIMED_OUT')
+    const r6Timeout = await wsSyms(
+      {
+        invocationId: 'c6-timeout',
+        capabilityId: 'lsp.workspace-symbols',
+        arguments: { path: file, query: 'A' },
+        timeoutMillis: 5000,
+      },
+      createContext(config, timeoutAc.signal),
+    )
+    expect(r6Timeout.error).toBe(true)
+    expect((r6Timeout.contents[0] as any).text).toBe('Error: Operation timed out')
+
+    const r7Timeout = await decompile(
+      {
+        invocationId: 'c7-timeout',
+        capabilityId: 'lsp.java-decompile',
+        arguments: { path: file, target: 'Test.class' },
+        timeoutMillis: 5000,
+      },
+      createContext(config, timeoutAc.signal),
+    )
+    expect(r7Timeout.error).toBe(true)
+    expect((r7Timeout.contents[0] as any).text).toBe('Error: Operation timed out')
 
     // In-flight abort during workspace-symbols and java-decompile
     const slowTranscript1 = path.join(tempDir, 'slow-abort-ws.jsonl')
@@ -633,7 +715,7 @@ describe('Lsp Capabilities Group End-to-End', () => {
       expect(service.activeClientCount()).toBe(0)
       const file = path.join(tempDir, 'App.java')
       fs.writeFileSync(file, 'class App {}\n')
-      await service.gotoDefinition(file, 1, 0, 5000)
+      await service.gotoDefinition(file, 1, 0)
       expect(service.activeClientCount()).toBe(1)
     } finally {
       await service.close()

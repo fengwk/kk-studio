@@ -336,7 +336,7 @@ export class LspClient {
     this.connection.listen()
   }
 
-  async initialize(timeoutMillis = 60_000, signal?: AbortSignal): Promise<void> {
+  async initialize(timeoutMillis = 180_000, signal?: AbortSignal): Promise<void> {
     const rootUri = pathToFileURL(this.root).href
     const initParams: Record<string, unknown> = {
       processId: this.managed.pid,
@@ -376,7 +376,7 @@ export class LspClient {
     try {
       const result = await this.sendRequest<{
         capabilities?: ServerCapabilities
-      }>('initialize', initParams, timeoutMillis, 'initialize', signal)
+      }>('initialize', initParams, 'initialize', { timeoutMillis, signal })
 
       this.capabilities = result?.capabilities ?? null
       const encoding = result?.capabilities?.positionEncoding
@@ -497,7 +497,6 @@ export class LspClient {
     filePath: string,
     line: number,
     character: number,
-    timeoutMillis: number,
     signal?: AbortSignal,
   ): Promise<string[]> {
     this.requireRunning()
@@ -518,9 +517,8 @@ export class LspClient {
         textDocument: { uri: document.uri },
         position: pos,
       },
-      timeoutMillis,
       'textDocument/definition',
-      signal,
+      { signal },
     )
     return this.formatLocations(result)
   }
@@ -528,7 +526,6 @@ export class LspClient {
   async workspaceSymbols(
     query: string,
     limit: number,
-    timeoutMillis: number,
     signal?: AbortSignal,
   ): Promise<string[]> {
     this.requireRunning()
@@ -538,14 +535,13 @@ export class LspClient {
     const result = await this.sendRequest<unknown[] | null | undefined>(
       'workspace/symbol',
       { query },
-      timeoutMillis,
       'workspace/symbol',
-      signal,
+      { signal },
     )
     return this.formatSymbols(result, limit)
   }
 
-  async javaDecompile(target: string, timeoutMillis: number, signal?: AbortSignal): Promise<string> {
+  async javaDecompile(target: string, signal?: AbortSignal): Promise<string> {
     this.requireRunning()
     const jdtMatch = target.match(JDT_URI_REGEX)
     if (jdtMatch) {
@@ -556,9 +552,8 @@ export class LspClient {
       const result = await this.sendRequest<string>(
         'java/classFileContents',
         { uri: uriMatch },
-        timeoutMillis,
         'java/classFileContents',
-        signal,
+        { signal },
       )
       return this.requireDecompiledSource(result, target)
     }
@@ -580,9 +575,8 @@ export class LspClient {
         command: 'java.decompile',
         arguments: [pathToFileURL(localPath).href],
       },
-      timeoutMillis,
       'java.decompile',
-      signal,
+      { signal },
     )
     return this.requireDecompiledSource(result, target)
   }
@@ -609,16 +603,23 @@ export class LspClient {
     try {
       if (!this.hasExited) {
         const shutdownGrace = Math.max(0, graceMillis)
-        try {
-          await this.sendRequest('shutdown', null, shutdownGrace, 'shutdown', undefined, false)
-        } catch {}
+        if (shutdownGrace > 0) {
+          try {
+            await this.sendRequest('shutdown', null, 'shutdown', {
+              timeoutMillis: shutdownGrace,
+              requireAlive: false,
+            })
+          } catch {}
+        }
         try {
           await this.connection.sendNotification('exit', {})
         } catch {}
 
-        const exitPromise = this.managed.exit
-        const timer = new Promise((resolve) => setTimeout(resolve, shutdownGrace))
-        await Promise.race([exitPromise, timer])
+        if (shutdownGrace > 0) {
+          const exitPromise = this.managed.exit
+          const timer = new Promise((resolve) => setTimeout(resolve, shutdownGrace))
+          await Promise.race([exitPromise, timer])
+        }
       }
     } finally {
       this.documents.clear()
@@ -673,41 +674,52 @@ export class LspClient {
   private async sendRequest<T>(
     method: string,
     params: unknown,
-    timeoutMillis: number,
     description: string,
-    signal?: AbortSignal,
-    requireAlive = true,
+    options: {
+      signal?: AbortSignal
+      timeoutMillis?: number
+      requireAlive?: boolean
+    } = {},
   ): Promise<T> {
+    const requireAlive = options.requireAlive ?? true
     if (requireAlive) {
       this.requireRunning()
     }
     const cts = new CancellationTokenSource()
 
     let timer: NodeJS.Timeout | null = null
+    let timeoutPromise: Promise<never> | null = null
+    const timeoutMillis = options.timeoutMillis
+    if (timeoutMillis !== undefined && timeoutMillis > 0) {
+      timeoutPromise = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          cts.cancel()
+          reject(new LspError(`LSP request timed out after ${timeoutMillis}ms (${description}).`))
+        }, timeoutMillis)
+      })
+    }
+
+    const signal = options.signal
     let onAbort: (() => void) | null = null
 
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => {
-        cts.cancel()
-        reject(new LspError(`LSP request timed out after ${timeoutMillis}ms (${description}).`))
-      }, timeoutMillis)
-    })
-
     const abortPromise = new Promise<never>((_, reject) => {
-      if (signal?.aborted) {
+      const handleAbort = (): void => {
         cts.cancel()
-        const err = new Error('Operation cancelled')
-        err.name = 'AbortError'
-        reject(err)
-        return
-      }
-      if (signal) {
-        onAbort = () => {
-          cts.cancel()
+        if (signal?.reason === 'TIMED_OUT') {
+          reject(new LspError(`LSP request timed out (${description}).`))
+        } else {
           const err = new Error('Operation cancelled')
           err.name = 'AbortError'
           reject(err)
         }
+      }
+
+      if (signal?.aborted) {
+        handleAbort()
+        return
+      }
+      if (signal) {
+        onAbort = handleAbort
         signal.addEventListener('abort', onAbort, { once: true })
       }
     })
@@ -723,13 +735,16 @@ export class LspClient {
     void exitPromise.catch(() => {})
 
     try {
-      const result = await Promise.race([
+      const races: Promise<unknown>[] = [
         this.connection.sendRequest(method, params, cts.token) as Promise<T>,
-        timeoutPromise,
         abortPromise,
         exitPromise,
         this.transportFailurePromise,
-      ])
+      ]
+      if (timeoutPromise) {
+        races.push(timeoutPromise)
+      }
+      const result = (await Promise.race(races)) as T
       if (requireAlive) {
         this.requireRunning()
       }

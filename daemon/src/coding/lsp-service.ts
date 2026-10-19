@@ -23,12 +23,11 @@ export class LspService {
     file: string,
     line: number,
     character: number,
-    timeoutMillis: number,
     signal?: AbortSignal,
   ): Promise<string> {
     const entry = await this.pool.lease(file, signal)
     try {
-      const locations = await entry.client.definition(file, line, character, timeoutMillis, signal)
+      const locations = await entry.client.definition(file, line, character, signal)
       return locations.join('\n')
     } finally {
       this.pool.release(entry)
@@ -39,12 +38,11 @@ export class LspService {
     file: string,
     query: string,
     limit: number,
-    timeoutMillis: number,
     signal?: AbortSignal,
   ): Promise<string> {
     const entry = await this.pool.lease(file, signal)
     try {
-      const symbols = await entry.client.workspaceSymbols(query, limit, timeoutMillis, signal)
+      const symbols = await entry.client.workspaceSymbols(query, limit, signal)
       return symbols.join('\n')
     } finally {
       this.pool.release(entry)
@@ -54,12 +52,11 @@ export class LspService {
   async javaDecompile(
     file: string,
     target: string,
-    timeoutMillis: number,
     signal?: AbortSignal,
   ): Promise<string> {
     const entry = await this.pool.lease(file, signal)
     try {
-      return await entry.client.javaDecompile(target, timeoutMillis, signal)
+      return await entry.client.javaDecompile(target, signal)
     } finally {
       this.pool.release(entry)
     }
