@@ -541,13 +541,67 @@ seedance_node = create_and_run(
 assert len(seedance_node["resources"]) == 1
 assert seedance_node["resources"][0]["kind"] == "VIDEO"
 
-# Offline Chat smoke: dev seed default-assistant -> stub/acceptance-stub, with the
-# stub provider endpoint resolving to the in-stack http-mock SSE stub.
-providers = json_call("GET", "/api/ai/catalog/providers?pageNumber=1&pageSize=50")
-stub = next(item for item in providers["results"] if item["name"] == "stub")
-assert stub["providerType"] == "openai", stub
-assert stub["baseUrl"] == "http://stub.local:8080/v1", stub
+# Offline Chat smoke: the stack starts with an empty catalog, so the smoke creates a
+# stub provider/model/agent through the catalog API. The provider endpoint resolves
+# to the in-stack http-mock SSE stub.
+stub = json_call(
+    "POST",
+    "/api/ai/catalog/providers",
+    {
+        "name": "stub",
+        "description": "offline smoke stub",
+        "providerType": "openai",
+        "baseUrl": "http://stub.local:8080/v1",
+        "credential": "stub-key",
+        "modelCallTimeoutMillis": 1_800_000,
+        "modelCallIdleTimeoutMillis": 120_000,
+    },
+)
 assert stub["configured"] is True, stub
+zero = {
+    "inputPerMillionTokens": 0,
+    "outputPerMillionTokens": 0,
+    "cacheReadPerMillionTokens": 0,
+    "cacheWritePerMillionTokens": 0,
+    "cacheWriteLongPerMillionTokens": 0,
+    "reasoningPerMillionTokens": 0,
+}
+json_call(
+    "POST",
+    "/api/ai/catalog/models",
+    {
+        "providerName": "stub",
+        "name": "acceptance-stub",
+        "modelId": "acceptance-stub",
+        "description": "offline smoke stub model",
+        "config": {
+            "limit": {"context": 128000, "output": 4096},
+            "abilities": {"tools": True, "reasoning": False, "inputModalities": ["TEXT"]},
+            "pricing": {
+                "currency": "USD",
+                "pricingTier": "default",
+                "serviceTier": "default",
+                "serviceTierMultiplier": 1,
+                "version": "v1",
+                **zero,
+            },
+            "defaultVariant": "default",
+            "variants": [{"id": "default"}],
+        },
+    },
+)
+json_call(
+    "POST",
+    "/api/ai/catalog/agents",
+    {
+        "name": "default-assistant",
+        "description": "offline smoke stub agent",
+        "systemPrompt": "You are the offline smoke assistant.",
+        "model": "stub/acceptance-stub",
+        "variant": "default",
+        "config": {"tools": [], "skills": [], "subagents": []},
+    },
+)
 
 chat = json_call(
     "POST",

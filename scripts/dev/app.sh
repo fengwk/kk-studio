@@ -242,7 +242,7 @@ Environment:
   BACKEND_PORT=18080
   FRONTEND_HOST=127.0.0.1
   FRONTEND_PORT=5173
-  SPRING_PROFILES_ACTIVE=e2e   # 默认 e2e（真实 Provider seed）；dev 为 stub seed
+  SPRING_PROFILES_ACTIVE=e2e   # 默认 e2e（真实 Provider seed）；dev 从空库开始（首次引导）
   SHARED_PREVIEW_ENV_FILE=/absolute/path/to/shared-preview.env
   # 只有显式给出时才按字面量解析 KEY=VALUE 外部数据面配置（owner-only、无 group/other 权限位、
   # 非符号链接）；未给出时脚本只按下面的默认值启动本机服务，不读取任何外部配置文件。

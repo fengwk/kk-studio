@@ -51,14 +51,15 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
   }
 
   @Test
-  void devSeedIsIdempotentAndStable() throws Exception {
-    applyAndAssertDevSeed();
+  void fixtureSeedIsIdempotentAndStable() throws Exception {
+    applyAndAssertFixtureSeed();
     // 快照确定性列。
-    String devFingerprintBefore = devSeedFingerprint();
+    String fixtureFingerprintBefore = fixtureSeedFingerprint();
     long maxVersionBefore = maxVersionAcrossAgentTables();
     // 重新执行：行内容必须保持一致（无版本变化、无时间戳变化）。
-    applyAndAssertDevSeed();
-    assertEquals(devFingerprintBefore, devSeedFingerprint(), "dev seed must be idempotent");
+    applyAndAssertFixtureSeed();
+    assertEquals(
+        fixtureFingerprintBefore, fixtureSeedFingerprint(), "fixture seed must be idempotent");
     assertEquals(maxVersionBefore, maxVersionAcrossAgentTables(), "version must stay 0");
   }
 
@@ -243,7 +244,6 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
       assertEquals(900L, settings.storageMedia().uploadExpiresSeconds());
       assertEquals(SystemSettings.Network.DEFAULT, settings.network());
       assertRepeatableMigrationRecorded(conn, "canvas test seed");
-      assertRepeatableMigrationRecorded(conn, "dev seed");
 
       // 重新执行 canvas-test 迁移，断言 repeatable migration 二次运行幂等且设置保持正确。
       applyCanvasTestDatabase(conn);
@@ -260,21 +260,21 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
   /** 验证从空库执行 Flyway bootstrap 时，各 profile 应用唯一 baseline 与对应 repeatable seeds。 */
   @Test
   void cleanSlateBootstrapAcrossAllProfiles() throws Exception {
-    // 1. 空库 bootstrap dev profile
+    // 1. 空库 bootstrap 测试 fixture
     try (Connection conn = newConnection()) {
       resetDatabase(conn);
-      applyDevDatabase(conn);
+      applyFixtureDatabase(conn);
       assertSingleLong(
           conn,
           "select count(*) from flyway_schema_history where version = '1' and success = true",
           1L);
-      assertRepeatableMigrationRecorded(conn, "dev seed");
+      assertRepeatableMigrationRecorded(conn, "fixture seed");
       assertSingleString(
           conn,
           "select string_agg(version, ',' order by installed_rank)"
               + " from flyway_schema_history where version is not null",
           VERSIONED_MIGRATIONS);
-      assertDevSeedPresent(conn);
+      assertFixtureSeedPresent(conn);
     }
 
     // 2. 空库 bootstrap e2e profile
@@ -294,7 +294,7 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
       assertE2eSeedContent(conn);
     }
 
-    // 3. 空库 bootstrap canvas-test profile (dev seed + canvas-test seed)
+    // 3. 空库 bootstrap canvas-test profile：只有 canvas-test 设置，不预置任何 Catalog
     try (Connection conn = newConnection()) {
       resetDatabase(conn);
       applyCanvasTestDatabase(conn);
@@ -303,13 +303,12 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
           "select count(*) from flyway_schema_history where version = '1' and success = true",
           1L);
       assertRepeatableMigrationRecorded(conn, "canvas test seed");
-      assertRepeatableMigrationRecorded(conn, "dev seed");
       assertSingleString(
           conn,
           "select string_agg(version, ',' order by installed_rank)"
               + " from flyway_schema_history where version is not null",
           VERSIONED_MIGRATIONS);
-      assertDevSeedPresent(conn);
+      assertSingleLong(conn, "select count(*) from agent_provider", 0L);
       assertSingleLong(conn, "select count(*) from system_setting where id = 1", 1L);
     }
   }
@@ -326,10 +325,10 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
       Path seedDir = Files.createDirectories(tempDir.resolve("seed"));
 
       String v1Content = readResource("db/migration/V1__schema.sql");
-      String rDevContent = readResource("db/seed/dev/R__dev_seed.sql");
+      String rDevContent = readResource("db/seed/fixture/R__fixture_seed.sql");
 
       Path v1File = migrationDir.resolve("V1__schema.sql");
-      Path rDevFile = seedDir.resolve("R__dev_seed.sql");
+      Path rDevFile = seedDir.resolve("R__fixture_seed.sql");
       Files.writeString(v1File, v1Content, StandardCharsets.UTF_8);
       Files.writeString(rDevFile, rDevContent, StandardCharsets.UTF_8);
 
@@ -339,7 +338,7 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
       try (Connection conn = newConnection()) {
         resetDatabase(conn);
 
-        // 1. 首次 migrate：应用唯一 V1 baseline 与初始 R__dev_seed
+        // 1. 首次 migrate：应用唯一 V1 baseline 与初始 R__fixture_seed
         migrate(conn, migrationLoc, seedLoc);
         assertSingleLong(
             conn,
@@ -348,9 +347,9 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
         assertSingleLong(
             conn,
             "select count(*) from flyway_schema_history where version is null and description ="
-                + " 'dev seed' and success = true",
+                + " 'fixture seed' and success = true",
             1L);
-        assertDevSeedPresent(conn);
+        assertFixtureSeedPresent(conn);
 
         // 2. 人为篡改 seed-owned 数据：修改属性并插入陈旧/多余行
         try (Statement st = conn.createStatement()) {
@@ -371,7 +370,7 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
             1L);
         assertSingleLong(conn, "select count(*) from agent_model where provider_name = 'stub'", 2L);
 
-        // 3. 修改 R__dev_seed.sql 内容，触发 checksum 变化
+        // 3. 修改 R__fixture_seed.sql 内容，触发 checksum 变化
         String updatedRDevContent =
             rDevContent + "\n-- modified checksum for repeatable migration replay verification\n";
         Files.writeString(rDevFile, updatedRDevContent, StandardCharsets.UTF_8);
@@ -379,15 +378,15 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
         // 4. 再次执行 migrate：Flyway 必须识别 checksum 变化并重跑 repeatable seed
         migrate(conn, migrationLoc, seedLoc);
 
-        // 5. 断言产生了第二次 repeatable dev seed 执行记录
+        // 5. 断言产生了第二次 repeatable fixture seed 执行记录
         assertSingleLong(
             conn,
             "select count(*) from flyway_schema_history where version is null and description ="
-                + " 'dev seed' and success = true",
+                + " 'fixture seed' and success = true",
             2L);
 
         // 6. 断言 seed 数据被确定性收敛恢复：tampered 属性恢复，多余的 extraneous model 被清除
-        assertDevSeedPresent(conn);
+        assertFixtureSeedPresent(conn);
         assertSingleLong(conn, "select count(*) from agent_model where provider_name = 'stub'", 1L);
       }
     } finally {
@@ -417,15 +416,15 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
     }
   }
 
-  private static void applyAndAssertDevSeed() throws Exception {
+  private static void applyAndAssertFixtureSeed() throws Exception {
     try (Connection conn = newConnection()) {
-      applyDevDatabase(conn);
-      assertDevSeedPresent(conn);
-      assertRepeatableMigrationRecorded(conn, "dev seed");
+      applyFixtureDatabase(conn);
+      assertFixtureSeedPresent(conn);
+      assertRepeatableMigrationRecorded(conn, "fixture seed");
     }
   }
 
-  private static void assertDevSeedPresent(Connection conn) throws Exception {
+  private static void assertFixtureSeedPresent(Connection conn) throws Exception {
     try (Statement st = conn.createStatement();
         ResultSet rs = st.executeQuery("select count(*) from agent_provider where name = 'stub'")) {
       assertTrue(rs.next());
@@ -526,8 +525,8 @@ class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
     }
   }
 
-  private static String devSeedFingerprint() throws Exception {
-    // 把 dev seed 拥有的所有行的确定性列值拼接在一起。
+  private static String fixtureSeedFingerprint() throws Exception {
+    // 把 fixture seed 拥有的所有行的确定性列值拼接在一起。
     StringBuilder sb = new StringBuilder();
     try (Connection conn = newConnection();
         Statement st = conn.createStatement()) {

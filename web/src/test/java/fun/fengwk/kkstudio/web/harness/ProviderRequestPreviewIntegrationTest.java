@@ -747,10 +747,10 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
     providerServer.start();
   }
 
-  /** 真实 provider 连接配置：把 dev seed 的 stub provider 指到本地 deterministic SSE 服务。 */
+  /** 真实 provider 连接配置：把 fixture seed 的 stub provider 指到本地 deterministic SSE 服务。 */
   private void pointStubProviderAtLocalServer() {
     AgentProvider provider = agentProviderRepository.getByName("stub");
-    assertNotNull(provider, "dev seed 必须提供 stub provider");
+    assertNotNull(provider, "fixture seed 必须提供 stub provider");
     AgentProviderUpdateDTO update = new AgentProviderUpdateDTO();
     update.setProviderType("openai");
     update.setBaseUrl(providerBaseUrl());

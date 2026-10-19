@@ -38,10 +38,8 @@ docker compose -f deploy/local/compose.yaml up -d --build --wait
 curl -fsS http://127.0.0.1:8080/actuator/health
 ```
 
-浏览器访问 <http://localhost:8080/>。`dev` profile 预置 `stub` Provider、
-`acceptance-stub` Model 和 `default-assistant` Agent，作为 Catalog 结构示例；本地栈不含
-`stub.local` 模型服务，直接用该 Agent 发消息会连接失败，需要先在
-<http://localhost:8080/providers> 接入自己的 Provider。
+浏览器访问 <http://localhost:8080/>。新库没有 Provider、模型或 Agent，首页会引导依次
+接入自己的 Provider、添加模型、创建 Agent，然后开始对话。
 
 查看状态与日志：
 
@@ -97,9 +95,8 @@ docker compose -f deploy/local/compose.yaml logs -f minio
 ## 数据与 Flyway
 
 PostgreSQL 是唯一 durable 数据库。空库由 `app` 在 `dev` profile 下用 Flyway 执行
-[V1__schema.sql](../../schema/src/main/resources/db/migration/V1__schema.sql) 和
-[R__dev_seed.sql](../../schema/src/main/resources/db/seed/dev/R__dev_seed.sql)，已执行版本
-记录在 `flyway_schema_history`。Compose 卷键为 `kk-studio-postgres` 与 `kk-studio-minio`；
+[V1__schema.sql](../../schema/src/main/resources/db/migration/V1__schema.sql)，不预置
+Provider、模型或 Agent，首次打开 Studio 时按引导添加。已执行版本记录在 `flyway_schema_history`。Compose 卷键为 `kk-studio-postgres` 与 `kk-studio-minio`；
 默认 project `kk-studio-local` 下的 Docker 卷名分别为
 `kk-studio-local_kk-studio-postgres` 与 `kk-studio-local_kk-studio-minio`。
 普通启动与 `down` 都保留已有卷；启动不会重建健康的 PostgreSQL 或清空 S3 对象。
