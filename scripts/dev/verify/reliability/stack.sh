@@ -169,7 +169,7 @@ up_stack() {
   BACKEND_URL="$APP_URL" \
     TEST_MINIMAX_API_KEY="${TEST_MINIMAX_API_KEY-}" \
     TEST_MINIMAX_BASE_URL="${TEST_MINIMAX_BASE_URL-}" \
-    python3 "$REPO_ROOT/scripts/dev/verify/reliability/sync_minimax_credentials.py" \
+    node "$REPO_ROOT/scripts/dev/verify/reliability/sync-minimax-credentials.mjs" \
       --backend-url "$APP_URL"
 }
 
