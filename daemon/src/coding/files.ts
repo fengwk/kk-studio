@@ -83,6 +83,7 @@ const readExecutor: CapabilityExecutor = async (call, context) => {
     const offset = optionalPositiveInt(args, 'offset', 1, MAX_OFFSET)
     const limit = optionalPositiveInt(args, 'limit', DEFAULT_READ_LIMIT, MAX_READ_LIMIT)
     const columnOffset = optionalPositiveIntOrNull(args, 'column_offset')
+    requireActive(context)
     const path = await resolveExistingPath(rawPath)
     const display = displayPath(path, rawPath)
     // 读取受控临时产物期间持有 in-use lease，防止定时清扫删除在途读取的 workspace。
@@ -108,8 +109,11 @@ async function readExisting(
   columnOffset: number | null,
 ): Promise<CapabilityResult> {
   const info = await statOrNull(path)
+  requireActive(context)
   if (info !== null && info.isDirectory()) {
-    return directoryResponse(call.invocationId, path, display, offset, limit)
+    const result = await directoryResponse(call.invocationId, path, display, offset, limit)
+    requireActive(context)
+    return result
   }
   if (info === null || !info.isFile()) {
     // 字符设备、FIFO、socket、块设备等非普通节点必须在任何 I/O 之前拒绝。
@@ -119,6 +123,7 @@ async function readExisting(
   const imageMime = detectImageMediaType(probeBytes)
   if (imageMime !== null) {
     const bytes = await readAllBytes(path)
+    requireActive(context)
     return {
       callId: call.invocationId,
       error: false,
@@ -130,11 +135,6 @@ async function readExisting(
   if (looksBinary(probeBytes, encoding)) {
     throw new ToolRunFailureError('file appears to be binary', 'CODEC')
   }
-  const checkpoint = (): void => {
-    if (context.signal.aborted) {
-      throw new CancelledError()
-    }
-  }
   const text = await readTextWindow(
     path,
     encoding,
@@ -143,7 +143,7 @@ async function readExisting(
     columnOffset,
     display,
     lspStatus(path),
-    checkpoint,
+    () => requireActive(context),
   )
   return textResult(call.invocationId, text)
 }
@@ -240,7 +240,7 @@ const writeExecutor: CapabilityExecutor = async (call, context) => {
 
     const release = await acquireFileLock(path)
     try {
-      requireNotCancelled(context)
+      requireActive(context)
       const existed = await pathExists(path)
       let charset: 'UTF-8' | 'UTF-16LE' | 'UTF-16BE' = 'UTF-8'
       let bomLength = 0
@@ -261,7 +261,7 @@ const writeExecutor: CapabilityExecutor = async (call, context) => {
       }
 
       const encoded = encodeText(content, charset, bomLength)
-      requireNotCancelled(context)
+      requireActive(context)
       await commitTextFile(path, encoded)
       fileHooks.fileChanged?.(path)
       return textResult(
@@ -314,7 +314,7 @@ async function editFile(
 
     const release = await acquireFileLock(path)
     try {
-      requireNotCancelled(context)
+      requireActive(context)
       const originalBytes = await readAllBytes(path)
       const sha256 = createHash('sha256').update(originalBytes).digest('hex')
       if (
@@ -385,7 +385,7 @@ async function editFile(
           'Complete edit diff exceeds the review transport limit; split this edit into smaller changes.',
         )
       }
-      requireNotCancelled(context)
+      requireActive(context)
       if (preview) {
         return {
           callId: call.invocationId,
@@ -419,8 +419,11 @@ async function statOrNull(path: string): Promise<Awaited<ReturnType<typeof stat>
   }
 }
 
-function requireNotCancelled(context: CapabilityContext): void {
+function requireActive(context: CapabilityContext): void {
   if (context.signal.aborted) {
+    if (context.signal.reason === 'TIMED_OUT') {
+      throw new ToolRunFailureError('Operation timed out', 'TIMEOUT')
+    }
     throw new CancelledError()
   }
 }

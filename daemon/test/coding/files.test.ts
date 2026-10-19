@@ -21,6 +21,34 @@ const read = fileCapabilities['fs.read']!
 const write = fileCapabilities['fs.write']!
 const edit = fileCapabilities['fs.edit']!
 
+// 到期与用户取消是不同事实；停止后的写入/编辑也不能绕过提交前检查。
+describe('file capability stop reason', () => {
+  it.each(['fs.read', 'fs.write', 'fs.edit', 'fs.edit.preview'])(
+    '%s keeps TIMED_OUT distinct from caller cancellation',
+    async (capabilityId) => {
+      const dir = await tempDir()
+      const file = join(dir, 'stopped.txt')
+      await writeFile(file, 'before\n')
+      const controller = new AbortController()
+      controller.abort('TIMED_OUT')
+      const args = capabilityId === 'fs.read'
+        ? { path: file }
+        : capabilityId === 'fs.write'
+          ? { path: file, content: 'after\n' }
+          : { path: file, old_string: 'before', new_string: 'after' }
+      const result = await callCapability(
+        fileCapabilities[capabilityId]!, capabilityId, args,
+        makeContext(dir, { signal: controller.signal }),
+      )
+      expect(result.error).toBe(true)
+      expect(result.details.code).toBe('TIMEOUT')
+      expect(textOf(result)).toContain('Operation timed out')
+      expect(textOf(result)).not.toContain('Operation cancelled')
+      expect(await readFile(file, 'utf8')).toBe('before\n')
+    },
+  )
+})
+
 describe('fs.read', () => {
   it('渲染有界窗口 header、offset 行号与 ends_with_newline', async () => {
     const dir = await tempDir()
