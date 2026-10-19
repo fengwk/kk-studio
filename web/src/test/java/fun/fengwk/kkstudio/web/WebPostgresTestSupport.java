@@ -6,24 +6,17 @@ import org.postgresql.Driver;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.datasource.SimpleDriverDataSource;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
-import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionDispatcher;
-import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;
-import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
-import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogFingerprint;
-import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogManifest;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRuntime;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogSnapshot;
-import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRepository;
-import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRow;
 
 import javax.sql.DataSource;
 
@@ -32,10 +25,6 @@ import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -45,26 +34,21 @@ import java.util.UUID;
  * 与 dev seed 迁移，保证任何 Spring 上下文创建前 {@code system_setting} 等表与默认行已经存在 （SystemSettingsSnapshot
  * 在上下文启动时读取权威配置）。
  *
- * <p>共享库的状态边界有两处，二者共同保证「一个 Context 只看见自己的目录」：
+ * <p>共享库的状态边界有两处，二者共同保证「一个 Context 只看见自己的插件配置」：
  *
  * <ul>
- *   <li>{@link #overrideDataSource} 在每次新 Context 构造前重置到 V1 baseline，因此任何新 Context 的真实启动都走「未初始化形态 →
- *       按自身安装定义与内置贡献初始化 epoch 1」，绝不会恢复上一个 Context 遗留的 manifest（也不会因目录不同而指纹不符）。
- *   <li>{@link #resetAndApplySchema} 在每次测试方法前重置后，立即用本 Context 已冻结的 {@link PluginCatalogSnapshot}
- *       身份（revision、值、 认证代际、上下文指纹、能力指纹）按真实 {@link PluginConfigurationRepository} 的唯一 CAS
- *       入口原样落库，使缓存复用的 Context 与库内权威 catalog 同身份；这里不重新 configure、不猜测默认值、不做生产侧兜底。
+ *   <li>{@link #overrideDataSource} 在每次新 Context 构造前重置到 baseline，因此任何新 Context 启动时都按自身安装定义写入默认配置。
+ *   <li>{@link #resetAndApplySchema} 在每次测试方法前重置后，按本 Context 当前 {@link PluginCatalogSnapshot}
+ *       的修订与值原样写回 {@code plugin_configuration}，使缓存复用的 Context 与库内配置一致；这里不重新 configure。
  * </ul>
  *
- * <p>需要独立目录的 Runner 测试用 {@link #createIsolatedDatabase()} 在同一个物理容器上取自己的数据库，绝不与共享 web 库共享权威 catalog。
+ * <p>需要独立配置的 Runner 测试用 {@link #createIsolatedDatabase()} 在同一个物理容器上取自己的数据库。
  */
 @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT, classes = WebTestApplication.class)
 public abstract class WebPostgresTestSupport {
 
   private static final String FLYWAY_DISABLED = "false";
   private static final String WORKERS_DISABLED = "false";
-
-  /** V1 唯一未初始化形态的 epoch；baseline 重置后必须以该版本做 CAS 初始化。 */
-  private static final long UNINITIALIZED_EPOCH = 0L;
 
   @MockitoBean private CanvasFunctionDispatcher canvasFunctionDispatcher;
 
@@ -99,16 +83,11 @@ public abstract class WebPostgresTestSupport {
 
   @Autowired private PluginCatalogRuntime baselineRuntime;
 
-  @Autowired private StudioPluginRegistry baselineRegistry;
-
-  @Autowired private PluginConfigurationRepository baselineRepository;
-
-  @Autowired private PlatformTransactionManager baselineTransactionManager;
+  @Autowired private JdbcClient baselineJdbc;
 
   @DynamicPropertySource
   static void overrideDataSource(DynamicPropertyRegistry registry) {
-    // 新 Context 构造前先回到 V1 baseline：Boot 期间的真实 PluginCatalogBootstrap 必须按本 Context 的安装定义初始化，
-    // 而不是恢复上一个测试类遗留的目录。
+    // 新 Context 构造前先回到 baseline：启动时按本 Context 的安装定义写入默认配置，而不是沿用上一个测试类的配置。
     try (Connection conn = newConnection()) {
       resetAndMigrateDevDatabase(conn);
     } catch (SQLException error) {
@@ -128,13 +107,12 @@ public abstract class WebPostgresTestSupport {
       resetAndMigrateDevDatabase(conn);
       verifyDevSeed(conn);
     }
-    persistBaselineCatalog();
+    persistBaselineConfigurations();
   }
 
   /**
-   * 同物理容器上的独立数据库：全新 UUID 库 + baseline/dev seed，供不加载 Web 上下文的 Runner 测试取得自己的 {@link DataSource}。
-   *
-   * <p>同一个物理容器不等于同一个目录：该库与共享 web 库互不可见，因此 Runner 测试的初始化、提交与恢复都不会污染真正的 web 启动链路。
+   * 同物理容器上的独立数据库：全新 UUID 库 + baseline/dev seed，供不加载 Web 上下文的 Runner 测试取得自己的 {@link
+   * DataSource}；该库与共享 web 库互不可见。
    */
   public static DataSource createIsolatedDatabase() {
     String database = "kk_studio_web_isolated_" + UUID.randomUUID().toString().replace("-", "");
@@ -159,60 +137,19 @@ public abstract class WebPostgresTestSupport {
     return dataSource;
   }
 
-  /** 与本 Context 冻结快照同身份的权威 catalog：身份字段全部来自一次 current 租用的 live 快照，绝不重新 configure 或采用默认值。 */
-  private void persistBaselineCatalog() {
-    try (PluginCatalogRuntime.Lease lease = baselineRuntime.acquireCurrent()) {
-      PluginCatalogSnapshot snapshot = lease.snapshot();
-      Map<String, PluginCatalogManifest.Entry> entries = new LinkedHashMap<>();
-      List<PluginConfigurationRow> rows = new ArrayList<>();
-      for (PluginCatalogSnapshot.ConfiguredPlugin configured : snapshot.configuredPlugins()) {
-        String pluginId = configured.descriptor().pluginId();
-        StudioPlugin plugin =
-            baselineRegistry
-                .find(pluginId)
-                .orElseThrow(
-                    () ->
-                        new IllegalStateException("baseline plugin is not installed: " + pluginId));
-        String schemaFingerprint =
-            PluginCatalogFingerprint.schema(
-                plugin.configurationSchema(), plugin.authenticationSpec());
-        String capabilityFingerprint = snapshot.capabilityFingerprints().get(pluginId);
-        UUID authGeneration = configured.credentialReference().authGeneration();
-        String contextFingerprint = configured.credentialReference().contextFingerprint();
-        long revision = configured.config().revision();
-        String valuesJson = configured.config().valuesJson();
-        entries.put(
-            pluginId,
-            new PluginCatalogManifest.Entry(
-                revision,
-                configured.descriptor().version(),
-                schemaFingerprint,
-                capabilityFingerprint,
-                authGeneration,
-                contextFingerprint));
-        rows.add(
-            new PluginConfigurationRow(
-                pluginId,
-                revision,
-                configured.descriptor().version(),
-                schemaFingerprint,
-                capabilityFingerprint,
-                authGeneration,
-                contextFingerprint,
-                List.of(),
-                valuesJson));
-      }
-      PluginCatalogManifest manifest =
-          new PluginCatalogManifest(entries, snapshot.catalogFingerprint());
-      long expectedEpoch = snapshot.epoch() - 1;
-      if (expectedEpoch < UNINITIALIZED_EPOCH) {
-        throw new IllegalStateException("baseline snapshot must be an initialized epoch");
-      }
-      Boolean committed =
-          new TransactionTemplate(baselineTransactionManager)
-              .execute(status -> baselineRepository.commit(expectedEpoch, rows, manifest));
-      if (!Boolean.TRUE.equals(committed)) {
-        throw new IllegalStateException("baseline catalog initialization must win the epoch CAS");
+  /** 按本 Context 当前快照的修订与值写回插件配置，使库内配置与运行期快照一致。 */
+  private void persistBaselineConfigurations() {
+    try (PluginCatalogRuntime.Lease lease = baselineRuntime.acquire()) {
+      for (PluginCatalogSnapshot.ConfiguredPlugin configured :
+          lease.snapshot().configuredPlugins()) {
+        baselineJdbc
+            .sql(
+                "insert into plugin_configuration (plugin_id, revision, values_json)"
+                    + " values (:pluginId, :revision, :valuesJson)")
+            .param("pluginId", configured.descriptor().pluginId())
+            .param("revision", configured.config().revision())
+            .param("valuesJson", configured.config().valuesJson())
+            .update();
       }
     }
   }
