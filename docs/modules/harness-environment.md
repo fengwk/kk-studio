@@ -92,7 +92,10 @@ default void terminate(EnvironmentCapabilityTerminationCause cause) { cancel(); 
 default Duration terminationGrace() { return Duration.ZERO; }
 ```
 
-`cancel()` 是无条件取消，`isCancelled()` 是「已被请求终止」的协作式中断信号。需要区分原因的宿主能力覆盖 `terminate`，按 [`EnvironmentCapabilityTerminationCause`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityTerminationCause.java) 的 `TIMED_OUT`/`CANCELLED` 产出与原因一致的收尾事实，因此超时不会被报告成调用方取消。Runtime 单一 invoke timer 在超时或取消时仅请求停止，不提前抢占终态；能力实现通过 `terminate` 在 cleanup 后交付真实结果，见 [Daemon 的超时与取消收尾](daemon.md#能力装配与运行时调度)。
+`cancel()` 请求取消，`isCancelled()` 表示已收到停止请求，不证明远端执行已经结束。
+`terminate` 与 `terminationGrace` 是 JVM 宿主句柄的可选收尾约定，不控制 TypeScript Daemon 的计时器。
+Daemon Runtime 的唯一 invoke timer 通过 `context.signal` 区分 `TIMED_OUT` 与 `CANCELLED`；
+执行器完成清理后交付真实结果，Runtime 不提前抢占终态，见 [Daemon 的超时与取消收尾](daemon.md#能力装配与运行时调度)。
 
 能力结果 [`EnvironmentCapabilityResult`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityResult.java) 是 `callId` 加 `contents`（至多 64 项）、`error` 与 `detailsJson`（至多 1 MiB UTF-8）。错误结果可以只带文本，也可以带稳定错误码：[`EnvironmentCapabilityResultCodes`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityResultCodes.java) 只冻结码的语法 `[A-Z][A-Z0-9_]*`（至多 64 字符），当前没有预置码常量。
 

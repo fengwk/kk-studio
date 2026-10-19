@@ -73,7 +73,7 @@ worker 在目录、行与 8KiB 数据块等检查点通过共享原子 flag 协�
 并在结果中显式体现 error 与 `search.incomplete`，决不谎报无匹配或完全成功。
 遇到非响应 stop 时，提供 5 秒清理宽限才 await terminate（非额外更短执行预算），清理失败明确暴露。
 `test/coding/search.test.ts` 验证上下文取消信号被映射为 `CANCELLED`，
-`test/coding/search-core.test.ts` 验证 `SearchControl` 超时保留 partial 结果并抛出稳定错误。
+`test/coding/search-core.test.ts` 通过可控检查点触发停止，验证 find/grep 保留已有匹配，并明确标记结果不完整。
 取消不能被误报成超时，已取消调用也不能继续遍历。
 
 capability 注册与结果协议由 [`harness/environment`](../../harness/environment) 与 Daemon Runtime 负责，
