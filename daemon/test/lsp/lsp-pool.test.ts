@@ -4,6 +4,7 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { LspClientPool, poolKey } from '../../src/coding/lsp-pool.js'
 import { LspDiscovery } from '../../src/coding/lsp-discovery.js'
+import { LspTimeoutError } from '../../src/coding/lsp-error.js'
 import type { ManagedProcess, ProcessSpec, ProcessSupervisor } from '../../src/contracts.js'
 import {
   awaitEvent,
@@ -275,11 +276,16 @@ describe('LspClientPool Concurrency & Lifecycle', () => {
     )
   })
 
+  it('defaults initializeTimeout to 180000ms', () => {
+    const pool = new LspClientPool(LspDiscovery.of([]), supervisor)
+    expect((pool as any).initializeTimeout).toBe(180_000)
+  })
+
   it('cancels a lease awaiting initialize when the caller aborts, then cleans up the late boot', async () => {
     const transcript = path.join(tempDir, 'abort-init-transcript.jsonl')
     const server = fakeServerConfig('java', 'slow-init', transcript)
     const pool = new LspClientPool(LspDiscovery.of([server]), supervisor, {
-      initializeTimeout: 60_000,
+      initializeTimeout: 180_000,
       shutdownGrace: 300,
     })
     pools.push(pool)
@@ -298,6 +304,158 @@ describe('LspClientPool Concurrency & Lifecycle', () => {
     expect(Date.now() - startedAt).toBeLessThan(2000)
     expect(pool.activeCount()).toBe(0)
     await awaitProcessGone(pid)
+  })
+
+  it('preserves other waiters when one waiter aborts or times out during boot without waiting for boot', async () => {
+    const transcript = path.join(tempDir, 'shared-waiters-transcript.jsonl')
+    const server = fakeServerConfig('java', 'slow-init', transcript)
+    const pool = new LspClientPool(LspDiscovery.of([server]), supervisor, {
+      shutdownGrace: 300,
+    })
+    pools.push(pool)
+
+    const file = path.join(tempDir, 'App.java')
+    fs.writeFileSync(file, 'class App {}\n')
+
+    const ac1 = new AbortController()
+    const ac2 = new AbortController()
+
+    const pending1 = pool.lease(file, ac1.signal)
+    const pending2 = pool.lease(file, ac2.signal)
+
+    const startEvent = await awaitEvent(transcript, (e) => e.event === 'start')
+    const pid = startEvent.pid!
+
+    // waiter1 times out; waiter1 must exit promptly without waiting for slow-init (3000ms)
+    const abortTime = Date.now()
+    ac1.abort('TIMED_OUT')
+    const err1 = await pending1.catch((e: unknown) => e)
+    expect(Date.now() - abortTime).toBeLessThan(1000)
+    expect(err1).toBeInstanceOf(LspTimeoutError)
+    expect((err1 as Error).message).toBe('Operation timed out')
+
+    // waiter2 was not affected, waits for boot to finish normally and succeeds
+    const entry2 = await pending2
+    expect(entry2.client.isAlive()).toBe(true)
+    expect(pool.activeCount()).toBe(1)
+    pool.release(entry2)
+
+    await pool.close()
+    await awaitProcessGone(pid)
+  })
+
+  it('aborts boot only after the last remaining waiter exits and awaits cleanup convergence', async () => {
+    const transcript = path.join(tempDir, 'all-waiters-abort-transcript.jsonl')
+    const server = fakeServerConfig('java', 'slow-init', transcript)
+    const pool = new LspClientPool(LspDiscovery.of([server]), supervisor, {
+      shutdownGrace: 300,
+    })
+    pools.push(pool)
+
+    const file = path.join(tempDir, 'App.java')
+    fs.writeFileSync(file, 'class App {}\n')
+
+    const ac1 = new AbortController()
+    const ac2 = new AbortController()
+
+    const pending1 = pool.lease(file, ac1.signal)
+    const pending2 = pool.lease(file, ac2.signal)
+
+    const startEvent = await awaitEvent(transcript, (e) => e.event === 'start')
+    const pid = startEvent.pid!
+
+    ac1.abort('TIMED_OUT')
+    await expect(pending1).rejects.toThrow(/Operation timed out/)
+
+    ac2.abort()
+    await expect(pending2).rejects.toThrow(/Operation cancelled/)
+
+    // Last waiter awaiting cleanup means process is already gone
+    expect(pool.activeCount()).toBe(0)
+    await awaitProcessGone(pid)
+  })
+
+  it('does not lease warm client when caller signal is already aborted', async () => {
+    const transcript = path.join(tempDir, 'warm-abort-transcript.jsonl')
+    const server = fakeServerConfig('java', 'normal', transcript)
+    const pool = new LspClientPool(LspDiscovery.of([server]), supervisor)
+    pools.push(pool)
+
+    const file = path.join(tempDir, 'App.java')
+    fs.writeFileSync(file, 'class App {}\n')
+
+    const first = await pool.lease(file)
+    expect(first.inFlight).toBe(1)
+    pool.release(first)
+    expect(first.inFlight).toBe(0)
+
+    const cancelledAc = new AbortController()
+    cancelledAc.abort()
+    await expect(pool.lease(file, cancelledAc.signal)).rejects.toThrow(/Operation cancelled/)
+    expect(first.inFlight).toBe(0)
+
+    const timeoutAc = new AbortController()
+    timeoutAc.abort('TIMED_OUT')
+    const timeoutErr = await pool.lease(file, timeoutAc.signal).catch((e: unknown) => e)
+    expect(timeoutErr).toBeInstanceOf(LspTimeoutError)
+    expect((timeoutErr as Error).message).toBe('Operation timed out')
+    expect(first.inFlight).toBe(0)
+  })
+
+  it('aborts promptly when waiting for cancelled boot convergence if caller aborts', async () => {
+    const transcript = path.join(tempDir, 'cancelled-boot-wait-transcript.jsonl')
+    const server = fakeServerConfig('java', 'slow-init', transcript)
+    const pool = new LspClientPool(LspDiscovery.of([server]), supervisor, {
+      shutdownGrace: 2000,
+    })
+    pools.push(pool)
+
+    const file = path.join(tempDir, 'App.java')
+    fs.writeFileSync(file, 'class App {}\n')
+
+    const ac1 = new AbortController()
+    const p1 = pool.lease(file, ac1.signal)
+    await awaitEvent(transcript, (e) => e.event === 'start')
+
+    ac1.abort()
+    await expect(p1).rejects.toThrow(/Operation cancelled/)
+
+    // Next waiter with already aborted signal must not hang waiting for old convergence
+    const ac2 = new AbortController()
+    ac2.abort('TIMED_OUT')
+    const started = Date.now()
+    const err = await pool.lease(file, ac2.signal).catch((e: unknown) => e)
+    expect(Date.now() - started).toBeLessThan(500)
+    expect(err).toBeInstanceOf(LspTimeoutError)
+  })
+
+  it('surfaces boot initialization failure to all concurrent waiters without treating it as cancellation', async () => {
+    const transcript = path.join(tempDir, 'boot-fail-waiters-transcript.jsonl')
+    const server = fakeServerConfig('java', 'no-init', transcript)
+    const pool = new LspClientPool(LspDiscovery.of([server]), supervisor, {
+      initializeTimeout: 100,
+      shutdownGrace: 100,
+    })
+    pools.push(pool)
+
+    const javaFile = path.join(tempDir, 'App.java')
+    fs.writeFileSync(javaFile, 'class App {}\n')
+
+    const p1 = pool.lease(javaFile)
+    const p2 = pool.lease(javaFile)
+
+    const [r1, r2] = await Promise.allSettled([p1, p2])
+    expect(r1.status).toBe('rejected')
+    expect(r2.status).toBe('rejected')
+    const err1 = (r1 as PromiseRejectedResult).reason as Error
+    const err2 = (r2 as PromiseRejectedResult).reason as Error
+    expect(err1.message).toContain('LSP request timed out')
+    expect(err2.message).toContain('LSP request timed out')
+    expect(err1.name).not.toBe('AbortError')
+    expect(err2.name).not.toBe('AbortError')
+    expect(err1.name).not.toBe('TimeoutError')
+    expect(err2.name).not.toBe('TimeoutError')
+    expect(pool.activeCount()).toBe(0)
   })
 
   it('close() surfaces release failures instead of silently claiming cleanup', async () => {
