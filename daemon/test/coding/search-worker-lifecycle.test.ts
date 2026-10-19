@@ -26,6 +26,7 @@ async function tempDir(): Promise<string> {
 }
 
 afterEach(async () => {
+  FakeWorker.onCreated = null
   for (const worker of FakeWorker.instances) {
     worker.release()
   }
@@ -186,6 +187,7 @@ describe('Worker 协作停止与宽限超时生命周期', () => {
       callCapability(grep, 'fs.grep', { pattern: 'zzz', path: dir }, makeContext(dir, { signal: controller.signal })),
     )
     const worker = await waitForWorker()
+    worker.autoResolve = false
 
     vi.useFakeTimers()
     try {
@@ -199,12 +201,17 @@ describe('Worker 协作停止与宽限超时生命周期', () => {
       // 宽限期满 5s
       await vi.advanceTimersByTimeAsync(1000)
       expect(worker.terminated).toBe(true)
+      expect(worker.terminateSettled).toBe(false)
+      expect(tracked.settled()).toBe(false)
+
+      worker.release()
       expect(worker.terminateSettled).toBe(true)
 
       const result = await tracked.promise
       expect(result.error).toBe(true)
       expect(result.details).toMatchObject({ code: 'TIMEOUT' })
     } finally {
+      worker.release()
       vi.useRealTimers()
     }
   })
@@ -213,13 +220,20 @@ describe('Worker 协作停止与宽限超时生命周期', () => {
     const dir = await tempDir()
     const tracked = track(callCapability(find, 'fs.find', { pattern: '*', path: dir }, makeContext(dir)))
     const worker = await waitForWorker()
+    worker.autoResolve = false
     worker.emit('error', new Error('worker exploded'))
-    // 能力层把未知错误映射为不泄露细节的 INTERNAL 失败，但仍是稳定的错误结果。
+    await new Promise((resolve) => setImmediate(resolve))
+    // gate 释放前：已经发起 terminate 但调用方保持 pending
+    expect(worker.terminated).toBe(true)
+    expect(worker.terminateSettled).toBe(false)
+    expect(tracked.settled()).toBe(false)
+
+    // release 后错误交付
+    worker.release()
+    expect(worker.terminateSettled).toBe(true)
     const result = await tracked.promise
     expect(result.error).toBe(true)
     expect(result.details).toMatchObject({ code: 'INTERNAL' })
-    expect(worker.terminated).toBe(true)
-    expect(worker.terminateSettled).toBe(true)
   })
 
   it('Worker 未回传即退出报告 INTERNAL 异常退出', async () => {
@@ -255,19 +269,38 @@ describe('Worker 协作停止与宽限超时生命周期', () => {
   it('postMessage 同步抛出时 await terminate 并以 INTERNAL 失败', async () => {
     const dir = await tempDir()
     FakeWorker.nextPostMessageError = new Error('structured clone failure')
-    const result = await callCapability(find, 'fs.find', { pattern: '*', path: dir }, makeContext(dir))
+    FakeWorker.nextAutoResolve = false
+    const workerCreated = Promise.withResolvers<FakeWorker>()
+    FakeWorker.onCreated = (w) => workerCreated.resolve(w)
+
+    const tracked = track(callCapability(find, 'fs.find', { pattern: '*', path: dir }, makeContext(dir)))
+    const worker = await workerCreated.promise
+
+    await vi.waitFor(() => expect(worker.terminated).toBe(true))
+    expect(worker.terminateSettled).toBe(false)
+    expect(tracked.settled()).toBe(false)
+
+    worker.release()
+    expect(worker.terminateSettled).toBe(true)
+    const result = await tracked.promise
     expect(result.error).toBe(true)
     expect(result.details).toMatchObject({ code: 'INTERNAL' })
-    const worker = FakeWorker.instances.at(-1)!
-    expect(worker.terminated).toBe(true)
   })
 
   it('worker.terminate 失败时明确交付 cleanup failed; results incomplete', async () => {
     const dir = await tempDir()
     FakeWorker.nextTerminateError = new Error('kill permission denied')
+    FakeWorker.nextAutoResolve = false
     const tracked = track(callCapability(find, 'fs.find', { pattern: '*', path: dir }, makeContext(dir)))
     const worker = await waitForWorker()
     worker.emit('error', new Error('worker crashed'))
+
+    await vi.waitFor(() => expect(worker.terminated).toBe(true))
+    expect(worker.terminateSettled).toBe(false)
+    expect(tracked.settled()).toBe(false)
+
+    worker.release()
+    expect(worker.terminateSettled).toBe(true)
     const result = await tracked.promise
     expect(result.error).toBe(true)
     expect(result.details).toMatchObject({ code: 'INTERNAL' })
