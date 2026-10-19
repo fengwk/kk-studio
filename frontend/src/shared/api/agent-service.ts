@@ -36,6 +36,9 @@ export function createAgentService(client: HttpClient = apiClient) {
     deleteProvider: (name: string, expectedVersion: string): Promise<void> =>
       client.delete(`/ai/catalog/providers/${encodeURIComponent(name)}`, { params: { expectedVersion } }),
 
+    listRemoteModels: (providerName: string): Promise<string[]> =>
+      client.get(`/ai/catalog/providers/${encodeURIComponent(providerName)}/remote-models`),
+
     listModels: (pageNumber = 1, pageSize = 50): Promise<PageResult<AgentModelDTO>> =>
       client.get('/ai/catalog/models', { params: { pageNumber, pageSize } }),
 

@@ -7,6 +7,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import fun.fengwk.kkstudio.harness.provider.ProviderModelDiscovery;
 import fun.fengwk.kkstudio.harness.provider.anthropic.AnthropicProviderAdapter;
 import fun.fengwk.kkstudio.harness.provider.gemini.GeminiProviderAdapter;
 import fun.fengwk.kkstudio.harness.provider.openai.chat.OpenAiChatProviderAdapter;
@@ -86,6 +87,14 @@ public class ModelExecutionConfiguration {
       @Qualifier("modelExecutionExecutor") ExecutorService modelExecutionExecutor,
       @Qualifier("modelExecutionWatchdogScheduler") ScheduledExecutorService scheduler) {
     return new JdkHttpSseTransport(httpClient, modelExecutionExecutor, scheduler);
+  }
+
+  /** Catalog 添加模型时查询 Provider 模型列表；复用模型调用的 HttpClient 与系统代理。 */
+  @Bean
+  @ConditionalOnMissingBean
+  public ProviderModelDiscovery providerModelDiscovery(
+      @Qualifier("modelExecutionHttpClient") HttpClient httpClient) {
+    return new ProviderModelDiscovery(httpClient, Duration.ofSeconds(15));
   }
 
   @Bean

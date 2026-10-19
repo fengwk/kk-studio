@@ -17,6 +17,7 @@ import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
 import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
 import fun.fengwk.kkstudio.platform.error.AiInUseException;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
+import fun.fengwk.kkstudio.platform.error.AiUpstreamException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.web.controller.StudioAgentDefinitionController;
@@ -158,6 +159,14 @@ class StudioDomainErrorAdviceTest {
         "The environment IDE is unavailable. Try again later.",
         "environment",
         "environment IDE command timed out");
+    assertError(
+        advice.handleUpstream(
+            new AiUpstreamException("agent_provider", "Provider model list returned HTTP 401")),
+        502,
+        "upstream_failed",
+        "The agent provider service request failed.",
+        "agent_provider",
+        "Provider model list returned HTTP 401");
   }
 
   private static void assertError(

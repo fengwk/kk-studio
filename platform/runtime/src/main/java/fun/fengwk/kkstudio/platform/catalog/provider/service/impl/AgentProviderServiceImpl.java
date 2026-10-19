@@ -7,12 +7,14 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import fun.fengwk.kkstudio.harness.provider.ProviderModelDiscovery;
 import fun.fengwk.kkstudio.platform.catalog.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.service.AgentProviderService;
 import fun.fengwk.kkstudio.platform.catalog.provider.service.converter.AgentProviderConverter;
 import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
+import fun.fengwk.kkstudio.platform.error.AiUpstreamException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.platform.error.CatalogVersions;
@@ -20,6 +22,8 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderEditablePropertiesDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderUpdateDTO;
+
+import java.util.List;
 
 /** 全局 provider CRUD。 */
 @AllArgsConstructor
@@ -32,6 +36,7 @@ public class AgentProviderServiceImpl implements AgentProviderService {
   private final AgentProviderConverter agentProviderConverter;
   private final AgentProviderMutationFactory providerMutationFactory;
   private final AgentProviderGuard providerGuard;
+  private final ProviderModelDiscovery modelDiscovery;
 
   @Override
   public Page<AgentProviderDTO> pageProviders(PageQuery pageQuery) {
@@ -117,6 +122,20 @@ public class AgentProviderServiceImpl implements AgentProviderService {
       }
       throw new AiVersionConflictException(
           RESOURCE, expectedVersion, CatalogVersions.format(reread.getVersion()));
+    }
+  }
+
+  /** 不在事务内：先读取已保存的连接配置，再发起有超时的上游请求。 */
+  @Override
+  public List<String> listRemoteModelIds(String name) {
+    AgentProvider provider = providerGuard.requireProvider(name);
+    try {
+      return modelDiscovery.listModelIds(
+          provider.getProviderType(), provider.getBaseUrl(), provider.getCredential());
+    } catch (IllegalArgumentException invalid) {
+      throw new AiValidationException(RESOURCE, invalid.getMessage());
+    } catch (ProviderModelDiscovery.Failure failure) {
+      throw new AiUpstreamException(RESOURCE, failure.getMessage());
     }
   }
 

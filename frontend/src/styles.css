@@ -892,6 +892,65 @@ div.is-error {
   gap: 10px;
 }
 
+.catalog-setup-guide {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.catalog-setup-guide h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.catalog-setup-guide ol {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.catalog-setup-guide li {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.catalog-setup-guide li[data-state='current'] {
+  border-color: var(--green-border);
+  background: var(--green-soft);
+}
+
+.catalog-setup-guide li[data-state='pending'] {
+  color: var(--fg-muted);
+}
+
+.catalog-setup-step-title {
+  font-weight: 600;
+}
+
+.catalog-setup-step-status {
+  color: var(--green);
+}
+
+.remote-model-ids {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
 .pricing-rules {
   display: flex;
   flex-direction: column;

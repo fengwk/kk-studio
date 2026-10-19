@@ -15,6 +15,7 @@ import { TextInput } from '@/shared/ui/controls/TextInput'
 import { Select } from '@/shared/ui/controls/Select'
 import type { AgentProviderDTO } from '@/shared/api/contracts/ai-catalog'
 import { useI18n } from '@/shared/i18n'
+import { RemoteModelIdPicker } from '@/features/ai/catalog/AiRemoteModelIdPicker'
 
 const AGENT_MODEL_INPUT_MODALITIES: AgentModelInputModality[] = [
   'TEXT',
@@ -30,12 +31,14 @@ export function ModelForm({
   providers,
   fieldErrors = {},
   onChange,
+  loadRemoteModelIds,
 }: {
   draft: ModelDraft
   mode: 'create' | 'edit'
   providers: AgentProviderDTO[]
   fieldErrors?: Partial<Record<ResourceFieldKey, string>>
   onChange: (draft: ModelDraft) => void
+  loadRemoteModelIds?: (providerName: string) => Promise<string[]>
 }) {
   const { t } = useI18n()
   const variantOptions = variantOptionsFromDraft(draft.variants)
@@ -66,6 +69,12 @@ export function ModelForm({
       defaultVariant:
         preferred && nextOptions.includes(preferred) ? preferred : (nextOptions[0] ?? ''),
     })
+  }
+
+  /** 新建时 Name 跟随 Model ID，直到用户单独编辑 Name。 */
+  function setModelId(modelId: string) {
+    const nameFollows = mode === 'create' && (!draft.name.trim() || draft.name === draft.modelId)
+    onChange({ ...draft, modelId, name: nameFollows ? modelId : draft.name })
   }
 
   function toggleInputModality(value: AgentModelInputModality) {
@@ -133,11 +142,19 @@ export function ModelForm({
           invalid={Boolean(fieldErrors.modelId)}
           aria-label={t('ai.catalog.form.modelId')}
           value={draft.modelId}
-          onChange={(event) => onChange({ ...draft, modelId: event.target.value })}
-          placeholder="claude-fable-5-dd-3M-xaMiniM"
+          onChange={(event) => setModelId(event.target.value)}
+          placeholder="minimax-m2.7"
+          list={mode === 'create' ? 'model-remote-ids' : undefined}
           required
         />
         <span className="inline-hint">{t('ai.catalog.form.modelIdHint')}</span>
+        {mode === 'create' ? (
+          <RemoteModelIdPicker
+            listId="model-remote-ids"
+            providerName={draft.providerName}
+            load={loadRemoteModelIds}
+          />
+        ) : null}
         {fieldErrors.modelId ? <span className="field-error">{fieldErrors.modelId}</span> : null}
       </label>
 

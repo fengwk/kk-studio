@@ -23,7 +23,10 @@ public enum DomainErrorCode {
   IN_USE("in_use"),
 
   /** 目标 Environment 的 IDE 通道当前不可用（未就绪、更新中、排队拒绝或超时）。 */
-  IDE_UNAVAILABLE("ide_unavailable");
+  IDE_UNAVAILABLE("ide_unavailable"),
+
+  /** 资源依赖的外部服务（如 Provider 模型列表）不可达或返回失败。 */
+  UPSTREAM_FAILED("upstream_failed");
 
   private final String code;
 
