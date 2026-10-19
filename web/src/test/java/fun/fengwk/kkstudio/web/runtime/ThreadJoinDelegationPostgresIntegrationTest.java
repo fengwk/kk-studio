@@ -1145,7 +1145,6 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
             UUID.randomUUID(),
             store,
             config,
-            clock,
             drainExecutor,
             workerExecutor,
             pollScheduler,

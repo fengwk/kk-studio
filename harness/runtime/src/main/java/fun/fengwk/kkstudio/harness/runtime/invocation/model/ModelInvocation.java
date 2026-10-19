@@ -19,9 +19,8 @@ import java.util.UUID;
  * 将执行结果链接到 Session 历史，且仅（在某些情况下）出现于 terminal 状态。 {@code streamCheckpoint} 是当前 attempt 的安全
  * partial，永远不是第二个 result。{@code failedAttempts} 是 append-only 的瞬态失败 attempt 审计，不属于对话语义。
  *
- * <p>{@code DISPATCHING} 表示 Work lease 已持有，Gateway admission 进行中：外部服务是否接受调用尚未被持久化状态 确认。纯转换会把回拨的调用方
- * wall-clock 抬升到当前 {@code updatedAt}；Store 仍必须在每次 {@code update*} 写入前调用 {@link
- * #validateTransition}，严格拒绝直接构造的时间回退。
+ * <p>{@code DISPATCHING} 表示 Work lease 已持有，Gateway admission 进行中：外部服务是否接受调用尚未被持久化状态 确认。Store 必须在每次
+ * {@code update*} 写入前调用 {@link #validateTransition}。
  */
 public record ModelInvocation(
     UUID id,
@@ -59,10 +58,6 @@ public record ModelInvocation(
       if (failure.attempt() > attempt) {
         throw new IllegalArgumentException("failed attempt must not exceed invocation attempt");
       }
-      if (index > 0 && failure.failedAt().isBefore(failedAttempts.get(index - 1).retryAt())) {
-        throw new IllegalArgumentException(
-            "a failed attempt must not precede the previous retry schedule");
-      }
     }
     if (streamCheckpoint != null && streamCheckpoint.attempt() != attempt) {
       throw new IllegalArgumentException("streamCheckpoint attempt must match invocation attempt");
@@ -78,9 +73,6 @@ public record ModelInvocation(
         providerReplayState);
     createdAt = Objects.requireNonNull(createdAt, "createdAt");
     updatedAt = Objects.requireNonNull(updatedAt, "updatedAt");
-    if (updatedAt.isBefore(createdAt)) {
-      throw new IllegalArgumentException("updatedAt must not precede createdAt");
-    }
   }
 
   public ModelInvocation(
@@ -132,9 +124,6 @@ public record ModelInvocation(
       return;
     }
     requireStableIdentity(stored, next);
-    if (next.updatedAt().isBefore(stored.updatedAt())) {
-      throw new IllegalArgumentException("updatedAt must not regress");
-    }
     int attemptDelta = next.attempt() - stored.attempt();
     if (attemptDelta < 0) {
       throw new IllegalArgumentException("attempt must not regress");
@@ -629,15 +618,10 @@ public record ModelInvocation(
             resultEntryId,
             failedAttempts,
             createdAt,
-            effectiveMutationTime(now),
+            now,
             providerReplayState);
     validateTransition(this, next);
     return next;
-  }
-
-  private Instant effectiveMutationTime(Instant now) {
-    Instant candidate = Objects.requireNonNull(now, "now");
-    return candidate.isBefore(updatedAt) ? updatedAt : candidate;
   }
 
   private static void validateStatusFields(

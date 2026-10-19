@@ -47,10 +47,8 @@ import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
-import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -88,11 +86,7 @@ class PostgresqlJoinAcceptanceRollbackTest {
   void setUp() {
     store = PostgresqlHarnessStoreFixture.resetAndCreate();
     runtime =
-        new HarnessRuntime(
-            store,
-            Clock.fixed(T0, ZoneOffset.UTC),
-            (threadId, path, prep) -> null,
-            () -> CompactionConfig.DEFAULT);
+        new HarnessRuntime(store, (threadId, path, prep) -> null, () -> CompactionConfig.DEFAULT);
     jdbcTemplate = new JdbcTemplate(PostgresqlHarnessStoreFixture.dataSource());
   }
 
@@ -634,7 +628,6 @@ class PostgresqlJoinAcceptanceRollbackTest {
                   new ProcessorLeaseConfig(Duration.ofSeconds(30), Duration.ofSeconds(5)),
                   Duration.ofSeconds(5),
                   () -> new CompactionConfig(20_000)),
-              Clock.fixed(now, ZoneOffset.UTC),
               scheduler,
               Runnable::run);
 
@@ -643,7 +636,7 @@ class PostgresqlJoinAcceptanceRollbackTest {
               .transaction(
                   tx ->
                       tx.claimNextWork(
-                          WorkTargetType.THREAD, now, "child-claim-1", Duration.ofSeconds(30)))
+                          WorkTargetType.THREAD, "child-claim-1", Duration.ofSeconds(30)))
               .orElseThrow();
       assertEquals(ThreadProcessResult.COMPLETED, processor.process(childWork1));
 
@@ -663,7 +656,7 @@ class PostgresqlJoinAcceptanceRollbackTest {
                 tx.updateModelInvocation(model.markRunning(T2));
                 model = tx.lockModelInvocation(found.id()).orElseThrow();
                 tx.updateModelInvocation(model.succeed(StoreTestSupport.assistantResponse(), T2));
-                tx.requestWork(new WorkTarget(WorkTargetType.THREAD, childThreadId), T2);
+                tx.requestWork(new WorkTarget(WorkTargetType.THREAD, childThreadId));
                 return found.id();
               });
 
@@ -673,7 +666,7 @@ class PostgresqlJoinAcceptanceRollbackTest {
               .transaction(
                   tx ->
                       tx.claimNextWork(
-                          WorkTargetType.THREAD, T2, "child-claim-2", Duration.ofSeconds(30)))
+                          WorkTargetType.THREAD, "child-claim-2", Duration.ofSeconds(30)))
               .orElseThrow();
       assertEquals(ThreadProcessResult.COMPLETED, processor.process(childWork2));
 
@@ -706,7 +699,7 @@ class PostgresqlJoinAcceptanceRollbackTest {
               .transaction(
                   tx ->
                       tx.claimNextWork(
-                          WorkTargetType.THREAD, T2, "parent-claim-1", Duration.ofSeconds(30)))
+                          WorkTargetType.THREAD, "parent-claim-1", Duration.ofSeconds(30)))
               .orElseThrow();
       assertEquals(ThreadProcessResult.COMPLETED, processor.process(parentWork));
 

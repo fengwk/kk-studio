@@ -196,8 +196,7 @@ class ExecutionConcurrentDeletionTest {
                       List.of(),
                       ThreadProcessorTestSupport.NOW,
                       ThreadProcessorTestSupport.NOW));
-              tx.requestWork(
-                  new WorkTarget(WorkTargetType.MODEL, id), ThreadProcessorTestSupport.NOW);
+              tx.requestWork(new WorkTarget(WorkTargetType.MODEL, id));
               return id;
             });
     ClaimedWork claim =
@@ -205,10 +204,7 @@ class ExecutionConcurrentDeletionTest {
             .transaction(
                 tx ->
                     tx.claimNextWork(
-                        WorkTargetType.MODEL,
-                        ThreadProcessorTestSupport.NOW,
-                        "token-" + invocationId,
-                        Duration.ofSeconds(60)))
+                        WorkTargetType.MODEL, "token-" + invocationId, Duration.ofSeconds(60)))
             .orElseThrow();
     rawStore.transaction(
         tx -> {

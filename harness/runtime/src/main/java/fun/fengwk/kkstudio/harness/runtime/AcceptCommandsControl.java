@@ -15,7 +15,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
@@ -30,7 +29,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayl
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
-import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -64,11 +62,9 @@ final class AcceptCommandsControl {
           ThreadCommandType.SET_CONTRIBUTOR_STATE);
 
   private final HarnessStore store;
-  private final Clock clock;
 
-  AcceptCommandsControl(HarnessStore store, Clock clock) {
+  AcceptCommandsControl(HarnessStore store) {
     this.store = Objects.requireNonNull(store, "store");
-    this.clock = Objects.requireNonNull(clock, "clock");
   }
 
   AcceptedCommands acceptCommands(AcceptCommandsCommand command, AcceptancePreflight preflight) {
@@ -195,7 +191,7 @@ final class AcceptCommandsControl {
                 join);
           }
           admitJoin(tx, threadId, parentThreadId, join, true);
-          Instant now = clock.instant();
+          Instant now = tx.now();
           Session session = new Session(sessionId, initialSessionName(commands, sessionId), now);
           tx.insertSession(session);
           UUID rootEntryId = tx.nextId();
@@ -323,7 +319,7 @@ final class AcceptCommandsControl {
                   target.threadName(),
                   yoloPolicy,
                   commands);
-          Instant now = clock.instant();
+          Instant now = tx.now();
           // fork 事实节点：作为新 Thread head 的第一个 Entry，只记录模式与切点，不复制共享前缀、不移动源 Thread。
           UUID forkEntryId = tx.nextId();
           tx.insertEntry(
@@ -332,7 +328,7 @@ final class AcceptCommandsControl {
                   target.sessionId(),
                   target.startEntryId(),
                   ForkPayload.branch(target.startEntryId()),
-                  HarnessStoreTime.notBefore(now, startEntry.createdAt())));
+                  now));
           ThreadState thread =
               new ThreadState(
                   target.threadId(),
@@ -454,7 +450,7 @@ final class AcceptCommandsControl {
           }
           BranchSettings rootSettings = tx.loadBranchSettings(target.startEntryId());
           admitJoin(tx, target.threadId(), null, join, true);
-          Instant now = clock.instant();
+          Instant now = tx.now();
           Session session =
               new Session(
                   target.sessionId(), initialSessionName(commands, target.sessionId()), now);
@@ -466,10 +462,6 @@ final class AcceptCommandsControl {
               SessionForkCopy.copyEffectiveContext(
                   tx, target.sessionId(), rootEntryId, sourceCutPath, now);
           UUID forkParentId = lastCopied == null ? rootEntryId : lastCopied.id();
-          Instant forkCreatedAt =
-              HarnessStoreTime.notBefore(
-                  now.plusMillis(1L),
-                  lastCopied == null ? now : lastCopied.createdAt().plusMillis(1L));
           UUID forkEntryId = tx.nextId();
           tx.insertEntry(
               new Entry(
@@ -477,7 +469,7 @@ final class AcceptCommandsControl {
                   target.sessionId(),
                   forkParentId,
                   ForkPayload.session(target.sourceThreadId(), target.startEntryId()),
-                  forkCreatedAt));
+                  now));
           ThreadState thread =
               new ThreadState(
                   target.threadId(),
@@ -546,7 +538,7 @@ final class AcceptCommandsControl {
             throw invalidBatch(target, "join acceptance requires a trailing task input");
           }
           admitJoin(tx, thread.id(), thread.parentThreadId(), join, false);
-          Instant now = clock.instant();
+          Instant now = tx.now();
           Session session =
               tx.findSession(thread.sessionId())
                   .orElseThrow(
@@ -557,7 +549,6 @@ final class AcceptCommandsControl {
                                   + " disappeared while thread existed"));
           List<NewThreadCommand> prepared = preflight.prepare(tx, session, commands);
           requirePreflightShape(commands, prepared);
-          Instant parentMutationNow = effectiveMutationTime(now, thread);
           long nextSeq = thread.nextCommandSequence();
           List<ThreadCommand> allInserted = new ArrayList<>();
           List<ThreadJoin> deliveries = new ArrayList<>();
@@ -565,8 +556,7 @@ final class AcceptCommandsControl {
           if (genuineUserInput && !pending.isEmpty()) {
             for (ThreadJoin pendingJoin : pending) {
               ThreadJoinCompletion.Delivery delivery =
-                  ThreadJoinCompletion.buildDelivery(
-                      tx, pendingJoin, thread, nextSeq, parentMutationNow);
+                  ThreadJoinCompletion.buildDelivery(tx, pendingJoin, thread, nextSeq, now);
               allInserted.add(delivery.command());
               deliveries.add(delivery.delivered());
               nextSeq++;
@@ -586,7 +576,7 @@ final class AcceptCommandsControl {
                     null,
                     null,
                     null,
-                    parentMutationNow));
+                    now));
           }
           allInserted.addAll(userCommands);
 
@@ -598,11 +588,11 @@ final class AcceptCommandsControl {
           ThreadState advanced =
               resumeStoppedTarget(thread, genuineUserInput)
                   ? thread.reserveCommandSequencesAndSetControl(
-                      allInserted.size(), ThreadExecutionControl.RUNNABLE, parentMutationNow)
-                  : thread.reserveCommandSequences(allInserted.size(), parentMutationNow);
+                      allInserted.size(), ThreadExecutionControl.RUNNABLE, now)
+                  : thread.reserveCommandSequences(allInserted.size(), now);
           tx.updateThread(advanced);
 
-          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), now);
+          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()));
           return attachJoin(
               tx,
               new AcceptedCommands(
@@ -784,7 +774,7 @@ final class AcceptCommandsControl {
       throw new IllegalArgumentException("source commands replayed without their join");
     }
     ThreadCommand source = accepted.acceptedCommands().get(accepted.acceptedCommands().size() - 1);
-    Instant joinNow = accepted.thread().updatedAt();
+    Instant joinNow = tx.now();
     tx.insertJoin(
         new ThreadJoin(
             join.invocationId(),
@@ -809,8 +799,7 @@ final class AcceptCommandsControl {
       for (ThreadJoin pending : tx.loadIncompleteJoins(accepted.thread().id())) {
         if (!pending.invocationId().equals(join.invocationId())
             && join.parentThreadId().equals(pending.parentThreadId())) {
-          Instant supersedeNow = HarnessStoreTime.notBefore(joinNow, pending.updatedAt());
-          tx.updateJoin(pending.superseded(join.invocationId(), supersedeNow));
+          tx.updateJoin(pending.superseded(join.invocationId(), joinNow));
           replaced = true;
         }
       }
@@ -852,7 +841,7 @@ final class AcceptCommandsControl {
     tx.insertCommands(inserted);
     ThreadState advanced = thread.reserveCommandSequences(prepared.size(), now);
     tx.updateThread(advanced);
-    tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), now);
+    tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()));
     return new AcceptedCommands(
         session, requireRootEntry(tx, session.id()), advanced, List.copyOf(inserted), false, false);
   }
@@ -1023,11 +1012,6 @@ final class AcceptCommandsControl {
         List.copyOf(ordered),
         true,
         false);
-  }
-
-  private static Instant effectiveMutationTime(Instant now, ThreadState thread) {
-    Instant candidate = Objects.requireNonNull(now, "now");
-    return candidate.isBefore(thread.updatedAt()) ? thread.updatedAt() : candidate;
   }
 
   /** 任何显式新 USER/GOAL/CUSTOM 可信输入都把 STOPPED 目标恢复为 RUNNABLE；不复活任何后代。 */

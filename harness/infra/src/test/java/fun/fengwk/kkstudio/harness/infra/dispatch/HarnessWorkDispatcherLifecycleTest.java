@@ -6,6 +6,7 @@ import static fun.fengwk.kkstudio.harness.infra.dispatch.DispatcherTestSupport.R
 import static fun.fengwk.kkstudio.harness.infra.dispatch.DispatcherTestSupport.awaitTrue;
 import static fun.fengwk.kkstudio.harness.infra.dispatch.DispatcherTestSupport.clock;
 import static fun.fengwk.kkstudio.harness.infra.dispatch.DispatcherTestSupport.config;
+import static fun.fengwk.kkstudio.harness.infra.dispatch.DispatcherTestSupport.newStore;
 import static fun.fengwk.kkstudio.harness.infra.dispatch.DispatcherTestSupport.seedThread;
 import static fun.fengwk.kkstudio.harness.infra.dispatch.DispatcherTestSupport.work;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -72,13 +73,16 @@ class HarnessWorkDispatcherLifecycleTest {
       Consumer<ClaimedWork> threadHandler,
       Consumer<ClaimedWork> modelHandler,
       Consumer<ClaimedWork> toolHandler) {
+    if (store instanceof InMemoryHarnessStore memory) {
+      memory.setClock(clock);
+    }
     return new HarnessWorkDispatcher(
-        store, config(), clock, drain, worker, poll, threadHandler, modelHandler, toolHandler);
+        store, config(), drain, worker, poll, threadHandler, modelHandler, toolHandler);
   }
 
   @Test
   void startIsIdempotentTriggersFirstWakeAndStopCancelsThePoll() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryHarnessStore store = newStore();
     ThreadSeed seed = seedThread(store);
     RecordingScheduler scheduler = new RecordingScheduler();
     CopyOnWriteArrayList<ClaimedWork> claims = new CopyOnWriteArrayList<>();
@@ -114,7 +118,7 @@ class HarnessWorkDispatcherLifecycleTest {
           tx.lockThread(seed.threadId());
           WorkTarget target = new WorkTarget(WorkTargetType.THREAD, seed.threadId());
           tx.deleteWork(target);
-          tx.requestWork(target, NOW);
+          tx.requestWork(target);
           return null;
         });
     scheduler.runPoll(0);
@@ -130,7 +134,7 @@ class HarnessWorkDispatcherLifecycleTest {
   void startAfterStopThrows() {
     HarnessWorkDispatcher dispatcher =
         newDispatcher(
-            new InMemoryHarnessStore(),
+            newStore(),
             clock(),
             singleThread(),
             singleThread(),
@@ -144,7 +148,7 @@ class HarnessWorkDispatcherLifecycleTest {
 
   @Test
   void wakeBeforeStartIsIgnoredWithoutAnyPollRegistration() throws InterruptedException {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryHarnessStore store = newStore();
     seedThread(store);
     RecordingScheduler scheduler = new RecordingScheduler();
     CopyOnWriteArrayList<ClaimedWork> claims = new CopyOnWriteArrayList<>();
@@ -167,7 +171,7 @@ class HarnessWorkDispatcherLifecycleTest {
 
   @Test
   void wakeAfterStopDoesNotStartAnyClaim() throws InterruptedException {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryHarnessStore store = newStore();
     ThreadSeed seed = seedThread(store);
     CopyOnWriteArrayList<ClaimedWork> claims = new CopyOnWriteArrayList<>();
     HarnessWorkDispatcher dispatcher =
@@ -190,7 +194,7 @@ class HarnessWorkDispatcherLifecycleTest {
 
   @Test
   void periodicPollReclaimsNewlyDueWork() throws InterruptedException {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryHarnessStore store = newStore();
     ThreadSeed seed = seedThread(store);
     MutableClock clock = clock();
     CopyOnWriteArrayList<ClaimedWork> claims = new CopyOnWriteArrayList<>();
@@ -213,19 +217,17 @@ class HarnessWorkDispatcherLifecycleTest {
         tx -> {
           tx.lockThread(seed.threadId());
           tx.deleteWork(target);
-          tx.requestWork(target, NOW);
+          tx.requestWork(target);
           return null;
         });
     ClaimedWork claim =
         store
             .transaction(
-                tx ->
-                    tx.claimNextWork(
-                        WorkTargetType.THREAD, NOW, "seed-lease", Duration.ofMillis(10)))
+                tx -> tx.claimNextWork(WorkTargetType.THREAD, "seed-lease", Duration.ofMillis(10)))
             .orElseThrow();
     store.transaction(
         tx -> {
-          tx.rescheduleWork(claim, NOW, Duration.ofMillis(150));
+          tx.rescheduleWork(claim, Duration.ofMillis(150));
           return null;
         });
     dispatcher.start();
@@ -240,7 +242,7 @@ class HarnessWorkDispatcherLifecycleTest {
 
   @Test
   void stopDoesNotShutdownInjectedExecutorsNorInterruptAcceptedTasks() throws InterruptedException {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryHarnessStore store = newStore();
     ThreadSeed seed = seedThread(store);
     ExecutorService drain = singleThread();
     ExecutorService worker = singleThread();
@@ -295,7 +297,7 @@ class HarnessWorkDispatcherLifecycleTest {
 
   @Test
   void stopWinningBetweenClaimAndHandoffReturnsTheClaim() throws InterruptedException {
-    InMemoryHarnessStore inner = new InMemoryHarnessStore();
+    InMemoryHarnessStore inner = newStore();
     BlockingStore store = new BlockingStore(inner);
     ThreadSeed seed = seedThread(store);
     ControlledExecutor drain = new ControlledExecutor(singleThread());

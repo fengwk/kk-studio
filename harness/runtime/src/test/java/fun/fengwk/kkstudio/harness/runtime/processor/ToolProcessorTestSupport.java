@@ -200,6 +200,11 @@ final class ToolProcessorTestSupport {
   static final class Fixture {
     final MutableClock clock = new MutableClock(NOW);
     final InMemoryHarnessStore store = new InMemoryHarnessStore();
+
+    {
+      store.setClock(clock);
+    }
+
     final FakeToolGateway gateway = new FakeToolGateway();
     final RecordingSink sink = new RecordingSink();
     final ScheduledExecutorService scheduler;
@@ -574,8 +579,8 @@ final class ToolProcessorTestSupport {
                       null,
                       now,
                       now)));
-          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, baseline.threadId()), now);
-          tx.requestWork(new WorkTarget(WorkTargetType.TOOL, toolId), now);
+          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, baseline.threadId()));
+          tx.requestWork(new WorkTarget(WorkTargetType.TOOL, toolId));
           return new Seeded(modelId, toolId);
         });
   }
@@ -596,7 +601,7 @@ final class ToolProcessorTestSupport {
       String token,
       Duration leaseDuration) {
     return store
-        .transaction(tx -> tx.claimNextWork(WorkTargetType.TOOL, now, token, leaseDuration))
+        .transaction(tx -> tx.claimNextWork(WorkTargetType.TOOL, token, leaseDuration))
         .orElseThrow();
   }
 
@@ -665,7 +670,7 @@ final class ToolProcessorTestSupport {
           tx.lockThread(fixture.baseline.threadId()).orElseThrow();
           WorkTarget target = new WorkTarget(WorkTargetType.TOOL, fixture.toolInvocationId);
           tx.deleteWork(target);
-          tx.requestWork(target, requestedAt);
+          tx.requestWork(target);
           return null;
         });
   }
@@ -674,8 +679,7 @@ final class ToolProcessorTestSupport {
     fixture.store.transaction(
         tx -> {
           tx.lockThread(fixture.baseline.threadId()).orElseThrow();
-          tx.requestWork(
-              new WorkTarget(WorkTargetType.TOOL, fixture.toolInvocationId), requestedAt);
+          tx.requestWork(new WorkTarget(WorkTargetType.TOOL, fixture.toolInvocationId));
           return null;
         });
   }

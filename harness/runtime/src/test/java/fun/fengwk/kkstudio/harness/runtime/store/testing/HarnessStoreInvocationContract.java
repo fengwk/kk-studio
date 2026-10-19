@@ -1770,12 +1770,12 @@ public abstract class HarnessStoreInvocationContract {
     WorkTarget target = new WorkTarget(WorkTargetType.TOOL, TestIds.id(10));
 
     assertThrows(
-        IllegalStateException.class, () -> inTransaction(store, tx -> tx.requestWork(target, T2)));
+        IllegalStateException.class, () -> inTransaction(store, tx -> tx.requestWork(target)));
     inTransaction(
         store,
         tx -> {
           tx.lockThread(baseline.threadId()).orElseThrow();
-          tx.requestWork(target, T2);
+          tx.requestWork(target);
         });
     assertTrue(store.transaction(tx -> tx.findWork(target)).isPresent());
   }

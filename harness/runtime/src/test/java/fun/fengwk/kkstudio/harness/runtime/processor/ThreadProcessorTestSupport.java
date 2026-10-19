@@ -370,7 +370,7 @@ final class ThreadProcessorTestSupport {
     store.transaction(
         tx -> {
           tx.lockThread(threadId);
-          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId), NOW);
+          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId));
           return null;
         });
   }
@@ -635,7 +635,7 @@ final class ThreadProcessorTestSupport {
       InMemoryHarnessStore store, UUID threadId, Instant now, Duration leaseDuration) {
     return store
         .transaction(
-            tx -> tx.claimNextWork(WorkTargetType.THREAD, now, "token-" + threadId, leaseDuration))
+            tx -> tx.claimNextWork(WorkTargetType.THREAD, "token-" + threadId, leaseDuration))
         .orElseThrow();
   }
 
@@ -1235,6 +1235,11 @@ final class ThreadProcessorTestSupport {
   static final class Fixture implements AutoCloseable {
     final MutableClock clock = new MutableClock(NOW);
     final InMemoryHarnessStore store = new InMemoryHarnessStore();
+
+    {
+      store.setClock(clock);
+    }
+
     final FakeTurnResolver resolver = new FakeTurnResolver();
     final ScheduledExecutorService scheduler;
     final ThreadProcessor processor;
@@ -1258,13 +1263,12 @@ final class ThreadProcessorTestSupport {
       this.scheduler = newScheduler();
       HarnessStore targetStore = processorStore == null ? store : processorStore;
       CompactionConfigProvider configProvider = () -> compactionConfig;
-      this.runtime = new HarnessRuntime(targetStore, clock, resolver, configProvider);
+      this.runtime = new HarnessRuntime(targetStore, resolver, configProvider);
       this.processor =
           new ThreadProcessor(
               targetStore,
               resolver,
               new ThreadProcessorConfig(LEASE_CONFIG, RESOLVE_FAILURE_DELAY, configProvider),
-              clock,
               scheduler,
               Runnable::run);
     }

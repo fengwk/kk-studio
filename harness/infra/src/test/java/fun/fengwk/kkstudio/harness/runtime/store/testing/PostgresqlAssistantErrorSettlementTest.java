@@ -107,7 +107,7 @@ class PostgresqlAssistantErrorSettlementTest {
               tx.updateModelInvocation(model.markRunning(T2));
               model = tx.lockModelInvocation(id).orElseThrow();
               tx.updateModelInvocation(model.fail(error, T2));
-              tx.requestWork(target, now);
+              tx.requestWork(target);
               return id;
             });
 
@@ -127,13 +127,13 @@ class PostgresqlAssistantErrorSettlementTest {
     ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
     try {
       ThreadProcessor processor =
-          new ThreadProcessor(store, resolver, config, clock, scheduler, Runnable::run);
+          new ThreadProcessor(store, resolver, config, scheduler, Runnable::run);
       ClaimedWork claimed =
           store
               .transaction(
                   tx ->
                       tx.claimNextWork(
-                          WorkTargetType.THREAD, now, "settle-claim", Duration.ofSeconds(30)))
+                          WorkTargetType.THREAD, "settle-claim", Duration.ofSeconds(30)))
               .orElseThrow();
       assertEquals(ThreadProcessResult.COMPLETED, processor.process(claimed));
 
@@ -154,7 +154,7 @@ class PostgresqlAssistantErrorSettlementTest {
 
       // durable 状态经既有 snapshot 投影读到 IDLE（不再 RUNNABLE/挂起）。
       HarnessRuntime snapshotRuntime =
-          new HarnessRuntime(store, clock, resolver, () -> new CompactionConfig(20_000));
+          new HarnessRuntime(store, resolver, () -> new CompactionConfig(20_000));
       assertEquals(
           ThreadRuntimeStatus.IDLE,
           snapshotRuntime.getThreadSnapshot(baseline.threadId()).runtimeStatus());
@@ -163,7 +163,7 @@ class PostgresqlAssistantErrorSettlementTest {
       store.transaction(
           tx -> {
             tx.lockThread(baseline.threadId()).orElseThrow();
-            tx.requestWork(target, now);
+            tx.requestWork(target);
             return null;
           });
       ClaimedWork replayed =
@@ -171,7 +171,7 @@ class PostgresqlAssistantErrorSettlementTest {
               .transaction(
                   tx ->
                       tx.claimNextWork(
-                          WorkTargetType.THREAD, now, "replay-claim", Duration.ofSeconds(30)))
+                          WorkTargetType.THREAD, "replay-claim", Duration.ofSeconds(30)))
               .orElseThrow();
       assertEquals(ThreadProcessResult.COMPLETED, processor.process(replayed));
       EntryPath replayedPath = loadPath(store, baseline.threadId());

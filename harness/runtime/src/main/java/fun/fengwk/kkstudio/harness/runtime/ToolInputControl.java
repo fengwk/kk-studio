@@ -19,14 +19,12 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
-import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
@@ -54,11 +52,9 @@ final class ToolInputControl {
   private static final HumanInputJsonCodec INPUT_JSON = new HumanInputJsonCodec();
 
   private final HarnessStore store;
-  private final Clock clock;
 
-  ToolInputControl(HarnessStore store, Clock clock) {
+  ToolInputControl(HarnessStore store) {
     this.store = Objects.requireNonNull(store, "store");
-    this.clock = Objects.requireNonNull(clock, "clock");
   }
 
   /** 在单个短事务内接受或精确 replay 一次人工输入提交，返回 durable 接受事实。 */
@@ -247,23 +243,16 @@ final class ToolInputControl {
       ThreadContext.ToolActive active,
       ToolInvocation tool,
       ToolInputSubmissionCommand command) {
-    Instant workNow = clock.instant();
-    Instant mutationNow =
-        HarnessStoreTime.notBefore(
-            workNow, thread.updatedAt(), path.head().createdAt(), active.model().updatedAt());
-    for (ToolInvocation sibling : active.siblings()) {
-      mutationNow = HarnessStoreTime.notBefore(mutationNow, sibling.updatedAt());
-    }
+    Instant now = tx.now();
     String canonical = canonicalAnswerJson(questionnaire(tool), command);
     ToolResult result =
         new ToolResult(
             tool.call().id(), List.of(new JsonResultContent(canonical)), false, canonical);
-    ToolInputReceipt receipt =
-        new ToolInputReceipt(command.submissionId(), command.actor(), mutationNow);
-    ToolInvocation accepted = tool.acceptInput(result, receipt, mutationNow);
+    ToolInputReceipt receipt = new ToolInputReceipt(command.submissionId(), command.actor(), now);
+    ToolInvocation accepted = tool.acceptInput(result, receipt, now);
     tx.updateToolInvocations(List.of(accepted));
-    tx.updateThread(thread.touchVersion(mutationNow));
-    tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), workNow);
+    tx.updateThread(thread.touchVersion(now));
+    tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()));
     return new ToolInputAcceptance(thread.id(), accepted.id(), receipt, false);
   }
 

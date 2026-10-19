@@ -25,10 +25,9 @@ import java.util.regex.Pattern;
  * <p>{@code inputThroughSequence} 是「已被普通 INPUT 接纳或确定性拒绝」的序号水位：它随历史、Command 应用坐标与 Invocation 在同
  * 一事务推进，不因 Stop、压缩或模型重试而倒退。{@code nextCommandSequence} 保留为下一条待分配 Command sequence。
  *
- * <p>所有 Thread 行变更都通过下方纯转换方法执行；转换会把回拨的调用方 wall-clock 抬升到当前 {@code updatedAt}，并把 {@code version} 严格
- * +1。该版本是 Thread 结构与控制状态的 CAS / invalidation cursor，不是完整快照的内容版本：ModelInvocation 的高频流式 checkpoint
- * 可在同一 Thread version 内推进。Store 仍必须在每次 {@code updateThread} 写入前调用 {@link
- * #validateTransition}，严格拒绝直接构造的时间回退。
+ * <p>所有 Thread 行变更都通过下方纯转换方法执行，并把 {@code version} 严格 +1。该版本是 Thread 结构与控制状态的 CAS / invalidation
+ * cursor，不是完整快照的内容版本：ModelInvocation 的高频流式 checkpoint 可在同一 Thread version 内推进。Store 必须在每次 {@code
+ * updateThread} 写入前调用 {@link #validateTransition}。
  */
 public record ThreadState(
     UUID id,
@@ -89,9 +88,6 @@ public record ThreadState(
     }
     createdAt = Objects.requireNonNull(createdAt, "createdAt");
     updatedAt = Objects.requireNonNull(updatedAt, "updatedAt");
-    if (updatedAt.isBefore(createdAt)) {
-      throw new IllegalArgumentException("updatedAt must not precede createdAt");
-    }
   }
 
   /**
@@ -130,9 +126,6 @@ public record ThreadState(
     }
     if (next.nextCommandSequence() < stored.nextCommandSequence()) {
       throw new IllegalArgumentException("nextCommandSequence must not regress");
-    }
-    if (next.updatedAt().isBefore(stored.updatedAt())) {
-      throw new IllegalArgumentException("updatedAt must not regress");
     }
     if (next.version() != Math.addExact(stored.version(), 1L)) {
       throw new IllegalArgumentException(
@@ -263,7 +256,7 @@ public record ThreadState(
             nextCommandSequence,
             Math.addExact(version, 1L),
             createdAt,
-            effectiveMutationTime(now));
+            now);
     validateTransition(this, next);
     return next;
   }
@@ -287,7 +280,7 @@ public record ThreadState(
             nextCommandSequence,
             Math.addExact(version, 1L),
             createdAt,
-            effectiveMutationTime(now));
+            now);
     validateTransition(this, next);
     return next;
   }
@@ -317,13 +310,8 @@ public record ThreadState(
             nextCommandSequence,
             Math.addExact(version, 1L),
             createdAt,
-            effectiveMutationTime(now));
+            now);
     validateTransition(this, next);
     return next;
-  }
-
-  private Instant effectiveMutationTime(Instant now) {
-    Instant candidate = Objects.requireNonNull(now, "now");
-    return candidate.isBefore(updatedAt) ? updatedAt : candidate;
   }
 }

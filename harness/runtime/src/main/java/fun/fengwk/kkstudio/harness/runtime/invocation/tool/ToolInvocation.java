@@ -16,9 +16,8 @@ import java.util.UUID;
  * 统计执行端实际接受的执行次数；BUSY/OVERLOADED 或执行前的本地拒绝不会增加它。result 与 error 在任何状态上都互斥；非 terminal 状态永远不携带
  * terminal 事实。Terminal Tool 行始终表示 outcome 尚未进入 ToolResult Entry：batch apply 后行被物理删除。
  *
- * <p>{@code DISPATCHING} 表示 Work lease 已持有，Gateway admission 进行中：外部服务是否接受执行尚未被持久化状态 确认。纯转换会把回拨的调用方
- * wall-clock 抬升到当前 {@code updatedAt}；Store 仍必须在每次 {@code update*} 写入前调用 {@link
- * #validateTransition}，严格拒绝直接构造的时间回退。
+ * <p>{@code DISPATCHING} 表示 Work lease 已持有，Gateway admission 进行中：外部服务是否接受执行尚未被持久化状态 确认。Store 必须在每次
+ * {@code update*} 写入前调用 {@link #validateTransition}。
  */
 public record ToolInvocation(
     UUID id,
@@ -121,9 +120,6 @@ public record ToolInvocation(
     validateBindingConstraint(status, attempt, call, binding);
     createdAt = Objects.requireNonNull(createdAt, "createdAt");
     updatedAt = Objects.requireNonNull(updatedAt, "updatedAt");
-    if (updatedAt.isBefore(createdAt)) {
-      throw new IllegalArgumentException("updatedAt must not precede createdAt");
-    }
   }
 
   /**
@@ -140,9 +136,6 @@ public record ToolInvocation(
       return;
     }
     requireStableIdentity(stored, next);
-    if (next.updatedAt().isBefore(stored.updatedAt())) {
-      throw new IllegalArgumentException("updatedAt must not regress");
-    }
     int attemptDelta = next.attempt() - stored.attempt();
     if (attemptDelta < 0) {
       throw new IllegalArgumentException("attempt must not regress");
@@ -342,7 +335,7 @@ public record ToolInvocation(
     if (approval != null) {
       throw new IllegalArgumentException("approval already exists");
     }
-    Instant effectiveNow = effectiveMutationTime(now);
+    Instant effectiveNow = now;
     return withState(
         ToolInvocationStatus.WAITING_APPROVAL,
         attempt,
@@ -589,7 +582,7 @@ public record ToolInvocation(
             effects,
             error,
             createdAt,
-            effectiveMutationTime(now),
+            now,
             inputReceipt);
     validateTransition(this, next);
     return next;
@@ -598,11 +591,6 @@ public record ToolInvocation(
   private boolean hasCompletedPreflightApproval() {
     return approval != null
         && (!approval.required() || approval.decision() == ToolApprovalDecision.ALLOWED);
-  }
-
-  private Instant effectiveMutationTime(Instant now) {
-    Instant candidate = Objects.requireNonNull(now, "now");
-    return candidate.isBefore(updatedAt) ? updatedAt : candidate;
   }
 
   /**

@@ -152,7 +152,7 @@ public final class CompactionChildStarter {
             null);
     tx.insertJoin(join);
 
-    tx.requestWork(new WorkTarget(WorkTargetType.THREAD, childThreadId), mutationNow);
+    tx.requestWork(new WorkTarget(WorkTargetType.THREAD, childThreadId));
 
     CompactionStart frozenStart =
         new CompactionStart(

@@ -7,6 +7,7 @@ import static fun.fengwk.kkstudio.harness.infra.dispatch.DispatcherTestSupport.T
 import static fun.fengwk.kkstudio.harness.infra.dispatch.DispatcherTestSupport.awaitTrue;
 import static fun.fengwk.kkstudio.harness.infra.dispatch.DispatcherTestSupport.clock;
 import static fun.fengwk.kkstudio.harness.infra.dispatch.DispatcherTestSupport.config;
+import static fun.fengwk.kkstudio.harness.infra.dispatch.DispatcherTestSupport.newStore;
 import static fun.fengwk.kkstudio.harness.infra.dispatch.DispatcherTestSupport.seedModel;
 import static fun.fengwk.kkstudio.harness.infra.dispatch.DispatcherTestSupport.seedThread;
 import static fun.fengwk.kkstudio.harness.infra.dispatch.DispatcherTestSupport.seedTool;
@@ -105,10 +106,12 @@ class HarnessWorkDispatcherHandoffTest {
       Consumer<ClaimedWork> threadHandler,
       Consumer<ClaimedWork> modelHandler,
       Consumer<ClaimedWork> toolHandler) {
+    if (store instanceof InMemoryHarnessStore memory) {
+      memory.setClock(clock);
+    }
     return new HarnessWorkDispatcher(
         store,
         config(maxDispatchTasks),
-        clock,
         drain,
         worker,
         poll,
@@ -119,7 +122,7 @@ class HarnessWorkDispatcherHandoffTest {
 
   @Test
   void routesClaimsToTheMatchingTypeConsumer() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryHarnessStore store = newStore();
     ThreadSeed threadSeed = seedThread(store);
     ModelSeed modelSeed = seedModel(store);
     ToolSeed toolSeed = seedTool(store);
@@ -152,7 +155,7 @@ class HarnessWorkDispatcherHandoffTest {
 
   @Test
   void claimsUsePerTypeLeasesFreshTokensAndWholeMillisecondTime() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryHarnessStore store = newStore();
     seedThread(store);
     seedModel(store);
     seedTool(store);
@@ -186,7 +189,7 @@ class HarnessWorkDispatcherHandoffTest {
     ClaimedWork firstThreadClaim = claims.get(0);
     store.transaction(
         tx -> {
-          tx.rescheduleWork(firstThreadClaim, NOW, Duration.ZERO);
+          tx.rescheduleWork(firstThreadClaim, Duration.ZERO);
           return null;
         });
     dispatcher.wake();
@@ -197,11 +200,11 @@ class HarnessWorkDispatcherHandoffTest {
   }
 
   @Test
-  void theDispatcherClockIsRoundedToMilliseconds() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+  void subMillisecondClockIsRoundedToMilliseconds() {
+    InMemoryHarnessStore store = newStore();
     ThreadSeed seed = seedThread(store);
     CopyOnWriteArrayList<ClaimedWork> claims = new CopyOnWriteArrayList<>();
-    // 亚毫秒源时钟：不包装会直接违反 store 的毫秒精度约束。
+    // 亚毫秒源时钟：事务时间必须截断到毫秒精度。
     Instant subMillisecondNow = NOW.plusNanos(123_456_789);
     HarnessWorkDispatcher dispatcher =
         newDispatcher(
@@ -225,7 +228,7 @@ class HarnessWorkDispatcherHandoffTest {
 
   @Test
   void normalProcessorReturnDoesNotTriggerAnyDispatcherDurableMutation() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryHarnessStore store = newStore();
     ThreadSeed threadSeed = seedThread(store);
     ModelSeed modelSeed = seedModel(store);
     CopyOnWriteArrayList<ClaimedWork> claims = new CopyOnWriteArrayList<>();
@@ -265,7 +268,7 @@ class HarnessWorkDispatcherHandoffTest {
    */
   @Test
   void runtimeExceptionFromTheProcessorKeepsTheLeaseButReleasesTheSlot() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryHarnessStore store = newStore();
     ThreadSeed threadSeed = seedThread(store);
     ModelSeed modelSeed = seedModel(store);
     CopyOnWriteArrayList<ClaimedWork> claims = new CopyOnWriteArrayList<>();
@@ -340,7 +343,7 @@ class HarnessWorkDispatcherHandoffTest {
 
   @Test
   void errorFromTheProcessorIsNotSwallowedButTheSlotIsStillReleased() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryHarnessStore store = newStore();
     ThreadSeed threadSeed = seedThread(store);
     ModelSeed modelSeed = seedModel(store);
     AtomicReference<Throwable> uncaught = new AtomicReference<>();
@@ -384,7 +387,7 @@ class HarnessWorkDispatcherHandoffTest {
 
   @Test
   void routesClaimsToTheRealProcessors() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryHarnessStore store = newStore();
     ThreadSeed threadSeed = seedThread(store);
     ModelSeed modelSeed = seedModel(store);
     ToolSeed toolSeed = seedTool(store);
@@ -407,7 +410,6 @@ class HarnessWorkDispatcherHandoffTest {
             },
             new ThreadProcessorConfig(
                 leaseConfig, Duration.ofSeconds(1), () -> CompactionConfig.DEFAULT),
-            clock,
             processorScheduler,
             Runnable::run);
     ModelProcessor modelProcessor =
@@ -434,7 +436,6 @@ class HarnessWorkDispatcherHandoffTest {
         new HarnessWorkDispatcher(
             store,
             config(3),
-            clock,
             singleThread(),
             singleThread(),
             new RecordingScheduler(),
@@ -487,7 +488,7 @@ class HarnessWorkDispatcherHandoffTest {
    */
   @Test
   void routesInFlightAndWaitingClaimsToTheRealProcessors() {
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    InMemoryHarnessStore store = newStore();
     ThreadSeed threadSeed = seedThread(store);
     ModelSeed modelSeed = seedModel(store);
     ToolSeed toolSeed = seedTool(store);
@@ -534,7 +535,7 @@ class HarnessWorkDispatcherHandoffTest {
           threadHandoffs.add(claim.target().id());
           store.transaction(
               tx -> {
-                tx.completeWork(claim, clock.instant());
+                tx.completeWork(claim);
                 return null;
               });
         };
@@ -639,7 +640,6 @@ class HarnessWorkDispatcherHandoffTest {
             new HarnessWorkDispatcher(
                 null,
                 config,
-                clock(),
                 singleThread(),
                 singleThread(),
                 new RecordingScheduler(),
@@ -650,21 +650,7 @@ class HarnessWorkDispatcherHandoffTest {
         NullPointerException.class,
         () ->
             new HarnessWorkDispatcher(
-                new InMemoryHarnessStore(),
-                null,
-                clock(),
-                singleThread(),
-                singleThread(),
-                new RecordingScheduler(),
-                handler,
-                handler,
-                handler));
-    assertThrows(
-        NullPointerException.class,
-        () ->
-            new HarnessWorkDispatcher(
-                new InMemoryHarnessStore(),
-                config,
+                newStore(),
                 null,
                 singleThread(),
                 singleThread(),
@@ -676,9 +662,8 @@ class HarnessWorkDispatcherHandoffTest {
         NullPointerException.class,
         () ->
             new HarnessWorkDispatcher(
-                new InMemoryHarnessStore(),
+                newStore(),
                 config,
-                clock(),
                 null,
                 singleThread(),
                 new RecordingScheduler(),
@@ -689,9 +674,8 @@ class HarnessWorkDispatcherHandoffTest {
         NullPointerException.class,
         () ->
             new HarnessWorkDispatcher(
-                new InMemoryHarnessStore(),
+                newStore(),
                 config,
-                clock(),
                 singleThread(),
                 null,
                 new RecordingScheduler(),
@@ -702,9 +686,8 @@ class HarnessWorkDispatcherHandoffTest {
         NullPointerException.class,
         () ->
             new HarnessWorkDispatcher(
-                new InMemoryHarnessStore(),
+                newStore(),
                 config,
-                clock(),
                 singleThread(),
                 singleThread(),
                 null,
@@ -715,9 +698,8 @@ class HarnessWorkDispatcherHandoffTest {
         NullPointerException.class,
         () ->
             new HarnessWorkDispatcher(
-                new InMemoryHarnessStore(),
+                newStore(),
                 config,
-                clock(),
                 singleThread(),
                 singleThread(),
                 new RecordingScheduler(),
@@ -728,9 +710,8 @@ class HarnessWorkDispatcherHandoffTest {
         NullPointerException.class,
         () ->
             new HarnessWorkDispatcher(
-                new InMemoryHarnessStore(),
+                newStore(),
                 config,
-                clock(),
                 singleThread(),
                 singleThread(),
                 new RecordingScheduler(),
@@ -741,9 +722,8 @@ class HarnessWorkDispatcherHandoffTest {
         NullPointerException.class,
         () ->
             new HarnessWorkDispatcher(
-                new InMemoryHarnessStore(),
+                newStore(),
                 config,
-                clock(),
                 singleThread(),
                 singleThread(),
                 new RecordingScheduler(),
@@ -754,9 +734,8 @@ class HarnessWorkDispatcherHandoffTest {
         NullPointerException.class,
         () ->
             new HarnessWorkDispatcher(
-                new InMemoryHarnessStore(),
+                newStore(),
                 config,
-                clock(),
                 singleThread(),
                 singleThread(),
                 new RecordingScheduler(),
@@ -800,9 +779,8 @@ class HarnessWorkDispatcherHandoffTest {
         IllegalArgumentException.class,
         () ->
             new HarnessWorkDispatcher(
-                new InMemoryHarnessStore(),
+                newStore(),
                 config(1),
-                clock(),
                 callerRuns,
                 Runnable::run,
                 new RecordingScheduler(),
@@ -813,9 +791,8 @@ class HarnessWorkDispatcherHandoffTest {
         IllegalArgumentException.class,
         () ->
             new HarnessWorkDispatcher(
-                new InMemoryHarnessStore(),
+                newStore(),
                 config(1),
-                clock(),
                 discard,
                 Runnable::run,
                 new RecordingScheduler(),
@@ -826,9 +803,8 @@ class HarnessWorkDispatcherHandoffTest {
         IllegalArgumentException.class,
         () ->
             new HarnessWorkDispatcher(
-                new InMemoryHarnessStore(),
+                newStore(),
                 config(1),
-                clock(),
                 Runnable::run,
                 discardOldest,
                 new RecordingScheduler(),

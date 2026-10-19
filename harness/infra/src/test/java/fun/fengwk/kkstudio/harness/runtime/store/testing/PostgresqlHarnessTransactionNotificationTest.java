@@ -338,12 +338,12 @@ class PostgresqlHarnessTransactionNotificationTest {
               .transaction(
                   tx ->
                       tx.claimNextWork(
-                          WorkTargetType.TOOL, now, "lease-1", Duration.ofSeconds(60), node))
+                          WorkTargetType.TOOL, "lease-1", Duration.ofSeconds(60), node))
               .orElseThrow();
       listener.expectExactly(interactionNotification(chain.threadId()));
 
       // cleanup/reset：重排清租约使 Work 可能重新进入待领取。
-      inTransaction(store, tx -> tx.rescheduleWork(claim, now, Duration.ZERO));
+      inTransaction(store, tx -> tx.rescheduleWork(claim, Duration.ZERO));
       listener.expectExactly(interactionNotification(chain.threadId()));
 
       ClaimedWork reclaimed =
@@ -351,12 +351,12 @@ class PostgresqlHarnessTransactionNotificationTest {
               .transaction(
                   tx ->
                       tx.claimNextWork(
-                          WorkTargetType.TOOL, now, "lease-2", Duration.ofSeconds(60), node))
+                          WorkTargetType.TOOL, "lease-2", Duration.ofSeconds(60), node))
               .orElseThrow();
       listener.expectExactly(interactionNotification(chain.threadId()));
 
       // cleanup：终态删除。
-      store.transaction(tx -> tx.completeWork(reclaimed, now));
+      store.transaction(tx -> tx.completeWork(reclaimed));
       listener.expectExactly(interactionNotification(chain.threadId()));
 
       requestEnvironmentWork(store, chain.threadId(), target, ENVIRONMENT);
@@ -384,7 +384,7 @@ class PostgresqlHarnessTransactionNotificationTest {
           store,
           tx -> {
             tx.lockThread(chain.threadId()).orElseThrow();
-            tx.requestWork(target, T2);
+            tx.requestWork(target);
           });
       listener.assertSilent();
 
@@ -392,12 +392,11 @@ class PostgresqlHarnessTransactionNotificationTest {
       ClaimedWork claim =
           store
               .transaction(
-                  tx ->
-                      tx.claimNextWork(WorkTargetType.TOOL, now, "lease-1", Duration.ofSeconds(60)))
+                  tx -> tx.claimNextWork(WorkTargetType.TOOL, "lease-1", Duration.ofSeconds(60)))
               .orElseThrow();
       listener.assertSilent();
 
-      store.transaction(tx -> tx.completeWork(claim, now));
+      store.transaction(tx -> tx.completeWork(claim));
       listener.assertSilent();
     }
   }
@@ -425,7 +424,7 @@ class PostgresqlHarnessTransactionNotificationTest {
               .transaction(
                   tx ->
                       tx.claimNextWork(
-                          WorkTargetType.TOOL, now, "lease-1", Duration.ofSeconds(60), node))
+                          WorkTargetType.TOOL, "lease-1", Duration.ofSeconds(60), node))
               .orElseThrow();
       listener.expectExactly(interactionNotification(chain.threadId()));
 
@@ -439,7 +438,7 @@ class PostgresqlHarnessTransactionNotificationTest {
       listener.assertSilent();
 
       // 来源 Thread 已不可解析：Work 终态失效退化为空 payload 全量 resync。
-      store.transaction(tx -> tx.completeWork(claim, now));
+      store.transaction(tx -> tx.completeWork(claim));
       listener.expectExactly(interactionResyncNotification());
     }
   }
@@ -616,7 +615,7 @@ class PostgresqlHarnessTransactionNotificationTest {
         store,
         tx -> {
           tx.lockThread(threadId).orElseThrow();
-          tx.requestWork(target, T2, environment);
+          tx.requestWork(target, environment);
         });
   }
 

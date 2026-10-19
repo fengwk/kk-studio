@@ -187,7 +187,9 @@ synthetic 归一化结果没有真实 invocation，binding 为 null。
 
 `Work` 是调度邮箱的持久化当前状态，每个 target 一行：`target = (THREAD|MODEL|TOOL, targetId)`、`availableAt`、`wakeVersion`、`leaseToken`、`leaseUntil` 与可选的环境路由标记 `requiredEnvironmentId`。所有跃迁都是返回新状态的纯函数（`initial` / `request` / `claim` / `renew` / `complete` / `reschedule`）：`request` 把 `availableAt` 提前到最早值并把 `wakeVersion` +1，`claim` 写入租约，`complete` 在 `wakeVersion` 未变时删除该行、被新 wake 推进时只清空租约保留行。`reschedule` 总是清空租约：没有新 wake 时采用目标时刻，有新 wake 时取现有 `availableAt` 与目标时刻的较早值，不让旧 claim 延后新唤醒。`leaseToken`、有效租约与认领时的 `wakeVersion` 共同拦截迟到的旧执行体，防止删除更新的 wake。
 
-Store 的 `claimNextWork` / `renewWork` 用租约时长（`Duration`）描述新 deadline，`rescheduleWork` 用非负整毫秒 `Duration` 描述相对当前的重试延迟（零表示立即），`requestWork` 只表达「立即唤醒」；`Work` 纯函数接收由该时间域算出的绝对时刻。有效性判定、deadline 与 due 全部在**单一权威时间域**内完成：生产实现是数据库时钟（`statement_timestamp()`），内存实现是传入的 `now`。节点 JVM 时钟与数据库的偏差不会改变租约有效性或重试相对延迟。
+Store 的 `claimNextWork` / `renewWork` 用租约时长（`Duration`）描述新 deadline，`rescheduleWork` 用非负整毫秒 `Duration` 描述相对当前的重试延迟（零表示立即），`requestWork` 只表达「立即唤醒」；`Work` 纯函数接收由该时间域算出的绝对时刻。有效性判定、deadline 与 due 全部在**单一权威时间域**内完成：生产实现是数据库时钟（`statement_timestamp()`），内存实现是测试时钟。
+
+所有持久化时间戳同样只取自事务的 `tx.now()`：生产实现在事务首次读取时取数据库时间，之后在该事务内保持不变。时间只记录事实发生的时刻，不承担排序或单调约束——Entry 顺序由父链表达，Thread / Invocation 的推进由 version 与状态机表达，因此 Runtime 不读取节点时钟，也不把时间抬升到已锁定事实的时间之后。
 
 **`requiredEnvironmentId` 仅当 Work target 为 `TOOL` 时允许非空；对 THREAD 与 MODEL 类型的 Work 必须为空，不需要绑定执行主机的服务端 TOOL 也可以为空。** 对非 TOOL 传入非空环境 ID 时领域构造器直接抛 `IllegalArgumentException`。环境要求在 Work 首次创建时冻结，并在后续 `request`、`claim`、`renew`、`complete`、`reschedule` 中完整保留；后续 `request` 传入冲突的非空环境 ID 同样抛异常拒绝。Runtime 只负责在 Work 行上携带这条路由要求，真正的节点分发由 Infra 按当前节点是否持有该 Environment 的 READY 连接租约实施围栏（见 [Harness Infra](harness-infra.md)）。
 

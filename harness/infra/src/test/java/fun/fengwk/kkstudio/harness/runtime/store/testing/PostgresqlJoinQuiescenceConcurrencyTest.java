@@ -59,10 +59,8 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
-import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -103,10 +101,7 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
     jdbc = new JdbcTemplate(PostgresqlHarnessStoreFixture.dataSource());
     runtime =
         new HarnessRuntime(
-            store,
-            Clock.fixed(T1, ZoneOffset.UTC),
-            (threadId, path, preparation) -> null,
-            () -> CompactionConfig.DEFAULT);
+            store, (threadId, path, preparation) -> null, () -> CompactionConfig.DEFAULT);
   }
 
   private record Tree(
@@ -261,9 +256,9 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
           insertSucceededModel(tx, threadC, cStart, cUser, now);
 
           if (bTerminalPending) {
-            tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadB), now);
+            tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadB));
           }
-          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadC), now);
+          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadC));
           return new Tree(sessionId, rootEntryId, threadA, threadB, threadC, joinAB, joinBC);
         });
   }
@@ -289,7 +284,6 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
             new ProcessorLeaseConfig(Duration.ofSeconds(30), Duration.ofSeconds(5)),
             Duration.ofSeconds(5),
             () -> new CompactionConfig(20_000)),
-        Clock.fixed(now, ZoneOffset.UTC),
         scheduler,
         Runnable::run);
   }
@@ -334,7 +328,7 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
           ModelInvocation model = tx.findModelInvocationByTurn(threadId, start).orElseThrow();
           tx.lockModelInvocation(model.id());
           succeedModel(tx, model, assistantResponse(), now);
-          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId), now);
+          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId));
           return null;
         });
   }
@@ -622,8 +616,7 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
 
   private ClaimedWork claim(String leaseId, Instant now) {
     return store
-        .transaction(
-            tx -> tx.claimNextWork(WorkTargetType.THREAD, now, leaseId, Duration.ofSeconds(30)))
+        .transaction(tx -> tx.claimNextWork(WorkTargetType.THREAD, leaseId, Duration.ofSeconds(30)))
         .orElseThrow();
   }
 

@@ -49,7 +49,6 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
@@ -497,21 +496,17 @@ class HarnessRuntimeToolInputTest {
     // MODEL 与 TOOL 的工作认领均为空
     Optional<ClaimedWork> modelWork =
         store.transaction(
-            tx ->
-                tx.claimNextWork(
-                    WorkTargetType.MODEL, T5, "probe-model", Duration.between(T5, T6)));
+            tx -> tx.claimNextWork(WorkTargetType.MODEL, "probe-model", Duration.between(T5, T6)));
     assertTrue(modelWork.isEmpty());
     Optional<ClaimedWork> toolWork =
         store.transaction(
-            tx ->
-                tx.claimNextWork(WorkTargetType.TOOL, T5, "probe-tool", Duration.between(T5, T6)));
+            tx -> tx.claimNextWork(WorkTargetType.TOOL, "probe-tool", Duration.between(T5, T6)));
     assertTrue(toolWork.isEmpty());
     // THREAD 的工作认领存在且指向该 thread
     Optional<ClaimedWork> threadWork =
         store.transaction(
             tx ->
-                tx.claimNextWork(
-                    WorkTargetType.THREAD, T5, "probe-thread", Duration.between(T5, T6)));
+                tx.claimNextWork(WorkTargetType.THREAD, "probe-thread", Duration.between(T5, T6)));
     assertTrue(threadWork.isPresent());
     assertEquals(
         new WorkTarget(WorkTargetType.THREAD, baseline.threadId()), threadWork.get().target());
@@ -552,12 +547,7 @@ class HarnessRuntimeToolInputTest {
         tx -> {
           ThreadState thread = tx.lockThread(baseline.threadId()).orElseThrow();
           EntryPath path = tx.loadEntryPath(thread.headEntryId());
-          Instant now =
-              HarnessStoreTime.notBefore(
-                  clock.instant(),
-                  thread.updatedAt(),
-                  path.head().createdAt(),
-                  acceptedTool.updatedAt());
+          Instant now = clock.instant();
           tx.insertEntry(
               new Entry(newEntryId, path.root().sessionId(), thread.headEntryId(), payload, now));
           tx.updateThread(thread.advanceHead(newEntryId, now));
@@ -860,12 +850,7 @@ class HarnessRuntimeToolInputTest {
         tx -> {
           ThreadState thread = tx.lockThread(threadId).orElseThrow();
           EntryPath path = tx.loadEntryPath(thread.headEntryId());
-          Instant now =
-              HarnessStoreTime.notBefore(
-                  clock.instant(),
-                  thread.updatedAt(),
-                  path.head().createdAt(),
-                  terminal.updatedAt());
+          Instant now = clock.instant();
           tx.insertEntry(
               new Entry(entryId, path.root().sessionId(), thread.headEntryId(), payload, now));
           tx.updateThread(thread.advanceHead(entryId, now));

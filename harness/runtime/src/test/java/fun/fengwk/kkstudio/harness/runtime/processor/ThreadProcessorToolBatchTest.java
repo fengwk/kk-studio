@@ -24,9 +24,6 @@ import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestS
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.tool;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.tooledRequest;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.toolsByAssistant;
-import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.touchModelTimestamp;
-import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.touchThreadTimestamp;
-import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.touchToolTimestamp;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.transitionModel;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.transitionTool;
 import static fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorTestSupport.work;
@@ -85,7 +82,6 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
-import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -341,54 +337,6 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
             .orElse(null));
     assertNotNull(
         work(fixture.store, new WorkTarget(WorkTargetType.THREAD, chain.turn().threadId())));
-  }
-
-  /**
-   * Tool batch 新建的 effects/result/TURN_END 以及随后 continuation 事实不得早于已锁定 Thread/Model/Tool durable
-   * floors；raw lease clock 仍保持回拨后的本地样本。
-   */
-  @Test
-  void toolTerminalApplyUsesAllDurableFloorsWithoutClampingLeaseClock() {
-    Fixture fixture = fixture();
-    var chain =
-        seedToolChain(
-            fixture.store,
-            List.of("call-1"),
-            ModelInvocationStatus.SUCCEEDED,
-            List.of(ToolInvocationStatus.SUCCEEDED));
-    Instant threadFloor = NOW.plusSeconds(120);
-    Instant modelFloor = NOW.plusSeconds(121);
-    Instant toolFloor = NOW.plusSeconds(122);
-    touchThreadTimestamp(fixture.store, chain.turn().threadId(), threadFloor);
-    touchModelTimestamp(fixture.store, chain.modelInvocationId(), modelFloor);
-    touchToolTimestamp(fixture.store, chain.toolInvocationIds().getFirst(), toolFloor);
-    requestThreadWork(fixture.store, chain.turn().threadId());
-    fixture.resolver.results.add(new TurnResolver.Resolved(plainRequest(), 100_000, 16_384));
-
-    // claim1：Tool batch 原子 apply（results + TURN_END）以全部 durable floors 抬升。
-    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(chain.turn().threadId()));
-    EntryPath durablePath = path(fixture.store, chain.turn().threadId());
-    for (Entry entry : durablePath.entries().subList(4, durablePath.entries().size())) {
-      assertEquals(toolFloor, entry.createdAt());
-    }
-    // applyToolBatch 已删除 Tool 行：无法读 tool.updatedAt，但 thread 的最终 updatedAt 仍受 mutationNow 抬升。
-    assertTrue(
-        fixture
-            .store
-            .transaction(tx -> tx.findToolInvocation(chain.toolInvocationIds().getFirst()))
-            .isEmpty());
-    assertEquals(toolFloor, thread(fixture.store, chain.turn().threadId()).updatedAt());
-
-    // claim2：continuation 事实沿用同一 durable floors（thread/plan 已抬升到 toolFloor）。
-    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(chain.turn().threadId()));
-    Entry continuation = path(fixture.store, chain.turn().threadId()).head();
-    ModelInvocation continuationModel =
-        inTx(
-                fixture,
-                tx -> tx.findModelInvocationByTurn(chain.turn().threadId(), continuation.id()))
-            .orElseThrow();
-    assertEquals(toolFloor, continuationModel.createdAt());
-    assertEquals(toolFloor, continuationModel.updatedAt());
   }
 
   /** effects 落在 ToolResult 之前；两个 tool 的 batch 后固定 TURN_END，随后单独 claim 启动 continuation。 */

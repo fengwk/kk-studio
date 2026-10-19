@@ -34,8 +34,6 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
 import java.time.Clock;
 import java.time.Duration;
-import java.time.Instant;
-import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -330,16 +328,13 @@ class PostgresqlModelLeaseRecoveryTest {
     store.transaction(
         tx -> {
           tx.lockThread(ownerThreadId).orElseThrow();
-          tx.requestWork(target, Instant.now().truncatedTo(ChronoUnit.MILLIS).minusSeconds(1));
+          tx.requestWork(target);
           return null;
         });
   }
 
   private Optional<ClaimedWork> claimModel(String token) {
-    return store.transaction(
-        tx ->
-            tx.claimNextWork(
-                WorkTargetType.MODEL, Instant.now().truncatedTo(ChronoUnit.MILLIS), token, LEASE));
+    return store.transaction(tx -> tx.claimNextWork(WorkTargetType.MODEL, token, LEASE));
   }
 
   private ModelInvocation findModel(UUID modelId) {

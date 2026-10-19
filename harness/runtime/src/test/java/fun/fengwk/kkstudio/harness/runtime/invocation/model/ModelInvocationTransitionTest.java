@@ -191,16 +191,6 @@ class ModelInvocationTransitionTest {
   }
 
   @Test
-  void transitionMethodsClampWallClockRollbackToCurrentUpdatedAt() {
-    ModelInvocation stored = withUpdatedAt(running(1, null), T2);
-
-    // Provider terminal callback 可携带早于 durable 行的 wall-clock 样本，但不能让 updatedAt 回退。
-    ModelInvocation next = stored.succeed(response(), T1);
-    assertEquals(ModelInvocationStatus.SUCCEEDED, next.status());
-    assertEquals(T2, next.updatedAt());
-  }
-
-  @Test
   void failTerminatesFromReadyAndRunningKeepingAttempt() {
     assertEquals(ModelInvocationStatus.FAILED, ready(0).fail(error(), T1).status());
     assertEquals(0, ready(0).fail(error(), T1).attempt());
@@ -674,7 +664,7 @@ class ModelInvocationTransitionTest {
   }
 
   @Test
-  void validateTransitionRejectsIdentityAndTimeRegression() {
+  void validateTransitionRejectsIdentityChanges() {
     ModelInvocation stored = withUpdatedAt(ready(0), T1);
     assertThrows(
         IllegalArgumentException.class,
@@ -694,17 +684,11 @@ class ModelInvocationTransitionTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> ModelInvocation.validateTransition(stored, withCreatedAt(stored)));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> ModelInvocation.validateTransition(stored, withUpdatedAt(stored, CREATED)));
   }
 
   @Test
   void validateTransitionRejectsIllegalStatusMovesAndAttemptDeltas() {
     ModelInvocation stored = ready(0);
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> ModelInvocation.validateTransition(stored, running(1, null)));
     assertThrows(
         IllegalArgumentException.class,
         () ->

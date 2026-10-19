@@ -46,7 +46,6 @@ import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ResolvedRequestValidator;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
@@ -60,7 +59,6 @@ import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
-import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -120,9 +118,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * （terminal apply 会按 queued 快照重建 wake）；rejected 只在仍保留合法 deferred messages 时先请求 THREAD 再
  * complete，绝不立即重排同一压缩。
  *
- * <p>持久化变更时间会抬升到事务内已锁定 Thread/path/Model/Tool 事实的时间下界；Work ownership、renew、 complete、request 与
- * reschedule 始终使用未抬升的本地 lease clock，避免未来持久化时间改变 lease 语义。
- *
  * <p>压缩触发正交：soft threshold 在尚未完成的 continuation 边界或下一条真实 user demand 到达时门控；hard overflow 立即压缩并只恢复一次。
  * 所有 trigger 共用 MODEL Work 与 deterministic no-gain，且统一在隔离的 child Runtime Thread 内执行（父 durable
  * wait、无父 ModelInvocation）；切分先 HISTORY 再以 continueModel obligation 机械启动 TURN_PREFIX。压缩消费零 queued
@@ -140,7 +135,6 @@ public final class ThreadProcessor {
   private final HarnessStore store;
   private final TurnResolver resolver;
   private final ThreadProcessorConfig config;
-  private final Clock clock;
   private final ScheduledExecutorService scheduler;
   private final Executor heartbeatWorker;
   private final ModelOutcomeAppender modelOutcomeAppender;
@@ -156,10 +150,9 @@ public final class ThreadProcessor {
       HarnessStore store,
       TurnResolver resolver,
       ThreadProcessorConfig config,
-      Clock clock,
       ScheduledExecutorService scheduler,
       Executor heartbeatWorker) {
-    this(store, resolver, config, clock, scheduler, heartbeatWorker, null);
+    this(store, resolver, config, scheduler, heartbeatWorker, null);
   }
 
   /** 注入 Tool outcome 的 durable history 物化端口（可为 null：ToolResult 含 Resource 引用时 fail-closed）。 */
@@ -167,14 +160,12 @@ public final class ThreadProcessor {
       HarnessStore store,
       TurnResolver resolver,
       ThreadProcessorConfig config,
-      Clock clock,
       ScheduledExecutorService scheduler,
       Executor heartbeatWorker,
       ToolResultHistoryMaterializer toolResultHistoryMaterializer) {
     this.store = Objects.requireNonNull(store, "store");
     this.resolver = Objects.requireNonNull(resolver, "resolver");
     this.config = Objects.requireNonNull(config, "config");
-    this.clock = HarnessStoreTime.millisecondClock(clock);
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
     this.heartbeatWorker = Objects.requireNonNull(heartbeatWorker, "heartbeatWorker");
     this.modelOutcomeAppender = new ModelOutcomeAppender(toolResultHistoryMaterializer);
@@ -224,7 +215,7 @@ public final class ThreadProcessor {
   }
 
   private TurnPlan stepTx(HarnessStore.Transaction tx, ClaimedWork claim) {
-    Instant now = clock.instant();
+    Instant now = tx.now();
     ThreadState thread = lockThreadWithSession(tx, claim.target().id());
     if (thread == null) {
       throw new ClaimLostSignal();
@@ -337,10 +328,10 @@ public final class ThreadProcessor {
 
   /** blocker / idle 完成：final fence 后 completeWork；fence 失败抛内部信号回滚（零 mutation 的 LOST）。 */
   private static void completeClaim(HarnessStore.Transaction tx, ClaimedWork claim, Instant now) {
-    if (tx.lockClaimedWork(claim, now).isEmpty()) {
+    if (tx.lockClaimedWork(claim).isEmpty()) {
       throw new ClaimLostSignal();
     }
-    tx.completeWork(claim, now);
+    tx.completeWork(claim);
   }
 
   /**
@@ -373,8 +364,6 @@ public final class ThreadProcessor {
     if (settings.isEmpty()) {
       return false;
     }
-    Instant mutationNow =
-        HarnessStoreTime.notBefore(now, thread.updatedAt(), path.head().createdAt());
     BranchSettings applied =
         settingsReducer.reduce(thread.id(), path.baseSettings(), settings, tx::nextId);
     UUID settingsEntryId = tx.nextId();
@@ -384,22 +373,22 @@ public final class ThreadProcessor {
             thread.sessionId(),
             path.head().id(),
             new SettingsPayload(applied, thread.id()),
-            mutationNow));
+            now));
     List<ThreadCommand> consumed = new ArrayList<>(settings.size());
     for (ThreadCommand command : settings) {
       consumed.add(command.markApplied(settingsEntryId));
     }
     tx.updateCommands(consumed);
-    tx.updateThread(thread.advanceHead(settingsEntryId, mutationNow));
+    tx.updateThread(thread.advanceHead(settingsEntryId, now));
     // final fence 最后执行：损失抛内部信号整事务回滚，绝无带 mutation 的 LOST 提交。
-    if (tx.lockClaimedWork(claim, now).isEmpty()) {
+    if (tx.lockClaimedWork(claim).isEmpty()) {
       throw new ClaimLostSignal();
     }
     // STOPPED 上只落 durable 设置，不唤醒：显式新输入才是恢复 RUNNABLE 的唯一入口。
     if (!thread.executionControl().isStopped()) {
-      tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), now);
+      tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()));
     }
-    tx.completeWork(claim, now);
+    tx.completeWork(claim);
     return true;
   }
 
@@ -441,9 +430,6 @@ public final class ThreadProcessor {
           "terminal model apply preconditions changed under the same transaction for model "
               + model.id());
     }
-    Instant mutationNow =
-        HarnessStoreTime.notBefore(
-            now, thread.updatedAt(), path.head().createdAt(), model.updatedAt());
     TurnStartPayload turnStart =
         (TurnStartPayload)
             path.openTurnStart()
@@ -452,8 +438,7 @@ public final class ThreadProcessor {
                         new IllegalStateException(
                             "terminal model must belong to an open TURN_START"))
                 .payload();
-    ModelOutcomeAppender.Applied applied =
-        modelOutcomeAppender.appendModel(tx, path, model, mutationNow);
+    ModelOutcomeAppender.Applied applied = modelOutcomeAppender.appendModel(tx, path, model, now);
     UUID head = applied.headEntryId();
     UUID finalAnswerEntryId = applied.finalAnswerEntryId();
     boolean terminal = applied.terminal();
@@ -463,13 +448,13 @@ public final class ThreadProcessor {
     ThreadState advancedThread;
     boolean requestThread = false;
     if (toolPhase) {
-      advancedThread = thread.advanceHead(head, mutationNow);
+      advancedThread = thread.advanceHead(head, now);
       tx.updateThread(advancedThread);
     } else {
       // 完全结束的 closed turn 只重建 queued demand / fallback / hard-overflow obligation；soft threshold
       // 无新 demand 时不 self-wake。CONTINUE 例外：必须机械请求 THREAD，下一 claim 才偿还 continueModel
       // obligation 并启动续写。
-      advancedThread = thread.advanceHead(head, mutationNow);
+      advancedThread = thread.advanceHead(head, now);
       // hard overflow / fallback obligation 与 idle soft threshold 都必须遵守同一条祖先链 guard：位于 COMPACTION
       // 子执行树内的
       // Thread（含压缩子自身的超限失败回合）绝不再次规划压缩，从而不产生递归压缩子、也不原样重复超限请求。
@@ -484,16 +469,16 @@ public final class ThreadProcessor {
       requestThread = continueModel || hasQueuedMessage || compactionDue;
       tx.updateThread(advancedThread);
       if (continueModel) {
-        coordinator.remindSoftBudgetIfDue(tx, advancedThread, tx.loadEntryPath(head), mutationNow);
+        coordinator.remindSoftBudgetIfDue(tx, advancedThread, tx.loadEntryPath(head), now);
       }
       if (terminal) {
         // 执行终止边界：首次最终回答 / 不可继续失败与 Join 冻结、父通知接受原子提交。
         ThreadLifecycleCoordinator.matchAndDeliverTerminalJoins(
-            tx, advancedThread, head, finalAnswerEntryId, mutationNow, false);
+            tx, advancedThread, head, finalAnswerEntryId, now, false);
       }
     }
     // final fence 最后执行：损失抛内部信号，整事务回滚，绝无带 mutation 的 LOST 提交。
-    if (tx.lockClaimedWork(claim, now).isEmpty()) {
+    if (tx.lockClaimedWork(claim).isEmpty()) {
       throw new ClaimLostSignal();
     }
     if (toolPhase) {
@@ -505,7 +490,7 @@ public final class ThreadProcessor {
           readyRequested = true;
           EnvironmentId environmentId =
               invocation.binding() == null ? null : invocation.binding().environmentId();
-          tx.requestWork(new WorkTarget(WorkTargetType.TOOL, invocation.id()), now, environmentId);
+          tx.requestWork(new WorkTarget(WorkTargetType.TOOL, invocation.id()), environmentId);
         }
       }
       if (!readyRequested) {
@@ -515,9 +500,9 @@ public final class ThreadProcessor {
       }
     }
     if (requestThread) {
-      tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), now);
+      tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()));
     }
-    tx.completeWork(claim, now);
+    tx.completeWork(claim);
   }
 
   /** 结算已 matched 的 COMPACTION Join 并推进父 Thread 历史；子执行失败则落 AssistantErrorPayload。 */
@@ -582,12 +567,9 @@ public final class ThreadProcessor {
         outcome = TurnEndOutcome.FAILED;
       }
     }
-    Instant mutationNow =
-        HarnessStoreTime.notBefore(now, thread.updatedAt(), path.head().createdAt());
     UUID resultEntryId = tx.nextId();
     tx.insertEntry(
-        new Entry(
-            resultEntryId, path.root().sessionId(), path.head().id(), resultPayload, mutationNow));
+        new Entry(resultEntryId, path.root().sessionId(), path.head().id(), resultPayload, now));
     UUID turnEndId = tx.nextId();
     tx.insertEntry(
         new Entry(
@@ -600,8 +582,8 @@ public final class ThreadProcessor {
                 continueModel,
                 outcome == TurnEndOutcome.FAILED ? TurnEndReason.TURN_FAILED : null,
                 null),
-            mutationNow));
-    ThreadState advanced = thread.advanceHead(turnEndId, mutationNow);
+            now));
+    ThreadState advanced = thread.advanceHead(turnEndId, now);
     tx.updateThread(advanced);
     // STOPPED 父 Thread 只固化压缩结果，不请求任何 Work、不续作：恢复仍由显式输入驱动（与已停止父的 task 回执交付一致）。
     boolean stopped = thread.executionControl().isStopped();
@@ -619,19 +601,19 @@ public final class ThreadProcessor {
     boolean requestThread = hasQueuedDemand && !stopped || compactionDue || mechanicalWake;
     if (mechanicalWake) {
       EntryPath updatedPath = tx.loadEntryPath(turnEndId);
-      coordinator.remindSoftBudgetIfDue(tx, advanced, updatedPath, mutationNow);
+      coordinator.remindSoftBudgetIfDue(tx, advanced, updatedPath, now);
     }
     if (outcome == TurnEndOutcome.FAILED && !requestThread) {
       ThreadLifecycleCoordinator.matchAndDeliverTerminalJoins(
-          tx, advanced, turnEndId, null, mutationNow, false);
+          tx, advanced, turnEndId, null, now, false);
     }
-    if (tx.lockClaimedWork(claim, now).isEmpty()) {
+    if (tx.lockClaimedWork(claim).isEmpty()) {
       throw new ClaimLostSignal();
     }
     if (requestThread) {
-      tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), now);
+      tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()));
     }
-    tx.completeWork(claim, now);
+    tx.completeWork(claim);
   }
 
   /**
@@ -668,25 +650,19 @@ public final class ThreadProcessor {
             "tool siblings changed under lock for assistant entry " + assistant.id());
       }
     }
-    Instant mutationNow =
-        HarnessStoreTime.notBefore(
-            now, thread.updatedAt(), path.head().createdAt(), model.updatedAt());
-    for (ToolInvocation sibling : siblings) {
-      mutationNow = HarnessStoreTime.notBefore(mutationNow, sibling.updatedAt());
-    }
     ModelOutcomeAppender.Applied applied =
-        modelOutcomeAppender.appendToolBatch(tx, path, model, siblings, mutationNow);
+        modelOutcomeAppender.appendToolBatch(tx, path, model, siblings, now);
     UUID turnEndId = applied.headEntryId();
-    ThreadState advanced = thread.advanceHead(turnEndId, mutationNow);
+    ThreadState advanced = thread.advanceHead(turnEndId, now);
     tx.updateThread(advanced);
     EntryPath updatedPath = tx.loadEntryPath(turnEndId);
-    coordinator.remindSoftBudgetIfDue(tx, advanced, updatedPath, mutationNow);
-    if (tx.lockClaimedWork(claim, now).isEmpty()) {
+    coordinator.remindSoftBudgetIfDue(tx, advanced, updatedPath, now);
+    if (tx.lockClaimedWork(claim).isEmpty()) {
       throw new ClaimLostSignal();
     }
     // batch 关闭 turn 固定产生 continueModel 义务：先 request THREAD 再 complete，下一 claim 才做 continuation。
-    tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), now);
-    tx.completeWork(claim, now);
+    tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()));
+    tx.completeWork(claim);
   }
 
   /** 在步骤事务内构造 speculative plan；claim fence 与 lease margin 在构造前完成。 */
@@ -720,13 +696,12 @@ public final class ThreadProcessor {
               + thread.id());
     }
     List<ThreadCommand> queued = tx.loadQueuedCommands(thread.id());
-    Work claimed = tx.lockClaimedWork(claim, now).orElse(null);
+    Work claimed = tx.lockClaimedWork(claim).orElse(null);
     if (claimed == null) {
       throw new ClaimLostSignal();
     }
     // 近过期 claim 在 Resolver 首次 heartbeat 前可能过期：plan 事务内先确保完整 lease margin。
     ProcessorLeaseSupport.ensureLeaseMargin(tx, claim, config.leaseConfig(), now);
-    Instant planNow = HarnessStoreTime.notBefore(now, thread.updatedAt(), path.head().createdAt());
     // 最小事实：INPUT 可以没有任何 queued 输入，只要本 Thread 有尚未接纳的已物化通知；这些通知已在历史里，不重复写 entry。
     boolean pendingNotificationInput =
         reason == TurnStartReason.INPUT
@@ -739,7 +714,7 @@ public final class ThreadProcessor {
         queued,
         thread.nextCommandSequence() - 1,
         tx::nextId,
-        planNow,
+        now,
         preparation,
         pendingNotificationInput);
   }
@@ -755,12 +730,7 @@ public final class ThreadProcessor {
     AtomicBoolean heartbeatLost = new AtomicBoolean();
     WorkHeartbeat heartbeat =
         new WorkHeartbeat(
-            store,
-            scheduler,
-            heartbeatWorker,
-            config.leaseConfig(),
-            clock,
-            () -> heartbeatLost.set(true));
+            store, scheduler, heartbeatWorker, config.leaseConfig(), () -> heartbeatLost.set(true));
     if (!heartbeat.start(claim)) {
       log.warn("cannot schedule work lease heartbeat for {}; rescheduling", claim.target());
       return rescheduleIfOwned(claim, config.resolveFailureDelay())
@@ -838,7 +808,7 @@ public final class ThreadProcessor {
 
   private void commitTx(
       HarnessStore.Transaction tx, ClaimedWork claim, TurnPlan plan, TurnResolver.Result result) {
-    Instant now = clock.instant();
+    Instant now = tx.now();
     ThreadState thread = lockThreadWithSession(tx, plan.threadId());
     if (thread == null) {
       throw new ClaimLostSignal();
@@ -850,10 +820,7 @@ public final class ThreadProcessor {
     if (!snapshotMatches(plan, queued)) {
       throw new ClaimLostSignal();
     }
-    Instant mutationNow = HarnessStoreTime.notBefore(now, thread.updatedAt());
-    for (Entry entry : plan.candidateEntries()) {
-      mutationNow = HarnessStoreTime.notBefore(mutationNow, entry.createdAt());
-    }
+    for (Entry entry : plan.candidateEntries()) {}
     Integer contextWindow = null;
     Integer maxOutputTokens = null;
     CompactionStart compactionStart = null;
@@ -875,12 +842,7 @@ public final class ThreadProcessor {
       maxOutputTokens = compactionResolved.maxOutputTokens();
       CompactionChildStarter.CompactionChild child =
           CompactionChildStarter.start(
-              tx,
-              thread,
-              plan.candidatePath(),
-              compactionResolved,
-              plan.preparation(),
-              mutationNow);
+              tx, thread, plan.candidatePath(), compactionResolved, plan.preparation(), now);
       compactionStart = child.frozenStart();
     }
     // 低序 mutation（Entries / Commands / Thread / ModelInvocation）先完成。
@@ -889,7 +851,7 @@ public final class ThreadProcessor {
           withCreatedAt(
               withResolvedTurnStart(
                   entry, plan, contextWindow, maxOutputTokens, compactionStart, invocationSpec),
-              mutationNow));
+              now));
     }
     List<ThreadCommand> consumed = new ArrayList<>(plan.consumedCommands().size());
     for (ThreadCommand command : plan.consumedCommands()) {
@@ -899,7 +861,7 @@ public final class ThreadProcessor {
     if (result instanceof TurnResolver.Resolved resolved) {
       ThreadState advanced =
           thread.advanceHeadAndInputThroughSequence(
-              plan.candidateHeadEntryId(), nextWatermark(plan, thread), mutationNow);
+              plan.candidateHeadEntryId(), nextWatermark(plan, thread), now);
       tx.updateThread(advanced);
       UUID invocationId = tx.nextId();
       tx.insertModelInvocation(
@@ -916,22 +878,22 @@ public final class ThreadProcessor {
               null,
               null,
               List.of(),
-              mutationNow,
-              mutationNow));
-      if (tx.lockClaimedWork(claim, now).isEmpty()) {
+              now,
+              now));
+      if (tx.lockClaimedWork(claim).isEmpty()) {
         throw new ClaimLostSignal();
       }
-      tx.requestWork(new WorkTarget(WorkTargetType.MODEL, invocationId), now);
-      tx.completeWork(claim, now);
+      tx.requestWork(new WorkTarget(WorkTargetType.MODEL, invocationId));
+      tx.completeWork(claim);
     } else if (result instanceof TurnResolver.CompactionResolved) {
       ThreadState advanced =
           thread.advanceHeadAndInputThroughSequence(
-              plan.candidateHeadEntryId(), nextWatermark(plan, thread), mutationNow);
+              plan.candidateHeadEntryId(), nextWatermark(plan, thread), now);
       tx.updateThread(advanced);
-      if (tx.lockClaimedWork(claim, now).isEmpty()) {
+      if (tx.lockClaimedWork(claim).isEmpty()) {
         throw new ClaimLostSignal();
       }
-      tx.completeWork(claim, now);
+      tx.completeWork(claim);
     } else {
       TurnResolver.Rejected rejected = (TurnResolver.Rejected) result;
       UUID errorEntryId = tx.nextId();
@@ -941,7 +903,7 @@ public final class ThreadProcessor {
               plan.sessionId(),
               plan.candidateHeadEntryId(),
               new AssistantErrorPayload(rejected.error(), null),
-              mutationNow));
+              now));
       UUID turnEndId = tx.nextId();
       tx.insertEntry(
           new Entry(
@@ -954,26 +916,25 @@ public final class ThreadProcessor {
                   false,
                   TurnEndReason.TURN_FAILED,
                   null),
-              mutationNow));
+              now));
       // 确定性 Rejected 失败绝不立即 self-wake 同一自动压缩：失败 turn 已落 durable，马上重排可能再次规划同一压缩而空转。
       // 只保留合法 queued user 需求——它会在下一 claim 作为 INPUT 正常处理（或同样落 durable 失败）；新的自动压缩只由后续真实
       // 输入 / 唤醒重新驱动。
       boolean requestThread = plan.hasDeferredUserMessages();
       ThreadState advanced =
-          thread.advanceHeadAndInputThroughSequence(
-              turnEndId, nextWatermark(plan, thread), mutationNow);
+          thread.advanceHeadAndInputThroughSequence(turnEndId, nextWatermark(plan, thread), now);
       tx.updateThread(advanced);
       // Rejected 是源输入的不可继续失败：执行终止边界结算本次 Join。
       ThreadLifecycleCoordinator.matchAndDeliverTerminalJoins(
-          tx, advanced, turnEndId, null, mutationNow, false);
-      if (tx.lockClaimedWork(claim, now).isEmpty()) {
+          tx, advanced, turnEndId, null, now, false);
+      if (tx.lockClaimedWork(claim).isEmpty()) {
         throw new ClaimLostSignal();
       }
       // rejected：仅在仍有合法 user 需求时先请求 THREAD 再 complete。
       if (requestThread) {
-        tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()), now);
+        tx.requestWork(new WorkTarget(WorkTargetType.THREAD, thread.id()));
       }
-      tx.completeWork(claim, now);
+      tx.completeWork(claim);
     }
   }
 
@@ -1082,20 +1043,18 @@ public final class ThreadProcessor {
 
   /** Work-only 前置校验：仅锁 Work 行验证 claim 当前真实 owned。 */
   private boolean claimOwned(ClaimedWork claim) {
-    Instant now = clock.instant();
-    return Boolean.TRUE.equals(store.transaction(tx -> !tx.lockClaimedWork(claim, now).isEmpty()));
+    return Boolean.TRUE.equals(store.transaction(tx -> !tx.lockClaimedWork(claim).isEmpty()));
   }
 
   /** 原子 reschedule：同一事务内校验 claim 仍 owned，失败表示 lost。 */
   private boolean rescheduleIfOwned(ClaimedWork claim, Duration delay) {
-    Instant now = clock.instant();
     return Boolean.TRUE.equals(
         store.transaction(
             tx -> {
-              if (tx.lockClaimedWork(claim, now).isEmpty()) {
+              if (tx.lockClaimedWork(claim).isEmpty()) {
                 return false;
               }
-              tx.rescheduleWork(claim, now, delay);
+              tx.rescheduleWork(claim, delay);
               return true;
             }));
   }

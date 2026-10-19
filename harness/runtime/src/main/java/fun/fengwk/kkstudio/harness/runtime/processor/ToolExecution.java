@@ -109,7 +109,6 @@ final class ToolExecution implements ToolGateway.Listener {
             Objects.requireNonNull(scheduler, "scheduler"),
             Objects.requireNonNull(heartbeatWorker, "heartbeatWorker"),
             config.leaseConfig(),
-            this.clock,
             this::abandon);
     this.ownerRelease = Objects.requireNonNull(ownerRelease, "ownerRelease");
   }
@@ -540,17 +539,17 @@ final class ToolExecution implements ToolGateway.Listener {
   }
 
   private boolean markRunning() {
-    Instant now = clock.instant();
     return Boolean.TRUE.equals(
         store.transaction(
             tx -> {
+              Instant now = tx.now();
               ThreadTreeLocks.lockForThread(tx, threadId);
               ThreadState thread = tx.lockThread(threadId).orElse(null);
               if (thread == null) {
                 return false;
               }
               ToolInvocation tool = tx.lockToolInvocation(invocationId).orElse(null);
-              if (tool == null || tx.lockClaimedWork(claim, now).isEmpty()) {
+              if (tool == null || tx.lockClaimedWork(claim).isEmpty()) {
                 return false;
               }
               if (tool.status() != ToolInvocationStatus.DISPATCHING
@@ -565,17 +564,17 @@ final class ToolExecution implements ToolGateway.Listener {
 
   /** RUNNING -&gt; READY + version+1 + reschedule；不 request THREAD。 */
   private boolean commitRetry(Duration delay) {
-    Instant now = clock.instant();
     return Boolean.TRUE.equals(
         store.transaction(
             tx -> {
+              Instant now = tx.now();
               ThreadTreeLocks.lockForThread(tx, threadId);
               ThreadState thread = tx.lockThread(threadId).orElse(null);
               if (thread == null) {
                 return false;
               }
               ToolInvocation tool = tx.lockToolInvocation(invocationId).orElse(null);
-              if (tool == null || tx.lockClaimedWork(claim, now).isEmpty()) {
+              if (tool == null || tx.lockClaimedWork(claim).isEmpty()) {
                 return false;
               }
               if (tool.status() != ToolInvocationStatus.RUNNING || tool.attempt() != attempt) {
@@ -583,17 +582,17 @@ final class ToolExecution implements ToolGateway.Listener {
               }
               tx.updateToolInvocations(List.of(tool.retryReady(now)));
               tx.updateThread(thread.touchVersion(now));
-              tx.rescheduleWork(claim, now, delay);
+              tx.rescheduleWork(claim, delay);
               return true;
             }));
   }
 
   private boolean commitSuccess(ToolResult result, ToolEffectBatch effects) {
-    Instant now = clock.instant();
     try {
       return Boolean.TRUE.equals(
           store.transaction(
               tx -> {
+                Instant now = tx.now();
                 ThreadTreeLocks.lockForThread(tx, threadId);
                 ThreadState thread = tx.lockThread(threadId).orElse(null);
                 if (thread == null) {
@@ -606,13 +605,13 @@ final class ToolExecution implements ToolGateway.Listener {
                 if (tool.status() != ToolInvocationStatus.RUNNING || tool.attempt() != attempt) {
                   return false;
                 }
-                tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId), now);
-                if (tx.lockClaimedWork(claim, now).isEmpty()) {
+                tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId));
+                if (tx.lockClaimedWork(claim).isEmpty()) {
                   throw new ClaimLostSignal();
                 }
                 tx.updateToolInvocations(List.of(tool.succeed(result, effects, now)));
                 tx.updateThread(thread.touchVersion(now));
-                tx.completeWork(claim, now);
+                tx.completeWork(claim);
                 return true;
               }));
     } catch (ClaimLostSignal ignored) {
@@ -621,11 +620,11 @@ final class ToolExecution implements ToolGateway.Listener {
   }
 
   private boolean commitTerminal(TerminalKind kind, ToolInvocationError error) {
-    Instant now = clock.instant();
     try {
       return Boolean.TRUE.equals(
           store.transaction(
               tx -> {
+                Instant now = tx.now();
                 ThreadTreeLocks.lockForThread(tx, threadId);
                 ThreadState thread = tx.lockThread(threadId).orElse(null);
                 if (thread == null) {
@@ -638,8 +637,8 @@ final class ToolExecution implements ToolGateway.Listener {
                 if (tool.status() != ToolInvocationStatus.RUNNING || tool.attempt() != attempt) {
                   return false;
                 }
-                tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId), now);
-                if (tx.lockClaimedWork(claim, now).isEmpty()) {
+                tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId));
+                if (tx.lockClaimedWork(claim).isEmpty()) {
                   throw new ClaimLostSignal();
                 }
                 ToolInvocation next =
@@ -650,7 +649,7 @@ final class ToolExecution implements ToolGateway.Listener {
                     };
                 tx.updateToolInvocations(List.of(next));
                 tx.updateThread(thread.touchVersion(now));
-                tx.completeWork(claim, now);
+                tx.completeWork(claim);
                 return true;
               }));
     } catch (ClaimLostSignal ignored) {

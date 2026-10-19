@@ -133,7 +133,7 @@ class ModelInvocationTest {
   }
 
   @Test
-  void rejectsInvalidIdentityAndTimeFacts() {
+  void rejectsInvalidIdentityFacts() {
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -152,24 +152,6 @@ class ModelInvocationTest {
                 List.of(),
                 CREATED,
                 UPDATED));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ModelInvocation(
-                id(1L),
-                id(1L),
-                id(1L),
-                id(1L),
-                requestSpec(),
-                ModelInvocationStatus.READY,
-                0,
-                null,
-                null,
-                null,
-                null,
-                List.of(),
-                CREATED,
-                CREATED.minusSeconds(1)));
     assertThrows(
         NullPointerException.class,
         () ->
@@ -305,7 +287,7 @@ class ModelInvocationTest {
 
   /** failedAttempts 必须形成连续 1..N 前缀，并遵守 retry schedule 的时间顺序。 */
   @Test
-  void rejectsInvalidFailedAttemptSequenceAndTimeOrder() {
+  void rejectsInvalidFailedAttemptSequence() {
     ModelAttemptFailure first = failure(1);
     ModelAttemptFailure skipped =
         new ModelAttemptFailure(
@@ -329,11 +311,6 @@ class ModelInvocationTest {
             new ModelInvocationError(ProviderErrorKind.TRANSIENT, "failure-2"),
             first.retryAt().minusMillis(1),
             first.retryAt());
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            invocation(
-                ModelInvocationStatus.READY, 2, null, null, null, null, List.of(first, tooEarly)));
   }
 
   private static ModelInvocation invocation(

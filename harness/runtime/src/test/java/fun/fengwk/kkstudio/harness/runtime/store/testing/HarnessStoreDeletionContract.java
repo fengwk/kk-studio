@@ -103,9 +103,9 @@ abstract class HarnessStoreDeletionContract {
               toolInvocation(
                   toolId, modelId, assistantEntryId, 0, "call-1", ToolInvocationStatus.READY, T1);
           tx.insertToolInvocations(List.of(tool));
-          tx.requestWork(threadWork, T1);
-          tx.requestWork(modelWork, T1);
-          tx.requestWork(toolWork, T1);
+          tx.requestWork(threadWork);
+          tx.requestWork(modelWork);
+          tx.requestWork(toolWork);
         });
 
     int deleted =

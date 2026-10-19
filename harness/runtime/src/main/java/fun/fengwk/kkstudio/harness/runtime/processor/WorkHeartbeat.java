@@ -3,11 +3,8 @@ package fun.fengwk.kkstudio.harness.runtime.processor;
 import lombok.extern.slf4j.Slf4j;
 
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 
-import java.time.Clock;
-import java.time.Instant;
 import java.util.Objects;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
@@ -37,7 +34,6 @@ final class WorkHeartbeat {
   private final ScheduledExecutorService scheduler;
   private final Executor heartbeatWorker;
   private final ProcessorLeaseConfig config;
-  private final Clock clock;
   private final Runnable onLostOwnership;
   private final Object stateLock = new Object();
   private final Object renewalLock = new Object();
@@ -53,13 +49,11 @@ final class WorkHeartbeat {
       ScheduledExecutorService scheduler,
       Executor heartbeatWorker,
       ProcessorLeaseConfig config,
-      Clock clock,
       Runnable onLostOwnership) {
     this.store = Objects.requireNonNull(store, "store");
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
     this.heartbeatWorker = Objects.requireNonNull(heartbeatWorker, "heartbeatWorker");
     this.config = Objects.requireNonNull(config, "config");
-    this.clock = HarnessStoreTime.millisecondClock(clock);
     this.onLostOwnership = Objects.requireNonNull(onLostOwnership, "onLostOwnership");
   }
 
@@ -161,10 +155,9 @@ final class WorkHeartbeat {
           return;
         }
         try {
-          Instant now = clock.instant();
           store.transaction(
               tx -> {
-                tx.renewWork(claim, now, config.leaseDuration());
+                tx.renewWork(claim, config.leaseDuration());
                 return null;
               });
         } catch (RuntimeException failure) {

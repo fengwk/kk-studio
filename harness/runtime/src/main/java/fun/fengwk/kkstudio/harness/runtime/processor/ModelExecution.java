@@ -182,7 +182,6 @@ final class ModelExecution implements ModelGateway.Listener {
             this.scheduler,
             Objects.requireNonNull(heartbeatWorker, "heartbeatWorker"),
             config.leaseConfig(),
-            this.clock,
             this::abandon);
     this.ownerRelease = Objects.requireNonNull(ownerRelease, "ownerRelease");
     this.nanoTime = Objects.requireNonNull(nanoTime, "nanoTime");
@@ -816,16 +815,16 @@ final class ModelExecution implements ModelGateway.Listener {
       }
     }
     final StreamCheckpoint pendingCheckpoint = checkpointToPersist;
-    Instant now = clock.instant();
     boolean committed;
     try {
       committed =
           Boolean.TRUE.equals(
               store.transaction(
                   tx -> {
+                    Instant now = tx.now();
                     ThreadTreeLocks.lockForThread(tx, threadId);
                     ModelInvocation model = tx.lockModelInvocation(invocationId).orElse(null);
-                    if (model == null || tx.lockClaimedWork(claim, now).isEmpty()) {
+                    if (model == null || tx.lockClaimedWork(claim).isEmpty()) {
                       return false;
                     }
                     if (model.status() != ModelInvocationStatus.RUNNING
@@ -1057,17 +1056,17 @@ final class ModelExecution implements ModelGateway.Listener {
   }
 
   private boolean markRunning() {
-    Instant now = clock.instant();
     return Boolean.TRUE.equals(
         store.transaction(
             tx -> {
+              Instant now = tx.now();
               ThreadTreeLocks.lockForThread(tx, threadId);
               ThreadState thread = tx.lockThread(threadId).orElse(null);
               if (thread == null) {
                 return false;
               }
               ModelInvocation model = tx.lockModelInvocation(invocationId).orElse(null);
-              if (model == null || tx.lockClaimedWork(claim, now).isEmpty()) {
+              if (model == null || tx.lockClaimedWork(claim).isEmpty()) {
                 return false;
               }
               if (model.status() != ModelInvocationStatus.DISPATCHING
@@ -1080,31 +1079,27 @@ final class ModelExecution implements ModelGateway.Listener {
             }));
   }
 
-  /**
-   * RUNNING -&gt; READY：记录瞬态失败并排程重试。持久化 {@code retryAt} 仍是业务重试时刻（{@code failedAt + delay}），不受时钟域影响；
-   * Work 的 due 只传「相对该业务时刻的剩余延迟」（{@code retryAt - leaseNow}），由 Store 用自己的权威时间域重新计算绝对 due，从而既不改变业务
-   * retry 语义，也不让 JVM 时钟偏差提前或推迟实际唤醒。
-   */
+  /** RUNNING -&gt; READY：记录瞬态失败并排程重试：{@code retryAt = failedAt + delay}，Work 按同一 delay 重排。 */
   private boolean commitRetry(Duration delay, ModelInvocationError error) {
     Objects.requireNonNull(error, "error");
-    Instant leaseNow = clock.instant();
     return Boolean.TRUE.equals(
         store.transaction(
             tx -> {
+              Instant now = tx.now();
               ThreadTreeLocks.lockForThread(tx, threadId);
               ThreadState thread = tx.lockThread(threadId).orElse(null);
               if (thread == null) {
                 return false;
               }
               ModelInvocation model = tx.lockModelInvocation(invocationId).orElse(null);
-              if (model == null || tx.lockClaimedWork(claim, leaseNow).isEmpty()) {
+              if (model == null || tx.lockClaimedWork(claim).isEmpty()) {
                 return false;
               }
               if (model.status() != ModelInvocationStatus.RUNNING || model.attempt() != attempt) {
                 return false;
               }
-              Instant failedAt = durableFailedAt(leaseNow, thread, model);
-              Instant retryAt = failedAt.plus(delay);
+              Instant failedAt = now;
+              Instant retryAt = now.plus(delay);
               ModelAttemptFailure failure =
                   new ModelAttemptFailure(
                       attempt,
@@ -1116,40 +1111,20 @@ final class ModelExecution implements ModelGateway.Listener {
                       retryAt);
               tx.updateModelInvocation(model.retryReady(failure, failedAt));
               tx.updateThread(thread.touchVersion(failedAt));
-              // 只把业务 retryAt 相对同一 JVM 采样 leaseNow 的剩余延迟交给 Store；绝对 due 由 Store 的权威时间域决定。
-              tx.rescheduleWork(claim, leaseNow, Duration.between(leaseNow, retryAt));
+              tx.rescheduleWork(claim, delay);
               return true;
             }));
-  }
-
-  /** 失败审计时间下界：max(leaseNow, thread.updatedAt, model.updatedAt, 上一 retryAt)。 */
-  private static Instant durableFailedAt(
-      Instant leaseNow, ThreadState thread, ModelInvocation model) {
-    Instant effective = leaseNow;
-    if (effective.isBefore(thread.updatedAt())) {
-      effective = thread.updatedAt();
-    }
-    if (effective.isBefore(model.updatedAt())) {
-      effective = model.updatedAt();
-    }
-    if (!model.failedAttempts().isEmpty()) {
-      Instant previousRetryAt = model.failedAttempts().getLast().retryAt();
-      if (effective.isBefore(previousRetryAt)) {
-        effective = previousRetryAt;
-      }
-    }
-    return effective;
   }
 
   private boolean commitSuccess(
       ProviderResponse response,
       StreamCheckpoint finalCheckpoint,
       ProviderReplayState replayState) {
-    Instant now = clock.instant();
     try {
       return Boolean.TRUE.equals(
           store.transaction(
               tx -> {
+                Instant now = tx.now();
                 ThreadTreeLocks.lockForThread(tx, threadId);
                 ThreadState thread = tx.lockThread(threadId).orElse(null);
                 if (thread == null) {
@@ -1162,14 +1137,14 @@ final class ModelExecution implements ModelGateway.Listener {
                 if (model.status() != ModelInvocationStatus.RUNNING || model.attempt() != attempt) {
                   return false;
                 }
-                tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId), now);
-                if (tx.lockClaimedWork(claim, now).isEmpty()) {
+                tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId));
+                if (tx.lockClaimedWork(claim).isEmpty()) {
                   throw new ClaimLostSignal();
                 }
                 tx.updateModelInvocation(
                     model.succeed(response, finalCheckpoint, replayState, now));
                 tx.updateThread(thread.touchVersion(now));
-                tx.completeWork(claim, now);
+                tx.completeWork(claim);
                 return true;
               }));
     } catch (ClaimLostSignal ignored) {
@@ -1178,11 +1153,11 @@ final class ModelExecution implements ModelGateway.Listener {
   }
 
   private boolean commitTerminal(TerminalKind kind, ModelInvocationError error) {
-    Instant now = clock.instant();
     try {
       return Boolean.TRUE.equals(
           store.transaction(
               tx -> {
+                Instant now = tx.now();
                 ThreadTreeLocks.lockForThread(tx, threadId);
                 ThreadState thread = tx.lockThread(threadId).orElse(null);
                 if (thread == null) {
@@ -1195,8 +1170,8 @@ final class ModelExecution implements ModelGateway.Listener {
                 if (model.status() != ModelInvocationStatus.RUNNING || model.attempt() != attempt) {
                   return false;
                 }
-                tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId), now);
-                if (tx.lockClaimedWork(claim, now).isEmpty()) {
+                tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId));
+                if (tx.lockClaimedWork(claim).isEmpty()) {
                   throw new ClaimLostSignal();
                 }
                 String text = accumulator.text();
@@ -1213,7 +1188,7 @@ final class ModelExecution implements ModelGateway.Listener {
                     };
                 tx.updateModelInvocation(next);
                 tx.updateThread(thread.touchVersion(now));
-                tx.completeWork(claim, now);
+                tx.completeWork(claim);
                 return true;
               }));
     } catch (ClaimLostSignal ignored) {

@@ -144,17 +144,13 @@ class StopRecordsTest {
         Modifier.isPublic(
             HarnessRuntime.class
                 .getDeclaredConstructor(
-                    HarnessStore.class,
-                    Clock.class,
-                    TurnResolver.class,
-                    CompactionConfigProvider.class)
+                    HarnessStore.class, TurnResolver.class, CompactionConfigProvider.class)
                 .getModifiers()));
     assertTrue(
         Modifier.isPublic(
             HarnessRuntime.class
                 .getDeclaredConstructor(
                     HarnessStore.class,
-                    Clock.class,
                     TurnResolver.class,
                     CompactionConfigProvider.class,
                     ToolResultHistoryMaterializer.class,
@@ -163,29 +159,19 @@ class StopRecordsTest {
                 .getModifiers()));
     assertThrows(
         NoSuchMethodException.class,
-        () -> HarnessRuntime.class.getDeclaredConstructor(HarnessStore.class, Clock.class));
+        () -> HarnessRuntime.class.getDeclaredConstructor(HarnessStore.class));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new HarnessRuntime(store, null, HarnessRuntimeTestSupport.DEFAULT_COMPACTION_PROVIDER));
+    assertThrows(
+        NullPointerException.class,
+        () -> new HarnessRuntime(store, HarnessRuntimeTestSupport.UNUSED_RESOLVER, null));
     assertThrows(
         NullPointerException.class,
         () ->
             new HarnessRuntime(
                 store,
-                Clock.fixed(Instant.EPOCH, ZoneOffset.UTC),
-                null,
-                HarnessRuntimeTestSupport.DEFAULT_COMPACTION_PROVIDER));
-    assertThrows(
-        NullPointerException.class,
-        () ->
-            new HarnessRuntime(
-                store,
-                Clock.fixed(Instant.EPOCH, ZoneOffset.UTC),
-                HarnessRuntimeTestSupport.UNUSED_RESOLVER,
-                null));
-    assertThrows(
-        NullPointerException.class,
-        () ->
-            new HarnessRuntime(
-                store,
-                Clock.fixed(Instant.EPOCH, ZoneOffset.UTC),
                 HarnessRuntimeTestSupport.UNUSED_RESOLVER,
                 HarnessRuntimeTestSupport.DEFAULT_COMPACTION_PROVIDER,
                 null,
@@ -196,7 +182,6 @@ class StopRecordsTest {
         () ->
             new HarnessRuntime(
                 store,
-                Clock.fixed(Instant.EPOCH, ZoneOffset.UTC),
                 HarnessRuntimeTestSupport.UNUSED_RESOLVER,
                 HarnessRuntimeTestSupport.DEFAULT_COMPACTION_PROVIDER,
                 null,

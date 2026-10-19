@@ -46,9 +46,6 @@ public record ToolApproval(
       actor = requireCanonical(actor, "actor");
       requestedAt = Objects.requireNonNull(requestedAt, "requestedAt");
       decidedAt = Objects.requireNonNull(decidedAt, "decidedAt");
-      if (decidedAt.isBefore(requestedAt)) {
-        throw new IllegalArgumentException("decidedAt must not precede requestedAt");
-      }
     }
     if (reason != null) {
       reason = requireCanonical(reason, "reason", 1024);

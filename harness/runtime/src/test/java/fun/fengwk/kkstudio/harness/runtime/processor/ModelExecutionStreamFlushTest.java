@@ -2531,8 +2531,8 @@ class ModelExecutionStreamFlushTest {
                   List.of(),
                   now,
                   now));
-          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, baseline.threadId()), now);
-          tx.requestWork(new WorkTarget(WorkTargetType.MODEL, id), now);
+          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, baseline.threadId()));
+          tx.requestWork(new WorkTarget(WorkTargetType.MODEL, id));
           return id;
         });
   }
@@ -2542,7 +2542,7 @@ class ModelExecutionStreamFlushTest {
         .transaction(
             tx ->
                 tx.claimNextWork(
-                    WorkTargetType.MODEL, now, "token-" + invocationId, Duration.ofSeconds(60)))
+                    WorkTargetType.MODEL, "token-" + invocationId, Duration.ofSeconds(60)))
         .orElseThrow();
   }
 

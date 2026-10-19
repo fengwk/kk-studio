@@ -20,10 +20,8 @@ import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
-import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.ZoneOffset;
 import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
@@ -153,13 +151,7 @@ class WorkHeartbeatTest {
         };
 
     WorkHeartbeat heartbeat =
-        new WorkHeartbeat(
-            blockingStore,
-            fixture.scheduler,
-            Runnable::run,
-            LEASE_CONFIG,
-            Clock.fixed(NOW, ZoneOffset.UTC),
-            () -> {});
+        new WorkHeartbeat(blockingStore, fixture.scheduler, Runnable::run, LEASE_CONFIG, () -> {});
     assertTrue(heartbeat.start(fixture.claimed));
     Runnable tick = fixture.scheduler.periodicTasks.get(0);
 
@@ -216,7 +208,6 @@ class WorkHeartbeatTest {
             fixture.scheduler,
             Runnable::run,
             LEASE_CONFIG,
-            Clock.fixed(NOW, ZoneOffset.UTC),
             notifications::incrementAndGet);
     assertTrue(heartbeat.start(fixture.claimed));
 
@@ -262,7 +253,6 @@ class WorkHeartbeatTest {
                         command.run();
                       }),
               LEASE_CONFIG,
-              Clock.fixed(NOW, ZoneOffset.UTC),
               () -> {});
       assertTrue(heartbeatA.start(fixtureA.claimed));
       WorkHeartbeat heartbeatB =
@@ -276,7 +266,6 @@ class WorkHeartbeatTest {
                         renewedB.countDown();
                       }),
               LEASE_CONFIG,
-              Clock.fixed(NOW, ZoneOffset.UTC),
               () -> {});
       assertTrue(heartbeatB.start(fixtureB.claimed));
 
@@ -312,12 +301,7 @@ class WorkHeartbeatTest {
 
     WorkHeartbeat heartbeat =
         new WorkHeartbeat(
-            fixture.store,
-            fixture.scheduler,
-            queuedTasks::add,
-            LEASE_CONFIG,
-            Clock.fixed(NOW, ZoneOffset.UTC),
-            () -> {});
+            fixture.store, fixture.scheduler, queuedTasks::add, LEASE_CONFIG, () -> {});
     assertTrue(heartbeat.start(fixture.claimed));
 
     Runnable tick = fixture.scheduler.periodicTasks.get(0);
@@ -351,7 +335,6 @@ class WorkHeartbeatTest {
             fixture.scheduler,
             Runnable::run,
             LEASE_CONFIG,
-            Clock.fixed(NOW, ZoneOffset.UTC),
             () -> {
               notifications.incrementAndGet();
               lostLatch.countDown();
@@ -382,7 +365,6 @@ class WorkHeartbeatTest {
             fixture.scheduler,
             rejectingWorker,
             LEASE_CONFIG,
-            Clock.fixed(NOW, ZoneOffset.UTC),
             () -> {
               notifications.incrementAndGet();
               lostLatch.countDown();
@@ -418,7 +400,6 @@ class WorkHeartbeatTest {
             fixture.scheduler,
             queuedWorker,
             LEASE_CONFIG,
-            Clock.fixed(NOW, ZoneOffset.UTC),
             lostNotifications::incrementAndGet);
     assertTrue(heartbeat.start(fixture.claimed));
 
@@ -460,7 +441,6 @@ class WorkHeartbeatTest {
             fixture.scheduler,
             failingWorker,
             LEASE_CONFIG,
-            Clock.fixed(NOW, ZoneOffset.UTC),
             lostNotifications::incrementAndGet);
     assertTrue(heartbeat.start(fixture.claimed));
 
@@ -501,7 +481,6 @@ class WorkHeartbeatTest {
             fixture.scheduler,
             controlledWorker,
             LEASE_CONFIG,
-            Clock.fixed(NOW, ZoneOffset.UTC),
             lostNotifications::incrementAndGet);
     assertTrue(heartbeat.start(fixture.claimed));
 
@@ -592,7 +571,7 @@ class WorkHeartbeatTest {
                         0,
                         NOW,
                         NOW));
-                tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadIdValue), NOW);
+                tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadIdValue));
                 return threadIdValue;
               });
       // claim lease 剩余（60s - 15s = 15s）必须小于 leaseDuration（30s），beat 的 renew 才能真实成功
@@ -602,16 +581,9 @@ class WorkHeartbeatTest {
               .transaction(
                   tx ->
                       tx.claimNextWork(
-                          WorkTargetType.THREAD, NOW, "token-" + threadId, Duration.ofSeconds(15)))
+                          WorkTargetType.THREAD, "token-" + threadId, Duration.ofSeconds(15)))
               .orElseThrow();
-      this.heartbeat =
-          new WorkHeartbeat(
-              store,
-              scheduler,
-              Runnable::run,
-              LEASE_CONFIG,
-              Clock.fixed(NOW, ZoneOffset.UTC),
-              () -> {});
+      this.heartbeat = new WorkHeartbeat(store, scheduler, Runnable::run, LEASE_CONFIG, () -> {});
     }
   }
 

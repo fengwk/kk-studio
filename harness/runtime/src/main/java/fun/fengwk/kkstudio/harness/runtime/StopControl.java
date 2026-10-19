@@ -33,7 +33,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextClassifier;
@@ -48,7 +47,6 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
 import java.nio.charset.StandardCharsets;
-import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -89,16 +87,11 @@ final class StopControl {
   private static final ThreadContextClassifier CLASSIFIER = new ThreadContextClassifier();
 
   private final HarnessStore store;
-  private final Clock clock;
   private final ToolResultHistoryMaterializer toolResultHistoryMaterializer;
   private final ModelOutcomeAppender modelOutcomeAppender;
 
-  StopControl(
-      HarnessStore store,
-      Clock clock,
-      ToolResultHistoryMaterializer toolResultHistoryMaterializer) {
+  StopControl(HarnessStore store, ToolResultHistoryMaterializer toolResultHistoryMaterializer) {
     this.store = Objects.requireNonNull(store, "store");
-    this.clock = HarnessStoreTime.millisecondClock(clock);
     this.toolResultHistoryMaterializer = toolResultHistoryMaterializer;
     this.modelOutcomeAppender = new ModelOutcomeAppender(toolResultHistoryMaterializer);
   }
@@ -367,7 +360,7 @@ final class StopControl {
     List<StoppedThreadReceipt> receipts = new ArrayList<>();
     List<ThreadState> stoppedStates = new ArrayList<>();
     List<Materialized> committedTerminals = new ArrayList<>();
-    Instant lastNow = null;
+    Instant now = tx.now();
 
     for (ThreadStopContext original : contexts.reversed()) {
       // 不在此阶段新增 Commands/Models/Tools 行锁（Stage 4-7 已按规范顺序取得，WORK 之后禁止再取），
@@ -408,8 +401,6 @@ final class StopControl {
         throw new IllegalStateException(
             "terminal invocation still pending after materialization for thread " + thread.id());
       }
-      Instant now = effectiveNow(clock.instant(), thread, path, queued, context);
-      lastNow = now;
       // 只取消人类/可信任务输入与设置；系统 NOTIFICATION 不取消，稍后物化进历史。
       List<ThreadCommand> cancelledCommands =
           queued.stream()
@@ -465,7 +456,6 @@ final class StopControl {
     }
 
     // Join 结算与父通知：所有节点已 STOPPED；父节点若在本集合内则通知直接固化到历史，否则投递为父命令并唤醒。
-    Instant settleNow = lastNow != null ? lastNow : clock.instant();
     // 已提交的最终结果先结算；延迟交付到全部节点关闭之后，避免父节点接到通知后又被本次 Stop 取消。
     for (Materialized terminal : committedTerminals) {
       ThreadLifecycleCoordinator.matchAndDeliverTerminalJoins(
@@ -473,7 +463,7 @@ final class StopControl {
           terminal.thread(),
           terminal.terminalEntryId(),
           terminal.finalAnswerEntryId(),
-          HarnessStoreTime.notBefore(settleNow, terminal.thread().updatedAt()),
+          now,
           false);
     }
     for (ThreadState stopped : stoppedStates) {
@@ -489,7 +479,7 @@ final class StopControl {
         continue;
       }
       ThreadLifecycleCoordinator.matchAndDeliverTerminalJoins(
-          tx, stopped, boundary, null, settleNow, true);
+          tx, stopped, boundary, null, now, true);
     }
 
     tx.insertStopReceipts(command.threadId(), command.stopRequestId(), receipts);
@@ -500,31 +490,6 @@ final class StopControl {
         new StopResult(false, target, receipts),
         List.copyOf(modelExecutionIds),
         List.copyOf(toolExecutionIds));
-  }
-
-  /**
-   * 在 Thread 锁内做 Stop 的 durable receipt 查找已由 {@link HarnessStore.Transaction#findStopReceipt} 覆盖；
-   * replay 返回持久保存的整批回执，不触碰 version、不写 marker。
-   */
-  private static Instant effectiveNow(
-      Instant clockNow,
-      ThreadState thread,
-      EntryPath path,
-      List<ThreadCommand> queued,
-      ThreadContext context) {
-    Instant now = HarnessStoreTime.notBefore(clockNow, thread.updatedAt(), path.head().createdAt());
-    for (ThreadCommand command : queued) {
-      now = HarnessStoreTime.notBefore(now, command.createdAt());
-    }
-    if (context instanceof ThreadContext.ModelActive active) {
-      now = HarnessStoreTime.notBefore(now, active.model().updatedAt());
-    } else if (context instanceof ThreadContext.ToolActive active) {
-      now = HarnessStoreTime.notBefore(now, active.model().updatedAt());
-      for (ToolInvocation sibling : active.siblings()) {
-        now = HarnessStoreTime.notBefore(now, sibling.updatedAt());
-      }
-    }
-    return now;
   }
 
   private static int workTypeRank(WorkTargetType type) {
@@ -833,14 +798,9 @@ final class StopControl {
             thread.nextCommandSequence(),
             Math.addExact(thread.version(), 1L),
             thread.createdAt(),
-            effectiveMutationTime(now, thread));
+            now);
     ThreadState.validateTransition(thread, next);
     return next;
-  }
-
-  private static Instant effectiveMutationTime(Instant now, ThreadState thread) {
-    Instant candidate = Objects.requireNonNull(now, "now");
-    return candidate.isBefore(thread.updatedAt()) ? thread.updatedAt() : candidate;
   }
 
   /** 按 sequence 升序还原被取消的人工输入（USER_MESSAGE 与 GOAL）；CUSTOM_MESSAGE、NOTIFICATION 与 SET_* 不退草稿。 */
@@ -901,9 +861,7 @@ final class StopControl {
    */
   private Materialized materializeTerminalModel(
       HarnessStore.Transaction tx, ThreadState thread, EntryPath path, ModelInvocation model) {
-    Instant mutationNow =
-        HarnessStoreTime.notBefore(
-            clock.instant(), thread.updatedAt(), path.head().createdAt(), model.updatedAt());
+    Instant mutationNow = tx.now();
     TurnStartPayload turnStart =
         (TurnStartPayload)
             path.openTurnStart()
@@ -942,12 +900,7 @@ final class StopControl {
       EntryPath path,
       ModelInvocation model,
       List<ToolInvocation> siblings) {
-    Instant mutationNow =
-        HarnessStoreTime.notBefore(
-            clock.instant(), thread.updatedAt(), path.head().createdAt(), model.updatedAt());
-    for (ToolInvocation sibling : siblings) {
-      mutationNow = HarnessStoreTime.notBefore(mutationNow, sibling.updatedAt());
-    }
+    Instant mutationNow = tx.now();
     ModelOutcomeAppender.Applied applied =
         modelOutcomeAppender.appendToolBatch(tx, path, model, siblings, mutationNow);
     ThreadState advanced = thread.advanceHead(applied.headEntryId(), mutationNow);

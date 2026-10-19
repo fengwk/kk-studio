@@ -43,8 +43,10 @@ import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -111,6 +113,7 @@ public final class InMemoryHarnessStore implements HarnessStore {
   private volatile RouteReadyPredicate routeReadyPredicate;
   private volatile EnvironmentReadyLeasePredicate environmentReadyLeasePredicate;
   private final Map<EnvironmentId, String> environmentNames = new HashMap<>();
+  private volatile Clock clock = HarnessStoreTime.millisecondClock(Clock.systemUTC());
 
   /** Route-ready 判定谓词接口，供契约测试注入环境就绪状态与 lease 有效性。 */
   @FunctionalInterface
@@ -149,6 +152,16 @@ public final class InMemoryHarnessStore implements HarnessStore {
     this.committed = new State();
     this.committed.nextId = initialNextId;
     this.routeReadyPredicate = routeReadyPredicate;
+  }
+
+  /** 测试时钟：每个事务首次 {@link Transaction#now()} 时读取一次，对应生产实现的数据库时钟。 */
+  public void setClock(Clock clock) {
+    this.clock = HarnessStoreTime.millisecondClock(Objects.requireNonNull(clock, "clock"));
+  }
+
+  /** 把测试时钟固定在给定时刻。 */
+  public void setNow(Instant now) {
+    setClock(Clock.fixed(now, ZoneOffset.UTC));
   }
 
   public void setRouteReadyPredicate(RouteReadyPredicate routeReadyPredicate) {
@@ -425,9 +438,19 @@ public final class InMemoryHarnessStore implements HarnessStore {
     private UUID highestThreadId;
     private WorkTarget highestWorkTarget;
     private boolean closed;
+    private Instant now;
 
     InMemoryTransaction(State state) {
       this.state = state;
+    }
+
+    @Override
+    public Instant now() {
+      checkOpen();
+      if (now == null) {
+        now = clock.instant();
+      }
+      return now;
     }
 
     void close() {
@@ -1854,15 +1877,11 @@ public final class InMemoryHarnessStore implements HarnessStore {
 
     @Override
     public List<PendingEnvironmentWaitRow> listPendingEnvironmentWaits(
-        Instant now,
-        Instant afterRepresentativeCreatedAt,
-        UUID afterRepresentativeInvocationId,
-        int limit) {
+        Instant afterRepresentativeCreatedAt, UUID afterRepresentativeInvocationId, int limit) {
       checkOpen();
-      Objects.requireNonNull(now, "now");
+      Instant now = now();
       Objects.requireNonNull(afterRepresentativeCreatedAt, "afterRepresentativeCreatedAt");
       Objects.requireNonNull(afterRepresentativeInvocationId, "afterRepresentativeInvocationId");
-      requireMillisecondPrecision(now);
       if (limit <= 0) {
         throw new IllegalArgumentException("limit must be positive");
       }
@@ -1920,12 +1939,10 @@ public final class InMemoryHarnessStore implements HarnessStore {
     }
 
     @Override
-    public List<EnvironmentToolWaitRow> listEnvironmentToolWaits(
-        Instant now, Collection<UUID> invocationIds) {
+    public List<EnvironmentToolWaitRow> listEnvironmentToolWaits(Collection<UUID> invocationIds) {
       checkOpen();
-      Objects.requireNonNull(now, "now");
+      Instant now = now();
       Objects.requireNonNull(invocationIds, "invocationIds");
-      requireMillisecondPrecision(now);
       if (invocationIds.isEmpty()) {
         return List.of();
       }
@@ -1956,10 +1973,9 @@ public final class InMemoryHarnessStore implements HarnessStore {
     }
 
     @Override
-    public Optional<Instant> findNextEnvironmentWaitChange(Instant now) {
+    public Optional<Instant> findNextEnvironmentWaitChange() {
       checkOpen();
-      Objects.requireNonNull(now, "now");
-      requireMillisecondPrecision(now);
+      Instant now = now();
       Instant earliest = null;
       for (ToolInvocation invocation : state.toolInvocations.values()) {
         if (invocation.status() != ToolInvocationStatus.READY) {
@@ -2182,11 +2198,10 @@ public final class InMemoryHarnessStore implements HarnessStore {
     }
 
     @Override
-    public Optional<Work> lockClaimedWork(ClaimedWork claim, Instant now) {
+    public Optional<Work> lockClaimedWork(ClaimedWork claim) {
       checkOpen();
+      Instant now = now();
       Objects.requireNonNull(claim, "claim");
-      Objects.requireNonNull(now, "now");
-      requireMillisecondPrecision(now);
       requireCanLockWork(claim.target());
       Work work = state.works.get(claim.target());
       if (work == null
@@ -2402,16 +2417,15 @@ public final class InMemoryHarnessStore implements HarnessStore {
     }
 
     @Override
-    public void requestWork(WorkTarget target, Instant now) {
-      requestWork(target, now, null);
+    public void requestWork(WorkTarget target) {
+      requestWork(target, null);
     }
 
     @Override
-    public void requestWork(WorkTarget target, Instant now, EnvironmentId requiredEnvironmentId) {
+    public void requestWork(WorkTarget target, EnvironmentId requiredEnvironmentId) {
       checkOpen();
+      Instant now = now();
       Objects.requireNonNull(target, "target");
-      Objects.requireNonNull(now, "now");
-      requireMillisecondPrecision(now);
       if (requiredEnvironmentId != null && target.type() != WorkTargetType.TOOL) {
         throw new IllegalArgumentException(
             "requiredEnvironmentId must be null for target type " + target.type());
@@ -2476,23 +2490,18 @@ public final class InMemoryHarnessStore implements HarnessStore {
 
     @Override
     public Optional<ClaimedWork> claimNextWork(
-        WorkTargetType targetType, Instant now, String leaseToken, Duration leaseDuration) {
-      return claimNextWork(targetType, now, leaseToken, leaseDuration, null);
+        WorkTargetType targetType, String leaseToken, Duration leaseDuration) {
+      return claimNextWork(targetType, leaseToken, leaseDuration, null);
     }
 
     @Override
     public Optional<ClaimedWork> claimNextWork(
-        WorkTargetType targetType,
-        Instant now,
-        String leaseToken,
-        Duration leaseDuration,
-        UUID nodeInstanceId) {
+        WorkTargetType targetType, String leaseToken, Duration leaseDuration, UUID nodeInstanceId) {
       checkOpen();
+      Instant now = now();
       Objects.requireNonNull(targetType, "targetType");
-      Objects.requireNonNull(now, "now");
       Objects.requireNonNull(leaseToken, "leaseToken");
       HarnessStoreTime.requireWholeMillisecondDuration(leaseDuration, "leaseDuration");
-      requireMillisecondPrecision(now);
       Instant leaseUntil = now.plus(leaseDuration);
       requireCanClaimWork();
       List<Work> due =
@@ -2535,12 +2544,11 @@ public final class InMemoryHarnessStore implements HarnessStore {
     }
 
     @Override
-    public boolean renewWork(ClaimedWork claim, Instant now, Duration leaseDuration) {
+    public boolean renewWork(ClaimedWork claim, Duration leaseDuration) {
       checkOpen();
+      Instant now = now();
       Objects.requireNonNull(claim, "claim");
-      Objects.requireNonNull(now, "now");
       HarnessStoreTime.requireWholeMillisecondDuration(leaseDuration, "leaseDuration");
-      requireMillisecondPrecision(now);
       Work work = lockedWork(claim.target());
       Instant target = now.plus(leaseDuration);
       if (!target.isAfter(work.leaseUntil())) {
@@ -2553,11 +2561,10 @@ public final class InMemoryHarnessStore implements HarnessStore {
     }
 
     @Override
-    public Optional<Work> completeWork(ClaimedWork claim, Instant now) {
+    public Optional<Work> completeWork(ClaimedWork claim) {
       checkOpen();
+      Instant now = now();
       Objects.requireNonNull(claim, "claim");
-      Objects.requireNonNull(now, "now");
-      requireMillisecondPrecision(now);
       Work work = state.works.get(claim.target());
       if (work == null) {
         // 行不存在意味着没有可验证的 lease：completed 的 ownership 已丢失，不能幂等吞掉终态。
@@ -2576,12 +2583,11 @@ public final class InMemoryHarnessStore implements HarnessStore {
     }
 
     @Override
-    public void rescheduleWork(ClaimedWork claim, Instant now, Duration delay) {
+    public void rescheduleWork(ClaimedWork claim, Duration delay) {
       checkOpen();
+      Instant now = now();
       Objects.requireNonNull(claim, "claim");
-      Objects.requireNonNull(now, "now");
       HarnessStoreTime.requireNonNegativeWholeMillisecondDuration(delay, "delay");
-      requireMillisecondPrecision(now);
       Work work = lockedWork(claim.target());
       Work next =
           work.reschedule(claim.leaseToken(), claim.claimedWakeVersion(), now, now.plus(delay));

@@ -160,13 +160,10 @@ class ThreadStateTest {
   }
 
   @Test
-  void rejectsInvalidTimestamps() {
-    // 测试意图：验证时间戳不可空且 updatedAt 不得早于 createdAt。
+  void rejectsNullTimestamps() {
+    // 测试意图：验证时间戳不可空。
     assertThrows(
         NullPointerException.class, () -> state(id(7), id(42), false, 1L, 0L, (Instant) null));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> state(id(7), id(42), false, 1L, 0L, CREATED.minusSeconds(1)));
   }
 
   @Test
@@ -346,22 +343,6 @@ class ThreadStateTest {
   }
 
   @Test
-  void transitionMethodsClampWallClockRollbackToCurrentUpdatedAt() {
-    Instant durableNow = CREATED.plusSeconds(2);
-    ThreadState stored = state(id(7), id(42), false, 3L, 5L, durableNow);
-
-    // Caller wall-clock 回拨时，纯转换保留 durable 时间下界；version/sequence/head 语义照常推进。
-    assertEquals(durableNow, stored.reserveCommandSequences(1, CREATED).updatedAt());
-    assertEquals(durableNow, stored.advanceHead(id(99), CREATED).updatedAt());
-    assertEquals(durableNow, stored.touchVersion(CREATED).updatedAt());
-    assertEquals(durableNow, stored.setRootYolo(true, CREATED).updatedAt());
-    assertEquals(durableNow, stored.renameThread("new name", CREATED).updatedAt());
-    assertEquals(
-        durableNow,
-        stored.changeExecutionControl(ThreadExecutionControl.RUNNABLE, CREATED).updatedAt());
-  }
-
-  @Test
   void renameThreadNormalizesNameAndBumpsVersionExactlyOnce() {
     ThreadState stored =
         state(id(7), id(100), id(42), false, ThreadExecutionControl.RUNNABLE, 3L, 5L, CREATED);
@@ -538,7 +519,7 @@ class ThreadStateTest {
   }
 
   @Test
-  void validateTransitionRejectsSequenceVersionAndUpdatedAtRegression() {
+  void validateTransitionRejectsSequenceAndVersionRegression() {
     ThreadState stored = state(id(7), id(42), false, 3L, 5L, CREATED.plusSeconds(2));
     // nextCommandSequence 倒退
     assertThrows(
@@ -552,32 +533,11 @@ class ThreadStateTest {
         () ->
             ThreadState.validateTransition(
                 stored, state(id(7), id(42), false, 3L, 4L, CREATED.plusSeconds(3))));
-    // updatedAt 倒退
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            ThreadState.validateTransition(
-                stored, state(id(7), id(42), false, 3L, 6L, CREATED.plusSeconds(1))));
   }
 
   @Test
   void validateTransitionRequiresExactVersionIncrementOnAnyChange() {
     ThreadState stored = state(id(7), id(42), false, 3L, 5L, CREATED);
-    // 任何对外可见的变更都必须将 version 恰好 bump 一次
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            ThreadState.validateTransition(
-                stored,
-                state(
-                    id(7),
-                    null,
-                    id(42),
-                    true,
-                    ThreadExecutionControl.RUNNABLE,
-                    3L,
-                    5L,
-                    CREATED.plusSeconds(1))));
     assertThrows(
         IllegalArgumentException.class,
         () ->

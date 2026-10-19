@@ -722,32 +722,6 @@ class ThreadJoinTest {
   }
 
   @Test
-  void rejectsUpdatedAtBeforeCreatedAt() {
-    // 测试意图：验证 updatedAt 早于 createdAt 时抛出 IllegalArgumentException。
-    IllegalArgumentException ex =
-        assertThrows(
-            IllegalArgumentException.class,
-            () ->
-                new ThreadJoin(
-                    id(1),
-                    VALID_HASH,
-                    id(2),
-                    id(3),
-                    1L,
-                    "agent",
-                    10,
-                    0L,
-                    null,
-                    null,
-                    null,
-                    T1,
-                    T0,
-                    JoinPurpose.TASK,
-                    null));
-    assertEquals("updatedAt precedes createdAt", ex.getMessage());
-  }
-
-  @Test
   void matchMethodLifecycle() {
     // 测试意图：验证 match 方法正常冻结 terminal/final answer，以及重复 match 与 null terminal 的校验拦截。
     ThreadJoin join = initialJoin(id(1), id(2), id(3));
@@ -1204,7 +1178,7 @@ class ThreadJoinTest {
   }
 
   @Test
-  void validateTransitionRejectsTimeAndReminderRegressions() {
+  void validateTransitionRejectsReminderRegressions() {
     // 测试意图：验证 validateTransition 拒绝 updatedAt 回退以及 reminderTurn 倒退。
     ThreadJoin old = initialJoin(id(1), id(2), id(3));
     ThreadJoin oldAdvancedTime =
@@ -1243,9 +1217,6 @@ class ThreadJoinTest {
             T1,
             JoinPurpose.TASK,
             null);
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> ThreadJoin.validateTransition(oldAdvancedTime, timeRegression));
 
     // reminderTurn 倒退（从 5 变 4）
     ThreadJoin oldReminded = old.remind(5L, T1);

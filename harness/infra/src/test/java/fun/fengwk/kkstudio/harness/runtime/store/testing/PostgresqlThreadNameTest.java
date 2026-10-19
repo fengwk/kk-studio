@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
-import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T0;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.seedThreadBaseline;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -21,8 +20,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayl
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
-import java.time.Clock;
-import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 
@@ -33,11 +30,7 @@ class PostgresqlThreadNameTest {
     var store = PostgresqlHarnessStoreFixture.resetAndCreate();
     var baseline = seedThreadBaseline(store);
     var runtime =
-        new HarnessRuntime(
-            store,
-            Clock.fixed(T0, ZoneOffset.UTC),
-            (threadId, path, prep) -> null,
-            () -> CompactionConfig.DEFAULT);
+        new HarnessRuntime(store, (threadId, path, prep) -> null, () -> CompactionConfig.DEFAULT);
     UUID createdId = UUID.randomUUID();
     var commands =
         List.of(

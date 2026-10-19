@@ -14,10 +14,10 @@ import java.util.UUID;
  * 一条不可变的 root-to-head Entry 链（Thread head cursor 指向的完整历史路径）。
  *
  * <p>构造时防御性拷贝并校验：非空；同一 Session；ROOT 在前且唯一；parent 链连续（每个非 ROOT Entry 的 parentEntryId 等于前一个 Entry 的
- * id）；ID 不重复；createdAt 不早于 parent。Turn 顺序与 TURN_END outcome 前置条件委托 {@link TurnPathValidator}：ROOT
- * 后所有非 ROOT entry 必须在 open TURN_START 内；TURN_END 只能关闭当前 open TURN_START 且 turnStartEntryId 匹配；未关闭
- * TURN_START 后不得出现第二个 TURN_START；input / Assistant result / ToolResult 前缀顺序按 outcome 校验。路径可以在任意
- * prefix 截断（最后一个 Entry 即 head，由调用方按 root-to-head 顺序传入）。不提供泛化 tree / repository API。
+ * id）；ID 不重复。Turn 顺序与 TURN_END outcome 前置条件委托 {@link TurnPathValidator}：ROOT 后所有非 ROOT entry 必须在
+ * open TURN_START 内；TURN_END 只能关闭当前 open TURN_START 且 turnStartEntryId 匹配；未关闭 TURN_START 后不得出现第二个
+ * TURN_START；input / Assistant result / ToolResult 前缀顺序按 outcome 校验。路径可以在任意 prefix 截断（最后一个 Entry 即
+ * head，由调用方按 root-to-head 顺序传入）。不提供泛化 tree / repository API。
  */
 public record EntryPath(List<Entry> entries) {
 
@@ -55,9 +55,6 @@ public record EntryPath(List<Entry> entries) {
         Entry parent = entries.get(i - 1);
         if (!Objects.equals(entry.parentEntryId(), parent.id())) {
           throw new IllegalArgumentException("entry parent chain must be contiguous");
-        }
-        if (entry.createdAt().isBefore(parent.createdAt())) {
-          throw new IllegalArgumentException("entry createdAt must not precede its parent");
         }
         turns.visit(entry);
       }

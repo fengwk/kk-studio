@@ -66,20 +66,6 @@ class ThreadCommandTest {
         () ->
             new ThreadCommand(
                 id(1L), 1L, payload(), id(99L), HASH, id(99L), STOP_REQUEST, CANCELLED, CREATED));
-    // cancelledAt 不能早于 createdAt。
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ThreadCommand(
-                id(1L),
-                1L,
-                payload(),
-                id(99L),
-                HASH,
-                null,
-                STOP_REQUEST,
-                CREATED.minusSeconds(1),
-                CREATED));
     assertThrows(
         NullPointerException.class,
         () -> new ThreadCommand(id(1L), 1L, payload(), id(99L), HASH, null, null, null, null));
@@ -135,11 +121,9 @@ class ThreadCommandTest {
   }
 
   @Test
-  void markAppliedRejectsNullTurnStartAndCancelRejectsPastTime() {
+  void markAppliedRejectsNullTurnStart() {
     ThreadCommand queued = command(1L, 1L, 1L, null, null, null);
     assertThrows(NullPointerException.class, () -> queued.markApplied(null));
-    assertThrows(
-        IllegalArgumentException.class, () -> queued.cancel(STOP_REQUEST, CREATED.minusSeconds(1)));
     assertThrows(NullPointerException.class, () -> queued.cancel(null, CANCELLED));
     assertThrows(NullPointerException.class, () -> queued.cancel(STOP_REQUEST, null));
   }

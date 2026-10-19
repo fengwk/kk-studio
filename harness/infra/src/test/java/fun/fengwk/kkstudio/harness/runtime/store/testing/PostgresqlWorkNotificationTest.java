@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.harness.runtime.store.testing;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T0;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T1;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T2;
-import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T3;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T4;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T5;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.inTransaction;
@@ -72,7 +71,7 @@ class PostgresqlWorkNotificationTest {
               store.transaction(
                   tx -> {
                     tx.lockThread(baseline.threadId()).orElseThrow();
-                    tx.requestWork(target, T0);
+                    tx.requestWork(target);
                     throw new IllegalStateException("rollback");
                   }));
       assertNoNotification(notifications);
@@ -85,38 +84,34 @@ class PostgresqlWorkNotificationTest {
           store
               .transaction(
                   tx ->
-                      tx.claimNextWork(
-                          WorkTargetType.THREAD, T1, "lease-1", Duration.between(T1, T5)))
+                      tx.claimNextWork(WorkTargetType.THREAD, "lease-1", Duration.between(T1, T5)))
               .orElseThrow();
       assertNoNotification(notifications);
-      inTransaction(store, tx -> tx.renewWork(first, T1, Duration.ofSeconds(5)));
+      inTransaction(store, tx -> tx.renewWork(first, Duration.ofSeconds(5)));
       assertNoNotification(notifications);
 
       requestWork(baseline.threadId(), target, T1);
       assertNotification(notifications);
-      assertTrue(store.transaction(tx -> tx.completeWork(first, T2)).isPresent());
+      assertTrue(store.transaction(tx -> tx.completeWork(first)).isPresent());
       assertNotification(notifications);
 
       ClaimedWork second =
           store
               .transaction(
                   tx ->
-                      tx.claimNextWork(
-                          WorkTargetType.THREAD, T2, "lease-2", Duration.between(T2, T5)))
+                      tx.claimNextWork(WorkTargetType.THREAD, "lease-2", Duration.between(T2, T5)))
               .orElseThrow();
       assertNoNotification(notifications);
-      inTransaction(store, tx -> tx.rescheduleWork(second, T2, Duration.ZERO));
+      inTransaction(store, tx -> tx.rescheduleWork(second, Duration.ZERO));
       assertNotification(notifications);
 
       ClaimedWork third =
           store
               .transaction(
-                  tx ->
-                      tx.claimNextWork(
-                          WorkTargetType.THREAD, T3, "lease-3", Duration.ofSeconds(60)))
+                  tx -> tx.claimNextWork(WorkTargetType.THREAD, "lease-3", Duration.ofSeconds(60)))
               .orElseThrow();
       assertNoNotification(notifications);
-      assertTrue(store.transaction(tx -> tx.completeWork(third, T4)).isEmpty());
+      assertTrue(store.transaction(tx -> tx.completeWork(third)).isEmpty());
       assertNoNotification(notifications);
 
       requestWork(baseline.threadId(), target, T4);
@@ -144,7 +139,7 @@ class PostgresqlWorkNotificationTest {
         store,
         tx -> {
           tx.lockThread(threadId).orElseThrow();
-          tx.requestWork(target, requestedAt);
+          tx.requestWork(target);
         });
   }
 
@@ -163,7 +158,7 @@ class PostgresqlWorkNotificationTest {
                     tx -> {
                       tx.lockThread(baseline.threadId()).orElseThrow();
                       try {
-                        tx.requestWork(target, T0);
+                        tx.requestWork(target);
                       } catch (DataAccessException error) {
                         caught.set(error);
                       }
@@ -182,13 +177,12 @@ class PostgresqlWorkNotificationTest {
         durable,
         tx -> {
           tx.lockThread(baseline.threadId()).orElseThrow();
-          tx.requestWork(target, T0);
+          tx.requestWork(target);
         });
     ClaimedWork claim =
         durable
             .transaction(
-                tx ->
-                    tx.claimNextWork(WorkTargetType.THREAD, T0, "lease-1", Duration.ofSeconds(60)))
+                tx -> tx.claimNextWork(WorkTargetType.THREAD, "lease-1", Duration.ofSeconds(60)))
             .orElseThrow();
     Work beforeFailure = durable.transaction(tx -> tx.findWork(target)).orElseThrow();
     HarnessStore failing = notifyFailingStore();
@@ -201,7 +195,7 @@ class PostgresqlWorkNotificationTest {
                 failing.transaction(
                     tx -> {
                       try {
-                        tx.rescheduleWork(claim, T1, Duration.ofSeconds(1));
+                        tx.rescheduleWork(claim, Duration.ofSeconds(1));
                       } catch (DataAccessException error) {
                         caught.set(error);
                       }
@@ -220,19 +214,18 @@ class PostgresqlWorkNotificationTest {
         durable,
         tx -> {
           tx.lockThread(baseline.threadId()).orElseThrow();
-          tx.requestWork(target, T0);
+          tx.requestWork(target);
         });
     ClaimedWork claim =
         durable
             .transaction(
-                tx ->
-                    tx.claimNextWork(WorkTargetType.THREAD, T0, "lease-1", Duration.ofSeconds(60)))
+                tx -> tx.claimNextWork(WorkTargetType.THREAD, "lease-1", Duration.ofSeconds(60)))
             .orElseThrow();
     inTransaction(
         durable,
         tx -> {
           tx.lockThread(baseline.threadId()).orElseThrow();
-          tx.requestWork(target, T1);
+          tx.requestWork(target);
         });
     Work beforeFailure = durable.transaction(tx -> tx.findWork(target)).orElseThrow();
     HarnessStore failing = notifyFailingStore();
@@ -245,7 +238,7 @@ class PostgresqlWorkNotificationTest {
                 failing.transaction(
                     tx -> {
                       try {
-                        tx.completeWork(claim, T2);
+                        tx.completeWork(claim);
                       } catch (DataAccessException error) {
                         caught.set(error);
                       }

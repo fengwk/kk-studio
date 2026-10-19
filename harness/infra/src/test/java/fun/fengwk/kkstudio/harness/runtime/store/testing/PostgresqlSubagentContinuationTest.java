@@ -84,7 +84,7 @@ class PostgresqlSubagentContinuationTest {
     TurnResolver resolver =
         (threadId, path, preparation) ->
             new TurnResolver.Resolved(succeededRequest(), 100_000, 16_384);
-    runtime = new HarnessRuntime(store, clock, resolver, () -> CompactionConfig.DEFAULT);
+    runtime = new HarnessRuntime(store, resolver, () -> CompactionConfig.DEFAULT);
     scheduler = Executors.newSingleThreadScheduledExecutor();
     processor =
         new ThreadProcessor(
@@ -94,7 +94,6 @@ class PostgresqlSubagentContinuationTest {
                 new ProcessorLeaseConfig(Duration.ofSeconds(30), Duration.ofSeconds(5)),
                 Duration.ofSeconds(5),
                 () -> new CompactionConfig(20_000)),
-            clock,
             scheduler,
             Runnable::run);
   }
@@ -409,7 +408,6 @@ class PostgresqlSubagentContinuationTest {
                 tx ->
                     tx.claimNextWork(
                         WorkTargetType.THREAD,
-                        T1,
                         UUID.randomUUID().toString(),
                         Duration.ofSeconds(30)))
             .orElseThrow();
@@ -456,7 +454,7 @@ class PostgresqlSubagentContinuationTest {
                   template.serviceTier(),
                   template.rawUsageJson());
           tx.updateModelInvocation(model.succeed(response, T1));
-          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId), T1);
+          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId));
           return null;
         });
   }
