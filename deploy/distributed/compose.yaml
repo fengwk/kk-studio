@@ -2,7 +2,7 @@ name: kk-studio-distributed
 
 # 双节点分布式 E2E 测试栈（免费 mock topology）。
 #
-# 网络不变量（scripts/dev/verify/e2e/validate_distributed.py 静态验证）：
+# 网络不变量（scripts/dev/verify/e2e/validate-distributed.mjs 静态验证）：
 # - postgres / minio / http-mock 同时加入 node-a-db 与 node-b-db 两个隔离网络；
 # - app-a 只加入 node-a-db + daemon-a + app-ingress-a，app-b 只加入 node-b-db
 #   + daemon-b + app-ingress-b；daemon-a / daemon-b 各只加入自己的 daemon 网络；
