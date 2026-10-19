@@ -10,6 +10,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -36,8 +37,12 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderUpdateDTO;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
+import java.io.OutputStream;
 import java.math.BigDecimal;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /** Provider、Model、Agent Catalog Controller 的 HTTP 契约。 */
 @AutoConfigureMockMvc
@@ -49,6 +54,65 @@ public class StudioAgentCatalogControllerTest extends WebPostgresTestSupport {
   @Autowired private MockMvc mockMvc;
   @Autowired private ObjectMapper objectMapper;
   @Autowired private BuiltinAgentInitializer builtinAgentInitializer;
+
+  /** 远端模型发现：成功返回排序 id，缺少 baseUrl 为 400，上游非 2xx 为 502。 */
+  @Test
+  public void shouldListProviderRemoteModels() throws Exception {
+    HttpServer upstream = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    AtomicInteger upstreamStatus = new AtomicInteger(200);
+    upstream.createContext(
+        "/v1/models",
+        exchange -> {
+          byte[] body =
+              "{\"data\":[{\"id\":\"m-b\"},{\"id\":\"m-a\"}]}".getBytes(StandardCharsets.UTF_8);
+          exchange.sendResponseHeaders(upstreamStatus.get(), body.length);
+          try (OutputStream out = exchange.getResponseBody()) {
+            out.write(body);
+          }
+        });
+    upstream.start();
+    try {
+      String suffix = Long.toString(System.nanoTime());
+      String reachable = "remote-" + suffix;
+      createProvider(reachable, "http://127.0.0.1:" + upstream.getAddress().getPort() + "/v1");
+      mockMvc
+          .perform(get("/api/ai/catalog/providers/{name}/remote-models", reachable))
+          .andExpect(status().isOk())
+          .andExpect(jsonPath("$.data[0]").value("m-a"))
+          .andExpect(jsonPath("$.data[1]").value("m-b"));
+
+      upstreamStatus.set(401);
+      mockMvc
+          .perform(get("/api/ai/catalog/providers/{name}/remote-models", reachable))
+          .andExpect(status().isBadGateway())
+          .andExpect(jsonPath("$.code").value("upstream_failed"));
+
+      String noBaseUrl = "remote-nourl-" + suffix;
+      createProvider(noBaseUrl, null);
+      mockMvc
+          .perform(get("/api/ai/catalog/providers/{name}/remote-models", noBaseUrl))
+          .andExpect(status().isBadRequest())
+          .andExpect(jsonPath("$.code").value("validation"));
+    } finally {
+      upstream.stop(0);
+    }
+  }
+
+  private void createProvider(String name, String baseUrl) throws Exception {
+    ObjectNode body = objectMapper.createObjectNode();
+    body.put("name", name);
+    body.put("providerType", "openai");
+    body.put("credential", "k");
+    if (baseUrl != null) {
+      body.put("baseUrl", baseUrl);
+    }
+    mockMvc
+        .perform(
+            post("/api/ai/catalog/providers")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body.toString()))
+        .andExpect(status().isCreated());
+  }
 
   @Test
   public void shouldUseNameBasedIdentitiesAndEnforceCatalogGuards() throws Exception {

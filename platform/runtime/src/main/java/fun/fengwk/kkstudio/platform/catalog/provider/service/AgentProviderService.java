@@ -8,6 +8,8 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderEditablePropertiesDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderUpdateDTO;
 
+import java.util.List;
+
 /** 全局 provider 应用服务。 */
 public interface AgentProviderService {
 
@@ -31,4 +33,7 @@ public interface AgentProviderService {
 
   /** 基于 (name, expectedVersion) 的原子 CAS 删除。 */
   void deleteProvider(String name, String expectedVersion);
+
+  /** 用已保存的连接配置向 Provider 查询当前公布的模型 id（去重排序），供添加模型时预填。 */
+  List<String> listRemoteModelIds(String name);
 }

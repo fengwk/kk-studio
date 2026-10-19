@@ -321,6 +321,22 @@ export const aiCatalog = {
     'en-US': 'Upstream model ID sent to the Provider; may differ from Name.',
     'zh-CN': '发送给 Provider 的上游模型 ID，可与 Name 不同。',
   },
+  'ai.catalog.form.remoteModelsFetch': {
+    'en-US': 'Fetch models from Provider',
+    'zh-CN': '从 Provider 拉取模型',
+  },
+  'ai.catalog.form.remoteModelsLoading': {
+    'en-US': 'Fetching models…',
+    'zh-CN': '正在拉取模型…',
+  },
+  'ai.catalog.form.remoteModelsLoaded': {
+    'en-US': '{{count}} models found; pick one in Model ID.',
+    'zh-CN': '找到 {{count}} 个模型，可在 Model ID 中选择。',
+  },
+  'ai.catalog.form.remoteModelsEmpty': {
+    'en-US': 'The Provider listed no models.',
+    'zh-CN': 'Provider 未列出任何模型。',
+  },
   'ai.catalog.form.description': {
     'en-US': 'Description',
     'zh-CN': 'Description',
@@ -1011,6 +1027,62 @@ export const aiCatalog = {
   'ai.chat.noOptions': {
     'en-US': 'No options',
     'zh-CN': '暂无选项',
+  },
+  'ai.setup.title': {
+    'en-US': 'Set up your first conversation',
+    'zh-CN': '开始第一次对话',
+  },
+  'ai.setup.description': {
+    'en-US': 'Connect a model service, then create an Agent to chat with.',
+    'zh-CN': '先接入模型服务，再创建用于对话的 Agent。',
+  },
+  'ai.setup.done': {
+    'en-US': 'Done',
+    'zh-CN': '已完成',
+  },
+  'ai.setup.provider.title': {
+    'en-US': '1. Connect a Provider',
+    'zh-CN': '1. 接入 Provider',
+  },
+  'ai.setup.provider.description': {
+    'en-US': 'Enter the base URL and API key of your model service.',
+    'zh-CN': '填写模型服务的 Base URL 与 API Key。',
+  },
+  'ai.setup.provider.action': {
+    'en-US': 'Add Provider',
+    'zh-CN': '添加 Provider',
+  },
+  'ai.setup.model.title': {
+    'en-US': '2. Add a Model',
+    'zh-CN': '2. 添加模型',
+  },
+  'ai.setup.model.description': {
+    'en-US': 'Pick a model the Provider offers and set its limits.',
+    'zh-CN': '选择 Provider 提供的模型并设置上限。',
+  },
+  'ai.setup.model.action': {
+    'en-US': 'Add Model',
+    'zh-CN': '添加模型',
+  },
+  'ai.setup.agent.title': {
+    'en-US': '3. Create an Agent',
+    'zh-CN': '3. 创建 Agent',
+  },
+  'ai.setup.agent.description': {
+    'en-US': 'Choose a model and instructions for the Agent.',
+    'zh-CN': '为 Agent 选择模型并编写指令。',
+  },
+  'ai.setup.agent.action': {
+    'en-US': 'Create Agent',
+    'zh-CN': '创建 Agent',
+  },
+  'ai.setup.chat.title': {
+    'en-US': '4. Start a chat',
+    'zh-CN': '4. 开始对话',
+  },
+  'ai.setup.chat.description': {
+    'en-US': 'Create a chat with the Agent below.',
+    'zh-CN': '在下方用该 Agent 新建对话。',
   },
   'ai.chat.noAgents': {
     'en-US': 'No Agents available',

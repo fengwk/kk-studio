@@ -20,6 +20,8 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderUpdateDTO;
 
+import java.util.List;
+
 /** provider 全局 CRUD API。 */
 @AllArgsConstructor
 @RequestMapping("/api/ai/catalog/providers")
@@ -44,6 +46,11 @@ public class StudioAgentProviderController {
   public Result<AgentProviderDTO> updateProvider(
       @PathVariable("name") String name, @RequestBody AgentProviderUpdateDTO updateDTO) {
     return Results.ok(agentProviderService.updateProvider(name, updateDTO));
+  }
+
+  @GetMapping("/{name}/remote-models")
+  public Result<List<String>> listRemoteModels(@PathVariable("name") String name) {
+    return Results.ok(agentProviderService.listRemoteModelIds(name));
   }
 
   @DeleteMapping("/{name}")

@@ -150,11 +150,26 @@ Anthropic 每次最多放置 **4 个**断点：最后一个合格 tool、最后�
 
 Chat 与 Responses 都只由运行时 `ProviderCacheControl` 决定缓存字段：`NONE` 不发任何 cache 字段；非 `NONE` 时 `prompt_cache_key` 直接使用运行时给的会话 key，`prompt_cache_retention` 按 `SHORT` / `LONG` 映射为 `in_memory` / `24h`。原生 `protocolOptions` 上的 `prompt_cache_key`、`prompt_cache_retention`、`prompt_cache_options` 等运行时独占字段一律拒绝；编码器不再发送 `prompt_cache_options` 或 `prompt_cache_breakpoint`，也不改写历史内容结构。缓存有效不等于必然命中：上游最小 token 长度、TTL、路由与上下文变化仍影响实际命中率。
 
+## 模型列表发现
+
+[`ProviderModelDiscovery`](../../harness/provider/src/main/java/fun/fengwk/kkstudio/harness/provider/ProviderModelDiscovery.java)
+是唯一不走 SSE 的上游调用，用于 Catalog 添加模型时预填 Model ID。它复用模型调用的 HttpClient（系统代理、禁止重定向），
+每种协议只读一页并去重排序：
+
+| 协议 | 请求 | 读取 |
+| --- | --- | --- |
+| `openai`、`openai_responses` | `GET <baseUrl>/models`，Bearer | `data[].id` |
+| `anthropic` | `GET <base>/v1/models?limit=1000`（baseUrl 已以 `/v1` 结尾时不重复），`x-api-key` 与 `anthropic-version` | `data[].id` |
+| `google` | `GET <baseUrl>/models?pageSize=1000`，`x-goog-api-key` | `models[]` 中支持 `generateContent` 的 `name`，去掉 `models/` 前缀 |
+
+baseUrl 必须是不含 user-info、query、fragment 的 http(s) 地址。非 2xx 消息为 `HTTP <status>` 加最多 300 字符正文，
+正文超过 4 MiB、不是 JSON 或缺少列表字段都明确失败；消息不含 baseUrl 与凭据。
+
 ## 包架构
 
 | 包名 | 职责 | 边界 |
 | --- | --- | --- |
-| `fun.fengwk.kkstudio.harness.provider` | 跨协议共享的流式生命周期桥接 `ProviderStreamBridge`、HTTP 错误格式化 `ProviderErrorHelper`、请求体上限守卫 `RequestBodySizeGuard` 与协议选项副本 `ProviderProtocolOptionsJson` | 不解析厂商错误分类，不修改原始响应正文；桥接器只承载 bind / cancel / terminal-once 生命周期，协议差异留在各协议包 |
+| `fun.fengwk.kkstudio.harness.provider` | 跨协议共享的流式生命周期桥接 `ProviderStreamBridge`、HTTP 错误格式化 `ProviderErrorHelper`、请求体上限守卫 `RequestBodySizeGuard`、协议选项副本 `ProviderProtocolOptionsJson` 与模型列表发现 `ProviderModelDiscovery` | 不解析厂商错误分类，不修改原始响应正文；桥接器只承载 bind / cancel / terminal-once 生命周期，协议差异留在各协议包 |
 | `fun.fengwk.kkstudio.harness.provider.transport` | `JdkHttpSseTransport`、`HttpSseStreamExecution`、`IncrementalSseParser`、`HttpSseLimits`、`HttpOpenMetadata`、`HeaderSanitizer`、`TransportErrorKind`、`TransportException`、`ServerSentEvent`、`HttpSseCallback` | 只依赖 `harness-runtime` 基础模型与 JDK；不暴露凭据，不保留未清洗的异常上下文 |
 | `fun.fengwk.kkstudio.harness.provider.anthropic` | Messages wire 编码、流式聚合、Prompt Cache 断点、thinking 编码、错误映射与 adapter | 只经 transport 发起 I/O；opaque replay 不进入公共 DTO、日志或异常 |
 | `fun.fengwk.kkstudio.harness.provider.gemini` | GenerateContent wire 编码、流式聚合、隐式 Prompt Cache 与 adapter | 只经 transport 发起 I/O；仅接受 `NONE` retention（服务端隐式缓存） |
@@ -169,6 +184,7 @@ Chat 与 Responses 都只由运行时 `ProviderCacheControl` 决定缓存字段�
 按维护任务分组的测试入口（每组先给目录，再给代表文件）：
 
 - 传输与字节级解析：[`transport` 测试目录](../../harness/provider/src/test/java/fun/fengwk/kkstudio/harness/provider/transport/)；[`IncrementalSseParserTest.java`](../../harness/provider/src/test/java/fun/fengwk/kkstudio/harness/provider/transport/IncrementalSseParserTest.java) 锁定换行/BOM/上限规则，[`JdkHttpSseTransportTest.java`](../../harness/provider/src/test/java/fun/fengwk/kkstudio/harness/provider/transport/JdkHttpSseTransportTest.java) 锁定启动门、Watchdog 与取消仲裁，[`HeaderSanitizerTest.java`](../../harness/provider/src/test/java/fun/fengwk/kkstudio/harness/provider/transport/HeaderSanitizerTest.java) 锁定标头脱敏。
+- 模型列表发现：根包 [`ProviderModelDiscoveryTest.java`](../../harness/provider/src/test/java/fun/fengwk/kkstudio/harness/provider/ProviderModelDiscoveryTest.java) 用本地 `HttpServer` 锁定四协议的路径、认证头、解析、错误与地址校验。
 - 上游错误透传：根包 [`ProviderErrorHelperTest.java`](../../harness/provider/src/test/java/fun/fengwk/kkstudio/harness/provider/ProviderErrorHelperTest.java) 与各协议目录下同名的 `*ErrorMapper` 测试锁定原始正文透传、`[TRUNCATED]` 标记与分类。
 - 工具结果媒体矩阵契约：根包 [`ProviderAdapterMediaCapabilitiesTest.java`](../../harness/provider/src/test/java/fun/fengwk/kkstudio/harness/provider/ProviderAdapterMediaCapabilitiesTest.java) 锁定四个协议的用户/工具结果声明矩阵，同包 [`ProviderToolResultMediaMatrixWireTest.java`](../../harness/provider/src/test/java/fun/fengwk/kkstudio/harness/provider/ProviderToolResultMediaMatrixWireTest.java) 用本地离线 `HttpServer` 逐格验证「声明 ↔ 真实 HTTP 请求体 ↔ 不支持模态以 `INVALID_REQUEST` 失败且不发起请求」；各协议目录内的参数化用例锁定各自的 wire 形态与拒绝理由，全部离线，不访问真实 Provider。
 - 协议测试：[`anthropic`](../../harness/provider/src/test/java/fun/fengwk/kkstudio/harness/provider/anthropic/)、[`gemini`](../../harness/provider/src/test/java/fun/fengwk/kkstudio/harness/provider/gemini/)、[`openai.chat`](../../harness/provider/src/test/java/fun/fengwk/kkstudio/harness/provider/openai/chat/)、[`openai.responses`](../../harness/provider/src/test/java/fun/fengwk/kkstudio/harness/provider/openai/responses/) 分别验证 wire、推理、流式聚合与终止证据。共享生命周期由根包 ProviderStreamBridgeTest 验证。Responses 的 [`OpenAiResponsesDurableReplayTest`](../../harness/provider/src/test/java/fun/fengwk/kkstudio/harness/provider/openai/responses/OpenAiResponsesDurableReplayTest.java) 与 [`OpenAiResponsesEmptyReasoningReplayRepairTest`](../../harness/provider/src/test/java/fun/fengwk/kkstudio/harness/provider/openai/responses/OpenAiResponsesEmptyReasoningReplayRepairTest.java) 验证密文合并和空占位符处理。

@@ -267,12 +267,16 @@ metadata 自行定价；durable 用量按当前 catalog 价格现算，不写回
 ## 功能入口
 
 AI feature 维护 Catalog、Chat、Environment、MCP、Skill 和 Thread 工作区。
+新库没有任何 Catalog 资源：Chat 列表在没有可用 Agent 时查询 Provider 与 Model，展示
+Provider → Model → Agent → Chat 的首次使用引导并链接到对应页面，已有可用 Agent 时不再查询。
+新建 Model 时可从已保存的 Provider 拉取上游模型 ID 作为 Model ID 候选，Name 默认跟随 Model ID，
+上游失败时就地展示状态与原因。
 Agent 目录按读 DTO 的 `type` 展示 `USER` / `BUILTIN` 徽标：内置定义的名称与删除受保护，编辑表单允许其模型留空（未配置），用户创建的 Agent 仍要求模型。
 MCP Card 消费安全投影，编辑时读取 no-store 配置并用 generation fence 保护迟到响应。
 Skill Check 只更新候选，用户确认 exact commit 后 Update 发布。
 Environment 管理面展示宿主事实与有界运维事件窗口，并提供“安装 / 覆盖”与“卸载”入口：安装弹窗
-保存安装设置后读取当前 token，用服务端返回的配置生成含凭据的安装/卸载命令并复制到剪贴板，
-保存只写设置、不代表已部署。
+保存安装设置后签发一次性安装码，生成安装/卸载命令并复制到剪贴板；下载安装脚本时服务端轮换注册凭证，
+安装码随即失效。保存只写设置、不代表已部署。
 
 Projects 使用权威 ProjectSnapshot/IssueDetail，按 workflow states 分列，
 通过 version CAS 提交控制、阶段额度、Activity 与 Evidence。

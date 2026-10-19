@@ -52,6 +52,30 @@ describe('useChatPageController', () => {
 
     expect(agentService.listProviders).not.toHaveBeenCalled()
     expect(agentService.listModels).not.toHaveBeenCalled()
+    expect(result.current.chatPanelProps.setup).toEqual({
+      hasProvider: true,
+      hasModel: true,
+      hasAgent: true,
+    })
+  })
+
+  // 没有可用 Agent 时才查询 Provider / Model，用于首次使用引导。
+  it('reports catalog setup progress when no usable agent exists', async () => {
+    vi.mocked(agentService.listAgents).mockResolvedValue(page([agent({ model: null })]))
+    vi.mocked(agentService.listProviders).mockResolvedValue(page([{ name: 'p' }]) as never)
+    vi.mocked(agentService.listModels).mockResolvedValue(page([]) as never)
+
+    const { result } = renderHook(() => useChatPageController(), {
+      wrapper: queryWrapper(new QueryClient(queryClientOptions)),
+    })
+
+    await waitFor(() =>
+      expect(result.current.chatPanelProps.setup).toEqual({
+        hasProvider: true,
+        hasModel: false,
+        hasAgent: false,
+      }),
+    )
   })
 
   it('opens the create-chat flow from the Chat panel and submits the selected agent', async () => {
@@ -148,7 +172,7 @@ function page<T>(results: T[]) {
   }
 }
 
-function agent(): AgentDefinitionDTO {
+function agent(overrides: Partial<AgentDefinitionDTO> = {}): AgentDefinitionDTO {
   return {
     name: 'default-assistant',
     description: null,
@@ -165,5 +189,6 @@ function agent(): AgentDefinitionDTO {
     version: '1',
     createTime: null,
     updateTime: null,
+    ...overrides,
   }
 }

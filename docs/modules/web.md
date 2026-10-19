@@ -51,7 +51,7 @@ health、资源下载和 WebSocket 使用各自传输形式。公开路由如下
 | family | 路径 | 用途 |
 | --- | --- | --- |
 | Health | `/healthz` | 存活探针 |
-| Catalog | `/api/ai/catalog/providers|models|agents|tools` | Provider/Model/Agent CRUD、工具候选；变更使用 expectedVersion |
+| Catalog | `/api/ai/catalog/providers|models|agents|tools` | Provider/Model/Agent CRUD、工具候选、Provider 远端模型 ID（`providers/{name}/remote-models`）；变更使用 expectedVersion |
 | Skill | `/api/ai/catalog/skill-packages` | CRUD、check、exact commit update |
 | MCP | `/api/ai/mcp-servers` | name-keyed CRUD、显式 no-store config、同步 discover |
 | Plugin | `/api/plugins` | 安全投影、auth/prepare、auth/complete、删除 auth；`{pluginId}/connection-check` 按 expected 坐标执行一次显式只读连接检查 |

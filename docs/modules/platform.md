@@ -75,6 +75,10 @@ Agent 被其它 Agent 的 subagents、插件普通配置或未归档 Project 的
 Provider credential 在显式写入口接收，常规响应给出安全投影；配置同步导出显式包含原值。运行时类型取自
 [`ProviderType`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderType.java)：
 `openai`、`openai_responses`、`anthropic`、`google`，按精确 wire value 解析。
+`GET /api/ai/catalog/providers/{name}/remote-models` 用已保存的 baseUrl 与 credential 读取 Provider 的
+模型列表（[`ProviderModelDiscovery`](../../harness/provider/src/main/java/fun/fengwk/kkstudio/harness/provider/ProviderModelDiscovery.java)），
+返回去重排序的模型 ID，只用于添加模型时预填，不写入 Catalog；请求不在数据库事务内，缺少 baseUrl 为校验错误，
+上游不可达或非 2xx 返回 502 `upstream_failed`，detail 带上游状态与截断正文。
 Model 配置保存 limit、abilities、variants、pricing 和 default variant。pricing 可带最多 16 条按顺序匹配的条件价格
 `rules`：每条限定每天的时段（IANA 时区下 `[start, end)`，可跨越午夜）和/或最小上下文 token，并给出完整的六项单价。
 Agent 配置保存工具名、`SkillRef(packageName, name)`、subagents 与 `inheritParentEnvironment`

@@ -15,6 +15,7 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DuplicateKeyException;
 
+import fun.fengwk.kkstudio.harness.provider.ProviderModelDiscovery;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.platform.catalog.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.service.converter.AgentProviderConverter;
@@ -22,12 +23,15 @@ import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider
 import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
 import fun.fengwk.kkstudio.platform.error.AiInUseException;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
+import fun.fengwk.kkstudio.platform.error.AiUpstreamException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderEditablePropertiesDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderUpdateDTO;
+
+import java.util.List;
 
 /** 原子 CAS 失败必须以类型化 {@link AiVersionConflictException} 抛出。 */
 public class AgentProviderServiceImplTest {
@@ -39,7 +43,8 @@ public class AgentProviderServiceImplTest {
     AgentProviderMutationFactory factory = mock(AgentProviderMutationFactory.class);
     AgentProviderGuard guard = mock(AgentProviderGuard.class);
     AgentProviderServiceImpl service =
-        new AgentProviderServiceImpl(repository, converter, factory, guard);
+        new AgentProviderServiceImpl(
+            repository, converter, factory, guard, mock(ProviderModelDiscovery.class));
 
     AgentProvider provider = new AgentProvider();
     provider.setName("provider");
@@ -87,7 +92,8 @@ public class AgentProviderServiceImplTest {
     AgentProviderMutationFactory factory = mock(AgentProviderMutationFactory.class);
     AgentProviderGuard guard = mock(AgentProviderGuard.class);
     AgentProviderServiceImpl service =
-        new AgentProviderServiceImpl(repository, converter, factory, guard);
+        new AgentProviderServiceImpl(
+            repository, converter, factory, guard, mock(ProviderModelDiscovery.class));
     AgentProvider provider = new AgentProvider();
     provider.setName("provider");
     provider.setVersion(1L);
@@ -114,7 +120,8 @@ public class AgentProviderServiceImplTest {
     AgentProviderMutationFactory factory = mock(AgentProviderMutationFactory.class);
     AgentProviderGuard guard = mock(AgentProviderGuard.class);
     AgentProviderServiceImpl service =
-        new AgentProviderServiceImpl(repository, converter, factory, guard);
+        new AgentProviderServiceImpl(
+            repository, converter, factory, guard, mock(ProviderModelDiscovery.class));
 
     AgentProvider provider = new AgentProvider();
     provider.setName("provider");
@@ -149,7 +156,8 @@ public class AgentProviderServiceImplTest {
     AgentProviderMutationFactory factory = mock(AgentProviderMutationFactory.class);
     AgentProviderGuard guard = mock(AgentProviderGuard.class);
     AgentProviderServiceImpl service =
-        new AgentProviderServiceImpl(repository, converter, factory, guard);
+        new AgentProviderServiceImpl(
+            repository, converter, factory, guard, mock(ProviderModelDiscovery.class));
     AgentProviderEditablePropertiesDTO properties = properties("openai", null);
 
     AgentProvider provider = new AgentProvider();
@@ -178,7 +186,8 @@ public class AgentProviderServiceImplTest {
     AgentProviderMutationFactory factory = mock(AgentProviderMutationFactory.class);
     AgentProviderGuard guard = mock(AgentProviderGuard.class);
     AgentProviderServiceImpl service =
-        new AgentProviderServiceImpl(repository, converter, factory, guard);
+        new AgentProviderServiceImpl(
+            repository, converter, factory, guard, mock(ProviderModelDiscovery.class));
     AgentProviderEditablePropertiesDTO properties = properties("openai", null);
 
     AgentProvider provider = new AgentProvider();
@@ -207,7 +216,8 @@ public class AgentProviderServiceImplTest {
     AgentProviderMutationFactory factory = mock(AgentProviderMutationFactory.class);
     AgentProviderGuard guard = mock(AgentProviderGuard.class);
     AgentProviderServiceImpl service =
-        new AgentProviderServiceImpl(repository, converter, factory, guard);
+        new AgentProviderServiceImpl(
+            repository, converter, factory, guard, mock(ProviderModelDiscovery.class));
     AgentProviderEditablePropertiesDTO properties = properties("openai", null);
 
     AgentProvider provider = new AgentProvider();
@@ -229,7 +239,8 @@ public class AgentProviderServiceImplTest {
     AgentProviderMutationFactory factory = mock(AgentProviderMutationFactory.class);
     AgentProviderGuard guard = mock(AgentProviderGuard.class);
     AgentProviderServiceImpl service =
-        new AgentProviderServiceImpl(repository, converter, factory, guard);
+        new AgentProviderServiceImpl(
+            repository, converter, factory, guard, mock(ProviderModelDiscovery.class));
     AgentProviderEditablePropertiesDTO properties = properties("openai", null);
 
     AgentProvider provider = new AgentProvider();
@@ -254,7 +265,8 @@ public class AgentProviderServiceImplTest {
     AgentProviderMutationFactory factory = mock(AgentProviderMutationFactory.class);
     AgentProviderGuard guard = mock(AgentProviderGuard.class);
     AgentProviderServiceImpl service =
-        new AgentProviderServiceImpl(repository, converter, factory, guard);
+        new AgentProviderServiceImpl(
+            repository, converter, factory, guard, mock(ProviderModelDiscovery.class));
     AgentProviderEditablePropertiesDTO properties = properties("openai", null);
 
     AgentProvider provider = new AgentProvider();
@@ -273,5 +285,44 @@ public class AgentProviderServiceImplTest {
     properties.setProviderType(providerType);
     properties.setCredential(credential);
     return properties;
+  }
+
+  /** 远端模型发现使用已保存的连接配置；地址错误与上游失败分别映射为校验与上游错误。 */
+  @Test
+  public void shouldListRemoteModelsWithSavedConnection() {
+    AgentProviderGuard guard = mock(AgentProviderGuard.class);
+    ProviderModelDiscovery discovery = mock(ProviderModelDiscovery.class);
+    AgentProviderServiceImpl service =
+        new AgentProviderServiceImpl(
+            mock(AgentProviderRepository.class),
+            mock(AgentProviderConverter.class),
+            mock(AgentProviderMutationFactory.class),
+            guard,
+            discovery);
+    AgentProvider provider = new AgentProvider();
+    provider.setName("p");
+    provider.setProviderType(ProviderType.OPENAI);
+    provider.setBaseUrl("https://h/v1");
+    provider.setCredential("k");
+    when(guard.requireProvider("p")).thenReturn(provider);
+
+    when(discovery.listModelIds(ProviderType.OPENAI, "https://h/v1", "k"))
+        .thenReturn(List.of("m1"));
+    assertEquals(List.of("m1"), service.listRemoteModelIds("p"));
+
+    when(discovery.listModelIds(ProviderType.OPENAI, "https://h/v1", "k"))
+        .thenThrow(new IllegalArgumentException("bad url"));
+    assertEquals(
+        "bad url",
+        assertThrows(AiValidationException.class, () -> service.listRemoteModelIds("p"))
+            .getMessage());
+
+    doThrow(new ProviderModelDiscovery.Failure("HTTP 401"))
+        .when(discovery)
+        .listModelIds(ProviderType.OPENAI, "https://h/v1", "k");
+    assertEquals(
+        "HTTP 401",
+        assertThrows(AiUpstreamException.class, () -> service.listRemoteModelIds("p"))
+            .getMessage());
   }
 }

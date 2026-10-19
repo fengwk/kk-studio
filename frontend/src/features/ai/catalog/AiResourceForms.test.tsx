@@ -195,8 +195,14 @@ describe('AiResourceForms', () => {
     expect(screen.getByLabelText('Reasoning Effort 1')).toHaveValue('')
     expect(screen.getByLabelText('Reasoning Effort 1')).not.toBeRequired()
 
+    // 新建时 Name 跟随 Model ID，直到单独编辑 Name。
     await user.type(screen.getByLabelText('Model ID'), 'upstream-claude-3')
-    expect(screen.getByDisplayValue('upstream-claude-3')).toBeInTheDocument()
+    expect(screen.getByLabelText('Model ID')).toHaveValue('upstream-claude-3')
+    expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue('upstream-claude-3')
+    await user.clear(screen.getByRole('textbox', { name: 'Name' }))
+    await user.type(screen.getByRole('textbox', { name: 'Name' }), 'claude')
+    await user.type(screen.getByLabelText('Model ID'), '-x')
+    expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue('claude')
 
     await user.click(screen.getByRole('button', { name: '添加 Variant' }))
     const secondNameInput = screen.getByLabelText('Variant ID 2')
