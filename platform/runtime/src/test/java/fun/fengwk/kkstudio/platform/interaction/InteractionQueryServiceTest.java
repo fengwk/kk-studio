@@ -41,6 +41,7 @@ import fun.fengwk.kkstudio.share.ai.interaction.InteractionPageDTO;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 /** 待处理交互统一查询用例 {@link InteractionQueryService} 的单元测试。 */
@@ -88,12 +89,12 @@ class InteractionQueryServiceTest {
 
   /** 显式过滤根/直接来源根必须解析为执行根；同时提供该根的快照（展示名）。后代来源会用 {@link #stubRootSession} 覆盖同一根的快照。 */
   private void stubRoot(UUID threadId) {
-    when(runtime.findAncestorChain(threadId)).thenReturn(List.of(threadId));
+    when(runtime.findRootThreadId(threadId)).thenReturn(Optional.of(threadId));
     stubRootSnapshot(threadId, ZERO_UUID, "thread-" + threadId);
   }
 
   private void stubDescendant(UUID threadId, UUID rootThreadId) {
-    when(runtime.findAncestorChain(threadId)).thenReturn(List.of(threadId, rootThreadId));
+    when(runtime.findRootThreadId(threadId)).thenReturn(Optional.of(rootThreadId));
   }
 
   /** 根快照同时提供 Session（归属解析）与名称（展示）；服务端每个根只回读一次。 */
@@ -334,13 +335,13 @@ class InteractionQueryServiceTest {
   /** 测试意图：显式根过滤值必须是已存在的执行根，不存在返回 not-found、子 Thread 返回非法参数且都不进入分页扫描。 */
   @Test
   void rootFilterRejectsNonexistentAndNonRootThreads() {
-    when(runtime.findAncestorChain(id(999))).thenReturn(List.of());
+    when(runtime.findRootThreadId(id(999))).thenReturn(Optional.empty());
     assertThrows(
         HarnessRuntimeNotFoundException.class, () -> service.listInteractions(id(999), null, 10));
 
     UUID child = id(501);
     UUID root = id(500);
-    when(runtime.findAncestorChain(child)).thenReturn(List.of(child, root));
+    when(runtime.findRootThreadId(child)).thenReturn(Optional.of(root));
     assertThrows(IllegalArgumentException.class, () -> service.listInteractions(child, null, 10));
 
     verify(runtime, never()).listPendingInteractions(any(), any(), anyInt());

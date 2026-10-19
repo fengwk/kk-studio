@@ -18,8 +18,7 @@ import java.util.UUID;
  * next-sequence cursor 期望。
  *
  * <p>YOLO 输入只出现在执行根 target：{@link NewRootSession}、{@link NewThread} 与 {@link NewForkedSession}
- * 携带调用方给定的根开关；{@link NewChildSession} 不携带任何开关，Runtime 在树锁内从真实父链派生不可变执行根并写入 {@code
- * FOLLOW(rootThreadId)}，调用方无法指定任意 Follow 目标。
+ * 携带调用方给定的根开关；{@link NewChildSession} 不携带任何开关，执行根继承自父 Thread，调用方无法指定。
  */
 public sealed interface AcceptCommandsTarget {
 
@@ -40,7 +39,7 @@ public sealed interface AcceptCommandsTarget {
 
   /**
    * 新建 Session 并作为既有 {@code parentThreadId} 的执行子代理：调用方预分配 {@code sessionId} / {@code
-   * threadId}，Runtime 在树锁内派生真实执行根，子 Thread 恒为 {@code FOLLOW(rootThreadId)}，不接受调用方给定的开关。
+   * threadId}，执行根继承自父 Thread，不接受调用方给定的开关。
    */
   record NewChildSession(
       UUID sessionId, UUID threadId, BranchSettings rootSettings, UUID parentThreadId)

@@ -465,14 +465,14 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
     // 并发直接控制面：与 plan 无关的独立短事务，成功（seedCommand 已把 version 推进到 1，CAS 精确匹配）。
     ThreadState yoloUpdate =
         fixture.runtime.setThreadYolo(new SetThreadYoloCommand(baseline.threadId(), true));
-    assertTrue(yoloUpdate.yoloPolicy().isEnabled());
+    assertTrue(yoloUpdate.yoloEnabled());
     assertEquals(2L, yoloUpdate.version());
     releaseResolver.countDown();
     processing.join(5000);
     assertFalse(processing.isAlive());
 
     ThreadState finalThread = thread(fixture.store, baseline.threadId());
-    assertTrue(finalThread.yoloPolicy().isEnabled());
+    assertTrue(finalThread.yoloEnabled());
     // seedCommand +1，setThreadYolo +1，commit advanceHead 再 +1。
     assertEquals(3L, finalThread.version());
     assertEquals(

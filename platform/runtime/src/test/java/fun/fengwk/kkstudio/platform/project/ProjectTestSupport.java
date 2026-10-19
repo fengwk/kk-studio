@@ -638,15 +638,16 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
             now);
         jdbc.update(
             "insert into harness_thread (id, session_id, head_entry_id, creation_request_hash,"
-                + " name, yolo_mode, yolo_root_thread_id, execution_control, input_through_sequence,"
+                + " name, root_thread_id, yolo_enabled, execution_control, input_through_sequence,"
                 + " next_command_sequence, version, created_at, updated_at)"
-                + " values (?, ?, ?, ?, ?, ?, null, 'RUNNABLE', 0, ?, 0, ?, ?)",
+                + " values (?, ?, ?, ?, ?, ?, ?, 'RUNNABLE', 0, ?, 0, ?, ?)",
             threadId,
             sessionId,
             rootEntryId,
             "0".repeat(64),
             "thread-" + threadId,
-            newSession.yoloEnabled() ? "ENABLE" : "DISABLE",
+            threadId,
+            newSession.yoloEnabled(),
             command.commands().size() + 1L,
             now,
             now);
@@ -673,9 +674,9 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
             now);
         jdbc.update(
             "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id,"
-                + " creation_request_hash, name, yolo_mode, yolo_root_thread_id, execution_control,"
+                + " creation_request_hash, name, root_thread_id, yolo_enabled, execution_control,"
                 + " input_through_sequence, next_command_sequence, version, created_at, updated_at)"
-                + " values (?, ?, ?, ?, ?, ?, 'FOLLOW', ?, 'RUNNABLE', 0, ?, 0, ?, ?)",
+                + " values (?, ?, ?, ?, ?, ?, ?, false, 'RUNNABLE', 0, ?, 0, ?, ?)",
             threadId,
             sessionId,
             parentThreadId,
@@ -703,15 +704,10 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
       return accepted(thread.threadId(), thread.expectedHeadEntryId());
     }
 
-    /** 由不可变 parent 链派生真实执行根（parentThreadId 为 null 的最顶层 Thread）。 */
+    /** 父 Thread 的不可变执行根。 */
     private static UUID resolveExecutionRoot(JdbcTemplate jdbc, UUID threadId) {
       return jdbc.queryForObject(
-          "with recursive chain as (select id, parent_thread_id from harness_thread where id = ?"
-              + " union all select t.id, t.parent_thread_id from harness_thread t"
-              + " join chain c on t.id = c.parent_thread_id)"
-              + " select id from chain where parent_thread_id is null",
-          UUID.class,
-          threadId);
+          "select root_thread_id from harness_thread where id = ?", UUID.class, threadId);
     }
 
     /** 记录本次接受的真实命令行，供并发幂等测试断言「只派发一次」。 */

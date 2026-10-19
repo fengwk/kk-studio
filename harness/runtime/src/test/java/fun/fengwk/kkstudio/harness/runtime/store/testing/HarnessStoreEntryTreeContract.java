@@ -41,7 +41,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -129,7 +128,8 @@ public abstract class HarnessStoreEntryTreeContract {
             root.headEntryId(),
             root.creationRequestHash(),
             root.name(),
-            ThreadYoloPolicy.follow(first.threadId()),
+            first.threadId(),
+            false,
             root.executionControl(),
             root.inputThroughSequence(),
             root.nextCommandSequence(),
@@ -595,7 +595,7 @@ public abstract class HarnessStoreEntryTreeContract {
         });
     ThreadState committed =
         store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
-    assertTrue(committed.yoloPolicy().isEnabled());
+    assertTrue(committed.yoloEnabled());
     assertEquals(3L, committed.nextCommandSequence());
     assertEquals(1L, committed.version());
     assertEquals(T2, committed.updatedAt());
@@ -641,7 +641,7 @@ public abstract class HarnessStoreEntryTreeContract {
                           locked.id(),
                           locked.sessionId(),
                           locked.headEntryId(),
-                          locked.yoloPolicy().isEnabled(),
+                          locked.yoloEnabled(),
                           locked.nextCommandSequence(),
                           locked.version(),
                           T1,
@@ -666,7 +666,7 @@ public abstract class HarnessStoreEntryTreeContract {
                           locked.sessionId(),
                           locked.headEntryId(),
                           "branch 分析",
-                          locked.yoloPolicy().isEnabled(),
+                          locked.yoloEnabled(),
                           locked.nextCommandSequence(),
                           locked.version(),
                           locked.createdAt(),
@@ -699,8 +699,7 @@ public abstract class HarnessStoreEntryTreeContract {
               return id;
             });
     assertTrue(
-        store.<Boolean>transaction(
-            tx -> tx.findThread(threadId).orElseThrow().yoloPolicy().isEnabled()));
+        store.<Boolean>transaction(tx -> tx.findThread(threadId).orElseThrow().yoloEnabled()));
   }
 
   @Test

@@ -9,7 +9,7 @@ import { ThreadPresentationActions } from './ThreadPresentationActions'
 
 const thread: HarnessThreadDTO = {
   threadId: 'child', name: 'worker', sessionId: 'session', headEntryId: 'head',
-  parentThreadId: 'parent', yoloPolicy: { mode: 'FOLLOW', rootThreadId: 'root' },
+  parentThreadId: 'parent', rootThreadId: 'root', yoloEnabled: false,
   nextCommandSequence: '1', version: '1', status: 'IDLE', processing: false,
   executionControl: 'RUNNABLE', createTime: null, updateTime: null,
   branchSettings: {

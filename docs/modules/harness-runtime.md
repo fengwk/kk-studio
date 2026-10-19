@@ -12,7 +12,7 @@
 acceptCommands / acceptCommandsAndJoin / findThreadCommand / getSession / getSessionEntries / listThreadsBySession
 stop / decideToolApproval / submitToolInput / listPendingInteractions / setThreadYolo / renameThread / renameSession
 manualCompactionAvailability / compactThread / getThreadSnapshot / getThreadTree
-findJoin / projectJoinReceipt / findAncestorChain
+findJoin / projectJoinReceipt / findRootThreadId
 ```
 
 普通控制操作在**一个** [`HarnessStore.Transaction`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/store/HarnessStore.java) 内完成全部写入并原子提交：状态变更要么整体可见，要么完全不发生。`compactThread` 是例外，采用短事务规划、事务外 resolve、第二短事务 CAS 提交，入口先用 `assertNoAmbientTransaction` 拒绝外层环境事务。`getThreadSnapshot` 等查询也使用 Store 事务，其中快照查询会加锁，不能把“只读”理解为“无锁”。
@@ -55,16 +55,14 @@ NOTIFICATION          SETTINGS     FORK
 
 ```text
 id / sessionId / parentThreadId / headEntryId / creationRequestHash / name
-yoloPolicy / executionControl / inputThroughSequence / nextCommandSequence / version / createdAt / updatedAt
+rootThreadId / yoloEnabled / executionControl / inputThroughSequence / nextCommandSequence / version / createdAt / updatedAt
 ```
 
 `sessionId`、`parentThreadId`、`creationRequestHash`（64 位小写 SHA-256 身份键，不对产品 DTO 暴露）与 `createdAt` 创建后不可变；`headEntryId` 必须属于同一 Session；`validateTransition` 要求命令序号与 `updatedAt` 不回退，任何非精确重放的变更都让 `version` **严格 +1**，精确重放原样接受。`version` 是结构与控制状态的 CAS / invalidation cursor，不是完整快照的内容版本——ModelInvocation 的高频流式 checkpoint 在同一 version 内推进。`name` 与根的 YOLO 开关由控制面直接更新：同值 no-op 不推进 version，值变化只替换该字段并精确 +1，不产生 Command / Entry / Work。YOLO 不与完整 Thread version 做 CAS，最后一次序列化写入生效。
 
-[`ThreadYoloPolicy`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/thread/ThreadYoloPolicy.java)
-区分根的 `ENABLE/DISABLE` 与子代理的 `FOLLOW(rootThreadId)`。子代理直接 Follow 真实执行根，
-Follow 目标创建后不可变，不复制父开关，也不能指向中间父或其他树。
-根开关更新只推进根行；既有子代理下一次权限决定在树锁内读取根策略，不改子行版本。
-创建与恢复校验祖先链和策略目标一致，创建幂等指纹只保存稳定策略身份。
+`rootThreadId` 是不可变执行根：根指向自身，子代理在创建时继承父 Thread 的执行根，树锁与整树读取都直接使用它。
+`yoloEnabled` 只属于执行根，子代理恒为 false。根开关更新只推进根行；既有子代理下一次权限决定读取执行根的开关，
+不改子行版本。创建幂等指纹只保存创建请求携带的根开关。
 
 [`ThreadExecutionControl`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/thread/ThreadExecutionControl.java) 只有 `RUNNABLE` / `STOPPED` 两种持久执行控制：Stop 把目标 Thread 与完整后代置为 `STOPPED`，该事实跨进程重启保留；显式新用户输入或显式新任务可把目标恢复为 `RUNNABLE`，但不会自动重启后代。另持久记录 `inputThroughSequence`（已推进的输入水位）：只有 INPUT 推进它，压缩、CONTINUATION 与 Stop 都不推进。对外的 [`ThreadRuntimeStatus`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/thread/ThreadRuntimeStatus.java) 由 [`ThreadSnapshot.runtimeStatus()`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/ThreadSnapshot.java) 从该 Thread 自身的事实派生，不递归子树：`STOPPED` 直接来自执行控制；其余按本地上下文给出 `IDLE` / `QUEUED` / `CONTINUATION_DUE` / `MODEL_*` / `TOOL_*` / `APPLYING`，其中 `IDLE`（无 queued command）与 `STOPPED` 的 `processing` 均为 false。等待子结果不是本地工作：父 Thread 不因未交付 join 而失去 `IDLE`。
 
@@ -83,7 +81,7 @@ Follow 目标创建后不可变，不复制父开关，也不能指向中间父�
 `acceptCommands` 接收一批有序命令加一个 sealed target：
 
 - `NEW_SESSION`（`NewRootSession`）：调用方预分配 `sessionId`/`threadId`，同一事务插入 Session + ROOT + Thread（`version=0`、`nextCommandSequence=1`）+ Commands（sequence 从 1 起）+ THREAD Work；以 client `threadId` 为查找键做初始创建重放，同 `creationRequestHash` 精确重放，不同哈希冲突为 `THREAD_ID_REUSED`。
-- `NEW_CHILD_SESSION`（`NewChildSession`，内部 task 子）：新建 Session 并作为既有 `parentThreadId` 的执行子代理；Runtime 在树锁内派生真实执行根并写入 `FOLLOW(rootThreadId)`，不接受调用方给定的开关。
+- `NEW_CHILD_SESSION`（`NewChildSession`，内部 task 子）：新建 Session 并作为既有 `parentThreadId` 的执行子代理；执行根继承自父 Thread，不接受调用方给定的开关。
 - `NEW_THREAD`：`KEY SHARE` 锁既有 Session（不串行化同 Session 的兄弟创建），校验 `startEntryId` 属于该 Session，插入一个 `FORK` Entry 作为新 Thread head（parent = 该切点）再加 Thread + Commands + Work；不复制任何前缀 Entry、不移动源 Thread。合法边界只有 ROOT 或已闭合 `TURN_END`；STOP Turn 作为原子控制屏障，绝不能 fork 到其未闭合 prefix（拒绝创建），但完整闭合的 `STOPPED` `TURN_END` 边界可正常 fork。
 - `NEW_FORKED_SESSION`：把执行根 `sourceThreadId` 在合法切点处的有效上下文复制到新 Session 并创建独立执行根；根 settings 从来源 branch 在切点处的生效快照推导、不接受调用方给定，不复制 join/commands/invocations，也不订阅源执行。
 - `THREAD`：先按 immutable `sessionId` 做 `KEY SHARE`，再 `FOR UPDATE` 锁 Thread；exact ordered replay 必须**先于**任何 cursor / preflight 准入，全新批次要求 `expectedHeadEntryId` 与 `expectedNextCommandSequence` 精确匹配（否则 `STALE_COMMAND_CURSOR`），随后调用 preflight、预留连续 sequence、请求 THREAD Work。
@@ -96,7 +94,7 @@ Follow 目标创建后不可变，不复制父开关，也不能指向中间父�
 
 `getThreadSnapshot` 在单事务内锁 Thread、读取待处理命令与 `EntryPath`，再用分类器投影出最小适用状态：`IdleOrHistorical`/`ContinuationDue` 只暴露 Thread 与历史；Model 上下文暴露 ModelInvocation 与尚未物化的失败 attempts；Tool 上下文额外暴露全部 Tool siblings。快照总是携带事务内最新的已提交 Invocation checkpoint，即使 Thread version 未变。
 
-`getThreadTree` 读取目标 Thread 所属的整棵执行树。它先用 `findAncestorChain` 找到真实根，不存在则 `HarnessRuntimeNotFoundException`；再取该根的树锁并重读确认，然后只按不可变 `parentThreadId` 用 `listChildren` 收集全部后代。同 Session 里另一棵 `parentThreadId = null` 的分支不会进入结果。收集完成后按 UUID 升序锁定全部 Thread，在树锁保护下只读探测各节点的 Invocation，并复用快照构造；返回顺序是 `createdAt` 再 UUID。查询不写 Command、Entry、Work，也不推进 version。节点上的 `turnCount` 只计当前 root-to-head 的 `INPUT` / `CONTINUATION`，`COMPACTION` 与 `STOP` 不计；`toolCallCount` 只计该路径上 ASSISTANT `MESSAGE` 的 ToolCall；`outcome` 只在运行时状态为 `IDLE` 且当前 head 是 `TURN_END` 时取 `COMPLETED` / `FAILED` / `STOPPED` / `CANCELLED`，否则为 null。状态仍是 `ThreadSnapshot.runtimeStatus()` 的本地细分值，不含任何递归子树投影。
+`getThreadTree` 读取目标 Thread 所属的整棵执行树。目标不存在则 `HarnessRuntimeNotFoundException`；否则取其 `rootThreadId` 的树锁，再用 `listThreadsByRoot` 读取同根全部 Thread。同 Session 里另一棵执行根的分支不会进入结果。收集完成后按 UUID 升序锁定全部 Thread，在树锁保护下只读探测各节点的 Invocation，并复用快照构造；返回顺序是 `createdAt` 再 UUID。查询不写 Command、Entry、Work，也不推进 version。节点上的 `turnCount` 只计当前 root-to-head 的 `INPUT` / `CONTINUATION`，`COMPACTION` 与 `STOP` 不计；`toolCallCount` 只计该路径上 ASSISTANT `MESSAGE` 的 ToolCall；`outcome` 只在运行时状态为 `IDLE` 且当前 head 是 `TURN_END` 时取 `COMPLETED` / `FAILED` / `STOPPED` / `CANCELLED`，否则为 null。状态仍是 `ThreadSnapshot.runtimeStatus()` 的本地细分值，不含任何递归子树投影。
 
 ### 发送前请求预览
 

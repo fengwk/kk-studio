@@ -29,7 +29,6 @@ import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NotificationCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
@@ -231,7 +230,8 @@ class ThreadLifecycleCoordinatorJoinTest {
                   turnEnd,
                   CREATION_REQUEST_HASH,
                   "thread-" + threadId,
-                  ThreadYoloPolicy.follow(root.threadId()),
+                  root.threadId(),
+                  false,
                   ThreadExecutionControl.RUNNABLE,
                   0L,
                   2L,

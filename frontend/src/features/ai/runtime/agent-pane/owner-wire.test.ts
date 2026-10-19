@@ -38,7 +38,7 @@ const thread: HarnessThreadDTO = {
   parentThreadId: null,
   nextCommandSequence: '1',
   name: 'Thread',
-  yoloPolicy: { mode: 'DISABLE', rootThreadId: null },
+  rootThreadId: 'thread-1', yoloEnabled: false,
   version: '1',
   status: 'IDLE',
   processing: false,

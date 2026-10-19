@@ -36,7 +36,7 @@ function boundController(): BoundThreadPanelController {
     }],
     thread: {
       threadId: 'thread', name: 'main', sessionId: 'session', headEntryId: 'head',
-      parentThreadId: null, yoloPolicy: { mode: 'DISABLE', rootThreadId: null },
+      parentThreadId: null, rootThreadId: 'thread', yoloEnabled: false,
       nextCommandSequence: '1', version: '1', status: 'MODEL_READY', processing: true,
       executionControl: 'RUNNABLE', branchSettings: {
         agentName: 'agent', model: DEBUG.model, environmentName: null, goal: null,

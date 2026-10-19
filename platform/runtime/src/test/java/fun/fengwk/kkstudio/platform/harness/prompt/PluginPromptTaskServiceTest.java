@@ -44,7 +44,6 @@ import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.testing.TestThreadChangeSource;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
@@ -588,7 +587,8 @@ class PluginPromptTaskServiceTest {
             UUID.randomUUID(),
             "0".repeat(64),
             "prompt-task",
-            ThreadYoloPolicy.root(false),
+            threadId,
+            false,
             ThreadExecutionControl.RUNNABLE,
             0L,
             1L,

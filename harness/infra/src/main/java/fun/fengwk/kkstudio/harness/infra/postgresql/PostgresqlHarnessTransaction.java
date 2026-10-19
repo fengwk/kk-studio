@@ -211,17 +211,18 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
    *
    * <p>候选是「调用已 READY、其 TOOL Work 已到期且无有效执行 lease、冻结了非空 {@code required_environment_id}，且该环境没有有效
    * READY 连接租约」的调用；时间条件统一使用数据库时钟 {@code statement_timestamp()}，与 Work claim 的 due / lease
-   * 判定同一时间域。根沿不可变 祖先链递归解析（{@code CYCLE} 防环），分组后按代表 keyset 过滤并升序输出。查询只读，不产生锁。
+   * 判定同一时间域。根取自 Thread 不可变的 {@code root_thread_id}，分组后按代表 keyset 过滤并升序输出。查询只读，不产生锁。
    */
   private static final String LIST_PENDING_ENVIRONMENT_WAITS =
       """
-      with recursive waiting as (
+      with waiting as (
           select i.id as invocation_id,
                  i.created_at as created_at,
-                 m.thread_id as thread_id,
+                 t.root_thread_id as root_thread_id,
                  w.required_environment_id as environment_id
           from harness_tool_invocation i
           join harness_model_invocation m on m.id = i.model_invocation_id
+          join harness_thread t on t.id = m.thread_id
           join durable_work w on w.target_type = 'TOOL' and w.target_id = i.id
           where i.status = 'READY'
             and w.required_environment_id is not null
@@ -235,25 +236,15 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
                   and ec.lease_until > statement_timestamp()
             )
       ),
-      ancestors (thread_id, current_id, parent_id) as (
-          select distinct w.thread_id, t.id, t.parent_thread_id
-          from waiting w
-          join harness_thread t on t.id = w.thread_id
-          union all
-          select a.thread_id, t.id, t.parent_thread_id
-          from ancestors a
-          join harness_thread t on t.id = a.parent_id
-      ) cycle current_id set is_cycle using path,
       grouped as (
-          select r.current_id as root_thread_id,
-                 w.environment_id as environment_id,
-                 min(w.created_at) as representative_created_at,
-                 (array_agg(w.invocation_id order by w.created_at, w.invocation_id))[1]
+          select root_thread_id,
+                 environment_id,
+                 min(created_at) as representative_created_at,
+                 (array_agg(invocation_id order by created_at, invocation_id))[1]
                      as representative_invocation_id,
                  count(*) as waiting_count
-          from waiting w
-          join ancestors r on r.thread_id = w.thread_id and r.parent_id is null
-          group by r.current_id, w.environment_id
+          from waiting
+          group by root_thread_id, environment_id
       )
       select root_thread_id,
              environment_id,
@@ -792,9 +783,9 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
       update(
           """
           insert into harness_thread (
-              id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_mode,
-              yolo_root_thread_id, execution_control, input_through_sequence, next_command_sequence,
-              version, created_at, updated_at
+              id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name,
+              root_thread_id, yolo_enabled, execution_control, input_through_sequence,
+              next_command_sequence, version, created_at, updated_at
           ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           """,
           thread.id(),
@@ -803,8 +794,8 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
           thread.headEntryId(),
           thread.creationRequestHash(),
           thread.name(),
-          thread.yoloPolicy().mode().name(),
-          thread.yoloPolicy().rootThreadId(),
+          thread.rootThreadId(),
+          thread.yoloEnabled(),
           thread.executionControl().name(),
           thread.inputThroughSequence(),
           thread.nextCommandSequence(),
@@ -816,7 +807,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     }
     // 插入即视为 version 变化：同一位置发布 Thread version 与真实执行根 tree 两条失效信号。
     notifyThreadVersion(thread.id(), thread.version());
-    notifyExecutionTree(executionRootOfThread(thread.id()));
+    notifyExecutionTree(thread.rootThreadId());
     if (joinedChild) {
       // A newly created child has no pre-existing row to lock in UUID order. Its parent is
       // already locked inside the same tree transaction; no other tree writer can race it.
@@ -927,8 +918,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
               update harness_thread
               set head_entry_id = ?,
                   name = ?,
-                  yolo_mode = ?,
-                  yolo_root_thread_id = ?,
+                  yolo_enabled = ?,
                   execution_control = ?,
                   input_through_sequence = ?,
                   next_command_sequence = ?,
@@ -938,8 +928,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
               """,
               thread.headEntryId(),
               thread.name(),
-              thread.yoloPolicy().mode().name(),
-              thread.yoloPolicy().rootThreadId(),
+              thread.yoloEnabled(),
               thread.executionControl().name(),
               thread.inputThroughSequence(),
               thread.nextCommandSequence(),
@@ -953,7 +942,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     if (stored.version() != thread.version()) {
       // 仅以写前事实（stored）与成功写后事实（thread）比较：同 version 写入（exact replay）保持静默。
       notifyThreadVersion(thread.id(), thread.version());
-      notifyExecutionTree(executionRootOfThread(thread.id()));
+      notifyExecutionTree(thread.rootThreadId());
     }
   }
 
@@ -961,36 +950,30 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
   public List<UUID> findAncestorChain(UUID threadId) {
     checkOpen();
     Objects.requireNonNull(threadId, "threadId");
-    List<AncestorRow> ancestors =
-        queryList(
-            """
-            with recursive ancestors as (
-                select id, parent_thread_id, 0 as depth
-                from harness_thread where id = ?
-                union all
-                select t.id, t.parent_thread_id, ancestors.depth + 1
-                from harness_thread t join ancestors on t.id = ancestors.parent_thread_id
-            ) cycle id set is_cycle using path
-            select id, parent_thread_id, is_cycle from ancestors order by depth
-            """,
-            (rs, ignored) ->
-                new AncestorRow(
-                    rs.getObject("id", UUID.class),
-                    rs.getObject("parent_thread_id", UUID.class),
-                    rs.getBoolean("is_cycle")),
-            threadId);
-    for (AncestorRow ancestor : ancestors) {
-      if (ancestor.cycle()) {
-        throw new IllegalStateException("thread parent cycle at " + ancestor.id());
-      }
-    }
-    if (!ancestors.isEmpty() && ancestors.get(ancestors.size() - 1).parentId() != null) {
-      throw new IllegalStateException("thread ancestor chain is incomplete");
-    }
-    return ancestors.stream().map(AncestorRow::id).toList();
+    return queryList(
+        """
+        with recursive ancestors as (
+            select id, parent_thread_id, 0 as depth
+            from harness_thread where id = ?
+            union all
+            select t.id, t.parent_thread_id, ancestors.depth + 1
+            from harness_thread t join ancestors on t.id = ancestors.parent_thread_id
+        )
+        select id from ancestors order by depth
+        """,
+        (rs, ignored) -> rs.getObject("id", UUID.class),
+        threadId);
   }
 
-  private record AncestorRow(UUID id, UUID parentId, boolean cycle) {}
+  @Override
+  public List<ThreadState> listThreadsByRoot(UUID rootThreadId) {
+    checkOpen();
+    Objects.requireNonNull(rootThreadId, "rootThreadId");
+    return queryList(
+        "select * from harness_thread where root_thread_id = ?",
+        PostgresqlHarnessRows.THREAD,
+        rootThreadId);
+  }
 
   @Override
   public void lockTree(UUID rootThreadId) {
@@ -1012,10 +995,6 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
         "select true from pg_advisory_xact_lock(hashtextextended('harness-tree:' || ?::text, 0))",
         Boolean.class,
         rootThreadId);
-    List<UUID> chain = findAncestorChain(rootThreadId);
-    if (!chain.isEmpty() && (chain.size() != 1 || !chain.get(0).equals(rootThreadId))) {
-      throw new IllegalStateException("tree root changed while acquiring lock");
-    }
     lockedTrees.add(rootThreadId);
   }
 
@@ -2308,7 +2287,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
       }
     }
 
-    // 删除前沿不可变祖先链取得受影响执行根：行一旦删除，parent 链已不存在，无法再解析根身份。
+    // 删除前读取受影响执行根：行一旦删除就无法再解析根身份。
     // 同一执行根只发一次：先按根聚合，再在删除成功后按根定点失效。
     Set<UUID> deletedThreadRoots = new LinkedHashSet<>();
     for (UUID threadId : copied) {
@@ -3155,10 +3134,10 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     }
   }
 
-  /** 沿不可变祖先链解析 Thread 的真实执行根。链完整性由 {@link #findAncestorChain} 校验：环路或链不完整直接抛出， 绝不静默降级成全量失效。 */
+  /** Thread 不可变的执行根；Thread 必须存在。 */
   private UUID executionRootOfThread(UUID threadId) {
-    List<UUID> chain = findAncestorChain(threadId);
-    return chain.get(chain.size() - 1);
+    return queryForObject(
+        "select root_thread_id from harness_thread where id = ?", UUID.class, threadId);
   }
 
   /**
@@ -3166,7 +3145,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
    * Thread，再解析真实执行根。
    *
    * <p>返回 {@code null} 仅表示来源 Thread 已不可解析（合法清理路径上来源行已删除），此时调用方以空 payload 触发 listener 全量 resync；
-   * 数据库故障与祖先链异常一律向上抛出，绝不吞成空 payload。
+   * 数据库故障一律向上抛出，绝不吞成空 payload。
    */
   private UUID executionRootOfToolInvocation(UUID toolInvocationId) {
     Optional<UUID> sourceThreadId =
@@ -3419,8 +3398,12 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
     if (lockedTrees.isEmpty()) {
       return false;
     }
-    List<UUID> chain = findAncestorChain(threadId);
-    UUID root = chain.isEmpty() ? threadId : chain.get(chain.size() - 1);
+    UUID root =
+        queryOne(
+                "select root_thread_id from harness_thread where id = ?",
+                (resultSet, rowNumber) -> resultSet.getObject("root_thread_id", UUID.class),
+                threadId)
+            .orElse(threadId);
     return lockedTrees.contains(root);
   }
 

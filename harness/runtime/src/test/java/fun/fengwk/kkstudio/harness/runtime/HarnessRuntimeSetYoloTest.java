@@ -21,7 +21,6 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
@@ -53,7 +52,7 @@ class HarnessRuntimeSetYoloTest {
     ThreadState result =
         runtime.setThreadYolo(new SetThreadYoloCommand(baseline.threadId(), false));
 
-    assertFalse(result.yoloPolicy().isEnabled());
+    assertFalse(result.yoloEnabled());
     assertEquals(0L, result.version());
     assertEquals(T0, result.updatedAt());
     assertEquals(T0, result.createdAt());
@@ -78,7 +77,7 @@ class HarnessRuntimeSetYoloTest {
     ThreadState enabled =
         runtime.setThreadYolo(new SetThreadYoloCommand(baseline.threadId(), true));
 
-    assertTrue(enabled.yoloPolicy().isEnabled());
+    assertTrue(enabled.yoloEnabled());
     assertEquals(2L, enabled.version());
     assertEquals(T3, enabled.updatedAt());
     assertNoCommandsEntriesOrWork(baseline.threadId());
@@ -92,7 +91,7 @@ class HarnessRuntimeSetYoloTest {
 
     ThreadState enabled =
         runtime.setThreadYolo(new SetThreadYoloCommand(baseline.threadId(), true));
-    assertTrue(enabled.yoloPolicy().isEnabled());
+    assertTrue(enabled.yoloEnabled());
     assertEquals(1L, enabled.version());
     assertEquals(T1, enabled.updatedAt());
     assertEquals(T0, enabled.createdAt());
@@ -100,13 +99,13 @@ class HarnessRuntimeSetYoloTest {
     clock.advance(T3);
     ThreadState disabled =
         runtime.setThreadYolo(new SetThreadYoloCommand(baseline.threadId(), false));
-    assertFalse(disabled.yoloPolicy().isEnabled());
+    assertFalse(disabled.yoloEnabled());
     assertEquals(2L, disabled.version());
     assertEquals(T3, disabled.updatedAt());
     assertEquals(T0, disabled.createdAt());
 
     ThreadState stored = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
-    assertFalse(stored.yoloPolicy().isEnabled());
+    assertFalse(stored.yoloEnabled());
     assertEquals(2L, stored.version());
     assertNoCommandsEntriesOrWork(baseline.threadId());
   }
@@ -123,12 +122,12 @@ class HarnessRuntimeSetYoloTest {
         () -> runtime.setThreadYolo(new SetThreadYoloCommand(childThreadId, true)));
 
     ThreadState child = store.transaction(tx -> tx.findThread(childThreadId).orElseThrow());
-    assertEquals(ThreadYoloPolicy.follow(baseline.threadId()), child.yoloPolicy());
+    assertEquals(baseline.threadId(), child.rootThreadId());
     assertEquals(0L, child.version());
     assertEquals(T0, child.updatedAt());
   }
 
-  /** 根开关只写根行：子代理的 FOLLOW 目标、version、updatedAt 与 Work 都不被触碰，也不唤醒 processors。 */
+  /** 根开关只写根行：子代理的执行根、version、updatedAt 与 Work 都不被触碰，也不唤醒 processors。 */
   @Test
   void rootToggleLeavesDescendantRowsUntouched() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
@@ -138,10 +137,10 @@ class HarnessRuntimeSetYoloTest {
     ThreadState enabled =
         runtime.setThreadYolo(new SetThreadYoloCommand(baseline.threadId(), true));
 
-    assertTrue(enabled.yoloPolicy().isEnabled());
+    assertTrue(enabled.yoloEnabled());
     assertEquals(1L, enabled.version());
     ThreadState child = store.transaction(tx -> tx.findThread(childThreadId).orElseThrow());
-    assertEquals(ThreadYoloPolicy.follow(baseline.threadId()), child.yoloPolicy());
+    assertEquals(baseline.threadId(), child.rootThreadId());
     assertEquals(0L, child.version());
     assertEquals(T0, child.updatedAt());
     assertTrue(
@@ -161,7 +160,7 @@ class HarnessRuntimeSetYoloTest {
     ThreadState enabled =
         runtime.setThreadYolo(new SetThreadYoloCommand(baseline.threadId(), true));
 
-    assertTrue(enabled.yoloPolicy().isEnabled());
+    assertTrue(enabled.yoloEnabled());
     assertEquals(versionBefore + 1, enabled.version());
     ToolInvocation tool =
         store.transaction(tx -> tx.findToolInvocation(baseline.toolId()).orElseThrow());
@@ -182,7 +181,8 @@ class HarnessRuntimeSetYoloTest {
                   baseline.rootEntryId(),
                   CREATION_REQUEST_HASH,
                   "child",
-                  ThreadYoloPolicy.follow(baseline.threadId()),
+                  baseline.threadId(),
+                  false,
                   ThreadExecutionControl.RUNNABLE,
                   0L,
                   1L,

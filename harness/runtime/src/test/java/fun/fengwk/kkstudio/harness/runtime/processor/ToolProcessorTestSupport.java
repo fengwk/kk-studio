@@ -50,7 +50,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
@@ -230,10 +229,7 @@ final class ToolProcessorTestSupport {
       this(retryPolicy, yoloEnabled, 0, scheduler, scenario);
     }
 
-    /**
-     * {@code followDepth>0} 时把完整 Tool 链种到 root session 内逐层 FOLLOW 的线程上：depth=1 为合法 FOLLOW(root)
-     * 子代理，depth=2 为跟随中间节点的非法链（用于验证 fail closed）。
-     */
+    /** {@code followDepth>0} 时把完整 Tool 链种到逐层嵌套的子代理线程上，所有子代理记录同一个执行根。 */
     Fixture(
         InvocationRetryPolicy retryPolicy,
         boolean yoloEnabled,
@@ -248,7 +244,7 @@ final class ToolProcessorTestSupport {
       Baseline root = seedToolBaseline(store, NOW, yoloEnabled, scenario);
       Baseline current = root;
       for (int i = 0; i < followDepth; i++) {
-        current = seedFollowChild(store, current, scenario);
+        current = seedChild(store, current, scenario);
       }
       this.baseline = current;
       Seeded seeded = seedTool(store, baseline, request, NOW, scenario);
@@ -267,22 +263,14 @@ final class ToolProcessorTestSupport {
     }
 
     /**
-     * 在独立 Session 内新增一个 {@code FOLLOW(root.threadId)} 子线程（parent = root.threadId），并为该子线程种出与 {@code
-     * scenario} 严格一致的最小链（ROOT/TURN_START/USER/ASSISTANT），返回指向子线程链的 Baseline。子代理线程与父线程分属不同
-     * Session，与运行期跨 Session 的父子结构一致。
+     * 在独立 Session 内新增一个子线程（parent = parent.threadId，执行根继承自父线程），并为该子线程种出与 {@code scenario}
+     * 严格一致的最小链（ROOT/TURN_START/USER/ASSISTANT），返回指向子线程链的 Baseline。子代理线程与父线程分属不同 Session，与运行期跨
+     * Session 的父子结构一致。
      */
-    static Baseline seedFollowChild(InMemoryHarnessStore store, Baseline root, Scenario scenario) {
-      return seedFollowChild(store, root, root.threadId(), scenario);
-    }
-
-    /**
-     * 变体：子线程 parent 为 {@code parent.threadId()}，但 {@code FOLLOW} 目标写成 {@code
-     * followRootThreadId}。用于构造「Follow 目标不是真实执行根」的权限一致性反例。
-     */
-    static Baseline seedFollowChild(
-        InMemoryHarnessStore store, Baseline parent, UUID followRootThreadId, Scenario scenario) {
+    static Baseline seedChild(InMemoryHarnessStore store, Baseline parent, Scenario scenario) {
       return store.transaction(
           tx -> {
+            UUID rootThreadId = tx.findThread(parent.threadId()).orElseThrow().rootThreadId();
             UUID sessionId = tx.nextId();
             UUID rootEntryId = tx.nextId();
             UUID turnStartEntryId = tx.nextId();
@@ -331,7 +319,8 @@ final class ToolProcessorTestSupport {
                     turnStartEntryId,
                     ThreadProcessorTestSupport.CREATION_REQUEST_HASH,
                     "child",
-                    ThreadYoloPolicy.follow(followRootThreadId),
+                    rootThreadId,
+                    false,
                     ThreadExecutionControl.RUNNABLE,
                     0L,
                     1L,
@@ -375,48 +364,14 @@ final class ToolProcessorTestSupport {
     return new Fixture(retryPolicy, sideEffect, yoloEnabled, scheduler);
   }
 
-  /**
-   * FOLLOW 子代理 fixture：root policy = root(rootYoloEnabled)，Tool 链种在逐层 FOLLOW 的线程上（depth 见 Fixture）。
-   */
-  static Fixture followChildFixture(boolean rootYoloEnabled, int followDepth) {
+  /** 子代理 fixture：执行根开关为 rootYoloEnabled，Tool 链种在逐层嵌套的子代理线程上（depth 见 Fixture）。 */
+  static Fixture childFixture(boolean rootYoloEnabled, int followDepth) {
     return new Fixture(
         NO_RETRY,
         rootYoloEnabled,
         followDepth,
         newScheduler(),
         bashScenario(ToolSideEffect.READ_ONLY));
-  }
-
-  /**
-   * 权限一致性反例 fixture：child 的真实执行根是 DISABLE 的 {@code realRoot}（parent 链），但其 {@code FOLLOW} 目标被写成另一棵
-   * ENABLE 的无关根（{@code followTargetOverride == null}）或一个不存在的 id。用于验证解析必须比对真实执行根而非盲目信任 policy。
-   */
-  static MisrootedFixture misrootedFollowChildFixture(UUID followTargetOverride) {
-    ScheduledExecutorService scheduler = newScheduler();
-    InMemoryHarnessStore store = new InMemoryHarnessStore();
-    Scenario scenario = bashScenario(ToolSideEffect.READ_ONLY);
-    Baseline realRoot = seedToolBaseline(store, NOW, false, scenario);
-    Baseline unrelatedRoot = seedToolBaseline(store, NOW, true, scenario);
-    UUID followTarget =
-        followTargetOverride == null ? unrelatedRoot.threadId() : followTargetOverride;
-    Baseline child = Fixture.seedFollowChild(store, realRoot, followTarget, scenario);
-    ToolInvocationRequest request =
-        new ToolInvocationRequest(
-            new ToolCall("call-1", scenario.toolName(), scenario.argumentsJson()),
-            scenario.binding());
-    Seeded seeded = seedTool(store, child, request, NOW, scenario);
-    FakeToolGateway gateway = new FakeToolGateway();
-    ToolProcessor processor =
-        new ToolProcessor(
-            store,
-            gateway,
-            new RecordingSink(),
-            new ToolProcessorConfig(
-                LEASE_CONFIG, () -> NO_RETRY, PREFLIGHT_FAILURE_DELAY, BUSY_FALLBACK_DELAY),
-            new MutableClock(NOW),
-            scheduler,
-            Runnable::run);
-    return new MisrootedFixture(store, gateway, realRoot, unrelatedRoot, child, seeded, processor);
   }
 
   record MisrootedFixture(
@@ -497,7 +452,8 @@ final class ToolProcessorTestSupport {
                   turnStartEntryId,
                   ThreadProcessorTestSupport.CREATION_REQUEST_HASH,
                   "main",
-                  ThreadYoloPolicy.root(yoloEnabled),
+                  threadId,
+                  yoloEnabled,
                   ThreadExecutionControl.RUNNABLE,
                   0L,
                   1L,

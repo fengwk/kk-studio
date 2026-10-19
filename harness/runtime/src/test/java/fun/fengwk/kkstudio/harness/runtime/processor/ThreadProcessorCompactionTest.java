@@ -82,7 +82,6 @@ import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
@@ -1875,7 +1874,8 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                   rootEntryId,
                   ThreadProcessorTestSupport.CREATION_REQUEST_HASH,
                   "child",
-                  ThreadYoloPolicy.follow(rootThreadId),
+                  rootThreadId,
+                  false,
                   ThreadExecutionControl.RUNNABLE,
                   0L,
                   2L,

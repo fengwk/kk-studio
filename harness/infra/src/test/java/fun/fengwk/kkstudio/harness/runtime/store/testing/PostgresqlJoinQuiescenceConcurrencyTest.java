@@ -47,7 +47,6 @@ import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NotificationCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
@@ -168,7 +167,8 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
                   rootEntryId,
                   REQUEST_HASH,
                   "root-A",
-                  ThreadYoloPolicy.root(false),
+                  threadA,
+                  false,
                   ThreadExecutionControl.RUNNABLE,
                   0L,
                   1L,
@@ -183,7 +183,8 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
                   bTerminalPending ? bUser : bEnd,
                   REQUEST_HASH,
                   "child-B",
-                  ThreadYoloPolicy.follow(threadA),
+                  threadA,
+                  false,
                   ThreadExecutionControl.RUNNABLE,
                   1L,
                   2L,
@@ -198,7 +199,8 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
                   cUser,
                   REQUEST_HASH,
                   "child-C",
-                  ThreadYoloPolicy.follow(threadA),
+                  threadA,
+                  false,
                   ThreadExecutionControl.RUNNABLE,
                   1L,
                   2L,

@@ -78,7 +78,7 @@ function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
     sessionId: 'session-child',
     headEntryId: 'head-1',
     parentThreadId: null,
-    yoloPolicy: { mode: 'DISABLE', rootThreadId: null },
+    rootThreadId: CHILD_THREAD_ID, yoloEnabled: false,
     nextCommandSequence: '1',
     version: '1',
     status: 'WAITING_APPROVAL',
@@ -519,7 +519,7 @@ describe('ThreadWorkspacePage', () => {
           parentThreadId: rootId,
           name: 'Waiting Parent',
           status: 'WAITING_APPROVAL',
-          yoloPolicy: { mode: 'FOLLOW', rootThreadId: rootId },
+          rootThreadId: rootId, yoloEnabled: false,
         }),
       }
     })

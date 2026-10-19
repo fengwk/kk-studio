@@ -38,7 +38,6 @@ import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
@@ -370,9 +369,11 @@ class PostgresqlJoinAcceptanceRollbackTest {
 
       // 验证在 PG 中两个子线程与 Join 均成功写入，且祖先链完全正确
       assertEquals(
-          List.of(child1ThreadId, baseline.threadId()), runtime.findAncestorChain(child1ThreadId));
+          List.of(child1ThreadId, baseline.threadId()),
+          store.transaction(tx -> tx.findAncestorChain(child1ThreadId)));
       assertEquals(
-          List.of(child2ThreadId, baseline.threadId()), runtime.findAncestorChain(child2ThreadId));
+          List.of(child2ThreadId, baseline.threadId()),
+          store.transaction(tx -> tx.findAncestorChain(child2ThreadId)));
 
       List<ThreadState> children = store.transaction(tx -> tx.listChildren(baseline.threadId()));
       assertEquals(2, children.size());
@@ -412,7 +413,8 @@ class PostgresqlJoinAcceptanceRollbackTest {
                   parentRootEntryId,
                   HASH,
                   "parent",
-                  ThreadYoloPolicy.root(false),
+                  parentThreadId,
+                  false,
                   ThreadExecutionControl.RUNNABLE,
                   0L,
                   1L,
@@ -471,7 +473,9 @@ class PostgresqlJoinAcceptanceRollbackTest {
     assertSingleRow("harness_thread_command", "thread_id", childThreadId);
     assertSingleRow("harness_thread_join", "invocation_id", joinInvocationId);
     assertSingleRow("durable_work", "target_id", childThreadId);
-    assertEquals(List.of(childThreadId, parentThreadId), runtime.findAncestorChain(childThreadId));
+    assertEquals(
+        List.of(childThreadId, parentThreadId),
+        store.transaction(tx -> tx.findAncestorChain(childThreadId)));
   }
 
   @Test
@@ -834,7 +838,8 @@ class PostgresqlJoinAcceptanceRollbackTest {
                   rootEntryId,
                   HASH,
                   "root",
-                  ThreadYoloPolicy.root(false),
+                  threadId,
+                  false,
                   ThreadExecutionControl.RUNNABLE,
                   0L,
                   1L,

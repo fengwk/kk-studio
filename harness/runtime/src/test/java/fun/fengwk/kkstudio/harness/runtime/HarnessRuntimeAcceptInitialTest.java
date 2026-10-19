@@ -167,7 +167,7 @@ class HarnessRuntimeAcceptInitialTest {
     assertEquals(TestIds.id(101), thread.sessionId());
     assertEquals(root.id(), thread.headEntryId());
     assertEquals(CREATION_REQUEST_HASH.length(), thread.creationRequestHash().length());
-    assertTrue(thread.yoloPolicy().isEnabled());
+    assertTrue(thread.yoloEnabled());
     // creation request hash 是服务端 deterministic 64 位小写 SHA-256。
     assertTrue(thread.creationRequestHash().matches("[0-9a-f]{64}"));
     // 初始 thread version 0，accept 后恰好 +1；next sequence 从 1 起推进 1。

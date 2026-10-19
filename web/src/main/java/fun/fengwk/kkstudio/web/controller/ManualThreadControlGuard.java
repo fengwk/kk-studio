@@ -6,14 +6,13 @@ import org.springframework.web.server.ResponseStatusException;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 
-import java.util.List;
 import java.util.UUID;
 
 /**
  * 人工 Thread 写入边界：自由输入、Goal、设置、YOLO、Stop、压缩、重命名与分支创建等人工控制只允许指向执行根。
  *
- * <p>用 {@link HarnessRuntime#findAncestorChain}（head-to-root，含自身）判定目标是否为根：子 Thread（祖先链长于 1）以 409
- * 拒绝，避免把根级输入或控制落到观察树内部。不存在的 Thread（空链）不在此判定，交由后续 Runtime 调用按既有语义翻译为 404。
+ * <p>用 {@link HarnessRuntime#findRootThreadId} 判定目标是否为根：执行根不是自身的子 Thread 以 409 拒绝，避免把根级输入或控制落到
+ * 观察树内部。不存在的 Thread 不在此判定，交由后续 Runtime 调用按既有语义翻译为 404。
  *
  * <p>NEW_THREAD 人工 fork 没有目标 Thread，只按会话定位：来源会话内一旦出现带父关系的 Thread（子执行树会话）即 409 拒绝。不能用
  * 「会话无产品归属」来推断来源属于根——真正成立的判据是会话内不存在 child Thread；这样即使同一会话里混入子 Thread 也不会漏判。
@@ -26,8 +25,7 @@ final class ManualThreadControlGuard {
 
   /** 目标必须是执行根，否则以 409 拒绝人工控制。 */
   static void requireExecutionRoot(HarnessRuntime runtime, UUID threadId) {
-    List<UUID> chain = runtime.findAncestorChain(threadId);
-    if (chain.size() > 1) {
+    if (runtime.findRootThreadId(threadId).filter(root -> !root.equals(threadId)).isPresent()) {
       throw new ResponseStatusException(
           HttpStatus.CONFLICT, "manual thread control is limited to the execution root");
     }

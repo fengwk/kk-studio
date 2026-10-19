@@ -58,7 +58,8 @@ public final class ThreadLifecycleCoordinator {
   public static ThreadState lockThreadWithAncestors(HarnessStore.Transaction tx, UUID threadId) {
     Objects.requireNonNull(tx, "tx");
     Objects.requireNonNull(threadId, "threadId");
-    List<UUID> chain = ThreadTreeLocks.lockForThread(tx, threadId);
+    ThreadTreeLocks.lockForThread(tx, threadId);
+    List<UUID> chain = tx.findAncestorChain(threadId);
     if (chain.isEmpty()) {
       // 目标线程在取得树锁前已被并发删除：合法缺失，不抛异常也不重试。
       return null;
@@ -88,10 +89,6 @@ public final class ThreadLifecycleCoordinator {
       ThreadState locked = tx.lockThread(id).orElse(null);
       if (locked == null) {
         return null;
-      }
-      if (!locked.sessionId().equals(immutableThreads.get(id).sessionId())) {
-        throw new IllegalStateException(
-            "thread " + id + " relocated while acquiring its session lock");
       }
       lockedThreads.put(id, locked);
     }

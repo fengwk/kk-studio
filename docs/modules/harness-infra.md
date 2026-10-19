@@ -21,7 +21,7 @@ advisory 围栏与六级行锁分别记录。Thread 按 UUID、Command 按 seque
 Tool siblings 按 assistantEntryId/callIndex、Work 按 type/UUID 排序。
 持有执行树锁时，生命周期交付允许回写同树 Command；其他逆序请求立即失败。
 
-执行树是 Thread 行上不可变 `parent_thread_id` 的递归闭包：`findAncestorChain` 用 `WITH RECURSIVE ... CYCLE` 从任意 Thread 回溯到根，涉及整棵树的读写先在根上取 `pg_advisory_xact_lock`，再在树锁内重读确认根未漂移；一次事务涉及多棵树时按根 UUID 升序依次取锁。`lockTree` 必须在任何业务行锁之前取得（否则抛 `IllegalStateException`）。`getThreadTree` 在这把树锁内收集全部后代，再按 UUID 升序锁定这些 Thread 和读取 Command；同树 Invocation 的写入已被树锁串行化，查询仅用无锁探测读取 Model 与 Tool，避免多节点之间出现 Tool 到 Model 的逆序加锁。
+执行树由 Thread 行上不可变的 `parent_thread_id` 与 `root_thread_id` 表达：根直接取自 `root_thread_id`，涉及整棵树的读写先在根上取 `pg_advisory_xact_lock`；一次事务涉及多棵树时按根 UUID 升序依次取锁。`findAncestorChain` 只在需要逐级祖先（例如锁祖先行）时用 `WITH RECURSIVE` 回溯。`lockTree` 必须在任何业务行锁之前取得（否则抛 `IllegalStateException`）。`getThreadTree` 在这把树锁内用 `listThreadsByRoot` 取同根全部 Thread，再按 UUID 升序锁定这些 Thread 和读取 Command；同树 Invocation 的写入已被树锁串行化，查询仅用无锁探测读取 Model 与 Tool，避免多节点之间出现 Tool 到 Model 的逆序加锁。
 
 `lockJoinAdmission` 使用与树锁隔离的双 int advisory key，在任何树锁和行锁之前串行化 task 接受。`countIncompleteChildJoins` 统计指定父 Thread 的未完成 Join，`countIncompleteSubagentJoins` 跨所有根统计 `parent_thread_id` 非空且 `terminal_entry_id` 为空的 Join，原子执行父级与全局并发准入。每次接受新的子任务 Join 占用一个额度，Join 结算后释放；子 Thread 后续普通交互不重新占用额度。普通执行推进和无父 one-shot 不取全局准入锁。
 
@@ -45,9 +45,8 @@ Tool siblings 按 assistantEntryId/callIndex、Work 按 type/UUID 排序。
 
 数据库只做形状防御，语义由应用层负责：`(session_id, parent_entry_id)` 外键保证父子同 Session，部分唯一索引 `uk_harness_entry_single_root` 保证每个 Session 至多一个 ROOT；`harness_thread_command` 以 `(thread_id, sequence)` 为主键、`(thread_id, idempotency_key)` 唯一；`harness_model_invocation` 以 `(thread_id, turn_start_entry_id)` 唯一；`harness_tool_invocation` 以 `(assistant_entry_id, call_index)` 唯一，且非 `SUCCEEDED` 时 `effects` 必须为空批 `{"version": 1, "customEntries": []}`；`durable_work` 要求租约 token 与租约到期时刻同空同非空、且 `required_environment_id` 只允许出现在 `TOOL` 行。`harness_thread` 要求 `execution_control` 取 `RUNNABLE` / `STOPPED` 且 `input_through_sequence < next_command_sequence`；`harness_thread_command` 的 `applied_entry_id` 与 `cancelled_at` 互斥、CANCELLED 必须 `stop_request_id` 与 `cancelled_at` 成对；`harness_thread_join` 的 `final_answer_entry_id` 只在 `terminal_entry_id` 非空时可非空、`delivery_command_sequence` 非空必须已 matched 且父 Thread 非空；`harness_thread_stop_receipt` 以 `(thread_id, stop_request_id)` 为主键、集合身份为 `(root_thread_id, root_stop_request_id)`，`cancelled_inputs` 必须是 JSON array。所有时间列是 `timestamptz(3)` 毫秒精度，version 与业务 ID 完全由应用生成。
 
-YOLO 形状约束要求根为 `ENABLE/DISABLE` 且目标为空，子代理为 `FOLLOW` 且目标非空、
-不等于自身；目标有 Thread 外键。目标必须是真实执行根的语义由 Runtime 在树锁内复验。
-根策略更新不递归写子行，子代理策略与父关系均在创建时固定。
+执行根约束要求「无父」与「`root_thread_id` 指向自身」等价，`root_thread_id` 有 Thread 外键；
+`yolo_enabled` 只允许出现在执行根上。根开关更新不递归写子行，执行根与父关系均在创建时固定。
 
 `loadEntryPath` 用单条 `WITH RECURSIVE ... CYCLE id SET is_cycle USING path` 递归 CTE 自 head 回溯到 ROOT，一次往返读出整条不可变路径并按 `depth desc` 输出，同时以环路哨兵检测并拒绝父子成环。句柄内维护事务局部 `Map<UUID, EntryPath>` 正向缓存：冷读一次 CTE 后回填；同事务内连续 `insertEntry` 直接从已缓存父路径派生新节点并更新缓存，后续读取子节点 0 次 CTE；缓存只在本事务可见，`close()` 清空；`deleteEntries` / `deleteSession` 按 session 整体驱逐，避免读到失效数据。`findRootEntry` 优先复用缓存中的 ROOT，未命中时借 `uk_harness_entry_single_root` 点查并把单节点路径写回缓存。[`PostgresqlHarnessRows`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/postgresql/PostgresqlHarnessRows.java) 负责行映射与毫秒精度校验。
 

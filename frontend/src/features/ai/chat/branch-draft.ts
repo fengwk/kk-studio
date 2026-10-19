@@ -86,7 +86,7 @@ export function materializeAgentBranchDraft(
 
 /** 从持久化的 Thread snapshot 初始化绑定面板 draft；子代理的 FOLLOW 不代表本地开关。 */
 export function branchDraftFromThread(thread: HarnessThreadDTO): BranchDraft {
-  return branchDraftFromBranchSettings(thread.branchSettings, thread.yoloPolicy.mode === 'ENABLE')
+  return branchDraftFromBranchSettings(thread.branchSettings, thread.yoloEnabled)
 }
 
 export function branchDraftFromBranchSettings(

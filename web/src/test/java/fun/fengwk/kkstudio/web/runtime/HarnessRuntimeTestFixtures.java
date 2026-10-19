@@ -31,7 +31,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
@@ -128,9 +127,8 @@ public final class HarnessRuntimeTestFixtures {
         headEntryId,
         CREATION_REQUEST_HASH,
         "thread",
-        parentThreadId == null
-            ? ThreadYoloPolicy.root(true)
-            : ThreadYoloPolicy.follow(parentThreadId),
+        parentThreadId == null ? id : parentThreadId,
+        parentThreadId == null && true,
         executionControl,
         0L,
         4,
@@ -148,7 +146,8 @@ public final class HarnessRuntimeTestFixtures {
         id(1),
         CREATION_REQUEST_HASH,
         "new thread name",
-        ThreadYoloPolicy.root(true),
+        id,
+        true,
         ThreadExecutionControl.RUNNABLE,
         0L,
         4,

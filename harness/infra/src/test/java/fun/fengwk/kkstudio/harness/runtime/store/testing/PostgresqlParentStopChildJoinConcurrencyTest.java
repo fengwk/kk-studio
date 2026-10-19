@@ -46,7 +46,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NotificationCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
@@ -132,7 +131,8 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
                   rootEntryId,
                   REQUEST_HASH,
                   "parent-thread",
-                  ThreadYoloPolicy.root(false),
+                  parentThreadId,
+                  false,
                   ThreadExecutionControl.RUNNABLE,
                   0L,
                   1L,
@@ -162,7 +162,8 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
                   userMsgId,
                   REQUEST_HASH,
                   "child-thread",
-                  ThreadYoloPolicy.follow(parentThreadId),
+                  parentThreadId,
+                  false,
                   ThreadExecutionControl.RUNNABLE,
                   0L,
                   2L,

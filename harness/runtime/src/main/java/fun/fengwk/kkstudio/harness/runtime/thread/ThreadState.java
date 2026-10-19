@@ -11,16 +11,15 @@ import java.util.regex.Pattern;
  * 持久化 Thread 当前状态。
  *
  * <p>持久化 Thread 自身拥有的字段：所属 Session、不可变父 Thread、creation request hash 身份键、head Entry cursor、Thread
- * 显示名称、Thread YOLO runtime policy（{@link ThreadYoloPolicy}）、执行控制（{@link
- * ThreadExecutionControl}）、已被普通 INPUT 接纳的输入水位 {@code inputThroughSequence}（初值 0）、下一条 Command
- * sequence 以及对外可见的 snapshot version。{@code sessionId}、{@code parentThreadId}、{@code
- * creationRequestHash} 与 {@code createdAt} 创建后不可变； environment、open turn、execution epoch 与
- * processor lease 刻意省略，settings 事实从 {@code headEntryId} 处的 Entry 分支派生。
+ * 显示名称、执行根与根的 YOLO 开关、执行控制（{@link ThreadExecutionControl}）、已被普通 INPUT 接纳的输入水位 {@code
+ * inputThroughSequence}（初值 0）、下一条 Command sequence 以及对外可见的 snapshot version。{@code
+ * sessionId}、{@code parentThreadId}、{@code creationRequestHash} 与 {@code createdAt} 创建后不可变；
+ * environment、open turn、execution epoch 与 processor lease 刻意省略，settings 事实从 {@code headEntryId} 处的
+ * Entry 分支派生。
  *
- * <p>{@code parentThreadId} 是不可变父 Thread UUID，建立执行关系树；根 Thread 为 {@code null}，不可指向自身。根 Thread 的
- * YOLO 策略是 {@code ENABLE} / {@code DISABLE} 且没有目标；子代理恒为 {@code
- * FOLLOW(rootThreadId)}，直接指向不可变执行根。执行控制只区分 {@code RUNNABLE / STOPPED}，不再维护递归的
- * IDLE/ACTIVE/WAITING_CHILDREN。
+ * <p>{@code parentThreadId} 是不可变父 Thread UUID，建立执行关系树；根 Thread 为 {@code null}，不可指向自身。{@code
+ * rootThreadId} 是不可变的执行根（根指向自身），供树锁与整树读取直接使用。{@code yoloEnabled} 只属于根：子代理恒为 false， 其有效 YOLO
+ * 由执行根的开关决定。执行控制只区分 {@code RUNNABLE / STOPPED}。
  *
  * <p>{@code inputThroughSequence} 是「已被普通 INPUT 接纳或确定性拒绝」的序号水位：它随历史、Command 应用坐标与 Invocation 在同
  * 一事务推进，不因 Stop、压缩或模型重试而倒退。{@code nextCommandSequence} 保留为下一条待分配 Command sequence。
@@ -36,7 +35,8 @@ public record ThreadState(
     UUID headEntryId,
     String creationRequestHash,
     String name,
-    ThreadYoloPolicy yoloPolicy,
+    UUID rootThreadId,
+    boolean yoloEnabled,
     ThreadExecutionControl executionControl,
     long inputThroughSequence,
     long nextCommandSequence,
@@ -59,18 +59,12 @@ public record ThreadState(
           "creationRequestHash must be 64 lowercase hexadecimal characters");
     }
     name = Names.normalize(name);
-    Objects.requireNonNull(yoloPolicy, "yoloPolicy");
-    if (parentThreadId == null) {
-      if (yoloPolicy.isFollow()) {
-        throw new IllegalArgumentException("root thread must not follow another thread");
-      }
-    } else {
-      if (!yoloPolicy.isFollow()) {
-        throw new IllegalArgumentException("child thread must follow its execution root");
-      }
-      if (yoloPolicy.rootThreadId().equals(id)) {
-        throw new IllegalArgumentException("thread must not follow itself");
-      }
+    Objects.requireNonNull(rootThreadId, "rootThreadId");
+    if ((parentThreadId == null) != rootThreadId.equals(id)) {
+      throw new IllegalArgumentException("only a thread without parent is its own execution root");
+    }
+    if (yoloEnabled && parentThreadId != null) {
+      throw new IllegalArgumentException("only an execution root carries the yolo switch");
     }
     Objects.requireNonNull(executionControl, "executionControl");
     if (inputThroughSequence < 0) {
@@ -92,9 +86,9 @@ public record ThreadState(
 
   /**
    * 校验 {@code next} 是存储行 {@code stored} 的合法迁移：identity（id / sessionId / parentThreadId /
-   * creationRequestHash / createdAt）不可变，子代理的 {@link ThreadYoloMode#FOLLOW} 策略（含不可变 Follow 目标）
-   * 不可改变，{@code headEntryId} / {@code inputThroughSequence} / {@code nextCommandSequence} / {@code
-   * version} / {@code updatedAt} 不允许回退，任何 Thread 行变更都会把 {@code version} 严格 +1。exact replay 一律被接受。
+   * rootThreadId / creationRequestHash / createdAt）不可变，{@code headEntryId} / {@code
+   * inputThroughSequence} / {@code nextCommandSequence} / {@code version} / {@code updatedAt}
+   * 不允许回退，任何 Thread 行变更都会把 {@code version} 严格 +1。exact replay 一律被接受。
    */
   public static void validateTransition(ThreadState stored, ThreadState next) {
     Objects.requireNonNull(stored, "stored");
@@ -114,9 +108,8 @@ public record ThreadState(
     if (!stored.creationRequestHash().equals(next.creationRequestHash())) {
       throw new IllegalArgumentException("thread creationRequestHash must not change");
     }
-    // 子代理的 Follow 目标创建后不可变：直接构造的 next 也不能换根、改模式或复制另一棵树的开关。
-    if (stored.yoloPolicy().isFollow() && !stored.yoloPolicy().equals(next.yoloPolicy())) {
-      throw new IllegalArgumentException("child thread yolo policy must not change");
+    if (!stored.rootThreadId().equals(next.rootThreadId())) {
+      throw new IllegalArgumentException("thread rootThreadId must not change");
     }
     if (!stored.createdAt().equals(next.createdAt())) {
       throw new IllegalArgumentException("thread createdAt must not change");
@@ -222,8 +215,8 @@ public record ThreadState(
   }
 
   /**
-   * 直接控制面更新执行控制（{@link ThreadExecutionControl}）：head / 水位 / nextCommandSequence / yoloPolicy / name
-   * / parentThreadId 不变，{@code version} 严格 +1。调用方负责在 version CAS 之前先做「状态相同即 no-op」判断。
+   * 直接控制面更新执行控制（{@link ThreadExecutionControl}）：head / 水位 / nextCommandSequence / YOLO 开关 / name /
+   * parentThreadId 不变，{@code version} 严格 +1。调用方负责在 version CAS 之前先做「状态相同即 no-op」判断。
    */
   public ThreadState changeExecutionControl(ThreadExecutionControl executionControl, Instant now) {
     return copy(
@@ -236,7 +229,7 @@ public record ThreadState(
 
   /**
    * 根控制面更新自身的 YOLO 开关：head / 水位 / nextCommandSequence 不变，{@code version} 严格 +1。只有执行根 （{@code
-   * parentThreadId} 为 null）拥有独立开关；子代理必须 Follow 执行根，调用方负责在 version CAS 之前先做「值相同即 no-op」判断。
+   * parentThreadId} 为 null）拥有独立开关；子代理的有效开关取自执行根，调用方负责在 version CAS 之前先做「值相同即 no-op」判断。
    */
   public ThreadState setRootYolo(boolean enabled, Instant now) {
     if (parentThreadId != null) {
@@ -250,7 +243,8 @@ public record ThreadState(
             headEntryId,
             creationRequestHash,
             name,
-            ThreadYoloPolicy.root(enabled),
+            id,
+            enabled,
             executionControl,
             inputThroughSequence,
             nextCommandSequence,
@@ -262,7 +256,7 @@ public record ThreadState(
   }
 
   /**
-   * 直接控制面重命名 Thread：head / 水位 / nextCommandSequence / yoloPolicy 不变，{@code name} 被规范化替换且 {@code
+   * 直接控制面重命名 Thread：head / 水位 / nextCommandSequence / YOLO 开关不变，{@code name} 被规范化替换且 {@code
    * version} 严格 +1。调用方负责在锁内先做「同名即 no-op」判断。
    */
   public ThreadState renameThread(String newName, Instant now) {
@@ -274,7 +268,8 @@ public record ThreadState(
             headEntryId,
             creationRequestHash,
             newName,
-            yoloPolicy,
+            rootThreadId,
+            yoloEnabled,
             executionControl,
             inputThroughSequence,
             nextCommandSequence,
@@ -304,7 +299,8 @@ public record ThreadState(
             headEntryId,
             creationRequestHash,
             name,
-            yoloPolicy,
+            rootThreadId,
+            yoloEnabled,
             executionControl,
             inputThroughSequence,
             nextCommandSequence,

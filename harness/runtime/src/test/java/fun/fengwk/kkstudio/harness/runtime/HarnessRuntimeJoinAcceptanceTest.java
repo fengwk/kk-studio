@@ -105,13 +105,13 @@ class HarnessRuntimeJoinAcceptanceTest {
     assertTrue(store.<Boolean>transaction(tx -> tx.findThread(TestIds.id(27)).isEmpty()));
     assertEquals(
         List.of(first.thread().id(), root.thread().id()),
-        runtime.findAncestorChain(first.thread().id()));
+        store.transaction(tx -> tx.findAncestorChain(first.thread().id())));
     AcceptedCommands second =
         runtime.acceptCommandsAndJoin(
             session(26, 27, first.thread().id()), secondJoin, AcceptancePreflight.IDENTITY);
     assertEquals(
         List.of(second.thread().id(), first.thread().id(), root.thread().id()),
-        runtime.findAncestorChain(second.thread().id()));
+        store.transaction(tx -> tx.findAncestorChain(second.thread().id())));
   }
 
   @Test

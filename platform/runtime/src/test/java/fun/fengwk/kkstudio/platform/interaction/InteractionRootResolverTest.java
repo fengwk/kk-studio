@@ -13,7 +13,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
 
-import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 /** 统一交互窄共用根解析 {@link InteractionRootResolver} 的单元测试。 */
@@ -39,8 +39,8 @@ class InteractionRootResolverTest {
   /** 测试意图：真实根只取 head-to-root 链末位——根自身即末位，后代取祖先链末位，来源自身与中间父节点都不被当作根。 */
   @Test
   void requireRootIdReturnsChainTailForRootAndDescendant() {
-    when(runtime.findAncestorChain(id(1))).thenReturn(List.of(id(1)));
-    when(runtime.findAncestorChain(id(2))).thenReturn(List.of(id(2), id(1)));
+    when(runtime.findRootThreadId(id(1))).thenReturn(Optional.of(id(1)));
+    when(runtime.findRootThreadId(id(2))).thenReturn(Optional.of(id(1)));
 
     assertEquals(id(1), resolver.requireRootId(id(1)));
     assertEquals(id(1), resolver.requireRootId(id(2)));
@@ -49,7 +49,7 @@ class InteractionRootResolverTest {
   /** 测试意图：Thread 不存在（空链）时显式抛 not-found，绝不静默回退为自身。 */
   @Test
   void requireRootIdFailsExplicitlyWhenThreadDoesNotExist() {
-    when(runtime.findAncestorChain(id(9))).thenReturn(List.of());
+    when(runtime.findRootThreadId(id(9))).thenReturn(Optional.empty());
 
     assertThrows(HarnessRuntimeNotFoundException.class, () -> resolver.requireRootId(id(9)));
   }

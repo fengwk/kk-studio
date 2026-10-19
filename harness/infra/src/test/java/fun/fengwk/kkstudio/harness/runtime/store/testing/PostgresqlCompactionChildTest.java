@@ -72,7 +72,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
@@ -1092,7 +1091,8 @@ class PostgresqlCompactionChildTest {
                   turn2EndId,
                   CREATION_REQUEST_HASH,
                   "main",
-                  ThreadYoloPolicy.root(false),
+                  threadId,
+                  false,
                   ThreadExecutionControl.RUNNABLE,
                   0L,
                   1L,

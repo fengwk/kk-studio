@@ -78,8 +78,8 @@ class PostgresqlHarnessSchemaTest {
             "head_entry_id",
             "creation_request_hash",
             "name",
-            "yolo_mode",
-            "yolo_root_thread_id",
+            "root_thread_id",
+            "yolo_enabled",
             "execution_control",
             "input_through_sequence",
             "next_command_sequence",
@@ -221,6 +221,7 @@ class PostgresqlHarnessSchemaTest {
             "idx_harness_thread_join_child_pending",
             "idx_harness_thread_join_parent_pending",
             "idx_harness_thread_parent",
+            "idx_harness_thread_root",
             "idx_harness_thread_session",
             "idx_harness_thread_stop_receipt_root",
             "idx_harness_tool_invocation_model_nonterminal",
@@ -320,11 +321,12 @@ class PostgresqlHarnessSchemaTest {
         sessionId,
         rootEntryId);
     jdbc.update(
-        "insert into harness_thread (id, session_id, head_entry_id, creation_request_hash, name, yolo_mode, yolo_root_thread_id, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
-            + " values (?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'thread-demo', 'DISABLE', null, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
+        "insert into harness_thread (id, session_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+            + " values (?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'thread-demo', ?, false, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
         threadId,
         sessionId,
-        turnStartEntryId);
+        turnStartEntryId,
+        threadId);
     jdbc.update(
         "insert into harness_model_invocation (id, thread_id, turn_start_entry_id, request_head_entry_id, request_spec,"
             + " status, attempt, result, error, result_entry_id, failed_attempts, created_at, updated_at)"
@@ -655,11 +657,12 @@ class PostgresqlHarnessSchemaTest {
         sessionId,
         turnStartEntryId);
     jdbc.update(
-        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_mode, yolo_root_thread_id, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
-            + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'thread-demo', 'DISABLE', null, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
+        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+            + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'thread-demo', ?, false, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
         threadId,
         sessionId,
-        turnStartEntryId);
+        turnStartEntryId,
+        threadId);
 
     String validReplayJson =
         "{\"format\":\"openai_responses\",\"affinity\":{},\"sourcePrefixHash\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\",\"payload\":{}}";
@@ -821,43 +824,47 @@ class PostgresqlHarnessSchemaTest {
         rootEntryId,
         sessionId);
     jdbc.update(
-        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_mode, yolo_root_thread_id, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
-            + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'thread-demo', 'DISABLE', null, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
+        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+            + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'thread-demo', ?, false, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
         threadId,
         sessionId,
-        rootEntryId);
+        rootEntryId,
+        threadId);
 
     // 5. thread name null（not null 拒绝）
     assertThrows(
         DataIntegrityViolationException.class,
         () ->
             jdbc.update(
-                "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_mode, yolo_root_thread_id, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
-                    + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', null, 'DISABLE', null, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
+                "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+                    + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', null, ?, false, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
                 UUID.fromString("00000000-0000-0000-0000-000000000024"),
                 sessionId,
-                rootEntryId),
+                rootEntryId,
+                UUID.fromString("00000000-0000-0000-0000-000000000024")),
         "null thread name must be rejected");
     // 6. thread name 全空白串（check 拒绝）
     assertThrows(
         DataIntegrityViolationException.class,
         () ->
             jdbc.update(
-                "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_mode, yolo_root_thread_id, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
-                    + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', '   ', 'DISABLE', null, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
+                "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+                    + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', '   ', ?, false, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
                 UUID.fromString("00000000-0000-0000-0000-000000000024"),
                 sessionId,
-                rootEntryId),
+                rootEntryId,
+                UUID.fromString("00000000-0000-0000-0000-000000000024")),
         "whitespace-only thread name must be rejected");
     // 7. 正向：带首尾空格的应用值可持久化（btrim check 只防御纯空白串）
     assertDoesNotThrow(
         () ->
             jdbc.update(
-                "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_mode, yolo_root_thread_id, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
-                    + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', '  padded  ', 'DISABLE', null, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
+                "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+                    + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', '  padded  ', ?, false, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
                 UUID.fromString("00000000-0000-0000-0000-000000000024"),
                 sessionId,
-                rootEntryId),
+                rootEntryId,
+                UUID.fromString("00000000-0000-0000-0000-000000000024")),
         "padded thread name must be accepted (trim is app-enforced)");
   }
 
@@ -886,11 +893,12 @@ class PostgresqlHarnessSchemaTest {
             DataIntegrityViolationException.class,
             () ->
                 jdbc.update(
-                    "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_mode, yolo_root_thread_id, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
-                        + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'thread-demo', 'DISABLE', null, 'RUNNING', 0, 1, 0, statement_timestamp(), statement_timestamp())",
+                    "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+                        + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'thread-demo', ?, false, 'RUNNING', 0, 1, 0, statement_timestamp(), statement_timestamp())",
                     parentThreadId,
                     sessionId,
-                    rootEntryId),
+                    rootEntryId,
+                    parentThreadId),
             "ck_harness_thread_execution_control must reject invalid execution control");
     assertTrue(exControl.getMessage().contains("ck_harness_thread_execution_control"));
 
@@ -900,11 +908,12 @@ class PostgresqlHarnessSchemaTest {
             DataIntegrityViolationException.class,
             () ->
                 jdbc.update(
-                    "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_mode, yolo_root_thread_id, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
-                        + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'thread-demo', 'DISABLE', null, 'RUNNABLE', 2, 2, 0, statement_timestamp(), statement_timestamp())",
+                    "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+                        + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'thread-demo', ?, false, 'RUNNABLE', 2, 2, 0, statement_timestamp(), statement_timestamp())",
                     parentThreadId,
                     sessionId,
-                    rootEntryId),
+                    rootEntryId,
+                    parentThreadId),
             "ck_harness_thread_input_through must reject watermark >= next_command_sequence");
     assertTrue(exWatermark.getMessage().contains("ck_harness_thread_input_through"));
 
@@ -912,11 +921,12 @@ class PostgresqlHarnessSchemaTest {
     assertDoesNotThrow(
         () ->
             jdbc.update(
-                "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_mode, yolo_root_thread_id, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
-                    + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'parent-thread', 'DISABLE', null, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
+                "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+                    + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'parent-thread', ?, false, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
                 parentThreadId,
                 sessionId,
-                rootEntryId));
+                rootEntryId,
+                parentThreadId));
 
     // 4. 拒绝 parent_thread_id 指向自身
     DataIntegrityViolationException exSelfParent =
@@ -924,8 +934,8 @@ class PostgresqlHarnessSchemaTest {
             DataIntegrityViolationException.class,
             () ->
                 jdbc.update(
-                    "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_mode, yolo_root_thread_id, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
-                        + " values (?, ?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'self-thread', 'FOLLOW', ?, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
+                    "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+                        + " values (?, ?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'self-thread', ?, false, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
                     childThreadId,
                     sessionId,
                     childThreadId,
@@ -941,8 +951,8 @@ class PostgresqlHarnessSchemaTest {
             DataIntegrityViolationException.class,
             () ->
                 jdbc.update(
-                    "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_mode, yolo_root_thread_id, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
-                        + " values (?, ?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'child-thread', 'FOLLOW', ?, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
+                    "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+                        + " values (?, ?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'child-thread', ?, false, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
                     childThreadId,
                     sessionId,
                     nonExistentParentId,
@@ -955,8 +965,8 @@ class PostgresqlHarnessSchemaTest {
     assertDoesNotThrow(
         () ->
             jdbc.update(
-                "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_mode, yolo_root_thread_id, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
-                    + " values (?, ?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'child-thread', 'FOLLOW', ?, 'STOPPED', 0, 1, 0, statement_timestamp(), statement_timestamp())",
+                "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+                    + " values (?, ?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'child-thread', ?, false, 'STOPPED', 0, 1, 0, statement_timestamp(), statement_timestamp())",
                 childThreadId,
                 sessionId,
                 parentThreadId,
@@ -1005,14 +1015,15 @@ class PostgresqlHarnessSchemaTest {
         turnStartEntryId);
 
     jdbc.update(
-        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_mode, yolo_root_thread_id, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
-            + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'parent', 'DISABLE', null, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
+        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+            + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'parent', ?, false, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
         parentThreadId,
         sessionId,
-        rootEntryId);
+        rootEntryId,
+        parentThreadId);
     jdbc.update(
-        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_mode, yolo_root_thread_id, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
-            + " values (?, ?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'child', 'FOLLOW', ?, 'RUNNABLE', 0, 2, 1, statement_timestamp(), statement_timestamp())",
+        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+            + " values (?, ?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'child', ?, false, 'RUNNABLE', 0, 2, 1, statement_timestamp(), statement_timestamp())",
         childThreadId,
         sessionId,
         parentThreadId,
@@ -1117,14 +1128,15 @@ class PostgresqlHarnessSchemaTest {
         turnStartEntryId);
 
     jdbc.update(
-        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_mode, yolo_root_thread_id, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
-            + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'parent', 'DISABLE', null, 'RUNNABLE', 0, 2, 0, statement_timestamp(), statement_timestamp())",
+        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+            + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'parent', ?, false, 'RUNNABLE', 0, 2, 0, statement_timestamp(), statement_timestamp())",
         parentThreadId,
         sessionId,
-        rootEntryId);
+        rootEntryId,
+        parentThreadId);
     jdbc.update(
-        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_mode, yolo_root_thread_id, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
-            + " values (?, ?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'child', 'FOLLOW', ?, 'RUNNABLE', 0, 2, 1, statement_timestamp(), statement_timestamp())",
+        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+            + " values (?, ?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'child', ?, false, 'RUNNABLE', 0, 2, 1, statement_timestamp(), statement_timestamp())",
         childThreadId,
         sessionId,
         parentThreadId,
@@ -1215,14 +1227,15 @@ class PostgresqlHarnessSchemaTest {
         rootEntryId,
         sessionId);
     jdbc.update(
-        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_mode, yolo_root_thread_id, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
-            + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'parent', 'DISABLE', null, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
+        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+            + " values (?, ?, null, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'parent', ?, false, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
         parentThreadId,
         sessionId,
-        rootEntryId);
+        rootEntryId,
+        parentThreadId);
     jdbc.update(
-        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_mode, yolo_root_thread_id, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
-            + " values (?, ?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'child', 'FOLLOW', ?, 'RUNNABLE', 0, 2, 1, statement_timestamp(), statement_timestamp())",
+        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+            + " values (?, ?, ?, ?, '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef', 'child', ?, false, 'RUNNABLE', 0, 2, 1, statement_timestamp(), statement_timestamp())",
         childThreadId,
         sessionId,
         parentThreadId,
@@ -1287,15 +1300,16 @@ class PostgresqlHarnessSchemaTest {
         sessionId,
         rootEntryId);
     jdbc.update(
-        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_mode, yolo_root_thread_id, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
-            + " values (?, ?, null, ?, ?, 'parent', 'DISABLE', null, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
+        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+            + " values (?, ?, null, ?, ?, 'parent', ?, false, 'RUNNABLE', 0, 1, 0, statement_timestamp(), statement_timestamp())",
         parentThreadId,
         sessionId,
         rootEntryId,
-        hash);
+        hash,
+        parentThreadId);
     jdbc.update(
-        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, yolo_mode, yolo_root_thread_id, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
-            + " values (?, ?, ?, ?, ?, 'child', 'FOLLOW', ?, 'RUNNABLE', 0, 2, 1, statement_timestamp(), statement_timestamp())",
+        "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name, root_thread_id, yolo_enabled, execution_control, input_through_sequence, next_command_sequence, version, created_at, updated_at)"
+            + " values (?, ?, ?, ?, ?, 'child', ?, false, 'RUNNABLE', 0, 2, 1, statement_timestamp(), statement_timestamp())",
         childThreadId,
         sessionId,
         parentThreadId,

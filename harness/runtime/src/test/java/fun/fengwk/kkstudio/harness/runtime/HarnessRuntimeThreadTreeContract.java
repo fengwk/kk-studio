@@ -54,7 +54,6 @@ import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadYoloPolicy;
 
 import java.lang.reflect.Proxy;
 import java.time.Clock;
@@ -633,8 +632,6 @@ public abstract class HarnessRuntimeThreadTreeContract {
       Instant createdAt,
       ThreadExecutionControl executionControl,
       UUID rootThreadId) {
-    ThreadYoloPolicy yoloPolicy =
-        parentId == null ? ThreadYoloPolicy.root(false) : ThreadYoloPolicy.follow(rootThreadId);
     return new ThreadState(
         id,
         sessionId,
@@ -642,7 +639,8 @@ public abstract class HarnessRuntimeThreadTreeContract {
         headId,
         CREATION_REQUEST_HASH,
         name,
-        yoloPolicy,
+        parentId == null ? id : rootThreadId,
+        false,
         executionControl,
         0L,
         1,

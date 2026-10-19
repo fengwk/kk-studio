@@ -499,7 +499,7 @@ export function useBoundBranchPanel({
       setYoloError(null)
       setConflict(null)
       // 权威响应携带策略投影：根只可能是 ENABLE/DISABLE，本地 draft 需要的是生效布尔。
-      const acceptedEnabled = accepted.yoloPolicy.mode === 'ENABLE'
+      const acceptedEnabled = accepted.yoloEnabled
       // 捕获成功时刻的排队意图：React 会延迟执行 setBranchState 回调，届时
       // pending 可能已被 drain 消费为 null，导致误判“无更新意图”而压掉乐观 draft。
       const hasNewerIntent = yoloPendingRef.current != null

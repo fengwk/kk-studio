@@ -73,7 +73,7 @@ Docker 不可用时的跳过不算数据库事务已验证。
 | 最新 Agent/model/variant 与环境继承物化 | `AgentBranchSettingsMaterializerTest`，包括 `materializesLatestAgentModelAndVariant`、`inheritsParentEnvironmentOnlyWhenSubagentEnablesIt` |
 | 冻结 allowlist 是唯一授权来源，foreign parent/无归属调用拒绝 | `DatabaseTurnResolverTest.freezesAllowedSubagentsAndComposesTaskPrompt`、`taskDelegationComesFromLatestAllowlistOnly`；`SubagentTaskRunnerTest.rejectsUnauthorizedSubagentTypeWithAvailableNames`、`rejectsResumingAThreadOfAnotherParent` |
 
-子只持久化不可变 `parent_thread_id`，根与深度从 `findAncestorChain` 派生，不从历史文本或冗余 ROOT
+子持久化不可变的 `parent_thread_id` 与 `root_thread_id`，深度从 `findAncestorChain` 派生，不从历史文本或冗余 ROOT
 字段猜测。ROOT payload 不承载运行树元数据。继续委派可立即向忙碌子追加 prompt，按最新 settings
 收敛，在下一次 turn 边界消费；`busyChildAcceptsAdditionalPromptWithoutPriorDeliveryAndWithFixedPrefix`、
 `resumeCursorConflictRetriesWithFreshSnapshot` 与数据库集成测试固定这条行为。
