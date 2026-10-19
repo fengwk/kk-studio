@@ -124,8 +124,7 @@ Debug。展示不改变模型正文、Provider 协议、资源安全边界或既
 短参数只在 Header；必要大参数下移后不再重复。edit 参数流式生成时，old/new 明确标注为输入；
 流结束后等待服务端读取真实文件生成 `approvalJson.editReview`，再展示冻结的路径、行号与全部变更。
 根审批区复用同一审查组件；缺少或非法审查信息时禁止“允许”，仍可“拒绝”。`replace_all` 等影响范围的参数可见。
-时间线优先展示冻结的审批快照；自动放行/YOLO 使用实际结果的 `details.editReview`，不由前端合成真实 diff。
-write/edit 正文保留空白、只在审查区出现一次，成功结果不重复正文或 diff；真实失败仍展示原始错误信息。
+时间线优先展示冻结的审批快照（freeze approval 优先）；自动放行/YOLO 或页面刷新/GC 后从实际结果的 `details.editReview` 恢复（durable entry 显式解码 `detailsJson`，invocation 从 `resultJson.details` 读取），不由前端合成真实 diff。write/edit 审查区与真实 diff 默认展开并有界滚动，正文只在审查区出现一次，成功结果仅呈现简短本地化文案，不重复正文或 diff；真实失败仍展示原始错误信息。
 
 未知工具无需自定义 renderer。紧凑 JSON 不改变字符串内容，超长值限制在 Header 参数区域
 内查看和复制，不撑宽 pane。真实 false/0/空值不能被摘要过滤，不补未传入默认值。

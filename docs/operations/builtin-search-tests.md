@@ -68,9 +68,12 @@ npm --prefix daemon run coverage
 
 ## 取消、超时与能力边界
 
-有效超时预算在进入检索时受控。
+`fs.grep` 与 `fs.find` 默认超时为 15 秒，可由正数 `timeout_seconds` 覆盖。
+worker 在目录、行与 8KiB 数据块等检查点通过共享原子 flag 协作检查中断；超时时保留已收集的 partial 匹配，
+并在结果中显式体现 error 与 `search.incomplete`，决不谎报无匹配或完全成功。
+遇到非响应 stop 时，提供 5 秒清理宽限才 await terminate（非额外更短执行预算），清理失败明确暴露。
 `test/coding/search.test.ts` 验证上下文取消信号被映射为 `CANCELLED`，
-`test/coding/search-core.test.ts` 验证 `SearchControl` 超时抛出稳定错误。
+`test/coding/search-core.test.ts` 验证 `SearchControl` 超时保留 partial 结果并抛出稳定错误。
 取消不能被误报成超时，已取消调用也不能继续遍历。
 
 capability 注册与结果协议由 [`harness/environment`](../../harness/environment) 与 Daemon Runtime 负责，
