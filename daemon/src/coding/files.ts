@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import { readdir, stat } from 'node:fs/promises'
+import { diffArrays } from 'diff'
 import type {
   CapabilityCall,
   CapabilityContext,
@@ -449,7 +450,6 @@ function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
 // ---------------------------------------------------------------------------
 
 const DIFF_CONTEXT_LINES = 4
-const DIFF_MAX_CELLS = 2_000_000
 
 interface LineEndingDocument {
   lines: string[]
@@ -713,115 +713,10 @@ function displayLine(token: string): string {
 }
 
 function diffParts(original: string[], next: string[]): DiffPart[] {
-  let prefix = 0
-  while (
-    prefix < original.length &&
-    prefix < next.length &&
-    original[prefix] === next[prefix]
-  ) {
-    prefix++
-  }
-  let suffix = 0
-  while (
-    suffix < original.length - prefix &&
-    suffix < next.length - prefix &&
-    original[original.length - 1 - suffix] === next[next.length - 1 - suffix]
-  ) {
-    suffix++
-  }
-  const parts: DiffPart[] = []
-  if (prefix > 0) {
-    parts.push({ kind: 'CONTEXT', lines: original.slice(0, prefix) })
-  }
-  parts.push(
-    ...alignMiddle(
-      original.slice(prefix, original.length - suffix),
-      next.slice(prefix, next.length - suffix),
-    ),
-  )
-  if (suffix > 0) {
-    parts.push({ kind: 'CONTEXT', lines: original.slice(original.length - suffix) })
-  }
-  return parts
-}
-
-function alignMiddle(original: string[], next: string[]): DiffPart[] {
-  if (original.length === 0 && next.length === 0) {
-    return []
-  }
-  if (original.length * next.length > DIFF_MAX_CELLS) {
-    return [{ kind: 'REMOVED', lines: [...original] }, { kind: 'ADDED', lines: [...next] }]
-  }
-
-  const width = next.length + 1
-  const lcs = new Int32Array((original.length + 1) * width)
-  for (let originalIndex = original.length - 1; originalIndex >= 0; originalIndex--) {
-    for (let nextIndex = next.length - 1; nextIndex >= 0; nextIndex--) {
-      lcs[originalIndex * width + nextIndex] =
-        original[originalIndex] === next[nextIndex]
-          ? (lcs[(originalIndex + 1) * width + nextIndex + 1] as number) + 1
-          : Math.max(
-              lcs[(originalIndex + 1) * width + nextIndex] as number,
-              lcs[originalIndex * width + nextIndex + 1] as number,
-            )
-    }
-  }
-
-  const parts: DiffPart[] = []
-  let removed: string[] = []
-  let added: string[] = []
-  let context: string[] = []
-  let originalIndex = 0
-  let nextIndex = 0
-  while (originalIndex < original.length && nextIndex < next.length) {
-    if (original[originalIndex] === next[nextIndex]) {
-      flushChanged(parts, removed, added)
-      removed = []
-      added = []
-      context.push(original[originalIndex] as string)
-      originalIndex++
-      nextIndex++
-      continue
-    }
-    flushContext(parts, context)
-    context = []
-    if (
-      (lcs[(originalIndex + 1) * width + nextIndex] as number) >=
-      (lcs[originalIndex * width + nextIndex + 1] as number)
-    ) {
-      removed.push(original[originalIndex] as string)
-      originalIndex++
-    } else {
-      added.push(next[nextIndex] as string)
-      nextIndex++
-    }
-  }
-  flushContext(parts, context)
-  while (originalIndex < original.length) {
-    removed.push(original[originalIndex] as string)
-    originalIndex++
-  }
-  while (nextIndex < next.length) {
-    added.push(next[nextIndex] as string)
-    nextIndex++
-  }
-  flushChanged(parts, removed, added)
-  return parts
-}
-
-function flushContext(parts: DiffPart[], context: string[]): void {
-  if (context.length > 0) {
-    parts.push({ kind: 'CONTEXT', lines: [...context] })
-  }
-}
-
-function flushChanged(parts: DiffPart[], removed: string[], added: string[]): void {
-  if (removed.length > 0) {
-    parts.push({ kind: 'REMOVED', lines: [...removed] })
-  }
-  if (added.length > 0) {
-    parts.push({ kind: 'ADDED', lines: [...added] })
-  }
+  return diffArrays(original, next).map((part) => ({
+    kind: part.removed ? 'REMOVED' : part.added ? 'ADDED' : 'CONTEXT',
+    lines: part.value,
+  }))
 }
 
 function renderDiff(original: string[], next: string[], parts: DiffPart[]): string {
@@ -836,6 +731,9 @@ function renderDiff(original: string[], next: string[], parts: DiffPart[]): stri
           diff += cursor.appendAdded(displayLine(line))
         } else {
           diff += cursor.appendRemoved(displayLine(line))
+        }
+        if (!line.endsWith('\n')) {
+          diff += '\\ No newline at end of file\n'
         }
       }
       continue
