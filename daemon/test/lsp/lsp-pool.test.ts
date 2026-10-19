@@ -712,6 +712,109 @@ describe('LspClientPool Concurrency & Lifecycle', () => {
     expect(readEvents(transcript).filter((event) => event.event === 'start')).toHaveLength(1)
     await expectPoolCloseFailure(pool)
   })
+
+  it('waits for cancelled boot to finish converging before fresh lease can proceed with non-overlapping instance', async () => {
+    const transcript = path.join(tempDir, 'cancelled-boot-wait-transcript.jsonl')
+    const server = fakeServerConfig('java', 'slow-init', transcript)
+
+    const cleanupGate = Promise.withResolvers<void>()
+    const terminateStartedGate = Promise.withResolvers<void>()
+    let terminateStarted = false
+    let launches = 0
+    let oldPid: number | null = null
+
+    const gatedSupervisor: ProcessSupervisor = {
+      start: async (spec: ProcessSpec): Promise<ManagedProcess> => {
+        launches++
+        const managed = await supervisor.start(spec)
+        if (launches === 1) {
+          oldPid = managed.pid
+          const originalTerminate = managed.terminate.bind(managed)
+          return {
+            ...managed,
+            terminate: async (): Promise<void> => {
+              terminateStarted = true
+              terminateStartedGate.resolve()
+              await cleanupGate.promise
+              return originalTerminate()
+            },
+          }
+        }
+        return managed
+      },
+      close: async (): Promise<void> => supervisor.close(),
+    }
+
+    const pool = new LspClientPool(LspDiscovery.of([server]), gatedSupervisor, {
+      shutdownGrace: 300,
+    })
+    pools.push(pool)
+
+    const file = path.join(tempDir, 'App.java')
+    fs.writeFileSync(file, 'class App {}\n')
+
+    const ac1 = new AbortController()
+    const ac2 = new AbortController()
+
+    // 1. p1 发起 lease，创建 boot 并开始启动进程
+    const p1 = pool.lease(file, ac1.signal).catch((err: unknown) => err)
+    await awaitEvent(transcript, (event) => event.event === 'recv' && event.message?.method === 'initialize')
+
+    // 2. p1 abort，触发 boot.cancelled = true 并进入 terminate 清理
+    ac1.abort()
+    await terminateStartedGate.promise
+    expect(terminateStarted).toBe(true)
+
+    // 3. 在旧 boot 还存在且正在清理时，p2 发起 lease：命中 boot && boot.cancelled 分支，进入等待
+    let p2Settled = false
+    const p2 = pool.lease(file, ac2.signal).catch((err: unknown) => {
+      p2Settled = true
+      return err
+    })
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    expect(p2Settled).toBe(false)
+
+    // 4. p2 abort：raceAbort 应该让 p2 立即返回（先返回），而 p1 依然因为 cleanupGate 挂起而 pending
+    ac2.abort()
+    const err2 = await p2
+    expect(err2).toBeInstanceOf(Error)
+    expect((err2 as Error).name).toBe('AbortError')
+    expect(p2Settled).toBe(true)
+
+    let p1Settled = false
+    void p1.then(() => {
+      p1Settled = true
+    })
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    expect(p1Settled).toBe(false)
+
+    try {
+      // 5. 释放 cleanupGate，让 p1 的底层 terminate 和 boot 清理彻底完成
+      cleanupGate.resolve()
+      const err1 = await p1
+      expect(err1).toBeInstanceOf(Error)
+      expect((err1 as Error).name).toBe('AbortError')
+
+      // 旧进程必须退出
+      if (oldPid !== null) {
+        await awaitProcessGone(oldPid)
+      }
+
+      // 6. 后续重建新实例不能和旧实例重叠：新实例启动并完成 boot，进程 PID 不与旧实例重叠
+      const entry = await pool.lease(file)
+      expect(entry.client.isAlive()).toBe(true)
+
+      const startEvents = readEvents(transcript).filter((e) => e.event === 'start')
+      expect(startEvents.length).toBeGreaterThanOrEqual(2)
+      const newPid = startEvents.at(-1)?.pid
+      expect(newPid).toBeDefined()
+      expect(newPid).not.toBe(oldPid)
+
+      pool.release(entry)
+    } finally {
+      cleanupGate.resolve()
+    }
+  })
 })
 
 // Fixture contract: a test supervisor must prove real stdio teardown, not just 'exit'. A child
