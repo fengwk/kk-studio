@@ -72,7 +72,7 @@ function contentKey(content: ToolContent, index: number): string {
 
 /**
  * 单一资源展示：按权威 MIME（durable blob 的解析结果，其次 content.mediaType）统一
- * 分发图片/视频/音频/下载。远程 http(s) 与 file:/s3: 只保留稳定 URI 文本与显式链接，
+ * 分发图片/视频/音频/下载。远程 http(s) 只保留稳定 URI 文本与显式链接，
  * 绝不自动发起请求；音视频不自动播放。
  */
 function ToolResourceView({ attachment }: { attachment: ToolAttachment }) {

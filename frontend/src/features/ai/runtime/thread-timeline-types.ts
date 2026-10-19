@@ -58,13 +58,11 @@ export interface ToolAttachment {
   type: ToolAttachmentType
   name: string
   mime: string
-  /** 稳定 URI（data:/http:/https:/file:/s3:/...）；自身始终不是 base64 负载。 */
+  /** 稳定 URI（data:/http:/https:/...）；自身始终不是 base64 负载。 */
   data: string
   preview?: string
   size?: number | null
   sha256?: string | null
-  /** Harness adapter 已解析的显式下载地址；portable panel 不感知 API 路由。 */
-  downloadHref?: string
   /** 共享存储的持久资源 id（RESOURCE parts）；URL 仅在渲染时通过 storage service 解析。 */
   blobId?: string
 }

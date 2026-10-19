@@ -12,9 +12,8 @@ import java.util.regex.Pattern;
 /**
  * 不可变的规范 Resource URI 引用。
  *
- * <p>只允许 {@code data} / {@code file} / {@code s3} / {@code https} / {@code http} / {@code
- * blob-upload} / {@code kkstudio} 七种 scheme；构造时执行全部 域约束与规范校验（含 data URI 解码与 size/sha 验证），保证 codec
- * 反序列化与直接构造得到同样的严格结果。
+ * <p>只允许 {@code data} / {@code https} / {@code http} / {@code blob-upload} / {@code kkstudio} 五种
+ * scheme；构造时执行全部 域约束与规范校验（含 data URI 解码与 size/sha 验证），保证 codec 反序列化与直接构造得到同样的严格结果。
  *
  * <p>{@code blob-upload:<uploadId>} 是 Environment Daemon 上传的瞬时引用：字节已由 Daemon 直传对象存储，Platform 只持有 全局
  * Blob 上传行 id。它必须携带非空 size/sha，并且只在一个 Tool 调用终态到 durable history 插入之间短暂存在。

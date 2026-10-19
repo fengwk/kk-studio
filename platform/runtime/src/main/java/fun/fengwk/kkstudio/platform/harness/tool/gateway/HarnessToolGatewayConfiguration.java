@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.platform.harness.tool.gateway;
 
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -12,7 +11,6 @@ import fun.fengwk.kkstudio.harness.runtime.admission.ConcurrencyAdmission;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionEvaluator;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsProvider;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
-import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessExecutionAdmissionProperties;
 import fun.fengwk.kkstudio.platform.harness.contributor.ContributorBranchViewLoader;
@@ -52,7 +50,6 @@ public class HarnessToolGatewayConfiguration {
    * tool.toolGatewayOverloadRetryMillis}。任何自定义 {@link ToolGateway} bean 都会抑制该默认实现。
    */
   @Bean
-  @ConditionalOnBean(ResourceStore.class)
   @ConditionalOnMissingBean(ToolGateway.class)
   public ToolExecutionGateway toolExecutionGateway(
       RuntimeToolCatalogSource runtimeToolCatalogSource,
@@ -60,7 +57,6 @@ public class HarnessToolGatewayConfiguration {
       EnvironmentCapabilityTransport capabilityTransport,
       PermissionEvaluator permissionEvaluator,
       ToolSettingsProvider toolSettingsProvider,
-      ResourceStore resourceStore,
       StorageUploadService storageUploadService,
       SystemSettingsSnapshot systemSettingsSnapshot,
       @Qualifier("toolGatewayExecutor") ExecutorService toolGatewayExecutor,
@@ -74,7 +70,6 @@ public class HarnessToolGatewayConfiguration {
         capabilityTransport,
         permissionEvaluator,
         toolSettingsProvider,
-        resourceStore,
         new StorageUploadToolResourceStager(storageUploadService, resourceMaxBytes),
         resourceMaxBytes,
         toolGatewayExecutor,

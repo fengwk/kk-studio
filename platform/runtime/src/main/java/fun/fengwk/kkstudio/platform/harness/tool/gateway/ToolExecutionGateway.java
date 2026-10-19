@@ -48,7 +48,6 @@ import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsProvider;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolSuccess;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolResultSizeLimits;
-import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
@@ -146,7 +145,6 @@ public final class ToolExecutionGateway implements ToolGateway {
       EnvironmentCapabilityTransport capabilityTransport,
       PermissionEvaluator permissionEvaluator,
       ToolSettingsProvider toolSettingsProvider,
-      ResourceStore resourceStore,
       ToolResourceStager resourceStager,
       int resourceMaxBytes,
       ExecutorService executor,
@@ -162,9 +160,7 @@ public final class ToolExecutionGateway implements ToolGateway {
         Objects.requireNonNull(toolSettingsProvider, "toolSettingsProvider");
     this.finalizer =
         new ToolResultFinalizer(
-            Objects.requireNonNull(resourceStore, "resourceStore"),
-            Objects.requireNonNull(resourceStager, "resourceStager"),
-            resourceMaxBytes);
+            Objects.requireNonNull(resourceStager, "resourceStager"), resourceMaxBytes);
     this.executor = Objects.requireNonNull(executor, "executor");
     this.retryDelay = Objects.requireNonNull(retryDelay, "retryDelay");
     this.clock = Objects.requireNonNull(clock, "clock");

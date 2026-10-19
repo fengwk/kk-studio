@@ -50,7 +50,6 @@ export interface ToolRendererAttachment {
   preview?: string
   size?: number | null
   sha256?: string | null
-  downloadHref?: string
 }
 
 /** 有序 Tool 结果内容：Text 忠实展示、JSON 格式化、Resource 按权威 MIME 渲染。 */

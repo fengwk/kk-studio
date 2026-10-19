@@ -2,7 +2,7 @@
 
 `harness-infra` 将 Runtime 的 Entry、命令、Invocation 与 Work 端口适配到 PostgreSQL。行锁协调写入，lease token/deadline 限定执行所有权，Work 行支持重启后的认领恢复；LISTEN/NOTIFY 降低发现延迟。
 
-模块把 Runtime 的强类型事务原语、Realtime 端口与 `ResourceStore` 端口适配到 PostgreSQL、PostgreSQL 通知通道与本地文件系统；生产依赖为 `harness-common`、`harness-runtime`、`harness-tool`、`harness-environment`、Jackson 3（`tools.jackson`，经 `harness-runtime` 传递）、Spring JDBC 与 PostgreSQL driver，测试通过 Flyway 与 Testcontainers 起真实数据库。边界见 [`InfraModuleArchitectureTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/InfraModuleArchitectureTest.java)，表结构统一由 [`V1__schema.sql`](../../schema/src/main/resources/db/migration/V1__schema.sql) 管理。
+模块把 Runtime 的强类型事务原语与 Realtime 端口适配到 PostgreSQL 与 PostgreSQL 通知通道；生产依赖为 `harness-common`、`harness-runtime`、`harness-tool`、`harness-environment`、Jackson 3（`tools.jackson`，经 `harness-runtime` 传递）、Spring JDBC 与 PostgreSQL driver，测试通过 Flyway 与 Testcontainers 起真实数据库。边界见 [`InfraModuleArchitectureTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/InfraModuleArchitectureTest.java)，表结构统一由 [`V1__schema.sql`](../../schema/src/main/resources/db/migration/V1__schema.sql) 管理。
 
 多节点部署中的 App 实例互为对等体，只通过同一 PostgreSQL 里的持久化状态、行锁、租约与 NOTIFY 协调；进程内没有任何跨节点共享的内存协调器。
 
@@ -123,20 +123,6 @@ PostgreSQL `jsonb` 会按自身规则规范化极端量级的数字文本（例�
 
 通知的丢失、乱序或重复都不会改变最终状态：固定周期 poll、重连后的重读与租约过期重认领共同构成收敛路径。
 
-## LocalFileResourceStore
-
-[`LocalFileResourceStore`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/resource/LocalFileResourceStore.java) 在固定受信任根目录下以 `<sha256>`（64 位小写十六进制）为扁平文件名实现 [`ResourceStore`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/resource/ResourceStore.java)：
-
-```text
-reference() -> 规范 file:///root/<sha256>，纯内存、无存储副作用
-put()       -> SHA-256 -> WRITE/CREATE_NEW 临时文件 -> force 落盘 -> create-only 硬链接发布 -> NOFOLLOW 校验
-read()      -> pinned root + sha 文件名 + NOFOLLOW + 精确 size + 精确摘要
-```
-
-构造时要求根目录解析为规范绝对真实目录且能生成合规 ASCII URI。`put` 先算摘要，在同一根目录写入临时文件并 `force(true)`，再用 `Files.createLink` 原子发布；并发写同一内容时恰好一个获胜者创建对象，其余捕获 `FileAlreadyExistsException` 复用已有目标。临时文件的创建与写入由 `writeTempFile` 自己拥有「创建即负责清理」的生命周期：只要文件已创建，任何写入或 `force` 失败都会 `deleteIfExists` 该临时文件（清理自身失败只作为 suppressed 附加，绝不掩盖原始故障），名称碰撞（文件不是自己创建）绝不删除。无论自有发布、冲突还是复用，返回引用前都必须对最终目标做一次精确 size 与摘要校验（同一条 NOFOLLOW 通道，EOF 提前结束或多出字节都算失败），绝不覆盖。`read` 只接受 parent 恰为 pinned root 且文件名等于 sha256 的规范引用，以 `NOFOLLOW_LINKS` 打开、确认是普通文件而非符号链接、按声明字节数精确读取并校验摘要。非法输入（null、超限 content、非 file 引用、越界或嵌套路径）抛 `IllegalArgumentException`；损坏、符号链接、大小或摘要不符、文件系统不支持硬链接等存储异常抛 `IllegalStateException`。
-
-**耐久性契约**：临时文件在发布前已 `force(true)`，但硬链接产生的目录项不额外 fsync 根目录。因此本实现保证的是进程级原子可见性（绝不返回部分对象），不承诺掉电/崩溃后 target 仍存在；要求掉电耐久的部署必须自行保证文件系统与目录项的持久化策略。
-
 ## 包架构
 
 | 包名 | 职责 | 边界 |
@@ -144,17 +130,16 @@ read()      -> pinned root + sha 文件名 + NOFOLLOW + 精确 size + 精确摘�
 | `infra.dispatch` | `HarnessWorkDispatcher` 与 `HarnessWorkDispatcherConfig`：Work 调度循环、类型轮转、有界 handoff、wake 合并与 stop | claim-only 短事务；不读业务状态、不解释 Processor 结果 |
 | `infra.postgresql` | `PostgresqlHarnessStore`、`PostgresqlHarnessTransaction`、`PostgresqlHarnessRows`、`PostgresqlWorkChannel`、`PostgresqlRealtimeEventSink` / `PostgresqlRealtimeEventSource` / `PostgresqlRealtimeChannel` / `RealtimeNotificationCodec` | 九表 durable 协议、树锁与锁序防御、poisoning、事务内 EntryPath 缓存、claim / lease / wake 与环境路由围栏、NOTIFY 编解码 |
 | `infra.realtime` | `RealtimeEventSource` 实时事件订阅端口 | 只定义 live overlay 订阅与完成围栏；durable snapshot 是唯一恢复事实源 |
-| `infra.resource` | `LocalFileResourceStore` 本地内容寻址对象存储 | 固定根目录、SHA-256 扁平命名、create-only 原子发布与精确校验 |
 
 ## 源码与测试
 
-生产源码只有四个包：[`postgresql`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/postgresql/)（Store、行映射、Work 通道、Realtime sink/source 与通知编解码）、[`dispatch`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/dispatch/)（Work 调度循环）、[`realtime`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/realtime/)（订阅端口）、[`resource`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/resource/)（本地内容寻址对象存储）。
+生产源码只有三个包：[`postgresql`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/postgresql/)（Store、行映射、Work 通道、Realtime sink/source 与通知编解码）、[`dispatch`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/dispatch/)（Work 调度循环）与 [`realtime`](../../harness/infra/src/main/java/fun/fengwk/kkstudio/harness/infra/realtime/)（订阅端口）。
 
 测试分四组，入口都在 [`harness/infra/src/test`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/) 下；改 Store 或调度前先从这里定位对应断言：
 
 - 真实 PostgreSQL 契约（需要 Testcontainers 启动数据库）：[`runtime/store/testing` 测试目录](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/)；[`PostgresqlHarnessSchemaTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlHarnessSchemaTest.java) 锁定九表形状（含 `harness_thread_join` 的 terminal/final-answer 与交付约束、`harness_thread_stop_receipt` 回执），[`PostgresqlHarnessStoreTransactionTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlHarnessStoreTransactionTest.java)、[`PostgresqlHarnessStoreConcurrencyTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlHarnessStoreConcurrencyTest.java) 覆盖事务边界、锁序递增与句柄生命周期；[`PostgresqlEntryPathCacheTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlEntryPathCacheTest.java) 用 CTE 计数器把冷读一次 CTE、连续 append 零 CTE 与会话驱逐变成可断言事实；[`PostgresqlWorkTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlWorkTest.java) 与 [`PostgresqlWorkNotificationTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/runtime/store/testing/PostgresqlWorkNotificationTest.java) 覆盖 claim、lease、wake 与 NOTIFY 唤醒；周期轮询由下列 Dispatcher 生命周期测试覆盖。深删除顺序、命令邮箱、Entry 树与 Invocation 状态一致性由同目录按域拆分的其余 PostgreSQL 契约测试覆盖。
 - 调度循环：[`dispatch` 测试目录](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/dispatch/)；[`HarnessWorkDispatcherLifecycleTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/dispatch/HarnessWorkDispatcherLifecycleTest.java)、[`HarnessWorkDispatcherDrainTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/dispatch/HarnessWorkDispatcherDrainTest.java)、[`HarnessWorkDispatcherHandoffTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/dispatch/HarnessWorkDispatcherHandoffTest.java)、[`HarnessWorkDispatcherConfigTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/dispatch/HarnessWorkDispatcherConfigTest.java) 覆盖单次 drain、周期调度、有界分发、执行器拒绝归还、恢复与等待态的 handoff、平滑停止与配置边界。
-- Realtime 与本地资源：[`postgresql` 测试目录](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/postgresql/) 的 [`RealtimeNotificationCodecTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/postgresql/RealtimeNotificationCodecTest.java)、[`PostgresqlRealtimeEventSinkTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/postgresql/PostgresqlRealtimeEventSinkTest.java)、[`PostgresqlRealtimeEventSinkIntegrationTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/postgresql/PostgresqlRealtimeEventSinkIntegrationTest.java)、[`PostgresqlRealtimeEventSourceTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/postgresql/PostgresqlRealtimeEventSourceTest.java)、[`PostgresqlRealtimeEventSourceConcurrencyTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/postgresql/PostgresqlRealtimeEventSourceConcurrencyTest.java) 覆盖规范编解码、超限降级、分块上界与 `Array` 释放、批量保序与回滚不产生通知、Source 围栏控制；[`LocalFileResourceStoreTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/resource/LocalFileResourceStoreTest.java) 覆盖哈希寻址、并发 create-only 发布、NOFOLLOW 打开与精确校验，并通过可注入写入步骤在部分写入与 `force` 失败处注入故障，断言失败后根目录无临时文件残留。
+- Realtime：[`postgresql` 测试目录](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/postgresql/) 的 [`RealtimeNotificationCodecTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/postgresql/RealtimeNotificationCodecTest.java)、[`PostgresqlRealtimeEventSinkTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/postgresql/PostgresqlRealtimeEventSinkTest.java)、[`PostgresqlRealtimeEventSinkIntegrationTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/postgresql/PostgresqlRealtimeEventSinkIntegrationTest.java)、[`PostgresqlRealtimeEventSourceTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/postgresql/PostgresqlRealtimeEventSourceTest.java)、[`PostgresqlRealtimeEventSourceConcurrencyTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/postgresql/PostgresqlRealtimeEventSourceConcurrencyTest.java) 覆盖规范编解码、超限降级、分块上界与 `Array` 释放、批量保序与回滚不产生通知、Source 围栏控制。
 - 架构守卫：[`InfraModuleArchitectureTest.java`](../../harness/infra/src/test/java/fun/fengwk/kkstudio/harness/infra/InfraModuleArchitectureTest.java) 守卫生产依赖范围与包结构。
 
 ---

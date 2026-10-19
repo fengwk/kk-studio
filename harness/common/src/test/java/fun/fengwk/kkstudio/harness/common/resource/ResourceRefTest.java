@@ -78,19 +78,14 @@ class ResourceRefTest {
                 "text/plain", null, 3L, sha256("a/b".getBytes(StandardCharsets.UTF_8))));
   }
 
-  /** 验证合法 file, s3, http/https URI 接受，且 digest 按 scheme 约束可选或必选。 */
+  /** 验证合法 http/https URI 接受且 digest 可选；节点本地 file 与裸 s3 引用不再是合法资源。 */
   @Test
-  void acceptsFileS3HttpUrisAndOptionalDigest() {
-    assertDoesNotThrow(
-        () -> new ResourceRef("file:///a/b.txt", "text/plain", null, 3L, sha256("abc")));
-    assertDoesNotThrow(
-        () ->
-            new ResourceRef(
-                "s3://my-bucket.example.com/dir/file.txt",
-                "application/octet-stream",
-                "file.txt",
-                3L,
-                sha256("abc")));
+  void acceptsHttpUrisWithOptionalDigestAndRejectsFileAndS3() {
+    for (String uri : List.of("file:///a/b.txt", "s3://my-bucket/dir/file.txt")) {
+      assertThrows(
+          IllegalArgumentException.class,
+          () -> new ResourceRef(uri, "text/plain", null, 3L, sha256("abc")));
+    }
     // http/https 不要求 size/sha。
     ResourceRef http = new ResourceRef("https://example.com/a/b", "text/plain", null, null, null);
     assertNull(http.size());
@@ -118,9 +113,9 @@ class ResourceRefTest {
     for (String uri :
         List.of(
             "http://example.com/a\u0000b",
-            "file:///a\tb",
+            "data:text/plain,a\tb",
             "https://x/a\nb",
-            "s3://b/a\\b",
+            "https://b/a\\b",
             "http://example.com/a\u007fb")) {
       assertThrows(
           IllegalArgumentException.class,
@@ -247,75 +242,6 @@ class ResourceRefTest {
     assertThrows(IllegalArgumentException.class, () -> ResourceRef.utf8LengthUpTo("x", "v", -1));
   }
 
-  /** 验证 file URI 规范与段约束。 */
-  @Test
-  void rejectsFileUriViolations() {
-    for (String uri :
-        List.of(
-            "file:/a", // 无 authority，必须 file:///。
-            "file://localhost/a", // 非空 authority。
-            "file:///a?query=1", // query。
-            "file:///a#frag", // fragment。
-            "file:////a", // 双前导斜杠。
-            "file:///", // 空路径。
-            "file:///a/../b", // dot segment。
-            "file:///a/./b", // dot segment。
-            "file:///a//b", // 空 segment。
-            "file:///a/", // 空 segment。
-            "file:///a%20b", // file path 禁止 percent encoding，adapter 不得二次解释。
-            "file:///a%FFb", // 同时拒绝非法 UTF-8 字节序列。
-            "file:///a b", // 非保守 ASCII。
-            "file:///a|b")) { // 非法 URI 字符。
-      assertThrows(
-          IllegalArgumentException.class,
-          () -> new ResourceRef(uri, "text/plain", null, 3L, sha256("abc")));
-    }
-    // file/s3 必须携带 size+sha；http 不需要。
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ResourceRef("file:///a", "text/plain", null, null, sha256("abc")));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ResourceRef("file:///a", "text/plain", null, 3L, null));
-  }
-
-  /** 验证 s3 URI 的 bucket 与 key 命名规则。 */
-  @Test
-  void rejectsS3UriViolations() {
-    for (String uri :
-        List.of(
-            "s3://Bucket/key", // 大写 bucket。
-            "s3:///key", // 空 bucket。
-            "s3://ab/key", // bucket 过短。
-            "s3://.bucket/key", // 点开头。
-            "s3://bucket./key", // 点结尾。
-            "s3://a..b/key", // 连续点。
-            "s3://a-.b/key", // label 以 '-' 结尾。
-            "s3://a.-b/key", // label 以 '-' 开头。
-            "s3://192.168.5.4/key", // 形如 IP。
-            "s3://u@bucket/key", // userinfo。
-            "s3://bucket:9000/key", // port。
-            "s3://bucket/key?x=1", // query。
-            "s3://bucket/key#f", // fragment。
-            "s3://bucket", // 无 key path。
-            "s3://bucket/", // 空 key。
-            "s3://bucket/.", // dot segment。
-            "s3://bucket/..", // dot segment。
-            "s3://bucket/a/../b", // dot segment。
-            "s3://bucket/a/./b", // dot segment。
-            "s3://bucket/a//b", // 空 segment。
-            "s3://bucket/a%20b", // 百分号编码。
-            "s3://bucket/a b", // 非保守 ASCII。
-            "s3://b%C3%BCcket/key")) { // 编码 host。
-      assertThrows(
-          IllegalArgumentException.class,
-          () -> new ResourceRef(uri, "text/plain", null, 3L, sha256("abc")));
-    }
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ResourceRef("s3://bucket/key", "text/plain", null, null, sha256("abc")));
-  }
-
   /** 验证 http/https URI 端口与 host 约束。 */
   @Test
   void rejectsHttpUriViolations() {
@@ -424,7 +350,7 @@ class ResourceRefTest {
     assertEquals(uploadId, ref.blobUploadId());
     assertEquals(uploadId, ResourceRef.blobUploadId("blob-upload:" + uploadId));
     // 非 blob-upload scheme 一律不识别为上传引用。
-    assertNull(ResourceRef.blobUploadId("file:///export/abc"));
+    assertNull(ResourceRef.blobUploadId("https://example.com/abc"));
     assertNull(ResourceRef.blobUploadId(null));
   }
 
@@ -476,7 +402,7 @@ class ResourceRefTest {
     assertEquals(blobId, ResourceRef.sessionBlobId("kkstudio:/resources/" + blobId));
     // kkstudio 引用不是上传引用，两者不互相混淆。
     assertNull(ref.blobUploadId());
-    assertNull(ResourceRef.sessionBlobId("file:///export/abc"));
+    assertNull(ResourceRef.sessionBlobId("https://example.com/abc"));
     assertNull(ResourceRef.sessionBlobId(null));
   }
 

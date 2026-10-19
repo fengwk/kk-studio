@@ -6,10 +6,7 @@ import type {
   TurnUsage,
   UsageCost,
 } from '@/features/ai/runtime/thread-timeline-types'
-import { apiBaseUrl } from '@/shared/api/client'
 
-const MANAGED_RESOURCE_URI_PATTERN = /^(file:|s3:)/i
-const SHA256_PATTERN = /^[0-9a-f]{64}$/
 
 export function contentText(content: Record<string, unknown>): string {
   const type = getString(content.type)
@@ -159,34 +156,8 @@ export function toResourceAttachment(content: Record<string, unknown>): ToolAtta
       preview: getString(content.preview) || undefined,
       size,
       sha256,
-      downloadHref: managedResourceHref(uri, mediaType, name, size, sha256),
     },
   ]
-}
-
-function managedResourceHref(
-  uri: string,
-  mediaType: string,
-  name: string,
-  size: number | null,
-  sha256: string | null,
-): string | undefined {
-  if (
-    !MANAGED_RESOURCE_URI_PATTERN.test(uri)
-    || size == null
-    || !SHA256_PATTERN.test(sha256 ?? '')
-    || !mediaType.trim()
-  ) {
-    return undefined
-  }
-  const query = new URLSearchParams({
-    mediaType,
-    size: String(size),
-  })
-  if (name.trim()) {
-    query.set('name', name)
-  }
-  return `${apiBaseUrl}/harness/resources/${sha256}?${query}`
 }
 
 export function resourceAttachmentType(mediaType: string): ToolAttachmentType {

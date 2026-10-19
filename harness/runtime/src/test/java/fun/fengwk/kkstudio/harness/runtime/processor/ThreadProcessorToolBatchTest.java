@@ -303,7 +303,7 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
             List.of(ToolInvocationStatus.READY));
     ResourceRef resource =
         new ResourceRef(
-            "file:///report.txt",
+            "blob-upload:00000000-0000-4000-8000-000000000001",
             "text/plain",
             "report.txt",
             3L,
@@ -331,7 +331,7 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
     assertEquals(
         "[Resource result available as metadata only: report.txt (text/plain)]\ncomplete preview",
         text);
-    assertFalse(text.contains("file:///report.txt"));
+    assertFalse(text.contains("blob-upload:00000000-0000-4000-8000-000000000001"));
     assertInstanceOf(TurnEndPayload.class, entries.get(5).payload());
     assertTrue(toolsByAssistant(fixture.store, chain.assistantEntryId()).isEmpty());
     assertNull(

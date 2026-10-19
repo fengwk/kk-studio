@@ -9,7 +9,6 @@ import fun.fengwk.kkstudio.harness.common.result.ResultContent;
 import fun.fengwk.kkstudio.harness.common.result.TextArtifactMetadata;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolResultSizeLimits;
-import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
@@ -43,8 +42,8 @@ import java.util.regex.Pattern;
  *   <li>任一阈值超出时，将完整 projection 存为一个 managed Resource，删除所有原 Text/Json 内容， 并在第一个原文本位置插入携带小 raw
  *       preview（&le; 2 KiB 且 &le; 20 行）和 {@link TextArtifactMetadata} 的 {@link
  *       ResourceResultContent}，其余非文本 Resource 顺序保持不变；
- *   <li>所有 {@link BinaryResultContent} 外部化为 managed Resource；已有 Resource 必须由同一 ResourceStore
- *       管理并通过完整性读取复核后才透传；文本工件的 preview 只从受信 bytes 重新计算；
+ *   <li>所有 {@link BinaryResultContent} 外部化为 managed Resource；已有 Resource 只接受已上传的 {@code
+ *       blob-upload} 或已授权的 Session 引用并原样透传，其余 scheme 一律拒绝；文本工件的 preview 只从受信 bytes 重新计算；
  *   <li>All-or-nothing plan：第一个 put 之前完成所有确定性校验、全文有界测量、硬上限（默认 16 MiB，超限报 {@code
  *       OUTPUT_TOO_LARGE}）、元数据规划与投影 canonical JSON 尺寸（&le; 1 MiB）验证；
  *   <li>存储失败或契约违反收敛为 {@code UNKNOWN / RESOURCE_STORE_FAILED}。
@@ -98,13 +97,10 @@ public final class ToolResultFinalizer {
   private static final Pattern CANONICAL_MEDIA_TYPE =
       Pattern.compile("[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+-]+");
 
-  private final ResourceStore resourceStore;
   private final ToolResourceStager resourceStager;
   private final int resourceMaxBytes;
 
-  public ToolResultFinalizer(
-      ResourceStore resourceStore, ToolResourceStager resourceStager, int resourceMaxBytes) {
-    this.resourceStore = Objects.requireNonNull(resourceStore, "resourceStore");
+  public ToolResultFinalizer(ToolResourceStager resourceStager, int resourceMaxBytes) {
     this.resourceStager = Objects.requireNonNull(resourceStager, "resourceStager");
     if (resourceMaxBytes <= 0) {
       throw new IllegalArgumentException("resourceMaxBytes must be positive");
@@ -130,8 +126,6 @@ public final class ToolResultFinalizer {
       return Outcome.outputTooLarge(tooLarge.getMessage());
     } catch (IllegalArgumentException invalid) {
       return Outcome.invalid(invalid.getMessage());
-    } catch (ResourceStoreException storeFailure) {
-      return Outcome.storeFailed();
     }
 
     List<ResultContent> finalContents = new ArrayList<>(plan.items().size());
@@ -217,14 +211,17 @@ public final class ToolResultFinalizer {
               "resource at index " + index + " must declare size and sha256");
         }
         if (ref.sessionBlobId() != null) {
-          // 已授权的 Session Blob durable 引用：字节已在全局对象存储且已按 Session 引用鉴权，本阶段只做形状校验并原样透传，
-          // 绝不读取宿主 ResourceStore、绝不重新 staging 或上传。
+          // 已授权的 Session Blob durable 引用：字节已在全局对象存储且已按 Session 引用鉴权，本阶段只做形状校验并原样透传。
           if (res.textMetadata() != null) {
             throw new IllegalArgumentException(
                 "session resource at index " + index + " must not declare text metadata");
           }
           resourcePieces.add(new ResourcePiece(index, res));
           continue;
+        }
+        if (ref.blobUploadId() == null) {
+          throw new IllegalArgumentException(
+              "resource at index " + index + " must be a staged upload or a session resource");
         }
         if (ref.size() > resourceMaxBytes) {
           throw new OutputTooLargeException(
@@ -234,36 +231,12 @@ public final class ToolResultFinalizer {
                   + resourceMaxBytes
                   + " bytes of stored resource content");
         }
-        if (ref.blobUploadId() != null) {
-          // 已由 Daemon 直传对象存储的上传引用：本阶段只做形状校验并原样透传，绝不读取或写入宿主 ResourceStore。
-          if (res.textMetadata() != null) {
-            throw new IllegalArgumentException(
-                "canonical upload resource at index " + index + " must not declare text metadata");
-          }
-          resourcePieces.add(new ResourcePiece(index, res));
-          continue;
-        }
-        byte[] bytes = readManagedResource(ref, index);
-        if (bytes.length != ref.size() || !ref.sha256().equals(sha256(bytes))) {
-          throw new ResourceStoreException();
-        }
-        String stagedName =
-            ref.name() == null ? resourceName(toolName, index + 1, null) : ref.name();
+        // 已由 Daemon 或插件直传对象存储的上传引用：本阶段只做形状校验并原样透传。
         if (res.textMetadata() != null) {
-          TextArtifact textArtifact =
-              validateTextArtifact(bytes, res.textMetadata(), "resource content at index " + index);
-          ResourceRef planned =
-              stagedReference(ref.mediaType(), stagedName, ref.size(), ref.sha256());
-          ResourceResultContent validated =
-              new ResourceResultContent(planned, textArtifact.preview(), textArtifact.metadata());
-          resourcePieces.add(new ResourcePiece(index, validated, bytes));
-        } else {
-          ResourceRef planned =
-              stagedReference(ref.mediaType(), stagedName, ref.size(), ref.sha256());
-          resourcePieces.add(
-              new ResourcePiece(
-                  index, new ResourceResultContent(planned, res.preview(), null), bytes));
+          throw new IllegalArgumentException(
+              "canonical upload resource at index " + index + " must not declare text metadata");
         }
+        resourcePieces.add(new ResourcePiece(index, res));
       } else {
         throw new IllegalArgumentException(
             "unsupported tool content: " + content.getClass().getSimpleName());
@@ -365,16 +338,7 @@ public final class ToolResultFinalizer {
       ResourcePiece rp =
           resourcePieces.stream().filter(r -> r.index() == currentIndex).findFirst().orElse(null);
       if (rp != null) {
-        if (rp.bytes() == null) {
-          items.add(new PlanItem.PassThrough(rp.content()));
-        } else {
-          items.add(
-              new PlanItem.StoreToResource(
-                  rp.content().resource(),
-                  rp.content().preview(),
-                  rp.content().textMetadata(),
-                  rp.bytes()));
-        }
+        items.add(new PlanItem.PassThrough(rp.content()));
         projected.add(rp.content());
       }
     }
@@ -504,23 +468,6 @@ public final class ToolResultFinalizer {
         extractRawPreview(text), new TextArtifactMetadata(bytes.length, totalLines));
   }
 
-  private byte[] readManagedResource(ResourceRef ref, int index) {
-    try {
-      byte[] bytes = resourceStore.read(ref);
-      if (bytes == null) {
-        throw new ResourceStoreException();
-      }
-      return bytes;
-    } catch (IllegalArgumentException invalid) {
-      throw new IllegalArgumentException(
-          "resource at index " + index + " is not managed by the platform resource store");
-    } catch (ResourceStoreException failure) {
-      throw failure;
-    } catch (RuntimeException failure) {
-      throw new ResourceStoreException();
-    }
-  }
-
   private static String decodeStrictUtf8(byte[] bytes, String context) {
     CharsetDecoder decoder =
         StandardCharsets.UTF_8
@@ -545,14 +492,10 @@ public final class ToolResultFinalizer {
     return toolName + "-result-" + callIndex + (extension == null ? "" : "." + extension);
   }
 
-  private static ResourceRef stagedReference(
+  private static ResourceRef plannedReference(
       String mediaType, String name, Long size, String sha256) {
     return new ResourceRef(
         ResourceRef.blobUploadUri(new UUID(0L, 0L)), mediaType, name, size, sha256);
-  }
-
-  private ResourceRef plannedReference(String mediaType, String name, Long size, String sha256) {
-    return stagedReference(mediaType, name, size, sha256);
   }
 
   private static boolean sameContentFacts(
@@ -654,11 +597,7 @@ public final class ToolResultFinalizer {
   private record BinaryPiece(
       int index, ResourceRef planned, byte[] content, TextArtifact textArtifact) {}
 
-  private record ResourcePiece(int index, ResourceResultContent content, byte[] bytes) {
-    private ResourcePiece(int index, ResourceResultContent content) {
-      this(index, content, null);
-    }
-  }
+  private record ResourcePiece(int index, ResourceResultContent content) {}
 
   private record TextArtifact(String preview, TextArtifactMetadata metadata) {}
 
@@ -678,6 +617,4 @@ public final class ToolResultFinalizer {
       super(message);
     }
   }
-
-  private static final class ResourceStoreException extends RuntimeException {}
 }

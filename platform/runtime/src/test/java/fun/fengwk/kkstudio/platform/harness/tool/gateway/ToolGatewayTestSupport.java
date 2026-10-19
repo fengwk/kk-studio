@@ -45,7 +45,6 @@ import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettings;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsProvider;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolSuccess;
-import fun.fengwk.kkstudio.harness.runtime.resource.ResourceStore;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
@@ -55,7 +54,6 @@ import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.catalog.tool.TestRuntimeToolCatalogSource;
-import fun.fengwk.kkstudio.platform.harness.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.platform.harness.contributor.ContributorBranchViewLoader;
 import fun.fengwk.kkstudio.platform.testing.TestEnvironments;
 
@@ -87,7 +85,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
 /**
- * {@link ToolExecutionGateway} 测试共享基座：可编程 Tool / Transport / ResourceStore / Listener 与请求 fixture。
+ * {@link ToolExecutionGateway} 测试共享基座：可编程 Tool / Transport / ResourceStager / Listener 与请求 fixture。
  */
 final class ToolGatewayTestSupport {
 
@@ -98,7 +96,7 @@ final class ToolGatewayTestSupport {
   static final UUID ASSISTANT_ENTRY_ID = new UUID(0L, 11L);
   static final int PROPOSED_ATTEMPT = 3;
 
-  /** 测试默认的 ResourceStore 单对象上限（与生产默认一致）。 */
+  /** 测试默认的工具资源单对象上限（与生产默认一致）。 */
   static final int RESOURCE_MAX_BYTES = 16 * 1024 * 1024;
 
   /** 测试默认的空 BranchView。 */
@@ -244,7 +242,7 @@ final class ToolGatewayTestSupport {
   static ToolExecutionGateway gateway(
       HarnessCatalog catalog,
       FakeTransport transport,
-      FakeResourceStore store,
+      FakeResourceStager store,
       ExecutorService executor) {
     return gateway(
         catalog, transport, store, executor, RESOURCE_MAX_BYTES, settings(PermissionAction.ALLOW));
@@ -253,7 +251,7 @@ final class ToolGatewayTestSupport {
   static ToolExecutionGateway gateway(
       HarnessCatalog catalog,
       FakeTransport transport,
-      FakeResourceStore store,
+      FakeResourceStager store,
       ExecutorService executor,
       int resourceMaxBytes) {
     return gateway(
@@ -263,7 +261,7 @@ final class ToolGatewayTestSupport {
   static ToolExecutionGateway gateway(
       HarnessCatalog catalog,
       FakeTransport transport,
-      FakeResourceStore store,
+      FakeResourceStager store,
       ExecutorService executor,
       ToolSettings settings) {
     return gateway(catalog, transport, store, executor, RESOURCE_MAX_BYTES, settings);
@@ -272,7 +270,7 @@ final class ToolGatewayTestSupport {
   static ToolExecutionGateway gateway(
       HarnessCatalog catalog,
       FakeTransport transport,
-      FakeResourceStore store,
+      FakeResourceStager store,
       ExecutorService executor,
       int resourceMaxBytes,
       ToolSettings settings) {
@@ -289,7 +287,7 @@ final class ToolGatewayTestSupport {
   static ToolExecutionGateway gateway(
       HarnessCatalog catalog,
       FakeTransport transport,
-      FakeResourceStore store,
+      FakeResourceStager store,
       ExecutorService executor,
       int resourceMaxBytes,
       ToolSettings settings,
@@ -307,7 +305,7 @@ final class ToolGatewayTestSupport {
   static ToolExecutionGateway gateway(
       RuntimeToolCatalogSource toolCatalogSource,
       FakeTransport transport,
-      FakeResourceStore store,
+      FakeResourceStager store,
       ExecutorService executor,
       int resourceMaxBytes,
       ToolSettings settings,
@@ -319,34 +317,11 @@ final class ToolGatewayTestSupport {
         new PermissionEvaluator(new BashSurfaceAnalyzer()),
         new FixedToolSettingsProvider(settings),
         store,
-        store,
         resourceMaxBytes,
         executor,
         OVERLOAD_RETRY_DELAY,
         TEST_CLOCK,
         admission);
-  }
-
-  static ToolExecutionGateway gateway(
-      HarnessCatalog catalog,
-      FakeTransport transport,
-      FakeResourceStore store,
-      HarnessRuntimeProperties properties,
-      ExecutorService executor,
-      ToolSettings settings) {
-    return new ToolExecutionGateway(
-        TestRuntimeToolCatalogSource.of(catalog),
-        DEFAULT_CONTRIBUTOR_BRANCH_LOADER,
-        transport,
-        new PermissionEvaluator(new BashSurfaceAnalyzer()),
-        new FixedToolSettingsProvider(settings),
-        store,
-        store,
-        RESOURCE_MAX_BYTES,
-        executor,
-        OVERLOAD_RETRY_DELAY,
-        TEST_CLOCK,
-        new ConcurrencyAdmission(Integer.MAX_VALUE));
   }
 
   static ToolSettings settings(PermissionAction action) {
@@ -547,12 +522,10 @@ final class ToolGatewayTestSupport {
     }
   }
 
-  /** 内存 ResourceStore：记录 put 参数，可按需抛确定性 / IO 失败；reference 与 put 返回同一规范引用。 */
-  static final class FakeResourceStore implements ResourceStore, ToolResourceStager {
+  /** 记录全部 staging 内容的 {@link ToolResourceStager} 假件；可注入失败或返回不一致的引用。 */
+  static final class FakeResourceStager implements ToolResourceStager {
     final List<PutRecord> puts = new CopyOnWriteArrayList<>();
-    final List<PutRecord> resources = new CopyOnWriteArrayList<>();
     final List<ResourceRef> discarded = new CopyOnWriteArrayList<>();
-    volatile RuntimeException referenceFailure;
     volatile RuntimeException putFailure;
     volatile boolean mismatchReturnedRef;
 
@@ -560,60 +533,23 @@ final class ToolGatewayTestSupport {
 
     @Override
     public ResourceRef stage(String mediaType, String name, byte[] content) {
-      ResourceRef stored = put(mediaType, name, content);
-      return new ResourceRef(
-          ResourceRef.blobUploadUri(UUID.randomUUID()),
-          stored.mediaType(),
-          stored.name(),
-          mismatchReturnedRef ? stored.size() + 1 : stored.size(),
-          stored.sha256());
-    }
-
-    @Override
-    public void discard(ResourceRef resource) {
-      discarded.add(resource);
-    }
-
-    @Override
-    public ResourceRef put(String mediaType, String name, byte[] content) {
       RuntimeException failure = putFailure;
       if (failure != null) {
         throw failure;
       }
       byte[] payload = content.clone();
-      String sha = sha256(payload);
-      PutRecord stored = new PutRecord(mediaType, name, payload);
-      puts.add(stored);
-      resources.add(stored);
-      ResourceRef planned = reference(mediaType, name, payload.length, sha);
-      return planned;
+      puts.add(new PutRecord(mediaType, name, payload));
+      return new ResourceRef(
+          ResourceRef.blobUploadUri(UUID.randomUUID()),
+          mediaType,
+          name,
+          mismatchReturnedRef ? payload.length + 1L : payload.length,
+          sha256(payload));
     }
 
     @Override
-    public ResourceRef reference(String mediaType, String name, long size, String sha256) {
-      RuntimeException failure = referenceFailure;
-      if (failure != null) {
-        throw failure;
-      }
-      return new ResourceRef("file:///resources/" + sha256, mediaType, name, size, sha256);
-    }
-
-    @Override
-    public byte[] read(ResourceRef resource) {
-      byte[] payload = null;
-      for (PutRecord put : resources) {
-        if (put.content().length == resource.size()
-            && sha256(put.content()).equals(resource.sha256())) {
-          payload = put.content();
-        }
-      }
-      return payload == null ? null : payload.clone();
-    }
-
-    ResourceRef seed(String mediaType, String name, byte[] content) {
-      byte[] payload = content.clone();
-      resources.add(new PutRecord(mediaType, name, payload));
-      return reference(mediaType, name, payload.length, sha256(payload));
+    public void discard(ResourceRef resource) {
+      discarded.add(resource);
     }
   }
 
@@ -637,7 +573,7 @@ final class ToolGatewayTestSupport {
     volatile boolean throwOnFailed;
     volatile boolean throwOnCancelled;
     volatile boolean throwOnUnknown;
-    FakeResourceStore store;
+    FakeResourceStager store;
 
     sealed interface Event
         permits Event.Partial, Event.Succeeded, Event.Failed, Event.Cancelled, Event.Unknown {

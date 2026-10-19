@@ -7,11 +7,11 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * terminal ToolResult 的 durable history 物化端口：在 Tool outcome Entry 插入前、同一 store 事务内调用，把 Platform
- * ResourceStore 拥有的瞬时 Resource 外部化为全局 Blob 存储引用并返回 durable 内容列表。
+ * terminal ToolResult 的 durable history 物化端口：在 Tool outcome Entry 插入前、同一 store 事务内调用，把已上传的瞬时 {@code
+ * blob-upload} 引用转为 Session 持有的全局 Blob 引用并返回 durable 内容列表。
  *
- * <p>实现只能通过受控 ResourceStore 读取其拥有的引用，不得自行解析或访问任意 data/file/http/https/s3 URI。任何一步失败都让调用方事务回滚，
- * 绝不写入部分 history；持久化 message 只能携带 durable {@code ResourceMessageContent}。
+ * <p>实现不得自行解析或访问任意 data/http/https URI。任何一步失败都让调用方事务回滚，绝不写入部分 history；持久化 message 只能携带 durable
+ * {@code ResourceMessageContent}。
  */
 public interface ToolResultHistoryMaterializer {
 
@@ -23,7 +23,7 @@ public interface ToolResultHistoryMaterializer {
    * @param toolName 工具名称
    * @param result 终态工具结果
    * @return 非空列表（调用方在为空时回退为空文本，与无物化路径一致）
-   * @throws IllegalArgumentException 引用不受 ResourceStore 管理、完整性校验失败或内容不可外部化
+   * @throws IllegalArgumentException 引用不是已上传的 Blob、完整性校验失败或内容不可外部化
    */
   List<AgentMessageContent> materialize(UUID sessionId, String toolName, ToolResult result);
 }

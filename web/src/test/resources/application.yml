@@ -32,4 +32,3 @@ kk-studio:
   harness:
     runtime:
       workers-enabled: false
-      resource-root: target/harness-resources

@@ -309,7 +309,6 @@ terminalEntryId / finalAnswerEntryId / deliveryCommandSequence / createdAt / upd
 | [`ToolGateway`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/ToolGateway.java) | `preflight` 返回 `Allow` / `Ask` / `Deny`，`start` 返回 `Started` / `RetryLater` / `Rejected` / `Indeterminate` |
 | [`ToolResultHistoryMaterializer`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/ToolResultHistoryMaterializer.java) | 在 Tool outcome Entry 插入前、同一事务内把瞬时 Resource 外部化为 durable 内容；缺失时资源结果降级为 metadata-only 文本 |
 | [`RealtimeEventSink`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/RealtimeEventSink.java) | 有损 `MODEL_DELTA` / `TOOL_PARTIAL` 投影写入，`append` 与 `appendAll` 同为 best-effort，失败不回滚 checkpoint 或终态 |
-| [`ResourceStore`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/resource/ResourceStore.java) | 内容寻址二进制对象存取；不是运行时正确性的一部分 |
 
 `ModelProcessor` / `ToolProcessor` 在各自的 lease 所有权短事务内（锁 `Work` 行并通过所有权围栏）直接持久 `READY -> DISPATCHING`，`Provider` / `Tool Gateway` 调用在提交之后，因此不会持锁等待外部 HTTP。Runtime 不反查 owner、Issue 归属或阶段等产品门禁：在途、等待态、终态与 THREAD claim 都只收敛或物化 durable 事实，恢复与收敛不因产品暂停而被阻断；需要终止在途执行时由业务显式调用 Stop。
 
@@ -349,7 +348,6 @@ terminalEntryId / finalAnswerEntryId / deliveryCommandSequence / createdAt / upd
 | `runtime.port` | `TurnResolver`、`ModelGateway`、`ToolGateway`、`ToolResultHistoryMaterializer`、`ToolHistoryActionResolver`、`ToolSuccess`、`RealtimeEventSink` | 窄端口，不泄漏 Spring、JDBC、HTTP 类型 |
 | `runtime.processor` | `ThreadProcessor`、`ModelProcessor`、`ToolProcessor`、`ModelExecution`、`ToolExecution`、`WorkHeartbeat`、`ClaimAdmissionGuard` 与各 ProcessorConfig | Target 级单动作归约、两阶段激活、租约心跳；所有写入走短事务与所有权围栏 |
 | `runtime.realtime` | `RealtimeEvent`、`RealtimeEventType` 与 JSON 编解码；Tool partial 携带重投递复用的 canonical eventId | 有损 live overlay，恢复与审计以 durable Snapshot/Entry 为准 |
-| `runtime.resource` | `ResourceStore` 内容寻址资源存取端口 | 基础设施能力，不参与 Agent Loop 正确性判定 |
 | `runtime.retry` | `InvocationRetryPolicy`、`InvocationRetryPolicyProvider`、`ModelHttpErrorPolicy`、`ModelHttpErrorPolicyProvider`、退避策略 | 只计算重试可行性与延迟，不读时钟、不写状态 |
 | `runtime.session` | `Session` 实体、不可变消息内容块（Text、Image、Audio、Video、Resource、Thinking、ToolCall 等）与 `AssistantMessageMetadata`（`stopReason` / `usage` / 可选 `decodeDurationMillis`，不含费用） | 与 `harness_session` 对齐；Entry 节点与 payload 在 `runtime.history` |
 | `runtime.store` | `HarnessStore` 根与 `HarnessStore.Transaction` 原语、`HarnessStoreTime`、`UuidOrder` | 领域模型与物理持久化的唯一边界，守卫锁序与毫秒精度 |

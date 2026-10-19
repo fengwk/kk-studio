@@ -45,11 +45,11 @@ describe('toResourceAttachment', () => {
     ])
   })
 
-  it('projects a complete managed resource identity into a same-origin download href', () => {
+  it('projects a transient resource reference with its content identity', () => {
     expect(
       toResourceAttachment({
         type: 'resource',
-        uri: 'file:///tmp/result.json',
+        uri: 'https://example.test/result.json',
         mediaType: 'application/json',
         name: 'result.json',
         size: 12,
@@ -60,36 +60,12 @@ describe('toResourceAttachment', () => {
         type: 'file',
         name: 'result.json',
         mime: 'application/json',
-        data: 'file:///tmp/result.json',
+        data: 'https://example.test/result.json',
         preview: undefined,
         size: 12,
         sha256: 'a'.repeat(64),
-        downloadHref:
-          `/api/harness/resources/${'a'.repeat(64)}`
-          + '?mediaType=application%2Fjson&size=12&name=result.json',
       },
     ])
-  })
-
-  it('does not invent a download href for incomplete or direct resources', () => {
-    expect(
-      toResourceAttachment({
-        type: 'resource',
-        uri: 's3://bucket/blob',
-        mediaType: 'application/octet-stream',
-        size: -1,
-        sha256: 'bad',
-      })[0]?.downloadHref,
-    ).toBeUndefined()
-    expect(
-      toResourceAttachment({
-        type: 'resource',
-        uri: 'https://example.test/blob',
-        mediaType: 'application/octet-stream',
-        size: 4,
-        sha256: 'b'.repeat(64),
-      })[0]?.downloadHref,
-    ).toBeUndefined()
   })
 
   it('rejects malformed durable and transient resource shapes', () => {
@@ -101,44 +77,8 @@ describe('toResourceAttachment', () => {
       }),
     ).toEqual([])
     expect(toResourceAttachment({ type: 'RESOURCE', name: 'missing-blob' })).toEqual([])
-    expect(toResourceAttachment({ type: 'unknown', uri: 'file:///tmp/x' })).toEqual([])
+    expect(toResourceAttachment({ type: 'unknown', uri: 'https://example.test/x' })).toEqual([])
     expect(toResourceAttachment({ type: 'resource', uri: '' })).toEqual([])
-  })
-
-  it('omits the managed-resource name query when a transient resource has no name', () => {
-    expect(
-      toResourceAttachment({
-        type: 'resource',
-        uri: 'file:///tmp/result.bin',
-        mediaType: 'application/octet-stream',
-        size: 3,
-        sha256: 'c'.repeat(64),
-      })[0]?.downloadHref,
-    ).toBe(
-      `/api/harness/resources/${'c'.repeat(64)}`
-      + '?mediaType=application%2Foctet-stream&size=3',
-    )
-  })
-
-  it('requires canonical hash and media type for managed transient resources', () => {
-    expect(
-      toResourceAttachment({
-        type: 'resource',
-        uri: 'file:///tmp/result.bin',
-        mediaType: 'application/octet-stream',
-        size: 3,
-        sha256: 'bad',
-      })[0]?.downloadHref,
-    ).toBeUndefined()
-    expect(
-      toResourceAttachment({
-        type: 'resource',
-        uri: 's3://bucket/result.bin',
-        mediaType: '',
-        size: 3,
-        sha256: 'd'.repeat(64),
-      })[0]?.downloadHref,
-    ).toBeUndefined()
   })
 })
 

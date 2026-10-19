@@ -49,7 +49,8 @@ class ToolExecutionGatewayStartTest {
   void hostRouteExecutesWithExactRequestAndContext() {
     ToolGatewayTestSupport.FakeTool tool = new ToolGatewayTestSupport.FakeTool(DESCRIPTOR);
     ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
-    ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
+    ToolGatewayTestSupport.FakeResourceStager store =
+        new ToolGatewayTestSupport.FakeResourceStager();
     ToolInvocationRequest request = ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR);
     ExecutorService executor = Executors.newSingleThreadExecutor();
     try {
@@ -79,7 +80,8 @@ class ToolExecutionGatewayStartTest {
   @Test
   void environmentRouteUsesFrozenEnvironmentIdOnlyAndSameDisplayNamesAreIrrelevant() {
     ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
-    ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
+    ToolGatewayTestSupport.FakeResourceStager store =
+        new ToolGatewayTestSupport.FakeResourceStager();
     ExecutorService executor = Executors.newSingleThreadExecutor();
     try {
       ToolExecutionGateway gateway =
@@ -130,7 +132,8 @@ class ToolExecutionGatewayStartTest {
   @Test
   void environmentRouteResolvesExplicitTimeoutOverridingDefault() {
     ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
-    ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
+    ToolGatewayTestSupport.FakeResourceStager store =
+        new ToolGatewayTestSupport.FakeResourceStager();
     ExecutorService executor = Executors.newSingleThreadExecutor();
     try {
       ToolExecutionGateway gateway =
@@ -191,7 +194,7 @@ class ToolExecutionGatewayStartTest {
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
-            new ToolGatewayTestSupport.FakeResourceStore(),
+            new ToolGatewayTestSupport.FakeResourceStager(),
             executor);
 
     ToolGateway.StartResult started =
@@ -222,7 +225,7 @@ class ToolExecutionGatewayStartTest {
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(),
             transport,
-            new ToolGatewayTestSupport.FakeResourceStore(),
+            new ToolGatewayTestSupport.FakeResourceStager(),
             executor);
     // 构造期已用探针任务校验过 executor，这里只比较拒绝前后的队列长度。
     int queuedBefore = executor.queued.size();
@@ -253,7 +256,7 @@ class ToolExecutionGatewayStartTest {
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(),
             new ToolGatewayTestSupport.FakeTransport(),
-            new ToolGatewayTestSupport.FakeResourceStore(),
+            new ToolGatewayTestSupport.FakeResourceStager(),
             new ToolGatewayTestSupport.DirectQueueExecutor());
     ToolGateway.StartResult result =
         gateway.start(
@@ -278,7 +281,7 @@ class ToolExecutionGatewayStartTest {
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(new ToolGatewayTestSupport.FakeTool(DESCRIPTOR)),
             new ToolGatewayTestSupport.FakeTransport(),
-            new ToolGatewayTestSupport.FakeResourceStore(),
+            new ToolGatewayTestSupport.FakeResourceStager(),
             new ToolGatewayTestSupport.DirectQueueExecutor());
     ToolGateway.StartResult result =
         gateway.start(
@@ -313,7 +316,7 @@ class ToolExecutionGatewayStartTest {
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(),
             new ToolGatewayTestSupport.FakeTransport(),
-            new ToolGatewayTestSupport.FakeResourceStore(),
+            new ToolGatewayTestSupport.FakeResourceStager(),
             new ToolGatewayTestSupport.DirectQueueExecutor());
     ToolGateway.StartResult result =
         gateway.start(
@@ -355,7 +358,7 @@ class ToolExecutionGatewayStartTest {
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(),
             new ToolGatewayTestSupport.FakeTransport(),
-            new ToolGatewayTestSupport.FakeResourceStore(),
+            new ToolGatewayTestSupport.FakeResourceStager(),
             new ToolGatewayTestSupport.DirectQueueExecutor());
     ToolGateway.StartResult result =
         gateway.start(
@@ -385,7 +388,7 @@ class ToolExecutionGatewayStartTest {
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
-            new ToolGatewayTestSupport.FakeResourceStore(),
+            new ToolGatewayTestSupport.FakeResourceStager(),
             new ToolGatewayTestSupport.DirectQueueExecutor());
 
     liveDescriptor.set(hostDriftedDescriptor("2"));
@@ -414,7 +417,7 @@ class ToolExecutionGatewayStartTest {
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
-            new ToolGatewayTestSupport.FakeResourceStore(),
+            new ToolGatewayTestSupport.FakeResourceStager(),
             new ToolGatewayTestSupport.DirectQueueExecutor());
 
     ToolBinding mismatchedContributorBinding =
@@ -441,7 +444,7 @@ class ToolExecutionGatewayStartTest {
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(),
             new ToolGatewayTestSupport.FakeTransport(),
-            new ToolGatewayTestSupport.FakeResourceStore(),
+            new ToolGatewayTestSupport.FakeResourceStager(),
             new ToolGatewayTestSupport.DirectQueueExecutor());
 
     ToolContribution bashContribution =
@@ -470,7 +473,8 @@ class ToolExecutionGatewayStartTest {
   @Test
   void unselectedEnvironmentToolIsRejectedAtStartWithoutExecuting() {
     ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
-    ToolGatewayTestSupport.FakeResourceStore store = new ToolGatewayTestSupport.FakeResourceStore();
+    ToolGatewayTestSupport.FakeResourceStager store =
+        new ToolGatewayTestSupport.FakeResourceStager();
     ToolGatewayTestSupport.DirectQueueExecutor executor =
         new ToolGatewayTestSupport.DirectQueueExecutor();
     ToolExecutionGateway gateway =
@@ -506,7 +510,7 @@ class ToolExecutionGatewayStartTest {
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(),
             transport,
-            new ToolGatewayTestSupport.FakeResourceStore(),
+            new ToolGatewayTestSupport.FakeResourceStager(),
             executor);
     ToolGatewayTestSupport.RecordingListener listener =
         new ToolGatewayTestSupport.RecordingListener();
@@ -535,7 +539,7 @@ class ToolExecutionGatewayStartTest {
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(),
             transport,
-            new ToolGatewayTestSupport.FakeResourceStore(),
+            new ToolGatewayTestSupport.FakeResourceStager(),
             executor);
     ToolGatewayTestSupport.RecordingListener listener =
         new ToolGatewayTestSupport.RecordingListener();
@@ -564,7 +568,7 @@ class ToolExecutionGatewayStartTest {
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(),
             transport,
-            new ToolGatewayTestSupport.FakeResourceStore(),
+            new ToolGatewayTestSupport.FakeResourceStager(),
             executor);
     ToolGatewayTestSupport.RecordingListener listener =
         new ToolGatewayTestSupport.RecordingListener();
@@ -592,7 +596,7 @@ class ToolExecutionGatewayStartTest {
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(),
             transport,
-            new ToolGatewayTestSupport.FakeResourceStore(),
+            new ToolGatewayTestSupport.FakeResourceStager(),
             executor);
     ToolGatewayTestSupport.RecordingListener listener =
         new ToolGatewayTestSupport.RecordingListener();
@@ -619,7 +623,7 @@ class ToolExecutionGatewayStartTest {
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(new ToolGatewayTestSupport.FakeTool(DESCRIPTOR)),
             new ToolGatewayTestSupport.FakeTransport(),
-            new ToolGatewayTestSupport.FakeResourceStore(),
+            new ToolGatewayTestSupport.FakeResourceStager(),
             executor);
     ToolGateway.StartResult result =
         gateway.start(
@@ -643,7 +647,7 @@ class ToolExecutionGatewayStartTest {
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
-            new ToolGatewayTestSupport.FakeResourceStore(),
+            new ToolGatewayTestSupport.FakeResourceStager(),
             executor);
     ToolGatewayTestSupport.RecordingListener listener =
         new ToolGatewayTestSupport.RecordingListener();
@@ -675,7 +679,7 @@ class ToolExecutionGatewayStartTest {
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(),
             transport,
-            new ToolGatewayTestSupport.FakeResourceStore(),
+            new ToolGatewayTestSupport.FakeResourceStager(),
             executor);
     ToolGatewayTestSupport.RecordingListener listener =
         new ToolGatewayTestSupport.RecordingListener();
@@ -713,7 +717,7 @@ class ToolExecutionGatewayStartTest {
         ToolGatewayTestSupport.gateway(
             catalog,
             new ToolGatewayTestSupport.FakeTransport(),
-            new ToolGatewayTestSupport.FakeResourceStore(),
+            new ToolGatewayTestSupport.FakeResourceStager(),
             new ToolGatewayTestSupport.DirectQueueExecutor());
     ToolGateway.StartResult result =
         gateway.start(
@@ -733,7 +737,7 @@ class ToolExecutionGatewayStartTest {
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(new ToolGatewayTestSupport.FakeTool(DESCRIPTOR)),
             new ToolGatewayTestSupport.FakeTransport(),
-            new ToolGatewayTestSupport.FakeResourceStore(),
+            new ToolGatewayTestSupport.FakeResourceStager(),
             executor);
     ToolGateway.StartResult result =
         gateway.start(
@@ -762,7 +766,7 @@ class ToolExecutionGatewayStartTest {
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(),
             transport,
-            new ToolGatewayTestSupport.FakeResourceStore(),
+            new ToolGatewayTestSupport.FakeResourceStager(),
             executor);
     ToolGateway.StartResult started =
         gateway.start(
@@ -788,7 +792,7 @@ class ToolExecutionGatewayStartTest {
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(),
             transport,
-            new ToolGatewayTestSupport.FakeResourceStore(),
+            new ToolGatewayTestSupport.FakeResourceStager(),
             executor);
     ToolGateway.StartResult started =
         gateway.start(
@@ -819,7 +823,7 @@ class ToolExecutionGatewayStartTest {
         ToolGatewayTestSupport.gateway(
             ToolGatewayTestSupport.defaultCatalog(),
             transport,
-            new ToolGatewayTestSupport.FakeResourceStore(),
+            new ToolGatewayTestSupport.FakeResourceStager(),
             executor);
     ToolGateway.StartResult started =
         gateway.start(

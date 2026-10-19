@@ -124,7 +124,7 @@ class ToolOutcomeAppenderMaterializerTest {
             List.of(ToolInvocationStatus.READY));
     ResourceRef resource =
         new ResourceRef(
-            "file:///report.txt",
+            "blob-upload:00000000-0000-4000-8000-000000000001",
             "text/plain",
             "report.txt",
             3L,
@@ -158,7 +158,7 @@ class ToolOutcomeAppenderMaterializerTest {
     assertEquals(
         "[Resource result available as metadata only: report.txt (text/plain)]\ncomplete preview",
         text);
-    assertFalse(text.contains("file:///report.txt"));
+    assertFalse(text.contains("blob-upload:00000000-0000-4000-8000-000000000001"));
   }
 
   /** append 只接受 terminal Tool：READY 行被拒绝（不进入任何 Entry 追加）。 */

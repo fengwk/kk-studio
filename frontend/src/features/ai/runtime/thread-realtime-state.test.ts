@@ -261,7 +261,7 @@ describe('thread realtime state', () => {
           toolCallId: 'call-1',
           contents: [
             { type: 'text', text: 'answer' },
-            { type: 'resource', uri: 's3://bucket/a.png', mediaType: 'image/png', name: 'a.png' },
+            { type: 'resource', uri: 'blob-upload:00000000-0000-4000-8000-000000000001', mediaType: 'image/png', name: 'a.png' },
           ],
           error: null,
           details: null,
@@ -320,7 +320,7 @@ describe('thread realtime state', () => {
       createTime: '2026-07-28T10:00:00Z',
       updateTime: '2026-07-28T10:00:00Z',
     }
-    // file:/s3: 托管资源投影为 attachment（含 downloadHref）；invalid result 回退
+    // 瞬时上传引用投影为 attachment；invalid result 回退
     // 到空文本 base；空白 resultJson 不算终态；非法 errorJson 原样暴露 message。
     const managed = snapshotToolStream(
       {
@@ -331,7 +331,7 @@ describe('thread realtime state', () => {
             { type: 'text', text: 'ok' },
             {
               type: 'resource',
-              uri: 'file:///tmp/a.png',
+              uri: 'blob-upload:00000000-0000-4000-8000-000000000001',
               mediaType: 'image/png',
               name: 'a.png',
               size: 10,
@@ -373,7 +373,7 @@ describe('thread realtime state', () => {
         toolCallId: 'call-1',
         contents: [
           { type: 'text', text: 'one' },
-          { type: 'resource', uri: 'file:///tmp/r.bin', mediaType: 'application/octet-stream', name: 'r.bin' },
+          { type: 'resource', uri: 'blob-upload:00000000-0000-4000-8000-000000000001', mediaType: 'application/octet-stream', name: 'r.bin' },
         ],
         error: null,
         details: null,

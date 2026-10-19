@@ -65,7 +65,7 @@ describe('thread timeline edge branches', () => {
                 },
                 {
                   type: 'resource',
-                  uri: 'file:///tmp/a.pdf',
+                  uri: 'blob-upload:00000000-0000-4000-8000-000000000001',
                   mediaType: 'application/pdf',
                   name: 'a.pdf',
                 },
