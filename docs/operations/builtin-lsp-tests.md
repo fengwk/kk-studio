@@ -72,7 +72,11 @@ read header 的可用状态由 `support()` 探测返回；服务器支持状态�
 验证同项目复用、并发启动去重、失败共享、空闲回收、启动中关闭与崩溃后重建。
 池的实现键包含 root、server id 与配置指纹；不同项目根使用独立客户端连接。
 
-调用方超时/取消只结束请求，发送 `$/cancelRequest`，不关闭共享客户端。有效请求预算来自 capability deadline，不额外增加隐藏客户端默认超时。
+调用方超时/取消只结束请求，发送 `$/cancelRequest`，不关闭共享客户端。
+LSP 三项工具（`lsp_goto_definition`、`lsp_workspace_symbols`、`lsp_java_decompile`）默认超时为 180 秒，
+覆盖等待启动、initialize 与 query 全程，全程消费同一 `context.signal`。
+共享池初始化生命周期默认 180 秒（独立资源生命周期保护，不重起查询 timer）；并发启动时一个 waiter 停止不影响其他等待者，
+最后退出的 waiter 等待 cleanup。闲置 5 分钟回收客户端与 1 秒 shutdown 机制保持不变。
 
 初始化失败不重试；并发等待者共享同一失败，进程范围随后收敛。
 崩溃的服务器报告退出码与有界诊断，客户端标记失效并在后续请求中重建。

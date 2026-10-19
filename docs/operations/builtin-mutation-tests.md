@@ -14,12 +14,8 @@ npm --prefix daemon run build
 npm --prefix daemon run test -- test/coding/files.test.ts test/coding/text.test.ts test/coding/edit-review.test.ts
 npm --prefix daemon run coverage
 
-# 前端文件变更与审查卡片浏览器回归
-npm --prefix frontend run build:layout
-(
-  cd frontend
-  npx playwright test --config playwright.layout.config.ts browser-tests/mutation-review.pw.ts
-)
+# 前端文件变更与审查卡片独立浏览器回归（独立端口 5178）
+npm --prefix frontend run test:mutation:browser
 ```
 
 测试在真实本地文件系统创建、覆盖、改权限和原子替换临时文件，不操作部署数据、不调用模型。
@@ -69,10 +65,10 @@ edit 读取当前文件；需要人工审批时，执行必须匹配审查时冻
 [`files.ts`](../../daemon/src/coding/files.ts) 与 [`test/coding/edit-review.test.ts`](../../daemon/test/coding/edit-review.test.ts)
 验证文件编辑审查、哈希保护与真实 diff 契约：
 
-- **只读审查能力 `fs.edit.preview`**：与 `fs.edit` 共享参数校验、解码与 diff 渲染逻辑；在 64-stripe 文件锁内读取真实原文件原始字节，计算 canonical 绝对路径、原始 bytes SHA-256 与带真实行号的变更 diff，返回 `{path, diff, sha256}`；不执行文件写入。
-- **全量 Diff 边界守卫**：若包含完整 diff 的结果序列化 UTF-8 字节数超过 details 限制（1 MiB），在预览及执行 commit 前直接抛出 `ToolInputRejectedError` 明确拒绝，决不静默截断变更内容。
+- **只读审查能力 `fs.edit.preview`**：与 `fs.edit` 共享参数校验、解码与 diff 渲染逻辑；基于 `diff@9.0.0` 的 `diffArrays` 计算真实 changedlines、4 行上下文与 EOF 缺换行显式标记，不设 diff 独立的 timeout 与 maxEditLength；在 64-stripe 文件锁内读取真实原文件原始字节，计算 canonical 绝对路径、原始 bytes SHA-256 与带真实行号的变更 diff，返回 `{path, diff, sha256}`；不执行文件写入。
+- **全量 Diff 边界守卫**：在预览及 commit 前执行 1 MiB 完整 review 尺寸前置限制，若包含完整 diff 的结果序列化 UTF-8 字节数超过 details 限制（1 MiB），直接抛出 `ToolInputRejectedError` 明确拒绝，决不截断变更内容。
 - **审批冻结与保护**：服务端将 review 结果冻结在 `approvalJson.editReview`（`{path, diff, sha256}`）；客户端 ALLOW/DENY 接口保持不变。
 - **执行期 `expectedFile` 守卫**：用户审批通过后，平台在 INVOKE 顶层携带 `expectedFile`（`{path, sha256}`）元数据下发给 Daemon（不修改模型参数 arguments）。Daemon 在文件 mutation 锁内核对当前磁盘文件的路径与 SHA-256：若文件在审查后被篡改或变动，立即拒绝写入（"File changed since edit review; nothing was written. Review a new edit before approving it."），决不将陈旧授权应用到新内容上。
-- **结果与呈现去重**：write 与 edit 执行成功后，结果仅呈现简洁的短状态文案（“写入成功”/“编辑成功”），不再在成功结果中重复回显正文或完整 diff；edit 成功结果仅在 `resultJson.details.editReview`（Java 对象的 `detailsJson`）中承载权威 diff 与哈希（供自动放行/YOLO 模式展示真实变更）；执行失败时不隐藏真实错误。自动放行/YOLO 模式不强求 expectedFile，不制造伪审批记录。
+- **结果与呈现去重**：write 与 edit 执行成功后，结果仅呈现简洁的短状态文案（“写入成功”/“编辑成功”），审查区默认展开并有界滚动；edit 成功结果仅在 `resultJson.details.editReview`（durable entry 显式解码 `detailsJson`）中承载权威 canonical diff 与哈希（freeze approval 快照优先，GC 或刷新后从结果 review 恢复）；模型可见内容由 `ToolResultModelContents` 纯内存派生；执行失败时不隐藏真实错误。自动放行/YOLO 模式不强求 expectedFile，不制造伪审批记录。
 
 核心实现位于 [`files.ts`](../../daemon/src/coding/files.ts)、[`commit.ts`](../../daemon/src/coding/commit.ts) 与 [`text.ts`](../../daemon/src/coding/text.ts)。
