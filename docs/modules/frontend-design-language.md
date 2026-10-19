@@ -57,7 +57,7 @@
 
 ## 控件、动作与反馈
 
-普通页面复用 [`shared/ui`](../../frontend/src/shared/ui) 的 Button/IconButton、输入、Select、Switch、Checkbox、NumberInput、Tabs、Dialog、StateBlock/EmptyState、Toast 和复制控件；数据展示复用 Badge（状态语义）、Mono/Code（标识符与数据值）、KeyValue、Table，区块容器复用 Panel 与 Toolbar。普通按钮不写原生 `<button>`；只有菜单项、选项、tab、下拉触发器和画布停靠按钮这类带专有交互的控件保留专门实现。共享组件负责外观与可访问性，feature 负责请求、业务校验、权限和文案。
+普通页面复用 [`shared/ui`](../../frontend/src/shared/ui) 的 Button/IconButton、输入、Select、Switch、Checkbox、NumberInput、Tabs、Dialog、StateBlock/EmptyState、Toast 和复制控件；数据展示复用 Badge（状态语义）、Mono/Code（标识符与数据值）、KeyValue，区块容器复用 Panel 与 Toolbar。普通按钮不写原生 `<button>`；只有菜单项、选项、tab、下拉触发器和画布停靠按钮这类带专有交互的控件保留专门实现。共享组件负责外观与可访问性，feature 负责请求、业务校验、权限和文案。
 
 Runtime 查看层、执行选择面板、历史树、改名和问卷的普通操作复用 Button，文本字段复用 TextInput/TextArea，纯图标动作复用 IconButton；局部样式只保留领域布局与必要密度。工作区使用唯一顶栏呈现当前查看身份，Debug 独占期间在左上提供“关闭 Debug”；子执行最左是“回到父 agent”，取当前执行的直接父身份，不同时显示“回到对话”。Debug 与 subagent 选择只从根输入区命令进入。
 
