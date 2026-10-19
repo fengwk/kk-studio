@@ -103,10 +103,6 @@ Vite 默认只监听 `127.0.0.1` 并使用自带 Host allowlist。需要容器�
 免费只表示不调用付费模型，不表示无副作用：E2E 会写测试数据，离线 smoke/性能入口会建镜像、
 启停容器并删除同名测试栈卷；供应链除离线 `test` 子命令外还可能下载依赖、漏洞库或镜像。
 
-内置工具的定向测试、平台条件与报告判断分别见
-[Read](builtin-read-tests.md)、[文件变更](builtin-mutation-tests.md)、[检索](builtin-search-tests.md)、
-[Bash](builtin-bash-tests.md)、[LSP](builtin-lsp-tests.md) 和 [Task/Thread Join](builtin-task-tests.md)。
-
 E2E 自身的 L1–L5 是 API case 的 level 分组，含义见下文 E2E 章节。
 
 ### CI 验证与镜像发布

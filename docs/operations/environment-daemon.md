@@ -293,7 +293,7 @@ Neovim 用户常经 Mason 管理语言服务器，可直接引用其安装路径
 
 程序基名识别为 jdtls 后才提供 `java/classFileContents`，`jdt://` 反编译不能在其它服务器上使用。
 客户端连接按项目复用，调用超时或取消只取消请求并发送 `$/cancelRequest`，不杀掉其它调用共享的
-服务器；初始化失败不重试，进程范围与清理行为见[内置 LSP 验证](builtin-lsp-tests.md)。
+服务器；初始化失败不重试，进程范围与清理行为见[内置工具与异步委派](../modules/builtin-tools-design.md#lsp-生命周期)。
 
 ## 本机代理
 

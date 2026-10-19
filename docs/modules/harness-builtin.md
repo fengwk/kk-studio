@@ -134,7 +134,7 @@ URI 的支持范围由读取器显式校验。Skill 读取使用 read 的路由�
 
 [`SubagentConfig`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentConfig.java) 冻结 `maxDepth`、`maxConcurrency`、`maxTotalConcurrency` 与 `maxTurns`：深度、单父并发和轮数软预算必须为正；全局并发上限允许 0 表示不限。单父与全局额度均按尚未冻结终态且未被 supersede 的子 Join 计数，全局范围跨所有执行树；root ticket 不计入，同一父/子对至多一个有效未完成 join（新续接 supersede 旧等待，旧 join 不占额度、不再产生独立交付），继续委派也需要额度准入。判定与接受由全局事务准入锁串行化。[`SubagentConfigProvider`](../../harness/builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/subagent/SubagentConfigProvider.java) 让每个决策点现读配置，Platform 把它映射到 `aiRuntime.subagent*`，因此调整并发与预算不需要重启。
 
-委派的完整契约见 [内置工具与异步委派](builtin-tools-design.md)，逐用例对照见 [Builtin Task 测试映射](../operations/builtin-task-tests.md)。
+委派的完整契约见 [内置工具与异步委派](builtin-tools-design.md)。
 
 ## 源码与测试
 

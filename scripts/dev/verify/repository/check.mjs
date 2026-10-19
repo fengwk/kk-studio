@@ -67,12 +67,6 @@ const documentPaths = [
   'docs/canvas-project.md',
   ...moduleDocuments.map((name) => `docs/modules/${name}`),
   'docs/operations/deployment.md',
-  'docs/operations/builtin-read-tests.md',
-  'docs/operations/builtin-mutation-tests.md',
-  'docs/operations/builtin-search-tests.md',
-  'docs/operations/builtin-bash-tests.md',
-  'docs/operations/builtin-lsp-tests.md',
-  'docs/operations/builtin-task-tests.md',
   'docs/operations/development-and-testing.md',
   'docs/operations/environment-daemon.md',
 ]
