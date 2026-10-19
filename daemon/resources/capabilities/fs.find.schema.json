@@ -15,7 +15,7 @@
     },
     "timeout_seconds": {
       "type": "integer",
-      "description": "Positive timeout in seconds. Defaults to 60 (1 minute)."
+      "description": "Positive timeout in seconds. Defaults to 15."
     }
   },
   "required": [

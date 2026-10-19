@@ -16,6 +16,7 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityC
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.platform.harness.read.PlatformResourceContentReader.ResourceRead;
+import fun.fengwk.kkstudio.platform.storage.ReadDeadline;
 
 import java.util.List;
 import java.util.Objects;
@@ -95,7 +96,9 @@ public class PlatformReadToolExecutor implements ReadToolExecutor {
       }
 
       if (path.startsWith("kkstudio:")) {
-        return handleKkstudioUri(callId, path, offset, limit, columnOffset, request, listener);
+        ReadDeadline deadline = ReadDeadline.after(request.timeout());
+        return handleKkstudioUri(
+            callId, path, offset, limit, columnOffset, request, listener, deadline);
       }
 
       if (isRemoteSchemeUri(path)) {
@@ -122,13 +125,15 @@ public class PlatformReadToolExecutor implements ReadToolExecutor {
       Integer limit,
       Integer columnOffset,
       ToolExecutionRequest request,
-      ToolExecutionListener listener) {
+      ToolExecutionListener listener,
+      ReadDeadline deadline) {
     if (path.startsWith(KKSTUDIO_SKILLS_PREFIX)) {
-      return handleSkillUri(callId, path, offset, limit, columnOffset, listener);
+      return handleSkillUri(callId, path, offset, limit, columnOffset, listener, deadline);
     }
 
     if (path.startsWith(KKSTUDIO_RESOURCES_PREFIX)) {
-      return handleResourceUri(callId, path, offset, limit, columnOffset, request, listener);
+      return handleResourceUri(
+          callId, path, offset, limit, columnOffset, request, listener, deadline);
     }
 
     listener.onComplete(ToolResult.error(callId, "unsupported kkstudio: URI: " + path));
@@ -141,7 +146,8 @@ public class PlatformReadToolExecutor implements ReadToolExecutor {
       Integer offset,
       Integer limit,
       Integer columnOffset,
-      ToolExecutionListener listener) {
+      ToolExecutionListener listener,
+      ReadDeadline deadline) {
     String sub = path.substring(KKSTUDIO_SKILLS_PREFIX.length());
 
     int firstSlash = sub.indexOf('/');
@@ -167,7 +173,8 @@ public class PlatformReadToolExecutor implements ReadToolExecutor {
 
     try {
       byte[] bytes = skillReader.readSkillFile(packageName, skillName, relativePath);
-      String text = ReadTextWindow.format(bytes, offset, limit, columnOffset, path, "unsupported");
+      String text =
+          ReadTextWindow.format(bytes, offset, limit, columnOffset, path, "unsupported", deadline);
       listener.onComplete(
           new ToolResult(callId, List.of(new TextResultContent(text)), false, "{}"));
     } catch (PlatformReadException e) {
@@ -187,7 +194,8 @@ public class PlatformReadToolExecutor implements ReadToolExecutor {
       Integer limit,
       Integer columnOffset,
       ToolExecutionRequest request,
-      ToolExecutionListener listener) {
+      ToolExecutionListener listener,
+      ReadDeadline deadline) {
     String blobIdStr = path.substring(KKSTUDIO_RESOURCES_PREFIX.length());
 
     if (blobIdStr.isBlank() || blobIdStr.contains("/")) {
@@ -229,7 +237,8 @@ public class PlatformReadToolExecutor implements ReadToolExecutor {
               offset,
               limit,
               columnOffset,
-              path);
+              path,
+              deadline);
       ToolResult result =
           switch (read) {
             case ResourceRead.Text text -> new ToolResult(

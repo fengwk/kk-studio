@@ -1,6 +1,8 @@
 package fun.fengwk.kkstudio.platform.harness.read;
 
 import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
@@ -45,8 +47,9 @@ import java.util.function.Supplier;
  */
 public class PlatformResourceContentReader {
 
-  /** 受管资源读取的绝对预算：从读取请求入口冻结，覆盖会话鉴权之后的 S3 握手与响应体消费。 */
-  public static final Duration READ_TIMEOUT = Duration.ofSeconds(30);
+  /** 受管资源读取的默认绝对预算：与 Environment capability catalog FS_READ 保持一致。 */
+  public static final Duration READ_TIMEOUT =
+      EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_READ).defaultTimeout();
 
   /** read 的两种结果形态：文本窗口或指向已授权 Blob 的 durable 媒体引用。 */
   public sealed interface ResourceRead permits ResourceRead.Text, ResourceRead.Media {
@@ -80,6 +83,7 @@ public class PlatformResourceContentReader {
    *
    * @param threadId 当前 Harness Thread ID，非空
    * @param blobId 目标 Blob ID，非空
+   * @param deadline 绝对读取截止，非空
    * @return 格式化的文本窗口
    * @throws PlatformReadException Thread 不存在、Session 未引用该资源、资源不存在、读取超时/取消或读取失败时抛出
    */
@@ -89,14 +93,15 @@ public class PlatformResourceContentReader {
       Integer offset,
       Integer limit,
       Integer columnOffset,
-      String displayPath) {
+      String displayPath,
+      ReadDeadline deadline) {
     if (threadId == null) {
       throw new PlatformReadException("threadId must not be null");
     }
     if (blobId == null) {
       throw new PlatformReadException("blobId must not be null");
     }
-    ReadDeadline deadline = ReadDeadline.after(READ_TIMEOUT);
+    Objects.requireNonNull(deadline, "deadline must not be null");
     HarnessStore store = requireStore();
     authorize(store, threadId, blobId);
     return readTextWindow(blobId, offset, limit, columnOffset, displayPath, deadline);
@@ -112,6 +117,7 @@ public class PlatformResourceContentReader {
    * @param invocationId 调用该工具的 durable {@code ToolInvocation} id；文本读取可为 null，媒体读取必须存在
    * @param callId 本次工具调用 id，用于校验调用绑定
    * @param blobId 目标 Blob ID，非空
+   * @param deadline 绝对读取截止，非空
    * @return 文本窗口或媒体引用
    * @throws PlatformReadException 鉴权失败、调用绑定不一致、媒体不受支持或超出预算、读取失败时抛出
    */
@@ -123,14 +129,15 @@ public class PlatformResourceContentReader {
       Integer offset,
       Integer limit,
       Integer columnOffset,
-      String displayPath) {
+      String displayPath,
+      ReadDeadline deadline) {
     if (threadId == null) {
       throw new PlatformReadException("threadId must not be null");
     }
     if (blobId == null) {
       throw new PlatformReadException("blobId must not be null");
     }
-    ReadDeadline deadline = ReadDeadline.after(READ_TIMEOUT);
+    Objects.requireNonNull(deadline, "deadline must not be null");
     HarnessStore store = requireStore();
     authorize(store, threadId, blobId);
 
@@ -251,7 +258,7 @@ public class PlatformResourceContentReader {
               deadline,
               stream ->
                   ReadTextWindow.format(
-                      stream, offset, limit, columnOffset, displayPath, "unsupported"));
+                      stream, offset, limit, columnOffset, displayPath, "unsupported", deadline));
       if (text == null) {
         throw new PlatformReadException("resource content is unavailable: " + blobId);
       }
