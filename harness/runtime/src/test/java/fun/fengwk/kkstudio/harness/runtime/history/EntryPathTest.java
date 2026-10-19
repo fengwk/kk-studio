@@ -372,7 +372,8 @@ class EntryPathTest {
                 null,
                 null,
                 CompactionStart.pending(
-                    CompactionPhase.FULL, CompactionTrigger.THRESHOLD, id(1L), null, null)),
+                    CompactionPhase.FULL, CompactionTrigger.THRESHOLD, id(1L), null, null),
+                null),
             time(id(6L)));
     Entry result = compactionResult(id(7L), id(6L));
     Entry end = turnEnd(id(8L), id(7L), id(6L), TurnEndOutcome.COMPLETED, true, null, null);
@@ -1480,7 +1481,8 @@ class EntryPathTest {
             null,
             null,
             CompactionStart.pending(
-                phase, trigger, id(1L), turnPrefixStartEntryId, historyCompactionEntryId)),
+                phase, trigger, id(1L), turnPrefixStartEntryId, historyCompactionEntryId),
+            null),
         time(id));
   }
 

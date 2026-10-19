@@ -151,7 +151,8 @@ final class SessionForkCopy {
               mappedOrNull(compaction.turnPrefixStartEntryId(), newIds),
               mappedOrNull(compaction.historyCompactionEntryId(), newIds),
               compaction.childThreadId(),
-              compaction.joinInvocationId()));
+              compaction.joinInvocationId()),
+          null);
     }
     if (payload instanceof MessagePayload message && message.toolResultMetadata() != null) {
       ToolResultMetadata metadata = message.toolResultMetadata();

@@ -585,7 +585,8 @@ public abstract class HarnessRuntimeThreadTreeContract {
             100_000,
             16_384,
             CompactionStart.pending(
-                CompactionPhase.FULL, CompactionTrigger.MANUAL, cutEntryId, null, null)),
+                CompactionPhase.FULL, CompactionTrigger.MANUAL, cutEntryId, null, null),
+            null),
         createdAt);
   }
 
@@ -601,7 +602,7 @@ public abstract class HarnessRuntimeThreadTreeContract {
         id,
         sessionId,
         parentId,
-        new TurnStartPayload(reason, branchSettings, ownerThreadId, 100_000, 16_384, null),
+        new TurnStartPayload(reason, branchSettings, ownerThreadId, 100_000, 16_384, null, null),
         createdAt);
   }
 

@@ -117,7 +117,8 @@ final class ManualCompactionControl {
                 thread.id(),
                 null,
                 null,
-                decision.preparation().pendingStart()),
+                decision.preparation().pendingStart(),
+                null),
             createdAt);
     List<Entry> candidateEntries = new ArrayList<>(path.entries());
     candidateEntries.add(candidateEntry);
@@ -228,7 +229,8 @@ final class ManualCompactionControl {
               startPayload.ownerThreadId(),
               compactionResolved.contextWindow(),
               compactionResolved.maxOutputTokens(),
-              child.frozenStart());
+              child.frozenStart(),
+              null);
       tx.insertEntry(
           new Entry(
               plan.turnStartEntryId(),

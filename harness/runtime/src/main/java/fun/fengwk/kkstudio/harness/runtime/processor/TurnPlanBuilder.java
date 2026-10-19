@@ -113,7 +113,8 @@ final class TurnPlanBuilder {
                 threadId,
                 null,
                 null,
-                preparation == null ? null : preparation.pendingStart()),
+                preparation == null ? null : preparation.pendingStart(),
+                null),
             now));
     parentId = turnStartEntryId;
 

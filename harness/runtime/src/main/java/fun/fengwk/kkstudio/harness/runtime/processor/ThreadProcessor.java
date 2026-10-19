@@ -15,6 +15,7 @@ import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionResultEvaluator;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.AssistantError;
@@ -886,7 +887,8 @@ public final class ThreadProcessor {
     for (Entry entry : plan.candidateEntries()) {
       tx.insertEntry(
           withCreatedAt(
-              withResolvedTurnStart(entry, plan, contextWindow, maxOutputTokens, compactionStart),
+              withResolvedTurnStart(
+                  entry, plan, contextWindow, maxOutputTokens, compactionStart, invocationSpec),
               mutationNow));
     }
     List<ThreadCommand> consumed = new ArrayList<>(plan.consumedCommands().size());
@@ -1043,18 +1045,26 @@ public final class ThreadProcessor {
 
   /**
    * 第二阶段 commit 在插入前补齐 Resolver 成功时的 contextWindow/maxOutputTokens/compactionStart；rejected 保持
-   * null。
+   * null。Resolver 改用 Agent 默认模型时（实际调用型号不同于 Thread 设置），把实际型号记为 fallbackModel。
    */
   static Entry withResolvedTurnStart(
       Entry entry,
       TurnPlan plan,
       Integer contextWindow,
       Integer maxOutputTokens,
-      CompactionStart compactionStart) {
+      CompactionStart compactionStart,
+      ModelRequestSpec resolvedSpec) {
     if (!entry.id().equals(plan.turnStartEntryId())
         || !(entry.payload() instanceof TurnStartPayload start)) {
       return entry;
     }
+    ModelSelection executed =
+        resolvedSpec == null
+            ? null
+            : new ModelSelection(
+                resolvedSpec.model().providerName(),
+                resolvedSpec.model().modelName(),
+                resolvedSpec.variant().id());
     return new Entry(
         entry.id(),
         entry.sessionId(),
@@ -1065,7 +1075,8 @@ public final class ThreadProcessor {
             start.ownerThreadId(),
             contextWindow,
             maxOutputTokens,
-            compactionStart != null ? compactionStart : start.compaction()),
+            compactionStart != null ? compactionStart : start.compaction(),
+            executed == null || executed.equals(start.settings().model()) ? null : executed),
         entry.createdAt());
   }
 

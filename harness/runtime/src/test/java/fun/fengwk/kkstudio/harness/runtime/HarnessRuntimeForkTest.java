@@ -646,7 +646,13 @@ class HarnessRuntimeForkTest {
             sessionId,
             parentId,
             new TurnStartPayload(
-                TurnStartReason.COMPACTION, settings(), ownerThreadId, 100_000, 16_384, start),
+                TurnStartReason.COMPACTION,
+                settings(),
+                ownerThreadId,
+                100_000,
+                16_384,
+                start,
+                null),
             createdAt));
     UUID resultId = tx.nextId();
     tx.insertEntry(

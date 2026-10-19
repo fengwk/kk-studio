@@ -735,7 +735,13 @@ final class StopControl {
             frozen.turnPrefixStartEntryId(),
             CompactionTurns.entryAt(path, history.resultIndex()).id());
     return new TurnStartPayload(
-        TurnStartReason.COMPACTION, path.baseSettings(), thread.id(), null, null, stoppedPrefix);
+        TurnStartReason.COMPACTION,
+        path.baseSettings(),
+        thread.id(),
+        null,
+        null,
+        stoppedPrefix,
+        null);
   }
 
   private NodeStop stopModel(

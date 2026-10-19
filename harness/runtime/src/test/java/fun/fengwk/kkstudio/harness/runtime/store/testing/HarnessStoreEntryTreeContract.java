@@ -1102,7 +1102,8 @@ public abstract class HarnessStoreEntryTreeContract {
                               CompactionTrigger.MANUAL,
                               inputTurnEnd,
                               null,
-                              null)),
+                              null),
+                          null),
                       T2));
               return id;
             });

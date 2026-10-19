@@ -851,7 +851,8 @@ class ProviderRequestPreviewServiceTest {
                     THREAD_ID,
                     CONTEXT_WINDOW,
                     MAX_OUTPUT_TOKENS,
-                    start),
+                    start,
+                    null),
                 COMPACTION_RESULT_TIME.minusSeconds(1)),
             new Entry(
                 COMPACTION_ENTRY_ID,
@@ -1015,12 +1016,18 @@ class ProviderRequestPreviewServiceTest {
 
   private static TurnStartPayload inputTurnStart() {
     return new TurnStartPayload(
-        TurnStartReason.INPUT, SETTINGS, THREAD_ID, CONTEXT_WINDOW, MAX_OUTPUT_TOKENS, null);
+        TurnStartReason.INPUT, SETTINGS, THREAD_ID, CONTEXT_WINDOW, MAX_OUTPUT_TOKENS, null, null);
   }
 
   private static TurnStartPayload continuationTurnStart() {
     return new TurnStartPayload(
-        TurnStartReason.CONTINUATION, SETTINGS, THREAD_ID, CONTEXT_WINDOW, MAX_OUTPUT_TOKENS, null);
+        TurnStartReason.CONTINUATION,
+        SETTINGS,
+        THREAD_ID,
+        CONTEXT_WINDOW,
+        MAX_OUTPUT_TOKENS,
+        null,
+        null);
   }
 
   /**

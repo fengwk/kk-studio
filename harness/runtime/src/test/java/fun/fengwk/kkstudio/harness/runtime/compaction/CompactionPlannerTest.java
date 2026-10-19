@@ -821,7 +821,13 @@ class CompactionPlannerTest {
               id(100L),
               parentId(),
               new TurnStartPayload(
-                  TurnStartReason.COMPACTION, SETTINGS, OWNER_THREAD_ID, 100_000, 16_384, start),
+                  TurnStartReason.COMPACTION,
+                  SETTINGS,
+                  OWNER_THREAD_ID,
+                  100_000,
+                  16_384,
+                  start,
+                  null),
               BASE));
       entries.add(
           new Entry(
@@ -848,7 +854,7 @@ class CompactionPlannerTest {
               id(100L),
               parentId(),
               new TurnStartPayload(
-                  TurnStartReason.COMPACTION, SETTINGS, OWNER_THREAD_ID, null, null, start),
+                  TurnStartReason.COMPACTION, SETTINGS, OWNER_THREAD_ID, null, null, start, null),
               BASE));
       aborted(abortedText);
       long endId = nextId++;

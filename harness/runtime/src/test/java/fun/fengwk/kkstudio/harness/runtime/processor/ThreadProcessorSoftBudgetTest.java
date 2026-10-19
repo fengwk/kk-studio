@@ -464,7 +464,7 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
                       sessionId,
                       rootEntryId,
                       new TurnStartPayload(
-                          TurnStartReason.STOP, branchSettings(), pid, null, null, null),
+                          TurnStartReason.STOP, branchSettings(), pid, null, null, null, null),
                       NOW));
               tx.insertEntry(
                   new Entry(
@@ -606,7 +606,13 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
                   sessionId,
                   rootEntryId,
                   new TurnStartPayload(
-                      TurnStartReason.INPUT, branchSettings(), childId, 100_000, 16_384, null),
+                      TurnStartReason.INPUT,
+                      branchSettings(),
+                      childId,
+                      100_000,
+                      16_384,
+                      null,
+                      null),
                   NOW));
           tx.insertEntry(
               new Entry(
@@ -646,11 +652,8 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
                       100_000,
                       16_384,
                       CompactionStart.pending(
-                          CompactionPhase.FULL,
-                          CompactionTrigger.THRESHOLD,
-                          userEntry,
-                          null,
-                          null)),
+                          CompactionPhase.FULL, CompactionTrigger.THRESHOLD, userEntry, null, null),
+                      null),
                   NOW));
           tx.insertEntry(
               new Entry(
@@ -678,6 +681,7 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
                       childId,
                       100_000,
                       16_384,
+                      null,
                       null),
                   NOW));
           tx.insertEntry(

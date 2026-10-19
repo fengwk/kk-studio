@@ -21,6 +21,9 @@ public interface AgentDefinitionRepository {
 
   boolean existsReferencingSubagent(String name);
 
+  /** 是否有未归档 Project 的工作流阶段把该 Agent 作为执行者。 */
+  boolean existsReferencingProjectWorkflow(String name);
+
   /** 是否有任何 Agent 的 {@code config.skills} 引用该全局 Skill。 */
   boolean existsReferencingSkill(String packageName, String skillName);
 

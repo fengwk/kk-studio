@@ -96,6 +96,37 @@ export function projectSettingsChanges(
   return changes
 }
 
+/**
+ * 本轮因 Thread 设置的模型不可用而改用 Agent 默认模型时的提示；Thread 设置本身不变。
+ * payload.fallbackModel 缺失或不完整时不产生提示。
+ */
+export function projectModelFallback(
+  entry: HarnessSessionEntryDTO,
+  settings: SettingsSnapshot,
+  fallbackModel: unknown,
+): EntryEventDialogueMessage | null {
+  if (fallbackModel == null || typeof fallbackModel !== 'object' || Array.isArray(fallbackModel)) {
+    return null
+  }
+  const fallback = fallbackModel as Record<string, unknown>
+  if (
+    typeof fallback.providerName !== 'string'
+    || typeof fallback.modelName !== 'string'
+    || typeof fallback.variant !== 'string'
+  ) return null
+  return {
+    ...event(entry, 'settings_change', translate('ai.runtime.entry.modelFallback', {
+      model: formatModelLabel(
+        settings.model.providerName,
+        settings.model.modelName,
+        settings.model.variant,
+      ),
+      fallback: formatModelLabel(fallback.providerName, fallback.modelName, fallback.variant),
+    }), ''),
+    id: `entry:${entry.entryId}:model-fallback`,
+  }
+}
+
 export function projectEmptyMessageEntry(
   entry: HarnessSessionEntryDTO,
   role: string,

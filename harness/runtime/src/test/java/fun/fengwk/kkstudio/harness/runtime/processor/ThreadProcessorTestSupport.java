@@ -784,6 +784,7 @@ final class ThreadProcessorTestSupport {
         ownerThreadId,
         CONTEXT_WINDOW,
         MAX_OUTPUT_TOKENS,
+        null,
         null);
   }
 
@@ -796,7 +797,8 @@ final class ThreadProcessorTestSupport {
         ownerThreadId,
         CONTEXT_WINDOW,
         MAX_OUTPUT_TOKENS,
-        compaction);
+        compaction,
+        null);
   }
 
   static EntryPayload userMessagePayload(String text) {

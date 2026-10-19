@@ -1048,7 +1048,8 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
             turnStartEntryId,
             sessionId,
             thread.headEntryId(),
-            new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, threadId, 100_000, 16_384, null),
+            new TurnStartPayload(
+                TurnStartReason.INPUT, SETTINGS, threadId, 100_000, 16_384, null, null),
             now));
     ThreadState afterTurnStart = thread.advanceHead(turnStartEntryId, now);
     tx.updateThread(afterTurnStart);

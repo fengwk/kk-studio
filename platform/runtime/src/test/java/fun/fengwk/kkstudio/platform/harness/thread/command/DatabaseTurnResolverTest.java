@@ -219,15 +219,56 @@ class DatabaseTurnResolverTest {
     assertEquals(resolved.maxOutputTokens(), requestSpec.outputTokens());
   }
 
+  /** 设置的 variant 已从模型中移除时，同一模型改用自身的默认 variant。 */
   @Test
-  void neverFallsBackVariantToModelDefault() {
+  void missingVariantUsesTheModelDefaultVariant() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
 
-    TurnResolver.Rejected rejected = fixture.rejected(fixture.path(settings("missing")));
+    ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("missing")));
 
-    assertEquals(DatabaseTurnResolver.REJECTION_CODE, rejected.error().code());
+    assertEquals("model", requestSpec.model().modelName());
+    assertEquals(Fixture.parsedModel().defaultVariant(), requestSpec.variant().id());
+  }
+
+  /** Thread 设置的模型被删除或改名时改用当前 Agent 的默认模型，Thread 设置本身不变。 */
+  @Test
+  void unavailableThreadModelFallsBackToTheAgentDefaultModel() {
+    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
+    fixture.missingModel();
+    ModelSelection backup = new ModelSelection("backup-provider", "backup-model", "default");
+    fixture.addModel(backup, Fixture.parsedModel());
+    fixture.agent.setModelProviderName("backup-provider");
+    fixture.agent.setModelName("backup-model");
+
+    ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("custom")));
+
+    assertEquals("backup-provider", requestSpec.model().providerName());
+    assertEquals("backup-model", requestSpec.model().modelName());
+    // 原 variant 在默认模型中仍存在时沿用它。
+    assertEquals("custom", requestSpec.variant().id());
+  }
+
+  /** Thread 模型与 Agent 默认模型都不可用时拒绝本 turn，不尝试其它模型。 */
+  @Test
+  void rejectsWhenThreadAndAgentDefaultModelsAreBothUnavailable() {
+    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
+    fixture.missingModel();
+    fixture.agent.setModelProviderName("backup-provider");
+    fixture.agent.setModelName("backup-model");
+
     assertEquals(
-        "model variant not found: provider/model variant=missing", rejected.error().message());
+        "model provider/model and the agent default model are both unavailable;"
+            + " bind an available model",
+        fixture.rejected(fixture.path(settings("default"))).error().message());
+
+    fixture = new Fixture(List.of(), List.of(), List.of());
+    fixture.missingModel();
+    fixture.agent.setModelProviderName("provider");
+    fixture.agent.setModelName("model");
+    assertEquals(
+        "model provider/model and the agent default model are both unavailable;"
+            + " bind an available model",
+        fixture.rejected(fixture.path(settings("default"))).error().message());
   }
 
   @Test
@@ -261,13 +302,8 @@ class DatabaseTurnResolverTest {
     fixture = new Fixture(List.of(), List.of(), List.of());
     fixture.missingProvider();
     assertEquals(
-        "provider not found: provider",
-        fixture.rejected(fixture.path(settings("default"))).error().message());
-
-    fixture = new Fixture(List.of(), List.of(), List.of());
-    fixture.missingModel();
-    assertEquals(
-        "model not found: provider/model",
+        "model provider/model and the agent default model are both unavailable;"
+            + " bind an available model",
         fixture.rejected(fixture.path(settings("default"))).error().message());
 
     fixture = new Fixture(List.of(), List.of(), List.of());
@@ -1936,7 +1972,8 @@ class DatabaseTurnResolverTest {
                     THREAD_ID,
                     null,
                     null,
-                    preparation.pendingStart()),
+                    preparation.pendingStart(),
+                    null),
                 NOW.plusSeconds(5))));
   }
 
@@ -1969,7 +2006,7 @@ class DatabaseTurnResolverTest {
                 SESSION_ID,
                 id(5),
                 new TurnStartPayload(
-                    TurnStartReason.COMPACTION, settings, THREAD_ID, 4096, 1234, start),
+                    TurnStartReason.COMPACTION, settings, THREAD_ID, 4096, 1234, start, null),
                 NOW)));
   }
 
@@ -2855,7 +2892,7 @@ class DatabaseTurnResolverTest {
         SESSION_ID,
         parentId,
         new TurnStartPayload(
-            TurnStartReason.COMPACTION, settings, THREAD_ID, null, null, compaction),
+            TurnStartReason.COMPACTION, settings, THREAD_ID, null, null, compaction, null),
         NOW);
   }
 
@@ -3291,7 +3328,7 @@ class DatabaseTurnResolverTest {
                   parsed.pricing()));
     }
 
-    private static ParsedAgentModelConfig parsedModel() {
+    static ParsedAgentModelConfig parsedModel() {
       ModelVariant defaultVariant = new ModelVariant("default");
       ModelVariant customVariant = new ModelVariant("custom", "medium");
       return new ParsedAgentModelConfig(

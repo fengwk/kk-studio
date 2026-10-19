@@ -20,6 +20,7 @@ import {
   projectInvalidSettings,
   projectRootSettings,
   projectSettingsChanges,
+  projectModelFallback,
   parseSettingsSnapshot,
   projectNotificationEntry,
   projectUnknownEntry,
@@ -94,6 +95,10 @@ export function projectDurableEntry(
           messages.push(projectInvalidSettings(entry))
         } else if (context.lastSettings !== null) {
           messages.push(...projectSettingsChanges(entry, context.lastSettings, settings))
+        }
+        if (settings !== null) {
+          const fallback = projectModelFallback(entry, settings, payload.fallbackModel)
+          if (fallback !== null) messages.push(fallback)
         }
         context.lastSettings = settings
       }

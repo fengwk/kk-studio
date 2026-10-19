@@ -93,10 +93,13 @@ public class UsageCostProjectionService {
             "entry ancestry is not contained in the projected entries: " + cursor);
       }
       if (ancestor.payload() instanceof TurnStartPayload turnStart) {
-        // 压缩 Turn 实际调用的是 executionModel（fallback 时不同于 branch settings），必须按真实调用型号计价。
-        return turnStart.compaction() == null
-            ? turnStart.settings().model()
-            : turnStart.compaction().executionModel();
+        // 按真实调用型号计价：压缩 Turn 用 executionModel，模型回退的 Turn 用 fallbackModel，其余用 branch settings。
+        if (turnStart.compaction() != null) {
+          return turnStart.compaction().executionModel();
+        }
+        return turnStart.fallbackModel() != null
+            ? turnStart.fallbackModel()
+            : turnStart.settings().model();
       }
       if (ancestor.payload() instanceof RootPayload root) {
         return root.settings().model();

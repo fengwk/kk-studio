@@ -252,7 +252,7 @@ class CompactionSummaryAssemblerTest {
 
   private static TurnStartPayload compactionTurnStart(CompactionStart start) {
     return new TurnStartPayload(
-        TurnStartReason.COMPACTION, SETTINGS, OWNER_THREAD_ID, 100_000, 16_384, start);
+        TurnStartReason.COMPACTION, SETTINGS, OWNER_THREAD_ID, 100_000, 16_384, start, null);
   }
 
   private static MessagePayload user(String text) {

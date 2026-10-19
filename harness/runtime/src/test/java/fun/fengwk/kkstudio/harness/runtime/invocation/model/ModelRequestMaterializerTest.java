@@ -479,7 +479,8 @@ class ModelRequestMaterializerTest {
         entry(
             2,
             1,
-            new TurnStartPayload(TurnStartReason.INPUT, goalSettings, OWNER, 4096, 1024, null)));
+            new TurnStartPayload(
+                TurnStartReason.INPUT, goalSettings, OWNER, 4096, 1024, null, null)));
     entries.add(entry(3, 2, new MessagePayload(GoalMessages.inputSet("ship it"), null, null)));
     entries.add(entry(4, 3, assistant("first reply")));
     entries.add(
@@ -495,7 +496,7 @@ class ModelRequestMaterializerTest {
               6,
               5,
               new TurnStartPayload(
-                  TurnStartReason.INPUT, clearedSettings, OWNER, 4096, 1024, null)));
+                  TurnStartReason.INPUT, clearedSettings, OWNER, 4096, 1024, null, null)));
       entries.add(entry(7, 6, new MessagePayload(GoalMessages.inputCleared(), null, null)));
       entries.add(entry(8, 7, assistant("cleared reply")));
       entries.add(
@@ -514,7 +515,13 @@ class ModelRequestMaterializerTest {
             id(compactionTurnStart),
             parent,
             new TurnStartPayload(
-                TurnStartReason.COMPACTION, boundarySettings, OWNER, 4096, 1024, compaction)));
+                TurnStartReason.COMPACTION,
+                boundarySettings,
+                OWNER,
+                4096,
+                1024,
+                compaction,
+                null)));
     entries.add(
         entry(
             id(compactionTurnStart + 1),
@@ -538,7 +545,7 @@ class ModelRequestMaterializerTest {
             id(20L),
             parent,
             new TurnStartPayload(
-                TurnStartReason.INPUT, SETTINGS.withGoal(null), OWNER, 4096, 1024, null)));
+                TurnStartReason.INPUT, SETTINGS.withGoal(null), OWNER, 4096, 1024, null, null)));
     entries.add(
         entry(id(21L), id(20L), new MessagePayload(GoalMessages.inputCleared(), null, null)));
     entries.add(entry(id(22L), id(21L), assistant("cleared reply")));
@@ -567,7 +574,7 @@ class ModelRequestMaterializerTest {
 
   private static TurnStartPayload resolvedStart(
       TurnStartReason reason, CompactionStart compaction) {
-    return new TurnStartPayload(reason, SETTINGS, OWNER, 4096, 1024, compaction);
+    return new TurnStartPayload(reason, SETTINGS, OWNER, 4096, 1024, compaction, null);
   }
 
   private static ToolBinding bashBinding() {

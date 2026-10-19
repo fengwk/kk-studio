@@ -1119,6 +1119,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                       baseline.threadId(),
                       CONTEXT_WINDOW,
                       MAX_OUTPUT_TOKENS,
+                      null,
                       null),
                   NOW));
           UUID assistantEntryId = tx.nextId();
@@ -1962,6 +1963,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                       childThreadId,
                       CONTEXT_WINDOW,
                       MAX_OUTPUT_TOKENS,
+                      null,
                       null),
                   NOW));
           tx.insertEntry(
@@ -2043,6 +2045,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                       childThreadId,
                       CONTEXT_WINDOW,
                       MAX_OUTPUT_TOKENS,
+                      null,
                       null),
                   NOW));
           tx.insertEntry(

@@ -605,6 +605,7 @@ class HarnessRuntimeTreeLockTest {
                       threadId,
                       100_000,
                       16_384,
+                      null,
                       null),
                   now));
           tx.insertEntry(
@@ -655,6 +656,7 @@ class HarnessRuntimeTreeLockTest {
                       threadId,
                       100_000,
                       16_384,
+                      null,
                       null),
                   now));
           tx.insertEntry(

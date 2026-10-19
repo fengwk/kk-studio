@@ -355,7 +355,8 @@ class CompactionFileSectionsTest {
                   100_000,
                   16_384,
                   CompactionStart.pending(
-                      CompactionPhase.FULL, CompactionTrigger.THRESHOLD, cutEntryId, null, null)),
+                      CompactionPhase.FULL, CompactionTrigger.THRESHOLD, cutEntryId, null, null),
+                  null),
               BASE));
       entries.add(
           new Entry(

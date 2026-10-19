@@ -2483,7 +2483,13 @@ class ModelExecutionStreamFlushTest {
                   sessionId,
                   rootEntryId,
                   new TurnStartPayload(
-                      TurnStartReason.INPUT, branchSettings(), threadId, 100_000, 16_384, null),
+                      TurnStartReason.INPUT,
+                      branchSettings(),
+                      threadId,
+                      100_000,
+                      16_384,
+                      null,
+                      null),
                   now.plusMillis(1)));
           UUID userId = tx.nextId();
           tx.insertEntry(

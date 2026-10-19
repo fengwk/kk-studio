@@ -792,6 +792,7 @@ class PostgresqlCompactionChildTest {
                       childThreadId,
                       CONTEXT_WINDOW,
                       MAX_OUTPUT_TOKENS,
+                      null,
                       null),
                   T1));
           tx.insertEntry(
@@ -1121,6 +1122,7 @@ class PostgresqlCompactionChildTest {
         ownerThreadId,
         CONTEXT_WINDOW,
         MAX_OUTPUT_TOKENS,
+        null,
         null);
   }
 
