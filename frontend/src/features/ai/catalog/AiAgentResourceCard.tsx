@@ -1,4 +1,5 @@
 import { ResourceCardLayout } from '@/features/ai/catalog/AiResourceCardLayout'
+import { Badge } from '@/shared/ui/data/Badge'
 import {
   formatModelLabel,
   modelRef,
@@ -61,7 +62,7 @@ export function AgentResourceCard({
       subtitle={agent.description || agent.systemPrompt || agent.name}
       badge={
         builtin ? (
-          <span className="status-pill is-neutral">{t('ai.catalog.card.builtinBadge')}</span>
+          <Badge tone="neutral">{t('ai.catalog.card.builtinBadge')}</Badge>
         ) : undefined
       }
       rows={[

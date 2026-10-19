@@ -1,4 +1,6 @@
 import { useI18n } from '@/shared/i18n'
+import { Panel } from '@/shared/ui/layout/Panel'
+import { Toolbar } from '@/shared/ui/layout/Toolbar'
 import type { SystemSettingsEditor } from '@/features/settings/useSystemSettingsEditor'
 import type { DraftValidationReason } from '@/features/settings/system-settings-draft'
 import { Button } from '@/shared/ui/controls/Button'
@@ -23,7 +25,7 @@ export function SettingsToolbar({ editor }: { editor: SystemSettingsEditor }) {
   const banner = draftError ?? editor.saveError
 
   return (
-    <div className="settings-toolbar" aria-label={t('settings.toolbar.ariaLabel')}>
+    <Panel className="settings-toolbar" aria-label={t('settings.toolbar.ariaLabel')}>
       {banner ? (
         <div
           className="settings-error-banner"
@@ -33,7 +35,7 @@ export function SettingsToolbar({ editor }: { editor: SystemSettingsEditor }) {
           {banner}
         </div>
       ) : null}
-      <div className="settings-toolbar-actions">
+      <Toolbar>
         <span className="settings-dirty" data-dirty={editor.dirty}>
           {editor.dirty ? t('settings.unsavedChanges') : t('settings.allSaved')}
         </span>
@@ -54,7 +56,7 @@ export function SettingsToolbar({ editor }: { editor: SystemSettingsEditor }) {
         >
           {t('settings.reset')}
         </Button>
-      </div>
-    </div>
+      </Toolbar>
+    </Panel>
   )
 }

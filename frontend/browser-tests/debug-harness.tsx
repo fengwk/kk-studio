@@ -249,7 +249,7 @@ function SinglePaneHarness({
             className="agent-pane-thread-heading"
             style={{ flexShrink: 0, padding: '10px 16px', borderBottom: '1px solid var(--border)' }}
           >
-            <h2 className="agent-pane-thread-title" style={{ margin: 0, fontSize: '14px' }}>
+            <h2 className="agent-pane-thread-title" style={{ margin: 0, fontSize: 'var(--font-size-sm)' }}>
               Thread ({paneId})
             </h2>
             {exerciseViewState ? (

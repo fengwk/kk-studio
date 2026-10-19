@@ -7,7 +7,7 @@
   place-items: center;
   border: 0;
   background: transparent;
-  color: var(--fg-dim);
+  color: var(--fg-muted);
   cursor: pointer;
 }
 

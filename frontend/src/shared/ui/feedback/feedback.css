@@ -6,7 +6,7 @@
   top: 20px;
   left: 50%;
   transform: translateX(-50%);
-  z-index: 200;
+  z-index: var(--z-toast);
   display: flex;
   align-items: center;
   gap: 10px;
@@ -15,20 +15,20 @@
   padding: 10px 12px 10px 14px;
   border: 1px solid var(--border-hover);
   border-radius: var(--radius-md);
-  background: var(--overlay-surface-strong);
+  background: var(--surface-overlay);
   color: var(--fg);
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   line-height: 1.45;
   box-shadow: var(--shadow-md);
   animation: ui-toast-in 0.18s ease-out;
 }
 
 .ui-toast-success {
-  border-color: var(--green-border);
+  border-color: var(--accent-border);
 }
 
 .ui-toast-success .ui-toast-icon {
-  color: var(--green-primary);
+  color: var(--accent);
 }
 
 .ui-toast-error {
@@ -55,23 +55,11 @@
   overflow-wrap: anywhere;
 }
 
-.ui-toast-dismiss {
-  display: grid;
-  place-items: center;
+.icon-button.ui-toast-dismiss {
   width: 22px;
   height: 22px;
-  flex: 0 0 22px;
-  padding: 0;
-  border: 0;
+  flex-basis: 22px;
   border-radius: var(--radius-sm);
-  color: var(--fg-muted);
-  background: transparent;
-  cursor: pointer;
-}
-
-.ui-toast-dismiss:hover {
-  color: var(--fg);
-  background: var(--stage-dot);
 }
 
 .ui-toast-dismiss svg {
@@ -117,7 +105,7 @@
   gap: 8px;
   padding: 24px 16px;
   color: var(--fg-muted);
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   min-height: 64px;
 }
 
@@ -138,4 +126,15 @@
   .ui-loading-spinner-icon {
     animation: none;
   }
+}
+
+.ui-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-8) 0;
+  color: var(--fg-muted);
+  font-size: var(--font-size-sm);
+  text-align: center;
 }

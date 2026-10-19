@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { EmptyState } from '@/shared/ui/feedback/EmptyState'
+import { Badge } from '@/shared/ui/data/Badge'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Activity,
@@ -153,7 +155,7 @@ function EvidenceRow({ evidence, storageService }: EvidenceRowProps) {
         <Paperclip size={14} aria-hidden="true" />
         <strong>{evidence.name || evidence.blobId}</strong>
         {evidence.actorAgentName && (
-          <span className="badge badge-agent">{evidence.actorAgentName}</span>
+          <Badge tone="accent">{evidence.actorAgentName}</Badge>
         )}
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -959,28 +961,28 @@ export function IssueDetailModal({
       header={
         <div className="modal-header">
           <div className="issue-detail-header-left">
-            <span className="issue-number" style={{ fontSize: '1.1rem' }}>
+            <span className="issue-number" style={{ fontSize: 'var(--font-size-md)' }}>
               #{issue?.number || '...'}
             </span>
-            <span className="badge badge-state">{issue?.state || 'INIT'}</span>
+            <Badge tone="info" mono>{issue?.state || 'INIT'}</Badge>
 
             {isBlocked && (
-              <span className="badge badge-blocked" title={issue?.blockReason || t('projects.state.blocked')}>
+              <Badge tone="danger" title={issue?.blockReason || t('projects.state.blocked')}>
                 <AlertCircle size={12} aria-hidden="true" />
                 BLOCKED
-              </span>
+              </Badge>
             )}
             {isUnknown && (
-              <span className="badge badge-unknown" title={t('projects.issue.pendingVerifyExternalSideEffects')}>
+              <Badge tone="info" title={t('projects.issue.pendingVerifyExternalSideEffects')}>
                 <ShieldAlert size={12} aria-hidden="true" />
                 UNKNOWN
-              </span>
+              </Badge>
             )}
             {issue?.pauseReason === 'USER' && (
-              <span className="badge badge-paused">PAUSED</span>
+              <Badge tone="warning">PAUSED</Badge>
             )}
             {issue?.pauseReason === 'ERROR' && (
-              <span className="badge badge-failed">ERROR</span>
+              <Badge tone="danger">ERROR</Badge>
             )}
           </div>
 
@@ -1367,7 +1369,7 @@ export function IssueDetailModal({
                         {issue.description ? (
                           <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{issue.description}</div>
                         ) : (
-                          <span style={{ color: 'var(--fg-dim)' }}>{t('projects.issue.noSpecDesc')}</span>
+                          <span style={{ color: 'var(--fg-muted)' }}>{t('projects.issue.noSpecDesc')}</span>
                         )}
                       </div>
 
@@ -1422,7 +1424,7 @@ export function IssueDetailModal({
                         onChange={(value) => handleActivityKindChange(value as 'COMMENT' | 'INSTRUCTION')}
                       />
 
-                      <span style={{ fontSize: '11px', color: 'var(--fg-dim)' }}>
+                      <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--fg-muted)' }}>
                         {activityKind === 'INSTRUCTION'
                           ? t('projects.issue.deliverToActiveRun')
                           : t('projects.issue.timelineOnlyNoWakeup')}
@@ -1460,7 +1462,7 @@ export function IssueDetailModal({
                   {/* 历史活动事实流 */}
                   <div className="activity-timeline">
                     {(detail.activities ?? []).length === 0 ? (
-                      <div className="empty-tip">{t('projects.issue.emptyActivities')}</div>
+                      <EmptyState title={t('projects.issue.emptyActivities')} />
                     ) : (
                       (detail.activities ?? []).map((act) => (
                         <div key={act.sequence} className={`activity-item kind-${act.kind.toLowerCase()}`}>
@@ -1499,7 +1501,7 @@ export function IssueDetailModal({
               {activeTab === 'runs' && (
                 <div className="tab-pane">
                   {(detail.runs ?? []).length === 0 ? (
-                    <div className="empty-tip">{t('projects.issue.emptyRuns')}</div>
+                    <EmptyState title={t('projects.issue.emptyRuns')} />
                   ) : (
                     <div className="runs-list">
                       {(detail.runs ?? []).map((r) => (
@@ -1507,18 +1509,16 @@ export function IssueDetailModal({
                           <div className="run-card-header">
                             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                               <span className="run-ordinal">Run #{r.ordinal}</span>
-                              <span className="badge badge-state">{r.state}</span>
+                              <Badge tone="info" mono>{r.state}</Badge>
                               {r.agentName && (
-                                <span className="badge badge-agent">
+                                <Badge tone="accent">
                                   <Bot size={12} aria-hidden="true" />
                                   {r.agentName}
-                                </span>
+                                </Badge>
                               )}
-                              <span className={`badge badge-run-status status-${r.status.toLowerCase()}`}>
-                                {r.status}
-                              </span>
+                              <Badge mono>{r.status}</Badge>
                             </div>
-                            <span style={{ fontSize: '12px', color: 'var(--fg-dim)' }}>
+                            <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--fg-muted)' }}>
                               {t('projects.issue.durationRemaining', { ms: r.remainingExecutionMs })}
                             </span>
                           </div>
@@ -1565,7 +1565,7 @@ export function IssueDetailModal({
                           setResetBudgetState(detail.stageBudgets[0].state)
                         }
                       }}
-                      style={{ fontSize: '13px' }}
+                      style={{ fontSize: 'var(--font-size-sm)' }}
                     >
                       <Coins size={14} aria-hidden="true" />
                       <span>{t('projects.issue.resetStageBudgetAction')}</span>
@@ -1573,13 +1573,13 @@ export function IssueDetailModal({
                   </div>
 
                   {(detail.stageBudgets ?? []).length === 0 ? (
-                    <div className="empty-tip">{t('projects.issue.emptyBudgets')}</div>
+                    <EmptyState title={t('projects.issue.emptyBudgets')} />
                   ) : (
                     <div className="budget-grid">
                       {(detail.stageBudgets ?? []).map((b) => (
                         <div key={b.state} className="budget-card">
                           <div className="budget-card-title">
-                            <span className="badge badge-state">{b.state}</span>
+                            <Badge tone="info" mono>{b.state}</Badge>
                             <span>{t('projects.issue.maxRunsBudget', { max: b.maxRuns })}</span>
                           </div>
                           <div className="budget-stats">
@@ -1589,7 +1589,7 @@ export function IssueDetailModal({
                             </div>
                             <div>
                               <span>{t('projects.issue.remainingRunsLabel')}</span>
-                              <strong style={{ color: Number(b.remainingRuns) > 0 ? 'var(--green-primary)' : 'var(--danger)' }}>
+                              <strong style={{ color: Number(b.remainingRuns) > 0 ? 'var(--accent)' : 'var(--danger)' }}>
                                 {b.remainingRuns}
                               </strong>
                             </div>
@@ -1609,7 +1609,7 @@ export function IssueDetailModal({
               {activeTab === 'agentThreads' && (
                 <div className="tab-pane">
                   {(detail.agentThreads ?? []).length === 0 ? (
-                    <div className="empty-tip">{t('projects.issue.emptyAgentThreads')}</div>
+                    <EmptyState title={t('projects.issue.emptyAgentThreads')} />
                   ) : (
                     <div className="thread-list">
                       {(detail.agentThreads ?? []).map((thread) => (
@@ -1652,7 +1652,7 @@ export function IssueDetailModal({
                     <Button
                       onClick={() => fileInputRef.current?.click()}
                       disabled={isUploadingEvidence || isWriteBlocked}
-                      style={{ fontSize: '13px' }}
+                      style={{ fontSize: 'var(--font-size-sm)' }}
                     >
                       <Upload size={14} aria-hidden="true" />
                       <span>{isUploadingEvidence ? t('projects.issue.uploading') : t('projects.issue.uploadEvidenceAction')}</span>
@@ -1660,7 +1660,7 @@ export function IssueDetailModal({
                   </div>
 
                   {allEvidences.length === 0 ? (
-                    <div className="empty-tip">{t('projects.issue.emptyEvidence')}</div>
+                    <EmptyState title={t('projects.issue.emptyEvidence')} />
                   ) : (
                     <div className="evidence-list">
                       {allEvidences.map((ev) => (
@@ -1737,7 +1737,7 @@ export function IssueDetailModal({
           >
               <form className="modal-card-form" onSubmit={handleResolveUnknownSubmit}>
                 <div className="modal-body">
-                  <p style={{ fontSize: '13px', color: 'var(--fg-dim)', margin: '0 0 12px 0' }}>
+                  <p style={{ fontSize: 'var(--font-size-sm)', color: 'var(--fg-muted)', margin: '0 0 12px 0' }}>
                     {t('projects.issue.resolveUnknownDesc')}
                   </p>
                   <label className="edit-project-field" htmlFor="issue-verification">

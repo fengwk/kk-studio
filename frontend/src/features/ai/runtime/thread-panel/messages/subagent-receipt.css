@@ -8,7 +8,7 @@
   border: 1px solid color-mix(in srgb, var(--info) 35%, transparent);
   border-radius: 8px;
   background: var(--info-soft);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 
 .thread-subagent-receipt-summary {
@@ -77,7 +77,7 @@
 }
 
 .thread-subagent-receipt-state.is-completed {
-  color: var(--green-primary);
+  color: var(--accent);
 }
 
 .thread-subagent-receipt-state.is-error {
@@ -93,7 +93,7 @@
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
-  color: var(--fg-dim);
+  color: var(--fg-muted);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -102,7 +102,7 @@
   display: grid;
   flex: 0 0 auto;
   place-items: center;
-  color: var(--fg-dim);
+  color: var(--fg-muted);
 }
 
 .thread-subagent-receipt-chevron svg {
@@ -151,7 +151,7 @@
 .thread-subagent-receipt-label {
   margin-bottom: 2px;
   color: var(--fg-muted);
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   font-weight: 600;
 }
 

@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react'
+import { Switch } from '@/shared/ui/controls/Switch'
 import { useBrowserPreferences } from '@/features/settings/browser-preferences'
 import {
   browserNotificationPermission,
@@ -76,19 +77,14 @@ export function BrowserNotificationsCard() {
             </span>
           </span>
         </div>
-        <button
-          type="button"
-          role="switch"
-          className="settings-switch"
-          aria-checked={enabled}
-          aria-label={t('settings.notifications.enabled')}
-          disabled={!canEnable}
-          onClick={() => {
-            void handleToggle(!enabled)
+        <Switch
+          checked={enabled}
+          onChange={(next) => {
+            void handleToggle(next)
           }}
-        >
-          <span className="settings-switch-thumb" aria-hidden="true" />
-        </button>
+          label={t('settings.notifications.enabled')}
+          disabled={!canEnable}
+        />
       </div>
       {permission === 'denied' ? (
         <p className="settings-hint danger" role="status">
