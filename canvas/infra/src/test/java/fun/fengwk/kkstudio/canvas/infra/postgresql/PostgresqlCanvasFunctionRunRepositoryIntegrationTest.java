@@ -38,7 +38,7 @@ class PostgresqlCanvasFunctionRunRepositoryIntegrationTest extends PostgresCanva
     UUID requestId = UUID.randomUUID();
     Instant now = Instant.now().truncatedTo(ChronoUnit.MILLIS);
     runs.insertReady(ready(node.id(), requestId, now.minusSeconds(1)));
-    ClaimedRun claim = workStore.claimNext(now, LEASE, "owner").orElseThrow();
+    ClaimedRun claim = workStore.claimNext(LEASE, "owner").orElseThrow();
 
     assertTrue(runs.ownsRunningRequest(canvasId, node.id(), requestId, claim.leaseToken()));
     assertFalse(
@@ -54,9 +54,6 @@ class PostgresqlCanvasFunctionRunRepositoryIntegrationTest extends PostgresCanva
             running.requestId(),
             CanvasFunctionRunStatus.SUCCEEDED,
             running.attempt(),
-            null,
-            null,
-            null,
             running.stage(),
             running.stateJson(),
             null,
@@ -73,9 +70,6 @@ class PostgresqlCanvasFunctionRunRepositoryIntegrationTest extends PostgresCanva
         requestId,
         CanvasFunctionRunStatus.READY,
         0,
-        availableAt,
-        null,
-        null,
         "QUEUED",
         minimalRunState("QUEUED"),
         null,

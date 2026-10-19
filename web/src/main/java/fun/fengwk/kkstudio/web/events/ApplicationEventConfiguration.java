@@ -90,58 +90,59 @@ public class ApplicationEventConfiguration {
             new PostgresqlNotificationHandler(
                 DurableWorkQueue.CHANNEL,
                 targetType ->
-                    durableWorkDispatcher(targetType, dispatcher, issueControllerDispatcher).run(),
+                    durableWorkDispatcher(
+                            targetType,
+                            dispatcher,
+                            issueControllerDispatcher,
+                            canvasFunctionDispatcher)
+                        .run(),
                 () -> {
                   dispatcher.wake();
                   issueControllerDispatcher.wake();
+                  canvasFunctionDispatcher.wake();
                 }),
-            // 3. 画布函数唤醒：广播提示有新的 Canvas 异步函数计算任务就绪，唤醒画布函数调度器
-            new PostgresqlNotificationHandler(
-                CanvasFunctionDispatcher.CHANNEL,
-                ignored -> canvasFunctionDispatcher.wake(),
-                canvasFunctionDispatcher::wake),
-            // 4. 会话版本失效：Thread 版本号推进，通知 WebSocket 向前端广播版本事件以触发快照对账
+            // 2. 会话版本失效：Thread 版本号推进，通知 WebSocket 向前端广播版本事件以触发快照对账
             new PostgresqlNotificationHandler(
                 ThreadVersionHub.CHANNEL,
                 threadVersionHub::onNotification,
                 threadVersionHub::broadcastResync),
-            // 5. 画布版本失效：Canvas 文档版本号推进，通知 WebSocket 向前端广播版本事件以触发图谱更新
+            // 3. 画布版本失效：Canvas 文档版本号推进，通知 WebSocket 向前端广播版本事件以触发图谱更新
             new PostgresqlNotificationHandler(
                 CanvasVersionHub.CHANNEL,
                 canvasVersionHub::onNotification,
                 canvasVersionHub::broadcastResync),
-            // 7. Project/Issue 失效：数据库事实提交后按 projectId 提示浏览器回读权威 Snapshot
+            // 4. Project/Issue 失效：数据库事实提交后按 projectId 提示浏览器回读权威 Snapshot
             new PostgresqlNotificationHandler(
                 ProjectInvalidationHub.CHANNEL,
                 projectInvalidationHub::onNotification,
                 projectInvalidationHub::broadcastResync),
-            // 8. 系统设置同步：集群任一节点修改全局设置提交后，广播通知所有节点原子回读最新快照
+            // 5. 系统设置同步：集群任一节点修改全局设置提交后，广播通知所有节点原子回读最新快照
             new PostgresqlNotificationHandler(
                 SystemSettingsChangeHandler.CHANNEL,
                 systemSettingsChangeHandler::onNotification,
                 systemSettingsChangeHandler::onResync),
-            // 9. 流式增量推送：大模型生成的文本 Delta 与工具局部输出，直接经由通道推送到前端，不落库
+            // 6. 流式增量推送：大模型生成的文本 Delta 与工具局部输出，直接经由通道推送到前端，不落库
             new PostgresqlNotificationHandler(
                 PostgresqlRealtimeEventSource.CHANNEL,
                 realtimeEventSource::onNotification,
                 realtimeEventSource::onResync),
-            // 10. Skill Package 变更：payload 是 package 名，把该 Package 同步到本节点全部 READY 的 Environment；
+            // 7. Skill Package 变更：payload 是 package 名，把该 Package 同步到本节点全部 READY 的 Environment；
             // 建连/重连时全量对账，通知丢失不改变 durable truth
             new PostgresqlNotificationHandler(
                 EnvironmentSkillSyncOrchestrator.CHANNEL,
                 environmentSkillSyncOrchestrator::onPackageChanged,
                 environmentSkillSyncOrchestrator::reconcileReadyEnvironments),
-            // 11. 执行树失效：Thread 写事务内由写入口把 payload 聚合为真实执行根 id，浏览器回读该根的树
+            // 8. 执行树失效：Thread 写事务内由写入口把 payload 聚合为真实执行根 id，浏览器回读该根的树
             new PostgresqlNotificationHandler(
                 ExecutionTreeChangeHub.CHANNEL,
                 executionTreeChangeHub::onNotification,
                 executionTreeChangeHub::broadcastResync),
-            // 12. 待处理交互失效：ToolInvocation 进出审批/人工输入等待后提交，payload 是真实执行根 id
+            // 9. 待处理交互失效：ToolInvocation 进出审批/人工输入等待后提交，payload 是真实执行根 id
             new PostgresqlNotificationHandler(
                 InteractionChangeHub.CHANNEL,
                 interactionChangeHub::onNotification,
                 interactionChangeHub::broadcastResync),
-            // 13. 环境连接变更：payload 是环境 id，不是执行根；环境精准失效，交互全量对账。
+            // 10. 环境连接变更：payload 是环境 id，不是执行根；环境精准失效，交互全量对账。
             new PostgresqlNotificationHandler(
                 EnvironmentChangeHub.CHANNEL,
                 payload -> {
@@ -152,7 +153,7 @@ public class ApplicationEventConfiguration {
                   environmentChangeHub.broadcastResync();
                   interactionChangeHub.broadcastResync();
                 }),
-            // 14. Plugin 目录变更：集群任一节点提交配置后广播提示其它节点立即回读权威目录；payload 只作提示、不能作为可信状态，
+            // 11. Plugin 目录变更：集群任一节点提交配置后广播提示其它节点立即回读权威目录；payload 只作提示、不能作为可信状态，
             // 建连/重连时同样 resync，通知丢失由周期对账追平
             pluginCatalogNotificationHandler),
         Duration.ofMillis(advanced.postgresqlWorkNotificationPollMillis()),
@@ -199,9 +200,12 @@ public class ApplicationEventConfiguration {
   private static Runnable durableWorkDispatcher(
       String targetType,
       HarnessWorkDispatcher harnessDispatcher,
-      IssueControllerDispatcher issueControllerDispatcher) {
-    return IssueControllerDispatcher.TARGET_TYPE.equals(targetType)
-        ? issueControllerDispatcher::wake
-        : harnessDispatcher::wake;
+      IssueControllerDispatcher issueControllerDispatcher,
+      CanvasFunctionDispatcher canvasFunctionDispatcher) {
+    return switch (targetType) {
+      case IssueControllerDispatcher.TARGET_TYPE -> issueControllerDispatcher::wake;
+      case CanvasFunctionDispatcher.TARGET_TYPE -> canvasFunctionDispatcher::wake;
+      default -> harnessDispatcher::wake;
+    };
   }
 }

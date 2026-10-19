@@ -14,7 +14,6 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionResourceStream;
 
 import java.io.InputStream;
-import java.time.Clock;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
@@ -34,7 +33,6 @@ final class CanvasFunctionExecutionContextImpl implements CanvasFunctionExecutio
   private final CanvasFunctionRunTransactions transactions;
   private final CanvasFunctionBlobAccess blobAccess;
   private final CanvasResourceMaterializer materializer;
-  private final Clock clock;
   private final ClaimedRun claim;
   private final AtomicBoolean ownershipLost;
   private final AtomicReference<CanvasFunctionFrozenRun> current;
@@ -44,14 +42,12 @@ final class CanvasFunctionExecutionContextImpl implements CanvasFunctionExecutio
       CanvasFunctionRunTransactions transactions,
       CanvasFunctionBlobAccess blobAccess,
       ObjectProvider<CanvasResourceMaterializer> materializers,
-      Clock clock,
       ClaimedRun claim,
       AtomicBoolean ownershipLost,
       CanvasFunctionFrozenRun frozen) {
     this.runRepository = Objects.requireNonNull(runRepository, "runRepository");
     this.transactions = Objects.requireNonNull(transactions, "transactions");
     this.blobAccess = Objects.requireNonNull(blobAccess, "blobAccess");
-    this.clock = Objects.requireNonNull(clock, "clock");
     this.claim = Objects.requireNonNull(claim, "claim");
     this.ownershipLost = Objects.requireNonNull(ownershipLost, "ownershipLost");
     materializer =
@@ -89,8 +85,7 @@ final class CanvasFunctionExecutionContextImpl implements CanvasFunctionExecutio
             run ->
                 run.status() == CanvasFunctionRunStatus.RUNNING
                     && run.requestId().equals(frozen.requestId())
-                    && Objects.equals(run.leaseToken(), claim.leaseToken())
-                    && run.leaseUntil().isAfter(clock.instant()))
+                    && runRepository.holdsLease(run.nodeId(), claim.leaseToken()))
         .isPresent();
   }
 

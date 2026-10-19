@@ -648,8 +648,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
     assertEquals(1, pinRepository.findByRun(canvasId, targetNodeId, ready.requestId()).size());
 
     // 2. Worker 认领 Run
-    ClaimedRun claim =
-        workStore.claimNext(ready.availableAt(), Duration.ofSeconds(30), "worker-1").orElseThrow();
+    ClaimedRun claim = workStore.claimNext(Duration.ofSeconds(30), "worker-1").orElseThrow();
     CanvasFunctionFrozenRun frozen = decode(claim.run());
 
     // 3. beginSubmit 持久化提交意图 (SUBMITTING)
@@ -720,7 +719,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
     assertEquals("UNKNOWN", unknownRun.stage());
     assertEquals(
         "external submission outcome is unknown; manual verification required", unknownRun.error());
-    assertNull(unknownRun.leaseToken());
+    assertFalse(runRepository.holdsLease(unknownRun.nodeId(), claim.leaseToken()));
 
     // UNKNOWN 状态下必须保留 INPUT 和 OUTPUT pin，预分配目标资源不能被丢弃
     assertFalse(pinRepository.findByRun(canvasId, targetNodeId, unknownRun.requestId()).isEmpty());
@@ -759,9 +758,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
 
     // 再次领取执行：已处于 SUBMITTED，直接 execute 物化并 completeSuccess
     ClaimedRun resumedClaim =
-        workStore
-            .claimNext(resumed.availableAt(), Duration.ofSeconds(30), "worker-resumed")
-            .orElseThrow();
+        workStore.claimNext(Duration.ofSeconds(30), "worker-resumed").orElseThrow();
     assertTrue(
         runtimeTransactions.completeSuccess(
             decode(resumedClaim.run()),
@@ -819,9 +816,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
     // 2. 测试 UNKNOWN -> CANCELLED
     CanvasFunctionRun replacement = startRun(canvasId, targetNodeId, REQUEST_2).run();
     ClaimedRun claim2 =
-        workStore
-            .claimNext(replacement.availableAt(), Duration.ofSeconds(30), "worker-cancelled")
-            .orElseThrow();
+        workStore.claimNext(Duration.ofSeconds(30), "worker-cancelled").orElseThrow();
     CanvasFunctionFrozenRun frozen2 = decode(claim2.run());
     CanvasResource target2 =
         materializeTarget(canvasId, targetNodeId, frozen2.requestId(), frozen2.output(0));
@@ -895,7 +890,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
 
     CanvasFunctionRun runInDb = runRepository.findByNodeId(nodeId).orElseThrow();
     assertEquals(CanvasFunctionRunStatus.RUNNING, runInDb.status());
-    assertEquals(claim.leaseToken(), runInDb.leaseToken());
+    assertTrue(runRepository.holdsLease(runInDb.nodeId(), claim.leaseToken()));
 
     // target 仍然保持未挂接
     CanvasResource unowned = resourceRepository.findById(canvasId, target.id()).orElseThrow();
@@ -996,7 +991,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
     assertFalse(runtimeTransactions.completeSuccess(frozen, "stale", frozen.outputResourceIds()));
     CanvasFunctionRun current = runRepository.findByNodeId(nodeId).orElseThrow();
     assertEquals(CanvasFunctionRunStatus.RUNNING, current.status());
-    assertEquals(claim.leaseToken(), current.leaseToken());
+    assertTrue(runRepository.holdsLease(current.nodeId(), claim.leaseToken()));
     assertTrue(resourceRepository.findById(canvasId, target.id()).isPresent());
     assertEquals(1L, version(canvasId));
   }
@@ -1238,13 +1233,14 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
     Instant now = Instant.now();
     Instant past = now.minusSeconds(10);
     jdbc.update(
-        "update canvas_function_run set lease_until = ? where node_id = ?",
+        "update durable_work set lease_until = ? where target_type = 'CANVAS_RUN'"
+            + " and target_id = ?",
         Timestamp.from(past),
         nodeId);
 
     // 3. Worker 2 重新认领
     ClaimedRun claim2 =
-        workStore.claimNext(now, Duration.ofSeconds(30), "worker-2-recovered").orElseThrow();
+        workStore.claimNext(Duration.ofSeconds(30), "worker-2-recovered").orElseThrow();
     assertEquals(nodeId, claim2.nodeId());
     assertEquals(REQUEST_1, claim2.requestId().toString());
     CanvasFunctionFrozenRun frozen2 = decode(claim2.run());
@@ -1469,10 +1465,7 @@ class CanvasFunctionRuntimeFoundationTest extends PostgresCanvasInfraTestSupport
   private ClaimedRun claimStartedRun(
       UUID canvasId, UUID nodeId, String requestId, String ownerToken) {
     CanvasFunctionRun started = startRun(canvasId, nodeId, requestId).run();
-    ClaimedRun claim =
-        workStore
-            .claimNext(started.availableAt(), Duration.ofSeconds(30), ownerToken)
-            .orElseThrow();
+    ClaimedRun claim = workStore.claimNext(Duration.ofSeconds(30), ownerToken).orElseThrow();
     assertEquals(nodeId, claim.nodeId(), "claim must correspond to the started node");
     return claim;
   }

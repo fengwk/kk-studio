@@ -29,10 +29,9 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunStateCodecPort;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionSubmitState;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasFunctionWorkStore;
+import fun.fengwk.kkstudio.work.WorkClaim;
 
-import java.time.Clock;
 import java.time.Instant;
-import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -59,7 +58,9 @@ class CanvasFunctionBindingExecutionTest {
     CanvasFunctionFrozenRun frozen =
         frozenRun(new CanvasFunctionBinding(definition), CanvasFunctionSubmitState.SUBMITTED);
     CanvasFunctionRun claimRun = runningRun();
-    ClaimedRun claim = new ClaimedRun(claimRun);
+    ClaimedRun claim =
+        new ClaimedRun(
+            claimRun, new WorkClaim(claimRun.nodeId(), 1L, "lease", Instant.EPOCH.plusSeconds(30)));
     CanvasFunctionRunStateCodecPort stateCodec = mock(CanvasFunctionRunStateCodecPort.class);
     when(stateCodec.decode(claimRun.stateJson())).thenReturn(frozen);
     CanvasFunctionRunTransactions transactions = mock(CanvasFunctionRunTransactions.class);
@@ -89,7 +90,9 @@ class CanvasFunctionBindingExecutionTest {
     CanvasFunctionFrozenRun frozen =
         frozenRun(new CanvasFunctionBinding(definition), CanvasFunctionSubmitState.PENDING);
     CanvasFunctionRun claimRun = runningRun();
-    ClaimedRun claim = new ClaimedRun(claimRun);
+    ClaimedRun claim =
+        new ClaimedRun(
+            claimRun, new WorkClaim(claimRun.nodeId(), 1L, "lease", Instant.EPOCH.plusSeconds(30)));
     CanvasFunctionRunStateCodecPort stateCodec = mock(CanvasFunctionRunStateCodecPort.class);
     when(stateCodec.decode(claimRun.stateJson())).thenReturn(frozen);
     CanvasFunctionRunTransactions transactions = mock(CanvasFunctionRunTransactions.class);
@@ -117,7 +120,9 @@ class CanvasFunctionBindingExecutionTest {
     CanvasFunctionFrozenRun frozen =
         frozenRun(new CanvasFunctionBinding(definition), CanvasFunctionSubmitState.SUBMITTED);
     CanvasFunctionRun claimRun = runningRun();
-    ClaimedRun claim = new ClaimedRun(claimRun);
+    ClaimedRun claim =
+        new ClaimedRun(
+            claimRun, new WorkClaim(claimRun.nodeId(), 1L, "lease", Instant.EPOCH.plusSeconds(30)));
     CanvasFunctionRunStateCodecPort stateCodec = mock(CanvasFunctionRunStateCodecPort.class);
     when(stateCodec.decode(claimRun.stateJson())).thenReturn(frozen);
     CanvasFunctionRunTransactions transactions = mock(CanvasFunctionRunTransactions.class);
@@ -145,9 +150,6 @@ class CanvasFunctionBindingExecutionTest {
             REQUEST,
             CanvasFunctionRunStatus.CANCELLED,
             1,
-            null,
-            null,
-            null,
             "CANCELLED",
             "{\"stage\":\"CANCELLED\"}",
             null,
@@ -192,7 +194,7 @@ class CanvasFunctionBindingExecutionTest {
       CanvasFunctionRunTransactions transactions,
       ScheduledThreadPoolExecutor scheduler) {
     CanvasFunctionWorkStore workStore = mock(CanvasFunctionWorkStore.class);
-    when(workStore.renew(any(), any(), any())).thenReturn(true);
+    when(workStore.renew(any(), any())).thenReturn(true);
     @SuppressWarnings("unchecked")
     ObjectProvider<CanvasResourceMaterializer> materializers = mock(ObjectProvider.class);
     when(materializers.getIfAvailable()).thenReturn(mock(CanvasResourceMaterializer.class));
@@ -208,7 +210,6 @@ class CanvasFunctionBindingExecutionTest {
         materializers,
         workStore,
         properties,
-        Clock.fixed(NOW, ZoneOffset.UTC),
         scheduler);
   }
 
@@ -234,9 +235,6 @@ class CanvasFunctionBindingExecutionTest {
         REQUEST,
         CanvasFunctionRunStatus.RUNNING,
         1,
-        null,
-        "lease",
-        NOW.plusSeconds(30),
         "SUBMITTED",
         "{\"stage\":\"SUBMITTED\"}",
         null,

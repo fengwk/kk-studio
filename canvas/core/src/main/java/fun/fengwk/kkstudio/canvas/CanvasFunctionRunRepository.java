@@ -13,10 +13,13 @@ public interface CanvasFunctionRunRepository {
   Optional<CanvasFunctionRun> findByNodeIdForUpdate(UUID nodeId);
 
   /**
-   * 在已持有 document → run 行锁的短事务内检查输出 ownership，包含节点所属 canvas、request、RUNNING、token 与租约。
+   * 在已持有 document → run 行锁的短事务内检查输出 ownership，包含节点所属 canvas、request、RUNNING 与该 token 的执行租约。
    * 租约必须使用数据库当前时间判定；不得缓存结果或使用事务开始时间。
    */
   boolean ownsRunningRequest(UUID canvasId, UUID nodeId, UUID requestId, String leaseToken);
+
+  /** 以数据库时钟判断 {@code leaseToken} 是否仍持有该节点 Run 的执行租约。 */
+  boolean holdsLease(UUID nodeId, String leaseToken);
 
   List<CanvasFunctionRun> findByCanvasId(UUID canvasId);
 
@@ -35,9 +38,9 @@ public interface CanvasFunctionRunRepository {
   boolean transitionTerminal(CanvasFunctionRun run, String leaseToken);
 
   /**
-   * 外部提交结果不明时把 RUNNING Run 收敛为 UNKNOWN：清租约、保留冻结计划与 pin，退出自动调度。
+   * 外部提交结果不明时把 RUNNING Run 收敛为 UNKNOWN：删除执行 Work、保留冻结计划与 pin，退出自动调度。
    *
-   * <p>CAS 同时要求 {@code request_id}、{@code status='RUNNING'}、{@code lease_token} 与未过期租约。
+   * <p>CAS 同时要求 {@code request_id}、{@code status='RUNNING'} 与该 lease token 仍持有未过期的执行租约。
    */
   boolean markUnknown(CanvasFunctionRun run, String leaseToken);
 

@@ -32,12 +32,11 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionReferencePolicy;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionResourceStream;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionSubmitState;
+import fun.fengwk.kkstudio.work.WorkClaim;
 
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
-import java.time.Clock;
 import java.time.Instant;
-import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -111,16 +110,16 @@ class CanvasFunctionExecutionContextImplTest {
             REQUEST,
             CanvasFunctionRunStatus.RUNNING,
             1,
-            null,
-            LEASE,
-            Instant.EPOCH.plusSeconds(60),
             "QUEUED",
             "{\"stage\":\"QUEUED\"}",
             null,
             Instant.EPOCH,
             Instant.EPOCH);
-    claim = new ClaimedRun(running);
+    claim =
+        new ClaimedRun(
+            running, new WorkClaim(running.nodeId(), 1L, "lease", Instant.EPOCH.plusSeconds(30)));
     when(runs.findByNodeId(NODE)).thenReturn(Optional.of(running));
+    when(runs.holdsLease(NODE, "lease")).thenReturn(true);
   }
 
   /** 只能读取冻结清单内的输入资源，且传递清单锁定的长度。 */
@@ -265,26 +264,12 @@ class CanvasFunctionExecutionContextImplTest {
 
   /** isRunning 检查状态、requestId、租约 token 及租约到期时间。 */
   @Test
-  void isRunningChecksStatusLeaseAndExpiration() {
+  void isRunningChecksStatusAndLiveLease() {
     CanvasFunctionExecutionContextImpl context = context();
     assertTrue(context.isRunning());
 
-    // 租约过期
-    CanvasFunctionRun expired =
-        new CanvasFunctionRun(
-            NODE,
-            REQUEST,
-            CanvasFunctionRunStatus.RUNNING,
-            1,
-            null,
-            LEASE,
-            Instant.EPOCH.minusSeconds(1),
-            "QUEUED",
-            "{\"stage\":\"QUEUED\"}",
-            null,
-            Instant.EPOCH,
-            Instant.EPOCH);
-    when(runs.findByNodeId(NODE)).thenReturn(Optional.of(expired));
+    // 数据库时钟下租约已失效
+    when(runs.holdsLease(NODE, "lease")).thenReturn(false);
     assertFalse(context.isRunning());
 
     // 本地 ownership 丢失
@@ -395,14 +380,7 @@ class CanvasFunctionExecutionContextImplTest {
   private CanvasFunctionExecutionContextImpl context(AtomicBoolean ownershipLost) {
     ObjectProvider<CanvasResourceMaterializer> materializerProvider = provider(materializer);
     return new CanvasFunctionExecutionContextImpl(
-        runs,
-        transactions,
-        blobAccess,
-        materializerProvider,
-        Clock.fixed(Instant.EPOCH, ZoneOffset.UTC),
-        claim,
-        ownershipLost,
-        frozen);
+        runs, transactions, blobAccess, materializerProvider, claim, ownershipLost, frozen);
   }
 
   @SuppressWarnings("unchecked")

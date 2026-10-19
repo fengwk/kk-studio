@@ -18,7 +18,5 @@ class PostgresqlCanvasChangeNotifierTest {
   void rejectsNotificationWithoutActiveTransaction() {
     assertThrows(
         IllegalStateException.class, () -> notifier.revisionChanged(UUID.randomUUID(), 1L));
-    assertThrows(
-        IllegalStateException.class, () -> notifier.functionWorkChanged(UUID.randomUUID()));
   }
 }

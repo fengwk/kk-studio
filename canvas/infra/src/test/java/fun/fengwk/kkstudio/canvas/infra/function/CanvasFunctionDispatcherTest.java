@@ -22,11 +22,10 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRun;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunStatus;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasFunctionWorkStore;
+import fun.fengwk.kkstudio.work.WorkClaim;
 
 import java.nio.charset.StandardCharsets;
-import java.time.Clock;
 import java.time.Instant;
-import java.time.ZoneOffset;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -62,7 +61,7 @@ class CanvasFunctionDispatcherTest {
     CanvasFunctionWorker worker = mock(CanvasFunctionWorker.class);
     ClaimedRun first = claim("first");
     ClaimedRun second = claim("second");
-    when(store.claimNext(any(), any(), anyString()))
+    when(store.claimNext(any(), anyString()))
         .thenReturn(Optional.of(first), Optional.of(second), Optional.empty());
     CountDownLatch entered = new CountDownLatch(1);
     CountDownLatch release = new CountDownLatch(1);
@@ -99,7 +98,7 @@ class CanvasFunctionDispatcherTest {
     CanvasFunctionWorker worker = mock(CanvasFunctionWorker.class);
     ClaimedRun first = claim("fatal");
     ClaimedRun second = claim("after-fatal");
-    when(store.claimNext(any(), any(), anyString()))
+    when(store.claimNext(any(), anyString()))
         .thenReturn(Optional.of(first), Optional.of(second), Optional.empty());
     OutOfMemoryError fatal = new OutOfMemoryError("simulated fatal error");
     doThrow(fatal).when(worker).run(first);
@@ -141,7 +140,7 @@ class CanvasFunctionDispatcherTest {
     CanvasFunctionWorker worker = mock(CanvasFunctionWorker.class);
     ClaimedRun first = claim("executor-rejected");
     ClaimedRun second = claim("after-executor-error");
-    when(store.claimNext(any(), any(), anyString()))
+    when(store.claimNext(any(), anyString()))
         .thenReturn(Optional.of(first), Optional.of(second), Optional.empty());
     AssertionError fatal = new AssertionError("worker executor failed before accepting the task");
     AtomicBoolean rejectFirst = new AtomicBoolean(true);
@@ -155,17 +154,11 @@ class CanvasFunctionDispatcherTest {
     // 内联 drain：接收前 Error 直接在 start() 调用栈上被观察到。
     CanvasFunctionDispatcher dispatcher =
         new CanvasFunctionDispatcher(
-            store,
-            properties(1_000),
-            Clock.fixed(NOW, ZoneOffset.UTC),
-            Runnable::run,
-            workers,
-            poll,
-            worker);
+            store, properties(1_000), Runnable::run, workers, poll, worker);
 
     assertSame(fatal, assertThrows(AssertionError.class, dispatcher::start));
     // claim 被 ownership-fenced 归还，且 permit 未泄漏。
-    verify(store).reschedule(eq(first), any(), any());
+    verify(store).reschedule(eq(first), any());
     dispatcher.wake();
     await(
         () -> {
@@ -181,7 +174,7 @@ class CanvasFunctionDispatcherTest {
     CanvasFunctionWorkStore store = mock(CanvasFunctionWorkStore.class);
     CanvasFunctionWorker worker = mock(CanvasFunctionWorker.class);
     ClaimedRun claim = claim("rejected");
-    when(store.claimNext(any(), any(), anyString())).thenReturn(Optional.of(claim));
+    when(store.claimNext(any(), anyString())).thenReturn(Optional.of(claim));
     Executor rejecting =
         task -> {
           throw new RejectedExecutionException("full");
@@ -191,10 +184,10 @@ class CanvasFunctionDispatcherTest {
     dispatcher.start();
     await(
         () -> {
-          verify(store).reschedule(any(), any(), any());
+          verify(store).reschedule(any(), any());
           return true;
         });
-    verify(store).claimNext(any(), any(), anyString());
+    verify(store).claimNext(any(), anyString());
     dispatcher.stop();
   }
 
@@ -204,7 +197,7 @@ class CanvasFunctionDispatcherTest {
     CanvasFunctionWorkStore store = mock(CanvasFunctionWorkStore.class);
     CanvasFunctionWorker worker = mock(CanvasFunctionWorker.class);
     ClaimedRun delayed = claim("poll");
-    when(store.claimNext(any(), any(), anyString()))
+    when(store.claimNext(any(), anyString()))
         .thenReturn(Optional.empty(), Optional.of(delayed), Optional.empty());
     CanvasFunctionDispatcher dispatcher = dispatcher(store, worker, workerExecutor, properties(20));
 
@@ -216,7 +209,7 @@ class CanvasFunctionDispatcherTest {
         });
     dispatcher.stop();
     assertFalse(dispatcher.isRunning());
-    verify(store, atLeastOnce()).claimNext(any(), any(), anyString());
+    verify(store, atLeastOnce()).claimNext(any(), anyString());
   }
 
   /** lifecycle 必须幂等，start 前/stop 后 wake 不触库，stop callback 必达且 stop 后禁止重启。 */
@@ -224,12 +217,12 @@ class CanvasFunctionDispatcherTest {
   void lifecycleIsIdempotentAndClosesCleanly() {
     CanvasFunctionWorkStore store = mock(CanvasFunctionWorkStore.class);
     CanvasFunctionWorker worker = mock(CanvasFunctionWorker.class);
-    when(store.claimNext(any(), any(), anyString())).thenReturn(Optional.empty());
+    when(store.claimNext(any(), anyString())).thenReturn(Optional.empty());
     CanvasFunctionDispatcher dispatcher =
         dispatcher(store, worker, workerExecutor, properties(1_000));
 
     dispatcher.wake();
-    verify(store, never()).claimNext(any(), any(), anyString());
+    verify(store, never()).claimNext(any(), anyString());
     dispatcher.start();
     dispatcher.start();
     dispatcher.stop();
@@ -257,19 +250,13 @@ class CanvasFunctionDispatcherTest {
         };
     CanvasFunctionDispatcher rejected =
         new CanvasFunctionDispatcher(
-            store,
-            properties(1_000),
-            Clock.fixed(NOW, ZoneOffset.UTC),
-            rejectingDrain,
-            workerExecutor,
-            poll,
-            worker);
+            store, properties(1_000), rejectingDrain, workerExecutor, poll, worker);
     rejected.start();
     rejected.wake();
-    verify(store, never()).claimNext(any(), any(), anyString());
+    verify(store, never()).claimNext(any(), anyString());
     rejected.stop();
 
-    when(store.claimNext(any(), any(), anyString()))
+    when(store.claimNext(any(), anyString()))
         .thenThrow(new IllegalStateException("database unavailable"))
         .thenReturn(Optional.empty());
     CanvasFunctionDispatcher retryable =
@@ -277,7 +264,7 @@ class CanvasFunctionDispatcherTest {
     retryable.start();
     await(
         () -> {
-          verify(store, atLeastOnce()).claimNext(any(), any(), anyString());
+          verify(store, atLeastOnce()).claimNext(any(), anyString());
           return true;
         });
     retryable.wake();
@@ -289,8 +276,7 @@ class CanvasFunctionDispatcherTest {
       CanvasFunctionWorker worker,
       Executor workers,
       CanvasFunctionRuntimeProperties properties) {
-    return new CanvasFunctionDispatcher(
-        store, properties, Clock.fixed(NOW, ZoneOffset.UTC), drain, workers, poll, worker);
+    return new CanvasFunctionDispatcher(store, properties, drain, workers, poll, worker);
   }
 
   private static CanvasFunctionRuntimeProperties properties(long pollMillis) {
@@ -310,15 +296,13 @@ class CanvasFunctionDispatcherTest {
             requestId,
             CanvasFunctionRunStatus.RUNNING,
             1,
-            null,
-            "lease-" + seed,
-            NOW.plusSeconds(30),
             "QUEUED",
             "{\"stage\":\"QUEUED\"}",
             null,
             NOW,
             NOW);
-    return new ClaimedRun(run);
+    return new ClaimedRun(
+        run, new WorkClaim(run.nodeId(), 1L, "lease", Instant.EPOCH.plusSeconds(30)));
   }
 
   private static void await(Check check) throws Exception {

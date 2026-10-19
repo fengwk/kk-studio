@@ -472,9 +472,6 @@ class StudioCanvasFunctionControllerTest {
         REQUEST,
         status,
         status == CanvasFunctionRunStatus.READY ? 0 : 1,
-        status == CanvasFunctionRunStatus.READY ? NOW : null,
-        status == CanvasFunctionRunStatus.RUNNING ? "lease" : null,
-        status == CanvasFunctionRunStatus.RUNNING ? NOW.plusSeconds(30) : null,
         stage,
         "{\"stage\":\"" + stage + "\",\"secret\":\"hidden\"}",
         status == CanvasFunctionRunStatus.FAILED || status == CanvasFunctionRunStatus.UNKNOWN

@@ -5,9 +5,7 @@ import org.springframework.context.SmartLifecycle;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasFunctionWorkStore;
 import fun.fengwk.kkstudio.harness.common.concurrent.BoundedWorkDispatcher;
 
-import java.time.Clock;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.Executor;
@@ -22,19 +20,18 @@ import java.util.concurrent.ScheduledExecutorService;
  */
 public final class CanvasFunctionDispatcher implements SmartLifecycle, AutoCloseable {
 
-  public static final String CHANNEL = "canvas_function_work";
+  /** Canvas Function Run 在 {@code durable_work} 上的 target type。 */
+  public static final String TARGET_TYPE = "CANVAS_RUN";
 
   private static final String NAME = "canvas function dispatcher";
 
   private final CanvasFunctionWorkStore workStore;
   private final CanvasFunctionRuntimeProperties properties;
-  private final Clock clock;
   private final BoundedWorkDispatcher<ClaimedRun> dispatcher;
 
   public CanvasFunctionDispatcher(
       CanvasFunctionWorkStore workStore,
       CanvasFunctionRuntimeProperties properties,
-      Clock clock,
       Executor drainExecutor,
       Executor workerExecutor,
       ScheduledExecutorService pollScheduler,
@@ -42,7 +39,6 @@ public final class CanvasFunctionDispatcher implements SmartLifecycle, AutoClose
     this.workStore = Objects.requireNonNull(workStore, "workStore");
     this.properties = Objects.requireNonNull(properties, "properties");
     this.properties.validate();
-    this.clock = Clock.tick(Objects.requireNonNull(clock, "clock"), Duration.ofMillis(1));
     this.dispatcher =
         new BoundedWorkDispatcher<>(
             NAME,
@@ -100,18 +96,14 @@ public final class CanvasFunctionDispatcher implements SmartLifecycle, AutoClose
   }
 
   private ClaimedRun claimNext() {
-    Instant now = clock.instant();
     return workStore
         .claimNext(
-            now,
-            Duration.ofMillis(properties.getLeaseDurationMillis()),
-            UUID.randomUUID().toString())
+            Duration.ofMillis(properties.getLeaseDurationMillis()), UUID.randomUUID().toString())
         .orElse(null);
   }
 
   /** ownership-fenced 归还：只把仍持有的 RUNNING claim 按 rejectionDelay 重排回 READY。 */
   private void returnClaim(ClaimedRun claim) {
-    workStore.reschedule(
-        claim, clock.instant(), Duration.ofMillis(properties.getRejectionDelayMillis()));
+    workStore.reschedule(claim, Duration.ofMillis(properties.getRejectionDelayMillis()));
   }
 }

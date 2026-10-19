@@ -34,10 +34,9 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionRunStateCodecPort;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionSubmitState;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionUnknownException;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasFunctionWorkStore;
+import fun.fengwk.kkstudio.work.WorkClaim;
 
-import java.time.Clock;
 import java.time.Instant;
-import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -57,7 +56,7 @@ class CanvasFunctionWorkerHeartbeatTest {
   @Test
   void twoPhaseExecutionFlowPersistsSubmitIntentBeforeExecute() throws Exception {
     Fixture fixture = new Fixture(CanvasFunctionSubmitState.PENDING);
-    when(fixture.workStore.renew(any(), any(), any())).thenReturn(true);
+    when(fixture.workStore.renew(any(), any())).thenReturn(true);
     when(fixture.transactions.beginSubmit(any(), eq(fixture.claim.leaseToken())))
         .thenReturn(fixture.frozenSubmitting);
     when(fixture.transactions.confirmSubmitted(any(), eq(fixture.claim.leaseToken())))
@@ -82,7 +81,7 @@ class CanvasFunctionWorkerHeartbeatTest {
   @Test
   void resumedSubmittingRunConvergesDirectlyToUnknownWithoutCallingSubmit() throws Exception {
     Fixture fixture = new Fixture(CanvasFunctionSubmitState.SUBMITTING);
-    when(fixture.workStore.renew(any(), any(), any())).thenReturn(true);
+    when(fixture.workStore.renew(any(), any())).thenReturn(true);
 
     try {
       fixture.worker.run(fixture.claim);
@@ -103,7 +102,7 @@ class CanvasFunctionWorkerHeartbeatTest {
   @Test
   void adapterUnknownExceptionConvergesToUnknownStatus() throws Exception {
     Fixture fixture = new Fixture(CanvasFunctionSubmitState.SUBMITTED);
-    when(fixture.workStore.renew(any(), any(), any())).thenReturn(true);
+    when(fixture.workStore.renew(any(), any())).thenReturn(true);
     doThrow(new CanvasFunctionUnknownException("external task timeout"))
         .when(fixture.adapter)
         .execute(any(), any());
@@ -126,7 +125,7 @@ class CanvasFunctionWorkerHeartbeatTest {
   @Test
   void heartbeatRenewsWhileBlockingAdapterRuns() throws Exception {
     Fixture fixture = new Fixture(CanvasFunctionSubmitState.SUBMITTED);
-    when(fixture.workStore.renew(any(), any(), any()))
+    when(fixture.workStore.renew(any(), any()))
         .thenAnswer(
             ignored -> {
               fixture.renewed.countDown();
@@ -154,7 +153,7 @@ class CanvasFunctionWorkerHeartbeatTest {
   @Test
   void heartbeatLossCancelsCheckpointAndTerminalWrite() throws Exception {
     Fixture fixture = new Fixture(CanvasFunctionSubmitState.SUBMITTED);
-    when(fixture.workStore.renew(any(), any(), any()))
+    when(fixture.workStore.renew(any(), any()))
         .thenAnswer(
             ignored -> {
               fixture.renewed.countDown();
@@ -191,7 +190,7 @@ class CanvasFunctionWorkerHeartbeatTest {
   @Test
   void heartbeatExceptionCancelsTerminalWrite() throws Exception {
     Fixture fixture = new Fixture(CanvasFunctionSubmitState.SUBMITTED);
-    when(fixture.workStore.renew(any(), any(), any()))
+    when(fixture.workStore.renew(any(), any()))
         .thenAnswer(
             ignored -> {
               fixture.renewed.countDown();
@@ -228,7 +227,7 @@ class CanvasFunctionWorkerHeartbeatTest {
   @Test
   void adapterFailureUsesFencedPublicFailureTransition() throws Exception {
     Fixture fixture = new Fixture(CanvasFunctionSubmitState.SUBMITTED);
-    when(fixture.workStore.renew(any(), any(), any())).thenReturn(true);
+    when(fixture.workStore.renew(any(), any())).thenReturn(true);
     doThrow(new IllegalStateException("provider")).when(fixture.adapter).execute(any(), any());
 
     try {
@@ -253,7 +252,7 @@ class CanvasFunctionWorkerHeartbeatTest {
   @Test
   void errorFromAdapterPropagatesWithoutAnyBusinessTerminalWrite() throws Exception {
     Fixture fixture = new Fixture(CanvasFunctionSubmitState.SUBMITTED);
-    when(fixture.workStore.renew(any(), any(), any())).thenReturn(true);
+    when(fixture.workStore.renew(any(), any())).thenReturn(true);
     OutOfMemoryError fatal = new OutOfMemoryError("simulated fatal error");
     doThrow(fatal).when(fixture.adapter).execute(any(), any());
 
@@ -317,15 +316,14 @@ class CanvasFunctionWorkerHeartbeatTest {
               UUID.randomUUID(),
               CanvasFunctionRunStatus.RUNNING,
               1,
-              null,
-              "lease",
-              NOW.plusSeconds(30),
               "QUEUED",
               "{\"stage\":\"QUEUED\"}",
               null,
               NOW,
               NOW);
-      claim = new ClaimedRun(run);
+      claim =
+          new ClaimedRun(
+              run, new WorkClaim(run.nodeId(), 1L, "lease", Instant.EPOCH.plusSeconds(30)));
       when(runRepository.findByNodeId(run.nodeId())).thenReturn(Optional.of(run));
 
       CanvasFunctionBinding binding = new CanvasFunctionBinding(definition);
@@ -390,7 +388,6 @@ class CanvasFunctionWorkerHeartbeatTest {
               materializers,
               workStore,
               properties,
-              Clock.fixed(NOW, ZoneOffset.UTC),
               scheduler);
     }
 

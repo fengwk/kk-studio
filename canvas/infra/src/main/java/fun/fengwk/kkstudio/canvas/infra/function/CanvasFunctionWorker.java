@@ -16,7 +16,6 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionSubmitState;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionUnknownException;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasFunctionWorkStore;
 
-import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
@@ -44,7 +43,6 @@ public class CanvasFunctionWorker {
   private final ObjectProvider<CanvasResourceMaterializer> materializers;
   private final CanvasFunctionWorkStore workStore;
   private final CanvasFunctionRuntimeProperties properties;
-  private final Clock clock;
   private final ScheduledExecutorService heartbeatScheduler;
 
   public CanvasFunctionWorker(
@@ -56,7 +54,6 @@ public class CanvasFunctionWorker {
       ObjectProvider<CanvasResourceMaterializer> materializers,
       CanvasFunctionWorkStore workStore,
       CanvasFunctionRuntimeProperties properties,
-      Clock clock,
       @Qualifier("canvasFunctionHeartbeatScheduler") ScheduledExecutorService heartbeatScheduler) {
     this.runRepository = runRepository;
     this.catalogSource = catalogSource;
@@ -66,7 +63,6 @@ public class CanvasFunctionWorker {
     this.materializers = materializers;
     this.workStore = workStore;
     this.properties = properties;
-    this.clock = Clock.tick(clock, Duration.ofMillis(1));
     this.heartbeatScheduler = heartbeatScheduler;
   }
 
@@ -144,14 +140,7 @@ public class CanvasFunctionWorker {
       registered.requireAvailable();
       CanvasFunctionExecutionContextImpl context =
           new CanvasFunctionExecutionContextImpl(
-              runRepository,
-              transactions,
-              blobAccess,
-              materializers,
-              clock,
-              claim,
-              ownershipLost,
-              frozen);
+              runRepository, transactions, blobAccess, materializers, claim, ownershipLost, frozen);
       CanvasFunctionFrozenRun current = frozen;
       if (!current.submitted()) {
         current = transactions.beginSubmit(current, claim.leaseToken());
@@ -188,8 +177,7 @@ public class CanvasFunctionWorker {
       return;
     }
     try {
-      if (!workStore.renew(
-          claim, clock.instant(), Duration.ofMillis(properties.getLeaseDurationMillis()))) {
+      if (!workStore.renew(claim, Duration.ofMillis(properties.getLeaseDurationMillis()))) {
         ownershipLost.set(true);
       }
     } catch (RuntimeException error) {

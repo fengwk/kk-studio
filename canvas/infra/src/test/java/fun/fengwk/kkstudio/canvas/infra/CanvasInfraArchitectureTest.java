@@ -34,6 +34,7 @@ class CanvasInfraArchitectureTest {
           "fun.fengwk.kk-studio:kk-studio-canvas-core",
           "fun.fengwk.kk-studio:kk-studio-canvas-plugin-api",
           "fun.fengwk.kk-studio:kk-studio-harness-common",
+          "fun.fengwk.kk-studio:kk-studio-work",
           "org.springframework.boot:spring-boot-starter-aspectj",
           "org.springframework.boot:spring-boot-starter-jdbc",
           "tools.jackson.core:jackson-databind");
@@ -42,13 +43,14 @@ class CanvasInfraArchitectureTest {
           "com.fasterxml.jackson.annotation.",
           "fun.fengwk.convention4j.",
           "fun.fengwk.kkstudio.canvas.",
+          "fun.fengwk.kkstudio.work.",
           "java.",
           "javax.",
           "lombok.",
           "org.springframework.",
           "tools.jackson.");
 
-  /** 生产源码留在 infra 包内，只允许共享调度基座，不依赖 Platform/Harness Runtime/Web。 */
+  /** 生产源码留在 infra 包内，只允许共享调度基座与 durable work 队列，不依赖 Platform/Harness Runtime/Web。 */
   @Test
   void mainSourcesStayInsideCanvasInfraBoundary() throws IOException {
     Path main = locateModuleRoot().resolve("src/main/java");
