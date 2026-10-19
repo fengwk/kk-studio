@@ -178,6 +178,38 @@ class UsageCostProjectionServiceTest {
     verifyNoMoreInteractions(modelRepository);
   }
 
+  /** 测试意图：模型回退的 turn 按实际调用的 Agent 默认模型计价，而不是 Thread 设置里已失效的型号。 */
+  @Test
+  void pricesFallbackTurnsWithTheModelThatActuallyRan() {
+    stubModel("provider-b", "model-b", pricing(BigDecimal.ONE, BigDecimal.ZERO, BigDecimal.ZERO));
+
+    Map<UUID, HarnessUsageCostDTO> costs =
+        service.project(
+            List.of(
+                root(settings("provider-a", "model-a")),
+                new Entry(
+                    TURN_A_ID,
+                    SESSION_ID,
+                    ROOT_ID,
+                    new TurnStartPayload(
+                        TurnStartReason.INPUT,
+                        settings("provider-a", "model-a"),
+                        THREAD_ID,
+                        4096,
+                        1024,
+                        null,
+                        new ModelSelection("provider-b", "model-b", "default")),
+                    NOW),
+                assistant(
+                    ASSISTANT_A_ID,
+                    TURN_A_ID,
+                    new ModelUsage(1_000_000, 0, 0, 0, 0, 0, 1_000_000))));
+
+    assertEquals("1", costs.get(ASSISTANT_A_ID).getAmount());
+    verify(modelRepository).getByProviderNameAndName("provider-b", "model-b");
+    verifyNoMoreInteractions(modelRepository);
+  }
+
   /**
    * 测试意图：压缩结果本身是真实模型输出，其 canonical metadata 的用量同样按 executionModel 计价；纯摘要（无 metadata）绝不 伪装成 0
    * 用量而进入投影。
@@ -388,7 +420,8 @@ class UsageCostProjectionServiceTest {
                 null,
                 null,
                 new UUID(0L, 50L),
-                new UUID(0L, 51L))),
+                new UUID(0L, 51L)),
+            null),
         NOW);
   }
 

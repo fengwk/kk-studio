@@ -588,7 +588,7 @@ final class DispatcherTestSupport {
         sessionId,
         parentId,
         new TurnStartPayload(
-            TurnStartReason.INPUT, branchSettings(), ownerThreadId, 100_000, 16_384, null),
+            TurnStartReason.INPUT, branchSettings(), ownerThreadId, 100_000, 16_384, null, null),
         NOW);
   }
 

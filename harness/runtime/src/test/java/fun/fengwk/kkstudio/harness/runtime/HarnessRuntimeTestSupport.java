@@ -323,7 +323,13 @@ final class HarnessRuntimeTestSupport {
                   sessionId,
                   rootEntryId,
                   new TurnStartPayload(
-                      TurnStartReason.CONTINUATION, settings(), threadId, 100_000, 16_384, null),
+                      TurnStartReason.CONTINUATION,
+                      settings(),
+                      threadId,
+                      100_000,
+                      16_384,
+                      null,
+                      null),
                   T1));
           ThreadState thread = thread(threadId, sessionId, turnStartEntryId);
           tx.insertThread(thread);
@@ -995,7 +1001,7 @@ final class HarnessRuntimeTestSupport {
         sessionId,
         parentId,
         new TurnStartPayload(
-            TurnStartReason.INPUT, settings(), ownerThreadId, 100_000, 16_384, null),
+            TurnStartReason.INPUT, settings(), ownerThreadId, 100_000, 16_384, null, null),
         createdAt);
   }
 

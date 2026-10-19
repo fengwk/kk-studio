@@ -82,7 +82,7 @@ class CompactionTurnsTest {
                 id(100L),
                 id(1L),
                 new TurnStartPayload(
-                    TurnStartReason.COMPACTION, SETTINGS, id(10L), 100_000, 16_384, start),
+                    TurnStartReason.COMPACTION, SETTINGS, id(10L), 100_000, 16_384, start, null),
                 NOW),
             new Entry(id(3L), id(100L), id(2L), new CompactionPayload("summary", null), NOW),
             new Entry(

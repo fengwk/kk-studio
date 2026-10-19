@@ -102,7 +102,7 @@ class CompactionResultEvaluatorTest {
                 id(100L),
                 id(1L),
                 new TurnStartPayload(
-                    TurnStartReason.COMPACTION, SETTINGS, id(200L), 100_000, 16_384, start),
+                    TurnStartReason.COMPACTION, SETTINGS, id(200L), 100_000, 16_384, start, null),
                 NOW)));
   }
 

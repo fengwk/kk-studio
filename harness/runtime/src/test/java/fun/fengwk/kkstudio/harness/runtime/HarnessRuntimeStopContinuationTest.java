@@ -172,7 +172,8 @@ class HarnessRuntimeStopContinuationTest {
                           threadId,
                           100_000,
                           16_384,
-                          history),
+                          history,
+                          null),
                       T5));
               tx.insertEntry(
                   new Entry(

@@ -379,10 +379,11 @@ class HistoryEntryPayloadJsonCodecTest {
             + ",\"environmentName\":null,\"goal\":null},"
             + "\"ownerThreadId\":\""
             + OWNER_THREAD_ID
-            + "\",\"contextWindow\":4096,\"maxOutputTokens\":1024,\"compaction\":null}",
+            + "\",\"contextWindow\":4096,\"maxOutputTokens\":1024,\"compaction\":null"
+            + ",\"fallbackModel\":null}",
         CODEC.encode(
             new TurnStartPayload(
-                TurnStartReason.INPUT, settings(), OWNER_THREAD_ID, 4096, 1024, null)));
+                TurnStartReason.INPUT, settings(), OWNER_THREAD_ID, 4096, 1024, null, null)));
     assertEquals(
         "{\"contributorId\":\"core\",\"customType\":\"message\",\"rendererKey\":\"message\","
             + "\"message\":{\"role\":\"USER\",\"contents\":[{\"type\":\"text\",\"text\":\"sys\"}]},"
@@ -427,6 +428,33 @@ class HistoryEntryPayloadJsonCodecTest {
                 new ModelAttemptSnapshot(2, 9, "final", ""))));
   }
 
+  /** 模型回退的 turn 记录实际调用的型号；settings 保持 Thread 自己的设置。 */
+  @Test
+  void roundTripsTurnStartFallbackModelAndRejectsInvalidShapes() {
+    ModelSelection fallback = new ModelSelection("openai", "gpt-5", "default");
+    TurnStartPayload resolved =
+        new TurnStartPayload(
+            TurnStartReason.INPUT, settings(), OWNER_THREAD_ID, 4096, 1024, null, fallback);
+    assertEquals(resolved, CODEC.decode(EntryType.TURN_START, CODEC.encode(resolved)));
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new TurnStartPayload(
+                TurnStartReason.INPUT, settings(), OWNER_THREAD_ID, null, null, null, fallback));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new TurnStartPayload(
+                TurnStartReason.INPUT,
+                settings(),
+                OWNER_THREAD_ID,
+                4096,
+                1024,
+                null,
+                settings().model()));
+  }
+
   @Test
   void roundTripsMinimalCompactionPayload() {
     // Durable result 只保存 summaryText；phase/trigger/cut 位于 enclosing TURN_START。
@@ -466,7 +494,7 @@ class HistoryEntryPayloadJsonCodecTest {
             id(2L));
     TurnStartPayload payload =
         new TurnStartPayload(
-            TurnStartReason.COMPACTION, settings(), OWNER_THREAD_ID, 4096, 1024, start);
+            TurnStartReason.COMPACTION, settings(), OWNER_THREAD_ID, 4096, 1024, start, null);
 
     assertEquals(payload, CODEC.decode(EntryType.TURN_START, CODEC.encode(payload)));
     assertEquals(payload, CODEC.decodeNode(EntryType.TURN_START, CODEC.encodeNode(payload)));
@@ -477,7 +505,7 @@ class HistoryEntryPayloadJsonCodecTest {
             CompactionPhase.TURN_PREFIX, CompactionTrigger.MANUAL, id(4L), id(3L), id(2L));
     TurnStartPayload pendingPayload =
         new TurnStartPayload(
-            TurnStartReason.COMPACTION, settings(), OWNER_THREAD_ID, 4096, 1024, pending);
+            TurnStartReason.COMPACTION, settings(), OWNER_THREAD_ID, 4096, 1024, pending, null);
 
     assertEquals(pendingPayload, CODEC.decode(EntryType.TURN_START, CODEC.encode(pendingPayload)));
     assertEquals(

@@ -139,6 +139,11 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
     }
     ensureExpectedVersion(definition, name, expectedVersion, expected);
     referenceResolver.ensureNotReferencedAsSubagent(name);
+    // Project 工作流阶段按名称指定执行 Agent；删除它会让后台 Issue Run 在下一次调度时失败，因此先拒绝，由用户改阶段配置或归档 Project。
+    if (agentDefinitionRepository.existsReferencingProjectWorkflow(name)) {
+      throw new AiInUseException(
+          RESOURCE, RESOURCE + " is referenced by a project workflow stage: " + name);
+    }
     // 权威 desired manifest 中任一已安装插件的普通配置声明引用该 Agent 即不可删除：删除先持自身行锁，引用方保存先持同锁，
     // 因此并发两侧最多一方成功；只读 desired 事实，不读取已应用状态、不解密秘密、不猜字段。
     if (!pluginAgentDependencies.pluginsDeclaringAgent(name).isEmpty()) {

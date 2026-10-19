@@ -103,7 +103,8 @@ class CompactionHistoryTest {
             null,
             null,
             CompactionStart.pending(
-                CompactionPhase.FULL, CompactionTrigger.MANUAL, ROOT_ID, null, null)));
+                CompactionPhase.FULL, CompactionTrigger.MANUAL, ROOT_ID, null, null),
+            null));
   }
 
   private static Entry message(UUID entryId, UUID parentId, AgentMessageRole role, String text) {

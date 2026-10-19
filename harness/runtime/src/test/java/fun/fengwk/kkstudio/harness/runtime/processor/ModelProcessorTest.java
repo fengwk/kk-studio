@@ -4192,7 +4192,13 @@ class ModelProcessorTest {
                   sessionId,
                   rootEntryId,
                   new TurnStartPayload(
-                      TurnStartReason.INPUT, branchSettings(), threadId, 100_000, 16_384, null),
+                      TurnStartReason.INPUT,
+                      branchSettings(),
+                      threadId,
+                      100_000,
+                      16_384,
+                      null,
+                      null),
                   NOW.plusMillis(1)));
           tx.insertEntry(
               new Entry(
@@ -4252,7 +4258,13 @@ class ModelProcessorTest {
                   sessionId,
                   rootEntryId,
                   new TurnStartPayload(
-                      TurnStartReason.INPUT, branchSettings(), threadId, 100_000, 16_384, null),
+                      TurnStartReason.INPUT,
+                      branchSettings(),
+                      threadId,
+                      100_000,
+                      16_384,
+                      null,
+                      null),
                   now.plusMillis(1)));
           tx.insertThread(
               ThreadProcessorTestSupport.threadState(threadId, sessionId, turnStartEntryId, now));

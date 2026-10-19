@@ -76,7 +76,9 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Function;
 
 /**
  * 生产 Platform 的 {@link TurnResolver}：把 candidate {@link EntryPath} 的最新 branch settings 解析为冻结的
@@ -275,43 +277,15 @@ public final class DatabaseTurnResolver implements TurnResolver {
             "agent not found: " + settings.agentName());
     AgentDefinitionConfigDTO agentConfig = decodeAgentConfig(agent);
 
-    ModelSelection selection = settings.model();
-    AgentProvider provider =
-        require(
-            providerRepository.getByName(selection.providerName()),
-            "provider not found: " + selection.providerName());
-    ProviderType providerType = provider.getProviderType();
-    if (providerType == null) {
-      throw rejection("provider type must not be null");
-    }
-    UUID providerConnectionGenerationId =
-        require(
-            provider.getConnectionGenerationId(),
-            "provider connection generation id must not be null");
-    AgentModel model =
-        require(
-            modelRepository.getByProviderNameAndName(
-                selection.providerName(), selection.modelName()),
-            "model not found: " + selection.providerName() + "/" + selection.modelName());
-    ParsedAgentModelConfig parsedModel = parseModel(model);
-    ModelVariant variant = findVariant(parsedModel, selection.variant());
-    if (variant == null) {
-      throw rejection(
-          "model variant not found: "
-              + selection.providerName()
-              + "/"
-              + selection.modelName()
-              + " variant="
-              + selection.variant());
-    }
-    ProviderFactory providerFactory =
-        require(
-            providerFactories.lookup(providerType).orElse(null),
-            "provider factory not found for "
-                + selection.providerName()
-                + " ("
-                + providerType
-                + ")");
+    ResolvedModel resolvedModel = resolveModel(settings.model(), agent);
+    ModelSelection selection = resolvedModel.selection();
+    AgentProvider provider = resolvedModel.provider();
+    ProviderType providerType = resolvedModel.providerType();
+    UUID providerConnectionGenerationId = resolvedModel.connectionGenerationId();
+    AgentModel model = resolvedModel.model();
+    ParsedAgentModelConfig parsedModel = resolvedModel.parsed();
+    ModelVariant variant = resolvedModel.variant();
+    ProviderFactory providerFactory = resolvedModel.factory();
 
     // Environment 只由 branch settings 的可空 environmentName 决定：Issue Run 在启动时已显式 SET_ENVIRONMENT，
     // 运行时不再按 Issue/阶段反查或覆写。
@@ -400,6 +374,98 @@ public final class DatabaseTurnResolver implements TurnResolver {
    * Environment 只由当前 branch settings 的可空 name 决定：null 表示未选择环境；非 null 时按全局唯一且不可变的 name 查 Environment
    * 并取内部路由身份，缺失时确定性拒绝规划。
    */
+  /**
+   * 解析本 turn 实际调用的模型：Thread 设置的模型可用时使用它；不可用（Provider 或 Model 已删除、改名）时改用当前 Agent 的默认模型；二者都不可用时拒绝本
+   * turn。
+   *
+   * <p>Thread 设置不被改写：默认模型恢复或重新绑定后，下一 turn 立即生效。variant 优先沿用原设置；目标模型没有该 variant 时，原模型改用自身的默认
+   * variant，回退模型依次取 Agent 声明的 variant 与模型自身的默认 variant。只对模型回退，Agent 与 Environment 失效一律停止。
+   */
+  private ResolvedModel resolveModel(ModelSelection requested, AgentDefinition agent) {
+    Optional<ResolvedModel> direct =
+        findModel(
+            requested.providerName(),
+            requested.modelName(),
+            parsed ->
+                findVariant(parsed, requested.variant()) != null
+                    ? requested.variant()
+                    : parsed.defaultVariant());
+    if (direct.isPresent()) {
+      return direct.get();
+    }
+    String defaultProvider = agent.getModelProviderName();
+    String defaultModel = agent.getModelName();
+    boolean hasDistinctDefault =
+        defaultProvider != null
+            && defaultModel != null
+            && !(defaultProvider.equals(requested.providerName())
+                && defaultModel.equals(requested.modelName()));
+    Optional<ResolvedModel> fallback =
+        hasDistinctDefault
+            ? findModel(
+                defaultProvider,
+                defaultModel,
+                parsed -> {
+                  if (findVariant(parsed, requested.variant()) != null) {
+                    return requested.variant();
+                  }
+                  if (agent.getVariant() != null
+                      && findVariant(parsed, agent.getVariant()) != null) {
+                    return agent.getVariant();
+                  }
+                  return parsed.defaultVariant();
+                })
+            : Optional.empty();
+    return fallback.orElseThrow(
+        () ->
+            rejection(
+                "model "
+                    + requested.providerName()
+                    + "/"
+                    + requested.modelName()
+                    + " and the agent default model are both unavailable; bind an available model"));
+  }
+
+  /** 按名字查找模型；Provider 或 Model 不存在、或选定 variant 不存在时返回空。Provider 配置缺失属于配置错误，直接拒绝。 */
+  private Optional<ResolvedModel> findModel(
+      String providerName,
+      String modelName,
+      Function<ParsedAgentModelConfig, String> variantChoice) {
+    AgentProvider provider = providerRepository.getByName(providerName);
+    AgentModel model =
+        provider == null ? null : modelRepository.getByProviderNameAndName(providerName, modelName);
+    if (model == null) {
+      return Optional.empty();
+    }
+    ParsedAgentModelConfig parsed = parseModel(model);
+    ModelVariant variant = findVariant(parsed, variantChoice.apply(parsed));
+    if (variant == null) {
+      return Optional.empty();
+    }
+    ProviderType providerType = provider.getProviderType();
+    if (providerType == null) {
+      throw rejection("provider type must not be null");
+    }
+    UUID connectionGenerationId =
+        require(
+            provider.getConnectionGenerationId(),
+            "provider connection generation id must not be null");
+    ProviderFactory factory =
+        require(
+            providerFactories.lookup(providerType).orElse(null),
+            "provider factory not found for " + providerName + " (" + providerType + ")");
+    return Optional.of(
+        new ResolvedModel(
+            new ModelSelection(providerName, modelName, variant.id()),
+            provider,
+            providerType,
+            connectionGenerationId,
+            model,
+            parsed,
+            variant,
+            factory));
+  }
+
   private Environment resolveEnvironment(String environmentName) {
     if (environmentName == null) {
       return null;
@@ -828,6 +894,16 @@ public final class DatabaseTurnResolver implements TurnResolver {
   }
 
   /** 一次工具规划的全部事实：冻结进 spec 的 SENT bindings 与「SENT 在前、FILTERED 在后」的完整候选投影。 */
+  private record ResolvedModel(
+      ModelSelection selection,
+      AgentProvider provider,
+      ProviderType providerType,
+      UUID connectionGenerationId,
+      AgentModel model,
+      ParsedAgentModelConfig parsed,
+      ModelVariant variant,
+      ProviderFactory factory) {}
+
   private record PlannedTools(
       List<ToolBinding> bindings, List<LiveTurnPlan.CandidateTool> candidates) {}
 

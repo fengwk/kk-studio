@@ -100,6 +100,22 @@ public class AgentDefinitionJdbcStore {
         .single();
   }
 
+  public boolean existsReferencingProjectWorkflow(String name) {
+    return jdbcClient
+        .sql(
+            """
+            select exists (
+                select 1
+                from project p, jsonb_array_elements(p.workflow -> 'states') state
+                where p.archived_at is null
+                  and state ->> 'agent' = :name
+            )
+            """)
+        .param("name", name)
+        .query(Boolean.class)
+        .single();
+  }
+
   public boolean existsReferencingSkill(String packageName, String skillName) {
     return jdbcClient
         .sql(

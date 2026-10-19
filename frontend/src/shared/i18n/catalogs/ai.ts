@@ -2132,6 +2132,10 @@ export const aiCatalog = {
     'en-US': 'Model changed to {{model}}',
     'zh-CN': '模型改为 {{model}}',
   },
+  'ai.runtime.entry.modelFallback': {
+    'en-US': '{{model}} is unavailable; this turn used the agent default model {{fallback}}',
+    'zh-CN': '{{model}} 不可用，本轮改用 Agent 默认模型 {{fallback}}',
+  },
   'ai.runtime.entry.environmentChanged': {
     'en-US': 'Environment changed to {{environment}}',
     'zh-CN': '环境改为 {{environment}}',

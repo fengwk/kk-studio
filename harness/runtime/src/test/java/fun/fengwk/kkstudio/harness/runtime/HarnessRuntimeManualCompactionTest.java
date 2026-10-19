@@ -402,6 +402,7 @@ class HarnessRuntimeManualCompactionTest {
             threadId,
             CONTEXT_WINDOW,
             MAX_OUTPUT_TOKENS,
+            null,
             null),
         NOW);
   }

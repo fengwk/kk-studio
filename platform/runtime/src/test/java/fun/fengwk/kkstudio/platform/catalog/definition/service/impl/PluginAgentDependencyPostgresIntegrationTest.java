@@ -518,6 +518,11 @@ class PluginAgentDependencyPostgresIntegrationTest {
     }
 
     @Override
+    public boolean existsReferencingProjectWorkflow(String name) {
+      return delegate.existsReferencingProjectWorkflow(name);
+    }
+
+    @Override
     public boolean existsReferencingSkill(String packageName, String skillName) {
       return delegate.existsReferencingSkill(packageName, skillName);
     }

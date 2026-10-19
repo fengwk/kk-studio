@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.history;
 
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 
 import java.util.Objects;
@@ -13,6 +14,9 @@ import java.util.UUID;
  * <p>{@code ownerThreadId} 始终记录创建该 turn 的 Thread。{@code contextWindow} 与 {@code maxOutputTokens} 仅在
  * Resolver 成功时一起为正整数冻结，二者要么同为 null（rejected / 候补）要么同为非 null； {@code compaction} 非空当且仅当 {@code
  * reason == COMPACTION}，冻结本次压缩的最小元数据。
+ *
+ * <p>{@code settings} 始终是 Thread 自己的设置，后续 turn 由它继承，因此模型失效时也不改写。{@code fallbackModel} 只在 Resolver
+ * 发现 {@code settings.model()} 不可用、改用 Agent 默认模型执行时非空，记录本 turn 实际调用的型号，用于界面提示与按实际型号计价。
  */
 public record TurnStartPayload(
     TurnStartReason reason,
@@ -20,12 +24,13 @@ public record TurnStartPayload(
     UUID ownerThreadId,
     Integer contextWindow,
     Integer maxOutputTokens,
-    CompactionStart compaction)
+    CompactionStart compaction,
+    ModelSelection fallbackModel)
     implements EntryPayload {
 
   /** 候补 path / rejected turn：contextWindow 与 maxOutputTokens 尚未补齐，无压缩元数据。 */
   public TurnStartPayload(TurnStartReason reason, BranchSettings settings, UUID ownerThreadId) {
-    this(reason, settings, ownerThreadId, null, null, null);
+    this(reason, settings, ownerThreadId, null, null, null, null);
   }
 
   public TurnStartPayload {
@@ -45,6 +50,14 @@ public record TurnStartPayload(
     if ((reason == TurnStartReason.COMPACTION) != (compaction != null)) {
       throw new IllegalArgumentException(
           "compaction metadata is required iff reason is COMPACTION");
+    }
+    if (fallbackModel != null
+        && (contextWindow == null
+            || compaction != null
+            || fallbackModel.equals(settings.model()))) {
+      throw new IllegalArgumentException(
+          "fallbackModel is only recorded for a resolved non-compaction turn that left the thread"
+              + " model");
     }
   }
 

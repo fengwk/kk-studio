@@ -56,7 +56,13 @@ public final class HistoryEntryPayloadJsonCodec {
   private static final Set<String> ROOT_FIELDS = orderedSet("settings");
   private static final Set<String> TURN_START_FIELDS =
       orderedSet(
-          "reason", "settings", "ownerThreadId", "contextWindow", "maxOutputTokens", "compaction");
+          "reason",
+          "settings",
+          "ownerThreadId",
+          "contextWindow",
+          "maxOutputTokens",
+          "compaction",
+          "fallbackModel");
   private static final Set<String> MESSAGE_FIELDS =
       orderedSet("message", "assistantMetadata", "toolResultMetadata");
   private static final Set<String> CUSTOM_FIELDS =
@@ -194,6 +200,11 @@ public final class HistoryEntryPayloadJsonCodec {
       node.putNull("compaction");
     } else {
       node.set("compaction", encodeCompactionStart(value.compaction()));
+    }
+    if (value.fallbackModel() == null) {
+      node.putNull("fallbackModel");
+    } else {
+      node.set("fallbackModel", HistoryValueCodecs.encodeModelSelection(value.fallbackModel()));
     }
     return node;
   }
@@ -387,7 +398,11 @@ public final class HistoryEntryPayloadJsonCodec {
         HistoryValueCodecs.requiredPositiveId(node, "ownerThreadId", "TURN_START"),
         HistoryValueCodecs.nullablePositiveInt(node, "contextWindow", "TURN_START"),
         HistoryValueCodecs.nullablePositiveInt(node, "maxOutputTokens", "TURN_START"),
-        decodeNullableCompactionStart(node.get("compaction")));
+        decodeNullableCompactionStart(node.get("compaction")),
+        node.get("fallbackModel").isNull()
+            ? null
+            : HistoryValueCodecs.decodeModelSelection(
+                node.get("fallbackModel"), "TURN_START.fallbackModel"));
   }
 
   private static MessagePayload decodeMessage(JsonNode value) {

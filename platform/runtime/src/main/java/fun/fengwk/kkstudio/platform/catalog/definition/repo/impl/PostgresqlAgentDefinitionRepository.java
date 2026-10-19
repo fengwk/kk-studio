@@ -50,6 +50,11 @@ public class PostgresqlAgentDefinitionRepository implements AgentDefinitionRepos
   }
 
   @Override
+  public boolean existsReferencingProjectWorkflow(String name) {
+    return agentDefinitionJdbcStore.existsReferencingProjectWorkflow(name);
+  }
+
+  @Override
   public boolean existsReferencingSkill(String packageName, String skillName) {
     return agentDefinitionJdbcStore.existsReferencingSkill(packageName, skillName);
   }

@@ -213,6 +213,7 @@ final class StoreTestSupport {
         ownerThreadId,
         CONTEXT_WINDOW,
         MAX_OUTPUT_TOKENS,
+        null,
         null);
   }
 

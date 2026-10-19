@@ -69,6 +69,8 @@ durable 快照，到期后同 version 重新 GET 会自然变化，无额外持�
 Provider 与 Agent 以不可变 `name` 寻址；Model 以 `(providerName, name)` 寻址，允许改名。
 变更携带 `expectedVersion`。Model 重命名在同一事务内插入新行、更新 Agent 引用、删除旧行，
 任何 CAS 或引用校验失败整体回滚。删除前校验入边，数据库外键提供并发兜底。
+Agent 被其它 Agent 的 subagents、插件普通配置或未归档 Project 的工作流阶段引用时不能删除；Chat 只按名称软引用 Agent，
+删除后其下一回合确定性失败，同名重建即恢复。
 
 Provider credential 在显式写入口接收，常规响应给出安全投影；配置同步导出显式包含原值。运行时类型取自
 [`ProviderType`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderType.java)：
@@ -135,7 +137,10 @@ Runtime 在自己的 lease 所有权短事务内直接持久 `READY -> DISPATCHI
 `DatabaseTurnResolver` 每个 live turn 持有一次目录租用完成全部规划，只按该分支冻结/提交的 Agent、Model、Variant、
 Environment、工具、Skill 和 subagents 规划；它不判断 Thread 属于哪个 Issue/Chat，也不据此覆写
 Environment 或注入工具——Issue Run 的 Agent/Model/Environment、业务工具与身份上下文都在接受 Run 时
-显式提交或冻结到 branch state。缺失引用返回规划失败。
+显式提交或冻结到 branch state。缺失引用返回规划失败，唯一例外是模型：branch 设置的 Model 已被删除或改名时，
+本回合改用当前 Agent 的默认模型（variant 优先沿用原值，否则取 Agent 声明的 variant 或模型默认 variant），
+并在 `TURN_START.fallbackModel` 记录实际型号供界面提示与计价；branch 设置本身不被改写，默认模型也不可用时拒绝本回合。
+设置的 variant 已从模型中移除时，同一模型改用自身默认 variant。Agent 与 Environment 失效一律停止，不做回退。
 `NONE`、`OPTIONAL` 工具保留，未选环境时过滤 `REQUIRED`；配置 Skill 时加入统一 `read`，
 subagent allowlist 非空时加入内部 `task`。Prompt 的 Skill 三元组冻结在 system instruction 中。规划期同时按 live provider 配置冻结 `ProviderCacheControl`（retention 与会话 UUID key，压缩回合固定 `none()`），执行期不再按当前 capability 重新规范化。
 

@@ -212,11 +212,8 @@ class HistoryNormalizationTest {
               null,
               null,
               CompactionStart.pending(
-                  CompactionPhase.FULL,
-                  CompactionTrigger.THRESHOLD,
-                  new UUID(0L, 3L),
-                  null,
-                  null)));
+                  CompactionPhase.FULL, CompactionTrigger.THRESHOLD, new UUID(0L, 3L), null, null),
+              null));
     }
 
     Entry append(UUID parentId, EntryPayload payload) {

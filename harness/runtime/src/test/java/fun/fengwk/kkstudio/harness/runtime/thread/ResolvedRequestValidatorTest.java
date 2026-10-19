@@ -130,7 +130,13 @@ class ResolvedRequestValidatorTest {
                 SESSION_ID,
                 ROOT_ENTRY_ID,
                 new TurnStartPayload(
-                    TurnStartReason.COMPACTION, settings, THREAD_ID, 100_000, 16_384, compaction),
+                    TurnStartReason.COMPACTION,
+                    settings,
+                    THREAD_ID,
+                    100_000,
+                    16_384,
+                    compaction,
+                    null),
                 NOW)));
   }
 

@@ -433,6 +433,7 @@ public abstract class HarnessStoreInvocationContract {
                           foreignOwner,
                           StoreTestSupport.CONTEXT_WINDOW,
                           StoreTestSupport.MAX_OUTPUT_TOKENS,
+                          null,
                           null),
                       T1));
               ThreadState locked = tx.lockThread(root.threadId()).orElseThrow();
@@ -2429,7 +2430,8 @@ public abstract class HarnessStoreInvocationContract {
                       baseline.threadId(),
                       StoreTestSupport.CONTEXT_WINDOW,
                       16_384,
-                      compaction),
+                      compaction,
+                      null),
                   T1));
           tx.updateThread(tx.findThread(baseline.threadId()).orElseThrow().advanceHead(start, T2));
           return start;
@@ -2514,7 +2516,8 @@ public abstract class HarnessStoreInvocationContract {
                       baseline.threadId(),
                       StoreTestSupport.CONTEXT_WINDOW,
                       16_384,
-                      compaction),
+                      compaction,
+                      null),
                   T1));
           UUID resultEntryId = tx.nextId();
           tx.insertEntry(new Entry(resultEntryId, baseline.sessionId(), start, resultPayload, T2));

@@ -998,7 +998,7 @@ class ModelAttemptMaterializationTest {
 
   private static TurnStartPayload resolvedCompactionTurnStart(CompactionStart compaction) {
     return new TurnStartPayload(
-        TurnStartReason.COMPACTION, SETTINGS, OWNER_THREAD_ID, 100_000, 16_384, compaction);
+        TurnStartReason.COMPACTION, SETTINGS, OWNER_THREAD_ID, 100_000, 16_384, compaction, null);
   }
 
   private static CompactionStart historyCompactionStart() {
