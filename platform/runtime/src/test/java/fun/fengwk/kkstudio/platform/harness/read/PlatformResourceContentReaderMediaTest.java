@@ -301,6 +301,62 @@ class PlatformResourceContentReaderMediaTest {
     assertSame(raw, error.getCause());
   }
 
+  /** 测试意图：媒体路径即使无需下载内容，在返回 ref 前也必须遵守 deadline；已超时必须拒绝，不得返回成功 ref。 */
+  @Test
+  void mediaPathRejectsExpiredDeadlineWithoutDownload() throws InterruptedException {
+    stubBlob("image/png", 1024L);
+    stubFrozenSpec(ProviderType.OPENAI, Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE));
+    ReadDeadline expired = ReadDeadline.after(Duration.ofMillis(10));
+    Thread.sleep(15L);
+
+    PlatformReadException error =
+        assertThrows(
+            PlatformReadException.class,
+            () ->
+                reader.readResource(
+                    threadId,
+                    invocationId,
+                    CALL_ID,
+                    blobId,
+                    null,
+                    null,
+                    null,
+                    "kkstudio:/resources/" + blobId,
+                    expired));
+
+    assertTrue(error.getMessage().contains("interrupted or timed out"), error.getMessage());
+    verifyNoInteractions(blobs);
+  }
+
+  /** 测试意图：媒体路径即使无需下载内容，在返回 ref 前也必须遵守线程中断；中断必须拒绝，不得返回成功 ref。 */
+  @Test
+  void mediaPathRejectsInterruptedThreadWithoutDownload() {
+    stubBlob("image/png", 1024L);
+    stubFrozenSpec(ProviderType.OPENAI, Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE));
+    Thread.currentThread().interrupt();
+    try {
+      PlatformReadException error =
+          assertThrows(
+              PlatformReadException.class,
+              () ->
+                  reader.readResource(
+                      threadId,
+                      invocationId,
+                      CALL_ID,
+                      blobId,
+                      null,
+                      null,
+                      null,
+                      "kkstudio:/resources/" + blobId,
+                      deadline()));
+
+      assertTrue(error.getMessage().contains("interrupted or timed out"), error.getMessage());
+      verifyNoInteractions(blobs);
+    } finally {
+      Thread.interrupted();
+    }
+  }
+
   private static ReadDeadline deadline() {
     return ReadDeadline.after(Duration.ofSeconds(60));
   }
