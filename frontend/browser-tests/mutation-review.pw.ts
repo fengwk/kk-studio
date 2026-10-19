@@ -21,6 +21,7 @@ type HarnessApi = {
   renderApprovalMissingReview(): void
   renderApprovalMalformedReview(): void
   renderApprovalValid(): void
+  renderEditDurableHistory(): void
 }
 
 function harness(page: Page, action: keyof HarnessApi, arg?: 'write' | 'edit'): Promise<void> {
@@ -350,5 +351,27 @@ test.describe('Mutation Review UI Acceptance & Browser Regression', () => {
     await expect(toolPane).not.toContainText('写入成功')
 
     await page.screenshot({ path: path.join(REPORTS_DIR, 'mutation-failure-notice.png') })
+  })
+
+  test('Case 6: 经真实 detailsJson 解码后的 durable 历史恢复，在清理 invocation/刷新后 diff 相同可读且有界滚动', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 800 })
+    await harness(page, 'renderEditDurableHistory')
+    await expect(page.locator('[data-testid="active-scenario"]')).toHaveText(
+      'edit-durable-history',
+    )
+
+    const toolPane = page.locator('[data-testid="tool-message-pane"]')
+    await expect(toolPane.locator('.thread-tool-preview-target-path')).toHaveText(
+      '/canonical/src/App.tsx',
+    )
+    const editViewport = toolPane.locator('.thread-tool-preview-body.is-edit')
+    await expect(editViewport).toBeVisible()
+    expect(await editViewport.textContent()).toBe(MULTI_HUNK_DIFF)
+    await expect(toolPane.locator('.thread-tool-mutation-success')).toHaveText('编辑成功')
+    await verifyBoundedScrollAndNoBlowout(editViewport)
+
+    await page.screenshot({ path: path.join(REPORTS_DIR, 'desktop-edit-durable-history.png') })
   })
 })
