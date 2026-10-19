@@ -33,6 +33,19 @@ function isAbortError(error: unknown): boolean {
   )
 }
 
+function isTimeout(error: unknown, signal?: AbortSignal): boolean {
+  if (signal?.aborted && signal.reason === 'TIMED_OUT') {
+    return true
+  }
+  return (
+    error instanceof Error &&
+    (error.name === 'TimeoutError' ||
+      (error instanceof LspError && error.message.includes('timed out')) ||
+      error.message === 'Operation timed out' ||
+      error.message.includes('timed out'))
+  )
+}
+
 function validatePath(rawPath: unknown): string {
   if (rawPath === undefined || rawPath === null || typeof rawPath !== 'string') {
     throw new LspError('path is required and must be a string')
@@ -69,6 +82,9 @@ export function createLspCapabilities(
   ): Promise<CapabilityResult> => {
     const callId = call.invocationId
     if (context.signal.aborted) {
+      if (isTimeout(null, context.signal)) {
+        return errorResult(callId, 'Operation timed out')
+      }
       return errorResult(callId, 'Operation cancelled')
     }
 
@@ -114,11 +130,13 @@ export function createLspCapabilities(
         realPath,
         line,
         character,
-        call.timeoutMillis,
         context.signal,
       )
       return textResult(callId, result)
     } catch (error) {
+      if (isTimeout(error, context.signal)) {
+        return errorResult(callId, 'Operation timed out')
+      }
       if (context.signal.aborted || isAbortError(error)) {
         return errorResult(callId, 'Operation cancelled')
       }
@@ -138,6 +156,9 @@ export function createLspCapabilities(
   ): Promise<CapabilityResult> => {
     const callId = call.invocationId
     if (context.signal.aborted) {
+      if (isTimeout(null, context.signal)) {
+        return errorResult(callId, 'Operation timed out')
+      }
       return errorResult(callId, 'Operation cancelled')
     }
 
@@ -173,11 +194,13 @@ export function createLspCapabilities(
         realPath,
         query,
         limit,
-        call.timeoutMillis,
         context.signal,
       )
       return textResult(callId, result)
     } catch (error) {
+      if (isTimeout(error, context.signal)) {
+        return errorResult(callId, 'Operation timed out')
+      }
       if (context.signal.aborted || isAbortError(error)) {
         return errorResult(callId, 'Operation cancelled')
       }
@@ -197,6 +220,9 @@ export function createLspCapabilities(
   ): Promise<CapabilityResult> => {
     const callId = call.invocationId
     if (context.signal.aborted) {
+      if (isTimeout(null, context.signal)) {
+        return errorResult(callId, 'Operation timed out')
+      }
       return errorResult(callId, 'Operation cancelled')
     }
 
@@ -219,11 +245,13 @@ export function createLspCapabilities(
       const result = await service.javaDecompile(
         realPath,
         target,
-        call.timeoutMillis,
         context.signal,
       )
       return textResult(callId, result)
     } catch (error) {
+      if (isTimeout(error, context.signal)) {
+        return errorResult(callId, 'Operation timed out')
+      }
       if (context.signal.aborted || isAbortError(error)) {
         return errorResult(callId, 'Operation cancelled')
       }

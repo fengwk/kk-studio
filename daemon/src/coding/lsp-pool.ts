@@ -55,14 +55,13 @@ export function poolKey(root: string, server: ResolvedServerConfig): string {
   ])
 }
 
-function abortError(): Error {
-  const error = new Error('Operation cancelled')
-  error.name = 'AbortError'
-  return error
-}
-
-function isAbortError(error: unknown): boolean {
-  return error instanceof Error && error.name === 'AbortError'
+export class WaiterAbortError extends Error {
+  readonly reason: unknown
+  constructor(reason?: unknown) {
+    super(reason === 'TIMED_OUT' ? 'Operation timed out' : 'Operation cancelled')
+    this.name = reason === 'TIMED_OUT' ? 'TimeoutError' : 'AbortError'
+    this.reason = reason
+  }
 }
 
 function toError(error: unknown): Error {
@@ -75,11 +74,11 @@ function raceAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
     return promise
   }
   if (signal.aborted) {
-    return Promise.reject(abortError())
+    return Promise.reject(new WaiterAbortError(signal.reason))
   }
   return new Promise<T>((resolve, reject) => {
     const onAbort = (): void => {
-      reject(abortError())
+      reject(new WaiterAbortError(signal.reason))
     }
     signal.addEventListener('abort', onAbort, { once: true })
     promise.then(
@@ -120,7 +119,7 @@ export class LspClientPool {
     this.processes = processes
     this.idleTimeout = options.idleTimeout ?? 5 * 60 * 1000
     this.shutdownGrace = options.shutdownGrace ?? 1000
-    this.initializeTimeout = options.initializeTimeout ?? 60_000
+    this.initializeTimeout = options.initializeTimeout ?? 180_000
   }
 
   async lease(file: string, signal?: AbortSignal): Promise<PoolEntry> {
@@ -173,7 +172,7 @@ export class LspClientPool {
       try {
         client = await raceAbort(boot.promise, signal)
       } catch (error) {
-        if (isAbortError(error)) {
+        if (error instanceof WaiterAbortError) {
           boot.waiters--
           if (boot.waiters <= 0 && !boot.published) {
             // No remaining waiter: cancel the boot so the late process is cleaned up.
