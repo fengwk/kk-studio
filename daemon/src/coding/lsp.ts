@@ -11,12 +11,12 @@ import {
   type ProcessSupervisor,
 } from '../contracts.js'
 import { LspDiscovery, type LspSupport } from './lsp-discovery.js'
-import { LspError } from './lsp-error.js'
+import { LspError, LspTimeoutError } from './lsp-error.js'
 import type { LspPoolOptions } from './lsp-pool.js'
 import { LspService } from './lsp-service.js'
 
 export { LspDiscovery, type LspSupport } from './lsp-discovery.js'
-export { LspError } from './lsp-error.js'
+export { LspError, LspTimeoutError } from './lsp-error.js'
 export { LspService } from './lsp-service.js'
 export { LspClient } from './lsp-client.js'
 export { LspClientPool } from './lsp-pool.js'
@@ -34,16 +34,7 @@ function isAbortError(error: unknown): boolean {
 }
 
 function isTimeout(error: unknown, signal?: AbortSignal): boolean {
-  if (signal?.aborted && signal.reason === 'TIMED_OUT') {
-    return true
-  }
-  return (
-    error instanceof Error &&
-    (error.name === 'TimeoutError' ||
-      (error instanceof LspError && error.message.includes('timed out')) ||
-      error.message === 'Operation timed out' ||
-      error.message.includes('timed out'))
-  )
+  return signal?.reason === 'TIMED_OUT' || error instanceof LspTimeoutError
 }
 
 function validatePath(rawPath: unknown): string {

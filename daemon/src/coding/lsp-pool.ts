@@ -1,6 +1,7 @@
 import type { ProcessSupervisor } from '../contracts.js'
 import { LspClient } from './lsp-client.js'
 import type { LspDiscovery, ResolvedServerConfig } from './lsp-discovery.js'
+import { LspTimeoutError } from './lsp-error.js'
 
 export interface PoolEntry {
   key: string
@@ -55,13 +56,20 @@ export function poolKey(root: string, server: ResolvedServerConfig): string {
   ])
 }
 
-export class WaiterAbortError extends Error {
-  readonly reason: unknown
+class WaiterAbortError extends Error {
+  readonly isTimeout: boolean
   constructor(reason?: unknown) {
-    super(reason === 'TIMED_OUT' ? 'Operation timed out' : 'Operation cancelled')
-    this.name = reason === 'TIMED_OUT' ? 'TimeoutError' : 'AbortError'
-    this.reason = reason
+    const isTimeout = reason === 'TIMED_OUT'
+    super(isTimeout ? 'Operation timed out' : 'Operation cancelled')
+    this.name = isTimeout ? 'TimeoutError' : 'AbortError'
+    this.isTimeout = isTimeout
   }
+}
+
+function abortError(): Error {
+  const error = new Error('Operation cancelled')
+  error.name = 'AbortError'
+  return error
 }
 
 function toError(error: unknown): Error {
@@ -129,6 +137,12 @@ export class LspClientPool {
     const key = this.key(root, server)
 
     while (true) {
+      if (signal?.aborted) {
+        throw signal.reason === 'TIMED_OUT'
+          ? new LspTimeoutError('Operation timed out')
+          : abortError()
+      }
+
       if (this.closed) {
         throw new Error('LSP service is closed')
       }
@@ -156,7 +170,7 @@ export class LspClientPool {
       let boot = this.boots.get(key)
       if (boot && boot.cancelled) {
         // A cancelled boot is converging; wait for it to clear, then start a fresh one.
-        await boot.promise.catch(() => {})
+        await raceAbort(boot.promise.catch(() => {}), signal)
         continue
       }
       if (!boot) {
@@ -174,11 +188,17 @@ export class LspClientPool {
       } catch (error) {
         if (error instanceof WaiterAbortError) {
           boot.waiters--
+          const stopError = error.isTimeout
+            ? new LspTimeoutError('Operation timed out')
+            : abortError()
+
           if (boot.waiters <= 0 && !boot.published) {
             // No remaining waiter: cancel the boot so the late process is cleaned up.
             boot.cancelled = true
             boot.abort.abort()
+            await boot.promise.catch(() => {})
           }
+          throw stopError
         }
         throw error
       }
@@ -339,11 +359,8 @@ export class LspClientPool {
   }
 
   /** Throws when the boot may no longer publish; the caller removes the registration and stops. */
-  private requireUsable(key: string, boot: Boot): void {
+  private requireUsable(_key: string, boot: Boot): void {
     if (this.closed || boot.generation !== this.generation || boot.cancelled) {
-      if (this.boots.get(key) === boot) {
-        this.boots.delete(key)
-      }
       throw new Error('LSP client startup cancelled')
     }
   }

@@ -12,7 +12,7 @@ import {
 import type { ManagedProcess, ProcessExit, ProcessSupervisor } from '../contracts.js'
 import { TextFileCodec } from './lsp-codec.js'
 import type { ResolvedServerConfig } from './lsp-discovery.js'
-import { LspError } from './lsp-error.js'
+import { LspError, LspTimeoutError } from './lsp-error.js'
 
 /**
  * Pre-header budget: non-LSP banner bytes are tolerated only up to this bound. Past it the stream
@@ -694,7 +694,7 @@ export class LspClient {
       timeoutPromise = new Promise<never>((_, reject) => {
         timer = setTimeout(() => {
           cts.cancel()
-          reject(new LspError(`LSP request timed out after ${timeoutMillis}ms (${description}).`))
+          reject(new LspTimeoutError(`LSP request timed out after ${timeoutMillis}ms (${description}).`))
         }, timeoutMillis)
       })
     }
@@ -706,7 +706,7 @@ export class LspClient {
       const handleAbort = (): void => {
         cts.cancel()
         if (signal?.reason === 'TIMED_OUT') {
-          reject(new LspError(`LSP request timed out (${description}).`))
+          reject(new LspTimeoutError(`LSP request timed out (${description}).`))
         } else {
           const err = new Error('Operation cancelled')
           err.name = 'AbortError'
