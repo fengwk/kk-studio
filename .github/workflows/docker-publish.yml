@@ -186,7 +186,7 @@ jobs:
           }
           node --test "${node_files[@]}"
       - name: Scan for sensitive data
-        run: python3 scripts/dev/verify/repository/check-sensitive-data.py
+        run: node scripts/dev/verify/repository/check-sensitive-data.mjs
       - name: Verify Java sources, tests and coverage
         run: env JAVA_HOME="$JAVA_HOME" mvn -B -ntp verify
       - name: Verify Java update commands with the Node decoder

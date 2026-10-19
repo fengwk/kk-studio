@@ -170,7 +170,7 @@ jobs:
 
       # 通过门禁的提交才可能进入构建与发布步骤；任一门禁失败都会终止 workflow。
       - name: Scan for sensitive data
-        run: python3 scripts/dev/verify/repository/check-sensitive-data.py
+        run: node scripts/dev/verify/repository/check-sensitive-data.mjs
       - name: Check documentation layout
         run: node scripts/dev/verify/repository/check.mjs
       # 版本对齐以仓库里的真实文件为准：根 POM 的 <version>、kk-studio.version 属性、daemon 包
