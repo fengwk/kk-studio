@@ -574,6 +574,7 @@ export async function forEachLine(
   path: string,
   encoding: Encoding,
   consumer: LineConsumer,
+  checkpoint?: () => void,
 ): Promise<LineScanOutcome> {
   const handle = await open(path, 'r')
   try {
@@ -586,7 +587,9 @@ export async function forEachLine(
     let endedWithNewline = false
     let position = encoding.bomLength
     for (;;) {
+      checkpoint?.()
       const { bytesRead } = await handle.read(buffer, 0, buffer.length, position)
+      checkpoint?.()
       if (bytesRead === 0) {
         break
       }

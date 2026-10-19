@@ -25,6 +25,19 @@ export const MAX_DISPLAY_LINE_CHARS = 500
 export const MAX_SKIP_DETAIL = 10
 export const MAX_MULTILINE_FILE_BYTES = 64 * 1024 * 1024
 
+export const STOP_NORMAL = 0
+export const STOP_TIMED_OUT = 1
+export const STOP_CANCELLED = 2
+
+export type SearchStopReason = 'TIMED_OUT' | 'CANCELLED'
+
+export class SearchStoppedError extends Error {
+  constructor(readonly reason: SearchStopReason) {
+    super(`search stopped: ${reason}`)
+    this.name = 'SearchStoppedError'
+  }
+}
+
 /** 未搜索路径及原因。 */
 export interface SkippedEntry {
   path: string
@@ -36,6 +49,7 @@ export interface FindOutcome {
   matches: string[]
   limitReached: boolean
   skipped: SkippedEntry[]
+  stopReason: SearchStopReason | null
 }
 
 /** fs.grep 的纯结果。 */
@@ -43,6 +57,7 @@ export interface GrepOutcome {
   lines: string[]
   moreMatches: boolean
   skipped: SkippedEntry[]
+  stopReason: SearchStopReason | null
 }
 
 export interface GrepOptions {
@@ -58,7 +73,7 @@ export interface FindJob {
   pattern: string
   path: string
   limit: number
-  timeoutMillis: number
+  stopBuffer: SharedArrayBuffer
 }
 
 export interface GrepJob {
@@ -70,7 +85,7 @@ export interface GrepJob {
   literal: boolean
   ignoreCase: boolean
   include: string | null
-  timeoutMillis: number
+  stopBuffer: SharedArrayBuffer
 }
 
 export type SearchJob = FindJob | GrepJob
@@ -81,21 +96,21 @@ export type SearchReply =
   | ({ ok: true; kind: 'grep' } & GrepOutcome)
   | { ok: false; error: 'input' | 'run' | 'cancelled'; message: string; code: string }
 
-/** 统一检查 deadline；Worker 无 AbortSignal，取消由主线程终止 Worker 实现。 */
+/** 统一检查 stop 标记；由 Atomics.load 原子读取主线程下发的停止状态。 */
 export class SearchControl {
-  private readonly started = Date.now()
+  private readonly stopView: Int32Array
 
-  constructor(
-    private readonly timeoutMillis: number,
-    private readonly capabilityName: string,
-  ) {}
+  constructor(stopBuffer: SharedArrayBuffer) {
+    this.stopView = new Int32Array(stopBuffer)
+  }
 
   check(): void {
-    if (this.timeoutMillis > 0 && Date.now() - this.started >= this.timeoutMillis) {
-      throw new ToolRunFailureError(
-        `${this.capabilityName} timed out after ${this.timeoutMillis} milliseconds`,
-        'TIMEOUT',
-      )
+    const state = Atomics.load(this.stopView, 0)
+    if (state === STOP_TIMED_OUT) {
+      throw new SearchStoppedError('TIMED_OUT')
+    }
+    if (state === STOP_CANCELLED) {
+      throw new SearchStoppedError('CANCELLED')
     }
   }
 }
@@ -362,16 +377,15 @@ async function walk(
   searchDirectory: string,
   control: SearchControl,
   consumer: FileConsumer,
-): Promise<{ unreadable: string[] }> {
+  onUnreadable: (path: string) => void,
+): Promise<void> {
   await requireReadableDirectory(searchDirectory)
   const target = resolve(searchDirectory)
   const prepared = await GitIgnoreRules.prepare(target, control)
   if (prepared.searchDirectoryIgnored) {
-    return { unreadable: [] }
+    return
   }
-  const unreadable: string[] = []
-  await walkDirectory(target, prepared.rules, control, consumer, unreadable)
-  return { unreadable }
+  await walkDirectory(target, prepared.rules, control, consumer, onUnreadable)
 }
 
 async function walkDirectory(
@@ -379,14 +393,14 @@ async function walkDirectory(
   rules: GitIgnoreRules,
   control: SearchControl,
   consumer: FileConsumer,
-  unreadable: string[],
+  onUnreadable: (path: string) => void,
 ): Promise<boolean> {
   control.check()
   let entries
   try {
     entries = await readdir(directory, { withFileTypes: true })
   } catch {
-    unreadable.push(directory)
+    onUnreadable(directory)
     return true
   }
   entries.sort((left, right) => (left.name < right.name ? -1 : left.name > right.name ? 1 : 0))
@@ -399,14 +413,14 @@ async function walkDirectory(
     if (entry.isDirectory()) {
       if (!(await rules.isIgnored(full, true, control))) {
         const nextRules = await rules.withDirectoryRules(full, control)
-        const continueWalk = await walkDirectory(full, nextRules, control, consumer, unreadable)
+        const continueWalk = await walkDirectory(full, nextRules, control, consumer, onUnreadable)
         if (!continueWalk) {
           return false
         }
       }
     } else if (entry.isFile()) {
       if (!(await isReadable(full))) {
-        unreadable.push(full)
+        onUnreadable(full)
         continue
       }
       if (!(await rules.isIgnored(full, false, control))) {
@@ -455,33 +469,49 @@ export async function findFiles(
   limit: number,
   control: SearchControl,
 ): Promise<FindOutcome> {
-  const pathPattern = sourcePattern.includes('/')
-  control.check()
-  const matcher = compileGlob(sourcePattern)
-  control.check()
-
   const matched: string[] = []
   const skipped = new Map<string, string>()
-  const report = await walk(path, control, async (file) => {
+  let stopReason: SearchStopReason | null = null
+
+  try {
+    const pathPattern = sourcePattern.includes('/')
     control.check()
-    const searchRelative = toPosix(relative(path, file))
-    if (matcher(pathPattern ? searchRelative : basename(file))) {
-      matched.push(toPosix(file))
-      if (matched.length > limit) {
-        return false
-      }
-    }
-    return true
-  })
-  for (const unreadable of report.unreadable) {
-    if (!skipped.has(toPosix(unreadable))) {
-      skipped.set(toPosix(unreadable), 'could not be read')
+    const matcher = compileGlob(sourcePattern)
+    control.check()
+
+    await walk(
+      path,
+      control,
+      async (file) => {
+        control.check()
+        const searchRelative = toPosix(relative(path, file))
+        if (matcher(pathPattern ? searchRelative : basename(file))) {
+          matched.push(toPosix(file))
+          if (matched.length > limit) {
+            return false
+          }
+        }
+        return true
+      },
+      (unreadable) => {
+        if (!skipped.has(toPosix(unreadable))) {
+          skipped.set(toPosix(unreadable), 'could not be read')
+        }
+      },
+    )
+  } catch (error) {
+    if (error instanceof SearchStoppedError) {
+      stopReason = error.reason
+    } else {
+      throw error
     }
   }
+
   return {
     matches: matched,
     limitReached: matched.length > limit,
     skipped: [...skipped].map(([skippedPath, reason]) => ({ path: skippedPath, reason })),
+    stopReason,
   }
 }
 
@@ -493,43 +523,59 @@ export async function grepFiles(
   options: GrepOptions,
   control: SearchControl,
 ): Promise<GrepOutcome> {
-  control.check()
-  const pattern = compileRegex(sourcePattern, options.literal, options.ignoreCase, options.multiline)
-  const include = compileInclude(options.include)
-  control.check()
-
-  const directFile = await isRegularFileNoFollow(path)
   const results = new SearchResults(limit)
-  if (directFile) {
-    if (!(await isReadable(path))) {
-      throw new ToolInputRejectedError(`path is not readable: ${toPosix(path)}`)
+  let stopReason: SearchStopReason | null = null
+
+  try {
+    control.check()
+    const pattern = compileRegex(sourcePattern, options.literal, options.ignoreCase, options.multiline)
+    const include = compileInclude(options.include)
+    control.check()
+
+    const directFile = await isRegularFileNoFollow(path)
+    if (directFile) {
+      if (!(await isReadable(path))) {
+        throw new ToolInputRejectedError(`path is not readable: ${toPosix(path)}`)
+      }
+      if (!isGitMetadata(path)) {
+        await searchInFile(path, dirname(path), true, include, pattern, options.multiline, control, results)
+      }
+    } else {
+      if (!(await isDirectoryNoFollow(path))) {
+        throw new ToolInputRejectedError('path must be a regular file or directory')
+      }
+      await walk(
+        path,
+        control,
+        async (file) => {
+          control.check()
+          await searchInFile(file, path, false, include, pattern, options.multiline, control, results)
+          return !results.limitReached()
+        },
+        (unreadable) => {
+          results.skip(toPosix(unreadable), 'could not be read')
+        },
+      )
     }
-    if (!isGitMetadata(path)) {
-      await searchInFile(path, dirname(path), true, include, pattern, options.multiline, control, results)
-    }
-  } else {
-    if (!(await isDirectoryNoFollow(path))) {
-      throw new ToolInputRejectedError('path must be a regular file or directory')
-    }
-    const report = await walk(path, control, async (file) => {
-      control.check()
-      await searchInFile(file, path, false, include, pattern, options.multiline, control, results)
-      return !results.limitReached()
-    })
-    for (const unreadable of report.unreadable) {
-      results.skip(toPosix(unreadable), 'could not be read')
+  } catch (error) {
+    if (error instanceof SearchStoppedError) {
+      stopReason = error.reason
+    } else {
+      throw error
     }
   }
+
   return {
     lines: results.lineList(),
     moreMatches: results.limitReached(),
     skipped: results.skippedList(),
+    stopReason,
   }
 }
 
 /** Worker 入口：把作业映射为可结构化克隆的稳定结果。 */
 export async function runSearchJob(job: SearchJob): Promise<SearchReply> {
-  const control = new SearchControl(job.timeoutMillis, job.kind)
+  const control = new SearchControl(job.stopBuffer)
   try {
     if (job.kind === 'find') {
       const outcome = await findFiles(job.pattern, job.path, job.limit, control)
@@ -641,29 +687,34 @@ async function searchSingleLines(
     throw new SearchFailureError(`file appears to be binary: ${display}`, null)
   }
   try {
-    await forEachLine(file, encoding, (lineNumber, line, truncated) => {
-      control.check()
-      if (results.limitReached()) {
-        return false
-      }
-      if (truncated) {
-        throw new SearchFailureError(
-          `file has a line longer than 1048576 characters and cannot be searched completely: ${display}`,
-          'contains a line longer than 1048576 characters',
-        )
-      }
-      const match = pattern.exec(line)
-      if (match !== null) {
-        if (!results.acceptMoreMatches()) {
+    await forEachLine(
+      file,
+      encoding,
+      (lineNumber, line, truncated) => {
+        control.check()
+        if (results.limitReached()) {
           return false
         }
-        const start = match.index
-        const end = start + (match[0]?.length ?? 0)
-        results.addLine(`${display}:${lineNumber}:${matchCenteredExcerpt(line, start, end)}`)
-        results.endMatch()
-      }
-      return true
-    })
+        if (truncated) {
+          throw new SearchFailureError(
+            `file has a line longer than 1048576 characters and cannot be searched completely: ${display}`,
+            'contains a line longer than 1048576 characters',
+          )
+        }
+        const match = pattern.exec(line)
+        if (match !== null) {
+          if (!results.acceptMoreMatches()) {
+            return false
+          }
+          const start = match.index
+          const end = start + (match[0]?.length ?? 0)
+          results.addLine(`${display}:${lineNumber}:${matchCenteredExcerpt(line, start, end)}`)
+          results.endMatch()
+        }
+        return true
+      },
+      () => control.check(),
+    )
   } catch (error) {
     if (error instanceof ToolRunFailureError && error.code === 'CODEC') {
       throw new SearchFailureError(`file appears to be binary: ${display}`, null)
@@ -691,19 +742,21 @@ async function searchMultiline(
       `exceeds ${MAX_MULTILINE_FILE_BYTES / (1024 * 1024)} MiB multiline limit`,
     )
   }
+  control.check()
   let bytes: Uint8Array
   try {
     bytes = await readAllBytes(file)
   } catch {
     throw new SearchFailureError(`path is not readable: ${display}`, 'could not be read')
   }
+  control.check()
   let text: string
   try {
     text = decodeText(bytes).text
   } catch {
     throw new SearchFailureError(`file appears to be binary: ${display}`, null)
   }
-  matchingMultiline(pattern, TextLines.from(text), display, control, results)
+  matchingMultiline(pattern, TextLines.from(text, () => control.check()), display, control, results)
 }
 
 function matchingMultiline(
@@ -718,7 +771,9 @@ function matchingMultiline(
   }
   const global = new RE2(pattern.source, `${pattern.flags}g`)
   let emittedThroughLine = -1
+  control.check()
   let match = global.exec(text.text)
+  control.check()
   while (match !== null) {
     control.check()
     if (!results.acceptMoreMatches()) {
@@ -730,6 +785,7 @@ function matchingMultiline(
     const coveredEnd = end > start ? end - 1 : start
     const endLine = lineIndex(text.lines, coveredEnd)
     for (let index = Math.max(startLine, emittedThroughLine + 1); index <= endLine; index++) {
+      control.check()
       const line = text.lines[index] as Line
       const matchStart = Math.max(0, start - line.startOffset)
       const matchEnd = Math.min(line.content.length, end - line.startOffset)
@@ -742,7 +798,9 @@ function matchingMultiline(
     if ((match[0]?.length ?? 0) === 0 && global.lastIndex === start) {
       global.lastIndex = start + 1
     }
+    control.check()
     match = global.exec(text.text)
+    control.check()
   }
 }
 
@@ -807,7 +865,8 @@ interface TextLines {
 }
 
 const TextLines = {
-  from(source: string): TextLines {
+  from(source: string, checkpoint?: () => void): TextLines {
+    checkpoint?.()
     const normalized = source.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
     if (normalized.length === 0) {
       return { text: normalized, lines: [] }
@@ -817,10 +876,14 @@ const TextLines = {
     const lines: Line[] = []
     let offset = 0
     for (let index = 0; index < count; index++) {
+      if ((index & 0x7f) === 0) {
+        checkpoint?.()
+      }
       const content = contents[index] as string
       lines.push({ startOffset: offset, content })
       offset += content.length + 1
     }
+    checkpoint?.()
     return { text: normalized, lines }
   },
 }

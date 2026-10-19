@@ -131,6 +131,50 @@ describe('forEachLine', () => {
       await rm(dir, { recursive: true, force: true })
     }
   })
+
+  it('forEachLine 在读取 8KiB 块前后调用 checkpoint 且异常时正确关闭 handle', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'kk-text-chk-'))
+    try {
+      const file = join(dir, 'longline.txt')
+      // 写入 24KiB 的无换行长数据
+      await writeFile(file, 'a'.repeat(24 * 1024))
+      let checkpoints = 0
+      let consumerCalled = 0
+      const outcome = await forEachLine(
+        file,
+        { charset: 'UTF-8', bomLength: 0, utf16: false },
+        () => {
+          consumerCalled++
+          return true
+        },
+        () => {
+          checkpoints++
+        },
+      )
+      // 24KiB 分 3 个 8KiB 块，每块读前后各调用 1 次，共至少 6 次 checkpoint
+      expect(checkpoints).toBeGreaterThanOrEqual(6)
+      expect(consumerCalled).toBe(1)
+      expect(outcome.totalLines).toBe(1)
+
+      // 验证 checkpoint 中途抛错时 handle 能够关闭并冒泡异常
+      let thrownCheckpoints = 0
+      await expect(
+        forEachLine(
+          file,
+          { charset: 'UTF-8', bomLength: 0, utf16: false },
+          () => true,
+          () => {
+            thrownCheckpoints++
+            if (thrownCheckpoints === 2) {
+              throw new Error('checkpoint abort')
+            }
+          },
+        ),
+      ).rejects.toThrow('checkpoint abort')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
 })
 
 describe('detectImageMediaType', () => {
