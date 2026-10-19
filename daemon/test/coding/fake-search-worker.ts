@@ -27,18 +27,11 @@ export class FakeWorker extends EventEmitter {
 
   terminate(): Promise<number> {
     this.terminated = true
-    this.terminatePromise ??= new Promise<number>((resolve) => {
-      this.settleTerminate = (code) => {
-        this.terminateSettled = true
-        resolve(code)
-      }
-    })
-    return this.terminatePromise
+    this.terminateSettled = true
+    return Promise.resolve(0)
   }
 
   /** 结束仍挂起的 terminate()，避免悬空 Promise。 */
   release(): void {
-    this.settleTerminate?.(0)
-    this.settleTerminate = null
   }
 }
