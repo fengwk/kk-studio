@@ -34,7 +34,7 @@ async function tempDir(): Promise<string> {
   return dir
 }
 
-/** Worker 超时用例硬终止真实 Worker：teardown 先 await terminate 完成（真实 Worker exit），再清理临时资源。 */
+/** 若失败路径请求强制清理，teardown 等待真实 Worker 退出后再删除临时资源。 */
 const pendingTerminations: Array<Promise<number>> = []
 
 beforeEach(() => {

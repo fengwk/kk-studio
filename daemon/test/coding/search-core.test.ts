@@ -36,8 +36,8 @@ vi.mock('node:fs/promises', async (importOriginal) => {
 })
 
 /**
- * search-core 直接单元测试：核心逻辑在 Worker 内执行，其覆盖率无法从主进程收集，
- * 因此这里直接调用导出的纯入口覆盖遍历/忽略/匹配/错误映射；真实 Worker 端到端由 search.test.ts 覆盖。
+ * search-core 直接单元测试：通过纯入口与可控检查点验证遍历、忽略、匹配及停止时的 partial 结果；
+ * 真实 Worker 端到端由 search.test.ts 与 worker-location.test.ts 覆盖。
  */
 
 const tempDirs: string[] = []
