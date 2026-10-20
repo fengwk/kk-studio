@@ -1226,7 +1226,11 @@ describe('useBoundBranchPanel', () => {
     const busy = busyThreadFixture(THREAD_ID)
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshotOf(busy))
     const releases: Array<() => void> = []
-    const calls: Array<{ commands: string[]; headEntryId: string; nextCommandSequence: string }> = []
+    const calls: Array<{
+      commands: string[]
+      headEntryId: string | undefined
+      nextCommandSequence: string | undefined
+    }> = []
     let version = 0
     vi.mocked(harnessService.acceptThreadCommandBatch).mockImplementation((threadId, request) => {
       version += 1
@@ -1262,6 +1266,9 @@ describe('useBoundBranchPanel', () => {
     // 串行且合并：第二个请求必须等第一个返回后才发出（latest intent 只保留最后目标）。
     expect(calls).toHaveLength(1)
     expect(calls[0]!.commands).toEqual(['SET_AGENT', 'SET_MODEL'])
+    // DTO 允许纯消息省 cursor，但设置请求仍必须精确携带初始 cursor。
+    expect(calls[0]!.headEntryId).toBe('e-assistant')
+    expect(calls[0]!.nextCommandSequence).toBe('1')
 
     await act(async () => {
       releases[0]!()
