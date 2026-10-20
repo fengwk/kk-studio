@@ -11,6 +11,7 @@ import fun.fengwk.kkstudio.harness.infra.realtime.RealtimeEventSource;
 import fun.fengwk.kkstudio.harness.runtime.HarnessThreadChangeSource;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEventJsonCodec;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrchestrator;
+import fun.fengwk.kkstudio.platform.harness.realtime.HarnessStreamCatchupService;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRefreshTrigger;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
@@ -160,11 +161,13 @@ public class ApplicationEventConfiguration {
   public PostgresqlNotificationLoop realtimeNotificationLoop(
       DataSource dataSource,
       RealtimeBus realtimeBus,
+      HarnessStreamCatchupService streamCatchupService,
       SystemSettingsSnapshot systemSettingsSnapshot) {
     SystemSettings.Advanced advanced = systemSettingsSnapshot.get().advanced();
     return createRealtimeNotificationLoop(
         dataSource,
         realtimeBus,
+        streamCatchupService,
         Duration.ofMillis(advanced.postgresqlWorkNotificationPollMillis()),
         Duration.ofMillis(advanced.postgresqlWorkReconnectBackoffMillis()));
   }
@@ -172,6 +175,7 @@ public class ApplicationEventConfiguration {
   static PostgresqlNotificationLoop createRealtimeNotificationLoop(
       DataSource dataSource,
       RealtimeBus realtimeBus,
+      HarnessStreamCatchupService streamCatchupService,
       Duration notificationPollInterval,
       Duration reconnectBackoff) {
     return new PostgresqlNotificationLoop(
@@ -180,7 +184,13 @@ public class ApplicationEventConfiguration {
             new PostgresqlNotificationHandler(
                 PostgresqlRealtimeEventSource.CHANNEL,
                 realtimeBus::onNotification,
-                realtimeBus::onResync)),
+                realtimeBus::onResync),
+            // 2. 跨节点流式追帧：每条通知只让接收节点对 active owner 做一次 attempt fence。重连不重放历史追帧，
+            // 也不回查 head；没有 active owner 时下一次真实请求或 checkpoint 自然收敛。
+            new PostgresqlNotificationHandler(
+                HarnessStreamCatchupService.CHANNEL,
+                streamCatchupService::onNotification,
+                () -> {})),
         notificationPollInterval,
         reconnectBackoff);
   }

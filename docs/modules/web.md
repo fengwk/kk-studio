@@ -150,6 +150,15 @@ Provider 上游错误正文沿其协议契约进入持久记录与客户端，�
 Thread/Canvas version、Project changed、Settings、realtime、Skill 同步、执行树、交互与环境失效。
 建立/重连后通知每个 handler resync；单 handler 失败隔离，durable 恢复仍由回读与 poll/lease 完成。
 
+`POST /api/threads/{threadId}/stream-catchup` 是浏览器追帧入口，body 为
+`{invocationId: canonical UUID, attempt: 正整数}`。服务端先用目标 Thread 的 durable 快照确认
+invocation 归属与 attempt，再让本地 active owner 立即提交 checkpoint，成功固定返回 202；
+请求成功只表示已接受，不承诺仍有 owner 或已经落盘。终态、过期 attempt 与不匹配关联都是 202 no-op，
+非法 UUID/请求形状为 400，Thread 不存在为 404。
+没有本地 owner 时只有存在其它活跃集群节点才向专用 `harness_stream_catchup` channel 发布一次提示；
+该 channel 与 `harness_realtime` 共用独立 realtime LISTEN 连接。接收节点只对本地 active owner 执行
+attempt fence，不回广播、不回查 head；连接重连不重放追帧提示。数据库查询/发布失败直接向上传播为 5xx。
+
 `/api/events/v1` 是唯一的浏览器事件通道，采用严格 version 1 帧。
 资源为 `{kind:thread|canvas|tree,id}` 或全局 `{kind:projects|interactions|environments}`；
 Thread `version` 与 Canvas `revision` 携 durable cursor，Thread `realtime` 是唯一的真负载事件，
