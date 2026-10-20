@@ -9,20 +9,21 @@ import {
   type DialogueMessage,
   type ToolDialogueMessage,
 } from '@/features/ai/runtime/thread-timeline-types'
-import { useOptionalExtensionHostSnapshot } from '@/platform/extensions/ExtensionHostContext'
+import { useOptionalApplicationContributions } from '@/platform/extensions/ApplicationContributionsContext'
+import type { ApplicationContributions } from '@/platform/extensions/types'
 import type { ReactNode } from 'react'
 
 /** 将每条对话消息分派给对应的块组件（pi 风格按消息类型分发）。 */
 export function MessageList({ messages }: { messages: DialogueMessage[] }) {
-  const extensionHost = useOptionalExtensionHostSnapshot()
+  const contributions = useOptionalApplicationContributions()
   const usedKeys = new Set<string>()
   const rendered: ReactNode[] = []
   for (const item of groupDialogueMessages(messages)) {
     if (item.kind === 'single') {
-      rendered.push(renderSingleMessage(item.message, extensionHost))
+      rendered.push(renderSingleMessage(item.message, contributions))
       continue
     }
-    const renderer = extensionHost?.toolRenderers.get(item.call.rendererKey)
+    const renderer = contributions?.toolRenderers.get(item.call.rendererKey)
     rendered.push(
       <ToolMessageBlock
         key={toolCardKey(item.call, usedKeys)}
@@ -37,7 +38,7 @@ export function MessageList({ messages }: { messages: DialogueMessage[] }) {
 
 function renderSingleMessage(
   message: DialogueMessage,
-  extensionHost: ReturnType<typeof useOptionalExtensionHostSnapshot>,
+  contributions: ApplicationContributions | null,
 ): ReactNode {
   switch (message.role) {
     case 'user':
@@ -47,7 +48,7 @@ function renderSingleMessage(
     case 'model_attempt_failure':
       return <ModelAttemptFailureMessageBlock key={message.id} message={message} />
     case 'tool': {
-      const renderer = extensionHost?.toolRenderers.get(message.rendererKey)
+      const renderer = contributions?.toolRenderers.get(message.rendererKey)
       return (
         <ToolMessageBlock
           key={message.toolCallId || message.id}

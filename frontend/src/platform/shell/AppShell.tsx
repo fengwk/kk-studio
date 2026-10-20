@@ -3,7 +3,7 @@ import { IconButton } from '@/shared/ui/controls/IconButton'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, matchRoutes, useLocation, type Location } from 'react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useOptionalExtensionHostSnapshot } from '@/platform/extensions/ExtensionHostContext'
+import { useOptionalApplicationContributions } from '@/platform/extensions/ApplicationContributionsContext'
 import type { PageContribution } from '@/platform/extensions/types'
 import type { AppShellProps, PrimaryNavItem } from '@/platform/shell/types'
 import { interactionService } from '@/shared/api/interaction-service'
@@ -115,14 +115,14 @@ export function AppShell({
   navItems,
 }: AppShellProps) {
   const location = useLocation()
-  const host = useOptionalExtensionHostSnapshot()
+  const contributions = useOptionalApplicationContributions()
   const { t } = useI18n()
   const pendingInteractionsCount = usePendingInteractionsCount()
 
   const { activeGroupId, immersive } = useMemo(() => {
-    const pages = explicitPages ?? host?.pages.list() ?? []
+    const pages = explicitPages ?? contributions?.pages ?? []
     return resolveRouteLayout(pages, navItems, location)
-  }, [explicitPages, host, navItems, location])
+  }, [explicitPages, contributions, navItems, location])
 
   const activeNavItem = navItems.find((item) => item.groupId === activeGroupId)
   const homePath = activeNavItem?.to ?? navItems[0]?.to ?? '/chats'

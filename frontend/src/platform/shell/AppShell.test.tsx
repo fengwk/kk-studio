@@ -5,10 +5,11 @@ import { MemoryRouter } from 'react-router'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Bot, FolderKanban, Grid2X2, Inbox, Settings } from 'lucide-react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { createApplicationExtensionHost } from '@/app/extension-host'
+import { applicationContributions } from '@/app/application-contributions'
 import { AppShell } from '@/platform/shell/AppShell'
+import type { PageContribution } from '@/platform/extensions/types'
 import type { PrimaryNavItem } from '@/platform/shell/types'
-import { ExtensionHostProvider } from '@/platform/extensions/ExtensionHostContext'
+import { ApplicationContributionsProvider } from '@/platform/extensions/ApplicationContributionsContext'
 import { ThreadComposer } from '@/features/ai/runtime/thread-panel/ThreadComposer'
 import { interactionService } from '@/shared/api/interaction-service'
 import { ApplicationEventProvider } from '@/shared/app-events'
@@ -69,10 +70,9 @@ function renderShell(
   options?: {
     navItems?: readonly PrimaryNavItem[]
     queryClient?: QueryClient
-    pages?: []
+    pages?: readonly PageContribution[]
   },
 ) {
-  const host = createApplicationExtensionHost()
   const queryClient = options?.queryClient ?? new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
@@ -80,7 +80,7 @@ function renderShell(
   const sockets = new FakeWebSocketHarness()
   const view = render(
     <QueryClientProvider client={queryClient}>
-      <ExtensionHostProvider host={host}>
+      <ApplicationContributionsProvider contributions={applicationContributions}>
         <ApplicationEventProvider url="ws://test/events/v1" socketFactory={sockets.factory}>
           <MemoryRouter initialEntries={[initialEntry]}>
             <AppShell navItems={navItems} pages={options?.pages}>
@@ -88,7 +88,7 @@ function renderShell(
             </AppShell>
           </MemoryRouter>
         </ApplicationEventProvider>
-      </ExtensionHostProvider>
+      </ApplicationContributionsProvider>
     </QueryClientProvider>,
   )
   return { ...view, sockets }

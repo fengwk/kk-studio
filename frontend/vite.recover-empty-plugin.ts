@@ -15,7 +15,7 @@ export function recoverEmptySrcModules(): Plugin {
         file.includes('/AppShell.tsx') ||
         file.includes('/AiResourceCardLayout.tsx') ||
         file.includes('/providers.tsx') ||
-        file.includes('/extension-host.ts')
+        file.includes('/application-contributions.ts')
       if (critical) {
         ctx.server.ws.send({ type: 'full-reload', path: '*' })
         return []

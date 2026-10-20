@@ -1,14 +1,12 @@
 import { Link, useLocation } from 'react-router'
-import { useOptionalExtensionHostSnapshot } from '@/platform/extensions/ExtensionHostContext'
 import { aiExtension } from '@/features/ai/extensions/ai-extension.definition'
 import { useI18n } from '@/shared/i18n'
 
 export function AiNavigation() {
-  const host = useOptionalExtensionHostSnapshot()
   const location = useLocation()
   const { t } = useI18n()
 
-  const pages = host ? host.pages.list() : (aiExtension.pages ?? [])
+  const pages = aiExtension.pages ?? []
   const items = pages
     .filter((page) => page.navGroup === 'ai' && page.navItem)
     .sort((a, b) => (b.navItem?.order ?? 0) - (a.navItem?.order ?? 0))

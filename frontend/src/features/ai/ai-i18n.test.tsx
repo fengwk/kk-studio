@@ -4,8 +4,6 @@ import { act, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AiNavigation } from '@/features/ai/extensions/AiNavigation'
-import { ExtensionHost } from '@/platform/extensions/ExtensionHost'
-import { ExtensionHostProvider } from '@/platform/extensions/ExtensionHostContext'
 import { AgentSelectionPanel } from '@/features/ai/chat/SelectionPanel'
 import { CreateChatModal } from '@/features/ai/chat/CreateChatModal'
 import { EnvironmentsPage } from '@/features/ai/environment/EnvironmentsPage'
@@ -55,34 +53,12 @@ afterEach(() => {
   act(() => setLocale('zh-CN'))
 })
 
-function createHost() {
-  const host = new ExtensionHost()
-  host.register({
-    id: 'test.ai',
-    pages: [
-      {
-        id: 'ai.nav.environments',
-        component: () => null,
-        path: 'environments',
-        navGroup: 'ai',
-        navItem: {
-          label: 'Environment',
-          labelKey: 'ai.nav.environments',
-        },
-      },
-    ],
-  })
-  return host
-}
-
 function renderWithWorkbench(ui: ReactNode, path: string) {
   // 部分受测页面（如 EnvironmentsPage）依赖唯一应用事件连接：统一注入替身 WebSocket 并保持同一 Provider 契约。
   const sockets = new FakeWebSocketHarness()
   return render(
     <ApplicationEventProvider url="ws://test/events/v1" socketFactory={sockets.factory}>
-      <ExtensionHostProvider host={createHost()}>
-        <MemoryRouter initialEntries={[`/${path}`]}>{ui}</MemoryRouter>
-      </ExtensionHostProvider>
+      <MemoryRouter initialEntries={[`/${path}`]}>{ui}</MemoryRouter>
     </ApplicationEventProvider>,
   )
 }
