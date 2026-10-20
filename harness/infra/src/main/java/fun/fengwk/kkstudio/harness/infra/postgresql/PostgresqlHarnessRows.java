@@ -116,7 +116,7 @@ final class PostgresqlHarnessRows {
               uuid(resultSet, "root_thread_id"),
               resultSet.getBoolean("yolo_enabled"),
               SpawnTrigger.valueOf(resultSet.getString("spawn_trigger")),
-              constraints(resultSet.getString("constraints")),
+              decodeConstraints(resultSet.getString("constraints")),
               ThreadExecutionControl.valueOf(resultSet.getString("execution_control")),
               resultSet.getLong("input_through_sequence"),
               resultSet.getLong("next_command_sequence"),
@@ -137,16 +137,32 @@ final class PostgresqlHarnessRows {
     return node.toString();
   }
 
-  private static ThreadConstraints constraints(String json) {
+  static ThreadConstraints decodeConstraints(String json) {
+    if (json == null) {
+      throw new IllegalArgumentException("thread constraints must not be null");
+    }
     try {
       JsonNode node = MAPPER.readTree(json);
+      if (node == null || !node.isObject() || node.size() != 3) {
+        throw new IllegalArgumentException("thread constraints must contain exactly three fields");
+      }
       JsonNode cap = node.get("maxOutputTokens");
+      JsonNode cacheDisabled = node.get("promptCacheDisabled");
+      JsonNode autoCompaction = node.get("allowAutoCompaction");
+      if (cap == null
+          || (!cap.isNull() && (!cap.isIntegralNumber() || !cap.canConvertToInt()))
+          || cacheDisabled == null
+          || !cacheDisabled.isBoolean()
+          || autoCompaction == null
+          || !autoCompaction.isBoolean()) {
+        throw new IllegalArgumentException("invalid thread constraints fields");
+      }
       return new ThreadConstraints(
-          cap == null || cap.isNull() ? null : cap.intValue(),
-          node.get("promptCacheDisabled").booleanValue(),
-          node.get("allowAutoCompaction").booleanValue());
+          cap.isNull() ? null : cap.intValue(),
+          cacheDisabled.booleanValue(),
+          autoCompaction.booleanValue());
     } catch (JacksonException error) {
-      throw new IllegalStateException("invalid thread constraints: " + json, error);
+      throw new IllegalArgumentException("malformed thread constraints JSON", error);
     }
   }
 
