@@ -97,6 +97,7 @@ test('repository structure guard verifies root and harness POM module lists', ()
   assert.deepEqual(rootModules, [
     'share',
     'schema',
+    'work',
     'canvas',
     'project',
     'harness',

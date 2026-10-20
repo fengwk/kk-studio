@@ -86,41 +86,49 @@ export function threadParentIdOf(thread) {
 }
 
 /**
- * 严格校验 Thread 投影的持久 YOLO policy（取代旧 boolean）：{@code mode} 只能是
- * ENABLE/DISABLE/FOLLOW；非 FOLLOW（执行根）必须显式为 null 的 {@code rootThreadId}，FOLLOW
- * （子代理）必须携带真实执行根的 canonical UUID。返回校验后的 policy。
+ * 严格校验 Thread 投影的执行根与 YOLO 开关：{@code rootThreadId} 必须是 canonical UUID，
+ * {@code yoloEnabled} 必须是显式 boolean（缺失字段绝不兜底为 false）。执行根指向自身且可开启
+ * YOLO；子代理指向执行根、自身开关恒为 false。返回校验后的 {@code yoloEnabled}。
  */
-export function assertThreadYoloPolicy(policy, label = 'yoloPolicy') {
+export function threadYoloOf(thread, label = 'thread') {
+  const threadId = canonicalUuid(thread?.threadId, `${label}.threadId`)
+  const parentThreadId = threadParentIdOf(thread)
+  const rootThreadId = canonicalUuid(thread?.rootThreadId, `${label}.rootThreadId`)
   assert(
-    policy != null && typeof policy === 'object',
-    `${label} must be an object: ${JSON.stringify(policy)}`,
+    typeof thread.yoloEnabled === 'boolean',
+    `${label}.yoloEnabled must be an explicit boolean: ${JSON.stringify(thread)}`,
   )
-  assert(
-    policy.mode === 'ENABLE' || policy.mode === 'DISABLE' || policy.mode === 'FOLLOW',
-    `${label}.mode must be ENABLE|DISABLE|FOLLOW: ${JSON.stringify(policy)}`,
-  )
-  if (policy.mode === 'FOLLOW') {
-    canonicalUuid(policy.rootThreadId, `${label}.rootThreadId`)
+  if (parentThreadId === null) {
+    assert(
+      rootThreadId === threadId,
+      `${label}.rootThreadId must point to the root thread itself: ${JSON.stringify(thread)}`,
+    )
   } else {
     assert(
-      policy.rootThreadId === null,
-      `${label}.rootThreadId must be null for ${policy.mode}: ${JSON.stringify(policy)}`,
+      rootThreadId !== threadId,
+      `${label}.rootThreadId must point to the execution root, not the child: ${JSON.stringify(thread)}`,
+    )
+    assert(
+      thread.yoloEnabled === false,
+      `${label}.yoloEnabled must be false for a child thread: ${JSON.stringify(thread)}`,
     )
   }
-  return policy
+  return thread.yoloEnabled
 }
 
-/**
- * 校验执行根 Thread 的 YOLO policy 精确投影：{@code mode} 只由根开关 {@code enabled}
- * 决定，且 {@code rootThreadId} 必须显式为 null。
- */
-export function assertRootYoloPolicy(thread, enabled, label = 'thread') {
-  const policy = assertThreadYoloPolicy(thread?.yoloPolicy, `${label}.yoloPolicy`)
+/** 校验执行根 Thread 的 YOLO 开关精确等于 {@code enabled}，并强制根自指约束。 */
+export function assertRootYoloEnabled(thread, enabled, label = 'thread') {
+  assert(typeof enabled === 'boolean', `${label} expected YOLO value must be boolean`)
   assert(
-    policy.mode === (enabled ? 'ENABLE' : 'DISABLE'),
-    `${label}.yoloPolicy.mode ${policy.mode} != ${enabled ? 'ENABLE' : 'DISABLE'}: ${JSON.stringify(thread)}`,
+    thread?.parentThreadId === null,
+    `${label} must be a root thread: ${JSON.stringify(thread)}`,
   )
-  return policy
+  const actual = threadYoloOf(thread, label)
+  assert(
+    actual === enabled,
+    `${label}.yoloEnabled ${actual} != ${enabled}: ${JSON.stringify(thread)}`,
+  )
+  return actual
 }
 
 /** 严格校验 Thread 投影 DTO 的 canonical UUID 标识字段、执行控制与父关系并返回 threadId。 */
@@ -128,8 +136,7 @@ export function threadIdOf(thread) {
   const threadId = canonicalUuid(thread?.threadId, 'threadId')
   canonicalUuid(thread.sessionId, 'sessionId')
   canonicalUuid(thread.headEntryId, 'headEntryId')
-  threadParentIdOf(thread)
-  assertThreadYoloPolicy(thread.yoloPolicy)
+  threadYoloOf(thread)
   // name 是 Thread 的必需非空展示名称（服务端派生/控制面重命名，绝不回退为 id）。
   assert(
     typeof thread.name === 'string' && thread.name.trim().length > 0,
@@ -850,7 +857,7 @@ export function setEnvironmentCommand(environmentName, idempotencyKey) {
 }
 
 /**
- * 直接更新 Thread YOLO policy（PUT /yolo）：只提交目标策略，不携带 Thread version。
+ * 直接更新 Thread YOLO 开关（PUT /yolo）：只提交目标开关，不携带 Thread version。
  * 同值请求是 no-op；值变化时 version 精确 +1。返回权威 Thread DTO。
  */
 export async function setThreadYolo(ctx, threadId, { yoloEnabled }) {
