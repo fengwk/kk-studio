@@ -231,8 +231,7 @@ public final class ProviderRequestPreviewService {
   private HarnessProviderRequestPreviewDTO previewCompactionChild(
       UUID parentSessionId, Map<UUID, Entry> parentEntries, Entry output) {
     EntryPath outputPath = entryPath(parentEntries, output.id());
-    Entry startEntry = requireEnclosingCompactionStart(outputPath);
-    Entry turnEnd = requireCompactionTurnEnd(parentEntries, output, startEntry);
+    Entry turnEnd = requireCompactionTurnEnd(parentEntries, output);
     List<Entry> closedEntries = new ArrayList<>(outputPath.entries());
     closedEntries.add(turnEnd);
     EntryPath closedPath;
@@ -274,15 +273,17 @@ public final class ProviderRequestPreviewService {
 
     Map<UUID, Entry> childEntries = sessionEntries(childThread.sessionId());
     Entry finalAnswer = childEntries.get(join.finalAnswerEntryId());
-    if (finalAnswer == null
-        || !carriesModelOutputMetadata(finalAnswer)
-        || (finalAnswer.payload() instanceof MessagePayload message
-            && message.message().role() != AgentMessageRole.ASSISTANT)) {
+    MessagePayload finalMessage =
+        finalAnswer != null && finalAnswer.payload() instanceof MessagePayload message
+            ? message
+            : null;
+    if (finalMessage == null
+        || finalMessage.message().role() != AgentMessageRole.ASSISTANT
+        || finalMessage.assistantMetadata() == null) {
       throw frozenCompactionUnavailable(
-          "compaction join final answer is not a model output in the child session");
+          "compaction join final answer is not an assistant model output in the child session");
     }
     CompactionPayload compaction = (CompactionPayload) output.payload();
-    MessagePayload finalMessage = (MessagePayload) finalAnswer.payload();
     if (compaction.assistantMetadata() == null
         || !compaction.assistantMetadata().equals(finalMessage.assistantMetadata())) {
       throw frozenCompactionUnavailable(
@@ -319,29 +320,21 @@ public final class ProviderRequestPreviewService {
         HarnessProviderRequestPreviewDTO.HISTORICAL_NOTICE);
   }
 
-  /** 压缩结果必须位于最近的 COMPACTION TURN_START 内，且该回合的 run group 已冻结。 */
-  private static Entry requireEnclosingCompactionStart(EntryPath outputPath) {
-    List<Entry> entries = outputPath.entries();
-    for (int index = entries.size() - 1; index >= 0; index--) {
-      Entry entry = entries.get(index);
-      if (entry.payload() instanceof TurnStartPayload start) {
-        if (start.reason() != TurnStartReason.COMPACTION || start.compaction() == null) {
-          throw frozenCompactionUnavailable(
-              "compaction result is not enclosed by a COMPACTION turn");
-        }
-        return entry;
-      }
-    }
-    throw frozenCompactionUnavailable("compaction result has no enclosing TURN_START");
-  }
-
-  /** 压缩结果与其 TURN_END 在同一提交中落库；结果 Entry 的直接子 TURN_END 是闭合事实。缺失说明回合未完成或关联损坏， 不能把它当成可预览的完成压缩。 */
-  private static Entry requireCompactionTurnEnd(
-      Map<UUID, Entry> entries, Entry output, Entry startEntry) {
+  /**
+   * 压缩结果与其 TURN_END 在同一提交中落库；结果 Entry 的直接子 TURN_END 指向 enclosing COMPACTION TURN_START 时才构成闭合事实。
+   * 缺失说明回合未完成或关联损坏，不能把它当成可预览的完成压缩。
+   */
+  private static Entry requireCompactionTurnEnd(Map<UUID, Entry> entries, Entry output) {
     for (Entry candidate : entries.values()) {
-      if (output.id().equals(candidate.parentEntryId())
-          && candidate.payload() instanceof TurnEndPayload end
-          && startEntry.id().equals(end.turnStartEntryId())) {
+      if (!output.id().equals(candidate.parentEntryId())
+          || !(candidate.payload() instanceof TurnEndPayload end)) {
+        continue;
+      }
+      Entry startEntry = entries.get(end.turnStartEntryId());
+      if (startEntry != null
+          && startEntry.payload() instanceof TurnStartPayload start
+          && start.reason() == TurnStartReason.COMPACTION
+          && start.compaction() != null) {
         return candidate;
       }
     }
@@ -372,13 +365,14 @@ public final class ProviderRequestPreviewService {
       ThreadState childThread, UUID parentSessionId, UUID ownerThreadId, CompactionStart frozen) {
     ThreadConstraints constraints = childThread.constraints();
     boolean frozenExecution =
-        childThread.parentThreadId() != null
+        childThread.id().equals(frozen.childThreadId())
+            && childThread.parentThreadId() != null
             && childThread.parentThreadId().equals(ownerThreadId)
             && !childThread.sessionId().equals(parentSessionId)
             && childThread.spawnTrigger() == SpawnTrigger.RUNTIME
             && constraints.promptCacheDisabled()
-            && (constraints.maxOutputTokens() == null
-                || constraints.maxOutputTokens() <= frozen.outputBudget());
+            && constraints.maxOutputTokens() != null
+            && constraints.maxOutputTokens() <= frozen.outputBudget();
     if (!frozenExecution) {
       throw frozenCompactionUnavailable(
           "compaction child thread does not belong to the frozen execution");
