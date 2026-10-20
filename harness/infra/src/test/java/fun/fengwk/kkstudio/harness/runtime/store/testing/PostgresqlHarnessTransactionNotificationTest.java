@@ -42,6 +42,8 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
@@ -513,6 +515,8 @@ class PostgresqlHarnessTransactionNotificationTest {
                   "main",
                   parentThreadId == null ? threadId : rootThreadId,
                   false,
+                  SpawnTrigger.MODEL_TOOL,
+                  ThreadConstraints.NONE,
                   ThreadExecutionControl.RUNNABLE,
                   0L,
                   1L,
@@ -589,6 +593,8 @@ class PostgresqlHarnessTransactionNotificationTest {
         "child",
         parentThreadId,
         false,
+        SpawnTrigger.MODEL_TOOL,
+        ThreadConstraints.NONE,
         ThreadExecutionControl.RUNNABLE,
         0L,
         1L,

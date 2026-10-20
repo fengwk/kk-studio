@@ -21,7 +21,6 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinProjector;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinReceipt;
-import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolResultHistoryMaterializer;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.processor.ModelProcessor;
@@ -164,10 +163,17 @@ public final class HarnessRuntime {
     return acceptCommandsControl.acceptCommands(command, preflight);
   }
 
-  /** 原子接受源 prompt、执行父子归属、join 凭据和持久 Work。 */
-  public AcceptedCommands acceptCommandsAndJoin(
-      AcceptCommandsCommand command, ThreadJoinRequest join, AcceptancePreflight preflight) {
-    return acceptCommandsControl.acceptCommandsAndJoin(command, join, preflight);
+  /**
+   * 在一个事务内创建（或续用）Agent Thread、接受首批输入并登记任务票据：{@link AgentSpawner} 的事务入口，加入调用方已有的外层事务。 锁序与准入由 {@link
+   * AgentSpawner} 与 {@link SpawnTickets} 承担。
+   */
+  public AcceptedCommands spawn(SpawnRequest request) {
+    Objects.requireNonNull(request, "request");
+    return store.transaction(
+        tx -> {
+          AgentSpawner.lockForSpawn(tx, request);
+          return AgentSpawner.spawn(tx, request);
+        });
   }
 
   /** 按 invocationId 读取固定 join receipt（未匹配时 receipt 字段为空）。 */

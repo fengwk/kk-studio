@@ -31,7 +31,9 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.SystemReminder;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatRepository;
@@ -308,6 +310,8 @@ class HarnessOwnerQueryServiceTest {
             root.name(),
             rootId,
             false,
+            SpawnTrigger.MODEL_TOOL,
+            ThreadConstraints.NONE,
             ThreadExecutionControl.RUNNABLE,
             0L,
             1L,
@@ -445,6 +449,8 @@ class HarnessOwnerQueryServiceTest {
         "thread",
         threadId,
         false,
+        SpawnTrigger.USER,
+        ThreadConstraints.NONE,
         ThreadExecutionControl.RUNNABLE,
         0L,
         1L,

@@ -1,8 +1,8 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T0;
-import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.settings;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.userMessageCommand;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.SpawnTestSupport.acceptAndJoin;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -10,9 +10,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
-import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.SpawnTestSupport.Child;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.SpawnTestSupport.Ticket;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 
@@ -44,7 +44,8 @@ class HarnessRuntimeYoloPolicyTest {
     HarnessRuntimeTestSupport.Baseline root = HarnessRuntimeTestSupport.seedBaseline(store);
 
     AcceptedCommands child =
-        runtime.acceptCommandsAndJoin(
+        acceptAndJoin(
+            runtime,
             childSession(root.threadId(), TestIds.id(101), TestIds.id(102)),
             join(TestIds.id(1001), root.threadId(), root.rootEntryId()),
             AcceptancePreflight.IDENTITY);
@@ -52,7 +53,8 @@ class HarnessRuntimeYoloPolicyTest {
     assertEquals(root.threadId(), childThread.rootThreadId());
     assertFalse(childThread.yoloEnabled());
 
-    runtime.acceptCommandsAndJoin(
+    acceptAndJoin(
+        runtime,
         childSession(child.thread().id(), TestIds.id(103), TestIds.id(104)),
         join(TestIds.id(1002), child.thread().id(), child.thread().headEntryId()),
         AcceptancePreflight.IDENTITY);
@@ -67,7 +69,8 @@ class HarnessRuntimeYoloPolicyTest {
   void independentForkCreatesRootWithItsOwnSwitch() {
     HarnessRuntimeTestSupport.Baseline root = HarnessRuntimeTestSupport.seedBaseline(store);
     AcceptedCommands child =
-        runtime.acceptCommandsAndJoin(
+        acceptAndJoin(
+            runtime,
             childSession(root.threadId(), TestIds.id(201), TestIds.id(202)),
             join(TestIds.id(2001), root.threadId(), root.rootEntryId()),
             AcceptancePreflight.IDENTITY);
@@ -92,11 +95,10 @@ class HarnessRuntimeYoloPolicyTest {
   @Test
   void childCreationReplaySurvivesRootToggle() {
     HarnessRuntimeTestSupport.Baseline root = HarnessRuntimeTestSupport.seedBaseline(store);
-    AcceptCommandsCommand command = childSession(root.threadId(), TestIds.id(301), TestIds.id(302));
-    ThreadJoinRequest ticket = join(TestIds.id(3001), root.threadId(), root.rootEntryId());
+    Child command = childSession(root.threadId(), TestIds.id(301), TestIds.id(302));
+    Ticket ticket = join(TestIds.id(3001), root.threadId(), root.rootEntryId());
 
-    AcceptedCommands first =
-        runtime.acceptCommandsAndJoin(command, ticket, AcceptancePreflight.IDENTITY);
+    AcceptedCommands first = acceptAndJoin(runtime, command, ticket, AcceptancePreflight.IDENTITY);
     ThreadState created = thread(TestIds.id(302));
     String creationHash = created.creationRequestHash();
     long childVersion = created.version();
@@ -105,8 +107,7 @@ class HarnessRuntimeYoloPolicyTest {
     runtime.setThreadYolo(new SetThreadYoloCommand(root.threadId(), true));
     assertEquals(rootVersionBefore + 1, thread(root.threadId()).version());
 
-    AcceptedCommands replay =
-        runtime.acceptCommandsAndJoin(command, ticket, AcceptancePreflight.IDENTITY);
+    AcceptedCommands replay = acceptAndJoin(runtime, command, ticket, AcceptancePreflight.IDENTITY);
     assertTrue(replay.replayed());
     assertEquals(first.thread().id(), replay.thread().id());
     ThreadState replayed = thread(TestIds.id(302));
@@ -115,25 +116,17 @@ class HarnessRuntimeYoloPolicyTest {
     assertEquals(childVersion, replayed.version());
   }
 
-  private static AcceptCommandsCommand childSession(
-      UUID parentThreadId, UUID sessionId, UUID threadId) {
-    return new AcceptCommandsCommand(
-        new AcceptCommandsTarget.NewChildSession(sessionId, threadId, settings(), parentThreadId),
+  private static Child childSession(UUID parentThreadId, UUID sessionId, UUID threadId) {
+    return new Child(
+        sessionId,
+        threadId,
+        parentThreadId,
         List.of(userMessageCommand(TestIds.id(parentThreadId.hashCode()), "child work")));
   }
 
-  private static ThreadJoinRequest join(UUID invocationId, UUID parentThreadId, UUID parentHead) {
-    return new ThreadJoinRequest(
-        invocationId,
-        parentThreadId,
-        parentHead,
-        JOIN_HASH,
-        "assistant",
-        3,
-        3,
-        2,
-        3,
-        JoinPurpose.TASK);
+  private static Ticket join(UUID invocationId, UUID parentThreadId, UUID parentHead) {
+    return Ticket.task(
+        invocationId, parentThreadId, parentHead, JOIN_HASH, "assistant", 3, 3, 2, 3);
   }
 
   private static AcceptCommandsCommand fork(

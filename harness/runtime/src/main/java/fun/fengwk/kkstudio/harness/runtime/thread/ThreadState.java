@@ -11,11 +11,11 @@ import java.util.regex.Pattern;
  * 持久化 Thread 当前状态。
  *
  * <p>持久化 Thread 自身拥有的字段：所属 Session、不可变父 Thread、creation request hash 身份键、head Entry cursor、Thread
- * 显示名称、执行根与根的 YOLO 开关、执行控制（{@link ThreadExecutionControl}）、已被普通 INPUT 接纳的输入水位 {@code
- * inputThroughSequence}（初值 0）、下一条 Command sequence 以及对外可见的 snapshot version。{@code
- * sessionId}、{@code parentThreadId}、{@code creationRequestHash} 与 {@code createdAt} 创建后不可变；
- * environment、open turn、execution epoch 与 processor lease 刻意省略，settings 事实从 {@code headEntryId} 处的
- * Entry 分支派生。
+ * 显示名称、执行根与根的 YOLO 开关、创建来源 {@link SpawnTrigger} 与冻结的 {@link ThreadConstraints}、执行控制（{@link
+ * ThreadExecutionControl}）、已被普通 INPUT 接纳的输入水位 {@code inputThroughSequence}（初值 0）、下一条 Command
+ * sequence 以及对外可见的 snapshot version。{@code sessionId}、{@code parentThreadId}、{@code
+ * creationRequestHash} 与 {@code createdAt} 创建后不可变； environment、open turn、execution epoch 与
+ * processor lease 刻意省略，settings 事实从 {@code headEntryId} 处的 Entry 分支派生。
  *
  * <p>{@code parentThreadId} 是不可变父 Thread UUID，建立执行关系树；根 Thread 为 {@code null}，不可指向自身。{@code
  * rootThreadId} 是不可变的执行根（根指向自身），供树锁与整树读取直接使用。{@code yoloEnabled} 只属于根：子代理恒为 false， 其有效 YOLO
@@ -37,6 +37,8 @@ public record ThreadState(
     String name,
     UUID rootThreadId,
     boolean yoloEnabled,
+    SpawnTrigger spawnTrigger,
+    ThreadConstraints constraints,
     ThreadExecutionControl executionControl,
     long inputThroughSequence,
     long nextCommandSequence,
@@ -66,6 +68,11 @@ public record ThreadState(
     if (yoloEnabled && parentThreadId != null) {
       throw new IllegalArgumentException("only an execution root carries the yolo switch");
     }
+    Objects.requireNonNull(spawnTrigger, "spawnTrigger");
+    Objects.requireNonNull(constraints, "constraints");
+    if (spawnTrigger == SpawnTrigger.USER && parentThreadId != null) {
+      throw new IllegalArgumentException("a user-created thread cannot have a parent");
+    }
     Objects.requireNonNull(executionControl, "executionControl");
     if (inputThroughSequence < 0) {
       throw new IllegalArgumentException("inputThroughSequence must not be negative");
@@ -86,9 +93,9 @@ public record ThreadState(
 
   /**
    * 校验 {@code next} 是存储行 {@code stored} 的合法迁移：identity（id / sessionId / parentThreadId /
-   * rootThreadId / creationRequestHash / createdAt）不可变，{@code headEntryId} / {@code
-   * inputThroughSequence} / {@code nextCommandSequence} / {@code version} / {@code updatedAt}
-   * 不允许回退，任何 Thread 行变更都会把 {@code version} 严格 +1。exact replay 一律被接受。
+   * rootThreadId / spawnTrigger / constraints / creationRequestHash / createdAt）不可变，{@code
+   * headEntryId} / {@code inputThroughSequence} / {@code nextCommandSequence} / {@code version} /
+   * {@code updatedAt} 不允许回退，任何 Thread 行变更都会把 {@code version} 严格 +1。exact replay 一律被接受。
    */
   public static void validateTransition(ThreadState stored, ThreadState next) {
     Objects.requireNonNull(stored, "stored");
@@ -110,6 +117,12 @@ public record ThreadState(
     }
     if (!stored.rootThreadId().equals(next.rootThreadId())) {
       throw new IllegalArgumentException("thread rootThreadId must not change");
+    }
+    if (stored.spawnTrigger() != next.spawnTrigger()) {
+      throw new IllegalArgumentException("thread spawnTrigger must not change");
+    }
+    if (!stored.constraints().equals(next.constraints())) {
+      throw new IllegalArgumentException("thread constraints must not change");
     }
     if (!stored.createdAt().equals(next.createdAt())) {
       throw new IllegalArgumentException("thread createdAt must not change");
@@ -245,6 +258,8 @@ public record ThreadState(
             name,
             id,
             enabled,
+            spawnTrigger,
+            constraints,
             executionControl,
             inputThroughSequence,
             nextCommandSequence,
@@ -270,6 +285,8 @@ public record ThreadState(
             newName,
             rootThreadId,
             yoloEnabled,
+            spawnTrigger,
+            constraints,
             executionControl,
             inputThroughSequence,
             nextCommandSequence,
@@ -301,6 +318,8 @@ public record ThreadState(
             name,
             rootThreadId,
             yoloEnabled,
+            spawnTrigger,
+            constraints,
             executionControl,
             inputThroughSequence,
             nextCommandSequence,

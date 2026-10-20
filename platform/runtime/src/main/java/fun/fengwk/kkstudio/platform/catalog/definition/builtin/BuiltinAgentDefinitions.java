@@ -18,8 +18,8 @@ public final class BuiltinAgentDefinitions {
   /**
    * 压缩内置 Agent 的保留身份名称；压缩执行路径按此名称通过普通 Agent 目录读取定义。
    *
-   * <p>这是普通 Agent 目录中的显示/身份名称，与 {@code JoinPurpose.COMPACTION} 的 wire token {@code compaction}
-   * 相互独立：后者是持久化与 wire 协议稳定性的一部分，不随此名称变化。
+   * <p>这是普通 Agent 目录中的显示/身份名称；压缩子执行以 {@code SpawnTrigger.RUNTIME} 与 {@code
+   * JoinDelivery.SETTLE_OWNER_TURN} 标识，不依赖此名称。
    */
   public static final String COMPACTION_NAME = "Compaction";
 

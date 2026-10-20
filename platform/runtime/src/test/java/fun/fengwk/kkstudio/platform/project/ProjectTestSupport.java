@@ -19,6 +19,7 @@ import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.harness.runtime.SpawnRequest;
 import fun.fengwk.kkstudio.harness.runtime.StopCommand;
 import fun.fengwk.kkstudio.harness.runtime.StopResult;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
@@ -30,11 +31,10 @@ import fun.fengwk.kkstudio.harness.runtime.history.EntryType;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryEntryPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
-import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
+import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinOutcome;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinReceipt;
-import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
@@ -465,11 +465,8 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
       HarnessRuntime runtime = mock(HarnessRuntime.class);
       when(runtime.acceptCommands(any(AcceptCommandsCommand.class), any()))
           .thenAnswer(invocation -> accept(jdbc, invocation.getArgument(0)));
-      when(runtime.acceptCommandsAndJoin(
-              any(AcceptCommandsCommand.class), any(ThreadJoinRequest.class), any()))
-          .thenAnswer(
-              invocation ->
-                  acceptAndJoin(jdbc, invocation.getArgument(0), invocation.getArgument(1)));
+      when(runtime.spawn(any(SpawnRequest.class)))
+          .thenAnswer(invocation -> spawn(jdbc, invocation.getArgument(0)));
       when(runtime.findJoin(any(UUID.class)))
           .thenAnswer(invocation -> findJoin(jdbc, invocation.getArgument(0)));
       when(runtime.findThreadCommand(any(UUID.class), any(UUID.class)))
@@ -485,10 +482,33 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
       return runtime;
     }
 
-    /** 原子接受并发起 join：先按普通接受写入 Session/Thread/Commands，再冻结 join 契约行（terminal 留空表示尚未匹配）。 */
-    private static AcceptedCommands acceptAndJoin(
-        JdbcTemplate jdbc, AcceptCommandsCommand command, ThreadJoinRequest join) {
-      AcceptedCommands accepted = accept(jdbc, command);
+    /** 原子创建 / 续用并登记票据：先按普通接受写入 Session/Thread/Commands，再冻结票据行（terminal 留空表示尚未匹配）。 */
+    private static AcceptedCommands spawn(JdbcTemplate jdbc, SpawnRequest request) {
+      AcceptedCommands accepted;
+      if (request.continuation() != null) {
+        accepted =
+            accept(
+                jdbc,
+                new AcceptCommandsCommand(
+                    new AcceptCommandsTarget.Thread(
+                        request.threadId(),
+                        request.continuation().expectedHeadEntryId(),
+                        request.continuation().expectedNextCommandSequence()),
+                    request.commands()));
+      } else if (request.parentThreadId() == null) {
+        accepted =
+            accept(
+                jdbc,
+                new AcceptCommandsCommand(
+                    new AcceptCommandsTarget.NewRootSession(
+                        request.sessionId(),
+                        request.threadId(),
+                        request.settings(),
+                        request.yoloEnabled()),
+                    request.commands()));
+      } else {
+        accepted = insertChild(jdbc, request);
+      }
       long sourceSequence =
           jdbc.queryForObject(
               "select max(sequence) from harness_thread_command where thread_id = ?",
@@ -499,16 +519,19 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
           "insert into harness_thread_join (invocation_id, request_hash, parent_thread_id,"
               + " child_thread_id, source_command_sequence, agent, max_turns, reminder_turn,"
               + " terminal_entry_id, final_answer_entry_id, delivery_command_sequence, created_at,"
-              + " updated_at) values (?, ?, ?, ?, ?, ?, ?, 0, null, null, null, ?, ?)",
-          join.invocationId(),
-          join.requestHash(),
-          join.parentThreadId(),
+              + " updated_at, delivery, counts_toward_quota)"
+              + " values (?, ?, ?, ?, ?, ?, ?, 0, null, null, null, ?, ?, ?, ?)",
+          request.ticketId(),
+          request.requestHash(),
+          request.parentThreadId(),
           accepted.thread().id(),
           sourceSequence,
-          join.agent(),
-          join.maxTurns(),
+          request.agent(),
+          request.budget().maxTurns(),
           now,
-          now);
+          now,
+          request.delivery().name(),
+          request.countsTowardQuota());
       return accepted;
     }
 
@@ -518,7 +541,8 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
           jdbc.queryForList(
               "select invocation_id, request_hash, parent_thread_id, child_thread_id,"
                   + " source_command_sequence, agent, max_turns, reminder_turn, terminal_entry_id,"
-                  + " final_answer_entry_id, delivery_command_sequence, created_at, updated_at"
+                  + " final_answer_entry_id, delivery_command_sequence, created_at, updated_at,"
+                  + " delivery, counts_toward_quota"
                   + " from harness_thread_join where invocation_id = ?",
               invocationId);
       if (rows.isEmpty()) {
@@ -542,7 +566,8 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
                   : ((Number) row.get("delivery_command_sequence")).longValue(),
               ((Timestamp) row.get("created_at")).toInstant(),
               ((Timestamp) row.get("updated_at")).toInstant(),
-              JoinPurpose.TASK,
+              JoinDelivery.valueOf((String) row.get("delivery")),
+              (Boolean) row.get("counts_toward_quota"),
               null));
     }
 
@@ -638,9 +663,10 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
             now);
         jdbc.update(
             "insert into harness_thread (id, session_id, head_entry_id, creation_request_hash,"
-                + " name, root_thread_id, yolo_enabled, execution_control, input_through_sequence,"
+                + " name, root_thread_id, yolo_enabled, spawn_trigger, constraints,"
+                + " execution_control, input_through_sequence,"
                 + " next_command_sequence, version, created_at, updated_at)"
-                + " values (?, ?, ?, ?, ?, ?, ?, 'RUNNABLE', 0, ?, 0, ?, ?)",
+                + " values (?, ?, ?, ?, ?, ?, ?, 'USER', '{\"maxOutputTokens\":null,\"promptCacheDisabled\":false,\"allowAutoCompaction\":true}'::jsonb, 'RUNNABLE', 0, ?, 0, ?, ?)",
             threadId,
             sessionId,
             rootEntryId,
@@ -648,42 +674,6 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
             "thread-" + threadId,
             threadId,
             newSession.yoloEnabled(),
-            command.commands().size() + 1L,
-            now,
-            now);
-        insertCommands(jdbc, threadId, 1, command.commands(), now);
-        return accepted(threadId, rootEntryId);
-      }
-      if (target instanceof AcceptCommandsTarget.NewChildSession newSession) {
-        UUID sessionId = newSession.sessionId();
-        UUID threadId = newSession.threadId();
-        UUID parentThreadId = newSession.parentThreadId();
-        UUID rootThreadId = resolveExecutionRoot(jdbc, parentThreadId);
-        UUID rootEntryId = UUID.randomUUID();
-        Timestamp now = Timestamp.from(Instant.now());
-        jdbc.update(
-            "insert into harness_session (id, name, created_at) values (?, ?, ?)",
-            sessionId,
-            "session-" + sessionId,
-            now);
-        jdbc.update(
-            "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload,"
-                + " created_at) values (?, ?, null, 'ROOT', '{}'::jsonb, ?)",
-            rootEntryId,
-            sessionId,
-            now);
-        jdbc.update(
-            "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id,"
-                + " creation_request_hash, name, root_thread_id, yolo_enabled, execution_control,"
-                + " input_through_sequence, next_command_sequence, version, created_at, updated_at)"
-                + " values (?, ?, ?, ?, ?, ?, ?, false, 'RUNNABLE', 0, ?, 0, ?, ?)",
-            threadId,
-            sessionId,
-            parentThreadId,
-            rootEntryId,
-            "0".repeat(64),
-            "thread-" + threadId,
-            rootThreadId,
             command.commands().size() + 1L,
             now,
             now);
@@ -702,6 +692,45 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
           command.commands().size(),
           thread.threadId());
       return accepted(thread.threadId(), thread.expectedHeadEntryId());
+    }
+
+    private static AcceptedCommands insertChild(JdbcTemplate jdbc, SpawnRequest request) {
+      UUID sessionId = request.sessionId();
+      UUID threadId = request.threadId();
+      UUID parentThreadId = request.parentThreadId();
+      UUID rootThreadId = resolveExecutionRoot(jdbc, parentThreadId);
+      UUID rootEntryId = UUID.randomUUID();
+      Timestamp now = Timestamp.from(Instant.now());
+      jdbc.update(
+          "insert into harness_session (id, name, created_at) values (?, ?, ?)",
+          sessionId,
+          "session-" + sessionId,
+          now);
+      jdbc.update(
+          "insert into harness_entry (id, session_id, parent_entry_id, entry_type, payload,"
+              + " created_at) values (?, ?, null, 'ROOT', '{}'::jsonb, ?)",
+          rootEntryId,
+          sessionId,
+          now);
+      jdbc.update(
+          "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id,"
+              + " creation_request_hash, name, root_thread_id, yolo_enabled, spawn_trigger,"
+              + " constraints, execution_control, input_through_sequence, next_command_sequence,"
+              + " version, created_at, updated_at)"
+              + " values (?, ?, ?, ?, ?, ?, ?, false, ?, '{\"maxOutputTokens\":null,\"promptCacheDisabled\":false,\"allowAutoCompaction\":true}'::jsonb, 'RUNNABLE', 0, ?, 0, ?, ?)",
+          threadId,
+          sessionId,
+          parentThreadId,
+          rootEntryId,
+          "0".repeat(64),
+          "thread-" + threadId,
+          rootThreadId,
+          request.trigger().name(),
+          request.commands().size() + 1L,
+          now,
+          now);
+      insertCommands(jdbc, threadId, 1, request.commands(), now);
+      return accepted(threadId, rootEntryId);
     }
 
     /** 父 Thread 的不可变执行根。 */

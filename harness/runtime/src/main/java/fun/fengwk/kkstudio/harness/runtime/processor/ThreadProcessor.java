@@ -6,8 +6,7 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.ThreadInputDemand;
 import fun.fengwk.kkstudio.harness.runtime.ThreadLifecycleCoordinator;
 import fun.fengwk.kkstudio.harness.runtime.compaction.AutomaticCompactionPlanner;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionChildScope;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionChildStarter;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionChildSpawn;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionHistory;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
@@ -35,6 +34,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatu
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinOutcome;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinProjector;
@@ -48,6 +48,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.thread.ResolvedRequestValidator;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextProbe;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
@@ -222,15 +223,12 @@ public final class ThreadProcessor {
     }
     EntryPath path = tx.loadEntryPath(thread.headEntryId());
     Optional<Entry> openTurn = path.openTurnStart();
-    if (openTurn.isPresent()
-        && openTurn.get().payload() instanceof TurnStartPayload startPayload
-        && startPayload.reason() == TurnStartReason.COMPACTION
-        && startPayload.ownerThreadId().equals(thread.id())
-        && startPayload.compaction() != null
-        && startPayload.compaction().joinInvocationId() != null) {
-      settleOpenCompactionTurn(
-          tx, claim, thread, path, startPayload.compaction(), openTurn.get(), now);
-      return null;
+    if (openTurn.isPresent() && openTurn.get().payload() instanceof TurnStartPayload startPayload) {
+      UUID ticketId = ownerTicketId(thread, startPayload);
+      if (ticketId != null) {
+        settleOwnerTurn(tx, claim, thread, path, startPayload, ticketId, openTurn.get(), now);
+        return null;
+      }
     }
     // 安全边界先应用全部 standalone 分支设置并追加 SETTINGS 快照；CONTRIBUTOR_STATE 留给普通输入 turn。
     // STOPPED 线程只结算设置，不恢复执行；存在 open turn 时保留冻结请求。
@@ -290,7 +288,7 @@ public final class ThreadProcessor {
         // owned HISTORY 机械续作仍由 compactionPreparation 保持最高优先级；普通 continuation
         // 在越过 soft threshold 时先压缩，成功后再由 durable continueModel obligation 恢复。
         CompactionPreparation preparation =
-            !CompactionChildScope.isInCompactionChildTree(tx, thread)
+            thread.constraints().allowAutoCompaction()
                 ? automaticCompactionPlanner.plan(
                     thread, path, config.compactionProvider().compactionConfig(), true)
                 : null;
@@ -310,7 +308,7 @@ public final class ThreadProcessor {
         boolean userDemand = ThreadInputDemand.hasInputDemand(tx, thread);
         // owned HISTORY / fallback / hard overflow 优先；idle soft threshold 只有真实 user demand 存在时才启动。
         CompactionPreparation preparation =
-            !CompactionChildScope.isInCompactionChildTree(tx, thread)
+            thread.constraints().allowAutoCompaction()
                 ? automaticCompactionPlanner.plan(
                     thread, path, config.compactionProvider().compactionConfig(), userDemand)
                 : null;
@@ -459,7 +457,7 @@ public final class ThreadProcessor {
       // 子执行树内的
       // Thread（含压缩子自身的超限失败回合）绝不再次规划压缩，从而不产生递归压缩子、也不原样重复超限请求。
       boolean compactionDue =
-          !CompactionChildScope.isInCompactionChildTree(tx, advancedThread)
+          advancedThread.constraints().allowAutoCompaction()
               && automaticCompactionPlanner.plan(
                       advancedThread,
                       tx.loadEntryPath(head),
@@ -505,25 +503,58 @@ public final class ThreadProcessor {
     tx.completeWork(claim);
   }
 
-  /** 结算已 matched 的 COMPACTION Join 并推进父 Thread 历史；子执行失败则落 AssistantErrorPayload。 */
-  private void settleOpenCompactionTurn(
+  /**
+   * 开放 Turn 的结算票据 id：只有 owner 自身持有的 COMPACTION Turn 携带 {@link JoinDelivery#SETTLE_OWNER_TURN} 票据（由
+   * {@link CompactionStart#joinInvocationId()} 冻结）；其它 Turn 返回 null。
+   */
+  private static UUID ownerTicketId(ThreadState thread, TurnStartPayload start) {
+    if (start.reason() == TurnStartReason.COMPACTION
+        && start.ownerThreadId().equals(thread.id())
+        && start.compaction() != null) {
+      return start.compaction().joinInvocationId();
+    }
+    return null;
+  }
+
+  /** SETTLE_OWNER_TURN 交付的处理：票据冻结结果后，owner 的开放 Turn 按其 reason 消费它；票据尚未冻结时只完成 claim 继续等待。 */
+  private void settleOwnerTurn(
+      HarnessStore.Transaction tx,
+      ClaimedWork claim,
+      ThreadState thread,
+      EntryPath path,
+      TurnStartPayload start,
+      UUID ticketId,
+      Entry openTurn,
+      Instant now) {
+    ThreadJoin join =
+        tx.findJoin(ticketId)
+            .orElseThrow(
+                () -> new IllegalStateException("owner ticket " + ticketId + " not found"));
+    if (join.delivery() != JoinDelivery.SETTLE_OWNER_TURN) {
+      throw new IllegalStateException("ticket " + ticketId + " does not settle the owner turn");
+    }
+    if (!join.matched()) {
+      completeClaim(tx, claim, now);
+      return;
+    }
+    switch (start.reason()) {
+      case COMPACTION -> settleCompactionTurn(
+          tx, claim, thread, path, start.compaction(), join, openTurn, now);
+      default -> throw new IllegalStateException(
+          "turn reason " + start.reason() + " has no owner-settled ticket");
+    }
+  }
+
+  /** 压缩 Turn 的结算：评估冻结的摘要并推进父 Thread 历史；子执行失败则落 AssistantErrorPayload。 */
+  private void settleCompactionTurn(
       HarnessStore.Transaction tx,
       ClaimedWork claim,
       ThreadState thread,
       EntryPath path,
       CompactionStart start,
+      ThreadJoin join,
       Entry openTurn,
       Instant now) {
-    ThreadJoin join =
-        tx.findJoin(start.joinInvocationId())
-            .orElseThrow(
-                () ->
-                    new IllegalStateException(
-                        "compaction join " + start.joinInvocationId() + " not found"));
-    if (!join.matched()) {
-      completeClaim(tx, claim, now);
-      return;
-    }
     ThreadJoinReceipt receipt =
         ThreadJoinProjector.INSTANCE
             .project(tx, join)
@@ -590,7 +621,7 @@ public final class ThreadProcessor {
     boolean hasQueuedDemand = ThreadInputDemand.hasQueuedDemand(tx.loadQueuedCommands(thread.id()));
     boolean compactionDue =
         !stopped
-            && !CompactionChildScope.isInCompactionChildTree(tx, thread)
+            && thread.constraints().allowAutoCompaction()
             && automaticCompactionPlanner.plan(
                     advanced,
                     tx.loadEntryPath(turnEndId),
@@ -827,23 +858,19 @@ public final class ThreadProcessor {
     ModelRequestSpec invocationSpec = null;
     if (result instanceof TurnResolver.Resolved resolved) {
       contextWindow = resolved.contextWindow();
-      // 直接压缩子 Thread 的每一次请求（含工具 loop turn 与失败重试）都按父冻结 outputBudget 收紧输出预算并把 cache 固定为 NONE：
-      // 身份只来自 durable COMPACTION Join 事实，事实缺失 fail closed。TURN_START 冻结的 maxOutputTokens 必须等于实际
-      // spec。
-      Optional<CompactionStart> frozen = CompactionChildScope.frozenStartFor(tx, thread.id());
-      invocationSpec =
-          frozen
-              .map(start -> capCompactionChildSpec(resolved.spec(), start))
-              .orElse(resolved.spec());
+      // Thread 冻结的创建约束（压缩子的输出预算、cache 禁用）作用于它的每一次请求（含工具 loop turn 与失败重试）：
+      // TURN_START 冻结的 maxOutputTokens 必须等于实际 spec。
+      ThreadConstraints constraints = thread.constraints();
+      invocationSpec = applyConstraints(resolved.spec(), constraints);
       maxOutputTokens =
-          frozen.isPresent() ? invocationSpec.outputTokens() : resolved.maxOutputTokens();
+          constraints.maxOutputTokens() != null
+              ? invocationSpec.outputTokens()
+              : resolved.maxOutputTokens();
     } else if (result instanceof TurnResolver.CompactionResolved compactionResolved) {
       contextWindow = compactionResolved.contextWindow();
       maxOutputTokens = compactionResolved.maxOutputTokens();
-      CompactionChildStarter.CompactionChild child =
-          CompactionChildStarter.start(
-              tx, thread, plan.candidatePath(), compactionResolved, plan.preparation(), now);
-      compactionStart = child.frozenStart();
+      compactionStart =
+          CompactionChildSpawn.start(tx, thread, compactionResolved, plan.preparation());
     }
     // 低序 mutation（Entries / Commands / Thread / ModelInvocation）先完成。
     for (Entry entry : plan.candidateEntries()) {
@@ -985,13 +1012,18 @@ public final class ThreadProcessor {
   }
 
   /**
-   * 压缩子请求的冻结事实收紧：只把输出预算压低到父冻结 {@code outputBudget}（min 语义），并把 cache 固定为 NONE；其余字段（模型、
-   * variant、system instruction、tools、subagents）原样保留，不复制也不新增任何 durable 标志。
+   * 把 Thread 的冻结约束作用于请求 spec：输出预算取 min 收紧，{@code promptCacheDisabled} 时把 cache 固定为 NONE；其余字段（模型、
+   * variant、system instruction、tools、subagents）原样保留。
    */
-  private static ModelRequestSpec capCompactionChildSpec(
-      ModelRequestSpec spec, CompactionStart frozen) {
-    long outputBudget = frozen.outputBudget();
-    int outputTokens = (int) Math.min(spec.outputTokens(), outputBudget);
+  private static ModelRequestSpec applyConstraints(
+      ModelRequestSpec spec, ThreadConstraints constraints) {
+    if (constraints.maxOutputTokens() == null && !constraints.promptCacheDisabled()) {
+      return spec;
+    }
+    int outputTokens =
+        constraints.maxOutputTokens() == null
+            ? spec.outputTokens()
+            : Math.min(spec.outputTokens(), constraints.maxOutputTokens());
     return new ModelRequestSpec(
         spec.providerType(),
         spec.providerConnectionGenerationId(),
@@ -1001,7 +1033,7 @@ public final class ThreadProcessor {
         spec.systemInstruction(),
         spec.toolBindings(),
         spec.subagentBindings(),
-        ProviderCacheControl.none());
+        constraints.promptCacheDisabled() ? ProviderCacheControl.none() : spec.cacheControl());
   }
 
   /**

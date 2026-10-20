@@ -920,6 +920,8 @@ create table harness_thread (
     name varchar(256) not null,
     root_thread_id uuid not null,
     yolo_enabled boolean not null default false,
+    spawn_trigger varchar(16) not null,
+    constraints jsonb not null,
     execution_control varchar(16) not null,
     input_through_sequence bigint not null default 0 check (input_through_sequence >= 0),
     next_command_sequence bigint not null check (next_command_sequence >= 1),
@@ -947,6 +949,14 @@ create table harness_thread (
     constraint ck_harness_thread_yolo_root_only check (
         not yolo_enabled or parent_thread_id is null
     ),
+    -- 用户只直接创建执行根；子代理总有其它来源。
+    constraint ck_harness_thread_spawn_trigger check (
+        spawn_trigger in ('USER', 'MODEL_TOOL', 'RUNTIME', 'CONTROLLER', 'PLUGIN')
+        and (spawn_trigger <> 'USER' or parent_thread_id is null)
+    ),
+    constraint ck_harness_thread_constraints check (
+        jsonb_typeof(constraints) = 'object'
+    ),
     constraint ck_harness_thread_creation_request_hash check (
         creation_request_hash ~ '^[0-9a-f]{64}$'
     ),
@@ -961,7 +971,7 @@ create table harness_thread (
     )
 );
 
-comment on table harness_thread is 'Thread：指向 head Entry 的游标状态机，version 随每次对外字段变化精确 +1；session_id 与 creation_request_hash 创建后不可变，head 必须与 session 同 Session；parent_thread_id 记录不可变执行父关系，root_thread_id 记录不可变执行根，yolo_enabled 是执行根的 YOLO 开关，execution_control 区分 RUNNABLE/STOPPED；input_through_sequence 记录已接纳的水位；(session_id, id) 唯一供同 Session 复合引用';
+comment on table harness_thread is 'Thread：指向 head Entry 的游标状态机，version 随每次对外字段变化精确 +1；session_id 与 creation_request_hash 创建后不可变，head 必须与 session 同 Session；parent_thread_id 记录不可变执行父关系，root_thread_id 记录不可变执行根，yolo_enabled 是执行根的 YOLO 开关，spawn_trigger 与 constraints 是创建时冻结的来源与执行约束，execution_control 区分 RUNNABLE/STOPPED；input_through_sequence 记录已接纳的水位；(session_id, id) 唯一供同 Session 复合引用';
 comment on column harness_thread.id is 'Thread 的全局唯一 UUID';
 comment on column harness_thread.session_id is '所属 Session（创建后不可变）';
 comment on column harness_thread.parent_thread_id is '不可变父 Thread UUID（无父/根 Thread 为 null，禁止指向自身）';
@@ -970,6 +980,8 @@ comment on column harness_thread.creation_request_hash is 'NEW_SESSION/NEW_THREA
 comment on column harness_thread.name is 'Thread 显示名称：应用保证非空、单行且至多 256 个 Unicode 码点，并由应用生成默认名或手动重命名（check 只防御空白串）';
 comment on column harness_thread.root_thread_id is '不可变执行根 UUID（根 Thread 指向自身），供树锁与整树读取';
 comment on column harness_thread.yolo_enabled is '执行根的 YOLO 开关；子代理恒为 false，有效值取自执行根';
+comment on column harness_thread.spawn_trigger is '不可变创建来源：USER / MODEL_TOOL / RUNTIME / CONTROLLER / PLUGIN';
+comment on column harness_thread.constraints is '不可变执行约束 JSON：maxOutputTokens（可空）、promptCacheDisabled、allowAutoCompaction；子 Thread 为请求约束与父约束合并后的有效值';
 comment on column harness_thread.execution_control is '持久执行控制状态（RUNNABLE/STOPPED）';
 comment on column harness_thread.input_through_sequence is '已被普通 INPUT 接纳或确定性拒绝的输入序号水位（>= 0，初值 0，< next_command_sequence）';
 comment on column harness_thread.next_command_sequence is '下一条 Command 的 sequence（从 1 递增）';
@@ -1288,7 +1300,8 @@ create table harness_thread_join (
     child_thread_id uuid not null,
     source_command_sequence bigint not null check (source_command_sequence > 0),
     agent varchar(256) not null,
-    purpose varchar(32) not null default 'task',
+    delivery varchar(32) not null,
+    counts_toward_quota boolean not null,
     superseded_by_invocation_id uuid,
     max_turns integer,
     reminder_turn bigint not null default 0,
@@ -1311,8 +1324,12 @@ create table harness_thread_join (
         references harness_thread_command (thread_id, sequence),
     constraint fk_harness_thread_join_superseded_by foreign key (superseded_by_invocation_id)
         references harness_thread_join (invocation_id),
-    constraint ck_harness_thread_join_purpose check (
-        purpose in ('task', 'compaction')
+    constraint ck_harness_thread_join_delivery_kind check (
+        delivery in ('NOTIFY_PARENT', 'SETTLE_OWNER_TURN', 'RECEIPT_ONLY')
+        and ((delivery = 'RECEIPT_ONLY') = (parent_thread_id is null))
+    ),
+    constraint ck_harness_thread_join_quota check (
+        not counts_toward_quota or parent_thread_id is not null
     ),
     constraint ck_harness_thread_join_superseded check (
         superseded_by_invocation_id is null
@@ -1349,7 +1366,8 @@ comment on column harness_thread_join.parent_thread_id is '父 Thread UUID（可
 comment on column harness_thread_join.child_thread_id is '目标子 Thread UUID';
 comment on column harness_thread_join.source_command_sequence is '子 Thread 接受源 prompt 的 command sequence';
 comment on column harness_thread_join.agent is '本次执行的 Agent 名';
-comment on column harness_thread_join.purpose is 'Join 用途：task 投递父通知；compaction 仅冻结结果并唤醒压缩 owner';
+comment on column harness_thread_join.delivery is '结算后的交付方式：NOTIFY_PARENT 投递父通知；SETTLE_OWNER_TURN 冻结结果并唤醒父 Thread 的开放 Turn owner；RECEIPT_ONLY 只冻结结果（无父 Thread）';
+comment on column harness_thread_join.counts_toward_quota is '是否计入子任务并发额度（创建时由 spawn 请求决定，必须有父 Thread）';
 comment on column harness_thread_join.superseded_by_invocation_id is '接管本未完成 join 的后续 invocation UUID；被取代的 join 保留源命令与身份，不再占配额或交付';
 comment on column harness_thread_join.max_turns is '软预算最大 turn 数（可空）';
 comment on column harness_thread_join.reminder_turn is '已发出的 max_turns 软提醒轮次计数';
@@ -1368,7 +1386,7 @@ comment on index idx_harness_thread_join_child_pending is '子 Thread 变为空�
 create index idx_harness_thread_join_parent_pending
     on harness_thread_join (parent_thread_id)
     where terminal_entry_id is not null and delivery_command_sequence is null
-      and purpose = 'task' and superseded_by_invocation_id is null;
+      and delivery = 'NOTIFY_PARENT' and superseded_by_invocation_id is null;
 
 comment on index idx_harness_thread_join_parent_pending is '父 Thread 恢复或接受输入时检索待交付给父的 pending join';
 

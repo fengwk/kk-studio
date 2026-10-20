@@ -20,7 +20,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
+import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
@@ -1020,7 +1020,7 @@ public final class InMemoryHarnessStore implements HarnessStore {
                   parentThreadId.equals(join.parentThreadId())
                       && join.matched()
                       && join.deliveryCommandSequence() == null
-                      && join.purpose() == JoinPurpose.TASK
+                      && join.delivery() == JoinDelivery.NOTIFY_PARENT
                       && join.supersededByInvocationId() == null)
           .sorted(
               Comparator.comparing(ThreadJoin::createdAt)
@@ -1039,7 +1039,7 @@ public final class InMemoryHarnessStore implements HarnessStore {
                       parentThreadId.equals(join.parentThreadId())
                           && !join.matched()
                           && join.supersededByInvocationId() == null
-                          && join.purpose() == JoinPurpose.TASK)
+                          && join.countsTowardQuota())
               .count();
     }
 
@@ -1064,10 +1064,9 @@ public final class InMemoryHarnessStore implements HarnessStore {
           state.joins.values().stream()
               .filter(
                   join ->
-                      join.parentThreadId() != null
+                      join.countsTowardQuota()
                           && !join.matched()
-                          && join.supersededByInvocationId() == null
-                          && join.purpose() == JoinPurpose.TASK)
+                          && join.supersededByInvocationId() == null)
               .count();
     }
 
@@ -1313,8 +1312,7 @@ public final class InMemoryHarnessStore implements HarnessStore {
         if (!join.matched()) {
           throw new IllegalArgumentException("cannot delete unmatched join " + join.invocationId());
         }
-        if (join.purpose() != JoinPurpose.COMPACTION
-            && join.parentThreadId() != null
+        if (join.delivery() == JoinDelivery.NOTIFY_PARENT
             && join.deliveryCommandSequence() == null) {
           throw new IllegalArgumentException(
               "cannot delete join pending delivery " + join.invocationId());
@@ -1379,7 +1377,7 @@ public final class InMemoryHarnessStore implements HarnessStore {
         if (!parentAlsoDeleted
             && join.supersededByInvocationId() == null
             && (!join.matched()
-                || (join.purpose() != JoinPurpose.COMPACTION
+                || (join.delivery() == JoinDelivery.NOTIFY_PARENT
                     && join.deliveryCommandSequence() == null))) {
           throw new IllegalArgumentException(
               "cannot delete join pending delivery " + join.invocationId());

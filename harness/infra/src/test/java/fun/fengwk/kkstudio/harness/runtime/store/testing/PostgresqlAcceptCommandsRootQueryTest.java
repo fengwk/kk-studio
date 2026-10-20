@@ -93,6 +93,8 @@ class PostgresqlAcceptCommandsRootQueryTest {
                   current.name(),
                   current.rootThreadId(),
                   current.yoloEnabled(),
+                  current.spawnTrigger(),
+                  current.constraints(),
                   current.executionControl(),
                   current.inputThroughSequence(),
                   current.nextCommandSequence(),

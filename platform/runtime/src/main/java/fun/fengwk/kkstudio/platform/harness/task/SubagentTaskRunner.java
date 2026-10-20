@@ -5,25 +5,25 @@ import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentConfigProvider;
 import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentRunner;
 import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentTaskAcceptance;
 import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentTaskRequest;
-import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
-import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
 import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
+import fun.fengwk.kkstudio.harness.runtime.SpawnRequest;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
-import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
-import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
+import fun.fengwk.kkstudio.platform.agenttask.AgentTaskRequest;
+import fun.fengwk.kkstudio.platform.agenttask.AgentTaskService;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -57,14 +57,17 @@ public class SubagentTaskRunner implements SubagentRunner {
       "This subagent thread is no longer valid. Dispatch a new task without thread_id.";
 
   private final Supplier<HarnessRuntime> runtimeProvider;
+  private final AgentTaskService agentTasks;
   private final AgentBranchSettingsMaterializer settingsMaterializer;
   private final SubagentConfigProvider configProvider;
 
   public SubagentTaskRunner(
       Supplier<HarnessRuntime> runtimeProvider,
+      AgentTaskService agentTasks,
       AgentBranchSettingsMaterializer settingsMaterializer,
       SubagentConfigProvider configProvider) {
     this.runtimeProvider = Objects.requireNonNull(runtimeProvider, "runtimeProvider");
+    this.agentTasks = Objects.requireNonNull(agentTasks, "agentTasks");
     this.settingsMaterializer =
         Objects.requireNonNull(settingsMaterializer, "settingsMaterializer");
     this.configProvider = Objects.requireNonNull(configProvider, "configProvider");
@@ -116,10 +119,10 @@ public class SubagentTaskRunner implements SubagentRunner {
       }
       try {
         AcceptedCommands accepted =
-            runtime.acceptCommandsAndJoin(
-                command(runtime, request, parent, settings, childThreadId),
-                joinRequest(request, parent, requestHash, maxTurns),
-                AcceptancePreflight.IDENTITY);
+            agentTasks
+                .submit(
+                    task(runtime, request, parent, settings, childThreadId, requestHash, maxTurns))
+                .accepted();
         return new SubagentTaskAcceptance(
             accepted.session().id(),
             accepted.thread().id(),
@@ -156,44 +159,49 @@ public class SubagentTaskRunner implements SubagentRunner {
         sessionIdOf(runtime, childThreadId), childThreadId, true, false);
   }
 
-  /** 新建子 Session：一次性携带 root settings、父关系与源 prompt。 */
-  private static AcceptCommandsCommand command(
-      HarnessRuntime runtime,
-      SubagentTaskRequest request,
-      ParentInvocation parent,
-      BranchSettings settings,
-      UUID childThreadId) {
-    if (request.resumeThreadId() != null) {
-      return appendCommand(runtime, request, parent, settings, childThreadId);
-    }
-    return new AcceptCommandsCommand(
-        new AcceptCommandsTarget.NewChildSession(
-            derive(request.invocationId(), CHILD_SESSION_NAMESPACE),
-            childThreadId,
-            settings,
-            parent.threadId()),
-        List.of(
-            command(
-                request.invocationId(),
-                0,
-                new CustomMessageCommandPayload(AgentMessage.user(request.prompt())))));
-  }
-
   /**
-   * 继续既有子 Thread：只校验永久父关系后追加命令，忙碌子线程照常入队。
+   * 把委派翻译成 Agent 任务：新建时一次性携带 root settings、父关系与源 prompt；续接既有子 Thread 时只校验永久父关系后追加命令，忙碌子线程照常入队。
    *
    * <p>续接只追加 SET_AGENT + SET_MODEL + CUSTOM_MESSAGE，绝不重发 SET_ENVIRONMENT：既有子 Thread 保留其既有运行环境，agent
-   * 变更按 {@code /agent} 设置语义在本批生效；新子 Thread 仍通过 NewChildSession 的 root settings 继承父环境。
-   *
-   * <p>SET_* 前缀按固定顺序发出，batch 形状只由本次请求的目标 settings 决定、与子线程当时的 head settings 或其可变运行时环境无关；因此同一次调用在任何重试
-   * / 并发顺序下都产生同一份命令指纹，Runtime 能精确识别为重放而不是「另一份委派」。
+   * 变更按 {@code /agent} 设置语义在本批生效；新子 Thread 仍通过 root settings 继承父环境。SET_* 前缀按固定顺序发出，batch
+   * 形状只由本次请求的目标 settings 决定、与子线程当时的 head settings 或其可变运行时环境无关；因此同一次调用在任何重试 /
+   * 并发顺序下都产生同一份命令指纹，Runtime 能精确识别为重放而不是「另一份委派」。
    */
-  private static AcceptCommandsCommand appendCommand(
+  private static AgentTaskRequest task(
       HarnessRuntime runtime,
       SubagentTaskRequest request,
       ParentInvocation parent,
       BranchSettings settings,
-      UUID childThreadId) {
+      UUID childThreadId,
+      String requestHash,
+      int maxTurns) {
+    SubagentConfig config = parent.config();
+    SpawnRequest.Budget budget =
+        new SpawnRequest.Budget(
+            maxTurns,
+            config.maxDepth(),
+            config.maxConcurrency(),
+            config.maxTotalConcurrency() == 0 ? Integer.MAX_VALUE : config.maxTotalConcurrency());
+    if (request.resumeThreadId() == null) {
+      return new AgentTaskRequest(
+          request.invocationId(),
+          childThreadId,
+          derive(request.invocationId(), CHILD_SESSION_NAMESPACE),
+          settings,
+          List.of(
+              command(
+                  request.invocationId(),
+                  0,
+                  new CustomMessageCommandPayload(AgentMessage.user(request.prompt())))),
+          AcceptancePreflight.IDENTITY,
+          SpawnTrigger.MODEL_TOOL,
+          parent.threadId(),
+          parent.headEntryId(),
+          null,
+          false,
+          budget,
+          requestHash);
+    }
     ThreadSnapshot child = requireChild(runtime, parent, childThreadId);
     List<ThreadCommandPayload> payloads =
         List.of(
@@ -204,10 +212,21 @@ public class SubagentTaskRunner implements SubagentRunner {
     for (int i = 0; i < payloads.size(); i++) {
       commands.add(command(request.invocationId(), i, payloads.get(i)));
     }
-    return new AcceptCommandsCommand(
-        new AcceptCommandsTarget.Thread(
-            childThreadId, child.thread().headEntryId(), child.thread().nextCommandSequence()),
-        List.copyOf(commands));
+    return new AgentTaskRequest(
+        request.invocationId(),
+        childThreadId,
+        null,
+        settings,
+        List.copyOf(commands),
+        AcceptancePreflight.IDENTITY,
+        SpawnTrigger.MODEL_TOOL,
+        parent.threadId(),
+        parent.headEntryId(),
+        new SpawnRequest.Continuation(
+            child.thread().headEntryId(), child.thread().nextCommandSequence()),
+        false,
+        budget,
+        requestHash);
   }
 
   /** 续接既有子 Thread 前做所属权前置校验：跨父续接直接拒绝，不进入重试且不触发任何持久写入。 */
@@ -235,22 +254,6 @@ public class SubagentTaskRunner implements SubagentRunner {
       throw reject("subagent thread " + childThreadId + " does not belong to this parent");
     }
     return child;
-  }
-
-  private static ThreadJoinRequest joinRequest(
-      SubagentTaskRequest request, ParentInvocation parent, String requestHash, int maxTurns) {
-    SubagentConfig config = parent.config();
-    return new ThreadJoinRequest(
-        request.invocationId(),
-        request.parentThreadId(),
-        parent.headEntryId(),
-        requestHash,
-        request.subagentType(),
-        maxTurns,
-        config.maxDepth(),
-        config.maxConcurrency(),
-        config.maxTotalConcurrency() == 0 ? Integer.MAX_VALUE : config.maxTotalConcurrency(),
-        JoinPurpose.TASK);
   }
 
   /** 校验父调用仍是当前冻结的 tool invocation，并冻结其允许的 subagent 与 settings 事实。 */

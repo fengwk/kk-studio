@@ -20,10 +20,12 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.NotificationPayload;
-import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
+import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
+import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 
@@ -197,7 +199,8 @@ class HarnessRuntimeThreadSemanticsScenarioTest {
                   null,
                   T0,
                   T0,
-                  JoinPurpose.TASK,
+                  JoinDelivery.NOTIFY_PARENT,
+                  true,
                   null);
           // terminalEntryId 指向已存在的 Entry；仅验证冻结结果不被 Stop 改写。
           tx.insertJoin(join);
@@ -225,7 +228,8 @@ class HarnessRuntimeThreadSemanticsScenarioTest {
                   null,
                   T0,
                   T0,
-                  JoinPurpose.TASK,
+                  JoinDelivery.NOTIFY_PARENT,
+                  true,
                   null));
           return null;
         });
@@ -246,6 +250,8 @@ class HarnessRuntimeThreadSemanticsScenarioTest {
                   "child-branch",
                   rootThreadId,
                   false,
+                  SpawnTrigger.MODEL_TOOL,
+                  ThreadConstraints.NONE,
                   ThreadExecutionControl.RUNNABLE,
                   0L,
                   1L,

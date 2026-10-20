@@ -27,6 +27,8 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
+import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.GoalCommandPayload;
@@ -129,6 +131,8 @@ class PostgresqlStopReceiptTest {
         name,
         parentThreadId == null ? id : rootThreadId,
         false,
+        SpawnTrigger.MODEL_TOOL,
+        ThreadConstraints.NONE,
         ThreadExecutionControl.RUNNABLE,
         0L,
         1L,

@@ -1,6 +1,8 @@
 package fun.fengwk.kkstudio.platform.project.adapter;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
@@ -11,6 +13,7 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.ObjectProvider;
 
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
@@ -18,16 +21,25 @@ import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
 import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
+import fun.fengwk.kkstudio.harness.runtime.SpawnRequest;
 import fun.fengwk.kkstudio.harness.runtime.StopCommand;
 import fun.fengwk.kkstudio.harness.runtime.StopResult;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
+import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinReceipt;
-import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionFacts;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
+import fun.fengwk.kkstudio.platform.agenttask.AgentTaskService;
+import fun.fengwk.kkstudio.project.port.IssueRunTask;
 import fun.fengwk.kkstudio.project.port.IssueThreadView;
 
 import java.util.List;
@@ -49,7 +61,7 @@ class PlatformIssueThreadExecutionPortTest {
   private final ObjectProvider<HarnessRuntime> runtimes = mock(ObjectProvider.class);
 
   private final PlatformIssueThreadExecutionPort port =
-      new PlatformIssueThreadExecutionPort(runtimes);
+      new PlatformIssueThreadExecutionPort(runtimes, new AgentTaskService(runtimes));
 
   @BeforeEach
   void runtimeAvailable() {
@@ -115,17 +127,47 @@ class PlatformIssueThreadExecutionPortTest {
     verify(runtime).acceptCommands(command, AcceptancePreflight.IDENTITY);
   }
 
-  /** 接受并 Join 原样转发三参，并返回宿主结果对象本身。 */
+  /** Run 任务经 Agent 任务服务提交：控制器发起、无父回执票据以 Run id 为身份，续用稳定 Thread 时携带冻结 cursor。 */
   @Test
-  void acceptCommandsAndJoinForwardsExactly() {
-    AcceptCommandsCommand command = mock(AcceptCommandsCommand.class);
-    ThreadJoinRequest join = mock(ThreadJoinRequest.class);
+  void submitRunTaskSpawnsAControllerTaskWithTheRunTicket() {
+    UUID runId = UUID.randomUUID();
+    UUID threadId = UUID.randomUUID();
+    UUID head = UUID.randomUUID();
+    BranchSettings settings =
+        new BranchSettings("worker", new ModelSelection("provider", "model", "v1"), null);
+    NewThreadCommand input =
+        new NewThreadCommand(
+            new CustomMessageCommandPayload(AgentMessage.user("work")), UUID.randomUUID());
     AcceptedCommands accepted = mock(AcceptedCommands.class);
-    when(runtime.acceptCommandsAndJoin(command, join, AcceptancePreflight.IDENTITY))
-        .thenReturn(accepted);
+    ThreadState thread = mock(ThreadState.class);
+    when(thread.id()).thenReturn(threadId);
+    when(accepted.thread()).thenReturn(thread);
+    when(runtime.spawn(any(SpawnRequest.class))).thenReturn(accepted);
 
-    assertSame(accepted, port.acceptCommandsAndJoin(command, join, AcceptancePreflight.IDENTITY));
-    verify(runtime).acceptCommandsAndJoin(command, join, AcceptancePreflight.IDENTITY);
+    assertSame(
+        accepted,
+        port.submitRunTask(
+            new IssueRunTask(
+                runId,
+                threadId,
+                null,
+                settings,
+                false,
+                new SpawnRequest.Continuation(head, 4L),
+                List.of(input),
+                input.requestHash())));
+
+    ArgumentCaptor<SpawnRequest> spawn = ArgumentCaptor.forClass(SpawnRequest.class);
+    verify(runtime).spawn(spawn.capture());
+    SpawnRequest request = spawn.getValue();
+    assertEquals(runId, request.ticketId());
+    assertEquals(threadId, request.threadId());
+    assertEquals(SpawnTrigger.CONTROLLER, request.trigger());
+    assertEquals(JoinDelivery.RECEIPT_ONLY, request.delivery());
+    assertFalse(request.countsTowardQuota());
+    assertNull(request.parentThreadId());
+    assertEquals(4L, request.continuation().expectedNextCommandSequence());
+    assertEquals(input.requestHash(), request.requestHash());
   }
 
   /** 停止只回传权威 head UUID，不把完整 ThreadState 暴露给 Project。 */
@@ -181,7 +223,7 @@ class PlatformIssueThreadExecutionPortTest {
   @SuppressWarnings("unchecked")
   void constructionDoesNotResolveRuntime() {
     ObjectProvider<HarnessRuntime> lazyRuntime = mock(ObjectProvider.class);
-    new PlatformIssueThreadExecutionPort(lazyRuntime);
+    new PlatformIssueThreadExecutionPort(lazyRuntime, new AgentTaskService(lazyRuntime));
     verifyNoInteractions(lazyRuntime);
   }
 }
