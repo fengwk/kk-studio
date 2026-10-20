@@ -15,16 +15,12 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Flow;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
@@ -91,7 +87,7 @@ public class ClusterInternalClient {
    */
   public Map<String, String> signHeaders(
       String method, String requestPath, ClusterIdeOwnerRoute owner) {
-    return authentication.sign(method, requestPath, owner);
+    return authentication.sign(method, requestPath, owner.nodeInstanceId());
   }
 
   public EnvironmentIdeViewDTO openView(
@@ -129,7 +125,7 @@ public class ClusterInternalClient {
   private <T> T exchange(
       String method, String path, ClusterIdeOwnerRoute owner, Object body, Class<T> type) {
     URI uri = owner.internalUrl().resolve(path);
-    Map<String, String> authHeaders = authentication.sign(method, path, owner);
+    Map<String, String> authHeaders = authentication.sign(method, path, owner.nodeInstanceId());
     HttpRequest.Builder builder =
         HttpRequest.newBuilder(uri).timeout(requestTimeout).header("Accept", "application/json");
     HttpRequest.BodyPublisher publisher = HttpRequest.BodyPublishers.noBody();
@@ -141,7 +137,12 @@ public class ClusterInternalClient {
     authHeaders.forEach(builder::header);
     HttpRequest request = builder.method(method, publisher).build();
 
-    BoundedBodySubscriber subscriber = new BoundedBodySubscriber(maxResponseBytes);
+    BoundedBodySubscriber subscriber =
+        new BoundedBodySubscriber(
+            maxResponseBytes,
+            () ->
+                new AiEnvironmentIdeUnavailableException(
+                    "cluster IDE owner response exceeds the metadata limit"));
     CompletableFuture<byte[]> bodyFuture = subscriber.bodyFuture();
     CompletableFuture<HttpResponse<byte[]>> responseFuture =
         httpClient.sendAsync(request, responseInfo -> subscriber);
@@ -207,81 +208,6 @@ public class ClusterInternalClient {
           "environment", "cluster IDE metadata request body is too large");
     }
     return payload;
-  }
-
-  /**
-   * 私有有界响应体订阅者：委托 {@link HttpResponse.BodySubscribers#ofByteArray()} 累积，同时按到达字节数计数，超过上限即取消订阅并让
-   * completion 异常完成。不暴露任何 stream/泛型抽象，只保留一个最小实现。
-   */
-  private static final class BoundedBodySubscriber implements HttpResponse.BodySubscriber<byte[]> {
-
-    private final HttpResponse.BodySubscriber<byte[]> delegate =
-        HttpResponse.BodySubscribers.ofByteArray();
-    private final long maxBytes;
-    private final CompletableFuture<byte[]> body = new CompletableFuture<>();
-    private long received;
-    private Flow.Subscription subscription;
-
-    BoundedBodySubscriber(long maxBytes) {
-      this.maxBytes = maxBytes;
-      delegate
-          .getBody()
-          .whenComplete(
-              (value, error) -> {
-                if (error != null) {
-                  body.completeExceptionally(error);
-                } else {
-                  body.complete(value);
-                }
-              });
-    }
-
-    CompletableFuture<byte[]> bodyFuture() {
-      return body;
-    }
-
-    @Override
-    public CompletionStage<byte[]> getBody() {
-      return body;
-    }
-
-    @Override
-    public void onSubscribe(Flow.Subscription subscription) {
-      this.subscription = subscription;
-      delegate.onSubscribe(subscription);
-    }
-
-    @Override
-    public void onNext(List<ByteBuffer> items) {
-      for (ByteBuffer item : items) {
-        received += item.remaining();
-      }
-      if (received > maxBytes) {
-        cancel();
-        body.completeExceptionally(
-            new AiEnvironmentIdeUnavailableException(
-                "cluster IDE owner response exceeds the metadata limit"));
-        return;
-      }
-      delegate.onNext(items);
-    }
-
-    @Override
-    public void onError(Throwable throwable) {
-      delegate.onError(throwable);
-    }
-
-    @Override
-    public void onComplete() {
-      delegate.onComplete();
-    }
-
-    void cancel() {
-      Flow.Subscription current = subscription;
-      if (current != null) {
-        current.cancel();
-      }
-    }
   }
 
   private <T> T readJson(String body, Class<T> type) {

@@ -163,6 +163,11 @@ Environment 的连接状态不做推送：Card 的 `status` / `statusExpiresAt` 
 AsyncTextSender 每连接一个 in-flight frame，frame 数和 UTF-8 字节预算包含在途帧，
 完成回调驱动下一帧。锁内转移队列，网络发送在锁外；失败关闭入队围栏并清理订阅。
 
+Oversize realtime 事件不在通知里携带正文：owner 把完整 canonical event 放入短期有界内存，
+`GET /internal/harness-realtime/{payloadId}` 供其它节点按 `cluster_node` 有效租约与内部 HMAC 认证回拉。
+端点只接受 canonical UUID，认证先于读取；payload 缺失、过期或被驱逐时返回 404。回拉总超时约 2 秒，
+接收方校验 Thread 后本地投递一次，失败只触发 RESYNC，不影响 durable 执行。
+
 ## Daemon WebSocket
 
 `/api/harness/environment-daemon/v1` 的 handler 适配 Spring/native session，

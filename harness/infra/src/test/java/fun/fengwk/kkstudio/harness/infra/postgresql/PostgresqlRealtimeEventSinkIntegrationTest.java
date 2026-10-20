@@ -20,6 +20,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
+import fun.fengwk.kkstudio.harness.infra.realtime.RealtimePayloadBuffer;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
 
@@ -60,6 +61,7 @@ class PostgresqlRealtimeEventSinkIntegrationTest {
   private static final UUID ORIGIN = id(900L);
 
   private final RealtimeNotificationCodec codec = new RealtimeNotificationCodec();
+  private final RealtimePayloadBuffer payloadBuffer = new RealtimePayloadBuffer();
   private DataSource dataSource;
   private JdbcTemplate jdbcTemplate;
   private TransactionTemplate transactionTemplate;
@@ -100,7 +102,8 @@ class PostgresqlRealtimeEventSinkIntegrationTest {
   @Test
   void batchDeliversEveryEnvelopeInInputOrder() throws Exception {
     CountingJdbcTemplate counting = new CountingJdbcTemplate(jdbcTemplate);
-    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(counting, codec, ORIGIN);
+    PostgresqlRealtimeEventSink sink =
+        new PostgresqlRealtimeEventSink(counting, codec, ORIGIN, payloadBuffer);
     List<RealtimeEvent> events = modelDeltas(50);
 
     transactionTemplate.executeWithoutResult(status -> sink.appendAll(events));
@@ -114,7 +117,8 @@ class PostgresqlRealtimeEventSinkIntegrationTest {
   @Test
   void batchSplittingByEventCountBoundPreservesGlobalOrder() throws Exception {
     CountingJdbcTemplate counting = new CountingJdbcTemplate(jdbcTemplate);
-    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(counting, codec, ORIGIN);
+    PostgresqlRealtimeEventSink sink =
+        new PostgresqlRealtimeEventSink(counting, codec, ORIGIN, payloadBuffer);
     int total = PostgresqlRealtimeEventSink.MAX_BATCH_EVENTS + 7;
     List<RealtimeEvent> events = modelDeltas(total);
 
@@ -129,7 +133,8 @@ class PostgresqlRealtimeEventSinkIntegrationTest {
   @Test
   void batchSplittingByByteBoundPreservesOrder() throws Exception {
     CountingJdbcTemplate counting = new CountingJdbcTemplate(jdbcTemplate);
-    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(counting, codec, ORIGIN);
+    PostgresqlRealtimeEventSink sink =
+        new PostgresqlRealtimeEventSink(counting, codec, ORIGIN, payloadBuffer);
     String filler = "x".repeat(7000);
     int total = 40;
     List<RealtimeEvent> events = new ArrayList<>();
@@ -148,11 +153,12 @@ class PostgresqlRealtimeEventSinkIntegrationTest {
     assertEnvelopes(received, events);
   }
 
-  /** 批量内单条超限事件只把该事件降级为 RESYNC，同批其余事件仍以完整 EVENT 顺序投递。 */
+  /** 批量内单条超限事件只把该事件降级为 REFERENCE，同批其余事件仍以完整 EVENT 顺序投递。 */
   @Test
-  void oversizedEventInsideBatchDegradesToResyncWithoutLosingOthers() throws Exception {
+  void oversizedEventInsideBatchDegradesToReferenceWithoutLosingOthers() throws Exception {
     CountingJdbcTemplate counting = new CountingJdbcTemplate(jdbcTemplate);
-    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(counting, codec, ORIGIN);
+    PostgresqlRealtimeEventSink sink =
+        new PostgresqlRealtimeEventSink(counting, codec, ORIGIN, payloadBuffer);
     RealtimeEvent.ModelDelta oversized = modelDelta("界".repeat(3000), 2L);
     RealtimeEvent.ModelDelta first = modelDelta("before", 1L);
     RealtimeEvent.ModelDelta last = modelDelta("after", 3L);
@@ -164,10 +170,12 @@ class PostgresqlRealtimeEventSinkIntegrationTest {
     RealtimeNotificationCodec.Envelope.Event firstEvent =
         assertInstanceOf(RealtimeNotificationCodec.Envelope.Event.class, received.get(0));
     assertEquals(first, firstEvent.event());
-    RealtimeNotificationCodec.Envelope.Resync resync =
-        assertInstanceOf(RealtimeNotificationCodec.Envelope.Resync.class, received.get(1));
-    assertEquals(oversized.threadId(), resync.threadId());
-    assertEquals(PostgresqlRealtimeEventSink.OVERSIZE_REASON, resync.reason());
+    RealtimeNotificationCodec.Envelope.Reference reference =
+        assertInstanceOf(RealtimeNotificationCodec.Envelope.Reference.class, received.get(1));
+    assertEquals(oversized.threadId(), reference.threadId());
+    assertEquals(
+        codec.encodeEventPayload(oversized),
+        payloadBuffer.get(reference.payloadId()).orElseThrow().canonicalJson());
     RealtimeNotificationCodec.Envelope.Event lastEvent =
         assertInstanceOf(RealtimeNotificationCodec.Envelope.Event.class, received.get(2));
     assertEquals(last, lastEvent.event());
@@ -177,7 +185,8 @@ class PostgresqlRealtimeEventSinkIntegrationTest {
   @Test
   void rolledBackBatchAndSingleAppendProduceNoNotifications() throws Exception {
     CountingJdbcTemplate counting = new CountingJdbcTemplate(jdbcTemplate);
-    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(counting, codec, ORIGIN);
+    PostgresqlRealtimeEventSink sink =
+        new PostgresqlRealtimeEventSink(counting, codec, ORIGIN, payloadBuffer);
 
     assertThrowsRollback(
         () ->
@@ -197,7 +206,8 @@ class PostgresqlRealtimeEventSinkIntegrationTest {
   /** 回滚后同一 channel 上的下一次已提交批量仍必须完整保序投递（事务语义不污染后续通知）。 */
   @Test
   void committedBatchAfterRollbackIsStillDeliveredInOrder() throws Exception {
-    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(jdbcTemplate, codec, ORIGIN);
+    PostgresqlRealtimeEventSink sink =
+        new PostgresqlRealtimeEventSink(jdbcTemplate, codec, ORIGIN, payloadBuffer);
 
     assertThrowsRollback(
         () ->
@@ -217,7 +227,8 @@ class PostgresqlRealtimeEventSinkIntegrationTest {
   /** Source 端到端：一次已提交批量后，订阅方按序收到全部事件且不触发任何 resync。 */
   @Test
   void committedBatchReachesSourceSubscribersWithoutResync() throws Exception {
-    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(jdbcTemplate, codec, ORIGIN);
+    PostgresqlRealtimeEventSink sink =
+        new PostgresqlRealtimeEventSink(jdbcTemplate, codec, ORIGIN, payloadBuffer);
     UUID threadId = id(1L);
     List<RealtimeEvent> received = new ArrayList<>();
     AtomicInteger resyncs = new AtomicInteger();

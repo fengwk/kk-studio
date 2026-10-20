@@ -7,7 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import java.net.URI;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -33,13 +32,9 @@ class HmacClusterInternalAuthenticationTest {
   private final HmacClusterInternalAuthentication authentication =
       new HmacClusterInternalAuthentication(SECRET, NODE_B, clock, WINDOW, 8);
 
-  private ClusterIdeOwnerRoute routeTo(UUID nodeInstanceId) {
-    return ClusterIdeOwnerRoute.remote(nodeInstanceId, URI.create("http://node.internal:8080"));
-  }
-
   @Test
   void signsAndVerifiesAgainstTheTargetInstance() {
-    Map<String, String> headers = authentication.sign("POST", PATH, routeTo(NODE_B));
+    Map<String, String> headers = authentication.sign("POST", PATH, NODE_B);
 
     assertEquals(NODE_B.toString(), headers.get(HmacClusterInternalAuthentication.HEADER_TARGET));
     assertDoesNotThrow(() -> authentication.verify("POST", PATH, headers));
@@ -47,7 +42,7 @@ class HmacClusterInternalAuthenticationTest {
 
   @Test
   void rejectsWhenTheRequestTargetsAnotherInstance() {
-    Map<String, String> headers = authentication.sign("POST", PATH, routeTo(NODE_A));
+    Map<String, String> headers = authentication.sign("POST", PATH, NODE_A);
 
     assertThrows(
         ClusterInternalAuthenticationException.class,
@@ -56,7 +51,7 @@ class HmacClusterInternalAuthenticationTest {
 
   @Test
   void rejectsWhenMethodDiffersFromTheSignedRequest() {
-    Map<String, String> headers = authentication.sign("POST", PATH, routeTo(NODE_B));
+    Map<String, String> headers = authentication.sign("POST", PATH, NODE_B);
 
     assertThrows(
         ClusterInternalAuthenticationException.class,
@@ -65,7 +60,7 @@ class HmacClusterInternalAuthenticationTest {
 
   @Test
   void rejectsWhenPathDiffersFromTheSignedRequest() {
-    Map<String, String> headers = authentication.sign("POST", PATH, routeTo(NODE_B));
+    Map<String, String> headers = authentication.sign("POST", PATH, NODE_B);
 
     assertThrows(
         ClusterInternalAuthenticationException.class,
@@ -74,7 +69,7 @@ class HmacClusterInternalAuthenticationTest {
 
   @Test
   void rejectsReplayedNonce() {
-    Map<String, String> headers = authentication.sign("POST", PATH, routeTo(NODE_B));
+    Map<String, String> headers = authentication.sign("POST", PATH, NODE_B);
     authentication.verify("POST", PATH, headers);
 
     assertThrows(
@@ -84,7 +79,7 @@ class HmacClusterInternalAuthenticationTest {
 
   @Test
   void rejectsWhenAuthenticationHeaderIsMissing() {
-    Map<String, String> headers = new HashMap<>(authentication.sign("POST", PATH, routeTo(NODE_B)));
+    Map<String, String> headers = new HashMap<>(authentication.sign("POST", PATH, NODE_B));
     headers.remove(HmacClusterInternalAuthentication.HEADER_SIGNATURE);
 
     assertThrows(
@@ -94,7 +89,7 @@ class HmacClusterInternalAuthenticationTest {
 
   @Test
   void rejectsStaleTimestampOutsideTheWindow() {
-    Map<String, String> headers = authentication.sign("POST", PATH, routeTo(NODE_B));
+    Map<String, String> headers = authentication.sign("POST", PATH, NODE_B);
     HmacClusterInternalAuthentication laterVerifier =
         new HmacClusterInternalAuthentication(
             SECRET, NODE_B, Clock.fixed(NOW.plusSeconds(31), ZoneOffset.UTC), WINDOW, 8);
@@ -106,7 +101,7 @@ class HmacClusterInternalAuthenticationTest {
 
   @Test
   void rejectsOversizedHeader() {
-    Map<String, String> headers = new HashMap<>(authentication.sign("POST", PATH, routeTo(NODE_B)));
+    Map<String, String> headers = new HashMap<>(authentication.sign("POST", PATH, NODE_B));
     headers.put(HmacClusterInternalAuthentication.HEADER_SIGNATURE, "a".repeat(4096));
 
     assertThrows(
@@ -116,7 +111,7 @@ class HmacClusterInternalAuthenticationTest {
 
   @Test
   void rejectsTamperedSignature() {
-    Map<String, String> headers = new HashMap<>(authentication.sign("POST", PATH, routeTo(NODE_B)));
+    Map<String, String> headers = new HashMap<>(authentication.sign("POST", PATH, NODE_B));
     String signature = headers.get(HmacClusterInternalAuthentication.HEADER_SIGNATURE);
     headers.put(
         HmacClusterInternalAuthentication.HEADER_SIGNATURE,
@@ -135,14 +130,14 @@ class HmacClusterInternalAuthenticationTest {
     ClusterInternalAuthenticationException error =
         assertThrows(
             ClusterInternalAuthenticationException.class,
-            () -> unconfigured.sign("POST", PATH, routeTo(NODE_B)));
+            () -> unconfigured.sign("POST", PATH, NODE_B));
     // 失败消息不得回显秘密内容。
     assertTrue(!error.getMessage().contains(SECRET));
   }
 
   @Test
   void rejectsExtremeTimestampWithoutOverflowBypass() {
-    Map<String, String> headers = new HashMap<>(authentication.sign("POST", PATH, routeTo(NODE_B)));
+    Map<String, String> headers = new HashMap<>(authentication.sign("POST", PATH, NODE_B));
     headers.put(HmacClusterInternalAuthentication.HEADER_TIMESTAMP, Long.toString(Long.MIN_VALUE));
 
     assertThrows(
@@ -152,7 +147,7 @@ class HmacClusterInternalAuthenticationTest {
 
   @Test
   void rejectsNonCanonicalNonceWithAuthenticationFailure() {
-    Map<String, String> headers = new HashMap<>(authentication.sign("POST", PATH, routeTo(NODE_B)));
+    Map<String, String> headers = new HashMap<>(authentication.sign("POST", PATH, NODE_B));
     headers.put(HmacClusterInternalAuthentication.HEADER_NONCE, "not-a-uuid");
 
     assertThrows(
@@ -162,7 +157,7 @@ class HmacClusterInternalAuthenticationTest {
 
   @Test
   void rejectsMalformedCanonicalPathWithAuthenticationFailureNot500() {
-    Map<String, String> headers = authentication.sign("POST", PATH, routeTo(NODE_B));
+    Map<String, String> headers = authentication.sign("POST", PATH, NODE_B);
 
     assertThrows(
         ClusterInternalAuthenticationException.class,
@@ -174,11 +169,11 @@ class HmacClusterInternalAuthenticationTest {
     HmacClusterInternalAuthentication bounded =
         new HmacClusterInternalAuthentication(SECRET, NODE_B, clock, WINDOW, 2);
 
-    bounded.verify("POST", PATH, bounded.sign("POST", PATH, routeTo(NODE_B)));
-    bounded.verify("POST", PATH, bounded.sign("POST", PATH, routeTo(NODE_B)));
+    bounded.verify("POST", PATH, bounded.sign("POST", PATH, NODE_B));
+    bounded.verify("POST", PATH, bounded.sign("POST", PATH, NODE_B));
 
     assertThrows(
         ClusterInternalAuthenticationException.class,
-        () -> bounded.verify("POST", PATH, bounded.sign("POST", PATH, routeTo(NODE_B))));
+        () -> bounded.verify("POST", PATH, bounded.sign("POST", PATH, NODE_B)));
   }
 }

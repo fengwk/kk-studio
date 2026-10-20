@@ -26,6 +26,7 @@ import fun.fengwk.kkstudio.harness.environment.server.IdeRequest;
 import fun.fengwk.kkstudio.harness.environment.server.IdeSessionIdentity;
 import fun.fengwk.kkstudio.harness.environment.server.IdeStreamPairingRegistry;
 import fun.fengwk.kkstudio.harness.environment.server.InMemoryIdeStreamTicketService;
+import fun.fengwk.kkstudio.platform.environment.cluster.ClusterIdeOwnerRoute;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalClient;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.environment.ide.IdeBootstrapTicketService;
@@ -34,6 +35,7 @@ import fun.fengwk.kkstudio.platform.environment.ide.InMemoryIdeBootstrapTicketSe
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.net.URI;
 import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
@@ -78,7 +80,18 @@ class IdeGatewayDataPlaneTest {
     final IdeBootstrapTicketService bootstrap = new InMemoryIdeBootstrapTicketService();
     final IdeSessionIdentity identity = new IdeSessionIdentity(ENV, INSTANCE, LEASE);
     final FakeTransport transport = new FakeTransport(pairings);
-    final ClusterNodeRegistry clusterNodeRegistry = environmentId -> Optional.empty();
+    final ClusterNodeRegistry clusterNodeRegistry =
+        new ClusterNodeRegistry() {
+          @Override
+          public Optional<ClusterIdeOwnerRoute> route(EnvironmentId environmentId) {
+            return Optional.empty();
+          }
+
+          @Override
+          public Optional<URI> liveInternalOrigin(UUID nodeInstanceId) {
+            return Optional.empty();
+          }
+        };
     final IdeGatewayDataPlane dataPlane =
         new IdeGatewayDataPlane(
             transport,

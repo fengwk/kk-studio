@@ -79,10 +79,7 @@ class ClusterEnvironmentIdeInternalControllerTest {
   @Test
   void wrongAuthenticationTargetIsRejectedBeforeAnyLocalSideEffect() throws Exception {
     Map<String, String> headers =
-        authentication.sign(
-            "POST",
-            ClusterInternalPaths.viewsPath(ENV),
-            ClusterIdeOwnerRoute.remote(NODE_A, URI.create("http://a.internal")));
+        authentication.sign("POST", ClusterInternalPaths.viewsPath(ENV), NODE_A);
 
     mockMvc
         .perform(
@@ -226,10 +223,7 @@ class ClusterEnvironmentIdeInternalControllerTest {
   }
 
   private Map<String, String> validHeaders() {
-    return authentication.sign(
-        "POST",
-        ClusterInternalPaths.viewsPath(ENV),
-        ClusterIdeOwnerRoute.remote(NODE_B, URI.create("http://b.internal")));
+    return authentication.sign("POST", ClusterInternalPaths.viewsPath(ENV), NODE_B);
   }
 
   private static HttpHeaders mockHeaders(Map<String, String> headers) {

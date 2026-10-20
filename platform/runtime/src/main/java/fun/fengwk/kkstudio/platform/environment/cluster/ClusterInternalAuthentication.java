@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.platform.environment.cluster;
 
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * 内部（跨节点）HTTP/WS 请求的认证端口。
@@ -20,10 +21,10 @@ public interface ClusterInternalAuthentication {
    *
    * @param method HTTP 方法（大小写不敏感，签名前统一大写）
    * @param requestPath 已编码的 canonical path（以 {@code /} 开头，含 query 时一并包含）
-   * @param owner 目标 owner 路由；签名绑定其实例 UUID
+   * @param targetNodeId 目标节点实例 UUID
    * @return 不可变的标准认证头集合
    */
-  Map<String, String> sign(String method, String requestPath, ClusterIdeOwnerRoute owner);
+  Map<String, String> sign(String method, String requestPath, UUID targetNodeId);
 
   /**
    * 校验入站内部请求的认证头；任何缺失、越界、目标/方法/路径不符、时间戳越界或重放都以异常 fail-closed。

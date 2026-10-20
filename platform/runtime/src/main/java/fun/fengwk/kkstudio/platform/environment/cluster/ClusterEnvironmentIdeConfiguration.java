@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.platform.environment.cluster;
 
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -37,6 +38,16 @@ public class ClusterEnvironmentIdeConfiguration {
     return new JdbcClusterNodeRegistry(jdbcClient, nodeInstanceId, clusterProperties);
   }
 
+  /** 跨节点内部 HTTP 唯一共享客户端；所有调用都必须自行施加有界响应与总超时。 */
+  @Bean(destroyMethod = "close")
+  @ConditionalOnMissingBean(name = "clusterInternalHttpClient")
+  public HttpClient clusterInternalHttpClient() {
+    return HttpClient.newBuilder()
+        .connectTimeout(Duration.ofSeconds(5))
+        .followRedirects(HttpClient.Redirect.NEVER)
+        .build();
+  }
+
   @Bean
   @ConditionalOnMissingBean
   public ClusterInternalAuthentication clusterInternalAuthentication(
@@ -49,19 +60,22 @@ public class ClusterEnvironmentIdeConfiguration {
   @Bean
   @ConditionalOnMissingBean
   public ClusterInternalClient clusterInternalClient(
+      @Qualifier("clusterInternalHttpClient") HttpClient httpClient,
       ClusterInternalAuthentication clusterInternalAuthentication,
       ClusterProperties clusterProperties,
       ObjectMapper objectMapper) {
     return new ClusterInternalClient(
-        HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build(),
+        httpClient,
         objectMapper,
         clusterInternalAuthentication,
         ClusterInternalClient.DEFAULT_REQUEST_TIMEOUT,
         clusterProperties.getMaxMetadataResponseBytes());
   }
 
+  /** IDE 组合服务只在本地 delegate 存在时装配；通用认证/注册/HTTP 客户端不依赖 IDE 上下文。 */
   @Bean
   @Primary
+  @ConditionalOnBean(name = "localEnvironmentIdeService")
   public ClusterEnvironmentIdeService clusterEnvironmentIdeService(
       EnvironmentIdeServiceImpl localEnvironmentIdeService,
       ClusterNodeRegistry clusterNodeRegistry,
