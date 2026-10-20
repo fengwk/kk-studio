@@ -25,7 +25,6 @@ export const aiExtension: TrustedReactExtension = {
       component: ChatsPage,
       navGroup: 'ai',
       navItem: { label: 'Chat', labelKey: 'ai.nav.chats', order: 100 },
-      priority: 100,
     },
     {
       id: 'ai.chat-workspace',
@@ -33,7 +32,6 @@ export const aiExtension: TrustedReactExtension = {
       component: ChatWorkspaceRoute,
       navGroup: 'ai',
       workspace: true,
-      priority: 100,
     },
     {
       id: 'ai.thread-workspace',
@@ -41,7 +39,6 @@ export const aiExtension: TrustedReactExtension = {
       component: ThreadWorkspaceRoute,
       navGroup: 'ai',
       workspace: true,
-      priority: 100,
     },
     {
       id: 'ai.agents',
@@ -49,7 +46,6 @@ export const aiExtension: TrustedReactExtension = {
       component: AgentsRoute,
       navGroup: 'ai',
       navItem: { label: 'Agent', labelKey: 'ai.nav.agents', order: 100 },
-      priority: 100,
     },
     {
       id: 'ai.models',
@@ -57,7 +53,6 @@ export const aiExtension: TrustedReactExtension = {
       component: ModelsRoute,
       navGroup: 'ai',
       navItem: { label: 'Model', labelKey: 'ai.nav.models', order: 100 },
-      priority: 100,
     },
     {
       id: 'ai.providers',
@@ -65,7 +60,6 @@ export const aiExtension: TrustedReactExtension = {
       component: ProvidersRoute,
       navGroup: 'ai',
       navItem: { label: 'Provider', labelKey: 'ai.nav.providers', order: 100 },
-      priority: 100,
     },
     {
       id: 'ai.skill-packages',
@@ -73,7 +67,6 @@ export const aiExtension: TrustedReactExtension = {
       component: SkillPackagesRoute,
       navGroup: 'ai',
       navItem: { label: 'Skill Packages', labelKey: 'ai.nav.skillPackages', order: 95 },
-      priority: 100,
     },
     {
       id: 'ai.environments',
@@ -81,7 +74,6 @@ export const aiExtension: TrustedReactExtension = {
       component: EnvironmentsRoute,
       navGroup: 'ai',
       navItem: { label: 'Environment', labelKey: 'ai.nav.environments', order: 90 },
-      priority: 100,
     },
     {
       id: 'ai.mcp-servers',
@@ -89,7 +81,6 @@ export const aiExtension: TrustedReactExtension = {
       component: McpServersRoute,
       navGroup: 'ai',
       navItem: { label: 'MCP Server', labelKey: 'ai.nav.mcpServers', order: 85 },
-      priority: 100,
     },
   ],
   dialogs: [
@@ -98,7 +89,7 @@ export const aiExtension: TrustedReactExtension = {
     { id: 'ai.delete-resource', component: ResourceDeleteDialog },
   ],
   // rendererKey 必须与后端 TaskDescriptor 冻结的 'task' 精确相同；MessageList
-  // 不做 name switch，一律通过 extension host 按 rendererKey 分发。
+  // 不做 name switch，一律通过 application contributions 按 rendererKey 分发。
   toolRenderers: [{
     id: 'task',
     component: TaskToolRendererLazy,

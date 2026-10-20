@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { createApplicationExtensionHost } from '@/app/extension-host'
+import { applicationContributions } from '@/app/application-contributions'
 import { aiExtension } from '@/features/ai/extensions/ai-extension.definition'
 import { canvasExtension } from '@/features/canvas/extensions/canvas-extension'
 import { projectsExtension } from '@/features/projects/extensions/projects-extension.definition'
@@ -42,8 +42,7 @@ describe('AI extension composition architecture', () => {
       ['projects.home', 'projects'],
       ['projects.detail', 'projects/:projectId'],
     ])
-    const host = createApplicationExtensionHost()
-    expect(host.pages.list().map((page) => page.id)).toEqual([
+    expect(applicationContributions.pages.map((page) => page.id)).toEqual([
       'ai.chats',
       'ai.chat-workspace',
       'ai.thread-workspace',
@@ -53,23 +52,26 @@ describe('AI extension composition architecture', () => {
       'ai.skill-packages',
       'ai.environments',
       'ai.mcp-servers',
-      'settings.page',
       'canvas.home',
       'canvas.editor',
       'projects.home',
       'projects.detail',
+      'settings.page',
     ])
-    expect(host.dialogs.list().map((dialog) => dialog.id)).toEqual(
+    expect(applicationContributions.dialogs.map((dialog) => dialog.id)).toEqual(
       aiExtension.dialogs!.map((dialog) => dialog.id),
     )
-    expect(host.overlays.list().map((overlay) => overlay.id)).toEqual(['projects.invalidation'])
-    expect(host.pages.get('canvas.home')?.component).toBe(
+    expect(applicationContributions.overlays.map((overlay) => overlay.id)).toEqual(['projects.invalidation'])
+    expect(applicationContributions.toolRenderers.get('task')?.component).toBe(
+      aiExtension.toolRenderers?.[0].component,
+    )
+    expect(applicationContributions.pages.find((page) => page.id === 'canvas.home')?.component).toBe(
       canvasExtension.pages?.[0].component,
     )
-    expect(host.pages.get('canvas.editor')?.component).toBe(
+    expect(applicationContributions.pages.find((page) => page.id === 'canvas.editor')?.component).toBe(
       canvasExtension.pages?.[1].component,
     )
-    expect(host.pages.get('settings.page')?.component).toBe(
+    expect(applicationContributions.pages.find((page) => page.id === 'settings.page')?.component).toBe(
       settingsExtension.pages?.[0].component,
     )
   })

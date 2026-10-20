@@ -6,11 +6,11 @@ import { BrowserPreferencesProvider } from '@/features/settings/browser-preferen
 import { settingsExtension } from '@/features/settings/settings-extension'
 import { systemSettingsService } from '@/shared/api/system-settings-service'
 import { makeSettingsDto, makeSettingsSchema } from '@/test-support/settings-test-fixtures'
-import { ExtensionHost } from '@/platform/extensions/ExtensionHost'
-import { ExtensionHostProvider } from '@/platform/extensions/ExtensionHostContext'
+import { ApplicationContributionsProvider } from '@/platform/extensions/ApplicationContributionsContext'
 import { WorkbenchShell } from '@/platform/workbench/WorkbenchShell'
 import { ApplicationEventProvider } from '@/shared/app-events'
 import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
+import { makeApplicationContributions } from '@/test-support/application-contributions'
 
 vi.mock('@/shared/api/system-settings-service', () => ({
   systemSettingsService: { get: vi.fn(), getSchema: vi.fn(), update: vi.fn() },
@@ -37,16 +37,17 @@ describe('settings extension architecture', () => {
     ])
   })
 
+  // SettingsRoute 由 React.lazy 动态导入；冷启动并行加载可能超过默认 5s 测试上限，
+  // 这里保留 15s 上限以避免把模块加载竞争误判为产品失败。
   it('renders the settings page through the workbench at /settings', async () => {
-    const host = new ExtensionHost()
-    host.register(settingsExtension)
+    const contributions = makeApplicationContributions({ pages: settingsExtension.pages })
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     // WorkbenchShell 通过唯一应用事件连接读取全局 pending：测试注入替身 WebSocket。
     const sockets = new FakeWebSocketHarness()
     render(
       <QueryClientProvider client={queryClient}>
         <ApplicationEventProvider url="ws://test/events/v1" socketFactory={sockets.factory}>
-          <ExtensionHostProvider host={host}>
+          <ApplicationContributionsProvider contributions={contributions}>
             <BrowserPreferencesProvider>
               <MemoryRouter initialEntries={['/settings']}>
                 <Routes>
@@ -54,12 +55,12 @@ describe('settings extension architecture', () => {
                 </Routes>
               </MemoryRouter>
             </BrowserPreferencesProvider>
-          </ExtensionHostProvider>
+          </ApplicationContributionsProvider>
         </ApplicationEventProvider>
       </QueryClientProvider>,
     )
 
-    expect(await screen.findByRole('heading', { name: '设置' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '设置' }, { timeout: 5000 })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '键盘快捷键' })).toBeInTheDocument()
-  })
+  }, 15_000)
 })

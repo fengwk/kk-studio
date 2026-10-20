@@ -6,8 +6,8 @@ import type {
   DialogueMessage,
   ToolDialogueMessage,
 } from '@/features/ai/runtime/thread-timeline-types'
-import { ExtensionHost } from '@/platform/extensions/ExtensionHost'
-import { ExtensionHostProvider } from '@/platform/extensions/ExtensionHostContext'
+import { ApplicationContributionsProvider } from '@/platform/extensions/ApplicationContributionsContext'
+import { makeApplicationContributions } from '@/test-support/application-contributions'
 
 const message: ToolDialogueMessage = {
   id: 'tool-1',
@@ -134,22 +134,20 @@ describe('MessageList tool renderer dispatch', () => {
 
   it('dispatches by the frozen rendererKey and falls back when no contribution exists', async () => {
     const user = userEvent.setup()
-    const host = new ExtensionHost()
-    host.register({
-      id: 'test.tools',
-      toolRenderers: [
-        {
+    const contributions = makeApplicationContributions({
+      toolRenderers: new Map([
+        ['read', {
           id: 'read',
           component: ({ message: rendered }) => (
             <div>read renderer: {rendered.arguments}</div>
           ),
-        },
-      ],
+        }],
+      ]),
     })
     const { rerender } = render(
-      <ExtensionHostProvider host={host}>
+      <ApplicationContributionsProvider contributions={contributions}>
         <MessageList messages={[message]} />
-      </ExtensionHostProvider>,
+      </ApplicationContributionsProvider>,
     )
     // read 的文本结果默认收起；展开后交给扩展 renderer，不叠加默认输出。
     expect(screen.queryByText('read renderer: {"path":"README.md"}')).not.toBeInTheDocument()
@@ -158,9 +156,9 @@ describe('MessageList tool renderer dispatch', () => {
     expect(screen.queryByText('full result')).not.toBeInTheDocument()
 
     rerender(
-      <ExtensionHostProvider host={host}>
+      <ApplicationContributionsProvider contributions={contributions}>
         <MessageList messages={[{ ...message, rendererKey: 'unknown' }]} />
-      </ExtensionHostProvider>,
+      </ApplicationContributionsProvider>,
     )
     // 无贡献时回退到有序内容视图，不叠加扩展输出（同一卡片身份，展开选择保留）。
     expect(screen.queryByText('read renderer: {"path":"README.md"}')).not.toBeInTheDocument()
