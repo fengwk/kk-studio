@@ -342,7 +342,7 @@ class ExecutionConcurrentDeletionTest {
       this.deletedThreadId = deletedThreadId;
     }
 
-    /** 下一次获取树锁时提交删除；模拟深删除在树锁等待期间落地。 */
+    /** 下一次锁定本 Thread 前提交删除；模拟删除先于单实体回写线性化。 */
     void armDeletionBeforeNextThreadLock() {
       armed = true;
     }

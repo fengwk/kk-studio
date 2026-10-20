@@ -240,7 +240,7 @@ function isThreadCommandBatchRequest(value: unknown): value is ThreadCommandBatc
   }
   const keys = Object.keys(value)
   if (keys.length === 1 && keys[0] === 'commands') {
-    return true
+    return value.commands.length === 1 && value.commands[0]?.type === 'USER_MESSAGE'
   }
   return hasExactKeys(value, ['expectedHeadEntryId', 'expectedNextCommandSequence', 'commands'])
     && nonBlank(value.expectedHeadEntryId)
