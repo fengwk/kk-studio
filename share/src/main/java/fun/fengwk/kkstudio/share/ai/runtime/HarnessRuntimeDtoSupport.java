@@ -18,4 +18,11 @@ final class HarnessRuntimeDtoSupport {
     }
     return (Boolean) value;
   }
+
+  static Integer requireJsonInteger(Object value, String field) {
+    if (value != null && !(value instanceof Integer)) {
+      throw new HarnessRequestFormatException(field + " must be a JSON integer");
+    }
+    return (Integer) value;
+  }
 }
