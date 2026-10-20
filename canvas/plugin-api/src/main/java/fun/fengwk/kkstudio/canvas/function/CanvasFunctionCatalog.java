@@ -4,10 +4,10 @@ import fun.fengwk.kkstudio.canvas.CanvasJson;
 import fun.fengwk.kkstudio.canvas.CanvasJson.JsonArray;
 import fun.fengwk.kkstudio.canvas.CanvasJson.JsonObject;
 import fun.fengwk.kkstudio.canvas.CanvasResourceKind;
+import fun.fengwk.kkstudio.canvas.Sha256;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
@@ -86,7 +86,7 @@ public final class CanvasFunctionCatalog {
    */
   public static String definitionFingerprint(CanvasFunctionDefinition definition) {
     Objects.requireNonNull(definition, "definition");
-    MessageDigest digest = sha256();
+    MessageDigest digest = Sha256.newDigest();
     updateText(digest, definition.name());
     updateText(digest, definition.description());
     updateText(digest, sortObjectKeys(definition.argsSchema()).write());
@@ -152,14 +152,6 @@ public final class CanvasFunctionCatalog {
     digest.update((byte) (value >>> 16));
     digest.update((byte) (value >>> 8));
     digest.update((byte) value);
-  }
-
-  private static MessageDigest sha256() {
-    try {
-      return MessageDigest.getInstance("SHA-256");
-    } catch (NoSuchAlgorithmException error) {
-      throw new IllegalStateException("SHA-256 must be available", error);
-    }
   }
 
   public record RegisteredFunction(

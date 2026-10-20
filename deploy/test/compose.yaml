@@ -70,15 +70,13 @@ services:
       - canvas-test
 
   http-mock:
-    image: python:3.12-alpine
+    image: node:22-alpine
     init: true
     read_only: true
-    environment:
-      PYTHONDONTWRITEBYTECODE: "1"
     command:
       [
-        "python",
-        "/mock/server.py",
+        "node",
+        "/mock/server.mjs",
         "--routes",
         "/config/routes.json",
         "--opencli-fake-fixtures",
@@ -87,17 +85,17 @@ services:
     ports:
       - "127.0.0.1:${CANVAS_TEST_MOCK_PORT:-18089}:8080"
     volumes:
-      - ./mock/server.py:/mock/server.py:ro
+      - ./mock/server.mjs:/mock/server.mjs:ro
       - ${CANVAS_TEST_MOCK_ROUTES:-./mock/routes.json}:/config/routes.json:ro
       - ../../platform/runtime/src/test/resources/fun/fengwk/kkstudio/platform/canvas/resource:/fixtures:ro
     healthcheck:
       test:
         - CMD
-        - python
-        - -c
+        - node
+        - -e
         - >-
-          import urllib.request;
-          urllib.request.urlopen("http://127.0.0.1:8080/health", timeout=2).read()
+          fetch("http://127.0.0.1:8080/health", { signal: AbortSignal.timeout(2000) })
+          .then((response) => process.exit(response.ok ? 0 : 1), () => process.exit(1))
       interval: 2s
       timeout: 3s
       retries: 30

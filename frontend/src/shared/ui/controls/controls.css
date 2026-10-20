@@ -65,11 +65,11 @@
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  color: var(--fg-dim);
+  color: var(--fg-muted);
 }
 
 .searchbox:focus-within {
-  border-color: var(--green-border);
+  border-color: var(--accent-border);
 }
 
 .searchbox svg {
@@ -87,12 +87,12 @@
   border: 0;
   outline: 0;
   color: var(--fg);
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   line-height: 1;
 }
 
 .searchbox input::placeholder {
-  color: var(--fg-dim);
+  color: var(--fg-muted);
 }
 
 @media (max-width: 860px) {
@@ -111,7 +111,7 @@
 }
 
 .ui-select.is-open {
-  z-index: 80;
+  z-index: var(--z-dropdown);
 }
 
 .ui-select.is-compact {
@@ -135,7 +135,7 @@
   background: var(--bg);
   cursor: pointer;
   font: inherit;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   line-height: 1;
   text-align: left;
 }
@@ -146,7 +146,7 @@
   min-height: 28px;
   padding: 0 9px;
   background: var(--surface);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   white-space: nowrap;
 }
 
@@ -158,7 +158,7 @@
 
 .ui-select-trigger:focus-visible {
   outline: none;
-  border-color: var(--green-primary);
+  border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
@@ -172,7 +172,7 @@
 }
 
 .ui-select.is-disabled .ui-select-trigger {
-  color: var(--fg-dim);
+  color: var(--fg-muted);
   cursor: not-allowed;
 }
 
@@ -186,8 +186,8 @@
   width: 14px;
   height: 14px;
   flex: 0 0 14px;
-  color: var(--fg-dim);
-  transition: transform 0.16s ease;
+  color: var(--fg-muted);
+  transition: transform var(--duration-base);
 }
 
 .ui-select-chevron.is-open {
@@ -197,24 +197,25 @@
 .ui-select-menu {
   /* portal 到 body，用视口坐标固定定位，避免被滚动/裁剪容器截断。 */
   position: fixed;
-  z-index: 130;
+  z-index: var(--z-popover);
   display: grid;
   gap: 2px;
   width: max-content;
   max-width: min(360px, calc(100vw - 24px));
-  max-height: min(280px, calc(100dvh - 48px), var(--ui-select-available-height, 280px));
+  max-height: min(280px, calc(100dvh - 48px));
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 5px;
   border: 1px solid var(--border-hover);
   border-radius: var(--radius-md);
-  background: var(--overlay-surface);
+  background: var(--surface-overlay);
   box-shadow: var(--shadow-md);
 }
 
 .ui-select-menu.is-compact {
   min-width: max(var(--ui-select-trigger-width), 148px);
+  max-height: min(280px, calc(100dvh - 48px), var(--ui-select-available-height));
 }
 
 .ui-select-option {
@@ -231,7 +232,7 @@
   background: transparent;
   cursor: pointer;
   font: inherit;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   line-height: 1;
   text-align: left;
   white-space: nowrap;
@@ -242,7 +243,7 @@
 }
 
 .ui-select-menu.is-compact .ui-select-option {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 
 .ui-select-option:hover,
@@ -252,7 +253,7 @@
 }
 
 .ui-select-option[aria-selected='true'] {
-  color: var(--green-primary);
+  color: var(--accent);
   font-weight: 600;
 }
 
@@ -293,12 +294,12 @@
   background: var(--bg);
   color: var(--fg);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   outline: 0;
 }
 
 .number-input-field:focus {
-  border-color: var(--green-primary);
+  border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
@@ -328,7 +329,7 @@
   padding: 0;
   border: 0;
   background: var(--surface);
-  color: var(--fg-dim);
+  color: var(--fg-muted);
   cursor: pointer;
 }
 
@@ -352,7 +353,7 @@
 }
 
 .number-input.is-disabled .number-input-field {
-  color: var(--fg-dim);
+  color: var(--fg-muted);
   cursor: not-allowed;
 }
 
@@ -362,7 +363,7 @@
   align-items: center;
   min-height: 32px;
   gap: 8px;
-  font-size: 0.875rem;
+  font-size: var(--font-size-sm);
   color: var(--fg-muted);
   cursor: pointer;
   user-select: none;
@@ -395,7 +396,7 @@
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: background var(--duration-fast), border-color var(--duration-fast), box-shadow var(--duration-fast);
 }
 
 .ui-checkbox:hover:not(.is-disabled) .ui-checkbox-box {
@@ -404,7 +405,7 @@
 }
 
 .ui-checkbox-input:focus-visible + .ui-checkbox-box {
-  border-color: var(--green-primary);
+  border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
@@ -413,31 +414,31 @@
 }
 
 .ui-checkbox.is-indeterminate .ui-checkbox-box {
-  background: var(--green-primary);
-  border-color: var(--green-primary);
+  background: var(--accent);
+  border-color: var(--accent);
 }
 
 .ui-checkbox.is-checked .ui-checkbox-box {
-  background: var(--green-primary);
-  border-color: var(--green-primary);
+  background: var(--accent);
+  border-color: var(--accent);
 }
 
 .ui-checkbox.is-checked:hover:not(.is-disabled) .ui-checkbox-box {
-  background: var(--green-gradient);
-  border-color: var(--green-border);
+  background: var(--accent-gradient);
+  border-color: var(--accent-border);
 }
 
 .ui-checkbox-check {
   width: 11px;
   height: 11px;
   stroke-width: 3;
-  color: var(--green-on);
+  color: var(--fg-on-accent);
 }
 
 .ui-checkbox-label {
   min-width: 0;
   color: var(--fg-muted);
-  transition: color 0.15s ease;
+  transition: color var(--duration-fast);
 }
 
 .ui-checkbox:hover:not(.is-disabled) .ui-checkbox-label {
@@ -454,7 +455,7 @@
   background: var(--bg);
   color: var(--fg);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   outline: 0;
 }
 
@@ -472,7 +473,7 @@
 
 .ui-text-input:focus,
 .ui-textarea:focus {
-  border-color: var(--green-primary);
+  border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
@@ -483,13 +484,13 @@
 
 .ui-text-input:disabled,
 .ui-textarea:disabled {
-  color: var(--fg-dim);
+  color: var(--fg-muted);
   cursor: not-allowed;
 }
 
 .ui-text-input::placeholder,
 .ui-textarea::placeholder {
-  color: var(--fg-dim);
+  color: var(--fg-muted);
 }
 
 /* 无障碍 Tabs：roving tabindex + aria-selected/aria-controls；面板由 Tabs 统一包裹。 */
@@ -513,7 +514,7 @@
   color: var(--fg-muted);
   cursor: pointer;
   font: inherit;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   font-weight: 500;
   white-space: nowrap;
 }
@@ -566,11 +567,11 @@
   border-radius: var(--radius-sm);
   color: var(--fg);
   cursor: text;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color var(--duration-fast), box-shadow var(--duration-fast);
 }
 
 .ui-tag-input:focus-within {
-  border-color: var(--green-primary);
+  border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--focus-ring);
 }
 
@@ -591,7 +592,7 @@
   background: var(--surface-raised);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   font-family: var(--mono);
   color: var(--fg);
   line-height: 1.4;
@@ -614,9 +615,9 @@
   color: var(--fg-muted);
   cursor: pointer;
   border-radius: 50%;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   line-height: 1;
-  transition: color 0.15s ease, background-color 0.15s ease;
+  transition: color var(--duration-fast), background-color var(--duration-fast);
 }
 
 .ui-tag-remove:hover:not(:disabled) {
@@ -634,7 +635,7 @@
   outline: 0;
   box-shadow: none;
   color: var(--fg);
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   font-family: inherit;
 }
 
@@ -645,6 +646,45 @@
 }
 
 .ui-tag-input-field::placeholder {
-  color: var(--fg-dim);
+  color: var(--fg-muted);
 }
 
+
+.ui-switch {
+  flex: 0 0 auto;
+  position: relative;
+  width: 40px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--bg);
+  cursor: pointer;
+  transition: border-color var(--duration-base), background var(--duration-base);
+}
+
+.ui-switch[aria-checked='true'] {
+  border-color: var(--accent-border);
+  background: var(--accent-deep);
+}
+
+.ui-switch:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.ui-switch-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--fg-muted);
+  transition: transform var(--duration-base), background var(--duration-base);
+}
+
+.ui-switch[aria-checked='true'] .ui-switch-thumb {
+  transform: translateX(18px);
+  background: var(--accent);
+}

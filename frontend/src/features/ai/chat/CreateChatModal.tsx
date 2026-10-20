@@ -1,4 +1,5 @@
 import { useMemo, type FormEventHandler } from 'react'
+import { Switch } from '@/shared/ui/controls/Switch'
 import { useQuery } from '@tanstack/react-query'
 import { Button } from '@/shared/ui/controls/Button'
 import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
@@ -122,17 +123,12 @@ export function CreateChatModal({
                   {t('ai.chat.yoloDescription')}
                 </span>
               </div>
-              <button
-                type="button"
-                role="switch"
-                className="settings-switch"
-                aria-checked={yoloEnabled}
-                aria-label={t('projects.yolo')}
+              <Switch
+                checked={yoloEnabled}
+                onChange={onYoloChange}
+                label={t('projects.yolo')}
                 disabled={pending}
-                onClick={() => onYoloChange(!yoloEnabled)}
-              >
-                <span className="settings-switch-thumb" aria-hidden="true" />
-              </button>
+              />
             </div>
           </div>
           <label className={`form-group${environmentsQuery.isError ? ' is-error' : ''}`}>

@@ -3,7 +3,7 @@ import { createServer } from 'node:http'
 import { baseModelConfig } from '../lib/fixtures.mjs'
 import {
   acceptCommandBatch,
-  assertRootYoloPolicy,
+  assertRootYoloEnabled,
   branchSettingsOf,
   chatOwner,
   createChat,
@@ -156,7 +156,7 @@ export async function runWorkspaceContractMatrix(ui) {
           // yolo 是直接控制面：选择 YOLO 立即 PUT /yolo（基于 snapshot version 的 CAS），
           // 绝不进入 command batch；Thread 快照反映权威值。
           const fresh = await getThreadSnapshot(apiCtx, fixture.threadId)
-          assertRootYoloPolicy(fresh.thread, true)
+          assertRootYoloEnabled(fresh.thread, true)
 
           await shot(caseArt, 'composer-settings-controls-batch')
           expectNoFatal(pageErrors, consoleErrors)
@@ -946,9 +946,10 @@ function childSnapshotWithPendingTool(targetThreadId, rootThreadId) {
       name: 'Child Worker Thread',
       sessionId: 'session-child',
       headEntryId: 'entry-tool-1',
-      // task 委派产生的是真实子代理：执行父关系指向父 Thread，YOLO policy 恒为 FOLLOW 真实执行根。
+      // task 委派产生的是真实子代理：执行父关系与 rootThreadId 指向父执行根，自身 YOLO 开关恒为 false。
       parentThreadId: rootThreadId,
-      yoloPolicy: { mode: 'FOLLOW', rootThreadId },
+      rootThreadId,
+      yoloEnabled: false,
       nextCommandSequence: '1',
       version: '1',
       status: 'TOOL_WAITING_APPROVAL',

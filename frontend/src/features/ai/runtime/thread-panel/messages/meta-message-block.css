@@ -14,7 +14,7 @@
   width: 24px;
   height: 24px;
   flex: 0 0 24px;
-  color: var(--fg-dim);
+  color: var(--fg-muted);
 }
 
 .thread-meta-row .thread-meta-branch-btn svg {

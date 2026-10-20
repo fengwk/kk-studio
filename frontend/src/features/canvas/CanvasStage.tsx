@@ -19,7 +19,6 @@ import { CanvasGenerationPanel } from '@/features/canvas/CanvasGenerationPanel'
 import { useCanvasRuntime } from '@/features/canvas/CanvasRuntimeContext'
 import { CanvasTextEditor } from '@/features/canvas/CanvasTextEditor'
 import { CanvasToolRail } from '@/features/canvas/CanvasToolRail'
-import { CANVAS_THEME } from '@/features/canvas/canvas-theme'
 import { isValidResourceConnection } from '@/features/canvas/canvas-stage-model'
 import { projectCanvasSnapshot } from '@/features/canvas/domain'
 import { extractPositionUpdates } from '@/features/canvas/node-position-changes'
@@ -450,8 +449,8 @@ function StageInner() {
               variant={BackgroundVariant.Dots}
               gap={18}
               size={0.75}
-              color={CANVAS_THEME.stageDot}
-              bgColor={CANVAS_THEME.stageBg}
+              color="var(--stage-dot)"
+              bgColor="var(--stage-bg)"
             />
             {!selectedFunctionNode ? (
               <MiniMap
@@ -459,9 +458,9 @@ function StageInner() {
                 pannable
                 zoomable
                 ariaLabel={t('canvas.stage.minimap')}
-                bgColor={CANVAS_THEME.stageBg}
-                maskColor="rgba(13,15,14,0.55)"
-                nodeColor={CANVAS_THEME.minimapNode}
+                bgColor="var(--stage-bg)"
+                maskColor="var(--surface-glass)"
+                nodeColor="var(--stage-node)"
                 style={{ width: 120, height: 78 }}
               />
             ) : null}

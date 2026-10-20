@@ -1,4 +1,5 @@
 import { useId, type ReactNode } from 'react'
+import { Switch } from '@/shared/ui/controls/Switch'
 import { useI18n } from '@/shared/i18n'
 import { NumberInput } from '@/shared/ui/controls/NumberInput'
 import { Select } from '@/shared/ui/controls/Select'
@@ -76,17 +77,7 @@ export function SettingsSwitchRow({
         <strong>{label}</strong>
         {description ? <span className="settings-row-description">{description}</span> : null}
       </div>
-      <button
-        type="button"
-        role="switch"
-        className="settings-switch"
-        aria-checked={checked}
-        aria-label={ariaLabel ?? label}
-        disabled={disabled}
-        onClick={() => onChange(!checked)}
-      >
-        <span className="settings-switch-thumb" aria-hidden="true" />
-      </button>
+      <Switch checked={checked} onChange={onChange} label={ariaLabel ?? label} disabled={disabled} />
     </div>
   )
 }

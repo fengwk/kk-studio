@@ -319,10 +319,11 @@ REFRESH_UNCERTAIN/REAUTH_REQUIRED 要求重新连接，Disconnect 二次确认�
 
 ## 共享 UI 与测试
 
-全局 token 在 [`styles.css`](../../frontend/src/styles.css)，Canvas 样式由 feature 拥有。
+三层 token（palette、语义、组件）在 [`styles.css`](../../frontend/src/styles.css) 的 `:root`，由 `npm run lint:css` 门禁（见[视觉与交互语言](frontend-design-language.md#token-分层与门禁)）；Canvas 样式由 feature 拥有。
 [`shared/ui`](../../frontend/src/shared/ui) 只提供中性组件：controls（Button、IconButton、Checkbox、
-Select、NumberInput、SearchField、TextInput、TextArea、TagInput、FieldLabel、Tabs）、cards（ResourceCard、
-ResourceGrid）、overlays（Dialog、ConfirmActionModal）、feedback（Toast、StateBlock、CreateCard），
+Select、Switch、NumberInput、SearchField、TextInput、TextArea、TagInput、FieldLabel、Tabs）、cards（ResourceCard、
+ResourceGrid）、overlays（Dialog、ConfirmActionModal）、feedback（Toast、StateBlock、EmptyState、CreateCard）、
+data（Badge、Mono/Code、KeyValue、Table）、layout（Panel、Toolbar），
 以及 markdown 与 media 内容组件；不引入外部 UI 组件库，
 生产代码禁用原生 `<select>`，下拉统一走自研 listbox。
 [`Dialog`](../../frontend/src/shared/ui/overlays/Dialog.tsx) portal 到 body，提供焦点陷阱与关闭后

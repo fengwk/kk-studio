@@ -49,6 +49,7 @@ import { useComposerMessageHistory } from '@/features/ai/runtime/thread-panel/us
 import { useComposerFocus } from '@/features/ai/runtime/thread-panel/useComposerFocus'
 import { useComposerSubmissionSettle } from '@/features/ai/runtime/thread-panel/useComposerSubmissionSettle'
 import { useI18n } from '@/shared/i18n'
+import { IconButton } from '@/shared/ui/controls/IconButton'
 
 const EMPTY_USER_MESSAGES: readonly string[] = []
 
@@ -555,14 +556,13 @@ export function ThreadComposer({
           aria-live="assertive"
         >
           <span className="composer-toast-message">{toast}</span>
-          <button
-            type="button"
+          <IconButton
             className="composer-toast-dismiss"
-            aria-label={t('ai.runtime.composer.dismissNotification')}
+            label={t('ai.runtime.composer.dismissNotification')}
             onClick={dismissToast}
           >
             <X aria-hidden="true" />
-          </button>
+          </IconButton>
         </div>
       ) : null}
       <ThreadCommandPalette

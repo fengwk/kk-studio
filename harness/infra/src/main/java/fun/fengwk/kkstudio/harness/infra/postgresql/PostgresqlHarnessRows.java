@@ -30,7 +30,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
+import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationErrorJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderReplayStateJsonCodec;
@@ -40,6 +40,8 @@ import fun.fengwk.kkstudio.harness.runtime.store.EnvironmentToolWaitRow;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.store.PendingEnvironmentWaitRow;
 import fun.fengwk.kkstudio.harness.runtime.store.PendingToolInvocationRow;
+import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
@@ -113,12 +115,56 @@ final class PostgresqlHarnessRows {
               resultSet.getString("name"),
               uuid(resultSet, "root_thread_id"),
               resultSet.getBoolean("yolo_enabled"),
+              SpawnTrigger.valueOf(resultSet.getString("spawn_trigger")),
+              decodeConstraints(resultSet.getString("constraints")),
               ThreadExecutionControl.valueOf(resultSet.getString("execution_control")),
               resultSet.getLong("input_through_sequence"),
               resultSet.getLong("next_command_sequence"),
               resultSet.getLong("version"),
               instant(resultSet, "created_at"),
               instant(resultSet, "updated_at"));
+
+  /** {@code harness_thread.constraints} 的本模块自有持久协议：固定三个键的 JSON 对象。 */
+  static String encodeConstraints(ThreadConstraints constraints) {
+    ObjectNode node = NODES.objectNode();
+    if (constraints.maxOutputTokens() == null) {
+      node.putNull("maxOutputTokens");
+    } else {
+      node.put("maxOutputTokens", constraints.maxOutputTokens());
+    }
+    node.put("promptCacheDisabled", constraints.promptCacheDisabled());
+    node.put("allowAutoCompaction", constraints.allowAutoCompaction());
+    return node.toString();
+  }
+
+  static ThreadConstraints decodeConstraints(String json) {
+    if (json == null) {
+      throw new IllegalArgumentException("thread constraints must not be null");
+    }
+    try {
+      JsonNode node = MAPPER.readTree(json);
+      if (node == null || !node.isObject() || node.size() != 3) {
+        throw new IllegalArgumentException("thread constraints must contain exactly three fields");
+      }
+      JsonNode cap = node.get("maxOutputTokens");
+      JsonNode cacheDisabled = node.get("promptCacheDisabled");
+      JsonNode autoCompaction = node.get("allowAutoCompaction");
+      if (cap == null
+          || (!cap.isNull() && (!cap.isIntegralNumber() || !cap.canConvertToInt()))
+          || cacheDisabled == null
+          || !cacheDisabled.isBoolean()
+          || autoCompaction == null
+          || !autoCompaction.isBoolean()) {
+        throw new IllegalArgumentException("invalid thread constraints fields");
+      }
+      return new ThreadConstraints(
+          cap.isNull() ? null : cap.intValue(),
+          cacheDisabled.booleanValue(),
+          autoCompaction.booleanValue());
+    } catch (JacksonException error) {
+      throw new IllegalArgumentException("malformed thread constraints JSON", error);
+    }
+  }
 
   static final RowMapper<ThreadCommand> COMMAND =
       (resultSet, rowNumber) -> {
@@ -151,7 +197,8 @@ final class PostgresqlHarnessRows {
               (Long) resultSet.getObject("delivery_command_sequence"),
               instant(resultSet, "created_at"),
               instant(resultSet, "updated_at"),
-              JoinPurpose.fromWireName(resultSet.getString("purpose")),
+              JoinDelivery.valueOf(resultSet.getString("delivery")),
+              resultSet.getBoolean("counts_toward_quota"),
               nullableUuid(resultSet, "superseded_by_invocation_id"));
 
   /** cancelled_inputs 是本模块自有持久协议：严格读取 + BigDecimal 读回自由 JSON，避免数值退化。 */

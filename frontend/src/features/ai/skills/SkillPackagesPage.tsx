@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { Badge, type BadgeTone } from '@/shared/ui/data/Badge'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowUpCircle, Edit2, Package, RefreshCw, Trash2 } from 'lucide-react'
 import { AiConsoleFrame } from '@/features/ai/extensions/AiConsoleFrame'
@@ -31,20 +32,19 @@ function formatCommit(commit: string | null | undefined): string {
 }
 
 /**
- * 状态 pill 只用设计系统已定义的变体：ok=is-ready、warning=is-pending、error=is-failed。
- * 不在列表里发明新的皮肤类，颜色语义由 .status-pill 变体统一决定。
+ * 检查状态只映射到共享 Badge 的语义：ok=success、warning=warning、error=danger。
  */
-function checkStatusPillClass(status: SkillPackageCheckStatus): string {
+function checkStatusTone(status: SkillPackageCheckStatus): BadgeTone {
   switch (status) {
     case 'UP_TO_DATE':
-      return 'status-pill is-ready'
+      return 'success'
     case 'UPDATE_AVAILABLE':
-      return 'status-pill is-pending'
+      return 'warning'
     case 'CHECK_FAILED':
-      return 'status-pill is-failed'
+      return 'danger'
     case 'UNCHECKED':
     default:
-      return 'status-pill is-offline'
+      return 'warning'
   }
 }
 
@@ -201,12 +201,9 @@ export function SkillPackagesPage() {
             title={pkg.packageName}
             subtitle={pkg.description || '—'}
             badge={
-              <span
-                className={checkStatusPillClass(pkg.checkStatus)}
-                data-testid="check-status-pill"
-              >
+              <Badge tone={checkStatusTone(pkg.checkStatus)} data-testid="check-status-pill">
                 {t(`ai.skillPackages.status.${pkg.checkStatus}`)}
-              </span>
+              </Badge>
             }
             meta={rows}
             actions={

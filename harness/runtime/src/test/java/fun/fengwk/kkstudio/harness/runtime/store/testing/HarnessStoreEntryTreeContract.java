@@ -40,6 +40,8 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
+import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 
 import java.time.Instant;
@@ -130,6 +132,8 @@ public abstract class HarnessStoreEntryTreeContract {
             root.name(),
             first.threadId(),
             false,
+            SpawnTrigger.MODEL_TOOL,
+            ThreadConstraints.NONE,
             root.executionControl(),
             root.inputThroughSequence(),
             root.nextCommandSequence(),

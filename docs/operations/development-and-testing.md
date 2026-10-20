@@ -13,7 +13,6 @@
 | Node 与 npm | Frontend 依赖由 [`package-lock.json`](../../frontend/package-lock.json) 固定；`distribution` profile 会自动安装 Node `v24.14.0` 与 npm `11.9.0` |
 | Docker 与 Compose v2 | 本地栈、测试栈、性能基线和镜像扫描需要 |
 | `curl`、`jq`、`lsof` | [scripts/dev/app.sh](../../scripts/dev/app.sh) 的启动硬依赖；端口与健康探测使用 lsof/curl |
-| Python 3 | E2E 与测试栈的 smoke 脚本 |
 
 数据库与服务由容器提供：[deploy/local](../../deploy/local/README.md) 覆盖主要本地路径，
 [deploy/test](../../deploy/test/README.md) 提供隔离离线栈。开发循环默认连接 PostgreSQL，
@@ -92,7 +91,7 @@ Vite 默认只监听 `127.0.0.1` 并使用自带 Host allowlist。需要容器�
 | 隔离栈 smoke | `./scripts/dev/verify/smoke/offline-chat.sh`；`--with-app` 增加应用契约，见 [deploy/test](../../deploy/test/README.md) |
 | 免费 API 契约矩阵 | [`./scripts/dev/verify/e2e/run.sh`](../../scripts/dev/verify/e2e/run.sh) |
 | 确认矩阵有哪些 case | `./scripts/dev/verify/e2e/run.sh --list`、`./scripts/dev/verify/e2e/run.sh --docs` |
-| 文档与敏感数据门禁 | `node scripts/dev/verify/repository/check.mjs`、`python3 scripts/dev/verify/repository/check-sensitive-data.py` |
+| 文档与敏感数据门禁 | `node scripts/dev/verify/repository/check.mjs`、`node scripts/dev/verify/repository/check-sensitive-data.mjs` |
 | 可靠性确定性回归 | `./scripts/dev/verify/reliability/regression.sh --iterations 1` |
 | 离线性能基线 | `./scripts/dev/verify/performance/run.sh` |
 | 供应链 SBOM / 漏洞门禁 | `./scripts/dev/verify/supply-chain/run.sh all` |
@@ -136,7 +135,7 @@ bin 目录置于 PATH 首位，不依赖 runner 默认版本。本地运行 [scr
 
 ### Daemon 安装与受管更新回归
 
-在仓库根运行 `python3 -m unittest discover -s scripts/daemon/tests -v`，覆盖安装、下载、受管更新与发布脚本契约。
+在仓库根运行 `node --test scripts/daemon/tests/*.test.mjs`，覆盖安装、下载、受管更新与发布脚本契约。
 Unix fixtures 替代网络与服务管理命令，真实执行 SHA256 校验、文件替换与暂存输入校验，验证 latest
 解析与发行归档版本匹配、`--check-config` 预检失败保留现有安装、受管身份判定、覆盖安装的备份与替换，
 以及卸载只移除受管服务与程序。安装器没有交互提示、from-source 与单独 upgrade 入口；从 checkout
@@ -169,7 +168,7 @@ Windows 原生还运行 `npm --prefix frontend run test:install:windows`，验�
 
 只有 Linux/macOS 时，可用 PS7 运行
 `pwsh -NoProfile -NonInteractive -File scripts/daemon/tests/test_daemon_install_windows.ps1 -ProcessOnly`；
-Python 入口在发现 `pwsh` 时也会运行这一子集，设置 120 秒超时以发现管道死锁。它只提供可移植
+它只提供可移植
 进程行为证据，不代替 Windows PowerShell 5.1 / PowerShell 7 的原生验收；镜像与 Daemon 发布 CI
 保留两个 Windows host 的完整门禁。
 
@@ -262,7 +261,8 @@ npm --prefix frontend run coverage
 | 命令 | 行为 | 结果 |
 | --- | --- | --- |
 | `run test` | `vitest run` | jsdom 单元/组件测试 |
-| `run test:layout` | Playwright Chromium 离线组件回归 | 布局基座与静态产物、共享资源卡/控件、Chat 1–9 pane 布局、Agent 执行树与回执、交互卡片、Debug 响应式与预览标题、媒体预览、Canvas 创建确认/生成布局/耐用性、Catalog i18n、Project 工作流与 Agent、Settings 同步与 Environment 安装；不依赖 Backend，产物在 `reports/layout/` |
+| `run test:browser` | Playwright Chromium 全量离线套件回归（CI 门禁） | 统一运行全部 8 个具名 projects，涵盖布局基座、Chat 1–9 pane、Environment 安装、Plugins、Composer、Compaction、Subagent 树与 Tool 卡片，产物输出至对应 reports 子目录 |
+| `run test:layout` | Playwright Chromium 定向 layout 套件回归 | 布局基座与静态产物、共享资源卡/控件、交互卡片、Debug 响应式与预览标题、媒体预览、Canvas、Catalog i18n、Project 工作流与 Agent、Settings 同步；产物在 `reports/layout/` |
 | `run lint` | `eslint .` | TypeScript、React hooks、分层 import 规则 |
 | `run typecheck` | `tsc -b` | 生产源码与构建配置的严格类型检查，不打包 |
 | `run typecheck:test` | `tsc -p tsconfig.test.json` | 全部单元测试、浏览器用例及其基座的严格类型检查，不运行浏览器或模型 |
@@ -275,21 +275,21 @@ localStorage、固定 `zh-CN`，并为 ResizeObserver、DOMMatrix、SVG geometry
 scrollIntoView 和 React Flow layout 提供确定性 stub。
 
 布局回归需要先在 `frontend/` 执行 `npx playwright install chromium` 安装浏览器。
-用例位于 `frontend/browser-tests/*.pw.ts`，与 Vitest 的组件测试分开运行。
-布局基座采用独立静态构建与预览机制（[`vite.layout.config.ts`](../../frontend/vite.layout.config.ts)），
-通过 Rollup 多页（MPA）模式将真实 React 组件与测试 harness 预编译至 `reports/layout-site/`。
-`npm run test:layout` 先执行 `build:layout`，成功后启动 Playwright；编译不占用服务器的启动预算。
-Playwright 通过 `preview:layout` 在 loopback 5174 端口启动静态预览
+用例位于 `frontend/browser-tests/*.pw.ts` 与 `*.browser.ts`，与 Vitest 的组件测试分开运行。
+浏览器基座采用统一静态构建与预览机制（[`vite.browser.config.ts`](../../frontend/vite.browser.config.ts)），
+通过 Rollup 多页（MPA）模式将真实 React 组件与全部测试 harness 预编译至 `reports/browser-site/`。
+全量回归（CI 门禁）执行 `npm run test:browser`，定向回归执行 `npm run test:layout`（或对应 `--project <name>`）；运行前先执行 `build:browser`，成功后启动 Playwright，编译不占用服务器的启动预算。
+Playwright 通过 `preview:browser` 在 loopback 5174 端口启动静态预览
 （`strictPort: true` 且 `reuseExistingServer: false`，以真实 harness URL 进行 HTTP readiness 探测），
-消除 dev HMR、实时转译与共享缓存依赖。调试时可在 `frontend/` 单独执行 `npm run build:layout`
-和 `npm run preview:layout`，直接通过浏览器访问 `http://127.0.0.1:5174/browser-tests/<harness>.html` 检查页面。
-并行验证用 `KK_LAYOUT_PORT` 指定独占端口，构建和 Playwright 使用同一值。
-首轮失败时，`reports/layout/` 下保留 `trace.zip` 和 `test-failed-*.png`，不依赖重试。
+消除 dev HMR、实时转译与共享缓存依赖。调试时可在 `frontend/` 单独执行 `npm run build:browser`
+和 `npm run preview:browser`，直接通过浏览器访问 `http://127.0.0.1:5174/browser-tests/<harness>.html` 检查页面。
+并行验证用 `KK_BROWSER_PORT` 指定独占端口，构建和 Playwright 使用同一值。
+首轮失败时，各 project 报告目录（如 `reports/layout/`）下保留 `trace.zip` 和 `test-failed-*.png`，不依赖重试。
 在 `frontend/` 执行 `npx playwright show-trace <trace-file-path>`，可检查时间线、DOM 快照、
 网络请求与控制台报错；trace 路径相对此目录通常以 `../reports/layout/` 开头。
 
 Chat 卡片和 Session/Thread 选择器的时间回归可在 `frontend/` 定向执行
-`npm run build:layout && npx playwright test --config playwright.layout.config.ts browser-tests/local-time.pw.ts`。
+`npm run build:browser && npx playwright test --project layout browser-tests/local-time.pw.ts`。
 该离线用例通过独立浏览器 context 固定上海、UTC、纽约时区，在宽窄视口验证实际组件：
 有时区 ISO 字符串及 epoch 秒/毫秒按浏览器本地时区显示为 `YYYY-MM-DD HH:mm`，
 包括跨日转换；无时区字符串和数组保留本地墙上时钟含义，空值及非法输入显示 `-`。
@@ -297,10 +297,10 @@ Chat 卡片和 Session/Thread 选择器的时间回归可在 `frontend/` 定向�
 Chat 默认设置、首发焦点、主题控件与 Debug 布局沿用同一离线 layout 入口：
 
 ```bash
-npm --prefix frontend run build:layout
+npm --prefix frontend run build:browser
 (
   cd frontend
-  npx playwright test --config playwright.layout.config.ts \
+  npx playwright test --project layout \
     browser-tests/chat-defaults.pw.ts browser-tests/composer-focus.pw.ts \
     browser-tests/debug-responsive-layout.pw.ts browser-tests/debug-preview-title.pw.ts \
     browser-tests/loading-skeleton.pw.ts browser-tests/retry-controls.pw.ts \
@@ -312,27 +312,26 @@ npm --prefix frontend run build:layout
 模态框和多 pane 防抢焦、等宽 Debug 列与 Subagent 配置详情，以及骨架屏、按钮忙碌状态和窄屏布局。
 API 规划与代理切换由后端定向测试验证，不以静态浏览器基座替代真实服务契约。
 
-Thread 控制与消息展示有独立的离线 Chromium 入口，可按改动范围选择：
+Thread 控制与消息展示通过统一 Playwright 配置划分具名 projects，可按改动范围选择：
 
 ```bash
 npm --prefix frontend run test:pane
 (
   cd frontend
-  npx playwright test --config playwright.tool-card.config.ts
-  npx playwright test --config playwright.subagent-tree.config.ts
-  npx playwright test --config playwright.compaction.config.ts
-  npx vite build --config vite.composer-editor.config.ts
-  npx playwright test --config playwright.composer-editor.config.ts
+  npx playwright test --project tool-card
+  npx playwright test --project subagent-tree
+  npx playwright test --project compaction
+  npx playwright test --project composer-editor
 )
 ```
 
-Thread/subagent 展示收口可定向运行 `playwright.pane.config.ts` 的 `chat-branch.browser.ts`、
-`playwright.tool-card.config.ts`、`playwright.subagent-tree.config.ts`，以及 layout 配置下的
+Thread/subagent 展示收口可定向运行 `--project pane` 的 `chat-branch.browser.ts`、
+`--project tool-card`、`--project subagent-tree`，以及 layout 配置下的
 `subagent-receipt.pw.ts` 与 `agent-tree.pw.ts`。这些离线回归覆盖根命令入口、只读直接父导航、
 完整当前执行根范围、选择键盘与零写请求、task 可读链接、工具 header/padding、回执链接与箭头顺序，
 并在宽屏及 320/360px 窄屏以实际几何验证统计行、按钮和图标中心。
 
-各入口只匹配对应 harness，使用独立构建、报告与 loopback 端口，不访问 Backend、
+各 project 只匹配对应 harness，统一在构建后的静态基座与 loopback 端口上运行，不访问 Backend、
 共享数据库或真实模型。Pane 验证根草稿/上传保留、子代理只读、根 Stop，以及新建分支的命名与
 1–9 目标路由、隐藏 pane 显露、完整祖先前缀与 409 改名恢复。Debug 回归从根或本地草稿的命令
 进入独占视图，验证单顶栏退出、控制区挂起，以及草稿、上传和焦点恢复。
@@ -410,12 +409,12 @@ Fat JAR 的 static 资源检查由 `-Pdistribution` 的三个插件完成；应�
 ```bash
 node scripts/dev/verify/e2e/run-matrix.mjs --docs
 node scripts/dev/verify/repository/check.mjs
-python3 scripts/dev/verify/repository/check-sensitive-data.py
+node scripts/dev/verify/repository/check-sensitive-data.mjs
 git diff --check
 ```
 
 [scripts/dev/verify/repository/check.mjs](../../scripts/dev/verify/repository/check.mjs) 负责固定文档布局、Markdown 链接、H1、源码
-路径和旧词守卫。[check-sensitive-data.py](../../scripts/dev/verify/repository/check-sensitive-data.py) 扫描
+路径和旧词守卫。[check-sensitive-data.mjs](../../scripts/dev/verify/repository/check-sensitive-data.mjs) 扫描
 tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook、个人绝对路径和已知私有环境标识；
 命中时只输出规则与 `path:line`，不要回显完整敏感值。该入口不扫描 Git 历史，历史审计是公开策略中
 的独立步骤。
@@ -1048,7 +1047,7 @@ dump 之后、冻结之前提交的写入。冻结后的 `<db>_pre_<UTCstamp>` �
 5. 检查 App 健康、配置、Daemon 重连、关键业务和既有 bucket。
    验收结束前保留完整备份、冻结库和对象存储数据；失败时保持停写，按部署恢复流程决定回退。
 
-维护脚本的自动化入口是 `python3 -m unittest discover -s scripts/ops/tests`，验证备份、
+维护脚本的自动化入口是 `node --test scripts/ops/tests/*.test.mjs`，验证备份、
 重建回滚、快照清理范围与确认、元数据保留、连接保护、owner-only 产物与敏感值不外泄。集成测试使用一次性 PostgreSQL 容器；
 Docker 不可用时跳过的结果不能当作数据库流程通过。
 
@@ -1183,7 +1182,7 @@ performance 入口每次运行都会自行清理 PostgreSQL/MinIO/test network�
 | E2E 只跑少数 case | `node scripts/dev/verify/e2e/run-matrix.mjs --list`；确认 `--real`、`--with-tools`、`--with-canvas-storage`、`--with-canvas-function` | 通过 `requires` 和 level 过滤是当前行为 |
 | 真实 Provider 不可用 | 检查 8 个 `TEST_{GOOGLE,OPENAI_RESPONSES,ANTHROPIC,OPENAI}_{BASE_URL,API_KEY}` 变量是否均非空 | 必须显式 `--real`，只用宿主同步器；不要放入 Compose/image/container |
 | reliability 环境未 READY | `./scripts/dev/verify/reliability/stack.sh status`；`./scripts/dev/verify/reliability/stack.sh logs app daemon` | `inspect` 先检查 non-root、volume 和 gateway |
-| 敏感数据门禁失败 | `python3 scripts/dev/verify/repository/check-sensitive-data.py` | 只按输出的规则和位置排查；不要把完整敏感值复制到日志或 Issue |
+| 敏感数据门禁失败 | `node scripts/dev/verify/repository/check-sensitive-data.mjs` | 只按输出的规则和位置排查；不要把完整敏感值复制到日志或 Issue |
 | performance/supply-chain 失败 | 阅读 `reports/performance/latest/report.md` 或 `reports/supply-chain/latest/summary.md` | 阈值、在线源、JSON 完整性和 zero-vulnerability 都不能放宽 |
 | proxy 下 build 失败 | 检查 `HTTP_PROXY`/`HTTPS_PROXY`、`CANVAS_TEST_BUILD_NETWORK`；再执行基础设施 smoke | 离线 smoke 对可解析 proxy 默认使用 host build network；performance 仅自动处理 loopback proxy，代理值不进入 runtime 镜像 |
 

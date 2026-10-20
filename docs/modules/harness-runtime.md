@@ -9,7 +9,7 @@
 [`HarnessRuntime`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/HarnessRuntime.java) 是外部与运行时交互的唯一同步入口：
 
 ```text
-acceptCommands / acceptCommandsAndJoin / findThreadCommand / getSession / getSessionEntries / listThreadsBySession
+acceptCommands / spawn / findThreadCommand / getSession / getSessionEntries / listThreadsBySession
 stop / decideToolApproval / submitToolInput / listPendingInteractions / setThreadYolo / renameThread / renameSession
 manualCompactionAvailability / compactThread / getThreadSnapshot / getThreadTree
 findJoin / projectJoinReceipt / findRootThreadId
@@ -81,12 +81,11 @@ rootThreadId / yoloEnabled / executionControl / inputThroughSequence / nextComma
 `acceptCommands` 接收一批有序命令加一个 sealed target：
 
 - `NEW_SESSION`（`NewRootSession`）：调用方预分配 `sessionId`/`threadId`，同一事务插入 Session + ROOT + Thread（`version=0`、`nextCommandSequence=1`）+ Commands（sequence 从 1 起）+ THREAD Work；以 client `threadId` 为查找键做初始创建重放，同 `creationRequestHash` 精确重放，不同哈希冲突为 `THREAD_ID_REUSED`。
-- `NEW_CHILD_SESSION`（`NewChildSession`，内部 task 子）：新建 Session 并作为既有 `parentThreadId` 的执行子代理；执行根继承自父 Thread，不接受调用方给定的开关。
 - `NEW_THREAD`：`KEY SHARE` 锁既有 Session（不串行化同 Session 的兄弟创建），校验 `startEntryId` 属于该 Session，插入一个 `FORK` Entry 作为新 Thread head（parent = 该切点）再加 Thread + Commands + Work；不复制任何前缀 Entry、不移动源 Thread。合法边界只有 ROOT 或已闭合 `TURN_END`；STOP Turn 作为原子控制屏障，绝不能 fork 到其未闭合 prefix（拒绝创建），但完整闭合的 `STOPPED` `TURN_END` 边界可正常 fork。
 - `NEW_FORKED_SESSION`：把执行根 `sourceThreadId` 在合法切点处的有效上下文复制到新 Session 并创建独立执行根；根 settings 从来源 branch 在切点处的生效快照推导、不接受调用方给定，不复制 join/commands/invocations，也不订阅源执行。
 - `THREAD`：先按 immutable `sessionId` 做 `KEY SHARE`，再 `FOR UPDATE` 锁 Thread；exact ordered replay 必须**先于**任何 cursor / preflight 准入，全新批次要求 `expectedHeadEntryId` 与 `expectedNextCommandSequence` 精确匹配（否则 `STALE_COMMAND_CURSOR`），随后调用 preflight、预留连续 sequence、请求 THREAD Work。
 
-命令类型有 `USER_MESSAGE`、`CUSTOM_MESSAGE`、`GOAL`、`SET_AGENT`、`SET_MODEL`、`SET_ENVIRONMENT`、`SET_CONTRIBUTOR_STATE`、`NOTIFICATION`：`USER_MESSAGE` 与 `GOAL` 是人工输入，`CUSTOM_MESSAGE` 是可信调用方输入（task/自动业务/one-shot），`NOTIFICATION` 是系统通知，不是输入来源。与前两类一样，typed `GOAL` 计入 user-like 输入：它在本回合 `TURN_START.settings` 内写入新的 [`GoalSetting`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/entry/GoalSetting.java)（每次设置都由运行时分配新的 `id`，因此基于旧 `id` 的进度报告不会命中新目标），并追加一条冻结的 USER 输入消息；payload 的 `text` 为 null 表示用户显式清除 Goal（空字符串不是清除），清除同样产生一条冻结 USER 消息。配置命令固定位于消息之前且顺序为 `SET_AGENT -> SET_MODEL -> SET_ENVIRONMENT -> SET_CONTRIBUTOR_STATE`，每种至多一次（`SET_ENVIRONMENT` 携带可空 `environmentName`，null 表示清除选择；`SET_CONTRIBUTOR_STATE` 携带 `{state:{contributorId,customType,schemaVersion,data}}`，是分支配置，不单独唤醒模型）。创建型 target（`NEW_SESSION` / `NEW_CHILD_SESSION` / `NEW_THREAD` / `NEW_FORKED_SESSION`）与带 Join 的批次必须包含**恰有一条末尾任务输入**；既有 Thread 也接受有序的纯设置批次：它在回合间安全边界（无 open `TURN_START`）由 `ThreadProcessor` 立即归约为 `BranchSettings` 快照并 append 一条 `SETTINGS` Entry（不打开/关闭 Turn、不调度模型、不恢复 `STOPPED`）；`SET_CONTRIBUTOR_STATE` 属于普通输入 turn，不在该纯设置路径内。产品 HTTP 面只接受 `USER_MESSAGE`、`GOAL` 与既有的三个 `SET_*` 前缀，`CUSTOM_MESSAGE`、`NOTIFICATION`、`SET_CONTRIBUTOR_STATE` 一律拒绝；typed `GOAL` 不可与普通消息同批，`CUSTOM_MESSAGE` 角色限定为 `USER`；非法批次是请求校验错误（`IllegalArgumentException`）。`TurnPlanBuilder` 只在 `TURN_START.settings` 冻结已生效的配置，不向模型注入配置提醒；UI 对比 ROOT 与非压缩 TURN_START 的完整设置快照投影配置变化。需要模型执行的独立提醒仍可作为显式 `CUSTOM_MESSAGE` 输入。运行时注入的提醒（`SystemReminder`）同样是一条 USER `CUSTOM_MESSAGE`，因此也计入 user-like；其识别要求完整开闭定界符（`<system-reminder>` + 非空正文 + `</system-reminder>`，闭标签后无尾随内容），普通消息只要伪造开标签前缀不会被当作 steering。YOLO 不走邮箱，由 `setThreadYolo` 直接改 Thread 行。
+命令类型有 `USER_MESSAGE`、`CUSTOM_MESSAGE`、`GOAL`、`SET_AGENT`、`SET_MODEL`、`SET_ENVIRONMENT`、`SET_CONTRIBUTOR_STATE`、`NOTIFICATION`：`USER_MESSAGE` 与 `GOAL` 是人工输入，`CUSTOM_MESSAGE` 是可信调用方输入（task/自动业务/one-shot），`NOTIFICATION` 是系统通知，不是输入来源。与前两类一样，typed `GOAL` 计入 user-like 输入：它在本回合 `TURN_START.settings` 内写入新的 [`GoalSetting`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/entry/GoalSetting.java)（每次设置都由运行时分配新的 `id`，因此基于旧 `id` 的进度报告不会命中新目标），并追加一条冻结的 USER 输入消息；payload 的 `text` 为 null 表示用户显式清除 Goal（空字符串不是清除），清除同样产生一条冻结 USER 消息。配置命令固定位于消息之前且顺序为 `SET_AGENT -> SET_MODEL -> SET_ENVIRONMENT -> SET_CONTRIBUTOR_STATE`，每种至多一次（`SET_ENVIRONMENT` 携带可空 `environmentName`，null 表示清除选择；`SET_CONTRIBUTOR_STATE` 携带 `{state:{contributorId,customType,schemaVersion,data}}`，是分支配置，不单独唤醒模型）。创建型 target（`NEW_SESSION` / `NEW_THREAD` / `NEW_FORKED_SESSION`）必须包含**恰有一条末尾任务输入**；统一 `spawn` 批次同样要求末尾 user-like 输入；既有 Thread 也接受有序的纯设置批次：它在回合间安全边界（无 open `TURN_START`）由 `ThreadProcessor` 立即归约为 `BranchSettings` 快照并 append 一条 `SETTINGS` Entry（不打开/关闭 Turn、不调度模型、不恢复 `STOPPED`）；`SET_CONTRIBUTOR_STATE` 属于普通输入 turn，不在该纯设置路径内。产品 HTTP 面只接受 `USER_MESSAGE`、`GOAL` 与既有的三个 `SET_*` 前缀，`CUSTOM_MESSAGE`、`NOTIFICATION`、`SET_CONTRIBUTOR_STATE` 一律拒绝；typed `GOAL` 不可与普通消息同批，`CUSTOM_MESSAGE` 角色限定为 `USER`；非法批次是请求校验错误（`IllegalArgumentException`）。`TurnPlanBuilder` 只在 `TURN_START.settings` 冻结已生效的配置，不向模型注入配置提醒；UI 对比 ROOT 与非压缩 TURN_START 的完整设置快照投影配置变化。需要模型执行的独立提醒仍可作为显式 `CUSTOM_MESSAGE` 输入。运行时注入的提醒（`SystemReminder`）同样是一条 USER `CUSTOM_MESSAGE`，因此也计入 user-like；其识别要求完整开闭定界符（`<system-reminder>` + 非空正文 + `</system-reminder>`，闭标签后无尾随内容），普通消息只要伪造开标签前缀不会被当作 steering。YOLO 不走邮箱，由 `setThreadYolo` 直接改 Thread 行。
 
 状态由标记字段派生：无标记即 `QUEUED`；有 `appliedEntryId` 即 `APPLIED`；`stopRequestId` 与 `cancelledAt` 成对存在且无 `appliedEntryId` 即 `CANCELLED`。
 
@@ -211,26 +210,26 @@ Dispatcher 认领 Work 后把 `ClaimedWork` 交给对应 Processor。Thread clai
 
 成功的 terminal 响应在成为 durable 事实之前先冻结 Tool 历史语义：`ModelExecution` 用本次调用的冻结 `toolBindings` 与注入的 [`ToolHistoryActionResolver`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/ToolHistoryActionResolver.java)（Platform 实现按冻结贡献身份与完整定义查不可变 `HarnessCatalog`，再调用 Tool 的 `historyRenderer()`）算出每个 READY 调用的自然语言动作，写入 `ProviderToolCall.historyAction` 后再持久化。解析与渲染在 execution monitor 和状态事务之外完成，动态 MCP Tool 不触发数据库查询；任何缺失、blank、异常或定义变化都退化为不冻结 action——历史语义渲染绝不阻断模型调用，也绝不改写 durable arguments。
 
-[`ToolProcessor`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ToolProcessor.java) 驱动一次工具调用：`READY` 且无审批记录时，在执行树锁内沿祖先链核对 YOLO policy；仅真实根的 `ENABLE` 跳过 preflight 直接 Allow，错根 Follow 立即拒绝。其余调用在事务外执行 `ToolGateway.preflight`（期间 heartbeat 续租），`Allow` 记录免审批并进入 dispatch，`Ask` 转为 `WAITING_APPROVAL` 并完成 TOOL claim（不唤醒 THREAD），`Deny` 标记 `FAILED` 并唤醒 THREAD。preflight 抛异常时保持 `READY` / 无审批 / version 不变，按失败延迟 reschedule。两阶段激活与回调门控协议与 Model 一致；超期租约（`DISPATCHING` 消费 proposed attempt、`RUNNING` 保留）同样收敛为 `UNKNOWN`，绝不对非幂等工具重放。`UNKNOWN` 是终态：与其它终态一样物化为失败 `ToolResult` 并唤醒 THREAD，作为 loop 反馈交给下一轮模型，不阻塞 Thread、也不升级为人工核查门禁。工具增量只支持文本与 JSON 格式。
+[`ToolProcessor`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ToolProcessor.java) 驱动一次工具调用：`READY` 且无审批记录时，在执行树锁内沿不可变 `rootThreadId` 解析执行根的 `yoloEnabled`；解析为 true 时跳过 preflight 直接 Allow。其余调用在事务外执行 `ToolGateway.preflight`（期间 heartbeat 续租），`Allow` 记录免审批并进入 dispatch，`Ask` 转为 `WAITING_APPROVAL` 并完成 TOOL claim（不唤醒 THREAD），`Deny` 标记 `FAILED` 并唤醒 THREAD。preflight 抛异常时保持 `READY` / 无审批 / version 不变，按失败延迟 reschedule。两阶段激活与回调门控协议与 Model 一致；超期租约（`DISPATCHING` 消费 proposed attempt、`RUNNING` 保留）同样收敛为 `UNKNOWN`，绝不对非幂等工具重放。`UNKNOWN` 是终态：与其它终态一样物化为失败 `ToolResult` 并唤醒 THREAD，作为 loop 反馈交给下一轮模型，不阻塞 Thread、也不升级为人工核查门禁。工具增量只支持文本与 JSON 格式。
 
 三个 Processor 共用 [`WorkHeartbeat`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/WorkHeartbeat.java) 的两层模型：注入的 scheduler 只做固定周期唤醒、单在途合并与非阻塞分派，绝不阻塞在数据库上；独立的 heartbeat worker 执行 `renewWork` 短事务与所有权丢失回调。续租事务异常、调度器启动拒绝或分派执行器拒绝都视为所有权无法维系，统一触发一次 `onLostOwnership`；`stop()` 返回前保证不会再有排队的续租事务开始。
 
 ## 压缩、停止、审批与子智能体
 
-压缩把父回合的 `TURN_START(reason=COMPACTION)` 与一个独立 child Runtime 关联：父在提交事务内由 [`CompactionChildStarter`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/compaction/CompactionChildStarter.java) 原子创建新 Session/子 Thread、首条摘要命令与 `JoinPurpose.COMPACTION` Join，并请求子 Thread 的 THREAD Work；[`CompactionStart`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/compaction/CompactionStart.java) 冻结 phase、trigger、`executionModel`、输出预算、切分锚点与 child 身份。父 COMPACTION turn 自身不产生 ModelInvocation：
+压缩把父回合的 `TURN_START(reason=COMPACTION)` 与一个独立子执行关联：父在提交事务内由 [`CompactionChildSpawn`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/compaction/CompactionChildSpawn.java) 走统一 [`AgentSpawner`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/AgentSpawner.java) 创建新 Session/子 Thread、首条摘要命令与 `SETTLE_OWNER_TURN` 票据，并请求子 Thread 的 THREAD Work；子 Thread 以 `SpawnTrigger.RUNTIME` 冻结，约束为父压缩 turn 的输出预算、禁用 prompt cache、禁止自动压缩（这些约束沿后代合并只会更紧）。[`CompactionStart`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/compaction/CompactionStart.java) 冻结 phase、trigger、`executionModel`、输出预算、切分锚点与 child 身份。父 COMPACTION turn 自身不产生 ModelInvocation：
 
 ```text
 父 TURN_START(COMPACTION) -> COMPACTION(summaryText) -> TURN_END
 子 TURN_START(INPUT)      -> ModelInvocation（Compaction Agent 的 systemInstruction + USER 摘要命令）-> ASSISTANT MESSAGE(summaryText) -> TURN_END
 ```
 
-父在 durable wait 中等待 Join 结算，不持长事务、不阻塞 `Future`；冻结的输入范围、Goal、设置与子身份不受后来排队输入污染。COMPACTION Join 只唤醒 owner，不产生公开 `SUBAGENT_RESULT` 通知；压缩子执行树内禁止再次创建压缩子线程，所有 compactor 请求 cache hint 固定 `NONE`（不承诺关闭厂商自动缓存）。
+父在 durable wait 中等待票据结算，不持长事务、不阻塞 `Future`；冻结的输入范围、Goal、设置与子身份不受后来排队输入污染。`SETTLE_OWNER_TURN` 只唤醒父 Thread 的开放 Turn owner，不产生公开 `SUBAGENT_RESULT` 通知；压缩子 Thread 的冻结约束禁止自动压缩，并且 `promptCacheDisabled=true` 使 compactor 请求 cache hint 固定 `NONE`。
 
 [`CompactionConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/compaction/CompactionConfig.java) 只保存 `keepRecentTokens`（默认 20_000；模型/Agent 选择由 `Compaction` 目录定义承担），并派生全部阈值：`effectiveKeep = min(keepRecentTokens, C/2)`、`effectiveReserve = min(16384, maxOutputTokens)`、`softThreshold = max(effectiveKeep, C - effectiveReserve)`、`manualMinimum = min(keepRecentTokens*2, C/2)`；压缩输出预算取 `min(maxOutputTokens, floor(reserve * 0.8), removedPrefixTokens)`，TURN_PREFIX 阶段把 0.8 换成 0.5。最近上下文保留量与摘要输出预留量是两个不同参数，分别受上下文窗口与输出上限约束。
 
 [`CompactionPlanner`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/compaction/CompactionPlanner.java) 是纯函数：只读 `EntryPath` 与配置，从尾部累计估算长度（`ceil(chars/4)`，媒体占位 4800 字符）越过 `effectiveKeep` 后取下一个合法切分点，绝不切在 ToolResult 或 COMPACTION 回合内部；切分落在 Agent 轮次中间时先出 HISTORY 中间摘要，再由 continuation 义务驱动 TURN_PREFIX 生成最终摘要。历史压缩输入由 [`CompactionPlanner`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/compaction/CompactionPlanner.java) 的 `reconstructSummaryInput` 按冻结的 `CompactionStart` Entry ID 重建，不重新运行切分选择。[`CompactionResultEvaluator`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/compaction/CompactionResultEvaluator.java) 把 LENGTH 截断、FILTERED 过滤、非法 stop reason、返回工具调用、空摘要、保留段解析失败与无 token 收益判定为失败（`COMPACTION_OUTPUT_TRUNCATED`、`COMPACTION_CONTENT_FILTERED`、`COMPACTION_INVALID_RESPONSE`、`COMPACTION_EMPTY_SUMMARY`、`COMPACTION_INVALID_SUMMARY`、`COMPACTION_NO_GAIN`）；空摘要、输出截断（LENGTH）与破损结果在成功回执冻结前进入普通调用重试路径（同一 `InvocationRetryPolicy` 预算，不新建压缩预算、不用 `max_turns`），重试耗尽则 child 失败、父执行失败且不交付 partial；过滤结果与输入超限直接失败，hard overflow 最多触发一次恢复。
 
-手工压缩走 `compactThread`：第一短事务按 version / availability / boundary 规划，事务外 resolve，第二短事务复验 expected version、source head 与完整排队命令快照，成功解析时原子提交 COMPACTION Turn、子 Thread/首条摘要命令与 COMPACTION Join，并请求子 Thread 的 THREAD Work，确定性拒绝时提交失败终态。它不认领 THREAD Work。[`ManualCompactionAvailability`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/ManualCompactionAvailability.java) 是瞬时投影，给出 `THREAD_BUSY`、`OWNERSHIP_BARRIER`、`NO_RESOLVED_CONTEXT`、`MODEL_CHANGED`、`BELOW_MINIMUM`、`NOTHING_TO_COMPACT` 等禁用原因，不能替代提交时的复验。
+手工压缩走 `compactThread`：第一短事务按 version / availability / boundary 规划，事务外 resolve，第二短事务复验 expected version、source head 与完整排队命令快照，成功解析时原子提交 COMPACTION Turn、子 Thread/首条摘要命令与 `SETTLE_OWNER_TURN` 票据，并请求子 Thread 的 THREAD Work，确定性拒绝时提交失败终态。它不认领 THREAD Work。[`ManualCompactionAvailability`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/ManualCompactionAvailability.java) 是瞬时投影，给出 `THREAD_BUSY`、`OWNERSHIP_BARRIER`、`NO_RESOLVED_CONTEXT`、`MODEL_CHANGED`、`BELOW_MINIMUM`、`NOTHING_TO_COMPACT` 等禁用原因，不能替代提交时的复验。
 
 Stop 在树锁与有序行锁内校验目标 version 和 `stopRequestId`，按不可变 `parentThreadId` 停止目标及全部后代。
 目标即使已经 `IDLE` 或 `STOPPED`，仍会覆盖其后代；已结算的 Join 不缩小停止范围。
@@ -268,19 +267,22 @@ Stop 在树锁与有序行锁内校验目标 version 和 `stopRequestId`，按�
 
 ### 子智能体委派与 Join
 
-内部 `task` 工具只做一次持久接受：Platform 的 `SubagentTaskRunner` 把本轮调用归一化为 `ThreadJoinRequest`，用 `acceptCommandsAndJoin` 在同一事务接受源 prompt、建立或沿用子 Thread、写入 join 凭据并请求 Work；`TaskTool` 立即用一次成功 tool_result 回执可读英文接受说明 `Task accepted. thread_id: <uuid>.`（含异步完成/失败/取消、继续独立工作或让出、以及 `task(thread_id, subagent_type, prompt)` 续做指引），不阻塞、没有第二个 tool_result；结构化元数据只在 details 中。子结果不经过工具返回，而是由运行时在子执行**收敛后**的终态边界结算 join，并作为父 Thread 的一条独立系统通知交付；子执行仍有未完成的直接子 Join、未送达的子回执或待处理输入时，本地 final 不是委派收敛点，不向上结算。
+内部 `task` 工具只做一次持久接受：Platform 的 `SubagentTaskRunner` 把本轮调用归一化为 [`AgentTaskRequest`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/agenttask/AgentTaskRequest.java) 并经 `AgentTaskService` 调用运行时统一 `spawn`，在同一事务接受源 prompt、建立或沿用子 Thread、写入票据并请求 Work；`TaskTool` 立即用一次成功 tool_result 回执可读英文接受说明 `Task accepted. thread_id: <uuid>.`（含异步完成/失败/取消、继续独立工作或让出、以及 `task(thread_id, subagent_type, prompt)` 续做指引），不阻塞、没有第二个 tool_result；结构化元数据只在 details 中。子结果不经过工具返回，而是由运行时在子执行**收敛后**的终态边界结算 join，并作为父 Thread 的一条独立系统通知交付；子执行仍有未完成的直接子 Join、未送达的子回执或待处理输入时，本地 final 不是委派收敛点，不向上结算。
 
 join 的持久事实是 `harness_thread_join` 的一行，只记凭据、不复制任何对话内容：
 
 ```text
 invocationId / requestHash / parentThreadId / childThreadId
 sourceCommandSequence / agent / maxTurns / reminderTurn
+delivery / countsTowardQuota
 terminalEntryId / finalAnswerEntryId / deliveryCommandSequence / createdAt / updatedAt
 ```
 
-- `ThreadJoinRequest` 携带 `invocationId`、可空 `parentThreadId`、父非空时的 `expectedParentHeadEntryId`、`requestHash`、`agent`、`maxTurns`，以及本次接纳的限额（`maxDepth`、`maxConcurrentChildren`、`maxConcurrentThreads`）。
-- `parentThreadId` 非空表示 task：同一事务校验父仍可接受本次调用、`expectedParentHeadEntryId` 与父 head 匹配、子关系与深度/并发额度。只有新建子才设置父关系，resume 不能改父；父处于 `STOPPED` 时拒绝发起新委派。resume 向仍在执行的子追加源 prompt 后等待它真正的下一次终态，绝不同步等待。
-- `parentThreadId` 为空表示内部 root one-shot 的 completion ticket：同样与源 prompt 原子接受，但不投递父通知。
+- 统一 `SpawnRequest` 携带预分配的 `threadId`/`sessionId`（续用时为 null 并给出 `Continuation`）、`BranchSettings`、首批命令、preflight、可空 `parentThreadId` 与父 head、`yoloEnabled`、冻结 `ThreadConstraints`、`SpawnTrigger`、`JoinDelivery`、`countsTowardQuota`、准入 `Budget`（`maxTurns`/`maxDepth`/`maxConcurrentChildren`/`maxConcurrentThreads`）、票据 id 与请求指纹。子 Thread 的有效约束是请求约束与父约束按 min/OR/AND 合并后的值；续用既有 Thread 沿用其创建时冻结的来源与约束。
+- `parentThreadId` 非空表示 task 子：`JoinDelivery.NOTIFY_PARENT`，`countsTowardQuota=true`；同一事务校验父仍可接受本次调用、`expectedParentHeadEntryId` 与父 head 匹配、子关系与深度/并发额度。只有新建子才设置父关系，resume 不能改父；父处于 `STOPPED` 时拒绝发起新委派。resume 向仍在执行的子追加源 prompt 后等待它真正的下一次终态，绝不同步等待。
+- `parentThreadId` 为空表示内部 root 任务：`JoinDelivery.RECEIPT_ONLY`、不计额度；同样与源 prompt 原子接受，但不投递父通知。
+- `JoinDelivery.SETTLE_OWNER_TURN` 用于压缩等 runtime 子执行：不计额度，结算后只唤醒父 Thread 的开放 Turn owner，不投递 `SUBAGENT_RESULT`。
+- Platform 的 `AgentTaskService` 与 HTTP `/api/agent-tasks` 按票据观察任务：有效票据未结算为 `RUNNING`，有冻结回执为 `COMPLETED` / `ERROR` / `CANCELLED`；被后续任务接管的旧票据为终态 `SUPERSEDED`，不伪造回执、不借用后续任务结果。按已结算或已接管的票据停止是 no-op，不能停止同 Thread 的后续任务。
 - `sourceCommandSequence` 记录源命令身份；只有当该命令已有 `appliedEntryId`（输入已应用）时才允许用子执行当前终态结算新 Join，输入尚未应用时旧回合完成不能结算新 Join。
 - `terminalEntryId` 与可空 `finalAnswerEntryId` 由 `match(terminalEntryId, finalAnswerEntryId, now)` **一次冻结**：`finalAnswerEntryId` 非空要求 `terminalEntryId` 非空，`deliveryCommandSequence` 非空必须已匹配且父存在。`matched()` 只由 `terminalEntryId` 判定，既不按 Thread version 匹配，也不等待永久子树 idle。
 - 普通结算的收敛判据：除源输入已应用外，必须同时满足**没有尚未冻结结果的直接子 Join**、**没有已冻结但未送达的子回执**、且**本 Thread 没有待处理输入**（QUEUED 消息/通知，或已物化但未越过输入水位的 APPLIED 通知）。直接子 Join 自身遵循同一判据，A-B-C 及更深委派因此自底向上自然收敛，不需要遍历全树历史空闲节点。`ThreadRuntimeStatus.IDLE` 只表示本地上下文，不等同于整次委派已可回执。Stop 的强制结算不受该判据限制。
@@ -330,7 +332,7 @@ terminalEntryId / finalAnswerEntryId / deliveryCommandSequence / createdAt / upd
 | --- | --- | --- |
 | `runtime` | 同步控制面 facade `HarnessRuntime` 与包私有控制类 `AcceptCommandsControl`、`StopControl`、`ManualCompactionControl`、`ToolInputControl`、`ThreadContextLock`、`ThreadLifecycleCoordinator`、`ThreadTreeLocks`、`ChangeGate`、`Names` | 控制事务边界与类型化冲突；`admission -> tree -> session -> thread -> command -> model -> tool -> work` 锁序由 `ThreadLifecycleCoordinator` 与 `ThreadTreeLocks` 统一守卫；执行状态流转委托给 `runtime.processor` |
 | `runtime.admission` | `ConcurrencyAdmission` 进程内非阻塞并发槽位 | 纯内存，不持久化、不跨进程协调 |
-| `runtime.compaction` | `CompactionPlanner`、`AutomaticCompactionPlanner`、`CompactionConfig`、`CompactionHistory`、`CompactionResultEvaluator`、`CompactionChildStarter`、`CompactionChildScope`、`CompactionStart`、摘要装配与提示词 | 规划与评估是纯函数；子执行复用标准 ModelInvocation 与 MODEL 邮箱，父侧只持 `JoinPurpose.COMPACTION` Join 与 durable wait |
+| `runtime.compaction` | `CompactionPlanner`、`AutomaticCompactionPlanner`、`CompactionConfig`、`CompactionHistory`、`CompactionResultEvaluator`、`CompactionChildSpawn`、`CompactionStart`、摘要装配与提示词 | 规划与评估是纯函数；子执行经统一 spawn 复用标准 ModelInvocation 与 MODEL 邮箱，父侧只持 `SETTLE_OWNER_TURN` 票据与 durable wait |
 | `runtime.entry` | `BranchSettings`、`GoalSetting`、`ModelSelection`、`TurnStartReason`、`TurnEndOutcome` | 只含分支配置与 turn 生命周期值对象；Environment name 进入 settings，内部路由 ID 与目录不进入分支历史 |
 | `runtime.history` | `Entry`、`EntryPath`、`EntryType`、turn 文法校验与历史 JSON 编解码 | 只追加事实与路径不变量；调度状态归 `runtime.work` |
 | `runtime.input` | `ask_user` 问卷值（`HumanInputQuestionnaire`、`HumanInputAnswers`）、答案规范化与 [HumanInputTool](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/input/HumanInputTool.java) | 提供纯值校验，等待冻结与派发门禁由 runtime.processor 承接 |
@@ -338,7 +340,7 @@ terminalEntryId / finalAnswerEntryId / deliveryCommandSequence / createdAt / upd
 | `runtime.invocation.codec` | Model/Tool 持久化列的严格确定性 JSON 编解码 | 未知、缺失、重复或尾随字段直接拒绝 |
 | `runtime.invocation.model` | `ModelInvocation` 状态机、`ModelRequestSpec`、重试审计与 `ModelRequestMaterializer` | 调度租约归 `runtime.work`；请求使用供应商中立模型 |
 | `runtime.invocation.tool` | `ToolInvocation` 状态机、`ToolBinding`、审批状态与 `ToolEffectBatch` | 不自行执行工具，物理执行委托 `ToolGateway` |
-| `runtime.join` | `ThreadJoinRequest`、`ThreadJoin`、`ThreadJoinReceipt`、`ThreadJoinOutcome`、`ThreadJoinProjector`、`ThreadJoinCompletion`、`ThreadJoinCompletionRenderer` | join 凭据、一次终态冻结与回执投影的纯函数；结算、交付与通知物化由 `runtime` 与 `runtime.processor` 在事务内驱动 |
+| `runtime.join` | `JoinDelivery`、`ThreadJoin`、`ThreadJoinReceipt`、`ThreadJoinOutcome`、`ThreadJoinProjector`、`ThreadJoinCompletion`、`ThreadJoinCompletionRenderer` | 票据凭据、一次终态冻结与回执投影的纯函数；`NOTIFY_PARENT` / `SETTLE_OWNER_TURN` / `RECEIPT_ONLY` 的结算与交付由 `runtime` 与 `runtime.processor` 在事务内驱动 |
 | `runtime.model` | `ModelDescriptor`、`ModelVariant`、`ModelPricing`、`ModelUsage`、`ModelCost`、`ModelInvocationError` | 纯领域值对象；用量非负，成本用精确 `BigDecimal` 计算且总额等于分项之和 |
 | `runtime.model.cache` | `PromptCacheRetention`、`ProviderCacheControl` | 留存档位与会话 key 的静态契约，不维护缓存存储、命中事实或前缀哈希 |
 | `runtime.model.codec` | `ModelDescriptor` 与 `ModelVariant` 的权威 JSON 编解码 | 拒绝未知字段，不允许数据库 resource id 或密钥进入该边界 |

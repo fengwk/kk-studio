@@ -20,7 +20,7 @@
   margin-inline-start: 8px;
   padding: 1px 6px;
   border: 1px solid var(--border);
-  border-radius: 999px;
-  font-size: 11px;
+  border-radius: var(--radius-pill);
+  font-size: var(--font-size-xs);
   color: var(--fg-muted);
 }

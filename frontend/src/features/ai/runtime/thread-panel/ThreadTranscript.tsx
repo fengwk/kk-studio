@@ -1,4 +1,5 @@
 import { MessageSquare } from 'lucide-react'
+import { Button } from '@/shared/ui/controls/Button'
 import type { RefObject } from 'react'
 import { MessageList } from '@/features/ai/runtime/thread-panel/messages/MessageList'
 import { isVisibleDialogueMessage } from '@/features/ai/runtime/thread-panel/visibility'
@@ -34,7 +35,7 @@ export function ThreadTranscript({
       {hasError && (
         <div className="thread-state danger" role="alert">
           {errorText ?? t('ai.runtime.thread.loadFailed')}
-          {onRetry ? <button type="button" className="ghost-btn" onClick={onRetry}>{t('shared.conflict.retry')}</button> : null}
+          {onRetry ? <Button variant="ghost" onClick={onRetry}>{t('shared.conflict.retry')}</Button> : null}
         </div>
       )}
       {empty && (

@@ -48,6 +48,8 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderResponse
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
@@ -790,6 +792,8 @@ class HarnessRuntimeResponseMapperTest {
             thread.name(),
             thread.rootThreadId(),
             thread.yoloEnabled(),
+            SpawnTrigger.MODEL_TOOL,
+            ThreadConstraints.NONE,
             thread.executionControl(),
             thread.inputThroughSequence(),
             thread.nextCommandSequence(),

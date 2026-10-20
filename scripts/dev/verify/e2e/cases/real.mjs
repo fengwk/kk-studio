@@ -1790,8 +1790,8 @@ registerCase({
         startEntryId,
         threadId: branchThreadId,
         threadName: branchThreadName,
-        // NEW_THREAD 独立 fork 新执行根：根开关从原根 mode 派生，不读取已删除的 boolean 字段。
-        yoloEnabled: current.yoloPolicy.mode === 'ENABLE',
+        // NEW_THREAD 独立 fork 新执行根：初始 YOLO 开关沿用原根当前生效值。
+        yoloEnabled: current.yoloEnabled,
         commands: [branchCommand],
       }
       const branched = await createNewThread(ctx, branchTarget)

@@ -258,7 +258,7 @@ test.describe('Responsive Debug Layout Real React Component Regression', () => {
     const planning = page.locator('.thread-debug-col-preview')
     expect(await planning.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
     await planning.locator('.thread-debug-environment').scrollIntoViewIfNeeded()
-    await expect(planning.getByText('dev-node', { exact: true })).toHaveClass('status-pill is-neutral')
+    await expect(planning.getByText('dev-node', { exact: true })).toHaveClass('ui-badge is-neutral')
     await page.getByRole('tab', { name: '事件' }).click()
     await page.locator('.thread-event').first().click()
     const detail = page.locator('.thread-debug-col-detail')

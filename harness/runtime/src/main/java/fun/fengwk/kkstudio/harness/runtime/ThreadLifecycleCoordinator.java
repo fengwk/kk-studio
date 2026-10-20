@@ -6,7 +6,6 @@ import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.NotificationKind;
 import fun.fengwk.kkstudio.harness.runtime.history.NotificationPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
-import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinCompletion;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
@@ -129,8 +128,8 @@ public final class ThreadLifecycleCoordinator {
       // 不向父结算、不自唤醒忙轮询；后续真实输入/子结算路径会再次到达终止边界。
       return;
     }
-    List<ThreadJoin> taskMatches = new ArrayList<>(incomplete.size());
-    List<ThreadJoin> compactionMatches = new ArrayList<>();
+    List<ThreadJoin> notifyMatches = new ArrayList<>(incomplete.size());
+    List<ThreadJoin> settleMatches = new ArrayList<>();
     for (ThreadJoin join : incomplete) {
       if (!includeUnappliedSource) {
         ThreadCommand source =
@@ -142,17 +141,17 @@ public final class ThreadLifecycleCoordinator {
       }
       ThreadJoin current = join.match(terminalEntryId, finalAnswerEntryId, now);
       tx.updateJoin(current);
-      if (current.purpose() == JoinPurpose.COMPACTION) {
-        compactionMatches.add(current);
-      } else {
-        taskMatches.add(current);
+      switch (current.delivery()) {
+        case NOTIFY_PARENT -> notifyMatches.add(current);
+        case SETTLE_OWNER_TURN -> settleMatches.add(current);
+        case RECEIPT_ONLY -> {}
       }
     }
-    if (!taskMatches.isEmpty()) {
-      deliverMatchedJoins(tx, taskMatches, now);
+    if (!notifyMatches.isEmpty()) {
+      deliverMatchedJoins(tx, notifyMatches, now);
     }
-    if (!compactionMatches.isEmpty()) {
-      wakeCompactionParents(tx, compactionMatches, now);
+    if (!settleMatches.isEmpty()) {
+      wakeOwners(tx, settleMatches);
     }
   }
 
@@ -169,8 +168,8 @@ public final class ThreadLifecycleCoordinator {
   }
 
   /**
-   * 对一批刚冻结的 TASK Join 执行父 Thread 交付：构造 NOTIFICATION 命令并预留父序列；父为 RUNNABLE 时请求 THREAD wake，父为 STOPPED
-   * 时把通知直接固化到历史而不唤醒模型。root ticket（parentThreadId 为空）不投递父通知。
+   * 对一批刚冻结的 NOTIFY_PARENT Join 执行父 Thread 交付：构造 NOTIFICATION 命令并预留父序列；父为 RUNNABLE 时请求 THREAD
+   * wake，父为 STOPPED 时把通知直接固化到历史而不唤醒模型。
    */
   private static void deliverMatchedJoins(
       HarnessStore.Transaction tx, List<ThreadJoin> matched, Instant now) {
@@ -180,9 +179,6 @@ public final class ThreadLifecycleCoordinator {
     Map<UUID, List<ThreadJoinCompletion.Delivery>> deliveriesByParent = new HashMap<>();
     for (ThreadJoin join : matched) {
       UUID parentId = join.parentThreadId();
-      if (parentId == null || join.purpose() != JoinPurpose.TASK) {
-        continue;
-      }
       ThreadState parent = parents.get(parentId);
       if (parent == null) {
         parent =
@@ -264,13 +260,12 @@ public final class ThreadLifecycleCoordinator {
   }
 
   /**
-   * 对一批刚冻结的 COMPACTION Join 唤醒父 Thread Work：压缩结果只冻结 receipt，不构造 SUBAGENT_RESULT 通知、不分配父序列；父 Thread
-   * 的压缩 owner 在同一终止边界后按 join 消费已冻结结果。
+   * 对一批刚冻结的 SETTLE_OWNER_TURN Join 唤醒父 Thread Work：结果只冻结 receipt，不构造 SUBAGENT_RESULT 通知、不分配父序列；父
+   * Thread 的开放 Turn owner 在随后的处理中按 join 消费已冻结结果。
    */
-  private static void wakeCompactionParents(
-      HarnessStore.Transaction tx, List<ThreadJoin> compactionMatches, Instant now) {
+  private static void wakeOwners(HarnessStore.Transaction tx, List<ThreadJoin> settleMatches) {
     Set<UUID> parents = new LinkedHashSet<>();
-    for (ThreadJoin join : compactionMatches) {
+    for (ThreadJoin join : settleMatches) {
       if (join.parentThreadId() != null) {
         parents.add(join.parentThreadId());
       }

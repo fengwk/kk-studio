@@ -24,9 +24,7 @@ import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
-import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
-import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.processor.ProcessorLeaseConfig;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessResult;
@@ -35,7 +33,11 @@ import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorConfig;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.SpawnTestSupport.Child;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.SpawnTestSupport.Ticket;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
+import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
@@ -60,13 +62,13 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 /**
- * 真实 PostgreSQL / Testcontainers 事务环境下 Join 命令接受（acceptCommandsAndJoin）与异常回滚 / GC 残留测试。
+ * 真实 PostgreSQL / Testcontainers 事务环境下 Agent spawn 接受（runtime.spawn）与异常回滚 / GC 残留测试。
  *
  * <p>核心验证点：
  *
  * <ul>
- *   <li><b>Preflight 失败全表原子回滚</b>：当 {@code acceptCommandsAndJoin} 中的 Preflight 抛出异常时，PostgreSQL 的
- *       Session / Thread / Entry / Command / Join / Work 全表数据原子回滚，零孤儿行残留；
+ *   <li><b>Preflight 失败全表原子回滚</b>：当 {@code runtime.spawn} 中的 Preflight 抛出异常时，PostgreSQL 的 Session /
+ *       Thread / Entry / Command / Join / Work 全表数据原子回滚，零孤儿行残留；
  *   <li><b>配额超限与标识重用回滚</b>：子线程 Join 配额超限或 InvocationId 重用被拒绝时，同样在 PostgreSQL 中不产生任何孤儿记录；
  *   <li><b>并发接受 Tree Lock 串行化</b>：同一父级下的并发子线程接受请求通过 PG Advisory Lock 严格串行化，避免配额竞态；
  *   <li><b>完整生命周期与 GC 验证</b>：子线程从 accept -> model terminal -> Join 冻结 -> 父级交付 NOTIFICATION -> 父级消费，
@@ -89,23 +91,24 @@ class PostgresqlJoinAcceptanceRollbackTest {
     jdbcTemplate = new JdbcTemplate(PostgresqlHarnessStoreFixture.dataSource());
   }
 
-  private static AcceptCommandsCommand newSessionChild(
+  private static Child newSessionChild(
       UUID sessionId, UUID childThreadId, UUID parentThreadId, String prompt) {
-    return new AcceptCommandsCommand(
-        new AcceptCommandsTarget.NewChildSession(
-            sessionId, childThreadId, branchSettings(), parentThreadId),
+    return new Child(
+        sessionId,
+        childThreadId,
+        parentThreadId,
         List.of(
             new NewThreadCommand(
                 new UserMessageCommandPayload(AgentMessage.user(prompt)), UUID.randomUUID())));
   }
 
-  private static ThreadJoinRequest joinRequest(
+  private static Ticket joinRequest(
       UUID invocationId,
       UUID parentThreadId,
       UUID expectedHead,
       int maxTurns,
       int concurrentQuota) {
-    return new ThreadJoinRequest(
+    return Ticket.task(
         invocationId,
         parentThreadId,
         expectedHead,
@@ -114,13 +117,12 @@ class PostgresqlJoinAcceptanceRollbackTest {
         maxTurns,
         3,
         concurrentQuota,
-        3,
-        JoinPurpose.TASK);
+        3);
   }
 
   @Test
-  void acceptCommandsAndJoinPreflightFailureRollsBackAllTablesWithoutOrphans() {
-    // 测试意图：验证当在已有的根/父线程下通过 acceptCommandsAndJoin 接受新子会话与 Join 凭据时，
+  void spawnPreflightFailureRollsBackAllTablesWithoutOrphans() {
+    // 测试意图：验证当在已有的根/父线程下通过 spawn 接受新子会话与 Join 凭据时，
     // 若 Preflight 抛出异常，PostgreSQL 的底层事务完整回滚，各表中均不残留任何孤儿行（Session、Thread、Entry、Command、Join、Work）。
     Baseline baseline = seedThreadBaseline(store);
 
@@ -128,16 +130,16 @@ class PostgresqlJoinAcceptanceRollbackTest {
     UUID childThreadId = UUID.randomUUID();
     UUID joinInvocationId = UUID.randomUUID();
 
-    AcceptCommandsCommand command =
+    Child command =
         newSessionChild(childSessionId, childThreadId, baseline.threadId(), "run subagent task");
-    ThreadJoinRequest join =
-        joinRequest(joinInvocationId, baseline.threadId(), baseline.rootEntryId(), 5, 3);
+    Ticket join = joinRequest(joinInvocationId, baseline.threadId(), baseline.rootEntryId(), 5, 3);
 
     // 传入拒绝的 preflight
     assertThrows(
         IllegalStateException.class,
         () ->
-            runtime.acceptCommandsAndJoin(
+            SpawnTestSupport.acceptAndJoin(
+                runtime,
                 command,
                 join,
                 (tx, current, commands) -> {
@@ -191,8 +193,8 @@ class PostgresqlJoinAcceptanceRollbackTest {
   }
 
   @Test
-  void acceptCommandsAndJoinQuotaExceededRollsBackEntirely() {
-    // 测试意图：验证同一父级下子线程 Join 配额达到上限时，后续超限的 acceptCommandsAndJoin 抛出异常并完整回滚，
+  void spawnQuotaExceededRollsBackEntirely() {
+    // 测试意图：验证同一父级下子线程 Join 配额达到上限时，后续超限的 spawn 抛出异常并完整回滚，
     // 第一个成功的子线程和 Join 记录不受破坏，第二个被拒绝的子线程在 PG 中零残留。
     Baseline baseline = seedThreadBaseline(store);
 
@@ -201,10 +203,11 @@ class PostgresqlJoinAcceptanceRollbackTest {
     UUID join1InvocationId = UUID.randomUUID();
 
     // 允许 1 个未匹配 join 的配额
-    ThreadJoinRequest join1 =
+    Ticket join1 =
         joinRequest(join1InvocationId, baseline.threadId(), baseline.rootEntryId(), 5, 1);
     AcceptedCommands first =
-        runtime.acceptCommandsAndJoin(
+        SpawnTestSupport.acceptAndJoin(
+            runtime,
             newSessionChild(child1SessionId, child1ThreadId, baseline.threadId(), "task 1"),
             join1,
             AcceptancePreflight.IDENTITY);
@@ -214,13 +217,14 @@ class PostgresqlJoinAcceptanceRollbackTest {
     UUID child2SessionId = UUID.randomUUID();
     UUID child2ThreadId = UUID.randomUUID();
     UUID join2InvocationId = UUID.randomUUID();
-    ThreadJoinRequest join2 =
+    Ticket join2 =
         joinRequest(join2InvocationId, baseline.threadId(), baseline.rootEntryId(), 5, 1);
 
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            runtime.acceptCommandsAndJoin(
+            SpawnTestSupport.acceptAndJoin(
+                runtime,
                 newSessionChild(child2SessionId, child2ThreadId, baseline.threadId(), "task 2"),
                 join2,
                 AcceptancePreflight.IDENTITY));
@@ -252,7 +256,7 @@ class PostgresqlJoinAcceptanceRollbackTest {
   }
 
   @Test
-  void acceptCommandsAndJoinReusedInvocationIdRejectionLeavesNoOrphans() {
+  void spawnReusedInvocationIdRejectionLeavesNoOrphans() {
     // 测试意图：验证重复使用同一个 invocationId 尝试创建不同的子线程时，抛出冲突异常并回滚，不污染数据库。
     Baseline baseline = seedThreadBaseline(store);
 
@@ -260,9 +264,10 @@ class PostgresqlJoinAcceptanceRollbackTest {
     UUID child1ThreadId = UUID.randomUUID();
     UUID sharedInvocationId = UUID.randomUUID();
 
-    ThreadJoinRequest join1 =
+    Ticket join1 =
         joinRequest(sharedInvocationId, baseline.threadId(), baseline.rootEntryId(), 5, 3);
-    runtime.acceptCommandsAndJoin(
+    SpawnTestSupport.acceptAndJoin(
+        runtime,
         newSessionChild(child1SessionId, child1ThreadId, baseline.threadId(), "initial subagent"),
         join1,
         AcceptancePreflight.IDENTITY);
@@ -270,13 +275,14 @@ class PostgresqlJoinAcceptanceRollbackTest {
     // 重用 sharedInvocationId 创建第二个不同的 session/thread
     UUID child2SessionId = UUID.randomUUID();
     UUID child2ThreadId = UUID.randomUUID();
-    ThreadJoinRequest join2 =
+    Ticket join2 =
         joinRequest(sharedInvocationId, baseline.threadId(), baseline.rootEntryId(), 5, 3);
 
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            runtime.acceptCommandsAndJoin(
+            SpawnTestSupport.acceptAndJoin(
+                runtime,
                 newSessionChild(
                     child2SessionId, child2ThreadId, baseline.threadId(), "conflicting subagent"),
                 join2,
@@ -298,8 +304,8 @@ class PostgresqlJoinAcceptanceRollbackTest {
   }
 
   @Test
-  void concurrentAcceptCommandsAndJoinOnSameTreeSerializesViaTreeLockOnPostgres() throws Exception {
-    // 测试意图：验证同一父执行树下的并发 acceptCommandsAndJoin 能够通过 Tree Advisory Lock 在 PostgreSQL 级别实现安全串行化互斥，
+  void concurrentSpawnOnSameTreeSerializesViaTreeLockOnPostgres() throws Exception {
+    // 测试意图：验证同一父执行树下的并发 spawn 能够通过 Tree Advisory Lock 在 PostgreSQL 级别实现安全串行化互斥，
     // 事务 A 持锁期间事务 B 阻塞等待，事务 A 提交后事务 B 顺利完成，最终两子树均正确落库且祖先链与子线程关系完整。
     Baseline baseline = seedThreadBaseline(store);
 
@@ -316,11 +322,12 @@ class PostgresqlJoinAcceptanceRollbackTest {
     CountDownLatch tx2Started = new CountDownLatch(1);
 
     try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
-      // 线程 1：执行 acceptCommandsAndJoin，在 preflight 内通知持锁并等待
+      // 线程 1：执行 spawn，在 preflight 内通知持锁并等待
       Future<AcceptedCommands> future1 =
           executor.submit(
               () ->
-                  runtime.acceptCommandsAndJoin(
+                  SpawnTestSupport.acceptAndJoin(
+                      runtime,
                       newSessionChild(
                           child1SessionId, child1ThreadId, baseline.threadId(), "task 1"),
                       joinRequest(join1Id, baseline.threadId(), baseline.rootEntryId(), 5, 5),
@@ -340,12 +347,13 @@ class PostgresqlJoinAcceptanceRollbackTest {
       // 等待线程 1 已经拿到树锁并进入 preflight
       assertTrue(tx1HoldingLock.await(10, TimeUnit.SECONDS));
 
-      // 线程 2：尝试在同一个父树下执行 acceptCommandsAndJoin，内部 lockTreeAndAncestors 必须被 PG 阻塞
+      // 线程 2：尝试在同一个父树下执行 spawn，内部 lockTreeAndAncestors 必须被 PG 阻塞
       Future<AcceptedCommands> future2 =
           executor.submit(
               () -> {
                 tx2Started.countDown();
-                return runtime.acceptCommandsAndJoin(
+                return SpawnTestSupport.acceptAndJoin(
+                    runtime,
                     newSessionChild(child2SessionId, child2ThreadId, baseline.threadId(), "task 2"),
                     joinRequest(join2Id, baseline.threadId(), baseline.rootEntryId(), 5, 5),
                     AcceptancePreflight.IDENTITY);
@@ -415,6 +423,8 @@ class PostgresqlJoinAcceptanceRollbackTest {
                   "parent",
                   parentThreadId,
                   false,
+                  SpawnTrigger.USER,
+                  ThreadConstraints.NONE,
                   ThreadExecutionControl.RUNNABLE,
                   0L,
                   1L,
@@ -424,9 +434,9 @@ class PostgresqlJoinAcceptanceRollbackTest {
           return null;
         });
 
-    AcceptCommandsCommand request =
+    Child request =
         newSession(childSessionId, childThreadId, parentThreadId, childCommandKey, "child task");
-    ThreadJoinRequest join = joinRequest(joinInvocationId, parentThreadId, parentRootEntryId, 5, 3);
+    Ticket join = joinRequest(joinInvocationId, parentThreadId, parentRootEntryId, 5, 3);
 
     CountDownLatch tx1HoldingTreeLock = new CountDownLatch(1);
     CountDownLatch tx1CanCommit = new CountDownLatch(1);
@@ -436,7 +446,8 @@ class PostgresqlJoinAcceptanceRollbackTest {
       Future<AcceptedCommands> first =
           executor.submit(
               () ->
-                  runtime.acceptCommandsAndJoin(
+                  SpawnTestSupport.acceptAndJoin(
+                      runtime,
                       request,
                       join,
                       (tx, current, commands) -> {
@@ -450,7 +461,8 @@ class PostgresqlJoinAcceptanceRollbackTest {
           executor.submit(
               () -> {
                 tx2Started.countDown();
-                return runtime.acceptCommandsAndJoin(request, join, AcceptancePreflight.IDENTITY);
+                return SpawnTestSupport.acceptAndJoin(
+                    runtime, request, join, AcceptancePreflight.IDENTITY);
               });
       assertTrue(tx2Started.await(10, TimeUnit.SECONDS));
       assertThrows(
@@ -488,10 +500,8 @@ class PostgresqlJoinAcceptanceRollbackTest {
     UUID commandKey = TestIds.id(6002);
     UUID joinInvocationId = TestIds.id(6003);
 
-    AcceptCommandsCommand request = newSession(sessionId, threadId, null, commandKey, "root task");
-    ThreadJoinRequest ticket =
-        new ThreadJoinRequest(
-            joinInvocationId, null, null, HASH, "test-agent", 5, 3, 3, 3, JoinPurpose.TASK);
+    AcceptCommandsCommand request = newRootSession(sessionId, threadId, commandKey, "root task");
+    Ticket ticket = Ticket.task(joinInvocationId, null, null, HASH, "test-agent", 5, 3, 3, 3);
 
     CountDownLatch tx1HoldingTreeLock = new CountDownLatch(1);
     CountDownLatch tx1CanCommit = new CountDownLatch(1);
@@ -501,7 +511,8 @@ class PostgresqlJoinAcceptanceRollbackTest {
       Future<AcceptedCommands> first =
           executor.submit(
               () ->
-                  runtime.acceptCommandsAndJoin(
+                  SpawnTestSupport.acceptAndJoin(
+                      runtime,
                       request,
                       ticket,
                       (tx, current, commands) -> {
@@ -515,7 +526,8 @@ class PostgresqlJoinAcceptanceRollbackTest {
           executor.submit(
               () -> {
                 tx2Started.countDown();
-                return runtime.acceptCommandsAndJoin(request, ticket, AcceptancePreflight.IDENTITY);
+                return SpawnTestSupport.acceptAndJoin(
+                    runtime, request, ticket, AcceptancePreflight.IDENTITY);
               });
       assertTrue(tx2Started.await(10, TimeUnit.SECONDS));
       assertThrows(
@@ -536,15 +548,21 @@ class PostgresqlJoinAcceptanceRollbackTest {
     assertSingleRow("durable_work", "target_id", threadId);
   }
 
-  private static AcceptCommandsCommand newSession(
-      UUID sessionId, UUID threadId, UUID parentThreadId, UUID commandKey, String prompt) {
-    AcceptCommandsTarget target =
-        parentThreadId == null
-            ? new AcceptCommandsTarget.NewRootSession(sessionId, threadId, branchSettings(), false)
-            : new AcceptCommandsTarget.NewChildSession(
-                sessionId, threadId, branchSettings(), parentThreadId);
+  private static AcceptCommandsCommand newRootSession(
+      UUID sessionId, UUID threadId, UUID commandKey, String prompt) {
     return new AcceptCommandsCommand(
-        target,
+        new AcceptCommandsTarget.NewRootSession(sessionId, threadId, branchSettings(), false),
+        List.of(
+            new NewThreadCommand(
+                new UserMessageCommandPayload(AgentMessage.user(prompt)), commandKey)));
+  }
+
+  private static Child newSession(
+      UUID sessionId, UUID threadId, UUID parentThreadId, UUID commandKey, String prompt) {
+    return new Child(
+        sessionId,
+        threadId,
+        parentThreadId,
         List.of(
             new NewThreadCommand(
                 new UserMessageCommandPayload(AgentMessage.user(prompt)), commandKey)));
@@ -572,7 +590,7 @@ class PostgresqlJoinAcceptanceRollbackTest {
   @Test
   void garbageCollectionAndFullLifecyclePostgresVerification() throws Exception {
     // 测试意图：真实 PostgreSQL 端到端完整生命周期与 GC 清理验证：
-    // 1. acceptCommandsAndJoin 接受子任务及 join 凭据；
+    // 1. spawn 接受子任务及 join 凭据；
     // 2. 模拟并发中途失败的垃圾请求并验证无脏数据残留；
     // 3. 由具体生产 ThreadProcessor 消费并推进子线程直至 IDLE；
     // 4. 直接查询 PG 数据表校验 harness_thread_join 各回执字段的真实落库（matched, idle_version, result_head,
@@ -587,7 +605,8 @@ class PostgresqlJoinAcceptanceRollbackTest {
 
     // 1. 正常接受子任务
     AcceptedCommands accepted =
-        runtime.acceptCommandsAndJoin(
+        SpawnTestSupport.acceptAndJoin(
+            runtime,
             newSessionChild(
                 childSessionId, childThreadId, baseline.threadId(), "calculate factorial(5)"),
             joinRequest(joinInvocationId, baseline.threadId(), baseline.rootEntryId(), 5, 3),
@@ -601,7 +620,8 @@ class PostgresqlJoinAcceptanceRollbackTest {
     assertThrows(
         RuntimeException.class,
         () ->
-            runtime.acceptCommandsAndJoin(
+            SpawnTestSupport.acceptAndJoin(
+                runtime,
                 newSessionChild(abortedSessionId, abortedThreadId, baseline.threadId(), "garbage"),
                 joinRequest(abortedJoinId, baseline.threadId(), baseline.rootEntryId(), 5, 3),
                 (tx, current, commands) -> {
@@ -742,14 +762,12 @@ class PostgresqlJoinAcceptanceRollbackTest {
     seedRootThread(rootASessionId, rootARootEntryId, rootAThreadId);
     seedRootThread(rootBSessionId, rootBRootEntryId, rootBThreadId);
 
-    AcceptCommandsCommand requestA =
+    Child requestA =
         newSession(childASessionId, childAThreadId, rootAThreadId, childACommandKey, "child A");
-    ThreadJoinRequest joinA =
-        globalJoinRequest(joinAInvocationId, rootAThreadId, rootARootEntryId, 1);
-    AcceptCommandsCommand requestB =
+    Ticket joinA = globalJoinRequest(joinAInvocationId, rootAThreadId, rootARootEntryId, 1);
+    Child requestB =
         newSession(childBSessionId, childBThreadId, rootBThreadId, childBCommandKey, "child B");
-    ThreadJoinRequest joinB =
-        globalJoinRequest(joinBInvocationId, rootBThreadId, rootBRootEntryId, 1);
+    Ticket joinB = globalJoinRequest(joinBInvocationId, rootBThreadId, rootBRootEntryId, 1);
 
     CountDownLatch tx1HoldingAdmission = new CountDownLatch(1);
     CountDownLatch tx1CanCommit = new CountDownLatch(1);
@@ -759,7 +777,8 @@ class PostgresqlJoinAcceptanceRollbackTest {
       Future<AcceptedCommands> first =
           executor.submit(
               () ->
-                  runtime.acceptCommandsAndJoin(
+                  SpawnTestSupport.acceptAndJoin(
+                      runtime,
                       requestA,
                       joinA,
                       (tx, current, commands) -> {
@@ -773,7 +792,8 @@ class PostgresqlJoinAcceptanceRollbackTest {
           executor.submit(
               () -> {
                 tx2Started.countDown();
-                return runtime.acceptCommandsAndJoin(requestB, joinB, AcceptancePreflight.IDENTITY);
+                return SpawnTestSupport.acceptAndJoin(
+                    runtime, requestB, joinB, AcceptancePreflight.IDENTITY);
               });
       assertTrue(tx2Started.await(10, TimeUnit.SECONDS));
       assertThrows(
@@ -809,7 +829,7 @@ class PostgresqlJoinAcceptanceRollbackTest {
 
     // 同一请求在额度释放后成功创建
     AcceptedCommands retried =
-        runtime.acceptCommandsAndJoin(requestB, joinB, AcceptancePreflight.IDENTITY);
+        SpawnTestSupport.acceptAndJoin(runtime, requestB, joinB, AcceptancePreflight.IDENTITY);
     assertFalse(retried.replayed());
     assertSingleRow("harness_session", "id", childBSessionId);
     assertSingleRow("harness_thread", "id", childBThreadId);
@@ -819,7 +839,7 @@ class PostgresqlJoinAcceptanceRollbackTest {
 
     // exact replay 命中既有 Join，不重复占额度
     AcceptedCommands replayed =
-        runtime.acceptCommandsAndJoin(requestB, joinB, AcceptancePreflight.IDENTITY);
+        SpawnTestSupport.acceptAndJoin(runtime, requestB, joinB, AcceptancePreflight.IDENTITY);
     assertTrue(replayed.replayed());
     assertEquals(1, incompleteSubagentJoins());
   }
@@ -840,6 +860,8 @@ class PostgresqlJoinAcceptanceRollbackTest {
                   "root",
                   threadId,
                   false,
+                  SpawnTrigger.USER,
+                  ThreadConstraints.NONE,
                   ThreadExecutionControl.RUNNABLE,
                   0L,
                   1L,
@@ -850,19 +872,10 @@ class PostgresqlJoinAcceptanceRollbackTest {
         });
   }
 
-  private static ThreadJoinRequest globalJoinRequest(
+  private static Ticket globalJoinRequest(
       UUID invocationId, UUID parentThreadId, UUID expectedHead, int globalCap) {
-    return new ThreadJoinRequest(
-        invocationId,
-        parentThreadId,
-        expectedHead,
-        HASH,
-        "test-agent",
-        5,
-        3,
-        5,
-        globalCap,
-        JoinPurpose.TASK);
+    return Ticket.task(
+        invocationId, parentThreadId, expectedHead, HASH, "test-agent", 5, 3, 5, globalCap);
   }
 
   private int incompleteSubagentJoins() {

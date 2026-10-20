@@ -1,9 +1,7 @@
 package fun.fengwk.kkstudio.platform.environment;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.util.HexFormat;
+import fun.fengwk.kkstudio.harness.common.hash.Sha256;
+
 import java.util.UUID;
 import java.util.regex.Pattern;
 
@@ -25,13 +23,7 @@ public final class RegistrationTokens {
 
   /** 明文凭证的规范摘要：UTF-8 的 SHA-256，小写十六进制。 */
   public static String hash(String token) {
-    try {
-      return HexFormat.of()
-          .formatHex(
-              MessageDigest.getInstance("SHA-256").digest(token.getBytes(StandardCharsets.UTF_8)));
-    } catch (NoSuchAlgorithmException error) {
-      throw new IllegalStateException("SHA-256 is unavailable", error);
-    }
+    return Sha256.hex(token);
   }
 
   /** 摘要是否为规范形态（64 位小写十六进制）。 */

@@ -39,6 +39,8 @@ class ThreadContextProbeTest {
             "main",
             THREAD_ID,
             false,
+            SpawnTrigger.USER,
+            ThreadConstraints.NONE,
             ThreadExecutionControl.RUNNABLE,
             0L,
             1,

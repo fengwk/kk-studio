@@ -31,8 +31,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.ThreadLifecycleCoordinator;
 import fun.fengwk.kkstudio.harness.runtime.ThreadTreeLocks;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionChildScope;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionChildStarter;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionChildSpawn;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionNoGain;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
@@ -60,7 +59,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
-import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
+import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
@@ -80,6 +79,8 @@ import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
@@ -177,7 +178,10 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
 
           // COMPACTION join
           ThreadJoin join = tx.findJoin(compaction.joinInvocationId()).orElseThrow();
-          assertEquals(JoinPurpose.COMPACTION, join.purpose());
+          assertEquals(JoinDelivery.SETTLE_OWNER_TURN, join.delivery());
+          assertFalse(join.countsTowardQuota());
+          assertEquals(SpawnTrigger.RUNTIME, childThread.spawnTrigger());
+          assertEquals(new ThreadConstraints(4096, true, false), childThread.constraints());
           assertEquals(baseline.threadId(), join.parentThreadId());
           assertEquals(compaction.childThreadId(), join.childThreadId());
           assertFalse(join.matched());
@@ -504,22 +508,19 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
             new BranchSettings(
                 "compaction", branchSettings().model(), branchSettings().environmentName(), null));
     CompactionPreparation historyPrep = historyPreparation();
-    CompactionChildStarter.CompactionChild child =
+    CompactionStart child =
         inTx(
             fixture,
             tx -> {
               ThreadState parent = tx.lockThread(baseline.threadId()).orElseThrow();
-              EntryPath parentPath = tx.loadEntryPath(parent.headEntryId());
-              CompactionChildStarter.CompactionChild c =
-                  CompactionChildStarter.start(
-                      tx, parent, parentPath, compResolved, historyPrep, NOW);
+              CompactionStart c = CompactionChildSpawn.start(tx, parent, compResolved, historyPrep);
               UUID tsId = tx.nextId();
               tx.insertEntry(
                   new Entry(
                       tsId,
                       baseline.sessionId(),
                       baseline.turnEndEntryId(),
-                      resolvedCompactionTurnStart(baseline.threadId(), c.frozenStart()),
+                      resolvedCompactionTurnStart(baseline.threadId(), c),
                       NOW));
               tx.updateThread(parent.advanceHead(tsId, NOW));
               return c;
@@ -1663,12 +1664,9 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     assertEquals(1, compactionFailureCount(fixture.store, baseline.threadId()));
   }
 
-  /**
-   * 意图：防递归只限定 COMPACTION 子执行树——只有自身或祖先持有未结算 COMPACTION join 的 Thread 才禁止再规划压缩；压缩子的后代 同样被覆盖，而未结算的
-   * TASK subagent join 与普通 Thread 都不构成阻塞。
-   */
+  /** 意图：防递归只由 Thread 冻结的创建约束决定——压缩子不允许自动压缩，其后代经约束合并同样不允许；普通 Thread 与普通 task subagent 不受影响。 */
   @Test
-  void compactionChildTreeGuardBlocksOnlyCompactionJoinOwners() {
+  void autoCompactionIsForbiddenOnlyByFrozenConstraints() {
     Fixture fixture = fixture();
     var baseline = seedCompactionReadyClosedTurn(fixture.store, OVER_THRESHOLD_USAGE);
     seedCommand(
@@ -1682,14 +1680,13 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
         ((TurnStartPayload) path(fixture.store, baseline.threadId()).head().payload())
             .compaction()
             .childThreadId();
-    UUID taskChild = seedJoinChildThread(fixture.store, baseline.threadId(), JoinPurpose.TASK);
-    UUID compactionDescendant =
-        seedJoinChildThread(fixture.store, compactionChild, JoinPurpose.TASK);
+    UUID taskChild = seedJoinChildThread(fixture.store, baseline.threadId());
+    UUID compactionDescendant = seedJoinChildThread(fixture.store, compactionChild);
 
-    assertTrue(guardBlocks(fixture.store, compactionChild));
-    assertTrue(guardBlocks(fixture.store, compactionDescendant));
-    assertFalse(guardBlocks(fixture.store, baseline.threadId()));
-    assertFalse(guardBlocks(fixture.store, taskChild));
+    assertTrue(forbidsAutoCompaction(fixture.store, compactionChild));
+    assertTrue(forbidsAutoCompaction(fixture.store, compactionDescendant));
+    assertFalse(forbidsAutoCompaction(fixture.store, baseline.threadId()));
+    assertFalse(forbidsAutoCompaction(fixture.store, taskChild));
   }
 
   /**
@@ -1736,12 +1733,12 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     assertEquals(4096, turnStartMaxOutputTokens(fixture.store, invocation.turnStartEntryId()));
   }
 
-  /** 意图：普通 Thread 与未结算 TASK subagent 不位于 COMPACTION 子执行树内，其解析结果（预算与 cache）完全不被压缩规则改写。 */
+  /** 意图：普通 Thread 与未结算 task subagent 不带压缩约束，其解析结果（预算与 cache）完全不被改写。 */
   @Test
   void threadOutsideCompactionChildTreeKeepsResolvedBudgetAndCache() {
     Fixture fixture = fixture();
     var baseline = seedCompactionReadyClosedTurn(fixture.store, BELOW_THRESHOLD_USAGE);
-    UUID taskChild = seedJoinChildThread(fixture.store, baseline.threadId(), JoinPurpose.TASK);
+    UUID taskChild = seedJoinChildThread(fixture.store, baseline.threadId());
     requestThreadWork(fixture.store, taskChild);
 
     ProviderCacheControl sessionCache =
@@ -1755,10 +1752,6 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     assertEquals(9000, invocation.requestSpec().outputTokens());
     assertEquals(sessionCache, invocation.requestSpec().cacheControl());
     assertEquals(9000, turnStartMaxOutputTokens(fixture.store, invocation.turnStartEntryId()));
-    boolean hasFrozenStart =
-        fixture.store.transaction(
-            tx -> CompactionChildScope.frozenStartFor(tx, taskChild).isPresent());
-    assertFalse(hasFrozenStart);
   }
 
   /** 以 base spec 为模板构造指定预算与 cache 的探测 spec。 */
@@ -1806,11 +1799,9 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                 .count());
   }
 
-  private static boolean guardBlocks(InMemoryHarnessStore store, UUID threadId) {
+  private static boolean forbidsAutoCompaction(InMemoryHarnessStore store, UUID threadId) {
     return store.transaction(
-        tx ->
-            CompactionChildScope.isInCompactionChildTree(
-                tx, tx.findThread(threadId).orElseThrow()));
+        tx -> !tx.findThread(threadId).orElseThrow().constraints().allowAutoCompaction());
   }
 
   private static void setStopped(InMemoryHarnessStore store, UUID threadId) {
@@ -1850,9 +1841,8 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
         });
   }
 
-  /** 手工创建带未结算 Join 的直接子线程（独立 Session），用于按 Join purpose 验证防递归判定。 */
-  private static UUID seedJoinChildThread(
-      InMemoryHarnessStore store, UUID parentThreadId, JoinPurpose purpose) {
+  /** 手工创建带未结算 task Join 的直接子线程（独立 Session）；有效约束与 spawn 一样由父约束合并而来。 */
+  private static UUID seedJoinChildThread(InMemoryHarnessStore store, UUID parentThreadId) {
     return store.transaction(
         tx -> {
           tx.lockThread(parentThreadId);
@@ -1863,9 +1853,8 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
           tx.insertSession(new Session(sessionId, "child-" + sessionId, NOW));
           tx.insertEntry(
               new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), NOW));
-          List<UUID> ancestors = tx.findAncestorChain(parentThreadId);
-          UUID rootThreadId =
-              ancestors.isEmpty() ? parentThreadId : ancestors.get(ancestors.size() - 1);
+          ThreadState parent = tx.findThread(parentThreadId).orElseThrow();
+          UUID rootThreadId = parent.rootThreadId();
           ThreadState child =
               new ThreadState(
                   threadId,
@@ -1876,6 +1865,8 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                   "child",
                   rootThreadId,
                   false,
+                  SpawnTrigger.MODEL_TOOL,
+                  ThreadConstraints.NONE.merge(parent.constraints()),
                   ThreadExecutionControl.RUNNABLE,
                   0L,
                   2L,
@@ -1905,7 +1896,8 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                   null,
                   NOW,
                   NOW,
-                  purpose,
+                  JoinDelivery.NOTIFY_PARENT,
+                  true,
                   null));
           return threadId;
         });

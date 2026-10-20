@@ -135,7 +135,7 @@ export function ChatLayoutHarnessApp() {
   return (
     <div className="harness-chat-workspace" style={{ display: 'flex', flexDirection: 'column', height: '100vh', width: '100vw', overflow: 'hidden' }}>
       <header className="chat-workspace-header" style={{ padding: '8px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)' }}>
-        <h1 style={{ margin: 0, fontSize: '16px' }}>Chat Workspace Layout Harness</h1>
+        <h1 style={{ margin: 0, fontSize: 'var(--font-size-md)' }}>Chat Workspace Layout Harness</h1>
         <div className="chat-workspace-actions">
           <ChatLayoutSelector
             layout={paneState.layout}

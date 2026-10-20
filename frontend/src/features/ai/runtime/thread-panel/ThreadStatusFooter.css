@@ -15,7 +15,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--fg-muted);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   line-height: 1.4;
   font-variant-numeric: tabular-nums;
   text-align: left;

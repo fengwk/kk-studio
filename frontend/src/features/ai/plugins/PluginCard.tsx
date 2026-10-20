@@ -1,4 +1,5 @@
 import { Activity, LogIn, LogOut, Plug, Settings } from 'lucide-react'
+import { Badge, type BadgeTone } from '@/shared/ui/data/Badge'
 import { useI18n, type AppLocale } from '@/shared/i18n'
 import { Button } from '@/shared/ui/controls/Button'
 import { ResourceCard, type ResourceCardMetaRow } from '@/shared/ui/cards/ResourceCard'
@@ -17,18 +18,18 @@ function formatDateTime(value: InstantTimestamp | undefined, locale: AppLocale):
   return date.toLocaleString(locale)
 }
 
-function statusPillClass(status: PluginStatus): string {
+function statusTone(status: PluginStatus): BadgeTone {
   switch (status) {
     case 'CONNECTED':
-      return 'status-pill is-ready'
+      return 'success'
     case 'REFRESH_FAILED':
     case 'REFRESH_UNCERTAIN':
-      return 'status-pill is-pending'
+      return 'warning'
     case 'REAUTH_REQUIRED':
-      return 'status-pill is-failed'
+      return 'danger'
     case 'NOT_CONNECTED':
     default:
-      return 'status-pill is-offline'
+      return 'warning'
   }
 }
 
@@ -129,24 +130,22 @@ export function PluginCard({
       subtitle={plugin.pluginId}
       badge={
         <>
-          <span className="status-pill is-neutral">v{plugin.version}</span>
-          <span
-            className={
-              isPendingApplication ? 'status-pill is-pending' : 'status-pill is-ready'
-            }
+          <Badge mono>v{plugin.version}</Badge>
+          <Badge
+            tone={isPendingApplication ? 'warning' : 'success'}
             data-testid={`plugin-app-status-${plugin.pluginId}`}
           >
             {isPendingApplication
               ? t('plugins.applicationStatus.pending')
               : t('plugins.applicationStatus.applied')}
-          </span>
+          </Badge>
           {plugin.authKind && plugin.status ? (
-            <span
-              className={statusPillClass(plugin.status)}
+            <Badge
+              tone={statusTone(plugin.status)}
               data-testid={`plugin-status-${plugin.pluginId}`}
             >
               {t(`plugins.status.${plugin.status}`) || plugin.status}
-            </span>
+            </Badge>
           ) : null}
         </>
       }

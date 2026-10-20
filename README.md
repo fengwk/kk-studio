@@ -150,7 +150,7 @@ npm --prefix frontend run test
 npm --prefix frontend run lint
 npm --prefix frontend run build
 node scripts/dev/verify/repository/check.mjs
-python3 scripts/dev/verify/repository/check-sensitive-data.py
+node scripts/dev/verify/repository/check-sensitive-data.mjs
 ```
 
 完整的本地配置、E2E、覆盖率、可靠性、性能和供应链入口见

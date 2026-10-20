@@ -31,6 +31,7 @@ import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
 import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.harness.runtime.SpawnRequest;
 import fun.fengwk.kkstudio.harness.runtime.StopCommand;
 import fun.fengwk.kkstudio.harness.runtime.StopResult;
 import fun.fengwk.kkstudio.harness.runtime.StoppedThreadReceipt;
@@ -41,12 +42,11 @@ import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.NotificationKind;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
-import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
+import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinCompletion;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinOutcome;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinReceipt;
-import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
 import fun.fengwk.kkstudio.harness.runtime.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
@@ -55,6 +55,8 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
@@ -326,13 +328,16 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
     UUID childThreadId = UUID.randomUUID();
     UUID invocationId = UUID.randomUUID();
     UUID expectedParentHead = headEntryId(parentThreadId);
-    AcceptCommandsCommand command =
-        new AcceptCommandsCommand(
-            new AcceptCommandsTarget.NewChildSession(
-                childSessionId, childThreadId, SETTINGS, parentThreadId),
-            List.of(promptCommand(UUID.randomUUID(), "child work")));
-    ThreadJoinRequest join =
-        taskJoin(invocationId, parentThreadId, expectedParentHead, "child work");
+    SpawnRequest request =
+        childTask(
+            childSessionId,
+            childThreadId,
+            parentThreadId,
+            promptCommand(UUID.randomUUID(), "child work"),
+            invocationId,
+            expectedParentHead,
+            "child work",
+            MAX_DEPTH);
 
     ExecutorService pool = Executors.newFixedThreadPool(2);
     List<AcceptedCommands> outcomes;
@@ -342,7 +347,7 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
           () -> {
             start.await();
             try {
-              return runtime.acceptCommandsAndJoin(command, join, AcceptancePreflight.IDENTITY);
+              return runtime.spawn(request);
             } catch (IllegalArgumentException rejected) {
               // 并发败者整体回滚：不允许留下半套事实。
               return null;
@@ -370,8 +375,7 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
     assertEquals(1, commandsOf(parentThreadId).size());
 
     // 已提交后的顺序重放：同一请求（同一 target/命令/幂等键 + 同一 join 身份）必须精确重放，不再创建任何事实。
-    AcceptedCommands replay =
-        runtime.acceptCommandsAndJoin(command, join, AcceptancePreflight.IDENTITY);
+    AcceptedCommands replay = runtime.spawn(request);
     assertTrue(replay.replayed(), "a committed duplicate acceptance must replay");
     assertEquals(childThreadId, replay.thread().id());
     assertEquals(1, count("harness_session", "id", childSessionId));
@@ -384,13 +388,16 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
         assertThrows(
             IllegalArgumentException.class,
             () ->
-                runtime.acceptCommandsAndJoin(
-                    new AcceptCommandsCommand(
-                        new AcceptCommandsTarget.NewChildSession(
-                            UUID.randomUUID(), UUID.randomUUID(), SETTINGS, parentThreadId),
-                        List.of(promptCommand(UUID.randomUUID(), "child work"))),
-                    join,
-                    AcceptancePreflight.IDENTITY));
+                runtime.spawn(
+                    childTask(
+                        UUID.randomUUID(),
+                        UUID.randomUUID(),
+                        parentThreadId,
+                        promptCommand(UUID.randomUUID(), "child work"),
+                        invocationId,
+                        expectedParentHead,
+                        "child work",
+                        MAX_DEPTH)));
     assertEquals("join invocation identity reused", reused.getMessage());
   }
 
@@ -425,20 +432,16 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
                     () -> {
                       start.await();
                       try {
-                        runtime.acceptCommandsAndJoin(
-                            new AcceptCommandsCommand(
-                                new AcceptCommandsTarget.NewChildSession(
-                                    childSessions.get(attempt),
-                                    childThreads.get(attempt),
-                                    SETTINGS,
-                                    parentThreadId),
-                                List.of(promptCommand(UUID.randomUUID(), "child work"))),
-                            taskJoin(
-                                invocations.get(attempt),
+                        runtime.spawn(
+                            childTask(
+                                childSessions.get(attempt),
+                                childThreads.get(attempt),
                                 parentThreadId,
+                                promptCommand(UUID.randomUUID(), "child work"),
+                                invocations.get(attempt),
                                 headEntryId(parentThreadId),
-                                "child work"),
-                            AcceptancePreflight.IDENTITY);
+                                "child work",
+                                MAX_DEPTH));
                         return true;
                       } catch (IllegalArgumentException rejected) {
                         return false;
@@ -506,18 +509,16 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
         assertThrows(
             IllegalArgumentException.class,
             () ->
-                runtime.acceptCommandsAndJoin(
-                    new AcceptCommandsCommand(
-                        new AcceptCommandsTarget.NewChildSession(
-                            grandChildSessionId, grandChildThreadId, SETTINGS, childThreadId),
-                        List.of(promptCommand(UUID.randomUUID(), "grandchild work"))),
-                    taskJoin(
-                        grandChildInvocationId,
+                runtime.spawn(
+                    childTask(
+                        grandChildSessionId,
+                        grandChildThreadId,
                         childThreadId,
+                        promptCommand(UUID.randomUUID(), "grandchild work"),
+                        grandChildInvocationId,
                         headEntryId(childThreadId),
                         "grandchild work",
-                        2),
-                    AcceptancePreflight.IDENTITY));
+                        2)));
     assertEquals("join depth quota exceeded", rejected.getMessage());
 
     // 越限者整体回滚：孙 Session/Thread/命令/join 都不存在，既有的父子事实完整保留。
@@ -663,13 +664,15 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
     long childSequence = threadState(childThreadId).nextCommandSequence();
     NewThreadCommand resumeSource = promptCommand(UUID.randomUUID(), "more child work");
     AcceptedCommands resumed =
-        runtime.acceptCommandsAndJoin(
-            new AcceptCommandsCommand(
-                new AcceptCommandsTarget.Thread(
-                    childThreadId, headEntryId(childThreadId), childSequence),
-                List.of(resumeSource)),
-            taskJoin(resumeInvocationId, parentThreadId, parentHead, "more child work"),
-            AcceptancePreflight.IDENTITY);
+        runtime.spawn(
+            resumeTask(
+                childThreadId,
+                parentThreadId,
+                new SpawnRequest.Continuation(headEntryId(childThreadId), childSequence),
+                resumeSource,
+                resumeInvocationId,
+                parentHead,
+                "more child work"));
     assertFalse(resumed.replayed());
     assertTrue(resumed.joinReplaced(), "busy resume supersedes the previous unfinished join");
     assertEquals(2, commandsOf(childThreadId).size());
@@ -1058,13 +1061,16 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
       int maxDepth) {
     NewThreadCommand source = promptCommand(UUID.randomUUID(), prompt);
     AcceptedCommands accepted =
-        runtime.acceptCommandsAndJoin(
-            new AcceptCommandsCommand(
-                new AcceptCommandsTarget.NewChildSession(
-                    childSessionId, childThreadId, SETTINGS, parentThreadId),
-                List.of(source)),
-            taskJoin(invocationId, parentThreadId, expectedParentHeadEntryId, prompt, maxDepth),
-            AcceptancePreflight.IDENTITY);
+        runtime.spawn(
+            childTask(
+                childSessionId,
+                childThreadId,
+                parentThreadId,
+                source,
+                invocationId,
+                expectedParentHeadEntryId,
+                prompt,
+                maxDepth));
     assertEquals(childThreadId, accepted.thread().id());
     assertFalse(accepted.replayed());
     return accepted;
@@ -1083,29 +1089,68 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
         AcceptancePreflight.IDENTITY);
   }
 
-  private static ThreadJoinRequest taskJoin(
-      UUID invocationId, UUID parentThreadId, UUID expectedParentHeadEntryId, String prompt) {
-    return taskJoin(invocationId, parentThreadId, expectedParentHeadEntryId, prompt, MAX_DEPTH);
-  }
-
-  private static ThreadJoinRequest taskJoin(
-      UUID invocationId,
+  /** 模型发起的新子代理：通知父 Thread、计入额度，票据哈希取自提示词。 */
+  private static SpawnRequest childTask(
+      UUID sessionId,
+      UUID threadId,
       UUID parentThreadId,
+      NewThreadCommand source,
+      UUID invocationId,
       UUID expectedParentHeadEntryId,
       String prompt,
       int maxDepth) {
-    return new ThreadJoinRequest(
-        invocationId,
+    return new SpawnRequest(
+        threadId,
+        sessionId,
+        SETTINGS,
+        List.of(source),
+        AcceptancePreflight.IDENTITY,
         parentThreadId,
         expectedParentHeadEntryId,
+        null,
+        false,
+        ThreadConstraints.NONE,
+        SpawnTrigger.MODEL_TOOL,
+        JoinDelivery.NOTIFY_PARENT,
+        true,
+        taskBudget(maxDepth),
+        invocationId,
         ThreadCommandPayloadJsonCodec.requestHash(
-            new UserMessageCommandPayload(AgentMessage.user(prompt))),
-        AGENT,
-        MAX_TURNS,
-        maxDepth,
-        MAX_CONCURRENT_CHILDREN,
-        MAX_CONCURRENT_THREADS,
-        JoinPurpose.TASK);
+            new UserMessageCommandPayload(AgentMessage.user(prompt))));
+  }
+
+  /** 续接既有子 Thread：追加输入并以新票据取代未完成票据。 */
+  private static SpawnRequest resumeTask(
+      UUID threadId,
+      UUID parentThreadId,
+      SpawnRequest.Continuation continuation,
+      NewThreadCommand source,
+      UUID invocationId,
+      UUID expectedParentHeadEntryId,
+      String prompt) {
+    return new SpawnRequest(
+        threadId,
+        null,
+        SETTINGS,
+        List.of(source),
+        AcceptancePreflight.IDENTITY,
+        parentThreadId,
+        expectedParentHeadEntryId,
+        continuation,
+        false,
+        ThreadConstraints.NONE,
+        SpawnTrigger.MODEL_TOOL,
+        JoinDelivery.NOTIFY_PARENT,
+        true,
+        taskBudget(MAX_DEPTH),
+        invocationId,
+        ThreadCommandPayloadJsonCodec.requestHash(
+            new UserMessageCommandPayload(AgentMessage.user(prompt))));
+  }
+
+  private static SpawnRequest.Budget taskBudget(int maxDepth) {
+    return new SpawnRequest.Budget(
+        MAX_TURNS, maxDepth, MAX_CONCURRENT_CHILDREN, MAX_CONCURRENT_THREADS);
   }
 
   private static NewThreadCommand promptCommand(UUID idempotencyKey, String prompt) {

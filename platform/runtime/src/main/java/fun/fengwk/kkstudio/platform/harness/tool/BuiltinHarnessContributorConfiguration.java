@@ -14,6 +14,7 @@ import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentConfigProvider;
 import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentRunner;
 import fun.fengwk.kkstudio.harness.builtin.subagent.TaskTool;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.platform.agenttask.AgentTaskService;
 import fun.fengwk.kkstudio.platform.harness.task.AgentBranchSettingsMaterializer;
 import fun.fengwk.kkstudio.platform.harness.task.SubagentTaskRunner;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
@@ -56,10 +57,14 @@ public class BuiltinHarnessContributorConfiguration {
   @ConditionalOnMissingBean
   public SubagentRunner subagentRunner(
       ObjectProvider<HarnessRuntime> runtimeProvider,
+      AgentTaskService agentTaskService,
       AgentBranchSettingsMaterializer settingsMaterializer,
       SubagentConfigProvider subagentConfigProvider) {
     return new SubagentTaskRunner(
-        runtimeProvider::getIfAvailable, settingsMaterializer, subagentConfigProvider);
+        runtimeProvider::getIfAvailable,
+        agentTaskService,
+        settingsMaterializer,
+        subagentConfigProvider);
   }
 
   @Bean

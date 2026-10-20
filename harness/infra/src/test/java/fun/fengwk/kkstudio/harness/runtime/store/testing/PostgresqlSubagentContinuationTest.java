@@ -32,10 +32,8 @@ import fun.fengwk.kkstudio.harness.runtime.history.SettingsPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinOutcome;
-import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.processor.ProcessorLeaseConfig;
@@ -44,6 +42,8 @@ import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorConfig;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.SpawnTestSupport.Child;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.SpawnTestSupport.Ticket;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
@@ -120,10 +120,12 @@ class PostgresqlSubagentContinuationTest {
     processNext(parent.thread().id());
     UUID invocation = UUID.randomUUID();
     AcceptedCommands child =
-        runtime.acceptCommandsAndJoin(
-            new AcceptCommandsCommand(
-                new AcceptCommandsTarget.NewChildSession(
-                    UUID.randomUUID(), UUID.randomUUID(), branchSettings(), parent.thread().id()),
+        SpawnTestSupport.acceptAndJoin(
+            runtime,
+            new Child(
+                UUID.randomUUID(),
+                UUID.randomUUID(),
+                parent.thread().id(),
                 List.of(prompt("first task"))),
             joinRequest(invocation, parent.thread().id()),
             AcceptancePreflight.IDENTITY);
@@ -144,9 +146,9 @@ class PostgresqlSubagentContinuationTest {
     ThreadSnapshot running = snapshot(childId);
     UUID secondJoin = UUID.randomUUID();
     AcceptCommandsCommand resume = resume(childId, prompt("second task"));
-    ThreadJoinRequest request = joinRequest(secondJoin, parentId);
+    Ticket request = joinRequest(secondJoin, parentId);
     AcceptedCommands accepted =
-        runtime.acceptCommandsAndJoin(resume, request, AcceptancePreflight.IDENTITY);
+        SpawnTestSupport.acceptAndJoin(runtime, resume, request, AcceptancePreflight.IDENTITY);
     assertEquals(2L, accepted.acceptedCommands().getFirst().sequence());
     assertEquals(5L, accepted.acceptedCommands().getLast().sequence());
     ThreadSnapshot queued = snapshot(childId);
@@ -247,7 +249,8 @@ class PostgresqlSubagentContinuationTest {
     assertEquals(ThreadProcessResult.LOST_OWNERSHIP, processor.process(busyClaim));
     assertEquals(ThreadProcessResult.LOST_OWNERSHIP, processor.process(finalClaim));
     assertTrue(
-        runtime.acceptCommandsAndJoin(resume, request, AcceptancePreflight.IDENTITY).replayed());
+        SpawnTestSupport.acceptAndJoin(runtime, resume, request, AcceptancePreflight.IDENTITY)
+            .replayed());
     assertEquals(deliveries, notifications(parentId));
     assertEquals(first, join(first.invocationId()));
     assertEquals(second, join(second.invocationId()));
@@ -285,7 +288,8 @@ class PostgresqlSubagentContinuationTest {
         assertThrows(
             IllegalArgumentException.class,
             () ->
-                runtime.acceptCommandsAndJoin(
+                SpawnTestSupport.acceptAndJoin(
+                    runtime,
                     resume(childId, prompt("take over old child")),
                     joinRequest(stolenJoin, forkId),
                     AcceptancePreflight.IDENTITY));
@@ -358,8 +362,8 @@ class PostgresqlSubagentContinuationTest {
             prompt));
   }
 
-  private ThreadJoinRequest joinRequest(UUID invocation, UUID parentId) {
-    return new ThreadJoinRequest(
+  private Ticket joinRequest(UUID invocation, UUID parentId) {
+    return Ticket.task(
         invocation,
         parentId,
         snapshot(parentId).thread().headEntryId(),
@@ -368,8 +372,7 @@ class PostgresqlSubagentContinuationTest {
         10,
         3,
         3,
-        3,
-        JoinPurpose.TASK);
+        3);
   }
 
   private ThreadSnapshot snapshot(UUID threadId) {
