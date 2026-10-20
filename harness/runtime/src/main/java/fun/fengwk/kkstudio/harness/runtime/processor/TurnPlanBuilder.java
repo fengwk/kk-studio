@@ -33,8 +33,8 @@ import java.util.UUID;
 import java.util.function.Supplier;
 
 /**
- * 纯 speculative turn planner：基于 plan 事务捕获的 source EntryPath 与 queued Command 快照构造完整合法 candidate
- * EntryPath，不接触 Store、不写任何 durable 状态。Thread YOLO 不进入 plan。
+ * 纯 turn planner：基于同一事务内捕获的 source EntryPath 与 queued Command 快照构造完整合法 candidate EntryPath，不接触
+ * Store、不写任何 durable 状态。Thread YOLO 不进入 plan。
  *
  * <p>INPUT 收获快照内<b>全部</b> queued Command（不再在首条 user-like 后截断），消费到冻结 cutoff 为止；SET_* 与
  * SET_CONTRIBUTOR_STATE 按 sequence 归约成该轮配置（SET_CONTRIBUTOR_STATE 同时追加 CUSTOM state Entry），
@@ -203,7 +203,6 @@ final class TurnPlanBuilder {
     return new TurnPlan(
         threadId,
         sessionId,
-        sourcePath.head().id(),
         cutoffSequence,
         plannedCommands,
         consumedCommands,

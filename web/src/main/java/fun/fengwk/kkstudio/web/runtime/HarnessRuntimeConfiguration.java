@@ -267,12 +267,8 @@ public class HarnessRuntimeConfiguration {
       HarnessStore store,
       TurnResolver turnResolver,
       ThreadProcessorConfig config,
-      Clock clock,
-      @Qualifier("harnessProcessorScheduler") ScheduledExecutorService scheduler,
-      @Qualifier("harnessHeartbeatWorkerExecutor") Executor heartbeatWorker,
       ToolResultHistoryMaterializer materializer) {
-    return new ThreadProcessor(
-        store, turnResolver, config, scheduler, heartbeatWorker, materializer);
+    return new ThreadProcessor(store, turnResolver, config, materializer);
   }
 
   @Bean(destroyMethod = "close")

@@ -12,13 +12,14 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * 一次 speculative turn plan 的不可变快照：计划事务内锁 Thread、读取 queued Command 快照与 cutoff、校验 claim 后构造， 不写任何
- * durable 状态。
+ * 一次 turn 的不可变内存计划：在同一 store transaction 内锁 Thread、读取 queued Command 快照与 cutoff、校验 claim
+ * 后构造，随即在同一事务内交给 {@link fun.fengwk.kkstudio.harness.runtime.port.TurnResolver} 并提交。它不写任何 durable
+ * 状态，也不存在事务外解析或第二次 CAS。
  *
  * <p>{@code candidatePath} 是 source path + candidate Entries 的完整合法 root-to-head 链（candidate Entry
- * 已分配 稳定 ID 但尚未持久化），交给 {@link fun.fengwk.kkstudio.harness.runtime.port.TurnResolver} 使用；提交事务必须重新校验
- * source head / cutoff 内 Command 精确快照 / claim ownership 后才能原子提交；Thread YOLO 始终以第二事务锁到的当前值 为准，不进入
- * plan。{@code preparation} 非空当且仅当 {@code reason == COMPACTION}。
+ * 已分配稳定 ID 但尚未持久化），交给 {@link fun.fengwk.kkstudio.harness.runtime.port.TurnResolver} 使用；解析完成后
+ * 直接在当前事务内原子提交。Thread YOLO 取自同一事务已锁定的当前值，不进入 plan。{@code preparation} 非空当且仅当 {@code reason ==
+ * COMPACTION}。
  *
  * <p>{@code cutoffSequence} 是本次 INPUT / CONTINUATION 冻结的已接受序列上界（{@code nextCommandSequence - 1}）；
  * {@code appliedEntryIds} 给出每条已消费 Command 的物化坐标：用户输入/配置引用 TURN_START，系统通知引用自身 NOTIFICATION Entry。
@@ -27,7 +28,6 @@ import java.util.UUID;
 record TurnPlan(
     UUID threadId,
     UUID sessionId,
-    UUID sourceHeadEntryId,
     long cutoffSequence,
     List<ThreadCommand> plannedCommands,
     List<ThreadCommand> consumedCommands,
@@ -42,7 +42,6 @@ record TurnPlan(
   TurnPlan {
     Objects.requireNonNull(threadId, "threadId");
     Objects.requireNonNull(sessionId, "sessionId");
-    Objects.requireNonNull(sourceHeadEntryId, "sourceHeadEntryId");
     if (cutoffSequence < 0) {
       throw new IllegalArgumentException("cutoffSequence must not be negative");
     }

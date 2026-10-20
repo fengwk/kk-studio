@@ -56,7 +56,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.CommandHarvestReducer;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
-import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
@@ -64,15 +63,10 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.Executor;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Target Thread processor：消费 dispatcher 已 claim 的 THREAD Work，每个 claim 恰好执行一个持久化 action 的
@@ -88,16 +82,17 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * 存在时启动 INPUT Turn（IDLE_OR_HISTORICAL）；(f) 否则完成 claim。旧 / 历史 open Turn 只在启动新 INPUT Turn 时被
  * normalization，绝不恢复 / 复用。不变量被破坏的形状由分类器以 ISE 拒绝，绝不降级为业务上下文。
  *
- * <p>Turn 启动采用 speculative plan：短事务按 Session KEY SHARE -&gt; Thread 顺序加锁、读取 queued Command 快照与
- * cutoff、校验 claim（并对近过期 lease 做 {@link ProcessorLeaseSupport#ensureLeaseMargin} 保证首次 Resolver
- * heartbeat 前不会过期）、分配 candidate Entry ID 并构造完整合法 candidate EntryPath（不写任何持久化状态）；事务外调用 {@link
- * TurnResolver}（期间由本地 {@link WorkHeartbeat} 维持 lease）；第二短事务以 source head / cutoff 内 Command 精确快照 /
- * claim ownership 做 CAS，一次性原子提交 TURN_START + Message + Command markers + Thread 更新 +
- * ModelInvocation/MODEL Work（resolved）或 AssistantError + FAILED TURN_END（rejected）。Resolved
- * 请求在提交前先经 {@link ResolvedRequestValidator} 按 candidate branch 事实（route / model / variant / tools /
- * compaction）做机械一致性校验，不一致即抛错且零持久化状态写入（绝不转 typed rejection）。任何 CAS / claim 损失一律抛内部 {@link
- * ClaimLostSignal} 使事务完整回滚（零部分写入），由 {@link #process} 映射为 LOST_OWNERSHIP；Resolver 异常 / null /
- * heartbeat 调度失败按单一正失败延迟 reschedule，绝不静默丢弃 Work。duplicate / stale THREAD claim 是 no-op。
+ * <p>Turn 启动在单个 store transaction 内完成：按 Session KEY SHARE -&gt; Thread 顺序加锁、读取 queued Command 快照与
+ * cutoff、校验 claim、分配 candidate Entry ID 并构造完整合法 candidate EntryPath（不写任何持久化状态），随后在同一事务内同步调用 {@link
+ * TurnResolver}。Resolved 请求先经 {@link ResolvedRequestValidator} 按 candidate branch 事实（route / model
+ * / variant / tools / compaction）做机械一致性校验，再一次性原子提交 TURN_START + Message + Command markers + Thread
+ * 更新 + ModelInvocation/MODEL Work（resolved）或 AssistantError + FAILED TURN_END（rejected）。因此不存在事务外
+ * resolve、二次 head/Command CAS 或解析期 heartbeat：candidate 只在解析完成后写入同一事务，要么全部提交、要么全部回滚。
+ *
+ * <p>只有显式 typed {@link TurnResolveTransientException}（DB / 网络瞬断）会使当前事务完整回滚，随后由 {@link #process}
+ * 在事务边界外按单一正失败延迟 reschedule；确定性 resolver 异常 / null / validator 契约失败都落成 durable AssistantError +
+ * FAILED TURN_END。任何 claim 损失一律抛内部 {@link ClaimLostSignal} 使事务完整回滚（零部分写入）， 由 {@link #process} 映射为
+ * LOST_OWNERSHIP。duplicate / stale THREAD claim 是 no-op。
  *
  * <p>锁序与最终所有权围栏（final fence）：Model terminal apply / Tool sibling batch / resolve commit
  * 都在同一事务内先完成全部低序写入（Session KEY SHARE -&gt; Thread -&gt; Commands -&gt; ModelInvocation -&gt;
@@ -136,8 +131,6 @@ public final class ThreadProcessor {
   private final HarnessStore store;
   private final TurnResolver resolver;
   private final ThreadProcessorConfig config;
-  private final ScheduledExecutorService scheduler;
-  private final Executor heartbeatWorker;
   private final ModelOutcomeAppender modelOutcomeAppender;
   private final TurnPlanBuilder planBuilder = new TurnPlanBuilder();
   private final CommandHarvestReducer settingsReducer = new CommandHarvestReducer();
@@ -147,13 +140,8 @@ public final class ThreadProcessor {
       new AutomaticCompactionPlanner();
   private final ThreadLifecycleCoordinator coordinator;
 
-  public ThreadProcessor(
-      HarnessStore store,
-      TurnResolver resolver,
-      ThreadProcessorConfig config,
-      ScheduledExecutorService scheduler,
-      Executor heartbeatWorker) {
-    this(store, resolver, config, scheduler, heartbeatWorker, null);
+  public ThreadProcessor(HarnessStore store, TurnResolver resolver, ThreadProcessorConfig config) {
+    this(store, resolver, config, null);
   }
 
   /** 注入 Tool outcome 的 durable history 物化端口（可为 null：ToolResult 含 Resource 引用时 fail-closed）。 */
@@ -161,14 +149,10 @@ public final class ThreadProcessor {
       HarnessStore store,
       TurnResolver resolver,
       ThreadProcessorConfig config,
-      ScheduledExecutorService scheduler,
-      Executor heartbeatWorker,
       ToolResultHistoryMaterializer toolResultHistoryMaterializer) {
     this.store = Objects.requireNonNull(store, "store");
     this.resolver = Objects.requireNonNull(resolver, "resolver");
     this.config = Objects.requireNonNull(config, "config");
-    this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
-    this.heartbeatWorker = Objects.requireNonNull(heartbeatWorker, "heartbeatWorker");
     this.modelOutcomeAppender = new ModelOutcomeAppender(toolResultHistoryMaterializer);
     this.coordinator = new ThreadLifecycleCoordinator();
   }
@@ -177,10 +161,10 @@ public final class ThreadProcessor {
    * 处理一次 dispatcher 已 claim 的 THREAD Work（single-action 持久化 reducer）。
    *
    * <p>先用 Work-only 短事务验证 claim 当前真实 owned，再进 per-thread admission guard（同一 claim 重复 / 并发投递一律 LOST
-   * no-op；不同新 token 抢占 guard）。随后恰执行一次持久化 action：单短事务分类并执行；若该 action 是 speculative plan 则事务外 resolve
-   * + 第二事务 CAS 提交。action 在事务内完成当前 claim；下一 action 已确定时先 {@code requestWork(THREAD)} 再
-   * complete。事务内最终所有权围栏（final fence） / CAS 丢失抛出的 {@link ClaimLostSignal} 在事务完整回滚后在此捕获并映射为
-   * LOST_OWNERSHIP。
+   * no-op；不同新 token 抢占 guard）。随后恰执行一次持久化 action：分类、构造 candidate turn plan、同事务 resolve 与提交都在同一个
+   * store transaction 内完成。action 在事务内完成当前 claim；下一 action 已确定时先 {@code requestWork(THREAD)} 再
+   * complete。事务内最终所有权围栏（final fence）失败抛出的 {@link ClaimLostSignal} 在事务完整回滚后在此捕获并映射为
+   * LOST_OWNERSHIP；显式 typed {@link TurnResolveTransientException} 同样在事务回滚后按既有语义 reschedule。
    */
   public ThreadProcessResult process(ClaimedWork claim) {
     Objects.requireNonNull(claim, "claim");
@@ -197,10 +181,19 @@ public final class ThreadProcessor {
       return ThreadProcessResult.LOST_OWNERSHIP;
     }
     try {
-      TurnPlan plan = step(claim);
-      return plan == null ? ThreadProcessResult.COMPLETED : resolveAndCommit(claim, plan);
+      step(claim);
+      return ThreadProcessResult.COMPLETED;
     } catch (ClaimLostSignal lost) {
       return ThreadProcessResult.LOST_OWNERSHIP;
+    } catch (TurnResolveTransientException transientFailure) {
+      // 事务已因 typed transient 回滚，candidate 尚未落库；只有此显式类型允许在事务边界外受控重排。
+      log.warn(
+          "turn resolver infrastructure unavailable for thread {}; rescheduling its work",
+          threadId,
+          transientFailure);
+      return rescheduleIfOwned(claim, config.resolveFailureDelay())
+          ? ThreadProcessResult.RESCHEDULED
+          : ThreadProcessResult.LOST_OWNERSHIP;
     } finally {
       admissionGuard.release(threadId, token);
     }
@@ -208,11 +201,11 @@ public final class ThreadProcessor {
 
   /**
    * 单 action 短事务：锁 Session KEY SHARE -&gt; Thread -&gt;（Commands -&gt; Model -&gt; Tool）-&gt;
-   * Work，按固定优先级分类并恰执行一个 durable action。返回 null 表示 action 已在该事务完成 claim；非 null 表示构造了 speculative
-   * plan，由调用方在事务外 resolve 后第二事务提交（第二事务同样完成 claim）。
+   * Work，按固定优先级分类并恰执行一个 durable action。Turn 分支在同一事务内构造 plan、同步 resolve、校验并提交； 返回的 plan 仅供调用链保持原有
+   * switch 形状，事务结果不依赖它。
    */
-  private TurnPlan step(ClaimedWork claim) {
-    return store.transaction(tx -> stepTx(tx, claim));
+  private void step(ClaimedWork claim) {
+    store.transaction(tx -> stepTx(tx, claim));
   }
 
   private TurnPlan stepTx(HarnessStore.Transaction tx, ClaimedWork claim) {
@@ -696,7 +689,7 @@ public final class ThreadProcessor {
     tx.completeWork(claim);
   }
 
-  /** 在步骤事务内构造 speculative plan；claim fence 与 lease margin 在构造前完成。 */
+  /** 在步骤事务内构造 candidate plan 并立即在同一事务内 resolve、校验、提交；claim fence 在构造前完成。 */
   private TurnPlan planStep(
       HarnessStore.Transaction tx,
       ClaimedWork claim,
@@ -727,131 +720,81 @@ public final class ThreadProcessor {
               + thread.id());
     }
     List<ThreadCommand> queued = tx.loadQueuedCommands(thread.id());
-    Work claimed = tx.lockClaimedWork(claim).orElse(null);
-    if (claimed == null) {
-      throw new ClaimLostSignal();
-    }
-    // 近过期 claim 在 Resolver 首次 heartbeat 前可能过期：plan 事务内先确保完整 lease margin。
-    ProcessorLeaseSupport.ensureLeaseMargin(tx, claim, config.leaseConfig(), now);
+    // claim 已在 process 入口用 Work-only 事务验证；本事务不再提前锁 Work（否则会在低序 Entry / ModelInvocation 之前
+    // 取得高序 WORK 锁并破坏锁序）。最终 commit fence 在全部低序 mutation 后校验所有权，失败即整体回滚。
     // 最小事实：INPUT 可以没有任何 queued 输入，只要本 Thread 有尚未接纳的已物化通知；这些通知已在历史里，不重复写 entry。
     boolean pendingNotificationInput =
         reason == TurnStartReason.INPUT
             && ThreadInputDemand.hasUnconsumedNotification(
                 tx.loadCommandsByThread(thread.id()), thread.inputThroughSequence());
-    return planBuilder.build(
-        thread.id(),
-        path,
-        reason,
-        queued,
-        thread.nextCommandSequence() - 1,
-        tx::nextId,
-        now,
-        preparation,
-        pendingNotificationInput);
+    TurnPlan plan =
+        planBuilder.build(
+            thread.id(),
+            path,
+            reason,
+            queued,
+            thread.nextCommandSequence() - 1,
+            tx::nextId,
+            now,
+            preparation,
+            pendingNotificationInput);
+    resolveAndCommitTx(tx, claim, thread, plan);
+    return plan;
   }
 
   /**
-   * 事务外解析 + 第二事务 CAS 提交：只有显式 typed {@link TurnResolveTransientException}（DB / 网络瞬断）按失败延迟
-   * reschedule（零 durable mutation）；确定性 resolver 异常 / null 结果 / validator 契约失败都落成 durable
-   * AssistantError + FAILED TURN_END 并结算 Join，绝不无限重排，也不把 raw cause 写入 durable。提交 CAS（source head /
-   * cutoff 内 Command 快照 / claim）失败抛 {@link ClaimLostSignal} 由 {@link #process} 映射为 LOST。YOLO 变化不使
-   * plan 失效：commit 以第二事务锁到的 Thread 当前 YOLO 为准。成功后本 claim 已消费，返回 COMPLETED。
+   * 在调用方已锁定 Session / Thread / Work 的同一事务内同步解析并原子提交：candidate Entry 只存在于内存，Resolver 直接消费其预分配
+   * ID，不要求也未写入任何持久化 plan。只有显式 typed {@link TurnResolveTransientException} 向上抛出， 由 {@link #process}
+   * 在事务回滚后受控重排（candidate 零写入）；确定性 resolver 异常 / null 结果 / validator 契约失败都转为 durable AssistantError
+   * + FAILED TURN_END 并结算 Join，绝不无限重排，也不把 raw cause 写入 durable。
    */
-  private ThreadProcessResult resolveAndCommit(ClaimedWork claim, TurnPlan plan) {
-    AtomicBoolean heartbeatLost = new AtomicBoolean();
-    WorkHeartbeat heartbeat =
-        new WorkHeartbeat(
-            store, scheduler, heartbeatWorker, config.leaseConfig(), () -> heartbeatLost.set(true));
-    if (!heartbeat.start(claim)) {
-      log.warn("cannot schedule work lease heartbeat for {}; rescheduling", claim.target());
-      return rescheduleIfOwned(claim, config.resolveFailureDelay())
-          ? ThreadProcessResult.RESCHEDULED
-          : ThreadProcessResult.LOST_OWNERSHIP;
-    }
+  private void resolveAndCommitTx(
+      HarnessStore.Transaction tx, ClaimedWork claim, ThreadState thread, TurnPlan plan) {
     TurnResolver.Result result;
     try {
       result = resolver.resolve(plan.threadId(), plan.candidatePath(), plan.preparation());
     } catch (TurnResolveTransientException transientFailure) {
-      log.warn(
-          "turn resolver infrastructure unavailable for thread {}; rescheduling its work",
-          plan.threadId(),
-          transientFailure);
-      return rescheduleIfOwned(claim, config.resolveFailureDelay())
-          ? ThreadProcessResult.RESCHEDULED
-          : ThreadProcessResult.LOST_OWNERSHIP;
+      // 事务边界必须整体回滚；在 rollback-only 事务里继续写错误终态既不安全也不真实。
+      throw transientFailure;
     } catch (RuntimeException deterministicFailure) {
       // 确定性 resolver 失败（含编程 / 契约错误）：落 durable FAILED 并结算 Join，绝不无限 reschedule。
       log.warn(
           "turn resolver failed deterministically for thread {}; failing the turn",
           plan.threadId(),
           deterministicFailure);
-      return commitDeterministicFailure(claim, plan);
-    } finally {
-      heartbeat.stop();
-    }
-    if (heartbeatLost.get()) {
-      return rescheduleIfOwned(claim, config.resolveFailureDelay())
-          ? ThreadProcessResult.RESCHEDULED
-          : ThreadProcessResult.LOST_OWNERSHIP;
+      result = new TurnResolver.Rejected(DETERMINISTIC_FAILURE);
     }
     if (result == null) {
       // null 违反 Resolver 契约：确定性失败，落 durable FAILED 而非无限重排。
       log.warn("turn resolver returned null for thread {}; failing the turn", plan.threadId());
-      return commitDeterministicFailure(claim, plan);
-    }
-    if (result instanceof TurnResolver.Resolved resolved) {
+      result = new TurnResolver.Rejected(DETERMINISTIC_FAILURE);
+    } else if (result instanceof TurnResolver.Resolved resolved) {
       try {
-        // Harness 边界校验：不一致即 Resolver 契约错误，此刻零 durable mutation，转为 typed FAILED 而非抛异常。
+        // Harness 边界校验：不一致即 Resolver 契约错误，此刻尚无 durable mutation，转为 FAILED 而非抛异常。
         ResolvedRequestValidator.validate(plan.candidatePath(), resolved);
       } catch (RuntimeException contractFailure) {
         log.warn(
             "resolved request violated the harness contract for thread {}; failing the turn",
             plan.threadId(),
             contractFailure);
-        return commitDeterministicFailure(claim, plan);
+        result = new TurnResolver.Rejected(DETERMINISTIC_FAILURE);
       }
     }
-    commit(claim, plan, result);
-    return ThreadProcessResult.COMPLETED;
+    commitTx(tx, claim, thread, plan, result);
   }
 
   /**
-   * 把确定性 resolver 失败落成 durable AssistantError + FAILED TURN_END 并结算 Join：复用 {@link
-   * TurnResolver.Rejected} 的 提交流程，durable 文本稳定且绝不泄露 raw cause。若该轮有 deferred user input，commit 会重新请求
-   * Thread 处理它。
+   * 在已锁定 Session / Thread / Claim 的当前事务中按低序 mutation 原子提交 TURN_START + Message + Command markers +
+   * Thread 更新 + ModelInvocation/MODEL Work（resolved）或 AssistantError + FAILED TURN_END（rejected）。最终
+   * Claim 围栏失败会回滚全部变更。
    */
-  private ThreadProcessResult commitDeterministicFailure(ClaimedWork claim, TurnPlan plan) {
-    commit(claim, plan, new TurnResolver.Rejected(DETERMINISTIC_FAILURE));
-    return ThreadProcessResult.COMPLETED;
-  }
-
-  /**
-   * 在第二事务中基于重新锁定的 Thread 重验 head、命令快照与 Claim，按 Session KEY SHARE -&gt; Thread -&gt; Commands -&gt;
-   * Model -&gt; Work 锁序原子提交；最终 Claim 围栏失败会回滚全部变更。
-   */
-  private void commit(ClaimedWork claim, TurnPlan plan, TurnResolver.Result result) {
-    store.transaction(
-        tx -> {
-          commitTx(tx, claim, plan, result);
-          return null;
-        });
-  }
-
   private void commitTx(
-      HarnessStore.Transaction tx, ClaimedWork claim, TurnPlan plan, TurnResolver.Result result) {
+      HarnessStore.Transaction tx,
+      ClaimedWork claim,
+      ThreadState thread,
+      TurnPlan plan,
+      TurnResolver.Result result) {
     Instant now = tx.now();
-    ThreadState thread = lockThreadWithSession(tx, plan.threadId());
-    if (thread == null) {
-      throw new ClaimLostSignal();
-    }
-    if (!thread.headEntryId().equals(plan.sourceHeadEntryId())) {
-      throw new ClaimLostSignal();
-    }
-    List<ThreadCommand> queued = tx.loadQueuedCommands(thread.id());
-    if (!snapshotMatches(plan, queued)) {
-      throw new ClaimLostSignal();
-    }
-    for (Entry entry : plan.candidateEntries()) {}
     Integer contextWindow = null;
     Integer maxOutputTokens = null;
     CompactionStart compactionStart = null;
@@ -980,30 +923,6 @@ public final class ThreadProcessor {
       return plan.cutoffSequence();
     }
     return thread.inputThroughSequence();
-  }
-
-  /** cutoff 内 queued Command 与 planned 快照逐字段相等（id/thread/sequence/payload/client ID/state）。 */
-  static boolean snapshotMatches(TurnPlan plan, List<ThreadCommand> queued) {
-    Map<Long, ThreadCommand> plannedBySequence = new HashMap<>();
-    for (ThreadCommand command : plan.plannedCommands()) {
-      plannedBySequence.put(command.sequence(), command);
-    }
-    int withinCutoff = 0;
-    for (ThreadCommand command : queued) {
-      if (command.sequence() > plan.cutoffSequence()) {
-        continue;
-      }
-      withinCutoff++;
-      ThreadCommand planned = plannedBySequence.get(command.sequence());
-      if (planned == null
-          || !planned.threadId().equals(command.threadId())
-          || !planned.payload().equals(command.payload())
-          || !planned.idempotencyKey().equals(command.idempotencyKey())
-          || planned.state() != command.state()) {
-        return false;
-      }
-    }
-    return withinCutoff == plan.plannedCommands().size();
   }
 
   static Entry withCreatedAt(Entry entry, Instant createdAt) {

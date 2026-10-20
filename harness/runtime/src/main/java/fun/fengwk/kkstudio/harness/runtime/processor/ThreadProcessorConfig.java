@@ -9,9 +9,9 @@ import java.util.Objects;
 /**
  * ThreadProcessor 的部署级配置。
  *
- * <p>{@code leaseConfig} 控制 claim lease 与 Resolver 外部解析期间的 heartbeat；{@code resolveFailureDelay} 是
- * Resolver 异常 / null 与 heartbeat 调度失败共用的单一正失败延迟；{@code compactionProvider} 在每次压缩决策点现读 keep 与可选
- * fallback model（aiRuntime 配置 live 生效，无需重启）。
+ * <p>{@code leaseConfig} 保留为 claim lease 参数；Turn resolve 已在调用方事务内完成，不再有解析期 heartbeat。 {@code
+ * resolveFailureDelay} 是 typed transient resolve 失败的事务外重排延迟；{@code compactionProvider} 在每次压缩决策点现读
+ * keep 与可选 fallback model（aiRuntime 配置 live 生效，无需重启）。
  */
 public record ThreadProcessorConfig(
     ProcessorLeaseConfig leaseConfig,

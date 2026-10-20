@@ -295,9 +295,7 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
         new ThreadProcessorConfig(
             new ProcessorLeaseConfig(Duration.ofSeconds(30), Duration.ofSeconds(5)),
             Duration.ofSeconds(5),
-            () -> new CompactionConfig(20_000)),
-        scheduler,
-        Runnable::run);
+            () -> new CompactionConfig(20_000)));
   }
 
   private static void insertSucceededModel(
