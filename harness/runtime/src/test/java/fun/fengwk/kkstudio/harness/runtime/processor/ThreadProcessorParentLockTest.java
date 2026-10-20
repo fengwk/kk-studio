@@ -107,15 +107,20 @@ class ThreadProcessorParentLockTest extends ThreadProcessorTestBase {
     assertFalse(
         ops.stream().anyMatch(op -> op.startsWith("findAncestorChain")),
         "processor must not walk the ancestor chain: " + ops);
-    int parentSessionLock = ops.indexOf("lockSessionForKeyShare:" + parentSession);
-    int childSessionLock = ops.indexOf("lockSessionForKeyShare:" + childSession);
-    int childThreadLock = ops.indexOf("lockThread:" + childId);
-    int parentThreadLock = ops.indexOf("lockThread:" + parentId);
-    assertTrue(parentSessionLock >= 0 && childSessionLock > parentSessionLock, ops.toString());
-    assertTrue(childThreadLock >= 0 && parentThreadLock > childThreadLock, ops.toString());
-    assertFalse(ops.contains("lockSessionForKeyShare:" + rootSession), ops.toString());
-    assertFalse(ops.contains("lockThread:" + rootId), ops.toString());
-    assertFalse(ops.contains("lockThread:" + siblingId), ops.toString());
+    assertEquals(
+        List.of(
+            "lockTree:" + rootId,
+            "lockSessionForKeyShare:" + parentSession,
+            "lockSessionForKeyShare:" + childSession,
+            "lockThread:" + childId,
+            "lockThread:" + parentId),
+        ops.stream()
+            .filter(
+                op ->
+                    op.startsWith("lockTree:")
+                        || op.startsWith("lockSessionForKeyShare:")
+                        || op.startsWith("lockThread:"))
+            .toList());
 
     ThreadJoin join = fixture.store.transaction(tx -> tx.findJoin(joinId).orElseThrow());
     assertTrue(join.matched());

@@ -66,20 +66,17 @@ public final class ThreadLifecycleCoordinator {
       // 目标线程在取得树锁前已被并发删除：合法缺失，不抛异常也不重试。
       return null;
     }
-    List<UUID> threadIds = new ArrayList<>(2);
-    threadIds.add(thread.id());
-    Map<UUID, ThreadState> snapshots = new HashMap<>();
-    snapshots.put(thread.id(), thread);
+    List<ThreadState> snapshots = new ArrayList<>(2);
+    snapshots.add(thread);
     if (thread.parentThreadId() != null) {
       ThreadState parent = tx.findThread(thread.parentThreadId()).orElse(null);
       if (parent == null) {
         return null;
       }
-      threadIds.add(parent.id());
-      snapshots.put(parent.id(), parent);
+      snapshots.add(parent);
     }
     List<UUID> sessionIds =
-        snapshots.values().stream()
+        snapshots.stream()
             .map(ThreadState::sessionId)
             .distinct()
             .sorted(UuidOrder.COMPARATOR)
@@ -89,16 +86,21 @@ public final class ThreadLifecycleCoordinator {
         return null;
       }
     }
-    List<UUID> sortedThreadIds = threadIds.stream().sorted(UuidOrder.COMPARATOR).toList();
-    Map<UUID, ThreadState> lockedThreads = new HashMap<>();
-    for (UUID id : sortedThreadIds) {
-      ThreadState locked = tx.lockThread(id).orElse(null);
+    List<ThreadState> sortedThreads =
+        snapshots.stream()
+            .sorted((left, right) -> UuidOrder.COMPARATOR.compare(left.id(), right.id()))
+            .toList();
+    ThreadState lockedTarget = null;
+    for (ThreadState snapshot : sortedThreads) {
+      ThreadState locked = tx.lockThread(snapshot.id()).orElse(null);
       if (locked == null) {
         return null;
       }
-      lockedThreads.put(id, locked);
+      if (locked.id().equals(threadId)) {
+        lockedTarget = locked;
+      }
     }
-    return lockedThreads.get(threadId);
+    return lockedTarget;
   }
 
   /**

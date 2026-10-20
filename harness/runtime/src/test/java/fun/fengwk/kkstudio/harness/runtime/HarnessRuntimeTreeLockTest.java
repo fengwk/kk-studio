@@ -57,6 +57,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 
 /**
@@ -184,6 +185,27 @@ class HarnessRuntimeTreeLockTest {
             tx -> ThreadLifecycleCoordinator.lockThreadWithParent(tx, childId));
 
     assertNull(locked);
+  }
+
+  @Test
+  void lockThreadWithParentReturnsNullAfterTreeLockWhenTargetDisappeared() {
+    // 测试意图：第一次 findThread 仍有值，取得树锁后重读为空时立即返回 null，绝不取任何 Session/Thread 行锁。
+    Baseline baseline = seedBaseline(store);
+    List<String> operations = new ArrayList<>();
+    HarnessStore firstVisibleThenMissing =
+        firstFindVisibleThenMissingStore(baseline.threadId(), operations);
+
+    ThreadState locked =
+        firstVisibleThenMissing.transaction(
+            tx -> ThreadLifecycleCoordinator.lockThreadWithParent(tx, baseline.threadId()));
+
+    assertNull(locked);
+    assertEquals(
+        List.of(
+            "findThread:" + baseline.threadId(),
+            "lockTree:" + baseline.threadId(),
+            "findThread:" + baseline.threadId()),
+        operations);
   }
 
   @Test
@@ -467,6 +489,48 @@ class HarnessRuntimeTreeLockTest {
                     });
               }
               return method.invoke(delegate, args);
+            });
+  }
+
+  /** 目标 Thread 第一次读取可见，取得树锁后的重读返回空；记录所有 lock* 与 findThread 调用。 */
+  private HarnessStore firstFindVisibleThenMissingStore(UUID threadId, List<String> operations) {
+    AtomicBoolean firstRead = new AtomicBoolean(true);
+    return (HarnessStore)
+        Proxy.newProxyInstance(
+            HarnessStore.class.getClassLoader(),
+            new Class<?>[] {HarnessStore.class},
+            (proxy, method, args) -> {
+              if (!method.getName().equals("transaction")) {
+                return method.invoke(store, args);
+              }
+              @SuppressWarnings("unchecked")
+              Function<HarnessStore.Transaction, Object> callback =
+                  (Function<HarnessStore.Transaction, Object>) args[0];
+              return store.transaction(
+                  tx -> {
+                    HarnessStore.Transaction wrapped =
+                        (HarnessStore.Transaction)
+                            Proxy.newProxyInstance(
+                                HarnessStore.Transaction.class.getClassLoader(),
+                                new Class<?>[] {HarnessStore.Transaction.class},
+                                (transactionProxy, transactionMethod, transactionArgs) -> {
+                                  String name = transactionMethod.getName();
+                                  if (name.startsWith("lock")
+                                      || (name.equals("findThread")
+                                          && threadId.equals(transactionArgs[0]))) {
+                                    operations.add(name + ":" + transactionArgs[0]);
+                                  }
+                                  if (name.equals("findThread")
+                                      && threadId.equals(transactionArgs[0])) {
+                                    if (firstRead.compareAndSet(true, false)) {
+                                      return transactionMethod.invoke(tx, transactionArgs);
+                                    }
+                                    return Optional.empty();
+                                  }
+                                  return transactionMethod.invoke(tx, transactionArgs);
+                                });
+                    return callback.apply(wrapped);
+                  });
             });
   }
 

@@ -33,7 +33,7 @@ advisory 围栏先于业务行锁，行锁守卫维护六级 rank。
 
 tree advisory 锁只用于结构或跨 Thread 写操作（spawn、Stop、delete、fork、Join 结算、压缩 spawn）以及整树查询；单 Thread 控制（`renameThread`、`setThreadYolo`、`decideToolApproval`、tool input、`getThreadSnapshot`）和 Model/Tool 状态提交只锁 own Thread 及其 Model/Tool/Work，不取 tree 锁，也不锁祖先。Join 交付只写子 Join 与直接父命令/Thread，不递归到祖父：ThreadProcessor 持 tree 锁后只锁自身与不可变直接父的 Session/Thread；Stop 只锁目标子树与目标直接父。此类单实体写入由 Thread 行锁串行化，与持 tree 锁的 delete/Stop 在同一行上线性化。
 
-task 接受先取全局准入锁，跨所有执行树统计尚未冻结终态且有父的有效子 Join，保证全局额度判定与接受原子；root ticket 不计入子代理额度，同一父/子对至多一个有效未完成 Join（新续接 supersede 旧等待，旧 Join 不占额度、不再产生独立交付）。普通推进不取该准入锁。涉及执行树结构的写操作用递归查询确定根 Thread，再取该树的 advisory lock；树的读写都在树锁内重读确认，跨树操作按根 UUID 升序依次取锁（细节见 [Harness Infra](harness-infra.md)）。
+task 接受先取全局准入锁，跨所有执行树统计尚未冻结终态且有父的有效子 Join，保证全局额度判定与接受原子；root ticket 不计入子代理额度，同一父/子对至多一个有效未完成 Join（新续接 supersede 旧等待，旧 Join 不占额度、不再产生独立交付）。普通推进不取该准入锁。涉及执行树结构的写操作直接使用 Thread 行上不可变的 `rootThreadId` 取该树的 advisory lock，并在树锁内重读确认；跨树操作按根 UUID 升序依次取锁（细节见 [Harness Infra](harness-infra.md)）。
 
 创建、请求或强制删除 Work 的业务事务必须先锁 owning Thread；Dispatcher 的 claim 与 heartbeat 是唯一允许只锁单条 Work 的调度事务，且它们不得制造新的业务 wake。
 

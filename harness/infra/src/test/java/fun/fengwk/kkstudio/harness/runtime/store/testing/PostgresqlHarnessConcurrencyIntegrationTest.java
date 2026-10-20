@@ -140,7 +140,7 @@ class PostgresqlHarnessConcurrencyIntegrationTest {
                           new Class<?>[] {Transaction.class},
                           (proxy, method, args) -> {
                             String name = method.getName();
-                            // 记录全部 lock*、Thread 与 ancestor 读取：任何业务行锁都会出现在完整操作序列里。
+                            // 记录全部 lock* 与 Thread 读取：任何业务行锁都会出现在完整操作序列里。
                             if (name.startsWith("lock") || name.equals("findThread")) {
                               operations.add(name + ":" + args[0]);
                             }
