@@ -11,6 +11,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatu
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestMaterializer;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.StreamCheckpoint;
+import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
@@ -207,7 +208,7 @@ public final class ModelProcessor implements AutoCloseable {
             claim,
             dispatched.threadId(),
             proposedAttempt,
-            dispatched.compactionChild(),
+            dispatched.ownerSettledSummary(),
             dispatched.request().toolBindings(),
             config,
             dispatched.request().model().providerName(),
@@ -397,12 +398,17 @@ public final class ModelProcessor implements AutoCloseable {
       throw new IllegalStateException(
           "model invocation " + model.id() + " turnStartEntryId does not reference a TURN_START");
     }
+    // 摘要特有的完整性校验只属于「本线程当前直接持有 SETTLE_OWNER_TURN 票据」的执行；约束只读本行执行语义，绝不据此推断用途，
+    // 否则普通子代理继承 allowAutoCompaction=false 时会被误当成摘要 Agent。票据查询只读本线程，不回溯父历史或祖先。
+    boolean ownerSettledSummary =
+        tx.loadIncompleteJoins(thread.id()).stream()
+            .anyMatch(join -> join.delivery() == JoinDelivery.SETTLE_OWNER_TURN);
     return new Prepare.Dispatched(
         thread.id(),
         model.requestHeadEntryId(),
         model.attempt(),
         model.requestSpec(),
-        !thread.constraints().allowAutoCompaction());
+        ownerSettledSummary);
   }
 
   /** 在 MODEL claim 仍 owned 期间加载不可变 basis EntryPath，并纯重建内存 ProviderRequest。 */
@@ -630,13 +636,13 @@ public final class ModelProcessor implements AutoCloseable {
     /** 失联恢复已按策略回到 READY 并重排 MODEL Work：不启动 Provider，不 request THREAD wake。 */
     record Retry() implements Prepare {}
 
-    /** 已冻结的 dispatch：{@code compactionChild} 来自 Thread 创建时冻结的约束（不允许自动压缩即压缩子执行），不查询票据或祖先。 */
+    /** 已冻结的 dispatch：{@code ownerSettledSummary} 来自本线程当前有效未完成票据的 SETTLE_OWNER_TURN 交付方式，不查询祖先。 */
     record Dispatched(
         UUID threadId,
         UUID requestHeadEntryId,
         int attempt,
         ModelRequestSpec request,
-        boolean compactionChild)
+        boolean ownerSettledSummary)
         implements Prepare {}
 
     record Terminated() implements Prepare {}

@@ -48,6 +48,8 @@ public final class AgentSpawner {
   public static AcceptedCommands spawn(HarnessStore.Transaction tx, SpawnRequest request) {
     Objects.requireNonNull(tx, "tx");
     Objects.requireNonNull(request, "request");
+    // 统一创建路径复用 accept 的 batch 形状规则，且在任何写入之前拒绝非法请求（含 settings-only / 多输入 / SET 乱序）。
+    AcceptCommandsControl.validateBatchShape("SpawnRequest", request.commands(), true);
     return request.continuation() == null ? spawnNew(tx, request) : spawnOnExisting(tx, request);
   }
 

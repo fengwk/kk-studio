@@ -167,14 +167,15 @@ class AgentTaskServiceTest {
   }
 
   @Test
-  void stopStopsTheTicketedChildAndRetriesOnlyStaleVersion() {
+  void stopStopsTheTicketedChildAndRetriesOnlyStaleVersionWithFreshSnapshots() {
     UUID ticketId = UUID.randomUUID();
     UUID childId = UUID.randomUUID();
-    when(runtime.findJoin(ticketId)).thenReturn(Optional.of(join(ticketId, childId)));
-    ThreadSnapshot snapshot = mock(ThreadSnapshot.class);
-    ThreadState thread = thread(childId);
-    when(snapshot.thread()).thenReturn(thread);
-    when(runtime.getThreadSnapshot(childId)).thenReturn(snapshot);
+    when(runtime.findJoin(ticketId)).thenReturn(Optional.of(join(ticketId, childId, false, false)));
+    ThreadSnapshot first = mock(ThreadSnapshot.class);
+    when(first.thread()).thenReturn(thread(childId, 0L));
+    ThreadSnapshot second = mock(ThreadSnapshot.class);
+    when(second.thread()).thenReturn(thread(childId, 1L));
+    when(runtime.getThreadSnapshot(childId)).thenReturn(first).thenReturn(second);
     when(runtime.stop(any(StopCommand.class)))
         .thenThrow(
             new HarnessRuntimeConflictException(
@@ -186,8 +187,51 @@ class AgentTaskServiceTest {
     ArgumentCaptor<StopCommand> stop = ArgumentCaptor.forClass(StopCommand.class);
     verify(runtime, times(2)).stop(stop.capture());
     assertEquals(childId, stop.getValue().threadId());
-    assertEquals(thread.version(), stop.getValue().expectedVersion());
+    assertEquals(1L, stop.getValue().expectedVersion());
     verify(runtime, times(2)).getThreadSnapshot(childId);
+  }
+
+  @Test
+  void stopIsNoOpForMatchedOrSupersededTickets() {
+    UUID matchedId = UUID.randomUUID();
+    UUID matchedChild = UUID.randomUUID();
+    when(runtime.findJoin(matchedId))
+        .thenReturn(Optional.of(join(matchedId, matchedChild, true, false)));
+    service.stop(matchedId);
+
+    UUID supersededId = UUID.randomUUID();
+    UUID supersededChild = UUID.randomUUID();
+    when(runtime.findJoin(supersededId))
+        .thenReturn(Optional.of(join(supersededId, supersededChild, false, true)));
+    service.stop(supersededId);
+
+    verify(runtime, never()).getThreadSnapshot(any());
+    verify(runtime, never()).stop(any(StopCommand.class));
+  }
+
+  @Test
+  void stopSkipsWhenTicketFinishesOrIsSupersededBetweenSnapshotAndStop() {
+    UUID completedId = UUID.randomUUID();
+    UUID completedChild = UUID.randomUUID();
+    when(runtime.findJoin(completedId))
+        .thenReturn(Optional.of(join(completedId, completedChild, false, false)))
+        .thenReturn(Optional.of(join(completedId, completedChild, true, false)));
+    ThreadSnapshot completedSnapshot = mock(ThreadSnapshot.class);
+    when(completedSnapshot.thread()).thenReturn(thread(completedChild, 0L));
+    when(runtime.getThreadSnapshot(completedChild)).thenReturn(completedSnapshot);
+    service.stop(completedId);
+
+    UUID supersededId = UUID.randomUUID();
+    UUID supersededChild = UUID.randomUUID();
+    when(runtime.findJoin(supersededId))
+        .thenReturn(Optional.of(join(supersededId, supersededChild, false, false)))
+        .thenReturn(Optional.of(join(supersededId, supersededChild, false, true)));
+    ThreadSnapshot supersededSnapshot = mock(ThreadSnapshot.class);
+    when(supersededSnapshot.thread()).thenReturn(thread(supersededChild, 0L));
+    when(runtime.getThreadSnapshot(supersededChild)).thenReturn(supersededSnapshot);
+    service.stop(supersededId);
+
+    verify(runtime, never()).stop(any(StopCommand.class));
   }
 
   @Test
@@ -243,6 +287,10 @@ class AgentTaskServiceTest {
   }
 
   private static ThreadState thread(UUID threadId) {
+    return thread(threadId, 0L);
+  }
+
+  private static ThreadState thread(UUID threadId, long version) {
     return new ThreadState(
         threadId,
         UUID.randomUUID(),
@@ -257,12 +305,12 @@ class AgentTaskServiceTest {
         ThreadExecutionControl.RUNNABLE,
         0L,
         1L,
-        0L,
+        version,
         NOW,
         NOW);
   }
 
-  private static ThreadJoin join(UUID ticketId, UUID childId) {
+  private static ThreadJoin join(UUID ticketId, UUID childId, boolean matched, boolean superseded) {
     return new ThreadJoin(
         ticketId,
         HASH,
@@ -272,13 +320,13 @@ class AgentTaskServiceTest {
         "worker",
         null,
         0,
-        null,
+        matched ? UUID.randomUUID() : null,
         null,
         null,
         NOW,
         NOW,
         JoinDelivery.NOTIFY_PARENT,
         true,
-        null);
+        superseded ? UUID.randomUUID() : null);
   }
 }
