@@ -44,15 +44,19 @@ import fun.fengwk.kkstudio.harness.runtime.history.ToolResultStatus;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
+import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
+import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
@@ -90,6 +94,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -138,6 +143,28 @@ class ProviderRequestPreviewServiceTest {
   private static final UUID TURN_THREE_ASSISTANT_ID = id(20L);
   private static final UUID COMPACTION_ENTRY_ID = id(21L);
   private static final UUID COMPACTION_TURN_START_ID = id(22L);
+  private static final UUID COMPACTION_END_ID = id(23L);
+  private static final UUID CHILD_SESSION_ID = id(40L);
+  private static final UUID CHILD_THREAD_ID = id(41L);
+  private static final UUID COMPACTION_JOIN_ID = id(42L);
+  private static final UUID CHILD_ROOT_ID = id(43L);
+  private static final UUID CHILD_INPUT_START_ID = id(44L);
+  private static final UUID CHILD_PROMPT_ID = id(45L);
+  private static final UUID CHILD_TOOL_CALL_ID = id(46L);
+  private static final UUID CHILD_TOOL_RESULT_ID = id(47L);
+  private static final UUID CHILD_INPUT_END_ID = id(48L);
+  private static final UUID CHILD_FINAL_START_ID = id(49L);
+  private static final UUID CHILD_FINAL_ANSWER_ID = id(50L);
+  private static final UUID CHILD_TERMINAL_END_ID = id(51L);
+  private static final UUID CHILD_LATER_START_ID = id(52L);
+  private static final UUID CHILD_LATER_USER_ID = id(53L);
+  private static final UUID CHILD_LATER_ASSISTANT_ID = id(54L);
+  private static final UUID CHILD_LATER_END_ID = id(55L);
+  private static final int COMPACTION_OUTPUT_BUDGET = 4_096;
+  private static final ModelSelection COMPACTION_MODEL =
+      new ModelSelection("provider", "compactor", "v1");
+  private static final BranchSettings CHILD_SETTINGS =
+      new BranchSettings("Compaction", COMPACTION_MODEL, null);
   private static final byte[] BODY = "{\"model\":\"wire-model\"}".getBytes(StandardCharsets.UTF_8);
 
   /** 历史输出的记录时间：与固定 clock 明显不同，用来证明历史预览用的是记录时间而不是「现在」。 */
@@ -150,6 +177,9 @@ class ProviderRequestPreviewServiceTest {
 
   /** 压缩结果的记录时间：历史预览必须用它而非「现在」。 */
   private static final Instant COMPACTION_RESULT_TIME = NOW.plusSeconds(240);
+
+  /** 压缩子最终答复（真实最后一次摘要调用）的记录时间，严格早于父压缩结果提交时间。 */
+  private static final Instant CHILD_FINAL_ANSWER_TIME = NOW.plusSeconds(200);
 
   private HarnessRuntime runtime;
   private DatabaseTurnResolver turnResolver;
@@ -185,6 +215,7 @@ class ProviderRequestPreviewServiceTest {
     // 测试意图：成功及各类拒绝都只允许读取——既不接受命令、消费附件或改变资源引用，也不触达 Session 之外的写入口。
     verify(runtime, atLeast(0)).getThreadSnapshot(any());
     verify(runtime, atLeast(0)).getSessionEntries(any());
+    verify(runtime, atLeast(0)).findJoin(any());
     verify(uploadService, atLeast(0)).peekReady(any());
     verify(refManager, atLeast(0)).contains(any(), any());
     verify(blobManager, atLeast(0)).getBlob(any());
@@ -790,25 +821,107 @@ class ProviderRequestPreviewServiceTest {
   }
 
   /**
-   * 测试意图：父 COMPACTION turn 自身不创建 ModelInvocation，其 provider 请求属于压缩子 Thread；父侧历史预览绝不伪造一份零工具请求，
-   * 而是在任何规划与 provider 解析之前明确 typed 拒绝并指向子的真实调用。
+   * 测试意图：父 COMPACTION 结果通过冻结的 child Thread / join 票据链接到真正的子执行，并以 join 冻结的 finalAnswer parent
+   * 作为请求前缀；工具 loop 历史保留，child 后续续跑与最终答复本身不进入请求。child 约束必须在规划后收紧预算并关闭 cache。
    */
   @Test
-  void rejectsHistoricalPreviewOfParentCompactionOutput() {
-    EntryPath sessionTree = compactionOutputPath();
-    when(runtime.getSessionEntries(SESSION_ID)).thenReturn(sessionTree.entries());
+  void previewsParentCompactionOutputAgainstFrozenChildFinalInvocation() {
+    EntryPath parentPath = compactionOutputPath();
+    EntryPath childPath = compactionChildPath();
+    when(runtime.getSessionEntries(SESSION_ID)).thenReturn(parentPath.entries());
+    when(runtime.findJoin(COMPACTION_JOIN_ID))
+        .thenReturn(Optional.of(compactionJoin(CHILD_THREAD_ID)));
+    when(runtime.getThreadSnapshot(CHILD_THREAD_ID))
+        .thenReturn(snapshot(childThread(CHILD_LATER_END_ID), childPath, List.of()));
+    when(runtime.getSessionEntries(CHILD_SESSION_ID)).thenReturn(childPath.entries());
+    when(turnResolver.planHistorical(eq(CHILD_THREAD_ID), any(), eq(CHILD_FINAL_ANSWER_TIME)))
+        .thenReturn(
+            new LiveTurnPlan.Planned(
+                spec(
+                    8_192,
+                    ProviderCacheControl.session(PromptCacheRetention.SHORT, "child-session")),
+                CONTEXT_WINDOW,
+                List.of(),
+                List.of()));
+    when(providerResolution.resolve(eq(ProviderType.OPENAI), eq(GENERATION_ID), any()))
+        .thenAnswer(
+            invocation ->
+                new ResolvedExecution(
+                    invocation.getArgument(2),
+                    new ModelCallTimeoutPolicy(Duration.ofSeconds(5), Duration.ofSeconds(1)),
+                    policy -> null,
+                    request -> BODY));
 
+    HarnessProviderRequestPreviewDTO dto =
+        service.previewHistorical(SESSION_ID, COMPACTION_ENTRY_ID);
+
+    assertEquals(HarnessProviderRequestPreviewDTO.HISTORICAL_REQUEST_PREVIEW, dto.getKind());
+    assertEquals(HarnessProviderRequestPreviewDTO.HISTORICAL_NOTICE, dto.getNotice());
+    assertEquals(CHILD_FINAL_START_ID.toString(), dto.getSourceHeadEntryId());
+    assertEquals(CHILD_FINAL_ANSWER_TIME, dto.getGeneratedAt());
+    assertEquals(new String(BODY, StandardCharsets.UTF_8), dto.getBodyJson());
+
+    ArgumentCaptor<EntryPath> pathCaptor = ArgumentCaptor.forClass(EntryPath.class);
+    verify(turnResolver)
+        .planHistorical(eq(CHILD_THREAD_ID), pathCaptor.capture(), eq(CHILD_FINAL_ANSWER_TIME));
+    assertEquals(
+        List.of(
+            CHILD_ROOT_ID,
+            CHILD_INPUT_START_ID,
+            CHILD_PROMPT_ID,
+            CHILD_TOOL_CALL_ID,
+            CHILD_TOOL_RESULT_ID,
+            CHILD_INPUT_END_ID,
+            CHILD_FINAL_START_ID),
+        ids(pathCaptor.getValue()));
+    // 冻结 finalAnswer 自身以及同一 child Thread 的后续续跑都不进入旧压缩请求。
+    assertFalse(ids(pathCaptor.getValue()).contains(CHILD_FINAL_ANSWER_ID));
+    assertFalse(ids(pathCaptor.getValue()).contains(CHILD_LATER_START_ID));
+    verify(runtime).getSessionEntries(CHILD_SESSION_ID);
+    verify(turnResolver, never()).planLive(any(), any(), any());
+
+    // 规划 spec 的输出预算与 cache 被 child Thread 的不可变约束收紧。
+    ArgumentCaptor<ProviderRequest> requestCaptor = ArgumentCaptor.forClass(ProviderRequest.class);
+    verify(providerResolution)
+        .resolve(eq(ProviderType.OPENAI), eq(GENERATION_ID), requestCaptor.capture());
+    assertEquals(COMPACTION_OUTPUT_BUDGET, requestCaptor.getValue().outputTokens());
+    assertEquals(PromptCacheRetention.NONE, requestCaptor.getValue().cacheControl().retention());
+  }
+
+  /**
+   * 测试意图：缺失、错误子身份或不在冻结执行里的 finalAnswer 都在任何规划之前以 typed unavailable 拒绝，绝不回退到 child 当前 head 或父的零工具请求。
+   */
+  @Test
+  void rejectsCompactionPreviewWhenFrozenChildExecutionCannotBeProven() {
+    EntryPath parentPath = compactionOutputPath();
+    when(runtime.getSessionEntries(SESSION_ID)).thenReturn(parentPath.entries());
+
+    when(runtime.findJoin(COMPACTION_JOIN_ID)).thenReturn(Optional.empty());
+    assertFrozenCompactionRejected();
+
+    when(runtime.findJoin(COMPACTION_JOIN_ID)).thenReturn(Optional.of(compactionJoin(id(99L))));
+    assertFrozenCompactionRejected();
+
+    when(runtime.findJoin(COMPACTION_JOIN_ID))
+        .thenReturn(Optional.of(compactionJoin(CHILD_THREAD_ID)));
+    when(runtime.getThreadSnapshot(CHILD_THREAD_ID))
+        .thenReturn(snapshot(childThread(CHILD_LATER_END_ID), compactionChildPath(), List.of()));
+    // child Session 中不存在 join 冻结的 finalAnswer：关联不完整，不得猜测。
+    when(runtime.getSessionEntries(CHILD_SESSION_ID))
+        .thenReturn(List.of(childEntries().getFirst()));
+    assertFrozenCompactionRejected();
+
+    verify(turnResolver, never()).planHistorical(any(), any(), any());
+    verify(turnResolver, never()).planLive(any(), any(), any());
+    verify(providerResolution, never()).resolve(any(), any(), any());
+  }
+
+  private void assertFrozenCompactionRejected() {
     ProviderRequestPreviewUnavailableException rejected =
         assertThrows(
             ProviderRequestPreviewUnavailableException.class,
             () -> service.previewHistorical(SESSION_ID, COMPACTION_ENTRY_ID));
-
     assertEquals(Reason.PREVIEW_UNSUPPORTED, rejected.reason());
-    assertTrue(rejected.getMessage().contains("compaction child thread"), rejected.getMessage());
-    verify(turnResolver, never()).planHistorical(any(), any(), any());
-    verify(turnResolver, never()).planLive(any(), any(), any());
-    verify(runtime, never()).getThreadSnapshot(any());
-    verify(providerResolution, never()).resolve(any(), any(), any());
   }
 
   /** ROOT + 一个关闭 INPUT turn + 其 parent 为 COMPACTION TURN_START 的压缩结果。 */
@@ -818,8 +931,16 @@ class ProviderRequestPreviewServiceTest {
     UUID assistant = id(33L);
     UUID end = id(34L);
     CompactionStart start =
-        CompactionStart.pending(
-            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, assistant, null, null);
+        new CompactionStart(
+            CompactionPhase.FULL,
+            CompactionTrigger.THRESHOLD,
+            COMPACTION_MODEL,
+            (long) COMPACTION_OUTPUT_BUDGET,
+            assistant,
+            null,
+            null,
+            CHILD_THREAD_ID,
+            COMPACTION_JOIN_ID);
     return new EntryPath(
         List.of(
             new Entry(ROOT_ID, SESSION_ID, null, new RootPayload(SETTINGS), NOW),
@@ -859,11 +980,187 @@ class ProviderRequestPreviewServiceTest {
                 COMPACTION_ENTRY_ID,
                 SESSION_ID,
                 COMPACTION_TURN_START_ID,
-                new CompactionPayload(
-                    "compaction summary",
-                    new AssistantMessageMetadata(
-                        GenerationStopReason.COMPLETE, BELOW_THRESHOLD_USAGE, 50L)),
-                COMPACTION_RESULT_TIME)));
+                new CompactionPayload("compaction summary", compactionMetadata()),
+                COMPACTION_RESULT_TIME),
+            new Entry(
+                COMPACTION_END_ID,
+                SESSION_ID,
+                COMPACTION_ENTRY_ID,
+                new TurnEndPayload(
+                    COMPACTION_TURN_START_ID, TurnEndOutcome.COMPLETED, false, null, null),
+                COMPACTION_RESULT_TIME.plusSeconds(1))));
+  }
+
+  /**
+   * 冻结压缩子 Session：一次工具 loop 后产生最终摘要，随后同一 child Thread 又发生了一次后续续跑。finalAnswer 的 parent 是续写 turn 的
+   * TURN_START，即最后那次摘要调用的 request head。
+   */
+  private static EntryPath compactionChildPath() {
+    return new EntryPath(childEntries());
+  }
+
+  private static List<Entry> childEntries() {
+    return List.of(
+        new Entry(CHILD_ROOT_ID, CHILD_SESSION_ID, null, new RootPayload(CHILD_SETTINGS), NOW),
+        new Entry(
+            CHILD_INPUT_START_ID,
+            CHILD_SESSION_ID,
+            CHILD_ROOT_ID,
+            childTurnStart(TurnStartReason.INPUT),
+            NOW.plusSeconds(10)),
+        new Entry(
+            CHILD_PROMPT_ID,
+            CHILD_SESSION_ID,
+            CHILD_INPUT_START_ID,
+            new MessagePayload(AgentMessage.user("summarize"), null, null),
+            NOW.plusSeconds(20)),
+        new Entry(
+            CHILD_TOOL_CALL_ID,
+            CHILD_SESSION_ID,
+            CHILD_PROMPT_ID,
+            new MessagePayload(
+                new AgentMessage(
+                    AgentMessageRole.ASSISTANT,
+                    List.of(new ToolCallMessageContent("call-1", "read", "builtin:read", "{}"))),
+                new AssistantMessageMetadata(
+                    GenerationStopReason.COMPLETE, BELOW_THRESHOLD_USAGE, null),
+                null),
+            NOW.plusSeconds(30)),
+        new Entry(
+            CHILD_TOOL_RESULT_ID,
+            CHILD_SESSION_ID,
+            CHILD_TOOL_CALL_ID,
+            new MessagePayload(
+                new AgentMessage(
+                    AgentMessageRole.TOOL,
+                    List.of(
+                        new ToolResultMessageContent(
+                            "call-1",
+                            "read",
+                            "builtin:read",
+                            List.of(new TextMessageContent("body")),
+                            false,
+                            "{}"))),
+                null,
+                new ToolResultMetadata(
+                    INVOCATION_ID,
+                    CHILD_TOOL_CALL_ID,
+                    "call-1",
+                    0,
+                    ToolResultStatus.SUCCEEDED,
+                    false,
+                    null,
+                    null,
+                    null)),
+            NOW.plusSeconds(40)),
+        new Entry(
+            CHILD_INPUT_END_ID,
+            CHILD_SESSION_ID,
+            CHILD_TOOL_RESULT_ID,
+            new TurnEndPayload(CHILD_INPUT_START_ID, TurnEndOutcome.COMPLETED, true, null, null),
+            NOW.plusSeconds(50)),
+        new Entry(
+            CHILD_FINAL_START_ID,
+            CHILD_SESSION_ID,
+            CHILD_INPUT_END_ID,
+            childTurnStart(TurnStartReason.CONTINUATION),
+            CHILD_FINAL_ANSWER_TIME.minusSeconds(1)),
+        new Entry(
+            CHILD_FINAL_ANSWER_ID,
+            CHILD_SESSION_ID,
+            CHILD_FINAL_START_ID,
+            new MessagePayload(
+                new AgentMessage(
+                    AgentMessageRole.ASSISTANT,
+                    List.of(new TextMessageContent("compaction summary"))),
+                compactionMetadata(),
+                null),
+            CHILD_FINAL_ANSWER_TIME),
+        new Entry(
+            CHILD_TERMINAL_END_ID,
+            CHILD_SESSION_ID,
+            CHILD_FINAL_ANSWER_ID,
+            new TurnEndPayload(CHILD_FINAL_START_ID, TurnEndOutcome.COMPLETED, false, null, null),
+            CHILD_FINAL_ANSWER_TIME.plusSeconds(1)),
+        new Entry(
+            CHILD_LATER_START_ID,
+            CHILD_SESSION_ID,
+            CHILD_TERMINAL_END_ID,
+            childTurnStart(TurnStartReason.INPUT),
+            CHILD_FINAL_ANSWER_TIME.plusSeconds(2)),
+        new Entry(
+            CHILD_LATER_USER_ID,
+            CHILD_SESSION_ID,
+            CHILD_LATER_START_ID,
+            new MessagePayload(AgentMessage.user("later child run"), null, null),
+            CHILD_FINAL_ANSWER_TIME.plusSeconds(3)),
+        new Entry(
+            CHILD_LATER_ASSISTANT_ID,
+            CHILD_SESSION_ID,
+            CHILD_LATER_USER_ID,
+            assistantMessage("later child answer", BELOW_THRESHOLD_USAGE),
+            CHILD_FINAL_ANSWER_TIME.plusSeconds(4)),
+        new Entry(
+            CHILD_LATER_END_ID,
+            CHILD_SESSION_ID,
+            CHILD_LATER_ASSISTANT_ID,
+            new TurnEndPayload(CHILD_LATER_START_ID, TurnEndOutcome.COMPLETED, false, null, null),
+            CHILD_FINAL_ANSWER_TIME.plusSeconds(5)));
+  }
+
+  private static TurnStartPayload childTurnStart(TurnStartReason reason) {
+    return new TurnStartPayload(
+        reason,
+        CHILD_SETTINGS,
+        CHILD_THREAD_ID,
+        CONTEXT_WINDOW,
+        COMPACTION_OUTPUT_BUDGET,
+        null,
+        null);
+  }
+
+  private static AssistantMessageMetadata compactionMetadata() {
+    return new AssistantMessageMetadata(GenerationStopReason.COMPLETE, BELOW_THRESHOLD_USAGE, 50L);
+  }
+
+  private static ThreadJoin compactionJoin(UUID childThreadId) {
+    return new ThreadJoin(
+        COMPACTION_JOIN_ID,
+        REQUEST_HASH,
+        THREAD_ID,
+        childThreadId,
+        1L,
+        "Compaction",
+        null,
+        0L,
+        CHILD_TERMINAL_END_ID,
+        CHILD_FINAL_ANSWER_ID,
+        null,
+        NOW,
+        NOW,
+        JoinDelivery.SETTLE_OWNER_TURN,
+        false,
+        null);
+  }
+
+  private static ThreadState childThread(UUID headEntryId) {
+    return new ThreadState(
+        CHILD_THREAD_ID,
+        CHILD_SESSION_ID,
+        THREAD_ID,
+        headEntryId,
+        REQUEST_HASH,
+        "compaction-child",
+        THREAD_ID,
+        false,
+        SpawnTrigger.RUNTIME,
+        new ThreadConstraints(COMPACTION_OUTPUT_BUDGET, true, false),
+        ThreadExecutionControl.RUNNABLE,
+        0L,
+        2L,
+        1L,
+        NOW,
+        NOW);
   }
 
   /** 测试意图：历史预览只接受模型输出本身；非模型输出与不属于该 Session 的 id 都在任何规划之前拒绝。 */
@@ -912,17 +1209,21 @@ class ProviderRequestPreviewServiceTest {
   }
 
   private static ModelRequestSpec spec() {
+    return spec(1024, ProviderCacheControl.none());
+  }
+
+  private static ModelRequestSpec spec(int outputTokens, ProviderCacheControl cacheControl) {
     return new ModelRequestSpec(
         ProviderType.OPENAI,
         GENERATION_ID,
         new ModelDescriptor(
             "provider", "model", "wire-model", Set.of(ModelInputModality.TEXT), false, false),
         new ModelVariant("v1"),
-        1024,
+        outputTokens,
         "system instruction",
         List.of(),
         List.of(),
-        ProviderCacheControl.none());
+        cacheControl);
   }
 
   private static ThreadSnapshot snapshot(

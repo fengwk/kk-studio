@@ -3,21 +3,33 @@ package fun.fengwk.kkstudio.platform.harness.model;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.compaction.AutomaticCompactionPlanner;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTurns;
+import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.history.CompactionPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryType;
 import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
+import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestMaterializer;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
+import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
+import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
+import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderAdapter;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.processor.TurnPlanPreview;
+import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextClassifier;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
@@ -37,6 +49,7 @@ import fun.fengwk.kkstudio.share.ai.runtime.HarnessProviderRequestPreviewDTO;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
@@ -175,11 +188,15 @@ public final class ProviderRequestPreviewService {
    * 现算一次历史模型输出的 Provider 协议请求体预览：请求前缀严格是 ROOT 到该输出的 parent，规划时间显式取该输出的记录时间。
    *
    * <p>catalog 与 Provider 配置都已不是当时的那一份，因此这里按当前定义重建；响应以 {@link
-   * HarnessProviderRequestPreviewDTO#HISTORICAL_NOTICE} 明确声明它不等于原始发送字节。父 COMPACTION turn 自身不创建
-   * ModelInvocation，其 provider 请求由独立的压缩子 Thread 发出，因此父侧无法重建该请求：这里明确 typed 拒绝并指向子的真实调用，绝不伪造一份零工具请求。
+   * HarnessProviderRequestPreviewDTO#HISTORICAL_NOTICE} 明确声明它不等于原始发送字节。
+   *
+   * <p>父 COMPACTION 结果自身不创建 ModelInvocation：它的摘要请求由独立的压缩子 Thread 发出。此时沿父 COMPACTION TURN_START 冻结的
+   * child Thread / join 票据定位子执行，并以 join 冻结的 finalAnswerEntryId（而不是 child 当前
+   * head）找到真正产出该摘要的最后一次调用前缀；工具 loop、输出预算与 cache 约束都按该子执行的冻结事实重建。关联缺失或不属于同一冻结执行时 typed 拒绝，绝不猜测。
    *
    * @param sessionId path 中的目标 Session；不存在时由 {@link HarnessRuntime} 以 typed 异常拒绝
-   * @param entryId 被查看的模型输出 Entry，必须属于该 Session 且携带 assistantMetadata
+   * @param entryId 被查看的模型输出 Entry，必须属于该 Session 且携带 assistantMetadata（压缩结果为 {@link
+   *     CompactionPayload}）
    */
   public HarnessProviderRequestPreviewDTO previewHistorical(UUID sessionId, UUID entryId) {
     Objects.requireNonNull(sessionId, "sessionId");
@@ -188,11 +205,7 @@ public final class ProviderRequestPreviewService {
     Map<UUID, Entry> entries = sessionEntries(sessionId);
     Entry output = requireSessionEntry(entries, entryId, "entry");
     if (output.payload() instanceof CompactionPayload) {
-      // 压缩结果由父 COMPACTION turn 提交，但请求属于压缩子 Thread（其 ROOT/输入回合在另一个 Session 里）；父侧没有可重建的请求。
-      throw new ProviderRequestPreviewUnavailableException(
-          Reason.PREVIEW_UNSUPPORTED,
-          "a COMPACTION parent turn has no model invocation; its provider request belongs to the"
-              + " compaction child thread");
+      return previewCompactionChild(sessionId, entries, output);
     }
     UUID requestHeadEntryId = requireRequestHead(output);
     EntryPath requestPath = entryPath(entries, requestHeadEntryId);
@@ -206,6 +219,238 @@ public final class ProviderRequestPreviewService {
         requestHeadEntryId,
         HarnessProviderRequestPreviewDTO.HISTORICAL_REQUEST_PREVIEW,
         HarnessProviderRequestPreviewDTO.HISTORICAL_NOTICE);
+  }
+
+  /**
+   * 父 COMPACTION 结果 -> 冻结压缩子执行的真实最后一次调用。
+   *
+   * <p>父 TURN_START 冻结 child Thread 与 join 票据；join 的 finalAnswerEntryId 是这次压缩执行的最终答复边界。这里只沿
+   * finalAnswer 的 parent（该次调用的 request head）构造前缀，绝不使用 child 当前 head，因此同一条 child Thread 上后续续跑
+   * 不会污染旧压缩结果。child Thread 的不可变执行约束在规划后再次收紧输出预算并强制关闭 prompt cache，与正式提交路径一致。
+   */
+  private HarnessProviderRequestPreviewDTO previewCompactionChild(
+      UUID parentSessionId, Map<UUID, Entry> parentEntries, Entry output) {
+    EntryPath outputPath = entryPath(parentEntries, output.id());
+    Entry startEntry = requireEnclosingCompactionStart(outputPath);
+    Entry turnEnd = requireCompactionTurnEnd(parentEntries, output, startEntry);
+    List<Entry> closedEntries = new ArrayList<>(outputPath.entries());
+    closedEntries.add(turnEnd);
+    EntryPath closedPath;
+    try {
+      closedPath = new EntryPath(closedEntries);
+    } catch (IllegalArgumentException error) {
+      throw frozenCompactionUnavailable(
+          "compaction turn end does not belong to the result path", error);
+    }
+    CompactionTurns.CompactionTurn turn;
+    try {
+      turn = CompactionTurns.ofResult(closedPath, output.id());
+    } catch (IllegalStateException error) {
+      throw frozenCompactionUnavailable(
+          "compaction result has no enclosing COMPACTION turn", error);
+    }
+    CompactionStart frozen = turn.freezing();
+    UUID ownerThreadId = turn.start().ownerThreadId();
+    if (frozen.childThreadId() == null || frozen.joinInvocationId() == null) {
+      // pending 压缩 TURN_START 尚未创建子执行，没有可预览的真实调用。
+      throw frozenCompactionUnavailable("compaction child execution is not frozen");
+    }
+
+    ThreadJoin join =
+        runtime
+            .findJoin(frozen.joinInvocationId())
+            .orElseThrow(() -> frozenCompactionUnavailable("compaction join does not exist"));
+    requireFrozenCompactionJoin(join, frozen, ownerThreadId);
+
+    ThreadSnapshot childSnapshot;
+    try {
+      childSnapshot = runtime.getThreadSnapshot(frozen.childThreadId());
+    } catch (HarnessRuntimeNotFoundException error) {
+      throw frozenCompactionUnavailable("compaction child thread does not exist", error);
+    }
+    ThreadState childThread = childSnapshot.thread();
+    ThreadConstraints constraints =
+        requireFrozenChildThread(childThread, parentSessionId, ownerThreadId, frozen);
+
+    Map<UUID, Entry> childEntries = sessionEntries(childThread.sessionId());
+    Entry finalAnswer = childEntries.get(join.finalAnswerEntryId());
+    if (finalAnswer == null
+        || !carriesModelOutputMetadata(finalAnswer)
+        || (finalAnswer.payload() instanceof MessagePayload message
+            && message.message().role() != AgentMessageRole.ASSISTANT)) {
+      throw frozenCompactionUnavailable(
+          "compaction join final answer is not a model output in the child session");
+    }
+    CompactionPayload compaction = (CompactionPayload) output.payload();
+    MessagePayload finalMessage = (MessagePayload) finalAnswer.payload();
+    if (compaction.assistantMetadata() == null
+        || !compaction.assistantMetadata().equals(finalMessage.assistantMetadata())) {
+      throw frozenCompactionUnavailable(
+          "compaction result metadata does not belong to the frozen final answer");
+    }
+    requireWithinFrozenExecution(childEntries, join, finalAnswer);
+
+    UUID requestHeadEntryId = requireRequestHead(finalAnswer);
+    EntryPath requestPath;
+    try {
+      requestPath = entryPath(childEntries, requestHeadEntryId);
+    } catch (IllegalStateException error) {
+      throw frozenCompactionUnavailable(
+          "compaction final answer has a broken request prefix", error);
+    }
+    // 子响应只接受携带 assistantMetadata 的真实模型输出；其请求前缀就是这个输出的 parent。
+    Instant recordedAt = finalAnswer.createdAt();
+    LiveTurnPlan plan =
+        turnResolver.planHistorical(frozen.childThreadId(), requestPath, recordedAt);
+    if (plan instanceof LiveTurnPlan.Planned planned) {
+      plan =
+          new LiveTurnPlan.Planned(
+              applyConstraints(planned.spec(), constraints),
+              planned.contextWindow(),
+              planned.candidateTools(),
+              planned.skills());
+    }
+    return planAndEncode(
+        plan,
+        requestPath,
+        recordedAt,
+        requestHeadEntryId,
+        HarnessProviderRequestPreviewDTO.HISTORICAL_REQUEST_PREVIEW,
+        HarnessProviderRequestPreviewDTO.HISTORICAL_NOTICE);
+  }
+
+  /** 压缩结果必须位于最近的 COMPACTION TURN_START 内，且该回合的 run group 已冻结。 */
+  private static Entry requireEnclosingCompactionStart(EntryPath outputPath) {
+    List<Entry> entries = outputPath.entries();
+    for (int index = entries.size() - 1; index >= 0; index--) {
+      Entry entry = entries.get(index);
+      if (entry.payload() instanceof TurnStartPayload start) {
+        if (start.reason() != TurnStartReason.COMPACTION || start.compaction() == null) {
+          throw frozenCompactionUnavailable(
+              "compaction result is not enclosed by a COMPACTION turn");
+        }
+        return entry;
+      }
+    }
+    throw frozenCompactionUnavailable("compaction result has no enclosing TURN_START");
+  }
+
+  /** 压缩结果与其 TURN_END 在同一提交中落库；结果 Entry 的直接子 TURN_END 是闭合事实。缺失说明回合未完成或关联损坏， 不能把它当成可预览的完成压缩。 */
+  private static Entry requireCompactionTurnEnd(
+      Map<UUID, Entry> entries, Entry output, Entry startEntry) {
+    for (Entry candidate : entries.values()) {
+      if (output.id().equals(candidate.parentEntryId())
+          && candidate.payload() instanceof TurnEndPayload end
+          && startEntry.id().equals(end.turnStartEntryId())) {
+        return candidate;
+      }
+    }
+    throw frozenCompactionUnavailable("compaction turn is not closed");
+  }
+
+  /** join 必须就是父 TURN_START 冻结的同一子执行，且已以最终答复结束。 */
+  private static void requireFrozenCompactionJoin(
+      ThreadJoin join, CompactionStart frozen, UUID ownerThreadId) {
+    boolean exactExecution =
+        join.invocationId().equals(frozen.joinInvocationId())
+            && join.delivery() == JoinDelivery.SETTLE_OWNER_TURN
+            && join.parentThreadId() != null
+            && join.parentThreadId().equals(ownerThreadId)
+            && join.childThreadId().equals(frozen.childThreadId());
+    if (!exactExecution
+        || !join.matched()
+        || join.terminalEntryId() == null
+        || join.finalAnswerEntryId() == null
+        || join.supersededByInvocationId() != null) {
+      throw frozenCompactionUnavailable(
+          "compaction join is not the frozen completed child execution");
+    }
+  }
+
+  /** 子 Thread 必须仍属于同一冻结执行：同一父、独立 Session、runtime 创建且约束不宽于冻结预算。 */
+  private static ThreadConstraints requireFrozenChildThread(
+      ThreadState childThread, UUID parentSessionId, UUID ownerThreadId, CompactionStart frozen) {
+    ThreadConstraints constraints = childThread.constraints();
+    boolean frozenExecution =
+        childThread.parentThreadId() != null
+            && childThread.parentThreadId().equals(ownerThreadId)
+            && !childThread.sessionId().equals(parentSessionId)
+            && childThread.spawnTrigger() == SpawnTrigger.RUNTIME
+            && constraints.promptCacheDisabled()
+            && (constraints.maxOutputTokens() == null
+                || constraints.maxOutputTokens() <= frozen.outputBudget());
+    if (!frozenExecution) {
+      throw frozenCompactionUnavailable(
+          "compaction child thread does not belong to the frozen execution");
+    }
+    return constraints;
+  }
+
+  /** finalAnswer 必须落在 join 冻结的 terminal Entry 路径上：后续续跑即使追加了新的 head 也不进入旧压缩结果。 */
+  private static void requireWithinFrozenExecution(
+      Map<UUID, Entry> childEntries, ThreadJoin join, Entry finalAnswer) {
+    EntryPath terminalPath;
+    try {
+      terminalPath = entryPath(childEntries, join.terminalEntryId());
+    } catch (IllegalStateException error) {
+      throw frozenCompactionUnavailable(
+          "compaction join terminal entry has a broken child path", error);
+    }
+    boolean finalAnswerOnTerminalPath =
+        terminalPath.entries().stream().anyMatch(entry -> entry.id().equals(finalAnswer.id()));
+    if (!finalAnswerOnTerminalPath) {
+      throw frozenCompactionUnavailable(
+          "compaction final answer is not within the frozen terminal path");
+    }
+    EntryPath answerPath = entryPath(childEntries, finalAnswer.id());
+    boolean ownedByChildTurn =
+        answerPath
+            .openTurnStart()
+            .map(Entry::payload)
+            .filter(TurnStartPayload.class::isInstance)
+            .map(TurnStartPayload.class::cast)
+            .map(
+                start ->
+                    start.reason() != TurnStartReason.COMPACTION
+                        && start.ownerThreadId().equals(join.childThreadId()))
+            .orElse(false);
+    if (!ownedByChildTurn) {
+      throw frozenCompactionUnavailable(
+          "compaction final answer is not owned by a child model turn");
+    }
+  }
+
+  /** 冻结 child 的约束与正式提交一致：输出预算取 min，禁用 cache 时固定 NONE。 */
+  private static ModelRequestSpec applyConstraints(
+      ModelRequestSpec spec, ThreadConstraints constraints) {
+    if (constraints.maxOutputTokens() == null && !constraints.promptCacheDisabled()) {
+      return spec;
+    }
+    int outputTokens =
+        constraints.maxOutputTokens() == null
+            ? spec.outputTokens()
+            : Math.min(spec.outputTokens(), constraints.maxOutputTokens());
+    return new ModelRequestSpec(
+        spec.providerType(),
+        spec.providerConnectionGenerationId(),
+        spec.model(),
+        spec.variant(),
+        outputTokens,
+        spec.systemInstruction(),
+        spec.toolBindings(),
+        spec.subagentBindings(),
+        constraints.promptCacheDisabled() ? ProviderCacheControl.none() : spec.cacheControl());
+  }
+
+  private static ProviderRequestPreviewUnavailableException frozenCompactionUnavailable(
+      String detail) {
+    return new ProviderRequestPreviewUnavailableException(Reason.PREVIEW_UNSUPPORTED, detail);
+  }
+
+  private static ProviderRequestPreviewUnavailableException frozenCompactionUnavailable(
+      String detail, RuntimeException cause) {
+    return new ProviderRequestPreviewUnavailableException(
+        Reason.PREVIEW_UNSUPPORTED, detail, cause);
   }
 
   /** 三种预览共用的只读尾部：冻结规划 -> 物化 -> 正式协议编码 -> 稳定响应投影。 */
