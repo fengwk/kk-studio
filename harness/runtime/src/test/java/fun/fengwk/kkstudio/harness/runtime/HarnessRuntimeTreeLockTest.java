@@ -281,9 +281,8 @@ class HarnessRuntimeTreeLockTest {
   }
 
   @Test
-  void compactThreadAcquiresTreeLockInPlanAndCommitTransactions() {
-    // 测试意图：验证 compactThread 在两阶段事务（planManual 与 commitManual）中均先获取 tree lock，再获取 session 和 thread
-    // 行锁。
+  void compactThreadAcquiresTreeSessionAndThreadLocksOnceInItsSingleTransaction() {
+    // 测试意图：手工压缩在同一事务内按 tree -> session -> thread 锁序完成 resolve 与提交，不重复规划。
     Fixture fixture = manualCompactionFixture();
     ClosedTurnBaseline baseline = seedCompactionEligibleTurn(fixture.store);
 
@@ -313,12 +312,9 @@ class HarnessRuntimeTreeLockTest {
                 tx.findWork(new WorkTarget(WorkTargetType.THREAD, baseline.threadId()))
                     .orElse(null)));
 
-    // 应该按顺序在第一阶段获取 tree -> session -> thread，在第二阶段再次获取 tree -> session -> thread
+    // 结构性写入仍需完整锁序，但只在该事务内获取一次。
     assertEquals(
         List.of(
-            "lockTree:" + baseline.threadId(),
-            "lockSessionForKeyShare:" + baseline.sessionId(),
-            "lockThread:" + baseline.threadId(),
             "lockTree:" + baseline.threadId(),
             "lockSessionForKeyShare:" + baseline.sessionId(),
             "lockThread:" + baseline.threadId()),
