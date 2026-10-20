@@ -60,9 +60,9 @@ import java.util.UUID;
 import java.util.function.Function;
 
 /**
- * 验证控制面入口（renameThread、setThreadYolo、decideToolApproval、getThreadSnapshot、
- * manualCompactionAvailability、compactThread）在获取任何业务行锁（Session/Thread/Model/Tool）之前
- * 先按规范获取执行树根锁（tree-lock-before-business-lock protocol），以及锁失败时的事务回滚。
+ * 验证控制面入口的锁边界：单实体 renameThread / setThreadYolo / decideToolApproval / getThreadSnapshot 只锁本
+ * Thread（及本 Thread 的 Model/Tool），不取执行树锁；manualCompactionAvailability / compactThread 与
+ * getThreadTree 等结构/跨 Thread 路径仍先取执行树根锁。另验证行锁失败时的事务回滚。
  */
 class HarnessRuntimeTreeLockTest {
 
@@ -167,8 +167,8 @@ class HarnessRuntimeTreeLockTest {
   }
 
   @Test
-  void renameThreadAcquiresTreeLockBeforeThreadLock() {
-    // 测试意图：验证 renameThread 严格先获取 root 的 tree lock，再获取目标 thread 的行锁。
+  void renameThreadLocksOnlyItsOwnThread() {
+    // 测试意图：renameThread 只改本行元数据，仅锁目标 thread，不取 tree lock。
     Baseline baseline = seedBaseline(store);
     UUID childId =
         createChildThread(
@@ -185,13 +185,13 @@ class HarnessRuntimeTreeLockTest {
     ThreadState renamed =
         recordingRuntime.renameThread(new RenameThreadCommand(childId, "new-child-name"));
     assertEquals("new-child-name", renamed.name());
-    assertEquals(List.of("lockTree:" + baseline.threadId(), "lockThread:" + childId), locks);
+    assertEquals(List.of("lockThread:" + childId), locks);
   }
 
   @Test
-  void setThreadYoloAcquiresTreeLockBeforeThreadLock() {
-    // 测试意图：验证 setThreadYolo 严格先获取 root 的 tree lock，再获取目标 thread 的行锁。
-    // 只有执行根拥有独立 YOLO 开关（子代理的开关取自执行根 执行根），因此目标必须是根线程本身。
+  void setThreadYoloLocksOnlyItsOwnThread() {
+    // 测试意图：setThreadYolo 只改根行，仅锁目标 thread，不取 tree lock。
+    // 只有执行根拥有独立 YOLO 开关（子代理的开关取自执行根），因此目标必须是根线程本身。
     Baseline baseline = seedBaseline(store);
 
     List<String> locks = new ArrayList<>();
@@ -201,13 +201,12 @@ class HarnessRuntimeTreeLockTest {
     ThreadState updated =
         recordingRuntime.setThreadYolo(new SetThreadYoloCommand(baseline.threadId(), true));
     assertTrue(updated.yoloEnabled());
-    assertEquals(
-        List.of("lockTree:" + baseline.threadId(), "lockThread:" + baseline.threadId()), locks);
+    assertEquals(List.of("lockThread:" + baseline.threadId()), locks);
   }
 
   @Test
-  void decideToolApprovalAcquiresTreeLockBeforeThreadLock() {
-    // 测试意图：验证 decideToolApproval 严格先获取 root 的 tree lock，再获取 thread/model/tool 行锁。
+  void decideToolApprovalLocksOnlyTheOwningThread() {
+    // 测试意图：decideToolApproval 只锁 owning thread -> model -> tool siblings，不取 tree lock。
     HarnessRuntimeTestSupport.ToolBaseline baseline = seedToolBaseline(store);
     setWaitingApproval(store, baseline);
 
@@ -227,7 +226,6 @@ class HarnessRuntimeTreeLockTest {
     assertEquals(ToolInvocationStatus.READY, decided.status());
     assertEquals(
         List.of(
-            "lockTree:" + baseline.threadId(),
             "lockThread:" + baseline.threadId(),
             "lockModelInvocation:" + baseline.modelId(),
             "lockToolInvocationsByAssistantEntryId:" + baseline.assistantEntryId()),
@@ -235,8 +233,8 @@ class HarnessRuntimeTreeLockTest {
   }
 
   @Test
-  void getThreadSnapshotAcquiresTreeLockBeforeThreadLock() {
-    // 测试意图：验证 getThreadSnapshot 严格先获取 root 的 tree lock，再获取 thread 行锁及后续 invocation 锁。
+  void getThreadSnapshotLocksOnlyTheOwnedThread() {
+    // 测试意图：getThreadSnapshot 只锁目标 thread 及其适用 invocation，不取 tree lock。
     Baseline baseline = seedBaseline(store);
     UUID childId =
         createChildThread(
@@ -252,7 +250,7 @@ class HarnessRuntimeTreeLockTest {
 
     ThreadSnapshot snapshot = recordingRuntime.getThreadSnapshot(childId);
     assertNotNull(snapshot);
-    assertEquals(List.of("lockTree:" + baseline.threadId(), "lockThread:" + childId), locks);
+    assertEquals(List.of("lockThread:" + childId), locks);
   }
 
   @Test
@@ -328,16 +326,47 @@ class HarnessRuntimeTreeLockTest {
   }
 
   @Test
-  void treeLockFailureRollsBackTransaction() {
-    // 测试意图：验证当 tree lock 获取失败抛出异常时，整个事务回滚，无任何行被修改。
+  void treeLockFailureRollsBackStructuralCompaction() {
+    // 测试意图：真正的树结构写入（手工压缩）在 tree lock 失败时整体回滚，不创建子 Thread/Work，也不改父 head/version。
+    Fixture fixture = manualCompactionFixture();
+    ClosedTurnBaseline baseline = seedCompactionEligibleTurn(fixture.store);
+    HarnessStore sabotagedStore =
+        sabotagingStore(
+            fixture.store,
+            Map.of(
+                "lockTree",
+                args -> {
+                  throw new IllegalStateException("simulated tree lock conflict");
+                }));
+    HarnessRuntime sabotagedRuntime =
+        new HarnessRuntime(sabotagedStore, fixture.resolver, fixture.compactionConfigProvider);
+
+    assertThrows(
+        IllegalStateException.class,
+        () -> sabotagedRuntime.compactThread(new CompactThreadCommand(baseline.threadId(), 0L)));
+
+    ThreadState stored =
+        fixture.store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
+    assertEquals("main", stored.name());
+    assertEquals(0L, stored.version());
+    assertEquals(baseline.turnEndId(), stored.headEntryId());
+    assertEquals(
+        1,
+        fixture.store.transaction(tx -> tx.listThreadsBySession(baseline.sessionId())).size(),
+        "failed tree-lock plan must not create the compaction child");
+  }
+
+  @Test
+  void threadLockFailureRollsBackSingleEntityRename() {
+    // 测试意图：单实体 rename 的行锁失败同样整体回滚，不留下任何修改。
     Baseline baseline = seedBaseline(store);
     HarnessStore sabotagedStore =
         sabotagingStore(
             store,
             Map.of(
-                "lockTree",
+                "lockThread",
                 args -> {
-                  throw new IllegalStateException("simulated tree lock conflict");
+                  throw new IllegalStateException("simulated thread lock conflict");
                 }));
 
     HarnessRuntime sabotagedRuntime = HarnessRuntimeTestSupport.runtime(sabotagedStore, clock);

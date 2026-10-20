@@ -7,7 +7,13 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
-/** 线程树锁辅助工具：在获取任何 Session/Thread/Work 业务行锁之前获取执行树事务级锁。 */
+/**
+ * 线程树锁辅助工具：仅供真正修改树结构或跨 Thread 写入的事务，在获取任何 Session/Thread/Work 业务行锁之前获取执行树事务级锁。
+ *
+ * <p>经核实，{@code HarnessStore.Transaction#lockThread} 只对目标 {@code harness_thread} 行取 {@code FOR
+ * UPDATE}，不会额外先取 Session {@code KEY SHARE}；单实体控制只需要这一把 own Thread 行锁，不要为补锁序而额外获取 Session 或祖先 Thread
+ * 锁。
+ */
 public final class ThreadTreeLocks {
 
   private ThreadTreeLocks() {}

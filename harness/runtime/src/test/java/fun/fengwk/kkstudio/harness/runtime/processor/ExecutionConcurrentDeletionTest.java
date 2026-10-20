@@ -39,8 +39,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
 /**
- * 回归：持根树锁的合法并发深删除在「首次 ancestor 读取」与「取得树锁」之间提交时，进程内 Model/Tool 执行必须映射 {@link
- * ProcessResult#LOST_OWNERSHIP}——不把合法缺失当作执行树结构漂移抛出，不留下 durable 写入或实时事件，并释放本地执行资源。
+ * 回归：持根树锁的合法并发深删除在 Model/Tool 执行取得本 Thread 行锁之前提交时，进程内执行必须映射 {@link
+ * ProcessResult#LOST_OWNERSHIP}——不把合法缺失当作结构漂移抛出，不留下 durable 写入或实时事件，并释放本地执行资源。 单 Thread
+ * 状态提交不再取执行树锁，因此删除点收敛到 own Thread 行锁。
  */
 class ExecutionConcurrentDeletionTest {
 
@@ -54,23 +55,23 @@ class ExecutionConcurrentDeletionTest {
   }
 
   @Test
-  void toolActivationLosesOwnershipWhenThreadDeletedWhileAcquiringTreeLock() {
+  void toolActivationLosesOwnershipWhenThreadDeletedBeforeOwnThreadLock() {
     ToolExecutionFixture fixture = toolExecutionFixture();
     long versionBefore = threadVersion(fixture.rawStore, fixture.threadId);
 
-    fixture.store.armDeletionOnNextTreeLock();
+    fixture.store.armDeletionBeforeNextThreadLock();
     assertEquals(ProcessResult.LOST_OWNERSHIP, fixture.execution.activate(fixture.handle));
 
     fixture.assertLostWithStatus(ToolInvocationStatus.DISPATCHING, versionBefore);
   }
 
   @Test
-  void toolTerminalCallbackLosesOwnershipWhenThreadDeletedWhileAcquiringTreeLock() {
+  void toolTerminalCallbackLosesOwnershipWhenThreadDeletedBeforeOwnThreadLock() {
     ToolExecutionFixture fixture = toolExecutionFixture();
     assertEquals(ProcessResult.STARTED, fixture.execution.activate(fixture.handle));
     long versionBefore = threadVersion(fixture.rawStore, fixture.threadId);
 
-    fixture.store.armDeletionOnNextTreeLock();
+    fixture.store.armDeletionBeforeNextThreadLock();
     fixture.execution.onSucceeded(
         ToolSuccess.withoutEffects(
             ToolProcessorTestSupport.successResult("call-1", new TextResultContent("ok"))));
@@ -79,11 +80,11 @@ class ExecutionConcurrentDeletionTest {
   }
 
   @Test
-  void modelActivationLosesOwnershipWhenThreadDeletedWhileAcquiringTreeLock() {
+  void modelActivationLosesOwnershipWhenThreadDeletedBeforeOwnThreadLock() {
     ModelExecutionFixture fixture = modelExecutionFixture(false);
     long versionBefore = threadVersion(fixture.rawStore, fixture.threadId);
 
-    fixture.store.armDeletionOnNextTreeLock();
+    fixture.store.armDeletionBeforeNextThreadLock();
     assertEquals(ProcessResult.LOST_OWNERSHIP, fixture.execution.activate(fixture.handle));
 
     fixture.assertLostWithStatus(ModelInvocationStatus.DISPATCHING, versionBefore);
@@ -91,11 +92,11 @@ class ExecutionConcurrentDeletionTest {
   }
 
   @Test
-  void modelSuccessCallbackLosesOwnershipWhenThreadDeletedWhileAcquiringTreeLock() {
+  void modelSuccessCallbackLosesOwnershipWhenThreadDeletedBeforeOwnThreadLock() {
     ModelExecutionFixture fixture = modelExecutionFixture(true);
     long versionBefore = threadVersion(fixture.rawStore, fixture.threadId);
 
-    fixture.store.armDeletionOnNextTreeLock();
+    fixture.store.armDeletionBeforeNextThreadLock();
     fixture.execution.onSucceeded(new ProviderCompletion(response("answer")));
 
     fixture.assertLostWithStatus(ModelInvocationStatus.RUNNING, versionBefore);
@@ -111,8 +112,8 @@ class ExecutionConcurrentDeletionTest {
             support.store, support.toolInvocationId, ToolProcessorTestSupport.NOW);
     ToolProcessorTestSupport.toDispatched(
         support.store, support.toolInvocationId, ToolProcessorTestSupport.NOW);
-    DeletionDuringTreeLockStore store =
-        new DeletionDuringTreeLockStore(support.store, support.baseline.threadId());
+    DeletionBeforeThreadLockStore store =
+        new DeletionBeforeThreadLockStore(support.store, support.baseline.threadId());
     AtomicInteger releases = new AtomicInteger();
     ToolExecution execution =
         new ToolExecution(
@@ -147,7 +148,7 @@ class ExecutionConcurrentDeletionTest {
       ToolProcessorTestSupport.RecordingSink sink,
       UUID toolInvocationId,
       UUID threadId,
-      DeletionDuringTreeLockStore store,
+      DeletionBeforeThreadLockStore store,
       ToolExecution execution,
       ToolProcessorTestSupport.FakeHandle handle,
       AtomicInteger releases) {
@@ -215,7 +216,7 @@ class ExecutionConcurrentDeletionTest {
     ModelExecutionFixture fixture =
         new ModelExecutionFixture(
             rawStore,
-            new DeletionDuringTreeLockStore(rawStore, threadId),
+            new DeletionBeforeThreadLockStore(rawStore, threadId),
             threadId,
             invocationId,
             claim,
@@ -233,13 +234,13 @@ class ExecutionConcurrentDeletionTest {
     final UUID invocationId;
     final AtomicInteger releases = new AtomicInteger();
     final List<Object> events = new CopyOnWriteArrayList<>();
-    final DeletionDuringTreeLockStore store;
+    final DeletionBeforeThreadLockStore store;
     final ModelExecution execution;
     final ModelHandle handle = new ModelHandle();
 
     ModelExecutionFixture(
         InMemoryHarnessStore rawStore,
-        DeletionDuringTreeLockStore store,
+        DeletionBeforeThreadLockStore store,
         UUID threadId,
         UUID invocationId,
         ClaimedWork claim,
@@ -325,10 +326,10 @@ class ExecutionConcurrentDeletionTest {
   }
 
   /**
-   * 在树锁获取点提交并发深删除：{@code findAncestorChain} 首次仍读到真实链，{@code lockTree} 委托成功后目标线程即视为已被
-   * 另一事务（持根树锁）删除，其后的线程读取一律返回空。
+   * 在本 Thread 行锁获取点提交并发深删除：第一次 {@code lockThread} 即视为删除事务已先提交，返回空；其后的线程读取一律返回空。 这验证单 Thread 状态提交仅凭
+   * own Thread 行锁即可与 delete 线性化。
    */
-  private static final class DeletionDuringTreeLockStore implements HarnessStore {
+  private static final class DeletionBeforeThreadLockStore implements HarnessStore {
 
     private final InMemoryHarnessStore delegate;
     private final UUID deletedThreadId;
@@ -336,13 +337,13 @@ class ExecutionConcurrentDeletionTest {
     private boolean armed;
     private boolean deleted;
 
-    DeletionDuringTreeLockStore(InMemoryHarnessStore delegate, UUID deletedThreadId) {
+    DeletionBeforeThreadLockStore(InMemoryHarnessStore delegate, UUID deletedThreadId) {
       this.delegate = delegate;
       this.deletedThreadId = deletedThreadId;
     }
 
     /** 下一次获取树锁时提交删除；模拟深删除在树锁等待期间落地。 */
-    void armDeletionOnNextTreeLock() {
+    void armDeletionBeforeNextThreadLock() {
       armed = true;
     }
 
@@ -374,12 +375,13 @@ class ExecutionConcurrentDeletionTest {
                           new Class<?>[] {Transaction.class},
                           (proxy, method, args) -> {
                             String name = method.getName();
-                            if (name.equals("lockTree")) {
-                              Object locked = invoke(tx, method, args);
-                              if (armed) {
-                                deleted = true;
-                              }
-                              return locked;
+                            if (armed
+                                && name.equals("lockThread")
+                                && args != null
+                                && deletedThreadId.equals(args[0])) {
+                              armed = false;
+                              deleted = true;
+                              return Optional.empty();
                             }
                             if (deleted && args != null && deletedThreadId.equals(args[0])) {
                               if (name.equals("findAncestorChain")) {

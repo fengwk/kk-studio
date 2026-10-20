@@ -36,6 +36,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
@@ -50,11 +51,14 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
 
+import java.lang.reflect.Proxy;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.function.Function;
 
 /**
  * Stop 的子树范围、每节点持久回执与 Join 结算契约。
@@ -137,6 +141,27 @@ class HarnessRuntimeStopSubtreeTest {
         ThreadExecutionControl.RUNNABLE,
         store.transaction(tx -> tx.findThread(root.threadId()).orElseThrow()).executionControl());
     assertEquals(0L, version(root.threadId()));
+  }
+
+  @Test
+  void stoppingChildDoesNotLockItsUnrelatedSibling() {
+    // 测试意图：Stop 只锁目标子树与为 Join 交付所需的祖先，不锁同一父下无关的兄弟 Thread。
+    HarnessRuntimeTestSupport.Baseline root = seedBaseline(store);
+    UUID child =
+        createChildThread(root.threadId(), root.threadId(), root.sessionId(), root.rootEntryId());
+    UUID sibling =
+        createChildThread(root.threadId(), root.threadId(), root.sessionId(), root.rootEntryId());
+    List<String> locks = new ArrayList<>();
+    HarnessRuntime recording =
+        runtime(
+            recordingStore(store, locks), Clock.fixed(Instant.ofEpochMilli(5_000), ZoneOffset.UTC));
+
+    recording.stop(new StopCommand(child, TestIds.id(16), 0L));
+
+    assertTrue(locks.contains("lockTree:" + root.threadId()), "structural Stop keeps tree lock");
+    assertTrue(locks.contains("lockThread:" + child), "Stop locks the stopped subtree");
+    assertTrue(locks.contains("lockThread:" + root.threadId()), "Stop locks joined ancestors");
+    assertFalse(locks.contains("lockThread:" + sibling), "Stop must not lock unrelated siblings");
   }
 
   @Test
@@ -441,6 +466,38 @@ class HarnessRuntimeStopSubtreeTest {
           return null;
         });
     return childId;
+  }
+
+  private static HarnessStore recordingStore(
+      InMemoryHarnessStore delegate, List<String> lockCalls) {
+    return (HarnessStore)
+        Proxy.newProxyInstance(
+            HarnessStore.class.getClassLoader(),
+            new Class<?>[] {HarnessStore.class},
+            (proxy, method, args) -> {
+              if (!method.getName().equals("transaction")) {
+                return method.invoke(delegate, args);
+              }
+              @SuppressWarnings("unchecked")
+              Function<HarnessStore.Transaction, Object> callback =
+                  (Function<HarnessStore.Transaction, Object>) args[0];
+              return delegate.transaction(
+                  tx -> {
+                    HarnessStore.Transaction wrapped =
+                        (HarnessStore.Transaction)
+                            Proxy.newProxyInstance(
+                                HarnessStore.Transaction.class.getClassLoader(),
+                                new Class<?>[] {HarnessStore.Transaction.class},
+                                (transactionProxy, transactionMethod, transactionArgs) -> {
+                                  String name = transactionMethod.getName();
+                                  if (name.equals("lockTree") || name.equals("lockThread")) {
+                                    lockCalls.add(name + ":" + transactionArgs[0]);
+                                  }
+                                  return transactionMethod.invoke(tx, transactionArgs);
+                                });
+                    return callback.apply(wrapped);
+                  });
+            });
   }
 
   private void insertJoin(UUID joinId, UUID parentThreadId, UUID childThreadId) {
