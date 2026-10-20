@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useQueryClient, type QueryClient } from '@tanstack/react-query'
+import { useQueryClient } from '@tanstack/react-query'
 import { useApplicationEvents } from '@/shared/app-events'
 import {
   createRealtimeFrameScheduler,
@@ -11,15 +11,19 @@ import {
   isProcessOutputPartial,
   isRealtimeModelDeltaGap,
   isRealtimeToolStreamActive,
+  mergeRealtimeModelStreamAfterCheckpoint,
+  parseRealtimeModelCheckpoint,
   parseRealtimeModelDelta,
   parseRealtimeToolPartial,
   reduceRealtimeModelStream,
   reduceRealtimeToolStream,
   snapshotModelStream,
   snapshotToolStream,
+  type RealtimeModelDelta,
   type RealtimeModelStream,
   type RealtimeToolStream,
 } from '@/features/ai/runtime/thread-realtime-state'
+import { harnessService } from '@/shared/api/harness-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import type {
   ModelAttemptFailureDTO,
@@ -67,10 +71,10 @@ export function useHarnessThreadRealtime(
   const invocationRef = useRef<ModelInvocationDTO | null>(modelInvocation)
   const toolInvocationsRef = useRef<ToolInvocationDTO[]>(toolInvocations)
   const modelAttemptFailuresRef = useRef<readonly ModelAttemptFailureDTO[]>(modelAttemptFailures)
-  const gapRef = useRef<{
-    invocationId: string
-    attempt: number
-    sequence: number
+  const modelRecoveryRef = useRef<ModelRecovery | null>(null)
+  const catchupInFlightRef = useRef<{
+    key: string
+    promise: Promise<void>
   } | null>(null)
   // TOOL_PARTIAL 的有界精确去重（realtime notification 可能重投递）：按
   // thread:invocation:attempt 分组、以生产端 eventId 为唯一键，因此 attempt 变化/终态
@@ -88,12 +92,38 @@ export function useHarnessThreadRealtime(
     schedulerOptions,
   )
 
-  const { requestGapRecovery, clearRecoveryLoop } = useGapRecoveryLoop(
-    queryClient,
-    modelStreamRef,
-    invocationRef,
-    modelAttemptFailuresRef,
-  )
+  const clearModelRecovery = useCallback(() => {
+    modelRecoveryRef.current = null
+  }, [])
+
+  /**
+   * 每个 thread:invocation:attempt 只保留一次在途 catchup；响应只是 202
+   * best-effort ack，不据此推断 owner 在线或推进 checkpoint，也不自动重试。
+   */
+  const requestCatchup = useCallback((
+    catchupThreadId: string,
+    invocationId: string,
+    attempt: number,
+    force = false,
+  ) => {
+    const key = `${catchupThreadId}:${invocationId}:${attempt}`
+    if (!force && catchupInFlightRef.current?.key === key) {
+      return
+    }
+    const entry: { key: string; promise: Promise<void> } = {
+      key,
+      promise: Promise.resolve(),
+    }
+    entry.promise = harnessService
+      .requestStreamCatchup(catchupThreadId, { invocationId, attempt })
+      .catch(() => undefined)
+      .finally(() => {
+        if (catchupInFlightRef.current === entry) {
+          catchupInFlightRef.current = null
+        }
+      })
+    catchupInFlightRef.current = entry
+  }, [])
 
   useEffect(() => {
     return () => {
@@ -116,56 +146,98 @@ export function useHarnessThreadRealtime(
     modelAttemptFailuresRef.current = modelAttemptFailures
     const snapshot = snapshotModelStream(threadId, modelInvocation)
     snapshotModelStreamRef.current = snapshot
+    const attemptFailed =
+      modelInvocation != null
+      && isFailedAttempt(modelInvocation.attempt, modelInvocation, modelAttemptFailures)
+    if (attemptFailed) {
+      clearModelRecovery()
+    }
     const current = modelStreamRef.current
     let next = current
     if (snapshot == null) {
-      gapRef.current = null
+      clearModelRecovery()
       next = null
     } else if (snapshot.status !== 'streaming') {
       // 持久化终态边界：resultJson/errorJson 投影无条件
       // 取代任何更高 sequence 的 lossy realtime overlay（流式 seq8 绝不能压过
       // 持久化 seq7 的结果）。resultEntryId == null 时投影保持可见，直到
       // 持久化 Entry 到达；期间事件处理器 fence 拒绝后续 delta。
+      clearModelRecovery()
       next = snapshot
-      const gap = gapRef.current
+    } else {
+      const recovery = modelRecoveryRef.current
       if (
-        gap != null
-        && gap.invocationId === snapshot.invocationId
-        && gap.attempt === snapshot.attempt
-        && snapshot.sequence >= gap.sequence
+        !attemptFailed
+        && recovery != null
+        && recovery.threadId === snapshot.threadId
+        && recovery.invocationId === snapshot.invocationId
+        && recovery.attempt === snapshot.attempt
       ) {
-        gapRef.current = null
-      }
-    } else if (
-      current == null
-      || current.threadId !== snapshot.threadId
-      || current.invocationId !== snapshot.invocationId
-      || current.attempt !== snapshot.attempt
-      || snapshot.sequence >= current.sequence
-    ) {
-      const hasVisibleOverlay =
-        snapshot.sequence > 0
-        || Boolean(snapshot.text)
-        || Boolean(snapshot.thinking)
-        || snapshot.toolCalls.length > 0
-        || (
-          current != null
-          && current.threadId === snapshot.threadId
-          && current.invocationId === snapshot.invocationId
-          && current.attempt === snapshot.attempt
-          && current.toolCalls.length > 0
+        // checkpoint 响应竞态：以 snapshot 为基线顺序拼接在途缓冲的后缀，
+        // 快照落后时保留已显示 overlay，绝不回退或跳过缺口。
+        const target = recovery.pendingCheckpointSequence
+          ?? Math.max(0, recovery.firstGapSequence - 1)
+        const merged = mergeRealtimeModelStreamAfterCheckpoint(
+          snapshot,
+          current,
+          [...recovery.buffered.values()],
+          target,
         )
-      next = hasVisibleOverlay
-        ? mergeSnapshotToolCalls(snapshot, current)
-        : null
-      const gap = gapRef.current
-      if (
-        gap != null
-        && gap.invocationId === snapshot.invocationId
-        && gap.attempt === snapshot.attempt
-        && snapshot.sequence >= gap.sequence
-      ) {
-        gapRef.current = null
+        next = hasVisibleModelOverlay(merged.stream) ? merged.stream : null
+        dropBufferedThrough(recovery, next?.sequence ?? 0)
+        const checkpointCovered = merged.stream.sequence >= target
+        const suffixComplete = merged.missingSequence == null
+        const overflowCovered =
+          !recovery.overflowed || merged.stream.sequence >= recovery.highestObservedSequence
+        if (checkpointCovered && suffixComplete && overflowCovered) {
+          clearModelRecovery()
+        } else {
+          // 该 checkpoint 仍不足（或 snapshot 暂时落后）：保持 gap，等下一周期
+          // checkpoint/终态/attempt 切换；不重复拉旧 snapshot，也不自动重试。
+          recovery.pendingCheckpointSequence = null
+          if (recovery.overflowed) {
+            // 已丢弃的 suffix 只能由覆盖最高已观察 sequence 的 checkpoint 恢复。
+            recovery.firstGapSequence = Math.max(
+              recovery.firstGapSequence,
+              recovery.highestObservedSequence + 1,
+            )
+          } else if (
+            merged.missingSequence != null
+            && merged.missingSequence > recovery.firstGapSequence - 1
+          ) {
+            // 只把缺口阈值向后推；首次跳号 current=2 / observed=5 的阈值仍是
+            // firstGapSequence=5 => checkpoint>=4，绝不能弱化成 missing=3 => 2。
+            recovery.firstGapSequence = merged.missingSequence + 1
+          }
+          recovery.requested = true
+        }
+      } else {
+        if (recovery != null) {
+          clearModelRecovery()
+        }
+        if (
+          current == null
+          || current.threadId !== snapshot.threadId
+          || current.invocationId !== snapshot.invocationId
+          || current.attempt !== snapshot.attempt
+          || snapshot.sequence >= current.sequence
+        ) {
+          const hasVisibleOverlay =
+            snapshot.sequence > 0
+            || Boolean(snapshot.text)
+            || Boolean(snapshot.thinking)
+            || snapshot.toolCalls.length > 0
+            || (
+              current != null
+              && current.threadId === snapshot.threadId
+              && current.invocationId === snapshot.invocationId
+              && current.attempt === snapshot.attempt
+              && current.toolCalls.length > 0
+            )
+          next = hasVisibleOverlay
+            ? mergeSnapshotToolCalls(snapshot, current)
+            : null
+        }
       }
     }
     const modelStreamDirty =
@@ -224,7 +296,7 @@ export function useHarnessThreadRealtime(
       setToolStreams(streams)
       scheduler.cancelTool()
     }
-  }, [modelAttemptFailures, modelInvocation, modelStream, scheduler, threadId, toolInvocations, toolStreams])
+  }, [clearModelRecovery, modelAttemptFailures, modelInvocation, modelStream, scheduler, threadId, toolInvocations, toolStreams])
 
   useEffect(() => {
     // 只有 Thread 消失或订阅真正被禁用才清空 overlays；`subscription == null` 或
@@ -232,7 +304,7 @@ export function useHarnessThreadRealtime(
     // subscription effect 即将落定）：保留 snapshot-seeded overlay，等下一 render
     // 的 subscription 就绪后通过应用级 Manager 建立订阅。
     if (!threadId || !subscriptionReady) {
-      clearRecoveryLoop()
+      clearModelRecovery()
       scheduler.cancel()
       modelStreamRef.current = null
       setModelStream(null)
@@ -247,12 +319,90 @@ export function useHarnessThreadRealtime(
       return undefined
     }
 
-    const invalidateSnapshot = () =>
+    const refetchSnapshot = (): Promise<void> =>
       queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(threadId) })
-    // 协议 data 是 delta envelope 的 JSON 对象；回序列化为同一文本后，
-    // reducer 的严格解析保持不变。
+    // 订阅/version/resync/error 的对账是 best-effort；失败只由下一次 durable
+    // 信号重试，绝不能变成 unhandled rejection。
+    const invalidateSnapshot = (): Promise<void> =>
+      refetchSnapshot().catch(() => undefined)
+    // 协议 data 是 envelope 的 JSON 对象；回序列化为同一文本后，reducer 的严格解析保持不变。
     const handleRealtime = (data: unknown) => {
       const raw = JSON.stringify(data)
+      const checkpoint = parseRealtimeModelCheckpoint(raw)
+      if (checkpoint != null && checkpoint.threadId === threadId) {
+        const durable = invocationRef.current
+        if (
+          !isActiveModelAttempt(
+            durable,
+            threadId,
+            checkpoint.invocationId,
+            checkpoint.attempt,
+            modelAttemptFailuresRef.current,
+          )
+        ) {
+          return
+        }
+        const current =
+          modelStreamRef.current
+          ?? snapshotModelStreamRef.current
+          ?? snapshotModelStream(threadId, durable)
+        const visibleSequence = current?.sequence ?? 0
+        let recovery = modelRecoveryRef.current
+        if (
+          recovery != null
+          && (
+            recovery.invocationId !== checkpoint.invocationId
+            || recovery.attempt !== checkpoint.attempt
+          )
+        ) {
+          clearModelRecovery()
+          recovery = null
+        }
+        if (recovery == null && checkpoint.sequence <= visibleSequence) {
+          // 连续 delta overlay 已完整覆盖该 durable 水位（例如周期 checkpoint 仍
+          // 停在已显示的 sequence）：无需创建恢复 episode，也无需无意义回读。
+          return
+        }
+        const requiredSequence =
+          recovery != null
+            ? Math.max(0, recovery.firstGapSequence - 1)
+            : visibleSequence
+        if (checkpoint.sequence < requiredSequence) {
+          // 尚未覆盖缺口（例如仅重复了已见的 durable 水位）：等待下一周期。
+          return
+        }
+        if (recovery == null) {
+          recovery = createModelRecovery(
+            threadId,
+            checkpoint.invocationId,
+            checkpoint.attempt,
+            visibleSequence + 1,
+          )
+          modelRecoveryRef.current = recovery
+        }
+        recovery.requested = true
+        recovery.pendingCheckpointSequence = Math.max(
+          recovery.pendingCheckpointSequence ?? 0,
+          checkpoint.sequence,
+        )
+        // 真正的单飞锁是 refreshInFlight；pendingCheckpointSequence 只记录等待
+        // snapshot 覆盖的水位。promise settled 后立即释放锁，不依赖 props 变化；
+        // 同 sequence 的下一 checkpoint 事件也可再次触发（非自动重试）。
+        if (!recovery.refreshInFlight) {
+          recovery.refreshInFlight = true
+          // 仅在 checkpoint 覆盖缺口/推进水位时回读一次；快照仍落后就等下一周期，
+          // 不循环拉取旧 snapshot。旧 recovery/thread/attempt 的 settle 不得
+          // 清掉新 recovery 的在途状态。
+          void refetchSnapshot()
+            .catch(() => undefined)
+            .finally(() => {
+              if (modelRecoveryRef.current === recovery) {
+                recovery.refreshInFlight = false
+              }
+            })
+        }
+        return
+      }
       const delta = parseRealtimeModelDelta(raw)
       if (delta != null && delta.threadId === threadId) {
         // 持久化终态 fence：终态 ModelInvocation（result/error/已挂接 result
@@ -260,19 +410,14 @@ export function useHarnessThreadRealtime(
         // Entry 到达前保持可见，但终态输出永远不会再追加。
         const durable = invocationRef.current
         if (
-          durable == null
-          || durable.threadId !== threadId
-          || durable.id !== delta.invocationId
-          || durable.attempt !== delta.attempt
-          || durable.resultJson != null
-          || durable.errorJson != null
-          || durable.resultEntryId != null
+          !isActiveModelAttempt(
+            durable,
+            threadId,
+            delta.invocationId,
+            delta.attempt,
+            modelAttemptFailuresRef.current,
+          )
         ) {
-          return
-        }
-        // Durable failedAttempts fence：已记录失败的旧 attempt 迟到 MODEL_DELTA
-        // 绝不能当作当前活动流应用。
-        if (isFailedAttempt(delta.attempt, durable, modelAttemptFailuresRef.current)) {
           return
         }
         const current = modelStreamRef.current
@@ -285,15 +430,34 @@ export function useHarnessThreadRealtime(
         if (base == null) {
           return
         }
-        if (isRealtimeModelDeltaGap(base, delta)) {
-          gapRef.current = {
-            invocationId: delta.invocationId,
-            attempt: delta.attempt,
-            sequence: delta.sequence,
+        let recovery = modelRecoveryRef.current
+        if (
+          recovery != null
+          && (
+            recovery.invocationId !== delta.invocationId
+            || recovery.attempt !== delta.attempt
+          )
+        ) {
+          clearModelRecovery()
+          recovery = null
+        }
+        if (recovery == null && isRealtimeModelDeltaGap(base, delta)) {
+          recovery = createModelRecovery(
+            threadId,
+            delta.invocationId,
+            delta.attempt,
+            delta.sequence,
+          )
+          modelRecoveryRef.current = recovery
+        }
+        if (recovery != null) {
+          // gap 或 checkpoint 在途期间到达的 delta 一律按 sequence 入有界 suffix
+          // 缓冲；snapshot 基线到达后再顺序拼接，绝不把缺口后的片段直接显示。
+          bufferModelDelta(recovery, delta)
+          if (!recovery.requested) {
+            recovery.requested = true
+            requestCatchup(threadId, delta.invocationId, delta.attempt)
           }
-          // 单飞恢复：同一时刻只做一次 refetch，带有限退避重新武装，
-          // 直到 checkpoint 追上（既不是一次性，也不会每个 delta 并发）。
-          requestGapRecovery(threadId, delta.invocationId, delta.attempt, delta.sequence)
           return
         }
         const next = reduceRealtimeModelStream(base, delta)
@@ -358,7 +522,25 @@ export function useHarnessThreadRealtime(
     const unsubscribe = applicationEvents.subscribe(
       { kind: 'thread', id: subscription.threadId },
       {
-        onSubscribed: invalidateSnapshot,
+        onSubscribed: () => {
+          invalidateSnapshot()
+          // 新订阅（含每次重连）若仍有 RUNNING model，只请求一次 best-effort
+          // 追帧；202 不表示 owner 在线，后续完全由 checkpoint/终态驱动。
+          const durable = invocationRef.current
+          if (
+            durable != null
+            && durable.status === 'RUNNING'
+            && isActiveModelAttempt(
+              durable,
+              subscription.threadId,
+              durable.id,
+              durable.attempt,
+              modelAttemptFailuresRef.current,
+            )
+          ) {
+            requestCatchup(subscription.threadId, durable.id, durable.attempt, true)
+          }
+        },
         onEvent: (name, data) => {
           if (name === 'version') {
             invalidateSnapshot()
@@ -372,15 +554,15 @@ export function useHarnessThreadRealtime(
     )
     return () => {
       unsubscribe()
-      clearRecoveryLoop()
+      clearModelRecovery()
       scheduler.cancel()
       toolPartialSeenEventIdsRef.current = new Map()
     }
   }, [
     applicationEvents,
-    clearRecoveryLoop,
+    clearModelRecovery,
     queryClient,
-    requestGapRecovery,
+    requestCatchup,
     scheduler,
     subscription,
     subscriptionReady,
@@ -507,18 +689,121 @@ function sameModelStream(left: RealtimeModelStream, right: RealtimeModelStream):
     && left.errorText === right.errorText
 }
 
-const RECOVERY_BACKOFF_BASE_MS = 200
-const RECOVERY_BACKOFF_MAX_MS = 2000
-const RECOVERY_MAX_ATTEMPTS = 8
 /** 每个 thread:invocation:attempt 保留的已见 eventId 上限；仅 best-effort 防重投递。 */
 const TOOL_PARTIAL_SEEN_EVENT_ID_LIMIT = 256
+/** gap / checkpoint 在途期间缓存的 delta suffix 硬上限；超限后清空并继续等 checkpoint。 */
+const MODEL_GAP_BUFFER_MAX_DELTAS = 256
+/** suffix 预算按 UTF-8 字节计，避免非 ASCII/emoji 按 UTF-16 code unit 低估真实体积。 */
+const MODEL_GAP_BUFFER_MAX_BYTES = 512 * 1024
+const UTF8_ENCODER = new TextEncoder()
 
-interface GapRecovery {
+interface ModelRecovery {
   threadId: string
   invocationId: string
   attempt: number
-  gapSequence: number
-  attempts: number
+  /** 触发恢复的首个跳号 delta；null 表示只等待订阅 catchup checkpoint。 */
+  firstGapSequence: number
+  /** 已按 sequence 索引的待拼接 suffix。 */
+  buffered: Map<number, RealtimeModelDelta>
+  bufferedBytes: number
+  highestObservedSequence: number
+  /** 缓冲超限后不再信任已丢弃的 suffix，只能等待覆盖它的下一 checkpoint。 */
+  overflowed: boolean
+  /** 本恢复 episode 已发过 catchup（或已被订阅 catchup 覆盖）。 */
+  requested: boolean
+  /** 已接受、等待 snapshot 覆盖的 checkpoint 水位（拼接目标）。 */
+  pendingCheckpointSequence: number | null
+  /** 真正在途的 snapshot 回读；与 pending 水位分离，settled 后即释放。 */
+  refreshInFlight: boolean
+}
+
+function createModelRecovery(
+  threadId: string,
+  invocationId: string,
+  attempt: number,
+  firstGapSequence: number,
+): ModelRecovery {
+  return {
+    threadId,
+    invocationId,
+    attempt,
+    firstGapSequence,
+    buffered: new Map(),
+    bufferedBytes: 0,
+    highestObservedSequence: firstGapSequence - 1,
+    overflowed: false,
+    requested: false,
+    pendingCheckpointSequence: null,
+    refreshInFlight: false,
+  }
+}
+
+function bufferModelDelta(recovery: ModelRecovery, delta: RealtimeModelDelta): void {
+  if (recovery.buffered.has(delta.sequence)) {
+    return
+  }
+  const size = deltaByteSize(delta)
+  if (
+    recovery.buffered.size >= MODEL_GAP_BUFFER_MAX_DELTAS
+    || recovery.bufferedBytes + size > MODEL_GAP_BUFFER_MAX_BYTES
+  ) {
+    // 有界：丢弃已缓存 suffix 并保持 gap；后续只接受能覆盖全部已观察
+    // sequence 的 checkpoint，绝不无界积累。
+    recovery.buffered.clear()
+    recovery.bufferedBytes = 0
+    recovery.overflowed = true
+    recovery.highestObservedSequence = Math.max(
+      recovery.highestObservedSequence,
+      delta.sequence,
+    )
+    return
+  }
+  recovery.buffered.set(delta.sequence, delta)
+  recovery.bufferedBytes += size
+  recovery.highestObservedSequence = Math.max(
+    recovery.highestObservedSequence,
+    delta.sequence,
+  )
+}
+
+function dropBufferedThrough(recovery: ModelRecovery, sequence: number): void {
+  for (const [bufferedSequence, delta] of [...recovery.buffered]) {
+    if (bufferedSequence <= sequence) {
+      recovery.buffered.delete(bufferedSequence)
+      recovery.bufferedBytes = Math.max(0, recovery.bufferedBytes - deltaByteSize(delta))
+    }
+  }
+}
+
+function deltaByteSize(delta: RealtimeModelDelta): number {
+  return UTF8_ENCODER.encode(delta.text).length
+    + UTF8_ENCODER.encode(delta.toolCall?.id ?? '').length
+    + UTF8_ENCODER.encode(delta.toolCall?.name ?? '').length
+    + UTF8_ENCODER.encode(delta.toolCall?.argumentsJson ?? '').length
+}
+
+function hasVisibleModelOverlay(stream: RealtimeModelStream): boolean {
+  return stream.sequence > 0
+    || Boolean(stream.text)
+    || Boolean(stream.thinking)
+    || stream.toolCalls.length > 0
+}
+
+function isActiveModelAttempt(
+  invocation: ModelInvocationDTO | null,
+  threadId: string,
+  invocationId: string,
+  attempt: number,
+  failures: readonly ModelAttemptFailureDTO[],
+): invocation is ModelInvocationDTO {
+  return invocation != null
+    && invocation.threadId === threadId
+    && invocation.id === invocationId
+    && invocation.attempt === attempt
+    && invocation.resultJson == null
+    && invocation.errorJson == null
+    && invocation.resultEntryId == null
+    && !isFailedAttempt(attempt, invocation, failures)
 }
 
 function useRealtimeFrameScheduler(
@@ -566,183 +851,3 @@ function useRealtimeFrameScheduler(
 
   return scheduler
 }
-
-/**
- * 单飞 sequence 缺口恢复循环（KISS）：同一时刻一次 snapshot refetch，带有限
- * 退避，直到 checkpoint 追上、invocation 终态化或 attempt 变化。
- * 绝不会为每个 delta 并发 refetch，也不会在一次过期 refetch 后冻结；循环在
- * 卸载/切换 Thread 时取消。
- *
- * 稳定回调：latest-function ref 转发打破 schedule -> run -> schedule
- * 循环，因此订阅 effect 不会在重渲染时重新注册。
- */
-function useGapRecoveryLoop(
-  queryClient: QueryClient,
-  modelStreamRef: { current: RealtimeModelStream | null },
-  invocationRef: { current: ModelInvocationDTO | null },
-  modelAttemptFailuresRef: { current: readonly ModelAttemptFailureDTO[] },
-): {
-  requestGapRecovery: (
-    recoveryThreadId: string,
-    invocationId: string,
-    attempt: number,
-    gapSequence: number,
-  ) => void
-  clearRecoveryLoop: () => void
-} {
-  const recoveryRef = useRef<GapRecovery | null>(null)
-  const recoveryBusyRef = useRef(false)
-  const recoveryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const scheduleRecoveryTickRef = useRef<() => void>(() => undefined)
-  const runRecoveryTickRef = useRef<() => Promise<void>>(async () => undefined)
-
-  const scheduleRecoveryTick = useCallback(() => {
-    if (recoveryBusyRef.current || recoveryTimerRef.current != null) {
-      return
-    }
-    const recovery = recoveryRef.current
-    if (recovery == null) {
-      return
-    }
-    const delay = Math.min(
-      RECOVERY_BACKOFF_BASE_MS * 2 ** recovery.attempts,
-      RECOVERY_BACKOFF_MAX_MS,
-    )
-    recoveryTimerRef.current = setTimeout(() => {
-      recoveryTimerRef.current = null
-      void runRecoveryTickRef.current()
-    }, delay)
-  }, [])
-
-  const runRecoveryTick = useCallback(async () => {
-    const recovery = recoveryRef.current
-    if (recovery == null) {
-      return
-    }
-    const currentInvocation = invocationRef.current
-    if (
-      currentInvocation == null
-      || currentInvocation.threadId !== recovery.threadId
-      || currentInvocation.attempt !== recovery.attempt
-      || currentInvocation.resultJson != null
-      || currentInvocation.errorJson != null
-      || currentInvocation.resultEntryId != null
-      || isFailedAttempt(recovery.attempt, currentInvocation, modelAttemptFailuresRef.current)
-    ) {
-      recoveryRef.current = null
-      return
-    }
-    recoveryBusyRef.current = true
-    try {
-      let refetchFailed = false
-      try {
-        // 使用 CAPTURED 的恢复 thread：本 tick 在途期间 hook 闭包的 threadId 可能
-        // 已切换到另一个 Thread。
-        await queryClient.invalidateQueries({
-          queryKey: queryKeys.threads.snapshot(recovery.threadId),
-        })
-      } catch {
-        // 失败的 refetch 不能冻结循环：异常逃逸时没有定时器被武装，
-        // 因此计入 attempt 并继续按下面的退避重试。
-        refetchFailed = true
-      }
-      if (recoveryRef.current === recovery) {
-        // Generation fence 已通过：只有捕获的 recovery 可以被修改/清除。失去
-        // fence 的旧 tick 会落入共享的重新武装出口，那里会调度
-        // CURRENT 的 recovery（可能在本 tick 忙时被安装）。
-        let terminal = false
-        if (!refetchFailed) {
-          // 已追上：reconcile effect 已把 overlay 刷新到超过最高缺口。
-          const stream = modelStreamRef.current
-          if (
-            stream != null
-            && stream.threadId === recovery.threadId
-            && stream.invocationId === recovery.invocationId
-            && stream.attempt === recovery.attempt
-            && stream.sequence >= recovery.gapSequence
-          ) {
-            terminal = true
-          } else {
-            // 过期（Thread/attempt 变化）或持久化终态/失败审计：停止并清理。
-            const invocation = invocationRef.current
-            if (
-              invocation == null
-              || invocation.threadId !== recovery.threadId
-              || invocation.attempt !== recovery.attempt
-              || invocation.resultJson != null
-              || invocation.errorJson != null
-              || invocation.resultEntryId != null
-              || isFailedAttempt(recovery.attempt, invocation, modelAttemptFailuresRef.current)
-            ) {
-              terminal = true
-            }
-          }
-        }
-        if (terminal) {
-          recoveryRef.current = null
-        } else {
-          recovery.attempts += 1
-          if (recovery.attempts > RECOVERY_MAX_ATTEMPTS) {
-            // 放弃该缺口；后续 delta 或 snapshot 刷新会重新武装恢复。
-            recoveryRef.current = null
-          }
-        }
-      }
-    } finally {
-      recoveryBusyRef.current = false
-    }
-    // 单一重新武装出口。只有 busy 标志清除后才重新武装（否则
-    // scheduleRecoveryTick 会提前返回）；本 tick 忙时安装的新 recovery
-    // 也会在这里被武装。
-    if (recoveryRef.current != null) {
-      scheduleRecoveryTickRef.current()
-    }
-  }, [queryClient, modelStreamRef, invocationRef, modelAttemptFailuresRef])
-
-  const requestGapRecovery = useCallback(
-    (
-      recoveryThreadId: string,
-      invocationId: string,
-      attempt: number,
-      gapSequence: number,
-    ) => {
-      const recovery = recoveryRef.current
-      if (
-        recovery != null
-        && recovery.threadId === recoveryThreadId
-        && recovery.invocationId === invocationId
-        && recovery.attempt === attempt
-      ) {
-        recovery.gapSequence = Math.max(recovery.gapSequence, gapSequence)
-        return
-      }
-      recoveryRef.current = {
-        threadId: recoveryThreadId,
-        invocationId,
-        attempt,
-        gapSequence,
-        attempts: 0,
-      }
-      scheduleRecoveryTickRef.current()
-    },
-    [],
-  )
-
-  const clearRecoveryLoop = useCallback(() => {
-    if (recoveryTimerRef.current != null) {
-      clearTimeout(recoveryTimerRef.current)
-      recoveryTimerRef.current = null
-    }
-    recoveryRef.current = null
-  }, [])
-
-  // Latest-function 转发（commit 之后）：定时器只在 layout/effect
-  // 之后触发，所以 refs 始终持有当前 tick 实现。
-  useEffect(() => {
-    scheduleRecoveryTickRef.current = scheduleRecoveryTick
-    runRecoveryTickRef.current = runRecoveryTick
-  }, [runRecoveryTick, scheduleRecoveryTick])
-
-  return { requestGapRecovery, clearRecoveryLoop }
-}
-

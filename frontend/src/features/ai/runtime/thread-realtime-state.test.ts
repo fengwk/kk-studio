@@ -5,7 +5,9 @@ import {
   isProcessOutputPartial,
   isRealtimeModelDeltaGap,
   isRealtimeToolStreamActive,
+  mergeRealtimeModelStreamAfterCheckpoint,
   parseProcessOutputDetails,
+  parseRealtimeModelCheckpoint,
   parseRealtimeModelDelta,
   parseRealtimeToolPartial,
   parseStreamCheckpoint,
@@ -36,6 +38,83 @@ describe('thread realtime state', () => {
     })
     expect(parseRealtimeModelDelta(event(0, 'TEXT_DELTA', 'hello'))).toBeNull()
     expect(parseRealtimeModelDelta('not-json')).toBeNull()
+  })
+
+  it('parses only the canonical payload-less MODEL_CHECKPOINT envelope', () => {
+    const value = {
+      threadId: '7',
+      subjectKind: 'MODEL_INVOCATION',
+      subjectId: '9',
+      attempt: 2,
+      sequence: 5,
+      type: 'MODEL_CHECKPOINT',
+      createdAt: '2026-07-28T10:00:00Z',
+    }
+    const checkpoint = JSON.stringify(value)
+    expect(parseRealtimeModelCheckpoint(checkpoint)).toEqual({
+      threadId: '7',
+      invocationId: '9',
+      attempt: 2,
+      sequence: 5,
+      createdAt: '2026-07-28T10:00:00Z',
+    })
+    // attempt / sequence 必须为正；subject kind 与 type 必须精确匹配。
+    expect(parseRealtimeModelCheckpoint(checkpoint.replace('"attempt":2', '"attempt":0'))).toBeNull()
+    expect(parseRealtimeModelCheckpoint(checkpoint.replace('"sequence":5', '"sequence":0'))).toBeNull()
+    expect(parseRealtimeModelCheckpoint(checkpoint.replace('MODEL_INVOCATION', 'TOOL_INVOCATION'))).toBeNull()
+    expect(parseRealtimeModelCheckpoint(checkpoint.replace('MODEL_CHECKPOINT', 'MODEL_DELTA'))).toBeNull()
+    expect(parseRealtimeModelCheckpoint('not-json')).toBeNull()
+    // 显式携带 payload（包括 null）不是 canonical checkpoint。
+    expect(
+      parseRealtimeModelCheckpoint(JSON.stringify({ ...value, payload: null })),
+    ).toBeNull()
+    expect(
+      parseRealtimeModelCheckpoint(JSON.stringify({ ...value, payload: {} })),
+    ).toBeNull()
+    // canonical 字段集合之外的任何字段都必须拒绝。
+    expect(
+      parseRealtimeModelCheckpoint(JSON.stringify({ ...value, extra: true })),
+    ).toBeNull()
+  })
+
+  it('merges the cached suffix onto a checkpoint snapshot in sequence order', () => {
+    const snapshot = streamAt(7, 'checkpoint-', '')
+    const buffered = [
+      parseRealtimeModelDelta(event(9, 'TEXT_DELTA', 'nine'))!,
+      parseRealtimeModelDelta(event(8, 'TEXT_DELTA', 'eight'))!,
+    ]
+    expect(mergeRealtimeModelStreamAfterCheckpoint(snapshot, null, buffered, 7)).toMatchObject({
+      missingSequence: null,
+      stream: { sequence: 9, text: 'checkpoint-eightnine' },
+    })
+    // 缓存里仍有洞时只推进到洞前，交由下一轮 checkpoint 恢复。
+    expect(
+      mergeRealtimeModelStreamAfterCheckpoint(
+        snapshot,
+        null,
+        [parseRealtimeModelDelta(event(9, 'TEXT_DELTA', 'nine'))!],
+        7,
+      ),
+    ).toMatchObject({
+      missingSequence: 8,
+      stream: { sequence: 7, text: 'checkpoint-' },
+    })
+  })
+
+  it('never regresses an already displayed overlay when the snapshot is behind it', () => {
+    // 快照 seq5 落后于已显示 seq7：保留已显示文本，再连续拼接缓存 seq8。
+    const snapshot = streamAt(5, 'abcde', '')
+    const current = streamAt(7, 'abcdefg', '')
+    const merged = mergeRealtimeModelStreamAfterCheckpoint(
+      snapshot,
+      current,
+      [parseRealtimeModelDelta(event(8, 'TEXT_DELTA', 'h'))!],
+      7,
+    )
+    expect(merged).toMatchObject({
+      missingSequence: null,
+      stream: { sequence: 8, text: 'abcdefgh' },
+    })
   })
 
   it('applies only the next sequence and detects a missing delta', () => {
@@ -1732,6 +1811,20 @@ describe('thread realtime state', () => {
     })
   })
 })
+
+function streamAt(sequence: number, text: string, thinking: string) {
+  return {
+    threadId: '7',
+    invocationId: '9',
+    attempt: 1,
+    sequence,
+    text,
+    thinking,
+    toolCalls: [],
+    createdAt: '2026-07-28T10:00:00Z',
+    status: 'streaming' as const,
+  }
+}
 
 function event(
   sequence: number,
