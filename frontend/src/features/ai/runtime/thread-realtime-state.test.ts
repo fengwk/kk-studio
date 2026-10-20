@@ -40,8 +40,8 @@ describe('thread realtime state', () => {
     expect(parseRealtimeModelDelta('not-json')).toBeNull()
   })
 
-  it('parses only the payload-less MODEL_CHECKPOINT envelope', () => {
-    const checkpoint = JSON.stringify({
+  it('parses only the canonical payload-less MODEL_CHECKPOINT envelope', () => {
+    const value = {
       threadId: '7',
       subjectKind: 'MODEL_INVOCATION',
       subjectId: '9',
@@ -49,7 +49,8 @@ describe('thread realtime state', () => {
       sequence: 5,
       type: 'MODEL_CHECKPOINT',
       createdAt: '2026-07-28T10:00:00Z',
-    })
+    }
+    const checkpoint = JSON.stringify(value)
     expect(parseRealtimeModelCheckpoint(checkpoint)).toEqual({
       threadId: '7',
       invocationId: '9',
@@ -63,6 +64,17 @@ describe('thread realtime state', () => {
     expect(parseRealtimeModelCheckpoint(checkpoint.replace('MODEL_INVOCATION', 'TOOL_INVOCATION'))).toBeNull()
     expect(parseRealtimeModelCheckpoint(checkpoint.replace('MODEL_CHECKPOINT', 'MODEL_DELTA'))).toBeNull()
     expect(parseRealtimeModelCheckpoint('not-json')).toBeNull()
+    // 显式携带 payload（包括 null）不是 canonical checkpoint。
+    expect(
+      parseRealtimeModelCheckpoint(JSON.stringify({ ...value, payload: null })),
+    ).toBeNull()
+    expect(
+      parseRealtimeModelCheckpoint(JSON.stringify({ ...value, payload: {} })),
+    ).toBeNull()
+    // canonical 字段集合之外的任何字段都必须拒绝。
+    expect(
+      parseRealtimeModelCheckpoint(JSON.stringify({ ...value, extra: true })),
+    ).toBeNull()
   })
 
   it('merges the cached suffix onto a checkpoint snapshot in sequence order', () => {
