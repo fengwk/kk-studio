@@ -110,10 +110,10 @@ Thread 控制面按认证、资源权限与请求格式收紧，不再按 Thread
 带精确 head/sequence）、`POST /api/sessions/{sessionId}/provider-request-preview`（本地分支草稿，
 `{startEntryId,commands}`）与 `GET /api/sessions/{sessionId}/entries/{entryId}/provider-request-preview`
 （历史模型输出，按该输出记录时间重建）。它们只读检查 READY 附件、复用正式规划/物化/编码器，
-不消费上传、不推进游标、不调用 transport；历史入口只接受普通 assistant 输出，压缩结果以 `PREVIEW_UNSUPPORTED` 拒绝（父回合没有 ModelInvocation）。
+不消费上传、不推进游标、不调用 transport；历史入口接受普通 assistant 输出，并对父 COMPACTION 结果通过冻结 child join 的 finalAnswer 前缀重建压缩子最后一次调用，结果不等于原始发送字节。
 `kind` 为 `DRAFT_REQUEST_PREVIEW` 或 `HISTORICAL_REQUEST_PREVIEW`，`bodyJson` 只代表点击时快照、
 不等于原始发送字节。`PREVIEW_*` reason 区分 stale cursor、queued、busy、compaction、attachment、
-planning、provider、unsupported（父压缩回合无 ModelInvocation，或 adapter 无预览能力）与 encoding 拒绝；客户端按 reason 恢复。
+planning、provider、unsupported（冻结压缩子执行无法可靠定位，或 adapter 无预览能力）与 encoding 拒绝；客户端按 reason 恢复。
 
 Canvas commands 返回 patch，Function start 返回 202。
 UNKNOWN resolve 要求 resolution 与非空 verification；Issue UNKNOWN 同样要求人工核查说明。
