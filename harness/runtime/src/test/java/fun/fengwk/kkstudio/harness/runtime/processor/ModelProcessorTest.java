@@ -3759,6 +3759,67 @@ class ModelProcessorTest {
     assertEquals(0, fixture.gateway.startCalls);
   }
 
+  /**
+   * 真实 prepare + 拒绝终态路径：每次写事务只先锁 own Thread，再锁 Model/Work，不取 tree、Session 或祖先锁。
+   * 拒绝回写与准入共用同一锁边界，覆盖失败终态路径。
+   */
+  @Test
+  void prepareAndRejectedDispatchLockOwnThreadOnly() {
+    Fixture fixture = fixture();
+    fixture.gateway.queue(
+        new ModelGateway.Rejected(
+            new ModelInvocationError(ProviderErrorKind.INVALID_REQUEST, "model rejected")));
+    ToolProcessorTestSupport.RecordingLockStore recording =
+        new ToolProcessorTestSupport.RecordingLockStore(fixture.store);
+    ModelProcessor processor =
+        new ModelProcessor(
+            recording,
+            fixture.gateway,
+            fixture.sink,
+            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY),
+            fixture.clock,
+            newScheduler(),
+            Runnable::run,
+            Runnable::run);
+
+    assertEquals(
+        ProcessResult.TERMINATED, processor.process(claim(fixture.store, fixture.invocationId)));
+
+    List<List<String>> locked = recording.threadLockTransactions();
+    assertEquals(2, locked.size(), "prepare and rejected dispatch each lock the own thread");
+    for (List<String> ops : locked) {
+      assertFalse(
+          ops.stream()
+              .anyMatch(
+                  op ->
+                      op.startsWith("lockTree")
+                          || op.startsWith("findAncestorChain")
+                          || op.startsWith("lockSession")),
+          "processor must not take tree/session/ancestor locks: " + ops);
+      assertEquals("lockThread:" + fixture.baseline.threadId(), ops.get(0));
+      assertTrue(
+          ops.stream()
+              .filter(op -> op.startsWith("lockThread:"))
+              .allMatch(op -> op.equals("lockThread:" + fixture.baseline.threadId())));
+      int model = indexOfPrefix(ops, "lockModelInvocation:");
+      int work = indexOfPrefix(ops, "lockClaimedWork");
+      assertTrue(model > 0, "own Thread must precede Model: " + ops);
+      assertTrue(work > model, "Model must precede Work: " + ops);
+    }
+    assertTrue(
+        locked.get(1).stream().anyMatch(op -> op.startsWith("requestWork")),
+        "rejected dispatch must request THREAD wake before terminal write");
+  }
+
+  private static int indexOfPrefix(List<String> ops, String prefix) {
+    for (int i = 0; i < ops.size(); i++) {
+      if (ops.get(i).startsWith(prefix)) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
   // ---------------------------------------------------------------------------------------------
   // fixture / 辅助方法
   // ---------------------------------------------------------------------------------------------

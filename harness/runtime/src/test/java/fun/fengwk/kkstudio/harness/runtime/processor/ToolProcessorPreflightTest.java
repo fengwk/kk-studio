@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
@@ -137,6 +138,82 @@ class ToolProcessorPreflightTest {
     assertNull(ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId));
     assertEquals(0, fixture.gateway.startCalls);
     assertFalse(fixture.processor.hasActiveExecution());
+  }
+
+  /**
+   * 真实 prepare + Deny 拒绝回写路径：只锁 own Thread，再锁 Model/Tool/Work；不取 tree/ancestor 锁， 且即使当前 Thread
+   * 是子代理也不锁 parent/root。
+   */
+  @Test
+  void denyLocksOwnChildThreadOnlyWithoutTreeOrAncestors() {
+    ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.childFixture(false, 1);
+    fixture.gateway.queuePreflightDeny(new ToolInvocationError("DENIED", "permission denied"));
+    ToolProcessorTestSupport.RecordingLockStore recording =
+        new ToolProcessorTestSupport.RecordingLockStore(fixture.store);
+    ToolProcessor processor =
+        new ToolProcessor(
+            recording,
+            fixture.gateway,
+            fixture.sink,
+            new ToolProcessorConfig(
+                ToolProcessorTestSupport.LEASE_CONFIG,
+                () -> ToolProcessorTestSupport.NO_RETRY,
+                ToolProcessorTestSupport.PREFLIGHT_FAILURE_DELAY,
+                ToolProcessorTestSupport.BUSY_FALLBACK_DELAY),
+            fixture.clock,
+            fixture.scheduler,
+            Runnable::run);
+
+    assertEquals(
+        ProcessResult.TERMINATED,
+        processor.process(
+            ToolProcessorTestSupport.claim(
+                fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW)));
+
+    ThreadState child = ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId());
+    List<List<String>> locked = recording.threadLockTransactions();
+    assertEquals(2, locked.size(), "prepare and deny each lock the own thread");
+    for (List<String> ops : locked) {
+      assertFalse(
+          ops.stream()
+              .anyMatch(
+                  op ->
+                      op.startsWith("lockTree")
+                          || op.startsWith("findAncestorChain")
+                          || op.startsWith("lockSession")),
+          "processor must not take tree/session/ancestor locks: " + ops);
+      assertEquals("lockThread:" + fixture.baseline.threadId(), ops.get(0));
+      assertTrue(
+          ops.stream()
+              .filter(op -> op.startsWith("lockThread:"))
+              .allMatch(op -> op.equals("lockThread:" + fixture.baseline.threadId())));
+      int tool = indexOfPrefix(ops, "lockToolInvocation:");
+      int work = indexOfPrefix(ops, "lockClaimedWork");
+      assertTrue(tool > 0, "own Thread must precede Tool: " + ops);
+      assertTrue(work > tool, "Tool must precede Work: " + ops);
+      if (indexOfPrefix(ops, "lockModelInvocation:") >= 0) {
+        assertTrue(
+            indexOfPrefix(ops, "lockModelInvocation:") < tool, "Model must precede Tool: " + ops);
+      }
+    }
+    assertTrue(!child.rootThreadId().equals(child.id()));
+    assertFalse(
+        locked.stream()
+            .flatMap(List::stream)
+            .anyMatch(
+                op ->
+                    op.equals("lockThread:" + child.rootThreadId())
+                        || op.equals("lockThread:" + child.parentThreadId())),
+        "child processor must not lock its execution root or parent");
+  }
+
+  private static int indexOfPrefix(List<String> ops, String prefix) {
+    for (int i = 0; i < ops.size(); i++) {
+      if (ops.get(i).startsWith(prefix)) {
+        return i;
+      }
+    }
+    return -1;
   }
 
   /**
