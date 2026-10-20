@@ -452,10 +452,7 @@ final class AcceptCommandsControl {
     }
     validateThreadBatchAdmission(target, thread);
     validateBatchShape(target, commands, false);
-    if (ticket != null && !genuineUserInput) {
-      // 票据交付只会追加 NOTIFICATION；唤醒父 Thread 必须同时携带真实的末尾任务输入。
-      throw invalidBatch(target, "join acceptance requires a trailing task input");
-    }
+    // 票据请求（带父）由统一 spawn 在写前校验为恰一条末尾 user-like；此处保留既有 THREAD target 的形状规则。
     SpawnTickets.admit(tx, ticket, false);
     Instant now = tx.now();
     Session session =
@@ -908,6 +905,16 @@ final class AcceptCommandsControl {
 
   private static void validateBatchShape(
       AcceptCommandsTarget target, List<NewThreadCommand> commands, boolean requireUserLike) {
+    validateBatchShape(target.getClass().getSimpleName(), commands, requireUserLike);
+  }
+
+  /**
+   * 与 target 无关的 batch shape 校验：统一 spawn 在写入任何行之前复用同一组规则，避免复制第二套或伪造 accept target。
+   *
+   * @param targetLabel 用于错误消息的来源标签
+   */
+  static void validateBatchShape(
+      String targetLabel, List<NewThreadCommand> commands, boolean requireUserLike) {
     int userLikeCount = 0;
     int lastSetOrder = -1;
     boolean sawMessage = false;
@@ -915,12 +922,12 @@ final class AcceptCommandsControl {
       ThreadCommandPayload payload = command.payload();
       if (payload.type().isSetting()) {
         if (sawMessage) {
-          throw invalidBatch(target, "SET_* commands must precede all messages");
+          throw invalidBatch(targetLabel, "SET_* commands must precede all messages");
         }
         int order = SET_PREFIX_ORDER.indexOf(payload.type());
         if (order <= lastSetOrder) {
           throw invalidBatch(
-              target, "SET_* prefix must use the fixed order and each type at most once");
+              targetLabel, "SET_* prefix must use the fixed order and each type at most once");
         }
         lastSetOrder = order;
         continue;
@@ -935,13 +942,13 @@ final class AcceptCommandsControl {
         || (requireUserLike && (userLikeCount != 1 || !trailingUserLike))
         || (userLikeCount == 1 && !trailingUserLike)) {
       throw invalidBatch(
-          target,
+          targetLabel,
           requireUserLike
               ? "batches must end with exactly one user-like input"
               : "batches may contain at most one user-like input and it must be the last command");
     }
     if (commands.isEmpty()) {
-      throw invalidBatch(target, "batches must not be empty");
+      throw invalidBatch(targetLabel, "batches must not be empty");
     }
   }
 
@@ -951,9 +958,8 @@ final class AcceptCommandsControl {
         || command.payload() instanceof GoalCommandPayload;
   }
 
-  private static IllegalArgumentException invalidBatch(
-      AcceptCommandsTarget target, String message) {
-    return new IllegalArgumentException(target.getClass().getSimpleName() + " batch: " + message);
+  private static IllegalArgumentException invalidBatch(String targetLabel, String message) {
+    return new IllegalArgumentException(targetLabel + " batch: " + message);
   }
 
   private static HarnessRuntimeConflictException conflict(

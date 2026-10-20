@@ -101,15 +101,56 @@ public class AgentTaskService {
     return requireRuntime().projectJoinReceipt(Objects.requireNonNull(ticketId, "ticketId"));
   }
 
-  /** 按票据停止执行它的 Thread（含其子树）；票据不存在时抛 {@link HarnessRuntimeNotFoundException}。 */
+  /**
+   * 按票据停止执行它的 Thread（含其子树）；票据不存在时抛 {@link HarnessRuntimeNotFoundException}。
+   *
+   * <p>已冻结结果或被后续 Run supersede 的票据是历史事实，必须 no-op：否则同一个 Thread 上的后续 Run 会被旧票据误停。每次 CAS 重试都在 取得新
+   * snapshot 后复核票据状态；后续 Run 改写 Thread 会让旧 version 的 stop 失败，从而回到复核。
+   */
   public void stop(UUID ticketId) {
-    ThreadJoin ticket =
+    ThreadJoin initial =
         findTicket(ticketId)
             .orElseThrow(
                 () ->
                     new HarnessRuntimeNotFoundException(
                         "agent task " + ticketId + " does not exist"));
-    stopThread(ticket.childThreadId());
+    if (isTerminal(initial)) {
+      return;
+    }
+    stopTicketed(ticketId, initial.childThreadId());
+  }
+
+  private static boolean isTerminal(ThreadJoin ticket) {
+    return ticket.matched() || ticket.supersededByInvocationId() != null;
+  }
+
+  /** 票据仍有效时才停止其 child；snapshot 与 stop 之间票据完成/被接管时，后续 Thread version 变化触发复核并 no-op。 */
+  private void stopTicketed(UUID ticketId, UUID threadId) {
+    HarnessRuntime runtime = requireRuntime();
+    for (int attempt = 0; attempt < STOP_ATTEMPTS; attempt++) {
+      ThreadSnapshot snapshot;
+      try {
+        snapshot = runtime.getThreadSnapshot(threadId);
+      } catch (HarnessRuntimeNotFoundException gone) {
+        return;
+      }
+      Optional<ThreadJoin> current = runtime.findJoin(ticketId);
+      if (current.isEmpty() || isTerminal(current.get())) {
+        return;
+      }
+      try {
+        runtime.stop(new StopCommand(threadId, UUID.randomUUID(), snapshot.thread().version()));
+        return;
+      } catch (HarnessRuntimeConflictException conflict) {
+        if (conflict.reason() != HarnessRuntimeConflictException.Reason.STALE_VERSION) {
+          throw conflict;
+        }
+      } catch (HarnessRuntimeNotFoundException gone) {
+        return;
+      }
+    }
+    throw new IllegalStateException(
+        "agent task stop did not converge after " + STOP_ATTEMPTS + " stale version retries");
   }
 
   /** 停止指定 Thread（含其子树）：Thread 已不存在时容忍，stale version 在有界次数内重读重试。 */

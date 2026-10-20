@@ -67,10 +67,10 @@ final class ModelExecution implements ModelGateway.Listener {
   private final int attempt;
 
   /**
-   * prepare 时冻结的压缩子身份事实：本 Thread 是 COMPACTION Join 的 child。只用于摘要完整性校验（截断 / 空 final 不成为摘要），
-   * 其余执行路径与普通 Runtime 完全一致。
+   * prepare 时冻结的直接 owner-settled 事实：本 Thread 当前有效未完成票据的 delivery 为 SETTLE_OWNER_TURN。只用于摘要完整性校验 （截断
+   * / 空 final 不成为摘要），其余执行路径与普通 Runtime 完全一致；执行约束不参与该判定。
    */
-  private final boolean compactionChild;
+  private final boolean ownerSettledSummary;
 
   private final List<ToolBinding> bindings;
   private final ModelProcessorConfig config;
@@ -120,7 +120,7 @@ final class ModelExecution implements ModelGateway.Listener {
       ClaimedWork claim,
       UUID threadId,
       int attempt,
-      boolean compactionChild,
+      boolean ownerSettledSummary,
       List<ToolBinding> bindings,
       ModelProcessorConfig config,
       String providerName,
@@ -135,7 +135,7 @@ final class ModelExecution implements ModelGateway.Listener {
         claim,
         threadId,
         attempt,
-        compactionChild,
+        ownerSettledSummary,
         bindings,
         config,
         providerName,
@@ -153,7 +153,7 @@ final class ModelExecution implements ModelGateway.Listener {
       ClaimedWork claim,
       UUID threadId,
       int attempt,
-      boolean compactionChild,
+      boolean ownerSettledSummary,
       List<ToolBinding> bindings,
       ModelProcessorConfig config,
       String providerName,
@@ -169,7 +169,7 @@ final class ModelExecution implements ModelGateway.Listener {
     this.invocationId = claim.target().id();
     this.threadId = threadId;
     this.attempt = attempt;
-    this.compactionChild = compactionChild;
+    this.ownerSettledSummary = ownerSettledSummary;
     this.bindings = List.copyOf(Objects.requireNonNull(bindings, "bindings"));
     this.config = Objects.requireNonNull(config, "config");
     this.providerName = requireProviderName(providerName);
@@ -875,7 +875,7 @@ final class ModelExecution implements ModelGateway.Listener {
                 ProviderErrorKind.INVALID_RESPONSE, message(failure, "invalid provider response")),
             publishes);
       }
-      if (compactionChild) {
+      if (ownerSettledSummary) {
         // 过滤结果明确不可恢复：既不能当作摘要，也不无依据地重放同一请求（INVALID_REQUEST 不属于可重试 kind）。
         log.info("compaction summary was filtered by the provider for invocation {}", invocationId);
         return finishFailureLocked(
@@ -922,7 +922,7 @@ final class ModelExecution implements ModelGateway.Listener {
 
     String text = accumulator.text();
     String thinking = accumulator.thinking();
-    if (compactionChild && invalidCompactionFinal(validatedResponse, text)) {
+    if (ownerSettledSummary && invalidCompactionFinal(validatedResponse, text)) {
       // 摘要完整性：截断的结果（LENGTH，含截断的 tool intent）与空 final 都不能成为摘要，也绝不执行截断的 tool call。走既有调用重试
       // （同一预算、无第二套预算），上限耗尽即 FAILED；父 Join 冻结前绝不产生成功回执，也不把部分输出当摘要交给父 Agent。
       String reason =

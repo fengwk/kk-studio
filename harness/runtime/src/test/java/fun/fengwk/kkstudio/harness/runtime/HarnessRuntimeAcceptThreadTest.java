@@ -492,7 +492,7 @@ class HarnessRuntimeAcceptThreadTest {
                         List.of(setModelCommand(TestIds.id(1)))),
                     join,
                     AcceptancePreflight.IDENTITY));
-    assertTrue(error.getMessage().contains("join acceptance requires a trailing task input"));
+    assertTrue(error.getMessage().contains("batches must end with exactly one user-like input"));
     assertTrue(runtime.findJoin(join.invocationId()).isEmpty());
   }
 }

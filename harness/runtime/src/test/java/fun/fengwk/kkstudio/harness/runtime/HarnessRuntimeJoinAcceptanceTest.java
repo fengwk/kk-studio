@@ -18,6 +18,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.NotificationPayload;
@@ -36,6 +37,8 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.GoalCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
@@ -925,5 +928,52 @@ class HarnessRuntimeJoinAcceptanceTest {
     ThreadJoin resumedJoin = runtime.findJoin(TestIds.id(4009)).orElseThrow();
     assertEquals(JoinDelivery.NOTIFY_PARENT, resumedJoin.delivery());
     assertTrue(resumedJoin.countsTowardQuota());
+  }
+
+  /** 统一 spawn 在写任何行前复用 accept 的 batch 形状规则；非法批次必须是参数错误而不是 ClassCast 或部分写入。 */
+  @Test
+  void spawnRejectsInvalidBatchShapesBeforeAnyWrite() {
+    NewThreadCommand first = userMessageCommand(TestIds.id(5001), "first");
+    NewThreadCommand second = userMessageCommand(TestIds.id(5002), "second");
+    NewThreadCommand setAgent =
+        new NewThreadCommand(new SetAgentCommandPayload("worker"), TestIds.id(5003));
+    NewThreadCommand setModel =
+        new NewThreadCommand(
+            new SetModelCommandPayload(new ModelSelection("provider", "model", "v1")),
+            TestIds.id(5004));
+
+    assertSpawnRejected(List.of(first, second));
+    assertSpawnRejected(List.of(setAgent));
+    assertSpawnRejected(List.of(setModel, setAgent, first));
+    assertSpawnRejected(List.of(first, setAgent));
+  }
+
+  private void assertSpawnRejected(List<NewThreadCommand> commands) {
+    UUID sessionId = TestIds.id(5100 + commands.size());
+    UUID threadId = TestIds.id(5200 + commands.size());
+    UUID ticketId = TestIds.id(5300 + commands.size());
+    SpawnRequest request =
+        new SpawnRequest(
+            threadId,
+            sessionId,
+            settings(),
+            commands,
+            AcceptancePreflight.IDENTITY,
+            null,
+            null,
+            null,
+            false,
+            ThreadConstraints.NONE,
+            SpawnTrigger.CONTROLLER,
+            JoinDelivery.RECEIPT_ONLY,
+            false,
+            SpawnRequest.Budget.unlimited(),
+            ticketId,
+            commands.getFirst().requestHash());
+
+    assertThrows(IllegalArgumentException.class, () -> runtime.spawn(request));
+    assertTrue(store.transaction(tx -> tx.findSession(sessionId)).isEmpty());
+    assertTrue(store.transaction(tx -> tx.findThread(threadId)).isEmpty());
+    assertTrue(runtime.findJoin(ticketId).isEmpty());
   }
 }
