@@ -181,9 +181,21 @@ export function parseRealtimeModelDelta(data: unknown): RealtimeModelDelta | nul
   }
 }
 
+/** MODEL_CHECKPOINT 的 canonical envelope 字段集合；payload 与任何额外字段都不合法。 */
+const MODEL_CHECKPOINT_FIELDS = [
+  'type',
+  'subjectKind',
+  'threadId',
+  'subjectId',
+  'attempt',
+  'sequence',
+  'createdAt',
+] as const
+
 /**
  * 解析 canonical MODEL_CHECKPOINT envelope。checkpoint 没有 payload；sequence 是
  * durable checkpoint 已覆盖到的 delta 水位，attempt 必须与当前 active attempt 匹配。
+ * 显式携带 payload（包括 null）或任何额外字段都视为格式错误。
  */
 export function parseRealtimeModelCheckpoint(data: unknown): RealtimeModelCheckpoint | null {
   if (typeof data !== 'string') {
@@ -208,6 +220,8 @@ export function parseRealtimeModelCheckpoint(data: unknown): RealtimeModelCheckp
     || !isPositiveInteger(envelope.sequence)
     || !isNonBlankString(envelope.createdAt)
     || toEpochMillis(envelope.createdAt) == null
+    || Object.hasOwn(envelope, 'payload')
+    || !hasOnlyFields(envelope, MODEL_CHECKPOINT_FIELDS)
   ) {
     return null
   }
@@ -1174,6 +1188,10 @@ function nullableString(value: unknown): string | null | undefined {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value != null && !Array.isArray(value)
+}
+
+function hasOnlyFields(record: Record<string, unknown>, fields: readonly string[]): boolean {
+  return Object.keys(record).every((key) => fields.includes(key))
 }
 
 function isNonBlankString(value: unknown): value is string {

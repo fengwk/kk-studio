@@ -19,6 +19,7 @@ import type {
 
 const THREAD_ID = '11111111-2222-4333-8444-555555555555'
 const THREAD_B_ID = 'bbbbbbbb-0000-4000-8000-000000000002'
+const MODEL_GAP_BUFFER_BYTES = 512 * 1024
 const threadResource = { kind: 'thread', id: THREAD_ID } as const
 
 function resource(threadId: string) {
@@ -117,6 +118,7 @@ describe('useHarnessThreadRealtime', () => {
 
   it('requests one catchup per subscription and reconnect while the model is RUNNING', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
     const { rerender, sockets } = renderRealtime(client, { invocation: modelInvocation() })
     const socket = sockets.openLatest()
     expect(requestStreamCatchup).not.toHaveBeenCalled()
@@ -128,17 +130,23 @@ describe('useHarnessThreadRealtime', () => {
         attempt: 1,
       }),
     )
+    // subscribed 先做 snapshot 对账，再发出唯一一次 best-effort catchup。
+    expect(invalidate).toHaveBeenCalledTimes(1)
+    expect(invalidate.mock.invocationCallOrder[0])
+      .toBeLessThan(requestStreamCatchup.mock.invocationCallOrder[0])
     expect(requestStreamCatchup).toHaveBeenCalledTimes(1)
 
     // 重连后的 subscribed ack 再次请求一次（新订阅周期），但仍只请求一次。
     act(() => socket.emitServer({ type: 'subscribed', resource: threadResource, cursor: '42' }))
     await waitFor(() => expect(requestStreamCatchup).toHaveBeenCalledTimes(2))
+    expect(invalidate).toHaveBeenCalledTimes(2)
 
-    // 非 RUNNING 的模型不再请求追帧。
+    // 非 RUNNING 的模型不再请求追帧，但 subscribed 仍执行 snapshot 对账。
     rerender({ invocation: { ...modelInvocation(), status: 'READY' } })
     act(() => socket.emitServer({ type: 'subscribed', resource: threadResource, cursor: '42' }))
     await sleep(50)
     expect(requestStreamCatchup).toHaveBeenCalledTimes(2)
+    expect(invalidate).toHaveBeenCalledTimes(3)
   })
 
   it('coalesces gap catchups and appends the buffered suffix after a covering checkpoint', async () => {
@@ -850,6 +858,264 @@ describe('useHarnessThreadRealtime', () => {
     }
   })
 
+  it('accepts a buffered suffix at exactly 512 KiB counted as UTF-8 bytes', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+    const { result, rerender, sockets } = renderRealtime(client, {
+      invocation: modelInvocationAt(2, 'ab'),
+    })
+    sockets.openLatest()
+
+    // 131072 个 emoji = 512 KiB UTF-8，但只有 262144 个 UTF-16 code unit：
+    // 恰好等于预算时必须保留，不能被 UTF-16 计数误判。
+    const exact = '😀'.repeat(MODEL_GAP_BUFFER_BYTES / 4)
+    emitRealtime(sockets, realtime(4, exact))
+    await waitFor(() => expect(requestStreamCatchup).toHaveBeenCalledTimes(1))
+
+    emitRealtime(sockets, checkpoint(3))
+    await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(1))
+    rerender({ invocation: modelInvocationAt(3, 'abc') })
+    await waitFor(() => expect(result.current?.modelStream?.sequence).toBe(4))
+    expect(result.current?.modelStream?.text).toBe(`abc${exact}`)
+  })
+
+  it('rejects the suffix when UTF-8 bytes exceed the 512 KiB boundary', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+    const { result, rerender, sockets } = renderRealtime(client, {
+      invocation: modelInvocationAt(2, 'ab'),
+    })
+    sockets.openLatest()
+
+    // ASCII 部分 + 一个 emoji 恰好 512 KiB UTF-8；再追加 1 字节即超限。
+    const exact = `${'a'.repeat(MODEL_GAP_BUFFER_BYTES - 4)}😀`
+    emitRealtime(sockets, realtime(4, exact))
+    emitRealtime(sockets, realtime(5, 'x'))
+    await waitFor(() => expect(requestStreamCatchup).toHaveBeenCalledTimes(1))
+
+    emitRealtime(sockets, checkpoint(3))
+    await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(1))
+    rerender({ invocation: modelInvocationAt(3, 'abc') })
+    // 超限后 suffix 已丢弃：只显示 checkpoint 基线，不拼接任何缓存片段。
+    await waitFor(() => expect(result.current?.modelStream?.sequence).toBe(3))
+    expect(result.current?.modelStream?.text).toBe('abc')
+  })
+
+  it('keeps the 256-delta suffix limit after switching to byte accounting', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+    const { result, rerender, sockets } = renderRealtime(client, {
+      invocation: modelInvocationAt(2, 'ab'),
+    })
+    sockets.openLatest()
+
+    // 257 条小 delta：第 257 条必须触发 overflow，即使字节数远低于预算。
+    for (let sequence = 4; sequence <= 260; sequence += 1) {
+      emitRealtime(sockets, realtime(sequence, `-${sequence}`))
+    }
+    await waitFor(() => expect(requestStreamCatchup).toHaveBeenCalledTimes(1))
+
+    emitRealtime(sockets, checkpoint(3))
+    await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(1))
+    rerender({ invocation: modelInvocationAt(3, 'abc') })
+    await waitFor(() => expect(result.current?.modelStream?.sequence).toBe(3))
+    expect(result.current?.modelStream?.text).toBe('abc')
+  })
+
+  it('releases checkpoint refresh in-flight after settle without a rerender', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+    const { result, sockets } = renderRealtime(client, {
+      invocation: modelInvocationAt(2, 'ab'),
+    })
+    sockets.openLatest()
+
+    emitRealtime(sockets, realtime(5, 'five'))
+    await waitFor(() => expect(requestStreamCatchup).toHaveBeenCalledTimes(1))
+    emitRealtime(sockets, checkpoint(4))
+    await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(1))
+
+    // 回读返回与原 snapshot 完全相同（结构共享）：没有 props 变化，effect 不会重跑。
+    // promise settled 后必须释放 in-flight，下一 checkpoint 仍能再次回读。
+    await act(async () => {
+      await sleep(0)
+    })
+    expect(invalidate).toHaveBeenCalledTimes(1)
+    emitRealtime(sockets, checkpoint(6))
+    await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(2))
+    expect(result.current?.modelStream?.text).toBe('ab')
+  })
+
+  it('allows the same checkpoint watermark to refresh again after a rejected refetch', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const invalidate = vi
+      .spyOn(client, 'invalidateQueries')
+      .mockRejectedValueOnce(new Error('snapshot unavailable'))
+    const { result, sockets } = renderRealtime(client, {
+      invocation: modelInvocationAt(2, 'ab'),
+    })
+    sockets.openLatest()
+
+    emitRealtime(sockets, realtime(5, 'five'))
+    await waitFor(() => expect(requestStreamCatchup).toHaveBeenCalledTimes(1))
+    emitRealtime(sockets, checkpoint(4))
+    await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(1))
+
+    // 失败不能变成 unhandled rejection，也不能自动 poll/退避/重试。
+    await act(async () => {
+      await sleep(600)
+    })
+    expect(invalidate).toHaveBeenCalledTimes(1)
+
+    // 失败的水位不能记为成功：同一 sequence 的下一 checkpoint 事件仍可回读。
+    emitRealtime(sockets, checkpoint(4))
+    await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(2))
+    expect(result.current?.modelStream?.text).toBe('ab')
+  })
+
+  it('coalesces checkpoints while one refresh is in flight and does not auto refresh after settle', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const pendingRefresh = deferredVoid()
+    const invalidate = vi
+      .spyOn(client, 'invalidateQueries')
+      .mockImplementationOnce(() => pendingRefresh.promise)
+    const { result, sockets } = renderRealtime(client, {
+      invocation: modelInvocationAt(2, 'ab'),
+    })
+    sockets.openLatest()
+
+    emitRealtime(sockets, realtime(5, 'five'))
+    await waitFor(() => expect(requestStreamCatchup).toHaveBeenCalledTimes(1))
+    emitRealtime(sockets, checkpoint(4))
+    await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(1))
+
+    // 在途期间的多个 checkpoint 只更新水位，不得启动第二次回读。
+    emitRealtime(sockets, checkpoint(5))
+    emitRealtime(sockets, checkpoint(6))
+    await act(async () => {
+      await sleep(0)
+    })
+    expect(invalidate).toHaveBeenCalledTimes(1)
+
+    pendingRefresh.resolve()
+    await act(async () => {
+      await sleep(50)
+    })
+    // settle 只释放 in-flight，不自动轮询。
+    expect(invalidate).toHaveBeenCalledTimes(1)
+
+    emitRealtime(sockets, checkpoint(7))
+    await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(2))
+    expect(result.current?.modelStream?.text).toBe('ab')
+  })
+
+  it('does not let an old attempt refresh settlement clear a newer attempt refresh', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const firstRefresh = deferredVoid()
+    const secondRefresh = deferredVoid()
+    const invalidate = vi
+      .spyOn(client, 'invalidateQueries')
+      .mockImplementationOnce(() => firstRefresh.promise)
+      .mockImplementationOnce(() => secondRefresh.promise)
+    const { result, rerender, sockets } = renderRealtime(client, {
+      invocation: modelInvocationAt(2, 'ab'),
+    })
+    sockets.openLatest()
+
+    emitRealtime(sockets, realtime(5, 'five', THREAD_ID, 'inv-1', 1))
+    await waitFor(() => expect(requestStreamCatchup).toHaveBeenCalledTimes(1))
+    emitRealtime(sockets, checkpoint(4, THREAD_ID, 'inv-1', 1))
+    await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(1))
+
+    // attempt 2 建立新的 recovery 与在途回读。
+    rerender({ invocation: modelInvocationAt(2, 'ab', 2) })
+    await waitFor(() => expect(result.current?.modelStream?.attempt).toBe(2))
+    emitRealtime(sockets, realtime(5, 'five', THREAD_ID, 'inv-1', 2))
+    emitRealtime(sockets, checkpoint(4, THREAD_ID, 'inv-1', 2))
+    await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(2))
+
+    // 旧 attempt 的 promise 完成不得释放新 attempt 的 in-flight。
+    firstRefresh.resolve()
+    await act(async () => {
+      await sleep(20)
+    })
+    emitRealtime(sockets, checkpoint(6, THREAD_ID, 'inv-1', 2))
+    await act(async () => {
+      await sleep(0)
+    })
+    expect(invalidate).toHaveBeenCalledTimes(2)
+
+    secondRefresh.resolve()
+    await act(async () => {
+      await sleep(20)
+    })
+    emitRealtime(sockets, checkpoint(7, THREAD_ID, 'inv-1', 2))
+    await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(3))
+  })
+
+  it('does not let an old thread refresh settlement clear a newer thread refresh', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const firstRefresh = deferredVoid()
+    const secondRefresh = deferredVoid()
+    const invalidate = vi
+      .spyOn(client, 'invalidateQueries')
+      .mockImplementationOnce(() => firstRefresh.promise)
+      .mockImplementationOnce(() => secondRefresh.promise)
+    const { result, rerender, sockets } = renderRealtime(client, {
+      invocation: modelInvocationAt(2, 'ab'),
+    })
+    sockets.openLatest()
+
+    emitRealtime(sockets, realtime(5, 'five'))
+    await waitFor(() => expect(requestStreamCatchup).toHaveBeenCalledTimes(1))
+    emitRealtime(sockets, checkpoint(4))
+    await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(1))
+
+    // 切到另一个 Thread，建立新的 recovery 与在途回读。
+    rerender({
+      threadId: THREAD_B_ID,
+      invocation: modelInvocationAt(2, 'ab', 1, 'inv-1', THREAD_B_ID),
+    })
+    await waitFor(() => expect(result.current?.modelStream?.threadId).toBe(THREAD_B_ID))
+    emitRealtime(
+      sockets,
+      realtime(5, 'five', THREAD_B_ID, 'inv-1', 1),
+      THREAD_B_ID,
+    )
+    emitRealtime(
+      sockets,
+      checkpoint(4, THREAD_B_ID, 'inv-1', 1),
+      THREAD_B_ID,
+    )
+    await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(2))
+
+    // 旧 Thread 的 promise 完成不得释放新 Thread 的 in-flight。
+    firstRefresh.resolve()
+    await act(async () => {
+      await sleep(20)
+    })
+    emitRealtime(
+      sockets,
+      checkpoint(6, THREAD_B_ID, 'inv-1', 1),
+      THREAD_B_ID,
+    )
+    await act(async () => {
+      await sleep(0)
+    })
+    expect(invalidate).toHaveBeenCalledTimes(2)
+
+    secondRefresh.resolve()
+    await act(async () => {
+      await sleep(20)
+    })
+    emitRealtime(
+      sockets,
+      checkpoint(7, THREAD_B_ID, 'inv-1', 1),
+      THREAD_B_ID,
+    )
+    await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(3))
+  })
+
   it('keeps the displayed suffix when the post-checkpoint snapshot is still behind it', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const invalidate = vi.spyOn(client, 'invalidateQueries')
@@ -1557,6 +1823,33 @@ function hash32(value: string): number {
     hash = Math.imul(hash, 0x01000193) >>> 0
   }
   return hash >>> 0
+}
+
+function modelInvocationAt(
+  sequence: number,
+  text: string,
+  attempt = 1,
+  invocationId = 'inv-1',
+  threadId = THREAD_ID,
+): ModelInvocationDTO {
+  return {
+    ...modelInvocation(invocationId, threadId),
+    attempt,
+    streamCheckpointJson: JSON.stringify({
+      attempt,
+      text,
+      thinking: '',
+      sequence,
+    }),
+  }
+}
+
+function deferredVoid(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void
+  const promise = new Promise<void>((done) => {
+    resolve = done
+  })
+  return { promise, resolve }
 }
 
 function modelInvocation(

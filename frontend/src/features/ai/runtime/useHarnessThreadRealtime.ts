@@ -195,6 +195,9 @@ export function useHarnessThreadRealtime(
           // 该 checkpoint 仍不足（或 snapshot 暂时落后）：保持 gap，等下一周期
           // checkpoint/终态/attempt 切换；不重复拉旧 snapshot，也不自动重试。
           recovery.pendingCheckpointSequence = null
+          // 本次回读已证明 snapshot 不足；允许后续同水位 checkpoint 再次触发一次
+          // 单飞回读（仍只由事件驱动，不轮询）。
+          recovery.refreshedCheckpointSequence = null
           if (recovery.overflowed) {
             // 已丢弃的 suffix 只能由覆盖最高已观察 sequence 的 checkpoint 恢复。
             recovery.firstGapSequence = Math.max(
@@ -319,8 +322,12 @@ export function useHarnessThreadRealtime(
       return undefined
     }
 
-    const invalidateSnapshot = () =>
+    const refetchSnapshot = (): Promise<void> =>
       queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(threadId) })
+    // 订阅/version/resync/error 的对账是 best-effort；失败只由下一次 durable
+    // 信号重试，绝不能变成 unhandled rejection。
+    const invalidateSnapshot = (): Promise<void> =>
+      refetchSnapshot().catch(() => undefined)
     // 协议 data 是 envelope 的 JSON 对象；回序列化为同一文本后，reducer 的严格解析保持不变。
     const handleRealtime = (data: unknown) => {
       const raw = JSON.stringify(data)
@@ -371,17 +378,42 @@ export function useHarnessThreadRealtime(
           )
           modelRecoveryRef.current = recovery
         }
-        if (recovery.pendingCheckpointSequence == null) {
-          recovery.pendingCheckpointSequence = checkpoint.sequence
-          recovery.requested = true
+        recovery.requested = true
+        recovery.pendingCheckpointSequence = Math.max(
+          recovery.pendingCheckpointSequence ?? 0,
+          checkpoint.sequence,
+        )
+        // 真正的单飞锁是 refreshInFlight；pendingCheckpointSequence 只记录等待
+        // snapshot 覆盖的水位。promise settled 后立即释放锁，不依赖 props 变化。
+        const lastRefreshed = recovery.refreshedCheckpointSequence
+        if (
+          !recovery.refreshInFlight
+          && (lastRefreshed == null || checkpoint.sequence > lastRefreshed)
+        ) {
+          recovery.refreshInFlight = true
+          recovery.refreshedCheckpointSequence = checkpoint.sequence
           // 仅在 checkpoint 覆盖缺口时回读一次；快照仍落后就等下一周期，
-          // 不循环拉取旧 snapshot。
-          void invalidateSnapshot()
-        } else {
-          recovery.pendingCheckpointSequence = Math.max(
-            recovery.pendingCheckpointSequence,
-            checkpoint.sequence,
-          )
+          // 不循环拉取旧 snapshot。旧 recovery/thread/attempt 的 settle 不得
+          // 清掉新 recovery 的在途状态。
+          void refetchSnapshot()
+            .then(
+              () => undefined,
+              () => {
+                if (
+                  modelRecoveryRef.current === recovery
+                  && recovery.refreshedCheckpointSequence === checkpoint.sequence
+                ) {
+                  // 失败的水位不是成功：同一 sequence 的下一 checkpoint 事件
+                  // 仍可再次触发单飞回读（仍无自动重试）。
+                  recovery.refreshedCheckpointSequence = null
+                }
+              },
+            )
+            .finally(() => {
+              if (modelRecoveryRef.current === recovery) {
+                recovery.refreshInFlight = false
+              }
+            })
         }
         return
       }
@@ -675,7 +707,9 @@ function sameModelStream(left: RealtimeModelStream, right: RealtimeModelStream):
 const TOOL_PARTIAL_SEEN_EVENT_ID_LIMIT = 256
 /** gap / checkpoint 在途期间缓存的 delta suffix 硬上限；超限后清空并继续等 checkpoint。 */
 const MODEL_GAP_BUFFER_MAX_DELTAS = 256
-const MODEL_GAP_BUFFER_MAX_CHARS = 512 * 1024
+/** suffix 预算按 UTF-8 字节计，避免非 ASCII/emoji 按 UTF-16 code unit 低估真实体积。 */
+const MODEL_GAP_BUFFER_MAX_BYTES = 512 * 1024
+const UTF8_ENCODER = new TextEncoder()
 
 interface ModelRecovery {
   threadId: string
@@ -685,14 +719,18 @@ interface ModelRecovery {
   firstGapSequence: number
   /** 已按 sequence 索引的待拼接 suffix。 */
   buffered: Map<number, RealtimeModelDelta>
-  bufferedChars: number
+  bufferedBytes: number
   highestObservedSequence: number
   /** 缓冲超限后不再信任已丢弃的 suffix，只能等待覆盖它的下一 checkpoint。 */
   overflowed: boolean
   /** 本恢复 episode 已发过 catchup（或已被订阅 catchup 覆盖）。 */
   requested: boolean
-  /** 已接受、正在回读 snapshot 的 checkpoint 水位。 */
+  /** 已接受、等待 snapshot 覆盖的 checkpoint 水位（拼接目标）。 */
   pendingCheckpointSequence: number | null
+  /** 真正在途的 snapshot 回读；与 pending 水位分离，settled 后即释放。 */
+  refreshInFlight: boolean
+  /** 已发起过回读的最高 checkpoint 水位，避免同一水位重复单飞。 */
+  refreshedCheckpointSequence: number | null
 }
 
 function createModelRecovery(
@@ -707,11 +745,13 @@ function createModelRecovery(
     attempt,
     firstGapSequence,
     buffered: new Map(),
-    bufferedChars: 0,
+    bufferedBytes: 0,
     highestObservedSequence: firstGapSequence - 1,
     overflowed: false,
     requested: false,
     pendingCheckpointSequence: null,
+    refreshInFlight: false,
+    refreshedCheckpointSequence: null,
   }
 }
 
@@ -719,15 +759,15 @@ function bufferModelDelta(recovery: ModelRecovery, delta: RealtimeModelDelta): v
   if (recovery.buffered.has(delta.sequence)) {
     return
   }
-  const size = deltaCharSize(delta)
+  const size = deltaByteSize(delta)
   if (
     recovery.buffered.size >= MODEL_GAP_BUFFER_MAX_DELTAS
-    || recovery.bufferedChars + size > MODEL_GAP_BUFFER_MAX_CHARS
+    || recovery.bufferedBytes + size > MODEL_GAP_BUFFER_MAX_BYTES
   ) {
     // 有界：丢弃已缓存 suffix 并保持 gap；后续只接受能覆盖全部已观察
     // sequence 的 checkpoint，绝不无界积累。
     recovery.buffered.clear()
-    recovery.bufferedChars = 0
+    recovery.bufferedBytes = 0
     recovery.overflowed = true
     recovery.highestObservedSequence = Math.max(
       recovery.highestObservedSequence,
@@ -736,7 +776,7 @@ function bufferModelDelta(recovery: ModelRecovery, delta: RealtimeModelDelta): v
     return
   }
   recovery.buffered.set(delta.sequence, delta)
-  recovery.bufferedChars += size
+  recovery.bufferedBytes += size
   recovery.highestObservedSequence = Math.max(
     recovery.highestObservedSequence,
     delta.sequence,
@@ -747,16 +787,16 @@ function dropBufferedThrough(recovery: ModelRecovery, sequence: number): void {
   for (const [bufferedSequence, delta] of [...recovery.buffered]) {
     if (bufferedSequence <= sequence) {
       recovery.buffered.delete(bufferedSequence)
-      recovery.bufferedChars = Math.max(0, recovery.bufferedChars - deltaCharSize(delta))
+      recovery.bufferedBytes = Math.max(0, recovery.bufferedBytes - deltaByteSize(delta))
     }
   }
 }
 
-function deltaCharSize(delta: RealtimeModelDelta): number {
-  return delta.text.length
-    + (delta.toolCall?.id?.length ?? 0)
-    + (delta.toolCall?.name?.length ?? 0)
-    + (delta.toolCall?.argumentsJson?.length ?? 0)
+function deltaByteSize(delta: RealtimeModelDelta): number {
+  return UTF8_ENCODER.encode(delta.text).length
+    + UTF8_ENCODER.encode(delta.toolCall?.id ?? '').length
+    + UTF8_ENCODER.encode(delta.toolCall?.name ?? '').length
+    + UTF8_ENCODER.encode(delta.toolCall?.argumentsJson ?? '').length
 }
 
 function hasVisibleModelOverlay(stream: RealtimeModelStream): boolean {
