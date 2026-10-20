@@ -25,11 +25,11 @@ import java.util.UUID;
 /**
  * 有界 realtime projection 的确定性 strict JSON codec。
  *
- * <p>支持 Model delta、Model checkpoint 与 Tool partial；top-level exact field set：Model delta 为 {@code {threadId,
- * subjectKind, subjectId, attempt, sequence, type, payload, createdAt}}，Model checkpoint 为同一字段集去掉 {@code
- * payload}，Tool partial 为 {@code
- * {threadId, subjectKind, subjectId, attempt, eventId, type, payload, createdAt}}。{@code attempt} 与
- * {@code sequence} 只出现在 top-level；{@code eventId} 是 Tool partial 事件自身的 canonical UUID identity。
+ * <p>支持 Model delta、Model checkpoint 与 Tool partial；top-level exact field set：Model delta 为 {@code
+ * {threadId, subjectKind, subjectId, attempt, sequence, type, payload, createdAt}}，Model checkpoint
+ * 为同一字段集去掉 {@code payload}，Tool partial 为 {@code {threadId, subjectKind, subjectId, attempt,
+ * eventId, type, payload, createdAt}}。{@code attempt} 与 {@code sequence} 只出现在 top-level；{@code
+ * eventId} 是 Tool partial 事件自身的 canonical UUID identity。
  *
  * <p>{@code payload} discriminator 严格大小写：
  *
@@ -79,7 +79,8 @@ public final class RealtimeEventJsonCodec {
           "createdAt");
 
   private static final Set<String> CHECKPOINT_EVENT_FIELDS =
-      orderedSet("threadId", "subjectKind", "subjectId", "attempt", "sequence", "type", "createdAt");
+      orderedSet(
+          "threadId", "subjectKind", "subjectId", "attempt", "sequence", "type", "createdAt");
 
   private static final Set<String> TEXT_PAYLOAD_FIELDS = orderedSet("kind", "text");
   private static final Set<String> THINKING_PAYLOAD_FIELDS = orderedSet("kind", "text");

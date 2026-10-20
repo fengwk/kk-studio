@@ -18,8 +18,6 @@ import tools.jackson.databind.node.JsonNodeFactory;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
@@ -138,6 +136,7 @@ class ModelProcessorTest {
   private static final ProcessorLeaseConfig LEASE_CONFIG =
       new ProcessorLeaseConfig(Duration.ofSeconds(30), Duration.ofSeconds(5));
   private static final Duration FALLBACK_DELAY = Duration.ofSeconds(7);
+
   /** 逐事件即时推送、1ms 后 checkpoint 的测试配置。 */
   private static final ModelStreamConfig IMMEDIATE_STREAM =
       new ModelStreamConfig(Duration.ofMillis(1), 1, 1, Duration.ofMillis(1));
@@ -733,6 +732,8 @@ class ModelProcessorTest {
     listener.onEvent(new ProviderStreamEvent.TextDelta("hel"));
     listener.onEvent(new ProviderStreamEvent.ToolCallDelta(0, "call_1", "bash", "{\"a\""));
 
+    // 方案 B：delta 立即推送、checkpoint 由独立节奏落库；这里用追帧请求确定性地触发一次 checkpoint。
+    assertTrue(fixture.processor.requestCheckpoint(fixture.invocationId, 1));
     ModelInvocation mid = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.RUNNING, mid.status());
     assertEquals(1, mid.attempt());
@@ -1271,7 +1272,7 @@ class ModelProcessorTest {
             newScheduler(),
             inherited,
             false,
-            StreamFlushConfig.DEFAULT,
+            ModelStreamConfig.DEFAULT,
             Runnable::run,
             null,
             ModelHttpErrorPolicyProvider.DEFAULT);
@@ -1297,7 +1298,7 @@ class ModelProcessorTest {
             newScheduler(),
             inherited,
             false,
-            StreamFlushConfig.DEFAULT,
+            ModelStreamConfig.DEFAULT,
             Runnable::run,
             null,
             ModelHttpErrorPolicyProvider.DEFAULT);
@@ -2939,47 +2940,65 @@ class ModelProcessorTest {
     assertFalse(fixture.processor.hasActiveExecution());
   }
 
-  /** 每个 safe delta 在发布 realtime 前先持久化完整 checkpoint；tool fragment 永不 checkpoint。 */
+  /**
+   * 意图：方案 B 的推送与落库解耦——safe delta 立即作为 realtime overlay 推送，但 checkpoint 不会逐 delta 落库；只有追帧请求
+   * 显式触发时才持久化完整 safe 前缀，且 CHECKPOINT 事件严格晚于提交（此前零 checkpoint 事件）。
+   */
   @Test
-  void everySafeDeltaPersistsCheckpointBeforeRealtimePublication() {
-    Fixture fixture = fixture(NO_RETRY, requestWithTool(), IMMEDIATE_STREAM);
-    HarnessRuntime runtime =
-        new HarnessRuntime(
-            fixture.store, (threadId, path, preparation) -> null, () -> CompactionConfig.DEFAULT);
+  void safeDeltasArePushedBeforeCheckpointAndCatchUpPublishesOnlyAfterCommit() {
+    // 长 checkpoint 间隔保证断言期间只有显式追帧才会落库；推送仍逐事件立即发生。
+    ModelStreamConfig streamConfig =
+        new ModelStreamConfig(Duration.ofMillis(1), 1, 1, Duration.ofMinutes(10));
+    Fixture fixture = fixture(NO_RETRY, requestWithTool(), streamConfig);
     fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
     assertEquals(
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
     ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
     long runningVersion = thread(fixture.store, fixture.baseline.threadId()).version();
-    assertNull(runtime.getThreadSnapshot(fixture.baseline.threadId()).model().streamCheckpoint());
+    assertNull(model(fixture.store, fixture.invocationId).streamCheckpoint());
+    assertTrue(checkpoints(fixture.sink).isEmpty());
 
     listener.onEvent(new ProviderStreamEvent.TextDelta("a"));
-    var snapshotAfterFirstDelta = runtime.getThreadSnapshot(fixture.baseline.threadId());
-    assertEquals(runningVersion, snapshotAfterFirstDelta.thread().version());
-    assertEquals(1, snapshotAfterFirstDelta.model().streamCheckpoint().sequence());
-    assertEquals("a", snapshotAfterFirstDelta.model().streamCheckpoint().text());
+    assertEquals(1, deltas(fixture.sink).size());
+    assertNull(model(fixture.store, fixture.invocationId).streamCheckpoint());
+    assertTrue(checkpoints(fixture.sink).isEmpty());
 
     listener.onEvent(new ProviderStreamEvent.TextDelta("b"));
-    assertEquals(2, model(fixture.store, fixture.invocationId).streamCheckpoint().sequence());
-    assertEquals("ab", model(fixture.store, fixture.invocationId).streamCheckpoint().text());
     assertEquals(2, deltas(fixture.sink).size());
+    assertNull(
+        model(fixture.store, fixture.invocationId).streamCheckpoint(),
+        "deltas must not persist a checkpoint on the push path");
+
+    assertTrue(fixture.processor.requestCheckpoint(fixture.invocationId, 1));
+    ModelInvocation checkpointed = model(fixture.store, fixture.invocationId);
+    assertEquals(2, checkpointed.streamCheckpoint().sequence());
+    assertEquals("ab", checkpointed.streamCheckpoint().text());
+    assertEquals(List.of(2L), checkpoints(fixture.sink));
+    assertEquals(runningVersion, thread(fixture.store, fixture.baseline.threadId()).version());
 
     listener.onEvent(new ProviderStreamEvent.TextDelta("c"));
-    assertEquals(3, model(fixture.store, fixture.invocationId).streamCheckpoint().sequence());
-    assertEquals("abc", model(fixture.store, fixture.invocationId).streamCheckpoint().text());
+    assertEquals(3, deltas(fixture.sink).size());
+    assertEquals(
+        2,
+        model(fixture.store, fixture.invocationId).streamCheckpoint().sequence(),
+        "later deltas must wait for the next checkpoint deadline or catch-up");
 
-    // tool fragment 永不 checkpoint；final 需携带该 tool call 才能 reconcile。
+    // tool fragment 永不 checkpoint，但会作为 overlay 推送并推进 sequence。
     listener.onEvent(new ProviderStreamEvent.ToolCallDelta(0, "call_1", null, null));
-    assertEquals(3, model(fixture.store, fixture.invocationId).streamCheckpoint().sequence());
+    assertEquals(4, deltas(fixture.sink).size());
+    assertEquals(2, model(fixture.store, fixture.invocationId).streamCheckpoint().sequence());
 
-    // terminal success 总是 flush 完整 safe snapshot（tool 的 name/args 差异聚合成 1 个 gap delta）。
+    // terminal success 总是 flush 完整 safe snapshot（tool 的 name/args 差异聚合成 gap delta）。
     listener.onSucceeded(toolResponse("abc", new ProviderToolCall("call_1", "bash", "{}")));
     ModelInvocation terminal = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.SUCCEEDED, terminal.status());
     assertNotNull(terminal.streamCheckpoint());
     assertEquals("abc", terminal.streamCheckpoint().text());
     assertEquals(3, terminal.streamCheckpoint().sequence());
+    assertEquals(
+        List.of(2L), checkpoints(fixture.sink), "terminal does not add a checkpoint event");
+    assertFalse(fixture.processor.requestCheckpoint(fixture.invocationId, 1));
   }
 
   /** claim lease 剩余不足（首次 heartbeat 前会过期）：prepare READY 时立即 renew 出完整 margin。 */
@@ -3983,7 +4002,7 @@ class ModelProcessorTest {
         ScheduledExecutorService scheduler,
         ThreadConstraints constraints,
         boolean ownerSettledSummary,
-        StreamFlushConfig flushConfig,
+        ModelStreamConfig flushConfig,
         Executor flushExecutor,
         ToolHistoryActionResolver toolHistoryActionResolver,
         ModelHttpErrorPolicyProvider httpErrorPolicyProvider) {
@@ -4328,6 +4347,14 @@ class ModelProcessorTest {
         .filter(event -> event instanceof RealtimeEvent.ModelDelta)
         .map(event -> (RealtimeEvent.ModelDelta) event)
         .map(RealtimeEvent.ModelDelta::delta)
+        .toList();
+  }
+
+  private static List<Long> checkpoints(RecordingSink sink) {
+    return sink.events.stream()
+        .filter(event -> event instanceof RealtimeEvent.ModelCheckpoint)
+        .map(event -> (RealtimeEvent.ModelCheckpoint) event)
+        .map(RealtimeEvent.ModelCheckpoint::sequence)
         .toList();
   }
 

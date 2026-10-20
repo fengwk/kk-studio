@@ -168,16 +168,19 @@ public final class ModelProcessor implements AutoCloseable {
   }
 
   /**
-   * 追帧：让本进程内正在执行该 Thread 的 Model execution 立即持久化 checkpoint 并发布 checkpoint 事件；不持有该 Thread 的执行时为 no-op。
-   * 不阻塞调用方，可从实时通道的任意线程调用。
+   * 追帧：由 active execution 集合精确定位当前 owner，仅当 {@code attempt} 与持有中的 execution 一致时立即持久化 checkpoint 并发布
+   * checkpoint 事件。
+   *
+   * <p>不匹配（invocation 不在本进程执行、attempt 已被其它 attempt 接管、execution 已终态/取消/abandoned）返回 {@code false}
+   * 且不触发任何持久化或发布；只有确实登记为 active 且 attempt 一致时返回 {@code true}。不阻塞调用方，可从实时通道的任意线程调用。
    */
-  public void requestCheckpoint(UUID threadId) {
-    Objects.requireNonNull(threadId, "threadId");
-    for (ModelExecution execution : executions.values()) {
-      if (execution.threadId().equals(threadId)) {
-        execution.requestCheckpoint();
-      }
+  public boolean requestCheckpoint(UUID invocationId, int attempt) {
+    Objects.requireNonNull(invocationId, "invocationId");
+    if (attempt <= 0) {
+      return false;
     }
+    ModelExecution execution = executions.get(invocationId);
+    return execution != null && execution.requestCheckpoint(attempt);
   }
 
   /** 取消全部本地 execution 并停止各自 heartbeat；不 shutdown 调用方注入的 scheduler；幂等。 */

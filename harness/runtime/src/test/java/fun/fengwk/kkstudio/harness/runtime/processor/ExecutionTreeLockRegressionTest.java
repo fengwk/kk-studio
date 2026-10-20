@@ -48,6 +48,7 @@ class ExecutionTreeLockRegressionTest {
   private static final ProcessorLeaseConfig LEASE_CONFIG =
       new ProcessorLeaseConfig(Duration.ofSeconds(30), Duration.ofSeconds(10));
   private static final Duration FALLBACK_DELAY = Duration.ofSeconds(5);
+
   /** 逐事件即时推送、1ms 后 checkpoint 的测试配置。 */
   private static final ModelStreamConfig IMMEDIATE_STREAM =
       new ModelStreamConfig(Duration.ofMillis(1), 1, 1, Duration.ofMillis(1));
@@ -231,7 +232,8 @@ class ExecutionTreeLockRegressionTest {
 
     execution.onEvent(new ProviderStreamEvent.TextDelta("hello "));
     execution.onEvent(new ProviderStreamEvent.TextDelta("world"));
-    assertTrue(recordingStore.recordedOperations().isEmpty(), "deltas alone must not touch the store");
+    assertTrue(
+        recordingStore.recordedOperations().isEmpty(), "deltas alone must not touch the store");
 
     execution.deliverCheckpoint(0, true);
 
