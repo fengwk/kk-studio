@@ -78,18 +78,17 @@ public final class HmacClusterInternalAuthentication implements ClusterInternalA
   }
 
   @Override
-  public Map<String, String> sign(String method, String requestPath, ClusterIdeOwnerRoute owner) {
-    Objects.requireNonNull(owner, "owner");
+  public Map<String, String> sign(String method, String requestPath, UUID targetNodeId) {
+    Objects.requireNonNull(targetNodeId, "targetNodeId");
     requireConfigured();
     String canonicalMethod = normalizeMethod(method);
     String canonicalPath = requireCanonicalPath(requestPath);
     long timestamp = clock.millis();
     String nonce = UUID.randomUUID().toString();
-    String signature =
-        signature(canonicalMethod, canonicalPath, owner.nodeInstanceId(), timestamp, nonce);
+    String signature = signature(canonicalMethod, canonicalPath, targetNodeId, timestamp, nonce);
     return Map.of(
         HEADER_TARGET,
-        owner.nodeInstanceId().toString(),
+        targetNodeId.toString(),
         HEADER_TIMESTAMP,
         Long.toString(timestamp),
         HEADER_NONCE,

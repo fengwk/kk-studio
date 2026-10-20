@@ -1001,10 +1001,19 @@ class IdeCrossNodeBrowserDataPlaneIntegrationTest extends WebPostgresTestSupport
         new ClusterInternalClient(
             HttpClient.newHttpClient(), JsonMapper.builder().build(), authentication);
     ClusterNodeRegistry remoteRegistry =
-        environmentId ->
-            Optional.of(
+        new ClusterNodeRegistry() {
+          @Override
+          public Optional<ClusterIdeOwnerRoute> route(EnvironmentId environmentId) {
+            return Optional.of(
                 ClusterIdeOwnerRoute.remote(
                     ownerNodeId, URI.create("http://localhost:" + ownerPort)));
+          }
+
+          @Override
+          public Optional<URI> liveInternalOrigin(UUID nodeInstanceId) {
+            return Optional.empty();
+          }
+        };
     IdeGatewayProperties properties = new IdeGatewayProperties();
     properties.setStreamUrlTemplate("wss://studio-lb" + IdeGatewayProperties.STREAM_PATH);
     IdeOriginProperties originProperties = new IdeOriginProperties();
