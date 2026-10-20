@@ -27,8 +27,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 
 /**
- * 真实 PostgreSQL 并发回归：持根树锁的合法深删除在另一事务的「首次 ancestor 读取」与「取得树 advisory 锁」之间提交时， 树锁 helper
- * 与线程生命周期协调器把目标线程当作合法缺失（空链 / null），而不是按结构漂移 fail-closed。
+ * 真实 PostgreSQL 并发回归：持根树锁的合法深删除在另一事务的「首次 Thread 读取」与「取得树 advisory 锁」之间提交时，
+ * 线程生命周期协调器在树锁内重读目标线程并把它当作合法缺失（null），而不是按结构漂移 fail-closed。
  *
  * <p>时序由有界 latch 精确控制，不依赖 sleep；删除失败时在 finally 释放等待方。
  */
@@ -42,7 +42,7 @@ class PostgresqlHarnessConcurrencyIntegrationTest {
   }
 
   @Test
-  void lockThreadWithAncestorsReturnsNullWhenSessionDeletedDuringTreeLockWait() throws Exception {
+  void lockThreadWithParentReturnsNullWhenSessionDeletedDuringTreeLockWait() throws Exception {
     Baseline baseline = seedThreadBaseline(store);
     CountDownLatch firstReadDone = new CountDownLatch(1);
     CountDownLatch deletionCommitted = new CountDownLatch(1);
@@ -56,7 +56,7 @@ class PostgresqlHarnessConcurrencyIntegrationTest {
               () ->
                   pausing.transaction(
                       tx ->
-                          ThreadLifecycleCoordinator.lockThreadWithAncestors(
+                          ThreadLifecycleCoordinator.lockThreadWithParent(
                               tx, baseline.threadId())));
       assertTrue(firstReadDone.await(10, TimeUnit.SECONDS), "first thread read must complete");
       try {
@@ -72,9 +72,9 @@ class PostgresqlHarnessConcurrencyIntegrationTest {
         List.of(
             "findThread:" + baseline.threadId(),
             "lockTree:" + baseline.threadId(),
-            "findAncestorChain:" + baseline.threadId()),
+            "findThread:" + baseline.threadId()),
         pausing.operations(),
-        "coordinator must return before taking any Session/Thread row lock");
+        "coordinator must re-read the target after the tree lock and return before any row lock");
   }
 
   /** 深删除：持根树锁后按 Session -> Thread 顺序删除执行事实与 Entry/Session。 */
@@ -92,7 +92,7 @@ class PostgresqlHarnessConcurrencyIntegrationTest {
   }
 
   /**
-   * 在目标线程的首次 ancestor 读取之后插入确定的暂停点：该读取仍返回删除前的真实链，随后等待并发深删除提交，
+   * 在目标线程的首次 Thread 读取之后插入确定的暂停点：该读取仍返回删除前的真实行，随后等待并发深删除提交，
    * 使后续「取得树锁后的确认读取」观察到已删除状态——即真实场景中锁等待期间的合法并发删除。
    */
   private static final class PausingStore implements HarnessStore {
@@ -141,9 +141,7 @@ class PostgresqlHarnessConcurrencyIntegrationTest {
                           (proxy, method, args) -> {
                             String name = method.getName();
                             // 记录全部 lock*、Thread 与 ancestor 读取：任何业务行锁都会出现在完整操作序列里。
-                            if (name.startsWith("lock")
-                                || name.equals("findAncestorChain")
-                                || name.equals("findThread")) {
+                            if (name.startsWith("lock") || name.equals("findThread")) {
                               operations.add(name + ":" + args[0]);
                             }
                             if (name.equals("findThread") && pausedThreadId.equals(args[0])) {

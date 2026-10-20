@@ -329,7 +329,7 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
   private void completeReadyModel(UUID threadId, Instant now) {
     store.transaction(
         tx -> {
-          ThreadState thread = ThreadLifecycleCoordinator.lockThreadWithAncestors(tx, threadId);
+          ThreadState thread = ThreadLifecycleCoordinator.lockThreadWithParent(tx, threadId);
           UUID start = tx.loadEntryPath(thread.headEntryId()).openTurnStart().orElseThrow().id();
           ModelInvocation model = tx.findModelInvocationByTurn(threadId, start).orElseThrow();
           tx.lockModelInvocation(model.id());

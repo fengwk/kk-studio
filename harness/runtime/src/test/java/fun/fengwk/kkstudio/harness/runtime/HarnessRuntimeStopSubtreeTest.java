@@ -37,6 +37,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
@@ -162,6 +163,138 @@ class HarnessRuntimeStopSubtreeTest {
     assertTrue(locks.contains("lockThread:" + child), "Stop locks the stopped subtree");
     assertTrue(locks.contains("lockThread:" + root.threadId()), "Stop locks joined ancestors");
     assertFalse(locks.contains("lockThread:" + sibling), "Stop must not lock unrelated siblings");
+  }
+
+  @Test
+  void stoppingDeepTargetLocksOnlySubtreeAndDirectParent() {
+    // 测试意图：深层目标 Stop 仅锁目标子树与目标直接父；grandparent/unrelated sibling 不锁，
+    // 直接父收到 Join 通知与 Work，深层祖先 head/version 不变，receipt 集合可精确 replay。
+    HarnessRuntimeTestSupport.Baseline root = seedBaseline(store);
+    UUID parent =
+        createChildThread(root.threadId(), root.threadId(), root.sessionId(), root.rootEntryId());
+    UUID target = createChildThread(parent, root.threadId(), root.sessionId(), root.rootEntryId());
+    UUID descendant =
+        createChildThread(target, root.threadId(), root.sessionId(), root.rootEntryId());
+    UUID relatedSibling =
+        createChildThread(parent, root.threadId(), root.sessionId(), root.rootEntryId());
+    UUID rootSibling =
+        createChildThread(root.threadId(), root.threadId(), root.sessionId(), root.rootEntryId());
+    UUID joinId = UUID.randomUUID();
+    seedQueuedCommand(store, target, 1L, userMessagePayload("delegated-task"), TestIds.id(50));
+    insertJoin(joinId, parent, target);
+    ThreadState rootBefore = store.transaction(tx -> tx.findThread(root.threadId()).orElseThrow());
+    UUID parentHeadBefore =
+        store.transaction(tx -> tx.findThread(parent).orElseThrow()).headEntryId();
+
+    List<String> locks = new ArrayList<>();
+    HarnessRuntime recording =
+        runtime(
+            recordingStore(store, locks), Clock.fixed(Instant.ofEpochMilli(5_000), ZoneOffset.UTC));
+    StopResult first = recording.stop(new StopCommand(target, TestIds.id(23), 0L));
+
+    assertFalse(first.replayed());
+    assertEquals(
+        List.of(target, descendant).stream().sorted(UuidOrder.COMPARATOR).toList(),
+        first.stoppedThreads().stream()
+            .map(StoppedThreadReceipt::threadId)
+            .sorted(UuidOrder.COMPARATOR)
+            .toList());
+    assertTrue(locks.contains("lockTree:" + root.threadId()));
+    assertTrue(locks.contains("lockThread:" + target));
+    assertTrue(locks.contains("lockThread:" + descendant));
+    assertTrue(locks.contains("lockThread:" + parent), "direct parent is needed for Join delivery");
+    assertFalse(locks.contains("lockThread:" + root.threadId()), "grandparent must not be locked");
+    assertFalse(
+        locks.contains("lockThread:" + relatedSibling), "unrelated sibling must not be locked");
+    assertFalse(locks.contains("lockThread:" + rootSibling), "root sibling must not be locked");
+
+    ThreadJoin join = store.transaction(tx -> tx.findJoin(joinId).orElseThrow());
+    assertTrue(join.matched());
+    assertNotNull(join.deliveryCommandSequence());
+    List<ThreadCommand> parentCommands = store.transaction(tx -> tx.loadCommandsByThread(parent));
+    assertEquals(1, parentCommands.size());
+    assertTrue(parentCommands.getFirst().payload() instanceof NotificationCommandPayload);
+    assertEquals(ThreadCommandState.QUEUED, parentCommands.getFirst().state());
+    assertNotNull(
+        store.transaction(
+            tx -> tx.findWork(new WorkTarget(WorkTargetType.THREAD, parent)).orElse(null)));
+    assertEquals(1L, version(target));
+    assertEquals(1L, version(descendant));
+    assertEquals(1L, version(parent));
+    assertEquals(
+        parentHeadBefore,
+        store.transaction(tx -> tx.findThread(parent).orElseThrow()).headEntryId());
+    ThreadState rootAfter = store.transaction(tx -> tx.findThread(root.threadId()).orElseThrow());
+    assertEquals(rootBefore.headEntryId(), rootAfter.headEntryId());
+    assertEquals(0L, rootAfter.version());
+    assertEquals(0L, version(relatedSibling));
+    assertEquals(0L, version(rootSibling));
+
+    // exact replay：同一 stopRequestId 返回持久回执集合，不重算当前树、不推进任何 version。
+    StopResult replay = recording.stop(new StopCommand(target, TestIds.id(23), 1L));
+    assertTrue(replay.replayed());
+    assertEquals(
+        first.stoppedThreads().stream().map(StoppedThreadReceipt::threadId).sorted().toList(),
+        replay.stoppedThreads().stream().map(StoppedThreadReceipt::threadId).sorted().toList());
+    assertEquals(1L, version(target));
+    assertEquals(1L, version(descendant));
+    assertEquals(1L, version(parent));
+  }
+
+  @Test
+  void stoppingParentMaterializesChildJoinToStoppedDirectParentWithoutWake() {
+    // 测试意图：目标父本身在停止集合内时，子 Join 通知直接物化到该父历史，不留 queued 命令或 Work；
+    // 仅目标直接父被锁，停止集合外的 grandparent/unrelated sibling 保持不变。
+    HarnessRuntimeTestSupport.Baseline root = seedBaseline(store);
+    UUID parent =
+        createChildThread(root.threadId(), root.threadId(), root.sessionId(), root.rootEntryId());
+    UUID child = createChildThread(parent, root.threadId(), root.sessionId(), root.rootEntryId());
+    UUID sibling = createChildThread(parent, root.threadId(), root.sessionId(), root.rootEntryId());
+    UUID rootSibling =
+        createChildThread(root.threadId(), root.threadId(), root.sessionId(), root.rootEntryId());
+    UUID joinId = UUID.randomUUID();
+    seedQueuedCommand(store, child, 1L, userMessagePayload("delegated-task"), TestIds.id(51));
+    insertJoin(joinId, parent, child);
+
+    List<String> locks = new ArrayList<>();
+    HarnessRuntime recording =
+        runtime(
+            recordingStore(store, locks), Clock.fixed(Instant.ofEpochMilli(5_000), ZoneOffset.UTC));
+    StopResult result = recording.stop(new StopCommand(parent, TestIds.id(24), 0L));
+
+    assertEquals(
+        List.of(parent, child, sibling).stream().sorted(UuidOrder.COMPARATOR).toList(),
+        result.stoppedThreads().stream()
+            .map(StoppedThreadReceipt::threadId)
+            .sorted(UuidOrder.COMPARATOR)
+            .toList());
+    assertTrue(locks.contains("lockTree:" + root.threadId()));
+    assertTrue(locks.contains("lockThread:" + parent));
+    assertTrue(locks.contains("lockThread:" + child));
+    assertTrue(locks.contains("lockThread:" + sibling));
+    assertTrue(
+        locks.contains("lockThread:" + root.threadId()), "direct parent of target is locked");
+    assertFalse(
+        locks.contains("lockThread:" + rootSibling), "unrelated sibling must not be locked");
+
+    ThreadJoin join = store.transaction(tx -> tx.findJoin(joinId).orElseThrow());
+    assertTrue(join.matched());
+    assertNotNull(join.deliveryCommandSequence());
+    assertEquals(1, notifications(parent).size());
+    assertTrue(
+        store.<Boolean>transaction(
+            tx -> {
+              tx.lockThread(parent);
+              return tx.loadQueuedCommands(parent).isEmpty();
+            }));
+    assertNull(
+        store.transaction(
+            tx -> tx.findWork(new WorkTarget(WorkTargetType.THREAD, parent)).orElse(null)));
+    assertEquals(
+        ThreadExecutionControl.RUNNABLE,
+        store.transaction(tx -> tx.findThread(root.threadId()).orElseThrow()).executionControl());
+    assertEquals(0L, version(root.threadId()));
+    assertEquals(0L, version(rootSibling));
   }
 
   @Test
@@ -490,7 +623,9 @@ class HarnessRuntimeStopSubtreeTest {
                                 new Class<?>[] {HarnessStore.Transaction.class},
                                 (transactionProxy, transactionMethod, transactionArgs) -> {
                                   String name = transactionMethod.getName();
-                                  if (name.equals("lockTree") || name.equals("lockThread")) {
+                                  if (name.equals("lockTree")
+                                      || name.equals("lockSessionForKeyShare")
+                                      || name.equals("lockThread")) {
                                     lockCalls.add(name + ":" + transactionArgs[0]);
                                   }
                                   return transactionMethod.invoke(tx, transactionArgs);

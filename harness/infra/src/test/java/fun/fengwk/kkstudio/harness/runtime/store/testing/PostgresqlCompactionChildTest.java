@@ -775,7 +775,7 @@ class PostgresqlCompactionChildTest {
   private void seedClosedToolLoopTurn(UUID childThreadId) {
     store.transaction(
         tx -> {
-          ThreadState child = ThreadLifecycleCoordinator.lockThreadWithAncestors(tx, childThreadId);
+          ThreadState child = ThreadLifecycleCoordinator.lockThreadWithParent(tx, childThreadId);
           BranchSettings settings = tx.loadEntryPath(child.headEntryId()).baseSettings();
           String callId = "call-1";
           UUID startId = tx.nextId();
@@ -1180,7 +1180,7 @@ class PostgresqlCompactionChildTest {
   private void startModel(UUID threadId) {
     store.transaction(
         tx -> {
-          ThreadState thread = ThreadLifecycleCoordinator.lockThreadWithAncestors(tx, threadId);
+          ThreadState thread = ThreadLifecycleCoordinator.lockThreadWithParent(tx, threadId);
           UUID turn = tx.loadEntryPath(thread.headEntryId()).openTurnStart().orElseThrow().id();
           ModelInvocation model = tx.findModelInvocationByTurn(threadId, turn).orElseThrow();
           assertEquals(ModelInvocationStatus.READY, model.status());
@@ -1199,7 +1199,7 @@ class PostgresqlCompactionChildTest {
     }
     store.transaction(
         tx -> {
-          ThreadState thread = ThreadLifecycleCoordinator.lockThreadWithAncestors(tx, threadId);
+          ThreadState thread = ThreadLifecycleCoordinator.lockThreadWithParent(tx, threadId);
           UUID turn = tx.loadEntryPath(thread.headEntryId()).openTurnStart().orElseThrow().id();
           ModelInvocation model = tx.findModelInvocationByTurn(threadId, turn).orElseThrow();
           assertEquals(ModelInvocationStatus.RUNNING, model.status());

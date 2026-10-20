@@ -178,17 +178,15 @@ final class StopControl {
       }
     }
 
-    // 祖先链纳入锁序：子 Join 结算需要向仍在运行的祖先投递完成通知（推进其 sequence 并请求 Work）。
-    List<UUID> ancestorIds = new ArrayList<>();
-    List<UUID> ancestorSessionIds = new ArrayList<>();
-    for (UUID ancestorId : tx.findAncestorChain(targetThread.id())) {
-      if (visited.contains(ancestorId)) {
-        continue;
-      }
-      ThreadState ancestor = tx.findThread(ancestorId).orElse(null);
-      if (ancestor != null) {
-        ancestorIds.add(ancestor.id());
-        ancestorSessionIds.add(ancestor.sessionId());
+    // 子树内所有其它节点的直接父都在停止集合内；子 Join 只向直接父交付，因此外部只补目标的一个直接父。
+    List<UUID> parentThreadIds = new ArrayList<>();
+    List<UUID> parentSessionIds = new ArrayList<>();
+    UUID parentThreadId = targetThread.parentThreadId();
+    if (parentThreadId != null) {
+      ThreadState parent = tx.findThread(parentThreadId).orElse(null);
+      if (parent != null) {
+        parentThreadIds.add(parent.id());
+        parentSessionIds.add(parent.sessionId());
       }
     }
 
@@ -198,7 +196,7 @@ final class StopControl {
     for (ThreadStopCandidate c : candidates) {
       sessionIdsList.add(c.thread().sessionId());
     }
-    sessionIdsList.addAll(ancestorSessionIds);
+    sessionIdsList.addAll(parentSessionIds);
     List<UUID> sessionIds =
         sessionIdsList.stream().distinct().sorted(UuidOrder.COMPARATOR).toList();
     for (UUID sessionId : sessionIds) {
@@ -213,7 +211,7 @@ final class StopControl {
     for (ThreadStopCandidate c : candidates) {
       threadIdsToLock.add(c.thread().id());
     }
-    threadIdsToLock.addAll(ancestorIds);
+    threadIdsToLock.addAll(parentThreadIds);
     List<UUID> sortedThreadIds =
         threadIdsToLock.stream().distinct().sorted(UuidOrder.COMPARATOR).toList();
     Map<UUID, ThreadState> lockedThreads = new HashMap<>();

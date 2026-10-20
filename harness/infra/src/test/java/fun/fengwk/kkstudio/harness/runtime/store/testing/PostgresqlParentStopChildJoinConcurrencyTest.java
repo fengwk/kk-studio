@@ -355,7 +355,7 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
       // 等待父级 Stop 拿到 PG 树级 advisory lock
       assertTrue(parentTreeLocked.await(10, TimeUnit.SECONDS));
 
-      // 线程 2：子级 ThreadProcessor 执行 claim，其内部 lockThreadWithAncestors 会尝试获取同一根节点的 tree lock
+      // 线程 2：子级 ThreadProcessor 执行 claim，其内部 lockThreadWithParent 会尝试获取同一根节点的 tree lock
       Future<ThreadProcessResult> childFuture =
           executor.submit(
               () -> {

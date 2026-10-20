@@ -31,7 +31,7 @@ Stop 的本地取消在提交后执行：`stop` 把取消登记在 [`HarnessStor
 advisory 围栏先于业务行锁，行锁守卫维护六级 rank。
 同级集合排序及树内 Command 交付例外见 [Harness Infra](harness-infra.md#事务边界与锁序)。
 
-tree advisory 锁只用于结构或跨 Thread 写操作（spawn、Stop、delete、fork、Join 结算、压缩 spawn）以及整树查询；单 Thread 控制（`renameThread`、`setThreadYolo`、`decideToolApproval`、tool input、`getThreadSnapshot`）和 Model/Tool 状态提交只锁 own Thread 及其 Model/Tool/Work，不取 tree 锁，也不锁祖先。此类单实体写入由 Thread 行锁串行化，与持 tree 锁的 delete/Stop 在同一行上线性化。
+tree advisory 锁只用于结构或跨 Thread 写操作（spawn、Stop、delete、fork、Join 结算、压缩 spawn）以及整树查询；单 Thread 控制（`renameThread`、`setThreadYolo`、`decideToolApproval`、tool input、`getThreadSnapshot`）和 Model/Tool 状态提交只锁 own Thread 及其 Model/Tool/Work，不取 tree 锁，也不锁祖先。Join 交付只写子 Join 与直接父命令/Thread，不递归到祖父：ThreadProcessor 持 tree 锁后只锁自身与不可变直接父的 Session/Thread；Stop 只锁目标子树与目标直接父。此类单实体写入由 Thread 行锁串行化，与持 tree 锁的 delete/Stop 在同一行上线性化。
 
 task 接受先取全局准入锁，跨所有执行树统计尚未冻结终态且有父的有效子 Join，保证全局额度判定与接受原子；root ticket 不计入子代理额度，同一父/子对至多一个有效未完成 Join（新续接 supersede 旧等待，旧 Join 不占额度、不再产生独立交付）。普通推进不取该准入锁。涉及执行树结构的写操作用递归查询确定根 Thread，再取该树的 advisory lock；树的读写都在树锁内重读确认，跨树操作按根 UUID 升序依次取锁（细节见 [Harness Infra](harness-infra.md)）。
 
@@ -196,7 +196,7 @@ Store 的 `claimNextWork` / `renewWork` 用租约时长（`Duration`）描述新
 
 Dispatcher 认领 Work 后把 `ClaimedWork` 交给对应 Processor。Thread claim 只归约一个持久化动作；Model / Tool claim 则驱动一次外部调用，期间可以续租、提交流式 checkpoint 与终态。后续调度由同事务的 `requestWork` 驱动，不在 Processor 内空转 Agent Loop。
 
-[`ThreadProcessor`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ThreadProcessor.java) 先校验 claim 所有权与 per-thread 准入，再锁 Session `KEY SHARE` + Thread、构建 `EntryPath` 并分类：
+[`ThreadProcessor`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ThreadProcessor.java) 先校验 claim 所有权与 per-thread 准入，再取执行树锁并按 UUID 升序锁自身与直接父的 Session `KEY SHARE` + Thread（根 Thread 只锁自身），构建 `EntryPath` 并分类。Join 交付只写子 Join 与直接父命令/Thread，绝不回溯祖父或兄弟；并发深删除等待结束后在树锁内重读目标，缺失按 `LOST_OWNERSHIP` 处理：
 
 - `MODEL_TERMINAL_PENDING`：原子写入 Assistant / Error / Compaction 终态结果；关闭 turn 时物理删除 ModelInvocation，进入 Tool phase 时保留父行并挂接 Assistant Entry；
 - `TOOL_TERMINAL_PENDING`：按 `callIndex` 写入副作用与 Tool Result，追加 `TURN_END(continueModel=true)`，删除 children 与父 ModelInvocation；
@@ -233,7 +233,7 @@ Model / Tool Processor 共用 [`WorkHeartbeat`](../../harness/runtime/src/main/j
 
 手工压缩走 `compactThread`：单个短事务按 expected version / availability / boundary 校验并构造 candidate，在同一事务内同步 resolve，成功时原子提交 COMPACTION Turn、子 Thread/首条摘要命令与 `SETTLE_OWNER_TURN` 票据，并请求子 Thread 的 THREAD Work；确定性拒绝时在同一事务提交失败终态。它不认领 THREAD Work。[`ManualCompactionAvailability`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/ManualCompactionAvailability.java) 是瞬时投影，给出 `THREAD_BUSY`、`OWNERSHIP_BARRIER`、`NO_RESOLVED_CONTEXT`、`MODEL_CHANGED`、`BELOW_MINIMUM`、`NOTHING_TO_COMPACT` 等禁用原因，不能替代提交时的复验。
 
-Stop 在树锁与有序行锁内校验目标 version 和 `stopRequestId`，按不可变 `parentThreadId` 停止目标及全部后代。
+Stop 在树锁与有序行锁内校验目标 version 和 `stopRequestId`，按不可变 `parentThreadId` 停止目标及全部后代；子树内其它节点的直接父已在停止集合内，因此外部行锁只补目标的一个直接父，不锁 grandparent 或无关 sibling。
 目标即使已经 `IDLE` 或 `STOPPED`，仍会覆盖其后代；已结算的 Join 不缩小停止范围。
 执行控制只由 Thread 自身的 `executionControl=STOPPED` 表达，不反查 Issue/Chat 门禁。
 

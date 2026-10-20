@@ -416,7 +416,7 @@ class PostgresqlSubagentContinuationTest {
   private void startModel(UUID threadId) {
     store.transaction(
         tx -> {
-          ThreadState thread = ThreadLifecycleCoordinator.lockThreadWithAncestors(tx, threadId);
+          ThreadState thread = ThreadLifecycleCoordinator.lockThreadWithParent(tx, threadId);
           UUID turn = tx.loadEntryPath(thread.headEntryId()).openTurnStart().orElseThrow().id();
           ModelInvocation model = tx.findModelInvocationByTurn(threadId, turn).orElseThrow();
           assertEquals(ModelInvocationStatus.READY, model.status());
@@ -434,7 +434,7 @@ class PostgresqlSubagentContinuationTest {
     }
     store.transaction(
         tx -> {
-          ThreadState thread = ThreadLifecycleCoordinator.lockThreadWithAncestors(tx, threadId);
+          ThreadState thread = ThreadLifecycleCoordinator.lockThreadWithParent(tx, threadId);
           UUID turn = tx.loadEntryPath(thread.headEntryId()).openTurnStart().orElseThrow().id();
           ModelInvocation model = tx.findModelInvocationByTurn(threadId, turn).orElseThrow();
           assertEquals(ModelInvocationStatus.RUNNING, model.status());
