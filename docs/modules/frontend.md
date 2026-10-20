@@ -11,7 +11,7 @@ Pane 布局、未发送输入、上传进度与编辑草稿由浏览器保存。
 
 [`main.tsx`](../../frontend/src/main.tsx) 在 StrictMode 下挂载
 [`AppProviders`](../../frontend/src/app/providers.tsx)：
-QueryClient → ExtensionHost → BrowserPreferences → ApplicationEvent → BrowserRouter。
+QueryClient → ApplicationContributions → BrowserPreferences → ApplicationEvent → BrowserRouter。
 查询默认关闭自动 retry 与窗口聚焦刷新；共享 ApplicationEvent manager 管理订阅。
 
 [`AppRouter`](../../frontend/src/app/router.tsx) 将 `/` 转至 `/chats`，`/interactions` 由应用层
@@ -23,9 +23,9 @@ PageContribution 的 navGroup/workspace 决定当前导航分组高亮和沉浸�
 合法 Chat/Thread/Canvas 工作区隐藏 topbar。Escape 按阻塞弹层、菜单、编辑焦点的优先级处理。
 
 四个内置扩展提供 AI、Projects、Canvas、Settings 页面。
-[`ExtensionHost`](../../frontend/src/platform/extensions/ExtensionHost.ts) 管理 pages、dialogs、
-overlays、toolRenderers；同 contribution 按 priority 降序、注册顺序升序选择。
-重复 extension id、非法 contribution id/path 在注册时拒绝。
+[`application-contributions.ts`](../../frontend/src/app/application-contributions.ts) 在应用组合边界
+把扩展一次性展开为只读的 pages、dialogs、overlays 与按 id 索引的 toolRenderers；
+重复 extension/contribution id 在组装时拒绝，运行时不再注册、覆盖或订阅。
 扩展是编译期受信任 React module，安装集合由应用组装确定。
 tool renderer id 对应后端冻结 rendererKey，缺失时使用默认展示。
 
@@ -281,7 +281,7 @@ Environment 管理面展示宿主事实与有界运维事件窗口，并提供�
 Projects 使用权威 ProjectSnapshot/IssueDetail，按 workflow states 分列，
 通过 version CAS 提交控制、阶段额度、Activity 与 Evidence。
 Issue Agent Pane 复用 Harness 时间线；UNKNOWN 核查与阶段状态分别展示。
-ProjectsInvalidationBridge 经 ExtensionHost overlay 失效 Query，重连全量对账。
+ProjectsInvalidationBridge 经 extension overlay 失效 Query，重连全量对账。
 Issue 详情与绑定 Thread 以 URL query 为唯一事实源，深链和浏览器前进后退沿同一状态解析。
 Project 编辑弹窗在打开时保存同项目的表单快照，后台更新不替换草稿；保存与显式 reload
 共用单一提交互斥。版本基线仅在成功写入或显式 reload 后推进，409 保留草稿与原版本。

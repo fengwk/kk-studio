@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { Link, Navigate, Route, Routes } from 'react-router'
 import type { PageContribution } from '@/platform/extensions/types'
-import { useExtensionHostSnapshot } from '@/platform/extensions/ExtensionHostContext'
+import { useApplicationContributions } from '@/platform/extensions/ApplicationContributionsContext'
 import { AppShell } from '@/platform/shell/AppShell'
 import type { PrimaryNavItem } from '@/platform/shell/types'
 import { OverlayHost } from '@/platform/workbench/WorkbenchSlots'
@@ -38,8 +38,7 @@ function RegisteredPage({ page }: { page: PageContribution }) {
 }
 
 function StudioRoutes() {
-  const host = useExtensionHostSnapshot()
-  const pages = host.pages.list()
+  const { pages } = useApplicationContributions()
   const defaultPage = pages[0]
 
   if (!defaultPage) {

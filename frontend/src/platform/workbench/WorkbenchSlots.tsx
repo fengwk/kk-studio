@@ -1,8 +1,8 @@
-import { useExtensionHostSnapshot } from '@/platform/extensions/ExtensionHostContext'
+import { useApplicationContributions } from '@/platform/extensions/ApplicationContributionsContext'
 
 export function OverlayHost() {
-  const host = useExtensionHostSnapshot()
-  const contributions = [...host.dialogs.list(), ...host.overlays.list()]
+  const { dialogs, overlays } = useApplicationContributions()
+  const contributions = [...dialogs, ...overlays]
 
   return (
     <>

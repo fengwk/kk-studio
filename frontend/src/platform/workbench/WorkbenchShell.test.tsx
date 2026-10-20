@@ -1,15 +1,18 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
 import { CatalogRuntimeContext, useOptionalCatalogRuntime } from '@/features/ai/catalog/CatalogRuntimeContext'
-import { ExtensionHost } from '@/platform/extensions/ExtensionHost'
-import { ExtensionHostProvider, useExtensionHostSnapshot } from '@/platform/extensions/ExtensionHostContext'
-import type { ExtensionComponentProps } from '@/platform/extensions/types'
+import {
+  ApplicationContributionsProvider,
+  useApplicationContributions,
+} from '@/platform/extensions/ApplicationContributionsContext'
+import type { ApplicationContributions, ExtensionComponentProps } from '@/platform/extensions/types'
 import type { PrimaryNavItem } from '@/platform/shell/types'
 import { WorkbenchShell } from '@/platform/workbench/WorkbenchShell'
 import { ApplicationEventProvider } from '@/shared/app-events'
 import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
+import { makeApplicationContributions } from '@/test-support/application-contributions'
 
 const FIXTURE_NAV_ITEMS: readonly PrimaryNavItem[] = [
   {
@@ -24,66 +27,55 @@ const FIXTURE_NAV_ITEMS: readonly PrimaryNavItem[] = [
 ]
 
 describe('WorkbenchShell', () => {
-  it('renders a registered Studio page without a feature switch', async () => {
-    const host = new ExtensionHost()
-    host.register({ id: 'test', pages: [{ id: 'plugin.page', path: 'plugin', component: () => <h1>Plugin</h1> }] })
-    renderWorkbench(host, '/plugin')
+  it('renders a page from the injected static contribution table', async () => {
+    const contributions = makeApplicationContributions({
+      pages: [{ id: 'plugin.page', path: 'plugin', component: () => <h1>Plugin</h1> }],
+    })
+    renderWorkbench(contributions, '/plugin')
 
     expect(await screen.findByRole('heading', { name: 'Plugin' })).toBeInTheDocument()
   })
 
   it('uses an unknown contribution fallback for unmatched paths', () => {
-    const host = new ExtensionHost()
-    host.register({ id: 'test', pages: [{ id: 'plugin.page', path: 'plugin', component: () => <div>plugin</div> }] })
-    renderWorkbench(host, '/missing')
+    const contributions = makeApplicationContributions({
+      pages: [{ id: 'plugin.page', path: 'plugin', component: () => <div>plugin</div> }],
+    })
+    renderWorkbench(contributions, '/missing')
 
     expect(screen.getByText('页面不可用')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '返回 Chat' })).toHaveAttribute('href', '/chats')
   })
 
-  it('reactively renders registered contributions, restores fallbacks, and clears on host disposal', async () => {
-    const host = new ExtensionHost()
-    renderWorkbench(host, '/plugin')
-    expect(screen.getByText('页面不可用')).toBeInTheDocument()
-
-    act(() => {
-      host.register(extension('base', 'Base', 10))
+  it('renders the current static fixture after the provider value changes', () => {
+    const base = makeApplicationContributions({
+      pages: [{ id: 'plugin.page', path: 'plugin', component: () => <h1>Base page</h1> }],
     })
-    await waitFor(() => {
-      expect(screen.getByRole('heading', { name: 'Base page' })).toBeInTheDocument()
+    const replacement = makeApplicationContributions({
+      pages: [{ id: 'plugin.page', path: 'plugin', component: () => <h1>Replacement page</h1> }],
     })
-
-    act(() => {
-      host.register(extension('override', 'Override', 20))
-    })
-    expect(screen.getByRole('heading', { name: 'Override page' })).toBeInTheDocument()
-
-    act(() => {
-      host.unregister('override')
-    })
+    const { rerender } = renderWorkbench(base, '/plugin')
     expect(screen.getByRole('heading', { name: 'Base page' })).toBeInTheDocument()
 
-    act(() => {
-      host.dispose()
-    })
+    rerender(workbenchTree(replacement, '/plugin'))
+    expect(screen.getByRole('heading', { name: 'Replacement page' })).toBeInTheDocument()
+
+    rerender(workbenchTree(makeApplicationContributions(), '/plugin'))
     expect(screen.getByText('页面不可用')).toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: 'Base page' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Replacement page' })).not.toBeInTheDocument()
   })
 
-  it('requires an extension host provider', () => {
+  it('requires an application contributions provider', () => {
     // 显式失败可以防止 contribution hook 静默绑定到隐藏的全局状态。
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     try {
-      expect(() => render(<MissingProviderProbe />)).toThrow('ExtensionHostProvider is required')
+      expect(() => render(<MissingProviderProbe />)).toThrow('ApplicationContributionsProvider is required')
     } finally {
       consoleError.mockRestore()
     }
   })
 
   it('I5: registered page 在自身 runtime provider 内挂载 OverlayHost，页面级上下文对 dialog 可见', async () => {
-    const host = new ExtensionHost()
-    host.register({
-      id: 'test-page-scoped-overlay',
+    const contributions = makeApplicationContributions({
       // 与真实 AI dialog contribution 相同：不 mock OptionalRuntime，直接消费真实 context。
       dialogs: [{ id: 'page.dialog', component: PageScopedDialog }],
       overlays: [{ id: 'page.overlay', component: PageScopedDialog }],
@@ -94,7 +86,7 @@ describe('WorkbenchShell', () => {
       }],
     })
 
-    renderWorkbench(host, '/test-page')
+    renderWorkbench(contributions, '/test-page')
 
     // 页面自身的 runtime provider 必须能被子树内的 OverlayHost 读到；若 OverlayHost
     // 被挂到 shell 根部（页面 Provider 之外），这里只会渲染出空内容。
@@ -104,32 +96,22 @@ describe('WorkbenchShell', () => {
       expect(node).toHaveTextContent('page-scoped-controller')
     }
     // 页面路径不再在根部重复挂载宿主。
-    expect(screen.getAllByTestId('page-scoped-dialog')).toHaveLength(host.dialogs.list().length + host.overlays.list().length)
+    expect(screen.getAllByTestId('page-scoped-dialog')).toHaveLength(
+      contributions.dialogs.length + contributions.overlays.length,
+    )
   })
 
-  it('I5: 显式 children 路由在 WorkbenchShell 根部挂载唯一 OverlayHost', async () => {
-    const host = new ExtensionHost()
-    host.register({
-      id: 'test-overlays',
+  it('I5: 显式 children 路由在 WorkbenchShell 根部挂载唯一 OverlayHost', () => {
+    const contributions = makeApplicationContributions({
       dialogs: [{ id: 'global.dialog', component: () => <div data-testid="global-dialog">Global Dialog</div> }],
       overlays: [{ id: 'global.overlay', component: () => <div data-testid="global-overlay">Global Overlay</div> }],
     })
 
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    const sockets = new FakeWebSocketHarness()
-    render(
-      <QueryClientProvider client={queryClient}>
-        <ApplicationEventProvider url="ws://test/events/v1" socketFactory={sockets.factory}>
-          <ExtensionHostProvider host={host}>
-            <MemoryRouter initialEntries={['/interactions']}>
-              <WorkbenchShell navItems={FIXTURE_NAV_ITEMS}>
-                <div data-testid="explicit-children">Explicit Interactions Page</div>
-              </WorkbenchShell>
-            </MemoryRouter>
-          </ExtensionHostProvider>
-        </ApplicationEventProvider>
-      </QueryClientProvider>,
-    )
+    render(workbenchTree(
+      contributions,
+      '/interactions',
+      <div data-testid="explicit-children">Explicit Interactions Page</div>,
+    ))
 
     expect(screen.getByTestId('explicit-children')).toBeInTheDocument()
     expect(screen.getByTestId('global-dialog')).toBeInTheDocument()
@@ -141,7 +123,7 @@ describe('WorkbenchShell', () => {
 })
 
 function MissingProviderProbe() {
-  useExtensionHostSnapshot()
+  useApplicationContributions()
   return null
 }
 
@@ -167,33 +149,29 @@ function PageScopedDialog() {
   return <div data-testid="page-scoped-dialog">page-scoped-controller</div>
 }
 
-function extension(id: string, label: string, priority: number) {
-  return {
-    id,
-    pages: [
-      {
-        id: 'plugin.page',
-        path: 'plugin',
-        priority,
-        component: () => <h1>{label} page</h1>,
-      },
-    ],
-  }
-}
-
-function renderWorkbench(host: ExtensionHost, entry: string) {
+function workbenchTree(
+  contributions: ApplicationContributions,
+  entry: string,
+  children?: React.ReactNode,
+) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   // Shell 依赖唯一应用事件连接读取全局 pending：测试注入替身 WebSocket，保持与生产同一 Provider 契约。
   const sockets = new FakeWebSocketHarness()
-  return render(
+  return (
     <QueryClientProvider client={queryClient}>
       <ApplicationEventProvider url="ws://test/events/v1" socketFactory={sockets.factory}>
-        <ExtensionHostProvider host={host}>
+        <ApplicationContributionsProvider contributions={contributions}>
           <MemoryRouter initialEntries={[entry]}>
-            <Routes><Route path="/*" element={<WorkbenchShell navItems={FIXTURE_NAV_ITEMS} />} /></Routes>
+            <Routes>
+              <Route path="/*" element={<WorkbenchShell navItems={FIXTURE_NAV_ITEMS}>{children}</WorkbenchShell>} />
+            </Routes>
           </MemoryRouter>
-        </ExtensionHostProvider>
+        </ApplicationContributionsProvider>
       </ApplicationEventProvider>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   )
+}
+
+function renderWorkbench(contributions: ApplicationContributions, entry: string) {
+  return render(workbenchTree(contributions, entry))
 }

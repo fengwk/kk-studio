@@ -1,14 +1,7 @@
 import type { ComponentType, ReactNode } from 'react'
 
-export type Disposable = () => void
-
 export interface ExtensionComponentProps {
   children?: ReactNode
-}
-
-interface Contribution {
-  id: string
-  priority?: number
 }
 
 export interface PageNavItem {
@@ -21,7 +14,8 @@ export type PageWorkspacePredicate =
   | boolean
   | ((params: Record<string, string | undefined>) => boolean)
 
-export interface PageContribution extends Contribution {
+export interface PageContribution {
+  id: string
   path: string
   component: ComponentType<ExtensionComponentProps>
   navGroup?: string
@@ -29,11 +23,13 @@ export interface PageContribution extends Contribution {
   workspace?: PageWorkspacePredicate
 }
 
-export interface DialogContribution extends Contribution {
+export interface DialogContribution {
+  id: string
   component: ComponentType<ExtensionComponentProps>
 }
 
-export interface OverlayContribution extends Contribution {
+export interface OverlayContribution {
+  id: string
   component: ComponentType<ExtensionComponentProps>
 }
 
@@ -80,7 +76,8 @@ export interface ToolRendererProps {
  * id 必须与后端 ToolDescriptor 冻结的 rendererKey 精确相同；未注册时由宿主回退到默认 renderer。
  * 展开/收起由宿主按有序内容统一裁决，contribution 不再声明可展开性。
  */
-export interface ToolRendererContribution extends Contribution {
+export interface ToolRendererContribution {
+  id: string
   component: ComponentType<ToolRendererProps>
 }
 
@@ -94,4 +91,12 @@ export interface TrustedReactExtension {
   dialogs?: DialogContribution[]
   overlays?: OverlayContribution[]
   toolRenderers?: ToolRendererContribution[]
+}
+
+/** 应用组合根一次性产出的只读 contribution 表；运行时不再注册、覆盖或订阅。 */
+export interface ApplicationContributions {
+  readonly pages: readonly PageContribution[]
+  readonly dialogs: readonly DialogContribution[]
+  readonly overlays: readonly OverlayContribution[]
+  readonly toolRenderers: ReadonlyMap<string, ToolRendererContribution>
 }
