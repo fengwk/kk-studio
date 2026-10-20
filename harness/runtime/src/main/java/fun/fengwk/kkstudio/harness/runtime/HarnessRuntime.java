@@ -304,15 +304,15 @@ public final class HarnessRuntime {
   /**
    * 在一个短 transaction 内直接重命名 Thread（isolated metadata mutation）。
    *
-   * <p>锁 Thread 后先比较当前 name：与规范化后的请求值相同即按原样返回当前 Thread（no-op，不触碰 version、不创建 Command/Entry/Work、不请求
-   * Work、不唤醒 processors）；否则仅替换 name 且 version 精确 +1、updatedAt 推进，复用 {@link
+   * <p>只锁目标 Thread 自身：本操作仅改本行 name，不读写祖先、后代或其它 Thread，不需要执行树锁。锁 Thread 后先比较当前
+   * name：与规范化后的请求值相同即按原样返回当前 Thread（no-op，不触碰 version、不创建 Command/Entry/Work、不请求 Work、不唤醒
+   * processors）；否则仅替换 name 且 version 精确 +1、updatedAt 推进，复用 {@link
    * HarnessStore.Transaction#updateThread} 的既有行迁移/校验路径。不接收 expectedVersion：并发重命名为 last-commit-wins。
    */
   public ThreadState renameThread(RenameThreadCommand command) {
     Objects.requireNonNull(command, "command");
     return store.transaction(
         tx -> {
-          ThreadTreeLocks.lockForThread(tx, command.threadId());
           ThreadState thread =
               tx.lockThread(command.threadId())
                   .orElseThrow(
@@ -331,16 +331,15 @@ public final class HarnessRuntime {
   /**
    * 在一个短 transaction 内直接更新执行根的 YOLO 开关。
    *
-   * <p>锁树与目标行后先校验目标必须是执行根（{@code parentThreadId} 为 null）；子代理的有效开关取自执行根，不能维护独立开关。与请求值 相同即按原样返回当前
-   * Thread（网络重试 no-op，不触碰 version、不创建 Command/Entry/Work、不请求 Work），否则在最新锁定行上更新开关且 version 精确
-   * +1，只修改根行。无关的执行 version 推进不会拒绝本次写入，最后一次序列化写入生效。本操作绝不唤醒 processors，也不改写已冻结的
-   * WAITING_APPROVAL、不回答问卷、不回滚已派发的工具。
+   * <p>只锁目标 Thread 自身：开关只写根行，不读写祖先、后代或其它 Thread，不需要执行树锁。锁目标行后先校验目标必须是执行根（{@code parentThreadId} 为
+   * null）；子代理的有效开关取自执行根，不能维护独立开关。与请求值相同即按原样返回当前 Thread（网络重试 no-op，不触碰 version、不创建
+   * Command/Entry/Work、不请求 Work），否则在最新锁定行上更新开关且 version 精确 +1，只修改根行。无关的执行 version
+   * 推进不会拒绝本次写入，最后一次序列化写入生效。本操作绝不唤醒 processors，也不改写已冻结的 WAITING_APPROVAL、不回答问卷、不回滚已派发的工具。
    */
   public ThreadState setThreadYolo(SetThreadYoloCommand command) {
     Objects.requireNonNull(command, "command");
     return store.transaction(
         tx -> {
-          ThreadTreeLocks.lockForThread(tx, command.threadId());
           ThreadState thread =
               tx.lockThread(command.threadId())
                   .orElseThrow(
@@ -537,17 +536,16 @@ public final class HarnessRuntime {
   /**
    * 在单个短 transaction 内决策一次必需的 Tool approval。
    *
-   * <p>锁序：Session -&gt; Thread -&gt; Model -&gt; Tool siblings -&gt; Work。未加锁的读仅用于发现不可变的
-   * id/ownership 并选择 稳定分支——approval 决策由 Thread 锁串行化，决策后即不可变。已决策 approval 在按规范顺序锁定 owning Model 与
-   * target Tool 之后，通过 {@link ToolApproval#decide} 以新的 {@code now} 验证其作为精确 replay，并返回已锁定的当前
-   * ToolInvocation（保留原始 {@code decidedAt}，不要求当前 branch/status，不递增 version，不请求 Work）；任何不匹配均为
-   * APPROVAL_DECISION_MISMATCH。
+   * <p>只锁本 Thread 与本 Thread 的 Model/Tool：Thread -&gt; Model -&gt; Tool siblings -&gt;
+   * Work，不取执行树锁；目标 approval 及其 owning Model 都属本 Thread，写回不涉及祖先或后代。未加锁的读仅用于发现不可变的 id/ownership 并选择
+   * 稳定分支——approval 决策由 Thread 锁串行化，决策后即不可变。已决策 approval 在按规范顺序锁定 owning Model 与 target Tool 之后，通过
+   * {@link ToolApproval#decide} 以新的 {@code now} 验证其作为精确 replay，并返回已锁定的当前 ToolInvocation（保留原始 {@code
+   * decidedAt}，不要求当前 branch/status，不递增 version，不请求 Work）；任何不匹配均为 APPROVAL_DECISION_MISMATCH。
    */
   public ToolInvocation decideToolApproval(ToolApprovalCommand command) {
     Objects.requireNonNull(command, "command");
     return store.transaction(
         tx -> {
-          ThreadTreeLocks.lockForThread(tx, command.threadId());
           ThreadState thread = tx.lockThread(command.threadId()).orElse(null);
           if (thread == null) {
             throw approvalNotApplicable("thread " + command.threadId() + " does not exist");
@@ -582,16 +580,17 @@ public final class HarnessRuntime {
    * 在单个短 transaction 内读取一次一致的 Thread snapshot（Thread -&gt; queued Commands -&gt; applicable Model
    * -&gt; Tool siblings），跨 transaction 永不混合状态。
    *
-   * <p>返回 ThreadState、当前 root-to-head {@link EntryPath}、不可变的已入队 Commands，以及仅与分类器匹配的 ModelInvocation
-   * / Tool siblings / 尚未物化的失败 attempts：IDLE_OR_HISTORICAL 与 CONTINUATION_DUE 不暴露 Invocation，Model
-   * context 暴露 Model 与失败 attempts，Tool context 暴露 Model 与全部 siblings。ModelInvocation checkpoint 可能在
-   * Thread version 不变时推进；本方法仍返回事务内最新 checkpoint，调用方不得把 version 当作完整快照 ETag。不持久化也不返回任何派生状态。
+   * <p>只锁目标 Thread 与该 Thread 当前适用的 Commands/Model/Tool 行，不取执行树锁；Thread 行锁串行化该 Thread 的全部写入，Entry
+   * 不可变，因此同事务行锁已足以保证快照一致性，无需阻塞祖先或兄弟。返回 ThreadState、当前 root-to-head {@link EntryPath}、不可变的已入队
+   * Commands，以及仅与分类器匹配的 ModelInvocation / Tool siblings / 尚未物化的失败 attempts：IDLE_OR_HISTORICAL 与
+   * CONTINUATION_DUE 不暴露 Invocation，Model context 暴露 Model 与失败 attempts，Tool context 暴露 Model 与全部
+   * siblings。ModelInvocation checkpoint 可能在 Thread version 不变时推进；本方法仍返回事务内最新 checkpoint，调用方不得把
+   * version 当作完整快照 ETag。不持久化也不返回任何派生状态。
    */
   public ThreadSnapshot getThreadSnapshot(UUID threadId) {
     Objects.requireNonNull(threadId, "threadId");
     return store.transaction(
         tx -> {
-          ThreadTreeLocks.lockForThread(tx, threadId);
           ThreadState thread =
               tx.lockThread(threadId)
                   .orElseThrow(
@@ -602,7 +601,7 @@ public final class HarnessRuntime {
         });
   }
 
-  /** 已锁定 Thread 的当前适用快照；调用方必须已持有该 Thread 所在执行树锁与 Thread 行锁。 */
+  /** 已锁定 Thread 的当前适用快照；调用方必须已持有该 Thread 行锁（整树查询另持有树锁）。 */
   private static ThreadSnapshot snapshotLockedThread(
       HarnessStore.Transaction tx, ThreadState thread) {
     List<ThreadCommand> queued = tx.loadQueuedCommands(thread.id());

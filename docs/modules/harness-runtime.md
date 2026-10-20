@@ -31,7 +31,9 @@ Stop 的本地取消在提交后执行：`stop` 把取消登记在 [`HarnessStor
 advisory 围栏先于业务行锁，行锁守卫维护六级 rank。
 同级集合排序及树内 Command 交付例外见 [Harness Infra](harness-infra.md#事务边界与锁序)。
 
-task 接受先取全局准入锁，跨所有执行树统计尚未冻结终态且有父的有效子 Join，保证全局额度判定与接受原子；root ticket 不计入子代理额度，同一父/子对至多一个有效未完成 Join（新续接 supersede 旧等待，旧 Join 不占额度、不再产生独立交付）。普通推进不取该准入锁。涉及执行树的事务用递归查询确定根 Thread，再取该树的 advisory lock；树的读写都在树锁内重读确认，跨树操作按根 UUID 升序依次取锁（细节见 [Harness Infra](harness-infra.md)）。
+tree advisory 锁只用于结构或跨 Thread 写操作（spawn、Stop、delete、fork、Join 结算、压缩 spawn）以及整树查询；单 Thread 控制（`renameThread`、`setThreadYolo`、`decideToolApproval`、tool input、`getThreadSnapshot`）和 Model/Tool 状态提交只锁 own Thread 及其 Model/Tool/Work，不取 tree 锁，也不锁祖先。此类单实体写入由 Thread 行锁串行化，与持 tree 锁的 delete/Stop 在同一行上线性化。
+
+task 接受先取全局准入锁，跨所有执行树统计尚未冻结终态且有父的有效子 Join，保证全局额度判定与接受原子；root ticket 不计入子代理额度，同一父/子对至多一个有效未完成 Join（新续接 supersede 旧等待，旧 Join 不占额度、不再产生独立交付）。普通推进不取该准入锁。涉及执行树结构的写操作用递归查询确定根 Thread，再取该树的 advisory lock；树的读写都在树锁内重读确认，跨树操作按根 UUID 升序依次取锁（细节见 [Harness Infra](harness-infra.md)）。
 
 创建、请求或强制删除 Work 的业务事务必须先锁 owning Thread；Dispatcher 的 claim 与 heartbeat 是唯一允许只锁单条 Work 的调度事务，且它们不得制造新的业务 wake。
 
@@ -91,7 +93,7 @@ rootThreadId / yoloEnabled / executionControl / inputThroughSequence / nextComma
 
 会话显示名由服务端在创建时派生、不进入 creation request hash：Session 取初始批次末尾 user-like 消息（含 typed `GOAL` 正文）的首个非空文本（折叠单行、前 40 个码点，无省略号），无文本回退 `session-` + Session UUID 前 8 位；ROOT Thread 固定为 `main`；分支 Thread 的显示名由调用方在 `NEW_THREAD` 中显式给出，是创建请求身份的一部分，不再有派生回退名。手工名称统一经 [`Names.normalize`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/Names.java) 折叠空白并要求非空、至多 256 个码点（超长报错，绝不截断）。
 
-`getThreadSnapshot` 在单事务内锁 Thread、读取待处理命令与 `EntryPath`，再用分类器投影出最小适用状态：`IdleOrHistorical`/`ContinuationDue` 只暴露 Thread 与历史；Model 上下文暴露 ModelInvocation 与尚未物化的失败 attempts；Tool 上下文额外暴露全部 Tool siblings。快照总是携带事务内最新的已提交 Invocation checkpoint，即使 Thread version 未变。
+`getThreadSnapshot` 在单事务内只锁目标 Thread、读取待处理命令与 `EntryPath`，再锁该 Thread 当前适用的 Model/Tool 并用分类器投影出最小适用状态；不取 tree 锁，也不锁祖先或兄弟：`IdleOrHistorical`/`ContinuationDue` 只暴露 Thread 与历史；Model 上下文暴露 ModelInvocation 与尚未物化的失败 attempts；Tool 上下文额外暴露全部 Tool siblings。快照总是携带事务内最新的已提交 Invocation checkpoint，即使 Thread version 未变。
 
 `getThreadTree` 读取目标 Thread 所属的整棵执行树。目标不存在则 `HarnessRuntimeNotFoundException`；否则取其 `rootThreadId` 的树锁，再用 `listThreadsByRoot` 读取同根全部 Thread。同 Session 里另一棵执行根的分支不会进入结果。收集完成后按 UUID 升序锁定全部 Thread，在树锁保护下只读探测各节点的 Invocation，并复用快照构造；返回顺序是 `createdAt` 再 UUID。查询不写 Command、Entry、Work，也不推进 version。节点上的 `turnCount` 只计当前 root-to-head 的 `INPUT` / `CONTINUATION`，`COMPACTION` 与 `STOP` 不计；`toolCallCount` 只计该路径上 ASSISTANT `MESSAGE` 的 ToolCall；`outcome` 只在运行时状态为 `IDLE` 且当前 head 是 `TURN_END` 时取 `COMPLETED` / `FAILED` / `STOPPED` / `CANCELLED`，否则为 null。状态仍是 `ThreadSnapshot.runtimeStatus()` 的本地细分值，不含任何递归子树投影。
 
@@ -206,7 +208,7 @@ Dispatcher 认领 Work 后把 `ClaimedWork` 交给对应 Processor。Thread clai
 
 [`ModelProcessor`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ModelProcessor.java) 驱动一次 Model 调用：prepare 事务把 `READY` 转为 `DISPATCHING` 并推进 Thread version（`DISPATCHING` / `RUNNING` 的旧租约恢复见下）→ 事务外启动 heartbeat 并调用 `ModelGateway.start` → `Started` 时先安全 attach handle、持久化 `RUNNING`，最后才调用 `handle.activate()` 打开回调门控 → 流式增量交给 [`ModelExecution`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ModelExecution.java) → 终态合并未刷增量，在一次 UPDATE 中写终态并请求 THREAD Work。旧租约过期（`DISPATCHING` / `RUNNING`）接入共享 [`InvocationRetryPolicy`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/retry/InvocationRetryPolicy.java)：`DISPATCHING`（启动可能已发出、结果未确认）计为已消耗 attempt（`attempt + 1`），`RUNNING` 计当前已确认 attempt；允许重试时写一条 retryable [`ModelAttemptFailure`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/model/ModelAttemptFailure.java)（含 `attempt` 与 `retryAt`）后回到 `READY`，并按 `retryAt` 延迟重排 MODEL Work（不唤醒 THREAD；旧 partial 只留作尝试审计，绝不与新 attempt 的文本或 tool-call 拼接）。预算耗尽时才以 `FAILED` 明确终止并唤醒 THREAD；同一 attempt 绝不重放 Provider，也不新建恢复专用预算或重置计数。
 
-`ModelExecution` 用单 drain owner 顺序处理 delta、推送定时信号与 terminal：delta 只做本地缓冲不触库，[`ModelStreamConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ModelStreamConfig.java) DEFAULT 在 `50ms` 合并窗口、`256` 个事件或 `64KiB` 增量载荷任一到达时立即推送 `MODEL_DELTA`（有损 overlay，不等待数据库）。累计 text/thinking 由独立节奏落库：DEFAULT 每 `1500ms` 一次，集成方也可以用 `requestCheckpoint(invocationId, attempt)` 让当前 active owner 立即追帧；checkpoint 短事务只锁 ModelInvocation 与 claimed Work（不取执行树锁），重校验 `RUNNING` + attempt + claimed lease，提交成功后才按 sequence 发布 `MODEL_CHECKPOINT`。terminal / retry 仍在同一次状态事务中合并未推送增量并写完整累计文本，随后只发布已提交缓冲与终态补齐的 delta；旧 attempt、租约丢失或 Stop 竞态立即停止发布，绝不补写未提交批次。
+`ModelExecution` 用单 drain owner 顺序处理 delta、推送定时信号与 terminal：delta 只做本地缓冲不触库，[`ModelStreamConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ModelStreamConfig.java) DEFAULT 在 `50ms` 合并窗口、`256` 个事件或 `64KiB` 增量载荷任一到达时立即推送 `MODEL_DELTA`（有损 overlay，不等待数据库）。累计 text/thinking 由独立节奏落库：DEFAULT 每 `1500ms` 一次，集成方也可以用 `requestCheckpoint(invocationId, attempt)` 让当前 active owner 立即追帧；checkpoint 短事务只锁 ModelInvocation 与 claimed Work（不取执行树锁），重校验 `RUNNING` + attempt + claimed lease，提交成功后才按 sequence 发布 `MODEL_CHECKPOINT`。terminal / retry 只写本 Thread 的 Thread/Model/Work：事务按 own Thread 行 -> ModelInvocation -> claimed Work 加锁，唤醒 THREAD Work 只是 hint，不需要执行树锁；Thread 行锁与 delete/Stop 在同一行上线性化。随后只发布已提交缓冲与终态补齐的 delta；旧 attempt、租约丢失或 Stop 竞态立即停止发布，绝不补写未提交批次。
 
 成功的 terminal 响应在成为 durable 事实之前先冻结 Tool 历史语义：`ModelExecution` 用本次调用的冻结 `toolBindings` 与注入的 [`ToolHistoryActionResolver`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/ToolHistoryActionResolver.java)（Platform 实现按冻结贡献身份与完整定义查不可变 `HarnessCatalog`，再调用 Tool 的 `historyRenderer()`）算出每个 READY 调用的自然语言动作，写入 `ProviderToolCall.historyAction` 后再持久化。解析与渲染在 execution monitor 和状态事务之外完成，动态 MCP Tool 不触发数据库查询；任何缺失、blank、异常或定义变化都退化为不冻结 action——历史语义渲染绝不阻断模型调用，也绝不改写 durable arguments。
 
@@ -330,7 +332,7 @@ terminalEntryId / finalAnswerEntryId / deliveryCommandSequence / createdAt / upd
 
 | 包名 | 职责 | 边界 |
 | --- | --- | --- |
-| `runtime` | 同步控制面 facade `HarnessRuntime` 与包私有控制类 `AcceptCommandsControl`、`StopControl`、`ManualCompactionControl`、`ToolInputControl`、`ThreadContextLock`、`ThreadLifecycleCoordinator`、`ThreadTreeLocks`、`ChangeGate`、`Names` | 控制事务边界与类型化冲突；`admission -> tree -> session -> thread -> command -> model -> tool -> work` 锁序由 `ThreadLifecycleCoordinator` 与 `ThreadTreeLocks` 统一守卫；执行状态流转委托给 `runtime.processor` |
+| `runtime` | 同步控制面 facade `HarnessRuntime` 与包私有控制类 `AcceptCommandsControl`、`StopControl`、`ManualCompactionControl`、`ToolInputControl`、`ThreadContextLock`、`ThreadLifecycleCoordinator`、`ThreadTreeLocks`、`ChangeGate`、`Names` | 控制事务边界与类型化冲突；结构/跨 Thread 写操作的 `admission -> tree -> session -> thread -> command -> model -> tool -> work` 锁序由 `ThreadLifecycleCoordinator` 与 `ThreadTreeLocks` 守卫，单实体控制与执行状态提交从 own Thread 行锁开始；执行状态流转委托给 `runtime.processor` |
 | `runtime.admission` | `ConcurrencyAdmission` 进程内非阻塞并发槽位 | 纯内存，不持久化、不跨进程协调 |
 | `runtime.compaction` | `CompactionPlanner`、`AutomaticCompactionPlanner`、`CompactionConfig`、`CompactionHistory`、`CompactionResultEvaluator`、`CompactionChildSpawn`、`CompactionStart`、摘要装配与提示词 | 规划与评估是纯函数；子执行经统一 spawn 复用标准 ModelInvocation 与 MODEL 邮箱，父侧只持 `SETTLE_OWNER_TURN` 票据与 durable wait |
 | `runtime.entry` | `BranchSettings`、`GoalSetting`、`ModelSelection`、`TurnStartReason`、`TurnEndOutcome` | 只含分支配置与 turn 生命周期值对象；Environment name 进入 settings，内部路由 ID 与目录不进入分支历史 |
