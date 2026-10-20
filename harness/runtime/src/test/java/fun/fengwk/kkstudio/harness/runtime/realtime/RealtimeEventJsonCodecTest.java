@@ -434,6 +434,70 @@ class RealtimeEventJsonCodecTest {
     assertThrows(NullPointerException.class, () -> codec.decodeNode(null));
   }
 
+  // ---------- Model checkpoint ----------
+
+  @Test
+  void modelCheckpointRoundTripsWithoutPayload() {
+    Instant now = Instant.parse("2026-02-01T00:00:00Z");
+    RealtimeEvent.ModelCheckpoint event =
+        new RealtimeEvent.ModelCheckpoint(
+            UUID.fromString("00000000-0000-0000-0000-000000000007"),
+            UUID.fromString("00000000-0000-0000-0000-00000000002a"),
+            3,
+            5L,
+            now);
+
+    assertEquals(checkpointJson(), codec.encode(event));
+    assertEquals(event, codec.decode(checkpointJson()));
+  }
+
+  /** checkpoint 是 MODEL_INVOCATION 的已提交水位；其它 subject kind 必须拒绝。 */
+  @Test
+  void modelCheckpointRejectsWrongSubjectKind() {
+    ObjectNode node = canonicalCheckpointNode();
+    node.put("subjectKind", "TOOL_INVOCATION");
+    assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(node));
+  }
+
+  /** checkpoint 的 exact field set 不含 payload，也不能缺失 sequence。 */
+  @Test
+  void modelCheckpointRequiresExactFields() {
+    ObjectNode missingSequence = canonicalCheckpointNode();
+    missingSequence.remove("sequence");
+    assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(missingSequence));
+
+    ObjectNode withPayload = canonicalCheckpointNode();
+    withPayload.set("payload", NODES.objectNode());
+    assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(withPayload));
+
+    ObjectNode unknownField = canonicalCheckpointNode();
+    unknownField.put("cursor", 1);
+    assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(unknownField));
+  }
+
+  @Test
+  void modelCheckpointRejectsNonPositiveAttemptOrSequence() {
+    ObjectNode zeroAttempt = canonicalCheckpointNode();
+    zeroAttempt.put("attempt", 0);
+    assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(zeroAttempt));
+
+    ObjectNode zeroSequence = canonicalCheckpointNode();
+    zeroSequence.put("sequence", 0);
+    assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(zeroSequence));
+
+    ObjectNode fractionalSequence = canonicalCheckpointNode();
+    fractionalSequence.put("sequence", 1.5);
+    assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(fractionalSequence));
+  }
+
+  @Test
+  void modelCheckpointRejectsDuplicateFieldAndTrailingTokens() {
+    String duplicateAttempt =
+        checkpointJson().replace("\"attempt\":3", "\"attempt\":3,\"attempt\":3");
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(duplicateAttempt));
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(checkpointJson() + "{}"));
+  }
+
   // ---------- 确定性 ----------
 
   @Test
@@ -451,6 +515,26 @@ class RealtimeEventJsonCodecTest {
   }
 
   // ---------- 辅助方法 ----------
+
+  private static ObjectNode canonicalCheckpointNode() {
+    ObjectNode node = NODES.objectNode();
+    node.put("threadId", "00000000-0000-0000-0000-000000000007");
+    node.put("subjectKind", "MODEL_INVOCATION");
+    node.put("subjectId", "00000000-0000-0000-0000-00000000002a");
+    node.put("attempt", 3);
+    node.put("sequence", 5);
+    node.put("type", "MODEL_CHECKPOINT");
+    node.put("createdAt", "2026-02-01T00:00:00Z");
+    return node;
+  }
+
+  private static String checkpointJson() {
+    return "{\"threadId\":\"00000000-0000-0000-0000-000000000007\","
+        + "\"subjectKind\":\"MODEL_INVOCATION\","
+        + "\"subjectId\":\"00000000-0000-0000-0000-00000000002a\","
+        + "\"attempt\":3,\"sequence\":5,\"type\":\"MODEL_CHECKPOINT\","
+        + "\"createdAt\":\"2026-02-01T00:00:00Z\"}";
+  }
 
   private static ObjectNode canonicalTextDeltaNode() {
     ObjectNode node = NODES.objectNode();
