@@ -1,12 +1,13 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 import { ApplicationEventProvider } from '@/shared/app-events'
+import { harnessService } from '@/shared/api/harness-service'
 import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
 import { useHarnessThreadRealtime } from '@/features/ai/runtime/useHarnessThreadRealtime'
 import type { RealtimeFrameSchedulerOptions } from '@/features/ai/runtime/realtime-frame-scheduler'
@@ -17,7 +18,6 @@ import type {
 } from '@/shared/api/contracts/ai-runtime'
 
 const THREAD_ID = '11111111-2222-4333-8444-555555555555'
-const THREAD_A_ID = 'aaaaaaaa-0000-4000-8000-000000000001'
 const THREAD_B_ID = 'bbbbbbbb-0000-4000-8000-000000000002'
 const threadResource = { kind: 'thread', id: THREAD_ID } as const
 
@@ -78,7 +78,13 @@ function emitRealtime(sockets: FakeWebSocketHarness, data: string, threadId = TH
   )
 }
 
+const requestStreamCatchup = vi.spyOn(harnessService, 'requestStreamCatchup')
+
 describe('useHarnessThreadRealtime', () => {
+  beforeEach(() => {
+    requestStreamCatchup.mockReset()
+    requestStreamCatchup.mockResolvedValue(undefined)
+  })
   afterEach(() => vi.clearAllMocks())
 
   it('uses one wire subscription, invalidates durable signals, and overlays the next delta', async () => {
@@ -109,157 +115,121 @@ describe('useHarnessThreadRealtime', () => {
     expect(invalidate).toHaveBeenCalledTimes(4)
   })
 
-  it('single-flight gap recovery re-refetches with bounded backoff until the checkpoint catches up', async () => {
+  it('requests one catchup per subscription and reconnect while the model is RUNNING', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const { rerender, sockets } = renderRealtime(client, { invocation: modelInvocation() })
+    const socket = sockets.openLatest()
+    expect(requestStreamCatchup).not.toHaveBeenCalled()
+
+    act(() => socket.emitServer({ type: 'subscribed', resource: threadResource, cursor: '42' }))
+    await waitFor(() =>
+      expect(requestStreamCatchup).toHaveBeenCalledWith(THREAD_ID, {
+        invocationId: 'inv-1',
+        attempt: 1,
+      }),
+    )
+    expect(requestStreamCatchup).toHaveBeenCalledTimes(1)
+
+    // 重连后的 subscribed ack 再次请求一次（新订阅周期），但仍只请求一次。
+    act(() => socket.emitServer({ type: 'subscribed', resource: threadResource, cursor: '42' }))
+    await waitFor(() => expect(requestStreamCatchup).toHaveBeenCalledTimes(2))
+
+    // 非 RUNNING 的模型不再请求追帧。
+    rerender({ invocation: { ...modelInvocation(), status: 'READY' } })
+    act(() => socket.emitServer({ type: 'subscribed', resource: threadResource, cursor: '42' }))
+    await sleep(50)
+    expect(requestStreamCatchup).toHaveBeenCalledTimes(2)
+  })
+
+  it('coalesces gap catchups and appends the buffered suffix after a covering checkpoint', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const invalidate = vi.spyOn(client, 'invalidateQueries')
     const { result, rerender, sockets } = renderRealtime(client, { invocation: modelInvocation() })
     sockets.openLatest()
 
-    // 重复且相同的 gap delta 只触发一次恢复循环（永不按每条 delta 单独 refetch）。
-    emitRealtime(sockets, realtime(3, 'missing'))
-    emitRealtime(sockets, realtime(3, 'missing'))
-    expect(result.current?.modelStream).toBeNull()
-    await waitFor(() => expect(invalidate.mock.calls.length).toBe(1), { timeout: 2000 })
-
-
-    // 首次 refetch 发现 checkpoint 仍然落后（数据未变化）：循环会按 backoff
-    // 重新挂载自己并再次 refetch，而不是停滞。
-    await waitFor(
-      () => expect(invalidate.mock.calls.length).toBeGreaterThanOrEqual(2),
-      { timeout: 3000 },
-    )
-
-    // checkpoint 追平：overlay 出现，循环停止。
+    // 已显示 current seq2；首次观察到 seq5 时缺 3/4，覆盖阈值必须是 5-1=4。
     rerender({
       invocation: {
         ...modelInvocation(),
-        streamCheckpointJson: '{"attempt":1,"text":"recovered","thinking":"","sequence":3}',
+        streamCheckpointJson: '{"attempt":1,"text":"ab","thinking":"","sequence":2}',
       },
     })
-    await waitFor(() => expect(result.current?.modelStream?.text).toBe('recovered'))
+    await waitFor(() => expect(result.current?.modelStream?.text).toBe('ab'))
+    emitRealtime(sockets, realtime(5, 'five'))
+    emitRealtime(sockets, realtime(5, 'five'))
+    emitRealtime(sockets, realtime(6, 'six'))
+    emitRealtime(sockets, realtime(7, 'seven'))
+    await waitFor(() =>
+      expect(requestStreamCatchup).toHaveBeenCalledWith(THREAD_ID, {
+        invocationId: 'inv-1',
+        attempt: 1,
+      }),
+    )
+    expect(requestStreamCatchup).toHaveBeenCalledTimes(1)
+    expect(invalidate).not.toHaveBeenCalled()
+    expect(result.current?.modelStream?.text).toBe('ab')
 
-    const callsAfterCatchUp = invalidate.mock.calls.length
-    await sleep(600)
-    expect(invalidate.mock.calls.length).toBe(callsAfterCatchUp)
+    // checkpoint3 只覆盖到缺口的 3，仍缺 4：不触发回读。
+    emitRealtime(sockets, checkpoint(3))
+    await sleep(0)
+    expect(invalidate).not.toHaveBeenCalled()
+    // checkpoint4 覆盖 3/4：才回读 snapshot 并以 seq4 为新基线拼接 seq5..7。
+    emitRealtime(sockets, checkpoint(4))
+    await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(1))
 
-    // 终止态结果但没有 resultEntryId：完整的持久 result 投影会替换
-    // overlay（status 'done'），并一直保留到 resultEntryId 被设置。
+    // 回读暂时仍返回 seq2：保留已显示 "ab"，并把阈值稳定在 5-1=4；
+    // 此时 checkpoint3 仍不得触发第二次回读。
     rerender({
       invocation: {
         ...modelInvocation(),
-        resultJson:
-          '{"text":"recovered","thinking":"","toolCalls":[],"stopReason":"stop","usage":{},"cost":{}}',
+        streamCheckpointJson: '{"attempt":1,"text":"ab","thinking":"","sequence":2}',
+      },
+    })
+    await waitFor(() => expect(result.current?.modelStream?.text).toBe('ab'))
+    emitRealtime(sockets, checkpoint(3))
+    await sleep(0)
+    expect(invalidate).toHaveBeenCalledTimes(1)
+
+    rerender({
+      invocation: {
+        ...modelInvocation(),
+        streamCheckpointJson: '{"attempt":1,"text":"abcd","thinking":"","sequence":4}',
       },
     })
     await waitFor(() =>
-      expect(result.current?.modelStream?.text).toBe('recovered'),
+      expect(result.current?.modelStream).toMatchObject({
+        sequence: 7,
+        text: 'abcdfivesixseven',
+      }),
     )
-    expect(result.current?.modelStream?.status).toBe('done')
-    // 设置 resultEntryId 后：持久 Entry 才是 transcript 的真实来源。
-    rerender({ invocation: { ...modelInvocation(), resultJson: '{}', resultEntryId: 'e-9' } })
-    await waitFor(() => expect(result.current?.modelStream).toBeNull())
+    expect(requestStreamCatchup).toHaveBeenCalledTimes(1)
+
+    // 恢复完成后新 delta 直接连续追加，不再请求 catchup。
+    emitRealtime(sockets, realtime(8, '-eight'))
+    await waitFor(() =>
+      expect(result.current?.modelStream?.text).toBe('abcdfivesixseven-eight'),
+    )
+    expect(requestStreamCatchup).toHaveBeenCalledTimes(1)
   })
 
-  it('does not let a stale Thread recovery tick cancel or starve a new Thread recovery', async () => {
-    vi.useFakeTimers()
-    try {
-      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-      const invalidate = vi.spyOn(client, 'invalidateQueries')
-      // 首次 refetch（旧 Thread A 的恢复）会一直处于 in-flight，直到手动 resolve。
-      let resolveFirstRefetch: (() => void) | null = null
-      let firstRefetch = true
-      invalidate.mockImplementation(async (options) => {
-        const key = (options?.queryKey ?? []) as readonly unknown[]
-        const refetchThreadId = String(key[key.length - 1] ?? '')
-        if (firstRefetch && refetchThreadId === THREAD_A_ID) {
-          firstRefetch = false
-          return new Promise<void>((resolve) => {
-            resolveFirstRefetch = resolve
-          })
-        }
-        return Promise.resolve()
-      })
-
-      const { result, rerender, sockets } = renderRealtime(client, {
-        threadId: THREAD_A_ID,
-        invocation: modelInvocation('inv-A', THREAD_A_ID),
-      })
-      sockets.openLatest()
-
-      // Thread A 的 gap delta 会挂起一次恢复 A；它的首次 tick 会卡在 in-flight 的 refetch 上。
-      emitRealtime(sockets, realtime(3, 'missing', THREAD_A_ID, 'inv-A'), THREAD_A_ID)
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(200)
-      })
-      expect(invalidate).toHaveBeenCalledTimes(1)
-
-      // 在 A 的 refetch 仍在 in-flight 时切到 Thread B；B 自己的 gap 独立计算。
-      // 由于旧 tick 仍持有 busy flag，新挂起的调度被跳过。B 的订阅 effect
-      // 还需要再渲染一次（订阅状态的回路往返）。
-      rerender({ threadId: THREAD_B_ID, invocation: modelInvocation('inv-B', THREAD_B_ID) })
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(0)
-      })
-      emitRealtime(sockets, realtime(3, 'missing', THREAD_B_ID, 'inv-B'), THREAD_B_ID)
-
-      // A 的陈旧 refetch 完成：绝不能因此清除 B 的恢复，并且重新挂起时
-      // 必须调度 B（旧 tick 的 finally 会清除 busy flag）。
-      await act(async () => {
-        resolveFirstRefetch?.()
-        await vi.advanceTimersByTimeAsync(0)
-      })
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(200)
-      })
-      expect(
-        invalidate.mock.calls.some(
-          (call) => String((call[0]?.queryKey as readonly unknown[])?.at(-1)) === THREAD_B_ID,
-        ),
-      ).toBe(true)
-
-      // B 追平：overlay 出现，循环停止。
-      rerender({
-        threadId: THREAD_B_ID,
-        invocation: {
-          ...modelInvocation('inv-B', THREAD_B_ID),
-          streamCheckpointJson: '{"attempt":1,"text":"recovered","thinking":"","sequence":3}',
-        },
-      })
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(0)
-      })
-      expect(result.current?.modelStream?.text).toBe('recovered')
-      // 让循环再跑一次追平检测，然后验证循环已停止。
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(800)
-      })
-      const callsAfterCatchUp = invalidate.mock.calls.length
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(1200)
-      })
-      expect(invalidate.mock.calls.length).toBe(callsAfterCatchUp)
-    } finally {
-      vi.useRealTimers()
-    }
-  })
-
-  it('survives a failed refetch: keeps backing off and catches up on a later attempt', async () => {
+  it('does not retry a failed catchup and waits for the next covering checkpoint', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const invalidate = vi.spyOn(client, 'invalidateQueries')
-    // 首次 refetch 失败（网络/后端故障），后续 refetch 成功。循环绝不能因
-    // 残留的 recoveryRef 又没有定时器而冻结。
-    invalidate
-      .mockRejectedValueOnce(new Error('refetch failed'))
-      .mockResolvedValue(undefined)
+    requestStreamCatchup.mockRejectedValueOnce(new Error('catchup unavailable'))
     const { result, rerender, sockets } = renderRealtime(client, { invocation: modelInvocation() })
     sockets.openLatest()
 
-    emitRealtime(sockets, realtime(3, 'missing'))
+    emitRealtime(sockets, realtime(3, 'three'))
+    await waitFor(() => expect(requestStreamCatchup).toHaveBeenCalledTimes(1))
+    await sleep(300)
+    // best-effort：失败后不自动重试，也不轮询旧 snapshot。
+    expect(requestStreamCatchup).toHaveBeenCalledTimes(1)
+    expect(invalidate).not.toHaveBeenCalled()
     expect(result.current?.modelStream).toBeNull()
-    // 首次 tick 失败仍会重新挂起：必须接着执行第二次（成功的）tick。
-    await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(2), { timeout: 4000 })
 
-    // 在后续一次 refetch 中 checkpoint 追平，循环随后停止。
+    // 后续周期 checkpoint 覆盖缺口后，snapshot 基线即可完成追帧。
+    emitRealtime(sockets, checkpoint(3))
+    await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(1))
     rerender({
       invocation: {
         ...modelInvocation(),
@@ -267,9 +237,7 @@ describe('useHarnessThreadRealtime', () => {
       },
     })
     await waitFor(() => expect(result.current?.modelStream?.text).toBe('recovered'))
-    const callsAfterCatchUp = invalidate.mock.calls.length
-    await sleep(600)
-    expect(invalidate.mock.calls.length).toBe(callsAfterCatchUp)
+    expect(requestStreamCatchup).toHaveBeenCalledTimes(1)
   })
 
   it('rejects late MODEL_DELTA after a durable terminal result and after the Entry lands', async () => {
@@ -358,36 +326,29 @@ describe('useHarnessThreadRealtime', () => {
     emitRealtime(sockets, realtime(3, 'stale-gap-3', THREAD_ID, 'inv-1', 1))
     await sleep(250)
     expect(invalidate).not.toHaveBeenCalled()
+    expect(requestStreamCatchup).not.toHaveBeenCalled()
     expect(result.current?.modelStream).toBeNull()
   })
 
-  it('terminates in-flight gap recovery loop when the attempt is recorded as failed', async () => {
-    // 验证在途 gap recovery 循环在 attempt 记录到 modelAttemptFailures 时被判定为 terminal 并停止
+  it('stops waiting when the attempt is recorded as failed and ignores its late checkpoint', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const invalidate = vi.spyOn(client, 'invalidateQueries')
     const { result, rerender, sockets } = renderRealtime(client, { invocation: modelInvocation() })
     sockets.openLatest()
 
-    // 发送 gap delta 启动 gap 恢复循环
     emitRealtime(sockets, realtime(3, 'missing'))
-    expect(result.current?.modelStream).toBeNull()
-    await waitFor(() => expect(invalidate.mock.calls.length).toBe(1), { timeout: 2000 })
+    await waitFor(() => expect(requestStreamCatchup).toHaveBeenCalledTimes(1))
 
-    // Snapshot 更新为 READY retry 且包含该 attempt 的失败记录
+    // attempt 1 已进入 durable failedAttempts：恢复终止，旧 attempt checkpoint 被丢弃。
     rerender({
-      invocation: {
-        ...modelInvocation(),
-        status: 'READY',
-        attempt: 1,
-        streamCheckpointJson: null,
-      },
+      invocation: { ...modelInvocation(), status: 'READY', streamCheckpointJson: null },
       modelAttemptFailures: [modelAttemptFailure(1, 'inv-1', '2')],
     })
-
-    // 等待超过退避时间，确认 recovery 循环已停止，不再继续发起 invalidate
-    const callsAfterFailure = invalidate.mock.calls.length
-    await sleep(600)
-    expect(invalidate.mock.calls.length).toBe(callsAfterFailure)
+    emitRealtime(sockets, checkpoint(3))
+    await sleep(300)
+    expect(invalidate).not.toHaveBeenCalled()
+    expect(requestStreamCatchup).toHaveBeenCalledTimes(1)
+    expect(result.current?.modelStream).toBeNull()
   })
 
   it('allows MODEL_DELTA for active attempt while rejecting late MODEL_DELTA for previously failed attempts', async () => {
@@ -437,6 +398,32 @@ describe('useHarnessThreadRealtime', () => {
     // 当前 invocation 'inv-current' 的 attempt 1 delta 应当被正常接收与应用
     emitRealtime(sockets, realtime(1, 'hello-current', THREAD_ID, 'inv-current', 1))
     await waitFor(() => expect(result.current?.modelStream?.text).toBe('hello-current'))
+  })
+
+  it('drops checkpoints for a previous attempt before they trigger snapshot reads', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+    const runningAttempt2: ModelInvocationDTO = {
+      ...modelInvocation(),
+      status: 'RUNNING',
+      attempt: 2,
+      streamCheckpointJson: '{"attempt":2,"text":"","thinking":"","sequence":0}',
+    }
+    const { sockets } = renderRealtime(client, {
+      invocation: runningAttempt2,
+      modelAttemptFailures: [modelAttemptFailure(1, 'inv-1', '2')],
+    })
+    sockets.openLatest()
+
+    emitRealtime(sockets, checkpoint(3, THREAD_ID, 'inv-1', 1))
+    emitRealtime(sockets, realtime(1, 'stale', THREAD_ID, 'inv-1', 1))
+    await sleep(100)
+    expect(invalidate).not.toHaveBeenCalled()
+    expect(requestStreamCatchup).not.toHaveBeenCalled()
+
+    // 当前 attempt2 的 checkpoint 才是有效追帧信号。
+    emitRealtime(sockets, checkpoint(3, THREAD_ID, 'inv-1', 2))
+    await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(1))
   })
 
   it('replaces a higher-sequence streaming overlay with the durable terminal projection', async () => {
@@ -805,108 +792,112 @@ describe('useHarnessThreadRealtime', () => {
     )
   })
 
-  it('abandons the gap recovery loop after exceeding the max attempt budget', async () => {
+  it('bounds the cached suffix and waits for a checkpoint covering the dropped range', async () => {
     vi.useFakeTimers()
     try {
       const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
       const invalidate = vi.spyOn(client, 'invalidateQueries')
-      const { result, sockets } = renderRealtime(client, {
-        invocation: modelInvocation(),
-      })
+      const { result, rerender, sockets } = renderRealtime(client, { invocation: modelInvocation() })
       sockets.openLatest()
 
-      // checkpoint 永不追平（snapshot 数据不变）：每次 tick 都判定未追上并
-      // 递增 attempts，最终超过 RECOVERY_MAX_ATTEMPTS(8) 后放弃（L565）。
-      emitRealtime(sockets, realtime(3, 'missing'))
+      emitRealtime(sockets, realtime(3, 'three'))
+      for (let sequence = 4; sequence <= 300; sequence += 1) {
+        emitRealtime(sockets, realtime(sequence, `-${sequence}`))
+      }
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(200) // attempts 0 -> 1
+        await vi.advanceTimersByTimeAsync(0)
       })
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(400) // attempts 1 -> 2
-      })
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(800) // attempts 2 -> 3
-      })
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(1600) // attempts 3 -> 4
-      })
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(2000) // attempts 4 -> 5
-      })
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(2000) // attempts 5 -> 6
-      })
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(2000) // attempts 6 -> 7
-      })
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(2000) // attempts 7 -> 8
-      })
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(2000) // attempts 8 -> 放弃（L565）
-      })
-      const callsAfterGiveUp = invalidate.mock.calls.length
-      expect(callsAfterGiveUp).toBeGreaterThanOrEqual(8)
-      // 放弃后不再有新的 refetch。
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(3000)
-      })
-      expect(invalidate.mock.calls.length).toBe(callsAfterGiveUp)
-      // 放弃后 checkpoint 仍未追平：overlay 保持为空。
+      // 大量 suffix 只保留有界窗口，绝不会为每个 delta 单独请求。
+      expect(requestStreamCatchup).toHaveBeenCalledTimes(1)
       expect(result.current?.modelStream).toBeNull()
-    } finally {
-      vi.useRealTimers()
-    }
-  })
 
-  it('clears the recorded gap when the checkpoint catches up and stops requesting recovery', async () => {
-    vi.useFakeTimers()
-    try {
-      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-      const invalidate = vi.spyOn(client, 'invalidateQueries')
-      const { result, rerender, sockets } = renderRealtime(client, {
-        invocation: modelInvocation(),
-      })
-      sockets.openLatest()
-
-      // 初始 checkpoint（sequence 0）落后于 seq3 的 delta：记录 gap 并单飞恢复。
-      emitRealtime(sockets, realtime(3, 'missing'))
+      // checkpoint3 只覆盖初始缺口，未覆盖被丢弃的更高水位：保留恢复状态。
+      emitRealtime(sockets, checkpoint(3))
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(200)
+        await vi.advanceTimersByTimeAsync(0)
       })
       expect(invalidate).toHaveBeenCalledTimes(1)
-
-      // checkpoint 追平到 seq3：reconcile effect 刷新 overlay 并清空 gapRef。
       rerender({
         invocation: {
           ...modelInvocation(),
-          streamCheckpointJson: '{"attempt":1,"text":"recovered","thinking":"","sequence":3}',
+          streamCheckpointJson: '{"attempt":1,"text":"base","thinking":"","sequence":3}',
         },
       })
       await act(async () => {
         await vi.advanceTimersByTimeAsync(0)
       })
-      expect(result.current?.modelStream?.text).toBe('recovered')
+      expect(result.current?.modelStream?.text).toBe('base')
 
-      // 追平后循环终止：不再有新的 refetch。追平后 reconcile effect 本身
-      // 不再触发 invalidate（不是订阅信号），因此等待超过下一个退避窗口
-      // 后调用数必须保持稳定 —— 恢复循环已彻底停止。
-      // 注意：在途 tick 的 finally 出口会重新武装一次（busy 标志清除后
-      // 调度 CURRENT recovery），因此等待窗口内可能看到一次「收尾」调用；
-      // 断言关键语义：追平后模型 overlay 可见且后续没有持续增长。
-      const callsAfterCatchUp = invalidate.mock.calls.length
-      expect(result.current?.modelStream).toMatchObject({ text: 'recovered', sequence: 3 })
+      // 下一周期 checkpoint 覆盖全部已观察水位后完成追帧。
+      emitRealtime(sockets, checkpoint(300))
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(600)
+        await vi.advanceTimersByTimeAsync(0)
+      })
+      expect(invalidate).toHaveBeenCalledTimes(2)
+      rerender({
+        invocation: {
+          ...modelInvocation(),
+          streamCheckpointJson: '{"attempt":1,"text":"complete","thinking":"","sequence":300}',
+        },
       })
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(1400)
+        await vi.advanceTimersByTimeAsync(0)
       })
-      expect(invalidate.mock.calls.length).toBeLessThanOrEqual(callsAfterCatchUp + 1)
-      expect(invalidate.mock.calls.length).toBeGreaterThanOrEqual(callsAfterCatchUp)
+      expect(result.current?.modelStream?.text).toBe('complete')
+      expect(requestStreamCatchup).toHaveBeenCalledTimes(1)
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('keeps the displayed suffix when the post-checkpoint snapshot is still behind it', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+    const { result, rerender, sockets } = renderRealtime(client, { invocation: modelInvocation() })
+    sockets.openLatest()
+
+    rerender({
+      invocation: {
+        ...modelInvocation(),
+        streamCheckpointJson: '{"attempt":1,"text":"safe","thinking":"","sequence":5}',
+      },
+    })
+    await waitFor(() => expect(result.current?.modelStream?.text).toBe('safe'))
+    emitRealtime(sockets, realtime(6, '-six'))
+    emitRealtime(sockets, realtime(7, '-seven'))
+    await waitFor(() =>
+      expect(result.current?.modelStream?.text).toBe('safe-six-seven'),
+    )
+
+    // seq9 暴露 seq8 缺口并请求 catchup；checkpoint8 覆盖缺口。
+    emitRealtime(sockets, realtime(9, 'nine'))
+    await waitFor(() => expect(requestStreamCatchup).toHaveBeenCalledTimes(1))
+    emitRealtime(sockets, checkpoint(8))
+    await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(1))
+
+    // 回读到的 snapshot 仍停在 seq5：保留已显示 seq7，绝不回退或丢字。
+    rerender({
+      invocation: {
+        ...modelInvocation(),
+        streamCheckpointJson: '{"attempt":1,"text":"safe","thinking":"","sequence":5}',
+      },
+    })
+    await waitFor(() =>
+      expect(result.current?.modelStream?.text).toBe('safe-six-seven'),
+    )
+
+    // 下一周期 checkpoint8 + 新 snapshot 追平后，缓存 seq9 才按序拼接。
+    emitRealtime(sockets, checkpoint(8))
+    await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(2))
+    rerender({
+      invocation: {
+        ...modelInvocation(),
+        streamCheckpointJson: '{"attempt":1,"text":"safe-six-seven-eight","thinking":"","sequence":8}',
+      },
+    })
+    await waitFor(() =>
+      expect(result.current?.modelStream?.text).toBe('safe-six-seven-eightnine'),
+    )
   })
 
   it('clears the gap through the terminal projection path when a durable result arrives', async () => {
@@ -1008,9 +999,10 @@ describe('useHarnessThreadRealtime', () => {
       type: 'MODEL_DELTA', payload: { kind: 'TEXT_DELTA', text: 'other-attempt' }, createdAt: '2026-01-01T00:00:00Z',
     }))
     await waitFor(() => expect(result.current?.modelStream).toBeNull())
-    // 没有 gap 记录 → 不触发任何 refetch。
+    // 没有 gap 记录 → 不触发任何 refetch 或 catchup。
     await sleep(300)
     expect(invalidate).not.toHaveBeenCalled()
+    expect(requestStreamCatchup).not.toHaveBeenCalled()
   })
 
   it('ignores TOOL_PARTIAL events from other threads', async () => {
@@ -1077,35 +1069,22 @@ describe('useHarnessThreadRealtime', () => {
     await waitFor(() => expect(result.current?.modelStream).toBe(before))
   })
 
-  it('does not schedule recovery ticks after the loop is cleared', async () => {
-    vi.useFakeTimers()
-    try {
-      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-      const invalidate = vi.spyOn(client, 'invalidateQueries')
-      const { rerender, sockets } = renderRealtime(client, {
-        invocation: modelInvocation(),
-      })
-      sockets.openLatest()
+  it('clears gap state and stops acting after subscription cleanup', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+    const { result, rerender, sockets } = renderRealtime(client, { invocation: modelInvocation() })
+    sockets.openLatest()
 
-      // gap delta 安装恢复；随后禁用订阅会 clearRecoveryLoop（timer + recovery 清空）。
-      emitRealtime(sockets, realtime(3, 'missing'))
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(200)
-      })
-      expect(invalidate).toHaveBeenCalledTimes(1)
+    emitRealtime(sockets, realtime(3, 'missing'))
+    await waitFor(() => expect(requestStreamCatchup).toHaveBeenCalledTimes(1))
 
-      // 恢复循环被禁用路径清空后，不应再有新的 refetch（L497/L512 空 recovery 返回）。
-      rerender({ enabled: false })
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(200)
-      })
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(2000)
-      })
-      expect(invalidate.mock.calls.length).toBe(1)
-    } finally {
-      vi.useRealTimers()
-    }
+    // 关闭订阅会清理恢复状态；此后到达的 checkpoint 不得再触发 snapshot 回读。
+    rerender({ enabled: false })
+    emitRealtime(sockets, checkpoint(3))
+    await sleep(200)
+    expect(invalidate).not.toHaveBeenCalled()
+    expect(requestStreamCatchup).toHaveBeenCalledTimes(1)
+    expect(result.current?.modelStream).toBeNull()
   })
 
   it('coalesces many sequential deltas before a single frame into one render with all text, thinking, and tool content', () => {
@@ -1487,6 +1466,23 @@ function realtime(
   return JSON.stringify({
     threadId, subjectKind: 'MODEL_INVOCATION', subjectId: invocationId, attempt, sequence,
     type: 'MODEL_DELTA', payload: { kind: 'TEXT_DELTA', text }, createdAt: '2026-01-01T00:00:00Z',
+  })
+}
+
+function checkpoint(
+  sequence: number,
+  threadId = THREAD_ID,
+  invocationId = 'inv-1',
+  attempt = 1,
+) {
+  return JSON.stringify({
+    threadId,
+    subjectKind: 'MODEL_INVOCATION',
+    subjectId: invocationId,
+    attempt,
+    sequence,
+    type: 'MODEL_CHECKPOINT',
+    createdAt: '2026-01-01T00:00:00Z',
   })
 }
 

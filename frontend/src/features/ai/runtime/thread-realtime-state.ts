@@ -30,6 +30,15 @@ export interface RealtimeModelDelta {
   createdAt: string
 }
 
+export interface RealtimeModelCheckpoint {
+  threadId: string
+  invocationId: string
+  attempt: number
+  /** durable checkpoint 覆盖到的 delta sequence（追帧完成信号）。 */
+  sequence: number
+  createdAt: string
+}
+
 export interface RealtimeModelStream {
   threadId: string
   invocationId: string
@@ -172,6 +181,45 @@ export function parseRealtimeModelDelta(data: unknown): RealtimeModelDelta | nul
   }
 }
 
+/**
+ * 解析 canonical MODEL_CHECKPOINT envelope。checkpoint 没有 payload；sequence 是
+ * durable checkpoint 已覆盖到的 delta 水位，attempt 必须与当前 active attempt 匹配。
+ */
+export function parseRealtimeModelCheckpoint(data: unknown): RealtimeModelCheckpoint | null {
+  if (typeof data !== 'string') {
+    return null
+  }
+  let envelope: Record<string, unknown>
+  try {
+    const parsed: unknown = JSON.parse(data)
+    if (!isRecord(parsed)) {
+      return null
+    }
+    envelope = parsed
+  } catch {
+    return null
+  }
+  if (
+    envelope.type !== 'MODEL_CHECKPOINT'
+    || envelope.subjectKind !== 'MODEL_INVOCATION'
+    || !isNonBlankString(envelope.threadId)
+    || !isNonBlankString(envelope.subjectId)
+    || !isPositiveInteger(envelope.attempt)
+    || !isPositiveInteger(envelope.sequence)
+    || !isNonBlankString(envelope.createdAt)
+    || toEpochMillis(envelope.createdAt) == null
+  ) {
+    return null
+  }
+  return {
+    threadId: envelope.threadId,
+    invocationId: envelope.subjectId,
+    attempt: envelope.attempt,
+    sequence: envelope.sequence,
+    createdAt: envelope.createdAt,
+  }
+}
+
 function parseToolCallDeltaPayload(
   payload: Record<string, unknown>,
 ): RealtimeToolCallDelta | null | undefined {
@@ -277,6 +325,23 @@ export function reduceRealtimeModelStream(
     toolCalls: applyToolCallDelta(current.toolCalls, delta.toolCall),
     status: 'streaming',
   }
+}
+
+function mergeSnapshotToolCalls(
+  snapshot: RealtimeModelStream,
+  current: RealtimeModelStream | null,
+): RealtimeModelStream {
+  if (
+    snapshot.toolCalls.length > 0
+    || current == null
+    || current.threadId !== snapshot.threadId
+    || current.invocationId !== snapshot.invocationId
+    || current.attempt !== snapshot.attempt
+    || current.toolCalls.length === 0
+  ) {
+    return snapshot
+  }
+  return { ...snapshot, toolCalls: current.toolCalls }
 }
 
 function applyToolCallDelta(
@@ -473,6 +538,53 @@ export function snapshotModelStream(
     thinking: checkpoint.thinking,
     status: 'streaming',
   }
+}
+
+/**
+ * 用 checkpoint 覆盖后的 snapshot 作为新基线，按 sequence 顺序拼接已缓存 suffix。
+ *
+ * <p>snapshot 落后于已显示 overlay 时保留 overlay，绝不回退；只有连续 sequence 能
+ * 接上时才追加，任何缺口都通过 missingSequence 交给下一轮 checkpoint 恢复。
+ */
+export function mergeRealtimeModelStreamAfterCheckpoint(
+  snapshot: RealtimeModelStream,
+  current: RealtimeModelStream | null,
+  buffered: readonly RealtimeModelDelta[],
+  checkpointSequence: number,
+): { stream: RealtimeModelStream; missingSequence: number | null } {
+  const currentMatches =
+    current != null
+    && current.threadId === snapshot.threadId
+    && current.invocationId === snapshot.invocationId
+    && current.attempt === snapshot.attempt
+  const base =
+    currentMatches && current.sequence > snapshot.sequence
+      ? current
+      : mergeSnapshotToolCalls(snapshot, current)
+  let stream = base
+  let missingSequence: number | null = null
+  const ordered = [...buffered]
+    .filter(
+      (delta) =>
+        delta.threadId === snapshot.threadId
+        && delta.invocationId === snapshot.invocationId
+        && delta.attempt === snapshot.attempt,
+    )
+    .sort((left, right) => left.sequence - right.sequence)
+  for (const delta of ordered) {
+    if (delta.sequence <= stream.sequence) {
+      continue
+    }
+    if (delta.sequence !== stream.sequence + 1) {
+      missingSequence = stream.sequence + 1
+      break
+    }
+    stream = reduceRealtimeModelStream(stream, delta)
+  }
+  if (missingSequence == null && stream.sequence < checkpointSequence) {
+    missingSequence = stream.sequence + 1
+  }
+  return { stream, missingSequence }
 }
 
 /**
