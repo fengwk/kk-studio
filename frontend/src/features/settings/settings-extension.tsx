@@ -29,7 +29,6 @@ export const settingsExtension: TrustedReactExtension = {
       path: 'settings',
       component: SettingsRoute,
       navGroup: 'settings',
-      priority: 100,
     },
   ],
 }

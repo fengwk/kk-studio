@@ -36,7 +36,6 @@ export const canvasExtension: TrustedReactExtension = {
       path: 'canvas',
       component: CanvasRoutePage,
       navGroup: 'canvas',
-      priority: 90,
     },
     {
       id: 'canvas.editor',
@@ -44,7 +43,6 @@ export const canvasExtension: TrustedReactExtension = {
       component: CanvasRoutePage,
       navGroup: 'canvas',
       workspace: ({ canvasId }) => Boolean(canvasId && isCanonicalUuid(canvasId)),
-      priority: 90,
     },
   ],
 }

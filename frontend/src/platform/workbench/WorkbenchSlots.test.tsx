@@ -1,22 +1,20 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import { ExtensionHost } from '@/platform/extensions/ExtensionHost'
-import { ExtensionHostProvider } from '@/platform/extensions/ExtensionHostContext'
+import { ApplicationContributionsProvider } from '@/platform/extensions/ApplicationContributionsContext'
 import { OverlayHost } from '@/platform/workbench/WorkbenchSlots'
+import { makeApplicationContributions } from '@/test-support/application-contributions'
 
 describe('OverlayHost', () => {
-  it('renders registered dialogs and overlays reactively', () => {
-    const host = new ExtensionHost()
-    host.register({
-      id: 'test',
+  it('renders dialogs and overlays from the static contribution table', () => {
+    const contributions = makeApplicationContributions({
       dialogs: [{ id: 'test.dialog', component: () => <div data-testid="dialog">Dialog content</div> }],
       overlays: [{ id: 'test.overlay', component: () => <div data-testid="overlay">Overlay content</div> }],
     })
 
     render(
-      <ExtensionHostProvider host={host}>
+      <ApplicationContributionsProvider contributions={contributions}>
         <OverlayHost />
-      </ExtensionHostProvider>,
+      </ApplicationContributionsProvider>,
     )
 
     expect(screen.getByTestId('dialog')).toHaveTextContent('Dialog content')

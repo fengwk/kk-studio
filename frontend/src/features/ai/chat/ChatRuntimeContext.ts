@@ -11,7 +11,7 @@ export function useChatRuntime() {
   return controller
 }
 
-/** 供全局 ExtensionHost dialog contribution 读取当前 Chat 页面状态。 */
+/** 供全局 extension dialog contribution 读取当前 Chat 页面状态。 */
 export function useOptionalChatRuntime() {
   return useContext(ChatRuntimeContext)
 }
