@@ -80,8 +80,9 @@ import java.util.function.Function;
  * <p>核心验证点（针对「子执行仍有未完成后代/待处理输入时被过早向上结算」的缺陷）：
  *
  * <ul>
- *   <li><b>结算+父入队原子</b>：子执行 C 的 Join 匹配与父 B 的 NOTIFICATION 入队/唤醒在同一事务提交；在 match 之后、父命令插入之前暂停时，
- *       同树读写受同一 PostgreSQL advisory 树锁阻塞（以 {@code pg_locks} 未授予锁为真实证据），外部观察者不可能看到「C 已结算但 B 无通知」；
+ *   <li><b>结算+父入队原子</b>：子执行 C 的 Join 匹配与父 B 的 NOTIFICATION 入队/唤醒在同一事务提交；在 match 之后、父命令插入之前暂停时， 结算子
+ *       Thread 持有直接父 Thread 的行锁，读取父 Thread 的观察者被阻塞（以 {@code pg_locks} 未授予锁为真实证据），外部观察者不可能看到「C 已结算但
+ *       B 无通知」；
  *   <li><b>父不被过早结算</b>：无论 B 的本地 final 和 C 的交付谁先到，B 都必须消费通知并到达新的成功或不可继续失败终态，才向 A 交付回执；
  *   <li><b>回滚 exactly-once</b>：同一窗口故障回滚时 Entry/Join/父序列/通知/wake 一致回滚，从 durable claim 重试后恰一份回执；
  *   <li><b>确定性窗口</b>：通过 {@link CountDownLatch} 与 {@code pg_locks} 事实定位事务窗口，不靠延时制造竞态。
@@ -487,7 +488,7 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
       // 确定窗口：C 已在其事务内执行了 updateJoin（match），但尚未 insertCommands/提交。
       assertTrue(matched.await(10, TimeUnit.SECONDS));
 
-      // 同一执行树的读取必须进入同一 PG advisory 树锁并被阻塞：以 pg_locks 未授予锁为真实证据。
+      // 读取父 Thread B 必须等待结算子 C 持有的 B 行锁：以 pg_locks 未授予锁为真实证据。
       CountDownLatch observerStarted = new CountDownLatch(1);
       Future<ThreadSnapshot> observerFuture =
           executor.submit(
@@ -497,8 +498,8 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
               });
       assertTrue(observerStarted.await(10, TimeUnit.SECONDS));
       awaitTrue(
-          () -> waitingAdvisoryLockCount() >= 1,
-          "observer snapshot must block on the same-tree PostgreSQL advisory lock");
+          () -> waitingLockCount() >= 1,
+          "observer snapshot must block on the parent row the settling child holds");
       assertThrows(
           TimeoutException.class,
           () -> observerFuture.get(150, TimeUnit.MILLISECONDS),
@@ -626,11 +627,9 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
         .orElseThrow();
   }
 
-  private int waitingAdvisoryLockCount() {
+  private int waitingLockCount() {
     Integer count =
-        jdbc.queryForObject(
-            "select count(*) from pg_locks where locktype = 'advisory' and not granted",
-            Integer.class);
+        jdbc.queryForObject("select count(*) from pg_locks where not granted", Integer.class);
     return count == null ? 0 : count;
   }
 

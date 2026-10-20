@@ -21,6 +21,7 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewUnavailableException;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewUnavailableException.Reason;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessRequestFormatException;
+import fun.fengwk.kkstudio.web.controller.StudioAgentTaskController;
 import fun.fengwk.kkstudio.web.controller.StudioCanvasController;
 import fun.fengwk.kkstudio.web.controller.StudioCanvasFunctionController;
 import fun.fengwk.kkstudio.web.controller.StudioCanvasResourceController;
@@ -33,6 +34,7 @@ import fun.fengwk.kkstudio.web.controller.StudioHarnessSessionController;
 import fun.fengwk.kkstudio.web.controller.StudioHarnessSessionProviderRequestPreviewController;
 import fun.fengwk.kkstudio.web.controller.StudioHarnessThreadCommandBatchController;
 import fun.fengwk.kkstudio.web.controller.StudioHarnessThreadController;
+import fun.fengwk.kkstudio.web.controller.StudioHarnessThreadStreamCatchupController;
 import fun.fengwk.kkstudio.web.controller.StudioInteractionController;
 import fun.fengwk.kkstudio.web.i18n.StudioMessageService;
 
@@ -67,6 +69,7 @@ class StudioResponseStatusErrorAdviceTest {
         StudioResponseStatusErrorAdvice.class.getAnnotation(RestControllerAdvice.class);
     assertArrayEquals(
         new Class<?>[] {
+          StudioAgentTaskController.class,
           StudioCanvasController.class,
           StudioCanvasFunctionController.class,
           StudioCanvasResourceController.class,
@@ -77,6 +80,7 @@ class StudioResponseStatusErrorAdviceTest {
           StudioHarnessSessionProviderRequestPreviewController.class,
           StudioHarnessThreadCommandBatchController.class,
           StudioHarnessThreadController.class,
+          StudioHarnessThreadStreamCatchupController.class,
           StudioInteractionController.class,
           StudioConfigSyncController.class,
           StudioEnvironmentIdeController.class
