@@ -55,6 +55,8 @@ import fun.fengwk.kkstudio.platform.harness.configuration.HarnessExecutionAdmiss
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.platform.harness.model.DatabaseProviderResolutionService;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewService;
+import fun.fengwk.kkstudio.platform.harness.realtime.HarnessStreamCatchupNotificationCodec;
+import fun.fengwk.kkstudio.platform.harness.realtime.HarnessStreamCatchupService;
 import fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseTurnResolver;
 import fun.fengwk.kkstudio.platform.harness.thread.query.ModelRequestDebugService;
 import fun.fengwk.kkstudio.platform.plugin.PluginProperties;
@@ -153,6 +155,35 @@ public class HarnessRuntimeConfiguration {
         new PostgresqlRealtimeEventSource(notificationCodec),
         new PostgresqlRealtimeEventSink(jdbcTemplate, notificationCodec, nodeInstanceId),
         clusterNodePresence::hasOtherActiveNodes);
+  }
+
+  /** 流式追帧通知的严格 envelope codec；仅供 realtime 专用 LISTEN 连接与跨节点发布使用。 */
+  @Bean
+  public HarnessStreamCatchupNotificationCodec harnessStreamCatchupNotificationCodec() {
+    return new HarnessStreamCatchupNotificationCodec();
+  }
+
+  /**
+   * 流式追帧应用服务：本地 active owner 优先，只有存在其它活跃节点时才向专用 channel 发布一次提示。
+   *
+   * <p>本服务不创建任何 durable 写入；checkpoint 仍由 {@link ModelProcessor} 的 active execution 在提交后发布既有 {@code
+   * MODEL_CHECKPOINT}。
+   */
+  @Bean
+  public HarnessStreamCatchupService harnessStreamCatchupService(
+      HarnessRuntime runtime,
+      ModelProcessor modelProcessor,
+      ClusterNodePresence clusterNodePresence,
+      DataSource dataSource,
+      @Qualifier("nodeInstanceId") UUID nodeInstanceId,
+      HarnessStreamCatchupNotificationCodec notificationCodec) {
+    return new HarnessStreamCatchupService(
+        runtime,
+        modelProcessor,
+        clusterNodePresence,
+        new JdbcTemplate(dataSource),
+        nodeInstanceId,
+        notificationCodec);
   }
 
   /** Model / Tool 调用的全局重试策略现读通道：每次 retry 判定点从 SystemSettings.AiRuntime 映射。 */
