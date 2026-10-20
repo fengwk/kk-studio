@@ -6,6 +6,7 @@ import org.springframework.jdbc.core.PreparedStatementCallback;
 
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.processor.ModelProcessor;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodePresence;
 
@@ -55,8 +56,9 @@ public final class HarnessStreamCatchupService {
   /**
    * 请求追帧；事前只信任目标 Thread 的 durable 快照，不信任客户端 UUID 或 head 事实。
    *
-   * <p>终态、过期 attempt 或不匹配关联都是 no-op；本方法不创建 Entry / Command / Work，也不推进 Thread version。Thread 不存在时仍由
-   * Runtime typed 异常向上翻译为 404；数据库查询或跨节点发布失败直接向上传播，不伪造成功。
+   * <p>只有 durable 状态仍为 {@link ModelInvocationStatus#RUNNING} 且 attempt 精确匹配时才请求 checkpoint；终态、过期
+   * attempt 或不匹配关联都是 no-op，不创建 Entry / Command / Work，也不推进 Thread version。Thread 不存在时仍由 Runtime
+   * typed 异常向上翻译为 404；数据库查询或跨节点发布失败直接向上传播，不伪造成功。
    */
   public void catchUp(UUID threadId, UUID invocationId, int attempt) {
     Objects.requireNonNull(threadId, "threadId");
@@ -68,8 +70,9 @@ public final class HarnessStreamCatchupService {
     if (model == null
         || !threadId.equals(model.threadId())
         || !invocationId.equals(model.id())
-        || attempt != model.attempt()) {
-      // 终态、过期 attempt、其它 Thread 的 invocation 或当前并非 Model 上下文：不触碰任何执行状态。
+        || attempt != model.attempt()
+        || model.status() != ModelInvocationStatus.RUNNING) {
+      // 非 RUNNING（含终态）、过期 attempt、其它 Thread 的 invocation 或当前并非 Model 上下文：不触碰任何执行状态。
       return;
     }
     if (modelProcessor.requestCheckpoint(invocationId, attempt)) {
@@ -92,7 +95,10 @@ public final class HarnessStreamCatchupService {
     try {
       envelope = notificationCodec.decode(payload);
     } catch (RuntimeException error) {
-      log.warn("cannot decode stream catchup notification; ignoring", error);
+      // 只记录异常类型：Jackson cause 的消息可能携带原始 JSON，不得写入日志。
+      log.warn(
+          "cannot decode stream catchup notification; ignoring; errorType={}",
+          error.getClass().getName());
       return;
     }
     if (originNodeId.equals(envelope.originNodeId())) {

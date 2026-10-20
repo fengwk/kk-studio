@@ -1,7 +1,10 @@
 package fun.fengwk.kkstudio.platform.harness.realtime;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
@@ -12,9 +15,14 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.PreparedStatementCallback;
@@ -22,6 +30,7 @@ import org.springframework.jdbc.core.PreparedStatementCallback;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.processor.ModelProcessor;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodePresence;
 
@@ -29,7 +38,7 @@ import java.sql.PreparedStatement;
 import java.util.UUID;
 
 /**
- * 流式追帧服务：只有目标 Thread 快照与 attempt 精确匹配时才触碰执行状态；本地优先、单节点零 NOTIFY，跨节点只发布一次。
+ * 流式追帧服务：只有 durable RUNNING 且目标 Thread 快照与 attempt 精确匹配时才触碰执行状态；本地优先、单节点零 NOTIFY，跨节点只发布一次。
  *
  * <p>所有测试都验证失败/不匹配路径完全 no-op；数据库查询或发布异常向上传播，由 HTTP 边界显式呈现，不伪造 202。
  */
@@ -66,6 +75,7 @@ class HarnessStreamCatchupServiceTest {
     when(model.threadId()).thenReturn(THREAD);
     when(model.id()).thenReturn(INVOCATION);
     when(model.attempt()).thenReturn(ATTEMPT);
+    when(model.status()).thenReturn(ModelInvocationStatus.RUNNING);
     service =
         new HarnessStreamCatchupService(
             runtime, modelProcessor, clusterNodePresence, jdbcTemplate, LOCAL, codec);
@@ -135,6 +145,22 @@ class HarnessStreamCatchupServiceTest {
   }
 
   @Test
+  void everyNonRunningDurableStatusIsBestEffortNoOp() {
+    // 只有 durable RUNNING 才允许追帧；READY/DISPATCHING 与全部终态都不得触达 owner、presence 或 NOTIFY。
+    for (ModelInvocationStatus status : ModelInvocationStatus.values()) {
+      if (status == ModelInvocationStatus.RUNNING) {
+        continue;
+      }
+      when(model.status()).thenReturn(status);
+      service.catchUp(THREAD, INVOCATION, ATTEMPT);
+    }
+
+    verifyNoInteractions(modelProcessor);
+    verifyNoInteractions(clusterNodePresence);
+    verifyNoInteractions(jdbcTemplate);
+  }
+
+  @Test
   void remoteNotificationReFencesExactAttemptWithoutSnapshotOrRebroadcast() throws Exception {
     String payload =
         codec.encode(
@@ -165,6 +191,23 @@ class HarnessStreamCatchupServiceTest {
   }
 
   @Test
+  void malformedNotificationLogsOnlyErrorTypeWithoutPayloadOrThrowable() {
+    ListAppender<ILoggingEvent> appender = attachLogCapture();
+    try {
+      service.onNotification("{\"originNodeId\":\"secret-payload-marker\"");
+    } finally {
+      detachLogCapture(appender);
+    }
+
+    assertEquals(1, appender.list.size());
+    ILoggingEvent event = appender.list.get(0);
+    assertEquals(Level.WARN, event.getLevel());
+    assertNull(event.getThrowableProxy());
+    assertFalse(event.getFormattedMessage().contains("secret-payload-marker"));
+    assertTrue(event.getFormattedMessage().contains(IllegalArgumentException.class.getName()));
+  }
+
+  @Test
   void clusterLookupFailurePropagatesInsteadOfPretendingAccepted() {
     when(modelProcessor.requestCheckpoint(INVOCATION, ATTEMPT)).thenReturn(false);
     when(clusterNodePresence.hasOtherActiveNodes())
@@ -188,6 +231,18 @@ class HarnessStreamCatchupServiceTest {
     assertThrows(
         DataAccessResourceFailureException.class,
         () -> service.catchUp(THREAD, INVOCATION, ATTEMPT));
+  }
+
+  private static ListAppender<ILoggingEvent> attachLogCapture() {
+    ListAppender<ILoggingEvent> appender = new ListAppender<>();
+    appender.start();
+    ((Logger) LoggerFactory.getLogger(HarnessStreamCatchupService.class)).addAppender(appender);
+    return appender;
+  }
+
+  private static void detachLogCapture(ListAppender<ILoggingEvent> appender) {
+    ((Logger) LoggerFactory.getLogger(HarnessStreamCatchupService.class)).detachAppender(appender);
+    appender.stop();
   }
 
   private static HarnessStreamCatchupNotificationCodec.Envelope capturePublishedEnvelope(
