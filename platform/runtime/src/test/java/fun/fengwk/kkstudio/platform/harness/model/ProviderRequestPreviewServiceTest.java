@@ -916,6 +916,109 @@ class ProviderRequestPreviewServiceTest {
     verify(providerResolution, never()).resolve(any(), any(), any());
   }
 
+  /**
+   * 测试意图：join 指向的 finalAnswer 必须是真实 ASSISTANT MESSAGE，而不是“恰好带 metadata”的其它 payload；错误结果以 typed
+   * unavailable 拒绝，绝不强转成 500。
+   */
+  @Test
+  void rejectsCompactionPreviewWhenFrozenFinalAnswerIsNotAnAssistantMessage() {
+    when(runtime.getSessionEntries(SESSION_ID)).thenReturn(compactionOutputPath().entries());
+    when(runtime.findJoin(COMPACTION_JOIN_ID))
+        .thenReturn(Optional.of(compactionJoin(CHILD_THREAD_ID)));
+    when(runtime.getThreadSnapshot(CHILD_THREAD_ID))
+        .thenReturn(snapshot(childThread(CHILD_LATER_END_ID), compactionChildPath(), List.of()));
+    List<Entry> wrongFinalAnswer = new ArrayList<>(childEntries());
+    for (int index = 0; index < wrongFinalAnswer.size(); index++) {
+      if (wrongFinalAnswer.get(index).id().equals(CHILD_FINAL_ANSWER_ID)) {
+        wrongFinalAnswer.set(
+            index,
+            new Entry(
+                CHILD_FINAL_ANSWER_ID,
+                CHILD_SESSION_ID,
+                CHILD_FINAL_START_ID,
+                new CompactionPayload("wrong result type", compactionMetadata()),
+                CHILD_FINAL_ANSWER_TIME));
+      }
+    }
+    when(runtime.getSessionEntries(CHILD_SESSION_ID)).thenReturn(wrongFinalAnswer);
+
+    assertFrozenCompactionRejected();
+    verify(turnResolver, never()).planHistorical(any(), any(), any());
+    verify(providerResolution, never()).resolve(any(), any(), any());
+  }
+
+  /** 测试意图：child 约束必须是正且不超过父冻结预算；null 表示无上限，比冻结预算更宽，不能当作可信冻结执行。更宽上限同样拒绝。 */
+  @Test
+  void rejectsCompactionPreviewWhenChildOutputCapIsMissingOrWiderThanFrozenBudget() {
+    when(runtime.getSessionEntries(SESSION_ID)).thenReturn(compactionOutputPath().entries());
+    when(runtime.findJoin(COMPACTION_JOIN_ID))
+        .thenReturn(Optional.of(compactionJoin(CHILD_THREAD_ID)));
+
+    when(runtime.getThreadSnapshot(CHILD_THREAD_ID))
+        .thenReturn(
+            snapshot(
+                childThread(CHILD_LATER_END_ID, new ThreadConstraints(null, true, false)),
+                compactionChildPath(),
+                List.of()));
+    assertFrozenCompactionRejected();
+
+    when(runtime.getThreadSnapshot(CHILD_THREAD_ID))
+        .thenReturn(
+            snapshot(
+                childThread(
+                    CHILD_LATER_END_ID,
+                    new ThreadConstraints(COMPACTION_OUTPUT_BUDGET + 1, true, false)),
+                compactionChildPath(),
+                List.of()));
+    assertFrozenCompactionRejected();
+
+    verify(turnResolver, never()).planHistorical(any(), any(), any());
+    verify(providerResolution, never()).resolve(any(), any(), any());
+  }
+
+  /** 测试意图：child 约束比父冻结预算更紧时接受，并让实际请求沿用更紧的上限。 */
+  @Test
+  void acceptsTighterChildOutputCapForCompactionPreview() {
+    stubPreviewableCompactionChild(
+        new ThreadConstraints(COMPACTION_OUTPUT_BUDGET / 2, true, false), childEntries(), 8_192);
+
+    service.previewHistorical(SESSION_ID, COMPACTION_ENTRY_ID);
+
+    ArgumentCaptor<ProviderRequest> requestCaptor = ArgumentCaptor.forClass(ProviderRequest.class);
+    verify(providerResolution)
+        .resolve(eq(ProviderType.OPENAI), eq(GENERATION_ID), requestCaptor.capture());
+    assertEquals(COMPACTION_OUTPUT_BUDGET / 2, requestCaptor.getValue().outputTokens());
+  }
+
+  private void stubPreviewableCompactionChild(
+      ThreadConstraints constraints, List<Entry> entries, int plannedOutputTokens) {
+    when(runtime.getSessionEntries(SESSION_ID)).thenReturn(compactionOutputPath().entries());
+    when(runtime.findJoin(COMPACTION_JOIN_ID))
+        .thenReturn(Optional.of(compactionJoin(CHILD_THREAD_ID)));
+    when(runtime.getThreadSnapshot(CHILD_THREAD_ID))
+        .thenReturn(
+            snapshot(
+                childThread(CHILD_LATER_END_ID, constraints), compactionChildPath(), List.of()));
+    when(runtime.getSessionEntries(CHILD_SESSION_ID)).thenReturn(entries);
+    when(turnResolver.planHistorical(eq(CHILD_THREAD_ID), any(), eq(CHILD_FINAL_ANSWER_TIME)))
+        .thenReturn(
+            new LiveTurnPlan.Planned(
+                spec(
+                    plannedOutputTokens,
+                    ProviderCacheControl.session(PromptCacheRetention.SHORT, "child-session")),
+                CONTEXT_WINDOW,
+                List.of(),
+                List.of()));
+    when(providerResolution.resolve(eq(ProviderType.OPENAI), eq(GENERATION_ID), any()))
+        .thenAnswer(
+            invocation ->
+                new ResolvedExecution(
+                    invocation.getArgument(2),
+                    new ModelCallTimeoutPolicy(Duration.ofSeconds(5), Duration.ofSeconds(1)),
+                    policy -> null,
+                    request -> BODY));
+  }
+
   private void assertFrozenCompactionRejected() {
     ProviderRequestPreviewUnavailableException rejected =
         assertThrows(
@@ -1144,6 +1247,10 @@ class ProviderRequestPreviewServiceTest {
   }
 
   private static ThreadState childThread(UUID headEntryId) {
+    return childThread(headEntryId, new ThreadConstraints(COMPACTION_OUTPUT_BUDGET, true, false));
+  }
+
+  private static ThreadState childThread(UUID headEntryId, ThreadConstraints constraints) {
     return new ThreadState(
         CHILD_THREAD_ID,
         CHILD_SESSION_ID,
@@ -1154,7 +1261,7 @@ class ProviderRequestPreviewServiceTest {
         THREAD_ID,
         false,
         SpawnTrigger.RUNTIME,
-        new ThreadConstraints(COMPACTION_OUTPUT_BUDGET, true, false),
+        constraints,
         ThreadExecutionControl.RUNNABLE,
         0L,
         2L,
