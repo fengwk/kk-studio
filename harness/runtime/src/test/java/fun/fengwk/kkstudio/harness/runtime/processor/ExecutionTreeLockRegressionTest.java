@@ -48,6 +48,10 @@ class ExecutionTreeLockRegressionTest {
   private static final ProcessorLeaseConfig LEASE_CONFIG =
       new ProcessorLeaseConfig(Duration.ofSeconds(30), Duration.ofSeconds(10));
   private static final Duration FALLBACK_DELAY = Duration.ofSeconds(5);
+  /** 逐事件即时推送、1ms 后 checkpoint 的测试配置。 */
+  private static final ModelStreamConfig IMMEDIATE_STREAM =
+      new ModelStreamConfig(Duration.ofMillis(1), 1, 1, Duration.ofMillis(1));
+
   private static final InvocationRetryPolicy NO_RETRY =
       new InvocationRetryPolicy(
           0, InvocationRetryBackoffStrategy.FIXED, Duration.ofSeconds(5), Duration.ofSeconds(5));
@@ -112,7 +116,7 @@ class ExecutionTreeLockRegressionTest {
             false,
             List.of(),
             new ModelProcessorConfig(
-                LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, StreamFlushConfig.IMMEDIATE),
+                LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, IMMEDIATE_STREAM),
             "test-provider",
             Clock.fixed(NOW, ZoneOffset.UTC),
             scheduler,
@@ -157,9 +161,9 @@ class ExecutionTreeLockRegressionTest {
     assertTrue(terminalTx.contains("completeWork"), "commitTerminal must completeWork");
   }
 
-  /** 测试意图：验证 ModelExecution 在流式批次刷盘 (commitBatchFlushLocked) 事务中，首个操作必须是获取执行树锁 (lockTree)。 */
+  /** 测试意图：验证 ModelExecution 的 checkpoint 事务不取执行树锁，只按 Model -> Work 顺序锁定自己的行。 */
   @Test
-  void modelExecutionBatchFlushAcquiresTreeLockFirst() {
+  void modelExecutionCheckpointTakesNoTreeLock() {
     InMemoryHarnessStore store = new InMemoryHarnessStore();
     RecordingStore recordingStore = new RecordingStore(store);
     ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
@@ -194,7 +198,8 @@ class ExecutionTreeLockRegressionTest {
                     tx.claimNextWork(WorkTargetType.MODEL, "token-model-2", Duration.ofSeconds(60)))
             .orElseThrow();
 
-    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 2, 1024 * 1024);
+    ModelStreamConfig flushConfig =
+        new ModelStreamConfig(Duration.ofMinutes(1), 1024, 1024 * 1024, Duration.ofMinutes(1));
     ModelExecution execution =
         new ModelExecution(
             recordingStore,
@@ -224,16 +229,19 @@ class ExecutionTreeLockRegressionTest {
     assertEquals(ProcessResult.STARTED, execution.activate(handle));
     recordingStore.clearLogs();
 
-    // 发送两个 delta 达到阈值 (2) 触发 batch flush
     execution.onEvent(new ProviderStreamEvent.TextDelta("hello "));
     execution.onEvent(new ProviderStreamEvent.TextDelta("world"));
+    assertTrue(recordingStore.recordedOperations().isEmpty(), "deltas alone must not touch the store");
+
+    execution.deliverCheckpoint(0, true);
 
     List<List<String>> txLogs = recordingStore.recordedOperations();
-    assertFalse(txLogs.isEmpty(), "must record batch flush transaction");
-    List<String> flushTx = txLogs.get(0);
-    assertEquals("lockTree", flushTx.get(0), "first operation in batch flush must be lockTree");
-    assertTrue(flushTx.contains("lockModelInvocation"), "batch flush must lockModelInvocation");
-    assertTrue(flushTx.contains("updateModelInvocation"), "batch flush must updateModelInvocation");
+    assertEquals(1, txLogs.size(), "exactly one checkpoint transaction");
+    List<String> checkpointTx = txLogs.get(0);
+    assertEquals(
+        List.of("lockModelInvocation", "lockClaimedWork", "updateModelInvocation"),
+        checkpointTx,
+        "checkpoint must lock Model then Work only, with no tree lock");
   }
 
   /**

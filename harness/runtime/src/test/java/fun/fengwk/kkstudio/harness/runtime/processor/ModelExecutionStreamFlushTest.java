@@ -104,6 +104,8 @@ class ModelExecutionStreamFlushTest {
       new InvocationRetryPolicy(
           0, InvocationRetryBackoffStrategy.FIXED, Duration.ofSeconds(5), Duration.ofSeconds(5));
 
+  private static final long CHECKPOINT_TIMER_MILLIS = Duration.ofMinutes(10).toMillis();
+
   private final List<ExecutorService> executorsToClose = new CopyOnWriteArrayList<>();
 
   @AfterEach
@@ -114,110 +116,103 @@ class ModelExecutionStreamFlushTest {
   }
 
   /**
-   * 意图：验证多个 safe delta 在未达到容量阈值与定时器超时前既不写库也不发布； 一次 flush 触发后，仅执行恰好一次 updateModelInvocation，且
-   * sequence 与 checkpoint 文本均正确。
+   * 意图：验证推送先于落库：delta 在批次上界到达时立即发布（零事务、零 UPDATE）；checkpoint 随后单独落库一次， 提交成功之后才发布 checkpoint 事件。
    */
   @Test
-  void multipleSafeDeltasDoNotPersistOrPublishBeforeThresholdAndFlushInSingleUpdate() {
-    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 4, 1024 * 1024);
+  void deltasArePushedBeforeAnyPersistenceAndCheckpointEventFollowsCommit() {
+    ModelStreamConfig flushConfig = new ModelStreamConfig(Duration.ofMinutes(1), 4, 1024 * 1024, Duration.ofMinutes(10));
     Fixture fixture = createFixture(flushConfig, NO_RETRY);
     fixture.start();
 
     ModelGateway.Listener listener = fixture.listener();
     listener.onEvent(new ProviderStreamEvent.TextDelta("hello "));
     listener.onEvent(new ProviderStreamEvent.TextDelta("world"));
+    assertTrue(fixture.sink.deltas().isEmpty(), "deltas below the batch bound wait for the window");
 
-    // 尚未达到 4 个事件容量，且定时器未到期：不写不发
-    assertEquals(
-        0,
-        fixture.store.modelInvocationUpdateCount(),
-        "deltas below threshold must not update invocation");
-    assertTrue(fixture.sink.deltas().isEmpty(), "deltas below threshold must not be published");
-
-    // 补齐到 4 个事件触发满批 flush
     listener.onEvent(new ProviderStreamEvent.ThinkingDelta("thinking "));
     listener.onEvent(new ProviderStreamEvent.ThinkingDelta("now"));
 
-    // 满批触发一次且仅一次 updateModelInvocation
-    assertEquals(
-        1,
-        fixture.store.modelInvocationUpdateCount(),
-        "exactly one updateModelInvocation upon batch flush");
-    ModelInvocation committed = fixture.currentModel();
-    assertNotNull(committed.streamCheckpoint());
-    assertEquals(4, committed.streamCheckpoint().sequence());
-    assertEquals("hello world", committed.streamCheckpoint().text());
-    assertEquals("thinking now", committed.streamCheckpoint().thinking());
-
-    // 4 个 delta 按 sequence 严格递增发布
+    // 满批立即推送，整个过程没有碰数据库
+    assertEquals(0, fixture.store.transactionCount(), "push must not open a transaction");
+    assertEquals(0, fixture.store.modelInvocationUpdateCount());
+    assertNull(fixture.currentModel().streamCheckpoint());
     List<RealtimeEvent.ModelDelta> deltas = fixture.sink.deltas();
     assertEquals(4, deltas.size());
+    assertEquals(1, fixture.sink.appendAllCalls(), "one batch is one appendAll");
     for (int i = 0; i < deltas.size(); i++) {
       assertEquals(i + 1, deltas.get(i).sequence());
     }
+    assertTrue(fixture.sink.checkpoints().isEmpty());
+
+    // checkpoint 独立落库一次：单事务单 UPDATE，提交后才发布事件
+    fixture.execution.deliverCheckpoint(0, false);
+    assertEquals(1, fixture.store.modelInvocationUpdateCount());
+    ModelInvocation committed = fixture.currentModel();
+    assertEquals(4, committed.streamCheckpoint().sequence());
+    assertEquals("hello world", committed.streamCheckpoint().text());
+    assertEquals("thinking now", committed.streamCheckpoint().thinking());
+    assertEquals(List.of(4L), fixture.sink.checkpoints());
+    assertTrue(
+        fixture.sink.events().get(fixture.sink.events().size() - 1)
+            instanceof RealtimeEvent.ModelCheckpoint,
+        "checkpoint event is published after the deltas and after the commit");
   }
 
+
   /**
-   * 意图：量化验证容量足够时，1/100/1000 条 delta 在同一窗口内都保持 flush 前零数据库开销（零事务、零行锁、零 UPDATE）、flush 后单事务单
-   * UPDATE，且全部 N 条已提交 delta 仅通过一次批量派发发布、sequence 完整且严格递增。
+   * 意图：量化验证容量足够时，1/100/1000 条 delta 在同一窗口内合并为一次批量发布且全程零数据库开销； checkpoint 单独落库时仍是单事务、单行锁、单 UPDATE。
    */
   @Test
-  void oneHundredAndThousandDeltasWithinOneWindowFlushWithSingleUpdate() {
+  void oneHundredAndThousandDeltasWithinOneWindowArePushedAsOneBatchWithoutDatabase() {
     for (int eventCount : List.of(1, 100, 1000)) {
       AtomicInteger scheduleCount = new AtomicInteger();
       AtomicReference<Runnable> capturedTask = new AtomicReference<>();
       ScheduledExecutorService scheduler = createControlledScheduler(scheduleCount, capturedTask);
-      StreamFlushConfig flushConfig =
-          new StreamFlushConfig(
-              Duration.ofMinutes(1), eventCount + 1, Math.max(1024, eventCount + 1));
+      ModelStreamConfig flushConfig =
+          new ModelStreamConfig(
+              Duration.ofMinutes(1),
+              eventCount + 1,
+              Math.max(1024, eventCount + 1),
+              Duration.ofMinutes(10));
       Fixture fixture = createFixture(flushConfig, NO_RETRY, scheduler, Runnable::run);
       fixture.start();
 
       for (int i = 0; i < eventCount; i++) {
         fixture.listener().onEvent(new ProviderStreamEvent.TextDelta("x"));
       }
-      assertEquals(1, scheduleCount.get());
-      assertEquals(0, fixture.store.modelInvocationUpdateCount());
-      assertEquals(
-          0,
-          fixture.store.transactionCount(),
-          eventCount + " buffered deltas must not open any transaction");
-      assertEquals(0, fixture.store.modelInvocationLockCount());
-      assertEquals(0, fixture.store.claimedWorkLockCount());
+      assertEquals(1, scheduleCount.get(), "exactly one push timer per window");
+      assertEquals(0, fixture.store.transactionCount());
       assertTrue(fixture.sink.deltas().isEmpty());
-      assertEquals(0, fixture.sink.appendCalls());
-      assertEquals(0, fixture.sink.appendAllCalls());
 
       capturedTask.get().run();
-      assertEquals(1, fixture.store.modelInvocationUpdateCount());
-      assertEquals(
-          1,
-          fixture.store.transactionCount(),
-          eventCount + " deltas must flush inside exactly one transaction");
-      assertEquals(1, fixture.store.modelInvocationLockCount());
-      assertEquals(1, fixture.store.claimedWorkLockCount());
       assertEquals(eventCount, fixture.sink.deltas().size());
-      assertEquals(eventCount, fixture.currentModel().streamCheckpoint().text().length());
-      // 单次已提交有界批次只派发一次批量发布，而不是 N 次单条发布；顺序保持 1..N
-      assertEquals(
-          1, fixture.sink.appendAllCalls(), "one committed batch must dispatch one appendAll");
-      assertEquals(0, fixture.sink.appendCalls(), "committed deltas must not use per-event append");
+      assertEquals(1, fixture.sink.appendAllCalls(), "one window is one appendAll");
+      assertEquals(0, fixture.sink.appendCalls());
+      assertEquals(0, fixture.store.transactionCount(), "pushing never opens a transaction");
       List<RealtimeEvent.ModelDelta> deltas = fixture.sink.deltas();
       for (int i = 0; i < deltas.size(); i++) {
         assertEquals(i + 1, deltas.get(i).sequence());
       }
+
+      fixture.execution.deliverCheckpoint(0, false);
+      assertEquals(1, fixture.store.modelInvocationUpdateCount());
+      assertEquals(1, fixture.store.transactionCount());
+      assertEquals(1, fixture.store.modelInvocationLockCount());
+      assertEquals(1, fixture.store.claimedWorkLockCount());
+      assertEquals(eventCount, fixture.currentModel().streamCheckpoint().text().length());
       fixture.processor.close();
     }
   }
 
+
   /**
-   * 意图：验证单 delta 即使 Provider 暂停也必然由 timer 刷出；后续 delta 到达时不重置首事件 deadline（不 debounce）； 定时器的 DB
-   * 写入与发布确实由 flushExecutor 执行而非 scheduler；stale generation 触发时判定为 no-op。
+   * 意图：验证单 delta 即使 Provider 暂停也必然由推送定时器发出；后续 delta 不重置首事件 deadline（不 debounce）； 推送与追帧 checkpoint 都由
+   * flushExecutor 执行而非 scheduler；过期代际触发为 no-op。
    */
   @Test
-  void singleDeltaTimerFlushesEventuallyAndSubsequentDeltasDoNotDebounceFirstDeadline()
+  void singleDeltaTimerPushesEventuallyAndSubsequentDeltasDoNotDebounceFirstDeadline()
       throws Exception {
-    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMillis(100), 10, 1024 * 1024);
+    ModelStreamConfig flushConfig = new ModelStreamConfig(Duration.ofMillis(100), 10, 1024 * 1024, Duration.ofMinutes(10));
 
     AtomicInteger scheduleCount = new AtomicInteger();
     AtomicReference<Runnable> capturedTask = new AtomicReference<>();
@@ -242,55 +237,36 @@ class ModelExecutionStreamFlushTest {
 
     ModelGateway.Listener listener = fixture.listener();
     listener.onEvent(new ProviderStreamEvent.TextDelta("first "));
+    assertEquals(1, scheduleCount.get(), "push timer must be scheduled for the first delta");
+    assertNotNull(capturedTask.get());
 
-    // 调度了一次 timer
-    assertEquals(1, scheduleCount.get(), "timer must be scheduled for first delta");
-    assertNotNull(capturedTask.get(), "timer task must be captured");
-
-    // 首事件 deadline 到期前发送第二个事件：不应重新 schedule（不 debounce 首事件 deadline）
     listener.onEvent(new ProviderStreamEvent.TextDelta("second"));
     assertEquals(1, scheduleCount.get(), "subsequent delta must not debounce or reschedule timer");
-
-    // 尚未触发定时器：0 update，0 publish
-    assertEquals(0, fixture.store.modelInvocationUpdateCount());
     assertTrue(fixture.sink.deltas().isEmpty());
 
-    // 模拟定时器到期：在 scheduler 线程触发任务（该任务仅往 flushExecutor 投递，不执行 DB/publish）
-    Runnable timerAction = capturedTask.get();
-    timerAction.run();
+    // scheduler 线程只投递，推送在 flushExecutor 上完成
+    capturedTask.get().run();
+    await(() -> fixture.sink.deltas().size() == 2, Duration.ofSeconds(2));
+    assertEquals("flush-worker-thread", publishThread.get());
+    assertEquals(0, fixture.store.modelInvocationUpdateCount(), "push never persists");
 
-    // Store 代理在真正提交前即计数；同时等待 delta 发布完成，避免提前读取线程记录。
-    await(
-        () -> fixture.store.modelInvocationUpdateCount() == 1 && fixture.sink.deltas().size() == 2,
-        Duration.ofSeconds(2));
+    // 追帧请求：checkpoint 同样在 flushExecutor 上落库
+    fixture.execution.requestCheckpoint();
+    await(() -> fixture.store.modelInvocationUpdateCount() == 1, Duration.ofSeconds(2));
+    assertEquals("flush-worker-thread", dbUpdateThread.get());
+    assertEquals("first second", fixture.currentModel().streamCheckpoint().text());
+    assertEquals(2, fixture.currentModel().streamCheckpoint().sequence());
 
-    // 验证 DB 写入与发布确实在 flush-worker-thread 上执行
-    assertEquals(
-        "flush-worker-thread",
-        dbUpdateThread.get(),
-        "DB update must execute on flushExecutor thread");
-    assertEquals(
-        "flush-worker-thread", publishThread.get(), "publish must execute on flushExecutor thread");
-
-    ModelInvocation committed = fixture.currentModel();
-    assertNotNull(committed.streamCheckpoint());
-    assertEquals(2, committed.streamCheckpoint().sequence());
-    assertEquals("first second", committed.streamCheckpoint().text());
-    assertEquals(2, fixture.sink.deltas().size());
-
-    // 验证 stale generation：使用过期的代际 0 触发 deliverFlush，必须直接 no-op
-    fixture.execution.deliverFlush(0);
-    assertEquals(
-        1,
-        fixture.store.modelInvocationUpdateCount(),
-        "stale generation deliverFlush must be no-op");
+    // 过期代际的推送定时器必须直接 no-op
+    fixture.execution.deliverPush(0);
     assertEquals(2, fixture.sink.deltas().size(), "stale generation must not publish");
   }
 
-  /** 意图：验证事件数达到配置阈值时立即触发 flush。 */
+
+  /** 意图：验证事件数达到配置阈值时立即推送。 */
   @Test
-  void thresholdByEventsFlushesExactlyAtLimit() {
-    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 3, 1024 * 1024);
+  void thresholdByEventsPushesExactlyAtLimit() {
+    ModelStreamConfig flushConfig = new ModelStreamConfig(Duration.ofMinutes(1), 3, 1024 * 1024, Duration.ofMinutes(10));
     Fixture fixture = createFixture(flushConfig, NO_RETRY);
     fixture.start();
 
@@ -300,16 +276,16 @@ class ModelExecutionStreamFlushTest {
     assertEquals(0, fixture.store.modelInvocationUpdateCount());
     assertTrue(fixture.sink.deltas().isEmpty());
 
-    // 第 3 个事件达到 maxEvents (3)
+    // 第 3 个事件达到 maxBatchEvents (3)：立即推送，仍不落库
     listener.onEvent(new ProviderStreamEvent.TextDelta("e3"));
-    assertEquals(1, fixture.store.modelInvocationUpdateCount());
+    assertEquals(0, fixture.store.modelInvocationUpdateCount());
     assertEquals(3, fixture.sink.deltas().size());
   }
 
-  /** 意图：验证增量 payload 字节数达到配置阈值时立即触发 flush。 */
+  /** 意图：验证增量 payload 字节数达到配置阈值时立即推送。 */
   @Test
-  void thresholdByPayloadBytesFlushesExactlyAtLimit() {
-    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 100, 30);
+  void thresholdByPayloadBytesPushesExactlyAtLimit() {
+    ModelStreamConfig flushConfig = new ModelStreamConfig(Duration.ofMinutes(1), 100, 30, Duration.ofMinutes(10));
     Fixture fixture = createFixture(flushConfig, NO_RETRY);
     fixture.start();
 
@@ -321,7 +297,7 @@ class ModelExecutionStreamFlushTest {
 
     // 第 3 个事件（累计 30 bytes 达到 maxPayloadBytes）
     listener.onEvent(new ProviderStreamEvent.TextDelta("1234567890"));
-    assertEquals(1, fixture.store.modelInvocationUpdateCount());
+    assertEquals(0, fixture.store.modelInvocationUpdateCount());
     assertEquals(3, fixture.sink.deltas().size());
   }
 
@@ -331,7 +307,7 @@ class ModelExecutionStreamFlushTest {
    */
   @Test
   void pureToolBatchPublishesWithoutModelInvocationUpdate() {
-    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 3, 1024 * 1024);
+    ModelStreamConfig flushConfig = new ModelStreamConfig(Duration.ofMinutes(1), 3, 1024 * 1024, Duration.ofMinutes(10));
     Fixture fixture = createFixture(flushConfig, NO_RETRY, requestWithTool());
     fixture.start();
 
@@ -349,12 +325,17 @@ class ModelExecutionStreamFlushTest {
     assertEquals(3, fixture.sink.deltas().size(), "pure tool batch events must be published");
     assertNull(
         fixture.currentModel().streamCheckpoint(), "pure tool batch must not create checkpoint");
+
+    // 追帧请求在没有任何 safe delta 时不写库，也没有可答复的 checkpoint 事件
+    fixture.execution.deliverCheckpoint(0, true);
+    assertEquals(0, fixture.store.transactionCount());
+    assertTrue(fixture.sink.checkpoints().isEmpty());
   }
 
-  /** 意图：验证单条事件超过聚合阈值时先收敛前一批，再单独处理超大事件。 */
+  /** 意图：验证单条事件超过字节上界时立即与前一批一起推送，顺序不变。 */
   @Test
-  void oversizedSingleEventFlushesPreBatchThenFlushesOversizedIndependently() {
-    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 10, 20);
+  void oversizedSingleEventPushesTogetherWithPendingBatchInOrder() {
+    ModelStreamConfig flushConfig = new ModelStreamConfig(Duration.ofMinutes(1), 10, 20, Duration.ofMinutes(10));
     Fixture fixture = createFixture(flushConfig, NO_RETRY);
     fixture.start();
 
@@ -366,22 +347,18 @@ class ModelExecutionStreamFlushTest {
     String oversizedText = "this is an oversized event payload that exceeds twenty bytes";
     listener.onEvent(new ProviderStreamEvent.TextDelta(oversizedText));
 
-    // 预期：前一批 small 先提交并发布（1 次），超大事件单独提交并发布（第 2 次），合计 2 次 UPDATE
-    assertEquals(
-        2,
-        fixture.store.modelInvocationUpdateCount(),
-        "pre-batch flush + oversized single flush = 2 updates");
+    // 超大事件触达字节上界：连同前一批按序一次推送，不落库
+    assertEquals(0, fixture.store.modelInvocationUpdateCount());
     assertEquals(
         2, fixture.sink.deltas().size(), "both small and oversized delta published in order");
     assertEquals(1, fixture.sink.deltas().get(0).sequence());
     assertEquals(2, fixture.sink.deltas().get(1).sequence());
-    assertEquals("small" + oversizedText, fixture.currentModel().streamCheckpoint().text());
   }
 
   /** 意图：验证 success terminal 吸收未刷内容、只一次 update，并按 sequence 先发布未刷批次再发布 completion gap。 */
   @Test
   void successTerminalAbsorbsUnflushedBatchWithSingleUpdateAndSequencePreserved() {
-    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 10, 1024 * 1024);
+    ModelStreamConfig flushConfig = new ModelStreamConfig(Duration.ofMinutes(1), 10, 1024 * 1024, Duration.ofMinutes(10));
     Fixture fixture = createFixture(flushConfig, NO_RETRY, requestWithTool());
     fixture.start();
 
@@ -423,7 +400,7 @@ class ModelExecutionStreamFlushTest {
    */
   @Test
   void failureRetryUnknownAbsorbsUnflushedBatchWithSingleUpdateAndSuppressesOldAttemptBatch() {
-    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 10, 1024 * 1024);
+    ModelStreamConfig flushConfig = new ModelStreamConfig(Duration.ofMinutes(1), 10, 1024 * 1024, Duration.ofMinutes(10));
 
     // Case 1: TRANSIENT 错误触发 retry
     InvocationRetryPolicy retryPolicy =
@@ -496,8 +473,8 @@ class ModelExecutionStreamFlushTest {
    * flush publish 之前完成。
    */
   @Test
-  void concurrentFlushAndTerminalStrictlyOrderedByDrainOwner() throws Exception {
-    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 1, 1024 * 1024);
+  void concurrentPushAndTerminalStrictlyOrderedByDrainOwner() throws Exception {
+    ModelStreamConfig flushConfig = new ModelStreamConfig(Duration.ofMinutes(1), 1, 1024 * 1024, Duration.ofMinutes(10));
 
     CountDownLatch sinkReached = new CountDownLatch(1);
     CountDownLatch sinkRelease = new CountDownLatch(1);
@@ -515,7 +492,7 @@ class ModelExecutionStreamFlushTest {
         };
     fixture.start();
 
-    // 线程 1 发送 safe delta（达到 maxEvents=1 触发 flush，commit 成功后在 publish 阶段阻塞）
+    // 线程 1 发送 safe delta（达到 maxBatchEvents=1 立即推送，在 publish 阶段阻塞）
     Thread thread1 =
         Thread.ofPlatform()
             .start(() -> fixture.listener().onEvent(new ProviderStreamEvent.TextDelta("hello ")));
@@ -537,7 +514,7 @@ class ModelExecutionStreamFlushTest {
 
     // 断言：线程 1 持有 drainLock 正在 publish，线程 2 被完全挡在外面：terminal 绝未提交！
     assertEquals(
-        1,
+        0,
         fixture.store.modelInvocationUpdateCount(),
         "terminal must not commit while drainLock is held for publish");
     assertEquals(ModelInvocationStatus.RUNNING, fixture.currentModel().status());
@@ -549,7 +526,7 @@ class ModelExecutionStreamFlushTest {
     thread2.join(5000);
 
     // 线程 2 随后获得 drainLock 完成 terminal 提交与发布
-    assertEquals(2, fixture.store.modelInvocationUpdateCount());
+    assertEquals(1, fixture.store.modelInvocationUpdateCount());
     assertEquals(ModelInvocationStatus.SUCCEEDED, fixture.currentModel().status());
 
     // 验证发布顺序严格单调：seq=1 先于 seq=2
@@ -560,22 +537,16 @@ class ModelExecutionStreamFlushTest {
   }
 
   /**
-   * 意图：验证 Claim Loss 竞态下（以合法锁序删除 MODEL work），缓冲中的 delta 既不写库也不发布， 检测只在下一个围栏边界发生：fenced flush 失败即以
-   * LOST 收敛为 abandon，缓冲事件整体丢弃。
+   * 意图：验证 Claim Loss 竞态下（以合法锁序删除 MODEL work），检测发生在 checkpoint 提交围栏： 围栏失败即 abandon，不发布 checkpoint 事件，尚未推送的缓冲被丢弃，此后不再发布。
    */
   @Test
-  void claimLossAtFencingSuppressesPublicationAndAbandons() {
-    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 2, 1024 * 1024);
+  void claimLossAtCheckpointFenceAbandonsAndStopsPublishing() {
+    ModelStreamConfig flushConfig = new ModelStreamConfig(Duration.ofMinutes(1), 2, 1024 * 1024, Duration.ofMinutes(10));
     Fixture fixture = createFixture(flushConfig, NO_RETRY);
     fixture.start();
 
-    // 进 batch 1 个事件（未刷）：per-delta 零数据库开销
     fixture.listener().onEvent(new ProviderStreamEvent.TextDelta("first"));
-    assertEquals(0, fixture.store.modelInvocationUpdateCount());
     assertEquals(0, fixture.store.transactionCount(), "buffered delta must not open a transaction");
-    assertEquals(0, fixture.store.modelInvocationLockCount());
-    assertEquals(0, fixture.store.claimedWorkLockCount());
-    assertTrue(fixture.sink.deltas().isEmpty());
 
     // 模拟 claim lost（按合法锁序：先锁 Thread，再删除 MODEL work）
     fixture
@@ -588,45 +559,39 @@ class ModelExecutionStreamFlushTest {
               return null;
             });
 
-    // 第 2 个事件到达容量上界，触发 fenced flush（该边界重新校验 RUNNING + attempt + claimed lease）
-    fixture.listener().onEvent(new ProviderStreamEvent.TextDelta("second"));
+    fixture.execution.deliverCheckpoint(0, true);
 
-    // 校验：fence 失败，绝不发布任何未提交 delta，execution 安全收敛为 abandoned
-    assertTrue(fixture.sink.deltas().isEmpty(), "claim loss must not publish uncommitted delta");
     assertTrue(fixture.execution.abandoned(), "execution must be abandoned on claim loss");
+    assertTrue(fixture.sink.checkpoints().isEmpty(), "no checkpoint event for a failed fence");
+    assertEquals(0, fixture.store.modelInvocationUpdateCount());
+
+    fixture.listener().onEvent(new ProviderStreamEvent.TextDelta("second"));
+    assertTrue(fixture.sink.deltas().isEmpty(), "a lost execution must not publish anything");
   }
 
   /**
-   * 意图：验证 lease 丢失（Stop / 另一实例 recovery 后 MODEL Work 被删除）发生在定时器、容量与 terminal 三个提交边界之前时， 缓冲 delta
-   * 一律不发布、不写库，durable 行保持 RUNNING 供 lease recovery 收敛。 这是「围栏只在提交边界重校验」的安全性证据：检测时机从 per-delta
-   * 后移到边界，但任何边界都绝不放行失去所有权的批次。
+   * 意图：验证 lease 丢失（Stop / 另一实例 recovery 后 MODEL Work 被删除）发生在 checkpoint 与 terminal 两个提交围栏之前时， 缓冲 delta 一律不发布、不写库，durable
+   * 行保持 RUNNING 供 lease recovery 收敛。
    */
   @Test
-  void leaseLossBeforeTimerCapacityAndTerminalNeverPublishesBufferedDeltas() {
-    assertLeaseLossBoundary("timer", (fixture, timerTask) -> timerTask.run());
-    assertLeaseLossBoundary(
-        "capacity", (fixture, timerTask) -> fixture.listener().onEvent(delta("second")));
-    assertLeaseLossBoundary(
-        "terminal", (fixture, timerTask) -> fixture.listener().onSucceeded(response("first")));
+  void leaseLossBeforeCheckpointAndTerminalNeverPublishesOrWrites() {
+    assertLeaseLossBoundary("checkpoint", fixture -> fixture.execution.deliverCheckpoint(0, true));
+    assertLeaseLossBoundary("terminal", fixture -> fixture.listener().onSucceeded(response("first")));
   }
 
-  /**
-   * 意图：验证 attempt 已被另一 attempt 接管（durable RUNNING attempt 前进）时，定时器、容量与 terminal 三个提交边界都会因 attempt
-   * 不匹配而拒绝提交，缓冲 delta 零发布、零写入。
-   */
+  /** 意图：验证 attempt 已被另一 attempt 接管（durable RUNNING attempt 前进）时，checkpoint 与 terminal 围栏都因 attempt 不匹配而拒绝提交。 */
   @Test
-  void attemptChangeBeforeTimerCapacityAndTerminalNeverPublishesBufferedDeltas() {
-    assertAttemptChangeBoundary("timer", (fixture, timerTask) -> timerTask.run());
+  void attemptChangeBeforeCheckpointAndTerminalNeverPublishesOrWrites() {
     assertAttemptChangeBoundary(
-        "capacity", (fixture, timerTask) -> fixture.listener().onEvent(delta("second")));
+        "checkpoint", fixture -> fixture.execution.deliverCheckpoint(0, true));
     assertAttemptChangeBoundary(
-        "terminal", (fixture, timerTask) -> fixture.listener().onSucceeded(response("first")));
+        "terminal", fixture -> fixture.listener().onSucceeded(response("first")));
   }
 
   /** 意图：验证本地取消（Stop / cancel 到 abandon）后，任何缓冲 delta 都绝不发布、绝不写库：围栏与心跳共享同一 abandon 收敛路径。 */
   @Test
   void cancellationBeforeFlushDiscardsBufferedDeltasWithoutWrites() {
-    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 2, 1024 * 1024);
+    ModelStreamConfig flushConfig = new ModelStreamConfig(Duration.ofMinutes(1), 2, 1024 * 1024, Duration.ofMinutes(10));
     Fixture fixture = createFixture(flushConfig, NO_RETRY);
     fixture.start();
 
@@ -648,12 +613,12 @@ class ModelExecutionStreamFlushTest {
   }
 
   /**
-   * 意图：验证 terminal 补齐 gap 时产生的大量 delta 严格按 {@link StreamFlushConfig} 上界分块批量派发： 每个分块恰好一次 {@code
+   * 意图：验证 terminal 补齐 gap 时产生的大量 delta 严格按 {@link ModelStreamConfig} 上界分块批量派发： 每个分块恰好一次 {@code
    * appendAll}，全部 sequence 连续且保序，既不是 N 次单条发布，也不是一次无界批量调用。
    */
   @Test
   void terminalGapDeltasAreDispatchedInBoundedBatchesPreservingOrder() {
-    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 2, 1024 * 1024);
+    ModelStreamConfig flushConfig = new ModelStreamConfig(Duration.ofMinutes(1), 2, 1024 * 1024, Duration.ofMinutes(10));
     Fixture fixture = createFixture(flushConfig, NO_RETRY, requestWithTool());
     fixture.start();
 
@@ -685,7 +650,7 @@ class ModelExecutionStreamFlushTest {
    */
   @Test
   void publishChunkFailureIsIsolatedAndDoesNotChangeTerminal() {
-    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 2, 1024 * 1024);
+    ModelStreamConfig flushConfig = new ModelStreamConfig(Duration.ofMinutes(1), 2, 1024 * 1024, Duration.ofMinutes(10));
     Fixture fixture = createFixture(flushConfig, NO_RETRY);
     fixture.start();
 
@@ -695,15 +660,17 @@ class ModelExecutionStreamFlushTest {
       fixture.listener().onEvent(delta("d" + i));
     }
 
-    // durable checkpoint 仍在运行期内正确推进，不受投影失败影响
     assertEquals(ModelInvocationStatus.RUNNING, fixture.currentModel().status());
-    assertEquals(4, fixture.currentModel().streamCheckpoint().sequence());
     assertEquals(2, fixture.sink.appendAllCalls());
     assertEquals(List.of(2, 2), fixture.sink.batchSizes());
     List<RealtimeEvent.ModelDelta> deltas = fixture.sink.deltas();
     assertEquals(2, deltas.size(), "only the successful chunk prefix is delivered");
     assertEquals(1, deltas.get(0).sequence());
     assertEquals(2, deltas.get(1).sequence());
+
+    // durable checkpoint 不受投影失败影响
+    fixture.execution.deliverCheckpoint(0, true);
+    assertEquals(4, fixture.currentModel().streamCheckpoint().sequence());
 
     // 后续 terminal 仍必须成功收敛为 durable SUCCEEDED
     fixture.listener().onSucceeded(response("d0d1d2d3"));
@@ -712,7 +679,7 @@ class ModelExecutionStreamFlushTest {
   }
 
   /** lease 丢失边界断言：缓冲 1 条 delta 后删除 MODEL Work，再触发指定边界，断言零发布、零写入且 durable 保持 RUNNING。 */
-  private void assertLeaseLossBoundary(String boundary, BiConsumer<Fixture, Runnable> trigger) {
+  private void assertLeaseLossBoundary(String boundary, Consumer<Fixture> trigger) {
     Fixture fixture = boundaryFixture();
     fixture
         .store
@@ -725,18 +692,18 @@ class ModelExecutionStreamFlushTest {
             });
     fixture.store.resetUpdateCount();
 
-    trigger.accept(fixture, fixture.capturedTimerTask);
+    trigger.accept(fixture);
 
     assertFenceRejectedWithoutWrites(fixture, "lease loss before " + boundary);
   }
 
   /** attempt 不匹配边界断言：缓冲 1 条 delta 后把 durable attempt 推进到 2，再触发边界，断言零发布、零写入。 */
-  private void assertAttemptChangeBoundary(String boundary, BiConsumer<Fixture, Runnable> trigger) {
+  private void assertAttemptChangeBoundary(String boundary, Consumer<Fixture> trigger) {
     Fixture fixture = boundaryFixture();
     advanceToSecondAttempt(fixture);
     fixture.store.resetUpdateCount();
 
-    trigger.accept(fixture, fixture.capturedTimerTask);
+    trigger.accept(fixture);
 
     assertFenceRejectedWithoutWrites(fixture, "attempt change before " + boundary);
   }
@@ -745,7 +712,7 @@ class ModelExecutionStreamFlushTest {
     assertEquals(0, fixture.store.modelInvocationUpdateCount(), scenario + ": must not UPDATE");
     assertEquals(0, fixture.sink.appendAllCalls(), scenario + ": must not dispatch appendAll");
     assertEquals(0, fixture.sink.appendCalls(), scenario + ": must not dispatch append");
-    assertTrue(fixture.sink.deltas().isEmpty(), scenario + ": must not publish buffered delta");
+    assertTrue(fixture.sink.events().isEmpty(), scenario + ": must not publish anything");
     assertTrue(fixture.execution.abandoned(), scenario + ": execution must be abandoned");
     assertEquals(
         ModelInvocationStatus.RUNNING,
@@ -754,9 +721,9 @@ class ModelExecutionStreamFlushTest {
     assertTrue(fixture.handle.isCancelled(), scenario + ": handle must be cancelled");
   }
 
-  /** 带受控 timer 的 fixture：缓冲 1 条 delta（未达 maxEvents=2），并暴露被捕获的 timer 任务。 */
+  /** 缓冲 1 条 delta（未达 maxBatchEvents=2、窗口 100ms 未到期）的 fixture。 */
   private Fixture boundaryFixture() {
-    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMillis(100), 2, 1024 * 1024);
+    ModelStreamConfig flushConfig = new ModelStreamConfig(Duration.ofMillis(100), 2, 1024 * 1024, Duration.ofMinutes(10));
     AtomicInteger scheduleCount = new AtomicInteger();
     AtomicReference<Runnable> capturedTask = new AtomicReference<>();
     ScheduledExecutorService controlledScheduler =
@@ -765,10 +732,8 @@ class ModelExecutionStreamFlushTest {
     fixture.start();
 
     fixture.listener().onEvent(delta("first"));
-    assertEquals(1, scheduleCount.get(), "first buffered delta must schedule the batch timer");
+    assertEquals(1, scheduleCount.get(), "first buffered delta must schedule the push timer");
     assertEquals(0, fixture.store.transactionCount(), "buffered delta must not touch the store");
-    fixture.capturedTimerTask = capturedTask.get();
-    assertNotNull(fixture.capturedTimerTask);
     return fixture;
   }
 
@@ -809,7 +774,7 @@ class ModelExecutionStreamFlushTest {
    */
   @Test
   void batchTimerSchedulerRejectionConvergesToAbandonedWithoutHoldingMonitor() {
-    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 10, 1024 * 1024);
+    ModelStreamConfig flushConfig = new ModelStreamConfig(Duration.ofMinutes(1), 10, 1024 * 1024, Duration.ofMinutes(10));
     ScheduledExecutorService delegate = Executors.newSingleThreadScheduledExecutor();
     executorsToClose.add(delegate);
 
@@ -823,7 +788,7 @@ class ModelExecutionStreamFlushTest {
                       && args != null
                       && args.length == 3
                       && args[1] instanceof Long delay
-                      && delay.longValue() == flushConfig.maxDelay().toMillis()) {
+                      && delay.longValue() == flushConfig.pushWindow().toMillis()) {
                     throw new RejectedExecutionException("batch timer queue full");
                   }
                   return method.invoke(delegate, args);
@@ -840,7 +805,7 @@ class ModelExecutionStreamFlushTest {
   /** 意图：验证批次定时器执行时如果 flushExecutor 拒绝投递，execution 安全收敛为 abandoned 且 handle 被取消。 */
   @Test
   void batchTimerFlushExecutorRejectionConvergesToAbandoned() {
-    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMillis(100), 10, 1024 * 1024);
+    ModelStreamConfig flushConfig = new ModelStreamConfig(Duration.ofMillis(100), 10, 1024 * 1024, Duration.ofMinutes(10));
     Executor rejectingFlushExecutor =
         task -> {
           throw new RejectedExecutionException("flushExecutor queue is full");
@@ -866,7 +831,7 @@ class ModelExecutionStreamFlushTest {
   /** 意图：验证 gate buffer 达到 maxEvents 容积时，合法 terminal 信号绝不被丢弃或误拒， 并在后续 activate 打开门控后成功落地终态。 */
   @Test
   void gateBufferTerminalAtCapacityIsAcceptedAndProcessedOnActivation() {
-    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 2, 1024 * 1024);
+    ModelStreamConfig flushConfig = new ModelStreamConfig(Duration.ofMinutes(1), 2, 1024 * 1024, Duration.ofMinutes(10));
     CountingStore store = new CountingStore(new InMemoryHarnessStore());
     Baseline baseline = seedBaseline(store.delegate(), NOW);
     UUID invocationId = seedInvocation(store.delegate(), baseline, requestSpec(), NOW);
@@ -921,39 +886,31 @@ class ModelExecutionStreamFlushTest {
     ModelInvocation model =
         store.delegate().transaction(tx -> tx.findModelInvocation(invocationId)).orElseThrow();
     assertEquals(ModelInvocationStatus.SUCCEEDED, model.status());
-    // activate 期间共 3 次 update：markRunning(1) + 重放满批2个事件flush(1) + terminal终态(1)
+    // activate 期间共 2 次 update：markRunning(1) + terminal 终态(1)；重放的 delta 只推送不落库
     assertEquals(
-        3, store.modelInvocationUpdateCount(), "markRunning + batch flush + terminal = 3 updates");
+        2, store.modelInvocationUpdateCount(), "markRunning + terminal = 2 updates");
   }
 
   /**
-   * 意图：验证容量触发批次 flush 遭遇 Store 持久化失败时，正确语义为 abandon 本地 execution， 绝不伪装为 Provider INVALID_RESPONSE 写
-   * FAILED/retry，未提交 delta 绝不发布，保持 durable RUNNING+claimed 供 lease recovery 收敛。
+   * 意图：验证 checkpoint 持久化遭遇 Store 失败时，正确语义为 abandon 本地 execution，绝不伪装为 Provider INVALID_RESPONSE 写
+   * FAILED/retry，不发布 checkpoint 事件，保持 durable RUNNING+claimed 供 lease recovery 收敛。
    */
   @Test
-  void capacityBatchFlushStoreFailureAbandonsLocalExecutionWithoutMaskingAsInvalidResponse() {
-    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 2, 1024 * 1024);
+  void checkpointStoreFailureAbandonsLocalExecutionWithoutMaskingAsInvalidResponse() {
+    ModelStreamConfig flushConfig = new ModelStreamConfig(Duration.ofMinutes(1), 2, 1024 * 1024, Duration.ofMinutes(10));
     Fixture fixture = createFixture(flushConfig, NO_RETRY);
     fixture.start();
 
-    ModelGateway.Listener listener = fixture.listener();
-    // 第 1 个事件放入批次，未达 maxEvents (2)
-    listener.onEvent(new ProviderStreamEvent.TextDelta("e1"));
-    assertFalse(fixture.execution.abandoned(), "execution must stay active before capacity");
-    assertEquals(0, fixture.sink.deltas().size());
+    fixture.listener().onEvent(new ProviderStreamEvent.TextDelta("e1"));
+    assertFalse(fixture.execution.abandoned(), "execution must stay active before the checkpoint");
 
-    // 注入 Store updateModelInvocation 抛出数据库故障
     fixture.store.updateInvocationFailure =
-        new RuntimeException("simulated db failure during flush");
+        new RuntimeException("simulated db failure during checkpoint");
+    fixture.execution.deliverCheckpoint(0, true);
 
-    // 第 2 个事件达到 maxEvents (2)，触发 flushBatchLocked 遭遇基础设施失败
-    listener.onEvent(new ProviderStreamEvent.TextDelta("e2"));
+    assertTrue(fixture.execution.abandoned(), "execution must be abandoned upon checkpoint failure");
+    assertTrue(fixture.handle.isCancelled(), "handle must be cancelled upon checkpoint failure");
 
-    // 1. 本地 execution 必须已 abandon，handle 必须被 cancel
-    assertTrue(fixture.execution.abandoned(), "execution must be abandoned upon flush failure");
-    assertTrue(fixture.handle.isCancelled(), "handle must be cancelled upon flush failure");
-
-    // 2. durable ModelInvocation 必须保留在原有的 RUNNING 状态，attempt 仍为 1，绝不写 ModelInvocationError
     ModelInvocation model = fixture.currentModel();
     assertEquals(
         ModelInvocationStatus.RUNNING,
@@ -963,7 +920,6 @@ class ModelExecutionStreamFlushTest {
     assertNull(model.error(), "must not write ModelInvocationError for infrastructure failure");
     assertTrue(model.failedAttempts().isEmpty(), "must not reschedule retry");
 
-    // 3. durable Work 必须保留在原有的 claimed 状态，未被 complete 或 reschedule
     Work work =
         fixture
             .store
@@ -976,49 +932,34 @@ class ModelExecutionStreamFlushTest {
         fixture.execution.claim().leaseToken(),
         work.leaseToken(),
         "lease token must remain identical");
-
-    // 4. 未提交批次的 delta 绝不得发布到 RealtimeEventSink
-    assertTrue(fixture.sink.deltas().isEmpty(), "uncommitted deltas must not be published");
+    assertTrue(fixture.sink.checkpoints().isEmpty(), "no checkpoint event after a failed commit");
   }
 
+
   /**
-   * 意图：验证批次定时器触发 flush 遭遇 Store 持久化失败时，execution 安全收敛为 abandoned 且 handle 取消， 绝不写 FAILED/retry，未提交
-   * delta 绝不发布，保持 durable RUNNING+claimed 供 lease recovery 收敛。
+   * 意图：验证 checkpoint 定时器触发的持久化遭遇 Store 失败时，execution 安全收敛为 abandoned 且 handle 取消，绝不写 FAILED/retry，保持 durable
+   * RUNNING+claimed 供 lease recovery 收敛。
    */
   @Test
-  void timerBatchFlushStoreFailureAbandonsLocalExecutionWithoutMaskingAsInvalidResponse() {
-    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMillis(100), 10, 1024 * 1024);
-    AtomicReference<Runnable> capturedTask = new AtomicReference<>();
-    ScheduledExecutorService controlledScheduler =
-        createControlledScheduler(new AtomicInteger(), capturedTask);
-
-    Fixture fixture = createFixture(flushConfig, NO_RETRY, controlledScheduler, Runnable::run);
+  void timerCheckpointStoreFailureAbandonsLocalExecutionWithoutMaskingAsInvalidResponse() {
+    ModelStreamConfig flushConfig = new ModelStreamConfig(Duration.ofMillis(100), 10, 1024 * 1024, Duration.ofMinutes(10));
+    Fixture fixture = createFixture(flushConfig, NO_RETRY);
     fixture.start();
 
-    ModelGateway.Listener listener = fixture.listener();
-    listener.onEvent(new ProviderStreamEvent.TextDelta("e1"));
-    assertNotNull(capturedTask.get(), "timer task must be captured");
-
-    // 注入 Store updateModelInvocation 抛出数据库故障
+    fixture.listener().onEvent(new ProviderStreamEvent.TextDelta("e1"));
     fixture.store.updateInvocationFailure =
-        new RuntimeException("simulated db failure during timer flush");
+        new RuntimeException("simulated db failure during timer checkpoint");
 
-    // 触发定时器任务（deliverFlush）
-    capturedTask.get().run();
+    // 首个 safe delta 武装的 checkpoint 定时器代际为 0
+    fixture.execution.deliverCheckpoint(0, false);
 
-    // 1. 本地 execution 必须已 abandon，handle 必须被 cancel
-    assertTrue(
-        fixture.execution.abandoned(), "execution must be abandoned upon timer flush failure");
-    assertTrue(fixture.handle.isCancelled(), "handle must be cancelled upon timer flush failure");
-
-    // 2. durable ModelInvocation 必须保留在 RUNNING 状态，未写错误
+    assertTrue(fixture.execution.abandoned());
+    assertTrue(fixture.handle.isCancelled());
     ModelInvocation model = fixture.currentModel();
     assertEquals(ModelInvocationStatus.RUNNING, model.status(), "model must remain RUNNING");
     assertEquals(1, model.attempt());
     assertNull(model.error());
     assertTrue(model.failedAttempts().isEmpty());
-
-    // 3. durable Work 必须保留在 claimed 状态
     Work work =
         fixture
             .store
@@ -1028,10 +969,9 @@ class ModelExecutionStreamFlushTest {
             .orElseThrow();
     assertNotNull(work.leaseToken());
     assertEquals(fixture.execution.claim().leaseToken(), work.leaseToken());
-
-    // 4. 未提交 delta 绝不发布
-    assertTrue(fixture.sink.deltas().isEmpty());
+    assertTrue(fixture.sink.checkpoints().isEmpty());
   }
+
 
   /**
    * 意图：验证 Provider stream event 自身非法（如 tool call 标识冲突）时， 仍然正确收敛为 INVALID_RESPONSE
@@ -1039,7 +979,7 @@ class ModelExecutionStreamFlushTest {
    */
   @Test
   void invalidProviderEventConvergesToInvalidResponseTerminal() {
-    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 10, 1024 * 1024);
+    ModelStreamConfig flushConfig = new ModelStreamConfig(Duration.ofMinutes(1), 10, 1024 * 1024, Duration.ofMinutes(10));
     Fixture fixture = createFixture(flushConfig, NO_RETRY, requestWithTool());
     fixture.start();
 
@@ -1059,37 +999,36 @@ class ModelExecutionStreamFlushTest {
   }
 
   /**
-   * 意图：验证空内容 delta 不得强制推进 checkpoint： 1. 周期 flush 路径：接收空 delta 后触发 flush，不生成内容相同但 sequence 更大的
-   * checkpoint（不发起无意义 UPDATE）； 2. 空 delta 仍按普通 realtime delta 分配递增 sequence 并正常发布； 3. 终态 terminal
-   * 路径：流尾部接收空 delta 后进入 succeeded，终态 checkpoint 复用已有 safe sequence，不抬高 sequence。
+   * 意图：验证空内容 delta 不得强制推进 checkpoint： 1. checkpoint 路径：接收空 delta 后再次 checkpoint 不发起无意义 UPDATE；
+   * 2. 空 delta 仍按普通 realtime delta 分配递增 sequence 并正常发布； 3. 终态路径：流尾部接收空 delta 后进入 succeeded，终态 checkpoint 复用已有 safe
+   * sequence，不抬高 sequence。
    */
   @Test
   void emptyDeltaDoesNotAdvanceCheckpointInPeriodicOrTerminalPaths() {
-    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 1, 1024 * 1024);
+    ModelStreamConfig flushConfig = new ModelStreamConfig(Duration.ofMinutes(1), 1, 1024 * 1024, Duration.ofMinutes(10));
     Fixture fixture = createFixture(flushConfig, NO_RETRY);
     fixture.start();
 
     ModelGateway.Listener listener = fixture.listener();
-    // 1. 发送非空 text delta（maxEvents=1 触发 flush），成功保存第一个 checkpoint (seq=1)
     listener.onEvent(new ProviderStreamEvent.TextDelta("hello"));
+    fixture.execution.deliverCheckpoint(0, true);
     assertEquals(1, fixture.store.modelInvocationUpdateCount());
     ModelInvocation modelAfterFirst = fixture.currentModel();
     assertNotNull(modelAfterFirst.streamCheckpoint());
     assertEquals(1L, modelAfterFirst.streamCheckpoint().sequence());
     assertEquals("hello", modelAfterFirst.streamCheckpoint().text());
 
-    // 2. 发送空内容 text delta（maxEvents=1 触发 flush）
     listener.onEvent(new ProviderStreamEvent.TextDelta(""));
-    // 验证：因为没有新增 safe 内容，不推进 checkpoint，因此没有发起额外的 updateModelInvocation！
+    fixture.execution.deliverCheckpoint(0, true);
     assertEquals(
         1,
         fixture.store.modelInvocationUpdateCount(),
         "empty delta must not trigger checkpoint update");
-    ModelInvocation modelAfterEmpty = fixture.currentModel();
     assertEquals(
-        1L, modelAfterEmpty.streamCheckpoint().sequence(), "checkpoint sequence must remain 1");
+        1L, fixture.currentModel().streamCheckpoint().sequence(), "checkpoint sequence must remain 1");
+    // 无前进的追帧请求重发已落库 checkpoint 的事件
+    assertEquals(List.of(1L, 1L), fixture.sink.checkpoints());
 
-    // 3. 验证空 delta 仍然获得连续递增的 sequence 并发布
     assertEquals(2, fixture.sink.deltas().size());
     assertEquals(1L, fixture.sink.deltas().get(0).sequence());
     assertEquals(
@@ -1097,11 +1036,9 @@ class ModelExecutionStreamFlushTest {
     assertEquals(2L, fixture.sink.deltas().get(1).sequence());
     assertEquals("", ((ProviderStreamEvent.TextDelta) fixture.sink.deltas().get(1).delta()).text());
 
-    // 4. 发送终态 succeeded：response 内容与 stream 一致（"hello"）
     listener.onSucceeded(response("hello"));
     ModelInvocation finalModel = fixture.currentModel();
     assertEquals(ModelInvocationStatus.SUCCEEDED, finalModel.status());
-    // 终态 checkpoint 仍然保持 sequence=1，未被空 delta 抬高为 2
     assertNotNull(finalModel.streamCheckpoint());
     assertEquals(
         1L,
@@ -1110,17 +1047,19 @@ class ModelExecutionStreamFlushTest {
     assertEquals("hello", finalModel.streamCheckpoint().text());
   }
 
+
   /**
    * 意图：验证流在接收空 delta 之后发生 failure，生成的 failure 审计与 final checkpoint 复用原有 safe sequence，不被空 delta 抬高。
    */
   @Test
   void emptyDeltaDoesNotAdvanceCheckpointInFailureTerminalPath() {
-    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 1, 1024 * 1024);
+    ModelStreamConfig flushConfig = new ModelStreamConfig(Duration.ofMinutes(1), 1, 1024 * 1024, Duration.ofMinutes(10));
     Fixture fixture = createFixture(flushConfig, NO_RETRY);
     fixture.start();
 
     ModelGateway.Listener listener = fixture.listener();
     listener.onEvent(new ProviderStreamEvent.TextDelta("hello"));
+    fixture.execution.deliverCheckpoint(0, true);
     assertEquals(1L, fixture.currentModel().streamCheckpoint().sequence());
 
     // 发送空 delta
@@ -1146,7 +1085,7 @@ class ModelExecutionStreamFlushTest {
    */
   @Test
   void synchronousActivateBufferedInvalidEventIsIsolatedAndConvergesToInvalidResponse() {
-    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 10, 1024 * 1024);
+    ModelStreamConfig flushConfig = new ModelStreamConfig(Duration.ofMinutes(1), 10, 1024 * 1024, Duration.ofMinutes(10));
     CountingStore store = new CountingStore(new InMemoryHarnessStore());
     Baseline baseline = seedBaseline(store.delegate(), NOW);
     UUID invocationId = seedInvocation(store.delegate(), baseline, requestWithTool(), NOW);
@@ -1212,84 +1151,12 @@ class ModelExecutionStreamFlushTest {
   }
 
   /**
-   * 意图：验证在 handle.activate 同步回调中缓冲普通 event，drain 期间触发 batch flush 遭遇 DB 失败时， 异常被 ModelExecution
-   * 边界隔离，返回 LOST_OWNERSHIP，保持 durable RUNNING+claimed。
-   */
-  @Test
-  void synchronousActivateBufferedEventBatchStoreFailureIsIsolatedAndReturnsLostOwnership() {
-    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 1, 1024 * 1024);
-    CountingStore store = new CountingStore(new InMemoryHarnessStore());
-    Baseline baseline = seedBaseline(store.delegate(), NOW);
-    UUID invocationId = seedInvocation(store.delegate(), baseline, requestSpec(), NOW);
-    RecordingSink sink = new RecordingSink();
-    ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
-    executorsToClose.add(scheduler);
-    ClaimedWork claim = claim(store.delegate(), invocationId, NOW);
-
-    store
-        .delegate()
-        .transaction(
-            tx -> {
-              tx.lockThread(baseline.threadId());
-              ModelInvocation model = tx.lockModelInvocation(invocationId).orElseThrow();
-              tx.updateModelInvocation(model.beginDispatch(NOW));
-              return null;
-            });
-
-    ModelExecution[] executionHolder = new ModelExecution[1];
-    ModelGateway.Handle synchronousHandle =
-        new ModelGateway.Handle() {
-          @Override
-          public void activate() {
-            // markRunning 已成功执行；在 drain 开始前注入 batch flush 时的 store 失败
-            store.updateInvocationFailure = new RuntimeException("db error during drain flush");
-            // 同步投递事件（maxEvents=1 将在 drain 时触发 flush）
-            executionHolder[0].onEvent(new ProviderStreamEvent.TextDelta("hello"));
-          }
-
-          @Override
-          public void cancel() {}
-        };
-
-    ModelExecution execution =
-        new ModelExecution(
-            store,
-            sink,
-            claim,
-            baseline.threadId(),
-            1,
-            false,
-            List.of(),
-            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, flushConfig),
-            "test-provider",
-            Clock.fixed(NOW, ZoneOffset.UTC),
-            scheduler,
-            Runnable::run,
-            Runnable::run,
-            e -> {});
-    executionHolder[0] = execution;
-
-    // 执行 activate：异常不得抛出，返回 LOST_OWNERSHIP，保留 RUNNING
-    ProcessResult result = execution.activate(synchronousHandle);
-    assertEquals(
-        ProcessResult.LOST_OWNERSHIP,
-        result,
-        "batch store failure in drain must return LOST_OWNERSHIP");
-    assertTrue(execution.abandoned());
-
-    ModelInvocation model =
-        store.delegate().transaction(tx -> tx.findModelInvocation(invocationId)).orElseThrow();
-    assertEquals(ModelInvocationStatus.RUNNING, model.status());
-    assertNull(model.error());
-  }
-
-  /**
    * 意图：验证在 handle.activate 同步回调中缓冲 terminal 信号，drain 期间持久化遭遇 DB 失败时， 异常被 ModelExecution 边界隔离，返回
    * LOST_OWNERSHIP，保持 durable RUNNING。
    */
   @Test
   void synchronousActivateBufferedTerminalStoreFailureIsIsolatedAndReturnsLostOwnership() {
-    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 10, 1024 * 1024);
+    ModelStreamConfig flushConfig = new ModelStreamConfig(Duration.ofMinutes(1), 10, 1024 * 1024, Duration.ofMinutes(10));
     CountingStore store = new CountingStore(new InMemoryHarnessStore());
     Baseline baseline = seedBaseline(store.delegate(), NOW);
     UUID invocationId = seedInvocation(store.delegate(), baseline, requestSpec(), NOW);
@@ -1356,7 +1223,7 @@ class ModelExecutionStreamFlushTest {
    */
   @Test
   void gateBufferPendingCapacityMaxPlusOneRejectsOrdinaryEventWhileTerminalIsAccepted() {
-    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 2, 1024 * 1024);
+    ModelStreamConfig flushConfig = new ModelStreamConfig(Duration.ofMinutes(1), 2, 1024 * 1024, Duration.ofMinutes(10));
     Fixture overflow = createFixture(flushConfig, NO_RETRY);
     AtomicBoolean overflowHandleCancelled = new AtomicBoolean();
     ModelGateway.Handle overflowingHandle =
@@ -1452,7 +1319,7 @@ class ModelExecutionStreamFlushTest {
    */
   @Test
   void synchronousActivateBufferedInvalidEventStoreFailureIsIsolatedAndReturnsLostOwnership() {
-    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 10, 1024 * 1024);
+    ModelStreamConfig flushConfig = new ModelStreamConfig(Duration.ofMinutes(1), 10, 1024 * 1024, Duration.ofMinutes(10));
     CountingStore store = new CountingStore(new InMemoryHarnessStore());
     Baseline baseline = seedBaseline(store.delegate(), NOW);
     UUID invocationId = seedInvocation(store.delegate(), baseline, requestSpec(), NOW);
@@ -1519,7 +1386,7 @@ class ModelExecutionStreamFlushTest {
   /** 意图：验证 Gateway 激活抛出异常且 UNKNOWN 终态持久化亦失败时，异常在边界被隔离并返回 LOST_OWNERSHIP，durable 保持 RUNNING。 */
   @Test
   void activationFailureStoreFailureIsIsolatedAndReturnsLostOwnership() {
-    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 10, 1024 * 1024);
+    ModelStreamConfig flushConfig = new ModelStreamConfig(Duration.ofMinutes(1), 10, 1024 * 1024, Duration.ofMinutes(10));
     CountingStore store = new CountingStore(new InMemoryHarnessStore());
     Baseline baseline = seedBaseline(store.delegate(), NOW);
     UUID invocationId = seedInvocation(store.delegate(), baseline, requestSpec(), NOW);
@@ -1583,7 +1450,7 @@ class ModelExecutionStreamFlushTest {
    */
   @Test
   void synchronousActivateBufferedEventSchedulerRejectionReturnsLostOwnership() {
-    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 10, 1024 * 1024);
+    ModelStreamConfig flushConfig = new ModelStreamConfig(Duration.ofMinutes(1), 10, 1024 * 1024, Duration.ofMinutes(10));
     CountingStore store = new CountingStore(new InMemoryHarnessStore());
     Baseline baseline = seedBaseline(store.delegate(), NOW);
     UUID invocationId = seedInvocation(store.delegate(), baseline, requestSpec(), NOW);
@@ -1659,7 +1526,7 @@ class ModelExecutionStreamFlushTest {
    */
   @Test
   void timerRejectionAfterTerminalClaimIsStaleNoOpAndDoesNotBlockTerminalCommit() throws Exception {
-    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMillis(100), 2, 1024 * 1024);
+    ModelStreamConfig flushConfig = new ModelStreamConfig(Duration.ofMillis(100), 2, 1024 * 1024, Duration.ofMinutes(10));
     CountingStore store = new CountingStore(new InMemoryHarnessStore());
     Baseline baseline = seedBaseline(store.delegate(), NOW);
     UUID invocationId = seedInvocation(store.delegate(), baseline, requestSpec(), NOW);
@@ -1687,8 +1554,10 @@ class ModelExecutionStreamFlushTest {
                 new Class<?>[] {ScheduledExecutorService.class},
                 (proxy, method, args) -> {
                   if ("schedule".equals(method.getName()) && args != null && args.length >= 1) {
-                    capturedTimerTask.set((Runnable) args[0]);
-                    scheduledLatch.countDown();
+                    if (((Long) args[1]) < CHECKPOINT_TIMER_MILLIS) {
+                      capturedTimerTask.set((Runnable) args[0]);
+                      scheduledLatch.countDown();
+                    }
                     return dummyFuture;
                   }
                   return null;
@@ -1811,7 +1680,7 @@ class ModelExecutionStreamFlushTest {
   /** 意图：验证已失效旧代际 timer 遭遇 executor rejection 时，为 stale no-op，不误伤当前批。 */
   @Test
   void staleGenerationTimerRejectionDoesNotAbandonCurrentExecution() {
-    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMillis(100), 2, 1024 * 1024);
+    ModelStreamConfig flushConfig = new ModelStreamConfig(Duration.ofMillis(100), 2, 1024 * 1024, Duration.ofMinutes(10));
     CountingStore store = new CountingStore(new InMemoryHarnessStore());
     Baseline baseline = seedBaseline(store.delegate(), NOW);
     UUID invocationId = seedInvocation(store.delegate(), baseline, requestSpec(), NOW);
@@ -1838,7 +1707,9 @@ class ModelExecutionStreamFlushTest {
                 new Class<?>[] {ScheduledExecutorService.class},
                 (proxy, method, args) -> {
                   if ("schedule".equals(method.getName()) && args != null && args.length >= 1) {
-                    capturedTimerTask.set((Runnable) args[0]);
+                    if (((Long) args[1]) < CHECKPOINT_TIMER_MILLIS) {
+                      capturedTimerTask.set((Runnable) args[0]);
+                    }
                     return dummyFuture;
                   }
                   return null;
@@ -1896,7 +1767,7 @@ class ModelExecutionStreamFlushTest {
   @Test
   void gateBufferPendingPayloadBytesBoundaryAndTerminalAcceptance() {
     // maxPayloadBytes = 10 字节
-    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 10, 10);
+    ModelStreamConfig flushConfig = new ModelStreamConfig(Duration.ofMinutes(1), 10, 10, Duration.ofMinutes(10));
     CountingStore store = new CountingStore(new InMemoryHarnessStore());
     Baseline baseline = seedBaseline(store.delegate(), NOW);
     RecordingSink sink = new RecordingSink();
@@ -1997,7 +1868,7 @@ class ModelExecutionStreamFlushTest {
   /** 意图：验证已提交 partial 遭遇合法 FILTERED 响应时，一次 UPDATE 落地 SUCCEEDED 并清除 checkpoint，不发布回退 delta。 */
   @Test
   void committedPartialWithFilteredResponseClearsCheckpointAndDoesNotPublishRegression() {
-    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 1, 1024 * 1024);
+    ModelStreamConfig flushConfig = new ModelStreamConfig(Duration.ofMinutes(1), 1, 1024 * 1024, Duration.ofMinutes(10));
     CountingStore store = new CountingStore(new InMemoryHarnessStore());
     Baseline baseline = seedBaseline(store.delegate(), NOW);
     UUID invocationId = seedInvocation(store.delegate(), baseline, requestSpec(), NOW);
@@ -2036,8 +1907,9 @@ class ModelExecutionStreamFlushTest {
 
     assertEquals(ProcessResult.STARTED, execution.activate(handle));
 
-    // 投递 delta 并触发 flush 提交 checkpoint
+    // 投递 delta（立即推送）并提交 checkpoint
     execution.onEvent(new ProviderStreamEvent.TextDelta("sensitive content"));
+    execution.deliverCheckpoint(0, true);
     ModelInvocation committedModel =
         store.delegate().transaction(tx -> tx.findModelInvocation(invocationId)).orElseThrow();
     assertNotNull(committedModel.streamCheckpoint(), "checkpoint must be committed");
@@ -2065,7 +1937,7 @@ class ModelExecutionStreamFlushTest {
   /** 意图：验证未刷盘 partial 遭遇合法 FILTERED 响应时，一次 UPDATE 为 SUCCEEDED 且 checkpoint 为 null，丢弃未刷批次。 */
   @Test
   void unflushedPartialWithFilteredResponseClearsCheckpointAndDiscardsBatch() {
-    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 10, 1024 * 1024);
+    ModelStreamConfig flushConfig = new ModelStreamConfig(Duration.ofMinutes(1), 10, 1024 * 1024, Duration.ofMinutes(10));
     CountingStore store = new CountingStore(new InMemoryHarnessStore());
     Baseline baseline = seedBaseline(store.delegate(), NOW);
     UUID invocationId = seedInvocation(store.delegate(), baseline, requestSpec(), NOW);
@@ -2126,7 +1998,7 @@ class ModelExecutionStreamFlushTest {
   /** 意图：验证非法 FILTERED 响应（携带 toolCalls）按现有语义收敛为 INVALID_RESPONSE 失败。 */
   @Test
   void illegalFilteredResponseWithToolCallsConvergesToInvalidResponseFailure() {
-    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 10, 1024 * 1024);
+    ModelStreamConfig flushConfig = new ModelStreamConfig(Duration.ofMinutes(1), 10, 1024 * 1024, Duration.ofMinutes(10));
     CountingStore store = new CountingStore(new InMemoryHarnessStore());
     Baseline baseline = seedBaseline(store.delegate(), NOW);
     UUID invocationId = seedInvocation(store.delegate(), baseline, requestSpec(), NOW);
@@ -2186,7 +2058,7 @@ class ModelExecutionStreamFlushTest {
    */
   @Test
   void continuationTerminalRetainsProviderReplayStateWhileFilteredDropsIt() {
-    StreamFlushConfig flushConfig = new StreamFlushConfig(Duration.ofMinutes(1), 10, 1024 * 1024);
+    ModelStreamConfig flushConfig = new ModelStreamConfig(Duration.ofMinutes(1), 10, 1024 * 1024, Duration.ofMinutes(10));
     Fixture continuationFixture = createFixture(flushConfig, NO_RETRY);
     continuationFixture.start();
     ProviderReplayState replayState = sampleReplayState();
@@ -2219,6 +2091,78 @@ class ModelExecutionStreamFlushTest {
   // Test Helpers & Fixtures
   // ---------------------------------------------------------------------------------------------
 
+  /** 意图：验证追帧请求经 ModelProcessor 路由到持有该 Thread 执行的 execution，立即落库并发布 checkpoint 事件；其它 Thread 的请求是 no-op。 */
+  @Test
+  void catchUpRequestForcesImmediateCheckpointOnlyForTheExecutingThread() {
+    ModelStreamConfig flushConfig = new ModelStreamConfig(Duration.ofMinutes(1), 100, 1024 * 1024, Duration.ofMinutes(10));
+    Fixture fixture = createFixture(flushConfig, NO_RETRY);
+    fixture.start();
+    fixture.listener().onEvent(new ProviderStreamEvent.TextDelta("abc"));
+    fixture.listener().onEvent(new ProviderStreamEvent.ThinkingDelta("xyz"));
+
+    fixture.processor.requestCheckpoint(UUID.randomUUID());
+    assertEquals(0, fixture.store.transactionCount(), "unrelated thread must be a no-op");
+    assertTrue(fixture.sink.checkpoints().isEmpty());
+
+    fixture.processor.requestCheckpoint(fixture.baseline.threadId());
+    assertEquals(1, fixture.store.modelInvocationUpdateCount());
+    assertEquals(2, fixture.currentModel().streamCheckpoint().sequence());
+    assertEquals("abc", fixture.currentModel().streamCheckpoint().text());
+    assertEquals(List.of(2L), fixture.sink.checkpoints());
+    RealtimeEvent.ModelCheckpoint event =
+        (RealtimeEvent.ModelCheckpoint) fixture.sink.events().getLast();
+    assertEquals(fixture.baseline.threadId(), event.threadId());
+    assertEquals(fixture.invocationId, event.modelInvocationId());
+    assertEquals(1, event.attempt());
+  }
+
+  /** 意图：验证 checkpoint 节奏：固定 deadline 只在上次落库之后的第一个 safe delta 武装一次，只有前进时才写库。 */
+  @Test
+  void checkpointTimerIsArmedOncePerIntervalAndOnlyPersistsAdvancedState() {
+    long checkpointMillis = Duration.ofMinutes(10).toMillis();
+    List<Long> scheduledDelays = new CopyOnWriteArrayList<>();
+    ScheduledExecutorService delegate = Executors.newSingleThreadScheduledExecutor();
+    executorsToClose.add(delegate);
+    ScheduledExecutorService recording =
+        (ScheduledExecutorService)
+            Proxy.newProxyInstance(
+                ScheduledExecutorService.class.getClassLoader(),
+                new Class<?>[] {ScheduledExecutorService.class},
+                (proxy, method, args) -> {
+                  if ("schedule".equals(method.getName()) && args != null && args.length == 3) {
+                    scheduledDelays.add((Long) args[1]);
+                  }
+                  return method.invoke(delegate, args);
+                });
+    ModelStreamConfig flushConfig = new ModelStreamConfig(Duration.ofMinutes(1), 1, 1024 * 1024, Duration.ofMinutes(10));
+    Fixture fixture = createFixture(flushConfig, NO_RETRY, recording, Runnable::run);
+    fixture.start();
+
+    for (int i = 0; i < 3; i++) {
+      fixture.listener().onEvent(delta("e" + i));
+    }
+    assertEquals(
+        1,
+        scheduledDelays.stream().filter(delay -> delay == checkpointMillis).count(),
+        "three safe deltas arm one checkpoint deadline");
+    assertEquals(0, fixture.store.modelInvocationUpdateCount());
+
+    fixture.execution.deliverCheckpoint(0, false);
+    assertEquals(1, fixture.store.modelInvocationUpdateCount());
+    assertEquals(3, fixture.currentModel().streamCheckpoint().sequence());
+
+    // 没有新内容：定时器代际已失效，不写库
+    fixture.execution.deliverCheckpoint(0, false);
+    assertEquals(1, fixture.store.modelInvocationUpdateCount());
+
+    // 新的 safe delta 武装下一个 deadline
+    fixture.listener().onEvent(delta("e3"));
+    assertEquals(
+        2,
+        scheduledDelays.stream().filter(delay -> delay == checkpointMillis).count(),
+        "the next safe delta after a checkpoint arms a new deadline");
+  }
+
   private void await(BooleanSupplier condition, Duration timeout) throws InterruptedException {
     long deadline = System.currentTimeMillis() + timeout.toMillis();
     while (!condition.getAsBoolean()) {
@@ -2243,8 +2187,11 @@ class ModelExecutionStreamFlushTest {
                   && args != null
                   && args.length == 3
                   && args[0] instanceof Runnable task) {
-                scheduleCount.incrementAndGet();
-                capturedTask.set(task);
+                // 本类的 checkpoint 间隔都是 10 分钟：只捕获推送定时器，checkpoint 由测试直接调用 deliverCheckpoint。
+                if (((Long) args[1]) < CHECKPOINT_TIMER_MILLIS) {
+                  scheduleCount.incrementAndGet();
+                  capturedTask.set(task);
+                }
                 ScheduledFuture<?> fakeFuture =
                     (ScheduledFuture<?>)
                         Proxy.newProxyInstance(
@@ -2262,12 +2209,12 @@ class ModelExecutionStreamFlushTest {
             });
   }
 
-  private Fixture createFixture(StreamFlushConfig flushConfig, InvocationRetryPolicy retryPolicy) {
+  private Fixture createFixture(ModelStreamConfig flushConfig, InvocationRetryPolicy retryPolicy) {
     return createFixture(flushConfig, retryPolicy, requestSpec());
   }
 
   private Fixture createFixture(
-      StreamFlushConfig flushConfig,
+      ModelStreamConfig flushConfig,
       InvocationRetryPolicy retryPolicy,
       ModelRequestSpec requestSpec) {
     ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
@@ -2277,7 +2224,7 @@ class ModelExecutionStreamFlushTest {
   }
 
   private Fixture createFixture(
-      StreamFlushConfig flushConfig,
+      ModelStreamConfig flushConfig,
       InvocationRetryPolicy retryPolicy,
       ScheduledExecutorService scheduler,
       Executor flushExecutor) {
@@ -2286,7 +2233,7 @@ class ModelExecutionStreamFlushTest {
   }
 
   private Fixture createFixture(
-      StreamFlushConfig flushConfig,
+      ModelStreamConfig flushConfig,
       InvocationRetryPolicy retryPolicy,
       ScheduledExecutorService scheduler,
       Executor flushExecutor,
@@ -2303,7 +2250,7 @@ class ModelExecutionStreamFlushTest {
   }
 
   private Fixture createFixture(
-      StreamFlushConfig flushConfig,
+      ModelStreamConfig flushConfig,
       InvocationRetryPolicy retryPolicy,
       ScheduledExecutorService scheduler,
       Executor flushExecutor,
@@ -2337,10 +2284,9 @@ class ModelExecutionStreamFlushTest {
     final FakeGateway gateway;
     final RecordingSink sink;
     final ModelProcessor processor;
-    final StreamFlushConfig flushConfig;
+    final ModelStreamConfig flushConfig;
     final FakeHandle handle = new FakeHandle();
     ModelExecution execution;
-    Runnable capturedTimerTask;
 
     Fixture(
         CountingStore store,
@@ -2349,7 +2295,7 @@ class ModelExecutionStreamFlushTest {
         FakeGateway gateway,
         RecordingSink sink,
         ModelProcessor processor,
-        StreamFlushConfig flushConfig) {
+        ModelStreamConfig flushConfig) {
       this.store = store;
       this.baseline = baseline;
       this.invocationId = invocationId;
@@ -2602,6 +2548,8 @@ class ModelExecutionStreamFlushTest {
    */
   private static final class RecordingSink implements RealtimeEventSink {
     private final List<RealtimeEvent.ModelDelta> deltas = new CopyOnWriteArrayList<>();
+    private final List<RealtimeEvent> events = new CopyOnWriteArrayList<>();
+    private final List<Long> checkpoints = new CopyOnWriteArrayList<>();
     private final AtomicReference<String> threadRecord;
     private final AtomicInteger appendCalls = new AtomicInteger();
     private final AtomicInteger appendAllCalls = new AtomicInteger();
@@ -2646,7 +2594,20 @@ class ModelExecutionStreamFlushTest {
           blockingHook.accept(delta);
         }
         deltas.add(delta);
+      } else if (event instanceof RealtimeEvent.ModelCheckpoint checkpoint) {
+        checkpoints.add(checkpoint.sequence());
       }
+      events.add(event);
+    }
+
+    /** 按到达顺序记录的全部事件。 */
+    List<RealtimeEvent> events() {
+      return List.copyOf(events);
+    }
+
+    /** 已发布 checkpoint 事件的 sequence。 */
+    List<Long> checkpoints() {
+      return List.copyOf(checkpoints);
     }
 
     List<RealtimeEvent.ModelDelta> deltas() {
