@@ -1,5 +1,6 @@
 import { useEffect, useRef, type KeyboardEvent, type Ref, type RefObject } from 'react'
 import { KeyValue, KeyValueRow } from '@/shared/ui/data/KeyValue'
+import { Code, Mono } from '@/shared/ui/data/Mono'
 import { Badge } from '@/shared/ui/data/Badge'
 import { X } from 'lucide-react'
 import type {
@@ -155,7 +156,7 @@ export function ThreadDebugInspector({
       {selection.type === 'tool' && (
         <div className="thread-debug-inspector-body">
           <KeyValue>
-            <KeyValueRow label={t('ai.runtime.debug.inspector.name')}><code>{selection.tool.name}</code></KeyValueRow>
+            <KeyValueRow label={t('ai.runtime.debug.inspector.name')}><Mono>{selection.tool.name}</Mono></KeyValueRow>
             <KeyValueRow label={t('ai.runtime.debug.inspector.status')}>
                 <Badge tone={selection.tool.state === 'SENT' ? 'neutral' : 'warning'}>
                   {selection.tool.state === 'SENT'
@@ -168,20 +169,20 @@ export function ThreadDebugInspector({
                   </span>
                 ) : null}
               </KeyValueRow>
-            <KeyValueRow label={t('ai.runtime.debug.inspector.environmentSupport')}><code>{formatEnvSupport(selection.tool.environmentSupport, t)}</code></KeyValueRow>
+            <KeyValueRow label={t('ai.runtime.debug.inspector.environmentSupport')}><Mono>{formatEnvSupport(selection.tool.environmentSupport, t)}</Mono></KeyValueRow>
             {selection.tool.requiredEnvironmentId ? (
-              <KeyValueRow label={t('ai.runtime.debug.inspector.requiredEnvId')}><code>{selection.tool.requiredEnvironmentId}</code></KeyValueRow>
+              <KeyValueRow label={t('ai.runtime.debug.inspector.requiredEnvId')}><Mono>{selection.tool.requiredEnvironmentId}</Mono></KeyValueRow>
             ) : null}
-            <KeyValueRow label={t('ai.runtime.debug.inspector.provenance')}><code>{selection.tool.provenance}</code></KeyValueRow>
+            <KeyValueRow label={t('ai.runtime.debug.inspector.provenance')}><Mono>{selection.tool.provenance}</Mono></KeyValueRow>
             <KeyValueRow label={t('ai.runtime.debug.inspector.description')}>{selection.tool.description}</KeyValueRow>
           </KeyValue>
           <div className="thread-debug-payload-section">
             <span className="thread-debug-payload-title">
               {t('ai.runtime.debug.inspector.inputSchemaJson')}
             </span>
-            <pre className="thread-event-detail-payload" tabIndex={0}>
+            <Code className="thread-event-detail-payload" tabIndex={0}>
               {formatJson(selection.tool.inputSchemaJson)}
-            </pre>
+            </Code>
           </div>
         </div>
       )}
@@ -189,26 +190,26 @@ export function ThreadDebugInspector({
       {selection.type === 'skill' && (
         <div className="thread-debug-inspector-body">
           <KeyValue>
-            <KeyValueRow label={t('ai.runtime.debug.inspector.skillName')}><code>{selection.skill.name}</code></KeyValueRow>
-            <KeyValueRow label={t('ai.runtime.debug.inspector.package')}><code>{selection.skill.packageName}</code></KeyValueRow>
+            <KeyValueRow label={t('ai.runtime.debug.inspector.skillName')}><Mono>{selection.skill.name}</Mono></KeyValueRow>
+            <KeyValueRow label={t('ai.runtime.debug.inspector.package')}><Mono>{selection.skill.packageName}</Mono></KeyValueRow>
             <KeyValueRow label={t('ai.runtime.debug.inspector.delivery')}>
                 <Badge tone="success">
                   {formatDelivery(selection.skill.delivery, t)}
                 </Badge>
               </KeyValueRow>
-            <KeyValueRow label={t('ai.runtime.debug.inspector.path')}><code>{selection.skill.path}</code></KeyValueRow>
+            <KeyValueRow label={t('ai.runtime.debug.inspector.path')}><Mono>{selection.skill.path}</Mono></KeyValueRow>
             <KeyValueRow label={t('ai.runtime.debug.inspector.description')}>{selection.skill.description}</KeyValueRow>
-            <KeyValueRow label={t('ai.runtime.debug.inspector.currentCommit')}><code>{selection.skill.currentCommit}</code></KeyValueRow>
-            <KeyValueRow label={t('ai.runtime.debug.inspector.observedHeadCommit')}><code>{selection.skill.observedHeadCommit || '—'}</code></KeyValueRow>
-            <KeyValueRow label={t('ai.runtime.debug.inspector.daemonInstalledCommit')}><code>{selection.skill.installedCommit || '—'}</code></KeyValueRow>
+            <KeyValueRow label={t('ai.runtime.debug.inspector.currentCommit')}><Mono>{selection.skill.currentCommit}</Mono></KeyValueRow>
+            <KeyValueRow label={t('ai.runtime.debug.inspector.observedHeadCommit')}><Mono>{selection.skill.observedHeadCommit || '—'}</Mono></KeyValueRow>
+            <KeyValueRow label={t('ai.runtime.debug.inspector.daemonInstalledCommit')}><Mono>{selection.skill.installedCommit || '—'}</Mono></KeyValueRow>
           </KeyValue>
           <div className="thread-debug-payload-section">
             <span className="thread-debug-payload-title">
               {t('ai.runtime.debug.inspector.promptXml')}
             </span>
-            <pre className="thread-event-detail-payload" tabIndex={0}>
+            <Code className="thread-event-detail-payload" tabIndex={0}>
               {selection.skill.promptXml}
-            </pre>
+            </Code>
           </div>
         </div>
       )}
@@ -216,13 +217,13 @@ export function ThreadDebugInspector({
       {selection.type === 'subagent' && (
         <div className="thread-debug-inspector-body">
           <KeyValue>
-            <KeyValueRow label={t('ai.runtime.debug.inspector.name')}><code>{selection.subagent.name}</code></KeyValueRow>
+            <KeyValueRow label={t('ai.runtime.debug.inspector.name')}><Mono>{selection.subagent.name}</Mono></KeyValueRow>
             <KeyValueRow label={t('ai.runtime.debug.inspector.description')}>{selection.subagent.description || '—'}</KeyValueRow>
             <KeyValueRow label={t('ai.runtime.debug.inspector.subagentTools')}>
                 {(selection.subagent.tools?.length ?? 0) > 0 ? (
                   <div className="thread-debug-rail" data-testid="subagent-tools-tags">
                     {selection.subagent.tools.map((tool) => (
-                      <code key={tool} className="thread-debug-tag">{tool}</code>
+                      <Mono key={tool} className="thread-debug-tag">{tool}</Mono>
                     ))}
                   </div>
                 ) : (
@@ -235,7 +236,7 @@ export function ThreadDebugInspector({
                     {selection.subagent.skills.map((skill) => {
                       const skillRef = `${skill.packageName}/${skill.name}`
                       return (
-                        <code key={skillRef} className="thread-debug-tag">{skillRef}</code>
+                        <Mono key={skillRef} className="thread-debug-tag">{skillRef}</Mono>
                       )
                     })}
                   </div>
@@ -247,7 +248,7 @@ export function ThreadDebugInspector({
                 {(selection.subagent.subagents?.length ?? 0) > 0 ? (
                   <div className="thread-debug-rail" data-testid="subagent-subagents-tags">
                     {selection.subagent.subagents.map((subagentName) => (
-                      <code key={subagentName} className="thread-debug-tag">{subagentName}</code>
+                      <Mono key={subagentName} className="thread-debug-tag">{subagentName}</Mono>
                     ))}
                   </div>
                 ) : (
@@ -259,13 +260,13 @@ export function ThreadDebugInspector({
             <span className="thread-debug-payload-title">
               {t('ai.runtime.debug.inspector.subagentConfigurationJson')}
             </span>
-            <pre
+            <Code
               className="thread-event-detail-payload"
               data-testid="subagent-configuration-json"
               tabIndex={0}
             >
               {formatJson(selection.subagent.configurationJson) || '—'}
-            </pre>
+            </Code>
           </div>
         </div>
       )}
@@ -274,7 +275,7 @@ export function ThreadDebugInspector({
         <div className="thread-debug-inspector-body">
           <KeyValue>
             <KeyValueRow label={t('ai.runtime.debug.inspector.cacheRetention')}>
-                <code>{debug?.cacheControl?.retention ?? 'NONE'}</code>
+                <Mono>{debug?.cacheControl?.retention ?? 'NONE'}</Mono>
                 {(!debug?.cacheControl || debug.cacheControl.retention === 'NONE') ? (
                   <span className="thread-debug-filter-reason">
                     ({t('ai.runtime.debug.inspector.cacheProviderDisclaimer')})
@@ -283,7 +284,7 @@ export function ThreadDebugInspector({
               </KeyValueRow>
             <KeyValueRow label={t('ai.runtime.debug.inspector.cacheKey')}>
                 {debug?.cacheControl?.key ? (
-                  <code>{debug.cacheControl.key}</code>
+                  <Mono>{debug.cacheControl.key}</Mono>
                 ) : (
                   '—'
                 )}
@@ -301,13 +302,13 @@ export function ThreadDebugInspector({
                   {debug.frozenInvocation.kind}
                 </Badge>
               </div>
-              <pre
+              <Code
                 className="thread-event-detail-payload"
                 tabIndex={0}
                 data-testid="frozen-request-json"
               >
                 {formatJson(debug.frozenInvocation.requestJson)}
-              </pre>
+              </Code>
               <p className="inline-hint">{t('ai.runtime.debug.frozenNotice')}</p>
               <p className="inline-hint">{t('ai.runtime.debug.httpOriginalUnavailable')}</p>
             </div>
@@ -327,13 +328,13 @@ export function ThreadDebugInspector({
             </Badge>
           </div>
           <KeyValue>
-            <KeyValueRow label={t('ai.runtime.debug.inspector.providerType')}><code>{selection.preview.providerType}</code></KeyValueRow>
-            <KeyValueRow label={t('ai.runtime.debug.inspector.modelName')}><code>{selection.preview.modelName}</code></KeyValueRow>
-            <KeyValueRow label={t('ai.runtime.debug.inspector.bodyByteSize')}><code>{formatFileSize(selection.preview.bodyByteSize)} ({selection.preview.bodyByteSize} B)</code></KeyValueRow>
+            <KeyValueRow label={t('ai.runtime.debug.inspector.providerType')}><Mono>{selection.preview.providerType}</Mono></KeyValueRow>
+            <KeyValueRow label={t('ai.runtime.debug.inspector.modelName')}><Mono>{selection.preview.modelName}</Mono></KeyValueRow>
+            <KeyValueRow label={t('ai.runtime.debug.inspector.bodyByteSize')}><Mono>{formatFileSize(selection.preview.bodyByteSize)} ({selection.preview.bodyByteSize} B)</Mono></KeyValueRow>
             <KeyValueRow label={t(selection.preview.kind === 'HISTORICAL_REQUEST_PREVIEW'
                 ? 'ai.runtime.debug.inspector.recordedAt'
-                : 'ai.runtime.debug.inspector.generatedAt')}><code>{selection.preview.generatedAt}</code></KeyValueRow>
-            <KeyValueRow label={t('ai.runtime.debug.inspector.sourceHeadEntryId')}><code>{selection.preview.sourceHeadEntryId || '—'}</code></KeyValueRow>
+                : 'ai.runtime.debug.inspector.generatedAt')}><Mono>{selection.preview.generatedAt}</Mono></KeyValueRow>
+            <KeyValueRow label={t('ai.runtime.debug.inspector.sourceHeadEntryId')}><Mono>{selection.preview.sourceHeadEntryId || '—'}</Mono></KeyValueRow>
             {selection.preview.notice ? (
               <KeyValueRow label={t('ai.runtime.debug.inspector.previewNotice')}>{selection.preview.notice}</KeyValueRow>
             ) : null}
@@ -346,13 +347,13 @@ export function ThreadDebugInspector({
             <span className="thread-debug-payload-title">
               {t('ai.runtime.debug.inspector.requestBodyJson')}
             </span>
-            <pre
+            <Code
               className="thread-event-detail-payload"
               tabIndex={0}
               data-testid="preview-request-body"
             >
               {formatJson(selection.preview.bodyJson)}
-            </pre>
+            </Code>
           </div>
         </div>
       )}
