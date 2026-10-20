@@ -200,14 +200,11 @@ public class HarnessRuntimeConfiguration {
 
   @Bean
   public ThreadProcessorConfig threadProcessorConfig(
-      ProcessorLeaseConfig leaseConfig,
       CompactionConfigProvider compactionConfigProvider,
       SystemSettingsSnapshot systemSettingsSnapshot) {
     SystemSettings.Advanced advanced = systemSettingsSnapshot.get().advanced();
     return new ThreadProcessorConfig(
-        leaseConfig,
-        Duration.ofMillis(advanced.threadResolveFailureDelayMillis()),
-        compactionConfigProvider);
+        Duration.ofMillis(advanced.threadResolveFailureDelayMillis()), compactionConfigProvider);
   }
 
   @Bean

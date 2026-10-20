@@ -460,11 +460,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
     assertEquals(1, fixture.resolver.calls);
   }
 
-  /**
-   * Resolver 两阶段提交的 YOLO 以第二事务锁到的 Thread 当前值为准：plan 在 yolo=false 时构造，resolve 期间并发 {@code
-   * setThreadYolo(true)}（version 0-&gt;1）成功，commit 重锁 Thread 后仍用最新的 {@code ENABLE} 根策略推进
-   * head（version 再 +1），绝不回写 plan 冻结值。
-   */
+  /** 确定性 typed rejection 写入 durable AssistantError + FAILED TURN_END，且不产生 ModelInvocation。 */
   @Test
   void typedRejectionWritesAssistantErrorAndFailedTurnEndWithoutInvocation() {
     Fixture fixture = fixture();
@@ -547,9 +543,6 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
     assertEquals(1, fixture.resolver.calls);
   }
 
-  /**
-   * resolve 期间 enqueue 侧新 wake 保留 THREAD Work；本 claim 的 commit 只请求 MODEL Work，complete 仍保留新 wake。
-   */
   /**
    * 普通 RuntimeException 是确定性 resolver 失败：落 durable AssistantError + FAILED TURN_END，绝不无限
    * reschedule。

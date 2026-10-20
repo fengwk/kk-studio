@@ -96,8 +96,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
 import java.util.function.Function;
@@ -1242,17 +1240,8 @@ final class ThreadProcessorTestSupport {
     }
   }
 
-  static ScheduledExecutorService newScheduler() {
-    return Executors.newSingleThreadScheduledExecutor(
-        runnable -> {
-          Thread thread = new Thread(runnable, "thread-processor-test");
-          thread.setDaemon(true);
-          return thread;
-        });
-  }
-
   /** 每次测试一个 Fixture：InMemory store + fake resolver + 可变时钟 + ThreadProcessor + HarnessRuntime。 */
-  static final class Fixture implements AutoCloseable {
+  static final class Fixture {
     final MutableClock clock = new MutableClock(NOW);
     final InMemoryHarnessStore store = new InMemoryHarnessStore();
 
@@ -1261,7 +1250,6 @@ final class ThreadProcessorTestSupport {
     }
 
     final FakeTurnResolver resolver = new FakeTurnResolver();
-    final ScheduledExecutorService scheduler;
     final ThreadProcessor processor;
     final HarnessRuntime runtime;
     ClaimedWork claim;
@@ -1280,7 +1268,6 @@ final class ThreadProcessorTestSupport {
     }
 
     private Fixture(HarnessStore processorStore, CompactionConfig compactionConfig) {
-      this.scheduler = newScheduler();
       HarnessStore targetStore = processorStore == null ? store : processorStore;
       CompactionConfigProvider configProvider = () -> compactionConfig;
       this.runtime = new HarnessRuntime(targetStore, resolver, configProvider);
@@ -1288,12 +1275,7 @@ final class ThreadProcessorTestSupport {
           new ThreadProcessor(
               targetStore,
               resolver,
-              new ThreadProcessorConfig(LEASE_CONFIG, RESOLVE_FAILURE_DELAY, configProvider));
-    }
-
-    @Override
-    public void close() {
-      scheduler.shutdownNow();
+              new ThreadProcessorConfig(RESOLVE_FAILURE_DELAY, configProvider));
     }
 
     /** claim 并处理一次指定 Thread 的 THREAD claim（single-action），返回处理结果。 */
