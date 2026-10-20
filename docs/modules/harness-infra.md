@@ -35,7 +35,7 @@ Tool siblings 按 assistantEntryId/callIndex、Work 按 type/UUID 排序。
 | --- | --- |
 | `harness_session` | Session 聚合根标识、显示名称与创建时间 |
 | `harness_entry` | append-only Entry Tree 节点与 payload |
-| `harness_thread` | Session 归属、不可变执行父关系、head 游标、持久 `execution_control`（`RUNNABLE` / `STOPPED`）、`input_through_sequence` 接纳水位、creation request hash、显示名称、`yolo_mode/yolo_root_thread_id` 策略、命令序号与 version |
+| `harness_thread` | Session 归属、不可变执行父关系、head 游标、持久 `execution_control`（`RUNNABLE` / `STOPPED`）、`input_through_sequence` 接纳水位、creation request hash、显示名称、`root_thread_id` 不可变执行根与 `yolo_enabled` 根开关、命令序号与 version |
 | `harness_thread_command` | 有序命令邮箱、请求哈希与 `applied_entry_id`（APPLIED 时指向应用的 Entry，未应用为 null）；CANCELLED 用 `stop_request_id` + `cancelled_at` 成对标记 |
 | `harness_model_invocation` | Model 请求规格、状态、attempt、流式 checkpoint、结果与错误 |
 | `harness_tool_invocation` | Tool 调用参数、绑定、审批记录、状态、副作用批与错误 |

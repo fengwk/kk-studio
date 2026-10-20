@@ -4,8 +4,7 @@ import test from 'node:test'
 import * as harnessModule from '../lib/harness.mjs'
 import {
   acceptCommandBatch,
-  assertRootYoloPolicy,
-  assertThreadYoloPolicy,
+  assertRootYoloEnabled,
   canonicalUuid,
   chatOwner,
   createChat,
@@ -15,6 +14,7 @@ import {
   newThreadTarget,
   threadParentIdOf,
   threadIdOf,
+  threadYoloOf,
   threadTarget,
   userMessageCommand,
 } from '../lib/harness.mjs'
@@ -137,7 +137,8 @@ test('threadParentIdOf/threadIdOf enforce the immutable execution parent relatio
     sessionId: '11111111-1111-4111-8111-111111111111',
     headEntryId: '22222222-2222-4222-8222-222222222222',
     name: 'main',
-    yoloPolicy: { mode: 'DISABLE', rootThreadId: null },
+    rootThreadId: threadId,
+    yoloEnabled: false,
     nextCommandSequence: '1',
     version: '0',
     status: 'IDLE',
@@ -148,12 +149,13 @@ test('threadParentIdOf/threadIdOf enforce the immutable execution parent relatio
   assert.equal(threadParentIdOf({ ...base, parentThreadId: null }), null)
   assert.throws(() => threadParentIdOf(base), /canonical UUID/)
   const parentThreadId = '33333333-3333-4333-8333-333333333333'
-  assert.equal(threadParentIdOf({ ...base, parentThreadId }), parentThreadId)
-  assert.equal(threadIdOf({ ...base, parentThreadId }), threadId)
+  const child = { ...base, parentThreadId, rootThreadId: parentThreadId }
+  assert.equal(threadParentIdOf(child), parentThreadId)
+  assert.equal(threadIdOf(child), threadId)
 
   for (const invalid of [undefined, 'not-uuid', '33333333333343338333333333333333', '']) {
     assert.throws(() => threadParentIdOf({ ...base, parentThreadId: invalid }), /canonical UUID/)
-    assert.throws(() => threadIdOf({ ...base, parentThreadId: invalid }), /canonical UUID/)
+    assert.throws(() => threadIdOf({ ...child, parentThreadId: invalid }), /canonical UUID/)
   }
 })
 
@@ -193,9 +195,9 @@ test('Session summaries preserve same-named root and child parent identities', a
   }
 })
 
-test('thread YOLO policy replaces the legacy boolean with root/follow invariants', () => {
-  // 测试意图：Thread 投影用持久 yoloPolicy 取代 yoloEnabled，根只允许 ENABLE/DISABLE 且
-  // rootThreadId 必须显式为 null，子代理只允许 FOLLOW 并携带 canonical 执行根。
+test('thread YOLO wire is an explicit boolean with an immutable execution root', () => {
+  // 测试意图：Thread 投影直接携带 yoloEnabled/rootThreadId；根必须自指且可开关，
+  // 子代理必须指向执行根且自身开关恒为 false，缺失字段不得兜底为 false。
   const rootThreadId = '33333333-3333-4333-8333-333333333333'
   const rootThread = {
     threadId: sampleId(),
@@ -203,28 +205,37 @@ test('thread YOLO policy replaces the legacy boolean with root/follow invariants
     headEntryId: '22222222-2222-4222-8222-222222222222',
     parentThreadId: null,
     name: 'main',
-    yoloPolicy: { mode: 'DISABLE', rootThreadId: null },
+    rootThreadId: sampleId(),
+    yoloEnabled: false,
     nextCommandSequence: '1',
     version: '0',
     status: 'IDLE',
     processing: false,
     executionControl: 'RUNNABLE',
   }
+  const childThread = {
+    ...rootThread,
+    threadId: rootThreadId,
+    parentThreadId: rootThread.threadId,
+    rootThreadId: rootThread.threadId,
+  }
 
-  assert.equal(assertRootYoloPolicy(rootThread, false).mode, 'DISABLE')
-  assert.equal(assertThreadYoloPolicy(rootThread.yoloPolicy, 'thread.yoloPolicy').mode, 'DISABLE')
-  assert.deepEqual(
-    assertThreadYoloPolicy({ mode: 'FOLLOW', rootThreadId }),
-    { mode: 'FOLLOW', rootThreadId },
-  )
+  assert.equal(assertRootYoloEnabled(rootThread, false), false)
+  assert.equal(threadYoloOf(rootThread), false)
+  assert.equal(threadYoloOf(childThread), false)
 
-  assert.throws(() => assertRootYoloPolicy(rootThread, true), /ENABLE/)
-  assert.throws(() => assertThreadYoloPolicy({ mode: 'FOLLOW', rootThreadId: null }), /canonical UUID/)
+  assert.throws(() => assertRootYoloEnabled(rootThread, true), /yoloEnabled false != true/)
+  assert.throws(() => threadYoloOf({ ...rootThread, yoloEnabled: undefined }), /explicit boolean/)
+  assert.throws(() => threadYoloOf({ ...rootThread, rootThreadId: undefined }), /canonical UUID/)
   assert.throws(
-    () => assertThreadYoloPolicy({ mode: 'ENABLE', rootThreadId }),
-    /rootThreadId must be null/,
+    () => threadYoloOf({ ...rootThread, rootThreadId: rootThreadId }),
+    /root thread itself/,
   )
-  assert.throws(() => threadIdOf({ ...rootThread, yoloPolicy: undefined }), /must be an object/)
+  assert.throws(
+    () => threadYoloOf({ ...childThread, yoloEnabled: true }),
+    /must be false for a child thread/,
+  )
+  assert.throws(() => threadIdOf({ ...rootThread, yoloEnabled: undefined }), /explicit boolean/)
 })
 
 test('legacy ENTRY target tokens and helpers are no longer part of the lib API', async () => {
