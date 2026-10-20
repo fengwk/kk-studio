@@ -92,12 +92,13 @@ export function threadParentIdOf(thread) {
  */
 export function threadYoloOf(thread, label = 'thread') {
   const threadId = canonicalUuid(thread?.threadId, `${label}.threadId`)
+  const parentThreadId = threadParentIdOf(thread)
   const rootThreadId = canonicalUuid(thread?.rootThreadId, `${label}.rootThreadId`)
   assert(
     typeof thread.yoloEnabled === 'boolean',
     `${label}.yoloEnabled must be an explicit boolean: ${JSON.stringify(thread)}`,
   )
-  if (thread.parentThreadId === null) {
+  if (parentThreadId === null) {
     assert(
       rootThreadId === threadId,
       `${label}.rootThreadId must point to the root thread itself: ${JSON.stringify(thread)}`,
@@ -118,6 +119,10 @@ export function threadYoloOf(thread, label = 'thread') {
 /** 校验执行根 Thread 的 YOLO 开关精确等于 {@code enabled}，并强制根自指约束。 */
 export function assertRootYoloEnabled(thread, enabled, label = 'thread') {
   assert(typeof enabled === 'boolean', `${label} expected YOLO value must be boolean`)
+  assert(
+    thread?.parentThreadId === null,
+    `${label} must be a root thread: ${JSON.stringify(thread)}`,
+  )
   const actual = threadYoloOf(thread, label)
   assert(
     actual === enabled,
@@ -131,7 +136,6 @@ export function threadIdOf(thread) {
   const threadId = canonicalUuid(thread?.threadId, 'threadId')
   canonicalUuid(thread.sessionId, 'sessionId')
   canonicalUuid(thread.headEntryId, 'headEntryId')
-  threadParentIdOf(thread)
   threadYoloOf(thread)
   // name 是 Thread 的必需非空展示名称（服务端派生/控制面重命名，绝不回退为 id）。
   assert(
