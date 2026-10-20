@@ -1580,16 +1580,10 @@ div.is-error {
   letter-spacing: 0.04em;
 }
 
-.thread-system-prompt-body {
+pre.thread-system-prompt-body {
   box-sizing: border-box;
-  margin: 0;
   padding: 8px 10px;
-  border: 1px solid var(--border);
   border-radius: 8px;
-  background: var(--surface-active);
-  color: var(--fg);
-  font-family: var(--mono);
-  font-size: var(--font-size-xs);
   line-height: 1.45;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -1878,19 +1872,9 @@ div.is-error {
   word-break: break-word;
 }
 
-.thread-event-detail-payload {
-  margin: 0;
+pre.thread-event-detail-payload {
   padding: 10px 12px;
   border-radius: 8px;
-  background: var(--surface-active);
-  border: 1px solid var(--border);
-  color: var(--fg);
-  font-family: var(--mono);
-  font-size: var(--font-size-xs);
-  line-height: 1.5;
-  white-space: pre;
-  overflow-x: auto;
-  max-width: 100%;
 }
 
 .thread-debug-payload-section {
@@ -6468,15 +6452,10 @@ select.settings-input option {
   overflow: auto;
 }
 
-.interaction-raw-pre {
-  margin: 0;
+pre.interaction-raw-pre {
   padding: 8px 12px;
   background: var(--bg);
-  border: 1px solid var(--border);
   border-radius: 6px;
-  font-size: var(--font-size-xs);
-  font-family: var(--mono);
-  color: var(--fg);
   white-space: pre-wrap;
   word-break: break-all;
 }

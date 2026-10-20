@@ -7,6 +7,7 @@ import type {
 } from '@/features/ai/runtime/thread-timeline-types'
 import type { DebugInspectorSelection } from '@/features/ai/runtime/thread-panel/ThreadDebugInspector'
 import { useI18n } from '@/shared/i18n'
+import { Code, Mono } from '@/shared/ui/data/Mono'
 import { Button } from '@/shared/ui/controls/Button'
 
 function envBadge(support: 'NONE' | 'OPTIONAL' | 'REQUIRED'): string {
@@ -128,13 +129,13 @@ export function ThreadModelRequestDebug({
         <div className="thread-debug-section-header">
           <span>{t('ai.runtime.debug.systemPromptTitle')}</span>
         </div>
-        <pre
+        <Code
           className="thread-system-prompt-body"
           tabIndex={0}
           aria-label={t('ai.runtime.debug.systemPromptTitle')}
         >
           {debug.systemInstruction || t('ai.runtime.debug.emptyPrompt')}
-        </pre>
+        </Code>
       </div>
 
       {/* TOOLS (SENT 在前，FILTERED 在后) */}
@@ -153,7 +154,7 @@ export function ThreadModelRequestDebug({
               aria-label={`${t('ai.runtime.debug.toolAriaPrefix')} ${tool.name}`}
               onClick={() => onSelectInspector({ type: 'tool', tool })}
             >
-              <code>{tool.name}</code>{' '}
+              <Mono>{tool.name}</Mono>{' '}
               <span
                 className="thread-debug-chip-badge"
                 title={envBadgeTitle(tool.environmentSupport, t)}
@@ -176,7 +177,7 @@ export function ThreadModelRequestDebug({
               onClick={() => onSelectInspector({ type: 'tool', tool })}
             >
               <span>⊘ </span>
-              <code>{tool.name}</code>{' '}
+              <Mono>{tool.name}</Mono>{' '}
               <span
                 className="thread-debug-chip-badge"
                 title={envBadgeTitle(tool.environmentSupport, t)}
@@ -210,7 +211,7 @@ export function ThreadModelRequestDebug({
                 aria-label={`${t('ai.runtime.debug.skillAriaPrefix')} ${skill.name}`}
                 onClick={() => onSelectInspector({ type: 'skill', skill })}
               >
-                <code>{skill.name}</code>{' '}
+                <Mono>{skill.name}</Mono>{' '}
                 <span className="thread-debug-chip-badge">
                   · {formatDelivery(skill.delivery, t)}
                 </span>
@@ -233,7 +234,7 @@ export function ThreadModelRequestDebug({
                 aria-label={`${t('ai.runtime.debug.subagentAriaPrefix')} ${subagent.name}`}
                 onClick={() => onSelectInspector({ type: 'subagent', subagent })}
               >
-                <code>{subagent.name}</code>
+                <Mono>{subagent.name}</Mono>
               </Button>
             ))
           ) : (
