@@ -34,6 +34,8 @@ public final class RealtimeNotificationCodec {
   private static final Set<String> EVENT_FIELDS = orderedSet("kind", "originNodeId", "event");
   private static final Set<String> RESYNC_FIELDS =
       orderedSet("kind", "originNodeId", "threadId", "reason");
+  private static final Set<String> REFERENCE_FIELDS =
+      orderedSet("kind", "originNodeId", "threadId", "payloadId");
 
   private final RealtimeEventJsonCodec eventCodec;
 
@@ -66,6 +68,32 @@ public final class RealtimeNotificationCodec {
     return write(node);
   }
 
+  /** 编码 origin 短期 buffer 的 REFERENCE；只含回拉所需的三个 UUID，不携带事件内容或 URL。 */
+  public String encodeReference(UUID originNodeId, UUID threadId, UUID payloadId) {
+    Envelope.Reference reference = new Envelope.Reference(originNodeId, threadId, payloadId);
+    ObjectNode node = NODES.objectNode();
+    node.put("kind", Kind.REFERENCE.name());
+    node.put("originNodeId", reference.originNodeId().toString());
+    node.put("threadId", reference.threadId().toString());
+    node.put("payloadId", reference.payloadId().toString());
+    return write(node);
+  }
+
+  /** 编码事件自身的 canonical JSON（不含 EVENT envelope），供 REFERENCE buffer 与回拉端点使用。 */
+  public String encodeEventPayload(RealtimeEvent event) {
+    return eventCodec.encode(event);
+  }
+
+  /** 从 origin 回拉的 canonical event JSON 解码；额外校验 encode/decode 逐字一致，拒绝任何非 canonical 表示。 */
+  public RealtimeEvent decodeEvent(String canonicalEventJson) {
+    Objects.requireNonNull(canonicalEventJson, "canonicalEventJson");
+    RealtimeEvent event = eventCodec.decode(canonicalEventJson);
+    if (!eventCodec.encode(event).equals(canonicalEventJson)) {
+      throw new IllegalArgumentException("realtime event payload must use canonical JSON");
+    }
+    return event;
+  }
+
   /** 解码且验证 canonical envelope。任何 malformed、unknown、字段集合不精确或非 canonical payload 都被拒绝。 */
   public Envelope decode(String payload) {
     Objects.requireNonNull(payload, "payload");
@@ -88,6 +116,13 @@ public final class RealtimeNotificationCodec {
           new Envelope.Event(
               requiredCanonicalUuid(node, "originNodeId", "notification"),
               eventCodec.decodeNode(eventNode));
+    } else if (kind == Kind.REFERENCE) {
+      requireExactFields(node, REFERENCE_FIELDS, "notification");
+      envelope =
+          new Envelope.Reference(
+              requiredCanonicalUuid(node, "originNodeId", "notification"),
+              requiredCanonicalUuid(node, "threadId", "notification"),
+              requiredCanonicalUuid(node, "payloadId", "notification"));
     } else {
       requireExactFields(node, RESYNC_FIELDS, "notification");
       envelope =
@@ -108,6 +143,9 @@ public final class RealtimeNotificationCodec {
     }
     if (envelope instanceof Envelope.Resync resync) {
       return encodeResync(resync.originNodeId(), resync.threadId(), resync.reason());
+    }
+    if (envelope instanceof Envelope.Reference reference) {
+      return encodeReference(reference.originNodeId(), reference.threadId(), reference.payloadId());
     }
     throw new IllegalArgumentException(
         "unsupported realtime notification: " + envelope.getClass().getName());
@@ -174,11 +212,12 @@ public final class RealtimeNotificationCodec {
 
   private enum Kind {
     EVENT,
-    RESYNC
+    RESYNC,
+    REFERENCE
   }
 
-  /** 严格 envelope 只允许 EVENT 与 RESYNC，且每条消息都必须携带产生它的节点身份。 */
-  public sealed interface Envelope permits Envelope.Event, Envelope.Resync {
+  /** 严格 envelope 只允许 EVENT、RESYNC 与 REFERENCE，且每条消息都必须携带产生它的节点身份。 */
+  public sealed interface Envelope permits Envelope.Event, Envelope.Resync, Envelope.Reference {
 
     /** 产生该 envelope 的节点；接收方据此丢弃自身回环消息。 */
     UUID originNodeId();
@@ -188,6 +227,15 @@ public final class RealtimeNotificationCodec {
       public Event {
         Objects.requireNonNull(originNodeId, "originNodeId");
         Objects.requireNonNull(event, "event");
+      }
+    }
+
+    /** 指示接收方从 origin 的短期 buffer 回拉完整事件；不携带事件内容或 URL。 */
+    record Reference(UUID originNodeId, UUID threadId, UUID payloadId) implements Envelope {
+      public Reference {
+        Objects.requireNonNull(originNodeId, "originNodeId");
+        Objects.requireNonNull(threadId, "threadId");
+        Objects.requireNonNull(payloadId, "payloadId");
       }
     }
 

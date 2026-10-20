@@ -60,6 +60,15 @@ public class JdbcClusterNodeRegistry implements ClusterNodeRegistry {
           last_seen = excluded.last_seen
       """;
 
+  /** 指定节点仍有效租约时返回其注册的内部 origin；过期、缺失或未配置共享秘密都不可用。 */
+  private static final String LIVE_NODE_ORIGIN_SQL =
+      """
+      select internal_url
+      from cluster_node
+      where instance_id = :instanceId
+        and lease_until > statement_timestamp()
+      """;
+
   /** 仅推进本节点注册行的 last_seen 与 lease_until，不改动 origin。 */
   private static final String HEARTBEAT_SQL =
       """
@@ -83,6 +92,23 @@ public class JdbcClusterNodeRegistry implements ClusterNodeRegistry {
   /** 本节点的实例身份，供路由判定与生命周期使用。 */
   public UUID localNodeId() {
     return localNodeId;
+  }
+
+  @Override
+  public Optional<URI> liveInternalOrigin(UUID nodeInstanceId) {
+    if (nodeInstanceId == null || !properties.remoteRoutingConfigured()) {
+      return Optional.empty();
+    }
+    List<String> origins =
+        jdbcClient
+            .sql(LIVE_NODE_ORIGIN_SQL)
+            .param("instanceId", nodeInstanceId)
+            .query(String.class)
+            .list();
+    if (origins.isEmpty() || origins.getFirst() == null) {
+      return Optional.empty();
+    }
+    return parseOrigin(origins.getFirst());
   }
 
   @Override

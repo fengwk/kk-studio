@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
 import org.junit.jupiter.api.Test;
@@ -22,6 +23,7 @@ import fun.fengwk.kkstudio.platform.environment.ide.InMemoryIdeBootstrapTicketSe
 
 import javax.sql.DataSource;
 
+import java.net.http.HttpClient;
 import java.time.Clock;
 import java.util.UUID;
 
@@ -30,6 +32,29 @@ import java.util.UUID;
  * {@code @Primary EnvironmentIdeService} 暴露，且上下文一次即可启动。
  */
 class ClusterEnvironmentIdeConfigurationTest {
+
+  /** 没有 IDE delegate 时，认证、节点注册、共享 HTTP 客户端与存在快照仍可独立装配。 */
+  @Test
+  void genericInternalBeansAreAvailableWithoutIdeContext() {
+    assertDoesNotThrow(
+        () -> {
+          try (AnnotationConfigApplicationContext context =
+              new AnnotationConfigApplicationContext()) {
+            context.registerBean(JdbcClient.class, () -> mock(JdbcClient.class));
+            context.registerBean(Clock.class, () -> Clock.systemUTC());
+            context.registerBean("nodeInstanceId", UUID.class, () -> UUID.randomUUID());
+            context.registerBean(ObjectMapper.class, () -> JsonMapper.builder().build());
+            context.register(ClusterEnvironmentIdeConfiguration.class);
+            context.refresh();
+
+            assertNotNull(context.getBean(ClusterNodeRegistry.class));
+            assertNotNull(context.getBean(ClusterInternalAuthentication.class));
+            assertNotNull(context.getBean("clusterInternalHttpClient", HttpClient.class));
+            assertNotNull(context.getBean(ClusterInternalClient.class));
+            assertTrue(context.getBeansOfType(EnvironmentIdeService.class).isEmpty());
+          }
+        });
+  }
 
   @Test
   void contextWiresThePrimaryClusterServiceWithoutCycleOrDuplicate() {

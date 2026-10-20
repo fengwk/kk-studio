@@ -13,8 +13,10 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.PreparedStatementCallback;
 
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
+import fun.fengwk.kkstudio.harness.infra.realtime.RealtimePayloadBuffer;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
+import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimePayloadLimits;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
 import java.lang.reflect.Proxy;
@@ -43,12 +45,14 @@ class PostgresqlRealtimeEventSinkTest {
           + " order by ord";
 
   private final RealtimeNotificationCodec codec = new RealtimeNotificationCodec();
+  private final RealtimePayloadBuffer payloadBuffer = new RealtimePayloadBuffer();
 
   /** 小型事件必须通过注入的 JdbcTemplate 调用参数化 pg_notify，并保持完整 EVENT envelope。 */
   @Test
   void appendSendsCanonicalEventThroughJdbcTemplate() {
     RecordingJdbcTemplate jdbcTemplate = new RecordingJdbcTemplate();
-    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(jdbcTemplate, codec, ORIGIN);
+    PostgresqlRealtimeEventSink sink =
+        new PostgresqlRealtimeEventSink(jdbcTemplate, codec, ORIGIN, payloadBuffer);
     RealtimeEvent.ModelDelta event = modelDelta("hello");
 
     sink.append(event);
@@ -63,34 +67,56 @@ class PostgresqlRealtimeEventSinkTest {
     assertTrue(jdbcTemplate.executed);
   }
 
-  /** 以最终 canonical notification 的 UTF-8 bytes 判断上限；超限时必须发送可安全承载的小型 RESYNC。 */
+  /** 以最终 canonical notification 的 UTF-8 bytes 判断上限；超限时发送小型 REFERENCE，完整事件留在 owner buffer。 */
   @Test
-  void oversizedEventIsReplacedWithSmallResyncNotification() {
+  void oversizedEventIsReplacedWithSmallReferenceAndKeptCompleteInBuffer() {
     RecordingJdbcTemplate jdbcTemplate = new RecordingJdbcTemplate();
-    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(jdbcTemplate, codec, ORIGIN);
+    PostgresqlRealtimeEventSink sink =
+        new PostgresqlRealtimeEventSink(jdbcTemplate, codec, ORIGIN, payloadBuffer);
     RealtimeEvent.ModelDelta event = modelDelta("界".repeat(3000));
+    String canonical = codec.encodeEventPayload(event);
     assertTrue(
-        codec.encodeEvent(ORIGIN, event).getBytes(StandardCharsets.UTF_8).length
+        canonical.getBytes(StandardCharsets.UTF_8).length
             > PostgresqlRealtimeEventSink.MAX_NOTIFICATION_BYTES);
+
+    sink.append(event);
+
+    RealtimeNotificationCodec.Envelope.Reference notification =
+        assertInstanceOf(
+            RealtimeNotificationCodec.Envelope.Reference.class, codec.decode(jdbcTemplate.payload));
+    assertEquals(ORIGIN, notification.originNodeId());
+    assertEquals(event.threadId(), notification.threadId());
+    RealtimePayloadBuffer.Payload stored =
+        payloadBuffer.get(notification.payloadId()).orElseThrow();
+    assertEquals(event.threadId(), stored.threadId());
+    assertEquals(canonical, stored.canonicalJson());
+    assertTrue(
+        jdbcTemplate.payload.getBytes(StandardCharsets.UTF_8).length
+            <= PostgresqlRealtimeEventSink.MAX_NOTIFICATION_BYTES);
+  }
+
+  /** 事件自身超过 owner buffer 单事件上限时明确 RESYNC，绝不截断内容。 */
+  @Test
+  void eventAboveBufferSingleEventLimitDegradesToUnavailableResync() {
+    RecordingJdbcTemplate jdbcTemplate = new RecordingJdbcTemplate();
+    PostgresqlRealtimeEventSink sink =
+        new PostgresqlRealtimeEventSink(jdbcTemplate, codec, ORIGIN, payloadBuffer);
+    RealtimeEvent.ModelDelta event = modelDelta("界".repeat(RealtimePayloadLimits.MAX_EVENT_BYTES));
 
     sink.append(event);
 
     RealtimeNotificationCodec.Envelope.Resync notification =
         assertInstanceOf(
             RealtimeNotificationCodec.Envelope.Resync.class, codec.decode(jdbcTemplate.payload));
-    assertEquals(ORIGIN, notification.originNodeId());
-    assertEquals(event.threadId(), notification.threadId());
-    assertEquals(PostgresqlRealtimeEventSink.OVERSIZE_REASON, notification.reason());
-    assertTrue(
-        jdbcTemplate.payload.getBytes(StandardCharsets.UTF_8).length
-            <= PostgresqlRealtimeEventSink.MAX_NOTIFICATION_BYTES);
+    assertEquals(PostgresqlRealtimeEventSink.PAYLOAD_UNAVAILABLE_REASON, notification.reason());
   }
 
   /** 恰好 7900 UTF-8 bytes 仍属于 EVENT 安全边界，不能提前退化为 RESYNC。 */
   @Test
   void eventAtNotificationByteLimitIsStillSentAsEvent() {
     RecordingJdbcTemplate jdbcTemplate = new RecordingJdbcTemplate();
-    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(jdbcTemplate, codec, ORIGIN);
+    PostgresqlRealtimeEventSink sink =
+        new PostgresqlRealtimeEventSink(jdbcTemplate, codec, ORIGIN, payloadBuffer);
     int emptyEventBytes =
         codec.encodeEvent(ORIGIN, modelDelta("")).getBytes(StandardCharsets.UTF_8).length;
     RealtimeEvent.ModelDelta event =
@@ -112,7 +138,8 @@ class PostgresqlRealtimeEventSinkTest {
   @Test
   void appendSendsCanonicalToolPartialEvent() {
     RecordingJdbcTemplate jdbcTemplate = new RecordingJdbcTemplate();
-    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(jdbcTemplate, codec, ORIGIN);
+    PostgresqlRealtimeEventSink sink =
+        new PostgresqlRealtimeEventSink(jdbcTemplate, codec, ORIGIN, payloadBuffer);
     RealtimeEvent.ToolPartial event = toolPartial(id(99L));
 
     sink.append(event);
@@ -137,7 +164,8 @@ class PostgresqlRealtimeEventSinkTest {
             throw failure;
           }
         };
-    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(jdbcTemplate, codec, ORIGIN);
+    PostgresqlRealtimeEventSink sink =
+        new PostgresqlRealtimeEventSink(jdbcTemplate, codec, ORIGIN, payloadBuffer);
 
     assertEquals(
         failure, assertThrows(IllegalStateException.class, () -> sink.append(modelDelta("x"))));
@@ -147,7 +175,8 @@ class PostgresqlRealtimeEventSinkTest {
   @Test
   void appendAllWithEmptyListIssuesNoSql() {
     RecordingJdbcTemplate jdbcTemplate = new RecordingJdbcTemplate();
-    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(jdbcTemplate, codec, ORIGIN);
+    PostgresqlRealtimeEventSink sink =
+        new PostgresqlRealtimeEventSink(jdbcTemplate, codec, ORIGIN, payloadBuffer);
 
     sink.appendAll(List.of());
 
@@ -162,7 +191,8 @@ class PostgresqlRealtimeEventSinkTest {
   @Test
   void appendAllSendsEveryEnvelopeInOneOrderedRoundtrip() {
     RecordingJdbcTemplate jdbcTemplate = new RecordingJdbcTemplate();
-    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(jdbcTemplate, codec, ORIGIN);
+    PostgresqlRealtimeEventSink sink =
+        new PostgresqlRealtimeEventSink(jdbcTemplate, codec, ORIGIN, payloadBuffer);
     List<RealtimeEvent> events = new ArrayList<>();
     for (int i = 1; i <= 5; i++) {
       events.add(modelDelta("d" + i));
@@ -179,11 +209,12 @@ class PostgresqlRealtimeEventSinkTest {
     assertTrue(jdbcTemplate.arrayFreed.get(), "JDBC Array must be released after the roundtrip");
   }
 
-  /** 批量内单个超大事件只把**该事件**降级为 RESYNC；同一批其余事件仍保持完整 EVENT，且总往返次数不变。 */
+  /** 批量内单个超大事件只把**该事件**降级为 REFERENCE；同一批其余事件仍保持完整 EVENT，且总往返次数不变。 */
   @Test
   void appendAllDegradesOnlyTheOversizedEventWithinTheBatch() {
     RecordingJdbcTemplate jdbcTemplate = new RecordingJdbcTemplate();
-    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(jdbcTemplate, codec, ORIGIN);
+    PostgresqlRealtimeEventSink sink =
+        new PostgresqlRealtimeEventSink(jdbcTemplate, codec, ORIGIN, payloadBuffer);
     RealtimeEvent.ModelDelta oversized = modelDelta("界".repeat(3000));
     RealtimeEvent.ModelDelta normal = modelDelta("small");
     assertTrue(
@@ -199,12 +230,14 @@ class PostgresqlRealtimeEventSinkTest {
             RealtimeNotificationCodec.Envelope.Event.class,
             codec.decode(jdbcTemplate.payloads.get(0)));
     assertEquals(normal, first.event());
-    RealtimeNotificationCodec.Envelope.Resync second =
+    RealtimeNotificationCodec.Envelope.Reference second =
         assertInstanceOf(
-            RealtimeNotificationCodec.Envelope.Resync.class,
+            RealtimeNotificationCodec.Envelope.Reference.class,
             codec.decode(jdbcTemplate.payloads.get(1)));
     assertEquals(oversized.threadId(), second.threadId());
-    assertEquals(PostgresqlRealtimeEventSink.OVERSIZE_REASON, second.reason());
+    assertEquals(
+        codec.encodeEventPayload(oversized),
+        payloadBuffer.get(second.payloadId()).orElseThrow().canonicalJson());
     assertTrue(jdbcTemplate.arrayFreed.get());
   }
 
@@ -212,7 +245,8 @@ class PostgresqlRealtimeEventSinkTest {
   @Test
   void appendAllSplitsBatchesByEventCountBound() {
     RecordingJdbcTemplate jdbcTemplate = new RecordingJdbcTemplate();
-    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(jdbcTemplate, codec, ORIGIN);
+    PostgresqlRealtimeEventSink sink =
+        new PostgresqlRealtimeEventSink(jdbcTemplate, codec, ORIGIN, payloadBuffer);
     int total = PostgresqlRealtimeEventSink.MAX_BATCH_EVENTS + 1;
     List<RealtimeEvent> events = new ArrayList<>();
     for (int i = 1; i <= total; i++) {
@@ -236,7 +270,8 @@ class PostgresqlRealtimeEventSinkTest {
   @Test
   void appendAllSplitsBatchesByEncodedByteBound() {
     RecordingJdbcTemplate jdbcTemplate = new RecordingJdbcTemplate();
-    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(jdbcTemplate, codec, ORIGIN);
+    PostgresqlRealtimeEventSink sink =
+        new PostgresqlRealtimeEventSink(jdbcTemplate, codec, ORIGIN, payloadBuffer);
     // 每个事件编码后在 7KB 左右（仍低于单条 7900 bytes 上限，保持 EVENT 而不降级 RESYNC）。
     String filler = "x".repeat(7000);
     int total = 40;
@@ -276,7 +311,8 @@ class PostgresqlRealtimeEventSinkTest {
     SQLException failure = new SQLException("batch notify failed");
     RecordingJdbcTemplate jdbcTemplate = new RecordingJdbcTemplate();
     jdbcTemplate.failOnExecute = failure;
-    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(jdbcTemplate, codec, ORIGIN);
+    PostgresqlRealtimeEventSink sink =
+        new PostgresqlRealtimeEventSink(jdbcTemplate, codec, ORIGIN, payloadBuffer);
 
     assertThrows(
         UncategorizedSQLException.class,
