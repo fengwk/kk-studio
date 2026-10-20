@@ -69,7 +69,9 @@ public final class PostgresqlRealtimeEventSource implements RealtimeEventSource 
     try {
       envelope = notificationCodec.decode(payload);
     } catch (RuntimeException error) {
-      log.warn("cannot decode realtime PostgreSQL notification; requesting resync", error);
+      log.warn(
+          "cannot decode realtime PostgreSQL notification; requesting resync errorType={}",
+          error.getClass().getSimpleName());
       onResync();
       return;
     }

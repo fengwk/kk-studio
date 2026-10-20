@@ -85,6 +85,40 @@ class RealtimeNotificationCodecTest {
     assertEquals("EVENT_TOO_LARGE", decoded.reason());
   }
 
+  /** REFERENCE 只携带 origin/Thread/payloadId，固定顺序且不包含事件内容或 URL。 */
+  @Test
+  void referenceEnvelopeIsCanonicalAndRoundTrips() {
+    UUID payloadId = id(77L);
+    String encoded = codec.encodeReference(ORIGIN, id(7L), payloadId);
+
+    assertEquals(
+        "{\"kind\":\"REFERENCE\",\"originNodeId\":\""
+            + ORIGIN
+            + "\",\"threadId\":\"00000000-0000-0000-0000-000000000007\","
+            + "\"payloadId\":\""
+            + payloadId
+            + "\"}",
+        encoded);
+    RealtimeNotificationCodec.Envelope.Reference decoded =
+        assertInstanceOf(RealtimeNotificationCodec.Envelope.Reference.class, codec.decode(encoded));
+    assertEquals(ORIGIN, decoded.originNodeId());
+    assertEquals(id(7L), decoded.threadId());
+    assertEquals(payloadId, decoded.payloadId());
+  }
+
+  /** 回拉的 canonical event 必须严格 canonical；非 canonical 文本与额外空白都拒绝。 */
+  @Test
+  void fetchedEventPayloadMustBeCanonical() {
+    RealtimeEvent event = toolPartial(id(99L));
+    String canonical = eventCodec.encode(event);
+
+    assertEquals(event, codec.decodeEvent(canonical));
+    assertThrows(IllegalArgumentException.class, () -> codec.decodeEvent(" " + canonical));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> codec.decodeEvent(canonical.replace("\"attempt\":2", "\"attempt\":2.0")));
+  }
+
   /** malformed、unknown、重复字段、额外字段、缺失 origin 与非 canonical 空白都必须拒绝。 */
   @Test
   void rejectsMalformedUnknownAndNonCanonicalPayloads() {
@@ -143,6 +177,26 @@ class RealtimeNotificationCodecTest {
                     + id(1L)
                     + "\",\"reason\":1}"));
     assertThrows(IllegalArgumentException.class, () -> codec.decode(" " + event));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(
+                "{\"kind\":\"REFERENCE\",\"originNodeId\":\""
+                    + ORIGIN
+                    + "\",\"threadId\":\""
+                    + id(1L)
+                    + "\",\"payloadId\":\"not-a-uuid\"}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(
+                "{\"kind\":\"REFERENCE\",\"originNodeId\":\""
+                    + ORIGIN
+                    + "\",\"threadId\":\""
+                    + id(1L)
+                    + "\",\"payloadId\":\""
+                    + id(2L)
+                    + "\",\"url\":\"http://evil\"}"));
   }
 
   /** origin 是所有 envelope 的必需字段，缺失或非 canonical UUID 一律拒绝。 */

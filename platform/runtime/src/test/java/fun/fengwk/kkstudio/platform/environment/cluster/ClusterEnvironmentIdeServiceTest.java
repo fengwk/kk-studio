@@ -135,6 +135,11 @@ class ClusterEnvironmentIdeServiceTest {
       calls++;
       return current;
     }
+
+    @Override
+    public Optional<URI> liveInternalOrigin(UUID nodeInstanceId) {
+      return Optional.empty();
+    }
   }
 
   private static final class RecordingClient extends ClusterInternalClient {

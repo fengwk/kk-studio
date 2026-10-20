@@ -239,10 +239,19 @@ class IdeCrossNodeReverseStreamIntegrationTest extends WebPostgresTestSupport {
         new ClusterInternalClient(
             HttpClient.newHttpClient(), JsonMapper.builder().build(), authentication);
     ClusterNodeRegistry registry =
-        environmentId ->
-            Optional.of(
+        new ClusterNodeRegistry() {
+          @Override
+          public Optional<ClusterIdeOwnerRoute> route(EnvironmentId environmentId) {
+            return Optional.of(
                 ClusterIdeOwnerRoute.remote(
                     ownerNodeId, URI.create("http://localhost:" + ownerPort)));
+          }
+
+          @Override
+          public Optional<URI> liveInternalOrigin(UUID nodeInstanceId) {
+            return Optional.empty();
+          }
+        };
     IdeReverseStreamWebSocketHandler handler =
         new IdeReverseStreamWebSocketHandler(
             new InMemoryIdeStreamTicketService(),

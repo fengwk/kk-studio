@@ -302,6 +302,11 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
     public Optional<ClusterIdeOwnerRoute> route(EnvironmentId environmentId) {
       return current;
     }
+
+    @Override
+    public Optional<URI> liveInternalOrigin(UUID nodeInstanceId) {
+      return Optional.empty();
+    }
   }
 
   private static final class RecordingTransport implements IdeCommandTransport {
