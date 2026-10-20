@@ -62,13 +62,13 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 /**
- * 真实 PostgreSQL / Testcontainers 事务环境下 Join 命令接受（acceptCommandsAndJoin）与异常回滚 / GC 残留测试。
+ * 真实 PostgreSQL / Testcontainers 事务环境下 Agent spawn 接受（runtime.spawn）与异常回滚 / GC 残留测试。
  *
  * <p>核心验证点：
  *
  * <ul>
- *   <li><b>Preflight 失败全表原子回滚</b>：当 {@code acceptCommandsAndJoin} 中的 Preflight 抛出异常时，PostgreSQL 的
- *       Session / Thread / Entry / Command / Join / Work 全表数据原子回滚，零孤儿行残留；
+ *   <li><b>Preflight 失败全表原子回滚</b>：当 {@code runtime.spawn} 中的 Preflight 抛出异常时，PostgreSQL 的 Session /
+ *       Thread / Entry / Command / Join / Work 全表数据原子回滚，零孤儿行残留；
  *   <li><b>配额超限与标识重用回滚</b>：子线程 Join 配额超限或 InvocationId 重用被拒绝时，同样在 PostgreSQL 中不产生任何孤儿记录；
  *   <li><b>并发接受 Tree Lock 串行化</b>：同一父级下的并发子线程接受请求通过 PG Advisory Lock 严格串行化，避免配额竞态；
  *   <li><b>完整生命周期与 GC 验证</b>：子线程从 accept -> model terminal -> Join 冻结 -> 父级交付 NOTIFICATION -> 父级消费，
@@ -121,8 +121,8 @@ class PostgresqlJoinAcceptanceRollbackTest {
   }
 
   @Test
-  void acceptCommandsAndJoinPreflightFailureRollsBackAllTablesWithoutOrphans() {
-    // 测试意图：验证当在已有的根/父线程下通过 acceptCommandsAndJoin 接受新子会话与 Join 凭据时，
+  void spawnPreflightFailureRollsBackAllTablesWithoutOrphans() {
+    // 测试意图：验证当在已有的根/父线程下通过 spawn 接受新子会话与 Join 凭据时，
     // 若 Preflight 抛出异常，PostgreSQL 的底层事务完整回滚，各表中均不残留任何孤儿行（Session、Thread、Entry、Command、Join、Work）。
     Baseline baseline = seedThreadBaseline(store);
 
@@ -193,8 +193,8 @@ class PostgresqlJoinAcceptanceRollbackTest {
   }
 
   @Test
-  void acceptCommandsAndJoinQuotaExceededRollsBackEntirely() {
-    // 测试意图：验证同一父级下子线程 Join 配额达到上限时，后续超限的 acceptCommandsAndJoin 抛出异常并完整回滚，
+  void spawnQuotaExceededRollsBackEntirely() {
+    // 测试意图：验证同一父级下子线程 Join 配额达到上限时，后续超限的 spawn 抛出异常并完整回滚，
     // 第一个成功的子线程和 Join 记录不受破坏，第二个被拒绝的子线程在 PG 中零残留。
     Baseline baseline = seedThreadBaseline(store);
 
@@ -256,7 +256,7 @@ class PostgresqlJoinAcceptanceRollbackTest {
   }
 
   @Test
-  void acceptCommandsAndJoinReusedInvocationIdRejectionLeavesNoOrphans() {
+  void spawnReusedInvocationIdRejectionLeavesNoOrphans() {
     // 测试意图：验证重复使用同一个 invocationId 尝试创建不同的子线程时，抛出冲突异常并回滚，不污染数据库。
     Baseline baseline = seedThreadBaseline(store);
 
@@ -304,8 +304,8 @@ class PostgresqlJoinAcceptanceRollbackTest {
   }
 
   @Test
-  void concurrentAcceptCommandsAndJoinOnSameTreeSerializesViaTreeLockOnPostgres() throws Exception {
-    // 测试意图：验证同一父执行树下的并发 acceptCommandsAndJoin 能够通过 Tree Advisory Lock 在 PostgreSQL 级别实现安全串行化互斥，
+  void concurrentSpawnOnSameTreeSerializesViaTreeLockOnPostgres() throws Exception {
+    // 测试意图：验证同一父执行树下的并发 spawn 能够通过 Tree Advisory Lock 在 PostgreSQL 级别实现安全串行化互斥，
     // 事务 A 持锁期间事务 B 阻塞等待，事务 A 提交后事务 B 顺利完成，最终两子树均正确落库且祖先链与子线程关系完整。
     Baseline baseline = seedThreadBaseline(store);
 
@@ -322,7 +322,7 @@ class PostgresqlJoinAcceptanceRollbackTest {
     CountDownLatch tx2Started = new CountDownLatch(1);
 
     try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
-      // 线程 1：执行 acceptCommandsAndJoin，在 preflight 内通知持锁并等待
+      // 线程 1：执行 spawn，在 preflight 内通知持锁并等待
       Future<AcceptedCommands> future1 =
           executor.submit(
               () ->
@@ -347,7 +347,7 @@ class PostgresqlJoinAcceptanceRollbackTest {
       // 等待线程 1 已经拿到树锁并进入 preflight
       assertTrue(tx1HoldingLock.await(10, TimeUnit.SECONDS));
 
-      // 线程 2：尝试在同一个父树下执行 acceptCommandsAndJoin，内部 lockTreeAndAncestors 必须被 PG 阻塞
+      // 线程 2：尝试在同一个父树下执行 spawn，内部 lockTreeAndAncestors 必须被 PG 阻塞
       Future<AcceptedCommands> future2 =
           executor.submit(
               () -> {
@@ -590,7 +590,7 @@ class PostgresqlJoinAcceptanceRollbackTest {
   @Test
   void garbageCollectionAndFullLifecyclePostgresVerification() throws Exception {
     // 测试意图：真实 PostgreSQL 端到端完整生命周期与 GC 清理验证：
-    // 1. acceptCommandsAndJoin 接受子任务及 join 凭据；
+    // 1. spawn 接受子任务及 join 凭据；
     // 2. 模拟并发中途失败的垃圾请求并验证无脏数据残留；
     // 3. 由具体生产 ThreadProcessor 消费并推进子线程直至 IDLE；
     // 4. 直接查询 PG 数据表校验 harness_thread_join 各回执字段的真实落库（matched, idle_version, result_head,
