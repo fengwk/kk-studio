@@ -2,7 +2,9 @@ package fun.fengwk.kkstudio.web.controller;
 
 import static org.hamcrest.Matchers.hasSize;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -121,6 +123,28 @@ class StudioHarnessThreadCommandBatchControllerTest {
     verify(runtime).getThreadSnapshot(UUID.fromString(AUTHORITATIVE_THREAD_ID));
   }
 
+  /** 纯 USER_MESSAGE 不要求 cursor：body 只带 commands 时同样映射为同 Thread 的接受请求。 */
+  @Test
+  void acceptsPureUserMessageBatchWithoutCursor() throws Exception {
+    postBatch(
+            THREAD_ID,
+            """
+            {"commands":%s}
+            """
+                .formatted(userMessageCommand(COMMAND_KEY)))
+        .andExpect(status().isAccepted());
+
+    ArgumentCaptor<AcceptCommandsCommand> commandCaptor =
+        ArgumentCaptor.forClass(AcceptCommandsCommand.class);
+    verify(acceptanceService).acceptOnThread(commandCaptor.capture());
+    AcceptCommandsTarget.Thread target =
+        assertInstanceOf(AcceptCommandsTarget.Thread.class, commandCaptor.getValue().target());
+    assertEquals(UUID.fromString(THREAD_ID), target.threadId());
+    assertFalse(target.hasCursor());
+    assertNull(target.expectedHeadEntryId());
+    assertNull(target.expectedNextCommandSequence());
+  }
+
   /** 请求体必须完全 owner-free：多携带历史 owner / target 字段即未知字段，400 且不触达 acceptance service 与 runtime。 */
   @Test
   void rejectsOwnerOrTargetFieldInBodyBeforeTouchingAcceptanceServiceOrRuntime() throws Exception {
@@ -169,20 +193,22 @@ class StudioHarnessThreadCommandBatchControllerTest {
           .andExpect(status().isBadRequest());
     }
 
-    // cursor 字段缺失是独立事实，绝不静默回退默认值。
+    // cursor 字段缺失对 SET_* 混合批次是请求错误，绝不静默回退默认值；纯消息的省略由单独用例覆盖。
+    String mixedCommands =
+        "[" + setAgentCommand(COMMAND_KEY) + "," + userMessageElement(COMMAND_KEY) + "]";
     postBatch(
             THREAD_ID,
             """
             {"expectedNextCommandSequence":"7","commands":%s}
             """
-                .formatted(commands))
+                .formatted(mixedCommands))
         .andExpect(status().isBadRequest());
     postBatch(
             THREAD_ID,
             """
             {"expectedHeadEntryId":"%s","commands":%s}
             """
-                .formatted(HEAD_ENTRY_ID, commands))
+                .formatted(HEAD_ENTRY_ID, mixedCommands))
         .andExpect(status().isBadRequest());
 
     verifyNoInteractions(acceptanceService, runtime);
@@ -315,12 +341,27 @@ class StudioHarnessThreadCommandBatchControllerTest {
   }
 
   private static String userMessageCommand(String idempotencyKey) {
+    return "[" + userMessageElement(idempotencyKey) + "]";
+  }
+
+  private static String userMessageElement(String idempotencyKey) {
     return """
-        [{
+        {
           "type":"USER_MESSAGE",
           "idempotencyKey":"%s",
           "contents":[{"type":"TEXT","text":"hello"}]
-        }]
+        }
+        """
+        .formatted(idempotencyKey);
+  }
+
+  private static String setAgentCommand(String idempotencyKey) {
+    return """
+        {
+          "type":"SET_AGENT",
+          "idempotencyKey":"%s",
+          "agentName":"coder"
+        }
         """
         .formatted(idempotencyKey);
   }

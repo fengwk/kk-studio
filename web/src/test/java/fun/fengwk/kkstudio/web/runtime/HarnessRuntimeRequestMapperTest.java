@@ -699,6 +699,64 @@ class HarnessRuntimeRequestMapperTest {
   }
 
   @Test
+  void pureUserMessageBatchMayOmitCursorButOtherBatchesRequireIt() {
+    // 单条纯 USER_MESSAGE 无需 cursor；SET 前缀混合批次与设置批次缺 cursor 一律 400。
+    HarnessThreadCommandBatchDTO cursorless = new HarnessThreadCommandBatchDTO();
+    cursorless.setCommands(List.of(userCommand("cursorless")));
+    AcceptCommandsCommand mapped =
+        HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(THREAD_ID, cursorless);
+    AcceptCommandsTarget.Thread target =
+        assertInstanceOf(AcceptCommandsTarget.Thread.class, mapped.target());
+    assertFalse(target.hasCursor());
+    assertNull(target.expectedHeadEntryId());
+    assertNull(target.expectedNextCommandSequence());
+
+    HarnessCommandCreateDTO agent = command("SET_AGENT", "agent");
+    agent.setAgentName("default-assistant");
+    HarnessThreadCommandBatchDTO mixedWithoutCursor = new HarnessThreadCommandBatchDTO();
+    mixedWithoutCursor.setCommands(List.of(agent, userCommand("mixed")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
+                THREAD_ID, mixedWithoutCursor));
+    HarnessThreadCommandBatchDTO settingsWithoutCursor = new HarnessThreadCommandBatchDTO();
+    settingsWithoutCursor.setCommands(List.of(agent));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
+                THREAD_ID, settingsWithoutCursor));
+
+    // 纯消息也接受显式 cursor；但两个字段必须成对，且已给出的字段仍严格解析。
+    HarnessThreadCommandBatchDTO partialCursor = new HarnessThreadCommandBatchDTO();
+    partialCursor.setExpectedHeadEntryId(idText(3));
+    partialCursor.setCommands(List.of(userCommand("partial")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(THREAD_ID, partialCursor));
+    HarnessThreadCommandBatchDTO malformedCursor = new HarnessThreadCommandBatchDTO();
+    malformedCursor.setExpectedHeadEntryId("not-a-uuid");
+    malformedCursor.setExpectedNextCommandSequence("4");
+    malformedCursor.setCommands(List.of(userCommand("malformed")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(THREAD_ID, malformedCursor));
+
+    // 预览依赖当前视图，即使纯消息也必须提供精确 cursor。
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> HarnessRuntimeRequestMapper.toPreviewThreadCommandsCommand(THREAD_ID, cursorless));
+    assertTrue(
+        ((AcceptCommandsTarget.Thread)
+                HarnessRuntimeRequestMapper.toPreviewThreadCommandsCommand(
+                        THREAD_ID, threadBatch(userCommand("preview")))
+                    .target())
+            .hasCursor());
+  }
+
+  @Test
   void rejectsCrossCommandFieldsAndMissingPayloads() {
     // 每个 command variant 只能携带自己的字段（SET_ENVIRONMENT 只允许 environmentName）。
     HarnessCommandCreateDTO user = userCommand("user-with-agent");

@@ -319,15 +319,10 @@ describe('ChatWorkspacePage', () => {
     expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
     const [threadId, request] = vi.mocked(harnessService.acceptThreadCommandBatch).mock.calls[0]!
     expect(threadId).toBe(THREAD_ID)
-    expect(request).toMatchObject({
-      expectedHeadEntryId: 'head-1',
-      expectedNextCommandSequence: '1',
-    })
-    expect(Object.keys(request).sort()).toEqual([
-      'commands',
-      'expectedHeadEntryId',
-      'expectedNextCommandSequence',
-    ])
+    // 纯 USER_MESSAGE 不携带 cursor；只在 path 上定位 Thread。
+    expect(request).not.toHaveProperty('expectedHeadEntryId')
+    expect(request).not.toHaveProperty('expectedNextCommandSequence')
+    expect(Object.keys(request).sort()).toEqual(['commands'])
   })
 
   it('keeps independent target persistence for two visible Chat panes', async () => {

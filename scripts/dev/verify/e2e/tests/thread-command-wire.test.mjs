@@ -80,6 +80,52 @@ test('THREAD continuation routes to the owner-free thread command-batches endpoi
   assert.equal(Object.hasOwn(body, 'target'), false)
 })
 
+test('pure THREAD message omits both cursor fields from the owner-free wire body', async () => {
+  // 测试意图：单条纯 USER_MESSAGE 不冻结 cursor，wire body 只有 commands；服务端按当前邮箱尾部入队。
+  const threadId = cid()
+  const command = userMessageCommand('cursorless', cid())
+  const calls = []
+  const ctx = {
+    async call(...args) {
+      calls.push(args)
+      return { status: 202, json: { data: acceptedDto(threadId, command) } }
+    },
+  }
+  await acceptCommandBatch(ctx, {
+    target: threadTarget({ threadId }),
+    commands: [command],
+  })
+
+  const [, url, body] = calls[0]
+  assert.equal(url, `/api/threads/${threadId}/command-batches`)
+  assert.deepEqual(Object.keys(body).sort(), ['commands'])
+  assert.deepEqual(body.commands, [command])
+})
+
+test('cursor-bound THREAD batch without cursor is not silently completed by the helper', async () => {
+  // 测试意图：SET/GOAL 批次缺少 cursor 时 helper 不得合成字段，服务端 400 必须原样冒泡。
+  const threadId = cid()
+  const commands = [
+    { type: 'SET_AGENT', idempotencyKey: cid(), agentName: 'coder' },
+    userMessageCommand('mixed', cid()),
+  ]
+  const ctx = {
+    async call(method, url, body) {
+      assert.equal(url, `/api/threads/${threadId}/command-batches`)
+      assert.deepEqual(Object.keys(body).sort(), ['commands'])
+      throw new HttpError(400, JSON.stringify({ errors: { detail: 'cursor required' } }), url)
+    },
+  }
+  await assert.rejects(
+    () =>
+      acceptCommandBatch(ctx, {
+        target: threadTarget({ threadId }),
+        commands,
+      }),
+    (error) => error instanceof HttpError && error.status === 400,
+  )
+})
+
 test('THREAD continuation surfaces the public rejection of NOTIFICATION commands', async () => {
   // 测试意图：helper 不静默丢弃/改写命令，NOTIFICATION 会原样到达 owner-free 端点，
   // 服务端的产品面拒绝（400）必须向上冒泡而不是被吞成成功。

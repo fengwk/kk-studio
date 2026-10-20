@@ -400,10 +400,10 @@ describe('useBoundBranchPanel', () => {
 
     expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(1)
     const [batchThreadId, request] = vi.mocked(harnessService.acceptThreadCommandBatch).mock.calls[0]!
-    // 既有 Thread 的写请求以 path 上的 threadId 定位，body 只携带 CAS 游标与有序命令。
+    // 纯消息批次以 path 上的 threadId 定位，body 只携带有序命令。
     expect(batchThreadId).toBe(THREAD_ID)
-    expect(request.expectedHeadEntryId).toBe('e-assistant')
-    expect(request.expectedNextCommandSequence).toBe('1')
+    expect(request).not.toHaveProperty('expectedHeadEntryId')
+    expect(request).not.toHaveProperty('expectedNextCommandSequence')
     // 已迁移到 owner-free 契约：请求体不再伪造 owner/target。
     expect(request).not.toHaveProperty('owner')
     expect(request).not.toHaveProperty('target')

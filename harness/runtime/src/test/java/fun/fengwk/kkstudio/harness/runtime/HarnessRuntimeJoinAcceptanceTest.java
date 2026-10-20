@@ -66,6 +66,10 @@ class HarnessRuntimeJoinAcceptanceTest {
         List.of(userMessageCommand(TestIds.id(session + 1000), "prompt")));
   }
 
+  private static NewThreadCommand setAgentCommand(UUID idempotencyKey) {
+    return new NewThreadCommand(new SetAgentCommandPayload("assistant"), idempotencyKey);
+  }
+
   private static Ticket request(int invocation, UUID parent, UUID head) {
     return Ticket.task(TestIds.id(invocation), parent, head, HASH, "assistant", 3, 3, 2, 3);
   }
@@ -227,15 +231,7 @@ class HarnessRuntimeJoinAcceptanceTest {
     AcceptedCommands replayed =
         runtime.acceptCommands(originalReplay, AcceptancePreflight.IDENTITY);
     assertTrue(replayed.replayed());
-    assertEquals(3L, replayed.acceptedCommands().get(0).sequence());
-
-    // 期望序号大于已持久化命令序号（firstSequence < expected）不是合法重放跳跃，确定性拒绝。
-    AcceptCommandsCommand invalidSeqReplay =
-        new AcceptCommandsCommand(
-            new AcceptCommandsTarget.Thread(parentId, parent.headEntryId(), 10L), List.of(userCmd));
-    assertThrows(
-        HarnessRuntimeConflictException.class,
-        () -> runtime.acceptCommands(invalidSeqReplay, AcceptancePreflight.IDENTITY));
+    assertEquals(3L, replayed.acceptedCommands().getFirst().sequence());
   }
 
   /** 该 Thread 当前 head 所在历史路径上是否已物化系统通知（STOPPED 父线程的 Join 交付直接固化到历史）。 */
@@ -255,51 +251,43 @@ class HarnessRuntimeJoinAcceptanceTest {
 
   @Test
   void replayPrecedingNonDeliveryRejectionAndNonContiguousRejection() {
-    // 测试意图：验证线程批次重放时，若跳过的历史前置序号包含普通用户命令（非 Join 交付）则拒绝重放；
+    // 测试意图：cursor-bound 批次重放时，若跳过的历史前置序号包含普通用户命令（非 Join 交付）则拒绝重放；
     // 若请求批次内各命令序号不连续同样拒绝。
     AcceptedCommands root =
         runtime.acceptCommands(session(50, 51, null), AcceptancePreflight.IDENTITY);
     UUID threadId = root.thread().id();
     UUID head = root.thread().headEntryId();
 
-    // 连续写入两条用户命令：seq 2 与 seq 3
+    // 连续写入两批 SET_AGENT + 用户命令：seq 2/3 与 seq 4/5。SET 前缀使这些批次保持 cursor-bound。
     NewThreadCommand cmd2 = userMessageCommand(TestIds.id(52), "cmd 2");
+    List<NewThreadCommand> batch2 = List.of(setAgentCommand(TestIds.id(55)), cmd2);
     AcceptedCommands acc2 =
         runtime.acceptCommands(
-            new AcceptCommandsCommand(
-                new AcceptCommandsTarget.Thread(threadId, head, 2L), List.of(cmd2)),
+            new AcceptCommandsCommand(new AcceptCommandsTarget.Thread(threadId, head, 2L), batch2),
             AcceptancePreflight.IDENTITY);
-    assertEquals(2L, acc2.acceptedCommands().get(0).sequence());
+    assertEquals(2L, acc2.acceptedCommands().getFirst().sequence());
 
     NewThreadCommand cmd3 = userMessageCommand(TestIds.id(53), "cmd 3");
     AcceptedCommands acc3 =
         runtime.acceptCommands(
             new AcceptCommandsCommand(
-                new AcceptCommandsTarget.Thread(threadId, head, 3L), List.of(cmd3)),
+                new AcceptCommandsTarget.Thread(threadId, head, 4L),
+                List.of(setAgentCommand(TestIds.id(56)), cmd3)),
             AcceptancePreflight.IDENTITY);
-    assertEquals(3L, acc3.acceptedCommands().get(0).sequence());
+    assertEquals(4L, acc3.acceptedCommands().getFirst().sequence());
 
-    // 尝试重放 cmd3，但传入 expected = 1L（前置 seq 1、seq 2 不是 delivery），触发 allPrecedingWereDeliveries = false
-    // -> 拒绝
+    // 尝试重放 batch2，但传入 expected = 1L（前置 seq 1 不是 delivery），触发
+    // allPrecedingWereDeliveries = false -> 拒绝。
     AcceptCommandsCommand nonDeliveryPreceding =
-        new AcceptCommandsCommand(
-            new AcceptCommandsTarget.Thread(threadId, head, 1L), List.of(cmd3));
+        new AcceptCommandsCommand(new AcceptCommandsTarget.Thread(threadId, head, 1L), batch2);
     assertThrows(
         HarnessRuntimeConflictException.class,
         () -> runtime.acceptCommands(nonDeliveryPreceding, AcceptancePreflight.IDENTITY));
 
-    // 尝试重放不连续的命令批次：[cmd2, cmd4]
-    NewThreadCommand cmd4 = userMessageCommand(TestIds.id(54), "cmd 4");
-    AcceptedCommands acc4 =
-        runtime.acceptCommands(
-            new AcceptCommandsCommand(
-                new AcceptCommandsTarget.Thread(threadId, head, 4L), List.of(cmd4)),
-            AcceptancePreflight.IDENTITY);
-    assertEquals(4L, acc4.acceptedCommands().get(0).sequence());
-
+    // 尝试重放不连续的命令批次：[cmd2, cmd3]
     AcceptCommandsCommand nonContiguousBatch =
         new AcceptCommandsCommand(
-            new AcceptCommandsTarget.Thread(threadId, head, 2L), List.of(cmd2, cmd4));
+            new AcceptCommandsTarget.Thread(threadId, head, 2L), List.of(cmd2, cmd3));
     assertThrows(
         HarnessRuntimeConflictException.class,
         () -> runtime.acceptCommands(nonContiguousBatch, AcceptancePreflight.IDENTITY));

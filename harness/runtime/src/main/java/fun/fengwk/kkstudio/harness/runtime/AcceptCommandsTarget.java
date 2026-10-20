@@ -70,16 +70,33 @@ public sealed interface AcceptCommandsTarget {
     }
   }
 
-  /** 在既有 Thread 上继续接受 Commands：精确的 head / next-command-sequence cursor 期望。 */
-  record Thread(UUID threadId, UUID expectedHeadEntryId, long expectedNextCommandSequence)
+  /**
+   * 在既有 Thread 上继续接受 Commands。单条纯 USER_MESSAGE 批次可以省略 head / next-command-sequence
+   * cursor，按当前邮箱尾部入队； 其余批次（SET_* 混合、纯设置、GOAL、内部 spawn continuation）仍要求精确 cursor。两个 cursor
+   * 字段必须同时给出或同时省略。
+   */
+  record Thread(UUID threadId, UUID expectedHeadEntryId, Long expectedNextCommandSequence)
       implements AcceptCommandsTarget {
 
     public Thread {
       Objects.requireNonNull(threadId, "threadId");
-      Objects.requireNonNull(expectedHeadEntryId, "expectedHeadEntryId");
-      if (expectedNextCommandSequence <= 0) {
+      if ((expectedHeadEntryId == null) != (expectedNextCommandSequence == null)) {
+        throw new IllegalArgumentException(
+            "expectedHeadEntryId and expectedNextCommandSequence must be provided together");
+      }
+      if (expectedNextCommandSequence != null && expectedNextCommandSequence <= 0) {
         throw new IllegalArgumentException("expectedNextCommandSequence must be positive");
       }
+    }
+
+    /** 便利构造：cursor-bound 请求无需显式装箱。 */
+    public Thread(UUID threadId, UUID expectedHeadEntryId, long expectedNextCommandSequence) {
+      this(threadId, expectedHeadEntryId, Long.valueOf(expectedNextCommandSequence));
+    }
+
+    /** 是否携带精确 cursor；null cursor 只对单条纯 USER_MESSAGE 批次合法。 */
+    public boolean hasCursor() {
+      return expectedHeadEntryId != null;
     }
   }
 }
