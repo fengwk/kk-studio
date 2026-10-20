@@ -669,7 +669,7 @@ final class ModelExecution implements ModelGateway.Listener {
               config.streamConfig().pushWindow().toMillis(),
               TimeUnit.MILLISECONDS);
     } catch (RuntimeException rejected) {
-      if (claimPushRejectionLocked(targetGeneration)) {
+      if (claimPushRejection(targetGeneration)) {
         log.warn(
             "model push timer scheduling rejected for {}: {}",
             invocationId,
@@ -696,7 +696,7 @@ final class ModelExecution implements ModelGateway.Listener {
               config.streamConfig().checkpointInterval().toMillis(),
               TimeUnit.MILLISECONDS);
     } catch (RuntimeException rejected) {
-      if (claimCheckpointRejectionLocked(targetGeneration)) {
+      if (claimCheckpointRejection(targetGeneration)) {
         log.warn(
             "model checkpoint timer scheduling rejected for {}: {}",
             invocationId,
@@ -729,7 +729,7 @@ final class ModelExecution implements ModelGateway.Listener {
     try {
       flushExecutor.execute(() -> deliverPush(generation));
     } catch (RuntimeException rejected) {
-      if (claimPushRejectionLocked(generation)) {
+      if (claimPushRejection(generation)) {
         log.warn(
             "model push executor rejected for {}: {}",
             invocationId,
@@ -749,7 +749,7 @@ final class ModelExecution implements ModelGateway.Listener {
     try {
       flushExecutor.execute(() -> deliverCheckpoint(generation, false));
     } catch (RuntimeException rejected) {
-      if (claimCheckpointRejectionLocked(generation)) {
+      if (claimCheckpointRejection(generation)) {
         log.warn(
             "model checkpoint executor rejected for {}: {}",
             invocationId,
@@ -759,20 +759,24 @@ final class ModelExecution implements ModelGateway.Listener {
     }
   }
 
-  /** 仅当前 push 代际仍未被 flush/terminal/cancel 推进时，原子认领一次 abandon。 */
-  private boolean claimPushRejectionLocked(long generation) {
-    if (abandoned.get() || terminal.get() || generation != pushGeneration) {
-      return false;
+  /** 在保护代际的同一 monitor 内复核并认领；外部取消仍在 monitor 外执行。 */
+  private boolean claimPushRejection(long generation) {
+    synchronized (monitor) {
+      if (abandoned.get() || terminal.get() || generation != pushGeneration) {
+        return false;
+      }
+      return terminal.compareAndSet(false, true);
     }
-    return terminal.compareAndSet(false, true);
   }
 
   /** 仅当前 checkpoint 代际仍未被后续 checkpoint/terminal/cancel 推进时，原子认领一次 abandon。 */
-  private boolean claimCheckpointRejectionLocked(long generation) {
-    if (abandoned.get() || terminal.get() || generation != checkpointGeneration) {
-      return false;
+  private boolean claimCheckpointRejection(long generation) {
+    synchronized (monitor) {
+      if (abandoned.get() || terminal.get() || generation != checkpointGeneration) {
+        return false;
+      }
+      return terminal.compareAndSet(false, true);
     }
-    return terminal.compareAndSet(false, true);
   }
 
   /** 取出推送缓冲并取消推送定时器；monitor 内调用。 */
