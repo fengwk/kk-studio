@@ -39,7 +39,6 @@ import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinOutcome;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
-import fun.fengwk.kkstudio.harness.runtime.processor.ProcessorLeaseConfig;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessResult;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorConfig;
@@ -292,10 +291,7 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
     return new ThreadProcessor(
         targetStore,
         resolver,
-        new ThreadProcessorConfig(
-            new ProcessorLeaseConfig(Duration.ofSeconds(30), Duration.ofSeconds(5)),
-            Duration.ofSeconds(5),
-            () -> new CompactionConfig(20_000)));
+        new ThreadProcessorConfig(Duration.ofSeconds(5), () -> new CompactionConfig(20_000)));
   }
 
   private static void insertSucceededModel(

@@ -28,6 +28,7 @@ import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
+import fun.fengwk.kkstudio.harness.runtime.port.TurnResolveTransientException;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
@@ -46,6 +47,7 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandState;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
@@ -57,7 +59,7 @@ import java.util.Deque;
 import java.util.List;
 import java.util.UUID;
 
-/** HarnessRuntime 手动压缩入口：availability、两阶段 version fence 与 durable plan 提交。 */
+/** HarnessRuntime 手动压缩入口：availability 与单事务 candidate 构造 / resolve / 提交。 */
 class HarnessRuntimeManualCompactionTest {
 
   private static final Instant NOW = Instant.parse("2026-07-01T00:00:00Z");
@@ -205,6 +207,64 @@ class HarnessRuntimeManualCompactionTest {
             () -> fixture.runtime.compactThread(new CompactThreadCommand(baseline.threadId(), 0)));
     assertEquals("turn resolver returned null for manual compaction", error.getMessage());
     assertEquals(0L, thread(fixture.store, baseline.threadId()).version());
+  }
+
+  @Test
+  void resolverRunsInsideTheSameCompactionTransaction() {
+    // 嵌套 store transaction 会被明确拒绝：resolver 能在 onResolve 中观察到活动事务，证明 candidate 构造与 resolve 同事务。
+    Fixture fixture = fixture();
+    ClosedTurnBaseline baseline = seedCompactionReadyClosedTurn(fixture.store);
+    fixture.resolver.autoConsistent = true;
+    fixture.resolver.onResolve =
+        () ->
+            assertThrows(IllegalStateException.class, () -> fixture.store.transaction(tx -> null));
+
+    CompactThreadResult result =
+        fixture.runtime.compactThread(new CompactThreadCommand(baseline.threadId(), 0));
+
+    assertNotNull(result.childThreadId());
+    assertEquals(
+        CompactionTrigger.MANUAL,
+        ((TurnStartPayload) path(fixture.store, baseline.threadId()).head().payload())
+            .compaction()
+            .trigger());
+  }
+
+  @Test
+  void typedSqlFailureRollsBackCompactionTurnChildThreadAndCommands() {
+    // SQL 失败可能已污染当前事务：typed transient 整体回滚，绝不落 COMPACTION/child/Command marker/Work。
+    Fixture fixture = fixture();
+    ClosedTurnBaseline baseline = seedCompactionReadyClosedTurn(fixture.store);
+    seedCommand(
+        fixture.store,
+        baseline.threadId(),
+        new CustomMessageCommandPayload(userMessage("deferred input")));
+    long version = thread(fixture.store, baseline.threadId()).version();
+    fixture.resolver.onResolve =
+        () -> {
+          throw new TurnResolveTransientException("sql failed", new RuntimeException("db down"));
+        };
+
+    assertThrows(
+        TurnResolveTransientException.class,
+        () ->
+            fixture.runtime.compactThread(new CompactThreadCommand(baseline.threadId(), version)));
+
+    EntryPath after = path(fixture.store, baseline.threadId());
+    assertEquals(9, after.entries().size());
+    assertEquals(baseline.turnEndEntryId(), after.head().id());
+    ThreadState thread = thread(fixture.store, baseline.threadId());
+    assertEquals(version, thread.version());
+    assertEquals(
+        1,
+        fixture.store.<Integer>transaction(
+            tx -> tx.listThreadsBySession(after.root().sessionId()).size()));
+    List<ThreadCommand> commands =
+        fixture.store.<List<ThreadCommand>>transaction(
+            tx -> tx.loadCommandsByThread(baseline.threadId()));
+    assertEquals(1, commands.size());
+    assertEquals(ThreadCommandState.QUEUED, commands.getFirst().state());
+    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
   }
 
   @Test

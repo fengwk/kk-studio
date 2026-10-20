@@ -201,14 +201,17 @@ public final class ThreadProcessor {
 
   /**
    * 单 action 短事务：锁 Session KEY SHARE -&gt; Thread -&gt;（Commands -&gt; Model -&gt; Tool）-&gt;
-   * Work，按固定优先级分类并恰执行一个 durable action。Turn 分支在同一事务内构造 plan、同步 resolve、校验并提交； 返回的 plan 仅供调用链保持原有
-   * switch 形状，事务结果不依赖它。
+   * Work，按固定优先级分类并恰执行一个 durable action。Turn 分支在同一事务内构造 candidate、同步 resolve、校验并提交，不存在跨事务的 plan 返回。
    */
   private void step(ClaimedWork claim) {
-    store.transaction(tx -> stepTx(tx, claim));
+    store.transaction(
+        tx -> {
+          stepTx(tx, claim);
+          return null;
+        });
   }
 
-  private TurnPlan stepTx(HarnessStore.Transaction tx, ClaimedWork claim) {
+  private void stepTx(HarnessStore.Transaction tx, ClaimedWork claim) {
     Instant now = tx.now();
     ThreadState thread = lockThreadWithSession(tx, claim.target().id());
     if (thread == null) {
@@ -220,23 +223,23 @@ public final class ThreadProcessor {
       UUID ticketId = ownerTicketId(thread, startPayload);
       if (ticketId != null) {
         settleOwnerTurn(tx, claim, thread, path, startPayload, ticketId, openTurn.get(), now);
-        return null;
+        return;
       }
     }
     // 安全边界先应用全部 standalone 分支设置并追加 SETTINGS 快照；CONTRIBUTOR_STATE 留给普通输入 turn。
     // STOPPED 线程只结算设置，不恢复执行；存在 open turn 时保留冻结请求。
     if (path.openTurnStart().isEmpty() && applyPendingSettings(tx, claim, thread, path, now)) {
-      return null;
+      return;
     }
     // STOPPED 是持久的执行控制：停止后只固化通知，绝不自动启动模型；只有显式新人工/可信输入在 accept 阶段恢复
     // RUNNABLE 后才会再次进入这里。残留 claim 在这里完成 fencing，不产生任何 durable mutation。
     if (thread.executionControl().isStopped()) {
       completeClaim(tx, claim, now);
-      return null;
+      return;
     }
     // 唯一的 live/historical 适用性来源：不变量被破坏的形状由分类器以 ISE 拒绝，绝不降级为业务上下文。
     ThreadContext context = threadContextProbe.probe(tx, thread, path);
-    return switch (context) {
+    switch (context) {
       case ThreadContext.ModelTerminalPending pending -> {
         // 锁序 Thread -> Commands -> Model：判断 pre-existing queued message 必须在 lock Model 前加载。
         boolean hasQueuedMessage =
@@ -246,12 +249,8 @@ public final class ThreadProcessor {
           throw new ClaimLostSignal();
         }
         applyModel(tx, claim, thread, path, locked, now, hasQueuedMessage);
-        yield null;
       }
-      case ThreadContext.ModelActive ignored -> {
-        completeClaim(tx, claim, now);
-        yield null;
-      }
+      case ThreadContext.ModelActive ignored -> completeClaim(tx, claim, now);
       case ThreadContext.ToolTerminalPending pending -> {
         // 锁序 Thread -> Model -> Tool：Tool batch 固定 self-wake 下一 claim 的 continuation，不消费任何
         // Command，因此无需加载 Command 快照（不为形式锁序锁无关行）。
@@ -271,12 +270,8 @@ public final class ThreadProcessor {
             pending.calls(),
             lockedSiblings,
             now);
-        yield null;
       }
-      case ThreadContext.ToolActive ignored -> {
-        completeClaim(tx, claim, now);
-        yield null;
-      }
+      case ThreadContext.ToolActive ignored -> completeClaim(tx, claim, now);
       case ThreadContext.ContinuationDue ignored -> {
         // owned HISTORY 机械续作仍由 compactionPreparation 保持最高优先级；普通 continuation
         // 在越过 soft threshold 时先压缩，成功后再由 durable continueModel obligation 恢复。
@@ -286,14 +281,16 @@ public final class ThreadProcessor {
                     thread, path, config.compactionProvider().compactionConfig(), true)
                 : null;
         if (preparation != null) {
-          yield planStep(tx, claim, thread, path, TurnStartReason.COMPACTION, preparation, now);
+          planStep(tx, claim, thread, path, TurnStartReason.COMPACTION, preparation, now);
+          return;
         }
         // 压缩判断完成后，已关闭 turn 是安全边界：有序消费完整输入快照，
         // 让预算提醒、用户 steering 与 child completion 不必等自动续作彻底停止。
         if (ThreadInputDemand.hasInputDemand(tx, thread)) {
-          yield planStep(tx, claim, thread, path, TurnStartReason.INPUT, now);
+          planStep(tx, claim, thread, path, TurnStartReason.INPUT, now);
+          return;
         }
-        yield planStep(tx, claim, thread, path, TurnStartReason.CONTINUATION, now);
+        planStep(tx, claim, thread, path, TurnStartReason.CONTINUATION, now);
       }
       case ThreadContext.IdleOrHistorical ignored -> {
         // 已物化但位于输入水位之后的系统通知仍需普通输入处理：需求只按本 Thread 自己的 Command 判定（fork 不继承源邮箱，
@@ -306,15 +303,16 @@ public final class ThreadProcessor {
                     thread, path, config.compactionProvider().compactionConfig(), userDemand)
                 : null;
         if (preparation != null) {
-          yield planStep(tx, claim, thread, path, TurnStartReason.COMPACTION, preparation, now);
+          planStep(tx, claim, thread, path, TurnStartReason.COMPACTION, preparation, now);
+          return;
         }
         if (userDemand) {
-          yield planStep(tx, claim, thread, path, TurnStartReason.INPUT, now);
+          planStep(tx, claim, thread, path, TurnStartReason.INPUT, now);
+          return;
         }
         completeClaim(tx, claim, now);
-        yield null;
       }
-    };
+    }
   }
 
   /** blocker / idle 完成：final fence 后 completeWork；fence 失败抛内部信号回滚（零 mutation 的 LOST）。 */
@@ -689,19 +687,19 @@ public final class ThreadProcessor {
     tx.completeWork(claim);
   }
 
-  /** 在步骤事务内构造 candidate plan 并立即在同一事务内 resolve、校验、提交；claim fence 在构造前完成。 */
-  private TurnPlan planStep(
+  /** 在步骤事务内构造 candidate 并立即在同一事务内 resolve、校验、提交；不返回任何跨事务 plan。 */
+  private void planStep(
       HarnessStore.Transaction tx,
       ClaimedWork claim,
       ThreadState thread,
       EntryPath path,
       TurnStartReason reason,
       Instant now) {
-    return planStep(tx, claim, thread, path, reason, null, now);
+    planStep(tx, claim, thread, path, reason, null, now);
   }
 
   /** COMPACTION turn 的 plan：切分事实由调用方传入（reason COMPACTION 时非空）。 */
-  private TurnPlan planStep(
+  private void planStep(
       HarnessStore.Transaction tx,
       ClaimedWork claim,
       ThreadState thread,
@@ -739,11 +737,10 @@ public final class ThreadProcessor {
             preparation,
             pendingNotificationInput);
     resolveAndCommitTx(tx, claim, thread, plan);
-    return plan;
   }
 
   /**
-   * 在调用方已锁定 Session / Thread / Work 的同一事务内同步解析并原子提交：candidate Entry 只存在于内存，Resolver 直接消费其预分配
+   * 在调用方已锁定 Session / Thread 的同一事务内同步解析并原子提交：candidate Entry 只存在于内存，Resolver 直接消费其预分配
    * ID，不要求也未写入任何持久化 plan。只有显式 typed {@link TurnResolveTransientException} 向上抛出， 由 {@link #process}
    * 在事务回滚后受控重排（candidate 零写入）；确定性 resolver 异常 / null 结果 / validator 契约失败都转为 durable AssistantError
    * + FAILED TURN_END 并结算 Join，绝不无限重排，也不把 raw cause 写入 durable。
