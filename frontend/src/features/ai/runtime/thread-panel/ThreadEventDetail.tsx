@@ -1,5 +1,6 @@
 import { useEffect, useRef, type KeyboardEvent, type Ref, type RefObject } from 'react'
 import { KeyValue, KeyValueRow } from '@/shared/ui/data/KeyValue'
+import { Code } from '@/shared/ui/data/Mono'
 import { Eye, LoaderCircle, X } from 'lucide-react'
 import type { ThreadEventRecord } from '@/features/ai/runtime/thread-events'
 import { useI18n } from '@/shared/i18n'
@@ -123,7 +124,7 @@ export function ThreadEventDetail({
           </span>
         </div>
       ) : null}
-      <pre className="thread-event-detail-payload" tabIndex={0}>{record.rawJson ?? record.summary}</pre>
+      <Code className="thread-event-detail-payload" tabIndex={0}>{record.rawJson ?? record.summary}</Code>
     </section>
   )
 }
