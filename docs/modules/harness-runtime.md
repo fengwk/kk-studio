@@ -99,7 +99,7 @@ rootThreadId / yoloEnabled / executionControl / inputThroughSequence / nextComma
 
 Platform 的请求预览有三个只读入口：`POST /api/threads/{threadId}/provider-request-preview` 接受与既有 Thread 续写面同形的 owner-free [`HarnessThreadCommandBatchDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/runtime/HarnessThreadCommandBatchDTO.java)（`{expectedHeadEntryId,expectedNextCommandSequence,commands}`，不带 owner/target），只接受 SET_* 前缀加末尾 USER_MESSAGE，调用前把最新快照的 `headEntryId` 与 `nextCommandSequence` 原样作为期望游标；`POST /api/sessions/{sessionId}/provider-request-preview` 接受 [`HarnessDraftPreviewRequestDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/runtime/HarnessDraftPreviewRequestDTO.java)（`{startEntryId,commands}`，本地分支草稿，Thread 尚未落库）；`GET /api/sessions/{sessionId}/entries/{entryId}/provider-request-preview` 重建一条历史模型输出。
 
-三者在同一条正式规划、物化与 [`ProviderAdapter#encodeRequestBody`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderAdapter.java) 路径上生成请求体，规划时间对 live/草稿取当前时刻、对历史取该输出记录的 `createdAt`；历史入口只接受携带 `assistantMetadata` 的普通 Assistant 输出；父 COMPACTION 结果显式拒绝（`PREVIEW_UNSUPPORTED`），因为父回合没有 ModelInvocation，其真实请求属于另一 Session 的压缩子 Thread。预览只读 peek 附件，不入队、不推进游标、不消费附件、不写任何内部事实、不调用 Provider transport。响应是 [`HarnessProviderRequestPreviewDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/runtime/HarnessProviderRequestPreviewDTO.java)（`kind`、`generatedAt`、`providerType`、`modelName`、`bodyByteSize`、`bodyJson`、`sourceHeadEntryId`、单一 `notice`），`kind` 为 `DRAFT_REQUEST_PREVIEW` 或 `HISTORICAL_REQUEST_PREVIEW`；历史 `notice` 明确声明它按当前定义重建、不等于原始发送字节。
+三者在同一条正式规划、物化与 [`ProviderAdapter#encodeRequestBody`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/model/provider/ProviderAdapter.java) 路径上生成请求体，规划时间对 live/草稿取当前时刻、对历史取该输出记录的 `createdAt`；历史入口只接受携带 `assistantMetadata` 的普通 Assistant 输出。父 COMPACTION 结果通过父 `TURN_START(COMPACTION)` 冻结的 child Thread / join 票据定位压缩子执行，并以 join 冻结的 `finalAnswerEntryId` 的 parent 作为请求前缀：工具 loop 历史保留，child 后续续跑不污染旧压缩结果，child 的不可变输出预算与 cache 约束在规划后收紧。该路径仍是按当前 catalog / Provider 配置重建，不是原始发送字节。预览只读 peek 附件，不入队、不推进游标、不消费附件、不写任何内部事实、不调用 Provider transport。响应是 [`HarnessProviderRequestPreviewDTO`](../../share/src/main/java/fun/fengwk/kkstudio/share/ai/runtime/HarnessProviderRequestPreviewDTO.java)（`kind`、`generatedAt`、`providerType`、`modelName`、`bodyByteSize`、`bodyJson`、`sourceHeadEntryId`、单一 `notice`），`kind` 为 `DRAFT_REQUEST_PREVIEW` 或 `HISTORICAL_REQUEST_PREVIEW`；历史 `notice` 明确声明它按当前定义重建、不等于原始发送字节。
 
 当前事实不允许精确预览时返回 HTTP 409，`errors.reason` 是稳定的机器码，`errors.detail` 仅为安全描述，客户端不应解析描述文本：
 
@@ -112,7 +112,7 @@ Platform 的请求预览有三个只读入口：`POST /api/threads/{threadId}/pr
 | `PREVIEW_ATTACHMENT_NOT_READY` | 附件上传未就绪或不可用 |
 | `PREVIEW_PLANNING_FAILED` | 草稿无法规划 |
 | `PREVIEW_PROVIDER_UNAVAILABLE` | 当前 Provider 无法解析，包括连接 generation 漂移 |
-| `PREVIEW_UNSUPPORTED` | 父 COMPACTION 回合没有 ModelInvocation，或 adapter 未覆写 `encodeRequestBody`，无法生成请求体预览 |
+| `PREVIEW_UNSUPPORTED` | 冻结压缩子执行无法从父 COMPACTION 结果可靠定位（join/child/finalAnswer 缺失或不属于同一冻结执行），或 adapter 未覆写 `encodeRequestBody`，无法生成请求体预览 |
 | `PREVIEW_ENCODING_FAILED` | 请求体编码失败 |
 
 收到 `PREVIEW_STALE_CURSOR` 后应重新读取快照，再用新游标请求预览；这不会绕过 queued、空闲、压缩、附件与归属校验。规划详情、连接凭据与异常原因链不进入错误响应。请求形状或归属错误仍为 400，缺失 Thread 仍为 404。
