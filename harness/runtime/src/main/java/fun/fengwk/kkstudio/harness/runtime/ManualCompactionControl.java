@@ -35,12 +35,10 @@ import java.util.UUID;
 /**
  * Target Thread 手动压缩控制面：处理 availability 查询与 compactThread 提交。
  *
- * <p>执行顺序严格保持：第一短事务 plan（Session KEY SHARE -&gt; Thread，校验 version/availability/boundary） -&gt; 事务外
- * resolve -&gt; 机械一致性校验 -&gt; 第二短事务 commit（同锁序，带 source head / Command 快照 CAS 原子提交 COMPACTION Turn
- * 与 MODEL Work）。失败与取消保持与自动压缩一致的单一事实源。
- *
- * <p>两段必须是独立物理短事务：入口（plan 之前）即调用 {@link HarnessStore#assertNoAmbientTransaction}，若调用方外层存在环境事务则
- * 在写入任何内容之前拒绝，避免慢 resolve 期间持有 owner / Thread 锁，并让第二阶段 CAS 失去“两事务之间允许并发变化”的前提。
+ * <p>执行顺序：单 store transaction 内按 Session KEY SHARE -&gt; Thread 顺序加锁，校验 expected version /
+ * availability / boundary，构造 candidate COMPACTION TURN_START，随后在同一事务内同步调用 {@link
+ * TurnResolver}，最后原子提交 COMPACTION Turn 与 MODEL Work（或失败终态）。expectedVersion 仍是对外 CAS：version 不匹配直接返回
+ * typed conflict； 不存在第二阶段 head / Command snapshot CAS，也不存在事务外 resolve。失败与取消保持与自动压缩一致的单一事实源。
  */
 final class ManualCompactionControl {
 
@@ -72,20 +70,21 @@ final class ManualCompactionControl {
 
   CompactThreadResult compactThread(CompactThreadCommand command) {
     Objects.requireNonNull(command, "command");
-    // 两段必须是独立物理短事务：入口先断言不在任何环境事务中，被拒绝的手动压缩绝不先写入 plan（更不能让慢 resolve 与
-    // owner/Thread 锁同事务）。内存实现是 no-op，生产实现检测到真实环境事务时在此立即拒绝。
-    store.assertNoAmbientTransaction();
-    ManualPlan manualPlan = store.transaction(tx -> planManual(tx, command));
-    TurnResolver.Result result =
-        resolver.resolve(
-            manualPlan.threadId(), manualPlan.candidatePath(), manualPlan.preparation());
-    if (result == null) {
-      throw new IllegalStateException("turn resolver returned null for manual compaction");
-    }
-    return store.transaction(tx -> commitManual(tx, command, manualPlan, result));
+    // 版本校验、candidate 构造、同库只读 resolve 与 COMPACTION 写入必须在同一个短事务内完成：要么整体提交，要么整体回滚。
+    return store.transaction(
+        tx -> {
+          ManualPlan manualPlan = planManual(tx, command);
+          TurnResolver.Result result =
+              resolver.resolve(
+                  manualPlan.threadId(), manualPlan.candidatePath(), manualPlan.preparation());
+          if (result == null) {
+            throw new IllegalStateException("turn resolver returned null for manual compaction");
+          }
+          return commitManual(tx, manualPlan, result);
+        });
   }
 
-  /** 在首个事务中按 Session KEY SHARE -> Thread 锁序校验版本与可用性，并冻结供事务外解析的手动压缩规划。 */
+  /** 在当前事务中按 Session KEY SHARE -> Thread 锁序校验版本与可用性，并构造仅存在于内存的手动压缩 candidate。 */
   private ManualPlan planManual(HarnessStore.Transaction tx, CompactThreadCommand command) {
     ThreadState thread = lockThreadWithSession(tx, command.threadId());
     if (thread.version() != command.expectedVersion()) {
@@ -117,13 +116,12 @@ final class ManualCompactionControl {
     candidateEntries.add(candidateEntry);
     EntryPath candidatePath = new EntryPath(candidateEntries);
     return new ManualPlan(
-        thread.id(),
+        thread,
         path.root().sessionId(),
         candidatePath,
         turnStartEntryId,
         candidateEntry,
         path.head().id(),
-        queued,
         decision.preparation(),
         hasUserDemand(queued));
   }
@@ -183,25 +181,11 @@ final class ManualCompactionControl {
             : ManualCompactionAvailability.DisabledReason.NO_RESOLVED_CONTEXT);
   }
 
-  /** 在第二事务中重验版本、head 与命令快照，再原子提交压缩 Turn 及其 Model Work 或失败终态。 */
+  /** 在当前已锁定事务中原子提交压缩 Turn 及其 Model Work 或失败终态；不再重验 version / head / Command 快照。 */
   private CompactThreadResult commitManual(
-      HarnessStore.Transaction tx,
-      CompactThreadCommand command,
-      ManualPlan plan,
-      TurnResolver.Result result) {
+      HarnessStore.Transaction tx, ManualPlan plan, TurnResolver.Result result) {
     Instant now = tx.now();
-    ThreadState thread = ThreadLifecycleCoordinator.lockThreadWithAncestors(tx, command.threadId());
-    if (thread == null) {
-      throw new HarnessRuntimeNotFoundException("thread " + command.threadId() + " does not exist");
-    }
-    if (thread.version() != command.expectedVersion()
-        || !thread.headEntryId().equals(plan.sourceHeadEntryId())) {
-      throw staleManualVersion(command, thread);
-    }
-    List<ThreadCommand> queued = tx.loadQueuedCommands(thread.id());
-    if (!snapshotMatches(plan.queuedSnapshot(), queued)) {
-      throw staleManualVersion(command, thread);
-    }
+    ThreadState thread = plan.thread();
     if (result instanceof TurnResolver.CompactionResolved compactionResolved) {
       CompactionStart frozenStart =
           CompactionChildSpawn.start(tx, thread, compactionResolved, plan.preparation());
@@ -297,18 +281,6 @@ final class ManualCompactionControl {
     return false;
   }
 
-  private static boolean snapshotMatches(List<ThreadCommand> expected, List<ThreadCommand> actual) {
-    if (expected.size() != actual.size()) {
-      return false;
-    }
-    for (int i = 0; i < actual.size(); i++) {
-      if (!expected.get(i).equals(actual.get(i))) {
-        return false;
-      }
-    }
-    return true;
-  }
-
   private static HarnessRuntimeConflictException staleManualVersion(
       CompactThreadCommand command, ThreadState thread) {
     return new HarnessRuntimeConflictException(
@@ -329,24 +301,26 @@ final class ManualCompactionControl {
   }
 
   private record ManualPlan(
-      UUID threadId,
+      ThreadState thread,
       UUID sessionId,
       EntryPath candidatePath,
       UUID turnStartEntryId,
       Entry candidateTurnStartEntry,
       UUID sourceHeadEntryId,
-      List<ThreadCommand> queuedSnapshot,
       CompactionPreparation preparation,
       boolean hasDeferredUserMessages) {
     private ManualPlan {
-      Objects.requireNonNull(threadId, "threadId");
+      Objects.requireNonNull(thread, "thread");
       Objects.requireNonNull(sessionId, "sessionId");
       Objects.requireNonNull(candidatePath, "candidatePath");
       Objects.requireNonNull(turnStartEntryId, "turnStartEntryId");
       Objects.requireNonNull(candidateTurnStartEntry, "candidateTurnStartEntry");
       Objects.requireNonNull(sourceHeadEntryId, "sourceHeadEntryId");
-      queuedSnapshot = List.copyOf(Objects.requireNonNull(queuedSnapshot, "queuedSnapshot"));
       Objects.requireNonNull(preparation, "preparation");
+    }
+
+    private UUID threadId() {
+      return thread.id();
     }
   }
 

@@ -52,8 +52,8 @@ import java.util.function.Consumer;
  * Root Harness command/control/query 平面：durable Agent Runtime 的同步公共入口。
  *
  * <p>同步控制操作通过短事务与规范锁序 Session -&gt; Thread -&gt; Commands -&gt; ModelInvocation -&gt;
- * ToolInvocation siblings -&gt; Work 保证 durable 状态一致；需要外部解析的手动压缩采用短事务 plan、事务外 resolve、第二短事务 CAS
- * commit。所有业务拒绝均为类型化 {@link HarnessRuntimeConflictException} / {@link
+ * ToolInvocation siblings -&gt; Work 保证 durable 状态一致；手动压缩在同一短事务内完成 version 校验、candidate 构造、同库
+ * resolve 与提交。所有业务拒绝均为类型化 {@link HarnessRuntimeConflictException} / {@link
  * HarnessRuntimeNotFoundException}；被破坏 的持久化不变量（所有权错误、sibling 混合挂接、callIndex 不连续）仍为 {@link
  * IllegalStateException}。所有持久化时间取自事务的 {@link HarnessStore.Transaction#now()}。
  *
@@ -367,8 +367,8 @@ public final class HarnessRuntime {
   }
 
   /**
-   * 手动压缩控制：短事务 plan，事务外 resolve，再以 expected version/source head/command snapshot 原子提交 COMPACTION
-   * Turn 与 MODEL Work。resolve 前崩溃零持久化；提交成功后不依赖进程内 intent。
+   * 手动压缩控制：在单个短事务内以 expected version 校验、构造 candidate、同库同步 resolve 并原子提交 COMPACTION Turn 与 MODEL
+   * Work。candidate 不先落库；提交成功后不依赖进程内 intent。
    */
   public CompactThreadResult compactThread(CompactThreadCommand command) {
     return manualCompactionControl.compactThread(command);

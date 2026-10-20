@@ -1,8 +1,6 @@
 package fun.fengwk.kkstudio.platform.harness.thread.command;
 
 import org.springframework.dao.DataAccessException;
-import org.springframework.dao.DataAccessResourceFailureException;
-import org.springframework.dao.TransientDataAccessException;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.harness.builtin.environment.ReadTool;
@@ -97,8 +95,9 @@ import java.util.function.Function;
  * 工具在已选环境时绑定环境，未选环境时两者为 null；NONE 工具始终不绑定环境；name 无法解析时确定性拒绝规划；Skill 引用按 (packageName, name) 解析为
  * Prompt 三元组；内容由统一 read 按稳定 path 读取。环境上下文（name、system、user、home、date、note）只来自选中的 Environment
  * 与连接行保留的最近一次 READY 宿主 payload；引用缺失或失效时确定性拒绝规划 （返回 {@link Result.Rejected}，稳定 error code {@value
- * #REJECTION_CODE}）。只有 repository / registry 等基础设施异常向上传播， 由 ThreadProcessor reschedule。YOLO 不进入
- * spec。非工具元数据（context projectors）从同一次租用的 Harness 目录提取。
+ * #REJECTION_CODE}）。SQL 访问异常统一以 {@link TurnResolveTransientException} 上抛，由 ThreadProcessor 回滚事务后
+ * reschedule； 其它编程 / 契约异常仍向上传播并按确定性失败处理。YOLO 不进入 spec。非工具元数据（context projectors）从同一次租用的 Harness
+ * 目录提取。
  */
 @Component
 public final class DatabaseTurnResolver implements TurnResolver {
@@ -173,20 +172,11 @@ public final class DatabaseTurnResolver implements TurnResolver {
       // 只把显式构造的确定性拒绝转为 typed Rejected；repository/registry 等基础设施异常按类型分别处理。
       return rejected(rejection.getMessage());
     } catch (DataAccessException failure) {
-      if (isTransientInfrastructure(failure)) {
-        // 数据库瞬断（连接失败 / 可重试数据访问）：适配为显式 typed transient，由 Processor reschedule，绝不判成用户错误。
-        throw new TurnResolveTransientException(
-            "turn resolution infrastructure unavailable", failure);
-      }
-      // 非瞬时的数据访问错误（如数据完整性）：确定性失败，交由 Processor 落 durable FAILED。
-      throw failure;
+      // 解析在调用方 turn 事务内执行：任何 SQL 访问异常都可能已把该事务标记为 rollback-only，绝不能继续在同一事务里写
+      // Rejected/FAILED。统一适配为显式 typed transient，由 Processor 整体回滚后在事务边界外受控 reschedule。
+      throw new TurnResolveTransientException(
+          "turn resolution infrastructure unavailable", failure);
     }
-  }
-
-  /** Spring SQLState 分类下属于瞬时基础设施不可用的数据访问异常。 */
-  private static boolean isTransientInfrastructure(DataAccessException failure) {
-    return failure instanceof TransientDataAccessException
-        || failure instanceof DataAccessResourceFailureException;
   }
 
   /**

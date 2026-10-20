@@ -22,7 +22,6 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
-import fun.fengwk.kkstudio.harness.runtime.processor.ProcessorLeaseConfig;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessResult;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorConfig;
@@ -119,15 +118,11 @@ class PostgresqlAssistantErrorSettlementTest {
               new AssistantError("TEST_REJECTED", "must not resolve on terminal settlement"));
         };
     ThreadProcessorConfig config =
-        new ThreadProcessorConfig(
-            new ProcessorLeaseConfig(Duration.ofSeconds(30), Duration.ofSeconds(5)),
-            Duration.ofSeconds(5),
-            () -> new CompactionConfig(20_000));
+        new ThreadProcessorConfig(Duration.ofSeconds(5), () -> new CompactionConfig(20_000));
     Clock clock = Clock.fixed(now, ZoneOffset.UTC);
     ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
     try {
-      ThreadProcessor processor =
-          new ThreadProcessor(store, resolver, config, scheduler, Runnable::run);
+      ThreadProcessor processor = new ThreadProcessor(store, resolver, config);
       ClaimedWork claimed =
           store
               .transaction(

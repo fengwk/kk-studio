@@ -46,7 +46,6 @@ class TurnPlanTest {
         new TurnPlan(
             baseline.threadId(),
             baseline.sessionId(),
-            baseline.rootEntryId(),
             1L,
             List.of(),
             List.of(),
@@ -82,7 +81,6 @@ class TurnPlanTest {
         new TurnPlan(
             baseline.threadId(),
             baseline.sessionId(),
-            baseline.rootEntryId(),
             1L,
             List.of(message),
             List.of(),
@@ -99,7 +97,6 @@ class TurnPlanTest {
         new TurnPlan(
             baseline.threadId(),
             baseline.sessionId(),
-            baseline.rootEntryId(),
             1L,
             List.of(message),
             List.of(message),
@@ -224,18 +221,9 @@ class TurnPlanTest {
     EntryPath candidatePath = path(store, baseline.threadId());
     UUID threadId = baseline.threadId();
     UUID sessionId = baseline.sessionId();
-    UUID sourceHeadEntryId = baseline.rootEntryId();
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            validPlan(
-                threadId,
-                sessionId,
-                sourceHeadEntryId,
-                -1L,
-                candidatePath,
-                TestIds.id(99),
-                TestIds.id(100)));
+        () -> validPlan(threadId, sessionId, -1L, candidatePath, TestIds.id(99), TestIds.id(100)));
   }
 
   @Test
@@ -249,7 +237,6 @@ class TurnPlanTest {
             new TurnPlan(
                 baseline.threadId(),
                 baseline.sessionId(),
-                baseline.rootEntryId(),
                 0L,
                 List.of(),
                 List.of(),
@@ -266,7 +253,6 @@ class TurnPlanTest {
             new TurnPlan(
                 baseline.threadId(),
                 baseline.sessionId(),
-                baseline.rootEntryId(),
                 0L,
                 List.of(),
                 List.of(),
@@ -282,7 +268,6 @@ class TurnPlanTest {
   private static TurnPlan validPlan(
       UUID threadId,
       UUID sessionId,
-      UUID sourceHeadEntryId,
       long cutoffSequence,
       EntryPath candidatePath,
       UUID turnStartEntryId,
@@ -290,7 +275,6 @@ class TurnPlanTest {
     return new TurnPlan(
         threadId,
         sessionId,
-        sourceHeadEntryId,
         cutoffSequence,
         List.of(),
         List.of(),

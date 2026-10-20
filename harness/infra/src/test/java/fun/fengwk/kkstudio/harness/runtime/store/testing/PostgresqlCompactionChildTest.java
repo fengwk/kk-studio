@@ -162,12 +162,7 @@ class PostgresqlCompactionChildTest {
         new ThreadProcessor(
             store,
             resolver,
-            new ThreadProcessorConfig(
-                new ProcessorLeaseConfig(Duration.ofSeconds(30), Duration.ofSeconds(5)),
-                Duration.ofSeconds(5),
-                () -> CompactionConfig.DEFAULT),
-            scheduler,
-            Runnable::run);
+            new ThreadProcessorConfig(Duration.ofSeconds(5), () -> CompactionConfig.DEFAULT));
     gateway = new ScriptedChildGateway();
     modelProcessor =
         new ModelProcessor(

@@ -206,14 +206,11 @@ public class HarnessRuntimeConfiguration {
 
   @Bean
   public ThreadProcessorConfig threadProcessorConfig(
-      ProcessorLeaseConfig leaseConfig,
       CompactionConfigProvider compactionConfigProvider,
       SystemSettingsSnapshot systemSettingsSnapshot) {
     SystemSettings.Advanced advanced = systemSettingsSnapshot.get().advanced();
     return new ThreadProcessorConfig(
-        leaseConfig,
-        Duration.ofMillis(advanced.threadResolveFailureDelayMillis()),
-        compactionConfigProvider);
+        Duration.ofMillis(advanced.threadResolveFailureDelayMillis()), compactionConfigProvider);
   }
 
   @Bean
@@ -273,12 +270,8 @@ public class HarnessRuntimeConfiguration {
       HarnessStore store,
       TurnResolver turnResolver,
       ThreadProcessorConfig config,
-      Clock clock,
-      @Qualifier("harnessProcessorScheduler") ScheduledExecutorService scheduler,
-      @Qualifier("harnessHeartbeatWorkerExecutor") Executor heartbeatWorker,
       ToolResultHistoryMaterializer materializer) {
-    return new ThreadProcessor(
-        store, turnResolver, config, scheduler, heartbeatWorker, materializer);
+    return new ThreadProcessor(store, turnResolver, config, materializer);
   }
 
   @Bean(destroyMethod = "close")
