@@ -282,6 +282,7 @@ terminalEntryId / finalAnswerEntryId / deliveryCommandSequence / createdAt / upd
 - `parentThreadId` 非空表示 task 子：`JoinDelivery.NOTIFY_PARENT`，`countsTowardQuota=true`；同一事务校验父仍可接受本次调用、`expectedParentHeadEntryId` 与父 head 匹配、子关系与深度/并发额度。只有新建子才设置父关系，resume 不能改父；父处于 `STOPPED` 时拒绝发起新委派。resume 向仍在执行的子追加源 prompt 后等待它真正的下一次终态，绝不同步等待。
 - `parentThreadId` 为空表示内部 root 任务：`JoinDelivery.RECEIPT_ONLY`、不计额度；同样与源 prompt 原子接受，但不投递父通知。
 - `JoinDelivery.SETTLE_OWNER_TURN` 用于压缩等 runtime 子执行：不计额度，结算后只唤醒父 Thread 的开放 Turn owner，不投递 `SUBAGENT_RESULT`。
+- Platform 的 `AgentTaskService` 与 HTTP `/api/agent-tasks` 按票据观察任务：有效票据未结算为 `RUNNING`，有冻结回执为 `COMPLETED` / `ERROR` / `CANCELLED`；被后续任务接管的旧票据为终态 `SUPERSEDED`，不伪造回执、不借用后续任务结果。按已结算或已接管的票据停止是 no-op，不能停止同 Thread 的后续任务。
 - `sourceCommandSequence` 记录源命令身份；只有当该命令已有 `appliedEntryId`（输入已应用）时才允许用子执行当前终态结算新 Join，输入尚未应用时旧回合完成不能结算新 Join。
 - `terminalEntryId` 与可空 `finalAnswerEntryId` 由 `match(terminalEntryId, finalAnswerEntryId, now)` **一次冻结**：`finalAnswerEntryId` 非空要求 `terminalEntryId` 非空，`deliveryCommandSequence` 非空必须已匹配且父存在。`matched()` 只由 `terminalEntryId` 判定，既不按 Thread version 匹配，也不等待永久子树 idle。
 - 普通结算的收敛判据：除源输入已应用外，必须同时满足**没有尚未冻结结果的直接子 Join**、**没有已冻结但未送达的子回执**、且**本 Thread 没有待处理输入**（QUEUED 消息/通知，或已物化但未越过输入水位的 APPLIED 通知）。直接子 Join 自身遵循同一判据，A-B-C 及更深委派因此自底向上自然收敛，不需要遍历全树历史空闲节点。`ThreadRuntimeStatus.IDLE` 只表示本地上下文，不等同于整次委派已可回执。Stop 的强制结算不受该判据限制。

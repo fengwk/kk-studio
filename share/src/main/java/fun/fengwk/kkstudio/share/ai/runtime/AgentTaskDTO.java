@@ -5,8 +5,8 @@ import lombok.Data;
 /**
  * Agent 任务的当前状态：票据与执行它的 Thread，加上冻结结果。
  *
- * <p>{@code state} 为 {@code RUNNING} 时尚无结果；结束后 {@code COMPLETED} 带 {@code report}，{@code ERROR} /
- * {@code CANCELLED} 带 {@code error} 与可选的 {@code partialResult}。
+ * <p>{@code state} 为 {@code RUNNING} 时尚无结果；{@code SUPERSEDED} 表示票据已被后续任务接管、不再等待结果；{@code COMPLETED}
+ * 带 {@code report}，{@code ERROR} / {@code CANCELLED} 带 {@code error} 与可选的 {@code partialResult}。
  */
 @Data
 public class AgentTaskDTO {
@@ -19,7 +19,7 @@ public class AgentTaskDTO {
   /** 执行任务的 Agent 名称。 */
   private String agent;
 
-  /** RUNNING / COMPLETED / ERROR / CANCELLED。 */
+  /** RUNNING / SUPERSEDED / COMPLETED / ERROR / CANCELLED。 */
   private String state;
 
   /** 任务完成后的最终报告。 */
