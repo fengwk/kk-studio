@@ -49,6 +49,43 @@ class HarnessStreamCatchupNotificationCodecTest {
   }
 
   @Test
+  void shouldRejectOutOfIntRangeNullAndWrongTypedFields() {
+    // 超过 int 的 JSON 整数在 tree 中成为 long/biginteger 节点，必须与 null/错类型一样被拒绝。
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> codec.decode(validJson().replace("\"attempt\":3", "\"attempt\":2147483648")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(validJson().replace("\"attempt\":3", "\"attempt\":9223372036854775808")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> codec.decode(validJson().replace("\"attempt\":3", "\"attempt\":null")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> codec.decode(validJson().replace("\"attempt\":3", "\"attempt\":true")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> codec.decode(validJson().replace("\"attempt\":3", "\"attempt\":[3]")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(
+                validJson()
+                    .replace(
+                        "\"originNodeId\":\"00000000-0000-0000-0000-000000000384\"",
+                        "\"originNodeId\":null")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(
+                validJson()
+                    .replace(
+                        "\"threadId\":\"00000000-0000-0000-0000-000000000001\"",
+                        "\"threadId\":1")));
+  }
+
+  @Test
   void shouldRejectNonCanonicalUuidAndNonPositiveOrNonIntegerAttempt() {
     assertThrows(
         IllegalArgumentException.class,
