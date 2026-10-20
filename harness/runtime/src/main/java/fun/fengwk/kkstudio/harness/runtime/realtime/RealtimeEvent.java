@@ -15,7 +15,8 @@ import java.util.UUID;
  * snapshot-first 客户端能够丢弃旧 attempt 的残留片段。PostgreSQL notification adapter 将其编码为 live overlay
  * envelope；Entry、Invocation 或 Thread 的恢复逻辑不得依赖该 event 是否存在。
  */
-public sealed interface RealtimeEvent permits RealtimeEvent.ModelDelta, RealtimeEvent.ToolPartial {
+public sealed interface RealtimeEvent
+    permits RealtimeEvent.ModelDelta, RealtimeEvent.ModelCheckpoint, RealtimeEvent.ToolPartial {
 
   UUID threadId();
 
@@ -75,6 +76,39 @@ public sealed interface RealtimeEvent permits RealtimeEvent.ModelDelta, Realtime
     @Override
     public RealtimeEventType type() {
       return RealtimeEventType.MODEL_DELTA;
+    }
+  }
+
+  /**
+   * 一次已提交的 stream checkpoint：{@code sequence} 是持久化 checkpoint 覆盖到的 delta sequence。 浏览器收到后回读 snapshot
+   * 即可以该 checkpoint 为基线继续拼接后续 delta（追帧完成信号）。
+   */
+  record ModelCheckpoint(
+      UUID threadId, UUID modelInvocationId, int attempt, long sequence, Instant createdAt)
+      implements RealtimeEvent {
+
+    public ModelCheckpoint {
+      Objects.requireNonNull(threadId, "threadId");
+      Objects.requireNonNull(modelInvocationId, "modelInvocationId");
+      if (attempt <= 0) {
+        throw new IllegalArgumentException("attempt must be positive");
+      }
+      if (sequence <= 0) {
+        throw new IllegalArgumentException("sequence must be positive");
+      }
+      createdAt =
+          HarnessStoreTime.requireMillisecondPrecision(
+              Objects.requireNonNull(createdAt, "createdAt"));
+    }
+
+    @Override
+    public Subject subject() {
+      return new Subject(SubjectKind.MODEL_INVOCATION, modelInvocationId);
+    }
+
+    @Override
+    public RealtimeEventType type() {
+      return RealtimeEventType.MODEL_CHECKPOINT;
     }
   }
 

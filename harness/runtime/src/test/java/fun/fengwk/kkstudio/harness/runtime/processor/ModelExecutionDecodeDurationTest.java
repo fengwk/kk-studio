@@ -55,8 +55,8 @@ class ModelExecutionDecodeDurationTest {
 
   private static final Instant NOW = ThreadProcessorTestSupport.NOW;
   private static final Duration FALLBACK_DELAY = Duration.ofSeconds(1);
-  private static final StreamFlushConfig FLUSH_CONFIG =
-      new StreamFlushConfig(Duration.ofMinutes(1), 1024, 1024 * 1024);
+  private static final ModelStreamConfig FLUSH_CONFIG =
+      new ModelStreamConfig(Duration.ofMinutes(1), 1024, 1024 * 1024, Duration.ofMinutes(1));
   private static final InvocationRetryPolicy NO_RETRY =
       new InvocationRetryPolicy(
           0, InvocationRetryBackoffStrategy.FIXED, Duration.ofSeconds(5), Duration.ofSeconds(5));

@@ -25,8 +25,9 @@ import java.util.UUID;
 /**
  * 有界 realtime projection 的确定性 strict JSON codec。
  *
- * <p>支持 Model delta 与 Tool partial；top-level exact field set：Model delta 为 {@code {threadId,
- * subjectKind, subjectId, attempt, sequence, type, payload, createdAt}}，Tool partial 为 {@code
+ * <p>支持 Model delta、Model checkpoint 与 Tool partial；top-level exact field set：Model delta 为 {@code {threadId,
+ * subjectKind, subjectId, attempt, sequence, type, payload, createdAt}}，Model checkpoint 为同一字段集去掉 {@code
+ * payload}，Tool partial 为 {@code
  * {threadId, subjectKind, subjectId, attempt, eventId, type, payload, createdAt}}。{@code attempt} 与
  * {@code sequence} 只出现在 top-level；{@code eventId} 是 Tool partial 事件自身的 canonical UUID identity。
  *
@@ -77,6 +78,9 @@ public final class RealtimeEventJsonCodec {
           "payload",
           "createdAt");
 
+  private static final Set<String> CHECKPOINT_EVENT_FIELDS =
+      orderedSet("threadId", "subjectKind", "subjectId", "attempt", "sequence", "type", "createdAt");
+
   private static final Set<String> TEXT_PAYLOAD_FIELDS = orderedSet("kind", "text");
   private static final Set<String> THINKING_PAYLOAD_FIELDS = orderedSet("kind", "text");
   private static final Set<String> TOOL_CALL_PAYLOAD_FIELDS =
@@ -85,6 +89,7 @@ public final class RealtimeEventJsonCodec {
   private static final String MODEL_INVOCATION = RealtimeEvent.SubjectKind.MODEL_INVOCATION.name();
   private static final String TOOL_INVOCATION = RealtimeEvent.SubjectKind.TOOL_INVOCATION.name();
   private static final String MODEL_DELTA = RealtimeEventType.MODEL_DELTA.name();
+  private static final String MODEL_CHECKPOINT = RealtimeEventType.MODEL_CHECKPOINT.name();
   private static final String TOOL_PARTIAL = RealtimeEventType.TOOL_PARTIAL.name();
 
   private static final String TEXT_DELTA = "TEXT_DELTA";
@@ -104,6 +109,9 @@ public final class RealtimeEventJsonCodec {
     Objects.requireNonNull(event, "event");
     if (event instanceof RealtimeEvent.ModelDelta delta) {
       return encodeModelDelta(delta);
+    }
+    if (event instanceof RealtimeEvent.ModelCheckpoint checkpoint) {
+      return encodeModelCheckpoint(checkpoint);
     }
     if (event instanceof RealtimeEvent.ToolPartial partial) {
       return encodeToolPartial(partial);
@@ -131,7 +139,11 @@ public final class RealtimeEventJsonCodec {
     RealtimeEventType type = readEnum(RealtimeEventType.class, typeName, "realtimeEvent.type");
     requireExactFields(
         node,
-        type == RealtimeEventType.MODEL_DELTA ? MODEL_EVENT_FIELDS : TOOL_EVENT_FIELDS,
+        switch (type) {
+          case MODEL_DELTA -> MODEL_EVENT_FIELDS;
+          case MODEL_CHECKPOINT -> CHECKPOINT_EVENT_FIELDS;
+          case TOOL_PARTIAL -> TOOL_EVENT_FIELDS;
+        },
         "realtimeEvent");
 
     UUID threadId = requiredCanonicalUuid(node, "threadId", "realtimeEvent");
@@ -141,7 +153,8 @@ public final class RealtimeEventJsonCodec {
     UUID subjectId = requiredCanonicalUuid(node, "subjectId", "realtimeEvent");
     int attempt = requiredPositiveInt(node, "attempt", "realtimeEvent");
     JsonNode payloadNode = node.get("payload");
-    if (payloadNode == null || !payloadNode.isObject()) {
+    if (type != RealtimeEventType.MODEL_CHECKPOINT
+        && (payloadNode == null || !payloadNode.isObject())) {
       throw new IllegalArgumentException("realtimeEvent.payload must be a JSON object");
     }
     String createdAtText = requiredText(node, "createdAt", "realtimeEvent");
@@ -161,6 +174,14 @@ public final class RealtimeEventJsonCodec {
       long sequence = requiredPositiveIntegralLong(node, "sequence", "realtimeEvent");
       ProviderStreamEvent delta = decodePayload((ObjectNode) payloadNode);
       return new RealtimeEvent.ModelDelta(threadId, subjectId, attempt, sequence, delta, createdAt);
+    }
+    if (type == RealtimeEventType.MODEL_CHECKPOINT) {
+      if (subjectKind != RealtimeEvent.SubjectKind.MODEL_INVOCATION) {
+        throw new IllegalArgumentException(
+            "MODEL_CHECKPOINT subjectKind must be MODEL_INVOCATION: " + subjectKindName);
+      }
+      long sequence = requiredPositiveIntegralLong(node, "sequence", "realtimeEvent");
+      return new RealtimeEvent.ModelCheckpoint(threadId, subjectId, attempt, sequence, createdAt);
     }
     if (type == RealtimeEventType.TOOL_PARTIAL) {
       if (subjectKind != RealtimeEvent.SubjectKind.TOOL_INVOCATION) {
@@ -187,6 +208,18 @@ public final class RealtimeEventJsonCodec {
     node.put("type", MODEL_DELTA);
     node.set("payload", encodePayload(delta.delta()));
     node.put("createdAt", delta.createdAt().toString());
+    return node;
+  }
+
+  private static ObjectNode encodeModelCheckpoint(RealtimeEvent.ModelCheckpoint checkpoint) {
+    ObjectNode node = NODES.objectNode();
+    node.put("threadId", checkpoint.threadId().toString());
+    node.put("subjectKind", MODEL_INVOCATION);
+    node.put("subjectId", checkpoint.modelInvocationId().toString());
+    node.put("attempt", checkpoint.attempt());
+    node.put("sequence", checkpoint.sequence());
+    node.put("type", MODEL_CHECKPOINT);
+    node.put("createdAt", checkpoint.createdAt().toString());
     return node;
   }
 

@@ -136,6 +136,10 @@ class ModelProcessorTest {
   private static final ProcessorLeaseConfig LEASE_CONFIG =
       new ProcessorLeaseConfig(Duration.ofSeconds(30), Duration.ofSeconds(5));
   private static final Duration FALLBACK_DELAY = Duration.ofSeconds(7);
+  /** 逐事件即时推送、1ms 后 checkpoint 的测试配置。 */
+  private static final ModelStreamConfig IMMEDIATE_STREAM =
+      new ModelStreamConfig(Duration.ofMillis(1), 1, 1, Duration.ofMillis(1));
+
   private static final InvocationRetryPolicy NO_RETRY =
       new InvocationRetryPolicy(
           0, InvocationRetryBackoffStrategy.FIXED, Duration.ofSeconds(1), Duration.ofSeconds(1));
@@ -717,7 +721,7 @@ class ModelProcessorTest {
   /** checkpoint 只累积 text/thinking；tool-call fragment 只推进 sequence，绝不进入 checkpoint。 */
   @Test
   void checkpointKeepsPrefixAndExcludesToolFragments() {
-    Fixture fixture = fixture(NO_RETRY, requestWithTool(), StreamFlushConfig.IMMEDIATE);
+    Fixture fixture = fixture(NO_RETRY, requestWithTool(), IMMEDIATE_STREAM);
     fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
     assertEquals(
         ProcessResult.STARTED,
@@ -865,7 +869,7 @@ class ModelProcessorTest {
                 InvocationRetryBackoffStrategy.FIXED,
                 Duration.ofSeconds(5),
                 Duration.ofSeconds(5)),
-            StreamFlushConfig.IMMEDIATE);
+            IMMEDIATE_STREAM);
     fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
     assertEquals(
         ProcessResult.STARTED,
@@ -969,7 +973,7 @@ class ModelProcessorTest {
   /** 压缩子空 final（COMPLETE 且无 tool calls 且空文本）按 INVALID_RESPONSE 处理，不落空摘要。 */
   @Test
   void compactionChildEmptyCompleteFinalFailsAsInvalidResponse() {
-    Fixture fixture = compactionFixture(NO_RETRY, StreamFlushConfig.IMMEDIATE);
+    Fixture fixture = compactionFixture(NO_RETRY, IMMEDIATE_STREAM);
     fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
     assertEquals(
         ProcessResult.STARTED,
@@ -1002,7 +1006,7 @@ class ModelProcessorTest {
                 InvocationRetryBackoffStrategy.FIXED,
                 Duration.ofSeconds(5),
                 Duration.ofSeconds(5)),
-            StreamFlushConfig.IMMEDIATE);
+            IMMEDIATE_STREAM);
     fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
     assertEquals(
         ProcessResult.STARTED,
@@ -1051,7 +1055,7 @@ class ModelProcessorTest {
                 InvocationRetryBackoffStrategy.FIXED,
                 Duration.ofSeconds(5),
                 Duration.ofSeconds(5)),
-            StreamFlushConfig.IMMEDIATE);
+            IMMEDIATE_STREAM);
     fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
     assertEquals(
         ProcessResult.STARTED,
@@ -1095,7 +1099,7 @@ class ModelProcessorTest {
                 InvocationRetryBackoffStrategy.FIXED,
                 Duration.ofSeconds(5),
                 Duration.ofSeconds(5)),
-            StreamFlushConfig.IMMEDIATE);
+            IMMEDIATE_STREAM);
     fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
     assertEquals(
         ProcessResult.STARTED,
@@ -1120,7 +1124,7 @@ class ModelProcessorTest {
   /** 配置了 tools 的压缩子合法 tool 回合（COMPLETE + tool calls）按普通 Runtime 推进，且不再抑制 replay 与实时 delta 发布。 */
   @Test
   void compactionChildToolTurnProceedsLikeOrdinaryRuntimeAndPublishesDeltas() {
-    Fixture fixture = compactionFixture(NO_RETRY, StreamFlushConfig.IMMEDIATE);
+    Fixture fixture = compactionFixture(NO_RETRY, IMMEDIATE_STREAM);
     fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
     assertEquals(
         ProcessResult.STARTED,
@@ -1151,7 +1155,7 @@ class ModelProcessorTest {
   /** 压缩子 LENGTH 即使同时带 tool call 也是被截断的结果：截断的 tool intent 不是可执行意图，必须走 INVALID_RESPONSE 而不执行工具。 */
   @Test
   void compactionChildTruncatedToolIntentIsInvalidResponseWithoutExecutingTools() {
-    Fixture fixture = compactionFixture(NO_RETRY, StreamFlushConfig.IMMEDIATE);
+    Fixture fixture = compactionFixture(NO_RETRY, IMMEDIATE_STREAM);
     fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
     assertEquals(
         ProcessResult.STARTED,
@@ -1472,7 +1476,7 @@ class ModelProcessorTest {
                 Duration.ofSeconds(5),
                 Duration.ofSeconds(5)),
             requestSpec(),
-            StreamFlushConfig.IMMEDIATE);
+            IMMEDIATE_STREAM);
     FakeHandle handle = new FakeHandle();
     fixture.gateway.queue(new ModelGateway.Started(handle));
     assertEquals(
@@ -2134,7 +2138,7 @@ class ModelProcessorTest {
   /** 非法终态（stream 冲突 / canonical 不变量违反）：转 FAILED(INVALID_RESPONSE)（重试策略允许时先 retry）。 */
   @Test
   void conflictingFinalResponseFailsWithInvalidResponse() {
-    Fixture fixture = fixture(StreamFlushConfig.IMMEDIATE);
+    Fixture fixture = fixture(IMMEDIATE_STREAM);
     fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
     assertEquals(
         ProcessResult.STARTED,
@@ -2263,7 +2267,7 @@ class ModelProcessorTest {
   /** 事件管线异常（tool-call identity 冲突）：转 FAILED(INVALID_RESPONSE)，已发布 delta 保持。 */
   @Test
   void conflictingToolIdentityEventFailsWithInvalidResponse() {
-    Fixture fixture = fixture(NO_RETRY, requestWithTool(), StreamFlushConfig.IMMEDIATE);
+    Fixture fixture = fixture(NO_RETRY, requestWithTool(), IMMEDIATE_STREAM);
     fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
     assertEquals(
         ProcessResult.STARTED,
@@ -2880,7 +2884,7 @@ class ModelProcessorTest {
   /** 每个 safe delta 在发布 realtime 前先持久化完整 checkpoint；tool fragment 永不 checkpoint。 */
   @Test
   void everySafeDeltaPersistsCheckpointBeforeRealtimePublication() {
-    Fixture fixture = fixture(NO_RETRY, requestWithTool(), StreamFlushConfig.IMMEDIATE);
+    Fixture fixture = fixture(NO_RETRY, requestWithTool(), IMMEDIATE_STREAM);
     HarnessRuntime runtime =
         new HarnessRuntime(
             fixture.store, (threadId, path, preparation) -> null, () -> CompactionConfig.DEFAULT);
@@ -3780,17 +3784,17 @@ class ModelProcessorTest {
     return fixture(retryPolicy, requestSpec());
   }
 
-  private Fixture fixture(StreamFlushConfig flushConfig) {
+  private Fixture fixture(ModelStreamConfig flushConfig) {
     return new Fixture(NO_RETRY, requestSpec(), newScheduler(), false, flushConfig);
   }
 
   /** 压缩子 fixture：fixture Thread 是本 fixture 自己创建的 COMPACTION Join 的 child。 */
   private Fixture compactionFixture(InvocationRetryPolicy retryPolicy) {
-    return compactionFixture(retryPolicy, StreamFlushConfig.DEFAULT);
+    return compactionFixture(retryPolicy, ModelStreamConfig.DEFAULT);
   }
 
   private Fixture compactionFixture(
-      InvocationRetryPolicy retryPolicy, StreamFlushConfig flushConfig) {
+      InvocationRetryPolicy retryPolicy, ModelStreamConfig flushConfig) {
     return new Fixture(retryPolicy, requestSpec(), newScheduler(), true, flushConfig);
   }
 
@@ -3805,7 +3809,7 @@ class ModelProcessorTest {
         requestSpec(),
         newScheduler(),
         false,
-        StreamFlushConfig.DEFAULT,
+        ModelStreamConfig.DEFAULT,
         Runnable::run,
         null,
         httpErrorPolicyProvider);
@@ -3814,7 +3818,7 @@ class ModelProcessorTest {
   private Fixture fixture(
       InvocationRetryPolicy retryPolicy,
       ModelRequestSpec requestSpec,
-      StreamFlushConfig flushConfig) {
+      ModelStreamConfig flushConfig) {
     return new Fixture(retryPolicy, requestSpec, newScheduler(), false, flushConfig);
   }
 
@@ -3849,7 +3853,7 @@ class ModelProcessorTest {
         InvocationRetryPolicy retryPolicy,
         ModelRequestSpec requestSpec,
         ScheduledExecutorService scheduler) {
-      this(retryPolicy, requestSpec, scheduler, false, StreamFlushConfig.DEFAULT);
+      this(retryPolicy, requestSpec, scheduler, false, ModelStreamConfig.DEFAULT);
     }
 
     Fixture(
@@ -3857,7 +3861,7 @@ class ModelProcessorTest {
         ModelRequestSpec requestSpec,
         ScheduledExecutorService scheduler,
         boolean compactionChild,
-        StreamFlushConfig flushConfig) {
+        ModelStreamConfig flushConfig) {
       this(retryPolicy, requestSpec, scheduler, compactionChild, flushConfig, Runnable::run);
     }
 
@@ -3866,7 +3870,7 @@ class ModelProcessorTest {
         ModelRequestSpec requestSpec,
         ScheduledExecutorService scheduler,
         boolean compactionChild,
-        StreamFlushConfig flushConfig,
+        ModelStreamConfig flushConfig,
         Executor flushExecutor) {
       this(
           retryPolicy,
@@ -3888,7 +3892,7 @@ class ModelProcessorTest {
           requestSpec,
           newScheduler(),
           false,
-          StreamFlushConfig.DEFAULT,
+          ModelStreamConfig.DEFAULT,
           Runnable::run,
           toolHistoryActionResolver,
           ModelHttpErrorPolicyProvider.DEFAULT);
@@ -3899,7 +3903,7 @@ class ModelProcessorTest {
         ModelRequestSpec requestSpec,
         ScheduledExecutorService scheduler,
         boolean compactionChild,
-        StreamFlushConfig flushConfig,
+        ModelStreamConfig flushConfig,
         Executor flushExecutor,
         ToolHistoryActionResolver toolHistoryActionResolver,
         ModelHttpErrorPolicyProvider httpErrorPolicyProvider) {
@@ -3990,7 +3994,7 @@ class ModelProcessorTest {
         gateway,
         new RecordingSink(),
         new ModelProcessorConfig(
-            LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, StreamFlushConfig.DEFAULT, null),
+            LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, ModelStreamConfig.DEFAULT, null),
         Clock.fixed(NOW, ZoneOffset.UTC),
         newScheduler(),
         Runnable::run,

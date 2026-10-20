@@ -167,6 +167,19 @@ public final class ModelProcessor implements AutoCloseable {
     return true;
   }
 
+  /**
+   * 追帧：让本进程内正在执行该 Thread 的 Model execution 立即持久化 checkpoint 并发布 checkpoint 事件；不持有该 Thread 的执行时为 no-op。
+   * 不阻塞调用方，可从实时通道的任意线程调用。
+   */
+  public void requestCheckpoint(UUID threadId) {
+    Objects.requireNonNull(threadId, "threadId");
+    for (ModelExecution execution : executions.values()) {
+      if (execution.threadId().equals(threadId)) {
+        execution.requestCheckpoint();
+      }
+    }
+  }
+
   /** 取消全部本地 execution 并停止各自 heartbeat；不 shutdown 调用方注入的 scheduler；幂等。 */
   @Override
   public void close() {

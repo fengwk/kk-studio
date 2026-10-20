@@ -261,7 +261,7 @@ class ExecutionConcurrentDeletionTest {
                   ThreadProcessorTestSupport.LEASE_CONFIG,
                   () -> ToolProcessorTestSupport.NO_RETRY,
                   Duration.ofSeconds(1),
-                  StreamFlushConfig.IMMEDIATE),
+                  new ModelStreamConfig(Duration.ofMillis(1), 1, 1, Duration.ofMinutes(10))),
               "test-provider",
               Clock.fixed(ThreadProcessorTestSupport.NOW, ZoneOffset.UTC),
               scheduler,
