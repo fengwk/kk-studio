@@ -85,7 +85,11 @@ class HarnessRuntimePostgresqlLifecycleIntegrationTest {
   private SmartLifecycle harnessRuntimeLifecycle;
 
   @Autowired private HarnessWorkDispatcher harnessWorkDispatcher;
-  @Autowired private PostgresqlNotificationLoop postgresqlNotificationLoop;
+
+  @Autowired
+  @Qualifier("postgresqlNotificationLoop")
+  private PostgresqlNotificationLoop postgresqlNotificationLoop;
+
   @Autowired private JdbcTemplate jdbc;
 
   @BeforeEach
