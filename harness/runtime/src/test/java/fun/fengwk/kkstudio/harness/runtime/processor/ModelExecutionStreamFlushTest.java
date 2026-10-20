@@ -2628,9 +2628,9 @@ class ModelExecutionStreamFlushTest {
             });
   }
 
-  private static Fixture createFixtureWithExecutor(
+  private Fixture createFixtureWithExecutor(
       ModelStreamConfig config, ScheduledExecutorService scheduler, Executor flushExecutor) {
-    return new FixtureFactory(config, scheduler, flushExecutor).create();
+    return createFixture(config, NO_RETRY, scheduler, flushExecutor);
   }
 
   private static void awaitLatch(CountDownLatch latch) {
@@ -2660,38 +2660,6 @@ class ModelExecutionStreamFlushTest {
         throw new RejectedExecutionException("executor queue full");
       }
       task.run();
-    }
-  }
-
-  private static final class FixtureFactory {
-    private final ModelStreamConfig config;
-    private final ScheduledExecutorService scheduler;
-    private final Executor flushExecutor;
-
-    private FixtureFactory(
-        ModelStreamConfig config, ScheduledExecutorService scheduler, Executor flushExecutor) {
-      this.config = config;
-      this.scheduler = scheduler;
-      this.flushExecutor = flushExecutor;
-    }
-
-    private Fixture create() {
-      CountingStore store = new CountingStore(new InMemoryHarnessStore());
-      Baseline baseline = seedBaseline(store.delegate(), NOW);
-      UUID invocationId = seedInvocation(store.delegate(), baseline, requestSpec(), NOW);
-      FakeGateway gateway = new FakeGateway();
-      RecordingSink sink = new RecordingSink();
-      ModelProcessor processor =
-          new ModelProcessor(
-              store,
-              gateway,
-              sink,
-              new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, config),
-              Clock.fixed(NOW, ZoneOffset.UTC),
-              scheduler,
-              Runnable::run,
-              flushExecutor);
-      return new Fixture(store, baseline, invocationId, gateway, sink, processor, config);
     }
   }
 
