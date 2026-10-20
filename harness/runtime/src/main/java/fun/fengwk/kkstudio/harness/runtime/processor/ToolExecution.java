@@ -5,7 +5,6 @@ import lombok.extern.slf4j.Slf4j;
 import fun.fengwk.kkstudio.harness.common.result.BinaryResultContent;
 import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.harness.common.result.ResultContent;
-import fun.fengwk.kkstudio.harness.runtime.ThreadTreeLocks;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
@@ -54,7 +53,9 @@ import java.util.function.Consumer;
  * 1 MiB 确定性 INVALID_RESULT，绝不把超大行写入 PostgreSQL）；retryable 失败只在 sideEffect 为 READ_ONLY / IDEMPOTENT
  * 且 retryPolicy 允许时重试，NON_IDEMPOTENT 绝不自动重试。duplicate / late / stale 一律 no-op；lost ownership
  * 立即关闭回调门控、cancel handle 并停止 heartbeat，且不反写任何持久化状态。{@code handle.activate()} 抛异常即激活失败：恰好一次 UNKNOWN
- * terminal，激活前缓冲的信号全部丢弃。
+ * terminal，激活前缓冲的信号全部丢弃。markRunning / retry / terminal 只写本 Thread 的 Thread/Tool/Work：事务按本 Thread 行
+ * -&gt; ToolInvocation -&gt; claimed Work 加锁并以 Thread 行锁与 delete/Stop 串行化，唤醒 THREAD Work 只是
+ * hint，不需要执行树锁。
  */
 @Slf4j
 final class ToolExecution implements ToolGateway.Listener {
@@ -543,7 +544,6 @@ final class ToolExecution implements ToolGateway.Listener {
         store.transaction(
             tx -> {
               Instant now = tx.now();
-              ThreadTreeLocks.lockForThread(tx, threadId);
               ThreadState thread = tx.lockThread(threadId).orElse(null);
               if (thread == null) {
                 return false;
@@ -568,7 +568,6 @@ final class ToolExecution implements ToolGateway.Listener {
         store.transaction(
             tx -> {
               Instant now = tx.now();
-              ThreadTreeLocks.lockForThread(tx, threadId);
               ThreadState thread = tx.lockThread(threadId).orElse(null);
               if (thread == null) {
                 return false;
@@ -593,7 +592,6 @@ final class ToolExecution implements ToolGateway.Listener {
           store.transaction(
               tx -> {
                 Instant now = tx.now();
-                ThreadTreeLocks.lockForThread(tx, threadId);
                 ThreadState thread = tx.lockThread(threadId).orElse(null);
                 if (thread == null) {
                   return false;
@@ -625,7 +623,6 @@ final class ToolExecution implements ToolGateway.Listener {
           store.transaction(
               tx -> {
                 Instant now = tx.now();
-                ThreadTreeLocks.lockForThread(tx, threadId);
                 ThreadState thread = tx.lockThread(threadId).orElse(null);
                 if (thread == null) {
                   return false;
