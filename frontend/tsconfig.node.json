@@ -21,6 +21,7 @@
     "vite.config.ts",
     "vite.*.config.ts",
     "vite.*.ts",
+    "browser-test-config.ts",
     "playwright.config.ts",
     "playwright.config.test.ts"
   ]

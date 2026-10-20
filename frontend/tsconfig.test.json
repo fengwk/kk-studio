@@ -27,6 +27,7 @@
     "src",
     "browser-tests",
     "vite.config.test.ts",
+    "browser-test-config.ts",
     "playwright.config.test.ts"
   ]
 }
