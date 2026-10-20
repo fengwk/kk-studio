@@ -32,7 +32,8 @@ public final class ClusterNodePresence {
   private final LongSupplier nanoClock;
 
   private boolean cached;
-  private long refreshAtNanos;
+  private boolean initialized;
+  private long refreshedAtNanos;
 
   public ClusterNodePresence(JdbcTemplate jdbcTemplate, UUID localNodeId) {
     this(jdbcTemplate, localNodeId, DEFAULT_CACHE_TTL, System::nanoTime);
@@ -54,13 +55,15 @@ public final class ClusterNodePresence {
   /** 依据缓存快照判断除本节点外是否还有未过期注册行。 */
   public synchronized boolean hasOtherActiveNodes() {
     long now = nanoClock.getAsLong();
-    if (now < refreshAtNanos) {
+    // nanoTime 的起点可以为负数，并且会回绕；只比较经过的时间，不把 0 当作尚未查询的 deadline。
+    if (initialized && now - refreshedAtNanos < cacheTtlNanos) {
       return cached;
     }
     Boolean active =
         jdbcTemplate.queryForObject(HAS_OTHER_ACTIVE_NODES_SQL, Boolean.class, localNodeId);
     cached = Boolean.TRUE.equals(active);
-    refreshAtNanos = now + cacheTtlNanos;
+    refreshedAtNanos = now;
+    initialized = true;
     return cached;
   }
 }
