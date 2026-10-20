@@ -36,6 +36,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 class PostgresqlRealtimeEventSinkTest {
 
   private static final Instant NOW = Instant.parse("2026-08-05T00:00:00Z");
+  private static final UUID ORIGIN = id(900L);
   private static final String BATCH_SQL =
       "select pg_notify(?, payload)"
           + " from unnest(?::text[]) with ordinality as t(payload, ord)"
@@ -47,7 +48,7 @@ class PostgresqlRealtimeEventSinkTest {
   @Test
   void appendSendsCanonicalEventThroughJdbcTemplate() {
     RecordingJdbcTemplate jdbcTemplate = new RecordingJdbcTemplate();
-    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(jdbcTemplate, codec);
+    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(jdbcTemplate, codec, ORIGIN);
     RealtimeEvent.ModelDelta event = modelDelta("hello");
 
     sink.append(event);
@@ -57,6 +58,7 @@ class PostgresqlRealtimeEventSinkTest {
     RealtimeNotificationCodec.Envelope.Event notification =
         assertInstanceOf(
             RealtimeNotificationCodec.Envelope.Event.class, codec.decode(jdbcTemplate.payload));
+    assertEquals(ORIGIN, notification.originNodeId());
     assertEquals(event, notification.event());
     assertTrue(jdbcTemplate.executed);
   }
@@ -65,10 +67,10 @@ class PostgresqlRealtimeEventSinkTest {
   @Test
   void oversizedEventIsReplacedWithSmallResyncNotification() {
     RecordingJdbcTemplate jdbcTemplate = new RecordingJdbcTemplate();
-    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(jdbcTemplate, codec);
+    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(jdbcTemplate, codec, ORIGIN);
     RealtimeEvent.ModelDelta event = modelDelta("界".repeat(3000));
     assertTrue(
-        codec.encodeEvent(event).getBytes(StandardCharsets.UTF_8).length
+        codec.encodeEvent(ORIGIN, event).getBytes(StandardCharsets.UTF_8).length
             > PostgresqlRealtimeEventSink.MAX_NOTIFICATION_BYTES);
 
     sink.append(event);
@@ -76,6 +78,7 @@ class PostgresqlRealtimeEventSinkTest {
     RealtimeNotificationCodec.Envelope.Resync notification =
         assertInstanceOf(
             RealtimeNotificationCodec.Envelope.Resync.class, codec.decode(jdbcTemplate.payload));
+    assertEquals(ORIGIN, notification.originNodeId());
     assertEquals(event.threadId(), notification.threadId());
     assertEquals(PostgresqlRealtimeEventSink.OVERSIZE_REASON, notification.reason());
     assertTrue(
@@ -87,14 +90,15 @@ class PostgresqlRealtimeEventSinkTest {
   @Test
   void eventAtNotificationByteLimitIsStillSentAsEvent() {
     RecordingJdbcTemplate jdbcTemplate = new RecordingJdbcTemplate();
-    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(jdbcTemplate, codec);
-    int emptyEventBytes = codec.encodeEvent(modelDelta("")).getBytes(StandardCharsets.UTF_8).length;
+    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(jdbcTemplate, codec, ORIGIN);
+    int emptyEventBytes =
+        codec.encodeEvent(ORIGIN, modelDelta("")).getBytes(StandardCharsets.UTF_8).length;
     RealtimeEvent.ModelDelta event =
         modelDelta(
             "a".repeat(PostgresqlRealtimeEventSink.MAX_NOTIFICATION_BYTES - emptyEventBytes));
     assertEquals(
         PostgresqlRealtimeEventSink.MAX_NOTIFICATION_BYTES,
-        codec.encodeEvent(event).getBytes(StandardCharsets.UTF_8).length);
+        codec.encodeEvent(ORIGIN, event).getBytes(StandardCharsets.UTF_8).length);
 
     sink.append(event);
 
@@ -108,7 +112,7 @@ class PostgresqlRealtimeEventSinkTest {
   @Test
   void appendSendsCanonicalToolPartialEvent() {
     RecordingJdbcTemplate jdbcTemplate = new RecordingJdbcTemplate();
-    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(jdbcTemplate, codec);
+    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(jdbcTemplate, codec, ORIGIN);
     RealtimeEvent.ToolPartial event = toolPartial(id(99L));
 
     sink.append(event);
@@ -133,7 +137,7 @@ class PostgresqlRealtimeEventSinkTest {
             throw failure;
           }
         };
-    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(jdbcTemplate, codec);
+    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(jdbcTemplate, codec, ORIGIN);
 
     assertEquals(
         failure, assertThrows(IllegalStateException.class, () -> sink.append(modelDelta("x"))));
@@ -143,7 +147,7 @@ class PostgresqlRealtimeEventSinkTest {
   @Test
   void appendAllWithEmptyListIssuesNoSql() {
     RecordingJdbcTemplate jdbcTemplate = new RecordingJdbcTemplate();
-    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(jdbcTemplate, codec);
+    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(jdbcTemplate, codec, ORIGIN);
 
     sink.appendAll(List.of());
 
@@ -158,7 +162,7 @@ class PostgresqlRealtimeEventSinkTest {
   @Test
   void appendAllSendsEveryEnvelopeInOneOrderedRoundtrip() {
     RecordingJdbcTemplate jdbcTemplate = new RecordingJdbcTemplate();
-    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(jdbcTemplate, codec);
+    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(jdbcTemplate, codec, ORIGIN);
     List<RealtimeEvent> events = new ArrayList<>();
     for (int i = 1; i <= 5; i++) {
       events.add(modelDelta("d" + i));
@@ -179,11 +183,11 @@ class PostgresqlRealtimeEventSinkTest {
   @Test
   void appendAllDegradesOnlyTheOversizedEventWithinTheBatch() {
     RecordingJdbcTemplate jdbcTemplate = new RecordingJdbcTemplate();
-    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(jdbcTemplate, codec);
+    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(jdbcTemplate, codec, ORIGIN);
     RealtimeEvent.ModelDelta oversized = modelDelta("界".repeat(3000));
     RealtimeEvent.ModelDelta normal = modelDelta("small");
     assertTrue(
-        codec.encodeEvent(oversized).getBytes(StandardCharsets.UTF_8).length
+        codec.encodeEvent(ORIGIN, oversized).getBytes(StandardCharsets.UTF_8).length
             > PostgresqlRealtimeEventSink.MAX_NOTIFICATION_BYTES);
 
     sink.appendAll(List.of(normal, oversized));
@@ -208,7 +212,7 @@ class PostgresqlRealtimeEventSinkTest {
   @Test
   void appendAllSplitsBatchesByEventCountBound() {
     RecordingJdbcTemplate jdbcTemplate = new RecordingJdbcTemplate();
-    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(jdbcTemplate, codec);
+    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(jdbcTemplate, codec, ORIGIN);
     int total = PostgresqlRealtimeEventSink.MAX_BATCH_EVENTS + 1;
     List<RealtimeEvent> events = new ArrayList<>();
     for (int i = 1; i <= total; i++) {
@@ -232,7 +236,7 @@ class PostgresqlRealtimeEventSinkTest {
   @Test
   void appendAllSplitsBatchesByEncodedByteBound() {
     RecordingJdbcTemplate jdbcTemplate = new RecordingJdbcTemplate();
-    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(jdbcTemplate, codec);
+    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(jdbcTemplate, codec, ORIGIN);
     // 每个事件编码后在 7KB 左右（仍低于单条 7900 bytes 上限，保持 EVENT 而不降级 RESYNC）。
     String filler = "x".repeat(7000);
     int total = 40;
@@ -241,7 +245,7 @@ class PostgresqlRealtimeEventSinkTest {
       events.add(modelDelta(filler + i));
     }
     int singleEventBytes =
-        codec.encodeEvent(events.getFirst()).getBytes(StandardCharsets.UTF_8).length;
+        codec.encodeEvent(ORIGIN, events.getFirst()).getBytes(StandardCharsets.UTF_8).length;
     assertTrue(
         singleEventBytes <= PostgresqlRealtimeEventSink.MAX_NOTIFICATION_BYTES,
         "fixture events must stay below the single-notification limit");
@@ -272,7 +276,7 @@ class PostgresqlRealtimeEventSinkTest {
     SQLException failure = new SQLException("batch notify failed");
     RecordingJdbcTemplate jdbcTemplate = new RecordingJdbcTemplate();
     jdbcTemplate.failOnExecute = failure;
-    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(jdbcTemplate, codec);
+    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(jdbcTemplate, codec, ORIGIN);
 
     assertThrows(
         UncategorizedSQLException.class,

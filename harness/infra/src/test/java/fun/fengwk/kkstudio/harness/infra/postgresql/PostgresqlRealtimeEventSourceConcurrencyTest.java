@@ -11,6 +11,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
 
 import java.time.Instant;
+import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -24,6 +25,7 @@ import java.util.concurrent.atomic.AtomicReference;
 class PostgresqlRealtimeEventSourceConcurrencyTest {
 
   private static final Instant NOW = Instant.parse("2026-08-05T00:00:00Z");
+  private static final UUID ORIGIN = id(900L);
 
   private final RealtimeNotificationCodec codec = new RealtimeNotificationCodec();
 
@@ -48,7 +50,7 @@ class PostgresqlRealtimeEventSourceConcurrencyTest {
           () -> {});
       Future<?> blockedDispatch =
           executor.submit(
-              () -> source.onNotification(codec.encodeEvent(modelDelta(1L, "blocked"))));
+              () -> source.onNotification(codec.encodeEvent(ORIGIN, modelDelta(1L, "blocked"))));
       assertTrue(callbackEntered.await(5, TimeUnit.SECONDS));
 
       AutoCloseable other =
@@ -57,7 +59,7 @@ class PostgresqlRealtimeEventSourceConcurrencyTest {
                   () -> source.subscribe(id(2L), ignored -> otherDelivered.countDown(), () -> {}))
               .get(1, TimeUnit.SECONDS);
       executor
-          .submit(() -> source.onNotification(codec.encodeEvent(modelDelta(2L, "other"))))
+          .submit(() -> source.onNotification(codec.encodeEvent(ORIGIN, modelDelta(2L, "other"))))
           .get(1, TimeUnit.SECONDS);
       assertTrue(otherDelivered.await(1, TimeUnit.SECONDS));
       executor.submit(() -> closeUnchecked(other)).get(1, TimeUnit.SECONDS);
@@ -91,7 +93,8 @@ class PostgresqlRealtimeEventSourceConcurrencyTest {
               },
               () -> {});
       Future<?> dispatch =
-          executor.submit(() -> source.onNotification(codec.encodeEvent(modelDelta(1L, "one"))));
+          executor.submit(
+              () -> source.onNotification(codec.encodeEvent(ORIGIN, modelDelta(1L, "one"))));
       assertTrue(callbackEntered.await(5, TimeUnit.SECONDS));
       Future<?> close =
           executor.submit(
@@ -105,7 +108,7 @@ class PostgresqlRealtimeEventSourceConcurrencyTest {
       releaseCallback.countDown();
       close.get(5, TimeUnit.SECONDS);
       dispatch.get(5, TimeUnit.SECONDS);
-      source.onNotification(codec.encodeEvent(modelDelta(1L, "dropped")));
+      source.onNotification(codec.encodeEvent(ORIGIN, modelDelta(1L, "dropped")));
 
       assertEquals(1, callbacks.get());
     } finally {
@@ -135,7 +138,8 @@ class PostgresqlRealtimeEventSourceConcurrencyTest {
           },
           resyncs::incrementAndGet);
       Future<?> dispatch =
-          executor.submit(() -> source.onNotification(codec.encodeEvent(modelDelta(1L, "one"))));
+          executor.submit(
+              () -> source.onNotification(codec.encodeEvent(ORIGIN, modelDelta(1L, "one"))));
       assertTrue(callbackEntered.await(5, TimeUnit.SECONDS));
       Future<?> firstClose =
           executor.submit(
@@ -157,7 +161,7 @@ class PostgresqlRealtimeEventSourceConcurrencyTest {
       firstClose.get(5, TimeUnit.SECONDS);
       secondClose.get(5, TimeUnit.SECONDS);
       dispatch.get(5, TimeUnit.SECONDS);
-      source.onNotification(codec.encodeEvent(modelDelta(1L, "dropped")));
+      source.onNotification(codec.encodeEvent(ORIGIN, modelDelta(1L, "dropped")));
       source.onResync();
 
       assertEquals(1, callbacks.get());
@@ -189,9 +193,9 @@ class PostgresqlRealtimeEventSourceConcurrencyTest {
               () -> {}));
 
       executor
-          .submit(() -> source.onNotification(codec.encodeEvent(modelDelta(1L, "one"))))
+          .submit(() -> source.onNotification(codec.encodeEvent(ORIGIN, modelDelta(1L, "one"))))
           .get(5, TimeUnit.SECONDS);
-      source.onNotification(codec.encodeEvent(modelDelta(1L, "dropped")));
+      source.onNotification(codec.encodeEvent(ORIGIN, modelDelta(1L, "dropped")));
 
       assertEquals(1, callbacks.get());
     } finally {
@@ -216,9 +220,9 @@ class PostgresqlRealtimeEventSourceConcurrencyTest {
           () -> {});
 
       executor
-          .submit(() -> source.onNotification(codec.encodeEvent(modelDelta(1L, "one"))))
+          .submit(() -> source.onNotification(codec.encodeEvent(ORIGIN, modelDelta(1L, "one"))))
           .get(5, TimeUnit.SECONDS);
-      source.onNotification(codec.encodeEvent(modelDelta(1L, "dropped")));
+      source.onNotification(codec.encodeEvent(ORIGIN, modelDelta(1L, "dropped")));
 
       assertEquals(1, callbacks.get());
       assertThrows(
@@ -251,9 +255,11 @@ class PostgresqlRealtimeEventSourceConcurrencyTest {
       }
 
       Future<?> first =
-          executor.submit(() -> source.onNotification(codec.encodeEvent(modelDelta(1L, "one"))));
+          executor.submit(
+              () -> source.onNotification(codec.encodeEvent(ORIGIN, modelDelta(1L, "one"))));
       Future<?> second =
-          executor.submit(() -> source.onNotification(codec.encodeEvent(modelDelta(2L, "two"))));
+          executor.submit(
+              () -> source.onNotification(codec.encodeEvent(ORIGIN, modelDelta(2L, "two"))));
       assertTrue(callbacksEntered.await(5, TimeUnit.SECONDS));
       startClose.countDown();
       first.get(5, TimeUnit.SECONDS);

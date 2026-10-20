@@ -1,0 +1,77 @@
+package fun.fengwk.kkstudio.platform.environment.cluster;
+
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+import org.junit.jupiter.api.Test;
+import org.springframework.jdbc.core.JdbcTemplate;
+
+import java.time.Duration;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicLong;
+
+/** ClusterNodePresence：节点存在判定短期缓存、过期刷新与查询失败可见性。 */
+class ClusterNodePresenceTest {
+
+  private static final UUID LOCAL = UUID.fromString("00000000-0000-0000-0000-000000000900");
+
+  /** 缓存窗口内只查询一次，窗口过期后重新读取数据库现在时快照。 */
+  @Test
+  void cachesPresenceWithinWindowAndRefreshesAfterExpiry() {
+    JdbcTemplate jdbc = mock(JdbcTemplate.class);
+    when(jdbc.queryForObject(
+            eq(ClusterNodePresence.HAS_OTHER_ACTIVE_NODES_SQL), eq(Boolean.class), eq(LOCAL)))
+        .thenReturn(true, false);
+    AtomicLong now = new AtomicLong(1_000_000_000L);
+    ClusterNodePresence presence =
+        new ClusterNodePresence(jdbc, LOCAL, Duration.ofSeconds(1), now::get);
+
+    assertTrue(presence.hasOtherActiveNodes());
+    now.addAndGet(999_999_999L);
+    assertTrue(presence.hasOtherActiveNodes());
+    verify(jdbc, times(1))
+        .queryForObject(
+            eq(ClusterNodePresence.HAS_OTHER_ACTIVE_NODES_SQL), eq(Boolean.class), eq(LOCAL));
+
+    now.addAndGet(1L);
+    assertFalse(presence.hasOtherActiveNodes());
+    verify(jdbc, times(2))
+        .queryForObject(
+            eq(ClusterNodePresence.HAS_OTHER_ACTIVE_NODES_SQL), eq(Boolean.class), eq(LOCAL));
+  }
+
+  /** 查询失败必须向上抛出，不能在失败时假装只有本节点。 */
+  @Test
+  void queryFailurePropagatesAndIsNotCached() {
+    JdbcTemplate jdbc = mock(JdbcTemplate.class);
+    IllegalStateException failure = new IllegalStateException("database unavailable");
+    when(jdbc.queryForObject(
+            eq(ClusterNodePresence.HAS_OTHER_ACTIVE_NODES_SQL), eq(Boolean.class), eq(LOCAL)))
+        .thenThrow(failure)
+        .thenReturn(true);
+    AtomicLong now = new AtomicLong(1_000_000_000L);
+    ClusterNodePresence presence =
+        new ClusterNodePresence(jdbc, LOCAL, Duration.ofSeconds(1), now::get);
+
+    assertThrows(IllegalStateException.class, presence::hasOtherActiveNodes);
+    assertTrue(presence.hasOtherActiveNodes());
+    verify(jdbc, times(2))
+        .queryForObject(
+            eq(ClusterNodePresence.HAS_OTHER_ACTIVE_NODES_SQL), eq(Boolean.class), eq(LOCAL));
+  }
+
+  @Test
+  void rejectsNonPositiveCacheTtl() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ClusterNodePresence(
+                mock(JdbcTemplate.class), LOCAL, Duration.ZERO, System::nanoTime));
+  }
+}
