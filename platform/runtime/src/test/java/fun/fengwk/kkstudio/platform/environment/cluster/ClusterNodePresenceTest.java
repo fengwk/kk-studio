@@ -46,6 +46,29 @@ class ClusterNodePresenceTest {
             eq(ClusterNodePresence.HAS_OTHER_ACTIVE_NODES_SQL), eq(Boolean.class), eq(LOCAL));
   }
 
+  /** 单调时钟允许负起点与 long 回绕，第一次调用必须查库，缓存仍按经过时间精确过期。 */
+  @Test
+  void negativeOriginAndNanoTimeWrapDoNotSkipPresenceQuery() {
+    for (long start : new long[] {-2_000_000_000L, Long.MAX_VALUE - 500_000_000L}) {
+      JdbcTemplate jdbc = mock(JdbcTemplate.class);
+      when(jdbc.queryForObject(
+              eq(ClusterNodePresence.HAS_OTHER_ACTIVE_NODES_SQL), eq(Boolean.class), eq(LOCAL)))
+          .thenReturn(true, false);
+      AtomicLong now = new AtomicLong(start);
+      ClusterNodePresence presence =
+          new ClusterNodePresence(jdbc, LOCAL, Duration.ofSeconds(1), now::get);
+
+      assertTrue(presence.hasOtherActiveNodes());
+      now.addAndGet(999_999_999L);
+      assertTrue(presence.hasOtherActiveNodes());
+      now.incrementAndGet();
+      assertFalse(presence.hasOtherActiveNodes());
+      verify(jdbc, times(2))
+          .queryForObject(
+              eq(ClusterNodePresence.HAS_OTHER_ACTIVE_NODES_SQL), eq(Boolean.class), eq(LOCAL));
+    }
+  }
+
   /** 查询失败必须向上抛出，不能在失败时假装只有本节点。 */
   @Test
   void queryFailurePropagatesAndIsNotCached() {
