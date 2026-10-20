@@ -173,12 +173,12 @@ PaneTarget 有四种状态：`NEW_SESSION_DRAFT`（尚无 Session/Thread）、
 回合间的 SETTINGS 成为最新 head 时立即展示变化；后续相同快照不重复展示。
 无效快照明确提示并中断差值基准，Debug 仍保留一条已识别的 SETTINGS 事件及完整原始数据。
 
-命令批在发送前冻结 idempotency keys、payload、顺序和 cursor，连同本地草稿写入 pending storage；
+命令批在发送前冻结 idempotency keys、payload 与顺序；只有设置 / Goal 批次冻结 cursor。连同本地草稿写入 pending storage；
 写入失败中止发送。容器创建用带 owner/target 的 `kk-studio.agent-pane-acceptance` 记录，
 既有 Thread 的发送用只按 threadId 隔离的 `kk-studio.agent-thread-pending` 记录，互不伪造 owner。
 不确定网络结果保留 exact replay，锁定请求身份并提供相同请求重试或显式放弃。
 恢复时按 request identity 保护多 Pane 并发；放弃只清理本地记录，服务端可能已接受。
-明确 409 保留草稿，只有同分支纯消息的 STALE_COMMAND_CURSOR 才有限更新 cursor 重试。
+单条纯 USER_MESSAGE 不依赖 cursor，过期 cursor 不会被客户端重算或重试；设置 / Goal 批次仍以精确 cursor 提交，明确 409 保留草稿并交给既有控制面处理。
 
 Stop 复用 stopRequestId 处理未知结果，覆盖当前 Thread 与完整后代。
 `stoppedThreads` 保留逐 Thread 取消事实，根 Composer 与目标编辑区只恢复该根的

@@ -283,6 +283,9 @@ export function newThreadTarget({ sessionId, startEntryId, threadId, threadName,
  */
 export function threadTarget({ threadId, expectedHeadEntryId, expectedNextCommandSequence }) {
   canonicalUuid(threadId, 'target.threadId')
+  if (expectedHeadEntryId == null && expectedNextCommandSequence == null) {
+    return { type: 'THREAD', threadId }
+  }
   canonicalUuid(expectedHeadEntryId, 'target.expectedHeadEntryId')
   positiveDecimal(expectedNextCommandSequence, 'target.expectedNextCommandSequence')
   return {
@@ -339,15 +342,18 @@ export async function acceptCommandBatch(ctx, { owner, target, commands }) {
 
   let accepted
   if (target.type === 'THREAD') {
-    // 既有 Thread 续写面 owner-free：body 只带 cursor 与 commands，绝不发送 owner/target。
+    // 既有 Thread 续写面 owner-free：body 只带 commands 与（可选）cursor，绝不发送 owner/target。
     const threadId = canonicalUuid(target.threadId, 'target.threadId')
-    const body = {
-      expectedHeadEntryId: canonicalUuid(target.expectedHeadEntryId, 'target.expectedHeadEntryId'),
-      expectedNextCommandSequence: positiveDecimal(
+    const body = { commands }
+    if (target.expectedHeadEntryId != null || target.expectedNextCommandSequence != null) {
+      body.expectedHeadEntryId = canonicalUuid(
+        target.expectedHeadEntryId,
+        'target.expectedHeadEntryId',
+      )
+      body.expectedNextCommandSequence = positiveDecimal(
         target.expectedNextCommandSequence,
         'target.expectedNextCommandSequence',
-      ),
-      commands,
+      )
     }
     const { status, json } = await ctx.call(
       'POST',

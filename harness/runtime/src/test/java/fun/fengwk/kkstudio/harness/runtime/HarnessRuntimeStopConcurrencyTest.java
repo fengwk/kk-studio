@@ -19,10 +19,13 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
+import fun.fengwk.kkstudio.harness.runtime.thread.command.SetAgentCommandPayload;
 
 import java.time.Clock;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutorService;
@@ -111,11 +114,11 @@ class HarnessRuntimeStopConcurrencyTest {
   }
 
   /**
-   * 同 Thread 上的两个并发 acceptCommands（相同 cursor、不同 client id）：Thread 行锁串行化后恰好一个赢得 cursor
-   * admission，败者必然 STALE_COMMAND_CURSOR，最终 nextCommandSequence 精确推进一次。
+   * 同 Thread 上的两个并发纯 USER_MESSAGE（不同 client id）：Thread 行锁串行化后两者都按当前尾部写入一次，最终 nextCommandSequence
+   * 精确推进两次，不依赖 cursor。
    */
   @Test
-  void concurrentAcceptsOnSameThreadHaveExactlyOneCursorWinner() throws Exception {
+  void concurrentPureUserMessagesAreBothAppendedOnce() throws Exception {
     InMemoryHarnessStore store = new InMemoryHarnessStore();
     HarnessRuntime runtime = runtime(store);
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
@@ -146,18 +149,70 @@ class HarnessRuntimeStopConcurrencyTest {
                           AcceptancePreflight.IDENTITY)));
       Attempt one = first.get();
       Attempt two = second.get();
-      assertEquals(1, successCount(one, two));
-      Attempt winner = one.error() == null ? one : two;
-      Attempt loser = one.error() == null ? two : one;
-      assertConflict(loser, Reason.STALE_COMMAND_CURSOR);
-      assertEquals(1, ((AcceptedCommands) winner.value()).acceptedCommands().size());
+      assertEquals(2, successCount(one, two));
       ThreadState thread =
           store.transaction(tx -> tx.lockThread(baseline.threadId()).orElseThrow());
-      assertEquals(2L, thread.nextCommandSequence());
+      assertEquals(3L, thread.nextCommandSequence());
+      assertEquals(2L, thread.version());
+    } finally {
+      pool.shutdownNow();
+    }
+  }
+
+  /**
+   * 同 Thread 上两个 cursor-bound 批次（相同 cursor、不同 client id）仍由 Thread 行锁串行化：恰好一个赢得 cursor admission，败者
+   * STALE_COMMAND_CURSOR，最终 nextCommandSequence 精确推进一次。
+   */
+  @Test
+  void concurrentCursorBoundBatchesHaveExactlyOneCursorWinner() throws Exception {
+    InMemoryHarnessStore store = new InMemoryHarnessStore();
+    HarnessRuntime runtime = runtime(store);
+    HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
+    CyclicBarrier barrier = new CyclicBarrier(2);
+    ExecutorService pool = Executors.newFixedThreadPool(2);
+    try {
+      Future<Attempt> first =
+          pool.submit(
+              attempt(
+                  barrier,
+                  () ->
+                      runtime.acceptCommands(
+                          new AcceptCommandsCommand(
+                              new AcceptCommandsTarget.Thread(
+                                  baseline.threadId(), baseline.rootEntryId(), 1),
+                              List.of(
+                                  setAgentCommand(TestIds.id(10)),
+                                  userMessageCommand(TestIds.id(1), "a"))),
+                          AcceptancePreflight.IDENTITY)));
+      Future<Attempt> second =
+          pool.submit(
+              attempt(
+                  barrier,
+                  () ->
+                      runtime.acceptCommands(
+                          new AcceptCommandsCommand(
+                              new AcceptCommandsTarget.Thread(
+                                  baseline.threadId(), baseline.rootEntryId(), 1),
+                              List.of(
+                                  setAgentCommand(TestIds.id(11)),
+                                  userMessageCommand(TestIds.id(2), "b"))),
+                          AcceptancePreflight.IDENTITY)));
+      Attempt one = first.get();
+      Attempt two = second.get();
+      assertEquals(1, successCount(one, two));
+      Attempt loser = one.error() == null ? two : one;
+      assertConflict(loser, Reason.STALE_COMMAND_CURSOR);
+      ThreadState thread =
+          store.transaction(tx -> tx.lockThread(baseline.threadId()).orElseThrow());
+      assertEquals(3L, thread.nextCommandSequence());
       assertEquals(1L, thread.version());
     } finally {
       pool.shutdownNow();
     }
+  }
+
+  private static NewThreadCommand setAgentCommand(UUID idempotencyKey) {
+    return new NewThreadCommand(new SetAgentCommandPayload("assistant"), idempotencyKey);
   }
 
   private static HarnessRuntime runtime(InMemoryHarnessStore store) {

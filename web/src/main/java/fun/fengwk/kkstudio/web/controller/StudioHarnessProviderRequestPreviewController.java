@@ -49,7 +49,7 @@ public class StudioHarnessProviderRequestPreviewController {
               () -> {
                 UUID id = HarnessRuntimeRequestMapper.parseUuid(threadId, "threadId");
                 AcceptCommandsCommand command =
-                    HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(threadId, request);
+                    HarnessRuntimeRequestMapper.toPreviewThreadCommandsCommand(threadId, request);
                 return previewService.preview(id, command);
               }));
     } catch (ProviderRequestPreviewUnavailableException error) {

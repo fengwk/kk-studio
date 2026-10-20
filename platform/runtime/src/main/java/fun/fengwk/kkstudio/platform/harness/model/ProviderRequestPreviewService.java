@@ -353,7 +353,8 @@ public final class ProviderRequestPreviewService {
   private void requirePreviewableSnapshot(
       ThreadSnapshot snapshot, AcceptCommandsTarget.Thread target) {
     ThreadState thread = snapshot.thread();
-    if (!thread.headEntryId().equals(target.expectedHeadEntryId())
+    if (!target.hasCursor()
+        || !thread.headEntryId().equals(target.expectedHeadEntryId())
         || thread.nextCommandSequence() != target.expectedNextCommandSequence()) {
       throw new ProviderRequestPreviewUnavailableException(
           Reason.PREVIEW_STALE_CURSOR,

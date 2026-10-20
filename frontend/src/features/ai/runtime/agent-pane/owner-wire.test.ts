@@ -85,7 +85,7 @@ describe('owner-free HTTP wire', () => {
   })
 
   it('serializes an existing thread message batch without owner or target', async () => {
-    // 测试意图：既有 Thread 的发送只提交精确 CAS 游标与命令，wire body 不存在 owner/target。
+    // 测试意图：纯 USER_MESSAGE 发送不携带 cursor，wire body 也不存在 owner/target。
     const plan = buildMessageBatchPlan({
       thread,
       effectiveBase: draft,
@@ -97,15 +97,11 @@ describe('owner-free HTTP wire', () => {
     const { url, data } = wireAt(0)
     expect(url).toBe('/threads/thread-1/command-batches')
     const body = JSON.parse(data) as Record<string, unknown>
-    expect(Object.keys(body).sort()).toEqual([
-      'commands',
-      'expectedHeadEntryId',
-      'expectedNextCommandSequence',
-    ])
+    expect(Object.keys(body).sort()).toEqual(['commands'])
     expect(body).not.toHaveProperty('owner')
     expect(body).not.toHaveProperty('target')
-    expect(body.expectedHeadEntryId).toBe('entry-1')
-    expect(body.expectedNextCommandSequence).toBe('1')
+    expect(body).not.toHaveProperty('expectedHeadEntryId')
+    expect(body).not.toHaveProperty('expectedNextCommandSequence')
     expect(data).not.toContain('"owner"')
     expect(data).not.toContain('"target"')
   })

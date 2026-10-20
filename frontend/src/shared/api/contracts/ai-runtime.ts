@@ -492,17 +492,18 @@ export interface AgentCommandBatchRequestDTO {
 }
 
 /**
- * 既有 Thread 的通用命令写请求：只携带精确 CAS 游标与有序命令。
+ * 既有 Thread 的通用命令写请求：有序命令，以及仅在批次依赖当前视图时携带的精确 CAS 游标。
  *
  * POST /threads/{threadId}/command-batches
  * POST /threads/{threadId}/provider-request-preview
  *
  * 不携带 owner 或 target：服务端从 path 解析 Session，owner 只用于 NEW_SESSION /
- * NEW_THREAD 创建与容器列表。
+ * NEW_THREAD 创建与容器列表。单条纯 USER_MESSAGE 发送可省略两个 cursor 字段；
+ * 包含 SET_* / GOAL 的批次与发送前预览仍必须携带两者。
  */
 export interface ThreadCommandBatchRequestDTO {
-  expectedHeadEntryId: string
-  expectedNextCommandSequence: string
+  expectedHeadEntryId?: string
+  expectedNextCommandSequence?: string
   commands: HarnessCommandCreateDTO[]
 }
 
