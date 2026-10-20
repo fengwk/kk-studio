@@ -183,12 +183,7 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
     return new ThreadProcessor(
         store,
         resolver,
-        new ThreadProcessorConfig(
-            new ProcessorLeaseConfig(LEASE, Duration.ofSeconds(5)),
-            Duration.ofSeconds(5),
-            () -> new CompactionConfig(20_000)),
-        scheduler,
-        Runnable::run);
+        new ThreadProcessorConfig(Duration.ofSeconds(5), () -> new CompactionConfig(20_000)));
   }
 
   private UUID seedUserEntry(StoreTestSupport.TurnBaseline turn) {

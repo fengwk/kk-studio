@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -16,6 +17,10 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DataAccessException;
+import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.TransientDataAccessResourceException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
@@ -88,6 +93,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
+import fun.fengwk.kkstudio.harness.runtime.port.TurnResolveTransientException;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
@@ -1809,6 +1815,39 @@ class DatabaseTurnResolverTest {
         RuntimeException.class,
         () ->
             missingModel.resolver.resolve(THREAD_ID, missingModel.path(settings("default")), null));
+  }
+
+  /**
+   * 测试意图：resolver 在调用方 turn 事务内执行时，SQL 访问失败已可能把事务标记为 rollback-only，因此三类
+   * DataAccessException（transient / resource / data-integrity）都必须原样保留 cause 并适配为 typed transient；
+   * 与之对照，显式业务拒绝仍确定性返回 Rejected，绝不混同为可重试基础设施失败。
+   */
+  @Test
+  void sqlAccessFailuresBecomeTypedTransientWithCauseWhileBusinessRejectionStaysDeterministic() {
+    List<DataAccessException> failures =
+        List.of(
+            new TransientDataAccessResourceException("transient pool exhaustion"),
+            new DataAccessResourceFailureException("connection lost"),
+            new DataIntegrityViolationException("constraint violated"));
+    for (DataAccessException failure : failures) {
+      Fixture fixture = new Fixture(List.of(), List.of(), List.of());
+      fixture.failAgentLookup(failure);
+      TurnResolveTransientException transientFailure =
+          assertThrows(
+              TurnResolveTransientException.class,
+              () -> fixture.resolver.resolve(THREAD_ID, fixture.path(settings("default")), null));
+      assertSame(failure, transientFailure.getCause());
+      assertEquals("turn resolution infrastructure unavailable", transientFailure.getMessage());
+    }
+
+    // 显式业务 Rejection 是确定性规划结果，不是可重试的 SQL / 基础设施失败。
+    Fixture deterministic = new Fixture(List.of("read"), List.of(), List.of());
+    BranchSettings missingEnvironment =
+        new BranchSettings(
+            "assistant", new ModelSelection("provider", "model", "default"), ENV_MISSING_NAME);
+    TurnResolver.Rejected rejected = deterministic.rejected(deterministic.path(missingEnvironment));
+    assertEquals(DatabaseTurnResolver.REJECTION_CODE, rejected.error().code());
+    assertTrue(rejected.error().message().startsWith("environment not found:"));
   }
 
   @Test

@@ -26,7 +26,6 @@ import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
-import fun.fengwk.kkstudio.harness.runtime.processor.ProcessorLeaseConfig;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessResult;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorConfig;
@@ -648,12 +647,7 @@ class PostgresqlJoinAcceptanceRollbackTest {
           new ThreadProcessor(
               store,
               resolver,
-              new ThreadProcessorConfig(
-                  new ProcessorLeaseConfig(Duration.ofSeconds(30), Duration.ofSeconds(5)),
-                  Duration.ofSeconds(5),
-                  () -> new CompactionConfig(20_000)),
-              scheduler,
-              Runnable::run);
+              new ThreadProcessorConfig(Duration.ofSeconds(5), () -> new CompactionConfig(20_000)));
 
       ClaimedWork childWork1 =
           store

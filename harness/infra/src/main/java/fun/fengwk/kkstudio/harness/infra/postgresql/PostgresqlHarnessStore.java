@@ -24,7 +24,7 @@ import java.util.function.Supplier;
  * <p>每个 store callback 在 {@code READ_COMMITTED} 事务内执行。{@code PROPAGATION_REQUIRED}
  * 边界允许调用方已有的外层事务加入（同连接同事务），禁止 {@code REQUIRES_NEW}，以便 owner 锁与 harness 写入保持同一物理事务。
  * 回调正常返回只表示当前事务边界已准备好；{@link #afterCommit} 在无外层事务时于本方法提交后执行，加入外层事务时只在 Spring 物理 {@code afterCommit}
- * 时执行。手动压缩等必须离开事务的入口先调用 {@link #assertNoAmbientTransaction}。
+ * 时执行。要求独立物理事务边界的入口先调用 {@link #assertNoAmbientTransaction}。
  *
  * <p>同一 Store 实例通过 {@link ThreadLocal} 显式拒绝嵌套事务（nested transactions are not supported）， 并在 callback
  * 正常执行完毕后统一触发 {@link PostgresqlHarnessTransaction#rethrowDatabaseFailure()} 实施首个数据库故障 poisoning 校验。
@@ -116,7 +116,7 @@ public final class PostgresqlHarnessStore implements HarnessStore {
     pending.add(action);
   }
 
-  /** 手动压缩 resolve 等入口的事务外守卫：检测到真实 Spring 事务时在工作开始前拒绝，避免慢调用持有 owner / Thread 锁。 */
+  /** 独立事务入口守卫：检测到真实 Spring 事务时在工作开始前拒绝，避免隐式加入调用方事务。 */
   @Override
   public void assertNoAmbientTransaction() {
     if (TransactionSynchronizationManager.isActualTransactionActive()) {
