@@ -138,6 +138,23 @@ class StudioAgentTaskControllerTest {
   }
 
   @Test
+  void getReportsASupersededTicketWithoutAFabricatedResult() throws Exception {
+    // 已被接管的旧票据有明确终态，但没有可归属的最终结果。
+    when(agentTasks.observe(TICKET_ID))
+        .thenReturn(
+            Optional.of(
+                new AgentTaskStatus(
+                    TICKET_ID, THREAD_ID, "worker", AgentTaskStatus.State.SUPERSEDED, null)));
+    mockMvc
+        .perform(get("/api/agent-tasks/" + TICKET_ID))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.state").value("SUPERSEDED"))
+        .andExpect(jsonPath("$.data.report").doesNotExist())
+        .andExpect(jsonPath("$.data.partialResult").doesNotExist())
+        .andExpect(jsonPath("$.data.error").doesNotExist());
+  }
+
+  @Test
   void getReturnsTheFrozenResultOfAFinishedTask() throws Exception {
     when(agentTasks.observe(TICKET_ID))
         .thenReturn(

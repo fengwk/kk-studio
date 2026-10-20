@@ -156,6 +156,55 @@ class AgentTaskServiceTest {
   }
 
   @Test
+  void supersededTicketObservesATerminalStateWithoutBorrowingALaterRunsResult() {
+    // 旧票据不会再被匹配：接管事实本身必须终止轮询，不能显示 RUNNING 或借用后续 Run 的结果。
+    UUID ticketId = UUID.randomUUID();
+    ThreadJoin ticket = join(ticketId, UUID.randomUUID(), false, true);
+    when(runtime.findJoin(ticketId)).thenReturn(Optional.of(ticket));
+
+    AgentTaskStatus superseded = service.observe(ticketId).orElseThrow();
+
+    assertEquals(AgentTaskStatus.State.SUPERSEDED, superseded.state());
+    assertEquals(ticketId, superseded.ticketId());
+    assertEquals(ticket.childThreadId(), superseded.threadId());
+    assertNull(superseded.receipt());
+    verify(runtime, never()).projectJoinReceipt(any());
+    verify(runtime, never()).getThreadSnapshot(any());
+  }
+
+  @Test
+  void onlyResultBearingTaskStatesAcceptAReceipt() {
+    // SUPERSEDED 不对应执行结果；仍在执行的票据也不能提前带回执，正常终态则必须有回执。
+    UUID ticketId = UUID.randomUUID();
+    UUID threadId = UUID.randomUUID();
+    ThreadJoinReceipt receipt =
+        new ThreadJoinReceipt(
+            ticketId,
+            threadId,
+            "worker",
+            ThreadJoinOutcome.COMPLETED,
+            "prompt",
+            "final",
+            null,
+            null);
+    for (AgentTaskStatus.State state :
+        List.of(AgentTaskStatus.State.RUNNING, AgentTaskStatus.State.SUPERSEDED)) {
+      assertThrows(
+          IllegalArgumentException.class,
+          () -> new AgentTaskStatus(ticketId, threadId, "worker", state, receipt));
+    }
+    for (AgentTaskStatus.State state :
+        List.of(
+            AgentTaskStatus.State.COMPLETED,
+            AgentTaskStatus.State.ERROR,
+            AgentTaskStatus.State.CANCELLED)) {
+      assertThrows(
+          IllegalArgumentException.class,
+          () -> new AgentTaskStatus(ticketId, threadId, "worker", state, null));
+    }
+  }
+
+  @Test
   void unknownTicketObservesEmptyAndStopFailsNotFound() {
     UUID ticketId = UUID.randomUUID();
     when(runtime.findJoin(ticketId)).thenReturn(Optional.empty());

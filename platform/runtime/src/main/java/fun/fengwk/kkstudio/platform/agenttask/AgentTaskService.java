@@ -75,7 +75,7 @@ public class AgentTaskService {
     return requireRuntime().findJoin(Objects.requireNonNull(ticketId, "ticketId"));
   }
 
-  /** 任务当前状态：票据不存在返回空；结果冻结前为 RUNNING，之后带回执。 */
+  /** 任务当前状态：票据不存在返回空；有效票据在结果冻结前为 RUNNING，被接管的旧票据为 SUPERSEDED，其余带冻结回执。 */
   public Optional<AgentTaskStatus> observe(UUID ticketId) {
     HarnessRuntime runtime = requireRuntime();
     Optional<ThreadJoin> join = runtime.findJoin(Objects.requireNonNull(ticketId, "ticketId"));
@@ -83,6 +83,15 @@ public class AgentTaskService {
       return Optional.empty();
     }
     ThreadJoin ticket = join.get();
+    if (ticket.supersededByInvocationId() != null) {
+      return Optional.of(
+          new AgentTaskStatus(
+              ticketId,
+              ticket.childThreadId(),
+              ticket.agent(),
+              AgentTaskStatus.State.SUPERSEDED,
+              null));
+    }
     ThreadJoinReceipt receipt = runtime.projectJoinReceipt(ticketId).orElse(null);
     AgentTaskStatus.State state =
         receipt == null
