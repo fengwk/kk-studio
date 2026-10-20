@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { Badge } from '@/shared/ui/data/Badge'
 import { useQuery } from '@tanstack/react-query'
 import {
   AlertTriangle,
@@ -612,16 +613,16 @@ function EditProjectModalContent({
                 >
                   <span className="workflow-stage-order">{index + 1}</span>
                   <span className="workflow-stage-label">{label}</span>
-                  <span className="badge badge-state">{state.state || '—'}</span>
+                  <Badge tone="info" mono>{state.state || '—'}</Badge>
                   {reserved ? (
-                    <span className="badge badge-archived">{t('projects.edit.badgeReserved')}</span>
+                    <Badge tone="neutral">{t('projects.edit.badgeReserved')}</Badge>
                   ) : state.agent !== null ? (
-                    <span className="badge badge-agent">{t('projects.edit.badgeAgent')}</span>
+                    <Badge tone="accent">{t('projects.edit.badgeAgent')}</Badge>
                   ) : (
-                    <span className="badge">{t('projects.edit.badgeManual')}</span>
+                    <Badge tone="neutral">{t('projects.edit.badgeManual')}</Badge>
                   )}
                   {!state.enabled && (
-                    <span className="badge badge-paused">{t('projects.edit.badgeDisabled')}</span>
+                    <Badge tone="warning">{t('projects.edit.badgeDisabled')}</Badge>
                   )}
                 </button>
                 <IconButton

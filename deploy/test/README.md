@@ -10,7 +10,7 @@ Resource/Blob、fake Canvas Function、OpenCLI fake Hub adapter 和离线 Chat �
 ## 前置条件
 
 - Docker Engine 与 Docker Compose v2。
-- `--with-app` 还需要 Python 3（宿主侧 smoke 脚本）。
+- `--with-app` 还需要 Node（宿主侧 smoke 脚本）。
 - 所有宿主端口只绑定 `127.0.0.1`，服务位于本 Compose project 的独立 bridge 网络，不会加入
   生产或其它本地栈的网络。
 - Compose 中的账号都是固定、可丢弃的测试值，不要替换成生产凭据。默认流程不配置也不调用
@@ -153,7 +153,7 @@ route 文件格式：
 `http://opencli-hub:8080` 与 `http://comfyui:8080` 两个容器内地址访问。内置 fake Hub 只接受
 合成单 Bearer（默认 `synthetic-opencli-key`），上传、执行、查询、取消与资源下载各受保护端点均严格验证；
 offline smoke 经统一插件配置与 secret API 初始化，不将秘密明文写入 seed 或 schema。细粒度异常、
-origin、multipart 与状态边界由 [server.py](mock/server.py) 的 contract tests 覆盖。
+origin、multipart 与状态边界由 [server.mjs](mock/server.mjs) 的 contract tests 覆盖。
 
 ## 真实 Seedance prepare-only 边界
 
@@ -164,10 +164,10 @@ RUN_REAL_SEEDANCE_PREPARE_SMOKE=1 \
 SEEDANCE_WORKSPACE_ID=... \
 OPENCLI_HUB_BASE_URL=https://your-opencli-hub.example \
 OPENCLI_API_KEY=... \
-  ./scripts/dev/verify/smoke/seedance-prepare.sh --confirm-prepare-only
+  ./scripts/dev/verify/smoke/seedance-prepare.mjs --confirm-prepare-only
 ```
 
-[scripts/dev/verify/smoke/seedance-prepare.sh](../../scripts/dev/verify/smoke/seedance-prepare.sh) 硬编码 `seedance2.0fast`、
+[scripts/dev/verify/smoke/seedance-prepare.mjs](../../scripts/dev/verify/smoke/seedance-prepare.mjs) 硬编码 `seedance2.0fast`、
 `duration=4`、`submit=0`、`retry=0`，只验证页面准备与 checkpoint，不点击真实生成、不创建
 FunctionRun、不下载或导入视频。`--confirm-prepare-only` 必须是唯一参数，同时要求
 `RUN_REAL_SEEDANCE_PREPARE_SMOKE=1`、非空 `SEEDANCE_WORKSPACE_ID`、非空

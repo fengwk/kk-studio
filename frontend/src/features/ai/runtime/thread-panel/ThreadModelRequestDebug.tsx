@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import { Badge } from '@/shared/ui/data/Badge'
 import { AlertCircle, Eye } from 'lucide-react'
 import type {
   ThreadModelRequestDebugData,
@@ -145,10 +146,10 @@ export function ThreadModelRequestDebug({
         </div>
         <div className="thread-debug-rail" data-testid="debug-tools-rail">
           {sentTools.map((tool) => (
-            <button
+            <Button
+              variant="inline"
               key={tool.name}
-              type="button"
-              className="ghost-inline-btn thread-debug-chip"
+              className="thread-debug-chip"
               aria-label={`${t('ai.runtime.debug.toolAriaPrefix')} ${tool.name}`}
               onClick={() => onSelectInspector({ type: 'tool', tool })}
             >
@@ -159,7 +160,7 @@ export function ThreadModelRequestDebug({
               >
                 {envBadge(tool.environmentSupport)}
               </span>
-            </button>
+            </Button>
           ))}
 
           {filteredTools.length > 0 && sentTools.length > 0 ? (
@@ -167,10 +168,10 @@ export function ThreadModelRequestDebug({
           ) : null}
 
           {filteredTools.map((tool) => (
-            <button
+            <Button
+              variant="inline"
               key={tool.name}
-              type="button"
-              className="ghost-inline-btn thread-debug-chip is-filtered"
+              className="thread-debug-chip is-filtered"
               aria-label={`${t('ai.runtime.debug.filteredToolAriaPrefix')} ${tool.name}`}
               onClick={() => onSelectInspector({ type: 'tool', tool })}
             >
@@ -182,7 +183,7 @@ export function ThreadModelRequestDebug({
               >
                 {envBadge(tool.environmentSupport)}
               </span>
-            </button>
+            </Button>
           ))}
 
           {sentTools.length === 0 && filteredTools.length === 0 ? (
@@ -202,10 +203,10 @@ export function ThreadModelRequestDebug({
         {(debug.skills && debug.skills.length > 0) ? (
           <div className="thread-debug-rail" data-testid="debug-skills-rail">
             {debug.skills.map((skill) => (
-              <button
+              <Button
+                variant="inline"
                 key={`${skill.packageName}/${skill.name}`}
-                type="button"
-                className="ghost-inline-btn thread-debug-chip"
+                className="thread-debug-chip"
                 aria-label={`${t('ai.runtime.debug.skillAriaPrefix')} ${skill.name}`}
                 onClick={() => onSelectInspector({ type: 'skill', skill })}
               >
@@ -213,7 +214,7 @@ export function ThreadModelRequestDebug({
                 <span className="thread-debug-chip-badge">
                   · {formatDelivery(skill.delivery, t)}
                 </span>
-              </button>
+              </Button>
             ))}
           </div>
         ) : null}
@@ -225,15 +226,15 @@ export function ThreadModelRequestDebug({
           <span className="thread-debug-meta-label">{t('ai.runtime.debug.subagentsLabel')}</span>{' '}
           {debug.subagents && debug.subagents.length > 0 ? (
             debug.subagents.map((subagent) => (
-              <button
+              <Button
+                variant="inline"
                 key={subagent.name}
-                type="button"
-                className="ghost-inline-btn thread-debug-chip"
+                className="thread-debug-chip"
                 aria-label={`${t('ai.runtime.debug.subagentAriaPrefix')} ${subagent.name}`}
                 onClick={() => onSelectInspector({ type: 'subagent', subagent })}
               >
                 <code>{subagent.name}</code>
-              </button>
+              </Button>
             ))
           ) : (
             <span className="thread-debug-empty-text">{t('ai.runtime.debug.none')}</span>
@@ -241,23 +242,23 @@ export function ThreadModelRequestDebug({
         </div>
         <div className="thread-debug-meta-item">
           <span className="thread-debug-meta-label">{t('ai.runtime.debug.cacheLabel')}</span>{' '}
-          <button
-            type="button"
-            className="ghost-inline-btn thread-debug-chip"
+          <Button
+            variant="inline"
+            className="thread-debug-chip"
             aria-label={`${t('ai.runtime.debug.cacheAriaPrefix')} ${cacheSummary}`}
             onClick={() => onSelectInspector({ type: 'cache' })}
           >
             <span>{cacheSummary}</span>
-          </button>
+          </Button>
         </div>
       </div>
       <footer className="thread-debug-section thread-debug-environment">
         <div className="thread-debug-section-header">
           <span>{t('ai.runtime.debug.plannedToolEnvironment')}</span>
         </div>
-        <span className="status-pill is-neutral">
+        <Badge tone="neutral">
           {debug.environmentName || t('ai.runtime.debug.noEnvironmentSelected')}
-        </span>
+        </Badge>
       </footer>
     </div>
   )

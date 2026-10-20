@@ -5,6 +5,7 @@ import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentConfigProvider;
 import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentRunner;
 import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentTaskAcceptance;
 import fun.fengwk.kkstudio.harness.builtin.subagent.SubagentTaskRequest;
+import fun.fengwk.kkstudio.harness.common.hash.Sha256;
 import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
 import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
@@ -27,7 +28,6 @@ import fun.fengwk.kkstudio.platform.agenttask.AgentTaskService;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
@@ -322,30 +322,26 @@ public class SubagentTaskRunner implements SubagentRunner {
    * <p>因此目标 agent 的目录 settings 或进程默认 {@code maxTurns} 变化都不会改写已接受 join 的请求指纹。
    */
   static String requestHash(SubagentTaskRequest request) {
-    try {
-      MessageDigest digest = MessageDigest.getInstance("SHA-256");
-      List<String> parts =
-          List.of(
-              request.parentThreadId().toString(),
-              request.subagentType(),
-              request.prompt(),
-              request.maxTurns() == null ? "default" : "explicit:" + request.maxTurns(),
-              request.resumeThreadId() == null ? "new" : "resume:" + request.resumeThreadId());
-      for (String part : parts) {
-        byte[] bytes = part.getBytes(StandardCharsets.UTF_8);
-        digest.update(
-            new byte[] {
-              (byte) (bytes.length >>> 24),
-              (byte) (bytes.length >>> 16),
-              (byte) (bytes.length >>> 8),
-              (byte) bytes.length
-            });
-        digest.update(bytes);
-      }
-      return HexFormat.of().formatHex(digest.digest());
-    } catch (NoSuchAlgorithmException impossible) {
-      throw new IllegalStateException("SHA-256 is unavailable", impossible);
+    MessageDigest digest = Sha256.newDigest();
+    List<String> parts =
+        List.of(
+            request.parentThreadId().toString(),
+            request.subagentType(),
+            request.prompt(),
+            request.maxTurns() == null ? "default" : "explicit:" + request.maxTurns(),
+            request.resumeThreadId() == null ? "new" : "resume:" + request.resumeThreadId());
+    for (String part : parts) {
+      byte[] bytes = part.getBytes(StandardCharsets.UTF_8);
+      digest.update(
+          new byte[] {
+            (byte) (bytes.length >>> 24),
+            (byte) (bytes.length >>> 16),
+            (byte) (bytes.length >>> 8),
+            (byte) bytes.length
+          });
+      digest.update(bytes);
     }
+    return HexFormat.of().formatHex(digest.digest());
   }
 
   /** 由父 Tool invocation 稳定派生子身份：同一次调用重放得到同一 UUID。 */

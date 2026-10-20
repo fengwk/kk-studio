@@ -41,22 +41,22 @@ systemd/launchd 服务，测试入口见
 
 | 任务 | 入口 | 前置条件与影响 |
 | --- | --- | --- |
-| 默认免费 L1 API 矩阵 | [dev/verify/e2e/run.sh](dev/verify/e2e/run.sh) | JDK 21、Maven、Node、python3、curl，Backend/Vite 可复用或由入口启动；报告在 `reports/e2e` |
+| 默认免费 L1 API 矩阵 | [dev/verify/e2e/run.sh](dev/verify/e2e/run.sh) | JDK 21、Maven、Node、curl，Backend/Vite 可复用或由入口启动；报告在 `reports/e2e` |
 | 真模型、Tool、Branch、UI、Canvas 扩展 | 同一 E2E 入口：`--real`、`--with-tools`、`--with-branch`、`--ui`、`--with-canvas-storage`、`--with-canvas-function` | real 需 4 个 Provider 的 8 个 `TEST_*` URL/key，branch 隐含 real；tools 启动/复用 Daemon；UI 需 Playwright；Canvas storage 需 S3，function 使用免费 fake 并隐含 storage + rebuild |
 | 免费双节点矩阵 | 同一 E2E 入口：`--distributed` | 需 Docker；不能与 real/tools/branch/UI/storage/function 组合，结束清理隔离栈与数据卷 |
 | 双节点栈生命周期 | [dev/verify/e2e/distributed.sh](dev/verify/e2e/distributed.sh) | Docker Engine 与 Compose v2；创建/删除容器、网络和数据卷 |
 | 本机免费性能基线 | [dev/verify/performance/run.sh](dev/verify/performance/run.sh) | Docker、Node；构建隔离测试镜像、短时压测，报告在 `reports/performance`，不是无 Docker 的纯离线构建 |
 | 确定性可靠性回归 | [dev/verify/reliability/regression.sh](dev/verify/reliability/regression.sh) | JDK 21、Maven、realpath、setsid；反复执行指定 JUnit 集合，报告在 `reports/reliability` |
-| 可靠性隔离栈 | [dev/verify/reliability/stack.sh](dev/verify/reliability/stack.sh) | Docker、curl、python3；snapshot 需 `PI_ANCHOR` 与 `PI_BASE_ANCHOR` Git worktree，创建/删除隔离栈与数据卷 |
+| 可靠性隔离栈 | [dev/verify/reliability/stack.sh](dev/verify/reliability/stack.sh) | Docker、curl、Node；snapshot 需 `PI_ANCHOR` 与 `PI_BASE_ANCHOR` Git worktree，创建/删除隔离栈与数据卷 |
 | Agent 可靠性矩阵 | [dev/verify/reliability/run-agent-matrix.mjs](dev/verify/reliability/run-agent-matrix.mjs) | Node、Docker、可靠性栈与 `TEST_MINIMAX_*`；真实付费模型调用 |
 | SBOM、依赖与镜像漏洞检查 | [dev/verify/supply-chain/run.sh](dev/verify/supply-chain/run.sh) `sbom` / `audit` / `image` / `all` | 按子命令需 JDK 21/Maven、Node/npm、Docker、git 与网络；访问 registry、NVD/漏洞库，报告在 `reports/supply-chain`；`test` 只运行脚本测试 |
-| 隔离栈应用 smoke | [dev/verify/smoke/offline-chat.sh](dev/verify/smoke/offline-chat.sh) | Docker，`--with-app` 另需 python3，覆盖 Blob、Canvas revision/typed commands、fake Function 与 Chat；创建/删除栈与数据卷 |
-| Seedance prepare-only smoke | [dev/verify/smoke/seedance-prepare.sh](dev/verify/smoke/seedance-prepare.sh) | 显式 `RUN_REAL_SEEDANCE_PREPARE_SMOKE=1`、`SEEDANCE_WORKSPACE_ID`、`OPENCLI_HUB_BASE_URL`；只做页面准备，不提交生成或下载视频 |
+| 隔离栈应用 smoke | [dev/verify/smoke/offline-chat.sh](dev/verify/smoke/offline-chat.sh) | Docker，`--with-app` 另需 Node，覆盖 Blob、Canvas revision/typed commands、fake Function 与 Chat；创建/删除栈与数据卷 |
+| Seedance prepare-only smoke | [dev/verify/smoke/seedance-prepare.mjs](dev/verify/smoke/seedance-prepare.mjs) | 显式 `RUN_REAL_SEEDANCE_PREPARE_SMOKE=1`、`SEEDANCE_WORKSPACE_ID`、`OPENCLI_HUB_BASE_URL`；只做页面准备，不提交生成或下载视频 |
 | 文档与仓库结构 | [dev/verify/repository/check.mjs](dev/verify/repository/check.mjs) | Node，只读 |
 | 稳定传输契约生成/漂移 | [dev/verify/generated-contracts/check.sh](dev/verify/generated-contracts/check.sh)（更新用 [write.sh](dev/verify/generated-contracts/write.sh)） | JDK 21、Maven；用真实 HTTP Jackson mapper 生成/比对 [frontend/src/shared/api/generated/stable-contracts.ts](../frontend/src/shared/api/generated/stable-contracts.ts)，只跑 `-pl web -am` 定向 reactor；`check.sh` 只读，`write.sh` 会改源码需人工审阅 diff；`mvn verify` 执行同一 check |
-| Canvas/Project V1 库表验证 | [dev/verify/repository/check-canvas-project-schema.py](dev/verify/repository/check-canvas-project-schema.py) | python3、本机 Docker socket、已有 `postgres:17.10`；无网络/无宿主端口的临时容器，加载 V1、检查 46 张业务表、17 张目标表与 SQL 探针，不访问部署库 |
-| 当前代码树敏感数据门禁 | [dev/verify/repository/check-sensitive-data.py](dev/verify/repository/check-sensitive-data.py) | python3、git，只读；命中只报告规则与位置，不回显敏感值 |
-| Git 历史敏感数据审计 | [dev/verify/repository/check-sensitive-history.py](dev/verify/repository/check-sensitive-history.py) | python3、git；扫描本地可见 refs 与当前树，可选抓取公开 PR refs 到隔离临时仓库；与当前树门禁分开使用 |
+| Canvas/Project V1 库表验证 | [dev/verify/repository/check-canvas-project-schema.mjs](dev/verify/repository/check-canvas-project-schema.mjs) | Node、本机 Docker socket、已有 `postgres:17.10`；无网络/无宿主端口的临时容器，加载 V1、检查 46 张业务表、17 张目标表与 SQL 探针，不访问部署库 |
+| 当前代码树敏感数据门禁 | [dev/verify/repository/check-sensitive-data.mjs](dev/verify/repository/check-sensitive-data.mjs) | Node、git，只读；命中只报告规则与位置，不回显敏感值 |
+| Git 历史敏感数据审计 | [dev/verify/repository/check-sensitive-history.mjs](dev/verify/repository/check-sensitive-history.mjs) | Node、git；扫描本地可见 refs 与当前树，可选抓取公开 PR refs 到隔离临时仓库；与当前树门禁分开使用 |
 
 E2E 的精确 case 列表以 `run.sh --list` / `--docs` 为准，分类与执行路径见[开发与测试](../docs/operations/development-and-testing.md)。
 
@@ -65,7 +65,7 @@ E2E 的精确 case 列表以 `run.sh --list` / `--docs` 为准，分类与执行
 | 任务 | 入口 | 前置条件与影响 |
 | --- | --- | --- |
 | 暂存 Daemon 发布资产 | [daemon/prepare-release.sh](daemon/prepare-release.sh) `<release-tag> <os> <arch>` | checkout、Node 24、npm、git、已编译 `daemon/dist`；按目标平台安装生产依赖并打包冻结 code-server 运行时，替换 `daemon/release/<os>-<arch>`，生成 tar.gz、SHA256、JSON 元数据、LICENSE、THIRD_PARTY_NOTICES 5 个资产，**不上传发布** |
-| 备份、冻结旧库、建空库 | [ops/reset-database.sh](ops/reset-database.sh) | psql/pg_dump/pg_restore/createdb、python3，owner 或 superuser 且有建库权限、无其它会话；完整备份与校验写仓库外，旧库改名禁连接，按原元数据建空库；非 `--yes` 需交互确认 |
+| 备份、冻结旧库、建空库 | [ops/reset-database.sh](ops/reset-database.sh) | psql/pg_dump/pg_restore/createdb、Node，owner 或 superuser 且有建库权限、无其它会话；完整备份与校验写仓库外，旧库改名禁连接，按原元数据建空库；非 `--yes` 需交互确认 |
 
 配置导出与导入在产品的“设置 → 同步”完成，YAML 始终包含所需凭据，不属于数据库脚本。
 数据库入口不管理服务生命周期。连接参数优先级为 CLI → `VPS_POSTGRES_*` → 标准 libpq；不从命令行接收密码，不交互询问口令，缺凭据直接失败。先用 `--dry-run` 看重建计划；reset 不执行 Flyway，空库 Schema 初始化由外部流程完成。完整步骤见[共享数据库重建](../docs/operations/development-and-testing.md#共享数据库重建)。

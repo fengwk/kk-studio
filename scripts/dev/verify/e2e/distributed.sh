@@ -121,15 +121,7 @@ wait_http() {
 environment_status() {
   local app_url=$1
   local env_name=$2
-  curl -fsS "$app_url/api/environments" 2>/dev/null | python3 -c '
-import json
-import sys
-
-name = sys.argv[1]
-rows = json.load(sys.stdin).get("data") or []
-match = next((row for row in rows if row.get("name") == name), None)
-print(match.get("status") if match else "MISSING")
-' "$env_name"
+  curl -fsS "$app_url/api/environments" 2>/dev/null | node "$SCRIPT_DIR/lib/json-probe.mjs" environment-status "$env_name"
 }
 
 wait_environment_ready() {
@@ -256,7 +248,7 @@ cmd_verify() {
   step "Validating Compose configuration"
   "${COMPOSE[@]}" config --quiet
   step "Validating network invariants"
-  python3 "$SCRIPT_DIR/validate_distributed.py" --compose-file "$COMPOSE_FILE"
+  node "$SCRIPT_DIR/validate-distributed.mjs" --compose-file "$COMPOSE_FILE"
   step "Compose config and topology invariants verified"
 }
 

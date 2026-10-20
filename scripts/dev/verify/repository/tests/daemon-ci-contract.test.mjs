@@ -77,15 +77,6 @@ function dedent(block, width) {
     return block.split('\n').map((line) => (line.startsWith(prefix) ? line.slice(width) : line)).join('\n')
 }
 
-function pythonHeredoc(script) {
-    const lines = script.split('\n')
-    const start = lines.findIndex((line) => line.includes("python3 - <<'PY'"))
-    assert.ok(start >= 0, 'missing python heredoc')
-    const end = lines.indexOf('PY', start + 1)
-    assert.ok(end > start, 'unterminated python heredoc')
-    return lines.slice(start + 1, end).join('\n')
-}
-
 test('daemon-ci runs the full Node daemon suite on the five release targets', () => {
     // 平台条件用例由各用例自己决定是否执行；矩阵必须覆盖五个发行目标，并且不整体跳过 native 套件。
     const job = jobBlock(CI, 'node_daemon')
@@ -413,7 +404,7 @@ test('daemon-ci runs the installer and archive smoke on the macOS runner', () =>
     assert.equal(stepField(step, 'if'), "runner.os == 'macOS'")
     assert.match(step, /\/bin\/bash --noprofile --norc/u)
     const run = stepRun(step)
-    assert.match(run, /python3 -m unittest discover -s scripts\/daemon\/tests/u)
+    assert.match(run, /node --test scripts\/daemon\/tests\/\*\.test\.mjs/u)
     assert.match(run, /\/bin\/bash --version/u)
 })
 
@@ -454,18 +445,19 @@ test('full repository validation reuses the daemon matrix and installs archive p
 test('the release version gate reads real project files and fails on any drift', () => {
     const step = stepNamed(RELEASE, 'stage', 'Verify the repository version alignment')
     assert.doesNotMatch(stepField(step, 'name'), /\d+\.\d+\.\d+/u, 'the gate must not pin a version in its name')
-    const script = dedent(stepRun(step), 10)
-    const python = pythonHeredoc(script)
-    // 版本来自真实文件：pom.xml 的元素与属性、daemon/package.json 与 tag；不写死任何版本字面量。
-    assert.match(python, /xml\.etree\.ElementTree/u)
-    assert.match(python, /daemon\/package\.json/u)
-    assert.match(python, /RELEASE_TAG/u)
-    assert.doesNotMatch(python, /["']\d+\.\d+\.\d+["']/u, 'the gate must not hardcode a version')
+    // 版本来自真实文件，由仓库脚本读取 pom.xml 的元素与属性、daemon/package.json 与 tag；工作流不写死任何版本。
+    assert.equal(
+        dedent(stepRun(step), 10).trim(),
+        'set -euo pipefail\nnode scripts/dev/verify/repository/check-version-alignment.mjs',
+    )
+    const gate = readFileSync(path.join(ROOT, 'scripts/dev/verify/repository/check-version-alignment.mjs'), 'utf8')
+    assert.match(gate, /daemon\/package\.json/u)
+    assert.match(gate, /RELEASE_TAG/u)
+    assert.doesNotMatch(gate, /["']\d+\.\d+\.\d+["']/u, 'the gate must not hardcode a version')
 
-    const runGate = (fixturePath, tag) => spawnSync('bash', ['-s'], {
-        input: `${script}\n`,
+    const runGate = (fixturePath, tag) => spawnSync('node', [path.join(ROOT, 'scripts/dev/verify/repository/check-version-alignment.mjs')], {
         cwd: fixturePath,
-        env: { ...process.env, RELEASE_TAG: tag },
+        env: { ...process.env, RELEASE_TAG: tag, KK_STUDIO_REPO_ROOT: fixturePath },
         encoding: 'utf8',
     })
 

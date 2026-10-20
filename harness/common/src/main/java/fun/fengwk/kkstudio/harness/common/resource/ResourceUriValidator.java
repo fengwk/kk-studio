@@ -1,11 +1,10 @@
 package fun.fengwk.kkstudio.harness.common.resource;
 
+import fun.fengwk.kkstudio.harness.common.hash.Sha256;
+
 import java.io.ByteArrayOutputStream;
 import java.net.URI;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.Base64;
-import java.util.HexFormat;
 import java.util.Locale;
 import java.util.UUID;
 import java.util.regex.Pattern;
@@ -159,7 +158,7 @@ final class ResourceUriValidator {
     if (size.longValue() != decoded.length) {
       throw new IllegalArgumentException("data uri size must equal decoded payload length");
     }
-    if (!sha256.equals(sha256Hex(decoded))) {
+    if (!sha256.equals(Sha256.hex(decoded))) {
       throw new IllegalArgumentException("data uri sha256 must match decoded payload digest");
     }
     return decoded;
@@ -309,13 +308,5 @@ final class ResourceUriValidator {
       }
     }
     return canonical.toString();
-  }
-
-  private static String sha256Hex(byte[] bytes) {
-    try {
-      return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
-    } catch (NoSuchAlgorithmException error) {
-      throw new IllegalStateException("SHA-256 unavailable", error);
-    }
   }
 }

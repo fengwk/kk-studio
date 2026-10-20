@@ -7,10 +7,10 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border-color: rgb(255 255 255 / 12%);
+  border-color: var(--border-glass);
   border-radius: 16px;
-  background: var(--overlay-surface-strong);
-  box-shadow: 0 28px 90px rgb(0 0 0 / 48%);
+  background: var(--surface-overlay);
+  box-shadow: var(--shadow-lg);
 }
 
 .media-lightbox-body {
@@ -30,14 +30,14 @@
   width: 34px;
   height: 34px;
   flex: 0 0 34px;
-  color: white;
-  background: rgb(0 0 0 / 58%);
+  color: var(--fg);
+  background: var(--scrim-soft);
   backdrop-filter: blur(10px);
 }
 
 .modal-card.media-lightbox-card .media-lightbox-close:hover:not(:disabled) {
-  color: white;
-  background: rgb(0 0 0 / 74%);
+  color: var(--fg);
+  background: var(--scrim);
 }
 
 .modal-card.media-lightbox-card .media-lightbox-close svg {
@@ -51,7 +51,7 @@
   flex: 1;
   place-items: center;
   overflow: auto;
-  background: rgb(0 0 0 / 54%);
+  background: var(--scrim-soft);
 }
 
 .media-lightbox-content img,
@@ -70,7 +70,7 @@
   gap: 12px;
   padding: 10px 14px;
   color: var(--fg);
-  font-size: 13px;
+  font-size: var(--font-size-sm);
 }
 
 .media-lightbox-footer span {

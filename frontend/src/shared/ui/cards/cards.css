@@ -17,12 +17,12 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background:
-    radial-gradient(120% 80% at 0% 0%, var(--green-soft), transparent 55%),
-    linear-gradient(180deg, var(--white-02) 0%, transparent 100%),
+    radial-gradient(120% 80% at 0% 0%, var(--accent-soft), transparent 55%),
+    linear-gradient(180deg, var(--wash-1) 0%, transparent 100%),
     var(--surface);
   text-align: left;
   overflow: hidden;
-  transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+  transition: border-color var(--duration-base), background var(--duration-base), box-shadow var(--duration-base);
 }
 
 .resource-card:hover {
@@ -46,8 +46,8 @@
   align-items: center;
   justify-content: center;
   border-radius: var(--radius-md);
-  background: var(--green-soft);
-  color: var(--green-primary);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .resource-card-icon svg {
@@ -71,7 +71,7 @@
 
 .resource-card-title {
   margin: 0 0 4px;
-  font-size: 15px;
+  font-size: var(--font-size-md);
   font-weight: 600;
   line-height: 1.25;
   white-space: nowrap;
@@ -82,7 +82,7 @@
 .resource-card-subtitle {
   margin: 0;
   color: var(--fg-muted);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   line-height: 1.4;
   white-space: nowrap;
   overflow: hidden;
@@ -92,7 +92,7 @@
 /* 业务内容槽：正文、进度、附件等由调用方提供，卡片只负责间距。 */
 .resource-card-content {
   min-width: 0;
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   line-height: 1.5;
 }
 
@@ -113,8 +113,8 @@
 
 /* 标签列固定 72px：长标签（中英混排、多词英文）必须换行而不是溢出到值列。 */
 .resource-card-meta-label {
-  color: var(--fg-dim);
-  font-size: 12px;
+  color: var(--fg-muted);
+  font-size: var(--font-size-xs);
   line-height: 1.5;
   white-space: normal;
   overflow-wrap: anywhere;
@@ -123,7 +123,7 @@
 .resource-card-meta-value {
   min-width: 0;
   color: var(--fg-muted);
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   line-height: 1.5;
   white-space: nowrap;
   overflow: hidden;
@@ -168,10 +168,10 @@
   height: 24px;
   padding: 0 8px;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--surface-raised);
   color: var(--fg-muted);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   font-weight: 500;
   line-height: 1;
   white-space: nowrap;
@@ -183,7 +183,7 @@
   max-width: none;
   border-style: dashed;
   background: transparent;
-  color: var(--fg-dim);
+  color: var(--fg-muted);
 }
 
 .resource-card-pairs {
@@ -202,8 +202,8 @@
 }
 
 .resource-card-pair-label {
-  color: var(--fg-dim);
-  font-size: 12px;
+  color: var(--fg-muted);
+  font-size: var(--font-size-xs);
   line-height: 1.5;
   white-space: nowrap;
 }
@@ -211,7 +211,7 @@
 .resource-card-pair-value {
   min-width: 0;
   color: var(--fg-muted);
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   line-height: 1.5;
   white-space: nowrap;
   overflow: hidden;
@@ -245,8 +245,8 @@
 .resource-card-skeleton:hover {
   border-color: var(--border);
   background:
-    radial-gradient(120% 80% at 0% 0%, var(--green-soft), transparent 55%),
-    linear-gradient(180deg, var(--white-02) 0%, transparent 100%),
+    radial-gradient(120% 80% at 0% 0%, var(--accent-soft), transparent 55%),
+    linear-gradient(180deg, var(--wash-1) 0%, transparent 100%),
     var(--surface);
   box-shadow: none;
 }

@@ -1,4 +1,5 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Badge } from '@/shared/ui/data/Badge'
 import { Code, FormInput, Lock } from 'lucide-react'
 import { Button } from '@/shared/ui/controls/Button'
 import { Checkbox } from '@/shared/ui/controls/Checkbox'
@@ -479,9 +480,9 @@ export function PluginConfigModal({
         <section className="plugin-config-section">
           <div className="plugin-config-section-title">
             <span>{t('plugins.configDialog.generalSettings')}</span>
-            <span className="status-pill is-neutral">
+            <Badge tone="neutral">
               Rev {plugin.configuration.revision ?? ''}
-            </span>
+            </Badge>
           </div>
 
           {editorMode === 'form' && schemaResult.ok && parseResult.ok ? (
@@ -566,15 +567,11 @@ export function PluginConfigModal({
                         </div>
 
                         <div className="plugin-config-secret-actions">
-                          <span
-                            className={`status-pill ${
-                              isConfigured ? 'is-ready' : 'is-neutral'
-                            }`}
-                          >
+                          <Badge tone={isConfigured ? 'success' : 'neutral'}>
                             {isConfigured
                               ? t('plugins.secrets.configured')
                               : t('plugins.secrets.notConfigured')}
-                          </span>
+                          </Badge>
 
                           {isDeepLink ? (
                             <span className="inline-hint">

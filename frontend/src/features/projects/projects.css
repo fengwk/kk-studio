@@ -23,7 +23,7 @@
 
 .projects-title {
   margin: 0;
-  font-size: 1.5rem;
+  font-size: var(--font-size-xl);
   font-weight: 600;
   color: var(--fg);
 }
@@ -91,7 +91,7 @@
 
 .project-detail-title {
   margin: 0;
-  font-size: 1.25rem;
+  font-size: var(--font-size-lg);
   font-weight: 600;
   color: var(--fg);
   overflow: hidden;
@@ -99,24 +99,9 @@
   white-space: nowrap;
 }
 
-.project-detail-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 12px;
-}
-
 .project-detail-toolbar .searchbox {
   margin-left: 0;
   flex: 0 1 260px;
-}
-
-.project-detail-toolbar-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  margin-left: auto;
 }
 
 .project-detail-body {
@@ -164,7 +149,7 @@
   flex: 0 0 280px;
   display: flex;
   flex-direction: column;
-  background: var(--white-02);
+  background: var(--wash-1);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   max-height: 100%;
@@ -186,13 +171,13 @@
 
 .column-title {
   margin: 0;
-  font-size: 0.875rem;
+  font-size: var(--font-size-sm);
   font-weight: 600;
   color: var(--fg);
 }
 
 .column-count {
-  font-size: 0.75rem;
+  font-size: var(--font-size-xs);
   color: var(--fg-muted);
   background: var(--surface);
   padding: 2px 6px;
@@ -211,8 +196,8 @@
 .column-empty {
   text-align: center;
   padding: 24px 0;
-  font-size: 0.8125rem;
-  color: var(--fg-dim);
+  font-size: var(--font-size-sm);
+  color: var(--fg-muted);
 }
 
 /* ---------- Issue 卡片 ---------- */
@@ -225,12 +210,12 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color var(--duration-fast), box-shadow var(--duration-fast);
 }
 
 .issue-card:hover {
   border-color: var(--border-hover);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--shadow-sm);
 }
 
 .issue-card.is-blocked {
@@ -255,7 +240,7 @@
 }
 
 .issue-number {
-  font-size: 0.75rem;
+  font-size: var(--font-size-xs);
   font-weight: 600;
   color: var(--fg-muted);
 }
@@ -282,7 +267,7 @@
 
 .issue-title {
   margin: 0;
-  font-size: 0.875rem;
+  font-size: var(--font-size-sm);
   font-weight: 600;
   color: var(--fg);
   line-height: 1.3;
@@ -303,7 +288,7 @@
 
 .issue-block-reason {
   margin: 4px 0 0 0;
-  font-size: 0.75rem;
+  font-size: var(--font-size-xs);
   color: var(--danger);
   line-height: 1.2;
 }
@@ -324,67 +309,6 @@
   gap: 4px;
 }
 
-/* ---------- Badges ---------- */
-
-.badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 0.75rem;
-  padding: 2px 8px;
-  border-radius: 12px;
-  font-weight: 500;
-  line-height: 1.2;
-}
-
-.badge-archived {
-  background: var(--surface-hover);
-  color: var(--fg-muted);
-  border: 1px solid var(--border);
-}
-
-.badge-blocked {
-  background: var(--danger-soft);
-  color: var(--danger);
-  border: 1px solid var(--danger);
-}
-
-.badge-waiting,
-.badge-paused {
-  background: var(--warning-soft);
-  color: var(--warning);
-  border: 1px solid var(--warning);
-}
-
-.badge-failed {
-  background: var(--danger-soft);
-  color: var(--danger);
-  border: 1px solid var(--danger);
-}
-
-.badge-unknown {
-  background: var(--info-soft);
-  color: var(--info);
-  border: 1px solid var(--info);
-}
-
-.badge-run,
-.badge-state {
-  background: var(--info-soft);
-  color: var(--info);
-  border: 1px solid var(--info);
-}
-
-.badge-state {
-  font-family: monospace;
-}
-
-.badge-agent {
-  background: var(--green-soft);
-  color: var(--accent);
-  border: 1px solid var(--accent);
-}
-
 /* ---------- 反馈 ---------- */
 
 .form-warning-banner {
@@ -397,14 +321,7 @@
   border-radius: var(--radius-sm);
   background: var(--warning-soft);
   color: var(--fg);
-  font-size: 13px;
-}
-
-.empty-tip {
-  text-align: center;
-  padding: 32px 0;
-  color: var(--fg-dim);
-  font-size: 0.875rem;
+  font-size: var(--font-size-sm);
 }
 
 /* ---------- 弹窗（项目配置 / Issue 详情） ---------- */
@@ -446,7 +363,7 @@
   gap: 8px;
   padding: 8px 20px;
   color: var(--fg-muted);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 
 .edit-project-tabs {
@@ -471,12 +388,12 @@
   padding: 16px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background: var(--white-02);
+  background: var(--wash-1);
 }
 
 .edit-project-section-title {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--font-size-sm);
   font-weight: 600;
   color: var(--fg);
 }
@@ -495,8 +412,8 @@
 
 .edit-project-hint {
   margin: 0;
-  font-size: 12px;
-  color: var(--fg-dim);
+  font-size: var(--font-size-xs);
+  color: var(--fg-muted);
 }
 
 .edit-project-workflow {
@@ -522,7 +439,7 @@
   padding: 8px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background: var(--white-02);
+  background: var(--wash-1);
 }
 
 .workflow-stage-row {
@@ -561,8 +478,8 @@
 }
 
 .workflow-stage-order {
-  font-size: 0.75rem;
-  color: var(--fg-dim);
+  font-size: var(--font-size-xs);
+  color: var(--fg-muted);
   min-width: 14px;
 }
 
@@ -572,12 +489,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 0.8125rem;
-}
-
-.workflow-stage-select .badge {
-  flex-shrink: 0;
-  white-space: nowrap;
+  font-size: var(--font-size-sm);
 }
 
 .workflow-stage-form {
@@ -644,7 +556,7 @@
 
 .spec-title {
   margin: 0;
-  font-size: 1.25rem;
+  font-size: var(--font-size-lg);
   font-weight: 600;
   color: var(--fg);
 }
@@ -672,7 +584,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 0.8125rem;
+  font-size: var(--font-size-sm);
 }
 
 .meta-label {
@@ -720,7 +632,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  font-size: 0.75rem;
+  font-size: var(--font-size-xs);
 }
 
 .activity-badge-kind {
@@ -734,7 +646,7 @@
 }
 
 .activity-time {
-  color: var(--fg-dim);
+  color: var(--fg-muted);
 }
 
 .activity-seq {
@@ -744,7 +656,7 @@
 }
 
 .activity-body-text {
-  font-size: 0.875rem;
+  font-size: var(--font-size-sm);
   color: var(--fg);
   white-space: pre-wrap;
   line-height: 1.4;
@@ -773,7 +685,7 @@
 
 .run-ordinal {
   font-weight: 600;
-  font-size: 0.875rem;
+  font-size: var(--font-size-sm);
   color: var(--fg);
 }
 
@@ -781,7 +693,7 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-  font-size: 0.8125rem;
+  font-size: var(--font-size-sm);
   color: var(--fg-muted);
 }
 
@@ -812,14 +724,14 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 0.875rem;
+  font-size: var(--font-size-sm);
 }
 
 .budget-stats {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  font-size: 0.8125rem;
+  font-size: var(--font-size-sm);
   color: var(--fg-muted);
 }
 
@@ -838,7 +750,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 0.875rem;
+  font-size: var(--font-size-sm);
 }
 
 /* Evidence */
@@ -856,7 +768,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 0.875rem;
+  font-size: var(--font-size-sm);
 }
 
 /* ---------- 受控 Issue Agent Dock ---------- */
@@ -893,7 +805,7 @@
 
 .project-agent-dock-title {
   font-weight: 600;
-  font-size: 0.875rem;
+  font-size: var(--font-size-sm);
   color: var(--fg);
   white-space: nowrap;
   overflow: hidden;

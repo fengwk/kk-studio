@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Badge } from '@/shared/ui/data/Badge'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Box, Download, KeyRound, SlidersHorizontal, Trash2 } from 'lucide-react'
 import {
@@ -307,9 +308,7 @@ export function EnvironmentsPage() {
                 title={environment.name}
                 subtitle={environment.id}
                 badge={
-                  <span className={`status-pill${ready ? ' is-ready' : ' is-offline'}`}>
-                    {displayStatus}
-                  </span>
+                  <Badge tone={ready ? 'success' : 'warning'}>{displayStatus}</Badge>
                 }
                 meta={rows}
                 actions={

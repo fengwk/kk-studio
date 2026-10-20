@@ -69,7 +69,7 @@ export function DeleteProjectModal({
           <p className="confirm-modal-description">
             {t('projects.delete.question', { title: project.title })}
           </p>
-          <p style={{ fontSize: '0.8125rem', color: 'var(--fg-muted)', margin: 0 }}>
+          <p style={{ fontSize: 'var(--font-size-sm)', color: 'var(--fg-muted)', margin: 0 }}>
             {t('projects.delete.cascade')}
           </p>
         </div>

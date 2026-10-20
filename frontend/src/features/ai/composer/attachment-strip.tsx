@@ -25,6 +25,8 @@ import type {
 import { useI18n } from '@/shared/i18n'
 import { Select } from '@/shared/ui/controls/Select'
 import { MediaLightbox } from '@/shared/ui/media/MediaLightbox'
+import { IconButton } from '@/shared/ui/controls/IconButton'
+import { Button } from '@/shared/ui/controls/Button'
 
 const IMAGE_TIER_OPTIONS = [
   { value: '720P', label: '720P' },
@@ -103,15 +105,15 @@ export function AttachmentStrip({
               <span className="attachment-reference-status-row">
                 <span className="attachment-reference-status">{status}</span>
                 {upload.status === 'complete_unknown' && onRetry ? (
-                  <button
-                    type="button"
-                    className="ghost-btn attachment-reference-retry"
+                  <Button
+                    variant="ghost"
+                    className="attachment-reference-retry"
                     aria-label={t('ai.runtime.composer.retryComplete', { name: displayName })}
                     disabled={disabled}
                     onClick={() => onRetry(upload)}
                   >
                     <RotateCw size={12} aria-hidden="true" />
-                  </button>
+                  </Button>
                 ) : null}
                 {isImage && (
                   <Select
@@ -126,15 +128,14 @@ export function AttachmentStrip({
                 )}
               </span>
             </span>
-            <button
-              type="button"
+            <IconButton
               className="attachment-reference-remove"
-              aria-label={t('ai.runtime.composer.removeAttachment', { name: displayName })}
+              label={t('ai.runtime.composer.removeAttachment', { name: displayName })}
               disabled={disabled}
               onClick={() => onRemove(upload)}
             >
               <X aria-hidden="true" />
-            </button>
+            </IconButton>
             {upload.status === 'uploading' ? (
               <span className="attachment-reference-progress" aria-hidden="true">
                 <span style={{ width: `${progress}%` }} />
