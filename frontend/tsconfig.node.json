@@ -21,7 +21,7 @@
     "vite.config.ts",
     "vite.*.config.ts",
     "vite.*.ts",
-    "playwright.*.config.ts",
-    "playwright.*.config.test.ts"
+    "playwright.config.ts",
+    "playwright.config.test.ts"
   ]
 }
