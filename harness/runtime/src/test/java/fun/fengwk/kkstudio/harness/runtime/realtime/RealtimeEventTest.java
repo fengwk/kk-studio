@@ -98,6 +98,54 @@ class RealtimeEventTest {
   }
 
   @Test
+  void modelCheckpointExposesInvocationAttemptAndSequence() {
+    Instant createdAt = Instant.parse("2026-07-23T00:00:00Z");
+    RealtimeEvent.ModelCheckpoint event =
+        new RealtimeEvent.ModelCheckpoint(
+            UUID.fromString("00000000-0000-0000-0000-000000000001"),
+            UUID.fromString("00000000-0000-0000-0000-000000000002"),
+            3,
+            9L,
+            createdAt);
+
+    assertEquals(
+        new RealtimeEvent.Subject(
+            RealtimeEvent.SubjectKind.MODEL_INVOCATION,
+            UUID.fromString("00000000-0000-0000-0000-000000000002")),
+        event.subject());
+    assertEquals(RealtimeEventType.MODEL_CHECKPOINT, event.type());
+    assertEquals(3, event.attempt());
+    assertEquals(9L, event.sequence());
+    assertEquals(createdAt, event.createdAt());
+  }
+
+  @Test
+  void modelCheckpointRejectsInvalidIdentity() {
+    Instant now = Instant.parse("2026-07-23T00:00:00Z");
+    UUID threadId = UUID.fromString("00000000-0000-0000-0000-000000000001");
+    UUID invocationId = UUID.fromString("00000000-0000-0000-0000-000000000002");
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new RealtimeEvent.ModelCheckpoint(threadId, invocationId, 0, 1L, now));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new RealtimeEvent.ModelCheckpoint(threadId, invocationId, 1, 0L, now));
+    assertThrows(
+        NullPointerException.class,
+        () -> new RealtimeEvent.ModelCheckpoint(null, invocationId, 1, 1L, now));
+    assertThrows(
+        NullPointerException.class,
+        () -> new RealtimeEvent.ModelCheckpoint(threadId, null, 1, 1L, now));
+    assertThrows(
+        NullPointerException.class,
+        () -> new RealtimeEvent.ModelCheckpoint(threadId, invocationId, 1, 1L, null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new RealtimeEvent.ModelCheckpoint(threadId, invocationId, 1, 1L, now.plusNanos(1)));
+  }
+
+  @Test
   void toolPartialExposesIdentityAndRejectsInvalidValues() {
     Instant now = Instant.parse("2026-07-23T00:00:00Z");
     UUID eventId = UUID.fromString("00000000-0000-0000-0000-0000000000ff");

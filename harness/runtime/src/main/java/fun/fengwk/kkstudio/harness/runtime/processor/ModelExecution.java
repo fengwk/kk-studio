@@ -112,6 +112,9 @@ final class ModelExecution implements ModelGateway.Listener {
   private ScheduledFuture<?> checkpointTimer;
   private long checkpointGeneration;
 
+  /** monitor 保护：追帧请求最多合并为一项待执行 checkpoint，避免公开入口无限占用 flushExecutor。 */
+  private boolean checkpointRequestInFlight;
+
   private long lastAcceptedSequence;
   private long lastSafeSequence;
 
@@ -666,7 +669,13 @@ final class ModelExecution implements ModelGateway.Listener {
               config.streamConfig().pushWindow().toMillis(),
               TimeUnit.MILLISECONDS);
     } catch (RuntimeException rejected) {
-      abandonAfterRejection("push timer scheduling", rejected);
+      if (claimPushRejectionLocked(targetGeneration)) {
+        log.warn(
+            "model push timer scheduling rejected for {}: {}",
+            invocationId,
+            ProcessorExceptions.describe(rejected));
+        abandon();
+      }
       return;
     }
     synchronized (monitor) {
@@ -687,7 +696,13 @@ final class ModelExecution implements ModelGateway.Listener {
               config.streamConfig().checkpointInterval().toMillis(),
               TimeUnit.MILLISECONDS);
     } catch (RuntimeException rejected) {
-      abandonAfterRejection("checkpoint timer scheduling", rejected);
+      if (claimCheckpointRejectionLocked(targetGeneration)) {
+        log.warn(
+            "model checkpoint timer scheduling rejected for {}: {}",
+            invocationId,
+            ProcessorExceptions.describe(rejected));
+        abandon();
+      }
       return;
     }
     synchronized (monitor) {
@@ -699,50 +714,65 @@ final class ModelExecution implements ModelGateway.Listener {
     }
   }
 
-  /** 推送定时器到期后先校验代际/终态再投递 executor：已失效代际绝不再触碰可能已满的 executor，避免 stale rejection 误伤当前执行。 */
+  /**
+   * 推送定时器到期后先校验代际/终态再投递 executor；executor 拒绝时重新在 monitor 内校验代际并原子认领 abandon。
+   *
+   * <p>检查与 execute 之间 generation 可能被容量 flush 推进、terminal 可能已被 provider 回调认领；此时 rejection
+   * 属于旧代际，绝不能误伤 当前 execution。
+   */
   private void submitPushIfCurrent(long generation) {
     synchronized (monitor) {
       if (abandoned.get() || terminal.get() || generation != pushGeneration) {
         return;
       }
     }
-    runOnFlushExecutor(() -> deliverPush(generation), "push");
+    try {
+      flushExecutor.execute(() -> deliverPush(generation));
+    } catch (RuntimeException rejected) {
+      if (claimPushRejectionLocked(generation)) {
+        log.warn(
+            "model push executor rejected for {}: {}",
+            invocationId,
+            ProcessorExceptions.describe(rejected));
+        abandon();
+      }
+    }
   }
 
-  /** checkpoint 定时器与推送定时器同理：只投递当前代际。 */
+  /** checkpoint 定时器与推送定时器同理：只有当前代际的 rejection 才能认领 abandon。 */
   private void submitCheckpointIfCurrent(long generation) {
     synchronized (monitor) {
       if (abandoned.get() || terminal.get() || generation != checkpointGeneration) {
         return;
       }
     }
-    runOnFlushExecutor(() -> deliverCheckpoint(generation, false), "checkpoint");
-  }
-
-  /** 定时器线程只投递：DB 写入与发布都在 flushExecutor 上执行；未投递（终态/abandoned/拒绝）返回 false。 */
-  private boolean runOnFlushExecutor(Runnable task, String what) {
-    if (abandoned.get() || terminal.get()) {
-      return false;
-    }
     try {
-      flushExecutor.execute(task);
-      return true;
+      flushExecutor.execute(() -> deliverCheckpoint(generation, false));
     } catch (RuntimeException rejected) {
-      abandonAfterRejection("flush executor (" + what + ")", rejected);
-      return false;
+      if (claimCheckpointRejectionLocked(generation)) {
+        log.warn(
+            "model checkpoint executor rejected for {}: {}",
+            invocationId,
+            ProcessorExceptions.describe(rejected));
+        abandon();
+      }
     }
   }
 
-  private void abandonAfterRejection(String what, RuntimeException rejected) {
-    if (abandoned.get()) {
-      return;
+  /** 仅当前 push 代际仍未被 flush/terminal/cancel 推进时，原子认领一次 abandon。 */
+  private boolean claimPushRejectionLocked(long generation) {
+    if (abandoned.get() || terminal.get() || generation != pushGeneration) {
+      return false;
     }
-    log.warn(
-        "model stream {} rejected for {}: {}",
-        what,
-        invocationId,
-        ProcessorExceptions.describe(rejected));
-    abandon();
+    return terminal.compareAndSet(false, true);
+  }
+
+  /** 仅当前 checkpoint 代际仍未被后续 checkpoint/terminal/cancel 推进时，原子认领一次 abandon。 */
+  private boolean claimCheckpointRejectionLocked(long generation) {
+    if (abandoned.get() || terminal.get() || generation != checkpointGeneration) {
+      return false;
+    }
+    return terminal.compareAndSet(false, true);
   }
 
   /** 取出推送缓冲并取消推送定时器；monitor 内调用。 */
@@ -801,10 +831,11 @@ final class ModelExecution implements ModelGateway.Listener {
   }
 
   /**
-   * 追帧请求：仅当本 execution 仍是 active owner 且 attempt 匹配时，安排一次立即 checkpoint 并发布 checkpoint 事件。
+   * 追帧请求：仅当本 execution 仍是 active owner 且 attempt 匹配时，合并安排一次立即 checkpoint。
    *
-   * <p>终态、取消/abandon、attempt 不匹配或 flush executor 拒绝投递时返回 {@code false} 且不写库、不发布。成功投递返回 {@code
-   * true}；checkpoint 本身仍在 flush executor 内异步执行，不阻塞调用方。
+   * <p>best-effort：每个 execution 最多一项 in-flight 追帧任务；重复请求在已有任务未完成时返回 {@code true}（已有请求会覆盖当前累计状态）。
+   * executor 拒绝只返回 {@code false}，绝不 cancel/abandon execution，也不影响周期 checkpoint 与
+   * terminal。终态、取消/abandon 或 attempt 不匹配返回 {@code false}。
    */
   boolean requestCheckpoint(int requestedAttempt) {
     if (requestedAttempt != attempt) {
@@ -814,8 +845,35 @@ final class ModelExecution implements ModelGateway.Listener {
       if (abandoned.get() || terminal.get()) {
         return false;
       }
+      if (checkpointRequestInFlight) {
+        return true;
+      }
+      checkpointRequestInFlight = true;
     }
-    return runOnFlushExecutor(() -> deliverCheckpoint(0, true), "catch-up checkpoint");
+    try {
+      flushExecutor.execute(this::runCatchUpCheckpoint);
+      return true;
+    } catch (RuntimeException rejected) {
+      synchronized (monitor) {
+        checkpointRequestInFlight = false;
+      }
+      log.warn(
+          "catch-up checkpoint rejected for {}: {}",
+          invocationId,
+          ProcessorExceptions.describe(rejected));
+      return false;
+    }
+  }
+
+  /** 追帧任务在 finally 释放本 execution 自己的 in-flight 标记；新 attempt 是独立 execution，互不影响。 */
+  private void runCatchUpCheckpoint() {
+    try {
+      deliverCheckpoint(0, true);
+    } finally {
+      synchronized (monitor) {
+        checkpointRequestInFlight = false;
+      }
+    }
   }
 
   /**
@@ -1265,6 +1323,10 @@ final class ModelExecution implements ModelGateway.Listener {
     List<RealtimeEvent> chunk = new ArrayList<>();
     long chunkPayloadBytes = 0;
     for (Publish publish : publishes) {
+      if (abandoned.get()) {
+        // cancel / lease loss 已获胜：已在 sink 内的块允许完成，后续块绝不再发布。
+        return;
+      }
       long payloadBytes = ModelStreamConfig.eventPayloadBytes(publish.event());
       if (!chunk.isEmpty()
           && (chunk.size() >= publishConfig.maxBatchEvents()
@@ -1281,7 +1343,7 @@ final class ModelExecution implements ModelGateway.Listener {
 
   /** 单次有界批量发布；sink 异常在此隔离，绝不影响 durable 状态与调用方返回的终态。 */
   private void dispatchRealtime(List<RealtimeEvent> events) {
-    if (events.isEmpty()) {
+    if (events.isEmpty() || abandoned.get()) {
       return;
     }
     try {

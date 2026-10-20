@@ -1791,6 +1791,224 @@ class ModelExecutionStreamFlushTest {
     assertFalse(execution.abandoned(), "stale timer rejection must not abandon execution");
   }
 
+  /**
+   * 意图：checkpoint executor 在 monitor 检查之后拒绝时，若追帧已取消旧 timer 并推进 generation，旧 rejection 不得 abandon；
+   * 周期/追帧机制仍可继续，terminal 仍可提交。
+   */
+  @Test
+  void checkpointExecutorRejectionAfterForcedCheckpointAdvancedGenerationDoesNotAbandon()
+      throws Exception {
+    ModelStreamConfig flushConfig =
+        new ModelStreamConfig(Duration.ofMinutes(10), 100, 1024 * 1024, Duration.ofMillis(100));
+    AtomicReference<Runnable> capturedTimerTask = new AtomicReference<>();
+    ScheduledFuture<?> dummyFuture = dummyFuture();
+    ScheduledExecutorService mockScheduler = capturingPushScheduler(capturedTimerTask, dummyFuture);
+    CountDownLatch entered = new CountDownLatch(1);
+    CountDownLatch release = new CountDownLatch(1);
+    Executor rejectingAfterLatch =
+        task -> {
+          entered.countDown();
+          awaitLatch(release);
+          throw new RejectedExecutionException("executor queue full");
+        };
+
+    Fixture fixture = createFixtureWithExecutor(flushConfig, mockScheduler, rejectingAfterLatch);
+    fixture.start();
+    fixture.listener().onEvent(new ProviderStreamEvent.TextDelta("a"));
+    Runnable timerTask = capturedTimerTask.get();
+    assertNotNull(timerTask);
+
+    Thread timerThread = new Thread(timerTask, "stale-checkpoint-timer");
+    timerThread.start();
+    assertTrue(entered.await(1, TimeUnit.SECONDS));
+
+    // 追帧直接取消旧 checkpoint timer 并推进 generation：阻塞中的 timer 已成为旧代际。
+    fixture.execution.deliverCheckpoint(0, true);
+    assertEquals(1, fixture.sink.checkpoints().size());
+
+    release.countDown();
+    timerThread.join(TimeUnit.SECONDS.toMillis(5));
+    assertFalse(execution(fixture).abandoned(), "stale checkpoint rejection must not abandon");
+    assertEquals(ModelInvocationStatus.RUNNING, fixture.currentModel().status());
+
+    fixture.listener().onSucceeded(response("a"));
+    assertEquals(ModelInvocationStatus.SUCCEEDED, fixture.currentModel().status());
+  }
+
+  /**
+   * 意图：executor 在 monitor 代际检查之后才拒绝时，如果 provider 容量 flush 已推进 push generation，rejection 属于旧定时器， 绝不能
+   * abandon 当前 execution；后续 terminal 仍可正常提交。
+   */
+  @Test
+  void executorRejectionAfterCapacityFlushAdvancedGenerationDoesNotAbandon() throws Exception {
+    ModelStreamConfig flushConfig =
+        new ModelStreamConfig(Duration.ofMillis(100), 2, 1024 * 1024, Duration.ofMinutes(10));
+    AtomicReference<Runnable> capturedTimerTask = new AtomicReference<>();
+    ScheduledFuture<?> dummyFuture = dummyFuture();
+    ScheduledExecutorService mockScheduler = capturingPushScheduler(capturedTimerTask, dummyFuture);
+    CountDownLatch entered = new CountDownLatch(1);
+    CountDownLatch release = new CountDownLatch(1);
+    Executor rejectingAfterLatch =
+        task -> {
+          entered.countDown();
+          awaitLatch(release);
+          throw new RejectedExecutionException("executor queue full");
+        };
+
+    Fixture fixture = createFixtureWithExecutor(flushConfig, mockScheduler, rejectingAfterLatch);
+    fixture.start();
+    fixture.listener().onEvent(new ProviderStreamEvent.TextDelta("e1"));
+    Runnable timerTask = capturedTimerTask.get();
+    assertNotNull(timerTask);
+
+    Thread timerThread = new Thread(timerTask, "stale-timer");
+    timerThread.start();
+    assertTrue(entered.await(1, TimeUnit.SECONDS));
+
+    // timer 已通过 monitor 检查并卡在 executor；容量 flush 推进 generation，使该 timer 失效。
+    fixture.listener().onEvent(new ProviderStreamEvent.TextDelta("e2"));
+    assertEquals(2, fixture.sink.deltas().size());
+
+    release.countDown();
+    timerThread.join(TimeUnit.SECONDS.toMillis(5));
+    assertFalse(execution(fixture).abandoned(), "stale executor rejection must not abandon");
+    assertEquals(ModelInvocationStatus.RUNNING, fixture.currentModel().status());
+
+    fixture.listener().onSucceeded(response("e1e2"));
+    assertEquals(ModelInvocationStatus.SUCCEEDED, fixture.currentModel().status());
+  }
+
+  /** 意图：terminal 已在上游回调中认领（并提交）后才发生的 executor rejection 不得改变终态；旧定时器只能被忽略。 */
+  @Test
+  void executorRejectionAfterTerminalClaimStillCommitsTerminal() throws Exception {
+    ModelStreamConfig flushConfig =
+        new ModelStreamConfig(Duration.ofMillis(100), 2, 1024 * 1024, Duration.ofMinutes(10));
+    AtomicReference<Runnable> capturedTimerTask = new AtomicReference<>();
+    ScheduledFuture<?> dummyFuture = dummyFuture();
+    ScheduledExecutorService mockScheduler = capturingPushScheduler(capturedTimerTask, dummyFuture);
+    CountDownLatch entered = new CountDownLatch(1);
+    CountDownLatch release = new CountDownLatch(1);
+    Executor rejectingAfterLatch =
+        task -> {
+          entered.countDown();
+          awaitLatch(release);
+          throw new RejectedExecutionException("executor queue full");
+        };
+
+    Fixture fixture = createFixtureWithExecutor(flushConfig, mockScheduler, rejectingAfterLatch);
+    fixture.start();
+    fixture.listener().onEvent(new ProviderStreamEvent.TextDelta("e1"));
+    Runnable timerTask = capturedTimerTask.get();
+    assertNotNull(timerTask);
+
+    Thread timerThread = new Thread(timerTask, "stale-timer");
+    timerThread.start();
+    assertTrue(entered.await(1, TimeUnit.SECONDS));
+
+    fixture.listener().onSucceeded(response("e1"));
+    assertEquals(ModelInvocationStatus.SUCCEEDED, fixture.currentModel().status());
+
+    release.countDown();
+    timerThread.join(TimeUnit.SECONDS.toMillis(5));
+    assertEquals(
+        ModelInvocationStatus.SUCCEEDED,
+        fixture.currentModel().status(),
+        "stale executor rejection must not roll back or mask the committed terminal");
+  }
+
+  /**
+   * 意图：追帧是可选 best-effort——并发/重复请求在途时只占用一个 flushExecutor 任务；executor 拒绝只返回 false，不
+   * cancel/abandon，之后终态仍可正常提交。
+   */
+  @Test
+  void catchUpRequestsCoalesceAndExecutorRejectionDoesNotCancelExecution() throws Exception {
+    ModelStreamConfig flushConfig =
+        new ModelStreamConfig(Duration.ofMinutes(10), 100, 1024 * 1024, Duration.ofMinutes(10));
+    GateExecutor gate = new GateExecutor();
+    ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+    executorsToClose.add(scheduler);
+    Fixture fixture = createFixtureWithExecutor(flushConfig, scheduler, gate);
+    fixture.start();
+    fixture.listener().onEvent(new ProviderStreamEvent.TextDelta("abc"));
+
+    AtomicBoolean firstResult = new AtomicBoolean();
+    Thread firstRequest =
+        new Thread(
+            () -> firstResult.set(fixture.processor.requestCheckpoint(fixture.invocationId, 1)));
+    firstRequest.start();
+    assertTrue(gate.entered.await(1, TimeUnit.SECONDS));
+
+    // 已有请求在途：重复请求返回 true，但绝不再向 executor 提交第二项任务。
+    assertTrue(fixture.processor.requestCheckpoint(fixture.invocationId, 1));
+    assertEquals(1, gate.submissions.get());
+
+    gate.release.countDown();
+    firstRequest.join(TimeUnit.SECONDS.toMillis(5));
+    assertTrue(firstResult.get());
+    assertEquals(List.of(1L), fixture.sink.checkpoints());
+
+    // executor 拒绝追帧：只返回 false，不 cancel/abandon，也不写库。
+    gate.reject.set(true);
+    int updatesBefore = fixture.store.modelInvocationUpdateCount();
+    assertFalse(fixture.processor.requestCheckpoint(fixture.invocationId, 1));
+    assertEquals(updatesBefore, fixture.store.modelInvocationUpdateCount());
+    assertFalse(execution(fixture).abandoned(), "best-effort catch-up rejection must not cancel");
+
+    fixture.listener().onSucceeded(response("abc"));
+    assertEquals(ModelInvocationStatus.SUCCEEDED, fixture.currentModel().status());
+  }
+
+  /**
+   * 意图：publishAll 在每块之前检查 abandoned：cancel 在首块阻塞于 sink 时立即返回（不等 drainLock/外部 I/O），释放后 后续块绝不再发布；已进入
+   * sink 的首块允许完成。
+   */
+  @Test
+  void cancelDuringBlockedFirstPublishChunkStopsSubsequentChunks() throws Exception {
+    ModelStreamConfig flushConfig =
+        new ModelStreamConfig(Duration.ofMinutes(1), 2, 1024 * 1024, Duration.ofMinutes(10));
+    Fixture fixture = createFixture(flushConfig, NO_RETRY, requestWithTool());
+    fixture.start();
+    CountDownLatch entered = new CountDownLatch(1);
+    CountDownLatch release = new CountDownLatch(1);
+    AtomicBoolean first = new AtomicBoolean(true);
+    fixture.sink.blockingHook =
+        delta -> {
+          if (first.compareAndSet(true, false)) {
+            entered.countDown();
+            awaitLatch(release);
+          }
+        };
+
+    List<ProviderToolCall> toolCalls =
+        List.of(
+            new ProviderToolCall("call_1", "bash", "{}"),
+            new ProviderToolCall("call_2", "bash", "{}"),
+            new ProviderToolCall("call_3", "bash", "{}"),
+            new ProviderToolCall("call_4", "bash", "{}"),
+            new ProviderToolCall("call_5", "bash", "{}"));
+    Thread terminalThread =
+        new Thread(
+            () ->
+                fixture
+                    .listener()
+                    .onSucceeded(response("answer", toolCalls, GenerationStopReason.COMPLETE)));
+    terminalThread.start();
+    assertTrue(entered.await(1, TimeUnit.SECONDS));
+
+    long start = System.nanoTime();
+    assertTrue(fixture.processor.cancel(fixture.invocationId));
+    long cancelNanos = System.nanoTime() - start;
+    assertTrue(
+        cancelNanos < TimeUnit.SECONDS.toNanos(1),
+        "cancel must not wait for drainLock or blocked external sink I/O");
+
+    release.countDown();
+    terminalThread.join(TimeUnit.SECONDS.toMillis(5));
+    assertEquals(ModelInvocationStatus.SUCCEEDED, fixture.currentModel().status());
+    assertEquals(1, fixture.sink.appendAllCalls(), "only the in-flight chunk may reach the sink");
+    assertEquals(2, fixture.sink.deltas().size(), "later chunks must not be published");
+  }
+
   /** 意图：验证门控前 pending 载荷字节约束：单个超阈值事件可独占，已有事件时超阈值则被拒绝并 abandon，terminal 信号在边界仍不受阻断并成功落地。 */
   @Test
   void gateBufferPendingPayloadBytesBoundaryAndTerminalAcceptance() {
@@ -2373,6 +2591,107 @@ class ModelExecutionStreamFlushTest {
 
     ModelInvocation currentModel() {
       return store.delegate().transaction(tx -> tx.findModelInvocation(invocationId)).orElseThrow();
+    }
+  }
+
+  private static ModelExecution execution(Fixture fixture) {
+    return fixture.execution;
+  }
+
+  private static ScheduledFuture<?> dummyFuture() {
+    return (ScheduledFuture<?>)
+        Proxy.newProxyInstance(
+            ScheduledFuture.class.getClassLoader(),
+            new Class<?>[] {ScheduledFuture.class},
+            (proxy, method, args) -> {
+              if ("cancel".equals(method.getName())) {
+                return Boolean.TRUE;
+              }
+              return null;
+            });
+  }
+
+  private static ScheduledExecutorService capturingPushScheduler(
+      AtomicReference<Runnable> captured, ScheduledFuture<?> future) {
+    return (ScheduledExecutorService)
+        Proxy.newProxyInstance(
+            ScheduledExecutorService.class.getClassLoader(),
+            new Class<?>[] {ScheduledExecutorService.class},
+            (proxy, method, args) -> {
+              if ("schedule".equals(method.getName()) && args != null && args.length >= 1) {
+                if (((Long) args[1]) < CHECKPOINT_TIMER_MILLIS) {
+                  captured.set((Runnable) args[0]);
+                }
+                return future;
+              }
+              return null;
+            });
+  }
+
+  private static Fixture createFixtureWithExecutor(
+      ModelStreamConfig config, ScheduledExecutorService scheduler, Executor flushExecutor) {
+    return new FixtureFactory(config, scheduler, flushExecutor).create();
+  }
+
+  private static void awaitLatch(CountDownLatch latch) {
+    try {
+      if (!latch.await(5, TimeUnit.SECONDS)) {
+        throw new IllegalStateException("latch timed out");
+      }
+    } catch (InterruptedException interrupted) {
+      Thread.currentThread().interrupt();
+      throw new IllegalStateException("latch interrupted", interrupted);
+    }
+  }
+
+  /** 可控 executor：记录提交次数，首次任务先阻塞在 gate 上，释放后按 reject 决定抛拒绝或执行。 */
+  private static final class GateExecutor implements Executor {
+    final AtomicInteger submissions = new AtomicInteger();
+    final CountDownLatch entered = new CountDownLatch(1);
+    final CountDownLatch release = new CountDownLatch(1);
+    final AtomicBoolean reject = new AtomicBoolean();
+
+    @Override
+    public void execute(Runnable task) {
+      submissions.incrementAndGet();
+      entered.countDown();
+      awaitLatch(release);
+      if (reject.get()) {
+        throw new RejectedExecutionException("executor queue full");
+      }
+      task.run();
+    }
+  }
+
+  private static final class FixtureFactory {
+    private final ModelStreamConfig config;
+    private final ScheduledExecutorService scheduler;
+    private final Executor flushExecutor;
+
+    private FixtureFactory(
+        ModelStreamConfig config, ScheduledExecutorService scheduler, Executor flushExecutor) {
+      this.config = config;
+      this.scheduler = scheduler;
+      this.flushExecutor = flushExecutor;
+    }
+
+    private Fixture create() {
+      CountingStore store = new CountingStore(new InMemoryHarnessStore());
+      Baseline baseline = seedBaseline(store.delegate(), NOW);
+      UUID invocationId = seedInvocation(store.delegate(), baseline, requestSpec(), NOW);
+      FakeGateway gateway = new FakeGateway();
+      RecordingSink sink = new RecordingSink();
+      ModelProcessor processor =
+          new ModelProcessor(
+              store,
+              gateway,
+              sink,
+              new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, config),
+              Clock.fixed(NOW, ZoneOffset.UTC),
+              scheduler,
+              Runnable::run,
+              flushExecutor);
+      return new Fixture(store, baseline, invocationId, gateway, sink, processor, config);
     }
   }
 
