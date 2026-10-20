@@ -168,35 +168,35 @@ class BuiltinHarnessContributorTest {
         "environment.grep",
         EnvironmentCapabilityIds.FS_GREP,
         ToolSideEffect.READ_ONLY,
-        Duration.ofMinutes(1));
+        Duration.ofSeconds(15));
     assertEnvironmentTool(
         catalog,
         "find",
         "environment.find",
         EnvironmentCapabilityIds.FS_FIND,
         ToolSideEffect.READ_ONLY,
-        Duration.ofMinutes(1));
+        Duration.ofSeconds(15));
     assertEnvironmentTool(
         catalog,
         "lsp_goto_definition",
         "environment.lsp-goto-definition",
         EnvironmentCapabilityIds.LSP_GOTO_DEFINITION,
         ToolSideEffect.READ_ONLY,
-        Duration.ofMinutes(2));
+        Duration.ofMinutes(3));
     assertEnvironmentTool(
         catalog,
         "lsp_workspace_symbols",
         "environment.lsp-workspace-symbols",
         EnvironmentCapabilityIds.LSP_WORKSPACE_SYMBOLS,
         ToolSideEffect.READ_ONLY,
-        Duration.ofMinutes(2));
+        Duration.ofMinutes(3));
     assertEnvironmentTool(
         catalog,
         "lsp_java_decompile",
         "environment.lsp-java-decompile",
         EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE,
         ToolSideEffect.READ_ONLY,
-        Duration.ofMinutes(2));
+        Duration.ofMinutes(3));
 
     // 1 个 Internal 工具 (INTERNAL visibility, NONE requirements)
     assertInternalTool(catalog, "task", "runtime.task", ToolRequirements.none());

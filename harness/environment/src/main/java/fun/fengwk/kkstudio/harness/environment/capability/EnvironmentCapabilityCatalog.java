@@ -24,7 +24,7 @@ import java.util.stream.Collectors;
 public final class EnvironmentCapabilityCatalog {
 
   /** 基础 capability 与 catalog 版本。 */
-  public static final String VERSION = "2";
+  public static final String VERSION = "3";
 
   private static final String RESOURCE_PREFIX =
       "/fun/fengwk/kkstudio/harness/environment/capability/schemas/";
@@ -63,12 +63,13 @@ public final class EnvironmentCapabilityCatalog {
         descriptor(EnvironmentCapabilityIds.FS_READ, Duration.ofMinutes(1)),
         descriptor(EnvironmentCapabilityIds.FS_WRITE, Duration.ofMinutes(1)),
         descriptor(EnvironmentCapabilityIds.FS_EDIT, Duration.ofMinutes(1)),
+        descriptor(EnvironmentCapabilityIds.FS_EDIT_PREVIEW, Duration.ofMinutes(1)),
         descriptor(EnvironmentCapabilityIds.PROCESS_EXEC, Duration.ofMinutes(5)),
-        descriptor(EnvironmentCapabilityIds.FS_GREP, Duration.ofMinutes(1)),
-        descriptor(EnvironmentCapabilityIds.FS_FIND, Duration.ofMinutes(1)),
-        descriptor(EnvironmentCapabilityIds.LSP_GOTO_DEFINITION, Duration.ofMinutes(2)),
-        descriptor(EnvironmentCapabilityIds.LSP_WORKSPACE_SYMBOLS, Duration.ofMinutes(2)),
-        descriptor(EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE, Duration.ofMinutes(2)),
+        descriptor(EnvironmentCapabilityIds.FS_GREP, Duration.ofSeconds(15)),
+        descriptor(EnvironmentCapabilityIds.FS_FIND, Duration.ofSeconds(15)),
+        descriptor(EnvironmentCapabilityIds.LSP_GOTO_DEFINITION, Duration.ofSeconds(180)),
+        descriptor(EnvironmentCapabilityIds.LSP_WORKSPACE_SYMBOLS, Duration.ofSeconds(180)),
+        descriptor(EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE, Duration.ofSeconds(180)),
         // 内部 Git 同步由 connect/read 空闲保护，不设整次执行 deadline。
         descriptor(EnvironmentCapabilityIds.SKILL_SYNC, Duration.ZERO));
   }

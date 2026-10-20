@@ -70,6 +70,7 @@ export interface ToolMessageView {
   contentsStreaming: boolean
   arguments: string
   toolName: string
+  isMutationSuccess: boolean
 }
 
 /**
@@ -121,28 +122,72 @@ export function buildToolMessageView({
     contentsSource != null
     && contentsSource.status === 'streaming'
   const contents = toolMessageContents(message, result)
-  const preview = previewForToolCall(toolName, argumentsValue)
   const facts = toolErrorFacts({ message, result })
-  const executionState = toolExecutionState(
+  const rawExecutionState = toolExecutionState(
     callMessage?.invocationStatus != null ? callMessage : resultMessage ?? message,
   )
+  const executionState = facts.hasError && rawExecutionState === 'succeeded' ? 'failed' : rawExecutionState
+
+  const editReview =
+    message.approval?.editReview
+    ?? callMessage?.approval?.editReview
+    ?? message.editReview
+    ?? callMessage?.editReview
+    ?? result?.editReview
+    ?? null
+
+  const isTerminal =
+    resultMessage != null
+    || ['succeeded', 'failed', 'cancelled', 'unknown'].includes(rawExecutionState)
+  const isTerminalWithoutReview = isTerminal && !editReview
+  const isWaitingReview = !isTerminal && (
+    callMessage?.invocationStatus === 'WAITING_APPROVAL'
+    || message.approval?.required === true
+    || (callMessage != null && !argumentsStreaming)
+  )
+
+  const preview = previewForToolCall(toolName, argumentsValue, {
+    editReview,
+    streaming: argumentsStreaming,
+    isWaitingReview,
+    isTerminalWithoutReview,
+  })
+
   const hasCallPreview =
-    CALL_PREVIEW_TOOLS.has(normalizedName) && preview != null && preview.lines.length > 0
+    CALL_PREVIEW_TOOLS.has(normalizedName)
+    && preview != null
+    && (
+      preview.kind === 'write'
+        ? (preview.hasContent || preview.content.length > 0 || preview.path.length > 0)
+        : (
+          preview.mode === 'preparing'
+          || (preview.mode === 'input' && (preview.oldText.length > 0 || preview.newText.length > 0))
+          || (preview.mode === 'review' && preview.lines.length > 0)
+        )
+    )
   const hasCallRecordBody =
     CALL_RECORD_TOOLS.has(normalizedName)
     && hasCallRecordRenderer
     && hasArgumentsBody(argumentsValue)
+
+  const isMutationTool = normalizedName === 'write' || normalizedName === 'edit'
+  const isMutationSuccess =
+    isMutationTool
+    && executionState === 'succeeded'
+    && !facts.hasError
+    && (resultMessage != null || message.phase === 'result' || callMessage?.invocationStatus === 'SUCCEEDED')
+
   return {
     callMessage,
     resultMessage,
     preview,
     summary: formatToolCallSummary(toolName, argumentsValue),
     visualState: facts.visualState,
-    executionState: facts.hasError && executionState === 'succeeded' ? 'failed' : executionState,
+    executionState,
     contents,
     errorText: facts.errorText,
     hasError: facts.hasError,
-    hasBody: contents.length > 0 || hasCallPreview || hasCallRecordBody,
+    hasBody: contents.length > 0 || hasCallPreview || hasCallRecordBody || isMutationSuccess,
     hasCallPreview,
     hasCallRecordBody,
     showBody: expanded,
@@ -150,6 +195,7 @@ export function buildToolMessageView({
     contentsStreaming,
     arguments: argumentsValue,
     toolName,
+    isMutationSuccess,
   }
 }
 

@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import fun.fengwk.kkstudio.harness.runtime.input.HumanInputJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.input.HumanInputTool;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
@@ -250,7 +251,8 @@ public final class ToolProcessor implements AutoCloseable {
     }
     tx.updateToolInvocations(List.of(tool.beginDispatch(now)));
     tx.updateThread(thread.touchVersion(now));
-    return new Prepare.Dispatched(thread.id(), tool.assistantEntryId(), tool.attempt(), request);
+    return new Prepare.Dispatched(
+        thread.id(), tool.assistantEntryId(), tool.attempt(), request, tool.approval());
   }
 
   /**
@@ -451,7 +453,7 @@ public final class ToolProcessor implements AutoCloseable {
           preflight.attempt(),
           preflight.request(),
           execution);
-      case ToolGateway.Ask ask -> applyPreflightAsk(claim, preflight, execution, ask.reason());
+      case ToolGateway.Ask ask -> applyPreflightAsk(claim, preflight, execution, ask);
       case ToolGateway.Deny deny -> applyPreflightDeny(claim, preflight, execution, deny.error());
     };
   }
@@ -481,7 +483,10 @@ public final class ToolProcessor implements AutoCloseable {
       return ProcessResult.LOST_OWNERSHIP;
     }
     return dispatch(
-        claim, new Prepare.Dispatched(threadId, assistantEntryId, attempt, request), execution);
+        claim,
+        new Prepare.Dispatched(
+            threadId, assistantEntryId, attempt, request, ToolApproval.notRequired()),
+        execution);
   }
 
   /**
@@ -514,7 +519,10 @@ public final class ToolProcessor implements AutoCloseable {
    * Ask：READY -&gt; WAITING_APPROVAL(request reason)，version+1，complete TOOL Work；不 request THREAD。
    */
   private ProcessResult applyPreflightAsk(
-      ClaimedWork claim, Prepare.Preflight preflight, ToolExecution execution, String reason) {
+      ClaimedWork claim,
+      Prepare.Preflight preflight,
+      ToolExecution execution,
+      ToolGateway.Ask ask) {
     boolean committed =
         Boolean.TRUE.equals(
             store.transaction(
@@ -533,7 +541,8 @@ public final class ToolProcessor implements AutoCloseable {
                       || tool.approval() != null) {
                     return false;
                   }
-                  tx.updateToolInvocations(List.of(tool.requestApproval(reason, now)));
+                  tx.updateToolInvocations(
+                      List.of(tool.requestApproval(ask.reason(), ask.editReview(), now)));
                   tx.updateThread(thread.touchVersion(now));
                   tx.completeWork(claim);
                   return true;
@@ -667,7 +676,8 @@ public final class ToolProcessor implements AutoCloseable {
                   dispatched.threadId(),
                   dispatched.assistantEntryId(),
                   Math.addExact(dispatched.attempt(), 1),
-                  dispatched.request()),
+                  dispatched.request(),
+                  dispatched.approval()),
               execution);
     } catch (RuntimeException failure) {
       // 契约：抛异常表示 Gateway 肯定未接受，可安全转 READY 并 reschedule（attempt 不变）。
@@ -879,7 +889,11 @@ public final class ToolProcessor implements AutoCloseable {
         implements Prepare {}
 
     record Dispatched(
-        UUID threadId, UUID assistantEntryId, int attempt, ToolInvocationRequest request)
+        UUID threadId,
+        UUID assistantEntryId,
+        int attempt,
+        ToolInvocationRequest request,
+        ToolApproval approval)
         implements Prepare {}
 
     record Terminated() implements Prepare {}

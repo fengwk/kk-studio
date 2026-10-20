@@ -55,7 +55,7 @@ class DaemonIdeCodecTest {
             VIEW,
             null,
             TICKET,
-            "wss://abc.ide.example.com/api/harness/environment-stream/v1/" + TICKET,
+            "/api/harness/environment-stream/v1/" + TICKET + "?environment=" + VIEW,
             IdeStreamMode.HTTP,
             "GET",
             "/?folder=/home/user/project&t=1",
@@ -71,7 +71,7 @@ class DaemonIdeCodecTest {
             VIEW,
             null,
             TICKET,
-            "wss://abc.ide.example.com/api/harness/environment-stream/v1/" + TICKET,
+            "/api/harness/environment-stream/v1/" + TICKET + "?environment=" + VIEW,
             IdeStreamMode.WS,
             null,
             "/ws/echo",
@@ -172,7 +172,7 @@ class DaemonIdeCodecTest {
                 VIEW,
                 null,
                 null,
-                "wss://x.example/s",
+                "/api/harness/environment-stream/v1/" + TICKET + "?environment=" + VIEW,
                 IdeStreamMode.WS,
                 null,
                 null,
@@ -185,7 +185,7 @@ class DaemonIdeCodecTest {
                 VIEW,
                 null,
                 TICKET,
-                "wss://x.example/s",
+                "/api/harness/environment-stream/v1/" + TICKET + "?environment=" + VIEW,
                 null,
                 null,
                 null,
@@ -202,7 +202,7 @@ class DaemonIdeCodecTest {
                 VIEW,
                 null,
                 TICKET,
-                "wss://x.example/s",
+                "/api/harness/environment-stream/v1/" + TICKET + "?environment=" + VIEW,
                 IdeStreamMode.HTTP,
                 null,
                 "/",
@@ -215,7 +215,7 @@ class DaemonIdeCodecTest {
                 VIEW,
                 null,
                 TICKET,
-                "wss://x.example/s",
+                "/api/harness/environment-stream/v1/" + TICKET + "?environment=" + VIEW,
                 IdeStreamMode.HTTP,
                 "GET",
                 null,
@@ -229,10 +229,36 @@ class DaemonIdeCodecTest {
     }
     for (String url :
         new String[] {
-          "ftp://x.example/s", "wss://user:pw@x.example/s", "wss://x.example/s#frag", "/relative"
+          "ftp://x.example/s",
+          "http://x.example/api/harness/environment-stream/v1/" + TICKET,
+          "ws://x.example/api/harness/environment-stream/v1/" + TICKET,
+          "wss://x.example/api/harness/environment-stream/v1/" + TICKET,
+          "wss://user:pw@x.example/s",
+          "wss://x.example/s#frag",
+          "//evil.example/s",
+          "relative",
+          "/relative#frag",
+          "/api/harness/environment-stream/v1/" + TICKET + "#frag",
+          "/api/harness/environment-stream/v1/" + TICKET + "\\bad",
+          "/api/harness/environment-stream/v1/../other",
+          "/api/harness/environment-stream/v1/" + TICKET + "/extra",
+          "/api/other/stream/v1/" + TICKET,
+          "/api/harness/environment-stream/v1/",
+          "/api/harness/environment-stream/v1/" + TICKET + "?other=1",
+          "/api/harness/environment-stream/v1/" + TICKET + "?environment=not-a-uuid",
+          "/api/harness/environment-stream/v1/"
+              + TICKET
+              + "?environment=11111111-2222-3333-4444-55555555555G"
         }) {
       assertThrows(IllegalArgumentException.class, () -> IdeCommand.validateStreamUrl(url), url);
     }
+    assertEquals(
+        "/api/harness/environment-stream/v1/" + TICKET + "?environment=" + VIEW,
+        IdeCommand.validateStreamUrl(
+            "/api/harness/environment-stream/v1/" + TICKET + "?environment=" + VIEW));
+    assertEquals(
+        "/api/harness/environment-stream/v1/" + TICKET,
+        IdeCommand.validateStreamUrl("/api/harness/environment-stream/v1/" + TICKET));
   }
 
   @Test
@@ -254,7 +280,7 @@ class DaemonIdeCodecTest {
                 VIEW,
                 null,
                 TICKET,
-                "wss://abc.ide.example.com/api/harness/environment-stream/v1/" + TICKET,
+                "/api/harness/environment-stream/v1/" + TICKET + "?environment=" + VIEW,
                 IdeStreamMode.WS,
                 null,
                 null,

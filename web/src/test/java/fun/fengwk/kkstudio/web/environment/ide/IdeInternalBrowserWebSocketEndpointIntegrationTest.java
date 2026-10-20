@@ -76,10 +76,6 @@ class IdeInternalBrowserWebSocketEndpointIntegrationTest extends WebPostgresTest
   @DynamicPropertySource
   static void clusterProperties(DynamicPropertyRegistry registry) {
     registry.add("kk-studio.cluster.secret", () -> SECRET);
-    registry.add(
-        "kk-studio.harness.ide-gateway.stream-url-template",
-        () -> "wss://studio-lb" + IdeGatewayProperties.STREAM_PATH);
-    registry.add("kk-studio.harness.ide.origin-template", () -> "https://{environmentId}.ide.test");
   }
 
   @LocalServerPort private int port;

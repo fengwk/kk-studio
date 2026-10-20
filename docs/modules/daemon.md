@@ -2,7 +2,7 @@
 
 Environment Daemon 是目标宿主上的独立 Node.js 进程，把 Platform 的原子能力调用落到文件系统、进程与本地工具链。网络连接只是消息管道：同一 Daemon 进程断线重连，不会重启已受理的执行。安装与三平台管理见 [Environment Daemon 安装与运行](../operations/environment-daemon.md)；共享契约见 [Harness Environment](harness-environment.md)，服务端会话见 [Harness Environment Server](harness-environment-server.md)。
 
-模块运行在 Node.js 24 运行时之上，依赖 `ajv`、`ignore`、`isomorphic-git`、`koffi`、`picomatch`、`re2-wasm`、`tar`、`vscode-jsonrpc`、`ws` 等生产依赖。官方发行归档内置冻结的 code-server 运行时（Node 24.x 与 code-server），不依赖宿主全局安装 Node 或 JDK 运行时；外部语言服务器与 Bash 由宿主提供。
+模块运行在 Node.js 24 运行时之上，依赖 `ajv`、`diff`、`ignore`、`isomorphic-git`、`koffi`、`picomatch`、`re2-wasm`、`tar`、`vscode-jsonrpc`、`ws` 等生产依赖。官方发行归档内置冻结的 code-server 运行时（Node 24.x 与 code-server），不依赖宿主全局安装 Node 或 JDK 运行时；外部语言服务器与 Bash 由宿主提供。
 
 ## 启动与本地状态
 
@@ -31,17 +31,17 @@ POSIX 目录权限为 0700、敏感文件为 0600。`tmp/workspaces` 由受控�
 
 ## 能力装配与运行时调度
 
-装配阶段将静态能力集合冻结并注入运行时：
-- 编码能力：文件读写编辑（`fs.read`、`fs.write`、`fs.edit`）、文件与内容检索（`fs.find`、`fs.grep`）、命令执行（`process.exec`）；
+装配阶段冻结 11 项原子能力（9 项模型工具与 2 项内部能力）；IDE 是独立受管服务。能力目录版本为 3，envelope wire 版本为 4，READY payload 版本为 5：
+- 编码能力：文件读写编辑（`fs.read`、`fs.write`、`fs.edit`、内部审查能力 `fs.edit.preview`）、文件与内容检索（`fs.find`、`fs.grep`）、命令执行（`process.exec`）；
 - 语言服务：`lsp.goto-definition`、`lsp.workspace-symbols`、`lsp.java-decompile`；
-- 扩展与受管服务：内部 `skill.sync` 以及 IDE 服务（code-server）。
+- 扩展与受管服务：内部 `skill.sync` 以及受管 IDE 服务（code-server，通过 `IDE_COMMAND` 与 `IDE_RESULT` 进行生命周期与流控制）。
 
 运行时 [`Runtime`](../../daemon/src/runtime.ts) 通过 WebSocket 保持控制连接：
 - 连接握手强制协商 `permessage-deflate`，缺失时以 1010 关闭；仅传输文本帧，超阈值单帧以 1008 关闭。
 - `daemonInstanceId` 在构造时随机生成，同进程所有 HELLO 复用。连接断开指数退避重连，上限为 30 秒；重连不改变进程内已有执行事实。
 - 注册被拒（REJECTED）进入 FAILED 状态、停止重连并退出进程；临时不可用（RETRY_LATER）退避重连。
 - INVOKE 经过严格 JSON 解码后，以 [`Journal`](../../daemon/src/journal.ts) 的 `start(invocationId)` 原子去重。已有条目直接重放：RUNNING 状态重放 `STARTED(replayed=true)`，已完成条目重放冻结终态，副作用不再重复执行。
-- 超时与取消：超时请求能力按 `TIMED_OUT` 收尾，取消请求按 `CANCELLED` 收尾；能力可通过收尾窗口提交终态文本，兜底到期由运行时直接提交终态裁决。
+- 超时与取消：Runtime 维护唯一的 invoke timer，超时或取消时通过同一 `context.signal` 请求停止（`TIMED_OUT` / `CANCELLED`），不提前抢占终态；由 process、search 等执行器在 cleanup 后交付真实结果，已完成的文件修改提交成功决不能被 late abort 覆盖。系统不对 OS 阻塞做严格硬中止或承诺 60 秒内一定回包。
 - 关停顺序：逆序释放连接与在途调用、能力资源、受控临时存储与目录锁。关停中发生的异常通过 `AggregateError` 聚合抛出，不静默吞掉清理错误。
 
 ## 本地存储与文本输出
@@ -71,11 +71,21 @@ POSIX 目录权限为 0700、敏感文件为 0600。`tmp/workspaces` 由受控�
 ### 文件与检索
 
 文件写入与编辑（[`files.ts`](../../daemon/src/coding/files.ts)）保留原有编码、BOM 与行尾，并通过 64-stripe 细粒度分段锁串行化同文件修改；原子写入临时文件后再替换目标文件（[`commit.ts`](../../daemon/src/coding/commit.ts)）。
-检索（[`search.ts`](../../daemon/src/coding/search.ts)）在进程内直接完成遍历与匹配，支持分层 `.gitignore` 与 `.git/info/exclude`，不依赖外部 ripgrep/fd 二进制。
+内部只读审查能力 `fs.edit.preview` 与 `fs.edit` 共享参数校验、解码、行尾检测与 diff 计算：
+
+- `fs.edit.preview` 使用 `diff@9.0.0` 的 `diffArrays` 计算所有变更行、4 行上下文与 EOF 缺换行标记，不设独立的计算超时或 `maxEditLength`；在文件锁内读取原文件原始字节，计算 canonical 绝对路径、原始字节 SHA-256 与带行号的 diff，返回 `{path, diff, sha256}`；完整 review 连同结果序列化后超过 1 MiB 时，在预览或提交前拒绝，不截断变更。
+- `fs.edit` 在文件锁内执行时，若 INVOKE 携带内部元数据 `expectedFile`（`{path, sha256}`），核对其与当前磁盘文件的绝对路径和 SHA-256；若文件在审查后已被变动，直接拒绝写入，防止授权陈旧变更；执行成功后在结果 `details.editReview` 携带 `{path, diff, sha256}`，作为唯一权威 canonical 持久化 diff，供自动放行/YOLO 模式展示真实变更。
+
+检索（[`search.ts`](../../daemon/src/coding/search.ts)）在进程内直接完成遍历与匹配，默认超时 15 秒（可由 `timeout_seconds` 覆盖），worker 共享原子 flag 在目录、行与 8KiB 块等检查点协作检查中断，超时保留 partial 匹配并标记 `search.incomplete`；非响应 stop 给予 5 秒清理宽限才 await terminate（非额外更短执行预算），清理失败明确暴露；支持分层 `.gitignore` 与 `.git/info/exclude`，不依赖外部 ripgrep/fd 二进制。
+
+### 受管 IDE 与反向数据流
+
+Daemon 受管运行内置的 code-server，响应 `IDE_COMMAND` 的 `OPEN_VIEW`、`CHANGE_DIRECTORY`、`FOCUS_TERMINAL`、`CLOSE_VIEW` 与 `OPEN_STREAM`，返回 `IDE_RESULT`。
+`OPEN_STREAM` 使用根相对路径 `/api/harness/environment-stream/v1/{ticket}?environment={id}`；Daemon 基于由 `studioUrl` 派生的 `gatewayUri` 解析目标地址与 TLS 端点，在 code-server 与 Studio 之间透传 HTTP 和 WebSocket 数据。
 
 ### LSP 语言服务
 
-LSP 组（[`lsp.ts`](../../daemon/src/coding/lsp.ts)）从配置中的 `lsp.servers` 初始化，按扩展名匹配语言服务器，并在目标文件所属项目根下复用 stdio JSON-RPC 连接。闲置 5 分钟后自动回收客户端；反编译能力（`lsp.java-decompile`）仅在匹配到 jdtls 服务器时可用。
+LSP 组（[`lsp.ts`](../../daemon/src/coding/lsp.ts)）从配置中的 `lsp.servers` 初始化，按扩展名匹配语言服务器，并在目标文件所属项目根下复用 stdio JSON-RPC 连接。三项能力默认超时 180 秒覆盖启动等待、initialize 与 query 全程，统一消费 `context.signal`；共享池初始化默认 180 秒独立生命周期，单个 waiter 停止不影响其他等待者，最后退出等待 cleanup；闲置 5 分钟自动回收客户端与 1 秒 shutdown 机制保持不变；反编译能力（`lsp.java-decompile`）仅在匹配到 jdtls 服务器时可用。
 
 ## 二进制直传与在线更新
 

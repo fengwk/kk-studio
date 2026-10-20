@@ -78,6 +78,24 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: daemon/package-lock.json
+      # 常规 Windows 门禁自动保留最小退出来源证据；先于依赖安装记录采集窗口与白名单工具链版本。
+      - name: Record Windows diagnostic toolchain and window start
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:GITHUB_WORKSPACE 'reports/windows-process-diagnostics'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          (Get-Date).ToUniversalTime().ToString('o') | Set-Content -Encoding utf8 (Join-Path $dir 'window-start.txt')
+          [ordered]@{
+            sourceCommit = (git rev-parse HEAD)
+            runnerOS = $env:RUNNER_OS
+            runnerArch = $env:RUNNER_ARCH
+            imageOS = $env:ImageOS
+            imageVersion = $env:ImageVersion
+            node = (node --version)
+            npm = (npm --version)
+            git = (git --version)
+          } | ConvertTo-Json | Set-Content -Encoding utf8 (Join-Path $dir 'toolchain-versions.json')
       - name: Install daemon dependencies
         run: npm --prefix daemon ci
       - name: Type-check the daemon
@@ -88,6 +106,11 @@ jobs:
       # 覆盖率是替换原 Java process-scope 门禁的核心证据：五个平台都真跑 native 进程范围、
       # 退出、Job/session 与能力层用例，任一平台失败即整体失败。
       - name: Test the daemon with coverage
+        id: coverage
+        env:
+          KK_WINDOWS_NATIVE_DIAGNOSTIC: ${{ runner.os == 'Windows' && '1' || '0' }}
+          KK_WINDOWS_NATIVE_DIAGNOSTIC_LABEL: ${{ runner.os == 'Windows' && 'regular-coverage' || 'disabled' }}
+          KK_WINDOWS_NATIVE_DIAGNOSTIC_OUTPUT: ${{ runner.os == 'Windows' && format('{0}/reports/windows-process-diagnostics', github.workspace) || '' }}
         run: npm --prefix daemon run coverage
       # macOS 上的安装器/归档测试只用系统 Bash 跑 fixture：不注册 launchd，也不把 Linux 归档
       # 当成 macOS 验收。真实 code-server 原生模块由发布作业在暂存归档上加载。
@@ -97,6 +120,130 @@ jobs:
         run: |
           /bin/bash --version
           node --test scripts/daemon/tests/*.test.mjs
+      # 无论覆盖率成功、失败还是因前置步骤未运行，都保留现有 JSONL 与采集状态；查询失败必须显式红灯。
+      - name: Collect Windows process exit diagnostics
+        if: ${{ always() && runner.os == 'Windows' }}
+        shell: pwsh
+        env:
+          COVERAGE_OUTCOME: ${{ steps.coverage.outcome }}
+        run: |
+          $dir = Join-Path $env:GITHUB_WORKSPACE 'reports/windows-process-diagnostics'
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          $startFile = Join-Path $dir 'window-start.txt'
+          $start = if (Test-Path -LiteralPath $startFile) {
+            [DateTime]::Parse((Get-Content -LiteralPath $startFile -Raw).Trim()).ToUniversalTime()
+          } else {
+            (Get-Date).ToUniversalTime().AddMinutes(-20)
+          }
+          $status = 'ok'
+          $queryError = $null
+          $events = @()
+          try {
+            $raw = @(Get-WinEvent -FilterHashtable @{ LogName = 'Application'; ProviderName = 'Application Error'; StartTime = $start } -ErrorAction Stop)
+            if ($raw.Count -eq 0) {
+              $status = 'no-events'
+            } else {
+              $rows = @()
+              foreach ($event in $raw) {
+                [xml]$xml = $event.ToXml()
+                $data = @{}
+                foreach ($item in $xml.Event.EventData.Data) { $data[$item.Name] = $item.'#text' }
+                $rows += [pscustomobject][ordered]@{
+                  timestamp = $event.TimeCreated.ToUniversalTime().ToString('o')
+                  AppName = $data['AppName']
+                  ModuleName = $data['ModuleName']
+                  ExceptionCode = $data['ExceptionCode']
+                  FaultingOffset = $data['FaultingOffset']
+                  ProcessId = $data['ProcessId']
+                }
+              }
+              # 只保留与本次 Node/Git Bash/MSYS 进程相关的崩溃，避免把 runner 上无关应用错误当成本次证据。
+              $relevant = @($rows | Where-Object {
+                $_.AppName -match '(?i)(node|bash|msys)' -or $_.ModuleName -match '(?i)(node|bash|msys)'
+              })
+              if ($relevant.Count -eq 0) {
+                $status = 'no-relevant-events'
+              } else {
+                $events = $relevant
+              }
+            }
+          } catch {
+            $message = $_.Exception.Message
+            if ($message -match '(?i)No events were found|No events matching') {
+              $status = 'no-events'
+            } else {
+              $status = 'query-failed'
+              $queryError = $message
+            }
+          }
+          [ordered]@{
+            status = $status
+            windowStart = $start.ToUniversalTime().ToString('o')
+            error = $queryError
+            events = @($events)
+          } | ConvertTo-Json -Depth 5 | Set-Content -Encoding utf8 (Join-Path $dir 'windows-application-errors.json')
+
+          $coverageOutcome = $env:COVERAGE_OUTCOME
+          if ([string]::IsNullOrWhiteSpace($coverageOutcome)) { $coverageOutcome = 'not-run' }
+          $coverageRan = $coverageOutcome -in @('success', 'failure')
+          $traceFiles = @(Get-ChildItem -LiteralPath $dir -Filter '*.jsonl' -File -ErrorAction SilentlyContinue)
+          $records = @()
+          $parseFailures = @()
+          foreach ($file in $traceFiles) {
+            $lineNumber = 0
+            foreach ($line in [System.IO.File]::ReadLines($file.FullName)) {
+              $lineNumber += 1
+              if ([string]::IsNullOrWhiteSpace($line)) { continue }
+              try {
+                $records += ($line | ConvertFrom-Json)
+              } catch {
+                $parseFailures += "$($file.Name):$lineNumber"
+              }
+            }
+          }
+          $exitResolved = @($records | Where-Object { $_.kind -eq 'exit-resolved' })
+          $sourceCounts = [ordered]@{}
+          foreach ($group in @($exitResolved | Group-Object source)) {
+            $sourceCounts[$group.Name] = $group.Count
+          }
+          $note = if (-not $coverageRan) {
+            'coverage did not run in this job'
+          } elseif ($traceFiles.Count -eq 0) {
+            'coverage ran but produced no trace files'
+          } elseif ($exitResolved.Count -eq 0) {
+            'coverage ran but produced no exit-resolved records'
+          } else {
+            $null
+          }
+          [ordered]@{
+            coverageOutcome = $coverageOutcome
+            coverageRan = $coverageRan
+            traceFiles = $traceFiles.Count
+            records = $records.Count
+            exitResolved = $exitResolved.Count
+            sourceCounts = $sourceCounts
+            parseFailures = @($parseFailures)
+            note = $note
+          } | ConvertTo-Json -Depth 5 | Set-Content -Encoding utf8 (Join-Path $dir 'collection-summary.json')
+
+          if ($status -eq 'query-failed') {
+            throw "Application Error query failed: $queryError"
+          }
+          if ($parseFailures.Count -gt 0) {
+            throw "Unparseable diagnostic JSONL: $($parseFailures -join ', ')"
+          }
+          # 覆盖率成功时必须有退出来源落定证据，不能把「没有任何 trace」当成绿色结果。
+          if ($coverageOutcome -eq 'success' -and $exitResolved.Count -eq 0) {
+            throw 'Coverage succeeded but produced no exit-resolved diagnostic evidence'
+          }
+      - name: Upload Windows process diagnostic evidence
+        if: ${{ always() && runner.os == 'Windows' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-process-diagnostics
+          path: reports/windows-process-diagnostics/
+          retention-days: 7
+          if-no-files-found: error
 
   windows_daemon_installer:
     name: windows daemon installer (PS 5.1 and 7)

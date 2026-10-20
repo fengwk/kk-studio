@@ -45,11 +45,9 @@ class EnvironmentIdeServiceImplTest {
   private static final String INSTANCE = "33333333-3333-3333-3333-333333333333";
   private static final UUID LEASE = new UUID(0L, 77L);
 
-  private final IdeOriginProperties originProperties = new IdeOriginProperties();
-
   private EnvironmentIdeServiceImpl service(
       FakeTransport transport, IdeBootstrapTicketService bootstrap, Duration timeout) {
-    return new EnvironmentIdeServiceImpl(transport, originProperties, bootstrap, timeout);
+    return new EnvironmentIdeServiceImpl(transport, bootstrap, timeout);
   }
 
   private EnvironmentIdeServiceImpl service(
@@ -57,13 +55,11 @@ class EnvironmentIdeServiceImplTest {
       IdeBootstrapTicketService bootstrap,
       Duration timeout,
       IdeViewAuthorizationListener viewAuthorization) {
-    return new EnvironmentIdeServiceImpl(
-        transport, originProperties, bootstrap, timeout, viewAuthorization);
+    return new EnvironmentIdeServiceImpl(transport, bootstrap, timeout, viewAuthorization);
   }
 
   @Test
   void openViewSendsCommandAndReturnsBootstrapEntry() {
-    originProperties.setOriginTemplate("https://{environmentId}.ide.example.com");
     FakeTransport transport = new FakeTransport();
     transport.reply =
         new IdeReply(true, VIEW, "/home/dev/project", "/daemon/workspaces/" + VIEW, null);
@@ -80,8 +76,7 @@ class EnvironmentIdeServiceImplTest {
     assertEquals(VIEW, dto.getViewId());
     assertEquals(ENV.toString(), dto.getEnvironmentId());
     assertEquals("/home/dev/project", dto.getDirectory());
-    assertTrue(
-        dto.getEntryUrl().startsWith("https://" + ENV + ".ide.example.com/__ide/bootstrap?token="));
+    assertTrue(dto.getEntryUrl().startsWith("/environment-ide/" + ENV + "/__ide/bootstrap?token="));
     // entryUrl 内的票据一次性绑定 workspace 路径。
     String token = tokenFrom(dto.getEntryUrl());
     IdeBootstrapTicketService.Ticket ticket = bootstrap.consume(token).orElseThrow();
@@ -95,20 +90,7 @@ class EnvironmentIdeServiceImplTest {
   }
 
   @Test
-  void openViewFailsClosedWhenOriginTemplateMissing() {
-    FakeTransport transport = new FakeTransport();
-    transport.reply = new IdeReply(true, VIEW, "/home/dev", "/daemon/workspaces/" + VIEW, null);
-
-    assertThrows(
-        AiEnvironmentIdeUnavailableException.class,
-        () ->
-            service(transport, new InMemoryIdeBootstrapTicketService(), Duration.ofSeconds(5))
-                .openView(ENV, openViewRequest(null)));
-  }
-
-  @Test
   void openViewFailsClosedWhenDaemonOmitsWorkspacePath() {
-    originProperties.setOriginTemplate("https://{environmentId}.ide.example.com");
     FakeTransport transport = new FakeTransport();
     transport.reply = new IdeReply(true, VIEW, "/home/dev", null, null);
 
@@ -229,13 +211,11 @@ class EnvironmentIdeServiceImplTest {
 
   @Test
   void defaultConstructorAppliesDocumentedCommandTimeout() {
-    originProperties.setOriginTemplate("https://{environmentId}.ide.example.com");
     FakeTransport transport = new FakeTransport();
     transport.reply = new IdeReply(true, VIEW, "/home/dev", "/daemon/workspaces/" + VIEW, null);
 
     EnvironmentIdeServiceImpl service =
-        new EnvironmentIdeServiceImpl(
-            transport, originProperties, new InMemoryIdeBootstrapTicketService());
+        new EnvironmentIdeServiceImpl(transport, new InMemoryIdeBootstrapTicketService());
 
     assertEquals(Duration.ofSeconds(30), EnvironmentIdeServiceImpl.DEFAULT_COMMAND_TIMEOUT);
     assertEquals(VIEW, service.openView(ENV, openViewRequest("/home/dev")).getViewId());
@@ -262,7 +242,6 @@ class EnvironmentIdeServiceImplTest {
   @ParameterizedTest
   @MethodSource("invalidDirectories")
   void openViewRejectsInvalidDirectoryBeforeSending(String directory) {
-    originProperties.setOriginTemplate("https://{environmentId}.ide.example.com");
     FakeTransport transport = new FakeTransport();
     transport.reply = new IdeReply(true, VIEW, "/home/dev", "/daemon/workspaces/" + VIEW, null);
     EnvironmentIdeServiceImpl service =
@@ -297,7 +276,6 @@ class EnvironmentIdeServiceImplTest {
 
   @Test
   void openViewAllowsMissingDirectory() {
-    originProperties.setOriginTemplate("https://{environmentId}.ide.example.com");
     FakeTransport transport = new FakeTransport();
     transport.reply = new IdeReply(true, VIEW, null, "/daemon/workspaces/" + VIEW, null);
 
@@ -341,7 +319,6 @@ class EnvironmentIdeServiceImplTest {
 
   @Test
   void openViewFallsBackToRequestedViewIdWhenReplyOmitsIt() {
-    originProperties.setOriginTemplate("https://{environmentId}.ide.example.com");
     FakeTransport transport = new FakeTransport();
     transport.reply = new IdeReply(true, null, "/home/dev", "/daemon/workspaces/" + VIEW, null);
 
@@ -354,7 +331,6 @@ class EnvironmentIdeServiceImplTest {
 
   @Test
   void openViewFailsClosedWhenDaemonReturnsBlankWorkspacePath() {
-    originProperties.setOriginTemplate("https://{environmentId}.ide.example.com");
     FakeTransport transport = new FakeTransport();
     transport.reply = new IdeReply(true, VIEW, "/home/dev", " ", null);
 
@@ -368,7 +344,6 @@ class EnvironmentIdeServiceImplTest {
 
   @Test
   void openViewFailsClosedWhenViewCapacityIsExhausted() {
-    originProperties.setOriginTemplate("https://{environmentId}.ide.example.com");
     FakeTransport transport = new FakeTransport();
     transport.reply = new IdeReply(true, VIEW, "/home/dev", "/daemon/workspaces/" + VIEW, null);
     InMemoryIdeBootstrapTicketService bootstrap = new InMemoryIdeBootstrapTicketService();
@@ -392,7 +367,6 @@ class EnvironmentIdeServiceImplTest {
 
   @Test
   void openViewNotifiesListenerAndIssuesBootstrapTicket() {
-    originProperties.setOriginTemplate("https://{environmentId}.ide.example.com");
     FakeTransport transport = new FakeTransport();
     transport.reply = new IdeReply(true, VIEW, "/home/dev", "/daemon/workspaces/" + VIEW, null);
     InMemoryIdeBootstrapTicketService bootstrap = new InMemoryIdeBootstrapTicketService();
@@ -413,7 +387,6 @@ class EnvironmentIdeServiceImplTest {
 
   @Test
   void openViewFailsClosedWhenListenerRejectsOpenedView() {
-    originProperties.setOriginTemplate("https://{environmentId}.ide.example.com");
     FakeTransport transport = new FakeTransport();
     transport.reply = new IdeReply(true, VIEW, "/home/dev", "/daemon/workspaces/" + VIEW, null);
     InMemoryIdeBootstrapTicketService bootstrap = new InMemoryIdeBootstrapTicketService();
@@ -432,7 +405,6 @@ class EnvironmentIdeServiceImplTest {
 
   @Test
   void closeViewNotifiesListenerAndRevokesIssuedTicket() {
-    originProperties.setOriginTemplate("https://{environmentId}.ide.example.com");
     FakeTransport transport = new FakeTransport();
     transport.reply = new IdeReply(true, VIEW, "/home/dev", "/daemon/workspaces/" + VIEW, null);
     InMemoryIdeBootstrapTicketService bootstrap = new InMemoryIdeBootstrapTicketService();

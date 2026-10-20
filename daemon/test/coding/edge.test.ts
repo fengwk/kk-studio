@@ -34,7 +34,7 @@ async function tempDir(): Promise<string> {
   return dir
 }
 
-/** Worker 超时用例硬终止真实 Worker：teardown 先 await terminate 完成（真实 Worker exit），再清理临时资源。 */
+/** 若失败路径请求强制清理，teardown 等待真实 Worker 退出后再删除临时资源。 */
 const pendingTerminations: Array<Promise<number>> = []
 
 beforeEach(() => {
@@ -279,7 +279,7 @@ describe('fs.edit 边界', () => {
     expect(decoded.text).toBe('a\nc\n')
   })
 
-  it('行级 diff 输出包含上下文与变更标记', async () => {
+  it('行级 diff 保留在结果审查详情，成功正文不重复输出', async () => {
     const dir = await tempDir()
     const file = join(dir, 'd.txt')
     await writeFile(file, 'a\nb\nc\n')
@@ -289,10 +289,12 @@ describe('fs.edit 边界', () => {
       { path: file, old_string: 'b', new_string: 'B' },
       makeContext(dir),
     )
-    const text = textOf(result)
-    expect(text).toContain('diff:')
-    expect(text).toContain('- 2|b')
-    expect(text).toContain('+ 2|B')
+    expect(textOf(result)).toBe('Edited successfully.\nReplacements: 1')
+    expect(result.details.editReview).toMatchObject({
+      path: file,
+      diff: expect.stringContaining('- 2|b'),
+    })
+    expect(result.details.editReview).toMatchObject({ diff: expect.stringContaining('+ 2|B') })
   })
 
   it('规范化后无变化时拒绝', async () => {
@@ -428,18 +430,17 @@ describe('fs.find / fs.grep 边界', () => {
 
   it('grep 超时映射为 TIMEOUT', async () => {
     const dir = await tempDir()
-    for (let index = 0; index < 3000; index++) {
-      await writeFile(join(dir, `f${index}.txt`), 'x\n')
-    }
+    const controller = new AbortController()
+    controller.abort('TIMED_OUT')
     const result = await callCapability(
       grep,
       'fs.grep',
       { pattern: 'zzz', path: dir },
-      makeContext(dir),
-      1,
+      makeContext(dir, { signal: controller.signal }),
     )
     expect(result.error).toBe(true)
     expect(result.details).toMatchObject({ code: 'TIMEOUT' })
+    expect(textOf(result)).toBe('[Search timed out; results are incomplete.]')
   })
 
   it('matchCenteredExcerpt 对超长行居中截取', () => {

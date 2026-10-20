@@ -194,10 +194,24 @@ Snapshot、Debug、用量并展示真实身份，并在顶部提供返回直属�
 根面板汇聚整棵执行树的审批和问卷，提交仍携带原始调用的 Thread 与 invocation 身份。
 执行结果与任务回执则始终交给直接派发的父 Agent，不改为根订阅。
 
-全局与根交互区共用 InteractionCardBody/ApprovalCard。审批保留一次完整 `argumentsJson`（含 bash 的 workdir），
+全局与根交互区共用 InteractionCardBody/ApprovalCard。非文件变更工具的审批显示一次完整 `argumentsJson`（含 bash 的 workdir），
 默认权限原因本地化，额外原因完整展示；允许与拒绝复用共享 Button，拒绝使用 primary + danger。
 来源名称来自 owner 或既有根执行树，不逐卡获取 Snapshot；无名称用“查看来源”，
 后代入口用“查看 subagent 执行”，名称与跳转目标一致，不显示裸 UUID，也不改变审批/问卷的原始来源身份。
+
+### 文件变更审查与工具卡片
+
+Chat 工具卡片与 ApprovalCard 共享文件变更审查组件：
+
+- **write 审查**：审批前展示目标路径与完整文件正文；参数中显式携带工作目录时一并展示，不补默认目录。采用有界滚动，不截断首尾，严格保留原始缩进与空白。
+- **edit 审查与真实 Diff**：模型流式生成参数阶段，展示传入的 `old_string` 与 `new_string`，明确标注为输入而非真实文件变更；
+  参数流结束后进入准备状态（preparing spinner），等待后端预检生成 `approvalJson.editReview`；
+  就绪后立即替换为真实文件 diff（包含 canonical 绝对路径、多 hunk 真实行号与变更行）。
+  若缺失或无法解析有效 review，禁用“允许”按钮，保留“拒绝”。
+- **展开与结果呈现**：write 与 edit 默认保持展开并有界滚动；执行成功后，可见结果仅呈现简洁的本地化提示
+  （中文“写入成功”/“编辑成功”，英文“Write succeeded”/“Edit succeeded”），不再在成功结果中重复回显文件正文或 diff；
+  执行失败时不隐藏错误详情，也不在产生真实终态前虚假展示成功。
+- **来源优先级与持久化结构**：优先从持久化的 `approvalJson.editReview` 获取真实 diff（freeze approval 优先）；对于自动放行（无需审批）、YOLO 模式或页面刷新与 GC 后的结果恢复，从持久化结果的 `details.editReview` 读取真实变更（durable entry 显式解码 `detailsJson`，invocation 从 `resultJson.details` 对象读取）；决不从旧/新参数在前端伪造 diff。其他工具的折叠与展示策略保持不变。
 
 根面板自动查询执行树，在 Widget 区以单行节点展示 processing 后代及其必要祖先；
 不重复根节点，不绘制无活跃后代的空壳。根本地空闲仍继续查询，整树 Stop 仍然可用。
@@ -275,8 +289,11 @@ Agent 目录按读 DTO 的 `type` 展示 `USER` / `BUILTIN` 徽标：内置定�
 MCP Card 消费安全投影，编辑时读取 no-store 配置并用 generation fence 保护迟到响应。
 Skill Check 只更新候选，用户确认 exact commit 后 Update 发布。
 Environment 管理面展示宿主事实与有界运维事件窗口，并提供“安装 / 覆盖”与“卸载”入口：安装弹窗
-保存安装设置后签发一次性安装码，生成安装/卸载命令并复制到剪贴板；下载安装脚本时服务端轮换注册凭证，
-安装码随即失效。保存只写设置、不代表已部署。
+保存安装设置后签发一次性安装码，生成安装/卸载命令并复制到剪贴板；下载安装脚本时服务端轮换注册凭证，安装码随即失效；
+卸载命令不需要安装码或注册凭证。前端不读取长期注册凭据，保存只写设置、不代表已部署。
+工作区内的受管 Environment 支持同源 IDE 嵌入：前端接收服务端的根相对 `entryUrl`（`/environment-ide/{id}/__ide/bootstrap?token=...`），
+直接通过普通 iframe 嵌入；Studio 与受管环境属于同一可信浏览器边界，不要求独立域名。本地开发环境由 Vite 的
+`/environment-ide` 代理通过 `changeOrigin: false, ws: true` 保留 Host 与 Origin 并透传 WebSocket。
 
 Projects 使用权威 ProjectSnapshot/IssueDetail，按 workflow states 分列，
 通过 version CAS 提交控制、阶段额度、Activity 与 Evidence。

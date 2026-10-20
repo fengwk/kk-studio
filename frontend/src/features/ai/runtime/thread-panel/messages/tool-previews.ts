@@ -1,3 +1,5 @@
+import type { EditReview } from '@/features/ai/runtime/mutation-review'
+
 export interface ParsedToolArguments {
   raw: string
   complete: boolean
@@ -7,18 +9,43 @@ export interface ParsedToolArguments {
 export interface WriteCallPreview {
   kind: 'write'
   path: string
+  workdir?: string
   content: string
+  hasContent: boolean
   lines: string[]
 }
 
-export interface EditCallPreview {
-  kind: 'edit'
-  path: string
-  replaceAll: boolean
-  lines: string[]
-}
+export type EditCallPreview =
+  | {
+      kind: 'edit'
+      mode: 'input'
+      path: string
+      oldText: string
+      newText: string
+      replaceAll: boolean
+    }
+  | {
+      kind: 'edit'
+      mode: 'preparing'
+      path: string
+    }
+  | {
+      kind: 'edit'
+      mode: 'review'
+      path: string
+      diff: string
+      sha256: string
+      lines: string[]
+    }
 
 export type ToolCallPreview = WriteCallPreview | EditCallPreview
+
+export interface EditPreviewOptions {
+  editReview?: EditReview | null
+  streaming?: boolean
+  isWaitingReview?: boolean
+  isTerminalWithoutReview?: boolean
+}
 
 export function parseToolArguments(raw: string): ParsedToolArguments {
   const trimmed = raw.trim()
@@ -42,6 +69,7 @@ export function parseToolArguments(raw: string): ParsedToolArguments {
 export function previewForToolCall(
   toolName: string,
   rawArguments: string,
+  options?: EditPreviewOptions,
 ): ToolCallPreview | null {
   const name = toolName.trim().toLowerCase()
   const parsed = parseToolArguments(rawArguments)
@@ -49,58 +77,72 @@ export function previewForToolCall(
     return formatWritePreview(parsed)
   }
   if (name === 'edit') {
-    return formatEditPreview(parsed)
+    return formatEditPreview(parsed, options)
   }
   return null
 }
 
 export function formatWritePreview(parsed: ParsedToolArguments): WriteCallPreview {
+  const hasContent = 'content' in parsed.values
   const content = stringField(parsed.values.content)
+  const workdir = stringField(parsed.values.workdir)
   return {
     kind: 'write',
     path: stringField(parsed.values.path),
+    workdir: workdir || undefined,
     content,
+    hasContent,
     lines: splitContentLines(content),
   }
 }
 
-export function formatEditPreview(parsed: ParsedToolArguments): EditCallPreview {
-  const oldText = stringField(parsed.values.old_string)
-  const newText = stringField(parsed.values.new_string)
-  return {
-    kind: 'edit',
-    path: stringField(parsed.values.path),
-    replaceAll: parsed.values.replace_all === true,
-    lines: generateSimpleDiffLines(oldText, newText),
-  }
-}
-
-export function generateSimpleDiffLines(oldText: string, newText: string): string[] {
-  if (!oldText && !newText) {
-    return []
-  }
-  const oldLines = splitContentLines(oldText)
-  const newLines = splitContentLines(newText)
-  const prefix = commonPrefixLength(oldLines, newLines)
-  const suffix = commonSuffixLength(oldLines.slice(prefix), newLines.slice(prefix))
-  const oldMid = oldLines.slice(prefix, oldLines.length - suffix)
-  const newMid = newLines.slice(prefix, newLines.length - suffix)
-  const lines: string[] = []
-  for (const line of oldLines.slice(0, prefix)) {
-    lines.push(` ${line}`)
-  }
-  for (const line of oldMid) {
-    lines.push(`-${line}`)
-  }
-  for (const line of newMid) {
-    lines.push(`+${line}`)
-  }
-  if (suffix > 0) {
-    for (const line of oldLines.slice(oldLines.length - suffix)) {
-      lines.push(` ${line}`)
+export function formatEditPreview(
+  parsed: ParsedToolArguments,
+  options?: EditPreviewOptions,
+): EditCallPreview | null {
+  if (options?.editReview) {
+    const diff = options.editReview.diff
+    return {
+      kind: 'edit',
+      mode: 'review',
+      path: options.editReview.path,
+      diff,
+      sha256: options.editReview.sha256,
+      lines: diff.split('\n'),
     }
   }
-  return lines
+
+  // Terminal without review must not show eternal preparing spinner
+  if (options?.isTerminalWithoutReview) {
+    return null
+  }
+
+  const path = stringField(parsed.values.path)
+  const isStreaming = options?.streaming ?? !parsed.complete
+
+  if (isStreaming) {
+    const oldText = stringField(parsed.values.old_string)
+    const newText = stringField(parsed.values.new_string)
+    return {
+      kind: 'edit',
+      mode: 'input',
+      path,
+      oldText,
+      newText,
+      replaceAll: parsed.values.replace_all === true,
+    }
+  }
+
+  // Once arguments finish, if review is being awaited/prepared
+  if (options?.isWaitingReview !== false) {
+    return {
+      kind: 'edit',
+      mode: 'preparing',
+      path,
+    }
+  }
+
+  return null
 }
 
 function extractPartialObjectFields(raw: string): Record<string, unknown> {
@@ -147,25 +189,4 @@ function splitContentLines(content: string): string[] {
     lines.pop()
   }
   return lines
-}
-
-function commonPrefixLength(left: string[], right: string[]): number {
-  const limit = Math.min(left.length, right.length)
-  let index = 0
-  while (index < limit && left[index] === right[index]) {
-    index += 1
-  }
-  return index
-}
-
-function commonSuffixLength(left: string[], right: string[]): number {
-  const limit = Math.min(left.length, right.length)
-  let index = 0
-  while (
-    index < limit
-    && left[left.length - 1 - index] === right[right.length - 1 - index]
-  ) {
-    index += 1
-  }
-  return index
 }

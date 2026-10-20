@@ -5,19 +5,38 @@ import { EventEmitter } from 'node:events'
  */
 export class FakeWorker extends EventEmitter {
   static readonly instances: FakeWorker[] = []
+  static nextPostMessageError: Error | null = null
+  static nextTerminateError: Error | null = null
+  static nextAutoResolve: boolean | null = null
+  static onCreated: ((worker: FakeWorker) => void) | null = null
+
   readonly posted: unknown[] = []
   terminated = false
   terminateSettled = false
   unrefCount = 0
-  private terminatePromise: Promise<number> | null = null
-  private settleTerminate: ((code: number) => void) | null = null
+  postMessageError: Error | null = null
+  terminateError: Error | null = null
+  autoResolve: boolean
+  private readonly terminateGate = Promise.withResolvers<number>()
 
   constructor(readonly entry: unknown) {
     super()
+    this.postMessageError = FakeWorker.nextPostMessageError
+    FakeWorker.nextPostMessageError = null
+    this.terminateError = FakeWorker.nextTerminateError
+    FakeWorker.nextTerminateError = null
+    this.autoResolve = FakeWorker.nextAutoResolve ?? true
+    FakeWorker.nextAutoResolve = null
+    // 挂兜底处理避免悬空未订阅时的全局 unhandled rejection
+    this.terminateGate.promise.catch(() => {})
     FakeWorker.instances.push(this)
+    FakeWorker.onCreated?.(this)
   }
 
   postMessage(job: unknown): void {
+    if (this.postMessageError) {
+      throw this.postMessageError
+    }
     this.posted.push(job)
   }
 
@@ -27,18 +46,25 @@ export class FakeWorker extends EventEmitter {
 
   terminate(): Promise<number> {
     this.terminated = true
-    this.terminatePromise ??= new Promise<number>((resolve) => {
-      this.settleTerminate = (code) => {
-        this.terminateSettled = true
-        resolve(code)
+    if (this.autoResolve) {
+      this.terminateSettled = true
+      if (this.terminateError) {
+        return Promise.reject(this.terminateError)
       }
-    })
-    return this.terminatePromise
+      return Promise.resolve(0)
+    }
+    return this.terminateGate.promise
   }
 
-  /** 结束仍挂起的 terminate()，避免悬空 Promise。 */
+  /** 结束仍挂起的 terminate()，避免悬空 Promise。未 terminate 时只 resolve 或 no-op，不 reject。 */
   release(): void {
-    this.settleTerminate?.(0)
-    this.settleTerminate = null
+    if (!this.terminateSettled) {
+      this.terminateSettled = true
+      if (this.terminated && this.terminateError) {
+        this.terminateGate.reject(this.terminateError)
+      } else {
+        this.terminateGate.resolve(0)
+      }
+    }
   }
 }

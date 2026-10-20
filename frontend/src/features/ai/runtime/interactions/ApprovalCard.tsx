@@ -8,6 +8,9 @@ import { queryKeys } from '@/shared/lib/query-keys'
 import { createUuid } from '@/shared/lib/uuid'
 import { Code } from '@/shared/ui/data/Mono'
 import { Button } from '@/shared/ui/controls/Button'
+import { extractApprovalEditReview } from '@/features/ai/runtime/mutation-review'
+import { previewForToolCall } from '@/features/ai/runtime/thread-panel/messages/tool-previews'
+import { ToolCallPreview } from '@/features/ai/runtime/thread-panel/messages/ToolCallPreview'
 import './interaction-cards.css'
 
 export interface ApprovalCardProps {
@@ -49,8 +52,25 @@ export function ApprovalCard({
   const reason = approvalData?.reason || null
   const decided = approvalData?.decision === 'ALLOWED' || approvalData?.decision === 'DENIED'
 
+  const normalizedTool = toolName.trim().toLowerCase()
+  const isEdit = normalizedTool === 'edit'
+  const isWrite = normalizedTool === 'write'
+  const isMutation = isWrite || isEdit
+
+  const editReview = useMemo(() => extractApprovalEditReview(approvalJson), [approvalJson])
+  const isEditMissingReview = isEdit && !editReview
+
+  const mutationPreview = useMemo(() => {
+    if (!isMutation) return null
+    return previewForToolCall(toolName, argumentsJson || '', {
+      editReview,
+      isWaitingReview: true,
+    })
+  }, [isMutation, toolName, argumentsJson, editReview])
+
   const handleDecision = async (decision: 'ALLOW' | 'DENY') => {
     if (busy || isNonRecoverable || decided) return
+    if (decision === 'ALLOW' && isEditMissingReview) return
     setBusy(true)
     setError(null)
 
@@ -119,9 +139,22 @@ export function ApprovalCard({
         ) : null}
       </div>
 
-      {argumentsJson ? (
+      {isMutation ? (
+        mutationPreview ? (
+          <div className="interaction-approval-mutation-preview">
+            <ToolCallPreview preview={mutationPreview} streaming={false} />
+          </div>
+        ) : null
+      ) : argumentsJson ? (
         <div className="interaction-approval-arguments">
           <Code className="interaction-raw-pre">{argumentsJson}</Code>
+        </div>
+      ) : null}
+
+      {isEditMissingReview ? (
+        <div className="interaction-error-banner">
+          <AlertCircle size={16} aria-hidden="true" />
+          <span>{t('ai.runtime.mutation.reviewMissing')}</span>
         </div>
       ) : null}
 
@@ -148,7 +181,7 @@ export function ApprovalCard({
         <Button
           variant="primary"
           className="interaction-allow-btn"
-          disabled={busy || isNonRecoverable}
+          disabled={busy || isNonRecoverable || isEditMissingReview}
           onClick={() => handleDecision('ALLOW')}
         >
           {t('ai.interaction.allow')}

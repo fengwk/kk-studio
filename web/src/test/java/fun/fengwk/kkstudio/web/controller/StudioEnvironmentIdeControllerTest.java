@@ -36,7 +36,6 @@ import fun.fengwk.kkstudio.harness.environment.server.IdeRequest;
 import fun.fengwk.kkstudio.harness.environment.server.IdeSessionIdentity;
 import fun.fengwk.kkstudio.platform.environment.ide.EnvironmentIdeService;
 import fun.fengwk.kkstudio.platform.environment.ide.EnvironmentIdeServiceImpl;
-import fun.fengwk.kkstudio.platform.environment.ide.IdeOriginProperties;
 import fun.fengwk.kkstudio.platform.environment.ide.InMemoryIdeBootstrapTicketService;
 import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
@@ -264,14 +263,9 @@ class StudioEnvironmentIdeControllerTest {
   void invalidDirectoryIsRejectedAsBadRequestWithoutDaemonCommand(String directory)
       throws Exception {
     RecordingIdeTransport transport = new RecordingIdeTransport();
-    IdeOriginProperties originProperties = new IdeOriginProperties();
-    originProperties.setOriginTemplate("http://{environmentId}.ide.test.localhost");
     EnvironmentIdeService service =
         new EnvironmentIdeServiceImpl(
-            transport,
-            originProperties,
-            new InMemoryIdeBootstrapTicketService(),
-            Duration.ofSeconds(5));
+            transport, new InMemoryIdeBootstrapTicketService(), Duration.ofSeconds(5));
     MockMvc realChain =
         MockMvcBuilders.standaloneSetup(new StudioEnvironmentIdeController(service))
             .setControllerAdvice(

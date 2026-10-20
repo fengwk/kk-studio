@@ -140,17 +140,18 @@ describe('environmentService', () => {
   })
 
   it('creates an ide view via POST /environments/{id}/ide/views', async () => {
+    const environmentId = 'a1000000-0000-4000-8000-000000000001'
     const view = {
       viewId: 'v-1',
-      environmentId: 'env-1',
+      environmentId,
       directory: '/home/user/workspace',
-      entryUrl: 'https://env-1.ide.example.com/?workspace=xyz',
+      entryUrl: `/environment-ide/${environmentId}/__ide/bootstrap?token=xyz`,
     }
     const client = createMockHttpClient()
     client.post.mockResolvedValue(view)
     const service = createEnvironmentService(client)
-    const result = await service.createIdeView('env-1', { viewId: 'v-1' })
-    expect(client.post).toHaveBeenCalledWith('/environments/env-1/ide/views', { viewId: 'v-1' })
+    const result = await service.createIdeView(environmentId, { viewId: 'v-1' })
+    expect(client.post).toHaveBeenCalledWith(`/environments/${environmentId}/ide/views`, { viewId: 'v-1' })
     expect(result).toEqual(view)
   })
 

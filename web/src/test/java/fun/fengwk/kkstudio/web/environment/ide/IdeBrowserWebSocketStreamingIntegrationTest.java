@@ -18,8 +18,6 @@ import okio.ByteString;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.web.server.LocalServerPort;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
@@ -71,14 +69,6 @@ class IdeBrowserWebSocketStreamingIntegrationTest extends WebPostgresTestSupport
 
   private static final EnvironmentId ENVIRONMENT =
       EnvironmentId.parse("33333333-3333-3333-3333-333333333333");
-
-  @DynamicPropertySource
-  static void ideGatewayProperties(DynamicPropertyRegistry registry) {
-    registry.add(
-        "kk-studio.harness.ide-gateway.stream-url-template",
-        () -> "wss://gateway.test" + IdeGatewayProperties.STREAM_PATH);
-    registry.add("kk-studio.harness.ide.origin-template", () -> "https://{environmentId}.ide.test");
-  }
 
   @LocalServerPort private int port;
 
@@ -195,7 +185,7 @@ class IdeBrowserWebSocketStreamingIntegrationTest extends WebPostgresTestSupport
               .build();
       Request request =
           new Request.Builder()
-              .url("http://" + ENVIRONMENT + ".ide.test:" + port + "/")
+              .url("http://localhost:" + port + "/environment-ide/" + ENVIRONMENT + "/")
               .header("Cookie", gatewayProperties.requireSessionCookieName() + "=" + cookie)
               // 显式禁用 OkHttp 的透明 gzip，保留原始压缩字节用于断言。
               .header("Accept-Encoding", "identity")
@@ -264,9 +254,9 @@ class IdeBrowserWebSocketStreamingIntegrationTest extends WebPostgresTestSupport
     browser.socket =
         client.newWebSocket(
             new Request.Builder()
-                .url("ws://" + ENVIRONMENT + ".ide.test:" + port + "/ws")
+                .url("ws://localhost:" + port + "/environment-ide/" + ENVIRONMENT + "/ws")
                 .header("Cookie", gatewayProperties.requireSessionCookieName() + "=" + cookie)
-                .header("Origin", "http://" + ENVIRONMENT + ".ide.test:" + port)
+                .header("Origin", "http://localhost:" + port)
                 .build(),
             browser);
     assertTrue(browser.opened.await(15, TimeUnit.SECONDS), "browser websocket must be established");

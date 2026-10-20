@@ -19,7 +19,6 @@ import fun.fengwk.kkstudio.harness.environment.server.IdeCommandTransport;
 import fun.fengwk.kkstudio.harness.environment.server.IdeRequest;
 import fun.fengwk.kkstudio.harness.environment.server.IdeSessionIdentity;
 import fun.fengwk.kkstudio.platform.environment.ide.EnvironmentIdeServiceImpl;
-import fun.fengwk.kkstudio.platform.environment.ide.IdeOriginProperties;
 import fun.fengwk.kkstudio.platform.environment.ide.InMemoryIdeBootstrapTicketService;
 import fun.fengwk.kkstudio.platform.error.AiEnvironmentIdeUnavailableException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
@@ -81,12 +80,9 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
     nodeBAuthentication =
         new HmacClusterInternalAuthentication(
             SECRET, NODE_B, Clock.systemUTC(), Duration.ofSeconds(30), 1024);
-    IdeOriginProperties originB = new IdeOriginProperties();
-    originB.setOriginTemplate("https://{environmentId}.ide.example.com");
     RecordingTransport transportB = new RecordingTransport();
     transportB.reply = IdeReply.ok(VIEW, "/home/dev/project", "/daemon/workspaces/" + VIEW);
-    nodeBLocal =
-        new EnvironmentIdeServiceImpl(transportB, originB, new InMemoryIdeBootstrapTicketService());
+    nodeBLocal = new EnvironmentIdeServiceImpl(transportB, new InMemoryIdeBootstrapTicketService());
 
     server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     server.createContext("/internal/environment-ide/", this::handle);
@@ -102,8 +98,7 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
             new HmacClusterInternalAuthentication(
                 SECRET, NODE_A, Clock.systemUTC(), Duration.ofSeconds(30), 1024));
     EnvironmentIdeServiceImpl localA =
-        new EnvironmentIdeServiceImpl(
-            localTransportA, originB, new InMemoryIdeBootstrapTicketService());
+        new EnvironmentIdeServiceImpl(localTransportA, new InMemoryIdeBootstrapTicketService());
     nodeAService = new ClusterEnvironmentIdeService(registryA, clientA, localA);
   }
 
@@ -121,7 +116,7 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
     assertEquals(VIEW, dto.getViewId());
     assertEquals(ENV.toString(), dto.getEnvironmentId());
     assertTrue(
-        dto.getEntryUrl().startsWith("https://" + ENV + ".ide.example.com/__ide/bootstrap?token="),
+        dto.getEntryUrl().startsWith("/environment-ide/" + ENV + "/__ide/bootstrap?token="),
         () -> "unexpected entry url: " + dto.getEntryUrl());
     assertEquals(1, received.get());
     assertTrue(localTransportA.commands.isEmpty());
@@ -170,8 +165,7 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
               ClusterIdeOwnerRoute.remote(
                   NODE_B, URI.create("http://127.0.0.1:" + oversizeServer.getAddress().getPort())));
       EnvironmentIdeServiceImpl local =
-          new EnvironmentIdeServiceImpl(
-              localTransportA, new IdeOriginProperties(), new InMemoryIdeBootstrapTicketService());
+          new EnvironmentIdeServiceImpl(localTransportA, new InMemoryIdeBootstrapTicketService());
       ClusterEnvironmentIdeService service =
           new ClusterEnvironmentIdeService(registry, smallClient, local);
 
@@ -217,8 +211,7 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
               ClusterIdeOwnerRoute.remote(
                   NODE_B, URI.create("http://127.0.0.1:" + stalledServer.getAddress().getPort())));
       EnvironmentIdeServiceImpl local =
-          new EnvironmentIdeServiceImpl(
-              localTransportA, new IdeOriginProperties(), new InMemoryIdeBootstrapTicketService());
+          new EnvironmentIdeServiceImpl(localTransportA, new InMemoryIdeBootstrapTicketService());
       ClusterEnvironmentIdeService service =
           new ClusterEnvironmentIdeService(registry, shortDeadlineClient, local);
 

@@ -1,3 +1,4 @@
+import { extractResultEditReview } from '@/features/ai/runtime/mutation-review'
 import type { HarnessSessionEntryDTO } from '@/shared/api/contracts/ai-runtime'
 import { asRecord, getRecordList, getString, parsePayload } from '@/features/ai/runtime/payload-json'
 import type {
@@ -386,7 +387,8 @@ function projectToolResult(
   callIndex: number,
   metadata: Record<string, unknown>,
 ): ToolDialogueMessage {
-  const projected = projectToolResultContent(content, argumentsJson)
+  const canonicalContent = decodeDurableToolResultContent(content)
+  const projected = projectToolResultContent(canonicalContent, argumentsJson)
   const assistantEntryId = getString(metadata.assistantEntryId)
   const metadataCallIndex = integerValue(metadata.callIndex)
   return {
@@ -402,9 +404,34 @@ function projectToolResult(
     errorMessage: projected.errorMessage,
     createdAt: entry.createTime,
     status: projected.status,
+    editReview: projected.editReview,
     callIdentity: assistantEntryId && metadataCallIndex != null
       ? strictToolCallIdentity(assistantEntryId, metadataCallIndex)
       : undefined,
+  }
+}
+
+/**
+ * 在 durable Entry 边界将持久化的 ToolResultMessageContent 解码为规范共享结果语义。
+ * durable 边界只认 detailsJson 字段；缺 detailsJson 或损坏时 details 均为 undefined，
+ * 绝不透传或旁路未知的 details 对象。
+ */
+function decodeDurableToolResultContent(content: Record<string, unknown>): Record<string, unknown> {
+  let details: Record<string, unknown> | undefined
+  const rawDetailsJson = content.detailsJson
+  if (typeof rawDetailsJson === 'string' && rawDetailsJson.trim()) {
+    try {
+      const parsed = JSON.parse(rawDetailsJson)
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        details = parsed as Record<string, unknown>
+      }
+    } catch {
+      // 损坏的 detailsJson 解析失败，details 保持 undefined，不假造或旁路未知对象
+    }
+  }
+  return {
+    ...content,
+    details,
   }
 }
 
@@ -415,7 +442,7 @@ function projectToolResult(
 export function projectToolResultContent(
   content: Record<string, unknown>,
   argumentsJson: string,
-): Pick<ToolDialogueMessage, 'arguments' | 'contents' | 'errorMessage' | 'status'> {
+): Pick<ToolDialogueMessage, 'arguments' | 'contents' | 'errorMessage' | 'status' | 'editReview'> {
   const error = content.error === true
   const contents = toToolContents(getRecordList(content.contents))
   // 错误直接使用工具结果原文：不再套用通用「工具执行失败」文案；没有可展示原文时
@@ -424,11 +451,13 @@ export function projectToolResultContent(
     .flatMap((item) => (item.type === 'text' ? [item.text] : []))
     .join('\n')
     .trim()
+  const editReview = extractResultEditReview(content) ?? undefined
   return {
     arguments: argumentsJson,
     contents,
     errorMessage: error && rawError ? rawError : undefined,
     status: error ? 'error' : 'done',
+    editReview,
   }
 }
 

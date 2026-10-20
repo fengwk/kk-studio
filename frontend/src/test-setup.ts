@@ -8,6 +8,9 @@ import { resetCanvasOperationStorage } from '@/features/canvas/canvas-operation-
 import { resetEditingSessionForTests } from '@/features/canvas/canvas-editing-session'
 
 beforeEach(() => {
+  if (typeof window === 'undefined') {
+    return
+  }
   localStorage.clear()
   sessionStorage.clear()
   // Canvas 本地状态默认按真实可用 IndexedDB 测试；需要验证不可用降级的用例自行移除。
@@ -285,5 +288,8 @@ if (typeof HTMLDialogElement !== 'undefined') {
 }
 
 afterEach(() => {
+  if (typeof window === 'undefined') {
+    return
+  }
   cleanup()
 })

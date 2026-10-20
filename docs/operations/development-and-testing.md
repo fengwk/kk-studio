@@ -36,7 +36,7 @@
 | Backend | `http://127.0.0.1:18080`，`SPRING_PROFILES_ACTIVE=e2e` |
 | Frontend | `http://127.0.0.1:5173` |
 | 工作目录 | `runtime/dev`，可由 `DEV_WORK_DIR` 覆盖 |
-| Backend log / JAR | `runtime/dev/backend.log`、`web/target/kk-studio-web-1.1.1.jar` |
+| Backend log / JAR | `runtime/dev/backend.log`、`web/target/kk-studio-web-1.1.3.jar` |
 
 `start` 会先执行 stop 流程、检查端口占用、按需用 Maven 打包 Backend、按需安装前端依赖，等
 Backend API ready 后再启动 Vite；`restart` 等价于 `stop` 后再 `start`，`logs` 与 `tail` 接受可选
@@ -83,6 +83,7 @@ Vite 默认只监听 `127.0.0.1` 并使用自带 Host allowlist。需要容器�
 | 编译 main/test 源码，不执行测试 | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp test-compile` |
 | 跑 Java 单元与集成测试 | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp test` |
 | 触发关键类覆盖率门禁 | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp verify` |
+| 同源 IDE 真实整链验收（需独立 Postgres 与受控 code-server） | `env JAVA_HOME="$JAVA_HOME_21" KK_STUDIO_IDE_ACCEPTANCE_DIR=<dir> KK_STUDIO_PLAYWRIGHT_MODULE_DIR=<dir> mvn -B -ntp -pl web -am test -Dtest=IdeRealBrowserAcceptanceTest -Dsurefire.failIfNoSpecifiedTests=false` |
 | 只格式化本次改动的 Java 文件 | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl <module> spotless:apply '-DspotlessFiles=<file-regex>'` |
 | 前端单元测试 / lint / 类型与构建 / 覆盖率 | `npm --prefix frontend run test`、`run lint`、`run typecheck`、`run typecheck:test`、`run build`、`run coverage` |
 | Daemon 单元测试与覆盖率 | 先 `npm --prefix daemon ci`，再 `npm --prefix daemon run test`、`run coverage`（Node 24）
@@ -127,6 +128,13 @@ Unix 矩阵在 Ubuntu 与 macOS runner 上使用系统 `/bin/bash`，macOS 明�
 五个目标上真实执行 `npm --prefix daemon run check`、`run build` 与 `run coverage`；macOS 追加系统 Bash 下的
 安装与归档契约测试，Windows 另以 PowerShell 5.1 与 7 运行安装、更新回归。Docker 发布与 Daemon Release
 都要求该门禁成功，release 还要在对应宿主上逐一烟测五个平台归档后才上传 GitHub Release。
+常规 Windows 覆盖率步骤会自动启用同步退出诊断，记录退出来源（`command-exit-report`、`helper-close-fallback`、
+`unknown`）、清理前的 scope/commandPid/exit/cleanup/helper 快照、被管理 helper 的 PID、退出、收敛与终止事实，
+以及采集窗口内与 node/bash/msys 相关的 Application Error 事件和 runner/node/npm/git 版本。无论覆盖率成功还是
+失败，都尝试把 `windows-process-diagnostics` artifact 上传到 Actions，保留 7 天，包含窗口起点、工具链白名单、
+JSONL trace、事件与采集摘要；覆盖率成功却没有 `exit-resolved` 证据时采集步骤显式失败。证据不包含 ProcessSpec
+参数、环境、cwd、launch 文件、token 或内存，也不保证存在原生栈或足以直接定位根因；runner 失联或强制结束时可能
+来不及上传。该诊断只改变 CI 测试证据，不改变 Daemon 运行时行为或发行版本。
 
 数据库维护脚本的集成测试使用独立的 PostgreSQL 17 容器。CI 显式安装 17 版客户端并将其
 bin 目录置于 PATH 首位，不依赖 runner 默认版本。本地运行 [scripts/ops/tests](../../scripts/ops/tests) 时，
@@ -304,12 +312,21 @@ npm --prefix frontend run build:browser
     browser-tests/chat-defaults.pw.ts browser-tests/composer-focus.pw.ts \
     browser-tests/debug-responsive-layout.pw.ts browser-tests/debug-preview-title.pw.ts \
     browser-tests/loading-skeleton.pw.ts browser-tests/retry-controls.pw.ts \
-    browser-tests/canvas-library.pw.ts browser-tests/interactions.pw.ts
+    browser-tests/canvas-library.pw.ts browser-tests/interactions.pw.ts \
+    browser-tests/mutation-review.pw.ts browser-tests/ide-overlay.pw.ts
 )
 ```
 
 这些用例验证新建/编辑默认值与显式清空、首次接受后的编辑器重挂载与临时禁用恢复、
-模态框和多 pane 防抢焦、等宽 Debug 列与 Subagent 配置详情，以及骨架屏、按钮忙碌状态和窄屏布局。
+模态框和多 pane 防抢焦、等宽 Debug 列与 Subagent 配置详情、骨架屏、按钮忙碌状态和窄屏布局，
+以及 write/edit 审查卡片（完整正文展示、准备中 spinner、真实文件 diff 与成功短文案呈现）和
+同源 IDE 覆盖层面板的显示、折叠与焦点恢复。
+文件变更审查卡片另提供独立的局部组件级浏览器回归入口（非 E2E 矩阵正式 case，独立 Chromium 端口 5178，不修改矩阵 inventory）：
+
+```bash
+npm --prefix frontend run test:mutation:browser
+```
+
 API 规划与代理切换由后端定向测试验证，不以静态浏览器基座替代真实服务契约。
 
 Thread 控制与消息展示通过统一 Playwright 配置划分具名 projects，可按改动范围选择：
