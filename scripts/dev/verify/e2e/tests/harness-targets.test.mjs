@@ -225,8 +225,11 @@ test('thread YOLO wire is an explicit boolean with an immutable execution root',
   assert.equal(threadYoloOf(childThread), false)
 
   assert.throws(() => assertRootYoloEnabled(rootThread, true), /yoloEnabled false != true/)
+  assert.throws(() => assertRootYoloEnabled(childThread, false), /must be a root thread/)
   assert.throws(() => threadYoloOf({ ...rootThread, yoloEnabled: undefined }), /explicit boolean/)
   assert.throws(() => threadYoloOf({ ...rootThread, rootThreadId: undefined }), /canonical UUID/)
+  assert.throws(() => threadYoloOf({ ...rootThread, parentThreadId: undefined }), /canonical UUID/)
+  assert.throws(() => threadYoloOf({ ...rootThread, parentThreadId: 'not-uuid' }), /canonical UUID/)
   assert.throws(
     () => threadYoloOf({ ...rootThread, rootThreadId: rootThreadId }),
     /root thread itself/,
