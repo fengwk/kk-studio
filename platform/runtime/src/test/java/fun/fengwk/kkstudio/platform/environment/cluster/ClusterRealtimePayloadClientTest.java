@@ -3,6 +3,10 @@ package fun.fengwk.kkstudio.platform.environment.cluster;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import com.sun.net.httpserver.Headers;
 import com.sun.net.httpserver.HttpExchange;
@@ -18,6 +22,8 @@ import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
@@ -25,6 +31,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -187,6 +194,33 @@ class ClusterRealtimePayloadClientTest {
 
     server.slow = false;
     assertEquals(EVENT_JSON, client.fetch(NODE_B, THREAD, PAYLOAD));
+  }
+
+  @Test
+  void timeoutAndInterruptionCancelExchangeBeforeResponseHeadersArrive() {
+    // 响应头之前还没有 body subscription：必须取消 HTTP future，而不只是尝试取消不存在的 subscription。
+    for (boolean interrupt : new boolean[] {false, true}) {
+      HttpClient httpClient = mock(HttpClient.class);
+      CompletableFuture<HttpResponse<byte[]>> response = new CompletableFuture<>();
+      when(httpClient.<byte[]>sendAsync(any(HttpRequest.class), any())).thenReturn(response);
+      StubRegistry registry = new StubRegistry();
+      registry.origins.put(NODE_B, URI.create("http://node.internal"));
+      ClusterRealtimePayloadClient client =
+          new ClusterRealtimePayloadClient(
+              httpClient, signer, registry, Duration.ofMillis(20), 1024);
+      if (interrupt) {
+        Thread.currentThread().interrupt();
+      }
+      try {
+        assertThrows(
+            RealtimePayloadUnavailableException.class, () -> client.fetch(NODE_B, THREAD, PAYLOAD));
+        assertTrue(response.isCancelled(), "the in-flight HTTP exchange must be cancelled");
+        assertEquals(interrupt, Thread.currentThread().isInterrupted());
+        verify(httpClient).sendAsync(any(HttpRequest.class), any());
+      } finally {
+        Thread.interrupted();
+      }
+    }
   }
 
   @Test

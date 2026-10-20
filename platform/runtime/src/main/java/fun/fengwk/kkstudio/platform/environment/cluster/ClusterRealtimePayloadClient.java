@@ -103,28 +103,28 @@ public final class ClusterRealtimePayloadClient implements RealtimePayloadFetche
     try {
       HttpResponse<byte[]> response = await(responseFuture, deadlineNanos);
       if (response.statusCode() != 200) {
-        subscriber.cancel();
         throw new RealtimePayloadUnavailableException(
             "realtime payload origin returned status " + response.statusCode());
       }
       byte[] body = await(subscriber.bodyFuture(), deadlineNanos);
       return new String(body, StandardCharsets.UTF_8);
     } catch (TimeoutException error) {
-      subscriber.cancel();
       throw new RealtimePayloadUnavailableException("realtime payload request timed out", error);
     } catch (InterruptedException error) {
       Thread.currentThread().interrupt();
-      subscriber.cancel();
       throw new RealtimePayloadUnavailableException(
           "realtime payload request was interrupted", error);
     } catch (ExecutionException error) {
-      subscriber.cancel();
       Throwable cause = error.getCause();
       if (cause instanceof RealtimePayloadUnavailableException unavailable) {
         throw unavailable;
       }
       throw new RealtimePayloadUnavailableException(
           "realtime payload origin is unavailable", cause);
+    } finally {
+      // 响应头尚未到达时 subscriber 还没有 subscription；取消 exchange 本身才能立即释放在途请求。
+      responseFuture.cancel(true);
+      subscriber.cancel();
     }
   }
 
