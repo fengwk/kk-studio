@@ -117,31 +117,12 @@ wait_app() {
 
 environment_is_ready() {
   curl -fsS "$APP_URL/api/environments" 2>/dev/null \
-    | python3 -c '
-import json
-import sys
-
-name = sys.argv[1]
-rows = json.load(sys.stdin).get("data") or []
-match = next((row for row in rows if row.get("name") == name), None)
-raise SystemExit(0 if match and match.get("status") == "READY" and match.get("ready") is True else 1)
-' "$RELIABILITY_ENV_NAME"
+    | node "$REPO_ROOT/scripts/dev/verify/reliability/stack-probe.mjs" environment-ready "$RELIABILITY_ENV_NAME"
 }
 
 print_environment_status() {
   curl -fsS "$APP_URL/api/environments" \
-    | python3 -c '
-import json
-import sys
-
-name = sys.argv[1]
-rows = json.load(sys.stdin).get("data") or []
-match = next((row for row in rows if row.get("name") == name), None)
-if match is None:
-    raise SystemExit(f"environment not found: {name}")
-print("environment={} status={} ready={}".format(
-    name, match.get("status"), match.get("ready")))
-' "$RELIABILITY_ENV_NAME"
+    | node "$REPO_ROOT/scripts/dev/verify/reliability/stack-probe.mjs" environment-status "$RELIABILITY_ENV_NAME"
 }
 
 wait_environment() {
@@ -159,7 +140,7 @@ wait_environment() {
 up_stack() {
   require_cmd docker
   require_cmd curl
-  require_cmd python3
+  require_cmd node
   assert_safe_config
   step "building and starting Compose project $PROJECT_NAME"
   compose up --detach --build
@@ -169,7 +150,7 @@ up_stack() {
   BACKEND_URL="$APP_URL" \
     TEST_MINIMAX_API_KEY="${TEST_MINIMAX_API_KEY-}" \
     TEST_MINIMAX_BASE_URL="${TEST_MINIMAX_BASE_URL-}" \
-    python3 "$REPO_ROOT/scripts/dev/verify/reliability/sync_minimax_credentials.py" \
+    node "$REPO_ROOT/scripts/dev/verify/reliability/sync-minimax-credentials.mjs" \
       --backend-url "$APP_URL"
 }
 
@@ -358,19 +339,7 @@ install_case_dependencies() {
   local container_id image_id workspace_volume network_name
   container_id=$(daemon_container_id)
   image_id=$(docker inspect --format '{{.Image}}' "$container_id")
-  workspace_volume=$(docker inspect "$container_id" | python3 -c '
-import json
-import sys
-
-container = json.load(sys.stdin)[0]
-matches = [
-    mount for mount in container.get("Mounts") or []
-    if mount.get("Type") == "volume" and mount.get("Destination") == "/workspace"
-]
-if len(matches) != 1 or not matches[0].get("Name"):
-    raise SystemExit("daemon workspace named volume was not found")
-print(matches[0]["Name"])
-')
+  workspace_volume=$(docker inspect "$container_id" | node "$REPO_ROOT/scripts/dev/verify/reliability/stack-probe.mjs" workspace-volume)
   network_name="${PROJECT_NAME}_app-ingress"
   docker network inspect "$network_name" >/dev/null 2>&1 \
     || die "reliability egress network is missing: $network_name"
@@ -400,7 +369,7 @@ EOF
 inspect_stack() {
   require_cmd docker
   require_cmd curl
-  require_cmd python3
+  require_cmd node
   assert_safe_config
 
   local container_id uid
@@ -410,23 +379,7 @@ inspect_stack() {
   [ "$uid" -ne 0 ] || die "daemon is running as root"
   printf 'daemon_uid=%s\n' "$uid"
 
-  docker inspect "$container_id" | python3 -c '
-import json
-import sys
-
-container = json.load(sys.stdin)[0]
-mounts = container.get("Mounts") or []
-if any(mount.get("Type") == "bind" for mount in mounts):
-    raise SystemExit("daemon has a forbidden bind mount")
-if len(mounts) != 1:
-    raise SystemExit(f"daemon expected exactly one mount, found {len(mounts)}")
-mount = mounts[0]
-if mount.get("Type") != "volume" or mount.get("Destination") != "/workspace":
-    raise SystemExit(f"unexpected daemon mount: {mount.get('Type')}:{mount.get('Destination')}")
-if mount.get("RW") is not True:
-    raise SystemExit("daemon workspace volume is not writable")
-print("daemon_mount=volume:/workspace writable=true")
-'
+  docker inspect "$container_id" | node "$REPO_ROOT/scripts/dev/verify/reliability/stack-probe.mjs" daemon-mount
 
   compose exec --no-TTY daemon bash -c '
 set -euo pipefail
@@ -479,28 +432,12 @@ node "$tmp/NativeToolSmoke.mjs"
 }
 
 safe_status() {
-  compose ps --format json | python3 -c '
-import json
-import sys
-
-raw = sys.stdin.read().strip()
-if not raw:
-    print("no reliability containers")
-    raise SystemExit(0)
-try:
-    decoded = json.loads(raw)
-    rows = decoded if isinstance(decoded, list) else [decoded]
-except json.JSONDecodeError:
-    rows = [json.loads(line) for line in raw.splitlines() if line.strip()]
-for row in sorted(rows, key=lambda item: item.get("Service", "")):
-    print("service={} state={} health={}".format(
-        row.get("Service"), row.get("State"), row.get("Health") or "-"))
-'
+  compose ps --format json | node "$REPO_ROOT/scripts/dev/verify/reliability/stack-probe.mjs" compose-status
 }
 
 status_stack() {
   require_cmd docker
-  require_cmd python3
+  require_cmd node
   safe_status
   if command -v curl >/dev/null 2>&1 \
     && curl -fsS "$APP_URL/actuator/health" >/dev/null 2>&1; then

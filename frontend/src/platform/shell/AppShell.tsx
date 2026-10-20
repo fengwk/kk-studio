@@ -1,4 +1,5 @@
 import { Menu, UserRound, X } from 'lucide-react'
+import { IconButton } from '@/shared/ui/controls/IconButton'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, matchRoutes, useLocation, type Location } from 'react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -184,17 +185,16 @@ export function AppShell({
               <span>KK Studio</span>
             </Link>
           </div>
-          <button
+          <IconButton
             ref={navToggleRef}
-            type="button"
             className="nav-toggle"
-            aria-label={navOpen ? t('platform.nav.close') : t('platform.nav.open')}
+            label={navOpen ? t('platform.nav.close') : t('platform.nav.open')}
             aria-expanded={navOpen}
             aria-controls="primary-navigation"
             onClick={() => setNavOpen((open) => !open)}
           >
             {navOpen ? <X aria-hidden="true" /> : <Menu aria-hidden="true" />}
-          </button>
+          </IconButton>
           <div className="topbar-center">
             <nav id="primary-navigation" className="topnav" aria-label={t('platform.primaryNavigation')}>
               {navItems.map((item) => {

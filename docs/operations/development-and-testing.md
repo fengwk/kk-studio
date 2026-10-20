@@ -13,7 +13,6 @@
 | Node 与 npm | Frontend 依赖由 [`package-lock.json`](../../frontend/package-lock.json) 固定；`distribution` profile 会自动安装 Node `v24.14.0` 与 npm `11.9.0` |
 | Docker 与 Compose v2 | 本地栈、测试栈、性能基线和镜像扫描需要 |
 | `curl`、`jq`、`lsof` | [scripts/dev/app.sh](../../scripts/dev/app.sh) 的启动硬依赖；端口与健康探测使用 lsof/curl |
-| Python 3 | E2E 与测试栈的 smoke 脚本 |
 
 数据库与服务由容器提供：[deploy/local](../../deploy/local/README.md) 覆盖主要本地路径，
 [deploy/test](../../deploy/test/README.md) 提供隔离离线栈。开发循环默认连接 PostgreSQL，
@@ -92,7 +91,7 @@ Vite 默认只监听 `127.0.0.1` 并使用自带 Host allowlist。需要容器�
 | 隔离栈 smoke | `./scripts/dev/verify/smoke/offline-chat.sh`；`--with-app` 增加应用契约，见 [deploy/test](../../deploy/test/README.md) |
 | 免费 API 契约矩阵 | [`./scripts/dev/verify/e2e/run.sh`](../../scripts/dev/verify/e2e/run.sh) |
 | 确认矩阵有哪些 case | `./scripts/dev/verify/e2e/run.sh --list`、`./scripts/dev/verify/e2e/run.sh --docs` |
-| 文档与敏感数据门禁 | `node scripts/dev/verify/repository/check.mjs`、`python3 scripts/dev/verify/repository/check-sensitive-data.py` |
+| 文档与敏感数据门禁 | `node scripts/dev/verify/repository/check.mjs`、`node scripts/dev/verify/repository/check-sensitive-data.mjs` |
 | 可靠性确定性回归 | `./scripts/dev/verify/reliability/regression.sh --iterations 1` |
 | 离线性能基线 | `./scripts/dev/verify/performance/run.sh` |
 | 供应链 SBOM / 漏洞门禁 | `./scripts/dev/verify/supply-chain/run.sh all` |
@@ -136,7 +135,7 @@ bin 目录置于 PATH 首位，不依赖 runner 默认版本。本地运行 [scr
 
 ### Daemon 安装与受管更新回归
 
-在仓库根运行 `python3 -m unittest discover -s scripts/daemon/tests -v`，覆盖安装、下载、受管更新与发布脚本契约。
+在仓库根运行 `node --test scripts/daemon/tests/*.test.mjs`，覆盖安装、下载、受管更新与发布脚本契约。
 Unix fixtures 替代网络与服务管理命令，真实执行 SHA256 校验、文件替换与暂存输入校验，验证 latest
 解析与发行归档版本匹配、`--check-config` 预检失败保留现有安装、受管身份判定、覆盖安装的备份与替换，
 以及卸载只移除受管服务与程序。安装器没有交互提示、from-source 与单独 upgrade 入口；从 checkout
@@ -169,7 +168,7 @@ Windows 原生还运行 `npm --prefix frontend run test:install:windows`，验�
 
 只有 Linux/macOS 时，可用 PS7 运行
 `pwsh -NoProfile -NonInteractive -File scripts/daemon/tests/test_daemon_install_windows.ps1 -ProcessOnly`；
-Python 入口在发现 `pwsh` 时也会运行这一子集，设置 120 秒超时以发现管道死锁。它只提供可移植
+它只提供可移植
 进程行为证据，不代替 Windows PowerShell 5.1 / PowerShell 7 的原生验收；镜像与 Daemon 发布 CI
 保留两个 Windows host 的完整门禁。
 
@@ -410,12 +409,12 @@ Fat JAR 的 static 资源检查由 `-Pdistribution` 的三个插件完成；应�
 ```bash
 node scripts/dev/verify/e2e/run-matrix.mjs --docs
 node scripts/dev/verify/repository/check.mjs
-python3 scripts/dev/verify/repository/check-sensitive-data.py
+node scripts/dev/verify/repository/check-sensitive-data.mjs
 git diff --check
 ```
 
 [scripts/dev/verify/repository/check.mjs](../../scripts/dev/verify/repository/check.mjs) 负责固定文档布局、Markdown 链接、H1、源码
-路径和旧词守卫。[check-sensitive-data.py](../../scripts/dev/verify/repository/check-sensitive-data.py) 扫描
+路径和旧词守卫。[check-sensitive-data.mjs](../../scripts/dev/verify/repository/check-sensitive-data.mjs) 扫描
 tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook、个人绝对路径和已知私有环境标识；
 命中时只输出规则与 `path:line`，不要回显完整敏感值。该入口不扫描 Git 历史，历史审计是公开策略中
 的独立步骤。
@@ -1048,7 +1047,7 @@ dump 之后、冻结之前提交的写入。冻结后的 `<db>_pre_<UTCstamp>` �
 5. 检查 App 健康、配置、Daemon 重连、关键业务和既有 bucket。
    验收结束前保留完整备份、冻结库和对象存储数据；失败时保持停写，按部署恢复流程决定回退。
 
-维护脚本的自动化入口是 `python3 -m unittest discover -s scripts/ops/tests`，验证备份、
+维护脚本的自动化入口是 `node --test scripts/ops/tests/*.test.mjs`，验证备份、
 重建回滚、快照清理范围与确认、元数据保留、连接保护、owner-only 产物与敏感值不外泄。集成测试使用一次性 PostgreSQL 容器；
 Docker 不可用时跳过的结果不能当作数据库流程通过。
 
@@ -1183,7 +1182,7 @@ performance 入口每次运行都会自行清理 PostgreSQL/MinIO/test network�
 | E2E 只跑少数 case | `node scripts/dev/verify/e2e/run-matrix.mjs --list`；确认 `--real`、`--with-tools`、`--with-canvas-storage`、`--with-canvas-function` | 通过 `requires` 和 level 过滤是当前行为 |
 | 真实 Provider 不可用 | 检查 8 个 `TEST_{GOOGLE,OPENAI_RESPONSES,ANTHROPIC,OPENAI}_{BASE_URL,API_KEY}` 变量是否均非空 | 必须显式 `--real`，只用宿主同步器；不要放入 Compose/image/container |
 | reliability 环境未 READY | `./scripts/dev/verify/reliability/stack.sh status`；`./scripts/dev/verify/reliability/stack.sh logs app daemon` | `inspect` 先检查 non-root、volume 和 gateway |
-| 敏感数据门禁失败 | `python3 scripts/dev/verify/repository/check-sensitive-data.py` | 只按输出的规则和位置排查；不要把完整敏感值复制到日志或 Issue |
+| 敏感数据门禁失败 | `node scripts/dev/verify/repository/check-sensitive-data.mjs` | 只按输出的规则和位置排查；不要把完整敏感值复制到日志或 Issue |
 | performance/supply-chain 失败 | 阅读 `reports/performance/latest/report.md` 或 `reports/supply-chain/latest/summary.md` | 阈值、在线源、JSON 完整性和 zero-vulnerability 都不能放宽 |
 | proxy 下 build 失败 | 检查 `HTTP_PROXY`/`HTTPS_PROXY`、`CANVAS_TEST_BUILD_NETWORK`；再执行基础设施 smoke | 离线 smoke 对可解析 proxy 默认使用 host build network；performance 仅自动处理 loopback proxy，代理值不进入 runtime 镜像 |
 

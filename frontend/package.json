@@ -9,6 +9,7 @@
     "typecheck": "tsc -b",
     "typecheck:test": "tsc -p tsconfig.test.json",
     "lint": "eslint .",
+    "lint:css": "node scripts/check-css.mjs",
     "build:layout": "vite build --config vite.layout.config.ts",
     "preview:layout": "vite preview --config vite.layout.config.ts",
     "preview": "vite preview",

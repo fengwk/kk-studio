@@ -26,7 +26,7 @@ const MERMAID_CONFIG: Record<string, unknown> = {
     darkMode: true,
     background: 'transparent',
     fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif',
-    fontSize: '14px',
+    fontSize: '13px',
     textColor: '#edf2ed',
     primaryColor: '#202723',
     primaryTextColor: '#edf2ed',
@@ -37,7 +37,7 @@ const MERMAID_CONFIG: Record<string, unknown> = {
     tertiaryColor: '#173d28',
     tertiaryTextColor: '#edf2ed',
     tertiaryBorderColor: '#355344',
-    lineColor: '#919c94',
+    lineColor: '#9aa59d',
     mainBkg: '#202723',
     nodeBkg: '#202723',
     nodeBorder: '#355344',
@@ -49,8 +49,8 @@ const MERMAID_CONFIG: Record<string, unknown> = {
     actorBkg: '#202723',
     actorBorder: '#355344',
     actorTextColor: '#edf2ed',
-    actorLineColor: '#919c94',
-    signalColor: '#919c94',
+    actorLineColor: '#9aa59d',
+    signalColor: '#9aa59d',
     signalTextColor: '#edf2ed',
     labelBoxBkgColor: '#202723',
     labelBoxBorderColor: '#355344',
@@ -69,7 +69,7 @@ const MERMAID_CONFIG: Record<string, unknown> = {
     pie8: '#1b211e',
     pie9: '#7fa38c',
     pie10: '#2b342f',
-    pie11: '#919c94',
+    pie11: '#9aa59d',
     pie12: '#355344',
     pieSectionTextColor: '#edf2ed',
     pieTitleTextColor: '#edf2ed',
@@ -83,7 +83,7 @@ const MERMAID_CONFIG: Record<string, unknown> = {
     cScale6: '#6d8f7a',
     cScale7: '#1b211e',
     cScale8: '#7fa38c',
-    cScale9: '#919c94',
+    cScale9: '#9aa59d',
     cScale10: '#355344',
     cScale11: '#4a6356',
   },
@@ -93,11 +93,11 @@ const MERMAID_CONFIG: Record<string, unknown> = {
       stroke: #355344 !important;
     }
     .edgePath .path, .flowchart-link {
-      stroke: #919c94 !important;
+      stroke: #9aa59d !important;
     }
     marker path {
-      fill: #919c94 !important;
-      stroke: #919c94 !important;
+      fill: #9aa59d !important;
+      stroke: #9aa59d !important;
     }
     .edgeLabel rect {
       fill: transparent !important;

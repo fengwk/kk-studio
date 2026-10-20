@@ -18,12 +18,12 @@
 }
 
 .plugin-check-fact-label {
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-xs);
   color: var(--fg-muted);
 }
 
 .plugin-check-fact-value {
-  font-size: var(--font-size-base);
+  font-size: var(--font-size-sm);
   color: var(--fg);
   overflow-wrap: anywhere;
 }
@@ -47,13 +47,13 @@
 }
 
 .plugin-check-dimension dt {
-  font-size: var(--font-size-sm);
+  font-size: var(--font-size-xs);
   color: var(--fg-muted);
 }
 
 .plugin-check-dimension dd {
   margin: 0;
-  font-size: var(--font-size-base);
+  font-size: var(--font-size-sm);
   color: var(--fg);
   text-align: right;
   overflow-wrap: anywhere;
@@ -66,13 +66,13 @@
   border-radius: var(--radius-md);
   background: var(--warning-soft);
   color: var(--warning);
-  font-size: var(--font-size-base);
+  font-size: var(--font-size-sm);
   line-height: 1.5;
 }
 
 .plugin-check-stale {
   margin-bottom: var(--space-3);
   color: var(--fg-muted);
-  font-size: var(--font-size-base);
+  font-size: var(--font-size-sm);
   line-height: 1.5;
 }

@@ -8,6 +8,7 @@ import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.harness.common.hash.Sha256;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryEntryPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
@@ -16,9 +17,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.util.HexFormat;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -152,11 +150,7 @@ public final class ThreadCreationRequestHash {
 
   private static String digest(ObjectNode envelope) {
     byte[] canonical = envelope.toString().getBytes(StandardCharsets.UTF_8);
-    try {
-      return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(canonical));
-    } catch (NoSuchAlgorithmException error) {
-      throw new IllegalStateException("SHA-256 is not available", error);
-    }
+    return Sha256.hex(canonical);
   }
 
   private static <T> T requireNonNull(T value, String field) {

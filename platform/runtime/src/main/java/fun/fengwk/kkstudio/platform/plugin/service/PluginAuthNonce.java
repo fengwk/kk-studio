@@ -1,11 +1,9 @@
 package fun.fengwk.kkstudio.platform.plugin.service;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
+import fun.fengwk.kkstudio.harness.common.hash.Sha256;
+
 import java.security.SecureRandom;
 import java.util.Base64;
-import java.util.HexFormat;
 import java.util.regex.Pattern;
 
 /**
@@ -55,13 +53,6 @@ public final class PluginAuthNonce {
     if (!isValidHandle(authAttemptId)) {
       throw new IllegalArgumentException("authAttemptId must be a canonical attempt handle");
     }
-    try {
-      byte[] digest =
-          MessageDigest.getInstance("SHA-256")
-              .digest((HASH_DOMAIN + authAttemptId).getBytes(StandardCharsets.UTF_8));
-      return HexFormat.of().formatHex(digest);
-    } catch (NoSuchAlgorithmException error) {
-      throw new IllegalStateException("SHA-256 is unavailable", error);
-    }
+    return Sha256.hex(HASH_DOMAIN + authAttemptId);
   }
 }

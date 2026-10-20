@@ -190,13 +190,7 @@ if [ "$REAL" = "true" ]; then
 fi
 if [ "$REAL" = "true" ]; then
   providers_ready=$(curl -fsS "$BACKEND_URL/api/providers?pageNumber=1&pageSize=50" \
-    | python3 -c 'import sys,json
-d=json.load(sys.stdin)
-rows=((d.get("data") or {}).get("results") or [])
-target_names={"google", "openai", "minimax-anthropic", "deepseek"}
-configured=set(r.get("name") for r in rows if r.get("configured") and r.get("baseUrl"))
-missing=target_names - configured
-print("missing:" + ",".join(sorted(missing)) if missing else "ok")')
+    | node "$SCRIPT_DIR/lib/json-probe.mjs" providers-ready)
   if [ "$providers_ready" != "ok" ]; then
     die "All 4 target providers (google, openai, minimax-anthropic, deepseek) must be configured for --real ($providers_ready)"
   fi

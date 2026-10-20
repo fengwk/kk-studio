@@ -1,4 +1,5 @@
 import { AlertCircle, Clock, RotateCcw, ShieldAlert, XCircle } from 'lucide-react'
+import { Badge } from '@/shared/ui/data/Badge'
 import { useI18n } from '@/shared/i18n'
 import { Button } from '@/shared/ui/controls/Button'
 import type { ProjectIssueSnapshotDTO } from '../types'
@@ -44,51 +45,51 @@ export function IssueCard({
       <div className="issue-card-header">
         <div className="issue-card-heading">
           <span className="issue-number">#{issue.number}</span>
-          <span className="badge badge-state">{issue.state}</span>
+          <Badge tone="info" mono>{issue.state}</Badge>
         </div>
 
         <div className="issue-badges-row">
           {isBlocked && (
-            <span
-              className="badge badge-blocked"
+            <Badge
+              tone="danger"
               title={t('projects.issue.blockedBadgeTitle', {
                 reason: issue.blockReason || t('projects.issue.reasonUnspecified'),
               })}
             >
               <AlertCircle size={12} aria-hidden="true" />
               BLOCKED
-            </span>
+            </Badge>
           )}
           {isUnknown && (
-            <span className="badge badge-unknown" title={t('projects.issue.unknownBadgeTitle')}>
+            <Badge tone="info" title={t('projects.issue.unknownBadgeTitle')}>
               <ShieldAlert size={12} aria-hidden="true" />
               UNKNOWN
-            </span>
+            </Badge>
           )}
           {issue.pauseReason === 'USER' && (
-            <span className="badge badge-paused" title={t('projects.issue.pausedBadgeTitle')}>
+            <Badge tone="warning" title={t('projects.issue.pausedBadgeTitle')}>
               PAUSED
-            </span>
+            </Badge>
           )}
           {issue.pauseReason === 'ERROR' && (
-            <span className="badge badge-failed" title={t('projects.issue.errorBadgeTitle')}>
+            <Badge tone="danger" title={t('projects.issue.errorBadgeTitle')}>
               ERROR
-            </span>
+            </Badge>
           )}
           {isWaiting && (
-            <span className="badge badge-waiting" title={t('projects.issue.waitingBadgeTitle')}>
+            <Badge tone="warning" title={t('projects.issue.waitingBadgeTitle')}>
               <Clock size={12} aria-hidden="true" />
               WAITING
-            </span>
+            </Badge>
           )}
           {isFailed && (
-            <span className="badge badge-failed" title={t('projects.issue.failedBadgeTitle')}>
+            <Badge tone="danger" title={t('projects.issue.failedBadgeTitle')}>
               <XCircle size={12} aria-hidden="true" />
               FAILED
-            </span>
+            </Badge>
           )}
           {issue.archivedAt && (
-            <span className="badge badge-archived">{t('projects.archived')}</span>
+            <Badge tone="neutral">{t('projects.archived')}</Badge>
           )}
         </div>
       </div>
@@ -105,11 +106,11 @@ export function IssueCard({
 
       {currentOrLatestRun && (
         <div className="issue-card-meta-row">
-          <span className="badge badge-run">
+          <Badge tone="info">
             #{currentOrLatestRun.ordinal} {currentOrLatestRun.state}
             {currentOrLatestRun.agentName ? ` · ${currentOrLatestRun.agentName}` : ''}
             {` · ${currentOrLatestRun.status}`}
-          </span>
+          </Badge>
         </div>
       )}
 

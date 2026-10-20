@@ -27,7 +27,7 @@
 - 新增依赖必须是直接使用的能力；不因 starter/JUnit 的传递依赖告警去平铺无关依赖。
 - 有意义的验证应沉淀为自动化测试：纯逻辑用单元测试，数据库、协议或跨组件行为用集成测试，不为凑层次重复同一断言。
 - 测试注释简洁说明意图，便于判断测试是否仍然有效。
-- 当前代码树的敏感数据门禁是 `python3 scripts/dev/verify/repository/check-sensitive-data.py`；命中时只报告规则和位置，不回显敏感值。
+- 当前代码树的敏感数据门禁是 `node scripts/dev/verify/repository/check-sensitive-data.mjs`；命中时只报告规则和位置，不回显敏感值。
 
 ## Java Formatting
 

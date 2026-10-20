@@ -20,7 +20,7 @@
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--surface);
-  transition: border-color 140ms ease, background-color 140ms ease;
+  transition: border-color var(--duration-fast), background-color var(--duration-fast);
 }
 
 .thread-turn-tool.tool-state-pending .thread-tool-surface {
@@ -31,9 +31,9 @@
 }
 
 .thread-turn-tool.tool-state-success .thread-tool-surface {
-  border-color: var(--green-border);
+  border-color: var(--accent-border);
   background:
-    linear-gradient(var(--green-soft), var(--green-soft)),
+    linear-gradient(var(--accent-soft), var(--accent-soft)),
     var(--surface);
 }
 
@@ -70,7 +70,7 @@
   display: block;
   padding: 4px 0;
   line-height: 20px;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   font-family: var(--mono);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -82,7 +82,7 @@
   line-height: 20px;
   color: var(--fg);
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   font-weight: 600;
   white-space: normal;
 }
@@ -90,9 +90,9 @@
 /* 参数与名称属于同一 inline 文本流，保留换行且无横向滚动。 */
 .thread-tool-summary-detail {
   min-width: 0;
-  color: var(--fg-dim);
+  color: var(--fg-muted);
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   line-height: 1.45;
   text-overflow: clip;
   white-space: pre-wrap;
@@ -114,10 +114,10 @@
   border-radius: var(--radius-sm);
   place-items: center;
   background: transparent;
-  color: var(--fg-dim);
+  color: var(--fg-muted);
   cursor: pointer;
   opacity: 1;
-  transition: opacity 120ms ease, background-color 120ms ease;
+  transition: opacity var(--duration-fast), background-color var(--duration-fast);
 }
 
 .thread-tool-toggle svg {
@@ -135,7 +135,7 @@
 
 .thread-tool-state-label {
   color: var(--fg-muted);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 
 .thread-tool-surface:hover .thread-tool-toggle,
@@ -163,7 +163,7 @@
 }
 
 .thread-turn-tool.tool-state-success .thread-tool-toggle {
-  color: var(--green);
+  color: var(--accent);
 }
 
 .thread-turn-tool.tool-state-error .thread-tool-toggle {
@@ -202,14 +202,14 @@
 .thread-tool-approval-note {
   margin: 9px 0 0;
   color: var(--fg-muted);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
 
 /* write 正文与 edit diff 使用同一个只读视口；内部滚动不把外层卡片滚走。 */
 .thread-tool-preview-body.is-edit .is-added {
-  color: var(--green);
+  color: var(--accent);
 }
 
 .thread-tool-preview-body.is-edit .is-removed {
@@ -226,7 +226,7 @@
   background: transparent;
   color: var(--fg-muted);
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -262,7 +262,7 @@
 
 .thread-tool-error {
   margin: 9px 0 0;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--danger);
   overflow-wrap: anywhere;
 }
@@ -290,9 +290,9 @@
 }
 
 .thread-tool-attachment-uri-text {
-  color: var(--fg-dim);
+  color: var(--fg-muted);
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   overflow-wrap: anywhere;
 }
 
@@ -315,7 +315,7 @@
 
 .ask-user-q-icon {
   flex: 0 0 auto;
-  color: var(--fg-dim);
+  color: var(--fg-muted);
 }
 
 /* task 工具 renderer：prompt 与可点击 Thread 链接；不显示受理/完成文案。 */
@@ -324,7 +324,7 @@
   flex-direction: column;
   gap: 8px;
   color: var(--fg-muted);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   font-weight: 400;
 }
 

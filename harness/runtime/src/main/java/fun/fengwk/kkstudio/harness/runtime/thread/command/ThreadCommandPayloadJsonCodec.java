@@ -10,15 +10,13 @@ import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.harness.common.hash.Sha256;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.NotificationKind;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageJsonCodec;
 
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.util.HexFormat;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.Objects;
@@ -96,11 +94,7 @@ public final class ThreadCommandPayloadJsonCodec {
   public static String requestHash(ThreadCommandPayload payload) {
     Objects.requireNonNull(payload, "payload");
     byte[] canonical = write(encodeRequestEnvelopeNode(payload)).getBytes(StandardCharsets.UTF_8);
-    try {
-      return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(canonical));
-    } catch (NoSuchAlgorithmException error) {
-      throw new IllegalStateException("SHA-256 is not available", error);
-    }
+    return Sha256.hex(canonical);
   }
 
   /** 编码 request hash 的 canonical 信封节点：{@code type}（command discriminator）+ {@code payload}。 */

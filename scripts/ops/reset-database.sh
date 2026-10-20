@@ -233,7 +233,7 @@ cleanup_snapshots() {
 }
 
 preflight() {
-  require_command python3
+  require_command node
   require_command psql
   require_command pg_dump
   require_command pg_restore

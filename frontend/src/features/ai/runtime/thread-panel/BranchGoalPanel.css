@@ -20,7 +20,7 @@
 
 .goal-panel-section-label {
   color: var(--fg-muted);
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   font-weight: 600;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -28,7 +28,7 @@
 
 .goal-panel-text {
   color: var(--fg);
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   line-height: 1.5;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -36,7 +36,7 @@
 
 .goal-panel-empty {
   color: var(--fg-muted);
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   font-style: italic;
 }
 
@@ -72,7 +72,7 @@
   align-items: center;
   gap: 6px;
   color: var(--fg);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   font-weight: 600;
 }
 
@@ -91,13 +91,13 @@
 
 .goal-panel-report-disclaimer {
   color: var(--fg-muted);
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   font-style: italic;
 }
 
 .goal-panel-report-reason {
   color: var(--fg);
-  font-size: 13px;
+  font-size: var(--font-size-sm);
   line-height: 1.4;
   overflow-wrap: anywhere;
 }
@@ -107,7 +107,7 @@
   align-items: center;
   gap: 4px;
   color: var(--fg-muted);
-  font-size: 11px;
+  font-size: var(--font-size-xs);
 }
 
 .goal-panel-report-time svg {
@@ -120,7 +120,7 @@
   border: 1px dashed var(--border);
   border-radius: var(--radius-sm);
   color: var(--fg-muted);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 
 .goal-panel-meta {
@@ -129,7 +129,7 @@
   justify-content: space-between;
   gap: 8px;
   color: var(--fg-muted);
-  font-size: 11px;
+  font-size: var(--font-size-xs);
 }
 
 .goal-panel-counter.overflow {
@@ -150,6 +150,6 @@
 
 .goal-panel-readonly {
   color: var(--fg-muted);
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   font-style: italic;
 }

@@ -172,10 +172,10 @@ test('frontend diagnostics survive failed gates and upload only report directori
 
 test('CI provisions and selects the PostgreSQL fixture client major before validation', () => {
   // Installing a client alone is insufficient: PATH must select every binary from that major.
-  const fixture = readFileSync(new URL('scripts/ops/tests/test_reset_database_integration.py', root), 'utf8')
-  const major = fixture.match(/^POSTGRES_MAJOR = (\d+)$/m)?.[1]
+  const fixture = readFileSync(new URL('scripts/ops/tests/support/postgres-fixture.mjs', root), 'utf8')
+  const major = fixture.match(/^export const POSTGRES_MAJOR = (\d+)$/m)?.[1]
   assert.ok(major)
-  assert.match(fixture, /f"postgres:\{POSTGRES_MAJOR\}-alpine"/u)
+  assert.ok(fixture.includes('`postgres:${POSTGRES_MAJOR}-alpine`'))
   for (const [source, validationName] of [
     [docker, 'Verify Java sources, tests and coverage'],
     [release, 'Verify and build the Node daemon'],
@@ -240,7 +240,7 @@ test('the five-platform Node matrix builds and covers every official target', ()
   assert.ok(macos, 'macOS must run the system-Bash installer/archive contract')
   assert.ok(macos.includes('shell: /bin/bash --noprofile --norc -eo pipefail {0}'))
   assert.ok(macos.includes('/bin/bash --version'))
-  assert.ok(macos.includes("python3 -m unittest discover -s scripts/daemon/tests -p 'test_*.py'"))
+  assert.ok(macos.includes('node --test scripts/daemon/tests/*.test.mjs'))
 })
 
 test('release reuses the same daemon matrix and gates on it before staging', () => {
