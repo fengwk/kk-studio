@@ -17,6 +17,7 @@ it('默认权限原因本地化；完整 arguments/workdir 一次，额外真实
   const { container, rerender } = render(<ApprovalCard {...props} />, { wrapper })
   expect(screen.getByText('权限规则要求审批')).toBeInTheDocument()
   expect(container.querySelectorAll('pre')).toHaveLength(1)
+  expect(container.querySelector('pre')).toHaveClass('ui-code', 'interaction-raw-pre')
   expect(container.querySelector('pre')?.textContent).toBe(args)
   expect(container.textContent?.split('/srv/完整目录')).toHaveLength(2)
   expect(screen.getByRole('button', { name: '拒绝' })).toHaveClass('btn-primary', 'danger')

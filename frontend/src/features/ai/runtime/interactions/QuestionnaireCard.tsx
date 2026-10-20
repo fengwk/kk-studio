@@ -7,6 +7,7 @@ import { interactionService } from '@/shared/api/interaction-service'
 import { useI18n } from '@/shared/i18n'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { createUuid } from '@/shared/lib/uuid'
+import { Code } from '@/shared/ui/data/Mono'
 import { Button } from '@/shared/ui/controls/Button'
 import { TextInput } from '@/shared/ui/controls/TextInput'
 import {
@@ -100,7 +101,7 @@ export function QuestionnaireCard({
         <span className="interaction-error-text">
           {t('ai.common.operationFailed')}
         </span>
-        <pre className="interaction-raw-pre">{argumentsJson}</pre>
+        <Code className="interaction-raw-pre">{argumentsJson}</Code>
       </div>
     )
   }

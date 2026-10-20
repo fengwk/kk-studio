@@ -119,7 +119,8 @@ describe('ThreadModelRequestDebug & Inspector', () => {
     expect(environment).toHaveClass('is-neutral')
     expect(environment).not.toHaveClass('is-ready')
     expect(screen.queryByText(/DEBUG ·/)).not.toBeInTheDocument()
-    expect(screen.getByText('System prompt content with instructions')).toBeInTheDocument()
+    expect(screen.getByText('System prompt content with instructions'))
+      .toHaveClass('ui-code', 'thread-system-prompt-body')
 
     // 工具标题与徽章
     expect(screen.getByText(/工具 1 纳入规划 · 1 已过滤/)).toBeInTheDocument()
@@ -199,6 +200,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
     expect(screen.getByText('名称')).toBeInTheDocument()
     expect(screen.getByText('纳入当前规划 (SENT)')).toBeInTheDocument()
     expect(screen.getByText('可选环境 (OPTIONAL)')).toBeInTheDocument()
+    expect(screen.getByText('builtin:read')).toHaveClass('ui-mono')
     expect(screen.getByText('builtin:read')).toBeInTheDocument()
     expect(screen.getByText('Read file')).toBeInTheDocument()
     expect(screen.getByText('输入 Schema JSON：')).toBeInTheDocument()
