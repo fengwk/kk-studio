@@ -21,7 +21,7 @@ advisory 围栏与六级行锁分别记录。Thread 按 UUID、Command 按 seque
 Tool siblings 按 assistantEntryId/callIndex、Work 按 type/UUID 排序。
 持有执行树锁时，生命周期交付允许回写同树 Command；其他逆序请求立即失败。
 
-执行树由 Thread 行上不可变的 `parent_thread_id` 与 `root_thread_id` 表达：根直接取自 `root_thread_id`，涉及整棵树的读写先在根上取 `pg_advisory_xact_lock`；一次事务涉及多棵树时按根 UUID 升序依次取锁。`findAncestorChain` 只在需要逐级祖先（例如锁祖先行）时用 `WITH RECURSIVE` 回溯。`lockTree` 必须在任何业务行锁之前取得（否则抛 `IllegalStateException`）。`getThreadTree` 在这把树锁内用 `listThreadsByRoot` 取同根全部 Thread，再按 UUID 升序锁定这些 Thread 和读取 Command；同树 Invocation 的写入已被树锁串行化，查询仅用无锁探测读取 Model 与 Tool，避免多节点之间出现 Tool 到 Model 的逆序加锁。
+执行树由 Thread 行上不可变的 `parent_thread_id` 与 `root_thread_id` 表达：根直接取自 `root_thread_id`，涉及整棵树的读写先在根上取 `pg_advisory_xact_lock`；一次事务涉及多棵树时按根 UUID 升序依次取锁。ThreadProcessor 的 Join 交付与 Stop 只锁自身/目标子树与直接父，不回溯完整祖先链；`findAncestorChain` 仅供 spawn 接受、深度判定等确实需要逐级祖先的路径用 `WITH RECURSIVE` 回溯。`lockTree` 必须在任何业务行锁之前取得（否则抛 `IllegalStateException`）。`getThreadTree` 在这把树锁内用 `listThreadsByRoot` 取同根全部 Thread，再按 UUID 升序锁定这些 Thread 和读取 Command；同树 Invocation 的写入已被树锁串行化，查询仅用无锁探测读取 Model 与 Tool，避免多节点之间出现 Tool 到 Model 的逆序加锁。
 
 `lockJoinAdmission` 使用与树锁隔离的双 int advisory key，在任何树锁和行锁之前串行化 task 接受。`countIncompleteChildJoins` 统计指定父 Thread 的未完成 Join，`countIncompleteSubagentJoins` 跨所有根统计 `parent_thread_id` 非空且 `terminal_entry_id` 为空的 Join，原子执行父级与全局并发准入。每次接受新的子任务 Join 占用一个额度，Join 结算后释放；子 Thread 后续普通交互不重新占用额度。普通执行推进和无父 one-shot 不取全局准入锁。
 

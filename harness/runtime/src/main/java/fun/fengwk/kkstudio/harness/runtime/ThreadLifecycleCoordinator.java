@@ -48,31 +48,38 @@ public final class ThreadLifecycleCoordinator {
   public ThreadLifecycleCoordinator() {}
 
   /**
-   * 获取指定 Thread 所在执行树的根锁，并按规范锁序锁定祖先链全部 Session（KEY SHARE）与 Thread（FOR UPDATE）。
+   * 获取指定 Thread 所在执行树的根锁，并按规范锁序锁定该 Thread 与其直接父 Thread 的 Session（KEY SHARE）和 Thread（FOR UPDATE）。
+   *
+   * <p>ThreadProcessor 的跨 Thread 写入只有 Join 父交付：只涉及自身与不可变的 {@code parentThreadId}。取得树锁后必须重新读取
+   * Thread，不能复用 {@link ThreadTreeLocks#lockForThread} 返回的加锁前快照：并发的深删除可能在树锁等待期间提交，此时按合法缺失处理。
    *
    * @param tx 当前事务句柄，不能为 null
    * @param threadId 目标线程 ID，不能为 null
-   * @return 目标线程锁定后的当前状态，若任何 Session/Thread 不存在或被并发删除则返回 null
+   * @return 目标线程锁定后的当前状态，若目标或其直接父 Session/Thread 不存在或被并发删除则返回 null
    */
-  public static ThreadState lockThreadWithAncestors(HarnessStore.Transaction tx, UUID threadId) {
+  public static ThreadState lockThreadWithParent(HarnessStore.Transaction tx, UUID threadId) {
     Objects.requireNonNull(tx, "tx");
     Objects.requireNonNull(threadId, "threadId");
     ThreadTreeLocks.lockForThread(tx, threadId);
-    List<UUID> chain = tx.findAncestorChain(threadId);
-    if (chain.isEmpty()) {
+    ThreadState thread = tx.findThread(threadId).orElse(null);
+    if (thread == null) {
       // 目标线程在取得树锁前已被并发删除：合法缺失，不抛异常也不重试。
       return null;
     }
-    Map<UUID, ThreadState> immutableThreads = new HashMap<>();
-    for (UUID id : chain) {
-      ThreadState state = tx.findThread(id).orElse(null);
-      if (state == null) {
+    List<UUID> threadIds = new ArrayList<>(2);
+    threadIds.add(thread.id());
+    Map<UUID, ThreadState> snapshots = new HashMap<>();
+    snapshots.put(thread.id(), thread);
+    if (thread.parentThreadId() != null) {
+      ThreadState parent = tx.findThread(thread.parentThreadId()).orElse(null);
+      if (parent == null) {
         return null;
       }
-      immutableThreads.put(id, state);
+      threadIds.add(parent.id());
+      snapshots.put(parent.id(), parent);
     }
     List<UUID> sessionIds =
-        immutableThreads.values().stream()
+        snapshots.values().stream()
             .map(ThreadState::sessionId)
             .distinct()
             .sorted(UuidOrder.COMPARATOR)
@@ -82,7 +89,7 @@ public final class ThreadLifecycleCoordinator {
         return null;
       }
     }
-    List<UUID> sortedThreadIds = chain.stream().sorted(UuidOrder.COMPARATOR).toList();
+    List<UUID> sortedThreadIds = threadIds.stream().sorted(UuidOrder.COMPARATOR).toList();
     Map<UUID, ThreadState> lockedThreads = new HashMap<>();
     for (UUID id : sortedThreadIds) {
       ThreadState locked = tx.lockThread(id).orElse(null);

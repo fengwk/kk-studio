@@ -213,7 +213,7 @@ public final class ThreadProcessor {
 
   private void stepTx(HarnessStore.Transaction tx, ClaimedWork claim) {
     Instant now = tx.now();
-    ThreadState thread = lockThreadWithSession(tx, claim.target().id());
+    ThreadState thread = ThreadLifecycleCoordinator.lockThreadWithParent(tx, claim.target().id());
     if (thread == null) {
       throw new ClaimLostSignal();
     }
@@ -903,15 +903,6 @@ public final class ThreadProcessor {
       }
       tx.completeWork(claim);
     }
-  }
-
-  /**
-   * 先获取执行树事务级锁并复核祖先链，再以不可变 Thread 快照定位父 Session，按 Session KEY SHARE -&gt; Thread FOR UPDATE 复核。
-   *
-   * <p>在任何 Session/Thread/Work 业务行锁之前先获取 Tree Advisory Lock，防止并发操作或深删除/停止产生逆序或竞态。
-   */
-  static ThreadState lockThreadWithSession(HarnessStore.Transaction tx, UUID threadId) {
-    return ThreadLifecycleCoordinator.lockThreadWithAncestors(tx, threadId);
   }
 
   /** 只有普通 INPUT 把输入水位推进到冻结 cutoff；CONTINUATION / COMPACTION 不推进，保留尚待接纳通知的原始尾部。 */

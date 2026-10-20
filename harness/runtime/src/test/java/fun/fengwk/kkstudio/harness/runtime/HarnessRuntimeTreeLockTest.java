@@ -147,7 +147,27 @@ class HarnessRuntimeTreeLockTest {
   }
 
   @Test
-  void lockThreadWithAncestorsReturnsNullWhenThreadDeletedWhileAcquiringTreeLock() {
+  void lockThreadWithParentOnRootLocksOnlyRootThreadAndSession() {
+    // 测试意图：根 Thread 没有父，helper 只锁自身 Session 与自身 Thread，不额外取任何祖先行锁。
+    Baseline baseline = seedBaseline(store);
+    List<String> locks = new ArrayList<>();
+    HarnessStore recording = recordingStore(store, locks);
+
+    ThreadState locked =
+        recording.transaction(
+            tx -> ThreadLifecycleCoordinator.lockThreadWithParent(tx, baseline.threadId()));
+
+    assertNotNull(locked);
+    assertEquals(
+        List.of(
+            "lockTree:" + baseline.threadId(),
+            "lockSessionForKeyShare:" + baseline.sessionId(),
+            "lockThread:" + baseline.threadId()),
+        locks);
+  }
+
+  @Test
+  void lockThreadWithParentReturnsNullWhenThreadDeletedWhileAcquiringTreeLock() {
     // 测试意图：取得树锁后 Thread 已被并发删除时协调器返回 null，而不是抛异常。
     Baseline baseline = seedBaseline(store);
     UUID childId =
@@ -161,7 +181,7 @@ class HarnessRuntimeTreeLockTest {
 
     ThreadState locked =
         deletingStore.transaction(
-            tx -> ThreadLifecycleCoordinator.lockThreadWithAncestors(tx, childId));
+            tx -> ThreadLifecycleCoordinator.lockThreadWithParent(tx, childId));
 
     assertNull(locked);
   }
