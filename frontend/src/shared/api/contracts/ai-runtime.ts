@@ -367,6 +367,15 @@ export interface ModelInvocationDTO {
 }
 
 /**
+ * 请求某个 RUNNING ModelInvocation attempt 的 best-effort stream 追帧。
+ * 202 只表示服务端已接受请求，不保证 owner 在线或 checkpoint 会立即推进。
+ */
+export interface HarnessStreamCatchupRequestDTO {
+  invocationId: string
+  attempt: number
+}
+
+/**
  * ToolInvocation 查询投影；id 均为 canonical UUID string。
  * 工具身份字段由 durable ToolCall 与 binding 派生：toolCallId / toolName / rendererKey / environmentId。
  * toolCallId / toolName / argumentsJson 恒来自 durable ToolCall，toolName 是唯一模型可见工具身份。

@@ -32,12 +32,15 @@ describe('Thread snapshot architecture', () => {
     expect(realtime).toContain('subscription.threadId')
     expect(realtime).toContain("name === 'version'")
     expect(realtime).toContain('invalidateSnapshot()')
-    // realtime 事件只走 overlay reducer，绝不触发 snapshot invalidate。
+    // delta 事件只走 overlay reducer，不触发 snapshot invalidate；
+    // 只有覆盖缺口的 MODEL_CHECKPOINT 才触发回读（行为由 hook 测试覆盖）。
+    expect(realtime).toContain('parseRealtimeModelCheckpoint(raw)')
+    expect(realtime).toContain('parseRealtimeModelDelta(raw)')
     expect(realtime).toContain('handleRealtime(data)')
     expect(realtime.match(/applicationEvents\.subscribe\(/g)).toHaveLength(1)
     expect(realtime).toContain("{ kind: 'thread', id: subscription.threadId }")
-    // subscribed/resync/error 与 version 一样触发 snapshot 对账。
-    expect(realtime).toContain('onSubscribed: invalidateSnapshot')
+    // version/resync/error 与订阅建立一样触发 snapshot 对账；onSubscribed 的
+    // invalidate 顺序与单次 catchup 由 hook 行为测试验证，不做源码字符串匹配。
     expect(realtime).toContain('onResync: invalidateSnapshot')
     expect(realtime).toContain('onError: invalidateSnapshot')
     expect(realtime).not.toContain('EventSource')

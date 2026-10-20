@@ -109,6 +109,23 @@ describe('harnessService', () => {
   })
 
   /**
+   * 测试意图：RUNNING model 的追帧是 POST /threads/{id}/stream-catchup，
+   * body 只含 canonical invocationId 与正整数 attempt；路径参数必须转义。
+   */
+  it('requests best-effort stream catchup via POST /threads/{id}/stream-catchup', async () => {
+    const http = createClient()
+    const service = createHarnessService(http)
+    const invocationId = '11111111-2222-4333-8444-555555555556'
+
+    await service.requestStreamCatchup('thread /1', { invocationId, attempt: 2 })
+
+    expect(http.post).toHaveBeenCalledWith(
+      '/threads/thread%20%2F1/stream-catchup',
+      { invocationId, attempt: 2 },
+    )
+  })
+
+  /**
    * 测试意图：验证结构化模型请求调试、YOLO 策略切换与 Thread 终止的端点，
    * 保持 model-request-debug/compact/yolo/stop 子路径不变并在 /threads/{id} 下。
    */
