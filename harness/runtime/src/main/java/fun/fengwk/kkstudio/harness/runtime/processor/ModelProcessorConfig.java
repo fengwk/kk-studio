@@ -11,10 +11,12 @@ import java.util.Objects;
 /**
  * ModelProcessor 的部署级配置。
  *
- * <p>{@code leaseConfig} 控制 claim lease 与 heartbeat；{@code streamConfig} 给出实时 delta 的推送合并窗口与独立的 checkpoint 落库节奏；{@code retryPolicyProvider} 在每次 TRANSIENT 失败 retry 判定点现读；{@code httpErrorPolicyProvider} 在每次带
- * HTTP 状态的失败 retry 判定点按冻结 Provider 身份现读；{@code dispatchBusyFallbackDelay} 是 Gateway start
- * 抛异常（肯定未接受）时的 reschedule 延迟；{@code toolHistoryActionResolver} 在成功响应持久化前冻结 Tool-owned 历史 action（可为
- * null，表示全部回退）。ToolProcessor 的配置与之不同，因此本配置命名明确限定为 Model。
+ * <p>{@code leaseConfig} 控制 claim lease 与 heartbeat；{@code streamConfig} 给出实时 delta 的推送合并窗口与独立的
+ * checkpoint 落库节奏；{@code retryPolicyProvider} 在每次 TRANSIENT 失败 retry 判定点现读；{@code
+ * httpErrorPolicyProvider} 在每次带 HTTP 状态的失败 retry 判定点按冻结 Provider 身份现读；{@code
+ * dispatchBusyFallbackDelay} 是 Gateway start 抛异常（肯定未接受）时的 reschedule 延迟；{@code
+ * toolHistoryActionResolver} 在成功响应持久化前冻结 Tool-owned 历史 action（可为 null，表示全部回退）。ToolProcessor
+ * 的配置与之不同，因此本配置命名明确限定为 Model。
  */
 public record ModelProcessorConfig(
     ProcessorLeaseConfig leaseConfig,

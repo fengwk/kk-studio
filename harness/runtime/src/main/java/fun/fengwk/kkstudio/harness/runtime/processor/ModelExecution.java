@@ -53,10 +53,10 @@ import java.util.function.LongSupplier;
  * per-execution 单 drain owner 顺序处理流式增量事件、推送/checkpoint 定时信号与终态信号。
  *
  * <p>推送与落库是两条独立节奏：delta 在 {@link ModelStreamConfig#pushWindow()} 内合并为小批次后直接发布（不等待数据库、不依赖提交）；累计
- * text/thinking 由独立的 checkpoint 定时器（或追帧请求 {@link #requestCheckpoint}）持久化，事务只锁 ModelInvocation 与 claimed
- * Work（不取执行树锁，因为不唤醒 Thread），围栏重校验 RUNNING + attempt + lease，提交后发布 {@link
- * RealtimeEvent.ModelCheckpoint}。terminal / retry 信号仍在同一次状态事务中单次更新 ModelInvocation 并唤醒 Thread，只发布已提交的终态补齐
- * delta；lost ownership 或 Stop 竞态立即收敛关闭并停止发布。
+ * text/thinking 由独立的 checkpoint 定时器（或追帧请求 {@link #requestCheckpoint}）持久化，事务只锁 ModelInvocation 与
+ * claimed Work（不取执行树锁，因为不唤醒 Thread），围栏重校验 RUNNING + attempt + lease，提交后发布 {@link
+ * RealtimeEvent.ModelCheckpoint}。terminal / retry 信号仍在同一次状态事务中单次更新 ModelInvocation 并唤醒
+ * Thread，只发布已提交的终态补齐 delta；lost ownership 或 Stop 竞态立即收敛关闭并停止发布。
  */
 @Slf4j
 final class ModelExecution implements ModelGateway.Listener {
@@ -206,10 +206,6 @@ final class ModelExecution implements ModelGateway.Listener {
 
   UUID invocationId() {
     return invocationId;
-  }
-
-  UUID threadId() {
-    return threadId;
   }
 
   /** 本 execution 持有的 claim（供 processor 的 duplicate admission fencing 比较 token）。 */
@@ -555,8 +551,8 @@ final class ModelExecution implements ModelGateway.Listener {
   }
 
   /**
-   * 处理一个 stream delta：只做本地缓冲，不触达数据库。delta 进入推送缓冲，达到事件数/字节上界立即推送，否则由单次无防抖的推送定时器在
-   * {@link ModelStreamConfig#pushWindow()} 内推送；text/thinking delta 更新 lastSafeSequence 并保证 checkpoint
+   * 处理一个 stream delta：只做本地缓冲，不触达数据库。delta 进入推送缓冲，达到事件数/字节上界立即推送，否则由单次无防抖的推送定时器在 {@link
+   * ModelStreamConfig#pushWindow()} 内推送；text/thinking delta 更新 lastSafeSequence 并保证 checkpoint
    * 定时器已武装（固定 deadline，不 debounce）。整个处理与发布在单 drain owner 内顺序执行。
    *
    * <p>推送不等待提交，所有权损失因此不在每个 token 上检测，而收敛到 checkpoint 提交围栏、terminal 围栏或 heartbeat 丢失 lease 后触发的
@@ -666,7 +662,7 @@ final class ModelExecution implements ModelGateway.Listener {
     try {
       future =
           scheduler.schedule(
-              () -> runOnFlushExecutor(() -> deliverPush(targetGeneration), "push"),
+              () -> submitPushIfCurrent(targetGeneration),
               config.streamConfig().pushWindow().toMillis(),
               TimeUnit.MILLISECONDS);
     } catch (RuntimeException rejected) {
@@ -687,9 +683,7 @@ final class ModelExecution implements ModelGateway.Listener {
     try {
       future =
           scheduler.schedule(
-              () ->
-                  runOnFlushExecutor(
-                      () -> deliverCheckpoint(targetGeneration, false), "checkpoint"),
+              () -> submitCheckpointIfCurrent(targetGeneration),
               config.streamConfig().checkpointInterval().toMillis(),
               TimeUnit.MILLISECONDS);
     } catch (RuntimeException rejected) {
@@ -705,15 +699,37 @@ final class ModelExecution implements ModelGateway.Listener {
     }
   }
 
-  /** 定时器线程只投递：DB 写入与发布都在 flushExecutor 上执行。 */
-  private void runOnFlushExecutor(Runnable task, String what) {
+  /** 推送定时器到期后先校验代际/终态再投递 executor：已失效代际绝不再触碰可能已满的 executor，避免 stale rejection 误伤当前执行。 */
+  private void submitPushIfCurrent(long generation) {
+    synchronized (monitor) {
+      if (abandoned.get() || terminal.get() || generation != pushGeneration) {
+        return;
+      }
+    }
+    runOnFlushExecutor(() -> deliverPush(generation), "push");
+  }
+
+  /** checkpoint 定时器与推送定时器同理：只投递当前代际。 */
+  private void submitCheckpointIfCurrent(long generation) {
+    synchronized (monitor) {
+      if (abandoned.get() || terminal.get() || generation != checkpointGeneration) {
+        return;
+      }
+    }
+    runOnFlushExecutor(() -> deliverCheckpoint(generation, false), "checkpoint");
+  }
+
+  /** 定时器线程只投递：DB 写入与发布都在 flushExecutor 上执行；未投递（终态/abandoned/拒绝）返回 false。 */
+  private boolean runOnFlushExecutor(Runnable task, String what) {
     if (abandoned.get() || terminal.get()) {
-      return;
+      return false;
     }
     try {
       flushExecutor.execute(task);
+      return true;
     } catch (RuntimeException rejected) {
       abandonAfterRejection("flush executor (" + what + ")", rejected);
+      return false;
     }
   }
 
@@ -785,10 +801,21 @@ final class ModelExecution implements ModelGateway.Listener {
   }
 
   /**
-   * 追帧请求：让执行者立即持久化一次 checkpoint 并发布 checkpoint 事件。可从任意线程调用，不阻塞调用方；execution 已结束时为 no-op。
+   * 追帧请求：仅当本 execution 仍是 active owner 且 attempt 匹配时，安排一次立即 checkpoint 并发布 checkpoint 事件。
+   *
+   * <p>终态、取消/abandon、attempt 不匹配或 flush executor 拒绝投递时返回 {@code false} 且不写库、不发布。成功投递返回 {@code
+   * true}；checkpoint 本身仍在 flush executor 内异步执行，不阻塞调用方。
    */
-  void requestCheckpoint() {
-    runOnFlushExecutor(() -> deliverCheckpoint(0, true), "catch-up checkpoint");
+  boolean requestCheckpoint(int requestedAttempt) {
+    if (requestedAttempt != attempt) {
+      return false;
+    }
+    synchronized (monitor) {
+      if (abandoned.get() || terminal.get()) {
+        return false;
+      }
+    }
+    return runOnFlushExecutor(() -> deliverCheckpoint(0, true), "catch-up checkpoint");
   }
 
   /**
@@ -840,8 +867,7 @@ final class ModelExecution implements ModelGateway.Listener {
                 if (model == null || tx.lockClaimedWork(claim).isEmpty()) {
                   return false;
                 }
-                if (model.status() != ModelInvocationStatus.RUNNING
-                    || model.attempt() != attempt) {
+                if (model.status() != ModelInvocationStatus.RUNNING || model.attempt() != attempt) {
                   return false;
                 }
                 tx.updateModelInvocation(model.checkpoint(checkpoint, now));

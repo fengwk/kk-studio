@@ -80,8 +80,8 @@ public sealed interface RealtimeEvent
   }
 
   /**
-   * 一次已提交的 stream checkpoint：{@code sequence} 是持久化 checkpoint 覆盖到的 delta sequence。 浏览器收到后回读 snapshot
-   * 即可以该 checkpoint 为基线继续拼接后续 delta（追帧完成信号）。
+   * 一次已提交的 stream checkpoint：{@code sequence} 是持久化 checkpoint 覆盖到的 delta sequence。 浏览器收到后回读
+   * snapshot 即可以该 checkpoint 为基线继续拼接后续 delta（追帧完成信号）。
    */
   record ModelCheckpoint(
       UUID threadId, UUID modelInvocationId, int attempt, long sequence, Instant createdAt)

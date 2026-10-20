@@ -13,15 +13,15 @@ import java.util.Objects;
  * <p>实时推送：provider delta 到达后最多在 {@code pushWindow} 内合并为一个批次直接发布到实时通道，批次同时受 {@code maxBatchEvents} 与
  * {@code maxBatchBytes} 约束（任一到达立即发布）。推送不等待数据库。
  *
- * <p>checkpoint 落库：累计 text/thinking 只在 {@code checkpointInterval} 的固定 deadline 到期且比上次落库前进时持久化一次，用于重连、追帧与崩溃后的展示恢复；
- * 与推送节奏无关。增量载荷按事件字符串字段 UTF-8 字节统计，避免每 delta 构造累计全文。
+ * <p>checkpoint 落库：累计 text/thinking 只在 {@code checkpointInterval} 的固定 deadline
+ * 到期且比上次落库前进时持久化一次，用于重连、追帧与崩溃后的展示恢复； 与推送节奏无关。增量载荷按事件字符串字段 UTF-8 字节统计，避免每 delta 构造累计全文。
  */
 public record ModelStreamConfig(
     Duration pushWindow, int maxBatchEvents, int maxBatchBytes, Duration checkpointInterval) {
 
-  /** 生产初值：40ms 合并窗口、256 个事件、64KiB 增量载荷、1500ms 一次 checkpoint。 */
+  /** 生产初值：50ms 合并窗口、256 个事件、64KiB 增量载荷、1500ms 一次 checkpoint。 */
   public static final ModelStreamConfig DEFAULT =
-      new ModelStreamConfig(Duration.ofMillis(40), 256, 64 * 1024, Duration.ofMillis(1500));
+      new ModelStreamConfig(Duration.ofMillis(50), 256, 64 * 1024, Duration.ofMillis(1500));
 
   public ModelStreamConfig {
     pushWindow = HarnessStoreTime.requireWholeMillisecondDuration(pushWindow, "pushWindow");

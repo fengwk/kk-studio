@@ -29,8 +29,8 @@ import fun.fengwk.kkstudio.harness.runtime.port.ToolResultHistoryMaterializer;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ModelProcessorConfig;
+import fun.fengwk.kkstudio.harness.runtime.processor.ModelStreamConfig;
 import fun.fengwk.kkstudio.harness.runtime.processor.ProcessorLeaseConfig;
-import fun.fengwk.kkstudio.harness.runtime.processor.StreamFlushConfig;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorConfig;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
@@ -222,7 +222,7 @@ public class HarnessRuntimeConfiguration {
         retryPolicyProvider,
         Duration.ofMillis(
             systemSettingsSnapshot.get().advanced().modelDispatchBusyFallbackDelayMillis()),
-        StreamFlushConfig.DEFAULT,
+        ModelStreamConfig.DEFAULT,
         toolHistoryActionResolver,
         modelHttpErrorPolicyProvider);
   }
