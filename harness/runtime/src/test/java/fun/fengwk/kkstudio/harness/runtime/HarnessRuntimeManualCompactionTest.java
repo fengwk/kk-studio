@@ -46,7 +46,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
@@ -125,7 +124,7 @@ class HarnessRuntimeManualCompactionTest {
 
   @Test
   void compactThreadLocksSessionBeforeThread() {
-    // availability、plan 与 commit 均经过守卫，防止 Entry 外键锁与 Session 深删除形成 Thread -> Session 逆序。
+    // availability 与单事务 compact 均经过守卫，防止 Entry 外键锁与 Session 深删除形成 Thread -> Session 逆序。
     InMemoryHarnessStore store = new InMemoryHarnessStore();
     Fixture fixture = fixture(store, SessionFirstThreadLockStore.wrap(store));
     ClosedTurnBaseline baseline = seedCompactionReadyClosedTurn(store);
@@ -206,31 +205,6 @@ class HarnessRuntimeManualCompactionTest {
             () -> fixture.runtime.compactThread(new CompactThreadCommand(baseline.threadId(), 0)));
     assertEquals("turn resolver returned null for manual compaction", error.getMessage());
     assertEquals(0L, thread(fixture.store, baseline.threadId()).version());
-  }
-
-  @Test
-  void compactThreadRejectsConcurrentCommandAcceptedDuringResolve() {
-    // plan 后出现新 Command 时，第二事务必须命中 version/head/Command snapshot fence。
-    Fixture fixture = fixture();
-    ClosedTurnBaseline baseline = seedCompactionReadyClosedTurn(fixture.store);
-    fixture.resolver.autoConsistent = true;
-    fixture.resolver.onResolve =
-        () ->
-            seedCommand(
-                fixture.store,
-                baseline.threadId(),
-                new UserMessageCommandPayload(userMessage("concurrent input")));
-
-    HarnessRuntimeConflictException error =
-        assertThrows(
-            HarnessRuntimeConflictException.class,
-            () -> fixture.runtime.compactThread(new CompactThreadCommand(baseline.threadId(), 0)));
-
-    assertEquals(HarnessRuntimeConflictException.Reason.STALE_VERSION, error.reason());
-    assertEquals(1L, thread(fixture.store, baseline.threadId()).version());
-    assertEquals(
-        baseline.turnEndEntryId(), thread(fixture.store, baseline.threadId()).headEntryId());
-    assertEquals(9, path(fixture.store, baseline.threadId()).entries().size());
   }
 
   @Test

@@ -11,16 +11,17 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * 同步、无副作用、事务外的 turn 解析端口：把调用方传入的 candidate {@link EntryPath} 解析为冻结的 {@link ModelRequestSpec} 与本次
+ * 同步、无副作用、调用方事务内的 turn 解析端口：把调用方传入的 candidate {@link EntryPath} 解析为冻结的 {@link ModelRequestSpec} 与本次
  * turn 的 {@code contextWindow} / {@code maxOutputTokens}。
  *
- * <p>调用方在短事务内锁 Thread、捕获 queued Command 快照、分配稳定 Entry ID 并构造 candidate path 后，在事务外调用本端口（Resolver
- * 执行期间 Processor 只做 lease heartbeat，本端口绝不要求也不持有任何行锁）。candidate path 是 Thread 当前 head 的已持久化前缀与尚未
- * 持久化的计划 suffix（normalization / TURN_START / Message）组成的完整 root-to-head 链，已通过 EntryPath
- * 全量不变量校验。实现只读取 最新 catalog / environment 事实，不得写 store、不得产生副作用、不得要求事务上下文，且不得按 candidate Entry ID 回查
- * Store（suffix 尚未持久化）；其结果只有在 Processor 第二事务 CAS 成功后才成为 durable execution fact。只有显式 typed 的 {@link
- * TurnResolveTransientException}（临时基础设施失败，DB / 网络不可用）会被 Processor reschedule；任何其它 RuntimeException、
- * null 结果或 validator 契约失败都视为确定性失败，落成 durable AssistantError + FAILED TURN_END 并结算 Join，绝不无限重排。
+ * <p>调用方在同一个短事务内锁 Session / Thread、捕获 queued Command 快照、分配稳定 Entry ID、构造 candidate path，并直接调用本端口；
+ * Resolver 不额外开启事务，也不要求调用方传入事务句柄（Spring 的既有事务传播会 join 当前物理事务）。candidate path 是 Thread 当前 head
+ * 的已持久化前缀与尚未持久化的计划 suffix（normalization / TURN_START / Message）组成的完整 root-to-head 链，已通过 EntryPath
+ * 全量不变量校验。实现必须只读取最新 catalog / environment 等同库事实：不得写 store、不得产生副作用、不得发起外部 I/O、不得要求事务上下文，且不得按
+ * candidate Entry ID 回查 Store（suffix 尚未持久化）。其解析结果在同一事务内直接成为 durable execution fact；不存在第二次 CAS。只有显式
+ * typed 的 {@link TurnResolveTransientException}（临时基础设施失败，DB / 网络不可用）会被 Processor 在事务整体回滚后
+ * reschedule；任何其它 RuntimeException、null 结果或 validator 契约失败都视为确定性失败，落成 durable AssistantError +
+ * FAILED TURN_END 并结算 Join，绝不无限重排。
  *
  * <p>{@code compactionPreparation} 非空当且仅当本次是 COMPACTION turn：实现必须按切分事实冻结输出预算作为 {@code
  * maxOutputTokens}，不得把 messagesToSummarize / previousSummary 写入 spec。YOLO 不进入本端口。

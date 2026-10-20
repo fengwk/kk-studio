@@ -126,8 +126,7 @@ class PostgresqlAssistantErrorSettlementTest {
     Clock clock = Clock.fixed(now, ZoneOffset.UTC);
     ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
     try {
-      ThreadProcessor processor =
-          new ThreadProcessor(store, resolver, config, scheduler, Runnable::run);
+      ThreadProcessor processor = new ThreadProcessor(store, resolver, config);
       ClaimedWork claimed =
           store
               .transaction(

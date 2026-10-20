@@ -1288,9 +1288,7 @@ final class ThreadProcessorTestSupport {
           new ThreadProcessor(
               targetStore,
               resolver,
-              new ThreadProcessorConfig(LEASE_CONFIG, RESOLVE_FAILURE_DELAY, configProvider),
-              scheduler,
-              Runnable::run);
+              new ThreadProcessorConfig(LEASE_CONFIG, RESOLVE_FAILURE_DELAY, configProvider));
     }
 
     @Override
