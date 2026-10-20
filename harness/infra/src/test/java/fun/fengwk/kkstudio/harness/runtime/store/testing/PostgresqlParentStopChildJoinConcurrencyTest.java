@@ -34,7 +34,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
-import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
+import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
@@ -44,6 +44,8 @@ import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorConfig;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NotificationCommandPayload;
@@ -133,6 +135,8 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
                   "parent-thread",
                   parentThreadId,
                   false,
+                  SpawnTrigger.USER,
+                  ThreadConstraints.NONE,
                   ThreadExecutionControl.RUNNABLE,
                   0L,
                   1L,
@@ -164,6 +168,8 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
                   "child-thread",
                   parentThreadId,
                   false,
+                  SpawnTrigger.MODEL_TOOL,
+                  ThreadConstraints.NONE,
                   ThreadExecutionControl.RUNNABLE,
                   0L,
                   2L,
@@ -233,7 +239,8 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
                   null,
                   now,
                   now,
-                  JoinPurpose.TASK,
+                  JoinDelivery.NOTIFY_PARENT,
+                  true,
                   null));
 
           tx.requestWork(new WorkTarget(WorkTargetType.THREAD, childThreadId));

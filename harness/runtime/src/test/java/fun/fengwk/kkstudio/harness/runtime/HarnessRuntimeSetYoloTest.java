@@ -19,6 +19,8 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
@@ -183,6 +185,8 @@ class HarnessRuntimeSetYoloTest {
                   "child",
                   baseline.threadId(),
                   false,
+                  SpawnTrigger.MODEL_TOOL,
+                  ThreadConstraints.NONE,
                   ThreadExecutionControl.RUNNABLE,
                   0L,
                   1L,

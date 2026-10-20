@@ -1,30 +1,24 @@
 package fun.fengwk.kkstudio.platform.harness.prompt;
 
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
-import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
-import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
 import fun.fengwk.kkstudio.harness.runtime.ChangeGate;
-import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
-import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.runtime.HarnessThreadChangeSource;
-import fun.fengwk.kkstudio.harness.runtime.StopCommand;
-import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
-import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
+import fun.fengwk.kkstudio.harness.runtime.SpawnRequest;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinOutcome;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinReceipt;
-import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.SystemReminder;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
+import fun.fengwk.kkstudio.platform.agenttask.AgentTaskRequest;
+import fun.fengwk.kkstudio.platform.agenttask.AgentTaskService;
 import fun.fengwk.kkstudio.platform.harness.task.AgentBranchSettingsMaterializer;
 import fun.fengwk.kkstudio.platform.plugin.prompt.PluginPromptContent;
 import fun.fengwk.kkstudio.platform.plugin.prompt.PluginPromptResources;
@@ -39,7 +33,7 @@ import java.util.UUID;
 import java.util.function.BooleanSupplier;
 
 /**
- * Prompt 任务窄端口的宿主实现：为一次调用创建 root Session/Thread、与 TASK join 原子接受源 Prompt，并观察固定 join 的终态报告。
+ * Prompt 任务窄端口的宿主实现：经 Agent 任务服务为一次调用创建 root Session/Thread、与无父回执票据原子接受源 Prompt，并观察固定 join 的终态报告。
  *
  * <p>插件只提交受信 system 文本与有序内容片段。宿主把受信文本包裹成前导 {@code <system-reminder>} 段，与内容片段合成唯一一条 USER 命令；媒体片段在
  * 接受事务内按捕获位置物化为 durable RESOURCE，因此提交前的命令形态只含 durable-safe 文本与媒体占位。
@@ -52,21 +46,18 @@ public final class PluginPromptTaskService implements PluginPromptTasks {
   /** timed signal wait 同时兼做 caller-active/deadline 检查的切片：无事件时不读 snapshot，但取消/超时最迟在该切片内被察觉。 */
   private static final long CALLER_CHECK_NANOS = Duration.ofMillis(100).toNanos();
 
-  /** stop 的 CAS 重读上限：只有真正的 stale version 才重试，耗尽后受控失败而不是静默返回。 */
-  private static final int STOP_ATTEMPTS = 3;
-
-  private final ObjectProvider<HarnessRuntime> runtimes;
+  private final AgentTaskService agentTasks;
   private final AgentBranchSettingsMaterializer settingsMaterializer;
   private final HarnessThreadChangeSource changeSource;
   private final PluginPromptResourceBridge resources;
 
   @Autowired
   public PluginPromptTaskService(
-      ObjectProvider<HarnessRuntime> runtimes,
+      AgentTaskService agentTasks,
       AgentBranchSettingsMaterializer settingsMaterializer,
       HarnessThreadChangeSource changeSource,
       PluginPromptResourceBridge resources) {
-    this.runtimes = Objects.requireNonNull(runtimes, "runtimes");
+    this.agentTasks = Objects.requireNonNull(agentTasks, "agentTasks");
     this.settingsMaterializer =
         Objects.requireNonNull(settingsMaterializer, "settingsMaterializer");
     this.changeSource = Objects.requireNonNull(changeSource, "changeSource");
@@ -92,19 +83,27 @@ public final class PluginPromptTaskService implements PluginPromptTasks {
       throw new IllegalArgumentException("prompt contents must not be empty");
     }
     List<PluginPromptContent> ordered = List.copyOf(contents);
-    HarnessRuntime runtime = requireRuntime();
     var settings = settingsMaterializer.materialize(agentName);
     // request hash 只基于 durable-safe 的文本/媒体占位形态计算：瞬时流与宿主消息结构不进入 command codec。
     CustomMessageCommandPayload payload =
         new CustomMessageCommandPayload(placeholderMessage(systemText, ordered));
     NewThreadCommand command = new NewThreadCommand(payload, UUID.randomUUID());
     UUID taskId = UUID.randomUUID();
-    runtime.acceptCommandsAndJoin(
-        new AcceptCommandsCommand(
-            new AcceptCommandsTarget.NewRootSession(UUID.randomUUID(), taskId, settings, false),
-            List.of(command)),
-        joinRequest(taskId, agentName, command.requestHash()),
-        preflight(systemText, ordered));
+    agentTasks.submit(
+        new AgentTaskRequest(
+            invocationId(taskId),
+            taskId,
+            UUID.randomUUID(),
+            settings,
+            List.of(command),
+            preflight(systemText, ordered),
+            SpawnTrigger.PLUGIN,
+            null,
+            null,
+            null,
+            false,
+            new SpawnRequest.Budget(null, 1, 1, Integer.MAX_VALUE),
+            command.requestHash()));
     return taskId;
   }
 
@@ -115,7 +114,6 @@ public final class PluginPromptTaskService implements PluginPromptTasks {
     Objects.requireNonNull(continueWaiting, "continueWaiting");
     long timeoutNanos = boundedTimeout.toNanos();
     UUID invocationId = invocationId(taskId);
-    HarnessRuntime runtime = requireRuntime();
     long startedAt = System.nanoTime();
     ChangeGate gate = new ChangeGate();
     // 订阅必须在 success/error/timeout/cancel/interruption 全路径释放。
@@ -125,7 +123,7 @@ public final class PluginPromptTaskService implements PluginPromptTasks {
       boolean first = true;
       while (true) {
         if (!continueWaiting.getAsBoolean()) {
-          stop(runtime, taskId);
+          agentTasks.stopThread(taskId);
           throw new IllegalStateException("prompt task caller is no longer active");
         }
         ChangeGate.State current = gate.snapshot();
@@ -134,7 +132,7 @@ public final class PluginPromptTaskService implements PluginPromptTasks {
         first = false;
         if (versionWake) {
           // 终态优先：订阅后的首次权威读取与 version/resync 唤醒后都先检查 terminal，再判 timeout。
-          String result = resultIfFinished(runtime, invocationId);
+          String result = resultIfFinished(invocationId);
           if (result != null) {
             return result;
           }
@@ -143,11 +141,11 @@ public final class PluginPromptTaskService implements PluginPromptTasks {
         long remaining = timeoutNanos - (System.nanoTime() - startedAt);
         if (remaining <= 0L) {
           // deadline 前的最终权威读：唤醒信号只是提示，漏通知/竞态不能把已匹配的结果误报为 timeout。
-          String result = resultIfFinished(runtime, invocationId);
+          String result = resultIfFinished(invocationId);
           if (result != null) {
             return result;
           }
-          stop(runtime, taskId);
+          agentTasks.stopThread(taskId);
           throw new IllegalStateException("prompt task timed out after " + timeout);
         }
         long sliceNanos = Math.min(remaining, CALLER_CHECK_NANOS);
@@ -164,8 +162,7 @@ public final class PluginPromptTaskService implements PluginPromptTasks {
 
   @Override
   public void stop(UUID taskId) {
-    Objects.requireNonNull(taskId, "taskId");
-    stop(requireRuntime(), taskId);
+    agentTasks.stopThread(Objects.requireNonNull(taskId, "taskId"));
   }
 
   /**
@@ -237,27 +234,9 @@ public final class PluginPromptTaskService implements PluginPromptTasks {
     return "<staged-media uploadId=" + resource.uploadId() + " blobId=" + resource.blobId() + ">";
   }
 
-  /** root completion ticket：parent 为空（不投递父消息），但与源 prompt 在同一事务内原子接受。 */
-  private static ThreadJoinRequest joinRequest(UUID taskId, String agentName, String requestHash) {
-    return new ThreadJoinRequest(
-        invocationId(taskId),
-        null,
-        null,
-        requestHash,
-        agentName,
-        null,
-        1,
-        1,
-        Integer.MAX_VALUE,
-        JoinPurpose.TASK);
-  }
-
   /** 读取固定 join 的终态；未匹配返回 null，已匹配则返回报告或抛出具名受控失败。 */
-  private static String resultIfFinished(HarnessRuntime runtime, UUID invocationId) {
-    return runtime
-        .projectJoinReceipt(invocationId)
-        .map(PluginPromptTaskService::terminalText)
-        .orElse(null);
+  private String resultIfFinished(UUID invocationId) {
+    return agentTasks.result(invocationId).map(PluginPromptTaskService::terminalText).orElse(null);
   }
 
   /** 非 COMPLETED 只声明受控 outcome，绝不拼 receipt.error、远端 URI 或凭据；空白报告明确失败，成功仍 trim。 */
@@ -270,39 +249,6 @@ public final class PluginPromptTaskService implements PluginPromptTasks {
       throw new IllegalStateException("prompt task returned no Assistant text");
     }
     return text.trim();
-  }
-
-  private void stop(HarnessRuntime runtime, UUID taskId) {
-    for (int attempt = 0; attempt < STOP_ATTEMPTS; attempt++) {
-      ThreadSnapshot snapshot;
-      try {
-        snapshot = runtime.getThreadSnapshot(taskId);
-      } catch (HarnessRuntimeNotFoundException gone) {
-        // 任务已经不存在：stop 容忍，不再重试。
-        return;
-      }
-      try {
-        runtime.stop(new StopCommand(taskId, UUID.randomUUID(), snapshot.thread().version()));
-        return;
-      } catch (HarnessRuntimeConflictException conflict) {
-        if (conflict.reason() != HarnessRuntimeConflictException.Reason.STALE_VERSION) {
-          // 只有真正的 stale version 才是有界 CAS 重读；其它冲突必须明确失败。
-          throw conflict;
-        }
-      } catch (HarnessRuntimeNotFoundException gone) {
-        return;
-      }
-    }
-    throw new IllegalStateException(
-        "prompt task stop did not converge after " + STOP_ATTEMPTS + " stale version retries");
-  }
-
-  private HarnessRuntime requireRuntime() {
-    HarnessRuntime runtime = runtimes.getIfAvailable();
-    if (runtime == null) {
-      throw new IllegalStateException("harness runtime is not available in this deployment");
-    }
-    return runtime;
   }
 
   private static Duration requirePositive(Duration value, String field) {

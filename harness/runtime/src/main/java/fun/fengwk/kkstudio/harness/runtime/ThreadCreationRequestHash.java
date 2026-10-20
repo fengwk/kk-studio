@@ -11,6 +11,8 @@ import tools.jackson.databind.node.ObjectNode;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryEntryPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
+import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 
 import java.nio.charset.StandardCharsets;
@@ -43,6 +45,8 @@ public final class ThreadCreationRequestHash {
       BranchSettings rootSettings,
       UUID parentThreadId,
       boolean yoloEnabled,
+      SpawnTrigger trigger,
+      ThreadConstraints constraints,
       List<NewThreadCommand> commands) {
     ObjectNode envelope = envelope("NEW_SESSION");
     envelope.put("sessionId", requireId(sessionId, "sessionId").toString());
@@ -54,6 +58,8 @@ public final class ThreadCreationRequestHash {
       envelope.put("parentThreadId", parentThreadId.toString());
     }
     envelope.put("yoloEnabled", yoloEnabled);
+    envelope.put("trigger", requireNonNull(trigger, "trigger").name());
+    envelope.set("constraints", constraintsNode(constraints));
     envelope.set("commands", commandsNode(commands));
     return digest(envelope);
   }
@@ -115,6 +121,20 @@ public final class ThreadCreationRequestHash {
     } catch (JacksonException error) {
       throw new IllegalStateException("cannot parse canonical root payload", error);
     }
+  }
+
+  /** 请求约束（合并父约束之前）进入创建身份：同一请求以不同约束重放视为 ID 复用冲突。 */
+  private static ObjectNode constraintsNode(ThreadConstraints constraints) {
+    requireNonNull(constraints, "constraints");
+    ObjectNode node = NODES.objectNode();
+    if (constraints.maxOutputTokens() == null) {
+      node.putNull("maxOutputTokens");
+    } else {
+      node.put("maxOutputTokens", constraints.maxOutputTokens());
+    }
+    node.put("promptCacheDisabled", constraints.promptCacheDisabled());
+    node.put("allowAutoCompaction", constraints.allowAutoCompaction());
+    return node;
   }
 
   private static ArrayNode commandsNode(List<NewThreadCommand> commands) {

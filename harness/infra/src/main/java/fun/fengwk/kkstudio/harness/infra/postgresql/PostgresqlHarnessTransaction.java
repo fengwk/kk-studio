@@ -30,7 +30,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
+import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
@@ -784,9 +784,9 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
           """
           insert into harness_thread (
               id, session_id, parent_thread_id, head_entry_id, creation_request_hash, name,
-              root_thread_id, yolo_enabled, execution_control, input_through_sequence,
-              next_command_sequence, version, created_at, updated_at
-          ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              root_thread_id, yolo_enabled, spawn_trigger, constraints, execution_control,
+              input_through_sequence, next_command_sequence, version, created_at, updated_at
+          ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, cast(? as jsonb), ?, ?, ?, ?, ?, ?)
           """,
           thread.id(),
           thread.sessionId(),
@@ -796,6 +796,8 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
           thread.name(),
           thread.rootThreadId(),
           thread.yoloEnabled(),
+          thread.spawnTrigger().name(),
+          PostgresqlHarnessRows.encodeConstraints(thread.constraints()),
           thread.executionControl().name(),
           thread.inputThroughSequence(),
           thread.nextCommandSequence(),
@@ -1037,8 +1039,8 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
             invocation_id, request_hash, parent_thread_id, child_thread_id,
             source_command_sequence, agent, max_turns, reminder_turn,
             terminal_entry_id, final_answer_entry_id, delivery_command_sequence,
-            created_at, updated_at, purpose, superseded_by_invocation_id
-        ) values (?, ?, ?, ?, ?, ?, ?, ?, null, null, null, ?, ?, ?, null)
+            created_at, updated_at, delivery, counts_toward_quota, superseded_by_invocation_id
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, null, null, null, ?, ?, ?, ?, null)
         """,
         join.invocationId(),
         join.requestHash(),
@@ -1050,7 +1052,8 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
         join.reminderTurn(),
         PostgresqlHarnessRows.timestamp(join.createdAt()),
         PostgresqlHarnessRows.timestamp(join.updatedAt()),
-        join.purpose().wireName());
+        join.delivery().name(),
+        join.countsTowardQuota());
   }
 
   @Override
@@ -1087,7 +1090,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
         select * from harness_thread_join
         where parent_thread_id = ? and terminal_entry_id is not null
           and delivery_command_sequence is null
-          and purpose = 'task' and superseded_by_invocation_id is null
+          and delivery = 'NOTIFY_PARENT' and superseded_by_invocation_id is null
         order by created_at, invocation_id
         """,
         PostgresqlHarnessRows.JOIN,
@@ -1104,7 +1107,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
             select count(*)
             from harness_thread_join
             where parent_thread_id = ? and terminal_entry_id is null
-              and superseded_by_invocation_id is null and purpose = 'task'
+              and superseded_by_invocation_id is null and counts_toward_quota
             """,
             Integer.class,
             parentThreadId);
@@ -1120,7 +1123,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
             select count(*)
             from harness_thread_join
             where parent_thread_id is not null and terminal_entry_id is null
-              and superseded_by_invocation_id is null and purpose = 'task'
+              and superseded_by_invocation_id is null and counts_toward_quota
             """,
             Integer.class);
     return count != null ? count : 0;
@@ -1391,9 +1394,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
       if (!join.matched()) {
         throw new IllegalArgumentException("cannot delete unmatched join " + join.invocationId());
       }
-      if (join.purpose() != JoinPurpose.COMPACTION
-          && join.parentThreadId() != null
-          && join.deliveryCommandSequence() == null) {
+      if (join.delivery() == JoinDelivery.NOTIFY_PARENT && join.deliveryCommandSequence() == null) {
         throw new IllegalArgumentException(
             "cannot delete join pending delivery " + join.invocationId());
       }
@@ -1427,7 +1428,7 @@ final class PostgresqlHarnessTransaction implements HarnessStore.Transaction {
       if (!parentAlsoDeleted
           && join.supersededByInvocationId() == null
           && (!join.matched()
-              || (join.purpose() != JoinPurpose.COMPACTION
+              || (join.delivery() == JoinDelivery.NOTIFY_PARENT
                   && join.deliveryCommandSequence() == null))) {
         throw new IllegalArgumentException(
             "cannot delete join pending delivery " + join.invocationId());

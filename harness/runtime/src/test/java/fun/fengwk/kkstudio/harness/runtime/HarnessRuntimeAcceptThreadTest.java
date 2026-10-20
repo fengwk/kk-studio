@@ -20,14 +20,14 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException.Reaso
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
-import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AttachmentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.SpawnTestSupport;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.SpawnTestSupport.Ticket;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
@@ -418,9 +418,8 @@ class HarnessRuntimeAcceptThreadTest {
         new SetModelCommandPayload(new ModelSelection("provider", "model", "v1")), idempotencyKey);
   }
 
-  private static ThreadJoinRequest rootTicket(UUID invocationId) {
-    return new ThreadJoinRequest(
-        invocationId, null, null, "a".repeat(64), "assistant", 3, 3, 1, 1, JoinPurpose.TASK);
+  private static Ticket rootTicket(UUID invocationId) {
+    return Ticket.task(invocationId, null, null, "a".repeat(64), "assistant", 3, 3, 1, 1);
   }
 
   /** 纯设置 batch 在 STOPPED 既有 Thread 上被接受：不复活为 RUNNABLE、不打开 INPUT turn / 不启动模型，仅入队等待下一 INPUT 边界收割。 */
@@ -479,12 +478,13 @@ class HarnessRuntimeAcceptThreadTest {
   @Test
   void rejectsJoinAcceptanceWithoutTrailingTaskInput() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
-    ThreadJoinRequest join = rootTicket(TestIds.id(60));
+    Ticket join = rootTicket(TestIds.id(60));
     IllegalArgumentException error =
         assertThrows(
             IllegalArgumentException.class,
             () ->
-                runtime.acceptCommandsAndJoin(
+                SpawnTestSupport.acceptAndJoin(
+                    runtime,
                     thread(
                         baseline.threadId(),
                         baseline.rootEntryId(),

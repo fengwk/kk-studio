@@ -6,7 +6,6 @@ import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.StopCommand;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinReceipt;
-import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 
 import java.util.Optional;
@@ -32,9 +31,8 @@ public interface IssueThreadExecutionPort {
   /** 原子接受一批命令及其 Work（NEW_ROOT_SESSION / THREAD 单原语），返回接受结果。 */
   AcceptedCommands acceptCommands(AcceptCommandsCommand command, AcceptancePreflight preflight);
 
-  /** 原子接受源 prompt 并登记 Join 凭据，返回接受结果。 */
-  AcceptedCommands acceptCommandsAndJoin(
-      AcceptCommandsCommand command, ThreadJoinRequest join, AcceptancePreflight preflight);
+  /** 原子创建（或续用 Issue 稳定 Thread）、接受 Run 的源输入并登记以 Run id 为票据的回执，返回接受结果。 */
+  AcceptedCommands submitRunTask(IssueRunTask task);
 
   /** 原子停止目标线程并返回其权威 head Entry：收尾区间必须以本次已提交的停止边界（返回的 head）为界，而不是停止前的旧事实。 */
   UUID stop(StopCommand command);

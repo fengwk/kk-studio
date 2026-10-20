@@ -4,6 +4,9 @@ import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T0;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.settings;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.userMessageCommand;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.userMessagePayload;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.SpawnTestSupport.HASH;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.SpawnTestSupport.acceptAndJoin;
+import static fun.fengwk.kkstudio.harness.runtime.store.testing.SpawnTestSupport.child;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -14,16 +17,20 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.NotificationPayload;
-import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
+import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
-import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.SpawnTestSupport.Child;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.SpawnTestSupport.Ticket;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
+import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.SystemReminder;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
@@ -40,7 +47,6 @@ import java.util.List;
 import java.util.UUID;
 
 class HarnessRuntimeJoinAcceptanceTest {
-  private static final String HASH = "a".repeat(64);
   private InMemoryHarnessStore store;
   private HarnessRuntime runtime;
 
@@ -51,34 +57,27 @@ class HarnessRuntimeJoinAcceptanceTest {
   }
 
   private static AcceptCommandsCommand session(int session, int thread, UUID parent) {
-    AcceptCommandsTarget target =
-        parent == null
-            ? new AcceptCommandsTarget.NewRootSession(
-                TestIds.id(session), TestIds.id(thread), settings(), false)
-            : new AcceptCommandsTarget.NewChildSession(
-                TestIds.id(session), TestIds.id(thread), settings(), parent);
     return new AcceptCommandsCommand(
-        target, List.of(userMessageCommand(TestIds.id(session + 1000), "prompt")));
+        new AcceptCommandsTarget.NewRootSession(
+            TestIds.id(session), TestIds.id(thread), settings(), false),
+        List.of(userMessageCommand(TestIds.id(session + 1000), "prompt")));
   }
 
-  private static ThreadJoinRequest request(int invocation, UUID parent, UUID head) {
-    return new ThreadJoinRequest(
-        TestIds.id(invocation), parent, head, HASH, "assistant", 3, 3, 2, 3, JoinPurpose.TASK);
+  private static Ticket request(int invocation, UUID parent, UUID head) {
+    return Ticket.task(TestIds.id(invocation), parent, head, HASH, "assistant", 3, 3, 2, 3);
   }
 
   @Test
   void rootTicketAcceptsCommandAndReceiptInSameTransactionAndReplays() {
     // 测试意图：one-shot 从首条源命令起存在 durable receipt，重放不重复插入。
     AcceptCommandsCommand source = session(10, 11, null);
-    ThreadJoinRequest ticket = request(12, null, null);
-    AcceptedCommands first =
-        runtime.acceptCommandsAndJoin(source, ticket, AcceptancePreflight.IDENTITY);
+    Ticket ticket = request(12, null, null);
+    AcceptedCommands first = acceptAndJoin(runtime, source, ticket, AcceptancePreflight.IDENTITY);
     ThreadJoin join = runtime.findJoin(ticket.invocationId()).orElseThrow();
     assertEquals(first.acceptedCommands().getLast().sequence(), join.sourceCommandSequence());
     assertEquals(ThreadExecutionControl.RUNNABLE, first.thread().executionControl());
     assertFalse(join.matched());
-    assertTrue(
-        runtime.acceptCommandsAndJoin(source, ticket, AcceptancePreflight.IDENTITY).replayed());
+    assertTrue(acceptAndJoin(runtime, source, ticket, AcceptancePreflight.IDENTITY).replayed());
     assertEquals(join, runtime.findJoin(ticket.invocationId()).orElseThrow());
   }
 
@@ -87,16 +86,17 @@ class HarnessRuntimeJoinAcceptanceTest {
     // 测试意图：建立不可变三层执行树，preflight 失败时子 session/command/join 一并回滚。
     AcceptedCommands root =
         runtime.acceptCommands(session(20, 21, null), AcceptancePreflight.IDENTITY);
-    ThreadJoinRequest firstJoin = request(22, root.thread().id(), root.thread().headEntryId());
+    Ticket firstJoin = request(22, root.thread().id(), root.thread().headEntryId());
     AcceptedCommands first =
-        runtime.acceptCommandsAndJoin(
-            session(23, 24, root.thread().id()), firstJoin, AcceptancePreflight.IDENTITY);
-    ThreadJoinRequest secondJoin = request(25, first.thread().id(), first.thread().headEntryId());
+        acceptAndJoin(
+            runtime, child(23, 24, root.thread().id()), firstJoin, AcceptancePreflight.IDENTITY);
+    Ticket secondJoin = request(25, first.thread().id(), first.thread().headEntryId());
     assertThrows(
         IllegalStateException.class,
         () ->
-            runtime.acceptCommandsAndJoin(
-                session(26, 27, first.thread().id()),
+            acceptAndJoin(
+                runtime,
+                child(26, 27, first.thread().id()),
                 secondJoin,
                 (tx, current, commands) -> {
                   throw new IllegalStateException("reject");
@@ -107,8 +107,8 @@ class HarnessRuntimeJoinAcceptanceTest {
         List.of(first.thread().id(), root.thread().id()),
         store.transaction(tx -> tx.findAncestorChain(first.thread().id())));
     AcceptedCommands second =
-        runtime.acceptCommandsAndJoin(
-            session(26, 27, first.thread().id()), secondJoin, AcceptancePreflight.IDENTITY);
+        acceptAndJoin(
+            runtime, child(26, 27, first.thread().id()), secondJoin, AcceptancePreflight.IDENTITY);
     assertEquals(
         List.of(second.thread().id(), first.thread().id(), root.thread().id()),
         store.transaction(tx -> tx.findAncestorChain(second.thread().id())));
@@ -120,33 +120,24 @@ class HarnessRuntimeJoinAcceptanceTest {
     AcceptedCommands root =
         runtime.acceptCommands(session(30, 31, null), AcceptancePreflight.IDENTITY);
     UUID parent = root.thread().id();
-    runtime.acceptCommandsAndJoin(
-        session(32, 33, parent),
+    acceptAndJoin(
+        runtime,
+        child(32, 33, parent),
         request(34, parent, root.thread().headEntryId()),
         AcceptancePreflight.IDENTITY);
-    ThreadJoinRequest limited =
-        new ThreadJoinRequest(
-            TestIds.id(35),
-            parent,
-            root.thread().headEntryId(),
-            HASH,
-            "assistant",
-            3,
-            3,
-            1,
-            3,
-            JoinPurpose.TASK);
+    Ticket limited =
+        Ticket.task(
+            TestIds.id(35), parent, root.thread().headEntryId(), HASH, "assistant", 3, 3, 1, 3);
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            runtime.acceptCommandsAndJoin(
-                session(36, 37, parent), limited, AcceptancePreflight.IDENTITY));
+        () -> acceptAndJoin(runtime, child(36, 37, parent), limited, AcceptancePreflight.IDENTITY));
     assertTrue(store.<Boolean>transaction(tx -> tx.findThread(TestIds.id(37)).isEmpty()));
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            runtime.acceptCommandsAndJoin(
-                session(38, 39, parent),
+            acceptAndJoin(
+                runtime,
+                child(38, 39, parent),
                 request(34, parent, root.thread().headEntryId()),
                 AcceptancePreflight.IDENTITY));
     assertTrue(store.<Boolean>transaction(tx -> tx.findThread(TestIds.id(39)).isEmpty()));
@@ -159,10 +150,9 @@ class HarnessRuntimeJoinAcceptanceTest {
     AcceptedCommands root =
         runtime.acceptCommands(session(40, 41, null), AcceptancePreflight.IDENTITY);
     UUID parentId = root.thread().id();
-    ThreadJoinRequest joinReq = request(42, parentId, root.thread().headEntryId());
+    Ticket joinReq = request(42, parentId, root.thread().headEntryId());
     AcceptedCommands child =
-        runtime.acceptCommandsAndJoin(
-            session(43, 44, parentId), joinReq, AcceptancePreflight.IDENTITY);
+        acceptAndJoin(runtime, child(43, 44, parentId), joinReq, AcceptancePreflight.IDENTITY);
     UUID childId = child.thread().id();
 
     // 真实 Stop 才使目标与完整子树 STOPPED（仅推进 head 的 seed 不再代表暂停语义）。
@@ -200,10 +190,9 @@ class HarnessRuntimeJoinAcceptanceTest {
     AcceptedCommands root =
         runtime.acceptCommands(session(46, 47, null), AcceptancePreflight.IDENTITY);
     UUID parentId = root.thread().id();
-    ThreadJoinRequest joinReq = request(48, parentId, root.thread().headEntryId());
+    Ticket joinReq = request(48, parentId, root.thread().headEntryId());
     AcceptedCommands child =
-        runtime.acceptCommandsAndJoin(
-            session(49, 50, parentId), joinReq, AcceptancePreflight.IDENTITY);
+        acceptAndJoin(runtime, child(49, 50, parentId), joinReq, AcceptancePreflight.IDENTITY);
     UUID childId = child.thread().id();
 
     // 父线程 RUNNABLE：子线程终止把交付命令排到父线程 seq 2，并请求父 Thread Work。
@@ -325,10 +314,9 @@ class HarnessRuntimeJoinAcceptanceTest {
         store.transaction(tx -> tx.findThread(parentId).orElseThrow().executionControl()));
 
     // 1. 创建子会话：父线程执行控制保持 RUNNABLE，子线程正确挂在父线程下。
-    ThreadJoinRequest join1 = request(62, parentId, parent.thread().headEntryId());
+    Ticket join1 = request(62, parentId, parent.thread().headEntryId());
     AcceptedCommands child =
-        runtime.acceptCommandsAndJoin(
-            session(63, 64, parentId), join1, AcceptancePreflight.IDENTITY);
+        acceptAndJoin(runtime, child(63, 64, parentId), join1, AcceptancePreflight.IDENTITY);
     UUID childId = child.thread().id();
     assertEquals(
         ThreadExecutionControl.RUNNABLE,
@@ -364,24 +352,17 @@ class HarnessRuntimeJoinAcceptanceTest {
     UUID parentHead = parent.thread().headEntryId();
 
     // child1 占用 parent 的唯一子任务额度（maxConcurrentChildren = 1）。
-    ThreadJoinRequest join1 =
-        new ThreadJoinRequest(
-            TestIds.id(72), parentId, parentHead, HASH, "assistant", 3, 3, 1, 5, JoinPurpose.TASK);
+    Ticket join1 = Ticket.task(TestIds.id(72), parentId, parentHead, HASH, "assistant", 3, 3, 1, 5);
     AcceptedCommands child1 =
-        runtime.acceptCommandsAndJoin(
-            session(73, 74, parentId), join1, AcceptancePreflight.IDENTITY);
+        acceptAndJoin(runtime, child(73, 74, parentId), join1, AcceptancePreflight.IDENTITY);
     UUID child1Id = child1.thread().id();
     assertEquals(1, store.<Integer>transaction(tx -> tx.countIncompleteChildJoins(parentId)));
 
     // 第二个子任务：未完成 Join 计数已达上限 -> 拒绝，且不留下 Thread / Join 残留。
-    ThreadJoinRequest join2 =
-        new ThreadJoinRequest(
-            TestIds.id(75), parentId, parentHead, HASH, "assistant", 3, 3, 1, 5, JoinPurpose.TASK);
+    Ticket join2 = Ticket.task(TestIds.id(75), parentId, parentHead, HASH, "assistant", 3, 3, 1, 5);
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            runtime.acceptCommandsAndJoin(
-                session(76, 77, parentId), join2, AcceptancePreflight.IDENTITY));
+        () -> acceptAndJoin(runtime, child(76, 77, parentId), join2, AcceptancePreflight.IDENTITY));
     assertTrue(store.<Boolean>transaction(tx -> tx.findThread(TestIds.id(77)).isEmpty()));
     assertTrue(runtime.findJoin(join2.invocationId()).isEmpty());
 
@@ -393,20 +374,17 @@ class HarnessRuntimeJoinAcceptanceTest {
 
     // 额度释放后，第二个子任务被接受。
     AcceptedCommands child2 =
-        runtime.acceptCommandsAndJoin(
-            session(76, 77, parentId), join2, AcceptancePreflight.IDENTITY);
+        acceptAndJoin(runtime, child(76, 77, parentId), join2, AcceptancePreflight.IDENTITY);
     assertFalse(child2.replayed());
     assertEquals(1, store.<Integer>transaction(tx -> tx.countIncompleteChildJoins(parentId)));
 
     // 深度配额：新子线程深度为 2，超过 maxDepth = 1 -> 拒绝（与子任务额度无关）。
-    ThreadJoinRequest tooDeep =
-        new ThreadJoinRequest(
-            TestIds.id(79), parentId, parentHead, HASH, "assistant", 3, 1, 5, 5, JoinPurpose.TASK);
+    Ticket tooDeep =
+        Ticket.task(TestIds.id(79), parentId, parentHead, HASH, "assistant", 3, 1, 5, 5);
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            runtime.acceptCommandsAndJoin(
-                session(80, 81, parentId), tooDeep, AcceptancePreflight.IDENTITY));
+            acceptAndJoin(runtime, child(80, 81, parentId), tooDeep, AcceptancePreflight.IDENTITY));
     assertTrue(store.<Boolean>transaction(tx -> tx.findThread(TestIds.id(81)).isEmpty()));
     assertTrue(runtime.findJoin(tooDeep.invocationId()).isEmpty());
   }
@@ -426,42 +404,35 @@ class HarnessRuntimeJoinAcceptanceTest {
     UUID headB = rootB.thread().headEntryId();
 
     // cap = 2：A 下的 childA1 与 B 下的 childB1 各占 1 个额度。
-    ThreadJoinRequest a1 =
-        new ThreadJoinRequest(
-            TestIds.id(2202), parentA, headA, HASH, "assistant", 3, 3, 5, 2, JoinPurpose.TASK);
+    Ticket a1 = Ticket.task(TestIds.id(2202), parentA, headA, HASH, "assistant", 3, 3, 5, 2);
     AcceptedCommands childA1 =
-        runtime.acceptCommandsAndJoin(
-            session(2203, 2204, parentA), a1, AcceptancePreflight.IDENTITY);
-    ThreadJoinRequest b1 =
-        new ThreadJoinRequest(
-            TestIds.id(2212), parentB, headB, HASH, "assistant", 3, 3, 5, 2, JoinPurpose.TASK);
-    runtime.acceptCommandsAndJoin(session(2213, 2214, parentB), b1, AcceptancePreflight.IDENTITY);
+        acceptAndJoin(runtime, child(2203, 2204, parentA), a1, AcceptancePreflight.IDENTITY);
+    Ticket b1 = Ticket.task(TestIds.id(2212), parentB, headB, HASH, "assistant", 3, 3, 5, 2);
+    acceptAndJoin(runtime, child(2213, 2214, parentB), b1, AcceptancePreflight.IDENTITY);
     assertEquals(2, activeSubagentJoinCount());
 
     // root ticket（parentThreadId 为空）不占全局 subagent 额度：额度已满时仍可创建。
     AcceptedCommands rootTicket =
-        runtime.acceptCommandsAndJoin(
-            session(2217, 2218, null), request(2219, null, null), AcceptancePreflight.IDENTITY);
+        acceptAndJoin(
+            runtime,
+            session(2217, 2218, null),
+            request(2219, null, null),
+            AcceptancePreflight.IDENTITY);
     assertFalse(rootTicket.replayed());
     assertNull(runtime.findJoin(TestIds.id(2219)).orElseThrow().parentThreadId());
     assertEquals(2, activeSubagentJoinCount());
 
     // 全局额度已满：A 树自己只有 1 个子任务，但 B 树的 childB1 占用全局额度 -> 拒绝，且无残留。
-    ThreadJoinRequest a2 =
-        new ThreadJoinRequest(
-            TestIds.id(2205), parentA, headA, HASH, "assistant", 3, 3, 5, 2, JoinPurpose.TASK);
+    Ticket a2 = Ticket.task(TestIds.id(2205), parentA, headA, HASH, "assistant", 3, 3, 5, 2);
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            runtime.acceptCommandsAndJoin(
-                session(2206, 2207, parentA), a2, AcceptancePreflight.IDENTITY));
+        () -> acceptAndJoin(runtime, child(2206, 2207, parentA), a2, AcceptancePreflight.IDENTITY));
     assertTrue(store.<Boolean>transaction(tx -> tx.findThread(TestIds.id(2207)).isEmpty()));
     assertTrue(store.<Boolean>transaction(tx -> tx.findJoin(TestIds.id(2205)).isEmpty()));
 
     // exact replay 命中既有 join，不重复占额度。
     AcceptedCommands replayed =
-        runtime.acceptCommandsAndJoin(
-            session(2203, 2204, parentA), a1, AcceptancePreflight.IDENTITY);
+        acceptAndJoin(runtime, child(2203, 2204, parentA), a1, AcceptancePreflight.IDENTITY);
     assertTrue(replayed.replayed());
     assertEquals(2, activeSubagentJoinCount());
 
@@ -473,12 +444,9 @@ class HarnessRuntimeJoinAcceptanceTest {
     assertEquals(1, activeSubagentJoinCount());
 
     // 额度释放后，A 下的新子任务再次被接受。
-    ThreadJoinRequest a3 =
-        new ThreadJoinRequest(
-            TestIds.id(2208), parentA, headA, HASH, "assistant", 3, 3, 5, 2, JoinPurpose.TASK);
+    Ticket a3 = Ticket.task(TestIds.id(2208), parentA, headA, HASH, "assistant", 3, 3, 5, 2);
     AcceptedCommands childA3 =
-        runtime.acceptCommandsAndJoin(
-            session(2209, 2220, parentA), a3, AcceptancePreflight.IDENTITY);
+        acceptAndJoin(runtime, child(2209, 2220, parentA), a3, AcceptancePreflight.IDENTITY);
     assertFalse(childA3.replayed());
     assertEquals(2, activeSubagentJoinCount());
   }
@@ -497,26 +465,22 @@ class HarnessRuntimeJoinAcceptanceTest {
     UUID parentId = root.thread().id();
     UUID parentHead = root.thread().headEntryId();
 
-    // 1. 创建子会话指定 parentId 但未提供 join -> 拒绝
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> runtime.acceptCommands(session(92, 93, parentId), AcceptancePreflight.IDENTITY));
-
+    // 1. 票据 parent 与既有 Thread 的不可变 parent 不一致 -> 拒绝（见下）。
     // 2. join parent 与 target.parentThreadId 不一致 -> 拒绝
-    ThreadJoinRequest diffParent = request(94, TestIds.id(999), parentHead);
+    Ticket diffParent = request(94, TestIds.id(999), parentHead);
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            runtime.acceptCommandsAndJoin(
-                session(95, 96, parentId), diffParent, AcceptancePreflight.IDENTITY));
+            acceptAndJoin(
+                runtime, child(95, 96, parentId), diffParent, AcceptancePreflight.IDENTITY));
 
     // 3. parent headEntryId 不匹配 -> 拒绝
-    ThreadJoinRequest wrongHead = request(97, parentId, TestIds.id(888));
+    Ticket wrongHead = request(97, parentId, TestIds.id(888));
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            runtime.acceptCommandsAndJoin(
-                session(98, 99, parentId), wrongHead, AcceptancePreflight.IDENTITY));
+            acceptAndJoin(
+                runtime, child(98, 99, parentId), wrongHead, AcceptancePreflight.IDENTITY));
 
     // 4. parent 被真实 Stop 置为 STOPPED -> 拒绝新子任务（STOPPED 是持久条件，不再依赖 head 形态）
     long parentVersion = store.transaction(tx -> tx.findThread(parentId).orElseThrow().version());
@@ -525,12 +489,15 @@ class HarnessRuntimeJoinAcceptanceTest {
     assertEquals(
         ThreadExecutionControl.STOPPED,
         store.transaction(tx -> tx.findThread(parentId).orElseThrow().executionControl()));
-    ThreadJoinRequest stoppedParentJoin = request(101, parentId, stoppedHead);
+    Ticket stoppedParentJoin = request(101, parentId, stoppedHead);
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            runtime.acceptCommandsAndJoin(
-                session(102, 103, parentId), stoppedParentJoin, AcceptancePreflight.IDENTITY));
+            acceptAndJoin(
+                runtime,
+                child(102, 103, parentId),
+                stoppedParentJoin,
+                AcceptancePreflight.IDENTITY));
     assertTrue(store.<Boolean>transaction(tx -> tx.findThread(TestIds.id(103)).isEmpty()));
     assertTrue(runtime.findJoin(stoppedParentJoin.invocationId()).isEmpty());
 
@@ -538,8 +505,9 @@ class HarnessRuntimeJoinAcceptanceTest {
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            runtime.acceptCommandsAndJoin(
-                session(103, 104, TestIds.id(777)),
+            acceptAndJoin(
+                runtime,
+                child(103, 104, TestIds.id(777)),
                 request(105, TestIds.id(777), stoppedHead),
                 AcceptancePreflight.IDENTITY));
 
@@ -556,11 +524,12 @@ class HarnessRuntimeJoinAcceptanceTest {
             List.of(cmdAlone)),
         AcceptancePreflight.IDENTITY);
 
-    ThreadJoinRequest newJoinOnReplayed = request(109, null, null);
+    Ticket newJoinOnReplayed = request(109, null, null);
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            runtime.acceptCommandsAndJoin(
+            acceptAndJoin(
+                runtime,
                 new AcceptCommandsCommand(
                     new AcceptCommandsTarget.Thread(
                         normal.thread().id(), normal.thread().headEntryId(), 2L),
@@ -569,18 +538,16 @@ class HarnessRuntimeJoinAcceptanceTest {
                 AcceptancePreflight.IDENTITY));
 
     // 7. Join invocation identity 被以不同参数（如不同 agent）重用 -> 拒绝
-    ThreadJoinRequest initialJoin = request(110, null, null);
-    runtime.acceptCommandsAndJoin(
-        session(111, 112, null), initialJoin, AcceptancePreflight.IDENTITY);
+    Ticket initialJoin = request(110, null, null);
+    acceptAndJoin(runtime, session(111, 112, null), initialJoin, AcceptancePreflight.IDENTITY);
 
-    ThreadJoinRequest conflictedJoin =
-        new ThreadJoinRequest(
-            TestIds.id(110), null, null, HASH, "different-agent", 3, 3, 2, 3, JoinPurpose.TASK);
+    Ticket conflictedJoin =
+        Ticket.task(TestIds.id(110), null, null, HASH, "different-agent", 3, 3, 2, 3);
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            runtime.acceptCommandsAndJoin(
-                session(113, 114, null), conflictedJoin, AcceptancePreflight.IDENTITY));
+            acceptAndJoin(
+                runtime, session(113, 114, null), conflictedJoin, AcceptancePreflight.IDENTITY));
   }
 
   @Test
@@ -642,10 +609,10 @@ class HarnessRuntimeJoinAcceptanceTest {
     AcceptedCommands root =
         caseRuntime.acceptCommands(session(base, base + 1, null), AcceptancePreflight.IDENTITY);
     UUID parentId = root.thread().id();
-    ThreadJoinRequest join = request(base + 2, parentId, root.thread().headEntryId());
+    Ticket join = request(base + 2, parentId, root.thread().headEntryId());
     AcceptedCommands child =
-        caseRuntime.acceptCommandsAndJoin(
-            session(base + 3, base + 4, parentId), join, AcceptancePreflight.IDENTITY);
+        acceptAndJoin(
+            caseRuntime, child(base + 3, base + 4, parentId), join, AcceptancePreflight.IDENTITY);
     UUID childId = child.thread().id();
 
     long parentVersion =
@@ -691,12 +658,12 @@ class HarnessRuntimeJoinAcceptanceTest {
     UUID stoppedHead = store.transaction(tx -> tx.findThread(parentId).orElseThrow().headEntryId());
 
     // 未恢复：子 Session + Join 被拒绝，且不残留 Thread / Join。
-    ThreadJoinRequest rejected = request(3103, parentId, stoppedHead);
+    Ticket rejected = request(3103, parentId, stoppedHead);
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            runtime.acceptCommandsAndJoin(
-                session(3104, 3105, parentId), rejected, AcceptancePreflight.IDENTITY));
+            acceptAndJoin(
+                runtime, child(3104, 3105, parentId), rejected, AcceptancePreflight.IDENTITY));
     assertTrue(runtime.findJoin(rejected.invocationId()).isEmpty());
     assertTrue(store.<Boolean>transaction(tx -> tx.findThread(TestIds.id(3105)).isEmpty()));
 
@@ -713,10 +680,9 @@ class HarnessRuntimeJoinAcceptanceTest {
         store.transaction(tx -> tx.findThread(parentId).orElseThrow().executionControl()));
 
     // 恢复后，同一父 head 上的子任务 Join 被接受。
-    ThreadJoinRequest accepted = request(3107, parentId, stoppedHead);
+    Ticket accepted = request(3107, parentId, stoppedHead);
     AcceptedCommands acceptedChild =
-        runtime.acceptCommandsAndJoin(
-            session(3104, 3105, parentId), accepted, AcceptancePreflight.IDENTITY);
+        acceptAndJoin(runtime, child(3104, 3105, parentId), accepted, AcceptancePreflight.IDENTITY);
     assertFalse(acceptedChild.replayed());
     assertEquals(
         parentId, runtime.findJoin(accepted.invocationId()).orElseThrow().parentThreadId());
@@ -729,17 +695,15 @@ class HarnessRuntimeJoinAcceptanceTest {
     AcceptedCommands root =
         runtime.acceptCommands(session(2100, 2101, null), AcceptancePreflight.IDENTITY);
     UUID parentId = root.thread().id();
-    ThreadJoinRequest join = request(2102, parentId, root.thread().headEntryId());
-    AcceptCommandsCommand child = session(1, 2, parentId);
+    Ticket join = request(2102, parentId, root.thread().headEntryId());
+    Child child = child(1, 2, parentId);
 
-    AcceptedCommands created =
-        runtime.acceptCommandsAndJoin(child, join, AcceptancePreflight.IDENTITY);
+    AcceptedCommands created = acceptAndJoin(runtime, child, join, AcceptancePreflight.IDENTITY);
     assertFalse(created.replayed());
     assertTrue(TestIds.id(1).equals(created.session().id()));
     assertTrue(TestIds.id(2).equals(created.thread().id()));
 
-    AcceptedCommands replayed =
-        runtime.acceptCommandsAndJoin(child, join, AcceptancePreflight.IDENTITY);
+    AcceptedCommands replayed = acceptAndJoin(runtime, child, join, AcceptancePreflight.IDENTITY);
     assertTrue(replayed.replayed());
     assertEquals(created.thread().id(), replayed.thread().id());
     assertEquals(1, store.transaction(tx -> tx.listChildren(parentId)).size());
@@ -808,27 +772,16 @@ class HarnessRuntimeJoinAcceptanceTest {
     UUID parentId = parent.thread().id();
     UUID parentHead = parent.thread().headEntryId();
 
-    ThreadJoinRequest first = request(902, parentId, parentHead);
+    Ticket first = request(902, parentId, parentHead);
     AcceptedCommands child =
-        runtime.acceptCommandsAndJoin(
-            session(903, 904, parentId), first, AcceptancePreflight.IDENTITY);
+        acceptAndJoin(runtime, child(903, 904, parentId), first, AcceptancePreflight.IDENTITY);
     UUID childId = child.thread().id();
     assertEquals(1, store.<Integer>transaction(tx -> tx.countIncompleteChildJoins(parentId)));
 
     ThreadState childState = store.transaction(tx -> tx.findThread(childId).orElseThrow());
     UUID secondInvocation = TestIds.id(905);
-    ThreadJoinRequest second =
-        new ThreadJoinRequest(
-            secondInvocation,
-            parentId,
-            parentHead,
-            HASH,
-            "assistant",
-            3,
-            3,
-            2,
-            3,
-            JoinPurpose.TASK);
+    Ticket second =
+        Ticket.task(secondInvocation, parentId, parentHead, HASH, "assistant", 3, 3, 2, 3);
     AcceptCommandsCommand continuation =
         new AcceptCommandsCommand(
             new AcceptCommandsTarget.Thread(
@@ -836,7 +789,7 @@ class HarnessRuntimeJoinAcceptanceTest {
             List.of(userMessageCommand(TestIds.id(906), "more work")));
 
     AcceptedCommands continued =
-        runtime.acceptCommandsAndJoin(continuation, second, AcceptancePreflight.IDENTITY);
+        acceptAndJoin(runtime, continuation, second, AcceptancePreflight.IDENTITY);
     assertTrue(continued.joinReplaced());
 
     ThreadJoin oldJoin = runtime.findJoin(first.invocationId()).orElseThrow();
@@ -857,50 +810,120 @@ class HarnessRuntimeJoinAcceptanceTest {
 
     // 同 invocation 重放幂等：不重复 supersede，也不改写既有 join。
     AcceptedCommands replay =
-        runtime.acceptCommandsAndJoin(continuation, second, AcceptancePreflight.IDENTITY);
+        acceptAndJoin(runtime, continuation, second, AcceptancePreflight.IDENTITY);
     assertTrue(replay.replayed());
     assertFalse(replay.joinReplaced());
     assertEquals(oldJoin, runtime.findJoin(first.invocationId()).orElseThrow());
     assertEquals(newJoin, runtime.findJoin(secondInvocation).orElseThrow());
   }
 
-  /** COMPACTION join 不占普通 task 父子/全局配额，也不计入未完成执行子 Join 计数。 */
+  /** 不计额度的票据（如压缩的 SETTLE_OWNER_TURN）不占父子/全局配额，也不计入未完成执行子 Join 计数。 */
   @Test
-  void compactionJoinDoesNotConsumeTaskQuota() {
+  void nonQuotaTicketDoesNotConsumeTaskQuota() {
     AcceptedCommands parent =
         runtime.acceptCommands(session(910, 911, null), AcceptancePreflight.IDENTITY);
     UUID parentId = parent.thread().id();
     UUID parentHead = parent.thread().headEntryId();
 
-    ThreadJoinRequest compaction =
-        new ThreadJoinRequest(
-            TestIds.id(912),
-            parentId,
-            parentHead,
-            HASH,
-            "compactor",
-            3,
-            3,
-            1,
-            1,
-            JoinPurpose.COMPACTION);
-    AcceptedCommands compactionChild =
-        runtime.acceptCommandsAndJoin(
-            session(913, 914, parentId), compaction, AcceptancePreflight.IDENTITY);
+    Ticket settle = Ticket.settle(TestIds.id(912), parentId, HASH, "compactor");
+    AcceptedCommands settleChild =
+        acceptAndJoin(runtime, child(913, 914, parentId), settle, AcceptancePreflight.IDENTITY);
 
-    assertEquals(
-        JoinPurpose.COMPACTION,
-        runtime.findJoin(compaction.invocationId()).orElseThrow().purpose());
-    // COMPACTION 未完成 join 不占用 task 配额。
+    ThreadJoin join = runtime.findJoin(settle.invocationId()).orElseThrow();
+    assertEquals(JoinDelivery.SETTLE_OWNER_TURN, join.delivery());
+    assertFalse(join.countsTowardQuota());
     assertEquals(0, store.<Integer>transaction(tx -> tx.countIncompleteChildJoins(parentId)));
     assertEquals(0, store.<Integer>transaction(tx -> tx.countIncompleteSubagentJoins()));
 
     // 因此父的唯一 task 子任务额度仍可用。
-    ThreadJoinRequest task =
-        new ThreadJoinRequest(
-            TestIds.id(915), parentId, parentHead, HASH, "assistant", 3, 3, 1, 1, JoinPurpose.TASK);
-    runtime.acceptCommandsAndJoin(session(916, 917, parentId), task, AcceptancePreflight.IDENTITY);
+    Ticket task = Ticket.task(TestIds.id(915), parentId, parentHead, HASH, "assistant", 3, 3, 1, 1);
+    acceptAndJoin(runtime, child(916, 917, parentId), task, AcceptancePreflight.IDENTITY);
     assertEquals(1, store.<Integer>transaction(tx -> tx.countIncompleteChildJoins(parentId)));
-    assertNotNull(compactionChild.thread().id());
+    assertNotNull(settleChild.thread().id());
+  }
+
+  /**
+   * 子 Thread 的有效约束是请求与父约束按 min/OR/AND 合并后的冻结值；续用既有 Thread 时沿用首次创建冻结的来源与约束， 本次请求的同名字段（即使是
+   * USER/NONE）不能改写它们。
+   */
+  @Test
+  void spawnFreezesMergedConstraintsAndContinuationCannotRewriteThem() {
+    BranchSettings settings = settings();
+    NewThreadCommand rootCommand = userMessageCommand(TestIds.id(4001), "root");
+    SpawnRequest rootRequest =
+        new SpawnRequest(
+            TestIds.id(4000),
+            TestIds.id(4002),
+            settings,
+            List.of(rootCommand),
+            AcceptancePreflight.IDENTITY,
+            null,
+            null,
+            null,
+            false,
+            new ThreadConstraints(1_000, false, false),
+            SpawnTrigger.CONTROLLER,
+            JoinDelivery.RECEIPT_ONLY,
+            false,
+            SpawnRequest.Budget.unlimited(),
+            TestIds.id(4003),
+            rootCommand.requestHash());
+    AcceptedCommands root = runtime.spawn(rootRequest);
+    assertEquals(new ThreadConstraints(1_000, false, false), root.thread().constraints());
+    assertEquals(SpawnTrigger.CONTROLLER, root.thread().spawnTrigger());
+
+    NewThreadCommand childCommand = userMessageCommand(TestIds.id(4004), "child");
+    SpawnRequest childRequest =
+        new SpawnRequest(
+            TestIds.id(4005),
+            TestIds.id(4006),
+            settings,
+            List.of(childCommand),
+            AcceptancePreflight.IDENTITY,
+            root.thread().id(),
+            root.thread().headEntryId(),
+            null,
+            false,
+            new ThreadConstraints(2_000, true, true),
+            SpawnTrigger.MODEL_TOOL,
+            JoinDelivery.NOTIFY_PARENT,
+            true,
+            SpawnRequest.Budget.unlimited(),
+            TestIds.id(4007),
+            childCommand.requestHash());
+    AcceptedCommands child = runtime.spawn(childRequest);
+    assertEquals(new ThreadConstraints(1_000, true, false), child.thread().constraints());
+    assertEquals(SpawnTrigger.MODEL_TOOL, child.thread().spawnTrigger());
+    ThreadJoin childJoin = runtime.findJoin(TestIds.id(4007)).orElseThrow();
+    assertEquals(JoinDelivery.NOTIFY_PARENT, childJoin.delivery());
+    assertTrue(childJoin.countsTowardQuota());
+
+    ThreadState current = runtime.getThreadSnapshot(child.thread().id()).thread();
+    NewThreadCommand resumedCommand = userMessageCommand(TestIds.id(4008), "more");
+    SpawnRequest resumedRequest =
+        new SpawnRequest(
+            child.thread().id(),
+            null,
+            settings,
+            List.of(resumedCommand),
+            AcceptancePreflight.IDENTITY,
+            root.thread().id(),
+            root.thread().headEntryId(),
+            new SpawnRequest.Continuation(current.headEntryId(), current.nextCommandSequence()),
+            false,
+            ThreadConstraints.NONE,
+            SpawnTrigger.CONTROLLER,
+            JoinDelivery.NOTIFY_PARENT,
+            true,
+            SpawnRequest.Budget.unlimited(),
+            TestIds.id(4009),
+            resumedCommand.requestHash());
+    AcceptedCommands resumed = runtime.spawn(resumedRequest);
+
+    assertEquals(SpawnTrigger.MODEL_TOOL, resumed.thread().spawnTrigger());
+    assertEquals(new ThreadConstraints(1_000, true, false), resumed.thread().constraints());
+    ThreadJoin resumedJoin = runtime.findJoin(TestIds.id(4009)).orElseThrow();
+    assertEquals(JoinDelivery.NOTIFY_PARENT, resumedJoin.delivery());
+    assertTrue(resumedJoin.countsTowardQuota());
   }
 }

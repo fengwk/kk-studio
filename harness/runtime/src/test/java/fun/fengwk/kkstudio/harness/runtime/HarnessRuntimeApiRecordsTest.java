@@ -19,6 +19,8 @@ import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
+import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
@@ -307,6 +309,8 @@ class HarnessRuntimeApiRecordsTest {
                 thread.name(),
                 thread.id(),
                 false,
+                SpawnTrigger.MODEL_TOOL,
+                ThreadConstraints.NONE,
                 thread.executionControl(),
                 0L,
                 1,
@@ -324,6 +328,8 @@ class HarnessRuntimeApiRecordsTest {
             thread.name(),
             thread.rootThreadId(),
             thread.yoloEnabled(),
+            thread.spawnTrigger(),
+            thread.constraints(),
             thread.executionControl(),
             0L,
             1,
@@ -345,6 +351,8 @@ class HarnessRuntimeApiRecordsTest {
                     thread.name(),
                     thread.rootThreadId(),
                     thread.yoloEnabled(),
+                    thread.spawnTrigger(),
+                    thread.constraints(),
                     thread.executionControl(),
                     0L,
                     1,
@@ -365,6 +373,8 @@ class HarnessRuntimeApiRecordsTest {
                     thread.name(),
                     thread.rootThreadId(),
                     thread.yoloEnabled(),
+                    thread.spawnTrigger(),
+                    thread.constraints(),
                     thread.executionControl(),
                     0L,
                     1,
@@ -390,6 +400,8 @@ class HarnessRuntimeApiRecordsTest {
                     thread.name(),
                     thread.id(),
                     true,
+                    SpawnTrigger.MODEL_TOOL,
+                    ThreadConstraints.NONE,
                     thread.executionControl(),
                     0L,
                     1,

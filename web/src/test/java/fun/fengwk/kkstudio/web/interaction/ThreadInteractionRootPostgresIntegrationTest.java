@@ -33,6 +33,7 @@ import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
+import fun.fengwk.kkstudio.harness.runtime.SpawnRequest;
 import fun.fengwk.kkstudio.harness.runtime.ToolApprovalCommand;
 import fun.fengwk.kkstudio.harness.runtime.ToolInputAcceptance;
 import fun.fengwk.kkstudio.harness.runtime.ToolInputSubmissionCommand;
@@ -52,8 +53,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
-import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
-import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
+import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
@@ -71,6 +71,8 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
@@ -865,36 +867,33 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
 
   private UUID acceptChild(UUID parentThreadId, String prompt) {
     UUID threadId = UUID.randomUUID();
-    UUID invocationId = UUID.randomUUID();
-    runtime.acceptCommandsAndJoin(
-        new AcceptCommandsCommand(
-            new AcceptCommandsTarget.NewChildSession(
-                UUID.randomUUID(), threadId, SETTINGS, parentThreadId),
-            List.of(promptCommand(prompt))),
-        taskJoin(invocationId, parentThreadId, headEntryId(parentThreadId), prompt),
-        AcceptancePreflight.IDENTITY);
+    NewThreadCommand command = promptCommand(prompt);
+    runtime.spawn(
+        new SpawnRequest(
+            threadId,
+            UUID.randomUUID(),
+            SETTINGS,
+            List.of(command),
+            AcceptancePreflight.IDENTITY,
+            parentThreadId,
+            headEntryId(parentThreadId),
+            null,
+            false,
+            ThreadConstraints.NONE,
+            SpawnTrigger.MODEL_TOOL,
+            JoinDelivery.NOTIFY_PARENT,
+            true,
+            new SpawnRequest.Budget(
+                MAX_TURNS, MAX_DEPTH, MAX_CONCURRENT_CHILDREN, MAX_CONCURRENT_THREADS),
+            UUID.randomUUID(),
+            ThreadCommandPayloadJsonCodec.requestHash(
+                new UserMessageCommandPayload(AgentMessage.user(prompt)))));
     return threadId;
   }
 
   private static NewThreadCommand promptCommand(String prompt) {
     return new NewThreadCommand(
         new UserMessageCommandPayload(AgentMessage.user(prompt)), UUID.randomUUID());
-  }
-
-  private static ThreadJoinRequest taskJoin(
-      UUID invocationId, UUID parentThreadId, UUID expectedParentHeadEntryId, String prompt) {
-    return new ThreadJoinRequest(
-        invocationId,
-        parentThreadId,
-        expectedParentHeadEntryId,
-        ThreadCommandPayloadJsonCodec.requestHash(
-            new UserMessageCommandPayload(AgentMessage.user(prompt))),
-        AGENT,
-        MAX_TURNS,
-        MAX_DEPTH,
-        MAX_CONCURRENT_CHILDREN,
-        MAX_CONCURRENT_THREADS,
-        JoinPurpose.TASK);
   }
 
   /** 在执行根的产品绑定上插入一个 Chat owner，并返回 chatId。 */
@@ -988,6 +987,8 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
                   "standalone",
                   threadId,
                   yoloEnabled,
+                  SpawnTrigger.USER,
+                  ThreadConstraints.NONE,
                   ThreadExecutionControl.RUNNABLE,
                   0L,
                   1L,

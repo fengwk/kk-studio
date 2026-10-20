@@ -29,6 +29,8 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.GoalCommandPayload;
@@ -657,6 +659,8 @@ class StudioHarnessCommandBatchControllerTest {
             "thread",
             sourceThreadId,
             true,
+            SpawnTrigger.USER,
+            ThreadConstraints.NONE,
             ThreadExecutionControl.RUNNABLE,
             0L,
             4,

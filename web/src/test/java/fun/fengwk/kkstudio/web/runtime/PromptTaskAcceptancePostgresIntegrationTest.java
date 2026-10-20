@@ -13,22 +13,22 @@ import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.TestPropertySource;
 
-import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
-import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
 import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.harness.runtime.SpawnRequest;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
-import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
-import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
+import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.SystemReminder;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
@@ -124,9 +124,9 @@ class PromptTaskAcceptancePostgresIntegrationTest extends WebPostgresTestSupport
         count(
             "harness_thread_join", "invocation_id", PluginPromptTaskService.invocationId(taskId)));
     assertEquals(
-        JoinPurpose.TASK.wireName(),
+        JoinDelivery.RECEIPT_ONLY.name(),
         jdbc.queryForObject(
-            "select purpose from harness_thread_join where invocation_id = ?",
+            "select delivery from harness_thread_join where invocation_id = ?",
             String.class,
             PluginPromptTaskService.invocationId(taskId)));
 
@@ -191,13 +191,13 @@ class PromptTaskAcceptancePostgresIntegrationTest extends WebPostgresTestSupport
     // 持久命令只含 durable-safe 文本与媒体占位，因此可从暂存句柄重建同一条命令并精确比对身份。
     NewThreadCommand durable = durablePromptCommand(staged, taskId);
     AcceptedCommands replayed =
-        runtime.acceptCommandsAndJoin(
-            new AcceptCommandsCommand(
-                new AcceptCommandsTarget.NewRootSession(
-                    sessionId, taskId, settingsMaterializer.materialize(AGENT), false),
-                List.of(durable)),
-            taskJoinRequest(taskId, durable.requestHash()),
-            failIfPromptPreflightRuns());
+        runtime.spawn(
+            taskSpawnRequest(
+                sessionId,
+                taskId,
+                settingsMaterializer.materialize(AGENT),
+                durable,
+                failIfPromptPreflightRuns()));
 
     assertTrue(
         replayed.replayed(), "the same prompt command must replay instead of writing new rows");
@@ -257,19 +257,30 @@ class PromptTaskAcceptancePostgresIntegrationTest extends WebPostgresTestSupport
     };
   }
 
-  /** 与 {@link PluginPromptTaskService} 相同的 root completion ticket 形态。 */
-  private static ThreadJoinRequest taskJoinRequest(UUID taskId, String requestHash) {
-    return new ThreadJoinRequest(
+  /** 与 {@link PluginPromptTaskService} 相同的插件 root 回执任务形态。 */
+  private static SpawnRequest taskSpawnRequest(
+      UUID sessionId,
+      UUID taskId,
+      BranchSettings settings,
+      NewThreadCommand command,
+      AcceptancePreflight preflight) {
+    return new SpawnRequest(
+        taskId,
+        sessionId,
+        settings,
+        List.of(command),
+        preflight,
+        null,
+        null,
+        null,
+        false,
+        ThreadConstraints.NONE,
+        SpawnTrigger.PLUGIN,
+        JoinDelivery.RECEIPT_ONLY,
+        false,
+        new SpawnRequest.Budget(null, 1, 1, Integer.MAX_VALUE),
         PluginPromptTaskService.invocationId(taskId),
-        null,
-        null,
-        requestHash,
-        AGENT,
-        null,
-        1,
-        1,
-        Integer.MAX_VALUE,
-        JoinPurpose.TASK);
+        command.requestHash());
   }
 
   private UUID readSessionId(UUID taskId) {

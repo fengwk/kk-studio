@@ -38,7 +38,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
-import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
+import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
@@ -52,6 +52,8 @@ import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
@@ -120,7 +122,8 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
                   null,
                   NOW,
                   NOW,
-                  JoinPurpose.TASK,
+                  JoinDelivery.NOTIFY_PARENT,
+                  true,
                   null));
           return null;
         });
@@ -269,7 +272,8 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
                   null,
                   NOW,
                   NOW,
-                  JoinPurpose.TASK,
+                  JoinDelivery.NOTIFY_PARENT,
+                  true,
                   null));
           return null;
         });
@@ -334,7 +338,8 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
                   null,
                   NOW,
                   NOW,
-                  JoinPurpose.TASK,
+                  JoinDelivery.NOTIFY_PARENT,
+                  true,
                   null));
           return null;
         });
@@ -417,7 +422,8 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
                   null,
                   NOW,
                   NOW,
-                  JoinPurpose.TASK,
+                  JoinDelivery.NOTIFY_PARENT,
+                  true,
                   null));
           return null;
         });
@@ -495,6 +501,8 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
                       "parent",
                       pid,
                       false,
+                      SpawnTrigger.USER,
+                      ThreadConstraints.NONE,
                       ThreadExecutionControl.RUNNABLE,
                       0L,
                       1L,
@@ -530,7 +538,8 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
                   null,
                   NOW,
                   NOW,
-                  JoinPurpose.TASK,
+                  JoinDelivery.NOTIFY_PARENT,
+                  true,
                   null));
           return null;
         });
@@ -726,7 +735,8 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
             null,
             NOW,
             NOW,
-            JoinPurpose.TASK,
+            JoinDelivery.RECEIPT_ONLY,
+            false,
             null);
 
     fixture.store.transaction(
@@ -775,7 +785,8 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
                   null,
                   NOW,
                   NOW,
-                  JoinPurpose.TASK,
+                  JoinDelivery.NOTIFY_PARENT,
+                  true,
                   null));
           return null;
         });
@@ -916,6 +927,8 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
                   "thread-" + threadId,
                   parentId == null ? threadId : parentId,
                   false,
+                  SpawnTrigger.MODEL_TOOL,
+                  ThreadConstraints.NONE,
                   status,
                   0L,
                   1L,
@@ -1023,7 +1036,8 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
                   null,
                   NOW,
                   NOW,
-                  JoinPurpose.TASK,
+                  JoinDelivery.NOTIFY_PARENT,
+                  true,
                   null));
           return null;
         });

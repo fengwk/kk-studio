@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.harness.runtime.processor;
 
 import lombok.extern.slf4j.Slf4j;
 
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionChildScope;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
@@ -403,7 +402,7 @@ public final class ModelProcessor implements AutoCloseable {
         model.requestHeadEntryId(),
         model.attempt(),
         model.requestSpec(),
-        CompactionChildScope.isCompactionChild(tx, thread.id()));
+        !thread.constraints().allowAutoCompaction());
   }
 
   /** 在 MODEL claim 仍 owned 期间加载不可变 basis EntryPath，并纯重建内存 ProviderRequest。 */
@@ -631,7 +630,7 @@ public final class ModelProcessor implements AutoCloseable {
     /** 失联恢复已按策略回到 READY 并重排 MODEL Work：不启动 Provider，不 request THREAD wake。 */
     record Retry() implements Prepare {}
 
-    /** 已冻结的 dispatch：{@code compactionChild} 是 prepare 时从未结算 COMPACTION Join 冻结的压缩子身份事实。 */
+    /** 已冻结的 dispatch：{@code compactionChild} 来自 Thread 创建时冻结的约束（不允许自动压缩即压缩子执行），不查询票据或祖先。 */
     record Dispatched(
         UUID threadId,
         UUID requestHeadEntryId,

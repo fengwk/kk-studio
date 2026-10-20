@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.project.service.impl;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -25,7 +26,6 @@ import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
-import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionFacts;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
@@ -42,6 +42,7 @@ import fun.fengwk.kkstudio.project.model.IssueRun;
 import fun.fengwk.kkstudio.project.model.IssueStageBudgetRow;
 import fun.fengwk.kkstudio.project.model.Project;
 import fun.fengwk.kkstudio.project.port.AgentBranchSettingsPort;
+import fun.fengwk.kkstudio.project.port.IssueRunTask;
 import fun.fengwk.kkstudio.project.port.IssueThreadExecutionPort;
 import fun.fengwk.kkstudio.project.port.IssueThreadView;
 import fun.fengwk.kkstudio.project.repo.IssueActivityRepository;
@@ -144,7 +145,7 @@ class IssueRunServiceImplTest {
     when(agentBranchSettingsPort.materializeBranchSettings("worker")).thenReturn(settings);
     when(rootEntry.id()).thenReturn(rootEntryId);
     when(accepted.rootEntry()).thenReturn(rootEntry);
-    when(threadExecutions.acceptCommandsAndJoin(any(), any(), any())).thenReturn(accepted);
+    when(threadExecutions.submitRunTask(any())).thenReturn(accepted);
     when(executions.getIfAvailable()).thenReturn(threadExecutions);
     when(issueAgentThreadRepository.insert(any())).thenReturn(true);
     when(issueRunRepository.insert(any()))
@@ -159,16 +160,13 @@ class IssueRunServiceImplTest {
 
     IssueRun run = service.acceptRun(ISSUE_ID, "accept-1");
 
-    ArgumentCaptor<AcceptCommandsCommand> commandCaptor =
-        ArgumentCaptor.forClass(AcceptCommandsCommand.class);
-    ArgumentCaptor<ThreadJoinRequest> joinCaptor = ArgumentCaptor.forClass(ThreadJoinRequest.class);
-    verify(threadExecutions)
-        .acceptCommandsAndJoin(commandCaptor.capture(), joinCaptor.capture(), any());
+    ArgumentCaptor<IssueRunTask> taskCaptor = ArgumentCaptor.forClass(IssueRunTask.class);
+    verify(threadExecutions).submitRunTask(taskCaptor.capture());
 
-    AcceptCommandsTarget.NewRootSession target =
-        assertInstanceOf(
-            AcceptCommandsTarget.NewRootSession.class, commandCaptor.getValue().target());
-    List<NewThreadCommand> commands = commandCaptor.getValue().commands();
+    IssueRunTask task = taskCaptor.getValue();
+    assertNotNull(task.sessionId());
+    assertNull(task.continuation());
+    List<NewThreadCommand> commands = task.commands();
     assertEquals(
         List.of(
             ThreadCommandType.SET_AGENT,
@@ -186,12 +184,10 @@ class IssueRunServiceImplTest {
     assertInstanceOf(CustomMessageCommandPayload.class, commands.get(4).payload());
 
     // runId 在接受源输入前分配，必须同时是 Run 主键与 root Join ticket 的 invocationId。
-    ThreadJoinRequest join = joinCaptor.getValue();
     assertEquals(inserted.get().getId(), run.getId());
-    assertEquals(run.getId(), join.invocationId());
-    assertNull(join.parentThreadId());
+    assertEquals(run.getId(), task.runId());
     String taskRequestHash = commands.get(4).requestHash();
-    assertEquals(taskRequestHash, join.requestHash());
+    assertEquals(taskRequestHash, task.requestHash());
 
     // 冻结快照必须携带本 Run 与 sourceThreadId 的业务身份，供上下文投影与工具授权共同使用。
     SetContributorStateCommandPayload stateCommand =
@@ -204,7 +200,7 @@ class IssueRunServiceImplTest {
     assertEquals(run.getId(), scope.runId());
     assertEquals(ISSUE_ID, scope.issueId());
     assertEquals(PROJECT_ID, scope.projectId());
-    assertEquals(target.threadId(), scope.sourceThreadId());
+    assertEquals(task.threadId(), scope.sourceThreadId());
     assertEquals("DESIGN", scope.stage());
     assertEquals("worker", scope.agentName());
     assertTrue(scope.active());
