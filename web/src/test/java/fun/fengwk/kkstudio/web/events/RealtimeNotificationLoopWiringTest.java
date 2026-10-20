@@ -45,7 +45,7 @@ class RealtimeNotificationLoopWiringTest {
   private static final UUID THREAD = UUID.fromString("00000000-0000-0000-0000-000000000001");
 
   @Test
-  void dedicatedLoopListensOnlyRealtimeChannelAndDeliversToBus() throws Exception {
+  void dedicatedLoopListensToBothChannelsAndDeliversRealtimeToBus() throws Exception {
     RealtimeNotificationCodec codec = new RealtimeNotificationCodec();
     RealtimeBus bus =
         new RealtimeBus(
@@ -120,7 +120,11 @@ class RealtimeNotificationLoopWiringTest {
             event -> {
               throw new AssertionError("remote event must not be re-published");
             },
-            () -> false);
+            () -> false,
+            (origin, thread, payloadId) -> {
+              throw new AssertionError("catchup notifications must not fetch an oversize payload");
+            },
+            new RealtimePayloadBuffer());
     HarnessStreamCatchupNotificationCodec catchupCodec =
         new HarnessStreamCatchupNotificationCodec();
     String payload =

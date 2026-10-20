@@ -928,7 +928,7 @@ describe('PaneTarget durable-local FSM', () => {
         createResourcePart('blob-res-1', 'chart.png', 'data:image/png;base64,aaa', 'ORIGINAL'),
       ],
       request: {
-        // 既有 Thread 的未决写入只携带 CAS 游标与有序命令，绝不携带 owner/target/threadId。
+        // 显式提供的 cursor 必须成对保留；纯消息也可以完全省略 cursor。
         expectedHeadEntryId: 'h1',
         expectedNextCommandSequence: '2',
         commands: [
@@ -950,6 +950,26 @@ describe('PaneTarget durable-local FSM', () => {
         ],
       },
     }
+
+    it('accepts cursor-free pending storage only for a single USER_MESSAGE', () => {
+      // 本地持久化校验必须与 HTTP 准入一致，不能把缺失 cursor 的设置/Goal/多命令恢复为可发送请求。
+      const command = validPending.request.commands[0]!
+      const cursorFree = { ...validPending, request: { commands: [command] } }
+      const storage = memoryStorage()
+      expect(isBoundPendingMessageValue(cursorFree)).toBe(true)
+      saveBoundPendingMessage(threadId, cursorFree, storage)
+      expect(loadBoundPendingMessage(threadId, storage)?.request).toEqual(cursorFree.request)
+      for (const commands of [
+        [{ type: 'GOAL', idempotencyKey: 'goal-key', text: 'goal' }],
+        [{ type: 'SET_AGENT', idempotencyKey: 'agent-key', agentName: 'assistant' }, command],
+        [command, { ...command, idempotencyKey: 'second-key' }],
+      ]) {
+        expect(isBoundPendingMessageValue({
+          ...validPending,
+          request: { commands },
+        })).toBe(false)
+      }
+    })
 
     it('strictly validates imageTier enum and rejects unknown keys in command contents', () => {
       // 严格枚举：720P | 1080P | ORIGINAL

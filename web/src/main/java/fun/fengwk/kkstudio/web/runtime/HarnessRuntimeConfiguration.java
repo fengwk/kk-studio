@@ -247,7 +247,7 @@ public class HarnessRuntimeConfiguration {
     };
   }
 
-  /** processor 共用的 claim/lease 与 heartbeat 节奏：读取共享启动快照的 SystemSettings.Advanced。 */
+  /** Model / Tool processor 共用的 claim/lease 与 heartbeat 节奏。 */
   @Bean
   public ProcessorLeaseConfig processorLeaseConfig(SystemSettingsSnapshot systemSettingsSnapshot) {
     SystemSettings.Advanced advanced = systemSettingsSnapshot.get().advanced();
@@ -296,7 +296,7 @@ public class HarnessRuntimeConfiguration {
   }
 
   /**
-   * Model / Tool / Thread-resolve 共用的 lease heartbeat 定时分发调度池。
+   * Model / Tool 共用的 lease heartbeat 定时分发调度池。
    *
    * <p>回调仅负责非阻塞状态检查与任务分派，绝不执行数据库事务或所有权取消操作。
    */
@@ -307,7 +307,7 @@ public class HarnessRuntimeConfiguration {
   }
 
   /**
-   * Model / Tool / Thread-resolve 心跳续租事务与失联取消执行器。
+   * Model / Tool 心跳续租事务与失联取消执行器。
    *
    * <p>采用命名虚拟线程，与阻塞 Provider / Tool I/O 严格隔离，避免长耗时调用阻塞续租。
    */
