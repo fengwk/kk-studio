@@ -47,6 +47,7 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
@@ -64,6 +65,8 @@ import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Proxy;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -907,6 +910,71 @@ final class ToolProcessorTestSupport {
         hook.run();
       }
       events.add(event);
+    }
+  }
+
+  /**
+   * 记录每个事务内的锁与写调用序列；用于断言 Processor 只按 own Thread -> Invocation -> Work 加锁， 不出现
+   * tree/ancestor/Session 锁。委托真实 InMemoryHarnessStore，保持事务语义。
+   */
+  static final class RecordingLockStore implements HarnessStore {
+
+    private final InMemoryHarnessStore delegate;
+    private final List<List<String>> transactions = new CopyOnWriteArrayList<>();
+
+    RecordingLockStore(InMemoryHarnessStore delegate) {
+      this.delegate = delegate;
+    }
+
+    List<List<String>> transactions() {
+      return List.copyOf(transactions);
+    }
+
+    List<List<String>> threadLockTransactions() {
+      return transactions.stream()
+          .filter(ops -> ops.stream().anyMatch(op -> op.startsWith("lockThread:")))
+          .toList();
+    }
+
+    @Override
+    public void afterCommit(Runnable action) {
+      delegate.afterCommit(action);
+    }
+
+    @Override
+    public void assertNoAmbientTransaction() {
+      delegate.assertNoAmbientTransaction();
+    }
+
+    @Override
+    public <T> T transaction(Function<Transaction, T> callback) {
+      return delegate.transaction(
+          tx -> {
+            List<String> ops = new CopyOnWriteArrayList<>();
+            transactions.add(ops);
+            Transaction recording =
+                (Transaction)
+                    Proxy.newProxyInstance(
+                        Transaction.class.getClassLoader(),
+                        new Class<?>[] {Transaction.class},
+                        (proxy, method, args) -> {
+                          String name = method.getName();
+                          if (name.startsWith("lock")
+                              || name.equals("findAncestorChain")
+                              || name.equals("requestWork")
+                              || name.equals("completeWork")
+                              || name.equals("rescheduleWork")
+                              || name.startsWith("update")) {
+                            ops.add(args == null || args.length == 0 ? name : name + ":" + args[0]);
+                          }
+                          try {
+                            return method.invoke(tx, args);
+                          } catch (InvocationTargetException error) {
+                            throw error.getCause();
+                          }
+                        });
+            return callback.apply(recording);
+          });
     }
   }
 
