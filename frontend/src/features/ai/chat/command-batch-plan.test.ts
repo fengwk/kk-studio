@@ -78,16 +78,10 @@ describe('command batch replay identity', () => {
     const second = plan()
     expect(second.identity).toBe(first.identity)
     expect(second.request.commands[0]?.type).toBe('USER_MESSAGE')
-    // 既有 Thread 的批次只提交精确 CAS 游标，绝不携带 owner/target。
-    expect(second.request).toMatchObject({
-      expectedHeadEntryId: 'root',
-      expectedNextCommandSequence: '1',
-    })
-    expect(Object.keys(second.request).sort()).toEqual([
-      'commands',
-      'expectedHeadEntryId',
-      'expectedNextCommandSequence',
-    ])
+    // 单条纯消息不依赖 cursor，也绝不携带 owner/target。
+    expect(second.request).not.toHaveProperty('expectedHeadEntryId')
+    expect(second.request).not.toHaveProperty('expectedNextCommandSequence')
+    expect(Object.keys(second.request).sort()).toEqual(['commands'])
   })
 
   it('changes identity when content, target draft, or Thread changes', () => {
@@ -118,8 +112,6 @@ describe('command batch replay identity', () => {
   it('exposes the complete owner-free request for a controller replay', () => {
     const batch = plan()
     expect(batch.request).toEqual({
-      expectedHeadEntryId: 'root',
-      expectedNextCommandSequence: '1',
       commands: [{
         type: 'USER_MESSAGE',
         idempotencyKey: 'stable-command',

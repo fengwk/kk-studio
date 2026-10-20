@@ -2037,11 +2037,9 @@ describe('AgentPane orchestration', () => {
     await waitFor(() =>
       expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledWith(
         THREAD_ID,
-        expect.objectContaining({
-          expectedHeadEntryId: 'head-1',
-          expectedNextCommandSequence: '1',
+        {
           commands: [expect.objectContaining({ type: 'USER_MESSAGE' })],
-        }),
+        },
       ),
     )
     // 既有 Thread 绝不走创建入口
@@ -3048,8 +3046,8 @@ function previewResponse(overrides: Partial<ProviderRequestPreviewDTO> = {}): Pr
       expect(threadId).toBe(THREAD_ID)
       expect(request).not.toHaveProperty('owner')
       expect(request).not.toHaveProperty('target')
-      expect(request.expectedHeadEntryId).toBe('head-1')
-      expect(request.expectedNextCommandSequence).toBe('1')
+      expect(request).not.toHaveProperty('expectedHeadEntryId')
+      expect(request).not.toHaveProperty('expectedNextCommandSequence')
       expect(request.commands.map((command) => command.type)).toEqual(['USER_MESSAGE'])
       expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
 

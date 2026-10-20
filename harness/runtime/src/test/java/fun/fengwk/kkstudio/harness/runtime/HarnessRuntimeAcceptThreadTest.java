@@ -101,8 +101,25 @@ class HarnessRuntimeAcceptThreadTest {
   }
 
   @Test
-  void staleCursorConflictsBeforeAnyWrite() {
+  void staleCursorIsIgnoredForPureUserMessageButStillRejectedForCursorBoundBatch() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
+    // 单条纯 USER_MESSAGE 不依赖 cursor：过期 head/sequence 仍按锁内当前尾部入队。
+    AcceptedCommands accepted =
+        runtime.acceptCommands(
+            thread(
+                baseline.threadId(),
+                baseline.rootEntryId(),
+                5,
+                List.of(userMessageCommand(TestIds.id(1), "hello"))),
+            AcceptancePreflight.IDENTITY);
+    assertFalse(accepted.replayed());
+    assertEquals(1L, accepted.acceptedCommands().getFirst().sequence());
+
+    ThreadState advanced =
+        store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
+    assertEquals(2L, advanced.nextCommandSequence());
+
+    // SET 前缀混合批次仍是 cursor-bound：stale sequence 确定性拒绝且零写入。
     HarnessRuntimeConflictException error =
         assertThrows(
             HarnessRuntimeConflictException.class,
@@ -111,15 +128,52 @@ class HarnessRuntimeAcceptThreadTest {
                     thread(
                         baseline.threadId(),
                         baseline.rootEntryId(),
-                        5,
-                        List.of(userMessageCommand(TestIds.id(1), "hello"))),
+                        9,
+                        List.of(
+                            setAgentCommand(TestIds.id(2)),
+                            userMessageCommand(TestIds.id(3), "next"))),
                     AcceptancePreflight.IDENTITY));
     assertEquals(Reason.STALE_COMMAND_CURSOR, error.reason());
-    assertTrue(
-        store.<Boolean>transaction(tx -> tx.loadCommandsByThread(baseline.threadId()).isEmpty()));
+    assertEquals(
+        1, store.<Integer>transaction(tx -> tx.loadCommandsByThread(baseline.threadId()).size()));
   }
 
   /** exact ordered replay：全 id 存在、hash 相同、sequence 连续且首 sequence 等于 expected → replayed，不写新行。 */
+  @Test
+  void acceptsAndReplaysPureUserMessageWithoutCursor() {
+    HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
+    AcceptCommandsCommand cursorless =
+        new AcceptCommandsCommand(
+            new AcceptCommandsTarget.Thread(baseline.threadId(), null, null),
+            List.of(userMessageCommand(TestIds.id(1), "cursorless")));
+    AcceptedCommands first = runtime.acceptCommands(cursorless, AcceptancePreflight.IDENTITY);
+    assertFalse(first.replayed());
+    assertEquals(1L, first.acceptedCommands().getFirst().sequence());
+
+    // head 由后续命令推进后，不带 cursor 的 exact replay 仍返回同一源命令。
+    runtime.acceptCommands(
+        thread(
+            baseline.threadId(),
+            baseline.rootEntryId(),
+            2,
+            List.of(userMessageCommand(TestIds.id(2), "after"))),
+        AcceptancePreflight.IDENTITY);
+    AcceptedCommands replay = runtime.acceptCommands(cursorless, AcceptancePreflight.IDENTITY);
+    assertTrue(replay.replayed());
+    assertEquals(first.acceptedCommands(), replay.acceptedCommands());
+
+    // 非纯批次缺少 cursor 是受控请求错误。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            runtime.acceptCommands(
+                new AcceptCommandsCommand(
+                    new AcceptCommandsTarget.Thread(baseline.threadId(), null, null),
+                    List.of(
+                        setAgentCommand(TestIds.id(3)), userMessageCommand(TestIds.id(4), "x"))),
+                AcceptancePreflight.IDENTITY));
+  }
+
   @Test
   void exactOrderedReplayReturnsExistingCommands() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
@@ -192,27 +246,21 @@ class HarnessRuntimeAcceptThreadTest {
     assertEquals(1L, threadState.version());
   }
 
-  /** replay 校验首 sequence 必须等于 expected next：期望不匹配是 order 冲突。 */
+  /** replay 校验首 sequence 必须等于 expected next：cursor-bound 批次期望不匹配是 order 冲突。 */
   @Test
   void orderedReplayRequiresFirstSequenceToMatchExpectedNext() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
+    List<NewThreadCommand> batch =
+        List.of(setAgentCommand(TestIds.id(9)), userMessageCommand(TestIds.id(1), "a"));
     runtime.acceptCommands(
-        thread(
-            baseline.threadId(),
-            baseline.rootEntryId(),
-            1,
-            List.of(userMessageCommand(TestIds.id(1), "a"))),
+        thread(baseline.threadId(), baseline.rootEntryId(), 1, batch),
         AcceptancePreflight.IDENTITY);
     HarnessRuntimeConflictException error =
         assertThrows(
             HarnessRuntimeConflictException.class,
             () ->
                 runtime.acceptCommands(
-                    thread(
-                        baseline.threadId(),
-                        baseline.rootEntryId(),
-                        2,
-                        List.of(userMessageCommand(TestIds.id(1), "a"))),
+                    thread(baseline.threadId(), baseline.rootEntryId(), 2, batch),
                     AcceptancePreflight.IDENTITY));
     assertEquals(Reason.COMMAND_REPLAY_ORDER_MISMATCH, error.reason());
   }

@@ -175,13 +175,24 @@ export function buildGoalAcceptanceRequest(input: GoalAcceptanceBuildInput): Fro
 }
 
 /**
- * 既有 Thread 的通用写请求：服务端从 path 解析 Session，客户端只提交精确 CAS 游标与命令。
- * head/nextCommandSequence 必须来自 freshly 读取的权威 snapshot。
+ * 单条纯 USER_MESSAGE 批次不依赖 Thread cursor：服务端按当前邮箱尾部入队。任何 SET_*、GOAL 或
+ * 多条命令的批次仍需要精确 cursor。
+ */
+export function isCursorFreeThreadBatch(commands: HarnessCommandCreateDTO[]): boolean {
+  return commands.length === 1 && commands[0]?.type === 'USER_MESSAGE'
+}
+
+/**
+ * 既有 Thread 的通用写请求：服务端从 path 解析 Session，客户端只提交命令与依赖当前视图时的
+ * 精确 CAS 游标。纯消息不冻结 cursor；设置 / Goal 批次必须来自 freshly 读取的权威 snapshot。
  */
 export function buildThreadCommandBatchRequest(
   thread: HarnessThreadDTO,
   commands: HarnessCommandCreateDTO[],
 ): ThreadCommandBatchRequestDTO {
+  if (isCursorFreeThreadBatch(commands)) {
+    return { commands }
+  }
   return {
     expectedHeadEntryId: thread.headEntryId,
     expectedNextCommandSequence: thread.nextCommandSequence,

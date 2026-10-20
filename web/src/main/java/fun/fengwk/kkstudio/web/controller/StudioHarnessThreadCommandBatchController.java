@@ -22,9 +22,11 @@ import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeResponseMapper;
 import java.util.Objects;
 
 /**
- * 既有 Thread 的通用命令写入口：只携带 path 的目标 Thread、精确 cursor 与有序命令，不携带 owner。
+ * 既有 Thread 的通用命令写入口：携带 path 的目标 Thread、命令批次与可选的精确 cursor，不携带 owner。
  *
- * <p>服务端从 Thread 解析 Session，身份认证、资源授权与附件引用校验照常完成；Issue/Chat 等业务规则由对应工作流在自身边界显式编排，本入口不按 owner 伪造或拒绝。
+ * <p>单条纯 USER_MESSAGE 批次不要求 cursor，按当前邮箱尾部入队；SET_* / GOAL / 设置批次仍要求精确 cursor（缺失为 400， stale 为
+ * 409）。服务端从 Thread 解析 Session，身份认证、资源授权与附件引用校验照常完成；Issue/Chat 等业务规则由对应工作流在自身边界显式编排，本入口不按 owner
+ * 伪造或拒绝。
  */
 @RestController
 @RequestMapping("/api/threads")

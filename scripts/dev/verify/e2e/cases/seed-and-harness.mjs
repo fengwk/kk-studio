@@ -1177,14 +1177,14 @@ registerCase({
 })
 
 registerCase({
-  id: 'thread.stale_command_cas_rejected',
+  id: 'thread.message_cursorless_and_settings_stale_cas',
   level: 'L1',
-  title: 'stale 命令 CAS cursor 被拒绝',
-  docs: 'expectedHeadEntryId/expectedNextCommandSequence 与快照不符 => 409 + errors.reason=STALE_COMMAND_CURSOR；隔离 Thread 上精确断言 nextCommandSequence/version/head 前后不变',
+  title: '纯 USER_MESSAGE 无需 cursor，设置批次仍拒绝 stale CAS',
+  docs: '单条纯 USER_MESSAGE 无 cursor 按当前邮箱尾部入队（即使提交过期 cursor 也不拒绝）；随后 SET_AGENT 混合批次以旧 head/sequence 提交 => 409 STALE_COMMAND_CURSOR，且被拒绝批次不改变 Thread 的 nextCommandSequence/version/head。',
   async run(ctx) {
     const { agent, model } = await resolveAnyCatalogTarget(ctx)
     const chat = await createChat(ctx, {
-      title: `e2e-stale-cas-${cid().slice(0, 8)}`,
+      title: `e2e-cursorless-${cid().slice(0, 8)}`,
       agentName: agent.name,
       yoloEnabled: false,
     })
@@ -1196,55 +1196,58 @@ registerCase({
       threadId,
       rootSettings: branchSettingsOf(agent, model),
       yoloEnabled: false,
-      commands: [userMessageCommand(`stale cas materialize ${cid().slice(0, 8)}`, cid())],
+      commands: [userMessageCommand(`cursorless materialize ${cid().slice(0, 8)}`, cid())],
     })
     await waitForQuiescentThread(ctx, threadId, { timeoutMs: 60_000, intervalMs: 100 })
     const before = await getThreadSnapshot(ctx, threadId)
-    const thread = before.thread
-    const staleHead = await expectHttpError(
+
+    // 纯消息不携带 cursor：按服务端当前尾部入队。
+    const accepted = await acceptCommandBatch(ctx, {
+      owner: chatOwner(chat.id),
+      target: threadTarget({ threadId }),
+      commands: [userMessageCommand('cursorless append', cid())],
+    })
+    assert(accepted.replayed === false, JSON.stringify(accepted))
+
+    const afterMessage = await getThreadSnapshot(ctx, threadId)
+    assert(
+      BigInt(afterMessage.thread.nextCommandSequence) > BigInt(before.thread.nextCommandSequence),
+      `pure message must append at the mailbox tail: ${JSON.stringify({
+        before: before.thread,
+        after: afterMessage.thread,
+      })}`,
+    )
+
+    // 设置混合批次仍依赖 cursor：旧 cursor 必须 409，且零写入。
+    const stale = await expectHttpError(
       () =>
         acceptCommandBatch(ctx, {
           owner: chatOwner(chat.id),
           target: threadTarget({
             threadId,
-            expectedHeadEntryId: cid(),
-            expectedNextCommandSequence: thread.nextCommandSequence,
+            expectedHeadEntryId: before.thread.headEntryId,
+            expectedNextCommandSequence: before.thread.nextCommandSequence,
           }),
-          commands: [userMessageCommand('stale head', cid())],
+          commands: [
+            setAgentCommand('coder', cid()),
+            userMessageCommand('stale settings', cid()),
+          ],
         }),
       { status: 409, messageIncludes: /head|conflict|stale/i },
     )
-    const staleHeadBody = JSON.parse(staleHead.body)
+    const staleBody = JSON.parse(stale.body)
     assert(
-      staleHeadBody.errors?.reason === 'STALE_COMMAND_CURSOR',
-      `stale head conflict reason: ${staleHead.body}`,
+      staleBody.errors?.reason === 'STALE_COMMAND_CURSOR',
+      `stale settings conflict reason: ${stale.body}`,
     )
-    const staleSequence = await expectHttpError(
-      () =>
-        acceptCommandBatch(ctx, {
-          owner: chatOwner(chat.id),
-          target: threadTarget({
-            threadId,
-            expectedHeadEntryId: thread.headEntryId,
-            expectedNextCommandSequence: '999999999',
-          }),
-          commands: [userMessageCommand('stale sequence', cid())],
-        }),
-      { status: 409, messageIncludes: /sequence|conflict|stale/i },
-    )
-    const staleSequenceBody = JSON.parse(staleSequence.body)
+    const afterReject = await getThreadSnapshot(ctx, threadId)
     assert(
-      staleSequenceBody.errors?.reason === 'STALE_COMMAND_CURSOR',
-      `stale sequence conflict reason: ${staleSequence.body}`,
-    )
-    const after = await getThreadSnapshot(ctx, threadId)
-    assert(
-      String(after.thread.nextCommandSequence) === String(before.thread.nextCommandSequence)
-        && String(after.thread.version) === String(before.thread.version)
-        && String(after.thread.headEntryId) === String(before.thread.headEntryId),
-      `stale batches must not mutate the Thread: ${JSON.stringify({
-        before: before.thread,
-        after: after.thread,
+      String(afterReject.thread.nextCommandSequence) === String(afterMessage.thread.nextCommandSequence)
+        && String(afterReject.thread.version) === String(afterMessage.thread.version)
+        && String(afterReject.thread.headEntryId) === String(afterMessage.thread.headEntryId),
+      `stale settings batch must not mutate the Thread: ${JSON.stringify({
+        afterMessage: afterMessage.thread,
+        afterReject: afterReject.thread,
       })}`,
     )
   },

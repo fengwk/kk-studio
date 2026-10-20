@@ -428,8 +428,14 @@ final class AcceptCommandsControl {
       AcceptancePreflight preflight,
       SpawnRequest ticket) {
     boolean genuineUserInput = isGenuineUserInput(commands);
+    boolean cursorFreeBatch =
+        ticket == null && AcceptCommandsCommand.isPureUserMessageBatch(commands);
+    if (!cursorFreeBatch && !target.hasCursor()) {
+      throw new IllegalArgumentException(
+          "expectedHeadEntryId and expectedNextCommandSequence are required for this command batch");
+    }
     List<ThreadJoin> pending = tx.loadPendingDeliveries(target.threadId());
-    // exact replay 查找必须先于 cursor/preflight admission。
+    // exact replay 查找必须先于 cursor/preflight admission；纯消息 replay 也不依赖 head 变化。
     List<Optional<ThreadCommand>> existing = new ArrayList<>(commands.size());
     for (NewThreadCommand request : commands) {
       existing.add(tx.findCommandByIdempotencyKey(target.threadId(), request.idempotencyKey()));
@@ -448,9 +454,9 @@ final class AcceptCommandsControl {
     }
     if (present == existing.size()) {
       return SpawnTickets.attach(
-          tx, replayThreadBatch(tx, target, commands, thread, existing), ticket);
+          tx, replayThreadBatch(tx, target, commands, thread, existing, cursorFreeBatch), ticket);
     }
-    validateThreadBatchAdmission(target, thread);
+    validateThreadBatchAdmission(target, thread, cursorFreeBatch);
     validateBatchShape(target, commands, false);
     // 票据请求（带父）由统一 spawn 在写前校验为恰一条末尾 user-like；此处保留既有 THREAD target 的形状规则。
     SpawnTickets.admit(tx, ticket, false);
@@ -721,7 +727,8 @@ final class AcceptCommandsControl {
       AcceptCommandsTarget.Thread target,
       List<NewThreadCommand> commands,
       ThreadState thread,
-      List<Optional<ThreadCommand>> found) {
+      List<Optional<ThreadCommand>> found,
+      boolean cursorFreeBatch) {
     List<ThreadCommand> ordered = new ArrayList<>(found.size());
     for (int i = 0; i < found.size(); i++) {
       ThreadCommand existing = found.get(i).orElseThrow();
@@ -736,8 +743,8 @@ final class AcceptCommandsControl {
       }
       ordered.add(existing);
     }
-    long firstSequence = ordered.get(0).sequence();
-    if (firstSequence != target.expectedNextCommandSequence()) {
+    long firstSequence = ordered.getFirst().sequence();
+    if (!cursorFreeBatch && firstSequence != target.expectedNextCommandSequence()) {
       long expected = target.expectedNextCommandSequence();
       boolean allPrecedingWereDeliveries = true;
       if (firstSequence > expected) {
@@ -874,12 +881,15 @@ final class AcceptCommandsControl {
   }
 
   /**
-   * THREAD 全新 batch 的 admission：stale cursor（head / next sequence 不匹配）必须确定性拒绝。SET_*（含
-   * SET_ENVIRONMENT）只入队、由 Reducer 于下一个 INPUT 边界收割，不参与 admission——即使 Thread 处于 live Model / Tool 或有
-   * queued 消息 / THREAD Work 也照常接受。
+   * THREAD 全新 batch 的 admission：cursor-bound 批次必须精确匹配 head / next sequence，stale cursor 确定性拒绝；单条纯
+   * USER_MESSAGE 批次按锁内当前邮箱尾部入队，不读取客户端的 head / sequence。SET_*（含 SET_ENVIRONMENT）只入队、由 Reducer 于下一个
+   * INPUT 边界收割，不参与 admission——即使 Thread 处于 live Model / Tool 或有 queued 消息 / THREAD Work 也照常接受。
    */
   private static void validateThreadBatchAdmission(
-      AcceptCommandsTarget.Thread target, ThreadState thread) {
+      AcceptCommandsTarget.Thread target, ThreadState thread, boolean cursorFreeBatch) {
+    if (cursorFreeBatch) {
+      return;
+    }
     if (!thread.headEntryId().equals(target.expectedHeadEntryId())
         || thread.nextCommandSequence() != target.expectedNextCommandSequence()) {
       throw conflict(

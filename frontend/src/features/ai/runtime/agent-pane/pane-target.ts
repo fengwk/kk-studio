@@ -232,13 +232,19 @@ function isCommandBatchRequest(value: unknown): value is AgentCommandBatchReques
 }
 
 function isThreadCommandBatchRequest(value: unknown): value is ThreadCommandBatchRequestDTO {
-  return isRecord(value)
-    && hasExactKeys(value, ['expectedHeadEntryId', 'expectedNextCommandSequence', 'commands'])
+  if (!isRecord(value) || !Array.isArray(value.commands) || value.commands.length === 0) {
+    return false
+  }
+  if (!value.commands.every(isCommand)) {
+    return false
+  }
+  const keys = Object.keys(value)
+  if (keys.length === 1 && keys[0] === 'commands') {
+    return true
+  }
+  return hasExactKeys(value, ['expectedHeadEntryId', 'expectedNextCommandSequence', 'commands'])
     && nonBlank(value.expectedHeadEntryId)
     && nonBlank(value.expectedNextCommandSequence)
-    && Array.isArray(value.commands)
-    && value.commands.length > 0
-    && value.commands.every(isCommand)
 }
 
 function isBranchDraft(value: unknown): value is BranchDraft {

@@ -260,11 +260,22 @@ public final class HarnessRuntimeRequestMapper {
   }
 
   /**
-   * 映射既有 Thread 的通用命令批：target 由 path 的 {@code threadId} 与请求体的精确 cursor 组合，不带 owner；附件物化与 Session
-   * 归属校验由接受服务的 preflight 完成。
+   * 映射既有 Thread 的通用命令批：target 由 path 的 {@code threadId} 与请求体的 cursor 组合，不带 owner；附件物化与 Session
+   * 归属校验由接受服务的 preflight 完成。单条纯 USER_MESSAGE 批次可省略 cursor；其余批次必须显式给出两个 cursor 字段。
    */
   public static AcceptCommandsCommand toAcceptThreadCommandsCommand(
       String threadId, HarnessThreadCommandBatchDTO dto) {
+    return toThreadCommandsCommand(threadId, dto, false);
+  }
+
+  /** 映射发送前预览批：预览依赖当前 head / next-sequence 快照，因此即使只有一条 USER_MESSAGE 也必须携带精确 cursor。 */
+  public static AcceptCommandsCommand toPreviewThreadCommandsCommand(
+      String threadId, HarnessThreadCommandBatchDTO dto) {
+    return toThreadCommandsCommand(threadId, dto, true);
+  }
+
+  private static AcceptCommandsCommand toThreadCommandsCommand(
+      String threadId, HarnessThreadCommandBatchDTO dto, boolean requireCursor) {
     requireNonNull(dto, "threadCommandBatchDTO");
     List<HarnessCommandCreateDTO> requestCommands = requireList(dto.getCommands(), "commands");
     if (requestCommands.isEmpty()) {
@@ -276,12 +287,26 @@ public final class HarnessRuntimeRequestMapper {
     }
     // 既有 Thread 允许纯设置批次（0 条 user-like）；最多一条且必须位于末尾，由 Core 在应用边界保证。
     validateHttpCommandShape(commands, false);
+    boolean cursorRequired =
+        requireCursor || !AcceptCommandsCommand.isPureUserMessageBatch(commands);
+    String headEntryId = dto.getExpectedHeadEntryId();
+    String nextCommandSequence = dto.getExpectedNextCommandSequence();
+    if (cursorRequired) {
+      if (headEntryId == null || nextCommandSequence == null) {
+        throw new IllegalArgumentException(
+            "expectedHeadEntryId and expectedNextCommandSequence are required for this command batch");
+      }
+    } else if ((headEntryId == null) != (nextCommandSequence == null)) {
+      throw new IllegalArgumentException(
+          "expectedHeadEntryId and expectedNextCommandSequence must be provided together");
+    }
     AcceptCommandsTarget target =
         new AcceptCommandsTarget.Thread(
             parseUuid(threadId, "threadId"),
-            parseUuid(dto.getExpectedHeadEntryId(), "expectedHeadEntryId"),
-            parsePositiveDecimal(
-                dto.getExpectedNextCommandSequence(), "expectedNextCommandSequence"));
+            headEntryId == null ? null : parseUuid(headEntryId, "expectedHeadEntryId"),
+            nextCommandSequence == null
+                ? null
+                : parsePositiveDecimal(nextCommandSequence, "expectedNextCommandSequence"));
     return new AcceptCommandsCommand(target, commands);
   }
 
