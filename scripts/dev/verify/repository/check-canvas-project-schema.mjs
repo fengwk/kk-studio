@@ -6,8 +6,8 @@
  * which is the single authoritative definition of the product schema: there is no second design DDL to keep
  * in sync. It then proves three kinds of target facts:
  *
- * - the 46 business and infrastructure tables of that baseline are present and nothing else was added;
- * - the 17 IDE-routing / Canvas / Project / Chat-Session target tables expose exactly their declared
+ * - the business and infrastructure tables of that baseline are present and nothing else was added;
+ * - the IDE-routing / Canvas / Project / Chat-Session target tables expose exactly their declared
  *   columns, foreign-key relations and indexes;
  * - the shared contract probes (`fresh-install-probes.sql`, also executed by the schema module's Java
  *   contract test) reject invalid writes, with at least 135 positive and negative assertions.
@@ -38,7 +38,7 @@ const PROBE_FILE = 'schema/src/test/resources/fun/fengwk/kkstudio/schema/fresh-i
 const MINIMUM_PROBE_ASSERTIONS = 135
 const IMAGE = 'postgres:17.10'
 
-// The 46 business and infrastructure tables of the sole production baseline. Flyway adds its own
+// The business and infrastructure tables of the sole production baseline. Flyway adds its own
 // history table on top, so the accepted table set is exactly this list. `main` re-derives the set
 // from the baseline DDL and fails on any drift, so a new or removed table can never slip through
 // silently.
@@ -56,6 +56,7 @@ const BUSINESS_TABLES = [
   'chat',
   'chat_session',
   'cluster_node',
+  'durable_work',
   'environment',
   'environment_connection',
   'environment_update_operation',
@@ -67,13 +68,10 @@ const BUSINESS_TABLES = [
   'harness_thread_join',
   'harness_thread_stop_receipt',
   'harness_tool_invocation',
-  'harness_work',
   'mcp_server',
   'mcp_tool',
   'plugin_auth_attempt',
-  'plugin_catalog_revision',
-  'plugin_catalog_state',
-  'plugin_configuration_revision',
+  'plugin_configuration',
   'plugin_credential',
   'project',
   'project_issue',
@@ -82,7 +80,6 @@ const BUSINESS_TABLES = [
   'project_issue_evidence',
   'project_issue_run',
   'project_issue_stage_budget',
-  'project_issue_work',
   'session_blob_ref',
   'skill_package',
   'storage_blob',
@@ -91,7 +88,7 @@ const BUSINESS_TABLES = [
   'system_setting'
 ]
 
-// The 17 target tables the IDE routing / Canvas / Project rewrite installs; only these are
+// The target tables the IDE routing / Canvas / Project rewrite installs; only these are
 // checked down to their columns, relations and indexes.
 const TARGET_TABLES = [
   'canvas_command_dedup',
@@ -110,7 +107,7 @@ const TARGET_TABLES = [
   'project_issue_evidence',
   'project_issue_run',
   'project_issue_stage_budget',
-  'project_issue_work'
+  'durable_work'
 ]
 
 const TARGET_COLUMNS = {
@@ -139,9 +136,6 @@ const TARGET_COLUMNS = {
     'request_id',
     'status',
     'attempt',
-    'available_at',
-    'lease_token',
-    'lease_until',
     'state_json',
     'error',
     'created_at',
@@ -274,14 +268,14 @@ const TARGET_COLUMNS = {
     'created_at',
     'updated_at'
   ],
-  'project_issue_work': [
-    'issue_id',
+  'durable_work': [
+    'target_type',
+    'target_id',
+    'available_at',
     'wake_version',
-    'due_at',
     'lease_token',
     'lease_until',
-    'created_at',
-    'updated_at'
+    'required_environment_id'
   ]
 }
 
@@ -346,8 +340,8 @@ const TARGET_RELATIONS = {
   'project_issue_stage_budget': [
     'fk_project_issue_stage_budget_issue'
   ],
-  'project_issue_work': [
-    'fk_project_issue_work_issue'
+  'durable_work': [
+    'fk_durable_work_environment'
   ]
 }
 
@@ -365,8 +359,7 @@ const TARGET_INDEXES = {
   ],
   'canvas_function_run': [
     'canvas_function_run_node_id_request_id_key',
-    'canvas_function_run_pkey',
-    'idx_canvas_function_run_claim'
+    'canvas_function_run_pkey'
   ],
   'canvas_group': [
     'canvas_group_canvas_id_id_key',
@@ -427,9 +420,10 @@ const TARGET_INDEXES = {
   'project_issue_stage_budget': [
     'pk_project_issue_stage_budget'
   ],
-  'project_issue_work': [
-    'idx_project_issue_work_due',
-    'pk_project_issue_work'
+  'durable_work': [
+    'durable_work_pkey',
+    'idx_durable_work_available',
+    'idx_durable_work_lease_until'
   ]
 }
 
@@ -468,11 +462,11 @@ const NEGATIVE_PROBES = [
   ],
   [
     'an added target column',
-    'alter table project_issue_work add column probe_field text;',
+    'alter table durable_work add column probe_field text;',
     [
       [
         'unexpected column',
-        'project_issue_work.probe_field'
+        'durable_work.probe_field'
       ]
     ]
   ],
@@ -488,7 +482,7 @@ const NEGATIVE_PROBES = [
   ]
 ]
 
-export { BUSINESS_TABLES, TARGET_TABLES }
+export { BUSINESS_TABLES, TARGET_COLUMNS, TARGET_INDEXES, TARGET_RELATIONS, TARGET_TABLES }
 
 const TABLE_DECLARATION = /^\s*create\s+table\s+(?:if\s+not\s+exists\s+)?([a-z_][a-z0-9_]*)/gim
 
@@ -643,8 +637,8 @@ function main() {
   if (!existsSync(probes) || !statSync(probes).isFile()) {
     throw new Error(`missing shared contract probes: ${PROBE_FILE}`)
   }
-  if (BUSINESS_TABLES.length !== 46 || TARGET_TABLES.length !== 17) {
-    throw new Error('the declared inventory must stay at 46 business and 17 target tables')
+  if (BUSINESS_TABLES.length !== 43 || TARGET_TABLES.length !== 17) {
+    throw new Error('the declared inventory must keep its fixed business and target table counts')
   }
   // Re-derive the inventory from the baseline DDL: a table added to (or removed from) the
   // baseline without updating BUSINESS_TABLES must fail before the isolated database runs.

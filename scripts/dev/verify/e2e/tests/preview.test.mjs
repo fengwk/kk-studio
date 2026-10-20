@@ -26,7 +26,7 @@ function fixture(reasons = ['PREVIEW_STALE_CURSOR', 'PREVIEW_PLANNING_FAILED']) 
           threadId, sessionId, headEntryId: id(2), parentThreadId: null,
           name: 'main', version: '1', nextCommandSequence: '2', status: 'IDLE', processing: false,
           executionControl: 'RUNNABLE',
-          yoloPolicy: { mode: 'DISABLE', rootThreadId: null },
+          rootThreadId: threadId, yoloEnabled: false,
         }
         return { status: 202, json: { data: {
           session: { sessionId, name: 'fixture' },
@@ -176,7 +176,7 @@ function modelRequestDebugFixture() {
         status: 'IDLE',
         processing: false,
         executionControl: 'RUNNABLE',
-        yoloPolicy: { mode: 'DISABLE', rootThreadId: null },
+        rootThreadId: threadId, yoloEnabled: false,
       }
       return {
         status: 202,
