@@ -199,14 +199,22 @@ class HarnessRuntimeStopSubtreeTest {
             .map(StoppedThreadReceipt::threadId)
             .sorted(UuidOrder.COMPARATOR)
             .toList());
-    assertTrue(locks.contains("lockTree:" + root.threadId()));
-    assertTrue(locks.contains("lockThread:" + target));
-    assertTrue(locks.contains("lockThread:" + descendant));
-    assertTrue(locks.contains("lockThread:" + parent), "direct parent is needed for Join delivery");
-    assertFalse(locks.contains("lockThread:" + root.threadId()), "grandparent must not be locked");
-    assertFalse(
-        locks.contains("lockThread:" + relatedSibling), "unrelated sibling must not be locked");
-    assertFalse(locks.contains("lockThread:" + rootSibling), "root sibling must not be locked");
+    List<String> expectedLocks = new ArrayList<>();
+    expectedLocks.add("lockTree:" + root.threadId());
+    expectedLocks.add("lockSessionForKeyShare:" + root.sessionId());
+    for (UUID threadId :
+        List.of(parent, target, descendant).stream().sorted(UuidOrder.COMPARATOR).toList()) {
+      expectedLocks.add("lockThread:" + threadId);
+    }
+    assertEquals(
+        expectedLocks,
+        locks.stream()
+            .filter(
+                op ->
+                    op.startsWith("lockTree:")
+                        || op.startsWith("lockSessionForKeyShare:")
+                        || op.startsWith("lockThread:"))
+            .toList());
 
     ThreadJoin join = store.transaction(tx -> tx.findJoin(joinId).orElseThrow());
     assertTrue(join.matched());
