@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.harness.runtime.processor;
 
 import lombok.extern.slf4j.Slf4j;
 
-import fun.fengwk.kkstudio.harness.runtime.ThreadTreeLocks;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelAttemptFailure;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
@@ -55,8 +54,9 @@ import java.util.function.LongSupplier;
  * <p>推送与落库是两条独立节奏：delta 在 {@link ModelStreamConfig#pushWindow()} 内合并为小批次后直接发布（不等待数据库、不依赖提交）；累计
  * text/thinking 由独立的 checkpoint 定时器（或追帧请求 {@link #requestCheckpoint}）持久化，事务只锁 ModelInvocation 与
  * claimed Work（不取执行树锁，因为不唤醒 Thread），围栏重校验 RUNNING + attempt + lease，提交后发布 {@link
- * RealtimeEvent.ModelCheckpoint}。terminal / retry 信号仍在同一次状态事务中单次更新 ModelInvocation 并唤醒
- * Thread，只发布已提交的终态补齐 delta；lost ownership 或 Stop 竞态立即收敛关闭并停止发布。
+ * RealtimeEvent.ModelCheckpoint}。terminal / retry 只写本 Thread 的 Thread/Model/Work：事务按本 Thread 行
+ * -&gt; ModelInvocation -&gt; claimed Work 加锁并以 Thread 行锁与 delete/Stop 串行化，唤醒 THREAD Work 只是
+ * hint，不需要执行树锁。 随后只发布已提交的终态补齐 delta；lost ownership 或 Stop 竞态立即收敛关闭并停止发布。
  */
 @Slf4j
 final class ModelExecution implements ModelGateway.Listener {
@@ -1137,7 +1137,6 @@ final class ModelExecution implements ModelGateway.Listener {
         store.transaction(
             tx -> {
               Instant now = tx.now();
-              ThreadTreeLocks.lockForThread(tx, threadId);
               ThreadState thread = tx.lockThread(threadId).orElse(null);
               if (thread == null) {
                 return false;
@@ -1163,7 +1162,6 @@ final class ModelExecution implements ModelGateway.Listener {
         store.transaction(
             tx -> {
               Instant now = tx.now();
-              ThreadTreeLocks.lockForThread(tx, threadId);
               ThreadState thread = tx.lockThread(threadId).orElse(null);
               if (thread == null) {
                 return false;
@@ -1202,7 +1200,6 @@ final class ModelExecution implements ModelGateway.Listener {
           store.transaction(
               tx -> {
                 Instant now = tx.now();
-                ThreadTreeLocks.lockForThread(tx, threadId);
                 ThreadState thread = tx.lockThread(threadId).orElse(null);
                 if (thread == null) {
                   return false;
@@ -1235,7 +1232,6 @@ final class ModelExecution implements ModelGateway.Listener {
           store.transaction(
               tx -> {
                 Instant now = tx.now();
-                ThreadTreeLocks.lockForThread(tx, threadId);
                 ThreadState thread = tx.lockThread(threadId).orElse(null);
                 if (thread == null) {
                   return false;

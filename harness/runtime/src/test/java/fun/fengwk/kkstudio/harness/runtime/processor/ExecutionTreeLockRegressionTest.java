@@ -39,8 +39,8 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.function.Function;
 
 /**
- * 回归测试：验证 ModelExecution 与 ToolExecution 的业务回写事务均以获取树锁 (lockTree) 为首个操作， 满足 Tree Advisory Lock ->
- * Session -> Thread -> Model/Tool -> Work 的规范锁序。
+ * 回归测试：验证 ModelExecution 与 ToolExecution 的业务回写事务只锁本 Thread 的 Thread/Model 或 Tool/Work，
+ * 不再获取执行树锁；同时验证 checkpoint 仍只锁 Model 与 Work。
  */
 class ExecutionTreeLockRegressionTest {
 
@@ -67,11 +67,10 @@ class ExecutionTreeLockRegressionTest {
   }
 
   /**
-   * 测试意图：验证 ModelExecution 在终态回写 (commitTerminal) 事务中，首个操作必须是获取执行树锁 (lockTree)， 随后依次锁定
-   * Thread、ModelInvocation 并完成 Work。
+   * 测试意图：ModelExecution 的 markRunning 与终态回写只按 Thread -> Model -> Work 锁定本 Thread 的事实行， 事务中不出现执行树锁。
    */
   @Test
-  void modelExecutionTerminalPathAcquiresTreeLockFirst() {
+  void modelExecutionTerminalPathTakesNoTreeLock() {
     InMemoryHarnessStore store = new InMemoryHarnessStore();
     RecordingStore recordingStore = new RecordingStore(store);
     ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
@@ -136,9 +135,16 @@ class ExecutionTreeLockRegressionTest {
 
     assertEquals(ProcessResult.STARTED, execution.activate(handle));
 
-    // markRunning 事务已被记录，首个操作应为 lockTree
+    // markRunning 事务：本 Thread -> Model -> Work，无树锁
     assertFalse(recordingStore.recordedOperations().isEmpty());
-    assertEquals("lockTree", recordingStore.recordedOperations().get(0).get(0));
+    assertEquals(
+        List.of(
+            "lockThread",
+            "lockModelInvocation",
+            "lockClaimedWork",
+            "updateModelInvocation",
+            "updateThread"),
+        recordingStore.recordedOperations().get(0));
 
     recordingStore.clearLogs();
 
@@ -150,16 +156,23 @@ class ExecutionTreeLockRegressionTest {
         store.transaction(tx -> tx.findModelInvocation(invocationId)).orElseThrow();
     assertEquals(ModelInvocationStatus.FAILED, terminalModel.status());
 
-    // 验证 commitTerminal 事务首个操作为 lockTree
+    // commitTerminal 事务只锁本 Thread 的 Thread/Model/Work 并完成 Work
     List<List<String>> txLogs = recordingStore.recordedOperations();
     assertFalse(txLogs.isEmpty(), "must record commitTerminal transaction");
     List<String> terminalTx = txLogs.get(txLogs.size() - 1);
     assertEquals(
-        "lockTree", terminalTx.get(0), "first operation in commitTerminal must be lockTree");
-    assertTrue(terminalTx.contains("lockThread"), "commitTerminal must lockThread");
+        List.of(
+            "lockThread",
+            "lockModelInvocation",
+            "requestWork",
+            "lockClaimedWork",
+            "updateModelInvocation",
+            "updateThread",
+            "completeWork"),
+        terminalTx);
     assertTrue(
-        terminalTx.contains("lockModelInvocation"), "commitTerminal must lockModelInvocation");
-    assertTrue(terminalTx.contains("completeWork"), "commitTerminal must completeWork");
+        txLogs.stream().flatMap(List::stream).noneMatch("lockTree"::equals),
+        "single-thread execution state commits must not take the tree lock");
   }
 
   /** 测试意图：验证 ModelExecution 的 checkpoint 事务不取执行树锁，只按 Model -> Work 顺序锁定自己的行。 */
@@ -246,12 +259,9 @@ class ExecutionTreeLockRegressionTest {
         "checkpoint must lock Model then Work only, with no tree lock");
   }
 
-  /**
-   * 测试意图：验证 ToolExecution 在激活异常导致的终态回写 (commitTerminal) 事务中，首个操作必须是获取执行树锁 (lockTree)， 随后锁定
-   * Thread、ToolInvocation 并完成 Work。
-   */
+  /** 测试意图：ToolExecution 激活异常路径的 markRunning 与终态回写只锁本 Thread 的 Thread/Tool/Work， 不取执行树锁。 */
   @Test
-  void toolExecutionTerminalPathAcquiresTreeLockFirst() {
+  void toolExecutionTerminalPathTakesNoTreeLock() {
     ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.fixture();
     schedulersToClose.add(fixture.scheduler);
 
@@ -299,14 +309,26 @@ class ExecutionTreeLockRegressionTest {
 
     List<List<String>> txLogs = recordingStore.recordedOperations();
     assertFalse(txLogs.isEmpty(), "must record transactions");
-    for (List<String> txOps : txLogs) {
-      assertEquals(
-          "lockTree", txOps.get(0), "first operation in mutating transaction must be lockTree");
-    }
-    List<String> terminalTx = txLogs.get(txLogs.size() - 1);
-    assertTrue(terminalTx.contains("lockThread"), "commitTerminal must lockThread");
-    assertTrue(terminalTx.contains("lockToolInvocation"), "commitTerminal must lockToolInvocation");
-    assertTrue(terminalTx.contains("completeWork"), "commitTerminal must completeWork");
+    assertEquals(
+        List.of(
+            List.of(
+                "lockThread",
+                "lockToolInvocation",
+                "lockClaimedWork",
+                "updateToolInvocations",
+                "updateThread"),
+            List.of(
+                "lockThread",
+                "lockToolInvocation",
+                "requestWork",
+                "lockClaimedWork",
+                "updateToolInvocations",
+                "updateThread",
+                "completeWork")),
+        txLogs);
+    assertTrue(
+        txLogs.stream().flatMap(List::stream).noneMatch("lockTree"::equals),
+        "single-thread execution state commits must not take the tree lock");
   }
 
   // --- 记录 Store 装饰器 ---

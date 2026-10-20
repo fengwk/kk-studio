@@ -33,10 +33,10 @@ import java.util.Optional;
 /**
  * 人工输入提交控制：把一次 {@code ask_user} 回答原子地物化为 ToolResult 与 durable 回执。
  *
- * <p>锁序 Tree Advisory Lock -&gt; Session KEY SHARE -&gt; Thread -&gt; Model -&gt; Tool siblings
- * -&gt; Work：未加锁的读仅用于发现不可变的 id/ownership 并选择稳定分支。提交先锁定执行树与祖先链，再按 Invocation ID 锁定当前真实调用，校验它仍在当前
- * TOOL_ACTIVE 上下文且状态为 WAITING_INPUT，再按冻结问卷 （Assistant ToolCall 的 arguments）校验并规范化答案；非法提交是 {@link
- * Reason#INPUT_SUBMISSION_INVALID}，不写入任何事实。
+ * <p>只锁本 Thread 与本 Thread 的 Model/Tool：Thread -&gt; Model -&gt; Tool siblings -&gt;
+ * Work，不取执行树锁；被回答的调用与写回事实都属于本 Thread，不涉及祖先或后代。未加锁的读仅用于发现不可变的 id/ownership 并选择稳定分支。提交先锁定 Thread，再按
+ * Invocation ID 锁定当前真实调用，校验它仍在当前 TOOL_ACTIVE 上下文且状态为 WAITING_INPUT，再按冻结问卷 （Assistant ToolCall 的
+ * arguments）校验并规范化答案；非法提交是 {@link Reason#INPUT_SUBMISSION_INVALID}，不写入任何事实。
  *
  * <p>接受事务依序写入 SUCCEEDED + ToolResult、inputReceipt（submissionId / actor / acceptedAt，与结果同事务）、Thread
  * version +1 与 THREAD Work：结果由既有 terminal Tool 物化路径进入 Entry 并删除调用行，因此崩溃只可能发生在回执落盘之前或之后——之后的重试按
@@ -62,8 +62,7 @@ final class ToolInputControl {
     Objects.requireNonNull(command, "command");
     return store.transaction(
         tx -> {
-          ThreadState thread =
-              ThreadLifecycleCoordinator.lockThreadWithAncestors(tx, command.threadId());
+          ThreadState thread = tx.lockThread(command.threadId()).orElse(null);
           if (thread == null) {
             throw notApplicable("thread " + command.threadId() + " does not exist");
           }
