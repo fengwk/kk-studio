@@ -851,4 +851,118 @@ class ThreadStateTest {
         CREATED,
         updatedAt);
   }
+
+  /** 创建来源与冻结约束是持久身份的一部分：缺失、USER 带父、以及创建后改写都必须拒绝。 */
+  @Test
+  void rejectsMissingOrChangedSpawnFacts() {
+    ThreadState stored =
+        state(id(7), id(100), id(42), false, ThreadExecutionControl.RUNNABLE, 3L, 5L, CREATED);
+
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new ThreadState(
+                id(7),
+                SESSION_ID,
+                id(100),
+                id(42),
+                CREATION_REQUEST_HASH,
+                "main",
+                id(100),
+                false,
+                null,
+                ThreadConstraints.NONE,
+                ThreadExecutionControl.RUNNABLE,
+                0L,
+                3L,
+                5L,
+                CREATED,
+                CREATED));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new ThreadState(
+                id(7),
+                SESSION_ID,
+                id(100),
+                id(42),
+                CREATION_REQUEST_HASH,
+                "main",
+                id(100),
+                false,
+                SpawnTrigger.MODEL_TOOL,
+                null,
+                ThreadExecutionControl.RUNNABLE,
+                0L,
+                3L,
+                5L,
+                CREATED,
+                CREATED));
+    // USER 只直接创建执行根；带父的 USER 来源必须拒绝。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ThreadState(
+                id(7),
+                SESSION_ID,
+                id(100),
+                id(42),
+                CREATION_REQUEST_HASH,
+                "main",
+                id(100),
+                false,
+                SpawnTrigger.USER,
+                ThreadConstraints.NONE,
+                ThreadExecutionControl.RUNNABLE,
+                0L,
+                3L,
+                5L,
+                CREATED,
+                CREATED));
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ThreadState.validateTransition(
+                stored,
+                new ThreadState(
+                    id(7),
+                    SESSION_ID,
+                    id(100),
+                    id(42),
+                    CREATION_REQUEST_HASH,
+                    "main",
+                    id(100),
+                    false,
+                    SpawnTrigger.CONTROLLER,
+                    ThreadConstraints.NONE,
+                    ThreadExecutionControl.RUNNABLE,
+                    0L,
+                    3L,
+                    6L,
+                    CREATED,
+                    CREATED.plusSeconds(1))));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ThreadState.validateTransition(
+                stored,
+                new ThreadState(
+                    id(7),
+                    SESSION_ID,
+                    id(100),
+                    id(42),
+                    CREATION_REQUEST_HASH,
+                    "main",
+                    id(100),
+                    false,
+                    SpawnTrigger.MODEL_TOOL,
+                    new ThreadConstraints(128, true, false),
+                    ThreadExecutionControl.RUNNABLE,
+                    0L,
+                    3L,
+                    6L,
+                    CREATED,
+                    CREATED.plusSeconds(1))));
+  }
 }
