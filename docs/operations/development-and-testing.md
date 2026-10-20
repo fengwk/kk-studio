@@ -274,21 +274,21 @@ localStorage、固定 `zh-CN`，并为 ResizeObserver、DOMMatrix、SVG geometry
 scrollIntoView 和 React Flow layout 提供确定性 stub。
 
 布局回归需要先在 `frontend/` 执行 `npx playwright install chromium` 安装浏览器。
-用例位于 `frontend/browser-tests/*.pw.ts`，与 Vitest 的组件测试分开运行。
-布局基座采用独立静态构建与预览机制（[`vite.layout.config.ts`](../../frontend/vite.layout.config.ts)），
-通过 Rollup 多页（MPA）模式将真实 React 组件与测试 harness 预编译至 `reports/layout-site/`。
-`npm run test:layout` 先执行 `build:layout`，成功后启动 Playwright；编译不占用服务器的启动预算。
-Playwright 通过 `preview:layout` 在 loopback 5174 端口启动静态预览
+用例位于 `frontend/browser-tests/*.pw.ts` 与 `*.browser.ts`，与 Vitest 的组件测试分开运行。
+浏览器基座采用统一静态构建与预览机制（[`vite.browser.config.ts`](../../frontend/vite.browser.config.ts)），
+通过 Rollup 多页（MPA）模式将真实 React 组件与全部测试 harness 预编译至 `reports/browser-site/`。
+`npm run test:layout` 先执行 `build:browser`，成功后启动 Playwright 对应 project；编译不占用服务器的启动预算。
+Playwright 通过 `preview:browser` 在 loopback 5174 端口启动静态预览
 （`strictPort: true` 且 `reuseExistingServer: false`，以真实 harness URL 进行 HTTP readiness 探测），
-消除 dev HMR、实时转译与共享缓存依赖。调试时可在 `frontend/` 单独执行 `npm run build:layout`
-和 `npm run preview:layout`，直接通过浏览器访问 `http://127.0.0.1:5174/browser-tests/<harness>.html` 检查页面。
-并行验证用 `KK_LAYOUT_PORT` 指定独占端口，构建和 Playwright 使用同一值。
-首轮失败时，`reports/layout/` 下保留 `trace.zip` 和 `test-failed-*.png`，不依赖重试。
+消除 dev HMR、实时转译与共享缓存依赖。调试时可在 `frontend/` 单独执行 `npm run build:browser`
+和 `npm run preview:browser`，直接通过浏览器访问 `http://127.0.0.1:5174/browser-tests/<harness>.html` 检查页面。
+并行验证用 `KK_BROWSER_PORT` 指定独占端口，构建和 Playwright 使用同一值。
+首轮失败时，各 project 报告目录（如 `reports/layout/`）下保留 `trace.zip` 和 `test-failed-*.png`，不依赖重试。
 在 `frontend/` 执行 `npx playwright show-trace <trace-file-path>`，可检查时间线、DOM 快照、
 网络请求与控制台报错；trace 路径相对此目录通常以 `../reports/layout/` 开头。
 
 Chat 卡片和 Session/Thread 选择器的时间回归可在 `frontend/` 定向执行
-`npm run build:layout && npx playwright test --config playwright.layout.config.ts browser-tests/local-time.pw.ts`。
+`npm run build:browser && npx playwright test --project layout browser-tests/local-time.pw.ts`。
 该离线用例通过独立浏览器 context 固定上海、UTC、纽约时区，在宽窄视口验证实际组件：
 有时区 ISO 字符串及 epoch 秒/毫秒按浏览器本地时区显示为 `YYYY-MM-DD HH:mm`，
 包括跨日转换；无时区字符串和数组保留本地墙上时钟含义，空值及非法输入显示 `-`。
@@ -296,10 +296,10 @@ Chat 卡片和 Session/Thread 选择器的时间回归可在 `frontend/` 定向�
 Chat 默认设置、首发焦点、主题控件与 Debug 布局沿用同一离线 layout 入口：
 
 ```bash
-npm --prefix frontend run build:layout
+npm --prefix frontend run build:browser
 (
   cd frontend
-  npx playwright test --config playwright.layout.config.ts \
+  npx playwright test --project layout \
     browser-tests/chat-defaults.pw.ts browser-tests/composer-focus.pw.ts \
     browser-tests/debug-responsive-layout.pw.ts browser-tests/debug-preview-title.pw.ts \
     browser-tests/loading-skeleton.pw.ts browser-tests/retry-controls.pw.ts \
@@ -311,27 +311,26 @@ npm --prefix frontend run build:layout
 模态框和多 pane 防抢焦、等宽 Debug 列与 Subagent 配置详情，以及骨架屏、按钮忙碌状态和窄屏布局。
 API 规划与代理切换由后端定向测试验证，不以静态浏览器基座替代真实服务契约。
 
-Thread 控制与消息展示有独立的离线 Chromium 入口，可按改动范围选择：
+Thread 控制与消息展示通过统一 Playwright 配置划分具名 projects，可按改动范围选择：
 
 ```bash
 npm --prefix frontend run test:pane
 (
   cd frontend
-  npx playwright test --config playwright.tool-card.config.ts
-  npx playwright test --config playwright.subagent-tree.config.ts
-  npx playwright test --config playwright.compaction.config.ts
-  npx vite build --config vite.composer-editor.config.ts
-  npx playwright test --config playwright.composer-editor.config.ts
+  npx playwright test --project tool-card
+  npx playwright test --project subagent-tree
+  npx playwright test --project compaction
+  npx playwright test --project composer-editor
 )
 ```
 
-Thread/subagent 展示收口可定向运行 `playwright.pane.config.ts` 的 `chat-branch.browser.ts`、
-`playwright.tool-card.config.ts`、`playwright.subagent-tree.config.ts`，以及 layout 配置下的
+Thread/subagent 展示收口可定向运行 `--project pane` 的 `chat-branch.browser.ts`、
+`--project tool-card`、`--project subagent-tree`，以及 layout 配置下的
 `subagent-receipt.pw.ts` 与 `agent-tree.pw.ts`。这些离线回归覆盖根命令入口、只读直接父导航、
 完整当前执行根范围、选择键盘与零写请求、task 可读链接、工具 header/padding、回执链接与箭头顺序，
 并在宽屏及 320/360px 窄屏以实际几何验证统计行、按钮和图标中心。
 
-各入口只匹配对应 harness，使用独立构建、报告与 loopback 端口，不访问 Backend、
+各 project 只匹配对应 harness，统一在构建后的静态基座与 loopback 端口上运行，不访问 Backend、
 共享数据库或真实模型。Pane 验证根草稿/上传保留、子代理只读、根 Stop，以及新建分支的命名与
 1–9 目标路由、隐藏 pane 显露、完整祖先前缀与 409 改名恢复。Debug 回归从根或本地草稿的命令
 进入独占视图，验证单顶栏退出、控制区挂起，以及草稿、上传和焦点恢复。

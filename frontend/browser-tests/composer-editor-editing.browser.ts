@@ -4,8 +4,8 @@ import { test, expect, type Page } from './fixture'
  * ComposerEditor / ThreadComposer 真实 contenteditable 回归。
  *
  * 运行（在 `frontend/`）：
- *   npx vite build --config vite.composer-editor.config.ts
- *   npx playwright test --config playwright.composer-editor.config.ts
+ *   npm run build:browser
+ *   npx playwright test --project composer-editor
  *
  * 覆盖 jsdom 无法真实复现的部分：contenteditable 光标/换行、Chromium IME 组合、
  * 真实文件选择产生的 pill 与整颗删除、上传失败与组合态并发的回滚时序、
