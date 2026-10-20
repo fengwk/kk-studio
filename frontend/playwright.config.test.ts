@@ -2,7 +2,8 @@ import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import playwrightConfig, { resolveBrowserPort } from './playwright.config'
+import { resolveBrowserPort } from './browser-test-config'
+import playwrightConfig from './playwright.config'
 
 /** 设置/清除 KK_BROWSER_PORT；port 为 undefined 表示变量缺失。 */
 function applyBrowserPort(port: string | undefined) {
@@ -76,7 +77,7 @@ describe('playwright projects inventory', () => {
     expect(byName.layout.outputDir).toBe('../reports/layout')
     expect(byName.pane.outputDir).toBe('../reports/pane')
     expect(byName.pane.timeout).toBe(60000)
-    expect(byName.install.outputDir).toBe('./.reports/install-browser')
+    expect(byName.install.outputDir).toBe('../reports/install-browser')
     expect(byName.install.use?.permissions).toEqual(['clipboard-read', 'clipboard-write'])
     expect(byName.plugin.outputDir).toBe('../reports/browser/plugins')
     expect(byName.plugin.use?.screenshot).toBe('on')
@@ -236,9 +237,10 @@ describe('vite browser build contract', () => {
 })
 
 describe('package.json scripts contract', () => {
-  // 验证 CI 门禁保留 test:layout 且调用方式指向 project layout
-  it('preserves test:layout script gate pointing to unified project', () => {
+  // 验证保留通用与定向浏览器运行脚本
+  it('configures test:browser and targeted project runners', () => {
     const manifest = JSON.parse(fs.readFileSync(path.resolve(__dirname, 'package.json'), 'utf8'))
+    expect(manifest.scripts['test:browser']).toBe('npm run build:browser && playwright test')
     expect(manifest.scripts['test:layout']).toBe('npm run build:browser && playwright test --project layout')
     expect(manifest.scripts['test:pane']).toBe('npm run build:browser && playwright test --project pane')
     expect(manifest.scripts['test:install:browser']).toBe('npm run build:browser && playwright test --project install')

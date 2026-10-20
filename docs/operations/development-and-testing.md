@@ -261,7 +261,8 @@ npm --prefix frontend run coverage
 | 命令 | 行为 | 结果 |
 | --- | --- | --- |
 | `run test` | `vitest run` | jsdom 单元/组件测试 |
-| `run test:layout` | Playwright Chromium 离线组件回归 | 布局基座与静态产物、共享资源卡/控件、Chat 1–9 pane 布局、Agent 执行树与回执、交互卡片、Debug 响应式与预览标题、媒体预览、Canvas 创建确认/生成布局/耐用性、Catalog i18n、Project 工作流与 Agent、Settings 同步与 Environment 安装；不依赖 Backend，产物在 `reports/layout/` |
+| `run test:browser` | Playwright Chromium 全量离线套件回归（CI 门禁） | 统一运行全部 8 个具名 projects，涵盖布局基座、Chat 1–9 pane、Environment 安装、Plugins、Composer、Compaction、Subagent 树与 Tool 卡片，产物输出至对应 reports 子目录 |
+| `run test:layout` | Playwright Chromium 定向 layout 套件回归 | 布局基座与静态产物、共享资源卡/控件、交互卡片、Debug 响应式与预览标题、媒体预览、Canvas、Catalog i18n、Project 工作流与 Agent、Settings 同步；产物在 `reports/layout/` |
 | `run lint` | `eslint .` | TypeScript、React hooks、分层 import 规则 |
 | `run typecheck` | `tsc -b` | 生产源码与构建配置的严格类型检查，不打包 |
 | `run typecheck:test` | `tsc -p tsconfig.test.json` | 全部单元测试、浏览器用例及其基座的严格类型检查，不运行浏览器或模型 |
@@ -277,7 +278,7 @@ scrollIntoView 和 React Flow layout 提供确定性 stub。
 用例位于 `frontend/browser-tests/*.pw.ts` 与 `*.browser.ts`，与 Vitest 的组件测试分开运行。
 浏览器基座采用统一静态构建与预览机制（[`vite.browser.config.ts`](../../frontend/vite.browser.config.ts)），
 通过 Rollup 多页（MPA）模式将真实 React 组件与全部测试 harness 预编译至 `reports/browser-site/`。
-`npm run test:layout` 先执行 `build:browser`，成功后启动 Playwright 对应 project；编译不占用服务器的启动预算。
+全量回归（CI 门禁）执行 `npm run test:browser`，定向回归执行 `npm run test:layout`（或对应 `--project <name>`）；运行前先执行 `build:browser`，成功后启动 Playwright，编译不占用服务器的启动预算。
 Playwright 通过 `preview:browser` 在 loopback 5174 端口启动静态预览
 （`strictPort: true` 且 `reuseExistingServer: false`，以真实 harness URL 进行 HTTP readiness 探测），
 消除 dev HMR、实时转译与共享缓存依赖。调试时可在 `frontend/` 单独执行 `npm run build:browser`

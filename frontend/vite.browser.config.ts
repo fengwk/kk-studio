@@ -3,7 +3,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { UserConfig } from 'vite'
 import react from '@vitejs/plugin-react'
-import { resolveBrowserPort } from './playwright.config'
+import { resolveBrowserPort } from './browser-test-config'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const browserTestsDir = path.resolve(__dirname, 'browser-tests')
