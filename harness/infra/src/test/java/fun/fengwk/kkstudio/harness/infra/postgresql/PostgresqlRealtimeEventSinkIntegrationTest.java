@@ -57,6 +57,8 @@ class PostgresqlRealtimeEventSinkIntegrationTest {
     POSTGRES.start();
   }
 
+  private static final UUID ORIGIN = id(900L);
+
   private final RealtimeNotificationCodec codec = new RealtimeNotificationCodec();
   private DataSource dataSource;
   private JdbcTemplate jdbcTemplate;
@@ -98,7 +100,7 @@ class PostgresqlRealtimeEventSinkIntegrationTest {
   @Test
   void batchDeliversEveryEnvelopeInInputOrder() throws Exception {
     CountingJdbcTemplate counting = new CountingJdbcTemplate(jdbcTemplate);
-    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(counting, codec);
+    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(counting, codec, ORIGIN);
     List<RealtimeEvent> events = modelDeltas(50);
 
     transactionTemplate.executeWithoutResult(status -> sink.appendAll(events));
@@ -112,7 +114,7 @@ class PostgresqlRealtimeEventSinkIntegrationTest {
   @Test
   void batchSplittingByEventCountBoundPreservesGlobalOrder() throws Exception {
     CountingJdbcTemplate counting = new CountingJdbcTemplate(jdbcTemplate);
-    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(counting, codec);
+    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(counting, codec, ORIGIN);
     int total = PostgresqlRealtimeEventSink.MAX_BATCH_EVENTS + 7;
     List<RealtimeEvent> events = modelDeltas(total);
 
@@ -127,7 +129,7 @@ class PostgresqlRealtimeEventSinkIntegrationTest {
   @Test
   void batchSplittingByByteBoundPreservesOrder() throws Exception {
     CountingJdbcTemplate counting = new CountingJdbcTemplate(jdbcTemplate);
-    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(counting, codec);
+    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(counting, codec, ORIGIN);
     String filler = "x".repeat(7000);
     int total = 40;
     List<RealtimeEvent> events = new ArrayList<>();
@@ -135,7 +137,7 @@ class PostgresqlRealtimeEventSinkIntegrationTest {
       events.add(modelDelta(filler + i, i + 1L));
     }
     int singleEventBytes =
-        codec.encodeEvent(events.getFirst()).getBytes(StandardCharsets.UTF_8).length;
+        codec.encodeEvent(ORIGIN, events.getFirst()).getBytes(StandardCharsets.UTF_8).length;
     assertTrue(singleEventBytes <= PostgresqlRealtimeEventSink.MAX_NOTIFICATION_BYTES);
     assertTrue((long) singleEventBytes * total > PostgresqlRealtimeEventSink.MAX_BATCH_BYTES);
 
@@ -150,7 +152,7 @@ class PostgresqlRealtimeEventSinkIntegrationTest {
   @Test
   void oversizedEventInsideBatchDegradesToResyncWithoutLosingOthers() throws Exception {
     CountingJdbcTemplate counting = new CountingJdbcTemplate(jdbcTemplate);
-    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(counting, codec);
+    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(counting, codec, ORIGIN);
     RealtimeEvent.ModelDelta oversized = modelDelta("界".repeat(3000), 2L);
     RealtimeEvent.ModelDelta first = modelDelta("before", 1L);
     RealtimeEvent.ModelDelta last = modelDelta("after", 3L);
@@ -175,7 +177,7 @@ class PostgresqlRealtimeEventSinkIntegrationTest {
   @Test
   void rolledBackBatchAndSingleAppendProduceNoNotifications() throws Exception {
     CountingJdbcTemplate counting = new CountingJdbcTemplate(jdbcTemplate);
-    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(counting, codec);
+    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(counting, codec, ORIGIN);
 
     assertThrowsRollback(
         () ->
@@ -195,7 +197,7 @@ class PostgresqlRealtimeEventSinkIntegrationTest {
   /** 回滚后同一 channel 上的下一次已提交批量仍必须完整保序投递（事务语义不污染后续通知）。 */
   @Test
   void committedBatchAfterRollbackIsStillDeliveredInOrder() throws Exception {
-    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(jdbcTemplate, codec);
+    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(jdbcTemplate, codec, ORIGIN);
 
     assertThrowsRollback(
         () ->
@@ -215,7 +217,7 @@ class PostgresqlRealtimeEventSinkIntegrationTest {
   /** Source 端到端：一次已提交批量后，订阅方按序收到全部事件且不触发任何 resync。 */
   @Test
   void committedBatchReachesSourceSubscribersWithoutResync() throws Exception {
-    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(jdbcTemplate, codec);
+    PostgresqlRealtimeEventSink sink = new PostgresqlRealtimeEventSink(jdbcTemplate, codec, ORIGIN);
     UUID threadId = id(1L);
     List<RealtimeEvent> received = new ArrayList<>();
     AtomicInteger resyncs = new AtomicInteger();

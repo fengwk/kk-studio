@@ -62,7 +62,9 @@ class IssueControllerRuntimeConfigurationTest extends WebPostgresTestSupport {
   @Qualifier("issueControllerDispatcherPollScheduler")
   private ScheduledExecutorService pollScheduler;
 
-  @Autowired private PostgresqlNotificationLoop postgresqlNotificationLoop;
+  @Autowired
+  @Qualifier("postgresqlNotificationLoop")
+  private PostgresqlNotificationLoop postgresqlNotificationLoop;
 
   /** 测试意图：验证完整的 Issue Controller 运行时 bean 图正确装配， 且配置属性正确绑定到 IssueControllerProperties。 */
   @Test

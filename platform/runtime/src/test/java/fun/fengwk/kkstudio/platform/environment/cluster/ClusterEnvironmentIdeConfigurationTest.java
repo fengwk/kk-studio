@@ -8,6 +8,7 @@ import static org.mockito.Mockito.mock;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
@@ -18,6 +19,8 @@ import fun.fengwk.kkstudio.platform.environment.ide.EnvironmentIdeService;
 import fun.fengwk.kkstudio.platform.environment.ide.EnvironmentIdeServiceImpl;
 import fun.fengwk.kkstudio.platform.environment.ide.IdeBootstrapTicketService;
 import fun.fengwk.kkstudio.platform.environment.ide.InMemoryIdeBootstrapTicketService;
+
+import javax.sql.DataSource;
 
 import java.time.Clock;
 import java.util.UUID;
@@ -35,6 +38,8 @@ class ClusterEnvironmentIdeConfigurationTest {
           try (AnnotationConfigApplicationContext context =
               new AnnotationConfigApplicationContext()) {
             context.registerBean(JdbcClient.class, () -> mock(JdbcClient.class));
+            context.registerBean(
+                JdbcTemplate.class, () -> new JdbcTemplate(mock(DataSource.class)));
             context.registerBean(IdeCommandTransport.class, () -> mock(IdeCommandTransport.class));
             context.registerBean(
                 IdeBootstrapTicketService.class, () -> new InMemoryIdeBootstrapTicketService());
@@ -42,7 +47,9 @@ class ClusterEnvironmentIdeConfigurationTest {
             context.registerBean("nodeInstanceId", UUID.class, () -> UUID.randomUUID());
             context.registerBean(ObjectMapper.class, () -> JsonMapper.builder().build());
             context.register(
-                EnvironmentIdeConfiguration.class, ClusterEnvironmentIdeConfiguration.class);
+                EnvironmentIdeConfiguration.class,
+                ClusterEnvironmentIdeConfiguration.class,
+                ClusterPresenceConfiguration.class);
             context.refresh();
 
             assertInstanceOf(
@@ -52,6 +59,7 @@ class ClusterEnvironmentIdeConfigurationTest {
             assertNotNull(context.getBean(ClusterNodeRegistry.class));
             assertNotNull(context.getBean(ClusterInternalAuthentication.class));
             assertNotNull(context.getBean(ClusterInternalClient.class));
+            assertNotNull(context.getBean(ClusterNodePresence.class));
             assertEquals(1, context.getBeansOfType(ClusterInternalClient.class).size());
           }
         });

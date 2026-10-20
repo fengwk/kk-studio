@@ -6,6 +6,7 @@ import org.springframework.context.annotation.Configuration;
 import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionDispatcher;
 import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlRealtimeEventSource;
+import fun.fengwk.kkstudio.harness.infra.realtime.RealtimeBus;
 import fun.fengwk.kkstudio.harness.infra.realtime.RealtimeEventSource;
 import fun.fengwk.kkstudio.harness.runtime.HarnessThreadChangeSource;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEventJsonCodec;
@@ -73,7 +74,6 @@ public class ApplicationEventConfiguration {
       CanvasVersionHub canvasVersionHub,
       ProjectInvalidationHub projectInvalidationHub,
       SystemSettingsChangeHandler systemSettingsChangeHandler,
-      PostgresqlRealtimeEventSource realtimeEventSource,
       EnvironmentSkillSyncOrchestrator environmentSkillSyncOrchestrator,
       ExecutionTreeChangeHub executionTreeChangeHub,
       InteractionChangeHub interactionChangeHub,
@@ -121,28 +121,23 @@ public class ApplicationEventConfiguration {
                 SystemSettingsChangeHandler.CHANNEL,
                 systemSettingsChangeHandler::onNotification,
                 systemSettingsChangeHandler::onResync),
-            // 6. 流式增量推送：大模型生成的文本 Delta 与工具局部输出，直接经由通道推送到前端，不落库
-            new PostgresqlNotificationHandler(
-                PostgresqlRealtimeEventSource.CHANNEL,
-                realtimeEventSource::onNotification,
-                realtimeEventSource::onResync),
-            // 7. Skill Package 变更：payload 是 package 名，把该 Package 同步到本节点全部 READY 的 Environment；
+            // 6. Skill Package 变更：payload 是 package 名，把该 Package 同步到本节点全部 READY 的 Environment；
             // 建连/重连时全量对账，通知丢失不改变 durable truth
             new PostgresqlNotificationHandler(
                 EnvironmentSkillSyncOrchestrator.CHANNEL,
                 environmentSkillSyncOrchestrator::onPackageChanged,
                 environmentSkillSyncOrchestrator::reconcileReadyEnvironments),
-            // 8. 执行树失效：Thread 写事务内由写入口把 payload 聚合为真实执行根 id，浏览器回读该根的树
+            // 7. 执行树失效：Thread 写事务内由写入口把 payload 聚合为真实执行根 id，浏览器回读该根的树
             new PostgresqlNotificationHandler(
                 ExecutionTreeChangeHub.CHANNEL,
                 executionTreeChangeHub::onNotification,
                 executionTreeChangeHub::broadcastResync),
-            // 9. 待处理交互失效：ToolInvocation 进出审批/人工输入等待后提交，payload 是真实执行根 id
+            // 8. 待处理交互失效：ToolInvocation 进出审批/人工输入等待后提交，payload 是真实执行根 id
             new PostgresqlNotificationHandler(
                 InteractionChangeHub.CHANNEL,
                 interactionChangeHub::onNotification,
                 interactionChangeHub::broadcastResync),
-            // 10. 环境连接变更：payload 是环境 id，不是执行根；环境精准失效，交互全量对账。
+            // 9. 环境连接变更：payload 是环境 id，不是执行根；环境精准失效，交互全量对账。
             new PostgresqlNotificationHandler(
                 EnvironmentChangeHub.CHANNEL,
                 payload -> {
@@ -153,11 +148,41 @@ public class ApplicationEventConfiguration {
                   environmentChangeHub.broadcastResync();
                   interactionChangeHub.broadcastResync();
                 }),
-            // 11. Plugin 目录变更：集群任一节点提交配置后广播提示其它节点立即回读权威目录；payload 只作提示、不能作为可信状态，
+            // 10. Plugin 目录变更：集群任一节点提交配置后广播提示其它节点立即回读权威目录；payload 只作提示、不能作为可信状态，
             // 建连/重连时同样 resync，通知丢失由周期对账追平
             pluginCatalogNotificationHandler),
         Duration.ofMillis(advanced.postgresqlWorkNotificationPollMillis()),
         Duration.ofMillis(advanced.postgresqlWorkReconnectBackoffMillis()));
+  }
+
+  /** 流式增量使用独立 LISTEN 连接：realtime 的高频小帧与 durable work / 失效提示互不阻塞，重连也只 resync 实时订阅。 */
+  @Bean(destroyMethod = "close")
+  public PostgresqlNotificationLoop realtimeNotificationLoop(
+      DataSource dataSource,
+      RealtimeBus realtimeBus,
+      SystemSettingsSnapshot systemSettingsSnapshot) {
+    SystemSettings.Advanced advanced = systemSettingsSnapshot.get().advanced();
+    return createRealtimeNotificationLoop(
+        dataSource,
+        realtimeBus,
+        Duration.ofMillis(advanced.postgresqlWorkNotificationPollMillis()),
+        Duration.ofMillis(advanced.postgresqlWorkReconnectBackoffMillis()));
+  }
+
+  static PostgresqlNotificationLoop createRealtimeNotificationLoop(
+      DataSource dataSource,
+      RealtimeBus realtimeBus,
+      Duration notificationPollInterval,
+      Duration reconnectBackoff) {
+    return new PostgresqlNotificationLoop(
+        dataSource,
+        List.of(
+            new PostgresqlNotificationHandler(
+                PostgresqlRealtimeEventSource.CHANNEL,
+                realtimeBus::onNotification,
+                realtimeBus::onResync)),
+        notificationPollInterval,
+        reconnectBackoff);
   }
 
   @Bean

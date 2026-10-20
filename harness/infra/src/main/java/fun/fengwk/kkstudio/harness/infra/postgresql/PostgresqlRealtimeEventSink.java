@@ -11,6 +11,7 @@ import java.sql.Array;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.UUID;
 
 /**
  * 通过 transaction-aware {@link JdbcTemplate} 写入 PostgreSQL NOTIFY 的 realtime sink。
@@ -38,11 +39,13 @@ public final class PostgresqlRealtimeEventSink implements RealtimeEventSink {
 
   private final JdbcTemplate jdbcTemplate;
   private final RealtimeNotificationCodec notificationCodec;
+  private final UUID originNodeId;
 
   public PostgresqlRealtimeEventSink(
-      JdbcTemplate jdbcTemplate, RealtimeNotificationCodec notificationCodec) {
+      JdbcTemplate jdbcTemplate, RealtimeNotificationCodec notificationCodec, UUID originNodeId) {
     this.jdbcTemplate = Objects.requireNonNull(jdbcTemplate, "jdbcTemplate");
     this.notificationCodec = Objects.requireNonNull(notificationCodec, "notificationCodec");
+    this.originNodeId = Objects.requireNonNull(originNodeId, "originNodeId");
   }
 
   @Override
@@ -113,9 +116,9 @@ public final class PostgresqlRealtimeEventSink implements RealtimeEventSink {
 
   /** 编码为 canonical envelope；超出 PostgreSQL payload 安全上限时退化为该事件所属 Thread 的小型 RESYNC。 */
   private String encode(RealtimeEvent event) {
-    String payload = notificationCodec.encodeEvent(event);
+    String payload = notificationCodec.encodeEvent(originNodeId, event);
     if (payload.getBytes(StandardCharsets.UTF_8).length > MAX_NOTIFICATION_BYTES) {
-      return notificationCodec.encodeResync(event.threadId(), OVERSIZE_REASON);
+      return notificationCodec.encodeResync(originNodeId, event.threadId(), OVERSIZE_REASON);
     }
     return payload;
   }

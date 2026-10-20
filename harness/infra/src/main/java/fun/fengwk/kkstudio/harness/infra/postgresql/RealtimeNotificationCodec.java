@@ -31,8 +31,9 @@ public final class RealtimeNotificationCodec {
           .build();
 
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
-  private static final Set<String> EVENT_FIELDS = orderedSet("kind", "event");
-  private static final Set<String> RESYNC_FIELDS = orderedSet("kind", "threadId", "reason");
+  private static final Set<String> EVENT_FIELDS = orderedSet("kind", "originNodeId", "event");
+  private static final Set<String> RESYNC_FIELDS =
+      orderedSet("kind", "originNodeId", "threadId", "reason");
 
   private final RealtimeEventJsonCodec eventCodec;
 
@@ -44,20 +45,22 @@ public final class RealtimeNotificationCodec {
     this.eventCodec = Objects.requireNonNull(eventCodec, "eventCodec");
   }
 
-  /** 编码 canonical EVENT envelope。 */
-  public String encodeEvent(RealtimeEvent event) {
-    Objects.requireNonNull(event, "event");
+  /** 编码 canonical EVENT envelope，并标记产生该事件的节点。 */
+  public String encodeEvent(UUID originNodeId, RealtimeEvent event) {
+    Envelope.Event envelope = new Envelope.Event(originNodeId, event);
     ObjectNode node = NODES.objectNode();
     node.put("kind", Kind.EVENT.name());
-    node.set("event", eventCodec.encodeNode(event));
+    node.put("originNodeId", envelope.originNodeId().toString());
+    node.set("event", eventCodec.encodeNode(envelope.event()));
     return write(node);
   }
 
-  /** 编码 canonical RESYNC envelope。 */
-  public String encodeResync(UUID threadId, String reason) {
-    Envelope.Resync resync = new Envelope.Resync(threadId, reason);
+  /** 编码 canonical RESYNC envelope，并标记判断该 Thread 需要恢复的节点。 */
+  public String encodeResync(UUID originNodeId, UUID threadId, String reason) {
+    Envelope.Resync resync = new Envelope.Resync(originNodeId, threadId, reason);
     ObjectNode node = NODES.objectNode();
     node.put("kind", Kind.RESYNC.name());
+    node.put("originNodeId", resync.originNodeId().toString());
     node.put("threadId", resync.threadId().toString());
     node.put("reason", resync.reason());
     return write(node);
@@ -81,11 +84,15 @@ public final class RealtimeNotificationCodec {
       if (eventNode == null || !eventNode.isObject()) {
         throw new IllegalArgumentException("notification.event must be a JSON object");
       }
-      envelope = new Envelope.Event(eventCodec.decodeNode(eventNode));
+      envelope =
+          new Envelope.Event(
+              requiredCanonicalUuid(node, "originNodeId", "notification"),
+              eventCodec.decodeNode(eventNode));
     } else {
       requireExactFields(node, RESYNC_FIELDS, "notification");
       envelope =
           new Envelope.Resync(
+              requiredCanonicalUuid(node, "originNodeId", "notification"),
               requiredCanonicalUuid(node, "threadId", "notification"),
               requiredText(node, "reason", "notification"));
     }
@@ -97,10 +104,10 @@ public final class RealtimeNotificationCodec {
 
   private String encode(Envelope envelope) {
     if (envelope instanceof Envelope.Event event) {
-      return encodeEvent(event.event());
+      return encodeEvent(event.originNodeId(), event.event());
     }
     if (envelope instanceof Envelope.Resync resync) {
-      return encodeResync(resync.threadId(), resync.reason());
+      return encodeResync(resync.originNodeId(), resync.threadId(), resync.reason());
     }
     throw new IllegalArgumentException(
         "unsupported realtime notification: " + envelope.getClass().getName());
@@ -170,19 +177,24 @@ public final class RealtimeNotificationCodec {
     RESYNC
   }
 
-  /** 严格 envelope 只允许 EVENT 与 RESYNC。 */
+  /** 严格 envelope 只允许 EVENT 与 RESYNC，且每条消息都必须携带产生它的节点身份。 */
   public sealed interface Envelope permits Envelope.Event, Envelope.Resync {
 
+    /** 产生该 envelope 的节点；接收方据此丢弃自身回环消息。 */
+    UUID originNodeId();
+
     /** 包含完整 canonical {@link RealtimeEvent} 的 live event。 */
-    record Event(RealtimeEvent event) implements Envelope {
+    record Event(UUID originNodeId, RealtimeEvent event) implements Envelope {
       public Event {
+        Objects.requireNonNull(originNodeId, "originNodeId");
         Objects.requireNonNull(event, "event");
       }
     }
 
     /** 指示指定 Thread 必须从 durable snapshot 恢复。 */
-    record Resync(UUID threadId, String reason) implements Envelope {
+    record Resync(UUID originNodeId, UUID threadId, String reason) implements Envelope {
       public Resync {
+        Objects.requireNonNull(originNodeId, "originNodeId");
         Objects.requireNonNull(threadId, "threadId");
         Objects.requireNonNull(reason, "reason");
         if (reason.isBlank()) {

@@ -21,22 +21,29 @@ import java.util.UUID;
 class RealtimeNotificationCodecTest {
 
   private static final Instant NOW = Instant.parse("2026-08-05T00:00:00Z");
+  private static final UUID ORIGIN = id(900L);
 
   private final RealtimeEventJsonCodec eventCodec = new RealtimeEventJsonCodec();
   private final RealtimeNotificationCodec codec = new RealtimeNotificationCodec(eventCodec);
 
-  /** EVENT 必须嵌入完整 canonical RealtimeEvent，重复编码稳定且 decode 不损失事件字段。 */
+  /** EVENT 必须嵌入完整 canonical RealtimeEvent 与 origin，重复编码稳定且 decode 不损失事件字段。 */
   @Test
   void eventEnvelopeIsCanonicalDeterministicAndRoundTripsFullEvent() {
     RealtimeEvent.ModelDelta event = modelDelta("你好");
-    String expected = "{\"kind\":\"EVENT\",\"event\":" + eventCodec.encode(event) + "}";
+    String expected =
+        "{\"kind\":\"EVENT\",\"originNodeId\":\""
+            + ORIGIN
+            + "\",\"event\":"
+            + eventCodec.encode(event)
+            + "}";
 
-    String encoded = codec.encodeEvent(event);
+    String encoded = codec.encodeEvent(ORIGIN, event);
 
     assertEquals(expected, encoded);
-    assertEquals(encoded, codec.encodeEvent(event));
+    assertEquals(encoded, codec.encodeEvent(ORIGIN, event));
     RealtimeNotificationCodec.Envelope.Event decoded =
         assertInstanceOf(RealtimeNotificationCodec.Envelope.Event.class, codec.decode(encoded));
+    assertEquals(ORIGIN, decoded.originNodeId());
     assertEquals(event, decoded.event());
   }
 
@@ -44,9 +51,14 @@ class RealtimeNotificationCodecTest {
   @Test
   void toolPartialEnvelopeRoundTripsEventIdentity() {
     RealtimeEvent.ToolPartial event = toolPartial(id(99L));
-    String expected = "{\"kind\":\"EVENT\",\"event\":" + eventCodec.encode(event) + "}";
+    String expected =
+        "{\"kind\":\"EVENT\",\"originNodeId\":\""
+            + ORIGIN
+            + "\",\"event\":"
+            + eventCodec.encode(event)
+            + "}";
 
-    String encoded = codec.encodeEvent(event);
+    String encoded = codec.encodeEvent(ORIGIN, event);
 
     assertEquals(expected, encoded);
     RealtimeNotificationCodec.Envelope.Event decoded =
@@ -55,25 +67,28 @@ class RealtimeNotificationCodecTest {
     assertEquals(id(99L), ((RealtimeEvent.ToolPartial) decoded.event()).eventId());
   }
 
-  /** RESYNC 只携带 canonical threadId 与非空 reason，保持固定字段顺序。 */
+  /** RESYNC 携带 origin、canonical threadId 与非空 reason，保持固定字段顺序。 */
   @Test
   void resyncEnvelopeIsCanonicalAndRoundTrips() {
-    String encoded = codec.encodeResync(id(7L), "EVENT_TOO_LARGE");
+    String encoded = codec.encodeResync(ORIGIN, id(7L), "EVENT_TOO_LARGE");
 
     assertEquals(
-        "{\"kind\":\"RESYNC\",\"threadId\":\"00000000-0000-0000-0000-000000000007\","
+        "{\"kind\":\"RESYNC\",\"originNodeId\":\""
+            + ORIGIN
+            + "\",\"threadId\":\"00000000-0000-0000-0000-000000000007\","
             + "\"reason\":\"EVENT_TOO_LARGE\"}",
         encoded);
     RealtimeNotificationCodec.Envelope.Resync decoded =
         assertInstanceOf(RealtimeNotificationCodec.Envelope.Resync.class, codec.decode(encoded));
+    assertEquals(ORIGIN, decoded.originNodeId());
     assertEquals(id(7L), decoded.threadId());
     assertEquals("EVENT_TOO_LARGE", decoded.reason());
   }
 
-  /** malformed、unknown、重复字段、额外字段与非 canonical 空白都必须拒绝，避免同一语义出现多种 wire 表示。 */
+  /** malformed、unknown、重复字段、额外字段、缺失 origin 与非 canonical 空白都必须拒绝。 */
   @Test
   void rejectsMalformedUnknownAndNonCanonicalPayloads() {
-    String event = codec.encodeEvent(modelDelta("x"));
+    String event = codec.encodeEvent(ORIGIN, modelDelta("x"));
 
     assertThrows(IllegalArgumentException.class, () -> codec.decode("{not-json"));
     assertThrows(IllegalArgumentException.class, () -> codec.decode("[]"));
@@ -83,33 +98,82 @@ class RealtimeNotificationCodecTest {
         () -> codec.decode("{\"kind\":\"EVENT\",\"event\":\"not-an-object\"}"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> codec.decode("{\"kind\":\"RESYNC\",\"kind\":\"RESYNC\"}"));
+        () ->
+            codec.decode(
+                "{\"kind\":\"EVENT\",\"originNodeId\":\"" + ORIGIN + "\"," + "\"event\":{}}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode("{\"kind\":\"RESYNC\",\"threadId\":\"" + id(1L) + "\",\"reason\":\"x\"}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             codec.decode(
-                "{\"kind\":\"RESYNC\",\"threadId\":\""
+                "{\"kind\":\"RESYNC\",\"originNodeId\":\""
+                    + ORIGIN
+                    + "\","
+                    + "\"threadId\":\""
                     + id(1L)
                     + "\",\"reason\":\"x\",\"extra\":1}"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> codec.decode("{\"kind\":\"RESYNC\",\"threadId\":\"not-a-uuid\",\"reason\":\"x\"}"));
+        () ->
+            codec.decode(
+                "{\"kind\":\"RESYNC\",\"originNodeId\":\""
+                    + ORIGIN
+                    + "\","
+                    + "\"threadId\":\"not-a-uuid\",\"reason\":\"x\"}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             codec.decode(
-                "{\"kind\":\"RESYNC\",\"threadId\":"
+                "{\"kind\":\"RESYNC\",\"originNodeId\":\""
+                    + ORIGIN
+                    + "\","
+                    + "\"threadId\":"
                     + "\"ABCDEFAB-CDEF-ABCD-EFAB-CDEFABCDEFAB\",\"reason\":\"x\"}"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> codec.decode("{\"kind\":\"RESYNC\",\"threadId\":\"" + id(1L) + "\",\"reason\":1}"));
+        () ->
+            codec.decode(
+                "{\"kind\":\"RESYNC\",\"originNodeId\":\""
+                    + ORIGIN
+                    + "\","
+                    + "\"threadId\":\""
+                    + id(1L)
+                    + "\",\"reason\":1}"));
     assertThrows(IllegalArgumentException.class, () -> codec.decode(" " + event));
+  }
+
+  /** origin 是所有 envelope 的必需字段，缺失或非 canonical UUID 一律拒绝。 */
+  @Test
+  void rejectsMissingOrNonCanonicalOrigin() {
+    String event = eventCodec.encode(modelDelta("x"));
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> codec.decode("{\"kind\":\"EVENT\",\"event\":" + event + "}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(
+                "{\"kind\":\"EVENT\",\"originNodeId\":\"not-a-uuid\",\"event\":" + event + "}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            codec.decode(
+                "{\"kind\":\"RESYNC\",\"originNodeId\":\""
+                    + ORIGIN
+                    + "\","
+                    + "\"threadId\":\""
+                    + id(1L)
+                    + "\",\"reason\":\" \"}"));
   }
 
   /** RESYNC reason 必须有实际诊断值，避免生成无法解释的恢复指令。 */
   @Test
   void rejectsBlankResyncReason() {
-    assertThrows(IllegalArgumentException.class, () -> codec.encodeResync(id(1L), " "));
+    assertThrows(IllegalArgumentException.class, () -> codec.encodeResync(ORIGIN, id(1L), " "));
   }
 
   private static RealtimeEvent.ModelDelta modelDelta(String text) {
