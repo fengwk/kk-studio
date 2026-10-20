@@ -4,6 +4,28 @@ import { fileURLToPath } from 'node:url'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+/**
+ * Windows 原生退出诊断：只有 Windows 且显式设置 `KK_WINDOWS_NATIVE_DIAGNOSTIC=1` 时才包装模块；否则直接返回真实模块。
+ * 默认 Linux/macOS 矩阵与本地运行完全沿用未包装实现，不改变任何断言或生产行为。
+ */
+vi.mock('../src/native/state.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/native/state.js')>()
+  if (process.platform !== 'win32' || process.env.KK_WINDOWS_NATIVE_DIAGNOSTIC !== '1') {
+    return actual
+  }
+  const { traceStateModule } = await import('./support/windows-process-diagnostics.js')
+  return traceStateModule(actual)
+})
+
+vi.mock('../src/native/process-supervisor-windows.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/native/process-supervisor-windows.js')>()
+  if (process.platform !== 'win32' || process.env.KK_WINDOWS_NATIVE_DIAGNOSTIC !== '1') {
+    return actual
+  }
+  const { traceWindowsSupervisorModule } = await import('./support/windows-process-diagnostics.js')
+  return traceWindowsSupervisorModule(actual)
+})
+
 import { main } from '../src/main.js'
 import { DAEMON_VERSION } from '../src/config.js'
 import type { Envelope } from '../src/protocol.js'
@@ -11,6 +33,7 @@ import * as native from '../src/native/index.js'
 import * as control from '../src/transport/control.js'
 import type { ProcessSpec, ProcessSupervisor } from '../src/contracts.js'
 import { waitFor } from './helpers.js'
+import { windowsProcessDiagnosticHealth } from './support/windows-process-diagnostics.js'
 import { awaitGone, isAlive } from './native/process-test-util.js'
 import {
   TOKEN,
@@ -54,6 +77,10 @@ afterEach(async () => {
   }
   vi.unstubAllEnvs()
   vi.restoreAllMocks()
+  // 诊断模式下证据写入失败必须让 main 覆盖步骤红灯；默认运行不读取该健康度。
+  if (process.platform === 'win32' && process.env.KK_WINDOWS_NATIVE_DIAGNOSTIC === '1') {
+    expect(windowsProcessDiagnosticHealth().healthy).toBe(true)
+  }
 })
 
 type Listener = (...args: unknown[]) => void

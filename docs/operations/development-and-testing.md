@@ -138,6 +138,13 @@ Unix 矩阵在 Ubuntu 与 macOS runner 上使用系统 `/bin/bash`，macOS 明�
 五个目标上真实执行 `npm --prefix daemon run check`、`run build` 与 `run coverage`；macOS 追加系统 Bash 下的
 安装与归档契约测试，Windows 另以 PowerShell 5.1 与 7 运行安装、更新回归。Docker 发布与 Daemon Release
 都要求该门禁成功，release 还要在对应宿主上逐一烟测五个平台归档后才上传 GitHub Release。
+常规 Windows 覆盖率步骤会自动启用同步退出诊断，记录退出来源（`command-exit-report`、`helper-close-fallback`、
+`unknown`）、清理前的 scope/commandPid/exit/cleanup/helper 快照、被管理 helper 的 PID、退出、收敛与终止事实，
+以及采集窗口内与 node/bash/msys 相关的 Application Error 事件和 runner/node/npm/git 版本。无论覆盖率成功还是
+失败，都尝试把 `windows-process-diagnostics` artifact 上传到 Actions，保留 7 天，包含窗口起点、工具链白名单、
+JSONL trace、事件与采集摘要；覆盖率成功却没有 `exit-resolved` 证据时采集步骤显式失败。证据不包含 ProcessSpec
+参数、环境、cwd、launch 文件、token 或内存，也不保证存在原生栈或足以直接定位根因；runner 失联或强制结束时可能
+来不及上传。该诊断只改变 CI 测试证据，不改变 Daemon 运行时行为或发行版本。
 
 数据库维护脚本的集成测试使用独立的 PostgreSQL 17 容器。CI 显式安装 17 版客户端并将其
 bin 目录置于 PATH 首位，不依赖 runner 默认版本。本地运行 [scripts/ops/tests](../../scripts/ops/tests) 时，

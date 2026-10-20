@@ -66,6 +66,19 @@ function stepRun(step) {
     return step.slice(start + marker.length).replace(/\n+$/, '')
 }
 
+function stepEnv(step, key) {
+    const env = step.match(/^ {8}env:\n((?: {10}.+\n)+)/m)?.[1]
+    assert.ok(env, 'missing env block')
+    const value = env.match(new RegExp(`^ {10}${key}: (.+)$`, 'm'))?.[1]
+    assert.ok(value, `missing env value: ${key}`)
+    return value
+}
+
+const WINDOWS_DIAGNOSTIC_STEPS = new Set([
+    'Collect Windows process exit diagnostics',
+    'Upload Windows process diagnostic evidence',
+])
+
 function stepNamed(source, job, name) {
     const step = stepsOf(jobBlock(source, job)).find((candidate) => stepField(candidate, 'name') === name)
     assert.ok(step, `missing step: ${name}`)
@@ -121,7 +134,12 @@ test('daemon-ci runs the full Node daemon suite on the five release targets', ()
     assert.ok(coverage > runs.indexOf('npm --prefix daemon run build'))
     const trailing = steps.slice(coverage + 1)
     for (const step of trailing) {
-        assert.equal(stepField(step, 'if'), "runner.os == 'macOS'")
+        // 常规 Windows 采集/上传显式保留 always+Windows 语义；其余尾部步骤仍然只在 macOS 执行。
+        if (WINDOWS_DIAGNOSTIC_STEPS.has(stepField(step, 'name'))) {
+            assert.equal(stepField(step, 'if'), '${{ always() && runner.os == \'Windows\' }}')
+        } else {
+            assert.equal(stepField(step, 'if'), "runner.os == 'macOS'")
+        }
     }
 })
 
@@ -616,4 +634,86 @@ test('the Windows installer launches main.js directly and its fixture stays insi
     } finally {
         rmSync(directory, { recursive: true, force: true })
     }
+})
+
+test('regular Windows coverage automatically enables the exit-source probe with a fixed label', () => {
+    // 采集只改变 Windows 的测试环境变量，覆盖率命令与无条件门禁语义保持不变。
+    const coverage = stepNamed(CI, 'node_daemon', 'Test the daemon with coverage')
+    assert.equal(stepField(coverage, 'id'), 'coverage')
+    assert.equal(stepField(coverage, 'run'), 'npm --prefix daemon run coverage')
+    assert.equal(stepField(coverage, 'if'), undefined)
+    assert.equal(stepEnv(coverage, 'KK_WINDOWS_NATIVE_DIAGNOSTIC'), "${{ runner.os == 'Windows' && '1' || '0' }}")
+    assert.equal(stepEnv(coverage, 'KK_WINDOWS_NATIVE_DIAGNOSTIC_LABEL'), "${{ runner.os == 'Windows' && 'regular-coverage' || 'disabled' }}")
+    assert.match(
+        stepEnv(coverage, 'KK_WINDOWS_NATIVE_DIAGNOSTIC_OUTPUT'),
+        /runner\.os == 'Windows'[\s\S]*format\('\{0\}\/reports\/windows-process-diagnostics', github\.workspace\)[\s\S]*''/u,
+    )
+
+    const job = jobBlock(CI, 'node_daemon')
+    const steps = stepsOf(job)
+    const toolchain = steps.find((step) => stepField(step, 'name') === 'Record Windows diagnostic toolchain and window start')
+    assert.ok(toolchain, 'missing Windows toolchain step')
+    assert.equal(stepField(toolchain, 'if'), "runner.os == 'Windows'")
+    assert.ok(steps.indexOf(toolchain) < steps.findIndex((step) => stepField(step, 'run') === 'npm --prefix daemon ci'))
+    const run = stepRun(toolchain)
+    assert.match(run, /window-start\.txt/u)
+    assert.match(run, /sourceCommit/u)
+    assert.match(run, /runnerOS/u)
+    assert.match(run, /imageOS/u)
+    assert.match(run, /imageVersion/u)
+    assert.match(run, /node --version/u)
+    assert.match(run, /npm --version/u)
+    assert.match(run, /git --version/u)
+    // 只记录白名单工具链，不启动 Bash，也不 dump 环境。
+    assert.doesNotMatch(run, /bash.*--version/iu)
+    assert.doesNotMatch(run, /Get-ChildItem Env:|gci Env:|process\.env/iu)
+})
+
+test('Windows diagnostics always keep minimal evidence and fail closed without exit-source proof', () => {
+    const collect = stepNamed(CI, 'node_daemon', 'Collect Windows process exit diagnostics')
+    assert.equal(stepField(collect, 'if'), '${{ always() && runner.os == \'Windows\' }}')
+    assert.equal(stepField(collect, 'shell'), 'pwsh')
+    assert.equal(stepEnv(collect, 'COVERAGE_OUTCOME'), '${{ steps.coverage.outcome }}')
+    const run = stepRun(collect)
+    // 事件时间窗与过滤沿用已验证实现，只输出白名单字段。
+    assert.match(run, /Get-WinEvent -FilterHashtable @\{ LogName = 'Application'; ProviderName = 'Application Error'; StartTime = \$start \}/u)
+    assert.match(run, /\(\?i\)\(node\|bash\|msys\)/u)
+    for (const field of ['timestamp', 'AppName', 'ModuleName', 'ExceptionCode', 'FaultingOffset', 'ProcessId']) {
+        assert.match(run, new RegExp(`${field} =`, 'u'))
+    }
+    assert.match(run, /'no-events'/u)
+    assert.match(run, /'query-failed'/u)
+    assert.match(run, /Application Error query failed/u)
+    // 汇总 JSONL 并仅在覆盖率成功时要求 exit-resolved 证据。
+    assert.match(run, /ConvertFrom-Json/u)
+    assert.match(run, /exit-resolved/u)
+    assert.match(run, /collection-summary\.json/u)
+    assert.match(run, /coverageOutcome -eq 'success' -and \$exitResolved\.Count -eq 0/u)
+    assert.match(run, /coverage did not run in this job/u)
+    assert.match(run, /Unparseable diagnostic JSONL/u)
+
+    const upload = stepNamed(CI, 'node_daemon', 'Upload Windows process diagnostic evidence')
+    assert.equal(stepField(upload, 'if'), '${{ always() && runner.os == \'Windows\' }}')
+    assert.equal(stepField(upload, 'uses'), 'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4')
+    assert.equal(stepField(upload, 'name', 10), 'windows-process-diagnostics')
+    assert.equal(stepField(upload, 'path', 10), 'reports/windows-process-diagnostics/')
+    assert.equal(stepField(upload, 'retention-days', 10), '7')
+    assert.equal(stepField(upload, 'if-no-files-found', 10), 'error')
+
+    // 上传必须位于采集之后，且两者都不能吞掉缺证据或查询失败。
+    const steps = stepsOf(jobBlock(CI, 'node_daemon'))
+    assert.ok(steps.indexOf(upload) > steps.indexOf(collect))
+    for (const step of [collect, upload]) {
+        assert.doesNotMatch(step, /continue-on-error:/u)
+    }
+})
+
+test('regular daemon CI has no experimental diagnostic jobs, inputs, retries or production entry points', () => {
+    // 日常门禁只保留五平台矩阵与原安装器 job；实验矩阵、手工输入和 daemon/diagnostics 不得回流。
+    const jobs = [...topLevelSection(CI, 'jobs').matchAll(/^ {2}([A-Za-z0-9_]+):\n/gm)].map((match) => match[1])
+    assert.deepEqual(jobs, ['node_daemon', 'windows_daemon_installer'])
+    assert.doesNotMatch(CI, /windows_diagnostic_only|windows_experiment|matrix\.sample/u)
+    assert.doesNotMatch(CI, /daemon\/diagnostics|windows-native-diagnostic|windows-original-|windows-exact-/u)
+    assert.doesNotMatch(CI, /continue-on-error:|repository_dispatch/u)
+    assert.doesNotMatch(jobBlock(CI, 'node_daemon'), /retry|--retry|max-parallel/u)
 })
