@@ -973,6 +973,55 @@ describe('useHarnessThreadRealtime', () => {
     expect(result.current?.modelStream?.text).toBe('ab')
   })
 
+  it('re-refreshes the same checkpoint watermark after settle without a rerender', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+    const { result, sockets } = renderRealtime(client, {
+      invocation: modelInvocationAt(2, 'ab'),
+    })
+    sockets.openLatest()
+
+    emitRealtime(sockets, realtime(5, 'five'))
+    await waitFor(() => expect(requestStreamCatchup).toHaveBeenCalledTimes(1))
+    emitRealtime(sockets, checkpoint(4))
+    await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(1))
+
+    // snapshot 回读返回同一 reference/旧数据且没有 rerender：上一 promise settled
+    // 后，同一 sequence 的周期 checkpoint 事件仍必须再次触发回读。
+    await act(async () => {
+      await sleep(0)
+    })
+    emitRealtime(sockets, checkpoint(4))
+    await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(2))
+    expect(result.current?.modelStream?.text).toBe('ab')
+  })
+
+  it('ignores checkpoints at or behind a contiguous overlay and refreshes only when ahead', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+    const { result, sockets } = renderRealtime(client, { invocation: modelInvocation() })
+    sockets.openLatest()
+
+    // 纯 delta 连续流到 seq3，没有缺口。
+    emitRealtime(sockets, realtime(1, 'a'))
+    emitRealtime(sockets, realtime(2, 'b'))
+    emitRealtime(sockets, realtime(3, 'c'))
+    await waitFor(() => expect(result.current?.modelStream?.text).toBe('abc'))
+
+    // 周期 checkpoint 等于/落后已显示水位：无需创建 recovery，也无需回读。
+    emitRealtime(sockets, checkpoint(3))
+    emitRealtime(sockets, checkpoint(2))
+    await act(async () => {
+      await sleep(20)
+    })
+    expect(invalidate).not.toHaveBeenCalled()
+    expect(requestStreamCatchup).not.toHaveBeenCalled()
+
+    // durable checkpoint 超过已显示 overlay：需要一次回读。
+    emitRealtime(sockets, checkpoint(4))
+    await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(1))
+  })
+
   it('coalesces checkpoints while one refresh is in flight and does not auto refresh after settle', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const pendingRefresh = deferredVoid()
