@@ -41,6 +41,7 @@ import fun.fengwk.kkstudio.share.ai.runtime.HarnessNameUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCommandBatchDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadCompactDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadStopDTO;
+import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadStreamCatchupDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessThreadYoloUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessToolApprovalDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessUserMessageContentDTO;
@@ -154,6 +155,26 @@ public final class HarnessRuntimeRequestMapper {
     return new SetThreadYoloCommand(
         parseUuid(threadId, "threadId"), requireBoolean(dto.getYoloEnabled(), "yoloEnabled"));
   }
+
+  /**
+   * 把流式追帧请求映射为已校验目标：Thread 与 Invocation 都使用 canonical UUID，attempt 必须是正 int。
+   *
+   * <p>这里只校验请求形状；invocation 是否属于目标 Thread、attempt 是否仍适用由 Runtime 快照与 active owner 的 attempt fence 按
+   * durable 事实判定。
+   */
+  public static StreamCatchupRequest toStreamCatchupRequest(
+      String threadId, HarnessThreadStreamCatchupDTO dto) {
+    requireNonNull(dto, "streamCatchupDTO");
+    Integer attempt = requireNonNull(dto.getAttempt(), "attempt");
+    if (attempt <= 0) {
+      throw new IllegalArgumentException("attempt must be positive: " + attempt);
+    }
+    return new StreamCatchupRequest(
+        parseUuid(threadId, "threadId"), parseUuid(dto.getInvocationId(), "invocationId"), attempt);
+  }
+
+  /** 已通过 HTTP 形状校验的流式追帧目标。 */
+  public record StreamCatchupRequest(UUID threadId, UUID invocationId, int attempt) {}
 
   /** 把 PUT name 请求映射为 Session 重命名命令；只校验 name 存在且非 blank，规范化与长度上限由 Core {@code Names} 权威处理。 */
   public static RenameSessionCommand toRenameSessionCommand(
