@@ -195,9 +195,6 @@ export function useHarnessThreadRealtime(
           // 该 checkpoint 仍不足（或 snapshot 暂时落后）：保持 gap，等下一周期
           // checkpoint/终态/attempt 切换；不重复拉旧 snapshot，也不自动重试。
           recovery.pendingCheckpointSequence = null
-          // 本次回读已证明 snapshot 不足；允许后续同水位 checkpoint 再次触发一次
-          // 单飞回读（仍只由事件驱动，不轮询）。
-          recovery.refreshedCheckpointSequence = null
           if (recovery.overflowed) {
             // 已丢弃的 suffix 只能由覆盖最高已观察 sequence 的 checkpoint 恢复。
             recovery.firstGapSequence = Math.max(
@@ -361,6 +358,11 @@ export function useHarnessThreadRealtime(
           clearModelRecovery()
           recovery = null
         }
+        if (recovery == null && checkpoint.sequence <= visibleSequence) {
+          // 连续 delta overlay 已完整覆盖该 durable 水位（例如周期 checkpoint 仍
+          // 停在已显示的 sequence）：无需创建恢复 episode，也无需无意义回读。
+          return
+        }
         const requiredSequence =
           recovery != null
             ? Math.max(0, recovery.firstGapSequence - 1)
@@ -384,31 +386,15 @@ export function useHarnessThreadRealtime(
           checkpoint.sequence,
         )
         // 真正的单飞锁是 refreshInFlight；pendingCheckpointSequence 只记录等待
-        // snapshot 覆盖的水位。promise settled 后立即释放锁，不依赖 props 变化。
-        const lastRefreshed = recovery.refreshedCheckpointSequence
-        if (
-          !recovery.refreshInFlight
-          && (lastRefreshed == null || checkpoint.sequence > lastRefreshed)
-        ) {
+        // snapshot 覆盖的水位。promise settled 后立即释放锁，不依赖 props 变化；
+        // 同 sequence 的下一 checkpoint 事件也可再次触发（非自动重试）。
+        if (!recovery.refreshInFlight) {
           recovery.refreshInFlight = true
-          recovery.refreshedCheckpointSequence = checkpoint.sequence
-          // 仅在 checkpoint 覆盖缺口时回读一次；快照仍落后就等下一周期，
+          // 仅在 checkpoint 覆盖缺口/推进水位时回读一次；快照仍落后就等下一周期，
           // 不循环拉取旧 snapshot。旧 recovery/thread/attempt 的 settle 不得
           // 清掉新 recovery 的在途状态。
           void refetchSnapshot()
-            .then(
-              () => undefined,
-              () => {
-                if (
-                  modelRecoveryRef.current === recovery
-                  && recovery.refreshedCheckpointSequence === checkpoint.sequence
-                ) {
-                  // 失败的水位不是成功：同一 sequence 的下一 checkpoint 事件
-                  // 仍可再次触发单飞回读（仍无自动重试）。
-                  recovery.refreshedCheckpointSequence = null
-                }
-              },
-            )
+            .catch(() => undefined)
             .finally(() => {
               if (modelRecoveryRef.current === recovery) {
                 recovery.refreshInFlight = false
@@ -729,8 +715,6 @@ interface ModelRecovery {
   pendingCheckpointSequence: number | null
   /** 真正在途的 snapshot 回读；与 pending 水位分离，settled 后即释放。 */
   refreshInFlight: boolean
-  /** 已发起过回读的最高 checkpoint 水位，避免同一水位重复单飞。 */
-  refreshedCheckpointSequence: number | null
 }
 
 function createModelRecovery(
@@ -751,7 +735,6 @@ function createModelRecovery(
     requested: false,
     pendingCheckpointSequence: null,
     refreshInFlight: false,
-    refreshedCheckpointSequence: null,
   }
 }
 
