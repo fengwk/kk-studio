@@ -68,6 +68,8 @@ health、资源下载和 WebSocket 使用各自传输形式。公开路由如下
 | Settings | `/api/settings`、`/api/settings/schema` | 聚合 GET/CAS PUT、编辑 schema |
 | Configuration sync | `/api/settings/sync`、`/export`、`/import/check`、`/import` | GET 清单、POST 选择导出、导入检查与确认执行；响应禁止缓存 |
 | Environment | `/api/environments`、`/{id}/update` | Card、注册令牌轮换（明文只在创建与轮换响应中返回一次）、安装设置保存、受管二进制在线更新（POST 发起、GET 只读投影）、运维 events |
+| Environment IDE | `/environment-ide/{environmentId}/` | 同源 IDE 固定入口、bootstrap 票据与 HTTP/WebSocket 数据面 |
+| Environment Stream | `/api/harness/environment-stream/v1/{ticket}` | Daemon IDE 反向数据流端点 |
 
 `POST /api/chats` 省略 `yoloEnabled` 时为 `false`；创建请求的 `environmentName` 可省略或为 null（都表示无默认环境），
 携带时必须为已存在的 Environment 名；响应中的 `environmentName` 是始终存在的 required-nullable 字段（未选择时为 null）。
@@ -118,6 +120,23 @@ planning、provider、unsupported（冻结压缩子执行无法可靠定位，�
 Canvas commands 返回 patch，Function start 返回 202。
 UNKNOWN resolve 要求 resolution 与非空 verification；Issue UNKNOWN 同样要求人工核查说明。
 Evidence 接收 READY uploadId，在事务内转移引用并返回规范资源标识，展示名取权威上传行。
+
+## 同源 IDE 网关与数据面
+
+[`IdeGatewayFilter`](../../web/src/main/java/fun/fengwk/kkstudio/web/environment/ide/IdeGatewayFilter.java)
+在 Studio 同源下固定 `/environment-ide/{environmentId}/` 路由：
+按路径严格解析 canonical UUID 的 `environmentId`，剥除 route base（`/environment-ide/{environmentId}/`）后转发给数据面。
+缺少尾随斜杠的 `/environment-ide/{id}` 返回永久重定向至规范路径；非 IDE 路径原样放行。
+
+- **Bootstrap 与会话隔离**：一次性票据请求由 `__ide/bootstrap?token=...` 消费，并在响应中通过 `Set-Cookie` 下发
+  `Path` 限定在 `/environment-ide/{environmentId}/` 的 HttpOnly cookie；重定向严格保持在当前环境 route base 之下。
+  Studio 与受管环境属于同一可信浏览器边界（非沙箱隔离），不需要独立 IDE 域名或主机模板。
+- **HTTP 与 WebSocket 转发**：普通 HTTP 请求由 [`IdeGatewayDataPlane`](../../web/src/main/java/fun/fengwk/kkstudio/web/environment/ide/IdeGatewayDataPlane.java)
+  转发；WebSocket upgrade 请求由 [`IdeBrowserWebSocketGateway`](../../web/src/main/java/fun/fengwk/kkstudio/web/environment/ide/IdeBrowserWebSocketGateway.java)
+  处理。跨节点场景通过内部端点（`/internal/environment-ide/{env}/http` 与 `/ws`）转发至持有目标环境连接的 owner 节点。
+- **反向数据流**：下发给 Daemon 的 stream URL 固定为根相对路径 `/api/harness/environment-stream/v1/{ticket}?environment={id}`，
+  由 Daemon 基于已有控制连接的 `gatewayUri` 解析，不引入备用公共 URL 权威。
+- **开发代理**：本地开发时 Vite 代理 `/environment-ide` 配置 `changeOrigin: false, ws: true`，保留浏览器原始 Host 与 Origin 以对齐同源校验。
 
 ## JSON、错误与信任边界
 
@@ -203,7 +222,9 @@ SPA fallback 仅适用于 GET、非 API/actuator 且末段无扩展名的路径�
 
 [`web/src/test`](../../web/src/test/java/fun/fengwk/kkstudio/web) 覆盖组合与依赖方向、Flyway、
 HTTP mapper/advice、owner 事务、Snapshot、ack-before-event、bounded sender、
-通知重连、Daemon 帧与静态 SPA。Spring 集成基座使用真实 PostgreSQL；
+通知重连、Daemon 帧与静态 SPA。Spring 集成基座使用真实 PostgreSQL。
+[`IdeRealBrowserAcceptanceTest`](../../web/src/test/java/fun/fengwk/kkstudio/web/environment/ide/IdeRealBrowserAcceptanceTest.java)
+覆盖真实同源 IDE 网关、真实 Node Daemon、冻结 code-server 与 Chromium 的整链端到端交互（需独立 PostgreSQL 与受控 code-server 目录）；
 执行命令和 E2E 分类见 [开发与测试](../operations/development-and-testing.md)。
 
 上级：[系统设计](../system-design.md)。相关文档：[Platform](platform.md)、[Share](share.md)、

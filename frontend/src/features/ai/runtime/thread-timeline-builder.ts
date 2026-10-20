@@ -1,3 +1,7 @@
+import {
+  extractResultEditReview,
+  parseEditReview,
+} from '@/features/ai/runtime/mutation-review'
 import type {
   HarnessSessionEntryDTO,
   HarnessThreadCommandDTO,
@@ -402,6 +406,11 @@ function projectInvocationOverlays(
     const failureText = invocation.errorJson != null
       ? parseToolErrorText(invocation.errorJson)
       : null
+    const effectiveEditReview =
+      approval?.editReview
+      ?? terminalResult?.editReview
+      ?? extractResultEditReview(invocation.resultJson)
+      ?? undefined
     const projected: ToolDialogueMessage = {
       ...message,
       callIdentity: toolCallIdentity(invocation.assistantEntryId, invocation.callIndex),
@@ -425,6 +434,7 @@ function projectInvocationOverlays(
           : undefined,
       partialErrorText: terminalResult == null ? overlay?.errorText : undefined,
       approval: approval?.required ? approval : undefined,
+      editReview: effectiveEditReview,
       errorMessage: failed ? failureText ?? undefined : message.errorMessage,
     }
     messages[index] = projected
@@ -443,6 +453,7 @@ function projectInvocationOverlays(
         invocationId: invocation.id,
         threadId: projected.threadId,
         status: failed ? 'error' : terminalResult.status,
+        editReview: terminalResult.editReview,
         errorMessage: failed
           ? terminalResult.errorMessage ?? failureText ?? undefined
           : undefined,
@@ -460,9 +471,13 @@ function projectInvocationOverlays(
 function terminalInvocationResult(
   invocation: ToolInvocationDTO,
   call: ToolDialogueMessage,
-): Pick<ToolDialogueMessage, 'arguments' | 'contents' | 'errorMessage' | 'status'> | null {
+): Pick<ToolDialogueMessage, 'arguments' | 'contents' | 'errorMessage' | 'status' | 'editReview'> | null {
   if (invocation.resultJson != null) {
-    return projectToolResultContent(parsePayload(invocation.resultJson), call.arguments)
+    const projected = projectToolResultContent(parsePayload(invocation.resultJson), call.arguments)
+    return {
+      ...projected,
+      editReview: extractResultEditReview(invocation.resultJson) ?? projected.editReview,
+    }
   }
   if (invocation.errorJson != null || isFailedInvocationStatus(invocation.status)) {
     return {
@@ -515,6 +530,7 @@ export function parseApproval(approvalJson: string | null): ToolApprovalState | 
     decision: decision === 'ALLOWED' || decision === 'DENIED' ? decision : null,
     decisionId: typeof value.decisionId === 'string' ? value.decisionId : null,
     reason: typeof value.reason === 'string' && value.reason.trim() ? value.reason : null,
+    editReview: parseEditReview(value.editReview),
   }
 }
 

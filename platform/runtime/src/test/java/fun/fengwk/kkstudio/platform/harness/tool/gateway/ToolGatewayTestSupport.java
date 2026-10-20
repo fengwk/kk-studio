@@ -303,6 +303,27 @@ final class ToolGatewayTestSupport {
   }
 
   static ToolExecutionGateway gateway(
+      HarnessCatalog catalog,
+      ContributorBranchViewLoader branchLoader,
+      FakeTransport transport,
+      FakeResourceStager store,
+      ExecutorService executor,
+      ConcurrencyAdmission admission) {
+    return new ToolExecutionGateway(
+        TestRuntimeToolCatalogSource.of(catalog),
+        branchLoader,
+        transport,
+        new PermissionEvaluator(new BashSurfaceAnalyzer()),
+        new FixedToolSettingsProvider(settings(PermissionAction.ALLOW)),
+        store,
+        RESOURCE_MAX_BYTES,
+        executor,
+        OVERLOAD_RETRY_DELAY,
+        TEST_CLOCK,
+        admission);
+  }
+
+  static ToolExecutionGateway gateway(
       RuntimeToolCatalogSource toolCatalogSource,
       FakeTransport transport,
       FakeResourceStager store,

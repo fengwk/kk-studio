@@ -50,29 +50,22 @@ vi.mock('@/shared/api/environment-service', () => ({
 }))
 
 describe('validateIdeEntryUrl', () => {
-  it('accepts valid distinct-origin HTTP/HTTPS URLs without userinfo', () => {
-    expect(validateIdeEntryUrl('https://node-1.ide.example.com/')).toBe('https://node-1.ide.example.com/')
-    expect(validateIdeEntryUrl('http://192.168.1.100:8080/path')).toBe('http://192.168.1.100:8080/path')
+  const env = 'a1000000-0000-4000-8000-000000000001'
+  const path = `/environment-ide/${env}/__ide/bootstrap?token=fixture`
+
+  it('接受同源入口并规范为相对路径', () => {
+    expect(validateIdeEntryUrl(path, env)).toBe(path)
+    expect(validateIdeEntryUrl(`${window.location.origin}${path}`, env)).toBe(path)
+    expect(validateIdeEntryUrl(`/studio${path}`, env)).toBe(`/studio${path}`)
   })
 
-  it('rejects empty or non-string entryUrl', () => {
-    expect(() => validateIdeEntryUrl(null)).toThrow('Initial IDE view did not return entry URL')
-    expect(() => validateIdeEntryUrl('')).toThrow('Initial IDE view did not return entry URL')
-  })
-
-  it('rejects relative or non-HTTP protocols', () => {
-    expect(() => validateIdeEntryUrl('/relative/path')).toThrow('must be an absolute URL')
-    expect(() => validateIdeEntryUrl('javascript:alert(1)')).toThrow('protocol must be http or https')
-    expect(() => validateIdeEntryUrl('data:text/html,test')).toThrow('protocol must be http or https')
-  })
-
-  it('rejects URLs containing userinfo', () => {
-    expect(() => validateIdeEntryUrl('https://user:pass@ide.example.com/')).toThrow('userinfo must be empty')
-  })
-
-  it('rejects URLs sharing origin with Studio app window', () => {
-    const sameOrigin = `${window.location.origin}/ide`
-    expect(() => validateIdeEntryUrl(sameOrigin)).toThrow('IDE origin must not equal Studio origin')
+  it.each([
+    null, '', '/other', `https://other.test${path}`, `//other.test${path}`,
+    'javascript:alert(1)', 'data:text/html,test', `http://user:pass@localhost${path}`,
+    `${path}#fragment`, path.replace(env, 'a1000000-0000-4000-8000-000000000002'),
+    path.replace('token=fixture', ''), `${path}&token=duplicate`,
+  ])('拒绝不属于当前环境的入口 %s', (value) => {
+    expect(() => validateIdeEntryUrl(value, env)).toThrow()
   })
 })
 
@@ -149,7 +142,7 @@ describe('IdeOverlayPanel', () => {
       viewId: 'v-toolbar',
       environmentId: readyEnv.id,
       directory: '/home/user/project',
-      entryUrl: 'https://ide.example.com/?workspace=toolbar',
+      entryUrl: `/environment-ide/${readyEnv.id}/__ide/bootstrap?token=toolbar`,
     })
     render(
       <IdeOverlayPanel
@@ -192,13 +185,13 @@ describe('IdeOverlayPanel', () => {
         viewId: 'v-env-label',
         environmentId: readyEnv.id,
         directory: '/home/user/project',
-        entryUrl: 'https://ide.example.com/?workspace=env-label',
+        entryUrl: `/environment-ide/${readyEnv.id}/__ide/bootstrap?token=env-label`,
       })
       .mockResolvedValueOnce({
         viewId: 'v-env-label',
         environmentId: secondReadyEnv.id,
         directory: '/srv/app',
-        entryUrl: 'https://ide.example.com/?workspace=env-second',
+        entryUrl: `/environment-ide/${secondReadyEnv.id}/__ide/bootstrap?token=env-second`,
       })
     vi.mocked(environmentService.closeIdeView).mockResolvedValue(undefined)
 
@@ -241,7 +234,7 @@ describe('IdeOverlayPanel', () => {
 
     rerender(<IdeOverlayPanel {...props} environment={secondReadyEnv} action={{ id: 3, mode: 'files' }} />)
     const reopenedIframe = await screen.findByTestId('ide-iframe')
-    expect(reopenedIframe).toHaveAttribute('src', 'https://ide.example.com/?workspace=env-second')
+    expect(reopenedIframe).toHaveAttribute('src', `/environment-ide/${secondReadyEnv.id}/__ide/bootstrap?token=env-second`)
     expect(screen.getByTestId('ide-open-directory-btn'))
       .toHaveAttribute('title', 'remote-ready · /srv/app')
     expect(environmentService.createIdeView).toHaveBeenNthCalledWith(2, secondReadyEnv.id, {
@@ -256,7 +249,7 @@ describe('IdeOverlayPanel', () => {
       viewId: 'v-manual-env',
       environmentId: readyEnv.id,
       directory: '/home/user',
-      entryUrl: 'https://ide.example.com/?workspace=manual-env',
+      entryUrl: `/environment-ide/${readyEnv.id}/__ide/bootstrap?token=manual-env`,
     })
 
     render(
@@ -278,7 +271,7 @@ describe('IdeOverlayPanel', () => {
     await user.click(within(selectState).getByRole('button', { name: '确认' }))
 
     const iframe = await screen.findByTestId('ide-iframe')
-    expect(iframe).toHaveAttribute('src', 'https://ide.example.com/?workspace=manual-env')
+    expect(iframe).toHaveAttribute('src', `/environment-ide/${readyEnv.id}/__ide/bootstrap?token=manual-env`)
     expect(environmentService.createIdeView).toHaveBeenCalledWith(readyEnv.id, { viewId: 'v-manual-env' })
     expect(screen.queryByTestId('ide-select-environment-state')).not.toBeInTheDocument()
   })
@@ -313,12 +306,12 @@ describe('IdeOverlayPanel', () => {
       viewId: 'v-strict',
       environmentId: readyEnv.id,
       directory: '/home/user',
-      entryUrl: 'https://ide.example.com/?workspace=strict',
+      entryUrl: `/environment-ide/${readyEnv.id}/__ide/bootstrap?token=strict`,
     })
 
     // Transitions cleanly to ready
     const iframe = await screen.findByTestId('ide-iframe')
-    expect(iframe).toHaveAttribute('src', 'https://ide.example.com/?workspace=strict')
+    expect(iframe).toHaveAttribute('src', `/environment-ide/${readyEnv.id}/__ide/bootstrap?token=strict`)
   })
 
   it('cleans up late-resolving view on actual unmount without leaks', async () => {
@@ -350,7 +343,7 @@ describe('IdeOverlayPanel', () => {
       viewId: 'v-unmount',
       environmentId: readyEnv.id,
       directory: '/home/user',
-      entryUrl: 'https://ide.example.com/?workspace=unmount',
+      entryUrl: `/environment-ide/${readyEnv.id}/__ide/bootstrap?token=unmount`,
     })
 
     await waitFor(() => {
@@ -367,7 +360,7 @@ describe('IdeOverlayPanel', () => {
         viewId: 'v-unmount-err',
         environmentId: readyEnv.id,
         directory: '/home/user',
-        entryUrl: 'https://ide.example.com/?workspace=unmount-err',
+        entryUrl: `/environment-ide/${readyEnv.id}/__ide/bootstrap?token=unmount-err`,
       })
       vi.mocked(environmentService.closeIdeView).mockRejectedValueOnce(
         new Error('DELETE https://node.internal:8443/ide?token=secret-token-999 failed in /home/user/secret'),
@@ -433,7 +426,7 @@ describe('IdeOverlayPanel', () => {
       viewId: 'v-shell',
       environmentId: readyEnv.id,
       directory: '/home/user',
-      entryUrl: 'https://ide.example.com/?workspace=shell',
+      entryUrl: `/environment-ide/${readyEnv.id}/__ide/bootstrap?token=shell`,
     })
 
     const shellAction: IdeCommandAction = { id: 1, mode: 'shell' }
@@ -502,7 +495,7 @@ describe('IdeOverlayPanel', () => {
       viewId: 'v-cancel-close',
       environmentId: readyEnv.id,
       directory: '/home/user',
-      entryUrl: 'https://ide.example.com/?workspace=cancel',
+      entryUrl: `/environment-ide/${readyEnv.id}/__ide/bootstrap?token=cancel`,
     })
 
     const onClose = vi.fn()
@@ -540,7 +533,7 @@ describe('IdeOverlayPanel', () => {
       viewId: 'v-close-fail',
       environmentId: readyEnv.id,
       directory: '/home/user',
-      entryUrl: 'https://ide.example.com/?workspace=fail',
+      entryUrl: `/environment-ide/${readyEnv.id}/__ide/bootstrap?token=fail`,
     })
     vi.mocked(environmentService.closeIdeView).mockRejectedValueOnce(new Error('Cannot close view with unsaved changes'))
 
@@ -580,7 +573,7 @@ describe('IdeOverlayPanel', () => {
       viewId: 'v-race',
       environmentId: readyEnv.id,
       directory: '/home/user',
-      entryUrl: 'https://ide.example.com/?workspace=race',
+      entryUrl: `/environment-ide/${readyEnv.id}/__ide/bootstrap?token=race`,
     })
     vi.mocked(environmentService.changeIdeViewDirectory).mockReturnValueOnce(changeDirPromise as never)
     vi.mocked(environmentService.closeIdeView).mockResolvedValue(undefined)
@@ -632,7 +625,7 @@ describe('IdeOverlayPanel', () => {
         viewId: 'v-race',
         environmentId: readyEnv.id,
         directory: '/home/user/new-dir',
-        entryUrl: 'https://ide.example.com/?bootstrap=late-resurrect',
+        entryUrl: `/environment-ide/${readyEnv.id}/__ide/bootstrap?token=late-resurrect`,
       })
       await changeDirPromise
     })
@@ -648,7 +641,7 @@ describe('IdeOverlayPanel', () => {
       viewId: 'v-term-err',
       environmentId: readyEnv.id,
       directory: '/home/user',
-      entryUrl: 'https://ide.example.com/?workspace=term',
+      entryUrl: `/environment-ide/${readyEnv.id}/__ide/bootstrap?token=term`,
     })
     vi.mocked(environmentService.openIdeViewTerminal).mockRejectedValueOnce(new Error('PTY spawn failed'))
 
@@ -678,7 +671,7 @@ describe('IdeOverlayPanel', () => {
       viewId: 'v-dir',
       environmentId: readyEnv.id,
       directory: '/home/user',
-      entryUrl: 'https://ide.example.com/?workspace=dir',
+      entryUrl: `/environment-ide/${readyEnv.id}/__ide/bootstrap?token=dir`,
     })
 
     const { rerender } = render(
@@ -726,7 +719,7 @@ describe('IdeOverlayPanel', () => {
       viewId: 'v-dir',
       environmentId: readyEnv.id,
       directory: '/home/user/project',
-      entryUrl: 'https://ide.example.com/?bootstrap=new-token-do-not-reload',
+      entryUrl: `/environment-ide/${readyEnv.id}/__ide/bootstrap?token=new-token-do-not-reload`,
     })
     await user.click(screen.getByTestId('ide-directory-confirm'))
 
@@ -740,7 +733,7 @@ describe('IdeOverlayPanel', () => {
     expect(screen.getByTestId('ide-open-directory-btn'))
       .toHaveAttribute('title', 'local-node · /home/user/project')
     expect(screen.getByTestId('ide-iframe')).toBe(iframe)
-    expect(screen.getByTestId('ide-iframe')).toHaveAttribute('src', 'https://ide.example.com/?workspace=dir')
+    expect(screen.getByTestId('ide-iframe')).toHaveAttribute('src', `/environment-ide/${readyEnv.id}/__ide/bootstrap?token=dir`)
   })
 
   it('renders offline state when environment is not ready', async () => {
@@ -810,7 +803,7 @@ describe('IdeOverlayPanel', () => {
       viewId: 'v-unload',
       environmentId: readyEnv.id,
       directory: '/home/user/project',
-      entryUrl: 'https://ide.example.com/?workspace=unload',
+      entryUrl: `/environment-ide/${readyEnv.id}/__ide/bootstrap?token=unload`,
     })
     const { unmount } = render(
       <IdeOverlayPanel
@@ -835,7 +828,7 @@ describe('IdeOverlayPanel', () => {
       viewId: 'v-term-err',
       environmentId: readyEnv.id,
       directory: '/home/user/project',
-      entryUrl: 'https://ide.example.com/?workspace=term',
+      entryUrl: `/environment-ide/${readyEnv.id}/__ide/bootstrap?token=term`,
     })
     vi.mocked(environmentService.openIdeViewTerminal).mockRejectedValueOnce(new Error('Terminal launch failed'))
     render(
@@ -891,7 +884,7 @@ describe('IdeOverlayPanel', () => {
       viewId: 'v-close-dialog',
       environmentId: readyEnv.id,
       directory: '/home/user/project',
-      entryUrl: 'https://ide.example.com/?workspace=close',
+      entryUrl: `/environment-ide/${readyEnv.id}/__ide/bootstrap?token=close`,
     })
     const user = userEvent.setup()
     const onClose = vi.fn()

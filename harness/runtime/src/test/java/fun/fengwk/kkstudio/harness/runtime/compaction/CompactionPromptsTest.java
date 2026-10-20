@@ -191,6 +191,63 @@ class CompactionPromptsTest {
   }
 
   @Test
+  void toolResultIncludesDerivedDiffFromEditReview() {
+    String sha256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+    String detailsJson =
+        "{\"editReview\":{\"path\":\"src/Test.java\",\"diff\":\"@@ -1 +1 @@\\n-foo\\n+bar\",\"sha256\":\""
+            + sha256
+            + "\"}}";
+    AgentMessage tool =
+        new AgentMessage(
+            AgentMessageRole.TOOL,
+            List.of(
+                new ToolResultMessageContent(
+                    "call-1",
+                    "edit",
+                    "edit",
+                    List.of(new TextMessageContent("Edited successfully.")),
+                    false,
+                    detailsJson)));
+
+    String serialized = CompactionPrompts.serializeConversation(List.of(tool));
+
+    assertTrue(serialized.startsWith("[Tool result]: Edited successfully."));
+    assertTrue(serialized.contains("File: src/Test.java"));
+    assertTrue(serialized.contains("Diff:\n@@ -1 +1 @@\n-foo\n+bar"));
+    assertFalse(serialized.contains(sha256));
+  }
+
+  @Test
+  void toolResultWithLargeDiffIsStillTruncatedToTwoThousandChars() {
+    String sha256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+    String largeDiff = "+\n".repeat(2_500);
+    String detailsJson =
+        "{\"editReview\":{\"path\":\"src/Large.java\",\"diff\":\""
+            + largeDiff.replace("\n", "\\n")
+            + "\",\"sha256\":\""
+            + sha256
+            + "\"}}";
+    AgentMessage tool =
+        new AgentMessage(
+            AgentMessageRole.TOOL,
+            List.of(
+                new ToolResultMessageContent(
+                    "call-1",
+                    "edit",
+                    "edit",
+                    List.of(new TextMessageContent("Edited successfully.")),
+                    false,
+                    detailsJson)));
+
+    String serialized = CompactionPrompts.serializeConversation(List.of(tool));
+
+    assertTrue(serialized.startsWith("[Tool result]: "));
+    assertTrue(serialized.contains("more characters truncated]"));
+    // 摘要截断前缀字符长度不超过 2000
+    assertTrue(serialized.length() < 2_100);
+  }
+
+  @Test
   void emptyAndBlankContentProduceNoSections() {
     assertEquals("", CompactionPrompts.serializeConversation(List.of(AgentMessage.user(""))));
     assertEquals("", CompactionPrompts.serializeConversation(List.of()));

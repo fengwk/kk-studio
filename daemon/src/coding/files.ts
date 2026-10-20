@@ -1,4 +1,6 @@
+import { createHash } from 'node:crypto'
 import { readdir, stat } from 'node:fs/promises'
+import { diffArrays } from 'diff'
 import type {
   CapabilityCall,
   CapabilityContext,
@@ -6,6 +8,7 @@ import type {
   CapabilityResult,
 } from '../contracts.js'
 import { textResult } from '../contracts.js'
+import { MAX_DETAILS_JSON_UTF8_BYTES } from '../protocol.js'
 import {
   CancelledError,
   ToolInputRejectedError,
@@ -80,6 +83,7 @@ const readExecutor: CapabilityExecutor = async (call, context) => {
     const offset = optionalPositiveInt(args, 'offset', 1, MAX_OFFSET)
     const limit = optionalPositiveInt(args, 'limit', DEFAULT_READ_LIMIT, MAX_READ_LIMIT)
     const columnOffset = optionalPositiveIntOrNull(args, 'column_offset')
+    requireActive(context)
     const path = await resolveExistingPath(rawPath)
     const display = displayPath(path, rawPath)
     // 读取受控临时产物期间持有 in-use lease，防止定时清扫删除在途读取的 workspace。
@@ -105,8 +109,11 @@ async function readExisting(
   columnOffset: number | null,
 ): Promise<CapabilityResult> {
   const info = await statOrNull(path)
+  requireActive(context)
   if (info !== null && info.isDirectory()) {
-    return directoryResponse(call.invocationId, path, display, offset, limit)
+    const result = await directoryResponse(call.invocationId, path, display, offset, limit)
+    requireActive(context)
+    return result
   }
   if (info === null || !info.isFile()) {
     // 字符设备、FIFO、socket、块设备等非普通节点必须在任何 I/O 之前拒绝。
@@ -116,6 +123,7 @@ async function readExisting(
   const imageMime = detectImageMediaType(probeBytes)
   if (imageMime !== null) {
     const bytes = await readAllBytes(path)
+    requireActive(context)
     return {
       callId: call.invocationId,
       error: false,
@@ -127,11 +135,6 @@ async function readExisting(
   if (looksBinary(probeBytes, encoding)) {
     throw new ToolRunFailureError('file appears to be binary', 'CODEC')
   }
-  const checkpoint = (): void => {
-    if (context.signal.aborted) {
-      throw new CancelledError()
-    }
-  }
   const text = await readTextWindow(
     path,
     encoding,
@@ -140,7 +143,7 @@ async function readExisting(
     columnOffset,
     display,
     lspStatus(path),
-    checkpoint,
+    () => requireActive(context),
   )
   return textResult(call.invocationId, text)
 }
@@ -237,7 +240,7 @@ const writeExecutor: CapabilityExecutor = async (call, context) => {
 
     const release = await acquireFileLock(path)
     try {
-      requireNotCancelled(context)
+      requireActive(context)
       const existed = await pathExists(path)
       let charset: 'UTF-8' | 'UTF-16LE' | 'UTF-16BE' = 'UTF-8'
       let bomLength = 0
@@ -258,7 +261,7 @@ const writeExecutor: CapabilityExecutor = async (call, context) => {
       }
 
       const encoded = encodeText(content, charset, bomLength)
-      requireNotCancelled(context)
+      requireActive(context)
       await commitTextFile(path, encoded)
       fileHooks.fileChanged?.(path)
       return textResult(
@@ -273,8 +276,15 @@ const writeExecutor: CapabilityExecutor = async (call, context) => {
   }
 }
 
-/** 在保留文件表示形式（编码/BOM/未修改区域的行尾分隔符）的前提下执行确定性的精确文本替换。 */
-const editExecutor: CapabilityExecutor = async (call, context) => {
+/** Preview and commit share the same file read, matching and encoding computation. */
+const editExecutor: CapabilityExecutor = (call, context) => editFile(call, context, false)
+const editPreviewExecutor: CapabilityExecutor = (call, context) => editFile(call, context, true)
+
+async function editFile(
+  call: CapabilityCall,
+  context: CapabilityContext,
+  preview: boolean,
+): Promise<CapabilityResult> {
   try {
     const args = call.arguments
     const rawPath = requiredString(args, 'path')
@@ -304,8 +314,17 @@ const editExecutor: CapabilityExecutor = async (call, context) => {
 
     const release = await acquireFileLock(path)
     try {
-      requireNotCancelled(context)
+      requireActive(context)
       const originalBytes = await readAllBytes(path)
+      const sha256 = createHash('sha256').update(originalBytes).digest('hex')
+      if (
+        call.expectedFile !== undefined
+        && (call.expectedFile.path !== path || call.expectedFile.sha256 !== sha256)
+      ) {
+        throw new ToolInputRejectedError(
+          'File changed since edit review; nothing was written. Review a new edit before approving it.',
+        )
+      }
       const decoded = decodeText(originalBytes)
       const source = decoded.text
       const lineEndingStyle = detectLineEnding(source)
@@ -347,16 +366,38 @@ const editExecutor: CapabilityExecutor = async (call, context) => {
         throw new ToolInputRejectedError('No changes to apply: edit would not change the file')
       }
 
-      const diffText = buildDiff(document, nextDocument)
-      requireNotCancelled(context)
+      const editReview = { path, diff: buildDiff(document, nextDocument), sha256 }
+      const completed = textResult(
+        call.invocationId,
+        `Edited successfully.\nReplacements: ${pending.length}`,
+        { editReview },
+      )
+      // Reserve the complete result, not just the diff, inside the existing 1 MiB JSON
+      // budget before preview/commit. Changed lines are never silently truncated.
+      const persistedResult = {
+        toolCallId: completed.callId,
+        contents: completed.contents,
+        error: completed.error,
+        details: completed.details,
+      }
+      if (Buffer.byteLength(JSON.stringify(persistedResult), 'utf8') > MAX_DETAILS_JSON_UTF8_BYTES) {
+        throw new ToolInputRejectedError(
+          'Complete edit diff exceeds the review transport limit; split this edit into smaller changes.',
+        )
+      }
+      requireActive(context)
+      if (preview) {
+        return {
+          callId: call.invocationId,
+          error: false,
+          details: {},
+          contents: [{ type: 'json', json: editReview }],
+        }
+      }
       await commitTextFile(path, encoded)
       fileHooks.fileChanged?.(path)
 
-      const summary = `Edited ${display} successfully.\nReplacements: ${pending.length}`
-      return textResult(
-        call.invocationId,
-        diffText.trim().length === 0 ? summary : `${summary}\n\ndiff:\n${diffText}`,
-      )
+      return completed
     } finally {
       release()
     }
@@ -378,8 +419,11 @@ async function statOrNull(path: string): Promise<Awaited<ReturnType<typeof stat>
   }
 }
 
-function requireNotCancelled(context: CapabilityContext): void {
+function requireActive(context: CapabilityContext): void {
   if (context.signal.aborted) {
+    if (context.signal.reason === 'TIMED_OUT') {
+      throw new ToolRunFailureError('Operation timed out', 'TIMEOUT')
+    }
     throw new CancelledError()
   }
 }
@@ -409,8 +453,6 @@ function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
 // ---------------------------------------------------------------------------
 
 const DIFF_CONTEXT_LINES = 4
-const DIFF_MAX_CELLS = 2_000_000
-const DIFF_MAX_CHARS = 30 * 1024
 
 interface LineEndingDocument {
   lines: string[]
@@ -651,22 +693,7 @@ interface DiffPart {
 export function buildDiff(originalDoc: LineEndingDocument, nextDoc: LineEndingDocument): string {
   const originalLines = diffLines(originalDoc)
   const nextLines = diffLines(nextDoc)
-  return truncateInline(renderDiff(originalLines, nextLines, diffParts(originalLines, nextLines)))
-}
-
-export function truncateInline(diff: string): string {
-  if (diff.length <= DIFF_MAX_CHARS) {
-    return diff
-  }
-  let end = DIFF_MAX_CHARS
-  if (isHighSurrogate(diff.charCodeAt(end - 1))) {
-    end--
-  }
-  return `${diff.slice(0, end)}\n... (diff truncated to fit inline limit)`
-}
-
-function isHighSurrogate(value: number): boolean {
-  return value >= 0xd800 && value <= 0xdbff
+  return renderDiff(originalLines, nextLines, diffParts(originalLines, nextLines))
 }
 
 function diffLines(document: LineEndingDocument): string[] {
@@ -689,115 +716,10 @@ function displayLine(token: string): string {
 }
 
 function diffParts(original: string[], next: string[]): DiffPart[] {
-  let prefix = 0
-  while (
-    prefix < original.length &&
-    prefix < next.length &&
-    original[prefix] === next[prefix]
-  ) {
-    prefix++
-  }
-  let suffix = 0
-  while (
-    suffix < original.length - prefix &&
-    suffix < next.length - prefix &&
-    original[original.length - 1 - suffix] === next[next.length - 1 - suffix]
-  ) {
-    suffix++
-  }
-  const parts: DiffPart[] = []
-  if (prefix > 0) {
-    parts.push({ kind: 'CONTEXT', lines: original.slice(0, prefix) })
-  }
-  parts.push(
-    ...alignMiddle(
-      original.slice(prefix, original.length - suffix),
-      next.slice(prefix, next.length - suffix),
-    ),
-  )
-  if (suffix > 0) {
-    parts.push({ kind: 'CONTEXT', lines: original.slice(original.length - suffix) })
-  }
-  return parts
-}
-
-function alignMiddle(original: string[], next: string[]): DiffPart[] {
-  if (original.length === 0 && next.length === 0) {
-    return []
-  }
-  if (original.length * next.length > DIFF_MAX_CELLS) {
-    return [{ kind: 'REMOVED', lines: [...original] }, { kind: 'ADDED', lines: [...next] }]
-  }
-
-  const width = next.length + 1
-  const lcs = new Int32Array((original.length + 1) * width)
-  for (let originalIndex = original.length - 1; originalIndex >= 0; originalIndex--) {
-    for (let nextIndex = next.length - 1; nextIndex >= 0; nextIndex--) {
-      lcs[originalIndex * width + nextIndex] =
-        original[originalIndex] === next[nextIndex]
-          ? (lcs[(originalIndex + 1) * width + nextIndex + 1] as number) + 1
-          : Math.max(
-              lcs[(originalIndex + 1) * width + nextIndex] as number,
-              lcs[originalIndex * width + nextIndex + 1] as number,
-            )
-    }
-  }
-
-  const parts: DiffPart[] = []
-  let removed: string[] = []
-  let added: string[] = []
-  let context: string[] = []
-  let originalIndex = 0
-  let nextIndex = 0
-  while (originalIndex < original.length && nextIndex < next.length) {
-    if (original[originalIndex] === next[nextIndex]) {
-      flushChanged(parts, removed, added)
-      removed = []
-      added = []
-      context.push(original[originalIndex] as string)
-      originalIndex++
-      nextIndex++
-      continue
-    }
-    flushContext(parts, context)
-    context = []
-    if (
-      (lcs[(originalIndex + 1) * width + nextIndex] as number) >=
-      (lcs[originalIndex * width + nextIndex + 1] as number)
-    ) {
-      removed.push(original[originalIndex] as string)
-      originalIndex++
-    } else {
-      added.push(next[nextIndex] as string)
-      nextIndex++
-    }
-  }
-  flushContext(parts, context)
-  while (originalIndex < original.length) {
-    removed.push(original[originalIndex] as string)
-    originalIndex++
-  }
-  while (nextIndex < next.length) {
-    added.push(next[nextIndex] as string)
-    nextIndex++
-  }
-  flushChanged(parts, removed, added)
-  return parts
-}
-
-function flushContext(parts: DiffPart[], context: string[]): void {
-  if (context.length > 0) {
-    parts.push({ kind: 'CONTEXT', lines: [...context] })
-  }
-}
-
-function flushChanged(parts: DiffPart[], removed: string[], added: string[]): void {
-  if (removed.length > 0) {
-    parts.push({ kind: 'REMOVED', lines: [...removed] })
-  }
-  if (added.length > 0) {
-    parts.push({ kind: 'ADDED', lines: [...added] })
-  }
+  return diffArrays(original, next).map((part) => ({
+    kind: part.removed ? 'REMOVED' : part.added ? 'ADDED' : 'CONTEXT',
+    lines: part.value,
+  }))
 }
 
 function renderDiff(original: string[], next: string[], parts: DiffPart[]): string {
@@ -812,6 +734,9 @@ function renderDiff(original: string[], next: string[], parts: DiffPart[]): stri
           diff += cursor.appendAdded(displayLine(line))
         } else {
           diff += cursor.appendRemoved(displayLine(line))
+        }
+        if (!line.endsWith('\n')) {
+          diff += '\\ No newline at end of file\n'
         }
       }
       continue
@@ -917,4 +842,5 @@ export const fileCapabilities: Record<string, CapabilityExecutor> = {
   'fs.read': readExecutor,
   'fs.write': writeExecutor,
   'fs.edit': editExecutor,
+  'fs.edit.preview': editPreviewExecutor,
 }

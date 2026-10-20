@@ -553,7 +553,7 @@ describe('ToolMessageBlock per-tool bodies', () => {
       />,
     )
 
-    expect(screen.getByText(/App\.java/)).toBeInTheDocument()
+    expect(screen.getAllByText(/App\.java/).length).toBeGreaterThanOrEqual(1)
     const preview = container.querySelector('.thread-tool-preview-body')
     expect(preview).toHaveTextContent('line-1')
     expect(preview).toHaveTextContent('line-40')
@@ -564,10 +564,10 @@ describe('ToolMessageBlock per-tool bodies', () => {
     // prompt/正文默认可见不等于不可收起。
     await user.click(collapseButton()!)
     expect(container.querySelector('.thread-tool-preview-body')).not.toBeInTheDocument()
-    expect(screen.getByText(/App\.java/)).toBeInTheDocument()
+    expect(screen.getAllByText(/App\.java/).length).toBeGreaterThanOrEqual(1)
   })
 
-  it('shows the pre-execution edit diff by default without claiming it ran', () => {
+  it('shows the pre-execution edit diff when editReview is present', () => {
     const { container } = render(
       <ToolMessageBlock
         message={message({
@@ -580,6 +580,11 @@ describe('ToolMessageBlock per-tool bodies', () => {
             old_string: 'alpha\nbeta',
             new_string: 'alpha\nBETA',
           }),
+          editReview: {
+            path: 'App.java',
+            diff: '-beta\n+BETA',
+            sha256: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+          },
         })}
       />,
     )
@@ -590,9 +595,6 @@ describe('ToolMessageBlock per-tool bodies', () => {
     expect(within(preview as HTMLElement).getByText('+BETA')).toBeInTheDocument()
     // replace_all 等影响范围的参数仍可见。
     expect(container.querySelector('.thread-tool-summary-detail')).toHaveTextContent('replace_all')
-    // 原始 old/new 只生成一份 diff，不重复铺开两份原文。
-    expect(preview?.textContent).not.toContain('old_string')
-    expect(preview?.textContent).not.toContain('new_string')
     // 尚未执行：不显示成功说明。
     expect(screen.queryByText(/已执行|修改成功|applied/)).not.toBeInTheDocument()
   })
@@ -614,13 +616,36 @@ describe('ToolMessageBlock per-tool bodies', () => {
     expect(container.querySelector('.thread-tool-preview-body')).toHaveClass('is-streaming')
   })
 
-  it('shows a complete edit diff once streamed arguments become durable', () => {
+  it('shows streamed edit input as explicit input rather than diff', () => {
     const { container } = render(
       <ToolMessageBlock
         message={message({
           phase: 'call',
           status: 'streaming',
-          subjectEntryId: 'assistant-1',
+          subjectEntryId: null,
+          toolName: 'edit',
+          rendererKey: 'edit',
+          arguments: JSON.stringify({
+            path: 'App.java',
+            old_string: 'one\ntwo',
+            new_string: 'ONE\nTWO',
+          }),
+        })}
+      />,
+    )
+
+    expect(screen.getByText(/流式输入内容/)).toBeInTheDocument()
+    expect(screen.getByText(/原文本/)).toBeInTheDocument()
+    expect(screen.getByText(/新文本/)).toBeInTheDocument()
+    expect(container.querySelector('.thread-tool-preview-body.is-input-old')?.textContent).toBe('one\ntwo')
+    expect(container.querySelector('.thread-tool-preview-body.is-input-new')?.textContent).toBe('ONE\nTWO')
+  })
+
+  it('shows a complete edit diff once editReview is provided', () => {
+    const { container } = render(
+      <ToolMessageBlock
+        message={message({
+          phase: 'call',
           toolName: 'edit',
           rendererKey: 'edit',
           arguments: JSON.stringify({
@@ -628,6 +653,11 @@ describe('ToolMessageBlock per-tool bodies', () => {
             old_string: 'one\ntwo\nthree\nfour\nfive\nsix',
             new_string: 'ONE\nTWO\nTHREE\nFOUR\nFIVE\nSIX',
           }),
+          editReview: {
+            path: 'App.java',
+            diff: '-one\n-six\n+ONE\n+SIX',
+            sha256: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+          },
         })}
       />,
     )

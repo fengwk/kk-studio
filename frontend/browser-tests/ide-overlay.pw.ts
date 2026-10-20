@@ -45,13 +45,8 @@ async function setupStrictIdeRoutes(page: Page): Promise<MockAudit> {
       throw new Error(`收到非法或未登记的 viewId: ${String(viewId)}`)
     }
 
-    const currentPort = new URL(page.url()).port
-    if (!currentPort || !/^\d+$/.test(currentPort)) {
-      throw new Error(`当前页面端口解析异常: "${currentPort}"`)
-    }
-
     audit.openCalls.push({ environmentId: HARNESS_ENV_ID, viewId })
-    const entryUrl = `http://127.0.0.2:${currentPort}/fixture-ide-frame.html?viewId=${viewId}`
+    const entryUrl = `/environment-ide/${HARNESS_ENV_ID}/__ide/bootstrap?token=${viewId}`
 
     await route.fulfill({
       status: 200,
@@ -69,9 +64,9 @@ async function setupStrictIdeRoutes(page: Page): Promise<MockAudit> {
   })
 
   // 2. 严格拦截 iframe fixture：记录请求次数与不可变 loadNonce 探针
-  await page.route('http://127.0.0.2:*/fixture-ide-frame.html*', async (route) => {
+  await page.route('**/environment-ide/*/__ide/bootstrap*', async (route) => {
     const parsed = new URL(route.request().url())
-    const viewId = parsed.searchParams.get('viewId')
+    const viewId = parsed.searchParams.get('token')
     if (!viewId || !ALLOWED_VIEW_IDS.has(viewId)) {
       throw new Error(`iframe fixture 请求携带非预期的 viewId: ${String(viewId)}`)
     }

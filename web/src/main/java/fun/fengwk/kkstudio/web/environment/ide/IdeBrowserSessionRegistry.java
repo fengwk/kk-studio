@@ -23,7 +23,7 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * IDE 独立 Origin 的浏览器会话与受管 workspace 授权登记。
+ * IDE 浏览器会话与受管 workspace 授权登记。
  *
  * <p><b>两个互不派生的生命周期：</b>
  *

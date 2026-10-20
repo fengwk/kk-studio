@@ -50,7 +50,7 @@ function baseOptions(overrides: Partial<RuntimeOptions> = {}): RuntimeOptions {
 }
 
 function invokeJson(args: Record<string, unknown> = {}): Record<string, unknown> {
-  return JSON.parse(encodeInvoke({ capabilityId: 'fs.read', capabilityVersion: '2', arguments: args, timeoutMillis: 0 })) as Record<string, unknown>
+  return JSON.parse(encodeInvoke({ capabilityId: 'fs.read', capabilityVersion: '3', arguments: args, timeoutMillis: 0 })) as Record<string, unknown>
 }
 
 function sentTypes(transport: FakeTransport): string[] {

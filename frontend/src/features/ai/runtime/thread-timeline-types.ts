@@ -1,5 +1,6 @@
 import type { InstantTimestamp } from '@/shared/api/contracts/base'
 import type { SkillRefDTO } from '@/shared/api/contracts/ai-catalog'
+import type { EditReview } from '@/features/ai/runtime/mutation-review'
 
 type DialogueRole =
   | 'user'
@@ -74,6 +75,7 @@ export interface ToolApprovalState {
   decision: 'ALLOWED' | 'DENIED' | null
   decisionId: string | null
   reason: string | null
+  editReview?: EditReview | null
 }
 
 /**
@@ -165,6 +167,8 @@ export interface ToolDialogueMessage extends BaseDialogueMessage {
   threadId?: string
   /** 投影的审批状态（当 tool invocation 不带审批时为 null）。 */
   approval?: ToolApprovalState
+  /** 经权威审查产生的真实 diff（来源自 approval 或终态 result details.editReview）。 */
+  editReview?: EditReview | null
   /**
    * 一次工具调用的严格身份：`${assistantEntryId}:${callIndex}`。
    * 相同 toolCallId 可以出现在不同 assistant Entry 上，配对和去重必须使用该身份。

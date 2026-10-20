@@ -3,7 +3,11 @@ import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
+  STOP_CANCELLED,
+  STOP_NORMAL,
+  STOP_TIMED_OUT,
   SearchControl,
+  SearchStoppedError,
   findFiles,
   grepFiles,
   matchCenteredExcerpt,
@@ -32,8 +36,8 @@ vi.mock('node:fs/promises', async (importOriginal) => {
 })
 
 /**
- * search-core 直接单元测试：核心逻辑在 Worker 内执行，其覆盖率无法从主进程收集，
- * 因此这里直接调用导出的纯入口覆盖遍历/忽略/匹配/错误映射；真实 Worker 端到端由 search.test.ts 覆盖。
+ * search-core 直接单元测试：通过纯入口与可控检查点验证遍历、忽略、匹配及停止时的 partial 结果；
+ * 真实 Worker 端到端由 search.test.ts 与 worker-location.test.ts 覆盖。
  */
 
 const tempDirs: string[] = []
@@ -53,7 +57,12 @@ afterEach(async () => {
   )
 })
 
-const noTimeout = (name = 'find'): SearchControl => new SearchControl(0, name)
+const createStopBuffer = (initial = STOP_NORMAL): SharedArrayBuffer => {
+  const buf = new SharedArrayBuffer(4)
+  Atomics.store(new Int32Array(buf), 0, initial)
+  return buf
+}
+const noTimeout = (): SearchControl => new SearchControl(createStopBuffer())
 
 const defaultGrep: GrepOptions = {
   multiline: false,
@@ -128,17 +137,17 @@ describe('grepFiles', () => {
     const dir = await tempDir()
     await writeFile(join(dir, 'a.txt'), 'Hello\nworld\n')
     await writeFile(join(dir, 'b.ts'), 'Hello\n')
-    const plain = await grepFiles('world', dir, 100, defaultGrep, noTimeout('grep'))
+    const plain = await grepFiles('world', dir, 100, defaultGrep, noTimeout())
     expect(plain.lines[0]?.endsWith('a.txt:2:world')).toBe(true)
 
-    const ignoreCase = await grepFiles('hello', dir, 100, { ...defaultGrep, ignoreCase: true }, noTimeout('grep'))
+    const ignoreCase = await grepFiles('hello', dir, 100, { ...defaultGrep, ignoreCase: true }, noTimeout())
     expect(ignoreCase.lines.length).toBe(2)
 
-    const include = await grepFiles('Hello', dir, 100, { ...defaultGrep, include: '*.ts' }, noTimeout('grep'))
+    const include = await grepFiles('Hello', dir, 100, { ...defaultGrep, include: '*.ts' }, noTimeout())
     expect(include.lines).toHaveLength(1)
     expect(include.lines[0]?.includes('b.ts')).toBe(true)
 
-    const literal = await grepFiles('wor.d', dir, 100, { ...defaultGrep, literal: true }, noTimeout('grep'))
+    const literal = await grepFiles('wor.d', dir, 100, { ...defaultGrep, literal: true }, noTimeout())
     expect(literal.lines).toEqual([])
   })
 
@@ -146,7 +155,7 @@ describe('grepFiles', () => {
     const dir = await tempDir()
     await writeFile(join(dir, 'bin.dat'), Buffer.from([0x00, 0x01, 0x02]))
     await writeFile(join(dir, 'a.txt'), 'x\n')
-    const outcome = await grepFiles('x', dir, 100, defaultGrep, noTimeout('grep'))
+    const outcome = await grepFiles('x', dir, 100, defaultGrep, noTimeout())
     expect(outcome.lines).toHaveLength(1)
     expect(outcome.skipped).toEqual([])
   })
@@ -155,7 +164,7 @@ describe('grepFiles', () => {
     const dir = await tempDir()
     const file = join(dir, 'bin.dat')
     await writeFile(file, Buffer.from([0x00, 0x01]))
-    await expect(grepFiles('x', file, 100, defaultGrep, noTimeout('grep'))).rejects.toThrowError(
+    await expect(grepFiles('x', file, 100, defaultGrep, noTimeout())).rejects.toThrowError(
       /binary/,
     )
   })
@@ -169,7 +178,7 @@ describe('grepFiles', () => {
       file,
       100,
       { ...defaultGrep, multiline: true },
-      noTimeout('grep'),
+      noTimeout(),
     )
     expect(outcome.lines).toEqual([`${toPosix(file)}:1:a`, `${toPosix(file)}:2:b`])
   })
@@ -182,7 +191,7 @@ describe('grepFiles', () => {
       join(dir, 'm.txt'),
       100,
       { ...defaultGrep, multiline: true },
-      noTimeout('grep'),
+      noTimeout(),
     )
     expect(outcome.lines.length).toBeGreaterThan(0)
   })
@@ -190,7 +199,7 @@ describe('grepFiles', () => {
   it('limit 达到时标注 moreMatches', async () => {
     const dir = await tempDir()
     await writeFile(join(dir, 'a.txt'), 'x\nx\nx\n')
-    const outcome = await grepFiles('x', dir, 1, defaultGrep, noTimeout('grep'))
+    const outcome = await grepFiles('x', dir, 1, defaultGrep, noTimeout())
     expect(outcome.moreMatches).toBe(true)
     expect(outcome.lines).toHaveLength(1)
   })
@@ -199,7 +208,7 @@ describe('grepFiles', () => {
     const dir = await tempDir()
     const line = `${'a'.repeat(600)}match${'b'.repeat(600)}`
     await writeFile(join(dir, 'long.txt'), `${line}\n`)
-    const outcome = await grepFiles('match', dir, 100, defaultGrep, noTimeout('grep'))
+    const outcome = await grepFiles('match', dir, 100, defaultGrep, noTimeout())
     expect(outcome.lines[0]).toContain('match')
     expect(outcome.lines[0]).toContain('line truncated to 500 chars')
   })
@@ -207,7 +216,7 @@ describe('grepFiles', () => {
   it('超过单行字符上界的行按 skip 处理', async () => {
     const dir = await tempDir()
     await writeFile(join(dir, 'huge.txt'), `${'a'.repeat(1024 * 1024 + 1)}\n`)
-    const outcome = await grepFiles('a', dir, 100, defaultGrep, noTimeout('grep'))
+    const outcome = await grepFiles('a', dir, 100, defaultGrep, noTimeout())
     expect(outcome.skipped.some((entry) => entry.reason.includes('1048576'))).toBe(true)
   })
 
@@ -218,7 +227,7 @@ describe('grepFiles', () => {
     await writeFile(join(blocked, 'a.txt'), 'x\n')
     blockedReads.add(blocked)
     try {
-      const outcome = await grepFiles('zzz', dir, 100, defaultGrep, noTimeout('grep'))
+      const outcome = await grepFiles('zzz', dir, 100, defaultGrep, noTimeout())
       expect(outcome.skipped.length).toBe(1)
     } finally {
       blockedReads.delete(blocked)
@@ -228,7 +237,7 @@ describe('grepFiles', () => {
   it('非文件非目录路径被拒绝', async () => {
     const dir = await tempDir()
     await expect(
-      grepFiles('x', join(dir, 'missing'), 100, defaultGrep, noTimeout('grep')),
+      grepFiles('x', join(dir, 'missing'), 100, defaultGrep, noTimeout()),
     ).rejects.toThrowError()
   })
 })
@@ -287,7 +296,7 @@ describe('runSearchJob 与辅助', () => {
       pattern: '*.txt',
       path: dir,
       limit: 100,
-      timeoutMillis: 0,
+      stopBuffer: createStopBuffer(),
     })) as Extract<SearchReply, { ok: true; kind: 'find' }>
     expect(find.ok).toBe(true)
     expect(find.matches).toHaveLength(1)
@@ -301,7 +310,7 @@ describe('runSearchJob 与辅助', () => {
       literal: false,
       ignoreCase: false,
       include: null,
-      timeoutMillis: 0,
+      stopBuffer: createStopBuffer(),
     })) as Extract<SearchReply, { ok: true; kind: 'grep' }>
     expect(grep.lines).toHaveLength(1)
   })
@@ -317,7 +326,7 @@ describe('runSearchJob 与辅助', () => {
       literal: false,
       ignoreCase: false,
       include: null,
-      timeoutMillis: 0,
+      stopBuffer: createStopBuffer(),
     })
     expect(reply).toMatchObject({ ok: false, error: 'input' })
   })
@@ -335,15 +344,36 @@ describe('runSearchJob 与辅助', () => {
       literal: false,
       ignoreCase: false,
       include: null,
-      timeoutMillis: 0,
+      stopBuffer: createStopBuffer(),
     })
     expect(reply).toMatchObject({ ok: false, error: 'run' })
   })
 
-  it('SearchControl 超时抛出稳定错误', async () => {
-    const control = new SearchControl(1, 'find')
-    await new Promise((resolve) => setTimeout(resolve, 5))
-    expect(() => control.check()).toThrowError(/timed out/)
+  it('SearchControl 遇原子标记抛出 SearchStoppedError', () => {
+    const buffer = new SharedArrayBuffer(4)
+    const view = new Int32Array(buffer)
+    const control = new SearchControl(buffer)
+    // 初始状态 0 不抛错
+    expect(() => control.check()).not.toThrow()
+
+    // 1 -> TIMED_OUT
+    Atomics.store(view, 0, STOP_TIMED_OUT)
+    expect(() => control.check()).toThrowError(SearchStoppedError)
+    try {
+      control.check()
+    } catch (error) {
+      expect(error).toBeInstanceOf(SearchStoppedError)
+      expect((error as SearchStoppedError).reason).toBe('TIMED_OUT')
+    }
+
+    // 2 -> CANCELLED
+    Atomics.store(view, 0, STOP_CANCELLED)
+    try {
+      control.check()
+    } catch (error) {
+      expect(error).toBeInstanceOf(SearchStoppedError)
+      expect((error as SearchStoppedError).reason).toBe('CANCELLED')
+    }
   })
 
   it('matchCenteredExcerpt 覆盖短行与居中截取', () => {
@@ -353,5 +383,102 @@ describe('runSearchJob 与辅助', () => {
     expect(excerpt).toContain('needle')
     expect(excerpt.startsWith('... ')).toBe(true)
     expect(excerpt).toContain('line truncated to 500 chars')
+  })
+})
+
+describe('确定性 control 注入与 partial 结果保留', () => {
+  class CountingControl extends SearchControl {
+    public checks = 0
+    constructor(
+      private readonly stopAtCheck: number = Infinity,
+      private readonly reason: 'TIMED_OUT' | 'CANCELLED' = 'TIMED_OUT',
+    ) {
+      super(createStopBuffer())
+    }
+    override check(): void {
+      this.checks++
+      if (this.checks >= this.stopAtCheck) {
+        throw new SearchStoppedError(this.reason)
+      }
+    }
+  }
+
+  it('findFiles 在匹配部分文件后被 stop，保留 partial matches 且带 stopReason', async () => {
+    const dir = await tempDir()
+    await writeFile(join(dir, 'a.ts'), '')
+    await writeFile(join(dir, 'b.ts'), '')
+    await writeFile(join(dir, 'c.ts'), '')
+
+    const counter = new CountingControl()
+    const complete = await findFiles('*.ts', dir, 10, counter)
+    expect(complete.matches).toHaveLength(3)
+
+    // 倒数第 2 次 check 触发 stop（确保已匹配到部分文件）
+    const stopControl = new CountingControl(counter.checks - 2, 'TIMED_OUT')
+    const outcome = await findFiles('*.ts', dir, 10, stopControl)
+    expect(outcome.stopReason).toBe('TIMED_OUT')
+    // 验证不伪造完成，且保留了中断前收集的 matches
+    expect(outcome.matches.length).toBeGreaterThan(0)
+    expect(outcome.matches.length).toBeLessThan(3)
+    expect(outcome.limitReached).toBe(false)
+  })
+
+  it('findFiles empty timeout 返回空 matches 且带 stopReason', async () => {
+    const dir = await tempDir()
+    await writeFile(join(dir, 'a.ts'), '')
+    const control = new CountingControl(1, 'TIMED_OUT')
+    const outcome = await findFiles('*.ts', dir, 10, control)
+    expect(outcome.matches).toEqual([])
+    expect(outcome.stopReason).toBe('TIMED_OUT')
+  })
+
+  it('grepFiles 在匹配部分文件后被 stop，保留 partial lines 且带 stopReason', async () => {
+    const dir = await tempDir()
+    await writeFile(join(dir, 'a.txt'), 'needle 1\n')
+    await writeFile(join(dir, 'b.txt'), 'needle 2\n')
+    await writeFile(join(dir, 'c.txt'), 'needle 3\n')
+
+    const counter = new CountingControl()
+    const complete = await grepFiles('needle', dir, 10, defaultGrep, counter)
+    expect(complete.lines).toHaveLength(3)
+
+    // 在搜到部分文件后触发 stop
+    const stopControl = new CountingControl(counter.checks - 6, 'TIMED_OUT')
+    const outcome = await grepFiles('needle', dir, 10, defaultGrep, stopControl)
+    expect(outcome.stopReason).toBe('TIMED_OUT')
+    expect(outcome.lines.length).toBeGreaterThan(0)
+    expect(outcome.lines.length).toBeLessThan(3)
+    expect(outcome.moreMatches).toBe(false)
+  })
+
+  it('grepFiles empty timeout 返回空 lines 且带 stopReason', async () => {
+    const dir = await tempDir()
+    await writeFile(join(dir, 'a.txt'), 'needle\n')
+    const control = new CountingControl(1, 'TIMED_OUT')
+    const outcome = await grepFiles('needle', dir, 10, defaultGrep, control)
+    expect(outcome.lines).toEqual([])
+    expect(outcome.stopReason).toBe('TIMED_OUT')
+  })
+
+  it('runSearchJob 携带 stopBuffer 遇到 stopReason 时正常回传 partial 纯结果', async () => {
+    const dir = await tempDir()
+    await writeFile(join(dir, 'a.txt'), 'hello\n')
+    const stopBuffer = createStopBuffer(STOP_TIMED_OUT)
+    const reply = await runSearchJob({
+      kind: 'grep',
+      pattern: 'hello',
+      path: dir,
+      limit: 100,
+      multiline: false,
+      literal: false,
+      ignoreCase: false,
+      include: null,
+      stopBuffer,
+    })
+    expect(reply.ok).toBe(true)
+    if (reply.ok && reply.kind === 'grep') {
+      expect(reply.stopReason).toBe('TIMED_OUT')
+      expect(reply.lines).toEqual([])
+    }
   })
 })

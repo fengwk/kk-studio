@@ -19,7 +19,6 @@ import org.springframework.mock.web.MockHttpServletResponse;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.server.IdeSessionIdentity;
-import fun.fengwk.kkstudio.platform.environment.ide.IdeOriginProperties;
 
 import java.security.SecureRandom;
 import java.time.Clock;
@@ -30,7 +29,6 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
@@ -39,34 +37,13 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 /**
- * 意图：IDE Origin 识别必须严格（只有模板形状的 Host 才算 IDE Origin），浏览器会话必须绑定代际且随租约关闭而失效，且 IDE Origin
+ * 意图：IDE 同源网关路由（/environment-ide/{environmentId}/...）必须严格校验环境标识，浏览器会话必须绑定代际且随租约关闭而失效，且 IDE
  * 请求必须由数据面本地处理、绝不进入 Studio REST 管线。
  */
 class IdeGatewayComponentsTest {
 
   private static final EnvironmentId ENV =
       EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
-
-  private static IdeOriginProperties originProperties() {
-    IdeOriginProperties properties = new IdeOriginProperties();
-    properties.setOriginTemplate("https://{environmentId}.ide.test");
-    properties.setBootstrapPath("/__ide/bootstrap");
-    return properties;
-  }
-
-  @Test
-  void hostResolverOnlyMatchesIdeOriginTemplate() {
-    IdeHostResolver resolver = new IdeHostResolver(originProperties());
-
-    assertEquals(Optional.of(ENV), resolver.resolve(ENV + ".ide.test"));
-    assertEquals(Optional.of(ENV), resolver.resolve(ENV + ".ide.test:8443"));
-    // 非 IDE Origin / 未知子域 / 非法 UUID / 大小写变体都不匹配。
-    assertTrue(resolver.resolve("studio.test").isEmpty());
-    assertTrue(resolver.resolve("www.ide.test").isEmpty());
-    assertTrue(resolver.resolve("not-a-uuid.ide.test").isEmpty());
-    assertEquals(Optional.of(ENV), resolver.resolve(ENV.toString().toUpperCase() + ".ide.test"));
-    assertTrue(resolver.resolve(null).isEmpty());
-  }
 
   @Test
   void browserSessionBindsGenerationAndClosesWithLease() {
@@ -211,56 +188,124 @@ class IdeGatewayComponentsTest {
   }
 
   @Test
-  void ideOriginRequestsAreHandledLocallyAndNeverChained() throws Exception {
+  void idePathRequestsAreHandledLocallyAndPrefixStripped() throws Exception {
     IdeGatewayDataPlane dataPlane = mock(IdeGatewayDataPlane.class);
-    IdeOriginRequestFilter filter =
-        new IdeOriginRequestFilter(
-            new IdeHostResolver(originProperties()),
-            originProperties(),
-            dataPlane,
-            mock(IdeBrowserWebSocketGateway.class));
+    IdeGatewayFilter filter =
+        new IdeGatewayFilter(dataPlane, mock(IdeBrowserWebSocketGateway.class));
 
-    MockHttpServletRequest request = new MockHttpServletRequest("GET", "/vscode/workbench.js");
-    request.addHeader("Host", ENV + ".ide.test");
+    MockHttpServletRequest request =
+        new MockHttpServletRequest("GET", "/environment-ide/" + ENV + "/vscode/workbench.js");
     MockHttpServletResponse response = new MockHttpServletResponse();
     MockFilterChain chain = new MockFilterChain();
 
     filter.doFilter(request, response, chain);
 
     verify(dataPlane).handleHttp(eq(ENV), eq("/vscode/workbench.js"), any(), any());
-    verify(dataPlane, never()).handleBootstrap(any(), any(), any());
+    verify(dataPlane, never()).handleBootstrap(any(), any(), any(), any());
     assertNull(chain.getRequest());
   }
 
   @Test
-  void ideOriginBootstrapPathIsHandledAsBootstrap() throws Exception {
+  void idePathBootstrapIsHandledAsBootstrap() throws Exception {
     IdeGatewayDataPlane dataPlane = mock(IdeGatewayDataPlane.class);
-    IdeOriginRequestFilter filter =
-        new IdeOriginRequestFilter(
-            new IdeHostResolver(originProperties()),
-            originProperties(),
-            dataPlane,
-            mock(IdeBrowserWebSocketGateway.class));
+    IdeGatewayFilter filter =
+        new IdeGatewayFilter(dataPlane, mock(IdeBrowserWebSocketGateway.class));
 
-    MockHttpServletRequest request = new MockHttpServletRequest("GET", "/__ide/bootstrap");
-    request.addHeader("Host", ENV + ".ide.test");
+    MockHttpServletRequest request =
+        new MockHttpServletRequest("GET", "/environment-ide/" + ENV + "/__ide/bootstrap");
+    request.setQueryString("token=xyz");
     MockHttpServletResponse response = new MockHttpServletResponse();
 
     filter.doFilter(request, response, new MockFilterChain());
 
-    verify(dataPlane).handleBootstrap(eq(ENV), any(), any());
+    verify(dataPlane).handleBootstrap(eq(ENV), eq("/__ide/bootstrap?token=xyz"), any(), any());
     verify(dataPlane, never()).handleHttp(any(), any(), any(), any());
   }
 
   @Test
-  void studioOriginRequestsPassThroughToTheChain() throws Exception {
+  void idePathWithoutTrailingSlashRedirects() throws Exception {
+    IdeGatewayFilter filter =
+        new IdeGatewayFilter(
+            mock(IdeGatewayDataPlane.class), mock(IdeBrowserWebSocketGateway.class));
+
+    MockHttpServletRequest request = new MockHttpServletRequest("GET", "/environment-ide/" + ENV);
+    request.setQueryString("a=b");
+    MockHttpServletResponse response = new MockHttpServletResponse();
+
+    filter.doFilter(request, response, new MockFilterChain());
+
+    assertEquals(301, response.getStatus());
+    assertEquals("/environment-ide/" + ENV + "/?a=b", response.getHeader("Location"));
+  }
+
+  @Test
+  void invalidIdePathReturnsNotFound() throws Exception {
+    IdeGatewayFilter filter =
+        new IdeGatewayFilter(
+            mock(IdeGatewayDataPlane.class), mock(IdeBrowserWebSocketGateway.class));
+
+    MockHttpServletRequest request =
+        new MockHttpServletRequest("GET", "/environment-ide/not-a-uuid/test");
+    MockHttpServletResponse response = new MockHttpServletResponse();
+
+    filter.doFilter(request, response, new MockFilterChain());
+
+    assertEquals(404, response.getStatus());
+  }
+
+  @Test
+  void ideFilterWithContextPathStripsRouteBaseOnlyOnceForBootstrapResourceAndWebSocket()
+      throws Exception {
     IdeGatewayDataPlane dataPlane = mock(IdeGatewayDataPlane.class);
-    IdeOriginRequestFilter filter =
-        new IdeOriginRequestFilter(
-            new IdeHostResolver(originProperties()),
-            originProperties(),
-            dataPlane,
-            mock(IdeBrowserWebSocketGateway.class));
+    IdeBrowserWebSocketGateway browserGateway = mock(IdeBrowserWebSocketGateway.class);
+    IdeGatewayFilter filter = new IdeGatewayFilter(dataPlane, browserGateway);
+
+    // 1. bootstrap: /studio/environment-ide/{ENV}/__ide/bootstrap?token=test-tok -> remainder is
+    // /__ide/bootstrap
+    MockHttpServletRequest bootstrapReq =
+        new MockHttpServletRequest("GET", "/studio/environment-ide/" + ENV + "/__ide/bootstrap");
+    bootstrapReq.setContextPath("/studio");
+    bootstrapReq.setQueryString("token=test-tok");
+    MockHttpServletResponse bootstrapResp = new MockHttpServletResponse();
+    filter.doFilter(bootstrapReq, bootstrapResp, new MockFilterChain());
+    verify(dataPlane).handleBootstrap(eq(ENV), eq("/__ide/bootstrap?token=test-tok"), any(), any());
+
+    // 2. resource whose path contains a nested /environment-ide/: strip prefix only once
+    MockHttpServletRequest resourceReq =
+        new MockHttpServletRequest(
+            "GET", "/studio/environment-ide/" + ENV + "/environment-ide/main.js");
+    resourceReq.setContextPath("/studio");
+    resourceReq.setQueryString("v=1");
+    MockHttpServletResponse resourceResp = new MockHttpServletResponse();
+    filter.doFilter(resourceReq, resourceResp, new MockFilterChain());
+    verify(dataPlane).handleHttp(eq(ENV), eq("/environment-ide/main.js?v=1"), any(), any());
+
+    // 3. web socket upgrade: strip prefix only once
+    MockHttpServletRequest wsReq =
+        new MockHttpServletRequest("GET", "/studio/environment-ide/" + ENV + "/ws/channel");
+    wsReq.setContextPath("/studio");
+    wsReq.addHeader("Upgrade", "websocket");
+    wsReq.addHeader("Connection", "Upgrade");
+    MockHttpServletResponse wsResp = new MockHttpServletResponse();
+    filter.doFilter(wsReq, wsResp, new MockFilterChain());
+    verify(browserGateway).handleUpgrade(eq(ENV), eq("/ws/channel"), any(), any());
+
+    // 4. missing trailing slash redirect preserves contextPath
+    MockHttpServletRequest redirectReq =
+        new MockHttpServletRequest("GET", "/studio/environment-ide/" + ENV);
+    redirectReq.setContextPath("/studio");
+    redirectReq.setQueryString("k=v");
+    MockHttpServletResponse redirectResp = new MockHttpServletResponse();
+    filter.doFilter(redirectReq, redirectResp, new MockFilterChain());
+    assertEquals(301, redirectResp.getStatus());
+    assertEquals("/studio/environment-ide/" + ENV + "/?k=v", redirectResp.getHeader("Location"));
+  }
+
+  @Test
+  void nonIdeRequestsPassThroughToTheChain() throws Exception {
+    IdeGatewayDataPlane dataPlane = mock(IdeGatewayDataPlane.class);
+    IdeGatewayFilter filter =
+        new IdeGatewayFilter(dataPlane, mock(IdeBrowserWebSocketGateway.class));
 
     MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/environments");
     request.addHeader("Host", "studio.test");

@@ -631,6 +631,7 @@ export class Runtime {
         capabilityId: invoke.capabilityId,
         arguments: invoke.arguments,
         timeoutMillis: invoke.timeoutMillis,
+        ...(invoke.expectedFile === undefined ? {} : { expectedFile: invoke.expectedFile }),
       }
       void this.track(this.execute(invocation, executor, call))
     } catch (error) {
@@ -667,6 +668,21 @@ export class Runtime {
       this.terminal(invocation.invocationId, 'COMPLETED', payloadJson, null)
     } catch (error) {
       if (invocation.terminalClaimed) {
+        return
+      }
+      const reason = invocation.controller.signal.reason
+      if (reason === 'CANCELLED' || reason === 'SHUTDOWN') {
+        const payload = reason === 'SHUTDOWN' ? { reason: 'daemon shutdown' } : { reason: 'cancelled' }
+        this.terminal(invocation.invocationId, 'CANCELLED', JSON.stringify(payload), reason)
+        return
+      }
+      if (reason === 'TIMED_OUT') {
+        this.terminal(
+          invocation.invocationId,
+          'FAILED',
+          JSON.stringify(errorPayload(`capability execution timed out after ${call.timeoutMillis}ms`)),
+          'TIMED_OUT',
+        )
         return
       }
       this.terminal(invocation.invocationId, 'FAILED', JSON.stringify(errorPayload(safeMessage(error))), null)
@@ -720,7 +736,10 @@ export class Runtime {
       this.replay(entry)
       return
     }
-    this.terminal(invocationId, 'CANCELLED', JSON.stringify({ reason: 'cancelled' }), 'CANCELLED')
+    const invocation = this.running.get(invocationId)
+    if (invocation !== undefined) {
+      invocation.controller.abort('CANCELLED')
+    }
   }
 
   private replay(entry: JournalEntry): void {
@@ -772,12 +791,10 @@ export class Runtime {
       return
     }
     invocation.deadlineTimer = setTimeout(() => {
-      this.terminal(
-        invocation.invocationId,
-        'FAILED',
-        JSON.stringify({ message: `capability execution timed out after ${timeoutMillis}ms` }),
-        'TIMED_OUT',
-      )
+      if (!this.isRunning(invocation.invocationId) || invocation.terminalClaimed) {
+        return
+      }
+      invocation.controller.abort('TIMED_OUT')
     }, timeoutMillis)
   }
 
@@ -1022,6 +1039,7 @@ export class Runtime {
       this.release('connection close', () => connection.connection.close())
     }
     for (const invocation of this.running.values()) {
+      invocation.claimTerminal()
       invocation.controller.abort('SHUTDOWN')
       invocation.clearDeadline()
       this.release('invocation journal complete', () =>

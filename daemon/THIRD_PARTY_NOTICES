@@ -11,6 +11,7 @@ inside the archive. Direct runtime dependencies:
 | Component | License |
 | --- | --- |
 | `ajv`, `ignore`, `isomorphic-git`, `jsonc-parser`, `koffi`, `picomatch`, `undici`, `vscode-jsonrpc`, `ws` | MIT License |
+| `diff` | BSD 3-Clause License |
 | `re2-wasm` | Apache License 2.0 |
 | `tar` | Blue Oak Model License 1.0.0 |
 | `code-server` (fengwk/code-server, managed fork of coder/code-server) | MIT License |

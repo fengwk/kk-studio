@@ -7,7 +7,7 @@ const browserPort = resolveBrowserPort()
  * KK Studio 前端收敛后的统一 Playwright 浏览器测试配置。
  *
  * 通过具名 projects 划分既有套件（layout / pane / install / plugin / composer-editor /
- * compaction / subagent-tree / tool-card），保留各套件的匹配规则、输出路径、超时与截图策略，
+ * compaction / subagent-tree / mutation-review / tool-card），保留各套件的匹配规则、输出路径、超时与截图策略，
  * 统一在单一 preview 静态基座上运行。
  */
 export default defineConfig({
@@ -34,6 +34,7 @@ export default defineConfig({
         '**/environment-install.pw.ts',
         '**/tool-card.pw.ts',
         '**/plugin-*.pw.ts',
+        '**/mutation-review.pw.ts',
       ],
       outputDir: '../reports/layout',
       use: {
@@ -86,6 +87,14 @@ export default defineConfig({
       name: 'subagent-tree',
       testMatch: '**/subagent-tree.browser.ts',
       outputDir: '../reports/subagent-tree',
+      use: {
+        screenshot: 'only-on-failure',
+      },
+    },
+    {
+      name: 'mutation-review',
+      testMatch: '**/mutation-review.pw.ts',
+      outputDir: '../reports/mutation-review',
       use: {
         screenshot: 'only-on-failure',
       },

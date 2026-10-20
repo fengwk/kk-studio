@@ -208,6 +208,59 @@
 }
 
 /* write 正文与 edit diff 使用同一个只读视口；内部滚动不把外层卡片滚走。 */
+.thread-tool-preview-target {
+  margin-bottom: 6px;
+  font-size: var(--font-size-xs);
+  font-family: var(--mono);
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.thread-tool-preview-target-path {
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.thread-tool-preview-target-workdir {
+  color: var(--fg-muted);
+}
+
+.thread-tool-preview-preparing {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--fg-muted);
+  font-size: var(--font-size-xs);
+  padding: 6px 0;
+}
+
+.thread-tool-preview-input-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.thread-tool-preview-input-label {
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  color: var(--fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.thread-tool-preview-input-block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.thread-tool-preview-input-sublabel {
+  font-size: var(--font-size-xs);
+  color: var(--fg-muted);
+}
+
 .thread-tool-preview-body.is-edit .is-added {
   color: var(--accent);
 }
@@ -216,8 +269,27 @@
   color: var(--danger);
 }
 
+.thread-tool-preview-body.is-edit .is-hunk-header {
+  color: var(--fg-muted);
+  font-weight: 500;
+}
+
 .thread-tool-preview-body.is-streaming {
   opacity: 0.85;
+}
+
+.thread-tool-mutation-success {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--font-size-xs);
+  color: var(--success);
+  margin-top: 6px;
+}
+
+.thread-tool-empty-content {
+  color: var(--fg-muted);
+  font-style: italic;
 }
 
 .thread-tool-pre {

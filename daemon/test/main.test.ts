@@ -4,6 +4,28 @@ import { fileURLToPath } from 'node:url'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+/**
+ * Windows 原生退出诊断：只有 Windows 且显式设置 `KK_WINDOWS_NATIVE_DIAGNOSTIC=1` 时才包装模块；否则直接返回真实模块。
+ * 默认 Linux/macOS 矩阵与本地运行完全沿用未包装实现，不改变任何断言或生产行为。
+ */
+vi.mock('../src/native/state.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/native/state.js')>()
+  if (process.platform !== 'win32' || process.env.KK_WINDOWS_NATIVE_DIAGNOSTIC !== '1') {
+    return actual
+  }
+  const { traceStateModule } = await import('./support/windows-process-diagnostics.js')
+  return traceStateModule(actual)
+})
+
+vi.mock('../src/native/process-supervisor-windows.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/native/process-supervisor-windows.js')>()
+  if (process.platform !== 'win32' || process.env.KK_WINDOWS_NATIVE_DIAGNOSTIC !== '1') {
+    return actual
+  }
+  const { traceWindowsSupervisorModule } = await import('./support/windows-process-diagnostics.js')
+  return traceWindowsSupervisorModule(actual)
+})
+
 import { main } from '../src/main.js'
 import { DAEMON_VERSION } from '../src/config.js'
 import type { Envelope } from '../src/protocol.js'
@@ -11,6 +33,7 @@ import * as native from '../src/native/index.js'
 import * as control from '../src/transport/control.js'
 import type { ProcessSpec, ProcessSupervisor } from '../src/contracts.js'
 import { waitFor } from './helpers.js'
+import { windowsProcessDiagnosticHealth } from './support/windows-process-diagnostics.js'
 import { awaitGone, isAlive } from './native/process-test-util.js'
 import {
   TOKEN,
@@ -54,6 +77,10 @@ afterEach(async () => {
   }
   vi.unstubAllEnvs()
   vi.restoreAllMocks()
+  // 诊断模式下证据写入失败必须让 main 覆盖步骤红灯；默认运行不读取该健康度。
+  if (process.platform === 'win32' && process.env.KK_WINDOWS_NATIVE_DIAGNOSTIC === '1') {
+    expect(windowsProcessDiagnosticHealth().healthy).toBe(true)
+  }
 })
 
 type Listener = (...args: unknown[]) => void
@@ -330,7 +357,7 @@ describe('daemon main real assembly', () => {
       const helloPayload = hello.payload as Record<string, unknown>
       expect(hello.environmentId).toBeNull()
       expect(helloPayload.registrationToken).toBe(TOKEN)
-      expect(helloPayload.capabilityCatalogVersion).toBe('2')
+      expect(helloPayload.capabilityCatalogVersion).toBe('3')
       expect(helloPayload.daemonVersion).toBe(DAEMON_VERSION)
       expect(typeof helloPayload.daemonInstanceId).toBe('string')
 
@@ -396,7 +423,20 @@ describe('daemon main real assembly', () => {
       const cancelledPid = Number(readFileSync(cancelledPidFile, 'utf8').trim())
       expect(isAlive(cancelledPid)).toBe(true)
       fixture.send('CANCEL', { invocationId: 'long-cancel', payload: {} })
-      await waitFor(() => lastTerminal(fixture, 'long-cancel') === 'CANCELLED', 30_000)
+      // process 返回已完成清理的真实取消结果，由 COMPLETED 帧承载，不提前抢占成 CANCELLED。
+      await waitFor(() => lastTerminal(fixture, 'long-cancel') === 'COMPLETED', 30_000)
+      expect(response(fixture, 'long-cancel', ['COMPLETED'])?.payload.result).toMatchObject({
+        error: true,
+        details: { process: { outcome: 'CANCELLED' } },
+      })
+      expect(
+        fixture.received
+          .filter((envelope) =>
+            envelope.invocationId === 'long-cancel' &&
+            ['COMPLETED', 'FAILED', 'CANCELLED'].includes(envelope.messageType),
+          )
+          .map((envelope) => envelope.messageType),
+      ).toEqual(['COMPLETED'])
       expect(await awaitGone(cancelledPid, 30_000)).toBe(true)
 
       // 再起一个长进程，用信号事件停机：runtime 中止在途执行后才发布终止。
@@ -429,7 +469,7 @@ describe('daemon main real assembly', () => {
   )
 
   it(
-    'assembles exactly the ten capability schemas and fails closed on registration rejection',
+    'assembles exactly the eleven capability schemas and fails closed on registration rejection',
     async () => {
       const fixture = await createControlServer()
       cleans.push(() => fixture.dispose())
@@ -437,13 +477,14 @@ describe('daemon main real assembly', () => {
       const harness = startMain(fixture.configPath)
       await waitFor(() => fixture.received.some((envelope) => envelope.messageType === 'READY'), 30_000)
 
-      // 资源 schema 目录就是能力目录的事实源：十项都必须被真实 main 装配。
+      // 资源 schema 目录就是能力目录的事实源：包含只读 edit preview 的十一项都必须被真实 main 装配。
       const schemaDir = fileURLToPath(new URL('../resources/capabilities', import.meta.url))
       const schemaIds = readdirSync(schemaDir)
         .filter((name) => name.endsWith('.schema.json'))
         .map((name) => name.replace(/\.schema\.json$/, ''))
         .sort()
-      expect(schemaIds).toHaveLength(10)
+      expect(schemaIds).toHaveLength(11)
+      expect(schemaIds).toContain('fs.edit.preview')
 
       for (const capabilityId of schemaIds) {
         fixture.send('INVOKE', { invocationId: capabilityId, payload: invoke(capabilityId, {}) })

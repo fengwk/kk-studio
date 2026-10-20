@@ -4701,7 +4701,7 @@ describe('AgentPane root control mounting', () => {
       viewId: req.viewId,
       environmentId: envCard.id,
       directory: '/home/user',
-      entryUrl: 'https://ide.test/?workspace=1',
+      entryUrl: `/environment-ide/${envCard.id}/__ide/bootstrap?token=1`,
     }))
 
     const onIdeMounted = vi.fn()
@@ -4788,13 +4788,13 @@ describe('AgentPane root control mounting', () => {
         viewId: req.viewId,
         environmentId: envCard.id,
         directory: '/home/user',
-        entryUrl: 'https://ide.test/?workspace=shell',
+        entryUrl: `/environment-ide/${envCard.id}/__ide/bootstrap?token=shell`,
       }))
       .mockImplementationOnce(async (_envId, req) => ({
         viewId: req.viewId,
         environmentId: secondEnvCard.id,
         directory: '/srv/second',
-        entryUrl: 'https://ide.test/?workspace=second',
+        entryUrl: `/environment-ide/${secondEnvCard.id}/__ide/bootstrap?token=second`,
       }))
     vi.mocked(environmentService.changeIdeViewDirectory).mockImplementationOnce(async (_envId, viewId, req) => ({
       viewId,

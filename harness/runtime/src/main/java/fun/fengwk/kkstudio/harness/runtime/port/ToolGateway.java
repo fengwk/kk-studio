@@ -1,5 +1,8 @@
 package fun.fengwk.kkstudio.harness.runtime.port;
 
+import fun.fengwk.kkstudio.harness.environment.capability.ExpectedFile;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEditReview;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
@@ -43,7 +46,23 @@ public interface ToolGateway {
       UUID threadId,
       UUID assistantEntryId,
       int proposedAttempt,
-      ToolInvocationRequest request) {
+      ToolInvocationRequest request,
+      ToolApproval approval) {
+
+    public Execution(
+        UUID invocationId,
+        UUID threadId,
+        UUID assistantEntryId,
+        int proposedAttempt,
+        ToolInvocationRequest request) {
+      this(
+          invocationId,
+          threadId,
+          assistantEntryId,
+          proposedAttempt,
+          request,
+          ToolApproval.notRequired());
+    }
 
     public Execution {
       Objects.requireNonNull(invocationId, "invocationId");
@@ -53,6 +72,12 @@ public interface ToolGateway {
         throw new IllegalArgumentException("proposedAttempt must be positive");
       }
       request = Objects.requireNonNull(request, "request");
+      approval = Objects.requireNonNull(approval, "approval");
+    }
+
+    public ExpectedFile expectedFile() {
+      ToolEditReview editReview = approval.editReview();
+      return editReview == null ? null : editReview.expectedFile();
     }
   }
 
@@ -63,7 +88,12 @@ public interface ToolGateway {
   record Allow() implements PreflightResult {}
 
   /** 需要用户确认；reason 是人类可读的 canonical 提示。 */
-  record Ask(String reason) implements PreflightResult {
+  record Ask(String reason, ToolEditReview editReview) implements PreflightResult {
+
+    public Ask(String reason) {
+      this(reason, null);
+    }
+
     public Ask {
       reason = requireCanonicalReason(reason);
     }

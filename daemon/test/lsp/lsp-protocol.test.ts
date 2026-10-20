@@ -66,15 +66,15 @@ describe('LspClient Protocol & Handshake', () => {
     fs.writeFileSync(file, 'class App {}\n')
 
     const normal = await startClient('normal')
-    const locs = await normal.client.definition(file, 1, 0, 5000)
+    const locs = await normal.client.definition(file, 1, 0)
     expect(locs).toEqual([`${file}:10:5`])
 
     const linkClient = await startClient('link-definition')
-    const linkLocs = await linkClient.client.definition(file, 1, 0, 5000)
+    const linkLocs = await linkClient.client.definition(file, 1, 0)
     expect(linkLocs).toEqual([`${file}:10:5`])
 
     const nullClient = await startClient('null-definition')
-    const nullLocs = await nullClient.client.definition(file, 1, 0, 5000)
+    const nullLocs = await nullClient.client.definition(file, 1, 0)
     expect(nullLocs).toEqual(['No results found'])
   })
 
@@ -83,7 +83,7 @@ describe('LspClient Protocol & Handshake', () => {
     fs.writeFileSync(file, 'class App {}\n')
 
     const weird = await startClient('weird-locations')
-    const locs = await weird.client.definition(file, 1, 0, 5000)
+    const locs = await weird.client.definition(file, 1, 0)
     expect(locs).toEqual(['jdt://contents/pkg/Thing.class', 'unknown'])
   })
 
@@ -92,7 +92,7 @@ describe('LspClient Protocol & Handshake', () => {
     fs.writeFileSync(file, 'class App {}\n')
 
     const errClient = await startClient('error-definition')
-    await expect(errClient.client.definition(file, 1, 0, 5000)).rejects.toThrow(
+    await expect(errClient.client.definition(file, 1, 0)).rejects.toThrow(
       'LSP request failed (textDocument/definition)',
     )
     expect(errClient.client.isAlive()).toBe(true)
@@ -100,24 +100,24 @@ describe('LspClient Protocol & Handshake', () => {
 
   it('formats workspace symbols in SymbolInformation and WorkspaceSymbol formats', async () => {
     const normal = await startClient('normal')
-    const symbols = await normal.client.workspaceSymbols('A', 2, 5000)
+    const symbols = await normal.client.workspaceSymbols('A', 2)
     expect(symbols).toEqual([
       'Alpha (Class) - file:///tmp/alpha.java',
       'Beta (Function) - file:///tmp/beta.java',
     ])
 
     const wsSymbols = await startClient('workspace-symbols')
-    const delta = await wsSymbols.client.workspaceSymbols('D', 10, 5000)
+    const delta = await wsSymbols.client.workspaceSymbols('D', 10)
     expect(delta).toEqual(['Delta (Class) - file:///tmp/delta.java'])
 
     const emptySymbols = await startClient('empty-symbols')
-    expect(await emptySymbols.client.workspaceSymbols('A', 10, 5000)).toEqual(['No symbols found'])
+    expect(await emptySymbols.client.workspaceSymbols('A', 10)).toEqual(['No symbols found'])
 
     const nullSymbols = await startClient('null-symbols')
-    expect(await nullSymbols.client.workspaceSymbols('A', 10, 5000)).toEqual(['No symbols found'])
+    expect(await nullSymbols.client.workspaceSymbols('A', 10)).toEqual(['No symbols found'])
 
     const oddSymbols = await startClient('odd-symbols')
-    expect(await oddSymbols.client.workspaceSymbols('A', 10, 5000)).toEqual([
+    expect(await oddSymbols.client.workspaceSymbols('A', 10)).toEqual([
       'unknown (unknown) - unknown',
     ])
   })
@@ -127,12 +127,12 @@ describe('LspClient Protocol & Handshake', () => {
     fs.writeFileSync(file, 'class App {}\n')
 
     const noDef = await startClient('no-definition')
-    await expect(noDef.client.definition(file, 1, 0, 5000)).rejects.toThrow(
+    await expect(noDef.client.definition(file, 1, 0)).rejects.toThrow(
       /does not advertise go-to-definition support/,
     )
 
     const noSym = await startClient('no-symbols')
-    await expect(noSym.client.workspaceSymbols('q', 10, 5000)).rejects.toThrow(
+    await expect(noSym.client.workspaceSymbols('q', 10)).rejects.toThrow(
       /does not advertise workspace symbol support/,
     )
 
@@ -146,7 +146,7 @@ describe('LspClient Protocol & Handshake', () => {
     fs.writeFileSync(crlfFile, 'class A {}\r\nclass B {}\n')
 
     const normal = await startClient('normal')
-    await normal.client.definition(crlfFile, 1, 9, 5000)
+    await normal.client.definition(crlfFile, 1, 9)
     const defMsg = receivedMessages(normal.transcript, 'textDocument/definition')[0]
     expect(defMsg.params.position.line).toBe(0)
     expect(defMsg.params.position.character).toBe(9)
@@ -154,10 +154,10 @@ describe('LspClient Protocol & Handshake', () => {
     // Beyond line boundary error
     const noNewline = path.join(tempDir, 'NoNewline.java')
     fs.writeFileSync(noNewline, 'class App {}\nclass Last {}')
-    await expect(normal.client.definition(noNewline, 3, 0, 5000)).rejects.toThrow(
+    await expect(normal.client.definition(noNewline, 3, 0)).rejects.toThrow(
       /line 3 is beyond the end of the synchronized document/,
     )
-    await expect(normal.client.definition(noNewline, 2, 20, 5000)).rejects.toThrow(
+    await expect(normal.client.definition(noNewline, 2, 20)).rejects.toThrow(
       /character 20 is beyond line 2/,
     )
 
@@ -165,13 +165,13 @@ describe('LspClient Protocol & Handshake', () => {
     const utf32Client = await startClient('utf32')
     const emojiFile = path.join(tempDir, 'Emoji.java')
     fs.writeFileSync(emojiFile, '"😀x";\n')
-    await utf32Client.client.definition(emojiFile, 1, 2, 5000)
+    await utf32Client.client.definition(emojiFile, 1, 2)
     const utf32Def = receivedMessages(utf32Client.transcript, 'textDocument/definition')[0]
     expect(utf32Def.params.position.character).toBe(2)
 
     // UTF-8 position encoding
     const utf8Client = await startClient('utf8')
-    await utf8Client.client.definition(emojiFile, 1, 2, 5000)
+    await utf8Client.client.definition(emojiFile, 1, 2)
     const utf8Def = receivedMessages(utf8Client.transcript, 'textDocument/definition')[0]
     // '"' is 1 byte, '😀' is 4 bytes -> 5 bytes
     expect(utf8Def.params.position.character).toBe(5)
@@ -182,7 +182,7 @@ describe('LspClient Protocol & Handshake', () => {
     const file = path.join(tempDir, 'App.java')
     fs.writeFileSync(file, 'class App {}\n')
 
-    const locs = await client.definition(file, 1, 0, 5000)
+    const locs = await client.definition(file, 1, 0)
     expect(locs).toEqual([`${file}:10:5`])
   })
 
@@ -191,7 +191,7 @@ describe('LspClient Protocol & Handshake', () => {
     const file = path.join(tempDir, 'App.java')
     fs.writeFileSync(file, 'class App {}\n')
 
-    const locs = await client.definition(file, 1, 0, 5000)
+    const locs = await client.definition(file, 1, 0)
     expect(locs).toEqual([`${file}:10:5`])
   })
 
@@ -202,7 +202,7 @@ describe('LspClient Protocol & Handshake', () => {
     clients.push(client)
 
     const startedAt = Date.now()
-    await expect(client.initialize(60_000)).rejects.toThrow(/non-protocol output/)
+    await expect(client.initialize()).rejects.toThrow(/non-protocol output/)
     expect(Date.now() - startedAt).toBeLessThan(5000)
     expect(client.isAlive()).toBe(false)
   })
@@ -217,7 +217,7 @@ describe('LspClient Protocol & Handshake', () => {
     const clientReq = await startClient('client-requests')
     await awaitEvent(clientReq.transcript, (e) => e.event === 'recv' && e.message?.id === 900)
 
-    const locs = await clientReq.client.definition(file, 1, 0, 5000)
+    const locs = await clientReq.client.definition(file, 1, 0)
     expect(locs).toEqual([`${file}:10:5`])
   })
 
@@ -226,8 +226,16 @@ describe('LspClient Protocol & Handshake', () => {
     const file = path.join(tempDir, 'App.java')
     fs.writeFileSync(file, 'class App {}\n')
 
-    await expect(client.definition(file, 1, 0, 300)).rejects.toThrow(
-      /LSP request timed out after 300ms \(textDocument\/definition\)\./,
+    const ac = new AbortController()
+    const p = client.definition(file, 1, 0, ac.signal)
+    await awaitEvent(
+      transcript,
+      (e) => e.event === 'recv' && e.message?.method === 'textDocument/definition',
+    )
+    ac.abort('TIMED_OUT')
+
+    await expect(p).rejects.toThrow(
+      /LSP request timed out \(textDocument\/definition\)\./,
     )
 
     // Verify $/cancelRequest was sent
@@ -245,10 +253,20 @@ describe('LspClient Protocol & Handshake', () => {
     fs.writeFileSync(file, 'class App {}\n')
 
     const ac = new AbortController()
-    const p = client.definition(file, 1, 0, 5000, ac.signal)
-    setTimeout(() => ac.abort(), 100)
+    const p = client.definition(file, 1, 0, ac.signal)
+    await awaitEvent(
+      transcript,
+      (e) => e.event === 'recv' && e.message?.method === 'textDocument/definition',
+    )
+    ac.abort()
 
     await expect(p).rejects.toThrow(/Operation cancelled/)
+    // Verify $/cancelRequest was sent
+    const cancelEvent = await awaitEvent(
+      transcript,
+      (e) => e.event === 'recv' && e.message?.method === '$/cancelRequest',
+    )
+    expect(cancelEvent).toBeDefined()
     expect(client.isAlive()).toBe(true)
   })
 
@@ -282,11 +300,11 @@ describe('LspClient Protocol & Handshake', () => {
     const file = path.join(tempDir, 'App.java')
     fs.writeFileSync(file, 'class App {}\n')
 
-    await expect(client.definition(file, 1, 0, 5000)).rejects.toThrow(/exit code 11/)
+    await expect(client.definition(file, 1, 0)).rejects.toThrow(/exit code 11/)
     expect(client.isAlive()).toBe(false)
 
     // Repeat calls report exited cleanly
-    await expect(client.definition(file, 1, 0, 5000)).rejects.toThrow(
+    await expect(client.definition(file, 1, 0)).rejects.toThrow(
       /LSP server 'fake' exited \(exit code 11\)/,
     )
   })
@@ -305,29 +323,29 @@ describe('LspClient Protocol & Handshake', () => {
     await client.initialize(5000)
 
     // jdt:// target uses java/classFileContents
-    const source1 = await client.javaDecompile('jdt://contents/org/Test.class', 5000)
+    const source1 = await client.javaDecompile('jdt://contents/org/Test.class')
     expect(source1).toBe('class Decompiled {}\n')
 
     // local class file uses workspace/executeCommand java.decompile
     const classFile = path.join(tempDir, 'App.class')
     fs.writeFileSync(classFile, Buffer.from([0xca, 0xfe, 0xba, 0xbe]))
-    const source2 = await client.javaDecompile(classFile, 5000)
+    const source2 = await client.javaDecompile(classFile)
     expect(source2).toBe('class Decompiled {}\n')
 
     // Non-jdtls server rejects javaDecompile for jdt:// targets
     const normal = await startClient('normal')
-    await expect(normal.client.javaDecompile('jdt://contents/Test.class', 5000)).rejects.toThrow(
+    await expect(normal.client.javaDecompile('jdt://contents/Test.class')).rejects.toThrow(
       'lsp_java_decompile is only supported by jdtls.',
     )
 
     // Empty decompile rejects
     const emptyClient = await startClient('empty-decompile')
-    await expect(emptyClient.client.javaDecompile(classFile, 5000)).rejects.toThrow(
+    await expect(emptyClient.client.javaDecompile(classFile)).rejects.toThrow(
       /Could not load or decompile class for target/,
     )
 
     // Relative target rejects
-    await expect(normal.client.javaDecompile('rel/App.class', 5000)).rejects.toThrow(
+    await expect(normal.client.javaDecompile('rel/App.class')).rejects.toThrow(
       /target must be an absolute class path, a file: URI, or a jdt:\/\/ URI/,
     )
   })
@@ -474,14 +492,14 @@ describe('LspClient Protocol & Handshake', () => {
     const file = path.join(tempDir, 'App.java')
     fs.writeFileSync(file, 'class App {}\n')
 
-    await client.definition(file, 1, 0, 5000)
+    await client.definition(file, 1, 0)
     expect(receivedMessages(transcript, 'textDocument/didOpen')).toHaveLength(1)
 
     // Update mtime without changing content
     const futureTime = new Date(Date.now() + 5000)
     fs.utimesSync(file, futureTime, futureTime)
 
-    await client.definition(file, 1, 0, 5000)
+    await client.definition(file, 1, 0)
     expect(receivedMessages(transcript, 'textDocument/didChange')).toHaveLength(0)
     expect(receivedMessages(transcript, 'textDocument/didSave')).toHaveLength(0)
   })
@@ -491,7 +509,7 @@ describe('LspClient Protocol & Handshake', () => {
     const file = path.join(tempDir, 'App.java')
     fs.writeFileSync(file, 'class App {}\n')
 
-    const results = await client.definition(file, 1, 0, 5000)
+    const results = await client.definition(file, 1, 0)
     expect(results).toHaveLength(2)
     expect(results[0]).toBe('custom://some/uri')
     expect(results[1]).toBe('file://invalid host/path')
@@ -499,7 +517,7 @@ describe('LspClient Protocol & Handshake', () => {
 
   it('formats symbols with string kind and missing URI safely', async () => {
     const { client } = await startClient('custom-symbols')
-    const results = await client.workspaceSymbols('query', 10, 5000)
+    const results = await client.workspaceSymbols('query', 10)
     expect(results).toHaveLength(1)
     expect(results[0]).toBe('CustomSym (customInterface) - unknown')
   })
@@ -542,7 +560,7 @@ describe('LspClient Protocol & Handshake', () => {
     expect(() => client.sync(binaryFile)).toThrow('LSP client stopped')
     const file = path.join(tempDir, 'App.java')
     fs.writeFileSync(file, 'class App {}\n')
-    await expect(client.definition(file, 1, 0, 5000)).rejects.toThrow('LSP client stopped')
+    await expect(client.definition(file, 1, 0)).rejects.toThrow('LSP client stopped')
   })
 
   it('javaDecompile rejects invalid file URI, non-existent target, and directory target', async () => {
@@ -553,14 +571,14 @@ describe('LspClient Protocol & Handshake', () => {
     await client.initialize(5000)
 
     // Invalid file URI
-    await expect(client.javaDecompile('file://invalid host/App.class', 5000)).rejects.toThrow(/invalid class target URI/)
+    await expect(client.javaDecompile('file://invalid host/App.class')).rejects.toThrow(/invalid class target URI/)
 
     // Non-existent file
     const missing = path.join(tempDir, 'Missing.class')
-    await expect(client.javaDecompile(missing, 5000)).rejects.toThrow(/target is not a readable class file/)
+    await expect(client.javaDecompile(missing)).rejects.toThrow(/target is not a readable class file/)
 
     // Directory
-    await expect(client.javaDecompile(tempDir, 5000)).rejects.toThrow(/target is not a readable class file/)
+    await expect(client.javaDecompile(tempDir)).rejects.toThrow(/target is not a readable class file/)
   })
 
   it('rejects immediately when signal is already aborted', async () => {
@@ -570,6 +588,15 @@ describe('LspClient Protocol & Handshake', () => {
 
     const ac = new AbortController()
     ac.abort()
-    await expect(client.definition(file, 1, 0, 5000, ac.signal)).rejects.toThrow(/Operation cancelled/)
+    await expect(client.definition(file, 1, 0, ac.signal)).rejects.toThrow(/Operation cancelled/)
+
+    const timeoutAc = new AbortController()
+    timeoutAc.abort('TIMED_OUT')
+    await expect(client.definition(file, 1, 0, timeoutAc.signal)).rejects.toThrow(/LSP request timed out/)
+  })
+
+  it('treats zero timeout as infinite without premature timer triggers', async () => {
+    const { client } = await startClient('normal')
+    expect(client.isAlive()).toBe(true)
   })
 })

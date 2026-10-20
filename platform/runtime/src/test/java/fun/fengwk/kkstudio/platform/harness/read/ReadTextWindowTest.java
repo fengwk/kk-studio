@@ -7,10 +7,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.platform.storage.ReadDeadline;
+
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.regex.Matcher;
@@ -33,10 +36,19 @@ class ReadTextWindowTest {
   /** 编号正文行：可选左填充数字 + {@code |} + 真实文件内容。 */
   private static final Pattern BODY_PATTERN = Pattern.compile(" *([0-9]+)\\|(.*)");
 
+  private static ReadDeadline deadline() {
+    return ReadDeadline.after(Duration.ofMinutes(1));
+  }
+
   private static String format(
       String content, Integer offset, Integer limit, Integer columnOffset) {
     return ReadTextWindow.format(
-        content.getBytes(StandardCharsets.UTF_8), offset, limit, columnOffset, "test.txt");
+        content.getBytes(StandardCharsets.UTF_8),
+        offset,
+        limit,
+        columnOffset,
+        "test.txt",
+        deadline());
   }
 
   /** 空资源输出明确空范围；lsp 不可用时整行省略。 */
@@ -44,7 +56,7 @@ class ReadTextWindowTest {
   void emptyInputReportsEmptyRange() {
     assertEquals(
         String.join("\n", "path: test.txt", "ends_with_newline: no", "range: empty"),
-        ReadTextWindow.format(new byte[0], 1, 200, null, "test.txt"));
+        ReadTextWindow.format(new byte[0], 1, 200, null, "test.txt", deadline()));
   }
 
   /** 分页窗口：offset/limit 生效，未到 EOF 时给出 line_limit 截断与下一行位置。 */
@@ -212,7 +224,8 @@ class ReadTextWindowTest {
   @Test
   void byteOrderMarkIsStrippedOnlyAtTheVeryStart() {
     assertTrue(
-        ReadTextWindow.format(withLeadingBom("bom-text\n"), 1, 200, null, "test.txt", "unsupported")
+        ReadTextWindow.format(
+                withLeadingBom("bom-text\n"), 1, 200, null, "test.txt", "unsupported", deadline())
             .contains("range: 1:1-1:8"));
 
     String afterNewline = format("\n\uFEFFx", 1, 200, null);
@@ -243,7 +256,9 @@ class ReadTextWindowTest {
     assertTrue(
         assertThrows(
                 PlatformReadException.class,
-                () -> ReadTextWindow.format(new byte[] {'a', 0, 'b'}, 1, 200, null, "test.bin"))
+                () ->
+                    ReadTextWindow.format(
+                        new byte[] {'a', 0, 'b'}, 1, 200, null, "test.bin", deadline()))
             .getMessage()
             .contains("binary"));
     assertTrue(
@@ -251,7 +266,12 @@ class ReadTextWindowTest {
                 PlatformReadException.class,
                 () ->
                     ReadTextWindow.format(
-                        new byte[] {(byte) 0xC0, (byte) 0xAF}, 1, 200, null, "test.bin"))
+                        new byte[] {(byte) 0xC0, (byte) 0xAF},
+                        1,
+                        200,
+                        null,
+                        "test.bin",
+                        deadline()))
             .getMessage()
             .contains("binary"));
   }
@@ -275,7 +295,8 @@ class ReadTextWindowTest {
             200,
             null,
             "app.java",
-            "supported (java)");
+            "supported (java)",
+            deadline());
     assertTrue(
         supported.startsWith(
             "path: app.java\nends_with_newline: yes\nrange: 1:1-1:12\nlsp: supported (java)\n\n1|class App {}"),
@@ -288,7 +309,8 @@ class ReadTextWindowTest {
             200,
             null,
             "app.java",
-            "unsupported");
+            "unsupported",
+            deadline());
     assertFalse(unsupported.contains("lsp:"), unsupported);
   }
 
@@ -311,7 +333,9 @@ class ReadTextWindowTest {
     PlatformReadException failure =
         assertThrows(
             PlatformReadException.class,
-            () -> ReadTextWindow.format(failing, 1, 200, null, "test.txt", "unsupported"));
+            () ->
+                ReadTextWindow.format(
+                    failing, 1, 200, null, "test.txt", "unsupported", deadline()));
     assertTrue(failure.getMessage().contains("cannot be read"), failure.getMessage());
   }
 
@@ -331,11 +355,27 @@ class ReadTextWindowTest {
       PlatformReadException failure =
           assertThrows(
               PlatformReadException.class,
-              () -> ReadTextWindow.format(interrupting, 1, 200, null, "test.txt", "unsupported"));
+              () ->
+                  ReadTextWindow.format(
+                      interrupting, 1, 200, null, "test.txt", "unsupported", deadline()));
       assertTrue(failure.getMessage().contains("interrupted or timed out"), failure.getMessage());
     } finally {
       Thread.interrupted();
     }
+  }
+
+  /** 测试意图：扫描前或扫描中已超时应抛出受管读取异常。 */
+  @Test
+  void expiredDeadlineFailsScan() throws InterruptedException {
+    ReadDeadline expired = ReadDeadline.after(Duration.ofMillis(10));
+    Thread.sleep(15L);
+    PlatformReadException error =
+        assertThrows(
+            PlatformReadException.class,
+            () ->
+                ReadTextWindow.format(
+                    "hello\n".getBytes(StandardCharsets.UTF_8), 1, 200, null, "test.txt", expired));
+    assertTrue(error.getMessage().contains("interrupted or timed out"), error.getMessage());
   }
 
   /**
@@ -348,7 +388,8 @@ class ReadTextWindowTest {
     int bytes = 9 * 1024 * 1024;
 
     String head =
-        ReadTextWindow.format(generatedStream(bytes), 1, 1, null, "huge.txt", "unsupported");
+        ReadTextWindow.format(
+            generatedStream(bytes), 1, 1, null, "huge.txt", "unsupported", deadline());
 
     assertTrue(head.contains("range: 1:1-1:99"), head);
     assertTrue(head.contains("1|" + "a".repeat(99)), head);
@@ -360,11 +401,17 @@ class ReadTextWindowTest {
     long lastLine = ((long) bytes - 1) / 100 + 1;
     String tail =
         ReadTextWindow.format(
-            generatedStream(bytes), (int) lastLine, 1, null, "huge.txt", "unsupported");
+            generatedStream(bytes), (int) lastLine, 1, null, "huge.txt", "unsupported", deadline());
     assertTrue(tail.contains("range: " + lastLine + ":1-" + lastLine + ":84"), tail);
     String beyond =
         ReadTextWindow.format(
-            generatedStream(bytes), (int) lastLine + 1, 1, null, "huge.txt", "unsupported");
+            generatedStream(bytes),
+            (int) lastLine + 1,
+            1,
+            null,
+            "huge.txt",
+            "unsupported",
+            deadline());
     assertTrue(beyond.endsWith("range: empty"), beyond);
   }
 
@@ -383,7 +430,12 @@ class ReadTextWindowTest {
     while (true) {
       String output =
           ReadTextWindow.format(
-              source.getBytes(StandardCharsets.UTF_8), offset, 2000, columnOffset, "test.txt");
+              source.getBytes(StandardCharsets.UTF_8),
+              offset,
+              2000,
+              columnOffset,
+              "test.txt",
+              deadline());
       collectFragments(output, fragments);
       if (!output.contains("truncated: yes")) {
         break;
@@ -438,7 +490,7 @@ class ReadTextWindowTest {
         };
 
     assertTrue(
-        ReadTextWindow.format(stream, 1, 200, null, "test.txt", "unsupported")
+        ReadTextWindow.format(stream, 1, 200, null, "test.txt", "unsupported", deadline())
             .contains("1|content"));
   }
 }

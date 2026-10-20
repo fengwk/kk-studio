@@ -247,7 +247,8 @@ public record ToolInvocation(
       if (nextApproval != null
           && nextApproval.required()
           && nextApproval.decision() != null
-          && nextApproval.requestedAt().equals(storedApproval.requestedAt())) {
+          && nextApproval.requestedAt().equals(storedApproval.requestedAt())
+          && Objects.equals(nextApproval.editReview(), storedApproval.editReview())) {
         if (nextApproval.decision() == ToolApprovalDecision.ALLOWED
             && next.status() != ToolInvocationStatus.READY) {
           throw new IllegalArgumentException(
@@ -332,6 +333,10 @@ public record ToolInvocation(
 
   /** READY 且无 approval -&gt; WAITING_APPROVAL，并附带一个 required undecided approval。 */
   public ToolInvocation requestApproval(String reason, Instant now) {
+    return requestApproval(reason, null, now);
+  }
+
+  public ToolInvocation requestApproval(String reason, ToolEditReview editReview, Instant now) {
     if (approval != null) {
       throw new IllegalArgumentException("approval already exists");
     }
@@ -339,7 +344,7 @@ public record ToolInvocation(
     return withState(
         ToolInvocationStatus.WAITING_APPROVAL,
         attempt,
-        ToolApproval.request(effectiveNow, reason),
+        ToolApproval.request(effectiveNow, reason, editReview),
         null,
         ToolEffectBatch.EMPTY,
         null,

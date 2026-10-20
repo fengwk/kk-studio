@@ -21,8 +21,8 @@ import fun.fengwk.kkstudio.share.ai.environment.EnvironmentIdeViewDTO;
 /**
  * Environment IDE 视图控制 API：把 Studio pane 的 view 生命周期翻译为对 Daemon 的 IDE 命令。
  *
- * <p>{@code OPEN_VIEW} 返回受控的独立 Origin entryUrl；{@code CHANGE_DIRECTORY} 明确拒绝 dirty（由 Daemon 判定）；
- * {@code FOCUS_TERMINAL} 只新建/显示人工终端，不模拟输入；{@code CLOSE_VIEW} 幂等清理该 view，不影响其它 view 或 Agent。
+ * <p>{@code OPEN_VIEW} 返回受控的同源 entryUrl；{@code CHANGE_DIRECTORY} 明确拒绝 dirty（由 Daemon 判定）； {@code
+ * FOCUS_TERMINAL} 只新建/显示人工终端，不模拟输入；{@code CLOSE_VIEW} 幂等清理该 view，不影响其它 view 或 Agent。
  */
 @AllArgsConstructor
 @RequestMapping("/api/environments/{environmentId}/ide/views")

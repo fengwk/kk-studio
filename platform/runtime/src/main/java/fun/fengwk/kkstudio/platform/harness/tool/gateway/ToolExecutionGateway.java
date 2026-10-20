@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.harness.tool.gateway;
 import lombok.extern.slf4j.Slf4j;
 
 import fun.fengwk.kkstudio.harness.builtin.CompletedToolExecutionHandle;
+import fun.fengwk.kkstudio.harness.builtin.environment.EnvironmentCapabilityTool;
 import fun.fengwk.kkstudio.harness.common.result.BinaryResultContent;
 import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.harness.common.result.ResultContent;
@@ -29,10 +30,12 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityE
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionListener;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionRequest;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityFailedException;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilitySendUncertainException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTransport;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
+import fun.fengwk.kkstudio.harness.environment.capability.ExpectedFile;
 import fun.fengwk.kkstudio.harness.runtime.admission.ConcurrencyAdmission;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorStateAccess;
@@ -75,7 +78,7 @@ import java.util.function.Supplier;
 /**
  * 生产工具执行网关，连接 Harness Runtime、运行时工具目录和 Contributor {@link Tool} SPI。
  *
- * <p>{@link #preflight} 只校验冻结绑定与当前目录是否一致，拒绝未选择 Environment 的环境工具，然后执行权限判定。{@link #start}
+ * <p>{@link #preflight} 校验冻结绑定、Environment 与权限；需要审批的文件编辑还会只读生成真实文件审查。{@link #start}
  * 获取并发租约，装配分支视图与可选环境绑定，再提交异步执行。
  *
  * <p>{@link #preflight} 与 {@link #start} 都在当前目录租用中严格取回冻结贡献：工具已移除（例如插件被关闭）或定义、贡献身份、 requirements
@@ -102,6 +105,7 @@ public final class ToolExecutionGateway implements ToolGateway {
   static final String EXECUTION_FAILED_KIND = "EXECUTION_FAILED";
   static final String INVALID_PARTIAL_KIND = "INVALID_PARTIAL";
   static final String CONTRIBUTOR_CONTRACT_VIOLATION_KIND = "CONTRIBUTOR_CONTRACT_VIOLATION";
+  static final String EDIT_REVIEW_REQUIRED_KIND = "EDIT_REVIEW_REQUIRED";
 
   /** 回调桥缓冲队列的保守上限：gate 打开前的同步回调绝不能无界缓冲。 */
   static final int MAX_BUFFERED_SIGNALS = 256;
@@ -115,6 +119,10 @@ public final class ToolExecutionGateway implements ToolGateway {
   /** 工具已不可用时的下一步：不要重试，由模型改用其它方式或询问用户。 */
   private static final String TOOL_UNAVAILABLE_NEXT_ACTION =
       "Continue without this tool or ask the user";
+
+  /** 需要编辑评审时的下一步：先携带编辑评审请求审批，再调用工具。 */
+  private static final String EDIT_REVIEW_REQUIRED_NEXT_ACTION =
+      "Request approval with an edit review before calling the tool again";
 
   /** 冻结定义与当前 catalog 不一致时的确定性下一步：下一轮按当前目录重新冻结工具定义。 */
   private static final String DEFINITION_MISMATCH_NEXT_ACTION =
@@ -249,7 +257,13 @@ public final class ToolExecutionGateway implements ToolGateway {
       PermissionAction action = evaluation.action();
       return switch (action) {
         case ALLOW -> new ToolGateway.Allow();
-        case ASK -> new ToolGateway.Ask("Permission rules require approval");
+        case ASK -> {
+          String reason = "Permission rules require approval";
+          yield resolved.contribution().tool() instanceof EnvironmentCapabilityTool environmentTool
+                  && EnvironmentCapabilityIds.FS_EDIT.equals(environmentTool.capability().id())
+              ? EditReviewPreflight.prepare(capabilityTransport, request, reason)
+              : new ToolGateway.Ask(reason);
+        }
         case DENY -> new ToolGateway.Deny(
             new ToolInvocationError(PERMISSION_DENIED_KIND, PERMISSION_DENIED_MESSAGE));
       };
@@ -299,6 +313,21 @@ public final class ToolExecutionGateway implements ToolGateway {
         return reject(resources, lease, environmentNotSelected);
       }
 
+      if (tool instanceof EnvironmentCapabilityTool environmentTool
+          && EnvironmentCapabilityIds.FS_EDIT.equals(environmentTool.capability().id())
+          && execution.approval().required()
+          && execution.expectedFile() == null) {
+        return reject(
+            resources,
+            lease,
+            new ToolInvocationError(
+                EDIT_REVIEW_REQUIRED_KIND,
+                ToolErrorGuidance.message(
+                    "Required edit approval must include a valid edit review",
+                    ExecutionFact.NOT_EXECUTED,
+                    EDIT_REVIEW_REQUIRED_NEXT_ACTION)));
+      }
+
       BranchView branch =
           contributorBranchViewLoader.load(
               execution.assistantEntryId(), contribution.id().contributorId().value());
@@ -308,7 +337,8 @@ public final class ToolExecutionGateway implements ToolGateway {
                   execution.request().binding().environmentId(),
                   capabilityTransport,
                   execution.invocationId().toString(),
-                  execution.request().call().id())
+                  execution.request().call().id(),
+                  execution.expectedFile())
               : null;
       ToolExecutionContext context =
           new ToolExecutionContext(
@@ -540,16 +570,19 @@ public final class ToolExecutionGateway implements ToolGateway {
     private final EnvironmentCapabilityTransport capabilityTransport;
     private final String invocationId;
     private final String modelCallId;
+    private final ExpectedFile expectedFile;
 
     private PlatformBoundEnvironment(
         EnvironmentId environmentId,
         EnvironmentCapabilityTransport capabilityTransport,
         String invocationId,
-        String modelCallId) {
+        String modelCallId,
+        ExpectedFile expectedFile) {
       this.environmentId = Objects.requireNonNull(environmentId, "environmentId");
       this.capabilityTransport = Objects.requireNonNull(capabilityTransport, "capabilityTransport");
       this.invocationId = Objects.requireNonNull(invocationId, "invocationId");
       this.modelCallId = Objects.requireNonNull(modelCallId, "modelCallId");
+      this.expectedFile = expectedFile;
     }
 
     @Override
@@ -572,7 +605,7 @@ public final class ToolExecutionGateway implements ToolGateway {
             new EnvironmentCapabilityCall(invocationId, request.call().argumentsJson());
         EnvironmentCapabilityExecutionRequest capabilityRequest =
             new EnvironmentCapabilityExecutionRequest(
-                capability, capabilityCall, request.timeout());
+                capability, capabilityCall, request.timeout(), expectedFile);
         EnvironmentCapabilityExecutionHandle transportHandle =
             capabilityTransport.invoke(environmentId, capabilityRequest, capabilityListener);
         if (transportHandle == null) {

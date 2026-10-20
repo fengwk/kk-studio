@@ -289,3 +289,43 @@ test('Java update commands are replayed through the built Node decoder as a requ
   assert.equal(stepField(step, 'if'), undefined, 'the Java-to-Node decoder step must not be conditional')
   assert.doesNotMatch(step, /continue-on-error:|\|\|\s*true/u)
 })
+
+test('Windows diagnostic steps stay enabled after failures and remain off Linux and macOS', () => {
+  // 两个步骤都使用 always()+Windows：覆盖率失败后仍应采集/上传，其它平台完全不执行。
+  const steps = [...jobBlock(daemonCi, 'node_daemon').matchAll(/^      - ([\s\S]*?)(?=^      - |$(?![\s\S]))/gm)]
+    .map((match) => match[1])
+  const stepNamed = (name) => {
+    const step = steps.find((candidate) => (candidate.match(/^ {8}name: (.+)$/m)?.[1]
+      ?? candidate.match(/^name: (.+)$/m)?.[1]) === name)
+    assert.ok(step, `missing step ${name}`)
+    return step
+  }
+  const condition = (step) => {
+    const raw = step.match(/^ {8}if: (.+)$/m)?.[1] ?? step.match(/^if: (.+)$/m)?.[1]
+    const expression = raw?.match(/^\$\{\{ (.+) \}\}$/u)?.[1]
+    assert.ok(expression, 'expected an evaluated if expression')
+    return expression
+  }
+  const evaluate = (expression, os) => runInNewContext(expression, {
+    always: () => true,
+    runner: { os },
+  }, { timeout: 100 })
+
+  for (const name of ['Collect Windows process exit diagnostics', 'Upload Windows process diagnostic evidence']) {
+    const step = stepNamed(name)
+    const expression = condition(step)
+    assert.equal(evaluate(expression, 'Windows'), true, `${name} must survive failed coverage`)
+    assert.equal(evaluate(expression, 'Linux'), false, `${name} must not run on Linux`)
+    assert.equal(evaluate(expression, 'macOS'), false, `${name} must not run on macOS`)
+  }
+
+  // 探针 flag 只在 Windows 为 1；Linux/macOS 明确为无效值。
+  const coverageEnv = stepNamed('Test the daemon with coverage').match(/^ {8}env:\n((?: {10}.+\n)+)/m)?.[1]
+  assert.ok(coverageEnv, 'missing coverage env')
+  const flag = coverageEnv.match(/^ {10}KK_WINDOWS_NATIVE_DIAGNOSTIC: (.+)$/m)?.[1]
+  const flagExpression = flag?.match(/^\$\{\{ (.+) \}\}$/u)?.[1]
+  assert.ok(flagExpression, 'missing diagnostic flag expression')
+  assert.equal(evaluate(flagExpression, 'Windows'), '1')
+  assert.equal(evaluate(flagExpression, 'Linux'), '0')
+  assert.equal(evaluate(flagExpression, 'macOS'), '0')
+})

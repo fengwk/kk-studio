@@ -23,7 +23,20 @@ public record ToolApproval(
     String actor,
     String reason,
     Instant requestedAt,
-    Instant decidedAt) {
+    Instant decidedAt,
+    ToolEditReview editReview) {
+
+  /** 不带文件审查的普通工具审批。 */
+  public ToolApproval(
+      boolean required,
+      ToolApprovalDecision decision,
+      UUID decisionId,
+      String actor,
+      String reason,
+      Instant requestedAt,
+      Instant decidedAt) {
+    this(required, decision, decisionId, actor, reason, requestedAt, decidedAt, null);
+  }
 
   public ToolApproval {
     if (!required) {
@@ -32,7 +45,8 @@ public record ToolApproval(
           || actor != null
           || reason != null
           || requestedAt != null
-          || decidedAt != null) {
+          || decidedAt != null
+          || editReview != null) {
         throw new IllegalArgumentException("non-required approval must not carry decision facts");
       }
     } else if (decision == null) {
@@ -64,7 +78,12 @@ public record ToolApproval(
 
   /** 携带给定 request time 与 reason 的 required undecided approval 的最小工厂方法。 */
   public static ToolApproval request(Instant requestedAt, String reason) {
-    return new ToolApproval(true, null, null, null, reason, requestedAt, null);
+    return request(requestedAt, reason, null);
+  }
+
+  public static ToolApproval request(
+      Instant requestedAt, String reason, ToolEditReview editReview) {
+    return new ToolApproval(true, null, null, null, reason, requestedAt, null, editReview);
   }
 
   /**
@@ -86,7 +105,8 @@ public record ToolApproval(
       throw new IllegalArgumentException("a non-required approval cannot be decided");
     }
     if (this.decision == null) {
-      return new ToolApproval(true, decision, decisionId, actor, reason, requestedAt, decidedAt);
+      return new ToolApproval(
+          true, decision, decisionId, actor, reason, requestedAt, decidedAt, editReview);
     }
     if (this.decision == decision
         && Objects.equals(this.decisionId, decisionId)
