@@ -43,9 +43,9 @@ import java.util.function.BiFunction;
  * Target Model processor：消费 dispatcher 已 claim 的 MODEL Work，驱动一次 Model invocation 的完整生命周期。
  *
  * <p>只依赖单一 {@link HarnessStore} + {@link ModelGateway} + {@link RealtimeEventSink}，不自行全局 poll；不做任何
- * Entry / head / Usage 写入。所有持久化状态写入都在短事务内通过 store 锁序（Tree Advisory Lock -&gt; Session KEY SHARE
- * -&gt; Thread -&gt; ModelInvocation -&gt; Work；同事务需要 THREAD Work 时先 request/upsert 并锁定 THREAD
- * Work，再 lockClaimed MODEL Work）与 claim ownership 所有权校验完成，lost / stale 一律完整 no-op。
+ * Entry / head / Usage 写入。所有持久化状态写入都在短事务内按 own Thread -&gt; ModelInvocation -&gt; Work 锁序完成 （同事务需要
+ * THREAD Work 时先 request/upsert 并锁定 THREAD Work，再 lockClaimed MODEL Work）；不取执行树锁、Session 锁或
+ * 祖先锁。每次写入都以 claim ownership 校验完成，lost / stale 一律完整 no-op。
  *
  * <p>Gateway 受理后 Listener 回调由 {@link ModelExecution} 回调门控缓冲，任何 Listener 回调都不可能早于持久化 RUNNING
  * 落地；heartbeat 只 renew 当前 Work lease。进程内 execution registry 以 invocationId 为键，{@link #cancel}
@@ -103,11 +103,11 @@ public final class ModelProcessor implements AutoCloseable {
    * claim 当前真实 owned：伪造 / 错误 / 已过期 token 一律 LOST_OWNERSHIP no-op，绝不 cancel 合法 active execution。随后
    * per-invocation guard 覆盖 prepare 到 registry 插入：同一 claim（同 lease token）重复 / 并发投递直接返回
    * LOST_OWNERSHIP（不 cancel、不 mutation）；不同新 token（已通过 Work-only 校验，旧 lease 必然过期）先 supersede 旧本地
-   * execution 再 prepare。prepare 短事务按 Tree Advisory Lock -&gt; Session KEY SHARE -&gt; Thread -&gt;
-   * ModelInvocation -&gt; Work 锁序二次校验：READY 转 DISPATCHING + Thread version+1（事务外启动 heartbeat /
-   * Gateway）；DISPATCHING / RUNNING（旧 lease 过期恢复）按既有重试策略记录一次失败 attempt 后回到 READY 并重排 MODEL
-   * Work，预算耗尽则以 FAILED 明确终止并唤醒 THREAD，绝不重放 Provider；terminal 行只确保 THREAD Work 请求 （resultEntryId 仍
-   * null 时）后 complete MODEL Work，不重复 bump version。
+   * execution 再 prepare。prepare 短事务按 own Thread -&gt; ModelInvocation -&gt; Work
+   * 锁序二次校验（不取树锁或祖先锁）：READY 转 DISPATCHING + Thread version+1（事务外启动 heartbeat / Gateway）；DISPATCHING
+   * / RUNNING（旧 lease 过期恢复）按既有重试策略记录一次失败 attempt 后回到 READY 并重排 MODEL Work，预算耗尽则以 FAILED 明确终止并唤醒
+   * THREAD，绝不重放 Provider；terminal 行只确保 THREAD Work 请求 （resultEntryId 仍 null 时）后 complete MODEL
+   * Work，不重复 bump version。
    */
   public ProcessResult process(ClaimedWork claim) {
     Objects.requireNonNull(claim, "claim");
@@ -360,17 +360,14 @@ public final class ModelProcessor implements AutoCloseable {
     };
   }
 
-  /**
-   * 在事务内按 Tree Advisory Lock -> Session KEY SHARE -> Thread -> Model -> Work 锁序锁定并校验状态，依据 durable
-   * status 路由准备结果。
-   */
+  /** 在事务内按 own Thread -> Model -> Work 锁序锁定并校验状态，不取树锁/祖先锁，依据 durable status 路由准备结果。 */
   private Prepare prepareLocked(HarnessStore.Transaction tx, ClaimedWork claim, Instant now) {
     UUID invocationId = claim.target().id();
     ModelInvocation peek = tx.findModelInvocation(invocationId).orElse(null);
     if (peek == null) {
       return new Prepare.Lost();
     }
-    ThreadState thread = lockThreadWithSession(tx, peek.threadId());
+    ThreadState thread = tx.lockThread(peek.threadId()).orElse(null);
     if (thread == null) {
       return new Prepare.Lost();
     }
@@ -562,7 +559,7 @@ public final class ModelProcessor implements AutoCloseable {
         store.transaction(
             tx -> {
               Instant now = tx.now();
-              ThreadState thread = lockThreadWithSession(tx, dispatched.threadId());
+              ThreadState thread = tx.lockThread(dispatched.threadId()).orElse(null);
               if (thread == null) {
                 return false;
               }
@@ -603,7 +600,7 @@ public final class ModelProcessor implements AutoCloseable {
           store.transaction(
               tx -> {
                 Instant now = tx.now();
-                ThreadState thread = lockThreadWithSession(tx, dispatched.threadId());
+                ThreadState thread = tx.lockThread(dispatched.threadId()).orElse(null);
                 if (thread == null) {
                   return false;
                 }
@@ -627,10 +624,6 @@ public final class ModelProcessor implements AutoCloseable {
     } catch (ClaimLostSignal ignored) {
       return false;
     }
-  }
-
-  private static ThreadState lockThreadWithSession(HarnessStore.Transaction tx, UUID threadId) {
-    return ThreadProcessor.lockThreadWithSession(tx, threadId);
   }
 
   private void release(ModelExecution execution) {

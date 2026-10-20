@@ -35,10 +35,9 @@ import java.util.function.BiFunction;
  * Target Tool processor：消费 dispatcher 已 claim 的 TOOL Work，驱动一次 Tool invocation 的完整生命周期。
  *
  * <p>只依赖单一 {@link HarnessStore} + {@link ToolGateway} + {@link RealtimeEventSink}，不自行全局 poll；不做任何
- * Entry / head / ToolResult Entry / Usage 写入。所有持久化状态写入都在短事务内通过 store 锁序（Tree Advisory Lock -&gt;
- * Session KEY SHARE -&gt; Thread -&gt; ModelInvocation -&gt; ToolInvocation -&gt; Work；同事务需要 THREAD
- * Work 时先 request/upsert 并锁定 THREAD Work，再 lockClaimed TOOL Work）与 claim ownership 所有权校验完成，lost /
- * stale 一律完整 no-op。
+ * Entry / head / ToolResult Entry / Usage 写入。所有持久化状态写入都在短事务内按 own Thread -&gt; ModelInvocation
+ * -&gt; ToolInvocation -&gt; Work 锁序完成（同事务需要 THREAD Work 时先 request/upsert 并锁定 THREAD Work，再
+ * lockClaimed TOOL Work）；不取执行树锁、Session 锁或祖先锁。每次写入都以 claim ownership 校验完成，lost / stale 一律完整 no-op。
  *
  * <p>状态机：READY + approval null 在 ensure 完整 lease margin 后于事务外执行 {@link ToolGateway#preflight}
  * （preflight 期间由本地 heartbeat 维持 lease）；锁内解析实际 YOLO 开关（执行根读自身，子代理读执行根）为 true 时跳过 preflight 直接
@@ -195,7 +194,7 @@ public final class ToolProcessor implements AutoCloseable {
     if (modelPeek == null) {
       return new Prepare.Lost();
     }
-    ThreadState thread = lockThreadWithSession(tx, modelPeek.threadId());
+    ThreadState thread = tx.lockThread(modelPeek.threadId()).orElse(null);
     if (thread == null) {
       return new Prepare.Lost();
     }
@@ -220,7 +219,7 @@ public final class ToolProcessor implements AutoCloseable {
    * 后事务外执行，期间 heartbeat 维持 lease）；completed approval 同事务 beginDispatch + version+1 后直接进入 Gateway
    * 派发。
    *
-   * <p>YOLO 决策在锁内完成：锁 Thread（含执行树锁与祖先链）后解析的实际开关为 true 时直接返回 {@link Prepare.Allowed}（一次 preflight
+   * <p>YOLO 决策在锁内完成：只锁本 Thread 后解析的实际开关为 true 时直接返回 {@link Prepare.Allowed}（一次 preflight
    * 只做一次控制决定，不调用 gateway / evaluator，后续切换不追溯已完成的派发）；false 才走普通 gateway preflight。 人输入判定先于 YOLO 与
    * preflight：YOLO 不代替用户作答，问卷也不经过工具权限审批。
    */
@@ -303,8 +302,8 @@ public final class ToolProcessor implements AutoCloseable {
    * gateway。
    *
    * <p>问卷必须在接受时就能解析：解析失败说明 {@code ask_user} 契约被破坏（工具实现与运行时契约漂移），此时以确定性失败收敛并唤醒
-   * Thread，让模型看到无效调用，而不是冻结一个无法作答的等待。提交前按 Tree Advisory Lock -&gt; Session KEY SHARE -&gt; Thread
-   * 锁序锁定后二次校验 claim + READY + attempt 0 + approval null，lost 完整 no-op。错误信息只报告原因，不回显问卷原文。
+   * Thread，让模型看到无效调用，而不是冻结一个无法作答的等待。提交前按 own Thread 锁序锁定后二次校验 claim + READY + attempt 0 + approval
+   * null，lost 完整 no-op。错误信息只报告原因，不回显问卷原文。
    */
   private ProcessResult requestInput(ClaimedWork claim, UUID threadId) {
     boolean committed =
@@ -312,7 +311,7 @@ public final class ToolProcessor implements AutoCloseable {
             store.transaction(
                 tx -> {
                   Instant now = tx.now();
-                  ThreadState thread = lockThreadWithSession(tx, threadId);
+                  ThreadState thread = tx.lockThread(threadId).orElse(null);
                   if (thread == null) {
                     return false;
                   }
@@ -486,12 +485,12 @@ public final class ToolProcessor implements AutoCloseable {
   }
 
   /**
-   * Allow 的持久意图：按 Tree Advisory Lock -&gt; Session KEY SHARE -&gt; Thread 锁序锁定后二次校验 claim + READY +
-   * attempt + approval null，再 markApprovalNotRequired -&gt; beginDispatch。
+   * Allow 的持久意图：按 own Thread -&gt; Tool 锁序锁定后二次校验 claim + READY + attempt + approval null，再
+   * markApprovalNotRequired -&gt; beginDispatch。
    */
   private boolean allowIntent(
       HarnessStore.Transaction tx, ClaimedWork claim, UUID threadId, int attempt, Instant now) {
-    ThreadState thread = lockThreadWithSession(tx, threadId);
+    ThreadState thread = tx.lockThread(threadId).orElse(null);
     if (thread == null) {
       return false;
     }
@@ -521,7 +520,7 @@ public final class ToolProcessor implements AutoCloseable {
             store.transaction(
                 tx -> {
                   Instant now = tx.now();
-                  ThreadState thread = lockThreadWithSession(tx, preflight.threadId());
+                  ThreadState thread = tx.lockThread(preflight.threadId()).orElse(null);
                   if (thread == null) {
                     return false;
                   }
@@ -556,7 +555,7 @@ public final class ToolProcessor implements AutoCloseable {
               store.transaction(
                   tx -> {
                     Instant now = tx.now();
-                    ThreadState thread = lockThreadWithSession(tx, preflight.threadId());
+                    ThreadState thread = tx.lockThread(preflight.threadId()).orElse(null);
                     if (thread == null) {
                       return false;
                     }
@@ -593,7 +592,7 @@ public final class ToolProcessor implements AutoCloseable {
     return Boolean.TRUE.equals(
         store.transaction(
             tx -> {
-              ThreadState thread = lockThreadWithSession(tx, preflight.threadId());
+              ThreadState thread = tx.lockThread(preflight.threadId()).orElse(null);
               if (thread == null) {
                 return false;
               }
@@ -758,7 +757,7 @@ public final class ToolProcessor implements AutoCloseable {
         store.transaction(
             tx -> {
               Instant now = tx.now();
-              ThreadState thread = lockThreadWithSession(tx, dispatched.threadId());
+              ThreadState thread = tx.lockThread(dispatched.threadId()).orElse(null);
               if (thread == null) {
                 return false;
               }
@@ -802,7 +801,7 @@ public final class ToolProcessor implements AutoCloseable {
           store.transaction(
               tx -> {
                 Instant now = tx.now();
-                ThreadState thread = lockThreadWithSession(tx, dispatched.threadId());
+                ThreadState thread = tx.lockThread(dispatched.threadId()).orElse(null);
                 if (thread == null) {
                   return false;
                 }
@@ -826,10 +825,6 @@ public final class ToolProcessor implements AutoCloseable {
     } catch (ClaimLostSignal ignored) {
       return false;
     }
-  }
-
-  private static ThreadState lockThreadWithSession(HarnessStore.Transaction tx, UUID threadId) {
-    return ThreadProcessor.lockThreadWithSession(tx, threadId);
   }
 
   /** 有效 YOLO 只由执行根的开关决定；子代理读取其不可变执行根。 */
