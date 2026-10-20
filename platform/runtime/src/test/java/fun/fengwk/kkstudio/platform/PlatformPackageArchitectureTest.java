@@ -20,6 +20,7 @@ class PlatformPackageArchitectureTest {
         repositoryRoot().resolve("platform/runtime/src/main/java/fun/fengwk/kkstudio/platform");
     assertEquals(
         Set.of(
+            "agenttask",
             "canvas",
             "catalog",
             "chat",

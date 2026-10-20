@@ -33,8 +33,8 @@ import java.util.UUID;
  * 唯一请求重建边界：从不可变 {@link EntryPath} 与冻结 {@link ModelRequestSpec} 纯投影内存 {@link ProviderRequest}。
  *
  * <p>不访问 catalog、Environment registry 或 Contributor ContextProjector；也不持有事务。压缩执行已完全移出本
- * materializer：压缩子 Thread 的首条输入由 {@code CompactionChildStarter} 以普通 CUSTOM_MESSAGE 构造，父 COMPACTION
- * turn 不创建 ModelInvocation，也不在请求内复制 compaction facts。
+ * materializer：压缩子 Thread 由 {@code CompactionChildSpawn} 经统一 spawn 创建，首条输入是普通 CUSTOM_MESSAGE； 父
+ * COMPACTION turn 不创建 ModelInvocation，也不在请求内复制 compaction facts。
  *
  * <p>压缩感知历史投影还把执行本次压缩的 COMPACTION TURN_START 冻结 settings 中的 Goal 作为有界 USER 级历史背景放在摘要之后、真实近期消息之前：
  * 背景逐字来自该冻结快照（同一压缩每次重建结果相同），已被切掉或仍在近期消息中都不改变它，后续 Goal 设置 / 清除由真实输入消息自身携带。 Goal 只作为用户级背景，绝不提升为
@@ -57,7 +57,7 @@ public final class ModelRequestMaterializer {
 
   /**
    * 纯投影一次普通 Model 请求：压缩执行已完全移出本 materializer——压缩子 Thread 的首条输入是普通 CUSTOM_MESSAGE，由 {@code
-   * CompactionChildStarter} 用共享 {@link CompactionPrompts} 构造，父 COMPACTION turn 不产生 ModelInvocation。
+   * CompactionChildSpawn} 用共享 {@link CompactionPrompts} 构造，父 COMPACTION turn 不产生 ModelInvocation。
    */
   public ProviderRequest materialize(EntryPath path, ModelRequestSpec spec) {
     Objects.requireNonNull(path, "path");

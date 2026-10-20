@@ -449,9 +449,9 @@ Thread 与 Run，回写复验 claim 和 Run 坐标。`wake_version` 在请求唤
 端到端选择与全部质量入口见 [开发与测试](operations/development-and-testing.md)。
 
 ```bash
-python3 scripts/dev/verify/repository/check-canvas-project-schema.py
+node scripts/dev/verify/repository/check-canvas-project-schema.mjs
 node scripts/dev/verify/repository/check.mjs
 ```
 
 验证脚本说明见
-[基线库表检查](../scripts/dev/verify/repository/check-canvas-project-schema.py)。
+[基线库表检查](../scripts/dev/verify/repository/check-canvas-project-schema.mjs)。

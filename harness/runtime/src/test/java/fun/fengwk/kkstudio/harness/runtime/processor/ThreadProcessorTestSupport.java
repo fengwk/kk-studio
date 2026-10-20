@@ -61,6 +61,8 @@ import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
+import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
@@ -134,12 +136,28 @@ final class ThreadProcessorTestSupport {
 
   /** 构造有合法 creationRequestHash 的 ThreadState：name 固定 root 名、version 0 / nextCommandSequence 1。 */
   static ThreadState threadState(UUID threadId, UUID sessionId, UUID headEntryId, Instant now) {
-    return threadState(threadId, sessionId, headEntryId, "main", now);
+    return threadState(threadId, sessionId, headEntryId, "main", now, ThreadConstraints.NONE);
+  }
+
+  /** 带冻结创建约束的 root ThreadState（如压缩子的不可自动压缩约束）。 */
+  static ThreadState threadState(
+      UUID threadId, UUID sessionId, UUID headEntryId, Instant now, ThreadConstraints constraints) {
+    return threadState(threadId, sessionId, headEntryId, "main", now, constraints);
   }
 
   /** 指定名称的 root ThreadState：同一 Session 内的额外根必须使用不同名称。 */
   static ThreadState threadState(
       UUID threadId, UUID sessionId, UUID headEntryId, String name, Instant now) {
+    return threadState(threadId, sessionId, headEntryId, name, now, ThreadConstraints.NONE);
+  }
+
+  private static ThreadState threadState(
+      UUID threadId,
+      UUID sessionId,
+      UUID headEntryId,
+      String name,
+      Instant now,
+      ThreadConstraints constraints) {
     return new ThreadState(
         threadId,
         sessionId,
@@ -149,6 +167,8 @@ final class ThreadProcessorTestSupport {
         name,
         threadId,
         false,
+        SpawnTrigger.USER,
+        constraints,
         ThreadExecutionControl.RUNNABLE,
         0L,
         1L,

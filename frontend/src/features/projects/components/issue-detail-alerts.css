@@ -40,7 +40,7 @@
 }
 
 .issue-detail-alert-detail {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--fg-muted);
 }
 
@@ -53,7 +53,7 @@
 }
 
 .issue-detail-alert-discard {
-  font-size: 12px;
+  font-size: var(--font-size-xs);
   color: var(--danger);
 }
 

@@ -11,6 +11,7 @@ import org.springframework.util.Assert;
 import org.springframework.util.MimeTypeUtils;
 import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 
+import fun.fengwk.kkstudio.harness.common.hash.Sha256;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.platform.storage.S3ObjectMetadata;
@@ -49,7 +50,6 @@ import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -259,7 +259,7 @@ public class StorageUploadServiceImpl implements StorageUploadService {
     Path spool = null;
     try {
       spool = Files.createTempFile("storage-stage-", ".tmp");
-      MessageDigest digest = newSha256();
+      MessageDigest digest = Sha256.newDigest();
       long total = 0;
       try (OutputStream output = Files.newOutputStream(spool)) {
         byte[] buffer = new byte[8192];
@@ -825,14 +825,6 @@ public class StorageUploadServiceImpl implements StorageUploadService {
   private static void rejectActiveTransaction() {
     if (TransactionSynchronizationManager.isActualTransactionActive()) {
       throw new IllegalStateException("storage staging must run without an active transaction");
-    }
-  }
-
-  private static MessageDigest newSha256() {
-    try {
-      return MessageDigest.getInstance("SHA-256");
-    } catch (NoSuchAlgorithmException error) {
-      throw new IllegalStateException("SHA-256 is not available", error);
     }
   }
 

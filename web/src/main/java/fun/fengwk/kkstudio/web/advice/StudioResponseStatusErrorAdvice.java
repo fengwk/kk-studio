@@ -16,6 +16,7 @@ import org.springframework.web.server.ResponseStatusException;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.platform.harness.model.ProviderRequestPreviewUnavailableException;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessRequestFormatException;
+import fun.fengwk.kkstudio.web.controller.StudioAgentTaskController;
 import fun.fengwk.kkstudio.web.controller.StudioCanvasController;
 import fun.fengwk.kkstudio.web.controller.StudioCanvasFunctionController;
 import fun.fengwk.kkstudio.web.controller.StudioCanvasResourceController;
@@ -38,6 +39,7 @@ import java.util.Map;
 @Order(Ordered.HIGHEST_PRECEDENCE)
 @RestControllerAdvice(
     assignableTypes = {
+      StudioAgentTaskController.class,
       StudioCanvasController.class,
       StudioCanvasFunctionController.class,
       StudioCanvasResourceController.class,

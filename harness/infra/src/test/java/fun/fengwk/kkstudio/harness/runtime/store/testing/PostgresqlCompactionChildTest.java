@@ -38,7 +38,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
-import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
+import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
@@ -70,6 +70,8 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
@@ -251,9 +253,16 @@ class PostgresqlCompactionChildTest {
               (TextMessageContent) promptPayload.message().contents().getFirst();
           assertFalse(textContent.text().isBlank());
 
-          // 存在 purpose == COMPACTION、childThreadId = 子、未 matched 的 join
+          // 存在 delivery == SETTLE_OWNER_TURN、childThreadId = 子、未 matched 的 join
           ThreadJoin join = tx.findJoin(joinInvocationId).orElseThrow();
-          assertEquals(JoinPurpose.COMPACTION, join.purpose());
+          assertEquals(JoinDelivery.SETTLE_OWNER_TURN, join.delivery());
+          assertFalse(join.countsTowardQuota());
+          // 压缩子的创建来源与约束经 PostgreSQL 持久化后原样读回。
+          assertEquals(SpawnTrigger.RUNTIME, childThread.spawnTrigger());
+          assertEquals(false, childThread.constraints().allowAutoCompaction());
+          assertEquals(true, childThread.constraints().promptCacheDisabled());
+          assertEquals(
+              compaction.outputBudget().intValue(), childThread.constraints().maxOutputTokens());
           assertEquals(parentId, join.parentThreadId());
           assertEquals(childThreadId, join.childThreadId());
           assertFalse(join.matched());
@@ -703,7 +712,7 @@ class PostgresqlCompactionChildTest {
           assertNotNull(startPayload.compaction(), "compaction turn must own a compaction child");
           UUID childThreadId = startPayload.compaction().childThreadId();
           ThreadJoin join = tx.findJoin(startPayload.compaction().joinInvocationId()).orElseThrow();
-          assertEquals(JoinPurpose.COMPACTION, join.purpose());
+          assertEquals(JoinDelivery.SETTLE_OWNER_TURN, join.delivery());
           return new CompactionChild(childThreadId, join.invocationId(), startEntry.id());
         });
   }
@@ -1093,6 +1102,8 @@ class PostgresqlCompactionChildTest {
                   "main",
                   threadId,
                   false,
+                  SpawnTrigger.USER,
+                  ThreadConstraints.NONE,
                   ThreadExecutionControl.RUNNABLE,
                   0L,
                   1L,

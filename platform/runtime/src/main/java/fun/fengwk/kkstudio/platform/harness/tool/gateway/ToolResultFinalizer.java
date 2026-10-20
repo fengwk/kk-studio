@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.platform.harness.tool.gateway;
 
 import fun.fengwk.kkstudio.harness.builtin.environment.ReadTool;
+import fun.fengwk.kkstudio.harness.common.hash.Sha256;
 import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.harness.common.result.BinaryResultContent;
 import fun.fengwk.kkstudio.harness.common.result.JsonResultContent;
@@ -22,7 +23,6 @@ import java.nio.charset.CoderResult;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
@@ -201,7 +201,7 @@ public final class ToolResultFinalizer {
                     bytes, binary.textMetadata(), "binary content at index " + index);
         String name = resourceName(toolName, index + 1, null);
         ResourceRef planned =
-            plannedReference(binary.mediaType(), name, (long) binary.size(), sha256(bytes));
+            plannedReference(binary.mediaType(), name, (long) binary.size(), Sha256.hex(bytes));
         binaryPieces.add(new BinaryPiece(index, planned, bytes, textArtifact));
       } else if (content instanceof ResourceResultContent res) {
         ResourceRef ref = res.resource();
@@ -509,14 +509,8 @@ public final class ToolResultFinalizer {
         && expected.sha256().equals(actual.sha256());
   }
 
-  private static String sha256(byte[] content) {
-    MessageDigest digest = newSha256();
-    digest.update(content);
-    return HexFormat.of().formatHex(digest.digest());
-  }
-
   private static String sha256Utf8(String text, String name) {
-    MessageDigest digest = newSha256();
+    MessageDigest digest = Sha256.newDigest();
     CharsetEncoder encoder =
         StandardCharsets.UTF_8
             .newEncoder()
@@ -547,14 +541,6 @@ public final class ToolResultFinalizer {
       throw new IllegalArgumentException(name + " must be valid Unicode", error);
     }
     return HexFormat.of().formatHex(digest.digest());
-  }
-
-  private static MessageDigest newSha256() {
-    try {
-      return MessageDigest.getInstance("SHA-256");
-    } catch (NoSuchAlgorithmException error) {
-      throw new IllegalStateException("SHA-256 is not available", error);
-    }
   }
 
   /** 终态化结果：Success 投递成功；Failed 确定性失败；StoreFailed 存储失败（收敛为 UNKNOWN）。 */

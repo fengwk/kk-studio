@@ -11,9 +11,10 @@
 | `fun.fengwk.kkstudio.harness.common.concurrent` | 与业务无关的有界调度骨架：合并 wake 的单 drain、bounded worker handoff、周期 poll 与 stop 生命周期 | 只做同步调度与容量计数；claim / execute / 未接手归还三个回调的语义与 executor 生命周期由调用方注入并持有 |
 | `fun.fengwk.kkstudio.harness.common.prompt` | classpath prompt 模板的严格解析、缓存与精确变量渲染 | 只支持 `${name}`，要求变量集合精确相等；表达式求值与业务编排由调用方承接 |
 | `fun.fengwk.kkstudio.harness.common.json` | 严格 JSON 门禁、共享有界输出流与有界 UTF-8 JSON 编码器 | 校验语法与体积，超限中止编码；业务结构由调用方定义 |
+| `fun.fengwk.kkstudio.harness.common.hash` | SHA-256 摘要与 64 位小写十六进制编码的唯一入口 | 只依赖 JDK；被哈希的字节与领域分隔由调用方决定 |
 | `fun.fengwk.kkstudio.harness.common.io` | send 前冻结预算的响应体 deadline 包装：到期主动关闭底层流并把超时统一为超时失败 | 纯 JDK 流包装，不构造 HTTP 客户端、不持有凭据；协议与凭据分类由调用方适配 |
 | `fun.fengwk.kkstudio.harness.common.network` | 固定与环境变量 HTTP 代理选择、主机绕过规则 | 只构造不可变选择器；配置来源、JVM 全局安装和客户端生命周期由调用方负责 |
-| `fun.fengwk.kkstudio.harness.common.resource` | 不可变规范 Resource URI 引用与逐 scheme 校验 | 六类 scheme 与字节上限在此固定；下载、传输与存储由外部能力承接 |
+| `fun.fengwk.kkstudio.harness.common.resource` | 不可变规范 Resource URI 引用与逐 scheme 校验 | 受支持的 scheme 与字节上限在此固定；下载、传输与存储由外部能力承接 |
 | `fun.fengwk.kkstudio.harness.common.result` | sealed 结果内容单元 Text / Json / Binary / Resource 与文本工件元数据 | 纯不可变值模型；执行生命周期、权限与持久化调度由运行时承接 |
 | `fun.fengwk.kkstudio.harness.common.schema` | 输入参数 schema 结构、严格校验器、容错归一化器与确定性 JSON 编解码器 | 属性字典序的确定性编解码；执行路由与 Provider 转换由上层处理 |
 | `fun.fengwk.kkstudio.harness.common.skill` | Skill 名称、package name/version、描述与正文的 canonical 文本规则 | 只定义跨层共享的纯文本约束；Catalog、Git I/O 与 Daemon 安装由外层承接 |

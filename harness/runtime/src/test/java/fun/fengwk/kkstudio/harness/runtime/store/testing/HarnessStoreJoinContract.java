@@ -23,11 +23,13 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
-import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
+import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
+import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
@@ -73,6 +75,8 @@ public abstract class HarnessStoreJoinContract {
                   "child-thread",
                   rootThreadId,
                   false,
+                  SpawnTrigger.MODEL_TOOL,
+                  ThreadConstraints.NONE,
                   ThreadExecutionControl.RUNNABLE,
                   0L,
                   1L,
@@ -141,7 +145,8 @@ public abstract class HarnessStoreJoinContract {
         deliveryCommandSequence,
         createdAt,
         updatedAt,
-        JoinPurpose.TASK,
+        parentThreadId == null ? JoinDelivery.RECEIPT_ONLY : JoinDelivery.NOTIFY_PARENT,
+        parentThreadId != null,
         null);
   }
 
@@ -456,7 +461,8 @@ public abstract class HarnessStoreJoinContract {
             null,
             T0,
             T1,
-            JoinPurpose.TASK,
+            JoinDelivery.NOTIFY_PARENT,
+            true,
             null);
 
     assertThrows(

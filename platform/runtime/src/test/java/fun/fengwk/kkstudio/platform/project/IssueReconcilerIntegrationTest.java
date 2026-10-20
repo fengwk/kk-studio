@@ -1186,9 +1186,9 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     UUID childThreadId = UUID.randomUUID();
     jdbc.update(
         "insert into harness_thread (id, session_id, parent_thread_id, head_entry_id,"
-            + " creation_request_hash, name, root_thread_id, yolo_enabled, execution_control,"
+            + " creation_request_hash, name, root_thread_id, yolo_enabled, spawn_trigger, constraints, execution_control,"
             + " input_through_sequence, next_command_sequence, version, created_at, updated_at)"
-            + " values (?, ?, ?, ?, ?, ?, ?, false, 'RUNNABLE', 0, 1, 0, current_timestamp,"
+            + " values (?, ?, ?, ?, ?, ?, ?, false, 'MODEL_TOOL', '{\"maxOutputTokens\":null,\"promptCacheDisabled\":false,\"allowAutoCompaction\":true}'::jsonb, 'RUNNABLE', 0, 1, 0, current_timestamp,"
             + " current_timestamp)",
         childThreadId,
         sessionId,

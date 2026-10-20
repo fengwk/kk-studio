@@ -1,4 +1,5 @@
 import { useI18n } from '@/shared/i18n'
+import { Button } from '@/shared/ui/controls/Button'
 import { ThreadTreeRows } from '@/features/ai/runtime/thread-panel/ThreadTreeRows'
 import { ThreadWidgetPanel } from '@/features/ai/runtime/thread-panel/ThreadWidgetPanel'
 import type { useActiveThreadTree } from '@/features/ai/runtime/useActiveThreadTree'
@@ -36,9 +37,9 @@ export function ActiveThreadTree({
       {isError ? (
         <div className="thread-tree-state is-error" role="alert">
           <p>{refreshFailed ? t('ai.runtime.agentTree.refreshFailed') : t('ai.runtime.agentTree.error')}</p>
-          <button type="button" className="ghost-btn" onClick={refetch}>
+          <Button variant="ghost" onClick={refetch}>
             {t('ai.runtime.agentTree.retry')}
-          </button>
+          </Button>
         </div>
       ) : null}
       <ThreadTreeRows rows={rows} currentThreadId={currentThreadId} />

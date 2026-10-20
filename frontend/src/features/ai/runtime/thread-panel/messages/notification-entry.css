@@ -2,11 +2,11 @@
 .thread-notification-body {
   min-width: 0;
   margin-top: 4px;
-  font-size: 12px;
+  font-size: var(--font-size-xs);
 }
 
 .thread-notification-text {
-  color: var(--fg-dim);
+  color: var(--fg-muted);
   line-height: 1.5;
   white-space: pre-wrap;
   overflow-wrap: break-word;

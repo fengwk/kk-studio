@@ -12,12 +12,11 @@ import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
 import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
+import fun.fengwk.kkstudio.harness.runtime.SpawnRequest;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.history.CustomEntryPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
-import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
-import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
@@ -50,6 +49,7 @@ import fun.fengwk.kkstudio.project.model.IssueStageBudgetRow;
 import fun.fengwk.kkstudio.project.model.PauseReason;
 import fun.fengwk.kkstudio.project.model.Project;
 import fun.fengwk.kkstudio.project.port.AgentBranchSettingsPort;
+import fun.fengwk.kkstudio.project.port.IssueRunTask;
 import fun.fengwk.kkstudio.project.port.IssueThreadExecutionPort;
 import fun.fengwk.kkstudio.project.port.IssueThreadView;
 import fun.fengwk.kkstudio.project.repo.IssueActivityRepository;
@@ -200,31 +200,33 @@ public class IssueRunServiceImpl implements IssueRunService {
     UUID sessionId;
     UUID threadId;
     UUID existingHead = null;
-    AcceptCommandsTarget target;
+    SpawnRequest.Continuation continuation = null;
     if (binding == null) {
       sessionId = UUID.randomUUID();
       threadId = UUID.randomUUID();
-      target =
-          new AcceptCommandsTarget.NewRootSession(
-              sessionId, threadId, settings, project.isYoloEnabled());
     } else {
       threadId = binding.threadId();
       IssueThreadView view = requireThreadExecution().readThread(threadId);
       sessionId = view.sessionId();
       existingHead = view.headEntryId();
-      target = new AcceptCommandsTarget.Thread(threadId, existingHead, view.nextCommandSequence());
+      continuation = new SpawnRequest.Continuation(existingHead, view.nextCommandSequence());
     }
 
     ProjectRunScope scope = runScope(issue, stage, agentName, runId, threadId);
     List<NewThreadCommand> commands = buildRunCommands(settings, scope, stage.environment());
     NewThreadCommand taskInput = commands.getLast();
-    ThreadJoinRequest join =
-        new ThreadJoinRequest(
-            runId, null, null, taskInput.requestHash(), agentName, null, 1, 1, 1, JoinPurpose.TASK);
     AcceptedCommands accepted =
         requireThreadExecution()
-            .acceptCommandsAndJoin(
-                new AcceptCommandsCommand(target, commands), join, AcceptancePreflight.IDENTITY);
+            .submitRunTask(
+                new IssueRunTask(
+                    runId,
+                    threadId,
+                    binding == null ? sessionId : null,
+                    settings,
+                    binding == null && project.isYoloEnabled(),
+                    continuation,
+                    commands,
+                    taskInput.requestHash()));
     UUID startEntryId;
     if (binding == null) {
       if (!issueAgentThreadRepository.insert(new IssueAgentThread(issueId, agentName, threadId))) {

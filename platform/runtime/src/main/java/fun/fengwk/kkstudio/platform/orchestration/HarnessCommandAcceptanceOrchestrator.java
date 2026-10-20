@@ -140,8 +140,8 @@ public class HarnessCommandAcceptanceOrchestrator {
 
   /**
    * owner-aware 入口只服务产品创建（NEW_ROOT_SESSION / NEW_THREAD / NEW_FORKED_SESSION）：既有 Thread 的继续写入走
-   * {@link #acceptOnThread}，子代理 NEW_CHILD_SESSION 只由 internal task 经 {@code
-   * HarnessRuntime.acceptCommandsAndJoin} 原子创建，不经产品 owner 路由（产品 owner 无法持有子 Session）。
+   * {@link #acceptOnThread}，子代理与任务只由 {@code AgentTaskService} 经 {@code HarnessRuntime.spawn}
+   * 原子创建，不经产品 owner 路由（产品 owner 无法持有子 Session）。
    */
   private static void requireCreationTarget(AcceptCommandsTarget target) {
     if (!(target instanceof AcceptCommandsTarget.NewRootSession)
@@ -176,8 +176,8 @@ public class HarnessCommandAcceptanceOrchestrator {
   /**
    * 目标 Session 必须已由 owner 持有：NEW_SESSION 只在 Session 已存在（精确 replay）时校验；NEW_THREAD 直接用 target 的
    * sessionId；NEW_FORKED_SESSION 校验来源 Thread 所属 Session（产品 owner 无法持有内部子 Session，Issue+Agent 不支持会话
-   * fork）。既有 Thread 的继续写入不经 owner 授权（{@link #acceptOnThread}）；NEW_CHILD_SESSION 与 THREAD 都不属于
-   * owner-aware 产品入口，即使上层形状校验被绕过也必须 fail closed。
+   * fork）。既有 Thread 的继续写入不经 owner 授权（{@link #acceptOnThread}）；THREAD 不属于 owner-aware
+   * 产品入口，即使上层形状校验被绕过也必须 fail closed。
    */
   private void requireTargetOwnership(OwnerRef owner, AcceptCommandsTarget target) {
     switch (target) {
@@ -195,10 +195,8 @@ public class HarnessCommandAcceptanceOrchestrator {
         }
         requireOwnedSession(owner, sourceSessionId(forkedSession.sourceThreadId()));
       }
-      case AcceptCommandsTarget.NewChildSession ignored -> throw new IllegalStateException(
-          "owner-aware authorization does not support NEW_CHILD_SESSION or THREAD targets");
       case AcceptCommandsTarget.Thread ignoredThread -> throw new IllegalStateException(
-          "owner-aware authorization does not support NEW_CHILD_SESSION or THREAD targets");
+          "owner-aware authorization does not support THREAD targets");
     }
   }
 

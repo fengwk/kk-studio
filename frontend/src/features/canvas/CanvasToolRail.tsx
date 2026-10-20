@@ -1,5 +1,5 @@
 import { useId } from 'react'
-import { CanvasAddMenu } from '@/features/canvas/agent/CanvasAddMenu'
+import { CanvasAddMenu } from '@/features/canvas/CanvasAddMenu'
 import { useCanvasRuntime } from '@/features/canvas/CanvasRuntimeContext'
 import { PlusIcon } from '@/features/canvas/icons'
 import {

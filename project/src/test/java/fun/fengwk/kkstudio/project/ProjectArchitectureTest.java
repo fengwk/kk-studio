@@ -42,6 +42,7 @@ class ProjectArchitectureTest {
       Set.of(
           "tools.jackson.",
           "com.fasterxml.jackson.annotation.",
+          "fun.fengwk.kkstudio.harness.common.hash.",
           "fun.fengwk.kkstudio.harness.runtime.",
           "fun.fengwk.kkstudio.work.",
           "lombok.",

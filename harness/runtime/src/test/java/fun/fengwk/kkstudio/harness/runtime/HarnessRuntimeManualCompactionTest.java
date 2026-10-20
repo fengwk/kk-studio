@@ -23,7 +23,7 @@ import fun.fengwk.kkstudio.harness.runtime.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.runtime.history.RootPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
-import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
+import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
@@ -37,6 +37,8 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.SessionFirstThreadLockStore;
+import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
@@ -375,6 +377,8 @@ class HarnessRuntimeManualCompactionTest {
                   "main",
                   threadId,
                   false,
+                  SpawnTrigger.USER,
+                  ThreadConstraints.NONE,
                   ThreadExecutionControl.RUNNABLE,
                   0L,
                   1,
@@ -437,9 +441,8 @@ class HarnessRuntimeManualCompactionTest {
   }
 
   /**
-   * 手动入口与自动压缩共用同一条祖先链 purpose guard：位于 COMPACTION 子执行树内的 Thread 一律不可手动压缩，即使该 Thread 自己的
-   * 委派已经结算（{@code loadIncompleteJoins} 为空）。runtime primitive 自身拒绝并返回明确 receipt，不依赖上层调用方的 root
-   * guard。
+   * 手动入口与自动压缩共用同一条约束 guard：创建约束不允许自动压缩的 Thread（压缩子及其经约束合并继承的后代）一律不可手动压缩，即使该 Thread 自己的委派已经结算（{@code
+   * loadIncompleteJoins} 为空）。runtime primitive 自身拒绝并返回明确 receipt，不依赖上层调用方的 root guard。
    */
   @Test
   void availabilityRejectsThreadsInsideCompactionChildTree() {
@@ -447,9 +450,22 @@ class HarnessRuntimeManualCompactionTest {
     UUID parentThreadId = HarnessRuntimeTestSupport.seedBaseline(fixture.store).threadId();
     // 压缩子自身（其 COMPACTION Join 未结算）。
     UUID compactionChild =
-        seedChildThread(fixture.store, parentThreadId, JoinPurpose.COMPACTION, false);
-    // 压缩子的后代：自己的 TASK Join 已结算，只有祖先链 guard 能挡住它。
-    UUID descendant = seedChildThread(fixture.store, compactionChild, JoinPurpose.TASK, true);
+        seedChildThread(
+            fixture.store,
+            parentThreadId,
+            SpawnTrigger.RUNTIME,
+            COMPACTION_CONSTRAINTS,
+            JoinDelivery.SETTLE_OWNER_TURN,
+            false);
+    // 压缩子的后代：自己的 task Join 已结算，只有继承的创建约束能挡住它。
+    UUID descendant =
+        seedChildThread(
+            fixture.store,
+            compactionChild,
+            SpawnTrigger.MODEL_TOOL,
+            COMPACTION_CONSTRAINTS,
+            JoinDelivery.NOTIFY_PARENT,
+            true);
     assertTrue(
         fixture.store.<Boolean>transaction(tx -> tx.loadIncompleteJoins(descendant).isEmpty()));
 
@@ -477,9 +493,18 @@ class HarnessRuntimeManualCompactionTest {
         ownerAvailability.disabledReason());
   }
 
-  /** 手工创建带 source command 与 Join 的 child Thread，用于按 Join purpose 事实验证手动入口 guard。 */
+  /** 压缩子冻结的创建约束：输出上限、禁用 cache、不允许自动压缩；后代经约束合并继承。 */
+  private static final ThreadConstraints COMPACTION_CONSTRAINTS =
+      new ThreadConstraints(100, true, false);
+
+  /** 手工创建带 source command 与 Join 的 child Thread，用于按创建约束事实验证手动入口 guard。 */
   private static UUID seedChildThread(
-      InMemoryHarnessStore store, UUID parentThreadId, JoinPurpose purpose, boolean matchedJoin) {
+      InMemoryHarnessStore store,
+      UUID parentThreadId,
+      SpawnTrigger trigger,
+      ThreadConstraints constraints,
+      JoinDelivery delivery,
+      boolean matchedJoin) {
     return store.transaction(
         tx -> {
           tx.lockThread(parentThreadId);
@@ -504,9 +529,11 @@ class HarnessRuntimeManualCompactionTest {
                   parentThreadId,
                   rootEntryId,
                   HarnessRuntimeTestSupport.CREATION_REQUEST_HASH,
-                  "child-" + purpose.name().toLowerCase(),
+                  "child-" + delivery.name().toLowerCase(),
                   rootThreadId,
                   false,
+                  trigger,
+                  constraints,
                   ThreadExecutionControl.RUNNABLE,
                   0L,
                   2L,
@@ -535,7 +562,8 @@ class HarnessRuntimeManualCompactionTest {
                   null,
                   NOW,
                   NOW,
-                  purpose,
+                  delivery,
+                  delivery == JoinDelivery.NOTIFY_PARENT,
                   null);
           tx.insertJoin(join);
           if (matchedJoin) {

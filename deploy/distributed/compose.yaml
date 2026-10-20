@@ -2,7 +2,7 @@ name: kk-studio-distributed
 
 # 双节点分布式 E2E 测试栈（免费 mock topology）。
 #
-# 网络不变量（scripts/dev/verify/e2e/validate_distributed.py 静态验证）：
+# 网络不变量（scripts/dev/verify/e2e/validate-distributed.mjs 静态验证）：
 # - postgres / minio / http-mock 同时加入 node-a-db 与 node-b-db 两个隔离网络；
 # - app-a 只加入 node-a-db + daemon-a + app-ingress-a，app-b 只加入 node-b-db
 #   + daemon-b + app-ingress-b；daemon-a / daemon-b 各只加入自己的 daemon 网络；
@@ -100,15 +100,13 @@ services:
       - node-a-db
 
   http-mock:
-    image: python:3.12-alpine
+    image: node:22-alpine
     init: true
     read_only: true
-    environment:
-      PYTHONDONTWRITEBYTECODE: "1"
     command:
       [
-        "python",
-        "/mock/server.py",
+        "node",
+        "/mock/server.mjs",
         "--routes",
         "/config/routes.json",
         "--opencli-fake-fixtures",
@@ -117,17 +115,17 @@ services:
     ports:
       - "127.0.0.1:${DISTRIBUTED_MOCK_PORT:-18090}:8080"
     volumes:
-      - ../test/mock/server.py:/mock/server.py:ro
+      - ../test/mock/server.mjs:/mock/server.mjs:ro
       - ${DISTRIBUTED_MOCK_ROUTES:-../test/mock/routes.json}:/config/routes.json:ro
       - ../../platform/runtime/src/test/resources/fun/fengwk/kkstudio/platform/canvas/resource:/fixtures:ro
     healthcheck:
       test:
         - CMD
-        - python
-        - -c
+        - node
+        - -e
         - >-
-          import urllib.request;
-          urllib.request.urlopen("http://127.0.0.1:8080/health", timeout=2).read()
+          fetch("http://127.0.0.1:8080/health", { signal: AbortSignal.timeout(2000) })
+          .then((response) => process.exit(response.ok ? 0 : 1), () => process.exit(1))
       interval: 2s
       timeout: 3s
       retries: 30

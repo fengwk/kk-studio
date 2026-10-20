@@ -42,7 +42,7 @@ describe('ResourceCardLayout', () => {
         icon="agent"
         title="builtin-agent"
         subtitle="detail"
-        badge={<span className="status-pill is-neutral">内置</span>}
+        badge={<span className="ui-badge is-neutral">内置</span>}
         rows={[]}
         onEdit={vi.fn()}
         onDelete={onDelete}

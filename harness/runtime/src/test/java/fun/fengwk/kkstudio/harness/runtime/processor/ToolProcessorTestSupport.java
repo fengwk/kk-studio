@@ -48,6 +48,8 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
@@ -321,6 +323,8 @@ final class ToolProcessorTestSupport {
                     "child",
                     rootThreadId,
                     false,
+                    SpawnTrigger.MODEL_TOOL,
+                    ThreadConstraints.NONE,
                     ThreadExecutionControl.RUNNABLE,
                     0L,
                     1L,
@@ -454,6 +458,8 @@ final class ToolProcessorTestSupport {
                   "main",
                   threadId,
                   yoloEnabled,
+                  SpawnTrigger.USER,
+                  ThreadConstraints.NONE,
                   ThreadExecutionControl.RUNNABLE,
                   0L,
                   1L,

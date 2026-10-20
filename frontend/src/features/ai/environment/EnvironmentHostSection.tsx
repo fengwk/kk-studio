@@ -1,4 +1,5 @@
 import { useI18n } from '@/shared/i18n'
+import { Mono } from '@/shared/ui/data/Mono'
 import { formatTimestamp } from '@/features/ai/environment/environment-utils'
 import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
 
@@ -19,7 +20,7 @@ export function EnvironmentHostSection({ environment }: EnvironmentHostSectionPr
       <div className="env-host-grid">
         <div className="env-host-meta-card">
           <span className="lbl">{t('ai.environment.runtime.daemonVersion')}</span>
-          <span className="val mono">{environment.daemonVersion ?? '—'}</span>
+          <Mono className="val">{environment.daemonVersion ?? '—'}</Mono>
         </div>
         <div className="env-host-meta-card">
           <span className="lbl">{t('ai.environment.runtime.operatingSystem')}</span>
@@ -31,11 +32,11 @@ export function EnvironmentHostSection({ environment }: EnvironmentHostSectionPr
         </div>
         <div className="env-host-meta-card">
           <span className="lbl">{t('ai.environment.runtime.userName')}</span>
-          <span className="val mono">{environment.userName ?? '—'}</span>
+          <Mono className="val">{environment.userName ?? '—'}</Mono>
         </div>
         <div className="env-host-meta-card">
           <span className="lbl">{t('ai.environment.runtime.homeDirectory')}</span>
-          <span className="val mono">{environment.homeDirectory ?? '—'}</span>
+          <Mono className="val">{environment.homeDirectory ?? '—'}</Mono>
         </div>
         <div className="env-host-meta-card">
           <span className="lbl">{t('ai.environment.lastSeen')}</span>

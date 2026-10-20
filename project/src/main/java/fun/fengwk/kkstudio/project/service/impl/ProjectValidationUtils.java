@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.project.service.impl;
 
+import fun.fengwk.kkstudio.harness.common.hash.Sha256;
 import fun.fengwk.kkstudio.project.error.ProjectValidationException;
 
 import java.nio.ByteBuffer;
@@ -8,9 +9,6 @@ import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CharsetEncoder;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.util.HexFormat;
 import java.util.function.Supplier;
 
 /**
@@ -119,11 +117,6 @@ public final class ProjectValidationUtils {
 
   /** 请求正文指纹：SHA-256 小写十六进制，用于 Activity 的幂等去重。 */
   public static String sha256(String value) {
-    try {
-      MessageDigest digest = MessageDigest.getInstance("SHA-256");
-      return HexFormat.of().formatHex(digest.digest(value.getBytes(StandardCharsets.UTF_8)));
-    } catch (NoSuchAlgorithmException error) {
-      throw new IllegalStateException("SHA-256 is not available", error);
-    }
+    return Sha256.hex(value);
   }
 }

@@ -1,13 +1,13 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
 import fun.fengwk.kkstudio.harness.runtime.compaction.AutomaticCompactionPlanner;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionChildScope;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionChildStarter;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionChildSpawn;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionHistory;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPlanner;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPreparation;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
@@ -136,9 +136,9 @@ final class ManualCompactionControl {
     if (!(context instanceof ThreadContext.IdleOrHistorical)
         || path.openTurnStart().isPresent()
         || !tx.loadIncompleteJoins(thread.id()).isEmpty()
-        // 手动入口使用与自动压缩相同的祖先链 guard：位于 COMPACTION 子执行树内（压缩子自身或其后代）的 Thread 一律不可手动压缩，
+        // 手动入口使用与自动压缩相同的约束 guard：创建约束不允许压缩的 Thread（压缩子自身及其后代）一律不可手动压缩，
         // 不依赖上层调用方（Web root guard）拦截，runtime primitive 自身绝不递归创建压缩子。
-        || CompactionChildScope.isInCompactionChildTree(tx, thread)
+        || !thread.constraints().allowAutoCompaction()
         || automaticPlanner.plan(thread, path, compactionConfig, false) != null) {
       return ManualDecision.disabled(ManualCompactionAvailability.DisabledReason.THREAD_BUSY);
     }
@@ -203,9 +203,8 @@ final class ManualCompactionControl {
       throw staleManualVersion(command, thread);
     }
     if (result instanceof TurnResolver.CompactionResolved compactionResolved) {
-      CompactionChildStarter.CompactionChild child =
-          CompactionChildStarter.start(
-              tx, thread, plan.candidatePath(), compactionResolved, plan.preparation(), now);
+      CompactionStart frozenStart =
+          CompactionChildSpawn.start(tx, thread, compactionResolved, plan.preparation());
       TurnStartPayload startPayload = (TurnStartPayload) plan.candidateTurnStartEntry().payload();
       TurnStartPayload resolvedPayload =
           new TurnStartPayload(
@@ -214,7 +213,7 @@ final class ManualCompactionControl {
               startPayload.ownerThreadId(),
               compactionResolved.contextWindow(),
               compactionResolved.maxOutputTokens(),
-              child.frozenStart(),
+              frozenStart,
               null);
       tx.insertEntry(
           new Entry(
@@ -225,7 +224,8 @@ final class ManualCompactionControl {
               now));
       ThreadState advanced = thread.advanceHead(plan.turnStartEntryId(), now);
       tx.updateThread(advanced);
-      return new CompactThreadResult(advanced, plan.turnStartEntryId(), child.childThreadId());
+      return new CompactThreadResult(
+          advanced, plan.turnStartEntryId(), frozenStart.childThreadId());
     }
     TurnResolver.Rejected rejected = (TurnResolver.Rejected) result;
     tx.insertEntry(

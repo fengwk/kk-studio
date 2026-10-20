@@ -118,7 +118,7 @@ test('manual validation and image publishing have separate concurrency groups', 
   assert.ok(group?.includes("${{ inputs.validate_only && 'validate' || 'publish' }}"))
 })
 
-test('frontend coverage and offline layout are required gates using the locked browser', () => {
+test('frontend coverage and offline browser suites are required gates using the locked browser', () => {
   // Coverage replaces the unit-test run; every preparation/gate must fail the job on error.
   const steps = validationSteps()
   const commands = [
@@ -128,7 +128,7 @@ test('frontend coverage and offline layout are required gates using the locked b
     'npm --prefix frontend run coverage',
     'npm --prefix frontend run build',
     'npx --no-install playwright install --with-deps chromium',
-    'npm --prefix frontend run test:layout',
+    'npm --prefix frontend run test:browser',
   ]
   let previous = -1
   for (const command of commands) {
@@ -161,21 +161,33 @@ test('frontend diagnostics survive failed gates and upload only report directori
   assert.equal(stepField(upload, 'uses'), 'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4')
   assert.equal(stepField(upload, 'if'), '${{ always() }}')
   assert.equal(stepField(upload, 'name', 10), 'frontend-diagnostics')
-  assert.equal(stepField(upload, 'path', 10), 'frontend/coverage/\nreports/layout/')
+  const expectedDiagnosticsPath = [
+    'frontend/coverage/',
+    'reports/browser-site/',
+    'reports/layout/',
+    'reports/pane/',
+    'reports/install-browser/',
+    'reports/browser/',
+    'reports/composer-editor/',
+    'reports/compaction/',
+    'reports/subagent-tree/',
+    'reports/tool-card/',
+  ].join('\n')
+  assert.equal(stepField(upload, 'path', 10), expectedDiagnosticsPath)
   assert.equal(stepField(upload, 'retention-days', 10), '7')
   assert.equal(stepField(upload, 'if-no-files-found', 10), 'ignore')
-  const layout = steps.findIndex((step) => stepField(step, 'run') === 'npm --prefix frontend run test:layout')
-  assert.ok(layout >= 0 && steps.indexOf(upload) > layout)
+  const browser = steps.findIndex((step) => stepField(step, 'run') === 'npm --prefix frontend run test:browser')
+  assert.ok(browser >= 0 && steps.indexOf(upload) > browser)
   assert.match(jobBlock(docker, 'publish'), /needs:\n      - validate\n/u)
   assert.match(jobBlock(docker, 'publish'), /      - daemon_ci\n/u)
 })
 
 test('CI provisions and selects the PostgreSQL fixture client major before validation', () => {
   // Installing a client alone is insufficient: PATH must select every binary from that major.
-  const fixture = readFileSync(new URL('scripts/ops/tests/test_reset_database_integration.py', root), 'utf8')
-  const major = fixture.match(/^POSTGRES_MAJOR = (\d+)$/m)?.[1]
+  const fixture = readFileSync(new URL('scripts/ops/tests/support/postgres-fixture.mjs', root), 'utf8')
+  const major = fixture.match(/^export const POSTGRES_MAJOR = (\d+)$/m)?.[1]
   assert.ok(major)
-  assert.match(fixture, /f"postgres:\{POSTGRES_MAJOR\}-alpine"/u)
+  assert.ok(fixture.includes('`postgres:${POSTGRES_MAJOR}-alpine`'))
   for (const [source, validationName] of [
     [docker, 'Verify Java sources, tests and coverage'],
     [release, 'Verify and build the Node daemon'],
@@ -240,7 +252,7 @@ test('the five-platform Node matrix builds and covers every official target', ()
   assert.ok(macos, 'macOS must run the system-Bash installer/archive contract')
   assert.ok(macos.includes('shell: /bin/bash --noprofile --norc -eo pipefail {0}'))
   assert.ok(macos.includes('/bin/bash --version'))
-  assert.ok(macos.includes("python3 -m unittest discover -s scripts/daemon/tests -p 'test_*.py'"))
+  assert.ok(macos.includes('node --test scripts/daemon/tests/*.test.mjs'))
 })
 
 test('release reuses the same daemon matrix and gates on it before staging', () => {

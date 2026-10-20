@@ -8,14 +8,18 @@ import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
 import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
+import fun.fengwk.kkstudio.harness.runtime.SpawnRequest;
 import fun.fengwk.kkstudio.harness.runtime.StopCommand;
 import fun.fengwk.kkstudio.harness.runtime.StopResult;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinReceipt;
-import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
+import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
+import fun.fengwk.kkstudio.platform.agenttask.AgentTaskRequest;
+import fun.fengwk.kkstudio.platform.agenttask.AgentTaskService;
+import fun.fengwk.kkstudio.project.port.IssueRunTask;
 import fun.fengwk.kkstudio.project.port.IssueThreadExecutionPort;
 import fun.fengwk.kkstudio.project.port.IssueThreadView;
 
@@ -36,6 +40,7 @@ import java.util.UUID;
 public class PlatformIssueThreadExecutionPort implements IssueThreadExecutionPort {
 
   private final ObjectProvider<HarnessRuntime> runtimes;
+  private final AgentTaskService agentTasks;
 
   @Override
   public IssueThreadView readThread(UUID threadId) {
@@ -56,10 +61,26 @@ public class PlatformIssueThreadExecutionPort implements IssueThreadExecutionPor
     return requireRuntime().acceptCommands(command, preflight);
   }
 
+  /** Run 任务：控制器发起、无父回执票据（Run id），Issue 的稳定 Thread 续用时只追加输入；加入调用方的产品事务。 */
   @Override
-  public AcceptedCommands acceptCommandsAndJoin(
-      AcceptCommandsCommand command, ThreadJoinRequest join, AcceptancePreflight preflight) {
-    return requireRuntime().acceptCommandsAndJoin(command, join, preflight);
+  public AcceptedCommands submitRunTask(IssueRunTask task) {
+    return agentTasks
+        .submit(
+            new AgentTaskRequest(
+                task.runId(),
+                task.threadId(),
+                task.sessionId(),
+                task.settings(),
+                task.commands(),
+                AcceptancePreflight.IDENTITY,
+                SpawnTrigger.CONTROLLER,
+                null,
+                null,
+                task.continuation(),
+                task.yoloEnabled(),
+                new SpawnRequest.Budget(null, 1, 1, 1),
+                task.requestHash()))
+        .accepted();
   }
 
   @Override

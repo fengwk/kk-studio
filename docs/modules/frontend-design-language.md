@@ -22,20 +22,32 @@
 - 资源栅格根据可用宽度自适应，间距 16px。窄窗口先减少列数，再让内容自然换行，不缩小文字或挤掉操作。
 - 长标题可截断并提供完整名称；正文、工具参数、错误和任务报告可自然换行，展开后必须完整。
 
-## 颜色与卡片
+## Token 分层与门禁
 
-主题唯一事实源是 [`styles.css`](../../frontend/src/styles.css) 的 `:root`，组件只消费已有语义 token，不在页面补同义色值或没有定义的 `color-*` 变量。
+样式只有一个事实源：[`styles.css`](../../frontend/src/styles.css) 的 `:root`，分三层，组件只消费后两层。
+
+1. **Palette**（`--palette-*`）：原始色板，是唯一允许写色值的地方，位于 `@palette:start/end` 标记之间。
+2. **语义层**：表面（`--bg` / `--surface` 系列 / `--stage-bg`）、文字（`--fg` / `--fg-muted`）、边框（`--border` / `--border-hover`）、强调与焦点（`--accent` 系列 / `--focus` / `--focus-ring`）、状态（`--success` / `--warning` / `--danger` / `--info`，各带 `-soft` 与 `-border`），以及半透明叠层（`--wash-1..3`、`--scrim`、`--surface-glass`）和阴影。
+3. **组件层**：只在多处规则共享同一取值时才有，例如 `--topbar-bg`、`--stage-node`。
+
+标尺同样是 token：间距 `--space-1..8`（4px 步进）、字号 `--font-size-xs/sm/md/lg/xl`（12 / 13 / 15 / 20 / 24px）、圆角 `--radius-*`、动效 `--duration-fast/base`、层级 `--z-raised/sticky/dropdown/modal/popover/toast`（局部堆叠只用 0–10 的整数）。字体 `--font` 与 `--mono`：标识符、id、版本号和数据值使用等宽，正文使用无衬线。
 
 | 用途 | Token |
 | --- | --- |
 | 页面/图形舞台 | `--bg` / `--stage-bg` |
 | 普通卡片/控件 | `--surface` |
 | Hover/选中层 | `--surface-hover` / `--surface-active` |
-| 弹层/抬升层 | `--surface-raised` |
+| 弹层/抬升层 | `--surface-raised` / `--surface-overlay` |
 | 正文/辅助文字 | `--fg` / `--fg-muted` |
 | 边框/hover边框 | `--border` / `--border-hover` |
-| 主动作/选择焦点 | `--accent` / `--focus-ring` |
-| 信息/等待/危险 | `--info` / `--warning` / `--danger` 及各自 soft token |
+| 主动作/选择 | `--accent` / `--accent-soft` |
+| 键盘焦点 | `--focus`（全局 `:focus-visible` 2px 轮廓）/ `--focus-ring` |
+| 成功/等待/危险/信息 | `--success` / `--warning` / `--danger` / `--info` 及 soft、border |
+
+没有同义别名，也没有 `var(--x, fallback)`：缺失的 token 应补进 `:root`，而不是在使用处兜底。
+`npm run lint:css`（[`check-css.mjs`](../../frontend/scripts/check-css.mjs)，由 `styles.tokens.test.ts` 随 vitest 执行）扫描 `src` 下的样式与非测试 TS/TSX，拒绝：未声明的自定义属性、fallback、组件中直接使用 `--palette-*`、palette 之外的色值与命名色（TS 中只允许重复 palette 色值，供 Mermaid 这类只能吃具体颜色的 JS 消费者）、偏离字号标尺的 `font-size` 与 `font` 简写，以及大于 10 且不是 `--z-*` 的 `z-index`。
+
+## 颜色与卡片
 
 资源卡共享 AI 区域的低对比表面、细边框、12px 圆角、标题图标、元信息与底部动作。新建卡使用同一尺寸语言的虚线边框；没有图像预览事实时显示类型图标和真实元信息，不展示伪缩略图。
 
@@ -45,7 +57,7 @@
 
 ## 控件、动作与反馈
 
-普通页面复用 [`shared/ui`](../../frontend/src/shared/ui) 的 Button/IconButton、输入、Select、Checkbox、NumberInput、Tabs、Dialog、StateBlock、Toast 和复制控件。共享组件负责外观与可访问性，feature 负责请求、业务校验、权限和文案。
+普通页面复用 [`shared/ui`](../../frontend/src/shared/ui) 的 Button/IconButton、输入、Select、Switch、Checkbox、NumberInput、Tabs、Dialog、StateBlock/EmptyState、Toast 和复制控件；数据展示复用 Badge（状态语义）、Mono/Code（标识符与数据值）、KeyValue，区块容器复用 Panel 与 Toolbar。普通按钮不写原生 `<button>`；只有菜单项、选项、tab、下拉触发器和画布停靠按钮这类带专有交互的控件保留专门实现。共享组件负责外观与可访问性，feature 负责请求、业务校验、权限和文案。
 
 Runtime 查看层、执行选择面板、历史树、改名和问卷的普通操作复用 Button，文本字段复用 TextInput/TextArea，纯图标动作复用 IconButton；局部样式只保留领域布局与必要密度。工作区使用唯一顶栏呈现当前查看身份，Debug 独占期间在左上提供“关闭 Debug”；子执行最左是“回到父 agent”，取当前执行的直接父身份，不同时显示“回到对话”。Debug 与 subagent 选择只从根输入区命令进入。
 

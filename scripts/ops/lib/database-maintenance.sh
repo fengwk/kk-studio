@@ -69,7 +69,18 @@ resolve_repository_root() {
 }
 
 resolve_absolute_path() {
-  python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$1"
+  # realpath of the longest existing prefix plus the not-yet-existing remainder.
+  node -e '
+const fs = require("node:fs")
+const path = require("node:path")
+let target = path.resolve(process.argv[1])
+const rest = []
+while (!fs.existsSync(target) && path.dirname(target) !== target) {
+  rest.unshift(path.basename(target))
+  target = path.dirname(target)
+}
+console.log(path.join(fs.realpathSync(target), ...rest))
+' "$1"
 }
 
 # 出参：要求目录解析后不在仓库内。含敏感凭据的包里任何文件都不该有被提交的机会。
@@ -230,16 +241,18 @@ prepare_owner_only_directory() {
 
 # 只保留一份 sha256 实现（不依赖宿主是否有 sha256sum 二进制，备份可能很大因此流式读取）。
 file_sha256() {
-  python3 - "$1" <<'PY'
-import hashlib
-import sys
-
-digest = hashlib.sha256()
-with open(sys.argv[1], "rb") as artifact:
-    for chunk in iter(lambda: artifact.read(1024 * 1024), b""):
-        digest.update(chunk)
-print(digest.hexdigest())
-PY
+  node -e '
+const { createHash } = require("node:crypto")
+const { createReadStream } = require("node:fs")
+const digest = createHash("sha256")
+createReadStream(process.argv[1])
+  .on("data", (chunk) => digest.update(chunk))
+  .on("end", () => console.log(digest.digest("hex")))
+  .on("error", (error) => {
+    console.error(error.message)
+    process.exit(1)
+  })
+' "$1"
 }
 
 REPO_ROOT=$(resolve_repository_root)

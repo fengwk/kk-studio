@@ -107,7 +107,7 @@ export function CreateIssueModal({
               />
             </label>
 
-            <div style={{ fontSize: '12px', color: 'var(--fg-dim)' }}>
+            <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--fg-muted)' }}>
               <span>{t('projects.issue.createHint')}</span>
             </div>
           </div>

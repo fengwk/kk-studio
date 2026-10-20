@@ -37,7 +37,7 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.StreamCheckpoint;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
-import fun.fengwk.kkstudio.harness.runtime.join.JoinPurpose;
+import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
@@ -76,10 +76,12 @@ import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
-import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
@@ -1240,9 +1242,8 @@ class ModelProcessorTest {
         model(empty.store, empty.invocationId).status(),
         "ordinary empty COMPLETE semantics must not change");
 
-    // TASK Join 的 child 与普通 Thread 一样，不是压缩子：截断 final 不做摘要完整性校验。
+    // 默认约束的普通 Thread（含 task child）不是 owner-settled 摘要任务：截断 final 不做摘要完整性校验。
     Fixture taskChild = fixture();
-    seedJoin(taskChild.store, taskChild.baseline.threadId(), JoinPurpose.TASK);
     taskChild.gateway.queue(new ModelGateway.Started(new FakeHandle()));
     assertEquals(
         ProcessResult.STARTED,
@@ -1256,7 +1257,64 @@ class ModelProcessorTest {
     assertEquals(
         ModelInvocationStatus.SUCCEEDED,
         model(taskChild.store, taskChild.invocationId).status(),
-        "only COMPACTION purpose joins make a thread a compaction child");
+        "ordinary children never get summary-only validation from execution constraints");
+  }
+
+  /** 普通子代理即使继承 allowAutoCompaction=false，也不是摘要任务：LENGTH/FILTERED 仍按普通 Runtime 语义提交。 */
+  @Test
+  void inheritedNoAutoCompactionDoesNotTurnOrdinaryChildIntoSummaryAgent() {
+    ThreadConstraints inherited = new ThreadConstraints(4096, false, false);
+    Fixture truncated =
+        new Fixture(
+            NO_RETRY,
+            requestSpec(),
+            newScheduler(),
+            inherited,
+            false,
+            StreamFlushConfig.DEFAULT,
+            Runnable::run,
+            null,
+            ModelHttpErrorPolicyProvider.DEFAULT);
+    truncated.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    assertEquals(
+        ProcessResult.STARTED,
+        truncated.processor.process(claim(truncated.store, truncated.invocationId)));
+    truncated
+        .gateway
+        .listener(truncated.invocationId)
+        .onSucceeded(
+            new ProviderCompletion(
+                response("ordinary partial", GenerationStopReason.LENGTH), sampleReplayState()));
+    assertEquals(
+        ModelInvocationStatus.SUCCEEDED,
+        model(truncated.store, truncated.invocationId).status(),
+        "inherited constraints must not redefine the Thread as a summary Agent");
+
+    Fixture filtered =
+        new Fixture(
+            NO_RETRY,
+            requestSpec(),
+            newScheduler(),
+            inherited,
+            false,
+            StreamFlushConfig.DEFAULT,
+            Runnable::run,
+            null,
+            ModelHttpErrorPolicyProvider.DEFAULT);
+    filtered.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    assertEquals(
+        ProcessResult.STARTED,
+        filtered.processor.process(claim(filtered.store, filtered.invocationId)));
+    filtered
+        .gateway
+        .listener(filtered.invocationId)
+        .onSucceeded(
+            new ProviderCompletion(
+                response("ordinary filtered", GenerationStopReason.FILTERED), sampleReplayState()));
+    assertEquals(
+        ModelInvocationStatus.SUCCEEDED,
+        model(filtered.store, filtered.invocationId).status(),
+        "ordinary FILTERED keeps ordinary semantics");
   }
 
   /**
@@ -3907,11 +3965,34 @@ class ModelProcessorTest {
         Executor flushExecutor,
         ToolHistoryActionResolver toolHistoryActionResolver,
         ModelHttpErrorPolicyProvider httpErrorPolicyProvider) {
+      this(
+          retryPolicy,
+          requestSpec,
+          scheduler,
+          compactionChild ? new ThreadConstraints(4096, true, false) : ThreadConstraints.NONE,
+          compactionChild,
+          flushConfig,
+          flushExecutor,
+          toolHistoryActionResolver,
+          httpErrorPolicyProvider);
+    }
+
+    Fixture(
+        InvocationRetryPolicy retryPolicy,
+        ModelRequestSpec requestSpec,
+        ScheduledExecutorService scheduler,
+        ThreadConstraints constraints,
+        boolean ownerSettledSummary,
+        StreamFlushConfig flushConfig,
+        Executor flushExecutor,
+        ToolHistoryActionResolver toolHistoryActionResolver,
+        ModelHttpErrorPolicyProvider httpErrorPolicyProvider) {
       this.scheduler = scheduler;
       this.requestSpec = requestSpec;
-      this.baseline = seedBaseline(store, NOW);
-      if (compactionChild) {
-        seedJoin(store, baseline.threadId(), JoinPurpose.COMPACTION);
+      this.baseline = seedBaseline(store, NOW, constraints);
+      if (ownerSettledSummary) {
+        seedOwnerSettledTicket(
+            store, baseline.sessionId(), baseline.rootEntryId(), baseline.threadId());
       }
       this.invocationId = seedInvocation(store, baseline, requestSpec, NOW);
       this.processor =
@@ -4069,7 +4150,72 @@ class ModelProcessorTest {
         });
   }
 
+  /** 真正由父 Turn owner 结算的摘要任务：直接票据 delivery=SETTLE_OWNER_TURN，而不是靠执行约束推断。 */
+  private static void seedOwnerSettledTicket(
+      InMemoryHarnessStore store, UUID sessionId, UUID rootEntryId, UUID threadId) {
+    store.transaction(
+        tx -> {
+          tx.lockThread(threadId).orElseThrow();
+          String hash = "a".repeat(64);
+          UUID parentThreadId = tx.nextId();
+          tx.insertThread(
+              new ThreadState(
+                  parentThreadId,
+                  sessionId,
+                  null,
+                  rootEntryId,
+                  hash,
+                  "compaction-owner",
+                  parentThreadId,
+                  false,
+                  SpawnTrigger.USER,
+                  ThreadConstraints.NONE,
+                  ThreadExecutionControl.RUNNABLE,
+                  0L,
+                  1L,
+                  0L,
+                  NOW,
+                  NOW));
+          tx.insertCommands(
+              List.of(
+                  new ThreadCommand(
+                      threadId,
+                      1,
+                      new CustomMessageCommandPayload(AgentMessage.user("summarize")),
+                      UUID.randomUUID(),
+                      hash,
+                      null,
+                      null,
+                      null,
+                      NOW)));
+          tx.insertJoin(
+              new ThreadJoin(
+                  UUID.randomUUID(),
+                  hash,
+                  parentThreadId,
+                  threadId,
+                  1,
+                  "Compaction",
+                  null,
+                  0,
+                  null,
+                  null,
+                  null,
+                  NOW,
+                  NOW,
+                  JoinDelivery.SETTLE_OWNER_TURN,
+                  false,
+                  null));
+          return null;
+        });
+  }
+
   private static Baseline seedBaseline(HarnessStore store, Instant now) {
+    return seedBaseline(store, now, ThreadConstraints.NONE);
+  }
+
+  private static Baseline seedBaseline(
+      HarnessStore store, Instant now, ThreadConstraints constraints) {
     return store.transaction(
         tx -> {
           UUID sessionId = tx.nextId();
@@ -4094,61 +4240,9 @@ class ModelProcessorTest {
                       null),
                   now.plusMillis(1)));
           tx.insertThread(
-              ThreadProcessorTestSupport.threadState(threadId, sessionId, turnStartEntryId, now));
-          return new Baseline(sessionId, rootEntryId, turnStartEntryId, threadId);
-        });
-  }
-
-  /**
-   * 给已存在的 Thread 插入一个 purpose 指定的未结算 Join（连同父 Thread 与子 source command），构造真实的 child 侧身份事实。
-   *
-   * <p>压缩子身份只能由 COMPACTION purpose 的未结算 Join 决定：TASK Join 的 child 与无 Join 的普通 Thread 都不是压缩子。
-   */
-  private static void seedJoin(
-      InMemoryHarnessStore store, UUID childThreadId, JoinPurpose purpose) {
-    store.transaction(
-        tx -> {
-          tx.lockThread(childThreadId);
-          UUID parentThreadId = tx.nextId();
-          UUID parentSessionId = tx.nextId();
-          UUID parentRootEntryId = tx.nextId();
-          tx.insertSession(new Session(parentSessionId, "parent-" + parentSessionId, NOW));
-          tx.insertEntry(
-              new Entry(
-                  parentRootEntryId,
-                  parentSessionId,
-                  null,
-                  new RootPayload(branchSettings()),
-                  NOW));
-          tx.insertThread(
               ThreadProcessorTestSupport.threadState(
-                  parentThreadId, parentSessionId, parentRootEntryId, NOW));
-          UUID commandId = tx.nextId();
-          CustomMessageCommandPayload payload =
-              new CustomMessageCommandPayload(AgentMessage.user("compaction instruction"));
-          String requestHash = ThreadCommandPayloadJsonCodec.requestHash(payload);
-          tx.insertCommands(
-              List.of(
-                  new ThreadCommand(
-                      childThreadId, 1L, payload, commandId, requestHash, null, null, null, NOW)));
-          tx.insertJoin(
-              new ThreadJoin(
-                  commandId,
-                  requestHash,
-                  parentThreadId,
-                  childThreadId,
-                  1L,
-                  "compaction",
-                  null,
-                  0L,
-                  null,
-                  null,
-                  null,
-                  NOW,
-                  NOW,
-                  purpose,
-                  null));
-          return null;
+                  threadId, sessionId, turnStartEntryId, now, constraints));
+          return new Baseline(sessionId, rootEntryId, turnStartEntryId, threadId);
         });
   }
 

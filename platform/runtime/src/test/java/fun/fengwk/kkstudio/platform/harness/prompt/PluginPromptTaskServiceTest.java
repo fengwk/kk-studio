@@ -21,20 +21,19 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.springframework.beans.factory.ObjectProvider;
 
-import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsCommand;
-import fun.fengwk.kkstudio.harness.runtime.AcceptCommandsTarget;
-import fun.fengwk.kkstudio.harness.runtime.AcceptancePreflight;
+import fun.fengwk.kkstudio.harness.runtime.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeConflictException;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
+import fun.fengwk.kkstudio.harness.runtime.SpawnRequest;
 import fun.fengwk.kkstudio.harness.runtime.StopCommand;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
+import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinOutcome;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinReceipt;
-import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinRequest;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.ResourceMessageContent;
@@ -42,11 +41,14 @@ import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.testing.TestThreadChangeSource;
+import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
+import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
+import fun.fengwk.kkstudio.platform.agenttask.AgentTaskService;
 import fun.fengwk.kkstudio.platform.harness.task.AgentBranchSettingsMaterializer;
 import fun.fengwk.kkstudio.platform.plugin.prompt.PluginPromptContent;
 import fun.fengwk.kkstudio.platform.plugin.prompt.PluginPromptResources;
@@ -98,12 +100,23 @@ class PluginPromptTaskServiceTest {
     materializer = mock(AgentBranchSettingsMaterializer.class);
     ObjectProvider<HarnessRuntime> runtimes = mock(ObjectProvider.class);
     when(runtimes.getIfAvailable()).thenReturn(runtime);
+    // AgentTaskService 只把统一 spawn 的接受结果包装为句柄：测试用窄 mock 表达接受事实。
+    AcceptedCommands accepted = mock(AcceptedCommands.class);
+    Session acceptedSession = mock(Session.class);
+    ThreadState acceptedThread = mock(ThreadState.class);
+    when(acceptedSession.id()).thenReturn(SESSION_ID);
+    when(acceptedThread.id()).thenReturn(UUID.randomUUID());
+    when(accepted.session()).thenReturn(acceptedSession);
+    when(accepted.thread()).thenReturn(acceptedThread);
+    when(runtime.spawn(any(SpawnRequest.class))).thenReturn(accepted);
     when(materializer.materialize(any())).thenReturn(SETTINGS);
     changeSource = new TestThreadChangeSource();
     uploadService = mock(StorageUploadService.class);
     refManager = mock(SessionBlobRefManager.class);
     resources = new PluginPromptResourceBridge(uploadService, refManager);
-    service = new PluginPromptTaskService(runtimes, materializer, changeSource, resources);
+    service =
+        new PluginPromptTaskService(
+            new AgentTaskService(runtimes), materializer, changeSource, resources);
   }
 
   private static List<PluginPromptContent> textContents() {
@@ -115,18 +128,17 @@ class PluginPromptTaskServiceTest {
     // root completion ticket：parent 为空（不投递父消息），但源 prompt 仍必须与 join 原子接受。
     UUID taskId = service.submit("worker", "system", textContents());
 
-    ArgumentCaptor<AcceptCommandsCommand> command =
-        ArgumentCaptor.forClass(AcceptCommandsCommand.class);
-    ArgumentCaptor<ThreadJoinRequest> join = ArgumentCaptor.forClass(ThreadJoinRequest.class);
-    verify(runtime).acceptCommandsAndJoin(command.capture(), join.capture(), any());
+    ArgumentCaptor<SpawnRequest> command = ArgumentCaptor.forClass(SpawnRequest.class);
+    verify(runtime).spawn(command.capture());
 
-    AcceptCommandsTarget.NewRootSession target =
-        (AcceptCommandsTarget.NewRootSession) command.getValue().target();
+    SpawnRequest target = command.getValue();
     assertEquals(taskId, target.threadId());
-    assertEquals(null, join.getValue().parentThreadId());
-    assertEquals(null, join.getValue().expectedParentHeadEntryId());
-    assertEquals(PluginPromptTaskService.invocationId(taskId), join.getValue().invocationId());
-    assertEquals(SETTINGS, target.rootSettings());
+    assertEquals(null, target.parentThreadId());
+    assertEquals(null, target.expectedParentHeadEntryId());
+    assertEquals(SpawnTrigger.PLUGIN, target.trigger());
+    assertEquals(JoinDelivery.RECEIPT_ONLY, target.delivery());
+    assertEquals(PluginPromptTaskService.invocationId(taskId), target.ticketId());
+    assertEquals(SETTINGS, target.settings());
     // 唯一命令是携带可信 system reminder 前缀的 USER 消息。
     assertEquals(1, command.getValue().commands().size());
     AgentMessage submitted =
@@ -142,7 +154,7 @@ class PluginPromptTaskServiceTest {
             ("kk-studio/harness/oneshot/" + taskId).getBytes(StandardCharsets.UTF_8)),
         PluginPromptTaskService.invocationId(taskId),
         "the durable task handle must preserve its join identity");
-    assertEquals(join.getValue().requestHash(), command.getValue().commands().get(0).requestHash());
+    assertEquals(target.requestHash(), command.getValue().commands().get(0).requestHash());
   }
 
   /** 空白 system 文本不得伪造提醒段：提交形态与接受事务内的 durable 形态都不注入。 */
@@ -150,11 +162,8 @@ class PluginPromptTaskServiceTest {
   void omitsReminderWhenTrustedSystemTextIsBlank() {
     service.submit("worker", "  ", List.of(new PluginPromptContent.Text("only")));
 
-    ArgumentCaptor<AcceptancePreflight> preflight =
-        ArgumentCaptor.forClass(AcceptancePreflight.class);
-    ArgumentCaptor<AcceptCommandsCommand> command =
-        ArgumentCaptor.forClass(AcceptCommandsCommand.class);
-    verify(runtime).acceptCommandsAndJoin(command.capture(), any(), preflight.capture());
+    ArgumentCaptor<SpawnRequest> command = ArgumentCaptor.forClass(SpawnRequest.class);
+    verify(runtime).spawn(command.capture());
     AgentMessage submitted =
         ((CustomMessageCommandPayload) command.getValue().commands().get(0).payload()).message();
     assertEquals(1, submitted.contents().size());
@@ -162,8 +171,9 @@ class PluginPromptTaskServiceTest {
 
     NewThreadCommand raw = command.getValue().commands().getFirst();
     List<NewThreadCommand> prepared =
-        preflight
+        command
             .getValue()
+            .preflight()
             .prepare(
                 mock(HarnessStore.Transaction.class),
                 new Session(SESSION_ID, "h3", NOW),
@@ -192,16 +202,14 @@ class PluginPromptTaskServiceTest {
             new PluginPromptContent.Media(staged),
             new PluginPromptContent.Text("tail")));
 
-    ArgumentCaptor<AcceptancePreflight> preflight =
-        ArgumentCaptor.forClass(AcceptancePreflight.class);
-    ArgumentCaptor<AcceptCommandsCommand> command =
-        ArgumentCaptor.forClass(AcceptCommandsCommand.class);
-    verify(runtime).acceptCommandsAndJoin(command.capture(), any(), preflight.capture());
+    ArgumentCaptor<SpawnRequest> command = ArgumentCaptor.forClass(SpawnRequest.class);
+    verify(runtime).spawn(command.capture());
 
     NewThreadCommand raw = command.getValue().commands().getFirst();
     List<NewThreadCommand> prepared =
-        preflight
+        command
             .getValue()
+            .preflight()
             .prepare(
                 mock(HarnessStore.Transaction.class),
                 new Session(SESSION_ID, "h3", NOW),
@@ -231,7 +239,8 @@ class PluginPromptTaskServiceTest {
     ObjectProvider<HarnessRuntime> missing = mock(ObjectProvider.class);
     when(missing.getIfAvailable()).thenReturn(null);
     PluginPromptTaskService unbound =
-        new PluginPromptTaskService(missing, materializer, changeSource, resources);
+        new PluginPromptTaskService(
+            new AgentTaskService(missing), materializer, changeSource, resources);
 
     IllegalStateException failure =
         assertThrows(
@@ -248,18 +257,16 @@ class PluginPromptTaskServiceTest {
   void preflightRejectsUnexpectedCommandBatches() {
     service.submit("worker", "system", List.of(new PluginPromptContent.Text("only")));
 
-    ArgumentCaptor<AcceptancePreflight> preflight =
-        ArgumentCaptor.forClass(AcceptancePreflight.class);
-    ArgumentCaptor<AcceptCommandsCommand> command =
-        ArgumentCaptor.forClass(AcceptCommandsCommand.class);
-    verify(runtime).acceptCommandsAndJoin(command.capture(), any(), preflight.capture());
+    ArgumentCaptor<SpawnRequest> command = ArgumentCaptor.forClass(SpawnRequest.class);
+    verify(runtime).spawn(command.capture());
     NewThreadCommand raw = command.getValue().commands().getFirst();
 
     assertThrows(
         IllegalStateException.class,
         () ->
-            preflight
+            command
                 .getValue()
+                .preflight()
                 .prepare(
                     mock(HarnessStore.Transaction.class),
                     new Session(SESSION_ID, "h3", NOW),
@@ -277,9 +284,8 @@ class PluginPromptTaskServiceTest {
     service.submit("worker", "system", contents);
     service.submit("worker", "system", contents);
 
-    ArgumentCaptor<AcceptCommandsCommand> commands =
-        ArgumentCaptor.forClass(AcceptCommandsCommand.class);
-    verify(runtime, times(2)).acceptCommandsAndJoin(commands.capture(), any(), any());
+    ArgumentCaptor<SpawnRequest> commands = ArgumentCaptor.forClass(SpawnRequest.class);
+    verify(runtime, times(2)).spawn(commands.capture());
     String first = commands.getAllValues().get(0).commands().getFirst().requestHash();
     String second = commands.getAllValues().get(1).commands().getFirst().requestHash();
     assertEquals(first, second);
@@ -300,7 +306,7 @@ class PluginPromptTaskServiceTest {
     assertThrows(
         NullPointerException.class,
         () -> service.submit("worker", "system", Arrays.asList((PluginPromptContent) null)));
-    verify(runtime, never()).acceptCommandsAndJoin(any(), any(), any());
+    verify(runtime, never()).spawn(any());
   }
 
   @Test
@@ -589,6 +595,8 @@ class PluginPromptTaskServiceTest {
             "prompt-task",
             threadId,
             false,
+            SpawnTrigger.USER,
+            ThreadConstraints.NONE,
             ThreadExecutionControl.RUNNABLE,
             0L,
             1L,
