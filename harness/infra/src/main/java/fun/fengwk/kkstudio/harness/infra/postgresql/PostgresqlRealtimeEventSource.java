@@ -73,6 +73,12 @@ public final class PostgresqlRealtimeEventSource implements RealtimeEventSource 
       onResync();
       return;
     }
+    onEnvelope(envelope);
+  }
+
+  /** 分发已解码 envelope；调用方负责跨节点 origin 过滤。 */
+  public void onEnvelope(RealtimeNotificationCodec.Envelope envelope) {
+    Objects.requireNonNull(envelope, "envelope");
     List<Subscriber> subscribers;
     synchronized (lifecycleFence) {
       if (closed) {
@@ -91,6 +97,19 @@ public final class PostgresqlRealtimeEventSource implements RealtimeEventSource 
     } else {
       dispatchResync(subscribers);
     }
+  }
+
+  /** 直接把本地产生的事件投递给本机订阅方，不经过编解码或跨节点 transport。 */
+  public void onEvent(RealtimeEvent event) {
+    Objects.requireNonNull(event, "event");
+    List<Subscriber> subscribers;
+    synchronized (lifecycleFence) {
+      if (closed) {
+        return;
+      }
+      subscribers = snapshot(event.threadId());
+    }
+    dispatchEvent(subscribers, event);
   }
 
   /** 由统一 listener 在显式建立或重建连接后触发全部本地订阅恢复。 */

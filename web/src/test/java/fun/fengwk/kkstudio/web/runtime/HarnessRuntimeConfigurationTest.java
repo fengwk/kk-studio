@@ -24,8 +24,7 @@ import org.testcontainers.utility.DockerImageName;
 import fun.fengwk.kkstudio.harness.environment.server.EnvironmentSessionListener;
 import fun.fengwk.kkstudio.harness.infra.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlHarnessStore;
-import fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlRealtimeEventSink;
-import fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlRealtimeEventSource;
+import fun.fengwk.kkstudio.harness.infra.realtime.RealtimeBus;
 import fun.fengwk.kkstudio.harness.infra.realtime.RealtimeEventSource;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
@@ -107,8 +106,15 @@ class HarnessRuntimeConfigurationTest {
   @Autowired private HarnessRuntimeProperties properties;
   @Autowired private HarnessStore harnessStore;
   @Autowired private SystemSettingsSnapshot systemSettingsSnapshot;
-  @Autowired private RealtimeEventSink realtimeEventSink;
-  @Autowired private RealtimeEventSource realtimeEventSource;
+
+  @Autowired
+  @Qualifier("realtimeBus")
+  private RealtimeEventSink realtimeEventSink;
+
+  @Autowired
+  @Qualifier("realtimeBus")
+  private RealtimeEventSource realtimeEventSource;
+
   @Autowired private InvocationRetryPolicyProvider invocationRetryPolicyProvider;
   @Autowired private ThreadProcessor threadProcessor;
   @Autowired private ModelProcessor modelProcessor;
@@ -118,7 +124,15 @@ class HarnessRuntimeConfigurationTest {
   @Autowired private HarnessWorkDispatcher harnessWorkDispatcher;
   @Autowired private HarnessDispatcherProperties harnessDispatcherProperties;
   @Autowired private ApplicationContext applicationContext;
-  @Autowired private PostgresqlNotificationLoop postgresqlNotificationLoop;
+
+  @Autowired
+  @Qualifier("postgresqlNotificationLoop")
+  private PostgresqlNotificationLoop postgresqlNotificationLoop;
+
+  @Autowired
+  @Qualifier("realtimeNotificationLoop")
+  private PostgresqlNotificationLoop realtimeNotificationLoop;
+
   @Autowired private EnvironmentSessionListener environmentSessionListener;
 
   @Autowired
@@ -148,8 +162,8 @@ class HarnessRuntimeConfigurationTest {
   @Test
   void composesTheFullRuntimeBeanGraph() {
     assertInstanceOf(PostgresqlHarnessStore.class, harnessStore);
-    assertInstanceOf(PostgresqlRealtimeEventSource.class, realtimeEventSource);
-    assertInstanceOf(PostgresqlRealtimeEventSink.class, realtimeEventSink);
+    assertInstanceOf(RealtimeBus.class, realtimeEventSource);
+    assertInstanceOf(RealtimeBus.class, realtimeEventSink);
     assertNotNull(threadProcessor);
     assertNotNull(modelProcessor);
     assertNotNull(toolProcessor);
@@ -184,6 +198,9 @@ class HarnessRuntimeConfigurationTest {
     assertTrue(
         postgresqlNotificationLoop.isRunning(),
         "application notification loop remains active for Thread/Canvas when workers are disabled");
+    assertTrue(
+        realtimeNotificationLoop.isRunning(),
+        "dedicated realtime LISTEN loop must start independently of workers");
   }
 
   /**

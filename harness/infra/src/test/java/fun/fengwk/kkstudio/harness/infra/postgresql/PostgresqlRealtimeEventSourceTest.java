@@ -12,12 +12,14 @@ import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /** PostgresqlRealtimeEventSource 的本地订阅、分发、恢复与关闭边界契约。 */
 class PostgresqlRealtimeEventSourceTest {
 
   private static final Instant NOW = Instant.parse("2026-08-05T00:00:00Z");
+  private static final UUID ORIGIN = id(900L);
 
   private final RealtimeNotificationCodec codec = new RealtimeNotificationCodec();
   private final PostgresqlRealtimeEventSource source = new PostgresqlRealtimeEventSource(codec);
@@ -33,7 +35,7 @@ class PostgresqlRealtimeEventSourceTest {
     source.subscribe(id(1L), second::add, () -> {});
     source.subscribe(id(2L), otherThread::add, () -> {});
 
-    source.onNotification(codec.encodeEvent(event));
+    source.onNotification(codec.encodeEvent(ORIGIN, event));
 
     assertEquals(List.of(event), first);
     assertEquals(List.of(event), second);
@@ -54,7 +56,7 @@ class PostgresqlRealtimeEventSourceTest {
         resyncs::incrementAndGet);
     source.subscribe(id(1L), received::add, resyncs::incrementAndGet);
 
-    source.onNotification(codec.encodeEvent(event));
+    source.onNotification(codec.encodeEvent(ORIGIN, event));
 
     assertEquals(List.of(event), received);
     assertEquals(0, resyncs.get());
@@ -68,7 +70,7 @@ class PostgresqlRealtimeEventSourceTest {
     source.subscribe(id(1L), ignored -> {}, first::incrementAndGet);
     source.subscribe(id(2L), ignored -> {}, second::incrementAndGet);
 
-    source.onNotification(codec.encodeResync(id(1L), "EVENT_TOO_LARGE"));
+    source.onNotification(codec.encodeResync(ORIGIN, id(1L), "EVENT_TOO_LARGE"));
 
     assertEquals(1, first.get());
     assertEquals(0, second.get());
@@ -120,7 +122,7 @@ class PostgresqlRealtimeEventSourceTest {
 
     firstSubscription.close();
     firstSubscription.close();
-    source.onNotification(codec.encodeEvent(event));
+    source.onNotification(codec.encodeEvent(ORIGIN, event));
 
     assertEquals(List.of(), first);
     assertEquals(List.of(event), second);
@@ -135,8 +137,8 @@ class PostgresqlRealtimeEventSourceTest {
         source.subscribe(id(1L), ignored -> events.incrementAndGet(), resyncs::incrementAndGet);
 
     subscription.close();
-    source.onNotification(codec.encodeEvent(modelDelta(1L, "dropped")));
-    source.onNotification(codec.encodeResync(id(1L), "test"));
+    source.onNotification(codec.encodeEvent(ORIGIN, modelDelta(1L, "dropped")));
+    source.onNotification(codec.encodeResync(ORIGIN, id(1L), "test"));
 
     assertEquals(0, events.get());
     assertEquals(0, resyncs.get());
@@ -152,7 +154,7 @@ class PostgresqlRealtimeEventSourceTest {
     later[0] =
         source.subscribe(id(1L), ignored -> events.incrementAndGet(), resyncs::incrementAndGet);
 
-    source.onNotification(codec.encodeEvent(modelDelta(1L, "one")));
+    source.onNotification(codec.encodeEvent(ORIGIN, modelDelta(1L, "one")));
     assertEquals(0, events.get());
 
     later[0] =
@@ -170,7 +172,7 @@ class PostgresqlRealtimeEventSourceTest {
 
     source.close();
     source.close();
-    source.onNotification(codec.encodeEvent(modelDelta(1L, "dropped")));
+    source.onNotification(codec.encodeEvent(ORIGIN, modelDelta(1L, "dropped")));
     source.onNotification("{not-json");
     source.onResync();
 

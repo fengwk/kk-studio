@@ -19,6 +19,7 @@ import fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlHarnessStore;
 import fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlRealtimeEventSink;
 import fun.fengwk.kkstudio.harness.infra.postgresql.PostgresqlRealtimeEventSource;
 import fun.fengwk.kkstudio.harness.infra.postgresql.RealtimeNotificationCodec;
+import fun.fengwk.kkstudio.harness.infra.realtime.RealtimeBus;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionConfigProvider;
 import fun.fengwk.kkstudio.harness.runtime.port.ModelGateway;
@@ -45,6 +46,7 @@ import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepos
 import fun.fengwk.kkstudio.platform.catalog.provider.configuration.AgentProviderConfigurationCodec;
 import fun.fengwk.kkstudio.platform.catalog.provider.repo.AgentProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
+import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodePresence;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrchestrator;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrchestratorFactory;
 import fun.fengwk.kkstudio.platform.environment.update.EnvironmentUpdateService;
@@ -137,16 +139,20 @@ public class HarnessRuntimeConfiguration {
     return new RealtimeNotificationCodec();
   }
 
-  @Bean
-  public RealtimeEventSink realtimeEventSink(
-      DataSource dataSource, RealtimeNotificationCodec notificationCodec) {
-    return new PostgresqlRealtimeEventSink(new JdbcTemplate(dataSource), notificationCodec);
-  }
-
+  /** 本地优先总线同时作为 Runtime 的 sink 与浏览器订阅的 source。 */
   @Bean(destroyMethod = "close")
-  public PostgresqlRealtimeEventSource realtimeEventSource(
-      RealtimeNotificationCodec notificationCodec) {
-    return new PostgresqlRealtimeEventSource(notificationCodec);
+  public RealtimeBus realtimeBus(
+      DataSource dataSource,
+      RealtimeNotificationCodec notificationCodec,
+      @Qualifier("nodeInstanceId") UUID nodeInstanceId,
+      ClusterNodePresence clusterNodePresence) {
+    JdbcTemplate jdbcTemplate = new JdbcTemplate(dataSource);
+    return new RealtimeBus(
+        nodeInstanceId,
+        notificationCodec,
+        new PostgresqlRealtimeEventSource(notificationCodec),
+        new PostgresqlRealtimeEventSink(jdbcTemplate, notificationCodec, nodeInstanceId),
+        clusterNodePresence::hasOtherActiveNodes);
   }
 
   /** Model / Tool 调用的全局重试策略现读通道：每次 retry 判定点从 SystemSettings.AiRuntime 映射。 */
