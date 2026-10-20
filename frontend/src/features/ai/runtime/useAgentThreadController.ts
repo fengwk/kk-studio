@@ -42,25 +42,16 @@ import {
   type CommandBatchPlan,
 } from '@/features/ai/chat/command-batch-plan'
 import {
-  branchDraftFromThread,
-  branchDraftsEqual,
-  projectPendingTarget,
-  type BranchDraft,
-} from '@/features/ai/chat/branch-draft'
-import {
   hasMessageContent,
   partsKey,
   slashQueryOf,
   trimMessageParts,
   type ComposerPart,
 } from '@/features/ai/composer/composer-parts'
-import { isConflictError, isConflictReason } from '@/shared/api/client'
+import { isConflictError } from '@/shared/api/client'
 import { harnessService } from '@/shared/api/harness-service'
 import type {
-  HarnessCommandCreateDTO,
-  HarnessThreadSnapshotDTO,
   HarnessStoppedThreadReceiptDTO,
-  ThreadCommandBatchRequestDTO,
 } from '@/shared/api/contracts/ai-runtime'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { translate, useI18n } from '@/shared/i18n'
@@ -86,45 +77,6 @@ function errorMessage(error: unknown): string {
 export interface CommandBatchReplay {
   plan: CommandBatchPlan
   parts: ComposerPart[]
-}
-
-const MAX_STALE_MESSAGE_CURSOR_RETRIES = 2
-
-/**
- * 只有纯消息 batch 才能在 cursor 冲突后原样换用新 cursor；SET_* 必须重新计算 diff。
- * 旧 head 仍位于最新 root-to-head 路径时，变化只是同一分支向前推进。
- */
-export function canRetryStaleMessageBatch(
-  planOrRequest:
-    | CommandBatchPlan
-    | ThreadCommandBatchRequestDTO
-    | { request: ThreadCommandBatchRequestDTO; targetDraft?: BranchDraft },
-  snapshot: HarnessThreadSnapshotDTO,
-): boolean {
-  const request: ThreadCommandBatchRequestDTO = 'request' in planOrRequest ? planOrRequest.request : planOrRequest
-  if (
-    request.commands.length === 0
-    || request.commands.some((command: HarnessCommandCreateDTO) => command.type !== 'USER_MESSAGE')
-  ) {
-    return false
-  }
-  if (
-    snapshot.thread.headEntryId === request.expectedHeadEntryId
-    && snapshot.thread.nextCommandSequence === request.expectedNextCommandSequence
-  ) {
-    return false
-  }
-  if ('targetDraft' in planOrRequest && planOrRequest.targetDraft != null) {
-    const latestTarget = projectPendingTarget(
-      branchDraftFromThread(snapshot.thread),
-      snapshot.queuedCommands,
-    )
-    if (!branchDraftsEqual(latestTarget, planOrRequest.targetDraft)) {
-      return false
-    }
-  }
-  return snapshot.thread.headEntryId === request.expectedHeadEntryId
-    || snapshot.entries.some((entry) => entry.entryId === request.expectedHeadEntryId)
 }
 
 /**
@@ -564,8 +516,8 @@ export function useAgentThreadController(
     const originThreadId = threadId
     const originEpoch = bindingEpochRef.current
     const originBindingKey = `${originThreadId}:${originEpoch}`
-    let currentPending = initialPending
-    let currentRequest = initialPending.request
+    const currentPending = initialPending
+    const currentRequest = initialPending.request
 
     inFlightBindingsRef.current.add(originBindingKey)
     setInFlightSubmissions((count) => count + 1)
@@ -573,74 +525,24 @@ export function useAgentThreadController(
     const isCurrentBound = () => isStillBound(originThreadId, originEpoch)
 
     try {
-      for (let retryCount = 0; ; retryCount += 1) {
-        try {
-          await harnessService.acceptThreadCommandBatch(originThreadId, currentRequest)
-          clearBoundPendingMessage(originThreadId, currentRequest)
-          if (isCurrentBound()) {
-            const existingStored = loadBoundPendingMessage(originThreadId)
-            if (existingStored == null || sameBatchRequestIdentity(existingStored.request, currentRequest)) {
-              setConflict(null)
-              pendingMessageRef.current = null
-              setPendingMessage(null)
-            }
-          }
-          // 成功后绝不再清空 draft，保留用户飞行期间输入的下一条草稿内容
-          await Promise.all([
-            queryClient.invalidateQueries({
-              queryKey: queryKeys.threads.snapshot(originThreadId),
-            }),
-            queryClient.invalidateQueries({ queryKey: queryKeys.chats.all }),
-          ])
-          return
-        } catch (error) {
-          if (
-            retryCount < MAX_STALE_MESSAGE_CURSOR_RETRIES
-            && isConflictReason(error, 'STALE_COMMAND_CURSOR')
-          ) {
-            // retry stale cursor 每次 await 后也 guard 当前 binding，避免跨 binding 自动重发
-            if (!isCurrentBound()) {
-              throw error
-            }
-            let latest: HarnessThreadSnapshotDTO
-            try {
-              latest = await harnessService.getThreadSnapshot(originThreadId)
-            } catch {
-              throw error
-            }
-            if (!isCurrentBound()) {
-              throw error
-            }
-            if (
-              latest.thread.threadId === originThreadId
-              && canRetryStaleMessageBatch(
-                { request: currentRequest, targetDraft: currentPending.targetDraft },
-                latest,
-              )
-            ) {
-              queryClient.setQueryData(queryKeys.threads.snapshot(originThreadId), latest)
-              currentRequest = {
-                ...currentRequest,
-                expectedHeadEntryId: latest.thread.headEntryId,
-                expectedNextCommandSequence: latest.thread.nextCommandSequence,
-              }
-              const updatedPending: BoundPendingMessage = {
-                ...currentPending,
-                request: currentRequest,
-              }
-              // stale 恢复 save 失败不能 best-effort 继续 POST，必须 fail-closed 抛错
-              saveBoundPendingMessage(originThreadId, updatedPending)
-              currentPending = updatedPending
-              if (isCurrentBound()) {
-                pendingMessageRef.current = updatedPending
-                setPendingMessage(updatedPending)
-              }
-              continue
-            }
-          }
-          throw error
+      await harnessService.acceptThreadCommandBatch(originThreadId, currentRequest)
+      clearBoundPendingMessage(originThreadId, currentRequest)
+      if (isCurrentBound()) {
+        const existingStored = loadBoundPendingMessage(originThreadId)
+        if (existingStored == null || sameBatchRequestIdentity(existingStored.request, currentRequest)) {
+          setConflict(null)
+          pendingMessageRef.current = null
+          setPendingMessage(null)
         }
       }
+      // 成功后绝不再清空 draft，保留用户飞行期间输入的下一条草稿内容
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: queryKeys.threads.snapshot(originThreadId),
+        }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.chats.all }),
+      ])
+      return
     } catch (error: unknown) {
       // 确切已发 request / currentPending 贯穿错误处理，绝不使用旧闭包覆盖
       const stillBound = isCurrentBound()

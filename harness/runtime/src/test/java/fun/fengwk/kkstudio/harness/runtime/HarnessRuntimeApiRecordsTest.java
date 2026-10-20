@@ -90,14 +90,24 @@ class HarnessRuntimeApiRecordsTest {
             new AcceptCommandsTarget.NewThread(
                 TestIds.id(1), TestIds.id(3), TestIds.id(4), "   ", false));
 
-    // THREAD cursor 必须为正。
+    // THREAD cursor 可省略（纯 USER_MESSAGE 按邮箱尾部入队）但必须成对；非空 sequence 必须为正。
     assertThrows(
         IllegalArgumentException.class,
         () -> new AcceptCommandsTarget.Thread(TestIds.id(1), TestIds.id(2), 0));
     assertThrows(
-        NullPointerException.class, () -> new AcceptCommandsTarget.Thread(null, TestIds.id(2), 1));
+        IllegalArgumentException.class,
+        () -> new AcceptCommandsTarget.Thread(TestIds.id(1), TestIds.id(2), null));
     assertThrows(
-        NullPointerException.class, () -> new AcceptCommandsTarget.Thread(TestIds.id(1), null, 1));
+        IllegalArgumentException.class,
+        () -> new AcceptCommandsTarget.Thread(TestIds.id(1), null, 1L));
+    assertThrows(
+        NullPointerException.class, () -> new AcceptCommandsTarget.Thread(null, TestIds.id(2), 1));
+    AcceptCommandsTarget.Thread cursorless =
+        new AcceptCommandsTarget.Thread(TestIds.id(1), null, null);
+    assertFalse(cursorless.hasCursor());
+    AcceptCommandsTarget.Thread cursor =
+        new AcceptCommandsTarget.Thread(TestIds.id(1), TestIds.id(2), 1L);
+    assertTrue(cursor.hasCursor());
 
     // target 只保存定位 / materialization 语义，不携带 commands。
     AcceptCommandsTarget.NewRootSession target =
