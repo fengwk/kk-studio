@@ -5,7 +5,7 @@ import static org.mockito.Mockito.mock;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
-import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
 
 import java.util.List;

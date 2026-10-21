@@ -13,7 +13,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import fun.fengwk.kkstudio.platform.catalog.skill.service.SkillCatalogService;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogService;
 import fun.fengwk.kkstudio.share.ai.skill.SkillPackageCheckDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillPackageCreateDTO;
 import fun.fengwk.kkstudio.share.ai.skill.SkillPackageDTO;

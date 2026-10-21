@@ -105,11 +105,11 @@ import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
-import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpDiscoveryStatus;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpServer;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerRepository;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpDiscoveryStatus;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser;
@@ -117,9 +117,9 @@ import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfi
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderConfigurationCodec;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
-import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogQueryService;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillManifestEntry;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.catalog.tool.TestRuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
@@ -1121,22 +1121,26 @@ class DatabaseTurnResolverTest {
     McpServerRepository repo = mock(McpServerRepository.class);
     McpToolCatalog mcpCatalog = new McpToolCatalog(repo);
 
-    McpServer server = new McpServer();
-    server.setName("srv");
-    server.setDiscoveryStatus(McpDiscoveryStatus.AVAILABLE);
-    server.setEnabled(true);
-    server.setVersion(1L);
-    server.setUrl("http://localhost:8080/mcp");
-    server.setHeaders(Map.of());
-    server.setTimeoutMillis(5000L);
+    McpServer server =
+        McpServer.builder()
+            .name("srv")
+            .discoveryStatus(McpDiscoveryStatus.AVAILABLE)
+            .enabled(true)
+            .version(1L)
+            .url("http://localhost:8080/mcp")
+            .headers(Map.of())
+            .timeoutMillis(5000L)
+            .build();
 
-    McpTool mcpTool = new McpTool();
-    mcpTool.setName("mcp_srv_echo");
-    mcpTool.setServerName("srv");
-    mcpTool.setSourceName("echo");
-    mcpTool.setDescription("echo tool");
-    mcpTool.setInputSchemaJson(
-        "{\"type\":\"object\",\"properties\":{},\"required\":[],\"additionalProperties\":true}");
+    McpTool mcpTool =
+        McpTool.builder()
+            .name("mcp_srv_echo")
+            .serverName("srv")
+            .sourceName("echo")
+            .description("echo tool")
+            .inputSchemaJson(
+                "{\"type\":\"object\",\"properties\":{},\"required\":[],\"additionalProperties\":true}")
+            .build();
 
     when(repo.getTool("mcp_srv_echo")).thenReturn(Optional.of(mcpTool));
     when(repo.getByName("srv")).thenReturn(Optional.of(server));
@@ -1281,25 +1285,29 @@ class DatabaseTurnResolverTest {
   }
 
   private static McpServer mcpServer(McpDiscoveryStatus status, boolean enabled) {
-    McpServer server = new McpServer();
-    server.setName("srv");
-    server.setDiscoveryStatus(status);
-    server.setEnabled(enabled);
-    server.setVersion(1L);
-    server.setUrl("http://localhost:8080/mcp");
-    server.setHeaders(Map.of());
-    server.setTimeoutMillis(5000L);
+    McpServer server =
+        McpServer.builder()
+            .name("srv")
+            .discoveryStatus(status)
+            .enabled(enabled)
+            .version(1L)
+            .url("http://localhost:8080/mcp")
+            .headers(Map.of())
+            .timeoutMillis(5000L)
+            .build();
     return server;
   }
 
   private static McpTool mcpTool(String name, String sourceName) {
-    McpTool tool = new McpTool();
-    tool.setName(name);
-    tool.setServerName("srv");
-    tool.setSourceName(sourceName);
-    tool.setDescription(sourceName + " tool");
-    tool.setInputSchemaJson(
-        "{\"type\":\"object\",\"properties\":{},\"required\":[],\"additionalProperties\":true}");
+    McpTool tool =
+        McpTool.builder()
+            .name(name)
+            .serverName("srv")
+            .sourceName(sourceName)
+            .description(sourceName + " tool")
+            .inputSchemaJson(
+                "{\"type\":\"object\",\"properties\":{},\"required\":[],\"additionalProperties\":true}")
+            .build();
     return tool;
   }
 
@@ -2988,8 +2996,8 @@ class DatabaseTurnResolverTest {
     private final SkillPromptPathResolver skillPromptPathResolver =
         new SkillPromptPathResolver(environmentRegistry);
     private final EnvironmentRepository environmentRepository = mock(EnvironmentRepository.class);
-    private final SkillCatalogQueryService skillCatalogQueryService =
-        mock(SkillCatalogQueryService.class);
+    private final SkillPackageRepository skillPackageRepository =
+        mock(SkillPackageRepository.class);
     private final Map<String, Map<String, String>> packages = new LinkedHashMap<>();
     private String observedHeadCommit;
     private AgentDefinition agent;
@@ -3162,7 +3170,7 @@ class DatabaseTurnResolverTest {
       agentConfig.setSubagents(List.of());
       when(agentConfigCodec.decode("agent-config")).thenReturn(agentConfig);
 
-      when(skillCatalogQueryService.getPackage(anyString()))
+      when(skillPackageRepository.getPackage(anyString()))
           .thenAnswer(
               invocation -> {
                 String pkgName = invocation.getArgument(0);
@@ -3170,14 +3178,16 @@ class DatabaseTurnResolverTest {
                 if (entries == null) {
                   return null;
                 }
-                SkillPackage pkg = new SkillPackage();
-                pkg.setPackageName(pkgName);
-                pkg.setCurrentCommit(CURRENT_COMMIT);
-                pkg.setObservedHeadCommit(observedHeadCommit);
-                pkg.setSkills(
-                    entries.entrySet().stream()
-                        .map(e -> new SkillManifestEntry(e.getKey(), e.getValue()))
-                        .toList());
+                SkillPackage pkg =
+                    SkillPackage.builder()
+                        .packageName(pkgName)
+                        .currentCommit(CURRENT_COMMIT)
+                        .observedHeadCommit(observedHeadCommit)
+                        .skills(
+                            entries.entrySet().stream()
+                                .map(e -> new SkillManifestEntry(e.getKey(), e.getValue()))
+                                .toList())
+                        .build();
                 return pkg;
               });
 
@@ -3249,7 +3259,7 @@ class DatabaseTurnResolverTest {
               toolCatalogSource,
               environmentRegistry,
               environmentRepository,
-              skillCatalogQueryService,
+              skillPackageRepository,
               skillPromptPathResolver,
               () -> new CompactionConfig(20_000),
               new AgentPromptComposer(() -> subagentConfig),

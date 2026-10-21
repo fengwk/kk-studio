@@ -4,11 +4,11 @@ import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpServer;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRow;
@@ -54,7 +54,7 @@ public final class ConfigSyncGraph {
   public Graph graph(ConfigSyncSnapshot snapshot) {
     Map<String, String> toolServer = new LinkedHashMap<>();
     for (McpTool tool : snapshot.mcpTools()) {
-      toolServer.put(tool.getName(), tool.getServerName());
+      toolServer.put(tool.name(), tool.serverName());
     }
     Set<String> builtinAgentNames = snapshot.builtinAgentNames();
 
@@ -230,7 +230,7 @@ public final class ConfigSyncGraph {
   }
 
   private static ConfigSyncRef skillRef(SkillPackage pkg) {
-    return ConfigSyncRefs.ref(ConfigSyncKind.SKILL_PACKAGES, pkg.getPackageName());
+    return ConfigSyncRefs.ref(ConfigSyncKind.SKILL_PACKAGES, pkg.packageName());
   }
 
   private static ConfigSyncRef environmentRef(Environment env) {
@@ -238,7 +238,7 @@ public final class ConfigSyncGraph {
   }
 
   private static ConfigSyncRef mcpRef(McpServer server) {
-    return ConfigSyncRefs.ref(ConfigSyncKind.MCP_SERVERS, server.getName());
+    return ConfigSyncRefs.ref(ConfigSyncKind.MCP_SERVERS, server.name());
   }
 
   private static ConfigSyncRef pluginRef(PluginConfigurationRow plugin) {

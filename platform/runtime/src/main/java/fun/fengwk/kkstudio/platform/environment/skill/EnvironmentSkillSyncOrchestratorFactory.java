@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.platform.environment.skill;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTransport;
-import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogQueryService;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 
 import java.time.Clock;
@@ -15,16 +15,16 @@ import java.util.concurrent.ExecutorService;
 public final class EnvironmentSkillSyncOrchestratorFactory {
 
   private final EnvironmentRegistry environmentRegistry;
-  private final SkillCatalogQueryService skillCatalogQueryService;
+  private final SkillPackageRepository skillPackageRepository;
   private final Clock clock;
 
   public EnvironmentSkillSyncOrchestratorFactory(
       EnvironmentRegistry environmentRegistry,
-      SkillCatalogQueryService skillCatalogQueryService,
+      SkillPackageRepository skillPackageRepository,
       Clock clock) {
     this.environmentRegistry = Objects.requireNonNull(environmentRegistry, "environmentRegistry");
-    this.skillCatalogQueryService =
-        Objects.requireNonNull(skillCatalogQueryService, "skillCatalogQueryService");
+    this.skillPackageRepository =
+        Objects.requireNonNull(skillPackageRepository, "skillPackageRepository");
     this.clock = Objects.requireNonNull(clock, "clock");
   }
 
@@ -32,7 +32,7 @@ public final class EnvironmentSkillSyncOrchestratorFactory {
       EnvironmentCapabilityTransport capabilityTransport, ExecutorService executor) {
     return new EnvironmentSkillSyncOrchestrator(
         environmentRegistry,
-        skillCatalogQueryService,
+        skillPackageRepository,
         Objects.requireNonNull(capabilityTransport, "capabilityTransport"),
         Objects.requireNonNull(executor, "executor"),
         clock);

@@ -39,9 +39,9 @@ import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
-import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerRepository;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseTurnResolver;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
@@ -148,8 +148,8 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
     List<McpTool> persistedTools = mcpServerRepository.listTools(serverName);
     assertEquals(1, persistedTools.size());
     McpTool persistedTool = persistedTools.get(0);
-    assertEquals("echo", persistedTool.getSourceName());
-    String modelName = persistedTool.getName();
+    assertEquals("echo", persistedTool.sourceName());
+    String modelName = persistedTool.name();
     assertEquals("mcp_" + serverName + "_echo", modelName);
 
     // 校验生产 RuntimeToolCatalog 也立即按该 name 查询到该工具

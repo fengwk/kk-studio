@@ -14,14 +14,14 @@ import org.springframework.transaction.support.TransactionTemplate;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionService;
-import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.McpServerService;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerRepository;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerService;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelService;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderService;
-import fun.fengwk.kkstudio.platform.catalog.skill.repo.SkillPackageRepository;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillManifestEntry;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
 import fun.fengwk.kkstudio.platform.error.AiInUseException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
@@ -137,7 +137,7 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
     assertTrue(updated.value() != null || updated.error() instanceof AiValidationException);
     definitionService.deleteAgent(persisted.name(), String.valueOf(persisted.version()));
     if (skillPackages.getPackage(packageName) != null) {
-      deletePackage(packageName, skillPackages.getPackage(packageName).getVersion());
+      deletePackage(packageName, skillPackages.getPackage(packageName).version());
     }
     model.delete();
   }
@@ -172,7 +172,7 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
       definitionService.deleteAgent(persisted.name(), String.valueOf(persisted.version()));
     }
     if (skillPackages.getPackage(packageName) != null) {
-      deletePackage(packageName, skillPackages.getPackage(packageName).getVersion());
+      deletePackage(packageName, skillPackages.getPackage(packageName).version());
     }
     model.delete();
   }
@@ -482,24 +482,25 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
         status -> {
           SkillPackage locked = skillPackages.lockPackage(packageName);
           if (locked != null) {
-            skillPackages.deletePackage(packageName, locked.getVersion());
+            skillPackages.deletePackage(packageName, locked.version());
           }
         });
   }
 
   private void insertPackage(String packageName, String... skillNames) {
-    SkillPackage skillPackage = new SkillPackage();
-    skillPackage.setPackageName(packageName);
-    skillPackage.setRepositoryUrl("https://example.com/" + packageName + ".git");
-    skillPackage.setBranch("main");
-    skillPackage.setCurrentCommit(COMMIT);
-    skillPackage.setObservedHeadCommit(COMMIT);
     List<SkillManifestEntry> skills = new ArrayList<>();
     for (String skillName : skillNames) {
       skills.add(new SkillManifestEntry(skillName, skillName + " skill"));
     }
-    skillPackage.setSkills(skills);
-    skillPackage.setVersion(0L);
+    SkillPackage skillPackage =
+        SkillPackage.builder()
+            .packageName(packageName)
+            .repositoryUrl("https://example.com/" + packageName + ".git")
+            .branch("main")
+            .currentCommit(COMMIT)
+            .observedHeadCommit(COMMIT)
+            .skills(skills)
+            .build();
     TransactionTemplate transaction = new TransactionTemplate(transactionManager);
     Boolean inserted = transaction.execute(status -> skillPackages.insertPackage(skillPackage));
     assertTrue(inserted);
@@ -521,8 +522,9 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
           for (String skillName : skillNames) {
             skills.add(new SkillManifestEntry(skillName, skillName + " skill"));
           }
-          current.setSkills(skills);
-          assertTrue(skillPackages.updatePackage(current, current.getVersion()));
+          assertTrue(
+              skillPackages.updatePackage(
+                  current.toBuilder().skills(skills).build(), current.version()));
         });
   }
 
@@ -535,19 +537,21 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
   }
 
   private void insertTool(String serverName, String sourceName) {
-    McpTool tool = new McpTool();
-    tool.setName("mcp_" + serverName + "_" + sourceName);
-    tool.setServerName(serverName);
-    tool.setSourceName(sourceName);
-    tool.setDescription(sourceName + " tool");
-    tool.setInputSchemaJson(
-        "{\"type\":\"object\",\"properties\":{},\"required\":[],\"additionalProperties\":false}");
+    McpTool tool =
+        McpTool.builder()
+            .name("mcp_" + serverName + "_" + sourceName)
+            .serverName(serverName)
+            .sourceName(sourceName)
+            .description(sourceName + " tool")
+            .inputSchemaJson(
+                "{\"type\":\"object\",\"properties\":{},\"required\":[],\"additionalProperties\":false}")
+            .build();
     mcpServers.insertTool(tool);
     jdbc.update("update mcp_server set discovery_status = 'AVAILABLE' where name = ?", serverName);
   }
 
   private String currentServerVersion(String name) {
-    return String.valueOf(mcpServers.getByName(name).orElseThrow().getVersion());
+    return String.valueOf(mcpServers.getByName(name).orElseThrow().version());
   }
 
   private Model model(String suffix) {

@@ -15,13 +15,13 @@ import org.mockito.InOrder;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributionId;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
-import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpServer;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerRepository;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
-import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogQueryService;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillManifestEntry;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
@@ -57,7 +57,7 @@ class AgentDefinitionReferenceResolverTest {
         new AgentDefinitionReferenceResolver(
             definitions,
             mock(AgentModelRepository.class),
-            mock(SkillCatalogQueryService.class),
+            mock(SkillPackageRepository.class),
             mock(McpServerRepository.class),
             TestCatalogSources.singleLease(mock(RuntimeToolCatalog.class)));
 
@@ -74,22 +74,25 @@ class AgentDefinitionReferenceResolverTest {
   /** 测试意图：Skill 引用校验：查询 package 及其 manifest，任一 Package 或 Skill 缺失都 fail closed。 */
   @Test
   void validatesSkillReferencesAndRejectsMissingOnes() {
-    SkillCatalogQueryService skillQueryService = mock(SkillCatalogQueryService.class);
+    SkillPackageRepository skillPackages = mock(SkillPackageRepository.class);
     AgentDefinitionReferenceResolver resolver =
         new AgentDefinitionReferenceResolver(
             mock(AgentDefinitionRepository.class),
             mock(AgentModelRepository.class),
-            skillQueryService,
+            skillPackages,
             mock(McpServerRepository.class),
             TestCatalogSources.singleLease(mock(RuntimeToolCatalog.class)));
 
-    SkillPackage pkg = new SkillPackage();
-    pkg.setPackageName("tools");
-    pkg.setSkills(
-        List.of(
-            new SkillManifestEntry("dev", "dev desc"), new SkillManifestEntry("ops", "ops desc")));
-    when(skillQueryService.getPackage("tools")).thenReturn(pkg);
-    when(skillQueryService.lockPackageForShare("tools")).thenReturn(pkg);
+    SkillPackage pkg =
+        SkillPackage.builder()
+            .packageName("tools")
+            .skills(
+                List.of(
+                    new SkillManifestEntry("dev", "dev desc"),
+                    new SkillManifestEntry("ops", "ops desc")))
+            .build();
+    when(skillPackages.getPackage("tools")).thenReturn(pkg);
+    when(skillPackages.lockPackageForShare("tools")).thenReturn(pkg);
 
     assertDoesNotThrow(
         () ->
@@ -113,23 +116,23 @@ class AgentDefinitionReferenceResolverTest {
 
   @Test
   void emptySkillSelectionDoesNotQueryCatalog() {
-    SkillCatalogQueryService skillQueryService = mock(SkillCatalogQueryService.class);
+    SkillPackageRepository skillPackages = mock(SkillPackageRepository.class);
     AgentDefinitionReferenceResolver resolver =
         new AgentDefinitionReferenceResolver(
             mock(AgentDefinitionRepository.class),
             mock(AgentModelRepository.class),
-            skillQueryService,
+            skillPackages,
             mock(McpServerRepository.class),
             TestCatalogSources.singleLease(mock(RuntimeToolCatalog.class)));
 
     assertDoesNotThrow(() -> resolver.requireReferencedLifecycles(List.of(), List.of()));
-    verify(skillQueryService, never()).getPackage(null);
+    verify(skillPackages, never()).getPackage(null);
   }
 
   /** 测试意图：Skill 与 MCP 共享锁按类别和 canonical name 排序，且发生在任何 Agent 行锁之前；内置工具不锁 server。 */
   @Test
   void locksSkillPackagesBeforeMcpServersInCanonicalOrder() {
-    SkillCatalogQueryService skills = mock(SkillCatalogQueryService.class);
+    SkillPackageRepository skills = mock(SkillPackageRepository.class);
     McpServerRepository servers = mock(McpServerRepository.class);
     RuntimeToolCatalog tools = mock(RuntimeToolCatalog.class);
     AgentDefinitionRepository definitions = mock(AgentDefinitionRepository.class);
@@ -193,7 +196,7 @@ class AgentDefinitionReferenceResolverTest {
         new AgentDefinitionReferenceResolver(
             mock(AgentDefinitionRepository.class),
             mock(AgentModelRepository.class),
-            mock(SkillCatalogQueryService.class),
+            mock(SkillPackageRepository.class),
             servers,
             TestCatalogSources.singleLease(tools));
 
@@ -205,7 +208,7 @@ class AgentDefinitionReferenceResolverTest {
   /** 测试意图：同一 Package 的第二个 Skill 在共享锁后被移除时，不能只因第一个仍存在就接受引用。 */
   @Test
   void rejectsSecondSkillRemovedAfterShareLock() {
-    SkillCatalogQueryService skills = mock(SkillCatalogQueryService.class);
+    SkillPackageRepository skills = mock(SkillPackageRepository.class);
     SkillPackage before = packageWith("tools", "alpha", "zeta");
     SkillPackage after = packageWith("tools", "alpha");
     when(skills.getPackage("tools")).thenReturn(before);
@@ -244,7 +247,7 @@ class AgentDefinitionReferenceResolverTest {
         new AgentDefinitionReferenceResolver(
             mock(AgentDefinitionRepository.class),
             mock(AgentModelRepository.class),
-            mock(SkillCatalogQueryService.class),
+            mock(SkillPackageRepository.class),
             servers,
             TestCatalogSources.singleLease(tools));
 
@@ -267,7 +270,7 @@ class AgentDefinitionReferenceResolverTest {
         new AgentDefinitionReferenceResolver(
             mock(AgentDefinitionRepository.class),
             mock(AgentModelRepository.class),
-            mock(SkillCatalogQueryService.class),
+            mock(SkillPackageRepository.class),
             servers,
             TestCatalogSources.singleLease(tools));
 
@@ -281,16 +284,18 @@ class AgentDefinitionReferenceResolverTest {
     return new AgentDefinitionReferenceResolver(
         mock(AgentDefinitionRepository.class),
         mock(AgentModelRepository.class),
-        mock(SkillCatalogQueryService.class),
+        mock(SkillPackageRepository.class),
         mock(McpServerRepository.class),
         TestCatalogSources.singleLease(mock(RuntimeToolCatalog.class)));
   }
 
   private static SkillPackage packageWith(String packageName, String... skillNames) {
-    SkillPackage skillPackage = new SkillPackage();
-    skillPackage.setPackageName(packageName);
-    skillPackage.setSkills(
-        Arrays.stream(skillNames).map(name -> new SkillManifestEntry(name, name)).toList());
+    SkillPackage skillPackage =
+        SkillPackage.builder()
+            .packageName(packageName)
+            .skills(
+                Arrays.stream(skillNames).map(name -> new SkillManifestEntry(name, name)).toList())
+            .build();
     return skillPackage;
   }
 
@@ -302,15 +307,12 @@ class AgentDefinitionReferenceResolverTest {
   }
 
   private static McpTool mcpTool(String name, String serverName) {
-    McpTool tool = new McpTool();
-    tool.setName(name);
-    tool.setServerName(serverName);
+    McpTool tool = McpTool.builder().name(name).serverName(serverName).build();
     return tool;
   }
 
   private static McpServer mcpServer(String name) {
-    McpServer server = new McpServer();
-    server.setName(name);
+    McpServer server = McpServer.builder().name(name).build();
     return server;
   }
 

@@ -5,14 +5,14 @@ import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
-import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpServer;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerRepository;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
-import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogQueryService;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.error.AiInUseException;
@@ -44,7 +44,7 @@ public final class AgentDefinitionReferenceResolver {
 
   private final AgentDefinitionRepository agentDefinitionRepository;
   private final AgentModelRepository agentModelRepository;
-  private final SkillCatalogQueryService skillCatalogQueryService;
+  private final SkillPackageRepository skillPackageRepository;
   private final McpServerRepository mcpServerRepository;
   private final RuntimeToolCatalogSource toolCatalogSource;
 
@@ -95,7 +95,7 @@ public final class AgentDefinitionReferenceResolver {
       RuntimeToolCatalog toolCatalog = lease.catalog();
       Map<String, TreeSet<String>> mcpServers = mcpServers(toolCatalog, toolNames);
       for (String packageName : new TreeSet<>(skillNames.keySet())) {
-        SkillPackage locked = skillCatalogQueryService.lockPackageForShare(packageName);
+        SkillPackage locked = skillPackageRepository.lockPackageForShare(packageName);
         for (String skillName : skillNames.get(packageName)) {
           if (locked == null || locked.findSkill(skillName) == null) {
             throw new AiValidationException(
@@ -117,12 +117,12 @@ public final class AgentDefinitionReferenceResolver {
           McpTool tool =
               mcpServerRepository
                   .lockToolForShare(toolName)
-                  .filter(candidate -> serverName.equals(candidate.getServerName()))
+                  .filter(candidate -> serverName.equals(candidate.serverName()))
                   .orElse(null);
           if (contribution == null
               || !MCP_CONTRIBUTOR.equals(contribution.id().contributorId())
               || tool == null
-              || !serverName.equals(locked.getName())) {
+              || !serverName.equals(locked.name())) {
             throw new AiValidationException(TOOL_RESOURCE, "unknown agent tool: " + toolName);
           }
         }
@@ -139,7 +139,7 @@ public final class AgentDefinitionReferenceResolver {
     for (SkillRefDTO ref : skills) {
       String identity = ref == null ? "null" : ref.getPackageName() + "/" + ref.getName();
       SkillPackage pkg =
-          ref == null ? null : skillCatalogQueryService.getPackage(ref.getPackageName());
+          ref == null ? null : skillPackageRepository.getPackage(ref.getPackageName());
       if (ref == null || pkg == null || pkg.findSkill(ref.getName()) == null) {
         if (!missing.contains(identity)) {
           missing.add(identity);
@@ -171,10 +171,10 @@ public final class AgentDefinitionReferenceResolver {
         continue;
       }
       McpTool tool = mcpServerRepository.getTool(toolName).orElse(null);
-      if (tool == null || tool.getServerName() == null) {
+      if (tool == null || tool.serverName() == null) {
         throw new AiValidationException(TOOL_RESOURCE, "unknown agent tool: " + toolName);
       }
-      servers.computeIfAbsent(tool.getServerName(), ignored -> new TreeSet<>()).add(toolName);
+      servers.computeIfAbsent(tool.serverName(), ignored -> new TreeSet<>()).add(toolName);
     }
     return servers;
   }

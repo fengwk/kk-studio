@@ -9,8 +9,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.mcp.McpClientFactory;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpServer;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.mcp.test.FakeStreamableHttpMcpServer;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 
@@ -62,11 +62,11 @@ class McpToolDiscoveryTest {
 
     assertEquals(1, tools.size());
     McpTool tool = tools.get(0);
-    assertEquals("mcp_discovery_server_search_files_v1", tool.getName());
-    assertEquals(SERVER_NAME, tool.getServerName());
-    assertEquals("Search-Files.v1", tool.getSourceName());
-    assertEquals("Search files by glob", tool.getDescription());
-    assertTrue(tool.getInputSchemaJson().contains("\"q\""));
+    assertEquals("mcp_discovery_server_search_files_v1", tool.name());
+    assertEquals(SERVER_NAME, tool.serverName());
+    assertEquals("Search-Files.v1", tool.sourceName());
+    assertEquals("Search files by glob", tool.description());
+    assertTrue(tool.inputSchemaJson().contains("\"q\""));
   }
 
   @Test
@@ -111,7 +111,7 @@ class McpToolDiscoveryTest {
     fakeServer.addTool("array_schema", "desc", "[\"a\",\"b\"]");
     List<McpTool> arrayTools = realDiscovery().discover(server(5000L));
     assertEquals(1, arrayTools.size());
-    assertTrue(arrayTools.get(0).getInputSchemaJson().startsWith("{"));
+    assertTrue(arrayTools.get(0).inputSchemaJson().startsWith("{"));
 
     fakeServer.clearTools();
     fakeServer.addTool(
@@ -120,7 +120,7 @@ class McpToolDiscoveryTest {
         "{\"type\":\"object\",\"properties\":{\"q\":{\"oneOf\":[{\"type\":\"string\"}]}},\"required\":[\"q\"]}");
     List<McpTool> complexTools = realDiscovery().discover(server(5000L));
     assertEquals(1, complexTools.size());
-    assertTrue(complexTools.get(0).getInputSchemaJson().contains("\"q\""));
+    assertTrue(complexTools.get(0).inputSchemaJson().contains("\"q\""));
   }
 
   @Test
@@ -137,9 +137,11 @@ class McpToolDiscoveryTest {
             },
             name -> "env-value");
 
-    McpServer server = server(5000L);
-    server.setHeaders(Map.of("Authorization", "${MCP_TOKEN}"));
-    server.setUrl(fakeServer.endpointUrl());
+    McpServer server =
+        server(5000L).toBuilder()
+            .headers(Map.of("Authorization", "${MCP_TOKEN}"))
+            .url(fakeServer.endpointUrl())
+            .build();
 
     List<McpTool> tools = envDiscovery.discover(server);
     assertEquals(1, tools.size());
@@ -151,8 +153,8 @@ class McpToolDiscoveryTest {
   void failureMessageNeverLeaksUrlOrHeaders() {
     // 意图：网络失败的错误信息绝不回显 URL、header 或底层异常原因
     fakeServer.setFailDiscovery(true);
-    McpServer server = server(5000L);
-    server.setUrl("https://sensitive-marker.example/mcp");
+    McpServer server =
+        server(5000L).toBuilder().url("https://sensitive-marker.example/mcp").build();
 
     AiValidationException error =
         assertThrows(AiValidationException.class, () -> realDiscovery().discover(server));
@@ -167,12 +169,14 @@ class McpToolDiscoveryTest {
   }
 
   private McpServer server(long timeoutMillis) {
-    McpServer server = new McpServer();
-    server.setName(SERVER_NAME);
-    server.setUrl(fakeServer.endpointUrl());
-    server.setHeaders(Map.of());
-    server.setEnabled(true);
-    server.setTimeoutMillis(timeoutMillis);
+    McpServer server =
+        McpServer.builder()
+            .name(SERVER_NAME)
+            .url(fakeServer.endpointUrl())
+            .headers(Map.of())
+            .enabled(true)
+            .timeoutMillis(timeoutMillis)
+            .build();
     return server;
   }
 }

@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.catalog.mcp.service;
+package fun.fengwk.kkstudio.platform.catalog.mcp;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -14,8 +14,6 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 
-import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.mcp.test.FakeStreamableHttpMcpServer;
 import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
 import fun.fengwk.kkstudio.platform.error.AiInUseException;
@@ -106,7 +104,10 @@ public class McpServerServiceTest extends PostgresSpringTestSupport {
 
   @Test
   public void rejectsInvalidNameAndUrlBeforeAnyPersistence() {
-    // 意图：name 正则、URL 绝对地址与 user-info 凭据约束在落库前确定性拒绝
+    // 意图：缺失请求体、name 正则、URL 绝对地址与 user-info 凭据约束在落库前确定性拒绝
+    assertThrows(AiValidationException.class, () -> mcpServerService.createServer(null));
+    assertThrows(
+        AiValidationException.class, () -> mcpServerService.updateServer("github_core", null));
     assertThrows(
         AiValidationException.class,
         () ->
@@ -143,11 +144,11 @@ public class McpServerServiceTest extends PostgresSpringTestSupport {
     assertEquals(2, tools.size());
     McpTool searchTool =
         tools.stream()
-            .filter(t -> t.getSourceName().equals("Search-Files.v1"))
+            .filter(t -> t.sourceName().equals("Search-Files.v1"))
             .findFirst()
             .orElseThrow();
-    assertEquals("mcp_remote_sync_search_files_v1", searchTool.getName());
-    assertFalse(tools.stream().anyMatch(t -> t.getName().contains("-")));
+    assertEquals("mcp_remote_sync_search_files_v1", searchTool.name());
+    assertFalse(tools.stream().anyMatch(t -> t.name().contains("-")));
 
     // 远端删掉 read_file 并更新 schema：整行删除并重建，不存在历史 tombstone。
     fakeServer.clearTools();
@@ -161,8 +162,8 @@ public class McpServerServiceTest extends PostgresSpringTestSupport {
 
     List<McpTool> after = repository.listTools("remote_sync");
     assertEquals(1, after.size());
-    assertEquals("mcp_remote_sync_search_files_v1", after.get(0).getName());
-    assertEquals("Updated desc", after.get(0).getDescription());
+    assertEquals("mcp_remote_sync_search_files_v1", after.get(0).name());
+    assertEquals("Updated desc", after.get(0).description());
   }
 
   @Test
@@ -226,10 +227,10 @@ public class McpServerServiceTest extends PostgresSpringTestSupport {
 
     String referencedName =
         repository.listTools("inuse_test").stream()
-            .filter(t -> t.getSourceName().equals("critical_tool"))
+            .filter(t -> t.sourceName().equals("critical_tool"))
             .findFirst()
             .orElseThrow()
-            .getName();
+            .name();
     insertFakeAgentDefinitionReferencingTool(referencedName);
 
     // 远端不再提供 critical_tool：引用保护必须阻止整次替换
@@ -240,7 +241,7 @@ public class McpServerServiceTest extends PostgresSpringTestSupport {
 
     List<McpTool> preserved = repository.listTools("inuse_test");
     assertEquals(2, preserved.size());
-    assertTrue(preserved.stream().anyMatch(t -> t.getName().equals(referencedName)));
+    assertTrue(preserved.stream().anyMatch(t -> t.name().equals(referencedName)));
     assertEquals("AVAILABLE", mcpServerService.getServer("inuse_test").getDiscoveryStatus());
   }
 
@@ -252,7 +253,7 @@ public class McpServerServiceTest extends PostgresSpringTestSupport {
         createDto("delete_guard", fakeServer.endpointUrl(), Map.of(), 5000L));
     mcpServerService.discoverServer("delete_guard", "0");
 
-    String referencedName = repository.listTools("delete_guard").get(0).getName();
+    String referencedName = repository.listTools("delete_guard").get(0).name();
     insertFakeAgentDefinitionReferencingTool(referencedName);
 
     assertThrows(AiInUseException.class, () -> mcpServerService.deleteServer("delete_guard", "0"));

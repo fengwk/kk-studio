@@ -214,9 +214,8 @@
                                         <include>fun.fengwk.kkstudio.platform.catalog.tool.FrozenToolBindingVerifier</include>
                                         <include>fun.fengwk.kkstudio.platform.catalog.mcp.discovery.McpInputSchemaConverter</include>
                                         <include>fun.fengwk.kkstudio.platform.catalog.mcp.discovery.McpToolDiscovery</include>
-                                        <include>fun.fengwk.kkstudio.platform.catalog.mcp.service.McpConfigParser</include>
-                                        <include>fun.fengwk.kkstudio.platform.catalog.mcp.service.McpServerMutationValidator</include>
-                                        <include>fun.fengwk.kkstudio.platform.catalog.mcp.service.impl.McpServerServiceImpl</include>
+                                        <include>fun.fengwk.kkstudio.platform.catalog.mcp.McpConfigParser</include>
+                                        <include>fun.fengwk.kkstudio.platform.catalog.mcp.McpServerService</include>
                                         <include>fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog</include>
                                         <include>fun.fengwk.kkstudio.platform.catalog.mcp.runtime.RemoteMcpExecutableTool</include>
                                         <include>fun.fengwk.kkstudio.platform.plugin.resource.PublicAddressPolicy</include>

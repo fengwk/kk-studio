@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.catalog.skill.service.model;
+package fun.fengwk.kkstudio.platform.catalog.skill;
 
 import java.util.Objects;
 

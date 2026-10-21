@@ -17,7 +17,7 @@ import org.eclipse.jgit.treewalk.TreeWalk;
 import org.springframework.context.annotation.DependsOn;
 
 import fun.fengwk.kkstudio.harness.common.skill.SkillNames;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillManifestEntry;
 
 import java.io.IOException;
 import java.net.URI;

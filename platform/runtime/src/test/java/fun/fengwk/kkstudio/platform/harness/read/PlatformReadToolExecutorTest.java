@@ -32,10 +32,10 @@ import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionContext;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
-import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogQueryService;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillManifestEntry;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitCache;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
 import fun.fengwk.kkstudio.platform.harness.read.PlatformResourceContentReader.ResourceRead;
 import fun.fengwk.kkstudio.platform.storage.ReadDeadline;
 
@@ -310,20 +310,24 @@ class PlatformReadToolExecutorTest {
   @ParameterizedTest
   @ValueSource(strings = {"dev/SKILL.md", "%2e%2e/literal%20.md"})
   void skillUriReadsExactGitPath(String relativePath) throws Exception {
-    SkillCatalogQueryService queryService = mock(SkillCatalogQueryService.class);
+    SkillPackageRepository skillPackageRepository = mock(SkillPackageRepository.class);
     SkillGitCache gitCache = mock(SkillGitCache.class);
-    SkillPackage pkg = new SkillPackage();
-    pkg.setRepositoryUrl("https://example.com/repo.git");
-    pkg.setCurrentCommit("c1");
-    pkg.setSkills(List.of(new SkillManifestEntry("dev", "desc")));
-    when(queryService.getPackage("pkg")).thenReturn(pkg);
+    SkillPackage pkg =
+        SkillPackage.builder()
+            .repositoryUrl("https://example.com/repo.git")
+            .currentCommit("c1")
+            .skills(List.of(new SkillManifestEntry("dev", "desc")))
+            .build();
+    when(skillPackageRepository.getPackage("pkg")).thenReturn(pkg);
     when(gitCache.readFile("pkg", "c1", "dev/SKILL.md"))
         .thenReturn("root".getBytes(StandardCharsets.UTF_8));
     when(gitCache.readFile("pkg", "c1", "dev/" + relativePath))
         .thenReturn("exact-file".getBytes(StandardCharsets.UTF_8));
     executor =
         new PlatformReadToolExecutor(
-            new PlatformSkillContentReader(queryService, gitCache), resourceReader, objectMapper);
+            new PlatformSkillContentReader(skillPackageRepository, gitCache),
+            resourceReader,
+            objectMapper);
     String uri = "kkstudio:/skills/pkg/dev/" + relativePath;
 
     ToolResult result =

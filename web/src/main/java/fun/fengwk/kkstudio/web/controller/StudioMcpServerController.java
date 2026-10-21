@@ -17,7 +17,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.McpServerService;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerService;
 import fun.fengwk.kkstudio.share.ai.mcp.McpServerConfigDTO;
 import fun.fengwk.kkstudio.share.ai.mcp.McpServerCreateDTO;
 import fun.fengwk.kkstudio.share.ai.mcp.McpServerDTO;

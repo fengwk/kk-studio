@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.catalog.skill.service.impl;
+package fun.fengwk.kkstudio.platform.catalog.skill;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -14,6 +14,7 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.Test;
 import org.springframework.aop.framework.ProxyFactory;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.AnnotationTransactionAttributeSource;
 import org.springframework.transaction.interceptor.TransactionInterceptor;
@@ -25,10 +26,6 @@ import tools.jackson.databind.json.JsonMapper;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitCache;
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitException;
-import fun.fengwk.kkstudio.platform.catalog.skill.repo.SkillPackageRepository;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.converter.SkillCatalogConverter;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
 import fun.fengwk.kkstudio.platform.error.AiInUseException;
@@ -56,7 +53,7 @@ import java.util.Objects;
  * <p>冻结四条关键语义：Create 发布当时解析出的 branch HEAD；编辑与发布只在事实变化时推进 version；Check 失败完整保留 current commit 与
  * manifest；发布只接受等于当前观察值的 exact commit，且移除仍被 Agent {@code SkillRef} 引用的 Skill 一律拒绝。
  */
-public class SkillCatalogServiceImplTest {
+public class SkillCatalogServiceTest {
 
   private static final String REPOSITORY_URL = "https://git.example.com/skills.git";
   private static final String OLD_COMMIT = "a".repeat(40);
@@ -179,7 +176,7 @@ public class SkillCatalogServiceImplTest {
 
     assertTrue(created.isHasToken());
     assertFalse(created.toString().contains("ghp_plain_secret"));
-    assertEquals("ghp_plain_secret", fixture.repository.getPackage("dev-package").getToken());
+    assertEquals("ghp_plain_secret", fixture.repository.getPackage("dev-package").token());
     // resolveBranchHead 与 ensureCommit 都必须携带同一令牌。
     assertEquals(List.of("ghp_plain_secret", "ghp_plain_secret"), fixture.git.observedTokens);
   }
@@ -194,7 +191,7 @@ public class SkillCatalogServiceImplTest {
     SkillPackageDTO created = fixture.service.createPackage(create("dev-package"));
 
     assertFalse(created.isHasToken());
-    assertNull(fixture.repository.getPackage("dev-package").getToken());
+    assertNull(fixture.repository.getPackage("dev-package").token());
     assertTrue(fixture.git.observedTokens.stream().allMatch(Objects::isNull));
   }
 
@@ -223,7 +220,7 @@ public class SkillCatalogServiceImplTest {
     replace.applyToken("second-token");
     SkillPackageDTO replaced = fixture.service.editPackage("dev-package", replace);
     assertEquals("1", replaced.getVersion());
-    assertEquals("second-token", fixture.repository.getPackage("dev-package").getToken());
+    assertEquals("second-token", fixture.repository.getPackage("dev-package").token());
 
     SkillPackageEditDTO clear = new SkillPackageEditDTO();
     clear.setExpectedVersion(replaced.getVersion());
@@ -232,7 +229,7 @@ public class SkillCatalogServiceImplTest {
     clear.applyToken(null);
     SkillPackageDTO cleared = fixture.service.editPackage("dev-package", clear);
     assertFalse(cleared.isHasToken());
-    assertNull(fixture.repository.getPackage("dev-package").getToken());
+    assertNull(fixture.repository.getPackage("dev-package").token());
 
     SkillPackageEditDTO blank = new SkillPackageEditDTO();
     blank.setExpectedVersion(cleared.getVersion());
@@ -272,7 +269,7 @@ public class SkillCatalogServiceImplTest {
         List.of(entry("dev", "developer skill")),
         "imported-token");
     assertTrue(fixture.service.getPackage("dev-package").isHasToken());
-    assertEquals("imported-token", fixture.repository.getPackage("dev-package").getToken());
+    assertEquals("imported-token", fixture.repository.getPackage("dev-package").token());
   }
 
   /** 测试意图：Check 使用已存储的令牌访问私有仓库。 */
@@ -386,8 +383,8 @@ public class SkillCatalogServiceImplTest {
         () ->
             fixture.service.updatePackage(
                 "dev-package", publish(observed.getVersion(), NEW_COMMIT)));
-    assertEquals(1L, fixture.repository.getPackage("dev-package").getVersion());
-    assertEquals(OLD_COMMIT, fixture.repository.getPackage("dev-package").getCurrentCommit());
+    assertEquals(1L, fixture.repository.getPackage("dev-package").version());
+    assertEquals(OLD_COMMIT, fixture.repository.getPackage("dev-package").currentCommit());
   }
 
   /** 测试意图：删除被引用的 Package 一律拒绝，未被引用时按 expectedVersion 删除，陈旧版本返回冲突。 */
@@ -523,15 +520,15 @@ public class SkillCatalogServiceImplTest {
       fixture.createPublished("dev-package");
       fixture.git.onNetwork =
           () -> {
-            SkillPackage concurrent = fixture.repository.getPackage("dev-package");
+            SkillPackage current = fixture.repository.getPackage("dev-package");
             switch (changed) {
-              case "branch" -> concurrent.setBranch("release");
-              case "repository" -> concurrent.setRepositoryUrl("https://other.invalid/repo");
-              case "observed" -> concurrent.setObservedHeadCommit(NEW_COMMIT);
+              case "branch" -> fixture.repository.seed(
+                  current.toBuilder().branch("release").build());
+              case "repository" -> fixture.repository.seed(
+                  current.toBuilder().repositoryUrl("https://other.invalid/repo").build());
+              case "observed" -> fixture.repository.seed(
+                  current.toBuilder().observedHeadCommit(NEW_COMMIT).build());
               default -> fixture.repository.packages.remove("dev-package");
-            }
-            if (!changed.equals("deleted")) {
-              fixture.repository.seed(concurrent);
             }
           };
       Class<? extends RuntimeException> expectedError =
@@ -679,14 +676,13 @@ public class SkillCatalogServiceImplTest {
   }
 
   private static SkillPackage unchecked(String packageName) {
-    SkillPackage skillPackage = new SkillPackage();
-    skillPackage.setPackageName(packageName);
-    skillPackage.setRepositoryUrl(REPOSITORY_URL);
-    skillPackage.setBranch("main");
-    skillPackage.setCurrentCommit(OLD_COMMIT);
-    skillPackage.setSkills(List.of(entry("dev", "developer skill")));
-    skillPackage.setVersion(0L);
-    return skillPackage;
+    return SkillPackage.builder()
+        .packageName(packageName)
+        .repositoryUrl(REPOSITORY_URL)
+        .branch("main")
+        .currentCommit(OLD_COMMIT)
+        .skills(List.of(entry("dev", "developer skill")))
+        .build();
   }
 
   /** 单测夹具：内存仓库 + 可编程 fake Git cache + mock Agent 引用。 */
@@ -696,7 +692,7 @@ public class SkillCatalogServiceImplTest {
     private final FakeGitCache git = new FakeGitCache();
     private final AgentDefinitionRepository agentDefinitionRepository =
         mock(AgentDefinitionRepository.class);
-    private final SkillCatalogServiceImpl service;
+    private final SkillCatalogService service;
 
     private Fixture() {
       AbstractPlatformTransactionManager transactions =
@@ -717,11 +713,10 @@ public class SkillCatalogServiceImplTest {
           };
       this.service =
           transactional(
-              new SkillCatalogServiceImpl(
+              new SkillCatalogService(
                   repository,
+                  agentDefinitionRepository,
                   git,
-                  new SkillCatalogConverter(),
-                  new SkillPackageGuard(repository, agentDefinitionRepository),
                   new AgentEditableSupport(JsonMapper.builder().build()),
                   transactional(new SkillCatalogWrites(), transactions)),
               transactions);
@@ -748,29 +743,32 @@ public class SkillCatalogServiceImplTest {
   }
 
   /** 内存权威表：只实现 service 用到的 CAS 语义。 */
-  private static final class FakeRepository implements SkillPackageRepository {
+  private static final class FakeRepository extends SkillPackageRepository {
 
     private final Map<String, SkillPackage> packages = new LinkedHashMap<>();
     private boolean failInsert;
     private boolean failUpdate;
     private boolean disappearOnUpdate;
 
+    private FakeRepository() {
+      super(mock(JdbcClient.class));
+    }
+
     private void seed(SkillPackage skillPackage) {
-      packages.put(skillPackage.getPackageName(), skillPackage);
+      packages.put(skillPackage.packageName(), skillPackage);
     }
 
     /** 与 SQL 的 {@code order by package_name asc} 一致：排序契约属于仓库层。 */
     @Override
     public List<SkillPackage> listPackages() {
       return packages.values().stream()
-          .sorted(Comparator.comparing(SkillPackage::getPackageName))
+          .sorted(Comparator.comparing(SkillPackage::packageName))
           .toList();
     }
 
     @Override
     public SkillPackage getPackage(String packageName) {
-      SkillPackage current = packages.get(packageName);
-      return current == null ? null : copy(current);
+      return packages.get(packageName);
     }
 
     @Override
@@ -789,15 +787,15 @@ public class SkillCatalogServiceImplTest {
     @Override
     public boolean insertPackage(SkillPackage skillPackage) {
       assertTrue(TransactionSynchronizationManager.isActualTransactionActive());
-      if (packages.containsKey(skillPackage.getPackageName())) {
+      if (packages.containsKey(skillPackage.packageName())) {
         throw new DuplicateKeyException("duplicate package");
       }
       if (failInsert) {
         return false;
       }
-      skillPackage.setCreateTime(Instant.EPOCH);
-      skillPackage.setUpdateTime(Instant.EPOCH);
-      packages.put(skillPackage.getPackageName(), copy(skillPackage));
+      packages.put(
+          skillPackage.packageName(),
+          skillPackage.toBuilder().createTime(Instant.EPOCH).updateTime(Instant.EPOCH).build());
       return true;
     }
 
@@ -805,45 +803,28 @@ public class SkillCatalogServiceImplTest {
     public boolean updatePackage(SkillPackage skillPackage, long expectedVersion) {
       if (failUpdate) {
         if (disappearOnUpdate) {
-          packages.remove(skillPackage.getPackageName());
+          packages.remove(skillPackage.packageName());
         }
         return false;
       }
-      SkillPackage current = packages.get(skillPackage.getPackageName());
-      if (current == null || current.getVersion() != expectedVersion) {
+      SkillPackage current = packages.get(skillPackage.packageName());
+      if (current == null || current.version() != expectedVersion) {
         return false;
       }
-      skillPackage.setVersion(expectedVersion + 1);
-      packages.put(skillPackage.getPackageName(), copy(skillPackage));
+      packages.put(
+          skillPackage.packageName(),
+          skillPackage.toBuilder().version(expectedVersion + 1).build());
       return true;
     }
 
     @Override
     public boolean deletePackage(String packageName, long expectedVersion) {
       SkillPackage current = packages.get(packageName);
-      if (current == null || current.getVersion() != expectedVersion) {
+      if (current == null || current.version() != expectedVersion) {
         return false;
       }
       packages.remove(packageName);
       return true;
-    }
-
-    private static SkillPackage copy(SkillPackage source) {
-      SkillPackage target = new SkillPackage();
-      target.setPackageName(source.getPackageName());
-      target.setDescription(source.getDescription());
-      target.setRepositoryUrl(source.getRepositoryUrl());
-      target.setBranch(source.getBranch());
-      target.setCurrentCommit(source.getCurrentCommit());
-      target.setObservedHeadCommit(source.getObservedHeadCommit());
-      target.setHeadCheckedAt(source.getHeadCheckedAt());
-      target.setHeadCheckError(source.getHeadCheckError());
-      target.setSkills(List.copyOf(source.getSkills()));
-      target.setToken(source.getToken());
-      target.setVersion(source.getVersion());
-      target.setCreateTime(source.getCreateTime());
-      target.setUpdateTime(source.getUpdateTime());
-      return target;
     }
   }
 

@@ -23,10 +23,10 @@ import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.common.schema.StringSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
-import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelDefaultVariantResolver;
-import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogQueryService;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.platform.catalog.tool.TestRuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.error.AiInUseException;
@@ -143,7 +143,7 @@ class PluginAgentDependencyPostgresIntegrationTest {
         new AgentDefinitionReferenceResolver(
             definitionRepository,
             mock(AgentModelRepository.class),
-            mock(SkillCatalogQueryService.class),
+            mock(SkillPackageRepository.class),
             mock(McpServerRepository.class),
             TestRuntimeToolCatalogSource.of(HarnessCatalog.from(List.of())));
     definitionService =

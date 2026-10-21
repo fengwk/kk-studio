@@ -50,9 +50,9 @@ import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfi
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser.ParsedAgentModelConfig;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
-import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogQueryService;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillManifestEntry;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
@@ -114,7 +114,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
   private final RuntimeToolCatalogSource toolCatalogSource;
   private final EnvironmentRegistry environmentRegistry;
   private final EnvironmentRepository environmentRepository;
-  private final SkillCatalogQueryService skillCatalogQueryService;
+  private final SkillPackageRepository skillPackageRepository;
   private final SkillPromptPathResolver skillPromptPathResolver;
   private final CompactionConfigProvider compactionConfigProvider;
   private final AgentPromptComposer promptComposer;
@@ -131,7 +131,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
       RuntimeToolCatalogSource toolCatalogSource,
       EnvironmentRegistry environmentRegistry,
       EnvironmentRepository environmentRepository,
-      SkillCatalogQueryService skillCatalogQueryService,
+      SkillPackageRepository skillPackageRepository,
       SkillPromptPathResolver skillPromptPathResolver,
       CompactionConfigProvider compactionConfigProvider,
       AgentPromptComposer promptComposer,
@@ -147,8 +147,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
     this.environmentRegistry = Objects.requireNonNull(environmentRegistry, "environmentRegistry");
     this.environmentRepository =
         Objects.requireNonNull(environmentRepository, "environmentRepository");
-    this.skillCatalogQueryService =
-        Objects.requireNonNull(skillCatalogQueryService, "skillCatalogQueryService");
+    this.skillPackageRepository =
+        Objects.requireNonNull(skillPackageRepository, "skillPackageRepository");
     this.skillPromptPathResolver =
         Objects.requireNonNull(skillPromptPathResolver, "skillPromptPathResolver");
     this.compactionConfigProvider =
@@ -724,8 +724,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
   /**
    * Agent skills 只从最新 Agent config 读取，并按全局 Skill 目录解析为冻结事实。
    *
-   * <p>通过 {@link SkillCatalogQueryService#getPackage(String)} 读取 Platform 权威事实，按 (packageName,
-   * name) 精确匹配；缺失或名称不存在时确定性拒绝。Skills 与 Environment 无关，未选择环境的 branch 同样可以规划。
+   * <p>通过 {@link SkillPackageRepository#getPackage(String)} 读取 Platform 权威事实，按 (packageName, name)
+   * 精确匹配；缺失或名称不存在时确定性拒绝。Skills 与 Environment 无关，未选择环境的 branch 同样可以规划。
    *
    * <p>路径与交付方式由 {@link SkillPromptPathResolver} 一次判定：只有选定 Environment 的 skill_state 记录的已安装 commit 与
    * Package 的 currentCommit 完全一致时才冻结 LOCAL 本地稳定路径，否则冻结 PLATFORM URI；同步失败时仍如实暴露实际 installedCommit。
@@ -740,7 +740,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
       if (ref == null || ref.getPackageName() == null || ref.getName() == null) {
         throw rejection("invalid agent skill reference");
       }
-      SkillPackage pkg = skillCatalogQueryService.getPackage(ref.getPackageName());
+      SkillPackage pkg = skillPackageRepository.getPackage(ref.getPackageName());
       if (pkg == null) {
         throw rejection(
             "agent skill not found in the global catalog: "
@@ -758,16 +758,16 @@ public final class DatabaseTurnResolver implements TurnResolver {
       }
       SkillPromptResolution resolution =
           skillPromptPathResolver.resolveDetails(
-              environmentId, ref.getPackageName(), ref.getName(), pkg.getCurrentCommit());
+              environmentId, ref.getPackageName(), ref.getName(), pkg.currentCommit());
       skills.add(
           new LiveTurnPlan.PlannedSkill(
-              pkg.getPackageName(),
+              pkg.packageName(),
               entry.name(),
               entry.description(),
               resolution.path(),
               resolution.delivery(),
-              pkg.getCurrentCommit(),
-              pkg.getObservedHeadCommit(),
+              pkg.currentCommit(),
+              pkg.observedHeadCommit(),
               resolution.installedCommit()));
     }
     return List.copyOf(skills);

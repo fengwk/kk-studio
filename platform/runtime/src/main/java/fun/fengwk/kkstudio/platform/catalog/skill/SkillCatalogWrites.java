@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.catalog.skill.service.impl;
+package fun.fengwk.kkstudio.platform.catalog.skill;
 
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;

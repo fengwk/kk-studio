@@ -6,12 +6,12 @@ import org.springframework.stereotype.Component;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderConfigurationCodec;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRow;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
@@ -73,8 +73,7 @@ public final class ConfigSyncExporter {
 
     List<Object> skills = new ArrayList<>();
     for (SkillPackage pkg : snapshot.skillPackages()) {
-      if (selected.contains(
-          ConfigSyncRefs.ref(ConfigSyncKind.SKILL_PACKAGES, pkg.getPackageName()))) {
+      if (selected.contains(ConfigSyncRefs.ref(ConfigSyncKind.SKILL_PACKAGES, pkg.packageName()))) {
         skills.add(exportSkillPackage(pkg));
       }
     }
@@ -90,7 +89,7 @@ public final class ConfigSyncExporter {
 
     List<Object> mcpServers = new ArrayList<>();
     for (McpServer server : snapshot.mcpServers()) {
-      if (selected.contains(ConfigSyncRefs.ref(ConfigSyncKind.MCP_SERVERS, server.getName()))) {
+      if (selected.contains(ConfigSyncRefs.ref(ConfigSyncKind.MCP_SERVERS, server.name()))) {
         mcpServers.add(exportMcpServer(server));
       }
     }
@@ -166,14 +165,14 @@ public final class ConfigSyncExporter {
 
   private Map<String, Object> exportSkillPackage(SkillPackage pkg) {
     Map<String, Object> map = new LinkedHashMap<>();
-    map.put("packageName", pkg.getPackageName());
-    putIfNotNull(map, "description", pkg.getDescription());
-    map.put("repositoryUrl", pkg.getRepositoryUrl());
-    map.put("branch", pkg.getBranch());
-    map.put("currentCommit", pkg.getCurrentCommit());
+    map.put("packageName", pkg.packageName());
+    putIfNotNull(map, "description", pkg.description());
+    map.put("repositoryUrl", pkg.repositoryUrl());
+    map.put("branch", pkg.branch());
+    map.put("currentCommit", pkg.currentCommit());
     // 与 provider credential 一致：按既有“凭据原值导出”策略，令牌不隐式遗失。
-    if (pkg.getToken() != null) {
-      map.put("token", pkg.getToken());
+    if (pkg.token() != null) {
+      map.put("token", pkg.token());
     }
     return map;
   }
@@ -191,13 +190,13 @@ public final class ConfigSyncExporter {
 
   private Map<String, Object> exportMcpServer(McpServer server) {
     Map<String, Object> map = new LinkedHashMap<>();
-    map.put("name", server.getName());
-    map.put("url", server.getUrl());
-    if (server.getHeaders() != null && !server.getHeaders().isEmpty()) {
-      map.put("headers", new LinkedHashMap<>(server.getHeaders()));
+    map.put("name", server.name());
+    map.put("url", server.url());
+    if (server.headers() != null && !server.headers().isEmpty()) {
+      map.put("headers", new LinkedHashMap<>(server.headers()));
     }
-    map.put("enabled", server.isEnabled());
-    map.put("timeoutMillis", server.getTimeoutMillis());
+    map.put("enabled", server.enabled());
+    map.put("timeoutMillis", server.timeoutMillis());
     return map;
   }
 
