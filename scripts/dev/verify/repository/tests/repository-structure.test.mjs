@@ -651,13 +651,8 @@ const CORE_STATE_ENUMS = [
   },
   {
     path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ModelExecution.java',
-    enumName: 'PendingKind',
-    constants: ['EVENT', 'SUCCEEDED', 'FAILED', 'UNKNOWN'],
-  },
-  {
-    path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ModelExecution.java',
     enumName: 'Applied',
-    constants: ['PROGRESSED', 'RETRY', 'TERMINAL', 'LOST'],
+    constants: ['RETRY', 'TERMINAL', 'LOST'],
   },
   {
     path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ModelExecution.java',

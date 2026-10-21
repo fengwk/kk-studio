@@ -2768,8 +2768,7 @@ class ModelProcessorTest {
         () -> new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, Duration.ofNanos(500)));
     assertEquals(
         FALLBACK_DELAY,
-        new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY)
-            .dispatchBusyFallbackDelay());
+        new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY).admitFailureDelay());
     assertThrows(
         NullPointerException.class,
         () ->

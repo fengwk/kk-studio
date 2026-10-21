@@ -277,8 +277,8 @@ final class HarnessRuntimeTestSupport {
   }
 
   /**
-   * MODEL_ACTIVE baseline，按指定的活动状态（READY / DISPATCHING / RUNNING）： ROOT -&gt; TURN_START(INPUT)
-   * -&gt; USER，thread head 指向 USER entry，model requestHead = USER entry。
+   * MODEL_ACTIVE baseline，按指定的活动状态（READY / RUNNING）： ROOT -&gt; TURN_START(INPUT) -&gt; USER，thread
+   * head 指向 USER entry，model requestHead = USER entry。
    */
   static ModelBaseline seedModel(InMemoryHarnessStore store, ModelInvocationStatus status) {
     return store.transaction(

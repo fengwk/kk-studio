@@ -261,7 +261,7 @@ class PostgresqlModelLeaseRecoveryTest {
     return modelId;
   }
 
-  /** READY -&gt; DISPATCHING -&gt; RUNNING(attempt + 1)，模拟恢复后实例真正发起的下一次尝试。 */
+  /** READY -&gt; RUNNING(attempt + 1)，模拟恢复后实例真正发起的下一次尝试。 */
   private void markModelRunning(StoreTestSupport.TurnBaseline turn, UUID modelId) {
     store.transaction(
         tx -> {
