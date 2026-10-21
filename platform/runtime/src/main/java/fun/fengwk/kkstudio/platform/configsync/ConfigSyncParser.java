@@ -7,7 +7,7 @@ import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentDefin
 import fun.fengwk.kkstudio.platform.catalog.definition.service.impl.AgentDefinitionMutationFactory;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.McpServerMutationValidator;
 import fun.fengwk.kkstudio.platform.catalog.model.service.impl.AgentModelMutationFactory;
-import fun.fengwk.kkstudio.platform.catalog.provider.service.impl.AgentProviderMutationFactory;
+import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderService;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.SkillCatalogService;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentInstallConfigs;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentServiceImpl;
@@ -65,7 +65,7 @@ public final class ConfigSyncParser {
           ConfigSyncKind.PLUGINS.wireValue());
 
   private final ConfigSyncYaml yaml;
-  private final AgentProviderMutationFactory providerFactory;
+  private final AgentProviderService providerService;
   private final AgentModelMutationFactory modelFactory;
   private final AgentDefinitionMutationFactory agentFactory;
   private final SkillCatalogService skillCatalogService;
@@ -74,14 +74,14 @@ public final class ConfigSyncParser {
 
   public ConfigSyncParser(
       ConfigSyncYaml yaml,
-      AgentProviderMutationFactory providerFactory,
+      AgentProviderService providerService,
       AgentModelMutationFactory modelFactory,
       AgentDefinitionMutationFactory agentFactory,
       SkillCatalogService skillCatalogService,
       SystemSettingsCodec systemSettingsCodec,
       StudioPluginRegistry pluginRegistry) {
     this.yaml = yaml;
-    this.providerFactory = providerFactory;
+    this.providerService = providerService;
     this.modelFactory = modelFactory;
     this.agentFactory = agentFactory;
     this.skillCatalogService = skillCatalogService;
@@ -238,7 +238,7 @@ public final class ConfigSyncParser {
     properties.applyModelHttpRetryStatusCodes(entry.optIntegerList("modelHttpRetryStatusCodes"));
     // 先用写入路径校验已知字段，未知字段不能绕过缺必填与非法值。
     validateEntry(
-        ConfigSyncKind.PROVIDERS, name, () -> providerFactory.validateImport(name, properties));
+        ConfigSyncKind.PROVIDERS, name, () -> providerService.validateImport(name, properties));
     if (skipUnknown(entry, ConfigSyncKind.PROVIDERS, name, skipped)) {
       return null;
     }

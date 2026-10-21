@@ -114,9 +114,9 @@ import fun.fengwk.kkstudio.platform.catalog.model.repo.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser.ParsedAgentModelConfig;
 import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
-import fun.fengwk.kkstudio.platform.catalog.provider.configuration.AgentProviderConfigurationCodec;
-import fun.fengwk.kkstudio.platform.catalog.provider.repo.AgentProviderRepository;
-import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
+import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
+import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderConfigurationCodec;
+import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogQueryService;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
@@ -159,6 +159,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 
 /**
  * DatabaseTurnResolver 契约：精确的 branch 引用（无回退）、不可变的 EnvironmentId 路由、严格有序的工具/skill 能力、唯一的 registry
@@ -313,13 +314,13 @@ class DatabaseTurnResolverTest {
         fixture.rejected(fixture.path(settings("default"))).error().message());
 
     fixture = new Fixture(List.of(), List.of(), List.of());
-    fixture.provider.setProviderType(null);
+    fixture.editProvider(provider -> provider.providerType(null));
     assertEquals(
         "provider type must not be null",
         fixture.rejected(fixture.path(settings("default"))).error().message());
 
     fixture = new Fixture(List.of(), List.of(), List.of());
-    fixture.provider.setConnectionGenerationId(null);
+    fixture.editProvider(provider -> provider.connectionGenerationId(null));
     assertEquals(
         "provider connection generation id must not be null",
         fixture.rejected(fixture.path(settings("default"))).error().message());
@@ -1652,8 +1653,8 @@ class DatabaseTurnResolverTest {
             ProviderType.OPENAI_RESPONSES,
             PromptCacheRetention.SHORT,
             true);
-    fixture.provider.setConfigJson(configJson);
-    fixture.provider.setBaseUrl("https://example.invalid/v1");
+    fixture.editProvider(
+        provider -> provider.configJson(configJson).baseUrl("https://example.invalid/v1"));
     fixture.models.getByProviderNameAndName("provider", "model").setModelId("gpt-5.6");
     ProviderFactory factory = fixture.resolverProviderFactory();
     when(factory.promptCacheRetention(any())).thenReturn(PromptCacheRetention.SHORT);
@@ -1753,7 +1754,7 @@ class DatabaseTurnResolverTest {
             PromptCacheRetention.NONE,
             true);
     String dynamicConfig = "{\"customCache\":true}";
-    fixture.provider.setConfigJson(dynamicConfig);
+    fixture.editProvider(provider -> provider.configJson(dynamicConfig));
 
     ProviderFactory factory = fixture.resolverProviderFactory();
     when(factory.promptCacheRetention(dynamicConfig)).thenReturn(PromptCacheRetention.LONG);
@@ -1778,7 +1779,7 @@ class DatabaseTurnResolverTest {
             PromptCacheRetention.NONE,
             true);
     String secretConfig = "{\"apiKey\":\"super-secret-token\",\"malformed\":true}";
-    fixture.provider.setConfigJson(secretConfig);
+    fixture.editProvider(provider -> provider.configJson(secretConfig));
 
     ProviderFactory factory = fixture.resolverProviderFactory();
     when(factory.promptCacheRetention(secretConfig))
@@ -2993,7 +2994,7 @@ class DatabaseTurnResolverTest {
     private String observedHeadCommit;
     private final AgentDefinition agent = new AgentDefinition();
     private final AgentDefinitionConfigDTO agentConfig = new AgentDefinitionConfigDTO();
-    private final AgentProvider provider = new AgentProvider();
+    private AgentProvider provider;
     private final ProviderFactory providerFactory = mock(ProviderFactory.class);
     private final DatabaseTurnResolver resolver;
 
@@ -3126,11 +3127,13 @@ class DatabaseTurnResolverTest {
       bindEnvironment(ENV_A_NAME, ENV_A);
       bindEnvironment(ENV_B_NAME, ENV_B);
 
-      provider.setName("provider");
-      provider.setProviderType(persistedProviderType);
-      provider.setConnectionGenerationId(new UUID(0L, 42L));
-      provider.setVersion(0L);
-      when(providers.getByName("provider")).thenReturn(provider);
+      editProvider(
+          AgentProvider.builder()
+              .name("provider")
+              .providerType(persistedProviderType)
+              .connectionGenerationId(new UUID(0L, 42L))
+              .version(0L)
+              .build());
 
       AgentModel model = new AgentModel();
       model.setProviderName("provider");
@@ -3256,12 +3259,26 @@ class DatabaseTurnResolverTest {
       when(environmentRepository.getByName(name)).thenReturn(environment);
     }
 
+    /** Provider 为不可变记录：整体替换并重新绑定仓库桩。 */
+    private void editProvider(AgentProvider replacement) {
+      provider = replacement;
+      when(providers.getByName("provider")).thenReturn(provider);
+    }
+
+    private void editProvider(Consumer<AgentProvider.AgentProviderBuilder> edit) {
+      AgentProvider.AgentProviderBuilder builder = provider.toBuilder();
+      edit.accept(builder);
+      editProvider(builder.build());
+    }
+
     private void addModel(ModelSelection selection, ParsedAgentModelConfig parsedModel) {
-      AgentProvider fallbackProvider = new AgentProvider();
-      fallbackProvider.setName(selection.providerName());
-      fallbackProvider.setProviderType(ProviderType.OPENAI);
-      fallbackProvider.setConnectionGenerationId(new UUID(0L, 43L));
-      fallbackProvider.setVersion(0L);
+      AgentProvider fallbackProvider =
+          AgentProvider.builder()
+              .name(selection.providerName())
+              .providerType(ProviderType.OPENAI)
+              .connectionGenerationId(new UUID(0L, 43L))
+              .version(0L)
+              .build();
       when(providers.getByName(selection.providerName())).thenReturn(fallbackProvider);
 
       String configJson = selection.providerName() + "-config";

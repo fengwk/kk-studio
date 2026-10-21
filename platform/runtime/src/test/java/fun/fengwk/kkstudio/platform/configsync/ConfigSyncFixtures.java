@@ -9,6 +9,7 @@ import tools.jackson.databind.json.JsonMapper;
 import fun.fengwk.kkstudio.harness.common.json.JsonValues;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.common.schema.StringSchema;
+import fun.fengwk.kkstudio.harness.provider.ProviderModelDiscovery;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
@@ -20,9 +21,10 @@ import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser;
 import fun.fengwk.kkstudio.platform.catalog.model.service.impl.AgentModelMutationFactory;
 import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
-import fun.fengwk.kkstudio.platform.catalog.provider.configuration.AgentProviderConfigurationCodec;
-import fun.fengwk.kkstudio.platform.catalog.provider.service.impl.AgentProviderMutationFactory;
-import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
+import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
+import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderConfigurationCodec;
+import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
+import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderService;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.SkillCatalogService;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.impl.SkillCatalogTestFixtures;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
@@ -81,8 +83,14 @@ final class ConfigSyncFixtures {
       new AgentProviderConfigurationCodec(MAPPER);
   private static final AgentEditableSupport EDITABLE_SUPPORT = new AgentEditableSupport(MAPPER);
 
-  static final AgentProviderMutationFactory PROVIDER_MUTATION_FACTORY =
-      new AgentProviderMutationFactory(EDITABLE_SUPPORT, PROVIDER_CONFIG_CODEC);
+  /** 真实 {@code AgentProviderService.validateImport}：纯静态校验，仓储与上游发现以 mock 占位。 */
+  static final AgentProviderService PROVIDER_SERVICE =
+      new AgentProviderService(
+          mock(AgentProviderRepository.class),
+          PROVIDER_CONFIG_CODEC,
+          EDITABLE_SUPPORT,
+          mock(ProviderModelDiscovery.class));
+
   static final AgentModelMutationFactory MODEL_MUTATION_FACTORY =
       new AgentModelMutationFactory(EDITABLE_SUPPORT, MODEL_CONFIG_PARSER);
   static final AgentDefinitionMutationFactory AGENT_MUTATION_FACTORY =
@@ -105,7 +113,7 @@ final class ConfigSyncFixtures {
   static ConfigSyncParser parser(ConfigSyncYaml yaml, StudioPluginRegistry pluginRegistry) {
     return new ConfigSyncParser(
         yaml,
-        PROVIDER_MUTATION_FACTORY,
+        PROVIDER_SERVICE,
         MODEL_MUTATION_FACTORY,
         AGENT_MUTATION_FACTORY,
         SKILL_CATALOG_SERVICE,
@@ -176,13 +184,13 @@ final class ConfigSyncFixtures {
   }
 
   static AgentProvider provider(String name) {
-    AgentProvider provider = new AgentProvider();
-    provider.setName(name);
-    provider.setProviderType(ProviderType.OPENAI);
-    provider.setBaseUrl("https://api.example.com");
-    provider.setCredential("secret-key");
-    provider.setVersion(0L);
-    return provider;
+    return AgentProvider.builder()
+        .name(name)
+        .providerType(ProviderType.OPENAI)
+        .baseUrl("https://api.example.com")
+        .credential("secret-key")
+        .version(0L)
+        .build();
   }
 
   static AgentModel model(String providerName, String name) {
