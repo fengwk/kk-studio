@@ -11,18 +11,18 @@ import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.function.Consumer;
 
 /**
- * Tool 执行 admission 端口：preflight 权限判定与 execution 提交。
+ * Tool 执行端口：preflight 权限判定、本地 admission 与阻塞执行。
  *
  * <p>{@link #preflight} 是同步、无副作用、事务外的判定；异常表示本次判定没有产生执行副作用，Processor 可安全 reschedule。它只接收 frozen
  * {@link ToolInvocationRequest}，不感知 Thread YOLO——YOLO 短路由 Processor 在锁内读取 Thread 后自行决定，本端口绝不查询
- * HarnessStore。{@link #start} 返回前不得同步调用任何 Listener 回调；回调的重复与陈旧触发由 Runtime 实施所有权围栏与陈旧回调围栏拦截，Gateway
- * 不保证 exactly-once。Tool 的 retry 决策（{@link RetryLater} 后何时重试）由 Processor 决定，不放 Gateway。
+ * HarnessStore。Tool 的 retry 决策（{@link Failed#retryable} 后何时重试）由 Processor 决定，不放 Gateway。
  *
- * <p>两阶段激活：{@link #start} 返回 {@link Started} 时不得打开任何回调门控（同步回调只能缓冲），{@link Handle#activate} 由
- * Processor 在 attach handle + 持久化 markRunning 之后、打开自身 Listener 回调门控之前调用，此时 Gateway 才允许打开回调门控 /
- * 启动外部执行；activate 抛异常表示激活失败，Processor 恰好收敛一次 UNKNOWN。
+ * <p>{@link #admit} 是纯本地检查：只解析冻结目录、校验定义与环境、申请并发配额并钉住目录租用，不触碰任何外部系统，因此 {@link Busy} / {@link
+ * Rejected} 肯定没有副作用。{@link Admitted} 持有的本地资源只由 {@link Run#close()} 释放：Processor 在终态决议提交之后、执行体
+ * 返回（或抛出）之后调用它，这一顺序保证资源在工作线程退出前绝不会被回收。
  */
 public interface ToolGateway {
 
@@ -30,47 +30,32 @@ public interface ToolGateway {
   PreflightResult preflight(ToolInvocationRequest request);
 
   /**
-   * 提交一次 execution。只有当实现能证明外部 Gateway 尚未接受该 execution 时才允许抛异常：异常后 durable 仍是 DISPATCHING，Processor
-   * 将 invocation 转回 READY 并 reschedule（attempt 不变）。如果发送 / 接受状态不确定 （execution 可能已开始），必须返回 {@link
-   * Indeterminate}，绝不能抛。
+   * 本地 admission：返回 {@link Admitted}（已持有资源）、{@link Busy} 或 {@link Rejected}。抛异常表示 admission
+   * 没有产生任何副作用（也不持有任何 资源），Processor 保持 READY 并 reschedule。
    */
-  StartResult start(Execution execution, Listener listener);
+  Admission admit(Execution execution);
 
   /**
-   * 一次 Tool execution 的不可变描述：key 为 {@code (invocationId, threadId, proposedAttempt)}，request 已冻结。
-   * {@code assistantEntryId} 是所有 sibling 共享的冻结 branch basis；{@code threadId} 提供平台
-   * ToolExecutionContext 需要的持久线程所有权。
+   * 一次 Tool execution 的不可变描述：key 为 {@code (invocationId, threadId)}，request 已冻结。 {@code
+   * assistantEntryId} 是所有 sibling 共享的冻结 branch basis；{@code threadId} 提供平台 ToolExecutionContext
+   * 需要的持久线程所有权。
    */
   record Execution(
       UUID invocationId,
       UUID threadId,
       UUID assistantEntryId,
-      int proposedAttempt,
       ToolInvocationRequest request,
       ToolApproval approval) {
 
     public Execution(
-        UUID invocationId,
-        UUID threadId,
-        UUID assistantEntryId,
-        int proposedAttempt,
-        ToolInvocationRequest request) {
-      this(
-          invocationId,
-          threadId,
-          assistantEntryId,
-          proposedAttempt,
-          request,
-          ToolApproval.notRequired());
+        UUID invocationId, UUID threadId, UUID assistantEntryId, ToolInvocationRequest request) {
+      this(invocationId, threadId, assistantEntryId, request, ToolApproval.notRequired());
     }
 
     public Execution {
       Objects.requireNonNull(invocationId, "invocationId");
       Objects.requireNonNull(threadId, "threadId");
       Objects.requireNonNull(assistantEntryId, "assistantEntryId");
-      if (proposedAttempt <= 0) {
-        throw new IllegalArgumentException("proposedAttempt must be positive");
-      }
       request = Objects.requireNonNull(request, "request");
       approval = Objects.requireNonNull(approval, "approval");
     }
@@ -84,7 +69,7 @@ public interface ToolGateway {
   /** preflight 结果；每种结果对应唯一确定的 durable approval transition。 */
   sealed interface PreflightResult permits ToolGateway.Allow, ToolGateway.Ask, ToolGateway.Deny {}
 
-  /** 无需审批；可直接 beginDispatch。 */
+  /** 无需审批；可直接进入 admission。 */
   record Allow() implements PreflightResult {}
 
   /** 需要用户确认；reason 是人类可读的 canonical 提示。 */
@@ -107,84 +92,78 @@ public interface ToolGateway {
   }
 
   /** admission 结果；每个结果对应唯一确定的 durable 后续 transition。 */
-  sealed interface StartResult
-      permits ToolGateway.Started,
-          ToolGateway.RetryLater,
-          ToolGateway.Rejected,
-          ToolGateway.Indeterminate {}
+  sealed interface Admission permits ToolGateway.Admitted, ToolGateway.Busy, ToolGateway.Rejected {}
 
-  /** 准入成功并已准备 {@code handle}；外部执行须等待 {@link Handle#activate()}，尚未开始。 */
-  record Started(Handle handle) implements StartResult {
-    public Started {
-      handle = Objects.requireNonNull(handle, "handle");
+  /** 准入成功并已持有执行资源；调用方必须恰好调用一次 {@link Run#close()}。 */
+  record Admitted(Run run) implements Admission {
+    public Admitted {
+      run = Objects.requireNonNull(run, "run");
     }
   }
 
-  /** 肯定未开始；调用方按 {@code retryAfter} 重新 dispatch（attempt 不变）。 */
-  record RetryLater(Duration retryAfter) implements StartResult {
-    public RetryLater {
+  /** 本地容量暂时不足，肯定未执行；调用方按 {@code retryAfter} 重新调度（attempt 不变）。 */
+  record Busy(Duration retryAfter) implements Admission {
+    public Busy {
       retryAfter = HarnessStoreTime.requireWholeMillisecondDuration(retryAfter, "retryAfter");
     }
   }
 
-  /** 肯定未开始且不可重试；调用方 terminate invocation（attempt 不变）。 */
-  record Rejected(ToolInvocationError error) implements StartResult {
+  /** 肯定未执行且不可重试；调用方 terminate invocation 为 FAILED（attempt 不变）。 */
+  record Rejected(ToolInvocationError error) implements Admission {
     public Rejected {
       error = Objects.requireNonNull(error, "error");
     }
   }
 
-  /** 可能已开始；调用方 terminate invocation 为 UNKNOWN（attempt + 1）。 */
-  record Indeterminate(ToolInvocationError error) implements StartResult {
-    public Indeterminate {
+  /**
+   * 一次已准入的阻塞执行。{@link #execute} 在 Processor 的执行线程上运行直至终态：取消与租约丢失表现为对该线程的 interrupt，实现把它映射为 {@link
+   * Cancelled}；工具异常由实现分类为 {@link Failed} / {@link Unknown}，绝不向外抛业务异常。
+   */
+  interface Run extends AutoCloseable {
+
+    /** 阻塞执行并返回唯一终态；{@code progress} 接收已校验的非 terminal partial。 */
+    Completion execute(Consumer<ToolResult> progress);
+
+    /** 释放本次执行持有的本地资源（并发配额与目录租用）；幂等，且不抛出。 */
+    @Override
+    void close();
+  }
+
+  /** 一次执行的唯一终态。 */
+  sealed interface Completion
+      permits ToolGateway.Succeeded,
+          ToolGateway.Failed,
+          ToolGateway.Cancelled,
+          ToolGateway.Unknown {}
+
+  /** 已确认成功：模型可见结果与同一次 durable terminal success 的 branch effects。 */
+  record Succeeded(ToolSuccess success) implements Completion {
+    public Succeeded {
+      success = Objects.requireNonNull(success, "success");
+    }
+  }
+
+  /**
+   * 已确认失败的 terminal 事实。{@code retryable} 是 Gateway 的明确判定：string kind 不足以让 Runtime
+   * 安全推断能否重试；Processor 最终还结合 {@link fun.fengwk.kkstudio.harness.tool.ToolSideEffect}
+   * 决定是否真的重试（NON_IDEMPOTENT 的失败即使 retryable 也不自动重试）。
+   */
+  record Failed(ToolInvocationError error, boolean retryable) implements Completion {
+    public Failed {
       error = Objects.requireNonNull(error, "error");
     }
   }
 
-  /**
-   * 一次 execution 的本地取消控制；best effort 且幂等，不保证远程停止。两阶段激活契约：Gateway 在 {@link #start} 返回 {@link
-   * Started} 时不得打开任何回调门控，{@link #activate} 由 Processor 在 attach handle + 持久化 markRunning 之后调用，此时
-   * Gateway 才允许打开回调门控 / 启动外部执行。
-   */
-  interface Handle {
-    void cancel();
-
-    /** 打开 Gateway 回调门控；只在 {@link Started} 返回后由 Processor 调用；抛异常即激活失败（收敛一次 UNKNOWN）。 */
-    void activate();
-  }
-
-  /** partial 与 terminal 回调；重复与陈旧的 Listener 回调由 Runtime 实施所有权围栏与陈旧回调围栏拦截。 */
-  interface Listener {
-
-    /** 交付一个非 terminal partial ToolResult（不得包含 binary / resource content）。 */
-    void onPartial(ToolResult partial);
-
-    /** 交付完整 ToolResult 与同一次 durable terminal success 的 branch effects。 */
-    void onSucceeded(ToolSuccess success);
-
-    /** 普通 Tool 的便捷入口：显式构造空 effects success。 */
-    default void onSucceeded(ToolResult result) {
-      onSucceeded(ToolSuccess.withoutEffects(result));
+  /** 已确认被取消的 terminal 事实。 */
+  record Cancelled(ToolInvocationError error) implements Completion {
+    public Cancelled {
+      error = Objects.requireNonNull(error, "error");
     }
-
-    /** 交付已确认失败的 terminal 事实（含明确 retryable 标记）。 */
-    void onFailed(Failure failure);
-
-    /** 交付已确认被取消的 terminal 事实（string kind 不足以可靠推导，必须显式回调）。 */
-    void onCancelled(ToolInvocationError error);
-
-    /** 交付无法确认是否执行成功的 terminal error。 */
-    void onUnknown(ToolInvocationError error);
   }
 
-  /**
-   * 已确认失败的 terminal 事实。{@code retryable} 是 Gateway 的明确判定：string kind 不足以让 Runtime 安全推断
-   * 能否重试；Processor 最终还结合 {@link fun.fengwk.kkstudio.harness.tool.ToolSideEffect} 决定是否真的重试 （例如
-   * NON_IDEMPOTENT 的失败即使 retryable 也不自动重试）。
-   */
-  record Failure(ToolInvocationError error, boolean retryable) {
-
-    public Failure {
+  /** 无法确认是否执行成功的 terminal error；调用方 terminate invocation 为 UNKNOWN，绝不重放。 */
+  record Unknown(ToolInvocationError error) implements Completion {
+    public Unknown {
       error = Objects.requireNonNull(error, "error");
     }
   }

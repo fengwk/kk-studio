@@ -90,10 +90,7 @@ public record ThreadSnapshot(
     // 分类器已经核验 siblings 的当前适用性；历史或非 Tool 上下文不允许携带 siblings。
     for (ToolInvocation sibling : toolSiblings) {
       ToolInvocationStatus status = sibling.status();
-      hasWork |=
-          status == ToolInvocationStatus.READY
-              || status == ToolInvocationStatus.DISPATCHING
-              || status == ToolInvocationStatus.RUNNING;
+      hasWork |= status == ToolInvocationStatus.READY || status == ToolInvocationStatus.RUNNING;
       waitingForHuman |=
           status == ToolInvocationStatus.WAITING_APPROVAL
               || status == ToolInvocationStatus.WAITING_INPUT;

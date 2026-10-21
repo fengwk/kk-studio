@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.platform.harness.tool.gateway;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -20,9 +20,8 @@ import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityBusyException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionHandle;
@@ -35,7 +34,6 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityU
 import fun.fengwk.kkstudio.harness.runtime.admission.ConcurrencyAdmission;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
-import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.permission.BashSurfaceAnalyzer;
 import fun.fengwk.kkstudio.harness.runtime.permission.PermissionAction;
@@ -44,8 +42,6 @@ import fun.fengwk.kkstudio.harness.runtime.permission.PermissionRule;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettings;
 import fun.fengwk.kkstudio.harness.runtime.permission.ToolSettingsProvider;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
-import fun.fengwk.kkstudio.harness.runtime.port.ToolSuccess;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
@@ -62,26 +58,15 @@ import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.AbstractExecutorService;
-import java.util.concurrent.Callable;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Future;
-import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 /**
@@ -94,7 +79,6 @@ final class ToolGatewayTestSupport {
   static final UUID INVOCATION_ID = new UUID(0L, 42L);
   static final UUID THREAD_ID = new UUID(0L, 7L);
   static final UUID ASSISTANT_ENTRY_ID = new UUID(0L, 11L);
-  static final int PROPOSED_ATTEMPT = 3;
 
   /** 测试默认的工具资源单对象上限（与生产默认一致）。 */
   static final int RESOURCE_MAX_BYTES = 16 * 1024 * 1024;
@@ -235,50 +219,40 @@ final class ToolGatewayTestSupport {
   }
 
   static ToolGateway.Execution execution(ToolInvocationRequest request) {
-    return new ToolGateway.Execution(
-        INVOCATION_ID, THREAD_ID, ASSISTANT_ENTRY_ID, PROPOSED_ATTEMPT, request);
+    return new ToolGateway.Execution(INVOCATION_ID, THREAD_ID, ASSISTANT_ENTRY_ID, request);
+  }
+
+  static ToolExecutionGateway gateway(
+      HarnessCatalog catalog, FakeTransport transport, FakeResourceStager store) {
+    return gateway(catalog, transport, store, RESOURCE_MAX_BYTES, settings(PermissionAction.ALLOW));
   }
 
   static ToolExecutionGateway gateway(
       HarnessCatalog catalog,
       FakeTransport transport,
       FakeResourceStager store,
-      ExecutorService executor) {
-    return gateway(
-        catalog, transport, store, executor, RESOURCE_MAX_BYTES, settings(PermissionAction.ALLOW));
-  }
-
-  static ToolExecutionGateway gateway(
-      HarnessCatalog catalog,
-      FakeTransport transport,
-      FakeResourceStager store,
-      ExecutorService executor,
       int resourceMaxBytes) {
-    return gateway(
-        catalog, transport, store, executor, resourceMaxBytes, settings(PermissionAction.ALLOW));
+    return gateway(catalog, transport, store, resourceMaxBytes, settings(PermissionAction.ALLOW));
   }
 
   static ToolExecutionGateway gateway(
       HarnessCatalog catalog,
       FakeTransport transport,
       FakeResourceStager store,
-      ExecutorService executor,
       ToolSettings settings) {
-    return gateway(catalog, transport, store, executor, RESOURCE_MAX_BYTES, settings);
+    return gateway(catalog, transport, store, RESOURCE_MAX_BYTES, settings);
   }
 
   static ToolExecutionGateway gateway(
       HarnessCatalog catalog,
       FakeTransport transport,
       FakeResourceStager store,
-      ExecutorService executor,
       int resourceMaxBytes,
       ToolSettings settings) {
     return gateway(
         catalog,
         transport,
         store,
-        executor,
         resourceMaxBytes,
         settings,
         new ConcurrencyAdmission(Integer.MAX_VALUE));
@@ -288,7 +262,6 @@ final class ToolGatewayTestSupport {
       HarnessCatalog catalog,
       FakeTransport transport,
       FakeResourceStager store,
-      ExecutorService executor,
       int resourceMaxBytes,
       ToolSettings settings,
       ConcurrencyAdmission admission) {
@@ -296,7 +269,6 @@ final class ToolGatewayTestSupport {
         TestRuntimeToolCatalogSource.of(catalog),
         transport,
         store,
-        executor,
         resourceMaxBytes,
         settings,
         admission);
@@ -307,7 +279,6 @@ final class ToolGatewayTestSupport {
       ContributorBranchViewLoader branchLoader,
       FakeTransport transport,
       FakeResourceStager store,
-      ExecutorService executor,
       ConcurrencyAdmission admission) {
     return new ToolExecutionGateway(
         TestRuntimeToolCatalogSource.of(catalog),
@@ -317,7 +288,6 @@ final class ToolGatewayTestSupport {
         new FixedToolSettingsProvider(settings(PermissionAction.ALLOW)),
         store,
         RESOURCE_MAX_BYTES,
-        executor,
         OVERLOAD_RETRY_DELAY,
         TEST_CLOCK,
         admission);
@@ -327,7 +297,6 @@ final class ToolGatewayTestSupport {
       RuntimeToolCatalogSource toolCatalogSource,
       FakeTransport transport,
       FakeResourceStager store,
-      ExecutorService executor,
       int resourceMaxBytes,
       ToolSettings settings,
       ConcurrencyAdmission admission) {
@@ -339,10 +308,14 @@ final class ToolGatewayTestSupport {
         new FixedToolSettingsProvider(settings),
         store,
         resourceMaxBytes,
-        executor,
         OVERLOAD_RETRY_DELAY,
         TEST_CLOCK,
         admission);
+  }
+
+  /** admit 并断言 Admitted，返回可执行的 run。 */
+  static ToolGateway.Run admitted(ToolExecutionGateway gateway, ToolInvocationRequest request) {
+    return assertInstanceOf(ToolGateway.Admitted.class, gateway.admit(execution(request))).run();
   }
 
   static ToolSettings settings(PermissionAction action) {
@@ -391,11 +364,10 @@ final class ToolGatewayTestSupport {
     }
   }
 
-  /** 可编程 Tool：记录 execution request，按 handler 执行并返回可观察 handle。 */
-  static final class FakeTool implements Tool {
+  /** 可编程 Tool：记录 execution request，按 body 阻塞执行。 */
+  static class FakeTool implements Tool {
     private final ToolDescriptor descriptor;
     final List<ToolExecutionRequest> requests = new CopyOnWriteArrayList<>();
-    final List<FakeToolHandle> handles = new CopyOnWriteArrayList<>();
 
     /** resolveTimeout 的调用次数：用于证明超时只在执行前解析一次。 */
     final AtomicInteger resolveTimeoutCalls = new AtomicInteger();
@@ -403,8 +375,7 @@ final class ToolGatewayTestSupport {
     /** 非 null 时作为 resolveTimeout 的结果，用于验证显式解析值与解析失败路径。 */
     volatile Duration resolvedTimeout;
 
-    volatile ToolExecutionHandler handler = (request, listener) -> {};
-    volatile boolean returnNullHandle;
+    volatile ToolBody body = (request, progress) -> null;
 
     FakeTool(ToolDescriptor descriptor) {
       this.descriptor = descriptor;
@@ -423,42 +394,41 @@ final class ToolGatewayTestSupport {
     }
 
     @Override
-    public ToolExecutionHandle execute(
-        ToolExecutionRequest request, ToolExecutionListener listener) {
+    public ToolOutcome execute(ToolExecutionRequest request, Consumer<ToolResult> progress)
+        throws InterruptedException {
       requests.add(request);
-      handler.execute(request, listener);
-      if (returnNullHandle) {
-        return null;
+      try {
+        return body.execute(request, progress);
+      } catch (InterruptedException | RuntimeException | Error failure) {
+        throw failure;
+      } catch (Exception failure) {
+        throw new IllegalStateException(failure);
       }
-      FakeToolHandle handle = new FakeToolHandle();
-      handles.add(handle);
-      return handle;
     }
   }
 
   @FunctionalInterface
-  interface ToolExecutionHandler {
-    void execute(ToolExecutionRequest request, ToolExecutionListener listener);
+  interface ToolBody {
+    ToolOutcome execute(ToolExecutionRequest request, Consumer<ToolResult> progress)
+        throws Exception;
   }
 
-  static final class FakeToolHandle
-      implements ToolExecutionHandle, EnvironmentCapabilityExecutionHandle {
-    private final AtomicBoolean cancelled = new AtomicBoolean();
+  /** Environment capability transport 的可观察句柄。 */
+  static final class FakeToolHandle implements EnvironmentCapabilityExecutionHandle {
+    private final AtomicInteger cancels = new AtomicInteger();
 
     @Override
     public void cancel() {
-      cancelled.set(true);
+      cancels.incrementAndGet();
     }
 
     @Override
     public boolean isCancelled() {
-      return cancelled.get();
+      return cancels.get() > 0;
     }
 
-    @Override
-    public CompletionStage<Void> quiescence() {
-      // 该替身只作为 Environment capability transport 句柄出现：网关为纯转发句柄，本地静止立即成立。
-      return CompletableFuture.completedFuture(null);
+    int cancelCount() {
+      return cancels.get();
     }
   }
 
@@ -579,397 +549,6 @@ final class ToolGatewayTestSupport {
       return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(content));
     } catch (NoSuchAlgorithmException error) {
       throw new IllegalStateException(error);
-    }
-  }
-
-  /** 记录全部 listener 事件的运行时 Listener 假件；{@code store} 由测试 helper 回填供断言。 */
-  static final class RecordingListener implements ToolGateway.Listener {
-    final List<Event> events = new CopyOnWriteArrayList<>();
-    final AtomicInteger inFlight = new AtomicInteger();
-    final AtomicInteger maxConcurrency = new AtomicInteger();
-    final AtomicInteger terminalInvocations = new AtomicInteger();
-
-    volatile boolean throwOnPartial;
-    volatile boolean throwOnSucceeded;
-    volatile boolean throwOnFailed;
-    volatile boolean throwOnCancelled;
-    volatile boolean throwOnUnknown;
-    FakeResourceStager store;
-
-    sealed interface Event
-        permits Event.Partial, Event.Succeeded, Event.Failed, Event.Cancelled, Event.Unknown {
-
-      record Partial(ToolResult partial) implements Event {}
-
-      record Succeeded(ToolResult result, ToolEffectBatch effects) implements Event {}
-
-      record Failed(ToolGateway.Failure failure) implements Event {}
-
-      record Cancelled(ToolInvocationError error) implements Event {}
-
-      record Unknown(ToolInvocationError error) implements Event {}
-    }
-
-    @Override
-    public void onPartial(ToolResult partial) {
-      enter();
-      try {
-        if (throwOnPartial) {
-          throw new IllegalStateException("partial projection failed");
-        }
-        events.add(new Event.Partial(partial));
-      } finally {
-        exit();
-      }
-    }
-
-    @Override
-    public void onSucceeded(ToolSuccess success) {
-      terminalInvocations.incrementAndGet();
-      enter();
-      try {
-        if (throwOnSucceeded) {
-          throw new IllegalStateException("listener rejected succeeded");
-        }
-        events.add(new Event.Succeeded(success.result(), success.effects()));
-      } finally {
-        exit();
-      }
-    }
-
-    @Override
-    public void onFailed(ToolGateway.Failure failure) {
-      terminalInvocations.incrementAndGet();
-      enter();
-      try {
-        if (throwOnFailed) {
-          throw new IllegalStateException("listener rejected failed");
-        }
-        events.add(new Event.Failed(failure));
-      } finally {
-        exit();
-      }
-    }
-
-    @Override
-    public void onCancelled(ToolInvocationError error) {
-      terminalInvocations.incrementAndGet();
-      enter();
-      try {
-        if (throwOnCancelled) {
-          throw new IllegalStateException("listener rejected cancelled");
-        }
-        events.add(new Event.Cancelled(error));
-      } finally {
-        exit();
-      }
-    }
-
-    @Override
-    public void onUnknown(ToolInvocationError error) {
-      terminalInvocations.incrementAndGet();
-      enter();
-      try {
-        if (throwOnUnknown) {
-          throw new IllegalStateException("listener rejected unknown");
-        }
-        events.add(new Event.Unknown(error));
-      } finally {
-        exit();
-      }
-    }
-
-    private void enter() {
-      int current = inFlight.incrementAndGet();
-      maxConcurrency.accumulateAndGet(current, Math::max);
-    }
-
-    private void exit() {
-      inFlight.decrementAndGet();
-    }
-
-    void awaitCount(int count) {
-      long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-      while (events.size() < count && System.nanoTime() < deadline) {
-        Thread.onSpinWait();
-      }
-      assertEquals(count, events.size(), "expected " + count + " events but got: " + events);
-    }
-  }
-
-  static final class DirectQueueExecutor extends AbstractExecutorService {
-    final List<Runnable> queued = new CopyOnWriteArrayList<>();
-    volatile boolean rejectSubmissions;
-    volatile RuntimeException ambiguousException;
-
-    @Override
-    public void shutdown() {}
-
-    @Override
-    public List<Runnable> shutdownNow() {
-      return List.of();
-    }
-
-    @Override
-    public boolean isShutdown() {
-      return false;
-    }
-
-    @Override
-    public boolean isTerminated() {
-      return false;
-    }
-
-    @Override
-    public boolean awaitTermination(long timeout, TimeUnit unit) {
-      return true;
-    }
-
-    @Override
-    public void execute(Runnable command) {
-      if (rejectSubmissions) {
-        throw new RejectedExecutionException("test executor rejected");
-      }
-      if (ambiguousException != null) {
-        throw ambiguousException;
-      }
-      queued.add(command);
-    }
-
-    void drain() {
-      List<Runnable> copy = new ArrayList<>(queued);
-      queued.clear();
-      for (Runnable task : copy) {
-        task.run();
-      }
-    }
-  }
-
-  static final class ManualExecutor implements ExecutorService {
-    final List<Runnable> tasks = new CopyOnWriteArrayList<>();
-    volatile boolean reject;
-    volatile RuntimeException executeFailure;
-    private volatile boolean shutdown;
-
-    @Override
-    public void execute(Runnable command) {
-      if (reject || shutdown) {
-        throw new RejectedExecutionException("rejected");
-      }
-      RuntimeException failure = executeFailure;
-      if (failure != null) {
-        throw failure;
-      }
-      tasks.add(command);
-    }
-
-    void runAll() {
-      for (Runnable task : List.copyOf(tasks)) {
-        task.run();
-      }
-    }
-
-    void runFirst() {
-      tasks.get(0).run();
-    }
-
-    @Override
-    public void shutdown() {
-      shutdown = true;
-    }
-
-    @Override
-    public List<Runnable> shutdownNow() {
-      shutdown = true;
-      return List.copyOf(tasks);
-    }
-
-    @Override
-    public boolean isShutdown() {
-      return shutdown;
-    }
-
-    @Override
-    public boolean isTerminated() {
-      return shutdown;
-    }
-
-    @Override
-    public boolean awaitTermination(long timeout, TimeUnit unit) {
-      return shutdown;
-    }
-
-    @Override
-    public <T> Future<T> submit(Callable<T> task) {
-      throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public <T> Future<T> submit(Runnable task, T result) {
-      throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public Future<?> submit(Runnable task) {
-      throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public <T> List<Future<T>> invokeAll(Collection<? extends Callable<T>> tasks)
-        throws InterruptedException {
-      throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public <T> List<Future<T>> invokeAll(
-        Collection<? extends Callable<T>> tasks, long timeout, TimeUnit unit)
-        throws InterruptedException {
-      throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public <T> T invokeAny(Collection<? extends Callable<T>> tasks)
-        throws InterruptedException, ExecutionException {
-      throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public <T> T invokeAny(Collection<? extends Callable<T>> tasks, long timeout, TimeUnit unit)
-        throws InterruptedException, ExecutionException, TimeoutException {
-      throw new UnsupportedOperationException();
-    }
-  }
-
-  static final class InlineExecutor extends AbstractExecutorService {
-    @Override
-    public void execute(Runnable command) {
-      command.run();
-    }
-
-    @Override
-    public void shutdown() {}
-
-    @Override
-    public List<Runnable> shutdownNow() {
-      return List.of();
-    }
-
-    @Override
-    public boolean isShutdown() {
-      return false;
-    }
-
-    @Override
-    public boolean isTerminated() {
-      return false;
-    }
-
-    @Override
-    public boolean awaitTermination(long timeout, TimeUnit unit) {
-      return false;
-    }
-  }
-
-  static final class InterruptingExecutor extends AbstractExecutorService {
-    @Override
-    public void execute(Runnable command) {
-      Thread thread = new Thread(command, "gateway-interrupting-executor");
-      thread.start();
-      long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-      while (thread.isAlive()
-          && thread.getState() != Thread.State.WAITING
-          && System.nanoTime() < deadline) {
-        Thread.onSpinWait();
-      }
-      thread.interrupt();
-      try {
-        thread.join();
-      } catch (InterruptedException error) {
-        Thread.currentThread().interrupt();
-      }
-    }
-
-    @Override
-    public void shutdown() {}
-
-    @Override
-    public List<Runnable> shutdownNow() {
-      return List.of();
-    }
-
-    @Override
-    public boolean isShutdown() {
-      return false;
-    }
-
-    @Override
-    public boolean isTerminated() {
-      return false;
-    }
-
-    @Override
-    public boolean awaitTermination(long timeout, TimeUnit unit) {
-      return false;
-    }
-  }
-
-  static final class ImmediateExecutor extends AbstractExecutorService {
-    @Override
-    public void shutdown() {}
-
-    @Override
-    public List<Runnable> shutdownNow() {
-      return List.of();
-    }
-
-    @Override
-    public boolean isShutdown() {
-      return false;
-    }
-
-    @Override
-    public boolean isTerminated() {
-      return false;
-    }
-
-    @Override
-    public boolean awaitTermination(long timeout, TimeUnit unit) {
-      return true;
-    }
-
-    @Override
-    public void execute(Runnable command) {
-      command.run();
-    }
-  }
-
-  static final class UnsafeRejectingExecutor extends AbstractExecutorService {
-    @Override
-    public void shutdown() {}
-
-    @Override
-    public List<Runnable> shutdownNow() {
-      return List.of();
-    }
-
-    @Override
-    public boolean isShutdown() {
-      return false;
-    }
-
-    @Override
-    public boolean isTerminated() {
-      return false;
-    }
-
-    @Override
-    public boolean awaitTermination(long timeout, TimeUnit unit) {
-      return true;
-    }
-
-    @Override
-    public void execute(Runnable command) {
-      throw new RejectedExecutionException("rejected");
     }
   }
 }

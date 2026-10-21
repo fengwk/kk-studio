@@ -70,7 +70,7 @@ rootThreadId / yoloEnabled / executionControl / inputThroughSequence / nextComma
 
 [`ThreadSnapshot.executionFacts()`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/ThreadSnapshot.java) 为上层策略提供三个独立事实：
 
-- `hasWork`：排队命令、本地非终态 Model、`READY`/`DISPATCHING`/`RUNNING` 工具，或归属本 Thread 的 continuation；判断续写时忽略 `TURN_END` 后的控制 Entry。
+- `hasWork`：排队命令、本地非终态 Model、`READY`/`RUNNING` 工具，或归属本 Thread 的 continuation；判断续写时忽略 `TURN_END` 后的控制 Entry。
 - `waitingForHuman`：本地工具处于 `WAITING_APPROVAL` 或 `WAITING_INPUT`。
 - `hasUnknownToolOutcome`：本地工具处于 `UNKNOWN`。它不计入 `hasWork`，终态 Model/Tool 待应用也不计入。
 
@@ -165,12 +165,13 @@ durable 事实。Skill 的 name、description 与稳定 path 已经完整写入
 [`ToolInvocation`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/tool/ToolInvocation.java) 是 `harness_tool_invocation` 行的当前状态：冻结的 `ToolCall` 参数、[`ToolBinding`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/tool/ToolBinding.java)、`assistantEntryId`、`callIndex`、审批记录、结果、副作用批次与错误描述。
 
 ```text
-READY -> WAITING_INPUT（ask_user 冻结问卷）/ WAITING_APPROVAL（Ask）/ DISPATCHING（Allow）/ FAILED（Deny）/ CANCELLED
+READY -> WAITING_INPUT（ask_user 冻结问卷）/ WAITING_APPROVAL（Ask）/ RUNNING（Allow 且 admission 通过）/ FAILED（Deny 或 admission Rejected）/ CANCELLED
 WAITING_APPROVAL -> READY（Allowed）/ FAILED（Denied）/ CANCELLED
 WAITING_INPUT -> SUCCEEDED（已作答或明确拒答）/ CANCELLED
-DISPATCHING -> RUNNING / READY（RetryLater）/ FAILED / UNKNOWN
 RUNNING -> SUCCEEDED / FAILED / CANCELLED / UNKNOWN / READY（retry）
 ```
+
+`attempt` 在 `READY -> RUNNING` 上精确 +1，且该转换在任何副作用之前持久化；admission `Busy` 与启动前拒绝都不增加它。RUNNING 的旧租约恢复一律收敛为 `UNKNOWN`（attempt 保留），绝不重放。
 
 `WAITING_INPUT` 与 `WAITING_APPROVAL` 刻意分离：问卷不能授权工具，审批也不能代替回答；两者都只占 durable 行，不占用 Worker 或外部执行。
 
@@ -213,21 +214,21 @@ Dispatcher 认领 Work 后把 `ClaimedWork` 交给对应 Processor。Thread clai
 
 成功的 terminal 响应在成为 durable 事实之前先冻结 Tool 历史语义：`ModelExecution` 用本次调用的冻结 `toolBindings` 与注入的 [`ToolHistoryActionResolver`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/ToolHistoryActionResolver.java)（Platform 实现按冻结贡献身份与完整定义查不可变 `HarnessCatalog`，再调用 Tool 的 `historyRenderer()`）算出每个 READY 调用的自然语言动作，写入 `ProviderToolCall.historyAction` 后再持久化。解析与渲染在 execution monitor 和状态事务之外完成，动态 MCP Tool 不触发数据库查询；任何缺失、blank、异常或定义变化都退化为不冻结 action——历史语义渲染绝不阻断模型调用，也绝不改写 durable arguments。
 
-[`ToolProcessor`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ToolProcessor.java) 的 prepare / preflight 回写 / allow / bounce / reject / unknown / terminal 短事务只按 own Thread -> Model -> Tool -> Work 加锁，不取 tree、Session 或祖先锁。它驱动一次工具调用：`READY` 且无审批记录时，在 own Thread 锁内沿不可变 `rootThreadId` 只读解析执行根的 `yoloEnabled`；解析为 true 时跳过 preflight 直接 Allow。其余调用在事务外执行 `ToolGateway.preflight`（期间 heartbeat 续租）：
+[`ToolProcessor`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ToolProcessor.java) 的 prepare / preflight 回写 / allow / reschedule / reject / terminal 短事务只按 own Thread -> Model -> Tool -> Work 加锁，不取 tree、Session 或祖先锁。它驱动一次工具调用：`READY` 且无审批记录时，在 own Thread 锁内沿不可变 `rootThreadId` 只读解析执行根的 `yoloEnabled`；解析为 true 时跳过 preflight 直接 Allow。其余调用在事务外执行 `ToolGateway.preflight`（期间 heartbeat 续租）：
 
-- `Allow` 记录免审批并进入 dispatch；
+- `Allow` 记录免审批并进入执行；
 - `Ask` 转为 `WAITING_APPROVAL`，携带可选的 `ToolEditReview`（含 canonical 绝对路径、全量 diff 与原始 bytes SHA-256）并持久化到 `approvalJson.editReview`，随后完成 TOOL claim（不唤醒 THREAD）；
 - `Deny` 标记 `FAILED` 并唤醒 THREAD。
 
 preflight 抛异常时保持 `READY` / 无审批 / version 不变，按失败延迟 reschedule。
 
-两阶段激活与回调门控协议与 Model 一致；超期租约（`DISPATCHING` 消费 proposed attempt、`RUNNING` 保留）同样收敛为 `UNKNOWN`，绝不对非幂等工具重放。`UNKNOWN` 是终态：与其它终态一样物化为失败 `ToolResult` 并唤醒 THREAD，作为 loop 反馈交给下一轮模型，不阻塞 Thread、也不升级为人工核查门禁。工具增量只支持文本与 JSON 格式。
+放行后的执行是单线程的阻塞调用：`ToolGateway.admit` 做纯本地 admission——`Busy` 按 `retryAfter` reschedule、`Rejected` 转 `FAILED`（都肯定未执行，attempt 不变），抛异常则保持 `READY` 并按失败延迟 reschedule；`Admitted` 后先持久化 `READY -> RUNNING`，再由 [`ToolExecution`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ToolExecution.java) 在独占虚拟线程上阻塞执行 `Run`，同一线程依次提交终态、释放 `Run` 持有的本地资源（并发租约与目录租用）。资源只在终态决议与执行体返回之后释放，因此取消（Stop、租约丢失、进程关闭）只需 interrupt 该线程，不需要另设静止簿记；interrupt 只在执行体内投递，进入终态事务前已清除。abandon 之后到达的结果被丢弃且不反写任何状态。失败的重试判定同 Model 共用重试策略：只有 `retryable` 且工具为 `READ_ONLY` / `IDEMPOTENT` 才重试，`NON_IDEMPOTENT` 绝不自动重放；超期租约的 `RUNNING` 恢复收敛为 `UNKNOWN`。`UNKNOWN` 是终态：与其它终态一样物化为失败 `ToolResult` 并唤醒 THREAD，作为 loop 反馈交给下一轮模型，不阻塞 Thread、也不升级为人工核查门禁。工具增量只支持文本与 JSON 格式，由网关校验后直接发布为有损 `TOOL_PARTIAL`。
 
 ### 审批决议与受管文件变更保护
 
 审批由 `decideToolApproval` 驱动，只在 Thread 处于 `ToolActive` 且目标工具处于 `WAITING_APPROVAL` 时接受。客户端提交 `ALLOW` / `DENY`，服务端冻结为 `ALLOWED` / `DENIED`：前者转 `READY` 并安排 TOOL Work，后者标记 `FAILED` 并唤醒 THREAD Work，两者都推进一次 Thread version。相同决策幂等重放，不同决策抛 `APPROVAL_DECISION_MISMATCH`。决议保留原 `editReview`，客户端只提交决策身份与原因。
 
-`ToolGateway.start` 的 `Execution` 携带非空 `ToolApproval` 快照。对于需要人工审批的环境 `fs.edit`，平台先核对已租用目录中的真实工具贡献身份；若缺少有效审查，则在加载分支或调用 transport 前以 `EDIT_REVIEW_REQUIRED` 拒绝，执行事实为 `NOT_EXECUTED`，并释放已获取的并发与目录租约。存在有效审查时，从同一快照提取 `expectedFile`（`{path, sha256}`），作为 INVOKE 顶层内部元数据下发，不改变模型 arguments。
+`ToolGateway.admit` 的 `Execution` 携带非空 `ToolApproval` 快照。对于需要人工审批的环境 `fs.edit`，平台先核对已租用目录中的真实工具贡献身份；若缺少有效审查，则在加载分支或调用 transport 前以 `EDIT_REVIEW_REQUIRED` 拒绝，执行事实为 `NOT_EXECUTED`，并释放已获取的并发与目录租约。存在有效审查时，从同一快照提取 `expectedFile`（`{path, sha256}`），作为 INVOKE 顶层内部元数据下发，不改变模型 arguments。
 
 Daemon 在文件修改锁内核对路径与原始字节哈希；审查后文件变化即拒绝写入。完整 diff 连同结果超过 1 MiB UTF-8 预算时，在预览或提交前明确拒绝。执行成功后，权威变更事实保存在 `resultJson.details.editReview`（Java 内部为 `detailsJson`，作为唯一 canonical 持久化 diff）。自动 ALLOW / YOLO 不要求人工审查快照，使用实际执行结果展示变更。
 
@@ -327,13 +328,13 @@ terminalEntryId / finalAnswerEntryId / deliveryCommandSequence / createdAt / upd
 | --- | --- |
 | [`TurnResolver`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/TurnResolver.java) | 同步、无副作用、事务外的 turn 解析；输入 candidate `EntryPath`，输出冻结 spec 与 contextWindow / maxOutputTokens，或确定性 `Rejected`；异常表示临时基础设施故障，由 Processor reschedule |
 | [`ModelGateway`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/ModelGateway.java) | 准入 `Started` / `Busy` / `Rejected` / `Indeterminate` + 两阶段激活 `start -> activate` |
-| [`ToolGateway`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/ToolGateway.java) | `preflight` 返回 `Allow` / `Ask(reason, editReview)` / `Deny`；`start` 接收携带非空 `ToolApproval` 的 `Execution`（含可选 `expectedFile`），返回 `Started` / `RetryLater` / `Rejected` / `Indeterminate` |
+| [`ToolGateway`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/ToolGateway.java) | `preflight` 返回 `Allow` / `Ask(reason, editReview)` / `Deny`；`admit` 接收携带非空 `ToolApproval` 的 `Execution`（含可选 `expectedFile`），返回 `Admitted(run)` / `Busy` / `Rejected`；`Run.execute` 阻塞返回 `Succeeded` / `Failed` / `Cancelled` / `Unknown`，`Run.close` 释放本地资源 |
 | [`ToolResultHistoryMaterializer`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/ToolResultHistoryMaterializer.java) | 在 Tool outcome Entry 插入前、同一事务内把瞬时 Resource 外部化为 durable 内容；缺失时资源结果降级为 metadata-only 文本 |
 | [`RealtimeEventSink`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/port/RealtimeEventSink.java) | 有损 `MODEL_DELTA` / `MODEL_CHECKPOINT` / `TOOL_PARTIAL` 投影写入，`append` 与 `appendAll` 同为 best-effort，失败不回滚 checkpoint 或终态 |
 
-`ModelProcessor` / `ToolProcessor` 在各自的 lease 所有权短事务内（锁 `Work` 行并通过所有权围栏）直接持久 `READY -> DISPATCHING`，`Provider` / `Tool Gateway` 调用在提交之后，因此不会持锁等待外部 HTTP。Runtime 不反查 owner、Issue 归属或阶段等产品门禁：在途、等待态、终态与 THREAD claim 都只收敛或物化 durable 事实，恢复与收敛不因产品暂停而被阻断；需要终止在途执行时由业务显式调用 Stop。
+`ModelProcessor` 在 lease 所有权短事务内（锁 `Work` 行并通过所有权围栏）直接持久 `READY -> DISPATCHING`，`ToolProcessor` 持久 `READY -> RUNNING`，`Provider` / `Tool Gateway` 调用在提交之后，因此不会持锁等待外部 HTTP。Runtime 不反查 owner、Issue 归属或阶段等产品门禁：在途、等待态、终态与 THREAD claim 都只收敛或物化 durable 事实，恢复与收敛不因产品暂停而被阻断；需要终止在途执行时由业务显式调用 Stop。
 
-三种准入结论各自对应唯一的 durable 后续：`Busy` / `RetryLater` 表示肯定未开始，安全 reschedule；`Rejected` 是确定性失败；`Indeterminate` 表示可能已开始，收敛为 `UNKNOWN`，严禁盲目重放。`Started` 必须先落 `RUNNING` 再 `activate`，因此 Gateway 打开回调门控必然晚于持久化事实，过早回调只会被缓冲，陈旧或重复回调由所有权围栏拦截。
+Tool 的三种准入结论各自对应唯一的 durable 后续：`Busy` 表示肯定未开始，安全 reschedule；`Rejected` 是确定性失败；`Admitted` 先落 `RUNNING` 再执行，此后任何副作用都可能已发生，崩溃恢复收敛为 `UNKNOWN`，严禁盲目重放。
 
 [`ConcurrencyAdmission`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/admission/ConcurrencyAdmission.java) 提供纯内存、无等待队列的进程内并发槽位，网关用它约束外部执行压力；槽位满立即返回空，`Lease` 幂等释放且恰好归还一个许可。[`InvocationRetryPolicy`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/retry/InvocationRetryPolicy.java) 提供 `FIXED` / `EXPONENTIAL` 确定性退避，只计算是否允许下一次重试与延迟，不读时钟、不写状态；重试只能基于初始冻结的请求契约重新物化，`NON_IDEMPOTENT` 工具永不自动重试。
 

@@ -16,7 +16,6 @@ import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
 
 import java.util.List;
-import java.util.concurrent.ExecutorService;
 
 class PlatformHarnessTestConfigurationTest {
 
@@ -24,7 +23,7 @@ class PlatformHarnessTestConfigurationTest {
   void mcpFactsAreFreshForEachLeaseAndFrozenUntilRelease() {
     // 测试组合根必须看到启动后新增的 MCP 行，同时保持一次规划租用内的目录不漂移。
     McpServerRepository repository = mock(McpServerRepository.class);
-    McpToolCatalog mcpCatalog = new McpToolCatalog(repository, mock(ExecutorService.class));
+    McpToolCatalog mcpCatalog = new McpToolCatalog(repository);
     RuntimeToolCatalogSource source =
         new PlatformHarnessTestConfiguration()
             .runtimeToolCatalogSource(HarnessCatalog.from(List.of()), mcpCatalog);

@@ -76,7 +76,7 @@ Run 计数，失败、取消和 UNKNOWN 也消耗一次；额度只限制**新 R
 终态必须冻结区间、FAILED/UNKNOWN 必须给出原因等不变量由 `project_issue_run` 的检查约束与
 部分唯一索引最终保证；Entry 父链、跨表外键与锁序校验由 service 与 Runtime 负责，领域层不重复实现。
 
-Run 的预算、等待与停止政策只消费 Runtime 投影的统一执行事实 [`ThreadExecutionFacts`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/thread/ThreadExecutionFacts.java)：存在在途工作（排队命令 / 合法本地 Model / `READY`、`DISPATCHING`、`RUNNING` 工具 / owned continuation）时 `reconcile` 只延后重检，绝不投递指示或收尾；只有 `WAITING_APPROVAL` / `WAITING_INPUT` 才把 Run 转入等待；`UNKNOWN` 工具是已收敛的模型反馈，不作为人工核查门禁，只在人工停止且仍有在途工作或结果未定时让 Run 收敛为 `UNKNOWN` 暂停。Project 不再自行遍历 Model、工具与 `TURN_END` 推导「在途」。
+Run 的预算、等待与停止政策只消费 Runtime 投影的统一执行事实 [`ThreadExecutionFacts`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/thread/ThreadExecutionFacts.java)：存在在途工作（排队命令 / 合法本地 Model / `READY`、`RUNNING` 工具 / owned continuation）时 `reconcile` 只延后重检，绝不投递指示或收尾；只有 `WAITING_APPROVAL` / `WAITING_INPUT` 才把 Run 转入等待；`UNKNOWN` 工具是已收敛的模型反馈，不作为人工核查门禁，只在人工停止且仍有在途工作或结果未定时让 Run 收敛为 `UNKNOWN` 暂停。Project 不再自行遍历 Model、工具与 `TURN_END` 推导「在途」。
 
 Project 的 `yoloEnabled` 只在首次创建该 `Issue + Agent` 执行根时初始化其
 YOLO 开关；修改项目开关不改写既有 Thread。该根委派的后代读取根的开关，

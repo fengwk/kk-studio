@@ -17,9 +17,7 @@ import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.contributor.api.StateDeclaration;
 import fun.fengwk.kkstudio.harness.contributor.api.StateMode;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionContext;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -33,7 +31,6 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * {@link IssueTransitionTool} 的模型可见契约：执行身份（runId/sourceThreadId）只从本 branch 冻结的 {@code project/run}
@@ -68,35 +65,6 @@ class IssueTransitionToolTest {
   private final IssueTransitionService service = mock(IssueTransitionService.class);
   private final IssueTransitionTool tool = new IssueTransitionTool(service);
 
-  /** 记录唯一终态结果的测试监听器。 */
-  private static final class RecordingListener implements ToolExecutionListener {
-
-    private final AtomicReference<ToolOutcome> outcome = new AtomicReference<>();
-    private final AtomicReference<Throwable> error = new AtomicReference<>();
-
-    @Override
-    public void onPartial(ToolResult partial) {}
-
-    @Override
-    public void onComplete(ToolOutcome value) {
-      if (!outcome.compareAndSet(null, value)) {
-        throw new IllegalStateException("duplicate terminal outcome");
-      }
-    }
-
-    @Override
-    public void onError(Throwable throwable) {
-      error.set(throwable);
-    }
-
-    ToolResult result() {
-      assertTrue(error.get() == null, "tool must not signal a raw failure");
-      ToolOutcome value = outcome.get();
-      assertTrue(value != null, "tool must produce exactly one terminal outcome");
-      return value.result();
-    }
-  }
-
   private ToolExecutionRequest request(String argumentsJson, ToolExecutionContext context) {
     return new ToolExecutionRequest(
         tool.descriptor(),
@@ -120,9 +88,7 @@ class IssueTransitionToolTest {
   }
 
   private ToolResult execute(String argumentsJson, ToolExecutionContext context) {
-    RecordingListener listener = new RecordingListener();
-    tool.execute(request(argumentsJson, context), listener);
-    return listener.result();
+    return tool.execute(request(argumentsJson, context), partial -> {}).result();
   }
 
   private static String text(ToolResult result) {

@@ -12,20 +12,19 @@ import java.util.Objects;
  * <p>{@code leaseConfig} 控制 claim lease 与 heartbeat；{@code retryPolicyProvider} 在每次 retryable 失败
  * retry 判定点现读（最终还受 binding 的 {@link fun.fengwk.kkstudio.harness.tool.ToolSideEffect} 约束，
  * NON_IDEMPOTENT 绝不自动重试）；{@code preflightFailureDelay} 是 preflight 抛异常 / 返回 null（确定无副作用）时的
- * reschedule 延迟；{@code dispatchBusyFallbackDelay} 是 Gateway start 抛异常（肯定未接受）时的 reschedule 延迟。
+ * reschedule 延迟；{@code admitFailureDelay} 是 Gateway admit 抛异常（肯定无副作用）或本地放弃（close）时的 reschedule 延迟。
  */
 public record ToolProcessorConfig(
     ProcessorLeaseConfig leaseConfig,
     InvocationRetryPolicyProvider retryPolicyProvider,
     Duration preflightFailureDelay,
-    Duration dispatchBusyFallbackDelay) {
+    Duration admitFailureDelay) {
 
   public ToolProcessorConfig {
     leaseConfig = Objects.requireNonNull(leaseConfig, "leaseConfig");
     retryPolicyProvider = Objects.requireNonNull(retryPolicyProvider, "retryPolicyProvider");
     preflightFailureDelay = requireMillisPositive(preflightFailureDelay, "preflightFailureDelay");
-    dispatchBusyFallbackDelay =
-        requireMillisPositive(dispatchBusyFallbackDelay, "dispatchBusyFallbackDelay");
+    admitFailureDelay = requireMillisPositive(admitFailureDelay, "admitFailureDelay");
   }
 
   private static Duration requireMillisPositive(Duration value, String name) {

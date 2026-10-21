@@ -46,15 +46,15 @@ class ToolProcessorPreflightTest {
   }
 
   /**
-   * Allow：同一短事务顺序 markApprovalNotRequired -&gt; beginDispatch（Thread version 只 +1），随后 markRunning
-   * +1，preflight 收到冻结 request。
+   * Allow：同一短事务顺序 markApprovalNotRequired（Thread version +1），随后 markRunning +1，preflight 收到冻结
+   * request。
    */
   @Test
   void allowDispatchesAndStarts() {
     ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.fixture();
-    ToolProcessorTestSupport.FakeHandle handle = new ToolProcessorTestSupport.FakeHandle();
     fixture.gateway.queuePreflightAllow();
-    fixture.gateway.queueStart(new ToolGateway.Started(handle));
+    ToolProcessorTestSupport.FakeRun run =
+        fixture.gateway.queueRun(progress -> ToolProcessorTestSupport.blockUntilInterrupted());
 
     assertEquals(
         ProcessResult.STARTED,
@@ -71,12 +71,11 @@ class ToolProcessorPreflightTest {
     assertFalse(tool.approval().required());
     assertEquals(
         2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
-    assertEquals(1, fixture.gateway.startCalls);
+    assertEquals(1, fixture.gateway.admitCalls);
     assertEquals(fixture.toolInvocationId, fixture.gateway.executions.get(0).invocationId());
     assertEquals(fixture.baseline.threadId(), fixture.gateway.executions.get(0).threadId());
-    assertEquals(1, fixture.gateway.executions.get(0).proposedAttempt());
     assertEquals(fixture.request, fixture.gateway.executions.get(0).request());
-    assertFalse(handle.isCancelled());
+    assertEquals(0, run.closes.get());
     assertTrue(fixture.processor.hasActiveExecution());
     Work toolWork = ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId);
     assertNotNull(toolWork);
@@ -112,7 +111,7 @@ class ToolProcessorPreflightTest {
         ToolProcessorTestSupport.threadWork(fixture.store, fixture.baseline.threadId())
             .wakeVersion());
     assertNull(ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId));
-    assertEquals(0, fixture.gateway.startCalls);
+    assertEquals(0, fixture.gateway.admitCalls);
     assertFalse(fixture.processor.hasActiveExecution());
   }
 
@@ -140,7 +139,7 @@ class ToolProcessorPreflightTest {
         ToolProcessorTestSupport.threadWork(fixture.store, fixture.baseline.threadId())
             .wakeVersion());
     assertNull(ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId));
-    assertEquals(0, fixture.gateway.startCalls);
+    assertEquals(0, fixture.gateway.admitCalls);
     assertFalse(fixture.processor.hasActiveExecution());
   }
 
@@ -250,7 +249,7 @@ class ToolProcessorPreflightTest {
         1,
         ToolProcessorTestSupport.threadWork(fixture.store, fixture.baseline.threadId())
             .wakeVersion());
-    assertEquals(0, fixture.gateway.startCalls);
+    assertEquals(0, fixture.gateway.admitCalls);
     assertFalse(fixture.processor.hasActiveExecution());
   }
 
@@ -277,7 +276,7 @@ class ToolProcessorPreflightTest {
         ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId).availableAt());
   }
 
-  /** READY + not-required approval：跳过 preflight，同事务 beginDispatch 后直接 admission。 */
+  /** READY + not-required approval：跳过 preflight，直接 admission。 */
   @Test
   void completedNotRequiredApprovalSkipsPreflight() {
     ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.fixture();
@@ -285,8 +284,8 @@ class ToolProcessorPreflightTest {
         fixture.store,
         fixture.toolInvocationId,
         tool -> tool.markApprovalNotRequired(ToolProcessorTestSupport.NOW));
-    ToolProcessorTestSupport.FakeHandle handle = new ToolProcessorTestSupport.FakeHandle();
-    fixture.gateway.queueStart(new ToolGateway.Started(handle));
+    ToolProcessorTestSupport.FakeRun run =
+        fixture.gateway.queueRun(progress -> ToolProcessorTestSupport.blockUntilInterrupted());
 
     assertEquals(
         ProcessResult.STARTED,
@@ -301,7 +300,7 @@ class ToolProcessorPreflightTest {
     assertEquals(
         1, ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).attempt());
     assertEquals(
-        2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
+        1, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
   }
 
   /** READY + ALLOWED decision：同样跳过 preflight 直接 admission。 */
@@ -317,7 +316,7 @@ class ToolProcessorPreflightTest {
         fixture.store,
         fixture.toolInvocationId,
         tool -> ToolProcessorTestSupport.decideAllowed(tool, ToolProcessorTestSupport.NOW));
-    fixture.gateway.queueStart(new ToolGateway.Started(new ToolProcessorTestSupport.FakeHandle()));
+    fixture.gateway.queueRun(progress -> ToolProcessorTestSupport.blockUntilInterrupted());
 
     assertEquals(
         ProcessResult.STARTED,
@@ -377,7 +376,7 @@ class ToolProcessorPreflightTest {
     ToolApproval frozenApproval = toolReady.approval();
     assertNotNull(frozenApproval);
 
-    fixture.gateway.queueStart(new ToolGateway.Started(new ToolProcessorTestSupport.FakeHandle()));
+    fixture.gateway.queueRun(progress -> ToolProcessorTestSupport.blockUntilInterrupted());
     assertEquals(
         ProcessResult.STARTED,
         fixture.processor.process(
@@ -428,7 +427,7 @@ class ToolProcessorPreflightTest {
           }
         };
     fixture.gateway.queuePreflightAllow();
-    fixture.gateway.queueStart(new ToolGateway.Started(new ToolProcessorTestSupport.FakeHandle()));
+    fixture.gateway.queueRun(progress -> ToolProcessorTestSupport.blockUntilInterrupted());
     ClaimedWork claimed =
         ToolProcessorTestSupport.claim(
             fixture.store,
@@ -452,7 +451,7 @@ class ToolProcessorPreflightTest {
     release.countDown();
     thread.join(5000);
     assertEquals(ProcessResult.STARTED, result.get());
-    assertEquals(1, fixture.gateway.startCalls);
+    assertEquals(1, fixture.gateway.admitCalls);
   }
 
   /** preflight 前 lease 剩余不足：ensure 出完整 margin 后再调 preflight / start。 */
@@ -467,7 +466,7 @@ class ToolProcessorPreflightTest {
             "near-expiry",
             Duration.ofSeconds(1));
     fixture.gateway.queuePreflightAllow();
-    fixture.gateway.queueStart(new ToolGateway.Started(new ToolProcessorTestSupport.FakeHandle()));
+    fixture.gateway.queueRun(progress -> ToolProcessorTestSupport.blockUntilInterrupted());
 
     assertEquals(ProcessResult.STARTED, fixture.processor.process(claimed));
 
@@ -487,8 +486,8 @@ class ToolProcessorPreflightTest {
             ToolProcessorTestSupport.NO_RETRY, ToolSideEffect.READ_ONLY, true);
     // 不 queue 任何 preflight result：若 YOLO 路径错误地调用 gateway.preflight 会立即抛
     // IllegalStateException，测试确定性失败。
-    ToolProcessorTestSupport.FakeHandle handle = new ToolProcessorTestSupport.FakeHandle();
-    fixture.gateway.queueStart(new ToolGateway.Started(handle));
+    ToolProcessorTestSupport.FakeRun run =
+        fixture.gateway.queueRun(progress -> ToolProcessorTestSupport.blockUntilInterrupted());
 
     assertEquals(
         ProcessResult.STARTED,
@@ -497,7 +496,7 @@ class ToolProcessorPreflightTest {
                 fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW)));
 
     assertEquals(0, fixture.gateway.preflightCallsCount);
-    assertEquals(1, fixture.gateway.startCalls);
+    assertEquals(1, fixture.gateway.admitCalls);
     ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
     assertEquals(ToolInvocationStatus.RUNNING, tool.status());
     assertEquals(1, tool.attempt());
@@ -507,9 +506,8 @@ class ToolProcessorPreflightTest {
         2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(fixture.toolInvocationId, fixture.gateway.executions.get(0).invocationId());
     assertEquals(fixture.baseline.threadId(), fixture.gateway.executions.get(0).threadId());
-    assertEquals(1, fixture.gateway.executions.get(0).proposedAttempt());
     assertEquals(fixture.request, fixture.gateway.executions.get(0).request());
-    assertFalse(handle.isCancelled());
+    assertEquals(0, run.closes.get());
     // registry / lease 语义与普通 Allow 路径一致：本地 execution 已注册，TOOL Work 持有 claim lease。
     assertTrue(fixture.processor.hasActiveExecution());
     assertTrue(fixture.processor.cancel(fixture.toolInvocationId));
@@ -544,7 +542,7 @@ class ToolProcessorPreflightTest {
     assertTrue(tool.approval().required());
     assertTrue(tool.approval().isUndecided());
     assertEquals(0, fixture.gateway.preflightCallsCount);
-    assertEquals(0, fixture.gateway.startCalls);
+    assertEquals(0, fixture.gateway.admitCalls);
     assertFalse(fixture.processor.hasActiveExecution());
   }
 
@@ -554,7 +552,7 @@ class ToolProcessorPreflightTest {
     ToolProcessorTestSupport.Fixture fixture =
         ToolProcessorTestSupport.fixture(
             ToolProcessorTestSupport.NO_RETRY, ToolSideEffect.READ_ONLY, true);
-    fixture.gateway.queueStart(new ToolGateway.Started(new ToolProcessorTestSupport.FakeHandle()));
+    fixture.gateway.queueRun(progress -> ToolProcessorTestSupport.blockUntilInterrupted());
 
     ClaimedWork claimed =
         ToolProcessorTestSupport.claim(
@@ -570,7 +568,7 @@ class ToolProcessorPreflightTest {
     assertEquals(
         0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(0, fixture.gateway.preflightCallsCount);
-    assertEquals(0, fixture.gateway.startCalls);
+    assertEquals(0, fixture.gateway.admitCalls);
     assertFalse(fixture.processor.hasActiveExecution());
   }
 
@@ -578,7 +576,7 @@ class ToolProcessorPreflightTest {
   @Test
   void childReadsEnabledRootWithoutGatewayPreflight() {
     ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.childFixture(true, 1);
-    fixture.gateway.queueStart(new ToolGateway.Started(new ToolProcessorTestSupport.FakeHandle()));
+    fixture.gateway.queueRun(progress -> ToolProcessorTestSupport.blockUntilInterrupted());
 
     assertEquals(
         ProcessResult.STARTED,
@@ -587,7 +585,7 @@ class ToolProcessorPreflightTest {
                 fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW)));
 
     assertEquals(0, fixture.gateway.preflightCallsCount);
-    assertEquals(1, fixture.gateway.startCalls);
+    assertEquals(1, fixture.gateway.admitCalls);
     ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
     assertEquals(ToolInvocationStatus.RUNNING, tool.status());
     assertEquals(fixture.baseline.threadId(), fixture.gateway.executions.get(0).threadId());
@@ -598,7 +596,7 @@ class ToolProcessorPreflightTest {
   void childReadsDisabledRootAndPreflights() {
     ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.childFixture(false, 1);
     fixture.gateway.queuePreflightAllow();
-    fixture.gateway.queueStart(new ToolGateway.Started(new ToolProcessorTestSupport.FakeHandle()));
+    fixture.gateway.queueRun(progress -> ToolProcessorTestSupport.blockUntilInterrupted());
 
     assertEquals(
         ProcessResult.STARTED,
@@ -607,7 +605,7 @@ class ToolProcessorPreflightTest {
                 fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW)));
 
     assertEquals(1, fixture.gateway.preflightCallsCount);
-    assertEquals(1, fixture.gateway.startCalls);
+    assertEquals(1, fixture.gateway.admitCalls);
     assertEquals(fixture.request, fixture.gateway.preflightCalls.get(0).request());
   }
 
@@ -627,7 +625,7 @@ class ToolProcessorPreflightTest {
           }
         };
     fixture.gateway.queuePreflightAllow();
-    fixture.gateway.queueStart(new ToolGateway.Started(new ToolProcessorTestSupport.FakeHandle()));
+    fixture.gateway.queueRun(progress -> ToolProcessorTestSupport.blockUntilInterrupted());
 
     AtomicReference<ProcessResult> result = new AtomicReference<>();
     Thread thread =
@@ -652,7 +650,7 @@ class ToolProcessorPreflightTest {
     assertNull(ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).approval());
     assertEquals(
         0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
-    assertEquals(0, fixture.gateway.startCalls);
+    assertEquals(0, fixture.gateway.admitCalls);
     assertFalse(fixture.processor.hasActiveExecution());
   }
 
@@ -672,7 +670,7 @@ class ToolProcessorPreflightTest {
           }
         };
     fixture.gateway.queuePreflightAllow();
-    fixture.gateway.queueStart(new ToolGateway.Started(new ToolProcessorTestSupport.FakeHandle()));
+    fixture.gateway.queueRun(progress -> ToolProcessorTestSupport.blockUntilInterrupted());
 
     AtomicReference<ProcessResult> result = new AtomicReference<>();
     Thread thread =
@@ -699,7 +697,7 @@ class ToolProcessorPreflightTest {
     assertEquals(
         ToolInvocationStatus.WAITING_APPROVAL,
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
-    assertEquals(0, fixture.gateway.startCalls);
+    assertEquals(0, fixture.gateway.admitCalls);
   }
 
   /** close 在 preflight 期间获胜：不调 start，READY claim 仍 owned 时立即重排。 */
@@ -718,7 +716,7 @@ class ToolProcessorPreflightTest {
           }
         };
     fixture.gateway.queuePreflightAllow();
-    fixture.gateway.queueStart(new ToolGateway.Started(new ToolProcessorTestSupport.FakeHandle()));
+    fixture.gateway.queueRun(progress -> ToolProcessorTestSupport.blockUntilInterrupted());
 
     AtomicReference<ProcessResult> result = new AtomicReference<>();
     Thread thread =
@@ -743,7 +741,7 @@ class ToolProcessorPreflightTest {
     assertNull(ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).approval());
     assertEquals(
         0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
-    assertEquals(0, fixture.gateway.startCalls);
+    assertEquals(0, fixture.gateway.admitCalls);
     assertFalse(fixture.processor.hasActiveExecution());
     assertEquals(
         ToolProcessorTestSupport.NOW.plus(ToolProcessorTestSupport.PREFLIGHT_FAILURE_DELAY),
@@ -800,7 +798,7 @@ class ToolProcessorPreflightTest {
     assertNull(ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).approval());
     assertEquals(
         0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
-    assertEquals(0, fixture.gateway.startCalls);
+    assertEquals(0, fixture.gateway.admitCalls);
   }
 
   /** Ask 结果提交前二次校验（claim 已 lost）：完整 no-op，绝不执行。 */
@@ -819,7 +817,7 @@ class ToolProcessorPreflightTest {
     assertNull(ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).approval());
     assertEquals(
         0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
-    assertEquals(0, fixture.gateway.startCalls);
+    assertEquals(0, fixture.gateway.admitCalls);
   }
 
   /** Ask 结果提交前二次校验（approval 被并发引入）：完整 no-op。 */
@@ -841,7 +839,7 @@ class ToolProcessorPreflightTest {
     assertEquals(
         ToolInvocationStatus.WAITING_APPROVAL,
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
-    assertEquals(0, fixture.gateway.startCalls);
+    assertEquals(0, fixture.gateway.admitCalls);
   }
 
   /** Deny 结果提交前二次校验（claim 已 lost）：完整 no-op。 */
@@ -863,7 +861,7 @@ class ToolProcessorPreflightTest {
         1,
         ToolProcessorTestSupport.threadWork(fixture.store, fixture.baseline.threadId())
             .wakeVersion());
-    assertEquals(0, fixture.gateway.startCalls);
+    assertEquals(0, fixture.gateway.admitCalls);
   }
 
   /** Deny 结果提交前二次校验（状态被并发改写）：完整 no-op。 */
@@ -885,10 +883,10 @@ class ToolProcessorPreflightTest {
     assertEquals(
         ToolInvocationStatus.WAITING_APPROVAL,
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
-    assertEquals(0, fixture.gateway.startCalls);
+    assertEquals(0, fixture.gateway.admitCalls);
   }
 
-  /** preflight 阶段 scheduler 拒绝 heartbeat：无法维持 lease，按 dispatchBusyFallbackDelay 重排，不调 preflight。 */
+  /** preflight 阶段 scheduler 拒绝 heartbeat：无法维持 lease，按 admitFailureDelay 重排，不调 preflight。 */
   @Test
   void preflightHeartbeatStartFailureReschedulesWithPreflightDelay() {
     ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.fixture();
@@ -909,7 +907,7 @@ class ToolProcessorPreflightTest {
             dead,
             Runnable::run);
     fixture.gateway.queuePreflightAllow();
-    fixture.gateway.queueStart(new ToolGateway.Started(new ToolProcessorTestSupport.FakeHandle()));
+    fixture.gateway.queueRun(progress -> ToolProcessorTestSupport.blockUntilInterrupted());
 
     assertEquals(
         ProcessResult.RESCHEDULED,
@@ -927,7 +925,7 @@ class ToolProcessorPreflightTest {
     assertEquals(
         ToolProcessorTestSupport.NOW.plus(ToolProcessorTestSupport.PREFLIGHT_FAILURE_DELAY),
         ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId).availableAt());
-    assertEquals(0, fixture.gateway.startCalls);
+    assertEquals(0, fixture.gateway.admitCalls);
   }
 
   /** close 在 preflight registry 插入之前完成：立即 abandon，并把仍 owned 的 READY Work 重排。 */
@@ -935,7 +933,7 @@ class ToolProcessorPreflightTest {
   void closeBeforeRegistryInsertInPreflightPathReschedules() throws Exception {
     ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.fixture();
     fixture.gateway.queuePreflightAllow();
-    fixture.gateway.queueStart(new ToolGateway.Started(new ToolProcessorTestSupport.FakeHandle()));
+    fixture.gateway.queueRun(progress -> ToolProcessorTestSupport.blockUntilInterrupted());
     ClaimedWork claimed =
         ToolProcessorTestSupport.claim(
             fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
@@ -975,7 +973,7 @@ class ToolProcessorPreflightTest {
 
     assertEquals(ProcessResult.RESCHEDULED, result.get());
     assertEquals(0, fixture.gateway.preflightCallsCount);
-    assertEquals(0, fixture.gateway.startCalls);
+    assertEquals(0, fixture.gateway.admitCalls);
     assertFalse(fixture.processor.hasActiveExecution());
     assertEquals(
         ToolInvocationStatus.READY,
@@ -1013,7 +1011,7 @@ class ToolProcessorPreflightTest {
     cancelId.set(fixture.toolInvocationId);
     processorRef.set(fixture.processor);
     fixture.gateway.queuePreflightAllow();
-    fixture.gateway.queueStart(new ToolGateway.Started(new ToolProcessorTestSupport.FakeHandle()));
+    fixture.gateway.queueRun(progress -> ToolProcessorTestSupport.blockUntilInterrupted());
 
     assertEquals(
         ProcessResult.RESCHEDULED,
@@ -1022,7 +1020,7 @@ class ToolProcessorPreflightTest {
                 fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW)));
 
     assertEquals(0, fixture.gateway.preflightCallsCount);
-    assertEquals(0, fixture.gateway.startCalls);
+    assertEquals(0, fixture.gateway.admitCalls);
     assertFalse(fixture.processor.hasActiveExecution());
     assertEquals(
         ToolInvocationStatus.READY,
@@ -1054,7 +1052,7 @@ class ToolProcessorPreflightTest {
     assertEquals(
         ToolInvocationStatus.WAITING_APPROVAL,
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
-    assertEquals(0, fixture.gateway.startCalls);
+    assertEquals(0, fixture.gateway.admitCalls);
   }
 
   /** 阻塞 preflight 直到 {@code during} 完成，返回 process 结果。 */
@@ -1073,7 +1071,7 @@ class ToolProcessorPreflightTest {
           }
         };
     queueResult.run();
-    fixture.gateway.queueStart(new ToolGateway.Started(new ToolProcessorTestSupport.FakeHandle()));
+    fixture.gateway.queueRun(progress -> ToolProcessorTestSupport.blockUntilInterrupted());
     AtomicReference<ProcessResult> result = new AtomicReference<>();
     Thread thread =
         new Thread(

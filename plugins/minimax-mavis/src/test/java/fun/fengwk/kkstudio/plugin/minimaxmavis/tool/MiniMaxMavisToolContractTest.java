@@ -31,7 +31,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Semaphore;
 
 /**
  * MiniMax Mavis 15 项能力工具的静态契约测试。
@@ -51,7 +51,7 @@ class MiniMaxMavisToolContractTest {
     MavisClient client = new MavisClient(transport);
     MiniMaxMavisCapabilityCache capabilityCache = new MiniMaxMavisCapabilityCache(client);
     MiniMaxMavisResourceAccess resourceAccess = new MiniMaxMavisResourceAccess(null);
-    ExecutorService executor = mock(ExecutorService.class);
+    Semaphore executor = new Semaphore(8);
 
     MiniMaxMavisHarnessContributor.ToolDependencies dependencies =
         new MiniMaxMavisHarnessContributor.ToolDependencies(

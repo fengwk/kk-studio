@@ -339,7 +339,7 @@ const toolCardHarness = {
   durableStates() {
     publish({
       messages: [
-        'READY', 'WAITING_APPROVAL', 'WAITING_INPUT', 'DISPATCHING', 'RUNNING',
+        'READY', 'WAITING_APPROVAL', 'WAITING_INPUT', 'RUNNING',
         'SUCCEEDED', 'FAILED', 'CANCELLED', 'UNKNOWN',
       ].map((status) => ({
         ...bashTool(status, 1, false), invocationStatus: status,
