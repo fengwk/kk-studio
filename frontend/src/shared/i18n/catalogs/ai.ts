@@ -1196,9 +1196,17 @@ export const aiCatalog = {
     'en-US': 'Branch from here',
     'zh-CN': '从此处分支',
   },
+  'ai.chat.branch.fromHereHint': {
+    'en-US': 'Start a new thread in this session from this point. It shares this session\'s history tree.',
+    'zh-CN': '在当前会话中从此处新建 thread 分支，它与原 thread 同属这个会话的历史树。',
+  },
   'ai.chat.branch.forkSession': {
     'en-US': 'Fork to new session',
     'zh-CN': '从此处新建会话',
+  },
+  'ai.chat.branch.forkSessionHint': {
+    'en-US': 'Copy the history up to this point into a separate new session.',
+    'zh-CN': '把截至此处的历史复制到一个独立的新会话。',
   },
   'ai.chat.branch.notBoundary': {
     'en-US': 'Only ROOT or a closed turn end can branch',
