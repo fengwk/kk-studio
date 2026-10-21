@@ -11,6 +11,7 @@ import fun.fengwk.kkstudio.harness.runtime.interaction.PendingInteraction;
 import fun.fengwk.kkstudio.harness.runtime.interaction.PendingInteractionPage;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.store.UuidOrder;
+import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatRepository;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatSession;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatSessionRepository;
@@ -44,7 +45,7 @@ import java.util.UUID;
  *
  * <p>产品 owner 与根由服务端按来源 Thread 不可变的执行根解析：人工等待用 {@link HarnessRuntime#findRootThreadId}
  * 定位真实执行根，环境等待的根已由 storage 按同一列给出；随后读取根的 Session（Chat）或根 Thread
- * 绑定（Issue+Agent）。两者都无法解析的根不对外暴露，绝不信任客户端传入归属。
+ * 绑定（Issue+Agent）；两者都没有时，控制器或插件发起的独立执行根作为 Agent 任务暴露（无产品页面，只在交互中心处理）。其余无法解析的根不对外暴露， 绝不信任客户端传入归属。
  *
  * <p>两种来源共享同一 {@code (createdAt, id)} 排序键域：人工等待用调用自身坐标，环境等待用组内最早调用的坐标。本用例对两条升序流做 k 路归并，因此可以跨来源、
  * 跨页稳定分页且不重复分组，{@code limit} 只截断可见项；{@code total} 在同过滤条件下分类计数两条流，绝不把首页长度当总数。
@@ -376,6 +377,15 @@ public class InteractionQueryService {
         owner.setIssueTitle(issueTitle(binding.issueId()));
         owner.setAgentName(binding.agentName());
         owner.setRootThreadName(rootThreadName(rootThreadId));
+        return Optional.of(owner);
+      }
+      ThreadSnapshot root = rootSnapshot(rootThreadId);
+      SpawnTrigger trigger = root.thread().spawnTrigger();
+      if (trigger == SpawnTrigger.CONTROLLER || trigger == SpawnTrigger.PLUGIN) {
+        InteractionOwnerDTO owner = new InteractionOwnerDTO();
+        owner.setType("AGENT_TASK");
+        owner.setAgentName(root.entryPath().baseSettings().agentName());
+        owner.setRootThreadName(root.thread().name());
         return Optional.of(owner);
       }
       return Optional.empty();

@@ -88,6 +88,50 @@ describe('InteractionsPage', () => {
     expect(screen.getByRole('button', { name: '刷新' })).toBeEnabled()
   })
 
+  // 测试意图：控制器/插件发起的独立 Agent 任务没有产品页面，其审批仍在交互中心可见、可操作，只标明来源而不提供跳转。
+  it('renders headless agent task approvals with a non-navigating source label', async () => {
+    vi.spyOn(interactionService, 'listInteractions').mockResolvedValue({
+      items: [
+        {
+          type: 'APPROVAL',
+          interactionId: 'int-3',
+          status: 'WAITING_APPROVAL',
+          threadId: 'th-3',
+          rootThreadId: 'th-3',
+          sessionId: 'sess-3',
+          owner: {
+            type: 'AGENT_TASK',
+            chatId: null,
+            chatTitle: null,
+            issueId: null,
+            issueTitle: null,
+            agentName: 'reporter',
+            rootThreadName: '夜间报告',
+          },
+          toolCallId: 'call-3',
+          toolName: 'bash',
+          argumentsJson: '{"command":"ls"}',
+          approvalJson: JSON.stringify({ required: true, reason: '列目录' }),
+          environmentId: null,
+          environmentName: null,
+          waitingCount: null,
+          createTime: '2026-09-27T10:06:00Z',
+        },
+      ],
+      nextCursor: null,
+      total: 1,
+      freshnessAt: null,
+    })
+
+    render(<InteractionsPage />, { wrapper })
+
+    expect(await screen.findByText('夜间报告')).toBeInTheDocument()
+    expect(screen.getByText('reporter')).toBeInTheDocument()
+    expect(screen.getByTitle('Agent 任务')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '允许' })).toBeInTheDocument()
+    expect(mockedNavigate).not.toHaveBeenCalled()
+  })
+
   it('renders error state and retries on button click', async () => {
     let callCount = 0
     const listSpy = vi.spyOn(interactionService, 'listInteractions').mockImplementation(async () => {
