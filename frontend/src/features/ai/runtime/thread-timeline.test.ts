@@ -7,7 +7,12 @@ import type {
   ModelInvocationDTO,
   ToolInvocationDTO,
 } from '@/shared/api/contracts/ai-runtime'
-import type { RealtimeModelStream, RealtimeToolStream } from '@/features/ai/runtime/thread-realtime-state'
+import type {
+  RealtimeModelStream,
+} from '@/features/ai/runtime/thread-realtime/model-stream'
+import type {
+  RealtimeToolStream,
+} from '@/features/ai/runtime/thread-realtime/tool-stream'
 import type { ToolDialogueMessage } from '@/features/ai/runtime/thread-timeline-types'
 import { buildThreadTimeline, isThreadWorking } from '@/features/ai/runtime/thread-timeline'
 

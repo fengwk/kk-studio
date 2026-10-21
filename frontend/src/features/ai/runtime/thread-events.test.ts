@@ -11,7 +11,9 @@ import {
   eventStatusText,
   type ThreadEventRecord,
 } from '@/features/ai/runtime/thread-events'
-import type { RealtimeModelStream } from '@/features/ai/runtime/thread-realtime-state'
+import type {
+  RealtimeModelStream,
+} from '@/features/ai/runtime/thread-realtime/model-stream'
 
 /**
  * Event 投影矩阵（冻结方案）：每个 durable Entry 恰好一条 ThreadEventRecord；

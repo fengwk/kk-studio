@@ -7,8 +7,10 @@ import type {
 import { asRecord, getRecordList, getString, parsePayload } from '@/features/ai/runtime/payload-json'
 import type {
   RealtimeModelStream,
+} from '@/features/ai/runtime/thread-realtime/model-stream'
+import type {
   RealtimeToolStream,
-} from '@/features/ai/runtime/thread-realtime-state'
+} from '@/features/ai/runtime/thread-realtime/tool-stream'
 import {
   contentText,
   formatTurnUsageText,

@@ -12,8 +12,10 @@ import type {
 import { asRecord, getRecordList, getString, parsePayload } from '@/features/ai/runtime/payload-json'
 import type {
   RealtimeModelStream,
+} from '@/features/ai/runtime/thread-realtime/model-stream'
+import type {
   RealtimeToolStream,
-} from '@/features/ai/runtime/thread-realtime-state'
+} from '@/features/ai/runtime/thread-realtime/tool-stream'
 import {
   sameToolCall,
   toolCallIdentity,
@@ -23,7 +25,9 @@ import {
   type ToolApprovalState,
   type ToolDialogueMessage,
 } from '@/features/ai/runtime/thread-timeline-types'
-import { parseToolErrorText } from '@/features/ai/runtime/thread-realtime-state'
+import {
+  parseToolErrorText,
+} from '@/features/ai/runtime/thread-realtime/tool-stream'
 import {
   projectDurableEntry,
   projectToolResultContent,

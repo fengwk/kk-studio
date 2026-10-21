@@ -7,8 +7,10 @@ import {
 import {
   isFailedAttempt,
   type RealtimeModelStream,
+} from '@/features/ai/runtime/thread-realtime/model-stream'
+import {
   type RealtimeToolStream,
-} from '@/features/ai/runtime/thread-realtime-state'
+} from '@/features/ai/runtime/thread-realtime/tool-stream'
 import type { ModelAttemptFailureDTO, ModelInvocationDTO } from '@/shared/api/contracts/ai-runtime'
 
 export function useRealtimeFrameScheduler(

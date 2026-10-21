@@ -1,4 +1,8 @@
-import { isFailedAttempt, type RealtimeModelDelta, type RealtimeModelStream } from '@/features/ai/runtime/thread-realtime-state'
+import {
+  isFailedAttempt,
+  type RealtimeModelDelta,
+  type RealtimeModelStream,
+} from '@/features/ai/runtime/thread-realtime/model-stream'
 import type { ModelAttemptFailureDTO, ModelInvocationDTO } from '@/shared/api/contracts/ai-runtime'
 
 /** 每个 thread:invocation:attempt 保留的已见 eventId 上限；仅 best-effort 防重投递。 */

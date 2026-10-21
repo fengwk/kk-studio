@@ -1,31 +1,35 @@
 import { describe, expect, it } from 'vitest'
 import {
-  boundProcessOutputText,
   isFailedAttempt,
-  isProcessOutputPartial,
   isRealtimeModelDeltaGap,
-  isRealtimeToolStreamActive,
   mergeRealtimeModelStreamAfterCheckpoint,
-  parseProcessOutputDetails,
   parseRealtimeModelCheckpoint,
   parseRealtimeModelDelta,
-  parseRealtimeToolPartial,
   parseStreamCheckpoint,
+  reduceRealtimeModelStream,
+  snapshotModelStream,
+} from '@/features/ai/runtime/thread-realtime/model-stream'
+import {
+  boundProcessOutputText,
+  isProcessOutputPartial,
+  isRealtimeToolStreamActive,
+  parseProcessOutputDetails,
+  parseRealtimeToolPartial,
   parseToolErrorText,
   PROCESS_OUTPUT_MAX_CHARS,
   PROCESS_OUTPUT_MAX_LINES,
   PROCESS_OUTPUT_OMISSION_MARKER,
-  reduceRealtimeModelStream,
   reduceRealtimeToolStream,
-  snapshotModelStream,
   snapshotToolStream,
-} from '@/features/ai/runtime/thread-realtime-state'
+} from '@/features/ai/runtime/thread-realtime/tool-stream'
 import type {
   ModelAttemptFailureDTO,
   ModelInvocationDTO,
   ToolInvocationDTO,
 } from '@/shared/api/contracts/ai-runtime'
-import type { RealtimeToolStream } from '@/features/ai/runtime/thread-realtime-state'
+import type {
+  RealtimeToolStream,
+} from '@/features/ai/runtime/thread-realtime/tool-stream'
 
 describe('thread realtime state', () => {
   it('parses only sequenced model deltas', () => {
