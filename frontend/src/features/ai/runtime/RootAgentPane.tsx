@@ -22,13 +22,9 @@ import { ConflictPresenter } from '@/shared/conflict/ConflictPresenter'
 import { NameRenamePanel } from '@/features/ai/runtime/thread-panel/NameRenamePanel'
 import { BranchGoalPanel } from '@/features/ai/runtime/thread-panel/BranchGoalPanel'
 import { formatThreadStatusLabel } from '@/features/ai/runtime/thread-panel/thread-status-format'
-import {
-  useRootThreadControl,
-  type AgentPaneCapabilities,
-  type AgentPaneDefaults,
-  type BranchRequestInput,
-  type PaneReport,
-} from '@/features/ai/runtime/useRootThreadControl'
+import { sessionSelectionItem, threadSelectionItem } from '@/features/ai/runtime/root-thread/session-selection-items'
+import { useRootThreadControl } from '@/features/ai/runtime/useRootThreadControl'
+import { type AgentPaneCapabilities, type AgentPaneDefaults, type BranchRequestInput, type PaneReport } from '@/features/ai/runtime/root-thread/types'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 import type { AgentRuntimeOwnerDTO } from '@/shared/api/contracts/ai-runtime'
 import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
@@ -403,7 +399,7 @@ export function RootAgentPane({
       return (
         <SelectionPanel
           title={t('ai.chat.selectSession')}
-          items={pane.sessions.map((session) => pane.sessionSelectionItem(session))}
+          items={pane.sessions.map(sessionSelectionItem)}
           loading={pane.sessionsLoading}
           emptyText={t('ai.chat.noSessions')}
           renameLabel={t('ai.runtime.rename.titleAria')}
@@ -430,7 +426,7 @@ export function RootAgentPane({
       return (
         <SelectionPanel
           title={t('ai.chat.selectThread')}
-          items={pane.threads.map((thread) => pane.threadSelectionItem(thread))}
+          items={pane.threads.map(threadSelectionItem)}
           loading={pane.threadsLoading}
           emptyText={t('ai.chat.noThreads')}
           renameLabel={t('ai.runtime.rename.titleAria')}

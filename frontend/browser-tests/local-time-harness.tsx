@@ -3,10 +3,7 @@ import { MemoryRouter } from 'react-router'
 import '@/styles.css'
 import { ChatCard } from '@/features/ai/chat/ChatCard'
 import { SelectionPanel } from '@/features/ai/chat/SelectionPanel'
-import {
-  sessionSelectionItem,
-  threadSelectionItem,
-} from '@/features/ai/runtime/useRootThreadControl'
+import { sessionSelectionItem, threadSelectionItem } from '@/features/ai/runtime/root-thread/session-selection-items'
 import { setLocale } from '@/shared/i18n'
 
 setLocale('zh-CN')

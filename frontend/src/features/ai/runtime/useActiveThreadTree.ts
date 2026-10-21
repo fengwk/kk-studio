@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo } from 'react'
+import { useCallback, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { harnessService } from '@/shared/api/harness-service'
-import { useApplicationEvents } from '@/shared/app-events'
+import { useResourceSync } from '@/shared/app-events/useResourceSync'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { projectThreadTree } from '@/features/ai/runtime/thread-panel/active-thread-tree'
 
@@ -17,7 +17,6 @@ import { projectThreadTree } from '@/features/ai/runtime/thread-panel/active-thr
  */
 export function useActiveThreadTree(boundThreadId: string | null) {
   const queryClient = useQueryClient()
-  const applicationEvents = useApplicationEvents()
   const treeQuery = useQuery({
     queryKey: queryKeys.threads.tree(boundThreadId ?? ''),
     queryFn: async () => {
@@ -39,23 +38,10 @@ export function useActiveThreadTree(boundThreadId: string | null) {
     }
     void queryClient.invalidateQueries({ queryKey: queryKeys.threads.tree(boundThreadId) })
   }, [queryClient, boundThreadId])
-  useEffect(() => {
-    if (actualRootThreadId == null) {
-      return
-    }
-    return applicationEvents.subscribe(
-      { kind: 'tree', id: actualRootThreadId },
-      {
-        onSubscribed: invalidateTree,
-        onEvent: (name) => {
-          if (name === 'changed') {
-            invalidateTree()
-          }
-        },
-        onResync: invalidateTree,
-      },
-    )
-  }, [applicationEvents, invalidateTree, actualRootThreadId])
+  useResourceSync(actualRootThreadId == null ? null : { kind: 'tree', id: actualRootThreadId }, {
+    sync: invalidateTree,
+    syncOn: (name) => name === 'changed',
+  })
   const { rows, historyRows, nodesById, root } = projection
   const activeCount = useMemo(
     () => rows.reduce((count, row) => (row.node.processing ? count + 1 : count), 0),

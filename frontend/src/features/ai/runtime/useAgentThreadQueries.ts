@@ -1,15 +1,15 @@
-import { useEffect, useMemo } from 'react'
+import { useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { agentService } from '@/shared/api/agent-service'
 import { harnessService } from '@/shared/api/harness-service'
 import { toAgentModelViews } from '@/features/ai/catalog'
 import { queryKeys } from '@/shared/lib/query-keys'
-import { readInteractionsChangedRoot, useApplicationEvents } from '@/shared/app-events'
+import { readInteractionsChangedRoot } from '@/shared/app-events'
+import { useResourceSync } from '@/shared/app-events/useResourceSync'
 import { useReadModelFreshnessRecheck } from '@/shared/lib/useReadModelFreshnessRecheck'
 
 export function useAgentThreadQueries(threadId: string) {
   const queryClient = useQueryClient()
-  const applicationEvents = useApplicationEvents()
   const agentsQuery = useQuery({
     queryKey: queryKeys.agents.list,
     queryFn: () => agentService.listAgents(),
@@ -53,26 +53,12 @@ export function useAgentThreadQueries(threadId: string) {
   })
   const earliest = deadlines.length > 0 ? Math.min(...deadlines) / 1000 : null
   useReadModelFreshnessRecheck(queryKeys.threads.snapshot(threadId), earliest)
-  useEffect(() => {
-    if (!hasEnvironmentTools || !rootThreadId) {
-      return
-    }
-    const invalidate = () => {
+  useResourceSync(hasEnvironmentTools && rootThreadId ? { kind: 'interactions' } : null, {
+    sync: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(threadId) })
-    }
-    return applicationEvents.subscribe(
-      { kind: 'interactions' },
-      {
-        onSubscribed: invalidate,
-        onResync: invalidate,
-        onEvent: (name, data) => {
-          if (name === 'changed' && readInteractionsChangedRoot(data) === rootThreadId) {
-            invalidate()
-          }
-        },
-      },
-    )
-  }, [applicationEvents, hasEnvironmentTools, queryClient, rootThreadId, threadId])
+    },
+    syncOn: (name, data) => name === 'changed' && readInteractionsChangedRoot(data) === rootThreadId,
+  })
 
   return {
     agentsQuery,

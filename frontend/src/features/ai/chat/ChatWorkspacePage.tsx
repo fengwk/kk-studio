@@ -10,7 +10,7 @@ import { harnessService } from '@/shared/api/harness-service'
 import { loadPendingAcceptance } from '@/features/ai/runtime/agent-pane'
 import { restoreComposerDraft } from '@/features/ai/composer/composer-draft'
 import { partsKey, trimMessageParts } from '@/features/ai/composer/composer-parts'
-import type { BranchRequestInput, PaneReport } from '@/features/ai/runtime/useRootThreadControl'
+import type { BranchRequestInput, PaneReport } from '@/features/ai/runtime/root-thread/types'
 import {
   applyChatLayout,
   chatPanePosition,

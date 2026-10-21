@@ -1,149 +1,66 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import type { ThreadProjection } from '@/features/ai/runtime/useThreadProjection'
-import {
-  useBoundBranchPanel,
-} from '@/features/ai/runtime/useBoundBranchPanel'
+import { useBoundBranchPanel } from '@/features/ai/runtime/useBoundBranchPanel'
 import { useBoundThreadPanelViews } from '@/features/ai/runtime/useBoundThreadPanelViews'
 import type { ThreadPanelComposerInput } from '@/features/ai/runtime/thread-panel/ThreadPanel'
-import type { ThreadCommand } from '@/features/ai/runtime/thread-panel/thread-commands'
 import {
   materializeAgentBranchDraft,
   materializeBlankBranchDraft,
   type BranchDraft,
 } from '@/features/ai/chat/branch-draft'
-import type {
-  ThreadComposerHandle,
-} from '@/features/ai/runtime/thread-panel'
+import type { ThreadComposerHandle } from '@/features/ai/runtime/thread-panel'
 import {
-  hasMessageContent,
   partsKey,
-  slashQueryOf,
   trimMessageParts,
   type ComposerPart,
 } from '@/features/ai/composer/composer-parts'
 import {
-  clearStoredComposerDraft,
   restoreComposerDraft,
   storeComposerDraft,
 } from '@/features/ai/composer/composer-draft'
 import { hasBlockingModal } from '@/shared/ui/blocking-overlay'
-import { harnessService } from '@/shared/api/harness-service'
-import { chatService } from '@/shared/api/chat-service'
-import {
-  presentConflict,
-  type ConflictPresentation,
-} from '@/shared/conflict/conflict-presenter'
+import type { ConflictPresentation } from '@/shared/conflict/conflict-presenter'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
-import type {
-  AgentCommandBatchResponseDTO,
-  AgentRuntimeOwnerDTO,
-  HarnessSessionEntryDTO,
-  HarnessThreadDTO,
-  HarnessThreadSnapshotDTO,
-  RuntimeSessionSummaryDTO,
-  RuntimeThreadSummaryDTO,
-} from '@/shared/api/contracts/ai-runtime'
+import type { AgentRuntimeOwnerDTO } from '@/shared/api/contracts/ai-runtime'
 import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
-import {
-  buildAcceptanceRequest,
-  buildGoalAcceptanceRequest,
-  isDefiniteAcceptanceFailure,
-  prependFrozenComposerParts,
-  preserveCurrentBranchDraft,
-  acceptanceCompletionApplies,
-  shouldRefreshAfterAcceptanceFailure,
-  type FrozenCommandBatchRequest,
-} from '@/features/ai/runtime/agent-pane/agent-pane-pipeline'
 import {
   parseGoalProgress,
   type BranchGoalProgressResult,
 } from '@/features/ai/runtime/goal-progress'
 import {
-  clearPendingAcceptance,
   isBoundTarget,
   isDraftHistoryTarget,
   isNewThreadTarget,
-  loadPendingAcceptance,
   ownerIdentity,
-  savePendingAcceptance,
   samePaneTarget,
   type PaneTarget,
   type PendingAcceptance,
 } from '@/features/ai/runtime/agent-pane'
 import { threadCommandsForTarget } from '@/features/ai/runtime/thread-panel/thread-commands'
-import { useApplicationEvents } from '@/shared/app-events'
-import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
-import { formatBackendDate } from '@/features/ai/chat/chat-utils'
-import { parsePayload } from '@/features/ai/runtime/payload-json'
-import { normalizeThreadName } from '@/features/ai/chat/thread-name'
-import { threadDraftPath } from '@/features/ai/chat/thread-draft-path'
-import { buildThreadTimeline } from '@/features/ai/runtime/thread-timeline'
-import { buildThreadEventTimeline } from '@/features/ai/runtime/thread-events'
-import { paneTargetViewKey } from './thread-presentation'
-
-export type PaneInteraction =
-  | 'subagent'
-  | 'agent'
-  | 'shortcuts'
-  | 'history'
-  | 'thread-sessions'
-  | 'thread-threads'
-  | 'rename-session'
-  | 'rename-thread'
-  | 'goal'
-  | null
-
-export type RenameKind = 'session' | 'thread'
-
-/**
- * 单输入重命名面板的目标实体。name 是当前权威名称：thread 目标在 bound 快照
- * 就绪后直接得到；session 目标先为 null，owner Sessions 摘要 on-demand 到达后
- * 由 effect 填充。绝不把名称持久化进 PaneTarget。
- */
-export interface RenameTarget {
-  kind: RenameKind
-  id: string
-  /** 当前权威名称；null 表示仍在解析（panel 进入 busy 状态）。 */
-  name: string | null
-  /** 面板关闭后返回的交互；null 表示回到主面板。 */
-  backTo: 'thread-sessions' | 'thread-threads' | null
-}
-
-export interface AgentPaneCapabilities {
-  allowNewSession?: boolean
-  readOnly?: boolean
-  allowSwitchAgent?: boolean
-  allowBranching?: boolean
-}
-
-export interface AgentPaneDefaults {
-  agentName?: string
-  yoloEnabled?: boolean
-  environmentName?: string | null
-}
-
-/** 新建分支请求：命名与目标 pane 由 Chat workspace 统一持有。 */
-export interface BranchRequestInput {
-  sessionId: string
-  startEntryId: string
-  /** 触发分支的 pane 当前分支名（用于目标选择与提示）；未知时为 null。 */
-  sourceLabel: string | null
-}
-
-/**
- * 面板运行时摘要。只用于 workspace 的目标路由（草稿确认/在途阻止）与顶栏面包屑，
- * 不参与任何持久化，也不是跨 pane 的 storage sidechannel。
- */
-export interface PaneReport {
-  target: PaneTarget
-  draftKey: string
-  pending: boolean
-  hasUnsentDraft: boolean
-  sessionId: string | null
-  branchName: string | null
-}
+import { paneTargetViewKey } from '@/features/ai/runtime/thread-presentation'
+import { cloneDraft } from '@/features/ai/runtime/root-thread/branch-draft-replay'
+import {
+  handlePaneCommand,
+  type PaneCommandContext,
+} from '@/features/ai/runtime/root-thread/pane-command-handler'
+import { usePaneAcceptance } from '@/features/ai/runtime/root-thread/usePaneAcceptance'
+import { usePaneBackgroundProjection } from '@/features/ai/runtime/root-thread/usePaneBackgroundProjection'
+import {
+  usePaneDraftHistory,
+  usePaneNavigationQueries,
+} from '@/features/ai/runtime/root-thread/usePaneHistory'
+import { usePaneNavigation } from '@/features/ai/runtime/root-thread/usePaneNavigation'
+import { usePaneRename } from '@/features/ai/runtime/root-thread/usePaneRename'
+import type {
+  AgentPaneCapabilities,
+  AgentPaneDefaults,
+  BranchRequestInput,
+  PaneInteraction,
+  PaneReport,
+  RenameKind,
+  RenameTarget,
+} from '@/features/ai/runtime/root-thread/types'
 
 export interface UseRootThreadControlOptions {
   owner?: AgentRuntimeOwnerDTO
@@ -195,8 +112,6 @@ export function useRootThreadControl({
   onOpenIde,
 }: UseRootThreadControlOptions) {
   const { t } = useI18n()
-  const queryClient = useQueryClient()
-  const applicationEvents = useApplicationEvents()
   const ownerKey = owner ? ownerIdentity(owner) : null
   const composerScope = ownerKey
     ? `agent-pane:${ownerKey}:${paneId}`
@@ -207,19 +122,7 @@ export function useRootThreadControl({
   const [parts, setPartsState] = useState<ComposerPart[]>(
     () => restoreComposerDraft(composerScope, []),
   )
-  const [pendingAcceptance, setPendingAcceptance] = useState<PendingAcceptance | null>(
-    () => {
-      if (!owner) {
-        return null
-      }
-      const pending = loadPendingAcceptance(owner, paneId)
-      return pending == null ? null : { ...pending, unknownOutcome: true }
-    },
-  )
   const [interaction, setInteraction] = useState<PaneInteraction>(null)
-  const [renameTarget, setRenameTargetState] = useState<RenameTarget | null>(null)
-  const [renamePending, setRenamePending] = useState(false)
-  const [renameError, setRenameError] = useState<string | null>(null)
   const [threadNavigationSessionId, setThreadNavigationSessionId] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [conflict, setConflict] = useState<ConflictPresentation | null>(null)
@@ -231,19 +134,12 @@ export function useRootThreadControl({
   }, [target])
   const partsRef = useRef(parts)
   const localDraftRef = useRef<BranchDraft | null>(localDraft)
-  const initializedEntryDraftRef = useRef<string | null>(null)
-  const pendingAcceptanceRef = useRef<PendingAcceptance | null>(pendingAcceptance)
-  const renameTargetRef = useRef<RenameTarget | null>(null)
+  const pendingAcceptanceRef = useRef<PendingAcceptance | null>(null)
   // rename PUT 在途栅栏：state commit 前也能让 changeTarget/handleCommand 看到
   // 重命名正在进行，从而阻塞外部 target 切换与并发命令（与 pendingAcceptance
   // 同栅栏，不持久化、不改变 pendingAcceptance 渲染语义）。
   const renamePendingRef = useRef(false)
   const generationRef = useRef(0)
-  const previousBoundThreadRef = useRef<string | null>(null)
-  const backgroundSubscriptionRef = useRef<{
-    threadId: string
-    unsubscribe: () => void
-  } | null>(null)
 
   const isMountedRef = useRef(true)
   useEffect(() => {
@@ -257,7 +153,6 @@ export function useRootThreadControl({
   const setFocusIntent = useCallback((next: PaneTarget | null) => {
     onFocusTargetChange?.(next)
   }, [onFocusTargetChange])
-
   const boundThreadId = isBoundTarget(target) ? target.threadId : ''
 
   // 视图身份：绑定 Thread 用 threadId，本地分支草稿用
@@ -269,12 +164,6 @@ export function useRootThreadControl({
     projection,
   })
   const controller = branchPanel.controller
-  const controllerRef = useRef(controller)
-  const branchPanelRef = useRef(branchPanel)
-  useEffect(() => {
-    controllerRef.current = controller
-    branchPanelRef.current = branchPanel
-  })
   const activeDraft = isBoundTarget(target) ? branchPanel.draft ?? null : localDraft
   const boundThreadName = isBoundTarget(target) && controller.thread?.threadId === target.threadId
     ? controller.thread.name
@@ -288,10 +177,6 @@ export function useRootThreadControl({
   useEffect(() => {
     localDraftRef.current = localDraft
   }, [localDraft])
-
-  useEffect(() => {
-    pendingAcceptanceRef.current = pendingAcceptance
-  }, [pendingAcceptance])
 
   useEffect(() => {
     if (isBoundTarget(target)) {
@@ -323,69 +208,7 @@ export function useRootThreadControl({
     }
   }, [agents, defaults.agentName, defaults.environmentName, defaults.yoloEnabled, localDraft, models, target])
 
-  /**
-   * Retain at most one inactive running Thread projection. The active Thread
-   * owns its realtime subscription in useHarnessThreadRealtime; an inactive
-   * terminal Thread never gets a background listener.
-   */
-  useEffect(() => {
-    const previous = previousBoundThreadRef.current
-    if (previous == null || previous === boundThreadId) {
-      previousBoundThreadRef.current = boundThreadId || null
-      return
-    }
-    const currentBackground = backgroundSubscriptionRef.current
-    if (currentBackground != null && currentBackground.threadId !== previous) {
-      currentBackground.unsubscribe()
-      backgroundSubscriptionRef.current = null
-    }
-    if (backgroundSubscriptionRef.current == null) {
-      const snapshot = queryClient.getQueryData<HarnessThreadSnapshotDTO>(
-        queryKeys.threads.snapshot(previous),
-      )
-      if (needsBackgroundProjection(snapshot)) {
-        const threadId = previous
-        let unsubscribe: () => void = () => undefined
-        const refresh = () => {
-          const refreshPromise = queryClient.invalidateQueries({
-            queryKey: queryKeys.threads.snapshot(threadId),
-          })
-          void refreshPromise.then(() => {
-            const latest = queryClient.getQueryData<HarnessThreadSnapshotDTO>(
-              queryKeys.threads.snapshot(threadId),
-            )
-            if (!needsBackgroundProjection(latest)
-              && backgroundSubscriptionRef.current?.threadId === threadId) {
-              unsubscribe()
-              backgroundSubscriptionRef.current = null
-            }
-          })
-        }
-        if (applicationEvents != null) {
-          unsubscribe = applicationEvents.subscribe(
-            { kind: 'thread', id: threadId },
-            {
-              onSubscribed: refresh,
-              onEvent: (name) => {
-                if (name === 'version') {
-                  refresh()
-                }
-              },
-              onResync: refresh,
-              onError: refresh,
-            },
-          )
-          backgroundSubscriptionRef.current = { threadId, unsubscribe }
-        }
-      }
-    }
-    previousBoundThreadRef.current = boundThreadId || null
-  }, [applicationEvents, boundThreadId, queryClient])
-
-  useEffect(() => () => {
-    backgroundSubscriptionRef.current?.unsubscribe()
-    backgroundSubscriptionRef.current = null
-  }, [])
+  usePaneBackgroundProjection(boundThreadId)
 
   const currentSessionId = isBoundTarget(target)
     ? controller.sessionId
@@ -397,323 +220,28 @@ export function useRootThreadControl({
   const historySessionId = isDraftHistoryTarget(target)
     ? target.sessionId
     : threadNavigationSessionId ?? currentSessionId
-  const sessionsQuery = useQuery<RuntimeSessionSummaryDTO[]>({
-    queryKey: ['agent-pane', 'sessions', ownerKey],
-    queryFn: () => {
-      if (!owner) {
-        return Promise.resolve([])
-      }
-      if (owner.type === 'CHAT') {
-        return chatService.listChatSessions(owner.chatId)
-      }
-      return Promise.resolve([])
-    },
-    enabled: owner?.type === 'CHAT' && (interaction === 'thread-sessions' || interaction === 'rename-session'),
+  const { sessionsQuery, threadsQuery, treeEntriesQuery } = usePaneNavigationQueries({
+    owner,
+    ownerKey,
+    target,
+    interaction,
+    threadNavigationSessionId,
+    historySessionId,
   })
-  const threadsQuery = useQuery({
-    queryKey: ['agent-pane', 'threads', threadNavigationSessionId],
-    queryFn: () => harnessService.listSessionThreads(threadNavigationSessionId!),
-    enabled: interaction === 'thread-threads' && threadNavigationSessionId != null,
-  })
-  const treeEntriesQuery = useQuery({
-    queryKey: ['agent-pane', 'entries', historySessionId],
-    queryFn: () => harnessService.listSessionEntries(historySessionId!),
-    enabled:
-      (interaction === 'history' || isDraftHistoryTarget(target))
-      && historySessionId != null,
-  })
-
-  const draftHistory = useMemo(() => {
-    if (!isDraftHistoryTarget(target) || treeEntriesQuery.data == null || treeEntriesQuery.isError) {
-      return { entries: [], error: null }
-    }
-    try {
-      return { entries: threadDraftPath(treeEntriesQuery.data, target.sessionId, target.startEntryId), error: null }
-    } catch {
-      return { entries: [], error: new Error(t('ai.chat.branch.historyInvalid')) }
-    }
-  }, [target, treeEntriesQuery.data, treeEntriesQuery.isError, t])
-  const draftHistoryReady = !isDraftHistoryTarget(target)
-    || (treeEntriesQuery.data != null && !treeEntriesQuery.isError && draftHistory.error == null)
-  const draftTimeline = useMemo(() => buildThreadTimeline(draftHistory.entries, [], []), [draftHistory.entries])
-  const draftEvents = useMemo(() => buildThreadEventTimeline({
-    entries: draftHistory.entries,
-    modelInvocation: null,
-    toolInvocations: [],
-    modelAttemptFailures: [],
-    modelStream: null,
-    toolStreams: null,
-  }), [draftHistory.entries])
-
-  const entryBaseDraft = useMemo(() => {
-    if (!isDraftHistoryTarget(target)) {
-      return activeDraft
-    }
-    if (!draftHistoryReady) {
-      return null
-    }
-    return draftHistory.entries.reduce<BranchDraft | null>((draft, entry) => branchDraftFromEntry(entry, draft), activeDraft)
-  }, [activeDraft, target, draftHistory, draftHistoryReady])
-
-  useEffect(() => {
-    if (!isDraftHistoryTarget(target) || treeEntriesQuery.data == null || entryBaseDraft == null) {
-      return
-    }
-    const identity = `${target.sessionId}:${target.startEntryId}`
-    if (initializedEntryDraftRef.current === identity) {
-      return
-    }
-    initializedEntryDraftRef.current = identity
-    setLocalDraft(cloneDraft(entryBaseDraft))
-  }, [entryBaseDraft, target, treeEntriesQuery.data])
-
-  // session 重命名面板的 on-demand 名称解析：打开时可能尚无 owner sessions
-  // 摘要；摘要到达后填充到 renameTarget.name（面板据此预填一次）。摘要加载
-  // 失败或已成功但不含目标（并发删除/权限变化）都会终止 busy 态并提示错误，
-  // 绝不把面板留在永久 busy。
-  const sessionsLoadFailed = sessionsQuery.isError
-    ? errorMessage(sessionsQuery.error, t('ai.runtime.action.requestFailed'))
-    : null
-  useEffect(() => {
-    if (renameTarget == null || renameTarget.kind !== 'session' || renameTarget.name != null) {
-      return
-    }
-    if (sessionsQuery.isError) {
-      setRenameTargetState((current) =>
-        current != null && current.kind === 'session' && current.name == null
-          ? { ...current, name: '' }
-          : current,
-      )
-      setRenameError(sessionsLoadFailed ?? t('ai.runtime.action.requestFailed'))
-      return
-    }
-    if (sessionsQuery.data == null) {
-      return
-    }
-    const summary = sessionsQuery.data.find((item) => item.sessionId === renameTarget.id)
-    if (summary != null) {
-      setRenameTargetState((current) =>
-        current != null && current.id === renameTarget.id ? { ...current, name: summary.name } : current,
-      )
-      return
-    }
-    // 摘要已成功加载但目标不存在：名称无法解析，结束 busy 并提示。
-    setRenameTargetState((current) =>
-      current != null && current.kind === 'session' && current.name == null
-        ? { ...current, name: '' }
-        : current,
-    )
-    setRenameError(t('ai.runtime.rename.sessionUnavailable'))
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- t 是稳定 useCallback。
-  }, [renameTarget, sessionsQuery.data, sessionsQuery.isError, sessionsLoadFailed])
+  const {
+    draftHistory,
+    draftHistoryReady,
+    draftTimeline,
+    draftEvents,
+    entryBaseDraft,
+    resetEntryDraftInit,
+  } = usePaneDraftHistory({ target, treeEntriesQuery, activeDraft, setLocalDraft })
 
   const setParts = useCallback((next: ComposerPart[]) => {
     partsRef.current = next
     storeComposerDraft(composerScope, next)
     setPartsState(next)
   }, [composerScope])
-
-  /** 打开指定 kind 的单输入重命名面板。name 为空/未知时为 null（解析态）。 */
-  function openRename(
-    kind: RenameKind,
-    id: string,
-    name: string | null,
-    backTo: RenameTarget['backTo'] = null,
-  ): void {
-    setRenameTargetState({ kind, id, name, backTo })
-    setRenameError(null)
-    setRenamePending(false)
-    setInteraction(kind === 'session' ? 'rename-session' : 'rename-thread')
-  }
-
-  /** 当前 target 可重命名的实体；不可用返回 null（矩阵保证可达才调用）。 */
-  function renameTargetOf(kind: RenameKind): { id: string; name: string | null } | null {
-    if (kind === 'thread') {
-      if (isNewThreadTarget(target)) {
-        return { id: target.sessionId, name: target.threadName }
-      }
-      if (isBoundTarget(target) && controller.thread?.threadId === target.threadId) {
-        return { id: target.threadId, name: controller.thread.name }
-      }
-      return null
-    }
-    if (isNewThreadTarget(target)) {
-      const summary = sessionsQuery.data?.find((item) => item.sessionId === target.sessionId)
-      return { id: target.sessionId, name: summary?.name ?? null }
-    }
-    if (isBoundTarget(target) && controller.sessionId) {
-      const summary = sessionsQuery.data?.find((item) => item.sessionId === controller.sessionId)
-      return { id: controller.sessionId, name: summary?.name ?? null }
-    }
-    return null
-  }
-
-  function openRenameForTarget(kind: RenameKind): void {
-    if (hasPendingOperation()) {
-      setActionError(t('ai.runtime.action.operationPending'))
-      return
-    }
-    const targetEntity = renameTargetOf(kind)
-    if (targetEntity == null) {
-      setActionError(kind === 'thread'
-        ? t('ai.runtime.rename.threadUnavailable')
-        : t('ai.runtime.rename.sessionUnavailable'))
-      return
-    }
-    openRename(kind, targetEntity.id, targetEntity.name)
-  }
-
-  function closeRename(): void {
-    if (renamePendingRef.current) {
-      return
-    }
-    const backTo = renameTarget?.backTo ?? null
-    renameTargetRef.current = null
-    renamePendingRef.current = false
-    setRenameTargetState(null)
-    setRenameError(null)
-    setRenamePending(false)
-    // 从 Session/Thread picker 行内进入时，关闭后返回该 picker。
-    setInteraction(backTo)
-  }
-
-  async function submitRename(name: string): Promise<void> {
-    if (renameTarget == null || renamePendingRef.current || hasPendingOperation()) {
-      return
-    }
-    const trimmed = normalizeThreadName(name)
-    if (trimmed == null) {
-      setRenameError(t('ai.runtime.rename.nameRequired'))
-      return
-    }
-    setRenameError(null)
-    setRenamePending(true)
-    renamePendingRef.current = true
-    const current = renameTarget
-    renameTargetRef.current = current
-    try {
-      if (current.kind === 'thread' && isNewThreadTarget(target)) {
-        const frozenTarget = target
-        const nameError = onValidateDraftName == null
-          ? t('ai.chat.branch.nameCheckFailed')
-          : await onValidateDraftName(frozenTarget, trimmed)
-        if (!isMountedRef.current || renameTargetRef.current !== current
-          || !samePaneTarget(targetRef.current, frozenTarget)) {
-          return
-        }
-        if (nameError != null) {
-          renamePendingRef.current = false
-          setRenamePending(false)
-          setRenameError(nameError)
-          return
-        }
-        const next = { ...target, threadName: trimmed }
-        targetRef.current = next
-        setTarget(next)
-        generationRef.current += 1
-        renamePendingRef.current = false
-        closeRename()
-        setActionError(null)
-        setFocusIntent(next)
-        return
-      }
-      if (current.kind === 'session') {
-        const renamed = await harnessService.renameSession(current.id, { name: trimmed })
-        if (renameTargetRef.current !== current) {
-          return
-        }
-        patchSessionNameCache(current.id, renamed.name)
-      } else {
-        const renamed = await harnessService.renameThread(current.id, { name: trimmed })
-        if (renameTargetRef.current !== current) {
-          return
-        }
-        patchThreadNameCache(current.id, renamed)
-      }
-      await invalidateAfterRename(current)
-      renamePendingRef.current = false
-      closeRename()
-    } catch (error) {
-      if (renameTargetRef.current !== current) {
-        return
-      }
-      renamePendingRef.current = false
-      setRenameError(errorMessage(error, t('ai.runtime.rename.failed')))
-      setRenamePending(false)
-    }
-  }
-
-  /**
-   * 更新已加载缓存中的 Session 名称（owner session summaries）。保持简单：
-   * 直接 setQueryData 到已存在的 key，随后 invalidateAfterRename 做必要失效。
-   */
-  function patchSessionNameCache(sessionId: string, name: string): void {
-    if (!ownerKey) {
-      return
-    }
-    for (const [key, data] of queryClient.getQueriesData<RuntimeSessionSummaryDTO[]>({
-      queryKey: ['agent-pane', 'sessions', ownerKey],
-    })) {
-      if (data == null) {
-        continue
-      }
-      queryClient.setQueryData<RuntimeSessionSummaryDTO[]>(
-        key,
-        data.map((item) => item.sessionId === sessionId ? { ...item, name } : item),
-      )
-    }
-  }
-
-  /** 重命名成功后失效相应查询：Session 摘要、Thread 投影与 Chat 列表。 */
-  async function invalidateAfterRename(target: RenameTarget): Promise<void> {
-    await Promise.all([
-      ...(ownerKey
-        ? [
-            queryClient.invalidateQueries({
-              queryKey: ['agent-pane', 'sessions', ownerKey],
-            }),
-          ]
-        : []),
-      ...(target.kind === 'thread'
-        ? [
-            queryClient.invalidateQueries({
-              queryKey: ['agent-pane', 'threads'],
-            }),
-            queryClient.invalidateQueries({
-              queryKey: queryKeys.threads.snapshot(target.id),
-            }),
-          ]
-        : []),
-      queryClient.invalidateQueries({ queryKey: queryKeys.chats.all }),
-    ])
-  }
-
-  /**
-   * 把 Thread 重命名成功响应 patch 进已加载的 snapshot/thread summary 缓存：
-   * snapshot cache 的 thread 本体直接采纳权威响应（含规范化的 name）；thread
-   * summary 只更新 name 字段。之后 invalidateAfterRename 会按需重新拉取权威数据。
-   */
-  function patchThreadNameCache(threadId: string, thread: HarnessThreadDTO): void {
-    const snapshotKey = queryKeys.threads.snapshot(threadId)
-    const snapshot = queryClient.getQueryData<HarnessThreadSnapshotDTO>(snapshotKey)
-    if (snapshot != null && snapshot.thread.threadId === threadId) {
-      queryClient.setQueryData<HarnessThreadSnapshotDTO>(
-        snapshotKey,
-        { ...snapshot, thread },
-      )
-    }
-    for (const [key, data] of queryClient.getQueriesData<RuntimeThreadSummaryDTO[]>({
-      queryKey: ['agent-pane', 'threads'],
-    })) {
-      if (data == null) {
-        continue
-      }
-      queryClient.setQueryData<RuntimeThreadSummaryDTO[]>(
-        key,
-        data.map((item) => item.threadId === threadId ? { ...item, name: thread.name } : item),
-      )
-    }
-  }
 
   /** 事件同步栅栏：state commit 前也能看到刚写入 pendingAcceptanceRef。 */
   const hasPendingOperation = useCallback((): boolean => {
@@ -736,6 +264,26 @@ export function useRootThreadControl({
     controller.stopReplayPending,
   ])
 
+  const rename = usePaneRename({
+    ownerKey,
+    target,
+    targetRef,
+    setTarget,
+    setFocusIntent,
+    generationRef,
+    isMountedRef,
+    renamePendingRef,
+    boundThread: controller.thread == null
+      ? null
+      : { threadId: controller.thread.threadId, name: controller.thread.name },
+    boundSessionId: controller.sessionId || null,
+    sessionsQuery,
+    hasPendingOperation,
+    setInteraction,
+    setActionError,
+    onValidateDraftName,
+  })
+
   const changeTarget = useCallback(
     (next: PaneTarget, draft: BranchDraft | null = activeDraft): boolean => {
       // 容器与列表属于 owner 范围：无 owner 的面板没有可导航的 Session/Thread 容器。
@@ -747,7 +295,7 @@ export function useRootThreadControl({
         return false
       }
       generationRef.current += 1
-      initializedEntryDraftRef.current = null
+      resetEntryDraftInit()
       targetRef.current = next
       setTarget(next)
       setFocusIntent(next)
@@ -758,6 +306,8 @@ export function useRootThreadControl({
       setConflict(null)
       return true
     },
+    // resetEntryDraftInit 只写 ref，身份每次渲染变化但语义稳定。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [activeDraft, hasPendingOperation, owner, setTarget, setFocusIntent, t],
   )
 
@@ -796,392 +346,38 @@ export function useRootThreadControl({
     }
   }, [applyExternalTarget, hasPendingOperation, initialTarget, onTargetConsumed, t, target])
 
-  function abandonPendingAcceptance(): void {
-    const pending = pendingAcceptanceRef.current
-    if (pending != null) {
-      setParts(prependFrozenComposerParts(pending.composerParts, partsRef.current))
-      setLocalDraft(preserveCurrentBranchDraft(pending.branchDraft, localDraftRef.current))
-    }
-    generationRef.current += 1
-    pendingAcceptanceRef.current = null
-    setPendingAcceptance(null)
-    if (owner) {
-      clearPendingAcceptance(owner, paneId)
-    }
-    setActionError(null)
-    setConflict(null)
-  }
-
-  function makePending(frozen: FrozenCommandBatchRequest): PendingAcceptance {
-    return {
-      owner: owner ? { ...owner } : { type: 'CHAT', chatId: '' },
-      target: frozen.target,
-      request: frozen.request,
-      branchDraft: frozen.branchDraft,
-      composerParts: frozen.composerParts,
-      generation: generationRef.current,
-      unknownOutcome: false,
-    }
-  }
-
-  function startAcceptance(frozen: FrozenCommandBatchRequest): void {
-    const pending = makePending(frozen)
-    pendingAcceptanceRef.current = pending
-    setPendingAcceptance(pending)
-    if (owner) {
-      savePendingAcceptance(owner, paneId, pending)
-    }
-    setParts([])
-    void submitFrozenAcceptance(pending)
-  }
-
-  function startGoalAcceptance(frozen: FrozenCommandBatchRequest): void {
-    const pending = makePending(frozen)
-    pendingAcceptanceRef.current = pending
-    setPendingAcceptance(pending)
-    if (owner) {
-      savePendingAcceptance(owner, paneId, pending)
-    }
-    void submitFrozenAcceptance(pending)
-  }
-
-  function submitGoal(
-    goalText: string | null,
-    options?: {
-      localParts?: ComposerPart[]
-    },
-  ): void {
-    if (capabilities?.readOnly) {
-      return
-    }
-    if (hasPendingOperation()) {
-      setActionError(t('ai.runtime.action.operationPending'))
-      return
-    }
-    // 既有 Thread 走通用 thread command batch：与普通消息共用同一 CAS 游标与未决重试通道。
-    if (isBoundTarget(target)) {
-      onFocus?.()
-      void controller.submitGoal(goalText)
-      setInteraction(null)
-      return
-    }
-    if (!owner) {
-      return
-    }
-    const effectiveBase = entryBaseDraft
-    const draft = activeDraft
-    if (!draft || !effectiveBase || !draftHistoryReady) {
-      setActionError(t('ai.runtime.action.threadNotLoaded'))
-      return
-    }
-    try {
-      const frozenParts = options?.localParts ?? parts
-      const frozen = buildGoalAcceptanceRequest({
-        owner,
-        target,
-        draft,
-        base: effectiveBase,
-        goalText,
-        localParts: frozenParts,
-      })
-      onFocus?.()
-      startGoalAcceptance(frozen)
-      setInteraction(null)
-    } catch (error) {
-      setActionError(errorMessage(error, t('ai.runtime.goal.submitFailed')))
-    }
-  }
-
-  function clearGoal(): void {
-    submitGoal(null)
-  }
-
-  async function invalidateAcceptanceResult(threadId: string): Promise<void> {
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(threadId) }),
-      ...(ownerKey
-        ? [
-            queryClient.invalidateQueries({
-              queryKey: ['agent-pane', 'sessions', ownerKey],
-            }),
-          ]
-        : []),
-    ])
-  }
-
-  /**
-   * 验收成功后、切目标之前把权威 Thread 状态放进 snapshot 缓存。
-   *
-   * 新 Session 没有历史；新 Thread 沿用已验证的闭合前缀，直到 invalidate 取回
-   * 权威快照。已有缓存的 Thread（重放）保持原样，不覆盖已加载的 Entry。
-   */
-  function seedAcceptedThreadSnapshot(
-    client: QueryClient,
-    response: AgentCommandBatchResponseDTO,
-  ): void {
-    const key = queryKeys.threads.snapshot(response.thread.threadId)
-    if (client.getQueryData<HarnessThreadSnapshotDTO>(key) != null) {
-      return
-    }
-    client.setQueryData<HarnessThreadSnapshotDTO>(key, {
-      version: response.thread.version,
-      thread: response.thread,
-      entries: isDraftHistoryTarget(targetRef.current) ? draftHistory.entries : [],
-      queuedCommands: response.acceptedCommands,
-      modelInvocation: null,
-      toolInvocations: [],
-      modelAttemptFailures: [],
-      manualCompaction: { available: false, disabledReason: null },
-      stopReceipts: [],
-    })
-  }
-
-  async function submitFrozenAcceptance(pending: PendingAcceptance): Promise<void> {
-    try {
-      const response = await harnessService.acceptCommandBatch(pending.request)
-      const stillActive = acceptanceCompletionApplies(
-        targetRef.current,
-        pending,
-        generationRef.current,
-      )
-      if (!stillActive) {
-        await invalidateAcceptanceResult(response.thread.threadId)
-        return
-      }
-      pendingAcceptanceRef.current = null
-      setPendingAcceptance(null)
-      if (owner) {
-        clearPendingAcceptance(owner, paneId)
-      }
-      generationRef.current += 1
-      const bound: PaneTarget = { kind: 'BOUND_THREAD', threadId: response.thread.threadId }
-      // 先种快照、再切目标：目标切换与执行根身份落在同一次 commit，根控制面（草稿与
-      // 上传注册表）不会因为身份未知而瞬间卸载重建。
-      seedAcceptedThreadSnapshot(queryClient, response)
-      targetRef.current = bound
-      setTarget(bound)
-      setFocusIntent(bound)
-      if (partsRef.current.length === 0) {
-        clearStoredComposerDraft(composerScope)
-        setPartsState([])
-      } else {
-        storeComposerDraft(composerScope, partsRef.current)
-      }
-      await invalidateAcceptanceResult(response.thread.threadId)
-    } catch (error) {
-      const currentPending = pendingAcceptanceRef.current
-      const stillActive = currentPending != null
-        && acceptanceCompletionApplies(
-          targetRef.current,
-          pending,
-          generationRef.current,
-        )
-      if (!stillActive) {
-        return
-      }
-      if (!isDefiniteAcceptanceFailure(error)) {
-        const unknown = { ...pending, unknownOutcome: true }
-        setPendingAcceptance(unknown)
-        if (owner) {
-          savePendingAcceptance(owner, paneId, unknown)
-        }
-        setActionError(errorMessage(error, t('ai.runtime.action.requestFailed')))
-        return
-      }
-      pendingAcceptanceRef.current = null
-      setPendingAcceptance(null)
-      if (owner) {
-        clearPendingAcceptance(owner, paneId)
-      }
-      setParts(prependFrozenComposerParts(pending.composerParts, partsRef.current))
-      setLocalDraft(preserveCurrentBranchDraft(pending.branchDraft, localDraftRef.current))
-      const presented = presentConflict(error)
-      if (presented?.reason === 'THREAD_NAME_CONFLICT' && isNewThreadTarget(targetRef.current)) {
-        openRename('thread', targetRef.current.sessionId, targetRef.current.threadName)
-        setRenameError(t('ai.chat.branch.nameConflict'))
-      } else if (presented != null) {
-        setConflict(presented)
-      } else {
-        setActionError(errorMessage(error, t('ai.runtime.action.firstSendFailed')))
-      }
-      if (shouldRefreshAfterAcceptanceFailure(error)) {
-        await refreshPaneProjection()
-      }
-    }
-  }
-
-  function retryAcceptance(): void {
-    if (pendingAcceptance == null) {
-      return
-    }
-    const retry = { ...pendingAcceptance, unknownOutcome: false }
-    setActionError(null)
-    setConflict(null)
-    pendingAcceptanceRef.current = retry
-    setPendingAcceptance(retry)
-    if (owner) {
-      savePendingAcceptance(owner, paneId, retry)
-    }
-    void submitFrozenAcceptance(retry)
-  }
-
-  function handleSubmit(payloadParts?: ComposerPart[], localDraftParts?: ComposerPart[]) {
-    if (capabilities?.readOnly) {
-      return
-    }
-    if (isBoundTarget(target)) {
-      void controller.submitMessage(payloadParts, localDraftParts)
-      return
-    }
-    if (!owner) {
-      return
-    }
-    if (hasPendingOperation()) {
-      setActionError(t('ai.runtime.action.operationPending'))
-      return
-    }
-    const payload = trimMessageParts(payloadParts ?? parts)
-    if (
-      !hasMessageContent(payload)
-      || slashQueryOf(payload) != null
-      || activeDraft == null
-      || !draftHistoryReady
-      || entryBaseDraft == null
-    ) {
-      return
-    }
-    try {
-      const frozen = buildAcceptanceRequest({
-        owner,
-        target,
-        draft: activeDraft,
-        base: entryBaseDraft,
-        parts: payload,
-        localParts: trimMessageParts(localDraftParts ?? parts),
-      })
-      onFocus?.()
-      startAcceptance(frozen)
-    } catch (error) {
-      setActionError(errorMessage(error, t('ai.runtime.action.firstSendFailed')))
-    }
-  }
-
-  function handleCommand(command: ThreadCommand): void {
-    onFocus?.()
-    if (command.disabled) {
-      if (command.disabledReason) {
-        setActionError(command.disabledReason)
-      }
-      return
-    }
-    switch (command.id) {
-      case 'thread':
-        if (capabilities?.allowBranching === false) {
-          setActionError(t('ai.runtime.action.branchingDisabled'))
-          return
-        }
-        if (hasPendingOperation()) {
-          setActionError(t('ai.runtime.action.operationPending'))
-          return
-        }
-        setInteraction('thread-sessions')
-        return
-      case 'history':
-        if (capabilities?.allowBranching === false) {
-          setActionError(t('ai.runtime.action.branchingDisabled'))
-          return
-        }
-        if (hasPendingOperation()) {
-          setActionError(t('ai.runtime.action.operationPending'))
-          return
-        }
-        if (historySessionId == null) {
-          setActionError(t('ai.runtime.action.threadNotLoaded'))
-          return
-        }
-        setInteraction('history')
-        return
-      case 'new':
-        if (capabilities?.readOnly) {
-          return
-        }
-        if (capabilities?.allowBranching === false) {
-          setActionError(t('ai.runtime.action.branchingDisabled'))
-          return
-        }
-        if (capabilities?.allowNewSession === false) {
-          if (currentSessionId && rootEntryId) {
-            requestBranch({
-              sessionId: currentSessionId,
-              startEntryId: rootEntryId,
-              sourceLabel: boundThreadName,
-            })
-            return
-          }
-          if (!currentSessionId) {
-            changeTarget({ kind: 'NEW_SESSION_DRAFT' }, activeDraft)
-          }
-          return
-        }
-        changeTarget({ kind: 'NEW_SESSION_DRAFT' }, activeDraft)
-        return
-      case 'agent':
-        if (capabilities?.allowSwitchAgent === false) {
-          setActionError(t('ai.runtime.action.agentSwitchDisabled'))
-          return
-        }
-        setInteraction('agent')
-        return
-      case 'yolo':
-        if (isBoundTarget(target)) {
-          branchPanel.setYoloEnabled(!(branchPanel.draft?.yoloEnabled ?? false))
-        } else {
-          setLocalDraft((current) =>
-            current ? { ...current, yoloEnabled: !current.yoloEnabled } : current,
-          )
-        }
-        return
-      case 'debug':
-        // 已绑定 Thread 与本地分支/会话 fork 草稿都从各自的 Debug 视图退出/进入：草稿没有绑定
-        // Thread，Debug 视图以只读覆盖方式展示（绝不为此创建 Thread）。
-        if (isBoundTarget(target) || isDraftHistoryTarget(target)) {
-          boundViews.switchMode(boundViews.mode === 'debug' ? 'conversation' : 'debug')
-        }
-        return
-      case 'subagent':
-        if (isBoundTarget(target)) {
-          setInteraction('subagent')
-        }
-        return
-      case 'shortcuts':
-        setInteraction('shortcuts')
-        return
-      case 'rename-session':
-        openRenameForTarget('session')
-        return
-      case 'rename-thread':
-        openRenameForTarget('thread')
-        return
-      case 'goal':
-        setInteraction('goal')
-        return
-      case 'compact':
-        controller.runCommand(command)
-        return
-      case 'stop':
-        controller.runCommand(command)
-        return
-      case 'files':
-        onOpenIde?.({ mode: 'files' })
-        return
-      case 'shell':
-        onOpenIde?.({ mode: 'shell' })
-        return
-      case 'models':
-      case 'upload':
-        return
-    }
-  }
+  const acceptance = usePaneAcceptance({
+    owner,
+    ownerKey,
+    paneId,
+    target,
+    targetRef,
+    setTarget,
+    setFocusIntent,
+    capabilities,
+    onFocus,
+    generationRef,
+    pendingAcceptanceRef,
+    composerScope,
+    parts,
+    partsRef,
+    setParts,
+    setPartsState,
+    localDraftRef,
+    setLocalDraft,
+    activeDraft,
+    entryBaseDraft,
+    draftHistoryReady,
+    draftHistoryEntries: draftHistory.entries,
+    boundSubmit: controller,
+    hasPendingOperation,
+    setActionError,
+    setConflict,
+    setInteraction,
+    openRename: rename.openRename,
+    setRenameError: rename.setRenameError,
+  })
+  const { pendingAcceptance, submitGoal } = acceptance
 
   function selectAgent(agentName: string): void {
     if (capabilities?.allowSwitchAgent === false) {
@@ -1217,108 +413,21 @@ export function useRootThreadControl({
     setActionError(null)
   }
 
-  /**
-   * 统一的“从此处分支”入口：分支名称与目标 pane 由 Chat workspace 决定，
-   * 本 pane 只请求，不本地改写自己的目标（新建 Thread 落在目标 pane）。
-   * 无 owner/无 workspace 回调（如只读宿主）时保持此前的无操作语义。
-   */
-  function requestBranch(input: BranchRequestInput): boolean {
-    if (owner == null || capabilities?.allowBranching === false) {
-      setActionError(t('ai.runtime.action.branchingDisabled'))
-      return false
-    }
-    // 没有 workspace 回调的宿主（只读嵌入）没有新建分支的去处，保持无操作。
-    if (onRequestBranch == null) {
-      return false
-    }
-    if (hasPendingOperation()) {
-      setActionError(t('ai.runtime.action.operationPending'))
-      return false
-    }
-    setActionError(null)
-    onRequestBranch(input)
-    return true
-  }
-
-  /** 历史树行的分叉动作：只对 ROOT / 已关闭 TURN_END 可用（面板已禁用其它行）。 */
-  function requestBranchFromEntry(entry: HarnessSessionEntryDTO): void {
-    if (requestBranch({
-      sessionId: entry.sessionId,
-      startEntryId: entry.entryId,
-      sourceLabel: boundThreadName,
-    })) {
-      setThreadNavigationSessionId(null)
-      setInteraction(null)
-    }
-  }
-
-  const historySourceThreadId = isBoundTarget(target)
-    && threadNavigationSessionId == null
-    && controller.sessionId != null
-    ? target.threadId
-    : target.kind === 'FORK_SESSION_DRAFT' && threadNavigationSessionId == null
-      ? target.sourceThreadId
-      : null
-  const canForkSession = Boolean(owner)
-    && capabilities?.allowBranching !== false
-    && !capabilities?.readOnly
-    && historySourceThreadId != null
-
-  /**
-   * 历史树行的显式“从此处新建会话”动作：把当前来源执行根 Thread 与选定切点写入
-   * 本 pane 的会话 fork 草稿（不预创建 Session/Thread）。源 Thread 继续独立运行，
-   * 目标与本地草稿只改本 pane；创建仍由首次输入原子提交。
-   */
-  function requestSessionForkFromEntry(entry: HarnessSessionEntryDTO): void {
-    if (!canForkSession || historySourceThreadId == null) {
-      setActionError(t('ai.runtime.action.branchingDisabled'))
-      return
-    }
-    if (hasPendingOperation()) {
-      setActionError(t('ai.runtime.action.operationPending'))
-      return
-    }
-    if (changeTarget({
-      kind: 'FORK_SESSION_DRAFT',
-      sessionId: entry.sessionId,
-      sourceThreadId: historySourceThreadId,
-      startEntryId: entry.entryId,
-    })) {
-      setThreadNavigationSessionId(null)
-      setInteraction(null)
-    }
-  }
-
-  function selectSession(session: RuntimeSessionSummaryDTO): void {
-    if (!owner || capabilities?.allowBranching === false) {
-      setActionError(t('ai.runtime.action.branchingDisabled'))
-      return
-    }
-    setThreadNavigationSessionId(session.sessionId)
-    setInteraction(session.threadCount === 0 ? 'history' : 'thread-threads')
-  }
-
-  function selectThread(thread: RuntimeThreadSummaryDTO): void {
-    if (!owner || capabilities?.allowBranching === false) {
-      setActionError(t('ai.runtime.action.branchingDisabled'))
-      return
-    }
-    changeTarget({ kind: 'BOUND_THREAD', threadId: thread.threadId }, activeDraft)
-  }
-
-  async function refreshPaneProjection(): Promise<void> {
-    const currentTarget = targetRef.current
-    if (isBoundTarget(currentTarget)) {
-      await queryClient.invalidateQueries({
-        queryKey: queryKeys.threads.snapshot(currentTarget.threadId),
-      })
-    }
-    if (ownerKey) {
-      await queryClient.invalidateQueries({
-        queryKey: ['agent-pane', 'sessions', ownerKey],
-      })
-    }
-  }
+  const navigation = usePaneNavigation({
+    owner,
+    target,
+    capabilities,
+    onRequestBranch,
+    boundThreadName,
+    boundSessionId: controller.sessionId,
+    activeDraft,
+    threadNavigationSessionId,
+    setThreadNavigationSessionId,
+    changeTarget,
+    hasPendingOperation,
+    setInteraction,
+    setActionError,
+  })
 
   const pending = pendingAcceptance != null
     || controller.pending
@@ -1332,7 +441,7 @@ export function useRootThreadControl({
     ? trimMessageParts(controller.draft).length > 0
     : trimMessageParts(parts).length > 0
   const reportDraftKey = partsKey(isBoundTarget(target) ? controller.draft : parts)
-  const reportPending = pending || renamePending || controller.queuedCommands.length > 0
+  const reportPending = pending || rename.renamePending || controller.queuedCommands.length > 0
   const reportSessionId = currentSessionId
   const reportBranchName = isBoundTarget(target)
     ? boundThreadName
@@ -1368,10 +477,6 @@ export function useRootThreadControl({
       ? t('ai.chat.history.loadFailed') : null,
     onRetryHistory: () => { void (isDraftHistoryTarget(target) ? treeEntriesQuery.refetch() : controller.snapshotQuery.refetch()) },
   })
-  const boundViewsRef = useRef(boundViews)
-  useEffect(() => {
-    boundViewsRef.current = boundViews
-  })
   const rootEntryId = controller.entries?.find((e) => e.parentEntryId == null)?.entryId
     ?? treeEntriesQuery.data?.find((e) => e.parentEntryId == null)?.entryId
     ?? null
@@ -1401,6 +506,30 @@ export function useRootThreadControl({
     )
   }, [target, controller.entries, boundGoal])
 
+  const commandContext: PaneCommandContext = {
+    target,
+    capabilities,
+    t,
+    onFocus,
+    onOpenIde,
+    activeDraft,
+    currentSessionId,
+    historySessionId,
+    rootEntryId,
+    boundThreadName,
+    hasPendingOperation,
+    setActionError,
+    setInteraction,
+    setLocalDraft,
+    changeTarget,
+    requestBranch: navigation.requestBranch,
+    openRenameForTarget: rename.openRenameForTarget,
+    setBoundYolo: branchPanel.setYoloEnabled,
+    boundYoloEnabled: branchPanel.draft?.yoloEnabled ?? false,
+    toggleDebugView: () => boundViews.switchMode(boundViews.mode === 'debug' ? 'conversation' : 'debug'),
+    runControllerCommand: controller.runCommand,
+  }
+
   const composerDraft = isBoundTarget(target) ? controller.draft : parts
   const goalDraft = isBoundTarget(target) ? controller.goalDraft : null
   const composerDisabled = Boolean(capabilities?.readOnly)
@@ -1417,11 +546,11 @@ export function useRootThreadControl({
     onHistoryPartsChange: isBoundTarget(target)
       ? (next) => controller.setDraft(next, 'history')
       : undefined,
-    onSubmit: handleSubmit,
+    onSubmit: acceptance.handleSubmit,
     onSubmitGoal: (goalText: string, localDraft?: ComposerPart[]) => {
       submitGoal(goalText, { localParts: localDraft })
     },
-    onCommand: handleCommand,
+    onCommand: (command) => handlePaneCommand(commandContext, command),
     commands,
     focusOnEscape: focused,
     composerRef,
@@ -1512,23 +641,20 @@ export function useRootThreadControl({
     interaction,
     openInteraction: (next: Exclude<PaneInteraction, null>) => setInteraction(next),
     closeInteraction: () => setInteraction(null),
-    renameTarget,
-    renamePending,
-    renameError,
-    renameBusy: renameTarget != null
-      && renameTarget.kind === 'session'
-      && renameTarget.name == null
-      && !sessionsQuery.isError,
-    renameSession: (sessionId: string, name: string | null) => openRename('session', sessionId, name),
-    renameThread: (threadId: string, name: string | null) => openRename('thread', threadId, name),
+    renameTarget: rename.renameTarget,
+    renamePending: rename.renamePending,
+    renameError: rename.renameError,
+    renameBusy: rename.renameBusy,
+    renameSession: (sessionId: string, name: string | null) => rename.openRename('session', sessionId, name),
+    renameThread: (threadId: string, name: string | null) => rename.openRename('thread', threadId, name),
     openRenameWithBackTo: (
       kind: RenameKind,
       id: string,
       name: string | null,
       backTo: RenameTarget['backTo'],
-    ) => openRename(kind, id, name, backTo),
-    submitRename,
-    closeRename,
+    ) => rename.openRename(kind, id, name, backTo),
+    submitRename: rename.submitRename,
+    closeRename: rename.closeRename,
     sessions: sessionsQuery.data ?? [],
     sessionsLoading: sessionsQuery.isLoading,
     threads: threadsQuery.data ?? [],
@@ -1548,7 +674,7 @@ export function useRootThreadControl({
       }
     },
     submitGoal,
-    clearGoal,
+    clearGoal: () => submitGoal(null),
     composer,
     restoreComposerFocus: () => setFocusIntent(target),
     pendingAcceptance,
@@ -1572,124 +698,20 @@ export function useRootThreadControl({
       controller.dismissConflict()
       branchPanel.dismissConflict()
     },
-    refreshPaneProjection,
-    retryAcceptance,
-    abandonPendingAcceptance,
+    refreshPaneProjection: acceptance.refreshPaneProjection,
+    retryAcceptance: acceptance.retryAcceptance,
+    abandonPendingAcceptance: acceptance.abandonPendingAcceptance,
     retryPendingMessage: controller.retryPendingMessage,
     abandonPendingMessage: controller.abandonPendingMessage,
     selectAgent,
-    requestBranch,
-    requestBranchFromEntry,
-    requestSessionForkFromEntry,
-    canForkSession,
+    requestBranch: navigation.requestBranch,
+    requestBranchFromEntry: navigation.requestBranchFromEntry,
+    requestSessionForkFromEntry: navigation.requestSessionForkFromEntry,
+    canForkSession: navigation.canForkSession,
     boundBranchName: boundThreadName,
-    selectSession,
-    selectThread,
-    sessionSelectionItem,
-    threadSelectionItem,
+    selectSession: navigation.selectSession,
+    selectThread: navigation.selectThread,
     boundEnvironment,
     environmentReady,
-  }
-}
-
-function needsBackgroundProjection(snapshot: HarnessThreadSnapshotDTO | undefined): boolean {
-  return snapshot != null
-    && (snapshot.thread.processing || snapshot.thread.status !== 'IDLE')
-}
-
-function cloneDraft(draft: BranchDraft): BranchDraft {
-  return {
-    ...draft,
-    model: { ...draft.model },
-  }
-}
-
-function errorMessage(error: unknown, fallback: string): string {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message
-  }
-  return fallback
-}
-
-export function branchDraftFromEntry(
-  entry: HarnessSessionEntryDTO,
-  fallback: BranchDraft | null,
-): BranchDraft | null {
-  if (fallback == null) {
-    return null
-  }
-  const payload = parsePayload(entry.payloadJson)
-  const settings = isRecord(payload.settings) ? payload.settings : null
-  if (settings == null) {
-    return cloneDraft(fallback)
-  }
-  const model = isRecord(settings.model) ? settings.model : null
-  let environmentName = fallback.environmentName
-  if (Object.hasOwn(settings, 'environmentName')) {
-    if (typeof settings.environmentName === 'string') {
-      environmentName = settings.environmentName
-    } else if (settings.environmentName === null) {
-      environmentName = null
-    }
-  }
-  return {
-    ...cloneDraft(fallback),
-    agentName: typeof settings.agentName === 'string' ? settings.agentName : fallback.agentName,
-    model: {
-      providerName: typeof model?.providerName === 'string'
-        ? model.providerName
-        : fallback.model.providerName,
-      modelName: typeof model?.modelName === 'string'
-        ? model.modelName
-        : fallback.model.modelName,
-      variant: typeof model?.variant === 'string' ? model.variant : fallback.model.variant,
-    },
-    environmentName,
-  }
-}
-
-export function branchDraftFromEntryPath(
-  entries: HarnessSessionEntryDTO[],
-  targetEntryId: string,
-  fallback: BranchDraft | null,
-): BranchDraft | null {
-  if (fallback == null) {
-    return null
-  }
-  const path = threadDraftPath(entries, entries.find((entry) => entry.entryId === targetEntryId)?.sessionId ?? '', targetEntryId)
-  let draft = cloneDraft(fallback)
-  for (const entry of path) {
-    draft = branchDraftFromEntry(entry, draft) ?? draft
-  }
-  return draft
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-}
-
-export function sessionSelectionItem(session: RuntimeSessionSummaryDTO) {
-  return {
-    id: session.sessionId,
-    title: session.name,
-    // 预览保持次要（subtitle）；主展示与搜索都以 name 为准，绝不回退为 id。
-    subtitle: [
-      session.firstMessagePreview || null,
-      `${formatBackendDate(session.lastActivityAt)} · ${session.threadCount} Threads`,
-    ].filter(Boolean).join(' · '),
-    // UUID 只作 badge 诊断。
-    badge: session.sessionId,
-  }
-}
-
-export function threadSelectionItem(thread: RuntimeThreadSummaryDTO) {
-  return {
-    id: thread.threadId,
-    title: thread.name,
-    subtitle: [
-      thread.headMessagePreview,
-      `${formatBackendDate(thread.updatedAt)} · ${thread.status}`,
-    ].filter(Boolean).join(' · '),
-    badge: thread.threadId,
   }
 }

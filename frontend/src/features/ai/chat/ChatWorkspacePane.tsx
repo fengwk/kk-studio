@@ -2,7 +2,7 @@ import { AgentPane } from '@/features/ai/runtime/AgentPane'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 import type { ChatDTO } from '@/shared/api/contracts/ai-chat'
 import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'
-import type { BranchRequestInput, PaneReport } from '@/features/ai/runtime/useRootThreadControl'
+import type { BranchRequestInput, PaneReport } from '@/features/ai/runtime/root-thread/types'
 import type { PaneTarget } from '@/features/ai/runtime/agent-pane'
 import type { ThreadPresentation } from '@/features/ai/runtime/thread-presentation'
 
