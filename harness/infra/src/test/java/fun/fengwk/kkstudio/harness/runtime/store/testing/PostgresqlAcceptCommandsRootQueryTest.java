@@ -107,8 +107,7 @@ class PostgresqlAcceptCommandsRootQueryTest {
     cteCounter.set(0);
     List<NewThreadCommand> batch = List.of(userMessageCommand(TestIds.id(50), "next message"));
     AcceptCommandsCommand command =
-        new AcceptCommandsCommand(
-            new AcceptCommandsTarget.Thread(baseline.threadId(), turnEndId, 1), batch);
+        new AcceptCommandsCommand(new AcceptCommandsTarget.Thread(baseline.threadId()), batch);
 
     AcceptedCommands accepted = runtime.acceptCommands(command, AcceptancePreflight.IDENTITY);
     assertFalse(accepted.replayed());

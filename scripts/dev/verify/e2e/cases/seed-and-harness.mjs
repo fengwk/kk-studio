@@ -860,26 +860,21 @@ registerCase({
     // 为保留原 case 对严格 wire + exact replay 的完整覆盖，这里逐条入队后再整体 replay。
     // 每次全新 accept 前等待连续两次一致的 quiescent cursor；单次 IDLE snapshot 可能落在
     // processor 已移除队列、尚未提交 Thread 尾部状态的瞬时窗口。
-    const batchFor = (cursorThread, commands) => ({
+    const batchFor = (commands) => ({
       owner: chatOwner(chat.id),
-      target: threadTarget({
-        threadId,
-        expectedHeadEntryId: cursorThread.headEntryId,
-        expectedNextCommandSequence: cursorThread.nextCommandSequence,
-      }),
+      target: threadTarget({ threadId }),
       commands,
     })
     const acceptedList = []
-    let cursorBefore = await waitForQuiescentThread(ctx, threadId, {
+    await waitForQuiescentThread(ctx, threadId, {
       timeoutMs: 60_000,
       intervalMs: 100,
     })
     for (const single of commandsOf()) {
-      const acceptedOnce = await acceptCommandBatch(ctx, batchFor(cursorBefore, [single]))
+      const acceptedOnce = await acceptCommandBatch(ctx, batchFor([single]))
       acceptedList.push(acceptedOnce.acceptedCommands[0])
-      // Exact replay：必须继续使用原首次接受前 cursor（该命令的 sequence）——
-      // THREAD replay 要求存储命令起始 sequence == expectedNextCommandSequence。
-      const replayAccepted = await acceptCommandBatch(ctx, batchFor(cursorBefore, [single]))
+      // Exact replay：纯 USER_MESSAGE 批次无 cursor，按 idempotencyKey 与 requestHash 重放。
+      const replayAccepted = await acceptCommandBatch(ctx, batchFor([single]))
       assert(replayAccepted.replayed === true, JSON.stringify(replayAccepted))
       assert(
         String(replayAccepted.acceptedCommands[0].sequence)
@@ -891,7 +886,7 @@ registerCase({
           replay: replayAccepted.acceptedCommands[0],
         })}`,
       )
-      cursorBefore = await waitForQuiescentThread(ctx, threadId, {
+      await waitForQuiescentThread(ctx, threadId, {
         timeoutMs: 60_000,
         intervalMs: 100,
       })
@@ -928,18 +923,12 @@ registerCase({
       }),
       `contents TEXT payload must be canonical: ${JSON.stringify(secondPayload)}`,
     )
-    const validationThread = cursorBefore
-
     const expectInvalidUserCommand = (command, options = { status: 400 }) =>
       expectHttpError(
         () =>
           acceptCommandBatch(ctx, {
             owner: chatOwner(chat.id),
-            target: threadTarget({
-              threadId,
-              expectedHeadEntryId: validationThread.headEntryId,
-              expectedNextCommandSequence: validationThread.nextCommandSequence,
-            }),
+            target: threadTarget({ threadId }),
             commands: [command],
           }),
         options,
@@ -1145,8 +1134,6 @@ registerCase({
       owner: chatOwner(chat.id),
       target: threadTarget({
         threadId,
-        expectedHeadEntryId: thread.headEntryId,
-        expectedNextCommandSequence: thread.nextCommandSequence,
       }),
       commands: [userMessageCommand('idempotent replay', idempotencyKey)],
     })
@@ -1493,8 +1480,6 @@ registerCase({
       owner: chatOwner(chat.id),
       target: threadTarget({
         threadId,
-        expectedHeadEntryId: trunk.thread.headEntryId,
-        expectedNextCommandSequence: trunk.thread.nextCommandSequence,
       }),
       commands: [userMessageCommand(originalMessage, cid())],
     })

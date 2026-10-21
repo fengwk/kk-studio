@@ -162,7 +162,7 @@ public abstract class HarnessRuntimeThreadTreeContract {
     TreeFixture tree = seedCrossSessionTree(store);
     runtime.acceptCommands(
         new AcceptCommandsCommand(
-            new AcceptCommandsTarget.Thread(tree.earlySiblingId(), tree.earlyHeadId(), 1),
+            new AcceptCommandsTarget.Thread(tree.earlySiblingId()),
             List.of(userMessageCommand(TestIds.id(90), "queued"))),
         AcceptancePreflight.IDENTITY);
     List<String> locks = new ArrayList<>();

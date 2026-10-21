@@ -159,8 +159,6 @@ registerCase({
       owner: chatOwner(chat.id),
       target: threadTarget({
         threadId,
-        expectedHeadEntryId: snapshotAfterReplay.thread.headEntryId,
-        expectedNextCommandSequence: snapshotAfterReplay.thread.nextCommandSequence,
       }),
       commands: [resourceCommand],
     })
@@ -202,8 +200,6 @@ registerCase({
           owner: chatOwner(chat.id),
           target: threadTarget({
             threadId,
-            expectedHeadEntryId: snapshotAfterResource.thread.headEntryId,
-            expectedNextCommandSequence: snapshotAfterResource.thread.nextCommandSequence,
           }),
           commands: [
             { type: 'USER_MESSAGE', idempotencyKey: cid(), contents: [{ type: 'ATTACHMENT', uploadId }] },
@@ -220,8 +216,6 @@ registerCase({
             owner: chatOwner(chat.id),
             target: threadTarget({
               threadId,
-              expectedHeadEntryId: snapshotAfterResource.thread.headEntryId,
-              expectedNextCommandSequence: snapshotAfterResource.thread.nextCommandSequence,
             }),
             commands: [
               {
@@ -249,8 +243,6 @@ registerCase({
           owner: chatOwner(chat.id),
           target: threadTarget({
             threadId,
-            expectedHeadEntryId: snapshotAfterResource.thread.headEntryId,
-            expectedNextCommandSequence: snapshotAfterResource.thread.nextCommandSequence,
           }),
           commands: [
             {
@@ -412,8 +404,6 @@ registerCase({
         owner: chatOwner(chat.id),
         target: threadTarget({
           threadId,
-          expectedHeadEntryId: firstSnapshot.thread.headEntryId,
-          expectedNextCommandSequence: firstSnapshot.thread.nextCommandSequence,
         }),
         commands: [
           {

@@ -67,9 +67,8 @@ function mockContext(def, { hitAt = 2, fault } = {}) {
             name: 'cache-test', parentThreadId: null, status: 'IDLE', processing: false,
             executionControl: 'RUNNABLE', rootThreadId: body.target.threadId, yoloEnabled: false }
         } else {
-          // 既有 Thread 续写面 owner-free：body 只带 cursor 与 commands。
-          assert.equal(body.expectedHeadEntryId, thread.headEntryId)
-          assert.equal(body.expectedNextCommandSequence, thread.nextCommandSequence)
+          // 既有 Thread 续写面 owner-free：单条纯 USER_MESSAGE 只带 commands，不带 cursor。
+          assert.deepEqual(Object.keys(body), ['commands'])
           assert.equal(Object.hasOwn(body, 'owner'), false)
           assert.equal(Object.hasOwn(body, 'target'), false)
         }

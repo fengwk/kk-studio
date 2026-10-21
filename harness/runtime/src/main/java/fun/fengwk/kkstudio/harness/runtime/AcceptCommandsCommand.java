@@ -40,8 +40,8 @@ public record AcceptCommandsCommand(AcceptCommandsTarget target, List<NewThreadC
   }
 
   /**
-   * 单条纯 USER_MESSAGE 批次不依赖 Thread cursor：并发追加只由按 Thread 的有序锁与幂等键保证。任何 SET_* 前缀、GOAL / CUSTOM /
-   * NOTIFICATION 或包含多条命令的批次仍然是 cursor-bound。
+   * 单条纯 USER_MESSAGE 批次不携带 Thread cursor（携带即输入错误）：并发追加只由按 Thread 的有序锁与幂等键保证。任何 SET_* 前缀、GOAL /
+   * CUSTOM / NOTIFICATION 或包含多条命令的批次仍然是 cursor-bound。
    */
   public static boolean isPureUserMessageBatch(List<NewThreadCommand> commands) {
     return commands.size() == 1

@@ -239,10 +239,12 @@ function isThreadCommandBatchRequest(value: unknown): value is ThreadCommandBatc
     return false
   }
   const keys = Object.keys(value)
+  const cursorFree = value.commands.length === 1 && value.commands[0]?.type === 'USER_MESSAGE'
   if (keys.length === 1 && keys[0] === 'commands') {
-    return value.commands.length === 1 && value.commands[0]?.type === 'USER_MESSAGE'
+    return cursorFree
   }
-  return hasExactKeys(value, ['expectedHeadEntryId', 'expectedNextCommandSequence', 'commands'])
+  return !cursorFree
+    && hasExactKeys(value, ['expectedHeadEntryId', 'expectedNextCommandSequence', 'commands'])
     && nonBlank(value.expectedHeadEntryId)
     && nonBlank(value.expectedNextCommandSequence)
 }

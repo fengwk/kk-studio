@@ -166,8 +166,7 @@ class ThreadSnapshotTest {
     ThreadState before = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
     runtime.acceptCommands(
         new AcceptCommandsCommand(
-            new AcceptCommandsTarget.Thread(
-                baseline.threadId(), before.headEntryId(), before.nextCommandSequence()),
+            new AcceptCommandsTarget.Thread(baseline.threadId()),
             List.of(userMessageCommand(TestIds.id(1), "queued"))),
         AcceptancePreflight.IDENTITY);
     ThreadSnapshot snapshot = runtime.getThreadSnapshot(baseline.threadId());
