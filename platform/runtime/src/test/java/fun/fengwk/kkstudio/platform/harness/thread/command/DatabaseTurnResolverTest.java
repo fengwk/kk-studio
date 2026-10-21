@@ -102,9 +102,9 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
-import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpDiscoveryStatus;
@@ -205,9 +205,9 @@ class DatabaseTurnResolverTest {
   void resolvesExactBranchModelReferencesWithoutFallback() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
     // Agent 自带的 provider/model/variant 引用是旧数据，绝不能被读取。
-    fixture.agent.setModelProviderName("old-provider");
-    fixture.agent.setModelName("old-model");
-    fixture.agent.setVariant("old-variant");
+    fixture.editAgent(agent -> agent.modelProviderName("old-provider"));
+    fixture.editAgent(agent -> agent.modelName("old-model"));
+    fixture.editAgent(agent -> agent.variant("old-variant"));
     when(fixture.providers.getByName("old-provider")).thenReturn(null);
     TurnResolver.Resolved resolved = fixture.resolvedResult(fixture.path(settings("custom")), null);
     ModelRequestSpec requestSpec = resolved.spec();
@@ -244,8 +244,8 @@ class DatabaseTurnResolverTest {
     fixture.missingModel();
     ModelSelection backup = new ModelSelection("backup-provider", "backup-model", "default");
     fixture.addModel(backup, Fixture.parsedModel());
-    fixture.agent.setModelProviderName("backup-provider");
-    fixture.agent.setModelName("backup-model");
+    fixture.editAgent(agent -> agent.modelProviderName("backup-provider"));
+    fixture.editAgent(agent -> agent.modelName("backup-model"));
 
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("custom")));
 
@@ -260,8 +260,8 @@ class DatabaseTurnResolverTest {
   void rejectsWhenThreadAndAgentDefaultModelsAreBothUnavailable() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
     fixture.missingModel();
-    fixture.agent.setModelProviderName("backup-provider");
-    fixture.agent.setModelName("backup-model");
+    fixture.editAgent(agent -> agent.modelProviderName("backup-provider"));
+    fixture.editAgent(agent -> agent.modelName("backup-model"));
 
     assertEquals(
         "model provider/model and the agent default model are both unavailable;"
@@ -270,8 +270,8 @@ class DatabaseTurnResolverTest {
 
     fixture = new Fixture(List.of(), List.of(), List.of());
     fixture.missingModel();
-    fixture.agent.setModelProviderName("provider");
-    fixture.agent.setModelName("model");
+    fixture.editAgent(agent -> agent.modelProviderName("provider"));
+    fixture.editAgent(agent -> agent.modelName("model"));
     assertEquals(
         "model provider/model and the agent default model are both unavailable;"
             + " bind an available model",
@@ -1887,7 +1887,7 @@ class DatabaseTurnResolverTest {
     List<ToolBinding> tools = frozen.toolBindings();
     ProviderRequest before = new ModelRequestMaterializer().materialize(path, frozen);
 
-    fixture.agent.setSystemPrompt("changed system prompt");
+    fixture.editAgent(agent -> agent.systemPrompt("changed system prompt"));
     fixture.agentConfig.setTools(List.of());
 
     // 二次 resolve 证明 mutation 真实生效：live spec 的 systemInstruction 与 tools 都变了，而 frozen spec 不受影响。
@@ -2994,7 +2994,7 @@ class DatabaseTurnResolverTest {
         mock(SkillCatalogQueryService.class);
     private final Map<String, Map<String, String>> packages = new LinkedHashMap<>();
     private String observedHeadCommit;
-    private final AgentDefinition agent = new AgentDefinition();
+    private AgentDefinition agent;
     private final AgentDefinitionConfigDTO agentConfig = new AgentDefinitionConfigDTO();
     private AgentProvider provider;
     private final ProviderFactory providerFactory = mock(ProviderFactory.class);
@@ -3120,9 +3120,12 @@ class DatabaseTurnResolverTest {
         HarnessCatalog providedCatalog,
         RuntimeToolCatalogSource providedToolCatalogSource,
         Clock clock) {
-      agent.setName("assistant");
-      agent.setSystemPrompt("agent system prompt");
-      agent.setConfigJson("agent-config");
+      agent =
+          AgentDefinition.builder()
+              .name("assistant")
+              .systemPrompt("agent system prompt")
+              .configJson("agent-config")
+              .build();
       when(agents.getByName("assistant")).thenReturn(agent);
 
       // 默认 branch 选择 ENV_A_NAME：解析为内部路由身份 ENV_A。
@@ -3269,6 +3272,14 @@ class DatabaseTurnResolverTest {
       when(providers.getByName("provider")).thenReturn(provider);
     }
 
+    /** Agent 为不可变记录：按编辑重建并重新绑定仓库桩。 */
+    private void editAgent(Consumer<AgentDefinition.AgentDefinitionBuilder> edit) {
+      AgentDefinition.AgentDefinitionBuilder builder = agent.toBuilder();
+      edit.accept(builder);
+      agent = builder.build();
+      when(agents.getByName("assistant")).thenReturn(agent);
+    }
+
     private void editProvider(Consumer<AgentProvider.AgentProviderBuilder> edit) {
       AgentProvider.AgentProviderBuilder builder = provider.toBuilder();
       edit.accept(builder);
@@ -3299,9 +3310,8 @@ class DatabaseTurnResolverTest {
     }
 
     private void subagent(String name, String description) {
-      AgentDefinition subagent = new AgentDefinition();
-      subagent.setName(name);
-      subagent.setDescription(description);
+      AgentDefinition subagent =
+          AgentDefinition.builder().name(name).description(description).build();
       when(agents.getByName(name)).thenReturn(subagent);
     }
 
@@ -3431,17 +3441,19 @@ class DatabaseTurnResolverTest {
     }
 
     private void compactionAgent(ModelSelection selection) {
-      AgentDefinition compaction = new AgentDefinition();
-      compaction.setName("Compaction");
-      compaction.setSystemPrompt(COMPACTION_SYSTEM_PROMPT);
       // 与普通 Agent 一样提供可解码的普通执行配置，使内置压缩 Agent 也能走 live 规划路径。
-      compaction.setConfigJson("agent-config");
+      AgentDefinition.AgentDefinitionBuilder compaction =
+          AgentDefinition.builder()
+              .name("Compaction")
+              .systemPrompt(COMPACTION_SYSTEM_PROMPT)
+              .configJson("agent-config");
       if (selection != null) {
-        compaction.setModelProviderName(selection.providerName());
-        compaction.setModelName(selection.modelName());
-        compaction.setVariant(selection.variant());
+        compaction
+            .modelProviderName(selection.providerName())
+            .modelName(selection.modelName())
+            .variant(selection.variant());
       }
-      when(agents.getByName("Compaction")).thenReturn(compaction);
+      when(agents.getByName("Compaction")).thenReturn(compaction.build());
     }
 
     private ModelRequestSpec resolved(EntryPath path) {

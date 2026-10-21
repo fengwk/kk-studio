@@ -4,9 +4,9 @@ import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
-import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser;
@@ -68,7 +68,7 @@ public final class AgentBranchSettingsMaterializer {
   private boolean inheritParentEnvironment(String agentName, AgentDefinition agent) {
     AgentDefinitionConfigDTO config;
     try {
-      config = agentConfigCodec.decode(agent.getConfigJson());
+      config = agentConfigCodec.decode(agent.configJson());
     } catch (RuntimeException error) {
       throw new IllegalArgumentException("invalid subagent configuration: " + agentName, error);
     }
@@ -77,16 +77,15 @@ public final class AgentBranchSettingsMaterializer {
 
   private BranchSettings materialize(
       String agentName, AgentDefinition agent, String environmentName) {
-    if (agent.getModelProviderName() == null || agent.getModelName() == null) {
+    if (agent.modelProviderName() == null || agent.modelName() == null) {
       // 未配置模型的内置 Agent（如 compaction）不能被普通调用当作路由来源：明确拒绝，不猜测或回退。
       throw new IllegalArgumentException("agent model is not configured: " + agentName);
     }
     AgentModel model =
-        modelRepository.getByProviderNameAndName(
-            agent.getModelProviderName(), agent.getModelName());
+        modelRepository.getByProviderNameAndName(agent.modelProviderName(), agent.modelName());
     if (model == null) {
       throw new IllegalArgumentException(
-          "subagent model not found: " + agent.getModelProviderName() + "/" + agent.getModelName());
+          "subagent model not found: " + agent.modelProviderName() + "/" + agent.modelName());
     }
     ParsedAgentModelConfig parsed;
     try {
@@ -96,9 +95,9 @@ public final class AgentBranchSettingsMaterializer {
           "invalid subagent model configuration: " + agentName, error);
     }
     String variantName =
-        agent.getVariant() == null || agent.getVariant().isBlank()
+        agent.variant() == null || agent.variant().isBlank()
             ? parsed.defaultVariant()
-            : agent.getVariant();
+            : agent.variant();
     // 校验所选 variant 存在于 catalog；ModelVariant 字段由 Resolver 在运行时按引用读取。
     parsed.variants().stream()
         .filter(candidate -> candidate.id().equals(variantName))
@@ -108,8 +107,8 @@ public final class AgentBranchSettingsMaterializer {
                 new IllegalArgumentException(
                     "subagent model variant not found: " + agentName + " variant=" + variantName));
     return new BranchSettings(
-        agent.getName(),
-        new ModelSelection(agent.getModelProviderName(), agent.getModelName(), variantName),
+        agent.name(),
+        new ModelSelection(agent.modelProviderName(), agent.modelName(), variantName),
         environmentName);
   }
 }

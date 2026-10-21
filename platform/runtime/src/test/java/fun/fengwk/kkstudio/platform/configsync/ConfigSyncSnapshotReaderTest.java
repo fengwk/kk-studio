@@ -18,9 +18,9 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentDefinitions;
-import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
@@ -128,21 +128,24 @@ class ConfigSyncSnapshotReaderTest {
     when(systemSettingsRepository.get()).thenReturn(settings(1L));
     when(skillCatalogQueryService.listPackages()).thenReturn(List.of());
     AgentDefinition user =
-        agent("user-agent", "p", "m", agentConfig(List.of(), List.of(), List.of()));
-    user.setType(AgentDefinitionType.USER);
+        agent("user-agent", "p", "m", agentConfig(List.of(), List.of(), List.of())).toBuilder()
+            .type(AgentDefinitionType.USER)
+            .build();
     AgentDefinition builtin =
         agent(
-            BuiltinAgentDefinitions.COMPACTION_NAME,
-            null,
-            null,
-            agentConfig(List.of(), List.of(), List.of()));
-    builtin.setType(AgentDefinitionType.BUILTIN);
+                BuiltinAgentDefinitions.COMPACTION_NAME,
+                null,
+                null,
+                agentConfig(List.of(), List.of(), List.of()))
+            .toBuilder()
+            .type(AgentDefinitionType.BUILTIN)
+            .build();
     when(definitionRepository.listAll()).thenReturn(List.of(user, builtin));
 
     ConfigSyncSnapshot snapshot = reader.read();
 
     assertEquals(
-        List.of("user-agent"), snapshot.agents().stream().map(AgentDefinition::getName).toList());
+        List.of("user-agent"), snapshot.agents().stream().map(AgentDefinition::name).toList());
     assertEquals(Set.of(BuiltinAgentDefinitions.COMPACTION_NAME), snapshot.builtinAgentNames());
   }
 

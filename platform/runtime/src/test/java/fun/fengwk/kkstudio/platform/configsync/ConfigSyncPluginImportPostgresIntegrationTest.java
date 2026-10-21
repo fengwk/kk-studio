@@ -20,11 +20,9 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.common.schema.StringSchema;
-import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.catalog.definition.repo.impl.PostgresqlAgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.catalog.definition.repo.impl.store.AgentDefinitionJdbcStore;
-import fun.fengwk.kkstudio.platform.catalog.definition.service.AgentDefinitionService;
-import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionService;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.McpServerService;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelService;
@@ -147,8 +145,7 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
     transactionManager = new DataSourceTransactionManager(dataSource);
     configurationRepository = new PluginConfigurationRepository(jdbcClient);
     credentialRepository = new PluginCredentialRepository(jdbcClient);
-    definitionRepository =
-        new PostgresqlAgentDefinitionRepository(new AgentDefinitionJdbcStore(jdbcClient));
+    definitionRepository = new AgentDefinitionRepository(jdbcClient);
 
     pluginAgentDependencies =
         new PluginAgentDependencies(registry, configurationRepository, definitionRepository);
@@ -326,15 +323,17 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
   }
 
   private static AgentDefinition agentDefinition(String name) {
-    AgentDefinition agent = new AgentDefinition();
-    agent.setName(name);
-    agent.setType(AgentDefinitionType.USER);
-    agent.setSystemPrompt("prompt " + name);
-    agent.setModelProviderName(MODEL_PROVIDER);
-    agent.setModelName(MODEL_NAME);
-    agent.setConfigJson(
-        "{\"tools\":[],\"skills\":[],\"subagents\":[],\"inheritParentEnvironment\":true}");
-    agent.setVersion(0L);
+    AgentDefinition agent =
+        AgentDefinition.builder()
+            .name(name)
+            .type(AgentDefinitionType.USER)
+            .systemPrompt("prompt " + name)
+            .modelProviderName(MODEL_PROVIDER)
+            .modelName(MODEL_NAME)
+            .configJson(
+                "{\"tools\":[],\"skills\":[],\"subagents\":[],\"inheritParentEnvironment\":true}")
+            .version(0L)
+            .build();
     return agent;
   }
 

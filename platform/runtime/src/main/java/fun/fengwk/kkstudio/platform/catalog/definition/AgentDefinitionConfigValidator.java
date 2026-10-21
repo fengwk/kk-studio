@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.catalog.definition.service.impl;
+package fun.fengwk.kkstudio.platform.catalog.definition;
 
 import org.springframework.stereotype.Component;
 

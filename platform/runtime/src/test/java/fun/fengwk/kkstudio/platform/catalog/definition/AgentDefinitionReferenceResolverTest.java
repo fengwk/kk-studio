@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.catalog.definition.service.impl;
+package fun.fengwk.kkstudio.platform.catalog.definition;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -15,8 +15,6 @@ import org.mockito.InOrder;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributionId;
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
-import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
@@ -49,9 +47,9 @@ class AgentDefinitionReferenceResolverTest {
   @Test
   void locksUpdatedAgentAndSubagentsInCanonicalOrder() {
     AgentDefinitionRepository definitions = mock(AgentDefinitionRepository.class);
-    AgentDefinition target = new AgentDefinition();
-    AgentDefinition alpha = new AgentDefinition();
-    AgentDefinition omega = new AgentDefinition();
+    AgentDefinition target = AgentDefinition.builder().name("middle").build();
+    AgentDefinition alpha = AgentDefinition.builder().name("alpha").build();
+    AgentDefinition omega = AgentDefinition.builder().name("omega").build();
     when(definitions.getByNameForUpdate("alpha")).thenReturn(alpha);
     when(definitions.getByNameForUpdate("middle")).thenReturn(target);
     when(definitions.getByNameForUpdate("omega")).thenReturn(omega);

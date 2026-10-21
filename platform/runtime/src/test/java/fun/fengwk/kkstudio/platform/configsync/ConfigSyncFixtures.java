@@ -11,16 +11,19 @@ import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.common.schema.StringSchema;
 import fun.fengwk.kkstudio.harness.provider.ProviderModelDiscovery;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionConfigValidator;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionReferenceResolver;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionService;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
-import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.catalog.definition.service.impl.AgentDefinitionMutationFactory;
-import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpDiscoveryStatus;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelService;
+import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelDefaultVariantResolver;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderConfigurationCodec;
@@ -100,8 +103,16 @@ final class ConfigSyncFixtures {
           EDITABLE_SUPPORT,
           MODEL_CONFIG_PARSER);
 
-  static final AgentDefinitionMutationFactory AGENT_MUTATION_FACTORY =
-      new AgentDefinitionMutationFactory(EDITABLE_SUPPORT, AGENT_CONFIG_CODEC);
+  /** 真实 {@code AgentDefinitionService.validateImport}：纯静态校验，仓储与引用解析以 mock 占位。 */
+  static final AgentDefinitionService AGENT_SERVICE =
+      new AgentDefinitionService(
+          mock(AgentDefinitionRepository.class),
+          mock(AgentDefinitionReferenceResolver.class),
+          mock(AgentModelDefaultVariantResolver.class),
+          mock(AgentDefinitionConfigValidator.class),
+          AGENT_CONFIG_CODEC,
+          EDITABLE_SUPPORT,
+          mock(PluginAgentDependencies.class));
 
   /**
    * 真实 {@code SkillCatalogServiceImpl.validateImport}：只做纯静态校验，避免单测 mock 掉能力而要求另一份生产校验。其余仓储依赖由
@@ -122,7 +133,7 @@ final class ConfigSyncFixtures {
         yaml,
         PROVIDER_SERVICE,
         MODEL_SERVICE,
-        AGENT_MUTATION_FACTORY,
+        AGENT_SERVICE,
         SKILL_CATALOG_SERVICE,
         new SystemSettingsCodec(),
         pluginRegistry);
@@ -218,12 +229,14 @@ final class ConfigSyncFixtures {
 
   static AgentDefinition agent(
       String name, String providerName, String modelName, AgentDefinitionConfigDTO config) {
-    AgentDefinition agent = new AgentDefinition();
-    agent.setName(name);
-    agent.setModelProviderName(providerName);
-    agent.setModelName(modelName);
-    agent.setConfigJson(AGENT_CONFIG_CODEC.encode(config));
-    agent.setVersion(0L);
+    AgentDefinition agent =
+        AgentDefinition.builder()
+            .name(name)
+            .modelProviderName(providerName)
+            .modelName(modelName)
+            .configJson(AGENT_CONFIG_CODEC.encode(config))
+            .version(0L)
+            .build();
     return agent;
   }
 

@@ -6,8 +6,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
-import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.catalog.definition.service.AgentDefinitionService;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionService;
 import fun.fengwk.kkstudio.platform.error.AiInUseException;
 import fun.fengwk.kkstudio.project.model.Project;
 
@@ -35,6 +35,6 @@ class AgentProjectReferenceIntegrationTest extends ProjectTestSupport {
   }
 
   private String currentVersion(String agent) {
-    return String.valueOf(agentDefinitionRepository.getByName(agent).getVersion());
+    return String.valueOf(agentDefinitionRepository.getByName(agent).version());
   }
 }

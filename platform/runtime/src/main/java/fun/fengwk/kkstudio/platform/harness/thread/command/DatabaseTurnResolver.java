@@ -40,10 +40,10 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolveTransientException;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentDefinitions;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
-import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser;
@@ -315,7 +315,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
             parsedModel.reasoning());
     String systemInstruction =
         systemInstruction(
-            agent.getSystemPrompt(),
+            agent.systemPrompt(),
             currentEnvironment,
             skills.stream().map(LiveTurnPlan.PlannedSkill::promptEntry).toList(),
             subagentBindings,
@@ -383,8 +383,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
     if (direct.isPresent()) {
       return direct.get();
     }
-    String defaultProvider = agent.getModelProviderName();
-    String defaultModel = agent.getModelName();
+    String defaultProvider = agent.modelProviderName();
+    String defaultModel = agent.modelName();
     boolean hasDistinctDefault =
         defaultProvider != null
             && defaultModel != null
@@ -399,9 +399,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
                   if (findVariant(parsed, requested.variant()) != null) {
                     return requested.variant();
                   }
-                  if (agent.getVariant() != null
-                      && findVariant(parsed, agent.getVariant()) != null) {
-                    return agent.getVariant();
+                  if (agent.variant() != null && findVariant(parsed, agent.variant()) != null) {
+                    return agent.variant();
                   }
                   return parsed.defaultVariant();
                 })
@@ -479,13 +478,13 @@ public final class DatabaseTurnResolver implements TurnResolver {
         require(
             agentDefinitionRepository.getByName(compactionAgentName),
             "agent not found: " + compactionAgentName);
-    if (agent.getModelProviderName() == null || agent.getModelName() == null) {
+    if (agent.modelProviderName() == null || agent.modelName() == null) {
       throw rejection("compaction agent has no configured model");
     }
     AgentProvider provider =
         require(
-            providerRepository.getByName(agent.getModelProviderName()),
-            "provider not found: " + agent.getModelProviderName());
+            providerRepository.getByName(agent.modelProviderName()),
+            "provider not found: " + agent.modelProviderName());
     ProviderType providerType = provider.providerType();
     if (providerType == null) {
       throw rejection("provider type must not be null");
@@ -496,33 +495,32 @@ public final class DatabaseTurnResolver implements TurnResolver {
             "provider connection generation id must not be null");
     AgentModel model =
         require(
-            modelRepository.getByProviderNameAndName(
-                agent.getModelProviderName(), agent.getModelName()),
-            "model not found: " + agent.getModelProviderName() + "/" + agent.getModelName());
+            modelRepository.getByProviderNameAndName(agent.modelProviderName(), agent.modelName()),
+            "model not found: " + agent.modelProviderName() + "/" + agent.modelName());
     ParsedAgentModelConfig parsedModel = parseModel(model);
     String variantName =
-        agent.getVariant() != null && !agent.getVariant().isBlank()
-            ? agent.getVariant()
+        agent.variant() != null && !agent.variant().isBlank()
+            ? agent.variant()
             : parsedModel.defaultVariant();
     ModelVariant variant = findVariant(parsedModel, variantName);
     if (variant == null) {
       throw rejection(
           "model variant not found: "
-              + agent.getModelProviderName()
+              + agent.modelProviderName()
               + "/"
-              + agent.getModelName()
+              + agent.modelName()
               + " variant="
               + variantName);
     }
     if (variant.reasoningEffort() != null && !parsedModel.reasoning()) {
       throw rejection(
           "model does not support reasoning: "
-              + agent.getModelProviderName()
+              + agent.modelProviderName()
               + "/"
-              + agent.getModelName());
+              + agent.modelName());
     }
     ModelSelection compactorModel =
-        new ModelSelection(agent.getModelProviderName(), agent.getModelName(), variant.id());
+        new ModelSelection(agent.modelProviderName(), agent.modelName(), variant.id());
     int maxOutputTokens = outputTokens(parsedModel);
     long outputBudget =
         compactionConfigProvider
@@ -581,7 +579,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
 
   private AgentDefinitionConfigDTO decodeAgentConfig(AgentDefinition agent) {
     try {
-      return agentConfigCodec.decode(agent.getConfigJson());
+      return agentConfigCodec.decode(agent.configJson());
     } catch (IllegalStateException error) {
       throw rejection("invalid agent configuration: " + messageOrClass(error));
     }
@@ -809,8 +807,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
           require(agentDefinitionRepository.getByName(name), "subagent not found: " + name);
       bindings.add(
           new SubagentBinding(
-              subagent.getName(),
-              subagent.getDescription() == null ? "" : subagent.getDescription()));
+              subagent.name(), subagent.description() == null ? "" : subagent.description()));
     }
     return List.copyOf(bindings);
   }

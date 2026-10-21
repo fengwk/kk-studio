@@ -4,8 +4,8 @@ import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
-import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser;
@@ -65,7 +65,7 @@ public final class ConfigSyncExporter {
 
     List<Object> agents = new ArrayList<>();
     for (AgentDefinition agent : snapshot.agents()) {
-      if (selected.contains(ConfigSyncRefs.ref(ConfigSyncKind.AGENTS, agent.getName()))) {
+      if (selected.contains(ConfigSyncRefs.ref(ConfigSyncKind.AGENTS, agent.name()))) {
         agents.add(exportAgent(agent));
       }
     }
@@ -155,12 +155,12 @@ public final class ConfigSyncExporter {
 
   private Map<String, Object> exportAgent(AgentDefinition agent) {
     Map<String, Object> map = new LinkedHashMap<>();
-    map.put("name", agent.getName());
-    putIfNotNull(map, "description", agent.getDescription());
-    putIfNotNull(map, "systemPrompt", agent.getSystemPrompt());
-    map.put("model", ConfigSyncRefs.modelName(agent.getModelProviderName(), agent.getModelName()));
-    putIfNotNull(map, "variant", agent.getVariant());
-    map.put("config", yaml.toMap(agentConfigCodec.decode(agent.getConfigJson()), "agent.config"));
+    map.put("name", agent.name());
+    putIfNotNull(map, "description", agent.description());
+    putIfNotNull(map, "systemPrompt", agent.systemPrompt());
+    map.put("model", ConfigSyncRefs.modelName(agent.modelProviderName(), agent.modelName()));
+    putIfNotNull(map, "variant", agent.variant());
+    map.put("config", yaml.toMap(agentConfigCodec.decode(agent.configJson()), "agent.config"));
     return map;
   }
 

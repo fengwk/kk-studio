@@ -117,7 +117,7 @@ class HarnessCatalogArchitectureTest {
         main.resolve("fun/fengwk/kkstudio/platform/harness/tool/gateway/ToolExecutionGateway.java");
     Path validatorPath =
         main.resolve(
-            "fun/fengwk/kkstudio/platform/catalog/definition/service/impl/"
+            "fun/fengwk/kkstudio/platform/catalog/definition/"
                 + "AgentDefinitionConfigValidator.java");
     Path queryServicePath =
         main.resolve("fun/fengwk/kkstudio/platform/catalog/tool/ToolCatalogQueryService.java");

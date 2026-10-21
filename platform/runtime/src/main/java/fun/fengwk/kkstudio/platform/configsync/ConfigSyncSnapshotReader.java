@@ -3,8 +3,8 @@ package fun.fengwk.kkstudio.platform.configsync;
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Component;
 
-import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
@@ -64,8 +64,8 @@ public class ConfigSyncSnapshotReader {
     List<AgentDefinition> agents = new ArrayList<>();
     Set<String> builtinAgentNames = new LinkedHashSet<>();
     for (AgentDefinition agent : definitionRepository.listAll()) {
-      if (agent.getType() == AgentDefinitionType.BUILTIN) {
-        builtinAgentNames.add(agent.getName());
+      if (agent.type() == AgentDefinitionType.BUILTIN) {
+        builtinAgentNames.add(agent.name());
       } else {
         agents.add(agent);
       }

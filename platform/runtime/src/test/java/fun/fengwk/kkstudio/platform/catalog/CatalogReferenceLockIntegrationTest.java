@@ -11,9 +11,9 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
-import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.catalog.definition.service.AgentDefinitionService;
-import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionService;
 import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.McpServerService;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
@@ -99,7 +99,7 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
     } else {
       assertTrue(created.error() instanceof AiValidationException);
       if (persisted != null) {
-        definitionService.deleteAgent(persisted.getName(), String.valueOf(persisted.getVersion()));
+        definitionService.deleteAgent(persisted.name(), String.valueOf(persisted.version()));
       }
     }
     deletePackage(packageName, skillPackages.getPackage(packageName) == null ? -1 : 0);
@@ -130,12 +130,12 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
             });
 
     AgentDefinition persisted = definitionRepository.getByName(created.getName());
-    boolean referencesReview = persisted.getConfigJson().contains("\"name\": \"review\"");
+    boolean referencesReview = persisted.configJson().contains("\"name\": \"review\"");
     if (referencesReview) {
       assertNotNull(skillPackages.getPackage(packageName).findSkill("review"));
     }
     assertTrue(updated.value() != null || updated.error() instanceof AiValidationException);
-    definitionService.deleteAgent(persisted.getName(), String.valueOf(persisted.getVersion()));
+    definitionService.deleteAgent(persisted.name(), String.valueOf(persisted.version()));
     if (skillPackages.getPackage(packageName) != null) {
       deletePackage(packageName, skillPackages.getPackage(packageName).getVersion());
     }
@@ -164,12 +164,12 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
             });
 
     AgentDefinition persisted = definitionRepository.getByName(create.getName());
-    if (persisted != null && persisted.getConfigJson().contains("\"name\": \"zeta\"")) {
+    if (persisted != null && persisted.configJson().contains("\"name\": \"zeta\"")) {
       assertNotNull(skillPackages.getPackage(packageName).findSkill("zeta"));
     }
     assertTrue(created.value() != null || created.error() instanceof AiValidationException);
     if (persisted != null) {
-      definitionService.deleteAgent(persisted.getName(), String.valueOf(persisted.getVersion()));
+      definitionService.deleteAgent(persisted.name(), String.valueOf(persisted.version()));
     }
     if (skillPackages.getPackage(packageName) != null) {
       deletePackage(packageName, skillPackages.getPackage(packageName).getVersion());
@@ -200,13 +200,13 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
             });
 
     AgentDefinition persisted = definitionRepository.getByName(create.getName());
-    if (persisted != null && persisted.getConfigJson().contains(toolName)) {
+    if (persisted != null && persisted.configJson().contains(toolName)) {
       assertTrue(
           mcpServers.getTool(toolName).isPresent(),
-          () -> created.value() + " / " + created.error() + " / " + persisted.getConfigJson());
+          () -> created.value() + " / " + created.error() + " / " + persisted.configJson());
     }
     if (persisted != null) {
-      definitionService.deleteAgent(persisted.getName(), String.valueOf(persisted.getVersion()));
+      definitionService.deleteAgent(persisted.name(), String.valueOf(persisted.version()));
     }
     assertTrue(
         created.value() != null
@@ -241,15 +241,15 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
             });
 
     AgentDefinition persisted = definitionRepository.getByName(create.getName());
-    if (persisted != null && persisted.getConfigJson().contains(zeta)) {
-      assertTrue(mcpServers.getTool(zeta).isPresent(), () -> persisted.getConfigJson());
+    if (persisted != null && persisted.configJson().contains(zeta)) {
+      assertTrue(mcpServers.getTool(zeta).isPresent(), () -> persisted.configJson());
     }
     assertTrue(
         created.value() != null
             || created.error() instanceof AiValidationException
             || persisted == null);
     if (persisted != null) {
-      definitionService.deleteAgent(persisted.getName(), String.valueOf(persisted.getVersion()));
+      definitionService.deleteAgent(persisted.name(), String.valueOf(persisted.version()));
     }
     mcpServerService.deleteServer(server.getName(), currentServerVersion(server.getName()));
     model.delete();
@@ -277,9 +277,9 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
         });
 
     AgentDefinition persisted = definitionRepository.getByName(create.getName());
-    if (persisted != null && persisted.getConfigJson().contains(toolName)) {
+    if (persisted != null && persisted.configJson().contains(toolName)) {
       assertTrue(mcpServers.getTool(toolName).isPresent());
-      definitionService.deleteAgent(persisted.getName(), String.valueOf(persisted.getVersion()));
+      definitionService.deleteAgent(persisted.name(), String.valueOf(persisted.version()));
     }
     mcpServerService.deleteServer(server.getName(), currentServerVersion(server.getName()));
     model.delete();
@@ -314,14 +314,14 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
             });
 
     AgentDefinition persisted = definitionRepository.getByName(created.getName());
-    if (persisted.getConfigJson().contains(toolName)) {
+    if (persisted.configJson().contains(toolName)) {
       assertTrue(mcpServers.getByName(server.getName()).isPresent());
       assertTrue(mcpServers.getTool(toolName).isPresent());
-      definitionService.deleteAgent(persisted.getName(), String.valueOf(persisted.getVersion()));
+      definitionService.deleteAgent(persisted.name(), String.valueOf(persisted.version()));
       mcpServerService.deleteServer(server.getName(), currentServerVersion(server.getName()));
     } else {
       assertTrue(updated.error() instanceof AiValidationException || updated.value() != null);
-      definitionService.deleteAgent(persisted.getName(), String.valueOf(persisted.getVersion()));
+      definitionService.deleteAgent(persisted.name(), String.valueOf(persisted.version()));
       if (mcpServers.getByName(server.getName()).isPresent()) {
         mcpServerService.deleteServer(server.getName(), currentServerVersion(server.getName()));
       }
@@ -380,7 +380,7 @@ class CatalogReferenceLockIntegrationTest extends PostgresSpringTestSupport {
           results.stream().filter(AiVersionConflictException.class::isInstance).count(),
           results::toString);
       AgentDefinition persisted = definitionRepository.getByName(created.getName());
-      definitionService.deleteAgent(persisted.getName(), String.valueOf(persisted.getVersion()));
+      definitionService.deleteAgent(persisted.name(), String.valueOf(persisted.version()));
     } finally {
       start.countDown();
       executor.shutdownNow();

@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.platform.catalog.skill.service.impl;
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Component;
 
-import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.skill.repo.SkillPackageRepository;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
