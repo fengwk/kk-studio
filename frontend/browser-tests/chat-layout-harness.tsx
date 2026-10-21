@@ -2,28 +2,28 @@ import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import '@/styles.css'
 import { setLocale } from '@/shared/i18n'
-import { ChatLayoutSelector } from '@/features/ai/chat/ChatWorkspacePage'
+import { ChatLayoutSelector } from '@/features/chat/ChatWorkspacePage'
 import {
   applyChatLayout,
   visibleChatPanes,
   type ChatLayout,
   type ChatPaneState,
-} from '@/features/ai/chat/chat-pane-state'
-import { ThreadStatusFooter } from '@/features/ai/runtime/thread-panel/ThreadStatusFooter'
-import { ThinkingBlock } from '@/features/ai/runtime/thread-panel/messages/ThinkingBlock'
-import { UserMessageBlock } from '@/features/ai/runtime/thread-panel/messages/UserMessageBlock'
-import { MetaMessageBlock } from '@/features/ai/runtime/thread-panel/messages/MetaMessageBlock'
-import { MessageList } from '@/features/ai/runtime/thread-panel/messages/MessageList'
-import { EntryBranchContext } from '@/features/ai/runtime/thread-panel/entry-branch-context'
-import { buildThreadTimeline } from '@/features/ai/runtime/thread-timeline-builder'
+} from '@/features/chat/chat-pane-state'
+import { ThreadStatusFooter } from '@/features/chat/runtime/thread-panel/ThreadStatusFooter'
+import { ThinkingBlock } from '@/features/chat/runtime/thread-panel/messages/ThinkingBlock'
+import { UserMessageBlock } from '@/features/chat/runtime/thread-panel/messages/UserMessageBlock'
+import { MetaMessageBlock } from '@/features/chat/runtime/thread-panel/messages/MetaMessageBlock'
+import { MessageList } from '@/features/chat/runtime/thread-panel/messages/MessageList'
+import { EntryBranchContext } from '@/features/chat/runtime/thread-panel/entry-branch-context'
+import { buildThreadTimeline } from '@/features/chat/runtime/thread-timeline-builder'
 import type { HarnessSessionEntryDTO } from '@/shared/api/contracts/ai-runtime'
 import { Button } from '@/shared/ui/controls/Button'
-import { formatTurnUsageText } from '@/features/ai/runtime/thread-timeline/content-utils'
+import { formatTurnUsageText } from '@/features/chat/runtime/thread-timeline/content-utils'
 import type {
   MetaDialogueMessage,
   TextDialogueMessage,
   TurnUsage,
-} from '@/features/ai/runtime/thread-timeline-types'
+} from '@/features/chat/runtime/thread-timeline-types'
 
 setLocale('zh-CN')
 

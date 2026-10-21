@@ -2,9 +2,9 @@ import { useCallback, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import '@/styles.css'
 import { setLocale } from '@/shared/i18n'
-import { ThreadComposer } from '@/features/ai/runtime/thread-panel/ThreadComposer'
-import { THREAD_COMMANDS } from '@/features/ai/runtime/thread-panel/thread-commands'
-import type { ComposerPart, HashFile, StorageService } from '@/features/ai/composer'
+import { ThreadComposer } from '@/features/chat/runtime/thread-panel/ThreadComposer'
+import { THREAD_COMMANDS } from '@/features/chat/runtime/thread-panel/thread-commands'
+import type { ComposerPart, HashFile, StorageService } from '@/features/chat/composer'
 
 setLocale('zh-CN')
 

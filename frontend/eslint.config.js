@@ -44,8 +44,8 @@ export default tseslint.config(
   },
   {
     files: [
-      'src/features/ai/runtime/thread-panel/**/*.{ts,tsx}',
-      'src/features/ai/runtime/thread-timeline-types.ts',
+      'src/features/chat/runtime/thread-panel/**/*.{ts,tsx}',
+      'src/features/chat/runtime/thread-timeline-types.ts',
     ],
     rules: {
       'no-restricted-imports': [
@@ -57,7 +57,7 @@ export default tseslint.config(
               message: 'Portable thread presentation must receive data through props.',
             },
             {
-              name: '@/features/ai/runtime/thread-timeline',
+              name: '@/features/chat/runtime/thread-timeline',
               message: 'Import the pure thread-timeline-types contract instead of the Harness adapter barrel.',
             },
           ],
@@ -79,11 +79,11 @@ export default tseslint.config(
                 // Catch-all: any feature dependency (ignore treats `*` as matching `/`).
                 // Allowed local presentation modules are restored by the leading `!` patterns.
                 '@/features/*',
-                '!@/features/ai',
+                '!@/features/chat',
                 // Allowed: local thread-panel + the pure thread-timeline-types contract.
-                '!@/features/ai/runtime/thread-panel',
-                '!@/features/ai/runtime/thread-panel/*',
-                '!@/features/ai/runtime/thread-timeline-types',
+                '!@/features/chat/runtime/thread-panel',
+                '!@/features/chat/runtime/thread-panel/*',
+                '!@/features/chat/runtime/thread-timeline-types',
               ],
               message:
                 'Portable thread panel must consume only thread-timeline-types and local thread-panel modules; API, query, controller, realtime, and Entry projection concerns stay outside.',
@@ -94,7 +94,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['src/features/ai/runtime/thread-timeline-types.ts'],
+    files: ['src/features/chat/runtime/thread-timeline-types.ts'],
     rules: {
       'no-restricted-imports': [
         'error',
@@ -149,8 +149,11 @@ export default tseslint.config(
     },
   },
   {
-    files: ['src/features/ai/**/*.{ts,tsx}'],
-    ignores: ['src/features/ai/**/*.test.{ts,tsx}', 'src/features/ai/**/__tests__/**'],
+    files: ['src/features/{chat,catalog,environment,extensions}/**/*.{ts,tsx}'],
+    ignores: [
+      'src/features/{chat,catalog,environment,extensions}/**/*.test.{ts,tsx}',
+      'src/features/{chat,catalog,environment,extensions}/**/__tests__/**',
+    ],
     rules: {
       'no-restricted-imports': [
         'error',
@@ -169,7 +172,7 @@ export default tseslint.config(
                 '../*/projects',
                 '../*/projects/*',
               ],
-              message: 'AI feature must not depend on projects feature.',
+              message: 'AI console features must not depend on projects feature.',
             },
           ],
         },

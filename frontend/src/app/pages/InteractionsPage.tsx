@@ -14,8 +14,8 @@ import type { InteractionDTO } from '@/shared/api/contracts/ai-interaction'
 import { projectsApi } from '@/features/projects/projects-api'
 import { useI18n } from '@/shared/i18n'
 import { interactionIdentity } from '@/shared/lib/interactions'
-import { InteractionCardBody } from '@/features/ai/runtime/interactions/InteractionCardBody'
-import { useInteractionsController } from '@/features/ai/runtime/interactions/useInteractionsController'
+import { InteractionCardBody } from '@/features/chat/runtime/interactions/InteractionCardBody'
+import { useInteractionsController } from '@/features/chat/runtime/interactions/useInteractionsController'
 
 export function InteractionsPage() {
   const { t } = useI18n()

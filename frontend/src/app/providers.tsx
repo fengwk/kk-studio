@@ -4,7 +4,7 @@ import { applicationContributions } from '@/app/application-contributions'
 import { BrowserPreferencesProvider } from '@/features/settings/browser-preferences'
 import { ApplicationEventProvider } from '@/shared/app-events'
 import { ApplicationContributionsProvider } from '@/platform/extensions/ApplicationContributionsContext'
-import { IdeLifecycleProvider } from '@/features/ai/ide/IdeLifecycleProvider'
+import { IdeLifecycleProvider } from '@/features/environment/ide/IdeLifecycleProvider'
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } },

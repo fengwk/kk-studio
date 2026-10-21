@@ -125,4 +125,44 @@ export const sharedCatalog = {
     'en-US': 'Retry',
     'zh-CN': '重试',
   },
+  'ai.common.loadingResources': {
+    'en-US': 'Loading resources',
+    'zh-CN': '正在加载资源',
+  },
+  'ai.common.resourceLoadFailed': {
+    'en-US': 'Failed to load resources',
+    'zh-CN': '资源加载失败',
+  },
+  'ai.common.operationFailed': {
+    'en-US': 'Operation failed. Please try again.',
+    'zh-CN': '操作失败，请稍后重试',
+  },
+  'ai.common.loadingAgent': {
+    'en-US': 'Loading Agent',
+    'zh-CN': '正在加载 Agent',
+  },
+  'ai.common.loadingModel': {
+    'en-US': 'Loading Model',
+    'zh-CN': '正在加载 Model',
+  },
+  'ai.common.loadingProvider': {
+    'en-US': 'Loading Provider',
+    'zh-CN': '正在加载 Provider',
+  },
+  'ai.common.loadingEnvironment': {
+    'en-US': 'Loading Environment',
+    'zh-CN': '正在加载 Environment',
+  },
+  'ai.common.loadingResourceEditor': {
+    'en-US': 'Loading resource editor',
+    'zh-CN': '正在加载资源编辑器',
+  },
+  'ai.common.loadingConfirmDialog': {
+    'en-US': 'Loading confirmation dialog',
+    'zh-CN': '正在加载确认对话框',
+  },
+  'ai.common.loadingMcpServer': {
+    'en-US': 'Loading MCP Servers',
+    'zh-CN': '正在加载 MCP 服务',
+  },
 } satisfies LocaleCatalog

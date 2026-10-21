@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { ArrowDown, ArrowUp, X } from 'lucide-react'
-import { buildPermissionToolCandidates } from '@/features/ai/catalog/agent-capability-candidates'
+import { buildPermissionToolCandidates } from '@/features/catalog/agent-capability-candidates'
 import {
   addRule,
   addTool,

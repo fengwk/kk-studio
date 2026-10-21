@@ -391,7 +391,7 @@ payload 只含 settings、不物化任何委派运行树元数据。
 创建 Session/Thread 才使用 owner-aware 的 `/api/command-batches`。
 同一 tool batch 中，某个调用已经成功而另一个仍在等待审批时，成功调用按其自身结果展示，
 等待审批的调用保持未决；durable 工具结果到达后只保留这一权威结果。
-[`ThreadWorkspacePage.test.tsx`](../../frontend/src/features/ai/thread/ThreadWorkspacePage.test.tsx)
+[`ThreadWorkspacePage.test.tsx`](../../frontend/src/features/chat/thread/ThreadWorkspacePage.test.tsx)
 通过真实组件验证根/子代理身份分流、子代理零写控制入口、实际查看身份与只读树/Debug 动作，
 以及非法 ID、加载失败、直接父入口和换路由时旧身份/动作立即失效；
 这些是 jsdom 回归，不替代真实浏览器验证。

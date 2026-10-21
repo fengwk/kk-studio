@@ -6,10 +6,10 @@ export default defineConfig({
   test: {
     ...base.test,
     include: [
-      'src/features/ai/environment/install-command.test.ts',
-      'src/features/ai/environment/install-command.windows.test.ts',
-      'src/features/ai/environment/EnvironmentInstallModal.test.tsx',
-      'src/features/ai/environment/EnvironmentsPage.test.tsx',
+      'src/features/environment/install-command.test.ts',
+      'src/features/environment/install-command.windows.test.ts',
+      'src/features/environment/EnvironmentInstallModal.test.tsx',
+      'src/features/environment/EnvironmentsPage.test.tsx',
       'src/shared/api/environment-service.test.ts',
       'src/shared/ui/feedback/Toast.test.tsx',
       'src/shared/ui/controls/Select.test.tsx',
@@ -18,8 +18,8 @@ export default defineConfig({
       reporter: ['text', 'html', 'json-summary'],
       reportsDirectory: '.reports/install-coverage',
       include: [
-        'src/features/ai/environment/install-command.ts',
-        'src/features/ai/environment/EnvironmentInstallModal.tsx',
+        'src/features/environment/install-command.ts',
+        'src/features/environment/EnvironmentInstallModal.tsx',
         'src/shared/api/environment-service.ts',
         'src/shared/ui/feedback/Toast.tsx',
       ],

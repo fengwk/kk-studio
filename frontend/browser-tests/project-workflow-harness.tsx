@@ -5,13 +5,13 @@ import { createBrowserRouter, RouterProvider, Route, Routes, useNavigate } from 
 import '@/styles.css'
 import { setLocale } from '@/shared/i18n'
 import { ApplicationEventProvider } from '@/shared/app-events'
-import { IdeLifecycleProvider } from '@/features/ai/ide/IdeLifecycleProvider'
+import { IdeLifecycleProvider } from '@/features/environment/ide/IdeLifecycleProvider'
 import { ProjectsInvalidationBridge } from '@/features/projects/extensions/projects-extension'
 import { ProjectDetailPage } from '@/features/projects/ProjectDetailPage'
 import { ProjectsPage } from '@/features/projects/ProjectsPage'
 import { IssueDetailModal } from '@/features/projects/components/IssueDetailModal'
-import { ThreadLink } from '@/features/ai/runtime/ThreadLink'
-import '@/features/ai/runtime/thread-panel/messages/tool-card.css'
+import { ThreadLink } from '@/features/chat/runtime/ThreadLink'
+import '@/features/chat/runtime/thread-panel/messages/tool-card.css'
 
 setLocale('zh-CN')
 const client = new QueryClient({
