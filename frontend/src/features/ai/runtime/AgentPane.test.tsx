@@ -3404,10 +3404,8 @@ function previewResponse(overrides: Partial<ProviderRequestPreviewDTO> = {}): Pr
           kind: 'MESSAGE',
           localDraft: [{ type: 'text', partId: 'p-reload', text: 'reload test message' }],
           goalText: null,
-          // 既有 Thread 的冻结请求：只有精确 CAS 游标与命令，没有 owner/target。
+          // 既有 Thread 的单条纯消息冻结请求：只有命令，不带 CAS 游标，也没有 owner/target。
           request: {
-            expectedHeadEntryId: 'h1',
-            expectedNextCommandSequence: '1',
             commands: [
               {
                 type: 'USER_MESSAGE',
