@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { SettingsToolbar } from '@/features/settings/SettingsToolbar'
 import { GeneralTab } from '@/features/settings/tabs/GeneralTab'
-import { PluginsTab } from '@/features/ai/plugins/PluginsTab'
+import { PluginsTab } from '@/features/extensions/PluginsTab'
 import {
   GENERAL_SETTINGS_TAB,
   PLUGINS_SETTINGS_TAB,

@@ -1,0 +1,610 @@
+import type {
+  ToolInvocationDTO,
+} from '@/shared/api/contracts/ai-runtime'
+import { isCanonicalUuid } from '@/shared/lib/uuid'
+import {
+  getString,
+  isNonBlankString,
+  isPositiveInteger,
+  isRecord,
+  stringifyJson,
+  timestampString,
+  toEpochMillis,
+} from '@/features/chat/runtime/thread-realtime/realtime-values'
+
+export interface RealtimeToolPartial {
+  threadId: string
+  invocationId: string
+  attempt: number
+  /**
+   * 生产端为这一条投影事件生成的 canonical UUID。重投递复用同一值，是普通 partial 的
+   * 唯一去重键；不同 eventId 的同 ms、同 payload 事件必须各自追加。
+   */
+  eventId: string
+  /** 规范的 partial ToolResult payload：{toolCallId, contents, error, details}。 */
+  payload: Record<string, unknown>
+  createdAt: string
+}
+
+export const PROCESS_OUTPUT_MAX_CHARS = 512 * 1024
+
+export const PROCESS_OUTPUT_MAX_LINES = 2000
+
+export const PROCESS_OUTPUT_OMISSION_MARKER = '... [output omitted] ...'
+
+export interface ProcessOutputDetails {
+  kind: 'process.output'
+  mode: 'APPEND' | 'SNAPSHOT'
+  startOffset: number
+  endOffset: number
+  observedBytes: number
+}
+
+export interface ProcessOutputStreamState {
+  mode: 'APPEND' | 'SNAPSHOT'
+  startOffset: number
+  endOffset: number
+  observedBytes: number
+  hasOmittedPrefix?: boolean
+  gapPending?: boolean
+}
+
+/** 一次 invocation attempt 的瞬态 tool-result overlay。 */
+export interface RealtimeToolStream {
+  threadId: string
+  invocationId: string
+  attempt: number
+  toolCallId: string
+  text: string
+  error: boolean
+  /** 在尚无 result Entry 时，从持久 errorJson 投影出的错误消息。 */
+  errorText?: string
+  /** Environment process.output 结构化流状态（mode、offsets、observedBytes、omission）。 */
+  processOutput?: ProcessOutputStreamState
+  createdAt: string
+}
+
+/** 用于 partial overlay 聚合的规范 ToolResult JSON 字段名。 */
+const TOOL_RESULT_CONTENTS_KEY = 'contents'
+
+const TOOL_RESULT_TOOL_CALL_ID_KEY = 'toolCallId'
+
+const TOOL_RESULT_ERROR_KEY = 'error'
+
+/** 将 TOOL_PARTIAL realtime 事件解析为它的规范 payload（严格 shape，含 canonical eventId identity）。 */
+export function parseRealtimeToolPartial(data: unknown): RealtimeToolPartial | null {
+  if (typeof data !== 'string') {
+    return null
+  }
+  let envelope: Record<string, unknown>
+  try {
+    const parsed: unknown = JSON.parse(data)
+    if (!isRecord(parsed)) {
+      return null
+    }
+    envelope = parsed
+  } catch {
+    return null
+  }
+  if (
+    envelope.type !== 'TOOL_PARTIAL'
+    || envelope.subjectKind !== 'TOOL_INVOCATION'
+    || !isNonBlankString(envelope.threadId)
+    || !isNonBlankString(envelope.subjectId)
+    || !isPositiveInteger(envelope.attempt)
+    || typeof envelope.eventId !== 'string'
+    || !isCanonicalUuid(envelope.eventId)
+    || envelope.eventId !== envelope.eventId.toLowerCase()
+    || !isNonBlankString(envelope.createdAt)
+    || !isRecord(envelope.payload)
+  ) {
+    return null
+  }
+  return {
+    threadId: envelope.threadId,
+    invocationId: envelope.subjectId,
+    attempt: envelope.attempt,
+    eventId: envelope.eventId,
+    payload: envelope.payload,
+    createdAt: envelope.createdAt,
+  }
+}
+
+/**
+ * 从活动 ToolInvocation 中派生瞬态 tool-result overlay（invocation 已消失则返回
+ * null）。ToolResult Entry 写入与 invocation 删除在同一事务原子提交：invocation
+ * 仍存在说明持久结果尚未物化，此时先给出已持久化的 text 与 error 摘要；Entry 落地后
+ * invocation 随即从 snapshot 消失。
+ */
+export function snapshotToolStream(
+  invocation: ToolInvocationDTO | null,
+  threadId: string,
+): RealtimeToolStream | null {
+  if (invocation == null) {
+    return null
+  }
+  const base = {
+    threadId,
+    invocationId: invocation.id,
+    attempt: invocation.attempt,
+    toolCallId: invocation.toolCallId,
+    text: '',
+    error: false,
+    createdAt: timestampString(invocation.updateTime) || timestampString(invocation.createTime),
+  }
+  const result = parseToolResultPayload(invocation.resultJson)
+  if (result != null) {
+    return {
+      ...base,
+      text: result.text,
+      error: result.error,
+    }
+  }
+  const errorText = parseToolErrorText(invocation.errorJson)
+  if (errorText != null) {
+    return { ...base, error: true, errorText }
+  }
+  return base
+}
+
+/** 将规范的 ToolResult JSON 解析为 text + error 标记。 */
+function parseToolResultPayload(json: string | null): {
+  text: string
+  error: boolean
+} | null {
+  if (json == null || !json.trim()) {
+    return null
+  }
+  try {
+    const value: unknown = JSON.parse(json)
+    if (!isRecord(value)) {
+      return null
+    }
+    return { text: partialText(value), error: value[TOOL_RESULT_ERROR_KEY] === true }
+  } catch {
+    return null
+  }
+}
+
+/** 将规范的错误 JSON 解析为用于展示的 message（不存在时返回 null）。 */
+export function parseToolErrorText(json: string | null): string | null {
+  if (json == null || !json.trim()) {
+    return null
+  }
+  try {
+    const value: unknown = JSON.parse(json)
+    if (isRecord(value)) {
+      const message = value.message
+      if (typeof message === 'string' && message.trim()) {
+        return message
+      }
+    }
+    return json
+  } catch {
+    return json
+  }
+}
+
+export function parseProcessOutputDetails(details: unknown): ProcessOutputDetails | null {
+  let record: Record<string, unknown> | null = null
+  if (isRecord(details)) {
+    record = details
+  } else if (typeof details === 'string' && details.trim()) {
+    try {
+      const parsed: unknown = JSON.parse(details)
+      if (isRecord(parsed)) {
+        record = parsed
+      }
+    } catch {
+      return null
+    }
+  }
+  if (record == null || record.kind !== 'process.output') {
+    return null
+  }
+  const rawMode = typeof record.mode === 'string' ? record.mode.toUpperCase() : ''
+  if (rawMode !== 'APPEND' && rawMode !== 'SNAPSHOT') {
+    return null
+  }
+  const mode = rawMode as 'APPEND' | 'SNAPSHOT'
+  const startOffset =
+    typeof record.startOffset === 'number'
+    && Number.isSafeInteger(record.startOffset)
+    && record.startOffset >= 0
+      ? record.startOffset
+      : null
+  const endOffset =
+    typeof record.endOffset === 'number'
+    && Number.isSafeInteger(record.endOffset)
+    && record.endOffset >= 0
+      ? record.endOffset
+      : null
+  const observedBytes =
+    typeof record.observedBytes === 'number'
+    && Number.isSafeInteger(record.observedBytes)
+    && record.observedBytes >= 0
+      ? record.observedBytes
+      : null
+
+  if (
+    startOffset == null
+    || endOffset == null
+    || observedBytes == null
+    || endOffset < startOffset
+  ) {
+    return null
+  }
+
+  return {
+    kind: 'process.output',
+    mode,
+    startOffset,
+    endOffset,
+    observedBytes,
+  }
+}
+
+export function isProcessOutputPartial(payload: Record<string, unknown>): boolean {
+  return parseProcessOutputDetails(payload.details) != null
+}
+
+export function boundProcessOutputText(
+  rawText: string,
+  forceOmissionMarker = false,
+): { text: string; hasOmittedPrefix: boolean } {
+  let content = rawText
+  let hasOmission = forceOmissionMarker
+  if (content.startsWith(PROCESS_OUTPUT_OMISSION_MARKER + '\n')) {
+    content = content.slice(PROCESS_OUTPUT_OMISSION_MARKER.length + 1)
+    hasOmission = true
+  } else if (content === PROCESS_OUTPUT_OMISSION_MARKER) {
+    content = ''
+    hasOmission = true
+  }
+
+  const lines = content.split('\n')
+  if (lines.length > PROCESS_OUTPUT_MAX_LINES) {
+    content = lines.slice(-PROCESS_OUTPUT_MAX_LINES).join('\n')
+    hasOmission = true
+  }
+
+  if (content.length > PROCESS_OUTPUT_MAX_CHARS) {
+    let sliced = content.slice(-PROCESS_OUTPUT_MAX_CHARS)
+    const firstNewline = sliced.indexOf('\n')
+    if (firstNewline !== -1 && firstNewline < 1024) {
+      sliced = sliced.slice(firstNewline + 1)
+    }
+    content = sliced
+    hasOmission = true
+  }
+
+  const resultText = hasOmission
+    ? (content ? `${PROCESS_OUTPUT_OMISSION_MARKER}\n${content}` : PROCESS_OUTPUT_OMISSION_MARKER)
+    : content
+
+  return {
+    text: resultText,
+    hasOmittedPrefix: hasOmission,
+  }
+}
+
+/**
+ * 将一条 TOOL_PARTIAL chunk 聚合到 overlay 中：只有 text/json chunk 会追加到 text。
+ * 支持 process.output 结构化流（APPEND / SNAPSHOT / gap healing / offset 去重与 UI 有界裁剪）。
+ * runtime 禁止 TOOL_PARTIAL 携带 Resource 内容，因此 attachments 不会在这里聚合——
+ * 它们仅由 {@link snapshotToolStream} 从持久终止态 resultJson 投影得到。
+ * attempt 发生变化（即重试）时会替换掉之前所有的片段。
+ */
+export function reduceRealtimeToolStream(
+  current: RealtimeToolStream | null,
+  partial: RealtimeToolPartial,
+): RealtimeToolStream {
+  const chunkText = partialText(partial.payload)
+  const processDetails = parseProcessOutputDetails(partial.payload.details)
+  const isNewAttempt =
+    current == null
+    || current.threadId !== partial.threadId
+    || current.invocationId !== partial.invocationId
+    || current.attempt !== partial.attempt
+
+  if (isNewAttempt) {
+    if (processDetails != null) {
+      if (processDetails.mode === 'SNAPSHOT') {
+        const bounded = boundProcessOutputText(chunkText, processDetails.startOffset > 0)
+        return {
+          threadId: partial.threadId,
+          invocationId: partial.invocationId,
+          attempt: partial.attempt,
+          toolCallId: getString(partial.payload[TOOL_RESULT_TOOL_CALL_ID_KEY]) || '',
+          text: bounded.text,
+          error: partial.payload[TOOL_RESULT_ERROR_KEY] === true,
+          processOutput: {
+            mode: 'SNAPSHOT',
+            startOffset: processDetails.startOffset,
+            endOffset: processDetails.endOffset,
+            observedBytes: processDetails.observedBytes,
+            hasOmittedPrefix: bounded.hasOmittedPrefix,
+            gapPending: false,
+          },
+          createdAt: partial.createdAt,
+        }
+      }
+      if (processDetails.startOffset === 0) {
+        const bounded = boundProcessOutputText(chunkText, false)
+        return {
+          threadId: partial.threadId,
+          invocationId: partial.invocationId,
+          attempt: partial.attempt,
+          toolCallId: getString(partial.payload[TOOL_RESULT_TOOL_CALL_ID_KEY]) || '',
+          text: bounded.text,
+          error: partial.payload[TOOL_RESULT_ERROR_KEY] === true,
+          processOutput: {
+            mode: 'APPEND',
+            startOffset: 0,
+            endOffset: processDetails.endOffset,
+            observedBytes: processDetails.observedBytes,
+            hasOmittedPrefix: bounded.hasOmittedPrefix,
+            gapPending: false,
+          },
+          createdAt: partial.createdAt,
+        }
+      }
+      return {
+        threadId: partial.threadId,
+        invocationId: partial.invocationId,
+        attempt: partial.attempt,
+        toolCallId: getString(partial.payload[TOOL_RESULT_TOOL_CALL_ID_KEY]) || '',
+        text: '',
+        error: partial.payload[TOOL_RESULT_ERROR_KEY] === true,
+        processOutput: {
+          mode: 'APPEND',
+          startOffset: 0,
+          endOffset: 0,
+          observedBytes: processDetails.observedBytes,
+          hasOmittedPrefix: false,
+          gapPending: true,
+        },
+        createdAt: partial.createdAt,
+      }
+    }
+
+    return {
+      threadId: partial.threadId,
+      invocationId: partial.invocationId,
+      attempt: partial.attempt,
+      toolCallId: getString(partial.payload[TOOL_RESULT_TOOL_CALL_ID_KEY]) || '',
+      text: chunkText,
+      error: partial.payload[TOOL_RESULT_ERROR_KEY] === true,
+      createdAt: partial.createdAt,
+    }
+  }
+
+  const nextError = current.error || partial.payload[TOOL_RESULT_ERROR_KEY] === true
+
+  if (processDetails != null) {
+    if (processDetails.mode === 'SNAPSHOT') {
+      const snapshot = classifySnapshot(current, partial.createdAt, processDetails)
+      if (snapshot === 'STALE') {
+        // 陈旧快照（乱序/重放或重复的截断快照）绝不覆盖更新的文本与偏移，只允许单调加宽 error。
+        if (nextError !== current.error) {
+          return {
+            ...current,
+            error: nextError,
+          }
+        }
+        return current
+      }
+      const bounded = boundProcessOutputText(chunkText, processDetails.startOffset > 0)
+      return {
+        ...current,
+        text: bounded.text,
+        error: nextError,
+        processOutput: {
+          mode: 'SNAPSHOT',
+          startOffset: processDetails.startOffset,
+          endOffset: processDetails.endOffset,
+          // 重置快照建立全新的流基线：绝不让旧流的 observedBytes 通过 Math.max 泄漏进新流。
+          observedBytes:
+            snapshot === 'RESET'
+              ? processDetails.observedBytes
+              : Math.max(
+                  current.processOutput?.observedBytes ?? 0,
+                  processDetails.observedBytes,
+                ),
+          hasOmittedPrefix: bounded.hasOmittedPrefix,
+          gapPending: false,
+        },
+        createdAt: monotonicCreatedAt(current.createdAt, partial.createdAt),
+      }
+    }
+
+    const currentEndOffset = current.processOutput?.endOffset ?? 0
+    const gapPending = current.processOutput?.gapPending === true
+
+    if (
+      processDetails.endOffset <= currentEndOffset
+      || processDetails.startOffset < currentEndOffset
+    ) {
+      if (nextError !== current.error) {
+        return {
+          ...current,
+          error: nextError,
+        }
+      }
+      return current
+    }
+
+    if (gapPending || processDetails.startOffset > currentEndOffset) {
+      const nextObservedBytes = Math.max(
+        current.processOutput?.observedBytes ?? 0,
+        processDetails.observedBytes,
+      )
+      if (
+        current.processOutput?.gapPending
+        && nextError === current.error
+        && nextObservedBytes === current.processOutput.observedBytes
+      ) {
+        return current
+      }
+      return {
+        ...current,
+        error: nextError,
+        processOutput: {
+          mode: 'APPEND',
+          startOffset: current.processOutput?.startOffset ?? 0,
+          endOffset: currentEndOffset,
+          observedBytes: nextObservedBytes,
+          hasOmittedPrefix: current.processOutput?.hasOmittedPrefix ?? false,
+          gapPending: true,
+        },
+        createdAt: monotonicCreatedAt(current.createdAt, partial.createdAt),
+      }
+    }
+
+    const unconstrained = current.text + chunkText
+    const bounded = boundProcessOutputText(
+      unconstrained,
+      current.processOutput?.hasOmittedPrefix ?? false,
+    )
+    return {
+      ...current,
+      text: bounded.text,
+      error: nextError,
+      processOutput: {
+        mode: 'APPEND',
+        startOffset: current.processOutput?.startOffset ?? 0,
+        endOffset: processDetails.endOffset,
+        observedBytes: Math.max(
+          current.processOutput?.observedBytes ?? 0,
+          processDetails.observedBytes,
+        ),
+        hasOmittedPrefix: bounded.hasOmittedPrefix,
+        gapPending: false,
+      },
+      createdAt: monotonicCreatedAt(current.createdAt, partial.createdAt),
+    }
+  }
+
+  if (!chunkText && nextError === current.error) {
+    return current
+  }
+  return {
+    ...current,
+    text: current.text + chunkText,
+    error: nextError,
+    createdAt: monotonicCreatedAt(current.createdAt, partial.createdAt),
+  }
+}
+
+/**
+ * 分类一次 SNAPSHOT 相对当前 overlay 的关系。
+ *
+ * <p>基于单调递增的 {@code observedBytes} 与字节偏移（{@code startOffset}/{@code endOffset}）
+ * 结合事件时间戳（{@code createdAt}）判定快照的新鲜度与重置语义：
+ *
+ * <ul>
+ *   <li>{@code STALE}：陈旧或重复快照。包括：
+ *     1) 时间戳严格早于当前状态（乱序/重放到达）；
+ *     2) 时间戳不晚于当前状态时声明了更小的结束偏移（流内乱序到达的历史帧）；
+ *     3) 与当前已应用的 SNAPSHOT 具有相同区间且未观测到更多字节（重复快照）。
+ *     陈旧快照绝不覆盖或回退已应用的文本与偏移，只允许单调加宽 {@code error}。
+ *   <li>{@code RESET}：合法的新流重置快照。
+ *     时间戳严格晚于当前状态，但声明了更小的结束偏移（例如新进程/命令从 0 开始）。
+ *     此时必须干净重置 text、offsets、observedBytes 与 gapPending，建立全新流基线。
+ *   <li>{@code FORWARD}：合法向前推进或修复 gap 的快照（偏移单调前进、APPEND 后的截断快照、或修复 pending gap）。
+ * </ul>
+ */
+function classifySnapshot(
+  current: RealtimeToolStream,
+  createdAt: string,
+  details: ProcessOutputDetails,
+): 'STALE' | 'RESET' | 'FORWARD' {
+  const applied = current.processOutput
+  if (applied == null) {
+    return 'FORWARD'
+  }
+  const currentMillis = toEpochMillis(current.createdAt)
+  const partialMillis = toEpochMillis(createdAt)
+
+  // 1. 时间戳严格早于当前状态：必为乱序/重放的历史快照。
+  if (partialMillis != null && currentMillis != null && partialMillis < currentMillis) {
+    return 'STALE'
+  }
+
+  // 2. 结束偏移回退：
+  if (details.endOffset < applied.endOffset) {
+    // 仅当时间戳严格晚于当前状态时，才视为新流合法重置（如新命令从 0 开始）；
+    // 否则（时间戳相同、更早或不可比较）属于流内乱序旧快照，必须作为 STALE 丢弃。
+    if (partialMillis != null && currentMillis != null && partialMillis > currentMillis) {
+      return 'RESET'
+    }
+    return 'STALE'
+  }
+
+  // 3. 结束偏移相同：
+  if (details.endOffset === applied.endOffset) {
+    // 当前已处于 SNAPSHOT 且起止区间与 observedBytes 均未推进，且无待修复的 gap：视为重复快照。
+    if (
+      applied.mode === 'SNAPSHOT'
+      && !applied.gapPending
+      && details.startOffset === applied.startOffset
+      && details.observedBytes <= applied.observedBytes
+    ) {
+      return 'STALE'
+    }
+    // 其余相同 endOffset 的情况（如 APPEND 后的截断快照、gapPending 修复、或更窄的 tail 预览）均属合法向前更新。
+    return 'FORWARD'
+  }
+
+  // 4. endOffset > applied.endOffset：正常推进或修复 gap。
+  return 'FORWARD'
+}
+
+/** 同一 attempt 的 process.output 时间戳只允许单调前进，避免乱序帧污染后续快照分类基线。 */
+function monotonicCreatedAt(current: string, candidate: string): string {
+  const currentMillis = toEpochMillis(current)
+  const candidateMillis = toEpochMillis(candidate)
+  if (candidateMillis == null) {
+    return current
+  }
+  if (currentMillis == null || candidateMillis > currentMillis) {
+    return candidate
+  }
+  return current
+}
+
+/** 当 tool partial overlay 属于同一 invocation attempt 且没有陈旧时返回 true。 */
+export function isRealtimeToolStreamActive(
+  current: RealtimeToolStream | null,
+  invocation: ToolInvocationDTO | null,
+): boolean {
+  return current != null
+    && invocation != null
+    && current.invocationId === invocation.id
+    && current.attempt === invocation.attempt
+}
+
+function partialText(payload: Record<string, unknown>): string {
+  const contents = Array.isArray(payload[TOOL_RESULT_CONTENTS_KEY])
+    ? (payload[TOOL_RESULT_CONTENTS_KEY] as unknown[])
+    : []
+  const parts: string[] = []
+  for (const item of contents) {
+    if (!isRecord(item)) {
+      continue
+    }
+    const type = item.type
+    if (type === 'text') {
+      const text = getString(item.text)
+      if (text) {
+        parts.push(text)
+      }
+    } else if (type === 'json') {
+      const json = stringifyJson(item.json)
+      if (json) {
+        parts.push(json)
+      }
+    }
+  }
+  return parts.join('\n')
+}

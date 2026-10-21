@@ -189,3 +189,41 @@ export function isNodeDirty(
     draft.groupId !== undefined,
   )
 }
+
+type DraftPositions = Record<string, { x: number; y: number }>
+
+/**
+ * 把一组 ACK 应用到草稿表与位置草稿：只有草稿 generation 不晚于 ACK 冻结值时才清除对应字段，等待期间追加的本地输入保持不变。
+ * 未发生变化时原样返回输入引用。
+ */
+export function applyDraftAcks(
+  drafts: Record<string, CanvasNodeDraft>,
+  positions: DraftPositions,
+  acks: ReadonlyArray<{ nodeId: string; field: 'position' | 'text' | 'function' | 'group'; generation?: number }>,
+): { drafts: Record<string, CanvasNodeDraft>; positions: DraftPositions; changed: boolean } {
+  const nextDrafts = { ...drafts }
+  const nextPositions = { ...positions }
+  let changed = false
+  for (const ack of acks) {
+    const draft = nextDrafts[ack.nodeId]
+    if (!draft) {
+      continue
+    }
+    if (ack.field === 'position' && (ack.generation === undefined || draft.generation <= ack.generation)) {
+      delete nextPositions[ack.nodeId]
+      changed = true
+    }
+    const next = removeDraftField(draft, ack.field === 'group' ? 'groupId' : ack.field, ack.generation)
+    if (next !== draft) {
+      if (next) {
+        nextDrafts[ack.nodeId] = next
+      } else {
+        delete nextDrafts[ack.nodeId]
+      }
+      changed = true
+    }
+  }
+  return changed
+    ? { drafts: nextDrafts, positions: nextPositions, changed }
+    : { drafts, positions, changed }
+}

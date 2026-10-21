@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import '@/styles.css'
-import { AssistantMessageBlock } from '@/features/ai/runtime/thread-panel/messages/AssistantMessageBlock'
-import type { TextDialogueMessage } from '@/features/ai/runtime/thread-timeline-types'
+import { AssistantMessageBlock } from '@/features/chat/runtime/thread-panel/messages/AssistantMessageBlock'
+import type { TextDialogueMessage } from '@/features/chat/runtime/thread-timeline-types'
 import { setLocale } from '@/shared/i18n'
 
 setLocale('zh-CN')

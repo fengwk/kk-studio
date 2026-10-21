@@ -4,9 +4,12 @@ import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 import { PRIMARY_NAV_ITEMS } from '@/app/navigation'
-import { aiExtension } from '@/features/ai/extensions/ai-extension.definition'
+import { aiExtension } from '@/app/ai-console/ai-extension.definition'
 import { createProjectsApi, projectsApi } from '@/features/projects'
 import { projectsExtension } from '@/features/projects/extensions/projects-extension.definition'
+
+/** 组成 AI 控制台的一级特性：它们与 Project 领域互相独立。 */
+const AI_CONSOLE_FEATURES = ['features/chat', 'features/catalog', 'features/environment', 'features/extensions']
 
 function resolvePath(relativePath: string): string {
   return fileURLToPath(new URL(relativePath, import.meta.url))
@@ -107,7 +110,7 @@ describe('Frontend architecture and entry contracts', () => {
       const violations: BoundaryViolation[] = []
       const relFile = path.relative(srcRoot, filePath).replace(/\\/g, '/')
       const isPlatform = relFile.startsWith('platform/')
-      const isAi = relFile.startsWith('features/ai/')
+      const isAi = AI_CONSOLE_FEATURES.some((feature) => relFile.startsWith(`${feature}/`))
 
       for (const imp of imports) {
         let resolvedTarget: string | null = null
@@ -160,7 +163,7 @@ describe('Frontend architecture and entry contracts', () => {
     it('rigorously detects synthetic violation inputs for both alias and relative imports', () => {
       // 测试意图：确保架构门禁能真实触发违规输入报错，而不是单纯扫当前文件树假通过。
       const mockPlatformFile = path.join(srcRoot, 'platform/shell/MockShell.ts')
-      const mockAiFile = path.join(srcRoot, 'features/ai/runtime/MockAgent.ts')
+      const mockAiFile = path.join(srcRoot, 'features/chat/runtime/MockAgent.ts')
 
       // 1. Platform 不能依赖 app（alias 与 relative 均触发）
       const p1 = checkImportBoundaries(mockPlatformFile, 'import { x } from "@/app/navigation"')
@@ -173,29 +176,29 @@ describe('Frontend architecture and entry contracts', () => {
       ])
 
       // 2. Platform 不能依赖 features（alias 与 relative 均触发）
-      const p3 = checkImportBoundaries(mockPlatformFile, 'import { x } from "@/features/ai"')
+      const p3 = checkImportBoundaries(mockPlatformFile, 'import { x } from "@/features/chat"')
       expect(p3).toEqual([
-        { file: 'platform/shell/MockShell.ts', specifier: '@/features/ai', reason: 'platform-depends-on-features' },
+        { file: 'platform/shell/MockShell.ts', specifier: '@/features/chat', reason: 'platform-depends-on-features' },
       ])
-      const p4 = checkImportBoundaries(mockPlatformFile, 'import { x } from "../../features/ai"')
+      const p4 = checkImportBoundaries(mockPlatformFile, 'import { x } from "../../features/chat"')
       expect(p4).toEqual([
-        { file: 'platform/shell/MockShell.ts', specifier: '../../features/ai', reason: 'platform-depends-on-features' },
+        { file: 'platform/shell/MockShell.ts', specifier: '../../features/chat', reason: 'platform-depends-on-features' },
       ])
 
       // 3. AI feature 不能反向依赖 projects（alias 与 relative 均触发）
       const a1 = checkImportBoundaries(mockAiFile, 'import { x } from "@/features/projects/projects-api"')
       expect(a1).toEqual([
-        { file: 'features/ai/runtime/MockAgent.ts', specifier: '@/features/projects/projects-api', reason: 'ai-depends-on-projects' },
+        { file: 'features/chat/runtime/MockAgent.ts', specifier: '@/features/projects/projects-api', reason: 'ai-depends-on-projects' },
       ])
       const a2 = checkImportBoundaries(mockAiFile, 'import { x } from "../../projects/projects-api"')
       expect(a2).toEqual([
-        { file: 'features/ai/runtime/MockAgent.ts', specifier: '../../projects/projects-api', reason: 'ai-depends-on-projects' },
+        { file: 'features/chat/runtime/MockAgent.ts', specifier: '../../projects/projects-api', reason: 'ai-depends-on-projects' },
       ])
 
       // 4. 合法导入（Platform 引用 shared 或同层 platform，AI 引用 shared 或同层 ai）零违规
       const validPlatform = checkImportBoundaries(mockPlatformFile, 'import { x } from "@/shared/api"; import { y } from "./types"')
       expect(validPlatform).toEqual([])
-      const validAi = checkImportBoundaries(mockAiFile, 'import { x } from "@/shared/api"; import { y } from "@/features/ai/catalog"')
+      const validAi = checkImportBoundaries(mockAiFile, 'import { x } from "@/shared/api"; import { y } from "@/features/catalog"')
       expect(validAi).toEqual([])
     })
 
@@ -209,8 +212,8 @@ describe('Frontend architecture and entry contracts', () => {
     })
 
     it('enforces AI feature does not reversely import projects feature', () => {
-      // 测试意图：验证当前仓库生产 features/ai 代码完全与 features/projects 解耦
-      const aiFiles = scanProductionFiles(path.join(srcRoot, 'features/ai'))
+      // 测试意图：验证 AI 控制台各特性（chat / catalog / environment / extensions）的生产代码完全与 features/projects 解耦
+      const aiFiles = AI_CONSOLE_FEATURES.flatMap((feature) => scanProductionFiles(path.join(srcRoot, feature)))
       expect(aiFiles.length).toBeGreaterThan(0)
 
       const violations = aiFiles.flatMap((file) => checkImportBoundaries(file))

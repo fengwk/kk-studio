@@ -5,9 +5,9 @@ import { createBrowserRouter, RouterProvider, Route, Routes, useNavigate } from 
 import '@/styles.css'
 import { setLocale } from '@/shared/i18n'
 import { ApplicationEventProvider } from '@/shared/app-events'
-import { IdeLifecycleProvider } from '@/features/ai/ide/IdeLifecycleProvider'
-import { AgentPane } from '@/features/ai/runtime/AgentPane'
-import { ThreadWorkspacePage } from '@/features/ai/thread/ThreadWorkspacePage'
+import { IdeLifecycleProvider } from '@/features/environment/ide/IdeLifecycleProvider'
+import { AgentPane } from '@/features/chat/runtime/AgentPane'
+import { ThreadWorkspacePage } from '@/features/chat/thread/ThreadWorkspacePage'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 
 setLocale('zh-CN')

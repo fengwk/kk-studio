@@ -8,7 +8,7 @@ import { ResourceCard } from '@/shared/ui/cards/ResourceCard'
 import { ResourceCardSkeleton } from '@/shared/ui/cards/ResourceCardSkeleton'
 import { ResourceGrid } from '@/shared/ui/cards/ResourceGrid'
 import { CreateCard } from '@/shared/ui/feedback/CreateCard'
-import { AiConsoleFrame } from '@/features/ai/extensions/AiConsoleFrame'
+import { AiConsoleFrame } from '@/app/ai-console/AiConsoleFrame'
 
 export function LoadingSkeletonHarnessApp() {
   const [clickCount, setClickCount] = useState(0)

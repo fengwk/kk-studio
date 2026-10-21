@@ -1,8 +1,8 @@
 import { createRoot } from 'react-dom/client'
 import { MemoryRouter } from 'react-router'
 import '@/styles.css'
-import { MessageList } from '@/features/ai/runtime/thread-panel/messages/MessageList'
-import { buildThreadTimeline } from '@/features/ai/runtime/thread-timeline'
+import { MessageList } from '@/features/chat/runtime/thread-panel/messages/MessageList'
+import { buildThreadTimeline } from '@/features/chat/runtime/thread-timeline'
 import { setLocale } from '@/shared/i18n'
 import type { HarnessSessionEntryDTO } from '@/shared/api/contracts/ai-runtime'
 

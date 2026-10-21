@@ -1,0 +1,535 @@
+import {
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type RefObject,
+} from 'react'
+import { AlertCircle } from 'lucide-react'
+import { Button } from '@/shared/ui/controls/Button'
+import { shouldDeferToBlockingModal } from '@/shared/ui/blocking-overlay'
+import type { ThreadEventRecord } from '@/features/chat/runtime/thread-events'
+import { ThreadModelRequestDebug } from '@/features/chat/runtime/thread-panel/ThreadModelRequestDebug'
+import {
+  ThreadDebugInspector,
+  type DebugInspectorSelection,
+} from '@/features/chat/runtime/thread-panel/ThreadDebugInspector'
+import { ThreadEventDetail } from '@/features/chat/runtime/thread-panel/ThreadEventDetail'
+import type {
+  ThreadModelRequestDebugData,
+  ThreadProviderRequestPreviewData,
+} from '@/features/chat/runtime/thread-timeline-types'
+import { useChatTranscriptAutoScroll } from '@/features/chat/runtime/useChatTranscriptAutoScroll'
+import { useI18n } from '@/shared/i18n'
+
+function pad(value: number): string {
+  return value.toString().padStart(2, '0')
+}
+
+function formatRowTime(value: ThreadEventRecord['createdAt']): string {
+  if (value == null || Array.isArray(value)) {
+    return '--:--:--'
+  }
+  const date = value instanceof Date ? value : new Date(value as string | number)
+  if (Number.isNaN(date.getTime())) {
+    return '--:--:--'
+  }
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+}
+
+export type DebugViewTab = 'preview' | 'events' | 'detail'
+
+const TAB_KEYS: DebugViewTab[] = ['preview', 'events', 'detail']
+
+export interface ThreadEventViewProps {
+  events: ThreadEventRecord[]
+  historyLoading?: boolean
+  historyError?: string | null
+  onRetryHistory?: () => void
+  selectedEventId: string | null
+  onSelectedEventIdChange: (eventId: string | null) => void
+  initialScrollTop?: number | null
+  bodyRef?: RefObject<HTMLDivElement | null>
+  debug?: ThreadModelRequestDebugData | null
+  /** Debug 请求投影的独立读取状态：loading/error 不被吞成「暂无请求预览数据」空态。 */
+  debugLoading?: boolean
+  debugError?: string | null
+  debugSelection?: DebugInspectorSelection | null
+  onSelectInspector?: (selection: DebugInspectorSelection | null) => void
+  /** 选中历史 ASSISTANT Entry 后按需读取到的调用前请求预览（只读）。 */
+  historicalPreview?: ThreadProviderRequestPreviewData | null
+  historicalPreviewLoading?: boolean
+  historicalPreviewError?: string | null
+  onRequestHistoricalPreview?: (entryId: string) => void
+  onDismissHistoricalPreview?: () => void
+}
+
+/**
+ * Debug 主视图：支持 3 区响应式布局。
+ *
+ * - 宽面板 (container >= 1100px)：规划与历史有界、详情占余宽，各列唯一纵向滚动；
+ * - 窄面板 (container < 1100px)：单区填满，通过带有 roving tabIndex 的 Tab 导航（请求预览 / 事件 / 详情）切换；
+ * - 点击事件 / 工具 / skill / request 自动切换到详情；关闭详情安全返回来源页签并恢复可见焦点；
+ * - 所有 ID 均基于 useId 作用域，防止在多 pane split 时冲突。
+ */
+export function ThreadEventView({
+  events,
+  historyLoading = false,
+  historyError = null,
+  onRetryHistory,
+  selectedEventId,
+  onSelectedEventIdChange,
+  initialScrollTop = null,
+  bodyRef: bodyRefProp,
+  debug,
+  debugLoading = false,
+  debugError = null,
+  debugSelection = null,
+  onSelectInspector,
+  historicalPreview = null,
+  historicalPreviewLoading = false,
+  historicalPreviewError = null,
+  onRequestHistoricalPreview,
+  onDismissHistoricalPreview,
+}: ThreadEventViewProps) {
+  const { t } = useI18n()
+  const baseId = useId()
+  const containerRef = useRef<HTMLDivElement>(null)
+  const internalBodyRef = useRef<HTMLDivElement>(null)
+  const bodyRef = bodyRefProp ?? internalBodyRef
+  const lastScrolledIdRef = useRef<string | null>(selectedEventId)
+
+  // 记录唤起详情的来源以及触发元素，以便关闭详情时切回并恢复可见焦点
+  const lastDetailSourceRef = useRef<'events' | 'preview'>(
+    debugSelection != null ? 'preview' : 'events',
+  )
+  const lastFocusedTriggerRef = useRef<HTMLElement | null>(null)
+  const detailCloseBtnRef = useRef<HTMLButtonElement>(null)
+  const pendingDetailFocusRef = useRef(false)
+  const tabButtonRefs = useRef<Record<DebugViewTab, HTMLButtonElement | null>>({
+    preview: null,
+    events: null,
+    detail: null,
+  })
+
+  // Tab 状态 (默认事件列)
+  const [activeTab, setActiveTab] = useState<DebugViewTab>(() => {
+    if (debugSelection != null || selectedEventId != null) {
+      return 'detail'
+    }
+    return 'events'
+  })
+
+  useEffect(() => {
+    pendingDetailFocusRef.current = debugSelection != null || selectedEventId != null
+    if (debugSelection != null || selectedEventId != null) {
+      setActiveTab('detail')
+    }
+  }, [debugSelection, selectedEventId])
+
+  // 容器宽度判定：由 ResizeObserver 监听，判定 >= 1100px 为宽模式
+  const [layoutMode, setLayoutMode] = useState<'wide' | 'narrow'>('wide')
+
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el || typeof ResizeObserver === 'undefined') {
+      return
+    }
+    const updateSize = (width: number) => {
+      setLayoutMode(width >= 1100 ? 'wide' : 'narrow')
+    }
+    updateSize(el.clientWidth)
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0]
+      if (entry) {
+        updateSize(entry.contentRect.width)
+      }
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+
+  const selectedIndex = useMemo(
+    () => events.findIndex((event) => event.id === selectedEventId),
+    [events, selectedEventId],
+  )
+
+  const selectedRecord = useMemo(() => {
+    if (selectedEventId == null) {
+      return null
+    }
+    return events.find((e) => e.id === selectedEventId) ?? null
+  }, [events, selectedEventId])
+
+  useChatTranscriptAutoScroll(bodyRef, events.length, events.length, initialScrollTop)
+
+  // 仅在初始挂载时赋予事件列表初始焦点（避免在 wide 模式下抢走 Inspector 或 Tab 的焦点）
+  useEffect(() => {
+    bodyRef.current?.focus({ preventScroll: true })
+  }, [bodyRef])
+
+  useEffect(() => {
+    // 异步初选可能挂载在隐藏列中，且初始 listbox 聚焦会覆盖子组件聚焦。
+    // 等详情页签真正显示后处理一次；roving 导航不会再从页签抢焦点。
+    if (activeTab === 'detail' && pendingDetailFocusRef.current) {
+      pendingDetailFocusRef.current = false
+      if (layoutMode === 'narrow') {
+        detailCloseBtnRef.current?.focus({ preventScroll: true })
+      }
+    }
+  }, [activeTab, layoutMode, selectedEventId, debugSelection])
+
+  useEffect(() => {
+    if (selectedEventId == null || lastScrolledIdRef.current === selectedEventId) {
+      lastScrolledIdRef.current = selectedEventId
+      return
+    }
+    lastScrolledIdRef.current = selectedEventId
+    if (selectedIndex < 0) {
+      return
+    }
+    bodyRef.current
+      ?.querySelector<HTMLElement>(`[data-event-id="${CSS.escape(events[selectedIndex]!.id)}"]`)
+      ?.scrollIntoView({ block: 'nearest' })
+  }, [bodyRef, events, selectedEventId, selectedIndex])
+
+  function moveSelected(delta: number) {
+    if (events.length === 0 || selectedIndex < 0) {
+      return
+    }
+    const next = Math.max(0, Math.min(events.length - 1, selectedIndex + delta))
+    onSelectedEventIdChange(events[next]!.id)
+  }
+
+  function handleListboxKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.nativeEvent.isComposing || event.keyCode === 229) {
+      return
+    }
+    if (event.key === 'Escape') {
+      if (historicalPreview != null) {
+        return
+      }
+      if (selectedEventId != null) {
+        event.preventDefault()
+        event.stopPropagation()
+        handleCloseDetail()
+      }
+      return
+    }
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      if (selectedEventId == null) {
+        return
+      }
+      event.preventDefault()
+      event.stopPropagation()
+      moveSelected(event.key === 'ArrowDown' ? 1 : -1)
+    }
+  }
+
+  function handleCloseDetail() {
+    if (debugSelection != null) {
+      onSelectInspector?.(null)
+    }
+    if (selectedEventId != null) {
+      onSelectedEventIdChange(null)
+    }
+    const nextTab = lastDetailSourceRef.current === 'preview' ? 'preview' : 'events'
+    setActiveTab(nextTab)
+
+    // 恢复可见焦点到触发元素
+    requestAnimationFrame(() => {
+      if (nextTab === 'preview') {
+        const trigger = lastFocusedTriggerRef.current
+        if (trigger && document.body.contains(trigger)) {
+          trigger.focus({ preventScroll: true })
+          return
+        }
+      }
+      // 默认（以及来自事件时）让 listbox 获得焦点，绝不尝试 focus 没有 tabIndex 的 option div
+      bodyRef.current?.focus({ preventScroll: true })
+    })
+  }
+
+  function handleSelectEvent(id: string) {
+    lastDetailSourceRef.current = 'events'
+    setActiveTab('detail')
+    if (layoutMode === 'wide') {
+      // wide 模式下保持 listbox 获焦，便于后续连续按 Arrow 导航
+      bodyRef.current?.focus({ preventScroll: true })
+    }
+    onSelectInspector?.(null)
+    // 选中新的历史事件即结束上一次历史请求预览，避免张冠李戴。
+    onDismissHistoricalPreview?.()
+    onSelectedEventIdChange(id)
+  }
+
+  function handleSelectInspector(
+    selection: DebugInspectorSelection | null,
+    triggerElement?: HTMLElement | null,
+  ) {
+    if (selection != null) {
+      lastFocusedTriggerRef.current = triggerElement ?? null
+      lastDetailSourceRef.current = 'preview'
+      setActiveTab('detail')
+      onSelectedEventIdChange(null)
+    }
+    onSelectInspector?.(selection)
+  }
+
+  // Roving TabIndex 键盘导航: ArrowLeft, ArrowRight, Home, End
+  function handleTabKeyDown(event: KeyboardEvent<HTMLButtonElement>, currentTab: DebugViewTab) {
+    const currentIndex = TAB_KEYS.indexOf(currentTab)
+    let nextIndex = currentIndex
+
+    if (event.key === 'ArrowRight') {
+      event.preventDefault()
+      nextIndex = (currentIndex + 1) % TAB_KEYS.length
+    } else if (event.key === 'ArrowLeft') {
+      event.preventDefault()
+      nextIndex = (currentIndex - 1 + TAB_KEYS.length) % TAB_KEYS.length
+    } else if (event.key === 'Home') {
+      event.preventDefault()
+      nextIndex = 0
+    } else if (event.key === 'End') {
+      event.preventDefault()
+      nextIndex = TAB_KEYS.length - 1
+    }
+
+    if (nextIndex !== currentIndex) {
+      const nextTab = TAB_KEYS[nextIndex]!
+      setActiveTab(nextTab)
+      tabButtonRefs.current[nextTab]?.focus()
+    }
+  }
+
+  // Pane 容器级局部 Escape 拦截，防止逃逸污染其他 Pane 或底层窗口
+  function handleContainerKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.defaultPrevented || event.nativeEvent.isComposing || event.keyCode === 229
+      || shouldDeferToBlockingModal(event.currentTarget)) {
+      return
+    }
+    if (event.key === 'Escape') {
+      if (historicalPreview != null) {
+        event.preventDefault()
+        event.stopPropagation()
+        onDismissHistoricalPreview?.()
+      } else if (selectedEventId != null || debugSelection != null) {
+        event.preventDefault()
+        event.stopPropagation()
+        handleCloseDetail()
+      }
+    }
+  }
+
+  const isWide = layoutMode === 'wide'
+
+  return (
+    <div
+      ref={containerRef}
+      className="thread-events-shell"
+      data-layout={layoutMode}
+      data-active-tab={activeTab}
+      onKeyDown={handleContainerKeyDown}
+    >
+      {/* 窄面板下的 WAI-ARIA Tab 导航；宽面板不渲染 tablist */}
+      {!isWide ? (
+        <div className="thread-debug-tabs" role="tablist" aria-label={t('ai.runtime.debug.tabsAriaLabel')}>
+          <button
+            ref={(el) => {
+              tabButtonRefs.current.preview = el
+            }}
+            type="button"
+            role="tab"
+            id={`${baseId}-tab-preview`}
+            aria-controls={`${baseId}-panel-preview`}
+            aria-selected={activeTab === 'preview'}
+            tabIndex={activeTab === 'preview' ? 0 : -1}
+            className={`thread-debug-tab ${activeTab === 'preview' ? 'active' : ''}`}
+            onClick={() => setActiveTab('preview')}
+            onKeyDown={(e) => handleTabKeyDown(e, 'preview')}
+          >
+            {t('ai.runtime.debug.tabPreview')}
+          </button>
+          <button
+            ref={(el) => {
+              tabButtonRefs.current.events = el
+            }}
+            type="button"
+            role="tab"
+            id={`${baseId}-tab-events`}
+            aria-controls={`${baseId}-panel-events`}
+            aria-selected={activeTab === 'events'}
+            tabIndex={activeTab === 'events' ? 0 : -1}
+            className={`thread-debug-tab ${activeTab === 'events' ? 'active' : ''}`}
+            onClick={() => setActiveTab('events')}
+            onKeyDown={(e) => handleTabKeyDown(e, 'events')}
+          >
+            {t('ai.runtime.debug.tabEvents')}
+          </button>
+          <button
+            ref={(el) => {
+              tabButtonRefs.current.detail = el
+            }}
+            type="button"
+            role="tab"
+            id={`${baseId}-tab-detail`}
+            aria-controls={`${baseId}-panel-detail`}
+            aria-selected={activeTab === 'detail'}
+            tabIndex={activeTab === 'detail' ? 0 : -1}
+            className={`thread-debug-tab ${activeTab === 'detail' ? 'active' : ''}`}
+            onClick={() => setActiveTab('detail')}
+            onKeyDown={(e) => handleTabKeyDown(e, 'detail')}
+          >
+            {t('ai.runtime.debug.tabDetail')}
+          </button>
+        </div>
+      ) : null}
+
+      {/* 3 区内容网格 */}
+      <div className="thread-debug-grid" data-active-tab={activeTab}>
+        {/* 区域 1：请求预览 */}
+        <section
+          id={`${baseId}-panel-preview`}
+          role={!isWide ? 'tabpanel' : undefined}
+          aria-labelledby={!isWide ? `${baseId}-tab-preview` : undefined}
+          aria-label={isWide ? t('ai.runtime.debug.tabPreview') : undefined}
+          className="thread-debug-col thread-debug-col-preview"
+        >
+          {debug ? (
+            <ThreadModelRequestDebug
+              debug={debug}
+              onSelectInspector={(selection) => {
+                const activeEl = document.activeElement as HTMLElement | null
+                handleSelectInspector(selection, activeEl)
+              }}
+            />
+          ) : debugLoading ? (
+            <div className="thread-debug-placeholder" data-testid="thread-debug-preview-loading">
+              <p>{t('ai.runtime.debug.previewLoading')}</p>
+            </div>
+          ) : debugError ? (
+            <div
+              role="alert"
+              className="thread-debug-placeholder thread-debug-preview-load-error"
+              data-testid="thread-debug-preview-error"
+            >
+              <AlertCircle size={14} aria-hidden="true" />
+              <p>{debugError}</p>
+            </div>
+          ) : (
+            <div className="thread-debug-placeholder">
+              <p>{t('ai.runtime.debug.noPreview')}</p>
+            </div>
+          )}
+        </section>
+
+        {/* 区域 2：事件列表 */}
+        <section
+          id={`${baseId}-panel-events`}
+          role={!isWide ? 'tabpanel' : undefined}
+          aria-labelledby={!isWide ? `${baseId}-tab-events` : undefined}
+          aria-label={isWide ? t('ai.runtime.debug.tabEvents') : undefined}
+          className="thread-debug-col thread-debug-col-events"
+        >
+          <div
+            ref={bodyRef}
+            className="thread-events"
+            role="listbox"
+            tabIndex={0}
+            aria-label={t('ai.runtime.event.list')}
+            aria-activedescendant={
+              selectedIndex >= 0 && events[selectedIndex]
+                ? `${baseId}-event-${events[selectedIndex]!.id}`
+                : undefined
+            }
+            onKeyDown={handleListboxKeyDown}
+          >
+            {historyLoading ? <div role="status">{t('ai.runtime.thread.loading')}</div> : null}
+            {historyError ? <div role="alert"><p>{historyError}</p>
+              {onRetryHistory ? <Button variant="ghost" onClick={onRetryHistory}>{t('ai.runtime.agentTree.retry')}</Button> : null}
+            </div> : null}
+            {!historyLoading && !historyError && events.length === 0 ? (
+              <div className="thread-empty">
+                <p>{t('ai.runtime.event.empty')}</p>
+              </div>
+            ) : null}
+            {events.map((event) => {
+              const selected = event.id === selectedEventId
+              return (
+                <div
+                  key={event.id}
+                  id={`${baseId}-event-${event.id}`}
+                  data-event-id={event.id}
+                  role="option"
+                  aria-selected={selected}
+                  className={`thread-event kind-${event.kind} status-${event.status} ${selected ? 'active' : ''}`}
+                  onClick={() => handleSelectEvent(event.id)}
+                >
+                  <span className="thread-event-time" data-event-time>
+                    {formatRowTime(event.createdAt)}
+                  </span>
+                  <span className="thread-event-badge">{event.title}</span>
+                  <span className="thread-event-summary">{event.summary}</span>
+                  {event.status === 'running' ? (
+                    <span className="thread-event-pulse" aria-hidden="true" />
+                  ) : null}
+                </div>
+              )
+            })}
+          </div>
+        </section>
+
+        {/* 区域 3：详情 */}
+        <section
+          id={`${baseId}-panel-detail`}
+          role={!isWide ? 'tabpanel' : undefined}
+          aria-labelledby={!isWide ? `${baseId}-tab-detail` : undefined}
+          aria-label={isWide ? t('ai.runtime.debug.tabDetail') : undefined}
+          tabIndex={-1}
+          className="thread-debug-col thread-debug-col-detail"
+        >
+          {historicalPreview != null ? (
+            <ThreadDebugInspector
+              selection={{ type: 'preview', preview: historicalPreview }}
+              debug={debug}
+              onClose={() => onDismissHistoricalPreview?.()}
+              closeButtonRef={detailCloseBtnRef}
+              autoFocusCloseButton={!isWide}
+            />
+          ) : debugSelection && (debug || debugSelection.type === 'preview') ? (
+            <ThreadDebugInspector
+              selection={debugSelection}
+              debug={debug}
+              onClose={handleCloseDetail}
+              closeButtonRef={detailCloseBtnRef}
+              autoFocusCloseButton={!isWide}
+            />
+          ) : selectedRecord ? (
+            <>
+              {historicalPreviewError ? (
+                <div role="alert" className="thread-debug-planning-error thread-debug-preview-error">
+                  <AlertCircle size={14} aria-hidden="true" />
+                  <span>{historicalPreviewError}</span>
+                </div>
+              ) : null}
+              <ThreadEventDetail
+                record={selectedRecord}
+                onClose={handleCloseDetail}
+                closeButtonRef={detailCloseBtnRef}
+                autoFocusCloseButton={!isWide}
+                onRequestHistoricalPreview={onRequestHistoricalPreview}
+                historicalPreviewLoading={historicalPreviewLoading}
+              />
+            </>
+          ) : (
+            <div className="thread-debug-placeholder" data-testid="thread-debug-placeholder">
+              <p>{t('ai.runtime.debug.noSelection')}</p>
+            </div>
+          )}
+        </section>
+      </div>
+    </div>
+  )
+}

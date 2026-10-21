@@ -1,16 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { MemoryRouter } from 'react-router'
-import { ToolMessageBlock } from '@/features/ai/runtime/thread-panel/messages/ToolMessageBlock'
-import { TaskToolRenderer } from '@/features/ai/runtime/thread-panel/messages/TaskToolRenderer'
-import { ThreadNavigationContext } from '@/features/ai/runtime/thread-navigation-context'
+import { ToolMessageBlock } from '@/features/chat/runtime/thread-panel/messages/ToolMessageBlock'
+import { TaskToolRenderer } from '@/features/chat/runtime/thread-panel/messages/TaskToolRenderer'
+import { ThreadNavigationContext } from '@/features/chat/runtime/thread-navigation-context'
 import '@/styles.css'
-import { ResourceBlobUrlContext } from '@/features/ai/runtime/thread-panel/messages/ResourceBlobUrlContext'
-import { ThreadConversationView } from '@/features/ai/runtime/thread-panel/ThreadConversationView'
+import { ResourceBlobUrlContext } from '@/features/chat/runtime/thread-panel/messages/ResourceBlobUrlContext'
+import { ThreadConversationView } from '@/features/chat/runtime/thread-panel/ThreadConversationView'
 import type {
   DialogueMessage,
   ToolDialogueMessage,
-} from '@/features/ai/runtime/thread-timeline-types'
+} from '@/features/chat/runtime/thread-timeline-types'
 
 /**
  * Slice C 的真实浏览器 harness：挂载真实 ThreadConversationView + 工具卡片，

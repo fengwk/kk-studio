@@ -17,7 +17,7 @@ const LONG_REASON =
   'bash requires approval in /srv/kk-studio/frontend/browser-tests/'
   + 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/reason.json'
 const LONG_ARGUMENTS = JSON.stringify({
-  command: 'npm --prefix frontend run test -- src/features/ai/runtime/thread-panel/messages/tool-message.view.test.tsx',
+  command: 'npm --prefix frontend run test -- src/features/chat/runtime/thread-panel/messages/tool-message.view.test.tsx',
   workdir: '/srv/kk-studio/frontend/browser-tests/nested/deeply/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
   env: { NODE_ENV: 'test', CI: 'true' },
   timeoutMs: 120000,

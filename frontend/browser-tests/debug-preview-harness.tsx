@@ -5,8 +5,8 @@ import { createMemoryRouter, RouterProvider } from 'react-router'
 import '@/styles.css'
 import { setLocale } from '@/shared/i18n'
 import { ApplicationEventProvider } from '@/shared/app-events'
-import { IdeLifecycleProvider } from '@/features/ai/ide/IdeLifecycleProvider'
-import { AgentPane } from '@/features/ai/runtime/AgentPane'
+import { IdeLifecycleProvider } from '@/features/environment/ide/IdeLifecycleProvider'
+import { AgentPane } from '@/features/chat/runtime/AgentPane'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 
 setLocale('zh-CN')
