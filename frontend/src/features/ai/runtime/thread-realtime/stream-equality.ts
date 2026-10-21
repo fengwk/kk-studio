@@ -1,4 +1,9 @@
-import type { RealtimeModelStream, RealtimeToolStream } from '@/features/ai/runtime/thread-realtime-state'
+import type {
+  RealtimeModelStream,
+} from '@/features/ai/runtime/thread-realtime/model-stream'
+import type {
+  RealtimeToolStream,
+} from '@/features/ai/runtime/thread-realtime/tool-stream'
 
 export function sameToolStreamMap(
   left: ReadonlyMap<string, RealtimeToolStream>,

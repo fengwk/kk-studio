@@ -9,7 +9,9 @@ import {
   buildThreadTimeline,
   parseApproval,
 } from '@/features/ai/runtime/thread-timeline-builder'
-import type { RealtimeToolStream } from '@/features/ai/runtime/thread-realtime-state'
+import type {
+  RealtimeToolStream,
+} from '@/features/ai/runtime/thread-realtime/tool-stream'
 
 describe('thread timeline edge branches', () => {
   it('projects custom user messages, empty user content, tool resources, and assistant errors', () => {

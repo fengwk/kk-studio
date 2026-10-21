@@ -7,7 +7,9 @@ import type {
 } from '@/shared/api/contracts/ai-runtime'
 import { buildThreadEventTimeline } from '@/features/ai/runtime/thread-events'
 import { buildThreadTimeline } from '@/features/ai/runtime/thread-timeline-builder'
-import type { RealtimeModelStream } from '@/features/ai/runtime/thread-realtime-state'
+import type {
+  RealtimeModelStream,
+} from '@/features/ai/runtime/thread-realtime/model-stream'
 import { AssistantMessageBlock } from '@/features/ai/runtime/thread-panel/messages/AssistantMessageBlock'
 import { ModelAttemptFailureMessageBlock } from '@/features/ai/runtime/thread-panel/messages/ModelAttemptFailureMessageBlock'
 import { ThreadEventDetail } from '@/features/ai/runtime/thread-panel/ThreadEventDetail'

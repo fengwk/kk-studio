@@ -1,20 +1,22 @@
 import type { RealtimeFrameScheduler } from '@/features/ai/runtime/realtime-frame-scheduler'
 import {
-  isProcessOutputPartial,
   isRealtimeModelDeltaGap,
-  isRealtimeToolStreamActive,
   mergeRealtimeModelStreamAfterCheckpoint,
   parseRealtimeModelCheckpoint,
   parseRealtimeModelDelta,
-  parseRealtimeToolPartial,
   reduceRealtimeModelStream,
-  reduceRealtimeToolStream,
   snapshotModelStream,
-  snapshotToolStream,
   isFailedAttempt,
   type RealtimeModelStream,
+} from '@/features/ai/runtime/thread-realtime/model-stream'
+import {
+  isProcessOutputPartial,
+  isRealtimeToolStreamActive,
+  parseRealtimeToolPartial,
+  reduceRealtimeToolStream,
+  snapshotToolStream,
   type RealtimeToolStream,
-} from '@/features/ai/runtime/thread-realtime-state'
+} from '@/features/ai/runtime/thread-realtime/tool-stream'
 import {
   TOOL_PARTIAL_SEEN_EVENT_ID_LIMIT,
   bufferModelDelta,

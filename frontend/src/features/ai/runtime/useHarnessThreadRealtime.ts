@@ -4,8 +4,10 @@ import { useApplicationEvents } from '@/shared/app-events'
 import type { RealtimeFrameSchedulerOptions } from '@/features/ai/runtime/realtime-frame-scheduler'
 import {
   type RealtimeModelStream,
+} from '@/features/ai/runtime/thread-realtime/model-stream'
+import {
   type RealtimeToolStream,
-} from '@/features/ai/runtime/thread-realtime-state'
+} from '@/features/ai/runtime/thread-realtime/tool-stream'
 import {
   isActiveModelAttempt,
   type ModelRecovery,
