@@ -162,7 +162,7 @@ public abstract class HarnessRuntimeThreadTreeContract {
     TreeFixture tree = seedCrossSessionTree(store);
     runtime.acceptCommands(
         new AcceptCommandsCommand(
-            new AcceptCommandsTarget.Thread(tree.earlySiblingId(), tree.earlyHeadId(), 1),
+            new AcceptCommandsTarget.Thread(tree.earlySiblingId()),
             List.of(userMessageCommand(TestIds.id(90), "queued"))),
         AcceptancePreflight.IDENTITY);
     List<String> locks = new ArrayList<>();
@@ -348,8 +348,7 @@ public abstract class HarnessRuntimeThreadTreeContract {
     UUID modelId = tx.nextId();
     ModelInvocation model = modelInvocation(modelId, threadId, startId, startId, T1);
     tx.insertModelInvocation(model);
-    tx.updateModelInvocation(model.beginDispatch(T2));
-    tx.updateModelInvocation(model.beginDispatch(T2).markRunning(T2));
+    tx.updateModelInvocation(model.markRunning(T2));
     return startId;
   }
 
@@ -383,9 +382,8 @@ public abstract class HarnessRuntimeThreadTreeContract {
     ModelInvocation model =
         modelInvocationWithRequest(modelId, threadId, startId, startId, request, T1);
     tx.insertModelInvocation(model);
-    ModelInvocation succeeded = model.beginDispatch(T2).markRunning(T2).succeed(response, T2);
-    tx.updateModelInvocation(model.beginDispatch(T2));
-    tx.updateModelInvocation(model.beginDispatch(T2).markRunning(T2));
+    ModelInvocation succeeded = model.markRunning(T2).succeed(response, T2);
+    tx.updateModelInvocation(model.markRunning(T2));
     tx.updateModelInvocation(succeeded);
     tx.updateModelInvocation(succeeded.attachResultEntry(assistantId, T2));
     UUID toolId = tx.nextId();

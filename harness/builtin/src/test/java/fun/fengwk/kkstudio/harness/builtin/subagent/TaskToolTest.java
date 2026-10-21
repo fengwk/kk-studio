@@ -17,8 +17,6 @@ import fun.fengwk.kkstudio.harness.common.schema.IntegerSchema;
 import fun.fengwk.kkstudio.harness.common.schema.StringSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.BranchView;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionContext;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
@@ -52,7 +50,7 @@ class TaskToolTest {
 
   /** descriptor 固定暴露 name/renderer/sideEffect/no-timeout 与 snake_case 参数 schema。 */
   @Test
-  void exposesCanonicalDescriptorContract() {
+  void exposesCanonicalDescriptorContract() throws Exception {
     TaskTool tool = new TaskTool(request -> acceptance(false));
     ToolDescriptor descriptor = tool.descriptor();
 
@@ -75,7 +73,7 @@ class TaskToolTest {
 
   /** 合法参数完整委托给 Runner，并把接受结果立即回执为一次成功 tool_result。 */
   @Test
-  void acceptsValidArgumentsAndReturnsAcceptedReceipt() {
+  void acceptsValidArgumentsAndReturnsAcceptedReceipt() throws Exception {
     AtomicReference<SubagentTaskRequest> receivedRequest = new AtomicReference<>();
     SubagentRunner runner =
         request -> {
@@ -92,9 +90,7 @@ class TaskToolTest {
             "{\"subagent_type\":\"coder\",\"prompt\":\"write code\",\"max_turns\":5,"
                 + "\"thread_id\":\"00000000-0000-0000-0000-00000000000a\"}");
 
-    ToolExecutionHandle handle = tool.execute(request, createListener(outcomeRef));
-
-    assertNotNull(handle);
+    outcomeRef.set(tool.execute(request, partial -> {}));
     assertNotNull(receivedRequest.get());
     assertEquals(INVOCATION_ID, receivedRequest.get().invocationId());
     assertEquals(PARENT_THREAD_ID, receivedRequest.get().parentThreadId());
@@ -123,7 +119,7 @@ class TaskToolTest {
 
   /** 可选参数缺省时正确传递 null（新任务、policy 默认预算）。 */
   @Test
-  void handlesOptionalMaxTurnsAndThreadId() {
+  void handlesOptionalMaxTurnsAndThreadId() throws Exception {
     AtomicReference<SubagentTaskRequest> receivedRequest = new AtomicReference<>();
     SubagentRunner runner =
         request -> {
@@ -135,7 +131,7 @@ class TaskToolTest {
     ToolExecutionRequest request =
         createRequest(tool, "call-2", "{\"subagent_type\":\"explorer\",\"prompt\":\"search\"}");
 
-    tool.execute(request, createListener(new AtomicReference<>()));
+    tool.execute(request, partial -> {});
 
     assertNotNull(receivedRequest.get());
     assertEquals("explorer", receivedRequest.get().subagentType());
@@ -146,7 +142,7 @@ class TaskToolTest {
 
   /** Schema 级参数校验拒绝在请求构造阶段抛出 IllegalArgumentException。 */
   @Test
-  void rejectsSchemaViolationsOnRequestCreation() {
+  void rejectsSchemaViolationsOnRequestCreation() throws Exception {
     TaskTool tool = new TaskTool(request -> acceptance(false));
 
     assertThrows(
@@ -163,7 +159,7 @@ class TaskToolTest {
 
   /** 语义级参数校验拒绝：空白、前后空格、非正整轮数、非法 UUID 在执行期安全返回错误 ToolResult。 */
   @Test
-  void rejectsSemanticViolationsWithDescriptiveErrors() {
+  void rejectsSemanticViolationsWithDescriptiveErrors() throws Exception {
     TaskTool tool = new TaskTool(request -> acceptance(false));
 
     assertRejection(
@@ -194,13 +190,13 @@ class TaskToolTest {
 
   /** 非幂等重放：Runner 返回 replayed=true 时回执同样成功，交给父判断是否已有既有执行。 */
   @Test
-  void reportsReplayedAcceptanceOnIdempotentRetry() {
+  void reportsReplayedAcceptanceOnIdempotentRetry() throws Exception {
     TaskTool tool = new TaskTool(request -> acceptance(true));
     AtomicReference<ToolOutcome> outcomeRef = new AtomicReference<>();
     ToolExecutionRequest request =
         createRequest(tool, "call-replay", "{\"subagent_type\":\"coder\",\"prompt\":\"p\"}");
 
-    tool.execute(request, createListener(outcomeRef));
+    outcomeRef.set(tool.execute(request, partial -> {}));
 
     ToolResult result = outcomeRef.get().result();
     assertFalse(result.error());
@@ -209,13 +205,13 @@ class TaskToolTest {
 
   /** busy follow-up：Runner 报告取代了旧未完成委派时，回执正文明确只会有最新一次的一份汇总结果。 */
   @Test
-  void reportsReplacedPendingWaitOnContinuation() {
+  void reportsReplacedPendingWaitOnContinuation() throws Exception {
     TaskTool tool = new TaskTool(request -> replacedAcceptance());
     AtomicReference<ToolOutcome> outcomeRef = new AtomicReference<>();
     ToolExecutionRequest request =
         createRequest(tool, "call-replaced", "{\"subagent_type\":\"coder\",\"prompt\":\"p\"}");
 
-    tool.execute(request, createListener(outcomeRef));
+    outcomeRef.set(tool.execute(request, partial -> {}));
 
     ToolResult result = outcomeRef.get().result();
     assertFalse(result.error());
@@ -226,7 +222,7 @@ class TaskToolTest {
 
   /** Runner 拒绝或抛异常时捕获并安全通知 listener，绝不逃出调用线程。 */
   @Test
-  void catchesRunnerExceptionsAndCompletesListenerWithError() {
+  void catchesRunnerExceptionsAndCompletesListenerWithError() throws Exception {
     SubagentRunner runner =
         request -> {
           throw new RejectedExecutionException("subagent concurrency limit reached");
@@ -237,9 +233,7 @@ class TaskToolTest {
     ToolExecutionRequest request =
         createRequest(tool, "call-err", "{\"subagent_type\":\"coder\",\"prompt\":\"do\"}");
 
-    ToolExecutionHandle handle = tool.execute(request, createListener(outcomeRef));
-
-    assertNotNull(handle);
+    outcomeRef.set(tool.execute(request, partial -> {}));
     assertNotNull(outcomeRef.get());
     assertTrue(outcomeRef.get().result().error());
     assertTrue(text(outcomeRef.get().result()).contains("subagent concurrency limit reached"));
@@ -247,7 +241,7 @@ class TaskToolTest {
 
   /** 执行缺少 durable 上下文时快速抛出 IllegalArgumentException。 */
   @Test
-  void requiresDurableExecutionContext() {
+  void requiresDurableExecutionContext() throws Exception {
     TaskTool tool = new TaskTool(request -> acceptance(false));
     ToolExecutionRequest requestWithoutContext =
         new ToolExecutionRequest(
@@ -256,8 +250,7 @@ class TaskToolTest {
             Duration.ZERO);
 
     assertThrows(
-        IllegalArgumentException.class,
-        () -> tool.execute(requestWithoutContext, createListener(new AtomicReference<>())));
+        IllegalArgumentException.class, () -> tool.execute(requestWithoutContext, partial -> {}));
   }
 
   private static SubagentTaskAcceptance acceptance(boolean replayed) {
@@ -272,8 +265,7 @@ class TaskToolTest {
       TaskTool tool, String argumentsJson, String expectedMessagePart) {
     AtomicReference<ToolOutcome> outcomeRef = new AtomicReference<>();
     ToolExecutionRequest request = createRequest(tool, "call-rej", argumentsJson);
-    ToolExecutionHandle handle = tool.execute(request, createListener(outcomeRef));
-    assertNotNull(handle);
+    outcomeRef.set(tool.execute(request, partial -> {}));
     assertNotNull(outcomeRef.get(), "listener.onComplete must be called on rejection");
     assertTrue(outcomeRef.get().result().error());
     assertTrue(
@@ -298,34 +290,19 @@ class TaskToolTest {
         context);
   }
 
-  private static ToolExecutionListener createListener(AtomicReference<ToolOutcome> outcomeRef) {
-    return new ToolExecutionListener() {
-      @Override
-      public void onPartial(ToolResult partial) {}
-
-      @Override
-      public void onComplete(ToolOutcome outcome) {
-        outcomeRef.set(outcome);
-      }
-
-      @Override
-      public void onError(Throwable error) {}
-    };
-  }
-
   private static String text(ToolResult result) {
     return ((TextResultContent) result.contents().get(0)).text();
   }
 
   /** task 参数被拒：明确未执行、父线程保留，并列出继续参数 subagent_type/prompt/thread_id，不含重试倾向措辞。 */
   @Test
-  void rejectionGuidanceStatesNotExecutedAndContinuationParameters() {
+  void rejectionGuidanceStatesNotExecutedAndContinuationParameters() throws Exception {
     TaskTool tool = new TaskTool(request -> acceptance(false));
     AtomicReference<ToolOutcome> outcomeRef = new AtomicReference<>();
     ToolExecutionRequest request =
         createRequest(tool, "call-guidance", "{\"subagent_type\":\" coder \",\"prompt\":\"p\"}");
 
-    tool.execute(request, createListener(outcomeRef));
+    outcomeRef.set(tool.execute(request, partial -> {}));
 
     String message = text(outcomeRef.get().result());
     assertTrue(message.contains("subagent_type must not contain surrounding whitespace"), message);

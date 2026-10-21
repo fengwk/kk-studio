@@ -30,7 +30,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderProtocolEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
@@ -82,7 +81,7 @@ class OpenAiChatProtocolEventTest {
             .followRedirects(HttpClient.Redirect.NEVER)
             .connectTimeout(Duration.ofSeconds(5))
             .build();
-    transport = new JdkHttpSseTransport(httpClient, workerExecutor, scheduler);
+    transport = new JdkHttpSseTransport(httpClient, scheduler);
 
     descriptor =
         new ProviderDescriptor(
@@ -141,25 +140,25 @@ class OpenAiChatProtocolEventTest {
         request(),
         new ProviderStreamHandler() {
           @Override
-          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {
+          public void onEvent(ProviderStreamEvent event) {
             timeline.add("delta:" + ((ProviderStreamEvent.TextDelta) event).text());
           }
 
           @Override
-          public void onProtocolEvent(ProviderProtocolEvent event, ProviderStream stream) {
+          public void onProtocolEvent(ProviderProtocolEvent event) {
             rawTypes.add(event.eventType());
             rawData.add(event.data());
             timeline.add("raw:" + event.eventType());
           }
 
           @Override
-          public void onComplete(ProviderCompletion completion, ProviderStream stream) {
+          public void onComplete(ProviderCompletion completion) {
             completionRef.set(completion);
             latch.countDown();
           }
 
           @Override
-          public void onError(ProviderException error, ProviderStream stream) {
+          public void onError(ProviderException error) {
             latch.countDown();
           }
         });
@@ -211,23 +210,23 @@ class OpenAiChatProtocolEventTest {
         request(),
         new ProviderStreamHandler() {
           @Override
-          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {
+          public void onEvent(ProviderStreamEvent event) {
             timeline.add("delta:" + ((ProviderStreamEvent.TextDelta) event).text());
           }
 
           @Override
-          public void onProtocolEvent(ProviderProtocolEvent event, ProviderStream stream) {
+          public void onProtocolEvent(ProviderProtocolEvent event) {
             timeline.add("raw:" + event.eventType());
           }
 
           @Override
-          public void onComplete(ProviderCompletion completion, ProviderStream stream) {
+          public void onComplete(ProviderCompletion completion) {
             completionRef.set(completion);
             latch.countDown();
           }
 
           @Override
-          public void onError(ProviderException error, ProviderStream stream) {
+          public void onError(ProviderException error) {
             errorRef.set(error);
             latch.countDown();
           }
@@ -268,21 +267,21 @@ class OpenAiChatProtocolEventTest {
         request(),
         new ProviderStreamHandler() {
           @Override
-          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
+          public void onEvent(ProviderStreamEvent event) {}
 
           @Override
-          public void onProtocolEvent(ProviderProtocolEvent event, ProviderStream stream) {
+          public void onProtocolEvent(ProviderProtocolEvent event) {
             rawTypes.add(event.eventType());
           }
 
           @Override
-          public void onComplete(ProviderCompletion completion, ProviderStream stream) {
+          public void onComplete(ProviderCompletion completion) {
             completionRef.set(completion);
             latch.countDown();
           }
 
           @Override
-          public void onError(ProviderException error, ProviderStream stream) {
+          public void onError(ProviderException error) {
             latch.countDown();
           }
         });
@@ -315,20 +314,20 @@ class OpenAiChatProtocolEventTest {
         request(),
         new ProviderStreamHandler() {
           @Override
-          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
+          public void onEvent(ProviderStreamEvent event) {}
 
           @Override
-          public void onProtocolEvent(ProviderProtocolEvent event, ProviderStream stream) {
+          public void onProtocolEvent(ProviderProtocolEvent event) {
             rawTypes.add(event.eventType());
           }
 
           @Override
-          public void onComplete(ProviderCompletion completion, ProviderStream stream) {
+          public void onComplete(ProviderCompletion completion) {
             latch.countDown();
           }
 
           @Override
-          public void onError(ProviderException error, ProviderStream stream) {
+          public void onError(ProviderException error) {
             errorRef.set(error);
             latch.countDown();
           }

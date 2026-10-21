@@ -833,8 +833,6 @@ for (const def of REAL_MODEL_DEFINITIONS) {
             owner: chatOwner(chat.id),
             target: threadTarget({
               threadId,
-              expectedHeadEntryId: currentThread.headEntryId,
-              expectedNextCommandSequence: currentThread.nextCommandSequence,
             }),
             commands: [userMessageCommand(followUpPrompt, cid())],
           })
@@ -1642,8 +1640,6 @@ registerCase({
         owner: chatOwner(chat.id),
         target: threadTarget({
           threadId: tid,
-          expectedHeadEntryId: stop.thread.headEntryId,
-          expectedNextCommandSequence: stop.thread.nextCommandSequence,
         }),
         commands: [userMessageCommand(followUpPrompt, cid())],
       })

@@ -149,12 +149,12 @@ class HarnessRuntimeSnapshotTest {
     // THREAD user batch 只能含恰一条 user-like：两条消息分两次接受。
     runtime.acceptCommands(
         new AcceptCommandsCommand(
-            new AcceptCommandsTarget.Thread(baseline.threadId(), baseline.rootEntryId(), 1),
+            new AcceptCommandsTarget.Thread(baseline.threadId()),
             List.of(userMessageCommand(TestIds.id(1), "a"))),
         AcceptancePreflight.IDENTITY);
     runtime.acceptCommands(
         new AcceptCommandsCommand(
-            new AcceptCommandsTarget.Thread(baseline.threadId(), baseline.rootEntryId(), 2),
+            new AcceptCommandsTarget.Thread(baseline.threadId()),
             List.of(userMessageCommand(TestIds.id(2), "b"))),
         AcceptancePreflight.IDENTITY);
     ThreadSnapshot snapshot = runtime.getThreadSnapshot(baseline.threadId());
@@ -206,8 +206,7 @@ class HarnessRuntimeSnapshotTest {
                 return runtime
                     .acceptCommands(
                         new AcceptCommandsCommand(
-                            new AcceptCommandsTarget.Thread(
-                                baseline.threadId(), baseline.rootEntryId(), 1),
+                            new AcceptCommandsTarget.Thread(baseline.threadId()),
                             List.of(userMessageCommand(TestIds.id(1), "a"))),
                         AcceptancePreflight.IDENTITY)
                     .acceptedCommands()

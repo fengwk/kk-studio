@@ -113,8 +113,8 @@ function requireBackendDateTime(value: unknown, path: string): InstantTimestamp 
 function decodeOwner(value: unknown, path: string): InteractionOwnerDTO {
   const record = requireRecord(value, path)
   const type = record.type
-  if (type !== 'CHAT' && type !== 'ISSUE_AGENT') {
-    throw invalidPayload(`${path}.type must be CHAT or ISSUE_AGENT`)
+  if (type !== 'CHAT' && type !== 'ISSUE_AGENT' && type !== 'AGENT_TASK') {
+    throw invalidPayload(`${path}.type must be CHAT, ISSUE_AGENT or AGENT_TASK`)
   }
   const nullable = requireRequiredNullableString
   return {

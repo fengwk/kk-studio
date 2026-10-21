@@ -8,7 +8,7 @@ import java.util.Objects;
  * attempt，输出唯一的重试决策。
  *
  * <p>正常失败与租约失联恢复共用同一判定，避免恢复路径自建预算或重置计数：{@code chargeableAttempt} 必须已经包含本次失败所消耗的 attempt（RUNNING
- * 为已确认启动，DISPATCHING 为可能已发出的启动），因此 {@code allowsRetry} / {@code delayBeforeRetry}
+ * 先于任何请求发出持久化并计入 attempt），因此 {@code allowsRetry} / {@code delayBeforeRetry}
  * 的语义与线上正常重试完全一致；一旦预算耗尽，调用方必须以明确的失败终止，不得无限重试。
  */
 public record InvocationRetryDecision(boolean retry, Duration delay, int chargeableAttempt) {

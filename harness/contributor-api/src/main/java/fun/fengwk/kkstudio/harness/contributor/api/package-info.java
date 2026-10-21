@@ -34,9 +34,9 @@
  *       (contributorId, customType)}；
  *   <li>静态状态声明校验：Tool 声明的 {@link fun.fengwk.kkstudio.harness.contributor.api.StateDeclaration} 涉及的
  *       customType 必须在该 Contributor 内显式注册；
- *   <li>执行与 effects：{@link fun.fengwk.kkstudio.harness.contributor.api.Tool#execute} 为快速返回的启动式异步
- *       SPI； {@link fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome} 仅在成功时允许携带 {@link
- *       fun.fengwk.kkstudio.harness.contributor.api.AppendCustomEntry} effects；
+ *   <li>执行与 effects：{@link fun.fengwk.kkstudio.harness.contributor.api.Tool#execute} 为阻塞
+ *       SPI，取消即对执行线程 interrupt； {@link fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome}
+ *       仅在成功时允许携带 {@link fun.fengwk.kkstudio.harness.contributor.api.AppendCustomEntry} effects；
  *   <li>分支隔离：{@link fun.fengwk.kkstudio.harness.contributor.api.BranchView} 查询严格限定在当前 Contributor
  *       且限定在当前 Assistant branch 的 root-to-head 路径上；
  *   <li>冻结不可变性：冻结后各扩展点按 requires 传递偏序、priority 降序、ContributionId 字典序排序，目录完全不可变。

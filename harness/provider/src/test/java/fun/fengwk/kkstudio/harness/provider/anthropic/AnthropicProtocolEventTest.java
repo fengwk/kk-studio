@@ -12,8 +12,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.provider.transport.HttpSseCallback;
-import fun.fengwk.kkstudio.harness.provider.transport.HttpSseLimits;
+import fun.fengwk.kkstudio.harness.provider.ScriptedSseTransport;
 import fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransport;
 import fun.fengwk.kkstudio.harness.provider.transport.ServerSentEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
@@ -29,7 +28,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderProtocolEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
@@ -40,7 +38,6 @@ import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -115,43 +112,32 @@ class AnthropicProtocolEventTest {
     }
   }
 
-  /** 测试意图：每条帧恰好一次原生回调且先于同帧 normalized/error 回调，terminal 后静默，原生 payload 不进入 normalized 可观测面。 */
+  /** 测试意图：每条帧恰好一次原生回调且先于同帧 normalized/error 回调，原生 payload 不进入 normalized 可观测面。 */
   @Test
   void emitsExactlyOneProtocolEventPerFrameBeforeNormalizedCallbacks() {
     RecordingHandler handler = new RecordingHandler();
-    AtomicReference<HttpSseCallback> callbackRef = new AtomicReference<>();
-    stream(handler, callbackRef);
-    HttpSseCallback callback = callbackRef.get();
-    assertNotNull(callback);
-
-    callback.onEvent(
+    stream(
+        handler,
         new ServerSentEvent(
             "message_start",
-            "{\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":7}}}"));
-    callback.onEvent(new ServerSentEvent("ping", "{\"type\":\"ping\"}"));
-    callback.onEvent(
+            "{\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":7}}}"),
+        new ServerSentEvent("ping", "{\"type\":\"ping\"}"),
         new ServerSentEvent(
             "content_block_start",
-            "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}"));
-    callback.onEvent(
+            "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}"),
         new ServerSentEvent(
             "content_block_delta",
-            "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hi\"}}"));
-    callback.onEvent(
-        new ServerSentEvent("content_block_stop", "{\"type\":\"content_block_stop\",\"index\":0}"));
-    callback.onEvent(
+            "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hi\"}}"),
+        new ServerSentEvent("content_block_stop", "{\"type\":\"content_block_stop\",\"index\":0}"),
         new ServerSentEvent(
-            "future_event", "{\"type\":\"future_event\",\"probe\":\"opaque-marker\"}"));
-    callback.onEvent(
-        new ServerSentEvent(null, "{\"type\":\"extra_unknown\",\"probe\":\"opaque-marker\"}"));
-    callback.onEvent(new ServerSentEvent(null, "[DONE]"));
-    callback.onEvent(new ServerSentEvent(null, ""));
-    callback.onEvent(
+            "future_event", "{\"type\":\"future_event\",\"probe\":\"opaque-marker\"}"),
+        new ServerSentEvent(null, "{\"type\":\"extra_unknown\",\"probe\":\"opaque-marker\"}"),
+        new ServerSentEvent(null, "[DONE]"),
+        new ServerSentEvent(null, ""),
         new ServerSentEvent(
             "message_delta",
-            "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":3}}"));
-    callback.onEvent(new ServerSentEvent("message_stop", "{\"type\":\"message_stop\"}"));
-    callback.onComplete();
+            "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":3}}"),
+        new ServerSentEvent("message_stop", "{\"type\":\"message_stop\"}"));
 
     assertEquals(
         List.of(
@@ -186,36 +172,27 @@ class AnthropicProtocolEventTest {
     assertFalse(handler.protocolEvents.get(5).toString().contains("opaque-marker"));
     assertFalse(handler.normalizedEvents.toString().contains("opaque-marker"));
     assertFalse(handler.completion.get().response().toString().contains("opaque-marker"));
-
-    // terminal（onComplete）之后不再派发任何原生回调
-    int afterComplete = handler.protocolEvents.size();
-    callback.onEvent(new ServerSentEvent("late_event", "{\"type\":\"late_event\"}"));
-    callback.onComplete();
-    assertEquals(afterComplete, handler.protocolEvents.size());
   }
 
   /** 测试意图：error 帧先原生回调再按现有语义映射为终止错误，终止后不再回调。 */
   @Test
   void emitsProtocolEventBeforeTerminalErrorAndStaysSilentAfterwards() {
     RecordingHandler handler = new RecordingHandler();
-    AtomicReference<HttpSseCallback> callbackRef = new AtomicReference<>();
-    stream(handler, callbackRef);
-    HttpSseCallback callback = callbackRef.get();
-
-    callback.onEvent(
+    // 终态之后的帧不再被读取。
+    stream(
+        handler,
         new ServerSentEvent(
-            "message_start", "{\"type\":\"message_start\",\"message\":{\"usage\":{}}}"));
-    callback.onEvent(
+            "message_start", "{\"type\":\"message_start\",\"message\":{\"usage\":{}}}"),
         new ServerSentEvent(
             "error",
-            "{\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"boom\"}}"));
+            "{\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"boom\"}}"),
+        new ServerSentEvent("message_stop", "{\"type\":\"message_stop\"}"));
 
     // 原生回调先于 error 终态，且每条帧恰好一次
     assertEquals(List.of("protocol:message_start", "protocol:error", "error"), handler.ordered);
     assertNotNull(handler.error.get());
     assertEquals(ProviderErrorKind.TRANSIENT, handler.error.get().kind());
 
-    callback.onEvent(new ServerSentEvent("message_stop", "{\"type\":\"message_stop\"}"));
     assertEquals(2, handler.protocolEvents.size());
   }
 
@@ -223,21 +200,18 @@ class AnthropicProtocolEventTest {
   @Test
   void emitsProtocolEventBeforeExplicitFailureForUnassemblableDelta() {
     RecordingHandler handler = new RecordingHandler();
-    AtomicReference<HttpSseCallback> callbackRef = new AtomicReference<>();
-    stream(handler, callbackRef);
-    HttpSseCallback callback = callbackRef.get();
-
-    callback.onEvent(
+    // 终态之后的帧不再被读取。
+    stream(
+        handler,
         new ServerSentEvent(
-            "message_start", "{\"type\":\"message_start\",\"message\":{\"usage\":{}}}"));
-    callback.onEvent(
+            "message_start", "{\"type\":\"message_start\",\"message\":{\"usage\":{}}}"),
         new ServerSentEvent(
             "content_block_start",
-            "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"server_tool_use\",\"id\":\"srv_1\",\"name\":\"web_search\"}}"));
-    callback.onEvent(
+            "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"server_tool_use\",\"id\":\"srv_1\",\"name\":\"web_search\"}}"),
         new ServerSentEvent(
             "content_block_delta",
-            "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"unknown_delta\",\"probe\":\"raw-marker\"}}"));
+            "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"unknown_delta\",\"probe\":\"raw-marker\"}}"),
+        new ServerSentEvent("message_stop", "{\"type\":\"message_stop\"}"));
 
     assertEquals(
         List.of(
@@ -253,27 +227,7 @@ class AnthropicProtocolEventTest {
     assertNull(handler.completion.get());
 
     // terminal 之后不再派发原生回调
-    callback.onEvent(new ServerSentEvent("message_stop", "{\"type\":\"message_stop\"}"));
     assertEquals(3, handler.protocolEvents.size());
-  }
-
-  /** 测试意图：cancel 之后不得再派发任何原生或 normalized 回调。 */
-  @Test
-  void stopsEmittingProtocolEventsAfterCancel() {
-    RecordingHandler handler = new RecordingHandler();
-    AtomicReference<HttpSseCallback> callbackRef = new AtomicReference<>();
-    ProviderStream stream = stream(handler, callbackRef);
-
-    stream.cancel();
-    callbackRef
-        .get()
-        .onEvent(
-            new ServerSentEvent(
-                "message_start", "{\"type\":\"message_start\",\"message\":{\"usage\":{}}}"));
-    callbackRef.get().onComplete();
-
-    assertEquals(List.of(), handler.protocolEvents);
-    assertEquals(List.of(), handler.ordered);
   }
 
   /** 真实 transport 端到端：每个解析出的 SSE 帧恰好一次原生回调，comment/无 data 帧不产生回调。 */
@@ -292,7 +246,7 @@ class AnthropicProtocolEventTest {
               new ModelCallTimeoutPolicy(Duration.ofSeconds(5), Duration.ofSeconds(3)),
               UUID.randomUUID());
       RecordingHandler handler = new RecordingHandler();
-      JdkHttpSseTransport transport = new JdkHttpSseTransport(client, exec, sched);
+      JdkHttpSseTransport transport = new JdkHttpSseTransport(client, sched);
       AnthropicProviderAdapter adapter = new AnthropicProviderAdapter(transport, "key");
       adapter.create(localDescriptor).stream(request, handler);
 
@@ -380,32 +334,11 @@ class AnthropicProtocolEventTest {
     return AnthropicModelProvider.toProtocolEvent(new ServerSentEvent(eventName, data));
   }
 
-  /** 以捕获 callback 的假 transport 启动请求；调用方通过返回的 stream 与 callback 驱动帧与终态。 */
-  private ProviderStream stream(
-      RecordingHandler handler, AtomicReference<HttpSseCallback> callbackRef) {
-    JdkHttpSseTransport transport =
-        new JdkHttpSseTransport(client, exec, sched) {
-          @Override
-          public ProviderStream stream(
-              HttpRequest httpRequest,
-              ModelCallTimeoutPolicy timeoutPolicy,
-              HttpSseLimits limits,
-              HttpSseCallback callback) {
-            callbackRef.set(callback);
-            return new ProviderStream() {
-              @Override
-              public void cancel() {}
-
-              @Override
-              public boolean isCancelled() {
-                return false;
-              }
-            };
-          }
-        };
-    AnthropicModelProvider provider =
-        new AnthropicModelProvider(transport, descriptor, "key", URI.create(MESSAGES_URI));
-    return provider.stream(request, handler);
+  /** 以脚本化 transport 按序交付 {@code frames} 后结束流。 */
+  private void stream(RecordingHandler handler, ServerSentEvent... frames) {
+    new AnthropicModelProvider(
+            ScriptedSseTransport.events(frames), descriptor, "key", URI.create(MESSAGES_URI))
+        .stream(request, handler);
   }
 
   private static final class RecordingHandler implements ProviderStreamHandler {
@@ -424,26 +357,26 @@ class AnthropicProtocolEventTest {
     }
 
     @Override
-    public void onProtocolEvent(ProviderProtocolEvent event, ProviderStream stream) {
+    public void onProtocolEvent(ProviderProtocolEvent event) {
       protocolEvents.add(event);
       ordered.add("protocol:" + event.eventType());
     }
 
     @Override
-    public void onEvent(ProviderStreamEvent event, ProviderStream stream) {
+    public void onEvent(ProviderStreamEvent event) {
       normalizedEvents.add(event);
       ordered.add("event:" + event.getClass().getSimpleName());
     }
 
     @Override
-    public void onComplete(ProviderCompletion completion, ProviderStream stream) {
+    public void onComplete(ProviderCompletion completion) {
       this.completion.set(completion);
       ordered.add("complete");
       terminal.countDown();
     }
 
     @Override
-    public void onError(ProviderException error, ProviderStream stream) {
+    public void onError(ProviderException error) {
       this.error.set(error);
       ordered.add("error");
       terminal.countDown();

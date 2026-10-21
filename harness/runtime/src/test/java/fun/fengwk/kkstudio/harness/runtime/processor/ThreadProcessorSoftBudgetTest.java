@@ -954,9 +954,7 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
     store.transaction(
         tx -> {
           tx.lockModelInvocation(model.id());
-          ModelInvocation dispatched = model.beginDispatch(NOW);
-          tx.updateModelInvocation(dispatched);
-          ModelInvocation running = dispatched.markRunning(NOW);
+          ModelInvocation running = model.markRunning(NOW);
           tx.updateModelInvocation(running);
           ModelInvocation succeeded = running.succeed(response, null, null, NOW);
           tx.updateModelInvocation(succeeded);
@@ -970,9 +968,7 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
     store.transaction(
         tx -> {
           tx.lockModelInvocation(model.id());
-          ModelInvocation dispatched = model.beginDispatch(NOW);
-          tx.updateModelInvocation(dispatched);
-          ModelInvocation running = dispatched.markRunning(NOW);
+          ModelInvocation running = model.markRunning(NOW);
           tx.updateModelInvocation(running);
           ModelInvocation succeeded = running.succeed(response, null, null, NOW);
           tx.updateModelInvocation(succeeded);
@@ -986,9 +982,7 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
     store.transaction(
         tx -> {
           tx.lockModelInvocation(model.id());
-          ModelInvocation dispatched = model.beginDispatch(NOW);
-          tx.updateModelInvocation(dispatched);
-          ModelInvocation running = dispatched.markRunning(NOW);
+          ModelInvocation running = model.markRunning(NOW);
           tx.updateModelInvocation(running);
           ModelInvocation succeeded = running.succeed(response, null, null, NOW);
           tx.updateModelInvocation(succeeded);

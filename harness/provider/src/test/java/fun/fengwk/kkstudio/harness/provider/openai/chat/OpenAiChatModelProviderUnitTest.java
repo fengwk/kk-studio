@@ -11,8 +11,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.provider.transport.HttpSseCallback;
-import fun.fengwk.kkstudio.harness.provider.transport.HttpSseLimits;
+import fun.fengwk.kkstudio.harness.provider.ScriptedSseTransport;
 import fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransport;
 import fun.fengwk.kkstudio.harness.provider.transport.ServerSentEvent;
 import fun.fengwk.kkstudio.harness.provider.transport.TransportErrorKind;
@@ -32,7 +31,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderProtocolEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
@@ -40,7 +38,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 
 import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
 import java.time.Duration;
 import java.util.List;
 import java.util.Set;
@@ -69,7 +66,7 @@ class OpenAiChatModelProviderUnitTest {
             .followRedirects(HttpClient.Redirect.NEVER)
             .connectTimeout(Duration.ofSeconds(5))
             .build();
-    transport = new JdkHttpSseTransport(httpClient, workerExecutor, scheduler);
+    transport = new JdkHttpSseTransport(httpClient, scheduler);
 
     descriptor =
         new ProviderDescriptor(
@@ -150,21 +147,18 @@ class OpenAiChatModelProviderUnitTest {
             List.of(),
             ProviderCacheControl.none());
 
-    ProviderStream stream =
-        provider.stream(
-            request,
-            new ProviderStreamHandler() {
-              @Override
-              public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
+    provider.stream(
+        request,
+        new ProviderStreamHandler() {
+          @Override
+          public void onEvent(ProviderStreamEvent event) {}
 
-              @Override
-              public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
+          @Override
+          public void onComplete(ProviderCompletion completion) {}
 
-              @Override
-              public void onError(ProviderException error, ProviderStream stream) {}
-            });
-    assertNotNull(stream);
-    stream.cancel();
+          @Override
+          public void onError(ProviderException error) {}
+        });
   }
 
   @Test
@@ -194,13 +188,13 @@ class OpenAiChatModelProviderUnitTest {
         reqInvalid,
         new ProviderStreamHandler() {
           @Override
-          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
+          public void onEvent(ProviderStreamEvent event) {}
 
           @Override
-          public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
+          public void onComplete(ProviderCompletion completion) {}
 
           @Override
-          public void onError(ProviderException error, ProviderStream stream) {
+          public void onError(ProviderException error) {
             errorRef.set(error);
           }
         });
@@ -227,13 +221,13 @@ class OpenAiChatModelProviderUnitTest {
         validReq,
         new ProviderStreamHandler() {
           @Override
-          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
+          public void onEvent(ProviderStreamEvent event) {}
 
           @Override
-          public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
+          public void onComplete(ProviderCompletion completion) {}
 
           @Override
-          public void onError(ProviderException error, ProviderStream stream) {
+          public void onError(ProviderException error) {
             headerErrorRef.set(error);
           }
         });
@@ -241,156 +235,77 @@ class OpenAiChatModelProviderUnitTest {
     assertEquals(ProviderErrorKind.INVALID_REQUEST, headerErrorRef.get().kind());
   }
 
-  /** 测试意图：同步执行器拒绝必须 exactly-once emitError，并返回已终态 bridge。 */
+  /** 测试意图：传输失败按 TRANSIENT 恰好交付一次 onError，且不携带底层异常链。 */
   @Test
-  void mapsSynchronousExecutorRejectionToTerminalError() {
-    JdkHttpSseTransport rejected =
-        new JdkHttpSseTransport(httpClient, workerExecutor, scheduler) {
-          @Override
-          public ProviderStream stream(
-              HttpRequest request,
-              ModelCallTimeoutPolicy timeoutPolicy,
-              HttpSseLimits limits,
-              HttpSseCallback callback) {
-            throw new TransportException(TransportErrorKind.EXECUTOR_REJECTED, "rejected");
-          }
-        };
-    ModelProvider provider = new OpenAiChatProviderAdapter(rejected, "sk-test").create(descriptor);
+  void transportFailureMapsToExactlyOneTerminalError() {
     AtomicReference<Integer> errors = new AtomicReference<>(0);
     AtomicReference<ProviderException> caught = new AtomicReference<>();
-    ProviderStream stream =
-        provider.stream(
-            validRequest(),
-            new ProviderStreamHandler() {
-              @Override
-              public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
-
-              @Override
-              public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
-
-              @Override
-              public void onError(ProviderException error, ProviderStream stream) {
-                errors.set(errors.get() + 1);
-                caught.set(error);
-              }
-            });
-    assertNotNull(stream);
-    assertEquals(1, errors.get());
-    assertEquals(ProviderErrorKind.TRANSIENT, caught.get().kind());
-    assertEquals("OpenAI executor rejected the request", caught.get().getMessage());
-    assertNull(caught.get().getCause());
-  }
-
-  /** 测试意图：用户 handler 抛错后已终态，CALLBACK_FAILED 不得再次回调。 */
-  @Test
-  void handlerFailureDoesNotReenterOnError() {
-    AtomicReference<HttpSseCallback> callbackRef = new AtomicReference<>();
-    JdkHttpSseTransport stub =
-        new JdkHttpSseTransport(httpClient, workerExecutor, scheduler) {
-          @Override
-          public ProviderStream stream(
-              HttpRequest request,
-              ModelCallTimeoutPolicy timeoutPolicy,
-              HttpSseLimits limits,
-              HttpSseCallback callback) {
-            callbackRef.set(callback);
-            return new ProviderStream() {
-              @Override
-              public void cancel() {}
-
-              @Override
-              public boolean isCancelled() {
-                return false;
-              }
-            };
-          }
-        };
-    ModelProvider provider = new OpenAiChatProviderAdapter(stub, "sk-test").create(descriptor);
-    AtomicReference<Integer> errors = new AtomicReference<>(0);
-    provider.stream(
-        validRequest(),
-        new ProviderStreamHandler() {
-          @Override
-          public void onProtocolEvent(ProviderProtocolEvent event, ProviderStream stream) {
-            throw new ProviderException(ProviderErrorKind.INVALID_REQUEST, "handler failed");
-          }
-
-          @Override
-          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
-
-          @Override
-          public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
-
-          @Override
-          public void onError(ProviderException error, ProviderStream stream) {
-            errors.set(errors.get() + 1);
-          }
-        });
-    assertThrows(
-        ProviderException.class,
-        () ->
-            callbackRef
-                .get()
-                .onEvent(
-                    new ServerSentEvent(null, "{\"choices\":[{\"delta\":{\"content\":\"x\"}}]}")));
-    callbackRef
-        .get()
-        .onFailure(new TransportException(TransportErrorKind.CALLBACK_FAILED, "callback"));
-    assertEquals(0, errors.get());
-
-    AtomicReference<HttpSseCallback> providerExceptionCallback = new AtomicReference<>();
-    JdkHttpSseTransport providerExceptionTransport =
-        new JdkHttpSseTransport(httpClient, workerExecutor, scheduler) {
-          @Override
-          public ProviderStream stream(
-              HttpRequest request,
-              ModelCallTimeoutPolicy timeoutPolicy,
-              HttpSseLimits limits,
-              HttpSseCallback callback) {
-            providerExceptionCallback.set(callback);
-            return new ProviderStream() {
-              @Override
-              public void cancel() {}
-
-              @Override
-              public boolean isCancelled() {
-                return false;
-              }
-            };
-          }
-        };
-    AtomicReference<Integer> providerExceptionErrors = new AtomicReference<>(0);
-    new OpenAiChatProviderAdapter(providerExceptionTransport, "sk-test")
+    new OpenAiChatProviderAdapter(
+            ScriptedSseTransport.failing(new TransportException(TransportErrorKind.IO, "io")),
+            "sk-test")
         .create(descriptor).stream(
             validRequest(),
             new ProviderStreamHandler() {
               @Override
-              public void onProtocolEvent(ProviderProtocolEvent event, ProviderStream stream) {}
+              public void onEvent(ProviderStreamEvent event) {}
 
               @Override
-              public void onEvent(ProviderStreamEvent event, ProviderStream stream) {
-                throw new ProviderException(ProviderErrorKind.INVALID_REQUEST, "handler failed");
-              }
+              public void onComplete(ProviderCompletion completion) {}
 
               @Override
-              public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
-
-              @Override
-              public void onError(ProviderException error, ProviderStream stream) {
-                providerExceptionErrors.set(providerExceptionErrors.get() + 1);
+              public void onError(ProviderException error) {
+                errors.set(errors.get() + 1);
+                caught.set(error);
               }
             });
-    assertThrows(
-        ProviderException.class,
-        () ->
-            providerExceptionCallback
-                .get()
-                .onEvent(
-                    new ServerSentEvent(null, "{\"choices\":[{\"delta\":{\"content\":\"x\"}}]}")));
-    providerExceptionCallback
-        .get()
-        .onFailure(new TransportException(TransportErrorKind.CALLBACK_FAILED, "callback"));
-    assertEquals(0, providerExceptionErrors.get());
+    assertEquals(1, errors.get());
+    assertEquals(ProviderErrorKind.TRANSIENT, caught.get().kind());
+    assertNull(caught.get().getCause());
+  }
+
+  /** 测试意图：用户 handler 在原生帧或增量处抛错时流已封口：异常传播给调用方，之后不再回调 onError。 */
+  @Test
+  void handlerFailureIsTerminalAndPropagates() {
+    ServerSentEvent delta =
+        new ServerSentEvent(null, "{\"choices\":[{\"delta\":{\"content\":\"x\"}}]}");
+    for (boolean failOnProtocol : new boolean[] {true, false}) {
+      AtomicReference<Integer> errors = new AtomicReference<>(0);
+      ModelProvider provider =
+          new OpenAiChatProviderAdapter(
+                  ScriptedSseTransport.failing(
+                      new TransportException(TransportErrorKind.IO, "late"), delta),
+                  "sk-test")
+              .create(descriptor);
+      assertThrows(
+          ProviderException.class,
+          () ->
+              provider.stream(
+                  validRequest(),
+                  new ProviderStreamHandler() {
+                    @Override
+                    public void onProtocolEvent(ProviderProtocolEvent event) {
+                      if (failOnProtocol) {
+                        throw new ProviderException(
+                            ProviderErrorKind.INVALID_REQUEST, "handler failed");
+                      }
+                    }
+
+                    @Override
+                    public void onEvent(ProviderStreamEvent event) {
+                      throw new ProviderException(
+                          ProviderErrorKind.INVALID_REQUEST, "handler failed");
+                    }
+
+                    @Override
+                    public void onComplete(ProviderCompletion completion) {}
+
+                    @Override
+                    public void onError(ProviderException error) {
+                      errors.set(errors.get() + 1);
+                    }
+                  }));
+      assertEquals(0, errors.get());
+    }
   }
 
   private ProviderRequest validRequest() {

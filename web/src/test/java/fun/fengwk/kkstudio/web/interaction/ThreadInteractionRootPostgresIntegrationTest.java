@@ -1088,15 +1088,10 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
             now,
             now);
     tx.insertModelInvocation(model);
-    tx.updateModelInvocation(model.beginDispatch(now));
-    tx.updateModelInvocation(model.beginDispatch(now).markRunning(now));
-    tx.updateModelInvocation(model.beginDispatch(now).markRunning(now).succeed(response, now));
+    tx.updateModelInvocation(model.markRunning(now));
+    tx.updateModelInvocation(model.markRunning(now).succeed(response, now));
     tx.updateModelInvocation(
-        model
-            .beginDispatch(now)
-            .markRunning(now)
-            .succeed(response, now)
-            .attachResultEntry(assistantEntryId, now));
+        model.markRunning(now).succeed(response, now).attachResultEntry(assistantEntryId, now));
 
     UUID toolId = tx.nextId();
     ToolInvocation ready =

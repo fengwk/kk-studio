@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.sun.net.httpserver.HttpServer;
@@ -15,12 +16,9 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
-import fun.fengwk.kkstudio.harness.provider.transport.HttpOpenMetadata;
-import fun.fengwk.kkstudio.harness.provider.transport.HttpSseCallback;
 import fun.fengwk.kkstudio.harness.provider.transport.HttpSseLimits;
 import fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransport;
 import fun.fengwk.kkstudio.harness.provider.transport.ServerSentEvent;
-import fun.fengwk.kkstudio.harness.provider.transport.TransportException;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
@@ -36,7 +34,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
@@ -66,6 +63,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Predicate;
 
 /** 测试意图：端到端集成测试，验证本地 HTTP 服务下连续多步工具循环、HTTP 异常分类映射、流终态封闭与回调崩溃的单次终态。 */
 class OpenAiChatModelProviderIntegrationTest {
@@ -95,7 +93,7 @@ class OpenAiChatModelProviderIntegrationTest {
             .followRedirects(HttpClient.Redirect.NEVER)
             .connectTimeout(Duration.ofSeconds(5))
             .build();
-    transport = new JdkHttpSseTransport(httpClient, workerExecutor, scheduler);
+    transport = new JdkHttpSseTransport(httpClient, scheduler);
 
     descriptor =
         new ProviderDescriptor(
@@ -181,16 +179,16 @@ class OpenAiChatModelProviderIntegrationTest {
         req1,
         new ProviderStreamHandler() {
           @Override
-          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
+          public void onEvent(ProviderStreamEvent event) {}
 
           @Override
-          public void onComplete(ProviderCompletion completion, ProviderStream stream) {
+          public void onComplete(ProviderCompletion completion) {
             comp1.set(completion);
             latch1.countDown();
           }
 
           @Override
-          public void onError(ProviderException error, ProviderStream stream) {
+          public void onError(ProviderException error) {
             latch1.countDown();
           }
         });
@@ -233,16 +231,16 @@ class OpenAiChatModelProviderIntegrationTest {
         req2,
         new ProviderStreamHandler() {
           @Override
-          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
+          public void onEvent(ProviderStreamEvent event) {}
 
           @Override
-          public void onComplete(ProviderCompletion completion, ProviderStream stream) {
+          public void onComplete(ProviderCompletion completion) {
             comp2.set(completion);
             latch2.countDown();
           }
 
           @Override
-          public void onError(ProviderException error, ProviderStream stream) {
+          public void onError(ProviderException error) {
             latch2.countDown();
           }
         });
@@ -291,13 +289,13 @@ class OpenAiChatModelProviderIntegrationTest {
         request,
         new ProviderStreamHandler() {
           @Override
-          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
+          public void onEvent(ProviderStreamEvent event) {}
 
           @Override
-          public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
+          public void onComplete(ProviderCompletion completion) {}
 
           @Override
-          public void onError(ProviderException error, ProviderStream stream) {
+          public void onError(ProviderException error) {
             errorRef.set(error);
             latch.countDown();
           }
@@ -342,17 +340,17 @@ class OpenAiChatModelProviderIntegrationTest {
         simpleRequest(),
         new ProviderStreamHandler() {
           @Override
-          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
+          public void onEvent(ProviderStreamEvent event) {}
 
           @Override
-          public void onComplete(ProviderCompletion completion, ProviderStream stream) {
+          public void onComplete(ProviderCompletion completion) {
             completes.incrementAndGet();
             firstTerminal.countDown();
             duplicateTerminal.countDown();
           }
 
           @Override
-          public void onError(ProviderException error, ProviderStream stream) {
+          public void onError(ProviderException error) {
             errors.incrementAndGet();
             caught.set(error);
             firstTerminal.countDown();
@@ -399,12 +397,12 @@ class OpenAiChatModelProviderIntegrationTest {
         simpleRequest(),
         new ProviderStreamHandler() {
           @Override
-          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {
+          public void onEvent(ProviderStreamEvent event) {
             deltas.add(event);
           }
 
           @Override
-          public void onComplete(ProviderCompletion completion, ProviderStream stream) {
+          public void onComplete(ProviderCompletion completion) {
             completes.incrementAndGet();
             completionRef.set(completion);
             firstTerminal.countDown();
@@ -412,7 +410,7 @@ class OpenAiChatModelProviderIntegrationTest {
           }
 
           @Override
-          public void onError(ProviderException error, ProviderStream stream) {
+          public void onError(ProviderException error) {
             errors.incrementAndGet();
             caught.set(error);
             firstTerminal.countDown();
@@ -434,12 +432,11 @@ class OpenAiChatModelProviderIntegrationTest {
   }
 
   /**
-   * 测试意图：provider 内部回调逃逸的非 ProviderException 由真实 transport 转换为 CALLBACK_FAILED，经 ErrorMapper 脱敏为
-   * INVALID_RESPONSE 后 handler 恰好收到一次终态错误（不静默、不重复、无 completion）。用户 handler 自身抛错属于 0-onError
-   * 契约，不在本例范围。
+   * 测试意图：provider 内部回调逃逸的非 ProviderException 由真实 transport 原样传播给调用方（由上层收敛为不确定终态），handler
+   * 不会收到任何伪造的终态。
    */
   @Test
-  void callbackCrashIsDeliveredAsExactlyOneTerminalError() throws Exception {
+  void callbackCrashPropagatesWithoutAFabricatedTerminal() throws Exception {
     server.createContext(
         "/chat/completions",
         exchange -> {
@@ -454,92 +451,64 @@ class OpenAiChatModelProviderIntegrationTest {
         });
 
     JdkHttpSseTransport crashingTransport =
-        new JdkHttpSseTransport(httpClient, workerExecutor, scheduler) {
+        new JdkHttpSseTransport(httpClient, scheduler) {
           @Override
-          public ProviderStream stream(
+          public void execute(
               HttpRequest httpRequest,
               ModelCallTimeoutPolicy timeoutPolicy,
               HttpSseLimits limits,
-              HttpSseCallback callback) {
-            // 先让 provider 正常处理真实帧，再故意抛出非 ProviderException：真实 transport 的故障隔离会把它转成
-            // CALLBACK_FAILED 终态，而不是让用户侧无终态挂死。
-            HttpSseCallback crashingCallback =
-                new HttpSseCallback() {
-                  @Override
-                  public void onOpen(HttpOpenMetadata metadata) {
-                    callback.onOpen(metadata);
-                  }
-
-                  @Override
-                  public void onEvent(ServerSentEvent event) {
-                    callback.onEvent(event);
-                    throw new IllegalStateException(
-                        "deliberate non-ProviderException callback crash");
-                  }
-
-                  @Override
-                  public void onComplete() {
-                    callback.onComplete();
-                  }
-
-                  @Override
-                  public void onFailure(TransportException error) {
-                    callback.onFailure(error);
-                  }
-                };
-            return super.stream(httpRequest, timeoutPolicy, limits, crashingCallback);
+              Predicate<ServerSentEvent> onEvent) {
+            // 先让 provider 正常处理真实帧，再故意抛出非 ProviderException：它必须原样传播给调用方，绝不伪造成终态。
+            super.execute(
+                httpRequest,
+                timeoutPolicy,
+                limits,
+                event -> {
+                  onEvent.test(event);
+                  throw new IllegalStateException(
+                      "deliberate non-ProviderException callback crash");
+                });
           }
         };
     ModelProvider provider =
         new OpenAiChatProviderAdapter(crashingTransport, "sk-test").create(descriptor);
 
-    AtomicInteger errors = new AtomicInteger(0);
-    AtomicInteger completes = new AtomicInteger(0);
+    AtomicInteger terminals = new AtomicInteger(0);
     List<ProviderStreamEvent> deltas = new ArrayList<>();
-    AtomicReference<ProviderException> caught = new AtomicReference<>();
-    CountDownLatch firstTerminal = new CountDownLatch(1);
-    // 终态计数为 2：只允许一次终态，出现第二次即释放
-    CountDownLatch duplicateTerminal = new CountDownLatch(2);
 
-    provider.stream(
-        simpleRequest(),
-        new ProviderStreamHandler() {
-          @Override
-          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {
-            deltas.add(event);
-          }
+    IllegalStateException crash =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                provider.stream(
+                    simpleRequest(),
+                    new ProviderStreamHandler() {
+                      @Override
+                      public void onEvent(ProviderStreamEvent event) {
+                        deltas.add(event);
+                      }
 
-          @Override
-          public void onComplete(ProviderCompletion completion, ProviderStream stream) {
-            completes.incrementAndGet();
-            firstTerminal.countDown();
-            duplicateTerminal.countDown();
-          }
+                      @Override
+                      public void onComplete(ProviderCompletion completion) {
+                        terminals.incrementAndGet();
+                      }
 
-          @Override
-          public void onError(ProviderException error, ProviderStream stream) {
-            errors.incrementAndGet();
-            caught.set(error);
-            firstTerminal.countDown();
-            duplicateTerminal.countDown();
-          }
-        });
+                      @Override
+                      public void onError(ProviderException error) {
+                        terminals.incrementAndGet();
+                      }
+                    }));
 
-    assertTrue(firstTerminal.await(5, TimeUnit.SECONDS));
-    assertFalse(duplicateTerminal.await(500, TimeUnit.MILLISECONDS));
+    assertEquals("deliberate non-ProviderException callback crash", crash.getMessage());
     // 崩溃前该帧已被 provider 正常交付，说明确实发生在回调内部而不是未开始流
     assertEquals(1, deltas.size());
     assertEquals("hi", ((ProviderStreamEvent.TextDelta) deltas.get(0)).text());
-    assertEquals(1, errors.get());
-    assertEquals(0, completes.get());
-    assertEquals(ProviderErrorKind.INVALID_RESPONSE, caught.get().kind());
-    assertEquals("OpenAI invalid response", caught.get().getMessage());
-    assertNull(caught.get().getCause());
+    assertEquals(0, terminals.get());
   }
 
   /**
-   * 测试意图：上游 should_cancel_streaming 与 cancelling-subscription-mid-stream 的协议级等价——客户端在首个事件回调里取消真实
-   * HTTP 流后，取消返回即封口；服务端随后到达的帧与结束信号都不得再交付任何增量或终态。
+   * 测试意图：上游 should_cancel_streaming 与 cancelling-subscription-mid-stream 的协议级等价——客户端在首个事件回调里中断调用
+   * 线程后真实 HTTP 流立即关闭；服务端随后到达的帧与结束信号都不得再交付任何增量或终态。
    */
   @Test
   void clientCancellationMidStreamStopsDelivery() throws Exception {
@@ -573,31 +542,31 @@ class OpenAiChatModelProviderIntegrationTest {
 
     List<ProviderStreamEvent> deltas = new ArrayList<>();
     AtomicInteger terminals = new AtomicInteger();
-    ProviderStream stream =
-        new OpenAiChatProviderAdapter(transport, "sk-test")
-            .create(descriptor).stream(
-                simpleRequest(),
-                new ProviderStreamHandler() {
-                  @Override
-                  public void onEvent(ProviderStreamEvent event, ProviderStream st) {
-                    deltas.add(event);
-                    st.cancel();
-                    clientCancelled.countDown();
-                  }
+    new OpenAiChatProviderAdapter(transport, "sk-test")
+        .create(descriptor).stream(
+            simpleRequest(),
+            new ProviderStreamHandler() {
+              @Override
+              public void onEvent(ProviderStreamEvent event) {
+                deltas.add(event);
+                // 取消即中断调用线程：传输器关闭连接并以 CANCELLED 静默返回。
+                Thread.currentThread().interrupt();
+                clientCancelled.countDown();
+              }
 
-                  @Override
-                  public void onComplete(ProviderCompletion completion, ProviderStream st) {
-                    terminals.incrementAndGet();
-                  }
+              @Override
+              public void onComplete(ProviderCompletion completion) {
+                terminals.incrementAndGet();
+              }
 
-                  @Override
-                  public void onError(ProviderException error, ProviderStream st) {
-                    terminals.incrementAndGet();
-                  }
-                });
+              @Override
+              public void onError(ProviderException error) {
+                terminals.incrementAndGet();
+              }
+            });
 
+    assertTrue(Thread.interrupted(), "cancellation must leave the interrupt flag for the caller");
     assertTrue(clientCancelled.await(5, TimeUnit.SECONDS));
-    assertTrue(stream.isCancelled());
     assertTrue(
         serverAttemptedLateFrames.await(5, TimeUnit.SECONDS),
         "server must have attempted to deliver frames after cancel");
@@ -849,16 +818,16 @@ class OpenAiChatModelProviderIntegrationTest {
         request,
         new ProviderStreamHandler() {
           @Override
-          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
+          public void onEvent(ProviderStreamEvent event) {}
 
           @Override
-          public void onComplete(ProviderCompletion completion, ProviderStream stream) {
+          public void onComplete(ProviderCompletion completion) {
             comp.set(completion);
             latch.countDown();
           }
 
           @Override
-          public void onError(ProviderException error, ProviderStream stream) {
+          public void onError(ProviderException error) {
             err.set(error);
             latch.countDown();
           }

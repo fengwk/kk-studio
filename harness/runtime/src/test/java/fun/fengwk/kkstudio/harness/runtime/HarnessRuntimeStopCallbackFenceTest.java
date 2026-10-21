@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.harness.runtime;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T3;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T5;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T6;
-import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.beginDispatchTool;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.approveTool;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.markRunningTool;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.runtime;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedModel;
@@ -53,7 +53,7 @@ class HarnessRuntimeStopCallbackFenceTest {
   void toolClaimCannotCommitAfterStop() {
     InMemoryHarnessStore store = new InMemoryHarnessStore();
     HarnessRuntimeTestSupport.ToolBaseline baseline = seedToolBaseline(store);
-    beginDispatchTool(store, baseline.toolId());
+    approveTool(store, baseline.toolId());
     markRunningTool(store, baseline.toolId());
     seedThreadWork(store, baseline.threadId());
     seedToolWork(store, baseline.toolId());

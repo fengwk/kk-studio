@@ -279,8 +279,7 @@ class PostgresqlHarnessSchemaTest {
     assertTrue(stopReceiptRoot.contains("(root_thread_id, root_stop_request_id)"));
     // 未收尾 ToolInvocation 的按 ModelInvocation 查找路径必须只覆盖全部非终态（含人工输入等待），且按 model_invocation_id 建键。
     assertTrue(toolNonterminal.contains("(model_invocation_id)"));
-    for (String nonterminal :
-        List.of("WAITING_APPROVAL", "WAITING_INPUT", "READY", "DISPATCHING", "RUNNING")) {
+    for (String nonterminal : List.of("WAITING_APPROVAL", "WAITING_INPUT", "READY", "RUNNING")) {
       assertTrue(toolNonterminal.contains("'" + nonterminal + "'"));
     }
     for (String terminal : List.of("SUCCEEDED", "FAILED", "CANCELLED", "UNKNOWN")) {
@@ -291,7 +290,7 @@ class PostgresqlHarnessSchemaTest {
     assertTrue(pending.contains("(created_at, id)"));
     assertTrue(pending.contains("'WAITING_APPROVAL'"));
     assertTrue(pending.contains("'WAITING_INPUT'"));
-    for (String nonWaiting : List.of("'READY'", "'DISPATCHING'", "'RUNNING'")) {
+    for (String nonWaiting : List.of("'READY'", "'RUNNING'")) {
       assertFalse(pending.contains(nonWaiting));
     }
   }

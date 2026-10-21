@@ -9,10 +9,10 @@ import type { InstantTimestamp } from '@/shared/api/contracts/base'
 export type InteractionType = 'INPUT' | 'APPROVAL' | 'ENVIRONMENT_WAIT'
 
 /**
- * 待处理 Interaction 的产品来源：Chat 或 Issue+Agent。
+ * 待处理 Interaction 的产品来源：Chat、Issue+Agent，或没有产品页面的独立 Agent 任务（控制器/插件发起）。
  */
 export interface InteractionOwnerDTO {
-  type: 'CHAT' | 'ISSUE_AGENT'
+  type: 'CHAT' | 'ISSUE_AGENT' | 'AGENT_TASK'
   chatId: string | null
   chatTitle: string | null
   issueId: string | null

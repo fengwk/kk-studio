@@ -1182,8 +1182,6 @@ async function createDurableHistoryFixture(
             owner,
             target: threadTarget({
               threadId: state.threadId,
-              expectedHeadEntryId: current.thread.headEntryId,
-              expectedNextCommandSequence: current.thread.nextCommandSequence,
             }),
             commands: [userMessageCommand(message, cid())],
           })
@@ -1276,8 +1274,6 @@ async function createBranchedHistoryFixture(
             owner,
             target: threadTarget({
               threadId: state.threadId,
-              expectedHeadEntryId: current.thread.headEntryId,
-              expectedNextCommandSequence: current.thread.nextCommandSequence,
             }),
             commands: [userMessageCommand(message, cid())],
           })
@@ -1468,8 +1464,6 @@ async function createHoldingQueueFixture(
         owner,
         target: threadTarget({
           threadId: state.threadId,
-          expectedHeadEntryId: cursor.headEntryId,
-          expectedNextCommandSequence: cursor.nextCommandSequence,
         }),
         commands: [userMessageCommand(message, cid())],
       })

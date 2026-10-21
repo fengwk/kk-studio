@@ -68,7 +68,7 @@ export function ThreadPane({
   const labels = useBoundThreadPanelLabels(environments, projection)
   const { t } = useI18n()
   const pendingTool = projection.toolInvocations.find(
-    (invocation) => ['READY', 'WAITING_APPROVAL', 'WAITING_INPUT', 'DISPATCHING'].includes(invocation.status),
+    (invocation) => ['READY', 'WAITING_APPROVAL', 'WAITING_INPUT'].includes(invocation.status),
   )
   const executing = projection.toolInvocations.some(
     (invocation) => invocation.status === 'RUNNING',

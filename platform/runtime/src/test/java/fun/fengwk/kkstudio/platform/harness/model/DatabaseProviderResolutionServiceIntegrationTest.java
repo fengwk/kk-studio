@@ -20,8 +20,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactories;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactory;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMediaCapabilities;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderConfigurationCodec;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
@@ -253,20 +251,7 @@ class DatabaseProviderResolutionServiceIntegrationTest extends PostgresSpringTes
         public ModelProvider create(ProviderDescriptor descriptor) {
           CapturingFactory.this.descriptor = descriptor;
           openCount++;
-          return new ModelProvider() {
-            @Override
-            public ProviderStream stream(ProviderRequest request, ProviderStreamHandler handler) {
-              return new ProviderStream() {
-                @Override
-                public void cancel() {}
-
-                @Override
-                public boolean isCancelled() {
-                  return false;
-                }
-              };
-            }
-          };
+          return (request, handler) -> {};
         }
       };
     }

@@ -93,7 +93,8 @@ class ModelExecutionDecodeDurationTest {
     harness.execution.onEvent(new ProviderStreamEvent.ThinkingDelta(""));
     harness.execution.onEvent(new ProviderStreamEvent.ToolCallDelta(0, "call-1", null, null));
     harness.execution.onEvent(new ProviderStreamEvent.TextDelta("hi"));
-    harness.execution.onSucceeded(new ProviderCompletion(toolResponse("hi")));
+    harness.execution.finish(
+        new ModelGateway.Succeeded(new ProviderCompletion(toolResponse("hi"))));
 
     assertEquals(250L, persistedDuration(harness));
     harness.nano.assertExhausted();
@@ -109,7 +110,7 @@ class ModelExecutionDecodeDurationTest {
     harness.execution.onEvent(new ProviderStreamEvent.ToolCallDelta(0, "call-1", null, null));
     // argumentsJson 存在但为空同样不构成模型输出。
     harness.execution.onEvent(new ProviderStreamEvent.ToolCallDelta(0, "call-1", null, ""));
-    harness.execution.onSucceeded(new ProviderCompletion(toolResponse()));
+    harness.execution.finish(new ModelGateway.Succeeded(new ProviderCompletion(toolResponse())));
 
     assertNull(persistedDuration(harness));
     harness.nano.assertExhausted();
@@ -122,7 +123,8 @@ class ModelExecutionDecodeDurationTest {
 
     harness.execution.onEvent(new ProviderStreamEvent.ThinkingDelta("think"));
     harness.execution.onEvent(new ProviderStreamEvent.TextDelta("answer"));
-    harness.execution.onSucceeded(new ProviderCompletion(response("answer")));
+    harness.execution.finish(
+        new ModelGateway.Succeeded(new ProviderCompletion(response("answer"))));
 
     assertEquals(500L, persistedDuration(harness));
     harness.nano.assertExhausted();
@@ -135,7 +137,7 @@ class ModelExecutionDecodeDurationTest {
 
     harness.execution.onEvent(new ProviderStreamEvent.ToolCallDelta(0, "call-1", null, null));
     harness.execution.onEvent(new ProviderStreamEvent.ToolCallDelta(0, null, null, "{\"q\":1}"));
-    harness.execution.onSucceeded(new ProviderCompletion(toolResponse()));
+    harness.execution.finish(new ModelGateway.Succeeded(new ProviderCompletion(toolResponse())));
 
     assertEquals(100L, persistedDuration(harness));
     harness.nano.assertExhausted();
@@ -147,7 +149,7 @@ class ModelExecutionDecodeDurationTest {
     Harness harness = new Harness(NO_RETRY, 4_000_000_000L, 4_400_000_000L);
 
     harness.execution.onEvent(new ProviderStreamEvent.ToolCallDelta(0, null, "bash", null));
-    harness.execution.onSucceeded(new ProviderCompletion(toolResponse()));
+    harness.execution.finish(new ModelGateway.Succeeded(new ProviderCompletion(toolResponse())));
 
     assertEquals(400L, persistedDuration(harness));
     harness.nano.assertExhausted();
@@ -158,35 +160,23 @@ class ModelExecutionDecodeDurationTest {
   void noEventsLeaveDurationAbsent() {
     Harness harness = new Harness(NO_RETRY, 9_000_000L);
 
-    harness.execution.onSucceeded(new ProviderCompletion(response("hello")));
+    harness.execution.finish(new ModelGateway.Succeeded(new ProviderCompletion(response("hello"))));
 
     assertNull(persistedDuration(harness));
     harness.nano.assertExhausted();
   }
 
-  /** 重复成功回调只保留首个观察时刻，且不产生第二次终态落地。 */
-  @Test
-  void duplicateSuccessCallbackKeepsFirstObservation() {
-    Harness harness = new Harness(NO_RETRY, 1_000_000L, 3_000_000L);
-
-    harness.execution.onEvent(new ProviderStreamEvent.TextDelta("x"));
-    harness.execution.onSucceeded(new ProviderCompletion(response("x")));
-    harness.execution.onSucceeded(new ProviderCompletion(response("x")));
-
-    assertEquals(2L, persistedDuration(harness));
-    assertEquals(
-        "x", ThreadProcessorTestSupport.model(harness.store, harness.invocationId).result().text());
-    harness.nano.assertExhausted();
-  }
-
-  /** abandon 后的成功回调被丢弃：durable RUNNING 不产生任何计时或结果。 */
+  /** abandon 后的终态提交被丢弃：durable RUNNING 不产生任何计时或结果。 */
   @Test
   void abandonedExecutionDoesNotFabricateDuration() {
     Harness harness = new Harness(NO_RETRY, 1_000_000L);
 
     harness.execution.onEvent(new ProviderStreamEvent.TextDelta("x"));
     harness.execution.abandon();
-    harness.execution.onSucceeded(new ProviderCompletion(response("x")));
+    assertEquals(
+        ProcessResult.LOST_OWNERSHIP,
+        harness.execution.finish(
+            new ModelGateway.Succeeded(new ProviderCompletion(response("x")))));
 
     ModelInvocation model = ThreadProcessorTestSupport.model(harness.store, harness.invocationId);
     assertEquals(ModelInvocationStatus.RUNNING, model.status());
@@ -200,8 +190,9 @@ class ModelExecutionDecodeDurationTest {
     Harness harness = new Harness(ONE_RETRY, 1_000_000L);
 
     harness.execution.onEvent(new ProviderStreamEvent.TextDelta("x"));
-    harness.execution.onFailed(
-        new ModelInvocationError(ProviderErrorKind.TRANSIENT, "provider down"));
+    harness.execution.finish(
+        new ModelGateway.Failed(
+            new ModelInvocationError(ProviderErrorKind.TRANSIENT, "provider down")));
 
     ModelInvocation model = ThreadProcessorTestSupport.model(harness.store, harness.invocationId);
     assertEquals(ModelInvocationStatus.READY, model.status());
@@ -216,8 +207,9 @@ class ModelExecutionDecodeDurationTest {
     Harness harness = new Harness(NO_RETRY, 1_000_000L);
 
     harness.execution.onEvent(new ProviderStreamEvent.TextDelta("x"));
-    harness.execution.onUnknown(
-        new ModelInvocationError(ProviderErrorKind.TRANSIENT, "outcome unknown"));
+    harness.execution.finish(
+        new ModelGateway.Unknown(
+            new ModelInvocationError(ProviderErrorKind.TRANSIENT, "outcome unknown")));
 
     ModelInvocation model = ThreadProcessorTestSupport.model(harness.store, harness.invocationId);
     assertEquals(ModelInvocationStatus.UNKNOWN, model.status());
@@ -231,7 +223,7 @@ class ModelExecutionDecodeDurationTest {
     Harness harness = new Harness(NO_RETRY, 1_000_000_000L, 1_750_000_000L);
 
     harness.execution.onEvent(new ProviderStreamEvent.TextDelta("hello"));
-    harness.execution.onSucceeded(new ProviderCompletion(response("hello")));
+    harness.execution.finish(new ModelGateway.Succeeded(new ProviderCompletion(response("hello"))));
     assertEquals(750L, persistedDuration(harness));
 
     harness.threadFixture.nextClaim(harness.turn.threadId());
@@ -254,7 +246,7 @@ class ModelExecutionDecodeDurationTest {
     Harness harness = new Harness(NO_RETRY, 10_000_000L, 5_000L);
 
     harness.execution.onEvent(new ProviderStreamEvent.TextDelta("x"));
-    harness.execution.onSucceeded(new ProviderCompletion(response("x")));
+    harness.execution.finish(new ModelGateway.Succeeded(new ProviderCompletion(response("x"))));
 
     assertEquals(0L, persistedDuration(harness));
     harness.nano.assertExhausted();
@@ -267,7 +259,7 @@ class ModelExecutionDecodeDurationTest {
     return model.result().decodeDurationMillis();
   }
 
-  /** 每个测试一个进程内 Model execution：READY -> DISPATCHING -> activate 到 RUNNING，claim 未过期。 */
+  /** 每个测试一个进程内 Model execution：READY -> markRunning 到 RUNNING，claim 未过期。 */
   private final class Harness {
 
     final ThreadProcessorTestSupport.Fixture threadFixture =
@@ -314,13 +306,6 @@ class ModelExecutionDecodeDurationTest {
                       tx.claimNextWork(
                           WorkTargetType.MODEL, "token-" + invocationId, Duration.ofSeconds(60)))
               .orElseThrow();
-      // 模拟 ModelProcessor prepare：READY -> DISPATCHING。
-      store.transaction(
-          tx -> {
-            ModelInvocation model = tx.lockModelInvocation(invocationId).orElseThrow();
-            tx.updateModelInvocation(model.beginDispatch(NOW));
-            return null;
-          });
       this.execution =
           new ModelExecution(
               store,
@@ -343,7 +328,7 @@ class ModelExecutionDecodeDurationTest {
               ignored -> {},
               nano);
       assertTrue(execution.startHeartbeat(), "heartbeat must start");
-      assertEquals(ProcessResult.STARTED, execution.activate(new FakeHandle()));
+      assertTrue(execution.markRunning(), "READY must persist RUNNING");
     }
   }
 
@@ -372,15 +357,6 @@ class ModelExecutionDecodeDurationTest {
         throw new AssertionError("unconsumed nanoTime values: " + values);
       }
     }
-  }
-
-  private static final class FakeHandle implements ModelGateway.Handle {
-
-    @Override
-    public void cancel() {}
-
-    @Override
-    public void activate() {}
   }
 
   private static ProviderResponse response(String text) {
