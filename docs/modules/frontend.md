@@ -15,7 +15,7 @@ QueryClient → ApplicationContributions → BrowserPreferences → ApplicationE
 查询默认关闭自动 retry 与窗口聚焦刷新；共享 ApplicationEvent manager 管理订阅。
 
 [`AppRouter`](../../frontend/src/app/router.tsx) 将 `/` 转至 `/chats`，`/interactions` 由应用层
-[`InteractionsPage`](../../frontend/src/app/pages/InteractionsPage.tsx) 承载问卷与审批，
+[`InteractionsPage`](../../frontend/src/app/pages/InteractionsPage.tsx) 承载问卷与审批（Chat / Issue 来源可跳转，独立 Agent 任务只标明来源），
 其余交给 [`WorkbenchShell`](../../frontend/src/platform/workbench/WorkbenchShell.tsx)。
 AppShell 与 WorkbenchShell 的 `navItems` 必传，由应用组合根
 [`navigation.ts`](../../frontend/src/app/navigation.ts) 组装；platform 不导入 feature。

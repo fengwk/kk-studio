@@ -1,4 +1,5 @@
 import {
+  Bot,
   CheckCircle2,
   ExternalLink,
   LoaderCircle,
@@ -74,6 +75,20 @@ export function InteractionsPage() {
           ) : null}
           <ExternalLink size={12} aria-hidden="true" />
         </Button>
+      )
+    }
+
+    if (owner.type === 'AGENT_TASK') {
+      // 独立任务没有产品页面：只标明来源，审批与作答直接在本页完成。
+      return (
+        <span className="interaction-task-source" title={t('ai.interaction.sourceAgentTask')}>
+          <Bot size={14} aria-hidden="true" />
+          <span>{t('ai.interaction.sourceAgentTask')}</span>
+          {owner.rootThreadName ? <span>{owner.rootThreadName}</span> : null}
+          {owner.agentName ? (
+            <span className="interaction-agent-badge">{owner.agentName}</span>
+          ) : null}
+        </span>
       )
     }
 

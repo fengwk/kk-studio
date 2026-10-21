@@ -3700,6 +3700,10 @@ export const aiCatalog = {
     'en-US': 'Open task chat',
     'zh-CN': '打开任务对话',
   },
+  'ai.interaction.sourceAgentTask': {
+    'en-US': 'Agent task',
+    'zh-CN': 'Agent 任务',
+  },
   'ai.interaction.submit': {
     'en-US': 'Submit Answers',
     'zh-CN': '提交回答',
