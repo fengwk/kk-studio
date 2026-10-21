@@ -191,8 +191,8 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
    * 在真实 Thread 行之上投影一组受控命令/模型/工具状态，并在 Harness 投影边界给出对应的执行事实。
    *
    * <p>受控假件只模拟 Harness 的执行事实投影，不冒充 Harness 的真实恢复/分类验证：状态矩阵（Model 各态、工具
-   * READY/DISPATCHING/RUNNING/等待/UNKNOWN、owned continuation 与尾部控制 Entry）由 Runtime 的真实 store 测试覆盖，
-   * 本类只验证 Project 事务、Join 与 Stop 政策对三个正交事实的消费。
+   * READY/RUNNING/等待/UNKNOWN、owned continuation 与尾部控制 Entry）由 Runtime 的真实 store 测试覆盖， 本类只验证 Project
+   * 事务、Join 与 Stop 政策对三个正交事实的消费。
    */
   private ThreadSnapshot overlay(
       UUID threadId,

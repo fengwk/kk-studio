@@ -264,7 +264,7 @@ public final class ModelProcessor implements AutoCloseable {
 
   private ProcessResult abortStart(ModelExecution execution, ClaimedWork claim) {
     execution.abandon();
-    return reschedule(claim, config.dispatchBusyFallbackDelay())
+    return reschedule(claim, config.admitFailureDelay())
         ? ProcessResult.RESCHEDULED
         : ProcessResult.LOST_OWNERSHIP;
   }
