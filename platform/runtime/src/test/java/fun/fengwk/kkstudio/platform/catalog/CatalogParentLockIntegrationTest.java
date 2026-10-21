@@ -12,8 +12,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.service.AgentDefinitionService;
-import fun.fengwk.kkstudio.platform.catalog.model.repo.AgentModelRepository;
-import fun.fengwk.kkstudio.platform.catalog.model.service.AgentModelService;
+import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
+import fun.fengwk.kkstudio.platform.catalog.model.AgentModelService;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderService;
 import fun.fengwk.kkstudio.platform.error.AiInUseException;

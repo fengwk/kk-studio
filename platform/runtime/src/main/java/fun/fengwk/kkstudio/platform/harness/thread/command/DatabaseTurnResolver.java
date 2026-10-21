@@ -44,10 +44,10 @@ import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentDefin
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
-import fun.fengwk.kkstudio.platform.catalog.model.repo.AgentModelRepository;
+import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
+import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser.ParsedAgentModelConfig;
-import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogQueryService;
@@ -309,7 +309,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
         new ModelDescriptor(
             selection.providerName(),
             selection.modelName(),
-            model.getModelId(),
+            model.modelId(),
             parsedModel.inputModalities(),
             parsedModel.tools(),
             parsedModel.reasoning());
@@ -589,7 +589,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
 
   private ParsedAgentModelConfig parseModel(AgentModel model) {
     try {
-      return modelConfigParser.parse(model.getConfigJson());
+      return modelConfigParser.parse(model.configJson());
     } catch (IllegalArgumentException error) {
       throw rejection("invalid model configuration: " + messageOrClass(error));
     }

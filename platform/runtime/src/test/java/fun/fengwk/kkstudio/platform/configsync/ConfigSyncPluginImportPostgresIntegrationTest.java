@@ -26,8 +26,8 @@ import fun.fengwk.kkstudio.platform.catalog.definition.repo.impl.store.AgentDefi
 import fun.fengwk.kkstudio.platform.catalog.definition.service.AgentDefinitionService;
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.McpServerService;
-import fun.fengwk.kkstudio.platform.catalog.model.repo.AgentModelRepository;
-import fun.fengwk.kkstudio.platform.catalog.model.service.AgentModelService;
+import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
+import fun.fengwk.kkstudio.platform.catalog.model.AgentModelService;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderService;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.SkillCatalogService;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;

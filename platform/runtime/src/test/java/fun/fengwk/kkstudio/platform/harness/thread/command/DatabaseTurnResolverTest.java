@@ -110,10 +110,10 @@ import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpDiscoveryStatus;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
-import fun.fengwk.kkstudio.platform.catalog.model.repo.AgentModelRepository;
+import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
+import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser.ParsedAgentModelConfig;
-import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderConfigurationCodec;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
@@ -1655,7 +1655,9 @@ class DatabaseTurnResolverTest {
             true);
     fixture.editProvider(
         provider -> provider.configJson(configJson).baseUrl("https://example.invalid/v1"));
-    fixture.models.getByProviderNameAndName("provider", "model").setModelId("gpt-5.6");
+    AgentModel model = fixture.models.getByProviderNameAndName("provider", "model");
+    when(fixture.models.getByProviderNameAndName("provider", "model"))
+        .thenReturn(model.toBuilder().modelId("gpt-5.6").build());
     ProviderFactory factory = fixture.resolverProviderFactory();
     when(factory.promptCacheRetention(any())).thenReturn(PromptCacheRetention.SHORT);
     JdkHttpSseTransport transport = mock(JdkHttpSseTransport.class);
@@ -3135,11 +3137,13 @@ class DatabaseTurnResolverTest {
               .version(0L)
               .build());
 
-      AgentModel model = new AgentModel();
-      model.setProviderName("provider");
-      model.setName("model");
-      model.setModelId("wire-model");
-      model.setConfigJson("model-config");
+      AgentModel model =
+          AgentModel.builder()
+              .providerName("provider")
+              .name("model")
+              .modelId("wire-model")
+              .configJson("model-config")
+              .build();
       when(models.getByProviderNameAndName("provider", "model")).thenReturn(model);
 
       List<SkillRefDTO> skillRefs = new ArrayList<>();
@@ -3282,11 +3286,13 @@ class DatabaseTurnResolverTest {
       when(providers.getByName(selection.providerName())).thenReturn(fallbackProvider);
 
       String configJson = selection.providerName() + "-config";
-      AgentModel fallbackModel = new AgentModel();
-      fallbackModel.setProviderName(selection.providerName());
-      fallbackModel.setName(selection.modelName());
-      fallbackModel.setModelId(selection.modelName());
-      fallbackModel.setConfigJson(configJson);
+      AgentModel fallbackModel =
+          AgentModel.builder()
+              .providerName(selection.providerName())
+              .name(selection.modelName())
+              .modelId(selection.modelName())
+              .configJson(configJson)
+              .build();
       when(models.getByProviderNameAndName(selection.providerName(), selection.modelName()))
           .thenReturn(fallbackModel);
       when(modelConfigParser.parse(configJson)).thenReturn(parsedModel);

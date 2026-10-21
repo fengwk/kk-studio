@@ -110,10 +110,10 @@ public final class ConfigSyncPlanner {
 
     Map<String, AgentModelConfigDTO> availableModels = new LinkedHashMap<>();
     for (var model : snapshot.models()) {
-      String key = ConfigSyncRefs.modelName(model.getProviderName(), model.getName());
-      if (!skippedModels.contains(key) && availableProviders.contains(model.getProviderName())) {
+      String key = ConfigSyncRefs.modelName(model.providerName(), model.name());
+      if (!skippedModels.contains(key) && availableProviders.contains(model.providerName())) {
         // 快照中未被文件覆盖的 Model 以 DB config 为准；解码失败与写入路径一致地硬拒绝。
-        availableModels.put(key, configParser.decode(model.getConfigJson()));
+        availableModels.put(key, configParser.decode(model.configJson()));
       }
     }
     List<ConfigSyncParser.ModelSpec> models = new ArrayList<>();

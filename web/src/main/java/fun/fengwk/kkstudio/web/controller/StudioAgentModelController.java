@@ -15,7 +15,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import fun.fengwk.kkstudio.platform.catalog.model.service.AgentModelService;
+import fun.fengwk.kkstudio.platform.catalog.model.AgentModelService;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelUpdateDTO;

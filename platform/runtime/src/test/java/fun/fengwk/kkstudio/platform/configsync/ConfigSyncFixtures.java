@@ -18,9 +18,10 @@ import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefini
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpDiscoveryStatus;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
+import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
+import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
+import fun.fengwk.kkstudio.platform.catalog.model.AgentModelService;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser;
-import fun.fengwk.kkstudio.platform.catalog.model.service.impl.AgentModelMutationFactory;
-import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderConfigurationCodec;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
@@ -91,8 +92,14 @@ final class ConfigSyncFixtures {
           EDITABLE_SUPPORT,
           mock(ProviderModelDiscovery.class));
 
-  static final AgentModelMutationFactory MODEL_MUTATION_FACTORY =
-      new AgentModelMutationFactory(EDITABLE_SUPPORT, MODEL_CONFIG_PARSER);
+  /** 真实 {@code AgentModelService.validateImport}：纯静态校验，仓储以 mock 占位。 */
+  static final AgentModelService MODEL_SERVICE =
+      new AgentModelService(
+          mock(AgentModelRepository.class),
+          mock(AgentProviderRepository.class),
+          EDITABLE_SUPPORT,
+          MODEL_CONFIG_PARSER);
+
   static final AgentDefinitionMutationFactory AGENT_MUTATION_FACTORY =
       new AgentDefinitionMutationFactory(EDITABLE_SUPPORT, AGENT_CONFIG_CODEC);
 
@@ -114,7 +121,7 @@ final class ConfigSyncFixtures {
     return new ConfigSyncParser(
         yaml,
         PROVIDER_SERVICE,
-        MODEL_MUTATION_FACTORY,
+        MODEL_SERVICE,
         AGENT_MUTATION_FACTORY,
         SKILL_CATALOG_SERVICE,
         new SystemSettingsCodec(),
@@ -198,12 +205,14 @@ final class ConfigSyncFixtures {
   }
 
   static AgentModel model(String providerName, String name, AgentModelConfigDTO config) {
-    AgentModel model = new AgentModel();
-    model.setProviderName(providerName);
-    model.setName(name);
-    model.setModelId("gpt-4");
-    model.setConfigJson(MODEL_CONFIG_PARSER.encode(config));
-    model.setVersion(0L);
+    AgentModel model =
+        AgentModel.builder()
+            .providerName(providerName)
+            .name(name)
+            .modelId("gpt-4")
+            .configJson(MODEL_CONFIG_PARSER.encode(config))
+            .version(0L)
+            .build();
     return model;
   }
 

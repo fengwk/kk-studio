@@ -6,7 +6,7 @@ import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefini
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
-import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
+import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
@@ -64,8 +64,8 @@ public final class ConfigSyncGraph {
     }
     for (AgentModel model : snapshot.models()) {
       edges.put(
-          ConfigSyncRefs.model(model.getProviderName(), model.getName()),
-          List.of(ConfigSyncRefs.ref(ConfigSyncKind.PROVIDERS, model.getProviderName())));
+          ConfigSyncRefs.model(model.providerName(), model.name()),
+          List.of(ConfigSyncRefs.ref(ConfigSyncKind.PROVIDERS, model.providerName())));
     }
     for (AgentDefinition agent : snapshot.agents()) {
       edges.put(agentRef(agent), agentDependencies(agent, toolServer, builtinAgentNames));
@@ -94,7 +94,7 @@ public final class ConfigSyncGraph {
     snapshot.providers().forEach(provider -> refs.add(providerRef(provider)));
     snapshot
         .models()
-        .forEach(model -> refs.add(ConfigSyncRefs.model(model.getProviderName(), model.getName())));
+        .forEach(model -> refs.add(ConfigSyncRefs.model(model.providerName(), model.name())));
     snapshot.agents().forEach(agent -> refs.add(agentRef(agent)));
     snapshot.skillPackages().forEach(pkg -> refs.add(skillRef(pkg)));
     snapshot.environments().forEach(env -> refs.add(environmentRef(env)));
