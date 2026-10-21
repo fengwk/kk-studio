@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.catalog.model.service;
+package fun.fengwk.kkstudio.platform.catalog.model;
 
 import static fun.fengwk.kkstudio.platform.catalog.model.AgentModelTestData.executable;
 import static org.junit.jupiter.api.Assertions.assertEquals;

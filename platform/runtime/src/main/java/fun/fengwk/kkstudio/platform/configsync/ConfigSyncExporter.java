@@ -7,8 +7,8 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
+import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser;
-import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderConfigurationCodec;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
@@ -57,7 +57,7 @@ public final class ConfigSyncExporter {
 
     List<Object> models = new ArrayList<>();
     for (AgentModel model : snapshot.models()) {
-      if (selected.contains(ConfigSyncRefs.model(model.getProviderName(), model.getName()))) {
+      if (selected.contains(ConfigSyncRefs.model(model.providerName(), model.name()))) {
         models.add(exportModel(model));
       }
     }
@@ -145,11 +145,11 @@ public final class ConfigSyncExporter {
 
   private Map<String, Object> exportModel(AgentModel model) {
     Map<String, Object> map = new LinkedHashMap<>();
-    map.put("providerName", model.getProviderName());
-    map.put("name", model.getName());
-    map.put("modelId", model.getModelId());
-    putIfNotNull(map, "description", model.getDescription());
-    map.put("config", yaml.toMap(modelConfigParser.decode(model.getConfigJson()), "model.config"));
+    map.put("providerName", model.providerName());
+    map.put("name", model.name());
+    map.put("modelId", model.modelId());
+    putIfNotNull(map, "description", model.description());
+    map.put("config", yaml.toMap(modelConfigParser.decode(model.configJson()), "model.config"));
     return map;
   }
 

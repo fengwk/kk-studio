@@ -18,9 +18,9 @@ import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentDefin
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
-import fun.fengwk.kkstudio.platform.catalog.model.repo.AgentModelRepository;
+import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
+import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser;
-import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
 
 /** 按最新 Agent/Model catalog 为子 Agent 物化 branch settings。 */
 class AgentBranchSettingsMaterializerTest {
@@ -58,11 +58,13 @@ class AgentBranchSettingsMaterializerTest {
             + "}");
     when(agentRepository.getByName(agentName)).thenReturn(agent);
 
-    AgentModel model = new AgentModel();
-    model.setProviderName("openai");
-    model.setName("gpt-x");
-    model.setModelId("gpt-x-wire");
-    model.setConfigJson(modelConfigJson);
+    AgentModel model =
+        AgentModel.builder()
+            .providerName("openai")
+            .name("gpt-x")
+            .modelId("gpt-x-wire")
+            .configJson(modelConfigJson)
+            .build();
     when(modelRepository.getByProviderNameAndName("openai", "gpt-x")).thenReturn(model);
   }
 

@@ -25,9 +25,9 @@ import fun.fengwk.kkstudio.platform.catalog.definition.service.AgentDefinitionSe
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.McpServerService;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
-import fun.fengwk.kkstudio.platform.catalog.model.repo.AgentModelRepository;
-import fun.fengwk.kkstudio.platform.catalog.model.service.AgentModelService;
-import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
+import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
+import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
+import fun.fengwk.kkstudio.platform.catalog.model.AgentModelService;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderService;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.SkillCatalogService;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
@@ -513,10 +513,7 @@ class ConfigSyncApplierTest {
   /** 意图：既有 Model 走 CAS 更新并携带既有版本，绝不重复创建。 */
   @Test
   void existingModelIsUpdatedWithExistingVersionCas() {
-    AgentModel existing = new AgentModel();
-    existing.setProviderName("p");
-    existing.setName("m");
-    existing.setVersion(4L);
+    AgentModel existing = AgentModel.builder().providerName("p").name("m").version(4L).build();
     when(modelRepository.getByProviderNameAndName("p", "m")).thenReturn(existing);
     AgentModelEditablePropertiesDTO properties = new AgentModelEditablePropertiesDTO();
     properties.setName("m");

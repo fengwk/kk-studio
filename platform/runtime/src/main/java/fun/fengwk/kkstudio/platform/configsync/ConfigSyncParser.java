@@ -6,7 +6,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentDefinitions;
 import fun.fengwk.kkstudio.platform.catalog.definition.service.impl.AgentDefinitionMutationFactory;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.McpServerMutationValidator;
-import fun.fengwk.kkstudio.platform.catalog.model.service.impl.AgentModelMutationFactory;
+import fun.fengwk.kkstudio.platform.catalog.model.AgentModelService;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderService;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.SkillCatalogService;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentInstallConfigs;
@@ -66,7 +66,7 @@ public final class ConfigSyncParser {
 
   private final ConfigSyncYaml yaml;
   private final AgentProviderService providerService;
-  private final AgentModelMutationFactory modelFactory;
+  private final AgentModelService modelService;
   private final AgentDefinitionMutationFactory agentFactory;
   private final SkillCatalogService skillCatalogService;
   private final SystemSettingsCodec systemSettingsCodec;
@@ -75,14 +75,14 @@ public final class ConfigSyncParser {
   public ConfigSyncParser(
       ConfigSyncYaml yaml,
       AgentProviderService providerService,
-      AgentModelMutationFactory modelFactory,
+      AgentModelService modelService,
       AgentDefinitionMutationFactory agentFactory,
       SkillCatalogService skillCatalogService,
       SystemSettingsCodec systemSettingsCodec,
       StudioPluginRegistry pluginRegistry) {
     this.yaml = yaml;
     this.providerService = providerService;
-    this.modelFactory = modelFactory;
+    this.modelService = modelService;
     this.agentFactory = agentFactory;
     this.skillCatalogService = skillCatalogService;
     this.systemSettingsCodec = systemSettingsCodec;
@@ -265,7 +265,7 @@ public final class ConfigSyncParser {
     properties.setConfig(
         yaml.convert(cleanedConfig, AgentModelConfigDTO.class, entry.path + ".config"));
     // 先用写入路径校验 known 字段（含嵌套 config 缺必填/非法值），未知字段不能绕过硬错误。
-    validateEntry(ConfigSyncKind.MODELS, key, () -> modelFactory.validateImport(name, properties));
+    validateEntry(ConfigSyncKind.MODELS, key, () -> modelService.validateImport(name, properties));
     if (skipUnknown(entry, ConfigSyncKind.MODELS, key, skipped)) {
       return null;
     }
