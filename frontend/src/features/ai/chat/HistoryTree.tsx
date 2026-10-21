@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from 'react'
+import { CopyPlus, GitBranch } from 'lucide-react'
 import { ThreadInteractionPanel } from '@/features/ai/runtime/thread-panel/ThreadInteractionPanel'
 import {
   buildHistoryTree,
@@ -148,18 +149,24 @@ export function HistoryTree({
               <Button
                 variant="ghost"
                 disabled={loading || selectedRow?.canFork !== true}
-                title={selectedRow?.canFork === false ? t('ai.chat.branch.notBoundary') : undefined}
+                title={selectedRow?.canFork === false
+                  ? t('ai.chat.branch.notBoundary')
+                  : t('ai.chat.branch.forkSessionHint')}
                 onClick={() => selectedRow?.canFork && onForkSession(selectedRow.entry)}
               >
-                {t('ai.chat.branch.forkSession')}
+                <CopyPlus size={14} aria-hidden="true" />
+                <span>{t('ai.chat.branch.forkSession')}</span>
               </Button>
             ) : null}
             <Button
               disabled={loading || selectedRow?.canFork !== true}
-              title={selectedRow?.canFork === false ? t('ai.chat.branch.notBoundary') : undefined}
+              title={selectedRow?.canFork === false
+                ? t('ai.chat.branch.notBoundary')
+                : t('ai.chat.branch.fromHereHint')}
               onClick={() => selectedRow?.canFork && onFork(selectedRow.entry)}
             >
-              {t('ai.chat.branch.fromHere')}
+              <GitBranch size={14} aria-hidden="true" />
+              <span>{t('ai.chat.branch.fromHere')}</span>
             </Button>
           </div>
         </div>

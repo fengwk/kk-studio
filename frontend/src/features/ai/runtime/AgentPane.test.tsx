@@ -2512,6 +2512,9 @@ describe('TURN_END 绑定与 Debug 只读退出', () => {
     await user.click(rows[2] as HTMLElement)
     expect(rows[2]?.getAttribute('data-can-fork')).toBe('true')
     expect(forkSessionButton).toBeEnabled()
+    // 两种分叉在界面上给出各自的结果说明：同会话的 thread 分支 vs 复制到独立新会话。
+    expect(branchButton).toHaveAttribute('title', '在当前会话中从此处新建 thread 分支，它与原 thread 同属这个会话的历史树。')
+    expect(forkSessionButton).toHaveAttribute('title', '把截至此处的历史复制到一个独立的新会话。')
     await user.click(forkSessionButton)
 
     const targetKey = `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`
