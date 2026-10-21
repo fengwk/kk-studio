@@ -45,8 +45,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 /** {@link ToolExecutionGateway#preflight}：三个 permission 状态的映射，且不改写冻结 request。 */
 class ToolExecutionGatewayPreflightTest {
@@ -128,7 +126,6 @@ class ToolExecutionGatewayPreflightTest {
                 ToolGatewayTestSupport.settings(PermissionAction.ALLOW)),
             stager,
             ToolGatewayTestSupport.RESOURCE_MAX_BYTES,
-            new ToolGatewayTestSupport.DirectQueueExecutor(),
             ToolGatewayTestSupport.OVERLOAD_RETRY_DELAY,
             ToolGatewayTestSupport.TEST_CLOCK,
             new ConcurrencyAdmission(Integer.MAX_VALUE));
@@ -196,7 +193,6 @@ class ToolExecutionGatewayPreflightTest {
             settingsProvider,
             stager,
             ToolGatewayTestSupport.RESOURCE_MAX_BYTES,
-            new ToolGatewayTestSupport.DirectQueueExecutor(),
             ToolGatewayTestSupport.OVERLOAD_RETRY_DELAY,
             ToolGatewayTestSupport.TEST_CLOCK,
             new ConcurrencyAdmission(Integer.MAX_VALUE));
@@ -236,7 +232,6 @@ class ToolExecutionGatewayPreflightTest {
                 new ToolGatewayTestSupport.FakeTool(PREFLIGHT_DESCRIPTOR)),
             new ToolGatewayTestSupport.FakeTransport(),
             new ToolGatewayTestSupport.FakeResourceStager(),
-            new ToolGatewayTestSupport.DirectQueueExecutor(),
             ToolGatewayTestSupport.settings(PermissionAction.ASK));
 
     ToolGateway.PreflightResult result = gateway.preflight(request);
@@ -257,30 +252,21 @@ class ToolExecutionGatewayPreflightTest {
     ToolGatewayTestSupport.FakeResourceStager store =
         new ToolGatewayTestSupport.FakeResourceStager();
     HarnessCatalog catalog = ToolGatewayTestSupport.defaultCatalog(tool);
-    ExecutorService executor = Executors.newSingleThreadExecutor();
+    ToolExecutionGateway gateway = ToolGatewayTestSupport.gateway(catalog, transport, store);
+    ToolInvocationRequest request = ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR);
+    gateway.preflight(request);
+    assertTrue(transport.invocations.isEmpty());
+    assertTrue(store.puts.isEmpty());
+    assertTrue(tool.requests.isEmpty(), "preflight must never execute the tool");
+    ToolGateway.Run run = ToolGatewayTestSupport.admitted(gateway, request);
     try {
-      ToolExecutionGateway gateway =
-          ToolGatewayTestSupport.gateway(catalog, transport, store, executor);
-      ToolInvocationRequest request = ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR);
-      gateway.preflight(request);
-      assertTrue(transport.invocations.isEmpty());
-      assertTrue(store.puts.isEmpty());
-      ToolGateway.StartResult started =
-          gateway.start(
-              ToolGatewayTestSupport.execution(request),
-              new ToolGatewayTestSupport.RecordingListener());
-      ToolGateway.Started startedResult = assertInstanceOf(ToolGateway.Started.class, started);
-      startedResult.handle().activate();
-      long deadline = System.nanoTime() + 5_000_000_000L;
-      while (tool.requests.isEmpty() && System.nanoTime() < deadline) {
-        Thread.onSpinWait();
-      }
-      assertEquals(1, tool.requests.size());
-      assertSame(request.call(), tool.requests.get(0).call());
-      assertEquals(request.binding().descriptor(), tool.requests.get(0).descriptor());
+      run.execute(partial -> {});
     } finally {
-      executor.shutdownNow();
+      run.close();
     }
+    assertEquals(1, tool.requests.size());
+    assertSame(request.call(), tool.requests.get(0).call());
+    assertEquals(request.binding().descriptor(), tool.requests.get(0).descriptor());
   }
 
   /** 环境工具的审批理由同样固定。 */
@@ -303,7 +289,6 @@ class ToolExecutionGatewayPreflightTest {
             ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
             new ToolGatewayTestSupport.FakeResourceStager(),
-            new ToolGatewayTestSupport.DirectQueueExecutor(),
             ToolGatewayTestSupport.settings(PermissionAction.ASK));
     ToolGateway.PreflightResult result =
         gateway.preflight(ToolGatewayTestSupport.hostRequest("call-1", DESCRIPTOR));
@@ -348,7 +333,6 @@ class ToolExecutionGatewayPreflightTest {
             ToolGatewayTestSupport.defaultCatalog(),
             new ToolGatewayTestSupport.FakeTransport(),
             new ToolGatewayTestSupport.FakeResourceStager(),
-            new ToolGatewayTestSupport.DirectQueueExecutor(),
             settings);
     ContributorBinding contributor =
         new ContributorBinding(
@@ -379,7 +363,6 @@ class ToolExecutionGatewayPreflightTest {
             ToolGatewayTestSupport.defaultCatalog(tool),
             new ToolGatewayTestSupport.FakeTransport(),
             new ToolGatewayTestSupport.FakeResourceStager(),
-            new ToolGatewayTestSupport.DirectQueueExecutor(),
             settings);
     ToolInvocationRequest request =
         new ToolInvocationRequest(
@@ -397,7 +380,7 @@ class ToolExecutionGatewayPreflightTest {
   void preflightAcceptsDynamicMcpTool() {
     // 意图：验证动态 MCP 工具在通过 RuntimeToolCatalog 聚合后能够顺利通过 Gateway preflight
     McpServerRepository repo = mock(McpServerRepository.class);
-    McpToolCatalog mcpCatalog = new McpToolCatalog(repo, mock(ExecutorService.class));
+    McpToolCatalog mcpCatalog = new McpToolCatalog(repo);
 
     McpServer server = new McpServer();
     server.setName("mcp_server");
@@ -427,7 +410,6 @@ class ToolExecutionGatewayPreflightTest {
             TestRuntimeToolCatalogSource.of(harnessCatalog, mcpCatalog),
             new ToolGatewayTestSupport.FakeTransport(),
             new ToolGatewayTestSupport.FakeResourceStager(),
-            new ToolGatewayTestSupport.DirectQueueExecutor(),
             ToolGatewayTestSupport.RESOURCE_MAX_BYTES,
             ToolGatewayTestSupport.settings(PermissionAction.ALLOW),
             new ConcurrencyAdmission(Integer.MAX_VALUE));

@@ -19,23 +19,11 @@ import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 
 import java.time.Clock;
 import java.time.Duration;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
-/** {@link ToolExecutionGateway} 的 executor 与配置 bean 装配。 */
+/** {@link ToolExecutionGateway} 的并发准入与配置 bean 装配。 */
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties(HarnessExecutionAdmissionProperties.class)
 public class HarnessToolGatewayConfiguration {
-
-  /**
-   * admission 之后 Tool 执行与缓冲回调重放专用的 executor。 Java 21 虚拟线程天然适合阻塞的远程 Tool 发送；{@code destroyMethod =
-   * "close"} 让在途任务由 Spring 生命周期持有，但不会等待它们。
-   */
-  @Bean(name = "toolGatewayExecutor", destroyMethod = "close")
-  @ConditionalOnMissingBean(name = "toolGatewayExecutor")
-  public ExecutorService toolGatewayExecutor() {
-    return Executors.newVirtualThreadPerTaskExecutor();
-  }
 
   @Bean(name = "toolExecutionAdmission")
   @ConditionalOnMissingBean(name = "toolExecutionAdmission")
@@ -59,7 +47,6 @@ public class HarnessToolGatewayConfiguration {
       ToolSettingsProvider toolSettingsProvider,
       StorageUploadService storageUploadService,
       SystemSettingsSnapshot systemSettingsSnapshot,
-      @Qualifier("toolGatewayExecutor") ExecutorService toolGatewayExecutor,
       @Qualifier("toolExecutionAdmission") ConcurrencyAdmission admission,
       Clock clock) {
     int resourceMaxBytes =
@@ -72,7 +59,6 @@ public class HarnessToolGatewayConfiguration {
         toolSettingsProvider,
         new StorageUploadToolResourceStager(storageUploadService, resourceMaxBytes),
         resourceMaxBytes,
-        toolGatewayExecutor,
         () ->
             Duration.ofMillis(systemSettingsSnapshot.get().tool().toolGatewayOverloadRetryMillis()),
         clock,

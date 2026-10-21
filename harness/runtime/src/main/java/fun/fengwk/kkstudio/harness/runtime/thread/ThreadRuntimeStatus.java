@@ -50,10 +50,7 @@ public enum ThreadRuntimeStatus {
   /** 无待审批或待回答 sibling，且至少一个 sibling 正在运行。 */
   TOOL_RUNNING,
 
-  /** 无待审批、待回答或运行 sibling，且至少一个 sibling 处于分派围栏。 */
-  TOOL_DISPATCHING,
-
-  /** 无待审批、待回答、运行或分派 sibling，且至少一个 sibling 已就绪。 */
+  /** 无待审批、待回答或运行 sibling，且至少一个 sibling 已就绪。 */
   TOOL_READY;
 
   /**
@@ -88,7 +85,7 @@ public enum ThreadRuntimeStatus {
   /**
    * 从工具兄弟调用列表派生运行时状态。
    *
-   * <p>判定优先级依次为 WAITING_APPROVAL > RUNNING > DISPATCHING > READY。 若列表为空或全部为终态，抛出 {@link
+   * <p>判定优先级依次为 WAITING_APPROVAL > WAITING_INPUT > RUNNING > READY。 若列表为空或全部为终态，抛出 {@link
    * IllegalStateException}。
    */
   public static ThreadRuntimeStatus fromToolSiblings(List<ToolInvocation> siblings) {
@@ -106,11 +103,6 @@ public enum ThreadRuntimeStatus {
     for (ToolInvocation sibling : siblings) {
       if (sibling.status() == ToolInvocationStatus.RUNNING) {
         return TOOL_RUNNING;
-      }
-    }
-    for (ToolInvocation sibling : siblings) {
-      if (sibling.status() == ToolInvocationStatus.DISPATCHING) {
-        return TOOL_DISPATCHING;
       }
     }
     for (ToolInvocation sibling : siblings) {

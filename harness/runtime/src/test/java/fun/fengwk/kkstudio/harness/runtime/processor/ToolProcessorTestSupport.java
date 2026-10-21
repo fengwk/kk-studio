@@ -41,6 +41,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
+import fun.fengwk.kkstudio.harness.runtime.port.ToolSuccess;
 import fun.fengwk.kkstudio.harness.runtime.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryBackoffStrategy;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
@@ -79,10 +80,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
@@ -93,7 +95,7 @@ import java.util.function.Function;
  *
  * <p>每个 Fixture 原子种子一条最小合法链：Session + ROOT + TURN_START + USER + ASSISTANT(call-1) + terminal
  * ModelInvocation（resultEntryId 指向 ASSISTANT）+ READY ToolInvocation + THREAD/TOOL Work。测试通过 {@link
- * #transition} 把 ToolInvocation 推进到 WAITING_APPROVAL / DISPATCHING / RUNNING / terminal 等前置状态。
+ * #transition} 把 ToolInvocation 推进到 WAITING_APPROVAL / RUNNING / terminal 等前置状态。
  */
 final class ToolProcessorTestSupport {
 
@@ -584,20 +586,16 @@ final class ToolProcessorTestSupport {
   }
 
   /**
-   * READY(null approval) -&gt; DISPATCHING 前置：approval 引入必须经过 READY -&gt; READY 的 not-required
-   * 步骤（aggregate transition rule），因此分两步写。
+   * READY(null approval) -&gt; READY(not-required approval) 前置：approval 引入必须经过 READY -&gt; READY
+   * 步骤。
    */
-  static void toDispatched(InMemoryHarnessStore store, UUID toolInvocationId, Instant now) {
+  static void toApproved(InMemoryHarnessStore store, UUID toolInvocationId, Instant now) {
     transition(store, toolInvocationId, tool -> tool.markApprovalNotRequired(now));
-    transition(store, toolInvocationId, tool -> tool.beginDispatch(now));
   }
 
-  /**
-   * READY(null approval) -&gt; RUNNING(attempt 1) 前置：not-required -&gt; beginDispatch -&gt;
-   * markRunning。
-   */
+  /** READY(null approval) -&gt; RUNNING(attempt 1) 前置：not-required -&gt; markRunning。 */
   static void toRunning(InMemoryHarnessStore store, UUID toolInvocationId, Instant now) {
-    toDispatched(store, toolInvocationId, now);
+    toApproved(store, toolInvocationId, now);
     transition(store, toolInvocationId, tool -> tool.markRunning(now));
   }
 
@@ -784,16 +782,15 @@ final class ToolProcessorTestSupport {
 
   static final class FakeToolGateway implements ToolGateway {
     private static final Object NULL_PREFLIGHT = new Object();
-    private static final Object NULL_START = new Object();
+    private static final Object NULL_ADMIT = new Object();
     final LinkedList<Object> preflightResults = new LinkedList<>();
-    final LinkedList<Object> startResults = new LinkedList<>();
+    final LinkedList<Object> admitResults = new LinkedList<>();
     final List<Execution> executions = new CopyOnWriteArrayList<>();
     final List<PreflightCall> preflightCalls = new CopyOnWriteArrayList<>();
-    final ConcurrentHashMap<UUID, Listener> listeners = new ConcurrentHashMap<>();
-    volatile Consumer<Listener> beforeStartReturn;
     volatile Consumer<PreflightCall> preflightHook;
+    volatile Runnable admitHook;
     volatile int preflightCallsCount;
-    volatile int startCalls;
+    volatile int admitCalls;
 
     void queuePreflightAllow() {
       preflightResults.add(new ToolGateway.Allow());
@@ -819,12 +816,20 @@ final class ToolProcessorTestSupport {
       preflightResults.add(NULL_PREFLIGHT);
     }
 
-    void queueStart(Object result) {
-      startResults.add(result);
+    /** 入队一个 admission 结果：{@link Admission} 或要抛出的 {@link RuntimeException}。 */
+    void queueAdmit(Object result) {
+      admitResults.add(result);
     }
 
-    void queueNullStart() {
-      startResults.add(NULL_START);
+    /** 入队 Admitted(run)，并返回 run 以便断言 / 控制。 */
+    FakeRun queueRun(Function<Consumer<ToolResult>, Completion> body) {
+      FakeRun run = new FakeRun(body);
+      admitResults.add(new ToolGateway.Admitted(run));
+      return run;
+    }
+
+    void queueNullAdmit() {
+      admitResults.add(NULL_ADMIT);
     }
 
     @Override
@@ -850,51 +855,83 @@ final class ToolProcessorTestSupport {
     }
 
     @Override
-    public StartResult start(Execution execution, Listener listener) {
-      startCalls++;
+    public Admission admit(Execution execution) {
+      admitCalls++;
       executions.add(execution);
-      listeners.put(execution.invocationId(), listener);
-      Object result = startResults.poll();
+      Object result = admitResults.poll();
       if (result == null) {
-        throw new IllegalStateException("no queued start result");
+        throw new IllegalStateException("no queued admit result");
       }
-      Consumer<Listener> hook = beforeStartReturn;
+      Runnable hook = admitHook;
       if (hook != null) {
-        hook.accept(listener);
+        hook.run();
       }
-      if (result == NULL_START) {
+      if (result == NULL_ADMIT) {
         return null;
       }
       if (result instanceof RuntimeException failure) {
         throw failure;
       }
-      return (StartResult) result;
-    }
-
-    Listener listener(UUID invocationId) {
-      return listeners.get(invocationId);
+      return (Admission) result;
     }
   }
 
   record PreflightCall(ToolInvocationRequest request) {}
 
-  static class FakeHandle implements ToolGateway.Handle {
-    final AtomicInteger cancels = new AtomicInteger();
-    final AtomicInteger activates = new AtomicInteger();
+  /** 可脚本化的 Run：{@code body} 在 processor 的执行线程上运行；记录执行线程、close 次数与是否被中断。 */
+  static final class FakeRun implements ToolGateway.Run {
+    final Function<Consumer<ToolResult>, ToolGateway.Completion> body;
+    final CountDownLatch executing = new CountDownLatch(1);
+    final CountDownLatch exited = new CountDownLatch(1);
+    final AtomicInteger executes = new AtomicInteger();
+    final AtomicInteger closes = new AtomicInteger();
+    volatile boolean exitedBeforeClose;
+    volatile Thread executionThread;
 
-    @Override
-    public void cancel() {
-      cancels.incrementAndGet();
+    FakeRun(Function<Consumer<ToolResult>, ToolGateway.Completion> body) {
+      this.body = body;
     }
 
     @Override
-    public void activate() {
-      activates.incrementAndGet();
+    public ToolGateway.Completion execute(Consumer<ToolResult> progress) {
+      executes.incrementAndGet();
+      executionThread = Thread.currentThread();
+      executing.countDown();
+      try {
+        return body.apply(progress);
+      } finally {
+        exited.countDown();
+      }
     }
 
-    boolean isCancelled() {
-      return cancels.get() > 0;
+    @Override
+    public void close() {
+      exitedBeforeClose = exited.getCount() == 0 || executes.get() == 0;
+      closes.incrementAndGet();
     }
+
+    boolean awaitExecuting() throws InterruptedException {
+      return executing.await(5, TimeUnit.SECONDS);
+    }
+
+    boolean awaitExited() throws InterruptedException {
+      return exited.await(5, TimeUnit.SECONDS);
+    }
+  }
+
+  /** 阻塞直到被中断：返回 Cancelled（模拟遵守中断契约的工具）。 */
+  static ToolGateway.Completion blockUntilInterrupted() {
+    try {
+      Thread.sleep(60_000);
+    } catch (InterruptedException interrupted) {
+      return new ToolGateway.Cancelled(new ToolInvocationError("CANCELLED", "cancelled"));
+    }
+    return new ToolGateway.Unknown(new ToolInvocationError("TIMEOUT", "never interrupted"));
+  }
+
+  static ToolGateway.Completion succeeded(String toolCallId) {
+    return new ToolGateway.Succeeded(
+        ToolSuccess.withoutEffects(successResult(toolCallId, new TextResultContent("ok"))));
   }
 
   static final class RecordingSink implements RealtimeEventSink {

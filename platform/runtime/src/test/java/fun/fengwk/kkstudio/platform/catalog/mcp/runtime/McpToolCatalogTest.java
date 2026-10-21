@@ -19,7 +19,6 @@ import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
 
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ExecutorService;
 
 /**
  * 动态 MCP 运行时工具目录测试。
@@ -36,7 +35,7 @@ class McpToolCatalogTest {
   @BeforeEach
   void setUp() {
     repository = mock(McpServerRepository.class);
-    catalog = new McpToolCatalog(repository, mock(ExecutorService.class));
+    catalog = new McpToolCatalog(repository);
   }
 
   @Test

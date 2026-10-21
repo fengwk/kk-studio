@@ -234,7 +234,6 @@ class PostgresqlHarnessTransactionNotificationTest {
     try (InvalidationListener listener = InvalidationListener.open(dataSource)) {
       updateTool(store, chain.toolId(), tool -> tool.markApprovalNotRequired(T2));
       listener.assertSilent();
-      updateTool(store, chain.toolId(), tool -> tool.beginDispatch(T3));
       listener.assertSilent();
       updateTool(store, chain.toolId(), tool -> tool.markRunning(T4));
       listener.assertSilent();

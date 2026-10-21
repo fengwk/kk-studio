@@ -7,15 +7,13 @@ import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.builtin.BuiltinHistoryRenderers;
-import fun.fengwk.kkstudio.harness.builtin.CompletedToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.common.tool.ToolErrorGuidance;
 import fun.fengwk.kkstudio.harness.common.tool.ToolErrorGuidance.ExecutionFact;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolHistoryRenderer;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
@@ -26,6 +24,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Consumer;
 
 /**
  * 以普通 durable Harness Thread 运行隔离 Subagent 的内部 {@code task} 工具适配器。
@@ -80,9 +79,8 @@ public final class TaskTool implements Tool {
   }
 
   @Override
-  public ToolExecutionHandle execute(ToolExecutionRequest request, ToolExecutionListener listener) {
+  public ToolOutcome execute(ToolExecutionRequest request, Consumer<ToolResult> progress) {
     Objects.requireNonNull(request, "request");
-    Objects.requireNonNull(listener, "listener");
     if (request.context() == null) {
       throw new IllegalArgumentException("task requires durable ToolExecutionContext");
     }
@@ -94,27 +92,25 @@ public final class TaskTool implements Tool {
               request.context().invocationId(), request.context().threadId(), request.call());
     } catch (TaskRejectedException rejected) {
       // 参数被拒是派发前确定性结果：父线程保留，明确未执行并给出继续参数。
-      listener.onComplete(
+      return ToolOutcome.withoutEffects(
           error(
               callId,
               ToolErrorGuidance.message(
                   rejected.getMessage(),
                   ExecutionFact.NOT_EXECUTED,
                   TASK_CONTINUATION_NEXT_ACTION)));
-      return CompletedToolExecutionHandle.INSTANCE;
     }
     try {
       SubagentTaskAcceptance acceptance = runner.accept(taskRequest);
-      listener.onComplete(accepted(callId, taskRequest.subagentType(), acceptance));
+      return ToolOutcome.withoutEffects(accepted(callId, taskRequest.subagentType(), acceptance));
     } catch (RuntimeException failure) {
       // 接受是原子持久操作：提交结果不确定时绝不能声称「未创建」。
-      listener.onComplete(
+      return ToolOutcome.withoutEffects(
           error(
               callId,
               ToolErrorGuidance.message(
                   message(failure), ExecutionFact.UNCERTAIN, TASK_CONTINUATION_NEXT_ACTION)));
     }
-    return CompletedToolExecutionHandle.INSTANCE;
   }
 
   private SubagentTaskRequest parseArguments(

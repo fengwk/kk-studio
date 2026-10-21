@@ -74,7 +74,6 @@ describe('ToolMessageBlock shell', () => {
     ['READY', 'queued', '排队中'],
     ['WAITING_APPROVAL', 'approval', '等待审批'],
     ['WAITING_INPUT', 'input', '等待输入'],
-    ['DISPATCHING', 'dispatching', '分派中'],
     ['RUNNING', 'running', '执行中'],
     ['SUCCEEDED', 'succeeded', '成功'],
     ['FAILED', 'failed', '失败'],

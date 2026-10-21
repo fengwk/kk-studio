@@ -1,8 +1,6 @@
 package fun.fengwk.kkstudio.harness.builtin.environment;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.eq;
@@ -17,8 +15,6 @@ import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.BoundEnvironment;
 import fun.fengwk.kkstudio.harness.contributor.api.BranchView;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionContext;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
@@ -32,11 +28,12 @@ import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 /** EnvironmentCapabilityTool 的委托、环境绑定缺失防护与构造一致性校验测试。 */
 class EnvironmentCapabilityToolTest {
@@ -90,7 +87,7 @@ class EnvironmentCapabilityToolTest {
 
   /** 执行上下文缺失环境绑定时，安全返回错误结果而不是抛出未捕获异常。 */
   @Test
-  void executeWithoutBoundEnvironmentReturnsErrorResult() {
+  void executeWithoutBoundEnvironmentReturnsErrorResult() throws Exception {
     ToolDescriptor descriptor =
         new ToolDescriptor(
             "read",
@@ -101,33 +98,15 @@ class EnvironmentCapabilityToolTest {
             FS_READ.defaultTimeout());
     EnvironmentCapabilityTool tool = new EnvironmentCapabilityTool(descriptor, FS_READ);
 
-    AtomicReference<ToolOutcome> outcomeRef = new AtomicReference<>();
-    ToolExecutionListener listener =
-        new ToolExecutionListener() {
-          @Override
-          public void onPartial(ToolResult partial) {}
-
-          @Override
-          public void onComplete(ToolOutcome outcome) {
-            outcomeRef.set(outcome);
-          }
-
-          @Override
-          public void onError(Throwable error) {}
-        };
-
     ToolExecutionRequest requestWithoutContext =
         new ToolExecutionRequest(
             descriptor,
             new ToolCall("call-1", "read", "{\"path\":\"/srv/repo/demo.txt\"}"),
             Duration.ZERO);
 
-    ToolExecutionHandle handle = tool.execute(requestWithoutContext, listener);
-    assertNotNull(handle);
-    assertFalse(handle.isCancelled());
-    assertNotNull(outcomeRef.get());
-    assertTrue(outcomeRef.get().result().error());
-    String message = ((TextResultContent) outcomeRef.get().result().contents().get(0)).text();
+    ToolOutcome outcome = tool.execute(requestWithoutContext, partial -> {});
+    assertTrue(outcome.result().error());
+    String message = ((TextResultContent) outcome.result().contents().get(0)).text();
     assertTrue(message.contains("No Environment is bound in the execution context"), message);
     // 缺少环境绑定是派发前确定性结果：必须声明未执行并给出下一步。
     assertTrue(message.contains("The tool was not executed."), message);
@@ -222,9 +201,9 @@ class EnvironmentCapabilityToolTest {
     return new ToolCall("call-timeout", toolName, argumentsJson);
   }
 
-  /** 正常执行时委托至 BoundEnvironment 的 execute 方法并透传句柄。 */
+  /** 正常执行时委托至 BoundEnvironment 的阻塞 execute 并把终态结果包成无 effects 的 outcome。 */
   @Test
-  void executeDelegatesToBoundEnvironment() {
+  void executeDelegatesToBoundEnvironment() throws Exception {
     ToolDescriptor descriptor =
         new ToolDescriptor(
             "read",
@@ -236,8 +215,9 @@ class EnvironmentCapabilityToolTest {
     EnvironmentCapabilityTool tool = new EnvironmentCapabilityTool(descriptor, FS_READ);
 
     BoundEnvironment boundEnv = mock(BoundEnvironment.class);
-    ToolExecutionHandle mockHandle = mock(ToolExecutionHandle.class);
-    ToolExecutionListener listener = mock(ToolExecutionListener.class);
+    ToolResult expected =
+        new ToolResult("call-2", List.of(new TextResultContent("ok")), false, "{}");
+    Consumer<ToolResult> progress = partial -> {};
 
     BranchView branchView = mock(BranchView.class);
     ToolExecutionContext context =
@@ -251,11 +231,12 @@ class EnvironmentCapabilityToolTest {
             Duration.ZERO,
             context);
 
-    when(boundEnv.execute(eq(FS_READ), eq(request), eq(listener))).thenReturn(mockHandle);
+    when(boundEnv.execute(eq(FS_READ), eq(request), eq(progress))).thenReturn(expected);
 
-    ToolExecutionHandle returnedHandle = tool.execute(request, listener);
-    assertEquals(mockHandle, returnedHandle);
-    verify(boundEnv).execute(FS_READ, request, listener);
+    ToolOutcome outcome = tool.execute(request, progress);
+    assertEquals(expected, outcome.result());
+    assertTrue(outcome.customEntries().isEmpty());
+    verify(boundEnv).execute(FS_READ, request, progress);
   }
 
   /** 验证 process.exec（bash）请求在缺少必填 workdir 时在构造期被拒绝。 */

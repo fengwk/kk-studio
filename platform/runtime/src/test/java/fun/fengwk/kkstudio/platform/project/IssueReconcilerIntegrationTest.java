@@ -229,7 +229,6 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
         !commands.isEmpty()
             || (model != null && (model.status() == null || !model.status().isTerminal()))
             || hasStatus(tools, ToolInvocationStatus.READY)
-            || hasStatus(tools, ToolInvocationStatus.DISPATCHING)
             || hasStatus(tools, ToolInvocationStatus.RUNNING);
     boolean waitingForHuman =
         hasStatus(tools, ToolInvocationStatus.WAITING_APPROVAL)

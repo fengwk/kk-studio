@@ -49,16 +49,6 @@ class ToolInvocationTest {
     ToolInvocation readyAllowed = invocation(ToolInvocationStatus.READY, 1, allowed(), null, null);
     assertEquals(ToolApprovalDecision.ALLOWED, readyAllowed.approval().decision());
 
-    ToolInvocation dispatchingNotRequired =
-        invocation(ToolInvocationStatus.DISPATCHING, 0, notRequired(), null, null);
-    assertEquals(ToolInvocationStatus.DISPATCHING, dispatchingNotRequired.status());
-    assertNull(dispatchingNotRequired.result());
-    assertNull(dispatchingNotRequired.error());
-
-    ToolInvocation dispatchingAllowed =
-        invocation(ToolInvocationStatus.DISPATCHING, 2, allowed(), null, null);
-    assertEquals(2, dispatchingAllowed.attempt());
-
     ToolInvocation running = invocation(ToolInvocationStatus.RUNNING, 1, allowed(), null, null);
     assertEquals(1, running.attempt());
 
@@ -107,15 +97,6 @@ class ToolInvocationTest {
 
   @Test
   void requiresCompletedPreflightApproval() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> invocation(ToolInvocationStatus.DISPATCHING, 0, null, null, null));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> invocation(ToolInvocationStatus.DISPATCHING, 0, requiredUndecided(), null, null));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> invocation(ToolInvocationStatus.DISPATCHING, 0, denied(), null, null));
     assertThrows(
         IllegalArgumentException.class,
         () -> invocation(ToolInvocationStatus.RUNNING, 1, null, null, null));

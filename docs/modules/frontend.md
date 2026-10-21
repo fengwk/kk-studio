@@ -229,7 +229,7 @@ Chat 工具卡片与 ApprovalCard 共享文件变更审查组件：
 终态结果优先于尚未结束时的 partial。工具名与参数属于同一 inline 文本流，保留换行、可选中复制，
 长路径在剩余宽度自然折行，不横滚；状态与展开图标占不收缩的尾部。
 工具状态直接保留 invocation 的 READY（排队或权威环境等待）、WAITING_APPROVAL、WAITING_INPUT、
-DISPATCHING、RUNNING、SUCCEEDED、FAILED、CANCELLED 与 UNKNOWN。只有 RUNNING 使用 spinner；
+RUNNING、SUCCEEDED、FAILED、CANCELLED 与 UNKNOWN。只有 RUNNING 使用 spinner；
 没有 invocation 的模型调用草稿不表示已运行或成功。task 的成功只表示“委派已受理”，不保证目标验收。
 Thread 处于等待审批时活动条显示“等待审批”；实际工具等待环境且没有其他执行中调用时显示真实环境等待，
 不与工具行相矛盾，Footer 不重复解释等待原因。通用执行文案为中文“执行中”、英文“Working...”。

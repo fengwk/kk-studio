@@ -22,7 +22,7 @@ Skill 由 System Prompt 提供稳定路径，读取统一交给
 
 | 包名 | 职责 | 明确边界 |
 | --- | --- | --- |
-| `fun.fengwk.kkstudio.harness.builtin` | 第一方内置能力根包：唯一的 `BuiltinHarnessContributor` 与完成态句柄 | 集中注册 13 个工具与 Goal 进度自定义类型；网络传输与持久化调度在外层模块 |
+| `fun.fengwk.kkstudio.harness.builtin` | 第一方内置能力根包：唯一的 `BuiltinHarnessContributor` | 集中注册 13 个工具与 Goal 进度自定义类型；网络传输与持久化调度在外层模块 |
 | `fun.fengwk.kkstudio.harness.builtin.environment` | 环境能力工具适配与 prompt 模板加载 | `read` 按地址选择 Platform 或可选 `BoundEnvironment`，其余宿主工具要求 Environment；传输协议与宿主进程管理由 Daemon 承接 |
 | `fun.fengwk.kkstudio.harness.builtin.goal` | Goal 读取与进度声明工具（`get_goal`、`update_goal`）、`GoalProgress` 与确定性编解码器 `GoalProgressCodec` | 目标正文由 branch settings 拥有（用户经 typed `GOAL` 命令设置/清除），本包只读取它并声明进度；进度依托通用 `harness_entry` 的 CUSTOM 载荷，通过 `AppendCustomEntry` 由 Runtime 原子追加 |
 | `fun.fengwk.kkstudio.harness.builtin.input` | 人工输入工具 `AskUserTool` 及其问卷提示词 | 只声明 `ask_user` 的模型可见契约；等待冻结与答案校验由 [harness-runtime](harness-runtime.md) 的 `runtime.input` 承接 |

@@ -29,10 +29,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 /** Contributor API 统一定义、Tool 契约、执行请求与上下文测试。 */
 class HarnessContractTest {
@@ -200,58 +197,6 @@ class HarnessContractTest {
     assertThrows(NullPointerException.class, () -> new ToolOutcome(successResult, null));
   }
 
-  /** 验证 ToolExecutionListener 默认方法将 onComplete(ToolResult) 委托为无 effects 的 ToolOutcome。 */
-  @Test
-  void toolExecutionListenerDelegatesOnCompleteByDefault() {
-    AtomicReference<ToolOutcome> received = new AtomicReference<>();
-    ToolExecutionListener listener =
-        new ToolExecutionListener() {
-          @Override
-          public void onPartial(ToolResult partial) {}
-
-          @Override
-          public void onComplete(ToolOutcome outcome) {
-            received.set(outcome);
-          }
-
-          @Override
-          public void onError(Throwable error) {}
-        };
-
-    ToolResult result = new ToolResult("call-1", List.of(new TextResultContent("ok")), false, "{}");
-    listener.onComplete(result);
-
-    assertEquals(result, received.get().result());
-    assertTrue(received.get().customEntries().isEmpty());
-  }
-
-  /** 验证 ToolExecutionHandle 取消契约。 */
-  @Test
-  void toolExecutionHandleContract() {
-    AtomicBoolean cancelled = new AtomicBoolean(false);
-    ToolExecutionHandle handle =
-        new ToolExecutionHandle() {
-          @Override
-          public void cancel() {
-            cancelled.set(true);
-          }
-
-          @Override
-          public boolean isCancelled() {
-            return cancelled.get();
-          }
-
-          @Override
-          public CompletionStage<Void> quiescence() {
-            return CompletableFuture.completedFuture(null);
-          }
-        };
-
-    assertFalse(handle.isCancelled());
-    handle.cancel();
-    assertTrue(handle.isCancelled());
-  }
-
   /** 验证 ToolExecutionContext 构造、重载与完整非空校验。 */
   @Test
   void toolExecutionContextValidatesNonNull() {
@@ -306,23 +251,8 @@ class HarnessContractTest {
     ToolExecutionRequest req =
         new ToolExecutionRequest(
             DESCRIPTOR, new ToolCall("call-1", "test_tool", "{\"path\":\"a.txt\"}"), Duration.ZERO);
-    AtomicBoolean called = new AtomicBoolean(false);
-    ToolExecutionListener listener =
-        new ToolExecutionListener() {
-          @Override
-          public void onPartial(ToolResult partial) {}
-
-          @Override
-          public void onComplete(ToolOutcome outcome) {
-            called.set(true);
-          }
-
-          @Override
-          public void onError(Throwable error) {}
-        };
-
-    ToolExecutionHandle handle = env.execute(cap, req, listener);
-    assertFalse(handle.isCancelled());
+    ToolResult result = env.execute(cap, req, partial -> {});
+    assertEquals("call-1", result.toolCallId());
   }
 
   /**
@@ -375,9 +305,8 @@ class HarnessContractTest {
       }
 
       @Override
-      public ToolExecutionHandle execute(
-          ToolExecutionRequest request, ToolExecutionListener listener) {
-        return dummyHandle();
+      public ToolOutcome execute(ToolExecutionRequest request, Consumer<ToolResult> progress) {
+        return dummyOutcome();
       }
     };
   }
@@ -402,9 +331,8 @@ class HarnessContractTest {
           }
 
           @Override
-          public ToolExecutionHandle execute(
-              ToolExecutionRequest request, ToolExecutionListener listener) {
-            return dummyHandle();
+          public ToolOutcome execute(ToolExecutionRequest request, Consumer<ToolResult> progress) {
+            return dummyOutcome();
           }
         };
 
@@ -431,9 +359,8 @@ class HarnessContractTest {
           }
 
           @Override
-          public ToolExecutionHandle execute(
-              ToolExecutionRequest request, ToolExecutionListener listener) {
-            return dummyHandle();
+          public ToolOutcome execute(ToolExecutionRequest request, Consumer<ToolResult> progress) {
+            return dummyOutcome();
           }
         };
 
@@ -448,21 +375,9 @@ class HarnessContractTest {
             new ToolContribution(id, definition, matchingTool, ToolRequirements.environment(), 0));
   }
 
-  private static ToolExecutionHandle dummyHandle() {
-    return new ToolExecutionHandle() {
-      @Override
-      public void cancel() {}
-
-      @Override
-      public boolean isCancelled() {
-        return false;
-      }
-
-      @Override
-      public CompletionStage<Void> quiescence() {
-        return CompletableFuture.completedFuture(null);
-      }
-    };
+  private static ToolOutcome dummyOutcome() {
+    return ToolOutcome.withoutEffects(
+        new ToolResult("call-1", List.of(new TextResultContent("ok")), false, "{}"));
   }
 
   private static final class DummyBranchView implements BranchView {
@@ -489,11 +404,11 @@ class HarnessContractTest {
     }
 
     @Override
-    public ToolExecutionHandle execute(
+    public ToolResult execute(
         EnvironmentCapabilityDescriptor capability,
         ToolExecutionRequest request,
-        ToolExecutionListener listener) {
-      return dummyHandle();
+        Consumer<ToolResult> progress) {
+      return dummyOutcome().result();
     }
   }
 }

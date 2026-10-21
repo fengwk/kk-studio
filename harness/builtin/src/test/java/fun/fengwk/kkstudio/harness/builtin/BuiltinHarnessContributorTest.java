@@ -23,15 +23,15 @@ import fun.fengwk.kkstudio.harness.contributor.api.StateDeclaration;
 import fun.fengwk.kkstudio.harness.contributor.api.StateMode;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityDescriptor;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 
@@ -40,8 +40,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 /**
@@ -482,22 +481,9 @@ class BuiltinHarnessContributorTest {
       }
 
       @Override
-      public ToolExecutionHandle execute(
-          ToolExecutionRequest request, ToolExecutionListener listener) {
-        return new ToolExecutionHandle() {
-          @Override
-          public void cancel() {}
-
-          @Override
-          public boolean isCancelled() {
-            return false;
-          }
-
-          @Override
-          public CompletionStage<Void> quiescence() {
-            return CompletableFuture.completedFuture(null);
-          }
-        };
+      public ToolOutcome execute(ToolExecutionRequest request, Consumer<ToolResult> progress) {
+        return ToolOutcome.withoutEffects(
+            new ToolResult(request.call().id(), List.of(), false, "{}"));
       }
     };
   }
