@@ -12,12 +12,12 @@ import java.util.UUID;
  * 一次 Tool Invocation 的持久化当前状态。
  *
  * <p>直接持有冻结的 {@code call} 与可空 {@code binding}，不保留冗余的持久化 request 包装；{@code inputReceipt} 只在
- * 内部人工输入工具（{@code ask_user}）被回答后随 SUCCEEDED 出现，是该回答的 durable 提交回执。{@code attempt}
- * 统计执行端实际接受的执行次数；BUSY/OVERLOADED 或执行前的本地拒绝不会增加它。result 与 error 在任何状态上都互斥；非 terminal 状态永远不携带
- * terminal 事实。Terminal Tool 行始终表示 outcome 尚未进入 ToolResult Entry：batch apply 后行被物理删除。
+ * 内部人工输入工具（{@code ask_user}）被回答后随 SUCCEEDED 出现，是该回答的 durable 提交回执。{@code attempt} 统计已进入 RUNNING
+ * 的执行次数；Busy 或执行前的本地拒绝不会增加它。result 与 error 在任何状态上都互斥；非 terminal 状态永远不携带 terminal 事实。Terminal Tool
+ * 行始终表示 outcome 尚未进入 ToolResult Entry：batch apply 后行被物理删除。
  *
- * <p>{@code DISPATCHING} 表示 Work lease 已持有，Gateway admission 进行中：外部服务是否接受执行尚未被持久化状态 确认。Store 必须在每次
- * {@code update*} 写入前调用 {@link #validateTransition}。
+ * <p>{@code READY -> RUNNING} 在任何副作用之前持久化并消耗一次 attempt：RUNNING 之后的崩溃恢复一律收敛为 UNKNOWN，绝不重放。Store
+ * 必须在每次 {@code update*} 写入前调用 {@link #validateTransition}。
  */
 public record ToolInvocation(
     UUID id,
@@ -124,10 +124,10 @@ public record ToolInvocation(
 
   /**
    * 校验 {@code next} 是已存储行 {@code stored} 的合法转换：identity 与 call/binding 不可变，updatedAt 不允许回退， attempt
-   * 仅在已确认启动（DISPATCHING-&gt;RUNNING / DISPATCHING-&gt;UNKNOWN）时恰好 +1；approval 仅能以 {@code
-   * not-required} 引入到 READY-&gt;READY，或以 required undecided request 引入到
-   * READY-&gt;WAITING_APPROVAL；undecided approval 仅能被决定（ALLOWED -&gt; READY，DENIED -&gt; FAILED）
-   * 或精确 replay；已决定 / non-required approval 不可变；terminal 事实不可变。精确 replay 始终被接受。
+   * 仅在 READY-&gt;RUNNING 时恰好 +1；approval 仅能以 {@code not-required} 引入到 READY-&gt;READY，或以 required
+   * undecided request 引入到 READY-&gt;WAITING_APPROVAL；undecided approval 仅能被决定（ALLOWED -&gt;
+   * READY，DENIED -&gt; FAILED） 或精确 replay；已决定 / non-required approval 不可变；terminal 事实不可变。精确 replay
+   * 始终被接受。
    */
   public static void validateTransition(ToolInvocation stored, ToolInvocation next) {
     Objects.requireNonNull(stored, "stored");
@@ -177,13 +177,9 @@ public record ToolInvocation(
           case READY -> next == ToolInvocationStatus.READY
               || next == ToolInvocationStatus.WAITING_APPROVAL
               || next == ToolInvocationStatus.WAITING_INPUT
-              || next == ToolInvocationStatus.DISPATCHING
-              || next == ToolInvocationStatus.FAILED
-              || next == ToolInvocationStatus.CANCELLED;
-          case DISPATCHING -> next == ToolInvocationStatus.READY
               || next == ToolInvocationStatus.RUNNING
               || next == ToolInvocationStatus.FAILED
-              || next == ToolInvocationStatus.UNKNOWN;
+              || next == ToolInvocationStatus.CANCELLED;
           case RUNNING -> next == ToolInvocationStatus.RUNNING
               || next == ToolInvocationStatus.READY
               || next == ToolInvocationStatus.SUCCEEDED
@@ -200,13 +196,12 @@ public record ToolInvocation(
 
   private static void requireAttemptDelta(
       ToolInvocation stored, ToolInvocation next, int attemptDelta) {
-    boolean confirmedStart =
-        stored.status() == ToolInvocationStatus.DISPATCHING
-            && (next.status() == ToolInvocationStatus.RUNNING
-                || next.status() == ToolInvocationStatus.UNKNOWN);
-    if (confirmedStart) {
+    boolean start =
+        stored.status() == ToolInvocationStatus.READY
+            && next.status() == ToolInvocationStatus.RUNNING;
+    if (start) {
       if (attemptDelta != 1) {
-        throw new IllegalArgumentException("a confirmed start must advance attempt by exactly one");
+        throw new IllegalArgumentException("a start must advance attempt by exactly one");
       }
     } else if (attemptDelta != 0) {
       throw new IllegalArgumentException("attempt must not change on this transition");
@@ -354,7 +349,7 @@ public record ToolInvocation(
   /**
    * READY（attempt 0、无 approval） -&gt; WAITING_INPUT：内部人工输入工具已接受调用，冻结问卷等待用户回答。
    *
-   * <p>等待不进入 DISPATCHING、不消耗 attempt，也不产生 approval：问卷不能授权工具，YOLO 也不代替用户回答。
+   * <p>等待不执行、不消耗 attempt，也不产生 approval：问卷不能授权工具，YOLO 也不代替用户回答。
    */
   public ToolInvocation requestInput(Instant now) {
     if (status != ToolInvocationStatus.READY || attempt != 0 || approval != null) {
@@ -424,47 +419,14 @@ public record ToolInvocation(
   }
 
   /**
-   * READY -&gt; DISPATCHING：Work lease 已持有，Gateway admission 启动；要求预检 approval 已完成 （非 null 且为
-   * not-required 或 ALLOWED）；attempt 不变。
+   * READY -&gt; RUNNING：本地 admission 已通过，副作用之前持久化执行意图；要求预检 approval 已完成（非 null 且为 not-required 或
+   * ALLOWED）；attempt 恰好 +1。
    */
-  public ToolInvocation beginDispatch(Instant now) {
-    if (!hasCompletedPreflightApproval()) {
-      throw new IllegalArgumentException("beginDispatch requires a completed preflight approval");
-    }
-    return withState(
-        ToolInvocationStatus.DISPATCHING,
-        attempt,
-        approval,
-        null,
-        ToolEffectBatch.EMPTY,
-        null,
-        now);
-  }
-
-  /**
-   * DISPATCHING -&gt; FAILED：Gateway 在任何执行之前明确拒绝了该调用；attempt 不变。仅进行中的 dispatch 能被拒绝，且 {@link #fail}
-   * 拒绝 DISPATCHING，所以这是失败 dispatch 的唯一路径。
-   */
-  public ToolInvocation rejectDispatch(ToolInvocationError error, Instant now) {
-    Objects.requireNonNull(error, "error");
-    if (status != ToolInvocationStatus.DISPATCHING) {
-      throw new IllegalArgumentException("rejectDispatch requires DISPATCHING status");
-    }
-    return withState(
-        ToolInvocationStatus.FAILED, attempt, approval, null, ToolEffectBatch.EMPTY, error, now);
-  }
-
-  /** DISPATCHING -&gt; READY：BUSY/OVERLOADED admission；attempt 不变。仅进行中的 dispatch 能被弹回 READY。 */
-  public ToolInvocation dispatchBusy(Instant now) {
-    if (status != ToolInvocationStatus.DISPATCHING) {
-      throw new IllegalArgumentException("dispatchBusy requires DISPATCHING status");
-    }
-    return withState(
-        ToolInvocationStatus.READY, attempt, approval, null, ToolEffectBatch.EMPTY, null, now);
-  }
-
-  /** DISPATCHING -&gt; RUNNING：Gateway 已确认启动；attempt 恰好 +1。 */
   public ToolInvocation markRunning(Instant now) {
+    if (status != ToolInvocationStatus.READY || !hasCompletedPreflightApproval()) {
+      throw new IllegalArgumentException(
+          "markRunning requires a READY invocation with a completed preflight approval");
+    }
     return withState(
         ToolInvocationStatus.RUNNING,
         Math.addExact(attempt, 1),
@@ -497,51 +459,31 @@ public record ToolInvocation(
   }
 
   /**
-   * READY / RUNNING -&gt; FAILED，并附带一个 terminal error；attempt 不变。WAITING_APPROVAL 与 DISPATCHING
-   * 被拒绝：undecided approval 只能通过已决定的 DENIED 决策来拒绝，或被作为 CANCELLED 终止；进行中的 dispatch 只能通过 {@link
-   * #rejectDispatch} 失败。
+   * READY / RUNNING -&gt; FAILED，并附带一个 terminal error；attempt 不变。WAITING_APPROVAL 被拒绝：undecided
+   * approval 只能通过已决定的 DENIED 决策来拒绝，或被作为 CANCELLED 终止。
    */
   public ToolInvocation fail(ToolInvocationError error, Instant now) {
     Objects.requireNonNull(error, "error");
     if (status != ToolInvocationStatus.READY && status != ToolInvocationStatus.RUNNING) {
       throw new IllegalArgumentException(
-          "fail requires READY or RUNNING status; WAITING_APPROVAL must be decided or stopped,"
-              + " and a DISPATCHING invocation must use rejectDispatch");
+          "fail requires READY or RUNNING status; WAITING_APPROVAL must be decided or stopped");
     }
     return withState(
         ToolInvocationStatus.FAILED, attempt, approval, null, ToolEffectBatch.EMPTY, error, now);
   }
 
-  /**
-   * WAITING_APPROVAL / READY / RUNNING -&gt; CANCELLED，并附带一个 terminal error；attempt 不变。 DISPATCHING
-   * 被刻意拒绝：在该窗口内执行可能已经启动，因此唯一诚实的终止是 UNKNOWN。
-   */
+  /** WAITING_APPROVAL / READY / RUNNING -&gt; CANCELLED，并附带一个 terminal error；attempt 不变。 */
   public ToolInvocation cancel(ToolInvocationError error, Instant now) {
     Objects.requireNonNull(error, "error");
-    if (status == ToolInvocationStatus.DISPATCHING) {
-      throw new IllegalArgumentException(
-          "a DISPATCHING tool invocation must terminate as UNKNOWN, not CANCELLED");
-    }
     return withState(
         ToolInvocationStatus.CANCELLED, attempt, approval, null, ToolEffectBatch.EMPTY, error, now);
   }
 
-  /**
-   * DISPATCHING / RUNNING -&gt; UNKNOWN，并附带一个 terminal error：不确定的 admission 或恢复的 lease
-   * 可能已经执行了该调用，因此 DISPATCHING 时 attempt 恰好 +1，而 RUNNING 保留其已确认的 attempt。
-   */
+  /** RUNNING -&gt; UNKNOWN，并附带一个 terminal error：不确定的结果或恢复的 lease 可能已经执行了该调用；attempt 保留已确认的值。 */
   public ToolInvocation unknown(ToolInvocationError error, Instant now) {
     Objects.requireNonNull(error, "error");
-    int nextAttempt =
-        status == ToolInvocationStatus.DISPATCHING ? Math.addExact(attempt, 1) : attempt;
     return withState(
-        ToolInvocationStatus.UNKNOWN,
-        nextAttempt,
-        approval,
-        null,
-        ToolEffectBatch.EMPTY,
-        error,
-        now);
+        ToolInvocationStatus.UNKNOWN, attempt, approval, null, ToolEffectBatch.EMPTY, error, now);
   }
 
   /**
@@ -600,10 +542,10 @@ public record ToolInvocation(
 
   /**
    * binding/call durable 不变量：binding 只在 immediate FAILED（attempt=0）槽位可空（unknown tool / 输出截断）； 非空
-   * binding 必须匹配 call 的 toolName；除 immediate FAILED 外的所有状态（READY / WAITING_APPROVAL / DISPATCHING /
-   * RUNNING / SUCCEEDED / CANCELLED / UNKNOWN 与 attempt&gt;0 的 FAILED）必须可通过 binding schema
-   * 确定性归一化并校验。 durable call 仍保持与 assistant history 精确一致，只有 transient execution request
-   * 持有归一化副本；immediate FAILED 可以表示 INVALID_TOOL_ARGUMENTS / MODEL_OUTPUT_TRUNCATED 而绕过 schema。
+   * binding 必须匹配 call 的 toolName；除 immediate FAILED 外的所有状态（READY / WAITING_APPROVAL / RUNNING /
+   * SUCCEEDED / CANCELLED / UNKNOWN 与 attempt&gt;0 的 FAILED）必须可通过 binding schema 确定性归一化并校验。 durable
+   * call 仍保持与 assistant history 精确一致，只有 transient execution request 持有归一化副本；immediate FAILED 可以表示
+   * INVALID_TOOL_ARGUMENTS / MODEL_OUTPUT_TRUNCATED 而绕过 schema。
    */
   private static void validateBindingConstraint(
       ToolInvocationStatus status, int attempt, ToolCall call, ToolBinding binding) {
@@ -663,10 +605,6 @@ public record ToolInvocation(
           && (approval.isUndecided() || approval.decision() == ToolApprovalDecision.DENIED)) {
         throw new IllegalArgumentException("READY must not carry an undecided or denied approval");
       }
-    } else if (status == ToolInvocationStatus.DISPATCHING) {
-      requireNoTerminalFacts(status, result, effects, error);
-      requireNoInputReceipt(status, inputReceipt);
-      requireCompletedPreflightApproval(status, approval);
     } else if (status == ToolInvocationStatus.RUNNING) {
       if (attempt <= 0) {
         throw new IllegalArgumentException("RUNNING requires a positive attempt");

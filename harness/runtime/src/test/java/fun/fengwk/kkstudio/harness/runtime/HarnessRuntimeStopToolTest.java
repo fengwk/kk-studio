@@ -1,8 +1,8 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T5;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.approveTool;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.assertStopped;
-import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.beginDispatchTool;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.cancelTool;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.inTransaction;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.markRunningTool;
@@ -46,7 +46,7 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Stop 在 TOOL_ACTIVE 上：每个 sibling 按自身状态收敛（WAITING_APPROVAL/READY 转 CANCELLED， DISPATCHING/RUNNING 转
+ * Stop 在 TOOL_ACTIVE 上：每个 sibling 按自身状态收敛（WAITING_APPROVAL/READY 转 CANCELLED， RUNNING 转
  * UNKNOWN，terminal 保持原样），按 callIndex 的 ToolResult Entry 以 invocation-backed 方式挂载且
  * synthetic=false，删除 THREAD/MODEL 与全部 TOOL Work 行； TOOL_TERMINAL_PENDING 保持零变更。
  */
@@ -76,17 +76,18 @@ class HarnessRuntimeStopToolTest {
           ToolInvocation waiting = tx.lockToolInvocation(ids.get(0)).orElseThrow();
           tx.updateToolInvocations(List.of(waiting.requestApproval("approval needed", T5)));
         });
-    beginDispatchTool(store, ids.get(2));
-    beginDispatchTool(store, ids.get(3));
+    approveTool(store, ids.get(2));
+    markRunningTool(store, ids.get(2));
+    approveTool(store, ids.get(3));
     markRunningTool(store, ids.get(3));
-    beginDispatchTool(store, ids.get(4));
+    approveTool(store, ids.get(4));
     markRunningTool(store, ids.get(4));
     ToolEffectBatch effects =
         new ToolEffectBatch(
             List.of(new CustomEntryPayload("goal", "state", 1, "{\"status\":\"active\"}")));
     succeedTool(store, ids.get(4), effects);
     cancelTool(store, ids.get(5));
-    beginDispatchTool(store, ids.get(6));
+    approveTool(store, ids.get(6));
     markRunningTool(store, ids.get(6));
     retryReadyTool(store, ids.get(6));
     seedThreadWork(store, baseline.threadId());
@@ -128,13 +129,13 @@ class HarnessRuntimeStopToolTest {
     assertEquals(turnEnd.id(), stored.headEntryId());
 
     // 每个 sibling 的 ToolResult Entry 内容由其前置状态收敛（WAITING_APPROVAL/READY → CANCELLED，
-    // DISPATCHING/RUNNING → UNKNOWN，SUCCEEDED → SUCCEEDED）；attempt 不再 durable（行被物理删除），
+    // RUNNING → UNKNOWN，SUCCEEDED → SUCCEEDED）；attempt 不再 durable（行被物理删除），
     // 只能通过 Entry metadata.status + 内容文本验证状态收敛。
     assertFalse(CANCELLED_WORDING.contains("never"));
     String[] expectedTexts = {
       CANCELLED_WORDING, // 0 WAITING_APPROVAL -> CANCELLED
       CANCELLED_WORDING, // 1 READY -> CANCELLED
-      UNKNOWN_WORDING, // 2 DISPATCHING -> UNKNOWN
+      UNKNOWN_WORDING, // 2 RUNNING -> UNKNOWN
       UNKNOWN_WORDING, // 3 RUNNING -> UNKNOWN
       "real result", // 4 SUCCEEDED -> SUCCEEDED
       "cancelled", // 5 CANCELLED -> CANCELLED

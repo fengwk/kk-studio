@@ -16,10 +16,7 @@ public enum ToolInvocationStatus {
   /** 工具调用已就绪，等待分派执行。 */
   READY,
 
-  /** 已写入持久化分派围栏，但 Gateway 是否成功接受尚未确认。 */
-  DISPATCHING,
-
-  /** Gateway 已接受工具调用，Runtime 已进入受租约保护的执行阶段。 */
+  /** 工具调用已通过本地 admission 并持久化为执行中：此后任何副作用都可能已发生，崩溃恢复只会收敛为 UNKNOWN。 */
   RUNNING,
 
   /** 工具调用已成功完成并产出结果。 */

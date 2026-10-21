@@ -50,6 +50,7 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /** 端到端：owner sink 写出 REFERENCE，接收节点通过真实 JDK HttpServer 内部认证回拉完整 unicode ToolPartial，并在本地只投递一次。 */
@@ -69,6 +70,7 @@ class RealtimePayloadClusterRoundTripTest {
 
   private final RealtimeNotificationCodec codec = new RealtimeNotificationCodec();
   private final RealtimePayloadBuffer payloadBuffer = new RealtimePayloadBuffer();
+  private final ExecutorService resolver = Executors.newSingleThreadExecutor();
   private final HmacClusterInternalAuthentication authentication =
       new HmacClusterInternalAuthentication(
           SECRET, OWNER, Clock.systemUTC(), Duration.ofSeconds(30), 1024);
@@ -107,7 +109,7 @@ class RealtimePayloadClusterRoundTripTest {
   }
 
   @Test
-  void largeUnicodeToolPartialRoundTripsCompletelyAndIsDeliveredOnce() {
+  void largeUnicodeToolPartialRoundTripsCompletelyAndIsDeliveredOnce() throws InterruptedException {
     RealtimeEvent.ToolPartial event = toolPartial("界".repeat(5_000));
     String envelope = codec.encodeEvent(OWNER, event);
     String canonical = codec.encodeEventPayload(event);
@@ -138,11 +140,13 @@ class RealtimePayloadClusterRoundTripTest {
             },
             () -> false,
             payloadClient(),
-            payloadBuffer);
+            payloadBuffer,
+            resolver);
     try (receiver) {
       receiver.subscribe(THREAD, received::add, () -> {});
 
       receiver.onNotification(jdbc.payload);
+      awaitResolved();
 
       assertEquals(List.of(event), received);
       assertEquals(PostgresqlRealtimeEventSource.CHANNEL, jdbc.channel);
@@ -151,7 +155,7 @@ class RealtimePayloadClusterRoundTripTest {
   }
 
   @Test
-  void wrongOriginReferenceResyncsWithoutFetchingOrDelivering() {
+  void wrongOriginReferenceResyncsWithoutFetchingOrDelivering() throws InterruptedException {
     UUID payloadId =
         payloadBuffer.put(THREAD, codec.encodeEventPayload(toolPartial("x"))).orElseThrow();
     AtomicInteger resyncs = new AtomicInteger();
@@ -166,11 +170,13 @@ class RealtimePayloadClusterRoundTripTest {
             },
             () -> false,
             payloadClient(),
-            payloadBuffer);
+            payloadBuffer,
+            resolver);
     try (receiver) {
       receiver.subscribe(THREAD, received::add, resyncs::incrementAndGet);
 
       receiver.onNotification(codec.encodeReference(UNKNOWN, THREAD, payloadId));
+      awaitResolved();
 
       assertEquals(List.of(), received);
       assertEquals(1, resyncs.get());
@@ -179,7 +185,7 @@ class RealtimePayloadClusterRoundTripTest {
   }
 
   @Test
-  void fetchedPayloadForAnotherThreadResyncsWithoutDelivery() {
+  void fetchedPayloadForAnotherThreadResyncsWithoutDelivery() throws InterruptedException {
     UUID payloadId =
         payloadBuffer.put(THREAD, codec.encodeEventPayload(toolPartial("thread-a"))).orElseThrow();
     AtomicInteger resyncs = new AtomicInteger();
@@ -194,16 +200,24 @@ class RealtimePayloadClusterRoundTripTest {
             },
             () -> false,
             payloadClient(),
-            payloadBuffer);
+            payloadBuffer,
+            resolver);
     try (receiver) {
       receiver.subscribe(OTHER_THREAD, received::add, resyncs::incrementAndGet);
 
       receiver.onNotification(codec.encodeReference(OWNER, OTHER_THREAD, payloadId));
+      awaitResolved();
 
       assertEquals(List.of(), received);
       assertEquals(1, resyncs.get());
       assertEquals(1, requests.get());
     }
+  }
+
+  /** REFERENCE 在 resolver 上异步回拉；关闭 resolver 并等待它跑完本次通道后再断言。 */
+  private void awaitResolved() throws InterruptedException {
+    resolver.shutdown();
+    assertTrue(resolver.awaitTermination(5, TimeUnit.SECONDS));
   }
 
   private ClusterRealtimePayloadClient payloadClient() {

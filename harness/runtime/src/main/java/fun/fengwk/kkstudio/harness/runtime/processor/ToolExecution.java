@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.harness.runtime.processor;
 import lombok.extern.slf4j.Slf4j;
 
 import fun.fengwk.kkstudio.harness.common.result.BinaryResultContent;
-import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.harness.common.result.ResultContent;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolEffectBatch;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
@@ -28,8 +27,6 @@ import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayDeque;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -40,25 +37,25 @@ import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
 /**
- * 一次 claim 的进程内 Tool execution：Gateway Listener 回调门控缓冲、所有权围栏与 lease heartbeat。
+ * 一次 claim 的进程内 Tool execution：独占一条虚拟线程阻塞执行 Gateway {@link ToolGateway.Run}，并持有所有权围栏与 lease
+ * heartbeat。
  *
- * <p>Listener 回调在持久化 RUNNING 落地前由回调门控缓冲；两阶段激活（{@link #activate}）：先安全 attach handle，再持久化
- * markRunning，最后调用外部 {@code handle.activate()}（通知 Gateway 打开回调门控），成功后按到达顺序重放。激活仲裁（abandon -&gt;
- * activate 竞态）：activation 开始前 abandon 获胜则 activate 绝不调用；开始后 abandon 把 cancel 推迟到 activate 返回，外部调用序
- * 恒为 ACTIVATE -&gt; CANCEL（外部 activate / cancel 绝不持 monitor 避免与 Listener 回调死锁）。partial 先做
- * toolCallId / content 校验（拒绝 Binary / Resource content，partial 不可持久资源）与 canonical JSON 256 KiB
- * 编码尺寸上限（bounded 编码器测量，超限即中止，不物化完整 JSON），由进程内 attempt / terminal 围栏保护（无需每 chunk 事务加锁）， 直接
- * best-effort 发布 {@link RealtimeEvent.ToolPartial}；sink 失败不影响执行。terminal 回调一次生效（拒绝
- * BinaryResultContent——Gateway 必须先外部化为稳定 ResourceResultContent ref），随后对即将持久化的结果做 bounded 编码尺寸校验，超过
- * 1 MiB 确定性 INVALID_RESULT，绝不把超大行写入 PostgreSQL）；retryable 失败只在 sideEffect 为 READ_ONLY / IDEMPOTENT
- * 且 retryPolicy 允许时重试，NON_IDEMPOTENT 绝不自动重试。duplicate / late / stale 一律 no-op；lost ownership
- * 立即关闭回调门控、cancel handle 并停止 heartbeat，且不反写任何持久化状态。{@code handle.activate()} 抛异常即激活失败：恰好一次 UNKNOWN
- * terminal，激活前缓冲的信号全部丢弃。markRunning / retry / terminal 只写本 Thread 的 Thread/Tool/Work：事务按本 Thread 行
- * -&gt; ToolInvocation -&gt; claimed Work 加锁并以 Thread 行锁与 delete/Stop 串行化，唤醒 THREAD Work 只是
- * hint，不需要执行树锁。
+ * <p>生命周期：{@link #start} 在持久化 {@code READY -> RUNNING}（任何副作用之前）后启动执行线程；线程内依次阻塞执行、提交终态、释放资源 （{@link
+ * ToolGateway.Run#close()}），因此资源只在终态决议之后、执行体返回之后释放——取消只是 interrupt，绝不代表工作线程已经退出。
+ *
+ * <p>{@link #abandon}（close / Stop / 租约丢失）只做本地收敛：停止 heartbeat、从 registry 移除，并在执行体运行期间 interrupt
+ * 执行线程； 它绝不反写任何持久化状态，abandon 之后到达的结果一律丢弃（durable 状态由 Stop 提交或由 lease 恢复收敛为 UNKNOWN）。interrupt 只在
+ * 执行体内部投递，进入终态事务前已清除，避免打断 JDBC。
+ *
+ * <p>终态提交：success 先做 toolCallId / 不含 BinaryResultContent 校验与 1 MiB bounded 编码尺寸校验（超限确定性
+ * INVALID_RESULT， 绝不把超大行写入 PostgreSQL）；retryable 失败只在 sideEffect 为 READ_ONLY / IDEMPOTENT 且
+ * retryPolicy 允许时重试，NON_IDEMPOTENT 绝不自动重试。partial 由 Gateway 校验后直接 best-effort 发布 {@link
+ * RealtimeEvent.ToolPartial}，sink 失败不影响执行。 markRunning / retry / terminal 只写本 Thread 的
+ * Thread/Tool/Work：事务按本 Thread 行 -&gt; ToolInvocation -&gt; claimed Work 加锁并以 Thread 行锁与
+ * delete/Stop 串行化，唤醒 THREAD Work 只是 hint，不需要执行树锁。
  */
 @Slf4j
-final class ToolExecution implements ToolGateway.Listener {
+final class ToolExecution {
 
   private final HarnessStore store;
   private final RealtimeEventSink realtimeEventSink;
@@ -72,16 +69,15 @@ final class ToolExecution implements ToolGateway.Listener {
   private final WorkHeartbeat heartbeat;
   private final Consumer<ToolExecution> ownerRelease;
 
-  private final AtomicBoolean terminal = new AtomicBoolean();
   private final AtomicBoolean abandoned = new AtomicBoolean();
   private final AtomicBoolean heartbeatStarted = new AtomicBoolean();
   private final Object monitor = new Object();
-  private final ArrayDeque<Pending> pending = new ArrayDeque<>();
-  private boolean gateOpen;
-  private ToolGateway.Handle handle;
 
-  /** monitor 保护；activation 期间 abandon 推迟 handle cancel。 */
-  private boolean activationInProgress;
+  /** monitor 保护：执行线程正处于 {@code Run.execute} 内；只有此时 abandon 才会 interrupt。 */
+  private boolean inBody;
+
+  private Thread bodyThread;
+  private volatile boolean progressOpen;
 
   ToolExecution(
       HarnessStore store,
@@ -128,7 +124,7 @@ final class ToolExecution implements ToolGateway.Listener {
     return abandoned.get();
   }
 
-  /** 启动 lease heartbeat；scheduler 拒绝时返回 false。已启动（preflight 阶段先行启动，dispatch 阶段复用）视为成功。 */
+  /** 启动 lease heartbeat；scheduler 拒绝时返回 false。已启动（preflight 阶段先行启动，执行阶段复用）视为成功。 */
   boolean startHeartbeat() {
     if (heartbeatStarted.get()) {
       return true;
@@ -141,16 +137,10 @@ final class ToolExecution implements ToolGateway.Listener {
   }
 
   /**
-   * Gateway admission 返回 Started 后调用。先安全 attach handle + 持久化 markRunning（失败即 abandon 并
-   * LOST），随后才调用外部 {@code handle.activate()} 打开回调门控。激活仲裁：monitor 内声明 activation 开始；abandon 在开始前获胜则
-   * handle 已由 abandon 取消且 activate 绝不调用；已开始后 abandon 推迟 cancel，由本方法在 activation 返回后补上，外部调用序 恒为
-   * ACTIVATE -&gt; CANCEL（外部 activate / cancel 绝不持 monitor 避免与 Listener 回调死锁）。activate
-   * 抛异常即激活失败：恰好一次 UNKNOWN terminal；lost / stale / Stop 获胜关闭回调门控并 cancel handle，不写任何持久化状态。
+   * Gateway admission 返回 Admitted 后调用：先持久化 {@code READY -> RUNNING}（失败即关闭 run 并 LOST），再启动执行线程。run
+   * 的关闭 责任自此转移给执行线程；返回 {@link ProcessResult#STARTED} 表示线程已启动。
    */
-  ProcessResult activate(ToolGateway.Handle startedHandle) {
-    if (!attachHandle(startedHandle)) {
-      return ProcessResult.LOST_OWNERSHIP;
-    }
+  ProcessResult start(ToolGateway.Run run) {
     boolean committed;
     try {
       committed = markRunning();
@@ -159,267 +149,114 @@ final class ToolExecution implements ToolGateway.Listener {
       committed = false;
     }
     if (!committed) {
-      // handle 已 attach：abandon 会 cancel 它。
+      closeQuietly(run);
       abandon();
       return ProcessResult.LOST_OWNERSHIP;
     }
-    if (!beginActivation()) {
-      // abandon 已在 activation 开始前获胜：handle 已由 abandon cancel，activate 绝不调用。
-      return ProcessResult.LOST_OWNERSHIP;
-    }
-    // 两阶段激活：持久化 markRunning 落地之后、打开自身 Listener 回调门控之前，才允许 Gateway 打开回调门控或启动外部执行。
-    RuntimeException activationError = null;
-    try {
-      startedHandle.activate();
-    } catch (RuntimeException failure) {
-      activationError = failure;
-    }
-    if (finishActivation()) {
-      // activation 期间 abandon 获胜且推迟了 cancel：这里补上 deferred cancel（外部调用序 ACTIVATE -> CANCEL）。
-      cancelHandle();
-      return ProcessResult.LOST_OWNERSHIP;
-    }
-    if (activationError != null) {
-      // 异常渲染（toString）绝不能绕过状态转换：先收敛持久化 UNKNOWN，再记录。
-      ProcessResult result =
-          activationFailure(
-              new ToolInvocationError(
-                  "ACTIVATION_FAILED",
-                  "tool gateway activation failed; tool outcome cannot be confirmed"));
-      log.warn(
-          "tool gateway activation failed for {}: {}",
-          invocationId,
-          ProcessorExceptions.describe(activationError));
-      return result;
-    }
-    List<Publish> publishes = new ArrayList<>();
-    Applied applied;
-    synchronized (monitor) {
-      gateOpen = true;
-      applied = abandoned.get() ? Applied.LOST : drain(publishes);
-      // 与 {@link #deliver} 相同：发布的因果顺序必须在 monitor 内确定。
-      publishAll(publishes);
-    }
-    if (applied == Applied.LOST) {
-      // 兜底：gate 打开前 abandon 竞态获胜时 handle 已由 abandon 取消，这里只补 deferred cancel。
-      cancelHandle();
-      return ProcessResult.LOST_OWNERSHIP;
-    }
-    if (applied != Applied.PROGRESSED) {
-      // 缓冲的 terminal/retry 信号在激活期间已落地：本地 execution 已结束。
-      abandon();
-      return applied == Applied.RETRY ? ProcessResult.RESCHEDULED : ProcessResult.TERMINATED;
-    }
+    Thread.ofVirtual().name("tool-" + invocationId + "-" + attempt).start(() -> execute(run));
     return ProcessResult.STARTED;
   }
 
-  /** monitor 内声明 activation 开始；abandon 已获胜时返回 false（activate 绝不调用，handle 已由 abandon 取消）。 */
-  private boolean beginActivation() {
+  /** 执行线程主体：阻塞执行、提交终态、释放资源。abandon 在执行体开始之前获胜时绝不调用工具。 */
+  private void execute(ToolGateway.Run run) {
+    try {
+      ToolGateway.Completion completion = null;
+      if (enterBody()) {
+        try {
+          completion = run.execute(this::publishProgress);
+        } catch (RuntimeException failure) {
+          // 契约：Gateway 把工具异常分类为 Completion；逃逸的异常说明外部效果不可知，收敛为 UNKNOWN，绝不重放。
+          log.warn(
+              "tool gateway run failed for {}: {}",
+              invocationId,
+              ProcessorExceptions.describe(failure));
+          completion =
+              new ToolGateway.Unknown(
+                  new ToolInvocationError(
+                      "GATEWAY_UNKNOWN", "tool gateway run failed; outcome cannot be confirmed"));
+        } finally {
+          exitBody();
+        }
+      }
+      if (completion != null && !abandoned.get()) {
+        apply(completion);
+      }
+    } finally {
+      closeQuietly(run);
+      abandon();
+    }
+  }
+
+  /** 声明执行体开始；abandon 已获胜时返回 false（工具绝不被调用）。 */
+  private boolean enterBody() {
     synchronized (monitor) {
       if (abandoned.get()) {
         return false;
       }
-      activationInProgress = true;
+      inBody = true;
+      bodyThread = Thread.currentThread();
+      progressOpen = true;
       return true;
     }
   }
 
-  /** monitor 内结束 activation 阶段并返回当前是否已 abandoned；abandoned 时 handle cancel 由调用方在 monitor 外补上。 */
-  private boolean finishActivation() {
+  /** 声明执行体退出，并清除可能已投递的 interrupt：此后 abandon 不会再打断本线程。 */
+  private void exitBody() {
     synchronized (monitor) {
-      activationInProgress = false;
-      return abandoned.get();
+      inBody = false;
+      progressOpen = false;
+      bodyThread = null;
+      Thread.interrupted();
     }
   }
 
-  /**
-   * Gateway 激活失败（{@code handle.activate} 抛异常）：执行结果无法确认，强制恰好一次 UNKNOWN terminal。恶意 / 异常 handle 可能在
-   * activate() 内同步投递 terminal 回调（gate 未开，只进缓冲且 terminal 已被 claim）——一律丢弃缓冲信号并强制落地 UNKNOWN，绝不把执行留在
-   * RUNNING 等 lease 恢复；随后 abandon。
-   */
-  private ProcessResult activationFailure(ToolInvocationError error) {
-    List<Publish> publishes = new ArrayList<>();
-    Applied applied;
-    synchronized (monitor) {
-      if (abandoned.get()) {
-        return ProcessResult.LOST_OWNERSHIP;
-      }
-      // 缓冲的 terminal（若存在）从未落地：丢弃并强制 UNKNOWN；terminal 标志无条件收敛，DB 层保证至多一次 terminal。
-      pending.clear();
-      terminal.set(true);
-      applied = finishUnknownLocked(error, publishes);
+  /** Run 的关闭是幂等且不抛的契约；这里只保证意外异常不会阻断 heartbeat 与 registry 清理。 */
+  private void closeQuietly(ToolGateway.Run run) {
+    try {
+      run.close();
+    } catch (RuntimeException failure) {
+      log.warn("cannot release tool run resources for {}", invocationId, failure);
     }
-    publishAll(publishes);
-    if (applied == Applied.LOST) {
-      abandon();
-      return ProcessResult.LOST_OWNERSHIP;
-    }
-    abandon();
-    return ProcessResult.TERMINATED;
   }
 
-  /**
-   * monitor 内只做决定与赋值：若 execution 已 abandoned（heartbeat / close / cancel 竞态）或 handle 已存在则返回 false
-   * （绝不 markRunning）；外部 {@link ToolGateway.Handle#cancel} 必须在 monitor 之外调用（cancel 可能同步触发 Listener
-   * 回调或阻塞等待确认，锁内调用会与需要 monitor 的回调路径死锁），因此锁内只置标记，锁外统一 best-effort cancel。 activation 已开始后的 abandon
-   * 由 {@link #abandon} 推迟 cancel，与 {@link #activate} 的 deferred cancel 合计仍恰好一次。
-   */
-  private boolean attachHandle(ToolGateway.Handle startedHandle) {
-    Objects.requireNonNull(startedHandle, "startedHandle");
-    boolean cancel;
-    synchronized (monitor) {
-      if (abandoned.get() || handle != null) {
-        cancel = true;
-      } else {
-        handle = startedHandle;
-        cancel = false;
-      }
-    }
-    if (cancel) {
-      cancelBestEffort(startedHandle);
-    }
-    return !cancel;
-  }
-
-  @Override
-  public void onPartial(ToolResult partial) {
-    deliver(new Pending(PendingKind.PARTIAL, partial, null, null, null));
-  }
-
-  @Override
-  public void onSucceeded(ToolSuccess success) {
-    deliver(new Pending(PendingKind.SUCCEEDED, null, success, null, null));
-  }
-
-  @Override
-  public void onFailed(ToolGateway.Failure failure) {
-    deliver(new Pending(PendingKind.FAILED, null, null, failure, null));
-  }
-
-  @Override
-  public void onCancelled(ToolInvocationError error) {
-    deliver(new Pending(PendingKind.CANCELLED, null, null, null, error));
-  }
-
-  @Override
-  public void onUnknown(ToolInvocationError error) {
-    deliver(new Pending(PendingKind.UNKNOWN, null, null, null, error));
-  }
-
-  /**
-   * 关闭 listener（丢弃缓冲）、cancel handle（activation 已开始时推迟到 activate 返回后）、停止 heartbeat 并从 registry
-   * 释放；幂等。
-   */
+  /** 停止 heartbeat、从 registry 释放，并在执行体运行期间 interrupt 执行线程；幂等，且不反写任何持久化状态。 */
   void abandon() {
     if (!abandoned.compareAndSet(false, true)) {
       return;
     }
     heartbeat.stop();
-    boolean cancelNow;
     synchronized (monitor) {
-      pending.clear();
-      cancelNow = !activationInProgress;
-    }
-    if (cancelNow) {
-      cancelHandle();
+      if (inBody) {
+        bodyThread.interrupt();
+      }
     }
     ownerRelease.accept(this);
   }
 
-  private void deliver(Pending signal) {
-    // 乐观预检只是快速路径；真正的仲裁与发布都在 monitor 内完成，保证与 terminal 严格串行。
-    if (terminal.get() || abandoned.get()) {
+  /** Gateway 已校验的非 terminal partial：直接 best-effort 发布，执行体退出或 abandon 之后丢弃。 */
+  private void publishProgress(ToolResult partial) {
+    if (!progressOpen || abandoned.get()) {
       return;
     }
-    boolean terminalSignal = signal.kind != PendingKind.PARTIAL;
-    if (terminalSignal && !terminal.compareAndSet(false, true)) {
-      return;
-    }
-    List<Publish> publishes = new ArrayList<>();
-    RuntimeException failure = null;
-    Applied applied = Applied.LOST;
-    synchronized (monitor) {
-      if (abandoned.get()) {
-        return;
-      }
-      // 关键重检：乐观预检与进入 monitor 之间可能有并发 terminal 已经赢下仲裁。partial 绝不能在终态之后发布或进入缓冲。
-      if (terminal.get() && !terminalSignal) {
-        return;
-      }
-      if (!gateOpen) {
-        pending.add(signal);
-        return;
-      }
-      try {
-        applied = processLocked(signal, publishes);
-        if (applied != Applied.LOST) {
-          // partial 的发布必须在同一 monitor 临界区内完成：否则「partial 已通过裁决」与「实际发布」之间会出现
-          // 窗口，让先到的 partial 在并发 terminal 落地之后才发布，破坏实时流的因果顺序。
-          publishAll(publishes);
-        }
-      } catch (RuntimeException error) {
-        failure = error;
-      }
-    }
-    if (failure != null) {
-      // 非法 partial/result 已在 processLocked 内确定性映射为 FAILED；逃逸到这里的是 Store /
-      // 本地管线异常，不能伪装成 Gateway 协议错误。关闭本地执行，保留 durable 状态供 lease 恢复为 UNKNOWN。
-      log.warn(
-          "cannot process tool callback for {}: {}",
-          invocationId,
-          ProcessorExceptions.describe(failure));
-      abandon();
-      return;
-    }
-    if (applied == Applied.LOST) {
-      abandon();
-      return;
-    }
-    if (applied != Applied.PROGRESSED) {
-      // terminal / retry 落地后本地 execution 已结束（包括 partial 校验失败转 terminal 的路径）。
-      abandon();
+    try {
+      // 每次生产一个 partial event 生成独立 UUID：同 ms、同 payload 的两条 progress 仍是两个事件，客户端按 eventId 去重。
+      realtimeEventSink.append(
+          new RealtimeEvent.ToolPartial(
+              threadId, invocationId, attempt, UUID.randomUUID(), partial, clock.instant()));
+    } catch (RuntimeException failure) {
+      log.warn("realtime tool partial projection failed for invocation {}", invocationId, failure);
     }
   }
 
-  /** 重放 gate 打开前缓冲的信号；terminal/retry 信号按到达顺序必须是缓冲区最后一个。 */
-  private Applied drain(List<Publish> publishes) {
-    List<Pending> buffered = List.copyOf(pending);
-    pending.clear();
-    for (Pending signal : buffered) {
-      Applied applied = processLocked(signal, publishes);
-      if (applied != Applied.PROGRESSED) {
-        return applied;
-      }
+  private void apply(ToolGateway.Completion completion) {
+    switch (completion) {
+      case ToolGateway.Succeeded succeeded -> finishSuccess(succeeded.success());
+      case ToolGateway.Failed failed -> finishFailure(failed.error(), failed.retryable());
+      case ToolGateway.Cancelled cancelled -> safeTerminal(
+          () -> commitTerminal(TerminalKind.CANCELLED, cancelled.error()));
+      case ToolGateway.Unknown unknown -> safeTerminal(
+          () -> commitTerminal(TerminalKind.UNKNOWN, unknown.error()));
     }
-    return Applied.PROGRESSED;
-  }
-
-  private Applied processLocked(Pending signal, List<Publish> publishes) {
-    return switch (signal.kind) {
-      case PARTIAL -> processPartialLocked(signal.partial, publishes);
-      case SUCCEEDED -> finishSuccessLocked(signal.success, publishes);
-      case FAILED -> finishFailureLocked(signal.failure, publishes);
-      case CANCELLED -> finishCancelledLocked(signal.error, publishes);
-      case UNKNOWN -> finishUnknownLocked(signal.error, publishes);
-    };
-  }
-
-  /**
-   * 处理一个 partial：先验证 toolCallId 匹配 request、不含 Binary / Resource content（partial 不可持久资源，违反即 协议破坏，确定性
-   * FAILED）且 canonical JSON 不超过 256 KiB（bounded 编码器测量，N×内联大文本不得撑爆实时通道）；由进程内 attempt / terminal
-   * 围栏保护，直接 best-effort 发布 {@link RealtimeEvent.ToolPartial}，无需每 chunk 执行 DB 短事务。
-   */
-  private Applied processPartialLocked(ToolResult partial, List<Publish> publishes) {
-    String validation = validatePartial(partial);
-    if (validation != null) {
-      return finishFailureLocked(
-          new ToolGateway.Failure(new ToolInvocationError("INVALID_PARTIAL", validation), false),
-          publishes);
-    }
-    Instant now = clock.instant();
-    // 每次生产一个 partial event 生成独立 UUID：同 ms、同 payload 的两条 progress 仍是两个事件，客户端按 eventId 去重。
-    publishes.add(new Publish(UUID.randomUUID(), partial, now));
-    return Applied.PROGRESSED;
   }
 
   /**
@@ -427,31 +264,25 @@ final class ToolExecution implements ToolGateway.Listener {
    * ResourceResultContent ref），再用 bounded 编码器测量即将持久化结果的 canonical JSON UTF-8 字节（不物化完整 JSON），超过 1
    * MiB 确定性 INVALID_RESULT（N×data URI / 超大 details/text 不得撑爆 PostgreSQL）。
    */
-  private Applied finishSuccessLocked(ToolSuccess success, List<Publish> publishes) {
-    ToolResult result = success == null ? null : success.result();
+  private void finishSuccess(ToolSuccess success) {
+    ToolResult result = success.result();
     String validation = validateTerminalResult(result);
     if (validation != null) {
-      return finishFailureLocked(
-          new ToolGateway.Failure(new ToolInvocationError("INVALID_RESULT", validation), false),
-          publishes);
+      finishFailure(new ToolInvocationError("INVALID_RESULT", validation), false);
+      return;
     }
     if (ToolResultJsonCodec.exceedsEncodedUtf8Bytes(
         result, ToolResultSizeLimits.MAX_TERMINAL_RESULT_UTF8_BYTES)) {
-      return finishFailureLocked(
-          new ToolGateway.Failure(
-              new ToolInvocationError(
-                  "INVALID_RESULT",
-                  "result must not exceed "
-                      + ToolResultSizeLimits.MAX_TERMINAL_RESULT_UTF8_BYTES
-                      + " bytes of canonical tool result JSON"),
-              false),
-          publishes);
+      finishFailure(
+          new ToolInvocationError(
+              "INVALID_RESULT",
+              "result must not exceed "
+                  + ToolResultSizeLimits.MAX_TERMINAL_RESULT_UTF8_BYTES
+                  + " bytes of canonical tool result JSON"),
+          false);
+      return;
     }
-    boolean committed = safeTerminal(() -> commitSuccess(result, success.effects()));
-    if (!committed) {
-      return Applied.LOST;
-    }
-    return Applied.TERMINAL;
+    safeTerminal(() -> commitSuccess(result, success.effects()));
   }
 
   /**
@@ -459,68 +290,25 @@ final class ToolExecution implements ToolGateway.Listener {
    * -&gt; READY + version+1 + policy delay reschedule（不 request THREAD）；NON_IDEMPOTENT 绝不自动
    * retry。否则 FAILED + THREAD wake + complete。
    */
-  private Applied finishFailureLocked(ToolGateway.Failure failure, List<Publish> publishes) {
-    ToolInvocationError error = failure.error();
+  private void finishFailure(ToolInvocationError error, boolean retryable) {
     ToolSideEffect sideEffect = request.binding().descriptor().sideEffect();
     InvocationRetryDecision decision =
         InvocationRetryDecision.decide(
             config.retryPolicyProvider().retryPolicy(),
-            failure.retryable() && sideEffect != ToolSideEffect.NON_IDEMPOTENT,
+            retryable && sideEffect != ToolSideEffect.NON_IDEMPOTENT,
             attempt);
     if (decision.retry()) {
       Duration delay = decision.delay();
-      boolean committed = safeTerminal(() -> commitRetry(delay));
-      if (committed) {
+      if (safeTerminal(() -> commitRetry(delay))) {
         log.info(
             "scheduled tool retry for invocation {} (attempt {}) in {}",
             invocationId,
             attempt + 1,
             delay);
-        return Applied.RETRY;
       }
-      return Applied.LOST;
+      return;
     }
-    return safeTerminal(() -> commitTerminal(TerminalKind.FAILED, error))
-        ? Applied.TERMINAL
-        : Applied.LOST;
-  }
-
-  /** onCancelled -&gt; CANCELLED terminal，不 retry。 */
-  private Applied finishCancelledLocked(ToolInvocationError error, List<Publish> publishes) {
-    return safeTerminal(() -> commitTerminal(TerminalKind.CANCELLED, error))
-        ? Applied.TERMINAL
-        : Applied.LOST;
-  }
-
-  /** onUnknown -&gt; UNKNOWN terminal（RUNNING 保留 attempt），不 retry。 */
-  private Applied finishUnknownLocked(ToolInvocationError error, List<Publish> publishes) {
-    return safeTerminal(() -> commitTerminal(TerminalKind.UNKNOWN, error))
-        ? Applied.TERMINAL
-        : Applied.LOST;
-  }
-
-  /**
-   * partial 校验：非空、toolCallId 匹配 request、不得携带 Binary / Resource content、canonical JSON 不超 256 KiB。
-   */
-  private String validatePartial(ToolResult partial) {
-    if (partial == null) {
-      return "partial must not be null";
-    }
-    if (!partial.toolCallId().equals(request.call().id())) {
-      return "partial toolCallId does not match the request call";
-    }
-    for (ResultContent content : partial.contents()) {
-      if (content instanceof BinaryResultContent || content instanceof ResourceResultContent) {
-        return "partial must not carry binary or resource content";
-      }
-    }
-    if (ToolResultJsonCodec.exceedsEncodedUtf8Bytes(
-        partial, ToolResultSizeLimits.MAX_PARTIAL_RESULT_UTF8_BYTES)) {
-      return "partial must not exceed "
-          + ToolResultSizeLimits.MAX_PARTIAL_RESULT_UTF8_BYTES
-          + " bytes of canonical tool result JSON";
-    }
-    return null;
+    safeTerminal(() -> commitTerminal(TerminalKind.FAILED, error));
   }
 
   /** Terminal result 基础校验：非空、toolCallId 匹配 request、不得携带 BinaryResultContent。编码尺寸校验在基础校验之后进行。 */
@@ -539,6 +327,7 @@ final class ToolExecution implements ToolGateway.Listener {
     return null;
   }
 
+  /** READY -&gt; RUNNING（attempt+1）+ version+1：副作用之前的持久执行意图，要求 claim 仍 owned 且 attempt 匹配。 */
   private boolean markRunning() {
     return Boolean.TRUE.equals(
         store.transaction(
@@ -552,8 +341,7 @@ final class ToolExecution implements ToolGateway.Listener {
               if (tool == null || tx.lockClaimedWork(claim).isEmpty()) {
                 return false;
               }
-              if (tool.status() != ToolInvocationStatus.DISPATCHING
-                  || tool.attempt() != attempt - 1) {
+              if (tool.status() != ToolInvocationStatus.READY || tool.attempt() != attempt - 1) {
                 return false;
               }
               tx.updateToolInvocations(List.of(tool.markRunning(now)));
@@ -654,6 +442,7 @@ final class ToolExecution implements ToolGateway.Listener {
     }
   }
 
+  /** 终态落库失败只记录：durable 状态保持 RUNNING，由 lease 恢复收敛为 UNKNOWN。 */
   private boolean safeTerminal(BooleanSupplier action) {
     try {
       return action.getAsBoolean();
@@ -666,95 +455,6 @@ final class ToolExecution implements ToolGateway.Listener {
     }
   }
 
-  private void publishAll(List<Publish> publishes) {
-    for (Publish publish : publishes) {
-      appendRealtime(publish);
-    }
-  }
-
-  private void appendRealtime(Publish publish) {
-    try {
-      realtimeEventSink.append(
-          new RealtimeEvent.ToolPartial(
-              threadId,
-              invocationId,
-              attempt,
-              publish.eventId(),
-              publish.partial(),
-              publish.createdAt()));
-    } catch (RuntimeException failure) {
-      log.warn("realtime tool partial projection failed for invocation {}", invocationId, failure);
-    }
-  }
-
-  private void cancelHandle() {
-    ToolGateway.Handle current;
-    synchronized (monitor) {
-      current = handle;
-      handle = null;
-    }
-    if (current != null) {
-      cancelBestEffort(current);
-    }
-  }
-
-  /** Gateway Handle 取消是契约级幂等；异常只记录，不影响本地清理。 */
-  private void cancelBestEffort(ToolGateway.Handle target) {
-    try {
-      target.cancel();
-    } catch (RuntimeException failure) {
-      log.warn("cannot cancel local tool execution handle for {}", invocationId, failure);
-    }
-  }
-
-  private enum PendingKind {
-    /** 暂存待处理的工具局部输出结果。 */
-    PARTIAL,
-
-    /** 暂存待处理的工具成功完成信号。 */
-    SUCCEEDED,
-
-    /** 暂存待处理的工具执行失败错误。 */
-    FAILED,
-
-    /** 暂存待处理的工具取消信号。 */
-    CANCELLED,
-
-    /** 暂存待处理的结果不确定错误。 */
-    UNKNOWN
-  }
-
-  private record Pending(
-      PendingKind kind,
-      ToolResult partial,
-      ToolSuccess success,
-      ToolGateway.Failure failure,
-      ToolInvocationError error) {}
-
-  private record Publish(UUID eventId, ToolResult partial, Instant createdAt) {}
-
-  /** 内部回滚信号：callback 事务失去 Work ownership 时使当前事务完整回滚。 */
-  private static final class ClaimLostSignal extends RuntimeException {
-    private ClaimLostSignal() {
-      super("claimed work lost at final fence", null, false, false);
-    }
-  }
-
-  /** 一次回调信号落地后的本地应用结果。 */
-  private enum Applied {
-    /** 局部输出已成功落盘或发布进度。 */
-    PROGRESSED,
-
-    /** 触发瞬态重试，对应 Work 已完成延迟重排。 */
-    RETRY,
-
-    /** 终态已持久化落盘，本地执行结束。 */
-    TERMINAL,
-
-    /** Claim 所有权已丢失或调用已被废弃，当前信号未被应用。 */
-    LOST
-  }
-
   private enum TerminalKind {
     /** 收敛为明确的失败终态。 */
     FAILED,
@@ -764,5 +464,12 @@ final class ToolExecution implements ToolGateway.Listener {
 
     /** 收敛为结果不确定的终态。 */
     UNKNOWN
+  }
+
+  /** 内部回滚信号：终态事务失去 Work ownership 时使当前事务完整回滚。 */
+  private static final class ClaimLostSignal extends RuntimeException {
+    private ClaimLostSignal() {
+      super("claimed work lost at final fence", null, false, false);
+    }
   }
 }

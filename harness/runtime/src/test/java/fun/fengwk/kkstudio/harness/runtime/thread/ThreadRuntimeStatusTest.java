@@ -33,9 +33,6 @@ class ThreadRuntimeStatusTest {
         ThreadRuntimeStatus.MODEL_READY,
         ThreadRuntimeStatus.from(modelActive(ModelInvocationStatus.READY)));
     assertEquals(
-        ThreadRuntimeStatus.MODEL_DISPATCHING,
-        ThreadRuntimeStatus.from(modelActive(ModelInvocationStatus.DISPATCHING)));
-    assertEquals(
         ThreadRuntimeStatus.MODEL_RUNNING,
         ThreadRuntimeStatus.from(modelActive(ModelInvocationStatus.RUNNING)));
     assertEquals(
@@ -55,35 +52,24 @@ class ThreadRuntimeStatusTest {
         ThreadRuntimeStatus.TOOL_RUNNING,
         ThreadRuntimeStatus.from(toolActive(ToolInvocationStatus.RUNNING)));
     assertEquals(
-        ThreadRuntimeStatus.TOOL_DISPATCHING,
-        ThreadRuntimeStatus.from(toolActive(ToolInvocationStatus.DISPATCHING)));
-    assertEquals(
         ThreadRuntimeStatus.TOOL_READY,
         ThreadRuntimeStatus.from(toolActive(ToolInvocationStatus.READY)));
   }
 
   @Test
   void toolStatusUsesTheDocumentedBlockingPriority() {
-    // sibling 顺序不能改变 WAITING_APPROVAL > RUNNING > DISPATCHING > READY 的优先级。
+    // sibling 顺序不能改变 WAITING_APPROVAL > RUNNING > READY 的优先级。
     assertEquals(
         ThreadRuntimeStatus.TOOL_WAITING_APPROVAL,
         ThreadRuntimeStatus.from(
             toolActive(
                 ToolInvocationStatus.READY,
-                ToolInvocationStatus.DISPATCHING,
                 ToolInvocationStatus.RUNNING,
                 ToolInvocationStatus.WAITING_APPROVAL)));
     assertEquals(
         ThreadRuntimeStatus.TOOL_RUNNING,
         ThreadRuntimeStatus.from(
-            toolActive(
-                ToolInvocationStatus.READY,
-                ToolInvocationStatus.DISPATCHING,
-                ToolInvocationStatus.RUNNING)));
-    assertEquals(
-        ThreadRuntimeStatus.TOOL_DISPATCHING,
-        ThreadRuntimeStatus.from(
-            toolActive(ToolInvocationStatus.READY, ToolInvocationStatus.DISPATCHING)));
+            toolActive(ToolInvocationStatus.READY, ToolInvocationStatus.RUNNING)));
     // 审批优先于等待回答，等待回答优先于运行。
     assertEquals(
         ThreadRuntimeStatus.TOOL_WAITING_APPROVAL,
@@ -128,13 +114,10 @@ class ThreadRuntimeStatusTest {
 
   @Test
   void fromModelStatusMapsNonTerminalStatusesAndRejectsTerminal() {
-    // 测试意图：验证 fromModelStatus 正确映射 READY/DISPATCHING/RUNNING，并对终态和 null fail-closed。
+    // 测试意图：验证 fromModelStatus 正确映射 READY/RUNNING，并对终态和 null fail-closed。
     assertEquals(
         ThreadRuntimeStatus.MODEL_READY,
         ThreadRuntimeStatus.fromModelStatus(ModelInvocationStatus.READY));
-    assertEquals(
-        ThreadRuntimeStatus.MODEL_DISPATCHING,
-        ThreadRuntimeStatus.fromModelStatus(ModelInvocationStatus.DISPATCHING));
     assertEquals(
         ThreadRuntimeStatus.MODEL_RUNNING,
         ThreadRuntimeStatus.fromModelStatus(ModelInvocationStatus.RUNNING));
@@ -151,27 +134,19 @@ class ThreadRuntimeStatusTest {
 
   @Test
   void fromToolSiblingsMapsByPriorityAndRejectsTerminalOrEmpty() {
-    // 测试意图：验证 fromToolSiblings 遵循 WAITING_APPROVAL > RUNNING > DISPATCHING > READY 优先级，且对全终态或空列表
+    // 测试意图：验证 fromToolSiblings 遵循 WAITING_APPROVAL > RUNNING > READY 优先级，且对全终态或空列表
     // fail-closed。
     assertEquals(
         ThreadRuntimeStatus.TOOL_WAITING_APPROVAL,
         ThreadRuntimeStatus.fromToolSiblings(
             toolInvocations(
                 ToolInvocationStatus.READY,
-                ToolInvocationStatus.DISPATCHING,
                 ToolInvocationStatus.RUNNING,
                 ToolInvocationStatus.WAITING_APPROVAL)));
     assertEquals(
         ThreadRuntimeStatus.TOOL_RUNNING,
         ThreadRuntimeStatus.fromToolSiblings(
-            toolInvocations(
-                ToolInvocationStatus.READY,
-                ToolInvocationStatus.DISPATCHING,
-                ToolInvocationStatus.RUNNING)));
-    assertEquals(
-        ThreadRuntimeStatus.TOOL_DISPATCHING,
-        ThreadRuntimeStatus.fromToolSiblings(
-            toolInvocations(ToolInvocationStatus.READY, ToolInvocationStatus.DISPATCHING)));
+            toolInvocations(ToolInvocationStatus.READY, ToolInvocationStatus.RUNNING)));
     assertEquals(
         ThreadRuntimeStatus.TOOL_READY,
         ThreadRuntimeStatus.fromToolSiblings(toolInvocations(ToolInvocationStatus.READY)));

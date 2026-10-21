@@ -29,7 +29,7 @@ import java.util.Set;
  *
  * <ul>
  *   <li>精确校验 (source, method) 全集 115 项，拒绝虚构、重复或遗漏。
- *   <li>按 invocation 维度独立记录 disposition：49 项 PORTED/PASSED，92 项 NOT_EXECUTED_OUT_OF_SCOPE。
+ *   <li>按 invocation 维度独立记录 disposition：47 项 PORTED/PASSED，94 项 NOT_EXECUTED_OUT_OF_SCOPE。
  *   <li>逐方法机械校验参数键和值（包括 Parser 7 个字符串、ExecutionMode SYNC/ASYNC、StreamingMode
  *       LISTENER/PUBLISHER、NonBlocking logging false/true、非参数化空参数）。
  *   <li>所有 PORTED invocation 均映射到本地真实存在的测试方法，必须标注 @Test 或 @ParameterizedTest，且绝对不得标注 @Disabled。
@@ -44,10 +44,10 @@ class UpstreamTestManifestTest {
 
   private static final int EXPECTED_TOTAL_METHODS = 115;
   private static final int EXPECTED_TOTAL_INVOCATIONS = 141;
-  private static final int EXPECTED_PORTED_INVOCATIONS = 49;
-  private static final int EXPECTED_OUT_OF_SCOPE_INVOCATIONS = 92;
-  private static final int EXPECTED_PORTED_METHODS = 43;
-  private static final int EXPECTED_PURE_OUT_OF_SCOPE_METHODS = 72;
+  private static final int EXPECTED_PORTED_INVOCATIONS = 47;
+  private static final int EXPECTED_OUT_OF_SCOPE_INVOCATIONS = 94;
+  private static final int EXPECTED_PORTED_METHODS = 41;
+  private static final int EXPECTED_PURE_OUT_OF_SCOPE_METHODS = 74;
 
   private static final List<String> PARSER_SINGLE_LINE_INPUTS =
       List.of(

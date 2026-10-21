@@ -167,8 +167,7 @@ class HarnessRuntimeThreadSemanticsScenarioTest {
     AcceptedCommands accepted =
         runtime.acceptCommands(
             new AcceptCommandsCommand(
-                new AcceptCommandsTarget.Thread(
-                    root.threadId(), stopped.headEntryId(), stopped.nextCommandSequence()),
+                new AcceptCommandsTarget.Thread(root.threadId()),
                 List.of(userMessageCommand(TestIds.id(24), "resume"))),
             AcceptancePreflight.IDENTITY);
     assertFalse(accepted.replayed());

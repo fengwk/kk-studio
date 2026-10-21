@@ -2,8 +2,8 @@ package fun.fengwk.kkstudio.harness.runtime;
 
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T3;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T5;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.approveTool;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.assistantEntry;
-import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.beginDispatchTool;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.cancelTool;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.markRunningTool;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.parkForInput;
@@ -48,8 +48,8 @@ import java.util.UUID;
  * {@link ThreadSnapshot#executionFacts()} 的统一执行事实投影测试。
  *
  * <p>全部用例都经真实 {@link InMemoryHarnessStore} 种子与 {@link HarnessRuntime#getThreadSnapshot} 读取，命中真实
- * {@code ThreadContextClassifier} 分支：排队命令、Model 活动/终态、工具 READY/DISPATCHING/RUNNING/等待/UNKNOWN 及混合、
- * owner 归属 continuation、尾部控制 Entry 与 STOPPED 仍在途。断言直接给出三个正交事实，覆盖全部状态矩阵。
+ * {@code ThreadContextClassifier} 分支：排队命令、Model 活动/终态、工具 READY/RUNNING/等待/UNKNOWN 及混合、 owner 归属
+ * continuation、尾部控制 Entry 与 STOPPED 仍在途。断言直接给出三个正交事实，覆盖全部状态矩阵。
  */
 class ThreadExecutionFactsTest {
 
@@ -76,8 +76,7 @@ class ThreadExecutionFactsTest {
     ThreadState before = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
     runtime.acceptCommands(
         new AcceptCommandsCommand(
-            new AcceptCommandsTarget.Thread(
-                baseline.threadId(), before.headEntryId(), before.nextCommandSequence()),
+            new AcceptCommandsTarget.Thread(baseline.threadId()),
             List.of(userMessageCommand(TestIds.id(1), "queued"))),
         AcceptancePreflight.IDENTITY);
     assertEquals(new ThreadExecutionFacts(true, false, false), facts(baseline.threadId()));
@@ -85,12 +84,9 @@ class ThreadExecutionFactsTest {
 
   @Test
   void liveModelStatusesConstituteWork() {
-    // 测试意图：本 Thread 合法的 READY/DISPATCHING/RUNNING Model 都是工作，且不引入等待或 UNKNOWN。
+    // 测试意图：本 Thread 合法的 READY/RUNNING Model 都是工作，且不引入等待或 UNKNOWN。
     for (ModelInvocationStatus status :
-        List.of(
-            ModelInvocationStatus.READY,
-            ModelInvocationStatus.DISPATCHING,
-            ModelInvocationStatus.RUNNING)) {
+        List.of(ModelInvocationStatus.READY, ModelInvocationStatus.RUNNING)) {
       HarnessRuntimeTestSupport.ModelBaseline baseline = seedModel(store, status);
       assertEquals(
           new ThreadExecutionFacts(true, false, false),
@@ -108,16 +104,16 @@ class ThreadExecutionFactsTest {
 
   @Test
   void runningToolsConstituteWork() {
-    // 测试意图：本地 READY/DISPATCHING/RUNNING 工具都是工作。
+    // 测试意图：本地 READY/RUNNING 工具都是工作。
     HarnessRuntimeTestSupport.ToolBaseline ready = seedToolBaseline(store);
     assertEquals(new ThreadExecutionFacts(true, false, false), facts(ready.threadId()));
 
-    HarnessRuntimeTestSupport.ToolBaseline dispatching = seedToolBaseline(store);
-    beginDispatchTool(store, dispatching.toolId());
-    assertEquals(new ThreadExecutionFacts(true, false, false), facts(dispatching.threadId()));
+    HarnessRuntimeTestSupport.ToolBaseline approved = seedToolBaseline(store);
+    approveTool(store, approved.toolId());
+    assertEquals(new ThreadExecutionFacts(true, false, false), facts(approved.threadId()));
 
     HarnessRuntimeTestSupport.ToolBaseline running = seedToolBaseline(store);
-    beginDispatchTool(store, running.toolId());
+    approveTool(store, running.toolId());
     markRunningTool(store, running.toolId());
     assertEquals(new ThreadExecutionFacts(true, false, false), facts(running.threadId()));
   }
@@ -158,7 +154,7 @@ class ThreadExecutionFactsTest {
   void mixedToolStatusesProjectOrthogonally() {
     // 测试意图：同一批兄弟工具可同时给出工作、人工等待与 UNKNOWN 三个正交事实。
     HarnessRuntimeTestSupport.MultiToolBaseline baseline = seedToolBaseline(store, 3);
-    beginDispatchTool(store, baseline.toolIds().get(0));
+    approveTool(store, baseline.toolIds().get(0));
     markRunningTool(store, baseline.toolIds().get(0));
     setWaitingApproval(store, baseline.toolIds().get(1));
     unknownTool(store, baseline.toolIds().get(2));
@@ -175,7 +171,7 @@ class ThreadExecutionFactsTest {
     assertEquals(new ThreadExecutionFacts(true, false, false), facts(model.threadId()));
 
     HarnessRuntimeTestSupport.ToolBaseline tool = seedToolBaseline(store);
-    beginDispatchTool(store, tool.toolId());
+    approveTool(store, tool.toolId());
     markRunningTool(store, tool.toolId());
     markControl(tool.threadId(), ThreadExecutionControl.STOPPED);
     assertEquals(new ThreadExecutionFacts(true, false, false), facts(tool.threadId()));

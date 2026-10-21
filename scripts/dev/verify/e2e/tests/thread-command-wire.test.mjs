@@ -42,11 +42,11 @@ const acceptedDto = (threadId, command) => ({
 })
 
 test('THREAD continuation routes to the owner-free thread command-batches endpoint', async () => {
-  // 测试意图：既有 Thread 续写面 owner-free——真实请求 body 只含 cursor 与 commands，
+  // 测试意图：既有 Thread 续写面 owner-free——cursor-bound 批次的 wire body 只含 cursor 与 commands，
   // 即使调用方传入 owner 也绝不进入 wire，也不带 helper 路由描述符的 type/threadId。
   const threadId = cid()
   const headEntryId = cid()
-  const command = userMessageCommand('continue', cid())
+  const command = { type: 'GOAL', text: 'ship it', idempotencyKey: cid() }
   const calls = []
   const ctx = {
     async call(...args) {

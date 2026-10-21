@@ -62,13 +62,11 @@ class HarnessRuntimeApprovalLockingTest {
     HarnessRuntimeTestSupport.ToolBaseline baseline = seedToolBaseline(store);
     setWaitingApproval(store, baseline);
     runtime.decideToolApproval(allow(baseline.threadId(), baseline.toolId()));
-    // ToolProcessor 风格的后续推进：READY -> DISPATCHING -> RUNNING（decided approval 保持不变）。
+    // ToolProcessor 风格的后续推进：READY -> RUNNING（decided approval 保持不变）。
     store.transaction(
         tx -> {
           ToolInvocation tool = tx.lockToolInvocation(baseline.toolId()).orElseThrow();
-          tx.updateToolInvocations(List.of(tool.beginDispatch(T6)));
-          ToolInvocation running = tx.lockToolInvocation(baseline.toolId()).orElseThrow();
-          tx.updateToolInvocations(List.of(running.markRunning(T6)));
+          tx.updateToolInvocations(List.of(tool.markRunning(T6)));
           return null;
         });
     ToolInvocation current =

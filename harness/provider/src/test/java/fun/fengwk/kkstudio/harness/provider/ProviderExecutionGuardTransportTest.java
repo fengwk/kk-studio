@@ -9,9 +9,9 @@ import fun.fengwk.kkstudio.harness.provider.anthropic.AnthropicProviderAdapter;
 import fun.fengwk.kkstudio.harness.provider.gemini.GeminiProviderAdapter;
 import fun.fengwk.kkstudio.harness.provider.openai.chat.OpenAiChatProviderAdapter;
 import fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesProviderAdapter;
-import fun.fengwk.kkstudio.harness.provider.transport.HttpSseCallback;
 import fun.fengwk.kkstudio.harness.provider.transport.HttpSseLimits;
 import fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransport;
+import fun.fengwk.kkstudio.harness.provider.transport.ServerSentEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
@@ -26,7 +26,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
@@ -42,6 +41,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Predicate;
 
 /** 验证四种流式 provider 对不可执行选项均在传输层调用前失败。 */
 class ProviderExecutionGuardTransportTest {
@@ -54,13 +54,13 @@ class ProviderExecutionGuardTransportTest {
     ExecutorService worker = Executors.newSingleThreadExecutor();
     ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
     JdkHttpSseTransport transport =
-        new JdkHttpSseTransport(client, worker, scheduler) {
+        new JdkHttpSseTransport(client, scheduler) {
           @Override
-          public ProviderStream stream(
+          public void execute(
               HttpRequest request,
               ModelCallTimeoutPolicy policy,
               HttpSseLimits limits,
-              HttpSseCallback callback) {
+              Predicate<ServerSentEvent> onEvent) {
             calls.incrementAndGet();
             throw new AssertionError("rejected options must not reach HTTP");
           }
@@ -139,13 +139,13 @@ class ProviderExecutionGuardTransportTest {
         request,
         new ProviderStreamHandler() {
           @Override
-          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
+          public void onEvent(ProviderStreamEvent event) {}
 
           @Override
-          public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
+          public void onComplete(ProviderCompletion completion) {}
 
           @Override
-          public void onError(ProviderException failure, ProviderStream stream) {
+          public void onError(ProviderException failure) {
             error.set(failure);
           }
         });

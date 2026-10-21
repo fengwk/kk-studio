@@ -1,12 +1,10 @@
 package fun.fengwk.kkstudio.harness.builtin.input;
 
-import fun.fengwk.kkstudio.harness.builtin.CompletedToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.common.tool.ToolErrorGuidance;
 import fun.fengwk.kkstudio.harness.common.tool.ToolErrorGuidance.ExecutionFact;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
@@ -14,6 +12,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 
 import java.time.Duration;
 import java.util.Objects;
+import java.util.function.Consumer;
 
 /**
  * 内置人工输入工具 {@code ask_user} 的模型侧契约：问卷形状与「等待用户作答」语义。
@@ -55,10 +54,9 @@ public final class AskUserTool implements Tool {
    * <p>若仍被调用（provenance 未被识别或调用方绕过运行时），则以确定性错误收敛：绝不伪造答案，也不回显问卷原文。
    */
   @Override
-  public ToolExecutionHandle execute(ToolExecutionRequest request, ToolExecutionListener listener) {
+  public ToolOutcome execute(ToolExecutionRequest request, Consumer<ToolResult> progress) {
     Objects.requireNonNull(request, "request");
-    Objects.requireNonNull(listener, "listener");
-    listener.onComplete(
+    return ToolOutcome.withoutEffects(
         ToolResult.error(
             request.call().id(),
             ToolErrorGuidance.message(
@@ -66,6 +64,5 @@ public final class AskUserTool implements Tool {
                     + " executed as a tool",
                 ExecutionFact.NOT_EXECUTED,
                 "Submit the questionnaire as a frozen call and wait for the user's answer")));
-    return CompletedToolExecutionHandle.INSTANCE;
   }
 }

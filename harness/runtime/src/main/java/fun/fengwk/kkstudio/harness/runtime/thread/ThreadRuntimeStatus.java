@@ -32,10 +32,7 @@ public enum ThreadRuntimeStatus {
   /** 已有 READY 模型调用，等待分派执行。 */
   MODEL_READY,
 
-  /** 模型调用已进入持久化分派围栏，Gateway 接受结果尚未确认。 */
-  MODEL_DISPATCHING,
-
-  /** Gateway 已接受模型调用，Runtime 正处于受租约保护的执行阶段。 */
+  /** 模型调用已持久化 RUNNING，Runtime 正处于受租约保护的执行阶段。 */
   MODEL_RUNNING,
 
   /** 当前调用已达终态，其结果尚待 ThreadProcessor 物化并推进上下文。 */
@@ -50,10 +47,7 @@ public enum ThreadRuntimeStatus {
   /** 无待审批或待回答 sibling，且至少一个 sibling 正在运行。 */
   TOOL_RUNNING,
 
-  /** 无待审批、待回答或运行 sibling，且至少一个 sibling 处于分派围栏。 */
-  TOOL_DISPATCHING,
-
-  /** 无待审批、待回答、运行或分派 sibling，且至少一个 sibling 已就绪。 */
+  /** 无待审批、待回答或运行 sibling，且至少一个 sibling 已就绪。 */
   TOOL_READY;
 
   /**
@@ -78,7 +72,6 @@ public enum ThreadRuntimeStatus {
     Objects.requireNonNull(status, "status");
     return switch (status) {
       case READY -> MODEL_READY;
-      case DISPATCHING -> MODEL_DISPATCHING;
       case RUNNING -> MODEL_RUNNING;
       default -> throw new IllegalStateException(
           "MODEL_ACTIVE context must contain a non-terminal model invocation");
@@ -88,7 +81,7 @@ public enum ThreadRuntimeStatus {
   /**
    * 从工具兄弟调用列表派生运行时状态。
    *
-   * <p>判定优先级依次为 WAITING_APPROVAL > RUNNING > DISPATCHING > READY。 若列表为空或全部为终态，抛出 {@link
+   * <p>判定优先级依次为 WAITING_APPROVAL > WAITING_INPUT > RUNNING > READY。 若列表为空或全部为终态，抛出 {@link
    * IllegalStateException}。
    */
   public static ThreadRuntimeStatus fromToolSiblings(List<ToolInvocation> siblings) {
@@ -106,11 +99,6 @@ public enum ThreadRuntimeStatus {
     for (ToolInvocation sibling : siblings) {
       if (sibling.status() == ToolInvocationStatus.RUNNING) {
         return TOOL_RUNNING;
-      }
-    }
-    for (ToolInvocation sibling : siblings) {
-      if (sibling.status() == ToolInvocationStatus.DISPATCHING) {
-        return TOOL_DISPATCHING;
       }
     }
     for (ToolInvocation sibling : siblings) {

@@ -113,7 +113,7 @@ final class GeminiStreamAccumulator {
 
   /** 处理单个 SSE 事件。 */
   void handleEvent(String eventName, String data) {
-    if (bridge.isCancelled()) {
+    if (bridge.isClosed()) {
       return;
     }
     if (data == null || data.isBlank() || "[DONE]".equals(data.trim())) {

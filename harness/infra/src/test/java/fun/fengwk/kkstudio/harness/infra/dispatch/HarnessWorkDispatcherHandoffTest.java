@@ -592,9 +592,7 @@ class HarnessWorkDispatcherHandoffTest {
     store.transaction(
         tx -> {
           ModelInvocation model = tx.lockModelInvocation(modelInvocationId).orElseThrow();
-          // 分两步推进：Store 按已持久化状态校验跃迁，READY -> DISPATCHING -> RUNNING 各写一次。
-          tx.updateModelInvocation(model.beginDispatch(now));
-          tx.updateModelInvocation(model.beginDispatch(now).markRunning(now));
+          tx.updateModelInvocation(model.markRunning(now));
           return null;
         });
   }
@@ -604,11 +602,9 @@ class HarnessWorkDispatcherHandoffTest {
     store.transaction(
         tx -> {
           ToolInvocation tool = tx.lockToolInvocation(toolInvocationId).orElseThrow();
-          // preflight 通过后才是 READY -> DISPATCHING -> RUNNING：每一步都是 Store 认可的单个跃迁。
+          // preflight 通过后才是 READY -> RUNNING：每一步都是 Store 认可的单个跃迁。
           tx.updateToolInvocations(List.of(tool.markApprovalNotRequired(now)));
-          tx.updateToolInvocations(List.of(tool.markApprovalNotRequired(now).beginDispatch(now)));
-          tx.updateToolInvocations(
-              List.of(tool.markApprovalNotRequired(now).beginDispatch(now).markRunning(now)));
+          tx.updateToolInvocations(List.of(tool.markApprovalNotRequired(now).markRunning(now)));
           return null;
         });
   }
@@ -832,7 +828,7 @@ class HarnessWorkDispatcherHandoffTest {
     private final List<UUID> started = new CopyOnWriteArrayList<>();
 
     @Override
-    public StartResult start(Execution execution, Listener listener) {
+    public Admission admit(Execution execution) {
       started.add(execution.invocationId());
       return new ModelGateway.Busy(Duration.ofSeconds(5));
     }
@@ -850,9 +846,9 @@ class HarnessWorkDispatcherHandoffTest {
     }
 
     @Override
-    public StartResult start(Execution execution, Listener listener) {
+    public Admission admit(Execution execution) {
       started.add(execution.invocationId());
-      return new ToolGateway.RetryLater(Duration.ofSeconds(9));
+      return new ToolGateway.Busy(Duration.ofSeconds(9));
     }
   }
 }

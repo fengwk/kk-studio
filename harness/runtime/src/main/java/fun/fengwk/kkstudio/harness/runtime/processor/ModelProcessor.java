@@ -36,8 +36,8 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.function.BiFunction;
 
 /**
  * Target Model processor：消费 dispatcher 已 claim 的 MODEL Work，驱动一次 Model invocation 的完整生命周期。
@@ -47,19 +47,22 @@ import java.util.function.BiFunction;
  * THREAD Work 时先 request/upsert 并锁定 THREAD Work，再 lockClaimed MODEL Work）；不取执行树锁、Session 锁或
  * 祖先锁。每次写入都以 claim ownership 校验完成，lost / stale 一律完整 no-op。
  *
- * <p>Gateway 受理后 Listener 回调由 {@link ModelExecution} 回调门控缓冲，任何 Listener 回调都不可能早于持久化 RUNNING
- * 落地；heartbeat 只 renew 当前 Work lease。进程内 execution registry 以 invocationId 为键，{@link #cancel}
- * 提供唯一本地取消入口， {@link #close} 取消全部并停止各自 heartbeat（不 shutdown 注入的 scheduler），closed 后 {@link
- * #process} 拒绝新 claim；close 与 process 竞态下，registry 插入后启动 heartbeat 前会再次检查 closed，已关闭时立即 abandon 并把仍
- * owned 的 DISPATCHING 安全 bounce 回 READY + reschedule，绝不启动 Gateway，也不留下新 execution。
+ * <p>执行模型：{@link #process} 在 dispatcher 线程上完成 claim 校验、短 prepare 事务、物化请求、{@link
+ * ModelGateway#admit}（纯本地检查，Busy / Rejected 都发生在任何请求发出前，此时 invocation 仍是 READY）与 {@link
+ * ModelExecution#markRunning}（READY -&gt; RUNNING，先于请求发出持久化），随后只把阻塞的 {@link ModelExecution#run}
+ * （增量在执行线程同步到达）与终态提交交给 executor 上的一个虚拟线程并返回 {@link ProcessResult#STARTED}。heartbeat 在整个阻塞期间续租当前
+ * Work lease。
+ *
+ * <p>进程内 execution registry 以 invocationId 为键，{@link #cancel} 提供唯一本地取消入口（abandon
+ * 会中断运行线程并关闭连接），{@link #close} 取消全部并停止各自 heartbeat（不 shutdown 注入的 scheduler / executor），closed 后
+ * {@link #process} 拒绝新 claim。崩溃或失联后 RUNNING 行的 lease 过期，由下一次 claim 按既有重试策略收敛，绝不重放可能已发出的请求。
  *
  * <p>重复准入所有权围栏（duplicate admission fencing）：任何 guard 替换 / active supersede 之前先用 Work-only 短事务校验传入
  * claim 当前真实 owned（伪造 / 错误 / 已过期 token 一律 LOST_OWNERSHIP no-op，不 cancel 合法 active execution）；通过后再进
  * per-invocation guard 覆盖 prepare 到 registry 插入。同一 claim（同 lease token）重复 / 并发投递一律 LOST_OWNERSHIP
- * no-op（不 cancel、不持久化变更）；只有不同新 token（已通过 Work-only 校验，旧 lease 必然过期）才 supersede 旧本地 execution 并让 持久化
- * DISPATCHING / RUNNING 状态按既有重试策略恢复。heartbeat 启动后、{@link ModelGateway#start} 前还有一道无状态写入
- * 的陈旧启动围栏（stale-start fence：持久化仍 DISPATCHING + attempt 匹配 + claim 仍 owned），失败立即 abandon 并 LOST，绝不启动
- * Provider（覆盖另一 JVM 实例 recovery 后本实例本地 abandoned 检查不可见的场景）。
+ * no-op（不 cancel、不持久化变更）；只有不同新 token（已通过 Work-only 校验，旧 lease 必然过期）才 supersede 旧本地 execution 并让持久化
+ * RUNNING 状态按既有重试策略恢复。{@code markRunning} 的 READY + attempt + claim 校验同时充当陈旧启动围栏：Stop / 跨实例
+ * recovery 已获胜时绝不发出请求。
  */
 @Slf4j
 public final class ModelProcessor implements AutoCloseable {
@@ -71,12 +74,15 @@ public final class ModelProcessor implements AutoCloseable {
   private final Clock clock;
   private final ScheduledExecutorService scheduler;
   private final Executor heartbeatWorker;
-  private final Executor flushExecutor;
+  private final Executor executionExecutor;
   private final ConcurrentHashMap<UUID, ModelExecution> executions = new ConcurrentHashMap<>();
   private final ClaimAdmissionGuard admissionGuard = new ClaimAdmissionGuard();
   private final ModelRequestMaterializer materializer = new ModelRequestMaterializer();
   private volatile boolean closed;
 
+  /**
+   * {@code executionExecutor} 必须为每个任务提供独立的（虚拟）线程：执行线程在 Provider 调用期间长时间阻塞，同时承载 execution 的定时刷新任务。
+   */
   public ModelProcessor(
       HarnessStore store,
       ModelGateway gateway,
@@ -85,7 +91,7 @@ public final class ModelProcessor implements AutoCloseable {
       Clock clock,
       ScheduledExecutorService scheduler,
       Executor heartbeatWorker,
-      Executor flushExecutor) {
+      Executor executionExecutor) {
     this.store = Objects.requireNonNull(store, "store");
     this.gateway = Objects.requireNonNull(gateway, "gateway");
     this.realtimeEventSink = Objects.requireNonNull(realtimeEventSink, "realtimeEventSink");
@@ -93,7 +99,7 @@ public final class ModelProcessor implements AutoCloseable {
     this.clock = HarnessStoreTime.millisecondClock(clock);
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
     this.heartbeatWorker = Objects.requireNonNull(heartbeatWorker, "heartbeatWorker");
-    this.flushExecutor = Objects.requireNonNull(flushExecutor, "flushExecutor");
+    this.executionExecutor = Objects.requireNonNull(executionExecutor, "executionExecutor");
   }
 
   /**
@@ -104,10 +110,10 @@ public final class ModelProcessor implements AutoCloseable {
    * per-invocation guard 覆盖 prepare 到 registry 插入：同一 claim（同 lease token）重复 / 并发投递直接返回
    * LOST_OWNERSHIP（不 cancel、不 mutation）；不同新 token（已通过 Work-only 校验，旧 lease 必然过期）先 supersede 旧本地
    * execution 再 prepare。prepare 短事务按 own Thread -&gt; ModelInvocation -&gt; Work
-   * 锁序二次校验（不取树锁或祖先锁）：READY 转 DISPATCHING + Thread version+1（事务外启动 heartbeat / Gateway）；DISPATCHING
-   * / RUNNING（旧 lease 过期恢复）按既有重试策略记录一次失败 attempt 后回到 READY 并重排 MODEL Work，预算耗尽则以 FAILED 明确终止并唤醒
-   * THREAD，绝不重放 Provider；terminal 行只确保 THREAD Work 请求 （resultEntryId 仍 null 时）后 complete MODEL
-   * Work，不重复 bump version。
+   * 锁序二次校验（不取树锁或祖先锁）：READY 只确认 lease margin 并交给执行线程（不写 invocation）；RUNNING（旧 lease
+   * 过期恢复）按既有重试策略记录一次失败 attempt 后回到 READY 并重排 MODEL Work，预算耗尽则以 FAILED 明确终止并唤醒 THREAD，绝不重放
+   * Provider；terminal 行只确保 THREAD Work 请求 （resultEntryId 仍 null 时）后 complete MODEL Work，不重复 bump
+   * version。
    */
   public ProcessResult process(ClaimedWork claim) {
     Objects.requireNonNull(claim, "claim");
@@ -142,7 +148,7 @@ public final class ModelProcessor implements AutoCloseable {
           case Prepare.Lost ignored -> ProcessResult.LOST_OWNERSHIP;
           case Prepare.Terminated ignored -> ProcessResult.TERMINATED;
           case Prepare.Retry ignored -> ProcessResult.RESCHEDULED;
-          case Prepare.Dispatched dispatched -> dispatch(claim, dispatched);
+          case Prepare.Dispatched dispatched -> start(claim, dispatched);
         };
       } catch (ClaimLostSignal ignored) {
         return ProcessResult.LOST_OWNERSHIP;
@@ -153,7 +159,7 @@ public final class ModelProcessor implements AutoCloseable {
   }
 
   /**
-   * 取消一个进程内本地 execution（供 Stop durable commit 后 best-effort 调用）；结果不反写任何 durable 状态。
+   * 取消一个进程内本地 execution（供 Stop durable commit 后 best-effort 调用）：中断运行线程并关闭连接；结果不反写任何 durable 状态。
    *
    * @return 是否存在并已取消对应本地 execution
    */
@@ -183,7 +189,7 @@ public final class ModelProcessor implements AutoCloseable {
     return execution != null && execution.requestCheckpoint(attempt);
   }
 
-  /** 取消全部本地 execution 并停止各自 heartbeat；不 shutdown 调用方注入的 scheduler；幂等。 */
+  /** 取消全部本地 execution 并停止各自 heartbeat；不 shutdown 调用方注入的 scheduler / executor；幂等。 */
   @Override
   public void close() {
     closed = true;
@@ -205,25 +211,24 @@ public final class ModelProcessor implements AutoCloseable {
     return Boolean.TRUE.equals(store.transaction(tx -> !tx.lockClaimedWork(claim).isEmpty()));
   }
 
-  /**
-   * per-invocation admission guard：覆盖 prepare 到 registry 插入窗口（逻辑见 {@link ClaimAdmissionGuard}）。同一
-   * claim（同 token）并发投递被拒绝；不同 token（旧 lease 已过期）并发投递抢占 guard。
-   */
   private void releaseExecution(ModelExecution execution) {
     executions.remove(execution.invocationId(), execution);
     execution.abandon();
   }
 
-  private ProcessResult dispatch(ClaimedWork claim, Prepare.Dispatched dispatched) {
+  /**
+   * 登记 execution 并启动 heartbeat，在调用线程上完成物化请求、准入与 RUNNING 持久化，只把阻塞的 Provider 运行与终态提交交给一个虚拟线程。
+   * 因此返回值如实反映本次处理：Busy / 准入异常为 RESCHEDULED，确定性拒绝为 TERMINATED，已开始运行为 STARTED。
+   */
+  private ProcessResult start(ClaimedWork claim, Prepare.Dispatched dispatched) {
     UUID invocationId = claim.target().id();
-    int proposedAttempt = Math.addExact(dispatched.attempt(), 1);
     ModelExecution execution =
         new ModelExecution(
             store,
             realtimeEventSink,
             claim,
             dispatched.threadId(),
-            proposedAttempt,
+            Math.addExact(dispatched.attempt(), 1),
             dispatched.ownerSettledSummary(),
             dispatched.request().toolBindings(),
             config,
@@ -231,37 +236,43 @@ public final class ModelProcessor implements AutoCloseable {
             clock,
             scheduler,
             heartbeatWorker,
-            flushExecutor,
+            executionExecutor,
             this::release);
     ModelExecution existing = executions.putIfAbsent(invocationId, execution);
     if (existing != null) {
-      // 防御分支（admission guard 串行化后实际不可达）：并发（不同 token 抢占 guard 后）竞态，不启动第二个 Provider
-      // 调用，也不做任何 durable mutation；未启动的本地 execution 无副作用（无 heartbeat / handle / 缓冲），直接丢弃。
+      // 防御分支（admission guard 串行化后实际不可达）：不启动第二个执行，也不做任何 durable mutation。
       log.warn("a concurrent local execution already owns invocation {}", invocationId);
       return ProcessResult.LOST_OWNERSHIP;
     }
-    if (closed) {
-      // close 已拍快照但本 execution 尚未被 abandon（close snapshot 之前插入的窗口）：立即 abandon（从 registry
-      // 移除，绝不留下新 execution），并把仍 owned 的 DISPATCHING 安全 bounce READY + reschedule，不启动 Gateway。
+    if (closed || !execution.startHeartbeat() || execution.abandoned()) {
+      // close 已拍快照、scheduler 拒绝导致无法维持 lease，或 close / cancel 在 heartbeat 启动窗口内获胜：不启动，按 reschedule
+      // 实际结果返回。
+      return abortStart(execution, claim);
+    }
+    try {
+      return admitAndRun(execution, claim, dispatched);
+    } catch (RuntimeException unexpected) {
+      // 绝不猜测 complete / reschedule：保留 lease 待过期后由后续 claim 收敛。
+      log.error(
+          "model execution failed unexpectedly for invocation {}: {}",
+          invocationId,
+          ProcessorExceptions.describe(unexpected));
       execution.abandon();
-      return bounceDispatch(claim, dispatched, config.dispatchBusyFallbackDelay())
-          ? ProcessResult.RESCHEDULED
-          : ProcessResult.LOST_OWNERSHIP;
+      return ProcessResult.LOST_OWNERSHIP;
     }
-    if (!execution.startHeartbeat()) {
-      // scheduler 拒绝：无法维持 lease，按 bounce 实际结果返回（仍 owned 才 RESCHEDULED，已 lost 则 LOST）。
-      execution.abandon();
-      return bounceDispatch(claim, dispatched, config.dispatchBusyFallbackDelay())
-          ? ProcessResult.RESCHEDULED
-          : ProcessResult.LOST_OWNERSHIP;
-    }
-    if (execution.abandoned()) {
-      // close / 本地 cancel 在 heartbeat 启动窗口内获胜（close snapshot 之后插入的 execution 由 close 负责 abandon）：
-      // 不启动 Gateway；DISPATCHING 仍 owned 则安全 bounce READY + reschedule。
-      return bounceDispatch(claim, dispatched, config.dispatchBusyFallbackDelay())
-          ? ProcessResult.RESCHEDULED
-          : ProcessResult.LOST_OWNERSHIP;
-    }
+  }
+
+  private ProcessResult abortStart(ModelExecution execution, ClaimedWork claim) {
+    execution.abandon();
+    return reschedule(claim, config.admitFailureDelay())
+        ? ProcessResult.RESCHEDULED
+        : ProcessResult.LOST_OWNERSHIP;
+  }
+
+  /** 物化请求、准入并持久化 RUNNING；准入成功后把阻塞运行交给执行线程。 */
+  private ProcessResult admitAndRun(
+      ModelExecution execution, ClaimedWork claim, Prepare.Dispatched dispatched) {
+    UUID invocationId = claim.target().id();
     ProviderRequest providerRequest;
     try {
       providerRequest = materializeRequest(claim, dispatched);
@@ -269,95 +280,114 @@ public final class ModelProcessor implements AutoCloseable {
       execution.abandon();
       return ProcessResult.LOST_OWNERSHIP;
     } catch (ProviderException setupFailure) {
-      log.warn(
-          "model request materialization failed for invocation {}: {}",
-          invocationId,
-          ProcessorExceptions.describe(setupFailure));
-      execution.abandon();
-      ModelInvocationError error =
+      return rejectBeforeStart(
+          execution,
+          claim,
+          dispatched,
+          setupFailure,
           new ModelInvocationError(
               setupFailure.kind(),
-              messageOrClass(setupFailure, "cannot materialize provider request"));
-      return rejectDispatch(claim, dispatched, error)
-          ? ProcessResult.TERMINATED
-          : ProcessResult.LOST_OWNERSHIP;
+              messageOrClass(setupFailure, "cannot materialize provider request")));
     } catch (IllegalArgumentException | IllegalStateException setupFailure) {
-      log.warn(
-          "model request materialization failed for invocation {}: {}",
-          invocationId,
-          ProcessorExceptions.describe(setupFailure));
-      execution.abandon();
-      ModelInvocationError error =
+      return rejectBeforeStart(
+          execution,
+          claim,
+          dispatched,
+          setupFailure,
           new ModelInvocationError(
               ProviderErrorKind.INVALID_REQUEST,
-              messageOrClass(setupFailure, "cannot materialize provider request"));
-      return rejectDispatch(claim, dispatched, error)
-          ? ProcessResult.TERMINATED
-          : ProcessResult.LOST_OWNERSHIP;
+              messageOrClass(setupFailure, "cannot materialize provider request")));
     }
-    // stale-start fence：Gateway.start 的确切 admission 边界。materialize 之后再校验 durable 仍 DISPATCHING +
-    // attempt 匹配 + claim 仍 owned（覆盖 materialize 期间 Stop / 跨实例 recovery 删除或改写 invocation/work）。
-    // 失败立即 abandon 并 LOST，绝不调用 Gateway；此检查之后并发 Stop / recovery 属于 DISPATCHING 不确定窗口，
-    // 由 Gateway 的 Indeterminate / Started 后 markRunning 校验等现有 UNKNOWN / CANCEL 协议处理。
-    if (!checkStartBoundary(claim, dispatched)) {
-      execution.abandon();
-      return ProcessResult.LOST_OWNERSHIP;
-    }
-    ModelGateway.StartResult result;
+    ModelGateway.Admission admission;
     try {
-      result =
-          gateway.start(
+      admission =
+          gateway.admit(
               new ModelGateway.Execution(
                   invocationId,
-                  proposedAttempt,
+                  Math.addExact(dispatched.attempt(), 1),
                   dispatched.request().providerType(),
                   dispatched.request().providerConnectionGenerationId(),
-                  providerRequest),
-              execution);
+                  providerRequest));
     } catch (RuntimeException failure) {
-      // 契约：抛异常表示 Gateway 肯定未接受，可安全转 READY 并 reschedule（attempt 不变）。
+      // 契约：admit 抛异常表示尚未占用任何名额也未发出请求，按兜底延迟重排。
       log.warn(
-          "model gateway start failed for invocation {}: {}",
+          "model gateway admission failed for invocation {}: {}",
           invocationId,
           ProcessorExceptions.describe(failure));
-      execution.abandon();
-      return bounceDispatch(claim, dispatched, config.dispatchBusyFallbackDelay())
-          ? ProcessResult.RESCHEDULED
-          : ProcessResult.LOST_OWNERSHIP;
+      return abortStart(execution, claim);
     }
-    if (result == null) {
-      // 契约违反：acceptance 不确定，按 Indeterminate 语义收敛（UNKNOWN attempt+1 + THREAD wake + complete）。
-      log.warn("model gateway start returned null for invocation {}", invocationId);
-      execution.abandon();
-      ModelInvocationError error =
-          new ModelInvocationError(
-              ProviderErrorKind.TRANSIENT,
-              "model gateway start returned null; provider outcome cannot be confirmed");
-      return unknownDispatch(claim, dispatched, error)
-          ? ProcessResult.TERMINATED
-          : ProcessResult.LOST_OWNERSHIP;
-    }
-    return switch (result) {
-      case ModelGateway.Started started -> execution.activate(started.handle());
+    return switch (admission) {
       case ModelGateway.Busy busy -> {
         execution.abandon();
-        yield bounceDispatch(claim, dispatched, busy.retryAfter())
+        yield reschedule(claim, busy.retryAfter())
             ? ProcessResult.RESCHEDULED
             : ProcessResult.LOST_OWNERSHIP;
       }
       case ModelGateway.Rejected rejected -> {
         execution.abandon();
-        yield rejectDispatch(claim, dispatched, rejected.error())
+        yield reject(claim, dispatched, rejected.error())
             ? ProcessResult.TERMINATED
             : ProcessResult.LOST_OWNERSHIP;
       }
-      case ModelGateway.Indeterminate indeterminate -> {
-        execution.abandon();
-        yield unknownDispatch(claim, dispatched, indeterminate.error())
-            ? ProcessResult.TERMINATED
-            : ProcessResult.LOST_OWNERSHIP;
-      }
+      case ModelGateway.Admitted admitted -> runAdmitted(execution, claim, admitted);
     };
+  }
+
+  /** 先持久化 RUNNING（陈旧启动围栏），再把阻塞运行与终态提交交给执行线程。 */
+  private ProcessResult runAdmitted(
+      ModelExecution execution, ClaimedWork claim, ModelGateway.Admitted admitted) {
+    if (execution.abandoned()) {
+      // close / cancel / supersede 在准入期间获胜：invocation 仍是 READY，释放名额后按 reschedule 实际结果返回。
+      admitted.close();
+      return abortStart(execution, claim);
+    }
+    if (!execution.markRunning()) {
+      admitted.close();
+      execution.abandon();
+      return ProcessResult.LOST_OWNERSHIP;
+    }
+    try {
+      executionExecutor.execute(() -> runToTerminal(execution, admitted));
+    } catch (RejectedExecutionException rejected) {
+      // RUNNING 已持久化：不能回退，交给 lease 过期后的恢复路径按既有重试策略收敛。
+      log.warn(
+          "model execution executor rejected invocation {}: {}",
+          execution.invocationId(),
+          ProcessorExceptions.describe(rejected));
+      admitted.close();
+      execution.abandon();
+      return ProcessResult.LOST_OWNERSHIP;
+    }
+    return ProcessResult.STARTED;
+  }
+
+  private void runToTerminal(ModelExecution execution, ModelGateway.Admitted admitted) {
+    try {
+      execution.finish(execution.run(admitted));
+    } catch (RuntimeException unexpected) {
+      // 绝不猜测 complete / reschedule：保留 lease 待过期后由后续 claim 收敛。
+      log.error(
+          "model execution failed unexpectedly for invocation {}: {}",
+          execution.invocationId(),
+          ProcessorExceptions.describe(unexpected));
+      execution.abandon();
+    }
+  }
+
+  private ProcessResult rejectBeforeStart(
+      ModelExecution execution,
+      ClaimedWork claim,
+      Prepare.Dispatched dispatched,
+      RuntimeException setupFailure,
+      ModelInvocationError error) {
+    log.warn(
+        "model request materialization failed for invocation {}: {}",
+        claim.target().id(),
+        ProcessorExceptions.describe(setupFailure));
+    execution.abandon();
+    return reject(claim, dispatched, error)
+        ? ProcessResult.TERMINATED
+        : ProcessResult.LOST_OWNERSHIP;
   }
 
   /** 在事务内按 own Thread -> Model -> Work 锁序锁定并校验状态，不取树锁/祖先锁，依据 durable status 路由准备结果。 */
@@ -377,7 +407,7 @@ public final class ModelProcessor implements AutoCloseable {
     }
     return switch (model.status()) {
       case READY -> prepareReady(tx, claim, thread, model, now);
-      case DISPATCHING, RUNNING -> recoverUnknown(tx, claim, thread, model, now);
+      case RUNNING -> recoverRunning(tx, claim, thread, model, now);
       case SUCCEEDED, FAILED, CANCELLED, UNKNOWN -> cleanupTerminal(tx, claim, thread, model, now);
     };
   }
@@ -392,10 +422,8 @@ public final class ModelProcessor implements AutoCloseable {
     if (claimed.isEmpty()) {
       return new Prepare.Lost();
     }
-    // Gateway admission 前确保 lease 有完整 margin：剩余不足以撑到首次 heartbeat 时立即 renew。
+    // 运行前确保 lease 有完整 margin：剩余不足以撑到首次 heartbeat 时立即 renew。
     ProcessorLeaseSupport.ensureLeaseMargin(tx, claim, config.leaseConfig(), now);
-    tx.updateModelInvocation(model.beginDispatch(now));
-    tx.updateThread(thread.touchVersion(now));
     // ModelInvocation 必须挂在真实 TURN_START 上的不变量断言：压缩子身份不再从 TURN_START payload 推导（父压缩 turn
     // 不产生 ModelInvocation），但仍拒绝引用缺失 / 类型错误的 turn start。
     Entry turnStart =
@@ -443,61 +471,31 @@ public final class ModelProcessor implements AutoCloseable {
   }
 
   /**
-   * Gateway.start 的确切 admission 边界：无 mutation 短事务（锁序 ModelInvocation -&gt; Work）校验 durable 仍
-   * DISPATCHING + attempt 匹配 + claim 仍 owned。失败表示 stale start（本地 abandoned 检查覆盖不到的跨实例 recovery /
-   * Stop 已获胜），调用方不得启动 Provider。
-   */
-  private boolean checkStartBoundary(ClaimedWork claim, Prepare.Dispatched dispatched) {
-    return Boolean.TRUE.equals(
-        store.transaction(
-            tx -> {
-              ModelInvocation model = tx.lockModelInvocation(claim.target().id()).orElse(null);
-              if (model == null || tx.lockClaimedWork(claim).isEmpty()) {
-                return false;
-              }
-              return model.status() == ModelInvocationStatus.DISPATCHING
-                  && model.attempt() == dispatched.attempt();
-            }));
-  }
-
-  /**
-   * 旧 lease 过期恢复：执行持有者已失效，但不把可能已经发出的调用当成确定未执行。接入既有 {@link
+   * 旧 lease 过期恢复：执行持有者已失效，但 RUNNING 已持久化，请求可能已经发出，不把它当成确定未执行。接入既有 {@link
    * fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy} 与持久 attempt/retryAt。
    *
-   * <p>DISPATCHING 表示启动可能已发出但结果未被确认，计为一个已消耗 attempt（{@code attempt + 1}）；RUNNING 计当前已确认
-   * attempt。允许重试时记录一条 retryable failed attempt 后回到 READY，并按策略延迟重排 MODEL Work（不 request THREAD
-   * wake，旧 partial 只作为尝试审计，绝不与新 attempt 的文本或 tool-call 拼接）；预算耗尽时以 FAILED 明确终止并唤醒 THREAD。绝不重放
-   * Provider，也不新建恢复专用预算或重置计数。
+   * <p>RUNNING 的 attempt 已被消耗。允许重试时记录一条 retryable failed attempt 后回到 READY，并按策略延迟重排 MODEL Work（不
+   * request THREAD wake，旧 partial 只作为尝试审计，绝不与新 attempt 的文本或 tool-call 拼接）；预算耗尽时以 FAILED 明确终止并唤醒
+   * THREAD。绝不重放 Provider，也不新建恢复专用预算或重置计数。
    */
-  private Prepare recoverUnknown(
+  private Prepare recoverRunning(
       HarnessStore.Transaction tx,
       ClaimedWork claim,
       ThreadState thread,
       ModelInvocation model,
       Instant now) {
-    boolean unconfirmedDispatch = model.status() == ModelInvocationStatus.DISPATCHING;
-    int chargeableAttempt =
-        unconfirmedDispatch ? Math.addExact(model.attempt(), 1) : model.attempt();
     ModelInvocationError error =
         new ModelInvocationError(
             ProviderErrorKind.TRANSIENT,
-            unconfirmedDispatch
-                ? "model dispatch lease expired before the start was confirmed; provider outcome"
-                    + " cannot be confirmed"
-                : "model work lease expired; provider outcome cannot be confirmed");
+            "model work lease expired; provider outcome cannot be confirmed");
     InvocationRetryDecision decision =
         InvocationRetryDecision.decide(
-            config.retryPolicyProvider().retryPolicy(), true, chargeableAttempt);
+            config.retryPolicyProvider().retryPolicy(), true, model.attempt());
     if (decision.retry()) {
-      Instant failedAt = now;
       Instant retryAt = now.plus(decision.delay());
-      ModelAttemptFailure failure =
-          attemptFailure(model, chargeableAttempt, error, failedAt, retryAt);
       tx.updateModelInvocation(
-          unconfirmedDispatch
-              ? model.retryDispatched(failure, failedAt)
-              : model.retryReady(failure, failedAt));
-      tx.updateThread(thread.touchVersion(failedAt));
+          model.retryReady(attemptFailure(model, model.attempt(), error, now, retryAt), now));
+      tx.updateThread(thread.touchVersion(now));
       if (tx.lockClaimedWork(claim).isEmpty()) {
         throw new ClaimLostSignal();
       }
@@ -509,8 +507,7 @@ public final class ModelProcessor implements AutoCloseable {
     if (tx.lockClaimedWork(claim).isEmpty()) {
       throw new ClaimLostSignal();
     }
-    tx.updateModelInvocation(
-        unconfirmedDispatch ? model.failDispatched(error, now) : model.fail(error, now));
+    tx.updateModelInvocation(model.fail(error, now));
     tx.updateThread(thread.touchVersion(now));
     tx.completeWork(claim);
     return new Prepare.Terminated();
@@ -553,48 +550,22 @@ public final class ModelProcessor implements AutoCloseable {
     return new Prepare.Terminated();
   }
 
-  /** admission 肯定未开始（Busy / 异常）：DISPATCHING -&gt; READY + version+1 + 按延迟 reschedule MODEL Work。 */
-  private boolean bounceDispatch(ClaimedWork claim, Prepare.Dispatched dispatched, Duration delay) {
+  /** 准入 Busy / 异常（肯定未发出请求）：invocation 保持 READY，仅按延迟重排 MODEL Work。 */
+  private boolean reschedule(ClaimedWork claim, Duration delay) {
     return Boolean.TRUE.equals(
         store.transaction(
             tx -> {
-              Instant now = tx.now();
-              ThreadState thread = tx.lockThread(dispatched.threadId()).orElse(null);
-              if (thread == null) {
+              if (tx.lockClaimedWork(claim).isEmpty()) {
                 return false;
               }
-              ModelInvocation model = tx.lockModelInvocation(claim.target().id()).orElse(null);
-              if (model == null || tx.lockClaimedWork(claim).isEmpty()) {
-                return false;
-              }
-              if (model.status() != ModelInvocationStatus.DISPATCHING
-                  || model.attempt() != dispatched.attempt()) {
-                return false;
-              }
-              tx.updateModelInvocation(model.dispatchBusy(now));
-              tx.updateThread(thread.touchVersion(now));
               tx.rescheduleWork(claim, delay);
               return true;
             }));
   }
 
-  /** admission 明确拒绝：rejectDispatch FAILED + version+1 + 请求 THREAD Work + complete MODEL Work。 */
-  private boolean rejectDispatch(
+  /** 启动前明确拒绝：READY -&gt; FAILED（attempt 不变）+ version+1 + 请求 THREAD Work + complete MODEL Work。 */
+  private boolean reject(
       ClaimedWork claim, Prepare.Dispatched dispatched, ModelInvocationError error) {
-    return terminalDispatch(claim, dispatched, (model, now) -> model.rejectDispatch(error, now));
-  }
-
-  /** admission 不确定：unknown UNKNOWN（attempt+1）+ version+1 + 请求 THREAD Work + complete MODEL Work。 */
-  private boolean unknownDispatch(
-      ClaimedWork claim, Prepare.Dispatched dispatched, ModelInvocationError error) {
-    return terminalDispatch(claim, dispatched, (model, now) -> model.unknown(error, now));
-  }
-
-  /** 在同一事务中先建立 THREAD wake，再以当前 Claim 为最终围栏写入 Model 终态并完成 MODEL Work。 */
-  private boolean terminalDispatch(
-      ClaimedWork claim,
-      Prepare.Dispatched dispatched,
-      BiFunction<ModelInvocation, Instant, ModelInvocation> transition) {
     try {
       return Boolean.TRUE.equals(
           store.transaction(
@@ -608,7 +579,7 @@ public final class ModelProcessor implements AutoCloseable {
                 if (model == null) {
                   return false;
                 }
-                if (model.status() != ModelInvocationStatus.DISPATCHING
+                if (model.status() != ModelInvocationStatus.READY
                     || model.attempt() != dispatched.attempt()) {
                   return false;
                 }
@@ -616,7 +587,7 @@ public final class ModelProcessor implements AutoCloseable {
                 if (tx.lockClaimedWork(claim).isEmpty()) {
                   throw new ClaimLostSignal();
                 }
-                tx.updateModelInvocation(transition.apply(model, now));
+                tx.updateModelInvocation(model.fail(error, now));
                 tx.updateThread(thread.touchVersion(now));
                 tx.completeWork(claim);
                 return true;

@@ -213,21 +213,21 @@ class HarnessRuntimeJoinAcceptanceTest {
     assertEquals(ThreadExecutionControl.RUNNABLE, parent.executionControl());
     assertEquals(3L, parent.nextCommandSequence());
 
-    // 父线程接纳新的真实用户输入，落在 seq 3。
+    // 父线程接纳新的 cursor-bound 批次（SET 前缀 + 真实用户输入），落在 seq 3/4。
     NewThreadCommand userCmd = userMessageCommand(TestIds.id(52), "next prompt");
+    List<NewThreadCommand> batch = List.of(setAgentCommand(TestIds.id(57)), userCmd);
     AcceptedCommands accepted =
         runtime.acceptCommands(
             new AcceptCommandsCommand(
-                new AcceptCommandsTarget.Thread(parentId, parent.headEntryId(), 3L),
-                List.of(userCmd)),
+                new AcceptCommandsTarget.Thread(parentId, parent.headEntryId(), 3L), batch),
             AcceptancePreflight.IDENTITY);
-    assertEquals(1, accepted.acceptedCommands().size());
+    assertEquals(2, accepted.acceptedCommands().size());
     assertEquals(3L, accepted.acceptedCommands().get(0).sequence());
 
     // client 仍以原始期望序号 2 重放：被跳过的 seq 2 恰是 Join 交付命令，按契约应接受重放。
     AcceptCommandsCommand originalReplay =
         new AcceptCommandsCommand(
-            new AcceptCommandsTarget.Thread(parentId, parent.headEntryId(), 2L), List.of(userCmd));
+            new AcceptCommandsTarget.Thread(parentId, parent.headEntryId(), 2L), batch);
     AcceptedCommands replayed =
         runtime.acceptCommands(originalReplay, AcceptancePreflight.IDENTITY);
     assertTrue(replayed.replayed());
@@ -319,10 +319,7 @@ class HarnessRuntimeJoinAcceptanceTest {
     ThreadState childCurrent = store.transaction(tx -> tx.findThread(childId).orElseThrow());
     NewThreadCommand childCmd = userMessageCommand(TestIds.id(65), "child progress");
     runtime.acceptCommands(
-        new AcceptCommandsCommand(
-            new AcceptCommandsTarget.Thread(
-                childId, childCurrent.headEntryId(), childCurrent.nextCommandSequence()),
-            List.of(childCmd)),
+        new AcceptCommandsCommand(new AcceptCommandsTarget.Thread(childId), List.of(childCmd)),
         AcceptancePreflight.IDENTITY);
 
     assertEquals(
@@ -508,11 +505,7 @@ class HarnessRuntimeJoinAcceptanceTest {
     NewThreadCommand cmdAlone = userMessageCommand(TestIds.id(108), "alone");
     runtime.acceptCommands(
         new AcceptCommandsCommand(
-            new AcceptCommandsTarget.Thread(
-                normal.thread().id(),
-                normal.thread().headEntryId(),
-                normal.thread().nextCommandSequence()),
-            List.of(cmdAlone)),
+            new AcceptCommandsTarget.Thread(normal.thread().id()), List.of(cmdAlone)),
         AcceptancePreflight.IDENTITY);
 
     Ticket newJoinOnReplayed = request(109, null, null);
@@ -523,7 +516,9 @@ class HarnessRuntimeJoinAcceptanceTest {
                 runtime,
                 new AcceptCommandsCommand(
                     new AcceptCommandsTarget.Thread(
-                        normal.thread().id(), normal.thread().headEntryId(), 2L),
+                        normal.thread().id(),
+                        normal.thread().headEntryId(),
+                        normal.thread().nextCommandSequence()),
                     List.of(cmdAlone)),
                 newJoinOnReplayed,
                 AcceptancePreflight.IDENTITY));
@@ -620,8 +615,10 @@ class HarnessRuntimeJoinAcceptanceTest {
     }
     caseRuntime.acceptCommands(
         new AcceptCommandsCommand(
-            new AcceptCommandsTarget.Thread(
-                parentId, stopped.headEntryId(), stopped.nextCommandSequence()),
+            AcceptCommandsCommand.isPureUserMessageBatch(batch)
+                ? new AcceptCommandsTarget.Thread(parentId)
+                : new AcceptCommandsTarget.Thread(
+                    parentId, stopped.headEntryId(), stopped.nextCommandSequence()),
             batch),
         AcceptancePreflight.IDENTITY);
 
@@ -662,8 +659,7 @@ class HarnessRuntimeJoinAcceptanceTest {
     ThreadState stopped = store.transaction(tx -> tx.findThread(parentId).orElseThrow());
     runtime.acceptCommands(
         new AcceptCommandsCommand(
-            new AcceptCommandsTarget.Thread(
-                parentId, stopped.headEntryId(), stopped.nextCommandSequence()),
+            new AcceptCommandsTarget.Thread(parentId),
             List.of(userMessageCommand(TestIds.id(3106), "resume parent"))),
         AcceptancePreflight.IDENTITY);
     assertEquals(

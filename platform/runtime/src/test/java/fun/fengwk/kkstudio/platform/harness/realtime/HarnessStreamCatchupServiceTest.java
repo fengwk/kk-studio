@@ -146,7 +146,7 @@ class HarnessStreamCatchupServiceTest {
 
   @Test
   void everyNonRunningDurableStatusIsBestEffortNoOp() {
-    // 只有 durable RUNNING 才允许追帧；READY/DISPATCHING 与全部终态都不得触达 owner、presence 或 NOTIFY。
+    // 只有 durable RUNNING 才允许追帧；READY 与全部终态都不得触达 owner、presence 或 NOTIFY。
     for (ModelInvocationStatus status : ModelInvocationStatus.values()) {
       if (status == ModelInvocationStatus.RUNNING) {
         continue;

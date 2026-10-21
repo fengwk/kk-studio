@@ -30,7 +30,6 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.function.BiFunction;
 
 /**
  * Target Tool processor：消费 dispatcher 已 claim 的 TOOL Work，驱动一次 Tool invocation 的完整生命周期。
@@ -42,19 +41,19 @@ import java.util.function.BiFunction;
  *
  * <p>状态机：READY + approval null 在 ensure 完整 lease margin 后于事务外执行 {@link ToolGateway#preflight}
  * （preflight 期间由本地 heartbeat 维持 lease）；锁内解析实际 YOLO 开关（执行根读自身，子代理读执行根）为 true 时跳过 preflight 直接
- * Allow（不调用 evaluator / gateway），Allow 在同一短事务顺序转换 markApprovalNotRequired -&gt;
- * beginDispatch（Thread version 只 +1）后进入 Gateway 派发；Ask 转 WAITING_APPROVAL（version+1 + complete，不
- * request THREAD）；Deny 转 FAILED（version+1 + THREAD wake + complete）；preflight 抛异常保持 READY /
- * approval null / version 不变，按 {@code preflightFailureDelay} reschedule。READY + completed approval
- * 同事务 beginDispatch + version+1 后直接 进入 Gateway 派发。WAITING_APPROVAL 只 complete TOOL Work；DISPATCHING
- * / RUNNING 旧 lease 恢复为 UNKNOWN（DISPATCHING 消费 proposed attempt，RUNNING 保留）+ version+1 + THREAD
- * wake + complete，绝不重放 Tool；terminal 行只确保 THREAD Work 后 complete，不重复 bump version。
+ * Allow（不调用 evaluator / gateway），Allow 在短事务内持久 markApprovalNotRequired（Thread version +1）后进入执行；Ask
+ * 转 WAITING_APPROVAL（version+1 + complete，不 request THREAD）；Deny 转 FAILED（version+1 + THREAD wake +
+ * complete）；preflight 抛异常保持 READY / approval null / version 不变，按 {@code preflightFailureDelay}
+ * reschedule。READY + completed approval 直接进入执行。WAITING_APPROVAL 只 complete TOOL Work；RUNNING 旧
+ * lease 恢复为 UNKNOWN（attempt 保留）+ version+1 + THREAD wake + complete，绝不重放 Tool；terminal 行只确保 THREAD
+ * Work 后 complete，不重复 bump version。
  *
- * <p>派发与回调并发协议与 {@link ModelProcessor} 一致：claimOwned Work-only 前置校验 -&gt; per-invocation guard
- * -&gt; registry；Started 后 handle 先安全 attach 再短事务校验 lease + DISPATCHING + proposed attempt 后
- * markRunning；Listener 回调在持久化 RUNNING 落地前由回调门控缓冲。heartbeat 只 renew 当前 Work lease；进程内 registry 以
- * invocationId 为键，{@link #cancel} 提供唯一本地取消入口，{@link #close} 取消全部并停止各自 heartbeat（不 shutdown 注入的
- * scheduler），closed 后 {@link #process} 拒绝新 claim。
+ * <p>执行：并发协议为 claimOwned Work-only 前置校验 -&gt; per-invocation guard -&gt; registry；随后 {@link
+ * ToolGateway#admit} 做纯本地 admission（Busy 按 retryAfter reschedule、Rejected 转
+ * FAILED，两者都肯定无副作用，attempt 不变）， Admitted 后在任何副作用之前持久化 {@code READY -> RUNNING}，再由 {@link
+ * ToolExecution} 在独占虚拟线程上阻塞执行至终态， 终态与资源释放都发生在该线程上。heartbeat 只 renew 当前 Work lease；进程内 registry 以
+ * invocationId 为键，{@link #cancel} 提供唯一本地取消入口（interrupt 执行线程），{@link #close} 取消全部并停止各自 heartbeat（不
+ * shutdown 注入的 scheduler），closed 后 {@link #process} 拒绝新 claim。
  */
 @Slf4j
 public final class ToolProcessor implements AutoCloseable {
@@ -137,7 +136,7 @@ public final class ToolProcessor implements AutoCloseable {
               allowed.attempt(),
               allowed.request(),
               null);
-          case Prepare.Dispatched dispatched -> dispatch(claim, dispatched, null);
+          case Prepare.Dispatched dispatched -> launch(claim, dispatched, null);
         };
       } catch (ClaimLostSignal ignored) {
         return ProcessResult.LOST_OWNERSHIP;
@@ -210,15 +209,14 @@ public final class ToolProcessor implements AutoCloseable {
     return switch (tool.status()) {
       case READY -> prepareReady(tx, claim, thread, model, tool, now);
       case WAITING_APPROVAL, WAITING_INPUT -> waitingForHuman(tx, claim, now);
-      case DISPATCHING, RUNNING -> recoverUnknown(tx, claim, thread, tool, now);
+      case RUNNING -> recoverUnknown(tx, claim, thread, tool, now);
       case SUCCEEDED, FAILED, CANCELLED, UNKNOWN -> cleanupTerminal(tx, claim, thread, tool, now);
     };
   }
 
   /**
    * READY：内部人工输入工具在锁内直接冻结为 WAITING_INPUT；其它调用 approval null 走 preflight（ensure 完整 lease margin
-   * 后事务外执行，期间 heartbeat 维持 lease）；completed approval 同事务 beginDispatch + version+1 后直接进入 Gateway
-   * 派发。
+   * 后事务外执行，期间 heartbeat 维持 lease）；completed approval 直接进入执行。
    *
    * <p>YOLO 决策在锁内完成：只锁本 Thread 后解析的实际开关为 true 时直接返回 {@link Prepare.Allowed}（一次 preflight
    * 只做一次控制决定，不调用 gateway / evaluator，后续切换不追溯已完成的派发）；false 才走普通 gateway preflight。 人输入判定先于 YOLO 与
@@ -238,7 +236,7 @@ public final class ToolProcessor implements AutoCloseable {
     if (HumanInputTool.isHumanInputTool(tool.binding())) {
       return new Prepare.Input(thread.id());
     }
-    // Gateway admission 前确保 lease 有完整 margin：剩余不足以撑到首次 heartbeat 时立即 renew。
+    // admission 前确保 lease 有完整 margin：剩余不足以撑到首次 heartbeat 时立即 renew。
     ProcessorLeaseSupport.ensureLeaseMargin(tx, claim, config.leaseConfig(), now);
     // READY 边界临时构造 transient executable request（不持久化）。
     ToolInvocationRequest request = new ToolInvocationRequest(tool.call(), tool.binding());
@@ -249,8 +247,6 @@ public final class ToolProcessor implements AutoCloseable {
       }
       return new Prepare.Preflight(thread.id(), tool.assistantEntryId(), tool.attempt(), request);
     }
-    tx.updateToolInvocations(List.of(tool.beginDispatch(now)));
-    tx.updateThread(thread.touchVersion(now));
     return new Prepare.Dispatched(
         thread.id(), tool.assistantEntryId(), tool.attempt(), request, tool.approval());
   }
@@ -268,8 +264,7 @@ public final class ToolProcessor implements AutoCloseable {
   }
 
   /**
-   * 旧 lease 过期恢复：执行持有者已失效，绝不重放 Tool。DISPATCHING 表示可能已派发、RUNNING 表示正在运行；两者都如实给出
-   * 中断原因与最后已知状态，并明确外部效果未知，交给下一轮模型自行决定查询或重试。
+   * 旧 lease 过期恢复：执行持有者已失效，绝不重放 Tool。RUNNING 表示可能已产生副作用；如实给出中断原因与最后已知状态，并明确外部效果未知， 交给下一轮模型自行决定查询或重试。
    */
   private Prepare recoverUnknown(
       HarnessStore.Transaction tx,
@@ -397,23 +392,26 @@ public final class ToolProcessor implements AutoCloseable {
       return ProcessResult.LOST_OWNERSHIP;
     }
     if (closed) {
-      // close 已拍快照但本 execution 尚未被 abandon：立即 abandon；durable 仍是 READY（无 DISPATCHING 可 bounce），
+      // close 已拍快照但本 execution 尚未被 abandon：立即 abandon；durable 仍是 READY，
       // claim 仍 owned 时立即 reschedule，不留新 execution；Stop 已删除 Work 时则自然 LOST。
       execution.abandon();
-      return reschedulePreflight(claim, preflight, config.preflightFailureDelay())
+      return reschedule(
+              claim, preflight.threadId(), preflight.attempt(), config.preflightFailureDelay())
           ? ProcessResult.RESCHEDULED
           : ProcessResult.LOST_OWNERSHIP;
     }
     if (!execution.startHeartbeat()) {
       // scheduler 拒绝：无法维持 lease，按 bounce 实际结果返回（仍 owned 才 RESCHEDULED，已 lost 则 LOST）。
       execution.abandon();
-      return reschedulePreflight(claim, preflight, config.preflightFailureDelay())
+      return reschedule(
+              claim, preflight.threadId(), preflight.attempt(), config.preflightFailureDelay())
           ? ProcessResult.RESCHEDULED
           : ProcessResult.LOST_OWNERSHIP;
     }
     if (execution.abandoned()) {
       // close / 本地 cancel 在 heartbeat 启动窗口内获胜：不调用 preflight；claim 仍 owned 时立即重排。
-      return reschedulePreflight(claim, preflight, config.preflightFailureDelay())
+      return reschedule(
+              claim, preflight.threadId(), preflight.attempt(), config.preflightFailureDelay())
           ? ProcessResult.RESCHEDULED
           : ProcessResult.LOST_OWNERSHIP;
     }
@@ -427,13 +425,15 @@ public final class ToolProcessor implements AutoCloseable {
           invocationId,
           ProcessorExceptions.describe(failure));
       execution.abandon();
-      return reschedulePreflight(claim, preflight, config.preflightFailureDelay())
+      return reschedule(
+              claim, preflight.threadId(), preflight.attempt(), config.preflightFailureDelay())
           ? ProcessResult.RESCHEDULED
           : ProcessResult.LOST_OWNERSHIP;
     }
     if (execution.abandoned()) {
       // close / cancel / heartbeat loss 在 preflight 期间获胜：claim 仍 owned时立即重排，否则 LOST。
-      return reschedulePreflight(claim, preflight, config.preflightFailureDelay())
+      return reschedule(
+              claim, preflight.threadId(), preflight.attempt(), config.preflightFailureDelay())
           ? ProcessResult.RESCHEDULED
           : ProcessResult.LOST_OWNERSHIP;
     }
@@ -441,7 +441,8 @@ public final class ToolProcessor implements AutoCloseable {
       // 契约违反：preflight 结果未知但无副作用，按 preflightFailureDelay 重排。
       log.warn("tool preflight returned null for invocation {}", invocationId);
       execution.abandon();
-      return reschedulePreflight(claim, preflight, config.preflightFailureDelay())
+      return reschedule(
+              claim, preflight.threadId(), preflight.attempt(), config.preflightFailureDelay())
           ? ProcessResult.RESCHEDULED
           : ProcessResult.LOST_OWNERSHIP;
     }
@@ -459,12 +460,11 @@ public final class ToolProcessor implements AutoCloseable {
   }
 
   /**
-   * Allow（含 YOLO 直接 Allow）：在同一短事务把 READY / null approval 顺序转换 markApprovalNotRequired -&gt;
-   * beginDispatch （Store 允许同 tx 连续 update），Thread version 只 +1；然后进入 Gateway 派发。二次校验失败（lost /
-   * 状态被并发改写）完整 no-op。
+   * Allow（含 YOLO 直接 Allow）：在短事务内把 READY / null approval 持久为 not-required approval（Thread version
+   * +1）；然后进入 执行。二次校验失败（lost / 状态被并发改写）完整 no-op。
    *
-   * <p>{@code execution} 为 null 表示 YOLO 直接 Allow 路径（未创建事务外 preflight execution）：派发段在 {@link
-   * #dispatch} 中新建。
+   * <p>{@code execution} 为 null 表示 YOLO 直接 Allow 路径（未创建事务外 preflight execution）：执行段在 {@link
+   * #launch} 中新建。
    */
   private ProcessResult applyPreflightAllow(
       ClaimedWork claim,
@@ -473,16 +473,16 @@ public final class ToolProcessor implements AutoCloseable {
       int attempt,
       ToolInvocationRequest request,
       ToolExecution execution) {
-    boolean dispatched =
+    boolean allowed =
         Boolean.TRUE.equals(
             store.transaction(tx -> allowIntent(tx, claim, threadId, attempt, tx.now())));
-    if (!dispatched) {
+    if (!allowed) {
       if (execution != null) {
         execution.abandon();
       }
       return ProcessResult.LOST_OWNERSHIP;
     }
-    return dispatch(
+    return launch(
         claim,
         new Prepare.Dispatched(
             threadId, assistantEntryId, attempt, request, ToolApproval.notRequired()),
@@ -491,7 +491,7 @@ public final class ToolProcessor implements AutoCloseable {
 
   /**
    * Allow 的持久意图：按 own Thread -&gt; Tool 锁序锁定后二次校验 claim + READY + attempt + approval null，再
-   * markApprovalNotRequired -&gt; beginDispatch。
+   * markApprovalNotRequired。
    */
   private boolean allowIntent(
       HarnessStore.Transaction tx, ClaimedWork claim, UUID threadId, int attempt, Instant now) {
@@ -508,9 +508,7 @@ public final class ToolProcessor implements AutoCloseable {
         || tool.approval() != null) {
       return false;
     }
-    ToolInvocation approved = tool.markApprovalNotRequired(now);
-    tx.updateToolInvocations(List.of(approved));
-    tx.updateToolInvocations(List.of(approved.beginDispatch(now)));
+    tx.updateToolInvocations(List.of(tool.markApprovalNotRequired(now)));
     tx.updateThread(thread.touchVersion(now));
     return true;
   }
@@ -557,51 +555,56 @@ public final class ToolProcessor implements AutoCloseable {
       Prepare.Preflight preflight,
       ToolExecution execution,
       ToolInvocationError error) {
-    boolean committed;
-    try {
-      committed =
-          Boolean.TRUE.equals(
-              store.transaction(
-                  tx -> {
-                    Instant now = tx.now();
-                    ThreadState thread = tx.lockThread(preflight.threadId()).orElse(null);
-                    if (thread == null) {
-                      return false;
-                    }
-                    ToolInvocation tool = tx.lockToolInvocation(claim.target().id()).orElse(null);
-                    if (tool == null) {
-                      return false;
-                    }
-                    if (tool.status() != ToolInvocationStatus.READY
-                        || tool.attempt() != preflight.attempt()
-                        || tool.approval() != null) {
-                      return false;
-                    }
-                    tx.requestWork(new WorkTarget(WorkTargetType.THREAD, preflight.threadId()));
-                    if (tx.lockClaimedWork(claim).isEmpty()) {
-                      throw new ClaimLostSignal();
-                    }
-                    tx.updateToolInvocations(List.of(tool.fail(error, now)));
-                    tx.updateThread(thread.touchVersion(now));
-                    tx.completeWork(claim);
-                    return true;
-                  }));
-    } catch (ClaimLostSignal ignored) {
-      committed = false;
-    }
+    boolean committed = failReady(claim, preflight.threadId(), preflight.attempt(), error);
     execution.abandon();
     return committed ? ProcessResult.TERMINATED : ProcessResult.LOST_OWNERSHIP;
   }
 
   /**
-   * preflight 失败（抛异常 / null）：二次校验 claim + READY + attempt + approval null 后仅 reschedule，无 version。
+   * 肯定未执行的确定性失败（preflight Deny / admission Rejected）：二次校验 claim + READY + attempt 后 READY -&gt;
+   * FAILED + version+1 + 请求 THREAD Work + complete TOOL Work（attempt 不变）。
    */
-  private boolean reschedulePreflight(
-      ClaimedWork claim, Prepare.Preflight preflight, Duration delay) {
+  private boolean failReady(
+      ClaimedWork claim, UUID threadId, int attempt, ToolInvocationError error) {
+    try {
+      return Boolean.TRUE.equals(
+          store.transaction(
+              tx -> {
+                Instant now = tx.now();
+                ThreadState thread = tx.lockThread(threadId).orElse(null);
+                if (thread == null) {
+                  return false;
+                }
+                ToolInvocation tool = tx.lockToolInvocation(claim.target().id()).orElse(null);
+                if (tool == null) {
+                  return false;
+                }
+                if (tool.status() != ToolInvocationStatus.READY || tool.attempt() != attempt) {
+                  return false;
+                }
+                tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId));
+                if (tx.lockClaimedWork(claim).isEmpty()) {
+                  throw new ClaimLostSignal();
+                }
+                tx.updateToolInvocations(List.of(tool.fail(error, now)));
+                tx.updateThread(thread.touchVersion(now));
+                tx.completeWork(claim);
+                return true;
+              }));
+    } catch (ClaimLostSignal ignored) {
+      return false;
+    }
+  }
+
+  /**
+   * 肯定未执行且无需改状态（preflight 失败 / admission Busy 或失败 / close）：二次校验 claim + READY + attempt 后仅按延迟
+   * reschedule TOOL Work，无 version。
+   */
+  private boolean reschedule(ClaimedWork claim, UUID threadId, int attempt, Duration delay) {
     return Boolean.TRUE.equals(
         store.transaction(
             tx -> {
-              ThreadState thread = tx.lockThread(preflight.threadId()).orElse(null);
+              ThreadState thread = tx.lockThread(threadId).orElse(null);
               if (thread == null) {
                 return false;
               }
@@ -609,9 +612,7 @@ public final class ToolProcessor implements AutoCloseable {
               if (tool == null || tx.lockClaimedWork(claim).isEmpty()) {
                 return false;
               }
-              if (tool.status() != ToolInvocationStatus.READY
-                  || tool.attempt() != preflight.attempt()
-                  || tool.approval() != null) {
+              if (tool.status() != ToolInvocationStatus.READY || tool.attempt() != attempt) {
                 return false;
               }
               tx.rescheduleWork(claim, delay);
@@ -620,11 +621,11 @@ public final class ToolProcessor implements AutoCloseable {
   }
 
   /**
-   * Gateway admission 续段：execution 可能已在 preflight 阶段创建（heartbeat 已启动，此时复用）。任何放弃路径都先 abandon 本地
-   * execution 再 bounce / terminal 收敛；stale-start fence 校验 durable 仍 DISPATCHING + attempt 匹配 +
-   * claim 仍 owned，失败绝不调用 Gateway。
+   * 执行续段：execution 可能已在 preflight 阶段创建（heartbeat 已启动，此时复用）。任何放弃路径都先 abandon 本地 execution 再
+   * reschedule / terminal 收敛；admission 之前 durable 仍是 READY，因此放弃只需 reschedule（attempt 不变）。Admitted
+   * 之后持久化 RUNNING 并启动执行线程，由 {@link ToolExecution} 接管 run 的关闭。
    */
-  private ProcessResult dispatch(
+  private ProcessResult launch(
       ClaimedWork claim, Prepare.Dispatched dispatched, ToolExecution execution) {
     UUID invocationId = claim.target().id();
     if (execution == null) {
@@ -632,96 +633,82 @@ public final class ToolProcessor implements AutoCloseable {
           newExecution(claim, dispatched.threadId(), dispatched.attempt(), dispatched.request());
       ToolExecution existing = executions.putIfAbsent(invocationId, execution);
       if (existing != null) {
-        // 防御分支（admission guard 串行化后实际不可达）：并发竞态，不启动第二个 Gateway 调用，也不做任何 durable mutation。
+        // 防御分支（admission guard 串行化后实际不可达）：并发竞态，不 admit 第二次，也不做任何 durable mutation。
         log.warn("a concurrent local execution already owns tool invocation {}", invocationId);
         return ProcessResult.LOST_OWNERSHIP;
       }
     }
     if (closed) {
       // close 已拍快照但本 execution 尚未被 abandon（close snapshot 之前插入的窗口）：立即 abandon（从 registry
-      // 移除，绝不留下新 execution），并把仍 owned 的 DISPATCHING 安全 bounce READY + reschedule，不启动 Gateway。
+      // 移除，绝不留下新 execution），仍 owned 时 reschedule，不 admit。
       execution.abandon();
-      return bounceDispatch(claim, dispatched, config.dispatchBusyFallbackDelay())
-          ? ProcessResult.RESCHEDULED
-          : ProcessResult.LOST_OWNERSHIP;
+      return rescheduleResult(claim, dispatched, config.admitFailureDelay());
     }
     if (!execution.startHeartbeat()) {
-      // scheduler 拒绝：无法维持 lease，按 bounce 实际结果返回（仍 owned 才 RESCHEDULED，已 lost 则 LOST）。
+      // scheduler 拒绝：无法维持 lease，按 reschedule 实际结果返回（仍 owned 才 RESCHEDULED，已 lost 则 LOST）。
       execution.abandon();
-      return bounceDispatch(claim, dispatched, config.dispatchBusyFallbackDelay())
-          ? ProcessResult.RESCHEDULED
-          : ProcessResult.LOST_OWNERSHIP;
+      return rescheduleResult(claim, dispatched, config.admitFailureDelay());
     }
     if (execution.abandoned()) {
-      // close / 本地 cancel 在 heartbeat 启动窗口内获胜（close snapshot 之后插入的 execution 由 close 负责 abandon）：
-      // 不启动 Gateway；DISPATCHING 仍 owned 则安全 bounce READY + reschedule。
-      return bounceDispatch(claim, dispatched, config.dispatchBusyFallbackDelay())
-          ? ProcessResult.RESCHEDULED
-          : ProcessResult.LOST_OWNERSHIP;
+      // close / 本地 cancel 在 heartbeat 启动窗口内获胜：不 admit；仍 owned 则 reschedule。
+      return rescheduleResult(claim, dispatched, config.admitFailureDelay());
     }
-    // stale-start fence：Gateway.start 的确切 admission 边界。再校验 durable 仍 DISPATCHING + attempt 匹配 +
-    // claim 仍 owned（覆盖跨实例 recovery：另一 JVM 的 processor 恢复 UNKNOWN 后本实例的本地 abandoned 检查看不到）。
-    // 失败立即 abandon 并 LOST，绝不调用 Gateway；此检查之后并发 Stop / recovery 属于 DISPATCHING 不确定窗口，
-    // 由 Gateway 的 Indeterminate / Started 后 markRunning 校验等现有 UNKNOWN / CANCEL 协议处理。
-    if (!checkStartBoundary(claim, dispatched)) {
-      execution.abandon();
-      return ProcessResult.LOST_OWNERSHIP;
-    }
-    ToolGateway.StartResult result;
+    ToolGateway.Admission admission;
     try {
-      result =
-          gateway.start(
+      admission =
+          gateway.admit(
               new ToolGateway.Execution(
                   invocationId,
                   dispatched.threadId(),
                   dispatched.assistantEntryId(),
-                  Math.addExact(dispatched.attempt(), 1),
                   dispatched.request(),
-                  dispatched.approval()),
-              execution);
+                  dispatched.approval()));
     } catch (RuntimeException failure) {
-      // 契约：抛异常表示 Gateway 肯定未接受，可安全转 READY 并 reschedule（attempt 不变）。
+      // 契约：抛异常表示 admission 没有任何副作用，保持 READY 并 reschedule（attempt 不变）。
       log.warn(
-          "tool gateway start failed for invocation {}: {}",
+          "tool admission failed for invocation {}: {}",
           invocationId,
           ProcessorExceptions.describe(failure));
       execution.abandon();
-      return bounceDispatch(claim, dispatched, config.dispatchBusyFallbackDelay())
-          ? ProcessResult.RESCHEDULED
-          : ProcessResult.LOST_OWNERSHIP;
+      return rescheduleResult(claim, dispatched, config.admitFailureDelay());
     }
-    if (result == null) {
-      // 契约违反：acceptance 不确定，按 Indeterminate 语义收敛（UNKNOWN attempt+1 + THREAD wake + complete）。
-      log.warn("tool gateway start returned null for invocation {}", invocationId);
+    if (admission == null) {
+      // 契约违反：admission 结果未知但无副作用，按 admitFailureDelay 重排。
+      log.warn("tool admission returned null for invocation {}", invocationId);
       execution.abandon();
-      ToolInvocationError error =
-          new ToolInvocationError(
-              "GATEWAY_UNKNOWN", "tool gateway start returned null; outcome cannot be confirmed");
-      return unknownDispatch(claim, dispatched, error)
-          ? ProcessResult.TERMINATED
-          : ProcessResult.LOST_OWNERSHIP;
+      return rescheduleResult(claim, dispatched, config.admitFailureDelay());
     }
-    return switch (result) {
-      case ToolGateway.Started started -> execution.activate(started.handle());
-      case ToolGateway.RetryLater retryLater -> {
+    return switch (admission) {
+      case ToolGateway.Admitted admitted -> {
+        if (execution.abandoned()) {
+          // close / cancel 在 admission 期间获胜：工具尚未执行，释放已持有的资源并 reschedule，不持久化 RUNNING。
+          try {
+            admitted.run().close();
+          } catch (RuntimeException failure) {
+            log.warn("cannot release tool run resources for {}", invocationId, failure);
+          }
+          yield rescheduleResult(claim, dispatched, config.admitFailureDelay());
+        }
+        yield execution.start(admitted.run());
+      }
+      case ToolGateway.Busy busy -> {
         execution.abandon();
-        yield bounceDispatch(claim, dispatched, retryLater.retryAfter())
-            ? ProcessResult.RESCHEDULED
-            : ProcessResult.LOST_OWNERSHIP;
+        yield rescheduleResult(claim, dispatched, busy.retryAfter());
       }
       case ToolGateway.Rejected rejected -> {
         execution.abandon();
-        yield rejectDispatch(claim, dispatched, rejected.error())
-            ? ProcessResult.TERMINATED
-            : ProcessResult.LOST_OWNERSHIP;
-      }
-      case ToolGateway.Indeterminate indeterminate -> {
-        execution.abandon();
-        yield unknownDispatch(claim, dispatched, indeterminate.error())
+        yield failReady(claim, dispatched.threadId(), dispatched.attempt(), rejected.error())
             ? ProcessResult.TERMINATED
             : ProcessResult.LOST_OWNERSHIP;
       }
     };
+  }
+
+  private ProcessResult rescheduleResult(
+      ClaimedWork claim, Prepare.Dispatched dispatched, Duration delay) {
+    return reschedule(claim, dispatched.threadId(), dispatched.attempt(), delay)
+        ? ProcessResult.RESCHEDULED
+        : ProcessResult.LOST_OWNERSHIP;
   }
 
   private ToolExecution newExecution(
@@ -738,103 +725,6 @@ public final class ToolProcessor implements AutoCloseable {
         scheduler,
         heartbeatWorker,
         this::release);
-  }
-
-  /**
-   * Gateway.start 的确切 admission 边界：无 mutation 短事务（锁序 ToolInvocation -&gt; Work）校验 durable 仍
-   * DISPATCHING + attempt 匹配 + claim 仍 owned。失败表示 stale start（本地 abandoned 检查覆盖不到的跨实例 recovery /
-   * Stop 已获胜），调用方不得启动 Gateway。
-   */
-  private boolean checkStartBoundary(ClaimedWork claim, Prepare.Dispatched dispatched) {
-    return Boolean.TRUE.equals(
-        store.transaction(
-            tx -> {
-              ToolInvocation tool = tx.lockToolInvocation(claim.target().id()).orElse(null);
-              if (tool == null || tx.lockClaimedWork(claim).isEmpty()) {
-                return false;
-              }
-              return tool.status() == ToolInvocationStatus.DISPATCHING
-                  && tool.attempt() == dispatched.attempt();
-            }));
-  }
-
-  /**
-   * admission 肯定未开始（RetryLater / 异常）：DISPATCHING -&gt; READY + version+1 + 按延迟 reschedule TOOL
-   * Work（attempt 不变）。
-   */
-  private boolean bounceDispatch(ClaimedWork claim, Prepare.Dispatched dispatched, Duration delay) {
-    return Boolean.TRUE.equals(
-        store.transaction(
-            tx -> {
-              Instant now = tx.now();
-              ThreadState thread = tx.lockThread(dispatched.threadId()).orElse(null);
-              if (thread == null) {
-                return false;
-              }
-              ToolInvocation tool = tx.lockToolInvocation(claim.target().id()).orElse(null);
-              if (tool == null || tx.lockClaimedWork(claim).isEmpty()) {
-                return false;
-              }
-              if (tool.status() != ToolInvocationStatus.DISPATCHING
-                  || tool.attempt() != dispatched.attempt()) {
-                return false;
-              }
-              tx.updateToolInvocations(List.of(tool.dispatchBusy(now)));
-              tx.updateThread(thread.touchVersion(now));
-              tx.rescheduleWork(claim, delay);
-              return true;
-            }));
-  }
-
-  /**
-   * admission 明确拒绝：rejectDispatch FAILED + version+1 + 请求 THREAD Work + complete TOOL Work（attempt
-   * 不变）。
-   */
-  private boolean rejectDispatch(
-      ClaimedWork claim, Prepare.Dispatched dispatched, ToolInvocationError error) {
-    return terminalDispatch(claim, dispatched, (tool, now) -> tool.rejectDispatch(error, now));
-  }
-
-  /** admission 不确定：unknown UNKNOWN（attempt+1）+ version+1 + 请求 THREAD Work + complete TOOL Work。 */
-  private boolean unknownDispatch(
-      ClaimedWork claim, Prepare.Dispatched dispatched, ToolInvocationError error) {
-    return terminalDispatch(claim, dispatched, (tool, now) -> tool.unknown(error, now));
-  }
-
-  /** 在同一事务中先建立 THREAD wake，再以当前 Claim 为最终围栏写入 Tool 终态并完成 TOOL Work。 */
-  private boolean terminalDispatch(
-      ClaimedWork claim,
-      Prepare.Dispatched dispatched,
-      BiFunction<ToolInvocation, Instant, ToolInvocation> transition) {
-    try {
-      return Boolean.TRUE.equals(
-          store.transaction(
-              tx -> {
-                Instant now = tx.now();
-                ThreadState thread = tx.lockThread(dispatched.threadId()).orElse(null);
-                if (thread == null) {
-                  return false;
-                }
-                ToolInvocation tool = tx.lockToolInvocation(claim.target().id()).orElse(null);
-                if (tool == null) {
-                  return false;
-                }
-                if (tool.status() != ToolInvocationStatus.DISPATCHING
-                    || tool.attempt() != dispatched.attempt()) {
-                  return false;
-                }
-                tx.requestWork(new WorkTarget(WorkTargetType.THREAD, dispatched.threadId()));
-                if (tx.lockClaimedWork(claim).isEmpty()) {
-                  throw new ClaimLostSignal();
-                }
-                tx.updateToolInvocations(List.of(transition.apply(tool, now)));
-                tx.updateThread(thread.touchVersion(now));
-                tx.completeWork(claim);
-                return true;
-              }));
-    } catch (ClaimLostSignal ignored) {
-      return false;
-    }
   }
 
   /** 有效 YOLO 只由执行根的开关决定；子代理读取其不可变执行根。 */

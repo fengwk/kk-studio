@@ -234,7 +234,6 @@ class PostgresqlHarnessTransactionNotificationTest {
     try (InvalidationListener listener = InvalidationListener.open(dataSource)) {
       updateTool(store, chain.toolId(), tool -> tool.markApprovalNotRequired(T2));
       listener.assertSilent();
-      updateTool(store, chain.toolId(), tool -> tool.beginDispatch(T3));
       listener.assertSilent();
       updateTool(store, chain.toolId(), tool -> tool.markRunning(T4));
       listener.assertSilent();
@@ -541,8 +540,6 @@ class PostgresqlHarnessTransactionNotificationTest {
                   T1,
                   T1));
           ModelInvocation model = tx.lockModelInvocation(modelId).orElseThrow();
-          tx.updateModelInvocation(model.beginDispatch(T1));
-          model = tx.lockModelInvocation(modelId).orElseThrow();
           tx.updateModelInvocation(model.markRunning(T1));
           model = tx.lockModelInvocation(modelId).orElseThrow();
           tx.updateModelInvocation(model.succeed(spec.response(), T1));

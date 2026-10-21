@@ -194,8 +194,6 @@ registerCase({
         owner: chatOwner(chat.id),
         target: threadTarget({
           threadId,
-          expectedHeadEntryId: firstFinalSnapshot.thread.headEntryId,
-          expectedNextCommandSequence: firstFinalSnapshot.thread.nextCommandSequence,
         }),
         commands: [userMessageCommand(secondMarker, cid())],
       })

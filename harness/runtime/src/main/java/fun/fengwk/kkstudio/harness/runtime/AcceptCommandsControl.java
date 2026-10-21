@@ -430,9 +430,11 @@ final class AcceptCommandsControl {
     boolean genuineUserInput = isGenuineUserInput(commands);
     boolean cursorFreeBatch =
         ticket == null && AcceptCommandsCommand.isPureUserMessageBatch(commands);
-    if (!cursorFreeBatch && !target.hasCursor()) {
+    if (cursorFreeBatch == target.hasCursor()) {
       throw new IllegalArgumentException(
-          "expectedHeadEntryId and expectedNextCommandSequence are required for this command batch");
+          cursorFreeBatch
+              ? "expectedHeadEntryId and expectedNextCommandSequence must be omitted for a single USER_MESSAGE batch"
+              : "expectedHeadEntryId and expectedNextCommandSequence are required for this command batch");
     }
     List<ThreadJoin> pending = tx.loadPendingDeliveries(target.threadId());
     // exact replay 查找必须先于 cursor/preflight admission；纯消息 replay 也不依赖 head 变化。

@@ -1,9 +1,10 @@
 package fun.fengwk.kkstudio.harness.builtin.environment;
 
 import fun.fengwk.kkstudio.harness.contributor.api.BoundEnvironment;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.tool.ToolResult;
+
+import java.util.function.Consumer;
 
 /**
  * 统一 {@code read} 工具的执行窄端口。
@@ -17,8 +18,10 @@ public interface ReadToolExecutor {
    * 执行 {@code read} 请求。
    *
    * @param request 工具执行请求，非空
-   * @param listener 工具执行监听器，非空
-   * @return 执行控制句柄，非空
+   * @param progress 非终止进度接收器，非空
+   * @return 终态结果，非空
+   * @throws InterruptedException 执行被取消
    */
-  ToolExecutionHandle read(ToolExecutionRequest request, ToolExecutionListener listener);
+  ToolResult read(ToolExecutionRequest request, Consumer<ToolResult> progress)
+      throws InterruptedException;
 }

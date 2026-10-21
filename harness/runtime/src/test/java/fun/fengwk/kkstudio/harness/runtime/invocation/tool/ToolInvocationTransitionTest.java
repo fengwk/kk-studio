@@ -39,10 +39,6 @@ class ToolInvocationTransitionTest {
     return invocation(ToolInvocationStatus.WAITING_APPROVAL, 0, undecided(), null, null);
   }
 
-  private static ToolInvocation dispatching(int attempt, ToolApproval approval) {
-    return invocation(ToolInvocationStatus.DISPATCHING, attempt, approval, null, null);
-  }
-
   private static ToolInvocation running(int attempt, ToolApproval approval) {
     return invocation(ToolInvocationStatus.RUNNING, attempt, approval, null, null);
   }
@@ -190,38 +186,18 @@ class ToolInvocationTransitionTest {
   }
 
   @Test
-  void beginDispatchRequiresCompletedPreflight() {
-    ToolInvocation notRequired = ready(0, null).markApprovalNotRequired(T1).beginDispatch(T2);
-    assertEquals(ToolInvocationStatus.DISPATCHING, notRequired.status());
-    assertEquals(0, notRequired.attempt());
-    ToolInvocation allowed = ready(1, allowed()).beginDispatch(T1);
-    assertEquals(ToolInvocationStatus.DISPATCHING, allowed.status());
-    assertEquals(1, allowed.attempt());
-    assertThrows(IllegalArgumentException.class, () -> ready(0, null).beginDispatch(T1));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> ready(0, null).markApprovalNotRequired(T1).beginDispatch(T2).beginDispatch(T3));
-  }
-
-  @Test
-  void dispatchBusyAndRejectDispatchLeaveAttemptUnchanged() {
-    ToolInvocation busy = dispatching(2, allowed()).dispatchBusy(T1);
-    assertEquals(ToolInvocationStatus.READY, busy.status());
-    assertEquals(2, busy.attempt());
-    assertEquals(allowed(), busy.approval());
-    ToolInvocation rejected = dispatching(0, allowed()).rejectDispatch(error(), T1);
-    assertEquals(ToolInvocationStatus.FAILED, rejected.status());
-    assertEquals(0, rejected.attempt());
-    assertThrows(IllegalArgumentException.class, () -> ready(0, null).dispatchBusy(T1));
-    assertThrows(IllegalArgumentException.class, () -> ready(0, null).rejectDispatch(error(), T1));
-  }
-
-  @Test
-  void markRunningConfirmsTheStartAndAdvancesAttemptByOne() {
-    ToolInvocation next = dispatching(2, allowed()).markRunning(T1);
-    assertEquals(ToolInvocationStatus.RUNNING, next.status());
-    assertEquals(3, next.attempt());
+  void markRunningStartsReadyWithCompletedPreflightAndAdvancesAttemptByOne() {
+    ToolInvocation notRequired = ready(0, null).markApprovalNotRequired(T1).markRunning(T2);
+    assertEquals(ToolInvocationStatus.RUNNING, notRequired.status());
+    assertEquals(1, notRequired.attempt());
+    ToolInvocation allowedRun = ready(2, allowed()).markRunning(T1);
+    assertEquals(ToolInvocationStatus.RUNNING, allowedRun.status());
+    assertEquals(3, allowedRun.attempt());
+    assertEquals(allowed(), allowedRun.approval());
+    // 没有完成 preflight approval，或不是 READY，都不能启动。
     assertThrows(IllegalArgumentException.class, () -> ready(0, null).markRunning(T1));
+    assertThrows(IllegalArgumentException.class, () -> running(1, allowed()).markRunning(T1));
+    assertThrows(IllegalArgumentException.class, () -> waiting().markRunning(T1));
   }
 
   @Test
@@ -232,8 +208,6 @@ class ToolInvocationTransitionTest {
     assertEquals(result(), next.result());
     assertEquals(allowed(), next.approval());
     assertThrows(IllegalArgumentException.class, () -> ready(0, null).succeed(result(), T1));
-    assertThrows(
-        IllegalArgumentException.class, () -> dispatching(0, allowed()).succeed(result(), T1));
   }
 
   @Test
@@ -311,24 +285,18 @@ class ToolInvocationTransitionTest {
     assertEquals(0, ready(0, null).fail(error(), T1).attempt());
     assertEquals(2, running(2, allowed()).fail(error(), T1).attempt());
     assertThrows(IllegalArgumentException.class, () -> succeeded(1).fail(error(), T1));
-    // DISPATCHING 只能通过 rejectDispatch 失败，不能调用 fail()
-    assertThrows(IllegalArgumentException.class, () -> dispatching(1, allowed()).fail(error(), T1));
     // WAITING_APPROVAL 不能直接 fail：必须先把未决 approval decide 为（DENIED ->
     // FAILED）或 stop 为 CANCELLED
     assertThrows(IllegalArgumentException.class, () -> waiting().fail(error(), T1));
   }
 
   @Test
-  void cancelTerminatesFromWaitingReadyAndRunningButNotDispatching() {
+  void cancelTerminatesFromWaitingReadyAndRunning() {
     assertEquals(ToolInvocationStatus.CANCELLED, waiting().cancel(error(), T1).status());
     assertEquals(0, waiting().cancel(error(), T1).attempt());
     assertTrue(waiting().cancel(error(), T1).approval().isUndecided());
     assertEquals(0, ready(0, null).cancel(error(), T1).attempt());
     assertEquals(2, running(2, allowed()).cancel(error(), T1).attempt());
-    // DISPATCHING 是执行可能已经启动的窗口：UNKNOWN 是唯一诚实的终态，
-    // CANCELLED 被拒绝
-    assertThrows(
-        IllegalArgumentException.class, () -> dispatching(1, allowed()).cancel(error(), T1));
     assertThrows(IllegalArgumentException.class, () -> succeeded(1).cancel(error(), T1));
   }
 
@@ -341,7 +309,6 @@ class ToolInvocationTransitionTest {
     assertNull(next.result());
     assertNull(next.error());
     assertThrows(IllegalArgumentException.class, () -> ready(0, null).retryReady(T1));
-    assertThrows(IllegalArgumentException.class, () -> dispatching(0, allowed()).retryReady(T1));
     assertThrows(IllegalArgumentException.class, () -> waiting().retryReady(T1));
     assertThrows(IllegalArgumentException.class, () -> succeeded(1).retryReady(T1));
   }
@@ -402,11 +369,9 @@ class ToolInvocationTransitionTest {
   }
 
   @Test
-  void unknownAdvancesAttemptOnlyFromDispatching() {
-    ToolInvocation fromDispatching = dispatching(2, allowed()).unknown(error(), T1);
-    assertEquals(ToolInvocationStatus.UNKNOWN, fromDispatching.status());
-    assertEquals(3, fromDispatching.attempt());
+  void unknownKeepsTheConfirmedAttemptAndOnlyFromRunning() {
     ToolInvocation fromRunning = running(2, allowed()).unknown(error(), T1);
+    assertEquals(ToolInvocationStatus.UNKNOWN, fromRunning.status());
     assertEquals(2, fromRunning.attempt());
     assertThrows(IllegalArgumentException.class, () -> ready(0, null).unknown(error(), T1));
     assertThrows(IllegalArgumentException.class, () -> waiting().unknown(error(), T1));
@@ -440,7 +405,7 @@ class ToolInvocationTransitionTest {
                 stored, invocation(ToolInvocationStatus.UNKNOWN, 1, allowed(), null, error())));
     assertThrows(
         IllegalArgumentException.class,
-        () -> ToolInvocation.validateTransition(dispatching(1, allowed()), running(3, allowed())));
+        () -> ToolInvocation.validateTransition(ready(1, allowed()), running(3, allowed())));
     assertThrows(
         IllegalArgumentException.class,
         () -> ToolInvocation.validateTransition(running(1, allowed()), succeeded(2)));

@@ -306,7 +306,7 @@ class ToolEditReviewModelProjectionWireTest {
   }
 
   private JdkHttpSseTransport transport() {
-    return new JdkHttpSseTransport(client, workers, scheduler);
+    return new JdkHttpSseTransport(client, scheduler);
   }
 
   private static ProviderRequest request(ModelDescriptor model, List<ProviderMessage> messages) {

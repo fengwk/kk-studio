@@ -132,8 +132,7 @@ class HarnessRuntimeStopConcurrencyTest {
                   () ->
                       runtime.acceptCommands(
                           new AcceptCommandsCommand(
-                              new AcceptCommandsTarget.Thread(
-                                  baseline.threadId(), baseline.rootEntryId(), 1),
+                              new AcceptCommandsTarget.Thread(baseline.threadId()),
                               List.of(userMessageCommand(TestIds.id(1), "a"))),
                           AcceptancePreflight.IDENTITY)));
       Future<Attempt> second =
@@ -143,8 +142,7 @@ class HarnessRuntimeStopConcurrencyTest {
                   () ->
                       runtime.acceptCommands(
                           new AcceptCommandsCommand(
-                              new AcceptCommandsTarget.Thread(
-                                  baseline.threadId(), baseline.rootEntryId(), 1),
+                              new AcceptCommandsTarget.Thread(baseline.threadId()),
                               List.of(userMessageCommand(TestIds.id(2), "b"))),
                           AcceptancePreflight.IDENTITY)));
       Attempt one = first.get();

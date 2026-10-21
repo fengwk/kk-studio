@@ -2,16 +2,18 @@ package fun.fengwk.kkstudio.harness.contributor.api;
 
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
 import java.time.Duration;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Consumer;
 
 /**
  * 工具实现 SPI；Runtime 负责权限、持久化和执行调度。
  *
- * <p>{@link #execute(ToolExecutionRequest, ToolExecutionListener)} 必须是启动式、快速返回的 async SPI。
- * 允许在调用线程中触发同步 callback，但必须由 Platform 对同步 callback 进行 gate 处理。
+ * <p>{@link #execute} 是阻塞 SPI：Runtime 在每次调用独占的一条虚拟线程上调用它，返回即终态。取消、Stop 与租约丢失都表现为对该线程的
+ * interrupt：实现必须响应中断，关闭自己持有的资源并抛出 {@link InterruptedException}；执行体退出之前，Runtime 不会释放该调用所钉住的任何 本地资源。
  */
 public interface Tool {
 
@@ -47,9 +49,13 @@ public interface Tool {
   }
 
   /**
-   * 启动执行并返回可取消句柄。
+   * 阻塞执行并返回终态结果。
    *
-   * <p>必须为启动式、快速返回的 async SPI。允许同步 callback，但由 Platform gate。
+   * <p>正常的业务失败返回 error {@link ToolResult}；无法完成时抛出运行时异常（Runtime 把它收敛为不确定终态）。需要流式进度的工具通过 {@code
+   * progress} 发布非终止的 {@link ToolResult}（不得含 binary / resource 内容）；不流式的工具忽略它。
+   *
+   * @throws InterruptedException 执行被取消（Stop、租约丢失或进程关闭）
    */
-  ToolExecutionHandle execute(ToolExecutionRequest request, ToolExecutionListener listener);
+  ToolOutcome execute(ToolExecutionRequest request, Consumer<ToolResult> progress)
+      throws InterruptedException;
 }

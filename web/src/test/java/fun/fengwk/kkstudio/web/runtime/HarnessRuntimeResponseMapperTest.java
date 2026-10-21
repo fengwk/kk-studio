@@ -132,9 +132,6 @@ class HarnessRuntimeResponseMapperTest {
     cases.put(
         ThreadRuntimeStatus.MODEL_READY, modelSnapshot(ModelInvocationStatus.READY, List.of()));
     cases.put(
-        ThreadRuntimeStatus.MODEL_DISPATCHING,
-        modelSnapshot(ModelInvocationStatus.DISPATCHING, List.of()));
-    cases.put(
         ThreadRuntimeStatus.MODEL_RUNNING, modelSnapshot(ModelInvocationStatus.RUNNING, List.of()));
     cases.put(
         ThreadRuntimeStatus.TOOL_WAITING_APPROVAL,
@@ -142,7 +139,6 @@ class HarnessRuntimeResponseMapperTest {
     cases.put(
         ThreadRuntimeStatus.TOOL_WAITING_INPUT, toolSnapshot(ToolInvocationStatus.WAITING_INPUT));
     cases.put(ThreadRuntimeStatus.TOOL_RUNNING, toolSnapshot(ToolInvocationStatus.RUNNING));
-    cases.put(ThreadRuntimeStatus.TOOL_DISPATCHING, toolSnapshot(ToolInvocationStatus.DISPATCHING));
     cases.put(ThreadRuntimeStatus.TOOL_READY, toolSnapshot(ToolInvocationStatus.READY));
     assertEquals(Set.of(ThreadRuntimeStatus.values()), cases.keySet());
 

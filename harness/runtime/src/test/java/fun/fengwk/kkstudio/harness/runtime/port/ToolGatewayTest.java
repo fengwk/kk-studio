@@ -22,6 +22,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import java.util.function.Consumer;
 
 /** ToolGateway public contract：preflight outcomes、admission certainty 与 value validation。 */
 class ToolGatewayTest {
@@ -36,13 +37,22 @@ class ToolGatewayTest {
   }
 
   @Test
-  void startResultIsSealedWithExactlyFourAdmissionOutcomes() {
-    List<Class<?>> permitted = List.of(ToolGateway.StartResult.class.getPermittedSubclasses());
-    assertEquals(4, permitted.size());
-    assertTrue(permitted.contains(ToolGateway.Started.class));
-    assertTrue(permitted.contains(ToolGateway.RetryLater.class));
+  void admissionIsSealedWithExactlyAdmittedBusyRejected() {
+    List<Class<?>> permitted = List.of(ToolGateway.Admission.class.getPermittedSubclasses());
+    assertEquals(3, permitted.size());
+    assertTrue(permitted.contains(ToolGateway.Admitted.class));
+    assertTrue(permitted.contains(ToolGateway.Busy.class));
     assertTrue(permitted.contains(ToolGateway.Rejected.class));
-    assertTrue(permitted.contains(ToolGateway.Indeterminate.class));
+  }
+
+  @Test
+  void completionIsSealedWithExactlyFourTerminalOutcomes() {
+    List<Class<?>> permitted = List.of(ToolGateway.Completion.class.getPermittedSubclasses());
+    assertEquals(4, permitted.size());
+    assertTrue(permitted.contains(ToolGateway.Succeeded.class));
+    assertTrue(permitted.contains(ToolGateway.Failed.class));
+    assertTrue(permitted.contains(ToolGateway.Cancelled.class));
+    assertTrue(permitted.contains(ToolGateway.Unknown.class));
   }
 
   @Test
@@ -52,25 +62,14 @@ class ToolGatewayTest {
             UUID.fromString("00000000-0000-0000-0000-000000000009"),
             UUID.fromString("00000000-0000-0000-0000-000000000007"),
             UUID.fromString("00000000-0000-0000-0000-00000000000b"),
-            2,
             PortTestData.toolRequest());
     assertEquals(UUID.fromString("00000000-0000-0000-0000-000000000009"), execution.invocationId());
     assertEquals(UUID.fromString("00000000-0000-0000-0000-000000000007"), execution.threadId());
     assertEquals(
         UUID.fromString("00000000-0000-0000-0000-00000000000b"), execution.assistantEntryId());
-    assertEquals(2, execution.proposedAttempt());
     assertEquals(PortTestData.toolRequest(), execution.request());
     assertEquals(ToolApproval.notRequired(), execution.approval());
     assertNull(execution.expectedFile());
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ToolGateway.Execution(
-                UUID.fromString("00000000-0000-0000-0000-000000000001"),
-                UUID.fromString("00000000-0000-0000-0000-000000000001"),
-                UUID.fromString("00000000-0000-0000-0000-000000000001"),
-                0,
-                PortTestData.toolRequest()));
     assertThrows(
         NullPointerException.class,
         () ->
@@ -78,7 +77,6 @@ class ToolGatewayTest {
                 UUID.fromString("00000000-0000-0000-0000-000000000001"),
                 UUID.fromString("00000000-0000-0000-0000-000000000001"),
                 UUID.fromString("00000000-0000-0000-0000-000000000001"),
-                1,
                 null));
     assertThrows(
         NullPointerException.class,
@@ -87,7 +85,6 @@ class ToolGatewayTest {
                 UUID.fromString("00000000-0000-0000-0000-000000000001"),
                 UUID.fromString("00000000-0000-0000-0000-000000000001"),
                 UUID.fromString("00000000-0000-0000-0000-000000000001"),
-                1,
                 PortTestData.toolRequest(),
                 null));
 
@@ -110,7 +107,6 @@ class ToolGatewayTest {
             UUID.fromString("00000000-0000-0000-0000-000000000009"),
             UUID.fromString("00000000-0000-0000-0000-000000000007"),
             UUID.fromString("00000000-0000-0000-0000-00000000000b"),
-            2,
             PortTestData.toolRequest(),
             reviewedApproval);
     assertSame(reviewedApproval, reviewedExecution.approval());
@@ -135,66 +131,39 @@ class ToolGatewayTest {
   }
 
   @Test
-  void startedAndRetryLaterRejectedIndeterminateValidateTheirFacts() {
-    ToolGateway.Handle handle = noopHandle();
-    ToolGateway.Started started = new ToolGateway.Started(handle);
-    assertNotNull(started.handle());
-    assertThrows(NullPointerException.class, () -> new ToolGateway.Started(null));
+  void admissionOutcomesValidateTheirFacts() {
+    ToolGateway.Run run = noopRun();
+    assertSame(run, new ToolGateway.Admitted(run).run());
+    assertThrows(NullPointerException.class, () -> new ToolGateway.Admitted(null));
     ToolInvocationError error = new ToolInvocationError("BUSY", "busy");
-    assertThrows(NullPointerException.class, () -> new ToolGateway.RetryLater(null));
-    assertThrows(IllegalArgumentException.class, () -> new ToolGateway.RetryLater(Duration.ZERO));
+    assertThrows(NullPointerException.class, () -> new ToolGateway.Busy(null));
+    assertThrows(IllegalArgumentException.class, () -> new ToolGateway.Busy(Duration.ZERO));
     assertThrows(
-        IllegalArgumentException.class, () -> new ToolGateway.RetryLater(Duration.ofSeconds(-1)));
+        IllegalArgumentException.class, () -> new ToolGateway.Busy(Duration.ofSeconds(-1)));
     assertThrows(
-        IllegalArgumentException.class,
-        () -> new ToolGateway.RetryLater(Duration.ofNanos(1_500_000)));
-    assertEquals(
-        Duration.ofSeconds(3), new ToolGateway.RetryLater(Duration.ofSeconds(3)).retryAfter());
+        IllegalArgumentException.class, () -> new ToolGateway.Busy(Duration.ofNanos(1_500_000)));
+    assertEquals(Duration.ofSeconds(3), new ToolGateway.Busy(Duration.ofSeconds(3)).retryAfter());
     assertThrows(NullPointerException.class, () -> new ToolGateway.Rejected(null));
     assertEquals(error, new ToolGateway.Rejected(error).error());
-    assertThrows(NullPointerException.class, () -> new ToolGateway.Indeterminate(null));
-    assertEquals(error, new ToolGateway.Indeterminate(error).error());
   }
 
   @Test
-  void listenerSurfaceCoversPartialAndTheFourTerminalOutcomes() {
-    ToolGateway.Listener listener =
-        new ToolGateway.Listener() {
-          @Override
-          public void onPartial(ToolResult partial) {}
-
-          @Override
-          public void onSucceeded(ToolSuccess success) {}
-
-          @Override
-          public void onFailed(ToolGateway.Failure failure) {}
-
-          @Override
-          public void onCancelled(ToolInvocationError error) {}
-
-          @Override
-          public void onUnknown(ToolInvocationError error) {}
-        };
-    listener.onPartial(new ToolResult("call-1", List.of(), false, "{}"));
-    listener.onSucceeded((ToolSuccess) null);
-    listener.onFailed(null);
-    listener.onCancelled(null);
-    listener.onUnknown(null);
-  }
-
-  @Test
-  void failureCarriesAnExplicitRetryableFact() {
+  void completionsValidateTheirFacts() {
     ToolInvocationError error = new ToolInvocationError("RATE_LIMITED", "slow down");
-    ToolGateway.Failure retryable = new ToolGateway.Failure(error, true);
+    assertThrows(NullPointerException.class, () -> new ToolGateway.Succeeded(null));
+    assertThrows(NullPointerException.class, () -> new ToolGateway.Cancelled(null));
+    assertThrows(NullPointerException.class, () -> new ToolGateway.Unknown(null));
+    assertEquals(error, new ToolGateway.Cancelled(error).error());
+    assertEquals(error, new ToolGateway.Unknown(error).error());
+    ToolGateway.Failed retryable = new ToolGateway.Failed(error, true);
     assertEquals(error, retryable.error());
     assertTrue(retryable.retryable());
-    ToolGateway.Failure permanent = new ToolGateway.Failure(error, false);
-    assertFalse(permanent.retryable());
-    assertThrows(NullPointerException.class, () -> new ToolGateway.Failure(null, true));
+    assertFalse(new ToolGateway.Failed(error, false).retryable());
+    assertThrows(NullPointerException.class, () -> new ToolGateway.Failed(null, true));
   }
 
   @Test
-  void preflightAndStartAcceptValidInputs() {
+  void preflightAndAdmitAcceptValidInputs() {
     ToolGateway gateway =
         new ToolGateway() {
           @Override
@@ -203,52 +172,34 @@ class ToolGatewayTest {
           }
 
           @Override
-          public StartResult start(Execution execution, Listener listener) {
-            return new ToolGateway.Started(noopHandle());
+          public Admission admit(Execution execution) {
+            return new ToolGateway.Admitted(noopRun());
           }
         };
     assertEquals(new ToolGateway.Allow(), gateway.preflight(PortTestData.toolRequest()));
-    ToolGateway.StartResult result =
-        gateway.start(
+    ToolGateway.Admission result =
+        gateway.admit(
             new ToolGateway.Execution(
                 UUID.fromString("00000000-0000-0000-0000-000000000005"),
                 UUID.fromString("00000000-0000-0000-0000-000000000003"),
                 UUID.fromString("00000000-0000-0000-0000-000000000007"),
-                1,
-                PortTestData.toolRequest()),
-            noopListener());
-    assertTrue(result instanceof ToolGateway.Started);
+                PortTestData.toolRequest()));
+    assertTrue(result instanceof ToolGateway.Admitted);
+    ToolGateway.Run run = ((ToolGateway.Admitted) result).run();
+    assertNotNull(run.execute(partial -> {}));
+    run.close();
   }
 
-  private static ToolGateway.Listener noopListener() {
-    return new ToolGateway.Listener() {
+  private static ToolGateway.Run noopRun() {
+    return new ToolGateway.Run() {
       @Override
-      public void onPartial(ToolResult partial) {}
-
-      @Override
-      public void onSucceeded(ToolSuccess success) {}
-
-      @Override
-      public void onFailed(ToolGateway.Failure failure) {}
-
-      @Override
-      public void onCancelled(ToolInvocationError error) {}
-
-      @Override
-      public void onUnknown(ToolInvocationError error) {}
-    };
-  }
-
-  private static ToolGateway.Handle noopHandle() {
-    return new ToolGateway.Handle() {
-      @Override
-      public void cancel() {
-        // 尽力而为、幂等的取消
+      public ToolGateway.Completion execute(Consumer<ToolResult> progress) {
+        return new ToolGateway.Unknown(new ToolInvocationError("NOOP", "noop"));
       }
 
       @Override
-      public void activate() {
-        // 打开 Gateway 回调 gate
+      public void close() {
+        // 幂等释放
       }
     };
   }

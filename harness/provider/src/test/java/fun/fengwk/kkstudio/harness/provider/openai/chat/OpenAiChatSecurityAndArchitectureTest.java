@@ -48,7 +48,7 @@ class OpenAiChatSecurityAndArchitectureTest {
             .followRedirects(HttpClient.Redirect.NEVER)
             .connectTimeout(Duration.ofSeconds(5))
             .build();
-    transport = new JdkHttpSseTransport(httpClient, workerExecutor, scheduler);
+    transport = new JdkHttpSseTransport(httpClient, scheduler);
 
     descriptor =
         new ProviderDescriptor(
