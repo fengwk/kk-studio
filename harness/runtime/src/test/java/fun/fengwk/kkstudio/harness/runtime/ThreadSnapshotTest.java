@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T5;
-import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.beginDispatchTool;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.approveTool;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.cancelTool;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.markRunningTool;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.runtime;
@@ -70,17 +70,13 @@ class ThreadSnapshotTest {
 
   @Test
   void activeLifecycleWithModelMapsToModelStatus() {
-    // 测试意图：ACTIVE 生命周期下，本地活跃 Model 按 invocation 状态细分为 MODEL_READY/DISPATCHING/RUNNING。
+    // 测试意图：ACTIVE 生命周期下，本地活跃 Model 按 invocation 状态细分为 MODEL_READY/RUNNING。
     for (ModelInvocationStatus status :
-        List.of(
-            ModelInvocationStatus.READY,
-            ModelInvocationStatus.DISPATCHING,
-            ModelInvocationStatus.RUNNING)) {
+        List.of(ModelInvocationStatus.READY, ModelInvocationStatus.RUNNING)) {
       HarnessRuntimeTestSupport.ModelBaseline baseline = seedModel(store, status);
       ThreadRuntimeStatus expected =
           switch (status) {
             case READY -> ThreadRuntimeStatus.MODEL_READY;
-            case DISPATCHING -> ThreadRuntimeStatus.MODEL_DISPATCHING;
             case RUNNING -> ThreadRuntimeStatus.MODEL_RUNNING;
             default -> throw new AssertionError();
           };
@@ -99,11 +95,11 @@ class ThreadSnapshotTest {
 
   @Test
   void activeLifecycleWithToolsMapsToToolStatusByPriority() {
-    // 测试意图：ACTIVE 生命周期下，非终态 Tool siblings 按 WAITING_APPROVAL > RUNNING > DISPATCHING > READY
+    // 测试意图：ACTIVE 生命周期下，非终态 Tool siblings 按 WAITING_APPROVAL > RUNNING > READY
     // 细分，优先级最高的 sibling 决定投影。
     HarnessRuntimeTestSupport.MultiToolBaseline waitingApproval = seedToolBaseline(store, 4);
-    beginDispatchTool(store, waitingApproval.toolIds().get(1));
-    beginDispatchTool(store, waitingApproval.toolIds().get(2));
+    approveTool(store, waitingApproval.toolIds().get(1));
+    approveTool(store, waitingApproval.toolIds().get(2));
     markRunningTool(store, waitingApproval.toolIds().get(2));
     setWaitingApproval(store, waitingApproval.toolIds().get(3));
     assertEquals(
@@ -111,18 +107,12 @@ class ThreadSnapshotTest {
         runtime.getThreadSnapshot(waitingApproval.threadId()).runtimeStatus());
 
     HarnessRuntimeTestSupport.MultiToolBaseline running = seedToolBaseline(store, 3);
-    beginDispatchTool(store, running.toolIds().get(1));
-    beginDispatchTool(store, running.toolIds().get(2));
+    approveTool(store, running.toolIds().get(1));
+    approveTool(store, running.toolIds().get(2));
     markRunningTool(store, running.toolIds().get(2));
     assertEquals(
         ThreadRuntimeStatus.TOOL_RUNNING,
         runtime.getThreadSnapshot(running.threadId()).runtimeStatus());
-
-    HarnessRuntimeTestSupport.MultiToolBaseline dispatching = seedToolBaseline(store, 2);
-    beginDispatchTool(store, dispatching.toolIds().get(1));
-    assertEquals(
-        ThreadRuntimeStatus.TOOL_DISPATCHING,
-        runtime.getThreadSnapshot(dispatching.threadId()).runtimeStatus());
 
     HarnessRuntimeTestSupport.ToolBaseline ready = seedToolBaseline(store);
     assertEquals(
@@ -166,8 +156,7 @@ class ThreadSnapshotTest {
     ThreadState before = store.transaction(tx -> tx.findThread(baseline.threadId()).orElseThrow());
     runtime.acceptCommands(
         new AcceptCommandsCommand(
-            new AcceptCommandsTarget.Thread(
-                baseline.threadId(), before.headEntryId(), before.nextCommandSequence()),
+            new AcceptCommandsTarget.Thread(baseline.threadId()),
             List.of(userMessageCommand(TestIds.id(1), "queued"))),
         AcceptancePreflight.IDENTITY);
     ThreadSnapshot snapshot = runtime.getThreadSnapshot(baseline.threadId());

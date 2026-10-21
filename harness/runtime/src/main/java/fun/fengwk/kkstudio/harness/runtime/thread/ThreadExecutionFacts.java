@@ -7,8 +7,8 @@ package fun.fengwk.kkstudio.harness.runtime.thread;
  * <p>三个事实彼此正交，供上层各自决定策略：
  *
  * <ul>
- *   <li>{@code hasWork}：本 Thread 仍有需要推进的本地工作——存在排队命令、合法的本 Thread 非终态 Model、本地
- *       READY/DISPATCHING/RUNNING 工具，或 owner 归属本 Thread 的 continuation 义务。
+ *   <li>{@code hasWork}：本 Thread 仍有需要推进的本地工作——存在排队命令、合法的本 Thread 非终态 Model、本地 READY/RUNNING 工具，或
+ *       owner 归属本 Thread 的 continuation 义务。
  *   <li>{@code waitingForHuman}：本地工具停在需要人工介入的等待点（审批或内部输入问卷）。
  *   <li>{@code hasUnknownToolOutcome}：本地工具已收敛为结果未定的 UNKNOWN。
  * </ul>

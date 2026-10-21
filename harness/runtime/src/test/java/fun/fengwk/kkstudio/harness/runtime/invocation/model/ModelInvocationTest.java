@@ -56,18 +56,6 @@ class ModelInvocationTest {
         invocation(ModelInvocationStatus.READY, 1, null, null, null, null);
     assertEquals(1, readyRetryWaiting.attempt());
 
-    ModelInvocation dispatchingFirstAttempt =
-        invocation(ModelInvocationStatus.DISPATCHING, 0, null, null, null, null);
-    assertEquals(ModelInvocationStatus.DISPATCHING, dispatchingFirstAttempt.status());
-    assertNull(dispatchingFirstAttempt.streamCheckpoint());
-    assertNull(dispatchingFirstAttempt.result());
-    assertNull(dispatchingFirstAttempt.error());
-    assertNull(dispatchingFirstAttempt.resultEntryId());
-
-    ModelInvocation dispatchingRetry =
-        invocation(ModelInvocationStatus.DISPATCHING, 1, null, null, null, null);
-    assertEquals(1, dispatchingRetry.attempt());
-
     ModelInvocation running =
         invocation(ModelInvocationStatus.RUNNING, 1, checkpoint(1), null, null, null);
     assertEquals(1, running.attempt());
@@ -114,22 +102,6 @@ class ModelInvocationTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> invocation(ModelInvocationStatus.UNKNOWN, 0, null, null, error(), null));
-  }
-
-  @Test
-  void rejectsInvalidDispatchingCombinations() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> invocation(ModelInvocationStatus.DISPATCHING, 0, checkpoint(1), null, null, null));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> invocation(ModelInvocationStatus.DISPATCHING, 0, null, response(), null, null));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> invocation(ModelInvocationStatus.DISPATCHING, 0, null, null, error(), null));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> invocation(ModelInvocationStatus.DISPATCHING, 0, null, null, null, id(5L)));
   }
 
   @Test
@@ -365,7 +337,7 @@ class ModelInvocationTest {
   private static List<ModelAttemptFailure> failures(ModelInvocationStatus status, int attempt) {
     int count =
         switch (status) {
-          case READY, DISPATCHING -> attempt;
+          case READY -> attempt;
           case RUNNING, SUCCEEDED, UNKNOWN, FAILED, CANCELLED -> Math.max(0, attempt - 1);
         };
     return IntStream.rangeClosed(1, count).mapToObj(ModelInvocationTest::failure).toList();

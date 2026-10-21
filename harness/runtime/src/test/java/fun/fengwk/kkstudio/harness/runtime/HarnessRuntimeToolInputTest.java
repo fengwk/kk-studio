@@ -7,8 +7,8 @@ import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T5;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T6;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.TestClock;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.ToolBaseline;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.approveTool;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.askUserModelRequest;
-import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.beginDispatchTool;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.cancelTool;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.mappedAssistantEntry;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.markRunningTool;
@@ -447,7 +447,7 @@ class HarnessRuntimeToolInputTest {
   @Test
   void executedSuccessWithoutReceiptIsNotAnInputTarget() {
     ToolBaseline baseline = seedAskUserBaseline(store);
-    beginDispatchTool(store, baseline.toolId());
+    approveTool(store, baseline.toolId());
     markRunningTool(store, baseline.toolId());
     succeedTool(store, baseline.toolId());
 
@@ -770,7 +770,7 @@ class HarnessRuntimeToolInputTest {
   @Test
   void materializedExecutedToolResultWithoutReceiptIsNotAnInputTarget() {
     ToolBaseline baseline = seedToolBaseline(store);
-    beginDispatchTool(store, baseline.toolId());
+    approveTool(store, baseline.toolId());
     markRunningTool(store, baseline.toolId());
     succeedTool(store, baseline.toolId());
     materializeTerminalTool(baseline.threadId(), baseline.toolId(), TestIds.id(61));
@@ -902,9 +902,8 @@ class HarnessRuntimeToolInputTest {
               modelInvocationWithRequest(
                   modelId, stale.threadId(), turnStartId, turnStartId, requestSpec, T3);
           tx.insertModelInvocation(model);
-          tx.updateModelInvocation(model.beginDispatch(T3));
-          tx.updateModelInvocation(model.beginDispatch(T3).markRunning(T3));
-          ModelInvocation succeeded = model.beginDispatch(T3).markRunning(T3).succeed(response, T3);
+          tx.updateModelInvocation(model.markRunning(T3));
+          ModelInvocation succeeded = model.markRunning(T3).succeed(response, T3);
           tx.updateModelInvocation(succeeded);
           tx.updateModelInvocation(succeeded.attachResultEntry(assistantEntryId, T3));
           UUID liveToolId = tx.nextId();

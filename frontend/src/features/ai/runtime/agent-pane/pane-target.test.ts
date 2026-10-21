@@ -928,9 +928,7 @@ describe('PaneTarget durable-local FSM', () => {
         createResourcePart('blob-res-1', 'chart.png', 'data:image/png;base64,aaa', 'ORIGINAL'),
       ],
       request: {
-        // 显式提供的 cursor 必须成对保留；纯消息也可以完全省略 cursor。
-        expectedHeadEntryId: 'h1',
-        expectedNextCommandSequence: '2',
+        // 单条纯消息不携带 cursor。
         commands: [
           {
             type: 'USER_MESSAGE',

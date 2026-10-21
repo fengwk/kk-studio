@@ -1,13 +1,13 @@
 package fun.fengwk.kkstudio.harness.runtime.processor;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
@@ -16,7 +16,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.port.ModelGateway;
-import fun.fengwk.kkstudio.harness.runtime.port.ToolSuccess;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
@@ -55,39 +54,40 @@ class ExecutionConcurrentDeletionTest {
   }
 
   @Test
-  void toolActivationLosesOwnershipWhenThreadDeletedBeforeOwnThreadLock() {
+  void toolStartLosesOwnershipWhenThreadDeletedBeforeOwnThreadLock() {
     ToolExecutionFixture fixture = toolExecutionFixture();
     long versionBefore = threadVersion(fixture.rawStore, fixture.threadId);
 
     fixture.store.armDeletionBeforeNextThreadLock();
-    assertEquals(ProcessResult.LOST_OWNERSHIP, fixture.execution.activate(fixture.handle));
+    assertEquals(ProcessResult.LOST_OWNERSHIP, fixture.execution.start(fixture.run));
 
-    fixture.assertLostWithStatus(ToolInvocationStatus.DISPATCHING, versionBefore);
+    fixture.assertLostWithStatus(ToolInvocationStatus.READY, versionBefore);
+    assertEquals(0, fixture.run.executes.get(), "the tool must never execute");
+    assertEquals(1, fixture.run.closes.get(), "the run must still be released");
   }
 
   @Test
-  void toolTerminalCallbackLosesOwnershipWhenThreadDeletedBeforeOwnThreadLock() {
-    ToolExecutionFixture fixture = toolExecutionFixture();
-    assertEquals(ProcessResult.STARTED, fixture.execution.activate(fixture.handle));
-    long versionBefore = threadVersion(fixture.rawStore, fixture.threadId);
+  void toolTerminalLosesOwnershipWhenThreadDeletedBeforeOwnThreadLock() throws Exception {
+    ToolExecutionFixture fixture = toolExecutionFixture(true);
+    long versionBefore = threadVersion(fixture.rawStore, fixture.threadId) + 1;
 
-    fixture.store.armDeletionBeforeNextThreadLock();
-    fixture.execution.onSucceeded(
-        ToolSuccess.withoutEffects(
-            ToolProcessorTestSupport.successResult("call-1", new TextResultContent("ok"))));
+    assertEquals(ProcessResult.STARTED, fixture.execution.start(fixture.run));
+    ToolProcessorTestSupport.awaitTrue(() -> fixture.releases.get() == 1, Duration.ofSeconds(5));
 
     fixture.assertLostWithStatus(ToolInvocationStatus.RUNNING, versionBefore);
+    assertEquals(1, fixture.run.closes.get());
   }
 
   @Test
-  void modelActivationLosesOwnershipWhenThreadDeletedBeforeOwnThreadLock() {
+  void modelMarkRunningLosesOwnershipWhenThreadDeletedBeforeOwnThreadLock() {
     ModelExecutionFixture fixture = modelExecutionFixture(false);
     long versionBefore = threadVersion(fixture.rawStore, fixture.threadId);
 
     fixture.store.armDeletionBeforeNextThreadLock();
-    assertEquals(ProcessResult.LOST_OWNERSHIP, fixture.execution.activate(fixture.handle));
+    assertFalse(fixture.execution.markRunning());
+    fixture.execution.abandon();
 
-    fixture.assertLostWithStatus(ModelInvocationStatus.DISPATCHING, versionBefore);
+    fixture.assertLostWithStatus(ModelInvocationStatus.READY, versionBefore);
     assertNull(modelResult(fixture.rawStore, fixture.invocationId));
   }
 
@@ -97,20 +97,27 @@ class ExecutionConcurrentDeletionTest {
     long versionBefore = threadVersion(fixture.rawStore, fixture.threadId);
 
     fixture.store.armDeletionBeforeNextThreadLock();
-    fixture.execution.onSucceeded(new ProviderCompletion(response("answer")));
+    assertEquals(
+        ProcessResult.LOST_OWNERSHIP,
+        fixture.execution.finish(
+            new ModelGateway.Succeeded(new ProviderCompletion(response("answer")))));
 
     fixture.assertLostWithStatus(ModelInvocationStatus.RUNNING, versionBefore);
     assertNull(modelResult(fixture.rawStore, fixture.invocationId));
   }
 
-  /** DISPATCHING 的 Tool 链 + 未激活的进程内 execution（由测试决定激活或直接投递回调）。 */
   private ToolExecutionFixture toolExecutionFixture() {
+    return toolExecutionFixture(false);
+  }
+
+  /** 已审批的 READY Tool 链 + 进程内 execution；{@code armInBody} 决定是否在执行体内布置「终态事务前删除 Thread」。 */
+  private ToolExecutionFixture toolExecutionFixture(boolean armInBody) {
     ToolProcessorTestSupport.Fixture support = ToolProcessorTestSupport.fixture();
     schedulersToClose.add(support.scheduler);
     ClaimedWork claim =
         ToolProcessorTestSupport.claim(
             support.store, support.toolInvocationId, ToolProcessorTestSupport.NOW);
-    ToolProcessorTestSupport.toDispatched(
+    ToolProcessorTestSupport.toApproved(
         support.store, support.toolInvocationId, ToolProcessorTestSupport.NOW);
     DeletionBeforeThreadLockStore store =
         new DeletionBeforeThreadLockStore(support.store, support.baseline.threadId());
@@ -132,6 +139,14 @@ class ExecutionConcurrentDeletionTest {
             support.scheduler,
             Runnable::run,
             ignored -> releases.incrementAndGet());
+    ToolProcessorTestSupport.FakeRun run =
+        new ToolProcessorTestSupport.FakeRun(
+            progress -> {
+              if (armInBody) {
+                store.armDeletionBeforeNextThreadLock();
+              }
+              return ToolProcessorTestSupport.succeeded("call-1");
+            });
     return new ToolExecutionFixture(
         support.store,
         support.sink,
@@ -139,7 +154,7 @@ class ExecutionConcurrentDeletionTest {
         support.baseline.threadId(),
         store,
         execution,
-        new ToolProcessorTestSupport.FakeHandle(),
+        run,
         releases);
   }
 
@@ -150,13 +165,12 @@ class ExecutionConcurrentDeletionTest {
       UUID threadId,
       DeletionBeforeThreadLockStore store,
       ToolExecution execution,
-      ToolProcessorTestSupport.FakeHandle handle,
+      ToolProcessorTestSupport.FakeRun run,
       AtomicInteger releases) {
 
-    /** LOST 语义：handle 取消、本地槽位释放、无实时事件、durable 状态与 Thread version 不变。 */
+    /** LOST 语义：本地槽位释放、无实时事件、durable 状态与 Thread version 不变。 */
     void assertLostWithStatus(ToolInvocationStatus expectedStatus, long versionBefore) {
       store.assertNoTransactionFailure();
-      assertTrue(handle.isCancelled(), "lost ownership must cancel the attached handle");
       assertEquals(1, releases.get(), "lost ownership must release the local execution slot");
       assertTrue(sink.events.isEmpty(), "no realtime event may leak");
       assertEquals(
@@ -168,7 +182,7 @@ class ExecutionConcurrentDeletionTest {
     }
   }
 
-  /** 一条 READY → DISPATCHING 的 Model 链 + 进程内 execution；{@code activated} 决定是否先激活到 RUNNING。 */
+  /** 一条 READY 的 Model 链 + 进程内 execution；{@code activated} 决定是否先持久化到 RUNNING。 */
   private ModelExecutionFixture modelExecutionFixture(boolean activated) {
     InMemoryHarnessStore rawStore = new InMemoryHarnessStore();
     ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
@@ -207,12 +221,6 @@ class ExecutionConcurrentDeletionTest {
                     tx.claimNextWork(
                         WorkTargetType.MODEL, "token-" + invocationId, Duration.ofSeconds(60)))
             .orElseThrow();
-    rawStore.transaction(
-        tx -> {
-          ModelInvocation model = tx.lockModelInvocation(invocationId).orElseThrow();
-          tx.updateModelInvocation(model.beginDispatch(ThreadProcessorTestSupport.NOW));
-          return null;
-        });
     ModelExecutionFixture fixture =
         new ModelExecutionFixture(
             rawStore,
@@ -222,7 +230,7 @@ class ExecutionConcurrentDeletionTest {
             claim,
             scheduler);
     if (activated) {
-      assertEquals(ProcessResult.STARTED, fixture.execution.activate(fixture.handle));
+      assertTrue(fixture.execution.markRunning());
     }
     return fixture;
   }
@@ -236,7 +244,6 @@ class ExecutionConcurrentDeletionTest {
     final List<Object> events = new CopyOnWriteArrayList<>();
     final DeletionBeforeThreadLockStore store;
     final ModelExecution execution;
-    final ModelHandle handle = new ModelHandle();
 
     ModelExecutionFixture(
         InMemoryHarnessStore rawStore,
@@ -271,33 +278,15 @@ class ExecutionConcurrentDeletionTest {
               ignored -> releases.incrementAndGet());
     }
 
-    /** LOST 语义：handle 取消、本地槽位释放、无实时事件、durable 状态与 Thread version 不变。 */
+    /** LOST 语义：本地槽位释放、无实时事件、durable 状态与 Thread version 不变。 */
     void assertLostWithStatus(ModelInvocationStatus expectedStatus, long versionBefore) {
       store.assertNoTransactionFailure();
-      assertTrue(handle.isCancelled(), "lost ownership must cancel the attached handle");
       assertEquals(1, releases.get(), "lost ownership must release the local execution slot");
       assertTrue(events.isEmpty(), "no realtime event may leak");
       assertEquals(
           expectedStatus, modelStatus(rawStore, invocationId), "no durable state may be persisted");
       assertEquals(
           versionBefore, threadVersion(rawStore, threadId), "thread version must not advance");
-    }
-  }
-
-  private static final class ModelHandle implements ModelGateway.Handle {
-
-    private final AtomicInteger cancels = new AtomicInteger();
-
-    @Override
-    public void cancel() {
-      cancels.incrementAndGet();
-    }
-
-    @Override
-    public void activate() {}
-
-    boolean isCancelled() {
-      return cancels.get() > 0;
     }
   }
 

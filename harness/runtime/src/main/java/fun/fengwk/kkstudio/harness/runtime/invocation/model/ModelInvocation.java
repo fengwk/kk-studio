@@ -15,12 +15,11 @@ import java.util.UUID;
 /**
  * 一次 Model Invocation 的持久化当前状态。
  *
- * <p>{@code attempt} 统计已确认的 Provider 调用启动次数；BUSY/OVERLOADED 或启动前的明确拒绝不会增加它。 {@code resultEntryId}
- * 将执行结果链接到 Session 历史，且仅（在某些情况下）出现于 terminal 状态。 {@code streamCheckpoint} 是当前 attempt 的安全
- * partial，永远不是第二个 result。{@code failedAttempts} 是 append-only 的瞬态失败 attempt 审计，不属于对话语义。
+ * <p>{@code attempt} 统计已持久化 RUNNING 的执行次数（RUNNING 先于任何请求发出）；BUSY 或启动前的明确拒绝不会增加它。 {@code
+ * resultEntryId} 将执行结果链接到 Session 历史，且仅（在某些情况下）出现于 terminal 状态。 {@code streamCheckpoint} 是当前
+ * attempt 的安全 partial，永远不是第二个 result。{@code failedAttempts} 是 append-only 的瞬态失败 attempt 审计，不属于对话语义。
  *
- * <p>{@code DISPATCHING} 表示 Work lease 已持有，Gateway admission 进行中：外部服务是否接受调用尚未被持久化状态 确认。Store 必须在每次
- * {@code update*} 写入前调用 {@link #validateTransition}。
+ * <p>Store 必须在每次 {@code update*} 写入前调用 {@link #validateTransition}。
  */
 public record ModelInvocation(
     UUID id,
@@ -110,12 +109,10 @@ public record ModelInvocation(
 
   /**
    * 校验 {@code next} 是已存储行 {@code stored} 的合法转换：identity 与 request 不可变，updatedAt 不允许回退， attempt 仅在
-   * DISPATCHING-&gt;RUNNING / DISPATCHING-&gt;UNKNOWN（已确认启动）以及 DISPATCHING-&gt;CANCELLED（Stop
-   * 窗口内调用可能已开始）这几种情形下恰好 +1；DISPATCHING-&gt;READY 的 BUSY bounce 与 DISPATCHING-&gt;FAILED 的启动前拒绝保持
-   * attempt，而执行持有者失联的恢复会把可能已发出的启动计为 attempt + 1（READY 重试或 FAILED 终止）；terminal 事实不可变 （仅 {@code
-   * resultEntryId} 可从 null 附加为正数）；checkpoint 仅能在 RUNNING-&gt;RUNNING 或 RUNNING-&gt;terminal
-   * 时被引入或增长；任何离开 RUNNING 或处于 terminal 内的转换，只能保留完全相同的 stored checkpoint 或清除它； terminal 结果 Entry
-   * 链接时必须同时清空已经物化的 checkpoint / failedAttempts。精确 replay 始终被接受。
+   * READY-&gt;RUNNING 时恰好 +1（RUNNING 持久化先于请求发出），其余转换保持不变；terminal 事实不可变 （仅 {@code resultEntryId} 可从
+   * null 附加为正数）；checkpoint 仅能在 RUNNING-&gt;RUNNING 或 RUNNING-&gt;terminal 时被引入或增长；任何离开 RUNNING 或处于
+   * terminal 内的转换，只能保留完全相同的 stored checkpoint 或清除它； terminal 结果 Entry 链接时必须同时清空已经物化的 checkpoint /
+   * failedAttempts。精确 replay 始终被接受。
    */
   public static void validateTransition(ModelInvocation stored, ModelInvocation next) {
     Objects.requireNonNull(stored, "stored");
@@ -155,14 +152,9 @@ public record ModelInvocation(
     boolean allowed =
         switch (stored) {
           case READY -> next == ModelInvocationStatus.READY
-              || next == ModelInvocationStatus.DISPATCHING
-              || next == ModelInvocationStatus.FAILED
-              || next == ModelInvocationStatus.CANCELLED;
-          case DISPATCHING -> next == ModelInvocationStatus.READY
               || next == ModelInvocationStatus.RUNNING
               || next == ModelInvocationStatus.FAILED
-              || next == ModelInvocationStatus.CANCELLED
-              || next == ModelInvocationStatus.UNKNOWN;
+              || next == ModelInvocationStatus.CANCELLED;
           case RUNNING -> next == ModelInvocationStatus.RUNNING
               || next == ModelInvocationStatus.READY
               || next == ModelInvocationStatus.SUCCEEDED
@@ -179,30 +171,12 @@ public record ModelInvocation(
 
   private static void requireAttemptDelta(
       ModelInvocation stored, ModelInvocation next, int attemptDelta) {
-    if (stored.status() == ModelInvocationStatus.DISPATCHING) {
-      boolean mustCharge =
-          next.status() == ModelInvocationStatus.RUNNING
-              || next.status() == ModelInvocationStatus.UNKNOWN
-              || next.status() == ModelInvocationStatus.CANCELLED;
-      if (mustCharge) {
-        if (attemptDelta != 1) {
-          throw new IllegalArgumentException(
-              "a confirmed start or the DISPATCHING stop window must advance attempt by exactly"
-                  + " one");
-        }
-        return;
+    if (stored.status() == ModelInvocationStatus.READY
+        && next.status() == ModelInvocationStatus.RUNNING) {
+      if (attemptDelta != 1) {
+        throw new IllegalArgumentException("READY -> RUNNING must advance attempt by exactly one");
       }
-      boolean maybeCharged =
-          next.status() == ModelInvocationStatus.READY
-              || next.status() == ModelInvocationStatus.FAILED;
-      if (maybeCharged) {
-        // 未发出（BUSY bounce / 启动前拒绝）保持 attempt；失联恢复把可能已发出的启动计为 attempt + 1。
-        if (attemptDelta != 0 && attemptDelta != 1) {
-          throw new IllegalArgumentException(
-              "a DISPATCHING -> " + next.status() + " move must keep or advance attempt by one");
-        }
-        return;
-      }
+      return;
     }
     if (attemptDelta != 0) {
       throw new IllegalArgumentException("attempt must not change on this transition");
@@ -314,11 +288,7 @@ public record ModelInvocation(
     boolean confirmedRetry =
         stored.status() == ModelInvocationStatus.RUNNING
             && next.status() == ModelInvocationStatus.READY;
-    boolean dispatchRetry =
-        stored.status() == ModelInvocationStatus.DISPATCHING
-            && next.status() == ModelInvocationStatus.READY
-            && next.attempt() == Math.addExact(stored.attempt(), 1);
-    if (!confirmedRetry && !dispatchRetry) {
+    if (!confirmedRetry) {
       if (!storedFailures.equals(nextFailures)) {
         throw new IllegalArgumentException("failedAttempts may only change on a retry transition");
       }
@@ -333,9 +303,8 @@ public record ModelInvocation(
         throw new IllegalArgumentException("failedAttempts is append-only");
       }
     }
-    int consumedAttempt = dispatchRetry ? Math.addExact(stored.attempt(), 1) : stored.attempt();
     ModelAttemptFailure appended = nextFailures.get(nextFailures.size() - 1);
-    if (appended.attempt() != consumedAttempt) {
+    if (appended.attempt() != stored.attempt()) {
       throw new IllegalArgumentException(
           "failed attempt must equal the attempt consumed by this retry");
     }
@@ -348,35 +317,7 @@ public record ModelInvocation(
     return value.startsWith(prefix);
   }
 
-  /** READY -&gt; DISPATCHING：Work lease 已持有，Gateway admission 启动；attempt 不变。 */
-  public ModelInvocation beginDispatch(Instant now) {
-    return withState(
-        ModelInvocationStatus.DISPATCHING, attempt, null, null, null, null, failedAttempts, now);
-  }
-
-  /**
-   * DISPATCHING -&gt; FAILED：Gateway 在任何 Provider 启动之前明确拒绝了该调用；attempt 不变。 仅进行中的 dispatch 能被拒绝，且
-   * {@link #fail} 拒绝 DISPATCHING，所以这是失败 dispatch 的唯一路径。
-   */
-  public ModelInvocation rejectDispatch(ModelInvocationError error, Instant now) {
-    Objects.requireNonNull(error, "error");
-    if (status != ModelInvocationStatus.DISPATCHING) {
-      throw new IllegalArgumentException("rejectDispatch requires DISPATCHING status");
-    }
-    return withState(
-        ModelInvocationStatus.FAILED, attempt, null, null, error, null, failedAttempts, now);
-  }
-
-  /** DISPATCHING -&gt; READY：BUSY/OVERLOADED admission；attempt 不变。仅进行中的 dispatch 能被弹回 READY。 */
-  public ModelInvocation dispatchBusy(Instant now) {
-    if (status != ModelInvocationStatus.DISPATCHING) {
-      throw new IllegalArgumentException("dispatchBusy requires DISPATCHING status");
-    }
-    return withState(
-        ModelInvocationStatus.READY, attempt, null, null, null, null, failedAttempts, now);
-  }
-
-  /** DISPATCHING -&gt; RUNNING：Gateway 已确认启动；attempt 恰好 +1。 */
+  /** READY -&gt; RUNNING：先于任何请求发出持久化；attempt 恰好 +1。 */
   public ModelInvocation markRunning(Instant now) {
     return withState(
         ModelInvocationStatus.RUNNING,
@@ -406,55 +347,6 @@ public record ModelInvocation(
     nextFailures.add(failure);
     return withState(
         ModelInvocationStatus.READY, attempt, null, null, null, null, nextFailures, now);
-  }
-
-  /**
-   * DISPATCHING -&gt; READY：执行持有者失联，本次启动可能已经发出但结果未被确认。把这次未确认的启动计为一个已消耗 attempt（{@code attempt +
-   * 1}），记录一个 retryable failed attempt 后从头重新调度；DISPATCHING 不携带 checkpoint，旧 partial 不参与新 attempt。
-   */
-  public ModelInvocation retryDispatched(ModelAttemptFailure failure, Instant now) {
-    Objects.requireNonNull(failure, "failure");
-    if (status != ModelInvocationStatus.DISPATCHING) {
-      throw new IllegalArgumentException("retryDispatched requires DISPATCHING status");
-    }
-    if (failure.attempt() != Math.addExact(attempt, 1)) {
-      throw new IllegalArgumentException(
-          "failed attempt must equal the unconfirmed dispatch attempt");
-    }
-    if (!failure.error().retryCandidate()) {
-      throw new IllegalArgumentException("retryDispatched requires a retryable error");
-    }
-    List<ModelAttemptFailure> nextFailures = new ArrayList<>(failedAttempts);
-    nextFailures.add(failure);
-    return withState(
-        ModelInvocationStatus.READY,
-        Math.addExact(attempt, 1),
-        null,
-        null,
-        null,
-        null,
-        nextFailures,
-        now);
-  }
-
-  /**
-   * DISPATCHING -&gt; FAILED：执行持有者失联且重试预算不允许再发起一次调用。未确认的启动仍计为一个已消耗 attempt（{@code attempt +
-   * 1}）后明确终止失败；failedAttempts 保持 pending prefix 不变。
-   */
-  public ModelInvocation failDispatched(ModelInvocationError error, Instant now) {
-    Objects.requireNonNull(error, "error");
-    if (status != ModelInvocationStatus.DISPATCHING) {
-      throw new IllegalArgumentException("failDispatched requires DISPATCHING status");
-    }
-    return withState(
-        ModelInvocationStatus.FAILED,
-        Math.addExact(attempt, 1),
-        null,
-        null,
-        error,
-        null,
-        failedAttempts,
-        now);
   }
 
   /** RUNNING -&gt; RUNNING，附带当前 attempt 的一个单调安全 text/thinking checkpoint。 */
@@ -498,16 +390,14 @@ public record ModelInvocation(
   }
 
   /**
-   * READY / RUNNING -&gt; FAILED，并附带 terminal error 与可选 streamCheckpoint；attempt 不变。DISPATCHING
-   * 被拒绝： 进行中的 dispatch 只能通过 {@link #rejectDispatch} 失败。
+   * READY / RUNNING -&gt; FAILED，并附带 terminal error 与可选 streamCheckpoint；attempt 不变。READY
+   * 用于启动前的明确拒绝。
    */
   public ModelInvocation fail(
       ModelInvocationError error, StreamCheckpoint checkpoint, Instant now) {
     Objects.requireNonNull(error, "error");
     if (status != ModelInvocationStatus.READY && status != ModelInvocationStatus.RUNNING) {
-      throw new IllegalArgumentException(
-          "fail requires READY or RUNNING status; a DISPATCHING invocation must use"
-              + " rejectDispatch");
+      throw new IllegalArgumentException("fail requires READY or RUNNING status");
     }
     return withState(
         ModelInvocationStatus.FAILED,
@@ -524,18 +414,13 @@ public record ModelInvocation(
     return fail(error, streamCheckpoint, now);
   }
 
-  /**
-   * READY / DISPATCHING / RUNNING -&gt; CANCELLED，并附带 terminal error 与可选 streamCheckpoint。READY 和
-   * RUNNING 保持其已确认的 attempt；DISPATCHING 是 Stop 窗口，调用可能已经开始，因此 attempt 恰好 +1。
-   */
+  /** READY / RUNNING -&gt; CANCELLED，并附带 terminal error 与可选 streamCheckpoint；attempt 不变。 */
   public ModelInvocation cancel(
       ModelInvocationError error, StreamCheckpoint checkpoint, Instant now) {
     Objects.requireNonNull(error, "error");
-    int nextAttempt =
-        status == ModelInvocationStatus.DISPATCHING ? Math.addExact(attempt, 1) : attempt;
     return withState(
         ModelInvocationStatus.CANCELLED,
-        nextAttempt,
+        attempt,
         status == ModelInvocationStatus.RUNNING ? checkpoint : null,
         null,
         error,
@@ -548,18 +433,13 @@ public record ModelInvocation(
     return cancel(error, streamCheckpoint, now);
   }
 
-  /**
-   * DISPATCHING / RUNNING -&gt; UNKNOWN，并附带 terminal error 与可选 streamCheckpoint：不确定的 admission 或恢复的
-   * lease 可能已经启动了该调用，因此 DISPATCHING 时 attempt 恰好 +1，而 RUNNING 保留其已确认的 attempt。
-   */
+  /** RUNNING -&gt; UNKNOWN，并附带 terminal error 与可选 streamCheckpoint：请求可能已发出但结果无法确认；attempt 不变。 */
   public ModelInvocation unknown(
       ModelInvocationError error, StreamCheckpoint checkpoint, Instant now) {
     Objects.requireNonNull(error, "error");
-    int nextAttempt =
-        status == ModelInvocationStatus.DISPATCHING ? Math.addExact(attempt, 1) : attempt;
     return withState(
         ModelInvocationStatus.UNKNOWN,
-        nextAttempt,
+        attempt,
         status == ModelInvocationStatus.RUNNING ? checkpoint : null,
         null,
         error,
@@ -651,14 +531,6 @@ public record ModelInvocation(
       }
       if (result != null || error != null) {
         throw new IllegalArgumentException("READY must not carry terminal result facts");
-      }
-    } else if (status == ModelInvocationStatus.DISPATCHING) {
-      requireFailureCount(failedAttempts, attempt, "DISPATCHING");
-      if (streamCheckpoint != null) {
-        throw new IllegalArgumentException("DISPATCHING must not carry a stream checkpoint");
-      }
-      if (result != null || error != null) {
-        throw new IllegalArgumentException("DISPATCHING must not carry terminal result facts");
       }
     } else if (status == ModelInvocationStatus.RUNNING) {
       if (attempt <= 0) {

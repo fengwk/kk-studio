@@ -42,8 +42,7 @@ final class GeminiErrorMapper {
    * 将传输层异常转换为 {@link ProviderException}。
    *
    * @param exception 传输层异常
-   * @return 映射后的 ProviderException；仅 CANCELLED 返回 null。EXECUTOR_REJECTED 映射为
-   *     TRANSIENT，CALLBACK_FAILED 映射为不含 cause 与响应正文的 INVALID_RESPONSE
+   * @return 映射后的 ProviderException；仅 CANCELLED（调用线程被中断）返回 null
    */
   static ProviderException mapTransportException(TransportException exception) {
     if (exception == null) {
@@ -51,13 +50,6 @@ final class GeminiErrorMapper {
     }
     if (ProviderErrorHelper.isSilentTransportKind(exception.kind())) {
       return null;
-    }
-    if (exception.kind() == TransportErrorKind.EXECUTOR_REJECTED) {
-      return new ProviderException(
-          ProviderErrorKind.TRANSIENT, "Gemini executor rejected the request");
-    }
-    if (exception.kind() == TransportErrorKind.CALLBACK_FAILED) {
-      return new ProviderException(ProviderErrorKind.INVALID_RESPONSE, MSG_INVALID_RESPONSE);
     }
     if (exception.kind() == TransportErrorKind.TIMEOUT) {
       return new ProviderException(ProviderErrorKind.TRANSIENT, "Gemini request timed out");

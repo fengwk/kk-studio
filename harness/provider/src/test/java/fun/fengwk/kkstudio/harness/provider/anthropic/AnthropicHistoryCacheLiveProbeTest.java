@@ -11,12 +11,9 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ObjectNode;
 
-import fun.fengwk.kkstudio.harness.provider.transport.HttpOpenMetadata;
-import fun.fengwk.kkstudio.harness.provider.transport.HttpSseCallback;
 import fun.fengwk.kkstudio.harness.provider.transport.HttpSseLimits;
 import fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransport;
 import fun.fengwk.kkstudio.harness.provider.transport.ServerSentEvent;
-import fun.fengwk.kkstudio.harness.provider.transport.TransportException;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
@@ -30,7 +27,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
@@ -49,12 +45,11 @@ import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Flow;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Predicate;
 
 /**
  * 显式付费门禁的历史端点 A/B 测量；仅访问 TEST_ANTHROPIC 凭据指向的线路，不重试。
@@ -111,10 +106,9 @@ class AnthropicHistoryCacheLiveProbeTest {
             .connectTimeout(Duration.ofSeconds(30))
             .followRedirects(HttpClient.Redirect.NEVER)
             .build()) {
-      ExecutorService workers = Executors.newCachedThreadPool();
       ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
       try {
-        ProbeTransport transport = new ProbeTransport(client, workers, scheduler);
+        ProbeTransport transport = new ProbeTransport(client, scheduler);
         ProviderDescriptor descriptor = descriptor(base);
         AnthropicModelProvider provider =
             new AnthropicModelProvider(
@@ -143,7 +137,6 @@ class AnthropicHistoryCacheLiveProbeTest {
         }
         System.out.println("classification=OBSERVED calls=" + transport.calls);
       } finally {
-        workers.shutdownNow();
         scheduler.shutdownNow();
       }
     } catch (AssertionError failure) {
@@ -160,28 +153,26 @@ class AnthropicHistoryCacheLiveProbeTest {
     CountDownLatch done = new CountDownLatch(1);
     AtomicReference<ProviderCompletion> result = new AtomicReference<>();
     AtomicReference<String> error = new AtomicReference<>();
-    ProviderStream stream =
-        provider.stream(
-            request,
-            new ProviderStreamHandler() {
-              @Override
-              public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
+    provider.stream(
+        request,
+        new ProviderStreamHandler() {
+          @Override
+          public void onEvent(ProviderStreamEvent event) {}
 
-              @Override
-              public void onComplete(ProviderCompletion completion, ProviderStream stream) {
-                result.set(completion);
-                done.countDown();
-              }
+          @Override
+          public void onComplete(ProviderCompletion completion) {
+            result.set(completion);
+            done.countDown();
+          }
 
-              @Override
-              public void onError(ProviderException failure, ProviderStream stream) {
-                error.set(failure.kind().name());
-                done.countDown();
-              }
-            });
-    if (!done.await(125, TimeUnit.SECONDS)) {
-      stream.cancel();
-      throw new AssertionError("classification=TIMEOUT calls=" + transport.calls);
+          @Override
+          public void onError(ProviderException failure) {
+            error.set(failure.kind().name());
+            done.countDown();
+          }
+        });
+    if (done.getCount() > 0) {
+      throw new AssertionError("classification=NO_TERMINAL calls=" + transport.calls);
     }
     if (error.get() != null) {
       throw new AssertionError("classification=" + error.get() + " calls=" + transport.calls);
@@ -318,17 +309,16 @@ class AnthropicHistoryCacheLiveProbeTest {
     private String group;
     private int calls;
 
-    private ProbeTransport(
-        HttpClient client, ExecutorService workers, ScheduledExecutorService scheduler) {
-      super(client, workers, scheduler);
+    private ProbeTransport(HttpClient client, ScheduledExecutorService scheduler) {
+      super(client, scheduler);
     }
 
     @Override
-    public ProviderStream stream(
+    public void execute(
         HttpRequest request,
         ModelCallTimeoutPolicy timeout,
         HttpSseLimits limits,
-        HttpSseCallback callback) {
+        Predicate<ServerSentEvent> onEvent) {
       try {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         request
@@ -381,32 +371,7 @@ class AnthropicHistoryCacheLiveProbeTest {
             .map()
             .forEach((name, values) -> values.forEach(value -> outgoing.header(name, value)));
         calls++;
-        return super.stream(
-            outgoing.build(),
-            timeout,
-            limits,
-            new HttpSseCallback() {
-              @Override
-              public void onOpen(HttpOpenMetadata metadata) {
-                System.out.println("status=" + metadata.statusCode());
-                callback.onOpen(metadata);
-              }
-
-              @Override
-              public void onEvent(ServerSentEvent event) {
-                callback.onEvent(event);
-              }
-
-              @Override
-              public void onComplete() {
-                callback.onComplete();
-              }
-
-              @Override
-              public void onFailure(TransportException failure) {
-                callback.onFailure(failure);
-              }
-            });
+        super.execute(outgoing.build(), timeout, limits, onEvent);
       } catch (AssertionError failure) {
         throw failure;
       } catch (Exception failure) {

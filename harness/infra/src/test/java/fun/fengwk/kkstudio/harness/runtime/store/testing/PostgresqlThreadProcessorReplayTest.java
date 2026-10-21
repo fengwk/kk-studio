@@ -107,8 +107,6 @@ class PostgresqlThreadProcessorReplayTest {
                       T2,
                       T2));
               var model = tx.lockModelInvocation(id).orElseThrow();
-              tx.updateModelInvocation(model.beginDispatch(T2));
-              model = tx.lockModelInvocation(id).orElseThrow();
               tx.updateModelInvocation(model.markRunning(T2));
               model = tx.lockModelInvocation(id).orElseThrow();
               tx.updateModelInvocation(model.succeed(response, null, replay, T2));
@@ -148,9 +146,7 @@ class PostgresqlThreadProcessorReplayTest {
           for (ToolInvocation sibling : siblings) {
             var ready = sibling.markApprovalNotRequired(T3);
             tx.updateToolInvocations(List.of(ready));
-            var dispatching = ready.beginDispatch(T3);
-            tx.updateToolInvocations(List.of(dispatching));
-            var running = dispatching.markRunning(T3);
+            var running = ready.markRunning(T3);
             tx.updateToolInvocations(List.of(running));
             tx.updateToolInvocations(
                 List.of(

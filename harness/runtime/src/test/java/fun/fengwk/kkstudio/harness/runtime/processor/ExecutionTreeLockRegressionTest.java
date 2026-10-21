@@ -20,6 +20,7 @@ import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryBackoffStrategy;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
@@ -89,13 +90,11 @@ class ExecutionTreeLockRegressionTest {
             null,
             null);
 
-    // 请求 MODEL work 并推进为 DISPATCHING 前置状态
+    // 请求 MODEL work（READY 状态由 execution.markRunning 推进）
     store.transaction(
         tx -> {
           tx.lockThread(openTurn.threadId());
-          ModelInvocation model = tx.lockModelInvocation(invocationId).orElseThrow();
           tx.requestWork(new WorkTarget(WorkTargetType.MODEL, invocationId));
-          tx.updateModelInvocation(model.beginDispatch(NOW));
           return null;
         });
 
@@ -124,16 +123,7 @@ class ExecutionTreeLockRegressionTest {
             Runnable::run,
             ignored -> {});
 
-    ModelGateway.Handle handle =
-        new ModelGateway.Handle() {
-          @Override
-          public void cancel() {}
-
-          @Override
-          public void activate() {}
-        };
-
-    assertEquals(ProcessResult.STARTED, execution.activate(handle));
+    assertTrue(execution.markRunning());
 
     // markRunning 事务：本 Thread -> Model -> Work，无树锁
     assertFalse(recordingStore.recordedOperations().isEmpty());
@@ -149,8 +139,9 @@ class ExecutionTreeLockRegressionTest {
     recordingStore.clearLogs();
 
     // 触发失败终态
-    execution.onFailed(
-        new ModelInvocationError(ProviderErrorKind.INVALID_REQUEST, "invalid input"));
+    execution.finish(
+        new ModelGateway.Failed(
+            new ModelInvocationError(ProviderErrorKind.INVALID_REQUEST, "invalid input")));
 
     ModelInvocation terminalModel =
         store.transaction(tx -> tx.findModelInvocation(invocationId)).orElseThrow();
@@ -199,9 +190,7 @@ class ExecutionTreeLockRegressionTest {
     store.transaction(
         tx -> {
           tx.lockThread(openTurn.threadId());
-          ModelInvocation model = tx.lockModelInvocation(invocationId).orElseThrow();
           tx.requestWork(new WorkTarget(WorkTargetType.MODEL, invocationId));
-          tx.updateModelInvocation(model.beginDispatch(NOW));
           return null;
         });
 
@@ -231,16 +220,7 @@ class ExecutionTreeLockRegressionTest {
             Runnable::run,
             ignored -> {});
 
-    ModelGateway.Handle handle =
-        new ModelGateway.Handle() {
-          @Override
-          public void cancel() {}
-
-          @Override
-          public void activate() {}
-        };
-
-    assertEquals(ProcessResult.STARTED, execution.activate(handle));
+    assertTrue(execution.markRunning());
     recordingStore.clearLogs();
 
     execution.onEvent(new ProviderStreamEvent.TextDelta("hello "));
@@ -248,7 +228,7 @@ class ExecutionTreeLockRegressionTest {
     assertTrue(
         recordingStore.recordedOperations().isEmpty(), "deltas alone must not touch the store");
 
-    execution.deliverCheckpoint(0, true);
+    execution.requestCheckpoint(1);
 
     List<List<String>> txLogs = recordingStore.recordedOperations();
     assertEquals(1, txLogs.size(), "exactly one checkpoint transaction");
@@ -259,7 +239,7 @@ class ExecutionTreeLockRegressionTest {
         "checkpoint must lock Model then Work only, with no tree lock");
   }
 
-  /** 测试意图：ToolExecution 激活异常路径的 markRunning 与终态回写只锁本 Thread 的 Thread/Tool/Work， 不取执行树锁。 */
+  /** 测试意图：ToolExecution 的 markRunning 与终态回写只锁本 Thread 的 Thread/Tool/Work，不取执行树锁。 */
   @Test
   void toolExecutionTerminalPathTakesNoTreeLock() {
     ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.fixture();
@@ -269,7 +249,7 @@ class ExecutionTreeLockRegressionTest {
     ClaimedWork claim =
         ToolProcessorTestSupport.claim(
             fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
-    ToolProcessorTestSupport.toDispatched(
+    ToolProcessorTestSupport.toApproved(
         fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
 
     ToolExecution execution =
@@ -290,19 +270,22 @@ class ExecutionTreeLockRegressionTest {
             Runnable::run,
             ignored -> {});
 
-    ToolGateway.Handle failingActivation =
-        new ToolGateway.Handle() {
-          @Override
-          public void cancel() {}
-
-          @Override
-          public void activate() {
-            throw new IllegalStateException("gateway activation failed");
-          }
-        };
+    ToolProcessorTestSupport.FakeRun run =
+        new ToolProcessorTestSupport.FakeRun(
+            progress ->
+                new ToolGateway.Unknown(new ToolInvocationError("REMOTE_UNCERTAIN", "uncertain")));
 
     recordingStore.clearLogs();
-    assertEquals(ProcessResult.TERMINATED, execution.activate(failingActivation));
+    assertEquals(ProcessResult.STARTED, execution.start(run));
+    try {
+      ToolProcessorTestSupport.awaitTrue(
+          () ->
+              ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status()
+                  == ToolInvocationStatus.UNKNOWN,
+          Duration.ofSeconds(5));
+    } catch (InterruptedException interrupted) {
+      throw new AssertionError(interrupted);
+    }
 
     ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
     assertEquals(ToolInvocationStatus.UNKNOWN, tool.status());

@@ -2,13 +2,10 @@ package fun.fengwk.kkstudio.platform.catalog.mcp.runtime;
 
 import lombok.extern.slf4j.Slf4j;
 
-import fun.fengwk.kkstudio.harness.builtin.CompletedToolExecutionHandle;
-import fun.fengwk.kkstudio.harness.common.concurrent.QuiescentFutureTask;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
 import fun.fengwk.kkstudio.harness.mcp.McpCancellationToken;
 import fun.fengwk.kkstudio.harness.mcp.McpCancelledException;
@@ -30,10 +27,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.concurrent.CompletionStage;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BiFunction;
+import java.util.function.Consumer;
 import java.util.function.Function;
 
 /**
@@ -55,7 +50,6 @@ public final class RemoteMcpExecutableTool implements Tool {
   private final String toolName;
   private final String sourceName;
   private final McpServerRepository repository;
-  private final ExecutorService executor;
   private final BiFunction<RemoteMcpConfig, McpDeadline, McpClient> clientProvider;
   private final Function<String, String> envProvider;
 
@@ -64,15 +58,13 @@ public final class RemoteMcpExecutableTool implements Tool {
       String serverName,
       String toolName,
       String sourceName,
-      McpServerRepository repository,
-      ExecutorService executor) {
+      McpServerRepository repository) {
     this(
         descriptor,
         serverName,
         toolName,
         sourceName,
         repository,
-        executor,
         McpClientFactory::createRemote,
         System::getenv);
   }
@@ -83,7 +75,6 @@ public final class RemoteMcpExecutableTool implements Tool {
       String toolName,
       String sourceName,
       McpServerRepository repository,
-      ExecutorService executor,
       BiFunction<RemoteMcpConfig, McpDeadline, McpClient> clientProvider,
       Function<String, String> envProvider) {
     this.descriptor = Objects.requireNonNull(descriptor, "descriptor");
@@ -94,7 +85,6 @@ public final class RemoteMcpExecutableTool implements Tool {
     }
     this.sourceName = sourceName;
     this.repository = Objects.requireNonNull(repository, "repository");
-    this.executor = Objects.requireNonNull(executor, "executor");
     this.clientProvider = Objects.requireNonNull(clientProvider, "clientProvider");
     this.envProvider = Objects.requireNonNull(envProvider, "envProvider");
   }
@@ -109,15 +99,19 @@ public final class RemoteMcpExecutableTool implements Tool {
     return ToolRequirements.none();
   }
 
+  /**
+   * 阻塞调用远端 MCP 工具：client 在本线程内创建并于退出时关闭，因此调用线程返回即本地资源静止。线程被中断时取消令牌、关闭 client 并抛出 {@link
+   * InterruptedException}。
+   */
   @Override
-  public ToolExecutionHandle execute(ToolExecutionRequest request, ToolExecutionListener listener) {
+  public ToolOutcome execute(ToolExecutionRequest request, Consumer<ToolResult> progress)
+      throws InterruptedException {
     Objects.requireNonNull(request, "request");
-    Objects.requireNonNull(listener, "listener");
 
     Optional<McpServer> serverOpt = repository.getByName(serverName);
     Optional<McpTool> toolOpt = repository.getTool(toolName);
     if (serverOpt.isEmpty() || toolOpt.isEmpty()) {
-      return staleConfiguration(request, listener);
+      return staleConfiguration(request);
     }
 
     McpServer server = serverOpt.get();
@@ -125,89 +119,45 @@ public final class RemoteMcpExecutableTool implements Tool {
     if (!server.isEnabled()
         || server.getDiscoveryStatus() != McpDiscoveryStatus.AVAILABLE
         || !serverName.equals(tool.getServerName())) {
-      return staleConfiguration(request, listener);
+      return staleConfiguration(request);
     }
 
     // MCP 工具没有 arguments 级超时契约：有效超时即 definition 默认值（Server timeout 配置），
     // 已由 Tool SPI 在执行前解析一次；这里不再与 DB 当前值做二次 min clamp。
     McpDeadline deadline = McpDeadline.of(request.timeout());
     McpCancellationToken token = new McpCancellationToken();
-    AtomicBoolean completed = new AtomicBoolean(false);
-
-    // 真实静止事实来自 run-finally：MCP client 的关闭在工作体退出时发生，取消不得提前宣告本地资源静止。
-    QuiescentFutureTask<Void> worker =
-        new QuiescentFutureTask<>(
-            () -> {
-              try {
-                Map<String, String> resolvedHeaders =
-                    McpConfigParser.resolveHeaders(server.getHeaders(), envProvider);
-                RemoteMcpConfig config = new RemoteMcpConfig(server.getUrl(), resolvedHeaders);
-                try (McpClient client = clientProvider.apply(config, deadline)) {
-                  if (token.isCancelled()) {
-                    return;
-                  }
-                  McpToolCallResult outcome =
-                      client.callTool(sourceName, request.call().argumentsJson(), deadline, token);
-                  if (completed.compareAndSet(false, true)) {
-                    listener.onComplete(
-                        new ToolResult(
-                            request.call().id(),
-                            outcome.contents(),
-                            outcome.error(),
-                            outcome.detailsJson()));
-                  }
-                }
-              } catch (McpCancelledException cancelled) {
-                // 取消无需完成回调
-              } catch (McpTimeoutException timeout) {
-                if (completed.compareAndSet(false, true)) {
-                  listener.onComplete(
-                      new ToolResult(
-                          request.call().id(),
-                          List.of(new TextResultContent(TIMEOUT_MESSAGE)),
-                          true,
-                          "{}"));
-                }
-              } catch (RuntimeException error) {
-                if (completed.compareAndSet(false, true)) {
-                  listener.onComplete(
-                      new ToolResult(
-                          request.call().id(),
-                          List.of(new TextResultContent(FAILED_MESSAGE)),
-                          true,
-                          "{}"));
-                }
-              }
-            });
-    executor.execute(worker);
-
-    return new ToolExecutionHandle() {
-      @Override
-      public void cancel() {
+    try {
+      Map<String, String> resolvedHeaders =
+          McpConfigParser.resolveHeaders(server.getHeaders(), envProvider);
+      RemoteMcpConfig config = new RemoteMcpConfig(server.getUrl(), resolvedHeaders);
+      try (McpClient client = clientProvider.apply(config, deadline)) {
+        McpToolCallResult outcome =
+            client.callTool(sourceName, request.call().argumentsJson(), deadline, token);
+        return ToolOutcome.withoutEffects(
+            new ToolResult(
+                request.call().id(), outcome.contents(), outcome.error(), outcome.detailsJson()));
+      }
+    } catch (McpTimeoutException timeout) {
+      return error(request, TIMEOUT_MESSAGE);
+    } catch (RuntimeException failure) {
+      // client 已由 try-with-resources 关闭；中断是取消的唯一来源。
+      if (Thread.interrupted()) {
         token.cancel();
-        worker.cancel(true);
+        throw new InterruptedException();
       }
-
-      @Override
-      public boolean isCancelled() {
-        return token.isCancelled();
+      if (failure instanceof McpCancelledException) {
+        throw new InterruptedException();
       }
-
-      @Override
-      public CompletionStage<Void> quiescence() {
-        return worker.quiescence();
-      }
-    };
+      return error(request, FAILED_MESSAGE);
+    }
   }
 
-  private static ToolExecutionHandle staleConfiguration(
-      ToolExecutionRequest request, ToolExecutionListener listener) {
-    listener.onComplete(
-        new ToolResult(
-            request.call().id(),
-            List.of(new TextResultContent(CONFIG_CHANGED_MESSAGE)),
-            true,
-            "{}"));
-    return CompletedToolExecutionHandle.INSTANCE;
+  private static ToolOutcome staleConfiguration(ToolExecutionRequest request) {
+    return error(request, CONFIG_CHANGED_MESSAGE);
+  }
+
+  private static ToolOutcome error(ToolExecutionRequest request, String message) {
+    return ToolOutcome.withoutEffects(
+        new ToolResult(request.call().id(), List.of(new TextResultContent(message)), true, "{}"));
   }
 }

@@ -157,7 +157,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
@@ -1120,7 +1119,7 @@ class DatabaseTurnResolverTest {
     // 意图：验证动态 MCP 工具能通过 RuntimeToolCatalog 正常解析到 ModelRequestSpec 的 tool bindings 中，同时
     // HarnessCatalog 中的静态 context projectors 依然正常工作
     McpServerRepository repo = mock(McpServerRepository.class);
-    McpToolCatalog mcpCatalog = new McpToolCatalog(repo, mock(ExecutorService.class));
+    McpToolCatalog mcpCatalog = new McpToolCatalog(repo);
 
     McpServer server = new McpServer();
     server.setName("srv");
@@ -1209,7 +1208,7 @@ class DatabaseTurnResolverTest {
         when(repo.listAllServers()).thenReturn(List.of(unavailableServer));
         when(repo.listTools("srv")).thenReturn(List.of(echo, sibling));
 
-        McpToolCatalog mcpCatalog = new McpToolCatalog(repo, mock(ExecutorService.class));
+        McpToolCatalog mcpCatalog = new McpToolCatalog(repo);
         RuntimeToolCatalogSource toolCatalogSource =
             TestRuntimeToolCatalogSource.of(staticCatalog, mcpCatalog);
 
@@ -1258,8 +1257,7 @@ class DatabaseTurnResolverTest {
     McpServerRepository emptyRepo = mock(McpServerRepository.class);
     when(emptyRepo.getTool("mcp_srv_echo")).thenReturn(Optional.empty());
     RuntimeToolCatalogSource missingToolSource =
-        TestRuntimeToolCatalogSource.of(
-            staticCatalog, new McpToolCatalog(emptyRepo, mock(ExecutorService.class)));
+        TestRuntimeToolCatalogSource.of(staticCatalog, new McpToolCatalog(emptyRepo));
     Fixture missingToolFixture =
         new Fixture(
             List.of("mcp_srv_echo"),

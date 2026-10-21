@@ -101,8 +101,6 @@ class PostgresqlAssistantErrorSettlementTest {
                       T2));
               // 与生产一致：dispatch 已开始、上游返回 HTTP 404，invocation 终结为 FAILED(INVALID_REQUEST)。
               var model = tx.lockModelInvocation(id).orElseThrow();
-              tx.updateModelInvocation(model.beginDispatch(T2));
-              model = tx.lockModelInvocation(id).orElseThrow();
               tx.updateModelInvocation(model.markRunning(T2));
               model = tx.lockModelInvocation(id).orElseThrow();
               tx.updateModelInvocation(model.fail(error, T2));

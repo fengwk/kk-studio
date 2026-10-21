@@ -24,7 +24,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.concurrent.ExecutorService;
 
 /**
  * 动态 MCP 工具目录：每次调用现读 DB 的 MCP 持久化行并映射为可执行 {@link ToolContribution}。
@@ -46,11 +45,9 @@ public final class McpToolCatalog implements RuntimeToolCatalog {
   public static final String RENDERER_KEY = "tool";
 
   private final McpServerRepository repository;
-  private final ExecutorService executor;
 
-  public McpToolCatalog(McpServerRepository repository, ExecutorService executor) {
+  public McpToolCatalog(McpServerRepository repository) {
     this.repository = Objects.requireNonNull(repository, "repository");
-    this.executor = Objects.requireNonNull(executor, "executor");
   }
 
   @Override
@@ -168,12 +165,7 @@ public final class McpToolCatalog implements RuntimeToolCatalog {
     AgentToolDefinition definition = new AgentToolDefinition(descriptor, ToolVisibility.SELECTABLE);
     Tool executable =
         new RemoteMcpExecutableTool(
-            descriptor,
-            tool.getServerName(),
-            tool.getName(),
-            tool.getSourceName(),
-            repository,
-            executor);
+            descriptor, tool.getServerName(), tool.getName(), tool.getSourceName(), repository);
 
     return new ToolContribution(
         new ContributionId(CONTRIBUTOR_ID, localName(tool.getName())),

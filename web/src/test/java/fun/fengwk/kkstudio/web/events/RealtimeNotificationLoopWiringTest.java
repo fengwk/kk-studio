@@ -34,6 +34,7 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -59,7 +60,8 @@ class RealtimeNotificationLoopWiringTest {
             (origin, thread, payloadId) -> {
               throw new AssertionError("small event must not fetch an oversize payload");
             },
-            new RealtimePayloadBuffer());
+            new RealtimePayloadBuffer(),
+            Executors.newVirtualThreadPerTaskExecutor());
     RealtimeEvent event = modelDelta("remote");
     CountDownLatch delivered = new CountDownLatch(1);
     bus.subscribe(THREAD, ignored -> delivered.countDown(), () -> {});
@@ -124,7 +126,8 @@ class RealtimeNotificationLoopWiringTest {
             (origin, thread, payloadId) -> {
               throw new AssertionError("catchup notifications must not fetch an oversize payload");
             },
-            new RealtimePayloadBuffer());
+            new RealtimePayloadBuffer(),
+            Executors.newVirtualThreadPerTaskExecutor());
     HarnessStreamCatchupNotificationCodec catchupCodec =
         new HarnessStreamCatchupNotificationCodec();
     String payload =

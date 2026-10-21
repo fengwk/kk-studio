@@ -1105,7 +1105,6 @@ create table harness_model_invocation (
     constraint ck_harness_model_invocation_status check (
         status in (
             'READY',
-            'DISPATCHING',
             'RUNNING',
             'SUCCEEDED',
             'FAILED',
@@ -1127,14 +1126,14 @@ create table harness_model_invocation (
     )
 );
 
-comment on table harness_model_invocation is 'ModelInvocation：一次 model turn 的 durable 生命周期记录（READY/DISPATCHING/RUNNING 与四个 terminal）';
+comment on table harness_model_invocation is 'ModelInvocation：一次 model turn 的 durable 生命周期记录（READY/RUNNING 与四个 terminal）';
 comment on column harness_model_invocation.id is 'ModelInvocation 的全局唯一 UUID';
 comment on column harness_model_invocation.thread_id is '所属 Thread';
 comment on column harness_model_invocation.turn_start_entry_id is '本次 turn 的 TURN_START Entry';
 comment on column harness_model_invocation.request_head_entry_id is '创建时的 Thread head（request 头 Entry CAS 快照）';
 comment on column harness_model_invocation.request_spec is '冻结的 model 请求规格（JSON object）';
 comment on column harness_model_invocation.status is '生命周期状态';
-comment on column harness_model_invocation.attempt is '已确认的 start 尝试次数（从 0 递增）';
+comment on column harness_model_invocation.attempt is '已持久化 RUNNING 的执行次数（从 0 递增，先于请求发出）';
 comment on column harness_model_invocation.stream_checkpoint is 'RUNNING 流式断点（JSON object，可空）';
 comment on column harness_model_invocation.result is 'terminal 成功结果（JSON object，与 error 互斥）';
 comment on column harness_model_invocation.error is 'terminal 失败错误（JSON object，与 result 互斥）';
@@ -1176,7 +1175,6 @@ create table harness_tool_invocation (
             'WAITING_APPROVAL',
             'WAITING_INPUT',
             'READY',
-            'DISPATCHING',
             'RUNNING',
             'SUCCEEDED',
             'FAILED',
@@ -1232,7 +1230,7 @@ comment on column harness_tool_invocation.input_receipt is '交互回执（JSON 
 
 create index idx_harness_tool_invocation_model_nonterminal
     on harness_tool_invocation (model_invocation_id)
-    where status in ('WAITING_APPROVAL', 'WAITING_INPUT', 'READY', 'DISPATCHING', 'RUNNING');
+    where status in ('WAITING_APPROVAL', 'WAITING_INPUT', 'READY', 'RUNNING');
 
 comment on index idx_harness_tool_invocation_model_nonterminal is '未收尾 ToolInvocation 按所属 ModelInvocation 的查找路径（已终态行在 batch apply 后物理删除，不需要覆盖）';
 

@@ -104,20 +104,6 @@ class HarnessRuntimeStopModelTest {
   }
 
   @Test
-  void dispatchingModelStopAppendsBarrierAndDeletesTheModelRow() {
-    HarnessRuntimeTestSupport.ModelBaseline baseline =
-        seedModel(store, ModelInvocationStatus.DISPATCHING);
-    StopResult result = runtime.stop(new StopCommand(baseline.threadId(), TestIds.id(1), 0));
-    assertStopped(result);
-    // Model row 在 stopModel 同一事务内被物理删除；只能通过 Entry path 校验 barrier + STOPPED TURN_END。
-    assertTrue(store.transaction(tx -> tx.findModelInvocation(baseline.modelId())).isEmpty());
-    EntryPath path = pathOf(baseline.threadId());
-    assertTrue(path.entries().get(3).payload() instanceof AssistantErrorPayload);
-    assertTrue(path.head().payload() instanceof TurnEndPayload);
-    assertEquals(TurnEndOutcome.STOPPED, ((TurnEndPayload) path.head().payload()).outcome());
-  }
-
-  @Test
   void runningModelStopAppendsBarrierWithCANCELLEDErrorAndDeletesTheModelRow() {
     HarnessRuntimeTestSupport.ModelBaseline baseline =
         seedModel(store, ModelInvocationStatus.RUNNING);

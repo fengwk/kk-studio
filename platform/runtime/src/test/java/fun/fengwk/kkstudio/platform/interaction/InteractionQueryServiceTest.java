@@ -20,11 +20,15 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeNotFoundException;
 import fun.fengwk.kkstudio.harness.runtime.ThreadSnapshot;
+import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.runtime.history.EntryPath;
 import fun.fengwk.kkstudio.harness.runtime.interaction.PendingEnvironmentWait;
 import fun.fengwk.kkstudio.harness.runtime.interaction.PendingEnvironmentWaitPage;
 import fun.fengwk.kkstudio.harness.runtime.interaction.PendingInteraction;
 import fun.fengwk.kkstudio.harness.runtime.interaction.PendingInteractionPage;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatRepository;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatSession;
@@ -37,6 +41,7 @@ import fun.fengwk.kkstudio.project.model.IssueAgentThread;
 import fun.fengwk.kkstudio.project.repo.IssueAgentThreadRepository;
 import fun.fengwk.kkstudio.project.repo.IssueRepository;
 import fun.fengwk.kkstudio.share.ai.interaction.InteractionDTO;
+import fun.fengwk.kkstudio.share.ai.interaction.InteractionOwnerDTO;
 import fun.fengwk.kkstudio.share.ai.interaction.InteractionPageDTO;
 
 import java.time.Instant;
@@ -785,6 +790,45 @@ class InteractionQueryServiceTest {
     assertEquals(0, page.getTotal());
     assertNull(page.getNextCursor());
     verifyNoInteractions(environmentRepository);
+  }
+
+  /** 测试意图：控制器/插件发起、没有 Chat 或 Issue 归属的独立任务根以 AGENT_TASK 暴露并计数，否则其审批无人可见、任务永久挂起。 */
+  @Test
+  void headlessAgentTaskRootIsExposedAsAgentTask() {
+    UUID rootThreadId = id(71);
+    UUID sessionId = id(72);
+    PendingInteraction approval =
+        waitingInput(id(73), rootThreadId, sessionId, Instant.EPOCH.plusSeconds(1));
+    when(runtime.findRootThreadId(rootThreadId)).thenReturn(Optional.of(rootThreadId));
+    ThreadState thread = mock(ThreadState.class);
+    when(thread.sessionId()).thenReturn(sessionId);
+    when(thread.name()).thenReturn("nightly report");
+    when(thread.spawnTrigger()).thenReturn(SpawnTrigger.CONTROLLER);
+    EntryPath entryPath = mock(EntryPath.class);
+    when(entryPath.baseSettings())
+        .thenReturn(new BranchSettings("worker", new ModelSelection("p", "m", "v1"), null));
+    ThreadSnapshot snapshot = mock(ThreadSnapshot.class);
+    when(snapshot.thread()).thenReturn(thread);
+    when(snapshot.entryPath()).thenReturn(entryPath);
+    when(runtime.getThreadSnapshot(rootThreadId)).thenReturn(snapshot);
+    when(chatSessionRepository.findBySessionId(sessionId)).thenReturn(null);
+    when(issueAgentThreadRepository.findByThreadId(rootThreadId)).thenReturn(null);
+    when(runtime.listPendingInteractions(Instant.EPOCH, ZERO_UUID, 5))
+        .thenReturn(new PendingInteractionPage(List.of(approval), false));
+    stubEnvironmentPage(Instant.EPOCH, ZERO_UUID, 5, List.of(), false);
+    stubCountPage(List.of(approval), false);
+    stubEnvironmentCountPage(List.of());
+
+    InteractionPageDTO page = service.listInteractions(null, null, 5);
+
+    assertEquals(1, page.getItems().size());
+    InteractionOwnerDTO owner = page.getItems().get(0).getOwner();
+    assertEquals("AGENT_TASK", owner.getType());
+    assertEquals("worker", owner.getAgentName());
+    assertEquals("nightly report", owner.getRootThreadName());
+    assertNull(owner.getChatId());
+    assertNull(owner.getIssueId());
+    assertEquals(1, page.getTotal());
   }
 
   /** 测试意图：验证构造函数的非空防御。 */

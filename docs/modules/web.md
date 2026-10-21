@@ -59,6 +59,7 @@ health、资源下载和 WebSocket 使用各自传输形式。公开路由如下
 | Harness command | `/api/command-batches`、`/api/threads/{threadId}/command-batches` | 创建型 Chat 命令接受（owner-aware）与既有 Thread 的 owner-free 续写；都返回 202 |
 | Session | `/api/sessions/{sessionId}` | threads、entries（含读取时 `usageCost`）、name、草稿/历史请求预览 |
 | Thread | `/api/threads/{threadId}` | Snapshot、执行树、name、Debug、协议预览、compact、yolo、stop、tool approval |
+| Agent task | `/api/agent-tasks`、`/{ticketId}`、`/{ticketId}/stop` | 提交独立执行的 Agent 任务（客户端 `ticketId` 为幂等键，同请求重放返回原任务，换内容被拒绝）、按票据观察状态与冻结结果、停止 |
 | Interaction | `/api/interactions` | 等待分页（`total` 是同一过滤条件下真实可见的待处理计数）与 `/{interactionId}/input` 人工提交 |
 | Canvas | `/api/canvases` | CRUD、Snapshot、commands、resource download/preview URL、节点 Function Run |
 | Function catalog | `/api/canvas-functions` | 函数 schema、输出计划、可用性 |
@@ -81,7 +82,7 @@ Session 的 `GET /api/sessions/{sessionId}/threads` 返回全部 Thread 摘要�
 命令 202 表示数据库已接受，执行由 dispatcher 异步推进。
 `/api/command-batches` 只服务创建型 `CHAT` owner（`NEW_SESSION` / `NEW_THREAD` / `NEW_FORKED_SESSION`；
 `ISSUE_AGENT` 由 Issue 工作流拥有，被该端点拒绝）；`/api/threads/{threadId}/command-batches`
-服务既有 Thread 的 owner-free 续写（path `threadId` + 精确 cursor，body 不带 owner 与 target）。
+服务既有 Thread 的 owner-free 续写（path `threadId`，body 不带 owner 与 target）：单条纯 `USER_MESSAGE` 批次不带 cursor（带了为 400），其余批次必须带精确 cursor。
 Issue 输入与控制通过工作流用例，人工审批/问卷通过交互入口。
 审批和问卷 actor 来自服务端认证主体；本地无认证模式使用固定 local-user。
 

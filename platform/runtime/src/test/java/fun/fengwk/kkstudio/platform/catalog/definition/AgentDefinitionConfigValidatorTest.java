@@ -16,12 +16,12 @@ import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
@@ -40,7 +40,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.ExecutorService;
+import java.util.function.Consumer;
 
 /** Agent 配置的校验：工具名必须来自运行时目录的当前 epoch 且对应可选择条目，且 skill 名必须遵守有界长度规则。 */
 class AgentDefinitionConfigValidatorTest {
@@ -164,7 +164,7 @@ class AgentDefinitionConfigValidatorTest {
   void acceptsDynamicMcpToolName() {
     // 意图：验证动态 MCP 工具按 mcp_tool.name 聚合到 RuntimeToolCatalog 后能够正常通过 Agent 配置校验
     McpServerRepository repo = mock(McpServerRepository.class);
-    McpToolCatalog mcpCatalog = new McpToolCatalog(repo, mock(ExecutorService.class));
+    McpToolCatalog mcpCatalog = new McpToolCatalog(repo);
 
     McpServer server = new McpServer();
     server.setName("test_server");
@@ -230,8 +230,7 @@ class AgentDefinitionConfigValidatorTest {
       }
 
       @Override
-      public ToolExecutionHandle execute(
-          ToolExecutionRequest request, ToolExecutionListener listener) {
+      public ToolOutcome execute(ToolExecutionRequest request, Consumer<ToolResult> progress) {
         throw new UnsupportedOperationException();
       }
     };

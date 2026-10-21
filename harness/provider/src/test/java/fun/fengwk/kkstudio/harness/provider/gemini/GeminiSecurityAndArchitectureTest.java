@@ -22,7 +22,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderImageBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
@@ -63,7 +62,7 @@ class GeminiSecurityAndArchitectureTest {
     httpClient = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build();
     workerExecutor = Executors.newSingleThreadExecutor();
     scheduler = Executors.newSingleThreadScheduledExecutor();
-    JdkHttpSseTransport transport = new JdkHttpSseTransport(httpClient, workerExecutor, scheduler);
+    JdkHttpSseTransport transport = new JdkHttpSseTransport(httpClient, scheduler);
 
     GeminiProviderAdapter adapter = new GeminiProviderAdapter(transport, sensitiveKey);
     assertFalse(adapter.toString().contains(sensitiveKey));
@@ -93,7 +92,7 @@ class GeminiSecurityAndArchitectureTest {
     httpClient = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build();
     workerExecutor = Executors.newSingleThreadExecutor();
     scheduler = Executors.newSingleThreadScheduledExecutor();
-    JdkHttpSseTransport transport = new JdkHttpSseTransport(httpClient, workerExecutor, scheduler);
+    JdkHttpSseTransport transport = new JdkHttpSseTransport(httpClient, scheduler);
 
     GeminiProviderAdapter adapter = new GeminiProviderAdapter(transport, "key");
     ProviderDescriptor anthropicDescriptor =
@@ -116,7 +115,7 @@ class GeminiSecurityAndArchitectureTest {
     httpClient = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build();
     workerExecutor = Executors.newSingleThreadExecutor();
     scheduler = Executors.newSingleThreadScheduledExecutor();
-    JdkHttpSseTransport transport = new JdkHttpSseTransport(httpClient, workerExecutor, scheduler);
+    JdkHttpSseTransport transport = new JdkHttpSseTransport(httpClient, scheduler);
     GeminiProviderAdapter adapter = new GeminiProviderAdapter(transport, "key");
 
     assertNotNull(adapter.create(descriptor("https://generativelanguage.googleapis.com/v1beta")));
@@ -146,7 +145,7 @@ class GeminiSecurityAndArchitectureTest {
     httpClient = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build();
     workerExecutor = Executors.newSingleThreadExecutor();
     scheduler = Executors.newSingleThreadScheduledExecutor();
-    JdkHttpSseTransport transport = new JdkHttpSseTransport(httpClient, workerExecutor, scheduler);
+    JdkHttpSseTransport transport = new JdkHttpSseTransport(httpClient, scheduler);
 
     GeminiProviderAdapter adapter = new GeminiProviderAdapter(transport, "key");
     assertEquals(ProviderType.GOOGLE, adapter.providerType());
@@ -207,13 +206,13 @@ class GeminiSecurityAndArchitectureTest {
     ProviderStreamHandler noop =
         new ProviderStreamHandler() {
           @Override
-          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
+          public void onEvent(ProviderStreamEvent event) {}
 
           @Override
-          public void onError(ProviderException error, ProviderStream stream) {}
+          public void onError(ProviderException error) {}
 
           @Override
-          public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
+          public void onComplete(ProviderCompletion completion) {}
         };
     ProviderRequest req =
         new ProviderRequest(

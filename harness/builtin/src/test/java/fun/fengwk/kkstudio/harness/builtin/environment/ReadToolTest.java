@@ -2,12 +2,10 @@ package fun.fengwk.kkstudio.harness.builtin.environment;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verify;
 
 import org.junit.jupiter.api.Test;
 
@@ -18,8 +16,6 @@ import fun.fengwk.kkstudio.harness.contributor.api.BoundEnvironment;
 import fun.fengwk.kkstudio.harness.contributor.api.BranchView;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionContext;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolHistoryRenderRequest;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolHistoryRenderer;
@@ -35,9 +31,11 @@ import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 /**
  * 统一 {@link ReadTool} 的契约与行为测试。
@@ -59,7 +57,7 @@ class ReadToolTest {
   /** 验证 descriptor 完全复用 fs.read capability 的 schema 与默认超时，且 name/rendererKey 固定为 read。 */
   @Test
   void descriptorMatchesFsReadCapabilitySpecification() {
-    ReadTool tool = new ReadTool((request, listener) -> null);
+    ReadTool tool = new ReadTool((request, progress) -> null);
     ToolDescriptor descriptor = tool.descriptor();
 
     assertEquals(ReadTool.NAME, descriptor.name());
@@ -79,7 +77,7 @@ class ReadToolTest {
   /** 验证 requirements 声明为 optionalEnvironment（无绑定时由实现方处理，有绑定时可使用 BoundEnvironment）。 */
   @Test
   void requirementsDeclareOptionalEnvironment() {
-    ReadTool tool = new ReadTool((request, listener) -> null);
+    ReadTool tool = new ReadTool((request, progress) -> null);
     assertEquals(ToolRequirements.optionalEnvironment(), tool.requirements());
     assertEquals(EnvironmentSupport.OPTIONAL, tool.requirements().environmentSupport());
   }
@@ -87,7 +85,7 @@ class ReadToolTest {
   /** 验证超时解析：缺省使用 capability 默认超时、显式正数严格使用覆盖值、非正数抛出 IllegalArgumentException。 */
   @Test
   void resolveTimeoutFollowsCapabilityTimeoutContract() {
-    ReadTool tool = new ReadTool((request, listener) -> null);
+    ReadTool tool = new ReadTool((request, progress) -> null);
 
     // 缺省 timeout_seconds
     ToolCall defaultCall = new ToolCall("c1", "read", "{\"path\":\"file.txt\"}");
@@ -110,7 +108,7 @@ class ReadToolTest {
   /** 验证 historyRenderer 存在且提供 fs.read 动作渲染语义。 */
   @Test
   void historyRendererMatchesFsReadAction() {
-    ReadTool tool = new ReadTool((request, listener) -> null);
+    ReadTool tool = new ReadTool((request, progress) -> null);
     Optional<ToolHistoryRenderer> renderer = tool.historyRenderer();
 
     assertTrue(renderer.isPresent());
@@ -120,18 +118,18 @@ class ReadToolTest {
     assertEquals(Optional.of("read src/App.java"), renderer.get().render(renderRequest));
   }
 
-  /** 验证 execute 委托给注入的 executor，并把包装后的 listener 事件原样转发给原始 listener。 */
+  /** 验证 execute 委托给注入的 executor，原样转发 progress，并返回 executor 的结果。 */
   @Test
-  void executeDelegatesToInjectedExecutorAndForwardsEvents() {
+  void executeDelegatesToInjectedExecutorAndForwardsProgress() throws Exception {
     AtomicReference<ToolExecutionRequest> capturedRequest = new AtomicReference<>();
-    AtomicReference<ToolExecutionListener> capturedListener = new AtomicReference<>();
-    ToolExecutionHandle mockHandle = mock(ToolExecutionHandle.class);
+    AtomicReference<Consumer<ToolResult>> capturedProgress = new AtomicReference<>();
+    ToolResult expected = okResult();
 
     ReadToolExecutor fakeExecutor =
-        (request, listener) -> {
+        (request, progress) -> {
           capturedRequest.set(request);
-          capturedListener.set(listener);
-          return mockHandle;
+          capturedProgress.set(progress);
+          return expected;
         };
 
     ReadTool tool = new ReadTool(fakeExecutor);
@@ -140,30 +138,26 @@ class ReadToolTest {
             tool.descriptor(),
             new ToolCall("c1", "read", "{\"path\":\"/srv/repo/file.txt\"}"),
             Duration.ZERO);
-    ToolExecutionListener listener = mock(ToolExecutionListener.class);
+    Consumer<ToolResult> progress = partial -> {};
 
-    ToolExecutionHandle handle = tool.execute(request, listener);
+    ToolOutcome outcome = tool.execute(request, progress);
 
-    assertSame(mockHandle, handle);
+    assertSame(expected, outcome.result());
     assertSame(request, capturedRequest.get());
-    assertNotNull(capturedListener.get());
-    IllegalStateException failure = new IllegalStateException("boom");
-    capturedListener.get().onError(failure);
-    verify(listener).onError(failure);
+    assertSame(progress, capturedProgress.get());
   }
 
-  /** 验证 execute 校验 request 与 listener 非空。 */
+  /** 验证 execute 校验 request 与 progress 非空。 */
   @Test
   void executeRequiresNonNullArguments() {
-    ReadTool tool = new ReadTool((request, listener) -> null);
+    ReadTool tool = new ReadTool((request, progress) -> null);
     ToolExecutionRequest request =
         new ToolExecutionRequest(
             tool.descriptor(),
             new ToolCall("c1", "read", "{\"path\":\"/srv/repo/file.txt\"}"),
             Duration.ZERO);
-    ToolExecutionListener listener = mock(ToolExecutionListener.class);
 
-    assertThrows(NullPointerException.class, () -> tool.execute(null, listener));
+    assertThrows(NullPointerException.class, () -> tool.execute(null, partial -> {}));
     assertThrows(NullPointerException.class, () -> tool.execute(request, null));
   }
 
@@ -172,7 +166,7 @@ class ReadToolTest {
   void executePropagatesExceptionsFromExecutor() {
     IllegalStateException failure = new IllegalStateException("executor failed");
     ReadToolExecutor failingExecutor =
-        (request, listener) -> {
+        (request, progress) -> {
           throw failure;
         };
 
@@ -182,17 +176,16 @@ class ReadToolTest {
             tool.descriptor(),
             new ToolCall("c1", "read", "{\"path\":\"/srv/repo/file.txt\"}"),
             Duration.ZERO);
-    ToolExecutionListener listener = mock(ToolExecutionListener.class);
 
     IllegalStateException thrown =
-        assertThrows(IllegalStateException.class, () -> tool.execute(request, listener));
+        assertThrows(IllegalStateException.class, () -> tool.execute(request, partial -> {}));
     assertSame(failure, thrown);
   }
 
   /** 验证 read 工具参数中携带已废弃的 workdir 时，在请求构造期抛出 IllegalArgumentException。 */
   @Test
   void executeRejectsWorkdirInArguments() {
-    ReadTool tool = new ReadTool((request, listener) -> null);
+    ReadTool tool = new ReadTool((request, progress) -> null);
     ToolCall callWithWorkdir =
         new ToolCall("c1", "read", "{\"path\":\"/srv/repo/file.txt\",\"workdir\":\"/srv/repo\"}");
     IllegalArgumentException error =
@@ -202,16 +195,16 @@ class ReadToolTest {
     assertTrue(error.getMessage().contains("workdir is not allowed"), error.getMessage());
   }
 
-  /** 验证 read 工具参数接受 kkstudio: resources 与 skills 两种稳定 URI 格式并成功构造委托请求。 */
+  /** 验证 read 工具参数接受 kkstudio: resources 与 skills 两种稳定 URI 格式并委托执行。 */
   @Test
-  void executeAcceptsKkstudioResourceAndSkillUris() {
+  void executeAcceptsKkstudioResourceAndSkillUris() throws Exception {
     AtomicReference<ToolExecutionRequest> capturedRequest = new AtomicReference<>();
-    ToolExecutionHandle mockHandle = mock(ToolExecutionHandle.class);
+    ToolResult ok = okResult();
     ReadTool tool =
         new ReadTool(
-            (request, listener) -> {
+            (request, progress) -> {
               capturedRequest.set(request);
-              return mockHandle;
+              return ok;
             });
 
     String resourceUri = "kkstudio:/resources/1f2e3d4c-5b6a-4c8d-9e0f-1a2b3c4d5e6f";
@@ -220,10 +213,8 @@ class ReadToolTest {
             tool.descriptor(),
             new ToolCall("c1", "read", "{\"path\":\"" + resourceUri + "\"}"),
             Duration.ZERO);
-    assertSame(mockHandle, tool.execute(resourceRequest, mock(ToolExecutionListener.class)));
-    assertEquals(
-        resourceUri,
-        capturedRequest.get().call().argumentsJson().contains(resourceUri) ? resourceUri : null);
+    assertSame(ok, tool.execute(resourceRequest, partial -> {}).result());
+    assertTrue(capturedRequest.get().call().argumentsJson().contains(resourceUri));
 
     String skillUri = "kkstudio:/skills/review/checklist/SKILL.md";
     ToolExecutionRequest skillRequest =
@@ -231,105 +222,76 @@ class ReadToolTest {
             tool.descriptor(),
             new ToolCall("c2", "read", "{\"path\":\"" + skillUri + "\"}"),
             Duration.ZERO);
-    assertSame(mockHandle, tool.execute(skillRequest, mock(ToolExecutionListener.class)));
+    assertSame(ok, tool.execute(skillRequest, partial -> {}).result());
   }
 
   /**
-   * read 的模型可见错误由 builtin wrapper 补足纠正指引：无绑定、空/非法 path、{@code kkstudio:} URI 声明未执行；仅本地路径且绑定
-   * Environment 时才可能进入 capability 执行，不得用 NOT_EXECUTED 掩盖潜在执行。
+   * read 的模型可见错误由 builtin 补足纠正指引：无绑定、空/非法 path、{@code kkstudio:} URI 声明未执行；仅本地路径且绑定 Environment
+   * 时才可能进入 capability 执行，不得用 NOT_EXECUTED 掩盖潜在执行。
    */
   @Test
-  void executeWrapsErrorResultsWithCorrectiveGuidance() {
-    AtomicReference<ToolExecutionListener> wrapped = new AtomicReference<>();
+  void executeWrapsErrorResultsWithCorrectiveGuidance() throws Exception {
     ReadTool tool =
-        new ReadTool(
-            (request, listener) -> {
-              wrapped.set(listener);
-              return mock(ToolExecutionHandle.class);
-            });
+        new ReadTool((request, progress) -> ToolResult.error("c1", "path must not be blank"));
 
     String localPath = "{\"path\":\"/srv/repo/file.txt\"}";
-    assertReadGuidance(tool, wrapped, null, localPath, "The tool was not executed.");
-    assertReadGuidance(
-        tool, wrapped, mock(BoundEnvironment.class), localPath, "cannot be confirmed");
+    assertReadGuidance(tool, null, localPath, "The tool was not executed.");
+    assertReadGuidance(tool, mock(BoundEnvironment.class), localPath, "cannot be confirmed");
     assertReadGuidance(
         tool,
-        wrapped,
         mock(BoundEnvironment.class),
         "{\"path\":\"kkstudio:/resources/1f2e3d4c-5b6a-4c8d-9e0f-1a2b3c4d5e6f\"}",
         "The tool was not executed.");
-    assertReadGuidance(tool, wrapped, null, "{\"path\":\" \"}", "The tool was not executed.");
+    assertReadGuidance(tool, null, "{\"path\":\" \"}", "The tool was not executed.");
   }
 
-  /** 已带执行事实的 daemon 文案不得被 builtin wrapper 二次包装。 */
+  /** 已带执行事实的 daemon 文案不得被 builtin 二次包装；成功结果原样返回。 */
   @Test
-  void executeDoesNotDoubleWrapAlreadyGuidedErrors() {
-    AtomicReference<ToolExecutionListener> wrapped = new AtomicReference<>();
-    ReadTool tool =
-        new ReadTool(
-            (request, listener) -> {
-              wrapped.set(listener);
-              return mock(ToolExecutionHandle.class);
-            });
-    ToolExecutionContext context =
-        new ToolExecutionContext(
-            UUID.randomUUID(), UUID.randomUUID(), Instant.now(), mock(BranchView.class));
-    ToolExecutionRequest request =
-        new ToolExecutionRequest(
-            tool.descriptor(),
-            new ToolCall("c1", "read", "{\"path\":\"/srv/repo/file.txt\"}"),
-            Duration.ZERO,
-            context);
-    AtomicReference<ToolOutcome> outcome = new AtomicReference<>();
-
-    tool.execute(request, capturingListener(outcome));
+  void executeDoesNotDoubleWrapAlreadyGuidedErrorsOrSuccess() throws Exception {
     String already =
         ToolErrorGuidance.message(
             "path does not exist: /srv/repo/file.txt", ExecutionFact.NOT_EXECUTED, "Review");
-    wrapped.get().onComplete(ToolResult.error("c1", already));
+    ReadTool guided = new ReadTool((request, progress) -> ToolResult.error("c1", already));
+    ToolExecutionRequest request = localRequest(guided, null, "{\"path\":\"/srv/repo/file.txt\"}");
+    assertEquals(
+        already,
+        ((TextResultContent) guided.execute(request, partial -> {}).result().contents().get(0))
+            .text());
 
-    assertEquals(already, ((TextResultContent) outcome.get().result().contents().get(0)).text());
+    ToolResult success = okResult();
+    ReadTool succeeding = new ReadTool((r, progress) -> success);
+    assertSame(success, succeeding.execute(request, partial -> {}).result());
   }
 
-  private static void assertReadGuidance(
-      ReadTool tool,
-      AtomicReference<ToolExecutionListener> wrapped,
-      BoundEnvironment environment,
-      String argumentsJson,
-      String expectedExecutionFact) {
+  private static ToolResult okResult() {
+    return new ToolResult("c1", List.of(new TextResultContent("contents")), false, "{}");
+  }
+
+  private static ToolExecutionRequest localRequest(
+      ReadTool tool, BoundEnvironment environment, String argumentsJson) {
     BranchView branch = mock(BranchView.class);
     ToolExecutionContext context =
         environment == null
             ? new ToolExecutionContext(UUID.randomUUID(), UUID.randomUUID(), Instant.now(), branch)
             : new ToolExecutionContext(
                 UUID.randomUUID(), UUID.randomUUID(), Instant.now(), branch, environment);
-    ToolExecutionRequest request =
-        new ToolExecutionRequest(
-            tool.descriptor(), new ToolCall("c1", "read", argumentsJson), Duration.ZERO, context);
-    AtomicReference<ToolOutcome> outcome = new AtomicReference<>();
+    return new ToolExecutionRequest(
+        tool.descriptor(), new ToolCall("c1", "read", argumentsJson), Duration.ZERO, context);
+  }
 
-    tool.execute(request, capturingListener(outcome));
-    wrapped.get().onComplete(ToolResult.error("c1", "path must not be blank"));
+  private static void assertReadGuidance(
+      ReadTool tool,
+      BoundEnvironment environment,
+      String argumentsJson,
+      String expectedExecutionFact)
+      throws InterruptedException {
+    ToolOutcome outcome =
+        tool.execute(localRequest(tool, environment, argumentsJson), partial -> {});
 
-    String text = ((TextResultContent) outcome.get().result().contents().get(0)).text();
-    assertTrue(outcome.get().result().error(), text);
+    String text = ((TextResultContent) outcome.result().contents().get(0)).text();
+    assertTrue(outcome.result().error(), text);
     assertTrue(text.contains("path must not be blank"), text);
     assertTrue(text.contains(expectedExecutionFact), text);
     assertTrue(text.contains("absolute local path"), text);
-  }
-
-  private static ToolExecutionListener capturingListener(AtomicReference<ToolOutcome> outcome) {
-    return new ToolExecutionListener() {
-      @Override
-      public void onPartial(ToolResult partial) {}
-
-      @Override
-      public void onComplete(ToolOutcome value) {
-        outcome.set(value);
-      }
-
-      @Override
-      public void onError(Throwable error) {}
-    };
   }
 }

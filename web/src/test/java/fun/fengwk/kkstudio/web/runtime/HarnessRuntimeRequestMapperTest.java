@@ -248,7 +248,7 @@ class HarnessRuntimeRequestMapperTest {
   @Test
   void mapsFixedSetPrefixAndRawRequestHash() {
     // 只允许稳定 SET_AGENT -> SET_MODEL -> SET_ENVIRONMENT 前缀，USER_MESSAGE raw hash 必须保持精确。
-    HarnessThreadCommandBatchDTO request = threadBatch(userCommand("user"));
+    HarnessThreadCommandBatchDTO request = cursorBatch(userCommand("user"));
     HarnessCommandCreateDTO agent = command("SET_AGENT", "agent");
     agent.setAgentName("default-assistant");
     HarnessCommandCreateDTO model = command("SET_MODEL", "model");
@@ -682,10 +682,12 @@ class HarnessRuntimeRequestMapperTest {
   /** 测试意图：既有 Thread 批次的 CAS cursor 必须精确映射到 domain target，命令列表缺失/为空一律拒绝。 */
   @Test
   void mapsThreadBatchCursorAndRequiresCommands() {
+    HarnessCommandCreateDTO agent = command("SET_AGENT", "agent");
+    agent.setAgentName("default-assistant");
     AcceptCommandsTarget.Thread target =
         (AcceptCommandsTarget.Thread)
             HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
-                    THREAD_ID, threadBatch(userCommand("user")))
+                    THREAD_ID, threadBatch(agent, userCommand("user")))
                 .target();
     assertEquals(idText(3), target.expectedHeadEntryId().toString());
     assertEquals(4L, target.expectedNextCommandSequence());
@@ -699,8 +701,8 @@ class HarnessRuntimeRequestMapperTest {
   }
 
   @Test
-  void pureUserMessageBatchMayOmitCursorButOtherBatchesRequireIt() {
-    // 单条纯 USER_MESSAGE 无需 cursor；SET 前缀混合批次与设置批次缺 cursor 一律 400。
+  void pureUserMessageBatchOmitsCursorAndOtherBatchesRequireIt() {
+    // 单条纯 USER_MESSAGE 不带 cursor；SET 前缀混合批次与设置批次缺 cursor 一律 400。
     HarnessThreadCommandBatchDTO cursorless = new HarnessThreadCommandBatchDTO();
     cursorless.setCommands(List.of(userCommand("cursorless")));
     AcceptCommandsCommand mapped =
@@ -728,7 +730,12 @@ class HarnessRuntimeRequestMapperTest {
             HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
                 THREAD_ID, settingsWithoutCursor));
 
-    // 纯消息也接受显式 cursor；但两个字段必须成对，且已给出的字段仍严格解析。
+    // 纯消息携带任一 cursor 字段都是输入错误。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            HarnessRuntimeRequestMapper.toAcceptThreadCommandsCommand(
+                THREAD_ID, cursorBatch(userCommand("cursor"))));
     HarnessThreadCommandBatchDTO partialCursor = new HarnessThreadCommandBatchDTO();
     partialCursor.setExpectedHeadEntryId(idText(3));
     partialCursor.setCommands(List.of(userCommand("partial")));
@@ -751,7 +758,7 @@ class HarnessRuntimeRequestMapperTest {
     assertTrue(
         ((AcceptCommandsTarget.Thread)
                 HarnessRuntimeRequestMapper.toPreviewThreadCommandsCommand(
-                        THREAD_ID, threadBatch(userCommand("preview")))
+                        THREAD_ID, cursorBatch(userCommand("preview")))
                     .target())
             .hasCursor());
   }
@@ -989,7 +996,17 @@ class HarnessRuntimeRequestMapperTest {
                 request(target, userCommand("user"))));
   }
 
+  /** 发送批次：单条纯 USER_MESSAGE 不带 cursor，其余批次带精确 cursor。 */
   private static HarnessThreadCommandBatchDTO threadBatch(HarnessCommandCreateDTO... commands) {
+    if (commands.length == 1 && "USER_MESSAGE".equals(commands[0].getType())) {
+      HarnessThreadCommandBatchDTO batch = new HarnessThreadCommandBatchDTO();
+      batch.setCommands(List.of(commands));
+      return batch;
+    }
+    return cursorBatch(commands);
+  }
+
+  private static HarnessThreadCommandBatchDTO cursorBatch(HarnessCommandCreateDTO... commands) {
     HarnessThreadCommandBatchDTO batch = new HarnessThreadCommandBatchDTO();
     batch.setExpectedHeadEntryId(idText(3));
     batch.setExpectedNextCommandSequence("4");

@@ -49,7 +49,9 @@ PostgreSQL 保存业务事实，内存 registry、执行句柄和通知承担可
 环境亲和 TOOL Work，且所需环境没有有效 READY 连接租约时才进入查询。
 沿永久父链找到真实执行根，再按根与冻结环境聚合，`waitingCount` 是组内调用数。
 分组用最早调用的 `(createTime, id)` 排序，与人工等待做 keyset 归并；`total` 是
-同一根过滤条件下的完整可见待处理数，不是当前页长度。无法解析产品归属的根不暴露。
+同一根过滤条件下的完整可见待处理数，不是当前页长度。产品归属按根解析为 `CHAT`、`ISSUE_AGENT`，
+或控制器/插件发起、没有产品页面的独立任务 `AGENT_TASK`（带 Agent 名与根 Thread 名，只在交互中心处理）；
+其余无法解析归属的根不暴露。
 
 owner 附带 Chat/Issue 标题、根 Thread 名称和 Agent 名；查询内缓存产品与根读取，
 显示名称不参与路由或身份判断。工具快照还独立批量读取当前 Work 的
@@ -126,8 +128,8 @@ URL 与 headers 仅在显式配置查询中以 `no-store` 返回，变量占位�
 不会按当前同名工具替换旧执行语义。工具所属插件已停用或移除时，调用以确定性失败返回模型：
 说明工具已不可用且未执行，建议不用它继续或询问用户；定义已变化时说明工具在规划后发生变化，
 提示重新调用（下一轮使用当前定义）。MCP 工具同样按现读定义校验。
-成功启动后，目录租用持续到终态或取消决议、执行体退出及句柄静止同时成立；
-取消先于启动时不进入工具执行体。违反静止契约的句柄产生 UNKNOWN，无法确认静止时保留资源租用。
+准入后，目录租用与并发租约只在终态决议提交之后、工具执行体返回（或抛出）之后释放；
+取消表现为对执行线程的 interrupt，不会提前回收仍被访问的插件实例。取消先于执行体开始时不会调用工具。
 
 ## 命令接受、产品归属与派发
 
@@ -136,7 +138,7 @@ URL 与 headers 仅在显式配置查询中以 `no-store` 返回，变量占位�
 
 Issue+Agent 的命令由 Issue 业务工作流拥有，公共 batch 端点拒绝 `ISSUE_AGENT` owner。Run 接受时显式提交 Agent/Model/Environment、`project`/`run` contributor state 与末尾任务输入；后续 turn 直接从冻结的 branch scope 取得 Run 身份，不再反查 Thread 归属。`issue_transition` 在业务锁内校验冻结 scope 的 Run/Issue/阶段/版本与调用 Thread 身份。问卷和审批复用 Runtime 的等待行，由 Interaction service 加入产品来源与人工操作者。
 
-Runtime 在自己的 lease 所有权短事务内直接持久 `READY -> DISPATCHING`，提交之后才调用 Provider / Tool Gateway，不反查 owner、Issue 归属或阶段等产品事实，也不存在产品侧派发门禁。需要终止在途 Run 时由业务显式调用 Stop；工具权限、preflight / 审批 / YOLO 与 Gateway 容量准入仍在各自边界生效。
+Runtime 在 Gateway 本地准入通过后，于自己的 lease 所有权短事务内持久 `READY -> RUNNING`，提交之后才执行 Provider / Tool 调用，不反查 owner、Issue 归属或阶段等产品事实，也不存在产品侧派发门禁。需要终止在途 Run 时由业务显式调用 Stop；工具权限、preflight / 审批 / YOLO 与 Gateway 容量准入仍在各自边界生效。
 
 ## Model 与 Tool 执行
 
@@ -150,12 +152,11 @@ Environment 或注入工具——Issue Run 的 Agent/Model/Environment、业务�
 `NONE`、`OPTIONAL` 工具保留，未选环境时过滤 `REQUIRED`；配置 Skill 时加入统一 `read`，
 subagent allowlist 非空时加入内部 `task`。Prompt 的 Skill 三元组冻结在 system instruction 中。规划期同时按 live provider 配置冻结 `ProviderCacheControl`（retention 与会话 UUID key，压缩回合固定 `none()`），执行期不再按当前 capability 重新规范化。
 
-网关先做资源解析与无等待 admission，再返回门控 `Started(handle)`。
-Runtime 持久化 RUNNING 后调用 activate；Busy/RetryLater 表示确定未启动，允许重排，
-Indeterminate 表示结果不确定，进入 UNKNOWN。Tool 网关按完整冻结定义、贡献归属和
-requirements 复验目录；有效超时仅经 `Tool.resolveTimeout` 解析一次并原样传递。
-回调 FIFO、有界队列与终态围栏保证迟到信号被丢弃，具体状态转换见
-[Harness Runtime](harness-runtime.md)。
+Tool 网关先做资源解析与无等待 admission（纯本地：并发租约、目录租用与分支视图），返回
+`Admitted(run)` / `Busy` / `Rejected`；Busy 与 Rejected 肯定未执行。Runtime 持久化 RUNNING 后在
+独占的虚拟线程上阻塞执行 `run`，工具异常由网关分类为失败、取消或 UNKNOWN（远程发送不确定时绝不重放）。
+Tool 网关按完整冻结定义、贡献归属和 requirements 复验目录；有效超时仅经 `Tool.resolveTimeout`
+解析一次并原样传递。具体状态转换见 [Harness Runtime](harness-runtime.md)。
 
 媒体物化将模型模态、adapter 能力和权威 MIME 取交集。Blob 转换为 attempt-only Base64；
 原始文件上限 100 MiB，请求累计 data URI 上限 160 MiB。图片按冻结的
@@ -253,7 +254,7 @@ Platform 适配注册、租约和资源票据；会话代际、在途调用和�
 
 在 [`plugins`](../../plugins/pom.xml) 下创建独立模块，并在根
 [`pom.xml`](../../pom.xml) 管理版本。实现安装定义与配置实例，Schema 是普通值和默认值的唯一来源；
-用单一 Boot 自动配置入口注册定义，实例拥有自己的执行器与生命周期；
+用单一 Boot 自动配置入口注册定义，实例拥有自己的资源与生命周期，工具在 Runtime 提供的执行线程上阻塞执行；
 网络访问与凭据读取在调用期执行，插件只能通过 scoped Context 读取本插件凭据。
 工具按 [Contributor API](harness-contributor-api.md#扩展一个-contributor) 注册，
 声明真实 side effect、timeout 和 EnvironmentSupport。最后在 Web 中选择 runtime 依赖，

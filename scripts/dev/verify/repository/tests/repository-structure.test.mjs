@@ -535,20 +535,18 @@ const CORE_STATE_ENUMS = [
       'STOPPED',
       'CONTINUATION_DUE',
       'MODEL_READY',
-      'MODEL_DISPATCHING',
       'MODEL_RUNNING',
       'APPLYING',
       'TOOL_WAITING_APPROVAL',
       'TOOL_WAITING_INPUT',
       'TOOL_RUNNING',
-      'TOOL_DISPATCHING',
       'TOOL_READY',
     ],
   },
   {
     path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/model/ModelInvocationStatus.java',
     enumName: 'ModelInvocationStatus',
-    constants: ['READY', 'DISPATCHING', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED', 'UNKNOWN'],
+    constants: ['READY', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED', 'UNKNOWN'],
   },
   {
     path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/tool/ToolInvocationStatus.java',
@@ -557,7 +555,6 @@ const CORE_STATE_ENUMS = [
       'WAITING_APPROVAL',
       'WAITING_INPUT',
       'READY',
-      'DISPATCHING',
       'RUNNING',
       'SUCCEEDED',
       'FAILED',
@@ -654,28 +651,13 @@ const CORE_STATE_ENUMS = [
   },
   {
     path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ModelExecution.java',
-    enumName: 'PendingKind',
-    constants: ['EVENT', 'SUCCEEDED', 'FAILED', 'UNKNOWN'],
-  },
-  {
-    path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ModelExecution.java',
     enumName: 'Applied',
-    constants: ['PROGRESSED', 'RETRY', 'TERMINAL', 'LOST'],
+    constants: ['RETRY', 'TERMINAL', 'LOST'],
   },
   {
     path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ModelExecution.java',
     enumName: 'TerminalKind',
     constants: ['FAILED', 'CANCELLED', 'UNKNOWN'],
-  },
-  {
-    path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ToolExecution.java',
-    enumName: 'PendingKind',
-    constants: ['PARTIAL', 'SUCCEEDED', 'FAILED', 'CANCELLED', 'UNKNOWN'],
-  },
-  {
-    path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ToolExecution.java',
-    enumName: 'Applied',
-    constants: ['PROGRESSED', 'RETRY', 'TERMINAL', 'LOST'],
   },
   {
     path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/processor/ToolExecution.java',
@@ -721,11 +703,6 @@ const CORE_STATE_ENUMS = [
     path: 'plugins/opencli/src/main/java/fun/fengwk/kkstudio/plugin/opencli/OpenCliHubClient.java',
     enumName: 'ExecutionStatus',
     constants: ['PENDING', 'RUNNING', 'SUCCEEDED', 'FAILED', 'TIMED_OUT', 'CANCELLED'],
-  },
-  {
-    path: 'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/tool/gateway/ToolExecutionGateway.java',
-    enumName: 'SignalKind',
-    constants: ['PARTIAL', 'COMPLETE', 'ERROR'],
   },
   {
     path: 'harness/environment-server/src/main/java/fun/fengwk/kkstudio/harness/environment/server/DaemonOfferResult.java',

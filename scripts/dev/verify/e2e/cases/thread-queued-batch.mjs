@@ -159,8 +159,6 @@ registerCase({
         owner: chatOwner(chat.id),
         target: threadTarget({
           threadId,
-          expectedHeadEntryId: running.thread.headEntryId,
-          expectedNextCommandSequence: running.thread.nextCommandSequence,
         }),
         commands: [userMessageCommand(firstPrompt, cid())],
       })
@@ -168,8 +166,6 @@ registerCase({
         owner: chatOwner(chat.id),
         target: threadTarget({
           threadId,
-          expectedHeadEntryId: firstQueued.thread.headEntryId,
-          expectedNextCommandSequence: firstQueued.thread.nextCommandSequence,
         }),
         commands: [userMessageCommand(secondPrompt, cid())],
       })

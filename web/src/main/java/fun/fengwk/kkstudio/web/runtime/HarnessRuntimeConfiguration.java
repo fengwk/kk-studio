@@ -152,7 +152,7 @@ public class HarnessRuntimeConfiguration {
     return new RealtimePayloadBuffer();
   }
 
-  /** 本地优先总线同时作为 Runtime 的 sink 与浏览器订阅的 source。 */
+  /** 本地优先总线同时作为 Runtime 的 sink 与浏览器订阅的 source；REFERENCE 回拉在总线自有的虚拟线程上执行，随总线关闭。 */
   @Bean(destroyMethod = "close")
   public RealtimeBus realtimeBus(
       DataSource dataSource,
@@ -175,7 +175,8 @@ public class HarnessRuntimeConfiguration {
             jdbcTemplate, notificationCodec, nodeInstanceId, realtimePayloadBuffer),
         clusterNodePresence::hasOtherActiveNodes,
         payloadClient::fetch,
-        realtimePayloadBuffer);
+        realtimePayloadBuffer,
+        Executors.newVirtualThreadPerTaskExecutor());
   }
 
   /** 流式追帧通知的严格 envelope codec；仅供 realtime 专用 LISTEN 连接与跨节点发布使用。 */
@@ -326,8 +327,9 @@ public class HarnessRuntimeConfiguration {
     return new ThreadProcessor(store, turnResolver, config, materializer);
   }
 
+  /** Model 执行线程与定时刷新任务：每个任务一个虚拟线程（执行线程在 Provider 调用期间阻塞）。 */
   @Bean(destroyMethod = "close")
-  public ExecutorService harnessModelFlushExecutor() {
+  public ExecutorService harnessModelExecutionExecutor() {
     return Executors.newVirtualThreadPerTaskExecutor();
   }
 
@@ -340,7 +342,7 @@ public class HarnessRuntimeConfiguration {
       Clock clock,
       @Qualifier("harnessProcessorScheduler") ScheduledExecutorService scheduler,
       @Qualifier("harnessHeartbeatWorkerExecutor") Executor heartbeatWorker,
-      @Qualifier("harnessModelFlushExecutor") ExecutorService flushExecutor) {
+      @Qualifier("harnessModelExecutionExecutor") ExecutorService executionExecutor) {
     return new ModelProcessor(
         store,
         modelGateway,
@@ -349,7 +351,7 @@ public class HarnessRuntimeConfiguration {
         clock,
         scheduler,
         heartbeatWorker,
-        flushExecutor);
+        executionExecutor);
   }
 
   @Bean(destroyMethod = "close")
