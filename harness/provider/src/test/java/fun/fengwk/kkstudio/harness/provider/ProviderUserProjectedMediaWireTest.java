@@ -93,7 +93,7 @@ class ProviderUserProjectedMediaWireTest {
             .followRedirects(HttpClient.Redirect.NEVER)
             .connectTimeout(Duration.ofSeconds(5))
             .build();
-    transport = new JdkHttpSseTransport(client, worker, scheduler);
+    transport = new JdkHttpSseTransport(client, scheduler);
   }
 
   @AfterEach

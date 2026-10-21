@@ -535,7 +535,6 @@ const CORE_STATE_ENUMS = [
       'STOPPED',
       'CONTINUATION_DUE',
       'MODEL_READY',
-      'MODEL_DISPATCHING',
       'MODEL_RUNNING',
       'APPLYING',
       'TOOL_WAITING_APPROVAL',
@@ -548,7 +547,7 @@ const CORE_STATE_ENUMS = [
   {
     path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/model/ModelInvocationStatus.java',
     enumName: 'ModelInvocationStatus',
-    constants: ['READY', 'DISPATCHING', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED', 'UNKNOWN'],
+    constants: ['READY', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED', 'UNKNOWN'],
   },
   {
     path: 'harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/tool/ToolInvocationStatus.java',

@@ -6,21 +6,16 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.cfg.JsonNodeFeature;
 import tools.jackson.databind.json.JsonMapper;
 
+import fun.fengwk.kkstudio.harness.provider.ProviderSseCall;
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
-import fun.fengwk.kkstudio.harness.provider.transport.HttpOpenMetadata;
-import fun.fengwk.kkstudio.harness.provider.transport.HttpSseCallback;
-import fun.fengwk.kkstudio.harness.provider.transport.HttpSseLimits;
 import fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransport;
 import fun.fengwk.kkstudio.harness.provider.transport.ServerSentEvent;
-import fun.fengwk.kkstudio.harness.provider.transport.TransportException;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelProvider;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderProtocolEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
 
 import java.net.URI;
@@ -120,7 +115,7 @@ final class AnthropicModelProvider implements ModelProvider {
   }
 
   @Override
-  public ProviderStream stream(ProviderRequest request, ProviderStreamHandler handler) {
+  public void stream(ProviderRequest request, ProviderStreamHandler handler) {
     Objects.requireNonNull(request, "request");
     Objects.requireNonNull(handler, "handler");
 
@@ -131,7 +126,7 @@ final class AnthropicModelProvider implements ModelProvider {
       encoded = encoder.encode(request, descriptor);
     } catch (ProviderException exception) {
       bridge.emitError(exception);
-      return bridge;
+      return;
     }
 
     HttpRequest httpRequest;
@@ -154,71 +149,24 @@ final class AnthropicModelProvider implements ModelProvider {
     } catch (IllegalArgumentException ex) {
       bridge.emitError(
           new ProviderException(ProviderErrorKind.INVALID_REQUEST, "invalid request header value"));
-      return bridge;
+      return;
     }
 
     AnthropicStreamAccumulator accumulator =
         new AnthropicStreamAccumulator(request, descriptor, bridge);
 
-    HttpSseCallback callback =
-        new HttpSseCallback() {
-          @Override
-          public void onOpen(HttpOpenMetadata metadata) {
-            // 连接已建立
-          }
-
-          @Override
-          public void onEvent(ServerSentEvent event) {
-            // 每条 transport SSE 帧先 exactly-once 原生回调，再进入 normalized/error 语义处理
-            bridge.emitProtocolEvent(toProtocolEvent(event));
-            try {
-              accumulator.handleEvent(event.event(), event.data());
-            } catch (ProviderException pe) {
-              if (bridge.handlerFailed()) {
-                throw pe;
-              }
-              bridge.emitError(pe);
-            }
-          }
-
-          @Override
-          public void onComplete() {
-            try {
-              ProviderCompletion completion = accumulator.finish();
-              bridge.emitComplete(completion);
-            } catch (ProviderException pe) {
-              if (bridge.handlerFailed()) {
-                throw pe;
-              }
-              bridge.emitError(pe);
-            }
-          }
-
-          @Override
-          public void onFailure(TransportException error) {
-            ProviderException mapped = AnthropicErrorMapper.mapTransportException(error);
-            if (mapped != null) {
-              bridge.emitError(mapped);
-            }
-          }
-        };
-
-    try {
-      ProviderStream stream =
-          transport.stream(
-              httpRequest, descriptor.modelCallTimeoutPolicy(), HttpSseLimits.DEFAULT, callback);
-      bridge.bind(stream);
-    } catch (TransportException exception) {
-      ProviderException mapped = AnthropicErrorMapper.mapTransportException(exception);
-      if (mapped != null) {
-        bridge.emitError(mapped);
-      }
-      return bridge;
-    } catch (RuntimeException ex) {
-      throw new RuntimeException("transport execution failed");
-    }
-
-    return bridge;
+    ProviderSseCall.run(
+        transport,
+        httpRequest,
+        descriptor.modelCallTimeoutPolicy(),
+        bridge,
+        event -> {
+          // 每条 transport SSE 帧先 exactly-once 原生回调，再进入 normalized/error 语义处理
+          bridge.emitProtocolEvent(toProtocolEvent(event));
+          accumulator.handleEvent(event.event(), event.data());
+        },
+        accumulator::finish,
+        AnthropicErrorMapper::mapTransportException);
   }
 
   @Override

@@ -30,7 +30,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
@@ -331,12 +330,12 @@ class AnthropicContinuationReplayTest {
   private static final class NoopHandler implements ProviderStreamHandler {
 
     @Override
-    public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
+    public void onEvent(ProviderStreamEvent event) {}
 
     @Override
-    public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
+    public void onComplete(ProviderCompletion completion) {}
 
     @Override
-    public void onError(ProviderException error, ProviderStream stream) {}
+    public void onError(ProviderException error) {}
   }
 }

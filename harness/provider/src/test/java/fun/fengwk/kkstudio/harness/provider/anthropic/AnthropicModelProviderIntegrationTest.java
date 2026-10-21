@@ -30,7 +30,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
@@ -82,7 +81,7 @@ class AnthropicModelProviderIntegrationTest {
             .followRedirects(HttpClient.Redirect.NEVER)
             .connectTimeout(Duration.ofSeconds(5))
             .build();
-    transport = new JdkHttpSseTransport(client, workerExecutor, scheduler);
+    transport = new JdkHttpSseTransport(client, scheduler);
   }
 
   @AfterEach
@@ -188,18 +187,18 @@ class AnthropicModelProviderIntegrationTest {
         request,
         new ProviderStreamHandler() {
           @Override
-          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {
+          public void onEvent(ProviderStreamEvent event) {
             events.add(event);
           }
 
           @Override
-          public void onComplete(ProviderCompletion completion, ProviderStream stream) {
+          public void onComplete(ProviderCompletion completion) {
             completionRef.set(completion);
             completionLatch.countDown();
           }
 
           @Override
-          public void onError(ProviderException error, ProviderStream stream) {}
+          public void onError(ProviderException error) {}
         });
 
     assertTrue(serverReceivedLatch.await(5, TimeUnit.SECONDS), "server should receive request");
@@ -269,13 +268,13 @@ class AnthropicModelProviderIntegrationTest {
         request,
         new ProviderStreamHandler() {
           @Override
-          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
+          public void onEvent(ProviderStreamEvent event) {}
 
           @Override
-          public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
+          public void onComplete(ProviderCompletion completion) {}
 
           @Override
-          public void onError(ProviderException error, ProviderStream stream) {
+          public void onError(ProviderException error) {
             errorRef.set(error);
             errorLatch.countDown();
           }
@@ -351,30 +350,28 @@ class AnthropicModelProviderIntegrationTest {
             List.of(),
             ProviderCacheControl.none());
 
-    AtomicReference<ProviderStream> streamRef = new AtomicReference<>();
     List<ProviderStreamEvent> receivedEvents = new CopyOnWriteArrayList<>();
 
-    ProviderStream stream =
-        modelProvider.stream(
-            request,
-            new ProviderStreamHandler() {
-              @Override
-              public void onEvent(ProviderStreamEvent event, ProviderStream st) {
-                receivedEvents.add(event);
-                st.cancel(); // 收到第一个事件立即取消
-                clientReceivedEventLatch.countDown();
-              }
+    modelProvider.stream(
+        request,
+        new ProviderStreamHandler() {
+          @Override
+          public void onEvent(ProviderStreamEvent event) {
+            receivedEvents.add(event);
+            // 取消即中断调用线程：传输器关闭连接并以 CANCELLED 静默返回。
+            Thread.currentThread().interrupt();
+            clientReceivedEventLatch.countDown();
+          }
 
-              @Override
-              public void onComplete(ProviderCompletion completion, ProviderStream st) {}
+          @Override
+          public void onComplete(ProviderCompletion completion) {}
 
-              @Override
-              public void onError(ProviderException error, ProviderStream st) {}
-            });
+          @Override
+          public void onError(ProviderException error) {}
+        });
 
-    streamRef.set(stream);
+    assertTrue(Thread.interrupted(), "cancellation must leave the interrupt flag for the caller");
     assertTrue(clientReceivedEventLatch.await(5, TimeUnit.SECONDS));
-    assertTrue(stream.isCancelled());
   }
 
   @Test
@@ -415,21 +412,20 @@ class AnthropicModelProviderIntegrationTest {
             ProviderCacheControl.none());
 
     AtomicReference<ProviderException> caughtError = new AtomicReference<>();
-    ProviderStream stream =
-        modelProvider.stream(
-            request,
-            new ProviderStreamHandler() {
-              @Override
-              public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
+    modelProvider.stream(
+        request,
+        new ProviderStreamHandler() {
+          @Override
+          public void onEvent(ProviderStreamEvent event) {}
 
-              @Override
-              public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
+          @Override
+          public void onComplete(ProviderCompletion completion) {}
 
-              @Override
-              public void onError(ProviderException error, ProviderStream stream) {
-                caughtError.set(error);
-              }
-            });
+          @Override
+          public void onError(ProviderException error) {
+            caughtError.set(error);
+          }
+        });
 
     assertNotNull(caughtError.get());
     assertEquals(ProviderErrorKind.INVALID_REQUEST, caughtError.get().kind());
@@ -484,13 +480,13 @@ class AnthropicModelProviderIntegrationTest {
         request,
         new ProviderStreamHandler() {
           @Override
-          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
+          public void onEvent(ProviderStreamEvent event) {}
 
           @Override
-          public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
+          public void onComplete(ProviderCompletion completion) {}
 
           @Override
-          public void onError(ProviderException error, ProviderStream stream) {
+          public void onError(ProviderException error) {
             caughtError.set(error);
             errorLatch.countDown();
           }
@@ -620,16 +616,16 @@ class AnthropicModelProviderIntegrationTest {
         request,
         new ProviderStreamHandler() {
           @Override
-          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
+          public void onEvent(ProviderStreamEvent event) {}
 
           @Override
-          public void onComplete(ProviderCompletion value, ProviderStream stream) {
+          public void onComplete(ProviderCompletion value) {
             completion.set(value);
             done.countDown();
           }
 
           @Override
-          public void onError(ProviderException error, ProviderStream stream) {
+          public void onError(ProviderException error) {
             failure.set(error);
             done.countDown();
           }

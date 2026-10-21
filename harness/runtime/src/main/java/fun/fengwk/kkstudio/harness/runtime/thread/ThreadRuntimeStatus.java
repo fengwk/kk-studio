@@ -32,10 +32,7 @@ public enum ThreadRuntimeStatus {
   /** 已有 READY 模型调用，等待分派执行。 */
   MODEL_READY,
 
-  /** 模型调用已进入持久化分派围栏，Gateway 接受结果尚未确认。 */
-  MODEL_DISPATCHING,
-
-  /** Gateway 已接受模型调用，Runtime 正处于受租约保护的执行阶段。 */
+  /** 模型调用已持久化 RUNNING，Runtime 正处于受租约保护的执行阶段。 */
   MODEL_RUNNING,
 
   /** 当前调用已达终态，其结果尚待 ThreadProcessor 物化并推进上下文。 */
@@ -78,7 +75,6 @@ public enum ThreadRuntimeStatus {
     Objects.requireNonNull(status, "status");
     return switch (status) {
       case READY -> MODEL_READY;
-      case DISPATCHING -> MODEL_DISPATCHING;
       case RUNNING -> MODEL_RUNNING;
       default -> throw new IllegalStateException(
           "MODEL_ACTIVE context must contain a non-terminal model invocation");

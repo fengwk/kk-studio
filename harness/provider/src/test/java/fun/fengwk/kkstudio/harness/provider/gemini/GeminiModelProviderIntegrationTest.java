@@ -24,7 +24,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
@@ -72,7 +71,7 @@ class GeminiModelProviderIntegrationTest {
             .followRedirects(HttpClient.Redirect.NEVER)
             .connectTimeout(Duration.ofSeconds(5))
             .build();
-    transport = new JdkHttpSseTransport(client, workerExecutor, scheduler);
+    transport = new JdkHttpSseTransport(client, scheduler);
   }
 
   @AfterEach
@@ -170,17 +169,17 @@ class GeminiModelProviderIntegrationTest {
         createRequest(),
         new ProviderStreamHandler() {
           @Override
-          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {
+          public void onEvent(ProviderStreamEvent event) {
             receivedEvents.add(event);
           }
 
           @Override
-          public void onError(ProviderException error, ProviderStream stream) {
+          public void onError(ProviderException error) {
             latch.countDown();
           }
 
           @Override
-          public void onComplete(ProviderCompletion completion, ProviderStream stream) {
+          public void onComplete(ProviderCompletion completion) {
             completionRef.set(completion);
             latch.countDown();
           }
@@ -235,16 +234,16 @@ class GeminiModelProviderIntegrationTest {
         createRequest(),
         new ProviderStreamHandler() {
           @Override
-          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
+          public void onEvent(ProviderStreamEvent event) {}
 
           @Override
-          public void onError(ProviderException error, ProviderStream stream) {
+          public void onError(ProviderException error) {
             caught.set(error);
             latch.countDown();
           }
 
           @Override
-          public void onComplete(ProviderCompletion completion, ProviderStream stream) {
+          public void onComplete(ProviderCompletion completion) {
             latch.countDown();
           }
         });
@@ -292,30 +291,30 @@ class GeminiModelProviderIntegrationTest {
     List<ProviderStreamEvent> deltas = new CopyOnWriteArrayList<>();
     AtomicInteger terminals = new AtomicInteger();
     GeminiModelProvider provider = new GeminiModelProvider(transport, createDescriptor(), "k");
-    ProviderStream stream =
-        provider.stream(
-            createRequest(),
-            new ProviderStreamHandler() {
-              @Override
-              public void onEvent(ProviderStreamEvent event, ProviderStream st) {
-                deltas.add(event);
-                st.cancel();
-                clientCancelled.countDown();
-              }
+    provider.stream(
+        createRequest(),
+        new ProviderStreamHandler() {
+          @Override
+          public void onEvent(ProviderStreamEvent event) {
+            deltas.add(event);
+            // 取消即中断调用线程：传输器关闭连接并以 CANCELLED 静默返回。
+            Thread.currentThread().interrupt();
+            clientCancelled.countDown();
+          }
 
-              @Override
-              public void onError(ProviderException error, ProviderStream st) {
-                terminals.incrementAndGet();
-              }
+          @Override
+          public void onError(ProviderException error) {
+            terminals.incrementAndGet();
+          }
 
-              @Override
-              public void onComplete(ProviderCompletion completion, ProviderStream st) {
-                terminals.incrementAndGet();
-              }
-            });
+          @Override
+          public void onComplete(ProviderCompletion completion) {
+            terminals.incrementAndGet();
+          }
+        });
 
+    assertTrue(Thread.interrupted(), "cancellation must leave the interrupt flag for the caller");
     assertTrue(clientCancelled.await(5, TimeUnit.SECONDS));
-    assertTrue(stream.isCancelled());
     assertTrue(
         serverAttemptedLateFrames.await(5, TimeUnit.SECONDS),
         "server must have attempted to deliver frames after cancel");
