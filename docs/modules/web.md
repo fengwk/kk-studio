@@ -81,7 +81,7 @@ Session 的 `GET /api/sessions/{sessionId}/threads` 返回全部 Thread 摘要�
 命令 202 表示数据库已接受，执行由 dispatcher 异步推进。
 `/api/command-batches` 只服务创建型 `CHAT` owner（`NEW_SESSION` / `NEW_THREAD` / `NEW_FORKED_SESSION`；
 `ISSUE_AGENT` 由 Issue 工作流拥有，被该端点拒绝）；`/api/threads/{threadId}/command-batches`
-服务既有 Thread 的 owner-free 续写（path `threadId` + 精确 cursor，body 不带 owner 与 target）。
+服务既有 Thread 的 owner-free 续写（path `threadId`，body 不带 owner 与 target）：单条纯 `USER_MESSAGE` 批次不带 cursor（带了为 400），其余批次必须带精确 cursor。
 Issue 输入与控制通过工作流用例，人工审批/问卷通过交互入口。
 审批和问卷 actor 来自服务端认证主体；本地无认证模式使用固定 local-user。
 

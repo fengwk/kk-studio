@@ -282,7 +282,7 @@ public final class HarnessRuntimeRequestMapper {
 
   /**
    * 映射既有 Thread 的通用命令批：target 由 path 的 {@code threadId} 与请求体的 cursor 组合，不带 owner；附件物化与 Session
-   * 归属校验由接受服务的 preflight 完成。单条纯 USER_MESSAGE 批次可省略 cursor；其余批次必须显式给出两个 cursor 字段。
+   * 归属校验由接受服务的 preflight 完成。单条纯 USER_MESSAGE 批次必须省略 cursor（给出即 400）；其余批次必须显式给出两个 cursor 字段。
    */
   public static AcceptCommandsCommand toAcceptThreadCommandsCommand(
       String threadId, HarnessThreadCommandBatchDTO dto) {
@@ -317,9 +317,9 @@ public final class HarnessRuntimeRequestMapper {
         throw new IllegalArgumentException(
             "expectedHeadEntryId and expectedNextCommandSequence are required for this command batch");
       }
-    } else if ((headEntryId == null) != (nextCommandSequence == null)) {
+    } else if (headEntryId != null || nextCommandSequence != null) {
       throw new IllegalArgumentException(
-          "expectedHeadEntryId and expectedNextCommandSequence must be provided together");
+          "expectedHeadEntryId and expectedNextCommandSequence must be omitted for a single USER_MESSAGE batch");
     }
     AcceptCommandsTarget target =
         new AcceptCommandsTarget.Thread(

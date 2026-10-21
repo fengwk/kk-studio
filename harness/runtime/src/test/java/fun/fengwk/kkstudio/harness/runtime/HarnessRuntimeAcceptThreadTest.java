@@ -66,6 +66,11 @@ class HarnessRuntimeAcceptThreadTest {
         new AcceptCommandsTarget.Thread(threadId, expectedHead, expectedNext), commands);
   }
 
+  /** 单条纯 USER_MESSAGE 批次：无 cursor。 */
+  private static AcceptCommandsCommand pure(UUID threadId, NewThreadCommand command) {
+    return new AcceptCommandsCommand(new AcceptCommandsTarget.Thread(threadId), List.of(command));
+  }
+
   private static NewThreadCommand setAgentCommand(UUID idempotencyKey) {
     return new NewThreadCommand(new SetAgentCommandPayload("assistant"), idempotencyKey);
   }
@@ -75,11 +80,7 @@ class HarnessRuntimeAcceptThreadTest {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
     AcceptedCommands result =
         runtime.acceptCommands(
-            thread(
-                baseline.threadId(),
-                baseline.rootEntryId(),
-                1,
-                List.of(userMessageCommand(TestIds.id(1), "hello"))),
+            pure(baseline.threadId(), userMessageCommand(TestIds.id(1), "hello")),
             AcceptancePreflight.IDENTITY);
 
     assertFalse(result.replayed());
@@ -101,16 +102,24 @@ class HarnessRuntimeAcceptThreadTest {
   }
 
   @Test
-  void staleCursorIsIgnoredForPureUserMessageButStillRejectedForCursorBoundBatch() {
+  void pureUserMessageRejectsAnyCursorWhileCursorBoundBatchStaysStaleChecked() {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
-    // 单条纯 USER_MESSAGE 不依赖 cursor：过期 head/sequence 仍按锁内当前尾部入队。
+    // 单条纯 USER_MESSAGE 只有无 cursor 一条路径：携带 cursor（即使精确）是请求错误且零写入。
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            runtime.acceptCommands(
+                thread(
+                    baseline.threadId(),
+                    baseline.rootEntryId(),
+                    1,
+                    List.of(userMessageCommand(TestIds.id(1), "hello"))),
+                AcceptancePreflight.IDENTITY));
+    assertEquals(
+        0, store.<Integer>transaction(tx -> tx.loadCommandsByThread(baseline.threadId()).size()));
     AcceptedCommands accepted =
         runtime.acceptCommands(
-            thread(
-                baseline.threadId(),
-                baseline.rootEntryId(),
-                5,
-                List.of(userMessageCommand(TestIds.id(1), "hello"))),
+            pure(baseline.threadId(), userMessageCommand(TestIds.id(1), "hello")),
             AcceptancePreflight.IDENTITY);
     assertFalse(accepted.replayed());
     assertEquals(1L, accepted.acceptedCommands().getFirst().sequence());
@@ -144,7 +153,7 @@ class HarnessRuntimeAcceptThreadTest {
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);
     AcceptCommandsCommand cursorless =
         new AcceptCommandsCommand(
-            new AcceptCommandsTarget.Thread(baseline.threadId(), null, null),
+            new AcceptCommandsTarget.Thread(baseline.threadId()),
             List.of(userMessageCommand(TestIds.id(1), "cursorless")));
     AcceptedCommands first = runtime.acceptCommands(cursorless, AcceptancePreflight.IDENTITY);
     assertFalse(first.replayed());
@@ -152,11 +161,7 @@ class HarnessRuntimeAcceptThreadTest {
 
     // head 由后续命令推进后，不带 cursor 的 exact replay 仍返回同一源命令。
     runtime.acceptCommands(
-        thread(
-            baseline.threadId(),
-            baseline.rootEntryId(),
-            2,
-            List.of(userMessageCommand(TestIds.id(2), "after"))),
+        pure(baseline.threadId(), userMessageCommand(TestIds.id(2), "after")),
         AcceptancePreflight.IDENTITY);
     AcceptedCommands replay = runtime.acceptCommands(cursorless, AcceptancePreflight.IDENTITY);
     assertTrue(replay.replayed());
@@ -224,9 +229,7 @@ class HarnessRuntimeAcceptThreadTest {
                         new TextMessageContent("please summarize")))));
     AcceptancePreflight materialize = (tx, session, commands) -> List.of(durable);
 
-    AcceptedCommands first =
-        runtime.acceptCommands(
-            thread(baseline.threadId(), baseline.rootEntryId(), 1, List.of(raw)), materialize);
+    AcceptedCommands first = runtime.acceptCommands(pure(baseline.threadId(), raw), materialize);
     assertFalse(first.replayed());
     // durable 命令落库：payload 已是 RESOURCE 形态（durable codec 可持久化），requestHash 仍是 raw hash。
     assertTrue(
@@ -236,9 +239,7 @@ class HarnessRuntimeAcceptThreadTest {
     assertEquals(raw.requestHash(), first.acceptedCommands().getFirst().requestHash());
 
     // 相同 raw 请求重试：按 idempotencyKey + raw requestHash 命中 ordered replay（不调用 preflight）。
-    AcceptedCommands replay =
-        runtime.acceptCommands(
-            thread(baseline.threadId(), baseline.rootEntryId(), 1, List.of(raw)), materialize);
+    AcceptedCommands replay = runtime.acceptCommands(pure(baseline.threadId(), raw), materialize);
     assertTrue(replay.replayed());
     assertEquals(first.acceptedCommands(), replay.acceptedCommands());
     ThreadState threadState =
@@ -433,20 +434,11 @@ class HarnessRuntimeAcceptThreadTest {
     UUID sibling = seedThreadAt(store, baseline.rootEntryId());
     AcceptedCommands first =
         runtime.acceptCommands(
-            thread(
-                baseline.threadId(),
-                baseline.rootEntryId(),
-                1,
-                List.of(userMessageCommand(TestIds.id(1), "a"))),
+            pure(baseline.threadId(), userMessageCommand(TestIds.id(1), "a")),
             AcceptancePreflight.IDENTITY);
     AcceptedCommands second =
         runtime.acceptCommands(
-            thread(
-                sibling,
-                baseline.rootEntryId(),
-                1,
-                List.of(userMessageCommand(TestIds.id(2), "b"))),
-            AcceptancePreflight.IDENTITY);
+            pure(sibling, userMessageCommand(TestIds.id(2), "b")), AcceptancePreflight.IDENTITY);
     assertEquals(1L, first.acceptedCommands().getFirst().sequence());
     assertEquals(1L, second.acceptedCommands().getFirst().sequence());
     // 两个 sibling Thread 都在同一 Session 内建立，listThreadsBySession 返回两者（按确定 id 序）。

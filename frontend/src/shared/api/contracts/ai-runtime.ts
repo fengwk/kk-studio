@@ -507,8 +507,8 @@ export interface AgentCommandBatchRequestDTO {
  * POST /threads/{threadId}/provider-request-preview
  *
  * 不携带 owner 或 target：服务端从 path 解析 Session，owner 只用于 NEW_SESSION /
- * NEW_THREAD 创建与容器列表。单条纯 USER_MESSAGE 发送可省略两个 cursor 字段；
- * 包含 SET_* / GOAL 的批次与发送前预览仍必须携带两者。
+ * NEW_THREAD 创建与容器列表。单条纯 USER_MESSAGE 发送必须省略两个 cursor 字段（携带即 400）；
+ * 包含 SET_* / GOAL 的批次与发送前预览必须携带两者。
  */
 export interface ThreadCommandBatchRequestDTO {
   expectedHeadEntryId?: string

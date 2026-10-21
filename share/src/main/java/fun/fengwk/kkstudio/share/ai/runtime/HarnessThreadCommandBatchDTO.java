@@ -12,17 +12,17 @@ import java.util.List;
  * <p>入口携带目标 Thread 的并发游标与有序命令，不再携带 owner 或 target：服务端从 path 的 {@code threadId} 解析 Session，
  * 身份认证、资源授权与附件引用校验照常完成，客户端无需伪造产品 owner。
  *
- * <p>只有单条纯 {@code USER_MESSAGE} 批次可以同时省略 {@code expectedHeadEntryId} 与 {@code
- * expectedNextCommandSequence}， 由服务端按当前邮箱尾部入队；包含 SET_*、GOAL、CUSTOM 或 NOTIFICATION 的批次仍必须携带两者作为精确
- * CAS 游标。两个字段必须 同时给出或同时省略。{@code commands} 元素沿用 {@link HarnessCommandCreateDTO} 的严格 wire 格式。
+ * <p>单条纯 {@code USER_MESSAGE} 的发送批次必须同时省略 {@code expectedHeadEntryId} 与 {@code
+ * expectedNextCommandSequence}（携带即 400），由服务端按当前邮箱尾部入队；包含 SET_*、GOAL、CUSTOM 或 NOTIFICATION
+ * 的批次以及发送前预览必须携带两者作为精确 CAS 游标。{@code commands} 元素沿用 {@link HarnessCommandCreateDTO} 的严格 wire 格式。
  */
 @Data
 public class HarnessThreadCommandBatchDTO {
 
-  /** 期望的当前 head Entry：canonical UUID string；仅纯 USER_MESSAGE 批次可省略。 */
+  /** 期望的当前 head Entry：canonical UUID string；纯 USER_MESSAGE 发送批次必须省略，其余必须携带。 */
   private String expectedHeadEntryId;
 
-  /** 期望的下一条 command sequence：strict positive decimal string；仅纯 USER_MESSAGE 批次可省略。 */
+  /** 期望的下一条 command sequence：strict positive decimal string；纯 USER_MESSAGE 发送批次必须省略，其余必须携带。 */
   private String expectedNextCommandSequence;
 
   /** 非空、按产品顺序排列的 SET_* + USER_MESSAGE / GOAL 命令列表。 */
