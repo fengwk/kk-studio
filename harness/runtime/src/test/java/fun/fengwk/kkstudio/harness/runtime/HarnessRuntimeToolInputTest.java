@@ -902,9 +902,8 @@ class HarnessRuntimeToolInputTest {
               modelInvocationWithRequest(
                   modelId, stale.threadId(), turnStartId, turnStartId, requestSpec, T3);
           tx.insertModelInvocation(model);
-          tx.updateModelInvocation(model.beginDispatch(T3));
-          tx.updateModelInvocation(model.beginDispatch(T3).markRunning(T3));
-          ModelInvocation succeeded = model.beginDispatch(T3).markRunning(T3).succeed(response, T3);
+          tx.updateModelInvocation(model.markRunning(T3));
+          ModelInvocation succeeded = model.markRunning(T3).succeed(response, T3);
           tx.updateModelInvocation(succeeded);
           tx.updateModelInvocation(succeeded.attachResultEntry(assistantEntryId, T3));
           UUID liveToolId = tx.nextId();

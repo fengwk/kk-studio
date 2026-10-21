@@ -33,7 +33,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
@@ -90,7 +89,7 @@ class AnthropicErrorHandlingTest {
             .followRedirects(HttpClient.Redirect.NEVER)
             .connectTimeout(Duration.ofSeconds(5))
             .build();
-    transport = new JdkHttpSseTransport(client, workerExecutor, scheduler);
+    transport = new JdkHttpSseTransport(client, scheduler);
   }
 
   @AfterEach
@@ -222,18 +221,18 @@ class AnthropicErrorHandlingTest {
         request,
         new ProviderStreamHandler() {
           @Override
-          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {
+          public void onEvent(ProviderStreamEvent event) {
             events.add(event);
           }
 
           @Override
-          public void onComplete(ProviderCompletion completion, ProviderStream stream) {
+          public void onComplete(ProviderCompletion completion) {
             completionRef.set(completion);
             callbackLatch.countDown();
           }
 
           @Override
-          public void onError(ProviderException error, ProviderStream stream) {
+          public void onError(ProviderException error) {
             errorRef.set(error);
             callbackLatch.countDown();
           }
@@ -316,27 +315,26 @@ class AnthropicErrorHandlingTest {
     AtomicInteger errorCount = new AtomicInteger();
     CountDownLatch errorLatch = new CountDownLatch(1);
 
-    ProviderStream stream =
-        modelProvider.stream(
-            request,
-            new ProviderStreamHandler() {
-              @Override
-              public void onEvent(ProviderStreamEvent event, ProviderStream st) {
-                events.add(event);
-              }
+    modelProvider.stream(
+        request,
+        new ProviderStreamHandler() {
+          @Override
+          public void onEvent(ProviderStreamEvent event) {
+            events.add(event);
+          }
 
-              @Override
-              public void onComplete(ProviderCompletion completion, ProviderStream st) {
-                completionRef.set(completion);
-              }
+          @Override
+          public void onComplete(ProviderCompletion completion) {
+            completionRef.set(completion);
+          }
 
-              @Override
-              public void onError(ProviderException error, ProviderStream st) {
-                errorCount.incrementAndGet();
-                errorRef.set(error);
-                errorLatch.countDown();
-              }
-            });
+          @Override
+          public void onError(ProviderException error) {
+            errorCount.incrementAndGet();
+            errorRef.set(error);
+            errorLatch.countDown();
+          }
+        });
 
     assertTrue(errorLatch.await(5, TimeUnit.SECONDS), "stream should receive error callback");
     assertEquals(1, errorCount.get(), "onError must be called exactly once (terminal-once)");
@@ -396,16 +394,16 @@ class AnthropicErrorHandlingTest {
         request,
         new ProviderStreamHandler() {
           @Override
-          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
+          public void onEvent(ProviderStreamEvent event) {}
 
           @Override
-          public void onComplete(ProviderCompletion completion, ProviderStream stream) {
+          public void onComplete(ProviderCompletion completion) {
             completionRef.set(completion);
             latch.countDown();
           }
 
           @Override
-          public void onError(ProviderException error, ProviderStream stream) {
+          public void onError(ProviderException error) {
             errorRef.set(error);
             latch.countDown();
           }

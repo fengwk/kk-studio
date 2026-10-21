@@ -238,7 +238,6 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
     store.transaction(
         tx -> {
           var thread = tx.lockThread(turn.threadId()).orElseThrow();
-          tx.updateModelInvocation(tx.lockModelInvocation(modelId).orElseThrow().beginDispatch(T3));
           tx.updateModelInvocation(tx.lockModelInvocation(modelId).orElseThrow().markRunning(T3));
           UUID assistantId = tx.nextId();
           tx.insertEntry(

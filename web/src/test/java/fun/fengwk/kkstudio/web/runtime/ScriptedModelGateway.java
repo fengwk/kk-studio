@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.web.runtime;
 
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
@@ -72,24 +73,20 @@ public final class ScriptedModelGateway implements ModelGateway {
   }
 
   @Override
-  public StartResult start(Execution execution, Listener listener) {
+  public Admission admit(Execution execution) {
     Objects.requireNonNull(execution, "execution");
-    Objects.requireNonNull(listener, "listener");
     ProviderRequest request = execution.request();
-    requests.add(request);
-    return new Started(
-        new Handle() {
-          @Override
-          public void cancel() {
-            // 脚本化响应是同步内存交付：没有需要取消的外部执行。
-          }
+    return new Admitted() {
+      @Override
+      public Outcome run(Sink sink) {
+        // 脚本化响应是同步内存交付：没有外部执行需要中断或释放。
+        requests.add(request);
+        return new Succeeded(new ProviderCompletion(respond(request), null));
+      }
 
-          @Override
-          public void activate() {
-            // 两阶段激活契约允许 Gateway 在 activate 期间同步回调；Runtime 会缓冲并在打开回调门控后按序重放。
-            listener.onSucceeded(respond(request));
-          }
-        });
+      @Override
+      public void close() {}
+    };
   }
 
   /** 已交付的 Provider 请求数（含 ToolResult continuation turn），供测试观测真实 Runtime 的调用次数。 */

@@ -227,7 +227,7 @@ function isLiveRetryPending(
   return invocation != null
     && invocation.id === failure.modelInvocationId
     && invocation.attempt === failure.attempt
-    && (invocation.status === 'READY' || invocation.status === 'DISPATCHING')
+    && invocation.status === 'READY'
 }
 
 function projectModelStream(

@@ -22,9 +22,9 @@ import fun.fengwk.kkstudio.harness.provider.anthropic.AnthropicProviderAdapter;
 import fun.fengwk.kkstudio.harness.provider.gemini.GeminiProviderAdapter;
 import fun.fengwk.kkstudio.harness.provider.openai.chat.OpenAiChatProviderAdapter;
 import fun.fengwk.kkstudio.harness.provider.openai.responses.OpenAiResponsesProviderAdapter;
-import fun.fengwk.kkstudio.harness.provider.transport.HttpSseCallback;
 import fun.fengwk.kkstudio.harness.provider.transport.HttpSseLimits;
 import fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransport;
+import fun.fengwk.kkstudio.harness.provider.transport.ServerSentEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
@@ -43,7 +43,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
@@ -67,6 +66,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Predicate;
 
 /**
  * 无网络请求体预览（{@link ProviderAdapter#encodeRequestBody}）的逐字节契约。
@@ -202,8 +202,7 @@ class ProviderRequestBodyPreviewTest {
   @ParameterizedTest(name = "{0} 预览 == transport 实际发送体")
   @EnumSource(Protocol.class)
   void previewMatchesTransportSentBody(Protocol protocol) throws Exception {
-    ProviderAdapter adapter =
-        adapterFor(protocol, new JdkHttpSseTransport(client, workers, scheduler));
+    ProviderAdapter adapter = adapterFor(protocol, new JdkHttpSseTransport(client, scheduler));
     ProviderDescriptor descriptor = descriptorFor(protocol);
     ProviderRequest request = richRequest(protocol);
 
@@ -223,8 +222,7 @@ class ProviderRequestBodyPreviewTest {
       value = Protocol.class,
       names = {"OPENAI_CHAT", "ANTHROPIC"})
   void previewMatchesTransportSentBodyForReplayState(Protocol protocol) throws Exception {
-    ProviderAdapter adapter =
-        adapterFor(protocol, new JdkHttpSseTransport(client, workers, scheduler));
+    ProviderAdapter adapter = adapterFor(protocol, new JdkHttpSseTransport(client, scheduler));
     ProviderDescriptor descriptor = descriptorFor(protocol);
     ProviderRequest request = replayRequest(protocol, descriptor);
 
@@ -308,13 +306,13 @@ class ProviderRequestBodyPreviewTest {
 
   /** 记录 transport 是否被调用；一旦调用即失败，证明预览路径纯本地。 */
   private JdkHttpSseTransport offlineTransport(AtomicInteger calls) {
-    return new JdkHttpSseTransport(client, workers, scheduler) {
+    return new JdkHttpSseTransport(client, scheduler) {
       @Override
-      public ProviderStream stream(
+      public void execute(
           HttpRequest request,
           ModelCallTimeoutPolicy policy,
           HttpSseLimits limits,
-          HttpSseCallback callback) {
+          Predicate<ServerSentEvent> onEvent) {
         calls.incrementAndGet();
         throw new AssertionError("preview must not call transport");
       }
@@ -447,13 +445,13 @@ class ProviderRequestBodyPreviewTest {
   private static ProviderStreamHandler noopHandler() {
     return new ProviderStreamHandler() {
       @Override
-      public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
+      public void onEvent(ProviderStreamEvent event) {}
 
       @Override
-      public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
+      public void onComplete(ProviderCompletion completion) {}
 
       @Override
-      public void onError(ProviderException error, ProviderStream stream) {}
+      public void onError(ProviderException error) {}
     };
   }
 }

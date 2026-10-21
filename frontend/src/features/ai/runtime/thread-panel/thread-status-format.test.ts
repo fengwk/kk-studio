@@ -43,7 +43,7 @@ describe('thread status formatting', () => {
   // 状态模型格式调整不能改变工作状态的本地化映射及未知状态回退。
   it.each([
     'STOPPED', 'QUEUED', 'IDLE', 'CONTINUATION_DUE', 'APPLYING',
-    'MODEL_READY', 'MODEL_DISPATCHING', 'MODEL_RUNNING', 'TOOL_WAITING_APPROVAL',
+    'MODEL_READY', 'MODEL_RUNNING', 'TOOL_WAITING_APPROVAL',
     'TOOL_READY', 'TOOL_RUNNING',
   ])('localizes %s through its runtime status key', (status) => {
     expect(formatThreadStatusLabel(status, (key) => `translated:${key}`))

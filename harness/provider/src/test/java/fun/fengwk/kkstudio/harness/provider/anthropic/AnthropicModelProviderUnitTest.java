@@ -3,15 +3,15 @@ package fun.fengwk.kkstudio.harness.provider.anthropic;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.provider.transport.HttpOpenMetadata;
-import fun.fengwk.kkstudio.harness.provider.transport.HttpSseCallback;
+import fun.fengwk.kkstudio.harness.provider.ScriptedSseTransport;
 import fun.fengwk.kkstudio.harness.provider.transport.HttpSseLimits;
 import fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransport;
 import fun.fengwk.kkstudio.harness.provider.transport.ServerSentEvent;
@@ -30,7 +30,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderProtocolEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
@@ -40,14 +39,15 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Predicate;
 
 /** 专门针对 AnthropicModelProvider 及其内部回调各分支状态流转的轻量单元测试。 */
 class AnthropicModelProviderUnitTest {
@@ -108,319 +108,8 @@ class AnthropicModelProviderUnitTest {
   }
 
   @Test
-  void mapsSynchronousTransportExceptionToExactlyOneTerminalError() {
-    // 1. 同步抛出 TransportException (IO)
-    JdkHttpSseTransport ioTransport =
-        new JdkHttpSseTransport(client, exec, sched) {
-          @Override
-          public ProviderStream stream(
-              HttpRequest request,
-              ModelCallTimeoutPolicy timeoutPolicy,
-              HttpSseLimits limits,
-              HttpSseCallback callback) {
-            throw new TransportException(TransportErrorKind.IO, "simulated io error");
-          }
-        };
-
-    AnthropicModelProvider ioProvider =
-        new AnthropicModelProvider(
-            ioTransport, descriptor, "key", URI.create("https://api.anthropic.com/v1/messages"));
-
-    AtomicReference<ProviderException> caughtIo = new AtomicReference<>();
-    AtomicReference<Integer> ioErrors = new AtomicReference<>(0);
-    ProviderStream ioStream =
-        ioProvider.stream(
-            request,
-            new ProviderStreamHandler() {
-              @Override
-              public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
-
-              @Override
-              public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
-
-              @Override
-              public void onError(ProviderException error, ProviderStream stream) {
-                ioErrors.set(ioErrors.get() + 1);
-                caughtIo.set(error);
-              }
-            });
-    assertNotNull(ioStream);
-    assertEquals(1, ioErrors.get());
-    assertEquals(ProviderErrorKind.TRANSIENT, caughtIo.get().kind());
-    assertEquals("Anthropic I/O error", caughtIo.get().getMessage());
-
-    // 2. 同步抛出 TransportException (EXECUTOR_REJECTED)
-    JdkHttpSseTransport rejectedTransport =
-        new JdkHttpSseTransport(client, exec, sched) {
-          @Override
-          public ProviderStream stream(
-              HttpRequest request,
-              ModelCallTimeoutPolicy timeoutPolicy,
-              HttpSseLimits limits,
-              HttpSseCallback callback) {
-            throw new TransportException(TransportErrorKind.EXECUTOR_REJECTED, "rejected");
-          }
-        };
-
-    AnthropicModelProvider rejProvider =
-        new AnthropicModelProvider(
-            rejectedTransport,
-            descriptor,
-            "key",
-            URI.create("https://api.anthropic.com/v1/messages"));
-
-    AtomicReference<ProviderException> caughtRej = new AtomicReference<>();
-    AtomicReference<Integer> rejectedErrors = new AtomicReference<>(0);
-    ProviderStream rejectedStream =
-        rejProvider.stream(
-            request,
-            new ProviderStreamHandler() {
-              @Override
-              public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
-
-              @Override
-              public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
-
-              @Override
-              public void onError(ProviderException error, ProviderStream stream) {
-                rejectedErrors.set(rejectedErrors.get() + 1);
-                caughtRej.set(error);
-              }
-            });
-    assertNotNull(rejectedStream);
-    assertEquals(1, rejectedErrors.get());
-    assertEquals(ProviderErrorKind.TRANSIENT, caughtRej.get().kind());
-    assertEquals("Anthropic executor rejected the request", caughtRej.get().getMessage());
-  }
-
-  /** 测试意图：用户 handler 抛错后 bridge 已终态，transport 再交付 CALLBACK_FAILED 时不得再次回调。 */
-  @Test
-  void handlerFailureIsTerminalAndDoesNotReenterOnError() {
-    AtomicReference<HttpSseCallback> callbackRef = new AtomicReference<>();
-    JdkHttpSseTransport failingCallbackTransport =
-        new JdkHttpSseTransport(client, exec, sched) {
-          @Override
-          public ProviderStream stream(
-              HttpRequest request,
-              ModelCallTimeoutPolicy timeoutPolicy,
-              HttpSseLimits limits,
-              HttpSseCallback callback) {
-            callbackRef.set(callback);
-            return new ProviderStream() {
-              @Override
-              public void cancel() {}
-
-              @Override
-              public boolean isCancelled() {
-                return false;
-              }
-            };
-          }
-        };
-    AnthropicModelProvider provider =
-        new AnthropicModelProvider(
-            failingCallbackTransport,
-            descriptor,
-            "key",
-            URI.create("https://api.anthropic.com/v1/messages"));
-    AtomicReference<Integer> errors = new AtomicReference<>(0);
-    ProviderStream stream =
-        provider.stream(
-            request,
-            new ProviderStreamHandler() {
-              @Override
-              public void onProtocolEvent(ProviderProtocolEvent event, ProviderStream stream) {
-                throw new ProviderException(ProviderErrorKind.INVALID_REQUEST, "handler failed");
-              }
-
-              @Override
-              public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
-
-              @Override
-              public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
-
-              @Override
-              public void onError(ProviderException error, ProviderStream stream) {
-                errors.set(errors.get() + 1);
-              }
-            });
-    assertThrows(
-        ProviderException.class,
-        () -> callbackRef.get().onEvent(new ServerSentEvent("message", "{\"type\":\"ping\"}")));
-    callbackRef
-        .get()
-        .onFailure(
-            new TransportException(TransportErrorKind.CALLBACK_FAILED, "onEvent callback threw"));
-    assertEquals(0, errors.get());
-    assertNotNull(stream);
-
-    AtomicReference<HttpSseCallback> providerExceptionCallback = new AtomicReference<>();
-    AnthropicModelProvider providerExceptionProvider =
-        new AnthropicModelProvider(
-            new JdkHttpSseTransport(client, exec, sched) {
-              @Override
-              public ProviderStream stream(
-                  HttpRequest request,
-                  ModelCallTimeoutPolicy timeoutPolicy,
-                  HttpSseLimits limits,
-                  HttpSseCallback callback) {
-                providerExceptionCallback.set(callback);
-                return new ProviderStream() {
-                  @Override
-                  public void cancel() {}
-
-                  @Override
-                  public boolean isCancelled() {
-                    return false;
-                  }
-                };
-              }
-            },
-            descriptor,
-            "key",
-            URI.create("https://api.anthropic.com/v1/messages"));
-    AtomicReference<Integer> providerExceptionErrors = new AtomicReference<>(0);
-    providerExceptionProvider.stream(
-        request,
-        new ProviderStreamHandler() {
-          @Override
-          public void onProtocolEvent(ProviderProtocolEvent event, ProviderStream stream) {}
-
-          @Override
-          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {
-            throw new ProviderException(ProviderErrorKind.INVALID_REQUEST, "handler failed");
-          }
-
-          @Override
-          public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
-
-          @Override
-          public void onError(ProviderException error, ProviderStream stream) {
-            providerExceptionErrors.set(providerExceptionErrors.get() + 1);
-          }
-        });
-    providerExceptionCallback
-        .get()
-        .onEvent(
-            new ServerSentEvent(
-                "message_start",
-                "{\"type\":\"message_start\",\"message\":{\"id\":\"msg\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude\",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}"));
-    assertThrows(
-        ProviderException.class,
-        () ->
-            providerExceptionCallback
-                .get()
-                .onEvent(
-                    new ServerSentEvent(
-                        "content_block_start",
-                        "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"x\"}}")));
-    providerExceptionCallback
-        .get()
-        .onFailure(new TransportException(TransportErrorKind.CALLBACK_FAILED, "callback"));
-    assertEquals(0, providerExceptionErrors.get());
-  }
-
-  @Test
-  void handlesAsyncTransportFailureInCallback() {
-    AtomicReference<HttpSseCallback> callbackRef = new AtomicReference<>();
-    JdkHttpSseTransport asyncTransport =
-        new JdkHttpSseTransport(client, exec, sched) {
-          @Override
-          public ProviderStream stream(
-              HttpRequest request,
-              ModelCallTimeoutPolicy timeoutPolicy,
-              HttpSseLimits limits,
-              HttpSseCallback callback) {
-            callbackRef.set(callback);
-            return new ProviderStream() {
-              @Override
-              public void cancel() {}
-
-              @Override
-              public boolean isCancelled() {
-                return false;
-              }
-            };
-          }
-        };
-
-    AnthropicModelProvider provider =
-        new AnthropicModelProvider(
-            asyncTransport, descriptor, "key", URI.create("https://api.anthropic.com/v1/messages"));
-
-    AtomicReference<ProviderException> caught = new AtomicReference<>();
-    ProviderStream stream =
-        provider.stream(
-            request,
-            new ProviderStreamHandler() {
-              @Override
-              public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
-
-              @Override
-              public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
-
-              @Override
-              public void onError(ProviderException error, ProviderStream stream) {
-                caught.set(error);
-              }
-            });
-
-    assertNotNull(stream);
-    assertNotNull(callbackRef.get());
-
-    // 异步触发 onFailure
-    callbackRef
-        .get()
-        .onFailure(new TransportException(TransportErrorKind.IO, "async socket reset"));
-    assertNotNull(caught.get());
-    assertEquals(ProviderErrorKind.TRANSIENT, caught.get().kind());
-  }
-
-  @Test
-  void throwsUnclassifiedRuntimeExceptionOnSynchronousTransportFailure() {
-    JdkHttpSseTransport failingTransport =
-        new JdkHttpSseTransport(client, exec, sched) {
-          @Override
-          public ProviderStream stream(
-              HttpRequest request,
-              ModelCallTimeoutPolicy timeoutPolicy,
-              HttpSseLimits limits,
-              HttpSseCallback callback) {
-            throw new RuntimeException("unexpected crash with sensitive detail");
-          }
-        };
-
-    AnthropicModelProvider provider =
-        new AnthropicModelProvider(
-            failingTransport,
-            descriptor,
-            "key",
-            URI.create("https://api.anthropic.com/v1/messages"));
-
-    RuntimeException ex =
-        assertThrows(
-            RuntimeException.class,
-            () ->
-                provider.stream(
-                    request,
-                    new ProviderStreamHandler() {
-                      @Override
-                      public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
-
-                      @Override
-                      public void onComplete(
-                          ProviderCompletion completion, ProviderStream stream) {}
-
-                      @Override
-                      public void onError(ProviderException error, ProviderStream stream) {}
-                    }));
-    assertEquals("transport execution failed", ex.getMessage());
-    assertNull(ex.getCause());
-  }
-
-  @Test
   void handlesInvalidHeaderValueSafelyWithoutLeakingSecrets() {
-    JdkHttpSseTransport mockTransport = new JdkHttpSseTransport(client, exec, sched);
+    JdkHttpSseTransport mockTransport = new JdkHttpSseTransport(client, sched);
     String sensitiveKeyWithCRLF = "secret-key\r\nInjected-Header: evil";
     AnthropicModelProvider provider =
         new AnthropicModelProvider(
@@ -434,13 +123,13 @@ class AnthropicModelProviderUnitTest {
         request,
         new ProviderStreamHandler() {
           @Override
-          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
+          public void onEvent(ProviderStreamEvent event) {}
 
           @Override
-          public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
+          public void onComplete(ProviderCompletion completion) {}
 
           @Override
-          public void onError(ProviderException error, ProviderStream stream) {
+          public void onError(ProviderException error) {
             caught.set(error);
           }
         });
@@ -453,7 +142,7 @@ class AnthropicModelProviderUnitTest {
 
   @Test
   void toStringDoesNotLeakDescriptorOrEndpoint() {
-    JdkHttpSseTransport mockTransport = new JdkHttpSseTransport(client, exec, sched);
+    JdkHttpSseTransport mockTransport = new JdkHttpSseTransport(client, sched);
     AnthropicModelProvider provider =
         new AnthropicModelProvider(
             mockTransport,
@@ -468,167 +157,8 @@ class AnthropicModelProviderUnitTest {
   }
 
   @Test
-  void handlesCallbackOnEventFailure() {
-    AtomicReference<HttpSseCallback> callbackRef = new AtomicReference<>();
-    JdkHttpSseTransport hookTransport =
-        new JdkHttpSseTransport(client, exec, sched) {
-          @Override
-          public ProviderStream stream(
-              HttpRequest request,
-              ModelCallTimeoutPolicy timeoutPolicy,
-              HttpSseLimits limits,
-              HttpSseCallback callback) {
-            callbackRef.set(callback);
-            return new ProviderStream() {
-              @Override
-              public void cancel() {}
-
-              @Override
-              public boolean isCancelled() {
-                return false;
-              }
-            };
-          }
-        };
-
-    AnthropicModelProvider provider =
-        new AnthropicModelProvider(
-            hookTransport, descriptor, "key", URI.create("https://api.anthropic.com/v1/messages"));
-
-    AtomicReference<ProviderException> caught = new AtomicReference<>();
-    provider.stream(
-        request,
-        new ProviderStreamHandler() {
-          @Override
-          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
-
-          @Override
-          public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
-
-          @Override
-          public void onError(ProviderException error, ProviderStream stream) {
-            caught.set(error);
-          }
-        });
-
-    HttpSseCallback cb = callbackRef.get();
-    assertNotNull(cb);
-
-    cb.onOpen(new HttpOpenMetadata(200, Map.of()));
-    cb.onEvent(
-        new ServerSentEvent(
-            "error", "{\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\"}}"));
-    assertNotNull(caught.get());
-    assertEquals(ProviderErrorKind.TRANSIENT, caught.get().kind());
-  }
-
-  @Test
-  void handlesCallbackOnCompleteFailure() {
-    AtomicReference<HttpSseCallback> callbackRef = new AtomicReference<>();
-    JdkHttpSseTransport hookTransport =
-        new JdkHttpSseTransport(client, exec, sched) {
-          @Override
-          public ProviderStream stream(
-              HttpRequest request,
-              ModelCallTimeoutPolicy timeoutPolicy,
-              HttpSseLimits limits,
-              HttpSseCallback callback) {
-            callbackRef.set(callback);
-            return new ProviderStream() {
-              @Override
-              public void cancel() {}
-
-              @Override
-              public boolean isCancelled() {
-                return false;
-              }
-            };
-          }
-        };
-
-    AnthropicModelProvider provider =
-        new AnthropicModelProvider(
-            hookTransport, descriptor, "key", URI.create("https://api.anthropic.com/v1/messages"));
-
-    AtomicReference<ProviderException> caught = new AtomicReference<>();
-    provider.stream(
-        request,
-        new ProviderStreamHandler() {
-          @Override
-          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
-
-          @Override
-          public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
-
-          @Override
-          public void onError(ProviderException error, ProviderStream stream) {
-            caught.set(error);
-          }
-        });
-
-    HttpSseCallback cb = callbackRef.get();
-    assertNotNull(cb);
-
-    cb.onOpen(new HttpOpenMetadata(200, Map.of()));
-    cb.onComplete();
-    assertNotNull(caught.get());
-    assertEquals(ProviderErrorKind.INVALID_RESPONSE, caught.get().kind());
-  }
-
-  @Test
-  void handlesCallbackOnFailureSilentCancellation() {
-    AtomicReference<HttpSseCallback> callbackRef = new AtomicReference<>();
-    JdkHttpSseTransport hookTransport =
-        new JdkHttpSseTransport(client, exec, sched) {
-          @Override
-          public ProviderStream stream(
-              HttpRequest request,
-              ModelCallTimeoutPolicy timeoutPolicy,
-              HttpSseLimits limits,
-              HttpSseCallback callback) {
-            callbackRef.set(callback);
-            return new ProviderStream() {
-              @Override
-              public void cancel() {}
-
-              @Override
-              public boolean isCancelled() {
-                return false;
-              }
-            };
-          }
-        };
-
-    AnthropicModelProvider provider =
-        new AnthropicModelProvider(
-            hookTransport, descriptor, "key", URI.create("https://api.anthropic.com/v1/messages"));
-
-    AtomicReference<ProviderException> caught = new AtomicReference<>();
-    provider.stream(
-        request,
-        new ProviderStreamHandler() {
-          @Override
-          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
-
-          @Override
-          public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
-
-          @Override
-          public void onError(ProviderException error, ProviderStream stream) {
-            caught.set(error);
-          }
-        });
-
-    HttpSseCallback cb = callbackRef.get();
-    assertNotNull(cb);
-
-    cb.onFailure(new TransportException(TransportErrorKind.CANCELLED, "cancelled"));
-    assertNull(caught.get());
-  }
-
-  @Test
   void adapterWiringAndConfigurationBehavior() {
-    JdkHttpSseTransport transport = new JdkHttpSseTransport(client, exec, sched);
+    JdkHttpSseTransport transport = new JdkHttpSseTransport(client, sched);
 
     // 1. 默认构造函数使用 ADAPTIVE
     AnthropicProviderAdapter defaultAdapter = new AnthropicProviderAdapter(transport, "key-1");
@@ -670,23 +200,14 @@ class AnthropicModelProviderUnitTest {
   void modelProviderEmitsInvalidRequestOnBudgetConstraintViolationWithoutInvokingTransport() {
     AtomicReference<Boolean> transportInvoked = new AtomicReference<>(false);
     JdkHttpSseTransport hookTransport =
-        new JdkHttpSseTransport(client, exec, sched) {
+        new JdkHttpSseTransport(client, sched) {
           @Override
-          public ProviderStream stream(
+          public void execute(
               HttpRequest request,
               ModelCallTimeoutPolicy timeoutPolicy,
               HttpSseLimits limits,
-              HttpSseCallback callback) {
+              Predicate<ServerSentEvent> onEvent) {
             transportInvoked.set(true);
-            return new ProviderStream() {
-              @Override
-              public void cancel() {}
-
-              @Override
-              public boolean isCancelled() {
-                return false;
-              }
-            };
           }
         };
 
@@ -726,13 +247,13 @@ class AnthropicModelProviderUnitTest {
         violatingReq,
         new ProviderStreamHandler() {
           @Override
-          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
+          public void onEvent(ProviderStreamEvent event) {}
 
           @Override
-          public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
+          public void onComplete(ProviderCompletion completion) {}
 
           @Override
-          public void onError(ProviderException error, ProviderStream stream) {
+          public void onError(ProviderException error) {
             caughtError.set(error);
           }
         });
@@ -742,5 +263,152 @@ class AnthropicModelProviderUnitTest {
     assertNotNull(caughtError.get());
     assertEquals(ProviderErrorKind.INVALID_REQUEST, caughtError.get().kind());
     assertEquals("budget_tokens must be lower than max_tokens", caughtError.get().getMessage());
+  }
+
+  /** 测试意图：传输失败（发送阶段或读到一半）都被映射为恰好一次 onError，且不再交付其它终态。 */
+  @Test
+  void transportFailureMapsToExactlyOneTerminalError() {
+    for (ScriptedSseTransport transport :
+        List.of(
+            ScriptedSseTransport.failing(
+                new TransportException(TransportErrorKind.IO, "simulated io error")),
+            ScriptedSseTransport.failing(
+                new TransportException(TransportErrorKind.IO, "socket reset"), MESSAGE_START))) {
+      Recording recording = new Recording();
+      provider(transport).stream(request, recording);
+      assertEquals(1, recording.errors.size());
+      assertEquals(0, recording.completions);
+      assertEquals(ProviderErrorKind.TRANSIENT, recording.errors.get(0).kind());
+      assertEquals("Anthropic I/O error", recording.errors.get(0).getMessage());
+    }
+  }
+
+  /** 测试意图：调用线程被中断（CANCELLED）时静默返回，不交付任何终态，由调用方按中断状态收敛。 */
+  @Test
+  void cancellationDeliversNoTerminal() {
+    Recording recording = new Recording();
+    provider(
+        ScriptedSseTransport.failing(
+            new TransportException(TransportErrorKind.CANCELLED, "cancelled"), MESSAGE_START))
+        .stream(request, recording);
+    assertTrue(recording.errors.isEmpty());
+    assertEquals(0, recording.completions);
+  }
+
+  /** 测试意图：用户 handler 抛错后流已封口：异常传播给调用方，之后不再回调 onError / onComplete。 */
+  @Test
+  void handlerFailureIsTerminalAndPropagates() {
+    Recording protocolFailure = new Recording();
+    protocolFailure.failOnProtocolEvent = true;
+    assertThrows(
+        ProviderException.class,
+        () ->
+            provider(
+                ScriptedSseTransport.events(new ServerSentEvent("message", "{\"type\":\"ping\"}")))
+                .stream(request, protocolFailure));
+    assertTrue(protocolFailure.errors.isEmpty());
+    assertEquals(0, protocolFailure.completions);
+
+    Recording deltaFailure = new Recording();
+    deltaFailure.failOnEvent = true;
+    assertThrows(
+        ProviderException.class,
+        () ->
+            provider(
+                ScriptedSseTransport.events(
+                    MESSAGE_START,
+                    new ServerSentEvent(
+                        "content_block_start",
+                        "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"x\"}}")))
+                .stream(request, deltaFailure));
+    assertTrue(deltaFailure.errors.isEmpty());
+    assertEquals(0, deltaFailure.completions);
+  }
+
+  /** 测试意图：传输抛出的未分类运行时异常原样传播（不伪造成可分类失败），由上层按不确定终态收敛。 */
+  @Test
+  void unclassifiedTransportExceptionPropagates() {
+    RuntimeException crash = new RuntimeException("unexpected crash");
+    JdkHttpSseTransport crashing =
+        new JdkHttpSseTransport(client, sched) {
+          @Override
+          public void execute(
+              HttpRequest request,
+              ModelCallTimeoutPolicy timeoutPolicy,
+              HttpSseLimits limits,
+              Predicate<ServerSentEvent> onEvent) {
+            throw crash;
+          }
+        };
+    Recording recording = new Recording();
+    assertSame(
+        crash,
+        assertThrows(RuntimeException.class, () -> provider(crashing).stream(request, recording)));
+    assertTrue(recording.errors.isEmpty());
+  }
+
+  /** 测试意图：流内 error 事件按协议映射为 onError（限流为 TRANSIENT）。 */
+  @Test
+  void streamErrorEventMapsToError() {
+    Recording recording = new Recording();
+    provider(
+        ScriptedSseTransport.events(
+            new ServerSentEvent(
+                "error", "{\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\"}}")))
+        .stream(request, recording);
+    assertEquals(1, recording.errors.size());
+    assertEquals(ProviderErrorKind.TRANSIENT, recording.errors.get(0).kind());
+  }
+
+  /** 测试意图：流在没有任何消息的情况下结束是无效响应，而不是空成功。 */
+  @Test
+  void emptyStreamIsInvalidResponse() {
+    Recording recording = new Recording();
+    provider(ScriptedSseTransport.events()).stream(request, recording);
+    assertEquals(1, recording.errors.size());
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, recording.errors.get(0).kind());
+    assertEquals(0, recording.completions);
+  }
+
+  private static final ServerSentEvent MESSAGE_START =
+      new ServerSentEvent(
+          "message_start",
+          "{\"type\":\"message_start\",\"message\":{\"id\":\"msg\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude\",\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}");
+
+  private AnthropicModelProvider provider(JdkHttpSseTransport transport) {
+    return new AnthropicModelProvider(
+        transport, descriptor, "key", URI.create("https://api.anthropic.com/v1/messages"));
+  }
+
+  /** 记录全部回调的 handler；可配置在原生帧或增量处抛错以模拟用户 handler 失败。 */
+  private static final class Recording implements ProviderStreamHandler {
+    final List<ProviderException> errors = new ArrayList<>();
+    int completions;
+    boolean failOnProtocolEvent;
+    boolean failOnEvent;
+
+    @Override
+    public void onProtocolEvent(ProviderProtocolEvent event) {
+      if (failOnProtocolEvent) {
+        throw new ProviderException(ProviderErrorKind.INVALID_REQUEST, "handler failed");
+      }
+    }
+
+    @Override
+    public void onEvent(ProviderStreamEvent event) {
+      if (failOnEvent) {
+        throw new ProviderException(ProviderErrorKind.INVALID_REQUEST, "handler failed");
+      }
+    }
+
+    @Override
+    public void onComplete(ProviderCompletion completion) {
+      completions++;
+    }
+
+    @Override
+    public void onError(ProviderException error) {
+      errors.add(error);
+    }
   }
 }

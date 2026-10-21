@@ -271,8 +271,7 @@ final class HarnessRuntimeTestSupport {
           ModelInvocation model =
               modelInvocation(modelId, threadId, turnStartEntryId, turnStartEntryId, T1);
           tx.insertModelInvocation(model);
-          tx.updateModelInvocation(model.beginDispatch(T2));
-          tx.updateModelInvocation(model.beginDispatch(T2).markRunning(T2));
+          tx.updateModelInvocation(model.markRunning(T2));
           return new ModelBaseline(sessionId, rootEntryId, turnStartEntryId, threadId, modelId);
         });
   }
@@ -299,11 +298,8 @@ final class HarnessRuntimeTestSupport {
           ModelInvocation model =
               modelInvocation(modelId, threadId, turnStartEntryId, userEntryId, T1);
           tx.insertModelInvocation(model);
-          if (status == ModelInvocationStatus.DISPATCHING) {
-            tx.updateModelInvocation(model.beginDispatch(T2));
-          } else if (status == ModelInvocationStatus.RUNNING) {
-            tx.updateModelInvocation(model.beginDispatch(T2));
-            tx.updateModelInvocation(model.beginDispatch(T2).markRunning(T2));
+          if (status == ModelInvocationStatus.RUNNING) {
+            tx.updateModelInvocation(model.markRunning(T2));
           }
           return new ModelBaseline(sessionId, rootEntryId, turnStartEntryId, threadId, modelId);
         });
@@ -342,8 +338,7 @@ final class HarnessRuntimeTestSupport {
           ModelInvocation model =
               modelInvocation(modelId, threadId, turnStartEntryId, turnStartEntryId, T1);
           tx.insertModelInvocation(model);
-          tx.updateModelInvocation(model.beginDispatch(T2));
-          tx.updateModelInvocation(model.beginDispatch(T2).markRunning(T2));
+          tx.updateModelInvocation(model.markRunning(T2));
           return new ModelBaseline(sessionId, rootEntryId, turnStartEntryId, threadId, modelId);
         });
   }
@@ -424,9 +419,8 @@ final class HarnessRuntimeTestSupport {
               modelInvocationWithRequest(
                   modelId, threadId, turnStartEntryId, turnStartEntryId, requestSpec, T1);
           tx.insertModelInvocation(model);
-          ModelInvocation succeeded = model.beginDispatch(T2).markRunning(T2).succeed(response, T2);
-          tx.updateModelInvocation(model.beginDispatch(T2));
-          tx.updateModelInvocation(model.beginDispatch(T2).markRunning(T2));
+          ModelInvocation succeeded = model.markRunning(T2).succeed(response, T2);
+          tx.updateModelInvocation(model.markRunning(T2));
           tx.updateModelInvocation(succeeded);
           tx.updateModelInvocation(succeeded.attachResultEntry(assistantEntryId, T2));
           List<ToolInvocation> invocations = new ArrayList<>(toolCount);
@@ -517,9 +511,8 @@ final class HarnessRuntimeTestSupport {
               modelInvocationWithRequest(
                   modelId, threadId, turnStartEntryId, turnStartEntryId, requestSpec, T1);
           tx.insertModelInvocation(model);
-          ModelInvocation succeeded = model.beginDispatch(T2).markRunning(T2).succeed(response, T2);
-          tx.updateModelInvocation(model.beginDispatch(T2));
-          tx.updateModelInvocation(model.beginDispatch(T2).markRunning(T2));
+          ModelInvocation succeeded = model.markRunning(T2).succeed(response, T2);
+          tx.updateModelInvocation(model.markRunning(T2));
           tx.updateModelInvocation(succeeded);
           tx.updateModelInvocation(succeeded.attachResultEntry(assistantEntryId, T2));
           UUID toolId = tx.nextId();

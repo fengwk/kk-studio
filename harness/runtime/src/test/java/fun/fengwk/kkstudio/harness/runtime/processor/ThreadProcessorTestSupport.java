@@ -568,14 +568,12 @@ final class ThreadProcessorTestSupport {
     switch (status) {
       case READY -> {}
       case SUCCEEDED -> {
-        transitionModel(store, modelId, m -> m.beginDispatch(NOW));
         transitionModel(store, modelId, m -> m.markRunning(NOW));
         transitionModel(store, modelId, m -> m.succeed(response, null, replayState, NOW));
       }
       case FAILED -> transitionModel(store, modelId, m -> m.fail(error, NOW));
       case CANCELLED -> transitionModel(store, modelId, m -> m.cancel(error, NOW));
       case UNKNOWN -> {
-        transitionModel(store, modelId, m -> m.beginDispatch(NOW));
         transitionModel(store, modelId, m -> m.markRunning(NOW));
         transitionModel(store, modelId, m -> m.unknown(error, NOW));
       }

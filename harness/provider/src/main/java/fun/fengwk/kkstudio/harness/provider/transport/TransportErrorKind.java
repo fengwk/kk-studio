@@ -14,12 +14,6 @@ public enum TransportErrorKind {
   /** 服务端返回非 2xx 状态码（含 3xx 重定向或 4xx/5xx）。 */
   HTTP_STATUS,
 
-  /** 注入的受管 ExecutorService 拒绝提交任务。 */
-  EXECUTOR_REJECTED,
-
-  /** 外部传入的回调函数抛出未受检异常。 */
-  CALLBACK_FAILED,
-
-  /** 流传输已被主动取消。 */
+  /** 调用线程在请求或读取期间被中断（取消）。 */
   CANCELLED
 }

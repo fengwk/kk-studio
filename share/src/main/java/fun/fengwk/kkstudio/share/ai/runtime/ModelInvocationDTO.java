@@ -34,12 +34,12 @@ public class ModelInvocationDTO {
   private String requestHeadEntryId;
 
   /**
-   * 状态，取 {@code ModelInvocationStatus} 枚举名：READY / DISPATCHING / RUNNING / SUCCEEDED / FAILED /
-   * CANCELLED / UNKNOWN。
+   * 状态，取 {@code ModelInvocationStatus} 枚举名：READY / RUNNING / SUCCEEDED / FAILED / CANCELLED /
+   * UNKNOWN。
    */
   private String status;
 
-  /** 已确认的 Provider 调用开始次数（非负整数）；BUSY/OVERLOADED 等未确认启动不计数。 */
+  /** 已持久化 RUNNING 的执行次数（非负整数）；BUSY 等未执行的准入不计数。 */
   private Integer attempt;
 
   /**

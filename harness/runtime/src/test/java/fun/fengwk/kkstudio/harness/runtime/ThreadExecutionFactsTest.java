@@ -84,12 +84,9 @@ class ThreadExecutionFactsTest {
 
   @Test
   void liveModelStatusesConstituteWork() {
-    // 测试意图：本 Thread 合法的 READY/DISPATCHING/RUNNING Model 都是工作，且不引入等待或 UNKNOWN。
+    // 测试意图：本 Thread 合法的 READY/RUNNING Model 都是工作，且不引入等待或 UNKNOWN。
     for (ModelInvocationStatus status :
-        List.of(
-            ModelInvocationStatus.READY,
-            ModelInvocationStatus.DISPATCHING,
-            ModelInvocationStatus.RUNNING)) {
+        List.of(ModelInvocationStatus.READY, ModelInvocationStatus.RUNNING)) {
       HarnessRuntimeTestSupport.ModelBaseline baseline = seedModel(store, status);
       assertEquals(
           new ThreadExecutionFacts(true, false, false),

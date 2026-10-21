@@ -22,7 +22,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
@@ -153,22 +152,22 @@ final class OpenAiResponsesStreamAccumulator {
     return new ProviderStreamBridge(
         new ProviderStreamHandler() {
           @Override
-          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {
+          public void onEvent(ProviderStreamEvent event) {
             if (eventConsumer != null) {
               eventConsumer.accept(event);
             }
           }
 
           @Override
-          public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
+          public void onComplete(ProviderCompletion completion) {}
 
           @Override
-          public void onError(ProviderException error, ProviderStream stream) {}
+          public void onError(ProviderException error) {}
         });
   }
 
   void handleEvent(String eventName, String data) {
-    if (bridge.isCancelled()) {
+    if (bridge.isClosed()) {
       return;
     }
     // 每条 transport 帧（含 keepalive ping、[DONE] 哨兵与畸形帧）先 exactly-once 上报原生事实，
