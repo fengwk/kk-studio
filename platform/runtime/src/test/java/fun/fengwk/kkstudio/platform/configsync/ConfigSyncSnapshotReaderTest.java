@@ -21,10 +21,10 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentDefinitions;
-import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
-import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogQueryService;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRepository;
@@ -44,8 +44,7 @@ class ConfigSyncSnapshotReaderTest {
   private final AgentModelRepository modelRepository = mock(AgentModelRepository.class);
   private final AgentDefinitionRepository definitionRepository =
       mock(AgentDefinitionRepository.class);
-  private final SkillCatalogQueryService skillCatalogQueryService =
-      mock(SkillCatalogQueryService.class);
+  private final SkillPackageRepository skillPackageRepository = mock(SkillPackageRepository.class);
   private final EnvironmentRepository environmentRepository = mock(EnvironmentRepository.class);
   private final McpServerRepository mcpServerRepository = mock(McpServerRepository.class);
   private final SystemSettingsRepository systemSettingsRepository =
@@ -58,7 +57,7 @@ class ConfigSyncSnapshotReaderTest {
           providerRepository,
           modelRepository,
           definitionRepository,
-          skillCatalogQueryService,
+          skillPackageRepository,
           environmentRepository,
           mcpServerRepository,
           systemSettingsRepository,
@@ -68,7 +67,7 @@ class ConfigSyncSnapshotReaderTest {
               new ConfigSyncFixtures.AgentDependencyPlugin("beta.plugin")));
 
   private void stubBaseFacts() {
-    when(skillCatalogQueryService.listPackages()).thenReturn(List.of());
+    when(skillPackageRepository.listPackages()).thenReturn(List.of());
     when(definitionRepository.listAll()).thenReturn(List.of());
     when(environmentRepository.listAll()).thenReturn(List.of());
     when(mcpServerRepository.listAllServers()).thenReturn(List.of());
@@ -87,7 +86,7 @@ class ConfigSyncSnapshotReaderTest {
     var tool = mcpTool("tool_x", "mcp");
     var settings = settings(3L);
     when(systemSettingsRepository.get()).thenReturn(settings);
-    when(skillCatalogQueryService.listPackages()).thenReturn(List.of(skillPackage));
+    when(skillPackageRepository.listPackages()).thenReturn(List.of(skillPackage));
     when(providerRepository.listAll()).thenReturn(List.of(provider));
     when(modelRepository.listAll()).thenReturn(List.of(model));
     when(definitionRepository.listAll()).thenReturn(List.of());
@@ -126,7 +125,7 @@ class ConfigSyncSnapshotReaderTest {
   @Test
   void excludesBuiltinAgentsFromTheSnapshot() {
     when(systemSettingsRepository.get()).thenReturn(settings(1L));
-    when(skillCatalogQueryService.listPackages()).thenReturn(List.of());
+    when(skillPackageRepository.listPackages()).thenReturn(List.of());
     AgentDefinition user =
         agent("user-agent", "p", "m", agentConfig(List.of(), List.of(), List.of())).toBuilder()
             .type(AgentDefinitionType.USER)

@@ -17,7 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
 import fun.fengwk.kkstudio.platform.environment.RegistrationTokens;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncKind;
@@ -128,8 +128,7 @@ class ConfigSyncExporterTest {
 
   @Test
   void exportIncludesSkillAccessTokenVerbatim() {
-    SkillPackage pkg = skillPackage("pkg", "s");
-    pkg.setToken("pkg-token");
+    SkillPackage pkg = skillPackage("pkg", "s").toBuilder().token("pkg-token").build();
     ConfigSyncSnapshot snapshot =
         snapshot(List.of(), List.of(), List.of(), List.of(pkg), List.of(), List.of(), List.of());
 

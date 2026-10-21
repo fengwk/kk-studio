@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.platform.catalog.skill.git;
 
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillManifestEntry;
 
 import java.util.List;
 

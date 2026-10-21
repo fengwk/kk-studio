@@ -18,11 +18,6 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitCache;
-import fun.fengwk.kkstudio.platform.catalog.skill.repo.SkillPackageRepository;
-import fun.fengwk.kkstudio.platform.catalog.skill.repo.impl.PostgresqlSkillPackageChangeNotifier;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.SkillCatalogService;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrchestrator;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
@@ -50,7 +45,6 @@ class SkillPackageChangeNotificationIntegrationTest extends PostgresSpringTestSu
   @MockitoBean private SkillGitCache skillGitCache;
   @Autowired private SkillCatalogService skillCatalogService;
   @Autowired private SkillPackageRepository skillPackageRepository;
-  @Autowired private PostgresqlSkillPackageChangeNotifier notifier;
   @Autowired private PlatformTransactionManager transactionManager;
 
   /** 插入/版本变化/删除都在提交后投递一次；未提交不可见，回滚静默且不改变权威事实。 */
@@ -75,24 +69,26 @@ class SkillPackageChangeNotificationIntegrationTest extends PostgresSpringTestSu
       tx.executeWithoutResult(
           status -> {
             SkillPackage current = skillPackageRepository.getPackage(PACKAGE);
-            current.setBranch("release");
-            assertTrue(skillPackageRepository.updatePackage(current, current.getVersion()));
+            assertTrue(
+                skillPackageRepository.updatePackage(
+                    current.toBuilder().branch("release").build(), current.version()));
             status.setRollbackOnly();
           });
       assertNoNotification(pg);
       SkillPackage rolledBack = skillPackageRepository.getPackage(PACKAGE);
-      assertEquals(0L, rolledBack.getVersion());
-      assertEquals("main", rolledBack.getBranch());
+      assertEquals(0L, rolledBack.version());
+      assertEquals("main", rolledBack.branch());
 
       // 提交的版本变更投递一次。
       tx.executeWithoutResult(
           status -> {
             SkillPackage current = skillPackageRepository.getPackage(PACKAGE);
-            current.setBranch("release");
-            assertTrue(skillPackageRepository.updatePackage(current, current.getVersion()));
+            assertTrue(
+                skillPackageRepository.updatePackage(
+                    current.toBuilder().branch("release").build(), current.version()));
           });
       assertNotification(pg, PACKAGE);
-      assertEquals(1L, skillPackageRepository.getPackage(PACKAGE).getVersion());
+      assertEquals(1L, skillPackageRepository.getPackage(PACKAGE).version());
 
       // 删除投递一次。
       tx.executeWithoutResult(
@@ -118,7 +114,7 @@ class SkillPackageChangeNotificationIntegrationTest extends PostgresSpringTestSu
       tx.executeWithoutResult(
           status -> {
             SkillPackage current = skillPackageRepository.getPackage(PACKAGE);
-            assertFalse(skillPackageRepository.updatePackage(current, current.getVersion() + 5));
+            assertFalse(skillPackageRepository.updatePackage(current, current.version() + 5));
           });
       assertNoNotification(pg);
 
@@ -129,7 +125,7 @@ class SkillPackageChangeNotificationIntegrationTest extends PostgresSpringTestSu
       unchanged.setBranch("main");
       skillCatalogService.editPackage(PACKAGE, unchanged);
       assertNoNotification(pg);
-      assertEquals(0L, skillPackageRepository.getPackage(PACKAGE).getVersion());
+      assertEquals(0L, skillPackageRepository.getPackage(PACKAGE).version());
 
       // 陈旧版本编辑：在写行前就 conflict，静默。
       SkillPackageEditDTO stale = new SkillPackageEditDTO();
@@ -139,7 +135,7 @@ class SkillPackageChangeNotificationIntegrationTest extends PostgresSpringTestSu
       assertThrows(
           AiVersionConflictException.class, () -> skillCatalogService.editPackage(PACKAGE, stale));
       assertNoNotification(pg);
-      assertEquals(0L, skillPackageRepository.getPackage(PACKAGE).getVersion());
+      assertEquals(0L, skillPackageRepository.getPackage(PACKAGE).version());
     }
   }
 
@@ -166,7 +162,7 @@ class SkillPackageChangeNotificationIntegrationTest extends PostgresSpringTestSu
 
       assertNotification(pg, PACKAGE);
       assertNoNotification(pg);
-      assertEquals(0L, skillPackageRepository.getPackage(PACKAGE).getVersion());
+      assertEquals(0L, skillPackageRepository.getPackage(PACKAGE).version());
     }
   }
 
@@ -189,38 +185,35 @@ class SkillPackageChangeNotificationIntegrationTest extends PostgresSpringTestSu
       assertThrows(
           IllegalStateException.class,
           () -> {
-            SkillPackage changed = skillPackageRepository.getPackage(PACKAGE);
-            changed.setBranch("release");
-            skillPackageRepository.updatePackage(changed, changed.getVersion());
+            SkillPackage current = skillPackageRepository.getPackage(PACKAGE);
+            skillPackageRepository.updatePackage(
+                current.toBuilder().branch("release").build(), current.version());
           });
       assertThrows(
           IllegalStateException.class,
-          () -> skillPackageRepository.deletePackage(PACKAGE, before.getVersion()));
+          () -> skillPackageRepository.deletePackage(PACKAGE, before.version()));
 
       SkillPackage after = skillPackageRepository.getPackage(PACKAGE);
       assertNotNull(after);
-      assertEquals(before.getVersion(), after.getVersion());
-      assertEquals(before.getBranch(), after.getBranch());
+      assertEquals(before.version(), after.version());
+      assertEquals(before.branch(), after.branch());
       assertNoNotification(pg);
     }
   }
 
   /** 未开启真实事务直接发布必须拒绝，避免 autocommit 提前发信号。 */
-  @Test
-  void notificationRequiresActiveTransaction() {
-    assertThrows(IllegalStateException.class, () -> notifier.packageChanged(PACKAGE));
-  }
-
   private static SkillPackage packageRow() {
-    SkillPackage skillPackage = new SkillPackage();
-    skillPackage.setPackageName(PACKAGE);
-    skillPackage.setDescription("notify package");
-    skillPackage.setRepositoryUrl(REPOSITORY_URL);
-    skillPackage.setBranch("main");
-    skillPackage.setCurrentCommit(COMMIT);
-    skillPackage.setObservedHeadCommit(COMMIT);
-    skillPackage.setSkills(List.of(new SkillManifestEntry("dev", "developer skill")));
-    skillPackage.setVersion(0L);
+    SkillPackage skillPackage =
+        SkillPackage.builder()
+            .packageName(PACKAGE)
+            .description("notify package")
+            .repositoryUrl(REPOSITORY_URL)
+            .branch("main")
+            .currentCommit(COMMIT)
+            .observedHeadCommit(COMMIT)
+            .skills(List.of(new SkillManifestEntry("dev", "developer skill")))
+            .version(0L)
+            .build();
     return skillPackage;
   }
 

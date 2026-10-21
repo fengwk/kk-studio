@@ -5,16 +5,16 @@ import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.McpServerMutationValidator;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpConfigParser;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpServer;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerRepository;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelDefaultVariantResolver;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillManifestEntry;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitCache;
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitException;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
@@ -141,16 +141,16 @@ public final class ConfigSyncPlanner {
     Map<String, SkillPackage> existingPackages = new LinkedHashMap<>();
     Map<String, Set<String>> availableSkills = new LinkedHashMap<>();
     for (SkillPackage pkg : snapshot.skillPackages()) {
-      if (skippedSkills.contains(pkg.getPackageName())) {
+      if (skippedSkills.contains(pkg.packageName())) {
         continue;
       }
-      existingPackages.put(pkg.getPackageName(), pkg);
-      availableSkills.put(pkg.getPackageName(), skillNames(pkg.getSkills()));
+      existingPackages.put(pkg.packageName(), pkg);
+      availableSkills.put(pkg.packageName(), skillNames(pkg.skills()));
     }
     List<ConfigSyncPlan.SkillImport> skillImports = new ArrayList<>();
     for (ConfigSyncParser.SkillSpec spec : document.skillPackages()) {
       SkillPackage existing = existingPackages.get(spec.packageName());
-      if (existing != null && !existing.getRepositoryUrl().equals(spec.repositoryUrl())) {
+      if (existing != null && !existing.repositoryUrl().equals(spec.repositoryUrl())) {
         // repositoryUrl 是不可变身份：同名换仓库是硬冲突，不能通过部分导入规避，也不回显 URL。
         throw new AiValidationException(
             RESOURCE, "skill package repositoryUrl is immutable: " + spec.packageName());
@@ -173,7 +173,7 @@ public final class ConfigSyncPlanner {
       if (existing != null) {
         Set<String> published = new LinkedHashSet<>(skillNames(manifest));
         List<String> referenced =
-            skillNames(existing.getSkills()).stream()
+            skillNames(existing.skills()).stream()
                 .filter(skill -> !published.contains(skill))
                 .filter(
                     skill ->
@@ -203,31 +203,33 @@ public final class ConfigSyncPlanner {
     Map<String, Set<String>> availableMcpTools = new LinkedHashMap<>();
     Set<String> knownMcpToolNames = new LinkedHashSet<>();
     for (McpServer server : snapshot.mcpServers()) {
-      if (skippedMcp.contains(server.getName())) {
+      if (skippedMcp.contains(server.name())) {
         continue;
       }
-      availableMcpTools.put(server.getName(), new LinkedHashSet<>());
+      availableMcpTools.put(server.name(), new LinkedHashSet<>());
     }
     for (McpTool tool : snapshot.mcpTools()) {
-      knownMcpToolNames.add(tool.getName());
-      if (skippedMcp.contains(tool.getServerName())) {
+      knownMcpToolNames.add(tool.name());
+      if (skippedMcp.contains(tool.serverName())) {
         continue;
       }
       availableMcpTools
-          .computeIfAbsent(tool.getServerName(), ignored -> new LinkedHashSet<>())
-          .add(tool.getName());
+          .computeIfAbsent(tool.serverName(), ignored -> new LinkedHashSet<>())
+          .add(tool.name());
     }
     Set<String> referencedMcpToolNames =
         new LinkedHashSet<>(mcpServerRepository.selectReferencedToolNames());
     List<ConfigSyncPlan.McpImport> mcpImports = new ArrayList<>();
     for (ConfigSyncParser.McpSpec spec : document.mcpServers()) {
-      McpServerMutationValidator.HttpConfig config = spec.config();
-      McpServer probe = new McpServer();
-      probe.setName(spec.name());
-      probe.setUrl(config.url());
-      probe.setHeaders(config.headers());
-      probe.setEnabled(config.enabled());
-      probe.setTimeoutMillis(config.timeoutMillis());
+      McpConfigParser.HttpConfig config = spec.config();
+      McpServer probe =
+          McpServer.builder()
+              .name(spec.name())
+              .url(config.url())
+              .headers(config.headers())
+              .enabled(config.enabled())
+              .timeoutMillis(config.timeoutMillis())
+              .build();
       List<McpTool> discovered;
       if (!config.enabled()) {
         // 禁用 server：不发起发现，仅保存配置（enabled=false 可独立恢复）；既有工具行保持，引用这些工具的 Agent 仍按现
@@ -261,7 +263,7 @@ public final class ConfigSyncPlanner {
       }
       Set<String> currentNames = availableMcpTools.getOrDefault(spec.name(), Set.of());
       Set<String> nextNames = new LinkedHashSet<>();
-      discovered.forEach(tool -> nextNames.add(tool.getName()));
+      discovered.forEach(tool -> nextNames.add(tool.name()));
       List<String> blocked =
           currentNames.stream()
               .filter(name -> !nextNames.contains(name))

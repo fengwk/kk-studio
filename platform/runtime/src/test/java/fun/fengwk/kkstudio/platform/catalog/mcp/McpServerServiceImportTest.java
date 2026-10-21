@@ -1,8 +1,9 @@
-package fun.fengwk.kkstudio.platform.catalog.mcp.service.impl;
+package fun.fengwk.kkstudio.platform.catalog.mcp;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -13,10 +14,6 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import fun.fengwk.kkstudio.platform.catalog.mcp.discovery.McpToolDiscovery;
-import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpDiscoveryStatus;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
 import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
 import fun.fengwk.kkstudio.platform.error.AiInUseException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
@@ -30,31 +27,30 @@ import java.util.Optional;
  * 测试意图：锁定配置同步专用的 {@code importServer} 边界——新建用 UNVERIFIED 起点并按发现结果整体写入工具；既有行按 CAS 更新，
  * 过期版本冲突；同名插入冲突转为业务重复错误；被 Agent 引用的工具将消失时 fail closed 拒绝整次替换。
  */
-class McpServerServiceImplImportTest {
+class McpServerServiceImportTest {
 
   private static final String URL = "https://mcp.example.com/mcp";
 
   private final McpServerRepository repository = mock(McpServerRepository.class);
-  private final McpServerServiceImpl service =
-      new McpServerServiceImpl(
+  private final McpServerService service =
+      new McpServerService(
           repository, mock(McpToolDiscovery.class), mock(PlatformTransactionManager.class));
 
   private static McpTool tool(String name) {
-    McpTool tool = new McpTool();
-    tool.setName(name);
-    tool.setServerName("mcp");
-    tool.setSourceName(name);
+    McpTool tool = McpTool.builder().name(name).serverName("mcp").sourceName(name).build();
     return tool;
   }
 
   private static McpServer existing(long version) {
-    McpServer server = new McpServer();
-    server.setName("mcp");
-    server.setUrl(URL);
-    server.setEnabled(true);
-    server.setTimeoutMillis(30_000L);
-    server.setDiscoveryStatus(McpDiscoveryStatus.UNVERIFIED);
-    server.setVersion(version);
+    McpServer server =
+        McpServer.builder()
+            .name("mcp")
+            .url(URL)
+            .enabled(true)
+            .timeoutMillis(30_000L)
+            .discoveryStatus(McpDiscoveryStatus.UNVERIFIED)
+            .version(version)
+            .build();
     return server;
   }
 
@@ -101,7 +97,7 @@ class McpServerServiceImplImportTest {
   void existingServerWithStaleVersionConflicts() {
     McpServer existing = existing(0L);
     when(repository.getForUpdate("mcp")).thenReturn(Optional.of(existing));
-    when(repository.update(existing, 0L)).thenReturn(false);
+    when(repository.update(any(), eq(0L))).thenReturn(false);
 
     assertThrows(
         AiVersionConflictException.class,
@@ -112,7 +108,7 @@ class McpServerServiceImplImportTest {
   void existingServerRemovingReferencedToolFailsClosed() {
     McpServer existing = existing(0L);
     when(repository.getForUpdate("mcp")).thenReturn(Optional.of(existing));
-    when(repository.update(existing, 0L)).thenReturn(true);
+    when(repository.update(any(), eq(0L))).thenReturn(true);
     when(repository.listTools("mcp")).thenReturn(List.of(tool("mcp_mcp_keep")));
     when(repository.selectReferencedToolNames()).thenReturn(List.of("mcp_mcp_keep"));
 
@@ -151,8 +147,8 @@ class McpServerServiceImplImportTest {
   void existingServerWithoutDiscoveryCountsPersistedTools() {
     McpServer existing = existing(0L);
     when(repository.getForUpdate("mcp")).thenReturn(Optional.of(existing));
-    when(repository.update(existing, 0L)).thenReturn(true);
-    when(repository.listTools("mcp")).thenReturn(List.of(tool("mcp_mcp_old")));
+    when(repository.update(any(), eq(0L))).thenReturn(true);
+    when(repository.countTools("mcp")).thenReturn(1);
 
     McpServerDTO dto = service.importServer("mcp", URL, Map.of(), Boolean.TRUE, 30_000L, null);
 
@@ -164,7 +160,7 @@ class McpServerServiceImplImportTest {
   void existingServerDiscoveryStatusCasConflictIsRejected() {
     McpServer existing = existing(0L);
     when(repository.getForUpdate("mcp")).thenReturn(Optional.of(existing));
-    when(repository.update(existing, 0L)).thenReturn(true);
+    when(repository.update(any(), eq(0L))).thenReturn(true);
     when(repository.listTools("mcp")).thenReturn(List.of());
     when(repository.selectReferencedToolNames()).thenReturn(List.of());
     when(repository.updateDiscoveryStatus("mcp", 1L, McpDiscoveryStatus.AVAILABLE))
@@ -181,7 +177,7 @@ class McpServerServiceImplImportTest {
   void existingServerReplacesToolsAndMarksAvailable() {
     McpServer existing = existing(0L);
     when(repository.getForUpdate("mcp")).thenReturn(Optional.of(existing));
-    when(repository.update(existing, 0L)).thenReturn(true);
+    when(repository.update(any(), eq(0L))).thenReturn(true);
     when(repository.listTools("mcp")).thenReturn(List.of(tool("mcp_mcp_old")));
     when(repository.selectReferencedToolNames()).thenReturn(List.of());
     when(repository.updateDiscoveryStatus("mcp", 1L, McpDiscoveryStatus.AVAILABLE))

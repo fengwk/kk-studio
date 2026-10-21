@@ -10,10 +10,10 @@ import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
-import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpDiscoveryStatus;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpDiscoveryStatus;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpServer;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerRepository;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
 
 import java.time.Duration;
@@ -82,7 +82,7 @@ public final class McpToolCatalog implements RuntimeToolCatalog {
         continue;
       }
       boolean selectableServer = isServerSelectable(server);
-      for (McpTool tool : repository.listTools(server.getName())) {
+      for (McpTool tool : repository.listTools(server.name())) {
         if (tool == null) {
           continue;
         }
@@ -143,8 +143,8 @@ public final class McpToolCatalog implements RuntimeToolCatalog {
 
   private boolean isServerSelectable(McpServer server) {
     return server != null
-        && server.isEnabled()
-        && server.getDiscoveryStatus() == McpDiscoveryStatus.AVAILABLE;
+        && server.enabled()
+        && server.discoveryStatus() == McpDiscoveryStatus.AVAILABLE;
   }
 
   /** 把模型可见工具名转换为 contribution localName：{@code _} 改为 {@code -} 以符合 canonical 语法。 */
@@ -156,19 +156,19 @@ public final class McpToolCatalog implements RuntimeToolCatalog {
   private ToolContribution contribution(McpTool tool, McpServer server) {
     ToolDescriptor descriptor =
         new ToolDescriptor(
-            tool.getName(),
-            tool.getDescription(),
+            tool.name(),
+            tool.description(),
             RENDERER_KEY,
             decodeSchema(tool),
             ToolSideEffect.NON_IDEMPOTENT,
-            Duration.ofMillis(server.getTimeoutMillis()));
+            Duration.ofMillis(server.timeoutMillis()));
     AgentToolDefinition definition = new AgentToolDefinition(descriptor, ToolVisibility.SELECTABLE);
     Tool executable =
         new RemoteMcpExecutableTool(
-            descriptor, tool.getServerName(), tool.getName(), tool.getSourceName(), repository);
+            descriptor, tool.serverName(), tool.name(), tool.sourceName(), repository);
 
     return new ToolContribution(
-        new ContributionId(CONTRIBUTOR_ID, localName(tool.getName())),
+        new ContributionId(CONTRIBUTOR_ID, localName(tool.name())),
         definition,
         executable,
         executable.requirements(),
@@ -176,6 +176,6 @@ public final class McpToolCatalog implements RuntimeToolCatalog {
   }
 
   private static InputSchema decodeSchema(McpTool tool) {
-    return new SchemaJsonCodec().decode(tool.getInputSchemaJson());
+    return new SchemaJsonCodec().decode(tool.inputSchemaJson());
   }
 }

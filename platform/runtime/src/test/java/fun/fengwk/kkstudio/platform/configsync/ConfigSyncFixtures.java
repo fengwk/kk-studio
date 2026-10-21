@@ -17,9 +17,9 @@ import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionReferenceR
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionService;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpDiscoveryStatus;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpDiscoveryStatus;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpServer;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelService;
@@ -29,10 +29,10 @@ import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderConfigurationCodec;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderService;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.SkillCatalogService;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.impl.SkillCatalogTestFixtures;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogService;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogTestFixtures;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillManifestEntry;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.platform.environment.RegistrationTokens;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
@@ -115,8 +115,8 @@ final class ConfigSyncFixtures {
           mock(PluginAgentDependencies.class));
 
   /**
-   * 真实 {@code SkillCatalogServiceImpl.validateImport}：只做纯静态校验，避免单测 mock 掉能力而要求另一份生产校验。其余仓储依赖由
-   * {@link SkillCatalogTestFixtures} 以 mock 占位。
+   * 真实 {@code SkillCatalogService.validateImport}：只做纯静态校验，避免单测 mock 掉能力而要求另一份生产校验。其余仓储依赖由 {@link
+   * SkillCatalogTestFixtures} 以 mock 占位。
    */
   static final SkillCatalogService SKILL_CATALOG_SERVICE = SkillCatalogTestFixtures.realValidator();
 
@@ -241,17 +241,17 @@ final class ConfigSyncFixtures {
   }
 
   static SkillPackage skillPackage(String packageName, String... skillNames) {
-    SkillPackage pkg = new SkillPackage();
-    pkg.setPackageName(packageName);
-    pkg.setRepositoryUrl("https://example.com/" + packageName + ".git");
-    pkg.setBranch("main");
-    pkg.setCurrentCommit("0".repeat(40));
     List<SkillManifestEntry> skills = new ArrayList<>();
     for (String skillName : skillNames) {
       skills.add(new SkillManifestEntry(skillName, "desc " + skillName));
     }
-    pkg.setSkills(skills);
-    return pkg;
+    return SkillPackage.builder()
+        .packageName(packageName)
+        .repositoryUrl("https://example.com/" + packageName + ".git")
+        .branch("main")
+        .currentCommit("0".repeat(40))
+        .skills(skills)
+        .build();
   }
 
   static Environment environment(String name) {
@@ -263,20 +263,19 @@ final class ConfigSyncFixtures {
   }
 
   static McpServer mcpServer(String name, boolean enabled) {
-    McpServer server = new McpServer();
-    server.setName(name);
-    server.setUrl("https://mcp.example.com/" + name);
-    server.setEnabled(enabled);
-    server.setTimeoutMillis(30_000L);
-    server.setDiscoveryStatus(McpDiscoveryStatus.AVAILABLE);
+    McpServer server =
+        McpServer.builder()
+            .name(name)
+            .url("https://mcp.example.com/" + name)
+            .enabled(enabled)
+            .timeoutMillis(30_000L)
+            .discoveryStatus(McpDiscoveryStatus.AVAILABLE)
+            .build();
     return server;
   }
 
   static McpTool mcpTool(String name, String serverName) {
-    McpTool tool = new McpTool();
-    tool.setName(name);
-    tool.setServerName(serverName);
-    tool.setSourceName(name);
+    McpTool tool = McpTool.builder().name(name).serverName(serverName).sourceName(name).build();
     return tool;
   }
 

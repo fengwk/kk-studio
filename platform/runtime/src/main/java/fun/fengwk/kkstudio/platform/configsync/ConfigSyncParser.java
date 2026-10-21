@@ -5,10 +5,10 @@ import org.springframework.stereotype.Component;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionService;
 import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentDefinitions;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.McpServerMutationValidator;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpConfigParser;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelService;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderService;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.SkillCatalogService;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogService;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentInstallConfigs;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentServiceImpl;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
@@ -368,9 +368,8 @@ public final class ConfigSyncParser {
     Boolean enabled = entry.optBoolean("enabled");
     Long timeoutMillis = entry.optLong("timeoutMillis");
     // 与 CRUD 共用校验并规范化；未知字段不能绕过 name/url/header/timeout 的硬错误。
-    validateEntry(
-        ConfigSyncKind.MCP_SERVERS, name, () -> McpServerMutationValidator.requireName(name));
-    McpServerMutationValidator.HttpConfig config =
+    validateEntry(ConfigSyncKind.MCP_SERVERS, name, () -> McpConfigParser.requireName(name));
+    McpConfigParser.HttpConfig config =
         normalizeMcpConfig(name, url, headers, enabled, timeoutMillis);
     if (skipUnknown(entry, ConfigSyncKind.MCP_SERVERS, name, skipped)) {
       return null;
@@ -378,10 +377,10 @@ public final class ConfigSyncParser {
     return new McpSpec(name, config);
   }
 
-  private static McpServerMutationValidator.HttpConfig normalizeMcpConfig(
+  private static McpConfigParser.HttpConfig normalizeMcpConfig(
       String name, String url, Map<String, String> headers, Boolean enabled, Long timeoutMillis) {
     try {
-      return McpServerMutationValidator.normalizeHttpConfig(url, headers, enabled, timeoutMillis);
+      return McpConfigParser.normalizeHttpConfig(url, headers, enabled, timeoutMillis);
     } catch (AiValidationException error) {
       // 底层消息可能含 URL 或 header 值，统一替换为安全的类别与条目名，不携带 cause。
       throw new AiValidationException(
@@ -534,7 +533,7 @@ public final class ConfigSyncParser {
   public record EnvironmentSpec(
       String name, String registrationTokenHash, EnvironmentInstallConfigDTO installConfig) {}
 
-  public record McpSpec(String name, McpServerMutationValidator.HttpConfig config) {}
+  public record McpSpec(String name, McpConfigParser.HttpConfig config) {}
 
   /**
    * 已安装插件的普通配置条目：安装身份加该插件 schema 归一化后的普通值文本。

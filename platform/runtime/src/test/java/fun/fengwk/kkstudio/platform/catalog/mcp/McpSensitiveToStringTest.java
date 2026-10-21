@@ -1,14 +1,10 @@
-package fun.fengwk.kkstudio.platform.catalog.mcp.service;
+package fun.fengwk.kkstudio.platform.catalog.mcp;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.platform.catalog.mcp.repo.impl.model.McpServerDO;
-import fun.fengwk.kkstudio.platform.catalog.mcp.repo.impl.model.McpToolDO;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
 import fun.fengwk.kkstudio.share.ai.mcp.McpServerConfigDTO;
 import fun.fengwk.kkstudio.share.ai.mcp.McpServerDTO;
 
@@ -21,26 +17,22 @@ class McpSensitiveToStringTest {
 
   @Test
   void redactsHeadersAndSchemaValues() {
-    // 意图：日志格式化领域对象、DO 与配置 DTO 时均不出现 headers 值或 schema 内容
-    McpServer server = new McpServer();
-    server.setName("sensitive_server");
-    server.setUrl("https://mcp.example.com/mcp");
-    server.setHeaders(Map.of("Authorization", "Bearer " + SECRET));
-
-    McpServerDO serverDO = new McpServerDO();
-    serverDO.setName("sensitive_server");
-    serverDO.setUrl("https://mcp.example.com/mcp");
-    serverDO.setHeadersJson("{\"Authorization\":\"Bearer " + SECRET + "\"}");
-
-    McpTool tool = new McpTool();
-    tool.setName("mcp_sensitive_server_probe");
-    tool.setDescription(SECRET);
-    tool.setInputSchemaJson("{\"secret\":\"" + SECRET + "\"}");
-
-    McpToolDO toolDO = new McpToolDO();
-    toolDO.setName("mcp_sensitive_server_probe");
-    toolDO.setDescription(SECRET);
-    toolDO.setInputSchemaJson("{\"secret\":\"" + SECRET + "\"}");
+    // 意图：日志格式化领域对象、规范化配置与配置 DTO 时均不出现 headers 值或 schema 内容
+    McpServer server =
+        McpServer.builder()
+            .name("sensitive_server")
+            .url("https://mcp.example.com/mcp")
+            .headers(Map.of("Authorization", "Bearer " + SECRET))
+            .build();
+    McpTool tool =
+        McpTool.builder()
+            .name("mcp_sensitive_server_probe")
+            .description(SECRET)
+            .inputSchemaJson("{\"secret\":\"" + SECRET + "\"}")
+            .build();
+    McpConfigParser.HttpConfig config =
+        McpConfigParser.normalizeHttpConfig(
+            "https://mcp.example.com/mcp", Map.of("Authorization", "Bearer " + SECRET), true, 1L);
 
     McpServerConfigDTO configDTO = new McpServerConfigDTO();
     configDTO.setName("sensitive_server");
@@ -49,9 +41,8 @@ class McpSensitiveToStringTest {
 
     assertFalse(server.toString().contains(SECRET));
     assertFalse(server.toString().contains("Authorization"));
-    assertFalse(serverDO.toString().contains(SECRET));
     assertFalse(tool.toString().contains(SECRET));
-    assertFalse(toolDO.toString().contains(SECRET));
+    assertFalse(config.toString().contains(SECRET));
     // 显式配置 DTO 允许暴露 URL（不含 user-info 凭据），但绝不暴露 headers
     assertFalse(configDTO.toString().contains("Authorization"));
 

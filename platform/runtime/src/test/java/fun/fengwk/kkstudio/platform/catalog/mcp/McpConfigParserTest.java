@@ -1,8 +1,7 @@
-package fun.fengwk.kkstudio.platform.catalog.mcp.service;
+package fun.fengwk.kkstudio.platform.catalog.mcp;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -11,21 +10,20 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.McpServerMutationValidator.HttpConfig;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpConfigParser.HttpConfig;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.mcp.McpServerCreateDTO;
-import fun.fengwk.kkstudio.share.ai.mcp.McpServerUpdateDTO;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * MCP Server 创建与更新输入校验器测试。
+ * MCP Server 名称与显式 HTTP 配置的校验测试。
  *
  * <p>只接受显式 HTTP 配置：name 必须满足 {@code ^[a-z][a-z0-9_]*$} 且 ≤32 字符，url 必须是绝对 http/https 地址且不含
  * user-info 凭据，headers 允许 {@code ${VAR}} 占位符但拒绝控制字符，timeout 缺省为 60 秒。
  */
-class McpServerMutationValidatorTest {
+class McpConfigParserTest {
 
   @Test
   void normalizesValidCreateDto() {
@@ -35,35 +33,29 @@ class McpServerMutationValidatorTest {
     dto.setUrl("https://mcp.github.com/api");
     dto.setHeaders(Map.of("Authorization", "Bearer ${GITHUB_TOKEN}"));
 
-    McpServerMutationValidator.NormalizedCreate normalized =
-        McpServerMutationValidator.normalizeCreate(dto);
+    HttpConfig normalized = normalizeCreate(dto);
 
-    assertEquals("github_mcp", normalized.name());
-    assertEquals("https://mcp.github.com/api", normalized.config().url());
-    assertEquals("Bearer ${GITHUB_TOKEN}", normalized.config().headers().get("Authorization"));
-    assertTrue(normalized.config().enabled());
-    assertEquals(McpConfigParser.DEFAULT_TIMEOUT_MILLIS, normalized.config().timeoutMillis());
+    assertEquals("https://mcp.github.com/api", normalized.url());
+    assertEquals("Bearer ${GITHUB_TOKEN}", normalized.headers().get("Authorization"));
+    assertTrue(normalized.enabled());
+    assertEquals(McpConfigParser.DEFAULT_TIMEOUT_MILLIS, normalized.timeoutMillis());
+    assertFalse(normalized.toString().contains("GITHUB_TOKEN"), "headers must not be printed");
 
     dto.setEnabled(false);
     dto.setTimeoutMillis(1500L);
-    McpServerMutationValidator.NormalizedCreate explicit =
-        McpServerMutationValidator.normalizeCreate(dto);
-    assertFalse(explicit.config().enabled());
-    assertEquals(1500L, explicit.config().timeoutMillis());
+    HttpConfig explicit = normalizeCreate(dto);
+    assertFalse(explicit.enabled());
+    assertEquals(1500L, explicit.timeoutMillis());
   }
 
   @Test
-  void normalizesNullHeadersToEmptyMapAndRejectsBlankBody() {
-    // 意图：headers 缺省归一化为空映射；null body 确定性拒绝
+  void normalizesNullHeadersToEmptyMap() {
+    // 意图：headers 缺省归一化为空映射
     McpServerCreateDTO dto = new McpServerCreateDTO();
     dto.setName("empty_headers");
     dto.setUrl("https://a.example.com/mcp");
 
-    assertTrue(McpServerMutationValidator.normalizeCreate(dto).config().headers().isEmpty());
-    assertThrows(
-        AiValidationException.class, () -> McpServerMutationValidator.normalizeCreate(null));
-    assertThrows(
-        AiValidationException.class, () -> McpServerMutationValidator.normalizeUpdate(null));
+    assertTrue(normalizeCreate(dto).headers().isEmpty());
   }
 
   @ParameterizedTest
@@ -75,8 +67,7 @@ class McpServerMutationValidatorTest {
     dto.setName(invalidName);
     dto.setUrl("https://a.example.com/mcp");
 
-    assertThrows(
-        AiValidationException.class, () -> McpServerMutationValidator.normalizeCreate(dto));
+    assertThrows(AiValidationException.class, () -> normalizeCreate(dto));
   }
 
   @Test
@@ -86,9 +77,8 @@ class McpServerMutationValidatorTest {
     dto.setName("a".repeat(33));
     dto.setUrl("https://a.example.com/mcp");
 
-    assertThrows(
-        AiValidationException.class, () -> McpServerMutationValidator.normalizeCreate(dto));
-    assertEquals(32, McpServerMutationValidator.NAME_MAX_LENGTH);
+    assertThrows(AiValidationException.class, () -> normalizeCreate(dto));
+    assertEquals("a".repeat(32), McpConfigParser.requireName("a".repeat(32)));
   }
 
   @ParameterizedTest
@@ -109,8 +99,7 @@ class McpServerMutationValidatorTest {
     dto.setName("valid_name");
     dto.setUrl(invalidUrl);
 
-    assertThrows(
-        AiValidationException.class, () -> McpServerMutationValidator.normalizeCreate(dto));
+    assertThrows(AiValidationException.class, () -> normalizeCreate(dto));
   }
 
   @Test
@@ -120,8 +109,7 @@ class McpServerMutationValidatorTest {
     dto.setName("valid_name");
     dto.setUrl("https://a.example.com/" + "x".repeat(McpConfigParser.URL_MAX_LENGTH));
 
-    assertThrows(
-        AiValidationException.class, () -> McpServerMutationValidator.normalizeCreate(dto));
+    assertThrows(AiValidationException.class, () -> normalizeCreate(dto));
   }
 
   @Test
@@ -132,8 +120,7 @@ class McpServerMutationValidatorTest {
     headers.put("X-Multi", "${A}${B}");
 
     HttpConfig config =
-        McpServerMutationValidator.normalizeHttpConfig(
-            "https://a.example.com", headers, true, 1000L);
+        McpConfigParser.normalizeHttpConfig("https://a.example.com", headers, true, 1000L);
     assertEquals("", config.headers().get("X-Trace"));
     assertEquals("${A}${B}", config.headers().get("X-Multi"));
 
@@ -141,19 +128,17 @@ class McpServerMutationValidatorTest {
     blankName.put("  ", "value");
     assertThrows(
         AiValidationException.class,
-        () ->
-            McpServerMutationValidator.normalizeHttpConfig(
-                "https://a.example.com", blankName, true, 1000L));
+        () -> McpConfigParser.normalizeHttpConfig("https://a.example.com", blankName, true, 1000L));
 
     assertThrows(
         AiValidationException.class,
         () ->
-            McpServerMutationValidator.normalizeHttpConfig(
+            McpConfigParser.normalizeHttpConfig(
                 "https://a.example.com", Map.of("X-Bad", "value\r\ninjected"), true, 1000L));
     assertThrows(
         AiValidationException.class,
         () ->
-            McpServerMutationValidator.normalizeHttpConfig(
+            McpConfigParser.normalizeHttpConfig(
                 "https://a.example.com", Map.of("X\u0000", "value"), true, 1000L));
   }
 
@@ -162,14 +147,10 @@ class McpServerMutationValidatorTest {
     // 意图：timeout 必须为正整数毫秒
     assertThrows(
         AiValidationException.class,
-        () ->
-            McpServerMutationValidator.normalizeHttpConfig(
-                "https://a.example.com", Map.of(), true, 0L));
+        () -> McpConfigParser.normalizeHttpConfig("https://a.example.com", Map.of(), true, 0L));
     assertThrows(
         AiValidationException.class,
-        () ->
-            McpServerMutationValidator.normalizeHttpConfig(
-                "https://a.example.com", Map.of(), true, -1L));
+        () -> McpConfigParser.normalizeHttpConfig("https://a.example.com", Map.of(), true, -1L));
   }
 
   @Test
@@ -191,18 +172,10 @@ class McpServerMutationValidatorTest {
         () -> McpConfigParser.resolveHeaders(Map.of("Authorization", "${MISSING}"), name -> null));
   }
 
-  @Test
-  void updateNormalizationIgnoresNameBecauseNameIsImmutable() {
-    // 意图：update 只包含可变配置；name 是路径身份，不参与归一化
-    McpServerUpdateDTO dto = new McpServerUpdateDTO();
-    dto.setExpectedVersion("3");
-    dto.setUrl("https://b.example.com/mcp");
-    dto.setTimeoutMillis(2000L);
-
-    McpServerMutationValidator.NormalizedUpdate normalized =
-        McpServerMutationValidator.normalizeUpdate(dto);
-    assertEquals("https://b.example.com/mcp", normalized.config().url());
-    assertEquals(2000L, normalized.config().timeoutMillis());
-    assertNull(normalized.config().headers().get("Authorization"));
+  /** 与 create 入口一致：先校验名称，再规范化显式 HTTP 配置。 */
+  private static HttpConfig normalizeCreate(McpServerCreateDTO dto) {
+    McpConfigParser.requireName(dto.getName());
+    return McpConfigParser.normalizeHttpConfig(
+        dto.getUrl(), dto.getHeaders(), dto.getEnabled(), dto.getTimeoutMillis());
   }
 }

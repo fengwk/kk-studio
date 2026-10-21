@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.platform.configsync;
 
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillManifestEntry;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncRef;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncSkipped;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;

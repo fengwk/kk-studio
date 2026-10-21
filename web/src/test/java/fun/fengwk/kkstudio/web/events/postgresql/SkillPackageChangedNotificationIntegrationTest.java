@@ -10,9 +10,9 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
-import fun.fengwk.kkstudio.platform.catalog.skill.repo.SkillPackageRepository;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillManifestEntry;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
 import fun.fengwk.kkstudio.platform.environment.skill.EnvironmentSkillSyncOrchestrator;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
 
@@ -49,15 +49,17 @@ class SkillPackageChangedNotificationIntegrationTest extends WebPostgresTestSupp
   }
 
   private static SkillPackage packageRow() {
-    SkillPackage skillPackage = new SkillPackage();
-    skillPackage.setPackageName(PACKAGE);
-    skillPackage.setDescription("notify package");
-    skillPackage.setRepositoryUrl(REPOSITORY_URL);
-    skillPackage.setBranch("main");
-    skillPackage.setCurrentCommit(COMMIT);
-    skillPackage.setObservedHeadCommit(COMMIT);
-    skillPackage.setSkills(List.of(new SkillManifestEntry("dev", "developer skill")));
-    skillPackage.setVersion(0L);
+    SkillPackage skillPackage =
+        SkillPackage.builder()
+            .packageName(PACKAGE)
+            .description("notify package")
+            .repositoryUrl(REPOSITORY_URL)
+            .branch("main")
+            .currentCommit(COMMIT)
+            .observedHeadCommit(COMMIT)
+            .skills(List.of(new SkillManifestEntry("dev", "developer skill")))
+            .version(0L)
+            .build();
     return skillPackage;
   }
 }

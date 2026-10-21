@@ -5,11 +5,11 @@ import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
-import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogQueryService;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.plugin.StudioPluginRegistry;
@@ -34,7 +34,7 @@ public class ConfigSyncSnapshotReader {
   private final AgentProviderRepository providerRepository;
   private final AgentModelRepository modelRepository;
   private final AgentDefinitionRepository definitionRepository;
-  private final SkillCatalogQueryService skillCatalogQueryService;
+  private final SkillPackageRepository skillPackageRepository;
   private final EnvironmentRepository environmentRepository;
   private final McpServerRepository mcpServerRepository;
   private final SystemSettingsRepository systemSettingsRepository;
@@ -59,7 +59,7 @@ public class ConfigSyncSnapshotReader {
             .filter(row -> pluginRegistry.find(row.pluginId()).isPresent())
             .sorted(Comparator.comparing(PluginConfigurationRow::pluginId))
             .toList();
-    List<SkillPackage> skillPackages = skillCatalogQueryService.listPackages();
+    List<SkillPackage> skillPackages = skillPackageRepository.listPackages();
     // 同一次 listAll 里按持有者类型分流：内置 Agent 只贡献名称，绝不进入可导出条目。
     List<AgentDefinition> agents = new ArrayList<>();
     Set<String> builtinAgentNames = new LinkedHashSet<>();

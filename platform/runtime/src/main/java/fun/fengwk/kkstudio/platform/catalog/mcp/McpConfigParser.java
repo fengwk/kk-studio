@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.catalog.mcp.service;
+package fun.fengwk.kkstudio.platform.catalog.mcp;
 
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 
@@ -13,13 +13,15 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * MCP Server 显式 HTTP 配置的校验与规范化。
+ * MCP Server 名称与显式 HTTP 配置的校验与规范化，CRUD 与配置同步共用同一套规则。
  *
  * <p>安全边界：错误信息中绝不泄露 URL、header 值或凭据。
  */
 public final class McpConfigParser {
 
   private static final String RESOURCE = "mcp_server";
+  private static final int NAME_MAX_LENGTH = 32;
+  private static final Pattern NAME_PATTERN = Pattern.compile("^[a-z][a-z0-9_]*$");
   public static final long DEFAULT_TIMEOUT_MILLIS = 60_000L;
   public static final int URL_MAX_LENGTH = 2048;
   public static final int HEADER_NAME_MAX_LENGTH = 256;
@@ -29,6 +31,42 @@ public final class McpConfigParser {
       Pattern.compile("^\\$\\{([a-zA-Z_][a-zA-Z0-9_]*)\\}$");
 
   private McpConfigParser() {}
+
+  /** 校验 Server 名：{@code ^[a-z][a-z0-9_]*$}，不超过 32 个字符。 */
+  public static String requireName(String name) {
+    if (name == null || name.isBlank()) {
+      throw new AiValidationException(RESOURCE, RESOURCE + " name must not be blank");
+    }
+    if (!NAME_PATTERN.matcher(name).matches()) {
+      throw new AiValidationException(
+          RESOURCE, RESOURCE + " name must match ^[a-z][a-z0-9_]*$: " + name);
+    }
+    if (name.length() > NAME_MAX_LENGTH) {
+      throw new AiValidationException(
+          RESOURCE, RESOURCE + " name must not exceed " + NAME_MAX_LENGTH + " characters");
+    }
+    return name;
+  }
+
+  /** 校验并规范化显式 HTTP 配置；{@code enabled} 为空时按 true 处理。 */
+  public static HttpConfig normalizeHttpConfig(
+      String url, Map<String, String> headers, Boolean enabled, Long timeoutMillis) {
+    return new HttpConfig(
+        requireUrl(url),
+        normalizeHeaders(headers),
+        enabled == null || enabled,
+        normalizeTimeoutMillis(timeoutMillis));
+  }
+
+  /** 归一化后的显式 HTTP 配置；headers 可能内嵌凭据，不进入 {@link #toString()}。 */
+  public record HttpConfig(
+      String url, Map<String, String> headers, boolean enabled, long timeoutMillis) {
+
+    @Override
+    public String toString() {
+      return "HttpConfig[enabled=" + enabled + ", timeoutMillis=" + timeoutMillis + "]";
+    }
+  }
 
   /** 校验并规范化 endpoint URL：必须是绝对 http/https 地址且不含 user-info 凭据。 */
   public static String requireUrl(String url) {

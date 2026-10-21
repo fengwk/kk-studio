@@ -8,7 +8,7 @@ import tools.jackson.databind.ObjectMapper;
 
 import fun.fengwk.kkstudio.harness.builtin.environment.ReadToolExecutor;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogQueryService;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitCache;
 import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
@@ -21,8 +21,8 @@ public class PlatformReadConfiguration {
   @Bean
   @ConditionalOnMissingBean
   public PlatformSkillContentReader platformSkillContentReader(
-      SkillCatalogQueryService skillCatalogQueryService, SkillGitCache skillGitCache) {
-    return new PlatformSkillContentReader(skillCatalogQueryService, skillGitCache);
+      SkillPackageRepository skillPackageRepository, SkillGitCache skillGitCache) {
+    return new PlatformSkillContentReader(skillPackageRepository, skillGitCache);
   }
 
   @Bean

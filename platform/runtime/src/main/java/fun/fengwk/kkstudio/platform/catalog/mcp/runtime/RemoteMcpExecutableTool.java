@@ -17,11 +17,11 @@ import fun.fengwk.kkstudio.harness.mcp.McpToolCallResult;
 import fun.fengwk.kkstudio.harness.mcp.RemoteMcpConfig;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
-import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.McpConfigParser;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpDiscoveryStatus;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpConfigParser;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpDiscoveryStatus;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpServer;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerRepository;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
 
 import java.util.List;
 import java.util.Map;
@@ -116,9 +116,9 @@ public final class RemoteMcpExecutableTool implements Tool {
 
     McpServer server = serverOpt.get();
     McpTool tool = toolOpt.get();
-    if (!server.isEnabled()
-        || server.getDiscoveryStatus() != McpDiscoveryStatus.AVAILABLE
-        || !serverName.equals(tool.getServerName())) {
+    if (!server.enabled()
+        || server.discoveryStatus() != McpDiscoveryStatus.AVAILABLE
+        || !serverName.equals(tool.serverName())) {
       return staleConfiguration(request);
     }
 
@@ -128,8 +128,8 @@ public final class RemoteMcpExecutableTool implements Tool {
     McpCancellationToken token = new McpCancellationToken();
     try {
       Map<String, String> resolvedHeaders =
-          McpConfigParser.resolveHeaders(server.getHeaders(), envProvider);
-      RemoteMcpConfig config = new RemoteMcpConfig(server.getUrl(), resolvedHeaders);
+          McpConfigParser.resolveHeaders(server.headers(), envProvider);
+      RemoteMcpConfig config = new RemoteMcpConfig(server.url(), resolvedHeaders);
       try (McpClient client = clientProvider.apply(config, deadline)) {
         McpToolCallResult outcome =
             client.callTool(sourceName, request.call().argumentsJson(), deadline, token);
