@@ -27,7 +27,6 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
@@ -36,21 +35,21 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * ToolProcessor 恢复与生命周期行为：旧 lease 恢复（DISPATCHING / RUNNING）、WAITING_APPROVAL / terminal 清理、伪造
- * token、duplicate / concurrent process、close / cancel / heartbeat 竞态、wrong target、config 校验。
+ * ToolProcessor 恢复与生命周期行为：旧 lease 恢复（RUNNING）、WAITING_APPROVAL / terminal 清理、伪造 token、duplicate /
+ * concurrent process、close / cancel / heartbeat 竞态、wrong target、config 校验。
  */
 class ToolProcessorRecoveryTest {
 
   private final List<ScheduledExecutorService> schedulers = new ArrayList<>();
 
   @AfterEach
-  void stopSchedulers() {
+  void stopSchedulers() throws Exception {
     schedulers.forEach(ScheduledExecutorService::shutdownNow);
   }
 
   /** wrong target：非 TOOL claim 直接拒绝。 */
   @Test
-  void rejectsNonToolClaim() {
+  void rejectsNonToolClaim() throws Exception {
     ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.fixture();
     ClaimedWork threadClaim =
         fixture
@@ -67,7 +66,7 @@ class ToolProcessorRecoveryTest {
    * Tool。
    */
   @Test
-  void staleRunningLeaseRecoveryTerminatesUnknownWithoutGateway() {
+  void staleRunningLeaseRecoveryTerminatesUnknownWithoutGateway() throws Exception {
     ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.fixture();
     ToolProcessorTestSupport.toRunning(
         fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
@@ -86,7 +85,7 @@ class ToolProcessorRecoveryTest {
     assertEquals("LEASE_EXPIRED", tool.error().kind());
     assertTrue(tool.error().message().contains("Last known status: RUNNING"));
     assertTrue(tool.error().message().contains("cannot be confirmed"));
-    assertEquals(0, fixture.gateway.startCalls);
+    assertEquals(0, fixture.gateway.admitCalls);
     assertEquals(
         1, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(
@@ -97,35 +96,9 @@ class ToolProcessorRecoveryTest {
     assertFalse(fixture.processor.hasActiveExecution());
   }
 
-  /** 新 claim 遇到旧 lease 过期的 DISPATCHING：UNKNOWN 消费 proposed attempt（attempt+1），并如实报告最后已知状态。 */
-  @Test
-  void staleDispatchingLeaseRecoveryConsumesProposedAttempt() {
-    ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.fixture();
-    ToolProcessorTestSupport.toDispatched(
-        fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
-    ToolProcessorTestSupport.claim(
-        fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
-    fixture.clock.advance(Duration.ofSeconds(61));
-    ClaimedWork recovered =
-        ToolProcessorTestSupport.claim(
-            fixture.store, fixture.toolInvocationId, fixture.clock.instant());
-
-    assertEquals(ProcessResult.TERMINATED, fixture.processor.process(recovered));
-
-    ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
-    assertEquals(ToolInvocationStatus.UNKNOWN, tool.status());
-    assertEquals(1, tool.attempt());
-    assertEquals("LEASE_EXPIRED", tool.error().kind());
-    assertTrue(tool.error().message().contains("Last known status: DISPATCHING"));
-    assertTrue(tool.error().message().contains("cannot be confirmed"));
-    assertEquals(0, fixture.gateway.startCalls);
-    assertEquals(
-        1, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
-  }
-
   /** WAITING_APPROVAL 不应执行：仅在 ownership 有效时 complete TOOL Work，不 bump version、不 request THREAD。 */
   @Test
-  void waitingApprovalCompletesWorkWithoutAnyMutation() {
+  void waitingApprovalCompletesWorkWithoutAnyMutation() throws Exception {
     ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.fixture();
     ToolProcessorTestSupport.transition(
         fixture.store,
@@ -150,12 +123,12 @@ class ToolProcessorRecoveryTest {
         ToolProcessorTestSupport.threadWork(fixture.store, fixture.baseline.threadId())
             .wakeVersion());
     assertNull(ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId));
-    assertEquals(0, fixture.gateway.startCalls);
+    assertEquals(0, fixture.gateway.admitCalls);
   }
 
   /** terminal 行：确保 THREAD wake 后 complete，不重复 bump version。 */
   @Test
-  void terminalCleanupWakesThreadWhenResultNotLinked() {
+  void terminalCleanupWakesThreadWhenResultNotLinked() throws Exception {
     ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.fixture();
     ToolProcessorTestSupport.toRunning(
         fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
@@ -182,14 +155,14 @@ class ToolProcessorRecoveryTest {
         ToolProcessorTestSupport.threadWork(fixture.store, fixture.baseline.threadId())
             .wakeVersion());
     assertNull(ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId));
-    assertEquals(0, fixture.gateway.startCalls);
+    assertEquals(0, fixture.gateway.admitCalls);
   }
 
   /** 恢复路径中 work 行已被删除：LOST_OWNERSHIP，无 mutation。 */
   @Test
-  void recoveryWithDeletedWorkIsLost() {
+  void recoveryWithDeletedWorkIsLost() throws Exception {
     ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.fixture();
-    ToolProcessorTestSupport.toDispatched(
+    ToolProcessorTestSupport.toRunning(
         fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
     ClaimedWork claimed =
         ToolProcessorTestSupport.claim(
@@ -199,18 +172,18 @@ class ToolProcessorRecoveryTest {
     assertEquals(ProcessResult.LOST_OWNERSHIP, fixture.processor.process(claimed));
 
     assertEquals(
-        ToolInvocationStatus.DISPATCHING,
+        ToolInvocationStatus.RUNNING,
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
     assertEquals(
-        0, ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).attempt());
+        1, ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).attempt());
     assertEquals(
         0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
-    assertEquals(0, fixture.gateway.startCalls);
+    assertEquals(0, fixture.gateway.admitCalls);
   }
 
   /** terminal cleanup 路径中 work 行已被删除：LOST_OWNERSHIP，无 mutation。 */
   @Test
-  void terminalCleanupWithDeletedWorkIsLost() {
+  void terminalCleanupWithDeletedWorkIsLost() throws Exception {
     ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.fixture();
     ToolProcessorTestSupport.toRunning(
         fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
@@ -237,16 +210,16 @@ class ToolProcessorRecoveryTest {
             .wakeVersion());
   }
 
-  /** 同一 JVM 内 recovery：新 token supersede 旧本地 execution 后按 durable DISPATCHING 恢复 UNKNOWN。 */
+  /** 同一 JVM 内 recovery：新 token supersede 旧本地 execution 后按 durable RUNNING 恢复 UNKNOWN。 */
   @Test
-  void sameJvmRecoverySupersedesStaleLocalExecution() {
+  void sameJvmRecoverySupersedesStaleLocalExecution() throws Exception {
     ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.fixture();
     ToolProcessorTestSupport.transition(
         fixture.store,
         fixture.toolInvocationId,
         tool -> tool.markApprovalNotRequired(ToolProcessorTestSupport.NOW));
-    ToolProcessorTestSupport.FakeHandle handle = new ToolProcessorTestSupport.FakeHandle();
-    fixture.gateway.queueStart(new ToolGateway.Started(handle));
+    ToolProcessorTestSupport.FakeRun run =
+        fixture.gateway.queueRun(progress -> ToolProcessorTestSupport.blockUntilInterrupted());
     assertEquals(
         ProcessResult.STARTED,
         fixture.processor.process(
@@ -255,6 +228,7 @@ class ToolProcessorRecoveryTest {
                 fixture.toolInvocationId,
                 ToolProcessorTestSupport.NOW,
                 "token-old")));
+    assertTrue(run.awaitExecuting());
     fixture.clock.advance(Duration.ofSeconds(61));
     ToolProcessorTestSupport.replaceToolWork(fixture, ToolProcessorTestSupport.NOW);
     ClaimedWork recovered =
@@ -266,24 +240,24 @@ class ToolProcessorRecoveryTest {
     ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
     assertEquals(ToolInvocationStatus.UNKNOWN, tool.status());
     assertEquals(1, tool.attempt());
-    assertEquals(1, fixture.gateway.startCalls);
-    assertTrue(handle.isCancelled());
+    assertEquals(1, fixture.gateway.admitCalls);
+    assertTrue(run.awaitExited());
     assertEquals(
-        3, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
+        2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertNull(ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId));
     assertFalse(fixture.processor.hasActiveExecution());
   }
 
   /** active RUNNING + 伪造不同 token 的 claim：Work-only 前置校验先拦截，合法 execution 不被 cancel。 */
   @Test
-  void forgedDifferentTokenWhileActiveRunningIsLostWithoutCancelling() {
+  void forgedDifferentTokenWhileActiveRunningIsLostWithoutCancelling() throws Exception {
     ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.fixture();
     ToolProcessorTestSupport.transition(
         fixture.store,
         fixture.toolInvocationId,
         tool -> tool.markApprovalNotRequired(ToolProcessorTestSupport.NOW));
-    ToolProcessorTestSupport.FakeHandle handle = new ToolProcessorTestSupport.FakeHandle();
-    fixture.gateway.queueStart(new ToolGateway.Started(handle));
+    ToolProcessorTestSupport.FakeRun run =
+        fixture.gateway.queueRun(progress -> ToolProcessorTestSupport.blockUntilInterrupted());
     ClaimedWork claimed =
         ToolProcessorTestSupport.claim(
             fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
@@ -300,9 +274,9 @@ class ToolProcessorRecoveryTest {
     assertEquals(
         1, ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).attempt());
     assertEquals(
-        2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
-    assertEquals(1, fixture.gateway.startCalls);
-    assertFalse(handle.isCancelled());
+        1, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
+    assertEquals(1, fixture.gateway.admitCalls);
+    assertEquals(1L, run.exited.getCount(), "body must not be interrupted");
     assertTrue(fixture.processor.hasActiveExecution());
     assertEquals(
         "token-" + fixture.toolInvocationId,
@@ -311,14 +285,14 @@ class ToolProcessorRecoveryTest {
 
   /** 顺序重复投递同一 claim（同 token）：LOST no-op，不 cancel、不 mutation。 */
   @Test
-  void duplicateSequentialProcessWithSameClaimIsLostNoOp() {
+  void duplicateSequentialProcessWithSameClaimIsLostNoOp() throws Exception {
     ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.fixture();
     ToolProcessorTestSupport.transition(
         fixture.store,
         fixture.toolInvocationId,
         tool -> tool.markApprovalNotRequired(ToolProcessorTestSupport.NOW));
-    ToolProcessorTestSupport.FakeHandle handle = new ToolProcessorTestSupport.FakeHandle();
-    fixture.gateway.queueStart(new ToolGateway.Started(handle));
+    ToolProcessorTestSupport.FakeRun run =
+        fixture.gateway.queueRun(progress -> ToolProcessorTestSupport.blockUntilInterrupted());
     ClaimedWork claimed =
         ToolProcessorTestSupport.claim(
             fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
@@ -334,8 +308,8 @@ class ToolProcessorRecoveryTest {
     assertEquals(
         version,
         ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
-    assertFalse(handle.isCancelled());
-    assertEquals(1, fixture.gateway.startCalls);
+    assertEquals(1L, run.exited.getCount(), "body must not be interrupted");
+    assertEquals(1, fixture.gateway.admitCalls);
     assertTrue(fixture.processor.hasActiveExecution());
   }
 
@@ -347,11 +321,10 @@ class ToolProcessorRecoveryTest {
         fixture.store,
         fixture.toolInvocationId,
         tool -> tool.markApprovalNotRequired(ToolProcessorTestSupport.NOW));
-    ToolProcessorTestSupport.FakeHandle handle = new ToolProcessorTestSupport.FakeHandle();
     CountDownLatch inStart = new CountDownLatch(1);
     CountDownLatch release = new CountDownLatch(1);
-    fixture.gateway.beforeStartReturn =
-        listener -> {
+    fixture.gateway.admitHook =
+        () -> {
           inStart.countDown();
           try {
             release.await(5, TimeUnit.SECONDS);
@@ -359,7 +332,8 @@ class ToolProcessorRecoveryTest {
             Thread.currentThread().interrupt();
           }
         };
-    fixture.gateway.queueStart(new ToolGateway.Started(handle));
+    ToolProcessorTestSupport.FakeRun run =
+        fixture.gateway.queueRun(progress -> ToolProcessorTestSupport.blockUntilInterrupted());
     ClaimedWork claimed =
         ToolProcessorTestSupport.claim(
             fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
@@ -377,34 +351,35 @@ class ToolProcessorRecoveryTest {
     release.countDown();
     firstThread.join(5000);
     assertEquals(ProcessResult.STARTED, first.get());
-    assertEquals(1, fixture.gateway.startCalls);
+    assertEquals(1, fixture.gateway.admitCalls);
     assertEquals(
         ToolInvocationStatus.RUNNING,
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
-    assertFalse(handle.isCancelled());
+    assertEquals(1L, run.exited.getCount(), "body must not be interrupted");
   }
 
-  /** 并发不同 token：新 claim 抢占 guard，supersede 旧本地 execution 后恢复 UNKNOWN；旧 Started handle 被 cancel。 */
+  /** 并发不同 token：新 claim 抢占 guard 并 supersede 正在 admission 的旧 execution；旧 run 被释放且从不执行。 */
   @Test
-  void concurrentNewTokenPreemptsGuardAndRecoversUnknown() throws Exception {
+  void concurrentNewTokenSupersedesTheAdmittingExecution() throws Exception {
     ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.fixture();
     ToolProcessorTestSupport.transition(
         fixture.store,
         fixture.toolInvocationId,
         tool -> tool.markApprovalNotRequired(ToolProcessorTestSupport.NOW));
-    ToolProcessorTestSupport.FakeHandle handle = new ToolProcessorTestSupport.FakeHandle();
-    CountDownLatch inStart = new CountDownLatch(1);
+    CountDownLatch inAdmit = new CountDownLatch(1);
     CountDownLatch release = new CountDownLatch(1);
-    fixture.gateway.beforeStartReturn =
-        listener -> {
-          inStart.countDown();
+    fixture.gateway.admitHook =
+        () -> {
+          inAdmit.countDown();
           try {
             release.await(5, TimeUnit.SECONDS);
           } catch (InterruptedException failure) {
             Thread.currentThread().interrupt();
           }
         };
-    fixture.gateway.queueStart(new ToolGateway.Started(handle));
+    ToolProcessorTestSupport.FakeRun run =
+        fixture.gateway.queueRun(progress -> ToolProcessorTestSupport.blockUntilInterrupted());
+    fixture.gateway.queueAdmit(new ToolGateway.Busy(Duration.ofSeconds(5)));
     ClaimedWork claimedA =
         ToolProcessorTestSupport.claim(
             fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW, "token-A");
@@ -412,13 +387,13 @@ class ToolProcessorRecoveryTest {
     AtomicReference<ProcessResult> resultA = new AtomicReference<>();
     Thread threadA = new Thread(() -> resultA.set(fixture.processor.process(claimedA)));
     threadA.start();
-    assertTrue(inStart.await(5, TimeUnit.SECONDS));
+    assertTrue(inAdmit.await(5, TimeUnit.SECONDS));
 
     ToolProcessorTestSupport.replaceToolWork(fixture, ToolProcessorTestSupport.NOW);
     ClaimedWork claimedB =
         ToolProcessorTestSupport.claim(
             fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW, "token-B");
-
+    fixture.gateway.admitHook = null;
     AtomicReference<ProcessResult> resultB = new AtomicReference<>();
     Thread threadB = new Thread(() -> resultB.set(fixture.processor.process(claimedB)));
     threadB.start();
@@ -426,24 +401,20 @@ class ToolProcessorRecoveryTest {
     release.countDown();
     threadA.join(5000);
 
-    assertEquals(ProcessResult.TERMINATED, resultB.get());
+    assertEquals(ProcessResult.RESCHEDULED, resultB.get());
     assertEquals(ProcessResult.LOST_OWNERSHIP, resultA.get());
-    assertEquals(1, fixture.gateway.startCalls);
-    assertTrue(handle.isCancelled());
+    assertEquals(2, fixture.gateway.admitCalls);
+    assertEquals(0, run.executes.get(), "the superseded run must never execute");
+    assertEquals(1, run.closes.get());
     assertEquals(
-        ToolInvocationStatus.UNKNOWN,
+        ToolInvocationStatus.READY,
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
-    assertEquals(
-        1, ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).attempt());
-    assertEquals(
-        2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
-    assertNull(ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId));
     assertFalse(fixture.processor.hasActiveExecution());
   }
 
   /** claim lease 已过期：typed LOST_OWNERSHIP，无任何 mutation。 */
   @Test
-  void expiredClaimIsLostOwnershipWithoutMutation() {
+  void expiredClaimIsLostOwnershipWithoutMutation() throws Exception {
     ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.fixture();
     ClaimedWork claimed =
         ToolProcessorTestSupport.claim(
@@ -457,12 +428,12 @@ class ToolProcessorRecoveryTest {
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
     assertEquals(
         0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
-    assertEquals(0, fixture.gateway.startCalls);
+    assertEquals(0, fixture.gateway.admitCalls);
   }
 
   /** Stop deleteWork 后：claim 行缺失同样 LOST_OWNERSHIP，无 mutation。 */
   @Test
-  void deletedWorkClaimIsLostOwnershipWithoutMutation() {
+  void deletedWorkClaimIsLostOwnershipWithoutMutation() throws Exception {
     ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.fixture();
     ClaimedWork claimed =
         ToolProcessorTestSupport.claim(
@@ -476,18 +447,18 @@ class ToolProcessorRecoveryTest {
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
     assertEquals(
         0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
-    assertEquals(0, fixture.gateway.startCalls);
+    assertEquals(0, fixture.gateway.admitCalls);
   }
 
   /** close 后拒绝新 process；close 幂等且不 shutdown 注入的 scheduler。 */
   @Test
-  void closedProcessorRejectsProcessAndCloseIsIdempotent() {
+  void closedProcessorRejectsProcessAndCloseIsIdempotent() throws Exception {
     ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.fixture();
     ToolProcessorTestSupport.transition(
         fixture.store,
         fixture.toolInvocationId,
         tool -> tool.markApprovalNotRequired(ToolProcessorTestSupport.NOW));
-    fixture.gateway.queueStart(new ToolGateway.Started(new ToolProcessorTestSupport.FakeHandle()));
+    fixture.gateway.queueRun(progress -> ToolProcessorTestSupport.blockUntilInterrupted());
     ClaimedWork claimed =
         ToolProcessorTestSupport.claim(
             fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
@@ -504,38 +475,38 @@ class ToolProcessorRecoveryTest {
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
   }
 
-  /** close 在 registry 插入之后执行：Started handle 经 attachHandle 竞态被锁外 cancel，不留新 execution。 */
+  /** close 在 admission 期间执行：工具尚未执行，run 被释放并 reschedule，不留新 execution。 */
   @Test
-  void closeAfterRegistryInsertCancelsHandleLeavesDispatching() {
+  void closeDuringAdmissionReleasesRunAndReschedules() throws Exception {
     ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.fixture();
     ToolProcessorTestSupport.transition(
         fixture.store,
         fixture.toolInvocationId,
         tool -> tool.markApprovalNotRequired(ToolProcessorTestSupport.NOW));
-    ToolProcessorTestSupport.FakeHandle handle = new ToolProcessorTestSupport.FakeHandle();
-    fixture.gateway.beforeStartReturn = listener -> fixture.processor.close();
-    fixture.gateway.queueStart(new ToolGateway.Started(handle));
+    fixture.gateway.admitHook = fixture.processor::close;
+    ToolProcessorTestSupport.FakeRun run =
+        fixture.gateway.queueRun(progress -> ToolProcessorTestSupport.blockUntilInterrupted());
 
     assertEquals(
-        ProcessResult.LOST_OWNERSHIP,
+        ProcessResult.RESCHEDULED,
         fixture.processor.process(
             ToolProcessorTestSupport.claim(
                 fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW)));
 
-    assertTrue(handle.isCancelled());
+    assertEquals(0, run.executes.get());
+    assertEquals(1, run.closes.get());
     assertFalse(fixture.processor.hasActiveExecution());
-    assertEquals(1, fixture.gateway.startCalls);
+    assertEquals(1, fixture.gateway.admitCalls);
     assertEquals(
-        ToolInvocationStatus.DISPATCHING,
+        ToolInvocationStatus.READY,
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
-    assertEquals(
-        "token-" + fixture.toolInvocationId,
+    assertNull(
         ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId).leaseToken());
   }
 
   /**
    * close 在 process 通过入口检查之后、registry 插入之前完成：putIfAbsent 后的 closed 检查必须拦截——abandon 新 execution、 把仍
-   * owned 的 DISPATCHING 安全 bounce 回 READY + reschedule，绝不启动 Gateway。
+   * owned 的 READY reschedule，绝不启动 Gateway。
    */
   @Test
   void closeBeforeRegistryInsertBouncesReadyWithoutStartingGateway() throws Exception {
@@ -544,7 +515,7 @@ class ToolProcessorRecoveryTest {
         fixture.store,
         fixture.toolInvocationId,
         tool -> tool.markApprovalNotRequired(ToolProcessorTestSupport.NOW));
-    fixture.gateway.queueStart(new ToolGateway.Started(new ToolProcessorTestSupport.FakeHandle()));
+    fixture.gateway.queueRun(progress -> ToolProcessorTestSupport.blockUntilInterrupted());
     ClaimedWork claimed =
         ToolProcessorTestSupport.claim(
             fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
@@ -583,7 +554,7 @@ class ToolProcessorRecoveryTest {
     processThread.join(5000);
 
     assertEquals(ProcessResult.RESCHEDULED, result.get());
-    assertEquals(0, fixture.gateway.startCalls);
+    assertEquals(0, fixture.gateway.admitCalls);
     assertFalse(fixture.processor.hasActiveExecution());
     assertEquals(
         ToolInvocationStatus.READY,
@@ -591,7 +562,7 @@ class ToolProcessorRecoveryTest {
     assertEquals(
         0, ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).attempt());
     assertEquals(
-        2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
+        0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     Work toolWork = ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId);
     assertNotNull(toolWork);
     assertEquals(
@@ -600,9 +571,9 @@ class ToolProcessorRecoveryTest {
     assertNull(toolWork.leaseToken());
   }
 
-  /** close / 本地 cancel 在 heartbeat 启动窗口内获胜：abandoned 检查拦截，不启动 Gateway，DISPATCHING 安全 bounce。 */
+  /** close / 本地 cancel 在 heartbeat 启动窗口内获胜：abandoned 检查拦截，不启动 Gateway，READY reschedule。 */
   @Test
-  void abandonDuringHeartbeatStartupBouncesWithoutStartingGateway() {
+  void abandonDuringHeartbeatStartupBouncesWithoutStartingGateway() throws Exception {
     AtomicReference<ToolProcessor> processorRef = new AtomicReference<>();
     AtomicReference<UUID> cancelId = new AtomicReference<>();
     ScheduledExecutorService base = ToolProcessorTestSupport.newScheduler();
@@ -627,7 +598,7 @@ class ToolProcessorRecoveryTest {
         tool -> tool.markApprovalNotRequired(ToolProcessorTestSupport.NOW));
     cancelId.set(fixture.toolInvocationId);
     processorRef.set(fixture.processor);
-    fixture.gateway.queueStart(new ToolGateway.Started(new ToolProcessorTestSupport.FakeHandle()));
+    fixture.gateway.queueRun(progress -> ToolProcessorTestSupport.blockUntilInterrupted());
 
     assertEquals(
         ProcessResult.RESCHEDULED,
@@ -635,13 +606,13 @@ class ToolProcessorRecoveryTest {
             ToolProcessorTestSupport.claim(
                 fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW)));
 
-    assertEquals(0, fixture.gateway.startCalls);
+    assertEquals(0, fixture.gateway.admitCalls);
     assertFalse(fixture.processor.hasActiveExecution());
     assertEquals(
         ToolInvocationStatus.READY,
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
     assertEquals(
-        2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
+        0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     Work toolWork = ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId);
     assertEquals(
         ToolProcessorTestSupport.NOW.plus(ToolProcessorTestSupport.BUSY_FALLBACK_DELAY),
@@ -651,7 +622,7 @@ class ToolProcessorRecoveryTest {
 
   /** scheduler 拒绝 heartbeat 且期间 ownership 已丢：按 bounce 实际结果返回 LOST_OWNERSHIP，不调用 Gateway。 */
   @Test
-  void heartbeatSchedulerRejectionWithLostWorkReturnsLostOwnership() {
+  void heartbeatSchedulerRejectionWithLostWorkReturnsLostOwnership() throws Exception {
     ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.fixture();
     ToolProcessorTestSupport.transition(
         fixture.store,
@@ -687,47 +658,41 @@ class ToolProcessorRecoveryTest {
             fixture.clock,
             hooked,
             Runnable::run);
-    fixture.gateway.queueStart(new ToolGateway.Started(new ToolProcessorTestSupport.FakeHandle()));
+    fixture.gateway.queueRun(progress -> ToolProcessorTestSupport.blockUntilInterrupted());
 
     assertEquals(ProcessResult.LOST_OWNERSHIP, processor.process(claimed));
 
-    assertEquals(0, fixture.gateway.startCalls);
+    assertEquals(0, fixture.gateway.admitCalls);
     assertEquals(
-        ToolInvocationStatus.DISPATCHING,
+        ToolInvocationStatus.READY,
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
     assertEquals(
         0, ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).attempt());
     assertEquals(
-        1, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
+        0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertFalse(processor.hasActiveExecution());
   }
 
-  /** cancel 只关闭本地执行（handle + heartbeat），不反写任何 durable 状态。 */
+  /** cancel 只关闭本地执行（interrupt + heartbeat），不反写任何 durable 状态。 */
   @Test
-  void cancelStopsLocalExecutionWithoutDurableWrite() {
+  void cancelStopsLocalExecutionWithoutDurableWrite() throws Exception {
     ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.fixture();
     ToolProcessorTestSupport.transition(
         fixture.store,
         fixture.toolInvocationId,
         tool -> tool.markApprovalNotRequired(ToolProcessorTestSupport.NOW));
-    ToolProcessorTestSupport.FakeHandle handle = new ToolProcessorTestSupport.FakeHandle();
-    fixture.gateway.queueStart(new ToolGateway.Started(handle));
+    ToolProcessorTestSupport.FakeRun run =
+        fixture.gateway.queueRun(progress -> ToolProcessorTestSupport.blockUntilInterrupted());
     assertEquals(
         ProcessResult.STARTED,
         fixture.processor.process(
             ToolProcessorTestSupport.claim(
                 fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW)));
-    ToolGateway.Listener listener = fixture.gateway.listener(fixture.toolInvocationId);
 
+    assertTrue(run.awaitExecuting());
     assertTrue(fixture.processor.cancel(fixture.toolInvocationId));
-    assertTrue(handle.isCancelled());
+    assertTrue(run.awaitExited());
     assertFalse(fixture.processor.hasActiveExecution());
-    assertEquals(
-        ToolInvocationStatus.RUNNING,
-        ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
-    listener.onPartial(ToolProcessorTestSupport.partialResult("call-1"));
-    listener.onSucceeded(
-        ToolProcessorTestSupport.successResult("call-1", new TextResultContent("late")));
     assertEquals(
         ToolInvocationStatus.RUNNING,
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
@@ -739,7 +704,7 @@ class ToolProcessorRecoveryTest {
 
   /** close 取消全部本地 execution；durable 行保持 RUNNING 等待 lease 恢复。 */
   @Test
-  void closeCancelsAllLocalExecutions() {
+  void closeCancelsAllLocalExecutions() throws Exception {
     ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.fixture();
     ToolProcessorTestSupport.transition(
         fixture.store,
@@ -750,10 +715,10 @@ class ToolProcessorRecoveryTest {
         fixture.store,
         second.toolInvocationId(),
         tool -> tool.markApprovalNotRequired(ToolProcessorTestSupport.NOW));
-    ToolProcessorTestSupport.FakeHandle firstHandle = new ToolProcessorTestSupport.FakeHandle();
-    ToolProcessorTestSupport.FakeHandle secondHandle = new ToolProcessorTestSupport.FakeHandle();
-    fixture.gateway.queueStart(new ToolGateway.Started(firstHandle));
-    fixture.gateway.queueStart(new ToolGateway.Started(secondHandle));
+    ToolProcessorTestSupport.FakeRun firstRun =
+        fixture.gateway.queueRun(progress -> ToolProcessorTestSupport.blockUntilInterrupted());
+    ToolProcessorTestSupport.FakeRun secondRun =
+        fixture.gateway.queueRun(progress -> ToolProcessorTestSupport.blockUntilInterrupted());
     assertEquals(
         ProcessResult.STARTED,
         fixture.processor.process(
@@ -765,11 +730,13 @@ class ToolProcessorRecoveryTest {
             ToolProcessorTestSupport.claim(
                 fixture.store, second.toolInvocationId(), ToolProcessorTestSupport.NOW)));
 
+    assertTrue(firstRun.awaitExecuting());
+    assertTrue(secondRun.awaitExecuting());
     fixture.processor.close();
 
     assertFalse(fixture.processor.hasActiveExecution());
-    assertTrue(firstHandle.isCancelled());
-    assertTrue(secondHandle.isCancelled());
+    assertTrue(firstRun.awaitExited());
+    assertTrue(secondRun.awaitExited());
     assertEquals(
         ToolInvocationStatus.RUNNING,
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
@@ -780,7 +747,7 @@ class ToolProcessorRecoveryTest {
 
   /** ToolProcessorConfig：两个 delay 必须为正且至少 1ms，其余参数非空。 */
   @Test
-  void toolProcessorConfigValidates() {
+  void toolProcessorConfigValidates() throws Exception {
     ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.fixture();
     assertThrows(
         IllegalArgumentException.class,
@@ -842,7 +809,7 @@ class ToolProcessorRecoveryTest {
 
   /** scheduler 拒绝 heartbeat 提交：视为无法维持 lease，bounce 为 RESCHEDULED 且不调用 Gateway。 */
   @Test
-  void heartbeatSchedulerRejectionBouncesWithoutGatewayCall() {
+  void heartbeatSchedulerRejectionBouncesWithoutGatewayCall() throws Exception {
     ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.fixture();
     ToolProcessorTestSupport.transition(
         fixture.store,
@@ -864,7 +831,7 @@ class ToolProcessorRecoveryTest {
             fixture.clock,
             dead,
             Runnable::run);
-    fixture.gateway.queueStart(new ToolGateway.Started(new ToolProcessorTestSupport.FakeHandle()));
+    fixture.gateway.queueRun(progress -> ToolProcessorTestSupport.blockUntilInterrupted());
 
     assertEquals(
         ProcessResult.RESCHEDULED,
@@ -872,7 +839,7 @@ class ToolProcessorRecoveryTest {
             ToolProcessorTestSupport.claim(
                 fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW)));
 
-    assertEquals(0, fixture.gateway.startCalls);
+    assertEquals(0, fixture.gateway.admitCalls);
     assertEquals(
         ToolInvocationStatus.READY,
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
@@ -880,12 +847,12 @@ class ToolProcessorRecoveryTest {
         ToolProcessorTestSupport.NOW.plus(ToolProcessorTestSupport.BUSY_FALLBACK_DELAY),
         ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId).availableAt());
     assertEquals(
-        2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
+        0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
   }
 
   /** WAITING_APPROVAL 的 ownership 已丢失：LOST_OWNERSHIP，无 mutation。 */
   @Test
-  void waitingApprovalWithLostWorkIsLost() {
+  void waitingApprovalWithLostWorkIsLost() throws Exception {
     ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.fixture();
     ToolProcessorTestSupport.transition(
         fixture.store,
@@ -908,7 +875,7 @@ class ToolProcessorRecoveryTest {
 
   /** WAITING_APPROVAL 被 Stop 为 CANCELLED 后：terminal cleanup 只确保 THREAD wake 后 complete。 */
   @Test
-  void cancelledWaitingApprovalCleanupWakesThread() {
+  void cancelledWaitingApprovalCleanupWakesThread() throws Exception {
     ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.fixture();
     ToolProcessorTestSupport.transition(
         fixture.store,
@@ -942,7 +909,7 @@ class ToolProcessorRecoveryTest {
 
   /** 前置状态为 DENIED 决策（FAILED）：terminal cleanup 同样只确保 THREAD wake 后 complete。 */
   @Test
-  void deniedTerminalCleanupWakesThread() {
+  void deniedTerminalCleanupWakesThread() throws Exception {
     ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.fixture();
     ToolProcessorTestSupport.transition(
         fixture.store,
@@ -978,159 +945,11 @@ class ToolProcessorRecoveryTest {
   }
 
   /**
-   * 本地 cancel 在 Started 的 markRunning 事务期间获胜：markRunning 仍 commit（durable RUNNING），但 activate 观察到
-   * abandoned 后必须返回 LOST 且绝不调用 {@code handle.activate()}，并由 abandon best-effort cancel handle；lease
-   * 到期后由 dispatcher 恢复 UNKNOWN。
-   */
-  @Test
-  void cancelWinningDuringMarkRunningReturnsLostAndCancelsHandle() throws Exception {
-    ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.fixture();
-    ToolProcessorTestSupport.transition(
-        fixture.store,
-        fixture.toolInvocationId,
-        tool -> tool.markApprovalNotRequired(ToolProcessorTestSupport.NOW));
-    ToolProcessorTestSupport.FakeHandle handle = new ToolProcessorTestSupport.FakeHandle();
-    CountDownLatch inStart = new CountDownLatch(1);
-    CountDownLatch proceed = new CountDownLatch(1);
-    fixture.gateway.beforeStartReturn =
-        listener -> {
-          inStart.countDown();
-          try {
-            proceed.await(5, TimeUnit.SECONDS);
-          } catch (InterruptedException failure) {
-            Thread.currentThread().interrupt();
-          }
-        };
-    fixture.gateway.queueStart(new ToolGateway.Started(handle));
-
-    AtomicReference<ProcessResult> result = new AtomicReference<>();
-    Thread processThread =
-        new Thread(
-            () ->
-                result.set(
-                    fixture.processor.process(
-                        ToolProcessorTestSupport.claim(
-                            fixture.store,
-                            fixture.toolInvocationId,
-                            ToolProcessorTestSupport.NOW))));
-    processThread.start();
-    assertTrue(inStart.await(5, TimeUnit.SECONDS), "process must be inside gateway.start");
-
-    // 测试线程抢 store monitor：让 process 的 markRunning 事务阻塞在其上。
-    CountDownLatch holding = new CountDownLatch(1);
-    CountDownLatch releaseMonitor = new CountDownLatch(1);
-    Thread holdStore =
-        new Thread(
-            () ->
-                fixture.store.transaction(
-                    ignored -> {
-                      holding.countDown();
-                      try {
-                        releaseMonitor.await(10, TimeUnit.SECONDS);
-                      } catch (InterruptedException failure) {
-                        Thread.currentThread().interrupt();
-                      }
-                      return null;
-                    }));
-    holdStore.start();
-    assertTrue(holding.await(5, TimeUnit.SECONDS));
-
-    proceed.countDown();
-    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-    while (processThread.getState() != Thread.State.BLOCKED && System.nanoTime() < deadline) {
-      Thread.sleep(10);
-    }
-    assertTrue(
-        System.nanoTime() < deadline, "process must block on the store monitor (markRunning)");
-    assertTrue(fixture.processor.cancel(fixture.toolInvocationId));
-
-    releaseMonitor.countDown();
-    holdStore.join(5000);
-    processThread.join(5000);
-
-    assertEquals(ProcessResult.LOST_OWNERSHIP, result.get());
-    assertEquals(0, handle.activates.get(), "abandon 先获胜时 handle.activate 绝不调用");
-    assertTrue(handle.isCancelled());
-    assertFalse(fixture.processor.hasActiveExecution());
-    assertEquals(
-        ToolInvocationStatus.RUNNING,
-        ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
-    assertEquals(
-        1, ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).attempt());
-    assertEquals(
-        2, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
-  }
-
-  /**
-   * 本地 cancel 在 handle.activate 已经开始之后获胜：abandon 必须推迟 handle cancel 直到 activate 返回，外部调用序只能是
-   * ACTIVATE -&gt; CANCEL，cancel 绝不丢失。
-   */
-  @Test
-  void cancelWinningDuringActivationDefersCancelUntilActivateReturns() throws Exception {
-    ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.fixture();
-    ToolProcessorTestSupport.transition(
-        fixture.store,
-        fixture.toolInvocationId,
-        tool -> tool.markApprovalNotRequired(ToolProcessorTestSupport.NOW));
-    List<String> order = new CopyOnWriteArrayList<>();
-    CountDownLatch inActivate = new CountDownLatch(1);
-    CountDownLatch releaseActivate = new CountDownLatch(1);
-    ToolGateway.Handle blockingHandle =
-        new ToolGateway.Handle() {
-          @Override
-          public void cancel() {
-            order.add("cancel");
-          }
-
-          @Override
-          public void activate() {
-            order.add("activate");
-            inActivate.countDown();
-            try {
-              releaseActivate.await(5, TimeUnit.SECONDS);
-            } catch (InterruptedException failure) {
-              Thread.currentThread().interrupt();
-            }
-          }
-        };
-    fixture.gateway.queueStart(new ToolGateway.Started(blockingHandle));
-
-    AtomicReference<ProcessResult> result = new AtomicReference<>();
-    Thread processThread =
-        new Thread(
-            () ->
-                result.set(
-                    fixture.processor.process(
-                        ToolProcessorTestSupport.claim(
-                            fixture.store,
-                            fixture.toolInvocationId,
-                            ToolProcessorTestSupport.NOW))));
-    processThread.start();
-    assertTrue(inActivate.await(5, TimeUnit.SECONDS), "handle.activate must have begun");
-
-    assertTrue(fixture.processor.cancel(fixture.toolInvocationId));
-    assertFalse(fixture.processor.hasActiveExecution());
-    assertEquals(List.of("activate"), order, "activation 中的 abandon 必须推迟 cancel");
-
-    releaseActivate.countDown();
-    processThread.join(5000);
-
-    assertEquals(ProcessResult.LOST_OWNERSHIP, result.get());
-    assertEquals(List.of("activate", "cancel"), order, "外部调用序必须保持 ACTIVATE -> CANCEL");
-    assertFalse(fixture.processor.hasActiveExecution());
-    assertEquals(
-        ToolInvocationStatus.RUNNING,
-        ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
-    assertEquals(
-        1, ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).attempt());
-  }
-
-  /**
    * 本地 cancel 与 Stop deleteWork 同时在 heartbeat 启动窗口内获胜：不启动 Gateway；bounce 因 work 已删失败，按实际 结果返回
    * LOST_OWNERSHIP（不得无条件 RESCHEDULED）。
    */
   @Test
-  void cancelWithLostWorkDuringHeartbeatStartupReturnsLost() {
+  void cancelWithLostWorkDuringHeartbeatStartupReturnsLost() throws Exception {
     AtomicReference<ToolProcessor> processorRef = new AtomicReference<>();
     AtomicReference<ToolProcessorTestSupport.Fixture> fixtureRef = new AtomicReference<>();
     AtomicReference<UUID> cancelId = new AtomicReference<>();
@@ -1159,7 +978,7 @@ class ToolProcessorRecoveryTest {
     cancelId.set(fixture.toolInvocationId);
     processorRef.set(fixture.processor);
     fixtureRef.set(fixture);
-    fixture.gateway.queueStart(new ToolGateway.Started(new ToolProcessorTestSupport.FakeHandle()));
+    fixture.gateway.queueRun(progress -> ToolProcessorTestSupport.blockUntilInterrupted());
 
     assertEquals(
         ProcessResult.LOST_OWNERSHIP,
@@ -1167,26 +986,25 @@ class ToolProcessorRecoveryTest {
             ToolProcessorTestSupport.claim(
                 fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW)));
 
-    assertEquals(0, fixture.gateway.startCalls);
+    assertEquals(0, fixture.gateway.admitCalls);
     assertFalse(fixture.processor.hasActiveExecution());
     assertEquals(
-        ToolInvocationStatus.DISPATCHING,
+        ToolInvocationStatus.READY,
         ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
     assertEquals(
-        1, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
+        0, ToolProcessorTestSupport.thread(fixture.store, fixture.baseline.threadId()).version());
     assertNull(ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId));
   }
 
-  /** abandon 幂等：第二次调用不再取消 handle、不再通知 owner。 */
+  /** abandon 幂等：第二次调用不再 interrupt、不再通知 owner。 */
   @Test
-  void abandonIsIdempotentAndReleasesOwnerOnce() {
+  void abandonIsIdempotentAndReleasesOwnerOnce() throws Exception {
     ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.fixture();
     ClaimedWork claimed =
         ToolProcessorTestSupport.claim(
             fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
-    ToolProcessorTestSupport.toDispatched(
+    ToolProcessorTestSupport.toApproved(
         fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
-    ToolProcessorTestSupport.FakeHandle handle = new ToolProcessorTestSupport.FakeHandle();
     AtomicInteger releases = new AtomicInteger();
     ToolExecution execution =
         new ToolExecution(
@@ -1205,13 +1023,17 @@ class ToolProcessorRecoveryTest {
             fixture.scheduler,
             Runnable::run,
             ignored -> releases.incrementAndGet());
-    assertEquals(ProcessResult.STARTED, execution.activate(handle));
+    ToolProcessorTestSupport.FakeRun run =
+        new ToolProcessorTestSupport.FakeRun(
+            progress -> ToolProcessorTestSupport.blockUntilInterrupted());
+    assertEquals(ProcessResult.STARTED, execution.start(run));
+    assertTrue(run.awaitExecuting());
 
     execution.abandon();
     execution.abandon();
 
     assertTrue(execution.abandoned());
     assertEquals(1, releases.get());
-    assertTrue(handle.isCancelled());
+    assertTrue(run.awaitExited());
   }
 }

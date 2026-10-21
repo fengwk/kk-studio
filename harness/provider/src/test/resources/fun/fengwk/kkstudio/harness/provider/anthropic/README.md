@@ -11,7 +11,7 @@
 [`upstream-test-manifest.json`](upstream-test-manifest.json) maps tests from
 `langchain4j-anthropic/src/test/java` and tracked inherited methods to local wire-contract tests.
 Its current inventory contains 40 source files, 423 methods and 577 invocation records:
-145 `PORTED`, 0 `PORT_PENDING` and 432 `OUT_OF_SCOPE`. Independently, 121 records carry
+144 `PORTED`, 0 `PORT_PENDING` and 433 `OUT_OF_SCOPE`. Independently, 121 records carry
 `realInteropStatus: NOT_EXECUTED_REQUIRES_CREDENTIAL`.
 
 These are counts of this manifest, including its expanded parameter cases and inherited-method

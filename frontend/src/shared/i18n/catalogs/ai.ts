@@ -1896,7 +1896,6 @@ export const aiCatalog = {
   },
   'ai.runtime.tool.approval': { 'en-US': 'Waiting for approval', 'zh-CN': '等待审批' },
   'ai.runtime.tool.input': { 'en-US': 'Waiting for input', 'zh-CN': '等待输入' },
-  'ai.runtime.tool.dispatching': { 'en-US': 'Dispatching', 'zh-CN': '分派中' },
   'ai.runtime.tool.running': { 'en-US': 'Running', 'zh-CN': '执行中' },
   'ai.runtime.tool.succeeded': { 'en-US': 'Succeeded', 'zh-CN': '成功' },
   'ai.runtime.tool.accepted': { 'en-US': 'Delegation accepted', 'zh-CN': '委派已受理' },
@@ -1964,10 +1963,6 @@ export const aiCatalog = {
     'en-US': 'Model ready',
     'zh-CN': '模型就绪',
   },
-  'ai.runtime.thread.status.MODEL_DISPATCHING': {
-    'en-US': 'Dispatching model',
-    'zh-CN': '分派模型中',
-  },
   'ai.runtime.thread.status.MODEL_RUNNING': {
     'en-US': 'Model running',
     'zh-CN': '模型运行中',
@@ -1979,10 +1974,6 @@ export const aiCatalog = {
   'ai.runtime.thread.status.TOOL_READY': {
     'en-US': 'Tool ready',
     'zh-CN': '工具就绪',
-  },
-  'ai.runtime.thread.status.TOOL_DISPATCHING': {
-    'en-US': 'Dispatching tool',
-    'zh-CN': '分派工具中',
   },
   'ai.runtime.thread.status.TOOL_RUNNING': {
     'en-US': 'Tool running',
@@ -3699,6 +3690,10 @@ export const aiCatalog = {
   'ai.interaction.openIssueSource': {
     'en-US': 'Open task chat',
     'zh-CN': '打开任务对话',
+  },
+  'ai.interaction.sourceAgentTask': {
+    'en-US': 'Agent task',
+    'zh-CN': 'Agent 任务',
   },
   'ai.interaction.submit': {
     'en-US': 'Submit Answers',

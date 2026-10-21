@@ -205,7 +205,7 @@ class AssistantHistoryFallbackWireTest {
   }
 
   private JdkHttpSseTransport transport() {
-    return new JdkHttpSseTransport(client, workers, scheduler);
+    return new JdkHttpSseTransport(client, scheduler);
   }
 
   private ProviderAdapter chatAdapter() {

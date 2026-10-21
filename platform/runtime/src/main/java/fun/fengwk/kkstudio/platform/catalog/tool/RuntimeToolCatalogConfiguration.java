@@ -9,8 +9,6 @@ import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRuntime;
 
-import java.util.concurrent.ExecutorService;
-
 /**
  * 生产运行时工具目录装配：真实的动态 MCP catalog 与唯一的 {@link RuntimeToolCatalogSource}。
  *
@@ -21,10 +19,8 @@ public class RuntimeToolCatalogConfiguration {
 
   @Bean(name = "mcpToolCatalog")
   @ConditionalOnMissingBean(name = "mcpToolCatalog")
-  public McpToolCatalog mcpToolCatalog(
-      McpServerRepository repository,
-      @Qualifier("toolGatewayExecutor") ExecutorService toolGatewayExecutor) {
-    return new McpToolCatalog(repository, toolGatewayExecutor);
+  public McpToolCatalog mcpToolCatalog(McpServerRepository repository) {
+    return new McpToolCatalog(repository);
   }
 
   @Bean(name = "runtimeToolCatalogSource")

@@ -84,13 +84,7 @@ class HeaderSanitizerTest {
             "Content-Type", List.of("text/event-stream"),
             "X-Request-Id", List.of("req-safe-001"));
 
-    // 1. 验证 HttpOpenMetadata 脱敏
-    HttpOpenMetadata metadata = new HttpOpenMetadata(200, raw);
-    assertFalse(metadata.headers().containsKey("x-debug"));
-    assertFalse(metadata.headers().containsKey("x-upstream-authorization-echo"));
-    assertFalse(metadata.toString().contains(sensitiveSecret));
-
-    // 2. 验证 TransportException 脱敏
+    // TransportException 脱敏
     Exception cause = new RuntimeException("Original nested internal failure");
     TransportException ex =
         new TransportException(

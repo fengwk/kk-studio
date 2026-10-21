@@ -568,14 +568,12 @@ final class ThreadProcessorTestSupport {
     switch (status) {
       case READY -> {}
       case SUCCEEDED -> {
-        transitionModel(store, modelId, m -> m.beginDispatch(NOW));
         transitionModel(store, modelId, m -> m.markRunning(NOW));
         transitionModel(store, modelId, m -> m.succeed(response, null, replayState, NOW));
       }
       case FAILED -> transitionModel(store, modelId, m -> m.fail(error, NOW));
       case CANCELLED -> transitionModel(store, modelId, m -> m.cancel(error, NOW));
       case UNKNOWN -> {
-        transitionModel(store, modelId, m -> m.beginDispatch(NOW));
         transitionModel(store, modelId, m -> m.markRunning(NOW));
         transitionModel(store, modelId, m -> m.unknown(error, NOW));
       }
@@ -619,7 +617,6 @@ final class ThreadProcessorTestSupport {
       case READY -> {}
       case SUCCEEDED -> {
         transitionTool(store, toolId, t -> t.markApprovalNotRequired(NOW));
-        transitionTool(store, toolId, t -> t.beginDispatch(NOW));
         transitionTool(store, toolId, t -> t.markRunning(NOW));
         transitionTool(store, toolId, t -> t.succeed(successToolResult(callId), NOW));
       }
@@ -631,7 +628,6 @@ final class ThreadProcessorTestSupport {
           t -> t.cancel(new ToolInvocationError("CANCELLED", "tool cancelled"), NOW));
       case UNKNOWN -> {
         transitionTool(store, toolId, t -> t.markApprovalNotRequired(NOW));
-        transitionTool(store, toolId, t -> t.beginDispatch(NOW));
         transitionTool(store, toolId, t -> t.markRunning(NOW));
         transitionTool(
             store, toolId, t -> t.unknown(new ToolInvocationError("UNKNOWN", "tool unknown"), NOW));
@@ -746,7 +742,6 @@ final class ThreadProcessorTestSupport {
   static void succeedToolWith(
       InMemoryHarnessStore store, UUID toolId, ToolResult result, ToolEffectBatch effects) {
     transitionTool(store, toolId, t -> t.markApprovalNotRequired(NOW));
-    transitionTool(store, toolId, t -> t.beginDispatch(NOW));
     transitionTool(store, toolId, t -> t.markRunning(NOW));
     transitionTool(store, toolId, t -> t.succeed(result, effects, NOW));
   }

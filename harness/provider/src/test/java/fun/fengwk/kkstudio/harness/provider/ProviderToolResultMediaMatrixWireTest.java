@@ -38,7 +38,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderImageBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
@@ -127,15 +126,15 @@ class ProviderToolResultMediaMatrixWireTest {
     private final AtomicReference<ProviderException> error = new AtomicReference<>();
 
     @Override
-    public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
+    public void onEvent(ProviderStreamEvent event) {}
 
     @Override
-    public void onComplete(ProviderCompletion completion, ProviderStream stream) {
+    public void onComplete(ProviderCompletion completion) {
       terminal.countDown();
     }
 
     @Override
-    public void onError(ProviderException error, ProviderStream stream) {
+    public void onError(ProviderException error) {
       this.error.compareAndSet(null, error);
       terminal.countDown();
     }
@@ -185,7 +184,7 @@ class ProviderToolResultMediaMatrixWireTest {
             .followRedirects(HttpClient.Redirect.NEVER)
             .connectTimeout(Duration.ofSeconds(5))
             .build();
-    transport = new JdkHttpSseTransport(client, workerExecutor, scheduler);
+    transport = new JdkHttpSseTransport(client, scheduler);
   }
 
   @AfterEach

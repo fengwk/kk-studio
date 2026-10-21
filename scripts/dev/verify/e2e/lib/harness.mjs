@@ -167,13 +167,11 @@ const THREAD_RUNTIME_STATUSES = new Set([
   'STOPPED',
   'CONTINUATION_DUE',
   'MODEL_READY',
-  'MODEL_DISPATCHING',
   'MODEL_RUNNING',
   'APPLYING',
   'TOOL_WAITING_APPROVAL',
   'TOOL_WAITING_INPUT',
   'TOOL_RUNNING',
-  'TOOL_DISPATCHING',
   'TOOL_READY',
 ])
 
@@ -278,8 +276,8 @@ export function newThreadTarget({ sessionId, startEntryId, threadId, threadName,
 /**
  * THREAD target：既有 Thread 续写的 helper 路由描述符（内部转为 owner-free body）。
  *
- * <p>它不是 HTTP wire：真实请求发往 {@code POST /api/threads/{threadId}/command-batches}，body 只含
- * {@code {expectedHeadEntryId, expectedNextCommandSequence, commands}}，不带 owner/target/type。cursor 由服务端做精确 CAS。
+ * <p>它不是 HTTP wire：真实请求发往 {@code POST /api/threads/{threadId}/command-batches}，body 只含 {@code commands}
+ * 与（非单条纯 USER_MESSAGE 批次必需的）{@code expectedHeadEntryId, expectedNextCommandSequence}，不带 owner/target/type。
  */
 export function threadTarget({ threadId, expectedHeadEntryId, expectedNextCommandSequence }) {
   canonicalUuid(threadId, 'target.threadId')

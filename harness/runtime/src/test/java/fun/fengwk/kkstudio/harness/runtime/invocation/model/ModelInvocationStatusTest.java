@@ -15,7 +15,6 @@ class ModelInvocationStatusTest {
     assertTrue(ModelInvocationStatus.CANCELLED.isTerminal());
     assertTrue(ModelInvocationStatus.UNKNOWN.isTerminal());
     assertFalse(ModelInvocationStatus.READY.isTerminal());
-    assertFalse(ModelInvocationStatus.DISPATCHING.isTerminal());
     assertFalse(ModelInvocationStatus.RUNNING.isTerminal());
   }
 }

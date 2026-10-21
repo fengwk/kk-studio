@@ -35,7 +35,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderImageBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
@@ -107,7 +106,7 @@ class AnthropicMessagesWireTest {
             .followRedirects(HttpClient.Redirect.NEVER)
             .connectTimeout(Duration.ofSeconds(5))
             .build();
-    transport = new JdkHttpSseTransport(client, workerExecutor, scheduler);
+    transport = new JdkHttpSseTransport(client, scheduler);
     adapter = new AnthropicProviderAdapter(transport, TEST_API_KEY);
   }
 
@@ -1459,7 +1458,7 @@ class AnthropicMessagesWireTest {
     assertEquals(10, comp.response().usage().cacheWriteTokens());
   }
 
-  /** 验证客户端取消流后，stream.isCancelled() 返回 true，底层传输立即终止，且不向上层回调投递任何后续事件或错误。 */
+  /** 验证客户端中断调用线程后底层传输立即终止，且不向上层回调投递任何后续事件或错误。 */
   @Test
   void should_cancel_streaming() throws Exception {
     CountDownLatch clientCancelledLatch = new CountDownLatch(1);
@@ -1506,10 +1505,10 @@ class AnthropicMessagesWireTest {
         request,
         new ProviderStreamHandler() {
           @Override
-          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {
+          public void onEvent(ProviderStreamEvent event) {
             if (gotFirstEvent.compareAndSet(false, true)) {
-              stream.cancel();
-              assertTrue(stream.isCancelled());
+              // 取消即中断调用线程：传输器关闭连接并以 CANCELLED 静默返回。
+              Thread.currentThread().interrupt();
               clientCancelledLatch.countDown();
             } else {
               postCancelCallbackTriggered.set(true);
@@ -1517,20 +1516,20 @@ class AnthropicMessagesWireTest {
           }
 
           @Override
-          public void onComplete(ProviderCompletion completion, ProviderStream stream) {
+          public void onComplete(ProviderCompletion completion) {
             postCancelCallbackTriggered.set(true);
             testDoneLatch.countDown();
           }
 
           @Override
-          public void onError(ProviderException error, ProviderStream stream) {
+          public void onError(ProviderException error) {
             postCancelCallbackTriggered.set(true);
             testDoneLatch.countDown();
           }
         });
 
+    assertTrue(Thread.interrupted(), "cancellation must leave the interrupt flag for the caller");
     assertTrue(serverFinishedLatch.await(5, TimeUnit.SECONDS));
-    Thread.sleep(150);
 
     assertFalse(
         postCancelCallbackTriggered.get(), "no callbacks may be delivered after cancellation");
@@ -1593,11 +1592,11 @@ class AnthropicMessagesWireTest {
     assertEquals(ProviderErrorKind.TRANSIENT, handler.error.get().kind());
   }
 
-  /** 验证 stream() 调用为非阻塞异步调用，回调在工作线程池中执行。 */
+  /** 验证 stream() 在调用线程上阻塞执行：全部回调都在调用线程上同步发生，返回时终态已交付。 */
   @Test
-  void should_chat_asynchronously() throws Exception {
+  void should_stream_on_the_calling_thread_and_return_after_the_terminal() {
     server.createContext(
-        "/v1/messages", exchange -> respondSseText(exchange, "msg_async", "async reply"));
+        "/v1/messages", exchange -> respondSseText(exchange, "msg_blocking", "blocking reply"));
 
     ProviderDescriptor descriptor = createDescriptor(null);
     AnthropicModelProvider provider = (AnthropicModelProvider) adapter.create(descriptor);
@@ -1605,25 +1604,19 @@ class AnthropicMessagesWireTest {
         createRequest("claude-3-5-sonnet", null, List.of(userTextMsg("hi")), null, null);
 
     RecordingStreamHandler handler = new RecordingStreamHandler();
-    Thread callingThread = Thread.currentThread();
     provider.stream(request, handler);
 
-    assertTrue(handler.await(5, TimeUnit.SECONDS));
-    assertNotNull(handler.completion.get());
-    assertFalse(handler.callbackThreads.isEmpty());
-    assertFalse(
-        handler.callbackThreads.contains(callingThread),
-        "callbacks must be executed asynchronously on worker threads");
+    assertNotNull(handler.completion.get(), "the terminal is delivered before stream() returns");
+    assertEquals(Set.of(Thread.currentThread()), handler.callbackThreads);
   }
 
   // ==========================================
   // Group 9: User Callback Failure & Terminal-Once
   // ==========================================
 
-  /** 验证用户在 onEvent 回调中抛出运行时异常时，传输层抑制二次错误上报，绝不产生二次终态。 */
+  /** 验证 onEvent 抛出的运行时异常原样传播给调用方并停止读取，不产生任何终态回调。 */
   @Test
-  void should_stop_stream_without_secondary_terminal_callback_when_on_event_throws()
-      throws Exception {
+  void should_propagate_on_event_failure_without_any_terminal_callback() {
     server.createContext(
         "/v1/messages",
         exchange -> {
@@ -1646,38 +1639,38 @@ class AnthropicMessagesWireTest {
 
     AtomicInteger errorCallbackCount = new AtomicInteger(0);
     AtomicInteger completeCallbackCount = new AtomicInteger(0);
-    CountDownLatch thrownLatch = new CountDownLatch(1);
 
-    provider.stream(
-        request,
-        new ProviderStreamHandler() {
-          @Override
-          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {
-            thrownLatch.countDown();
-            throw new RuntimeException("intentional boom in onEvent");
-          }
+    RuntimeException thrown =
+        assertThrows(
+            RuntimeException.class,
+            () ->
+                provider.stream(
+                    request,
+                    new ProviderStreamHandler() {
+                      @Override
+                      public void onEvent(ProviderStreamEvent event) {
+                        throw new RuntimeException("intentional boom in onEvent");
+                      }
 
-          @Override
-          public void onComplete(ProviderCompletion completion, ProviderStream stream) {
-            completeCallbackCount.incrementAndGet();
-          }
+                      @Override
+                      public void onComplete(ProviderCompletion completion) {
+                        completeCallbackCount.incrementAndGet();
+                      }
 
-          @Override
-          public void onError(ProviderException error, ProviderStream stream) {
-            errorCallbackCount.incrementAndGet();
-          }
-        });
+                      @Override
+                      public void onError(ProviderException error) {
+                        errorCallbackCount.incrementAndGet();
+                      }
+                    }));
 
-    assertTrue(thrownLatch.await(5, TimeUnit.SECONDS));
-    Thread.sleep(150);
-
+    assertEquals("intentional boom in onEvent", thrown.getMessage());
     assertEquals(0, completeCallbackCount.get(), "no onComplete after callback failure");
-    assertEquals(0, errorCallbackCount.get(), "no secondary onError triggered when onEvent throws");
+    assertEquals(0, errorCallbackCount.get(), "no onError after callback failure");
   }
 
-  /** 验证用户在 onComplete 回调中抛出运行时异常时，绝不触发二次终态 onError。 */
+  /** 验证 onComplete 抛出的运行时异常原样传播，绝不转成二次终态 onError。 */
   @Test
-  void should_not_emit_secondary_error_when_on_complete_throws() throws Exception {
+  void should_propagate_on_complete_failure_without_secondary_error() {
     server.createContext(
         "/v1/messages", exchange -> respondSseText(exchange, "msg_complete_ex", "done"));
 
@@ -1687,35 +1680,35 @@ class AnthropicMessagesWireTest {
         createRequest("claude-3-5-sonnet", null, List.of(userTextMsg("hi")), null, null);
 
     AtomicInteger errorCallbackCount = new AtomicInteger(0);
-    CountDownLatch completeLatch = new CountDownLatch(1);
 
-    provider.stream(
-        request,
-        new ProviderStreamHandler() {
-          @Override
-          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
+    RuntimeException thrown =
+        assertThrows(
+            RuntimeException.class,
+            () ->
+                provider.stream(
+                    request,
+                    new ProviderStreamHandler() {
+                      @Override
+                      public void onEvent(ProviderStreamEvent event) {}
 
-          @Override
-          public void onComplete(ProviderCompletion completion, ProviderStream stream) {
-            completeLatch.countDown();
-            throw new RuntimeException("intentional boom in onComplete");
-          }
+                      @Override
+                      public void onComplete(ProviderCompletion completion) {
+                        throw new RuntimeException("intentional boom in onComplete");
+                      }
 
-          @Override
-          public void onError(ProviderException error, ProviderStream stream) {
-            errorCallbackCount.incrementAndGet();
-          }
-        });
+                      @Override
+                      public void onError(ProviderException error) {
+                        errorCallbackCount.incrementAndGet();
+                      }
+                    }));
 
-    assertTrue(completeLatch.await(5, TimeUnit.SECONDS));
-    Thread.sleep(150);
-
+    assertEquals("intentional boom in onComplete", thrown.getMessage());
     assertEquals(0, errorCallbackCount.get(), "onError must not be called if onComplete throws");
   }
 
-  /** 验证当底层错误触发且用户 onError 回调中抛出运行时异常时，异常被安全隔离且不产生二次回调。 */
+  /** 验证上游错误交付时 onError 抛出的运行时异常原样传播，不产生二次回调。 */
   @Test
-  void should_isolate_exception_thrown_by_on_error() throws Exception {
+  void should_propagate_on_error_failure_unchanged() {
     server.createContext(
         "/v1/messages",
         exchange -> {
@@ -1734,25 +1727,30 @@ class AnthropicMessagesWireTest {
     ProviderRequest request =
         createRequest("claude-3-5-sonnet", null, List.of(userTextMsg("hi")), null, null);
 
-    CountDownLatch errorLatch = new CountDownLatch(1);
+    AtomicInteger errorCallbackCount = new AtomicInteger(0);
 
-    provider.stream(
-        request,
-        new ProviderStreamHandler() {
-          @Override
-          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
+    RuntimeException thrown =
+        assertThrows(
+            RuntimeException.class,
+            () ->
+                provider.stream(
+                    request,
+                    new ProviderStreamHandler() {
+                      @Override
+                      public void onEvent(ProviderStreamEvent event) {}
 
-          @Override
-          public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
+                      @Override
+                      public void onComplete(ProviderCompletion completion) {}
 
-          @Override
-          public void onError(ProviderException error, ProviderStream stream) {
-            errorLatch.countDown();
-            throw new RuntimeException("intentional boom in onError");
-          }
-        });
+                      @Override
+                      public void onError(ProviderException error) {
+                        errorCallbackCount.incrementAndGet();
+                        throw new RuntimeException("intentional boom in onError");
+                      }
+                    }));
 
-    assertTrue(errorLatch.await(5, TimeUnit.SECONDS));
+    assertEquals("intentional boom in onError", thrown.getMessage());
+    assertEquals(1, errorCallbackCount.get());
   }
 
   // ==========================================
@@ -1994,20 +1992,20 @@ class AnthropicMessagesWireTest {
     final Set<Thread> callbackThreads = Collections.synchronizedSet(new HashSet<>());
 
     @Override
-    public void onEvent(ProviderStreamEvent event, ProviderStream stream) {
+    public void onEvent(ProviderStreamEvent event) {
       callbackThreads.add(Thread.currentThread());
       events.add(event);
     }
 
     @Override
-    public void onComplete(ProviderCompletion completion, ProviderStream stream) {
+    public void onComplete(ProviderCompletion completion) {
       callbackThreads.add(Thread.currentThread());
       this.completion.set(completion);
       latch.countDown();
     }
 
     @Override
-    public void onError(ProviderException error, ProviderStream stream) {
+    public void onError(ProviderException error) {
       callbackThreads.add(Thread.currentThread());
       this.error.set(error);
       latch.countDown();

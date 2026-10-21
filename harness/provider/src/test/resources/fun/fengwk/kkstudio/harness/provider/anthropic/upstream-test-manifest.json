@@ -20,9 +20,9 @@
     "totalSourceFiles": 40,
     "totalMethods": 423,
     "totalInvocations": 577,
-    "portedInvocations": 145,
+    "portedInvocations": 144,
     "inScopePendingInvocations": 0,
-    "outOfScopeInvocations": 432,
+    "outOfScopeInvocations": 433,
     "realCredentialInvocations": 121
   },
   "methods": [
@@ -10172,13 +10172,13 @@
           "upstreamStatus": "CONDITIONAL",
           "condition": "@EnabledIfEnvironmentVariable(named = \"ANTHROPIC_API_KEY\", matches = \".+\")",
           "capability": "Messages Protocol IT",
-          "targetTest": "fun.fengwk.kkstudio.harness.provider.anthropic.AnthropicMessagesWireTest#should_chat_asynchronously",
-          "fixture": "anthropic/fixtures/messages-wire.json",
-          "validationLayer": "wire/protocol",
-          "mappingStatus": "PORTED",
-          "executionStatus": "PASSED",
+          "targetTest": null,
+          "fixture": null,
+          "validationLayer": "not-applicable",
+          "mappingStatus": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "realInteropStatus": "NOT_EXECUTED_REQUIRES_CREDENTIAL",
-          "capabilityMismatch": null,
+          "capabilityMismatch": "kk-studio provider calls are blocking: stream() runs on the calling (virtual) thread and returns after the terminal callback, so there is no asynchronous chat API to exercise.",
           "securityAdaptation": null
         }
       ]

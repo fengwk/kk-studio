@@ -271,15 +271,14 @@ final class HarnessRuntimeTestSupport {
           ModelInvocation model =
               modelInvocation(modelId, threadId, turnStartEntryId, turnStartEntryId, T1);
           tx.insertModelInvocation(model);
-          tx.updateModelInvocation(model.beginDispatch(T2));
-          tx.updateModelInvocation(model.beginDispatch(T2).markRunning(T2));
+          tx.updateModelInvocation(model.markRunning(T2));
           return new ModelBaseline(sessionId, rootEntryId, turnStartEntryId, threadId, modelId);
         });
   }
 
   /**
-   * MODEL_ACTIVE baseline，按指定的活动状态（READY / DISPATCHING / RUNNING）： ROOT -&gt; TURN_START(INPUT)
-   * -&gt; USER，thread head 指向 USER entry，model requestHead = USER entry。
+   * MODEL_ACTIVE baseline，按指定的活动状态（READY / RUNNING）： ROOT -&gt; TURN_START(INPUT) -&gt; USER，thread
+   * head 指向 USER entry，model requestHead = USER entry。
    */
   static ModelBaseline seedModel(InMemoryHarnessStore store, ModelInvocationStatus status) {
     return store.transaction(
@@ -299,11 +298,8 @@ final class HarnessRuntimeTestSupport {
           ModelInvocation model =
               modelInvocation(modelId, threadId, turnStartEntryId, userEntryId, T1);
           tx.insertModelInvocation(model);
-          if (status == ModelInvocationStatus.DISPATCHING) {
-            tx.updateModelInvocation(model.beginDispatch(T2));
-          } else if (status == ModelInvocationStatus.RUNNING) {
-            tx.updateModelInvocation(model.beginDispatch(T2));
-            tx.updateModelInvocation(model.beginDispatch(T2).markRunning(T2));
+          if (status == ModelInvocationStatus.RUNNING) {
+            tx.updateModelInvocation(model.markRunning(T2));
           }
           return new ModelBaseline(sessionId, rootEntryId, turnStartEntryId, threadId, modelId);
         });
@@ -342,8 +338,7 @@ final class HarnessRuntimeTestSupport {
           ModelInvocation model =
               modelInvocation(modelId, threadId, turnStartEntryId, turnStartEntryId, T1);
           tx.insertModelInvocation(model);
-          tx.updateModelInvocation(model.beginDispatch(T2));
-          tx.updateModelInvocation(model.beginDispatch(T2).markRunning(T2));
+          tx.updateModelInvocation(model.markRunning(T2));
           return new ModelBaseline(sessionId, rootEntryId, turnStartEntryId, threadId, modelId);
         });
   }
@@ -424,9 +419,8 @@ final class HarnessRuntimeTestSupport {
               modelInvocationWithRequest(
                   modelId, threadId, turnStartEntryId, turnStartEntryId, requestSpec, T1);
           tx.insertModelInvocation(model);
-          ModelInvocation succeeded = model.beginDispatch(T2).markRunning(T2).succeed(response, T2);
-          tx.updateModelInvocation(model.beginDispatch(T2));
-          tx.updateModelInvocation(model.beginDispatch(T2).markRunning(T2));
+          ModelInvocation succeeded = model.markRunning(T2).succeed(response, T2);
+          tx.updateModelInvocation(model.markRunning(T2));
           tx.updateModelInvocation(succeeded);
           tx.updateModelInvocation(succeeded.attachResultEntry(assistantEntryId, T2));
           List<ToolInvocation> invocations = new ArrayList<>(toolCount);
@@ -517,9 +511,8 @@ final class HarnessRuntimeTestSupport {
               modelInvocationWithRequest(
                   modelId, threadId, turnStartEntryId, turnStartEntryId, requestSpec, T1);
           tx.insertModelInvocation(model);
-          ModelInvocation succeeded = model.beginDispatch(T2).markRunning(T2).succeed(response, T2);
-          tx.updateModelInvocation(model.beginDispatch(T2));
-          tx.updateModelInvocation(model.beginDispatch(T2).markRunning(T2));
+          ModelInvocation succeeded = model.markRunning(T2).succeed(response, T2);
+          tx.updateModelInvocation(model.markRunning(T2));
           tx.updateModelInvocation(succeeded);
           tx.updateModelInvocation(succeeded.attachResultEntry(assistantEntryId, T2));
           UUID toolId = tx.nextId();
@@ -657,16 +650,14 @@ final class HarnessRuntimeTestSupport {
         });
   }
 
-  /** 将指定 id 的 ToolInvocation 从 READY 经 DISPATCHING/RUNNING 推进到 terminal UNKNOWN（outcome 尚未物化）。 */
+  /** 将指定 id 的 ToolInvocation 从 READY 经 RUNNING 推进到 terminal UNKNOWN（outcome 尚未物化）。 */
   static ToolInvocation unknownTool(InMemoryHarnessStore store, UUID toolId) {
     return store.transaction(
         tx -> {
           ToolInvocation tool = tx.lockToolInvocation(toolId).orElseThrow();
           ToolInvocation preflighted = tool.markApprovalNotRequired(T3);
           tx.updateToolInvocations(List.of(preflighted));
-          ToolInvocation dispatched = preflighted.beginDispatch(T3);
-          tx.updateToolInvocations(List.of(dispatched));
-          ToolInvocation running = dispatched.markRunning(T3);
+          ToolInvocation running = preflighted.markRunning(T3);
           tx.updateToolInvocations(List.of(running));
           ToolInvocation unknown = running.unknown(toolError(), T3);
           tx.updateToolInvocations(List.of(unknown));
@@ -674,20 +665,18 @@ final class HarnessRuntimeTestSupport {
         });
   }
 
-  /** 将指定 tool 从 READY 推进到 DISPATCHING（approval preflight 已完成，attempt 保持为 0）。 */
-  static ToolInvocation beginDispatchTool(InMemoryHarnessStore store, UUID toolId) {
+  /** 将指定 tool 保持 READY 并完成 approval preflight（not-required approval，attempt 保持为 0）。 */
+  static ToolInvocation approveTool(InMemoryHarnessStore store, UUID toolId) {
     return store.transaction(
         tx -> {
           ToolInvocation tool = tx.lockToolInvocation(toolId).orElseThrow();
-          ToolInvocation preflighted = tool.markApprovalNotRequired(T3);
-          tx.updateToolInvocations(List.of(preflighted));
-          ToolInvocation updated = preflighted.beginDispatch(T3);
+          ToolInvocation updated = tool.markApprovalNotRequired(T3);
           tx.updateToolInvocations(List.of(updated));
           return updated;
         });
   }
 
-  /** 将指定 tool 从 DISPATCHING 推进到 RUNNING（attempt 推进到 1）。 */
+  /** 将已完成 approval preflight 的 tool 从 READY 推进到 RUNNING（attempt 推进到 1）。 */
   static ToolInvocation markRunningTool(InMemoryHarnessStore store, UUID toolId) {
     return store.transaction(
         tx -> {

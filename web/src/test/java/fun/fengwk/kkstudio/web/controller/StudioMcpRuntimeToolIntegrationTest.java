@@ -34,11 +34,9 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.runtime.port.ToolGateway;
-import fun.fengwk.kkstudio.harness.runtime.port.ToolSuccess;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
@@ -66,8 +64,6 @@ import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
 
 /**
  * 端到端证明动态 MCP 工具在生产 Runtime 路径上的完整生命周期：
@@ -293,46 +289,17 @@ public class StudioMcpRuntimeToolIntegrationTest extends WebPostgresTestSupport 
 
     UUID invocationId = UUID.randomUUID();
     ToolGateway.Execution execution =
-        new ToolGateway.Execution(invocationId, threadId, rootEntryId, 1, invocationRequest);
+        new ToolGateway.Execution(invocationId, threadId, rootEntryId, invocationRequest);
 
-    CompletableFuture<ToolResult> resultFuture = new CompletableFuture<>();
-    ToolGateway.Listener listener =
-        new ToolGateway.Listener() {
-          @Override
-          public void onPartial(ToolResult partial) {}
-
-          @Override
-          public void onSucceeded(ToolSuccess success) {
-            resultFuture.complete(success.result());
-          }
-
-          @Override
-          public void onFailed(ToolGateway.Failure failure) {
-            resultFuture.completeExceptionally(
-                new IllegalStateException("tool execution failed: " + failure.error()));
-          }
-
-          @Override
-          public void onCancelled(ToolInvocationError error) {
-            resultFuture.completeExceptionally(
-                new IllegalStateException("tool cancelled: " + error));
-          }
-
-          @Override
-          public void onUnknown(ToolInvocationError error) {
-            resultFuture.completeExceptionally(
-                new IllegalStateException("tool indeterminate/unknown: " + error));
-          }
-        };
-
-    ToolGateway.StartResult startResult = toolGateway.start(execution, listener);
-    ToolGateway.Started started = assertInstanceOf(ToolGateway.Started.class, startResult);
-
-    // 按照两阶段激活契约打开回调 gate 并启动执行
-    started.handle().activate();
-
-    // 确定性等待终端结果（避免任意 sleep）
-    ToolResult terminalResult = resultFuture.get(15, TimeUnit.SECONDS);
+    // admit 只做本地检查并持有资源；阻塞执行返回唯一终态，之后释放资源。
+    ToolGateway.Admitted admitted =
+        assertInstanceOf(ToolGateway.Admitted.class, toolGateway.admit(execution));
+    ToolGateway.Completion completion;
+    try (ToolGateway.Run run = admitted.run()) {
+      completion = run.execute(partial -> {});
+    }
+    ToolResult terminalResult =
+        assertInstanceOf(ToolGateway.Succeeded.class, completion).success().result();
     assertNotNull(terminalResult);
     assertEquals(callId, terminalResult.toolCallId());
     assertFalse(terminalResult.error());

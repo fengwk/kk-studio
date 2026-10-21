@@ -555,9 +555,8 @@ class HarnessRuntimeStopSubtreeTest {
                   modelId, childId, turnStartEntryId, userEntryId, modelRequest(), T1);
           tx.insertModelInvocation(model);
           ProviderResponse response = responseWithToolCalls();
-          tx.updateModelInvocation(model.beginDispatch(T2));
-          tx.updateModelInvocation(model.beginDispatch(T2).markRunning(T2));
-          tx.updateModelInvocation(model.beginDispatch(T2).markRunning(T2).succeed(response, T2));
+          tx.updateModelInvocation(model.markRunning(T2));
+          tx.updateModelInvocation(model.markRunning(T2).succeed(response, T2));
 
           tx.insertJoin(
               new ThreadJoin(

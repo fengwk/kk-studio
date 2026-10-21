@@ -134,8 +134,6 @@ public abstract class HarnessStoreInvocationContract {
                   null,
                   T1));
           ModelInvocation current = tx.lockModelInvocation(TestIds.id(101)).orElseThrow();
-          tx.updateModelInvocation(current.beginDispatch(T2));
-          current = tx.lockModelInvocation(TestIds.id(101)).orElseThrow();
           tx.updateModelInvocation(current.markRunning(T2));
           current = tx.lockModelInvocation(TestIds.id(101)).orElseThrow();
           tx.updateModelInvocation(current.succeed(response, null, replayState, T2));
@@ -344,9 +342,7 @@ public abstract class HarnessStoreInvocationContract {
         store,
         tx -> {
           ModelInvocation model = tx.lockModelInvocation(TestIds.id(1)).orElseThrow();
-          ModelInvocation dispatching = model.beginDispatch(T2);
-          tx.updateModelInvocation(dispatching);
-          ModelInvocation running = dispatching.markRunning(T2);
+          ModelInvocation running = model.markRunning(T2);
           tx.updateModelInvocation(running);
           tx.updateModelInvocation(running.retryReady(failure, T3));
         });
@@ -881,8 +877,6 @@ public abstract class HarnessStoreInvocationContract {
                 store,
                 tx -> {
                   ModelInvocation current = tx.lockModelInvocation(TestIds.id(1)).orElseThrow();
-                  tx.updateModelInvocation(current.beginDispatch(T2));
-                  current = tx.lockModelInvocation(TestIds.id(1)).orElseThrow();
                   tx.updateModelInvocation(current.markRunning(T2));
                   current = tx.lockModelInvocation(TestIds.id(1)).orElseThrow();
                   tx.updateModelInvocation(
@@ -917,8 +911,6 @@ public abstract class HarnessStoreInvocationContract {
                   null,
                   T1));
           ModelInvocation current = tx.lockModelInvocation(TestIds.id(1)).orElseThrow();
-          tx.updateModelInvocation(current.beginDispatch(T2));
-          current = tx.lockModelInvocation(TestIds.id(1)).orElseThrow();
           tx.updateModelInvocation(current.markRunning(T2));
           current = tx.lockModelInvocation(TestIds.id(1)).orElseThrow();
           tx.updateModelInvocation(current.succeed(response, T2));
@@ -1000,8 +992,6 @@ public abstract class HarnessStoreInvocationContract {
         store,
         tx -> {
           ModelInvocation current = tx.lockModelInvocation(TestIds.id(1)).orElseThrow();
-          tx.updateModelInvocation(current.beginDispatch(T2));
-          current = tx.lockModelInvocation(TestIds.id(1)).orElseThrow();
           tx.updateModelInvocation(current.markRunning(T2));
           current = tx.lockModelInvocation(TestIds.id(1)).orElseThrow();
           tx.updateModelInvocation(current.succeed(response, T2));
@@ -1039,8 +1029,6 @@ public abstract class HarnessStoreInvocationContract {
         store,
         tx -> {
           ModelInvocation current = tx.lockModelInvocation(TestIds.id(10)).orElseThrow();
-          tx.updateModelInvocation(current.beginDispatch(T2));
-          current = tx.lockModelInvocation(TestIds.id(10)).orElseThrow();
           tx.updateModelInvocation(current.markRunning(T2));
           current = tx.lockModelInvocation(TestIds.id(10)).orElseThrow();
           StreamCheckpoint finalCheckpoint = new StreamCheckpoint(1, 10L, "hello", "");
@@ -1073,8 +1061,6 @@ public abstract class HarnessStoreInvocationContract {
         store,
         tx -> {
           ModelInvocation current = tx.lockModelInvocation(TestIds.id(11)).orElseThrow();
-          tx.updateModelInvocation(current.beginDispatch(T2));
-          current = tx.lockModelInvocation(TestIds.id(11)).orElseThrow();
           tx.updateModelInvocation(current.markRunning(T2));
           current = tx.lockModelInvocation(TestIds.id(11)).orElseThrow();
           tx.updateModelInvocation(current.checkpoint(new StreamCheckpoint(1, 5L, "hel", ""), T2));
@@ -1108,8 +1094,6 @@ public abstract class HarnessStoreInvocationContract {
         store,
         tx -> {
           ModelInvocation current = tx.lockModelInvocation(TestIds.id(12)).orElseThrow();
-          tx.updateModelInvocation(current.beginDispatch(T2));
-          current = tx.lockModelInvocation(TestIds.id(12)).orElseThrow();
           tx.updateModelInvocation(current.markRunning(T2));
           current = tx.lockModelInvocation(TestIds.id(12)).orElseThrow();
           StreamCheckpoint failureCheckpoint = new StreamCheckpoint(1, 3L, "partial error", "");
@@ -1141,8 +1125,6 @@ public abstract class HarnessStoreInvocationContract {
         store,
         tx -> {
           ModelInvocation current = tx.lockModelInvocation(TestIds.id(13)).orElseThrow();
-          tx.updateModelInvocation(current.beginDispatch(T2));
-          current = tx.lockModelInvocation(TestIds.id(13)).orElseThrow();
           tx.updateModelInvocation(current.markRunning(T2));
           current = tx.lockModelInvocation(TestIds.id(13)).orElseThrow();
           tx.updateModelInvocation(
@@ -1649,8 +1631,6 @@ public abstract class HarnessStoreInvocationContract {
                   createdAt));
           ModelInvocation current = tx.lockModelInvocation(id).orElseThrow();
           if (status == ModelInvocationStatus.SUCCEEDED) {
-            tx.updateModelInvocation(current.beginDispatch(createdAt));
-            current = tx.lockModelInvocation(id).orElseThrow();
             tx.updateModelInvocation(current.markRunning(createdAt));
             current = tx.lockModelInvocation(id).orElseThrow();
             tx.updateModelInvocation(current.succeed(response, createdAt));
@@ -1660,8 +1640,6 @@ public abstract class HarnessStoreInvocationContract {
                     new ModelInvocationError(ProviderErrorKind.INVALID_REQUEST, "model failed"),
                     createdAt));
           } else if (status == ModelInvocationStatus.CANCELLED) {
-            tx.updateModelInvocation(current.beginDispatch(createdAt));
-            current = tx.lockModelInvocation(id).orElseThrow();
             tx.updateModelInvocation(current.markRunning(createdAt));
             current = tx.lockModelInvocation(id).orElseThrow();
             tx.updateModelInvocation(
@@ -1838,7 +1816,6 @@ public abstract class HarnessStoreInvocationContract {
             T2);
     inTransaction(store, tx -> tx.insertToolInvocations(List.of(ready)));
     updateTool(TestIds.id(10), tool -> tool.markApprovalNotRequired(T2));
-    updateTool(TestIds.id(10), tool -> tool.beginDispatch(T2));
     updateTool(TestIds.id(10), tool -> tool.markRunning(T2));
     ToolEffectBatch effects =
         new ToolEffectBatch(
@@ -2626,8 +2603,6 @@ public abstract class HarnessStoreInvocationContract {
                               T2));
                       ModelInvocation current =
                           tx.lockModelInvocation(succeededModelId).orElseThrow();
-                      tx.updateModelInvocation(current.beginDispatch(T2));
-                      current = tx.lockModelInvocation(succeededModelId).orElseThrow();
                       tx.updateModelInvocation(current.markRunning(T2));
                       current = tx.lockModelInvocation(succeededModelId).orElseThrow();
                       tx.updateModelInvocation(current.succeed(successResponse(), T3));

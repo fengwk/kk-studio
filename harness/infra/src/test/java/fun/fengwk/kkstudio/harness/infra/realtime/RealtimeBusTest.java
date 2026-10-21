@@ -19,6 +19,12 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.AbstractExecutorService;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
@@ -134,7 +140,8 @@ class RealtimeBusTest {
               busRef.get().close();
               return canonical;
             },
-            payloadBuffer);
+            payloadBuffer,
+            new InlineExecutorService());
     busRef.set(bus);
     List<RealtimeEvent> received = new ArrayList<>();
     AtomicInteger resyncs = new AtomicInteger();
@@ -273,7 +280,8 @@ class RealtimeBusTest {
               fetched.add(id);
               return canonical;
             },
-            payloadBuffer)) {
+            payloadBuffer,
+            new InlineExecutorService())) {
       List<RealtimeEvent> received = new ArrayList<>();
       bus.subscribe(event.threadId(), received::add, () -> {});
 
@@ -401,6 +409,185 @@ class RealtimeBusTest {
     assertThrows(IllegalStateException.class, () -> bus.subscribe(id(1L), ignored -> {}, () -> {}));
   }
 
+  /** REFERENCE 回拉期间同 Thread 的后续通知排在其后按到达顺序投递，其它 Thread 立即投递，不被阻塞的回拉拖住。 */
+  @Test
+  void referenceFetchKeepsPerThreadOrderWithoutBlockingOtherThreads() throws Exception {
+    RealtimeEvent oversized = modelDelta("oversized");
+    String canonical = codec.encodeEventPayload(oversized);
+    UUID payloadId = payloadBuffer.put(oversized.threadId(), canonical).orElseThrow();
+    CountDownLatch fetchStarted = new CountDownLatch(1);
+    CountDownLatch releaseFetch = new CountDownLatch(1);
+    ExecutorService resolver = Executors.newVirtualThreadPerTaskExecutor();
+    try (RealtimeBus bus =
+        new RealtimeBus(
+            LOCAL,
+            codec,
+            new PostgresqlRealtimeEventSource(codec),
+            new RecordingSink(),
+            () -> false,
+            (origin, thread, id) -> {
+              fetchStarted.countDown();
+              await(releaseFetch);
+              return canonical;
+            },
+            payloadBuffer,
+            resolver)) {
+      List<RealtimeEvent> sameThread = new CopyOnWriteArrayList<>();
+      List<RealtimeEvent> otherThread = new CopyOnWriteArrayList<>();
+      bus.subscribe(id(1L), sameThread::add, () -> {});
+      bus.subscribe(id(2L), otherThread::add, () -> {});
+      RealtimeEvent after = modelDelta("after");
+      RealtimeEvent other = modelDelta(id(2L), "other");
+
+      bus.onNotification(codec.encodeReference(REMOTE, id(1L), payloadId));
+      assertTrue(fetchStarted.await(5, TimeUnit.SECONDS));
+      bus.onNotification(codec.encodeEvent(REMOTE, after));
+      bus.onNotification(codec.encodeEvent(REMOTE, other));
+
+      assertEquals(List.of(other), otherThread);
+      assertEquals(List.of(), sameThread);
+      releaseFetch.countDown();
+      awaitSize(sameThread, 2);
+      assertEquals(List.of(oversized, after), sameThread);
+    }
+  }
+
+  /** 通道积压达到上限时丢弃积压并以一条 RESYNC 代替，触发溢出的通知及之后的通知照常排队，内存有界且不静默丢失。 */
+  @Test
+  void laneOverflowReplacesBacklogWithResync() throws Exception {
+    RealtimeEvent oversized = modelDelta("oversized");
+    String canonical = codec.encodeEventPayload(oversized);
+    UUID payloadId = payloadBuffer.put(oversized.threadId(), canonical).orElseThrow();
+    CountDownLatch fetchStarted = new CountDownLatch(1);
+    CountDownLatch releaseFetch = new CountDownLatch(1);
+    try (RealtimeBus bus =
+        new RealtimeBus(
+            LOCAL,
+            codec,
+            new PostgresqlRealtimeEventSource(codec),
+            new RecordingSink(),
+            () -> false,
+            (origin, thread, id) -> {
+              fetchStarted.countDown();
+              await(releaseFetch);
+              return canonical;
+            },
+            payloadBuffer,
+            Executors.newVirtualThreadPerTaskExecutor())) {
+      List<RealtimeEvent> received = new CopyOnWriteArrayList<>();
+      AtomicInteger resyncs = new AtomicInteger();
+      bus.subscribe(id(1L), received::add, resyncs::incrementAndGet);
+
+      bus.onNotification(codec.encodeReference(REMOTE, id(1L), payloadId));
+      assertTrue(fetchStarted.await(5, TimeUnit.SECONDS));
+      for (int i = 0; i < RealtimeBus.MAX_PENDING_PER_THREAD; i++) {
+        bus.onNotification(codec.encodeEvent(REMOTE, modelDelta("backlog-" + i)));
+      }
+      RealtimeEvent tail = modelDelta("tail");
+      bus.onNotification(codec.encodeEvent(REMOTE, tail));
+      releaseFetch.countDown();
+
+      // 触发溢出的那条通知保留在 RESYNC 之后；更早的积压被丢弃。
+      awaitSize(received, 3);
+      assertEquals(
+          List.of(
+              oversized, modelDelta("backlog-" + (RealtimeBus.MAX_PENDING_PER_THREAD - 1)), tail),
+          received);
+      assertEquals(1, resyncs.get());
+    }
+  }
+
+  /** 关闭会中断进行中的回拉并释放 resolver；之后不再投递也不触发 resync。 */
+  @Test
+  void closeInterruptsInFlightReferenceFetch() throws Exception {
+    CountDownLatch fetchStarted = new CountDownLatch(1);
+    CountDownLatch interrupted = new CountDownLatch(1);
+    ExecutorService resolver = Executors.newVirtualThreadPerTaskExecutor();
+    RealtimeBus bus =
+        new RealtimeBus(
+            LOCAL,
+            codec,
+            new PostgresqlRealtimeEventSource(codec),
+            new RecordingSink(),
+            () -> false,
+            (origin, thread, id) -> {
+              fetchStarted.countDown();
+              try {
+                new CountDownLatch(1).await();
+              } catch (InterruptedException e) {
+                interrupted.countDown();
+                Thread.currentThread().interrupt();
+              }
+              throw new RealtimePayloadUnavailableException("interrupted");
+            },
+            payloadBuffer,
+            resolver);
+    AtomicInteger resyncs = new AtomicInteger();
+    bus.subscribe(id(1L), ignored -> {}, resyncs::incrementAndGet);
+
+    bus.onNotification(codec.encodeReference(REMOTE, id(1L), id(77L)));
+    assertTrue(fetchStarted.await(5, TimeUnit.SECONDS));
+    bus.close();
+
+    assertTrue(interrupted.await(5, TimeUnit.SECONDS));
+    assertTrue(resolver.awaitTermination(5, TimeUnit.SECONDS));
+    assertEquals(0, resyncs.get());
+  }
+
+  private static void await(CountDownLatch latch) {
+    try {
+      assertTrue(latch.await(5, TimeUnit.SECONDS));
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw new AssertionError(e);
+    }
+  }
+
+  private static void awaitSize(List<?> list, int size) throws InterruptedException {
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    while (list.size() < size && System.nanoTime() < deadline) {
+      Thread.sleep(5);
+    }
+    assertEquals(size, list.size());
+  }
+
+  /** 在调用线程内执行的 ExecutorService：让不关心并发的用例保持同步断言。 */
+  private static final class InlineExecutorService extends AbstractExecutorService {
+
+    private volatile boolean shutdown;
+
+    @Override
+    public void execute(Runnable command) {
+      command.run();
+    }
+
+    @Override
+    public void shutdown() {
+      shutdown = true;
+    }
+
+    @Override
+    public List<Runnable> shutdownNow() {
+      shutdown = true;
+      return List.of();
+    }
+
+    @Override
+    public boolean isShutdown() {
+      return shutdown;
+    }
+
+    @Override
+    public boolean isTerminated() {
+      return shutdown;
+    }
+
+    @Override
+    public boolean awaitTermination(long timeout, TimeUnit unit) {
+      return shutdown;
+    }
+  }
+
   private RealtimeBus bus(RealtimeEventSink remote, BooleanSupplier otherActiveNodes) {
     return bus(
         remote,
@@ -421,7 +608,8 @@ class RealtimeBusTest {
         remote,
         otherActiveNodes,
         payloadFetcher,
-        payloadBuffer);
+        payloadBuffer,
+        new InlineExecutorService());
   }
 
   private static RealtimeEvent.ModelDelta modelDelta(String text) {

@@ -618,10 +618,8 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
 
     // 子 Thread 被直接继续使用：Thread/owner API 不因 join 已存在或已交付而被门禁拦住。
     UUID childHead = headEntryId(childThreadId);
-    long childSequence = threadState(childThreadId).nextCommandSequence();
     AcceptedCommands followUp =
-        acceptOnThread(
-            childThreadId, childHead, childSequence, promptCommand(UUID.randomUUID(), "follow-up"));
+        acceptOnThread(childThreadId, promptCommand(UUID.randomUUID(), "follow-up"));
     assertFalse(followUp.replayed());
 
     awaitTrue(
@@ -1076,16 +1074,10 @@ class ThreadJoinDelegationPostgresIntegrationTest extends WebPostgresTestSupport
     return accepted;
   }
 
-  private AcceptedCommands acceptOnThread(
-      UUID threadId,
-      UUID expectedHeadEntryId,
-      long expectedNextCommandSequence,
-      NewThreadCommand command) {
+  /** 单条纯 USER_MESSAGE 续写：不带 cursor。 */
+  private AcceptedCommands acceptOnThread(UUID threadId, NewThreadCommand command) {
     return runtime.acceptCommands(
-        new AcceptCommandsCommand(
-            new AcceptCommandsTarget.Thread(
-                threadId, expectedHeadEntryId, expectedNextCommandSequence),
-            List.of(command)),
+        new AcceptCommandsCommand(new AcceptCommandsTarget.Thread(threadId), List.of(command)),
         AcceptancePreflight.IDENTITY);
   }
 

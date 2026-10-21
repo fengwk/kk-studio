@@ -49,7 +49,7 @@ public class ModelExecutionConfiguration {
     return new ConcurrencyAdmission(properties.getModel());
   }
 
-  /** 阻塞 Provider I/O 使用的虚拟线程 executor。 */
+  /** 模型执行线程（每次调用一个阻塞的虚拟线程）与 HttpClient 内部使用的虚拟线程 executor。 */
   @Bean(name = "modelExecutionExecutor", destroyMethod = "close")
   @ConditionalOnMissingBean(name = "modelExecutionExecutor")
   public ExecutorService modelExecutionExecutor() {
@@ -57,7 +57,7 @@ public class ModelExecutionConfiguration {
         Thread.ofVirtual().name("model-provider-", 0L).factory());
   }
 
-  /** 模型调用固定使用 HTTP/1.1，避免明文网关链路的 h2c 升级；禁止重定向并复用受管 worker。 */
+  /** 模型调用固定使用 HTTP/1.1，避免明文网关链路的 h2c 升级；禁止重定向并复用受管虚拟线程 executor。 */
   @Bean(name = "modelExecutionHttpClient", destroyMethod = "close")
   @ConditionalOnMissingBean(name = "modelExecutionHttpClient")
   public HttpClient modelExecutionHttpClient(
@@ -79,14 +79,13 @@ public class ModelExecutionConfiguration {
         Thread.ofPlatform().name("model-watchdog-", 0L).daemon(true).factory());
   }
 
-  /** 基于 JDK 21 HttpClient、受管虚拟线程 worker 与 Watchdog 调度器的长生命周期受管 SSE 传输器。 */
+  /** 基于 JDK 21 HttpClient 与 Watchdog 调度器的长生命周期阻塞 SSE 传输器。 */
   @Bean(name = "modelExecutionTransport")
   @ConditionalOnMissingBean(name = "modelExecutionTransport")
   public JdkHttpSseTransport modelExecutionTransport(
       @Qualifier("modelExecutionHttpClient") HttpClient httpClient,
-      @Qualifier("modelExecutionExecutor") ExecutorService modelExecutionExecutor,
       @Qualifier("modelExecutionWatchdogScheduler") ScheduledExecutorService scheduler) {
-    return new JdkHttpSseTransport(httpClient, modelExecutionExecutor, scheduler);
+    return new JdkHttpSseTransport(httpClient, scheduler);
   }
 
   /** Catalog 添加模型时查询 Provider 模型列表；复用模型调用的 HttpClient 与系统代理。 */
@@ -112,12 +111,10 @@ public class ModelExecutionConfiguration {
   @ConditionalOnMissingBean(ModelGateway.class)
   public PlatformModelGateway platformModelGateway(
       ProviderResolutionService providerResolution,
-      @Qualifier("modelExecutionExecutor") ExecutorService modelExecutionExecutor,
       SystemSettingsSnapshot systemSettingsSnapshot,
       @Qualifier("modelExecutionAdmission") ConcurrencyAdmission admission) {
     return new PlatformModelGateway(
         providerResolution,
-        modelExecutionExecutor,
         () -> Duration.ofMillis(systemSettingsSnapshot.get().tool().modelGatewayBusyRetryMillis()),
         admission);
   }

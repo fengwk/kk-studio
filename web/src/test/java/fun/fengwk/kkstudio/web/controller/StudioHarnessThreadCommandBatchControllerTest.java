@@ -54,6 +54,7 @@ class StudioHarnessThreadCommandBatchControllerTest {
   private static final String HEAD_ENTRY_ID = "00000000-0000-0000-0000-000000000013";
 
   private static final String COMMAND_KEY = "00000000-0000-0000-0000-000000000014";
+  private static final String SET_COMMAND_KEY = "00000000-0000-0000-0000-000000000015";
 
   /** fixture 的权威 Thread id：接受后回读的 snapshot，与 path 的客户端 threadId 是不同事实。 */
   private static final String AUTHORITATIVE_THREAD_ID = "00000000-0000-0000-0000-000000000001";
@@ -86,10 +87,17 @@ class StudioHarnessThreadCommandBatchControllerTest {
     when(runtime.getThreadSnapshot(any())).thenReturn(HarnessRuntimeTestFixtures.idleSnapshot());
   }
 
-  /** 成功：owner-free 请求体映射为 path Thread + 精确 cursor 的 THREAD target，响应回读接受后的权威 Thread。 */
+  /** 成功：owner-free 的 SET_* 混合批次映射为 path Thread + 精确 cursor 的 THREAD target，响应回读接受后的权威 Thread。 */
   @Test
   void acceptsOwnerFreeThreadBatchFromThePathAndMapsCurrentSnapshotResponse() throws Exception {
-    postBatch(THREAD_ID, batch(userMessageCommand(COMMAND_KEY)))
+    postBatch(
+            THREAD_ID,
+            batch(
+                "["
+                    + setAgentCommand(SET_COMMAND_KEY)
+                    + ","
+                    + userMessageElement(COMMAND_KEY)
+                    + "]"))
         .andExpect(status().isAccepted())
         .andExpect(
             jsonPath("$.data.session.sessionId").value("00000000-0000-0000-0000-000000000001"))
@@ -113,9 +121,10 @@ class StudioHarnessThreadCommandBatchControllerTest {
         commandCaptor.getValue().commands().stream()
             .map(command -> command.payload().type())
             .toList();
-    assertEquals(List.of(ThreadCommandType.USER_MESSAGE), acceptedTypes);
     assertEquals(
-        UUID.fromString(COMMAND_KEY), commandCaptor.getValue().commands().get(0).idempotencyKey());
+        List.of(ThreadCommandType.SET_AGENT, ThreadCommandType.USER_MESSAGE), acceptedTypes);
+    assertEquals(
+        UUID.fromString(COMMAND_KEY), commandCaptor.getValue().commands().get(1).idempotencyKey());
 
     // 既有 Thread 的继续写入只走 acceptOnThread，不借 owner-aware 创建入口，也不回读 snapshot 之外的状态。
     verify(acceptanceService, never())
@@ -123,7 +132,7 @@ class StudioHarnessThreadCommandBatchControllerTest {
     verify(runtime).getThreadSnapshot(UUID.fromString(AUTHORITATIVE_THREAD_ID));
   }
 
-  /** 纯 USER_MESSAGE 不要求 cursor：body 只带 commands 时同样映射为同 Thread 的接受请求。 */
+  /** 纯 USER_MESSAGE 不带 cursor：body 只带 commands，映射为无 cursor 的同 Thread 接受请求；带 cursor 即 400。 */
   @Test
   void acceptsPureUserMessageBatchWithoutCursor() throws Exception {
     postBatch(
@@ -143,6 +152,8 @@ class StudioHarnessThreadCommandBatchControllerTest {
     assertFalse(target.hasCursor());
     assertNull(target.expectedHeadEntryId());
     assertNull(target.expectedNextCommandSequence());
+
+    postBatch(THREAD_ID, batch(userMessageCommand(COMMAND_KEY))).andExpect(status().isBadRequest());
   }
 
   /** 请求体必须完全 owner-free：多携带历史 owner / target 字段即未知字段，400 且不触达 acceptance service 与 runtime。 */
@@ -175,7 +186,8 @@ class StudioHarnessThreadCommandBatchControllerTest {
    */
   @Test
   void rejectsMalformedCursorBeforeTouchingAcceptanceServiceOrRuntime() throws Exception {
-    String commands = userMessageCommand(COMMAND_KEY);
+    String commands =
+        "[" + setAgentCommand(SET_COMMAND_KEY) + "," + userMessageElement(COMMAND_KEY) + "]";
 
     postBatch("not-a-uuid", batch(commands)).andExpect(status().isBadRequest());
     for (String malformedUuid :
@@ -259,13 +271,13 @@ class StudioHarnessThreadCommandBatchControllerTest {
   void translatesTypedRejectionsFromAcceptOnThread() throws Exception {
     when(acceptanceService.acceptOnThread(any(AcceptCommandsCommand.class)))
         .thenThrow(new IllegalArgumentException("thread command batch rejected"));
-    postBatch(THREAD_ID, batch(userMessageCommand(COMMAND_KEY)))
+    postBatch(THREAD_ID, messageBatch(userMessageCommand(COMMAND_KEY)))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.errors.detail").value("thread command batch rejected"));
 
     when(acceptanceService.acceptOnThread(any(AcceptCommandsCommand.class)))
         .thenThrow(new HarnessRuntimeNotFoundException("thread not found"));
-    postBatch(THREAD_ID, batch(userMessageCommand(COMMAND_KEY)))
+    postBatch(THREAD_ID, messageBatch(userMessageCommand(COMMAND_KEY)))
         .andExpect(status().isNotFound())
         .andExpect(jsonPath("$.errors.detail").value("thread not found"));
 
@@ -274,7 +286,7 @@ class StudioHarnessThreadCommandBatchControllerTest {
             new HarnessRuntimeConflictException(
                 HarnessRuntimeConflictException.Reason.IDEMPOTENCY_KEY_REUSED,
                 "client command id was reused"));
-    postBatch(THREAD_ID, batch(userMessageCommand(COMMAND_KEY)))
+    postBatch(THREAD_ID, messageBatch(userMessageCommand(COMMAND_KEY)))
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.errors.reason").value("IDEMPOTENCY_KEY_REUSED"))
         .andExpect(jsonPath("$.errors.detail").value("client command id was reused"));
@@ -293,7 +305,8 @@ class StudioHarnessThreadCommandBatchControllerTest {
     UUID root = UUID.randomUUID();
     when(runtime.findRootThreadId(child)).thenReturn(Optional.of(root));
 
-    postBatch(THREAD_ID, batch(userMessageCommand(COMMAND_KEY))).andExpect(status().isConflict());
+    postBatch(THREAD_ID, messageBatch(userMessageCommand(COMMAND_KEY)))
+        .andExpect(status().isConflict());
 
     verifyNoInteractions(acceptanceService);
   }
@@ -327,6 +340,12 @@ class StudioHarnessThreadCommandBatchControllerTest {
         "\"expectedHeadEntryId\":\"%s\",\"expectedNextCommandSequence\":\"7\""
             .formatted(HEAD_ENTRY_ID),
         commands);
+  }
+
+  private static String messageBatch(String commands) {
+    return """
+        {"commands":%s}
+        """.formatted(commands);
   }
 
   /** 组装 owner-free 请求体：cursorFields 是完整或部分的 cursor JSON 片段，commands 是命令数组。 */

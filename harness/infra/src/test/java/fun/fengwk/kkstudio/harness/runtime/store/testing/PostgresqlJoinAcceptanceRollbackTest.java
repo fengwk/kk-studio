@@ -669,8 +669,6 @@ class PostgresqlJoinAcceptanceRollbackTest {
                 ModelInvocation found =
                     tx.findModelInvocationByTurn(childThreadId, turnStartId).orElseThrow();
                 ModelInvocation model = tx.lockModelInvocation(found.id()).orElseThrow();
-                tx.updateModelInvocation(model.beginDispatch(T2));
-                model = tx.lockModelInvocation(found.id()).orElseThrow();
                 tx.updateModelInvocation(model.markRunning(T2));
                 model = tx.lockModelInvocation(found.id()).orElseThrow();
                 tx.updateModelInvocation(model.succeed(StoreTestSupport.assistantResponse(), T2));

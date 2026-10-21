@@ -192,7 +192,6 @@ class ToolInvocationInputTest {
         List.of(
             ToolInvocationStatus.READY,
             ToolInvocationStatus.WAITING_APPROVAL,
-            ToolInvocationStatus.DISPATCHING,
             ToolInvocationStatus.RUNNING)) {
       assertThrows(
           IllegalArgumentException.class,
@@ -254,8 +253,8 @@ class ToolInvocationInputTest {
                     dispatching.callIndex(),
                     dispatching.call(),
                     dispatching.binding(),
-                    ToolInvocationStatus.DISPATCHING,
-                    0,
+                    ToolInvocationStatus.RUNNING,
+                    1,
                     ToolApproval.notRequired(),
                     null,
                     ToolEffectBatch.EMPTY,

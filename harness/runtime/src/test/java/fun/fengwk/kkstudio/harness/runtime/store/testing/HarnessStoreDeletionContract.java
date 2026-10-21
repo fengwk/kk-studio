@@ -93,8 +93,6 @@ abstract class HarnessStoreDeletionContract {
                   T1,
                   T1));
           ModelInvocation model = tx.lockModelInvocation(modelId).orElseThrow();
-          tx.updateModelInvocation(model.beginDispatch(T1));
-          model = tx.lockModelInvocation(modelId).orElseThrow();
           tx.updateModelInvocation(model.markRunning(T1));
           model = tx.lockModelInvocation(modelId).orElseThrow();
           tx.updateModelInvocation(model.succeed(response, T1));

@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.platform.project.tool;
 
 import tools.jackson.databind.JsonNode;
 
-import fun.fengwk.kkstudio.harness.builtin.CompletedToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.common.json.JsonValues;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
@@ -12,8 +11,6 @@ import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.contributor.api.StateDeclaration;
 import fun.fengwk.kkstudio.harness.contributor.api.StateMode;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
@@ -28,6 +25,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Consumer;
 
 /**
  * {@code issue_transition}：Issue Agent 唯一显式选择的业务写工具，用于请求把当前阶段交接到 workflow 声明的下一阶段。
@@ -95,10 +93,8 @@ public final class IssueTransitionTool implements Tool {
   }
 
   @Override
-  public ToolExecutionHandle execute(ToolExecutionRequest request, ToolExecutionListener listener) {
+  public ToolOutcome execute(ToolExecutionRequest request, Consumer<ToolResult> progress) {
     Objects.requireNonNull(request, "request");
-    Objects.requireNonNull(listener, "listener");
-    ToolOutcome outcome;
     try {
       if (request.context() == null || request.context().threadId() == null) {
         throw new IllegalArgumentException(
@@ -117,12 +113,10 @@ public final class IssueTransitionTool implements Tool {
       IssueTransitionService.IssueTransitionResult result =
           transitionService.accept(
               request.context().threadId(), scope.schemaVersion(), scope.dataJson(), toState);
-      outcome = success(request, result);
+      return success(request, result);
     } catch (RuntimeException error) {
-      outcome = error(request, error);
+      return error(request, error);
     }
-    listener.onComplete(outcome);
-    return CompletedToolExecutionHandle.INSTANCE;
   }
 
   private static String requireToState(String argumentsJson) {

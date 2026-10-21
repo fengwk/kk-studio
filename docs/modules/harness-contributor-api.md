@@ -63,16 +63,16 @@ ToolDescriptor descriptor();
 default ToolRequirements requirements();                  // 默认 ToolRequirements.none()
 default Duration resolveTimeout(ToolCall call);           // 默认返回 descriptor.defaultTimeout()
 default Optional<ToolHistoryRenderer> historyRenderer();  // 默认 absent：Runtime 使用通用回退
-ToolExecutionHandle execute(ToolExecutionRequest request, ToolExecutionListener listener);
+ToolOutcome execute(ToolExecutionRequest request, Consumer<ToolResult> progress) throws InterruptedException;
 ```
 
-`execute` 必须启动式、快速返回：实现可以在调用线程触发同步回调，但调用状态持久化为 `RUNNING` 之前回调会被门控缓冲，因此执行状态转换始终有序。返回的 [`ToolExecutionHandle`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolExecutionHandle.java) 提供幂等 `cancel()`；`isCancelled()` 表示是否已经请求取消，不证明远端副作用已回滚。Platform 的 Gateway 用监视器保护回调队列与取消、终态标志，过滤重复和迟到回调；句柄另用原子标志保证取消幂等，并非 SPI 要求所有实现共享一个 CAS。
+`execute` 是阻塞调用：Runtime 在每次调用独占的一条虚拟线程上执行它，返回即终态，调用状态在进入 `execute` 之前已持久化为 `RUNNING`。业务失败返回 error 的 `ToolResult`；无法完成时抛出运行时异常，由 Runtime 收敛为不确定终态。取消、Stop 与租约丢失都表现为对该线程的 interrupt：实现必须响应中断、关闭自己持有的资源并抛出 `InterruptedException`，这不证明远端副作用已回滚。执行体退出之前，Runtime 不会释放该调用所钉住的任何本地资源，因此实现不需要另外上报「静止」。
 
 `resolveTimeout` 是执行前唯一的超时解析点：入参是已归一化并通过 schema 校验的 `ToolCall`，默认实现返回 definition 的 `defaultTimeout()`，只有真正拥有 arguments 级超时契约的工具才覆盖它。返回值必须是原样的最终结果：`Duration.ZERO` 表示没有 execution deadline，下游不得再回落实现默认值或施加上限；非法 arguments 级超时必须抛出 `IllegalArgumentException` 而不是退回默认值，Gateway 会把它收敛为确定性的 `INVALID_REQUEST` 拒绝。
 
 [`ToolExecutionRequest`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolExecutionRequest.java) 携带最终 descriptor、已归一化并通过 schema 校验的 `ToolCall`（构造期调用 `validateFor`）、已解析的 `timeout` 与可选的 `ToolExecutionContext`。`timeout` 就是 `resolveTimeout` 的结果，执行层不得二次解析。请求不携带 workdir：目录只存在于具体工具的 arguments 中，框架既不把它提升为通用执行状态，也不提供隐藏默认目录。
 
-[`ToolExecutionListener`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolExecutionListener.java) 接收 `onPartial(ToolResult)*` 与互斥的 `onComplete` / `onError(Throwable)`：终态至多一次，重复或迟到的回调由运行时侧适配层过滤，实现无需自己防御。`onComplete` 的抽象方法是 `onComplete(ToolOutcome)`（可携带 effects），另有一个只带结果的 default 重载 `onComplete(ToolResult)`，它包成不带 effects 的 outcome。
+返回值 [`ToolOutcome`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolOutcome.java) 携带模型可见的 `ToolResult` 与可选的 branch effects（`ToolOutcome.withoutEffects` 构造不带 effects 的结果）。`progress` 接收非终止的流式输出（不得含 binary / resource 内容），不流式的工具忽略它；非法 partial 由 Platform 的 Gateway 以确定性失败收敛。
 
 ### 历史语义渲染
 
@@ -96,7 +96,7 @@ Environment 时才进入模型工具面。`requiredEnvironmentId` 用于把 `REQ
 指定 Environment。Platform MCP 工具使用 `NONE`，统一 `read` 使用 `OPTIONAL`，宿主
 写入、命令、检索与 LSP 工具使用 `REQUIRED`。
 
-需要环境的工具在 [`ToolExecutionContext`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolExecutionContext.java) 中拿到 `invocationId`、`threadId`、`executedAt`、`branch` 与可选的 [`BoundEnvironment`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/BoundEnvironment.java)。`BoundEnvironment` 是刻意窄的接口——只有 `environmentId()` 与 `execute(capability, request, listener)`，工具据此执行一个 `EnvironmentCapabilityDescriptor`，而连接注册、路由与协议细节由 Platform 的适配器承担。
+需要环境的工具在 [`ToolExecutionContext`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolExecutionContext.java) 中拿到 `invocationId`、`threadId`、`executedAt`、`branch` 与可选的 [`BoundEnvironment`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/BoundEnvironment.java)。`BoundEnvironment` 是刻意窄的接口——只有 `environmentId()` 与阻塞的 `execute(capability, request, progress)`，工具据此执行一个 `EnvironmentCapabilityDescriptor` 并拿到终态 `ToolResult`，而连接注册、路由与协议细节由 Platform 的适配器承担。
 
 环境绑定在持久化侧被冻结：[`ToolBinding`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/invocation/tool/ToolBinding.java)
 保留 `environmentSupport` 与可空的 `environmentId` / `environmentName`。`NONE` 不得携带
@@ -107,10 +107,7 @@ Environment 时才进入模型工具面。`requiredEnvironmentId` 用于把 `REQ
 `environmentName` 与 `environmentId` 同源，继续作为历史投影判定 native 资格的
 durable 事实。
 
-`ToolExecutionHandle.quiescence()` 必须返回非空 stage，表示该调用不再访问本地工具资源。
-取消只是请求，不能以 `Future.cancel` 或 `FutureTask.done` 冒充真实线程退出；
-异步工具通过工作线程退出完成静止，尚未启动即取消的任务和同步终结句柄可以立即完成。
-纯 Environment 转发句柄只声明本地资源静止，不表示远端停止或副作用已被撤销。
+发送前的确定性与不确定性由抛出的异常类型承载：`EnvironmentCapabilityBusyException` / `EnvironmentCapabilityUnavailableException` 表示调用肯定未执行，`EnvironmentCapabilitySendUncertainException` 表示可能已被接受，Gateway 据此区分可重试失败与 `UNKNOWN`。调用线程被中断时，`BoundEnvironment` 向远端请求取消并立即抛出 `InterruptedException`，不等待远端确认，也不表示远端已停止或副作用已被撤销。
 
 ## 分支状态与副作用
 
@@ -149,7 +146,7 @@ Plugin 安装集合由 Web runtime dependency 和发行物构建确定，步骤�
 ## 源码与测试
 
 - 冻结与校验：[`HarnessCatalog.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/HarnessCatalog.java)、[`HarnessRegistrar.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/HarnessRegistrar.java)、[`HarnessContributor.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/HarnessContributor.java)、[`Identifiers.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/Identifiers.java)
-- 执行 SPI：[`Tool.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/Tool.java)、[`ToolExecutionRequest.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolExecutionRequest.java)、[`ToolExecutionListener.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolExecutionListener.java)、[`ToolExecutionHandle.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolExecutionHandle.java)、[`ToolHistoryRenderer.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolHistoryRenderer.java)
+- 执行 SPI：[`Tool.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/Tool.java)、[`ToolExecutionRequest.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolExecutionRequest.java)、[`ToolOutcome.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolOutcome.java)、[`ToolHistoryRenderer.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolHistoryRenderer.java)
 - 环境与状态：[`ToolRequirements.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ToolRequirements.java)、[`BoundEnvironment.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/BoundEnvironment.java)、[`BranchView.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/BranchView.java)、[`AppendCustomEntry.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/AppendCustomEntry.java)、[`ContextProjector.java`](../../harness/contributor-api/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/ContextProjector.java)
 - [`HarnessCatalogTest.java`](../../harness/contributor-api/src/test/java/fun/fengwk/kkstudio/harness/contributor/api/HarnessCatalogTest.java) 覆盖 DAG、排序、唯一性与 registrar 越界拒绝；[`HarnessContractTest.java`](../../harness/contributor-api/src/test/java/fun/fengwk/kkstudio/harness/contributor/api/HarnessContractTest.java) 覆盖 SPI 契约与请求归一化，[`BranchViewTest.java`](../../harness/contributor-api/src/test/java/fun/fengwk/kkstudio/harness/contributor/api/BranchViewTest.java) 覆盖 contributor-scoped 状态可见性与用户 Goal 投影。参考实现见 [`harness-builtin`](harness-builtin.md)。
 

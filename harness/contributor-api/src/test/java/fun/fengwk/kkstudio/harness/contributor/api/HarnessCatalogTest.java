@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 
@@ -17,6 +18,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 /** {@link HarnessCatalog} 的完整构建、确定性拓扑排序、统一工具注册与强隔离/校验测试。 */
 class HarnessCatalogTest {
@@ -367,8 +369,7 @@ class HarnessCatalogTest {
       }
 
       @Override
-      public ToolExecutionHandle execute(
-          ToolExecutionRequest request, ToolExecutionListener listener) {
+      public ToolOutcome execute(ToolExecutionRequest request, Consumer<ToolResult> progress) {
         return null;
       }
     };

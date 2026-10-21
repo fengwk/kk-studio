@@ -681,17 +681,28 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
         return accepted(threadId, rootEntryId);
       }
       AcceptCommandsTarget.Thread thread = (AcceptCommandsTarget.Thread) target;
+      // 单条纯 USER_MESSAGE 无 cursor：按线程当前尾部入队，与真实运行时一致。
+      long nextSequence =
+          thread.hasCursor()
+              ? thread.expectedNextCommandSequence()
+              : jdbc.queryForObject(
+                  "select next_command_sequence from harness_thread where id = ?",
+                  Long.class,
+                  thread.threadId());
+      UUID headEntryId =
+          thread.hasCursor()
+              ? thread.expectedHeadEntryId()
+              : jdbc.queryForObject(
+                  "select head_entry_id from harness_thread where id = ?",
+                  UUID.class,
+                  thread.threadId());
       insertCommands(
-          jdbc,
-          thread.threadId(),
-          thread.expectedNextCommandSequence(),
-          command.commands(),
-          Timestamp.from(Instant.now()));
+          jdbc, thread.threadId(), nextSequence, command.commands(), Timestamp.from(Instant.now()));
       jdbc.update(
           "update harness_thread set next_command_sequence = next_command_sequence + ? where id = ?",
           command.commands().size(),
           thread.threadId());
-      return accepted(thread.threadId(), thread.expectedHeadEntryId());
+      return accepted(thread.threadId(), headEntryId);
     }
 
     private static AcceptedCommands insertChild(JdbcTemplate jdbc, SpawnRequest request) {

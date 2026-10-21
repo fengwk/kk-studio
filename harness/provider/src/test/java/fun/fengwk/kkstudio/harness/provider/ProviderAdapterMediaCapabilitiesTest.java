@@ -69,7 +69,7 @@ class ProviderAdapterMediaCapabilitiesTest {
     httpClient = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build();
     workerExecutor = Executors.newSingleThreadExecutor();
     scheduler = Executors.newSingleThreadScheduledExecutor();
-    transport = new JdkHttpSseTransport(httpClient, workerExecutor, scheduler);
+    transport = new JdkHttpSseTransport(httpClient, scheduler);
   }
 
   @AfterEach

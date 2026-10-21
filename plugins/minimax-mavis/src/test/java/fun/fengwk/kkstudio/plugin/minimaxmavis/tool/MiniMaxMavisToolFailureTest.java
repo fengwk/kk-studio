@@ -21,7 +21,6 @@ import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.contributor.api.BranchView;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionContext;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
@@ -51,11 +50,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.AbstractExecutorService;
-import java.util.concurrent.Future;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -90,13 +85,12 @@ class MiniMaxMavisToolFailureTest {
           + "{\"endpoint\":\"batch_text_to_music\"}"
           + "]}";
 
-  private DirectExecutor executor;
+  private final Semaphore executor = new Semaphore(8);
   private FakeTransport transport;
   private FakeGateway gateway;
 
   @BeforeEach
   void setUp() {
-    this.executor = new DirectExecutor();
     this.transport = new FakeTransport();
     this.gateway = new FakeGateway();
   }
@@ -125,8 +119,7 @@ class MiniMaxMavisToolFailureTest {
         new ToolCall("call-cred-fail", tool.descriptor().name(), "{\"query\":\"test\"}");
     MiniMaxMavisToolExecutionTest.TestToolExecutionListener listener =
         new MiniMaxMavisToolExecutionTest.TestToolExecutionListener();
-    tool.execute(
-        new ToolExecutionRequest(tool.descriptor(), call, Duration.ofSeconds(120)), listener);
+    listener.run(tool, new ToolExecutionRequest(tool.descriptor(), call, Duration.ofSeconds(120)));
 
     ToolResult result = listener.result();
     assertTrue(result != null, "Tool execution must invoke listener");
@@ -168,8 +161,7 @@ class MiniMaxMavisToolFailureTest {
         new ToolCall("call-catalog-missing", tool.descriptor().name(), "{\"query\":\"test\"}");
     MiniMaxMavisToolExecutionTest.TestToolExecutionListener listener =
         new MiniMaxMavisToolExecutionTest.TestToolExecutionListener();
-    tool.execute(
-        new ToolExecutionRequest(tool.descriptor(), call, Duration.ofSeconds(120)), listener);
+    listener.run(tool, new ToolExecutionRequest(tool.descriptor(), call, Duration.ofSeconds(120)));
 
     ToolResult result = listener.result();
     assertTrue(result.error());
@@ -213,8 +205,8 @@ class MiniMaxMavisToolFailureTest {
         new ToolCall("call-gen-" + capability.id(), tool.descriptor().name(), arguments);
     MiniMaxMavisToolExecutionTest.TestToolExecutionListener listener =
         new MiniMaxMavisToolExecutionTest.TestToolExecutionListener();
-    tool.execute(
-        new ToolExecutionRequest(tool.descriptor(), call, capability.requestTimeout()), listener);
+    listener.run(
+        tool, new ToolExecutionRequest(tool.descriptor(), call, capability.requestTimeout()));
 
     ToolResult result = listener.result();
     assertTrue(result.error());
@@ -258,7 +250,7 @@ class MiniMaxMavisToolFailureTest {
             tool.descriptor(), call, Duration.ofSeconds(120), createContext(threadId));
     MiniMaxMavisToolExecutionTest.TestToolExecutionListener listener =
         new MiniMaxMavisToolExecutionTest.TestToolExecutionListener();
-    tool.execute(request, listener);
+    listener.run(tool, request);
 
     ToolResult result = listener.result();
     assertTrue(result.error());
@@ -297,7 +289,7 @@ class MiniMaxMavisToolFailureTest {
             tool.descriptor(), call, Duration.ofSeconds(120), createContext(threadId));
     MiniMaxMavisToolExecutionTest.TestToolExecutionListener listener =
         new MiniMaxMavisToolExecutionTest.TestToolExecutionListener();
-    tool.execute(request, listener);
+    listener.run(tool, request);
 
     ToolResult result = listener.result();
     assertFalse(
@@ -347,7 +339,7 @@ class MiniMaxMavisToolFailureTest {
             tool.descriptor(), call, Duration.ofSeconds(120), createContext(expectedThreadId));
     MiniMaxMavisToolExecutionTest.TestToolExecutionListener listener =
         new MiniMaxMavisToolExecutionTest.TestToolExecutionListener();
-    tool.execute(request, listener);
+    listener.run(tool, request);
 
     ToolResult result = listener.result();
     assertFalse(result.error(), () -> "Tool execution should succeed: " + result);
@@ -392,7 +384,7 @@ class MiniMaxMavisToolFailureTest {
         new ToolExecutionRequest(tool.descriptor(), call, Duration.ofSeconds(120));
     MiniMaxMavisToolExecutionTest.TestToolExecutionListener listener =
         new MiniMaxMavisToolExecutionTest.TestToolExecutionListener();
-    tool.execute(request, listener);
+    listener.run(tool, request);
 
     ToolResult result = listener.result();
     assertTrue(result != null, "Execution must complete");
@@ -450,7 +442,7 @@ class MiniMaxMavisToolFailureTest {
             tool.descriptor(), call, Duration.ofSeconds(120), createContext(threadId));
     MiniMaxMavisToolExecutionTest.TestToolExecutionListener listener =
         new MiniMaxMavisToolExecutionTest.TestToolExecutionListener();
-    tool.execute(request, listener);
+    listener.run(tool, request);
 
     ToolResult result = listener.result();
     assertTrue(result.error());
@@ -499,8 +491,7 @@ class MiniMaxMavisToolFailureTest {
         new ToolCall("call-timeout", tool.descriptor().name(), "{\"query\":\"test query\"}");
     MiniMaxMavisToolExecutionTest.TestToolExecutionListener listener =
         new MiniMaxMavisToolExecutionTest.TestToolExecutionListener();
-    tool.execute(
-        new ToolExecutionRequest(tool.descriptor(), call, Duration.ofSeconds(120)), listener);
+    listener.run(tool, new ToolExecutionRequest(tool.descriptor(), call, Duration.ofSeconds(120)));
 
     ToolResult result = listener.result();
     assertTrue(result.error());
@@ -725,7 +716,6 @@ class MiniMaxMavisToolFailureTest {
     ToggleableCredentialAccess credentialAccess = new ToggleableCredentialAccess(valid);
     MavisClient client = new MavisClient(transport);
     MiniMaxMavisCapabilityCache cache = new MiniMaxMavisCapabilityCache(client);
-    InspectableExecutor worker = new InspectableExecutor();
     Tool tool =
         new MiniMaxMavisTool(
             MavisCapability.WEB_SEARCH,
@@ -734,24 +724,20 @@ class MiniMaxMavisToolFailureTest {
             client,
             cache,
             new MiniMaxMavisResourceAccess(gateway),
-            worker);
+            executor);
     MiniMaxMavisToolExecutionTest.TestToolExecutionListener listener =
         new MiniMaxMavisToolExecutionTest.TestToolExecutionListener();
     ToolCall call = new ToolCall("call-lock", tool.descriptor().name(), "{\"query\":\"test\"}");
     ToolExecutionRequest request =
         new ToolExecutionRequest(tool.descriptor(), call, Duration.ofSeconds(120));
 
-    try {
-      synchronized (cache) {
-        tool.execute(request, listener);
-        awaitBlocked(worker.createdThreads(), "capability cache monitor");
-        credentialAccess.revoke();
-      }
-      worker.awaitCompletion();
-    } finally {
-      worker.shutdownNow();
-      assertTrue(worker.awaitTermination(10, TimeUnit.SECONDS));
+    Thread caller;
+    synchronized (cache) {
+      caller = Thread.ofVirtual().start(() -> listener.run(tool, request));
+      awaitBlocked(caller, "capability cache monitor");
+      credentialAccess.revoke();
     }
+    caller.join(10_000);
 
     ToolResult result = listener.result();
     assertTrue(result.error());
@@ -801,11 +787,10 @@ class MiniMaxMavisToolFailureTest {
   }
 
   /** 轮询直到工作线程进入 BLOCKED：条件确定且有界，不使用 sleep 弱证明。 */
-  private static void awaitBlocked(List<Thread> threads, String description) {
+  private static void awaitBlocked(Thread worker, String description) {
     long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
     while (true) {
-      Thread worker = threads.isEmpty() ? null : threads.get(0);
-      if (worker != null && worker.getState() == Thread.State.BLOCKED) {
+      if (worker.getState() == Thread.State.BLOCKED) {
         return;
       }
       if (System.nanoTime() > deadline) {
@@ -819,8 +804,7 @@ class MiniMaxMavisToolFailureTest {
     ToolCall call = new ToolCall(id, tool.descriptor().name(), arguments);
     MiniMaxMavisToolExecutionTest.TestToolExecutionListener listener =
         new MiniMaxMavisToolExecutionTest.TestToolExecutionListener();
-    tool.execute(
-        new ToolExecutionRequest(tool.descriptor(), call, Duration.ofSeconds(120)), listener);
+    listener.run(tool, new ToolExecutionRequest(tool.descriptor(), call, Duration.ofSeconds(120)));
     return listener.result();
   }
 
@@ -992,10 +976,10 @@ class MiniMaxMavisToolFailureTest {
     UUID threadId = UUID.fromString("44444444-5555-6666-7777-888888888888");
     MiniMaxMavisToolExecutionTest.TestToolExecutionListener listener =
         new MiniMaxMavisToolExecutionTest.TestToolExecutionListener();
-    tool.execute(
+    listener.run(
+        tool,
         new ToolExecutionRequest(
-            tool.descriptor(), call, Duration.ofSeconds(120), createContext(threadId)),
-        listener);
+            tool.descriptor(), call, Duration.ofSeconds(120), createContext(threadId)));
 
     ToolResult result = listener.result();
     assertTrue(result.error());
@@ -1057,8 +1041,7 @@ class MiniMaxMavisToolFailureTest {
     ToolCall call = new ToolCall("call-auth", tool.descriptor().name(), "{\"query\":\"test\"}");
     MiniMaxMavisToolExecutionTest.TestToolExecutionListener listener =
         new MiniMaxMavisToolExecutionTest.TestToolExecutionListener();
-    tool.execute(
-        new ToolExecutionRequest(tool.descriptor(), call, Duration.ofSeconds(120)), listener);
+    listener.run(tool, new ToolExecutionRequest(tool.descriptor(), call, Duration.ofSeconds(120)));
     return listener.result();
   }
 
@@ -1077,13 +1060,13 @@ class MiniMaxMavisToolFailureTest {
   }
 
   /**
-   * 调用并发上限已满（Executor 拒绝排入）：必须在**发送请求前**收敛为确定性的 MAVIS_CALL_FAILED，且不产生任何副作用。
+   * 调用并发上限已满（许可耗尽）：必须在**发送请求前**收敛为确定性的 MAVIS_CALL_FAILED，且不产生任何副作用。
    *
    * <p>这是「额度型调用宁可失败也不排队重放」的边界证据：拒绝发生在任何网络请求之前，因此它既不是不确定失败，也不需要用户重新登录。
    */
   @Test
-  void rejectedExecutionFailsDeterministicallyWithoutSideEffects() {
-    RejectingExecutor rejectingExecutor = new RejectingExecutor();
+  void exhaustedPermitsFailDeterministicallyWithoutSideEffects() {
+    Semaphore exhausted = new Semaphore(0);
     MavisClient client = new MavisClient(transport);
     MiniMaxMavisCapabilityCache cache = new MiniMaxMavisCapabilityCache(client);
     MiniMaxMavisResourceAccess access = new MiniMaxMavisResourceAccess(gateway);
@@ -1096,18 +1079,15 @@ class MiniMaxMavisToolFailureTest {
             client,
             cache,
             access,
-            rejectingExecutor);
+            exhausted);
 
     ToolCall call =
         new ToolCall(
             "call-rejected", tool.descriptor().name(), "{\"prompt\":\"a cat on the moon\"}");
     MiniMaxMavisToolExecutionTest.TestToolExecutionListener listener =
         new MiniMaxMavisToolExecutionTest.TestToolExecutionListener();
-    ToolExecutionHandle handle =
-        tool.execute(
-            new ToolExecutionRequest(tool.descriptor(), call, Duration.ofSeconds(120)), listener);
+    listener.run(tool, new ToolExecutionRequest(tool.descriptor(), call, Duration.ofSeconds(120)));
 
-    assertTrue(handle != null);
     ToolResult result = listener.result();
     assertTrue(result.error(), "Rejected scheduling must produce an error result");
     assertTrue(resultText(result).startsWith("MAVIS_CALL_FAILED"));
@@ -1393,134 +1373,6 @@ class MiniMaxMavisToolFailureTest {
         return null;
       }
       return resolvedUris.get(resolvedUris.size() - 1);
-    }
-  }
-
-  /** 始终拒绝排入的执行器：模拟并发上限已满。 */
-  static final class RejectingExecutor extends AbstractExecutorService {
-    @Override
-    public void shutdown() {}
-
-    @Override
-    public List<Runnable> shutdownNow() {
-      return List.of();
-    }
-
-    @Override
-    public boolean isShutdown() {
-      return false;
-    }
-
-    @Override
-    public boolean isTerminated() {
-      return false;
-    }
-
-    @Override
-    public boolean awaitTermination(long timeout, TimeUnit unit) {
-      return true;
-    }
-
-    @Override
-    public void execute(Runnable command) {
-      throw new RejectedExecutionException("tool concurrency limit reached");
-    }
-  }
-
-  /** 同线程执行器。 */
-  static final class DirectExecutor extends AbstractExecutorService {
-    private volatile boolean terminated = false;
-
-    @Override
-    public void shutdown() {
-      terminated = true;
-    }
-
-    @Override
-    public List<Runnable> shutdownNow() {
-      terminated = true;
-      return List.of();
-    }
-
-    @Override
-    public boolean isShutdown() {
-      return terminated;
-    }
-
-    @Override
-    public boolean isTerminated() {
-      return terminated;
-    }
-
-    @Override
-    public boolean awaitTermination(long timeout, TimeUnit unit) {
-      return true;
-    }
-
-    @Override
-    public void execute(Runnable command) {
-      command.run();
-    }
-  }
-
-  /** 暴露等待缓存锁的工作线程，并通过 Future 把异步失败传回测试。 */
-  static final class InspectableExecutor extends AbstractExecutorService {
-    private final List<Thread> createdThreads = Collections.synchronizedList(new ArrayList<>());
-    private Future<?> submitted;
-    private final ThreadPoolExecutor pool =
-        new ThreadPoolExecutor(
-            1,
-            1,
-            0L,
-            TimeUnit.MILLISECONDS,
-            new LinkedBlockingQueue<>(),
-            runnable -> {
-              Thread thread = new Thread(runnable, "mavis-fence-worker");
-              thread.setDaemon(true);
-              createdThreads.add(thread);
-              return thread;
-            });
-
-    List<Thread> createdThreads() {
-      return List.copyOf(createdThreads);
-    }
-
-    void awaitCompletion() throws Exception {
-      submitted.get(10, TimeUnit.SECONDS);
-    }
-
-    @Override
-    public void shutdown() {
-      pool.shutdown();
-    }
-
-    @Override
-    public List<Runnable> shutdownNow() {
-      return pool.shutdownNow();
-    }
-
-    @Override
-    public boolean isShutdown() {
-      return pool.isShutdown();
-    }
-
-    @Override
-    public boolean isTerminated() {
-      return pool.isTerminated();
-    }
-
-    @Override
-    public boolean awaitTermination(long timeout, TimeUnit unit) throws InterruptedException {
-      return pool.awaitTermination(timeout, unit);
-    }
-
-    @Override
-    public void execute(Runnable command) {
-      if (!(command instanceof Future<?> future)) {
-        throw new AssertionError("expected an executor submission");
-      }
-      submitted = future;
-      pool.execute(command);
     }
   }
 

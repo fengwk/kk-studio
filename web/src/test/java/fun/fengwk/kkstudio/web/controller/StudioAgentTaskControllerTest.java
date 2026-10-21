@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -62,20 +63,36 @@ class StudioAgentTaskControllerTest {
             .build();
   }
 
+  /** 提交用客户端票据作幂等键：Thread / Session / 命令 id 由票据确定性派生，响应为该票据的当前状态。 */
   @Test
   void submitAcceptsAControllerTaskAndReturnsItsTicket() throws Exception {
-    mockMvc
-        .perform(
-            post("/api/agent-tasks")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"agent\":\"worker\",\"prompt\":\"summarize\",\"maxTurns\":4}"))
-        .andExpect(status().isAccepted())
-        .andExpect(jsonPath("$.data.state").value("RUNNING"))
-        .andExpect(jsonPath("$.data.agent").value("worker"));
+    when(agentTasks.observe(TICKET_ID))
+        .thenReturn(
+            Optional.of(
+                new AgentTaskStatus(
+                    TICKET_ID, THREAD_ID, "worker", AgentTaskStatus.State.RUNNING, null)));
+    String body =
+        "{\"ticketId\":\"%s\",\"agent\":\"worker\",\"prompt\":\"summarize\",\"maxTurns\":4}"
+            .formatted(TICKET_ID);
+    for (int i = 0; i < 2; i++) {
+      mockMvc
+          .perform(post("/api/agent-tasks").contentType(MediaType.APPLICATION_JSON).content(body))
+          .andExpect(status().isAccepted())
+          .andExpect(jsonPath("$.data.ticketId").value(TICKET_ID.toString()))
+          .andExpect(jsonPath("$.data.state").value("RUNNING"))
+          .andExpect(jsonPath("$.data.agent").value("worker"));
+    }
 
     ArgumentCaptor<AgentTaskRequest> captor = ArgumentCaptor.forClass(AgentTaskRequest.class);
-    verify(agentTasks).submit(captor.capture());
-    AgentTaskRequest request = captor.getValue();
+    verify(agentTasks, times(2)).submit(captor.capture());
+    AgentTaskRequest request = captor.getAllValues().get(0);
+    AgentTaskRequest retry = captor.getAllValues().get(1);
+    assertEquals(TICKET_ID, request.ticketId());
+    assertEquals(request.threadId(), retry.threadId());
+    assertEquals(request.sessionId(), retry.sessionId());
+    assertEquals(
+        request.commands().getFirst().idempotencyKey(),
+        retry.commands().getFirst().idempotencyKey());
     assertEquals(SpawnTrigger.CONTROLLER, request.trigger());
     assertNull(request.parentThreadId());
     assertNull(request.continuation());
@@ -91,19 +108,31 @@ class StudioAgentTaskControllerTest {
         .perform(
             post("/api/agent-tasks")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"agent\":\"worker\",\"prompt\":\"  \"}"))
+                .content("{\"agent\":\"worker\",\"prompt\":\"work\"}"))
         .andExpect(status().isBadRequest());
     mockMvc
         .perform(
             post("/api/agent-tasks")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"prompt\":\"work\"}"))
+                .content("{\"ticketId\":\"not-a-uuid\",\"agent\":\"worker\",\"prompt\":\"work\"}"))
         .andExpect(status().isBadRequest());
     mockMvc
         .perform(
             post("/api/agent-tasks")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"agent\":\"worker\",\"prompt\":\"work\",\"maxTurns\":0}"))
+                .content(withTicket("{\"agent\":\"worker\",\"prompt\":\"  \"}")))
+        .andExpect(status().isBadRequest());
+    mockMvc
+        .perform(
+            post("/api/agent-tasks")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(withTicket("{\"prompt\":\"work\"}")))
+        .andExpect(status().isBadRequest());
+    mockMvc
+        .perform(
+            post("/api/agent-tasks")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(withTicket("{\"agent\":\"worker\",\"prompt\":\"work\",\"maxTurns\":0}")))
         .andExpect(status().isBadRequest());
     verify(agentTasks, never()).submit(any());
   }
@@ -116,7 +145,7 @@ class StudioAgentTaskControllerTest {
         .perform(
             post("/api/agent-tasks")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"agent\":\"ghost\",\"prompt\":\"work\"}"))
+                .content(withTicket("{\"agent\":\"ghost\",\"prompt\":\"work\"}")))
         .andExpect(status().isBadRequest());
     verify(agentTasks, never()).submit(any());
   }
@@ -219,5 +248,9 @@ class StudioAgentTaskControllerTest {
     mockMvc
         .perform(post("/api/agent-tasks/" + TICKET_ID + "/stop"))
         .andExpect(status().isNotFound());
+  }
+
+  private static String withTicket(String json) {
+    return "{\"ticketId\":\"" + TICKET_ID + "\"," + json.substring(1);
   }
 }

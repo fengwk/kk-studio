@@ -52,7 +52,7 @@ class AnthropicSecurityAndArchitectureTest {
     httpClient = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build();
     workerExecutor = Executors.newSingleThreadExecutor();
     scheduler = Executors.newSingleThreadScheduledExecutor();
-    JdkHttpSseTransport transport = new JdkHttpSseTransport(httpClient, workerExecutor, scheduler);
+    JdkHttpSseTransport transport = new JdkHttpSseTransport(httpClient, scheduler);
 
     AnthropicProviderAdapter adapter = new AnthropicProviderAdapter(transport, sensitiveKey);
     assertFalse(adapter.toString().contains(sensitiveKey));
@@ -84,7 +84,7 @@ class AnthropicSecurityAndArchitectureTest {
     httpClient = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build();
     workerExecutor = Executors.newSingleThreadExecutor();
     scheduler = Executors.newSingleThreadScheduledExecutor();
-    JdkHttpSseTransport transport = new JdkHttpSseTransport(httpClient, workerExecutor, scheduler);
+    JdkHttpSseTransport transport = new JdkHttpSseTransport(httpClient, scheduler);
 
     AnthropicProviderAdapter adapter = new AnthropicProviderAdapter(transport, "key");
     ProviderDescriptor openAiDescriptor =

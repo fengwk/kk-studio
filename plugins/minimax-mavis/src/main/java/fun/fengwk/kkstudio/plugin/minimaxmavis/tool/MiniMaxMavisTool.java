@@ -7,16 +7,14 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.cfg.JsonNodeFeature;
 import tools.jackson.databind.json.JsonMapper;
 
-import fun.fengwk.kkstudio.harness.common.concurrent.QuiescentFutureTask;
 import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.harness.common.result.JsonResultContent;
 import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.harness.common.result.ResultContent;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionContext;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
@@ -42,11 +40,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.Semaphore;
+import java.util.function.Consumer;
 
 /**
  * 单个 MiniMax Mavis 能力对应的模型可见 Tool。
@@ -114,7 +109,7 @@ public final class MiniMaxMavisTool implements Tool {
   private final MavisClient client;
   private final MiniMaxMavisCapabilityCache capabilityCache;
   private final MiniMaxMavisResourceAccess resourceAccess;
-  private final ExecutorService executor;
+  private final Semaphore callPermits;
 
   public MiniMaxMavisTool(
       MavisCapability capability,
@@ -123,7 +118,7 @@ public final class MiniMaxMavisTool implements Tool {
       MavisClient client,
       MiniMaxMavisCapabilityCache capabilityCache,
       MiniMaxMavisResourceAccess resourceAccess,
-      ExecutorService executor) {
+      Semaphore callPermits) {
     this.capability = Objects.requireNonNull(capability, "capability");
     Objects.requireNonNull(definition, "definition");
     this.sideEffect = sideEffectOf(capability);
@@ -139,7 +134,7 @@ public final class MiniMaxMavisTool implements Tool {
     this.client = Objects.requireNonNull(client, "client");
     this.capabilityCache = Objects.requireNonNull(capabilityCache, "capabilityCache");
     this.resourceAccess = Objects.requireNonNull(resourceAccess, "resourceAccess");
-    this.executor = Objects.requireNonNull(executor, "executor");
+    this.callPermits = Objects.requireNonNull(callPermits, "callPermits");
   }
 
   /** 能力到 side effect 的固定映射：搜索、提取、理解、ASR、音色列表与视频查询是只读；生成类是非幂等，断连或超时不得自动重放。 */
@@ -197,10 +192,14 @@ public final class MiniMaxMavisTool implements Tool {
     return ToolRequirements.none();
   }
 
+  /**
+   * 在调用线程上阻塞执行一次 Mavis 请求；本地资源只存在于调用栈内，线程返回即静止。线程被中断（取消）时抛出 {@link
+   * InterruptedException}，调用线程不再等待上游响应。
+   */
   @Override
-  public ToolExecutionHandle execute(ToolExecutionRequest request, ToolExecutionListener listener) {
+  public ToolOutcome execute(ToolExecutionRequest request, Consumer<ToolResult> progress)
+      throws InterruptedException {
     Objects.requireNonNull(request, "request");
-    Objects.requireNonNull(listener, "listener");
     String toolCallId = request.call().id();
 
     JsonNode arguments;
@@ -211,7 +210,6 @@ public final class MiniMaxMavisTool implements Tool {
       }
       if (requiresGatewayBeforeSend(capability) && !resourceAccess.gatewayBound()) {
         return failed(
-            listener,
             toolCallId,
             CODE_RESOURCE_UNAVAILABLE,
             "this deployment cannot stage MiniMax Mavis media output");
@@ -219,71 +217,40 @@ public final class MiniMaxMavisTool implements Tool {
       // 资源鉴权身份只来自本次 invocation context：没有它就绝不发送引用会话资源的请求。
       arguments = resourceAccess.resolveInputs(threadId(request), arguments);
     } catch (PluginResourceUnavailableException error) {
-      return failed(listener, toolCallId, CODE_RESOURCE_UNAVAILABLE, error.getMessage());
+      return failed(toolCallId, CODE_RESOURCE_UNAVAILABLE, error.getMessage());
     } catch (JacksonException | IllegalArgumentException error) {
-      return failed(listener, toolCallId, CODE_CALL_FAILED, "invalid tool arguments");
+      return failed(toolCallId, CODE_CALL_FAILED, "invalid tool arguments");
     }
 
-    JsonNode resolved = arguments;
-    AtomicBoolean completed = new AtomicBoolean(false);
-    // 真实的工作线程退出事实由 QuiescentFutureTask 的 run-finally 给出：取消成功且尚未进入 run 才立即静止。
-    QuiescentFutureTask<Void> worker =
-        new QuiescentFutureTask<>(
-            () -> {
-              try {
-                ToolResult result = invoke(resolved, toolCallId);
-                if (completed.compareAndSet(false, true)) {
-                  listener.onComplete(result);
-                }
-              } catch (PluginCredentialUnavailableException error) {
-                if (completed.compareAndSet(false, true)) {
-                  listener.onComplete(
-                      errorResult(
-                          toolCallId, codeFor(error.reason()), credentialDetail(error.reason())));
-                }
-              } catch (PluginResourceUnavailableException error) {
-                if (completed.compareAndSet(false, true)) {
-                  listener.onComplete(
-                      errorResult(toolCallId, CODE_RESOURCE_UNAVAILABLE, error.getMessage()));
-                }
-              } catch (MavisException error) {
-                if (completed.compareAndSet(false, true)) {
-                  listener.onComplete(
-                      errorResult(toolCallId, CODE_CALL_FAILED, error.getMessage()));
-                }
-              } catch (RuntimeException error) {
-                log.debug("MiniMax Mavis tool call failed unexpectedly", error);
-                if (completed.compareAndSet(false, true)) {
-                  listener.onComplete(
-                      errorResult(toolCallId, CODE_CALL_FAILED, "MiniMax Mavis call failed"));
-                }
-              }
-            });
-    try {
-      executor.execute(worker);
-    } catch (RejectedExecutionException rejected) {
+    if (!callPermits.tryAcquire()) {
       // 并发上限已满时既没有发出请求也没有产生副作用，因此是确定性的、可安全重试的失败。
-      return failed(
-          listener, toolCallId, CODE_CALL_FAILED, "MiniMax Mavis call could not be scheduled");
+      return failed(toolCallId, CODE_CALL_FAILED, "MiniMax Mavis call could not be scheduled");
     }
-    return new ToolExecutionHandle() {
-      @Override
-      public void cancel() {
-        if (completed.compareAndSet(false, true)) {
-          worker.cancel(true);
-        }
-      }
+    try {
+      return ToolOutcome.withoutEffects(invoke(arguments, toolCallId));
+    } catch (PluginCredentialUnavailableException error) {
+      interruptIfRequested();
+      return failed(toolCallId, codeFor(error.reason()), credentialDetail(error.reason()));
+    } catch (PluginResourceUnavailableException error) {
+      interruptIfRequested();
+      return failed(toolCallId, CODE_RESOURCE_UNAVAILABLE, error.getMessage());
+    } catch (MavisException error) {
+      interruptIfRequested();
+      return failed(toolCallId, CODE_CALL_FAILED, error.getMessage());
+    } catch (RuntimeException error) {
+      interruptIfRequested();
+      log.debug("MiniMax Mavis tool call failed unexpectedly", error);
+      return failed(toolCallId, CODE_CALL_FAILED, "MiniMax Mavis call failed");
+    } finally {
+      callPermits.release();
+    }
+  }
 
-      @Override
-      public boolean isCancelled() {
-        return worker.isCancelled();
-      }
-
-      @Override
-      public CompletionStage<Void> quiescence() {
-        return worker.quiescence();
-      }
-    };
+  /** 传输层把线程中断恢复为中断标志并以失败异常结束；把它还原为取消。 */
+  private static void interruptIfRequested() throws InterruptedException {
+    if (Thread.interrupted()) {
+      throw new InterruptedException();
+    }
   }
 
   /** 调用上下文里的 Harness Thread id；框架直调（无 context）时为空。 */
@@ -378,27 +345,8 @@ public final class MiniMaxMavisTool implements Tool {
     return ToolResult.error(toolCallId, message);
   }
 
-  /** 凭据不可用时同时完成回调与错误返回（同步路径），避免调用方在启动期等待。 */
-  private ToolExecutionHandle failed(
-      ToolExecutionListener listener, String toolCallId, String code, String detail) {
-    listener.onComplete(errorResult(toolCallId, code, detail));
-    return new ToolExecutionHandle() {
-      @Override
-      public void cancel() {
-        // 同步终结的调用无需取消。
-      }
-
-      @Override
-      public boolean isCancelled() {
-        return false;
-      }
-
-      @Override
-      public CompletionStage<Void> quiescence() {
-        // 同步路径从未提交异步工作，静止立即成立。
-        return CompletableFuture.completedFuture(null);
-      }
-    };
+  private static ToolOutcome failed(String toolCallId, String code, String detail) {
+    return ToolOutcome.withoutEffects(errorResult(toolCallId, code, detail));
   }
 
   private static String codeFor(PluginCredentialUnavailableReason reason) {

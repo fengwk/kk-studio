@@ -57,7 +57,7 @@ class ToolProcessorInputTest {
     assertEquals(1L, threadWork(fixture.store, fixture.baseline.threadId()).wakeVersion());
     // 等待是接受而非执行：既不 preflight 也不 start，且不持有本地 execution。
     assertEquals(0, fixture.gateway.preflightCallsCount);
-    assertEquals(0, fixture.gateway.startCalls);
+    assertEquals(0, fixture.gateway.admitCalls);
     assertFalse(fixture.processor.hasActiveExecution());
   }
 
@@ -79,7 +79,7 @@ class ToolProcessorInputTest {
         ToolInvocationStatus.WAITING_INPUT, tool(fixture.store, fixture.toolInvocationId).status());
     assertEquals(1L, thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(0, fixture.gateway.preflightCallsCount);
-    assertEquals(0, fixture.gateway.startCalls);
+    assertEquals(0, fixture.gateway.admitCalls);
   }
 
   /** 非内置来源的同名调用：必须走普通工具路径（preflight + 执行），不得被名字误导为等待。 */
@@ -135,6 +135,6 @@ class ToolProcessorInputTest {
     assertEquals(1L, threadWork(fixture.store, fixture.baseline.threadId()).wakeVersion());
     assertNull(toolWork(fixture.store, fixture.toolInvocationId));
     assertEquals(0, fixture.gateway.preflightCallsCount);
-    assertEquals(0, fixture.gateway.startCalls);
+    assertEquals(0, fixture.gateway.admitCalls);
   }
 }

@@ -6189,6 +6189,15 @@ select.settings-input option {
   box-shadow: 0 0 0 2px var(--focus-ring);
 }
 
+.interaction-task-source {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--font-size-sm);
+  color: var(--fg-muted);
+  padding: 2px 6px;
+}
+
 .interaction-agent-badge {
   font-size: var(--font-size-xs);
   padding: 1px 6px;

@@ -264,7 +264,7 @@ class HarnessRuntimeAcceptInitialTest {
     // 同一 Thread 上再接受第二批（THREAD target，cursor: head=root, next=3）。
     runtime.acceptCommands(
         new AcceptCommandsCommand(
-            new AcceptCommandsTarget.Thread(TestIds.id(102), first.thread().headEntryId(), 3),
+            new AcceptCommandsTarget.Thread(TestIds.id(102)),
             List.of(userMessageCommand(TestIds.id(2), "c"))),
         AcceptancePreflight.IDENTITY);
     ThreadState before = store.transaction(tx -> tx.findThread(TestIds.id(102)).orElseThrow());

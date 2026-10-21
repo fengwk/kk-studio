@@ -246,7 +246,7 @@ public class IssueReconciler {
       }
       IssueActivity deliverable = nextDeliverableInstruction(run);
       if (deliverable != null) {
-        deliverInstruction(issue, run, view, deliverable);
+        deliverInstruction(issue, run, deliverable);
         return finish(claim, true, Duration.ZERO, IssueReconcileOutcome.INSTRUCTION_DELIVERED);
       }
       return failRun(
@@ -298,7 +298,7 @@ public class IssueReconciler {
 
     IssueActivity deliverable = nextDeliverableInstruction(run);
     if (deliverable != null) {
-      deliverInstruction(issue, run, view, deliverable);
+      deliverInstruction(issue, run, deliverable);
       return finish(claim, true, Duration.ZERO, IssueReconcileOutcome.INSTRUCTION_DELIVERED);
     }
 
@@ -630,8 +630,7 @@ public class IssueReconciler {
   }
 
   /** 把来自人的定向指示作为 USER_MESSAGE 投递给明确的当前 Run；幂等键由 Issue 事实位置确定，重放不会重复入队。 */
-  private void deliverInstruction(
-      Issue issue, IssueRun run, IssueThreadView view, IssueActivity activity) {
+  private void deliverInstruction(Issue issue, IssueRun run, IssueActivity activity) {
     AgentMessage message =
         new AgentMessage(
             AgentMessageRole.USER, List.of(new TextMessageContent(activity.getBody())));
@@ -644,9 +643,7 @@ public class IssueReconciler {
     requireThreadExecution()
         .acceptCommands(
             new AcceptCommandsCommand(
-                new AcceptCommandsTarget.Thread(
-                    run.getThreadId(), view.headEntryId(), view.nextCommandSequence()),
-                List.of(command)),
+                new AcceptCommandsTarget.Thread(run.getThreadId()), List.of(command)),
             AcceptancePreflight.IDENTITY);
     advanceObservedSequence(run, activity.getSequence());
   }

@@ -756,7 +756,7 @@ final class StopControl {
           switch (sibling.status()) {
             case WAITING_APPROVAL, WAITING_INPUT, READY -> sibling.cancel(
                 TOOL_CANCELLED_ERROR, now);
-            case DISPATCHING, RUNNING -> sibling.unknown(TOOL_UNKNOWN_ERROR, now);
+            case RUNNING -> sibling.unknown(TOOL_UNKNOWN_ERROR, now);
             case SUCCEEDED, FAILED, CANCELLED, UNKNOWN -> sibling;
           };
       ToolOutcomeAppender.Applied applied =

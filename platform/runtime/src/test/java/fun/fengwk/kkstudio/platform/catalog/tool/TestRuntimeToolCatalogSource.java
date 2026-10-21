@@ -10,7 +10,6 @@ import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
 
 import java.util.List;
 import java.util.Objects;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -52,7 +51,7 @@ public final class TestRuntimeToolCatalogSource implements RuntimeToolCatalogSou
 
   /** 不读库的空 MCP 目录：仅用于不需要 MCP 工具的测试。 */
   public static McpToolCatalog emptyMcpCatalog() {
-    return new McpToolCatalog(mock(McpServerRepository.class), mock(ExecutorService.class));
+    return new McpToolCatalog(mock(McpServerRepository.class));
   }
 
   /** 已授予的租用总数。 */
