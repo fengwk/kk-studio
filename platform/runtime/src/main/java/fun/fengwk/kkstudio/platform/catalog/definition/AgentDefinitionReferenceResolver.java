@@ -1,12 +1,10 @@
-package fun.fengwk.kkstudio.platform.catalog.definition.service.impl;
+package fun.fengwk.kkstudio.platform.catalog.definition;
 
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.harness.contributor.api.ContributorId;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
-import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
@@ -36,7 +34,7 @@ import java.util.TreeSet;
  */
 @AllArgsConstructor
 @Component
-final class AgentDefinitionReferenceResolver {
+public final class AgentDefinitionReferenceResolver {
 
   private static final String DEFINITION_RESOURCE = "agent_definition";
   private static final String MODEL_RESOURCE = "agent_model";

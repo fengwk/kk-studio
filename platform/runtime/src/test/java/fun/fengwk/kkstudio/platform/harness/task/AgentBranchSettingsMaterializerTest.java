@@ -14,10 +14,10 @@ import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.runtime.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentDefinitions;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
-import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser;
@@ -47,15 +47,17 @@ class AgentBranchSettingsMaterializerTest {
 
   private void stub(
       String agentName, String variant, String modelConfigJson, boolean inheritParentEnvironment) {
-    AgentDefinition agent = new AgentDefinition();
-    agent.setName(agentName);
-    agent.setModelProviderName("openai");
-    agent.setModelName("gpt-x");
-    agent.setVariant(variant);
-    agent.setConfigJson(
-        "{\"tools\":[],\"skills\":[],\"subagents\":[],\"inheritParentEnvironment\":"
-            + inheritParentEnvironment
-            + "}");
+    AgentDefinition agent =
+        AgentDefinition.builder()
+            .name(agentName)
+            .modelProviderName("openai")
+            .modelName("gpt-x")
+            .variant(variant)
+            .configJson(
+                "{\"tools\":[],\"skills\":[],\"subagents\":[],\"inheritParentEnvironment\":"
+                    + inheritParentEnvironment
+                    + "}")
+            .build();
     when(agentRepository.getByName(agentName)).thenReturn(agent);
 
     AgentModel model =
@@ -156,11 +158,13 @@ class AgentBranchSettingsMaterializerTest {
   /** 测试意图：验证 subagent 物化读取损坏的 Agent config 时以带上下文与原因链的稳定异常失败。 */
   @Test
   void wrapsCorruptAgentConfigsWithContext() {
-    AgentDefinition broken = new AgentDefinition();
-    broken.setName("broken");
-    broken.setModelProviderName("openai");
-    broken.setModelName("gpt-x");
-    broken.setConfigJson("{\"tools\":[]}");
+    AgentDefinition broken =
+        AgentDefinition.builder()
+            .name("broken")
+            .modelProviderName("openai")
+            .modelName("gpt-x")
+            .configJson("{\"tools\":[]}")
+            .build();
     when(agentRepository.getByName("broken")).thenReturn(broken);
 
     IllegalArgumentException error =
@@ -176,9 +180,11 @@ class AgentBranchSettingsMaterializerTest {
   /** 测试意图：未配置模型的内置 Agent（两列同为 null）被明确拒绝，而不是 NPE 或回退到其它模型。 */
   @Test
   void rejectsUnconfiguredAgentModelExplicitly() {
-    AgentDefinition unconfigured = new AgentDefinition();
-    unconfigured.setName(BuiltinAgentDefinitions.COMPACTION_NAME);
-    unconfigured.setConfigJson("{\"tools\":[],\"skills\":[],\"subagents\":[]}");
+    AgentDefinition unconfigured =
+        AgentDefinition.builder()
+            .name(BuiltinAgentDefinitions.COMPACTION_NAME)
+            .configJson("{\"tools\":[],\"skills\":[],\"subagents\":[]}")
+            .build();
     when(agentRepository.getByName(BuiltinAgentDefinitions.COMPACTION_NAME))
         .thenReturn(unconfigured);
 

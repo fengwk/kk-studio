@@ -56,9 +56,9 @@ import fun.fengwk.kkstudio.harness.runtime.thread.SpawnTrigger;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadState;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
-import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.platform.environment.skill.SkillPromptResolution;
 import fun.fengwk.kkstudio.platform.harness.task.AgentPromptComposer;
 import fun.fengwk.kkstudio.platform.harness.task.SkillPromptEntry;
@@ -411,9 +411,8 @@ class ModelRequestDebugServiceTest {
         missing.getMessage());
 
     // 同名 definition 存在但配置非法。
-    AgentDefinition invalid = new AgentDefinition();
-    invalid.setName("coder");
-    invalid.setConfigJson("{ not json");
+    AgentDefinition invalid =
+        AgentDefinition.builder().name("coder").configJson("{ not json").build();
     when(agentDefinitionRepository.getByName("coder")).thenReturn(invalid);
     IllegalStateException broken =
         assertThrows(
@@ -452,9 +451,8 @@ class ModelRequestDebugServiceTest {
   }
 
   private void stubCoderDefinition() {
-    AgentDefinition coder = new AgentDefinition();
-    coder.setName("coder");
-    coder.setConfigJson(CODER_CONFIG_JSON);
+    AgentDefinition coder =
+        AgentDefinition.builder().name("coder").configJson(CODER_CONFIG_JSON).build();
     when(agentDefinitionRepository.getByName("coder")).thenReturn(coder);
   }
 

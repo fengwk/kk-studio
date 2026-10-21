@@ -5,9 +5,9 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.catalog.definition.service.AgentDefinitionService;
-import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionService;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.McpServerService;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
@@ -147,7 +147,7 @@ public class ConfigSyncApplier {
     for (ConfigSyncParser.AgentSpec spec : agents) {
       AgentDefinition current = definitionRepository.getByName(spec.name());
       AgentDefinitionUpdateDTO update = buildAgentUpdate(spec);
-      update.setExpectedVersion(CatalogVersions.format(current.getVersion()));
+      update.setExpectedVersion(CatalogVersions.format(current.version()));
       definitionService.updateAgent(spec.name(), update);
     }
   }

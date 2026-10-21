@@ -1,7 +1,8 @@
-package fun.fengwk.kkstudio.platform.catalog.definition.repo.impl.store;
+package fun.fengwk.kkstudio.platform.catalog.definition;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import fun.fengwk.convention4j.api.page.PageQuery;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -9,19 +10,19 @@ import org.postgresql.Driver;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.datasource.SimpleDriverDataSource;
 
-import fun.fengwk.kkstudio.platform.catalog.definition.repo.impl.model.AgentDefinitionDO;
 import fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionType;
 
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.UUID;
 
 /** {@code agent_definition} 读取路径的真实 SQL 覆盖：listAll 排序、count 与 jsonb 引用检查。 */
-class AgentDefinitionJdbcStoreIntegrationTest {
+class AgentDefinitionRepositoryIntegrationTest {
 
   private static JdbcClient jdbcClient;
 
-  private AgentDefinitionJdbcStore store;
+  private AgentDefinitionRepository store;
 
   @BeforeAll
   static void beforeAll() {
@@ -40,19 +41,17 @@ class AgentDefinitionJdbcStoreIntegrationTest {
       PostgresSchemaSupport.resetDatabase(conn);
       PostgresSchemaSupport.applyBaseline(conn);
     }
-    store = new AgentDefinitionJdbcStore(jdbcClient);
+    store = new AgentDefinitionRepository(jdbcClient);
   }
 
-  /** listAll 按 name 升序，count 统计全部行。 */
+  /** listAll 按 name 升序，分页 total 统计全部行。 */
   @Test
   void listAllOrdersByNameAndCountsRows() {
     insert("alpha", "{\"subagents\":[\"beta\"]}");
     insert("beta", "{}");
 
-    assertThat(store.count()).isEqualTo(2);
-    assertThat(store.listAll())
-        .extracting(AgentDefinitionDO::getName)
-        .containsExactly("alpha", "beta");
+    assertThat(store.page(new PageQuery(1, 10)).getTotalCount()).isEqualTo(2);
+    assertThat(store.listAll()).extracting(AgentDefinition::name).containsExactly("alpha", "beta");
   }
 
   /** existsReferencingSubagent 与 existsReferencingSkill 按 config jsonb 形状判定。 */
@@ -89,12 +88,15 @@ class AgentDefinitionJdbcStoreIntegrationTest {
         .param("modelId", "wire-" + id)
         .update();
 
-    AgentDefinitionDO row = new AgentDefinitionDO();
-    row.setName(name);
-    row.setType("USER");
-    row.setModelProviderName(providerName);
-    row.setModelName(modelName);
-    row.setConfigJson(configJson);
-    assertThat(store.insert(row)).isEqualTo(1);
+    assertThat(
+            store.create(
+                AgentDefinition.builder()
+                    .name(name)
+                    .type(AgentDefinitionType.USER)
+                    .modelProviderName(providerName)
+                    .modelName(modelName)
+                    .configJson(configJson)
+                    .build()))
+        .isTrue();
   }
 }

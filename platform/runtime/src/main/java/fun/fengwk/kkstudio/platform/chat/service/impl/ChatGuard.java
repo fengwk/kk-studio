@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.platform.chat.service.impl;
 
 import org.springframework.stereotype.Component;
 
-import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.chat.repo.ChatRepository;
 import fun.fengwk.kkstudio.platform.chat.service.ChatIds;
 import fun.fengwk.kkstudio.platform.chat.service.model.Chat;

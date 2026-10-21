@@ -16,9 +16,9 @@ import org.springframework.http.MediaType;
 import org.springframework.test.annotation.DirtiesContext;
 import tools.jackson.databind.JsonNode;
 
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentDefinitions;
-import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncApplier;
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncParser;
@@ -226,19 +226,21 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
                 .content(objectMapper.writeValueAsString(Map.of("yaml", reserved))))
         .andExpect(status().isBadRequest());
     AgentDefinition after = definitionRepository.getByName(BuiltinAgentDefinitions.COMPACTION_NAME);
-    assertEquals(before.getVersion(), after.getVersion());
-    assertEquals(before.getConfigJson(), after.getConfigJson());
-    assertEquals(before.getSystemPrompt(), after.getSystemPrompt());
+    assertEquals(before.version(), after.version());
+    assertEquals(before.configJson(), after.configJson());
+    assertEquals(before.systemPrompt(), after.systemPrompt());
   }
 
   /** 以系统持有身份落一行 BUILTIN Agent：只用于证明内置身份满足引用却绝不进入 portable 范围。 */
   private void seedBuiltinAgent(String name) {
-    AgentDefinition builtin = new AgentDefinition();
-    builtin.setName(name);
-    builtin.setType(AgentDefinitionType.BUILTIN);
-    builtin.setSystemPrompt("builtin prompt");
-    builtin.setConfigJson(
-        "{\"tools\":[],\"skills\":[],\"subagents\":[],\"inheritParentEnvironment\":true}");
+    AgentDefinition builtin =
+        AgentDefinition.builder()
+            .name(name)
+            .type(AgentDefinitionType.BUILTIN)
+            .systemPrompt("builtin prompt")
+            .configJson(
+                "{\"tools\":[],\"skills\":[],\"subagents\":[],\"inheritParentEnvironment\":true}")
+            .build();
     definitionRepository.create(builtin);
   }
 

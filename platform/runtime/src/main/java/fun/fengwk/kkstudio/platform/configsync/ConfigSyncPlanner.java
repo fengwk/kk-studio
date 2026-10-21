@@ -4,7 +4,7 @@ import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
-import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.McpServerMutationValidator;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
@@ -293,8 +293,8 @@ public final class ConfigSyncPlanner {
 
     Set<String> agentPool = new LinkedHashSet<>();
     for (var agent : snapshot.agents()) {
-      if (!skippedAgents.contains(agent.getName())) {
-        agentPool.add(agent.getName());
+      if (!skippedAgents.contains(agent.name())) {
+        agentPool.add(agent.name());
       }
     }
     // 系统内置 Agent 不在可导入条目里，但确实存在：作为已满足的依赖进入池，插件与 Agent 的引用都可解析。

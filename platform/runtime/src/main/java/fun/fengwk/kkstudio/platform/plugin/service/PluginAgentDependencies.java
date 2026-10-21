@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.platform.plugin.service;
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
 
-import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
 import fun.fengwk.kkstudio.platform.plugin.StudioPlugin;

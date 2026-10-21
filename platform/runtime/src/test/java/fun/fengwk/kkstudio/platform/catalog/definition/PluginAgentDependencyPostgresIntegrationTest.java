@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.catalog.definition.service.impl;
+package fun.fengwk.kkstudio.platform.catalog.definition;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -6,8 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
-import fun.fengwk.convention4j.api.page.Page;
-import fun.fengwk.convention4j.api.page.PageQuery;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -25,15 +23,11 @@ import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.common.schema.StringSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
-import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.catalog.definition.repo.impl.PostgresqlAgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.catalog.definition.repo.impl.store.AgentDefinitionJdbcStore;
-import fun.fengwk.kkstudio.platform.catalog.definition.service.converter.AgentDefinitionConverter;
-import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelDefaultVariantResolver;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogQueryService;
+import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.platform.catalog.tool.TestRuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.error.AiInUseException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
@@ -110,7 +104,7 @@ class PluginAgentDependencyPostgresIntegrationTest {
   private PluginConfigurationService configurationService;
   private AgentDefinitionRepository definitionRepository;
   private PluginAgentDependencies pluginAgentDependencies;
-  private AgentDefinitionServiceImpl definitionService;
+  private AgentDefinitionService definitionService;
 
   @BeforeAll
   static void beforeAll() throws SQLException {
@@ -139,8 +133,7 @@ class PluginAgentDependencyPostgresIntegrationTest {
     transactionManager = new DataSourceTransactionManager(dataSource);
     configurationRepository = new PluginConfigurationRepository(jdbcClient);
     credentialRepository = new PluginCredentialRepository(jdbcClient);
-    definitionRepository =
-        new PostgresqlAgentDefinitionRepository(new AgentDefinitionJdbcStore(jdbcClient));
+    definitionRepository = new AgentDefinitionRepository(jdbcClient);
     pluginAgentDependencies =
         new PluginAgentDependencies(registry, configurationRepository, definitionRepository);
 
@@ -154,15 +147,14 @@ class PluginAgentDependencyPostgresIntegrationTest {
             mock(McpServerRepository.class),
             TestRuntimeToolCatalogSource.of(HarnessCatalog.from(List.of())));
     definitionService =
-        new AgentDefinitionServiceImpl(
+        new AgentDefinitionService(
             definitionRepository,
-            mock(AgentDefinitionConverter.class),
-            mock(AgentDefinitionMutationFactory.class),
             resolver,
             mock(AgentModelDefaultVariantResolver.class),
             new AgentDefinitionConfigValidator(
                 TestRuntimeToolCatalogSource.of(HarnessCatalog.from(List.of()))),
             new AgentDefinitionConfigCodec(JsonMapper.builder().build()),
+            new AgentEditableSupport(JsonMapper.builder().build()),
             pluginAgentDependencies);
 
     configurationRepository.insertIfMissing(DECLARING_PLUGIN_ID, VALUES_NO_DECLARATION);
@@ -239,7 +231,7 @@ class PluginAgentDependencyPostgresIntegrationTest {
         new PluginAgentDependencies(
             registry,
             configurationRepository,
-            new GatedAgentDefinitionRepository(definitionRepository, saveLockHeld, releaseSave));
+            new GatedAgentDefinitionRepository(jdbcClient, saveLockHeld, releaseSave));
 
     ExecutorService executor = Executors.newFixedThreadPool(2);
     try {
@@ -425,15 +417,17 @@ class PluginAgentDependencyPostgresIntegrationTest {
   }
 
   private static AgentDefinition agentDefinition(String name) {
-    AgentDefinition agent = new AgentDefinition();
-    agent.setName(name);
-    agent.setType(AgentDefinitionType.USER);
-    agent.setSystemPrompt("prompt " + name);
-    agent.setModelProviderName(MODEL_PROVIDER);
-    agent.setModelName(MODEL_NAME);
-    agent.setConfigJson(
-        "{\"tools\":[],\"skills\":[],\"subagents\":[],\"inheritParentEnvironment\":true}");
-    agent.setVersion(0L);
+    AgentDefinition agent =
+        AgentDefinition.builder()
+            .name(name)
+            .type(AgentDefinitionType.USER)
+            .systemPrompt("prompt " + name)
+            .modelProviderName(MODEL_PROVIDER)
+            .modelName(MODEL_NAME)
+            .configJson(
+                "{\"tools\":[],\"skills\":[],\"subagents\":[],\"inheritParentEnvironment\":true}")
+            .version(0L)
+            .build();
     return agent;
   }
 
@@ -476,70 +470,24 @@ class PluginAgentDependencyPostgresIntegrationTest {
   }
 
   /** 只在保存侧生效的闸门：代理真实仓库，在取得 Agent 行锁后通知测试并等待放行，用于确定性地制造「保存先持锁」的顺序。 */
-  private static final class GatedAgentDefinitionRepository implements AgentDefinitionRepository {
+  private static final class GatedAgentDefinitionRepository extends AgentDefinitionRepository {
 
-    private final AgentDefinitionRepository delegate;
     private final CountDownLatch lockAcquired;
     private final CountDownLatch release;
 
     GatedAgentDefinitionRepository(
-        AgentDefinitionRepository delegate, CountDownLatch lockAcquired, CountDownLatch release) {
-      this.delegate = delegate;
+        JdbcClient jdbcClient, CountDownLatch lockAcquired, CountDownLatch release) {
+      super(jdbcClient);
       this.lockAcquired = lockAcquired;
       this.release = release;
     }
 
     @Override
     public AgentDefinition getByNameForUpdate(String name) {
-      AgentDefinition locked = delegate.getByNameForUpdate(name);
+      AgentDefinition locked = super.getByNameForUpdate(name);
       lockAcquired.countDown();
       awaitLatchQuietly(release);
       return locked;
-    }
-
-    @Override
-    public Page<AgentDefinition> page(PageQuery pageQuery) {
-      return delegate.page(pageQuery);
-    }
-
-    @Override
-    public List<AgentDefinition> listAll() {
-      return delegate.listAll();
-    }
-
-    @Override
-    public AgentDefinition getByName(String name) {
-      return delegate.getByName(name);
-    }
-
-    @Override
-    public boolean existsReferencingSubagent(String name) {
-      return delegate.existsReferencingSubagent(name);
-    }
-
-    @Override
-    public boolean existsReferencingProjectWorkflow(String name) {
-      return delegate.existsReferencingProjectWorkflow(name);
-    }
-
-    @Override
-    public boolean existsReferencingSkill(String packageName, String skillName) {
-      return delegate.existsReferencingSkill(packageName, skillName);
-    }
-
-    @Override
-    public boolean create(AgentDefinition agentDefinition) {
-      return delegate.create(agentDefinition);
-    }
-
-    @Override
-    public boolean updateByName(AgentDefinition agentDefinition, long expectedVersion) {
-      return delegate.updateByName(agentDefinition, expectedVersion);
-    }
-
-    @Override
-    public boolean deleteByName(String name, long expectedVersion) {
-      return delegate.deleteByName(name, expectedVersion);
     }
   }
 

@@ -2,8 +2,8 @@ package fun.fengwk.kkstudio.platform.configsync;
 
 import org.springframework.stereotype.Component;
 
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
-import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
@@ -178,8 +178,8 @@ public final class ConfigSyncGraph {
   private List<ConfigSyncRef> agentDependencies(
       AgentDefinition agent, Map<String, String> toolServer, Set<String> builtinAgentNames) {
     Set<ConfigSyncRef> deps = new LinkedHashSet<>();
-    deps.add(ConfigSyncRefs.model(agent.getModelProviderName(), agent.getModelName()));
-    AgentDefinitionConfigDTO config = agentConfigCodec.decode(agent.getConfigJson());
+    deps.add(ConfigSyncRefs.model(agent.modelProviderName(), agent.modelName()));
+    AgentDefinitionConfigDTO config = agentConfigCodec.decode(agent.configJson());
     if (config.getSkills() != null) {
       for (SkillRefDTO skill : config.getSkills()) {
         deps.add(ConfigSyncRefs.ref(ConfigSyncKind.SKILL_PACKAGES, skill.getPackageName()));
@@ -226,7 +226,7 @@ public final class ConfigSyncGraph {
   }
 
   private static ConfigSyncRef agentRef(AgentDefinition agent) {
-    return ConfigSyncRefs.ref(ConfigSyncKind.AGENTS, agent.getName());
+    return ConfigSyncRefs.ref(ConfigSyncKind.AGENTS, agent.name());
   }
 
   private static ConfigSyncRef skillRef(SkillPackage pkg) {
