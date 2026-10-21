@@ -3,11 +3,11 @@ import { useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import '@/styles.css'
 import { setLocale } from '@/shared/i18n'
-import { ThreadEventView } from '@/features/ai/runtime/thread-panel/ThreadEventView'
-import { useThreadPanelViewState } from '@/features/ai/runtime/thread-panel/useThreadPanelViewState'
-import type { DebugInspectorSelection } from '@/features/ai/runtime/thread-panel/ThreadDebugInspector'
-import type { ThreadEventRecord } from '@/features/ai/runtime/thread-events'
-import type { ThreadModelRequestDebugData } from '@/features/ai/runtime/thread-timeline-types'
+import { ThreadEventView } from '@/features/chat/runtime/thread-panel/ThreadEventView'
+import { useThreadPanelViewState } from '@/features/chat/runtime/thread-panel/useThreadPanelViewState'
+import type { DebugInspectorSelection } from '@/features/chat/runtime/thread-panel/ThreadDebugInspector'
+import type { ThreadEventRecord } from '@/features/chat/runtime/thread-events'
+import type { ThreadModelRequestDebugData } from '@/features/chat/runtime/thread-timeline-types'
 
 setLocale('zh-CN')
 

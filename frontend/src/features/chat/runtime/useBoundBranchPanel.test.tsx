@@ -1,0 +1,1501 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { act, renderHook, waitFor } from '@testing-library/react'
+import { StrictMode } from 'react'
+import type { ReactNode } from 'react'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { useBoundBranchPanel } from '@/features/chat/runtime/useBoundBranchPanel'
+import { createTextPart } from '@/features/chat/composer/composer-parts'
+import { queryKeys } from '@/shared/lib/query-keys'
+import { agentService } from '@/shared/api/agent-service'
+import { harnessService } from '@/shared/api/harness-service'
+import { ApiError } from '@/shared/api/client'
+import type {
+  AgentCommandBatchResponseDTO,
+  HarnessBranchSettingsDTO,
+  HarnessCommandCreateDTO,
+  HarnessModelSelectionDTO,
+  HarnessThreadCommandDTO,
+  HarnessThreadDTO,
+  HarnessThreadSnapshotDTO,
+} from '@/shared/api/contracts/ai-runtime'
+import type { AgentDefinitionDTO, AgentModelDTO } from '@/shared/api/contracts/ai-catalog'
+
+const THREAD_ID = '11111111-2222-4333-8444-555555555555'
+const THREAD_ID_2 = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'
+
+const { fakeApplicationEvents } = vi.hoisted(() => {
+  const manager = { subscribe: () => () => undefined }
+  return { fakeApplicationEvents: { useApplicationEvents: () => manager } }
+})
+
+vi.mock('@/shared/app-events', () => ({
+  useApplicationEvents: fakeApplicationEvents.useApplicationEvents,
+}))
+vi.mock('@/shared/api/agent-service', () => ({
+  agentService: {
+    listAgents: vi.fn(),
+    listModels: vi.fn(),
+    listProviders: vi.fn(),
+  },
+}))
+vi.mock('@/shared/api/harness-service', () => ({
+  harnessService: {
+    getThreadSnapshot: vi.fn(),
+    acceptThreadCommandBatch: vi.fn(),
+    setThreadYolo: vi.fn(),
+    stopThread: vi.fn(),
+    decideApproval: vi.fn(),
+  },
+}))
+
+function modelSelection(
+  overrides: Partial<HarnessModelSelectionDTO> = {},
+): HarnessModelSelectionDTO {
+  return {
+    providerName: 'minimax',
+    modelName: 'MiniMax',
+    variant: 'default',
+    ...overrides,
+  }
+}
+
+function branchSettings(
+  overrides: Partial<HarnessBranchSettingsDTO> = {},
+): HarnessBranchSettingsDTO {
+  return {
+    agentName: 'assistant',
+    model: modelSelection(),
+    environmentName: null,
+    goal: null,
+    ...overrides,
+  }
+}
+
+function threadFixture(
+  threadId: string,
+  overrides: Partial<HarnessThreadDTO> & { yoloEnabled?: boolean } = {},
+): HarnessThreadDTO {
+  const { yoloEnabled = false, ...rest } = overrides
+  return {
+    threadId,
+    /** Thread 名称（服务端权威必填非空）。 */
+    name: 'thread-name',
+    sessionId: 's1',
+    headEntryId: 'e-assistant',
+    parentThreadId: null,
+    rootThreadId: threadId,
+    yoloEnabled,
+    nextCommandSequence: '1',
+    version: '0',
+    status: 'IDLE',
+    processing: false,
+    executionControl: 'RUNNABLE',
+    branchSettings: branchSettings(),
+    createTime: '2026-01-01T00:00:00Z',
+    updateTime: '2026-01-02T00:00:00Z',
+    ...rest,
+  }
+}
+
+function snapshotOf(
+  currentThread: HarnessThreadDTO,
+  extras: Partial<HarnessThreadSnapshotDTO> = {},
+): HarnessThreadSnapshotDTO {
+  return {
+    version: currentThread.version,
+    thread: currentThread,
+    entries: [],
+    queuedCommands: [],
+    modelInvocation: null,
+    toolInvocations: [],
+    modelAttemptFailures: [],
+    stopReceipts: [],
+    manualCompaction: { available: false, disabledReason: null },
+    ...extras,
+  }
+}
+
+function queuedSettingCommand(
+  sequence: string,
+  type: string,
+  payload: Record<string, unknown>,
+): HarnessThreadCommandDTO {
+  return {
+    threadId: THREAD_ID,
+    sequence,
+    type,
+    state: 'QUEUED',
+    idempotencyKey: `queued-${sequence}`,
+    payloadJson: JSON.stringify(payload),
+    cancelledAt: null,
+    createTime: null,
+  }
+}
+
+/** busy Thread：模型/工具/排队阶段都视为运行中，选择应立即提交而不是留作草稿。 */
+function busyThreadFixture(
+  threadId: string,
+  overrides: Partial<HarnessThreadDTO> = {},
+): HarnessThreadDTO {
+  return threadFixture(threadId, { status: 'MODEL_STREAM', processing: true, ...overrides })
+}
+
+function acceptedCommandPayload(command: HarnessCommandCreateDTO): Record<string, unknown> {
+  switch (command.type) {
+    case 'SET_AGENT':
+      return { agentName: command.agentName }
+    case 'SET_MODEL':
+      return { model: command.model }
+    case 'SET_ENVIRONMENT':
+      return { environmentName: command.environmentName }
+    default:
+      return {}
+  }
+}
+
+/** 接受响应中 durable 的 SET 命令投影：state 恒为 QUEUED，payloadJson 与请求一致。 */
+function acceptedSettingCommand(
+  threadId: string,
+  sequence: string,
+  command: HarnessCommandCreateDTO,
+): HarnessThreadCommandDTO {
+  return {
+    threadId,
+    sequence,
+    type: command.type,
+    state: 'QUEUED',
+    idempotencyKey: command.idempotencyKey,
+    payloadJson: JSON.stringify(acceptedCommandPayload(command)),
+    cancelledAt: null,
+    createTime: null,
+  }
+}
+
+function acceptedResponse(
+  thread: HarnessThreadDTO,
+  commands: HarnessCommandCreateDTO[],
+): AgentCommandBatchResponseDTO {
+  return {
+    session: { sessionId: thread.sessionId, name: 'session-name', createdAt: null },
+    rootEntry: {
+      entryId: 'e-root',
+      sessionId: thread.sessionId,
+      parentEntryId: null,
+      entryType: 'ROOT',
+      payloadJson: '{}',
+      createTime: null,
+    },
+    thread,
+    acceptedCommands: commands.map((command, index) =>
+      acceptedSettingCommand(thread.threadId, String(index + 1), command)),
+    replayed: false,
+  }
+}
+
+const agents: AgentDefinitionDTO[] = [
+  {
+    name: 'assistant',
+    description: null,
+    systemPrompt: null,
+    type: 'USER',
+    model: 'minimax/MiniMax',
+    variant: 'default',
+    config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
+    version: '0',
+    createTime: null,
+    updateTime: null,
+  },
+  {
+    name: 'coder',
+    description: null,
+    systemPrompt: null,
+    type: 'USER',
+    model: 'minimax/MiniMax',
+    variant: 'default',
+    config: {
+      inheritParentEnvironment: true,
+      tools: ['web_search'],
+      skills: [{ packageName: 'pkg', name: 'skill-a' }],
+      subagents: [],
+    },
+    version: '0',
+    createTime: null,
+    updateTime: null,
+  },
+  {
+    name: 'writer',
+    description: null,
+    systemPrompt: null,
+    type: 'USER',
+    model: 'anthropic/Claude',
+    variant: 'fast',
+    config: {
+      inheritParentEnvironment: true,
+      tools: [],
+      skills: [],
+      subagents: [],
+    },
+    version: '0',
+    createTime: null,
+    updateTime: null,
+  },
+  {
+    name: 'broken-model-agent',
+    description: null,
+    systemPrompt: null,
+    type: 'USER',
+    model: 'nonexistent/model',
+    variant: 'default',
+    config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
+    version: '0',
+    createTime: null,
+    updateTime: null,
+  },
+  {
+    name: 'broken-variant-agent',
+    description: null,
+    systemPrompt: null,
+    type: 'USER',
+    model: 'minimax/MiniMax',
+    variant: 'nonexistent-variant',
+    config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
+    version: '0',
+    createTime: null,
+    updateTime: null,
+  },
+]
+
+const claudeModelEntry: AgentModelDTO = {
+  providerName: 'anthropic',
+  name: 'Claude',
+  modelId: 'anthropic/Claude',
+  description: null,
+  config: {
+    limit: { context: 200000, output: 4096 },
+    abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
+    pricing: {
+      currency: 'USD',
+      pricingTier: 'default',
+      serviceTier: 'default',
+      serviceTierMultiplier: 1,
+      version: 'v1',
+      inputPerMillionTokens: 0,
+      outputPerMillionTokens: 0,
+      cacheReadPerMillionTokens: 0,
+      cacheWritePerMillionTokens: 0,
+      cacheWriteLongPerMillionTokens: 0,
+      reasoningPerMillionTokens: 0,
+    },
+    defaultVariant: 'v1',
+    variants: [{ id: 'v1' }, { id: 'fast' }],
+  },
+  version: '0',
+  createTime: null,
+  updateTime: null,
+}
+
+const modelEntry: AgentModelDTO = {
+  providerName: 'minimax',
+  name: 'MiniMax',
+  modelId: 'minimax/MiniMax',
+  description: null,
+  config: {
+    limit: { context: 128000, output: 8192 },
+    abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
+    pricing: {
+      currency: 'USD',
+      pricingTier: 'default',
+      serviceTier: 'default',
+      serviceTierMultiplier: 1,
+      version: 'v1',
+      inputPerMillionTokens: 0,
+      outputPerMillionTokens: 0,
+      cacheReadPerMillionTokens: 0,
+      cacheWritePerMillionTokens: 0,
+      cacheWriteLongPerMillionTokens: 0,
+      reasoningPerMillionTokens: 0,
+    },
+    defaultVariant: 'default',
+    variants: [{ id: 'default' }],
+  },
+  version: '0',
+  createTime: null,
+  updateTime: null,
+}
+
+function clientWrapper(client: QueryClient) {
+  return function Wrapper({ children }: { children: ReactNode }) {
+    return <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  }
+}
+
+function createClient() {
+  return new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  })
+}
+
+/** StrictMode 包装：强制 React 在开发构建下重复执行 render 与 effect，暴露重复副作用。 */
+function strictClientWrapper(client: QueryClient) {
+  return function Wrapper({ children }: { children: ReactNode }) {
+    return (
+      <StrictMode>
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      </StrictMode>
+    )
+  }
+}
+
+async function send(result: { current: ReturnType<typeof useBoundBranchPanel> }) {
+  await act(async () => {
+    await result.current.controller.submitMessage([createTextPart('hello world')])
+  })
+}
+
+describe('useBoundBranchPanel', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(agentService.listAgents).mockResolvedValue({
+      pageNumber: 1,
+      pageSize: 50,
+      totalCount: agents.length,
+      results: agents,
+    })
+    vi.mocked(agentService.listModels).mockResolvedValue({
+      pageNumber: 1,
+      pageSize: 50,
+      totalCount: 2,
+      results: [modelEntry, claudeModelEntry],
+    })
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshotOf(threadFixture(THREAD_ID)),
+    )
+    vi.mocked(harnessService.acceptThreadCommandBatch).mockResolvedValue(
+      acceptedResponse(threadFixture(THREAD_ID), []),
+    )
+    // 直接控制面默认回显请求值（同值 no-op 由服务端保证，这里仅回显）。
+    vi.mocked(harnessService.setThreadYolo).mockImplementation((threadId, data) =>
+      Promise.resolve(threadFixture(threadId, { yoloEnabled: data.yoloEnabled })),
+    )
+  })
+
+  it('initializes the draft from the snapshot with queued SET_* projected, and submits without a reversal diff', async () => {
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshotOf(threadFixture(THREAD_ID), {
+        queuedCommands: [queuedSettingCommand('1', 'SET_AGENT', { agentName: 'coder' })],
+      }),
+    )
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+      wrapper: clientWrapper(createClient()),
+    })
+
+    await waitFor(() => expect(result.current.controller.thread?.threadId).toBe(THREAD_ID))
+    // base 跟随快照事实；draft 投影 queued SET_AGENT（绝不重复携带在途 settings）。
+    expect(result.current.branchState?.base.agentName).toBe('assistant')
+    expect(result.current.draft?.agentName).toBe('coder')
+    expect(result.current.effectiveBase?.agentName).toBe('coder')
+    expect(result.current.dirty).toBe(false)
+
+    await send(result)
+
+    expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(1)
+    const [batchThreadId, request] = vi.mocked(harnessService.acceptThreadCommandBatch).mock.calls[0]!
+    // 纯消息批次以 path 上的 threadId 定位，body 只携带有序命令。
+    expect(batchThreadId).toBe(THREAD_ID)
+    expect(request).not.toHaveProperty('expectedHeadEntryId')
+    expect(request).not.toHaveProperty('expectedNextCommandSequence')
+    // 已迁移到 owner-free 契约：请求体不再伪造 owner/target。
+    expect(request).not.toHaveProperty('owner')
+    expect(request).not.toHaveProperty('target')
+    // 投影后 effectiveBase === draft：最小 diff 只含 USER_MESSAGE，无 SET_AGENT reversal。
+    expect(request.commands.map((command) => command.type)).toEqual(['USER_MESSAGE'])
+    expect(request.commands[0]).toMatchObject({
+      contents: [{ type: 'TEXT', text: 'hello world' }],
+    })
+  })
+
+  it('applies draft-local selections with freeze rules and emits the fixed minimal diff order in one batch', async () => {
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+      wrapper: clientWrapper(createClient()),
+    })
+
+    await waitFor(() => expect(result.current.branchState).not.toBeNull())
+    expect(result.current.dirty).toBe(false)
+
+    act(() => {
+      // 采用新 agent 及其关联预设 model；yolo 保持快照值，后续手动选择覆盖。
+      expect(result.current.selectAgent('coder')).toBe(true)
+      expect(result.current.selectAgent('missing')).toBe(false)
+      result.current.setYoloEnabled(true)
+      result.current.selectModel({ providerName: 'openai', modelName: 'GPT-5', variant: 'v2' })
+      result.current.selectEnvironment('dev-env')
+    })
+
+    expect(result.current.draft).toEqual({
+      agentName: 'coder',
+      model: { providerName: 'openai', modelName: 'GPT-5', variant: 'v2' },
+      environmentName: 'dev-env',
+      yoloEnabled: true,
+    })
+    // effectiveBase 仍是干净快照；draft 已变脏。
+    expect(result.current.effectiveBase?.agentName).toBe('assistant')
+    expect(result.current.dirty).toBe(true)
+
+    await send(result)
+
+    const [batchThreadId, batch] = vi.mocked(harnessService.acceptThreadCommandBatch).mock.calls[0]!
+    expect(batchThreadId).toBe(THREAD_ID)
+    // buildBranchDiffCommands 的固定顺序：AGENT/MODEL/ENVIRONMENT + USER_MESSAGE；yolo 走直接控制面。
+    expect(batch.commands.map((command) => command.type)).toEqual([
+      'SET_AGENT',
+      'SET_MODEL',
+      'SET_ENVIRONMENT',
+      'USER_MESSAGE',
+    ])
+    const setAgent = batch.commands[0]!
+    expect(setAgent).toMatchObject({ agentName: 'coder' })
+    const setEnv = batch.commands[2]!
+    expect(setEnv).toMatchObject({ environmentName: 'dev-env' })
+    // 直接控制面只提交目标策略，绝不生成 SET_YOLO command。
+    expect(harnessService.setThreadYolo).toHaveBeenCalledWith(THREAD_ID, {
+      yoloEnabled: true,
+    })
+  })
+
+  it('atomically updates agentName and target agent model/variant on selectAgent and emits SET_AGENT+SET_MODEL+USER_MESSAGE', async () => {
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+      wrapper: clientWrapper(createClient()),
+    })
+
+    await waitFor(() => expect(result.current.branchState).not.toBeNull())
+    act(() => {
+      result.current.selectEnvironment('existing-env')
+      result.current.setYoloEnabled(true)
+    })
+
+    act(() => {
+      // 切换到目标 agent writer，其模型为 anthropic/Claude，变体为 fast
+      const ok = result.current.selectAgent('writer')
+      expect(ok).toBe(true)
+    })
+
+    expect(result.current.draft).toEqual({
+      agentName: 'writer',
+      model: { providerName: 'anthropic', modelName: 'Claude', variant: 'fast' },
+      environmentName: 'existing-env',
+      yoloEnabled: true,
+    })
+    expect(result.current.dirty).toBe(true)
+
+    await send(result)
+
+    expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(1)
+    const [batchThreadId, batch] = vi.mocked(harnessService.acceptThreadCommandBatch).mock.calls[0]!
+    expect(batchThreadId).toBe(THREAD_ID)
+    expect(batch.commands.map((cmd) => cmd.type)).toEqual([
+      'SET_AGENT',
+      'SET_MODEL',
+      'SET_ENVIRONMENT',
+      'USER_MESSAGE',
+    ])
+    expect(batch.commands[0]).toMatchObject({ agentName: 'writer' })
+    expect(batch.commands[1]).toMatchObject({
+      model: { providerName: 'anthropic', modelName: 'Claude', variant: 'fast' },
+    })
+  })
+
+  it('rejects selectAgent when agent model or variant is unresolvable without mutating draft', async () => {
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+      wrapper: clientWrapper(createClient()),
+    })
+
+    await waitFor(() => expect(result.current.branchState).not.toBeNull())
+    const initialDraft = { ...result.current.draft! }
+
+    act(() => {
+      // 不存在的 model
+      expect(result.current.selectAgent('broken-model-agent')).toBe(false)
+    })
+    expect(result.current.draft).toEqual(initialDraft)
+
+    act(() => {
+      // 不存在的 variant
+      expect(result.current.selectAgent('broken-variant-agent')).toBe(false)
+    })
+    expect(result.current.draft).toEqual(initialDraft)
+  })
+
+  it('resets manual model modification when reselecting the same agent', async () => {
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+      wrapper: clientWrapper(createClient()),
+    })
+
+    await waitFor(() => expect(result.current.branchState).not.toBeNull())
+    act(() => {
+      result.current.selectModel({ providerName: 'custom', modelName: 'CustomModel', variant: 'v1' })
+    })
+    expect(result.current.draft?.model.modelName).toBe('CustomModel')
+
+    act(() => {
+      // 重新选中当前 agent assistant，显式恢复 preset 模型设置
+      expect(result.current.selectAgent('assistant')).toBe(true)
+    })
+    expect(result.current.draft?.model).toEqual({
+      providerName: 'minimax',
+      modelName: 'MiniMax',
+      variant: 'default',
+    })
+  })
+
+  it('optimistically updates yolo via the direct API, aligning base+draft on success without touching other unsent settings', async () => {
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+      wrapper: clientWrapper(createClient()),
+    })
+
+    await waitFor(() => expect(result.current.branchState).not.toBeNull())
+    act(() => {
+      result.current.selectAgent('coder')
+      result.current.setYoloEnabled(true)
+    })
+    // 乐观：draft 立即变脏（yolo 目标值 + 未发送 agent），base 保持快照。
+    expect(result.current.draft?.yoloEnabled).toBe(true)
+    expect(result.current.draft?.agentName).toBe('coder')
+    expect(result.current.branchState?.base.yoloEnabled).toBe(false)
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+    // 成功：base + draft 的 yolo 对齐服务器权威值；未发送的 agent 编辑原样保留。
+    expect(result.current.branchState?.base.yoloEnabled).toBe(true)
+    expect(result.current.draft?.yoloEnabled).toBe(true)
+    expect(result.current.draft?.agentName).toBe('coder')
+    expect(result.current.yoloError).toBeNull()
+
+    await send(result)
+    const [batchThreadId, batch] = vi.mocked(harnessService.acceptThreadCommandBatch).mock.calls[0]!
+    expect(batchThreadId).toBe(THREAD_ID)
+    // 未发送的 agent 编辑仍与消息一起提交；yolo 已对齐，绝不重复发送。
+    expect(batch.commands.map((command) => command.type)).toEqual([
+      'SET_AGENT',
+      'USER_MESSAGE',
+    ])
+  })
+
+  it('reverts the optimistic yolo edit and surfaces yoloError when the direct API fails', async () => {
+    vi.mocked(harnessService.setThreadYolo).mockRejectedValueOnce(
+      new Error('STALE_VERSION: version 2 does not match expected 0'),
+    )
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+      wrapper: clientWrapper(createClient()),
+    })
+
+    await waitFor(() => expect(result.current.branchState).not.toBeNull())
+    act(() => {
+      result.current.setYoloEnabled(true)
+    })
+    expect(result.current.draft?.yoloEnabled).toBe(true)
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+    // 失败：draft 回滚到 base 值，错误暴露给面板；base 零触碰。
+    expect(result.current.draft?.yoloEnabled).toBe(false)
+    expect(result.current.branchState?.base.yoloEnabled).toBe(false)
+    expect(result.current.yoloError).toContain('STALE_VERSION')
+
+    act(() => {
+      result.current.dismissYoloError()
+    })
+    expect(result.current.yoloError).toBeNull()
+  })
+
+  it('adopts the authoritative thread returned by /yolo across sequential toggles', async () => {
+    let responseVersion = 0
+    vi.mocked(harnessService.setThreadYolo).mockImplementation((threadId, data) => {
+      responseVersion += 1
+      return Promise.resolve(
+        threadFixture(threadId, {
+          yoloEnabled: data.yoloEnabled,
+          version: String(responseVersion),
+        }),
+      )
+    })
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+      wrapper: clientWrapper(createClient()),
+    })
+
+    await waitFor(() => expect(result.current.branchState).not.toBeNull())
+    act(() => {
+      result.current.setYoloEnabled(true)
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(vi.mocked(harnessService.setThreadYolo).mock.calls[0]![1]).toEqual({
+      yoloEnabled: true,
+    })
+    expect(result.current.branchState?.base.yoloEnabled).toBe(true)
+
+    act(() => {
+      result.current.setYoloEnabled(false)
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(vi.mocked(harnessService.setThreadYolo).mock.calls[1]![1]).toEqual({
+      yoloEnabled: false,
+    })
+    expect(result.current.draft?.yoloEnabled).toBe(false)
+    expect(result.current.branchState?.base.yoloEnabled).toBe(false)
+  })
+
+  it('serializes rapid yolo toggles and preserves the newer draft while pending (latest wins)', async () => {
+    const releases: Array<() => void> = []
+    const calls: Array<{ yoloEnabled: boolean }> = []
+    let responseVersion = 0
+    vi.mocked(harnessService.setThreadYolo).mockImplementation((threadId, data) => {
+      calls.push({ yoloEnabled: data.yoloEnabled })
+      responseVersion += 1
+      const version = String(responseVersion)
+      // 两个请求都 deferred，便于断言第二个请求返回前的中间状态。
+      return new Promise<HarnessThreadDTO>((resolve) => {
+        releases.push(() =>
+          resolve(
+            threadFixture(threadId, {
+              yoloEnabled: data.yoloEnabled,
+              version,
+            }),
+          ),
+        )
+      })
+    })
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+      wrapper: clientWrapper(createClient()),
+    })
+
+    await waitFor(() => expect(result.current.branchState).not.toBeNull())
+    act(() => {
+      result.current.setYoloEnabled(true)
+      result.current.setYoloEnabled(false)
+    })
+    // 快速连点串行：第一个（true）请求返回前只有它在网；false 仅记录为最新意图。
+    expect(calls).toEqual([{ yoloEnabled: true }])
+    expect(result.current.draft?.yoloEnabled).toBe(false)
+
+    await act(async () => {
+      releases[0]?.()
+    })
+    await waitFor(() => expect(calls.length).toBe(2))
+    expect(calls[1]).toEqual({ yoloEnabled: false })
+    // 第一个请求（true）成功：权威/base 采纳 true，但最新意图 false 的乐观 draft 不被压回 true。
+    expect(result.current.branchState?.base.yoloEnabled).toBe(true)
+    expect(result.current.draft?.yoloEnabled).toBe(false)
+
+    await act(async () => {
+      releases[1]?.()
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    // latest wins：最终 draft 与 base 均为 false。
+    expect(result.current.draft?.yoloEnabled).toBe(false)
+    expect(result.current.branchState?.base.yoloEnabled).toBe(false)
+    expect(result.current.yoloError).toBeNull()
+  })
+
+  it('ignores a regressing snapshot arriving after /yolo success (exact decimal version comparison beyond Number.MAX_SAFE_INTEGER)', async () => {
+    // 2^53 相邻的两个 version：Number() 会把它们舍入为相同 double 而误判回退，
+    // 只有 BigInt 精确比较才能真正识别低 version 的迟到 snapshot。
+    const BIG_LOW = '9007199254740992'
+    const BIG_AUTH = '9007199254740993'
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+      snapshotOf(threadFixture(THREAD_ID, { version: BIG_LOW })),
+    )
+    vi.mocked(harnessService.setThreadYolo).mockImplementation((threadId, data) =>
+      Promise.resolve(
+        threadFixture(threadId, {
+          yoloEnabled: data.yoloEnabled,
+          version: BIG_AUTH,
+        }),
+      ),
+    )
+    const client = createClient()
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+      wrapper: clientWrapper(client),
+    })
+
+    await waitFor(() => expect(result.current.branchState).not.toBeNull())
+    expect(result.current.branchState?.base.yoloEnabled).toBe(false)
+
+    act(() => {
+      result.current.setYoloEnabled(true)
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    // /yolo 成功：base/draft 对齐 true，权威 version 推进到 BIG_AUTH。
+    expect(result.current.draft?.yoloEnabled).toBe(true)
+    expect(result.current.branchState?.base.yoloEnabled).toBe(true)
+
+    // 注入迟到的低 version snapshot（yolo=false + 不同 settings），模拟 /yolo 前失效快照晚到。
+    await act(async () => {
+      client.setQueryData(
+        queryKeys.threads.snapshot(THREAD_ID),
+        snapshotOf(
+          threadFixture(THREAD_ID, {
+            yoloEnabled: false,
+            version: BIG_LOW,
+            branchSettings: branchSettings({ agentName: 'stale' }),
+          }),
+        ),
+      )
+    })
+    // 回退 snapshot 被整体忽略：base/draft 不被改写、权威 version 不下降。
+    expect(result.current.draft?.yoloEnabled).toBe(true)
+    expect(result.current.branchState?.base.yoloEnabled).toBe(true)
+    expect(result.current.branchState?.base.agentName).toBe('assistant')
+
+    act(() => {
+      result.current.setYoloEnabled(false)
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(vi.mocked(harnessService.setThreadYolo).mock.calls[1]![1]).toEqual({
+      yoloEnabled: false,
+    })
+    expect(result.current.branchState?.base.yoloEnabled).toBe(false)
+  })
+
+  it('keeps the newer optimistic draft and suppresses yoloError when a superseded request fails', async () => {
+    let rejectFirst: ((error: Error) => void) | null = null
+    let releaseSecond: (() => void) | null = null
+    const calls: Array<{ yoloEnabled: boolean }> = []
+    vi.mocked(harnessService.setThreadYolo).mockImplementation((threadId, data) => {
+      calls.push({ yoloEnabled: data.yoloEnabled })
+      if (calls.length === 1) {
+        return new Promise<HarnessThreadDTO>((_, reject) => {
+          rejectFirst = reject
+        })
+      }
+      return new Promise<HarnessThreadDTO>((resolve) => {
+        releaseSecond = () =>
+          resolve(threadFixture(threadId, { yoloEnabled: true, version: '1' }))
+      })
+    })
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+      wrapper: clientWrapper(createClient()),
+    })
+
+    await waitFor(() => expect(result.current.branchState).not.toBeNull())
+    // base=false 上先发一个过期中间值 false 请求，随即押注最新意图 true。
+    act(() => {
+      result.current.setYoloEnabled(false)
+      result.current.setYoloEnabled(true)
+    })
+    expect(calls).toEqual([{ yoloEnabled: false }])
+    expect(result.current.draft?.yoloEnabled).toBe(true)
+
+    await act(async () => {
+      rejectFirst?.(new Error('network gone'))
+    })
+    await waitFor(() => expect(calls.length).toBe(2))
+    // 过期中间请求失败：最新意图 true 被保留（不回滚到 base false），且不产生瞬时错误；
+    // 第二个请求已发出但尚未返回。
+    expect(calls[1]).toEqual({ yoloEnabled: true })
+    expect(result.current.draft?.yoloEnabled).toBe(true)
+    expect(result.current.branchState?.base.yoloEnabled).toBe(false)
+    expect(result.current.yoloError).toBeNull()
+
+    await act(async () => {
+      releaseSecond?.()
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    // 最新意图成功：最终一致，全程无瞬时错误/回滚。
+    expect(result.current.draft?.yoloEnabled).toBe(true)
+    expect(result.current.branchState?.base.yoloEnabled).toBe(true)
+    expect(result.current.yoloError).toBeNull()
+  })
+
+  it('fences late yolo responses after rebind: old-thread failure neither surfaces yoloError nor mutates the new draft', async () => {
+    let rejectOld: ((error: Error) => void) | null = null
+    vi.mocked(harnessService.setThreadYolo).mockImplementation((threadId, data) => {
+      if (threadId === THREAD_ID) {
+        return new Promise<HarnessThreadDTO>((_, reject) => {
+          rejectOld = reject
+        })
+      }
+      return Promise.resolve(threadFixture(threadId, { yoloEnabled: data.yoloEnabled }))
+    })
+    vi.mocked(harnessService.getThreadSnapshot).mockImplementation((threadId) =>
+      Promise.resolve(
+        threadId === THREAD_ID_2
+          ? snapshotOf(
+              threadFixture(THREAD_ID_2, {
+                yoloEnabled: true,
+                branchSettings: branchSettings({ agentName: 'assistant2' }),
+              }),
+            )
+          : snapshotOf(threadFixture(THREAD_ID)),
+      ),
+    )
+    const client = createClient()
+    const { result, rerender } = renderHook(
+      ({ threadId }: { threadId: string }) => useBoundBranchPanel({ threadId }),
+      { wrapper: clientWrapper(client), initialProps: { threadId: THREAD_ID } },
+    )
+
+    await waitFor(() => expect(result.current.branchState).not.toBeNull())
+    act(() => {
+      result.current.setYoloEnabled(true)
+    })
+    expect(result.current.draft?.yoloEnabled).toBe(true)
+
+    rerender({ threadId: THREAD_ID_2 })
+    await waitFor(() => expect(result.current.draft?.agentName).toBe('assistant2'))
+    // 重绑后新面板干净，无陈旧错误。
+    expect(result.current.yoloError).toBeNull()
+
+    // 旧 Thread 的请求在重绑之后才被拒绝：generation 已失效。
+    await act(async () => {
+      rejectOld?.(new Error('STALE_VERSION: old thread gone'))
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    // 迟到失败不污染新面板：无 yoloError，draft/base 保持新 Thread 权威值。
+    expect(result.current.yoloError).toBeNull()
+    expect(result.current.draft?.yoloEnabled).toBe(true)
+    expect(result.current.draft?.agentName).toBe('assistant2')
+  })
+
+  it('resets the pane-local draft on thread rebind and re-initializes from the new snapshot', async () => {
+    vi.mocked(harnessService.getThreadSnapshot).mockImplementation((threadId) =>
+      Promise.resolve(
+        threadId === THREAD_ID_2
+          ? snapshotOf(
+              threadFixture(THREAD_ID_2, {
+                yoloEnabled: true,
+                branchSettings: branchSettings({
+                  agentName: 'assistant2',
+                  model: modelSelection({ providerName: 'anthropic', modelName: 'Claude', variant: 'v1' }),
+                }),
+              }),
+            )
+          : snapshotOf(threadFixture(THREAD_ID)),
+      ),
+    )
+    const client = createClient()
+    const { result, rerender } = renderHook(
+      ({ threadId }: { threadId: string }) => useBoundBranchPanel({ threadId }),
+      { wrapper: clientWrapper(client), initialProps: { threadId: THREAD_ID } },
+    )
+
+    await waitFor(() => expect(result.current.branchState).not.toBeNull())
+    act(() => {
+      result.current.selectAgent('coder')
+      result.current.setYoloEnabled(true)
+    })
+    expect(result.current.dirty).toBe(true)
+
+    rerender({ threadId: THREAD_ID_2 })
+    await waitFor(() =>
+      expect(result.current.branchState?.base.agentName).toBe('assistant2'),
+    )
+    // 旧 Thread 的 draft 编辑绝不泄漏：draft 完全来自新 snapshot，且恢复干净。
+    expect(result.current.draft).toEqual({
+      agentName: 'assistant2',
+      model: { providerName: 'anthropic', modelName: 'Claude', variant: 'v1' },
+      environmentName: null,
+      yoloEnabled: true,
+    })
+    expect(result.current.dirty).toBe(false)
+  })
+
+  it('fails closed during the rebind gap: old draft is not exposed and cannot be submitted until the new snapshot arrives', async () => {
+    let resolveNewSnapshot: ((snapshot: HarnessThreadSnapshotDTO) => void) | null = null
+    vi.mocked(harnessService.getThreadSnapshot).mockImplementation((threadId) => {
+      if (threadId === THREAD_ID) {
+        return Promise.resolve(snapshotOf(threadFixture(THREAD_ID)))
+      }
+      // 新 Thread 的 snapshot deferred：模拟重绑后 snapshot 未到达的窗口。
+      return new Promise((resolve) => {
+        resolveNewSnapshot = resolve
+      })
+    })
+    const client = createClient()
+    const { result, rerender } = renderHook(
+      ({ threadId }: { threadId: string }) => useBoundBranchPanel({ threadId }),
+      { wrapper: clientWrapper(client), initialProps: { threadId: THREAD_ID } },
+    )
+
+    await waitFor(() => expect(result.current.branchState).not.toBeNull())
+    act(() => {
+      result.current.selectAgent('coder')
+      result.current.setYoloEnabled(true)
+    })
+    expect(result.current.draft?.agentName).toBe('coder')
+    expect(result.current.dirty).toBe(true)
+
+    rerender({ threadId: THREAD_ID_2 })
+
+    // render-time fail-closed：新 snapshot 未到前，旧 state 不暴露、composer 门控全 null。
+    expect(result.current.branchState).toBeNull()
+    expect(result.current.draft).toBeUndefined()
+    expect(result.current.effectiveBase).toBeNull()
+    expect(result.current.dirty).toBe(false)
+    // 即使是旧 Thread 的 snapshot 也绝不会被当作新 Thread 的状态初始化。
+    expect(result.current.controller.thread).toBeUndefined()
+    act(() => {
+      expect(result.current.selectAgent('writer')).toBe(false)
+    })
+    expect(result.current.draft).toBeUndefined()
+
+    // submit 绝不把旧 draft 发到新 Thread。
+    await act(async () => {
+      await result.current.controller.submitMessage([createTextPart('hello world')])
+    })
+    expect(harnessService.acceptThreadCommandBatch).not.toHaveBeenCalled()
+
+    // 新 snapshot 到达后，从新 Thread 重新初始化，旧编辑不泄漏。
+    await act(async () => {
+      resolveNewSnapshot?.(
+        snapshotOf(
+          threadFixture(THREAD_ID_2, {
+            yoloEnabled: true,
+            branchSettings: branchSettings({
+              agentName: 'assistant2',
+              model: modelSelection({ providerName: 'anthropic', modelName: 'Claude', variant: 'v1' }),
+            }),
+          }),
+        ),
+      )
+    })
+    await waitFor(() => expect(result.current.draft?.agentName).toBe('assistant2'))
+    expect(result.current.draft).toEqual({
+      agentName: 'assistant2',
+      model: { providerName: 'anthropic', modelName: 'Claude', variant: 'v1' },
+      environmentName: null,
+      yoloEnabled: true,
+    })
+    expect(result.current.dirty).toBe(false)
+  })
+
+  it('surfaces raw string and fallback yolo rejection payloads and dismisses them', async () => {
+    vi.mocked(harnessService.setThreadYolo).mockRejectedValueOnce('plain string failure')
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+      wrapper: clientWrapper(createClient()),
+    })
+
+    await waitFor(() => expect(result.current.branchState).not.toBeNull())
+    act(() => {
+      result.current.setYoloEnabled(true)
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    // string 拒绝：原样暴露；draft 回滚到 base。
+    expect(result.current.yoloError).toBe('plain string failure')
+    expect(result.current.draft?.yoloEnabled).toBe(false)
+    act(() => result.current.dismissYoloError())
+    expect(result.current.yoloError).toBeNull()
+
+    // 非法 error payload（null）→ 回退 updateYoloFailed。
+    vi.mocked(harnessService.setThreadYolo).mockRejectedValueOnce(null)
+    act(() => {
+      result.current.setYoloEnabled(true)
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(result.current.yoloError).toBe('更新 YOLO 失败')
+  })
+
+  it('ignores yolo toggles while no snapshot is bound yet', async () => {
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+      wrapper: clientWrapper(createClient()),
+    })
+    act(() => {
+      result.current.setYoloEnabled(true)
+    })
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(harnessService.setThreadYolo).not.toHaveBeenCalled()
+    expect(result.current.yoloError).toBeNull()
+  })
+
+  it('follows the base from a newer snapshot while preserving the local draft', async () => {
+    const client = createClient()
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+      wrapper: clientWrapper(client),
+    })
+
+    await waitFor(() => expect(result.current.branchState).not.toBeNull())
+    act(() => {
+      result.current.selectAgent('coder')
+    })
+    expect(result.current.draft?.agentName).toBe('coder')
+
+    // 更新的权威 snapshot（settings 变化 + version 前进）：base 跟随，draft 保留本地编辑。
+    await act(async () => {
+      client.setQueryData(
+        queryKeys.threads.snapshot(THREAD_ID),
+        snapshotOf(
+          threadFixture(THREAD_ID, {
+            version: '1',
+            branchSettings: branchSettings({ agentName: 'updated' }),
+          }),
+        ),
+      )
+    })
+    await waitFor(() => expect(result.current.branchState?.base.agentName).toBe('updated'))
+    expect(result.current.draft?.agentName).toBe('coder')
+    expect(result.current.dirty).toBe(true)
+  })
+
+  it('keeps a newer SSE policy when an older yolo response returns later', async () => {
+    // 测试意图：更高 version 的 SSE 已改变策略后，较旧 /yolo 响应既不降 version，也不覆盖 base/draft。
+    let resolveYolo: ((thread: HarnessThreadDTO) => void) | null = null
+    vi.mocked(harnessService.setThreadYolo).mockImplementation(
+      () => new Promise<HarnessThreadDTO>((resolve) => {
+        resolveYolo = resolve
+      }),
+    )
+    const client = createClient()
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+      wrapper: clientWrapper(client),
+    })
+
+    await waitFor(() => expect(result.current.branchState).not.toBeNull())
+    act(() => {
+      result.current.selectModel(modelSelection({ modelName: 'CustomModel' }))
+      result.current.setYoloEnabled(true)
+    })
+    await act(async () => {
+      client.setQueryData(
+        queryKeys.threads.snapshot(THREAD_ID),
+        snapshotOf(threadFixture(THREAD_ID, { version: '2', yoloEnabled: false })),
+      )
+    })
+    await act(async () => {
+      resolveYolo?.(threadFixture(THREAD_ID, { version: '1', yoloEnabled: true }))
+    })
+
+    expect(result.current.branchState?.base.yoloEnabled).toBe(false)
+    expect(result.current.draft?.yoloEnabled).toBe(false)
+    expect(result.current.draft?.model.modelName).toBe('CustomModel')
+    expect(result.current.yoloError).toBeNull()
+  })
+
+  it('follows an external YOLO policy change without discarding unsent model edits', async () => {
+    const client = createClient()
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+      wrapper: clientWrapper(client),
+    })
+    await waitFor(() => expect(result.current.branchState).not.toBeNull())
+    act(() => result.current.selectModel(modelSelection({ modelName: 'CustomModel' })))
+    await act(async () => {
+      client.setQueryData(
+        queryKeys.threads.snapshot(THREAD_ID),
+        snapshotOf(threadFixture(THREAD_ID, { version: '2', yoloEnabled: true })),
+      )
+    })
+    await waitFor(() => expect(result.current.branchState?.base.yoloEnabled).toBe(true))
+    expect(result.current.draft?.yoloEnabled).toBe(true)
+    expect(result.current.draft?.model.modelName).toBe('CustomModel')
+    expect(harnessService.setThreadYolo).not.toHaveBeenCalled()
+  })
+
+  it('reloads base and draft from an authoritative thread DTO and ignores foreign threads', async () => {
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+      wrapper: clientWrapper(createClient()),
+    })
+
+    await waitFor(() => expect(result.current.branchState).not.toBeNull())
+    act(() => {
+      result.current.selectAgent('coder')
+    })
+    expect(result.current.dirty).toBe(true)
+
+    // 外国 Thread 的 DTO 被整体忽略，本地编辑保留。
+    act(() => {
+      result.current.resetDraftFromThread(
+        threadFixture(THREAD_ID_2, {
+          branchSettings: branchSettings({ agentName: 'foreign' }),
+        }),
+      )
+    })
+    expect(result.current.draft?.agentName).toBe('coder')
+
+    // 当前 Thread 的权威 DTO：base === draft === snapshot（干净），并采纳其 yolo/version。
+    act(() => {
+      result.current.resetDraftFromThread(
+        threadFixture(THREAD_ID, {
+          version: '3',
+          yoloEnabled: true,
+          branchSettings: branchSettings({ agentName: 'fresh' }),
+        }),
+      )
+    })
+    expect(result.current.draft).toEqual({
+      agentName: 'fresh',
+      model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+      environmentName: null,
+      yoloEnabled: true,
+    })
+    expect(result.current.dirty).toBe(false)
+  })
+
+  it('immediately submits a standalone SET-only batch when the thread is busy and shows pending', async () => {
+    const busy = busyThreadFixture(THREAD_ID)
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshotOf(busy))
+    vi.mocked(harnessService.acceptThreadCommandBatch).mockImplementation((threadId, request) =>
+      Promise.resolve(
+        acceptedResponse(busyThreadFixture(threadId, { version: '1' }), request.commands),
+      ),
+    )
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+      wrapper: clientWrapper(createClient()),
+    })
+
+    await waitFor(() => expect(result.current.branchState).not.toBeNull())
+    act(() => {
+      expect(result.current.selectAgent('writer')).toBe(true)
+    })
+
+    await waitFor(() => expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(1))
+    const [batchThreadId, request] = vi.mocked(harnessService.acceptThreadCommandBatch).mock.calls[0]!
+    expect(batchThreadId).toBe(THREAD_ID)
+    // busy 立即提交纯设置批次：固定顺序的 SET_*，绝不伪造 USER_MESSAGE/GOAL 终止输入。
+    expect(request.commands.map((command) => command.type)).toEqual(['SET_AGENT', 'SET_MODEL'])
+    expect(request.expectedHeadEntryId).toBe('e-assistant')
+    expect(request.expectedNextCommandSequence).toBe('1')
+
+    // 选择即时反映为待生效，而不是本地草稿。
+    expect(result.current.draft?.agentName).toBe('writer')
+    await waitFor(() => expect(result.current.settingsStatus).toBe('pending'))
+    expect(result.current.settingsError).toBeNull()
+  })
+
+  it('keeps idle and stopped threads as drafts without an immediate submit', async () => {
+    for (const status of ['IDLE', 'STOPPED']) {
+      vi.clearAllMocks()
+      vi.mocked(agentService.listAgents).mockResolvedValue({
+        pageNumber: 1,
+        pageSize: 50,
+        totalCount: agents.length,
+        results: agents,
+      })
+      vi.mocked(agentService.listModels).mockResolvedValue({
+        pageNumber: 1,
+        pageSize: 50,
+        totalCount: 2,
+        results: [modelEntry, claudeModelEntry],
+      })
+      vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
+        snapshotOf(threadFixture(THREAD_ID, { status, processing: false })),
+      )
+      vi.mocked(harnessService.acceptThreadCommandBatch).mockResolvedValue(
+        acceptedResponse(threadFixture(THREAD_ID), []),
+      )
+      const { result, unmount } = renderHook(
+        () => useBoundBranchPanel({ threadId: THREAD_ID }),
+        { wrapper: clientWrapper(createClient()) },
+      )
+      await waitFor(() => expect(result.current.branchState).not.toBeNull())
+
+      act(() => {
+        expect(result.current.selectAgent('coder')).toBe(true)
+      })
+      await act(async () => {
+        await Promise.resolve()
+      })
+
+      // 静止 Thread 不立即提交：选择保持草稿，随下一条输入一起提交。
+      expect(harnessService.acceptThreadCommandBatch).not.toHaveBeenCalled()
+      expect(result.current.draft?.agentName).toBe('coder')
+      expect(result.current.settingsStatus).toBe('draft')
+      unmount()
+    }
+  })
+
+  it('serializes consecutive busy selections and reuses the advanced accepted cursor (latest intent wins)', async () => {
+    const busy = busyThreadFixture(THREAD_ID)
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshotOf(busy))
+    const releases: Array<() => void> = []
+    const calls: Array<{
+      commands: string[]
+      headEntryId: string | undefined
+      nextCommandSequence: string | undefined
+    }> = []
+    let version = 0
+    vi.mocked(harnessService.acceptThreadCommandBatch).mockImplementation((threadId, request) => {
+      version += 1
+      const responseVersion = String(version)
+      calls.push({
+        commands: request.commands.map((command) => command.type),
+        headEntryId: request.expectedHeadEntryId,
+        nextCommandSequence: request.expectedNextCommandSequence,
+      })
+      return new Promise<AgentCommandBatchResponseDTO>((resolve) => {
+        releases.push(() =>
+          resolve(
+            acceptedResponse(
+              busyThreadFixture(threadId, {
+                version: responseVersion,
+                // 明显区别于初始快照的 cursor，证明后续提交复用接受响应推进后的权威 cursor。
+                nextCommandSequence: String(version + 1),
+              }),
+              request.commands,
+            ),
+          ))
+      })
+    })
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+      wrapper: clientWrapper(createClient()),
+    })
+    await waitFor(() => expect(result.current.branchState).not.toBeNull())
+
+    act(() => {
+      result.current.selectAgent('writer')
+      result.current.selectModel({ providerName: 'openai', modelName: 'GPT-5', variant: 'v2' })
+    })
+    // 串行且合并：第二个请求必须等第一个返回后才发出（latest intent 只保留最后目标）。
+    expect(calls).toHaveLength(1)
+    expect(calls[0]!.commands).toEqual(['SET_AGENT', 'SET_MODEL'])
+    // DTO 允许纯消息省 cursor，但设置请求仍必须精确携带初始 cursor。
+    expect(calls[0]!.headEntryId).toBe('e-assistant')
+    expect(calls[0]!.nextCommandSequence).toBe('1')
+
+    await act(async () => {
+      releases[0]!()
+    })
+    await waitFor(() => expect(calls).toHaveLength(2))
+    // 第二个请求复用接受响应推进后的 cursor，且只携带相对已提交 overlay 的最小 diff。
+    expect(calls[1]!.headEntryId).toBe('e-assistant')
+    expect(calls[1]!.nextCommandSequence).toBe('2')
+    expect(calls[1]!.commands).toEqual(['SET_MODEL'])
+
+    await act(async () => {
+      releases[1]!()
+    })
+    await waitFor(() => expect(result.current.settingsStatus).toBe('pending'))
+    expect(result.current.draft?.model.modelName).toBe('GPT-5')
+  })
+
+  it('does not re-carry a just-submitted setting when a message is sent before the snapshot re-read', async () => {
+    const busy = busyThreadFixture(THREAD_ID)
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshotOf(busy))
+    vi.mocked(harnessService.acceptThreadCommandBatch).mockImplementation((threadId, request) =>
+      Promise.resolve(
+        acceptedResponse(
+          busyThreadFixture(threadId, { version: '1', nextCommandSequence: '2' }),
+          request.commands,
+        ),
+      ),
+    )
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+      wrapper: clientWrapper(createClient()),
+    })
+    await waitFor(() => expect(result.current.branchState).not.toBeNull())
+
+    act(() => {
+      result.current.selectAgent('coder')
+    })
+    await waitFor(() => expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(1))
+    // 等待 overlay 装入 effective base：状态同步后 buildBatch 才携带已提交的 SET 差异。
+    await waitFor(() => expect(result.current.effectiveBase?.agentName).toBe('coder'))
+
+    await send(result)
+    expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(2)
+    const [, messageBatch] = vi.mocked(harnessService.acceptThreadCommandBatch).mock.calls[1]!
+    // snapshot 尚未回读时，已提交的 SET_AGENT 由 overlay 提供 effective base，绝不重复携带。
+    expect(messageBatch.commands.map((command) => command.type)).toEqual(['USER_MESSAGE'])
+  })
+
+  it('preserves the selection as a draft and surfaces the error when the immediate submit fails', async () => {
+    const busy = busyThreadFixture(THREAD_ID)
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshotOf(busy))
+    vi.mocked(harnessService.acceptThreadCommandBatch).mockRejectedValueOnce(
+      new Error('request rejected'),
+    )
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+      wrapper: clientWrapper(createClient()),
+    })
+    await waitFor(() => expect(result.current.branchState).not.toBeNull())
+
+    act(() => {
+      result.current.selectAgent('coder')
+    })
+    await waitFor(() => expect(result.current.settingsError).toContain('request rejected'))
+
+    // 失败保输入：选择留在 draft（随下一条输入提交），绝不被静默丢弃。
+    expect(result.current.draft?.agentName).toBe('coder')
+    expect(result.current.settingsStatus).toBe('draft')
+    act(() => {
+      result.current.dismissSettingsError()
+    })
+    expect(result.current.settingsError).toBeNull()
+  })
+
+  it('retries once through an authoritative snapshot read on STALE_COMMAND_CURSOR', async () => {
+    const busy = busyThreadFixture(THREAD_ID)
+    const fresh = busyThreadFixture(THREAD_ID, {
+      version: '5',
+      nextCommandSequence: '9',
+      headEntryId: 'e-fresh',
+    })
+    vi.mocked(harnessService.getThreadSnapshot)
+      .mockResolvedValueOnce(snapshotOf(busy))
+      .mockResolvedValue(snapshotOf(fresh))
+    vi.mocked(harnessService.acceptThreadCommandBatch)
+      .mockRejectedValueOnce(new ApiError('stale cursor', 409, 'CONFLICT', {
+        reason: 'STALE_COMMAND_CURSOR',
+      }))
+      .mockImplementationOnce((threadId, request) =>
+        Promise.resolve(
+          acceptedResponse(busyThreadFixture(threadId, { version: '6' }), request.commands),
+        ))
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+      wrapper: clientWrapper(createClient()),
+    })
+    await waitFor(() => expect(result.current.branchState).not.toBeNull())
+
+    act(() => {
+      result.current.selectModel({ providerName: 'openai', modelName: 'GPT-5', variant: 'v2' })
+    })
+    await waitFor(() => expect(harnessService.getThreadSnapshot).toHaveBeenCalled())
+
+    await waitFor(() => expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(2))
+    const [, retry] = vi.mocked(harnessService.acceptThreadCommandBatch).mock.calls[1]!
+    // cursor 由权威回读重建，绝不沿用已失效的旧 cursor。
+    expect(retry.expectedHeadEntryId).toBe('e-fresh')
+    expect(retry.expectedNextCommandSequence).toBe('9')
+  })
+
+  it('ignores a late immediate-submit response after navigating to another thread', async () => {
+    const busy = busyThreadFixture(THREAD_ID)
+    vi.mocked(harnessService.getThreadSnapshot).mockImplementation((threadId) =>
+      Promise.resolve(
+        snapshotOf(threadId === THREAD_ID ? busy : threadFixture(THREAD_ID_2)),
+      ))
+    let release: (() => void) | null = null
+    vi.mocked(harnessService.acceptThreadCommandBatch).mockImplementation((threadId, request) =>
+      new Promise<AgentCommandBatchResponseDTO>((resolve) => {
+        release = () =>
+          resolve(
+            acceptedResponse(busyThreadFixture(threadId, { version: '1' }), request.commands),
+          )
+      }))
+    const { result, rerender } = renderHook(
+      ({ threadId }: { threadId: string }) => useBoundBranchPanel({ threadId }),
+      {
+        initialProps: { threadId: THREAD_ID },
+        wrapper: clientWrapper(createClient()),
+      },
+    )
+    await waitFor(() => expect(result.current.branchState).not.toBeNull())
+
+    act(() => {
+      result.current.selectAgent('writer')
+    })
+    await waitFor(() => expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(1))
+
+    // 导航到另一个 Thread：旧 Thread 的迟到响应必须整体失效。
+    rerender({ threadId: THREAD_ID_2 })
+    await waitFor(() => expect(result.current.controller.thread?.threadId).toBe(THREAD_ID_2))
+    await act(async () => {
+      release!()
+      await Promise.resolve()
+    })
+
+    expect(result.current.draft?.agentName).toBe('assistant')
+    expect(result.current.settingsStatus).toBeNull()
+    expect(result.current.settingsError).toBeNull()
+  })
+
+  it('submits exactly one standalone SET batch under StrictMode double render/effect', async () => {
+    const busy = busyThreadFixture(THREAD_ID)
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshotOf(busy))
+    vi.mocked(harnessService.acceptThreadCommandBatch).mockImplementation((threadId, request) =>
+      Promise.resolve(
+        acceptedResponse(busyThreadFixture(threadId, { version: '1' }), request.commands),
+      ))
+    const { result } = renderHook(() => useBoundBranchPanel({ threadId: THREAD_ID }), {
+      wrapper: strictClientWrapper(createClient()),
+    })
+    await waitFor(() => expect(result.current.branchState).not.toBeNull())
+
+    act(() => {
+      expect(result.current.selectAgent('writer')).toBe(true)
+    })
+
+    // 重复 render/effect 绝不触发第二次写：一次选择对应恰好一个 standalone SET 批次。
+    await waitFor(() => expect(result.current.settingsStatus).toBe('pending'))
+    expect(harnessService.acceptThreadCommandBatch).toHaveBeenCalledTimes(1)
+    expect(result.current.draft?.agentName).toBe('writer')
+    expect(result.current.settingsError).toBeNull()
+  })
+
+  it('does not lose a newer selection made after rebinding away from an in-flight submit', async () => {
+    const busyA = busyThreadFixture(THREAD_ID)
+    const busyB = busyThreadFixture(THREAD_ID_2, { headEntryId: 'e-b' })
+    vi.mocked(harnessService.getThreadSnapshot).mockImplementation((threadId) =>
+      Promise.resolve(snapshotOf(threadId === THREAD_ID ? busyA : busyB)))
+    let releaseA: (() => void) | null = null
+    const calls: Array<{ threadId: string; commands: string[] }> = []
+    vi.mocked(harnessService.acceptThreadCommandBatch).mockImplementation((threadId, request) => {
+      calls.push({ threadId, commands: request.commands.map((command) => command.type) })
+      if (threadId === THREAD_ID) {
+        // Thread A 的提交悬停在途，期间用户重绑到 Thread B 并产生更新选择。
+        return new Promise<AgentCommandBatchResponseDTO>((resolve) => {
+          releaseA = () =>
+            resolve(
+              acceptedResponse(busyThreadFixture(threadId, { version: '1' }), request.commands),
+            )
+        })
+      }
+      return Promise.resolve(
+        acceptedResponse(busyThreadFixture(threadId, { version: '1' }), request.commands),
+      )
+    })
+    const { result, rerender } = renderHook(
+      ({ threadId }: { threadId: string }) => useBoundBranchPanel({ threadId }),
+      {
+        initialProps: { threadId: THREAD_ID },
+        wrapper: clientWrapper(createClient()),
+      },
+    )
+    await waitFor(() => expect(result.current.branchState).not.toBeNull())
+
+    act(() => {
+      result.current.selectAgent('writer')
+    })
+    await waitFor(() => expect(calls).toHaveLength(1))
+    expect(calls[0]!.threadId).toBe(THREAD_ID)
+
+    // 重绑到 Thread B：旧 Thread 的 drain 仍在途，A 的迟到响应必须整体失效。
+    rerender({ threadId: THREAD_ID_2 })
+    await waitFor(() => expect(result.current.controller.thread?.threadId).toBe(THREAD_ID_2))
+    await waitFor(() => expect(result.current.branchState).not.toBeNull())
+
+    // 新 Thread 上的更新选择绝不能因 drain 被占用而丢失。
+    act(() => {
+      result.current.selectModel({ providerName: 'openai', modelName: 'GPT-5', variant: 'v2' })
+    })
+    await act(async () => {
+      releaseA!()
+      await Promise.resolve()
+    })
+
+    await waitFor(() => expect(calls).toHaveLength(2))
+    expect(calls[1]!.threadId).toBe(THREAD_ID_2)
+    expect(calls[1]!.commands).toEqual(['SET_MODEL'])
+    expect(result.current.draft?.model.modelName).toBe('GPT-5')
+    expect(result.current.settingsStatus).toBe('pending')
+  })
+})
+

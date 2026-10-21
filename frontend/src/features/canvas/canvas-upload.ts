@@ -5,7 +5,7 @@ import {
   createWorkerHasher,
   validateUploadFile,
   type HashFile,
-} from '@/features/ai/composer'
+} from '@/features/chat/composer'
 import type {
   CanvasCommandDTO,
   CanvasTransformDTO,

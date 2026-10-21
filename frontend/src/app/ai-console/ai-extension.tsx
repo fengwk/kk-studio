@@ -1,0 +1,155 @@
+import { lazy, Suspense } from 'react'
+import { useOptionalCatalogRuntime } from '@/features/catalog/CatalogRuntimeContext'
+import { CreateChatDialog as LazyCreateChatDialog } from '@/app/ai-console/CreateChatDialog'
+import type { ExtensionComponentProps } from '@/platform/extensions/types'
+import { useI18n } from '@/shared/i18n'
+
+const ChatsRoute = lazy(() => import('@/features/chat/ChatsRoute'))
+const ChatWorkspacePage = lazy(() => import('@/features/chat/ChatWorkspaceRoute'))
+const ThreadWorkspacePage = lazy(() => import('@/features/chat/thread/ThreadWorkspaceRoute'))
+const AgentsPage = lazy(async () => {
+  const module = await import('@/features/catalog/AgentsPage')
+  return { default: module.AgentsPage }
+})
+const ModelsPage = lazy(async () => {
+  const module = await import('@/features/catalog/ModelsPage')
+  return { default: module.ModelsPage }
+})
+const ProvidersPage = lazy(async () => {
+  const module = await import('@/features/catalog/ProvidersPage')
+  return { default: module.ProvidersPage }
+})
+const EnvironmentsPage = lazy(async () => {
+  const module = await import('@/features/environment/EnvironmentsPage')
+  return { default: module.EnvironmentsPage }
+})
+const McpServersPage = lazy(async () => {
+  const module = await import('@/features/catalog/mcp/McpServersPage')
+  return { default: module.McpServersPage }
+})
+const SkillPackagesPage = lazy(async () => {
+  const module = await import('@/features/catalog/skills/SkillPackagesPage')
+  return { default: module.SkillPackagesPage }
+})
+const ResourceEditorModal = lazy(async () => {
+  const module = await import('@/features/catalog/AiConsoleResourceEditorModal')
+  return { default: module.ResourceEditorModal }
+})
+const ConfirmActionModal = lazy(async () => {
+  const module = await import('@/shared/ui/overlays/ConfirmActionModal')
+  return { default: module.ConfirmActionModal }
+})
+
+export function ChatsPage({ children }: ExtensionComponentProps) {
+  const { t } = useI18n()
+  return (
+    <Suspense fallback={<div className="state-block" role="status">{t('ai.chat.loading')}</div>}>
+      <ChatsRoute>{children}</ChatsRoute>
+    </Suspense>
+  )
+}
+
+export function AgentsRoute({ children }: ExtensionComponentProps) {
+  const { t } = useI18n()
+  return (
+    <Suspense fallback={<div className="state-block" role="status">{t('ai.common.loadingAgent')}</div>}>
+      <AgentsPage>{children}</AgentsPage>
+    </Suspense>
+  )
+}
+
+export function ModelsRoute({ children }: ExtensionComponentProps) {
+  const { t } = useI18n()
+  return (
+    <Suspense fallback={<div className="state-block" role="status">{t('ai.common.loadingModel')}</div>}>
+      <ModelsPage>{children}</ModelsPage>
+    </Suspense>
+  )
+}
+
+export function ProvidersRoute({ children }: ExtensionComponentProps) {
+  const { t } = useI18n()
+  return (
+    <Suspense fallback={<div className="state-block" role="status">{t('ai.common.loadingProvider')}</div>}>
+      <ProvidersPage>{children}</ProvidersPage>
+    </Suspense>
+  )
+}
+
+export function CreateChatDialog() {
+  return <LazyCreateChatDialog />
+}
+
+export function ResourceEditorDialog() {
+  const { t } = useI18n()
+  const controller = useOptionalCatalogRuntime()
+  if (!controller?.resourceEditorModal.modal) {
+    return null
+  }
+  return (
+    <Suspense fallback={<div className="state-block" role="status">{t('ai.common.loadingResourceEditor')}</div>}>
+      <ResourceEditorModal {...controller.resourceEditorModal} />
+    </Suspense>
+  )
+}
+
+export function ResourceDeleteDialog() {
+  const { t } = useI18n()
+  const controller = useOptionalCatalogRuntime()
+  if (!controller?.resourceDeleteConfirmModal.modal) {
+    return null
+  }
+  return (
+    <Suspense fallback={<div className="state-block" role="status">{t('ai.common.loadingConfirmDialog')}</div>}>
+      <ConfirmActionModal {...controller.resourceDeleteConfirmModal} />
+    </Suspense>
+  )
+}
+
+export function EnvironmentsRoute({ children }: ExtensionComponentProps) {
+  const { t } = useI18n()
+  return (
+    <Suspense fallback={<div className="state-block" role="status">{t('ai.common.loadingEnvironment')}</div>}>
+      <EnvironmentsPage />
+      {children}
+    </Suspense>
+  )
+}
+
+export function SkillPackagesRoute({ children }: ExtensionComponentProps) {
+  const { t } = useI18n()
+  return (
+    <Suspense fallback={<div className="state-block" role="status">{t('ai.skillPackages.loading')}</div>}>
+      <SkillPackagesPage />
+      {children}
+    </Suspense>
+  )
+}
+
+export function McpServersRoute({ children }: ExtensionComponentProps) {
+  const { t } = useI18n()
+  return (
+    <Suspense fallback={<div className="state-block" role="status">{t('ai.common.loadingMcpServer')}</div>}>
+      <McpServersPage />
+      {children}
+    </Suspense>
+  )
+}
+
+export function ChatWorkspaceRoute({ children }: ExtensionComponentProps) {
+  const { t } = useI18n()
+  return (
+    <Suspense fallback={<div className="state-block" role="status">{t('ai.chat.loading')}</div>}>
+      <ChatWorkspacePage>{children}</ChatWorkspacePage>
+    </Suspense>
+  )
+}
+
+export function ThreadWorkspaceRoute({ children }: ExtensionComponentProps) {
+  const { t } = useI18n()
+  return (
+    <Suspense fallback={<div className="state-block" role="status">{t('ai.chat.loading')}</div>}>
+      <ThreadWorkspacePage>{children}</ThreadWorkspacePage>
+    </Suspense>
+  )
+}

@@ -3,8 +3,8 @@ import { createRoot } from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import '@/styles.css'
 import { setLocale } from '@/shared/i18n'
-import { ProviderForm } from '@/features/ai/catalog/AiProviderResourceForm'
-import type { ProviderDraft } from '@/features/ai/catalog/ai-console-types'
+import { ProviderForm } from '@/features/catalog/AiProviderResourceForm'
+import type { ProviderDraft } from '@/features/catalog/ai-console-types'
 import { SystemSettingsSchemaRenderer } from '@/features/settings/SystemSettingsSchemaRenderer'
 import {
   makeSettingsDto,

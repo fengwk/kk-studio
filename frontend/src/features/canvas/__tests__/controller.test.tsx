@@ -109,8 +109,8 @@ vi.mock('@/shared/api/storage-service', () => ({
   },
 }))
 
-vi.mock('@/features/ai/composer', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/features/ai/composer')>()
+vi.mock('@/features/chat/composer', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/features/chat/composer')>()
   return { ...actual, createWorkerHasher: () => async () => FAKE_SHA256 }
 })
 

@@ -21,12 +21,12 @@ export const FULL_COMPACTION_SUMMARY = [
   '```',
   '',
   '<read-files>',
-  'src/features/ai/runtime/thread-timeline-builder.ts',
-  'src/features/ai/runtime/thread-timeline/entry-event-projection.ts',
+  'src/features/chat/runtime/thread-timeline-builder.ts',
+  'src/features/chat/runtime/thread-timeline/entry-event-projection.ts',
   '</read-files>',
   '',
   '<modified-files>',
-  'src/features/ai/runtime/thread-panel/messages/CompactionEntryBlock.tsx',
+  'src/features/chat/runtime/thread-panel/messages/CompactionEntryBlock.tsx',
   '</modified-files>',
 ].join('\n')
 
@@ -39,7 +39,7 @@ export const LONG_COMPACTION_SUMMARY = [
     `第 ${index + 1} 段：这是一段用于撑开压缩摘要正文高度的说明文字，验证只有一个有界纵向滚动区。`),
   '',
   '<read-files>',
-  'src/features/ai/runtime/thread-timeline-builder.ts',
+  'src/features/chat/runtime/thread-timeline-builder.ts',
   '</read-files>',
 ].join('\n\n')
 
