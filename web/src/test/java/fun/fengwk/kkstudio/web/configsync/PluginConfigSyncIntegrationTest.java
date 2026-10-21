@@ -19,7 +19,7 @@ import tools.jackson.databind.JsonNode;
 import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentDefinitions;
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
-import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
+import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncApplier;
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncParser;
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncPlan;
@@ -336,7 +336,7 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
   private static List<String> providerNames(ConfigSyncSnapshot snapshot) {
     List<String> names = new ArrayList<>();
     for (AgentProvider provider : snapshot.providers()) {
-      names.add(provider.getName());
+      names.add(provider.name());
     }
     return names;
   }

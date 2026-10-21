@@ -44,9 +44,9 @@ import fun.fengwk.kkstudio.harness.runtime.retry.ModelHttpErrorPolicyProvider;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.catalog.provider.configuration.AgentProviderConfigurationCodec;
-import fun.fengwk.kkstudio.platform.catalog.provider.repo.AgentProviderRepository;
-import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
+import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
+import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderConfigurationCodec;
+import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterInternalAuthentication;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodePresence;
 import fun.fengwk.kkstudio.platform.environment.cluster.ClusterNodeRegistry;
@@ -238,7 +238,7 @@ public class HarnessRuntimeConfiguration {
       AgentProvider provider = agentProviderRepository.getByName(providerName);
       if (provider != null) {
         List<Integer> override =
-            providerConfigurationCodec.readHttpRetryStatusCodes(provider.getConfigJson());
+            providerConfigurationCodec.readHttpRetryStatusCodes(provider.configJson());
         if (override != null) {
           effective = override;
         }

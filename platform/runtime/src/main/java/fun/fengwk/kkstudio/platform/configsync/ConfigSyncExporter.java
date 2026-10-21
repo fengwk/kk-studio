@@ -9,8 +9,8 @@ import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefini
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser;
 import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
-import fun.fengwk.kkstudio.platform.catalog.provider.configuration.AgentProviderConfigurationCodec;
-import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
+import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
+import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderConfigurationCodec;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRow;
@@ -49,7 +49,7 @@ public final class ConfigSyncExporter {
 
     List<Object> providers = new ArrayList<>();
     for (AgentProvider provider : snapshot.providers()) {
-      if (selected.contains(ConfigSyncRefs.ref(ConfigSyncKind.PROVIDERS, provider.getName()))) {
+      if (selected.contains(ConfigSyncRefs.ref(ConfigSyncKind.PROVIDERS, provider.name()))) {
         providers.add(exportProvider(provider));
       }
     }
@@ -127,19 +127,19 @@ public final class ConfigSyncExporter {
 
   private Map<String, Object> exportProvider(AgentProvider provider) {
     ModelCallTimeoutPolicy timeout =
-        providerConfigurationCodec.readTimeoutPolicy(provider.getConfigJson());
+        providerConfigurationCodec.readTimeoutPolicy(provider.configJson());
     Map<String, Object> map = new LinkedHashMap<>();
-    map.put("name", provider.getName());
-    putIfNotNull(map, "description", provider.getDescription());
-    map.put("providerType", provider.getProviderType().wireValue());
-    putIfNotNull(map, "baseUrl", provider.getBaseUrl());
-    putIfNotNull(map, "credential", provider.getCredential());
+    map.put("name", provider.name());
+    putIfNotNull(map, "description", provider.description());
+    map.put("providerType", provider.providerType().wireValue());
+    putIfNotNull(map, "baseUrl", provider.baseUrl());
+    putIfNotNull(map, "credential", provider.credential());
     map.put("modelCallTimeoutMillis", timeout.modelCallTimeout().toMillis());
     map.put("modelCallIdleTimeoutMillis", timeout.modelCallIdleTimeout().toMillis());
     putIfNotNull(
         map,
         "modelHttpRetryStatusCodes",
-        providerConfigurationCodec.readHttpRetryStatusCodes(provider.getConfigJson()));
+        providerConfigurationCodec.readHttpRetryStatusCodes(provider.configJson()));
     return map;
   }
 

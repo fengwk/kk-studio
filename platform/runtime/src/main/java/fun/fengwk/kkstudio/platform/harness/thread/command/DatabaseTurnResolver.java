@@ -48,8 +48,8 @@ import fun.fengwk.kkstudio.platform.catalog.model.repo.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser.ParsedAgentModelConfig;
 import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
-import fun.fengwk.kkstudio.platform.catalog.provider.repo.AgentProviderRepository;
-import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
+import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
+import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
 import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogQueryService;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
@@ -332,7 +332,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
             ? ProviderCacheControl.none()
             : ProviderCacheControl.session(
                 promptCacheRetention(
-                    providerFactory, provider.getConfigJson(), selection.providerName()),
+                    providerFactory, provider.configJson(), selection.providerName()),
                 sessionId.toString());
     return new LiveTurnPlan.Planned(
         new ModelRequestSpec(
@@ -432,13 +432,13 @@ public final class DatabaseTurnResolver implements TurnResolver {
     if (variant == null) {
       return Optional.empty();
     }
-    ProviderType providerType = provider.getProviderType();
+    ProviderType providerType = provider.providerType();
     if (providerType == null) {
       throw rejection("provider type must not be null");
     }
     UUID connectionGenerationId =
         require(
-            provider.getConnectionGenerationId(),
+            provider.connectionGenerationId(),
             "provider connection generation id must not be null");
     ProviderFactory factory =
         require(
@@ -486,13 +486,13 @@ public final class DatabaseTurnResolver implements TurnResolver {
         require(
             providerRepository.getByName(agent.getModelProviderName()),
             "provider not found: " + agent.getModelProviderName());
-    ProviderType providerType = provider.getProviderType();
+    ProviderType providerType = provider.providerType();
     if (providerType == null) {
       throw rejection("provider type must not be null");
     }
     UUID providerConnectionGenerationId =
         require(
-            provider.getConnectionGenerationId(),
+            provider.connectionGenerationId(),
             "provider connection generation id must not be null");
     AgentModel model =
         require(

@@ -99,8 +99,8 @@ public final class ConfigSyncPlanner {
 
     Set<String> availableProviders = new LinkedHashSet<>();
     for (var provider : snapshot.providers()) {
-      if (!skippedProviders.contains(provider.getName())) {
-        availableProviders.add(provider.getName());
+      if (!skippedProviders.contains(provider.name())) {
+        availableProviders.add(provider.name());
       }
     }
     for (ConfigSyncParser.ProviderSpec spec : document.providers()) {

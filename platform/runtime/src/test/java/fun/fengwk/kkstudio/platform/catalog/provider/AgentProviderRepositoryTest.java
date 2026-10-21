@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.platform.catalog.provider.repo;
+package fun.fengwk.kkstudio.platform.catalog.provider;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -12,7 +12,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
-import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 
 import java.util.UUID;
@@ -36,30 +35,30 @@ public class AgentProviderRepositoryTest extends PostgresSpringTestSupport {
 
     AgentProvider stored = agentProviderRepository.getByName(name);
     assertNotNull(stored);
-    assertEquals(name, stored.getName());
-    assertEquals(ProviderType.OPENAI, stored.getProviderType());
+    assertEquals(name, stored.name());
+    assertEquals(ProviderType.OPENAI, stored.providerType());
     // Repository 必须显式写入稳定 wire 值，不做隐式 enum 名称转换。
     assertEquals(
         "openai",
         jdbc.queryForObject(
             "select provider_type from agent_provider where name = ?", String.class, name));
-    assertEquals("{}", stored.getConfigJson());
-    assertNotNull(stored.getCreateTime());
-    assertNotNull(stored.getUpdateTime());
+    assertEquals("{}", stored.configJson());
+    assertNotNull(stored.createTime());
+    assertNotNull(stored.updateTime());
     assertTrue(
         agentProviderRepository.page(new PageQuery(1, 100)).getResults().stream()
-            .anyMatch(candidate -> candidate.getName().equals(name)));
+            .anyMatch(candidate -> candidate.name().equals(name)));
 
-    stored.setDescription("updated");
-    assertTrue(agentProviderRepository.updateByName(stored, 0L));
+    AgentProvider edited = withDescription(stored, "updated");
+    assertTrue(agentProviderRepository.updateByName(edited, 0L));
     AgentProvider updated = agentProviderRepository.getByName(name);
-    assertEquals("updated", updated.getDescription());
-    assertEquals(Long.valueOf(1L), updated.getVersion());
+    assertEquals("updated", updated.description());
+    assertEquals(Long.valueOf(1L), updated.version());
 
-    assertFalse(agentProviderRepository.updateByName(stored, 0L));
-    assertTrue(agentProviderRepository.updateByName(stored, 1L));
+    assertFalse(agentProviderRepository.updateByName(edited, 0L));
+    assertTrue(agentProviderRepository.updateByName(edited, 1L));
     AgentProvider reread = agentProviderRepository.getByName(name);
-    assertEquals(Long.valueOf(2L), reread.getVersion());
+    assertEquals(Long.valueOf(2L), reread.version());
 
     assertFalse(agentProviderRepository.deleteByName(name, 0L));
     assertTrue(agentProviderRepository.deleteByName(name, 2L));
@@ -72,10 +71,9 @@ public class AgentProviderRepositoryTest extends PostgresSpringTestSupport {
     String name = "concurrent-provider-" + System.nanoTime();
     assertTrue(agentProviderRepository.create(provider(name)));
 
-    AgentProvider first = agentProviderRepository.getByName(name);
-    AgentProvider second = agentProviderRepository.getByName(name);
-    first.setDescription("first");
-    second.setDescription("second");
+    AgentProvider current = agentProviderRepository.getByName(name);
+    AgentProvider first = withDescription(current, "first");
+    AgentProvider second = withDescription(current, "second");
 
     CountDownLatch ready = new CountDownLatch(2);
     CountDownLatch start = new CountDownLatch(1);
@@ -101,20 +99,29 @@ public class AgentProviderRepositoryTest extends PostgresSpringTestSupport {
       int successfulUpdates = (firstResult.get() ? 1 : 0) + (secondResult.get() ? 1 : 0);
       assertEquals(1, successfulUpdates);
       AgentProvider reread = agentProviderRepository.getByName(name);
-      assertEquals(Long.valueOf(1L), reread.getVersion());
-      assertTrue(
-          "first".equals(reread.getDescription()) || "second".equals(reread.getDescription()));
+      assertEquals(Long.valueOf(1L), reread.version());
+      assertTrue("first".equals(reread.description()) || "second".equals(reread.description()));
     } finally {
       executor.shutdownNow();
     }
   }
 
   private AgentProvider provider(String name) {
-    AgentProvider provider = new AgentProvider();
-    provider.setName(name);
-    provider.setProviderType(ProviderType.OPENAI);
-    provider.setConfigJson("{}");
-    provider.setConnectionGenerationId(UUID.randomUUID());
-    return provider;
+    return new AgentProvider(
+        name, null, ProviderType.OPENAI, null, null, "{}", UUID.randomUUID(), null, null, null);
+  }
+
+  private static AgentProvider withDescription(AgentProvider source, String description) {
+    return new AgentProvider(
+        source.name(),
+        description,
+        source.providerType(),
+        source.baseUrl(),
+        source.credential(),
+        source.configJson(),
+        source.connectionGenerationId(),
+        source.version(),
+        source.createTime(),
+        source.updateTime());
   }
 }
