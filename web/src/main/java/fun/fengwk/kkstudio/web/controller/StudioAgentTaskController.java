@@ -26,6 +26,7 @@ import fun.fengwk.kkstudio.share.ai.runtime.AgentTaskDTO;
 import fun.fengwk.kkstudio.share.ai.runtime.AgentTaskSubmitDTO;
 import fun.fengwk.kkstudio.web.runtime.HarnessRuntimeRequestMapper;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -49,26 +50,28 @@ public class StudioAgentTaskController {
         Objects.requireNonNull(settingsMaterializer, "settingsMaterializer");
   }
 
-  /** 提交任务；202 仅表示任务已 durable 接受，结果经票据异步观察。 */
+  /**
+   * 提交任务；202 仅表示任务已 durable 接受，结果经票据异步观察。客户端给出的 {@code ticketId} 是幂等键：执行 Thread、Session 与首条命令的 id
+   * 都由它确定性派生，因此同一请求重放会精确命中原任务并返回其当前状态，同一 ticketId 换了内容则被运行时拒绝。
+   */
   @PostMapping
   public Result<AgentTaskDTO> submit(@RequestBody AgentTaskSubmitDTO request) {
     return Results.accepted(
         StudioHarnessThreadController.withRuntimeTranslation(
             () -> {
+              UUID ticketId = parse(request.getTicketId());
               String agent = requireText(request.getAgent(), "agent");
               String prompt = requireText(request.getPrompt(), "prompt");
               BranchSettings settings = settingsMaterializer.materialize(agent);
               NewThreadCommand command =
                   new NewThreadCommand(
                       new CustomMessageCommandPayload(AgentMessage.user(prompt)),
-                      UUID.randomUUID());
-              UUID ticketId = UUID.randomUUID();
-              UUID threadId = UUID.randomUUID();
+                      derivedId(ticketId, "command"));
               agentTasks.submit(
                   new AgentTaskRequest(
                       ticketId,
-                      threadId,
-                      UUID.randomUUID(),
+                      derivedId(ticketId, "thread"),
+                      derivedId(ticketId, "session"),
                       settings,
                       List.of(command),
                       AcceptancePreflight.IDENTITY,
@@ -79,12 +82,7 @@ public class StudioAgentTaskController {
                       false,
                       new SpawnRequest.Budget(request.getMaxTurns(), 1, 1, Integer.MAX_VALUE),
                       command.requestHash()));
-              AgentTaskDTO accepted = new AgentTaskDTO();
-              accepted.setTicketId(ticketId.toString());
-              accepted.setThreadId(threadId.toString());
-              accepted.setAgent(settings.agentName());
-              accepted.setState(AgentTaskStatus.State.RUNNING.name());
-              return accepted;
+              return status(ticketId);
             }));
   }
 
@@ -127,6 +125,12 @@ public class StudioAgentTaskController {
       dto.setError(receipt.error());
     }
     return dto;
+  }
+
+  /** 由票据确定性派生的 id：同一票据的重放得到同一组 Thread / Session / 命令 id。 */
+  private static UUID derivedId(UUID ticketId, String role) {
+    return UUID.nameUUIDFromBytes(
+        ("agent-task:" + role + ":" + ticketId).getBytes(StandardCharsets.UTF_8));
   }
 
   private static UUID parse(String ticketId) {
