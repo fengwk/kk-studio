@@ -1,4 +1,4 @@
-import { aiExtension } from '@/features/ai/extensions/ai-extension.definition'
+import { aiExtension } from '@/app/ai-console/ai-extension.definition'
 import { canvasExtension } from '@/features/canvas/extensions/canvas-extension'
 import { projectsExtension } from '@/features/projects/extensions/projects-extension.definition'
 import { settingsExtension } from '@/features/settings/settings-extension'

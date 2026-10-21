@@ -3,10 +3,10 @@ import { createRoot } from 'react-dom/client'
 import { MemoryRouter } from 'react-router'
 import '@/styles.css'
 import { setLocale } from '@/shared/i18n'
-import { SubagentTreePanel } from '@/features/ai/runtime/SubagentTreePanel'
-import { ActiveThreadTree } from '@/features/ai/runtime/ActiveThreadTree'
-import { projectThreadTree, type ActiveThreadTreeNode } from '@/features/ai/runtime/thread-panel/active-thread-tree'
-import { ThreadNavigationContext } from '@/features/ai/runtime/thread-navigation-context'
+import { SubagentTreePanel } from '@/features/chat/runtime/SubagentTreePanel'
+import { ActiveThreadTree } from '@/features/chat/runtime/ActiveThreadTree'
+import { projectThreadTree, type ActiveThreadTreeNode } from '@/features/chat/runtime/thread-panel/active-thread-tree'
+import { ThreadNavigationContext } from '@/features/chat/runtime/thread-navigation-context'
 
 setLocale('zh-CN')
 const node = (threadId: string, parentThreadId: string | null, agentName: string, processing = false, outcome: string | null = null): ActiveThreadTreeNode => ({

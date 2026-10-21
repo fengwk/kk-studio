@@ -1,0 +1,140 @@
+import { act, render, screen } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { ModelAttemptFailureMessageBlock } from '@/features/chat/runtime/thread-panel/messages/ModelAttemptFailureMessageBlock'
+import { retryCountdownSeconds } from '@/features/chat/runtime/thread-panel/messages/retry-countdown'
+import type { ModelAttemptFailureDialogueMessage } from '@/features/chat/runtime/thread-timeline-types'
+
+function message(
+  overrides: Partial<ModelAttemptFailureDialogueMessage> = {},
+): ModelAttemptFailureDialogueMessage {
+  return {
+    id: 'failure-1',
+    role: 'model_attempt_failure',
+    subjectEntryId: null,
+    createdAt: '2026-07-28T10:00:00Z',
+    status: 'done',
+    attempt: 1,
+    sequence: '2',
+    text: 'partial output',
+    thinking: 'partial thinking',
+    errorCode: 'TRANSIENT',
+    errorMessage: 'provider is busy',
+    failedAt: '2026-07-28T10:00:00Z',
+    retryAt: '2026-07-28T10:00:05Z',
+    nextAttempt: 2,
+    modelInvocationId: 'model-1',
+    ...overrides,
+  }
+}
+
+describe('ModelAttemptFailureMessageBlock', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-07-28T10:00:02Z'))
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('renders partial content normally and error in a separate block with countdown', () => {
+    const { container } = render(<ModelAttemptFailureMessageBlock message={message()} />)
+
+    expect(screen.getByText('模型请求失败')).toBeInTheDocument()
+    expect(screen.getByText('请求 #1')).toBeInTheDocument()
+    expect(screen.getByText('3 秒后重试（请求 #2）')).toBeInTheDocument()
+    expect(screen.getByText('partial output')).toBeInTheDocument()
+    expect(screen.getByText('partial thinking')).toBeInTheDocument()
+    expect(screen.getByText('TRANSIENT')).toBeInTheDocument()
+    expect(screen.getByText('provider is busy')).toBeInTheDocument()
+    expect(container.querySelector('.thread-block-model-attempt-failure-error')).toBeInTheDocument()
+    expect(container.querySelector('.thread-error-raw')).toBeInTheDocument()
+  })
+
+  it('changes to the stable retrying copy at retryAt and clears its timer on unmount', () => {
+    const { unmount } = render(<ModelAttemptFailureMessageBlock message={message()} />)
+
+    act(() => {
+      vi.advanceTimersByTime(3000)
+    })
+    expect(screen.getByText('正在重试（请求 #2）')).toBeInTheDocument()
+
+    unmount()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('does not schedule a timer for terminal failures', () => {
+    render(
+      <ModelAttemptFailureMessageBlock
+        message={message({ retryAt: null, nextAttempt: null })}
+      />,
+    )
+
+    expect(screen.getByText('模型请求失败')).toBeInTheDocument()
+    expect(screen.getByText('请求 #1')).toBeInTheDocument()
+    expect(screen.queryByText(/重试/u)).not.toBeInTheDocument()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('renders a durable retry as historical state without a countdown timer', () => {
+    render(
+      <ModelAttemptFailureMessageBlock
+        message={message({
+          subjectEntryId: 'entry-1',
+          modelInvocationId: undefined,
+        })}
+      />,
+    )
+
+    expect(screen.getByText('已安排重试（请求 #2）')).toBeInTheDocument()
+    expect(screen.queryByText(/还剩/u)).not.toBeInTheDocument()
+    expect(screen.queryByText(/正在进行/u)).not.toBeInTheDocument()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('calculates remaining seconds without a polling interval', () => {
+    expect(
+      retryCountdownSeconds('2026-07-28T10:00:05Z', Date.parse('2026-07-28T10:00:02.001Z')),
+    ).toBe(3)
+    expect(
+      retryCountdownSeconds('2026-07-28T10:00:05Z', Date.parse('2026-07-28T10:00:05Z')),
+    ).toBe(0)
+  })
+
+  it('renders long (>128 chars) multiline JSON and HTML error text safely escaped and untruncated', () => {
+    // 验证超长多行 JSON、请求 ID 与 HTML 片段在 pre 中原样展示且不被解析为 HTML DOM
+    const rawError = [
+      'HTTP 400',
+      '{',
+      '  "error": {',
+      '    "message": "context length exceeded by 132450 tokens. 详情：上下文超限",',
+      '    "type": "invalid_request_error",',
+      '    "param": "messages.[4].content",',
+      '    "code": "context_length_exceeded",',
+      '    "request_id": "req_vendor_987654321_abc_xyz",',
+      '    "html_snippet": "<html><body><script>alert(\\"xss\\")</script>502 Gateway Error</body></html>"',
+      '  }',
+      '}',
+    ].join('\n')
+    expect(rawError.length).toBeGreaterThan(128)
+
+    const { container } = render(
+      <ModelAttemptFailureMessageBlock
+        message={message({
+          errorCode: 'INVALID_REQUEST',
+          errorMessage: rawError,
+        })}
+      />,
+    )
+
+    const errorPre = container.querySelector('.thread-error-raw')
+    expect(errorPre).not.toBeNull()
+    expect(errorPre?.textContent).toBe(rawError)
+    // 验证文本转义：HTML 字符串绝不能作为真实 DOM 元素挂载
+    expect(container.querySelector('script')).toBeNull()
+    expect(container.querySelector('html')).toBeNull()
+    expect(container.querySelector('body')).toBeNull()
+    expect(screen.getByText(/req_vendor_987654321_abc_xyz/)).toBeInTheDocument()
+    expect(screen.getByText(/messages\.\[4\]\.content/)).toBeInTheDocument()
+  })
+})

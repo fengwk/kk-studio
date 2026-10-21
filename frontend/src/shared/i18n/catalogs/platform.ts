@@ -85,4 +85,40 @@ export const platformCatalog = {
     'en-US': 'Loading project',
     'zh-CN': '正在加载项目',
   },
+  'ai.nav.chats': {
+    'en-US': 'Chat',
+    'zh-CN': '对话',
+  },
+  'ai.nav.agents': {
+    'en-US': 'Agent',
+    'zh-CN': '代理',
+  },
+  'ai.nav.models': {
+    'en-US': 'Model',
+    'zh-CN': '模型',
+  },
+  'ai.nav.providers': {
+    'en-US': 'Provider',
+    'zh-CN': '提供商',
+  },
+  'ai.nav.environments': {
+    'en-US': 'Environment',
+    'zh-CN': '环境',
+  },
+  'ai.nav.mcpServers': {
+    'en-US': 'MCP Server',
+    'zh-CN': 'MCP 服务',
+  },
+  'ai.nav.skillPackages': {
+    'en-US': 'Skill Packages',
+    'zh-CN': '技能包',
+  },
+  'ai.nav.interactions': {
+    'en-US': 'Pending',
+    'zh-CN': '待处理',
+  },
+  'ai.nav.interactionsAria': {
+    'en-US': 'Pending Interactions',
+    'zh-CN': '待处理事项',
+  },
 } satisfies LocaleCatalog

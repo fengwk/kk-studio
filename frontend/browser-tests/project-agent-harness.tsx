@@ -4,7 +4,7 @@ import { createBrowserRouter, RouterProvider } from 'react-router'
 import '@/styles.css'
 import { setLocale } from '@/shared/i18n'
 import { ApplicationEventProvider } from '@/shared/app-events'
-import { IdeLifecycleProvider } from '@/features/ai/ide/IdeLifecycleProvider'
+import { IdeLifecycleProvider } from '@/features/environment/ide/IdeLifecycleProvider'
 import { ProjectDetailPage } from '@/features/projects/ProjectDetailPage'
 
 setLocale('zh-CN')

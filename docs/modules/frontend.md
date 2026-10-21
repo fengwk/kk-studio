@@ -22,7 +22,13 @@ AppShell 与 WorkbenchShell 的 `navItems` 必传，由应用组合根
 PageContribution 的 navGroup/workspace 决定当前导航分组高亮和沉浸布局，
 合法 Chat/Thread/Canvas 工作区隐藏 topbar。Escape 按阻塞弹层、菜单、编辑焦点的优先级处理。
 
-四个内置扩展提供 AI、Projects、Canvas、Settings 页面。
+一级特性按用户心智划分：[`chat`](../../frontend/src/features/chat)（Chat 工作区、Thread 运行时与编辑区）、
+[`catalog`](../../frontend/src/features/catalog)（Agent、模型、Provider、Skill Package 与 MCP Server）、
+[`environment`](../../frontend/src/features/environment)（执行环境与 IDE）、
+[`extensions`](../../frontend/src/features/extensions)（插件配置）、canvas、projects 与 settings。
+四个内置扩展提供页面：应用层的 [`ai-console`](../../frontend/src/app/ai-console) 把 chat、catalog、environment
+的页面组装进同一个 AI 导航分组，Projects、Canvas、Settings 各自声明扩展。
+i18n 文案按同一划分放在 [`catalogs`](../../frontend/src/shared/i18n/catalogs)，key 前缀保持不变。
 [`application-contributions.ts`](../../frontend/src/app/application-contributions.ts) 在应用组合边界
 把扩展一次性展开为只读的 pages、dialogs、overlays 与按 id 索引的 toolRenderers；
 重复 extension/contribution id 在组装时拒绝，运行时不再注册、覆盖或订阅。
@@ -85,7 +91,7 @@ TOOL_PARTIAL 按 thread/invocation/attempt 内 eventId 精确去重，process.ou
 Invocation 终态和 attempt failure 建立围栏，迟到信号丢弃；
 durable 结果到达后退出 transient overlay。
 
-[`thread-events.ts`](../../frontend/src/features/ai/runtime/thread-events.ts) 将 Entry、活动
+[`thread-events.ts`](../../frontend/src/features/chat/runtime/thread-events.ts) 将 Entry、活动
 Invocation 与 attempt failure 投影为时间线记录。`processing` 等价于阶段仍在处理中
 （`IDLE` 与 `STOPPED` 为 false），`executionControl` 是持久执行控制（`RUNNABLE` / `STOPPED`）；
 两者只描述该 Thread 自身，委派进度按执行树逐 Thread 展示，不由父 Thread 递归投影。
@@ -325,7 +331,7 @@ Settings 的 General 保存本地偏好；server tabs 由 settings schema 驱动
 ### Plugin 设置
 
 `/settings` 的静态 Plugins 页签挂载
-[`PluginsTab`](../../frontend/src/features/ai/plugins/PluginsTab.tsx)，调用 `/api/plugins`。
+[`PluginsTab`](../../frontend/src/features/extensions/PluginsTab.tsx)，调用 `/api/plugins`。
 卡片展示发行物已安装 StudioPlugin 的安全 descriptor、region、状态和刷新摘要。
 认证 contract 当前为 DEEP_LINK：选 region、打开官方链接、粘贴 callback、提交后清空 password 输入、
 重新读取安全状态。callback 不写浏览器 storage，同一请求保持单次提交。

@@ -1,0 +1,70 @@
+import type { AgentDraft, ModelDraft, ProviderDraft, ResourceModal } from '@/features/catalog/ai-console-types'
+import {
+  toEditableAgent,
+  toEditableAgentUpdate,
+  toEditableModel,
+  toEditableModelUpdate,
+  toEditableProvider,
+  toEditableProviderUpdate,
+} from '@/features/catalog/ai-resource-draft-codecs'
+import type { ResourceSubmitPlan } from '@/features/catalog/ai-resource-editor-plan-types'
+
+export function buildResourceSubmitPlan(
+  modal: ResourceModal,
+  drafts: {
+    providerDraft: ProviderDraft
+    modelDraft: ModelDraft
+    agentDraft: AgentDraft
+  },
+): ResourceSubmitPlan {
+  if (modal.kind === 'provider') {
+    if (modal.mode === 'edit') {
+      return {
+        kind: 'provider',
+        mode: 'edit',
+        name: modal.name,
+        data: { ...toEditableProviderUpdate(drafts.providerDraft), expectedVersion: modal.expectedVersion },
+      }
+    }
+    return {
+      kind: 'provider',
+      mode: 'create',
+      data: toEditableProvider(drafts.providerDraft),
+    }
+  }
+
+  if (modal.kind === 'model') {
+    if (modal.mode === 'edit') {
+      return {
+        kind: 'model',
+        mode: 'edit',
+        providerName: modal.providerName,
+        name: modal.name,
+        data: { ...toEditableModelUpdate(drafts.modelDraft), expectedVersion: modal.expectedVersion },
+      }
+    }
+    return {
+      kind: 'model',
+      mode: 'create',
+      data: toEditableModel(drafts.modelDraft),
+    }
+  }
+
+  if (modal.mode === 'edit') {
+    return {
+      kind: 'agent',
+      mode: 'edit',
+      name: modal.name,
+      data: {
+        // BUILTIN 允许未配置模型；请求体不携带系统持有的 type。
+        ...toEditableAgentUpdate(drafts.agentDraft, modal.type === 'BUILTIN'),
+        expectedVersion: modal.expectedVersion,
+      },
+    }
+  }
+  return {
+    kind: 'agent',
+    mode: 'create',
+    data: toEditableAgent(drafts.agentDraft),
+  }
+}

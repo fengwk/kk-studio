@@ -21,7 +21,7 @@ Unix 测试在一次性临时目录中执行实际生成的一行命令，用假
 运行，使用 PowerShell 5.1 和 7 执行同一下载入口，验证下载失败、脚本失败和 UTF-8 脚本可执行；
 非 Windows 主机明确跳过。发布安装器的预检与服务生命周期由 `scripts/daemon/tests/` 验证。
 
-Windows 原生执行入口：`npm test -- src/features/ai/environment/install-command.windows.test.ts`。
+Windows 原生执行入口：`npm test -- src/features/environment/install-command.windows.test.ts`。
 Unix 用例在 Windows 上跳过，不用 Git Bash 代替原生 PowerShell 下载入口。
 
 ## Windows 原生验证
