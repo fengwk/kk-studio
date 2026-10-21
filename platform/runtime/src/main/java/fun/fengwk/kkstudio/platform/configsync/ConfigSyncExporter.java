@@ -4,14 +4,14 @@ import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
-import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpServer;
+import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser;
-import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
-import fun.fengwk.kkstudio.platform.catalog.provider.configuration.AgentProviderConfigurationCodec;
-import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
+import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
+import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderConfigurationCodec;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
 import fun.fengwk.kkstudio.platform.plugin.persistence.PluginConfigurationRow;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
@@ -49,7 +49,7 @@ public final class ConfigSyncExporter {
 
     List<Object> providers = new ArrayList<>();
     for (AgentProvider provider : snapshot.providers()) {
-      if (selected.contains(ConfigSyncRefs.ref(ConfigSyncKind.PROVIDERS, provider.getName()))) {
+      if (selected.contains(ConfigSyncRefs.ref(ConfigSyncKind.PROVIDERS, provider.name()))) {
         providers.add(exportProvider(provider));
       }
     }
@@ -57,7 +57,7 @@ public final class ConfigSyncExporter {
 
     List<Object> models = new ArrayList<>();
     for (AgentModel model : snapshot.models()) {
-      if (selected.contains(ConfigSyncRefs.model(model.getProviderName(), model.getName()))) {
+      if (selected.contains(ConfigSyncRefs.model(model.providerName(), model.name()))) {
         models.add(exportModel(model));
       }
     }
@@ -65,7 +65,7 @@ public final class ConfigSyncExporter {
 
     List<Object> agents = new ArrayList<>();
     for (AgentDefinition agent : snapshot.agents()) {
-      if (selected.contains(ConfigSyncRefs.ref(ConfigSyncKind.AGENTS, agent.getName()))) {
+      if (selected.contains(ConfigSyncRefs.ref(ConfigSyncKind.AGENTS, agent.name()))) {
         agents.add(exportAgent(agent));
       }
     }
@@ -73,8 +73,7 @@ public final class ConfigSyncExporter {
 
     List<Object> skills = new ArrayList<>();
     for (SkillPackage pkg : snapshot.skillPackages()) {
-      if (selected.contains(
-          ConfigSyncRefs.ref(ConfigSyncKind.SKILL_PACKAGES, pkg.getPackageName()))) {
+      if (selected.contains(ConfigSyncRefs.ref(ConfigSyncKind.SKILL_PACKAGES, pkg.packageName()))) {
         skills.add(exportSkillPackage(pkg));
       }
     }
@@ -90,7 +89,7 @@ public final class ConfigSyncExporter {
 
     List<Object> mcpServers = new ArrayList<>();
     for (McpServer server : snapshot.mcpServers()) {
-      if (selected.contains(ConfigSyncRefs.ref(ConfigSyncKind.MCP_SERVERS, server.getName()))) {
+      if (selected.contains(ConfigSyncRefs.ref(ConfigSyncKind.MCP_SERVERS, server.name()))) {
         mcpServers.add(exportMcpServer(server));
       }
     }
@@ -127,53 +126,53 @@ public final class ConfigSyncExporter {
 
   private Map<String, Object> exportProvider(AgentProvider provider) {
     ModelCallTimeoutPolicy timeout =
-        providerConfigurationCodec.readTimeoutPolicy(provider.getConfigJson());
+        providerConfigurationCodec.readTimeoutPolicy(provider.configJson());
     Map<String, Object> map = new LinkedHashMap<>();
-    map.put("name", provider.getName());
-    putIfNotNull(map, "description", provider.getDescription());
-    map.put("providerType", provider.getProviderType().wireValue());
-    putIfNotNull(map, "baseUrl", provider.getBaseUrl());
-    putIfNotNull(map, "credential", provider.getCredential());
+    map.put("name", provider.name());
+    putIfNotNull(map, "description", provider.description());
+    map.put("providerType", provider.providerType().wireValue());
+    putIfNotNull(map, "baseUrl", provider.baseUrl());
+    putIfNotNull(map, "credential", provider.credential());
     map.put("modelCallTimeoutMillis", timeout.modelCallTimeout().toMillis());
     map.put("modelCallIdleTimeoutMillis", timeout.modelCallIdleTimeout().toMillis());
     putIfNotNull(
         map,
         "modelHttpRetryStatusCodes",
-        providerConfigurationCodec.readHttpRetryStatusCodes(provider.getConfigJson()));
+        providerConfigurationCodec.readHttpRetryStatusCodes(provider.configJson()));
     return map;
   }
 
   private Map<String, Object> exportModel(AgentModel model) {
     Map<String, Object> map = new LinkedHashMap<>();
-    map.put("providerName", model.getProviderName());
-    map.put("name", model.getName());
-    map.put("modelId", model.getModelId());
-    putIfNotNull(map, "description", model.getDescription());
-    map.put("config", yaml.toMap(modelConfigParser.decode(model.getConfigJson()), "model.config"));
+    map.put("providerName", model.providerName());
+    map.put("name", model.name());
+    map.put("modelId", model.modelId());
+    putIfNotNull(map, "description", model.description());
+    map.put("config", yaml.toMap(modelConfigParser.decode(model.configJson()), "model.config"));
     return map;
   }
 
   private Map<String, Object> exportAgent(AgentDefinition agent) {
     Map<String, Object> map = new LinkedHashMap<>();
-    map.put("name", agent.getName());
-    putIfNotNull(map, "description", agent.getDescription());
-    putIfNotNull(map, "systemPrompt", agent.getSystemPrompt());
-    map.put("model", ConfigSyncRefs.modelName(agent.getModelProviderName(), agent.getModelName()));
-    putIfNotNull(map, "variant", agent.getVariant());
-    map.put("config", yaml.toMap(agentConfigCodec.decode(agent.getConfigJson()), "agent.config"));
+    map.put("name", agent.name());
+    putIfNotNull(map, "description", agent.description());
+    putIfNotNull(map, "systemPrompt", agent.systemPrompt());
+    map.put("model", ConfigSyncRefs.modelName(agent.modelProviderName(), agent.modelName()));
+    putIfNotNull(map, "variant", agent.variant());
+    map.put("config", yaml.toMap(agentConfigCodec.decode(agent.configJson()), "agent.config"));
     return map;
   }
 
   private Map<String, Object> exportSkillPackage(SkillPackage pkg) {
     Map<String, Object> map = new LinkedHashMap<>();
-    map.put("packageName", pkg.getPackageName());
-    putIfNotNull(map, "description", pkg.getDescription());
-    map.put("repositoryUrl", pkg.getRepositoryUrl());
-    map.put("branch", pkg.getBranch());
-    map.put("currentCommit", pkg.getCurrentCommit());
+    map.put("packageName", pkg.packageName());
+    putIfNotNull(map, "description", pkg.description());
+    map.put("repositoryUrl", pkg.repositoryUrl());
+    map.put("branch", pkg.branch());
+    map.put("currentCommit", pkg.currentCommit());
     // 与 provider credential 一致：按既有“凭据原值导出”策略，令牌不隐式遗失。
-    if (pkg.getToken() != null) {
-      map.put("token", pkg.getToken());
+    if (pkg.token() != null) {
+      map.put("token", pkg.token());
     }
     return map;
   }
@@ -191,13 +190,13 @@ public final class ConfigSyncExporter {
 
   private Map<String, Object> exportMcpServer(McpServer server) {
     Map<String, Object> map = new LinkedHashMap<>();
-    map.put("name", server.getName());
-    map.put("url", server.getUrl());
-    if (server.getHeaders() != null && !server.getHeaders().isEmpty()) {
-      map.put("headers", new LinkedHashMap<>(server.getHeaders()));
+    map.put("name", server.name());
+    map.put("url", server.url());
+    if (server.headers() != null && !server.headers().isEmpty()) {
+      map.put("headers", new LinkedHashMap<>(server.headers()));
     }
-    map.put("enabled", server.isEnabled());
-    map.put("timeoutMillis", server.getTimeoutMillis());
+    map.put("enabled", server.enabled());
+    map.put("timeoutMillis", server.timeoutMillis());
     return map;
   }
 

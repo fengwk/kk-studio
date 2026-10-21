@@ -3,12 +3,12 @@ package fun.fengwk.kkstudio.platform.configsync;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionService;
 import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentDefinitions;
-import fun.fengwk.kkstudio.platform.catalog.definition.service.impl.AgentDefinitionMutationFactory;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.McpServerMutationValidator;
-import fun.fengwk.kkstudio.platform.catalog.model.service.impl.AgentModelMutationFactory;
-import fun.fengwk.kkstudio.platform.catalog.provider.service.impl.AgentProviderMutationFactory;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.SkillCatalogService;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpConfigParser;
+import fun.fengwk.kkstudio.platform.catalog.model.AgentModelService;
+import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderService;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogService;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentInstallConfigs;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentServiceImpl;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
@@ -65,25 +65,25 @@ public final class ConfigSyncParser {
           ConfigSyncKind.PLUGINS.wireValue());
 
   private final ConfigSyncYaml yaml;
-  private final AgentProviderMutationFactory providerFactory;
-  private final AgentModelMutationFactory modelFactory;
-  private final AgentDefinitionMutationFactory agentFactory;
+  private final AgentProviderService providerService;
+  private final AgentModelService modelService;
+  private final AgentDefinitionService agentService;
   private final SkillCatalogService skillCatalogService;
   private final SystemSettingsCodec systemSettingsCodec;
   private final StudioPluginRegistry pluginRegistry;
 
   public ConfigSyncParser(
       ConfigSyncYaml yaml,
-      AgentProviderMutationFactory providerFactory,
-      AgentModelMutationFactory modelFactory,
-      AgentDefinitionMutationFactory agentFactory,
+      AgentProviderService providerService,
+      AgentModelService modelService,
+      AgentDefinitionService agentService,
       SkillCatalogService skillCatalogService,
       SystemSettingsCodec systemSettingsCodec,
       StudioPluginRegistry pluginRegistry) {
     this.yaml = yaml;
-    this.providerFactory = providerFactory;
-    this.modelFactory = modelFactory;
-    this.agentFactory = agentFactory;
+    this.providerService = providerService;
+    this.modelService = modelService;
+    this.agentService = agentService;
     this.skillCatalogService = skillCatalogService;
     this.systemSettingsCodec = systemSettingsCodec;
     this.pluginRegistry = pluginRegistry;
@@ -238,7 +238,7 @@ public final class ConfigSyncParser {
     properties.applyModelHttpRetryStatusCodes(entry.optIntegerList("modelHttpRetryStatusCodes"));
     // 先用写入路径校验已知字段，未知字段不能绕过缺必填与非法值。
     validateEntry(
-        ConfigSyncKind.PROVIDERS, name, () -> providerFactory.validateImport(name, properties));
+        ConfigSyncKind.PROVIDERS, name, () -> providerService.validateImport(name, properties));
     if (skipUnknown(entry, ConfigSyncKind.PROVIDERS, name, skipped)) {
       return null;
     }
@@ -265,7 +265,7 @@ public final class ConfigSyncParser {
     properties.setConfig(
         yaml.convert(cleanedConfig, AgentModelConfigDTO.class, entry.path + ".config"));
     // 先用写入路径校验 known 字段（含嵌套 config 缺必填/非法值），未知字段不能绕过硬错误。
-    validateEntry(ConfigSyncKind.MODELS, key, () -> modelFactory.validateImport(name, properties));
+    validateEntry(ConfigSyncKind.MODELS, key, () -> modelService.validateImport(name, properties));
     if (skipUnknown(entry, ConfigSyncKind.MODELS, key, skipped)) {
       return null;
     }
@@ -308,7 +308,7 @@ public final class ConfigSyncParser {
     properties.setConfig(
         yaml.convert(cleanedConfig, AgentDefinitionConfigDTO.class, entry.path + ".config"));
     // 先用写入路径校验 known 字段（含嵌套 config 缺必填/非法值），未知字段不能绕过硬错误。
-    validateEntry(ConfigSyncKind.AGENTS, name, () -> agentFactory.validateImport(name, properties));
+    validateEntry(ConfigSyncKind.AGENTS, name, () -> agentService.validateImport(name, properties));
     if (skipUnknown(entry, ConfigSyncKind.AGENTS, name, skipped)) {
       return null;
     }
@@ -368,9 +368,8 @@ public final class ConfigSyncParser {
     Boolean enabled = entry.optBoolean("enabled");
     Long timeoutMillis = entry.optLong("timeoutMillis");
     // 与 CRUD 共用校验并规范化；未知字段不能绕过 name/url/header/timeout 的硬错误。
-    validateEntry(
-        ConfigSyncKind.MCP_SERVERS, name, () -> McpServerMutationValidator.requireName(name));
-    McpServerMutationValidator.HttpConfig config =
+    validateEntry(ConfigSyncKind.MCP_SERVERS, name, () -> McpConfigParser.requireName(name));
+    McpConfigParser.HttpConfig config =
         normalizeMcpConfig(name, url, headers, enabled, timeoutMillis);
     if (skipUnknown(entry, ConfigSyncKind.MCP_SERVERS, name, skipped)) {
       return null;
@@ -378,10 +377,10 @@ public final class ConfigSyncParser {
     return new McpSpec(name, config);
   }
 
-  private static McpServerMutationValidator.HttpConfig normalizeMcpConfig(
+  private static McpConfigParser.HttpConfig normalizeMcpConfig(
       String name, String url, Map<String, String> headers, Boolean enabled, Long timeoutMillis) {
     try {
-      return McpServerMutationValidator.normalizeHttpConfig(url, headers, enabled, timeoutMillis);
+      return McpConfigParser.normalizeHttpConfig(url, headers, enabled, timeoutMillis);
     } catch (AiValidationException error) {
       // 底层消息可能含 URL 或 header 值，统一替换为安全的类别与条目名，不携带 cause。
       throw new AiValidationException(
@@ -534,7 +533,7 @@ public final class ConfigSyncParser {
   public record EnvironmentSpec(
       String name, String registrationTokenHash, EnvironmentInstallConfigDTO installConfig) {}
 
-  public record McpSpec(String name, McpServerMutationValidator.HttpConfig config) {}
+  public record McpSpec(String name, McpConfigParser.HttpConfig config) {}
 
   /**
    * 已安装插件的普通配置条目：安装身份加该插件 schema 归一化后的普通值文本。

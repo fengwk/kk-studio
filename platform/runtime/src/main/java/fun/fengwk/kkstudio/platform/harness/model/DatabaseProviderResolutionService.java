@@ -10,9 +10,9 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactories;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderFactory;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
-import fun.fengwk.kkstudio.platform.catalog.provider.configuration.AgentProviderConfigurationCodec;
-import fun.fengwk.kkstudio.platform.catalog.provider.repo.AgentProviderRepository;
-import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
+import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
+import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderConfigurationCodec;
+import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
 
 import java.util.Objects;
 import java.util.UUID;
@@ -60,7 +60,7 @@ public final class DatabaseProviderResolutionService implements ProviderResoluti
     if (provider == null) {
       throw new IllegalArgumentException("provider not found: " + providerName);
     }
-    ProviderType providerType = provider.getProviderType();
+    ProviderType providerType = provider.providerType();
     if (providerType == null) {
       throw new IllegalArgumentException("provider type must not be null");
     }
@@ -77,12 +77,12 @@ public final class DatabaseProviderResolutionService implements ProviderResoluti
                         "ProviderFactory is not registered for " + providerType));
     ModelCallTimeoutPolicy timeoutPolicy;
     try {
-      timeoutPolicy = providerConfigurationCodec.readTimeoutPolicy(provider.getConfigJson());
+      timeoutPolicy = providerConfigurationCodec.readTimeoutPolicy(provider.configJson());
     } catch (RuntimeException error) {
       throw new IllegalArgumentException("cannot parse provider configuration for " + providerName);
     }
-    String baseUrl = provider.getBaseUrl();
-    UUID connectionGenerationId = provider.getConnectionGenerationId();
+    String baseUrl = provider.baseUrl();
+    UUID connectionGenerationId = provider.connectionGenerationId();
     if (connectionGenerationId == null) {
       throw new IllegalStateException(
           "provider " + providerName + " connectionGenerationId must not be null");
@@ -99,7 +99,7 @@ public final class DatabaseProviderResolutionService implements ProviderResoluti
         providerName, providerType, baseUrl, timeoutPolicy, connectionGenerationId);
     ProviderAdapter adapter;
     try {
-      adapter = factory.create(provider.getCredential(), provider.getConfigJson());
+      adapter = factory.create(provider.credential(), provider.configJson());
     } catch (RuntimeException error) {
       throw new IllegalArgumentException("cannot create provider adapter for " + providerName);
     }

@@ -52,9 +52,9 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.SetModelCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.UserMessageCommandPayload;
-import fun.fengwk.kkstudio.platform.catalog.provider.repo.AgentProviderRepository;
-import fun.fengwk.kkstudio.platform.catalog.provider.service.AgentProviderService;
-import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
+import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
+import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
+import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderService;
 import fun.fengwk.kkstudio.platform.chat.service.ChatService;
 import fun.fengwk.kkstudio.platform.error.CatalogVersions;
 import fun.fengwk.kkstudio.platform.harness.model.DatabaseProviderResolutionService;
@@ -756,7 +756,7 @@ class ProviderRequestPreviewIntegrationTest extends WebPostgresTestSupport {
     update.setCredential("stub-key");
     update.setModelCallTimeoutMillis(30_000L);
     update.setModelCallIdleTimeoutMillis(10_000L);
-    update.setExpectedVersion(CatalogVersions.format(provider.getVersion()));
+    update.setExpectedVersion(CatalogVersions.format(provider.version()));
     agentProviderService.updateProvider("stub", update);
   }
 

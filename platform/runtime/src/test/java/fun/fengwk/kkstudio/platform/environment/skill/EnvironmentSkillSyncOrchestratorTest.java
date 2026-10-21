@@ -35,8 +35,8 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityT
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonCapabilities;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonEnvironmentInfo;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
-import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogQueryService;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentEvent;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
@@ -107,13 +107,13 @@ class EnvironmentSkillSyncOrchestratorTest {
   private final ScriptedTransport transport = new ScriptedTransport();
 
   private EnvironmentRegistry registry;
-  private SkillCatalogQueryService catalogQuery;
+  private SkillPackageRepository catalogQuery;
   private EnvironmentSkillSyncOrchestrator orchestrator;
 
   @BeforeEach
   void setUp() {
     registry = mock(EnvironmentRegistry.class);
-    catalogQuery = mock(SkillCatalogQueryService.class);
+    catalogQuery = mock(SkillPackageRepository.class);
     rowStatus.put(ENV, LiveEnvironmentStatus.READY);
     rowStatus.put(OTHER, LiveEnvironmentStatus.READY);
 
@@ -813,11 +813,13 @@ class EnvironmentSkillSyncOrchestratorTest {
   }
 
   private static SkillPackage skillPackage(String packageName, String commit) {
-    SkillPackage skillPackage = new SkillPackage();
-    skillPackage.setPackageName(packageName);
-    skillPackage.setRepositoryUrl("https://git.example.com/" + packageName + ".git");
-    skillPackage.setBranch("main");
-    skillPackage.setCurrentCommit(commit);
+    SkillPackage skillPackage =
+        SkillPackage.builder()
+            .packageName(packageName)
+            .repositoryUrl("https://git.example.com/" + packageName + ".git")
+            .branch("main")
+            .currentCommit(commit)
+            .build();
     return skillPackage;
   }
 

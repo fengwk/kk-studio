@@ -9,24 +9,30 @@ import tools.jackson.databind.json.JsonMapper;
 import fun.fengwk.kkstudio.harness.common.json.JsonValues;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.common.schema.StringSchema;
+import fun.fengwk.kkstudio.harness.provider.ProviderModelDiscovery;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionConfigValidator;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionReferenceResolver;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionService;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
-import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.catalog.definition.service.impl.AgentDefinitionMutationFactory;
-import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpDiscoveryStatus;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpDiscoveryStatus;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpServer;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
+import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
+import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
+import fun.fengwk.kkstudio.platform.catalog.model.AgentModelService;
+import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelDefaultVariantResolver;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser;
-import fun.fengwk.kkstudio.platform.catalog.model.service.impl.AgentModelMutationFactory;
-import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
-import fun.fengwk.kkstudio.platform.catalog.provider.configuration.AgentProviderConfigurationCodec;
-import fun.fengwk.kkstudio.platform.catalog.provider.service.impl.AgentProviderMutationFactory;
-import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.SkillCatalogService;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.impl.SkillCatalogTestFixtures;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
+import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
+import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderConfigurationCodec;
+import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
+import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderService;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogService;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogTestFixtures;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillManifestEntry;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
 import fun.fengwk.kkstudio.platform.environment.RegistrationTokens;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
@@ -81,16 +87,36 @@ final class ConfigSyncFixtures {
       new AgentProviderConfigurationCodec(MAPPER);
   private static final AgentEditableSupport EDITABLE_SUPPORT = new AgentEditableSupport(MAPPER);
 
-  static final AgentProviderMutationFactory PROVIDER_MUTATION_FACTORY =
-      new AgentProviderMutationFactory(EDITABLE_SUPPORT, PROVIDER_CONFIG_CODEC);
-  static final AgentModelMutationFactory MODEL_MUTATION_FACTORY =
-      new AgentModelMutationFactory(EDITABLE_SUPPORT, MODEL_CONFIG_PARSER);
-  static final AgentDefinitionMutationFactory AGENT_MUTATION_FACTORY =
-      new AgentDefinitionMutationFactory(EDITABLE_SUPPORT, AGENT_CONFIG_CODEC);
+  /** 真实 {@code AgentProviderService.validateImport}：纯静态校验，仓储与上游发现以 mock 占位。 */
+  static final AgentProviderService PROVIDER_SERVICE =
+      new AgentProviderService(
+          mock(AgentProviderRepository.class),
+          PROVIDER_CONFIG_CODEC,
+          EDITABLE_SUPPORT,
+          mock(ProviderModelDiscovery.class));
+
+  /** 真实 {@code AgentModelService.validateImport}：纯静态校验，仓储以 mock 占位。 */
+  static final AgentModelService MODEL_SERVICE =
+      new AgentModelService(
+          mock(AgentModelRepository.class),
+          mock(AgentProviderRepository.class),
+          EDITABLE_SUPPORT,
+          MODEL_CONFIG_PARSER);
+
+  /** 真实 {@code AgentDefinitionService.validateImport}：纯静态校验，仓储与引用解析以 mock 占位。 */
+  static final AgentDefinitionService AGENT_SERVICE =
+      new AgentDefinitionService(
+          mock(AgentDefinitionRepository.class),
+          mock(AgentDefinitionReferenceResolver.class),
+          mock(AgentModelDefaultVariantResolver.class),
+          mock(AgentDefinitionConfigValidator.class),
+          AGENT_CONFIG_CODEC,
+          EDITABLE_SUPPORT,
+          mock(PluginAgentDependencies.class));
 
   /**
-   * 真实 {@code SkillCatalogServiceImpl.validateImport}：只做纯静态校验，避免单测 mock 掉能力而要求另一份生产校验。其余仓储依赖由
-   * {@link SkillCatalogTestFixtures} 以 mock 占位。
+   * 真实 {@code SkillCatalogService.validateImport}：只做纯静态校验，避免单测 mock 掉能力而要求另一份生产校验。其余仓储依赖由 {@link
+   * SkillCatalogTestFixtures} 以 mock 占位。
    */
   static final SkillCatalogService SKILL_CATALOG_SERVICE = SkillCatalogTestFixtures.realValidator();
 
@@ -105,9 +131,9 @@ final class ConfigSyncFixtures {
   static ConfigSyncParser parser(ConfigSyncYaml yaml, StudioPluginRegistry pluginRegistry) {
     return new ConfigSyncParser(
         yaml,
-        PROVIDER_MUTATION_FACTORY,
-        MODEL_MUTATION_FACTORY,
-        AGENT_MUTATION_FACTORY,
+        PROVIDER_SERVICE,
+        MODEL_SERVICE,
+        AGENT_SERVICE,
         SKILL_CATALOG_SERVICE,
         new SystemSettingsCodec(),
         pluginRegistry);
@@ -176,13 +202,13 @@ final class ConfigSyncFixtures {
   }
 
   static AgentProvider provider(String name) {
-    AgentProvider provider = new AgentProvider();
-    provider.setName(name);
-    provider.setProviderType(ProviderType.OPENAI);
-    provider.setBaseUrl("https://api.example.com");
-    provider.setCredential("secret-key");
-    provider.setVersion(0L);
-    return provider;
+    return AgentProvider.builder()
+        .name(name)
+        .providerType(ProviderType.OPENAI)
+        .baseUrl("https://api.example.com")
+        .credential("secret-key")
+        .version(0L)
+        .build();
   }
 
   static AgentModel model(String providerName, String name) {
@@ -190,38 +216,42 @@ final class ConfigSyncFixtures {
   }
 
   static AgentModel model(String providerName, String name, AgentModelConfigDTO config) {
-    AgentModel model = new AgentModel();
-    model.setProviderName(providerName);
-    model.setName(name);
-    model.setModelId("gpt-4");
-    model.setConfigJson(MODEL_CONFIG_PARSER.encode(config));
-    model.setVersion(0L);
+    AgentModel model =
+        AgentModel.builder()
+            .providerName(providerName)
+            .name(name)
+            .modelId("gpt-4")
+            .configJson(MODEL_CONFIG_PARSER.encode(config))
+            .version(0L)
+            .build();
     return model;
   }
 
   static AgentDefinition agent(
       String name, String providerName, String modelName, AgentDefinitionConfigDTO config) {
-    AgentDefinition agent = new AgentDefinition();
-    agent.setName(name);
-    agent.setModelProviderName(providerName);
-    agent.setModelName(modelName);
-    agent.setConfigJson(AGENT_CONFIG_CODEC.encode(config));
-    agent.setVersion(0L);
+    AgentDefinition agent =
+        AgentDefinition.builder()
+            .name(name)
+            .modelProviderName(providerName)
+            .modelName(modelName)
+            .configJson(AGENT_CONFIG_CODEC.encode(config))
+            .version(0L)
+            .build();
     return agent;
   }
 
   static SkillPackage skillPackage(String packageName, String... skillNames) {
-    SkillPackage pkg = new SkillPackage();
-    pkg.setPackageName(packageName);
-    pkg.setRepositoryUrl("https://example.com/" + packageName + ".git");
-    pkg.setBranch("main");
-    pkg.setCurrentCommit("0".repeat(40));
     List<SkillManifestEntry> skills = new ArrayList<>();
     for (String skillName : skillNames) {
       skills.add(new SkillManifestEntry(skillName, "desc " + skillName));
     }
-    pkg.setSkills(skills);
-    return pkg;
+    return SkillPackage.builder()
+        .packageName(packageName)
+        .repositoryUrl("https://example.com/" + packageName + ".git")
+        .branch("main")
+        .currentCommit("0".repeat(40))
+        .skills(skills)
+        .build();
   }
 
   static Environment environment(String name) {
@@ -233,20 +263,19 @@ final class ConfigSyncFixtures {
   }
 
   static McpServer mcpServer(String name, boolean enabled) {
-    McpServer server = new McpServer();
-    server.setName(name);
-    server.setUrl("https://mcp.example.com/" + name);
-    server.setEnabled(enabled);
-    server.setTimeoutMillis(30_000L);
-    server.setDiscoveryStatus(McpDiscoveryStatus.AVAILABLE);
+    McpServer server =
+        McpServer.builder()
+            .name(name)
+            .url("https://mcp.example.com/" + name)
+            .enabled(enabled)
+            .timeoutMillis(30_000L)
+            .discoveryStatus(McpDiscoveryStatus.AVAILABLE)
+            .build();
     return server;
   }
 
   static McpTool mcpTool(String name, String serverName) {
-    McpTool tool = new McpTool();
-    tool.setName(name);
-    tool.setServerName(serverName);
-    tool.setSourceName(name);
+    McpTool tool = McpTool.builder().name(name).serverName(serverName).sourceName(name).build();
     return tool;
   }
 

@@ -16,8 +16,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
+import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
 import fun.fengwk.kkstudio.platform.environment.RegistrationTokens;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsCodec;
 import fun.fengwk.kkstudio.share.configsync.ConfigSyncKind;
@@ -52,8 +52,8 @@ class ConfigSyncExporterTest {
 
   @Test
   void exportIncludesProviderHttpRetryOverride() {
-    AgentProvider p = provider("p");
-    p.setConfigJson("{\"modelHttpRetryStatusCodes\":[408,429]}");
+    AgentProvider p =
+        provider("p").toBuilder().configJson("{\"modelHttpRetryStatusCodes\":[408,429]}").build();
     ConfigSyncSnapshot snapshot =
         snapshot(List.of(p), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
 
@@ -128,8 +128,7 @@ class ConfigSyncExporterTest {
 
   @Test
   void exportIncludesSkillAccessTokenVerbatim() {
-    SkillPackage pkg = skillPackage("pkg", "s");
-    pkg.setToken("pkg-token");
+    SkillPackage pkg = skillPackage("pkg", "s").toBuilder().token("pkg-token").build();
     ConfigSyncSnapshot snapshot =
         snapshot(List.of(), List.of(), List.of(), List.of(pkg), List.of(), List.of(), List.of());
 

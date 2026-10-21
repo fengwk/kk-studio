@@ -15,9 +15,9 @@ import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DuplicateKeyException;
 import tools.jackson.databind.json.JsonMapper;
 
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
-import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionType;
 import fun.fengwk.kkstudio.share.ai.catalog.BuiltinAgentPrompts;
@@ -40,15 +40,14 @@ class BuiltinAgentInitializerTest {
     ArgumentCaptor<AgentDefinition> captor = ArgumentCaptor.forClass(AgentDefinition.class);
     verify(repository).create(captor.capture());
     AgentDefinition created = captor.getValue();
-    assertEquals(BuiltinAgentDefinitions.COMPACTION_NAME, created.getName());
-    assertEquals(AgentDefinitionType.BUILTIN, created.getType());
+    assertEquals(BuiltinAgentDefinitions.COMPACTION_NAME, created.name());
+    assertEquals(AgentDefinitionType.BUILTIN, created.type());
     // 独立未配置模型：两列与 variant 同为 null，不选首个 model，也不继承父配置。
-    assertNull(created.getModelProviderName());
-    assertNull(created.getModelName());
-    assertNull(created.getVariant());
-    assertEquals(
-        BuiltinAgentPrompts.compactionSummarizationSystemPrompt(), created.getSystemPrompt());
-    AgentDefinitionConfigDTO config = codec.decode(created.getConfigJson());
+    assertNull(created.modelProviderName());
+    assertNull(created.modelName());
+    assertNull(created.variant());
+    assertEquals(BuiltinAgentPrompts.compactionSummarizationSystemPrompt(), created.systemPrompt());
+    AgentDefinitionConfigDTO config = codec.decode(created.configJson());
     assertTrue(config.getTools().isEmpty());
     assertTrue(config.getSkills().isEmpty());
     assertTrue(config.getSubagents().isEmpty());
@@ -57,10 +56,12 @@ class BuiltinAgentInitializerTest {
 
   @Test
   void skipsExistingBuiltinWithoutOverwritingUserEdits() {
-    AgentDefinition existing = new AgentDefinition();
-    existing.setName(BuiltinAgentDefinitions.COMPACTION_NAME);
-    existing.setType(AgentDefinitionType.BUILTIN);
-    existing.setSystemPrompt("user edited prompt");
+    AgentDefinition existing =
+        AgentDefinition.builder()
+            .name(BuiltinAgentDefinitions.COMPACTION_NAME)
+            .type(AgentDefinitionType.BUILTIN)
+            .systemPrompt("user edited prompt")
+            .build();
     when(repository.getByName(BuiltinAgentDefinitions.COMPACTION_NAME)).thenReturn(existing);
 
     // 幂等：重复启动仍是 no-op，绝不覆盖既有编辑。

@@ -13,9 +13,9 @@ import fun.fengwk.kkstudio.harness.mcp.McpClient;
 import fun.fengwk.kkstudio.harness.mcp.McpDeadline;
 import fun.fengwk.kkstudio.harness.mcp.McpToolCallResult;
 import fun.fengwk.kkstudio.harness.mcp.McpToolDefinition;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpServer;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.mcp.discovery.McpToolDiscovery;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
 
 import java.util.List;
 import java.util.Map;
@@ -28,9 +28,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 class ConfigSyncMcpDiscoveryTest {
 
   private McpServer server() {
-    McpServer server = mcpServer("mcp", true);
-    server.setHeaders(Map.of());
-    return server;
+    return mcpServer("mcp", true).toBuilder().headers(Map.of()).build();
   }
 
   private static McpClient client(
@@ -79,7 +77,7 @@ class ConfigSyncMcpDiscoveryTest {
     List<McpTool> tools = discovery.discoverOrNull(server());
 
     assertEquals(1, tools.size());
-    assertEquals("mcp_mcp_echo", tools.get(0).getName());
+    assertEquals("mcp_mcp_echo", tools.get(0).name());
     assertTrue(closed.get());
   }
 

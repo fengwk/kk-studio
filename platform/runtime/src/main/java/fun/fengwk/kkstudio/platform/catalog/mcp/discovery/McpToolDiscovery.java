@@ -6,10 +6,10 @@ import fun.fengwk.kkstudio.harness.mcp.McpClientFactory;
 import fun.fengwk.kkstudio.harness.mcp.McpDeadline;
 import fun.fengwk.kkstudio.harness.mcp.McpToolDefinition;
 import fun.fengwk.kkstudio.harness.mcp.RemoteMcpConfig;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpConfigParser;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpServer;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpToolNameNormalizer;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.McpConfigParser;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 
 import java.time.Duration;
@@ -69,12 +69,14 @@ public final class McpToolDiscovery {
             "mcp server returns tools that normalize to the same model name: " + toolName);
       }
 
-      McpTool candidate = new McpTool();
-      candidate.setName(toolName);
-      candidate.setServerName(server.getName());
-      candidate.setSourceName(sourceName);
-      candidate.setDescription(requireDescription(remote.description(), sourceName));
-      candidate.setInputSchemaJson(canonicalizeSchema(remote.inputSchemaJson(), sourceName));
+      McpTool candidate =
+          McpTool.builder()
+              .name(toolName)
+              .serverName(server.name())
+              .sourceName(sourceName)
+              .description(requireDescription(remote.description(), sourceName))
+              .inputSchemaJson(canonicalizeSchema(remote.inputSchemaJson(), sourceName))
+              .build();
       candidates.add(candidate);
     }
     return List.copyOf(candidates);
@@ -82,9 +84,9 @@ public final class McpToolDiscovery {
 
   private List<McpToolDefinition> listRemoteTools(McpServer server) {
     Map<String, String> resolvedHeaders =
-        McpConfigParser.resolveHeaders(server.getHeaders(), envProvider);
-    RemoteMcpConfig config = new RemoteMcpConfig(server.getUrl(), resolvedHeaders);
-    Duration timeout = Duration.ofMillis(server.getTimeoutMillis());
+        McpConfigParser.resolveHeaders(server.headers(), envProvider);
+    RemoteMcpConfig config = new RemoteMcpConfig(server.url(), resolvedHeaders);
+    Duration timeout = Duration.ofMillis(server.timeoutMillis());
     McpDeadline deadline = McpDeadline.of(timeout);
     McpCancellationToken token = McpCancellationToken.none();
 
@@ -127,7 +129,7 @@ public final class McpToolDiscovery {
 
   private static String requireToolName(McpServer server, String sourceName) {
     try {
-      return McpToolNameNormalizer.requireModelToolName(server.getName(), sourceName);
+      return McpToolNameNormalizer.requireModelToolName(server.name(), sourceName);
     } catch (IllegalArgumentException error) {
       throw new AiValidationException(RESOURCE, error.getMessage());
     }

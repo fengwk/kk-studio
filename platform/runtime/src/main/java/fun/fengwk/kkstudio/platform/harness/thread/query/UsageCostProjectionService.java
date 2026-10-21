@@ -11,9 +11,9 @@ import fun.fengwk.kkstudio.harness.runtime.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelCost;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelUsage;
-import fun.fengwk.kkstudio.platform.catalog.model.repo.AgentModelRepository;
+import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
+import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser;
-import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.share.ai.runtime.HarnessUsageCostDTO;
 
 import java.util.HashMap;
@@ -121,7 +121,7 @@ public class UsageCostProjectionService {
     AgentModel model =
         modelRepository.getByProviderNameAndName(selection.providerName(), selection.modelName());
     ModelPricing pricing =
-        model == null ? null : modelConfigParser.parse(model.getConfigJson()).pricing();
+        model == null ? null : modelConfigParser.parse(model.configJson()).pricing();
     pricingByModel.put(key, pricing);
     return pricing;
   }
