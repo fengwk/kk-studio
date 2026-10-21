@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.harness.builtin.goal;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -25,8 +24,6 @@ import fun.fengwk.kkstudio.harness.contributor.api.StateDeclaration;
 import fun.fengwk.kkstudio.harness.contributor.api.StateMode;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionContext;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
@@ -44,10 +41,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 /**
  * 用户维护 Goal 的只读读取、goal-id-bound 进度声明与 catalog 冻结测试。
@@ -249,49 +243,6 @@ class GoalFeatureTest {
     assertTrue(updateOutcome.customEntries().isEmpty());
   }
 
-  /** 验证 terminal-at-most-once：listener 同步抛出时工具不会再次触发 onComplete。 */
-  @Test
-  void listenerThrowingExceptionDoesNotTriggerSecondaryCallback() {
-    SimpleBranchView branch = new SimpleBranchView().withGoal(GOAL);
-    AtomicInteger calls = new AtomicInteger();
-    ToolExecutionListener throwingListener =
-        new ToolExecutionListener() {
-          @Override
-          public void onPartial(ToolResult partial) {}
-
-          @Override
-          public void onComplete(ToolOutcome outcome) {
-            calls.incrementAndGet();
-            throw new RuntimeException("listener sync failure");
-          }
-
-          @Override
-          public void onError(Throwable error) {}
-        };
-
-    ToolExecutionRequest getRequest =
-        new ToolExecutionRequest(
-            new GetGoalTool().descriptor(),
-            new ToolCall("call-1", "get_goal", "{}"),
-            Duration.ZERO,
-            new ToolExecutionContext(UUID.randomUUID(), UUID.randomUUID(), T1, branch));
-    assertThrows(
-        RuntimeException.class, () -> new GetGoalTool().execute(getRequest, throwingListener));
-    assertEquals(1, calls.get(), "get_goal must invoke onComplete exactly once");
-
-    calls.set(0);
-    ToolExecutionRequest updateRequest =
-        new ToolExecutionRequest(
-            new UpdateGoalTool().descriptor(),
-            new ToolCall("call-2", "update_goal", "{\"status\":\"complete\",\"reason\":\"done\"}"),
-            Duration.ZERO,
-            new ToolExecutionContext(UUID.randomUUID(), UUID.randomUUID(), T2, branch));
-    assertThrows(
-        RuntimeException.class,
-        () -> new UpdateGoalTool().execute(updateRequest, throwingListener));
-    assertEquals(1, calls.get(), "update_goal must invoke onComplete exactly once");
-  }
-
   private static ToolOutcome executeTool(
       Tool tool, BranchView branch, Instant executedAt, String callId, String argumentsJson) {
     ToolExecutionContext context =
@@ -302,23 +253,7 @@ class GoalFeatureTest {
             new ToolCall(callId, tool.descriptor().name(), argumentsJson),
             Duration.ZERO,
             context);
-    AtomicReference<ToolOutcome> ref = new AtomicReference<>();
-    tool.execute(
-        request,
-        new ToolExecutionListener() {
-          @Override
-          public void onPartial(ToolResult partial) {}
-
-          @Override
-          public void onComplete(ToolOutcome outcome) {
-            ref.set(outcome);
-          }
-
-          @Override
-          public void onError(Throwable error) {}
-        });
-    assertNotNull(ref.get(), "listener.onComplete must be called synchronously");
-    return ref.get();
+    return execute(tool, request);
   }
 
   private static ToolOutcome executeToolWithoutContext(
@@ -328,23 +263,15 @@ class GoalFeatureTest {
             tool.descriptor(),
             new ToolCall(callId, tool.descriptor().name(), argumentsJson),
             Duration.ZERO);
-    AtomicReference<ToolOutcome> ref = new AtomicReference<>();
-    tool.execute(
-        request,
-        new ToolExecutionListener() {
-          @Override
-          public void onPartial(ToolResult partial) {}
+    return execute(tool, request);
+  }
 
-          @Override
-          public void onComplete(ToolOutcome outcome) {
-            ref.set(outcome);
-          }
-
-          @Override
-          public void onError(Throwable error) {}
-        });
-    assertNotNull(ref.get(), "listener.onComplete must be called");
-    return ref.get();
+  private static ToolOutcome execute(Tool tool, ToolExecutionRequest request) {
+    try {
+      return tool.execute(request, partial -> {});
+    } catch (InterruptedException interrupted) {
+      throw new AssertionError(interrupted);
+    }
   }
 
   private static String textContent(ToolResult result) {
@@ -387,22 +314,9 @@ class GoalFeatureTest {
       }
 
       @Override
-      public ToolExecutionHandle execute(
-          ToolExecutionRequest request, ToolExecutionListener listener) {
-        return new ToolExecutionHandle() {
-          @Override
-          public void cancel() {}
-
-          @Override
-          public boolean isCancelled() {
-            return false;
-          }
-
-          @Override
-          public CompletionStage<Void> quiescence() {
-            return CompletableFuture.completedFuture(null);
-          }
-        };
+      public ToolOutcome execute(ToolExecutionRequest request, Consumer<ToolResult> progress) {
+        return ToolOutcome.withoutEffects(
+            new ToolResult(request.call().id(), List.of(), false, "{}"));
       }
     };
   }

@@ -7,8 +7,8 @@
  * <p>{@link fun.fengwk.kkstudio.harness.runtime.port.TurnResolver} 是同步、无副作用、调用方事务内的解析端口；{@link
  * fun.fengwk.kkstudio.harness.runtime.port.ModelGateway} 与 {@link
  * fun.fengwk.kkstudio.harness.runtime.port.ToolGateway} 是 execution admission / stream 端口。Model
- * admission 固定为 Started / Busy / Rejected / Indeterminate，Tool admission 固定为 Started / RetryLater /
- * Rejected / Indeterminate；重复或陈旧的 Listener 回调由 Runtime 实施所有权围栏与陈旧回调围栏拦截，两阶段激活规范要求在持久化 RUNNING
+ * admission 固定为 Started / Busy / Rejected / Indeterminate，Tool 只做本地 admission（Admitted / Busy /
+ * Rejected）并阻塞执行至终态；重复或陈旧的 Listener 回调由 Runtime 实施所有权围栏与陈旧回调围栏拦截，两阶段激活规范要求在持久化 RUNNING
  * 落地前不得打开回调门控。{@link fun.fengwk.kkstudio.harness.runtime.port.RealtimeEventSink} 保持现有唯一 realtime
  * 接口，不另造 event bus。
  */

@@ -13,7 +13,7 @@ import type {
 
 export type ToolVisualState = 'pending' | 'success' | 'error'
 export type ToolExecutionState =
-  | 'preparing' | 'queued' | 'environment' | 'approval' | 'input' | 'dispatching'
+  | 'preparing' | 'queued' | 'environment' | 'approval' | 'input'
   | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'unknown'
 
 /** 状态仅取 durable invocation；模型流里的 call.done 只是参数完整。 */
@@ -24,7 +24,6 @@ export function toolExecutionState(
     case 'READY': return message.waitingForEnvironment ? 'environment' : 'queued'
     case 'WAITING_APPROVAL': return 'approval'
     case 'WAITING_INPUT': return 'input'
-    case 'DISPATCHING': return 'dispatching'
     case 'RUNNING': return 'running'
     case 'SUCCEEDED': return 'succeeded'
     case 'FAILED': return 'failed'

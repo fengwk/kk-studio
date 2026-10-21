@@ -3,19 +3,17 @@ package fun.fengwk.kkstudio.harness.builtin.goal;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.builtin.BuiltinHistoryRenderers;
-import fun.fengwk.kkstudio.harness.builtin.CompletedToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.contributor.api.GoalSnapshot;
 import fun.fengwk.kkstudio.harness.contributor.api.StateDeclaration;
 import fun.fengwk.kkstudio.harness.contributor.api.StateMode;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolHistoryRenderer;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 
 import java.time.Duration;
@@ -23,6 +21,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Consumer;
 
 /**
  * 把当前用户 Goal 的 Agent 声明（complete | blocked + reason）记成 goal-id-bound 的 {@code goal.progress}。
@@ -64,15 +63,12 @@ public final class UpdateGoalTool implements Tool {
   }
 
   @Override
-  public ToolExecutionHandle execute(ToolExecutionRequest request, ToolExecutionListener listener) {
+  public ToolOutcome execute(ToolExecutionRequest request, Consumer<ToolResult> progress) {
     Objects.requireNonNull(request, "request");
-    Objects.requireNonNull(listener, "listener");
     if (request.context() == null) {
-      listener.onComplete(
-          GoalToolSupport.error(
-              request.call(),
-              new IllegalArgumentException("update_goal requires durable ToolExecutionContext")));
-      return CompletedToolExecutionHandle.INSTANCE;
+      return GoalToolSupport.error(
+          request.call(),
+          new IllegalArgumentException("update_goal requires durable ToolExecutionContext"));
     }
     ToolOutcome outcome;
     try {
@@ -98,7 +94,6 @@ public final class UpdateGoalTool implements Tool {
     } catch (RuntimeException error) {
       outcome = GoalToolSupport.error(request.call(), error);
     }
-    listener.onComplete(outcome);
-    return CompletedToolExecutionHandle.INSTANCE;
+    return outcome;
   }
 }

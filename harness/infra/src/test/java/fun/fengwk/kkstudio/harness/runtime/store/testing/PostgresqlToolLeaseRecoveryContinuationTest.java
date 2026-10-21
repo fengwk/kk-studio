@@ -263,9 +263,7 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
                   .getFirst()
                   .markApprovalNotRequired(T3);
           tx.updateToolInvocations(List.of(ready));
-          ToolInvocation dispatching = ready.beginDispatch(T3);
-          tx.updateToolInvocations(List.of(dispatching));
-          tx.updateToolInvocations(List.of(dispatching.markRunning(T3)));
+          tx.updateToolInvocations(List.of(ready.markRunning(T3)));
           return null;
         });
     return modelId;
@@ -315,9 +313,9 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
     }
 
     @Override
-    public StartResult start(Execution execution, Listener listener) {
+    public Admission admit(Execution execution) {
       startCalls.incrementAndGet();
-      return new ToolGateway.RetryLater(Duration.ofSeconds(9));
+      return new ToolGateway.Busy(Duration.ofSeconds(9));
     }
   }
 }

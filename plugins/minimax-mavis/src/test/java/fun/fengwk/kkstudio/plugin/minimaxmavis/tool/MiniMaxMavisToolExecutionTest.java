@@ -14,9 +14,7 @@ import fun.fengwk.kkstudio.harness.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.harness.common.result.JsonResultContent;
 import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialSnapshot;
@@ -43,8 +41,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.AbstractExecutorService;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -82,7 +79,7 @@ class MiniMaxMavisToolExecutionTest {
 
   private FakeMavisTransport transport;
   private FakeResourceGateway gateway;
-  private DirectExecutor executor;
+  private final Semaphore executor = new Semaphore(8);
   private PluginCredentialAccess credentialAccess;
   private MiniMaxMavisHarnessContributor contributor;
   private Map<MavisCapability, Tool> tools;
@@ -91,7 +88,6 @@ class MiniMaxMavisToolExecutionTest {
   void setUp() {
     this.transport = new FakeMavisTransport();
     this.gateway = new FakeResourceGateway();
-    this.executor = new DirectExecutor();
 
     PluginCredentialSnapshot snapshot =
         new PluginCredentialSnapshot(
@@ -146,7 +142,7 @@ class MiniMaxMavisToolExecutionTest {
         new ToolExecutionRequest(tool.descriptor(), call, capability.requestTimeout());
 
     TestToolExecutionListener listener = new TestToolExecutionListener();
-    tool.execute(request, listener);
+    listener.run(tool, request);
 
     ToolResult result = listener.result();
     assertTrue(result != null, "Tool execution must invoke the completion listener");
@@ -217,8 +213,8 @@ class MiniMaxMavisToolExecutionTest {
     // 第一次调用：应产生 1 次 catalog 请求 + 1 次 invoke 请求
     ToolCall call1 = new ToolCall("call-first", tool.descriptor().name(), arguments);
     TestToolExecutionListener listener1 = new TestToolExecutionListener();
-    tool.execute(
-        new ToolExecutionRequest(tool.descriptor(), call1, Duration.ofSeconds(120)), listener1);
+    listener1.run(
+        tool, new ToolExecutionRequest(tool.descriptor(), call1, Duration.ofSeconds(120)));
     assertFalse(listener1.result().error());
     assertEquals(2, transport.requests().size(), "First call should send catalog GET and MCP POST");
 
@@ -227,8 +223,8 @@ class MiniMaxMavisToolExecutionTest {
     String arguments2 = sampleArguments(MavisCapability.LIST_VOICES);
     ToolCall call2 = new ToolCall("call-second", tool2.descriptor().name(), arguments2);
     TestToolExecutionListener listener2 = new TestToolExecutionListener();
-    tool2.execute(
-        new ToolExecutionRequest(tool2.descriptor(), call2, Duration.ofSeconds(120)), listener2);
+    listener2.run(
+        tool2, new ToolExecutionRequest(tool2.descriptor(), call2, Duration.ofSeconds(120)));
     assertFalse(listener2.result().error());
 
     assertEquals(
@@ -286,42 +282,6 @@ class MiniMaxMavisToolExecutionTest {
 
     public List<MavisHttpRequest> requests() {
       return requests;
-    }
-  }
-
-  /** 同线程执行器，确保 Tool 执行结果同步交付，避免多线程异步等待。 */
-  static final class DirectExecutor extends AbstractExecutorService {
-    private volatile boolean terminated = false;
-
-    @Override
-    public void shutdown() {
-      terminated = true;
-    }
-
-    @Override
-    public List<Runnable> shutdownNow() {
-      terminated = true;
-      return List.of();
-    }
-
-    @Override
-    public boolean isShutdown() {
-      return terminated;
-    }
-
-    @Override
-    public boolean isTerminated() {
-      return terminated;
-    }
-
-    @Override
-    public boolean awaitTermination(long timeout, TimeUnit unit) {
-      return true;
-    }
-
-    @Override
-    public void execute(Runnable command) {
-      command.run();
     }
   }
 
@@ -397,21 +357,17 @@ class MiniMaxMavisToolExecutionTest {
   }
 
   /** 收集回调结果的同步测试 Listener。 */
-  static final class TestToolExecutionListener implements ToolExecutionListener {
+  static final class TestToolExecutionListener {
     private final AtomicReference<ToolResult> resultRef = new AtomicReference<>();
     private final AtomicReference<Throwable> errorRef = new AtomicReference<>();
 
-    @Override
-    public void onPartial(ToolResult partial) {}
-
-    @Override
-    public void onComplete(ToolOutcome outcome) {
-      resultRef.set(outcome.result());
-    }
-
-    @Override
-    public void onError(Throwable error) {
-      errorRef.set(error);
+    /** 阻塞执行一次工具并记录结果或抛出的异常。 */
+    void run(Tool tool, ToolExecutionRequest request) {
+      try {
+        resultRef.set(tool.execute(request, partial -> {}).result());
+      } catch (Throwable failure) {
+        errorRef.set(failure);
+      }
     }
 
     public ToolResult result() {

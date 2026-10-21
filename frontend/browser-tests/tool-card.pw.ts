@@ -566,7 +566,7 @@ test.describe('narrow pane header', () => {
 
 test('all durable states retain accessible labels without visible status icons or text', async ({ page }) => {
   await page.evaluate(() => window.toolCardHarness.durableStates())
-  const states = ['queued', 'approval', 'input', 'dispatching', 'running', 'succeeded', 'failed', 'cancelled', 'unknown']
+  const states = ['queued', 'approval', 'input', 'running', 'succeeded', 'failed', 'cancelled', 'unknown']
   for (const state of states) {
     await expect(page.locator(`[data-invocation-state="${state}"]`)).toHaveCount(1)
     await expect(page.locator(`[data-invocation-state="${state}"]`)).toHaveAttribute('aria-label', /bash: .+/)

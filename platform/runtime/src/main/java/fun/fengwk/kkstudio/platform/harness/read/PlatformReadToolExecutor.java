@@ -3,14 +3,11 @@ package fun.fengwk.kkstudio.platform.harness.read;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
-import fun.fengwk.kkstudio.harness.builtin.CompletedToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.builtin.environment.ReadToolExecutor;
 import fun.fengwk.kkstudio.harness.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.contributor.api.BoundEnvironment;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionContext;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
@@ -22,6 +19,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Consumer;
 import java.util.regex.Pattern;
 
 /**
@@ -60,171 +58,138 @@ public class PlatformReadToolExecutor implements ReadToolExecutor {
   }
 
   @Override
-  public ToolExecutionHandle read(ToolExecutionRequest request, ToolExecutionListener listener) {
+  public ToolResult read(ToolExecutionRequest request, Consumer<ToolResult> progress)
+      throws InterruptedException {
     Objects.requireNonNull(request, "request");
-    Objects.requireNonNull(listener, "listener");
 
     String callId = request.call().id();
 
     try {
       JsonNode args = objectMapper.readTree(request.call().argumentsJson());
       if (args == null || !args.isObject()) {
-        listener.onComplete(ToolResult.error(callId, "arguments must be a JSON object"));
-        return CompletedToolExecutionHandle.INSTANCE;
+        return ToolResult.error(callId, "arguments must be a JSON object");
       }
 
       JsonNode pathNode = args.get("path");
       if (pathNode == null || !pathNode.isTextual() || pathNode.asText().isBlank()) {
-        listener.onComplete(ToolResult.error(callId, "path must be a non-blank string"));
-        return CompletedToolExecutionHandle.INSTANCE;
+        return ToolResult.error(callId, "path must be a non-blank string");
       }
       String path = pathNode.asText();
 
-      Integer offset = parsePositiveInt(args, "offset", callId, listener);
-      if (offset == null && args.hasNonNull("offset")) {
-        return CompletedToolExecutionHandle.INSTANCE;
-      }
-
-      Integer limit = parsePositiveInt(args, "limit", callId, listener);
-      if (limit == null && args.hasNonNull("limit")) {
-        return CompletedToolExecutionHandle.INSTANCE;
-      }
-
-      Integer columnOffset = parsePositiveInt(args, "column_offset", callId, listener);
-      if (columnOffset == null && args.hasNonNull("column_offset")) {
-        return CompletedToolExecutionHandle.INSTANCE;
-      }
+      Integer offset = parsePositiveInt(args, "offset");
+      Integer limit = parsePositiveInt(args, "limit");
+      Integer columnOffset = parsePositiveInt(args, "column_offset");
 
       if (path.startsWith("kkstudio:")) {
         ReadDeadline deadline = ReadDeadline.after(request.timeout());
-        return handleKkstudioUri(
-            callId, path, offset, limit, columnOffset, request, listener, deadline);
+        return handleKkstudioUri(callId, path, offset, limit, columnOffset, request, deadline);
       }
 
       if (isRemoteSchemeUri(path)) {
-        listener.onComplete(
-            ToolResult.error(callId, "Platform does not support remote URI fetching: " + path));
-        return CompletedToolExecutionHandle.INSTANCE;
+        return ToolResult.error(callId, "Platform does not support remote URI fetching: " + path);
       }
 
-      return handleLocalPath(request, listener, callId);
+      return handleLocalPath(request, progress, callId);
     } catch (PlatformReadException e) {
-      listener.onComplete(ToolResult.error(callId, e.getMessage()));
-      return CompletedToolExecutionHandle.INSTANCE;
-    } catch (Throwable t) {
-      String message = t.getMessage() != null ? t.getMessage() : t.getClass().getSimpleName();
-      listener.onComplete(ToolResult.error(callId, message));
-      return CompletedToolExecutionHandle.INSTANCE;
+      return ToolResult.error(callId, e.getMessage());
+    } catch (InterruptedException interrupted) {
+      throw interrupted;
+    } catch (Exception e) {
+      String message = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+      return ToolResult.error(callId, message);
     }
   }
 
-  private ToolExecutionHandle handleKkstudioUri(
+  private ToolResult handleKkstudioUri(
       String callId,
       String path,
       Integer offset,
       Integer limit,
       Integer columnOffset,
       ToolExecutionRequest request,
-      ToolExecutionListener listener,
       ReadDeadline deadline) {
     if (path.startsWith(KKSTUDIO_SKILLS_PREFIX)) {
-      return handleSkillUri(callId, path, offset, limit, columnOffset, listener, deadline);
+      return handleSkillUri(callId, path, offset, limit, columnOffset, deadline);
     }
 
     if (path.startsWith(KKSTUDIO_RESOURCES_PREFIX)) {
-      return handleResourceUri(
-          callId, path, offset, limit, columnOffset, request, listener, deadline);
+      return handleResourceUri(callId, path, offset, limit, columnOffset, request, deadline);
     }
 
-    listener.onComplete(ToolResult.error(callId, "unsupported kkstudio: URI: " + path));
-    return CompletedToolExecutionHandle.INSTANCE;
+    return ToolResult.error(callId, "unsupported kkstudio: URI: " + path);
   }
 
-  private ToolExecutionHandle handleSkillUri(
+  private ToolResult handleSkillUri(
       String callId,
       String path,
       Integer offset,
       Integer limit,
       Integer columnOffset,
-      ToolExecutionListener listener,
       ReadDeadline deadline) {
     String sub = path.substring(KKSTUDIO_SKILLS_PREFIX.length());
 
     int firstSlash = sub.indexOf('/');
     if (firstSlash <= 0) {
-      listener.onComplete(ToolResult.error(callId, "unsupported kkstudio: URI: " + path));
-      return CompletedToolExecutionHandle.INSTANCE;
+      return ToolResult.error(callId, "unsupported kkstudio: URI: " + path);
     }
     String packageName = sub.substring(0, firstSlash);
     String rest = sub.substring(firstSlash + 1);
 
     int secondSlash = rest.indexOf('/');
     if (secondSlash <= 0) {
-      listener.onComplete(ToolResult.error(callId, "unsupported kkstudio: URI: " + path));
-      return CompletedToolExecutionHandle.INSTANCE;
+      return ToolResult.error(callId, "unsupported kkstudio: URI: " + path);
     }
     String skillName = rest.substring(0, secondSlash);
     String relativePath = rest.substring(secondSlash + 1);
 
     if (packageName.isBlank() || skillName.isBlank() || relativePath.isBlank()) {
-      listener.onComplete(ToolResult.error(callId, "unsupported kkstudio: URI: " + path));
-      return CompletedToolExecutionHandle.INSTANCE;
+      return ToolResult.error(callId, "unsupported kkstudio: URI: " + path);
     }
 
     try {
       byte[] bytes = skillReader.readSkillFile(packageName, skillName, relativePath);
       String text =
           ReadTextWindow.format(bytes, offset, limit, columnOffset, path, "unsupported", deadline);
-      listener.onComplete(
-          new ToolResult(callId, List.of(new TextResultContent(text)), false, "{}"));
+      return new ToolResult(callId, List.of(new TextResultContent(text)), false, "{}");
     } catch (PlatformReadException e) {
-      listener.onComplete(ToolResult.error(callId, e.getMessage()));
+      return ToolResult.error(callId, e.getMessage());
     } catch (Exception e) {
-      listener.onComplete(
-          ToolResult.error(
-              callId, e.getMessage() != null ? e.getMessage() : "failed to read skill"));
+      return ToolResult.error(
+          callId, e.getMessage() != null ? e.getMessage() : "failed to read skill");
     }
-    return CompletedToolExecutionHandle.INSTANCE;
   }
 
-  private ToolExecutionHandle handleResourceUri(
+  private ToolResult handleResourceUri(
       String callId,
       String path,
       Integer offset,
       Integer limit,
       Integer columnOffset,
       ToolExecutionRequest request,
-      ToolExecutionListener listener,
       ReadDeadline deadline) {
     String blobIdStr = path.substring(KKSTUDIO_RESOURCES_PREFIX.length());
 
     if (blobIdStr.isBlank() || blobIdStr.contains("/")) {
-      listener.onComplete(ToolResult.error(callId, "unsupported kkstudio: URI: " + path));
-      return CompletedToolExecutionHandle.INSTANCE;
+      return ToolResult.error(callId, "unsupported kkstudio: URI: " + path);
     }
 
     UUID blobId;
     try {
       blobId = UUID.fromString(blobIdStr);
     } catch (IllegalArgumentException e) {
-      listener.onComplete(
-          ToolResult.error(callId, "invalid resource blobId (must be a valid UUID): " + blobIdStr));
-      return CompletedToolExecutionHandle.INSTANCE;
+      return ToolResult.error(
+          callId, "invalid resource blobId (must be a valid UUID): " + blobIdStr);
     }
 
     if (!blobId.toString().equalsIgnoreCase(blobIdStr)) {
-      listener.onComplete(
-          ToolResult.error(
-              callId, "invalid resource blobId (must be a canonical UUID): " + blobIdStr));
-      return CompletedToolExecutionHandle.INSTANCE;
+      return ToolResult.error(
+          callId, "invalid resource blobId (must be a canonical UUID): " + blobIdStr);
     }
 
     ToolExecutionContext context = request.context();
     if (context == null || context.threadId() == null) {
-      listener.onComplete(
-          ToolResult.error(
-              callId, "execution context with threadId is required to read kkstudio: resources"));
-      return CompletedToolExecutionHandle.INSTANCE;
+      return ToolResult.error(
+          callId, "execution context with threadId is required to read kkstudio: resources");
     }
 
     try {
@@ -239,39 +204,34 @@ public class PlatformReadToolExecutor implements ReadToolExecutor {
               columnOffset,
               path,
               deadline);
-      ToolResult result =
-          switch (read) {
-            case ResourceRead.Text text -> new ToolResult(
-                callId, List.of(new TextResultContent(text.text())), false, "{}");
-            case ResourceRead.Media media -> new ToolResult(
-                callId,
-                List.of(new ResourceResultContent(media.resource(), media.preview())),
-                false,
-                "{}");
-          };
-      listener.onComplete(result);
+      return switch (read) {
+        case ResourceRead.Text text -> new ToolResult(
+            callId, List.of(new TextResultContent(text.text())), false, "{}");
+        case ResourceRead.Media media -> new ToolResult(
+            callId,
+            List.of(new ResourceResultContent(media.resource(), media.preview())),
+            false,
+            "{}");
+      };
     } catch (PlatformReadException e) {
-      listener.onComplete(ToolResult.error(callId, e.getMessage()));
+      return ToolResult.error(callId, e.getMessage());
     } catch (Exception e) {
-      listener.onComplete(
-          ToolResult.error(
-              callId, e.getMessage() != null ? e.getMessage() : "failed to read resource"));
+      return ToolResult.error(
+          callId, e.getMessage() != null ? e.getMessage() : "failed to read resource");
     }
-    return CompletedToolExecutionHandle.INSTANCE;
   }
 
-  private ToolExecutionHandle handleLocalPath(
-      ToolExecutionRequest request, ToolExecutionListener listener, String callId) {
+  private ToolResult handleLocalPath(
+      ToolExecutionRequest request, Consumer<ToolResult> progress, String callId)
+      throws InterruptedException {
     ToolExecutionContext context = request.context();
     Optional<BoundEnvironment> environment =
         context == null ? Optional.empty() : context.environment();
 
     if (environment.isEmpty()) {
-      listener.onComplete(
-          ToolResult.error(
-              callId,
-              "No environment bound in execution context; select an environment for the branch and retry."));
-      return CompletedToolExecutionHandle.INSTANCE;
+      return ToolResult.error(
+          callId,
+          "No environment bound in execution context; select an environment for the branch and retry.");
     }
 
     return environment
@@ -279,7 +239,7 @@ public class PlatformReadToolExecutor implements ReadToolExecutor {
         .execute(
             EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_READ),
             request,
-            listener);
+            progress);
   }
 
   private static boolean isRemoteSchemeUri(String path) {
@@ -287,15 +247,14 @@ public class PlatformReadToolExecutor implements ReadToolExecutor {
         && !WINDOWS_DRIVE_PATTERN.matcher(path).matches();
   }
 
-  private static Integer parsePositiveInt(
-      JsonNode args, String name, String callId, ToolExecutionListener listener) {
+  /** 缺省返回 null；显式给出但不是正整数时按参数错误抛出（{@link PlatformReadException} 收敛为错误结果）。 */
+  private static Integer parsePositiveInt(JsonNode args, String name) {
     JsonNode node = args.get(name);
     if (node == null || node.isNull()) {
       return null;
     }
     if (!node.isIntegralNumber() || node.asLong() < 1 || node.asLong() > Integer.MAX_VALUE) {
-      listener.onComplete(ToolResult.error(callId, name + " must be a positive integer"));
-      return null;
+      throw new PlatformReadException(name + " must be a positive integer");
     }
     return node.asInt();
   }

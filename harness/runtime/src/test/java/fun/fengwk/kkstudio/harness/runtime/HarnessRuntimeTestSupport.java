@@ -657,16 +657,14 @@ final class HarnessRuntimeTestSupport {
         });
   }
 
-  /** 将指定 id 的 ToolInvocation 从 READY 经 DISPATCHING/RUNNING 推进到 terminal UNKNOWN（outcome 尚未物化）。 */
+  /** 将指定 id 的 ToolInvocation 从 READY 经 RUNNING 推进到 terminal UNKNOWN（outcome 尚未物化）。 */
   static ToolInvocation unknownTool(InMemoryHarnessStore store, UUID toolId) {
     return store.transaction(
         tx -> {
           ToolInvocation tool = tx.lockToolInvocation(toolId).orElseThrow();
           ToolInvocation preflighted = tool.markApprovalNotRequired(T3);
           tx.updateToolInvocations(List.of(preflighted));
-          ToolInvocation dispatched = preflighted.beginDispatch(T3);
-          tx.updateToolInvocations(List.of(dispatched));
-          ToolInvocation running = dispatched.markRunning(T3);
+          ToolInvocation running = preflighted.markRunning(T3);
           tx.updateToolInvocations(List.of(running));
           ToolInvocation unknown = running.unknown(toolError(), T3);
           tx.updateToolInvocations(List.of(unknown));
@@ -674,20 +672,18 @@ final class HarnessRuntimeTestSupport {
         });
   }
 
-  /** 将指定 tool 从 READY 推进到 DISPATCHING（approval preflight 已完成，attempt 保持为 0）。 */
-  static ToolInvocation beginDispatchTool(InMemoryHarnessStore store, UUID toolId) {
+  /** 将指定 tool 保持 READY 并完成 approval preflight（not-required approval，attempt 保持为 0）。 */
+  static ToolInvocation approveTool(InMemoryHarnessStore store, UUID toolId) {
     return store.transaction(
         tx -> {
           ToolInvocation tool = tx.lockToolInvocation(toolId).orElseThrow();
-          ToolInvocation preflighted = tool.markApprovalNotRequired(T3);
-          tx.updateToolInvocations(List.of(preflighted));
-          ToolInvocation updated = preflighted.beginDispatch(T3);
+          ToolInvocation updated = tool.markApprovalNotRequired(T3);
           tx.updateToolInvocations(List.of(updated));
           return updated;
         });
   }
 
-  /** 将指定 tool 从 DISPATCHING 推进到 RUNNING（attempt 推进到 1）。 */
+  /** 将已完成 approval preflight 的 tool 从 READY 推进到 RUNNING（attempt 推进到 1）。 */
   static ToolInvocation markRunningTool(InMemoryHarnessStore store, UUID toolId) {
     return store.transaction(
         tx -> {

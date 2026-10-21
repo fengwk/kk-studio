@@ -1,16 +1,14 @@
 package fun.fengwk.kkstudio.harness.builtin.environment;
 
-import fun.fengwk.kkstudio.harness.builtin.CompletedToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.common.tool.ToolErrorGuidance;
 import fun.fengwk.kkstudio.harness.common.tool.ToolErrorGuidance.ExecutionFact;
 import fun.fengwk.kkstudio.harness.contributor.api.BoundEnvironment;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionContext;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolHistoryRenderer;
+import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
@@ -21,6 +19,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Consumer;
 
 /** 委托至 BoundEnvironment 执行的具体环境能力 Tool 实现。 */
 public final class EnvironmentCapabilityTool implements Tool {
@@ -78,14 +77,15 @@ public final class EnvironmentCapabilityTool implements Tool {
   }
 
   @Override
-  public ToolExecutionHandle execute(ToolExecutionRequest request, ToolExecutionListener listener) {
+  public ToolOutcome execute(ToolExecutionRequest request, Consumer<ToolResult> progress)
+      throws InterruptedException {
     Objects.requireNonNull(request, "request");
-    Objects.requireNonNull(listener, "listener");
+    Objects.requireNonNull(progress, "progress");
     ToolExecutionContext context = request.context();
     Optional<BoundEnvironment> environment =
         context == null ? Optional.empty() : context.environment();
     if (environment.isEmpty()) {
-      listener.onComplete(
+      return ToolOutcome.withoutEffects(
           new ToolResult(
               request.call().id(),
               List.of(
@@ -96,8 +96,7 @@ public final class EnvironmentCapabilityTool implements Tool {
                           "Select an Environment for the branch, then call the tool again"))),
               true,
               "{}"));
-      return CompletedToolExecutionHandle.INSTANCE;
     }
-    return environment.get().execute(capability, request, listener);
+    return ToolOutcome.withoutEffects(environment.get().execute(capability, request, progress));
   }
 }

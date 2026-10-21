@@ -14,7 +14,7 @@ import java.util.EnumMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Semaphore;
 
 /**
  * MiniMax Mavis 的 Harness Contributor：把 15 个能力注册为模型可见工具。
@@ -85,14 +85,14 @@ public final class MiniMaxMavisHarnessContributor implements HarnessContributor 
       MavisClient client,
       MiniMaxMavisCapabilityCache capabilityCache,
       MiniMaxMavisResourceAccess resourceAccess,
-      ExecutorService executor) {
+      Semaphore callPermits) {
 
     public ToolDependencies {
       Objects.requireNonNull(credentialAccess, "credentialAccess");
       Objects.requireNonNull(client, "client");
       Objects.requireNonNull(capabilityCache, "capabilityCache");
       Objects.requireNonNull(resourceAccess, "resourceAccess");
-      Objects.requireNonNull(executor, "executor");
+      Objects.requireNonNull(callPermits, "callPermits");
     }
   }
 
@@ -109,7 +109,7 @@ public final class MiniMaxMavisHarnessContributor implements HarnessContributor 
               dependencies.client(),
               dependencies.capabilityCache(),
               dependencies.resourceAccess(),
-              dependencies.executor()));
+              dependencies.callPermits()));
     }
     return new MiniMaxMavisHarnessContributor(tools);
   }

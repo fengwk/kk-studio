@@ -2,11 +2,11 @@ package fun.fengwk.kkstudio.platform.harness.tool.gateway;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.builtin.CompletedToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.common.result.BinaryResultContent;
 import fun.fengwk.kkstudio.harness.common.result.ResultContent;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
@@ -23,8 +23,6 @@ import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
 import fun.fengwk.kkstudio.harness.contributor.api.StateDeclaration;
 import fun.fengwk.kkstudio.harness.contributor.api.StateMode;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
@@ -58,6 +56,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 /** 统一 Tool SPI 的 branch effects、provenance、WRITE 声明与 owner 注入测试。 */
 class ToolExecutionGatewayEffectsTest {
@@ -80,324 +79,142 @@ class ToolExecutionGatewayEffectsTest {
     Fixture fixture = fixture(statefulTool(ToolOutcome.withoutEffects(result(List.of()))));
 
     ToolGateway.PreflightResult result =
-        fixture.gateway.preflight(fixture.execution("write").request());
+        fixture.gateway.preflight(fixture.execution("write", StateAccess.WRITE).request());
 
     assertInstanceOf(ToolGateway.Allow.class, result);
   }
 
   @Test
-  void capacityRejectsBeforeExecutionAndCancelReleasesPermit() {
+  void capacityIsBusyBeforeBranchLoadAndRunCloseReleasesPermit() {
     Fixture fixture =
         fixture(
             statefulTool(ToolOutcome.withoutEffects(result(List.of()))),
             new ConcurrencyAdmission(1));
 
-    ToolGateway.Started first =
+    ToolGateway.Run first =
         assertInstanceOf(
-            ToolGateway.Started.class,
-            fixture.gateway.start(fixture.execution("write"), fixture.listener));
+                ToolGateway.Admitted.class,
+                fixture.gateway.admit(fixture.execution("write", StateAccess.WRITE)))
+            .run();
     fixture.loadedAssistantId.set(null);
-    ToolGateway.RetryLater second =
+    ToolGateway.Busy busy =
         assertInstanceOf(
-            ToolGateway.RetryLater.class,
-            fixture.gateway.start(fixture.execution("write"), fixture.listener));
+            ToolGateway.Busy.class,
+            fixture.gateway.admit(fixture.execution("write", StateAccess.WRITE)));
 
-    assertTrue(fixture.listener.events.isEmpty());
-    assertTrue(fixture.loadedAssistantId.get() == null);
-    first.handle().cancel();
-    ToolGateway.Started third =
-        assertInstanceOf(
-            ToolGateway.Started.class,
-            fixture.gateway.start(fixture.execution("write"), fixture.listener));
-    third.handle().cancel();
-    assertEquals(ToolGatewayTestSupport.OVERLOAD_RETRY_DELAY.get(), second.retryAfter());
+    assertNull(fixture.loadedAssistantId.get());
+    assertEquals(ToolGatewayTestSupport.OVERLOAD_RETRY_DELAY.get(), busy.retryAfter());
+    first.close();
+    assertInstanceOf(
+            ToolGateway.Admitted.class,
+            fixture.gateway.admit(fixture.execution("write", StateAccess.WRITE)))
+        .run()
+        .close();
   }
 
   @Test
   void validAppendIsValidatedThenDeliveredWithInjectedContributorOwner() {
     AppendCustomEntry entry = new AppendCustomEntry("state", 1, "{\"objective\":\"ship\"}");
-    Tool tool =
-        statefulTool(new ToolOutcome(result(List.of(new TextResultContent("ok"))), List.of(entry)));
-    Fixture fixture = fixture(tool);
+    Fixture fixture =
+        fixture(
+            statefulTool(
+                new ToolOutcome(result(List.of(new TextResultContent("ok"))), List.of(entry))));
 
-    ToolGateway.Started started =
-        assertInstanceOf(
-            ToolGateway.Started.class,
-            fixture.gateway.start(fixture.execution("write"), fixture.listener));
-    started.handle().activate();
-    fixture.executor.drain();
+    ToolGateway.Completion completion = fixture.run("write", StateAccess.WRITE);
 
-    ToolGatewayTestSupport.RecordingListener.Event.Succeeded succeeded =
-        assertInstanceOf(
-            ToolGatewayTestSupport.RecordingListener.Event.Succeeded.class,
-            fixture.listener.events.get(0));
-    CustomEntryPayload expectedPayload =
-        new CustomEntryPayload("goal", "state", 1, "{\"objective\":\"ship\"}");
-    assertEquals(List.of(expectedPayload), succeeded.effects().customEntries());
+    ToolGateway.Succeeded succeeded = assertInstanceOf(ToolGateway.Succeeded.class, completion);
+    assertEquals(
+        List.of(new CustomEntryPayload("goal", "state", 1, "{\"objective\":\"ship\"}")),
+        succeeded.success().effects().customEntries());
     assertEquals(ToolGatewayTestSupport.ASSISTANT_ENTRY_ID, fixture.loadedAssistantId.get());
   }
 
   @Test
   void frozenContributionMismatchIsRejectedBeforeExecution() {
     Fixture fixture = fixture(statefulTool(ToolOutcome.withoutEffects(result(List.of()))));
-    ToolGateway.StartResult result =
-        fixture.gateway.start(fixture.execution("other"), fixture.listener);
-    ToolGateway.Rejected rejected = assertInstanceOf(ToolGateway.Rejected.class, result);
+
+    ToolGateway.Rejected rejected =
+        assertInstanceOf(
+            ToolGateway.Rejected.class,
+            fixture.gateway.admit(fixture.execution("other", StateAccess.WRITE)));
+
     assertEquals(ToolExecutionGateway.TOOL_DEFINITION_MISMATCH_KIND, rejected.error().kind());
-    assertTrue(fixture.listener.events.isEmpty());
-  }
-
-  @Test
-  void descriptorMutationAfterFreezeIsRejectedBeforeBranchLoadOrExecute() {
-    AtomicReference<ToolDescriptor> liveDescriptor = new AtomicReference<>(DESCRIPTOR);
-    Tool tool =
-        new Tool() {
-          @Override
-          public ToolDescriptor descriptor() {
-            return liveDescriptor.get();
-          }
-
-          @Override
-          public ToolRequirements requirements() {
-            return new ToolRequirements(
-                EnvironmentSupport.NONE, List.of(new StateDeclaration("state", StateMode.WRITE)));
-          }
-
-          @Override
-          public ToolExecutionHandle execute(
-              ToolExecutionRequest request, ToolExecutionListener listener) {
-            throw new AssertionError("execute must not be reached when descriptor drifted");
-          }
-        };
-    Fixture fixture = fixture(tool);
-
-    liveDescriptor.set(
-        new ToolDescriptor(
-            "effects_tool",
-            "mutated",
-            "effects_tool",
-            DESCRIPTOR.inputSchema(),
-            DESCRIPTOR.sideEffect(),
-            DESCRIPTOR.defaultTimeout()));
-    ToolGateway.StartResult result =
-        fixture.gateway.start(fixture.execution("write"), fixture.listener);
-    ToolGateway.Rejected rejected = assertInstanceOf(ToolGateway.Rejected.class, result);
-    assertEquals(ToolExecutionGateway.TOOL_DEFINITION_MISMATCH_KIND, rejected.error().kind());
-    assertTrue(
-        fixture.loadedAssistantId.get() == null,
-        "branch view must not be loaded when descriptor drifted");
-    assertTrue(fixture.listener.events.isEmpty());
-
-    liveDescriptor.set(null);
-    ToolGateway.StartResult nullResult =
-        fixture.gateway.start(fixture.execution("write"), fixture.listener);
-    ToolGateway.Rejected nullRejected = assertInstanceOf(ToolGateway.Rejected.class, nullResult);
-    assertEquals(ToolExecutionGateway.TOOL_DEFINITION_MISMATCH_KIND, nullRejected.error().kind());
   }
 
   @Test
   void frozenStateAccessMismatchIsRejected() {
     Fixture fixture = fixture(statefulTool(ToolOutcome.withoutEffects(result(List.of()))));
-    ContributorBinding mismatchedContributor =
-        new ContributorBinding(
-            "goal",
-            "write",
-            List.of(new ContributorStateAccess("state", ContributorStateAccessMode.READ)));
-    ToolInvocationRequest request =
-        new ToolInvocationRequest(
-            new ToolCall("call-1", "effects_tool", "{}"),
-            new ToolBinding(
-                DEFINITION, mismatchedContributor, EnvironmentSupport.NONE, null, null));
-    ToolGateway.Execution execution =
-        new ToolGateway.Execution(
-            ToolGatewayTestSupport.INVOCATION_ID,
-            ToolGatewayTestSupport.THREAD_ID,
-            ToolGatewayTestSupport.ASSISTANT_ENTRY_ID,
-            1,
-            request);
-    ToolGateway.StartResult result = fixture.gateway.start(execution, fixture.listener);
-    ToolGateway.Rejected rejected = assertInstanceOf(ToolGateway.Rejected.class, result);
+
+    ToolGateway.Rejected rejected =
+        assertInstanceOf(
+            ToolGateway.Rejected.class,
+            fixture.gateway.admit(fixture.execution("write", StateAccess.READ)));
+
     assertEquals(ToolExecutionGateway.TOOL_DEFINITION_MISMATCH_KIND, rejected.error().kind());
   }
 
+  /** effects 指向未注册的 customType：契约违反，在资源外部化之前以确定性失败收敛。 */
   @Test
   void intentTargetingUnregisteredCustomTypeFailsBeforeExternalization() {
-    AppendCustomEntry unregisteredEntry =
-        new AppendCustomEntry("unregistered.type", 1, "{\"k\":\"v\"}");
-    Tool tool =
-        new Tool() {
-          @Override
-          public ToolDescriptor descriptor() {
-            return DESCRIPTOR;
-          }
-
-          @Override
-          public ToolRequirements requirements() {
-            return new ToolRequirements(
-                EnvironmentSupport.NONE, List.of(new StateDeclaration("state", StateMode.WRITE)));
-          }
-
-          @Override
-          public ToolExecutionHandle execute(
-              ToolExecutionRequest request, ToolExecutionListener listener) {
-            listener.onComplete(
+    AppendCustomEntry unregistered = new AppendCustomEntry("unregistered.type", 1, "{\"k\":\"v\"}");
+    Fixture fixture =
+        fixture(
+            statefulTool(
                 new ToolOutcome(
                     result(
                         List.of(
                             new BinaryResultContent(
                                 "application/octet-stream", new byte[] {1, 2}))),
-                    List.of(unregisteredEntry)));
-            return CompletedToolExecutionHandle.INSTANCE;
-          }
-        };
-    HarnessContributor contributor =
-        HarnessContributor.of(
-            new ContributorDescriptor(CONTRIBUTOR_ID, "Goal", "1", Set.of()),
-            registrar -> {
-              registrar.registerCustomEntryType("state-type", "state", 0);
-              registrar.registerTool("write", tool, ToolVisibility.SELECTABLE, 0);
-            });
-    HarnessCatalog catalog = HarnessCatalog.from(List.of(contributor));
-    ToolGatewayTestSupport.DirectQueueExecutor executor =
-        new ToolGatewayTestSupport.DirectQueueExecutor();
-    ToolGatewayTestSupport.FakeResourceStager stager =
-        new ToolGatewayTestSupport.FakeResourceStager();
-    ToolExecutionGateway gateway =
-        new ToolExecutionGateway(
-            TestRuntimeToolCatalogSource.of(catalog),
-            (assistantEntryId, contributorId) -> emptyBranch(),
-            new ToolGatewayTestSupport.FakeTransport(),
-            new PermissionEvaluator(new BashSurfaceAnalyzer()),
-            new ToolGatewayTestSupport.FixedToolSettingsProvider(
-                ToolGatewayTestSupport.settings(PermissionAction.ALLOW)),
-            stager,
-            ToolGatewayTestSupport.RESOURCE_MAX_BYTES,
-            executor,
-            ToolGatewayTestSupport.OVERLOAD_RETRY_DELAY,
-            Clock.fixed(NOW, ZoneOffset.UTC),
-            new ConcurrencyAdmission(Integer.MAX_VALUE));
-    ToolGatewayTestSupport.RecordingListener listener =
-        new ToolGatewayTestSupport.RecordingListener();
+                    List.of(unregistered))));
 
-    ContributorBinding binding =
-        new ContributorBinding(
-            "goal",
-            "write",
-            List.of(new ContributorStateAccess("state", ContributorStateAccessMode.WRITE)));
-    ToolInvocationRequest request =
-        new ToolInvocationRequest(
-            new ToolCall("call-1", "effects_tool", "{}"),
-            new ToolBinding(DEFINITION, binding, EnvironmentSupport.NONE, null, null));
-    ToolGateway.Execution exec =
-        new ToolGateway.Execution(
-            ToolGatewayTestSupport.INVOCATION_ID,
-            ToolGatewayTestSupport.THREAD_ID,
-            ToolGatewayTestSupport.ASSISTANT_ENTRY_ID,
-            1,
-            request);
+    ToolGateway.Failed failed =
+        assertInstanceOf(ToolGateway.Failed.class, fixture.run("write", StateAccess.WRITE));
 
-    ToolGateway.Started started =
-        assertInstanceOf(ToolGateway.Started.class, gateway.start(exec, listener));
-    started.handle().activate();
-    executor.drain();
-
-    ToolGatewayTestSupport.RecordingListener.Event.Failed failed =
-        assertInstanceOf(
-            ToolGatewayTestSupport.RecordingListener.Event.Failed.class, listener.events.get(0));
-    assertEquals(
-        ToolExecutionGateway.CONTRIBUTOR_CONTRACT_VIOLATION_KIND, failed.failure().error().kind());
-    assertTrue(stager.puts.isEmpty(), "must not stage any resource");
+    assertEquals(ToolExecutionGateway.CONTRIBUTOR_CONTRACT_VIOLATION_KIND, failed.error().kind());
+    assertTrue(fixture.stager.puts.isEmpty(), "must not stage any resource");
   }
 
+  /** effects 指向只声明 READ 的状态：缺少 WRITE 声明，同样在外部化之前失败。 */
   @Test
   void intentTargetingReadOnlyDeclaredStateFailsBeforeExternalization() {
     AppendCustomEntry entry = new AppendCustomEntry("state", 1, "{\"k\":\"v\"}");
-    Tool tool =
-        new Tool() {
-          @Override
-          public ToolDescriptor descriptor() {
-            return DESCRIPTOR;
-          }
-
-          @Override
-          public ToolRequirements requirements() {
-            return new ToolRequirements(
-                EnvironmentSupport.NONE, List.of(new StateDeclaration("state", StateMode.READ)));
-          }
-
-          @Override
-          public ToolExecutionHandle execute(
-              ToolExecutionRequest request, ToolExecutionListener listener) {
-            listener.onComplete(
+    Fixture fixture =
+        fixture(
+            readOnlyTool(
                 new ToolOutcome(
                     result(
                         List.of(
                             new BinaryResultContent(
                                 "application/octet-stream", new byte[] {1, 2}))),
-                    List.of(entry)));
-            return CompletedToolExecutionHandle.INSTANCE;
-          }
-        };
-    HarnessContributor contributor =
-        HarnessContributor.of(
-            new ContributorDescriptor(CONTRIBUTOR_ID, "Goal", "1", Set.of()),
-            registrar -> {
-              registrar.registerCustomEntryType("state-type", "state", 0);
-              registrar.registerTool("write", tool, ToolVisibility.SELECTABLE, 0);
-            });
-    HarnessCatalog catalog = HarnessCatalog.from(List.of(contributor));
-    ToolGatewayTestSupport.DirectQueueExecutor executor =
-        new ToolGatewayTestSupport.DirectQueueExecutor();
-    ToolGatewayTestSupport.FakeResourceStager stager =
-        new ToolGatewayTestSupport.FakeResourceStager();
-    ToolExecutionGateway gateway =
-        new ToolExecutionGateway(
-            TestRuntimeToolCatalogSource.of(catalog),
-            (assistantEntryId, contributorId) -> emptyBranch(),
-            new ToolGatewayTestSupport.FakeTransport(),
-            new PermissionEvaluator(new BashSurfaceAnalyzer()),
-            new ToolGatewayTestSupport.FixedToolSettingsProvider(
-                ToolGatewayTestSupport.settings(PermissionAction.ALLOW)),
-            stager,
-            ToolGatewayTestSupport.RESOURCE_MAX_BYTES,
-            executor,
-            ToolGatewayTestSupport.OVERLOAD_RETRY_DELAY,
-            Clock.fixed(NOW, ZoneOffset.UTC),
-            new ConcurrencyAdmission(Integer.MAX_VALUE));
-    ToolGatewayTestSupport.RecordingListener listener =
-        new ToolGatewayTestSupport.RecordingListener();
+                    List.of(entry))));
 
-    ContributorBinding binding =
-        new ContributorBinding(
-            "goal",
-            "write",
-            List.of(new ContributorStateAccess("state", ContributorStateAccessMode.READ)));
-    ToolInvocationRequest request =
-        new ToolInvocationRequest(
-            new ToolCall("call-1", "effects_tool", "{}"),
-            new ToolBinding(DEFINITION, binding, EnvironmentSupport.NONE, null, null));
-    ToolGateway.Execution exec =
-        new ToolGateway.Execution(
-            ToolGatewayTestSupport.INVOCATION_ID,
-            ToolGatewayTestSupport.THREAD_ID,
-            ToolGatewayTestSupport.ASSISTANT_ENTRY_ID,
-            1,
-            request);
+    ToolGateway.Failed failed =
+        assertInstanceOf(ToolGateway.Failed.class, fixture.run("write", StateAccess.READ));
 
-    ToolGateway.Started started =
-        assertInstanceOf(ToolGateway.Started.class, gateway.start(exec, listener));
-    started.handle().activate();
-    executor.drain();
+    assertEquals(ToolExecutionGateway.CONTRIBUTOR_CONTRACT_VIOLATION_KIND, failed.error().kind());
+    assertTrue(fixture.stager.puts.isEmpty(), "must not stage any resource");
+  }
 
-    ToolGatewayTestSupport.RecordingListener.Event.Failed failed =
-        assertInstanceOf(
-            ToolGatewayTestSupport.RecordingListener.Event.Failed.class, listener.events.get(0));
-    assertEquals(
-        ToolExecutionGateway.CONTRIBUTOR_CONTRACT_VIOLATION_KIND, failed.failure().error().kind());
-    assertTrue(stager.puts.isEmpty(), "must not stage any resource");
+  private enum StateAccess {
+    READ(ContributorStateAccessMode.READ),
+    WRITE(ContributorStateAccessMode.WRITE);
+
+    private final ContributorStateAccessMode mode;
+
+    StateAccess(ContributorStateAccessMode mode) {
+      this.mode = mode;
+    }
   }
 
   private static Tool statefulTool(ToolOutcome outcome) {
+    return tool(outcome, StateMode.WRITE);
+  }
+
+  private static Tool readOnlyTool(ToolOutcome outcome) {
+    return tool(outcome, StateMode.READ);
+  }
+
+  private static Tool tool(ToolOutcome outcome, StateMode mode) {
     return new Tool() {
       @Override
       public ToolDescriptor descriptor() {
@@ -407,15 +224,13 @@ class ToolExecutionGatewayEffectsTest {
       @Override
       public ToolRequirements requirements() {
         return new ToolRequirements(
-            EnvironmentSupport.NONE, List.of(new StateDeclaration("state", StateMode.WRITE)));
+            EnvironmentSupport.NONE, List.of(new StateDeclaration("state", mode)));
       }
 
       @Override
-      public ToolExecutionHandle execute(
-          ToolExecutionRequest request, ToolExecutionListener listener) {
+      public ToolOutcome execute(ToolExecutionRequest request, Consumer<ToolResult> progress) {
         assertEquals("effects_tool", request.descriptor().name());
-        listener.onComplete(outcome);
-        return CompletedToolExecutionHandle.INSTANCE;
+        return outcome;
       }
     };
   }
@@ -443,8 +258,6 @@ class ToolExecutionGatewayEffectsTest {
           loadedAssistantId.set(assistantEntryId);
           return emptyBranch();
         };
-    ToolGatewayTestSupport.DirectQueueExecutor executor =
-        new ToolGatewayTestSupport.DirectQueueExecutor();
     ToolGatewayTestSupport.FakeResourceStager stager =
         new ToolGatewayTestSupport.FakeResourceStager();
     ToolExecutionGateway gateway =
@@ -457,14 +270,10 @@ class ToolExecutionGatewayEffectsTest {
                 ToolGatewayTestSupport.settings(PermissionAction.ALLOW)),
             stager,
             ToolGatewayTestSupport.RESOURCE_MAX_BYTES,
-            executor,
             ToolGatewayTestSupport.OVERLOAD_RETRY_DELAY,
             Clock.fixed(NOW, ZoneOffset.UTC),
             admission);
-    ToolGatewayTestSupport.RecordingListener listener =
-        new ToolGatewayTestSupport.RecordingListener();
-    listener.store = stager;
-    return new Fixture(gateway, executor, stager, listener, loadedAssistantId);
+    return new Fixture(gateway, stager, loadedAssistantId);
   }
 
   private static BranchView emptyBranch() {
@@ -488,17 +297,13 @@ class ToolExecutionGatewayEffectsTest {
 
   private record Fixture(
       ToolExecutionGateway gateway,
-      ToolGatewayTestSupport.DirectQueueExecutor executor,
       ToolGatewayTestSupport.FakeResourceStager stager,
-      ToolGatewayTestSupport.RecordingListener listener,
       AtomicReference<UUID> loadedAssistantId) {
 
-    ToolGateway.Execution execution(String localName) {
+    ToolGateway.Execution execution(String localName, StateAccess access) {
       ContributorBinding contributor =
           new ContributorBinding(
-              "goal",
-              localName,
-              List.of(new ContributorStateAccess("state", ContributorStateAccessMode.WRITE)));
+              "goal", localName, List.of(new ContributorStateAccess("state", access.mode)));
       ToolInvocationRequest request =
           new ToolInvocationRequest(
               new ToolCall("call-1", "effects_tool", "{}"),
@@ -507,8 +312,18 @@ class ToolExecutionGatewayEffectsTest {
           ToolGatewayTestSupport.INVOCATION_ID,
           ToolGatewayTestSupport.THREAD_ID,
           ToolGatewayTestSupport.ASSISTANT_ENTRY_ID,
-          1,
           request);
+    }
+
+    ToolGateway.Completion run(String localName, StateAccess access) {
+      ToolGateway.Run run =
+          assertInstanceOf(ToolGateway.Admitted.class, gateway.admit(execution(localName, access)))
+              .run();
+      try {
+        return run.execute(partial -> {});
+      } finally {
+        run.close();
+      }
     }
   }
 }

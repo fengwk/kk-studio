@@ -20,6 +20,7 @@ import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryBackoffStrategy;
 import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.runtime.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
@@ -259,7 +260,7 @@ class ExecutionTreeLockRegressionTest {
         "checkpoint must lock Model then Work only, with no tree lock");
   }
 
-  /** 测试意图：ToolExecution 激活异常路径的 markRunning 与终态回写只锁本 Thread 的 Thread/Tool/Work， 不取执行树锁。 */
+  /** 测试意图：ToolExecution 的 markRunning 与终态回写只锁本 Thread 的 Thread/Tool/Work，不取执行树锁。 */
   @Test
   void toolExecutionTerminalPathTakesNoTreeLock() {
     ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.fixture();
@@ -269,7 +270,7 @@ class ExecutionTreeLockRegressionTest {
     ClaimedWork claim =
         ToolProcessorTestSupport.claim(
             fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
-    ToolProcessorTestSupport.toDispatched(
+    ToolProcessorTestSupport.toApproved(
         fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
 
     ToolExecution execution =
@@ -290,19 +291,22 @@ class ExecutionTreeLockRegressionTest {
             Runnable::run,
             ignored -> {});
 
-    ToolGateway.Handle failingActivation =
-        new ToolGateway.Handle() {
-          @Override
-          public void cancel() {}
-
-          @Override
-          public void activate() {
-            throw new IllegalStateException("gateway activation failed");
-          }
-        };
+    ToolProcessorTestSupport.FakeRun run =
+        new ToolProcessorTestSupport.FakeRun(
+            progress ->
+                new ToolGateway.Unknown(new ToolInvocationError("REMOTE_UNCERTAIN", "uncertain")));
 
     recordingStore.clearLogs();
-    assertEquals(ProcessResult.TERMINATED, execution.activate(failingActivation));
+    assertEquals(ProcessResult.STARTED, execution.start(run));
+    try {
+      ToolProcessorTestSupport.awaitTrue(
+          () ->
+              ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status()
+                  == ToolInvocationStatus.UNKNOWN,
+          Duration.ofSeconds(5));
+    } catch (InterruptedException interrupted) {
+      throw new AssertionError(interrupted);
+    }
 
     ToolInvocation tool = ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
     assertEquals(ToolInvocationStatus.UNKNOWN, tool.status());

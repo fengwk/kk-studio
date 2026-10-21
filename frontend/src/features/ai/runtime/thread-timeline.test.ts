@@ -13,7 +13,7 @@ import { buildThreadTimeline, isThreadWorking } from '@/features/ai/runtime/thre
 
 describe('thread timeline', () => {
   it.each([
-    'READY', 'WAITING_APPROVAL', 'WAITING_INPUT', 'DISPATCHING', 'RUNNING',
+    'READY', 'WAITING_APPROVAL', 'WAITING_INPUT', 'RUNNING',
     'SUCCEEDED', 'FAILED', 'CANCELLED', 'UNKNOWN',
   ])('preserves durable %s and frozen environment facts at the sole overlay boundary', (status) => {
     const tool = invocation('inv-status', 'assistant-status', 'call-status', {
