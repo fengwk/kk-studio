@@ -5,9 +5,9 @@ import org.springframework.beans.factory.InitializingBean;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Component;
 
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
-import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionType;
 
 /**
@@ -29,11 +29,13 @@ public class BuiltinAgentInitializer implements InitializingBean {
       if (agentDefinitionRepository.getByName(definition.name()) != null) {
         continue;
       }
-      AgentDefinition builtin = new AgentDefinition();
-      builtin.setName(definition.name());
-      builtin.setType(AgentDefinitionType.BUILTIN);
-      builtin.setSystemPrompt(definition.systemPrompt());
-      builtin.setConfigJson(configCodec.encode(definition.config()));
+      AgentDefinition builtin =
+          AgentDefinition.builder()
+              .name(definition.name())
+              .type(AgentDefinitionType.BUILTIN)
+              .systemPrompt(definition.systemPrompt())
+              .configJson(configCodec.encode(definition.config()))
+              .build();
       try {
         agentDefinitionRepository.create(builtin);
       } catch (DuplicateKeyException ignored) {

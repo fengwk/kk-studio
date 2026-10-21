@@ -29,10 +29,10 @@ import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
-import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpDiscoveryStatus;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpDiscoveryStatus;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpServer;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerRepository;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.mcp.test.FakeStreamableHttpMcpServer;
 
 import java.io.IOException;
@@ -122,9 +122,11 @@ class RemoteMcpExecutableToolTest {
   void redactsOutboundAuthorizationIntoConfiguredHeader() throws Exception {
     // 意图：header 中的 ${VAR} 占位符在发送前按进程环境整值替换，且解析值绝不回显到结果
     fakeServer.addTool("echo", "Echo", "{}");
-    McpServer server = server("https://unused");
-    server.setUrl(fakeServer.endpointUrl());
-    server.setHeaders(Map.of("Authorization", "${KK_TEST_MCP_TOKEN}"));
+    McpServer server =
+        server("https://unused").toBuilder()
+            .url(fakeServer.endpointUrl())
+            .headers(Map.of("Authorization", "${KK_TEST_MCP_TOKEN}"))
+            .build();
     McpTool tool = tool("mcp_srv_echo", "echo");
     when(repository.getByName(SERVER_NAME)).thenReturn(Optional.of(server));
     when(repository.getTool("mcp_srv_echo")).thenReturn(Optional.of(tool));
@@ -165,20 +167,23 @@ class RemoteMcpExecutableToolTest {
     assertFalse(missingServer.toString().contains(fakeServer.endpointUrl()));
 
     // 2. server 被禁用
-    McpServer disabled = server(fakeServer.endpointUrl());
-    disabled.setEnabled(false);
+    McpServer disabled = server(fakeServer.endpointUrl()).toBuilder().enabled(false).build();
     when(repository.getByName(SERVER_NAME)).thenReturn(Optional.of(disabled));
     assertTrue(execute(tool, descriptor, "call_disabled", "{}").error());
 
     // 3. server 尚未验证
-    McpServer unverified = server(fakeServer.endpointUrl());
-    unverified.setDiscoveryStatus(McpDiscoveryStatus.UNVERIFIED);
+    McpServer unverified =
+        server(fakeServer.endpointUrl()).toBuilder()
+            .discoveryStatus(McpDiscoveryStatus.UNVERIFIED)
+            .build();
     when(repository.getByName(SERVER_NAME)).thenReturn(Optional.of(unverified));
     assertTrue(execute(tool, descriptor, "call_unverified", "{}").error());
 
     // 4. server 发现失败
-    McpServer failed = server(fakeServer.endpointUrl());
-    failed.setDiscoveryStatus(McpDiscoveryStatus.FAILED);
+    McpServer failed =
+        server(fakeServer.endpointUrl()).toBuilder()
+            .discoveryStatus(McpDiscoveryStatus.FAILED)
+            .build();
     when(repository.getByName(SERVER_NAME)).thenReturn(Optional.of(failed));
     assertTrue(execute(tool, descriptor, "call_failed", "{}").error());
 
@@ -199,8 +204,8 @@ class RemoteMcpExecutableToolTest {
     fakeServer.addTool("echo", "Echo", "{}");
     when(repository.getByName(siblingServerName))
         .thenReturn(Optional.of(serverOf(siblingServerName, fakeServer.endpointUrl())));
-    McpTool siblingRow = tool(siblingToolName, "echo");
-    siblingRow.setServerName(siblingServerName);
+    McpTool siblingRow =
+        tool(siblingToolName, "echo").toBuilder().serverName(siblingServerName).build();
     when(repository.getTool(siblingToolName)).thenReturn(Optional.of(siblingRow));
     ToolDescriptor siblingDescriptor = SampleDescriptors.tool(siblingToolName);
     RemoteMcpExecutableTool sibling =
@@ -400,10 +405,9 @@ class RemoteMcpExecutableToolTest {
   private void stubServerAndTool(String toolName, String sourceName, String serverName) {
     when(repository.getByName(SERVER_NAME))
         .thenReturn(Optional.of(server(fakeServer.endpointUrl())));
-    McpTool tool = tool(toolName, sourceName);
-    when(repository.getTool(toolName)).thenReturn(Optional.of(tool));
     // 工具的 serverName 必须与执行的 server 一致
-    tool.setServerName(SERVER_NAME);
+    McpTool tool = tool(toolName, sourceName).toBuilder().serverName(SERVER_NAME).build();
+    when(repository.getTool(toolName)).thenReturn(Optional.of(tool));
   }
 
   private ToolResult execute(
@@ -423,24 +427,28 @@ class RemoteMcpExecutableToolTest {
   }
 
   private static McpServer serverOf(String name, String url) {
-    McpServer server = new McpServer();
-    server.setName(name);
-    server.setUrl(url);
-    server.setHeaders(Map.of());
-    server.setEnabled(true);
-    server.setTimeoutMillis(5000L);
-    server.setDiscoveryStatus(McpDiscoveryStatus.AVAILABLE);
-    server.setVersion(1L);
+    McpServer server =
+        McpServer.builder()
+            .name(name)
+            .url(url)
+            .headers(Map.of())
+            .enabled(true)
+            .timeoutMillis(5000L)
+            .discoveryStatus(McpDiscoveryStatus.AVAILABLE)
+            .version(1L)
+            .build();
     return server;
   }
 
   private static McpTool tool(String toolName, String sourceName) {
-    McpTool tool = new McpTool();
-    tool.setName(toolName);
-    tool.setServerName(SERVER_NAME);
-    tool.setSourceName(sourceName);
-    tool.setDescription("sample description");
-    tool.setInputSchemaJson("{}");
+    McpTool tool =
+        McpTool.builder()
+            .name(toolName)
+            .serverName(SERVER_NAME)
+            .sourceName(sourceName)
+            .description("sample description")
+            .inputSchemaJson("{}")
+            .build();
     return tool;
   }
 

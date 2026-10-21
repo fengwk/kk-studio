@@ -40,19 +40,19 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolveTransientException;
 import fun.fengwk.kkstudio.harness.runtime.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentDefinitions;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
-import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
-import fun.fengwk.kkstudio.platform.catalog.model.repo.AgentModelRepository;
+import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
+import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser.ParsedAgentModelConfig;
-import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
-import fun.fengwk.kkstudio.platform.catalog.provider.repo.AgentProviderRepository;
-import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
-import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogQueryService;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
+import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
+import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillManifestEntry;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalog;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
@@ -114,7 +114,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
   private final RuntimeToolCatalogSource toolCatalogSource;
   private final EnvironmentRegistry environmentRegistry;
   private final EnvironmentRepository environmentRepository;
-  private final SkillCatalogQueryService skillCatalogQueryService;
+  private final SkillPackageRepository skillPackageRepository;
   private final SkillPromptPathResolver skillPromptPathResolver;
   private final CompactionConfigProvider compactionConfigProvider;
   private final AgentPromptComposer promptComposer;
@@ -131,7 +131,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
       RuntimeToolCatalogSource toolCatalogSource,
       EnvironmentRegistry environmentRegistry,
       EnvironmentRepository environmentRepository,
-      SkillCatalogQueryService skillCatalogQueryService,
+      SkillPackageRepository skillPackageRepository,
       SkillPromptPathResolver skillPromptPathResolver,
       CompactionConfigProvider compactionConfigProvider,
       AgentPromptComposer promptComposer,
@@ -147,8 +147,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
     this.environmentRegistry = Objects.requireNonNull(environmentRegistry, "environmentRegistry");
     this.environmentRepository =
         Objects.requireNonNull(environmentRepository, "environmentRepository");
-    this.skillCatalogQueryService =
-        Objects.requireNonNull(skillCatalogQueryService, "skillCatalogQueryService");
+    this.skillPackageRepository =
+        Objects.requireNonNull(skillPackageRepository, "skillPackageRepository");
     this.skillPromptPathResolver =
         Objects.requireNonNull(skillPromptPathResolver, "skillPromptPathResolver");
     this.compactionConfigProvider =
@@ -309,13 +309,13 @@ public final class DatabaseTurnResolver implements TurnResolver {
         new ModelDescriptor(
             selection.providerName(),
             selection.modelName(),
-            model.getModelId(),
+            model.modelId(),
             parsedModel.inputModalities(),
             parsedModel.tools(),
             parsedModel.reasoning());
     String systemInstruction =
         systemInstruction(
-            agent.getSystemPrompt(),
+            agent.systemPrompt(),
             currentEnvironment,
             skills.stream().map(LiveTurnPlan.PlannedSkill::promptEntry).toList(),
             subagentBindings,
@@ -332,7 +332,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
             ? ProviderCacheControl.none()
             : ProviderCacheControl.session(
                 promptCacheRetention(
-                    providerFactory, provider.getConfigJson(), selection.providerName()),
+                    providerFactory, provider.configJson(), selection.providerName()),
                 sessionId.toString());
     return new LiveTurnPlan.Planned(
         new ModelRequestSpec(
@@ -383,8 +383,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
     if (direct.isPresent()) {
       return direct.get();
     }
-    String defaultProvider = agent.getModelProviderName();
-    String defaultModel = agent.getModelName();
+    String defaultProvider = agent.modelProviderName();
+    String defaultModel = agent.modelName();
     boolean hasDistinctDefault =
         defaultProvider != null
             && defaultModel != null
@@ -399,9 +399,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
                   if (findVariant(parsed, requested.variant()) != null) {
                     return requested.variant();
                   }
-                  if (agent.getVariant() != null
-                      && findVariant(parsed, agent.getVariant()) != null) {
-                    return agent.getVariant();
+                  if (agent.variant() != null && findVariant(parsed, agent.variant()) != null) {
+                    return agent.variant();
                   }
                   return parsed.defaultVariant();
                 })
@@ -432,13 +431,13 @@ public final class DatabaseTurnResolver implements TurnResolver {
     if (variant == null) {
       return Optional.empty();
     }
-    ProviderType providerType = provider.getProviderType();
+    ProviderType providerType = provider.providerType();
     if (providerType == null) {
       throw rejection("provider type must not be null");
     }
     UUID connectionGenerationId =
         require(
-            provider.getConnectionGenerationId(),
+            provider.connectionGenerationId(),
             "provider connection generation id must not be null");
     ProviderFactory factory =
         require(
@@ -479,50 +478,49 @@ public final class DatabaseTurnResolver implements TurnResolver {
         require(
             agentDefinitionRepository.getByName(compactionAgentName),
             "agent not found: " + compactionAgentName);
-    if (agent.getModelProviderName() == null || agent.getModelName() == null) {
+    if (agent.modelProviderName() == null || agent.modelName() == null) {
       throw rejection("compaction agent has no configured model");
     }
     AgentProvider provider =
         require(
-            providerRepository.getByName(agent.getModelProviderName()),
-            "provider not found: " + agent.getModelProviderName());
-    ProviderType providerType = provider.getProviderType();
+            providerRepository.getByName(agent.modelProviderName()),
+            "provider not found: " + agent.modelProviderName());
+    ProviderType providerType = provider.providerType();
     if (providerType == null) {
       throw rejection("provider type must not be null");
     }
     UUID providerConnectionGenerationId =
         require(
-            provider.getConnectionGenerationId(),
+            provider.connectionGenerationId(),
             "provider connection generation id must not be null");
     AgentModel model =
         require(
-            modelRepository.getByProviderNameAndName(
-                agent.getModelProviderName(), agent.getModelName()),
-            "model not found: " + agent.getModelProviderName() + "/" + agent.getModelName());
+            modelRepository.getByProviderNameAndName(agent.modelProviderName(), agent.modelName()),
+            "model not found: " + agent.modelProviderName() + "/" + agent.modelName());
     ParsedAgentModelConfig parsedModel = parseModel(model);
     String variantName =
-        agent.getVariant() != null && !agent.getVariant().isBlank()
-            ? agent.getVariant()
+        agent.variant() != null && !agent.variant().isBlank()
+            ? agent.variant()
             : parsedModel.defaultVariant();
     ModelVariant variant = findVariant(parsedModel, variantName);
     if (variant == null) {
       throw rejection(
           "model variant not found: "
-              + agent.getModelProviderName()
+              + agent.modelProviderName()
               + "/"
-              + agent.getModelName()
+              + agent.modelName()
               + " variant="
               + variantName);
     }
     if (variant.reasoningEffort() != null && !parsedModel.reasoning()) {
       throw rejection(
           "model does not support reasoning: "
-              + agent.getModelProviderName()
+              + agent.modelProviderName()
               + "/"
-              + agent.getModelName());
+              + agent.modelName());
     }
     ModelSelection compactorModel =
-        new ModelSelection(agent.getModelProviderName(), agent.getModelName(), variant.id());
+        new ModelSelection(agent.modelProviderName(), agent.modelName(), variant.id());
     int maxOutputTokens = outputTokens(parsedModel);
     long outputBudget =
         compactionConfigProvider
@@ -581,7 +579,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
 
   private AgentDefinitionConfigDTO decodeAgentConfig(AgentDefinition agent) {
     try {
-      return agentConfigCodec.decode(agent.getConfigJson());
+      return agentConfigCodec.decode(agent.configJson());
     } catch (IllegalStateException error) {
       throw rejection("invalid agent configuration: " + messageOrClass(error));
     }
@@ -589,7 +587,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
 
   private ParsedAgentModelConfig parseModel(AgentModel model) {
     try {
-      return modelConfigParser.parse(model.getConfigJson());
+      return modelConfigParser.parse(model.configJson());
     } catch (IllegalArgumentException error) {
       throw rejection("invalid model configuration: " + messageOrClass(error));
     }
@@ -726,8 +724,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
   /**
    * Agent skills 只从最新 Agent config 读取，并按全局 Skill 目录解析为冻结事实。
    *
-   * <p>通过 {@link SkillCatalogQueryService#getPackage(String)} 读取 Platform 权威事实，按 (packageName,
-   * name) 精确匹配；缺失或名称不存在时确定性拒绝。Skills 与 Environment 无关，未选择环境的 branch 同样可以规划。
+   * <p>通过 {@link SkillPackageRepository#getPackage(String)} 读取 Platform 权威事实，按 (packageName, name)
+   * 精确匹配；缺失或名称不存在时确定性拒绝。Skills 与 Environment 无关，未选择环境的 branch 同样可以规划。
    *
    * <p>路径与交付方式由 {@link SkillPromptPathResolver} 一次判定：只有选定 Environment 的 skill_state 记录的已安装 commit 与
    * Package 的 currentCommit 完全一致时才冻结 LOCAL 本地稳定路径，否则冻结 PLATFORM URI；同步失败时仍如实暴露实际 installedCommit。
@@ -742,7 +740,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
       if (ref == null || ref.getPackageName() == null || ref.getName() == null) {
         throw rejection("invalid agent skill reference");
       }
-      SkillPackage pkg = skillCatalogQueryService.getPackage(ref.getPackageName());
+      SkillPackage pkg = skillPackageRepository.getPackage(ref.getPackageName());
       if (pkg == null) {
         throw rejection(
             "agent skill not found in the global catalog: "
@@ -760,16 +758,16 @@ public final class DatabaseTurnResolver implements TurnResolver {
       }
       SkillPromptResolution resolution =
           skillPromptPathResolver.resolveDetails(
-              environmentId, ref.getPackageName(), ref.getName(), pkg.getCurrentCommit());
+              environmentId, ref.getPackageName(), ref.getName(), pkg.currentCommit());
       skills.add(
           new LiveTurnPlan.PlannedSkill(
-              pkg.getPackageName(),
+              pkg.packageName(),
               entry.name(),
               entry.description(),
               resolution.path(),
               resolution.delivery(),
-              pkg.getCurrentCommit(),
-              pkg.getObservedHeadCommit(),
+              pkg.currentCommit(),
+              pkg.observedHeadCommit(),
               resolution.installedCommit()));
     }
     return List.copyOf(skills);
@@ -809,8 +807,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
           require(agentDefinitionRepository.getByName(name), "subagent not found: " + name);
       bindings.add(
           new SubagentBinding(
-              subagent.getName(),
-              subagent.getDescription() == null ? "" : subagent.getDescription()));
+              subagent.name(), subagent.description() == null ? "" : subagent.description()));
     }
     return List.copyOf(bindings);
   }

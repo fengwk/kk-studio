@@ -102,24 +102,24 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
-import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
-import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpDiscoveryStatus;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpServer;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerRepository;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
 import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpDiscoveryStatus;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
-import fun.fengwk.kkstudio.platform.catalog.model.repo.AgentModelRepository;
+import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
+import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser.ParsedAgentModelConfig;
-import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
-import fun.fengwk.kkstudio.platform.catalog.provider.configuration.AgentProviderConfigurationCodec;
-import fun.fengwk.kkstudio.platform.catalog.provider.repo.AgentProviderRepository;
-import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
-import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogQueryService;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
+import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
+import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderConfigurationCodec;
+import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillManifestEntry;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.catalog.tool.TestRuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
@@ -158,6 +158,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 
 /**
  * DatabaseTurnResolver 契约：精确的 branch 引用（无回退）、不可变的 EnvironmentId 路由、严格有序的工具/skill 能力、唯一的 registry
@@ -203,9 +204,9 @@ class DatabaseTurnResolverTest {
   void resolvesExactBranchModelReferencesWithoutFallback() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
     // Agent 自带的 provider/model/variant 引用是旧数据，绝不能被读取。
-    fixture.agent.setModelProviderName("old-provider");
-    fixture.agent.setModelName("old-model");
-    fixture.agent.setVariant("old-variant");
+    fixture.editAgent(agent -> agent.modelProviderName("old-provider"));
+    fixture.editAgent(agent -> agent.modelName("old-model"));
+    fixture.editAgent(agent -> agent.variant("old-variant"));
     when(fixture.providers.getByName("old-provider")).thenReturn(null);
     TurnResolver.Resolved resolved = fixture.resolvedResult(fixture.path(settings("custom")), null);
     ModelRequestSpec requestSpec = resolved.spec();
@@ -242,8 +243,8 @@ class DatabaseTurnResolverTest {
     fixture.missingModel();
     ModelSelection backup = new ModelSelection("backup-provider", "backup-model", "default");
     fixture.addModel(backup, Fixture.parsedModel());
-    fixture.agent.setModelProviderName("backup-provider");
-    fixture.agent.setModelName("backup-model");
+    fixture.editAgent(agent -> agent.modelProviderName("backup-provider"));
+    fixture.editAgent(agent -> agent.modelName("backup-model"));
 
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("custom")));
 
@@ -258,8 +259,8 @@ class DatabaseTurnResolverTest {
   void rejectsWhenThreadAndAgentDefaultModelsAreBothUnavailable() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
     fixture.missingModel();
-    fixture.agent.setModelProviderName("backup-provider");
-    fixture.agent.setModelName("backup-model");
+    fixture.editAgent(agent -> agent.modelProviderName("backup-provider"));
+    fixture.editAgent(agent -> agent.modelName("backup-model"));
 
     assertEquals(
         "model provider/model and the agent default model are both unavailable;"
@@ -268,8 +269,8 @@ class DatabaseTurnResolverTest {
 
     fixture = new Fixture(List.of(), List.of(), List.of());
     fixture.missingModel();
-    fixture.agent.setModelProviderName("provider");
-    fixture.agent.setModelName("model");
+    fixture.editAgent(agent -> agent.modelProviderName("provider"));
+    fixture.editAgent(agent -> agent.modelName("model"));
     assertEquals(
         "model provider/model and the agent default model are both unavailable;"
             + " bind an available model",
@@ -312,13 +313,13 @@ class DatabaseTurnResolverTest {
         fixture.rejected(fixture.path(settings("default"))).error().message());
 
     fixture = new Fixture(List.of(), List.of(), List.of());
-    fixture.provider.setProviderType(null);
+    fixture.editProvider(provider -> provider.providerType(null));
     assertEquals(
         "provider type must not be null",
         fixture.rejected(fixture.path(settings("default"))).error().message());
 
     fixture = new Fixture(List.of(), List.of(), List.of());
-    fixture.provider.setConnectionGenerationId(null);
+    fixture.editProvider(provider -> provider.connectionGenerationId(null));
     assertEquals(
         "provider connection generation id must not be null",
         fixture.rejected(fixture.path(settings("default"))).error().message());
@@ -1120,22 +1121,26 @@ class DatabaseTurnResolverTest {
     McpServerRepository repo = mock(McpServerRepository.class);
     McpToolCatalog mcpCatalog = new McpToolCatalog(repo);
 
-    McpServer server = new McpServer();
-    server.setName("srv");
-    server.setDiscoveryStatus(McpDiscoveryStatus.AVAILABLE);
-    server.setEnabled(true);
-    server.setVersion(1L);
-    server.setUrl("http://localhost:8080/mcp");
-    server.setHeaders(Map.of());
-    server.setTimeoutMillis(5000L);
+    McpServer server =
+        McpServer.builder()
+            .name("srv")
+            .discoveryStatus(McpDiscoveryStatus.AVAILABLE)
+            .enabled(true)
+            .version(1L)
+            .url("http://localhost:8080/mcp")
+            .headers(Map.of())
+            .timeoutMillis(5000L)
+            .build();
 
-    McpTool mcpTool = new McpTool();
-    mcpTool.setName("mcp_srv_echo");
-    mcpTool.setServerName("srv");
-    mcpTool.setSourceName("echo");
-    mcpTool.setDescription("echo tool");
-    mcpTool.setInputSchemaJson(
-        "{\"type\":\"object\",\"properties\":{},\"required\":[],\"additionalProperties\":true}");
+    McpTool mcpTool =
+        McpTool.builder()
+            .name("mcp_srv_echo")
+            .serverName("srv")
+            .sourceName("echo")
+            .description("echo tool")
+            .inputSchemaJson(
+                "{\"type\":\"object\",\"properties\":{},\"required\":[],\"additionalProperties\":true}")
+            .build();
 
     when(repo.getTool("mcp_srv_echo")).thenReturn(Optional.of(mcpTool));
     when(repo.getByName("srv")).thenReturn(Optional.of(server));
@@ -1280,25 +1285,29 @@ class DatabaseTurnResolverTest {
   }
 
   private static McpServer mcpServer(McpDiscoveryStatus status, boolean enabled) {
-    McpServer server = new McpServer();
-    server.setName("srv");
-    server.setDiscoveryStatus(status);
-    server.setEnabled(enabled);
-    server.setVersion(1L);
-    server.setUrl("http://localhost:8080/mcp");
-    server.setHeaders(Map.of());
-    server.setTimeoutMillis(5000L);
+    McpServer server =
+        McpServer.builder()
+            .name("srv")
+            .discoveryStatus(status)
+            .enabled(enabled)
+            .version(1L)
+            .url("http://localhost:8080/mcp")
+            .headers(Map.of())
+            .timeoutMillis(5000L)
+            .build();
     return server;
   }
 
   private static McpTool mcpTool(String name, String sourceName) {
-    McpTool tool = new McpTool();
-    tool.setName(name);
-    tool.setServerName("srv");
-    tool.setSourceName(sourceName);
-    tool.setDescription(sourceName + " tool");
-    tool.setInputSchemaJson(
-        "{\"type\":\"object\",\"properties\":{},\"required\":[],\"additionalProperties\":true}");
+    McpTool tool =
+        McpTool.builder()
+            .name(name)
+            .serverName("srv")
+            .sourceName(sourceName)
+            .description(sourceName + " tool")
+            .inputSchemaJson(
+                "{\"type\":\"object\",\"properties\":{},\"required\":[],\"additionalProperties\":true}")
+            .build();
     return tool;
   }
 
@@ -1650,9 +1659,11 @@ class DatabaseTurnResolverTest {
             ProviderType.OPENAI_RESPONSES,
             PromptCacheRetention.SHORT,
             true);
-    fixture.provider.setConfigJson(configJson);
-    fixture.provider.setBaseUrl("https://example.invalid/v1");
-    fixture.models.getByProviderNameAndName("provider", "model").setModelId("gpt-5.6");
+    fixture.editProvider(
+        provider -> provider.configJson(configJson).baseUrl("https://example.invalid/v1"));
+    AgentModel model = fixture.models.getByProviderNameAndName("provider", "model");
+    when(fixture.models.getByProviderNameAndName("provider", "model"))
+        .thenReturn(model.toBuilder().modelId("gpt-5.6").build());
     ProviderFactory factory = fixture.resolverProviderFactory();
     when(factory.promptCacheRetention(any())).thenReturn(PromptCacheRetention.SHORT);
     JdkHttpSseTransport transport = mock(JdkHttpSseTransport.class);
@@ -1751,7 +1762,7 @@ class DatabaseTurnResolverTest {
             PromptCacheRetention.NONE,
             true);
     String dynamicConfig = "{\"customCache\":true}";
-    fixture.provider.setConfigJson(dynamicConfig);
+    fixture.editProvider(provider -> provider.configJson(dynamicConfig));
 
     ProviderFactory factory = fixture.resolverProviderFactory();
     when(factory.promptCacheRetention(dynamicConfig)).thenReturn(PromptCacheRetention.LONG);
@@ -1776,7 +1787,7 @@ class DatabaseTurnResolverTest {
             PromptCacheRetention.NONE,
             true);
     String secretConfig = "{\"apiKey\":\"super-secret-token\",\"malformed\":true}";
-    fixture.provider.setConfigJson(secretConfig);
+    fixture.editProvider(provider -> provider.configJson(secretConfig));
 
     ProviderFactory factory = fixture.resolverProviderFactory();
     when(factory.promptCacheRetention(secretConfig))
@@ -1882,7 +1893,7 @@ class DatabaseTurnResolverTest {
     List<ToolBinding> tools = frozen.toolBindings();
     ProviderRequest before = new ModelRequestMaterializer().materialize(path, frozen);
 
-    fixture.agent.setSystemPrompt("changed system prompt");
+    fixture.editAgent(agent -> agent.systemPrompt("changed system prompt"));
     fixture.agentConfig.setTools(List.of());
 
     // 二次 resolve 证明 mutation 真实生效：live spec 的 systemInstruction 与 tools 都变了，而 frozen spec 不受影响。
@@ -2985,13 +2996,13 @@ class DatabaseTurnResolverTest {
     private final SkillPromptPathResolver skillPromptPathResolver =
         new SkillPromptPathResolver(environmentRegistry);
     private final EnvironmentRepository environmentRepository = mock(EnvironmentRepository.class);
-    private final SkillCatalogQueryService skillCatalogQueryService =
-        mock(SkillCatalogQueryService.class);
+    private final SkillPackageRepository skillPackageRepository =
+        mock(SkillPackageRepository.class);
     private final Map<String, Map<String, String>> packages = new LinkedHashMap<>();
     private String observedHeadCommit;
-    private final AgentDefinition agent = new AgentDefinition();
+    private AgentDefinition agent;
     private final AgentDefinitionConfigDTO agentConfig = new AgentDefinitionConfigDTO();
-    private final AgentProvider provider = new AgentProvider();
+    private AgentProvider provider;
     private final ProviderFactory providerFactory = mock(ProviderFactory.class);
     private final DatabaseTurnResolver resolver;
 
@@ -3115,26 +3126,33 @@ class DatabaseTurnResolverTest {
         HarnessCatalog providedCatalog,
         RuntimeToolCatalogSource providedToolCatalogSource,
         Clock clock) {
-      agent.setName("assistant");
-      agent.setSystemPrompt("agent system prompt");
-      agent.setConfigJson("agent-config");
+      agent =
+          AgentDefinition.builder()
+              .name("assistant")
+              .systemPrompt("agent system prompt")
+              .configJson("agent-config")
+              .build();
       when(agents.getByName("assistant")).thenReturn(agent);
 
       // 默认 branch 选择 ENV_A_NAME：解析为内部路由身份 ENV_A。
       bindEnvironment(ENV_A_NAME, ENV_A);
       bindEnvironment(ENV_B_NAME, ENV_B);
 
-      provider.setName("provider");
-      provider.setProviderType(persistedProviderType);
-      provider.setConnectionGenerationId(new UUID(0L, 42L));
-      provider.setVersion(0L);
-      when(providers.getByName("provider")).thenReturn(provider);
+      editProvider(
+          AgentProvider.builder()
+              .name("provider")
+              .providerType(persistedProviderType)
+              .connectionGenerationId(new UUID(0L, 42L))
+              .version(0L)
+              .build());
 
-      AgentModel model = new AgentModel();
-      model.setProviderName("provider");
-      model.setName("model");
-      model.setModelId("wire-model");
-      model.setConfigJson("model-config");
+      AgentModel model =
+          AgentModel.builder()
+              .providerName("provider")
+              .name("model")
+              .modelId("wire-model")
+              .configJson("model-config")
+              .build();
       when(models.getByProviderNameAndName("provider", "model")).thenReturn(model);
 
       List<SkillRefDTO> skillRefs = new ArrayList<>();
@@ -3152,7 +3170,7 @@ class DatabaseTurnResolverTest {
       agentConfig.setSubagents(List.of());
       when(agentConfigCodec.decode("agent-config")).thenReturn(agentConfig);
 
-      when(skillCatalogQueryService.getPackage(anyString()))
+      when(skillPackageRepository.getPackage(anyString()))
           .thenAnswer(
               invocation -> {
                 String pkgName = invocation.getArgument(0);
@@ -3160,14 +3178,16 @@ class DatabaseTurnResolverTest {
                 if (entries == null) {
                   return null;
                 }
-                SkillPackage pkg = new SkillPackage();
-                pkg.setPackageName(pkgName);
-                pkg.setCurrentCommit(CURRENT_COMMIT);
-                pkg.setObservedHeadCommit(observedHeadCommit);
-                pkg.setSkills(
-                    entries.entrySet().stream()
-                        .map(e -> new SkillManifestEntry(e.getKey(), e.getValue()))
-                        .toList());
+                SkillPackage pkg =
+                    SkillPackage.builder()
+                        .packageName(pkgName)
+                        .currentCommit(CURRENT_COMMIT)
+                        .observedHeadCommit(observedHeadCommit)
+                        .skills(
+                            entries.entrySet().stream()
+                                .map(e -> new SkillManifestEntry(e.getKey(), e.getValue()))
+                                .toList())
+                        .build();
                 return pkg;
               });
 
@@ -3239,7 +3259,7 @@ class DatabaseTurnResolverTest {
               toolCatalogSource,
               environmentRegistry,
               environmentRepository,
-              skillCatalogQueryService,
+              skillPackageRepository,
               skillPromptPathResolver,
               () -> new CompactionConfig(20_000),
               new AgentPromptComposer(() -> subagentConfig),
@@ -3254,29 +3274,52 @@ class DatabaseTurnResolverTest {
       when(environmentRepository.getByName(name)).thenReturn(environment);
     }
 
+    /** Provider 为不可变记录：整体替换并重新绑定仓库桩。 */
+    private void editProvider(AgentProvider replacement) {
+      provider = replacement;
+      when(providers.getByName("provider")).thenReturn(provider);
+    }
+
+    /** Agent 为不可变记录：按编辑重建并重新绑定仓库桩。 */
+    private void editAgent(Consumer<AgentDefinition.AgentDefinitionBuilder> edit) {
+      AgentDefinition.AgentDefinitionBuilder builder = agent.toBuilder();
+      edit.accept(builder);
+      agent = builder.build();
+      when(agents.getByName("assistant")).thenReturn(agent);
+    }
+
+    private void editProvider(Consumer<AgentProvider.AgentProviderBuilder> edit) {
+      AgentProvider.AgentProviderBuilder builder = provider.toBuilder();
+      edit.accept(builder);
+      editProvider(builder.build());
+    }
+
     private void addModel(ModelSelection selection, ParsedAgentModelConfig parsedModel) {
-      AgentProvider fallbackProvider = new AgentProvider();
-      fallbackProvider.setName(selection.providerName());
-      fallbackProvider.setProviderType(ProviderType.OPENAI);
-      fallbackProvider.setConnectionGenerationId(new UUID(0L, 43L));
-      fallbackProvider.setVersion(0L);
+      AgentProvider fallbackProvider =
+          AgentProvider.builder()
+              .name(selection.providerName())
+              .providerType(ProviderType.OPENAI)
+              .connectionGenerationId(new UUID(0L, 43L))
+              .version(0L)
+              .build();
       when(providers.getByName(selection.providerName())).thenReturn(fallbackProvider);
 
       String configJson = selection.providerName() + "-config";
-      AgentModel fallbackModel = new AgentModel();
-      fallbackModel.setProviderName(selection.providerName());
-      fallbackModel.setName(selection.modelName());
-      fallbackModel.setModelId(selection.modelName());
-      fallbackModel.setConfigJson(configJson);
+      AgentModel fallbackModel =
+          AgentModel.builder()
+              .providerName(selection.providerName())
+              .name(selection.modelName())
+              .modelId(selection.modelName())
+              .configJson(configJson)
+              .build();
       when(models.getByProviderNameAndName(selection.providerName(), selection.modelName()))
           .thenReturn(fallbackModel);
       when(modelConfigParser.parse(configJson)).thenReturn(parsedModel);
     }
 
     private void subagent(String name, String description) {
-      AgentDefinition subagent = new AgentDefinition();
-      subagent.setName(name);
-      subagent.setDescription(description);
+      AgentDefinition subagent =
+          AgentDefinition.builder().name(name).description(description).build();
       when(agents.getByName(name)).thenReturn(subagent);
     }
 
@@ -3406,17 +3449,19 @@ class DatabaseTurnResolverTest {
     }
 
     private void compactionAgent(ModelSelection selection) {
-      AgentDefinition compaction = new AgentDefinition();
-      compaction.setName("Compaction");
-      compaction.setSystemPrompt(COMPACTION_SYSTEM_PROMPT);
       // 与普通 Agent 一样提供可解码的普通执行配置，使内置压缩 Agent 也能走 live 规划路径。
-      compaction.setConfigJson("agent-config");
+      AgentDefinition.AgentDefinitionBuilder compaction =
+          AgentDefinition.builder()
+              .name("Compaction")
+              .systemPrompt(COMPACTION_SYSTEM_PROMPT)
+              .configJson("agent-config");
       if (selection != null) {
-        compaction.setModelProviderName(selection.providerName());
-        compaction.setModelName(selection.modelName());
-        compaction.setVariant(selection.variant());
+        compaction
+            .modelProviderName(selection.providerName())
+            .modelName(selection.modelName())
+            .variant(selection.variant());
       }
-      when(agents.getByName("Compaction")).thenReturn(compaction);
+      when(agents.getByName("Compaction")).thenReturn(compaction.build());
     }
 
     private ModelRequestSpec resolved(EntryPath path) {

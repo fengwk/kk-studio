@@ -48,9 +48,9 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderThinkingBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolResultBlock;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
-import fun.fengwk.kkstudio.platform.catalog.provider.configuration.AgentProviderConfigurationCodec;
-import fun.fengwk.kkstudio.platform.catalog.provider.repo.AgentProviderRepository;
-import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
+import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
+import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderConfigurationCodec;
+import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
 import fun.fengwk.kkstudio.platform.storage.service.StorageBlobManager;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
@@ -120,8 +120,8 @@ class DatabaseProviderResolutionServiceTest {
 
   @Test
   void resolveRejectsProviderWithNullConnectionGenerationId() {
-    AgentProvider p = provider(ProviderType.OPENAI, ENDPOINT);
-    p.setConnectionGenerationId(null);
+    AgentProvider p =
+        provider(ProviderType.OPENAI, ENDPOINT).toBuilder().connectionGenerationId(null).build();
     when(repository.getByName(PROVIDER_NAME)).thenReturn(p);
     ProviderFactory factory = openAiFactory(PromptCacheRetention.NONE);
     DatabaseProviderResolutionService resolution = resolution(factory);
@@ -137,8 +137,10 @@ class DatabaseProviderResolutionServiceTest {
 
   @Test
   void resolveRejectsFrozenConnectionGenerationDrift() {
-    AgentProvider provider = provider(ProviderType.OPENAI, ENDPOINT);
-    provider.setConnectionGenerationId(new UUID(0L, 2L));
+    AgentProvider provider =
+        provider(ProviderType.OPENAI, ENDPOINT).toBuilder()
+            .connectionGenerationId(new UUID(0L, 2L))
+            .build();
     when(repository.getByName(PROVIDER_NAME)).thenReturn(provider);
     ProviderAdapter adapter = adapter(ProviderType.OPENAI, mock(ModelProvider.class));
     ProviderFactory factory = factory(ProviderType.OPENAI, PromptCacheRetention.NONE, adapter);
@@ -213,8 +215,10 @@ class DatabaseProviderResolutionServiceTest {
   void resolveWrapsPersistedConfigurationFailureWithoutUntrustedCause() {
     // 意图：损坏的持久 Provider 配置可能含敏感内容；解析边界只暴露稳定定位信息，不保留原始
     // Jackson cause 或配置片段。
-    AgentProvider p = provider(ProviderType.OPENAI, ENDPOINT);
-    p.setConfigJson("{\"credential\":\"sensitive-value\"");
+    AgentProvider p =
+        provider(ProviderType.OPENAI, ENDPOINT).toBuilder()
+            .configJson("{\"credential\":\"sensitive-value\"")
+            .build();
     when(repository.getByName(PROVIDER_NAME)).thenReturn(p);
     DatabaseProviderResolutionService resolution =
         resolution(openAiFactory(PromptCacheRetention.NONE));
@@ -773,14 +777,14 @@ class DatabaseProviderResolutionServiceTest {
   }
 
   private static AgentProvider provider(ProviderType type, String baseUrl) {
-    AgentProvider provider = new AgentProvider();
-    provider.setName(PROVIDER_NAME);
-    provider.setProviderType(type);
-    provider.setBaseUrl(baseUrl);
-    provider.setCredential("secret");
-    provider.setConfigJson("{}");
-    provider.setConnectionGenerationId(GENERATION_ID);
-    return provider;
+    return AgentProvider.builder()
+        .name(PROVIDER_NAME)
+        .providerType(type)
+        .baseUrl(baseUrl)
+        .credential("secret")
+        .configJson("{}")
+        .connectionGenerationId(GENERATION_ID)
+        .build();
   }
 
   private static ProviderRequest request(ProviderCacheControl cacheControl) {

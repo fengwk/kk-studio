@@ -31,9 +31,9 @@ import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
-import fun.fengwk.kkstudio.platform.catalog.model.repo.AgentModelRepository;
+import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
+import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser;
-import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelAbilitiesDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelInputModality;
@@ -354,10 +354,8 @@ class UsageCostProjectionServiceTest {
   /** 测试意图：catalog 定义本身非法属于数据损坏，照常抛出而不是静默把该 Entry 降级为「未计价」。 */
   @Test
   void propagatesMalformedCatalogConfigInsteadOfUnpricingTheEntry() {
-    AgentModel broken = new AgentModel();
-    broken.setProviderName("provider-a");
-    broken.setName("model-a");
-    broken.setConfigJson("{}");
+    AgentModel broken =
+        AgentModel.builder().providerName("provider-a").name("model-a").configJson("{}").build();
     when(modelRepository.getByProviderNameAndName("provider-a", "model-a")).thenReturn(broken);
 
     List<Entry> entries =
@@ -374,10 +372,12 @@ class UsageCostProjectionServiceTest {
   }
 
   private void stubModel(String providerName, String modelName, AgentModelPricingDTO pricing) {
-    AgentModel model = new AgentModel();
-    model.setProviderName(providerName);
-    model.setName(modelName);
-    model.setConfigJson(configParser.encode(config(pricing)));
+    AgentModel model =
+        AgentModel.builder()
+            .providerName(providerName)
+            .name(modelName)
+            .configJson(configParser.encode(config(pricing)))
+            .build();
     when(modelRepository.getByProviderNameAndName(providerName, modelName)).thenReturn(model);
   }
 

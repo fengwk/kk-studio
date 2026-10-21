@@ -12,10 +12,10 @@ import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
-import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpDiscoveryStatus;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpDiscoveryStatus;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpServer;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerRepository;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
 
 import java.util.List;
 import java.util.Map;
@@ -154,26 +154,30 @@ class McpToolCatalogTest {
   }
 
   private static McpServer server(String name, McpDiscoveryStatus status, boolean enabled) {
-    McpServer server = new McpServer();
-    server.setName(name);
-    server.setUrl("https://mcp.example.com/mcp");
-    server.setHeaders(Map.of());
-    server.setEnabled(enabled);
-    server.setTimeoutMillis(15000L);
-    server.setDiscoveryStatus(status);
-    server.setVersion(1L);
+    McpServer server =
+        McpServer.builder()
+            .name(name)
+            .url("https://mcp.example.com/mcp")
+            .headers(Map.of())
+            .enabled(enabled)
+            .timeoutMillis(15000L)
+            .discoveryStatus(status)
+            .version(1L)
+            .build();
     return server;
   }
 
   private static McpTool tool(
       String name, String serverName, String sourceName, String description) {
-    McpTool tool = new McpTool();
-    tool.setName(name);
-    tool.setServerName(serverName);
-    tool.setSourceName(sourceName);
-    tool.setDescription(description);
-    tool.setInputSchemaJson(
-        "{\"type\":\"object\",\"properties\":{},\"required\":[],\"additionalProperties\":true}");
+    McpTool tool =
+        McpTool.builder()
+            .name(name)
+            .serverName(serverName)
+            .sourceName(sourceName)
+            .description(description)
+            .inputSchemaJson(
+                "{\"type\":\"object\",\"properties\":{},\"required\":[],\"additionalProperties\":true}")
+            .build();
     return tool;
   }
 }

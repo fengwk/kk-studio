@@ -5,15 +5,15 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.catalog.definition.service.AgentDefinitionService;
-import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.McpServerService;
-import fun.fengwk.kkstudio.platform.catalog.model.repo.AgentModelRepository;
-import fun.fengwk.kkstudio.platform.catalog.model.service.AgentModelService;
-import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
-import fun.fengwk.kkstudio.platform.catalog.provider.service.AgentProviderService;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.SkillCatalogService;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionService;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerService;
+import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
+import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
+import fun.fengwk.kkstudio.platform.catalog.model.AgentModelService;
+import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderService;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogService;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentService;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
@@ -113,7 +113,7 @@ public class ConfigSyncApplier {
       } else {
         AgentModelUpdateDTO update = new AgentModelUpdateDTO();
         copyModel(spec.properties(), update);
-        update.setExpectedVersion(CatalogVersions.format(existing.getVersion()));
+        update.setExpectedVersion(CatalogVersions.format(existing.version()));
         modelService.updateModel(spec.providerName(), spec.name(), update);
       }
     }
@@ -147,7 +147,7 @@ public class ConfigSyncApplier {
     for (ConfigSyncParser.AgentSpec spec : agents) {
       AgentDefinition current = definitionRepository.getByName(spec.name());
       AgentDefinitionUpdateDTO update = buildAgentUpdate(spec);
-      update.setExpectedVersion(CatalogVersions.format(current.getVersion()));
+      update.setExpectedVersion(CatalogVersions.format(current.version()));
       definitionService.updateAgent(spec.name(), update);
     }
   }

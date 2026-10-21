@@ -9,8 +9,8 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.json.JsonMapper;
 
-import fun.fengwk.kkstudio.platform.catalog.model.repo.impl.model.AgentModelDO;
-import fun.fengwk.kkstudio.platform.catalog.model.repo.impl.store.AgentModelJdbcStore;
+import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
+import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
 
 /** Model Variant 覆盖必须引用当前的复合 Model 标识。 */
@@ -18,13 +18,15 @@ class AgentModelDefaultVariantResolverTest {
 
   @Test
   void resolvesDefaultAndRejectsUnknownModelOrVariant() {
-    AgentModelJdbcStore store = mock(AgentModelJdbcStore.class);
+    AgentModelRepository store = mock(AgentModelRepository.class);
     AgentModelRuntimeConfigParser parser =
         new AgentModelRuntimeConfigParser(JsonMapper.builder().build());
-    AgentModelDO model = new AgentModelDO();
-    model.setProviderName("provider");
-    model.setName("model");
-    model.setConfigJson(parser.encode(executableConfig()));
+    AgentModel model =
+        AgentModel.builder()
+            .providerName("provider")
+            .name("model")
+            .configJson(parser.encode(executableConfig()))
+            .build();
     when(store.getByProviderNameAndName("provider", "model")).thenReturn(model);
 
     AgentModelDefaultVariantResolver resolver = new AgentModelDefaultVariantResolver(store, parser);

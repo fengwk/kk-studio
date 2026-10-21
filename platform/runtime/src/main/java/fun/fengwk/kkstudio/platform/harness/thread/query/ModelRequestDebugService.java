@@ -13,9 +13,9 @@ import fun.fengwk.kkstudio.harness.runtime.invocation.model.SubagentBinding;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderRequestJsonCodec;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentDefinitionConfigCodec;
-import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.platform.harness.task.AgentPromptComposer;
 import fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseTurnResolver;
 import fun.fengwk.kkstudio.platform.harness.thread.command.LiveTurnPlan;
@@ -190,10 +190,10 @@ public final class ModelRequestDebugService {
 
   private AgentDefinitionConfigDTO decodeSubagentConfig(AgentDefinition definition) {
     try {
-      return agentConfigCodec.decode(definition.getConfigJson());
+      return agentConfigCodec.decode(definition.configJson());
     } catch (IllegalStateException error) {
       throw new IllegalStateException(
-          "subagent has an invalid configuration: " + definition.getName(), error);
+          "subagent has an invalid configuration: " + definition.name(), error);
     }
   }
 

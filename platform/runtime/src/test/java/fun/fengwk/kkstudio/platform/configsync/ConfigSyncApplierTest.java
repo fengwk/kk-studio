@@ -20,17 +20,17 @@ import org.mockito.InOrder;
 import org.mockito.Mockito;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.platform.catalog.definition.repo.AgentDefinitionRepository;
-import fun.fengwk.kkstudio.platform.catalog.definition.service.AgentDefinitionService;
-import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.McpServerService;
-import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
-import fun.fengwk.kkstudio.platform.catalog.model.repo.AgentModelRepository;
-import fun.fengwk.kkstudio.platform.catalog.model.service.AgentModelService;
-import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
-import fun.fengwk.kkstudio.platform.catalog.provider.service.AgentProviderService;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.SkillCatalogService;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinition;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionRepository;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentDefinitionService;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerService;
+import fun.fengwk.kkstudio.platform.catalog.mcp.McpTool;
+import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
+import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
+import fun.fengwk.kkstudio.platform.catalog.model.AgentModelService;
+import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderService;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogService;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillManifestEntry;
 import fun.fengwk.kkstudio.platform.environment.repo.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.service.EnvironmentService;
 import fun.fengwk.kkstudio.platform.environment.service.model.Environment;
@@ -138,9 +138,7 @@ class ConfigSyncApplierTest {
 
   /** 合成依赖插件：普通值里的 Agent 名称字段由测试显式给出。 */
   private static AgentDefinition existingAgent(String name) {
-    AgentDefinition agent = new AgentDefinition();
-    agent.setName(name);
-    agent.setVersion(0L);
+    AgentDefinition agent = AgentDefinition.builder().name(name).version(0L).build();
     return agent;
   }
 
@@ -154,12 +152,8 @@ class ConfigSyncApplierTest {
 
   @Test
   void agentTwoStageWriteResolvesCyclicSubagents() {
-    AgentDefinition existingA = new AgentDefinition();
-    existingA.setName("a");
-    existingA.setVersion(0L);
-    AgentDefinition existingB = new AgentDefinition();
-    existingB.setName("b");
-    existingB.setVersion(0L);
+    AgentDefinition existingA = AgentDefinition.builder().name("a").version(0L).build();
+    AgentDefinition existingB = AgentDefinition.builder().name("b").version(0L).build();
     // 阶段一每个名字返回 null（尚不存在），阶段二返回已创建的行。
     when(definitionRepository.getByName("a")).thenReturn(null, existingA);
     when(definitionRepository.getByName("b")).thenReturn(null, existingB);
@@ -513,10 +507,7 @@ class ConfigSyncApplierTest {
   /** 意图：既有 Model 走 CAS 更新并携带既有版本，绝不重复创建。 */
   @Test
   void existingModelIsUpdatedWithExistingVersionCas() {
-    AgentModel existing = new AgentModel();
-    existing.setProviderName("p");
-    existing.setName("m");
-    existing.setVersion(4L);
+    AgentModel existing = AgentModel.builder().providerName("p").name("m").version(4L).build();
     when(modelRepository.getByProviderNameAndName("p", "m")).thenReturn(existing);
     AgentModelEditablePropertiesDTO properties = new AgentModelEditablePropertiesDTO();
     properties.setName("m");
@@ -535,9 +526,7 @@ class ConfigSyncApplierTest {
   /** 意图：已存在的 Agent 不再创建，直接进入第二阶段用既有版本 CAS 更新完整配置。 */
   @Test
   void existingAgentIsUpdatedWithoutCreate() {
-    AgentDefinition existing = new AgentDefinition();
-    existing.setName("a");
-    existing.setVersion(7L);
+    AgentDefinition existing = AgentDefinition.builder().name("a").version(7L).build();
     when(definitionRepository.getByName("a")).thenReturn(existing);
     ConfigSyncParser.AgentSpec spec =
         new ConfigSyncParser.AgentSpec(

@@ -23,8 +23,8 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityR
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTransport;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.harness.environment.daemon.DaemonWorkdirSyntax;
-import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogQueryService;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentEvent;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
@@ -86,7 +86,7 @@ public class EnvironmentSkillSyncOrchestrator {
   static final int LOCK_STRIPES = 64;
 
   private final EnvironmentRegistry environmentRegistry;
-  private final SkillCatalogQueryService skillCatalogQueryService;
+  private final SkillPackageRepository skillPackageRepository;
   private final EnvironmentCapabilityTransport capabilityTransport;
   private final ExecutorService executor;
   private final Clock clock;
@@ -94,13 +94,13 @@ public class EnvironmentSkillSyncOrchestrator {
 
   public EnvironmentSkillSyncOrchestrator(
       EnvironmentRegistry environmentRegistry,
-      SkillCatalogQueryService skillCatalogQueryService,
+      SkillPackageRepository skillPackageRepository,
       EnvironmentCapabilityTransport capabilityTransport,
       ExecutorService executor,
       Clock clock) {
     this.environmentRegistry = Objects.requireNonNull(environmentRegistry, "environmentRegistry");
-    this.skillCatalogQueryService =
-        Objects.requireNonNull(skillCatalogQueryService, "skillCatalogQueryService");
+    this.skillPackageRepository =
+        Objects.requireNonNull(skillPackageRepository, "skillPackageRepository");
     this.capabilityTransport = Objects.requireNonNull(capabilityTransport, "capabilityTransport");
     this.executor = Objects.requireNonNull(executor, "executor");
     this.clock = Objects.requireNonNull(clock, "clock");
@@ -180,9 +180,7 @@ public class EnvironmentSkillSyncOrchestrator {
     List<String> packageNames;
     try {
       packageNames =
-          skillCatalogQueryService.listPackages().stream()
-              .map(SkillPackage::getPackageName)
-              .toList();
+          skillPackageRepository.listPackages().stream().map(SkillPackage::packageName).toList();
     } catch (RuntimeException error) {
       log.warn("environment skill sync could not list skill packages", error);
       return;
@@ -199,7 +197,7 @@ public class EnvironmentSkillSyncOrchestrator {
 
   /** 同步单个 Package：读取当前行 → 记录 STARTED 事件 → 发送调用 → 在同一围栏下写回投影与终态事件。 */
   private void syncPackage(EnvironmentId environmentId, String packageName) {
-    SkillPackage skillPackage = skillCatalogQueryService.getPackage(packageName);
+    SkillPackage skillPackage = skillPackageRepository.getPackage(packageName);
     if (skillPackage == null) {
       return;
     }
@@ -342,10 +340,7 @@ public class EnvironmentSkillSyncOrchestrator {
     for (ResultContent content : result.contents()) {
       if (content instanceof JsonResultContent json) {
         return parseOutcome(
-            json.json(),
-            skillPackage.getPackageName(),
-            skillPackage.getCurrentCommit(),
-            operatingSystem);
+            json.json(), skillPackage.packageName(), skillPackage.currentCommit(), operatingSystem);
       }
     }
     return SyncOutcome.failure(RESULT_FAILURE);
@@ -429,12 +424,12 @@ public class EnvironmentSkillSyncOrchestrator {
 
   private String argumentsJson(SkillPackage skillPackage) {
     ObjectNode node = JSON.createObjectNode();
-    node.put("packageName", skillPackage.getPackageName());
-    node.put("repositoryUrl", skillPackage.getRepositoryUrl());
-    node.put("branch", skillPackage.getBranch());
-    node.put("targetCommit", skillPackage.getCurrentCommit());
+    node.put("packageName", skillPackage.packageName());
+    node.put("repositoryUrl", skillPackage.repositoryUrl());
+    node.put("branch", skillPackage.branch());
+    node.put("targetCommit", skillPackage.currentCommit());
     // 私有仓库令牌从加密事实解析后只进入这条受信任的 capability 通道；绝不进入模型上下文、事件或日志。
-    String credential = skillCatalogQueryService.resolveAccessToken(skillPackage);
+    String credential = skillPackage.token();
     if (credential != null) {
       node.put("credential", credential);
     }

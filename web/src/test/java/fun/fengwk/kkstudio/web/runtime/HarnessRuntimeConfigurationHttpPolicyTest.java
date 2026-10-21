@@ -3,17 +3,18 @@ package fun.fengwk.kkstudio.web.runtime;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
-import fun.fengwk.convention4j.api.page.Page;
-import fun.fengwk.convention4j.api.page.PageQuery;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.runtime.retry.ModelHttpErrorPolicy;
 import fun.fengwk.kkstudio.harness.runtime.retry.ModelHttpErrorPolicyProvider;
-import fun.fengwk.kkstudio.platform.catalog.provider.configuration.AgentProviderConfigurationCodec;
-import fun.fengwk.kkstudio.platform.catalog.provider.repo.AgentProviderRepository;
-import fun.fengwk.kkstudio.platform.catalog.provider.service.model.AgentProvider;
+import fun.fengwk.kkstudio.platform.catalog.provider.AgentProvider;
+import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderConfigurationCodec;
+import fun.fengwk.kkstudio.platform.catalog.provider.AgentProviderRepository;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 
@@ -67,12 +68,20 @@ class HarnessRuntimeConfigurationHttpPolicyTest {
     assertThrows(IllegalArgumentException.class, () -> policyFor("  "));
   }
 
+  /** 只读 Provider 仓库替身：仅 getByName 参与策略解析。 */
+  private AgentProviderRepository repository() {
+    AgentProviderRepository repository = mock(AgentProviderRepository.class);
+    when(repository.getByName(anyString()))
+        .thenAnswer(invocation -> providers.get(invocation.<String>getArgument(0)));
+    return repository;
+  }
+
   private ModelHttpErrorPolicy policyFor(String providerName) {
     ModelHttpErrorPolicyProvider provider =
         new HarnessRuntimeConfiguration()
             .modelHttpErrorPolicyProvider(
                 new SystemSettingsSnapshot(settingsWithRetryList(List.of(429))),
-                new MapProviderRepository(providers),
+                repository(),
                 codec);
     return provider.policy(providerName);
   }
@@ -99,59 +108,6 @@ class HarnessRuntimeConfigurationHttpPolicyTest {
   }
 
   private static AgentProvider provider(String name, String configJson) {
-    AgentProvider provider = new AgentProvider();
-    provider.setName(name);
-    provider.setConfigJson(configJson);
-    return provider;
-  }
-
-  /** 只读 Provider 仓库 fake：仅 {@link #getByName} 参与策略解析。 */
-  private static final class MapProviderRepository implements AgentProviderRepository {
-
-    private final Map<String, AgentProvider> byName;
-
-    MapProviderRepository(Map<String, AgentProvider> byName) {
-      this.byName = byName;
-    }
-
-    @Override
-    public Page<AgentProvider> page(PageQuery pageQuery) {
-      throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public List<AgentProvider> listAll() {
-      throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public AgentProvider getByName(String name) {
-      return byName.get(name);
-    }
-
-    @Override
-    public AgentProvider getByNameForUpdate(String name) {
-      throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public boolean create(AgentProvider provider) {
-      throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public boolean updateByName(AgentProvider provider, long expectedVersion) {
-      throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public boolean deleteByName(String name, long expectedVersion) {
-      throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public boolean hasModels(String providerName) {
-      throw new UnsupportedOperationException();
-    }
+    return AgentProvider.builder().name(name).configJson(configJson).build();
   }
 }

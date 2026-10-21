@@ -1,9 +1,9 @@
 package fun.fengwk.kkstudio.platform.harness.read;
 
-import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogQueryService;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillManifestEntry;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackage;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillPackageRepository;
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitCache;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillPackage;
 
 import java.util.Objects;
 
@@ -15,11 +15,13 @@ import java.util.Objects;
  */
 public class PlatformSkillContentReader {
 
-  private final SkillCatalogQueryService queryService;
+  private final SkillPackageRepository skillPackageRepository;
   private final SkillGitCache gitCache;
 
-  public PlatformSkillContentReader(SkillCatalogQueryService queryService, SkillGitCache gitCache) {
-    this.queryService = Objects.requireNonNull(queryService, "queryService");
+  public PlatformSkillContentReader(
+      SkillPackageRepository skillPackageRepository, SkillGitCache gitCache) {
+    this.skillPackageRepository =
+        Objects.requireNonNull(skillPackageRepository, "skillPackageRepository");
     this.gitCache = Objects.requireNonNull(gitCache, "gitCache");
   }
 
@@ -41,7 +43,7 @@ public class PlatformSkillContentReader {
     }
     validateRelativePath(relativePath);
 
-    SkillPackage pkg = queryService.getPackage(packageName);
+    SkillPackage pkg = skillPackageRepository.getPackage(packageName);
     if (pkg == null) {
       throw new PlatformReadException("skill package not found: " + packageName);
     }
@@ -51,15 +53,14 @@ public class PlatformSkillContentReader {
       throw new PlatformReadException("skill not found: " + packageName + "/" + skillName);
     }
 
-    String currentCommit = pkg.getCurrentCommit();
+    String currentCommit = pkg.currentCommit();
     if (currentCommit == null || currentCommit.isBlank()) {
       throw new PlatformReadException("skill package has no published commit: " + packageName);
     }
 
     try {
       // 冷启动也必须成功：从当前发布事实解析令牌（未配置为 null），绝不因 cache miss 而放弃私有仓库鉴权。
-      gitCache.ensureCommit(
-          packageName, pkg.getRepositoryUrl(), currentCommit, queryService.resolveAccessToken(pkg));
+      gitCache.ensureCommit(packageName, pkg.repositoryUrl(), currentCommit, pkg.token());
     } catch (Exception e) {
       throw new PlatformReadException("skill content is unavailable: " + e.getMessage(), e);
     }

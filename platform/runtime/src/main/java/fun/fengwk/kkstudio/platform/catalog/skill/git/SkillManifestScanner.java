@@ -5,7 +5,7 @@ import org.yaml.snakeyaml.Yaml;
 import org.yaml.snakeyaml.constructor.SafeConstructor;
 
 import fun.fengwk.kkstudio.harness.common.skill.SkillNames;
-import fun.fengwk.kkstudio.platform.catalog.skill.service.model.SkillManifestEntry;
+import fun.fengwk.kkstudio.platform.catalog.skill.SkillManifestEntry;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;

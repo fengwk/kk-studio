@@ -2,8 +2,8 @@ package fun.fengwk.kkstudio.platform.catalog.model.runtime;
 
 import org.springframework.stereotype.Component;
 
-import fun.fengwk.kkstudio.platform.catalog.model.repo.impl.model.AgentModelDO;
-import fun.fengwk.kkstudio.platform.catalog.model.repo.impl.store.AgentModelJdbcStore;
+import fun.fengwk.kkstudio.platform.catalog.model.AgentModel;
+import fun.fengwk.kkstudio.platform.catalog.model.AgentModelRepository;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
 
 import java.util.Objects;
@@ -17,12 +17,13 @@ import java.util.Objects;
 @Component
 public class AgentModelDefaultVariantResolver {
 
-  private final AgentModelJdbcStore agentModelJdbcStore;
+  private final AgentModelRepository agentModelRepository;
   private final AgentModelRuntimeConfigParser configParser;
 
   public AgentModelDefaultVariantResolver(
-      AgentModelJdbcStore agentModelJdbcStore, AgentModelRuntimeConfigParser configParser) {
-    this.agentModelJdbcStore = Objects.requireNonNull(agentModelJdbcStore, "agentModelJdbcStore");
+      AgentModelRepository agentModelRepository, AgentModelRuntimeConfigParser configParser) {
+    this.agentModelRepository =
+        Objects.requireNonNull(agentModelRepository, "agentModelRepository");
     this.configParser = Objects.requireNonNull(configParser, "configParser");
   }
 
@@ -33,11 +34,11 @@ public class AgentModelDefaultVariantResolver {
     if (modelName == null || modelName.isBlank()) {
       throw new IllegalArgumentException("modelName must not be blank");
     }
-    AgentModelDO model = agentModelJdbcStore.getByProviderNameAndName(providerName, modelName);
+    AgentModel model = agentModelRepository.getByProviderNameAndName(providerName, modelName);
     if (model == null) {
       throw new IllegalArgumentException("unknown agent model: " + providerName + "/" + modelName);
     }
-    AgentModelConfigDTO config = configParser.decode(model.getConfigJson());
+    AgentModelConfigDTO config = configParser.decode(model.configJson());
     return resolveConfiguredVariant(providerName, modelName, overrideVariant, config);
   }
 
