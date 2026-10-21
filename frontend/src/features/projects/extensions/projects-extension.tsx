@@ -1,9 +1,9 @@
-import { lazy, Suspense, useEffect } from 'react'
+import { lazy, Suspense } from 'react'
 import { useNavigate, useParams } from 'react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import { invalidateProjectQueries } from '@/features/projects/projects-invalidation'
 import type { ExtensionComponentProps } from '@/platform/extensions/types'
-import { useApplicationEvents } from '@/shared/app-events'
+import { useResourceSync } from '@/shared/app-events/useResourceSync'
 import { useI18n } from '@/shared/i18n'
 
 const ProjectsPage = lazy(async () => {
@@ -52,37 +52,24 @@ export function ProjectDetailRoute({ children }: ExtensionComponentProps) {
 /** Bridges the global projects WebSocket resource into TanStack Query cache invalidations. */
 export function ProjectsInvalidationBridge() {
   const queryClient = useQueryClient()
-  const events = useApplicationEvents()
-
-  useEffect(
-    () =>
-      events.subscribe(
-        { kind: 'projects' },
-        {
-          onSubscribed: () => {
-            void invalidateProjectQueries(queryClient)
-          },
-          onEvent: (name, data) => {
-            if (name !== 'changed' || typeof data !== 'object' || data == null) {
-              return
-            }
-            const projectId = (data as { projectId?: unknown }).projectId
-            if (typeof projectId === 'string') {
-              void invalidateProjectQueries(queryClient, { projectId })
-            } else {
-              void invalidateProjectQueries(queryClient)
-            }
-          },
-          onResync: () => {
-            void invalidateProjectQueries(queryClient)
-          },
-          onError: () => {
-            void invalidateProjectQueries(queryClient)
-          },
-        },
-      ),
-    [events, queryClient],
-  )
+  // changed 事件带 projectId 时只失效该项目，其余一律全量失效。
+  const invalidateAll = () => {
+    void invalidateProjectQueries(queryClient)
+  }
+  useResourceSync({ kind: 'projects' }, {
+    sync: invalidateAll,
+    onEvent: (name, data) => {
+      if (name !== 'changed' || typeof data !== 'object' || data == null) {
+        return
+      }
+      const projectId = (data as { projectId?: unknown }).projectId
+      if (typeof projectId === 'string') {
+        void invalidateProjectQueries(queryClient, { projectId })
+      } else {
+        invalidateAll()
+      }
+    },
+  })
 
   return null
 }

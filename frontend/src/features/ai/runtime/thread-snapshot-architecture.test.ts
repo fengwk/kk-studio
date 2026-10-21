@@ -27,7 +27,10 @@ describe('Thread snapshot architecture', () => {
   })
 
   it('keeps durable and lossy realtime paths causally separate', () => {
-    const realtime = source('features/ai/runtime/useHarnessThreadRealtime.ts')
+    const realtime = [
+      'features/ai/runtime/useHarnessThreadRealtime.ts',
+      'features/ai/runtime/thread-realtime/realtime-streams.ts',
+    ].map(source).join('\n')
 
     expect(realtime).toContain('subscription.threadId')
     expect(realtime).toContain("name === 'version'")

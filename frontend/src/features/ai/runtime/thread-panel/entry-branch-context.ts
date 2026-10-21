@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react'
-import type { BranchRequestInput } from '@/features/ai/runtime/useRootThreadControl'
+import type { BranchRequestInput } from '@/features/ai/runtime/root-thread/types'
 
 /**
  * 会话里“从此处分支”的统一入口：由根控制面提供，回合 footer（TURN_END）按钮消费。

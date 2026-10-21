@@ -17,12 +17,7 @@ import { useThreadProjection } from '@/features/ai/runtime/useThreadProjection'
 import { isBoundTarget, samePaneTarget } from '@/features/ai/runtime/agent-pane'
 import { createUuid, isCanonicalUuid } from '@/shared/lib/uuid'
 import { IdeOverlayPanel, type IdeCommandAction, type ResolvedEnvironmentInfo } from '@/features/ai/ide/IdeOverlayPanel'
-import type {
-  AgentPaneCapabilities,
-  AgentPaneDefaults,
-  BranchRequestInput,
-  PaneReport,
-} from '@/features/ai/runtime/useRootThreadControl'
+import type { AgentPaneCapabilities, AgentPaneDefaults, BranchRequestInput, PaneReport } from '@/features/ai/runtime/root-thread/types'
 import type { AgentDefinitionDTO } from '@/shared/api/contracts/ai-catalog'
 import type { AgentRuntimeOwnerDTO } from '@/shared/api/contracts/ai-runtime'
 import type { EnvironmentCardDTO } from '@/shared/api/contracts/ai-environment'

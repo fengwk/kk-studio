@@ -30,14 +30,9 @@ function MemoryRouter({ children }: { children: ReactNode }) {
 }
 
 import { AgentPane } from '@/features/ai/runtime/AgentPane'
-import {
-  branchDraftFromEntry,
-  branchDraftFromEntryPath,
-  sessionSelectionItem,
-  threadSelectionItem,
-  useRootThreadControl,
-  type UseRootThreadControlOptions,
-} from '@/features/ai/runtime/useRootThreadControl'
+import { useRootThreadControl, type UseRootThreadControlOptions } from '@/features/ai/runtime/useRootThreadControl'
+import { branchDraftFromEntry, branchDraftFromEntryPath } from '@/features/ai/runtime/root-thread/branch-draft-replay'
+import { sessionSelectionItem, threadSelectionItem } from '@/features/ai/runtime/root-thread/session-selection-items'
 import { usePaneTarget } from '@/features/ai/runtime/usePaneTarget'
 import { isBoundTarget, type PaneTarget } from '@/features/ai/runtime/agent-pane'
 import { useThreadProjection } from '@/features/ai/runtime/useThreadProjection'

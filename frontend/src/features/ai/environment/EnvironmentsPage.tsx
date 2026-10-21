@@ -20,7 +20,7 @@ import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { ConfirmActionModal } from '@/shared/ui/overlays/ConfirmActionModal'
 import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
 import { environmentService } from '@/shared/api/environment-service'
-import { useApplicationEvents } from '@/shared/app-events'
+import { useResourceSync } from '@/shared/app-events/useResourceSync'
 import { isConflictError } from '@/shared/api/client'
 import { presentConflict, type ConflictPresentation } from '@/shared/conflict/conflict-presenter'
 import { ConflictPresenter } from '@/shared/conflict/ConflictPresenter'
@@ -88,7 +88,6 @@ function earliestStatusExpiresAt(cards: EnvironmentCardDTO[]): number | null {
 export function EnvironmentsPage() {
   const { t, locale } = useI18n()
   const queryClient = useQueryClient()
-  const applicationEvents = useApplicationEvents()
 
   const [createModalOpen, setCreateModalOpen] = useState(false)
   const [createName, setCreateName] = useState('')
@@ -116,24 +115,12 @@ export function EnvironmentsPage() {
   })
 
   // 环境事实（注册表与连接租约，含心跳续租、断线与注销）由服务端在提交后推送 changed：
-  // 只提示回读权威列表，因此不再用固定轮询掩盖状态变化；subscribed（首订与重连重订阅）
+  // 只提示回读权威列表，因此不再用固定轮询掩盖状态变化；订阅建立（首订与重连重订阅）
   // 与 resync 同样回读，关闭断线窗口。
-  useEffect(
-    () =>
-      applicationEvents.subscribe(
-        { kind: 'environments' },
-        {
-          onSubscribed: invalidateEnvironments,
-          onEvent: (name) => {
-            if (name === 'changed') {
-              invalidateEnvironments()
-            }
-          },
-          onResync: invalidateEnvironments,
-        },
-      ),
-    [applicationEvents, invalidateEnvironments],
-  )
+  useResourceSync({ kind: 'environments' }, {
+    sync: invalidateEnvironments,
+    syncOn: (name) => name === 'changed',
+  })
 
   const environments = useMemo(
     () => filterEnvironments(environmentsQuery.data ?? [], ''),

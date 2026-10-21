@@ -42,11 +42,8 @@ export {
   useBoundThreadPanelViews,
   useBoundThreadPanelLabels,
 } from '@/features/ai/runtime/useBoundThreadPanelViews'
-export {
-  useRootThreadControl,
-  type AgentPaneDefaults,
-  type PaneInteraction,
-} from '@/features/ai/runtime/useRootThreadControl'
+export { useRootThreadControl } from '@/features/ai/runtime/useRootThreadControl'
+export { type AgentPaneDefaults, type PaneInteraction } from '@/features/ai/runtime/root-thread/types'
 export { usePaneTarget } from '@/features/ai/runtime/usePaneTarget'
 export { RootAgentPane } from '@/features/ai/runtime/RootAgentPane'
 export { useActiveThreadTree } from '@/features/ai/runtime/useActiveThreadTree'
