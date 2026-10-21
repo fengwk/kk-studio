@@ -1838,7 +1838,6 @@ public abstract class HarnessStoreInvocationContract {
             T2);
     inTransaction(store, tx -> tx.insertToolInvocations(List.of(ready)));
     updateTool(TestIds.id(10), tool -> tool.markApprovalNotRequired(T2));
-    updateTool(TestIds.id(10), tool -> tool.beginDispatch(T2));
     updateTool(TestIds.id(10), tool -> tool.markRunning(T2));
     ToolEffectBatch effects =
         new ToolEffectBatch(

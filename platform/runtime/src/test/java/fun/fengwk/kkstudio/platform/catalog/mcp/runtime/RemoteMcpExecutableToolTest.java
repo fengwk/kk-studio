@@ -16,14 +16,12 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
 import fun.fengwk.kkstudio.harness.mcp.McpCancellationToken;
 import fun.fengwk.kkstudio.harness.mcp.McpClient;
 import fun.fengwk.kkstudio.harness.mcp.McpClientFactory;
 import fun.fengwk.kkstudio.harness.mcp.McpDeadline;
+import fun.fengwk.kkstudio.harness.mcp.McpException;
 import fun.fengwk.kkstudio.harness.mcp.McpTimeoutException;
 import fun.fengwk.kkstudio.harness.mcp.McpToolCallResult;
 import fun.fengwk.kkstudio.harness.mcp.McpToolDefinition;
@@ -43,11 +41,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 /** 验证 {@link RemoteMcpExecutableTool} 的 Streamable HTTP 执行契约与安全边界。 */
 class RemoteMcpExecutableToolTest {
@@ -57,13 +54,11 @@ class RemoteMcpExecutableToolTest {
 
   private FakeStreamableHttpMcpServer fakeServer;
   private McpServerRepository repository;
-  private ExecutorService executor;
 
   @BeforeEach
   void setUp() throws IOException {
     fakeServer = new FakeStreamableHttpMcpServer();
     repository = mock(McpServerRepository.class);
-    executor = Executors.newVirtualThreadPerTaskExecutor();
   }
 
   @AfterEach
@@ -71,7 +66,6 @@ class RemoteMcpExecutableToolTest {
     if (fakeServer != null) {
       fakeServer.close();
     }
-    executor.close();
   }
 
   @Test
@@ -79,8 +73,7 @@ class RemoteMcpExecutableToolTest {
     // 意图：Remote MCP 工具对外暴露的 requirements 恒为 none，sideEffect 为 NON_IDEMPOTENT
     ToolDescriptor descriptor = SampleDescriptors.tool("mcp_srv_echo");
     RemoteMcpExecutableTool tool =
-        new RemoteMcpExecutableTool(
-            descriptor, SERVER_NAME, "mcp_srv_echo", "echo", repository, executor);
+        new RemoteMcpExecutableTool(descriptor, SERVER_NAME, "mcp_srv_echo", "echo", repository);
 
     assertEquals(descriptor, tool.descriptor());
     assertNotNull(tool.requirements());
@@ -96,18 +89,17 @@ class RemoteMcpExecutableToolTest {
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            new RemoteMcpExecutableTool(
-                descriptor, SERVER_NAME, "mcp_srv_echo", null, repository, executor));
+            new RemoteMcpExecutableTool(descriptor, SERVER_NAME, "mcp_srv_echo", null, repository));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new RemoteMcpExecutableTool(
-                descriptor, SERVER_NAME, "mcp_srv_echo", "   ", repository, executor));
+                descriptor, SERVER_NAME, "mcp_srv_echo", "   ", repository));
   }
 
   @Test
-  void executesAndCompletesListenerWithRawSourceName() throws Exception {
-    // 意图：异步执行并在 listener 收到完成回调，且原始远端工具名无改写传给 MCP server
+  void executesAndReturnsResultWithRawSourceName() throws Exception {
+    // 意图：阻塞执行并返回结果，且原始远端工具名无改写传给 MCP server
     String rawSourceName = "remote.raw-tool_name@v1";
     fakeServer.addTool(rawSourceName, "Raw tool", "{}");
     stubServerAndTool("mcp_srv_raw", rawSourceName, "mcp_srv_raw");
@@ -115,7 +107,7 @@ class RemoteMcpExecutableToolTest {
     ToolDescriptor descriptor = SampleDescriptors.tool("mcp_srv_raw");
     RemoteMcpExecutableTool tool =
         new RemoteMcpExecutableTool(
-            descriptor, SERVER_NAME, "mcp_srv_raw", rawSourceName, repository, executor);
+            descriptor, SERVER_NAME, "mcp_srv_raw", rawSourceName, repository);
 
     ToolResult result = execute(tool, descriptor, "call_raw_1", "{}");
 
@@ -145,7 +137,6 @@ class RemoteMcpExecutableToolTest {
             "mcp_srv_echo",
             "echo",
             repository,
-            executor,
             McpClientFactory::createRemote,
             name -> "resolved-secret-value");
 
@@ -162,8 +153,7 @@ class RemoteMcpExecutableToolTest {
     // 调用期仍必须按当前 DB 行 fail closed。
     ToolDescriptor descriptor = SampleDescriptors.tool(TOOL_NAME);
     RemoteMcpExecutableTool tool =
-        new RemoteMcpExecutableTool(
-            descriptor, SERVER_NAME, TOOL_NAME, "echo", repository, executor);
+        new RemoteMcpExecutableTool(descriptor, SERVER_NAME, TOOL_NAME, "echo", repository);
 
     // 1. server 行缺失
     when(repository.getByName(SERVER_NAME)).thenReturn(Optional.empty());
@@ -215,7 +205,7 @@ class RemoteMcpExecutableToolTest {
     ToolDescriptor siblingDescriptor = SampleDescriptors.tool(siblingToolName);
     RemoteMcpExecutableTool sibling =
         new RemoteMcpExecutableTool(
-            siblingDescriptor, siblingServerName, siblingToolName, "echo", repository, executor);
+            siblingDescriptor, siblingServerName, siblingToolName, "echo", repository);
 
     ToolResult siblingResult = execute(sibling, siblingDescriptor, "call_sibling", "{}");
     assertFalse(siblingResult.error());
@@ -227,7 +217,7 @@ class RemoteMcpExecutableToolTest {
 
   @Test
   void handlesToolCallFailureGracefullyAndRedactsMessage() throws Exception {
-    // 意图：调用失败时 listener 收到脱敏的 onComplete 错误结果且未调用 onError
+    // 意图：调用失败时返回脱敏的错误结果而不是抛出
     fakeServer.setFailToolCall(true);
     fakeServer.addTool("fail_tool", "Fail tool", "{}");
     stubServerAndTool("mcp_srv_fail", "fail_tool", "mcp_srv_fail");
@@ -235,47 +225,88 @@ class RemoteMcpExecutableToolTest {
     ToolDescriptor descriptor = SampleDescriptors.tool("mcp_srv_fail");
     RemoteMcpExecutableTool tool =
         new RemoteMcpExecutableTool(
-            descriptor, SERVER_NAME, "mcp_srv_fail", "fail_tool", repository, executor);
+            descriptor, SERVER_NAME, "mcp_srv_fail", "fail_tool", repository);
 
-    CompletableFuture<ToolResult> future = new CompletableFuture<>();
-    AtomicBoolean onErrorCalled = new AtomicBoolean(false);
-    tool.execute(
-        new ToolExecutionRequest(
-            descriptor,
-            new ToolCall("call_fail_1", descriptor.name(), "{}"),
-            Duration.ofSeconds(5)),
-        listener(future, onErrorCalled));
-
-    ToolResult result = future.get(5, TimeUnit.SECONDS);
-    assertFalse(onErrorCalled.get());
+    ToolResult result = execute(tool, descriptor, "call_fail_1", "{}");
     assertTrue(result.error());
     assertEquals("call_fail_1", result.toolCallId());
     assertFalse(result.contents().isEmpty());
   }
 
+  /** 线程中断即取消：令牌被取消、client 被关闭，并以 InterruptedException 结束，不产生任何结果。 */
   @Test
-  void cancelHandleMarksCancelled() {
-    // 意图：取消 Handle 幂等标记 isCancelled，且不抛出异常
-    ToolDescriptor descriptor = SampleDescriptors.tool("mcp_srv_slow");
+  void interruptionCancelsTheCallAndClosesTheClient() throws Exception {
     stubServerAndTool("mcp_srv_slow", "slow_tool", "mcp_srv_slow");
-
+    CountDownLatch inCall = new CountDownLatch(1);
+    AtomicReference<McpCancellationToken> seenToken = new AtomicReference<>();
+    AtomicBoolean clientClosed = new AtomicBoolean(false);
+    ToolDescriptor descriptor = SampleDescriptors.tool("mcp_srv_slow");
     RemoteMcpExecutableTool tool =
         new RemoteMcpExecutableTool(
-            descriptor, SERVER_NAME, "mcp_srv_slow", "slow_tool", repository, executor);
+            descriptor,
+            SERVER_NAME,
+            "mcp_srv_slow",
+            "slow_tool",
+            repository,
+            (config, deadline) ->
+                new McpClient() {
+                  @Override
+                  public List<McpToolDefinition> listTools(
+                      McpDeadline deadline, McpCancellationToken token) {
+                    throw new UnsupportedOperationException();
+                  }
 
-    ToolExecutionHandle handle =
-        tool.execute(
-            new ToolExecutionRequest(
-                descriptor,
-                new ToolCall("call_cancel_1", descriptor.name(), "{}"),
-                Duration.ofSeconds(5)),
-            mock(ToolExecutionListener.class));
+                  @Override
+                  public McpToolCallResult callTool(
+                      String name,
+                      String argumentsJson,
+                      McpDeadline deadline,
+                      McpCancellationToken token) {
+                    seenToken.set(token);
+                    inCall.countDown();
+                    try {
+                      Thread.sleep(60_000);
+                    } catch (InterruptedException interrupted) {
+                      // 与真实 client 一致：恢复中断标志并以失败异常结束。
+                      Thread.currentThread().interrupt();
+                      throw new McpException("interrupted");
+                    }
+                    throw new AssertionError("must be interrupted");
+                  }
 
-    handle.cancel();
-    assertTrue(handle.isCancelled());
+                  @Override
+                  public void close() {
+                    clientClosed.set(true);
+                  }
+                },
+            name -> null);
+    AtomicReference<Throwable> outcome = new AtomicReference<>();
+    Thread worker =
+        Thread.ofVirtual()
+            .start(
+                () -> {
+                  try {
+                    tool.execute(
+                        new ToolExecutionRequest(
+                            descriptor,
+                            new ToolCall("call_cancel_1", descriptor.name(), "{}"),
+                            Duration.ofSeconds(5)),
+                        partial -> {});
+                  } catch (Throwable failure) {
+                    outcome.set(failure);
+                  }
+                });
+    assertTrue(inCall.await(5, TimeUnit.SECONDS));
+
+    worker.interrupt();
+    worker.join(5000);
+
+    assertTrue(outcome.get() instanceof InterruptedException, String.valueOf(outcome.get()));
+    assertTrue(seenToken.get().isCancelled());
+    assertTrue(clientClosed.get());
   }
 
-  /** 调用超时是本次调用的终态：listener 收到脱敏超时结果，客户端仍被关闭，内部细节绝不外泄。 */
+  /** 调用超时是本次调用的终态：返回脱敏超时结果，客户端仍被关闭，内部细节绝不外泄。 */
   @Test
   void reportsTimeoutAsRedactedErrorResultAndClosesClient() throws Exception {
     // 意图：McpTimeoutException 映射为固定超时文案的错误结果，且 try-with-resources 仍关闭客户端
@@ -290,7 +321,6 @@ class RemoteMcpExecutableToolTest {
             "mcp_srv_slow",
             "slow_tool",
             repository,
-            executor,
             (config, deadline) ->
                 throwingClient(
                     () -> {
@@ -324,7 +354,6 @@ class RemoteMcpExecutableToolTest {
             "mcp_srv_broken",
             "broken_tool",
             repository,
-            executor,
             (config, deadline) ->
                 throwingClient(
                     () -> {
@@ -380,31 +409,13 @@ class RemoteMcpExecutableToolTest {
   private ToolResult execute(
       RemoteMcpExecutableTool tool, ToolDescriptor descriptor, String callId, String arguments)
       throws Exception {
-    CompletableFuture<ToolResult> future = new CompletableFuture<>();
-    tool.execute(
-        new ToolExecutionRequest(
-            descriptor, new ToolCall(callId, descriptor.name(), arguments), Duration.ofSeconds(5)),
-        listener(future, new AtomicBoolean(false)));
-    return future.get(5, TimeUnit.SECONDS);
-  }
-
-  private static ToolExecutionListener listener(
-      CompletableFuture<ToolResult> future, AtomicBoolean onErrorCalled) {
-    return new ToolExecutionListener() {
-      @Override
-      public void onPartial(ToolResult partial) {}
-
-      @Override
-      public void onComplete(ToolOutcome outcome) {
-        future.complete(outcome.result());
-      }
-
-      @Override
-      public void onError(Throwable error) {
-        onErrorCalled.set(true);
-        future.completeExceptionally(error);
-      }
-    };
+    return tool.execute(
+            new ToolExecutionRequest(
+                descriptor,
+                new ToolCall(callId, descriptor.name(), arguments),
+                Duration.ofSeconds(5)),
+            partial -> {})
+        .result();
   }
 
   private static McpServer server(String url) {

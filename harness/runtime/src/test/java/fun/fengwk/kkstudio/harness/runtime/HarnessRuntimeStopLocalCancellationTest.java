@@ -1,8 +1,8 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T5;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.approveTool;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.assertStopped;
-import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.beginDispatchTool;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.markRunningTool;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedBaseline;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedModel;
@@ -77,9 +77,9 @@ class HarnessRuntimeStopLocalCancellationTest {
     InMemoryHarnessStore store = new InMemoryHarnessStore();
     HarnessRuntimeTestSupport.MultiToolBaseline baseline = seedToolBaseline(store, 3);
     List<UUID> ids = baseline.toolIds();
-    beginDispatchTool(store, ids.get(1));
+    approveTool(store, ids.get(1));
     markRunningTool(store, ids.get(1));
-    beginDispatchTool(store, ids.get(2));
+    approveTool(store, ids.get(2));
     markRunningTool(store, ids.get(2));
     succeedTool(store, ids.get(2));
     seedThreadWork(store, baseline.threadId());

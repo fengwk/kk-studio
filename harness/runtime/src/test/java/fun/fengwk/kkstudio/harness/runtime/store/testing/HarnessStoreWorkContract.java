@@ -1120,9 +1120,7 @@ public abstract class HarnessStoreWorkContract {
           ToolInvocation ready = tx.lockToolInvocation(seeded.toolId()).orElseThrow();
           ToolInvocation approved = ready.markApprovalNotRequired(T1);
           tx.updateToolInvocations(List.of(approved));
-          ToolInvocation dispatching = approved.beginDispatch(T1);
-          tx.updateToolInvocations(List.of(dispatching));
-          tx.updateToolInvocations(List.of(dispatching.markRunning(T1)));
+          tx.updateToolInvocations(List.of(approved.markRunning(T1)));
         });
     EnvironmentToolWaitRow running =
         store.transaction(tx -> tx.listEnvironmentToolWaits(List.of(seeded.toolId()))).getFirst();

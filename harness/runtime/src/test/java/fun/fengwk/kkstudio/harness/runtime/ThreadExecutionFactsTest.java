@@ -2,8 +2,8 @@ package fun.fengwk.kkstudio.harness.runtime;
 
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T3;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T5;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.approveTool;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.assistantEntry;
-import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.beginDispatchTool;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.cancelTool;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.markRunningTool;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.parkForInput;
@@ -108,16 +108,16 @@ class ThreadExecutionFactsTest {
 
   @Test
   void runningToolsConstituteWork() {
-    // 测试意图：本地 READY/DISPATCHING/RUNNING 工具都是工作。
+    // 测试意图：本地 READY/RUNNING 工具都是工作。
     HarnessRuntimeTestSupport.ToolBaseline ready = seedToolBaseline(store);
     assertEquals(new ThreadExecutionFacts(true, false, false), facts(ready.threadId()));
 
-    HarnessRuntimeTestSupport.ToolBaseline dispatching = seedToolBaseline(store);
-    beginDispatchTool(store, dispatching.toolId());
-    assertEquals(new ThreadExecutionFacts(true, false, false), facts(dispatching.threadId()));
+    HarnessRuntimeTestSupport.ToolBaseline approved = seedToolBaseline(store);
+    approveTool(store, approved.toolId());
+    assertEquals(new ThreadExecutionFacts(true, false, false), facts(approved.threadId()));
 
     HarnessRuntimeTestSupport.ToolBaseline running = seedToolBaseline(store);
-    beginDispatchTool(store, running.toolId());
+    approveTool(store, running.toolId());
     markRunningTool(store, running.toolId());
     assertEquals(new ThreadExecutionFacts(true, false, false), facts(running.threadId()));
   }
@@ -158,7 +158,7 @@ class ThreadExecutionFactsTest {
   void mixedToolStatusesProjectOrthogonally() {
     // 测试意图：同一批兄弟工具可同时给出工作、人工等待与 UNKNOWN 三个正交事实。
     HarnessRuntimeTestSupport.MultiToolBaseline baseline = seedToolBaseline(store, 3);
-    beginDispatchTool(store, baseline.toolIds().get(0));
+    approveTool(store, baseline.toolIds().get(0));
     markRunningTool(store, baseline.toolIds().get(0));
     setWaitingApproval(store, baseline.toolIds().get(1));
     unknownTool(store, baseline.toolIds().get(2));
@@ -175,7 +175,7 @@ class ThreadExecutionFactsTest {
     assertEquals(new ThreadExecutionFacts(true, false, false), facts(model.threadId()));
 
     HarnessRuntimeTestSupport.ToolBaseline tool = seedToolBaseline(store);
-    beginDispatchTool(store, tool.toolId());
+    approveTool(store, tool.toolId());
     markRunningTool(store, tool.toolId());
     markControl(tool.threadId(), ThreadExecutionControl.STOPPED);
     assertEquals(new ThreadExecutionFacts(true, false, false), facts(tool.threadId()));

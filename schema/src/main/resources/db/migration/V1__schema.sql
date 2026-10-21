@@ -1176,7 +1176,6 @@ create table harness_tool_invocation (
             'WAITING_APPROVAL',
             'WAITING_INPUT',
             'READY',
-            'DISPATCHING',
             'RUNNING',
             'SUCCEEDED',
             'FAILED',
@@ -1232,7 +1231,7 @@ comment on column harness_tool_invocation.input_receipt is '交互回执（JSON 
 
 create index idx_harness_tool_invocation_model_nonterminal
     on harness_tool_invocation (model_invocation_id)
-    where status in ('WAITING_APPROVAL', 'WAITING_INPUT', 'READY', 'DISPATCHING', 'RUNNING');
+    where status in ('WAITING_APPROVAL', 'WAITING_INPUT', 'READY', 'RUNNING');
 
 comment on index idx_harness_tool_invocation_model_nonterminal is '未收尾 ToolInvocation 按所属 ModelInvocation 的查找路径（已终态行在 batch apply 后物理删除，不需要覆盖）';
 

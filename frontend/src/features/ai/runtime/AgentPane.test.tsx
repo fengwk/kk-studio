@@ -4067,7 +4067,6 @@ describe('AgentPane root control mounting', () => {
     ['READY', true, '等待环境 archlinux 上线'],
     ['WAITING_APPROVAL', false, '等待审批'],
     ['WAITING_INPUT', false, '等待输入'],
-    ['DISPATCHING', false, '分派中'],
   ])('working 展示 %s 的真实等待而不是通用执行中', async (status, waiting, label) => {
     bindPaneTarget({ kind: 'BOUND_THREAD', threadId: THREAD_ID })
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot(

@@ -29,12 +29,12 @@ public class ToolInvocationDTO {
   private Integer callIndex;
 
   /**
-   * 状态，取 {@code ToolInvocationStatus} 枚举名：WAITING_APPROVAL / READY / DISPATCHING / RUNNING /
+   * 状态，取 {@code ToolInvocationStatus} 枚举名：WAITING_APPROVAL / WAITING_INPUT / READY / RUNNING /
    * SUCCEEDED / FAILED / CANCELLED / UNKNOWN。
    */
   private String status;
 
-  /** 执行侧已确认的尝试次数（非负整数）；BUSY/OVERLOADED 等未确认执行不计数。 */
+  /** 已进入 RUNNING 的执行次数（非负整数）；Busy 等未开始执行的准入不计数。 */
   private Integer attempt;
 
   /** Provider 侧 tool call id（冻结的调用标识），恒来自 durable ToolCall。 */

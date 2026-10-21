@@ -200,7 +200,6 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
                       ToolApprovalDecision.ALLOWED, UUID.randomUUID(), "tester", null, NOW, NOW)));
           return null;
         });
-    transitionTool(fixture.store, ready.id(), tool -> tool.beginDispatch(NOW));
     transitionTool(fixture.store, ready.id(), tool -> tool.markRunning(NOW));
     transitionTool(
         fixture.store,

@@ -604,11 +604,9 @@ class HarnessWorkDispatcherHandoffTest {
     store.transaction(
         tx -> {
           ToolInvocation tool = tx.lockToolInvocation(toolInvocationId).orElseThrow();
-          // preflight 通过后才是 READY -> DISPATCHING -> RUNNING：每一步都是 Store 认可的单个跃迁。
+          // preflight 通过后才是 READY -> RUNNING：每一步都是 Store 认可的单个跃迁。
           tx.updateToolInvocations(List.of(tool.markApprovalNotRequired(now)));
-          tx.updateToolInvocations(List.of(tool.markApprovalNotRequired(now).beginDispatch(now)));
-          tx.updateToolInvocations(
-              List.of(tool.markApprovalNotRequired(now).beginDispatch(now).markRunning(now)));
+          tx.updateToolInvocations(List.of(tool.markApprovalNotRequired(now).markRunning(now)));
           return null;
         });
   }
@@ -850,9 +848,9 @@ class HarnessWorkDispatcherHandoffTest {
     }
 
     @Override
-    public StartResult start(Execution execution, Listener listener) {
+    public Admission admit(Execution execution) {
       started.add(execution.invocationId());
-      return new ToolGateway.RetryLater(Duration.ofSeconds(9));
+      return new ToolGateway.Busy(Duration.ofSeconds(9));
     }
   }
 }

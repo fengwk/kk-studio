@@ -1,25 +1,24 @@
 package fun.fengwk.kkstudio.harness.builtin.goal;
 
 import fun.fengwk.kkstudio.harness.builtin.BuiltinHistoryRenderers;
-import fun.fengwk.kkstudio.harness.builtin.CompletedToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.contributor.api.GoalSnapshot;
 import fun.fengwk.kkstudio.harness.contributor.api.StateDeclaration;
 import fun.fengwk.kkstudio.harness.contributor.api.StateMode;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolHistoryRenderer;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 
 import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Consumer;
 
 /** 只读当前 branch 的用户 Goal 及其 Agent 进度声明。Agent 不能通过本工具创建或改写 Goal 正文。 */
 public final class GetGoalTool implements Tool {
@@ -57,15 +56,12 @@ public final class GetGoalTool implements Tool {
   }
 
   @Override
-  public ToolExecutionHandle execute(ToolExecutionRequest request, ToolExecutionListener listener) {
+  public ToolOutcome execute(ToolExecutionRequest request, Consumer<ToolResult> ignoredProgress) {
     Objects.requireNonNull(request, "request");
-    Objects.requireNonNull(listener, "listener");
     if (request.context() == null) {
-      listener.onComplete(
-          GoalToolSupport.error(
-              request.call(),
-              new IllegalArgumentException("get_goal requires durable ToolExecutionContext")));
-      return CompletedToolExecutionHandle.INSTANCE;
+      return GoalToolSupport.error(
+          request.call(),
+          new IllegalArgumentException("get_goal requires durable ToolExecutionContext"));
     }
     ToolOutcome outcome;
     try {
@@ -88,7 +84,6 @@ public final class GetGoalTool implements Tool {
     } catch (RuntimeException error) {
       outcome = GoalToolSupport.error(request.call(), error);
     }
-    listener.onComplete(outcome);
-    return CompletedToolExecutionHandle.INSTANCE;
+    return outcome;
   }
 }

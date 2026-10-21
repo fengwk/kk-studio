@@ -14,8 +14,6 @@ import fun.fengwk.kkstudio.platform.catalog.mcp.repo.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
 import fun.fengwk.kkstudio.platform.plugin.catalog.PluginCatalogRuntime;
 
-import java.util.concurrent.ExecutorService;
-
 /**
  * {@link RuntimeToolCatalogConfiguration} 的 Spring 装配测试：只暴露动态 MCP 目录与唯一的 epoch 租用
  * source，且不再发布任何静态目录单例。
@@ -26,7 +24,6 @@ class RuntimeToolCatalogConfigurationTest {
       new ApplicationContextRunner()
           .withBean(PluginCatalogRuntime.class, () -> mock(PluginCatalogRuntime.class))
           .withBean(McpServerRepository.class, () -> mock(McpServerRepository.class))
-          .withBean("toolGatewayExecutor", ExecutorService.class, () -> mock(ExecutorService.class))
           .withUserConfiguration(RuntimeToolCatalogConfiguration.class);
 
   @Test
@@ -54,8 +51,7 @@ class RuntimeToolCatalogConfigurationTest {
   @Test
   void unrelatedConcreteCatalogBeansDoNotSuppressRequiredNamedSources() {
     // 意图：同类型扩展 bean 不得误触发条件装配并移除按名称依赖的内置 source。
-    McpToolCatalog otherMcp =
-        new McpToolCatalog(mock(McpServerRepository.class), mock(ExecutorService.class));
+    McpToolCatalog otherMcp = new McpToolCatalog(mock(McpServerRepository.class));
 
     runner
         .withBean("otherMcpToolCatalog", McpToolCatalog.class, () -> otherMcp)

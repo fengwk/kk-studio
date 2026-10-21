@@ -3,31 +3,25 @@ package fun.fengwk.kkstudio.harness.builtin.input;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.builtin.CompletedToolExecutionHandle;
 import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.common.schema.ArraySchema;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.common.schema.ObjectSchema;
 import fun.fengwk.kkstudio.harness.common.schema.SchemaElement;
 import fun.fengwk.kkstudio.harness.common.schema.SchemaJsonCodec;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
-import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 
 import java.time.Duration;
-import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -152,14 +146,13 @@ class AskUserToolTest {
     ToolCall call =
         new ToolCall("call-1", AskUserTool.NAME, FROZEN_QUESTIONNAIRE)
             .validateFor(tool.descriptor());
-    RecordingListener listener = new RecordingListener();
+    ToolOutcome outcome =
+        tool.execute(
+            new ToolExecutionRequest(tool.descriptor(), call, Duration.ZERO),
+            partial -> {
+              throw new AssertionError("ask_user must not stream partial results");
+            });
 
-    ToolExecutionHandle handle =
-        tool.execute(new ToolExecutionRequest(tool.descriptor(), call, Duration.ZERO), listener);
-
-    assertEquals(CompletedToolExecutionHandle.INSTANCE, handle);
-    assertNull(listener.error);
-    ToolOutcome outcome = Objects.requireNonNull(listener.outcome, "the tool must complete");
     assertTrue(outcome.result().error());
     assertEquals("call-1", outcome.result().toolCallId());
     assertTrue(outcome.customEntries().isEmpty());
@@ -193,27 +186,5 @@ class AskUserToolTest {
 
   private static ObjectSchema itemsObject(SchemaElement array) {
     return assertInstanceOf(ObjectSchema.class, assertInstanceOf(ArraySchema.class, array).items());
-  }
-
-  /** 捕获单次执行回调；partial 与 error 都是 ask_user 不应产生的行为。 */
-  private static final class RecordingListener implements ToolExecutionListener {
-
-    private ToolOutcome outcome;
-    private Throwable error;
-
-    @Override
-    public void onPartial(ToolResult partial) {
-      throw new AssertionError("ask_user must not stream partial results");
-    }
-
-    @Override
-    public void onComplete(ToolOutcome value) {
-      this.outcome = value;
-    }
-
-    @Override
-    public void onError(Throwable value) {
-      this.error = value;
-    }
   }
 }

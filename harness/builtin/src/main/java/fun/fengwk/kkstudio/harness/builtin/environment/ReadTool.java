@@ -7,8 +7,6 @@ import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.common.tool.ToolErrorGuidance;
 import fun.fengwk.kkstudio.harness.common.tool.ToolErrorGuidance.ExecutionFact;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionHandle;
-import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionListener;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolHistoryRenderer;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
@@ -25,6 +23,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Consumer;
 
 /**
  * 统一文件与资源读取工具。
@@ -81,10 +80,13 @@ public final class ReadTool implements Tool {
   }
 
   @Override
-  public ToolExecutionHandle execute(ToolExecutionRequest request, ToolExecutionListener listener) {
+  public ToolOutcome execute(ToolExecutionRequest request, Consumer<ToolResult> progress)
+      throws InterruptedException {
     Objects.requireNonNull(request, "request");
-    Objects.requireNonNull(listener, "listener");
-    return executor.read(request, new GuidanceListener(listener, executionFact(request)));
+    Objects.requireNonNull(progress, "progress");
+    ExecutionFact executionFact = executionFact(request);
+    return ToolOutcome.withoutEffects(
+        withGuidance(executor.read(request, progress), executionFact));
   }
 
   /** read 是只读工具：只有本地路径且绑定了 Environment 时才可能真正进入执行。 */
@@ -100,57 +102,30 @@ public final class ReadTool implements Tool {
   }
 
   /** 只包装终止错误结果：保留原 toolCallId/details，替换为三段式纠正文案。 */
-  private static final class GuidanceListener implements ToolExecutionListener {
-
-    private final ToolExecutionListener delegate;
-    private final ExecutionFact executionFact;
-
-    private GuidanceListener(ToolExecutionListener delegate, ExecutionFact executionFact) {
-      this.delegate = Objects.requireNonNull(delegate, "delegate");
-      this.executionFact = Objects.requireNonNull(executionFact, "executionFact");
+  private static ToolResult withGuidance(ToolResult result, ExecutionFact executionFact) {
+    if (!result.error()) {
+      return result;
     }
-
-    @Override
-    public void onPartial(ToolResult partial) {
-      delegate.onPartial(partial);
+    String whatFailed = firstText(result);
+    if (ToolErrorGuidance.isGuided(whatFailed)) {
+      // 已带执行事实（例如 daemon capability 已包装）：不重复包装。
+      return result;
     }
+    return new ToolResult(
+        result.toolCallId(),
+        List.of(
+            new TextResultContent(
+                ToolErrorGuidance.message(whatFailed, executionFact, READ_NEXT_ACTION))),
+        true,
+        result.detailsJson());
+  }
 
-    @Override
-    public void onComplete(ToolOutcome outcome) {
-      if (outcome == null || !outcome.result().error()) {
-        delegate.onComplete(outcome);
-        return;
+  private static String firstText(ToolResult result) {
+    for (var content : result.contents()) {
+      if (content instanceof TextResultContent text && !text.text().isBlank()) {
+        return text.text();
       }
-      ToolResult result = outcome.result();
-      String whatFailed = firstText(result);
-      if (ToolErrorGuidance.isGuided(whatFailed)) {
-        // 已带执行事实（例如 daemon capability 已包装）：不重复包装。
-        delegate.onComplete(outcome);
-        return;
-      }
-      delegate.onComplete(
-          ToolOutcome.withoutEffects(
-              new ToolResult(
-                  result.toolCallId(),
-                  List.of(
-                      new TextResultContent(
-                          ToolErrorGuidance.message(whatFailed, executionFact, READ_NEXT_ACTION))),
-                  true,
-                  result.detailsJson())));
     }
-
-    @Override
-    public void onError(Throwable error) {
-      delegate.onError(error);
-    }
-
-    private static String firstText(ToolResult result) {
-      for (var content : result.contents()) {
-        if (content instanceof TextResultContent text && !text.text().isBlank()) {
-          return text.text();
-        }
-      }
-      return "read failed";
-    }
+    return "read failed";
   }
 }

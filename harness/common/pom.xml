@@ -56,7 +56,6 @@
                                         <include>fun.fengwk.kkstudio.harness.common.io.DeadlineResponseBody</include>
                                         <include>fun.fengwk.kkstudio.harness.common.network.HttpProxySelector*</include>
                                         <include>fun.fengwk.kkstudio.harness.common.concurrent.BoundedWorkDispatcher</include>
-                                        <include>fun.fengwk.kkstudio.harness.common.concurrent.QuiescentFutureTask</include>
                                     </includes>
                                     <limits>
                                         <limit>
