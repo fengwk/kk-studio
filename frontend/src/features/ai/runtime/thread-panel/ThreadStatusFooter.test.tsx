@@ -43,7 +43,7 @@ describe('ThreadStatusFooter', () => {
     const lines = [...footer.querySelectorAll('.thread-status-line')]
     expect(lines).toHaveLength(1)
     // 缺失的数值默认显示 0，不为未知定价假定币种。
-    expect(lines[0].textContent).toBe('未选择环境 ∣ ↑0 · ↓0 · R0 · W0 · 0 · cache 0% · 0 tok/s')
+    expect(lines[0].textContent).toBe('未选择环境 ∣ ↑0 · ↓0 · R0 · W0 · 0 · cache 0.00% · 0 tok/s')
     expect(footer).not.toHaveTextContent('ctx')
     expect(footer.querySelector('button')).toBeNull()
   })
@@ -67,7 +67,7 @@ describe('ThreadStatusFooter', () => {
     expect(spans.map((span) => span.textContent)).toEqual([
       'local',
       'ctx 61/128k',
-      '↑30 · ↓9 · R14 · W17 · $0.5 · cache 23% · 18 tok/s',
+      '↑30 · ↓9 · R14 · W17 · $0.5 · cache 22.95% · 18 tok/s',
     ])
   })
 
@@ -137,7 +137,7 @@ describe('ThreadStatusFooter', () => {
     const lines = [...footer.querySelectorAll('.thread-status-line')]
     expect(lines).toHaveLength(1)
     expect(lines[0].textContent).toBe(
-      'local ∣ ctx 61/128k ∣ ↑30 · ↓9 · R14 · W17 · $0.5 · cache 23% · 18 tok/s',
+      'local ∣ ctx 61/128k ∣ ↑30 · ↓9 · R14 · W17 · $0.5 · cache 22.95% · 18 tok/s',
     )
     const title = hoverLines(lines[0])
     // 环境 + 上下文 + 用量两行（token/cache）+ 费用行：既无冗余的累计标题行，也没有被压缩成一行。
@@ -173,7 +173,7 @@ describe('ThreadStatusFooter', () => {
     const lines = [...footer.querySelectorAll('.thread-status-line')]
     expect(lines).toHaveLength(1)
     expect(lines[0].textContent).toBe(
-      '未选择环境 ∣ ctx 0/128k ∣ ↑0 · ↓0 · R0 · W0 · 0 · cache 0% · 0 tok/s',
+      '未选择环境 ∣ ctx 0/128k ∣ ↑0 · ↓0 · R0 · W0 · 0 · cache 0.00% · 0 tok/s',
     )
     // 零用量/无定价/无测速样本时 hover 仍有完整 5 行结构（缺失项由 catalog 文案标注暂无数据）。
     expect(hoverLines(lines[0])).toHaveLength(5)
@@ -191,7 +191,7 @@ describe('ThreadStatusFooter', () => {
     act(() => setLocale('en-US'))
     const line = lineOf(screen.getByLabelText('Thread status'))
     expect(line.textContent).toBe(
-      'dev (unavailable) ∣ ctx 0/128k ∣ ↑0 · ↓0 · R0 · W0 · 0 · cache 0% · 0 tok/s',
+      'dev (unavailable) ∣ ctx 0/128k ∣ ↑0 · ↓0 · R0 · W0 · 0 · cache 0.00% · 0 tok/s',
     )
     const unavailableTitle = hoverLines(line)
     expect(unavailableTitle).toHaveLength(5)
@@ -212,7 +212,7 @@ describe('ThreadStatusFooter', () => {
     const readyTitle = hoverLines(line)
     expect(readyTitle).toHaveLength(5)
     expect(readyTitle[0]).toBe('Environment: dev')
-    expect(line.textContent).toBe('dev ∣ ctx 61/128k ∣ ↑30 · ↓9 · R14 · W17 · $0.5 · cache 23% · 18 tok/s')
+    expect(line.textContent).toBe('dev ∣ ctx 61/128k ∣ ↑30 · ↓9 · R14 · W17 · $0.5 · cache 22.95% · 18 tok/s')
   })
 })
 
