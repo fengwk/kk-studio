@@ -1,69 +1,60 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { EmptyState } from '@/shared/ui/feedback/EmptyState'
-import { Badge } from '@/shared/ui/data/Badge'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Activity,
   AlertCircle,
-  AlertTriangle,
   ArrowRight,
   Bot,
   Coins,
-  Download,
-  Eye,
   FileText,
   ListOrdered,
   Paperclip,
-  Pencil,
-  RefreshCw,
   RotateCcw,
   Send,
   ShieldAlert,
   Square,
   Trash2,
   Upload,
-  User,
   X,
 } from 'lucide-react'
+import { validateUploadFile, type HashFile } from '@/features/ai/composer'
 import { isConflictError } from '@/shared/api/client'
-import { useI18n } from '@/shared/i18n'
-import { Button } from '@/shared/ui/controls/Button'
-import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
-import { IconButton } from '@/shared/ui/controls/IconButton'
-import { NumberInput } from '@/shared/ui/controls/NumberInput'
-import { Select } from '@/shared/ui/controls/Select'
-import { Tabs } from '@/shared/ui/controls/Tabs'
-import { TextArea } from '@/shared/ui/controls/TextArea'
-import { TextInput } from '@/shared/ui/controls/TextInput'
-import { StateBlock } from '@/shared/ui/feedback/StateBlock'
-import { Dialog } from '@/shared/ui/overlays/Dialog'
 import {
   storageService as defaultStorageService,
   type StorageService,
 } from '@/shared/api/storage-service'
-import {
-  createWorkerHasher,
-  validateUploadFile,
-  type HashFile,
-} from '@/features/ai/composer'
+import { useI18n } from '@/shared/i18n'
 import { queryKeys } from '@/shared/lib/query-keys'
-import { MAX_RUNS, parseMaxRuns } from '../workflow-draft'
 import { createUuid } from '@/shared/lib/uuid'
-import {
-  clearPendingAction,
-  isNetworkUnknownError,
-  loadPendingAction,
-  storePendingAction,
-  type IssueActionKind,
-  type LoadPendingActionResult,
-  type PendingIssueAction,
-} from '../pending-action-sidecar'
+import { Button } from '@/shared/ui/controls/Button'
+import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
+import { IconButton } from '@/shared/ui/controls/IconButton'
+import { Select } from '@/shared/ui/controls/Select'
+import { Tabs } from '@/shared/ui/controls/Tabs'
+import { TextArea } from '@/shared/ui/controls/TextArea'
+import { TextInput } from '@/shared/ui/controls/TextInput'
+import { Badge } from '@/shared/ui/data/Badge'
+import { EmptyState } from '@/shared/ui/feedback/EmptyState'
+import { StateBlock } from '@/shared/ui/feedback/StateBlock'
+import { Dialog } from '@/shared/ui/overlays/Dialog'
+import type { IssueActionKind } from '../pending-action-sidecar'
 import type { ProjectsApi } from '../projects-api'
 import { projectsApi } from '../projects-api'
-import type {
-  IssueEvidenceDTO,
-  ProjectWorkflowDTO,
-} from '../types'
+import type { IssueEvidenceDTO, ProjectWorkflowDTO } from '../types'
+import { MAX_RUNS, parseMaxRuns } from '../workflow-draft'
+import { DeleteIssueDialog, ResetBudgetDialog, TextActionDialog } from './issue-detail/IssueActionDialogs'
+import { IssueAlerts } from './issue-detail/IssueAlerts'
+import {
+  IssueActivityTimeline,
+  IssueAgentThreadsPane,
+  IssueRunsPane,
+  IssueSpecView,
+  IssueStageBudgetList,
+} from './issue-detail/IssueTabPanes'
+import { EvidenceRow } from './issue-detail/EvidenceRow'
+import { calculateFileSha256, mergeEvidences } from './issue-detail/evidence-files'
+import { useIssueActionRunner } from './issue-detail/useIssueActionRunner'
+import { useKeyedRequest } from './issue-detail/useKeyedRequest'
 import './issue-detail-alerts.css'
 
 export interface IssueDetailModalProps {
@@ -82,113 +73,10 @@ export interface IssueDetailModalProps {
 
 type TabKey = 'spec' | 'activities' | 'runs' | 'stageBudgets' | 'agentThreads' | 'evidence'
 
-async function calculateFileSha256(file: File, customHasher?: HashFile): Promise<string> {
-  if (customHasher) {
-    return customHasher(file)
-  }
-  if (typeof Worker !== 'undefined') {
-    try {
-      const workerHasher = createWorkerHasher()
-      return await workerHasher(file)
-    } catch {
-      // fallback
-    }
-  }
-  if (typeof crypto !== 'undefined' && crypto.subtle) {
-    const buf = await file.arrayBuffer()
-    const digest = await crypto.subtle.digest('SHA-256', buf)
-    return Array.from(new Uint8Array(digest))
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('')
-  }
-  return '0'.repeat(64)
-}
-
-interface EvidenceRowProps {
-  evidence: IssueEvidenceDTO
-  storageService: StorageService
-}
-
-function EvidenceRow({ evidence, storageService }: EvidenceRowProps) {
-  const { t } = useI18n()
-  const { data: presignedUrl, isLoading } = useQuery({
-    queryKey: ['storage', 'blob', 'download-url', evidence.blobId],
-    queryFn: async () => {
-      try {
-        return await storageService.getBlobDownloadUrl(evidence.blobId)
-      } catch {
-        return await storageService.getBlobPreviewUrl(evidence.blobId)
-      }
-    },
-    enabled: Boolean(evidence.blobId),
-    staleTime: 60_000,
-  })
-
-  const [isOpening, setIsOpening] = useState(false)
-
-  const handleClick = async (e: React.MouseEvent<HTMLAnchorElement>) => {
-    if (presignedUrl?.url) {
-      return
-    }
-    e.preventDefault()
-    setIsOpening(true)
-    try {
-      let res: { url: string } | null = null
-      try {
-        res = await storageService.getBlobDownloadUrl(evidence.blobId)
-      } catch {
-        res = await storageService.getBlobPreviewUrl(evidence.blobId)
-      }
-      if (res?.url) {
-        window.open(res.url, '_blank', 'noreferrer')
-      }
-    } catch {
-      // 容错处理
-    } finally {
-      setIsOpening(false)
-    }
-  }
-
-  return (
-    <div key={evidence.blobId} className="evidence-card">
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-        <Paperclip size={14} aria-hidden="true" />
-        <strong>{evidence.name || evidence.blobId}</strong>
-        {evidence.actorAgentName && (
-          <Badge tone="accent">{evidence.actorAgentName}</Badge>
-        )}
-      </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-        <a
-          href={presignedUrl?.url || '#'}
-          target="_blank"
-          rel="noreferrer"
-          className="ghost-btn"
-          onClick={handleClick}
-          title={t('projects.issue.previewOrDownload')}
-        >
-          <Download size={14} className={isLoading || isOpening ? 'animate-spin' : ''} aria-hidden="true" />
-          <span>{isLoading || isOpening ? t('projects.issue.fetching') : t('projects.issue.downloadOrView')}</span>
-        </a>
-      </div>
-    </div>
-  )
-}
-
-function safeLoadPendingAction(issueId: string | null): LoadPendingActionResult {
-  if (!issueId) {
-    return { type: 'NONE' }
-  }
-  try {
-    return loadPendingAction(issueId)
-  } catch (err) {
-    return {
-      type: 'STORAGE_ERROR',
-      error: err instanceof Error ? err.message : String(err),
-    }
-  }
-}
-
+/**
+ * Issue 详情：Spec 编辑、活动、Run、阶段预算、Agent 线程与证据六个 tab，以及流转、阻塞/恢复、终止、重开、人工核查、预算重置与删除等写操作。
+ * 带幂等身份的写操作统一经 {@link useIssueActionRunner} 执行。
+ */
 export function IssueDetailModal({
   isOpen,
   issueId,
@@ -229,24 +117,6 @@ export function IssueDetailModal({
   })
 
   const [activeTab, setActiveTab] = useState<TabKey>('spec')
-  const [actionError, setActionError] = useState<string | null>(null)
-  const displayError = actionError || (queryError instanceof Error ? queryError.message : null)
-  const [conflictDetail, setConflictDetail] = useState<string | null>(null)
-  const [isActionPending, setIsActionPending] = useState(false)
-  const isActionPendingRef = useRef(false)
-
-  // 0. 未决操作持久化侧车与 unknown / 异常状态 (I07)
-  const [pendingActionResult, setPendingActionResult] = useState<LoadPendingActionResult>(() => {
-    return safeLoadPendingAction(issueId)
-  })
-
-  const pendingUnknownAction = pendingActionResult.type === 'VALID' ? pendingActionResult.action : null
-  const corruptActionInfo =
-    pendingActionResult.type === 'CORRUPT'
-      ? { raw: pendingActionResult.raw, error: pendingActionResult.error }
-      : null
-  const storageLoadError = pendingActionResult.type === 'STORAGE_ERROR' ? pendingActionResult.error : null
-  const [isDiscardConfirmOpen, setIsDiscardConfirmOpen] = useState(false)
 
   // 1. Spec 编辑草稿状态与 409 保护
   const [isEditingSpec, setIsEditingSpec] = useState(false)
@@ -254,57 +124,93 @@ export function IssueDetailModal({
   const [draftDescription, setDraftDescription] = useState('')
   const [specVersion, setSpecVersion] = useState('0')
 
-  // 2. Activity 发布状态（普通评论 vs 运行指令）
+  // 2. 各写操作表单：值 + 幂等请求身份
   const [activityKind, setActivityKind] = useState<'COMMENT' | 'INSTRUCTION'>('COMMENT')
   const [activityBody, setActivityBody] = useState('')
-  const [activityRequestKey, setActivityRequestKey] = useState<string>(() => createUuid())
-  const activityPayloadRef = useRef<{ kind: string; body: string } | null>(null)
-
-  // 3. 阻塞表单
+  const activityRequest = useKeyedRequest<{ kind: string; body: string }>()
   const [isBlockModalOpen, setIsBlockModalOpen] = useState(false)
   const [blockReason, setBlockReason] = useState('')
-  const [blockRequestKey, setBlockRequestKey] = useState<string>(() => createUuid())
-  const blockPayloadRef = useRef<{ reason: string } | null>(null)
-
-  // 4. UNKNOWN 人工核查表单
+  const blockRequest = useKeyedRequest<{ reason: string }>()
   const [isResolveUnknownOpen, setIsResolveUnknownOpen] = useState(false)
   const [verificationInput, setVerificationInput] = useState('')
-  const [resolveUnknownRequestKey, setResolveUnknownRequestKey] = useState<string>(() => createUuid())
-  const resolveUnknownPayloadRef = useRef<{ verification: string } | null>(null)
-
-  // 5. 阶段预算重置表单
+  const resolveUnknownRequest = useKeyedRequest<{ verification: string }>()
   const [isResetBudgetOpen, setIsResetBudgetOpen] = useState(false)
   const [resetBudgetState, setResetBudgetState] = useState('')
   const [resetBudgetMaxRuns, setResetBudgetMaxRuns] = useState<number>(3)
-  const [budgetRequestKey, setBudgetRequestKey] = useState<string>(() => createUuid())
-  const budgetPayloadRef = useRef<{ state: string; maxRuns: number } | null>(null)
-
-  // 6. Stop 终止表单
+  const budgetRequest = useKeyedRequest<{ state: string; maxRuns: number }>()
   const [isStopModalOpen, setIsStopModalOpen] = useState(false)
   const [stopDetail, setStopDetail] = useState('')
-  const [stopRequestKey, setStopRequestKey] = useState<string>(() => createUuid())
-  const stopPayloadRef = useRef<{ detail: string | null } | null>(null)
-
-  // 7. 删除 Issue 确认
+  const stopRequest = useKeyedRequest<{ detail: string | null }>()
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
 
-  // 8. Evidence 状态
+  // 3. Evidence 状态
   const [localEvidences, setLocalEvidences] = useState<IssueEvidenceDTO[]>([])
   const [isUploadingEvidence, setIsUploadingEvidence] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const allEvidences = useMemo(
+    () => mergeEvidences(localEvidences, serverEvidences),
+    [localEvidences, serverEvidences],
+  )
 
-  const allEvidences = useMemo(() => {
-    const seen = new Set<string>()
-    const merged: IssueEvidenceDTO[] = []
-    for (const ev of [...localEvidences, ...serverEvidences]) {
-      const key = `${ev.blobId}-${ev.name ?? ''}`
-      if (!seen.has(key)) {
-        seen.add(key)
-        merged.push(ev)
+  const resetBlockForm = () => {
+    setIsBlockModalOpen(false)
+    setBlockReason('')
+    blockRequest.reset()
+  }
+  const resetResolveUnknownForm = () => {
+    setIsResolveUnknownOpen(false)
+    setVerificationInput('')
+    resolveUnknownRequest.reset()
+  }
+  const resetStopForm = () => {
+    setIsStopModalOpen(false)
+    setStopDetail('')
+    stopRequest.reset()
+  }
+  const resetBudgetForm = () => {
+    setIsResetBudgetOpen(false)
+    budgetRequest.reset()
+  }
+  const resetActivityForm = () => {
+    setActivityBody('')
+    activityRequest.reset()
+  }
+
+  const runner = useIssueActionRunner({
+    isOpen,
+    issueId,
+    issue: detail?.issue,
+    api,
+    queryClient,
+    issueQueryKey,
+    notifyUpdated,
+    onRetrySucceeded: (kind) => {
+      if (kind === 'BLOCK') {
+        resetBlockForm()
+      } else if (kind === 'RESOLVE_UNKNOWN') {
+        resetResolveUnknownForm()
+      } else if (kind === 'STOP') {
+        resetStopForm()
+      } else if (kind === 'RESET_BUDGET') {
+        resetBudgetForm()
+      } else if (kind === 'ACTIVITY') {
+        resetActivityForm()
       }
-    }
-    return merged
-  }, [localEvidences, serverEvidences])
+    },
+  })
+  const {
+    actionError,
+    setActionError,
+    conflictDetail,
+    setConflictDetail,
+    isActionPending,
+    setIsActionPending,
+    isActionPendingRef,
+    pendingUnknownAction,
+    isWriteBlocked,
+    executeIssueAction,
+  } = runner
+  const displayError = actionError || (queryError instanceof Error ? queryError.message : null)
 
   // 初始化草稿与版本基线
   useEffect(() => {
@@ -317,29 +223,15 @@ export function IssueDetailModal({
     }
   }, [detail, isEditingSpec])
 
-  // 挂载/打开/issueId 变化时同步加载持久化侧车未决操作或异常状态
-  useEffect(() => {
-    if (!issueId || !isOpen) {
-      setPendingActionResult({ type: 'NONE' })
-      return
-    }
-    setPendingActionResult(safeLoadPendingAction(issueId))
-  }, [issueId, isOpen])
-
   // 关闭时清理临时对话框、未提交草稿与本地证据 (I09)
   useEffect(() => {
     if (!isOpen) {
-      isActionPendingRef.current = false
       setIsEditingSpec(false)
       setIsBlockModalOpen(false)
       setIsResolveUnknownOpen(false)
       setIsResetBudgetOpen(false)
       setIsStopModalOpen(false)
       setIsDeleteModalOpen(false)
-      setActionError(null)
-      setConflictDetail(null)
-      setIsDiscardConfirmOpen(false)
-
       setDraftTitle('')
       setDraftDescription('')
       setActivityBody('')
@@ -347,105 +239,53 @@ export function IssueDetailModal({
       setVerificationInput('')
       setStopDetail('')
       setLocalEvidences([])
-
-      activityPayloadRef.current = null
-      blockPayloadRef.current = null
-      resolveUnknownPayloadRef.current = null
-      stopPayloadRef.current = null
-      budgetPayloadRef.current = null
-
-      setActivityRequestKey(createUuid())
-      setBlockRequestKey(createUuid())
-      setResolveUnknownRequestKey(createUuid())
-      setStopRequestKey(createUuid())
-      setBudgetRequestKey(createUuid())
+      activityRequest.reset()
+      blockRequest.reset()
+      resolveUnknownRequest.reset()
+      stopRequest.reset()
+      budgetRequest.reset()
     }
+    // 只在开合时重置；各 reset 函数引用稳定。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen])
 
-  // 草稿修改检测：输入变更时旧 unknown 不能丢，修改 draft 时换用全新 requestKey 防同 key 换 payload
-  const handleActivityBodyChange = (value: string) => {
-    if (pendingUnknownAction && pendingUnknownAction.kind === 'ACTIVITY') {
-      setActionError(t('projects.issue.pendingActivityModifyBlocked'))
+  /** 未决未知操作属于该表单时拒绝修改；否则更新值，偏离冻结 payload 即换新请求身份。 */
+  const guardedChange = (blockedKind: IssueActionKind, blockedMessage: string, apply: () => void) => {
+    if (pendingUnknownAction && pendingUnknownAction.kind === blockedKind) {
+      setActionError(t(blockedMessage))
       return
     }
+    apply()
+  }
+
+  const handleActivityBodyChange = (value: string) => guardedChange('ACTIVITY', 'projects.issue.pendingActivityModifyBlocked', () => {
     setActivityBody(value)
-    if (activityPayloadRef.current && activityPayloadRef.current.body !== value) {
-      setActivityRequestKey(createUuid())
-      activityPayloadRef.current = null
-    }
-  }
-
-  const handleActivityKindChange = (kind: 'COMMENT' | 'INSTRUCTION') => {
-    if (pendingUnknownAction && pendingUnknownAction.kind === 'ACTIVITY') {
-      setActionError(t('projects.issue.pendingActivityModifyBlocked'))
-      return
-    }
+    activityRequest.invalidateIfChanged((frozen) => frozen.body === value)
+  })
+  const handleActivityKindChange = (kind: 'COMMENT' | 'INSTRUCTION') => guardedChange('ACTIVITY', 'projects.issue.pendingActivityModifyBlocked', () => {
     setActivityKind(kind)
-    if (activityPayloadRef.current && activityPayloadRef.current.kind !== kind) {
-      setActivityRequestKey(createUuid())
-      activityPayloadRef.current = null
-    }
-  }
-
-  const handleBlockReasonChange = (value: string) => {
-    if (pendingUnknownAction && pendingUnknownAction.kind === 'BLOCK') {
-      setActionError(t('projects.issue.pendingBlockModifyBlocked'))
-      return
-    }
+    activityRequest.invalidateIfChanged((frozen) => frozen.kind === kind)
+  })
+  const handleBlockReasonChange = (value: string) => guardedChange('BLOCK', 'projects.issue.pendingBlockModifyBlocked', () => {
     setBlockReason(value)
-    if (blockPayloadRef.current && blockPayloadRef.current.reason !== value) {
-      setBlockRequestKey(createUuid())
-      blockPayloadRef.current = null
-    }
-  }
-
-  const handleVerificationInputChange = (value: string) => {
-    if (pendingUnknownAction && pendingUnknownAction.kind === 'RESOLVE_UNKNOWN') {
-      setActionError(t('projects.issue.pendingResolveUnknownModifyBlocked'))
-      return
-    }
+    blockRequest.invalidateIfChanged((frozen) => frozen.reason === value)
+  })
+  const handleVerificationInputChange = (value: string) => guardedChange('RESOLVE_UNKNOWN', 'projects.issue.pendingResolveUnknownModifyBlocked', () => {
     setVerificationInput(value)
-    if (resolveUnknownPayloadRef.current && resolveUnknownPayloadRef.current.verification !== value) {
-      setResolveUnknownRequestKey(createUuid())
-      resolveUnknownPayloadRef.current = null
-    }
-  }
-
-  const handleStopDetailChange = (value: string) => {
-    if (pendingUnknownAction && pendingUnknownAction.kind === 'STOP') {
-      setActionError(t('projects.issue.pendingStopModifyBlocked'))
-      return
-    }
+    resolveUnknownRequest.invalidateIfChanged((frozen) => frozen.verification === value)
+  })
+  const handleStopDetailChange = (value: string) => guardedChange('STOP', 'projects.issue.pendingStopModifyBlocked', () => {
     setStopDetail(value)
-    if (stopPayloadRef.current && stopPayloadRef.current.detail !== (value.trim() || null)) {
-      setStopRequestKey(createUuid())
-      stopPayloadRef.current = null
-    }
-  }
-
-  const handleBudgetStateChange = (value: string) => {
-    if (pendingUnknownAction && pendingUnknownAction.kind === 'RESET_BUDGET') {
-      setActionError(t('projects.issue.pendingResetBudgetModifyBlocked'))
-      return
-    }
+    stopRequest.invalidateIfChanged((frozen) => frozen.detail === (value.trim() || null))
+  })
+  const handleBudgetStateChange = (value: string) => guardedChange('RESET_BUDGET', 'projects.issue.pendingResetBudgetModifyBlocked', () => {
     setResetBudgetState(value)
-    if (budgetPayloadRef.current && budgetPayloadRef.current.state !== value) {
-      setBudgetRequestKey(createUuid())
-      budgetPayloadRef.current = null
-    }
-  }
-
-  const handleBudgetMaxRunsChange = (value: number) => {
-    if (pendingUnknownAction && pendingUnknownAction.kind === 'RESET_BUDGET') {
-      setActionError(t('projects.issue.pendingResetBudgetModifyBlocked'))
-      return
-    }
+    budgetRequest.invalidateIfChanged((frozen) => frozen.state === value)
+  })
+  const handleBudgetMaxRunsChange = (value: number) => guardedChange('RESET_BUDGET', 'projects.issue.pendingResetBudgetModifyBlocked', () => {
     setResetBudgetMaxRuns(value)
-    if (budgetPayloadRef.current && budgetPayloadRef.current.maxRuns !== value) {
-      setBudgetRequestKey(createUuid())
-      budgetPayloadRef.current = null
-    }
-  }
+    budgetRequest.invalidateIfChanged((frozen) => frozen.maxRuns === value)
+  })
 
   if (!isOpen || !issueId) {
     return null
@@ -455,14 +295,6 @@ export function IssueDetailModal({
   const isBlocked = issue?.state === 'BLOCKED' || Boolean(issue?.blockedFromState)
   const isUnknown = issue?.state === 'UNKNOWN' || issue?.pauseReason === 'UNKNOWN'
   const isDone = issue?.state === 'DONE'
-  const isWriteBlocked = isActionPending || Boolean(pendingUnknownAction || corruptActionInfo || storageLoadError)
-
-  // 放弃损坏的挂起记录并解锁界面
-  const handleDiscardCorruptAction = () => {
-    if (!issueId || isActionPendingRef.current) return
-    clearPendingAction(issueId, undefined, undefined, true)
-    setPendingActionResult({ type: 'NONE' })
-  }
 
   // 从传入的 workflow 找到可转移的 next 列表
   const currentWorkflowState = workflow?.states.find((s) => s.state === issue?.state)
@@ -490,77 +322,7 @@ export function IssueDetailModal({
     }
   }
 
-  // --- 核心写操作封装：同 issue 仅一个 pending，发送前侧车落盘 (fail closed)，成功仅清自身 key，unknown 禁新 identity ---
-  const executeIssueAction = async (
-    kind: IssueActionKind,
-    requestKey: string,
-    expectedVersion: string,
-    payload: Record<string, unknown>,
-    runApi: () => Promise<unknown>,
-    onExplicitSuccess: () => void,
-  ) => {
-    if (!issue) return
-    if (isWriteBlocked || isActionPendingRef.current) {
-      setActionError(t('projects.issue.pendingWriteBlockedNotice'))
-      return
-    }
-
-    const pending = {
-      issueId: issue.id,
-      kind,
-      requestKey,
-      expectedVersion,
-      payload,
-      createdAt: new Date().toISOString(),
-      isUnknown: true,
-    } as PendingIssueAction
-
-    // 1. 发送前落盘侧车（fail closed）
-    try {
-      storePendingAction(issue.id, pending)
-    } catch (err) {
-      setActionError(t('projects.detail.storePendingFailed', {
-          reason: err instanceof Error ? err.message : String(err),
-        }))
-      return
-    }
-
-    isActionPendingRef.current = true
-    setIsActionPending(true)
-    setActionError(null)
-    setConflictDetail(null)
-
-    try {
-      await runApi()
-      // 2. 异步成功：只能清自己的 identity！
-      clearPendingAction(issue.id, requestKey)
-      setPendingActionResult({ type: 'NONE' })
-      onExplicitSuccess()
-      await queryClient.invalidateQueries({ queryKey: issueQueryKey })
-      notifyUpdated()
-    } catch (err) {
-      if (isConflictError(err)) {
-        // 409 确定被服务端拒绝，清理侧车并保留草稿
-        clearPendingAction(issue.id, requestKey)
-        setPendingActionResult({ type: 'NONE' })
-        setConflictDetail(t('projects.issue.actionConflictNotice'))
-      } else if (!isNetworkUnknownError(err)) {
-        // 其余明确 4xx 业务错误，服务端未接受
-        clearPendingAction(issue.id, requestKey)
-        setPendingActionResult({ type: 'NONE' })
-        setActionError(err instanceof Error ? err.message : t('projects.issue.actionFailed'))
-      } else {
-        // 未知网络错误（408, 429, 5xx, 网络中断）：侧车保留并在 UI 标记 unknown！
-        setPendingActionResult({ type: 'VALID', action: pending })
-        setActionError(err instanceof Error ? err.message : t('projects.issue.networkUnknownError'))
-      }
-    } finally {
-      isActionPendingRef.current = false
-      setIsActionPending(false)
-    }
-  }
-
-  // 1. 保存 Spec
+  // 保存 Spec
   const handleSaveSpec = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!issue) return
@@ -599,238 +361,95 @@ export function IssueDetailModal({
     }
   }
 
-  // 2. 精确重试未决未知操作（完整版本与 payload 严格从冻结 pending 读取，不可因刷新而改变）
-  const handleRetryPendingAction = async () => {
-    if (!pendingUnknownAction || !issue || isActionPendingRef.current) return
-    isActionPendingRef.current = true
-    setIsActionPending(true)
-    setActionError(null)
-    setConflictDetail(null)
-
-    const pending = pendingUnknownAction
-    const { kind, requestKey, expectedVersion, payload } = pending
-
-    try {
-      switch (kind) {
-        case 'TRANSITION':
-          await api.transitionIssue(issue.id, {
-            expectedVersion,
-            requestKey,
-            toState: (payload as { toState: string }).toState,
-          })
-          break
-        case 'RECOVER':
-          await api.recoverIssue(issue.id, {
-            expectedVersion,
-            requestKey,
-          })
-          break
-        case 'REOPEN':
-          await api.reopenIssue(issue.id, {
-            expectedVersion,
-            requestKey,
-          })
-          break
-        case 'BLOCK':
-          await api.blockIssue(issue.id, {
-            expectedVersion,
-            requestKey,
-            reason: (payload as { reason: string }).reason,
-          })
-          setIsBlockModalOpen(false)
-          setBlockReason('')
-          blockPayloadRef.current = null
-          setBlockRequestKey(createUuid())
-          break
-        case 'RESOLVE_UNKNOWN':
-          await api.resolveUnknown(issue.id, {
-            expectedVersion,
-            requestKey,
-            verification: (payload as { verification: string }).verification,
-          })
-          setIsResolveUnknownOpen(false)
-          setVerificationInput('')
-          resolveUnknownPayloadRef.current = null
-          setResolveUnknownRequestKey(createUuid())
-          break
-        case 'STOP':
-          await api.stopIssue(issue.id, {
-            expectedVersion,
-            requestKey,
-            detail: (payload as { detail: string | null }).detail,
-          })
-          setIsStopModalOpen(false)
-          setStopDetail('')
-          stopPayloadRef.current = null
-          setStopRequestKey(createUuid())
-          break
-        case 'RESET_BUDGET':
-          await api.resetStageBudget(issue.id, {
-            expectedVersion,
-            requestKey,
-            state: (payload as { state: string }).state,
-            maxRuns: (payload as { maxRuns: number }).maxRuns,
-          })
-          setIsResetBudgetOpen(false)
-          budgetPayloadRef.current = null
-          setBudgetRequestKey(createUuid())
-          break
-        case 'ACTIVITY':
-          await api.appendIssueActivity(issue.id, {
-            expectedVersion,
-            requestKey,
-            kind: (payload as { kind: 'COMMENT' | 'INSTRUCTION' }).kind,
-            body: (payload as { body: string }).body,
-          })
-          setActivityBody('')
-          activityPayloadRef.current = null
-          setActivityRequestKey(createUuid())
-          break
-      }
-      clearPendingAction(issue.id, requestKey)
-      setPendingActionResult({ type: 'NONE' })
-      await queryClient.invalidateQueries({ queryKey: issueQueryKey })
-      notifyUpdated()
-    } catch (err) {
-      if (isConflictError(err)) {
-        clearPendingAction(issue.id, requestKey)
-        setPendingActionResult({ type: 'NONE' })
-        setConflictDetail(t('projects.issue.retryConflictNotice'))
-      } else if (!isNetworkUnknownError(err)) {
-        clearPendingAction(issue.id, requestKey)
-        setPendingActionResult({ type: 'NONE' })
-        setActionError(err instanceof Error ? err.message : t('projects.issue.actionFailed'))
-      } else {
-        setActionError(err instanceof Error ? err.message : t('projects.issue.retryStillUnknownError'))
-      }
-    } finally {
-      isActionPendingRef.current = false
-      setIsActionPending(false)
-    }
-  }
-
-  // 3. 明确放弃未决操作（清理侧车与 unknown 状态）
-  const handleDiscardPendingAction = () => {
-    if (!issueId || !pendingUnknownAction || isActionPendingRef.current) return
-    clearPendingAction(issueId, pendingUnknownAction.requestKey)
-    setPendingActionResult({ type: 'NONE' })
-    setIsDiscardConfirmOpen(false)
-  }
-
-  // 4. 流转状态 (Transition)
   const handleTransition = async (toState: string) => {
     if (!issue) return
     const requestKey = createUuid()
     await executeIssueAction(
       'TRANSITION',
       requestKey,
-      issue.version,
       { toState },
-      () => api.transitionIssue(issue.id, { expectedVersion: issue.version, requestKey, toState }),
+      (expectedVersion) => api.transitionIssue(issue.id, { expectedVersion, requestKey, toState }),
       () => {},
     )
   }
 
-  // 5. 恢复 (Recover)
   const handleRecover = async () => {
     if (!issue) return
     const requestKey = createUuid()
     await executeIssueAction(
       'RECOVER',
       requestKey,
-      issue.version,
       {},
-      () => api.recoverIssue(issue.id, { expectedVersion: issue.version, requestKey }),
+      (expectedVersion) => api.recoverIssue(issue.id, { expectedVersion, requestKey }),
       () => {},
     )
   }
 
-  // 6. 重开 (Reopen)
   const handleReopen = async () => {
     if (!issue) return
     const requestKey = createUuid()
     await executeIssueAction(
       'REOPEN',
       requestKey,
-      issue.version,
       {},
-      () => api.reopenIssue(issue.id, { expectedVersion: issue.version, requestKey }),
+      (expectedVersion) => api.reopenIssue(issue.id, { expectedVersion, requestKey }),
       () => {},
     )
   }
 
-  // 7. 阻塞 (Block)
   const handleBlockSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!issue) return
-    const trimmed = blockReason.trim()
-    if (!trimmed) {
+    const reason = blockReason.trim()
+    if (!reason) {
       setActionError(t('projects.issue.blockReasonRequired'))
       return
     }
-    blockPayloadRef.current = { reason: trimmed }
+    const requestKey = blockRequest.requestKey
+    blockRequest.freeze({ reason })
     await executeIssueAction(
       'BLOCK',
-      blockRequestKey,
-      issue.version,
-      { reason: trimmed },
-      () => api.blockIssue(issue.id, { expectedVersion: issue.version, requestKey: blockRequestKey, reason: trimmed }),
-      () => {
-        setIsBlockModalOpen(false)
-        setBlockReason('')
-        blockPayloadRef.current = null
-        setBlockRequestKey(createUuid())
-      },
+      requestKey,
+      { reason },
+      (expectedVersion) => api.blockIssue(issue.id, { expectedVersion, requestKey, reason }),
+      resetBlockForm,
     )
   }
 
-  // 8. 人工核查 UNKNOWN
   const handleResolveUnknownSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!issue) return
-    const trimmed = verificationInput.trim()
-    if (!trimmed) {
+    const verification = verificationInput.trim()
+    if (!verification) {
       setActionError(t('projects.issue.verificationRequired'))
       return
     }
-    resolveUnknownPayloadRef.current = { verification: trimmed }
+    const requestKey = resolveUnknownRequest.requestKey
+    resolveUnknownRequest.freeze({ verification })
     await executeIssueAction(
       'RESOLVE_UNKNOWN',
-      resolveUnknownRequestKey,
-      issue.version,
-      { verification: trimmed },
-      () => api.resolveUnknown(issue.id, { expectedVersion: issue.version, requestKey: resolveUnknownRequestKey, verification: trimmed }),
-      () => {
-        setIsResolveUnknownOpen(false)
-        setVerificationInput('')
-        resolveUnknownPayloadRef.current = null
-        setResolveUnknownRequestKey(createUuid())
-      },
+      requestKey,
+      { verification },
+      (expectedVersion) => api.resolveUnknown(issue.id, { expectedVersion, requestKey, verification }),
+      resetResolveUnknownForm,
     )
   }
 
-  // 9. Stop 终止
   const handleStopSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!issue) return
-    const trimmedDetail = stopDetail.trim() || null
-    stopPayloadRef.current = { detail: trimmedDetail }
+    const detailText = stopDetail.trim() || null
+    const requestKey = stopRequest.requestKey
+    stopRequest.freeze({ detail: detailText })
     await executeIssueAction(
       'STOP',
-      stopRequestKey,
-      issue.version,
-      { detail: trimmedDetail },
-      () => api.stopIssue(issue.id, { expectedVersion: issue.version, requestKey: stopRequestKey, detail: trimmedDetail }),
-      () => {
-        setIsStopModalOpen(false)
-        setStopDetail('')
-        stopPayloadRef.current = null
-        setStopRequestKey(createUuid())
-      },
+      requestKey,
+      { detail: detailText },
+      (expectedVersion) => api.stopIssue(issue.id, { expectedVersion, requestKey, detail: detailText }),
+      resetStopForm,
     )
   }
 
-  // 10. 重置阶段预算
   const handleResetBudgetSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!issue) return
@@ -838,51 +457,43 @@ export function IssueDetailModal({
       setActionError(t('projects.issue.resetBudgetStateRequired'))
       return
     }
-    const parsedMaxRuns = parseMaxRuns(String(resetBudgetMaxRuns))
-    if (parsedMaxRuns === null) {
+    const maxRuns = parseMaxRuns(String(resetBudgetMaxRuns))
+    if (maxRuns === null) {
       setActionError(t('projects.edit.maxRunsInvalid', { max: MAX_RUNS }))
       return
     }
-    budgetPayloadRef.current = { state: resetBudgetState, maxRuns: parsedMaxRuns }
+    const state = resetBudgetState
+    const requestKey = budgetRequest.requestKey
+    budgetRequest.freeze({ state, maxRuns })
     await executeIssueAction(
       'RESET_BUDGET',
-      budgetRequestKey,
-      issue.version,
-      { state: resetBudgetState, maxRuns: parsedMaxRuns },
-      () => api.resetStageBudget(issue.id, { expectedVersion: issue.version, requestKey: budgetRequestKey, state: resetBudgetState, maxRuns: parsedMaxRuns }),
-      () => {
-        setIsResetBudgetOpen(false)
-        budgetPayloadRef.current = null
-        setBudgetRequestKey(createUuid())
-      },
+      requestKey,
+      { state, maxRuns },
+      (expectedVersion) => api.resetStageBudget(issue.id, { expectedVersion, requestKey, state, maxRuns }),
+      resetBudgetForm,
     )
   }
 
-  // 11. 追加活动 (Activity)
   const handleAppendActivity = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!issue) return
-    const trimmedBody = activityBody.trim()
-    if (!trimmedBody) {
+    const body = activityBody.trim()
+    if (!body) {
       setActionError(t('projects.issue.contentEmpty'))
       return
     }
-    activityPayloadRef.current = { kind: activityKind, body: trimmedBody }
+    const kind = activityKind
+    const requestKey = activityRequest.requestKey
+    activityRequest.freeze({ kind, body })
     await executeIssueAction(
       'ACTIVITY',
-      activityRequestKey,
-      issue.version,
-      { kind: activityKind, body: trimmedBody },
-      () => api.appendIssueActivity(issue.id, { expectedVersion: issue.version, requestKey: activityRequestKey, kind: activityKind, body: trimmedBody }),
-      () => {
-        setActivityBody('')
-        activityPayloadRef.current = null
-        setActivityRequestKey(createUuid())
-      },
+      requestKey,
+      { kind, body },
+      (expectedVersion) => api.appendIssueActivity(issue.id, { expectedVersion, requestKey, kind, body }),
+      resetActivityForm,
     )
   }
 
-  // 10. 删除 Issue
   const handleDeleteIssue = async () => {
     if (!issue) return
     if (isWriteBlocked || isActionPendingRef.current) {
@@ -905,7 +516,6 @@ export function IssueDetailModal({
     }
   }
 
-  // 11. 上传证据
   const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file || !issue) return
@@ -1090,146 +700,29 @@ export function IssueDetailModal({
           </div>
         </div>
 
-        {/* 存储读取异常警告条 */}
-        {storageLoadError && (
-          <div
-            className="form-error-banner issue-detail-alert issue-detail-alert-danger"
-            role="alert"
-          >
-            <AlertTriangle size={16} aria-hidden="true" />
-            <span>{t('projects.issue.storageLoadError', { error: storageLoadError })}</span>
-          </div>
-        )}
-
-        {/* 损坏挂起记录警告条 */}
-        {corruptActionInfo && (
-          <div
-            className="form-error-banner issue-detail-alert issue-detail-alert-warning"
-            role="alert"
-          >
-            <div className="issue-detail-alert-heading">
-              <AlertTriangle size={16} aria-hidden="true" />
-              <strong>{t('projects.issue.corruptActionTitle')}</strong>
-            </div>
-            <div className="issue-detail-alert-detail">
-              {t('projects.issue.corruptActionDetail', { error: corruptActionInfo.error })}
-            </div>
-            <div className="issue-detail-alert-actions">
-              <Button
-                danger
-                onClick={handleDiscardCorruptAction}
-                disabled={isActionPending}
-                size="compact"
-              >
-                {t('projects.issue.discardCorruptAction')}
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {/* 未决写操作未知状态警告条 (I07) */}
-        {pendingUnknownAction && (
-          <div
-            className="form-error-banner issue-detail-alert issue-detail-alert-warning"
-            role="alert"
-          >
-            <div className="issue-detail-alert-heading">
-              <AlertTriangle size={16} aria-hidden="true" />
-              <strong>{t('projects.issue.unknownPending')}</strong>
-            </div>
-            <div className="issue-detail-alert-detail">
-              {t('projects.issue.pendingActionKind')} <code>{pendingUnknownAction.kind}</code> |
-              {t('projects.issue.pendingRequestKey')} <code>{pendingUnknownAction.requestKey}</code> |
-              {t('projects.issue.pendingExpectedVersion')} <code>{pendingUnknownAction.expectedVersion}</code>
-            </div>
-            <div className="issue-detail-alert-actions">
-              <Button
-                onClick={() => void handleRetryPendingAction()}
-                disabled={isActionPending}
-                size="compact"
-              >
-                {isActionPending ? t('projects.issue.retrying') : t('projects.issue.retryOriginalAction')}
-              </Button>
-              {!isDiscardConfirmOpen ? (
-                <Button
-                  variant="ghost"
-                  danger
-                  onClick={() => setIsDiscardConfirmOpen(true)}
-                  disabled={isActionPending}
-                  size="compact"
-                >
-                  {t('projects.issue.discardPending')}
-                </Button>
-              ) : (
-                <div className="issue-detail-alert-actions">
-                  <span className="issue-detail-alert-discard">
-                    {t('projects.issue.discardWarning')}
-                  </span>
-                  <Button
-                    danger
-                    onClick={handleDiscardPendingAction}
-                    disabled={isActionPending}
-                    size="compact"
-                  >
-                    {t('projects.issue.confirmDiscard')}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    onClick={() => setIsDiscardConfirmOpen(false)}
-                    size="compact"
-                  >
-                    {t('projects.cancel')}
-                  </Button>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* 冲突与错误提示横幅 */}
-        {conflictDetail && (
-          <div
-            className="form-error-banner issue-detail-alert issue-detail-alert-conflict"
-            role="alert"
-          >
-            <div className="issue-detail-alert-heading">
-              <AlertTriangle size={16} aria-hidden="true" />
-              <span>{conflictDetail}</span>
-            </div>
-            <div className="issue-detail-alert-actions">
-              {isEditingSpec && detail?.issue && detail.issue.version !== specVersion && (
-                <Button
-                  onClick={() => {
-                    if (detail?.issue) {
-                      setSpecVersion(detail.issue.version)
-                      setConflictDetail(null)
-                    }
-                  }}
-                  disabled={isWriteBlocked}
-                  size="compact"
-                  title={t('projects.issue.confirmOverwriteRiskTitle')}
-                >
-                  {t('projects.issue.confirmOverwriteRisk')}
-                </Button>
-              )}
-              <Button
-                variant="ghost"
-                onClick={() => void handleReloadFreshData()}
-                size="compact"
-              >
-                <RefreshCw size={12} aria-hidden="true" />
-                <span>{t('projects.issue.refreshAndKeepDraft')}</span>
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {displayError && (
-          <div className="form-error-banner issue-detail-alert" role="alert">
-            <AlertTriangle size={16} aria-hidden="true" />
-            <span>{displayError}</span>
-          </div>
-        )}
+        <IssueAlerts
+          storageLoadError={runner.storageLoadError}
+          corruptActionError={runner.corruptActionError}
+          pendingUnknownAction={runner.pendingUnknownAction}
+          conflictDetail={conflictDetail}
+          displayError={displayError}
+          isActionPending={isActionPending}
+          onConfirmOverwrite={
+            isEditingSpec && detail?.issue && detail.issue.version !== specVersion
+              ? () => {
+                  if (detail?.issue) {
+                    setSpecVersion(detail.issue.version)
+                    setConflictDetail(null)
+                  }
+                }
+              : null
+          }
+          confirmOverwriteDisabled={isWriteBlocked}
+          onDiscardCorruptAction={runner.discardCorruptAction}
+          onRetryPendingAction={() => void runner.retryPendingAction()}
+          onDiscardPendingAction={runner.discardPendingAction}
+          onReloadFreshData={() => void handleReloadFreshData()}
+        />
 
         {/* Tab 导航与内容：共享 Tabs 统一 tablist/tabpanel 语义、roving tabindex 与方向键导航 */}
         <Tabs
@@ -1351,57 +844,11 @@ export function IssueDetailModal({
                       </div>
                     </form>
                   ) : (
-                    <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <h2 className="spec-title">{issue.title}</h2>
-                        <Button
-                          variant="ghost"
-                          onClick={() => setIsEditingSpec(true)}
-                          disabled={isWriteBlocked}
-                          title={t('projects.issue.editSpecTitle')}
-                        >
-                          <Pencil size={14} aria-hidden="true" />
-                          <span>{t('projects.issue.editSpec')}</span>
-                        </Button>
-                      </div>
-
-                      <div className="spec-desc-block">
-                        {issue.description ? (
-                          <div style={{ whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{issue.description}</div>
-                        ) : (
-                          <span style={{ color: 'var(--fg-muted)' }}>{t('projects.issue.noSpecDesc')}</span>
-                        )}
-                      </div>
-
-                      <div className="spec-meta-grid">
-                        <div className="meta-item">
-                          <span className="meta-label">{t('projects.issue.currentStageLabel')}</span>
-                          <span className="meta-value"><code>{issue.state}</code></span>
-                        </div>
-                        <div className="meta-item">
-                          <span className="meta-label">{t('projects.issue.expectedVersionLabel')}</span>
-                          <span className="meta-value"><code>{issue.version}</code></span>
-                        </div>
-                        {issue.blockedFromState && (
-                          <div className="meta-item">
-                            <span className="meta-label">{t('projects.issue.blockedFromStageLabel')}</span>
-                            <span className="meta-value">{issue.blockedFromState}</span>
-                          </div>
-                        )}
-                        {issue.blockReason && (
-                          <div className="meta-item" style={{ gridColumn: 'span 2' }}>
-                            <span className="meta-label">{t('projects.issue.blockReasonLabel')}</span>
-                            <span className="meta-value" style={{ color: 'var(--danger)' }}>{issue.blockReason}</span>
-                          </div>
-                        )}
-                        {issue.pauseDetail && (
-                          <div className="meta-item" style={{ gridColumn: 'span 2' }}>
-                            <span className="meta-label">{t('projects.issue.pauseDetailLabel')}</span>
-                            <span className="meta-value">{issue.pauseDetail}</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
+                    <IssueSpecView
+                      issue={issue}
+                      editDisabled={isWriteBlocked}
+                      onEdit={() => setIsEditingSpec(true)}
+                    />
                   )}
                 </div>
               )}
@@ -1460,97 +907,14 @@ export function IssueDetailModal({
                   </form>
 
                   {/* 历史活动事实流 */}
-                  <div className="activity-timeline">
-                    {(detail.activities ?? []).length === 0 ? (
-                      <EmptyState title={t('projects.issue.emptyActivities')} />
-                    ) : (
-                      (detail.activities ?? []).map((act) => (
-                        <div key={act.sequence} className={`activity-item kind-${act.kind.toLowerCase()}`}>
-                          <div className="activity-item-header">
-                            <span className="activity-badge-kind">{act.kind}</span>
-                            <span className="activity-actor">
-                              {act.actorType === 'AGENT' ? (
-                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                                  <Bot size={12} aria-hidden="true" />
-                                  <span>{act.actorAgentName || 'Agent'}</span>
-                                </span>
-                              ) : act.actorType === 'HUMAN' ? (
-                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                                  <User size={12} aria-hidden="true" />
-                                  <span>{t('projects.issue.actorHuman')}</span>
-                                </span>
-                              ) : (
-                                <span>{t('projects.issue.actorSystem')}</span>
-                              )}
-                            </span>
-                            <span className="activity-time">{act.createdAt}</span>
-                            <span className="activity-seq">#{act.sequence}</span>
-                          </div>
-
-                          {act.body && (
-                            <div className="activity-body-text">{act.body}</div>
-                          )}
-                        </div>
-                      ))
-                    )}
-                  </div>
+                  <IssueActivityTimeline activities={detail.activities ?? []} />
                 </div>
               )}
 
               {/* TAB 3: Run 执行事实与区间报告 */}
               {activeTab === 'runs' && (
                 <div className="tab-pane">
-                  {(detail.runs ?? []).length === 0 ? (
-                    <EmptyState title={t('projects.issue.emptyRuns')} />
-                  ) : (
-                    <div className="runs-list">
-                      {(detail.runs ?? []).map((r) => (
-                        <div key={r.id} className="run-card">
-                          <div className="run-card-header">
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                              <span className="run-ordinal">Run #{r.ordinal}</span>
-                              <Badge tone="info" mono>{r.state}</Badge>
-                              {r.agentName && (
-                                <Badge tone="accent">
-                                  <Bot size={12} aria-hidden="true" />
-                                  {r.agentName}
-                                </Badge>
-                              )}
-                              <Badge mono>{r.status}</Badge>
-                            </div>
-                            <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--fg-muted)' }}>
-                              {t('projects.issue.durationRemaining', { ms: r.remainingExecutionMs })}
-                            </span>
-                          </div>
-
-                          <div className="run-card-details">
-                            <div className="run-detail-row">
-                              <span>{t('projects.issue.entryRangeLabel')}</span>
-                              <code>{r.startEntryId} → {r.endEntryId || t('projects.issue.running')}</code>
-                            </div>
-                            {r.finalAnswerEntryId && (
-                              <div className="run-detail-row">
-                                <span>{t('projects.issue.finalAnswerEntryLabel')}</span>
-                                <code>{r.finalAnswerEntryId}</code>
-                              </div>
-                            )}
-                            {r.nextState && (
-                              <div className="run-detail-row">
-                                <span>{t('projects.issue.handoverTargetLabel')}</span>
-                                <strong style={{ color: 'var(--accent)' }}>{r.nextState}</strong>
-                              </div>
-                            )}
-                            {r.error && (
-                              <div className="run-detail-row" style={{ color: 'var(--danger)' }}>
-                                <span>{t('projects.issue.errorMessageLabel')}</span>
-                                <span>{r.error}</span>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                  <IssueRunsPane runs={detail.runs ?? []} />
                 </div>
               )}
 
@@ -1572,69 +936,14 @@ export function IssueDetailModal({
                     </Button>
                   </div>
 
-                  {(detail.stageBudgets ?? []).length === 0 ? (
-                    <EmptyState title={t('projects.issue.emptyBudgets')} />
-                  ) : (
-                    <div className="budget-grid">
-                      {(detail.stageBudgets ?? []).map((b) => (
-                        <div key={b.state} className="budget-card">
-                          <div className="budget-card-title">
-                            <Badge tone="info" mono>{b.state}</Badge>
-                            <span>{t('projects.issue.maxRunsBudget', { max: b.maxRuns })}</span>
-                          </div>
-                          <div className="budget-stats">
-                            <div>
-                              <span>{t('projects.issue.usedRunsLabel')}</span>
-                              <strong>{b.usedRuns}</strong>
-                            </div>
-                            <div>
-                              <span>{t('projects.issue.remainingRunsLabel')}</span>
-                              <strong style={{ color: Number(b.remainingRuns) > 0 ? 'var(--accent)' : 'var(--danger)' }}>
-                                {b.remainingRuns}
-                              </strong>
-                            </div>
-                            <div>
-                              <span>{t('projects.issue.budgetAfterOrdinalLabel')}</span>
-                              <code>#{b.budgetAfterOrdinal}</code>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                  <IssueStageBudgetList stageBudgets={detail.stageBudgets ?? []} />
                 </div>
               )}
 
               {/* TAB 5: Agent 线程绑定 (AgentThreads) */}
               {activeTab === 'agentThreads' && (
                 <div className="tab-pane">
-                  {(detail.agentThreads ?? []).length === 0 ? (
-                    <EmptyState title={t('projects.issue.emptyAgentThreads')} />
-                  ) : (
-                    <div className="thread-list">
-                      {(detail.agentThreads ?? []).map((thread) => (
-                        <div key={thread.threadId} className="thread-item">
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <Bot size={16} aria-hidden="true" />
-                            <strong>{thread.agentName}</strong>
-                          </div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <code>{thread.threadId}</code>
-                            {onOpenThread && (
-                              <Button
-                                variant="ghost"
-                                onClick={() => onOpenThread(thread.threadId)}
-                                title={t('projects.issue.openAgentThreadTitle')}
-                              >
-                                <Eye size={14} aria-hidden="true" />
-                                <span>{t('projects.issue.openAction')}</span>
-                              </Button>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                  <IssueAgentThreadsPane agentThreads={detail.agentThreads ?? []} onOpenThread={onOpenThread} />
                 </div>
               )}
 
@@ -1688,194 +997,87 @@ export function IssueDetailModal({
 
         {/* --- 子对话框区 --- */}
 
-        {/* 1. 业务阻塞弹窗 */}
         {isBlockModalOpen && (
-          <Dialog
-            className="sub-card"
+          <TextActionDialog
             title={t('projects.issue.blockDialogTitle')}
-            pending={isWriteBlocked}
+            fieldId="issue-block-reason"
+            fieldLabel={t('projects.issue.blockReasonFieldLabel')}
+            required
+            rows={3}
+            value={blockReason}
+            placeholder={t('projects.issue.blockReasonPlaceholder')}
+            onChange={handleBlockReasonChange}
+            submitLabel={t('projects.issue.confirmBlock')}
+            pendingLabel={t('projects.issue.submitting')}
+            danger
+            isPending={isActionPending}
+            isBlocked={isWriteBlocked}
+            onSubmit={handleBlockSubmit}
             onClose={() => setIsBlockModalOpen(false)}
-          >
-              <form className="modal-card-form" onSubmit={handleBlockSubmit}>
-                <div className="modal-body">
-                  <label className="edit-project-field" htmlFor="issue-block-reason">
-                    <FieldLabel required>{t('projects.issue.blockReasonFieldLabel')}</FieldLabel>
-                    <TextArea
-                      id="issue-block-reason"
-                      rows={3}
-                      value={blockReason}
-                      onChange={(e) => handleBlockReasonChange(e.target.value)}
-                      placeholder={t('projects.issue.blockReasonPlaceholder')}
-                      autoFocus
-                    />
-                  </label>
-                </div>
-                <div className="modal-footer">
-                  <Button variant="ghost" onClick={() => setIsBlockModalOpen(false)}>
-                    {t('projects.cancel')}
-                    </Button>
-                  <Button
-                    type="submit"
-                    danger
-                    disabled={isWriteBlocked}
-                    >
-                    {isActionPending ? t('projects.issue.submitting') : t('projects.issue.confirmBlock')}
-                  </Button>
-                </div>
-              </form>
-              </Dialog>
+          />
         )}
 
-        {/* 2. UNKNOWN 人工核查弹窗 */}
         {isResolveUnknownOpen && (
-          <Dialog
-            className="sub-card"
+          <TextActionDialog
             title={t('projects.issue.resolveUnknownDialogTitle')}
             headerIcon={<ShieldAlert size={16} className="text-danger" aria-hidden="true" />}
-            pending={isWriteBlocked}
+            description={t('projects.issue.resolveUnknownDesc')}
+            fieldId="issue-verification"
+            fieldLabel={t('projects.issue.verificationFieldLabel')}
+            required
+            rows={4}
+            value={verificationInput}
+            placeholder={t('projects.issue.verificationPlaceholder')}
+            onChange={handleVerificationInputChange}
+            submitLabel={t('projects.issue.confirmResolveUnknown')}
+            pendingLabel={t('projects.issue.resolving')}
+            isPending={isActionPending}
+            isBlocked={isWriteBlocked}
+            onSubmit={handleResolveUnknownSubmit}
             onClose={() => setIsResolveUnknownOpen(false)}
-          >
-              <form className="modal-card-form" onSubmit={handleResolveUnknownSubmit}>
-                <div className="modal-body">
-                  <p style={{ fontSize: 'var(--font-size-sm)', color: 'var(--fg-muted)', margin: '0 0 12px 0' }}>
-                    {t('projects.issue.resolveUnknownDesc')}
-                  </p>
-                  <label className="edit-project-field" htmlFor="issue-verification">
-                    <FieldLabel required>{t('projects.issue.verificationFieldLabel')}</FieldLabel>
-                    <TextArea
-                      id="issue-verification"
-                      rows={4}
-                      value={verificationInput}
-                      onChange={(e) => handleVerificationInputChange(e.target.value)}
-                      placeholder={t('projects.issue.verificationPlaceholder')}
-                      autoFocus
-                    />
-                  </label>
-                </div>
-                <div className="modal-footer">
-                  <Button variant="ghost" onClick={() => setIsResolveUnknownOpen(false)}>
-                    {t('projects.cancel')}
-                    </Button>
-                  <Button
-                    type="submit"
-                    disabled={isWriteBlocked}
-                    >
-                    {isActionPending ? t('projects.issue.resolving') : t('projects.issue.confirmResolveUnknown')}
-                  </Button>
-                </div>
-              </form>
-              </Dialog>
+          />
         )}
 
-        {/* 3. Stop 终止弹窗 */}
         {isStopModalOpen && (
-          <Dialog
-            className="sub-card"
+          <TextActionDialog
             title={t('projects.issue.stopDialogTitle')}
-            pending={isWriteBlocked}
+            fieldId="issue-stop-detail"
+            fieldLabel={t('projects.issue.stopDetailFieldLabel')}
+            rows={3}
+            value={stopDetail}
+            placeholder={t('projects.issue.stopDetailPlaceholder')}
+            onChange={handleStopDetailChange}
+            submitLabel={t('projects.issue.confirmStop')}
+            pendingLabel={t('projects.issue.stopping')}
+            danger
+            isPending={isActionPending}
+            isBlocked={isWriteBlocked}
+            onSubmit={handleStopSubmit}
             onClose={() => setIsStopModalOpen(false)}
-          >
-              <form className="modal-card-form" onSubmit={handleStopSubmit}>
-                <div className="modal-body">
-                  <label className="edit-project-field" htmlFor="issue-stop-detail">
-                    <FieldLabel>{t('projects.issue.stopDetailFieldLabel')}</FieldLabel>
-                    <TextArea
-                      id="issue-stop-detail"
-                      rows={3}
-                      value={stopDetail}
-                      onChange={(e) => handleStopDetailChange(e.target.value)}
-                      placeholder={t('projects.issue.stopDetailPlaceholder')}
-                      autoFocus
-                    />
-                  </label>
-                </div>
-                <div className="modal-footer">
-                  <Button variant="ghost" onClick={() => setIsStopModalOpen(false)}>
-                    {t('projects.cancel')}
-                    </Button>
-                  <Button
-                    type="submit"
-                    danger
-                    disabled={isWriteBlocked}
-                    >
-                    {isActionPending ? t('projects.issue.stopping') : t('projects.issue.confirmStop')}
-                  </Button>
-                </div>
-              </form>
-              </Dialog>
+          />
         )}
 
-        {/* 4. 阶段预算重置弹窗 */}
         {isResetBudgetOpen && (
-          <Dialog
-            className="sub-card"
-            title={t('projects.issue.resetStageBudgetAction')}
-            pending={isWriteBlocked}
+          <ResetBudgetDialog
+            state={resetBudgetState}
+            maxRuns={resetBudgetMaxRuns}
+            onStateChange={handleBudgetStateChange}
+            onMaxRunsChange={handleBudgetMaxRunsChange}
+            isPending={isActionPending}
+            isBlocked={isWriteBlocked}
+            onSubmit={handleResetBudgetSubmit}
             onClose={() => setIsResetBudgetOpen(false)}
-          >
-              <form className="modal-card-form" onSubmit={handleResetBudgetSubmit}>
-                <div className="modal-body">
-                  <label className="edit-project-field" htmlFor="reset-budget-state">
-                    <FieldLabel required>{t('projects.issue.budgetStageFieldLabel')}</FieldLabel>
-                    <TextInput
-                      id="reset-budget-state"
-                      value={resetBudgetState}
-                      onChange={(e) => handleBudgetStateChange(e.target.value)}
-                      placeholder={t('projects.issue.budgetStagePlaceholder')}
-                    />
-                  </label>
-                  <label className="edit-project-field" htmlFor="reset-budget-max-runs">
-                    <FieldLabel required>{t('projects.issue.budgetMaxRunsFieldLabel')}</FieldLabel>
-                    <NumberInput
-                      id="reset-budget-max-runs"
-                      min={1}
-                      max={MAX_RUNS}
-                      value={String(resetBudgetMaxRuns)}
-                      onChange={(next) => handleBudgetMaxRunsChange(next === '' ? 0 : Number(next))}
-                    />
-                  </label>
-                </div>
-                <div className="modal-footer">
-                  <Button variant="ghost" onClick={() => setIsResetBudgetOpen(false)}>
-                    {t('projects.cancel')}
-                    </Button>
-                  <Button
-                    type="submit"
-                    disabled={isWriteBlocked}
-                    >
-                    {isActionPending ? t('projects.issue.resettingBudget') : t('projects.issue.confirmResetBudget')}
-                  </Button>
-                </div>
-              </form>
-              </Dialog>
+          />
         )}
 
-        {/* 5. 删除 Issue 确认弹窗 */}
         {isDeleteModalOpen && (
-          <Dialog
-            className="sub-card"
-            title={t('projects.issue.deleteDialogTitle', { number: issue?.number ?? '' })}
-            pending={isWriteBlocked}
+          <DeleteIssueDialog
+            issueNumber={issue?.number ?? ''}
+            isPending={isActionPending}
+            isBlocked={isWriteBlocked}
+            onConfirm={handleDeleteIssue}
             onClose={() => setIsDeleteModalOpen(false)}
-          >
-              <div className="modal-body">
-                <p style={{ margin: 0, color: 'var(--fg)' }}>
-                  {t('projects.issue.deleteConfirmDesc')}
-                </p>
-              </div>
-              <div className="modal-footer">
-                <Button variant="ghost" onClick={() => setIsDeleteModalOpen(false)}>
-                  {t('projects.cancel')}
-                  </Button>
-                <Button
-                  danger
-                  disabled={isWriteBlocked}
-                  onClick={handleDeleteIssue}
-                  >
-                  {isActionPending ? t('projects.issue.deleting') : t('projects.delete.confirm')}
-                </Button>
-              </div>
-            </Dialog>
+          />
         )}
     </Dialog>
   )
