@@ -1,19 +1,13 @@
 package fun.fengwk.kkstudio.harness.provider.openai.responses;
 
+import fun.fengwk.kkstudio.harness.provider.ProviderSseCall;
 import fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge;
-import fun.fengwk.kkstudio.harness.provider.transport.HttpOpenMetadata;
-import fun.fengwk.kkstudio.harness.provider.transport.HttpSseCallback;
-import fun.fengwk.kkstudio.harness.provider.transport.HttpSseLimits;
 import fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransport;
-import fun.fengwk.kkstudio.harness.provider.transport.ServerSentEvent;
-import fun.fengwk.kkstudio.harness.provider.transport.TransportException;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelProvider;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
 
 import java.net.URI;
@@ -48,7 +42,7 @@ final class OpenAiResponsesModelProvider implements ModelProvider {
   }
 
   @Override
-  public ProviderStream stream(ProviderRequest request, ProviderStreamHandler handler) {
+  public void stream(ProviderRequest request, ProviderStreamHandler handler) {
     Objects.requireNonNull(request, "request");
     Objects.requireNonNull(handler, "handler");
 
@@ -59,7 +53,7 @@ final class OpenAiResponsesModelProvider implements ModelProvider {
       encoded = encoder.encode(request, descriptor);
     } catch (ProviderException exception) {
       bridge.emitError(exception);
-      return bridge;
+      return;
     }
 
     HttpRequest httpRequest;
@@ -76,69 +70,19 @@ final class OpenAiResponsesModelProvider implements ModelProvider {
     } catch (IllegalArgumentException ex) {
       bridge.emitError(
           new ProviderException(ProviderErrorKind.INVALID_REQUEST, "invalid request header value"));
-      return bridge;
+      return;
     }
 
     OpenAiResponsesStreamAccumulator accumulator =
         new OpenAiResponsesStreamAccumulator(request, descriptor, bridge);
 
-    HttpSseCallback callback =
-        new HttpSseCallback() {
-          @Override
-          public void onOpen(HttpOpenMetadata metadata) {
-            // 连接已建立
-          }
-
-          @Override
-          public void onEvent(ServerSentEvent event) {
-            try {
-              accumulator.handleEvent(event.event(), event.data());
-            } catch (ProviderException pe) {
-              if (bridge.handlerFailed()) {
-                throw pe;
-              }
-              bridge.emitError(pe);
-            }
-          }
-
-          @Override
-          public void onComplete() {
-            try {
-              ProviderCompletion completion = accumulator.finish();
-              bridge.emitComplete(completion);
-            } catch (ProviderException pe) {
-              if (bridge.handlerFailed()) {
-                throw pe;
-              }
-              bridge.emitError(pe);
-            }
-          }
-
-          @Override
-          public void onFailure(TransportException error) {
-            ProviderException mapped = OpenAiResponsesErrorMapper.mapTransportException(error);
-            if (mapped != null) {
-              bridge.emitError(mapped);
-            }
-          }
-        };
-
-    ProviderStream transportStream;
-    try {
-      transportStream =
-          transport.stream(
-              httpRequest, descriptor.modelCallTimeoutPolicy(), HttpSseLimits.DEFAULT, callback);
-    } catch (TransportException te) {
-      ProviderException pe = OpenAiResponsesErrorMapper.mapTransportException(te);
-      if (pe != null) {
-        bridge.emitError(pe);
-      }
-      return bridge;
-    } catch (RuntimeException ex) {
-      throw new RuntimeException("transport execution failed");
-    }
-
-    bridge.bind(transportStream);
-    return bridge;
+    ProviderSseCall.run(
+        transport,
+        httpRequest,
+        descriptor.modelCallTimeoutPolicy(),
+        bridge,
+        event -> accumulator.handleEvent(event.event(), event.data()),
+        accumulator::finish,
+        OpenAiResponsesErrorMapper::mapTransportException);
   }
 }

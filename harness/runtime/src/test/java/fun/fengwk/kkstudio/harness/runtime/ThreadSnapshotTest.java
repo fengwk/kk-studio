@@ -70,17 +70,13 @@ class ThreadSnapshotTest {
 
   @Test
   void activeLifecycleWithModelMapsToModelStatus() {
-    // 测试意图：ACTIVE 生命周期下，本地活跃 Model 按 invocation 状态细分为 MODEL_READY/DISPATCHING/RUNNING。
+    // 测试意图：ACTIVE 生命周期下，本地活跃 Model 按 invocation 状态细分为 MODEL_READY/RUNNING。
     for (ModelInvocationStatus status :
-        List.of(
-            ModelInvocationStatus.READY,
-            ModelInvocationStatus.DISPATCHING,
-            ModelInvocationStatus.RUNNING)) {
+        List.of(ModelInvocationStatus.READY, ModelInvocationStatus.RUNNING)) {
       HarnessRuntimeTestSupport.ModelBaseline baseline = seedModel(store, status);
       ThreadRuntimeStatus expected =
           switch (status) {
             case READY -> ThreadRuntimeStatus.MODEL_READY;
-            case DISPATCHING -> ThreadRuntimeStatus.MODEL_DISPATCHING;
             case RUNNING -> ThreadRuntimeStatus.MODEL_RUNNING;
             default -> throw new AssertionError();
           };

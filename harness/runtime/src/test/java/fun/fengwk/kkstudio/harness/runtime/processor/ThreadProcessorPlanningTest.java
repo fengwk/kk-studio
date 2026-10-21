@@ -661,7 +661,6 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
     assertEquals(ModelInvocationStatus.READY, planned.status());
 
     // claim2：模型 SUCCEEDED 后一个 claim 应用 terminal，跑到 COMPLETED 终止 turn。
-    transitionModel(fixture.store, planned.id(), model -> model.beginDispatch(NOW));
     transitionModel(fixture.store, planned.id(), model -> model.markRunning(NOW));
     transitionModel(
         fixture.store,

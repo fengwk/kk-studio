@@ -112,7 +112,7 @@ final class OpenAiChatStreamAccumulator {
   }
 
   void handleData(String data) {
-    if (bridge.isCancelled()) {
+    if (bridge.isClosed()) {
       return;
     }
     if (data == null || data.isBlank()) {

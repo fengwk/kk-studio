@@ -5,10 +5,7 @@ public enum ModelInvocationStatus {
   /** 模型调用已创建就绪，等待分派执行。 */
   READY,
 
-  /** 已写入持久化分派围栏，但 Gateway 是否成功接受尚未确认。 */
-  DISPATCHING,
-
-  /** Gateway 已接受模型调用，Runtime 已进入受租约保护的执行阶段。 */
+  /** 已持久化执行意图（先于请求发出），Runtime 处于受租约保护的执行阶段。 */
   RUNNING,
 
   /** 模型调用已成功完成并生成完整响应。 */

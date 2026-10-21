@@ -218,8 +218,6 @@ final class DispatcherTestSupport {
                   NOW,
                   NOW));
           ModelInvocation current = tx.lockModelInvocation(modelId).orElseThrow();
-          tx.updateModelInvocation(current.beginDispatch(NOW));
-          current = tx.lockModelInvocation(modelId).orElseThrow();
           tx.updateModelInvocation(current.markRunning(NOW));
           current = tx.lockModelInvocation(modelId).orElseThrow();
           tx.updateModelInvocation(current.succeed(response, NOW));

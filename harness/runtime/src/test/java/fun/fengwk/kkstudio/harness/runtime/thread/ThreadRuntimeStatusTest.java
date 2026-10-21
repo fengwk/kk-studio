@@ -33,9 +33,6 @@ class ThreadRuntimeStatusTest {
         ThreadRuntimeStatus.MODEL_READY,
         ThreadRuntimeStatus.from(modelActive(ModelInvocationStatus.READY)));
     assertEquals(
-        ThreadRuntimeStatus.MODEL_DISPATCHING,
-        ThreadRuntimeStatus.from(modelActive(ModelInvocationStatus.DISPATCHING)));
-    assertEquals(
         ThreadRuntimeStatus.MODEL_RUNNING,
         ThreadRuntimeStatus.from(modelActive(ModelInvocationStatus.RUNNING)));
     assertEquals(
@@ -117,13 +114,10 @@ class ThreadRuntimeStatusTest {
 
   @Test
   void fromModelStatusMapsNonTerminalStatusesAndRejectsTerminal() {
-    // 测试意图：验证 fromModelStatus 正确映射 READY/DISPATCHING/RUNNING，并对终态和 null fail-closed。
+    // 测试意图：验证 fromModelStatus 正确映射 READY/RUNNING，并对终态和 null fail-closed。
     assertEquals(
         ThreadRuntimeStatus.MODEL_READY,
         ThreadRuntimeStatus.fromModelStatus(ModelInvocationStatus.READY));
-    assertEquals(
-        ThreadRuntimeStatus.MODEL_DISPATCHING,
-        ThreadRuntimeStatus.fromModelStatus(ModelInvocationStatus.DISPATCHING));
     assertEquals(
         ThreadRuntimeStatus.MODEL_RUNNING,
         ThreadRuntimeStatus.fromModelStatus(ModelInvocationStatus.RUNNING));

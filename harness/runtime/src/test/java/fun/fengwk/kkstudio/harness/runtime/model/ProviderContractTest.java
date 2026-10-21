@@ -16,7 +16,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderProtocolEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
@@ -121,42 +120,39 @@ class ProviderContractTest {
   /** 现有实现不需要任何改动：只需规范化增量的实现者不覆盖 onProtocolEvent 也能编译并安全忽略原生事件；显式覆盖者按序收到事件。 */
   @Test
   void deliversProtocolEventsOnlyToExplicitImplementations() {
-    ProviderStream stream = stubStream();
     ProviderProtocolEvent event = new ProviderProtocolEvent("message_delta", "{\"delta\":{}}");
 
     ProviderStreamHandler ignoring =
         new ProviderStreamHandler() {
           @Override
-          public void onEvent(ProviderStreamEvent ignoredEvent, ProviderStream ignoredStream) {}
+          public void onEvent(ProviderStreamEvent ignoredEvent) {}
 
           @Override
-          public void onComplete(
-              ProviderCompletion ignoredCompletion, ProviderStream ignoredStream) {}
+          public void onComplete(ProviderCompletion ignoredCompletion) {}
 
           @Override
-          public void onError(ProviderException error, ProviderStream ignoredStream) {}
+          public void onError(ProviderException error) {}
         };
-    ignoring.onProtocolEvent(event, stream);
+    ignoring.onProtocolEvent(event);
 
     List<ProviderProtocolEvent> received = new ArrayList<>();
     ProviderStreamHandler explicit =
         new ProviderStreamHandler() {
           @Override
-          public void onEvent(ProviderStreamEvent ignoredEvent, ProviderStream ignoredStream) {}
+          public void onEvent(ProviderStreamEvent ignoredEvent) {}
 
           @Override
-          public void onProtocolEvent(ProviderProtocolEvent protocolEvent, ProviderStream ignored) {
+          public void onProtocolEvent(ProviderProtocolEvent protocolEvent) {
             received.add(protocolEvent);
           }
 
           @Override
-          public void onComplete(
-              ProviderCompletion ignoredCompletion, ProviderStream ignoredStream) {}
+          public void onComplete(ProviderCompletion ignoredCompletion) {}
 
           @Override
-          public void onError(ProviderException error, ProviderStream ignoredStream) {}
+          public void onError(ProviderException error) {}
         };
-    explicit.onProtocolEvent(event, stream);
+    explicit.onProtocolEvent(event);
 
     assertEquals(List.of(event), received);
   }
@@ -230,19 +226,6 @@ class ProviderContractTest {
                 null,
                 "[{\"cached_tokens\":1}]")
             .rawUsageJson());
-  }
-
-  /** 取消控制的最小桩实现；原生事件回调只观察事件本身，不需要真实流状态。 */
-  private static ProviderStream stubStream() {
-    return new ProviderStream() {
-      @Override
-      public void cancel() {}
-
-      @Override
-      public boolean isCancelled() {
-        return false;
-      }
-    };
   }
 
   private static ModelCost zeroCost() {

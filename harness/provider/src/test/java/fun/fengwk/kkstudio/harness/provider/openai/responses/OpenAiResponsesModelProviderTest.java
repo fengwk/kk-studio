@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -11,8 +12,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.provider.transport.HttpOpenMetadata;
-import fun.fengwk.kkstudio.harness.provider.transport.HttpSseCallback;
 import fun.fengwk.kkstudio.harness.provider.transport.HttpSseLimits;
 import fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransport;
 import fun.fengwk.kkstudio.harness.provider.transport.ServerSentEvent;
@@ -34,7 +33,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderProtocolEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
@@ -46,31 +44,33 @@ import java.net.http.HttpRequest;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Predicate;
 
 /** 验证 OpenAI Responses ModelProvider 端到端请求装配、鉴权注入与流生命周期交互。 */
 class OpenAiResponsesModelProviderTest {
 
-  private static final ProviderStream INERT_STREAM =
-      new ProviderStream() {
-        @Override
-        public void cancel() {}
-
-        @Override
-        public boolean isCancelled() {
-          return false;
-        }
-      };
-
   @FunctionalInterface
   private interface TransportAction {
-    void execute(HttpRequest request, HttpSseCallback callback) throws Exception;
+    void execute(HttpRequest request, Frames frames) throws Exception;
+  }
+
+  /** 在调用线程上逐帧驱动适配器：onEvent 交付一帧，onFailure 以传输失败结束，onComplete 无动作（返回即流结束）。 */
+  private record Frames(Predicate<ServerSentEvent> sink) {
+    void onEvent(ServerSentEvent event) {
+      sink.test(event);
+    }
+
+    void onComplete() {}
+
+    void onFailure(TransportException error) {
+      throw error;
+    }
   }
 
   private static final class RecordingHandler implements ProviderStreamHandler {
@@ -85,24 +85,24 @@ class OpenAiResponsesModelProviderTest {
     int errorCount;
 
     @Override
-    public void onEvent(ProviderStreamEvent event, ProviderStream stream) {
+    public void onEvent(ProviderStreamEvent event) {
       events.add(event);
     }
 
     @Override
-    public void onProtocolEvent(ProviderProtocolEvent event, ProviderStream stream) {
+    public void onProtocolEvent(ProviderProtocolEvent event) {
       protocolEvents.add(event);
       callbackOrder.add("protocol:" + event.eventType());
     }
 
     @Override
-    public void onComplete(ProviderCompletion completion, ProviderStream stream) {
+    public void onComplete(ProviderCompletion completion) {
       this.completion = completion;
       callbackOrder.add("complete");
     }
 
     @Override
-    public void onError(ProviderException error, ProviderStream stream) {
+    public void onError(ProviderException error) {
       this.error = error;
       errorCount++;
       callbackOrder.add("error");
@@ -134,21 +134,20 @@ class OpenAiResponsesModelProviderTest {
   }
 
   private JdkHttpSseTransport stubTransport(TransportAction action) {
-    return new JdkHttpSseTransport(httpClient, workerExecutor, scheduler) {
+    return new JdkHttpSseTransport(httpClient, scheduler) {
       @Override
-      public ProviderStream stream(
+      public void execute(
           HttpRequest request,
           ModelCallTimeoutPolicy timeoutPolicy,
           HttpSseLimits limits,
-          HttpSseCallback callback) {
+          Predicate<ServerSentEvent> onEvent) {
         try {
-          action.execute(request, callback);
+          action.execute(request, new Frames(onEvent));
         } catch (RuntimeException exception) {
           throw exception;
         } catch (Exception exception) {
           throw new RuntimeException(exception);
         }
-        return INERT_STREAM;
       }
     };
   }
@@ -189,9 +188,7 @@ class OpenAiResponsesModelProviderTest {
     assertEquals(ProviderType.OPENAI_RESPONSES, adapter.providerType());
 
     ModelProvider provider = adapter.create(createDescriptor());
-    ProviderStream stream = provider.stream(createRequest(), new RecordingHandler());
-
-    assertNotNull(stream);
+    provider.stream(createRequest(), new RecordingHandler());
     HttpRequest req = capturedRequest.get();
     assertNotNull(req);
     assertEquals("POST", req.method());
@@ -223,7 +220,6 @@ class OpenAiResponsesModelProviderTest {
     JdkHttpSseTransport transport =
         stubTransport(
             (req, cb) -> {
-              cb.onOpen(new HttpOpenMetadata(200, Map.of()));
               cb.onEvent(
                   new ServerSentEvent(
                       null, "{\"type\":\"response.created\",\"response\":{\"id\":\"resp_life\"}}"));
@@ -263,7 +259,6 @@ class OpenAiResponsesModelProviderTest {
     JdkHttpSseTransport transport =
         stubTransport(
             (req, cb) -> {
-              cb.onOpen(new HttpOpenMetadata(200, Map.of()));
               cb.onEvent(new ServerSentEvent("response.created", created));
               cb.onEvent(new ServerSentEvent("response.web_search_call.searching", unknownEvent));
               cb.onEvent(new ServerSentEvent(null, unknownEvent));
@@ -404,7 +399,6 @@ class OpenAiResponsesModelProviderTest {
     JdkHttpSseTransport transport =
         stubTransport(
             (req, cb) -> {
-              cb.onOpen(new HttpOpenMetadata(200, Map.of()));
               cb.onComplete();
             });
 
@@ -501,9 +495,7 @@ class OpenAiResponsesModelProviderTest {
             ProviderCacheControl.none());
 
     RecordingHandler handler = new RecordingHandler();
-    ProviderStream stream = provider.stream(invalidRequest, handler);
-
-    assertNotNull(stream);
+    provider.stream(invalidRequest, handler);
     assertNotNull(handler.error);
     assertEquals(ProviderErrorKind.INVALID_REQUEST, handler.error.kind());
   }
@@ -517,9 +509,7 @@ class OpenAiResponsesModelProviderTest {
     ModelProvider provider = adapter.create(createDescriptor());
 
     RecordingHandler handler = new RecordingHandler();
-    ProviderStream stream = provider.stream(createRequest(), handler);
-
-    assertNotNull(stream);
+    provider.stream(createRequest(), handler);
     assertNotNull(handler.error);
     assertEquals(ProviderErrorKind.INVALID_REQUEST, handler.error.kind());
     assertFalse(handler.error.getMessage().contains("sk-secret-key"));
@@ -536,9 +526,7 @@ class OpenAiResponsesModelProviderTest {
     ModelProvider provider = adapter.create(createDescriptor());
     RecordingHandler handler = new RecordingHandler();
 
-    ProviderStream stream = provider.stream(createRequest(), handler);
-
-    assertNotNull(stream);
+    provider.stream(createRequest(), handler);
     assertNotNull(handler.error);
     assertEquals(ProviderErrorKind.INVALID_RESPONSE, handler.error.kind());
   }
@@ -560,9 +548,7 @@ class OpenAiResponsesModelProviderTest {
     ModelProvider provider = adapter.create(createDescriptor());
     RecordingHandler handler = new RecordingHandler();
 
-    ProviderStream stream = provider.stream(createRequest(), handler);
-
-    assertNotNull(stream);
+    provider.stream(createRequest(), handler);
     assertNotNull(handler.error);
     assertEquals(ProviderErrorKind.INVALID_RESPONSE, handler.error.kind());
   }
@@ -580,27 +566,10 @@ class OpenAiResponsesModelProviderTest {
     ModelProvider provider = adapter.create(createDescriptor());
     RecordingHandler handler = new RecordingHandler();
 
-    ProviderStream stream = provider.stream(createRequest(), handler);
-
-    assertNotNull(stream);
+    provider.stream(createRequest(), handler);
     assertNotNull(handler.error);
     assertEquals(ProviderErrorKind.TRANSIENT, handler.error.kind());
     assertEquals("OpenAI Responses I/O error", handler.error.getMessage());
-
-    JdkHttpSseTransport rejectedTransport =
-        stubTransport(
-            (req, cb) -> {
-              throw new TransportException(TransportErrorKind.EXECUTOR_REJECTED, "rejected");
-            });
-    RecordingHandler rejectedHandler = new RecordingHandler();
-    ProviderStream rejectedStream =
-        new OpenAiResponsesProviderAdapter(rejectedTransport, "key")
-            .create(createDescriptor()).stream(createRequest(), rejectedHandler);
-    assertNotNull(rejectedStream);
-    assertEquals(1, rejectedHandler.errorCount);
-    assertEquals(ProviderErrorKind.TRANSIENT, rejectedHandler.error.kind());
-    assertEquals(
-        "OpenAI Responses executor rejected the request", rejectedHandler.error.getMessage());
 
     // 同时验证当 TransportErrorKind 为 CANCELLED 时，映射为 null 且不投递错误
     JdkHttpSseTransport cancelledTransport =
@@ -618,81 +587,62 @@ class OpenAiResponsesModelProviderTest {
     assertNull(cancelledHandler.error);
   }
 
-  /** 验证 transport.stream 同步抛出未知运行时异常时，不透传敏感堆栈与原因，对外统一抛出脱敏的 RuntimeException。 */
+  /** 验证传输抛出的未分类运行时异常原样传播（由上层按不确定终态收敛且只记录异常类型）。 */
   @Test
-  void test_synchronousUnexpectedRuntimeExceptionSanitization() {
-    JdkHttpSseTransport failingTransport =
-        stubTransport(
-            (req, cb) -> {
-              throw new IllegalStateException(
-                  "fatal crash with sensitive credential token=sk-12345");
-            });
-
-    OpenAiResponsesProviderAdapter adapter =
-        new OpenAiResponsesProviderAdapter(failingTransport, "key");
-    ModelProvider provider = adapter.create(createDescriptor());
-
-    RuntimeException ex =
-        assertThrows(
-            RuntimeException.class, () -> provider.stream(createRequest(), new RecordingHandler()));
-
-    assertEquals("transport execution failed", ex.getMessage());
-    assertNull(ex.getCause());
-  }
-
-  /** 验证异步 onFailure 回调中 TransportErrorKind.CANCELLED 时映射为 null，不向 handler 投递错误。 */
-  @Test
-  void test_asyncTransportCancelledCallbackSilenced() {
-    AtomicReference<HttpSseCallback> callbackRef = new AtomicReference<>();
-    JdkHttpSseTransport transport = stubTransport((req, cb) -> callbackRef.set(cb));
-
-    OpenAiResponsesProviderAdapter adapter = new OpenAiResponsesProviderAdapter(transport, "key");
-    ModelProvider provider = adapter.create(createDescriptor());
-    RecordingHandler handler = new RecordingHandler();
-
-    provider.stream(createRequest(), handler);
-
-    assertNotNull(callbackRef.get());
-    callbackRef.get().onFailure(new TransportException(TransportErrorKind.CANCELLED, "cancelled"));
-    assertNull(handler.error);
-  }
-
-  /** 测试意图：用户 handler 抛错后 bridge 已终态，CALLBACK_FAILED 不得再次回调 onError。 */
-  @Test
-  void test_handlerFailureDoesNotReenterOnError() {
-    AtomicReference<HttpSseCallback> callbackRef = new AtomicReference<>();
-    JdkHttpSseTransport transport = stubTransport((req, cb) -> callbackRef.set(cb));
+  void test_unclassifiedTransportExceptionPropagates() {
+    IllegalStateException crash = new IllegalStateException("fatal crash");
     ModelProvider provider =
-        new OpenAiResponsesProviderAdapter(transport, "key").create(createDescriptor());
+        new OpenAiResponsesProviderAdapter(
+                stubTransport(
+                    (req, frames) -> {
+                      throw crash;
+                    }),
+                "key")
+            .create(createDescriptor());
+
+    assertSame(
+        crash,
+        assertThrows(
+            IllegalStateException.class,
+            () -> provider.stream(createRequest(), new RecordingHandler())));
+  }
+
+  /** 测试意图：用户 handler 抛错后流已封口：异常传播给调用方，之后的传输失败不再回调 onError。 */
+  @Test
+  void test_handlerFailureIsTerminalAndPropagates() {
+    ModelProvider provider =
+        new OpenAiResponsesProviderAdapter(
+                stubTransport(
+                    (req, frames) -> {
+                      frames.onEvent(
+                          new ServerSentEvent(
+                              "response.output_text.delta",
+                              "{\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}"));
+                      frames.onFailure(new TransportException(TransportErrorKind.IO, "late"));
+                    }),
+                "key")
+            .create(createDescriptor());
     AtomicReference<Integer> errors = new AtomicReference<>(0);
-    provider.stream(
-        createRequest(),
-        new ProviderStreamHandler() {
-          @Override
-          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {
-            throw new IllegalStateException("user handler failed");
-          }
 
-          @Override
-          public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
-
-          @Override
-          public void onError(ProviderException error, ProviderStream stream) {
-            errors.set(errors.get() + 1);
-          }
-        });
     assertThrows(
         IllegalStateException.class,
         () ->
-            callbackRef
-                .get()
-                .onEvent(
-                    new ServerSentEvent(
-                        "response.output_text.delta",
-                        "{\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}")));
-    callbackRef
-        .get()
-        .onFailure(new TransportException(TransportErrorKind.CALLBACK_FAILED, "callback"));
+            provider.stream(
+                createRequest(),
+                new ProviderStreamHandler() {
+                  @Override
+                  public void onEvent(ProviderStreamEvent event) {
+                    throw new IllegalStateException("user handler failed");
+                  }
+
+                  @Override
+                  public void onComplete(ProviderCompletion completion) {}
+
+                  @Override
+                  public void onError(ProviderException error) {
+                    errors.set(errors.get() + 1);
+                  }
+                }));
     assertEquals(0, errors.get());
   }
 }

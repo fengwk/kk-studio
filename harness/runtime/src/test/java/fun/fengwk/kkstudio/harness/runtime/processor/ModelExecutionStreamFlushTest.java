@@ -69,13 +69,11 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
@@ -103,8 +101,6 @@ class ModelExecutionStreamFlushTest {
       new InvocationRetryPolicy(
           0, InvocationRetryBackoffStrategy.FIXED, Duration.ofSeconds(5), Duration.ofSeconds(5));
 
-  private static final long CHECKPOINT_TIMER_MILLIS = Duration.ofMinutes(10).toMillis();
-
   private final List<ExecutorService> executorsToClose = new CopyOnWriteArrayList<>();
 
   @AfterEach
@@ -122,7 +118,7 @@ class ModelExecutionStreamFlushTest {
     Fixture fixture = createFixture(flushConfig, NO_RETRY);
     fixture.start();
 
-    ModelGateway.Listener listener = fixture.listener();
+    Driver listener = fixture.listener();
     listener.onEvent(new ProviderStreamEvent.TextDelta("hello "));
     listener.onEvent(new ProviderStreamEvent.TextDelta("world"));
     assertTrue(fixture.sink.deltas().isEmpty(), "deltas below the batch bound wait for the window");
@@ -143,7 +139,7 @@ class ModelExecutionStreamFlushTest {
     assertTrue(fixture.sink.checkpoints().isEmpty());
 
     // checkpoint 独立落库一次：单事务单 UPDATE，提交后才发布事件
-    fixture.execution.deliverCheckpoint(0, false);
+    fixture.execution.requestCheckpoint(1);
     assertEquals(1, fixture.store.modelInvocationUpdateCount());
     ModelInvocation committed = fixture.currentModel();
     assertEquals(4, committed.streamCheckpoint().sequence());
@@ -191,72 +187,14 @@ class ModelExecutionStreamFlushTest {
         assertEquals(i + 1, deltas.get(i).sequence());
       }
 
-      fixture.execution.deliverCheckpoint(0, false);
+      fixture.execution.requestCheckpoint(1);
       assertEquals(1, fixture.store.modelInvocationUpdateCount());
       assertEquals(1, fixture.store.transactionCount());
       assertEquals(1, fixture.store.modelInvocationLockCount());
       assertEquals(1, fixture.store.claimedWorkLockCount());
       assertEquals(eventCount, fixture.currentModel().streamCheckpoint().text().length());
-      fixture.processor.close();
+      fixture.execution.abandon();
     }
-  }
-
-  /**
-   * 意图：验证单 delta 即使 Provider 暂停也必然由推送定时器发出；后续 delta 不重置首事件 deadline（不 debounce）； 推送与追帧 checkpoint
-   * 都由 flushExecutor 执行而非 scheduler；过期代际触发为 no-op。
-   */
-  @Test
-  void singleDeltaTimerPushesEventuallyAndSubsequentDeltasDoNotDebounceFirstDeadline()
-      throws Exception {
-    ModelStreamConfig flushConfig =
-        new ModelStreamConfig(Duration.ofMillis(100), 10, 1024 * 1024, Duration.ofMinutes(10));
-
-    AtomicInteger scheduleCount = new AtomicInteger();
-    AtomicReference<Runnable> capturedTask = new AtomicReference<>();
-    ScheduledExecutorService controlledScheduler =
-        createControlledScheduler(scheduleCount, capturedTask);
-
-    AtomicReference<String> dbUpdateThread = new AtomicReference<>();
-    AtomicReference<String> publishThread = new AtomicReference<>();
-    ExecutorService flushExecutor =
-        Executors.newSingleThreadExecutor(r -> new Thread(r, "flush-worker-thread"));
-    executorsToClose.add(flushExecutor);
-
-    Fixture fixture =
-        createFixture(
-            flushConfig,
-            NO_RETRY,
-            controlledScheduler,
-            flushExecutor,
-            dbUpdateThread,
-            publishThread);
-    fixture.start();
-
-    ModelGateway.Listener listener = fixture.listener();
-    listener.onEvent(new ProviderStreamEvent.TextDelta("first "));
-    assertEquals(1, scheduleCount.get(), "push timer must be scheduled for the first delta");
-    assertNotNull(capturedTask.get());
-
-    listener.onEvent(new ProviderStreamEvent.TextDelta("second"));
-    assertEquals(1, scheduleCount.get(), "subsequent delta must not debounce or reschedule timer");
-    assertTrue(fixture.sink.deltas().isEmpty());
-
-    // scheduler 线程只投递，推送在 flushExecutor 上完成
-    capturedTask.get().run();
-    await(() -> fixture.sink.deltas().size() == 2, Duration.ofSeconds(2));
-    assertEquals("flush-worker-thread", publishThread.get());
-    assertEquals(0, fixture.store.modelInvocationUpdateCount(), "push never persists");
-
-    // 追帧请求：checkpoint 同样在 flushExecutor 上落库
-    assertTrue(fixture.execution.requestCheckpoint(1));
-    await(() -> fixture.store.modelInvocationUpdateCount() == 1, Duration.ofSeconds(2));
-    assertEquals("flush-worker-thread", dbUpdateThread.get());
-    assertEquals("first second", fixture.currentModel().streamCheckpoint().text());
-    assertEquals(2, fixture.currentModel().streamCheckpoint().sequence());
-
-    // 过期代际的推送定时器必须直接 no-op
-    fixture.execution.deliverPush(0);
-    assertEquals(2, fixture.sink.deltas().size(), "stale generation must not publish");
   }
 
   /** 意图：验证事件数达到配置阈值时立即推送。 */
@@ -267,7 +205,7 @@ class ModelExecutionStreamFlushTest {
     Fixture fixture = createFixture(flushConfig, NO_RETRY);
     fixture.start();
 
-    ModelGateway.Listener listener = fixture.listener();
+    Driver listener = fixture.listener();
     listener.onEvent(new ProviderStreamEvent.TextDelta("e1"));
     listener.onEvent(new ProviderStreamEvent.TextDelta("e2"));
     assertEquals(0, fixture.store.modelInvocationUpdateCount());
@@ -287,7 +225,7 @@ class ModelExecutionStreamFlushTest {
     Fixture fixture = createFixture(flushConfig, NO_RETRY);
     fixture.start();
 
-    ModelGateway.Listener listener = fixture.listener();
+    Driver listener = fixture.listener();
     listener.onEvent(new ProviderStreamEvent.TextDelta("1234567890")); // 10 bytes
     listener.onEvent(new ProviderStreamEvent.TextDelta("1234567890")); // 10 bytes (累计 20)
     assertEquals(0, fixture.store.modelInvocationUpdateCount());
@@ -310,7 +248,7 @@ class ModelExecutionStreamFlushTest {
     Fixture fixture = createFixture(flushConfig, NO_RETRY, requestWithTool());
     fixture.start();
 
-    ModelGateway.Listener listener = fixture.listener();
+    Driver listener = fixture.listener();
     listener.onEvent(
         new ProviderStreamEvent.ToolCallDelta(0, "call_1", "bash", "{\"cmd\":\"ls\"}"));
     listener.onEvent(new ProviderStreamEvent.ToolCallDelta(0, null, null, "\n"));
@@ -326,7 +264,7 @@ class ModelExecutionStreamFlushTest {
         fixture.currentModel().streamCheckpoint(), "pure tool batch must not create checkpoint");
 
     // 追帧请求在没有任何 safe delta 时不写库，也没有可答复的 checkpoint 事件
-    fixture.execution.deliverCheckpoint(0, true);
+    fixture.execution.requestCheckpoint(1);
     assertEquals(0, fixture.store.transactionCount());
     assertTrue(fixture.sink.checkpoints().isEmpty());
   }
@@ -339,7 +277,7 @@ class ModelExecutionStreamFlushTest {
     Fixture fixture = createFixture(flushConfig, NO_RETRY);
     fixture.start();
 
-    ModelGateway.Listener listener = fixture.listener();
+    Driver listener = fixture.listener();
     listener.onEvent(new ProviderStreamEvent.TextDelta("small")); // 5 bytes < 20
     assertEquals(0, fixture.store.modelInvocationUpdateCount());
     assertTrue(fixture.sink.deltas().isEmpty());
@@ -363,7 +301,7 @@ class ModelExecutionStreamFlushTest {
     Fixture fixture = createFixture(flushConfig, NO_RETRY, requestWithTool());
     fixture.start();
 
-    ModelGateway.Listener listener = fixture.listener();
+    Driver listener = fixture.listener();
     listener.onEvent(new ProviderStreamEvent.TextDelta("buffered "));
     listener.onEvent(new ProviderStreamEvent.ThinkingDelta("thinking "));
 
@@ -470,76 +408,6 @@ class ModelExecutionStreamFlushTest {
   }
 
   /**
-   * 意图：验证单 drain owner 下并发 flush 与 callback / terminal 的提交后发布不会乱序： 用 CountDownLatch 阻塞 flush 的
-   * post-commit publish，在此期间并发调用 terminal， 直接证明同一 drain ownership 覆盖 post-commit publish，终态提交绝不可能抢在
-   * flush publish 之前完成。
-   */
-  @Test
-  void concurrentPushAndTerminalStrictlyOrderedByDrainOwner() throws Exception {
-    ModelStreamConfig flushConfig =
-        new ModelStreamConfig(Duration.ofMinutes(1), 1, 1024 * 1024, Duration.ofMinutes(10));
-
-    CountDownLatch sinkReached = new CountDownLatch(1);
-    CountDownLatch sinkRelease = new CountDownLatch(1);
-
-    Fixture fixture = createFixture(flushConfig, NO_RETRY);
-    fixture.sink.blockingHook =
-        delta -> {
-          if (delta.sequence() == 1) {
-            sinkReached.countDown();
-            try {
-              sinkRelease.await();
-            } catch (InterruptedException ignored) {
-            }
-          }
-        };
-    fixture.start();
-
-    // 线程 1 发送 safe delta（达到 maxBatchEvents=1 立即推送，在 publish 阶段阻塞）
-    Thread thread1 =
-        Thread.ofPlatform()
-            .start(() -> fixture.listener().onEvent(new ProviderStreamEvent.TextDelta("hello ")));
-
-    assertTrue(sinkReached.await(5, TimeUnit.SECONDS), "sink must be reached by thread1");
-
-    // 线程 2 在此时发起 terminal 提交
-    AtomicBoolean thread2Finished = new AtomicBoolean();
-    Thread thread2 =
-        Thread.ofPlatform()
-            .start(
-                () -> {
-                  fixture.listener().onSucceeded(response("hello world"));
-                  thread2Finished.set(true);
-                });
-
-    // 等待一小段让线程 2 尝试获取锁
-    Thread.sleep(50);
-
-    // 断言：线程 1 持有 drainLock 正在 publish，线程 2 被完全挡在外面：terminal 绝未提交！
-    assertEquals(
-        0,
-        fixture.store.modelInvocationUpdateCount(),
-        "terminal must not commit while drainLock is held for publish");
-    assertEquals(ModelInvocationStatus.RUNNING, fixture.currentModel().status());
-    assertFalse(thread2Finished.get(), "thread2 must be blocked waiting for drainLock");
-
-    // 放行线程 1 的 publish
-    sinkRelease.countDown();
-    thread1.join(5000);
-    thread2.join(5000);
-
-    // 线程 2 随后获得 drainLock 完成 terminal 提交与发布
-    assertEquals(1, fixture.store.modelInvocationUpdateCount());
-    assertEquals(ModelInvocationStatus.SUCCEEDED, fixture.currentModel().status());
-
-    // 验证发布顺序严格单调：seq=1 先于 seq=2
-    List<RealtimeEvent.ModelDelta> deltas = fixture.sink.deltas();
-    assertEquals(2, deltas.size());
-    assertEquals(1, deltas.get(0).sequence());
-    assertEquals(2, deltas.get(1).sequence());
-  }
-
-  /**
    * 意图：验证 Claim Loss 竞态下（以合法锁序删除 MODEL work），检测发生在 checkpoint 提交围栏： 围栏失败即 abandon，不发布 checkpoint
    * 事件，尚未推送的缓冲被丢弃，此后不再发布。
    */
@@ -564,7 +432,7 @@ class ModelExecutionStreamFlushTest {
               return null;
             });
 
-    fixture.execution.deliverCheckpoint(0, true);
+    fixture.execution.requestCheckpoint(1);
 
     assertTrue(fixture.execution.abandoned(), "execution must be abandoned on claim loss");
     assertTrue(fixture.sink.checkpoints().isEmpty(), "no checkpoint event for a failed fence");
@@ -580,7 +448,7 @@ class ModelExecutionStreamFlushTest {
    */
   @Test
   void leaseLossBeforeCheckpointAndTerminalNeverPublishesOrWrites() {
-    assertLeaseLossBoundary("checkpoint", fixture -> fixture.execution.deliverCheckpoint(0, true));
+    assertLeaseLossBoundary("checkpoint", fixture -> fixture.execution.requestCheckpoint(1));
     assertLeaseLossBoundary(
         "terminal", fixture -> fixture.listener().onSucceeded(response("first")));
   }
@@ -591,8 +459,7 @@ class ModelExecutionStreamFlushTest {
    */
   @Test
   void attemptChangeBeforeCheckpointAndTerminalNeverPublishesOrWrites() {
-    assertAttemptChangeBoundary(
-        "checkpoint", fixture -> fixture.execution.deliverCheckpoint(0, true));
+    assertAttemptChangeBoundary("checkpoint", fixture -> fixture.execution.requestCheckpoint(1));
     assertAttemptChangeBoundary(
         "terminal", fixture -> fixture.listener().onSucceeded(response("first")));
   }
@@ -608,7 +475,7 @@ class ModelExecutionStreamFlushTest {
     fixture.listener().onEvent(delta("first"));
     assertEquals(0, fixture.store.transactionCount(), "buffered delta must not touch the store");
 
-    fixture.processor.cancel(fixture.invocationId);
+    fixture.execution.abandon();
     fixture.store.resetUpdateCount();
 
     // 取消后到达的容量边界与后续 delta 都必须 no-op
@@ -681,7 +548,7 @@ class ModelExecutionStreamFlushTest {
     assertEquals(2, deltas.get(1).sequence());
 
     // durable checkpoint 不受投影失败影响
-    fixture.execution.deliverCheckpoint(0, true);
+    fixture.execution.requestCheckpoint(1);
     assertEquals(4, fixture.currentModel().streamCheckpoint().sequence());
 
     // 后续 terminal 仍必须成功收敛为 durable SUCCEEDED
@@ -730,7 +597,6 @@ class ModelExecutionStreamFlushTest {
         ModelInvocationStatus.RUNNING,
         fixture.currentModel().status(),
         scenario + ": durable row must stay RUNNING for lease recovery");
-    assertTrue(fixture.handle.isCancelled(), scenario + ": handle must be cancelled");
   }
 
   /** 缓冲 1 条 delta（未达 maxBatchEvents=2、窗口 100ms 未到期）的 fixture。 */
@@ -752,7 +618,7 @@ class ModelExecutionStreamFlushTest {
 
   /**
    * 以合法状态机把 durable 行推进到 RUNNING attempt=2，模拟同一 invocation 已被下一次 attempt 接管： RUNNING(1) -> READY(1,
-   * retry) -> DISPATCHING -> RUNNING(2)。
+   * retry) -> RUNNING(2)。
    *
    * <p>Store 的 {@code updateModelInvocation} 始终以**已存储行**为基准调用 {@code validateTransition}，
    * 因此每一步合法转换都必须单独 update 落地，不能只把局部表达式拆开。
@@ -770,8 +636,6 @@ class ModelExecutionStreamFlushTest {
               model =
                   model.retryReady(new ModelAttemptFailure(1, 0L, "", "", error, NOW, NOW), NOW);
               tx.updateModelInvocation(model);
-              model = model.beginDispatch(NOW);
-              tx.updateModelInvocation(model);
               model = model.markRunning(NOW);
               tx.updateModelInvocation(model);
               return null;
@@ -780,130 +644,6 @@ class ModelExecutionStreamFlushTest {
 
   private static ProviderStreamEvent delta(String text) {
     return new ProviderStreamEvent.TextDelta(text);
-  }
-
-  /**
-   * 意图：验证批次定时器遭遇 scheduler 拒绝时，execution 安全收敛为 abandoned 且 handle 被取消， cancel 绝不在持 monitor 状态下触发死锁。
-   */
-  @Test
-  void batchTimerSchedulerRejectionConvergesToAbandonedWithoutHoldingMonitor() {
-    ModelStreamConfig flushConfig =
-        new ModelStreamConfig(Duration.ofMinutes(1), 10, 1024 * 1024, Duration.ofMinutes(10));
-    ScheduledExecutorService delegate = Executors.newSingleThreadScheduledExecutor();
-    executorsToClose.add(delegate);
-
-    ScheduledExecutorService rejectingBatchScheduler =
-        (ScheduledExecutorService)
-            Proxy.newProxyInstance(
-                ScheduledExecutorService.class.getClassLoader(),
-                new Class<?>[] {ScheduledExecutorService.class},
-                (proxy, method, args) -> {
-                  if ("schedule".equals(method.getName())
-                      && args != null
-                      && args.length == 3
-                      && args[1] instanceof Long delay
-                      && delay.longValue() == flushConfig.pushWindow().toMillis()) {
-                    throw new RejectedExecutionException("batch timer queue full");
-                  }
-                  return method.invoke(delegate, args);
-                });
-
-    Fixture fixture = createFixture(flushConfig, NO_RETRY, rejectingBatchScheduler, Runnable::run);
-    fixture.start();
-
-    fixture.listener().onEvent(new ProviderStreamEvent.TextDelta("trigger batch schedule"));
-    assertTrue(fixture.execution.abandoned(), "scheduler rejection must converge to abandoned");
-    assertTrue(fixture.handle.isCancelled(), "handle must be cancelled upon scheduler rejection");
-  }
-
-  /** 意图：验证批次定时器执行时如果 flushExecutor 拒绝投递，execution 安全收敛为 abandoned 且 handle 被取消。 */
-  @Test
-  void batchTimerFlushExecutorRejectionConvergesToAbandoned() {
-    ModelStreamConfig flushConfig =
-        new ModelStreamConfig(Duration.ofMillis(100), 10, 1024 * 1024, Duration.ofMinutes(10));
-    Executor rejectingFlushExecutor =
-        task -> {
-          throw new RejectedExecutionException("flushExecutor queue is full");
-        };
-    AtomicReference<Runnable> capturedTask = new AtomicReference<>();
-    ScheduledExecutorService controlledScheduler =
-        createControlledScheduler(new AtomicInteger(), capturedTask);
-
-    Fixture fixture =
-        createFixture(flushConfig, NO_RETRY, controlledScheduler, rejectingFlushExecutor);
-    fixture.start();
-
-    fixture.listener().onEvent(new ProviderStreamEvent.TextDelta("start batch"));
-    assertNotNull(capturedTask.get(), "timer task must be captured");
-
-    // 模拟 scheduler 触发任务：调用 flushExecutor.execute 抛出 rejection
-    capturedTask.get().run();
-    assertTrue(fixture.execution.abandoned(), "flushExecutor rejection must converge to abandoned");
-    assertTrue(
-        fixture.handle.isCancelled(), "handle must be cancelled upon flushExecutor rejection");
-  }
-
-  /** 意图：验证 gate buffer 达到 maxEvents 容积时，合法 terminal 信号绝不被丢弃或误拒， 并在后续 activate 打开门控后成功落地终态。 */
-  @Test
-  void gateBufferTerminalAtCapacityIsAcceptedAndProcessedOnActivation() {
-    ModelStreamConfig flushConfig =
-        new ModelStreamConfig(Duration.ofMinutes(1), 2, 1024 * 1024, Duration.ofMinutes(10));
-    CountingStore store = new CountingStore(new InMemoryHarnessStore());
-    Baseline baseline = seedBaseline(store.delegate(), NOW);
-    UUID invocationId = seedInvocation(store.delegate(), baseline, requestSpec(), NOW);
-    RecordingSink sink = new RecordingSink();
-    ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
-    executorsToClose.add(scheduler);
-
-    ClaimedWork claim = claim(store.delegate(), invocationId, NOW);
-    ModelExecution execution =
-        new ModelExecution(
-            store,
-            sink,
-            claim,
-            baseline.threadId(),
-            1,
-            false,
-            List.of(),
-            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, flushConfig),
-            "test-provider",
-            Clock.fixed(NOW, ZoneOffset.UTC),
-            scheduler,
-            Runnable::run,
-            Runnable::run,
-            e -> {});
-
-    // 填满 maxEvents (2 个事件)
-    execution.onEvent(new ProviderStreamEvent.TextDelta("e1"));
-    execution.onEvent(new ProviderStreamEvent.TextDelta("e2"));
-
-    // 投递 terminal 信号：不能仅因 pending.size() >= maxEvents 而被拒绝！
-    execution.onSucceeded(response("e1e2 completed"));
-
-    // 推进 modelInvocation 到 DISPATCHING 模拟真实流程
-    store
-        .delegate()
-        .transaction(
-            tx -> {
-              tx.lockThread(baseline.threadId());
-              ModelInvocation model = tx.lockModelInvocation(invocationId).orElseThrow();
-              tx.updateModelInvocation(model.beginDispatch(NOW));
-              return null;
-            });
-
-    store.resetUpdateCount();
-    FakeHandle handle = new FakeHandle();
-    // 执行 activate：打开 gate 并成功落地 terminal
-    ProcessResult result = execution.activate(handle);
-    assertEquals(
-        ProcessResult.TERMINATED,
-        result,
-        "terminal at capacity must be processed successfully upon activate");
-    ModelInvocation model =
-        store.delegate().transaction(tx -> tx.findModelInvocation(invocationId)).orElseThrow();
-    assertEquals(ModelInvocationStatus.SUCCEEDED, model.status());
-    // activate 期间共 2 次 update：markRunning(1) + terminal 终态(1)；重放的 delta 只推送不落库
-    assertEquals(2, store.modelInvocationUpdateCount(), "markRunning + terminal = 2 updates");
   }
 
   /**
@@ -922,11 +662,10 @@ class ModelExecutionStreamFlushTest {
 
     fixture.store.updateInvocationFailure =
         new RuntimeException("simulated db failure during checkpoint");
-    fixture.execution.deliverCheckpoint(0, true);
+    fixture.execution.requestCheckpoint(1);
 
     assertTrue(
         fixture.execution.abandoned(), "execution must be abandoned upon checkpoint failure");
-    assertTrue(fixture.handle.isCancelled(), "handle must be cancelled upon checkpoint failure");
 
     ModelInvocation model = fixture.currentModel();
     assertEquals(
@@ -953,43 +692,6 @@ class ModelExecutionStreamFlushTest {
   }
 
   /**
-   * 意图：验证 checkpoint 定时器触发的持久化遭遇 Store 失败时，execution 安全收敛为 abandoned 且 handle 取消，绝不写
-   * FAILED/retry，保持 durable RUNNING+claimed 供 lease recovery 收敛。
-   */
-  @Test
-  void timerCheckpointStoreFailureAbandonsLocalExecutionWithoutMaskingAsInvalidResponse() {
-    ModelStreamConfig flushConfig =
-        new ModelStreamConfig(Duration.ofMillis(100), 10, 1024 * 1024, Duration.ofMinutes(10));
-    Fixture fixture = createFixture(flushConfig, NO_RETRY);
-    fixture.start();
-
-    fixture.listener().onEvent(new ProviderStreamEvent.TextDelta("e1"));
-    fixture.store.updateInvocationFailure =
-        new RuntimeException("simulated db failure during timer checkpoint");
-
-    // 首个 safe delta 武装的 checkpoint 定时器代际为 0
-    fixture.execution.deliverCheckpoint(0, false);
-
-    assertTrue(fixture.execution.abandoned());
-    assertTrue(fixture.handle.isCancelled());
-    ModelInvocation model = fixture.currentModel();
-    assertEquals(ModelInvocationStatus.RUNNING, model.status(), "model must remain RUNNING");
-    assertEquals(1, model.attempt());
-    assertNull(model.error());
-    assertTrue(model.failedAttempts().isEmpty());
-    Work work =
-        fixture
-            .store
-            .delegate()
-            .transaction(
-                tx -> tx.findWork(new WorkTarget(WorkTargetType.MODEL, fixture.invocationId)))
-            .orElseThrow();
-    assertNotNull(work.leaseToken());
-    assertEquals(fixture.execution.claim().leaseToken(), work.leaseToken());
-    assertTrue(fixture.sink.checkpoints().isEmpty());
-  }
-
-  /**
    * 意图：验证 Provider stream event 自身非法（如 tool call 标识冲突）时， 仍然正确收敛为 INVALID_RESPONSE
    * 终态（或重试），不与基础设施失败混淆。
    */
@@ -1000,7 +702,7 @@ class ModelExecutionStreamFlushTest {
     Fixture fixture = createFixture(flushConfig, NO_RETRY, requestWithTool());
     fixture.start();
 
-    ModelGateway.Listener listener = fixture.listener();
+    Driver listener = fixture.listener();
     listener.onEvent(new ProviderStreamEvent.ToolCallDelta(0, "call_1", "bash", null));
 
     // 发送冲突的 tool call delta（同一 index 不同 call id），导致 accumulator 抛出 IllegalArgumentException
@@ -1027,9 +729,9 @@ class ModelExecutionStreamFlushTest {
     Fixture fixture = createFixture(flushConfig, NO_RETRY);
     fixture.start();
 
-    ModelGateway.Listener listener = fixture.listener();
+    Driver listener = fixture.listener();
     listener.onEvent(new ProviderStreamEvent.TextDelta("hello"));
-    fixture.execution.deliverCheckpoint(0, true);
+    fixture.execution.requestCheckpoint(1);
     assertEquals(1, fixture.store.modelInvocationUpdateCount());
     ModelInvocation modelAfterFirst = fixture.currentModel();
     assertNotNull(modelAfterFirst.streamCheckpoint());
@@ -1037,7 +739,7 @@ class ModelExecutionStreamFlushTest {
     assertEquals("hello", modelAfterFirst.streamCheckpoint().text());
 
     listener.onEvent(new ProviderStreamEvent.TextDelta(""));
-    fixture.execution.deliverCheckpoint(0, true);
+    fixture.execution.requestCheckpoint(1);
     assertEquals(
         1,
         fixture.store.modelInvocationUpdateCount(),
@@ -1077,9 +779,9 @@ class ModelExecutionStreamFlushTest {
     Fixture fixture = createFixture(flushConfig, NO_RETRY);
     fixture.start();
 
-    ModelGateway.Listener listener = fixture.listener();
+    Driver listener = fixture.listener();
     listener.onEvent(new ProviderStreamEvent.TextDelta("hello"));
-    fixture.execution.deliverCheckpoint(0, true);
+    fixture.execution.requestCheckpoint(1);
     assertEquals(1L, fixture.currentModel().streamCheckpoint().sequence());
 
     // 发送空 delta
@@ -1100,823 +802,6 @@ class ModelExecutionStreamFlushTest {
   }
 
   /**
-   * 意图：验证在 handle.activate 同步回调中缓冲非法 Provider event 时， 异常被 ModelExecution 边界隔离，收敛为 INVALID_RESPONSE
-   * terminal，异常不逃出 activate()。
-   */
-  @Test
-  void synchronousActivateBufferedInvalidEventIsIsolatedAndConvergesToInvalidResponse() {
-    ModelStreamConfig flushConfig =
-        new ModelStreamConfig(Duration.ofMinutes(1), 10, 1024 * 1024, Duration.ofMinutes(10));
-    CountingStore store = new CountingStore(new InMemoryHarnessStore());
-    Baseline baseline = seedBaseline(store.delegate(), NOW);
-    UUID invocationId = seedInvocation(store.delegate(), baseline, requestWithTool(), NOW);
-    RecordingSink sink = new RecordingSink();
-    ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
-    executorsToClose.add(scheduler);
-    ClaimedWork claim = claim(store.delegate(), invocationId, NOW);
-
-    store
-        .delegate()
-        .transaction(
-            tx -> {
-              tx.lockThread(baseline.threadId());
-              ModelInvocation model = tx.lockModelInvocation(invocationId).orElseThrow();
-              tx.updateModelInvocation(model.beginDispatch(NOW));
-              return null;
-            });
-
-    ModelExecution[] executionHolder = new ModelExecution[1];
-    ModelGateway.Handle synchronousHandle =
-        new ModelGateway.Handle() {
-          @Override
-          public void activate() {
-            // 在 activate 内部同步投递两个冲突的 tool call 片段
-            executionHolder[0].onEvent(
-                new ProviderStreamEvent.ToolCallDelta(0, "call_1", null, null));
-            executionHolder[0].onEvent(
-                new ProviderStreamEvent.ToolCallDelta(0, "call_2", null, null));
-          }
-
-          @Override
-          public void cancel() {}
-        };
-
-    ModelExecution execution =
-        new ModelExecution(
-            store,
-            sink,
-            claim,
-            baseline.threadId(),
-            1,
-            false,
-            List.of(),
-            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, flushConfig),
-            "test-provider",
-            Clock.fixed(NOW, ZoneOffset.UTC),
-            scheduler,
-            Runnable::run,
-            Runnable::run,
-            e -> {});
-    executionHolder[0] = execution;
-
-    // 执行 activate：异常不得抛出，返回 TERMINATED（NO_RETRY 下转 FAILED）
-    ProcessResult result = execution.activate(synchronousHandle);
-    assertEquals(
-        ProcessResult.TERMINATED,
-        result,
-        "illegal provider event in buffer must converge to TERMINATED");
-    ModelInvocation model =
-        store.delegate().transaction(tx -> tx.findModelInvocation(invocationId)).orElseThrow();
-    assertEquals(ModelInvocationStatus.FAILED, model.status());
-    assertEquals(ProviderErrorKind.INVALID_RESPONSE, model.error().kind());
-  }
-
-  /**
-   * 意图：验证在 handle.activate 同步回调中缓冲 terminal 信号，drain 期间持久化遭遇 DB 失败时， 异常被 ModelExecution 边界隔离，返回
-   * LOST_OWNERSHIP，保持 durable RUNNING。
-   */
-  @Test
-  void synchronousActivateBufferedTerminalStoreFailureIsIsolatedAndReturnsLostOwnership() {
-    ModelStreamConfig flushConfig =
-        new ModelStreamConfig(Duration.ofMinutes(1), 10, 1024 * 1024, Duration.ofMinutes(10));
-    CountingStore store = new CountingStore(new InMemoryHarnessStore());
-    Baseline baseline = seedBaseline(store.delegate(), NOW);
-    UUID invocationId = seedInvocation(store.delegate(), baseline, requestSpec(), NOW);
-    RecordingSink sink = new RecordingSink();
-    ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
-    executorsToClose.add(scheduler);
-    ClaimedWork claim = claim(store.delegate(), invocationId, NOW);
-
-    store
-        .delegate()
-        .transaction(
-            tx -> {
-              tx.lockThread(baseline.threadId());
-              ModelInvocation model = tx.lockModelInvocation(invocationId).orElseThrow();
-              tx.updateModelInvocation(model.beginDispatch(NOW));
-              return null;
-            });
-
-    ModelExecution[] executionHolder = new ModelExecution[1];
-    ModelGateway.Handle synchronousHandle =
-        new ModelGateway.Handle() {
-          @Override
-          public void activate() {
-            // markRunning 已成功执行；在 drain 开始前注入 terminal commit 时的 store 失败
-            store.updateInvocationFailure = new RuntimeException("db error during terminal commit");
-            executionHolder[0].onSucceeded(response("hello"));
-          }
-
-          @Override
-          public void cancel() {}
-        };
-
-    ModelExecution execution =
-        new ModelExecution(
-            store,
-            sink,
-            claim,
-            baseline.threadId(),
-            1,
-            false,
-            List.of(),
-            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, flushConfig),
-            "test-provider",
-            Clock.fixed(NOW, ZoneOffset.UTC),
-            scheduler,
-            Runnable::run,
-            Runnable::run,
-            e -> {});
-    executionHolder[0] = execution;
-
-    // 执行 activate：异常不得逃出，返回 LOST_OWNERSHIP
-    ProcessResult result = execution.activate(synchronousHandle);
-    assertEquals(ProcessResult.LOST_OWNERSHIP, result);
-    assertTrue(execution.abandoned());
-
-    ModelInvocation model =
-        store.delegate().transaction(tx -> tx.findModelInvocation(invocationId)).orElseThrow();
-    assertEquals(ModelInvocationStatus.RUNNING, model.status());
-  }
-
-  /**
-   * 意图：验证 activation gate 的普通 EVENT 缓冲数量严格有界；max+1 属于本地背压失败，保留 RUNNING/claim 供 lease recovery，而
-   * terminal 在容量边界仍可落地。
-   */
-  @Test
-  void gateBufferPendingCapacityMaxPlusOneRejectsOrdinaryEventWhileTerminalIsAccepted() {
-    ModelStreamConfig flushConfig =
-        new ModelStreamConfig(Duration.ofMinutes(1), 2, 1024 * 1024, Duration.ofMinutes(10));
-    Fixture overflow = createFixture(flushConfig, NO_RETRY);
-    AtomicBoolean overflowHandleCancelled = new AtomicBoolean();
-    ModelGateway.Handle overflowingHandle =
-        new ModelGateway.Handle() {
-          @Override
-          public void activate() {
-            overflow.listener().onEvent(new ProviderStreamEvent.TextDelta("e1"));
-            overflow.listener().onEvent(new ProviderStreamEvent.TextDelta("e2"));
-            overflow.listener().onEvent(new ProviderStreamEvent.TextDelta("e3"));
-          }
-
-          @Override
-          public void cancel() {
-            overflowHandleCancelled.set(true);
-          }
-        };
-
-    assertEquals(ProcessResult.LOST_OWNERSHIP, overflow.start(overflowingHandle));
-    assertTrue(overflow.execution.abandoned());
-    assertTrue(overflowHandleCancelled.get());
-    assertEquals(ModelInvocationStatus.RUNNING, overflow.currentModel().status());
-    assertNull(overflow.currentModel().error());
-    assertTrue(overflow.currentModel().failedAttempts().isEmpty());
-    Work overflowWork =
-        overflow
-            .store
-            .delegate()
-            .transaction(
-                tx ->
-                    tx.findWork(new WorkTarget(WorkTargetType.MODEL, overflow.invocationId))
-                        .orElseThrow());
-    assertNotNull(overflowWork.leaseToken());
-    assertFalse(overflow.processor.hasActiveExecution());
-    assertTrue(overflow.sink.deltas().isEmpty());
-
-    CountingStore store = new CountingStore(new InMemoryHarnessStore());
-    RecordingSink sink = new RecordingSink();
-    ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
-    executorsToClose.add(scheduler);
-    Baseline baseline2 = seedBaseline(store.delegate(), NOW.plusSeconds(10));
-    UUID invocationId2 =
-        seedInvocation(store.delegate(), baseline2, requestSpec(), NOW.plusSeconds(10));
-    ClaimedWork claim2 = claim(store.delegate(), invocationId2, NOW.plusSeconds(10));
-    FakeHandle handle2 = new FakeHandle();
-    ModelExecution execution2 =
-        new ModelExecution(
-            store,
-            sink,
-            claim2,
-            baseline2.threadId(),
-            1,
-            false,
-            List.of(),
-            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, flushConfig),
-            "test-provider",
-            Clock.fixed(NOW.plusSeconds(10), ZoneOffset.UTC),
-            scheduler,
-            Runnable::run,
-            Runnable::run,
-            e -> {});
-
-    // 填满 maxEvents (2 个事件)
-    execution2.onEvent(new ProviderStreamEvent.TextDelta("e1"));
-    execution2.onEvent(new ProviderStreamEvent.TextDelta("e2"));
-    assertFalse(execution2.abandoned());
-
-    // 在容量边界投递 terminal 信号：绝不因 pending.size() >= maxEvents 而被拒绝！
-    execution2.onSucceeded(response("e1e2 completed"));
-    assertFalse(execution2.abandoned(), "terminal signal must not be rejected at capacity");
-
-    store
-        .delegate()
-        .transaction(
-            tx -> {
-              tx.lockThread(baseline2.threadId());
-              ModelInvocation model = tx.lockModelInvocation(invocationId2).orElseThrow();
-              tx.updateModelInvocation(model.beginDispatch(NOW.plusSeconds(10)));
-              return null;
-            });
-
-    // activate 后顺利打开门控并成功将 terminal 落地落盘
-    ProcessResult result = execution2.activate(handle2);
-    assertEquals(
-        ProcessResult.TERMINATED, result, "terminal signal must be processed on activation");
-    ModelInvocation finalModel =
-        store.delegate().transaction(tx -> tx.findModelInvocation(invocationId2)).orElseThrow();
-    assertEquals(ModelInvocationStatus.SUCCEEDED, finalModel.status());
-  }
-
-  /**
-   * 意图：验证非法同步 buffered EVENT 触发 INVALID_RESPONSE 收敛时再注入 store failure，异常被 ModelExecution 隔离，返回
-   * LOST_OWNERSHIP，durable 保持 RUNNING。
-   */
-  @Test
-  void synchronousActivateBufferedInvalidEventStoreFailureIsIsolatedAndReturnsLostOwnership() {
-    ModelStreamConfig flushConfig =
-        new ModelStreamConfig(Duration.ofMinutes(1), 10, 1024 * 1024, Duration.ofMinutes(10));
-    CountingStore store = new CountingStore(new InMemoryHarnessStore());
-    Baseline baseline = seedBaseline(store.delegate(), NOW);
-    UUID invocationId = seedInvocation(store.delegate(), baseline, requestSpec(), NOW);
-    RecordingSink sink = new RecordingSink();
-    ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
-    executorsToClose.add(scheduler);
-    ClaimedWork claim = claim(store.delegate(), invocationId, NOW);
-
-    store
-        .delegate()
-        .transaction(
-            tx -> {
-              tx.lockThread(baseline.threadId());
-              ModelInvocation model = tx.lockModelInvocation(invocationId).orElseThrow();
-              tx.updateModelInvocation(model.beginDispatch(NOW));
-              return null;
-            });
-
-    ModelExecution[] executionHolder = new ModelExecution[1];
-    ModelGateway.Handle synchronousHandle =
-        new ModelGateway.Handle() {
-          @Override
-          public void activate() {
-            // markRunning 成功后，注入失败终态持久化时的 store 失败
-            store.updateInvocationFailure =
-                new RuntimeException("db error during failure terminal commit");
-            // 同步投递事件，随后投递前缀冲突的非法 response，触发 INVALID_RESPONSE 收敛
-            executionHolder[0].onEvent(new ProviderStreamEvent.TextDelta("valid"));
-            executionHolder[0].onSucceeded(response("conflicts with valid"));
-          }
-
-          @Override
-          public void cancel() {}
-        };
-
-    ModelExecution execution =
-        new ModelExecution(
-            store,
-            sink,
-            claim,
-            baseline.threadId(),
-            1,
-            false,
-            List.of(),
-            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, flushConfig),
-            "test-provider",
-            Clock.fixed(NOW, ZoneOffset.UTC),
-            scheduler,
-            Runnable::run,
-            Runnable::run,
-            e -> {});
-    executionHolder[0] = execution;
-
-    ProcessResult result = execution.activate(synchronousHandle);
-    assertEquals(ProcessResult.LOST_OWNERSHIP, result);
-    assertTrue(execution.abandoned());
-
-    ModelInvocation model =
-        store.delegate().transaction(tx -> tx.findModelInvocation(invocationId)).orElseThrow();
-    assertEquals(ModelInvocationStatus.RUNNING, model.status());
-    assertNull(model.error());
-  }
-
-  /** 意图：验证 Gateway 激活抛出异常且 UNKNOWN 终态持久化亦失败时，异常在边界被隔离并返回 LOST_OWNERSHIP，durable 保持 RUNNING。 */
-  @Test
-  void activationFailureStoreFailureIsIsolatedAndReturnsLostOwnership() {
-    ModelStreamConfig flushConfig =
-        new ModelStreamConfig(Duration.ofMinutes(1), 10, 1024 * 1024, Duration.ofMinutes(10));
-    CountingStore store = new CountingStore(new InMemoryHarnessStore());
-    Baseline baseline = seedBaseline(store.delegate(), NOW);
-    UUID invocationId = seedInvocation(store.delegate(), baseline, requestSpec(), NOW);
-    RecordingSink sink = new RecordingSink();
-    ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
-    executorsToClose.add(scheduler);
-    ClaimedWork claim = claim(store.delegate(), invocationId, NOW);
-
-    store
-        .delegate()
-        .transaction(
-            tx -> {
-              tx.lockThread(baseline.threadId());
-              ModelInvocation model = tx.lockModelInvocation(invocationId).orElseThrow();
-              tx.updateModelInvocation(model.beginDispatch(NOW));
-              return null;
-            });
-
-    ModelGateway.Handle failingHandle =
-        new ModelGateway.Handle() {
-          @Override
-          public void activate() {
-            // markRunning 成功后，注入持久化 UNKNOWN 失败并抛出激活异常
-            store.updateInvocationFailure = new RuntimeException("db error during UNKNOWN commit");
-            throw new RuntimeException("gateway activation failed");
-          }
-
-          @Override
-          public void cancel() {}
-        };
-
-    ModelExecution execution =
-        new ModelExecution(
-            store,
-            sink,
-            claim,
-            baseline.threadId(),
-            1,
-            false,
-            List.of(),
-            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, flushConfig),
-            "test-provider",
-            Clock.fixed(NOW, ZoneOffset.UTC),
-            scheduler,
-            Runnable::run,
-            Runnable::run,
-            e -> {});
-
-    ProcessResult result = execution.activate(failingHandle);
-    assertEquals(ProcessResult.LOST_OWNERSHIP, result);
-    assertTrue(execution.abandoned());
-
-    ModelInvocation model =
-        store.delegate().transaction(tx -> tx.findModelInvocation(invocationId)).orElseThrow();
-    assertEquals(ModelInvocationStatus.RUNNING, model.status());
-  }
-
-  /**
-   * 意图：验证同步 activate 缓冲普通事件在 drain 期间若遭遇 scheduler 调度拒绝，事件处理返回 LOST，activate 返回 LOST_OWNERSHIP 而非
-   * STARTED。
-   */
-  @Test
-  void synchronousActivateBufferedEventSchedulerRejectionReturnsLostOwnership() {
-    ModelStreamConfig flushConfig =
-        new ModelStreamConfig(Duration.ofMinutes(1), 10, 1024 * 1024, Duration.ofMinutes(10));
-    CountingStore store = new CountingStore(new InMemoryHarnessStore());
-    Baseline baseline = seedBaseline(store.delegate(), NOW);
-    UUID invocationId = seedInvocation(store.delegate(), baseline, requestSpec(), NOW);
-    RecordingSink sink = new RecordingSink();
-    ScheduledExecutorService delegate = Executors.newSingleThreadScheduledExecutor();
-    executorsToClose.add(delegate);
-
-    ScheduledExecutorService rejectingScheduler =
-        (ScheduledExecutorService)
-            Proxy.newProxyInstance(
-                ScheduledExecutorService.class.getClassLoader(),
-                new Class<?>[] {ScheduledExecutorService.class},
-                (proxy, method, args) -> {
-                  if ("schedule".equals(method.getName())) {
-                    throw new RejectedExecutionException("scheduler queue full");
-                  }
-                  return method.invoke(delegate, args);
-                });
-
-    ClaimedWork claim = claim(store.delegate(), invocationId, NOW);
-
-    store
-        .delegate()
-        .transaction(
-            tx -> {
-              tx.lockThread(baseline.threadId());
-              ModelInvocation model = tx.lockModelInvocation(invocationId).orElseThrow();
-              tx.updateModelInvocation(model.beginDispatch(NOW));
-              return null;
-            });
-
-    ModelExecution[] executionHolder = new ModelExecution[1];
-    ModelGateway.Handle synchronousHandle =
-        new ModelGateway.Handle() {
-          @Override
-          public void activate() {
-            executionHolder[0].onEvent(new ProviderStreamEvent.TextDelta("hello"));
-          }
-
-          @Override
-          public void cancel() {}
-        };
-
-    ModelExecution execution =
-        new ModelExecution(
-            store,
-            sink,
-            claim,
-            baseline.threadId(),
-            1,
-            false,
-            List.of(),
-            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, flushConfig),
-            "test-provider",
-            Clock.fixed(NOW, ZoneOffset.UTC),
-            rejectingScheduler,
-            Runnable::run,
-            Runnable::run,
-            e -> {});
-    executionHolder[0] = execution;
-
-    ProcessResult result = execution.activate(synchronousHandle);
-    assertEquals(
-        ProcessResult.LOST_OWNERSHIP,
-        result,
-        "scheduler rejection during drain must return LOST_OWNERSHIP rather than STARTED");
-    assertTrue(execution.abandoned());
-  }
-
-  /**
-   * 意图：验证单 drain owner 覆盖 post-commit publish：批次已提交并正在发布（drainLock 被持有）时， terminal 信号只能先 CAS 再将
-   * durable 提交排在 publish 之后；此时仍指向上一代际的 timer 必须是 no-op，绝不 abandon 正在被 terminal 收敛的 execution。
-   */
-  @Test
-  void timerRejectionAfterTerminalClaimIsStaleNoOpAndDoesNotBlockTerminalCommit() throws Exception {
-    ModelStreamConfig flushConfig =
-        new ModelStreamConfig(Duration.ofMillis(100), 2, 1024 * 1024, Duration.ofMinutes(10));
-    CountingStore store = new CountingStore(new InMemoryHarnessStore());
-    Baseline baseline = seedBaseline(store.delegate(), NOW);
-    UUID invocationId = seedInvocation(store.delegate(), baseline, requestSpec(), NOW);
-    RecordingSink sink = new RecordingSink();
-    ClaimedWork claim = claim(store.delegate(), invocationId, NOW);
-
-    AtomicReference<Runnable> capturedTimerTask = new AtomicReference<>();
-    CountDownLatch scheduledLatch = new CountDownLatch(1);
-    ScheduledFuture<?> dummyFuture =
-        (ScheduledFuture<?>)
-            Proxy.newProxyInstance(
-                ScheduledFuture.class.getClassLoader(),
-                new Class<?>[] {ScheduledFuture.class},
-                (proxy, method, args) -> {
-                  if ("cancel".equals(method.getName())) {
-                    return Boolean.TRUE;
-                  }
-                  return null;
-                });
-
-    ScheduledExecutorService mockScheduler =
-        (ScheduledExecutorService)
-            Proxy.newProxyInstance(
-                ScheduledExecutorService.class.getClassLoader(),
-                new Class<?>[] {ScheduledExecutorService.class},
-                (proxy, method, args) -> {
-                  if ("schedule".equals(method.getName()) && args != null && args.length >= 1) {
-                    if (((Long) args[1]) < CHECKPOINT_TIMER_MILLIS) {
-                      capturedTimerTask.set((Runnable) args[0]);
-                      scheduledLatch.countDown();
-                    }
-                    return dummyFuture;
-                  }
-                  return null;
-                });
-
-    Executor rejectingExecutor =
-        task -> {
-          throw new RejectedExecutionException("flush executor busy");
-        };
-
-    CountDownLatch publishingLatch = new CountDownLatch(1);
-    CountDownLatch releasePublishLatch = new CountDownLatch(1);
-    sink.blockingHook =
-        delta -> {
-          if (delta.sequence() == 2) {
-            publishingLatch.countDown();
-            try {
-              releasePublishLatch.await(10, TimeUnit.SECONDS);
-            } catch (InterruptedException error) {
-              Thread.currentThread().interrupt();
-            }
-          }
-        };
-
-    FakeHandle handle = new FakeHandle();
-    ModelExecution execution =
-        new ModelExecution(
-            store,
-            sink,
-            claim,
-            baseline.threadId(),
-            1,
-            false,
-            List.of(),
-            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, flushConfig),
-            "test-provider",
-            Clock.fixed(NOW, ZoneOffset.UTC),
-            mockScheduler,
-            Runnable::run,
-            rejectingExecutor,
-            e -> {});
-
-    store
-        .delegate()
-        .transaction(
-            tx -> {
-              tx.lockThread(baseline.threadId());
-              ModelInvocation model = tx.lockModelInvocation(invocationId).orElseThrow();
-              tx.updateModelInvocation(model.beginDispatch(NOW));
-              return null;
-            });
-
-    assertEquals(ProcessResult.STARTED, execution.activate(handle));
-
-    // 1. 发送第一个事件，调度批次定时器
-    execution.onEvent(new ProviderStreamEvent.TextDelta("hello"));
-    assertTrue(scheduledLatch.await(1, TimeUnit.SECONDS));
-    assertNotNull(capturedTimerTask.get());
-
-    // 2. 启动异步线程 T1 发送第二个事件：到达 maxEvents 触发容量 flush，提交成功后阻塞在 post-commit publish
-    ExecutorService asyncExecutor = Executors.newFixedThreadPool(2);
-    executorsToClose.add(asyncExecutor);
-
-    asyncExecutor.submit(() -> execution.onEvent(new ProviderStreamEvent.TextDelta(" world")));
-    assertTrue(publishingLatch.await(5, TimeUnit.SECONDS));
-
-    // 3. 在 drainLock 正被 T1 持有时，启动异步线程 T2 调用 onSucceeded：
-    //    T2 首先成功原子完成 terminal.compareAndSet(false, true)，随后阻塞在 drainLock.lock()
-    Thread[] t2Holder = new Thread[1];
-    CountDownLatch t2StartedLatch = new CountDownLatch(1);
-    asyncExecutor.submit(
-        () -> {
-          t2Holder[0] = Thread.currentThread();
-          t2StartedLatch.countDown();
-          execution.onSucceeded(response("hello world"));
-        });
-    assertTrue(t2StartedLatch.await(1, TimeUnit.SECONDS));
-    await(
-        () ->
-            t2Holder[0] != null
-                && (t2Holder[0].getState() == Thread.State.WAITING
-                    || t2Holder[0].getState() == Thread.State.BLOCKED),
-        Duration.ofSeconds(2));
-
-    // 4. 此时 terminal 已经 CAS 为 true，而 timer 仍指向已被容量 flush 推进的旧代际：必须是 no-op，绝不 abandon！
-    capturedTimerTask.get().run();
-    assertFalse(execution.abandoned(), "stale timer after terminal claim must be no-op");
-    assertEquals(
-        ModelInvocationStatus.RUNNING,
-        store
-            .delegate()
-            .transaction(tx -> tx.findModelInvocation(invocationId))
-            .orElseThrow()
-            .status(),
-        "terminal must not commit before the in-flight publish completes");
-
-    // 5. 释放 T1 的 publish，T2 随后获取 drainLock 并成功落地 SUCCEEDED
-    releasePublishLatch.countDown();
-    await(
-        () ->
-            store
-                .delegate()
-                .transaction(tx -> tx.findModelInvocation(invocationId))
-                .orElseThrow()
-                .status()
-                .isTerminal(),
-        Duration.ofSeconds(5));
-
-    ModelInvocation finalModel =
-        store.delegate().transaction(tx -> tx.findModelInvocation(invocationId)).orElseThrow();
-    assertEquals(
-        ModelInvocationStatus.SUCCEEDED, finalModel.status(), "terminal must commit successfully");
-    // 容量 flush 已将 2 条 delta 按序提交并发布；final text 与累积文本一致，因此 terminal 不产生 gap delta
-    List<RealtimeEvent.ModelDelta> deltas = sink.deltas();
-    assertEquals(2, deltas.size());
-    assertEquals(1, deltas.get(0).sequence());
-    assertEquals(2, deltas.get(1).sequence());
-  }
-
-  /** 意图：验证已失效旧代际 timer 遭遇 executor rejection 时，为 stale no-op，不误伤当前批。 */
-  @Test
-  void staleGenerationTimerRejectionDoesNotAbandonCurrentExecution() {
-    ModelStreamConfig flushConfig =
-        new ModelStreamConfig(Duration.ofMillis(100), 2, 1024 * 1024, Duration.ofMinutes(10));
-    CountingStore store = new CountingStore(new InMemoryHarnessStore());
-    Baseline baseline = seedBaseline(store.delegate(), NOW);
-    UUID invocationId = seedInvocation(store.delegate(), baseline, requestSpec(), NOW);
-    RecordingSink sink = new RecordingSink();
-    ClaimedWork claim = claim(store.delegate(), invocationId, NOW);
-
-    AtomicReference<Runnable> capturedTimerTask = new AtomicReference<>();
-    ScheduledFuture<?> dummyFuture =
-        (ScheduledFuture<?>)
-            Proxy.newProxyInstance(
-                ScheduledFuture.class.getClassLoader(),
-                new Class<?>[] {ScheduledFuture.class},
-                (proxy, method, args) -> {
-                  if ("cancel".equals(method.getName())) {
-                    return Boolean.TRUE;
-                  }
-                  return null;
-                });
-
-    ScheduledExecutorService mockScheduler =
-        (ScheduledExecutorService)
-            Proxy.newProxyInstance(
-                ScheduledExecutorService.class.getClassLoader(),
-                new Class<?>[] {ScheduledExecutorService.class},
-                (proxy, method, args) -> {
-                  if ("schedule".equals(method.getName()) && args != null && args.length >= 1) {
-                    if (((Long) args[1]) < CHECKPOINT_TIMER_MILLIS) {
-                      capturedTimerTask.set((Runnable) args[0]);
-                    }
-                    return dummyFuture;
-                  }
-                  return null;
-                });
-
-    Executor rejectingExecutor =
-        task -> {
-          throw new RejectedExecutionException("executor queue full");
-        };
-
-    FakeHandle handle = new FakeHandle();
-    ModelExecution execution =
-        new ModelExecution(
-            store,
-            sink,
-            claim,
-            baseline.threadId(),
-            1,
-            false,
-            List.of(),
-            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, flushConfig),
-            "test-provider",
-            Clock.fixed(NOW, ZoneOffset.UTC),
-            mockScheduler,
-            Runnable::run,
-            rejectingExecutor,
-            e -> {});
-
-    store
-        .delegate()
-        .transaction(
-            tx -> {
-              tx.lockThread(baseline.threadId());
-              ModelInvocation model = tx.lockModelInvocation(invocationId).orElseThrow();
-              tx.updateModelInvocation(model.beginDispatch(NOW));
-              return null;
-            });
-
-    assertEquals(ProcessResult.STARTED, execution.activate(handle));
-
-    // 事件 1：调度代际 0 的 timer
-    execution.onEvent(new ProviderStreamEvent.TextDelta("e1"));
-    Runnable staleTimer = capturedTimerTask.get();
-    assertNotNull(staleTimer);
-
-    // 事件 2：达到 maxEvents=2 触发容量 flush，generation 递增，staleTimer 变为旧代际
-    execution.onEvent(new ProviderStreamEvent.TextDelta("e2"));
-
-    // 执行旧代际 timer：应当直接检查到代际失效退出，不 abandon execution
-    staleTimer.run();
-    assertFalse(execution.abandoned(), "stale timer rejection must not abandon execution");
-  }
-
-  /**
-   * 意图：checkpoint executor 在 monitor 检查之后拒绝时，若追帧已取消旧 timer 并推进 generation，旧 rejection 不得 abandon；
-   * 周期/追帧机制仍可继续，terminal 仍可提交。
-   */
-  @Test
-  void checkpointExecutorRejectionAfterForcedCheckpointAdvancedGenerationDoesNotAbandon()
-      throws Exception {
-    ModelStreamConfig flushConfig =
-        new ModelStreamConfig(Duration.ofMinutes(10), 100, 1024 * 1024, Duration.ofMillis(100));
-    AtomicReference<Runnable> capturedTimerTask = new AtomicReference<>();
-    ScheduledFuture<?> dummyFuture = dummyFuture();
-    ScheduledExecutorService mockScheduler = capturingPushScheduler(capturedTimerTask, dummyFuture);
-    CountDownLatch entered = new CountDownLatch(1);
-    CountDownLatch release = new CountDownLatch(1);
-    Executor rejectingAfterLatch =
-        task -> {
-          entered.countDown();
-          awaitLatch(release);
-          throw new RejectedExecutionException("executor queue full");
-        };
-
-    Fixture fixture = createFixtureWithExecutor(flushConfig, mockScheduler, rejectingAfterLatch);
-    fixture.start();
-    fixture.listener().onEvent(new ProviderStreamEvent.TextDelta("a"));
-    Runnable timerTask = capturedTimerTask.get();
-    assertNotNull(timerTask);
-
-    Thread timerThread = new Thread(timerTask, "stale-checkpoint-timer");
-    timerThread.start();
-    assertTrue(entered.await(1, TimeUnit.SECONDS));
-
-    // 追帧直接取消旧 checkpoint timer 并推进 generation：阻塞中的 timer 已成为旧代际。
-    fixture.execution.deliverCheckpoint(0, true);
-    assertEquals(1, fixture.sink.checkpoints().size());
-
-    release.countDown();
-    timerThread.join(TimeUnit.SECONDS.toMillis(5));
-    assertFalse(execution(fixture).abandoned(), "stale checkpoint rejection must not abandon");
-    assertEquals(ModelInvocationStatus.RUNNING, fixture.currentModel().status());
-
-    fixture.listener().onSucceeded(response("a"));
-    assertEquals(ModelInvocationStatus.SUCCEEDED, fixture.currentModel().status());
-  }
-
-  /**
-   * 意图：executor 在 monitor 代际检查之后才拒绝时，如果 provider 容量 flush 已推进 push generation，rejection 属于旧定时器， 绝不能
-   * abandon 当前 execution；后续 terminal 仍可正常提交。
-   */
-  @Test
-  void executorRejectionAfterCapacityFlushAdvancedGenerationDoesNotAbandon() throws Exception {
-    ModelStreamConfig flushConfig =
-        new ModelStreamConfig(Duration.ofMillis(100), 2, 1024 * 1024, Duration.ofMinutes(10));
-    AtomicReference<Runnable> capturedTimerTask = new AtomicReference<>();
-    ScheduledFuture<?> dummyFuture = dummyFuture();
-    ScheduledExecutorService mockScheduler = capturingPushScheduler(capturedTimerTask, dummyFuture);
-    CountDownLatch entered = new CountDownLatch(1);
-    CountDownLatch release = new CountDownLatch(1);
-    Executor rejectingAfterLatch =
-        task -> {
-          entered.countDown();
-          awaitLatch(release);
-          throw new RejectedExecutionException("executor queue full");
-        };
-
-    Fixture fixture = createFixtureWithExecutor(flushConfig, mockScheduler, rejectingAfterLatch);
-    fixture.start();
-    fixture.listener().onEvent(new ProviderStreamEvent.TextDelta("e1"));
-    Runnable timerTask = capturedTimerTask.get();
-    assertNotNull(timerTask);
-
-    Thread timerThread = new Thread(timerTask, "stale-timer");
-    timerThread.start();
-    assertTrue(entered.await(1, TimeUnit.SECONDS));
-
-    // timer 已通过 monitor 检查并卡在 executor；容量 flush 推进 generation，使该 timer 失效。
-    fixture.listener().onEvent(new ProviderStreamEvent.TextDelta("e2"));
-    assertEquals(2, fixture.sink.deltas().size());
-
-    release.countDown();
-    timerThread.join(TimeUnit.SECONDS.toMillis(5));
-    assertFalse(execution(fixture).abandoned(), "stale executor rejection must not abandon");
-    assertEquals(ModelInvocationStatus.RUNNING, fixture.currentModel().status());
-
-    fixture.listener().onSucceeded(response("e1e2"));
-    assertEquals(ModelInvocationStatus.SUCCEEDED, fixture.currentModel().status());
-  }
-
-  /** 意图：terminal 已在上游回调中认领（并提交）后才发生的 executor rejection 不得改变终态；旧定时器只能被忽略。 */
-  @Test
-  void executorRejectionAfterTerminalClaimStillCommitsTerminal() throws Exception {
-    ModelStreamConfig flushConfig =
-        new ModelStreamConfig(Duration.ofMillis(100), 2, 1024 * 1024, Duration.ofMinutes(10));
-    AtomicReference<Runnable> capturedTimerTask = new AtomicReference<>();
-    ScheduledFuture<?> dummyFuture = dummyFuture();
-    ScheduledExecutorService mockScheduler = capturingPushScheduler(capturedTimerTask, dummyFuture);
-    CountDownLatch entered = new CountDownLatch(1);
-    CountDownLatch release = new CountDownLatch(1);
-    Executor rejectingAfterLatch =
-        task -> {
-          entered.countDown();
-          awaitLatch(release);
-          throw new RejectedExecutionException("executor queue full");
-        };
-
-    Fixture fixture = createFixtureWithExecutor(flushConfig, mockScheduler, rejectingAfterLatch);
-    fixture.start();
-    fixture.listener().onEvent(new ProviderStreamEvent.TextDelta("e1"));
-    Runnable timerTask = capturedTimerTask.get();
-    assertNotNull(timerTask);
-
-    Thread timerThread = new Thread(timerTask, "stale-timer");
-    timerThread.start();
-    assertTrue(entered.await(1, TimeUnit.SECONDS));
-
-    fixture.listener().onSucceeded(response("e1"));
-    assertEquals(ModelInvocationStatus.SUCCEEDED, fixture.currentModel().status());
-
-    release.countDown();
-    timerThread.join(TimeUnit.SECONDS.toMillis(5));
-    assertEquals(
-        ModelInvocationStatus.SUCCEEDED,
-        fixture.currentModel().status(),
-        "stale executor rejection must not roll back or mask the committed terminal");
-  }
-
-  /**
    * 意图：追帧是可选 best-effort——并发/重复请求在途时只占用一个 flushExecutor 任务；executor 拒绝只返回 false，不
    * cancel/abandon，之后终态仍可正常提交。
    */
@@ -1932,14 +817,12 @@ class ModelExecutionStreamFlushTest {
     fixture.listener().onEvent(new ProviderStreamEvent.TextDelta("abc"));
 
     AtomicBoolean firstResult = new AtomicBoolean();
-    Thread firstRequest =
-        new Thread(
-            () -> firstResult.set(fixture.processor.requestCheckpoint(fixture.invocationId, 1)));
+    Thread firstRequest = new Thread(() -> firstResult.set(fixture.execution.requestCheckpoint(1)));
     firstRequest.start();
     assertTrue(gate.entered.await(1, TimeUnit.SECONDS));
 
     // 已有请求在途：重复请求返回 true，但绝不再向 executor 提交第二项任务。
-    assertTrue(fixture.processor.requestCheckpoint(fixture.invocationId, 1));
+    assertTrue(fixture.execution.requestCheckpoint(1));
     assertEquals(1, gate.submissions.get());
 
     gate.release.countDown();
@@ -1950,7 +833,7 @@ class ModelExecutionStreamFlushTest {
     // executor 拒绝追帧：只返回 false，不 cancel/abandon，也不写库。
     gate.reject.set(true);
     int updatesBefore = fixture.store.modelInvocationUpdateCount();
-    assertFalse(fixture.processor.requestCheckpoint(fixture.invocationId, 1));
+    assertFalse(fixture.execution.requestCheckpoint(1));
     assertEquals(updatesBefore, fixture.store.modelInvocationUpdateCount());
     assertFalse(execution(fixture).abandoned(), "best-effort catch-up rejection must not cancel");
 
@@ -1996,7 +879,7 @@ class ModelExecutionStreamFlushTest {
     assertTrue(entered.await(1, TimeUnit.SECONDS));
 
     long start = System.nanoTime();
-    assertTrue(fixture.processor.cancel(fixture.invocationId));
+    fixture.execution.abandon();
     long cancelNanos = System.nanoTime() - start;
     assertTrue(
         cancelNanos < TimeUnit.SECONDS.toNanos(1),
@@ -2007,109 +890,6 @@ class ModelExecutionStreamFlushTest {
     assertEquals(ModelInvocationStatus.SUCCEEDED, fixture.currentModel().status());
     assertEquals(1, fixture.sink.appendAllCalls(), "only the in-flight chunk may reach the sink");
     assertEquals(2, fixture.sink.deltas().size(), "later chunks must not be published");
-  }
-
-  /** 意图：验证门控前 pending 载荷字节约束：单个超阈值事件可独占，已有事件时超阈值则被拒绝并 abandon，terminal 信号在边界仍不受阻断并成功落地。 */
-  @Test
-  void gateBufferPendingPayloadBytesBoundaryAndTerminalAcceptance() {
-    // maxPayloadBytes = 10 字节
-    ModelStreamConfig flushConfig =
-        new ModelStreamConfig(Duration.ofMinutes(1), 10, 10, Duration.ofMinutes(10));
-    CountingStore store = new CountingStore(new InMemoryHarnessStore());
-    Baseline baseline = seedBaseline(store.delegate(), NOW);
-    RecordingSink sink = new RecordingSink();
-    ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
-    executorsToClose.add(scheduler);
-
-    // 1. 单个超阈值事件（15 字节）可独占 pending
-    UUID id1 = seedInvocation(store.delegate(), baseline, requestSpec(), NOW);
-    ClaimedWork claim1 = claim(store.delegate(), id1, NOW);
-    ModelExecution exec1 =
-        new ModelExecution(
-            store,
-            sink,
-            claim1,
-            baseline.threadId(),
-            1,
-            false,
-            List.of(),
-            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, flushConfig),
-            "test-provider",
-            Clock.fixed(NOW, ZoneOffset.UTC),
-            scheduler,
-            Runnable::run,
-            Runnable::run,
-            e -> {});
-    exec1.onEvent(new ProviderStreamEvent.TextDelta("012345678901234")); // 15 字节 > 10
-    assertFalse(
-        exec1.abandoned(), "single oversized event must be allowed to monopolize pending buffer");
-
-    // 2. 已有普通事件（6 字节）时，新事件（5 字节）使总字节（11 字节 > 10）超阈值，被拒绝并收敛为 abandoned
-    Baseline baseline2 = seedBaseline(store.delegate(), NOW.plusSeconds(10));
-    UUID id2 = seedInvocation(store.delegate(), baseline2, requestSpec(), NOW.plusSeconds(10));
-    ClaimedWork claim2 = claim(store.delegate(), id2, NOW.plusSeconds(10));
-    ModelExecution exec2 =
-        new ModelExecution(
-            store,
-            sink,
-            claim2,
-            baseline2.threadId(),
-            1,
-            false,
-            List.of(),
-            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, flushConfig),
-            "test-provider",
-            Clock.fixed(NOW.plusSeconds(10), ZoneOffset.UTC),
-            scheduler,
-            Runnable::run,
-            Runnable::run,
-            e -> {});
-    exec2.onEvent(new ProviderStreamEvent.TextDelta("123456")); // 6 bytes <= 10
-    assertFalse(exec2.abandoned());
-    exec2.onEvent(new ProviderStreamEvent.TextDelta("12345")); // 6 + 5 = 11 > 10
-    assertTrue(
-        exec2.abandoned(), "subsequent event exceeding total payload bytes must abandon execution");
-
-    // 3. pending 处于超阈值状态时，terminal 信号依然不受阻断并成功落地
-    Baseline baseline3 = seedBaseline(store.delegate(), NOW.plusSeconds(20));
-    UUID id3 = seedInvocation(store.delegate(), baseline3, requestSpec(), NOW.plusSeconds(20));
-    ClaimedWork claim3 = claim(store.delegate(), id3, NOW.plusSeconds(20));
-    FakeHandle handle3 = new FakeHandle();
-    ModelExecution exec3 =
-        new ModelExecution(
-            store,
-            sink,
-            claim3,
-            baseline3.threadId(),
-            1,
-            false,
-            List.of(),
-            new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY, flushConfig),
-            "test-provider",
-            Clock.fixed(NOW.plusSeconds(20), ZoneOffset.UTC),
-            scheduler,
-            Runnable::run,
-            Runnable::run,
-            e -> {});
-    exec3.onEvent(new ProviderStreamEvent.TextDelta("012345678901234")); // 15 字节独占
-    exec3.onSucceeded(response("012345678901234 completed")); // terminal 信号
-    assertFalse(exec3.abandoned(), "terminal signal must not be rejected at payload boundary");
-
-    store
-        .delegate()
-        .transaction(
-            tx -> {
-              tx.lockThread(baseline3.threadId());
-              ModelInvocation model = tx.lockModelInvocation(id3).orElseThrow();
-              tx.updateModelInvocation(model.beginDispatch(NOW.plusSeconds(20)));
-              return null;
-            });
-
-    ProcessResult result = exec3.activate(handle3);
-    assertEquals(ProcessResult.TERMINATED, result);
-    ModelInvocation finalModel =
-        store.delegate().transaction(tx -> tx.findModelInvocation(id3)).orElseThrow();
-    assertEquals(ModelInvocationStatus.SUCCEEDED, finalModel.status());
   }
 
   /** 意图：验证已提交 partial 遭遇合法 FILTERED 响应时，一次 UPDATE 落地 SUCCEEDED 并清除 checkpoint，不发布回退 delta。 */
@@ -2125,17 +905,6 @@ class ModelExecutionStreamFlushTest {
     executorsToClose.add(scheduler);
     ClaimedWork claim = claim(store.delegate(), invocationId, NOW);
 
-    store
-        .delegate()
-        .transaction(
-            tx -> {
-              tx.lockThread(baseline.threadId());
-              ModelInvocation model = tx.lockModelInvocation(invocationId).orElseThrow();
-              tx.updateModelInvocation(model.beginDispatch(NOW));
-              return null;
-            });
-
-    FakeHandle handle = new FakeHandle();
     ModelExecution execution =
         new ModelExecution(
             store,
@@ -2153,11 +922,11 @@ class ModelExecutionStreamFlushTest {
             Runnable::run,
             e -> {});
 
-    assertEquals(ProcessResult.STARTED, execution.activate(handle));
+    assertTrue(execution.markRunning());
 
     // 投递 delta（立即推送）并提交 checkpoint
     execution.onEvent(new ProviderStreamEvent.TextDelta("sensitive content"));
-    execution.deliverCheckpoint(0, true);
+    execution.requestCheckpoint(1);
     ModelInvocation committedModel =
         store.delegate().transaction(tx -> tx.findModelInvocation(invocationId)).orElseThrow();
     assertNotNull(committedModel.streamCheckpoint(), "checkpoint must be committed");
@@ -2167,7 +936,9 @@ class ModelExecutionStreamFlushTest {
     int updatesBefore = store.modelInvocationUpdateCount.get();
 
     // 投递合法 FILTERED 响应（内容被过滤为空，不作为前缀）
-    execution.onSucceeded(response("", GenerationStopReason.FILTERED));
+    execution.finish(
+        new ModelGateway.Succeeded(
+            new ProviderCompletion(response("", GenerationStopReason.FILTERED), null)));
 
     // 校验：恰好单次 UPDATE 为 SUCCEEDED，checkpoint 撤回为 null
     assertEquals(
@@ -2195,17 +966,6 @@ class ModelExecutionStreamFlushTest {
     executorsToClose.add(scheduler);
     ClaimedWork claim = claim(store.delegate(), invocationId, NOW);
 
-    store
-        .delegate()
-        .transaction(
-            tx -> {
-              tx.lockThread(baseline.threadId());
-              ModelInvocation model = tx.lockModelInvocation(invocationId).orElseThrow();
-              tx.updateModelInvocation(model.beginDispatch(NOW));
-              return null;
-            });
-
-    FakeHandle handle = new FakeHandle();
     ModelExecution execution =
         new ModelExecution(
             store,
@@ -2223,14 +983,16 @@ class ModelExecutionStreamFlushTest {
             Runnable::run,
             e -> {});
 
-    assertEquals(ProcessResult.STARTED, execution.activate(handle));
+    assertTrue(execution.markRunning());
 
     // 投递 delta，未达到 maxEvents=10，停留在 batchItems 中未刷盘
     execution.onEvent(new ProviderStreamEvent.TextDelta("unflushed sensitive"));
     int updatesBefore = store.modelInvocationUpdateCount.get();
 
     // 投递合法 FILTERED 响应
-    execution.onSucceeded(response("", GenerationStopReason.FILTERED));
+    execution.finish(
+        new ModelGateway.Succeeded(
+            new ProviderCompletion(response("", GenerationStopReason.FILTERED), null)));
 
     // 校验：单次 UPDATE 为 SUCCEEDED，checkpoint 保持 null，未刷批次被丢弃未发布
     assertEquals(
@@ -2257,17 +1019,6 @@ class ModelExecutionStreamFlushTest {
     executorsToClose.add(scheduler);
     ClaimedWork claim = claim(store.delegate(), invocationId, NOW);
 
-    store
-        .delegate()
-        .transaction(
-            tx -> {
-              tx.lockThread(baseline.threadId());
-              ModelInvocation model = tx.lockModelInvocation(invocationId).orElseThrow();
-              tx.updateModelInvocation(model.beginDispatch(NOW));
-              return null;
-            });
-
-    FakeHandle handle = new FakeHandle();
     ModelExecution execution =
         new ModelExecution(
             store,
@@ -2285,7 +1036,7 @@ class ModelExecutionStreamFlushTest {
             Runnable::run,
             e -> {});
 
-    assertEquals(ProcessResult.STARTED, execution.activate(handle));
+    assertTrue(execution.markRunning());
 
     // 非法 FILTERED：携带 tool call
     ProviderResponse illegalFiltered =
@@ -2293,7 +1044,7 @@ class ModelExecutionStreamFlushTest {
             "",
             List.of(new ProviderToolCall("call-1", "tool", "{}")),
             GenerationStopReason.FILTERED);
-    execution.onSucceeded(illegalFiltered);
+    execution.finish(new ModelGateway.Succeeded(new ProviderCompletion(illegalFiltered, null)));
 
     ModelInvocation finalModel =
         store.delegate().transaction(tx -> tx.findModelInvocation(invocationId)).orElseThrow();
@@ -2343,8 +1094,8 @@ class ModelExecutionStreamFlushTest {
   // ---------------------------------------------------------------------------------------------
 
   /**
-   * 意图：追帧接口按 invocationId + attempt 精确定位 active owner：未知 invocation、attempt 不匹配、终态/取消后一律返回 false
-   * 且零写零发布； 只有当前 active execution 与 attempt 都匹配时才立即落库并在 commit 后发布 checkpoint 事件。
+   * 意图：追帧请求按 attempt 精确匹配 active execution：attempt 不匹配或 abandon 之后一律返回 false 且零写零发布；只有 attempt
+   * 匹配时才立即落库并在 commit 后发布 checkpoint 事件。
    */
   @Test
   void catchUpRequestForcesImmediateCheckpointOnlyForActiveOwnerAndAttempt() {
@@ -2355,15 +1106,11 @@ class ModelExecutionStreamFlushTest {
     fixture.listener().onEvent(new ProviderStreamEvent.TextDelta("abc"));
     fixture.listener().onEvent(new ProviderStreamEvent.ThinkingDelta("xyz"));
 
-    assertFalse(fixture.processor.requestCheckpoint(UUID.randomUUID(), 1));
-    assertEquals(0, fixture.store.transactionCount(), "unrelated invocation must be a no-op");
-    assertTrue(fixture.sink.checkpoints().isEmpty());
-
-    assertFalse(fixture.processor.requestCheckpoint(fixture.invocationId, 2));
+    assertFalse(fixture.execution.requestCheckpoint(2));
     assertEquals(0, fixture.store.transactionCount(), "attempt mismatch must be a no-op");
     assertTrue(fixture.sink.checkpoints().isEmpty());
 
-    assertTrue(fixture.processor.requestCheckpoint(fixture.invocationId, 1));
+    assertTrue(fixture.execution.requestCheckpoint(1));
     assertEquals(1, fixture.store.modelInvocationUpdateCount());
     assertEquals(2, fixture.currentModel().streamCheckpoint().sequence());
     assertEquals("abc", fixture.currentModel().streamCheckpoint().text());
@@ -2374,59 +1121,11 @@ class ModelExecutionStreamFlushTest {
     assertEquals(fixture.invocationId, event.modelInvocationId());
     assertEquals(1, event.attempt());
 
-    // cancel 会立即从 active owner 集合释放：之后的追帧请求不再触发任何写入或发布。
-    assertTrue(fixture.processor.cancel(fixture.invocationId));
-    assertFalse(fixture.processor.requestCheckpoint(fixture.invocationId, 1));
+    // abandon 之后的追帧请求不再触发任何写入或发布。
+    fixture.execution.abandon();
+    assertFalse(fixture.execution.requestCheckpoint(1));
     assertEquals(1, fixture.store.modelInvocationUpdateCount());
     assertEquals(List.of(2L), fixture.sink.checkpoints());
-  }
-
-  /** 意图：验证 checkpoint 节奏：固定 deadline 只在上次落库之后的第一个 safe delta 武装一次，只有前进时才写库。 */
-  @Test
-  void checkpointTimerIsArmedOncePerIntervalAndOnlyPersistsAdvancedState() {
-    long checkpointMillis = Duration.ofMinutes(10).toMillis();
-    List<Long> scheduledDelays = new CopyOnWriteArrayList<>();
-    ScheduledExecutorService delegate = Executors.newSingleThreadScheduledExecutor();
-    executorsToClose.add(delegate);
-    ScheduledExecutorService recording =
-        (ScheduledExecutorService)
-            Proxy.newProxyInstance(
-                ScheduledExecutorService.class.getClassLoader(),
-                new Class<?>[] {ScheduledExecutorService.class},
-                (proxy, method, args) -> {
-                  if ("schedule".equals(method.getName()) && args != null && args.length == 3) {
-                    scheduledDelays.add((Long) args[1]);
-                  }
-                  return method.invoke(delegate, args);
-                });
-    ModelStreamConfig flushConfig =
-        new ModelStreamConfig(Duration.ofMinutes(1), 1, 1024 * 1024, Duration.ofMinutes(10));
-    Fixture fixture = createFixture(flushConfig, NO_RETRY, recording, Runnable::run);
-    fixture.start();
-
-    for (int i = 0; i < 3; i++) {
-      fixture.listener().onEvent(delta("e" + i));
-    }
-    assertEquals(
-        1,
-        scheduledDelays.stream().filter(delay -> delay == checkpointMillis).count(),
-        "three safe deltas arm one checkpoint deadline");
-    assertEquals(0, fixture.store.modelInvocationUpdateCount());
-
-    fixture.execution.deliverCheckpoint(0, false);
-    assertEquals(1, fixture.store.modelInvocationUpdateCount());
-    assertEquals(3, fixture.currentModel().streamCheckpoint().sequence());
-
-    // 没有新内容：定时器代际已失效，不写库
-    fixture.execution.deliverCheckpoint(0, false);
-    assertEquals(1, fixture.store.modelInvocationUpdateCount());
-
-    // 新的 safe delta 武装下一个 deadline
-    fixture.listener().onEvent(delta("e3"));
-    assertEquals(
-        2,
-        scheduledDelays.stream().filter(delay -> delay == checkpointMillis).count(),
-        "the next safe delta after a checkpoint arms a new deadline");
   }
 
   private void await(BooleanSupplier condition, Duration timeout) throws InterruptedException {
@@ -2449,15 +1148,11 @@ class ModelExecutionStreamFlushTest {
             ScheduledExecutorService.class.getClassLoader(),
             new Class<?>[] {ScheduledExecutorService.class},
             (proxy, method, args) -> {
-              if ("schedule".equals(method.getName())
-                  && args != null
-                  && args.length == 3
+              if ("scheduleWithFixedDelay".equals(method.getName())
                   && args[0] instanceof Runnable task) {
-                // 本类的 checkpoint 间隔都是 10 分钟：只捕获推送定时器，checkpoint 由测试直接调用 deliverCheckpoint。
-                if (((Long) args[1]) < CHECKPOINT_TIMER_MILLIS) {
-                  scheduleCount.incrementAndGet();
-                  capturedTask.set(task);
-                }
+                // 只捕获刷新 tick，由测试手动触发；本类的 checkpoint 间隔都是 10 分钟，tick 只会推送，checkpoint 由追帧请求触发。
+                scheduleCount.incrementAndGet();
+                capturedTask.set(task);
                 ScheduledFuture<?> fakeFuture =
                     (ScheduledFuture<?>)
                         Proxy.newProxyInstance(
@@ -2526,67 +1221,60 @@ class ModelExecutionStreamFlushTest {
     CountingStore store = new CountingStore(new InMemoryHarnessStore(), dbThreadRecord);
     Baseline baseline = seedBaseline(store.delegate(), NOW);
     UUID invocationId = seedInvocation(store.delegate(), baseline, requestSpec, NOW);
-    FakeGateway gateway = new FakeGateway();
     RecordingSink sink = new RecordingSink(publishThreadRecord);
-
-    ModelProcessor processor =
-        new ModelProcessor(
+    ClaimedWork claim = claim(store.delegate(), invocationId, NOW);
+    ModelExecution execution =
+        new ModelExecution(
             store,
-            gateway,
             sink,
+            claim,
+            baseline.threadId(),
+            1,
+            false,
+            requestSpec.toolBindings(),
             new ModelProcessorConfig(LEASE_CONFIG, () -> retryPolicy, FALLBACK_DELAY, flushConfig),
+            "provider",
             Clock.fixed(NOW, ZoneOffset.UTC),
             scheduler,
             Runnable::run,
-            flushExecutor);
-
-    return new Fixture(store, baseline, invocationId, gateway, sink, processor, flushConfig);
+            flushExecutor,
+            ignored -> {});
+    return new Fixture(store, baseline, invocationId, sink, execution, flushConfig);
   }
 
   private static final class Fixture {
     final CountingStore store;
     final Baseline baseline;
     final UUID invocationId;
-    final FakeGateway gateway;
     final RecordingSink sink;
-    final ModelProcessor processor;
+    final ModelExecution execution;
     final ModelStreamConfig flushConfig;
-    final FakeHandle handle = new FakeHandle();
-    ModelExecution execution;
+    final Driver driver;
 
     Fixture(
         CountingStore store,
         Baseline baseline,
         UUID invocationId,
-        FakeGateway gateway,
         RecordingSink sink,
-        ModelProcessor processor,
+        ModelExecution execution,
         ModelStreamConfig flushConfig) {
       this.store = store;
       this.baseline = baseline;
       this.invocationId = invocationId;
-      this.gateway = gateway;
       this.sink = sink;
-      this.processor = processor;
+      this.execution = execution;
       this.flushConfig = flushConfig;
+      this.driver = new Driver(execution);
     }
 
+    /** READY -> RUNNING 持久化；随后重置计数器，只统计流式阶段的事务与更新。 */
     void start() {
-      assertEquals(ProcessResult.STARTED, start(handle));
-    }
-
-    ProcessResult start(ModelGateway.Handle startedHandle) {
-      gateway.queue(new ModelGateway.Started(startedHandle));
-      ClaimedWork claim = claim(store.delegate(), invocationId, NOW);
-      ProcessResult result = processor.process(claim);
-      this.execution = (ModelExecution) gateway.listener(invocationId);
-      // 排除 seed 与 markRunning 的初始更新，启动后重置计数器
+      assertTrue(execution.markRunning());
       store.resetUpdateCount();
-      return result;
     }
 
-    ModelGateway.Listener listener() {
-      return execution != null ? execution : gateway.listener(invocationId);
+    Driver listener() {
+      return driver;
     }
 
     ModelInvocation currentModel() {
@@ -2594,38 +1282,68 @@ class ModelExecutionStreamFlushTest {
     }
   }
 
+  /**
+   * 把 Gateway 一次运行的增量与终态同步驱动到 execution（等价于运行线程上的 sink 与 finish）。与真实 Gateway 一致：sink 中止增量（已 abandon
+   * 或增量非法）时运行随即结束并经 {@link ModelExecution#run} 收敛终态，之后的信号不再投递。
+   */
+  private static final class Driver {
+    private final ModelExecution execution;
+    private boolean ended;
+
+    Driver(ModelExecution execution) {
+      this.execution = execution;
+    }
+
+    void onEvent(ProviderStreamEvent event) {
+      if (ended) {
+        return;
+      }
+      try {
+        execution.onEvent(event);
+      } catch (RuntimeException aborted) {
+        ended = true;
+        execution.finish(execution.run(new AbortedRun(aborted)));
+      }
+    }
+
+    ProcessResult onSucceeded(ProviderResponse response) {
+      return end(new ModelGateway.Succeeded(new ProviderCompletion(response, null)));
+    }
+
+    ProcessResult onSucceeded(ProviderCompletion completion) {
+      return end(new ModelGateway.Succeeded(completion));
+    }
+
+    ProcessResult onFailed(ModelInvocationError error) {
+      return end(new ModelGateway.Failed(error));
+    }
+
+    ProcessResult onUnknown(ModelInvocationError error) {
+      return end(new ModelGateway.Unknown(error));
+    }
+
+    private ProcessResult end(ModelGateway.Outcome outcome) {
+      if (ended) {
+        return ProcessResult.LOST_OWNERSHIP;
+      }
+      ended = true;
+      return execution.finish(outcome);
+    }
+  }
+
+  /** Gateway 运行因 sink 中止而抛出：把中止异常交还给 {@link ModelExecution#run} 的映射。 */
+  private record AbortedRun(RuntimeException abort) implements ModelGateway.Admitted {
+    @Override
+    public ModelGateway.Outcome run(ModelGateway.Sink sink) {
+      throw abort;
+    }
+
+    @Override
+    public void close() {}
+  }
+
   private static ModelExecution execution(Fixture fixture) {
     return fixture.execution;
-  }
-
-  private static ScheduledFuture<?> dummyFuture() {
-    return (ScheduledFuture<?>)
-        Proxy.newProxyInstance(
-            ScheduledFuture.class.getClassLoader(),
-            new Class<?>[] {ScheduledFuture.class},
-            (proxy, method, args) -> {
-              if ("cancel".equals(method.getName())) {
-                return Boolean.TRUE;
-              }
-              return null;
-            });
-  }
-
-  private static ScheduledExecutorService capturingPushScheduler(
-      AtomicReference<Runnable> captured, ScheduledFuture<?> future) {
-    return (ScheduledExecutorService)
-        Proxy.newProxyInstance(
-            ScheduledExecutorService.class.getClassLoader(),
-            new Class<?>[] {ScheduledExecutorService.class},
-            (proxy, method, args) -> {
-              if ("schedule".equals(method.getName()) && args != null && args.length >= 1) {
-                if (((Long) args[1]) < CHECKPOINT_TIMER_MILLIS) {
-                  captured.set((Runnable) args[0]);
-                }
-                return future;
-              }
-              return null;
-            });
   }
 
   private Fixture createFixtureWithExecutor(
@@ -2832,48 +1550,6 @@ class ModelExecutionStreamFlushTest {
   }
 
   private record Baseline(UUID sessionId, UUID rootEntryId, UUID turnStartEntryId, UUID threadId) {}
-
-  private static final class FakeHandle implements ModelGateway.Handle {
-    private final AtomicBoolean activated = new AtomicBoolean();
-    private final AtomicBoolean cancelled = new AtomicBoolean();
-
-    @Override
-    public void activate() {
-      activated.set(true);
-    }
-
-    @Override
-    public void cancel() {
-      cancelled.set(true);
-    }
-
-    boolean isCancelled() {
-      return cancelled.get();
-    }
-  }
-
-  private static final class FakeGateway implements ModelGateway {
-    final LinkedList<Object> results = new LinkedList<>();
-    final ConcurrentHashMap<UUID, Listener> listeners = new ConcurrentHashMap<>();
-
-    void queue(Object result) {
-      results.add(result);
-    }
-
-    @Override
-    public StartResult start(Execution execution, Listener listener) {
-      listeners.put(execution.invocationId(), listener);
-      Object next = results.isEmpty() ? null : results.removeFirst();
-      if (next instanceof StartResult startResult) {
-        return startResult;
-      }
-      throw new IllegalStateException("no queued start result");
-    }
-
-    Listener listener(UUID invocationId) {
-      return listeners.get(invocationId);
-    }
-  }
 
   /**
    * 记录型 sink：既能统计单条 {@code append}，也能统计批量 {@link #appendAll} 的调用次数与每次批量大小，用于断言「N 个已提交 delta

@@ -51,7 +51,7 @@
                                         <include>fun.fengwk.kkstudio.harness.provider.ProviderStreamBridge</include>
                                         <include>fun.fengwk.kkstudio.harness.provider.ProviderModelDiscovery</include>
                                         <include>fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransport</include>
-                                        <include>fun.fengwk.kkstudio.harness.provider.transport.HttpSseStreamExecution</include>
+                                        <include>fun.fengwk.kkstudio.harness.provider.ProviderSseCall</include>
                                         <include>fun.fengwk.kkstudio.harness.provider.transport.IncrementalSseParser</include>
                                         <include>fun.fengwk.kkstudio.harness.provider.transport.TransportException</include>
                                         <include>fun.fengwk.kkstudio.harness.provider.anthropic.AnthropicConfiguration</include>

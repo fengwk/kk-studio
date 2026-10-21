@@ -17,17 +17,6 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 class ProviderStreamHandlerTest {
 
-  private static final ProviderStream DUMMY_STREAM =
-      new ProviderStream() {
-        @Override
-        public void cancel() {}
-
-        @Override
-        public boolean isCancelled() {
-          return false;
-        }
-      };
-
   /** 意图：成功终态只有一个入口，必须原样交付 ProviderCompletion（含 native replay），不丢信息也不做二次适配。 */
   @Test
   void completionHandlerReceivesFullCompletionIncludingReplayState() {
@@ -41,18 +30,18 @@ class ProviderStreamHandlerTest {
     ProviderStreamHandler handler =
         new ProviderStreamHandler() {
           @Override
-          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
+          public void onEvent(ProviderStreamEvent event) {}
 
           @Override
-          public void onComplete(ProviderCompletion value, ProviderStream stream) {
+          public void onComplete(ProviderCompletion value) {
             captured.set(value);
           }
 
           @Override
-          public void onError(ProviderException error, ProviderStream stream) {}
+          public void onError(ProviderException error) {}
         };
 
-    handler.onComplete(completion, DUMMY_STREAM);
+    handler.onComplete(completion);
 
     assertSame(completion, captured.get());
     assertSame(replayState, captured.get().replayState());
@@ -65,19 +54,18 @@ class ProviderStreamHandlerTest {
     ProviderStreamHandler handler =
         new ProviderStreamHandler() {
           @Override
-          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
+          public void onEvent(ProviderStreamEvent event) {}
 
           @Override
-          public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
+          public void onComplete(ProviderCompletion completion) {}
 
           @Override
-          public void onError(ProviderException error, ProviderStream stream) {}
+          public void onError(ProviderException error) {}
         };
 
     assertDoesNotThrow(
         () ->
-            handler.onProtocolEvent(
-                new ProviderProtocolEvent("message_delta", "{\"delta\":{}}"), DUMMY_STREAM));
+            handler.onProtocolEvent(new ProviderProtocolEvent("message_delta", "{\"delta\":{}}")));
   }
 
   private static ProviderResponse sampleResponse() {

@@ -327,8 +327,9 @@ public class HarnessRuntimeConfiguration {
     return new ThreadProcessor(store, turnResolver, config, materializer);
   }
 
+  /** Model 执行线程与定时刷新任务：每个任务一个虚拟线程（执行线程在 Provider 调用期间阻塞）。 */
   @Bean(destroyMethod = "close")
-  public ExecutorService harnessModelFlushExecutor() {
+  public ExecutorService harnessModelExecutionExecutor() {
     return Executors.newVirtualThreadPerTaskExecutor();
   }
 
@@ -341,7 +342,7 @@ public class HarnessRuntimeConfiguration {
       Clock clock,
       @Qualifier("harnessProcessorScheduler") ScheduledExecutorService scheduler,
       @Qualifier("harnessHeartbeatWorkerExecutor") Executor heartbeatWorker,
-      @Qualifier("harnessModelFlushExecutor") ExecutorService flushExecutor) {
+      @Qualifier("harnessModelExecutionExecutor") ExecutorService executionExecutor) {
     return new ModelProcessor(
         store,
         modelGateway,
@@ -350,7 +351,7 @@ public class HarnessRuntimeConfiguration {
         clock,
         scheduler,
         heartbeatWorker,
-        flushExecutor);
+        executionExecutor);
   }
 
   @Bean(destroyMethod = "close")

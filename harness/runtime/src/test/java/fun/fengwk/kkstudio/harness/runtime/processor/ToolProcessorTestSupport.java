@@ -519,8 +519,6 @@ final class ToolProcessorTestSupport {
                   now,
                   now));
           ModelInvocation current = tx.lockModelInvocation(modelId).orElseThrow();
-          tx.updateModelInvocation(current.beginDispatch(now));
-          current = tx.lockModelInvocation(modelId).orElseThrow();
           tx.updateModelInvocation(current.markRunning(now));
           current = tx.lockModelInvocation(modelId).orElseThrow();
           tx.updateModelInvocation(

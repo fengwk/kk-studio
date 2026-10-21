@@ -3,10 +3,10 @@
   "summary": {
     "totalMethods": 115,
     "totalInvocations": 141,
-    "portedInvocations": 49,
-    "outOfScopeInvocations": 92,
-    "portedMethods": 43,
-    "pureOutOfScopeMethods": 72
+    "portedInvocations": 47,
+    "outOfScopeInvocations": 94,
+    "portedMethods": 41,
+    "pureOutOfScopeMethods": 74
   },
   "methods": [
     {
@@ -496,9 +496,9 @@
           "status": "PORTED",
           "executionStatus": "PASSED",
           "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-          "localMethod": "should_handle_io_exception_during_stream_read_and_fail_exactly_once",
+          "localMethod": "connectionResetMidStreamIsIo",
           "capabilityMismatch": null,
-          "apiAdaptation": "Upstream tests parser-level IOException from stream; in kk-studio, InputStream reading and parsing are composed in JdkHttpSseTransport/HttpSseStreamExecution, where body read failure transitions to onFailure(TransportErrorKind.IO) exactly once without onComplete.",
+          "apiAdaptation": "Upstream tests parser-level IOException from stream; in kk-studio, InputStream reading and parsing are composed in the blocking JdkHttpSseTransport.execute, where a body read failure after delivered events is thrown once as TransportException(IO) instead of ending as a normal EOF.",
           "securityAdaptation": null
         }
       ]
@@ -514,9 +514,9 @@
           "status": "PORTED",
           "executionStatus": "PASSED",
           "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-          "localMethod": "parse_stops_emitting_after_the_listener_cancels",
+          "localMethod": "callerCanStopReadingEarly",
           "capabilityMismatch": null,
-          "apiAdaptation": "Upstream parser provides a ParsingHandle to cancel parsing; in kk-studio transport, cancellation is controlled via ProviderStream.cancel(), verified by reentrant cancellation on the first event callback.",
+          "apiAdaptation": "Upstream parser provides a ParsingHandle to cancel parsing; in kk-studio the event callback returns false to stop reading, after which the transport closes the response and delivers no further events.",
           "securityAdaptation": null
         }
       ]
@@ -684,7 +684,7 @@
           "status": "PORTED",
           "executionStatus": "PASSED",
           "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-          "localMethod": "should_stream_successful_response",
+          "localMethod": "deliversEventsInOrderAndReturnsAtEndOfStream",
           "capabilityMismatch": null,
           "apiAdaptation": null,
           "securityAdaptation": null
@@ -718,7 +718,7 @@
           "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "localClass": null,
           "localMethod": null,
-          "capabilityMismatch": "Upstream asserts cancel streaming emits onError; kk-studio transport guarantees silent abort without terminal callbacks upon ProviderStream.cancel(). Local contract tested in cancel_streaming_silently_aborts_without_terminal_callback.",
+          "capabilityMismatch": "Upstream asserts cancel streaming emits onError; kk-studio cancels by interrupting the calling thread: execute throws TransportException(CANCELLED) and never reports an upstream error. Local contract tested in interruptCancelsTheBlockedRead.",
           "apiAdaptation": null,
           "securityAdaptation": null
         },
@@ -750,7 +750,7 @@
           "status": "PORTED",
           "executionStatus": "PASSED",
           "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-          "localMethod": "should_stream_response_with_double_newline",
+          "localMethod": "blankDataLinesKeepLiteralDoubleNewline",
           "capabilityMismatch": null,
           "apiAdaptation": null,
           "securityAdaptation": null
@@ -783,7 +783,7 @@
           "status": "PORTED",
           "executionStatus": "PASSED",
           "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-          "localMethod": "should_deliver_error_when_streaming_400",
+          "localMethod": "non2xxCarriesBoundedErrorBodyAndSafeHeaders",
           "capabilityMismatch": null,
           "apiAdaptation": null,
           "securityAdaptation": "Error body is not reflected in exception message to prevent credential leakage. Body is verified via error.errorBodyUtf8()."
@@ -816,7 +816,7 @@
           "status": "PORTED",
           "executionStatus": "PASSED",
           "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-          "localMethod": "should_deliver_error_when_streaming_connect_fails",
+          "localMethod": "connectionFailureIsIoWithoutLeakingTheUri",
           "capabilityMismatch": null,
           "apiAdaptation": null,
           "securityAdaptation": null
@@ -866,7 +866,7 @@
           "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "localClass": null,
           "localMethod": null,
-          "capabilityMismatch": "Upstream suppresses user exceptions thrown from onOpen and continues streaming. kk-studio transport safely halts and transitions to CALLBACK_FAILED terminal error. Local contract tested in listener_onOpen_throwing_exception_transitions_to_callback_failed.",
+          "capabilityMismatch": "Upstream suppresses user exceptions thrown from onOpen and continues streaming; kk-studio transport has no onOpen callback: response status and Content-Type are validated inside execute before any event is delivered.",
           "apiAdaptation": null,
           "securityAdaptation": null
         }
@@ -884,7 +884,7 @@
           "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "localClass": null,
           "localMethod": null,
-          "capabilityMismatch": "Upstream suppresses user exceptions thrown from onEvent and continues streaming. kk-studio transport safely halts and transitions to CALLBACK_FAILED terminal error. Local contract tested in listener_onEvent_throwing_exception_transitions_to_callback_failed.",
+          "capabilityMismatch": "Upstream suppresses user exceptions thrown from onEvent and continues streaming; kk-studio stops reading and propagates the callback exception unchanged to the caller. Local contract tested in callbackExceptionPropagatesUnchanged.",
           "apiAdaptation": null,
           "securityAdaptation": null
         }
@@ -898,11 +898,11 @@
         {
           "invocationId": "client-it-should_not_fail_when_listener_onError_throws_exception-1",
           "parameters": {},
-          "status": "PORTED",
-          "executionStatus": "PASSED",
-          "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-          "localMethod": "should_not_fail_when_listener_onError_throws_exception",
-          "capabilityMismatch": null,
+          "status": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
+          "localClass": null,
+          "localMethod": null,
+          "capabilityMismatch": "Upstream isolates user exceptions thrown from an onError listener; kk-studio transport has no error listener: failures are thrown to the calling thread as TransportException, so there is no listener exception to isolate.",
           "apiAdaptation": null,
           "securityAdaptation": null
         }
@@ -1071,7 +1071,7 @@
           "status": "PORTED",
           "executionStatus": "PASSED",
           "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-          "localMethod": "should_stream_successful_response",
+          "localMethod": "deliversEventsInOrderAndReturnsAtEndOfStream",
           "capabilityMismatch": null,
           "apiAdaptation": null,
           "securityAdaptation": null
@@ -1105,7 +1105,7 @@
           "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "localClass": null,
           "localMethod": null,
-          "capabilityMismatch": "Upstream asserts cancel streaming emits onError; kk-studio transport guarantees silent abort without terminal callbacks upon ProviderStream.cancel(). Local contract tested in cancel_streaming_silently_aborts_without_terminal_callback.",
+          "capabilityMismatch": "Upstream asserts cancel streaming emits onError; kk-studio cancels by interrupting the calling thread: execute throws TransportException(CANCELLED) and never reports an upstream error. Local contract tested in interruptCancelsTheBlockedRead.",
           "apiAdaptation": null,
           "securityAdaptation": null
         },
@@ -1137,7 +1137,7 @@
           "status": "PORTED",
           "executionStatus": "PASSED",
           "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-          "localMethod": "should_stream_response_with_double_newline",
+          "localMethod": "blankDataLinesKeepLiteralDoubleNewline",
           "capabilityMismatch": null,
           "apiAdaptation": null,
           "securityAdaptation": null
@@ -1170,7 +1170,7 @@
           "status": "PORTED",
           "executionStatus": "PASSED",
           "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-          "localMethod": "should_deliver_error_when_streaming_400",
+          "localMethod": "non2xxCarriesBoundedErrorBodyAndSafeHeaders",
           "capabilityMismatch": null,
           "apiAdaptation": null,
           "securityAdaptation": "Error body is not reflected in exception message to prevent credential leakage. Body is verified via error.errorBodyUtf8()."
@@ -1203,7 +1203,7 @@
           "status": "PORTED",
           "executionStatus": "PASSED",
           "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-          "localMethod": "should_deliver_error_when_streaming_connect_fails",
+          "localMethod": "connectionFailureIsIoWithoutLeakingTheUri",
           "capabilityMismatch": null,
           "apiAdaptation": null,
           "securityAdaptation": null
@@ -1253,7 +1253,7 @@
           "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "localClass": null,
           "localMethod": null,
-          "capabilityMismatch": "Upstream suppresses user exceptions thrown from onOpen and continues streaming. kk-studio transport safely halts and transitions to CALLBACK_FAILED terminal error. Local contract tested in listener_onOpen_throwing_exception_transitions_to_callback_failed.",
+          "capabilityMismatch": "Upstream suppresses user exceptions thrown from onOpen and continues streaming; kk-studio transport has no onOpen callback: response status and Content-Type are validated inside execute before any event is delivered.",
           "apiAdaptation": null,
           "securityAdaptation": null
         }
@@ -1271,7 +1271,7 @@
           "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
           "localClass": null,
           "localMethod": null,
-          "capabilityMismatch": "Upstream suppresses user exceptions thrown from onEvent and continues streaming. kk-studio transport safely halts and transitions to CALLBACK_FAILED terminal error. Local contract tested in listener_onEvent_throwing_exception_transitions_to_callback_failed.",
+          "capabilityMismatch": "Upstream suppresses user exceptions thrown from onEvent and continues streaming; kk-studio stops reading and propagates the callback exception unchanged to the caller. Local contract tested in callbackExceptionPropagatesUnchanged.",
           "apiAdaptation": null,
           "securityAdaptation": null
         }
@@ -1285,11 +1285,11 @@
         {
           "invocationId": "jdk-client-it-should_not_fail_when_listener_onError_throws_exception-1",
           "parameters": {},
-          "status": "PORTED",
-          "executionStatus": "PASSED",
-          "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-          "localMethod": "should_not_fail_when_listener_onError_throws_exception",
-          "capabilityMismatch": null,
+          "status": "OUT_OF_SCOPE",
+          "executionStatus": "NOT_EXECUTED_OUT_OF_SCOPE",
+          "localClass": null,
+          "localMethod": null,
+          "capabilityMismatch": "Upstream isolates user exceptions thrown from an onError listener; kk-studio transport has no error listener: failures are thrown to the calling thread as TransportException, so there is no listener exception to isolate.",
           "apiAdaptation": null,
           "securityAdaptation": null
         }
@@ -1324,9 +1324,9 @@
           "status": "PORTED",
           "executionStatus": "PASSED",
           "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-          "localMethod": "cancelling_the_future_releases_the_caller",
+          "localMethod": "interruptCancelsTheBlockedRead",
           "capabilityMismatch": null,
-          "apiAdaptation": null,
+          "apiAdaptation": "Upstream cancels a returned future; kk-studio execute blocks the calling thread, so cancellation is interrupting that thread: the blocked read returns promptly with TransportException(CANCELLED) and the connection is closed.",
           "securityAdaptation": null
         }
       ]
@@ -1342,9 +1342,9 @@
           "status": "PORTED",
           "executionStatus": "PASSED",
           "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-          "localMethod": "cancelling_the_future_aborts_the_request_and_closes_the_connection",
+          "localMethod": "interruptCancelsTheBlockedRead",
           "capabilityMismatch": null,
-          "apiAdaptation": null,
+          "apiAdaptation": "Upstream cancels a returned future; kk-studio execute blocks the calling thread, so cancellation is interrupting that thread: the blocked read returns promptly with TransportException(CANCELLED) and the connection is closed.",
           "securityAdaptation": null
         }
       ]
@@ -1360,9 +1360,9 @@
           "status": "PORTED",
           "executionStatus": "PASSED",
           "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-          "localMethod": "cancelling_the_future_releases_the_caller",
+          "localMethod": "interruptCancelsTheBlockedRead",
           "capabilityMismatch": null,
-          "apiAdaptation": null,
+          "apiAdaptation": "Upstream cancels a returned future; kk-studio execute blocks the calling thread, so cancellation is interrupting that thread: the blocked read returns promptly with TransportException(CANCELLED) and the connection is closed.",
           "securityAdaptation": null
         }
       ]
@@ -1378,9 +1378,9 @@
           "status": "PORTED",
           "executionStatus": "PASSED",
           "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-          "localMethod": "cancelling_the_future_aborts_the_request_and_closes_the_connection",
+          "localMethod": "interruptCancelsTheBlockedRead",
           "capabilityMismatch": null,
-          "apiAdaptation": null,
+          "apiAdaptation": "Upstream cancels a returned future; kk-studio execute blocks the calling thread, so cancellation is interrupting that thread: the blocked read returns promptly with TransportException(CANCELLED) and the connection is closed.",
           "securityAdaptation": null
         }
       ]
@@ -1414,9 +1414,9 @@
           "status": "PORTED",
           "executionStatus": "PASSED",
           "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-          "localMethod": "should_timeout_on_read_async",
+          "localMethod": "idleBodyTimesOutAndClosesTheBlockedRead",
           "capabilityMismatch": null,
-          "apiAdaptation": null,
+          "apiAdaptation": "kk-studio has a single blocking call path; the read timeout is the stream idle timeout enforced by the watchdog, which closes the blocked read and throws TransportException(TIMEOUT).",
           "securityAdaptation": null
         }
       ]
@@ -1450,9 +1450,9 @@
           "status": "PORTED",
           "executionStatus": "PASSED",
           "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-          "localMethod": "should_timeout_on_read_async",
+          "localMethod": "idleBodyTimesOutAndClosesTheBlockedRead",
           "capabilityMismatch": null,
-          "apiAdaptation": null,
+          "apiAdaptation": "kk-studio has a single blocking call path; the read timeout is the stream idle timeout enforced by the watchdog, which closes the blocked read and throws TransportException(TIMEOUT).",
           "securityAdaptation": null
         }
       ]
@@ -1468,7 +1468,7 @@
           "status": "PORTED",
           "executionStatus": "PASSED",
           "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-          "localMethod": "should_preserve_line_separators_of_error_response_body",
+          "localMethod": "non2xxCarriesBoundedErrorBodyAndSafeHeaders",
           "capabilityMismatch": null,
           "apiAdaptation": null,
           "securityAdaptation": "Error body is not reflected in exception message to prevent credential leakage. Body is verified via error.errorBodyUtf8()."
@@ -1486,7 +1486,7 @@
           "status": "PORTED",
           "executionStatus": "PASSED",
           "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-          "localMethod": "should_decode_error_response_body_as_utf8",
+          "localMethod": "non2xxCarriesBoundedErrorBodyAndSafeHeaders",
           "capabilityMismatch": null,
           "apiAdaptation": null,
           "securityAdaptation": "Error body is not reflected in exception message to prevent credential leakage. Body is verified via error.errorBodyUtf8()."
@@ -1504,7 +1504,7 @@
           "status": "PORTED",
           "executionStatus": "PASSED",
           "localClass": "fun.fengwk.kkstudio.harness.provider.transport.JdkHttpSseTransportTest",
-          "localMethod": "should_not_fail_on_successful_response",
+          "localMethod": "deliversEventsInOrderAndReturnsAtEndOfStream",
           "capabilityMismatch": null,
           "apiAdaptation": null,
           "securityAdaptation": null

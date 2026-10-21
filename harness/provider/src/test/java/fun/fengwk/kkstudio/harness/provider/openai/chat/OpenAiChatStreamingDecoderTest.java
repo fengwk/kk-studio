@@ -24,7 +24,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderTextBlock;
@@ -76,7 +75,7 @@ class OpenAiChatStreamingDecoderTest {
             .followRedirects(HttpClient.Redirect.NEVER)
             .connectTimeout(Duration.ofSeconds(5))
             .build();
-    transport = new JdkHttpSseTransport(httpClient, workerExecutor, scheduler);
+    transport = new JdkHttpSseTransport(httpClient, scheduler);
 
     descriptor =
         new ProviderDescriptor(
@@ -155,16 +154,16 @@ class OpenAiChatStreamingDecoderTest {
         request,
         new ProviderStreamHandler() {
           @Override
-          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
+          public void onEvent(ProviderStreamEvent event) {}
 
           @Override
-          public void onComplete(ProviderCompletion completion, ProviderStream stream) {
+          public void onComplete(ProviderCompletion completion) {
             completionRef.set(completion);
             latch.countDown();
           }
 
           @Override
-          public void onError(ProviderException error, ProviderStream stream) {
+          public void onError(ProviderException error) {
             latch.countDown();
           }
         });
@@ -228,16 +227,16 @@ class OpenAiChatStreamingDecoderTest {
         request,
         new ProviderStreamHandler() {
           @Override
-          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {}
+          public void onEvent(ProviderStreamEvent event) {}
 
           @Override
-          public void onComplete(ProviderCompletion completion, ProviderStream stream) {
+          public void onComplete(ProviderCompletion completion) {
             completionRef.set(completion);
             latch.countDown();
           }
 
           @Override
-          public void onError(ProviderException error, ProviderStream stream) {
+          public void onError(ProviderException error) {
             latch.countDown();
           }
         });
@@ -294,18 +293,18 @@ class OpenAiChatStreamingDecoderTest {
         request,
         new ProviderStreamHandler() {
           @Override
-          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {
+          public void onEvent(ProviderStreamEvent event) {
             events.add(event);
           }
 
           @Override
-          public void onComplete(ProviderCompletion completion, ProviderStream stream) {
+          public void onComplete(ProviderCompletion completion) {
             completionRef.set(completion);
             latch.countDown();
           }
 
           @Override
-          public void onError(ProviderException error, ProviderStream stream) {
+          public void onError(ProviderException error) {
             latch.countDown();
           }
         });

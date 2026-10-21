@@ -1963,10 +1963,6 @@ export const aiCatalog = {
     'en-US': 'Model ready',
     'zh-CN': '模型就绪',
   },
-  'ai.runtime.thread.status.MODEL_DISPATCHING': {
-    'en-US': 'Dispatching model',
-    'zh-CN': '分派模型中',
-  },
   'ai.runtime.thread.status.MODEL_RUNNING': {
     'en-US': 'Model running',
     'zh-CN': '模型运行中',

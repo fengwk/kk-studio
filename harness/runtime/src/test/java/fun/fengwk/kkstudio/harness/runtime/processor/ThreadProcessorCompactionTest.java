@@ -247,7 +247,6 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
             .orElseThrow();
 
     // 模拟 ModelProcessor 完成 turn2 Model 并请求 THREAD（enqueue 侧调度原语，重建 Work 行 v1）。
-    transitionModel(fixture.store, turn2Model.id(), m -> m.beginDispatch(NOW));
     transitionModel(fixture.store, turn2Model.id(), m -> m.markRunning(NOW));
     transitionModel(
         fixture.store,
@@ -394,7 +393,6 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
             .transaction(
                 tx -> tx.findModelInvocationByTurn(baseline.threadId(), inputTurnStart.id()))
             .orElseThrow();
-    transitionModel(fixture.store, input.id(), m -> m.beginDispatch(NOW));
     transitionModel(fixture.store, input.id(), m -> m.markRunning(NOW));
     transitionModel(
         fixture.store,
@@ -654,7 +652,6 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
             .transaction(
                 tx -> tx.findModelInvocationByTurn(baseline.threadId(), continuationStart.id()))
             .orElseThrow();
-    transitionModel(fixture.store, continuation.id(), m -> m.beginDispatch(NOW));
     transitionModel(fixture.store, continuation.id(), m -> m.markRunning(NOW));
     transitionModel(
         fixture.store,
@@ -834,7 +831,6 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
             .transaction(
                 tx -> tx.findModelInvocationByTurn(baseline.threadId(), continuationStart.id()))
             .orElseThrow();
-    transitionModel(fixture.store, continuation.id(), m -> m.beginDispatch(NOW));
     transitionModel(fixture.store, continuation.id(), m -> m.markRunning(NOW));
     transitionModel(
         fixture.store,
@@ -966,7 +962,6 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
             .transaction(
                 tx -> tx.findModelInvocationByTurn(baseline.threadId(), inputTurnStart.id()))
             .orElseThrow();
-    transitionModel(fixture.store, input.id(), m -> m.beginDispatch(NOW));
     transitionModel(fixture.store, input.id(), m -> m.markRunning(NOW));
     transitionModel(
         fixture.store,

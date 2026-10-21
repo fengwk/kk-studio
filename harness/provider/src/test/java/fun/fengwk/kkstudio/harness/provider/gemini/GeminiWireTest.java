@@ -18,7 +18,6 @@ import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderToolCall;
@@ -88,15 +87,15 @@ class GeminiWireTest {
     ProviderStreamHandler handler =
         new ProviderStreamHandler() {
           @Override
-          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {
+          public void onEvent(ProviderStreamEvent event) {
             events.add(event);
           }
 
           @Override
-          public void onError(ProviderException error, ProviderStream stream) {}
+          public void onError(ProviderException error) {}
 
           @Override
-          public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
+          public void onComplete(ProviderCompletion completion) {}
         };
 
     GeminiStreamAccumulator accumulator =
@@ -118,15 +117,15 @@ class GeminiWireTest {
     ProviderStreamHandler handler =
         new ProviderStreamHandler() {
           @Override
-          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {
+          public void onEvent(ProviderStreamEvent event) {
             events.add(event);
           }
 
           @Override
-          public void onError(ProviderException error, ProviderStream stream) {}
+          public void onError(ProviderException error) {}
 
           @Override
-          public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
+          public void onComplete(ProviderCompletion completion) {}
         };
 
     GeminiStreamAccumulator accumulator =
@@ -147,15 +146,15 @@ class GeminiWireTest {
     ProviderStreamHandler handler =
         new ProviderStreamHandler() {
           @Override
-          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {
+          public void onEvent(ProviderStreamEvent event) {
             events.add(event);
           }
 
           @Override
-          public void onError(ProviderException error, ProviderStream stream) {}
+          public void onError(ProviderException error) {}
 
           @Override
-          public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
+          public void onComplete(ProviderCompletion completion) {}
         };
 
     GeminiStreamAccumulator accumulator =
@@ -178,15 +177,15 @@ class GeminiWireTest {
     ProviderStreamHandler handler =
         new ProviderStreamHandler() {
           @Override
-          public void onEvent(ProviderStreamEvent event, ProviderStream stream) {
+          public void onEvent(ProviderStreamEvent event) {
             events.add(event);
           }
 
           @Override
-          public void onError(ProviderException error, ProviderStream stream) {}
+          public void onError(ProviderException error) {}
 
           @Override
-          public void onComplete(ProviderCompletion completion, ProviderStream stream) {}
+          public void onComplete(ProviderCompletion completion) {}
         };
 
     GeminiStreamAccumulator accumulator =

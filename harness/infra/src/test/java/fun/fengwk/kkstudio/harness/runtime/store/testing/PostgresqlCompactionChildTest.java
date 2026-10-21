@@ -48,6 +48,7 @@ import fun.fengwk.kkstudio.harness.runtime.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.runtime.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.GenerationStopReason;
+import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderType;
@@ -93,11 +94,9 @@ import java.time.ZoneOffset;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -364,11 +363,10 @@ class PostgresqlCompactionChildTest {
 
     // 子的模型调用真实经 ModelProcessor 发出，provider 报上下文超限（OVERFLOW 不可重试）。
     UUID childModelId = openChildModel(child.childThreadId());
-    gateway.queueStarted();
+    gateway.queue(
+        new ModelGateway.Failed(
+            new ModelInvocationError(ProviderErrorKind.OVERFLOW, "context window exceeded")));
     assertEquals(ProcessResult.STARTED, processModel(childModelId, T1));
-    gateway
-        .listener(childModelId)
-        .onFailed(new ModelInvocationError(ProviderErrorKind.OVERFLOW, "context window exceeded"));
     assertEquals(ModelInvocationStatus.FAILED, findModel(childModelId).status());
     assertFalse(hasWork(WorkTargetType.MODEL, childModelId));
 
@@ -425,11 +423,11 @@ class PostgresqlCompactionChildTest {
     UUID childModelId = openChildModel(child.childThreadId());
 
     // attempt 1：截断 final（LENGTH）→ INVALID_RESPONSE，绝不产生结果，也不交付父。
-    gateway.queueStarted();
+    gateway.queue(
+        new ModelGateway.Succeeded(
+            new ProviderCompletion(
+                providerResponse("truncated partial summary", GenerationStopReason.LENGTH), null)));
     assertEquals(ProcessResult.STARTED, processModel(childModelId, T1));
-    gateway
-        .listener(childModelId)
-        .onSucceeded(providerResponse("truncated partial summary", GenerationStopReason.LENGTH));
     ModelInvocation afterFirstAttempt = findModel(childModelId);
     assertEquals(ModelInvocationStatus.READY, afterFirstAttempt.status());
     assertEquals(1, afterFirstAttempt.attempt());
@@ -441,12 +439,12 @@ class PostgresqlCompactionChildTest {
     assertFalse(hasWork(WorkTargetType.THREAD, parentId));
 
     // attempt 2：合法摘要，attempt 计数不重置。
-    gateway.queueStarted();
-    assertEquals(ProcessResult.STARTED, processModel(childModelId, T1));
     String summary = "durable compacted summary";
-    gateway
-        .listener(childModelId)
-        .onSucceeded(providerResponse(summary, GenerationStopReason.COMPLETE));
+    gateway.queue(
+        new ModelGateway.Succeeded(
+            new ProviderCompletion(
+                providerResponse(summary, GenerationStopReason.COMPLETE), null)));
+    assertEquals(ProcessResult.STARTED, processModel(childModelId, T1));
     ModelInvocation afterSecondAttempt = findModel(childModelId);
     assertEquals(ModelInvocationStatus.SUCCEEDED, afterSecondAttempt.status());
     assertEquals(2, afterSecondAttempt.attempt());
@@ -487,16 +485,14 @@ class PostgresqlCompactionChildTest {
     UUID childModelId = openChildModel(child.childThreadId());
 
     String partial = "partial text that must never surface";
-    gateway.queueStarted();
+    gateway.queue(
+        new ModelGateway.Succeeded(
+            new ProviderCompletion(providerResponse(partial, GenerationStopReason.LENGTH), null)));
     assertEquals(ProcessResult.STARTED, processModel(childModelId, T1));
-    gateway
-        .listener(childModelId)
-        .onSucceeded(providerResponse(partial, GenerationStopReason.LENGTH));
-    gateway.queueStarted();
+    gateway.queue(
+        new ModelGateway.Succeeded(
+            new ProviderCompletion(providerResponse(partial, GenerationStopReason.LENGTH), null)));
     assertEquals(ProcessResult.STARTED, processModel(childModelId, T1));
-    gateway
-        .listener(childModelId)
-        .onSucceeded(providerResponse(partial, GenerationStopReason.LENGTH));
 
     ModelInvocation exhausted = findModel(childModelId);
     assertEquals(ModelInvocationStatus.FAILED, exhausted.status());
@@ -599,11 +595,11 @@ class PostgresqlCompactionChildTest {
     UUID childModelId = openChildModel(child.childThreadId());
 
     // attempt 1：纯空白 final → INVALID_RESPONSE，绝不产生结果，也不交付父。
-    gateway.queueStarted();
+    gateway.queue(
+        new ModelGateway.Succeeded(
+            new ProviderCompletion(
+                providerResponse("  \n ", GenerationStopReason.COMPLETE), null)));
     assertEquals(ProcessResult.STARTED, processModel(childModelId, T1));
-    gateway
-        .listener(childModelId)
-        .onSucceeded(providerResponse("  \n ", GenerationStopReason.COMPLETE));
     ModelInvocation afterFirstAttempt = findModel(childModelId);
     assertEquals(ModelInvocationStatus.READY, afterFirstAttempt.status());
     assertEquals(1, afterFirstAttempt.attempt());
@@ -616,11 +612,11 @@ class PostgresqlCompactionChildTest {
 
     // attempt 2：合法摘要，attempt 计数不重置。
     String summary = "durable compacted summary";
-    gateway.queueStarted();
+    gateway.queue(
+        new ModelGateway.Succeeded(
+            new ProviderCompletion(
+                providerResponse(summary, GenerationStopReason.COMPLETE), null)));
     assertEquals(ProcessResult.STARTED, processModel(childModelId, T1));
-    gateway
-        .listener(childModelId)
-        .onSucceeded(providerResponse(summary, GenerationStopReason.COMPLETE));
     assertEquals(ModelInvocationStatus.SUCCEEDED, findModel(childModelId).status());
 
     processNext(child.childThreadId());
@@ -655,16 +651,14 @@ class PostgresqlCompactionChildTest {
     processNext(child.childThreadId());
     UUID childModelId = openChildModel(child.childThreadId());
 
-    gateway.queueStarted();
+    gateway.queue(
+        new ModelGateway.Succeeded(
+            new ProviderCompletion(providerResponse("   ", GenerationStopReason.COMPLETE), null)));
     assertEquals(ProcessResult.STARTED, processModel(childModelId, T1));
-    gateway
-        .listener(childModelId)
-        .onSucceeded(providerResponse("   ", GenerationStopReason.COMPLETE));
-    gateway.queueStarted();
+    gateway.queue(
+        new ModelGateway.Succeeded(
+            new ProviderCompletion(providerResponse("\n\n", GenerationStopReason.COMPLETE), null)));
     assertEquals(ProcessResult.STARTED, processModel(childModelId, T1));
-    gateway
-        .listener(childModelId)
-        .onSucceeded(providerResponse("\n\n", GenerationStopReason.COMPLETE));
 
     ModelInvocation exhausted = findModel(childModelId);
     assertEquals(ModelInvocationStatus.FAILED, exhausted.status());
@@ -938,38 +932,30 @@ class PostgresqlCompactionChildTest {
         "{}");
   }
 
-  /** 脚本化子压缩 model gateway：测试驱动 Started 与 Provider 终态回调，覆盖截断 / 超限的真实 processor 路径。 */
+  /** 脚本化子压缩 model gateway：按序返回排入的终态，覆盖截断 / 超限的真实 processor 路径（执行线程内联运行）。 */
   private static final class ScriptedChildGateway implements ModelGateway {
-    private final Deque<Object> results = new ArrayDeque<>();
-    private final Map<UUID, Listener> listeners = new ConcurrentHashMap<>();
+    private final Deque<Outcome> outcomes = new ArrayDeque<>();
 
-    void queueStarted() {
-      results.add(new ModelGateway.Started(new FakeHandle()));
+    void queue(Outcome outcome) {
+      outcomes.add(outcome);
     }
 
     @Override
-    public StartResult start(Execution execution, Listener listener) {
-      listeners.put(execution.invocationId(), listener);
-      Object result = results.poll();
-      if (result == null) {
-        throw new IllegalStateException("no queued gateway start");
+    public Admission admit(Execution execution) {
+      Outcome outcome = outcomes.poll();
+      if (outcome == null) {
+        throw new IllegalStateException("no queued gateway outcome");
       }
-      return (StartResult) result;
+      return new Admitted() {
+        @Override
+        public Outcome run(Sink sink) {
+          return outcome;
+        }
+
+        @Override
+        public void close() {}
+      };
     }
-
-    Listener listener(UUID invocationId) {
-      Listener listener = listeners.get(invocationId);
-      assertNotNull(listener, "gateway must have been asked to start " + invocationId);
-      return listener;
-    }
-  }
-
-  private static final class FakeHandle implements ModelGateway.Handle {
-    @Override
-    public void cancel() {}
-
-    @Override
-    public void activate() {}
   }
 
   private record ClosedTurnBaseline(
@@ -1185,9 +1171,7 @@ class PostgresqlCompactionChildTest {
           ModelInvocation model = tx.findModelInvocationByTurn(threadId, turn).orElseThrow();
           assertEquals(ModelInvocationStatus.READY, model.status());
           tx.lockModelInvocation(model.id());
-          ModelInvocation dispatching = model.beginDispatch(T1);
-          tx.updateModelInvocation(dispatching);
-          tx.updateModelInvocation(dispatching.markRunning(T1));
+          tx.updateModelInvocation(model.markRunning(T1));
           return null;
         });
   }

@@ -421,9 +421,7 @@ class PostgresqlSubagentContinuationTest {
           ModelInvocation model = tx.findModelInvocationByTurn(threadId, turn).orElseThrow();
           assertEquals(ModelInvocationStatus.READY, model.status());
           tx.lockModelInvocation(model.id());
-          ModelInvocation dispatching = model.beginDispatch(T1);
-          tx.updateModelInvocation(dispatching);
-          tx.updateModelInvocation(dispatching.markRunning(T1));
+          tx.updateModelInvocation(model.markRunning(T1));
           return null;
         });
   }
