@@ -2,3113 +2,514 @@ package fun.fengwk.kkstudio.harness.provider.transport;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ModelCallTimeoutPolicy;
-import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderStream;
 
-import javax.net.ssl.SSLContext;
-import javax.net.ssl.SSLParameters;
-import javax.net.ssl.SSLSession;
-
-import java.io.BufferedReader;
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.io.OutputStream;
-import java.net.Authenticator;
-import java.net.CookieHandler;
 import java.net.InetSocketAddress;
-import java.net.ProxySelector;
 import java.net.ServerSocket;
-import java.net.Socket;
-import java.net.SocketException;
 import java.net.URI;
 import java.net.http.HttpClient;
-import java.net.http.HttpClient.Redirect;
-import java.net.http.HttpClient.Version;
-import java.net.http.HttpHeaders;
 import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.Set;
-import java.util.concurrent.AbstractExecutorService;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Executor;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.Flow;
-import java.util.concurrent.Future;
-import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.ScheduledThreadPoolExecutor;
-import java.util.concurrent.SynchronousQueue;
-import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.stream.Collectors;
 
 /**
- * JdkHttpSseTransport 核心流传输器综合测试。
- *
- * <p>完整对齐上游 LangChain4j 1.20.0 规范中针对 SSE 流传输的核心行为， 并针对 Review 阻塞项强化状态机权威 RUNNING
- * 限制、Direct/Caller-runs 启动门死锁防护、 deadline 调度、严格最小 Allowlist 脱敏与竞态资源管理。
+ * 阻塞式 SSE 传输器：在调用线程上完成请求与逐事件交付；非 2xx / 非法 Content-Type / 超限 / 超时 / 中断都以分类明确且不泄露远端细节的 {@link
+ * TransportException} 结束，且任何路径都关闭响应体。
  */
 class JdkHttpSseTransportTest {
 
-  private HttpServer httpServer;
-  private ExecutorService workerExecutor;
-  private ScheduledExecutorService scheduler;
+  private static final ModelCallTimeoutPolicy GENEROUS =
+      new ModelCallTimeoutPolicy(Duration.ofSeconds(10), Duration.ofSeconds(10));
+
+  private HttpServer server;
+  private ScheduledExecutorService watchdog;
   private HttpClient httpClient;
   private JdkHttpSseTransport transport;
-  private int serverPort;
+  private final AtomicReference<Handler> handler = new AtomicReference<>();
+
+  @FunctionalInterface
+  interface Handler {
+    void handle(HttpExchange exchange) throws Exception;
+  }
 
   @BeforeEach
   void setUp() throws IOException {
-    httpServer = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-    serverPort = httpServer.getAddress().getPort();
-    httpServer.start();
-
-    workerExecutor = Executors.newVirtualThreadPerTaskExecutor();
-    scheduler = Executors.newSingleThreadScheduledExecutor();
-    httpClient =
-        HttpClient.newBuilder()
-            .version(HttpClient.Version.HTTP_1_1)
-            .followRedirects(HttpClient.Redirect.NEVER)
-            .build();
-    transport = new JdkHttpSseTransport(httpClient, workerExecutor, scheduler);
+    server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    server.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
+    server.createContext(
+        "/",
+        exchange -> {
+          try {
+            handler.get().handle(exchange);
+          } catch (Exception ignored) {
+            // 客户端主动断开等场景：服务端写失败属于预期。
+          } finally {
+            exchange.close();
+          }
+        });
+    server.start();
+    watchdog = Executors.newSingleThreadScheduledExecutor();
+    httpClient = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NEVER).build();
+    transport = new JdkHttpSseTransport(httpClient, watchdog);
   }
 
   @AfterEach
   void tearDown() {
-    if (httpServer != null) {
-      httpServer.stop(0);
-    }
-    if (httpClient != null) {
-      httpClient.shutdownNow();
-    }
-    if (workerExecutor != null) {
-      workerExecutor.shutdownNow();
-    }
-    if (scheduler != null) {
-      scheduler.shutdownNow();
-    }
+    server.stop(0);
+    watchdog.shutdownNow();
+    httpClient.close();
   }
 
-  // ==========================================
-  // 上游 HttpClientIT / Cancellation / Timeout 移植用例
-  // ==========================================
-
-  /** 对应上游 should_stream_successful_response：验证流式成功接收 SSE 响应。 */
+  /** 成功响应：按序交付全部事件（含事件名与多行 data），读完正常返回。 */
   @Test
-  void should_stream_successful_response() throws Exception {
-    httpServer.createContext(
-        "/it-stream-success",
-        exchange -> {
-          exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
-          exchange.sendResponseHeaders(200, 0);
-          try (OutputStream os = exchange.getResponseBody()) {
-            os.write("data: first\n\ndata: second\n\n".getBytes(StandardCharsets.UTF_8));
-          }
-        });
+  void deliversEventsInOrderAndReturnsAtEndOfStream() {
+    handler.set(
+        exchange ->
+            sse(
+                exchange,
+                "event: first\ndata: one\n\ndata: two\ndata: lines\n\n\n\ndata: three\n\n"));
 
-    RecordingCallback callback = new RecordingCallback();
-    HttpRequest request =
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/it-stream-success"))
-            .GET()
-            .build();
-    transport.stream(request, ModelCallTimeoutPolicy.DEFAULT, HttpSseLimits.DEFAULT, callback);
+    List<ServerSentEvent> events = execute(GENEROUS, HttpSseLimits.DEFAULT);
 
-    assertTrue(callback.latch.await(5, TimeUnit.SECONDS));
-    assertTrue(callback.opened);
-    assertNotNull(callback.openMetadata);
-    assertEquals(200, callback.openMetadata.statusCode());
-    assertFalse(callback.openMetadata.headers().isEmpty());
-    assertTrue(callback.completed);
-    assertNull(callback.error);
-    assertEquals(2, callback.events.size());
-    assertEquals("first", callback.events.get(0).data());
-    assertEquals("second", callback.events.get(1).data());
     assertEquals(
-        1,
-        callback.callbackThreads.size(),
-        "all callbacks must be delivered on a single worker thread");
+        List.of(
+            new ServerSentEvent("first", "one"),
+            new ServerSentEvent(null, "two\nlines"),
+            new ServerSentEvent(null, "three")),
+        events);
+  }
+
+  /** 空 data 行保留为字面换行：多行 data 合并后含 double newline。 */
+  @Test
+  void blankDataLinesKeepLiteralDoubleNewline() {
+    handler.set(exchange -> sse(exchange, "data: Berlin\ndata: \ndata: Paris\n\n"));
+
     assertEquals(
-        List.of("OPEN", "EVENT:first", "EVENT:second", "COMPLETE"),
-        callback.lifecycleEvents,
-        "lifecycle sequence must strictly be OPEN -> EVENT+ -> COMPLETE");
-    assertNotNull(callback.callbackThread);
-    assertNotEquals(
-        Thread.currentThread(),
-        callback.callbackThread,
-        "callbacks must be delivered off calling thread");
+        List.of(new ServerSentEvent(null, "Berlin\n\nParis")),
+        execute(GENEROUS, HttpSseLimits.DEFAULT));
   }
 
-  /**
-   * 本仓契约测试：验证显式 cancel 静默且无任何终态回调（onClose/onComplete/onFailure），并关闭底层连接。 契约差异说明：上游期望在取消后派发
-   * onClose；本模块显式取消对调用方保证静默无终态回调。
-   */
+  /** 回调返回 false：立即停止读取、关闭响应并正常返回，后续事件不再交付。 */
   @Test
-  void cancel_streaming_silently_aborts_without_terminal_callback() throws Exception {
-    for (int i = 0; i < 20; i++) {
-      assertCancellationClosesConnection(true);
-    }
+  void callerCanStopReadingEarly() {
+    handler.set(exchange -> sse(exchange, "data: a\n\ndata: b\n\ndata: c\n\n"));
+    List<String> seen = new ArrayList<>();
+
+    transport.execute(
+        request(),
+        GENEROUS,
+        HttpSseLimits.DEFAULT,
+        event -> {
+          seen.add(event.data());
+          return false;
+        });
+
+    assertEquals(List.of("a"), seen);
   }
 
-  /** 对应上游 should_stream_response_with_double_newline：验证事件 data 中保留字面 double newline 内容。 */
+  /** 回调抛出的运行时异常原样传播（不被包装成传输错误）。 */
   @Test
-  void should_stream_response_with_double_newline() throws Exception {
-    httpServer.createContext(
-        "/it-stream-newlines",
+  void callbackExceptionPropagatesUnchanged() {
+    handler.set(exchange -> sse(exchange, "data: a\n\n"));
+    IllegalStateException failure = new IllegalStateException("handler broke");
+
+    IllegalStateException thrown =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                transport.execute(
+                    request(),
+                    GENEROUS,
+                    HttpSseLimits.DEFAULT,
+                    event -> {
+                      throw failure;
+                    }));
+
+    assertSame(failure, thrown);
+  }
+
+  /** 非 2xx：HTTP_STATUS 携带状态码、按上限截断的 UTF-8 错误体（保留换行）与白名单内的响应头；未知或敏感头被丢弃。 */
+  @Test
+  void non2xxCarriesBoundedErrorBodyAndSafeHeaders() {
+    String body = "第一行\r\n第二行 " + "x".repeat(200);
+    handler.set(
         exchange -> {
-          exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
-          exchange.sendResponseHeaders(200, 0);
-          try (OutputStream os = exchange.getResponseBody()) {
-            // 发送跨行并带有空行的 data 内容，解析后应当保留字面 \n\n
-            os.write("data: Berlin\ndata: \ndata: Paris\n\n".getBytes(StandardCharsets.UTF_8));
-            os.flush();
+          exchange.getResponseHeaders().add("Content-Type", "application/problem+json");
+          exchange.getResponseHeaders().add("X-Request-Id", "req-1");
+          exchange.getResponseHeaders().add("X-Internal-Secret", "s3cr3t-value");
+          byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+          exchange.sendResponseHeaders(429, bytes.length);
+          try (OutputStream out = exchange.getResponseBody()) {
+            out.write(bytes);
           }
         });
 
-    RecordingCallback callback = new RecordingCallback();
-    HttpRequest request =
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/it-stream-newlines"))
-            .GET()
-            .build();
-    transport.stream(request, ModelCallTimeoutPolicy.DEFAULT, HttpSseLimits.DEFAULT, callback);
+    TransportException error =
+        assertThrows(
+            TransportException.class,
+            () -> execute(GENEROUS, new HttpSseLimits(1024, 1024, 1024 * 1024, 64)));
 
-    assertTrue(callback.latch.await(5, TimeUnit.SECONDS));
-    assertTrue(callback.opened);
-    assertTrue(callback.completed);
-    assertNull(callback.error);
-    assertFalse(callback.events.isEmpty());
-    String combined =
-        callback.events.stream().map(ServerSentEvent::data).collect(Collectors.joining(""));
-    assertTrue(combined.contains("Berlin"));
-    assertTrue(combined.contains("Paris"));
-    assertTrue(combined.contains("\n\n"), "event data must contain literal double newline");
-    assertNotNull(callback.callbackThread);
-    assertNotEquals(Thread.currentThread(), callback.callbackThread, "callback off calling thread");
+    assertEquals(TransportErrorKind.HTTP_STATUS, error.kind());
+    assertEquals(429, error.statusCode());
+    assertTrue(error.isErrorBodyTruncated());
+    assertEquals(64, error.errorBodyBytes().length);
+    assertTrue(error.errorBodyUtf8().startsWith("第一行\r\n第二行"));
+    assertFalse(error.getMessage().contains("第一行"), "error body must not leak into the message");
+    assertEquals(List.of("req-1"), error.safeHeaders().get("x-request-id"));
+    assertFalse(error.toString().contains("s3cr3t-value"));
+    assertFalse(String.valueOf(error.safeHeaders()).contains("s3cr3t-value"));
   }
 
-  /** 对应上游 should_deliver_error_when_streaming_400：验证流式响应 400 交付错误终态。 */
+  /** 错误体上限为 Integer.MAX_VALUE 时不发生整型溢出，完整读取且不标记截断。 */
   @Test
-  void should_deliver_error_when_streaming_400() throws Exception {
-    httpServer.createContext(
-        "/it-stream-400",
-        exchange -> {
-          byte[] err = "bad request body".getBytes(StandardCharsets.UTF_8);
-          exchange.sendResponseHeaders(400, err.length);
-          try (OutputStream os = exchange.getResponseBody()) {
-            os.write(err);
-          }
-        });
+  void errorBodyLimitAtIntegerMaxDoesNotOverflow() {
+    handler.set(exchange -> respond(exchange, 500, "text/plain", "boom"));
 
-    RecordingCallback callback = new RecordingCallback();
-    HttpRequest request =
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/it-stream-400"))
-            .GET()
-            .build();
-    transport.stream(request, ModelCallTimeoutPolicy.DEFAULT, HttpSseLimits.DEFAULT, callback);
+    TransportException error =
+        assertThrows(
+            TransportException.class,
+            () -> execute(GENEROUS, new HttpSseLimits(1024, 1024, 1024, Integer.MAX_VALUE)));
 
-    assertTrue(callback.latch.await(5, TimeUnit.SECONDS));
-    assertFalse(callback.opened);
-    assertFalse(callback.completed);
-    assertTrue(callback.events.isEmpty());
-    assertNotNull(callback.error);
-    assertEquals(TransportErrorKind.HTTP_STATUS, callback.error.kind());
-    assertEquals(400, callback.error.statusCode());
-    assertEquals("bad request body", callback.error.errorBodyUtf8());
+    assertEquals("boom", error.errorBodyUtf8());
+    assertFalse(error.isErrorBodyTruncated());
+  }
+
+  /** 2xx 但 Content-Type 不是 UTF-8 的 text/event-stream：INVALID_RESPONSE，且消息不含远端头值。 */
+  @Test
+  void invalidContentTypeIsRejectedWithoutLeakingTheHeaderValue() {
+    handler.set(exchange -> respond(exchange, 200, "text/html; secret-marker", "<html/>"));
+
+    TransportException error =
+        assertThrows(TransportException.class, () -> execute(GENEROUS, HttpSseLimits.DEFAULT));
+
+    assertEquals(TransportErrorKind.INVALID_RESPONSE, error.kind());
+    assertFalse(error.getMessage().contains("secret-marker"));
+    assertTrue(JdkHttpSseTransport.isValidEventStreamContentType("text/event-stream"));
+    assertTrue(
+        JdkHttpSseTransport.isValidEventStreamContentType("Text/Event-Stream; charset=\"UTF-8\""));
     assertFalse(
-        callback.error.getMessage().contains("bad request body"),
-        "error body must not leak into exception message");
-    assertNotNull(callback.callbackThread);
-    assertNotEquals(Thread.currentThread(), callback.callbackThread, "callback off calling thread");
+        JdkHttpSseTransport.isValidEventStreamContentType("text/event-stream; charset=latin1"));
+    assertFalse(JdkHttpSseTransport.isValidEventStreamContentType(" "));
+    assertFalse(JdkHttpSseTransport.isValidEventStreamContentType(null));
   }
 
-  /**
-   * 本仓契约测试：验证 onOpen 抛出异常安全隔离转终态。 契约差异说明：上游忽略 listener onOpen 异常并继续流；本模块遵循“回调失败即流失败”原则，安全隔离并立即终结。
-   */
+  /** 重定向不被跟随：3xx 作为 HTTP_STATUS 失败；构造时拒绝会跟随重定向的 HttpClient。 */
   @Test
-  void listener_onOpen_throwing_exception_transitions_to_callback_failed() throws Exception {
-    httpServer.createContext(
-        "/it-open-throw",
+  void redirectsAreNeverFollowed() {
+    handler.set(
         exchange -> {
-          exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
-          exchange.sendResponseHeaders(200, 0);
-          try (OutputStream os = exchange.getResponseBody()) {
-            os.write("data: hello\n\n".getBytes(StandardCharsets.UTF_8));
-          }
+          exchange.getResponseHeaders().add("Location", "http://127.0.0.1:1/elsewhere");
+          exchange.sendResponseHeaders(302, -1);
         });
 
-    CountDownLatch done = new CountDownLatch(1);
-    AtomicReference<TransportException> captured = new AtomicReference<>();
-    HttpRequest request =
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/it-open-throw"))
-            .GET()
-            .build();
-    transport.stream(
-        request,
-        ModelCallTimeoutPolicy.DEFAULT,
-        HttpSseLimits.DEFAULT,
-        new HttpSseCallback() {
-          @Override
-          public void onOpen(HttpOpenMetadata metadata) {
-            throw new RuntimeException("Error inside onOpen");
-          }
+    TransportException error =
+        assertThrows(TransportException.class, () -> execute(GENEROUS, HttpSseLimits.DEFAULT));
+    assertEquals(TransportErrorKind.HTTP_STATUS, error.kind());
+    assertEquals(302, error.statusCode());
 
-          @Override
-          public void onEvent(ServerSentEvent event) {}
-
-          @Override
-          public void onComplete() {}
-
-          @Override
-          public void onFailure(TransportException error) {
-            captured.set(error);
-            done.countDown();
-          }
-        });
-
-    assertTrue(done.await(5, TimeUnit.SECONDS));
-    assertNotNull(captured.get());
-    assertEquals(TransportErrorKind.CALLBACK_FAILED, captured.get().kind());
-  }
-
-  /**
-   * 本仓契约测试：验证 onEvent 抛出异常安全隔离转终态。 契约差异说明：上游忽略 listener onEvent 异常并继续流；本模块遵循“回调失败即流失败”原则，安全隔离并立即终结。
-   */
-  @Test
-  void listener_onEvent_throwing_exception_transitions_to_callback_failed() throws Exception {
-    httpServer.createContext(
-        "/it-event-throw",
-        exchange -> {
-          exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
-          exchange.sendResponseHeaders(200, 0);
-          try (OutputStream os = exchange.getResponseBody()) {
-            os.write("data: hello\n\n".getBytes(StandardCharsets.UTF_8));
-          }
-        });
-
-    CountDownLatch done = new CountDownLatch(1);
-    AtomicReference<TransportException> captured = new AtomicReference<>();
-    HttpRequest request =
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/it-event-throw"))
-            .GET()
-            .build();
-    transport.stream(
-        request,
-        ModelCallTimeoutPolicy.DEFAULT,
-        HttpSseLimits.DEFAULT,
-        new HttpSseCallback() {
-          @Override
-          public void onOpen(HttpOpenMetadata metadata) {}
-
-          @Override
-          public void onEvent(ServerSentEvent event) {
-            throw new RuntimeException("Error inside onEvent");
-          }
-
-          @Override
-          public void onComplete() {}
-
-          @Override
-          public void onFailure(TransportException error) {
-            captured.set(error);
-            done.countDown();
-          }
-        });
-
-    assertTrue(done.await(5, TimeUnit.SECONDS));
-    assertNotNull(captured.get());
-    assertEquals(TransportErrorKind.CALLBACK_FAILED, captured.get().kind());
-  }
-
-  /** 对应上游 should_not_fail_when_listener_onError_throws_exception：验证 onError 抛出异常被安全吸收不产生第二终态。 */
-  @Test
-  void should_not_fail_when_listener_onError_throws_exception() throws Exception {
-    httpServer.createContext(
-        "/it-error-throw",
-        exchange -> {
-          exchange.sendResponseHeaders(400, 0);
-          exchange.close();
-        });
-
-    AtomicInteger failureCount = new AtomicInteger(0);
-    AtomicBoolean openCalled = new AtomicBoolean(false);
-    AtomicBoolean eventCalled = new AtomicBoolean(false);
-    AtomicBoolean completeCalled = new AtomicBoolean(false);
-    AtomicReference<Thread> failureThread = new AtomicReference<>();
-    CountDownLatch done = new CountDownLatch(1);
-
-    HttpRequest request =
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/it-error-throw"))
-            .GET()
-            .build();
-    transport.stream(
-        request,
-        ModelCallTimeoutPolicy.DEFAULT,
-        HttpSseLimits.DEFAULT,
-        new HttpSseCallback() {
-          @Override
-          public void onOpen(HttpOpenMetadata metadata) {
-            openCalled.set(true);
-          }
-
-          @Override
-          public void onEvent(ServerSentEvent event) {
-            eventCalled.set(true);
-          }
-
-          @Override
-          public void onComplete() {
-            completeCalled.set(true);
-          }
-
-          @Override
-          public void onFailure(TransportException error) {
-            failureThread.set(Thread.currentThread());
-            failureCount.incrementAndGet();
-            done.countDown();
-            throw new RuntimeException("Error inside onFailure");
-          }
-        });
-
-    assertTrue(done.await(5, TimeUnit.SECONDS));
-    assertEquals(1, failureCount.get(), "must trigger failure callback exactly once");
-    assertFalse(openCalled.get(), "onOpen must not be called");
-    assertFalse(eventCalled.get(), "onEvent must not be called");
-    assertFalse(completeCalled.get(), "onComplete must not be called");
-    assertNotNull(failureThread.get());
-    assertNotEquals(
-        Thread.currentThread(), failureThread.get(), "callback must be off calling thread");
-  }
-
-  /** 对应上游 should_deliver_error_when_streaming_connect_fails：验证建连失败交付错误终态。 */
-  @Test
-  void should_deliver_error_when_streaming_connect_fails() throws Exception {
-    int deadPort;
-    try (ServerSocket ss = new ServerSocket(0)) {
-      deadPort = ss.getLocalPort();
-    }
-
-    RecordingCallback callback = new RecordingCallback();
-    HttpRequest request =
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + deadPort + "/connect-fail"))
-            .GET()
-            .build();
-    transport.stream(request, ModelCallTimeoutPolicy.DEFAULT, HttpSseLimits.DEFAULT, callback);
-
-    assertTrue(callback.latch.await(5, TimeUnit.SECONDS));
-    assertFalse(callback.opened);
-    assertFalse(callback.completed);
-    assertTrue(callback.events.isEmpty());
-    assertNotNull(callback.error);
-    assertEquals(TransportErrorKind.IO, callback.error.kind());
-    assertNotNull(callback.callbackThread);
-    assertNotEquals(Thread.currentThread(), callback.callbackThread, "callback off calling thread");
-  }
-
-  /** 对应上游 cancelling_the_future_releases_the_caller：验证取消流立即返回释放调用方。 */
-  @Test
-  void cancelling_the_future_releases_the_caller() throws Exception {
-    CountDownLatch clientConnected = new CountDownLatch(1);
-    httpServer.createContext(
-        "/it-cancel-release",
-        exchange -> {
-          exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
-          exchange.sendResponseHeaders(200, 0);
-          clientConnected.countDown();
-          try (OutputStream os = exchange.getResponseBody()) {
-            new CountDownLatch(1).await(5, TimeUnit.SECONDS);
-          } catch (Exception ignored) {
-          }
-        });
-
-    RecordingCallback callback = new RecordingCallback();
-    HttpRequest request =
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/it-cancel-release"))
-            .GET()
-            .build();
-    ProviderStream stream =
-        transport.stream(request, ModelCallTimeoutPolicy.DEFAULT, HttpSseLimits.DEFAULT, callback);
-
-    assertTrue(clientConnected.await(5, TimeUnit.SECONDS));
-    long start = System.nanoTime();
-    stream.cancel();
-    long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
-    assertTrue(elapsedMs < 500, "cancel must release calling thread rapidly (<500ms)");
-    assertTrue(stream.isCancelled());
-    assertFalse(callback.completed, "no onComplete callback on cancel");
-    assertNull(callback.error, "no onFailure callback on cancel");
-  }
-
-  /** 对应上游 cancelling_the_future_aborts_the_request_and_closes_the_connection：验证取消流立即关闭底层连接。 */
-  @Test
-  void cancelling_the_future_aborts_the_request_and_closes_the_connection() throws Exception {
-    for (int i = 0; i < 20; i++) {
-      assertCancellationClosesConnection(false);
+    try (HttpClient following =
+        HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NORMAL).build()) {
+      assertThrows(
+          IllegalArgumentException.class, () -> new JdkHttpSseTransport(following, watchdog));
     }
   }
 
-  /** 直接观测 TCP EOF/reset，分别覆盖响应刚发出和首个事件已接收时的取消，不依赖写缓冲耗尽。 */
-  private void assertCancellationClosesConnection(boolean waitForFirstEvent) throws Exception {
-    CountDownLatch firstSent = new CountDownLatch(1);
-    CountDownLatch firstReceived = new CountDownLatch(1);
-    CountDownLatch clientCancelled = new CountDownLatch(1);
-    RecordingCallback callback =
-        new RecordingCallback() {
-          @Override
-          public void onEvent(ServerSentEvent event) {
-            super.onEvent(event);
-            firstReceived.countDown();
-          }
-        };
+  /** 连接失败：IO，且消息不含请求 URI。 */
+  @Test
+  void connectionFailureIsIoWithoutLeakingTheUri() throws IOException {
+    int closedPort;
+    try (ServerSocket socket = new ServerSocket(0)) {
+      closedPort = socket.getLocalPort();
+    }
+    HttpRequest unreachable =
+        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + closedPort + "/secret-path"))
+            .build();
 
-    try (ServerSocket server = new ServerSocket()) {
-      server.bind(new InetSocketAddress("127.0.0.1", 0));
-      server.setSoTimeout(5000);
-      Future<Integer> peerClosed =
-          workerExecutor.submit(
+    TransportException error =
+        assertThrows(
+            TransportException.class,
+            () -> transport.execute(unreachable, GENEROUS, HttpSseLimits.DEFAULT, event -> true));
+
+    assertEquals(TransportErrorKind.IO, error.kind());
+    assertFalse(error.getMessage().contains("secret-path"));
+  }
+
+  /** 读取中途连接被重置：已交付的事件保留，随后以 IO 失败结束（不当作正常 EOF）。 */
+  @Test
+  void connectionResetMidStreamIsIo() throws Exception {
+    CountDownLatch firstEvent = new CountDownLatch(1);
+    try (ServerSocket socket = new ServerSocket(0)) {
+      Thread.ofVirtual()
+          .start(
               () -> {
-                try (Socket peer = server.accept()) {
-                  peer.setSoTimeout(5000);
-                  BufferedReader input =
-                      new BufferedReader(
-                          new InputStreamReader(peer.getInputStream(), StandardCharsets.UTF_8));
-                  assertEquals("GET /it-cancel-close HTTP/1.1", input.readLine());
-                  String header;
-                  do {
-                    header = input.readLine();
-                    assertNotNull(header, "request headers must be complete");
-                  } while (!header.isEmpty());
-                  byte[] event = "data: chunk1\n\n".getBytes(StandardCharsets.UTF_8);
-                  OutputStream output = peer.getOutputStream();
-                  output.write(
-                      ("HTTP/1.1 200 OK\r\n"
-                              + "Content-Type: text/event-stream\r\n"
+                try (var client = socket.accept()) {
+                  OutputStream out = client.getOutputStream();
+                  byte[] event = "data: first-event\n\n".getBytes(StandardCharsets.UTF_8);
+                  out.write(
+                      ("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n"
                               + "Transfer-Encoding: chunked\r\n\r\n"
                               + Integer.toHexString(event.length)
                               + "\r\n")
                           .getBytes(StandardCharsets.UTF_8));
-                  output.write(event);
-                  output.write("\r\n".getBytes(StandardCharsets.UTF_8));
-                  output.flush();
-                  firstSent.countDown();
-                  assertTrue(clientCancelled.await(5, TimeUnit.SECONDS));
-                  try {
-                    return input.read();
-                  } catch (SocketException e) {
-                    // 未读完的响应被取消时，对端也可能以 TCP reset 关闭连接。
-                    return -1;
-                  }
+                  out.write(event);
+                  out.write("\r\n".getBytes(StandardCharsets.UTF_8));
+                  out.flush();
+                  firstEvent.await(5, TimeUnit.SECONDS);
+                  // SO_LINGER=0 使 close 发送 RST，模拟连接被强行重置。
+                  client.setSoLinger(true, 0);
+                } catch (Exception ignored) {
+                  // 测试结束时 socket 关闭属于预期。
                 }
               });
-      try {
-        HttpRequest request =
-            HttpRequest.newBuilder(
-                    URI.create("http://127.0.0.1:" + server.getLocalPort() + "/it-cancel-close"))
-                .GET()
-                .build();
-        ProviderStream stream =
-            transport.stream(
-                request, ModelCallTimeoutPolicy.DEFAULT, HttpSseLimits.DEFAULT, callback);
-        assertTrue((waitForFirstEvent ? firstReceived : firstSent).await(5, TimeUnit.SECONDS));
-        stream.cancel();
-        clientCancelled.countDown();
-        assertEquals(
-            -1, peerClosed.get(5, TimeUnit.SECONDS), "server must detect closed connection");
-        assertTrue(stream.isCancelled());
-        assertFalse(callback.completed, "no completed callback on explicit cancel");
-        assertNull(callback.error, "no failure callback on explicit cancel");
-      } finally {
-        peerClosed.cancel(true);
-      }
-    }
-  }
-
-  /** send 返回前已交付响应体时，取消须关闭真实 subscriber，而不只是取消 worker future。 */
-  @Test
-  void cancelling_during_body_handoff_closes_the_handed_off_subscriber() throws Exception {
-    BodyHandoffFakeHttpClient fakeClient = new BodyHandoffFakeHttpClient();
-    RecordingCallback callback = new RecordingCallback();
-    JdkHttpSseTransport localTransport =
-        new JdkHttpSseTransport(fakeClient, workerExecutor, scheduler);
-
-    ProviderStream stream =
-        localTransport.stream(
-            HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/dummy"))
-                .GET()
-                .build(),
-            ModelCallTimeoutPolicy.DEFAULT,
-            HttpSseLimits.DEFAULT,
-            callback);
-
-    // 等待 body 已在 send 返回前交付（登记完成），随后取消
-    assertTrue(fakeClient.bodyHandoffDone.await(5, TimeUnit.SECONDS));
-    stream.cancel();
-
-    assertTrue(
-        fakeClient.subscription.cancelled.await(5, TimeUnit.SECONDS),
-        "cancel must close the handed-off response body, not only mark the future cancelled");
-    assertEquals(
-        1,
-        fakeClient.subscription.cancelCount.get(),
-        "handed-off subscription must be cancelled exactly once");
-    assertTrue(stream.isCancelled());
-    assertFalse(callback.opened, "no onOpen callback on cancel during body handoff");
-    assertFalse(callback.completed, "no onComplete callback on cancel during body handoff");
-    assertNull(callback.error, "no onFailure callback on explicit cancel");
-    assertTrue(callback.events.isEmpty(), "no onEvent callback on cancel during body handoff");
-  }
-
-  /** 回归：总超时在 body 交付后、send 返回前获胜时，同样必须关闭已登记的响应体。 */
-  @Test
-  void timeout_during_body_handoff_closes_the_handed_off_subscriber() throws Exception {
-    BodyHandoffFakeHttpClient fakeClient = new BodyHandoffFakeHttpClient();
-    RecordingCallback callback = new RecordingCallback();
-    JdkHttpSseTransport localTransport =
-        new JdkHttpSseTransport(fakeClient, workerExecutor, scheduler);
-
-    localTransport.stream(
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/dummy"))
-            .GET()
-            .build(),
-        new ModelCallTimeoutPolicy(Duration.ofSeconds(2), Duration.ofSeconds(2)),
-        HttpSseLimits.DEFAULT,
-        callback);
-
-    assertTrue(fakeClient.bodyHandoffDone.await(5, TimeUnit.SECONDS));
-    assertTrue(
-        fakeClient.subscription.cancelled.await(5, TimeUnit.SECONDS),
-        "timeout must close the handed-off response body");
-    assertTrue(callback.latch.await(5, TimeUnit.SECONDS));
-    assertNotNull(callback.error);
-    assertEquals(TransportErrorKind.TIMEOUT, callback.error.kind());
-    assertFalse(callback.opened, "onOpen must not be called when timeout wins body handoff");
-    assertFalse(callback.completed, "onComplete must not be called when timeout wins body handoff");
-  }
-
-  /** 终态先于 body 交付获胜时，晚到的响应体必须被立即关闭且不被登记。 */
-  @Test
-  void late_body_handoff_after_terminal_state_is_closed_immediately() {
-    AtomicInteger closeCount = new AtomicInteger();
-    InputStream lateBody = countingStream(closeCount);
-
-    HttpSseStreamExecution execution = newExecution(new RecordingCallback());
-    execution.triggerTimeout("simulated timeout before body handoff");
-    assertEquals(HttpSseStreamExecution.STATE_FAILED, execution.currentState());
-
-    assertNull(execution.captureBodyStream(null));
-    assertSame(lateBody, execution.captureBodyStream(lateBody));
-    assertEquals(1, closeCount.get(), "late body must be closed exactly once");
-
-    // 已进入终态的执行再次取消不得重复关闭晚到流
-    execution.cancel();
-    assertEquals(1, closeCount.get(), "late body must not be closed twice");
-  }
-
-  /** 已有 body 在管时，重复交付的流不得复写并泄漏原有所有权。 */
-  @Test
-  void body_handoff_never_overwrites_an_owned_stream() {
-    AtomicInteger firstClose = new AtomicInteger();
-    AtomicInteger secondClose = new AtomicInteger();
-    InputStream first = countingStream(firstClose);
-    InputStream second = countingStream(secondClose);
-
-    HttpSseStreamExecution execution = newExecution(new RecordingCallback());
-
-    assertSame(first, execution.captureBodyStream(first));
-    assertSame(second, execution.captureBodyStream(second));
-    assertEquals(0, firstClose.get(), "owned stream must not be closed by a later handoff");
-    assertEquals(1, secondClose.get(), "unowned duplicate stream must be closed and never leak");
-
-    // 取消只关闭真正在管的流一次
-    execution.cancel();
-    assertEquals(1, firstClose.get(), "owned stream must be closed exactly once on cancel");
-    assertEquals(1, secondClose.get());
-  }
-
-  private HttpSseStreamExecution newExecution(RecordingCallback callback) {
-    HttpRequest request =
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/dummy"))
-            .GET()
-            .build();
-    return new HttpSseStreamExecution(
-        httpClient, request, ModelCallTimeoutPolicy.DEFAULT, HttpSseLimits.DEFAULT, callback);
-  }
-
-  private static HttpHeaders eventStreamHeaders() {
-    return HttpHeaders.of(Map.of("Content-Type", List.of("text/event-stream")), (k, v) -> true);
-  }
-
-  private static InputStream countingStream(AtomicInteger closeCount) {
-    return new InputStream() {
-      @Override
-      public int read() {
-        return -1;
-      }
-
-      @Override
-      public void close() {
-        closeCount.incrementAndGet();
-      }
-    };
-  }
-
-  /** 对应上游 should_timeout_on_read_async：验证在接收响应头前发生超时，生命周期仅触发一次 onError(TIMEOUT)。 */
-  @Test
-  void should_timeout_on_read_async() throws Exception {
-    httpServer.createContext(
-        "/it-timeout-async",
-        exchange -> {
-          // 在发送任何响应头之前阻塞，直到测试完成或超时触发
-          try {
-            new CountDownLatch(1).await(5, TimeUnit.SECONDS);
-          } catch (Exception ignored) {
-          }
-        });
-
-    ModelCallTimeoutPolicy tightPolicy =
-        new ModelCallTimeoutPolicy(Duration.ofMillis(50), Duration.ofMillis(50));
-    RecordingCallback callback = new RecordingCallback();
-    HttpRequest request =
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/it-timeout-async"))
-            .GET()
-            .build();
-    transport.stream(request, tightPolicy, HttpSseLimits.DEFAULT, callback);
-
-    assertTrue(callback.latch.await(5, TimeUnit.SECONDS));
-    assertFalse(callback.opened, "onOpen must not be called when timeout happens before headers");
-    assertTrue(callback.events.isEmpty(), "onEvent must not be called");
-    assertFalse(callback.completed, "onComplete must not be called");
-    assertNotNull(callback.error, "onError must be called exactly once");
-    assertEquals(TransportErrorKind.TIMEOUT, callback.error.kind());
-    assertNotNull(callback.callbackThread);
-    assertNotEquals(Thread.currentThread(), callback.callbackThread, "callback off calling thread");
-  }
-
-  /** 对应上游 should_preserve_line_separators_of_error_response_body：验证错误正文保留换行符。 */
-  @Test
-  void should_preserve_line_separators_of_error_response_body() throws Exception {
-    String body = "line1\r\nline2\r\n";
-    httpServer.createContext(
-        "/error-newlines",
-        exchange -> {
-          byte[] b = body.getBytes(StandardCharsets.UTF_8);
-          exchange.sendResponseHeaders(400, b.length);
-          try (OutputStream os = exchange.getResponseBody()) {
-            os.write(b);
-          }
-        });
-
-    RecordingCallback callback = new RecordingCallback();
-    HttpRequest request =
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/error-newlines"))
-            .GET()
-            .build();
-    transport.stream(request, ModelCallTimeoutPolicy.DEFAULT, HttpSseLimits.DEFAULT, callback);
-
-    assertTrue(callback.latch.await(5, TimeUnit.SECONDS));
-    assertNotNull(callback.error);
-    assertEquals(body, callback.error.errorBodyUtf8());
-    assertEquals(400, callback.error.statusCode());
-    assertFalse(
-        callback.error.getMessage().contains("line1"),
-        "error body must not leak into exception message");
-  }
-
-  /** 对应上游 should_decode_error_response_body_as_utf8：验证错误正文以 UTF-8 解码。 */
-  @Test
-  void should_decode_error_response_body_as_utf8() throws Exception {
-    String koreanBody = "모델 오류 발생";
-    httpServer.createContext(
-        "/error-utf8",
-        exchange -> {
-          byte[] b = koreanBody.getBytes(StandardCharsets.UTF_8);
-          exchange.sendResponseHeaders(400, b.length);
-          try (OutputStream os = exchange.getResponseBody()) {
-            os.write(b);
-          }
-        });
-
-    RecordingCallback callback = new RecordingCallback();
-    HttpRequest request =
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/error-utf8"))
-            .GET()
-            .build();
-    transport.stream(request, ModelCallTimeoutPolicy.DEFAULT, HttpSseLimits.DEFAULT, callback);
-
-    assertTrue(callback.latch.await(5, TimeUnit.SECONDS));
-    assertNotNull(callback.error);
-    assertEquals(koreanBody, callback.error.errorBodyUtf8());
-    assertFalse(
-        callback.error.getMessage().contains("모델"),
-        "error body must not leak into exception message");
-  }
-
-  /** 对应上游 should_not_fail_on_successful_response：验证 200 成功响应不触发错误。 */
-  @Test
-  void should_not_fail_on_successful_response() throws Exception {
-    httpServer.createContext(
-        "/success-no-fail",
-        exchange -> {
-          exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
-          exchange.sendResponseHeaders(200, 0);
-          try (OutputStream os = exchange.getResponseBody()) {
-            os.write("data: ok\n\n".getBytes(StandardCharsets.UTF_8));
-          }
-        });
-
-    RecordingCallback callback = new RecordingCallback();
-    HttpRequest request =
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/success-no-fail"))
-            .GET()
-            .build();
-    transport.stream(request, ModelCallTimeoutPolicy.DEFAULT, HttpSseLimits.DEFAULT, callback);
-
-    assertTrue(callback.latch.await(5, TimeUnit.SECONDS));
-    assertNull(callback.error);
-    assertTrue(callback.completed);
-    assertEquals(1, callback.events.size());
-    assertEquals("ok", callback.events.get(0).data());
-  }
-
-  /** 本仓契约测试：验证 HttpSseLimits 单行缓冲区大小溢出时中止请求并关闭连接。 */
-  @Test
-  void line_limit_exceeded_aborts_request_with_protocol_error() throws Exception {
-    httpServer.createContext(
-        "/overflow-stream",
-        exchange -> {
-          exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
-          exchange.sendResponseHeaders(200, 0);
-          try (OutputStream os = exchange.getResponseBody()) {
-            // 写入单行超限事件
-            os.write("data: ".getBytes(StandardCharsets.UTF_8));
-            byte[] big = new byte[200];
-            Arrays.fill(big, (byte) 'a');
-            os.write(big);
-            os.write("\n\n".getBytes(StandardCharsets.UTF_8));
-          } catch (Exception ignored) {
-          }
-        });
-
-    HttpSseLimits smallLimits = new HttpSseLimits(64, 128, 1024, 64);
-    RecordingCallback callback = new RecordingCallback();
-    HttpRequest request =
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/overflow-stream"))
-            .GET()
-            .build();
-    transport.stream(request, ModelCallTimeoutPolicy.DEFAULT, smallLimits, callback);
-
-    assertTrue(callback.latch.await(5, TimeUnit.SECONDS));
-    assertNotNull(callback.error);
-    assertEquals(TransportErrorKind.INVALID_RESPONSE, callback.error.kind());
-    assertTrue(callback.error.getMessage().contains("SSE line size exceeded limit"));
-  }
-
-  /** 验证默认 HttpSseLimits 下单行超过 64KB 但在 1MB 预算内的合法数据行正常传输和消费。 */
-  @Test
-  void default_limits_accepts_transport_line_larger_than_64k_and_within_1m() throws Exception {
-    int dataSize = 128 * 1024;
-    httpServer.createContext(
-        "/large-line-stream",
-        exchange -> {
-          exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
-          exchange.sendResponseHeaders(200, 0);
-          try (OutputStream os = exchange.getResponseBody()) {
-            os.write("data: ".getBytes(StandardCharsets.UTF_8));
-            byte[] big = new byte[dataSize];
-            Arrays.fill(big, (byte) 'k');
-            os.write(big);
-            os.write("\n\n".getBytes(StandardCharsets.UTF_8));
-            os.flush();
-          } catch (Exception ignored) {
-          }
-        });
-
-    RecordingCallback callback = new RecordingCallback();
-    HttpRequest request =
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/large-line-stream"))
-            .GET()
-            .build();
-    transport.stream(request, ModelCallTimeoutPolicy.DEFAULT, HttpSseLimits.DEFAULT, callback);
-
-    assertTrue(callback.latch.await(5, TimeUnit.SECONDS));
-    assertNull(callback.error);
-    assertTrue(callback.completed);
-    assertEquals(1, callback.events.size());
-    assertEquals(dataSize, callback.events.get(0).data().length());
-  }
-
-  /** 验证默认 HttpSseLimits 下单行超过 1MB 预算时立即被拒绝并中止连接（fail closed）。 */
-  @Test
-  void default_limits_rejects_transport_line_larger_than_1m() throws Exception {
-    int dataSize = 1024 * 1024 + 10;
-    httpServer.createContext(
-        "/overflow-1m-stream",
-        exchange -> {
-          exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
-          exchange.sendResponseHeaders(200, 0);
-          try (OutputStream os = exchange.getResponseBody()) {
-            os.write("data: ".getBytes(StandardCharsets.UTF_8));
-            byte[] big = new byte[dataSize];
-            Arrays.fill(big, (byte) 'x');
-            os.write(big);
-            os.write("\n\n".getBytes(StandardCharsets.UTF_8));
-            os.flush();
-          } catch (Exception ignored) {
-          }
-        });
-
-    RecordingCallback callback = new RecordingCallback();
-    HttpRequest request =
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/overflow-1m-stream"))
-            .GET()
-            .build();
-    transport.stream(request, ModelCallTimeoutPolicy.DEFAULT, HttpSseLimits.DEFAULT, callback);
-
-    assertTrue(callback.latch.await(5, TimeUnit.SECONDS));
-    assertNotNull(callback.error);
-    assertEquals(TransportErrorKind.INVALID_RESPONSE, callback.error.kind());
-    assertTrue(callback.error.getMessage().contains("SSE line size exceeded limit"));
-  }
-
-  /**
-   * 契约测试（对应上游 shouldHandleIOException 的传输层映射）： 验证底层 HTTP 响应体流在读取过程中发生 I/O 故障时，精准且仅触发一次
-   * onFailure(TransportErrorKind.IO)，且绝不触发 onComplete。
-   */
-  @Test
-  void should_handle_io_exception_during_stream_read_and_fail_exactly_once() throws Exception {
-    CountDownLatch firstEventReceived = new CountDownLatch(1);
-    ServerSocket ss = new ServerSocket(0);
-    int port = ss.getLocalPort();
-    workerExecutor.submit(
-        () -> {
-          try (Socket client = ss.accept()) {
-            OutputStream out = client.getOutputStream();
-            String response =
-                "HTTP/1.1 200 OK\r\n"
-                    + "Content-Type: text/event-stream\r\n"
-                    + "Transfer-Encoding: chunked\r\n\r\n";
-            out.write(response.getBytes(StandardCharsets.UTF_8));
-            out.flush();
-            // 发送第一个有效事件 (chunk 长度必须精确为 19 即十六进制 13)
-            byte[] eventBytes = "data: first-event\n\n".getBytes(StandardCharsets.UTF_8);
-            String chunkHeader = Integer.toHexString(eventBytes.length) + "\r\n";
-            out.write(chunkHeader.getBytes(StandardCharsets.UTF_8));
-            out.write(eventBytes);
-            out.write("\r\n".getBytes(StandardCharsets.UTF_8));
-            out.flush();
-            // 等待客户端确认接收第一个事件后，通过 RST 强行重置 socket
-            assertTrue(firstEventReceived.await(5, TimeUnit.SECONDS));
-            client.setSoLinger(true, 0);
-            client.close();
-          } catch (Exception ignored) {
-          } finally {
-            try {
-              ss.close();
-            } catch (Exception ignored) {
-            }
-          }
-        });
-
-    RecordingCallback callback =
-        new RecordingCallback() {
-          @Override
-          public void onEvent(ServerSentEvent event) {
-            super.onEvent(event);
-            firstEventReceived.countDown();
-          }
-        };
-
-    HttpRequest request =
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/io-fail")).GET().build();
-    transport.stream(request, ModelCallTimeoutPolicy.DEFAULT, HttpSseLimits.DEFAULT, callback);
-
-    assertTrue(callback.latch.await(5, TimeUnit.SECONDS));
-    assertTrue(callback.opened, "onOpen must have been invoked before IO error");
-    assertEquals(1, callback.events.size(), "first event must be received");
-    assertEquals("first-event", callback.events.get(0).data());
-    assertFalse(callback.completed, "onComplete must not be invoked on IO failure");
-    assertNotNull(callback.error, "onFailure must be invoked");
-    assertEquals(TransportErrorKind.IO, callback.error.kind());
-  }
-
-  /**
-   * 契约测试（对应上游 parse_stops_emitting_after_the_listener_cancels 的传输层映射）： 验证在首个事件回调中重入调用
-   * ProviderStream.cancel()，即便服务端继续写入后续事件，客户端也立刻停止分发新事件且无终态回调。
-   */
-  @Test
-  void parse_stops_emitting_after_the_listener_cancels() throws Exception {
-    CountDownLatch firstEventReceived = new CountDownLatch(1);
-    CountDownLatch serverFinished = new CountDownLatch(1);
-    AtomicReference<ProviderStream> streamRef = new AtomicReference<>();
-    AtomicInteger eventCount = new AtomicInteger(0);
-    AtomicBoolean completedCalled = new AtomicBoolean(false);
-    AtomicBoolean failedCalled = new AtomicBoolean(false);
-
-    httpServer.createContext(
-        "/cancel-reentrant-test",
-        exchange -> {
-          exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
-          exchange.sendResponseHeaders(200, 0);
-          try (OutputStream os = exchange.getResponseBody()) {
-            os.write("data: first\n\n".getBytes(StandardCharsets.UTF_8));
-            os.flush();
-            assertTrue(firstEventReceived.await(5, TimeUnit.SECONDS));
-            // 客户端已在首个事件回调中 cancel，服务端继续写入后续多个事件
-            for (int i = 0; i < 5; i++) {
-              os.write(("data: subsequent-" + i + "\n\n").getBytes(StandardCharsets.UTF_8));
-              os.flush();
-            }
-          } catch (Exception ignored) {
-          } finally {
-            serverFinished.countDown();
-          }
-        });
-
-    HttpRequest request =
-        HttpRequest.newBuilder(
-                URI.create("http://127.0.0.1:" + serverPort + "/cancel-reentrant-test"))
-            .GET()
-            .build();
-
-    ProviderStream stream =
-        transport.stream(
-            request,
-            ModelCallTimeoutPolicy.DEFAULT,
-            HttpSseLimits.DEFAULT,
-            new HttpSseCallback() {
-              @Override
-              public void onOpen(HttpOpenMetadata metadata) {}
-
-              @Override
-              public void onEvent(ServerSentEvent event) {
-                eventCount.incrementAndGet();
-                // 收到首个事件立即重入取消
-                streamRef.get().cancel();
-                firstEventReceived.countDown();
-              }
-
-              @Override
-              public void onComplete() {
-                completedCalled.set(true);
-              }
-
-              @Override
-              public void onFailure(TransportException error) {
-                failedCalled.set(true);
-              }
-            });
-    streamRef.set(stream);
-
-    assertTrue(serverFinished.await(5, TimeUnit.SECONDS), "server writing must finish");
-
-    // 严格断言仅首个事件被分发
-    assertEquals(1, eventCount.get(), "only the first event should be emitted before cancel");
-    assertTrue(stream.isCancelled());
-    assertFalse(completedCalled.get(), "no completed callback on cancel");
-    assertFalse(failedCalled.get(), "no failure callback on cancel");
-  }
-
-  // ==========================================
-  // Review 阻塞项确定性回归测试
-  // ==========================================
-
-  /** 阻塞项 A.1：Watchdog 闲置超时转 FAILED 终态后，服务端后到的 late event 绝不再派发，worker 立即停止后续读取。 */
-  @Test
-  void watchdog_terminal_prevents_late_events_after_idle_timeout() throws Exception {
-    CountDownLatch serverStarted = new CountDownLatch(1);
-    CountDownLatch clientTimeoutReceived = new CountDownLatch(1);
-    CountDownLatch serverLateWriteFinished = new CountDownLatch(1);
-    AtomicBoolean failureOccurred = new AtomicBoolean(false);
-    AtomicInteger callbacksAfterFailure = new AtomicInteger(0);
-
-    httpServer.createContext(
-        "/watchdog-late-data",
-        exchange -> {
-          exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
-          exchange.sendResponseHeaders(200, 0);
-          serverStarted.countDown();
-          try (OutputStream os = exchange.getResponseBody()) {
-            // 等待客户端超时转为 FAILED 终态
-            assertTrue(clientTimeoutReceived.await(5, TimeUnit.SECONDS));
-            // 超时后发送数据
-            os.write("data: late event\n\n".getBytes(StandardCharsets.UTF_8));
-            os.flush();
-          } catch (Exception ignored) {
-          } finally {
-            serverLateWriteFinished.countDown();
-          }
-        });
-
-    ModelCallTimeoutPolicy tightPolicy =
-        new ModelCallTimeoutPolicy(Duration.ofMillis(20), Duration.ofMillis(20));
-    CountDownLatch failureLatch = new CountDownLatch(1);
-    HttpRequest request =
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/watchdog-late-data"))
-            .GET()
-            .build();
-
-    transport.stream(
-        request,
-        tightPolicy,
-        HttpSseLimits.DEFAULT,
-        new HttpSseCallback() {
-          @Override
-          public void onOpen(HttpOpenMetadata metadata) {
-            if (failureOccurred.get()) {
-              callbacksAfterFailure.incrementAndGet();
-            }
-          }
-
-          @Override
-          public void onEvent(ServerSentEvent event) {
-            if (failureOccurred.get()) {
-              callbacksAfterFailure.incrementAndGet();
-            }
-          }
-
-          @Override
-          public void onComplete() {
-            if (failureOccurred.get()) {
-              callbacksAfterFailure.incrementAndGet();
-            }
-          }
-
-          @Override
-          public void onFailure(TransportException error) {
-            failureOccurred.set(true);
-            clientTimeoutReceived.countDown();
-            failureLatch.countDown();
-          }
-        });
-
-    assertTrue(failureLatch.await(5, TimeUnit.SECONDS));
-    assertTrue(
-        serverLateWriteFinished.await(5, TimeUnit.SECONDS),
-        "server must finish attempting late write");
-    // 验证终态后非终态回调绝对为零
-    assertEquals(
-        0,
-        callbacksAfterFailure.get(),
-        "no non-terminal callbacks permitted after terminal FAILED state");
-  }
-
-  /** 阻塞项 A.1：Watchdog 总调用超时转 FAILED 终态后，服务端后到的 late headers/onOpen 绝不再派发。 */
-  @Test
-  void watchdog_terminal_prevents_late_headers_after_connect_timeout() throws Exception {
-    CountDownLatch clientTimeoutReceived = new CountDownLatch(1);
-    CountDownLatch serverLateResponseFinished = new CountDownLatch(1);
-    AtomicBoolean failureOccurred = new AtomicBoolean(false);
-    AtomicInteger onOpenCount = new AtomicInteger(0);
-    AtomicInteger callbacksAfterFailure = new AtomicInteger(0);
-
-    httpServer.createContext(
-        "/watchdog-late-headers",
-        exchange -> {
-          try {
-            // 等待客户端超时转为 FAILED 终态
-            assertTrue(clientTimeoutReceived.await(5, TimeUnit.SECONDS));
-            exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
-            exchange.sendResponseHeaders(200, 0);
-            try (OutputStream os = exchange.getResponseBody()) {
-              os.write("data: late-event\n\n".getBytes(StandardCharsets.UTF_8));
-              os.flush();
-            }
-          } catch (Exception ignored) {
-          } finally {
-            serverLateResponseFinished.countDown();
-          }
-        });
-
-    ModelCallTimeoutPolicy tightPolicy =
-        new ModelCallTimeoutPolicy(Duration.ofMillis(20), Duration.ofMillis(20));
-    CountDownLatch failureLatch = new CountDownLatch(1);
-    HttpRequest request =
-        HttpRequest.newBuilder(
-                URI.create("http://127.0.0.1:" + serverPort + "/watchdog-late-headers"))
-            .GET()
-            .build();
-
-    transport.stream(
-        request,
-        tightPolicy,
-        HttpSseLimits.DEFAULT,
-        new HttpSseCallback() {
-          @Override
-          public void onOpen(HttpOpenMetadata metadata) {
-            onOpenCount.incrementAndGet();
-            if (failureOccurred.get()) {
-              callbacksAfterFailure.incrementAndGet();
-            }
-          }
-
-          @Override
-          public void onEvent(ServerSentEvent event) {
-            if (failureOccurred.get()) {
-              callbacksAfterFailure.incrementAndGet();
-            }
-          }
-
-          @Override
-          public void onComplete() {
-            if (failureOccurred.get()) {
-              callbacksAfterFailure.incrementAndGet();
-            }
-          }
-
-          @Override
-          public void onFailure(TransportException error) {
-            failureOccurred.set(true);
-            clientTimeoutReceived.countDown();
-            failureLatch.countDown();
-          }
-        });
-
-    assertTrue(failureLatch.await(5, TimeUnit.SECONDS));
-    assertTrue(
-        serverLateResponseFinished.await(5, TimeUnit.SECONDS),
-        "server must finish attempting late response headers");
-    assertEquals(0, onOpenCount.get(), "onOpen must never be called after connect timeout");
-    assertEquals(0, callbacksAfterFailure.get(), "no callbacks permitted after terminal failure");
-  }
-
-  /** 阻塞项 A.1：onEvent 失败后，worker 立即停止后续读取，服务端后续事件绝不被派发。 */
-  @Test
-  void callback_failure_halts_further_worker_reading_and_no_further_callbacks() throws Exception {
-    AtomicInteger eventDeliveries = new AtomicInteger(0);
-    CountDownLatch failedLatch = new CountDownLatch(1);
-
-    httpServer.createContext(
-        "/event-fail-halt",
-        exchange -> {
-          exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
-          exchange.sendResponseHeaders(200, 0);
-          try (OutputStream os = exchange.getResponseBody()) {
-            for (int i = 1; i <= 10; i++) {
-              os.write(("data: event-" + i + "\n\n").getBytes(StandardCharsets.UTF_8));
-              os.flush();
-            }
-          } catch (Exception ignored) {
-          }
-        });
-
-    HttpRequest request =
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/event-fail-halt"))
-            .GET()
-            .build();
-    transport.stream(
-        request,
-        ModelCallTimeoutPolicy.DEFAULT,
-        HttpSseLimits.DEFAULT,
-        new HttpSseCallback() {
-          @Override
-          public void onOpen(HttpOpenMetadata metadata) {}
-
-          @Override
-          public void onEvent(ServerSentEvent event) {
-            eventDeliveries.incrementAndGet();
-            throw new RuntimeException("Simulated onEvent failure");
-          }
-
-          @Override
-          public void onComplete() {
-            eventDeliveries.incrementAndGet();
-          }
-
-          @Override
-          public void onFailure(TransportException error) {
-            failedLatch.countDown();
-          }
-        });
-
-    assertTrue(failedLatch.await(5, TimeUnit.SECONDS));
-    assertEquals(
-        1, eventDeliveries.get(), "worker must halt reading immediately upon callback failure");
-  }
-
-  /** 工作器 future 晚于 cancel 挂接时仍须立即取消；终态也不再安排 deadline。 */
-  @Test
-  void worker_future_attach_after_terminal_is_immediately_cancelled() {
-    HttpRequest request =
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/dummy"))
-            .GET()
-            .build();
-    RecordingCallback callback = new RecordingCallback();
-    HttpSseStreamExecution execution =
-        new HttpSseStreamExecution(
-            httpClient, request, ModelCallTimeoutPolicy.DEFAULT, HttpSseLimits.DEFAULT, callback);
-
-    // 提前取消使 execution 进入 CANCELLED 终态
-    execution.cancel();
-    assertTrue(execution.isCancelled());
-
-    // 随后挂接未完成的 worker future，必须被立即 cancel。
-    CountDownLatch blocker = new CountDownLatch(1);
-    Future<?> mockWorkerFuture =
-        workerExecutor.submit(
-            () -> {
-              try {
-                blocker.await(5, TimeUnit.SECONDS);
-              } catch (InterruptedException ignored) {
-              }
-            });
-    execution.attachWorkerFuture(mockWorkerFuture);
-    ScheduledThreadPoolExecutor deadlineScheduler = new ScheduledThreadPoolExecutor(1);
-    try {
-      execution.scheduleDeadline(deadlineScheduler);
-
-      assertTrue(
-          mockWorkerFuture.isCancelled(),
-          "workerFuture must be cancelled immediately when attached in terminal state");
-      assertTrue(
-          deadlineScheduler.getQueue().isEmpty(),
-          "terminal execution must not schedule another deadline");
-    } finally {
-      blocker.countDown();
-      deadlineScheduler.shutdownNow();
-    }
-  }
-
-  /** 阻塞项 A.3：检测并拒绝 direct executor inline execution，防止 stream 死锁，保证无触网、无回调。 */
-  @Test
-  void direct_executor_inline_execution_is_rejected_without_deadlock() {
-    ExecutorService directExecutor =
-        new AbstractExecutorService() {
-          private volatile boolean shutdown = false;
-
-          @Override
-          public void shutdown() {
-            shutdown = true;
-          }
-
-          @Override
-          public List<Runnable> shutdownNow() {
-            shutdown = true;
-            return List.of();
-          }
-
-          @Override
-          public boolean isShutdown() {
-            return shutdown;
-          }
-
-          @Override
-          public boolean isTerminated() {
-            return shutdown;
-          }
-
-          @Override
-          public boolean awaitTermination(long timeout, TimeUnit unit) {
-            return true;
-          }
-
-          @Override
-          public void execute(Runnable command) {
-            command.run(); // 强制在调用线程同步执行
-          }
-        };
-
-    JdkHttpSseTransport directTransport =
-        new JdkHttpSseTransport(httpClient, directExecutor, scheduler);
-    HttpRequest request =
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/dummy"))
-            .GET()
-            .build();
-    RecordingCallback callback = new RecordingCallback();
-
-    TransportException ex =
-        assertThrows(
-            TransportException.class,
-            () ->
-                directTransport.stream(
-                    request, ModelCallTimeoutPolicy.DEFAULT, HttpSseLimits.DEFAULT, callback));
-
-    assertEquals(TransportErrorKind.EXECUTOR_REJECTED, ex.kind());
-    assertFalse(callback.opened);
-    assertFalse(callback.completed);
-    assertNull(callback.error);
-  }
-
-  /** 阻塞项 A.3：使用 CallerRunsPolicy 满载时的 inline execution 确定性拒绝测试，杜绝死锁。 */
-  @Test
-  void caller_runs_policy_inline_execution_is_rejected_without_deadlock() throws Exception {
-    CountDownLatch blockerLatch = new CountDownLatch(1);
-    // 单线程池，队列容量为 0，超出时执行 CallerRunsPolicy
-    ThreadPoolExecutor callerRunsPool =
-        new ThreadPoolExecutor(
-            1,
-            1,
-            0,
-            TimeUnit.MILLISECONDS,
-            new SynchronousQueue<>(),
-            new ThreadPoolExecutor.CallerRunsPolicy());
-
-    try {
-      // 占满该唯一工作线程
-      callerRunsPool.submit(
-          () -> {
-            try {
-              blockerLatch.await(5, TimeUnit.SECONDS);
-            } catch (InterruptedException ignored) {
-            }
-          });
-
-      JdkHttpSseTransport callerRunsTransport =
-          new JdkHttpSseTransport(httpClient, callerRunsPool, scheduler);
       HttpRequest request =
-          HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/dummy"))
-              .GET()
+          HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + socket.getLocalPort() + "/io"))
               .build();
-      RecordingCallback callback = new RecordingCallback();
+      List<String> seen = new ArrayList<>();
 
-      // 再次提交将触发 CallerRunsPolicy 在当前调用线程内执行
-      TransportException ex =
+      TransportException error =
           assertThrows(
               TransportException.class,
               () ->
-                  callerRunsTransport.stream(
-                      request, ModelCallTimeoutPolicy.DEFAULT, HttpSseLimits.DEFAULT, callback));
+                  transport.execute(
+                      request,
+                      GENEROUS,
+                      HttpSseLimits.DEFAULT,
+                      event -> {
+                        seen.add(event.data());
+                        firstEvent.countDown();
+                        return true;
+                      }));
 
-      assertEquals(TransportErrorKind.EXECUTOR_REJECTED, ex.kind());
-      assertFalse(callback.opened);
-      assertNull(callback.error);
-    } finally {
-      blockerLatch.countDown();
-      callerRunsPool.shutdownNow();
+      assertEquals(TransportErrorKind.IO, error.kind());
+      assertEquals(List.of("first-event"), seen);
     }
   }
 
-  /** 阻塞项 A.4：非显式 cancel 导致的 worker 线程 InterruptedException 必须按 IO 语义分类并保留中断标志。 */
+  /** 响应头迟迟不到：以闲置/总时长中较短者作为响应头超时，分类为 TIMEOUT。 */
   @Test
-  void non_explicit_worker_interrupt_classifies_as_io_and_preserves_interrupt_flag()
-      throws Exception {
-    CountDownLatch serverConnected = new CountDownLatch(1);
-    AtomicReference<Thread> workerThreadRef = new AtomicReference<>();
-    CountDownLatch workerThreadCaptured = new CountDownLatch(1);
-    AtomicBoolean workerInterruptedFlag = new AtomicBoolean(false);
-    AtomicReference<TransportException> capturedError = new AtomicReference<>();
-    CountDownLatch latch = new CountDownLatch(1);
-
-    httpServer.createContext(
-        "/interrupt-io",
+  void slowHeadersTimeOut() {
+    CountDownLatch release = new CountDownLatch(1);
+    handler.set(
         exchange -> {
-          exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
-          exchange.sendResponseHeaders(200, 0);
-          serverConnected.countDown();
-          try (OutputStream os = exchange.getResponseBody()) {
-            new CountDownLatch(1).await(5, TimeUnit.SECONDS);
-          } catch (Exception ignored) {
-          }
+          release.await(5, TimeUnit.SECONDS);
+          sse(exchange, "data: late\n\n");
         });
-
-    ExecutorService customWorker =
-        Executors.newSingleThreadExecutor(
-            r -> {
-              Thread t = new Thread(r);
-              workerThreadRef.set(t);
-              workerThreadCaptured.countDown();
-              return t;
-            });
-
     try {
-      JdkHttpSseTransport customTransport =
-          new JdkHttpSseTransport(httpClient, customWorker, scheduler);
-      HttpRequest request =
-          HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/interrupt-io"))
-              .GET()
-              .build();
-
-      HttpSseCallback callback =
-          new HttpSseCallback() {
-            @Override
-            public void onOpen(HttpOpenMetadata metadata) {}
-
-            @Override
-            public void onEvent(ServerSentEvent event) {}
-
-            @Override
-            public void onComplete() {}
-
-            @Override
-            public void onFailure(TransportException error) {
-              workerInterruptedFlag.set(Thread.currentThread().isInterrupted());
-              // 清理中断标志以便安全回收线程
-              Thread.interrupted();
-              capturedError.set(error);
-              latch.countDown();
-            }
-          };
-
-      ProviderStream stream =
-          customTransport.stream(
-              request, ModelCallTimeoutPolicy.DEFAULT, HttpSseLimits.DEFAULT, callback);
-
-      assertTrue(workerThreadCaptured.await(5, TimeUnit.SECONDS));
-      assertTrue(serverConnected.await(5, TimeUnit.SECONDS));
-
-      // 外部非显式 cancel 中断 worker 线程
-      workerThreadRef.get().interrupt();
-
-      assertTrue(latch.await(5, TimeUnit.SECONDS));
-      assertNotNull(capturedError.get());
-      // 必须分类为 IO，绝不得误报为 CANCELLED，且中断标志必须被保留
-      assertEquals(TransportErrorKind.IO, capturedError.get().kind());
-      assertTrue(workerInterruptedFlag.get(), "worker thread interrupt flag must be preserved");
+      TransportException error =
+          assertThrows(
+              TransportException.class,
+              () ->
+                  execute(
+                      new ModelCallTimeoutPolicy(Duration.ofSeconds(5), Duration.ofMillis(200)),
+                      HttpSseLimits.DEFAULT));
+      assertEquals(TransportErrorKind.TIMEOUT, error.kind());
     } finally {
-      customWorker.shutdownNow();
+      release.countDown();
     }
   }
 
-  /** 短超时直接排到 deadline，而不是等待固定的轮询间隔。 */
+  /** 响应体闲置超时：watchdog 关闭阻塞中的读取，以 TIMEOUT（而不是正常 EOF）结束，已交付的事件保留。 */
   @Test
-  void short_timeout_triggers_rapidly_via_deadline() throws Exception {
-    httpServer.createContext(
-        "/rapid-timeout",
+  void idleBodyTimesOutAndClosesTheBlockedRead() {
+    CountDownLatch release = new CountDownLatch(1);
+    handler.set(
         exchange -> {
-          exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+          exchange.getResponseHeaders().add("Content-Type", "text/event-stream");
           exchange.sendResponseHeaders(200, 0);
-          try (OutputStream os = exchange.getResponseBody()) {
-            new CountDownLatch(1).await(5, TimeUnit.SECONDS);
-          } catch (Exception ignored) {
-          }
+          OutputStream out = exchange.getResponseBody();
+          out.write("data: first\n\n".getBytes(StandardCharsets.UTF_8));
+          out.flush();
+          release.await(5, TimeUnit.SECONDS);
         });
-
-    ModelCallTimeoutPolicy shortTimeout =
-        new ModelCallTimeoutPolicy(Duration.ofMillis(5), Duration.ofMillis(5));
-    RecordingCallback callback = new RecordingCallback();
-    HttpRequest request =
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/rapid-timeout"))
-            .GET()
-            .build();
-
-    // 直接检查初次 deadline 不引入 25ms 的轮询延迟。
-    HttpSseStreamExecution execution =
-        new HttpSseStreamExecution(
-            httpClient, request, shortTimeout, HttpSseLimits.DEFAULT, callback);
-    assertTrue(execution.nextDeadlineDelayNanos(System.nanoTime()) <= 5_000_000L);
-
-    long start = System.nanoTime();
-    transport.stream(request, shortTimeout, HttpSseLimits.DEFAULT, callback);
-
-    assertTrue(callback.latch.await(2, TimeUnit.SECONDS));
-    long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
-
-    assertNotNull(callback.error);
-    assertEquals(TransportErrorKind.TIMEOUT, callback.error.kind());
-    assertTrue(elapsedMillis < 500, "short timeout must trigger rapidly without artificial delay");
-  }
-
-  /** timer 只排期：阻塞的失败回调不得拖延其他流的 deadline。 */
-  @Test
-  void blocking_timeout_callback_does_not_block_shared_scheduler() throws Exception {
-    CountDownLatch callbackEntered = new CountDownLatch(1);
-    CountDownLatch releaseCallback = new CountDownLatch(1);
+    List<String> seen = new ArrayList<>();
     try {
-      httpServer.createContext(
-          "/blocked-deadline",
-          exchange -> {
-            try {
-              releaseCallback.await(5, TimeUnit.SECONDS);
-            } catch (InterruptedException e) {
-              Thread.currentThread().interrupt();
-            }
-          });
-      HttpRequest request =
-          HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/blocked-deadline"))
-              .GET()
-              .build();
-      RecordingCallback first =
-          new RecordingCallback() {
-            @Override
-            public void onFailure(TransportException error) {
-              callbackEntered.countDown();
-              try {
-                releaseCallback.await(5, TimeUnit.SECONDS);
-              } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-              }
-              super.onFailure(error);
-            }
-          };
-      transport.stream(
-          request,
-          new ModelCallTimeoutPolicy(Duration.ofMillis(50), Duration.ofSeconds(2)),
-          HttpSseLimits.DEFAULT,
-          first);
-      assertTrue(callbackEntered.await(5, TimeUnit.SECONDS));
-      RecordingCallback second = new RecordingCallback();
-      transport.stream(
-          request,
-          new ModelCallTimeoutPolicy(Duration.ofMillis(50), Duration.ofSeconds(2)),
-          HttpSseLimits.DEFAULT,
-          second);
-      assertTrue(
-          second.latch.await(2, TimeUnit.SECONDS), "second timeout must not await first callback");
-      assertEquals(TransportErrorKind.TIMEOUT, second.error.kind());
+      TransportException error =
+          assertThrows(
+              TransportException.class,
+              () ->
+                  transport.execute(
+                      request(),
+                      new ModelCallTimeoutPolicy(Duration.ofSeconds(5), Duration.ofMillis(300)),
+                      HttpSseLimits.DEFAULT,
+                      event -> seen.add(event.data())));
+      assertEquals(TransportErrorKind.TIMEOUT, error.kind());
+      assertTrue(error.getMessage().contains("idle"));
+      assertEquals(List.of("first"), seen);
     } finally {
-      releaseCallback.countDown();
+      release.countDown();
     }
   }
 
-  /** 单线程 worker 的唯一线程卡在 read 时，deadline 清理不能排在同一 I/O 队列后。 */
+  /** 持续活动只延长闲置期限，不延长总时长：一直有数据的流仍在总时长到期时以 TIMEOUT 结束。 */
   @Test
-  void deadline_expires_with_single_worker_blocked_in_stream_read() throws Exception {
-    verifyDeadlineIndependentOfWorker(
-        new ThreadPoolExecutor(1, 1, 0, TimeUnit.SECONDS, new LinkedBlockingQueue<>(1)), false);
-  }
-
-  /** CallerRunsPolicy 不能把 deadline 清理转移到共享 timer 上。 */
-  @Test
-  void deadline_expires_with_caller_runs_worker() throws Exception {
-    verifyDeadlineIndependentOfWorker(
-        new ThreadPoolExecutor(
-            1,
-            1,
-            0,
-            TimeUnit.SECONDS,
-            new SynchronousQueue<>(),
-            new ThreadPoolExecutor.CallerRunsPolicy()),
-        false);
-  }
-
-  /** 入场后的 worker 池关闭也不能使已经排期的 timeout 失效。 */
-  @Test
-  void deadline_expires_after_worker_executor_shutdown() throws Exception {
-    verifyDeadlineIndependentOfWorker(
-        new ThreadPoolExecutor(1, 1, 0, TimeUnit.SECONDS, new LinkedBlockingQueue<>(1)), true);
-  }
-
-  private void verifyDeadlineIndependentOfWorker(ThreadPoolExecutor singleWorker, boolean shutdown)
-      throws Exception {
-    CountDownLatch firstEvent = new CountDownLatch(1);
-    CountDownLatch releaseServer = new CountDownLatch(1);
-    AtomicReference<Thread> timerThread = new AtomicReference<>();
-    ScheduledThreadPoolExecutor singleTimer =
-        new ScheduledThreadPoolExecutor(
-            1,
-            runnable ->
-                new Thread(
-                    () -> {
-                      timerThread.set(Thread.currentThread());
-                      runnable.run();
-                    },
-                    "deadline-test-timer"));
-    try {
-      httpServer.createContext(
-          "/single-worker-deadline",
-          exchange -> {
-            exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
-            exchange.sendResponseHeaders(200, 0);
-            try (OutputStream out = exchange.getResponseBody()) {
-              out.write("data: first\n\n".getBytes(StandardCharsets.UTF_8));
-              out.flush();
-              releaseServer.await(5, TimeUnit.SECONDS);
-            } catch (Exception ignored) {
-            }
-          });
-      RecordingCallback callback =
-          new RecordingCallback() {
-            @Override
-            public void onEvent(ServerSentEvent event) {
-              super.onEvent(event);
-              firstEvent.countDown();
-            }
-          };
-      ProviderStream stream =
-          new JdkHttpSseTransport(httpClient, singleWorker, singleTimer)
-              .stream(
-                  HttpRequest.newBuilder(
-                          URI.create("http://127.0.0.1:" + serverPort + "/single-worker-deadline"))
-                      .GET()
-                      .build(),
-                  new ModelCallTimeoutPolicy(Duration.ofSeconds(2), Duration.ofMillis(300)),
-                  HttpSseLimits.DEFAULT,
-                  callback);
-      assertTrue(firstEvent.await(5, TimeUnit.SECONDS));
-      assertEquals(1, singleWorker.getActiveCount(), "only worker remains in blocking read");
-      if (shutdown) {
-        singleWorker.shutdown();
-      }
-      assertTrue(callback.latch.await(2, TimeUnit.SECONDS), "deadline must not queue behind I/O");
-      assertEquals(TransportErrorKind.TIMEOUT, callback.error.kind());
-      assertTrue(callback.error.getMessage().contains("idle timeout"));
-      assertFalse(stream.isCancelled());
-      assertFalse(callback.completed);
-      assertNotEquals(timerThread.get(), callback.callbackThread, "timer never executes callbacks");
-      assertEquals(
-          1, callback.lifecycleEvents.stream().filter(e -> e.startsWith("FAILURE")).count());
-    } finally {
-      releaseServer.countDown();
-      singleTimer.shutdownNow();
-      singleWorker.shutdownNow();
-    }
-  }
-
-  /** 有读活动时不逐字节重建 timer；结束时取消未到期任务。 */
-  @Test
-  void activity_does_not_churn_deadline_tasks_and_completion_cancels_timer() throws Exception {
-    AtomicInteger schedules = new AtomicInteger();
-    ScheduledThreadPoolExecutor countingScheduler =
-        new ScheduledThreadPoolExecutor(1) {
-          @Override
-          public ScheduledFuture<?> schedule(Runnable command, long delay, TimeUnit unit) {
-            schedules.incrementAndGet();
-            return super.schedule(command, delay, unit);
-          }
-        };
-    countingScheduler.setRemoveOnCancelPolicy(true);
-    CountDownLatch releaseServer = new CountDownLatch(1);
-    try {
-      CountDownLatch eventsReceived = new CountDownLatch(20);
-      httpServer.createContext(
-          "/active-deadline",
-          exchange -> {
-            exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
-            exchange.sendResponseHeaders(200, 0);
-            try (OutputStream os = exchange.getResponseBody()) {
-              for (int i = 0; i < 20; i++) {
-                os.write(("data: " + i + "\n\n").getBytes(StandardCharsets.UTF_8));
-                os.flush();
-              }
-              releaseServer.await(5, TimeUnit.SECONDS);
-            } catch (Exception ignored) {
-            }
-          });
-      RecordingCallback callback =
-          new RecordingCallback() {
-            @Override
-            public void onEvent(ServerSentEvent event) {
-              super.onEvent(event);
-              eventsReceived.countDown();
-            }
-          };
-      JdkHttpSseTransport localTransport =
-          new JdkHttpSseTransport(httpClient, workerExecutor, countingScheduler);
-      localTransport.stream(
-          HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/active-deadline"))
-              .GET()
-              .build(),
-          new ModelCallTimeoutPolicy(Duration.ofSeconds(10), Duration.ofSeconds(5)),
-          HttpSseLimits.DEFAULT,
-          callback);
-      assertTrue(eventsReceived.await(5, TimeUnit.SECONDS));
-      assertEquals(1, schedules.get(), "reads must not reschedule timer");
-      releaseServer.countDown();
-      assertTrue(callback.latch.await(5, TimeUnit.SECONDS));
-      assertTrue(callback.completed);
-      assertEquals(0, countingScheduler.getQueue().size(), "terminal must remove timer");
-    } finally {
-      releaseServer.countDown();
-      countingScheduler.shutdownNow();
-    }
-  }
-
-  /** 活动延长 idle deadline，但持续活动不能延长绝对总超时；超时后仅有一个终态。 */
-  @Test
-  void activity_extends_idle_but_not_total_deadline() throws Exception {
-    CountDownLatch stopServer = new CountDownLatch(1);
-    CountDownLatch firstEvent = new CountDownLatch(1);
-    try {
-      httpServer.createContext(
-          "/heartbeat-deadline",
-          exchange -> {
-            exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
-            exchange.sendResponseHeaders(200, 0);
-            try (OutputStream os = exchange.getResponseBody()) {
-              while (!stopServer.await(40, TimeUnit.MILLISECONDS)) {
-                os.write("data: beat\n\n".getBytes(StandardCharsets.UTF_8));
-                os.flush();
-              }
-            } catch (Exception ignored) {
-            }
-          });
-      RecordingCallback callback =
-          new RecordingCallback() {
-            @Override
-            public void onEvent(ServerSentEvent event) {
-              super.onEvent(event);
-              firstEvent.countDown();
-            }
-          };
-      transport.stream(
-          HttpRequest.newBuilder(
-                  URI.create("http://127.0.0.1:" + serverPort + "/heartbeat-deadline"))
-              .GET()
-              .build(),
-          new ModelCallTimeoutPolicy(Duration.ofMillis(600), Duration.ofMillis(200)),
-          HttpSseLimits.DEFAULT,
-          callback);
-      assertTrue(firstEvent.await(5, TimeUnit.SECONDS));
-      assertTrue(callback.latch.await(5, TimeUnit.SECONDS));
-      assertEquals(TransportErrorKind.TIMEOUT, callback.error.kind());
-      assertTrue(callback.error.getMessage().contains("Total call duration"));
-      assertTrue(callback.events.size() >= 3, "activity must prevent early idle timeout");
-      assertFalse(callback.completed);
-    } finally {
-      stopServer.countDown();
-    }
-  }
-
-  /** 已取消的过期 timer 即使开始执行，也不能排新任务或触发终态回调。 */
-  @Test
-  void stale_deadline_task_cannot_change_cancelled_state() {
-    AtomicReference<Runnable> timerTask = new AtomicReference<>();
-    AtomicInteger schedules = new AtomicInteger();
-    ScheduledThreadPoolExecutor capturingScheduler =
-        new ScheduledThreadPoolExecutor(1) {
-          @Override
-          public ScheduledFuture<?> schedule(Runnable command, long delay, TimeUnit unit) {
-            timerTask.set(command);
-            schedules.incrementAndGet();
-            return super.schedule(command, delay, unit);
-          }
-        };
-    try {
-      RecordingCallback callback = new RecordingCallback();
-      HttpSseStreamExecution execution =
-          new HttpSseStreamExecution(
-              httpClient,
-              HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/dummy"))
-                  .GET()
-                  .build(),
-              ModelCallTimeoutPolicy.DEFAULT,
-              HttpSseLimits.DEFAULT,
-              callback);
-      execution.scheduleDeadline(capturingScheduler);
-      execution.cancel();
-      timerTask.get().run();
-      assertEquals(1, schedules.get());
-      assertTrue(execution.isCancelled());
-      assertNull(callback.error);
-      assertFalse(callback.completed);
-    } finally {
-      capturingScheduler.shutdownNow();
-    }
-  }
-
-  /** 已入场的流在 idle 重新排期时遇调度器关闭，应明确失败并清理旧 timer。 */
-  @Test
-  void reschedule_rejection_fails_and_cleans_up() throws Exception {
-    AtomicReference<Runnable> deadlineTask = new AtomicReference<>();
-    ScheduledThreadPoolExecutor closingScheduler =
-        new ScheduledThreadPoolExecutor(1) {
-          @Override
-          public ScheduledFuture<?> schedule(Runnable command, long delay, TimeUnit unit) {
-            deadlineTask.set(command);
-            return super.schedule(command, delay, unit);
-          }
-        };
-    RecordingCallback callback = new RecordingCallback();
-    HttpSseStreamExecution execution =
-        new HttpSseStreamExecution(
-            httpClient,
-            HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/dummy"))
-                .GET()
-                .build(),
-            ModelCallTimeoutPolicy.DEFAULT,
-            HttpSseLimits.DEFAULT,
-            callback);
-    execution.scheduleDeadline(closingScheduler);
-    closingScheduler.shutdownNow();
-    // 真实 timer 入口触发重排；拒绝清理在短寿虚拟线程上完成。
-    deadlineTask.get().run();
-    assertTrue(callback.latch.await(5, TimeUnit.SECONDS));
-    assertEquals(HttpSseStreamExecution.STATE_FAILED, execution.currentState());
-    assertEquals(TransportErrorKind.EXECUTOR_REJECTED, callback.error.kind());
-  }
-
-  /** deadline 失败须在回调前关闭阻塞中的响应流，并中止工作器。 */
-  @Test
-  void deadline_closes_active_stream_before_failure_callback() throws Exception {
-    CountDownLatch readEntered = new CountDownLatch(1);
-    CountDownLatch released = new CountDownLatch(1);
-    AtomicInteger closeCount = new AtomicInteger();
-    InputStream body =
-        new InputStream() {
-          @Override
-          public int read() throws IOException {
-            readEntered.countDown();
-            try {
-              released.await(5, TimeUnit.SECONDS);
-            } catch (InterruptedException e) {
-              Thread.currentThread().interrupt();
-              throw new IOException(e);
-            }
-            return -1;
-          }
-
-          @Override
-          public int read(byte[] bytes, int offset, int length) throws IOException {
-            return read();
-          }
-
-          @Override
-          public void close() {
-            closeCount.incrementAndGet();
-            released.countDown();
-          }
-        };
-    HttpHeaders headers =
-        HttpHeaders.of(Map.of("Content-Type", List.of("text/event-stream")), (k, v) -> true);
-    ControllableFakeHttpClient fakeClient =
-        new ControllableFakeHttpClient(new FakeHttpResponse<>(200, headers, body));
-    RecordingCallback callback =
-        new RecordingCallback() {
-          @Override
-          public void onFailure(TransportException error) {
-            assertEquals(1, closeCount.get(), "stream must close before terminal callback");
-            super.onFailure(error);
-          }
-        };
-    JdkHttpSseTransport localTransport =
-        new JdkHttpSseTransport(fakeClient, workerExecutor, scheduler);
-    localTransport.stream(
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/dummy"))
-            .GET()
-            .build(),
-        new ModelCallTimeoutPolicy(Duration.ofSeconds(2), Duration.ofMillis(500)),
-        HttpSseLimits.DEFAULT,
-        callback);
-    assertTrue(fakeClient.sendEntered.await(5, TimeUnit.SECONDS));
-    fakeClient.allowSendReturn.countDown();
-    assertTrue(readEntered.await(5, TimeUnit.SECONDS));
-    assertTrue(callback.latch.await(5, TimeUnit.SECONDS));
-    assertEquals(TransportErrorKind.TIMEOUT, callback.error.kind());
-    assertEquals(1, closeCount.get());
-    assertFalse(callback.completed);
-  }
-
-  /** 阻塞项 A.5：大 Duration (Long.MAX_VALUE) 饱和算术不发生溢出崩溃或误报超时。 */
-  @Test
-  void large_duration_does_not_overflow() throws Exception {
-    httpServer.createContext(
-        "/large-duration-safe",
+  void activityExtendsIdleButNotTotalDeadline() {
+    AtomicBoolean stop = new AtomicBoolean();
+    handler.set(
         exchange -> {
-          exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+          exchange.getResponseHeaders().add("Content-Type", "text/event-stream");
           exchange.sendResponseHeaders(200, 0);
-          try (OutputStream os = exchange.getResponseBody()) {
-            os.write("data: normal\n\n".getBytes(StandardCharsets.UTF_8));
+          OutputStream out = exchange.getResponseBody();
+          while (!stop.get()) {
+            out.write("data: tick\n\n".getBytes(StandardCharsets.UTF_8));
+            out.flush();
+            Thread.sleep(50);
           }
         });
-
-    ModelCallTimeoutPolicy safeLargePolicy =
-        new ModelCallTimeoutPolicy(
-            Duration.ofSeconds(Long.MAX_VALUE), Duration.ofSeconds(Long.MAX_VALUE));
-    RecordingCallback callback = new RecordingCallback();
-    HttpRequest request =
-        HttpRequest.newBuilder(
-                URI.create("http://127.0.0.1:" + serverPort + "/large-duration-safe"))
-            .GET()
-            .build();
-
-    transport.stream(request, safeLargePolicy, HttpSseLimits.DEFAULT, callback);
-
-    assertTrue(callback.latch.await(5, TimeUnit.SECONDS));
-    assertNull(callback.error);
-    assertTrue(callback.completed);
-    assertEquals(1, callback.events.size());
-  }
-
-  /** 阻塞项 B.6：INVALID_CONTENT_TYPE 错误信息不得拼入远端原始 Content-Type 字符串。 */
-  @Test
-  void invalid_content_type_does_not_leak_remote_header_value() throws Exception {
-    String sensitiveContentType = "text/html; secret_token=leak-value-999";
-    httpServer.createContext(
-        "/ct-leak-test",
-        exchange -> {
-          exchange.getResponseHeaders().set("Content-Type", sensitiveContentType);
-          exchange.sendResponseHeaders(200, 0);
-          try (OutputStream os = exchange.getResponseBody()) {
-            os.write("<h1>Not SSE</h1>".getBytes(StandardCharsets.UTF_8));
-          }
-        });
-
-    RecordingCallback callback = new RecordingCallback();
-    HttpRequest request =
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/ct-leak-test"))
-            .GET()
-            .build();
-
-    transport.stream(request, ModelCallTimeoutPolicy.DEFAULT, HttpSseLimits.DEFAULT, callback);
-
-    assertTrue(callback.latch.await(5, TimeUnit.SECONDS));
-    assertNotNull(callback.error);
-    assertEquals(TransportErrorKind.INVALID_RESPONSE, callback.error.kind());
-    // 错误消息绝对不得拼入远端原始值
-    assertFalse(callback.error.getMessage().contains("leak-value-999"));
-    assertFalse(callback.error.getMessage().contains(sensitiveContentType));
-    assertFalse(callback.error.toString().contains("leak-value-999"));
-  }
-
-  /** 阻塞项 B.7：未知响应 Header 携带 secret 时，安全过滤掉未知标头且任何字段均不泄露 secret。 */
-  @Test
-  void unknown_response_header_with_secret_is_dropped_and_never_leaked() throws Exception {
-    String sensitiveSecret = "my-confidential-secret-key-12345";
-    httpServer.createContext(
-        "/unknown-headers-leak",
-        exchange -> {
-          exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
-          exchange.getResponseHeaders().set("X-Debug-Session", sensitiveSecret);
-          exchange.getResponseHeaders().set("Set-Cookie", "session=" + sensitiveSecret);
-          exchange.getResponseHeaders().set("X-Request-Id", "req-12345");
-          exchange.sendResponseHeaders(200, 0);
-          try (OutputStream os = exchange.getResponseBody()) {
-            os.write("data: ok\n\n".getBytes(StandardCharsets.UTF_8));
-          }
-        });
-
-    AtomicReference<HttpOpenMetadata> metaRef = new AtomicReference<>();
-    CountDownLatch done = new CountDownLatch(1);
-    HttpRequest request =
-        HttpRequest.newBuilder(
-                URI.create("http://127.0.0.1:" + serverPort + "/unknown-headers-leak"))
-            .GET()
-            .build();
-
-    transport.stream(
-        request,
-        ModelCallTimeoutPolicy.DEFAULT,
-        HttpSseLimits.DEFAULT,
-        new HttpSseCallback() {
-          @Override
-          public void onOpen(HttpOpenMetadata metadata) {
-            metaRef.set(metadata);
-          }
-
-          @Override
-          public void onEvent(ServerSentEvent event) {}
-
-          @Override
-          public void onComplete() {
-            done.countDown();
-          }
-
-          @Override
-          public void onFailure(TransportException error) {
-            done.countDown();
-          }
-        });
-
-    assertTrue(done.await(5, TimeUnit.SECONDS));
-    HttpOpenMetadata metadata = metaRef.get();
-    assertNotNull(metadata);
-
-    // 未知标头 X-Debug-Session 与 Cookie 等彻底被丢弃
-    assertFalse(metadata.headers().containsKey("x-debug-session"));
-    assertFalse(metadata.headers().containsKey("set-cookie"));
-    assertTrue(metadata.headers().containsKey("x-request-id"));
-    assertTrue(metadata.headers().containsKey("content-type"));
-    assertFalse(metadata.toString().contains(sensitiveSecret));
-  }
-
-  // ==========================================
-  // 本仓强化契约与并发/安全门禁测试
-  // ==========================================
-
-  /** 契约测试：构造函数必须拒绝 followRedirects != NEVER 的 HttpClient。 */
-  @Test
-  void redirecting_http_client_is_rejected_in_constructor() {
-    HttpClient redirectClient =
-        HttpClient.newBuilder().followRedirects(HttpClient.Redirect.ALWAYS).build();
     try {
-      assertThrows(
-          IllegalArgumentException.class,
-          () -> new JdkHttpSseTransport(redirectClient, workerExecutor, scheduler));
+      long start = System.nanoTime();
+      TransportException error =
+          assertThrows(
+              TransportException.class,
+              () ->
+                  transport.execute(
+                      request(),
+                      new ModelCallTimeoutPolicy(Duration.ofMillis(600), Duration.ofMillis(300)),
+                      HttpSseLimits.DEFAULT,
+                      event -> true));
+      long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+      assertEquals(TransportErrorKind.TIMEOUT, error.kind());
+      assertTrue(error.getMessage().contains("Total"));
+      assertTrue(elapsedMillis >= 500, "total deadline must not fire early: " + elapsedMillis);
     } finally {
-      redirectClient.shutdownNow();
+      stop.set(true);
     }
   }
 
-  /** 契约测试：第一阶段 workerExecutor 拒绝时同步抛出 EXECUTOR_REJECTED 异常。 */
+  /** 中断调用线程即取消：阻塞的读取立即返回，以 CANCELLED 结束并保留中断标记，连接随之关闭。 */
   @Test
-  void first_stage_worker_rejection_throws_synchronously() {
-    ExecutorService shutdownWorker = Executors.newSingleThreadExecutor();
-    shutdownWorker.shutdownNow();
-
-    JdkHttpSseTransport rejectedTransport =
-        new JdkHttpSseTransport(httpClient, shutdownWorker, scheduler);
-    HttpRequest request =
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/any")).GET().build();
-    RecordingCallback callback = new RecordingCallback();
-
-    TransportException ex =
-        assertThrows(
-            TransportException.class,
-            () ->
-                rejectedTransport.stream(
-                    request, ModelCallTimeoutPolicy.DEFAULT, HttpSseLimits.DEFAULT, callback));
-    assertEquals(TransportErrorKind.EXECUTOR_REJECTED, ex.kind());
-    assertFalse(callback.completed);
-    assertNull(callback.error);
-  }
-
-  /** 契约测试：第二阶段 scheduler 拒绝时，必须证明 worker 绝对未发起 HTTP 请求。 */
-  @Test
-  void second_stage_scheduler_rejection_proves_worker_never_touched_http_client() {
-    ScheduledExecutorService shutdownScheduler = Executors.newSingleThreadScheduledExecutor();
-    shutdownScheduler.shutdownNow();
-
-    AtomicBoolean serverHit = new AtomicBoolean(false);
-    httpServer.createContext(
-        "/never-hit",
+  void interruptCancelsTheBlockedRead() throws Exception {
+    CountDownLatch release = new CountDownLatch(1);
+    CountDownLatch connectionClosed = new CountDownLatch(1);
+    handler.set(
         exchange -> {
-          serverHit.set(true);
+          exchange.getResponseHeaders().add("Content-Type", "text/event-stream");
           exchange.sendResponseHeaders(200, 0);
-          exchange.close();
-        });
-
-    JdkHttpSseTransport rejectedTransport =
-        new JdkHttpSseTransport(httpClient, workerExecutor, shutdownScheduler);
-    HttpRequest request =
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/never-hit"))
-            .GET()
-            .build();
-    RecordingCallback callback = new RecordingCallback();
-
-    TransportException ex =
-        assertThrows(
-            TransportException.class,
-            () ->
-                rejectedTransport.stream(
-                    request, ModelCallTimeoutPolicy.DEFAULT, HttpSseLimits.DEFAULT, callback));
-
-    assertEquals(TransportErrorKind.EXECUTOR_REJECTED, ex.kind());
-    assertFalse(serverHit.get(), "worker must never hit http server when scheduler rejects");
-  }
-
-  /** 契约测试：四个不同取消窗口的幂等性与静默性。 */
-  @Test
-  void cancellation_windows_are_safe_and_idempotent() throws Exception {
-    CountDownLatch request2Started = new CountDownLatch(1);
-    CountDownLatch request2Cancelled = new CountDownLatch(1);
-
-    httpServer.createContext(
-        "/success-sse",
-        exchange -> {
-          exchange.getResponseHeaders().set("Content-Type", "text/event-stream; charset=utf-8");
-          exchange.sendResponseHeaders(200, 0);
-          try (OutputStream os = exchange.getResponseBody()) {
-            os.write("data: ok\n\n".getBytes(StandardCharsets.UTF_8));
-            os.flush();
-          }
-        });
-
-    httpServer.createContext(
-        "/hanging-sse",
-        exchange -> {
-          request2Started.countDown();
+          OutputStream out = exchange.getResponseBody();
+          out.write("data: first\n\n".getBytes(StandardCharsets.UTF_8));
+          out.flush();
+          // 持续写注释行直到客户端关闭连接导致写失败。
           try {
-            assertTrue(request2Cancelled.await(5, TimeUnit.SECONDS));
-            exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
-            exchange.sendResponseHeaders(200, 0);
-          } catch (Exception ignored) {
-          }
-        });
-
-    // 窗口 1：PENDING 阶段刚创建时立即取消
-    HttpRequest request1 =
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/success-sse"))
-            .GET()
-            .build();
-    RecordingCallback cb1 = new RecordingCallback();
-    ProviderStream s1 =
-        transport.stream(request1, ModelCallTimeoutPolicy.DEFAULT, HttpSseLimits.DEFAULT, cb1);
-    s1.cancel();
-    s1.cancel(); // 幂等性
-    assertTrue(s1.isCancelled());
-
-    // 窗口 2：HTTP 请求发出且在等待响应阶段（send 挂起中）由外部线程 cancel
-    HttpRequest request2 =
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/hanging-sse"))
-            .GET()
-            .build();
-    RecordingCallback cb2 = new RecordingCallback();
-    ProviderStream s2 =
-        transport.stream(request2, ModelCallTimeoutPolicy.DEFAULT, HttpSseLimits.DEFAULT, cb2);
-    assertTrue(request2Started.await(5, TimeUnit.SECONDS));
-    s2.cancel();
-    request2Cancelled.countDown();
-    assertTrue(s2.isCancelled());
-    assertFalse(cb2.completed);
-    assertNull(cb2.error);
-
-    // 窗口 3：收到事件后在流读取中由回调发起 cancel（验证重入不死锁）
-    //
-    // 该窗口需要两个显式握手，否则断言与 cancel() 之间没有 happens-before，
-    // 会在慢机器上偶发失败：
-    //   1）streamHandlePublished：服务端发出首个事件前先等主线程发布句柄，
-    //      保证回调里读到的引用一定非空（重入路径确定性被执行）；
-    //   2）reentrantCancelReturned：回调内 cancel() 返回后再放行主线程断言，
-    //      保证断言读取的是 cancel() 已生效后的状态。
-    CountDownLatch streamHandlePublished = new CountDownLatch(1);
-    CountDownLatch firstEventDelivered = new CountDownLatch(1);
-    CountDownLatch reentrantCancelReturned = new CountDownLatch(1);
-    AtomicReference<ProviderStream> s3Ref = new AtomicReference<>();
-    httpServer.createContext(
-        "/stream-mid-cancel",
-        exchange -> {
-          exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
-          exchange.sendResponseHeaders(200, 0);
-          try (OutputStream os = exchange.getResponseBody()) {
-            assertTrue(streamHandlePublished.await(5, TimeUnit.SECONDS));
-            os.write("data: 1\n\n".getBytes(StandardCharsets.UTF_8));
-            os.flush();
-            firstEventDelivered.await(5, TimeUnit.SECONDS);
-            for (int i = 2; i <= 10; i++) {
-              os.write(("data: " + i + "\n\n").getBytes(StandardCharsets.UTF_8));
-              os.flush();
+            while (!release.await(50, TimeUnit.MILLISECONDS)) {
+              out.write(": ping\n".getBytes(StandardCharsets.UTF_8));
+              out.flush();
             }
-          } catch (Exception ignored) {
+          } catch (IOException closed) {
+            connectionClosed.countDown();
           }
         });
-
-    HttpRequest request3 =
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/stream-mid-cancel"))
-            .GET()
-            .build();
-    RecordingCallback cb3 =
-        new RecordingCallback() {
-          @Override
-          public void onEvent(ServerSentEvent event) {
-            super.onEvent(event);
-            firstEventDelivered.countDown();
-            ProviderStream st = s3Ref.get();
-            if (st != null) {
-              st.cancel(); // 回调内部重入 cancel
-              reentrantCancelReturned.countDown();
-            }
-          }
-        };
-    ProviderStream s3 =
-        transport.stream(request3, ModelCallTimeoutPolicy.DEFAULT, HttpSseLimits.DEFAULT, cb3);
-    s3Ref.set(s3);
-    streamHandlePublished.countDown();
-
-    assertTrue(firstEventDelivered.await(5, TimeUnit.SECONDS));
-    assertTrue(reentrantCancelReturned.await(5, TimeUnit.SECONDS));
-    assertTrue(s3.isCancelled());
-    assertFalse(cb3.completed);
-    assertNull(cb3.error);
-    assertEquals(1, cb3.events.size());
-
-    // 窗口 4：流正常完成之后再次 cancel() 为 no-op
-    HttpRequest request4 =
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/success-sse"))
-            .GET()
-            .build();
-    RecordingCallback cb4 = new RecordingCallback();
-    ProviderStream s4 =
-        transport.stream(request4, ModelCallTimeoutPolicy.DEFAULT, HttpSseLimits.DEFAULT, cb4);
-    assertTrue(cb4.latch.await(5, TimeUnit.SECONDS));
-    assertNull(cb4.error);
-    assertTrue(cb4.completed);
-    s4.cancel(); // 终态后取消为 no-op，流仍保持 COMPLETED，未被取消
-    assertFalse(s4.isCancelled());
-  }
-
-  /** 契约测试：callback 与 cancel 竞态下保证所有回调串行且 cancel 返回后绝不再有新回调。 */
-  @Test
-  void callback_vs_cancel_races_guarantee_serialization_and_no_new_callbacks() throws Exception {
-    CountDownLatch firstEventDelivered = new CountDownLatch(1);
-    CountDownLatch slowCallbackHoldingLock = new CountDownLatch(1);
-    CountDownLatch cancelInvocationFinished = new CountDownLatch(1);
-    CountDownLatch cancelStarted = new CountDownLatch(1);
-    CountDownLatch serverWritingFinished = new CountDownLatch(1);
-    AtomicBoolean completedCalled = new AtomicBoolean(false);
-    AtomicBoolean failedCalled = new AtomicBoolean(false);
-    AtomicInteger eventCount = new AtomicInteger();
-
-    httpServer.createContext(
-        "/race-stream",
-        exchange -> {
-          exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
-          exchange.sendResponseHeaders(200, 0);
-          try (OutputStream os = exchange.getResponseBody()) {
-            os.write("data: first-slow\n\n".getBytes(StandardCharsets.UTF_8));
-            os.flush();
-            for (int i = 0; i < 20; i++) {
-              os.write(("data: burst-" + i + "\n\n").getBytes(StandardCharsets.UTF_8));
-              os.flush();
-            }
-          } catch (Exception ignored) {
-          } finally {
-            serverWritingFinished.countDown();
-          }
-        });
-
-    HttpRequest request =
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/race-stream"))
-            .GET()
-            .build();
-    AtomicReference<ProviderStream> streamRef = new AtomicReference<>();
-    ProviderStream stream =
-        transport.stream(
-            request,
-            ModelCallTimeoutPolicy.DEFAULT,
-            HttpSseLimits.DEFAULT,
-            new HttpSseCallback() {
-              @Override
-              public void onOpen(HttpOpenMetadata metadata) {}
-
-              @Override
-              public void onEvent(ServerSentEvent event) {
-                eventCount.incrementAndGet();
-                firstEventDelivered.countDown();
-                try {
-                  slowCallbackHoldingLock.await(5, TimeUnit.SECONDS);
-                } catch (InterruptedException ignored) {
-                }
-              }
-
-              @Override
-              public void onComplete() {
-                completedCalled.set(true);
-              }
-
-              @Override
-              public void onFailure(TransportException error) {
-                failedCalled.set(true);
-              }
-            });
-    streamRef.set(stream);
-
-    assertTrue(firstEventDelivered.await(5, TimeUnit.SECONDS));
-
-    // 启动独立任务调用 cancel
-    AtomicBoolean cancelReturned = new AtomicBoolean(false);
-    workerExecutor.submit(
-        () -> {
-          cancelStarted.countDown();
-          streamRef.get().cancel();
-          cancelReturned.set(true);
-          cancelInvocationFinished.countDown();
-        });
-
-    assertTrue(cancelStarted.await(5, TimeUnit.SECONDS));
-    // cancel() 由于 slowCallbackHoldingLock 还没释放，不得在 onEvent 结束前返回
-    assertFalse(cancelReturned.get(), "cancel() must block waiting for active onEvent to finish");
-
-    // 释放 onEvent
-    slowCallbackHoldingLock.countDown();
-    assertTrue(
-        cancelInvocationFinished.await(5, TimeUnit.SECONDS),
-        "cancel() must complete after onEvent releases lock");
-    assertTrue(cancelReturned.get());
-
-    // 确保服务端所有 burst 数据已发出
-    assertTrue(serverWritingFinished.await(5, TimeUnit.SECONDS));
-
-    // 确认在 cancel 返回后，已缓冲或新到达的数据不再分发，事件数稳定为 1
-    assertEquals(1, eventCount.get(), "event count must stay at 1 after cancel returns");
-    assertFalse(completedCalled.get(), "no onComplete callback after cancel");
-    assertFalse(failedCalled.get(), "no onFailure callback after cancel");
-    assertTrue(stream.isCancelled());
-  }
-
-  /** 契约测试：worker 线程在正常流完成或失败时绝对不自我中断。 */
-  @Test
-  void worker_thread_does_not_self_interrupt_on_completion_or_failure() throws Exception {
-    // 1. 成功完成路径
-    AtomicBoolean workerInterruptedOnComplete = new AtomicBoolean(true);
-    CountDownLatch completeLatch = new CountDownLatch(1);
-
-    httpServer.createContext(
-        "/no-self-interrupt-ok",
-        exchange -> {
-          exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
-          exchange.sendResponseHeaders(200, 0);
-          try (OutputStream os = exchange.getResponseBody()) {
-            os.write("data: normal\n\n".getBytes(StandardCharsets.UTF_8));
-          }
-        });
-
-    HttpRequest requestOk =
-        HttpRequest.newBuilder(
-                URI.create("http://127.0.0.1:" + serverPort + "/no-self-interrupt-ok"))
-            .GET()
-            .build();
-    transport.stream(
-        requestOk,
-        ModelCallTimeoutPolicy.DEFAULT,
-        HttpSseLimits.DEFAULT,
-        new HttpSseCallback() {
-          @Override
-          public void onOpen(HttpOpenMetadata metadata) {}
-
-          @Override
-          public void onEvent(ServerSentEvent event) {}
-
-          @Override
-          public void onComplete() {
-            workerInterruptedOnComplete.set(Thread.currentThread().isInterrupted());
-            completeLatch.countDown();
-          }
-
-          @Override
-          public void onFailure(TransportException error) {}
-        });
-
-    assertTrue(completeLatch.await(5, TimeUnit.SECONDS));
-    assertFalse(
-        workerInterruptedOnComplete.get(), "worker must not be self-interrupted on complete");
-
-    // 2. 失败路径
-    AtomicBoolean workerInterruptedOnFailure = new AtomicBoolean(true);
-    CountDownLatch failLatch = new CountDownLatch(1);
-
-    httpServer.createContext(
-        "/no-self-interrupt-fail",
-        exchange -> {
-          exchange.sendResponseHeaders(500, 0);
-          exchange.close();
-        });
-
-    HttpRequest requestFail =
-        HttpRequest.newBuilder(
-                URI.create("http://127.0.0.1:" + serverPort + "/no-self-interrupt-fail"))
-            .GET()
-            .build();
-    transport.stream(
-        requestFail,
-        ModelCallTimeoutPolicy.DEFAULT,
-        HttpSseLimits.DEFAULT,
-        new HttpSseCallback() {
-          @Override
-          public void onOpen(HttpOpenMetadata metadata) {}
-
-          @Override
-          public void onEvent(ServerSentEvent event) {}
-
-          @Override
-          public void onComplete() {}
-
-          @Override
-          public void onFailure(TransportException error) {
-            workerInterruptedOnFailure.set(Thread.currentThread().isInterrupted());
-            failLatch.countDown();
-          }
-        });
-
-    assertTrue(failLatch.await(5, TimeUnit.SECONDS));
-    assertFalse(workerInterruptedOnFailure.get(), "worker must not be self-interrupted on failure");
-  }
-
-  /**
-   * 契约测试：send 阻塞期间 execution 因超时或外部操作进入 FAILED 终态，当 send 随后返回 HttpResponse 时， 生产代码在设置
-   * activeInputStream 后立即校验权威状态，直接关闭流，绝不读取响应体，且不触发 onOpen/onEvent/onComplete。
-   */
-  @Test
-  void watchdog_terminal_prevents_late_headers_closes_stream_without_reading() throws Exception {
-    AtomicInteger bodyReadCount = new AtomicInteger();
-    AtomicInteger bodyCloseCount = new AtomicInteger();
-    CountDownLatch bodyClosed = new CountDownLatch(1);
-
-    InputStream trackingBody =
-        new InputStream() {
-          @Override
-          public int read() {
-            bodyReadCount.incrementAndGet();
-            return -1;
-          }
-
-          @Override
-          public int read(byte[] b, int off, int len) {
-            bodyReadCount.incrementAndGet();
-            return -1;
-          }
-
-          @Override
-          public void close() {
-            bodyCloseCount.incrementAndGet();
-            bodyClosed.countDown();
-          }
-        };
-
-    HttpHeaders headers =
-        HttpHeaders.of(Map.of("Content-Type", List.of("text/event-stream")), (k, v) -> true);
-    FakeHttpResponse<InputStream> fakeResponse = new FakeHttpResponse<>(200, headers, trackingBody);
-    ControllableFakeHttpClient fakeClient = new ControllableFakeHttpClient(fakeResponse);
-
-    HttpRequest request =
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/dummy"))
-            .GET()
-            .build();
-    RecordingCallback callback = new RecordingCallback();
-    HttpSseStreamExecution execution =
-        new HttpSseStreamExecution(
-            fakeClient, request, ModelCallTimeoutPolicy.DEFAULT, HttpSseLimits.DEFAULT, callback);
-
-    Future<?> workerFuture = workerExecutor.submit(execution::runWorker);
-    execution.attachWorkerFuture(workerFuture);
-    execution.openStartGate();
-
-    // 等待 worker 进入 send
-    assertTrue(fakeClient.sendEntered.await(5, TimeUnit.SECONDS));
-
-    // 模拟 watchdog 超时，使 execution 直接进入 FAILED 终态
-    execution.triggerTimeout("Simulated call timeout while waiting for response headers");
-    assertEquals(HttpSseStreamExecution.STATE_FAILED, execution.currentState());
-
-    // 释放 send 返回
-    fakeClient.allowSendReturn.countDown();
-
-    // 等待 worker 退出 (终态时 workerFuture 会被 cancel，忽略 CancellationException)
+    CountDownLatch firstEvent = new CountDownLatch(1);
+    AtomicReference<Throwable> outcome = new AtomicReference<>();
+    AtomicBoolean interruptedAfter = new AtomicBoolean();
+    Thread caller =
+        Thread.ofVirtual()
+            .start(
+                () -> {
+                  try {
+                    transport.execute(
+                        request(),
+                        GENEROUS,
+                        HttpSseLimits.DEFAULT,
+                        event -> {
+                          firstEvent.countDown();
+                          return true;
+                        });
+                  } catch (Throwable thrown) {
+                    outcome.set(thrown);
+                  }
+                  interruptedAfter.set(Thread.currentThread().isInterrupted());
+                });
     try {
-      workerFuture.get(5, TimeUnit.SECONDS);
-    } catch (Exception ignored) {
+      assertTrue(firstEvent.await(5, TimeUnit.SECONDS));
+      caller.interrupt();
+      caller.join(TimeUnit.SECONDS.toMillis(5));
+      assertFalse(caller.isAlive());
+      TransportException error = (TransportException) outcome.get();
+      assertEquals(TransportErrorKind.CANCELLED, error.kind());
+      assertTrue(interruptedAfter.get());
+      assertTrue(connectionClosed.await(5, TimeUnit.SECONDS), "the connection must be closed");
+    } finally {
+      release.countDown();
     }
-    assertTrue(bodyClosed.await(5, TimeUnit.SECONDS), "late response body was not closed");
+  }
 
-    // 核心断言：body 绝未读取，且流被且仅被 close 一次
+  /** 单行超过上限：INVALID_RESPONSE；默认上限接受 64 KiB 以上、1 MiB 以内的单行，拒绝超过 1 MiB 的单行。 */
+  @Test
+  void enforcesLineLimits() {
+    String wide = "y".repeat(100 * 1024);
+    handler.set(exchange -> sse(exchange, "data: " + wide + "\n\n"));
     assertEquals(
-        0, bodyReadCount.get(), "body must not be read after execution entered terminal state");
-    assertEquals(1, bodyCloseCount.get(), "stream must be closed exactly once");
-    assertFalse(callback.opened, "onOpen must not be called");
-    assertTrue(callback.events.isEmpty(), "onEvent must not be called");
-    assertFalse(callback.completed, "onComplete must not be called");
-    assertNotNull(callback.error);
-    assertEquals(TransportErrorKind.TIMEOUT, callback.error.kind());
+        List.of(new ServerSentEvent(null, wide)), execute(GENEROUS, HttpSseLimits.DEFAULT));
+
+    TransportException small =
+        assertThrows(
+            TransportException.class,
+            () -> execute(GENEROUS, new HttpSseLimits(1024, 1024 * 1024, 1024 * 1024, 1024)));
+    assertEquals(TransportErrorKind.INVALID_RESPONSE, small.kind());
+
+    handler.set(exchange -> sse(exchange, "data: " + "z".repeat(1024 * 1024 + 1) + "\n\n"));
+    TransportException huge =
+        assertThrows(TransportException.class, () -> execute(GENEROUS, HttpSseLimits.DEFAULT));
+    assertEquals(TransportErrorKind.INVALID_RESPONSE, huge.kind());
   }
 
-  /** 契约测试：readBoundedErrorBody 在终态下直接退出并关闭输入流。 */
+  /** 事件名缺省时为 null；空 data 字段的事件照常交付。 */
   @Test
-  void read_bounded_error_body_in_terminal_state_closes_stream_without_reading() {
-    AtomicBoolean readAttempted = new AtomicBoolean(false);
-    AtomicBoolean streamClosed = new AtomicBoolean(false);
-    InputStream trackStream =
-        new InputStream() {
-          @Override
-          public int read() {
-            readAttempted.set(true);
-            return -1;
-          }
+  void eventWithoutNameHasNullName() {
+    handler.set(exchange -> sse(exchange, "data:\n\n"));
 
-          @Override
-          public int read(byte[] b, int off, int len) {
-            readAttempted.set(true);
-            return -1;
-          }
+    List<ServerSentEvent> events = execute(GENEROUS, HttpSseLimits.DEFAULT);
 
-          @Override
-          public void close() {
-            streamClosed.set(true);
-          }
-        };
-
-    HttpRequest request =
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/dummy"))
-            .GET()
-            .build();
-    RecordingCallback callback = new RecordingCallback();
-    HttpSseStreamExecution execution =
-        new HttpSseStreamExecution(
-            httpClient, request, ModelCallTimeoutPolicy.DEFAULT, HttpSseLimits.DEFAULT, callback);
-
-    // 预先取消进入 CANCELLED 终态
-    execution.cancel();
-    assertTrue(execution.isCancelled());
-
-    HttpSseStreamExecution.BoundedErrorResult result = execution.readBoundedErrorBody(trackStream);
-    assertFalse(
-        readAttempted.get(), "must not attempt reading body when stream is in terminal state");
-    assertTrue(streamClosed.get(), "stream must be closed");
-    assertEquals(0, result.bodyBytes().length);
-    assertFalse(result.truncated());
+    assertEquals(1, events.size());
+    assertNull(events.get(0).event());
+    assertEquals("", events.get(0).data());
   }
 
-  /** 契约测试：readBoundedErrorBody 在 maxErrorBodyBytes 为 Integer.MAX_VALUE 时无整型溢出。 */
-  @Test
-  void read_bounded_error_body_handles_max_integer_limit_without_overflow() {
-    HttpRequest request =
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/dummy"))
-            .GET()
-            .build();
-    RecordingCallback callback = new RecordingCallback();
-    HttpSseLimits maxLimits = new HttpSseLimits(64, 128, 1024, Integer.MAX_VALUE);
-    HttpSseStreamExecution execution =
-        new HttpSseStreamExecution(
-            httpClient, request, ModelCallTimeoutPolicy.DEFAULT, maxLimits, callback);
-
-    byte[] testData = new byte[100];
-    Arrays.fill(testData, (byte) 'x');
-    ByteArrayInputStream in = new ByteArrayInputStream(testData);
-
-    HttpSseStreamExecution.BoundedErrorResult result = execution.readBoundedErrorBody(in);
-    assertEquals(100, result.bodyBytes().length);
-    assertFalse(result.truncated());
+  private List<ServerSentEvent> execute(ModelCallTimeoutPolicy policy, HttpSseLimits limits) {
+    List<ServerSentEvent> events = new ArrayList<>();
+    transport.execute(request(), policy, limits, events::add);
+    return events;
   }
 
-  /** 契约测试：错误正文截断标记 errorBodyTruncated 与 errorBodyUtf8() 验证。 */
-  @Test
-  void error_body_truncation_flag_and_utf8_retrieval() throws Exception {
-    httpServer.createContext(
-        "/truncated-error",
-        exchange -> {
-          byte[] body = "0123456789ABCDE".getBytes(StandardCharsets.UTF_8);
-          exchange.sendResponseHeaders(500, body.length);
-          try (OutputStream os = exchange.getResponseBody()) {
-            os.write(body);
-          }
-        });
-
-    HttpSseLimits limit10 = new HttpSseLimits(1024, 1024, 1024 * 1024, 10);
-    HttpRequest request1 =
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/truncated-error"))
-            .GET()
-            .build();
-    RecordingCallback cb1 = new RecordingCallback();
-    transport.stream(request1, ModelCallTimeoutPolicy.DEFAULT, limit10, cb1);
-
-    assertTrue(cb1.latch.await(5, TimeUnit.SECONDS));
-    assertNotNull(cb1.error);
-    assertTrue(cb1.error.isErrorBodyTruncated(), "error body must be marked as truncated");
-    assertEquals(10, cb1.error.errorBodyBytes().length);
-    assertEquals("0123456789", cb1.error.errorBodyUtf8());
-
-    httpServer.createContext(
-        "/non-truncated-error",
-        exchange -> {
-          byte[] body = "HELLO".getBytes(StandardCharsets.UTF_8);
-          exchange.sendResponseHeaders(500, body.length);
-          try (OutputStream os = exchange.getResponseBody()) {
-            os.write(body);
-          }
-        });
-
-    HttpRequest request2 =
-        HttpRequest.newBuilder(
-                URI.create("http://127.0.0.1:" + serverPort + "/non-truncated-error"))
-            .GET()
-            .build();
-    RecordingCallback cb2 = new RecordingCallback();
-    transport.stream(request2, ModelCallTimeoutPolicy.DEFAULT, limit10, cb2);
-
-    assertTrue(cb2.latch.await(5, TimeUnit.SECONDS));
-    assertNotNull(cb2.error);
-    assertFalse(cb2.error.isErrorBodyTruncated(), "error body must not be marked as truncated");
-    assertEquals("HELLO", cb2.error.errorBodyUtf8());
+  private HttpRequest request() {
+    return HttpRequest.newBuilder(
+            URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/stream"))
+        .build();
   }
 
-  /** 契约测试：错误正文读取挂起时受 Watchdog 超时保护并关闭连接（消除 sleep，使用 latch 优雅挂起）。 */
-  @Test
-  void error_body_read_timeout_closes_stream() throws Exception {
-    httpServer.createContext(
-        "/hanging-error",
-        exchange -> {
-          exchange.sendResponseHeaders(500, 0);
-          try (OutputStream os = exchange.getResponseBody()) {
-            os.write("initial error part".getBytes(StandardCharsets.UTF_8));
-            os.flush();
-            new CountDownLatch(1).await(5, TimeUnit.SECONDS);
-          } catch (Exception ignored) {
-          }
-        });
-
-    ModelCallTimeoutPolicy shortTimeout =
-        new ModelCallTimeoutPolicy(Duration.ofSeconds(10), Duration.ofMillis(100));
-    HttpRequest request =
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/hanging-error"))
-            .GET()
-            .build();
-    RecordingCallback callback = new RecordingCallback();
-    transport.stream(request, shortTimeout, HttpSseLimits.DEFAULT, callback);
-
-    assertTrue(callback.latch.await(5, TimeUnit.SECONDS));
-    assertNotNull(callback.error);
-    assertEquals(TransportErrorKind.TIMEOUT, callback.error.kind());
+  private static void sse(HttpExchange exchange, String body) throws IOException {
+    respond(exchange, 200, "text/event-stream; charset=utf-8", body);
   }
 
-  /** 契约测试：Content-Type 格式校验。 */
-  @Test
-  void content_type_validation() throws Exception {
-    httpServer.createContext(
-        "/ct-uppercase",
-        exchange -> {
-          exchange.getResponseHeaders().set("Content-Type", "TEXT/EVENT-STREAM; CHARSET=UTF-8");
-          exchange.sendResponseHeaders(200, 0);
-          try (OutputStream os = exchange.getResponseBody()) {
-            os.write("data: ok\n\n".getBytes(StandardCharsets.UTF_8));
-          }
-        });
-    RecordingCallback cb1 = new RecordingCallback();
-    transport.stream(
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/ct-uppercase"))
-            .GET()
-            .build(),
-        ModelCallTimeoutPolicy.DEFAULT,
-        HttpSseLimits.DEFAULT,
-        cb1);
-    assertTrue(cb1.latch.await(5, TimeUnit.SECONDS));
-    assertTrue(cb1.completed);
-
-    httpServer.createContext(
-        "/ct-json",
-        exchange -> {
-          exchange.getResponseHeaders().set("Content-Type", "application/json");
-          exchange.sendResponseHeaders(200, 0);
-          try (OutputStream os = exchange.getResponseBody()) {
-            os.write("{\"error\": true}".getBytes(StandardCharsets.UTF_8));
-          }
-        });
-    RecordingCallback cb2 = new RecordingCallback();
-    transport.stream(
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/ct-json"))
-            .GET()
-            .build(),
-        ModelCallTimeoutPolicy.DEFAULT,
-        HttpSseLimits.DEFAULT,
-        cb2);
-    assertTrue(cb2.latch.await(5, TimeUnit.SECONDS));
-    assertNotNull(cb2.error);
-    assertEquals(TransportErrorKind.INVALID_RESPONSE, cb2.error.kind());
-  }
-
-  /** 契约测试：3xx 重定向严格拒绝，作为 HTTP_STATUS 错误处理且不跟随。 */
-  @Test
-  void redirects_are_not_followed_and_fail_with_http_status() throws Exception {
-    httpServer.createContext(
-        "/redirect",
-        exchange -> {
-          exchange.getResponseHeaders().set("Location", "/destination");
-          byte[] body = "redirect body".getBytes(StandardCharsets.UTF_8);
-          exchange.sendResponseHeaders(307, body.length);
-          try (OutputStream os = exchange.getResponseBody()) {
-            os.write(body);
-          }
-        });
-
-    HttpRequest request =
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/redirect"))
-            .GET()
-            .build();
-    RecordingCallback callback = new RecordingCallback();
-    transport.stream(request, ModelCallTimeoutPolicy.DEFAULT, HttpSseLimits.DEFAULT, callback);
-
-    assertTrue(callback.latch.await(5, TimeUnit.SECONDS));
-    assertNotNull(callback.error);
-    assertEquals(TransportErrorKind.HTTP_STATUS, callback.error.kind());
-    assertEquals(307, callback.error.statusCode());
-    assertEquals("redirect body", callback.error.errorBodyUtf8());
-  }
-
-  /** 覆盖 HttpSseStreamExecution 的状态查询与 Content-Type 静态边界。 */
-  @Test
-  void httpSseStreamExecutionDirectUnitTests() {
-    HttpRequest request =
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/dummy"))
-            .GET()
-            .build();
-    RecordingCallback callback = new RecordingCallback();
-    HttpSseStreamExecution execution =
-        new HttpSseStreamExecution(
-            httpClient, request, ModelCallTimeoutPolicy.DEFAULT, HttpSseLimits.DEFAULT, callback);
-
-    assertEquals(HttpSseStreamExecution.STATE_PENDING, execution.currentState());
-    assertFalse(execution.isCancelled());
-
-    // Content-Type 边界测试
-    assertFalse(HttpSseStreamExecution.isValidEventStreamContentType(null));
-    assertFalse(HttpSseStreamExecution.isValidEventStreamContentType(""));
-    assertFalse(HttpSseStreamExecution.isValidEventStreamContentType("application/json"));
-    assertFalse(
-        HttpSseStreamExecution.isValidEventStreamContentType("text/event-stream; charset=gbk"));
-    assertTrue(
-        HttpSseStreamExecution.isValidEventStreamContentType(
-            "text/event-stream; charset=\"utf-8\""));
-    assertTrue(
-        HttpSseStreamExecution.isValidEventStreamContentType("text/event-stream; charset=utf-8"));
-
-    // 针对 null InputStream 的 bounded error body 测试
-    HttpSseStreamExecution.BoundedErrorResult nullStreamResult =
-        execution.readBoundedErrorBody(null);
-    assertEquals(0, nullStreamResult.bodyBytes().length);
-    assertFalse(nullStreamResult.truncated());
-
-    // 尚未到 deadline 的执行不应变为终态。
-    assertTrue(execution.nextDeadlineDelayNanos(System.nanoTime()) > 0);
-  }
-
-  /** 测试 safeDurationToNanos 的各类边界条件（null、负数、零、纳秒累加溢出）。 */
-  @Test
-  void safe_duration_to_nanos_boundary_cases() {
-    assertEquals(0L, HttpSseStreamExecution.safeDurationToNanos(null));
-    assertEquals(0L, HttpSseStreamExecution.safeDurationToNanos(Duration.ofSeconds(-1)));
-    assertEquals(0L, HttpSseStreamExecution.safeDurationToNanos(Duration.ZERO));
-    assertEquals(
-        Long.MAX_VALUE,
-        HttpSseStreamExecution.safeDurationToNanos(
-            Duration.ofSeconds(Long.MAX_VALUE / 1_000_000_000L + 1)));
-    assertEquals(
-        Long.MAX_VALUE,
-        HttpSseStreamExecution.safeDurationToNanos(
-            Duration.ofSeconds(Long.MAX_VALUE / 1_000_000_000L, 900_000_000)));
-  }
-
-  /** 纳秒级超时不能被人为截断为 1ms。 */
-  @Test
-  void watchdog_interval_with_minimal_timeouts() {
-    HttpRequest request =
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/dummy"))
-            .GET()
-            .build();
-    RecordingCallback callback = new RecordingCallback();
-    HttpSseStreamExecution execution =
-        new HttpSseStreamExecution(
-            httpClient,
-            request,
-            new ModelCallTimeoutPolicy(Duration.ofNanos(1), Duration.ofNanos(1)),
-            HttpSseLimits.DEFAULT,
-            callback);
-    assertEquals(0L, execution.nextDeadlineDelayNanos(System.nanoTime()));
-  }
-
-  /** 契约测试：readBoundedErrorBody 正文超过上限截断分支。 */
-  @Test
-  void error_body_truncation_boundary_when_exceeding_max_limit() {
-    HttpRequest request =
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/dummy"))
-            .GET()
-            .build();
-    RecordingCallback callback = new RecordingCallback();
-    HttpSseLimits limits = new HttpSseLimits(1024, 1024, 1024 * 1024, 5);
-    HttpSseStreamExecution execution =
-        new HttpSseStreamExecution(
-            httpClient, request, ModelCallTimeoutPolicy.DEFAULT, limits, callback);
-
-    byte[] sourceData = "0123456789".getBytes(StandardCharsets.UTF_8);
-    ByteArrayInputStream in = new ByteArrayInputStream(sourceData);
-    HttpSseStreamExecution.BoundedErrorResult result = execution.readBoundedErrorBody(in);
-    assertTrue(result.truncated());
-    assertEquals(5, result.bodyBytes().length);
-    assertEquals("01234", new String(result.bodyBytes(), StandardCharsets.UTF_8));
-  }
-
-  /** 契约测试：closeInputStream 遇到 IOException 静默关闭。 */
-  @Test
-  void close_input_stream_with_exception_handled_silently() {
-    InputStream faultyStream =
-        new InputStream() {
-          @Override
-          public int read() {
-            return -1;
-          }
-
-          @Override
-          public void close() throws IOException {
-            throw new IOException("simulated close failure");
-          }
-        };
-    HttpSseStreamExecution.closeInputStream(faultyStream);
-  }
-
-  /** 契约测试：application/problem+json 错误响应正常解析与状态分类。 */
-  @Test
-  void handle_non_2xx_with_problem_json_content_type() throws Exception {
-    httpServer.createContext(
-        "/problem-json",
-        exchange -> {
-          exchange.getResponseHeaders().set("Content-Type", "application/problem+json");
-          byte[] body = "{\"title\": \"problem description\"}".getBytes(StandardCharsets.UTF_8);
-          exchange.sendResponseHeaders(400, body.length);
-          try (OutputStream os = exchange.getResponseBody()) {
-            os.write(body);
-          }
-        });
-    RecordingCallback cb = new RecordingCallback();
-    transport.stream(
-        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + serverPort + "/problem-json"))
-            .GET()
-            .build(),
-        ModelCallTimeoutPolicy.DEFAULT,
-        HttpSseLimits.DEFAULT,
-        cb);
-    assertTrue(cb.latch.await(5, TimeUnit.SECONDS));
-    assertNotNull(cb.error);
-    assertEquals(TransportErrorKind.HTTP_STATUS, cb.error.kind());
-    assertEquals(400, cb.error.statusCode());
-    assertEquals("{\"title\": \"problem description\"}", cb.error.errorBodyUtf8());
-  }
-
-  // ==========================================
-  // 回调记录辅助类
-  // ==========================================
-
-  private static class RecordingCallback implements HttpSseCallback {
-    final CountDownLatch latch = new CountDownLatch(1);
-    final List<ServerSentEvent> events = Collections.synchronizedList(new ArrayList<>());
-    final List<String> lifecycleEvents = Collections.synchronizedList(new ArrayList<>());
-    final Set<Thread> callbackThreads = Collections.synchronizedSet(new HashSet<>());
-    volatile boolean opened = false;
-    volatile boolean completed = false;
-    volatile TransportException error = null;
-    volatile HttpOpenMetadata openMetadata = null;
-    volatile Thread callbackThread = null;
-
-    @Override
-    public void onOpen(HttpOpenMetadata metadata) {
-      this.callbackThread = Thread.currentThread();
-      this.callbackThreads.add(Thread.currentThread());
-      this.lifecycleEvents.add("OPEN");
-      this.openMetadata = metadata;
-      opened = true;
-    }
-
-    @Override
-    public void onEvent(ServerSentEvent event) {
-      this.callbackThread = Thread.currentThread();
-      this.callbackThreads.add(Thread.currentThread());
-      this.lifecycleEvents.add("EVENT:" + event.data());
-      events.add(event);
-    }
-
-    @Override
-    public void onComplete() {
-      this.callbackThread = Thread.currentThread();
-      this.callbackThreads.add(Thread.currentThread());
-      this.lifecycleEvents.add("COMPLETE");
-      completed = true;
-      latch.countDown();
-    }
-
-    @Override
-    public void onFailure(TransportException error) {
-      this.callbackThread = Thread.currentThread();
-      this.callbackThreads.add(Thread.currentThread());
-      this.lifecycleEvents.add("FAILURE:" + error.kind());
-      this.error = error;
-      latch.countDown();
-    }
-  }
-
-  private static class ControllableFakeHttpClient extends HttpClient {
-    final CountDownLatch sendEntered = new CountDownLatch(1);
-    final CountDownLatch allowSendReturn = new CountDownLatch(1);
-    final HttpResponse<InputStream> response;
-
-    ControllableFakeHttpClient(HttpResponse<InputStream> response) {
-      this.response = response;
-    }
-
-    @Override
-    public Optional<CookieHandler> cookieHandler() {
-      return Optional.empty();
-    }
-
-    @Override
-    public Optional<Duration> connectTimeout() {
-      return Optional.empty();
-    }
-
-    @Override
-    public Redirect followRedirects() {
-      return Redirect.NEVER;
-    }
-
-    @Override
-    public Optional<ProxySelector> proxy() {
-      return Optional.empty();
-    }
-
-    @Override
-    public SSLContext sslContext() {
-      return null;
-    }
-
-    @Override
-    public SSLParameters sslParameters() {
-      return null;
-    }
-
-    @Override
-    public Optional<Authenticator> authenticator() {
-      return Optional.empty();
-    }
-
-    @Override
-    public Version version() {
-      return Version.HTTP_2;
-    }
-
-    @Override
-    public Optional<Executor> executor() {
-      return Optional.empty();
-    }
-
-    @SuppressWarnings("unchecked")
-    @Override
-    public <T> HttpResponse<T> send(
-        HttpRequest request, HttpResponse.BodyHandler<T> responseHandler)
-        throws IOException, InterruptedException {
-      sendEntered.countDown();
-      try {
-        allowSendReturn.await();
-      } catch (InterruptedException ignored) {
-        // 忽略中断，模拟 send 在终态后仍返回 HttpResponse 的极端竞态场景
+  private static void respond(HttpExchange exchange, int status, String contentType, String body)
+      throws IOException {
+    byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+    exchange.getResponseHeaders().add("Content-Type", contentType);
+    exchange.sendResponseHeaders(status, bytes.length == 0 ? -1 : bytes.length);
+    if (bytes.length > 0) {
+      try (OutputStream out = exchange.getResponseBody()) {
+        out.write(bytes);
       }
-      return (HttpResponse<T>) response;
-    }
-
-    @Override
-    public <T> CompletableFuture<HttpResponse<T>> sendAsync(
-        HttpRequest request, HttpResponse.BodyHandler<T> responseHandler) {
-      throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public <T> CompletableFuture<HttpResponse<T>> sendAsync(
-        HttpRequest request,
-        HttpResponse.BodyHandler<T> responseHandler,
-        HttpResponse.PushPromiseHandler<T> pushPromiseHandler) {
-      throw new UnsupportedOperationException();
-    }
-  }
-
-  /**
-   * 模拟 JDK 在 send() 返回前完成响应体交付：先 apply body handler 并调用 getBody 使 body 生效 （等价于 JDK 交付响应时登记所有权），再交付
-   * onSubscribe，随后阻塞直到工作线程被中断， 并以 InterruptedException 抛出而不返回 HttpResponse——正是取消中断 send 时的泄漏窗口。
-   */
-  private static final class BodyHandoffFakeHttpClient extends ControllableFakeHttpClient {
-    final CountDownLatch bodyHandoffDone = new CountDownLatch(1);
-    final TrackingSubscription subscription = new TrackingSubscription();
-
-    BodyHandoffFakeHttpClient() {
-      super(new FakeHttpResponse<>(200, eventStreamHeaders(), null));
-    }
-
-    @Override
-    public <T> HttpResponse<T> send(HttpRequest request, HttpResponse.BodyHandler<T> bodyHandler)
-        throws IOException, InterruptedException {
-      HttpResponse.BodySubscriber<T> subscriber =
-          bodyHandler.apply(new FakeResponseInfo(200, eventStreamHeaders()));
-      // 触发 body 生效：JDK 通过 getBody 交付响应体，mapping 在此登记所有权
-      subscriber.getBody();
-      subscriber.onSubscribe(subscription);
-      bodyHandoffDone.countDown();
-      // 阻塞直到工作线程被取消中断；绝不返回 HttpResponse，模拟 send 被中断的竞态
-      new CountDownLatch(1).await();
-      throw new AssertionError("send must not return after body handoff cancellation");
-    }
-  }
-
-  /** 记录 cancel 信号的订阅，用于验证 body 交付后的实际资源所有权回收。 */
-  private static final class TrackingSubscription implements Flow.Subscription {
-    final AtomicInteger cancelCount = new AtomicInteger();
-    final CountDownLatch cancelled = new CountDownLatch(1);
-    final AtomicLong requested = new AtomicLong();
-
-    @Override
-    public void request(long n) {
-      requested.addAndGet(n);
-    }
-
-    @Override
-    public void cancel() {
-      cancelCount.incrementAndGet();
-      cancelled.countDown();
-    }
-  }
-
-  private static final class FakeResponseInfo implements HttpResponse.ResponseInfo {
-    private final int statusCode;
-    private final HttpHeaders headers;
-
-    FakeResponseInfo(int statusCode, HttpHeaders headers) {
-      this.statusCode = statusCode;
-      this.headers = headers;
-    }
-
-    @Override
-    public int statusCode() {
-      return statusCode;
-    }
-
-    @Override
-    public HttpHeaders headers() {
-      return headers;
-    }
-
-    @Override
-    public Version version() {
-      return Version.HTTP_1_1;
-    }
-  }
-
-  private static class FakeHttpResponse<T> implements HttpResponse<T> {
-    private final int statusCode;
-    private final HttpHeaders headers;
-    private final T body;
-
-    FakeHttpResponse(int statusCode, HttpHeaders headers, T body) {
-      this.statusCode = statusCode;
-      this.headers = headers;
-      this.body = body;
-    }
-
-    @Override
-    public int statusCode() {
-      return statusCode;
-    }
-
-    @Override
-    public HttpRequest request() {
-      return null;
-    }
-
-    @Override
-    public Optional<HttpResponse<T>> previousResponse() {
-      return Optional.empty();
-    }
-
-    @Override
-    public HttpHeaders headers() {
-      return headers;
-    }
-
-    @Override
-    public T body() {
-      return body;
-    }
-
-    @Override
-    public Optional<SSLSession> sslSession() {
-      return Optional.empty();
-    }
-
-    @Override
-    public URI uri() {
-      return URI.create("http://127.0.0.1/fake");
-    }
-
-    @Override
-    public Version version() {
-      return Version.HTTP_1_1;
     }
   }
 }

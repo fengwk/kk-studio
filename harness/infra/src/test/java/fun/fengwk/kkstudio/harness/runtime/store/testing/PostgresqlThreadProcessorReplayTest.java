@@ -107,8 +107,6 @@ class PostgresqlThreadProcessorReplayTest {
                       T2,
                       T2));
               var model = tx.lockModelInvocation(id).orElseThrow();
-              tx.updateModelInvocation(model.beginDispatch(T2));
-              model = tx.lockModelInvocation(id).orElseThrow();
               tx.updateModelInvocation(model.markRunning(T2));
               model = tx.lockModelInvocation(id).orElseThrow();
               tx.updateModelInvocation(model.succeed(response, null, replay, T2));

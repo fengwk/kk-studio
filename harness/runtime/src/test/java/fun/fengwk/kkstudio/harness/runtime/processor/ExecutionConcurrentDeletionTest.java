@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.processor;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -80,14 +81,15 @@ class ExecutionConcurrentDeletionTest {
   }
 
   @Test
-  void modelActivationLosesOwnershipWhenThreadDeletedBeforeOwnThreadLock() {
+  void modelMarkRunningLosesOwnershipWhenThreadDeletedBeforeOwnThreadLock() {
     ModelExecutionFixture fixture = modelExecutionFixture(false);
     long versionBefore = threadVersion(fixture.rawStore, fixture.threadId);
 
     fixture.store.armDeletionBeforeNextThreadLock();
-    assertEquals(ProcessResult.LOST_OWNERSHIP, fixture.execution.activate(fixture.handle));
+    assertFalse(fixture.execution.markRunning());
+    fixture.execution.abandon();
 
-    fixture.assertLostWithStatus(ModelInvocationStatus.DISPATCHING, versionBefore);
+    fixture.assertLostWithStatus(ModelInvocationStatus.READY, versionBefore);
     assertNull(modelResult(fixture.rawStore, fixture.invocationId));
   }
 
@@ -97,7 +99,10 @@ class ExecutionConcurrentDeletionTest {
     long versionBefore = threadVersion(fixture.rawStore, fixture.threadId);
 
     fixture.store.armDeletionBeforeNextThreadLock();
-    fixture.execution.onSucceeded(new ProviderCompletion(response("answer")));
+    assertEquals(
+        ProcessResult.LOST_OWNERSHIP,
+        fixture.execution.finish(
+            new ModelGateway.Succeeded(new ProviderCompletion(response("answer")))));
 
     fixture.assertLostWithStatus(ModelInvocationStatus.RUNNING, versionBefore);
     assertNull(modelResult(fixture.rawStore, fixture.invocationId));
@@ -168,7 +173,7 @@ class ExecutionConcurrentDeletionTest {
     }
   }
 
-  /** 一条 READY → DISPATCHING 的 Model 链 + 进程内 execution；{@code activated} 决定是否先激活到 RUNNING。 */
+  /** 一条 READY 的 Model 链 + 进程内 execution；{@code activated} 决定是否先持久化到 RUNNING。 */
   private ModelExecutionFixture modelExecutionFixture(boolean activated) {
     InMemoryHarnessStore rawStore = new InMemoryHarnessStore();
     ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
@@ -207,12 +212,6 @@ class ExecutionConcurrentDeletionTest {
                     tx.claimNextWork(
                         WorkTargetType.MODEL, "token-" + invocationId, Duration.ofSeconds(60)))
             .orElseThrow();
-    rawStore.transaction(
-        tx -> {
-          ModelInvocation model = tx.lockModelInvocation(invocationId).orElseThrow();
-          tx.updateModelInvocation(model.beginDispatch(ThreadProcessorTestSupport.NOW));
-          return null;
-        });
     ModelExecutionFixture fixture =
         new ModelExecutionFixture(
             rawStore,
@@ -222,7 +221,7 @@ class ExecutionConcurrentDeletionTest {
             claim,
             scheduler);
     if (activated) {
-      assertEquals(ProcessResult.STARTED, fixture.execution.activate(fixture.handle));
+      assertTrue(fixture.execution.markRunning());
     }
     return fixture;
   }
@@ -236,7 +235,6 @@ class ExecutionConcurrentDeletionTest {
     final List<Object> events = new CopyOnWriteArrayList<>();
     final DeletionBeforeThreadLockStore store;
     final ModelExecution execution;
-    final ModelHandle handle = new ModelHandle();
 
     ModelExecutionFixture(
         InMemoryHarnessStore rawStore,
@@ -271,33 +269,15 @@ class ExecutionConcurrentDeletionTest {
               ignored -> releases.incrementAndGet());
     }
 
-    /** LOST 语义：handle 取消、本地槽位释放、无实时事件、durable 状态与 Thread version 不变。 */
+    /** LOST 语义：本地槽位释放、无实时事件、durable 状态与 Thread version 不变。 */
     void assertLostWithStatus(ModelInvocationStatus expectedStatus, long versionBefore) {
       store.assertNoTransactionFailure();
-      assertTrue(handle.isCancelled(), "lost ownership must cancel the attached handle");
       assertEquals(1, releases.get(), "lost ownership must release the local execution slot");
       assertTrue(events.isEmpty(), "no realtime event may leak");
       assertEquals(
           expectedStatus, modelStatus(rawStore, invocationId), "no durable state may be persisted");
       assertEquals(
           versionBefore, threadVersion(rawStore, threadId), "thread version must not advance");
-    }
-  }
-
-  private static final class ModelHandle implements ModelGateway.Handle {
-
-    private final AtomicInteger cancels = new AtomicInteger();
-
-    @Override
-    public void cancel() {
-      cancels.incrementAndGet();
-    }
-
-    @Override
-    public void activate() {}
-
-    boolean isCancelled() {
-      return cancels.get() > 0;
     }
   }
 

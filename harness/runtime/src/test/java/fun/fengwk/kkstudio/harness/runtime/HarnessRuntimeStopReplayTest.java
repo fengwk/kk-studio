@@ -128,8 +128,7 @@ class HarnessRuntimeStopReplayTest {
           tx.insertThread(thread(threadId, sessionId, user2));
           ModelInvocation model = modelInvocation(modelId, threadId, turnStart2, user2, T1);
           tx.insertModelInvocation(model);
-          tx.updateModelInvocation(model.beginDispatch(T2));
-          tx.updateModelInvocation(model.beginDispatch(T2).markRunning(T2));
+          tx.updateModelInvocation(model.markRunning(T2));
         });
     // 该 STOP 边界已持久保存回执：replay 完全由 (threadId, stopRequestId) 回执驱动，不读当前 head。
     store.transaction(

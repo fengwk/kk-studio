@@ -319,9 +319,7 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
 
   private static void succeedModel(
       HarnessStore.Transaction tx, ModelInvocation model, ProviderResponse response, Instant now) {
-    ModelInvocation dispatching = model.beginDispatch(now);
-    tx.updateModelInvocation(dispatching);
-    ModelInvocation running = dispatching.markRunning(now);
+    ModelInvocation running = model.markRunning(now);
     tx.updateModelInvocation(running);
     tx.updateModelInvocation(running.succeed(response, now));
   }

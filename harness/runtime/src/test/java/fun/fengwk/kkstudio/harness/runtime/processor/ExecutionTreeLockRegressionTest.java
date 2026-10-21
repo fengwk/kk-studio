@@ -89,13 +89,11 @@ class ExecutionTreeLockRegressionTest {
             null,
             null);
 
-    // 请求 MODEL work 并推进为 DISPATCHING 前置状态
+    // 请求 MODEL work（READY 状态由 execution.markRunning 推进）
     store.transaction(
         tx -> {
           tx.lockThread(openTurn.threadId());
-          ModelInvocation model = tx.lockModelInvocation(invocationId).orElseThrow();
           tx.requestWork(new WorkTarget(WorkTargetType.MODEL, invocationId));
-          tx.updateModelInvocation(model.beginDispatch(NOW));
           return null;
         });
 
@@ -124,16 +122,7 @@ class ExecutionTreeLockRegressionTest {
             Runnable::run,
             ignored -> {});
 
-    ModelGateway.Handle handle =
-        new ModelGateway.Handle() {
-          @Override
-          public void cancel() {}
-
-          @Override
-          public void activate() {}
-        };
-
-    assertEquals(ProcessResult.STARTED, execution.activate(handle));
+    assertTrue(execution.markRunning());
 
     // markRunning 事务：本 Thread -> Model -> Work，无树锁
     assertFalse(recordingStore.recordedOperations().isEmpty());
@@ -149,8 +138,9 @@ class ExecutionTreeLockRegressionTest {
     recordingStore.clearLogs();
 
     // 触发失败终态
-    execution.onFailed(
-        new ModelInvocationError(ProviderErrorKind.INVALID_REQUEST, "invalid input"));
+    execution.finish(
+        new ModelGateway.Failed(
+            new ModelInvocationError(ProviderErrorKind.INVALID_REQUEST, "invalid input")));
 
     ModelInvocation terminalModel =
         store.transaction(tx -> tx.findModelInvocation(invocationId)).orElseThrow();
@@ -199,9 +189,7 @@ class ExecutionTreeLockRegressionTest {
     store.transaction(
         tx -> {
           tx.lockThread(openTurn.threadId());
-          ModelInvocation model = tx.lockModelInvocation(invocationId).orElseThrow();
           tx.requestWork(new WorkTarget(WorkTargetType.MODEL, invocationId));
-          tx.updateModelInvocation(model.beginDispatch(NOW));
           return null;
         });
 
@@ -231,16 +219,7 @@ class ExecutionTreeLockRegressionTest {
             Runnable::run,
             ignored -> {});
 
-    ModelGateway.Handle handle =
-        new ModelGateway.Handle() {
-          @Override
-          public void cancel() {}
-
-          @Override
-          public void activate() {}
-        };
-
-    assertEquals(ProcessResult.STARTED, execution.activate(handle));
+    assertTrue(execution.markRunning());
     recordingStore.clearLogs();
 
     execution.onEvent(new ProviderStreamEvent.TextDelta("hello "));
@@ -248,7 +227,7 @@ class ExecutionTreeLockRegressionTest {
     assertTrue(
         recordingStore.recordedOperations().isEmpty(), "deltas alone must not touch the store");
 
-    execution.deliverCheckpoint(0, true);
+    execution.requestCheckpoint(1);
 
     List<List<String>> txLogs = recordingStore.recordedOperations();
     assertEquals(1, txLogs.size(), "exactly one checkpoint transaction");

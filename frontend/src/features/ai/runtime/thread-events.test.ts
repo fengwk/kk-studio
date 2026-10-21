@@ -447,7 +447,6 @@ describe('buildThreadEventTimeline', () => {
         (event) => event.source === 'active-model',
       )!.status
     expect(byStatus('READY')).toBe('pending')
-    expect(byStatus('DISPATCHING')).toBe('pending')
     expect(byStatus('RUNNING')).toBe('running')
     expect(byStatus('SUCCEEDED')).toBe('completed')
     expect(byStatus('FAILED')).toBe('failed')

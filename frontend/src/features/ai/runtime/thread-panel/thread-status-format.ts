@@ -192,8 +192,6 @@ export function formatThreadStatusLabel(
       return t('ai.runtime.thread.status.APPLYING')
     case 'MODEL_READY':
       return t('ai.runtime.thread.status.MODEL_READY')
-    case 'MODEL_DISPATCHING':
-      return t('ai.runtime.thread.status.MODEL_DISPATCHING')
     case 'MODEL_RUNNING':
       return t('ai.runtime.thread.status.MODEL_RUNNING')
     case 'WAITING_APPROVAL':

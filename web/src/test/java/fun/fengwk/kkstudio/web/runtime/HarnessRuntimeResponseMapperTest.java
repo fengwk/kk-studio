@@ -132,9 +132,6 @@ class HarnessRuntimeResponseMapperTest {
     cases.put(
         ThreadRuntimeStatus.MODEL_READY, modelSnapshot(ModelInvocationStatus.READY, List.of()));
     cases.put(
-        ThreadRuntimeStatus.MODEL_DISPATCHING,
-        modelSnapshot(ModelInvocationStatus.DISPATCHING, List.of()));
-    cases.put(
         ThreadRuntimeStatus.MODEL_RUNNING, modelSnapshot(ModelInvocationStatus.RUNNING, List.of()));
     cases.put(
         ThreadRuntimeStatus.TOOL_WAITING_APPROVAL,

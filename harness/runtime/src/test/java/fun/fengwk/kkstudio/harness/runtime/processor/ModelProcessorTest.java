@@ -110,7 +110,9 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -124,10 +126,9 @@ import java.util.function.Function;
 /**
  * ModelProcessor 端到端行为测试：InMemoryHarnessStore + fake ModelGateway / Realtime sink。
  *
- * <p>覆盖 READY admission（Started / Busy / 抛异常 / Rejected / Indeterminate）、callback-before-running
- * 门控、 stale lease 恢复、stream checkpoint 前缀与 tool fragment 排除、success terminal + THREAD
- * wake、transient retry 与 retry exhausted、UNKNOWN、duplicate terminal、deleteWork 后 late callback、new
- * wake 保留、sink 失败隔离、 cancel / close 与 wrong target。
+ * <p>覆盖 READY 准入（Admitted / Busy / 抛异常 / Rejected）、RUNNING 先于运行持久化的陈旧启动围栏、stale lease 恢复、stream
+ * checkpoint 前缀与 tool fragment 排除、success terminal + THREAD wake、transient retry 与 retry
+ * exhausted、UNKNOWN、 deleteWork 后的 terminal、new wake 保留、sink 失败隔离、cancel / close 与 wrong target。
  */
 class ModelProcessorTest {
   private static final Instant NOW = Instant.parse("2026-07-01T00:00:00Z");
@@ -146,10 +147,19 @@ class ModelProcessorTest {
           0, InvocationRetryBackoffStrategy.FIXED, Duration.ofSeconds(1), Duration.ofSeconds(1));
 
   private final List<ScheduledExecutorService> schedulers = new ArrayList<>();
+  private final List<ExecutorService> executors = new ArrayList<>();
 
   @AfterEach
   void stopSchedulers() {
     schedulers.forEach(ScheduledExecutorService::shutdownNow);
+    executors.forEach(ExecutorService::shutdownNow);
+  }
+
+  /** 每个任务一个虚拟线程的执行 executor，与生产装配一致。 */
+  private ExecutorService newExecutionExecutor() {
+    ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+    executors.add(executor);
+    return executor;
   }
 
   private ScheduledExecutorService newScheduler() {
@@ -181,14 +191,11 @@ class ModelProcessorTest {
     assertThrows(IllegalArgumentException.class, () -> fixture.processor.process(threadClaim));
   }
 
-  /**
-   * READY admission Started：短事务 DISPATCHING + version+1，随后 markRunning + version+1 并保留 heartbeat。
-   */
+  /** READY admission Admitted：一次短事务 READY -&gt; RUNNING + version+1，保留 heartbeat 与本地执行线程。 */
   @Test
   void admissionStartedMarksRunningAndKeepsLocalExecution() {
     Fixture fixture = fixture();
-    FakeHandle handle = new FakeHandle();
-    fixture.gateway.queue(new ModelGateway.Started(handle));
+    fixture.gateway.queueControlled();
 
     assertEquals(
         ProcessResult.STARTED,
@@ -198,14 +205,14 @@ class ModelProcessorTest {
     assertEquals(ModelInvocationStatus.RUNNING, model.status());
     assertEquals(1, model.attempt());
     assertNull(model.streamCheckpoint());
-    assertEquals(2, thread(fixture.store, fixture.baseline.threadId()).version());
-    assertEquals(1, fixture.gateway.startCalls);
+    assertEquals(1, thread(fixture.store, fixture.baseline.threadId()).version());
+    assertEquals(1, fixture.gateway.admitCalls);
     ModelGateway.Execution execution = fixture.gateway.executions.get(0);
     assertEquals(fixture.invocationId, execution.invocationId());
     assertEquals(1, execution.proposedAttempt());
     assertEquals(fixture.requestSpec.providerType(), execution.providerType());
     assertEquals(materialized(fixture), execution.request());
-    assertFalse(handle.isCancelled());
+    assertFalse(fixture.gateway.controlled(fixture.invocationId).interrupted.get());
     assertTrue(fixture.processor.hasActiveExecution());
     Work modelWork =
         work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
@@ -213,48 +220,7 @@ class ModelProcessorTest {
     assertEquals("token-" + fixture.invocationId, modelWork.leaseToken());
   }
 
-  /**
-   * start 刚返回（甚至同步）到达的 callback 必须先缓冲：callback 观察到的 durable 状态仍是 DISPATCHING，只有 markRunning commit
-   * 后才按到达顺序重放（event -&gt; terminal），terminal 在激活期间落地因此 process 返回 TERMINATED。
-   */
-  @Test
-  void gatesCallbacksUntilDurableRunningIsCommitted() {
-    Fixture fixture = fixture();
-    AtomicReference<ModelInvocationStatus> statusAtCallback = new AtomicReference<>();
-    fixture.gateway.beforeReturn =
-        listener -> {
-          listener.onEvent(new ProviderStreamEvent.TextDelta("ans"));
-          listener.onSucceeded(response("answer", GenerationStopReason.COMPLETE));
-          statusAtCallback.set(model(fixture.store, fixture.invocationId).status());
-        };
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
-
-    assertEquals(
-        ProcessResult.TERMINATED,
-        fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-    assertEquals(ModelInvocationStatus.DISPATCHING, statusAtCallback.get());
-
-    ModelInvocation model = model(fixture.store, fixture.invocationId);
-    assertEquals(ModelInvocationStatus.SUCCEEDED, model.status());
-    assertEquals(1, model.attempt());
-    assertEquals("answer", model.result().text());
-    assertNotNull(model.streamCheckpoint());
-    assertEquals(1, model.streamCheckpoint().attempt());
-    assertEquals(2, model.streamCheckpoint().sequence());
-    assertEquals("answer", model.streamCheckpoint().text());
-    assertEquals(
-        List.of(new ProviderStreamEvent.TextDelta("ans"), new ProviderStreamEvent.TextDelta("wer")),
-        deltas(fixture.sink));
-    assertEquals(3, thread(fixture.store, fixture.baseline.threadId()).version());
-    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId)));
-    assertEquals(
-        2,
-        work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
-            .wakeVersion());
-    assertFalse(fixture.processor.hasActiveExecution());
-  }
-
-  /** Busy：DISPATCHING -&gt; READY + version+1，按 retryAfter reschedule，attempt 不变。 */
+  /** Busy：肯定未发出请求，invocation 保持 READY 且不写 Thread，按 retryAfter reschedule，attempt 不变。 */
   @Test
   void busyAdmissionBouncesToReadyWithoutAdvancingAttempt() {
     Fixture fixture = fixture();
@@ -267,7 +233,7 @@ class ModelProcessorTest {
     ModelInvocation model = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.READY, model.status());
     assertEquals(0, model.attempt());
-    assertEquals(2, thread(fixture.store, fixture.baseline.threadId()).version());
+    assertEquals(0, thread(fixture.store, fixture.baseline.threadId()).version());
     Work modelWork =
         work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
     assertNotNull(modelWork);
@@ -276,7 +242,7 @@ class ModelProcessorTest {
     assertFalse(fixture.processor.hasActiveExecution());
   }
 
-  /** start 抛异常（契约：肯定未接受）：同样 bounce，使用构造注入的 fallback delay。 */
+  /** admit 抛异常（契约：肯定未接受）：同样只重排 Work，使用构造注入的 fallback delay。 */
   @Test
   void startExceptionBouncesWithFallbackDelay() {
     Fixture fixture = fixture();
@@ -291,10 +257,10 @@ class ModelProcessorTest {
     Work modelWork =
         work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
     assertEquals(NOW.plus(FALLBACK_DELAY), modelWork.availableAt());
-    assertEquals(2, thread(fixture.store, fixture.baseline.threadId()).version());
+    assertEquals(0, thread(fixture.store, fixture.baseline.threadId()).version());
   }
 
-  /** Rejected：rejectDispatch FAILED + version+1 + THREAD wake + complete MODEL Work，attempt 不变。 */
+  /** Rejected：READY -&gt; FAILED + version+1 + THREAD wake + complete MODEL Work，attempt 不变。 */
   @Test
   void rejectedAdmissionFailsInvocationAndWakesThread() {
     Fixture fixture = fixture();
@@ -310,7 +276,7 @@ class ModelProcessorTest {
     assertEquals(ModelInvocationStatus.FAILED, model.status());
     assertEquals(0, model.attempt());
     assertEquals(error, model.error());
-    assertEquals(2, thread(fixture.store, fixture.baseline.threadId()).version());
+    assertEquals(1, thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(
         2,
         work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
@@ -327,12 +293,12 @@ class ModelProcessorTest {
     UserBasis basis = history.basis();
     UUID invocationId = history.invocationId();
     FakeGateway gateway = new FakeGateway();
-    gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    gateway.queueControlled();
     ModelProcessor processor = projectionProcessor(store, gateway);
 
     assertEquals(ProcessResult.STARTED, processor.process(claim(store, invocationId)));
 
-    assertEquals(1, gateway.startCalls);
+    assertEquals(1, gateway.admitCalls);
     ModelGateway.Execution execution = gateway.executions.get(0);
     assertEquals(invocationId, execution.invocationId());
     assertEquals(1, execution.proposedAttempt());
@@ -352,13 +318,13 @@ class ModelProcessorTest {
     assertEquals(ModelInvocationStatus.RUNNING, running.status());
     assertEquals(1, running.attempt());
     assertNull(running.error());
-    assertEquals(3, thread(store, basis.threadId()).version());
+    assertEquals(2, thread(store, basis.threadId()).version());
     assertEquals(
         1, work(store, new WorkTarget(WorkTargetType.THREAD, basis.threadId())).wakeVersion());
     assertTrue(processor.hasActiveExecution());
   }
 
-  /** 加载历史后丢失 claim：即使随后投影要放弃 replay，也不得把别人的执行标记为 FAILED，零 gateway 启动、零 mutation。 */
+  /** 加载历史后丢失 claim：即使随后投影要放弃 replay，也不得把别人的执行标记为 FAILED；准入名额被释放，零运行、零 mutation。 */
   @Test
   void ownershipLossDuringMaterializationDoesNotWriteOrDispatch() {
     ReplayHistory history = seedReplayHistory();
@@ -376,14 +342,16 @@ class ModelProcessorTest {
                       return null;
                     }));
     ModelProcessor processor = projectionProcessor(hooked, gateway);
+    gateway.queueControlled();
 
     assertEquals(
         ProcessResult.LOST_OWNERSHIP, processor.process(claim(store, history.invocationId())));
-    assertEquals(ModelInvocationStatus.DISPATCHING, model(store, history.invocationId()).status());
+    assertEquals(ModelInvocationStatus.READY, model(store, history.invocationId()).status());
     assertEquals(0, model(store, history.invocationId()).attempt());
-    assertEquals(2, thread(store, history.basis().threadId()).version());
+    assertEquals(1, thread(store, history.basis().threadId()).version());
     assertNull(work(store, target));
-    assertEquals(0, gateway.startCalls);
+    assertEquals(0, gateway.runCalls.get());
+    assertTrue(gateway.runs.get(history.invocationId()).closedWithoutRun.get());
     assertFalse(processor.hasActiveExecution());
   }
 
@@ -411,32 +379,8 @@ class ModelProcessorTest {
         2,
         work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
             .wakeVersion());
-    assertEquals(0, fixture.gateway.startCalls);
+    assertEquals(0, fixture.gateway.admitCalls);
     assertFalse(processor.hasActiveExecution());
-  }
-
-  /** Indeterminate：UNKNOWN 并消费 proposed attempt（DISPATCHING attempt+1）。 */
-  @Test
-  void indeterminateAdmissionTerminatesUnknownConsumingProposedAttempt() {
-    Fixture fixture = fixture();
-    ModelInvocationError error =
-        new ModelInvocationError(ProviderErrorKind.TRANSIENT, "outcome unknown");
-    fixture.gateway.queue(new ModelGateway.Indeterminate(error));
-
-    assertEquals(
-        ProcessResult.TERMINATED,
-        fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-
-    ModelInvocation model = model(fixture.store, fixture.invocationId);
-    assertEquals(ModelInvocationStatus.UNKNOWN, model.status());
-    assertEquals(1, model.attempt());
-    assertEquals(error, model.error());
-    assertEquals(2, thread(fixture.store, fixture.baseline.threadId()).version());
-    assertEquals(
-        2,
-        work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
-            .wakeVersion());
-    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId)));
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -456,7 +400,6 @@ class ModelProcessorTest {
                 InvocationRetryBackoffStrategy.FIXED,
                 Duration.ofSeconds(5),
                 Duration.ofSeconds(5)));
-    transition(fixture.store, fixture.invocationId, model -> model.beginDispatch(NOW));
     transition(fixture.store, fixture.invocationId, model -> model.markRunning(NOW));
     StreamCheckpoint checkpoint = new StreamCheckpoint(1, 7, "durable partial", "thinking");
     transition(
@@ -479,7 +422,7 @@ class ModelProcessorTest {
     assertEquals(7L, model.failedAttempts().getFirst().sequence());
     assertEquals("durable partial", model.failedAttempts().getFirst().text());
     assertEquals(ProviderErrorKind.TRANSIENT, model.failedAttempts().getFirst().error().kind());
-    assertEquals(0, fixture.gateway.startCalls);
+    assertEquals(0, fixture.gateway.admitCalls);
     assertEquals(1, thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(
         1,
@@ -494,49 +437,12 @@ class ModelProcessorTest {
   }
 
   /**
-   * 新 claim 遇到旧 lease 过期的 DISPATCHING：把可能已发出的启动计为一个已消耗 attempt（attempt+1）后按策略回到 READY， 绝不重放
-   * Provider。DISPATCHING 无 checkpoint，审计快照的 sequence/text 为空。
-   */
-  @Test
-  void staleDispatchingLeaseRecoveryChargesUnconfirmedAttemptAndRetries() {
-    Fixture fixture =
-        fixture(
-            new InvocationRetryPolicy(
-                1,
-                InvocationRetryBackoffStrategy.FIXED,
-                Duration.ofSeconds(5),
-                Duration.ofSeconds(5)));
-    transition(fixture.store, fixture.invocationId, model -> model.beginDispatch(NOW));
-    claim(fixture.store, fixture.invocationId);
-    fixture.clock.advance(Duration.ofSeconds(61));
-    ClaimedWork recovered = claim(fixture.store, fixture.invocationId);
-
-    assertEquals(ProcessResult.RESCHEDULED, fixture.processor.process(recovered));
-
-    ModelInvocation model = model(fixture.store, fixture.invocationId);
-    assertEquals(ModelInvocationStatus.READY, model.status());
-    assertEquals(1, model.attempt());
-    assertEquals(1, model.failedAttempts().size());
-    assertEquals(1, model.failedAttempts().getFirst().attempt());
-    assertEquals(0L, model.failedAttempts().getFirst().sequence());
-    assertEquals("", model.failedAttempts().getFirst().text());
-    assertEquals(ProviderErrorKind.TRANSIENT, model.failedAttempts().getFirst().error().kind());
-    assertEquals(0, fixture.gateway.startCalls);
-    assertEquals(1, thread(fixture.store, fixture.baseline.threadId()).version());
-    Work modelWork =
-        work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
-    assertNotNull(modelWork);
-    assertEquals(fixture.clock.instant().plusSeconds(5), modelWork.availableAt());
-  }
-
-  /**
    * 新 claim 遇到旧 lease 过期的 RUNNING 且重试预算耗尽：FAILED 保留已确认 attempt，唤醒 THREAD 并 complete MODEL
    * Work，明确报告失败而不是无限重试。
    */
   @Test
   void staleRunningLeaseRecoveryExhaustedTerminatesFailed() {
     Fixture fixture = fixture();
-    transition(fixture.store, fixture.invocationId, model -> model.beginDispatch(NOW));
     transition(fixture.store, fixture.invocationId, model -> model.markRunning(NOW));
     claim(fixture.store, fixture.invocationId);
     fixture.clock.advance(Duration.ofSeconds(61));
@@ -549,35 +455,7 @@ class ModelProcessorTest {
     assertEquals(1, model.attempt());
     assertEquals(ProviderErrorKind.TRANSIENT, model.error().kind());
     assertTrue(model.failedAttempts().isEmpty());
-    assertEquals(0, fixture.gateway.startCalls);
-    assertEquals(1, thread(fixture.store, fixture.baseline.threadId()).version());
-    assertEquals(
-        2,
-        work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
-            .wakeVersion());
-    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId)));
-  }
-
-  /**
-   * 新 claim 遇到旧 lease 过期的 DISPATCHING 且重试预算耗尽：未确认的启动仍计为 attempt+1 后 FAILED，唤醒 THREAD 并 complete
-   * MODEL Work。
-   */
-  @Test
-  void staleDispatchingLeaseRecoveryExhaustedTerminatesFailed() {
-    Fixture fixture = fixture();
-    transition(fixture.store, fixture.invocationId, model -> model.beginDispatch(NOW));
-    claim(fixture.store, fixture.invocationId);
-    fixture.clock.advance(Duration.ofSeconds(61));
-    ClaimedWork recovered = claim(fixture.store, fixture.invocationId);
-
-    assertEquals(ProcessResult.TERMINATED, fixture.processor.process(recovered));
-
-    ModelInvocation model = model(fixture.store, fixture.invocationId);
-    assertEquals(ModelInvocationStatus.FAILED, model.status());
-    assertEquals(1, model.attempt());
-    assertEquals(ProviderErrorKind.TRANSIENT, model.error().kind());
-    assertTrue(model.failedAttempts().isEmpty());
-    assertEquals(0, fixture.gateway.startCalls);
+    assertEquals(0, fixture.gateway.admitCalls);
     assertEquals(1, thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(
         2,
@@ -597,7 +475,6 @@ class ModelProcessorTest {
             Duration.ofSeconds(5),
             Duration.ofSeconds(5));
     Fixture fixture = fixture(policy);
-    transition(fixture.store, fixture.invocationId, model -> model.beginDispatch(NOW));
     transition(fixture.store, fixture.invocationId, model -> model.markRunning(NOW));
     claim(fixture.store, fixture.invocationId);
     fixture.clock.advance(Duration.ofSeconds(61));
@@ -636,7 +513,7 @@ class ModelProcessorTest {
       assertEquals(beforeThread, thread(fixture.store, fixture.baseline.threadId()));
       assertEquals(beforeWake, work(fixture.store, threadTarget));
       assertNull(work(fixture.store, recovered.target()));
-      assertEquals(0, fixture.gateway.startCalls);
+      assertEquals(0, fixture.gateway.admitCalls);
       assertFalse(processor.hasActiveExecution());
     }
   }
@@ -645,7 +522,6 @@ class ModelProcessorTest {
   @Test
   void terminalCleanupWakesThreadWithoutVersionBump() {
     Fixture fixture = fixture();
-    transition(fixture.store, fixture.invocationId, model -> model.beginDispatch(NOW));
     transition(fixture.store, fixture.invocationId, model -> model.markRunning(NOW));
     transition(
         fixture.store,
@@ -665,14 +541,13 @@ class ModelProcessorTest {
         work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
             .wakeVersion());
     assertNull(work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId)));
-    assertEquals(0, fixture.gateway.startCalls);
+    assertEquals(0, fixture.gateway.admitCalls);
   }
 
   /** terminal 行且 resultEntryId 已链接：只 complete MODEL Work，不再请求 THREAD wake。 */
   @Test
   void terminalCleanupSkipsThreadWakeWhenResultEntryIsLinked() {
     Fixture fixture = fixture();
-    transition(fixture.store, fixture.invocationId, model -> model.beginDispatch(NOW));
     transition(fixture.store, fixture.invocationId, model -> model.markRunning(NOW));
     transition(
         fixture.store,
@@ -723,17 +598,18 @@ class ModelProcessorTest {
   @Test
   void checkpointKeepsPrefixAndExcludesToolFragments() {
     Fixture fixture = fixture(NO_RETRY, requestWithTool(), IMMEDIATE_STREAM);
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    fixture.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
+    ControlledRun listener = fixture.gateway.controlled(fixture.invocationId);
 
-    listener.onEvent(new ProviderStreamEvent.TextDelta("hel"));
-    listener.onEvent(new ProviderStreamEvent.ToolCallDelta(0, "call_1", "bash", "{\"a\""));
+    listener.event(new ProviderStreamEvent.TextDelta("hel"));
+    listener.event(new ProviderStreamEvent.ToolCallDelta(0, "call_1", "bash", "{\"a\""));
 
-    // 方案 B：delta 立即推送、checkpoint 由独立节奏落库；这里用追帧请求确定性地触发一次 checkpoint。
+    // 方案 B：delta 立即推送、checkpoint 由独立节奏落库；这里用追帧请求触发一次 checkpoint（异步落库）。
     assertTrue(fixture.processor.requestCheckpoint(fixture.invocationId, 1));
+    awaitTrue(() -> model(fixture.store, fixture.invocationId).streamCheckpoint() != null);
     ModelInvocation mid = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.RUNNING, mid.status());
     assertEquals(1, mid.attempt());
@@ -741,10 +617,9 @@ class ModelProcessorTest {
     assertEquals("hel", mid.streamCheckpoint().text());
     assertFalse(mid.streamCheckpoint().text().contains("call_1"));
 
-    listener.onEvent(new ProviderStreamEvent.TextDelta("lo"));
-    listener.onEvent(new ProviderStreamEvent.ToolCallDelta(0, null, null, ":1}"));
-    listener.onSucceeded(
-        toolResponse("hello", new ProviderToolCall("call_1", "bash", "{\"a\":1}")));
+    listener.event(new ProviderStreamEvent.TextDelta("lo"));
+    listener.event(new ProviderStreamEvent.ToolCallDelta(0, null, null, ":1}"));
+    listener.succeed(toolResponse("hello", new ProviderToolCall("call_1", "bash", "{\"a\":1}")));
 
     ModelInvocation terminal = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.SUCCEEDED, terminal.status());
@@ -770,13 +645,13 @@ class ModelProcessorTest {
     Fixture fixture =
         new Fixture(
             NO_RETRY, requestWithTool(), (binding, call) -> Optional.of("run bash " + call.id()));
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    fixture.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
+    ControlledRun listener = fixture.gateway.controlled(fixture.invocationId);
 
-    listener.onSucceeded(toolResponse("hello", new ProviderToolCall("call_1", "bash", "{}")));
+    listener.succeed(toolResponse("hello", new ProviderToolCall("call_1", "bash", "{}")));
 
     ModelInvocation terminal = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.SUCCEEDED, terminal.status());
@@ -791,72 +666,18 @@ class ModelProcessorTest {
             (binding, call) -> {
               throw new IllegalStateException("renderer exploded");
             });
-    failing.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    failing.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         failing.processor.process(claim(failing.store, failing.invocationId)));
     failing
         .gateway
-        .listener(failing.invocationId)
-        .onSucceeded(toolResponse("hello", new ProviderToolCall("call_1", "bash", "{}")));
+        .controlled(failing.invocationId)
+        .succeed(toolResponse("hello", new ProviderToolCall("call_1", "bash", "{}")));
 
     ModelInvocation failedRender = model(failing.store, failing.invocationId);
     assertEquals(ModelInvocationStatus.SUCCEEDED, failedRender.status());
     assertNull(failedRender.result().toolCalls().getFirst().historyAction());
-  }
-
-  /** 意图：Tool-owned renderer 阻塞时不得占用 execution monitor；close/lease-loss 必须仍可立即 abandon。 */
-  @Test
-  void toolHistoryRenderingDoesNotHoldExecutionMonitor() throws Exception {
-    CountDownLatch rendererEntered = new CountDownLatch(1);
-    CountDownLatch releaseRenderer = new CountDownLatch(1);
-    Fixture fixture =
-        new Fixture(
-            NO_RETRY,
-            requestWithTool(),
-            (binding, call) -> {
-              rendererEntered.countDown();
-              try {
-                if (!releaseRenderer.await(5, TimeUnit.SECONDS)) {
-                  throw new IllegalStateException("renderer release timed out");
-                }
-              } catch (InterruptedException interrupted) {
-                Thread.currentThread().interrupt();
-                throw new IllegalStateException("renderer interrupted", interrupted);
-              }
-              return Optional.of("run bash");
-            });
-    FakeHandle handle = new FakeHandle();
-    fixture.gateway.queue(new ModelGateway.Started(handle));
-    assertEquals(
-        ProcessResult.STARTED,
-        fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-
-    Thread terminalThread =
-        new Thread(
-            () ->
-                fixture
-                    .gateway
-                    .listener(fixture.invocationId)
-                    .onSucceeded(
-                        toolResponse("hello", new ProviderToolCall("call_1", "bash", "{}"))),
-            "blocked-history-renderer");
-    terminalThread.start();
-    assertTrue(rendererEntered.await(2, TimeUnit.SECONDS));
-
-    Thread closeThread = new Thread(fixture.processor::close, "model-processor-close");
-    closeThread.start();
-    closeThread.join(2_000);
-    boolean closeCompletedWithoutRenderer = !closeThread.isAlive();
-
-    releaseRenderer.countDown();
-    terminalThread.join(2_000);
-    closeThread.join(2_000);
-
-    assertTrue(closeCompletedWithoutRenderer, "close must not wait for the history renderer");
-    assertFalse(terminalThread.isAlive());
-    assertFalse(closeThread.isAlive());
-    assertTrue(handle.isCancelled());
   }
 
   /**
@@ -873,14 +694,14 @@ class ModelProcessorTest {
                 Duration.ofSeconds(5),
                 Duration.ofSeconds(5)),
             IMMEDIATE_STREAM);
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    fixture.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
+    ControlledRun listener = fixture.gateway.controlled(fixture.invocationId);
 
-    listener.onEvent(new ProviderStreamEvent.TextDelta("truncated partial"));
-    listener.onSucceeded(
+    listener.event(new ProviderStreamEvent.TextDelta("truncated partial"));
+    listener.succeed(
         new ProviderCompletion(
             response("truncated partial", GenerationStopReason.LENGTH), sampleReplayState()));
 
@@ -904,11 +725,11 @@ class ModelProcessorTest {
 
     // 第二次 attempt：合法摘要提交，attempt 计数不重置。
     fixture.clock.advance(Duration.ofSeconds(5));
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    fixture.gateway.queueControlled();
     ClaimedWork second = claim(fixture.store, fixture.invocationId);
     assertEquals(ProcessResult.STARTED, fixture.processor.process(second));
-    ModelGateway.Listener secondListener = fixture.gateway.listener(fixture.invocationId);
-    secondListener.onSucceeded(
+    ControlledRun secondListener = fixture.gateway.controlled(fixture.invocationId);
+    secondListener.succeed(
         new ProviderCompletion(
             response("valid summary", GenerationStopReason.COMPLETE), sampleReplayState()));
 
@@ -929,24 +750,24 @@ class ModelProcessorTest {
                 InvocationRetryBackoffStrategy.FIXED,
                 Duration.ofSeconds(5),
                 Duration.ofSeconds(5)));
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    fixture.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
-    listener.onEvent(new ProviderStreamEvent.TextDelta("partial one"));
-    listener.onSucceeded(
+    ControlledRun listener = fixture.gateway.controlled(fixture.invocationId);
+    listener.event(new ProviderStreamEvent.TextDelta("partial one"));
+    listener.succeed(
         new ProviderCompletion(
             response("partial one", GenerationStopReason.LENGTH), sampleReplayState()));
     assertEquals(ModelInvocationStatus.READY, model(fixture.store, fixture.invocationId).status());
 
     fixture.clock.advance(Duration.ofSeconds(5));
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    fixture.gateway.queueControlled();
     ClaimedWork second = claim(fixture.store, fixture.invocationId);
     assertEquals(ProcessResult.STARTED, fixture.processor.process(second));
-    ModelGateway.Listener secondListener = fixture.gateway.listener(fixture.invocationId);
-    secondListener.onEvent(new ProviderStreamEvent.TextDelta("partial two"));
-    secondListener.onSucceeded(
+    ControlledRun secondListener = fixture.gateway.controlled(fixture.invocationId);
+    secondListener.event(new ProviderStreamEvent.TextDelta("partial two"));
+    secondListener.succeed(
         new ProviderCompletion(
             response("partial two", GenerationStopReason.LENGTH), sampleReplayState()));
 
@@ -977,13 +798,13 @@ class ModelProcessorTest {
   @Test
   void compactionChildEmptyCompleteFinalFailsAsInvalidResponse() {
     Fixture fixture = compactionFixture(NO_RETRY, IMMEDIATE_STREAM);
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    fixture.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
+    ControlledRun listener = fixture.gateway.controlled(fixture.invocationId);
 
-    listener.onSucceeded(
+    listener.succeed(
         new ProviderCompletion(
             new ProviderResponse(
                 "", null, List.of(), GenerationStopReason.COMPLETE, usage(), "req-1", null, null),
@@ -1010,13 +831,13 @@ class ModelProcessorTest {
                 Duration.ofSeconds(5),
                 Duration.ofSeconds(5)),
             IMMEDIATE_STREAM);
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    fixture.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
+    ControlledRun listener = fixture.gateway.controlled(fixture.invocationId);
 
-    listener.onSucceeded(
+    listener.succeed(
         new ProviderCompletion(
             response(" \n\t", GenerationStopReason.COMPLETE), sampleReplayState()));
 
@@ -1033,12 +854,12 @@ class ModelProcessorTest {
         afterFirst.failedAttempts().getFirst().error().message());
 
     fixture.clock.advance(Duration.ofSeconds(5));
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    fixture.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-    ModelGateway.Listener secondListener = fixture.gateway.listener(fixture.invocationId);
-    secondListener.onSucceeded(
+    ControlledRun secondListener = fixture.gateway.controlled(fixture.invocationId);
+    secondListener.succeed(
         new ProviderCompletion(
             response("valid summary", GenerationStopReason.COMPLETE), sampleReplayState()));
 
@@ -1059,27 +880,27 @@ class ModelProcessorTest {
                 Duration.ofSeconds(5),
                 Duration.ofSeconds(5)),
             IMMEDIATE_STREAM);
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    fixture.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
     fixture
         .gateway
-        .listener(fixture.invocationId)
-        .onSucceeded(
+        .controlled(fixture.invocationId)
+        .succeed(
             new ProviderCompletion(
                 response(" \n", GenerationStopReason.COMPLETE), sampleReplayState()));
     assertEquals(ModelInvocationStatus.READY, model(fixture.store, fixture.invocationId).status());
 
     fixture.clock.advance(Duration.ofSeconds(5));
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    fixture.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
     fixture
         .gateway
-        .listener(fixture.invocationId)
-        .onSucceeded(
+        .controlled(fixture.invocationId)
+        .succeed(
             new ProviderCompletion(
                 response("\t \n", GenerationStopReason.COMPLETE), sampleReplayState()));
 
@@ -1103,13 +924,13 @@ class ModelProcessorTest {
                 Duration.ofSeconds(5),
                 Duration.ofSeconds(5)),
             IMMEDIATE_STREAM);
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    fixture.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
+    ControlledRun listener = fixture.gateway.controlled(fixture.invocationId);
 
-    listener.onSucceeded(
+    listener.succeed(
         new ProviderCompletion(
             response("filtered text", GenerationStopReason.FILTERED), sampleReplayState()));
 
@@ -1120,7 +941,7 @@ class ModelProcessorTest {
     assertEquals(
         "compaction model response was filtered and cannot be used as a summary",
         failed.error().message());
-    assertEquals(1, fixture.gateway.startCalls, "a filtered result must never be replayed");
+    assertEquals(1, fixture.gateway.admitCalls, "a filtered result must never be replayed");
     assertNull(failed.resultEntryId());
   }
 
@@ -1128,14 +949,14 @@ class ModelProcessorTest {
   @Test
   void compactionChildToolTurnProceedsLikeOrdinaryRuntimeAndPublishesDeltas() {
     Fixture fixture = compactionFixture(NO_RETRY, IMMEDIATE_STREAM);
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    fixture.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
+    ControlledRun listener = fixture.gateway.controlled(fixture.invocationId);
 
-    listener.onEvent(new ProviderStreamEvent.TextDelta("calling tool"));
-    listener.onSucceeded(
+    listener.event(new ProviderStreamEvent.TextDelta("calling tool"));
+    listener.succeed(
         new ProviderCompletion(
             new ProviderResponse(
                 "calling tool",
@@ -1159,14 +980,14 @@ class ModelProcessorTest {
   @Test
   void compactionChildTruncatedToolIntentIsInvalidResponseWithoutExecutingTools() {
     Fixture fixture = compactionFixture(NO_RETRY, IMMEDIATE_STREAM);
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    fixture.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
+    ControlledRun listener = fixture.gateway.controlled(fixture.invocationId);
 
-    listener.onEvent(new ProviderStreamEvent.TextDelta("truncated call"));
-    listener.onSucceeded(
+    listener.event(new ProviderStreamEvent.TextDelta("truncated call"));
+    listener.succeed(
         new ProviderCompletion(
             new ProviderResponse(
                 "truncated call",
@@ -1204,14 +1025,14 @@ class ModelProcessorTest {
   @Test
   void ordinaryAgentTruncatedAndEmptyFinalsKeepExistingSemantics() {
     Fixture truncated = fixture();
-    truncated.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    truncated.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         truncated.processor.process(claim(truncated.store, truncated.invocationId)));
     truncated
         .gateway
-        .listener(truncated.invocationId)
-        .onSucceeded(
+        .controlled(truncated.invocationId)
+        .succeed(
             new ProviderCompletion(
                 response("partial answer", GenerationStopReason.LENGTH), sampleReplayState()));
     assertEquals(
@@ -1220,13 +1041,13 @@ class ModelProcessorTest {
         "ordinary LENGTH semantics must not change");
 
     Fixture empty = fixture();
-    empty.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    empty.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED, empty.processor.process(claim(empty.store, empty.invocationId)));
     empty
         .gateway
-        .listener(empty.invocationId)
-        .onSucceeded(
+        .controlled(empty.invocationId)
+        .succeed(
             new ProviderCompletion(
                 new ProviderResponse(
                     "",
@@ -1245,14 +1066,14 @@ class ModelProcessorTest {
 
     // 默认约束的普通 Thread（含 task child）不是 owner-settled 摘要任务：截断 final 不做摘要完整性校验。
     Fixture taskChild = fixture();
-    taskChild.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    taskChild.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         taskChild.processor.process(claim(taskChild.store, taskChild.invocationId)));
     taskChild
         .gateway
-        .listener(taskChild.invocationId)
-        .onSucceeded(
+        .controlled(taskChild.invocationId)
+        .succeed(
             new ProviderCompletion(
                 response("task partial", GenerationStopReason.LENGTH), sampleReplayState()));
     assertEquals(
@@ -1273,17 +1094,16 @@ class ModelProcessorTest {
             inherited,
             false,
             ModelStreamConfig.DEFAULT,
-            Runnable::run,
             null,
             ModelHttpErrorPolicyProvider.DEFAULT);
-    truncated.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    truncated.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         truncated.processor.process(claim(truncated.store, truncated.invocationId)));
     truncated
         .gateway
-        .listener(truncated.invocationId)
-        .onSucceeded(
+        .controlled(truncated.invocationId)
+        .succeed(
             new ProviderCompletion(
                 response("ordinary partial", GenerationStopReason.LENGTH), sampleReplayState()));
     assertEquals(
@@ -1299,17 +1119,16 @@ class ModelProcessorTest {
             inherited,
             false,
             ModelStreamConfig.DEFAULT,
-            Runnable::run,
             null,
             ModelHttpErrorPolicyProvider.DEFAULT);
-    filtered.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    filtered.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         filtered.processor.process(claim(filtered.store, filtered.invocationId)));
     filtered
         .gateway
-        .listener(filtered.invocationId)
-        .onSucceeded(
+        .controlled(filtered.invocationId)
+        .succeed(
             new ProviderCompletion(
                 response("ordinary filtered", GenerationStopReason.FILTERED), sampleReplayState()));
     assertEquals(
@@ -1326,16 +1145,16 @@ class ModelProcessorTest {
   void modelExecutionPersistsReplayStateOnCompleteAndLengthWithoutDiagnostics() {
     // 1. COMPLETE 场景
     Fixture fixtureComplete = fixture();
-    fixtureComplete.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    fixtureComplete.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         fixtureComplete.processor.process(
             claim(fixtureComplete.store, fixtureComplete.invocationId)));
-    ModelGateway.Listener listenerComplete =
-        fixtureComplete.gateway.listener(fixtureComplete.invocationId);
+    ControlledRun listenerComplete =
+        fixtureComplete.gateway.controlled(fixtureComplete.invocationId);
 
     ProviderReplayState replayState1 = sampleReplayState();
-    listenerComplete.onSucceeded(
+    listenerComplete.succeed(
         new ProviderCompletion(response("hello", GenerationStopReason.COMPLETE), replayState1));
 
     ModelInvocation modelComplete = model(fixtureComplete.store, fixtureComplete.invocationId);
@@ -1347,15 +1166,14 @@ class ModelProcessorTest {
 
     // 2. LENGTH 场景
     Fixture fixtureLength = fixture();
-    fixtureLength.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    fixtureLength.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         fixtureLength.processor.process(claim(fixtureLength.store, fixtureLength.invocationId)));
-    ModelGateway.Listener listenerLength =
-        fixtureLength.gateway.listener(fixtureLength.invocationId);
+    ControlledRun listenerLength = fixtureLength.gateway.controlled(fixtureLength.invocationId);
 
     ProviderReplayState replayState2 = sampleReplayState();
-    listenerLength.onSucceeded(
+    listenerLength.succeed(
         new ProviderCompletion(response("partial", GenerationStopReason.LENGTH), replayState2));
 
     ModelInvocation modelLength = model(fixtureLength.store, fixtureLength.invocationId);
@@ -1371,15 +1189,15 @@ class ModelProcessorTest {
   void modelExecutionSuppressesReplayStateOnFilteredAndIncompleteDiagnostics() {
     // 1. FILTERED 场景
     Fixture fixtureFiltered = fixture();
-    fixtureFiltered.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    fixtureFiltered.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         fixtureFiltered.processor.process(
             claim(fixtureFiltered.store, fixtureFiltered.invocationId)));
-    ModelGateway.Listener listenerFiltered =
-        fixtureFiltered.gateway.listener(fixtureFiltered.invocationId);
+    ControlledRun listenerFiltered =
+        fixtureFiltered.gateway.controlled(fixtureFiltered.invocationId);
 
-    listenerFiltered.onSucceeded(
+    listenerFiltered.succeed(
         new ProviderCompletion(
             response("filtered output", GenerationStopReason.FILTERED), sampleReplayState()));
 
@@ -1389,11 +1207,11 @@ class ModelProcessorTest {
 
     // 2. 含 incomplete tool diagnostics 场景
     Fixture fixtureDiag = fixture();
-    fixtureDiag.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    fixtureDiag.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         fixtureDiag.processor.process(claim(fixtureDiag.store, fixtureDiag.invocationId)));
-    ModelGateway.Listener listenerDiag = fixtureDiag.gateway.listener(fixtureDiag.invocationId);
+    ControlledRun listenerDiag = fixtureDiag.gateway.controlled(fixtureDiag.invocationId);
 
     ProviderToolCallDiagnostic diagnostic =
         new ProviderToolCallDiagnostic(0, "call_1", "bash", "{\"param\":", "truncated json");
@@ -1409,7 +1227,7 @@ class ModelProcessorTest {
             null,
             List.of(diagnostic));
 
-    listenerDiag.onSucceeded(new ProviderCompletion(responseWithDiagnostics, sampleReplayState()));
+    listenerDiag.succeed(new ProviderCompletion(responseWithDiagnostics, sampleReplayState()));
 
     ModelInvocation modelDiag = model(fixtureDiag.store, fixtureDiag.invocationId);
     assertEquals(ModelInvocationStatus.SUCCEEDED, modelDiag.status());
@@ -1423,14 +1241,13 @@ class ModelProcessorTest {
   void modelExecutionDoesNotLeaveReplayStateOnFailureOrUnknown() {
     // 1. FAILED 终态
     Fixture fixtureFailed = fixture();
-    fixtureFailed.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    fixtureFailed.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         fixtureFailed.processor.process(claim(fixtureFailed.store, fixtureFailed.invocationId)));
-    ModelGateway.Listener listenerFailed =
-        fixtureFailed.gateway.listener(fixtureFailed.invocationId);
+    ControlledRun listenerFailed = fixtureFailed.gateway.controlled(fixtureFailed.invocationId);
 
-    listenerFailed.onFailed(
+    listenerFailed.fail(
         new ModelInvocationError(ProviderErrorKind.INVALID_REQUEST, "terminal failure"));
 
     ModelInvocation modelFailed = model(fixtureFailed.store, fixtureFailed.invocationId);
@@ -1439,14 +1256,13 @@ class ModelProcessorTest {
 
     // 2. UNKNOWN 终态
     Fixture fixtureUnknown = fixture();
-    fixtureUnknown.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    fixtureUnknown.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         fixtureUnknown.processor.process(claim(fixtureUnknown.store, fixtureUnknown.invocationId)));
-    ModelGateway.Listener listenerUnknown =
-        fixtureUnknown.gateway.listener(fixtureUnknown.invocationId);
+    ControlledRun listenerUnknown = fixtureUnknown.gateway.controlled(fixtureUnknown.invocationId);
 
-    listenerUnknown.onUnknown(
+    listenerUnknown.unknown(
         new ModelInvocationError(ProviderErrorKind.TRANSIENT, "indeterminate execution"));
 
     ModelInvocation modelUnknown = model(fixtureUnknown.store, fixtureUnknown.invocationId);
@@ -1462,15 +1278,14 @@ class ModelProcessorTest {
   @Test
   void successTerminalWakesThreadAndPublishesTrailingGap() {
     Fixture fixture = fixture();
-    FakeHandle handle = new FakeHandle();
-    fixture.gateway.queue(new ModelGateway.Started(handle));
+    fixture.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
+    ControlledRun listener = fixture.gateway.controlled(fixture.invocationId);
 
-    listener.onEvent(new ProviderStreamEvent.TextDelta("ans"));
-    listener.onSucceeded(response("answer", GenerationStopReason.COMPLETE));
+    listener.event(new ProviderStreamEvent.TextDelta("ans"));
+    listener.succeed(response("answer", GenerationStopReason.COMPLETE));
 
     ModelInvocation model = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.SUCCEEDED, model.status());
@@ -1482,13 +1297,12 @@ class ModelProcessorTest {
     assertEquals(
         List.of(new ProviderStreamEvent.TextDelta("ans"), new ProviderStreamEvent.TextDelta("wer")),
         deltas(fixture.sink));
-    assertEquals(3, thread(fixture.store, fixture.baseline.threadId()).version());
+    assertEquals(2, thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(
         2,
         work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
             .wakeVersion());
     assertNull(work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId)));
-    assertTrue(handle.isCancelled());
     assertFalse(fixture.processor.hasActiveExecution());
   }
 
@@ -1496,8 +1310,7 @@ class ModelProcessorTest {
   @Test
   void successTerminalRecreatesConsumedThreadWork() {
     Fixture fixture = fixture();
-    FakeHandle handle = new FakeHandle();
-    fixture.gateway.queue(new ModelGateway.Started(handle));
+    fixture.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
@@ -1512,8 +1325,8 @@ class ModelProcessorTest {
 
     fixture
         .gateway
-        .listener(fixture.invocationId)
-        .onSucceeded(response("answer", GenerationStopReason.COMPLETE));
+        .controlled(fixture.invocationId)
+        .succeed(response("answer", GenerationStopReason.COMPLETE));
 
     assertEquals(
         ModelInvocationStatus.SUCCEEDED, model(fixture.store, fixture.invocationId).status());
@@ -1536,16 +1349,15 @@ class ModelProcessorTest {
                 Duration.ofSeconds(5)),
             requestSpec(),
             IMMEDIATE_STREAM);
-    FakeHandle handle = new FakeHandle();
-    fixture.gateway.queue(new ModelGateway.Started(handle));
+    fixture.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
+    ControlledRun listener = fixture.gateway.controlled(fixture.invocationId);
 
-    listener.onEvent(new ProviderStreamEvent.TextDelta("partial"));
-    listener.onEvent(new ProviderStreamEvent.TextDelta("-tail"));
-    listener.onFailed(new ModelInvocationError(ProviderErrorKind.TRANSIENT, "unavailable"));
+    listener.event(new ProviderStreamEvent.TextDelta("partial"));
+    listener.event(new ProviderStreamEvent.TextDelta("-tail"));
+    listener.fail(new ModelInvocationError(ProviderErrorKind.TRANSIENT, "unavailable"));
 
     ModelInvocation model = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.READY, model.status());
@@ -1561,7 +1373,7 @@ class ModelProcessorTest {
         model.failedAttempts().getFirst().error());
     assertEquals(NOW, model.failedAttempts().getFirst().failedAt());
     assertEquals(NOW.plusSeconds(5), model.failedAttempts().getFirst().retryAt());
-    assertEquals(3, thread(fixture.store, fixture.baseline.threadId()).version());
+    assertEquals(2, thread(fixture.store, fixture.baseline.threadId()).version());
     Work modelWork =
         work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
     assertNotNull(modelWork);
@@ -1571,12 +1383,7 @@ class ModelProcessorTest {
         1,
         work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
             .wakeVersion());
-    assertTrue(handle.isCancelled());
     assertFalse(fixture.processor.hasActiveExecution());
-
-    // retry 后旧 execution 的 late callback 必须 no-op。
-    listener.onEvent(new ProviderStreamEvent.TextDelta("late"));
-    assertEquals(ModelInvocationStatus.READY, model(fixture.store, fixture.invocationId).status());
     assertEquals(2, deltas(fixture.sink).size());
   }
 
@@ -1590,22 +1397,22 @@ class ModelProcessorTest {
                 InvocationRetryBackoffStrategy.FIXED,
                 Duration.ofSeconds(5),
                 Duration.ofSeconds(5)));
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    fixture.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
+    ControlledRun listener = fixture.gateway.controlled(fixture.invocationId);
 
-    listener.onFailed(new ModelInvocationError(ProviderErrorKind.TRANSIENT, "first"));
+    listener.fail(new ModelInvocationError(ProviderErrorKind.TRANSIENT, "first"));
     assertEquals(ModelInvocationStatus.READY, model(fixture.store, fixture.invocationId).status());
 
     fixture.clock.advance(Duration.ofSeconds(5));
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    fixture.gateway.queueControlled();
     ClaimedWork second = claim(fixture.store, fixture.invocationId);
     assertEquals(ProcessResult.STARTED, fixture.processor.process(second));
-    ModelGateway.Listener secondListener = fixture.gateway.listener(fixture.invocationId);
+    ControlledRun secondListener = fixture.gateway.controlled(fixture.invocationId);
 
-    secondListener.onFailed(new ModelInvocationError(ProviderErrorKind.TRANSIENT, "second"));
+    secondListener.fail(new ModelInvocationError(ProviderErrorKind.TRANSIENT, "second"));
 
     ModelInvocation model = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.FAILED, model.status());
@@ -1614,7 +1421,7 @@ class ModelProcessorTest {
     assertEquals(1, model.failedAttempts().size());
     assertEquals("first", model.failedAttempts().getFirst().error().message());
     assertEquals(NOW.plusSeconds(5), model.failedAttempts().getFirst().retryAt());
-    assertEquals(6, thread(fixture.store, fixture.baseline.threadId()).version());
+    assertEquals(4, thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(
         2,
         work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
@@ -1633,13 +1440,13 @@ class ModelProcessorTest {
                 Duration.ofSeconds(5),
                 Duration.ofSeconds(5)),
             providerName -> new ModelHttpErrorPolicy(List.of(408, 429)));
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    fixture.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
+    ControlledRun listener = fixture.gateway.controlled(fixture.invocationId);
 
-    listener.onFailed(new ModelInvocationError(ProviderErrorKind.BILLING, "quota exceeded", 429));
+    listener.fail(new ModelInvocationError(ProviderErrorKind.BILLING, "quota exceeded", 429));
 
     ModelInvocation model = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.READY, model.status());
@@ -1660,13 +1467,13 @@ class ModelProcessorTest {
                 Duration.ofSeconds(5),
                 Duration.ofSeconds(5)),
             providerName -> new ModelHttpErrorPolicy(List.of(429)));
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    fixture.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
+    ControlledRun listener = fixture.gateway.controlled(fixture.invocationId);
 
-    listener.onFailed(new ModelInvocationError(ProviderErrorKind.TRANSIENT, "server", 500));
+    listener.fail(new ModelInvocationError(ProviderErrorKind.TRANSIENT, "server", 500));
 
     ModelInvocation model = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.FAILED, model.status());
@@ -1687,13 +1494,13 @@ class ModelProcessorTest {
                 Duration.ofSeconds(5),
                 Duration.ofSeconds(5)),
             providerName -> new ModelHttpErrorPolicy(List.of()));
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    fixture.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
+    ControlledRun listener = fixture.gateway.controlled(fixture.invocationId);
 
-    listener.onFailed(new ModelInvocationError(ProviderErrorKind.TRANSIENT, "overloaded", 503));
+    listener.fail(new ModelInvocationError(ProviderErrorKind.TRANSIENT, "overloaded", 503));
 
     assertEquals(ModelInvocationStatus.FAILED, model(fixture.store, fixture.invocationId).status());
   }
@@ -1709,13 +1516,13 @@ class ModelProcessorTest {
                 Duration.ofSeconds(5),
                 Duration.ofSeconds(5)),
             providerName -> new ModelHttpErrorPolicy(List.of(408, 429, 500, 502, 503, 504)));
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    fixture.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
+    ControlledRun listener = fixture.gateway.controlled(fixture.invocationId);
 
-    listener.onFailed(
+    listener.fail(
         new ModelInvocationError(ProviderErrorKind.INVALID_RESPONSE, "unexpected redirect", 301));
 
     ModelInvocation model = model(fixture.store, fixture.invocationId);
@@ -1740,13 +1547,13 @@ class ModelProcessorTest {
               observedProvider.set(providerName);
               return new ModelHttpErrorPolicy(live.get());
             });
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    fixture.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
+    ControlledRun listener = fixture.gateway.controlled(fixture.invocationId);
 
-    listener.onFailed(new ModelInvocationError(ProviderErrorKind.TRANSIENT, "down", 503));
+    listener.fail(new ModelInvocationError(ProviderErrorKind.TRANSIENT, "down", 503));
 
     assertEquals("provider", observedProvider.get());
     assertEquals(ModelInvocationStatus.READY, model(fixture.store, fixture.invocationId).status());
@@ -1754,12 +1561,12 @@ class ModelProcessorTest {
     // 现读快照：把白名单改为空后，下一次失败立即终止，不重写已派发的 attempt。
     live.set(List.of());
     fixture.clock.advance(Duration.ofSeconds(5));
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    fixture.gateway.queueControlled();
     ClaimedWork second = claim(fixture.store, fixture.invocationId);
     assertEquals(ProcessResult.STARTED, fixture.processor.process(second));
-    ModelGateway.Listener secondListener = fixture.gateway.listener(fixture.invocationId);
+    ControlledRun secondListener = fixture.gateway.controlled(fixture.invocationId);
 
-    secondListener.onFailed(new ModelInvocationError(ProviderErrorKind.TRANSIENT, "down", 503));
+    secondListener.fail(new ModelInvocationError(ProviderErrorKind.TRANSIENT, "down", 503));
 
     ModelInvocation model = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.FAILED, model.status());
@@ -1778,24 +1585,23 @@ class ModelProcessorTest {
                 Duration.ofSeconds(5),
                 Duration.ofSeconds(5)),
             providerName -> new ModelHttpErrorPolicy(List.of(401, 429, 500, 502, 503, 504)));
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    fixture.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
+    ControlledRun listener = fixture.gateway.controlled(fixture.invocationId);
 
-    listener.onFailed(new ModelInvocationError(ProviderErrorKind.AUTHENTICATION, "auth", 401));
+    listener.fail(new ModelInvocationError(ProviderErrorKind.AUTHENTICATION, "auth", 401));
 
     assertEquals(ModelInvocationStatus.READY, model(fixture.store, fixture.invocationId).status());
 
     fixture.clock.advance(Duration.ofSeconds(5));
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    fixture.gateway.queueControlled();
     ClaimedWork second = claim(fixture.store, fixture.invocationId);
     assertEquals(ProcessResult.STARTED, fixture.processor.process(second));
-    ModelGateway.Listener secondListener = fixture.gateway.listener(fixture.invocationId);
+    ControlledRun secondListener = fixture.gateway.controlled(fixture.invocationId);
 
-    secondListener.onFailed(
-        new ModelInvocationError(ProviderErrorKind.AUTHENTICATION, "auth", 401));
+    secondListener.fail(new ModelInvocationError(ProviderErrorKind.AUTHENTICATION, "auth", 401));
 
     ModelInvocation model = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.FAILED, model.status());
@@ -1816,13 +1622,13 @@ class ModelProcessorTest {
                 InvocationRetryBackoffStrategy.FIXED,
                 Duration.ofSeconds(5),
                 Duration.ofSeconds(5)));
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    fixture.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
+    ControlledRun listener = fixture.gateway.controlled(fixture.invocationId);
 
-    listener.onUnknown(new ModelInvocationError(ProviderErrorKind.TRANSIENT, "outcome unknown"));
+    listener.unknown(new ModelInvocationError(ProviderErrorKind.TRANSIENT, "outcome unknown"));
 
     ModelInvocation model = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.UNKNOWN, model.status());
@@ -1832,62 +1638,6 @@ class ModelProcessorTest {
         work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
             .wakeVersion());
     assertNull(work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId)));
-  }
-
-  /** terminal 只生效一次：duplicate / late terminal 与 terminal 后的 event 全部 no-op。 */
-  @Test
-  void duplicateTerminalAndLateEventsAreNoOps() {
-    Fixture fixture = fixture();
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
-    assertEquals(
-        ProcessResult.STARTED,
-        fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
-
-    listener.onSucceeded(response("answer", GenerationStopReason.COMPLETE));
-    listener.onSucceeded(response("second", GenerationStopReason.COMPLETE));
-    listener.onFailed(new ModelInvocationError(ProviderErrorKind.TRANSIENT, "late"));
-    listener.onUnknown(new ModelInvocationError(ProviderErrorKind.TRANSIENT, "late"));
-    listener.onEvent(new ProviderStreamEvent.TextDelta("late"));
-
-    ModelInvocation model = model(fixture.store, fixture.invocationId);
-    assertEquals(ModelInvocationStatus.SUCCEEDED, model.status());
-    assertEquals("answer", model.result().text());
-    assertEquals(1, model.attempt());
-    assertEquals(List.of(new ProviderStreamEvent.TextDelta("answer")), deltas(fixture.sink));
-    assertEquals(
-        2,
-        work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
-            .wakeVersion());
-    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId)));
-  }
-
-  /** Stop deleteWork 后到达的 late callback：ownership 校验失败，不写任何 durable 状态并关闭本地执行。 */
-  @Test
-  void lateCallbackAfterWorkDeletionIsNoOp() {
-    Fixture fixture = fixture();
-    FakeHandle handle = new FakeHandle();
-    fixture.gateway.queue(new ModelGateway.Started(handle));
-    assertEquals(
-        ProcessResult.STARTED,
-        fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
-    deleteModelWork(fixture);
-
-    listener.onSucceeded(response("answer", GenerationStopReason.COMPLETE));
-    listener.onEvent(new ProviderStreamEvent.TextDelta("late"));
-
-    ModelInvocation model = model(fixture.store, fixture.invocationId);
-    assertEquals(ModelInvocationStatus.RUNNING, model.status());
-    assertEquals(1, model.attempt());
-    assertNull(model.streamCheckpoint());
-    assertEquals(
-        1,
-        work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
-            .wakeVersion());
-    assertTrue(fixture.sink.events.isEmpty());
-    assertTrue(handle.isCancelled());
-    assertFalse(fixture.processor.hasActiveExecution());
   }
 
   /** Stop deleteWork 后到达的 late TRANSIENT 失败：retry 事务 ownership 校验失败，保持 RUNNING 并关闭本地执行。 */
@@ -1900,20 +1650,18 @@ class ModelProcessorTest {
                 InvocationRetryBackoffStrategy.FIXED,
                 Duration.ofSeconds(5),
                 Duration.ofSeconds(5)));
-    FakeHandle handle = new FakeHandle();
-    fixture.gateway.queue(new ModelGateway.Started(handle));
+    fixture.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
+    ControlledRun listener = fixture.gateway.controlled(fixture.invocationId);
     deleteModelWork(fixture);
 
-    listener.onFailed(new ModelInvocationError(ProviderErrorKind.TRANSIENT, "boom"));
+    listener.fail(new ModelInvocationError(ProviderErrorKind.TRANSIENT, "boom"));
 
     ModelInvocation model = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.RUNNING, model.status());
     assertEquals(1, model.attempt());
-    assertTrue(handle.isCancelled());
     assertFalse(fixture.processor.hasActiveExecution());
   }
 
@@ -1921,15 +1669,14 @@ class ModelProcessorTest {
   @Test
   void unknownAfterWorkDeletionIsLost() {
     Fixture fixture = fixture();
-    FakeHandle handle = new FakeHandle();
-    fixture.gateway.queue(new ModelGateway.Started(handle));
+    fixture.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
+    ControlledRun listener = fixture.gateway.controlled(fixture.invocationId);
     deleteModelWork(fixture);
 
-    listener.onUnknown(new ModelInvocationError(ProviderErrorKind.TRANSIENT, "outcome unknown"));
+    listener.unknown(new ModelInvocationError(ProviderErrorKind.TRANSIENT, "outcome unknown"));
 
     assertEquals(
         ModelInvocationStatus.RUNNING, model(fixture.store, fixture.invocationId).status());
@@ -1937,7 +1684,6 @@ class ModelProcessorTest {
         1,
         work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
             .wakeVersion());
-    assertTrue(handle.isCancelled());
     assertFalse(fixture.processor.hasActiveExecution());
   }
 
@@ -1945,21 +1691,19 @@ class ModelProcessorTest {
   @Test
   void eventFailureAfterWorkDeletionIsLost() {
     Fixture fixture = fixture(NO_RETRY, requestWithTool());
-    FakeHandle handle = new FakeHandle();
-    fixture.gateway.queue(new ModelGateway.Started(handle));
+    fixture.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
+    ControlledRun listener = fixture.gateway.controlled(fixture.invocationId);
     deleteModelWork(fixture);
 
-    listener.onEvent(new ProviderStreamEvent.ToolCallDelta(0, "call_1", null, null));
-    listener.onEvent(new ProviderStreamEvent.ToolCallDelta(0, "call_2", null, null));
+    listener.event(new ProviderStreamEvent.ToolCallDelta(0, "call_1", null, null));
+    listener.event(new ProviderStreamEvent.ToolCallDelta(0, "call_2", null, null));
 
     ModelInvocation model = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.RUNNING, model.status());
     assertNull(model.error());
-    assertTrue(handle.isCancelled());
     assertFalse(fixture.processor.hasActiveExecution());
   }
 
@@ -1967,20 +1711,18 @@ class ModelProcessorTest {
   @Test
   void nullEventAfterWorkDeletionIsLost() {
     Fixture fixture = fixture();
-    FakeHandle handle = new FakeHandle();
-    fixture.gateway.queue(new ModelGateway.Started(handle));
+    fixture.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
+    ControlledRun listener = fixture.gateway.controlled(fixture.invocationId);
     deleteModelWork(fixture);
 
-    listener.onEvent(null);
+    listener.event(null);
 
     ModelInvocation model = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.RUNNING, model.status());
     assertNull(model.error());
-    assertTrue(handle.isCancelled());
     assertFalse(fixture.processor.hasActiveExecution());
   }
 
@@ -1988,20 +1730,18 @@ class ModelProcessorTest {
   @Test
   void cancelledAfterWorkDeletionIsLost() {
     Fixture fixture = fixture();
-    FakeHandle handle = new FakeHandle();
-    fixture.gateway.queue(new ModelGateway.Started(handle));
+    fixture.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
+    ControlledRun listener = fixture.gateway.controlled(fixture.invocationId);
     deleteModelWork(fixture);
 
-    listener.onFailed(new ModelInvocationError(ProviderErrorKind.CANCELLED, "stopped"));
+    listener.fail(new ModelInvocationError(ProviderErrorKind.CANCELLED, "stopped"));
 
     ModelInvocation model = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.RUNNING, model.status());
     assertNull(model.error());
-    assertTrue(handle.isCancelled());
     assertFalse(fixture.processor.hasActiveExecution());
   }
 
@@ -2015,13 +1755,13 @@ class ModelProcessorTest {
                 InvocationRetryBackoffStrategy.FIXED,
                 Duration.ofSeconds(5),
                 Duration.ofSeconds(5)));
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    fixture.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
+    ControlledRun listener = fixture.gateway.controlled(fixture.invocationId);
 
-    listener.onFailed(new ModelInvocationError(ProviderErrorKind.CANCELLED, "stopped"));
+    listener.fail(new ModelInvocationError(ProviderErrorKind.CANCELLED, "stopped"));
 
     ModelInvocation model = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.CANCELLED, model.status());
@@ -2034,131 +1774,18 @@ class ModelProcessorTest {
     assertNull(work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId)));
   }
 
-  /** handle.cancel 抛异常：本地隔离，不传播也不影响 registry 释放。 */
-  @Test
-  void handleCancelFailureIsIsolated() {
-    Fixture fixture = fixture();
-    ModelGateway.Handle throwingHandle =
-        new ModelGateway.Handle() {
-          @Override
-          public void cancel() {
-            throw new IllegalStateException("transport gone");
-          }
-
-          @Override
-          public void activate() {}
-        };
-    fixture.gateway.queue(new ModelGateway.Started(throwingHandle));
-    assertEquals(
-        ProcessResult.STARTED,
-        fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-
-    assertTrue(fixture.processor.cancel(fixture.invocationId));
-    assertFalse(fixture.processor.hasActiveExecution());
-    assertEquals(
-        ModelInvocationStatus.RUNNING, model(fixture.store, fixture.invocationId).status());
-  }
-
-  /** handle.activate 抛异常（激活失败）：恰好一次 UNKNOWN terminal（RUNNING 保留 attempt），不重试、不重放。 */
-  @Test
-  void activationFailureProducesExactlyOneUnknown() {
-    Fixture fixture = fixture();
-    ModelGateway.Handle failingActivation =
-        new ModelGateway.Handle() {
-          @Override
-          public void cancel() {}
-
-          @Override
-          public void activate() {
-            throw new IllegalStateException("provider gate broken");
-          }
-        };
-    fixture.gateway.queue(new ModelGateway.Started(failingActivation));
-    assertEquals(
-        ProcessResult.TERMINATED,
-        fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-    ModelInvocation model = model(fixture.store, fixture.invocationId);
-    assertEquals(ModelInvocationStatus.UNKNOWN, model.status());
-    assertEquals(1, model.attempt(), "RUNNING keeps its confirmed attempt");
-    assertEquals(ProviderErrorKind.TRANSIENT, model.error().kind());
-    assertTrue(model.error().message().contains("activation failed"));
-    assertFalse(fixture.processor.hasActiveExecution());
-  }
-
-  /** 恶意 handle：activate 内先同步投递 terminal 回调（gate 未开，只进缓冲）再抛异常——必须丢弃缓冲并强制恰好一次 UNKNOWN。 */
-  @Test
-  void activationFailureForcesUnknownEvenIfHandleEmitsTerminalThenThrows() {
-    Fixture fixture = fixture();
-    ModelGateway.Handle malicious =
-        new ModelGateway.Handle() {
-          @Override
-          public void cancel() {}
-
-          @Override
-          public void activate() {
-            fixture
-                .gateway
-                .listener(fixture.invocationId)
-                .onSucceeded(response("answer", GenerationStopReason.COMPLETE));
-            throw new IllegalStateException("provider gate broken");
-          }
-        };
-    fixture.gateway.queue(new ModelGateway.Started(malicious));
-    assertEquals(
-        ProcessResult.TERMINATED,
-        fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-    ModelInvocation model = model(fixture.store, fixture.invocationId);
-    assertEquals(
-        ModelInvocationStatus.UNKNOWN, model.status(), "buffered terminal must be dropped");
-    assertEquals(1, model.attempt(), "RUNNING keeps its confirmed attempt");
-    assertEquals(ProviderErrorKind.TRANSIENT, model.error().kind());
-    assertTrue(model.error().message().contains("activation failed"));
-    assertFalse(fixture.processor.hasActiveExecution());
-  }
-
-  /** 激活失败异常携带 adversarial toString：先收敛 durable UNKNOWN 再记录，异常渲染绝不 bypass 状态转换。 */
-  @Test
-  void activationFailureWithAdversarialExceptionToStringStillConvergesUnknown() {
-    Fixture fixture = fixture();
-    ModelGateway.Handle failingActivation =
-        new ModelGateway.Handle() {
-          @Override
-          public void cancel() {}
-
-          @Override
-          public void activate() {
-            throw new RuntimeException("gate broken") {
-              @Override
-              public String toString() {
-                throw new IllegalStateException("adversarial toString");
-              }
-            };
-          }
-        };
-    fixture.gateway.queue(new ModelGateway.Started(failingActivation));
-    assertEquals(
-        ProcessResult.TERMINATED,
-        fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-    ModelInvocation model = model(fixture.store, fixture.invocationId);
-    assertEquals(ModelInvocationStatus.UNKNOWN, model.status());
-    assertEquals(1, model.attempt(), "RUNNING keeps its confirmed attempt");
-    assertEquals(ProviderErrorKind.TRANSIENT, model.error().kind());
-    assertTrue(model.error().message().contains("activation failed"));
-    assertFalse(fixture.processor.hasActiveExecution());
-  }
-
   /** 处理期间到达新 wake：terminal complete 只清 lease 保留行，新 wake 保持可见。 */
   @Test
   void newWakeSurvivesTerminalCompletion() {
     Fixture fixture = fixture();
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    fixture.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
+    ControlledRun listener = fixture.gateway.controlled(fixture.invocationId);
     requestModelWork(fixture);
 
-    listener.onSucceeded(response("answer", GenerationStopReason.COMPLETE));
+    listener.succeed(response("answer", GenerationStopReason.COMPLETE));
 
     assertEquals(
         ModelInvocationStatus.SUCCEEDED, model(fixture.store, fixture.invocationId).status());
@@ -2174,15 +1801,15 @@ class ModelProcessorTest {
   @Test
   void sinkFailureDoesNotAffectDurableState() {
     Fixture fixture = fixture();
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    fixture.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
+    ControlledRun listener = fixture.gateway.controlled(fixture.invocationId);
     fixture.sink.failure = new IllegalStateException("notification channel unavailable");
 
-    listener.onEvent(new ProviderStreamEvent.TextDelta("ans"));
-    listener.onSucceeded(response("answer", GenerationStopReason.COMPLETE));
+    listener.event(new ProviderStreamEvent.TextDelta("ans"));
+    listener.succeed(response("answer", GenerationStopReason.COMPLETE));
 
     ModelInvocation model = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.SUCCEEDED, model.status());
@@ -2198,14 +1825,14 @@ class ModelProcessorTest {
   @Test
   void conflictingFinalResponseFailsWithInvalidResponse() {
     Fixture fixture = fixture(IMMEDIATE_STREAM);
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    fixture.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
+    ControlledRun listener = fixture.gateway.controlled(fixture.invocationId);
 
-    listener.onEvent(new ProviderStreamEvent.TextDelta("hello"));
-    listener.onSucceeded(response("world", GenerationStopReason.COMPLETE));
+    listener.event(new ProviderStreamEvent.TextDelta("hello"));
+    listener.succeed(response("world", GenerationStopReason.COMPLETE));
 
     ModelInvocation model = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.FAILED, model.status());
@@ -2228,13 +1855,13 @@ class ModelProcessorTest {
   @Test
   void undeclaredToolCallIsAcceptedByModelProcessor() {
     Fixture fixture = fixture(NO_RETRY, requestWithTool());
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    fixture.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
+    ControlledRun listener = fixture.gateway.controlled(fixture.invocationId);
 
-    listener.onSucceeded(
+    listener.succeed(
         new ProviderResponse(
             "",
             null,
@@ -2251,90 +1878,18 @@ class ModelProcessorTest {
     assertEquals("undeclared", model.result().toolCalls().getFirst().name());
   }
 
-  /** 缓冲的 TRANSIENT 失败在激活期间落地：走 retry 路径并返回 RESCHEDULED（attempt 已确认）。 */
-  @Test
-  void bufferedTransientFailureBeforeActivationReschedules() {
-    Fixture fixture =
-        fixture(
-            new InvocationRetryPolicy(
-                2,
-                InvocationRetryBackoffStrategy.FIXED,
-                Duration.ofSeconds(5),
-                Duration.ofSeconds(5)));
-    fixture.gateway.beforeReturn =
-        listener ->
-            listener.onFailed(new ModelInvocationError(ProviderErrorKind.TRANSIENT, "boom"));
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
-
-    assertEquals(
-        ProcessResult.RESCHEDULED,
-        fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-
-    ModelInvocation model = model(fixture.store, fixture.invocationId);
-    assertEquals(ModelInvocationStatus.READY, model.status());
-    assertEquals(1, model.attempt());
-    assertEquals(3, thread(fixture.store, fixture.baseline.threadId()).version());
-    Work modelWork =
-        work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
-    assertEquals(NOW.plusSeconds(5), modelWork.availableAt());
-    assertFalse(fixture.processor.hasActiveExecution());
-  }
-
-  /** 缓冲的不可重试失败在激活期间落地：走 terminal 路径并返回 TERMINATED。 */
-  @Test
-  void bufferedRejectionBeforeActivationTerminates() {
-    Fixture fixture = fixture();
-    fixture.gateway.beforeReturn =
-        listener ->
-            listener.onFailed(new ModelInvocationError(ProviderErrorKind.INVALID_REQUEST, "nope"));
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
-
-    assertEquals(
-        ProcessResult.TERMINATED,
-        fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-
-    ModelInvocation model = model(fixture.store, fixture.invocationId);
-    assertEquals(ModelInvocationStatus.FAILED, model.status());
-    assertEquals(1, model.attempt());
-    assertEquals(3, thread(fixture.store, fixture.baseline.threadId()).version());
-    assertEquals(
-        2,
-        work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
-            .wakeVersion());
-    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId)));
-  }
-
-  /** admission 期间 Stop 获胜（work 行被删）：markRunning 校验失败，LOST_OWNERSHIP 且 cancel handle。 */
-  @Test
-  void stopWinningAdmissionReturnsLostAndCancelsHandle() {
-    Fixture fixture = fixture();
-    FakeHandle handle = new FakeHandle();
-    fixture.gateway.beforeReturn = listener -> deleteModelWork(fixture);
-    fixture.gateway.queue(new ModelGateway.Started(handle));
-
-    assertEquals(
-        ProcessResult.LOST_OWNERSHIP,
-        fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-
-    ModelInvocation model = model(fixture.store, fixture.invocationId);
-    assertEquals(ModelInvocationStatus.DISPATCHING, model.status());
-    assertEquals(0, model.attempt());
-    assertTrue(handle.isCancelled());
-    assertFalse(fixture.processor.hasActiveExecution());
-  }
-
   /** 事件管线异常（tool-call identity 冲突）：转 FAILED(INVALID_RESPONSE)，已发布 delta 保持。 */
   @Test
   void conflictingToolIdentityEventFailsWithInvalidResponse() {
     Fixture fixture = fixture(NO_RETRY, requestWithTool(), IMMEDIATE_STREAM);
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    fixture.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
+    ControlledRun listener = fixture.gateway.controlled(fixture.invocationId);
 
-    listener.onEvent(new ProviderStreamEvent.ToolCallDelta(0, "call_1", null, null));
-    listener.onEvent(new ProviderStreamEvent.ToolCallDelta(0, "call_2", null, null));
+    listener.event(new ProviderStreamEvent.ToolCallDelta(0, "call_1", null, null));
+    listener.event(new ProviderStreamEvent.ToolCallDelta(0, "call_2", null, null));
 
     ModelInvocation model = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.FAILED, model.status());
@@ -2350,13 +1905,13 @@ class ModelProcessorTest {
   @Test
   void successWithoutStreamedContentKeepsNoCheckpoint() {
     Fixture fixture = fixture();
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    fixture.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
+    ControlledRun listener = fixture.gateway.controlled(fixture.invocationId);
 
-    listener.onSucceeded(response("", GenerationStopReason.COMPLETE));
+    listener.succeed(response("", GenerationStopReason.COMPLETE));
 
     ModelInvocation model = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.SUCCEEDED, model.status());
@@ -2369,14 +1924,14 @@ class ModelProcessorTest {
   @Test
   void thinkingDeltasAreCheckpointedAndGapProjected() {
     Fixture fixture = fixture();
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    fixture.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
+    ControlledRun listener = fixture.gateway.controlled(fixture.invocationId);
 
-    listener.onEvent(new ProviderStreamEvent.ThinkingDelta("think"));
-    listener.onSucceeded(
+    listener.event(new ProviderStreamEvent.ThinkingDelta("think"));
+    listener.succeed(
         new ProviderResponse(
             "",
             "thinking",
@@ -2404,14 +1959,14 @@ class ModelProcessorTest {
   @Test
   void streamedThinkingIsPersistedWhenFinalOmitsIt() {
     Fixture fixture = fixture();
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    fixture.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
+    ControlledRun listener = fixture.gateway.controlled(fixture.invocationId);
 
-    listener.onEvent(new ProviderStreamEvent.ThinkingDelta("think"));
-    listener.onSucceeded(response("", GenerationStopReason.COMPLETE));
+    listener.event(new ProviderStreamEvent.ThinkingDelta("think"));
+    listener.succeed(response("", GenerationStopReason.COMPLETE));
 
     ModelInvocation model = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.SUCCEEDED, model.status());
@@ -2424,16 +1979,16 @@ class ModelProcessorTest {
   @Test
   void toolCallFragmentGapsAreProjectedAtTerminal() {
     Fixture fixture = fixture(NO_RETRY, requestWithTool());
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    fixture.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
+    ControlledRun listener = fixture.gateway.controlled(fixture.invocationId);
 
-    listener.onEvent(new ProviderStreamEvent.ToolCallDelta(0, "call", null, null));
-    listener.onEvent(new ProviderStreamEvent.ToolCallDelta(0, null, "bas", null));
-    listener.onEvent(new ProviderStreamEvent.ToolCallDelta(0, null, null, "{\"a\""));
-    listener.onSucceeded(toolResponse("", new ProviderToolCall("call_1", "bash", "{\"a\":1}")));
+    listener.event(new ProviderStreamEvent.ToolCallDelta(0, "call", null, null));
+    listener.event(new ProviderStreamEvent.ToolCallDelta(0, null, "bas", null));
+    listener.event(new ProviderStreamEvent.ToolCallDelta(0, null, null, "{\"a\""));
+    listener.succeed(toolResponse("", new ProviderToolCall("call_1", "bash", "{\"a\":1}")));
 
     ModelInvocation model = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.SUCCEEDED, model.status());
@@ -2446,14 +2001,14 @@ class ModelProcessorTest {
   @Test
   void finalResponseOmittingStreamedToolCallFails() {
     Fixture fixture = fixture(NO_RETRY, requestWithTool());
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    fixture.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
+    ControlledRun listener = fixture.gateway.controlled(fixture.invocationId);
 
-    listener.onEvent(new ProviderStreamEvent.ToolCallDelta(0, "call_1", "bash", "{}"));
-    listener.onSucceeded(response("", GenerationStopReason.COMPLETE));
+    listener.event(new ProviderStreamEvent.ToolCallDelta(0, "call_1", "bash", "{}"));
+    listener.succeed(response("", GenerationStopReason.COMPLETE));
 
     ModelInvocation model = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.FAILED, model.status());
@@ -2464,13 +2019,13 @@ class ModelProcessorTest {
   @Test
   void duplicateToolCallIdsFail() {
     Fixture fixture = fixture(NO_RETRY, requestWithTool());
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    fixture.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
+    ControlledRun listener = fixture.gateway.controlled(fixture.invocationId);
 
-    listener.onSucceeded(
+    listener.succeed(
         new ProviderResponse(
             "",
             null,
@@ -2492,13 +2047,13 @@ class ModelProcessorTest {
   @Test
   void malformedToolArgumentsFail() {
     Fixture fixture = fixture(NO_RETRY, requestWithTool());
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    fixture.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
+    ControlledRun listener = fixture.gateway.controlled(fixture.invocationId);
 
-    listener.onSucceeded(toolResponse("", new ProviderToolCall("call_1", "bash", "not-json")));
+    listener.succeed(toolResponse("", new ProviderToolCall("call_1", "bash", "not-json")));
 
     assertEquals(
         ProviderErrorKind.INVALID_RESPONSE,
@@ -2519,15 +2074,15 @@ class ModelProcessorTest {
                 Duration.ofSeconds(5),
                 Duration.ofSeconds(5)),
             requestSpec());
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    fixture.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
+    ControlledRun listener = fixture.gateway.controlled(fixture.invocationId);
 
     // 第一次 canonical 校验失败：INVALID_RESPONSE 走 retry 路径（不是 FAILED）。
-    listener.onEvent(new ProviderStreamEvent.TextDelta("hello"));
-    listener.onSucceeded(response("world", GenerationStopReason.COMPLETE));
+    listener.event(new ProviderStreamEvent.TextDelta("hello"));
+    listener.succeed(response("world", GenerationStopReason.COMPLETE));
 
     ModelInvocation retried = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.READY, retried.status());
@@ -2541,14 +2096,14 @@ class ModelProcessorTest {
             .availableAt());
 
     // 重试耗尽：第二次 INVALID_RESPONSE 转 FAILED。
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    fixture.gateway.queueControlled();
     fixture.clock.set(NOW.plusSeconds(5));
     assertEquals(
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-    ModelGateway.Listener retriedListener = fixture.gateway.listener(fixture.invocationId);
-    retriedListener.onEvent(new ProviderStreamEvent.TextDelta("hello"));
-    retriedListener.onSucceeded(response("world", GenerationStopReason.COMPLETE));
+    ControlledRun retriedListener = fixture.gateway.controlled(fixture.invocationId);
+    retriedListener.event(new ProviderStreamEvent.TextDelta("hello"));
+    retriedListener.succeed(response("world", GenerationStopReason.COMPLETE));
 
     ModelInvocation failed = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.FAILED, failed.status());
@@ -2562,8 +2117,7 @@ class ModelProcessorTest {
   @Test
   void sameJvmRecoverySupersedesStaleLocalExecution() {
     Fixture fixture = fixture();
-    FakeHandle handle = new FakeHandle();
-    fixture.gateway.queue(new ModelGateway.Started(handle));
+    fixture.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId, "token-old")));
@@ -2576,9 +2130,8 @@ class ModelProcessorTest {
     assertEquals(ModelInvocationStatus.FAILED, model.status());
     assertEquals(1, model.attempt());
     assertEquals(ProviderErrorKind.TRANSIENT, model.error().kind());
-    assertEquals(1, fixture.gateway.startCalls);
-    assertTrue(handle.isCancelled());
-    assertEquals(3, thread(fixture.store, fixture.baseline.threadId()).version());
+    assertEquals(1, fixture.gateway.admitCalls);
+    assertEquals(2, thread(fixture.store, fixture.baseline.threadId()).version());
     assertEquals(
         2,
         work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
@@ -2587,106 +2140,27 @@ class ModelProcessorTest {
     assertFalse(fixture.processor.hasActiveExecution());
   }
 
-  /** admission 结果事务期间 ownership 丢失（Busy 且 work 已被删）：返回 LOST_OWNERSHIP，无 mutation。 */
-  @Test
-  void busyWithLostWorkReturnsLostOwnership() {
-    Fixture fixture = fixture();
-    fixture.gateway.beforeReturn = listener -> deleteModelWork(fixture);
-    fixture.gateway.queue(new ModelGateway.Busy(Duration.ofSeconds(5)));
-
-    assertEquals(
-        ProcessResult.LOST_OWNERSHIP,
-        fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-
-    ModelInvocation model = model(fixture.store, fixture.invocationId);
-    assertEquals(ModelInvocationStatus.DISPATCHING, model.status());
-    assertEquals(0, model.attempt());
-    assertEquals(1, thread(fixture.store, fixture.baseline.threadId()).version());
-    assertFalse(fixture.processor.hasActiveExecution());
-  }
-
-  /** start 抛异常且期间 ownership 丢失：同样返回 LOST_OWNERSHIP，无 mutation。 */
-  @Test
-  void startExceptionWithLostWorkReturnsLostOwnership() {
-    Fixture fixture = fixture();
-    fixture.gateway.beforeReturn = listener -> deleteModelWork(fixture);
-    fixture.gateway.queue(new RuntimeException("gateway down"));
-
-    assertEquals(
-        ProcessResult.LOST_OWNERSHIP,
-        fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-
-    assertEquals(
-        ModelInvocationStatus.DISPATCHING, model(fixture.store, fixture.invocationId).status());
-    assertEquals(1, thread(fixture.store, fixture.baseline.threadId()).version());
-  }
-
-  /** Rejected 且期间 ownership 丢失：LOST_OWNERSHIP。 */
-  @Test
-  void rejectedWithLostWorkReturnsLostOwnership() {
-    Fixture fixture = fixture();
-    fixture.gateway.beforeReturn = listener -> deleteModelWork(fixture);
-    fixture.gateway.queue(
-        new ModelGateway.Rejected(
-            new ModelInvocationError(ProviderErrorKind.INVALID_REQUEST, "rejected")));
-
-    assertEquals(
-        ProcessResult.LOST_OWNERSHIP,
-        fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-
-    assertEquals(
-        ModelInvocationStatus.DISPATCHING, model(fixture.store, fixture.invocationId).status());
-    assertEquals(0, model(fixture.store, fixture.invocationId).attempt());
-    assertEquals(
-        1,
-        work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
-            .wakeVersion());
-  }
-
-  /** Indeterminate 且期间 ownership 丢失：LOST_OWNERSHIP。 */
-  @Test
-  void indeterminateWithLostWorkReturnsLostOwnership() {
-    Fixture fixture = fixture();
-    fixture.gateway.beforeReturn = listener -> deleteModelWork(fixture);
-    fixture.gateway.queue(
-        new ModelGateway.Indeterminate(
-            new ModelInvocationError(ProviderErrorKind.TRANSIENT, "unknown")));
-
-    assertEquals(
-        ProcessResult.LOST_OWNERSHIP,
-        fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-
-    assertEquals(
-        ModelInvocationStatus.DISPATCHING, model(fixture.store, fixture.invocationId).status());
-    assertEquals(0, model(fixture.store, fixture.invocationId).attempt());
-    assertEquals(
-        1,
-        work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
-            .wakeVersion());
-  }
-
   /** 恢复路径中 work 行已被删除：LOST_OWNERSHIP，无 mutation。 */
   @Test
   void recoveryWithDeletedWorkIsLost() {
     Fixture fixture = fixture();
-    transition(fixture.store, fixture.invocationId, model -> model.beginDispatch(NOW));
+    transition(fixture.store, fixture.invocationId, model -> model.markRunning(NOW));
     ClaimedWork claimed = claim(fixture.store, fixture.invocationId);
     deleteModelWork(fixture);
 
     assertEquals(ProcessResult.LOST_OWNERSHIP, fixture.processor.process(claimed));
 
     ModelInvocation model = model(fixture.store, fixture.invocationId);
-    assertEquals(ModelInvocationStatus.DISPATCHING, model.status());
-    assertEquals(0, model.attempt());
+    assertEquals(ModelInvocationStatus.RUNNING, model.status());
+    assertEquals(1, model.attempt());
     assertEquals(0, thread(fixture.store, fixture.baseline.threadId()).version());
-    assertEquals(0, fixture.gateway.startCalls);
+    assertEquals(0, fixture.gateway.admitCalls);
   }
 
   /** terminal cleanup 路径中 work 行已被删除：LOST_OWNERSHIP，无 mutation。 */
   @Test
   void terminalCleanupWithDeletedWorkIsLost() {
     Fixture fixture = fixture();
-    transition(fixture.store, fixture.invocationId, model -> model.beginDispatch(NOW));
     transition(fixture.store, fixture.invocationId, model -> model.markRunning(NOW));
     transition(
         fixture.store,
@@ -2703,167 +2177,18 @@ class ModelProcessorTest {
         1,
         work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
             .wakeVersion());
-    assertEquals(0, fixture.gateway.startCalls);
+    assertEquals(0, fixture.gateway.admitCalls);
   }
 
   // ---------------------------------------------------------------------------------------------
   // Handle fencing / duplicate admission / null start / lease margin / close
   // ---------------------------------------------------------------------------------------------
 
-  /**
-   * Started handle 在 markRunning 之前安全 attach：execution 已被本地 cancel（heartbeat / close 竞态的确定性近似）时，
-   * handle 必须被 best-effort cancel 且不得 markRunning（保持 DISPATCHING、无 mutation）。
-   */
-  @Test
-  void activateAfterLocalCancelCancelsHandleWithoutMarkingRunning() {
-    Fixture fixture = fixture();
-    FakeHandle handle = new FakeHandle();
-    fixture.gateway.beforeReturn =
-        listener -> assertTrue(fixture.processor.cancel(fixture.invocationId));
-    fixture.gateway.queue(new ModelGateway.Started(handle));
-
-    assertEquals(
-        ProcessResult.LOST_OWNERSHIP,
-        fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-
-    assertTrue(handle.isCancelled());
-    ModelInvocation model = model(fixture.store, fixture.invocationId);
-    assertEquals(ModelInvocationStatus.DISPATCHING, model.status());
-    assertEquals(0, model.attempt());
-    assertEquals(1, thread(fixture.store, fixture.baseline.threadId()).version());
-    assertFalse(fixture.processor.hasActiveExecution());
-  }
-
-  /**
-   * abandon 在 activation 开始前获胜（本地 cancel 抢占 markRunning 事务，markRunning 仍 commit）：durable RUNNING
-   * 保持，但 {@code handle.activate()} 绝不调用。
-   */
-  @Test
-  void cancelWinningDuringMarkRunningSkipsActivateAndCancelsHandle() throws Exception {
-    Fixture fixture = fixture();
-    FakeHandle handle = new FakeHandle();
-    CountDownLatch inStart = new CountDownLatch(1);
-    CountDownLatch proceed = new CountDownLatch(1);
-    fixture.gateway.beforeReturn =
-        listener -> {
-          inStart.countDown();
-          try {
-            proceed.await(5, TimeUnit.SECONDS);
-          } catch (InterruptedException failure) {
-            Thread.currentThread().interrupt();
-          }
-        };
-    fixture.gateway.queue(new ModelGateway.Started(handle));
-
-    AtomicReference<ProcessResult> result = new AtomicReference<>();
-    Thread processThread =
-        new Thread(
-            () ->
-                result.set(fixture.processor.process(claim(fixture.store, fixture.invocationId))));
-    processThread.start();
-    assertTrue(inStart.await(5, TimeUnit.SECONDS), "process must be inside gateway.start");
-
-    // 测试线程抢 store monitor：让 process 的 markRunning 事务阻塞在其上。
-    CountDownLatch holding = new CountDownLatch(1);
-    CountDownLatch releaseMonitor = new CountDownLatch(1);
-    Thread holdStore =
-        new Thread(
-            () ->
-                fixture.store.transaction(
-                    ignored -> {
-                      holding.countDown();
-                      try {
-                        releaseMonitor.await(10, TimeUnit.SECONDS);
-                      } catch (InterruptedException failure) {
-                        Thread.currentThread().interrupt();
-                      }
-                      return null;
-                    }));
-    holdStore.start();
-    assertTrue(holding.await(5, TimeUnit.SECONDS));
-
-    proceed.countDown();
-    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-    while (processThread.getState() != Thread.State.BLOCKED && System.nanoTime() < deadline) {
-      Thread.sleep(10);
-    }
-    assertTrue(
-        System.nanoTime() < deadline, "process must block on the store monitor (markRunning)");
-    assertTrue(fixture.processor.cancel(fixture.invocationId));
-
-    releaseMonitor.countDown();
-    holdStore.join(5000);
-    processThread.join(5000);
-
-    assertEquals(ProcessResult.LOST_OWNERSHIP, result.get());
-    assertEquals(0, handle.activates.get(), "abandon 先获胜时 handle.activate 绝不调用");
-    assertTrue(handle.isCancelled());
-    assertFalse(fixture.processor.hasActiveExecution());
-    ModelInvocation model = model(fixture.store, fixture.invocationId);
-    assertEquals(ModelInvocationStatus.RUNNING, model.status());
-    assertEquals(1, model.attempt());
-    assertEquals(2, thread(fixture.store, fixture.baseline.threadId()).version());
-  }
-
-  /**
-   * abandon 在 activation 期间获胜（{@code handle.activate()} 已开始）：abandon 必须推迟 handle cancel 直到 activate
-   * 返回，外部调用序恒为 ACTIVATE -&gt; CANCEL，cancel 绝不丢失。
-   */
-  @Test
-  void cancelWinningDuringActivationDefersCancelUntilActivateReturns() throws Exception {
-    Fixture fixture = fixture();
-    List<String> order = new CopyOnWriteArrayList<>();
-    CountDownLatch inActivate = new CountDownLatch(1);
-    CountDownLatch releaseActivate = new CountDownLatch(1);
-    ModelGateway.Handle blockingHandle =
-        new ModelGateway.Handle() {
-          @Override
-          public void cancel() {
-            order.add("cancel");
-          }
-
-          @Override
-          public void activate() {
-            order.add("activate");
-            inActivate.countDown();
-            try {
-              releaseActivate.await(5, TimeUnit.SECONDS);
-            } catch (InterruptedException failure) {
-              Thread.currentThread().interrupt();
-            }
-          }
-        };
-    fixture.gateway.queue(new ModelGateway.Started(blockingHandle));
-
-    AtomicReference<ProcessResult> result = new AtomicReference<>();
-    Thread processThread =
-        new Thread(
-            () ->
-                result.set(fixture.processor.process(claim(fixture.store, fixture.invocationId))));
-    processThread.start();
-    assertTrue(inActivate.await(5, TimeUnit.SECONDS), "handle.activate must have begun");
-
-    assertTrue(fixture.processor.cancel(fixture.invocationId));
-    assertFalse(fixture.processor.hasActiveExecution());
-    assertEquals(List.of("activate"), order, "activation 中的 abandon 必须推迟 cancel");
-
-    releaseActivate.countDown();
-    processThread.join(5000);
-
-    assertEquals(ProcessResult.LOST_OWNERSHIP, result.get());
-    assertEquals(List.of("activate", "cancel"), order, "外部调用序必须保持 ACTIVATE -> CANCEL");
-    assertFalse(fixture.processor.hasActiveExecution());
-    ModelInvocation model = model(fixture.store, fixture.invocationId);
-    assertEquals(ModelInvocationStatus.RUNNING, model.status());
-    assertEquals(1, model.attempt());
-  }
-
   /** 顺序重复投递同一 claim（同 token）：LOST no-op，不 cancel、不 mutation，合法 RUNNING 不受影响。 */
   @Test
   void duplicateSequentialProcessWithSameClaimIsLostNoOp() {
     Fixture fixture = fixture();
-    FakeHandle handle = new FakeHandle();
-    fixture.gateway.queue(new ModelGateway.Started(handle));
+    fixture.gateway.queueControlled();
     ClaimedWork claimed = claim(fixture.store, fixture.invocationId);
 
     assertEquals(ProcessResult.STARTED, fixture.processor.process(claimed));
@@ -2874,70 +2199,38 @@ class ModelProcessorTest {
         ModelInvocationStatus.RUNNING, model(fixture.store, fixture.invocationId).status());
     assertEquals(1, model(fixture.store, fixture.invocationId).attempt());
     assertEquals(version, thread(fixture.store, fixture.baseline.threadId()).version());
-    assertFalse(handle.isCancelled());
-    assertEquals(1, fixture.gateway.startCalls);
+    assertEquals(1, fixture.gateway.admitCalls);
     assertTrue(fixture.processor.hasActiveExecution());
   }
 
-  /** 并发重复投递同一 claim：guard 覆盖 prepare 到 registry 插入，后到者 LOST no-op，绝不双发 Provider。 */
+  /** 首个 process 的执行线程仍在准入时重复投递同一 claim：后到者 LOST no-op，绝不二次准入或双发 Provider。 */
   @Test
   void duplicateConcurrentProcessWithSameClaimIsLostNoOp() throws Exception {
     Fixture fixture = fixture();
-    FakeHandle handle = new FakeHandle();
-    CountDownLatch inStart = new CountDownLatch(1);
+    CountDownLatch inAdmit = new CountDownLatch(1);
     CountDownLatch release = new CountDownLatch(1);
     fixture.gateway.beforeReturn =
-        listener -> {
-          inStart.countDown();
+        execution -> {
+          inAdmit.countDown();
           try {
             release.await(5, TimeUnit.SECONDS);
           } catch (InterruptedException failure) {
             Thread.currentThread().interrupt();
           }
         };
-    fixture.gateway.queue(new ModelGateway.Started(handle));
+    fixture.gateway.queueControlled();
     ClaimedWork claimed = claim(fixture.store, fixture.invocationId);
-    AtomicReference<ProcessResult> first = new AtomicReference<>();
-    AtomicReference<ProcessResult> second = new AtomicReference<>();
-    Thread firstThread = new Thread(() -> first.set(fixture.processor.process(claimed)));
-    firstThread.start();
-    assertTrue(inStart.await(5, TimeUnit.SECONDS));
 
-    Thread secondThread = new Thread(() -> second.set(fixture.processor.process(claimed)));
-    secondThread.start();
-    secondThread.join(5000);
-    assertEquals(ProcessResult.LOST_OWNERSHIP, second.get());
+    assertEquals(ProcessResult.STARTED, fixture.processor.process(claimed));
+    assertTrue(inAdmit.await(5, TimeUnit.SECONDS));
+    assertEquals(ProcessResult.LOST_OWNERSHIP, fixture.processor.process(claimed));
 
     release.countDown();
-    firstThread.join(5000);
-    assertEquals(ProcessResult.STARTED, first.get());
-    assertEquals(1, fixture.gateway.startCalls);
+    ControlledRun run = fixture.gateway.controlled(fixture.invocationId);
+    assertEquals(1, fixture.gateway.admitCalls);
     assertEquals(
         ModelInvocationStatus.RUNNING, model(fixture.store, fixture.invocationId).status());
-    assertFalse(handle.isCancelled());
-  }
-
-  /** Gateway start 返回 null（契约违反）：acceptance 不确定，按 Indeterminate 语义收敛 UNKNOWN(attempt+1)。 */
-  @Test
-  void nullGatewayStartTreatsAsIndeterminate() {
-    Fixture fixture = fixture();
-    fixture.gateway.queueNullStart();
-
-    assertEquals(
-        ProcessResult.TERMINATED,
-        fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-
-    ModelInvocation model = model(fixture.store, fixture.invocationId);
-    assertEquals(ModelInvocationStatus.UNKNOWN, model.status());
-    assertEquals(1, model.attempt());
-    assertEquals(ProviderErrorKind.TRANSIENT, model.error().kind());
-    assertEquals(2, thread(fixture.store, fixture.baseline.threadId()).version());
-    assertEquals(
-        2,
-        work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
-            .wakeVersion());
-    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId)));
-    assertFalse(fixture.processor.hasActiveExecution());
+    assertFalse(run.interrupted.get());
   }
 
   /**
@@ -2950,34 +2243,35 @@ class ModelProcessorTest {
     ModelStreamConfig streamConfig =
         new ModelStreamConfig(Duration.ofMillis(1), 1, 1, Duration.ofMinutes(10));
     Fixture fixture = fixture(NO_RETRY, requestWithTool(), streamConfig);
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    fixture.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
+    ControlledRun listener = fixture.gateway.controlled(fixture.invocationId);
     long runningVersion = thread(fixture.store, fixture.baseline.threadId()).version();
     assertNull(model(fixture.store, fixture.invocationId).streamCheckpoint());
     assertTrue(checkpoints(fixture.sink).isEmpty());
 
-    listener.onEvent(new ProviderStreamEvent.TextDelta("a"));
+    listener.event(new ProviderStreamEvent.TextDelta("a"));
     assertEquals(1, deltas(fixture.sink).size());
     assertNull(model(fixture.store, fixture.invocationId).streamCheckpoint());
     assertTrue(checkpoints(fixture.sink).isEmpty());
 
-    listener.onEvent(new ProviderStreamEvent.TextDelta("b"));
+    listener.event(new ProviderStreamEvent.TextDelta("b"));
     assertEquals(2, deltas(fixture.sink).size());
     assertNull(
         model(fixture.store, fixture.invocationId).streamCheckpoint(),
         "deltas must not persist a checkpoint on the push path");
 
     assertTrue(fixture.processor.requestCheckpoint(fixture.invocationId, 1));
+    awaitTrue(() -> !checkpoints(fixture.sink).isEmpty());
     ModelInvocation checkpointed = model(fixture.store, fixture.invocationId);
     assertEquals(2, checkpointed.streamCheckpoint().sequence());
     assertEquals("ab", checkpointed.streamCheckpoint().text());
     assertEquals(List.of(2L), checkpoints(fixture.sink));
     assertEquals(runningVersion, thread(fixture.store, fixture.baseline.threadId()).version());
 
-    listener.onEvent(new ProviderStreamEvent.TextDelta("c"));
+    listener.event(new ProviderStreamEvent.TextDelta("c"));
     assertEquals(3, deltas(fixture.sink).size());
     assertEquals(
         2,
@@ -2985,12 +2279,12 @@ class ModelProcessorTest {
         "later deltas must wait for the next checkpoint deadline or catch-up");
 
     // tool fragment 永不 checkpoint，但会作为 overlay 推送并推进 sequence。
-    listener.onEvent(new ProviderStreamEvent.ToolCallDelta(0, "call_1", null, null));
+    listener.event(new ProviderStreamEvent.ToolCallDelta(0, "call_1", null, null));
     assertEquals(4, deltas(fixture.sink).size());
     assertEquals(2, model(fixture.store, fixture.invocationId).streamCheckpoint().sequence());
 
     // terminal success 总是 flush 完整 safe snapshot（tool 的 name/args 差异聚合成 gap delta）。
-    listener.onSucceeded(toolResponse("abc", new ProviderToolCall("call_1", "bash", "{}")));
+    listener.succeed(toolResponse("abc", new ProviderToolCall("call_1", "bash", "{}")));
     ModelInvocation terminal = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.SUCCEEDED, terminal.status());
     assertNotNull(terminal.streamCheckpoint());
@@ -3011,7 +2305,7 @@ class ModelProcessorTest {
             .transaction(
                 tx -> tx.claimNextWork(WorkTargetType.MODEL, "near-expiry", Duration.ofSeconds(1)))
             .orElseThrow();
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    fixture.gateway.queueControlled();
 
     assertEquals(ProcessResult.STARTED, fixture.processor.process(claimed));
 
@@ -3026,7 +2320,7 @@ class ModelProcessorTest {
   void sufficientLeaseMarginIsNotRenewed() {
     Fixture fixture = fixture();
     ClaimedWork claimed = claim(fixture.store, fixture.invocationId);
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    fixture.gateway.queueControlled();
 
     assertEquals(ProcessResult.STARTED, fixture.processor.process(claimed));
 
@@ -3039,7 +2333,7 @@ class ModelProcessorTest {
   @Test
   void closedProcessorRejectsProcessAndCloseIsIdempotent() {
     Fixture fixture = fixture();
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    fixture.gateway.queueControlled();
     ClaimedWork claimed = claim(fixture.store, fixture.invocationId);
     assertEquals(ProcessResult.STARTED, fixture.processor.process(claimed));
 
@@ -3054,7 +2348,7 @@ class ModelProcessorTest {
   }
 
   // ---------------------------------------------------------------------------------------------
-  // 最终并发收口：claimOwned 前置校验 / close-race / attachHandle 锁外 cancel
+  // 最终并发收口：claimOwned 前置校验 / close-race / 准入竞态
   // ---------------------------------------------------------------------------------------------
 
   /**
@@ -3064,8 +2358,7 @@ class ModelProcessorTest {
   @Test
   void forgedDifferentTokenWhileActiveRunningIsLostWithoutCancelling() {
     Fixture fixture = fixture();
-    FakeHandle handle = new FakeHandle();
-    fixture.gateway.queue(new ModelGateway.Started(handle));
+    fixture.gateway.queueControlled();
     ClaimedWork claimed = claim(fixture.store, fixture.invocationId);
     assertEquals(ProcessResult.STARTED, fixture.processor.process(claimed));
 
@@ -3077,9 +2370,8 @@ class ModelProcessorTest {
     assertEquals(
         ModelInvocationStatus.RUNNING, model(fixture.store, fixture.invocationId).status());
     assertEquals(1, model(fixture.store, fixture.invocationId).attempt());
-    assertEquals(2, thread(fixture.store, fixture.baseline.threadId()).version());
-    assertEquals(1, fixture.gateway.startCalls);
-    assertFalse(handle.isCancelled());
+    assertEquals(1, thread(fixture.store, fixture.baseline.threadId()).version());
+    assertEquals(1, fixture.gateway.admitCalls);
     assertTrue(fixture.processor.hasActiveExecution());
     assertEquals(
         "token-" + fixture.invocationId,
@@ -3088,42 +2380,39 @@ class ModelProcessorTest {
   }
 
   /**
-   * close 在 registry 插入之后执行（close snapshot 之前插入，快照含该 execution）：close 负责 abandon，Started handle
-   * 到达时经 attachHandle 竞态被锁外 cancel，不留新 execution；durable 保持 DISPATCHING（markRunning 未发生），lease 过期后由
-   * dispatcher 恢复。
+   * admit 期间 close：execution 已被 abandon，准入返回后释放名额、绝不持久化 RUNNING 也不运行；invocation 保持 READY 并按兜底延迟重排。
    */
   @Test
-  void closeAfterRegistryInsertCancelsHandleAndLeavesNoExecution() {
+  void closeDuringAdmissionReleasesTheSlotWithoutRunning() {
     Fixture fixture = fixture();
-    FakeHandle handle = new FakeHandle();
-    fixture.gateway.beforeReturn = listener -> fixture.processor.close();
-    fixture.gateway.queue(new ModelGateway.Started(handle));
+    fixture.gateway.beforeReturn = execution -> fixture.processor.close();
+    fixture.gateway.queueControlled();
 
     assertEquals(
-        ProcessResult.LOST_OWNERSHIP,
+        ProcessResult.RESCHEDULED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
 
-    assertTrue(handle.isCancelled());
+    assertTrue(fixture.gateway.runs.get(fixture.invocationId).closedWithoutRun.get());
+    assertEquals(0, fixture.gateway.runCalls.get());
     assertFalse(fixture.processor.hasActiveExecution());
-    assertEquals(1, fixture.gateway.startCalls);
-    assertEquals(
-        ModelInvocationStatus.DISPATCHING, model(fixture.store, fixture.invocationId).status());
+    assertEquals(1, fixture.gateway.admitCalls);
+    assertEquals(ModelInvocationStatus.READY, model(fixture.store, fixture.invocationId).status());
     assertEquals(0, model(fixture.store, fixture.invocationId).attempt());
-    assertEquals(
-        "token-" + fixture.invocationId,
-        work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId))
-            .leaseToken());
+    Work modelWork =
+        work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
+    assertEquals(NOW.plus(FALLBACK_DELAY), modelWork.availableAt());
+    assertNull(modelWork.leaseToken());
   }
 
   /**
    * close 在 process 通过入口检查之后、registry 插入之前完成（close snapshot 之后插入）：putIfAbsent 后的 closed 检查
-   * 必须拦截——abandon 新 execution、把仍 owned 的 DISPATCHING 安全 bounce 回 READY + reschedule，绝不启动 Gateway。
-   * 确定性同步：持 store monitor 使 process 阻塞在 claimOwned 事务上，期间执行 close。
+   * 必须拦截——abandon 新 execution、保持 READY 并 reschedule 仍 owned 的 Work，绝不调用 Gateway。 确定性同步：持 store
+   * monitor 使 process 阻塞在 claimOwned 事务上，期间执行 close。
    */
   @Test
   void closeBeforeRegistryInsertBouncesReadyWithoutStartingGateway() throws Exception {
     Fixture fixture = fixture();
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle())); // 不应被消费
+    fixture.gateway.queueControlled(); // 不应被消费
     ClaimedWork claimed = claim(fixture.store, fixture.invocationId);
 
     CountDownLatch holding = new CountDownLatch(1);
@@ -3160,11 +2449,11 @@ class ModelProcessorTest {
     processThread.join(5000);
 
     assertEquals(ProcessResult.RESCHEDULED, result.get());
-    assertEquals(0, fixture.gateway.startCalls);
+    assertEquals(0, fixture.gateway.admitCalls);
     assertFalse(fixture.processor.hasActiveExecution());
     assertEquals(ModelInvocationStatus.READY, model(fixture.store, fixture.invocationId).status());
     assertEquals(0, model(fixture.store, fixture.invocationId).attempt());
-    assertEquals(2, thread(fixture.store, fixture.baseline.threadId()).version());
+    assertEquals(0, thread(fixture.store, fixture.baseline.threadId()).version());
     Work modelWork =
         work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
     assertNotNull(modelWork);
@@ -3173,56 +2462,8 @@ class ModelProcessorTest {
   }
 
   /**
-   * attachHandle 的 handle.cancel 必须在 monitor 锁外：cancel 若同步触发 listener 回调（回调需要 monitor），锁内调用会 死锁。用
-   * cancel 内启动回调线程并 join 的方式确定性验证无死锁（join 5s 超时即视为死锁）。
-   */
-  @Test
-  void attachHandleCancelsOutsideMonitorSoCancelCallbacksCannotDeadlock() {
-    Fixture fixture = fixture();
-    FakeHandle handle =
-        new FakeHandle() {
-          @Override
-          public void cancel() {
-            super.cancel();
-            Thread callback =
-                new Thread(
-                    () ->
-                        fixture
-                            .gateway
-                            .listener(fixture.invocationId)
-                            .onSucceeded(response("x", GenerationStopReason.COMPLETE)));
-            callback.start();
-            try {
-              callback.join(5000);
-              if (callback.isAlive()) {
-                throw new AssertionError(
-                    "handle.cancel synchronously waiting for listener callback deadlocked");
-              }
-            } catch (InterruptedException failure) {
-              Thread.currentThread().interrupt();
-              throw new AssertionError(failure);
-            }
-          }
-        };
-    fixture.gateway.beforeReturn =
-        listener -> assertTrue(fixture.processor.cancel(fixture.invocationId));
-    fixture.gateway.queue(new ModelGateway.Started(handle));
-
-    assertEquals(
-        ProcessResult.LOST_OWNERSHIP,
-        fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-
-    assertTrue(handle.isCancelled());
-    assertEquals(
-        ModelInvocationStatus.DISPATCHING, model(fixture.store, fixture.invocationId).status());
-    assertEquals(0, model(fixture.store, fixture.invocationId).attempt());
-    assertFalse(fixture.processor.hasActiveExecution());
-  }
-
-  /**
-   * close / 本地 cancel 在 heartbeat 启动窗口内获胜（startHeartbeat 返回后、Gateway start 前）：abandoned 检查必须 拦截，不启动
-   * Gateway，把仍 owned 的 DISPATCHING 安全 bounce READY + reschedule。确定性注入：包装 scheduler， 在
-   * scheduleAtFixedRate 提交期间取消本地 execution。
+   * close / 本地 cancel 在 heartbeat 启动窗口内获胜（startHeartbeat 返回后、准入前）：abandoned 检查必须拦截，不调用 Gateway，保持
+   * READY 并 reschedule 仍 owned 的 Work。确定性注入：包装 scheduler，在 scheduleAtFixedRate 提交期间取消本地 execution。
    */
   @Test
   void abandonDuringHeartbeatStartupBouncesWithoutStartingGateway() {
@@ -3244,17 +2485,17 @@ class ModelProcessorTest {
     Fixture fixture = fixture(NO_RETRY, requestSpec(), hooked);
     cancelId.set(fixture.invocationId);
     processorRef.set(fixture.processor);
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle())); // 不应被消费
+    fixture.gateway.queueControlled(); // 不应被消费
 
     assertEquals(
         ProcessResult.RESCHEDULED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
 
-    assertEquals(0, fixture.gateway.startCalls);
+    assertEquals(0, fixture.gateway.admitCalls);
     assertFalse(fixture.processor.hasActiveExecution());
     assertEquals(ModelInvocationStatus.READY, model(fixture.store, fixture.invocationId).status());
     assertEquals(0, model(fixture.store, fixture.invocationId).attempt());
-    assertEquals(2, thread(fixture.store, fixture.baseline.threadId()).version());
+    assertEquals(0, thread(fixture.store, fixture.baseline.threadId()).version());
     Work modelWork =
         work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
     assertNotNull(modelWork);
@@ -3263,64 +2504,63 @@ class ModelProcessorTest {
   }
 
   /**
-   * 并发不同 token：新 claim 已真实 owned（旧 lease 过期被 dispatcher 重新 claim）时通过 claimOwned 前置校验并抢占 guard
-   * （replace 循环），supersede 旧本地 execution 后按 durable DISPATCHING 把未确认启动计为 attempt+1（无重试预算时 FAILED）；
-   * 旧 process 的 Started handle 到达时被锁外 cancel。
+   * 旧 claim 仍阻塞在准入时 lease 过期并被新 token 重新领取：新 claim supersede 旧本地 execution 并完成准入与运行；旧 claim
+   * 准入返回后发现已被 abandon，释放名额、绝不运行，reschedule 也因 ownership 已转移而 LOST。
    */
   @Test
-  void concurrentNewTokenPreemptsGuardAndRecoversUnknown() throws Exception {
+  void newTokenSupersedesExecutionStillInAdmission() throws Exception {
     Fixture fixture = fixture();
-    FakeHandle handle = new FakeHandle();
-    CountDownLatch inStart = new CountDownLatch(1);
+    CountDownLatch inAdmit = new CountDownLatch(1);
     CountDownLatch release = new CountDownLatch(1);
     fixture.gateway.beforeReturn =
-        listener -> {
-          inStart.countDown();
-          try {
-            release.await(5, TimeUnit.SECONDS);
-          } catch (InterruptedException failure) {
-            Thread.currentThread().interrupt();
+        execution -> {
+          if (inAdmit.getCount() > 0) {
+            inAdmit.countDown();
+            try {
+              release.await(5, TimeUnit.SECONDS);
+            } catch (InterruptedException failure) {
+              Thread.currentThread().interrupt();
+            }
           }
         };
-    fixture.gateway.queue(new ModelGateway.Started(handle));
     ClaimedWork claimedA = claim(fixture.store, fixture.invocationId, "token-A");
-
     AtomicReference<ProcessResult> resultA = new AtomicReference<>();
     Thread threadA = new Thread(() -> resultA.set(fixture.processor.process(claimedA)));
     threadA.start();
-    assertTrue(inStart.await(5, TimeUnit.SECONDS)); // A 已通过 guard / putIfAbsent，阻塞在 gateway.start
+    assertTrue(inAdmit.await(5, TimeUnit.SECONDS));
 
     // 旧 lease 被 dispatcher 重新 claim：删旧行、重建 wake 并以新 token 重新领取。
     replaceModelWork(fixture);
     ClaimedWork claimedB = claim(fixture.store, fixture.invocationId, "token-B");
+    fixture.gateway.queueControlled();
+    assertEquals(ProcessResult.STARTED, fixture.processor.process(claimedB));
+    ControlledRun fresh = fixture.gateway.controlled(fixture.invocationId);
 
-    AtomicReference<ProcessResult> resultB = new AtomicReference<>();
-    Thread threadB = new Thread(() -> resultB.set(fixture.processor.process(claimedB)));
-    threadB.start();
-    threadB.join(5000);
+    ControlledRun stale = new ControlledRun();
+    fixture.gateway.queue(stale);
     release.countDown();
     threadA.join(5000);
 
-    assertEquals(ProcessResult.TERMINATED, resultB.get());
     assertEquals(ProcessResult.LOST_OWNERSHIP, resultA.get());
-    assertEquals(1, fixture.gateway.startCalls);
-    assertTrue(handle.isCancelled());
-    // 新 token 接管 durable DISPATCHING：把可能已发出的启动计为 attempt+1，无重试预算时如实终止 FAILED。
-    assertEquals(ModelInvocationStatus.FAILED, model(fixture.store, fixture.invocationId).status());
-    assertEquals(1, model(fixture.store, fixture.invocationId).attempt());
-    assertEquals(2, thread(fixture.store, fixture.baseline.threadId()).version());
+    assertTrue(stale.closedWithoutRun.get());
+    assertEquals(2, fixture.gateway.admitCalls);
+    assertEquals(1, fixture.gateway.runCalls.get());
     assertEquals(
-        2,
-        work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()))
-            .wakeVersion());
-    assertNull(work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId)));
-    assertFalse(fixture.processor.hasActiveExecution());
+        ModelInvocationStatus.RUNNING, model(fixture.store, fixture.invocationId).status());
+    assertEquals(1, model(fixture.store, fixture.invocationId).attempt());
+    assertEquals(
+        "token-B",
+        work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId))
+            .leaseToken());
+    fresh.succeed(response("done", GenerationStopReason.COMPLETE));
+    assertEquals(
+        ModelInvocationStatus.SUCCEEDED, model(fixture.store, fixture.invocationId).status());
   }
 
   /**
-   * stale-start fence：A（token-1）在 heartbeat 启动后暂停；lease 过期后由**另一实例**（模拟另一 JVM 的 processor， 本地
-   * registry / guard 独立，A 的本地 abandoned 检查不可见）以 token-2 接管 durable DISPATCHING；A 恢复时 fence 校验
-   * durable 已非 DISPATCHING → 立即 abandon 并 LOST，绝不调用 Gateway。
+   * stale-start fence：A（token-1）在 heartbeat 启动后暂停；lease 过期后由**另一实例**（模拟另一 JVM 的 processor，本地
+   * registry / guard 独立，A 的本地 abandoned 检查不可见）以 token-2 接管并完成运行；A 恢复时物化事务的 claim 校验失败 → 立即 abandon
+   * 并 LOST，绝不调用 Gateway。
    */
   @Test
   void staleStartAfterCrossInstanceRecoveryNeverCallsGateway() throws Exception {
@@ -3341,7 +2581,7 @@ class ModelProcessorTest {
                   return result;
                 });
     Fixture fixtureA = fixture(NO_RETRY, requestSpec(), hooked);
-    fixtureA.gateway.queue(new ModelGateway.Started(new FakeHandle())); // 不应被消费
+    fixtureA.gateway.queueControlled(); // 不应被消费
     ClaimedWork claimedA = claim(fixtureA.store, fixtureA.invocationId, "token-1");
 
     AtomicReference<ProcessResult> resultA = new AtomicReference<>();
@@ -3350,31 +2590,35 @@ class ModelProcessorTest {
     assertTrue(
         inHeartbeat.await(5, TimeUnit.SECONDS)); // A 已 putIfAbsent + prepare，暂停在 startHeartbeat
 
-    // lease 过期，dispatcher 以 token-2 重新 claim；另一实例接管 durable DISPATCHING（跨实例，A 的 abandoned 检查不可见）。
+    // lease 过期，dispatcher 以 token-2 重新 claim；另一实例接管并完成运行（跨实例，A 的 abandoned 检查不可见）。
     fixtureA.clock.advance(Duration.ofSeconds(61));
     replaceModelWork(fixtureA);
     ClaimedWork claimedB = claim(fixtureA.store, fixtureA.invocationId, "token-2");
+    FakeGateway gatewayB = new FakeGateway();
+    gatewayB.queueScript(
+        new ModelGateway.Succeeded(
+            new ProviderCompletion(response("done", GenerationStopReason.COMPLETE), null)));
     ModelProcessor processorB =
         new ModelProcessor(
             fixtureA.store,
-            new FakeGateway(),
+            gatewayB,
             fixtureA.sink,
             new ModelProcessorConfig(LEASE_CONFIG, () -> NO_RETRY, FALLBACK_DELAY),
             fixtureA.clock,
             newScheduler(),
             Runnable::run,
-            Runnable::run);
-    assertEquals(ProcessResult.TERMINATED, processorB.process(claimedB));
+            newExecutionExecutor());
+    assertEquals(ProcessResult.STARTED, processorB.process(claimedB));
+    awaitTrue(() -> !processorB.hasActiveExecution());
 
     release.countDown();
     threadA.join(5000);
 
     assertEquals(ProcessResult.LOST_OWNERSHIP, resultA.get());
-    assertEquals(0, fixtureA.gateway.startCalls, "stale start must never call the gateway");
+    assertEquals(0, fixtureA.gateway.admitCalls, "stale start must never call the gateway");
     assertFalse(fixtureA.processor.hasActiveExecution());
-    assertFalse(processorB.hasActiveExecution());
     ModelInvocation model = model(fixtureA.store, fixtureA.invocationId);
-    assertEquals(ModelInvocationStatus.FAILED, model.status());
+    assertEquals(ModelInvocationStatus.SUCCEEDED, model.status());
     assertEquals(1, model.attempt());
     assertEquals(2, thread(fixtureA.store, fixtureA.baseline.threadId()).version());
     assertEquals(
@@ -3385,12 +2629,13 @@ class ModelProcessorTest {
   }
 
   /**
-   * materialize 完成后再做 start fence：Stop / recovery 在加载 EntryPath 之后删除 MODEL work 时，不得再调用 Gateway。
+   * materialize 完成后 Stop / recovery 删除 MODEL work：准入只做本地检查可以发生，但 markRunning 围栏拒绝，释放名额且绝不运行，durable
+   * 保持 READY。
    */
   @Test
   void staleStartAfterMaterializationNeverCallsGateway() {
     Fixture fixture = fixture();
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    fixture.gateway.queueControlled();
     HarnessStore hooked = afterEntryPathLoad(fixture.store, () -> deleteModelWork(fixture));
     ModelProcessor processor =
         new ModelProcessor(
@@ -3401,15 +2646,16 @@ class ModelProcessorTest {
             fixture.clock,
             newScheduler(),
             Runnable::run,
-            Runnable::run);
+            newExecutionExecutor());
 
     assertEquals(
         ProcessResult.LOST_OWNERSHIP,
         processor.process(claim(fixture.store, fixture.invocationId)));
 
-    assertEquals(0, fixture.gateway.startCalls, "post-materialization stale start must not start");
     assertEquals(
-        ModelInvocationStatus.DISPATCHING, model(fixture.store, fixture.invocationId).status());
+        0, fixture.gateway.runCalls.get(), "post-materialization stale start must not run");
+    assertTrue(fixture.gateway.runs.get(fixture.invocationId).closedWithoutRun.get());
+    assertEquals(ModelInvocationStatus.READY, model(fixture.store, fixture.invocationId).status());
     assertEquals(0, model(fixture.store, fixture.invocationId).attempt());
     assertFalse(processor.hasActiveExecution());
   }
@@ -3445,16 +2691,15 @@ class ModelProcessorTest {
             fixture.clock,
             hooked,
             Runnable::run,
-            Runnable::run);
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle())); // 不应被消费
+            newExecutionExecutor());
+    fixture.gateway.queueControlled(); // 不应被消费
 
     assertEquals(ProcessResult.LOST_OWNERSHIP, processor.process(claimed));
 
-    assertEquals(0, fixture.gateway.startCalls);
-    assertEquals(
-        ModelInvocationStatus.DISPATCHING, model(fixture.store, fixture.invocationId).status());
+    assertEquals(0, fixture.gateway.admitCalls);
+    assertEquals(ModelInvocationStatus.READY, model(fixture.store, fixture.invocationId).status());
     assertEquals(0, model(fixture.store, fixture.invocationId).attempt());
-    assertEquals(1, thread(fixture.store, fixture.baseline.threadId()).version());
+    assertEquals(0, thread(fixture.store, fixture.baseline.threadId()).version());
     assertFalse(processor.hasActiveExecution());
   }
 
@@ -3468,7 +2713,7 @@ class ModelProcessorTest {
             .transaction(
                 tx -> tx.claimNextWork(WorkTargetType.MODEL, "partial", Duration.ofSeconds(15)))
             .orElseThrow();
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    fixture.gateway.queueControlled();
 
     assertEquals(ProcessResult.STARTED, fixture.processor.process(claimed));
 
@@ -3488,7 +2733,7 @@ class ModelProcessorTest {
             .transaction(
                 tx -> tx.claimNextWork(WorkTargetType.MODEL, "exact", Duration.ofSeconds(30)))
             .orElseThrow();
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+    fixture.gateway.queueControlled();
 
     assertEquals(ProcessResult.STARTED, fixture.processor.process(claimed));
 
@@ -3585,28 +2830,24 @@ class ModelProcessorTest {
   // registry / cancel / close / heartbeat（注册表 / 取消 / 关闭 / 心跳）
   // ---------------------------------------------------------------------------------------------
 
-  /** cancel 只关闭本地执行（handle + heartbeat），不反写任何 durable 状态。 */
+  /** cancel 只中断本地执行线程（连接关闭、heartbeat 停止），不反写任何 durable 状态，之后的增量全部丢弃。 */
   @Test
   void cancelStopsLocalExecutionWithoutDurableWrite() {
     Fixture fixture = fixture();
-    FakeHandle handle = new FakeHandle();
-    fixture.gateway.queue(new ModelGateway.Started(handle));
+    fixture.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
-    ModelGateway.Listener listener = fixture.gateway.listener(fixture.invocationId);
+    ControlledRun run = fixture.gateway.controlled(fixture.invocationId);
 
     assertTrue(fixture.processor.cancel(fixture.invocationId));
-    assertTrue(handle.isCancelled());
+    awaitTrue(run.interrupted::get);
     assertFalse(fixture.processor.hasActiveExecution());
     assertEquals(
         ModelInvocationStatus.RUNNING, model(fixture.store, fixture.invocationId).status());
     assertNotNull(
         work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId))
             .leaseToken());
-    listener.onEvent(new ProviderStreamEvent.TextDelta("late"));
-    assertEquals(
-        ModelInvocationStatus.RUNNING, model(fixture.store, fixture.invocationId).status());
     assertNull(model(fixture.store, fixture.invocationId).streamCheckpoint());
     assertTrue(fixture.sink.events.isEmpty());
 
@@ -3614,27 +2855,26 @@ class ModelProcessorTest {
     assertThrows(NullPointerException.class, () -> fixture.processor.cancel(null));
   }
 
-  /** close 取消全部本地 execution；durable 行保持 RUNNING 等待 lease 恢复。 */
+  /** close 中断全部本地执行线程；durable 行保持 RUNNING 等待 lease 恢复。 */
   @Test
   void closeCancelsAllLocalExecutions() {
     Fixture fixture = fixture();
     Baseline secondBaseline = seedBaseline(fixture.store, NOW);
     UUID secondInvocationId = seedInvocation(fixture.store, secondBaseline, requestSpec(), NOW);
-    FakeHandle firstHandle = new FakeHandle();
-    FakeHandle secondHandle = new FakeHandle();
-    fixture.gateway.queue(new ModelGateway.Started(firstHandle));
-    fixture.gateway.queue(new ModelGateway.Started(secondHandle));
+    fixture.gateway.queueControlled();
+    fixture.gateway.queueControlled();
     assertEquals(
         ProcessResult.STARTED,
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
+    ControlledRun first = fixture.gateway.controlled(fixture.invocationId);
     assertEquals(
         ProcessResult.STARTED, fixture.processor.process(claim(fixture.store, secondInvocationId)));
+    ControlledRun second = fixture.gateway.controlled(secondInvocationId);
 
     fixture.processor.close();
 
+    awaitTrue(() -> first.interrupted.get() && second.interrupted.get());
     assertFalse(fixture.processor.hasActiveExecution());
-    assertTrue(firstHandle.isCancelled());
-    assertTrue(secondHandle.isCancelled());
     assertEquals(
         ModelInvocationStatus.RUNNING, model(fixture.store, fixture.invocationId).status());
     assertEquals(ModelInvocationStatus.RUNNING, model(fixture.store, secondInvocationId).status());
@@ -3649,7 +2889,6 @@ class ModelProcessorTest {
     UUID invocationId = seedInvocation(store, baseline, requestSpec(), now);
     FakeGateway gateway = new FakeGateway();
     RecordingSink sink = new RecordingSink();
-    FakeHandle handle = new FakeHandle();
     ModelProcessor processor =
         new ModelProcessor(
             store,
@@ -3662,8 +2901,9 @@ class ModelProcessorTest {
             Clock.systemUTC(),
             newScheduler(),
             Runnable::run,
-            Runnable::run);
-    gateway.queue(new ModelGateway.Started(handle));
+            newExecutionExecutor());
+    ControlledRun run = new ControlledRun();
+    gateway.queue(run);
     ClaimedWork claimed =
         store
             .transaction(
@@ -3686,7 +2926,7 @@ class ModelProcessorTest {
           tx.deleteWork(new WorkTarget(WorkTargetType.MODEL, invocationId));
           return null;
         });
-    awaitTrue(handle::isCancelled, Duration.ofSeconds(2));
+    awaitTrue(run.interrupted::get, Duration.ofSeconds(2));
 
     assertFalse(processor.hasActiveExecution());
     assertEquals(ModelInvocationStatus.RUNNING, model(store, invocationId).status());
@@ -3707,19 +2947,19 @@ class ModelProcessorTest {
             fixture.clock,
             dead,
             Runnable::run,
-            Runnable::run);
-    fixture.gateway.queue(new ModelGateway.Started(new FakeHandle()));
+            newExecutionExecutor());
+    fixture.gateway.queueControlled();
 
     assertEquals(
         ProcessResult.RESCHEDULED,
         deadProcessor.process(claim(fixture.store, fixture.invocationId)));
 
-    assertEquals(0, fixture.gateway.startCalls);
+    assertEquals(0, fixture.gateway.admitCalls);
     assertEquals(ModelInvocationStatus.READY, model(fixture.store, fixture.invocationId).status());
     Work modelWork =
         work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
     assertEquals(NOW.plus(FALLBACK_DELAY), modelWork.availableAt());
-    assertEquals(2, thread(fixture.store, fixture.baseline.threadId()).version());
+    assertEquals(0, thread(fixture.store, fixture.baseline.threadId()).version());
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -3739,7 +2979,7 @@ class ModelProcessorTest {
     assertEquals(ModelInvocationStatus.READY, model.status());
     assertEquals(0, model.attempt());
     assertEquals(0, thread(fixture.store, fixture.baseline.threadId()).version());
-    assertEquals(0, fixture.gateway.startCalls);
+    assertEquals(0, fixture.gateway.admitCalls);
     Work modelWork =
         work(fixture.store, new WorkTarget(WorkTargetType.MODEL, fixture.invocationId));
     assertEquals("token-" + fixture.invocationId, modelWork.leaseToken());
@@ -3756,7 +2996,7 @@ class ModelProcessorTest {
 
     assertEquals(ModelInvocationStatus.READY, model(fixture.store, fixture.invocationId).status());
     assertEquals(0, thread(fixture.store, fixture.baseline.threadId()).version());
-    assertEquals(0, fixture.gateway.startCalls);
+    assertEquals(0, fixture.gateway.admitCalls);
   }
 
   /**
@@ -3780,7 +3020,7 @@ class ModelProcessorTest {
             fixture.clock,
             newScheduler(),
             Runnable::run,
-            Runnable::run);
+            newExecutionExecutor());
 
     assertEquals(
         ProcessResult.TERMINATED, processor.process(claim(fixture.store, fixture.invocationId)));
@@ -3948,7 +3188,6 @@ class ModelProcessorTest {
         newScheduler(),
         false,
         ModelStreamConfig.DEFAULT,
-        Runnable::run,
         null,
         httpErrorPolicyProvider);
   }
@@ -4000,23 +3239,12 @@ class ModelProcessorTest {
         ScheduledExecutorService scheduler,
         boolean compactionChild,
         ModelStreamConfig flushConfig) {
-      this(retryPolicy, requestSpec, scheduler, compactionChild, flushConfig, Runnable::run);
-    }
-
-    Fixture(
-        InvocationRetryPolicy retryPolicy,
-        ModelRequestSpec requestSpec,
-        ScheduledExecutorService scheduler,
-        boolean compactionChild,
-        ModelStreamConfig flushConfig,
-        Executor flushExecutor) {
       this(
           retryPolicy,
           requestSpec,
           scheduler,
           compactionChild,
           flushConfig,
-          flushExecutor,
           null,
           ModelHttpErrorPolicyProvider.DEFAULT);
     }
@@ -4031,7 +3259,6 @@ class ModelProcessorTest {
           newScheduler(),
           false,
           ModelStreamConfig.DEFAULT,
-          Runnable::run,
           toolHistoryActionResolver,
           ModelHttpErrorPolicyProvider.DEFAULT);
     }
@@ -4042,7 +3269,6 @@ class ModelProcessorTest {
         ScheduledExecutorService scheduler,
         boolean compactionChild,
         ModelStreamConfig flushConfig,
-        Executor flushExecutor,
         ToolHistoryActionResolver toolHistoryActionResolver,
         ModelHttpErrorPolicyProvider httpErrorPolicyProvider) {
       this(
@@ -4052,7 +3278,6 @@ class ModelProcessorTest {
           compactionChild ? new ThreadConstraints(4096, true, false) : ThreadConstraints.NONE,
           compactionChild,
           flushConfig,
-          flushExecutor,
           toolHistoryActionResolver,
           httpErrorPolicyProvider);
     }
@@ -4064,7 +3289,6 @@ class ModelProcessorTest {
         ThreadConstraints constraints,
         boolean ownerSettledSummary,
         ModelStreamConfig flushConfig,
-        Executor flushExecutor,
         ToolHistoryActionResolver toolHistoryActionResolver,
         ModelHttpErrorPolicyProvider httpErrorPolicyProvider) {
       this.scheduler = scheduler;
@@ -4075,6 +3299,7 @@ class ModelProcessorTest {
             store, baseline.sessionId(), baseline.rootEntryId(), baseline.threadId());
       }
       this.invocationId = seedInvocation(store, baseline, requestSpec, NOW);
+      Executor executionExecutor = newExecutionExecutor();
       this.processor =
           new ModelProcessor(
               store,
@@ -4090,7 +3315,8 @@ class ModelProcessorTest {
               clock,
               scheduler,
               Runnable::run,
-              flushExecutor);
+              executionExecutor);
+      gateway.owner = processor;
     }
   }
 
@@ -4159,7 +3385,7 @@ class ModelProcessorTest {
         Clock.fixed(NOW, ZoneOffset.UTC),
         newScheduler(),
         Runnable::run,
-        Runnable::run);
+        newExecutionExecutor());
   }
 
   /** Session + ROOT + TURN_START(INPUT) + USER；Thread head 指向 USER。 */
@@ -4536,66 +3762,209 @@ class ModelProcessorTest {
         JsonNodeFactory.instance.objectNode().put("token", 42));
   }
 
+  /**
+   * 可编排的 fake Gateway：每次 admit 取队列头的一个结果。{@link #queueControlled} 排入一次受测试线程控制的阻塞运行——测试通过 {@link
+   * ControlledRun} 逐个推送增量并给出终态，运行线程在 {@code run} 内阻塞等待。
+   */
   static final class FakeGateway implements ModelGateway {
-    private static final Object NULL_START = new Object();
     final LinkedList<Object> results = new LinkedList<>();
     final List<Execution> executions = new CopyOnWriteArrayList<>();
-    final ConcurrentHashMap<UUID, Listener> listeners = new ConcurrentHashMap<>();
-    volatile Consumer<Listener> beforeReturn;
-    volatile int startCalls;
+    final ConcurrentHashMap<UUID, ControlledRun> runs = new ConcurrentHashMap<>();
+    final AtomicInteger runCalls = new AtomicInteger();
+    final AtomicInteger closedUnused = new AtomicInteger();
+    volatile int admitCalls;
+    volatile ModelProcessor owner;
 
+    /** 在 admit 返回结果之前于执行线程上运行，用于确定性地制造准入与本地状态变化的竞态窗口。 */
+    volatile Consumer<Execution> beforeReturn;
+
+    /** 排入一个 Admission、一次抛出的 RuntimeException 或 {@link Script}。 */
     void queue(Object result) {
       results.add(result);
     }
 
-    /** queue 一次返回 null 的 start（契约违反场景）。 */
-    void queueNullStart() {
-      results.add(NULL_START);
+    /** 排入一次由测试控制的阻塞运行。 */
+    void queueControlled() {
+      results.add(new ControlledRun());
+    }
+
+    /** 排入一次立即完成的运行：先按序推送 events，再返回 outcome。 */
+    void queueScript(Outcome outcome, ProviderStreamEvent... events) {
+      results.add(
+          (Script)
+              sink -> {
+                for (ProviderStreamEvent event : events) {
+                  sink.onEvent(event);
+                }
+                return outcome;
+              });
     }
 
     @Override
-    public StartResult start(Execution execution, Listener listener) {
-      startCalls++;
+    public Admission admit(Execution execution) {
+      admitCalls++;
       executions.add(execution);
-      listeners.put(execution.invocationId(), listener);
+      Consumer<Execution> hook = beforeReturn;
+      if (hook != null) {
+        hook.accept(execution);
+      }
       Object result = results.poll();
       if (result == null) {
         throw new IllegalStateException("no queued gateway result");
       }
-      Consumer<Listener> hook = beforeReturn;
-      if (hook != null) {
-        hook.accept(listener);
-      }
-      if (result == NULL_START) {
-        return null;
-      }
       if (result instanceof RuntimeException failure) {
         throw failure;
       }
-      return (StartResult) result;
+      if (result instanceof ControlledRun controlled) {
+        controlled.gateway = this;
+        runs.put(execution.invocationId(), controlled);
+        return controlled;
+      }
+      if (result instanceof Script script) {
+        return new ScriptedAdmitted(script, this);
+      }
+      return (Admission) result;
     }
 
-    Listener listener(UUID invocationId) {
-      return listeners.get(invocationId);
+    /** 等待运行线程进入 {@code run}（此时 RUNNING 已持久化）并返回控制器。 */
+    ControlledRun controlled(UUID invocationId) {
+      awaitTrue(
+          () -> runs.get(invocationId) != null && runs.get(invocationId).entered.getCount() == 0);
+      return runs.get(invocationId);
     }
   }
 
-  static class FakeHandle implements ModelGateway.Handle {
-    final AtomicInteger cancels = new AtomicInteger();
-    final AtomicInteger activates = new AtomicInteger();
+  /** 运行线程在 {@link Admitted#run} 内执行的脚本。 */
+  interface Script {
+    ModelGateway.Outcome run(ModelGateway.Sink sink);
+  }
 
-    @Override
-    public void cancel() {
-      cancels.incrementAndGet();
+  static final class ScriptedAdmitted implements ModelGateway.Admitted {
+    private final Script script;
+    private final FakeGateway gateway;
+
+    ScriptedAdmitted(Script script, FakeGateway gateway) {
+      this.script = script;
+      this.gateway = gateway;
     }
 
     @Override
-    public void activate() {
-      activates.incrementAndGet();
+    public ModelGateway.Outcome run(ModelGateway.Sink sink) {
+      gateway.runCalls.incrementAndGet();
+      return script.run(sink);
     }
 
-    boolean isCancelled() {
-      return cancels.get() > 0;
+    @Override
+    public void close() {
+      gateway.closedUnused.incrementAndGet();
+    }
+  }
+
+  /** 测试线程驱动的阻塞运行：推送增量 / 终态都会等待运行线程处理完毕。 */
+  static final class ControlledRun implements ModelGateway.Admitted {
+    private final LinkedBlockingQueue<Object[]> signals = new LinkedBlockingQueue<>();
+    final CountDownLatch entered = new CountDownLatch(1);
+    final AtomicBoolean interrupted = new AtomicBoolean();
+    final AtomicBoolean closedWithoutRun = new AtomicBoolean();
+    volatile FakeGateway gateway;
+    volatile RuntimeException sinkFailure;
+
+    @Override
+    public ModelGateway.Outcome run(ModelGateway.Sink sink) {
+      gateway.runCalls.incrementAndGet();
+      entered.countDown();
+      try {
+        while (true) {
+          Object[] signal = signals.take();
+          if (signal[0] instanceof ProviderStreamEvent event) {
+            try {
+              sink.onEvent(event);
+            } catch (RuntimeException failure) {
+              sinkFailure = failure;
+              throw failure;
+            } finally {
+              ((CountDownLatch) signal[1]).countDown();
+            }
+          } else {
+            ((CountDownLatch) signal[1]).countDown();
+            return (ModelGateway.Outcome) signal[0];
+          }
+        }
+      } catch (InterruptedException cancelled) {
+        interrupted.set(true);
+        Thread.currentThread().interrupt();
+        return new ModelGateway.Failed(
+            new ModelInvocationError(ProviderErrorKind.CANCELLED, "cancelled"));
+      }
+    }
+
+    @Override
+    public void close() {
+      closedWithoutRun.set(true);
+    }
+
+    void event(ProviderStreamEvent event) {
+      CountDownLatch done = new CountDownLatch(1);
+      signals.add(new Object[] {event, done});
+      await(done);
+      if (sinkFailure != null) {
+        // sink 拒绝事件后 run 随即结束，终态提交发生在 run 返回之后：等待 execution 释放。
+        awaitTrue(() -> gateway.owner == null || !gateway.owner.hasActiveExecution());
+      }
+    }
+
+    void succeed(ProviderCompletion completion) {
+      finish(new ModelGateway.Succeeded(completion));
+    }
+
+    void succeed(ProviderResponse response) {
+      succeed(new ProviderCompletion(response, null));
+    }
+
+    void fail(ModelInvocationError error) {
+      finish(new ModelGateway.Failed(error));
+    }
+
+    void unknown(ModelInvocationError error) {
+      finish(new ModelGateway.Unknown(error));
+    }
+
+    private void finish(ModelGateway.Outcome outcome) {
+      CountDownLatch done = new CountDownLatch(1);
+      signals.add(new Object[] {outcome, done});
+      await(done);
+      // 终态提交发生在 run 返回之后：等待 execution 释放。
+      awaitTrue(() -> gateway.owner == null || !gateway.owner.hasActiveExecution());
+    }
+
+    private static void await(CountDownLatch latch) {
+      try {
+        if (!latch.await(5, TimeUnit.SECONDS)) {
+          failTest("run thread did not process the signal");
+        }
+      } catch (InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
+        throw new AssertionError(interrupted);
+      }
+    }
+  }
+
+  static void failTest(String message) {
+    fail(message);
+  }
+
+  static void awaitTrue(BooleanSupplier condition) {
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    while (!condition.getAsBoolean()) {
+      if (System.nanoTime() > deadline) {
+        failTest("condition not reached in time");
+      }
+      try {
+        Thread.sleep(2);
+      } catch (InterruptedException interrupted) {
+        Thread.currentThread().interrupt();
+        throw new AssertionError(interrupted);
+      }
     }
   }
 

@@ -42,13 +42,7 @@ class GatewayConfigurationConditionalTest {
             () -> (frozenType, frozenConnectionGenerationId, request) -> null)
         .withBean(
             ModelGateway.class,
-            () ->
-                new ModelGateway() {
-                  @Override
-                  public StartResult start(Execution execution, Listener listener) {
-                    return new ModelGateway.Busy(Duration.ofSeconds(1));
-                  }
-                })
+            () -> (ModelGateway) execution -> new ModelGateway.Busy(Duration.ofSeconds(1)))
         .run(
             context -> {
               assertFalse(context.containsBean("platformModelGateway"));

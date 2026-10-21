@@ -45,10 +45,6 @@ class ModelInvocationTransitionTest {
     return invocation(ModelInvocationStatus.READY, attempt, null, null, null, null);
   }
 
-  private static ModelInvocation dispatching(int attempt) {
-    return invocation(ModelInvocationStatus.DISPATCHING, attempt, null, null, null, null);
-  }
-
   private static ModelInvocation running(int attempt, StreamCheckpoint checkpoint) {
     return invocation(ModelInvocationStatus.RUNNING, attempt, checkpoint, null, null, null);
   }
@@ -88,7 +84,7 @@ class ModelInvocationTransitionTest {
   private static List<ModelAttemptFailure> failures(ModelInvocationStatus status, int attempt) {
     int count =
         switch (status) {
-          case READY, DISPATCHING -> attempt;
+          case READY -> attempt;
           case RUNNING, SUCCEEDED, UNKNOWN, FAILED, CANCELLED -> Math.max(0, attempt - 1);
         };
     return IntStream.rangeClosed(1, count)
@@ -97,52 +93,18 @@ class ModelInvocationTransitionTest {
   }
 
   @Test
-  void beginDispatchMovesReadyToDispatchingKeepingAttempt() {
-    ModelInvocation next = ready(2).beginDispatch(T1);
-    assertEquals(ModelInvocationStatus.DISPATCHING, next.status());
-    assertEquals(2, next.attempt());
+  void markRunningMovesReadyToRunningAdvancingAttemptByOne() {
+    ModelInvocation next = ready(2).markRunning(T1);
+    assertEquals(ModelInvocationStatus.RUNNING, next.status());
+    assertEquals(3, next.attempt());
     assertNull(next.streamCheckpoint());
     assertNull(next.result());
     assertNull(next.error());
     assertNull(next.resultEntryId());
     assertEquals(T1, next.updatedAt());
-    assertThrows(
-        IllegalArgumentException.class, () -> ready(0).beginDispatch(T1).beginDispatch(T2));
-    assertThrows(IllegalArgumentException.class, () -> running(1, null).beginDispatch(T1));
-    assertThrows(IllegalArgumentException.class, () -> succeeded(1).beginDispatch(T1));
-  }
-
-  @Test
-  void rejectDispatchFailsBeforeStartWithoutAdvancingAttempt() {
-    ModelInvocation next = dispatching(0).rejectDispatch(error(), T1);
-    assertEquals(ModelInvocationStatus.FAILED, next.status());
-    assertEquals(0, next.attempt());
-    assertEquals(error(), next.error());
-    // 在 retry dispatch 上，确切的预启动拒绝也合法
-    assertEquals(2, dispatching(2).rejectDispatch(error(), T1).attempt());
-    assertThrows(IllegalArgumentException.class, () -> ready(0).rejectDispatch(error(), T1));
-  }
-
-  @Test
-  void dispatchBusyReturnsToReadyKeepingAttempt() {
-    ModelInvocation next = dispatching(2).dispatchBusy(T1);
-    assertEquals(ModelInvocationStatus.READY, next.status());
-    assertEquals(2, next.attempt());
-    assertNull(next.streamCheckpoint());
-    assertThrows(IllegalArgumentException.class, () -> ready(0).dispatchBusy(T1));
-    assertThrows(IllegalArgumentException.class, () -> running(1, null).dispatchBusy(T1));
-  }
-
-  @Test
-  void markRunningConfirmsTheStartAndAdvancesAttemptByOne() {
-    ModelInvocation next = dispatching(2).markRunning(T1);
-    assertEquals(ModelInvocationStatus.RUNNING, next.status());
-    assertEquals(3, next.attempt());
-    assertNull(next.streamCheckpoint());
-    assertThrows(IllegalArgumentException.class, () -> ready(0).markRunning(T1));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> dispatching(0).beginDispatch(T1).markRunning(T2).markRunning(T3));
+    assertThrows(IllegalArgumentException.class, () -> ready(0).markRunning(T1).markRunning(T2));
+    assertThrows(IllegalArgumentException.class, () -> running(1, null).markRunning(T1));
+    assertThrows(IllegalArgumentException.class, () -> succeeded(1).markRunning(T1));
   }
 
   @Test
@@ -187,7 +149,7 @@ class ModelInvocationTransitionTest {
     assertEquals(checkpoint(1), next.streamCheckpoint());
     assertNull(next.error());
     assertThrows(IllegalArgumentException.class, () -> ready(0).succeed(response(), T1));
-    assertThrows(IllegalArgumentException.class, () -> dispatching(0).succeed(response(), T1));
+    assertThrows(IllegalArgumentException.class, () -> ready(0).succeed(response(), T1));
   }
 
   @Test
@@ -195,8 +157,7 @@ class ModelInvocationTransitionTest {
     assertEquals(ModelInvocationStatus.FAILED, ready(0).fail(error(), T1).status());
     assertEquals(0, ready(0).fail(error(), T1).attempt());
     assertEquals(2, running(2, null).fail(error(), T1).attempt());
-    // DISPATCHING 只能通过 rejectDispatch 失败，不能调用 fail()
-    assertThrows(IllegalArgumentException.class, () -> dispatching(1).fail(error(), T1));
+    // READY 的 fail 是启动前的明确拒绝：attempt 不变
     assertThrows(IllegalArgumentException.class, () -> succeeded(1).fail(error(), T1));
     // 终态 FAILED 行拒绝用不同 error 重新失败（终态事实不可变）
     assertThrows(
@@ -207,11 +168,9 @@ class ModelInvocationTransitionTest {
   }
 
   @Test
-  void cancelTerminatesAdvancingAttemptOnlyFromDispatching() {
+  void cancelTerminatesFromReadyAndRunningKeepingAttempt() {
     assertEquals(ModelInvocationStatus.CANCELLED, ready(0).cancel(error(), T1).status());
     assertEquals(0, ready(0).cancel(error(), T1).attempt());
-    // DISPATCHING 是调用可能已经启动的 Stop 窗口：attempt + 1
-    assertEquals(2, dispatching(1).cancel(error(), T1).attempt());
     assertEquals(2, running(2, null).cancel(error(), T1).attempt());
     assertThrows(IllegalArgumentException.class, () -> succeeded(1).cancel(error(), T1));
   }
@@ -227,60 +186,16 @@ class ModelInvocationTransitionTest {
     assertNull(next.error());
     assertEquals(List.of(failure(1)), next.failedAttempts());
     assertThrows(IllegalArgumentException.class, () -> ready(0).retryReady(failure(1), T1));
-    assertThrows(IllegalArgumentException.class, () -> dispatching(0).retryReady(failure(1), T1));
     assertThrows(IllegalArgumentException.class, () -> succeeded(1).retryReady(failure(1), T1));
     assertThrows(IllegalArgumentException.class, () -> failed(1).retryReady(failure(1), T1));
   }
 
-  /**
-   * DISPATCHING -&gt; READY 的失联恢复把可能已发出的启动计为一个已消耗 attempt：attempt+1 且追加一条 attempt 等于新值的失败记录，
-   * DISPATCHING 无 checkpoint。
-   */
-  @Test
-  void retryDispatchedReturnsToReadyChargingUnconfirmedAttempt() {
-    ModelInvocation first = dispatching(0).retryDispatched(failure(1), T1);
-    assertEquals(ModelInvocationStatus.READY, first.status());
-    assertEquals(1, first.attempt());
-    assertNull(first.streamCheckpoint());
-    assertNull(first.error());
-    assertEquals(List.of(failure(1)), first.failedAttempts());
-
-    ModelInvocation second = dispatching(1).retryDispatched(failure(2), T2);
-    assertEquals(2, second.attempt());
-    assertEquals(List.of(failure(1), failure(2)), second.failedAttempts());
-
-    assertThrows(IllegalArgumentException.class, () -> ready(0).retryDispatched(failure(1), T1));
-    assertThrows(
-        IllegalArgumentException.class, () -> running(1, null).retryDispatched(failure(1), T1));
-    // 失败 attempt 必须恰好是本次未确认的启动计数，不能复用当前 attempt。
-    assertThrows(
-        IllegalArgumentException.class, () -> dispatching(1).retryDispatched(failure(1), T1));
-  }
-
-  /** DISPATCHING -&gt; FAILED 的失联耗尽同样把未确认启动计为 attempt+1，并以明确错误终止。 */
-  @Test
-  void failDispatchedTerminatesFailedChargingUnconfirmedAttempt() {
-    ModelInvocation next = dispatching(0).failDispatched(error(), T1);
-    assertEquals(ModelInvocationStatus.FAILED, next.status());
-    assertEquals(1, next.attempt());
-    assertEquals(error(), next.error());
-    assertEquals(List.of(), next.failedAttempts());
-
-    ModelInvocation retried = dispatching(1).failDispatched(error(), T2);
-    assertEquals(2, retried.attempt());
-    assertEquals(List.of(failure(1)), retried.failedAttempts());
-
-    assertThrows(IllegalArgumentException.class, () -> ready(0).failDispatched(error(), T1));
-    assertThrows(
-        IllegalArgumentException.class, () -> running(1, null).failDispatched(error(), T1));
-  }
-
-  /** failedAttempts 只能由 RUNNING -> READY 与 DISPATCHING -> READY（失联计费）追加一条，历史前缀不可改写或跨状态注入。 */
+  /** failedAttempts 只能由 RUNNING -> READY 追加一条，历史前缀不可改写或跨状态注入。 */
   @Test
   void failedAttemptsAreAppendOnlyAcrossTransitions() {
     ModelInvocation running = running(1, checkpoint(1));
     ModelInvocation retried = running.retryReady(failure(1), T1);
-    ModelInvocation nextRunning = retried.beginDispatch(T2).markRunning(T3);
+    ModelInvocation nextRunning = retried.markRunning(T3);
     ModelAttemptFailure second = failure(2);
     ModelInvocation secondRetry = nextRunning.retryReady(second, T3.plusSeconds(2));
     assertEquals(List.of(failure(1), second), secondRetry.failedAttempts());
@@ -360,7 +275,7 @@ class ModelInvocationTransitionTest {
     ModelInvocation.validateTransition(
         runningNoCheckpoint, runningNoCheckpoint.unknown(error(), checkpoint(1), T1));
 
-    // READY / DISPATCHING 不能产生 checkpoint
+    // READY 不能产生 checkpoint
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -371,7 +286,7 @@ class ModelInvocationTransitionTest {
         IllegalArgumentException.class,
         () ->
             ModelInvocation.validateTransition(
-                dispatching(0),
+                ready(0),
                 invocation(ModelInvocationStatus.FAILED, 0, checkpoint(0), null, error(), null)));
 
     // 终态不能从 null 引入 checkpoint
@@ -397,12 +312,12 @@ class ModelInvocationTransitionTest {
                     response(),
                     null,
                     null)));
-    // DISPATCHING -> RUNNING 是已确认启动而非流式：不能注入 checkpoint
+    // READY -> RUNNING 是启动而非流式：不能注入 checkpoint
     assertThrows(
         IllegalArgumentException.class,
         () ->
             ModelInvocation.validateTransition(
-                dispatching(0),
+                ready(0),
                 invocation(ModelInvocationStatus.RUNNING, 1, checkpoint(1), null, null, null)));
     // RUNNING -> READY（retry）丢弃 checkpoint，RUNNING -> RUNNING 仍允许增长
     ModelInvocation.validateTransition(
@@ -463,11 +378,9 @@ class ModelInvocationTransitionTest {
   }
 
   @Test
-  void unknownAdvancesAttemptOnlyFromDispatching() {
-    ModelInvocation fromDispatching = dispatching(2).unknown(error(), T1);
-    assertEquals(ModelInvocationStatus.UNKNOWN, fromDispatching.status());
-    assertEquals(3, fromDispatching.attempt());
+  void unknownTerminatesOnlyFromRunningKeepingAttempt() {
     ModelInvocation fromRunning = running(2, null).unknown(error(), T1);
+    assertEquals(ModelInvocationStatus.UNKNOWN, fromRunning.status());
     assertEquals(2, fromRunning.attempt());
     assertThrows(IllegalArgumentException.class, () -> ready(0).unknown(error(), T1));
     assertThrows(IllegalArgumentException.class, () -> failed(1).unknown(error(), T1));
@@ -696,15 +609,7 @@ class ModelInvocationTransitionTest {
                 stored, invocation(ModelInvocationStatus.UNKNOWN, 1, null, null, error(), null)));
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            ModelInvocation.validateTransition(
-                stored, invocation(ModelInvocationStatus.DISPATCHING, 1, null, null, null, null)));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> ModelInvocation.validateTransition(running(1, null), dispatching(1)));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> ModelInvocation.validateTransition(dispatching(0), succeeded(1)));
+        () -> ModelInvocation.validateTransition(ready(0), succeeded(1)));
     assertThrows(
         IllegalArgumentException.class,
         () -> ModelInvocation.validateTransition(succeeded(1), failed(1)));
@@ -719,21 +624,12 @@ class ModelInvocationTransitionTest {
         IllegalArgumentException.class,
         () ->
             ModelInvocation.validateTransition(
-                dispatching(1),
-                invocation(ModelInvocationStatus.RUNNING, 3, null, null, null, null)));
+                ready(1), invocation(ModelInvocationStatus.RUNNING, 3, null, null, null, null)));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             ModelInvocation.validateTransition(
-                dispatching(1),
-                invocation(ModelInvocationStatus.UNKNOWN, 1, null, null, error(), null)));
-    // DISPATCHING stop 窗口必须将 attempt 恰好前进 1，绝不能保持不变
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            ModelInvocation.validateTransition(
-                dispatching(1),
-                invocation(ModelInvocationStatus.CANCELLED, 1, null, null, error(), null)));
+                ready(1), invocation(ModelInvocationStatus.RUNNING, 1, null, null, null, null)));
     assertThrows(
         IllegalArgumentException.class,
         () -> ModelInvocation.validateTransition(running(1, null), succeeded(2)));
@@ -833,11 +729,9 @@ class ModelInvocationTransitionTest {
   }
 
   @Test
-  void rejectDispatchAcceptsAnyDefinitePreStartError() {
+  void failFromReadyAcceptsAnyDefinitePreStartError() {
     ModelInvocation next =
-        dispatching(0)
-            .rejectDispatch(
-                new ModelInvocationError(ProviderErrorKind.INVALID_REQUEST, "quota"), T1);
+        ready(0).fail(new ModelInvocationError(ProviderErrorKind.INVALID_REQUEST, "quota"), T1);
     assertEquals(ModelInvocationStatus.FAILED, next.status());
     assertEquals(ProviderErrorKind.INVALID_REQUEST, next.error().kind());
   }

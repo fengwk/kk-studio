@@ -592,9 +592,7 @@ class HarnessWorkDispatcherHandoffTest {
     store.transaction(
         tx -> {
           ModelInvocation model = tx.lockModelInvocation(modelInvocationId).orElseThrow();
-          // 分两步推进：Store 按已持久化状态校验跃迁，READY -> DISPATCHING -> RUNNING 各写一次。
-          tx.updateModelInvocation(model.beginDispatch(now));
-          tx.updateModelInvocation(model.beginDispatch(now).markRunning(now));
+          tx.updateModelInvocation(model.markRunning(now));
           return null;
         });
   }
@@ -832,7 +830,7 @@ class HarnessWorkDispatcherHandoffTest {
     private final List<UUID> started = new CopyOnWriteArrayList<>();
 
     @Override
-    public StartResult start(Execution execution, Listener listener) {
+    public Admission admit(Execution execution) {
       started.add(execution.invocationId());
       return new ModelGateway.Busy(Duration.ofSeconds(5));
     }
