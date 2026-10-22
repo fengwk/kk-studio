@@ -45,10 +45,6 @@ export const settingsCatalog = {
     'en-US': 'Plugins',
     'zh-CN': '插件',
   },
-  'plugins.title': {
-    'en-US': 'Installed Plugins',
-    'zh-CN': '已安装插件',
-  },
   'plugins.empty': {
     'en-US': 'No plugins installed',
     'zh-CN': '未安装任何插件',
@@ -165,10 +161,6 @@ export const settingsCatalog = {
     'en-US': 'Configure Plugin: {{name}}',
     'zh-CN': '配置插件：{{name}}',
   },
-  'plugins.configDialog.revision': {
-    'en-US': 'Current Revision',
-    'zh-CN': '当前配置修订',
-  },
   'plugins.configDialog.generalSettings': {
     'en-US': 'Configuration',
     'zh-CN': '普通配置',
@@ -200,10 +192,6 @@ export const settingsCatalog = {
   'plugins.configDialog.conflict': {
     'en-US': 'Configuration was modified by another operation (version conflict). Please refresh and review latest changes.',
     'zh-CN': '配置已被其他操作修改（版本冲突），请刷新并查看最新改动。',
-  },
-  'plugins.configDialog.savePending': {
-    'en-US': 'Configuration is saved but this node has not applied it yet.',
-    'zh-CN': '配置已保存，但本节点尚未应用。',
   },
   'plugins.configDialog.unsupportedSchema': {
     'en-US': 'Schema contains unsupported keywords: {{error}}. Switched to JSON editor mode.',
@@ -392,14 +380,6 @@ export const settingsCatalog = {
   'plugins.capabilities': {
     'en-US': 'Active Capabilities',
     'zh-CN': '生效能力',
-  },
-  'plugins.capabilities.tools': {
-    'en-US': 'Tools',
-    'zh-CN': '模型工具',
-  },
-  'plugins.capabilities.canvasFunctions': {
-    'en-US': 'Canvas Functions',
-    'zh-CN': 'Canvas 函数',
   },
   'plugins.capabilities.none': {
     'en-US': 'None',
@@ -605,22 +585,6 @@ export const settingsCatalog = {
   'settings.error.httpStatusDuplicate': {
     'en-US': 'HTTP status code list contains duplicate entries.',
     'zh-CN': 'HTTP 状态码列表中包含重复的状态码。',
-  },
-  'settings.error.integerListEmptyToken': {
-    'en-US': 'Contains an empty or incomplete status code entry.',
-    'zh-CN': '包含未完成或空的状态码条目。',
-  },
-  'settings.error.integerListInvalidToken': {
-    'en-US': '"{{token}}" is not a valid integer status code.',
-    'zh-CN': '“{{token}}”不是有效的整数状态码。',
-  },
-  'settings.error.integerListOutOfRange': {
-    'en-US': '"{{token}}" is outside the valid range ({{min}}–{{max}}).',
-    'zh-CN': '“{{token}}”超出有效范围（{{min}}–{{max}}）。',
-  },
-  'settings.error.integerListDuplicate': {
-    'en-US': 'Duplicate status code: "{{token}}".',
-    'zh-CN': '状态码“{{token}}”重复出现。',
   },
 
   // --- General / notifications / shortcuts ---
@@ -959,10 +923,6 @@ export const settingsCatalog = {
   },
 
   // --- Environment ---
-  'settings.section.environment.title': {
-    'en-US': 'Daemon gateway',
-    'zh-CN': '守护网关',
-  },
   'settings.section.environment.description': {
     'en-US': 'Resource limits and timeouts for the daemon gateway.',
     'zh-CN': '守护网关的资源上限与超时。',

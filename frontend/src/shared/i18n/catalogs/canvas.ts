@@ -125,22 +125,6 @@ export const canvasCatalog = {
     'en-US': 'Canvas version',
     'zh-CN': '画布版本',
   },
-  'canvas.editor.thread': {
-    'en-US': 'Chat',
-    'zh-CN': '对话',
-  },
-  'canvas.editor.threadAria': {
-    'en-US': 'Toggle the Chat panel',
-    'zh-CN': '切换对话面板',
-  },
-  'canvas.agent.panelAria': {
-    'en-US': 'Canvas Chat panel',
-    'zh-CN': 'Canvas 对话面板',
-  },
-  'canvas.agent.resize': {
-    'en-US': 'Resize the Chat panel',
-    'zh-CN': '调整对话面板宽度',
-  },
   'canvas.stage.ariaLabel': {
     'en-US': 'Infinite canvas. Drag resources, connect them to Function nodes, and drop media files to upload.',
     'zh-CN': '无限画布。拖动资源并连接 Function 节点，或拖入媒体文件上传。',
@@ -148,18 +132,6 @@ export const canvasCatalog = {
   'canvas.stage.minimap': {
     'en-US': 'Canvas minimap',
     'zh-CN': '画布小地图',
-  },
-  'canvas.stage.hint.pan': {
-    'en-US': 'pan',
-    'zh-CN': '平移',
-  },
-  'canvas.stage.hint.tools': {
-    'en-US': 'tools',
-    'zh-CN': '工具',
-  },
-  'canvas.stage.hint.invokeAgent': {
-    'en-US': 'invoke Agent',
-    'zh-CN': '唤起 Agent',
   },
   'canvas.stage.zoomControls': {
     'en-US': 'Canvas zoom controls',
@@ -305,10 +277,6 @@ export const canvasCatalog = {
     'en-US': 'Describe what you want to generate; type @ to reference a resource',
     'zh-CN': '描述你想生成的内容，输入 @ 引用资源',
   },
-  'canvas.generation.segmentAria': {
-    'en-US': 'Prompt segment {{index}}',
-    'zh-CN': '提示词片段 {{index}}',
-  },
   'canvas.generation.composerAria': {
     'en-US': 'Structured prompt',
     'zh-CN': '结构化提示词',
@@ -316,14 +284,6 @@ export const canvasCatalog = {
   'canvas.generation.references': {
     'en-US': 'Reference assets',
     'zh-CN': '可用参考资源',
-  },
-  'canvas.generation.referenceCandidates': {
-    'en-US': '@ reference candidates',
-    'zh-CN': '@ 引用候选',
-  },
-  'canvas.generation.referenceNone': {
-    'en-US': 'No candidates',
-    'zh-CN': '没有可用引用',
   },
   'canvas.generation.referenceInsert': {
     'en-US': 'Insert reference {{label}}',
@@ -620,25 +580,5 @@ export const canvasCatalog = {
   'canvas.add.videoFunction': {
     'en-US': 'Video generation',
     'zh-CN': '视频生成',
-  },
-  'canvas.agent.thread.ariaLabel': {
-    'en-US': 'Canvas Chat messages',
-    'zh-CN': 'Canvas 对话消息',
-  },
-  'canvas.agent.blankTitle': {
-    'en-US': 'Start a Canvas thread',
-    'zh-CN': '开始 Canvas 对话',
-  },
-  'canvas.agent.blankDescription': {
-    'en-US': 'Choose an agent below; send the first message to start a conversation on this canvas.',
-    'zh-CN': '在下方选择 Agent；发送第一条消息即可开始本画布的对话。',
-  },
-  'canvas.agent.agentMissing': {
-    'en-US': 'No agent is available yet; pick an agent to continue.',
-    'zh-CN': '暂无可用的 Agent，请选择一个继续。',
-  },
-  'canvas.agent.collapse': {
-    'en-US': 'Collapse the Chat panel',
-    'zh-CN': '收起对话面板',
   },
 } satisfies LocaleCatalog

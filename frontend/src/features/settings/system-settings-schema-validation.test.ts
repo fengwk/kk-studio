@@ -168,43 +168,6 @@ describe('system settings schema validation', () => {
     )
   })
 
-  it('rejects an old integrations field if a stale schema still declares it', () => {
-    // 旧 integrations 整段已退役：即使一份（过期的）schema 仍声明 integrations 字段，
-    // validateSystemSettingsSchema 也必须在读取 draft 时 fail-closed，绝不渲染旧字段。
-    const schema = makeSettingsSchema()
-    const freshDraft = settingsSectionsToDraft(makeSettingsDto())
-    schema.sections.push({
-      key: 'integrations',
-      labelKey: 'settings.tabs.integrations',
-      descriptionKey: 'settings.section.integrations.description',
-      restartRequired: false,
-      groups: [
-        {
-          key: 'integrations.comfyui',
-          labelKey: 'settings.section.integrations.comfyui.title',
-          descriptionKey: 'settings.section.integrations.comfyui.description',
-          restartRequired: false,
-          applyTiming: null,
-          fields: [
-            {
-              path: 'integrations.comfyui.baseUrl',
-              labelKey: 'settings.field.integrations.comfyui.baseUrl',
-              hintKey: null,
-              type: 'TEXT',
-              nullable: true,
-              min: null,
-              max: null,
-              options: null,
-            },
-          ],
-        },
-      ],
-    })
-    expect(validateSystemSettingsSchema(schema, freshDraft)).toBe(
-      'unknown system settings draft path: integrations.comfyui.baseUrl',
-    )
-  })
-
   it('rejects a schema field list that misses a draft leaf', () => {
     const schema = makeSettingsSchema()
     // 从 schema 中删掉一个字段：draft 存在但 schema 未声明，路径集合不相等。

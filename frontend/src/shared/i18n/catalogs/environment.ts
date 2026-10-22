@@ -102,10 +102,6 @@ export const environmentCatalog = {
     'en-US': 'Failed to load environments',
     'zh-CN': '加载 Environment 失败',
   },
-  'ai.environment.empty': {
-    'en-US': 'There are no Environments',
-    'zh-CN': '当前没有 Environment',
-  },
   'ai.environment.create': {
     'en-US': 'Create Environment',
     'zh-CN': '创建环境',
@@ -273,10 +269,6 @@ export const environmentCatalog = {
   'ai.environment.close': {
     'en-US': 'Close',
     'zh-CN': '关闭',
-  },
-  'ai.environment.unavailable': {
-    'en-US': 'Unavailable',
-    'zh-CN': '不可用',
   },
   'ai.environment.lastSeen': {
     'en-US': 'Last seen',

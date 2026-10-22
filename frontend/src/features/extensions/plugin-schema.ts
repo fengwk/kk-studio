@@ -1,13 +1,5 @@
 import { parseStrictJsonObject } from './plugin-config-json'
 
-export type SupportedSchemaType =
-  | 'string'
-  | 'integer'
-  | 'number'
-  | 'boolean'
-  | 'array'
-  | 'object'
-
 export type PluginSchemaElement =
   | {
       kind: 'string'

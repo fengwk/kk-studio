@@ -439,7 +439,7 @@ public final class ConfigSyncParser {
     for (Map.Entry<?, ?> entry : rawMap.entrySet()) {
       raw.put(String.valueOf(entry.getKey()), entry.getValue());
     }
-    // 未知字段移除并报告（含已退役的旧 integrations 段）；剩余结构必须在解析期满足当前完整六节契约，避免对必然无效的文件做外部 Git/MCP 准备。
+    // 未知字段移除并报告；剩余结构必须在解析期满足当前完整六节契约，避免对必然无效的文件做外部 Git/MCP 准备。
     List<String> removed = new ArrayList<>();
     Object cleaned =
         yaml.removeUnknownProperties(SystemSettingsSectionsDTO.class, raw, key, removed);

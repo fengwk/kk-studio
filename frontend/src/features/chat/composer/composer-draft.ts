@@ -8,8 +8,6 @@ import {
 
 const STORAGE_PREFIX = 'kkstudio.ai.composer-draft.v1:'
 
-export type ComposerDraftChangeSource = 'edit' | 'history'
-
 export function composerDraftStorageKey(scope: string): string {
   return `${STORAGE_PREFIX}${scope}`
 }
