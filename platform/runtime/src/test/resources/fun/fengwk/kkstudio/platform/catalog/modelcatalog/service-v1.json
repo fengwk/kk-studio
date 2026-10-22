@@ -1,0 +1,17 @@
+{
+  "alpha": {
+    "id": "alpha",
+    "models": {
+      "a3": { "id": "a3", "cost": { "input": 3, "output": 6 } },
+      "a1": { "id": "a1", "cost": { "input": 1, "output": 2 } },
+      "a2": { "id": "a2", "cost": { "input": 2, "output": 4 } }
+    }
+  },
+  "beta": {
+    "id": "beta",
+    "models": {
+      "b2": { "id": "b2", "cost": { "input": 2, "output": 4 } },
+      "b1": { "id": "b1", "cost": { "input": 1, "output": 2 } }
+    }
+  }
+}
