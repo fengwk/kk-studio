@@ -24,7 +24,7 @@ import java.util.Objects;
  * 历史密文。原语的 {@link GeneralSecurityException} 在这里收敛为去敏的失败关闭错误；主密钥不可用同样 fail closed。
  *
  * <p>{@link #encrypt(SecretKey, String, String)} 与 {@link #decrypt(SecretKey, String, byte[])}
- * 让已经持有显式主密钥的调用点（如离线转换）复用同一格式 1 实现；它们不引入第二份 envelope 或兼容读取路径，通常的读写仍由实例方法从 keyLoader 取密钥。
+ * 封装同一格式 1 实现；它们不引入第二份 envelope 或兼容读取路径，通常的读写仍由实例方法从 keyLoader 取密钥。
  *
  * <p>令牌明文只在临时的加解密调用中出现：绝不持久化为明文、绝不回显、绝不进入日志、Prompt 或模型上下文。
  */
@@ -56,7 +56,7 @@ public class SkillTokenCipher {
   /**
    * 以显式 AES-256 主密钥加密 {@code packageName} 的访问令牌。
    *
-   * <p>供已经持有真实密钥的离线调用点复用与实例方法完全相同的格式 {@link #FORMAT_VERSION} 与 AAD 布局；本类不提供第二套 envelope、
+   * <p>与实例方法共用格式 {@link #FORMAT_VERSION} 与 AAD 布局；本类不提供第二套 envelope、
    * 兼容读取路径或测试专用入口，调用方必须自行承担密钥的来源与生命周期。
    */
   public static byte[] encrypt(SecretKey key, String packageName, String token) {

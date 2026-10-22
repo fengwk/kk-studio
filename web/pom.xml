@@ -118,8 +118,8 @@
             <artifactId>flyway-database-postgresql</artifactId>
         </dependency>
         <!--
-          | 离线数据库转换内核需要 PostgreSQL 原生 COPY 协议（CopyManager）与 PGConnection，
-          | 因此这里显式声明唯一直接使用的 JDBC 驱动；版本仍由 Spring Boot BOM 统一管理。
+          | 正常运行需要 PostgreSQL JDBC 驱动，启动拒绝测试也直接使用 Driver；
+          | 版本仍由 Spring Boot BOM 统一管理。
           |-->
         <dependency>
             <groupId>org.postgresql</groupId>

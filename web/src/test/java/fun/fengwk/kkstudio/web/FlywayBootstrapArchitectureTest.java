@@ -119,7 +119,7 @@ class FlywayBootstrapArchitectureTest {
     assertEquals(
         UPGRADE_TEST_SQL_FIXTURES,
         upgradeFixtureSqlFiles,
-        "upgrade test SQL is limited to the three frozen source baselines and the four business/copy probes");
+        "startup rejection SQL is limited to the three frozen source baselines");
     assertEquals(
         SEED_RESOURCES,
         seedSqlFiles,
