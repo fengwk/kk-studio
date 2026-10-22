@@ -21,5 +21,8 @@ public enum ProviderErrorKind {
   INVALID_RESPONSE,
 
   /** 请求已被主动取消。 */
-  CANCELLED
+  CANCELLED,
+
+  /** 模型组内没有可用候选；本地调度失败，不是上游 Provider 错误且不可重试。 */
+  NO_AVAILABLE_MODEL
 }

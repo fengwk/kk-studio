@@ -74,7 +74,7 @@ public class ModelsDevCatalogTransport implements ModelCatalogTransport {
     httpClient.close();
   }
 
-  private static String readBounded(InputStream body) throws IOException {
+  static String readBounded(InputStream body) throws IOException {
     byte[] buffer = new byte[8192];
     ByteArrayOutputStream output = new ByteArrayOutputStream();
     int read;
@@ -87,7 +87,7 @@ public class ModelsDevCatalogTransport implements ModelCatalogTransport {
     return output.toString(StandardCharsets.UTF_8);
   }
 
-  private static Map<ModelCatalogSource, URI> endpoints() {
+  static Map<ModelCatalogSource, URI> endpoints() {
     Map<ModelCatalogSource, URI> endpoints = new EnumMap<>(ModelCatalogSource.class);
     endpoints.put(ModelCatalogSource.MODELS_DEV_V1, URI.create("https://models.dev/api.json"));
     endpoints.put(

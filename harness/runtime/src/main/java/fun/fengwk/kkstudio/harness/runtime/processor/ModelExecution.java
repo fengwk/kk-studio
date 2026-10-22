@@ -1122,6 +1122,8 @@ final class ModelExecution implements ModelGateway.Listener {
                       lastSafeSequence,
                       accumulator.text(),
                       accumulator.thinking(),
+                      model.actualSelection(),
+                      model.requestedAt(),
                       error,
                       failedAt,
                       retryAt);
@@ -1277,7 +1279,7 @@ final class ModelExecution implements ModelGateway.Listener {
             return Applied.LOST;
           }
           ModelInvocation model = tx.lockModelInvocation(invocationId).orElse(null);
-          if (model == null || tx.lockClaimedWork(claim, leaseNow).isEmpty()) {
+          if (model == null) {
             return Applied.LOST;
           }
           if (model.status() != ModelInvocationStatus.RUNNING || model.attempt() != attempt) {
@@ -1306,7 +1308,7 @@ final class ModelExecution implements ModelGateway.Listener {
               ModelGroupFailureDecider.decide(
                   error, group, retryable, retryDecision != null && retryDecision.retry());
           if (action == ModelGroupFailureDecider.Action.DEDICATED_TERMINAL) {
-            return null;
+            return tx.lockClaimedWork(claim, leaseNow).isEmpty() ? Applied.LOST : null;
           }
           Instant failedAt = durableFailedAt(leaseNow, thread, model);
           Instant retryAt = failedAt;
@@ -1316,11 +1318,16 @@ final class ModelExecution implements ModelGateway.Listener {
                   lastSafeSequence,
                   accumulator.text(),
                   accumulator.thinking(),
+                  model.actualSelection(),
+                  model.requestedAt(),
                   error,
                   failedAt,
                   retryAt);
 
           if (action == ModelGroupFailureDecider.Action.RETRY_CURRENT) {
+            if (tx.lockClaimedWork(claim, leaseNow).isEmpty()) {
+              return Applied.LOST;
+            }
             Instant delayedRetryAt = failedAt.plus(retryDecision.delay());
             ModelAttemptFailure delayedFailure =
                 new ModelAttemptFailure(
@@ -1328,6 +1335,8 @@ final class ModelExecution implements ModelGateway.Listener {
                     lastSafeSequence,
                     accumulator.text(),
                     accumulator.thinking(),
+                    model.actualSelection(),
+                    model.requestedAt(),
                     error,
                     failedAt,
                     delayedRetryAt);
@@ -1340,6 +1349,15 @@ final class ModelExecution implements ModelGateway.Listener {
             return Applied.RETRY;
           }
 
+          int nextIndex = progress.memberIndex() + 1;
+          if (nextIndex >= group.members().size()) {
+            // 终态先请求 THREAD Work，再锁 MODEL Work，维持 THREAD -> MODEL 的全局 Work 锁序。
+            tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId), failedAt);
+          }
+          if (tx.lockClaimedWork(claim, leaseNow).isEmpty()) {
+            // 先写 THREAD wake 后丢失 MODEL claim：抛错回滚，避免提交无主唤醒。
+            throw new ClaimLostSignal();
+          }
           if (group.cooldownSeconds() > 0) {
             var member = group.members().get(progress.memberIndex());
             tx.freezeGroupMember(
@@ -1350,7 +1368,6 @@ final class ModelExecution implements ModelGateway.Listener {
                 failedAt.plusSeconds(group.cooldownSeconds()),
                 failedAt);
           }
-          int nextIndex = progress.memberIndex() + 1;
           if (nextIndex < group.members().size()) {
             ModelGroupProgress next =
                 new ModelGroupProgress(progress.groupName(), progress.groupVersion(), nextIndex, 0);
@@ -1360,8 +1377,7 @@ final class ModelExecution implements ModelGateway.Listener {
             tx.rescheduleWork(claim, leaseNow, Duration.ofMillis(1));
             return Applied.RETRY;
           }
-          tx.requestWork(new WorkTarget(WorkTargetType.THREAD, threadId), failedAt);
-          tx.updateModelInvocation(model.fail(error, failedAt));
+          tx.updateModelInvocation(model.failAfterAttempt(error, failure, failedAt));
           tx.updateThread(thread.touchVersion(failedAt));
           tx.completeWork(claim, failedAt);
           return Applied.TERMINAL;

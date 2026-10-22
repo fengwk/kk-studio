@@ -1,0 +1,44 @@
+{
+  "validation": {
+    "id": "validation",
+    "models": {
+      "capable": {
+        "id": "capable",
+        "name": "Capable Model",
+        "limit": { "context": 128000, "output": 8192 },
+        "tool_call": false,
+        "reasoning": true,
+        "modalities": { "input": ["text", "image", "pdf", "audio", "video", "unknown"] },
+        "cost": { "input": 1, "output": 2 }
+      },
+      "no-cost": {
+        "id": "no-cost",
+        "name": "No Cost"
+      },
+      "unknown-cost": {
+        "cost": { "input": 1, "output": 2, "cache_write_1h": 3 }
+      },
+      "unknown-tier": {
+        "cost": {
+          "input": 1,
+          "output": 2,
+          "tiers": [
+            { "input": 2, "output": 4, "tier": { "type": "context", "size": 1000 }, "note": "x" }
+          ]
+        }
+      },
+      "tier-gt": {
+        "cost": {
+          "input": 1,
+          "output": 2,
+          "tiers": [
+            { "input": 2, "output": 4, "tier": { "type": "context", "size": 1000 } }
+          ]
+        }
+      },
+      "reasoning-zero": {
+        "cost": { "input": 1, "output": 2, "reasoning": 0 }
+      }
+    }
+  }
+}

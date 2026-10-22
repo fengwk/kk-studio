@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.invocation.model;
 
+import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.ProviderErrorKind;
 
@@ -18,6 +19,8 @@ public record ModelAttemptFailure(
     long sequence,
     String text,
     String thinking,
+    ModelSelection model,
+    Instant requestedAt,
     ModelInvocationError error,
     Instant failedAt,
     Instant retryAt) {
@@ -31,10 +34,14 @@ public record ModelAttemptFailure(
     }
     text = Objects.requireNonNull(text, "text");
     thinking = Objects.requireNonNull(thinking, "thinking");
+    model = Objects.requireNonNull(model, "model");
     error = Objects.requireNonNull(error, "error");
     if (error.kind() == ProviderErrorKind.CANCELLED || error.kind() == ProviderErrorKind.OVERFLOW) {
       throw new IllegalArgumentException(
           "cancelled or overflow attempts are not model fallback audit failures");
+    }
+    if (requestedAt != null) {
+      requestedAt = requireMillisecondPrecision(requestedAt, "requestedAt");
     }
     failedAt = requireMillisecondPrecision(failedAt, "failedAt");
     retryAt = requireMillisecondPrecision(retryAt, "retryAt");
