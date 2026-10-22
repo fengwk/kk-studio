@@ -208,7 +208,7 @@ create table agent_model_group_cooldown (
 comment on table agent_model_group_cooldown is
     'Model Group 组内成员固定冷却截止时间；PostgreSQL 共享、按组配置版本隔离，到期自然失效';
 comment on column agent_model_group_cooldown.group_version is
-    '写入时冻结的组配置版本；组配置变更后旧版本冷却不再参与选择'
+    '写入时冻结的组配置版本；组配置变更后旧版本冷却不再参与选择';
 
 -- -----------------------------------------------------------------------------
 -- Platform 全局 Skill Package

@@ -790,7 +790,18 @@ class ModelExecutionStreamFlushTest {
               ModelInvocationError error =
                   new ModelInvocationError(ProviderErrorKind.TRANSIENT, "superseded");
               model =
-                  model.retryReady(new ModelAttemptFailure(1, 0L, "", "", error, NOW, NOW), NOW);
+                  model.retryReady(
+                      new ModelAttemptFailure(
+                          1,
+                          0L,
+                          "",
+                          "",
+                          ModelSelection.model("model", "v1"),
+                          null,
+                          error,
+                          NOW,
+                          NOW),
+                      NOW);
               tx.updateModelInvocation(model);
               model = model.beginDispatch(NOW);
               tx.updateModelInvocation(model);

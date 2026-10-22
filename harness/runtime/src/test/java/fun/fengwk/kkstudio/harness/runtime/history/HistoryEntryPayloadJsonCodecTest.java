@@ -94,6 +94,8 @@ class HistoryEntryPayloadJsonCodecTest {
     EntryPayload attemptFailure =
         new ModelAttemptFailurePayload(
             new ModelAttemptSnapshot(1, 7, "partial", "thinking"),
+            ModelSelection.model("model", "v1"),
+            null,
             new AssistantError("TRANSIENT", "down"),
             Instant.parse("2026-01-01T00:00:02Z"));
     EntryPayload error =
@@ -443,11 +445,15 @@ class HistoryEntryPayloadJsonCodecTest {
         CODEC.encode(new MessagePayload(user("hi"), null, null)));
     assertEquals(
         "{\"attempt\":{\"attempt\":1,\"sequence\":7,\"text\":\"partial\",\"thinking\":\"\"},"
+            + "\"model\":{\"modelName\":\"model\",\"variant\":\"v1\"},"
+            + "\"requestedAt\":null,"
             + "\"error\":{\"code\":\"TRANSIENT\",\"message\":\"down\"},"
             + "\"retryAt\":\"2026-01-01T00:00:02Z\"}",
         CODEC.encode(
             new ModelAttemptFailurePayload(
                 new ModelAttemptSnapshot(1, 7, "partial", ""),
+                ModelSelection.model("model", "v1"),
+                null,
                 new AssistantError("TRANSIENT", "down"),
                 Instant.parse("2026-01-01T00:00:02Z"))));
     assertEquals(

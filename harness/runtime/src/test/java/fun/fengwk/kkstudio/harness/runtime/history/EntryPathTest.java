@@ -1524,6 +1524,8 @@ class EntryPathTest {
         parentId,
         new ModelAttemptFailurePayload(
             new ModelAttemptSnapshot(attempt, attempt, "partial-" + attempt, ""),
+            ModelSelection.model("model", "v1"),
+            null,
             new AssistantError("TRANSIENT", "down-" + attempt),
             failedAt.plusSeconds(1)),
         failedAt);
