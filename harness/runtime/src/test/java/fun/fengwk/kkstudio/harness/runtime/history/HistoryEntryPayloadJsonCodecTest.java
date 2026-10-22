@@ -196,7 +196,7 @@ class HistoryEntryPayloadJsonCodecTest {
     AssistantMessageMetadata metadata =
         new AssistantMessageMetadata(
             GenerationStopReason.COMPLETE,
-            new ModelUsage(1L, 2L, 0L, 0L, 0L, 0L, 3L),
+            new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L),
             null,
             ModelSelection.model("actual-model", "high"),
             Instant.parse("2026-01-01T00:00:05Z"),

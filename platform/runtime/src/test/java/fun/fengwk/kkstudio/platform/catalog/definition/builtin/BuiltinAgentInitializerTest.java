@@ -42,8 +42,7 @@ class BuiltinAgentInitializerTest {
     AgentDefinition created = captor.getValue();
     assertEquals(BuiltinAgentDefinitions.COMPACTION_NAME, created.getName());
     assertEquals(AgentDefinitionType.BUILTIN, created.getType());
-    // 独立未配置模型：两列与 variant 同为 null，不选首个 model，也不继承父配置。
-    assertNull(created.getModelProviderName());
+    // 独立未配置模型：model 与 variant 同为 null，不选首个 model，也不继承父配置。
     assertNull(created.getModelName());
     assertNull(created.getVariant());
     assertEquals(

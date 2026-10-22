@@ -140,7 +140,7 @@ class PostgresqlCompactionChildTest {
     TurnResolver resolver =
         (threadId, path, preparation) -> {
           if (preparation != null) {
-            ModelSelection compactorModel = new ModelSelection("provider", "compactor-model", "v1");
+            ModelSelection compactorModel = ModelSelection.model("compactor-model", "v1");
             return new TurnResolver.CompactionResolved(
                 compactorModel,
                 4096L,
@@ -1257,7 +1257,7 @@ class PostgresqlCompactionChildTest {
         ProviderType.OPENAI,
         new UUID(0L, 1L),
         new ModelDescriptor(
-            settings.model().providerName(),
+            "provider",
             settings.model().modelName(),
             settings.model().modelName(),
             Set.of(ModelInputModality.TEXT),

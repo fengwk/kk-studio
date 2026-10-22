@@ -13,7 +13,7 @@ import fun.fengwk.kkstudio.platform.catalog.model.repo.impl.model.AgentModelDO;
 import fun.fengwk.kkstudio.platform.catalog.model.repo.impl.store.AgentModelJdbcStore;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
 
-/** Model Variant 覆盖必须引用当前的复合 Model 标识。 */
+/** Model Variant 覆盖必须引用当前全局逻辑 Model 名称。 */
 class AgentModelDefaultVariantResolverTest {
 
   @Test
@@ -22,26 +22,23 @@ class AgentModelDefaultVariantResolverTest {
     AgentModelRuntimeConfigParser parser =
         new AgentModelRuntimeConfigParser(JsonMapper.builder().build());
     AgentModelDO model = new AgentModelDO();
-    model.setProviderName("provider");
+    model.setKind("MODEL");
     model.setName("model");
     model.setConfigJson(parser.encode(executableConfig()));
-    when(store.getByProviderNameAndName("provider", "model")).thenReturn(model);
+    when(store.getByName("model")).thenReturn(model);
 
     AgentModelDefaultVariantResolver resolver = new AgentModelDefaultVariantResolver(store, parser);
 
-    assertEquals("default", resolver.resolve("provider", "model", null));
-    assertEquals("default", resolver.resolve("provider", "model", " default "));
+    assertEquals("default", resolver.resolve("model", null));
+    assertEquals("default", resolver.resolve("model", " default "));
     assertEquals(
-        "unknown agent model variant: model=provider/model, variant=missing",
+        "unknown agent model variant: model=model, variant=missing",
         assertThrows(
-                IllegalArgumentException.class,
-                () -> resolver.resolve("provider", "model", "missing"))
+                IllegalArgumentException.class, () -> resolver.resolve("model", "missing"))
             .getMessage());
     assertEquals(
-        "unknown agent model: missing/model",
-        assertThrows(
-                IllegalArgumentException.class,
-                () -> resolver.resolve("missing", "model", "default"))
+        "unknown agent model: missing",
+        assertThrows(IllegalArgumentException.class, () -> resolver.resolve("missing", "default"))
             .getMessage());
   }
 
@@ -51,30 +48,27 @@ class AgentModelDefaultVariantResolverTest {
     AgentModelConfigDTO config = executableConfig();
 
     assertEquals(
-        "default",
-        AgentModelDefaultVariantResolver.resolveConfiguredVariant(
-            "provider", "model", null, config));
+        "default", AgentModelDefaultVariantResolver.resolveConfiguredVariant("model", null, config));
     assertEquals(
         "default",
-        AgentModelDefaultVariantResolver.resolveConfiguredVariant(
-            "provider", "model", "  default  ", config));
+        AgentModelDefaultVariantResolver.resolveConfiguredVariant("model", "  default  ", config));
     assertEquals(
-        "unknown agent model variant: model=provider/model, variant=missing",
+        "unknown agent model variant: model=model, variant=missing",
         assertThrows(
                 IllegalArgumentException.class,
                 () ->
                     AgentModelDefaultVariantResolver.resolveConfiguredVariant(
-                        "provider", "model", "missing", config))
+                        "model", "missing", config))
             .getMessage());
     AgentModelConfigDTO noDefault = executableConfig();
     noDefault.setDefaultVariant(null);
     assertEquals(
-        "model defaultVariant missing: provider/model",
+        "model defaultVariant missing: model",
         assertThrows(
                 IllegalStateException.class,
                 () ->
                     AgentModelDefaultVariantResolver.resolveConfiguredVariant(
-                        "provider", "model", " ", noDefault))
+                        "model", " ", noDefault))
             .getMessage());
   }
 }

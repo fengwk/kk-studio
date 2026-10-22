@@ -195,6 +195,10 @@ public class AgentModelJdbcStore {
         .param("oldName", oldName)
         .param("name", model.getName())
         .update();
+    if ("GROUP".equals(model.getKind())) {
+      // 组改名同样是一次配置写：旧名字下的冷却不再属于当前组。
+      deleteGroupCooldowns(model.getName());
+    }
     return updated;
   }
 
