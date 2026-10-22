@@ -11,9 +11,10 @@ import type { ModelPricingDraft } from '@/features/ai/catalog/ai-console-types'
 
 const DECIMAL_PATTERN = /^(?:0|[1-9]\d*)(?:\.\d+)?$/
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/
-const TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/
-export const MAX_CONDITION_DEPTH = 6
-export const MAX_CONDITION_CHILDREN = 20
+const START_TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/
+const END_TIME_PATTERN = /^(?:(?:[01]\d|2[0-3]):[0-5]\d|24:00)$/
+export const MAX_CONDITION_DEPTH = 8
+export const MAX_CONDITION_CHILDREN = 64
 
 /** 新建价格完整为零；reasoning=null 表示跟随 output。 */
 export function emptyPricingDraft(): ModelPricingDraft {
@@ -165,7 +166,8 @@ function normalizeRatePatch(rates: AgentModelRatePatchDTO): AgentModelRatePatchD
     result.cacheWrite = requireDecimal(rates.cacheWrite, 'override.rates.cacheWrite')
   }
   const ttl = normalizeTtlMap(rates.cacheWriteByTtl, 'override.rates')
-  if (Object.keys(ttl).length > 0) {
+  // 显式空 map 会原子清空 base TTL 覆盖；缺省属性才表示继承。
+  if (rates.cacheWriteByTtl !== undefined) {
     result.cacheWriteByTtl = ttl
   }
   if (rates.reasoning === null) {
@@ -244,11 +246,12 @@ export function normalizeCondition(
     }
   }
 
-  if (condition.serviceTier) {
-    const tiers = uniqueNonBlank(condition.serviceTier)
-    if (tiers.length > 0) {
-      result.serviceTier = tiers
+  if (condition.serviceTier !== undefined) {
+    if (condition.serviceTier.length > MAX_CONDITION_CHILDREN) {
+      throw new Error(`${field}.serviceTier exceeds maximum value count`)
     }
+    // 显式空列表恒假；必须与“缺省不约束”区分，不能收窄为 undefined。
+    result.serviceTier = uniqueNonBlank(condition.serviceTier)
   }
 
   if (condition.date) {
@@ -263,11 +266,16 @@ export function normalizeCondition(
 
   if (condition.time) {
     const time = condition.time
-    if (!TIME_PATTERN.test(time.start.trim())) {
-      throw new Error(`${field}.time.start must be HH:mm`)
+    const start = time.start.trim()
+    const end = time.end.trim()
+    if (!START_TIME_PATTERN.test(start)) {
+      throw new Error(`${field}.time.start must be HH:mm before 24:00`)
     }
-    if (!TIME_PATTERN.test(time.end.trim())) {
-      throw new Error(`${field}.time.end must be HH:mm`)
+    if (!END_TIME_PATTERN.test(end)) {
+      throw new Error(`${field}.time.end must be HH:mm or 24:00`)
+    }
+    if (start === end) {
+      throw new Error(`${field}.time.start and end must differ; use 00:00-24:00 for all day`)
     }
     const timezone = time.timezone.trim()
     if (!timezone) {
@@ -283,8 +291,8 @@ export function normalizeCondition(
       throw new Error(`${field}.time.weekdays must be integers 1..7`)
     }
     result.time = {
-      start: time.start.trim(),
-      end: time.end.trim(),
+      start,
+      end,
       timezone,
       ...(weekdays.length > 0 ? { weekdays } : {}),
     }
@@ -338,8 +346,12 @@ export function describeCondition(condition: AgentModelConditionDTO): string {
     if (context.lt != null) parts.push(`context < ${context.lt}`)
     if (context.lte != null) parts.push(`context ≤ ${context.lte}`)
   }
-  if (condition.serviceTier?.length) {
-    parts.push(`tier ∈ ${condition.serviceTier.join(', ')}`)
+  if (condition.serviceTier !== undefined) {
+    parts.push(
+      condition.serviceTier.length > 0
+        ? `tier ∈ ${condition.serviceTier.join(', ')}`
+        : 'tier ∈ ∅',
+    )
   }
   if (condition.date?.gte) parts.push(`date ≥ ${condition.date.gte}`)
   if (condition.date?.lt) parts.push(`date < ${condition.date.lt}`)

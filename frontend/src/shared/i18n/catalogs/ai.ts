@@ -767,6 +767,14 @@ export const aiCatalog = {
     'en-US': 'Cache write TTL overrides',
     'zh-CN': '缓存写入 TTL 覆盖',
   },
+  'ai.catalog.form.overrideTtl': {
+    'en-US': 'Override cache write TTL',
+    'zh-CN': '覆盖缓存写入 TTL',
+  },
+  'ai.catalog.form.overrideTtlHint': {
+    'en-US': 'Unchecked inherits the base map; checked replaces it. An empty map explicitly clears inherited TTL prices.',
+    'zh-CN': '未勾选继承基础映射；勾选后整体替换。显式空映射用于清空继承的 TTL 价格。',
+  },
   'ai.catalog.form.ttlSeconds': {
     'en-US': 'TTL seconds',
     'zh-CN': 'TTL 秒数',
@@ -922,6 +930,10 @@ export const aiCatalog = {
   'ai.catalog.form.timeZone': {
     'en-US': 'IANA time zone',
     'zh-CN': 'IANA 时区',
+  },
+  'ai.catalog.form.timeHint': {
+    'en-US': 'Use HH:mm. End may be 24:00; 00:00-24:00 means all day, and start must differ from end.',
+    'zh-CN': '格式 HH:mm；结束时间可为 24:00，00:00-24:00 表示全天，开始与结束不能相同。',
   },
   'ai.catalog.form.weekday.1': { 'en-US': 'Mon', 'zh-CN': '周一' },
   'ai.catalog.form.weekday.2': { 'en-US': 'Tue', 'zh-CN': '周二' },
