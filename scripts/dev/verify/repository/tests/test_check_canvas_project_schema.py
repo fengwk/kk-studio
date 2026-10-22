@@ -56,7 +56,7 @@ class DeclaredInventoryTest(unittest.TestCase):
     def test_inventory_matches_the_real_baseline(self):
         tables = declared_baseline_tables(BASELINE.read_text(encoding="utf-8"))
         self.assertEqual(sorted(BUSINESS_TABLES), tables)
-        self.assertEqual(len(BUSINESS_TABLES), 46)
+        self.assertEqual(len(BUSINESS_TABLES), 47)
         self.assertTrue(set(TARGET_TABLES).issubset(BUSINESS_TABLES))
 
     def test_declared_inventory_has_no_drift_against_the_real_baseline(self):

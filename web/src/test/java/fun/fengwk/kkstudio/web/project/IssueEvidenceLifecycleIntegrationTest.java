@@ -371,24 +371,20 @@ class IssueEvidenceLifecycleIntegrationTest extends WebPostgresTestSupport {
         providerName,
         UUID.randomUUID());
     jdbc.update(
-        "insert into agent_model (provider_name, name, model_id, config) values (?, ?, ?, ?::jsonb)",
-        providerName,
+        "insert into agent_model (name, kind, provider_name, model_id, config)"
+            + " values (?, 'MODEL', ?, ?, ?::jsonb)",
         modelName,
+        providerName,
         "wire-" + id,
         "{\"limit\":{\"context\":128000,\"output\":8192},"
             + "\"abilities\":{\"tools\":true,\"reasoning\":true,\"inputModalities\":[\"TEXT\"]},"
             + "\"variants\":[{\"id\":\"default\"}],\"defaultVariant\":\"default\","
-            + "\"pricing\":{\"currency\":\"USD\",\"pricingTier\":\"standard\","
-            + "\"serviceTier\":\"standard\",\"serviceTierMultiplier\":1.0,"
-            + "\"version\":\"2026-01-01\",\"inputPerMillionTokens\":0,"
-            + "\"outputPerMillionTokens\":0,\"cacheReadPerMillionTokens\":0,"
-            + "\"cacheWritePerMillionTokens\":0,\"cacheWriteLongPerMillionTokens\":0,"
-            + "\"reasoningPerMillionTokens\":0}}");
+            + "\"pricing\":{\"base\":{\"input\":\"0\",\"output\":\"0\",\"cacheRead\":\"0\","
+            + "\"cacheWrite\":\"0\",\"cacheWriteByTtl\":{},\"reasoning\":\"0\"},"
+            + "\"overrides\":[],\"multipliers\":[]}}");
     jdbc.update(
-        "insert into agent_definition (name, model_provider_name, model_name, config) "
-            + "values (?, ?, ?, '{}'::jsonb)",
+        "insert into agent_definition (name, model_name, config) values (?, ?, '{}'::jsonb)",
         agentName,
-        providerName,
         modelName);
     return agentName;
   }

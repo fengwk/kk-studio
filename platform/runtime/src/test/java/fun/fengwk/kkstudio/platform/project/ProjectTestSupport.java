@@ -92,12 +92,9 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
           + "\"abilities\":{\"tools\":true,\"reasoning\":true,\"inputModalities\":[\"TEXT\"]},"
           + "\"variants\":[{\"id\":\"default\"}],"
           + "\"defaultVariant\":\"default\","
-          + "\"pricing\":{\"currency\":\"USD\",\"pricingTier\":\"standard\","
-          + "\"serviceTier\":\"standard\",\"serviceTierMultiplier\":1.0,"
-          + "\"version\":\"2026-01-01\",\"inputPerMillionTokens\":0,"
-          + "\"outputPerMillionTokens\":0,\"cacheReadPerMillionTokens\":0,"
-          + "\"cacheWritePerMillionTokens\":0,\"cacheWriteLongPerMillionTokens\":0,"
-          + "\"reasoningPerMillionTokens\":0}}";
+          + "\"pricing\":{\"base\":{\"input\":\"0\",\"output\":\"0\",\"cacheRead\":\"0\","
+          + "\"cacheWrite\":\"0\",\"cacheWriteByTtl\":{},\"reasoning\":\"0\"},"
+          + "\"overrides\":[],\"multipliers\":[]}}";
 
   @Autowired protected JdbcTemplate jdbc;
   @Autowired protected ProjectService projectService;
@@ -112,7 +109,7 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
    */
   @MockitoSpyBean protected IssueActivityRepository issueActivityRepository;
 
-  /** 插入一个最小合法的 AgentDefinition（含 provider/model）并返回 Agent 自然名称。 */
+  /** 插入一个最小合法的 AgentDefinition（引用全局 MODEL 名称）并返回 Agent 自然名称。 */
   protected String createAgent() {
     long id = FIXTURE_COUNTER.incrementAndGet();
     String providerName = "prov-" + id;
@@ -124,17 +121,15 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
         providerName,
         UUID.randomUUID());
     jdbc.update(
-        "insert into agent_model (provider_name, name, model_id, config)"
-            + " values (?, ?, ?, ?::jsonb)",
-        providerName,
+        "insert into agent_model (name, kind, provider_name, model_id, config)"
+            + " values (?, 'MODEL', ?, ?, ?::jsonb)",
         modelName,
+        providerName,
         "wire-" + id,
         VALID_MODEL_CONFIG);
     jdbc.update(
-        "insert into agent_definition (name, model_provider_name, model_name, config)"
-            + " values (?, ?, ?, '{}'::jsonb)",
+        "insert into agent_definition (name, model_name, config)" + " values (?, ?, '{}'::jsonb)",
         agentName,
-        providerName,
         modelName);
     return agentName;
   }
