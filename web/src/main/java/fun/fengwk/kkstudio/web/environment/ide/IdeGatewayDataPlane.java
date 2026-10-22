@@ -536,10 +536,30 @@ public final class IdeGatewayDataPlane {
           }
           byte[] chunk = new byte[read];
           System.arraycopy(buffer, 0, chunk, 0, read);
-          relay.sendHttpBody(chunk);
+          if (!sendToDaemon(() -> relay.sendHttpBody(chunk))) {
+            return;
+          }
         }
       }
-      relay.sendHttpEnd();
+      sendToDaemon(relay::sendHttpEnd);
+    }
+
+    /**
+     * 发送请求方向的一帧。
+     *
+     * <p>上游可以不读完请求就交付完整响应并关闭反向流：peer 已关闭时停止发送请求，已入队的响应仍由 {@link #readResponse} 交付或判定不完整；peer
+     * 仍存活时的发送失败原样抛出。
+     */
+    private boolean sendToDaemon(Runnable send) {
+      try {
+        send.run();
+        return true;
+      } catch (IllegalStateException error) {
+        if (peer.closed()) {
+          return false;
+        }
+        throw error;
+      }
     }
 
     private void readResponse() throws IOException {
