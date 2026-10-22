@@ -42,16 +42,12 @@ class FlywayBootstrapArchitectureTest {
   private static final String SCHEMA_TEST_SQL_PREFIX = "schema/src/test/";
 
   /**
-   * 升级测试自己的固定 SQL 夹具：三份与 Git blob 逐字节一致的冻结源 V1 DDL（旧 DEV、旧 MAIN 与 Java 1.1.0），以及四份业务/拷贝探针脚本。
+   * 启动拒绝测试的固定 SQL 夹具：三份冻结源 V1 DDL（旧 DEV、旧 MAIN 与 Java 1.1.0）。
    *
    * <p>它们只允许出现在这个固定的升级 test fixture 目录，既不是第二份 DDL，也不属于任何生产引导路径；任何新增 SQL 都必须同时更新本清单。
    */
   private static final List<String> UPGRADE_TEST_SQL_FIXTURES =
       List.of(
-          "web/src/test/resources/fun/fengwk/kkstudio/web/upgrade/legacy-reference-data-business.sql",
-          "web/src/test/resources/fun/fengwk/kkstudio/web/upgrade/legacy-reference-data-project.sql",
-          "web/src/test/resources/fun/fengwk/kkstudio/web/upgrade/legacy-table-copy-probe-schema.sql",
-          "web/src/test/resources/fun/fengwk/kkstudio/web/upgrade/legacy-table-copy-probe-target.sql",
           "web/src/test/resources/fun/fengwk/kkstudio/web/upgrade/source/dev/V1__schema.sql",
           "web/src/test/resources/fun/fengwk/kkstudio/web/upgrade/source/java-v1.1.0/V1__schema.sql",
           "web/src/test/resources/fun/fengwk/kkstudio/web/upgrade/source/main/V1__schema.sql");
