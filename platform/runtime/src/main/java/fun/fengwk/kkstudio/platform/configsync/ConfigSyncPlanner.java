@@ -186,13 +186,16 @@ public final class ConfigSyncPlanner {
         break;
       }
     }
+    // 写入顺序先 MODEL 后 GROUP：同一次导入中的组必须能看到已插入的成员行。
     List<ConfigSyncParser.ModelSpec> models = new ArrayList<>();
-    for (ConfigSyncParser.ModelSpec spec : candidateModels.values()) {
-      if (!availableModels.containsKey(spec.name())) {
-        continue;
+    for (AgentModelKind kind : List.of(AgentModelKind.MODEL, AgentModelKind.GROUP)) {
+      for (ConfigSyncParser.ModelSpec spec : candidateModels.values()) {
+        if (!availableModels.containsKey(spec.name()) || spec.properties().getKind() != kind) {
+          continue;
+        }
+        models.add(spec);
+        imported.add(ConfigSyncRefs.model(spec.name()));
       }
-      models.add(spec);
-      imported.add(ConfigSyncRefs.model(spec.name()));
     }
 
     // 模型池就绪后、外部准备前：Agent 显式 variant 必须由导入后将生效的 Model config 声明，GROUP 不得带 variant。

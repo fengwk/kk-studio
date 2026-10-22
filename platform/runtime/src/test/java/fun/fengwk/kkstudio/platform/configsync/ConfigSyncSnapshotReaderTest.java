@@ -178,13 +178,11 @@ class ConfigSyncSnapshotReaderTest {
     when(systemSettingsRepository.get()).thenReturn(settings(1L));
     when(skillCatalogQueryService.listPackages()).thenReturn(List.of());
     when(pluginConfigurationRepository.readCatalog()).thenReturn(emptyCatalog());
-    AgentDefinition user =
-        agent("user-agent", "p", "m", agentConfig(List.of(), List.of(), List.of()));
+    AgentDefinition user = agent("user-agent", "m", agentConfig(List.of(), List.of(), List.of()));
     user.setType(AgentDefinitionType.USER);
     AgentDefinition builtin =
         agent(
             BuiltinAgentDefinitions.COMPACTION_NAME,
-            null,
             null,
             agentConfig(List.of(), List.of(), List.of()));
     builtin.setType(AgentDefinitionType.BUILTIN);

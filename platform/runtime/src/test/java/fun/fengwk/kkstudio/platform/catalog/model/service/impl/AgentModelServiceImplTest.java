@@ -24,6 +24,7 @@ import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelCreateDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelUpdateDTO;
 
 import java.sql.SQLException;
@@ -40,15 +41,13 @@ public class AgentModelServiceImplTest {
     AgentModelServiceImpl service =
         new AgentModelServiceImpl(repository, converter, factory, resolver);
 
-    AgentModel model = new AgentModel();
-    model.setProviderName("provider");
-    model.setName("model");
-    model.setVersion(0L);
-    when(resolver.requireModelForUpdate("provider", "model")).thenReturn(model);
+    AgentModel model = model();
+    when(resolver.requireModelForUpdate("model")).thenReturn(model);
     AgentModelCreateDTO create = new AgentModelCreateDTO();
-    create.setProviderName("provider");
     create.setName("model");
-    when(factory.newModel("provider", "model", create)).thenReturn(model);
+    create.setKind(AgentModelKind.MODEL);
+    create.setProviderName("provider");
+    when(factory.newModel("model", create)).thenReturn(model);
     when(repository.create(model)).thenReturn(false);
     assertThrows(IllegalStateException.class, () -> service.createModel(create));
 
@@ -61,41 +60,32 @@ public class AgentModelServiceImplTest {
     update.setName("model");
     update.setExpectedVersion("0");
     AgentModelUpdateDTO missing = new AgentModelUpdateDTO();
-    assertThrows(
-        AiValidationException.class, () -> service.updateModel("provider", "model", missing));
-    when(resolver.requireModelForUpdate("provider", "model")).thenReturn(model);
+    assertThrows(AiValidationException.class, () -> service.updateModel("model", missing));
+    when(resolver.requireModelForUpdate("model")).thenReturn(model);
     when(repository.updateByName(model, 0L)).thenReturn(false);
-    when(repository.getByProviderNameAndName("provider", "model")).thenReturn(null);
-    assertThrows(
-        AiResourceNotFoundException.class, () -> service.updateModel("provider", "model", update));
+    when(repository.getByName("model")).thenReturn(null);
+    assertThrows(AiResourceNotFoundException.class, () -> service.updateModel("model", update));
 
-    AgentModel reread = new AgentModel();
-    reread.setProviderName("provider");
-    reread.setName("model");
+    AgentModel reread = model();
     reread.setVersion(3L);
-    when(repository.getByProviderNameAndName("provider", "model")).thenReturn(reread);
-    assertThrows(
-        AiVersionConflictException.class, () -> service.updateModel("provider", "model", update));
+    when(repository.getByName("model")).thenReturn(reread);
+    assertThrows(AiVersionConflictException.class, () -> service.updateModel("model", update));
 
     when(repository.updateByName(model, 0L)).thenThrow(new DuplicateKeyException("dup"));
-    assertThrows(
-        AiDuplicateException.class, () -> service.updateModel("provider", "model", update));
+    assertThrows(AiDuplicateException.class, () -> service.updateModel("model", update));
 
     AgentModelUpdateDTO rename = new AgentModelUpdateDTO();
     rename.setName("renamed-model");
     rename.setExpectedVersion("0");
     doThrow(new DuplicateKeyException("dup")).when(repository).rename("model", model, 0L);
-    assertThrows(
-        AiDuplicateException.class, () -> service.updateModel("provider", "model", rename));
+    assertThrows(AiDuplicateException.class, () -> service.updateModel("model", rename));
 
-    when(repository.deleteByName(eq("provider"), eq("model"), anyLong())).thenReturn(false);
-    when(repository.getByProviderNameAndName("provider", "model")).thenReturn(null);
-    assertThrows(
-        AiResourceNotFoundException.class, () -> service.deleteModel("provider", "model", "0"));
-    when(repository.getByProviderNameAndName("provider", "model")).thenReturn(reread);
-    assertThrows(
-        AiVersionConflictException.class, () -> service.deleteModel("provider", "model", "0"));
-    verify(resolver, atLeastOnce()).requireModelForUpdate("provider", "model");
+    when(repository.deleteByName(eq("model"), anyLong())).thenReturn(false);
+    when(repository.getByName("model")).thenReturn(null);
+    assertThrows(AiResourceNotFoundException.class, () -> service.deleteModel("model", "0"));
+    when(repository.getByName("model")).thenReturn(reread);
+    assertThrows(AiVersionConflictException.class, () -> service.deleteModel("model", "0"));
+    verify(resolver, atLeastOnce()).requireModelForUpdate("model");
 
     DataIntegrityViolationException nonForeignKey = integrityFailure("22001");
     doThrow(nonForeignKey).when(repository).create(model);
@@ -112,25 +102,28 @@ public class AgentModelServiceImplTest {
     AgentModelReferenceResolver resolver = mock(AgentModelReferenceResolver.class);
     AgentModelServiceImpl service =
         new AgentModelServiceImpl(repository, converter, factory, resolver);
-    AgentModel model = new AgentModel();
-    model.setProviderName("provider");
-    model.setName("model");
+    AgentModel model = model();
     model.setVersion(1L);
-    when(resolver.requireModel("provider", "model")).thenReturn(model);
-    when(resolver.requireModelForUpdate("provider", "model")).thenReturn(model);
+    when(resolver.requireModel("model")).thenReturn(model);
+    when(resolver.requireModelForUpdate("model")).thenReturn(model);
 
     AgentModelUpdateDTO update = new AgentModelUpdateDTO();
     update.setExpectedVersion("0");
-    assertThrows(
-        AiVersionConflictException.class, () -> service.updateModel("provider", "model", update));
+    assertThrows(AiVersionConflictException.class, () -> service.updateModel("model", update));
     verify(factory, never()).update(model, update);
 
-    doThrow(new AiInUseException("agent_model", "in use"))
-        .when(resolver)
-        .ensureDeletable("provider", "model");
-    assertThrows(
-        AiVersionConflictException.class, () -> service.deleteModel("provider", "model", "0"));
-    verify(resolver, never()).ensureDeletable("provider", "model");
+    doThrow(new AiInUseException("agent_model", "in use")).when(resolver).ensureDeletable("model");
+    assertThrows(AiVersionConflictException.class, () -> service.deleteModel("model", "0"));
+    verify(resolver, never()).ensureDeletable("model");
+  }
+
+  private static AgentModel model() {
+    AgentModel model = new AgentModel();
+    model.setProviderName("provider");
+    model.setName("model");
+    model.setKind(AgentModelKind.MODEL);
+    model.setVersion(0L);
+    return model;
   }
 
   private static DataIntegrityViolationException integrityFailure(String sqlState) {

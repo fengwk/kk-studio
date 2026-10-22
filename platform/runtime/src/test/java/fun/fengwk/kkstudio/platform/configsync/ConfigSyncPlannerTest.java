@@ -72,6 +72,7 @@ class ConfigSyncPlannerTest {
           mcpServerRepository,
           TestCatalogSources.singleLease(toolCatalog),
           ConfigSyncFixtures.MODEL_CONFIG_PARSER,
+          ConfigSyncFixtures.GROUP_CONFIG_CODEC,
           ConfigSyncFixtures.agentDependencies());
 
   private ConfigSyncSnapshot emptySnapshot() {
@@ -101,6 +102,7 @@ class ConfigSyncPlannerTest {
         mcpServerRepository,
         TestCatalogSources.singleLease(toolCatalog),
         ConfigSyncFixtures.MODEL_CONFIG_PARSER,
+        ConfigSyncFixtures.GROUP_CONFIG_CODEC,
         ConfigSyncFixtures.agentDependencies(syntheticPlugin()));
   }
 
@@ -153,7 +155,7 @@ class ConfigSyncPlannerTest {
             + "  - name: mcp\n"
             + "    url: https://mcp.example.com/mcp\n"
             + "agents:\n"
-            + agent("a", "p/m", "      tools: [tool_x]\n      skills: []\n      subagents: []\n");
+            + agent("a", "m", "      tools: [tool_x]\n      skills: []\n      subagents: []\n");
     ConfigSyncPlan plan = plan(yamlText);
 
     assertFalse(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.MCP_SERVERS, "mcp")));
@@ -203,7 +205,7 @@ class ConfigSyncPlannerTest {
             + "    url: https://mcp.example.com/mcp\n"
             + "    enabled: false\n"
             + "agents:\n"
-            + agent("a", "p/m", "      tools: [tool_x]\n      skills: []\n      subagents: []\n");
+            + agent("a", "m", "      tools: [tool_x]\n      skills: []\n      subagents: []\n");
     ConfigSyncPlan plan = plan(yamlText);
 
     verify(mcpDiscovery, never()).discoverOrNull(any());
@@ -278,7 +280,7 @@ class ConfigSyncPlannerTest {
             + "agents:\n"
             + agent(
                 "a",
-                "p/m",
+                "m",
                 "      tools: []\n      skills:\n        - packageName: pkg\n          name: s2\n"
                     + "      subagents: []\n");
     ConfigSyncPlan plan = plan(yamlText);
@@ -360,7 +362,7 @@ class ConfigSyncPlannerTest {
             + "  - name: mcp\n"
             + "    url: https://mcp.example.com/mcp\n"
             + "agents:\n"
-            + agent("a", "p/m", "      tools: [tool_x]\n      skills: []\n      subagents: []\n");
+            + agent("a", "m", "      tools: [tool_x]\n      skills: []\n      subagents: []\n");
     ConfigSyncPlan plan = plan(yamlText);
 
     assertEquals(1, plan.mcpServers().size());
@@ -390,7 +392,6 @@ class ConfigSyncPlannerTest {
                 List.of(
                     ConfigSyncFixtures.agent(
                         "existing",
-                        "p",
                         "m",
                         ConfigSyncFixtures.agentConfig(List.of(), List.of(), List.of()))),
                 List.of(skillPackage("pkg", "s1")),
@@ -401,25 +402,23 @@ class ConfigSyncPlannerTest {
 
     String yamlText =
         "agents:\n"
-            + agent("missing_model", "q/x", agentConfigLines())
+            + agent("missing_model", "x", agentConfigLines())
             + agent(
                 "missing_pkg",
-                "p/m",
+                "m",
                 "      tools: []\n      skills:\n        - packageName: ghost\n          name: s\n      subagents: []\n")
             + agent(
                 "missing_skill",
-                "p/m",
+                "m",
                 "      tools: []\n      skills:\n        - packageName: pkg\n          name: nope\n      subagents: []\n")
             + agent(
-                "missing_sub",
-                "p/m",
-                "      tools: []\n      skills: []\n      subagents: [ghost]\n")
+                "missing_sub", "m", "      tools: []\n      skills: []\n      subagents: [ghost]\n")
             + "environments:\n"
             + "  - name: env\n"
             + "    registrationToken: tok\n";
     ConfigSyncPlan plan = plan(yamlText);
 
-    assertEquals("missing model: q/x", reason(plan.skipped(), "agents", "missing_model"));
+    assertEquals("missing model: x", reason(plan.skipped(), "agents", "missing_model"));
     assertEquals("missing skill package: ghost", reason(plan.skipped(), "agents", "missing_pkg"));
     assertEquals("missing skill: pkg/nope", reason(plan.skipped(), "agents", "missing_skill"));
     assertEquals("missing subagent: ghost", reason(plan.skipped(), "agents", "missing_sub"));
@@ -436,9 +435,7 @@ class ConfigSyncPlannerTest {
         PROVIDER_AND_MODEL
             + "agents:\n"
             + agent(
-                "a",
-                "p/m",
-                "      tools: []\n      skills:\n        - null\n      subagents: []\n");
+                "a", "m", "      tools: []\n      skills:\n        - null\n      subagents: []\n");
     assertThrows(AiValidationException.class, () -> plan(yamlText));
   }
 
@@ -462,14 +459,14 @@ class ConfigSyncPlannerTest {
             + "    providerType: unsupported_protocol\n"
             + ConfigSyncFixtures.resourceYaml("model-entry.yaml")
             + "agents:\n"
-            + agent("a", "p/m", agentConfigLines());
+            + agent("a", "m", agentConfigLines());
     ConfigSyncPlan plan = plan(yamlText);
 
-    assertFalse(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.MODELS, "p/m")));
+    assertFalse(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.MODELS, "m")));
     assertTrue(plan.models().isEmpty());
-    assertTrue(skipped(plan.skipped(), "models", "p/m"));
+    assertTrue(skipped(plan.skipped(), "models", "m"));
     // 被 poison 的 Model 不能被 Agent 借用。
-    assertEquals("missing model: p/m", reason(plan.skipped(), "agents", "a"));
+    assertEquals("missing model: m", reason(plan.skipped(), "agents", "a"));
     assertFalse(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.AGENTS, "a")));
   }
 
@@ -504,7 +501,7 @@ class ConfigSyncPlannerTest {
             + "agents:\n"
             + agent(
                 "a",
-                "p/m",
+                "m",
                 "      tools: []\n      skills:\n        - packageName: pkg\n          name: s\n"
                     + "      subagents: []\n");
     ConfigSyncPlan plan = plan(yamlText);
@@ -538,7 +535,7 @@ class ConfigSyncPlannerTest {
             + "  - name: mcp\n"
             + "    url: https://mcp.example.com/mcp\n"
             + "agents:\n"
-            + agent("a", "p/m", "      tools: [tool_x]\n      skills: []\n      subagents: []\n");
+            + agent("a", "m", "      tools: [tool_x]\n      skills: []\n      subagents: []\n");
     ConfigSyncPlan plan = plan(yamlText);
 
     assertTrue(skipped(plan.skipped(), "mcpServers", "mcp"));
@@ -624,7 +621,7 @@ class ConfigSyncPlannerTest {
     String yamlText =
         PROVIDER_AND_MODEL
             + "agents:\n"
-            + agent("a", "p/m", "      tools: [builtin]\n      skills: []\n      subagents: []\n");
+            + agent("a", "m", "      tools: [builtin]\n      skills: []\n      subagents: []\n");
     ConfigSyncPlan plan = plan(yamlText);
 
     assertFalse(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.AGENTS, "a")));
@@ -650,7 +647,7 @@ class ConfigSyncPlannerTest {
         document(
             agent(
                 "a",
-                "p/m",
+                "m",
                 "raw-variant-xyz",
                 ConfigSyncFixtures.agentConfig(List.of(), List.of(), List.of())));
     AiValidationException error =
@@ -665,11 +662,11 @@ class ConfigSyncPlannerTest {
         document(
             agent(
                 "b",
-                "q/x",
+                "x",
                 "raw-variant-xyz",
                 ConfigSyncFixtures.agentConfig(List.of(), List.of(), List.of())));
     ConfigSyncPlan plan = plan(ConfigSyncFixtures.documentYaml(missingModel));
-    assertEquals("missing model: q/x", reason(plan.skipped(), "agents", "b"));
+    assertEquals("missing model: x", reason(plan.skipped(), "agents", "b"));
   }
 
   /** 无 variant 或仅空白的 Agent 不触发声明校验，维持既有“不覆盖 default”语义。 */
@@ -695,7 +692,7 @@ class ConfigSyncPlannerTest {
                 "name",
                 "no_variant",
                 "model",
-                "p/m",
+                "m",
                 "config",
                 ConfigSyncFixtures.agentConfigMap(
                     ConfigSyncFixtures.agentConfig(List.of(), List.of(), List.of()))),
@@ -703,7 +700,7 @@ class ConfigSyncPlannerTest {
                 "name",
                 "blank_variant",
                 "model",
-                "p/m",
+                "m",
                 "variant",
                 "   ",
                 "config",
@@ -750,10 +747,7 @@ class ConfigSyncPlannerTest {
         documentWithModel(
             fileModel,
             agent(
-                "a",
-                "p/m",
-                "new",
-                ConfigSyncFixtures.agentConfig(List.of(), List.of(), List.of())));
+                "a", "m", "new", ConfigSyncFixtures.agentConfig(List.of(), List.of(), List.of())));
     ConfigSyncPlan plan = plan(ConfigSyncFixtures.documentYaml(withNew));
     assertTrue(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.AGENTS, "a")));
 
@@ -761,10 +755,7 @@ class ConfigSyncPlannerTest {
         documentWithModel(
             fileModel,
             agent(
-                "a",
-                "p/m",
-                "old",
-                ConfigSyncFixtures.agentConfig(List.of(), List.of(), List.of())));
+                "a", "m", "old", ConfigSyncFixtures.agentConfig(List.of(), List.of(), List.of())));
     assertThrows(AiValidationException.class, () -> plan(ConfigSyncFixtures.documentYaml(withOld)));
   }
 
@@ -802,7 +793,7 @@ class ConfigSyncPlannerTest {
                 List.of(model("p", "m")),
                 List.of(
                     ConfigSyncFixtures.agent(
-                        "h3", "p", "m", agentConfig(List.of(), List.of(), List.of()))),
+                        "h3", "m", agentConfig(List.of(), List.of(), List.of()))),
                 Set.of(),
                 List.of(),
                 List.of(),
@@ -859,7 +850,7 @@ class ConfigSyncPlannerTest {
                 List.of(model("p", "m")),
                 List.of(
                     ConfigSyncFixtures.agent(
-                        "a", "p", "m", agentConfig(List.of(), List.of(), List.of()))),
+                        "a", "m", agentConfig(List.of(), List.of(), List.of()))),
                 Set.of(),
                 List.of(),
                 List.of(),
@@ -881,7 +872,7 @@ class ConfigSyncPlannerTest {
                             + "agents:\n"
                             + agent(
                                 "a",
-                                "p/m",
+                                "m",
                                 "      tools: [ghost_tool]\n      skills: []\n      subagents: []\n")));
 
     assertTrue(skipped(plan.skipped(), "agents", "a"));
@@ -947,7 +938,7 @@ class ConfigSyncPlannerTest {
                         List.of(
                             agent(
                                 "a",
-                                "p/m",
+                                "m",
                                 "default",
                                 ConfigSyncFixtures.agentConfig(
                                     List.of(), List.of(), List.of(BUILTIN_AGENT)))))));
@@ -1010,6 +1001,7 @@ class ConfigSyncPlannerTest {
             mcpServerRepository,
             TestCatalogSources.singleLease(toolCatalog),
             ConfigSyncFixtures.MODEL_CONFIG_PARSER,
+            ConfigSyncFixtures.GROUP_CONFIG_CODEC,
             ConfigSyncFixtures.agentDependencies(
                 new ConfigSyncFixtures.FailingAgentDeclarationPlugin(PLUGIN_ID)));
 
