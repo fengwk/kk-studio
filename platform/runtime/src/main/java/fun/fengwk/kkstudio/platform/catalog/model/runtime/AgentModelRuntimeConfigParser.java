@@ -161,7 +161,7 @@ public final class AgentModelRuntimeConfigParser {
         abilities.getReasoning(),
         List.copyOf(variants),
         config.getDefaultVariant(),
-        toModelPricing(pricing));
+        parsePricing(pricing));
   }
 
   private void validate(AgentModelConfigDTO config) {
@@ -252,12 +252,58 @@ public final class AgentModelRuntimeConfigParser {
 
     AgentModelPricingDTO pricing = config.getPricing();
     if (pricing == null) {
-      throw invalid("config.pricing is required");
+      pricing = new AgentModelPricingDTO();
+      config.setPricing(pricing);
     }
+    normalizePricing(pricing);
     validatePricing(pricing);
   }
 
-  private void validatePricing(AgentModelPricingDTO pricing) {
+  /** 直接解析单个 pricing DTO；null/缺省即完整零定义。调用方与 {@code parse(config)} 使用同一转换，避免目录校验等旁路漂移。 */
+  public static ModelPricing parsePricing(AgentModelPricingDTO pricing) {
+    if (pricing == null) {
+      return ModelPricing.ZERO;
+    }
+    normalizePricing(pricing);
+    validatePricing(pricing);
+    return toModelPricing(pricing);
+  }
+
+  /**
+   * 归一化为 canonical pricing DTO：base 普通价格缺失写 0、TTL 缺失写空 map、规则数组缺失写空列表。
+   *
+   * <p>base.reasoning 缺省仍表示继承 output；rate patch 的 null/缺省仍表示不修改，不能在此默认成 0。
+   */
+  private static void normalizePricing(AgentModelPricingDTO pricing) {
+    AgentModelRateSetDTO base = pricing.getBase();
+    if (base == null) {
+      base = new AgentModelRateSetDTO();
+      pricing.setBase(base);
+    }
+    if (base.getInput() == null) {
+      base.setInput(BigDecimal.ZERO);
+    }
+    if (base.getOutput() == null) {
+      base.setOutput(BigDecimal.ZERO);
+    }
+    if (base.getCacheRead() == null) {
+      base.setCacheRead(BigDecimal.ZERO);
+    }
+    if (base.getCacheWrite() == null) {
+      base.setCacheWrite(BigDecimal.ZERO);
+    }
+    if (base.getCacheWriteByTtl() == null) {
+      base.setCacheWriteByTtl(Map.of());
+    }
+    if (pricing.getOverrides() == null) {
+      pricing.setOverrides(List.of());
+    }
+    if (pricing.getMultipliers() == null) {
+      pricing.setMultipliers(List.of());
+    }
+  }
+
+  private static void validatePricing(AgentModelPricingDTO pricing) {
     String path = "config.pricing";
     validateRateSet(pricing.getBase(), path + ".base");
     List<AgentModelPricingOverrideDTO> overrides = pricing.getOverrides();
@@ -467,8 +513,8 @@ public final class AgentModelRuntimeConfigParser {
   }
 
   /**
-   * Wire 时间窗左闭右开；全天必须显式写成 00:00-24:00，并在内部规范为 00:00-00:00。 不接受 start=24:00，也不接受 start=end（含
-   * 00:00-00:00）被误读为全天。
+   * Wire 时间窗左闭右开；全天必须显式写成 00:00-24:00，并在内部规范为 00:00-00:00。end=24:00 可配任意合法 start 表示当日 24:00 右边界；不接受
+   * start=24:00，也不接受 start=end（含 00:00-00:00）被误读为全天。
    */
   private static TimeBounds parseTimeBounds(String startValue, String endValue, String path) {
     if ("24:00".equals(startValue)) {
@@ -476,9 +522,6 @@ public final class AgentModelRuntimeConfigParser {
     }
     LocalTime start = parseTime(startValue, path + ".start");
     if ("24:00".equals(endValue)) {
-      if (!start.equals(LocalTime.MIDNIGHT)) {
-        throw invalid(path + ".end 24:00 requires start 00:00");
-      }
       return new TimeBounds(start, LocalTime.MIDNIGHT);
     }
     LocalTime end = parseTime(endValue, path + ".end");
