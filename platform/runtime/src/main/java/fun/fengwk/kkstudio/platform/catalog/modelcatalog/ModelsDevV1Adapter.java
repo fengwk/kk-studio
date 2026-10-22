@@ -92,6 +92,7 @@ public class ModelsDevV1Adapter implements ModelsDevCatalogAdapter {
     candidate.setSupportIssues(issues);
     try {
       AgentModelPricingDTO pricing = pricing(model.get("cost"), issues);
+      CatalogPricingValidator.validate(pricing);
       candidate.setPricing(pricing);
       candidate.setPricingSupported(true);
     } catch (CatalogPriceException error) {
