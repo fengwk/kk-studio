@@ -41,6 +41,11 @@ public class ModelsDevV1Adapter implements ModelsDevCatalogAdapter {
           "context_over_200k",
           "input_audio",
           "output_audio");
+  private static final Set<String> TIER_KEYS =
+      Set.of("input", "output", "cache_read", "cache_write", "reasoning", "tier");
+  private static final Set<String> TIER_META_KEYS = Set.of("type", "size");
+  private static final Set<String> LEGACY_TIER_KEYS =
+      Set.of("input", "output", "cache_read", "cache_write", "reasoning");
 
   @Override
   public ModelCatalogSource source() {
@@ -212,8 +217,10 @@ public class ModelsDevV1Adapter implements ModelsDevCatalogAdapter {
       int index = 0;
       for (JsonNode tier : tierArray) {
         JsonNode object = CatalogJson.requireObject(tier, "cost.tiers[" + index + "]");
+        validateKeys(object, TIER_KEYS, "cost.tiers[" + index + "]");
         JsonNode tierSpec = object.get("tier");
         JsonNode spec = CatalogJson.requireObject(tierSpec, "cost.tiers[" + index + "].tier");
+        validateKeys(spec, TIER_META_KEYS, "cost.tiers[" + index + "].tier");
         String type = CatalogJson.text(spec.get("type"), "");
         if (!"context".equals(type)) {
           throw new CatalogPriceException("unsupported v1 tier type: " + type);
@@ -222,18 +229,19 @@ public class ModelsDevV1Adapter implements ModelsDevCatalogAdapter {
         if (size == null) {
           throw new CatalogPriceException("cost.tiers[" + index + "].tier.size is required");
         }
-        mergeTier(tiers, size, tierPatch(object));
+        mergeTier(tiers, size, tierPatch(object, "cost.tiers[" + index + "]"));
         index++;
       }
     }
     JsonNode legacy = cost.get("context_over_200k");
     if (legacy != null && !legacy.isNull()) {
-      mergeTier(
-          tiers, 200_000, tierPatch(CatalogJson.requireObject(legacy, "cost.context_over_200k")));
+      JsonNode legacyNode = CatalogJson.requireObject(legacy, "cost.context_over_200k");
+      validateKeys(legacyNode, LEGACY_TIER_KEYS, "cost.context_over_200k");
+      mergeTier(tiers, 200_000, tierPatch(legacyNode, "cost.context_over_200k"));
     }
     for (Map.Entry<Integer, AgentModelRatePatchDTO> entry : tiers.entrySet()) {
       AgentModelPricingContextConditionDTO context = new AgentModelPricingContextConditionDTO();
-      context.setGte(entry.getKey());
+      context.setGt(entry.getKey());
       AgentModelPricingConditionDTO when = new AgentModelPricingConditionDTO();
       when.setContext(context);
       AgentModelPricingOverrideDTO override = new AgentModelPricingOverrideDTO();
@@ -255,14 +263,23 @@ public class ModelsDevV1Adapter implements ModelsDevCatalogAdapter {
     }
   }
 
-  private static AgentModelRatePatchDTO tierPatch(JsonNode node) {
+  private static AgentModelRatePatchDTO tierPatch(JsonNode node, String name) {
+    validateKeys(node, TIER_KEYS, name);
     AgentModelRatePatchDTO patch = new AgentModelRatePatchDTO();
-    patch.setInput(CatalogJson.decimal(node.get("input"), "tier.input"));
-    patch.setOutput(CatalogJson.decimal(node.get("output"), "tier.output"));
-    patch.setCacheRead(CatalogJson.decimal(node.get("cache_read"), "tier.cache_read"));
-    patch.setCacheWrite(CatalogJson.decimal(node.get("cache_write"), "tier.cache_write"));
-    patch.setReasoning(CatalogJson.decimal(node.get("reasoning"), "tier.reasoning"));
+    patch.setInput(CatalogJson.decimal(node.get("input"), name + ".input"));
+    patch.setOutput(CatalogJson.decimal(node.get("output"), name + ".output"));
+    patch.setCacheRead(CatalogJson.decimal(node.get("cache_read"), name + ".cache_read"));
+    patch.setCacheWrite(CatalogJson.decimal(node.get("cache_write"), name + ".cache_write"));
+    patch.setReasoning(CatalogJson.decimal(node.get("reasoning"), name + ".reasoning"));
     return patch;
+  }
+
+  private static void validateKeys(JsonNode node, Set<String> allowed, String name) {
+    for (String key : node.propertyNames()) {
+      if (!allowed.contains(key)) {
+        throw new CatalogPriceException("unsupported v1 " + name + " field: " + key);
+      }
+    }
   }
 
   private static void zero(AgentModelRateSetDTO rates) {
