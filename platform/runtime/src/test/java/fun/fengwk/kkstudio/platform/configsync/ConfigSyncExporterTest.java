@@ -36,6 +36,7 @@ class ConfigSyncExporterTest {
       new ConfigSyncExporter(
           ConfigSyncFixtures.PROVIDER_CONFIG_CODEC,
           ConfigSyncFixtures.MODEL_CONFIG_PARSER,
+          ConfigSyncFixtures.GROUP_CONFIG_CODEC,
           ConfigSyncFixtures.AGENT_CONFIG_CODEC,
           new SystemSettingsCodec(),
           yaml,
@@ -45,7 +46,7 @@ class ConfigSyncExporterTest {
     return snapshot(
         List.of(provider("p")),
         List.of(model("p", "m")),
-        List.of(agent("a", "p", "m", agentConfig(List.of(), List.of(), List.of()))),
+        List.of(agent("a", "m", agentConfig(List.of(), List.of(), List.of()))),
         List.of(skillPackage("pkg", "s")),
         List.of(environment("env")),
         List.of(mcpServer("mcp", true)),
@@ -95,7 +96,7 @@ class ConfigSyncExporterTest {
     List<ConfigSyncRef> refs =
         List.of(
             new ConfigSyncRef(ConfigSyncKind.PROVIDERS, "p"),
-            new ConfigSyncRef(ConfigSyncKind.MODELS, "p/m"),
+            new ConfigSyncRef(ConfigSyncKind.MODELS, "m"),
             new ConfigSyncRef(ConfigSyncKind.AGENTS, "a"),
             new ConfigSyncRef(ConfigSyncKind.SKILL_PACKAGES, "pkg"),
             new ConfigSyncRef(ConfigSyncKind.ENVIRONMENTS, "env"),

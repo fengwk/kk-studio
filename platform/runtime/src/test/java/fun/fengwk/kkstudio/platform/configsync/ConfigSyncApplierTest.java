@@ -49,6 +49,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionEditablePropertiesDTO
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelEditablePropertiesDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderEditablePropertiesDTO;
 import fun.fengwk.kkstudio.share.systemsettings.SystemSettingsSectionsDTO;
@@ -176,10 +177,10 @@ class ConfigSyncApplierTest {
 
     ConfigSyncParser.AgentSpec specA =
         new ConfigSyncParser.AgentSpec(
-            "a", "p", "m", agentProperties(agentConfig(List.of(), List.of(), List.of("b"))));
+            "a", "m", agentProperties(agentConfig(List.of(), List.of(), List.of("b"))));
     ConfigSyncParser.AgentSpec specB =
         new ConfigSyncParser.AgentSpec(
-            "b", "p", "m", agentProperties(agentConfig(List.of(), List.of(), List.of("a"))));
+            "b", "m", agentProperties(agentConfig(List.of(), List.of(), List.of("a"))));
 
     applier.apply(
         plan(List.of(), List.of(), List.of(), List.of(), List.of(), List.of(specA, specB), null));
@@ -271,12 +272,14 @@ class ConfigSyncApplierTest {
 
   @Test
   void modelImportCreatesNewModel() {
-    when(modelRepository.getByProviderNameAndName("p", "m")).thenReturn(null);
+    when(modelRepository.getByName("m")).thenReturn(null);
     AgentModelEditablePropertiesDTO properties = new AgentModelEditablePropertiesDTO();
+    properties.setKind(AgentModelKind.MODEL);
+    properties.setProviderName("p");
     properties.setName("m");
     properties.setModelId("gpt");
     properties.setConfig(ConfigSyncFixtures.modelConfig());
-    ConfigSyncParser.ModelSpec spec = new ConfigSyncParser.ModelSpec("p", "m", properties);
+    ConfigSyncParser.ModelSpec spec = new ConfigSyncParser.ModelSpec("m", properties);
 
     applier.apply(plan(List.of(), List.of(spec), List.of(), List.of(), List.of(), List.of(), null));
 
@@ -419,7 +422,6 @@ class ConfigSyncApplierTest {
             List.of(
                 new ConfigSyncParser.AgentSpec(
                     "dep-agent",
-                    "p",
                     "m",
                     agentProperties(agentConfig(List.of(), List.of(), List.of())))),
             List.of(
@@ -485,7 +487,7 @@ class ConfigSyncApplierTest {
   private static AgentDefinitionEditablePropertiesDTO agentProperties(
       AgentDefinitionConfigDTO config) {
     AgentDefinitionEditablePropertiesDTO properties = new AgentDefinitionEditablePropertiesDTO();
-    properties.setModel("p/m");
+    properties.setModel("m");
     properties.setConfig(config);
     return properties;
   }
@@ -539,20 +541,23 @@ class ConfigSyncApplierTest {
   @Test
   void existingModelIsUpdatedWithExistingVersionCas() {
     AgentModel existing = new AgentModel();
+    existing.setKind(AgentModelKind.MODEL);
     existing.setProviderName("p");
     existing.setName("m");
     existing.setVersion(4L);
-    when(modelRepository.getByProviderNameAndName("p", "m")).thenReturn(existing);
+    when(modelRepository.getByName("m")).thenReturn(existing);
     AgentModelEditablePropertiesDTO properties = new AgentModelEditablePropertiesDTO();
+    properties.setKind(AgentModelKind.MODEL);
+    properties.setProviderName("p");
     properties.setName("m");
     properties.setModelId("gpt");
     properties.setConfig(ConfigSyncFixtures.modelConfig());
-    ConfigSyncParser.ModelSpec spec = new ConfigSyncParser.ModelSpec("p", "m", properties);
+    ConfigSyncParser.ModelSpec spec = new ConfigSyncParser.ModelSpec("m", properties);
 
     applier.apply(plan(List.of(), List.of(spec), List.of(), List.of(), List.of(), List.of(), null));
 
     ArgumentCaptor<AgentModelUpdateDTO> captor = ArgumentCaptor.forClass(AgentModelUpdateDTO.class);
-    verify(modelService).updateModel(eq("p"), eq("m"), captor.capture());
+    verify(modelService).updateModel(eq("m"), captor.capture());
     assertEquals("4", captor.getValue().getExpectedVersion());
     verify(modelService, never()).createModel(any());
   }
@@ -566,7 +571,7 @@ class ConfigSyncApplierTest {
     when(definitionRepository.getByName("a")).thenReturn(existing);
     ConfigSyncParser.AgentSpec spec =
         new ConfigSyncParser.AgentSpec(
-            "a", "p", "m", agentProperties(agentConfig(List.of(), List.of(), List.of())));
+            "a", "m", agentProperties(agentConfig(List.of(), List.of(), List.of())));
 
     applier.apply(plan(List.of(), List.of(), List.of(), List.of(), List.of(), List.of(spec), null));
 

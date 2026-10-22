@@ -1,13 +1,16 @@
 package fun.fengwk.kkstudio.platform.catalog.model.service;
 
+import static fun.fengwk.kkstudio.platform.catalog.model.AgentModelTestData.buildConfig;
 import static fun.fengwk.kkstudio.platform.catalog.model.AgentModelTestData.executable;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import fun.fengwk.convention4j.api.page.PageQuery;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import fun.fengwk.kkstudio.platform.catalog.definition.service.AgentDefinitionService;
 import fun.fengwk.kkstudio.platform.catalog.provider.service.AgentProviderService;
@@ -20,39 +23,44 @@ import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelGroupDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelGroupMemberDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderDTO;
 
 import java.util.List;
 
-/** 模型名称在 Provider 内唯一并按复合名称寻址；支持事务原子重命名并同步更新引用 Agent，硬删除后可同名重建。 */
+/** 全局模型名称跨 MODEL/GROUP 唯一，并验证组 CRUD、引用维护与冷却清理。 */
 public class AgentModelServiceTest extends PostgresSpringTestSupport {
 
   @Autowired private AgentProviderService agentProviderService;
   @Autowired private AgentModelService agentModelService;
   @Autowired private AgentDefinitionService agentDefinitionService;
+  @Autowired private JdbcTemplate jdbc;
 
   @Test
-  public void shouldScopeModelNamesToProvider() {
+  public void shouldEnforceGlobalModelNamesAcrossProviders() {
     String suffix = Long.toString(System.nanoTime());
     AgentProviderDTO provider = provider("model-provider-" + suffix);
     AgentProviderDTO otherProvider = provider("model-provider-other-" + suffix);
-    String modelName = "MiniMax-M2.7-" + suffix;
+    String modelName = "shared-model-" + suffix;
 
     AgentModelDTO model = agentModelService.createModel(model(provider.getName(), modelName));
     assertEquals(provider.getName(), model.getProviderName());
+    assertEquals(AgentModelKind.MODEL, model.getKind());
     assertEquals("0", model.getVersion());
     assertThrows(
         AiDuplicateException.class,
         () -> agentModelService.createModel(model(provider.getName(), modelName)));
-
-    AgentModelDTO sameNameOtherProvider =
-        agentModelService.createModel(model(otherProvider.getName(), modelName));
-    assertEquals(otherProvider.getName(), sameNameOtherProvider.getProviderName());
-    assertEquals(modelName, sameNameOtherProvider.getName());
+    // 同一逻辑名称即使换 Provider 也不可重复。
+    assertThrows(
+        AiDuplicateException.class,
+        () -> agentModelService.createModel(model(otherProvider.getName(), modelName)));
 
     assertThrows(
         AiResourceNotFoundException.class,
@@ -64,47 +72,32 @@ public class AgentModelServiceTest extends PostgresSpringTestSupport {
         AiInUseException.class,
         () -> agentProviderService.deleteProvider(provider.getName(), provider.getVersion()));
 
-    AgentModelUpdateDTO update = new AgentModelUpdateDTO();
-    update.setName(modelName);
-    update.setModelId(model.getModelId());
-    update.setDescription("updated");
-    update.setConfig(model.getConfig());
-    update.setExpectedVersion(model.getVersion());
-    AgentModelDTO updated = agentModelService.updateModel(provider.getName(), modelName, update);
+    AgentModelUpdateDTO update = modelUpdate(model, modelName, "updated");
+    AgentModelDTO updated = agentModelService.updateModel(modelName, update);
     assertEquals("updated", updated.getDescription());
     assertEquals("1", updated.getVersion());
     assertTrue(
         agentModelService.pageModels(new PageQuery(1, 100)).getResults().stream()
-            .anyMatch(
-                candidate ->
-                    candidate.getProviderName().equals(provider.getName())
-                        && candidate.getName().equals(modelName)));
+            .anyMatch(candidate -> candidate.getName().equals(modelName)));
 
-    AgentModelUpdateDTO stale = new AgentModelUpdateDTO();
-    stale.setName(modelName);
-    stale.setModelId(model.getModelId());
-    stale.setDescription("stale");
-    stale.setConfig(model.getConfig());
+    AgentModelUpdateDTO stale = modelUpdate(model, modelName, "stale");
     stale.setExpectedVersion(model.getVersion());
     assertThrows(
-        AiVersionConflictException.class,
-        () -> agentModelService.updateModel(provider.getName(), modelName, stale));
+        AiVersionConflictException.class, () -> agentModelService.updateModel(modelName, stale));
 
-    agentModelService.deleteModel(provider.getName(), modelName, updated.getVersion());
-    agentModelService.deleteModel(otherProvider.getName(), modelName, "0");
+    agentModelService.deleteModel(modelName, updated.getVersion());
+    assertThrows(
+        AiResourceNotFoundException.class, () -> agentModelService.deleteModel(modelName, "0"));
     // 硬删除：同名立即可重建，重建后解析到新行。
     AgentModelDTO recreated = agentModelService.createModel(model(provider.getName(), modelName));
     assertEquals("0", recreated.getVersion());
-    agentModelService.deleteModel(provider.getName(), modelName, recreated.getVersion());
-    assertThrows(
-        AiResourceNotFoundException.class,
-        () -> agentModelService.deleteModel(provider.getName(), modelName, "0"));
+    agentModelService.deleteModel(modelName, recreated.getVersion());
     agentProviderService.deleteProvider(provider.getName(), "0");
     agentProviderService.deleteProvider(otherProvider.getName(), "0");
   }
 
   @Test
-  public void shouldRenameModelAndAtomicallyUpdateReferencingAgents() {
+  public void shouldRenameModelAndAtomicallyUpdateAgentsGroupsAndCooldowns() {
     String suffix = Long.toString(System.nanoTime());
     String providerName = "rename-provider-" + suffix;
     provider(providerName);
@@ -115,170 +108,130 @@ public class AgentModelServiceTest extends PostgresSpringTestSupport {
 
     AgentModelDTO origDto = agentModelService.createModel(model(providerName, originalModel));
     agentModelService.createModel(model(providerName, existingModel));
+    AgentModelDTO group =
+        agentModelService.createModel(group("group-" + suffix, originalModel, "default"));
 
     String agentName = "agent-ref-" + suffix;
     AgentDefinitionDTO agentDto =
-        agentDefinitionService.createAgent(agent(providerName + "/" + originalModel, agentName));
-    assertEquals(providerName + "/" + originalModel, agentDto.getModel());
-    assertEquals("0", agentDto.getVersion());
+        agentDefinitionService.createAgent(agent(originalModel, agentName));
+    assertEquals(originalModel, agentDto.getModel());
 
-    // 1. 成功重命名：原名称变为新名称，version 递增，保留 createTime，引用它的 agent_definition 原子同步且 version 递增
-    AgentModelUpdateDTO renameReq = new AgentModelUpdateDTO();
-    renameReq.setName(renamedModel);
-    renameReq.setModelId(origDto.getModelId());
-    renameReq.setDescription("renamed desc");
-    renameReq.setConfig(origDto.getConfig());
-    renameReq.setExpectedVersion(origDto.getVersion());
+    insertCooldown(group.getName(), originalModel, "default", Long.parseLong(group.getVersion()));
 
-    AgentModelDTO renamedDto =
-        agentModelService.updateModel(providerName, originalModel, renameReq);
+    AgentModelUpdateDTO renameReq = modelUpdate(origDto, renamedModel, "renamed desc");
+    AgentModelDTO renamedDto = agentModelService.updateModel(originalModel, renameReq);
     assertEquals(renamedModel, renamedDto.getName());
     assertEquals(providerName, renamedDto.getProviderName());
     assertEquals("1", renamedDto.getVersion());
-    assertEquals("renamed desc", renamedDto.getDescription());
     assertEquals(origDto.getCreateTime(), renamedDto.getCreateTime());
-    assertTrue(renamedDto.getUpdateTime().compareTo(origDto.getUpdateTime()) >= 0);
 
-    // 验证旧名称已不存在，新名称存在
     assertThrows(
         AiResourceNotFoundException.class,
-        () -> agentModelService.updateModel(providerName, originalModel, renameReq));
-    assertTrue(
-        agentModelService.pageModels(new PageQuery(1, 100)).getResults().stream()
-            .noneMatch(
-                m ->
-                    m.getProviderName().equals(providerName) && m.getName().equals(originalModel)));
-    assertTrue(
-        agentModelService.pageModels(new PageQuery(1, 100)).getResults().stream()
-            .anyMatch(
-                m -> m.getProviderName().equals(providerName) && m.getName().equals(renamedModel)));
+        () -> agentModelService.updateModel(originalModel, renameReq));
 
-    // 验证引用的 Agent definition 原子更新到 provider/renamedModel，其 version 递增为 1 且 updateTime 推进
     AgentDefinitionDTO updatedAgent =
         agentDefinitionService.pageAgents(new PageQuery(1, 100)).getResults().stream()
-            .filter(a -> a.getName().equals(agentName))
+            .filter(candidate -> candidate.getName().equals(agentName))
             .findFirst()
             .orElseThrow();
-    assertEquals(providerName + "/" + renamedModel, updatedAgent.getModel());
+    assertEquals(renamedModel, updatedAgent.getModel());
     assertEquals("1", updatedAgent.getVersion());
-    assertTrue(updatedAgent.getUpdateTime().compareTo(agentDto.getUpdateTime()) >= 0);
 
-    // 2. 目标名称冲突：重命名到同 Provider 下已有的 existingModel 触发 409 duplicate
-    AgentModelUpdateDTO collisionReq = new AgentModelUpdateDTO();
-    collisionReq.setName(existingModel);
-    collisionReq.setModelId(renamedDto.getModelId());
-    collisionReq.setConfig(renamedDto.getConfig());
-    collisionReq.setExpectedVersion(renamedDto.getVersion());
+    AgentModelDTO renamedGroup =
+        agentModelService.pageModels(new PageQuery(1, 100)).getResults().stream()
+            .filter(candidate -> candidate.getName().equals(group.getName()))
+            .findFirst()
+            .orElseThrow();
+    assertEquals("1", renamedGroup.getVersion());
+    assertEquals(renamedModel, renamedGroup.getGroup().getMembers().get(0).getModelName());
+    assertEquals(
+        0,
+        jdbc.queryForObject(
+            "select count(*) from agent_model_group_cooldown where group_name = ?",
+            Integer.class,
+            group.getName()));
+
+    AgentModelUpdateDTO collisionReq = modelUpdate(renamedDto, existingModel, null);
     assertThrows(
         AiDuplicateException.class,
-        () -> agentModelService.updateModel(providerName, renamedModel, collisionReq));
-
-    // 验证目标冲突回滚：原模型数据/版本及引用 Agent 保持冲突尝试前的状态不变
-    AgentModelDTO sourceAfterCollision =
+        () -> agentModelService.updateModel(renamedModel, collisionReq));
+    AgentModelDTO unchanged =
         agentModelService.pageModels(new PageQuery(1, 100)).getResults().stream()
-            .filter(
-                m -> m.getProviderName().equals(providerName) && m.getName().equals(renamedModel))
+            .filter(candidate -> candidate.getName().equals(renamedModel))
             .findFirst()
             .orElseThrow();
-    assertEquals("1", sourceAfterCollision.getVersion());
-    assertEquals("renamed desc", sourceAfterCollision.getDescription());
-    assertEquals(origDto.getCreateTime(), sourceAfterCollision.getCreateTime());
+    assertEquals("1", unchanged.getVersion());
+    assertEquals("renamed desc", unchanged.getDescription());
 
-    AgentModelDTO targetAfterCollision =
-        agentModelService.pageModels(new PageQuery(1, 100)).getResults().stream()
-            .filter(
-                m -> m.getProviderName().equals(providerName) && m.getName().equals(existingModel))
-            .findFirst()
-            .orElseThrow();
-    assertEquals("0", targetAfterCollision.getVersion());
-
+    // 组仍引用单 Model 时不可删除；删除组后引用消失。
+    assertThrows(
+        AiInUseException.class,
+        () -> agentModelService.deleteModel(renamedModel, unchanged.getVersion()));
+    agentModelService.deleteModel(renamedGroup.getName(), renamedGroup.getVersion());
     AgentDefinitionDTO agentAfterCollision =
         agentDefinitionService.pageAgents(new PageQuery(1, 100)).getResults().stream()
-            .filter(a -> a.getName().equals(agentName))
+            .filter(candidate -> candidate.getName().equals(agentName))
             .findFirst()
             .orElseThrow();
-    assertEquals(providerName + "/" + renamedModel, agentAfterCollision.getModel());
-    assertEquals(updatedAgent.getVersion(), agentAfterCollision.getVersion());
-    assertEquals(updatedAgent.getUpdateTime(), agentAfterCollision.getUpdateTime());
-
-    // 3. expectedVersion 过期：CAS 检查失败触发版本冲突
-    AgentModelUpdateDTO staleReq = new AgentModelUpdateDTO();
-    staleReq.setName("model-another-" + suffix);
-    staleReq.setModelId(renamedDto.getModelId());
-    staleReq.setConfig(renamedDto.getConfig());
-    staleReq.setExpectedVersion("0");
     assertThrows(
-        AiVersionConflictException.class,
-        () -> agentModelService.updateModel(providerName, renamedModel, staleReq));
-
-    // 4. 非法名称：空白、首尾空格、超出 128 字符被校验拦截
-    AgentModelUpdateDTO blankReq = new AgentModelUpdateDTO();
-    blankReq.setName("   ");
-    blankReq.setModelId(renamedDto.getModelId());
-    blankReq.setConfig(renamedDto.getConfig());
-    blankReq.setExpectedVersion(renamedDto.getVersion());
-    assertThrows(
-        AiValidationException.class,
-        () -> agentModelService.updateModel(providerName, renamedModel, blankReq));
-
-    AgentModelUpdateDTO paddedReq = new AgentModelUpdateDTO();
-    paddedReq.setName(" " + renamedModel + " ");
-    paddedReq.setModelId(renamedDto.getModelId());
-    paddedReq.setConfig(renamedDto.getConfig());
-    paddedReq.setExpectedVersion(renamedDto.getVersion());
-    assertThrows(
-        AiValidationException.class,
-        () -> agentModelService.updateModel(providerName, renamedModel, paddedReq));
-
-    AgentModelUpdateDTO oversizedReq = new AgentModelUpdateDTO();
-    oversizedReq.setName("a".repeat(129));
-    oversizedReq.setModelId(renamedDto.getModelId());
-    oversizedReq.setConfig(renamedDto.getConfig());
-    oversizedReq.setExpectedVersion(renamedDto.getVersion());
-    assertThrows(
-        AiValidationException.class,
-        () -> agentModelService.updateModel(providerName, renamedModel, oversizedReq));
-
-    // 5. 同名更新走正常单行 CAS，不使用 insert/delete，引用它的 Agent 保持不变
-    AgentModelUpdateDTO noOpRenameReq = new AgentModelUpdateDTO();
-    noOpRenameReq.setName(renamedModel);
-    noOpRenameReq.setModelId(renamedDto.getModelId());
-    noOpRenameReq.setDescription("updated again");
-    noOpRenameReq.setConfig(renamedDto.getConfig());
-    noOpRenameReq.setExpectedVersion(renamedDto.getVersion());
-    AgentModelDTO noOpUpdated =
-        agentModelService.updateModel(providerName, renamedModel, noOpRenameReq);
-    assertEquals("2", noOpUpdated.getVersion());
-    assertEquals("updated again", noOpUpdated.getDescription());
-    assertEquals(origDto.getCreateTime(), noOpUpdated.getCreateTime());
-
-    AgentDefinitionDTO agentAfterSameName =
-        agentDefinitionService.pageAgents(new PageQuery(1, 100)).getResults().stream()
-            .filter(a -> a.getName().equals(agentName))
-            .findFirst()
-            .orElseThrow();
-    assertEquals(updatedAgent.getVersion(), agentAfterSameName.getVersion());
-
-    // 6. 支持包含斜杠的 model name 进行重命名
-    String slashModel = "org/model-v1-" + suffix;
-    String slashModelRenamed = "org/model-v2-" + suffix;
-    AgentModelDTO slashDto = agentModelService.createModel(model(providerName, slashModel));
-    AgentModelUpdateDTO slashRenameReq = new AgentModelUpdateDTO();
-    slashRenameReq.setName(slashModelRenamed);
-    slashRenameReq.setModelId(slashDto.getModelId());
-    slashRenameReq.setConfig(slashDto.getConfig());
-    slashRenameReq.setExpectedVersion("0");
-    AgentModelDTO slashRenamedDto =
-        agentModelService.updateModel(providerName, slashModel, slashRenameReq);
-    assertEquals(slashModelRenamed, slashRenamedDto.getName());
-    assertEquals("1", slashRenamedDto.getVersion());
-
-    // 清理
-    agentDefinitionService.deleteAgent(agentName, agentAfterSameName.getVersion());
-    agentModelService.deleteModel(providerName, renamedModel, noOpUpdated.getVersion());
-    agentModelService.deleteModel(providerName, existingModel, "0");
-    agentModelService.deleteModel(providerName, slashModelRenamed, slashRenamedDto.getVersion());
+        AiInUseException.class,
+        () -> agentModelService.deleteModel(renamedModel, unchanged.getVersion()));
+    agentDefinitionService.deleteAgent(agentName, agentAfterCollision.getVersion());
+    agentModelService.deleteModel(renamedModel, unchanged.getVersion());
+    agentModelService.deleteModel(existingModel, "0");
     agentProviderService.deleteProvider(providerName, "0");
+  }
+
+  @Test
+  public void shouldRejectRemovingVariantStillReferencedAndKeepGroupShapeStrict() {
+    String suffix = Long.toString(System.nanoTime());
+    String providerName = "variant-provider-" + suffix;
+    provider(providerName);
+
+    AgentModelCreateDTO create = model(providerName, "variant-model-" + suffix);
+    create.setConfig(
+        buildConfig(
+            32768, 4096, true, false, "standard", "v1", List.of("default", "fast"), "default"));
+    AgentModelDTO model = agentModelService.createModel(create);
+
+    AgentModelDTO group =
+        agentModelService.createModel(group("variant-group-" + suffix, model.getName(), "fast"));
+    assertEquals(AgentModelKind.GROUP, group.getKind());
+    assertNull(group.getProviderName());
+    assertNull(group.getModelId());
+    assertNull(group.getConfig().getPricing());
+    assertEquals(32768, group.getConfig().getLimit().getContext());
+    assertEquals(4096, group.getConfig().getLimit().getOutput());
+    assertEquals(List.of(), group.getConfig().getVariants());
+    assertNull(group.getConfig().getDefaultVariant());
+    assertEquals(1, group.getGroup().getMembers().size());
+
+    AgentModelUpdateDTO removeVariant = modelUpdate(model, model.getName(), null);
+    removeVariant.setConfig(
+        buildConfig(32768, 4096, true, false, "standard", "v1", List.of("default"), "default"));
+    assertThrows(
+        AiInUseException.class,
+        () -> agentModelService.updateModel(model.getName(), removeVariant));
+
+    AgentModelCreateDTO invalidGroup = group("invalid-group-" + suffix, model.getName(), "fast");
+    invalidGroup.setProviderName(providerName);
+    assertThrows(AiValidationException.class, () -> agentModelService.createModel(invalidGroup));
+
+    agentModelService.deleteModel(group.getName(), group.getVersion());
+    agentModelService.deleteModel(model.getName(), model.getVersion());
+    agentProviderService.deleteProvider(providerName, "0");
+  }
+
+  private void insertCooldown(
+      String groupName, String memberModelName, String variant, long groupVersion) {
+    jdbc.update(
+        "insert into agent_model_group_cooldown"
+            + " (group_name, member_model_name, member_variant, group_version, cooldown_until)"
+            + " values (?, ?, ?, ?, current_timestamp + interval '1 hour')",
+        groupName,
+        memberModelName,
+        variant,
+        groupVersion);
   }
 
   private AgentDefinitionCreateDTO agent(String model, String name) {
@@ -302,9 +255,38 @@ public class AgentModelServiceTest extends PostgresSpringTestSupport {
 
   private AgentModelCreateDTO model(String providerName, String name) {
     AgentModelCreateDTO dto = new AgentModelCreateDTO();
+    dto.setKind(AgentModelKind.MODEL);
     dto.setProviderName(providerName);
     dto.setName(name);
     executable(dto);
+    return dto;
+  }
+
+  private AgentModelCreateDTO group(String name, String modelName, String variant) {
+    AgentModelGroupMemberDTO member = new AgentModelGroupMemberDTO();
+    member.setModelName(modelName);
+    member.setVariant(variant);
+    AgentModelGroupDTO group = new AgentModelGroupDTO();
+    group.setMembers(List.of(member));
+    group.setFallbackStatusCodes(List.of(429));
+    group.setCooldownSeconds(30);
+    AgentModelCreateDTO dto = new AgentModelCreateDTO();
+    dto.setName(name);
+    dto.setKind(AgentModelKind.GROUP);
+    dto.setGroup(group);
+    return dto;
+  }
+
+  private AgentModelUpdateDTO modelUpdate(AgentModelDTO current, String name, String description) {
+    AgentModelUpdateDTO dto = new AgentModelUpdateDTO();
+    dto.setKind(AgentModelKind.MODEL);
+    dto.setName(name);
+    dto.setProviderName(current.getProviderName());
+    dto.setModelId(current.getModelId());
+    dto.setDescription(description);
+    AgentModelConfigDTO config = current.getConfig();
+    dto.setConfig(config);
+    dto.setExpectedVersion(current.getVersion());
     return dto;
   }
 }

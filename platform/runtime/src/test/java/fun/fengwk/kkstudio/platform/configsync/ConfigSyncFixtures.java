@@ -17,6 +17,8 @@ import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefini
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpDiscoveryStatus;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpServer;
 import fun.fengwk.kkstudio.platform.catalog.mcp.service.model.McpTool;
+import fun.fengwk.kkstudio.platform.catalog.model.repo.AgentModelRepository;
+import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelGroupConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser;
 import fun.fengwk.kkstudio.platform.catalog.model.service.impl.AgentModelMutationFactory;
 import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
@@ -50,6 +52,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelAbilitiesDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelInputModality;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelLimitDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelPricingDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelRateSetDTO;
@@ -82,6 +85,8 @@ final class ConfigSyncFixtures {
       new AgentDefinitionConfigCodec(MAPPER);
   static final AgentModelRuntimeConfigParser MODEL_CONFIG_PARSER =
       new AgentModelRuntimeConfigParser(MAPPER);
+  static final AgentModelGroupConfigCodec GROUP_CONFIG_CODEC =
+      new AgentModelGroupConfigCodec(MAPPER);
   static final AgentProviderConfigurationCodec PROVIDER_CONFIG_CODEC =
       new AgentProviderConfigurationCodec(MAPPER);
   private static final AgentEditableSupport EDITABLE_SUPPORT = new AgentEditableSupport(MAPPER);
@@ -89,7 +94,11 @@ final class ConfigSyncFixtures {
   static final AgentProviderMutationFactory PROVIDER_MUTATION_FACTORY =
       new AgentProviderMutationFactory(EDITABLE_SUPPORT, PROVIDER_CONFIG_CODEC);
   static final AgentModelMutationFactory MODEL_MUTATION_FACTORY =
-      new AgentModelMutationFactory(EDITABLE_SUPPORT, MODEL_CONFIG_PARSER);
+      new AgentModelMutationFactory(
+          EDITABLE_SUPPORT,
+          MODEL_CONFIG_PARSER,
+          GROUP_CONFIG_CODEC,
+          mock(AgentModelRepository.class));
   static final AgentDefinitionMutationFactory AGENT_MUTATION_FACTORY =
       new AgentDefinitionMutationFactory(EDITABLE_SUPPORT, AGENT_CONFIG_CODEC);
 
@@ -195,6 +204,7 @@ final class ConfigSyncFixtures {
 
   static AgentModel model(String providerName, String name, AgentModelConfigDTO config) {
     AgentModel model = new AgentModel();
+    model.setKind(AgentModelKind.MODEL);
     model.setProviderName(providerName);
     model.setName(name);
     model.setModelId("gpt-4");
@@ -203,11 +213,9 @@ final class ConfigSyncFixtures {
     return model;
   }
 
-  static AgentDefinition agent(
-      String name, String providerName, String modelName, AgentDefinitionConfigDTO config) {
+  static AgentDefinition agent(String name, String modelName, AgentDefinitionConfigDTO config) {
     AgentDefinition agent = new AgentDefinition();
     agent.setName(name);
-    agent.setModelProviderName(providerName);
     agent.setModelName(modelName);
     agent.setConfigJson(AGENT_CONFIG_CODEC.encode(config));
     agent.setVersion(0L);
@@ -470,7 +478,7 @@ final class ConfigSyncFixtures {
     }
   }
 
-  /** 通用「Provider p + Model p/m」文档基座；具体测试再追加 mcpServers/agents 等段落。 */
+  /** 通用「Provider p + Model m」文档基座；具体测试再追加 mcpServers/agents 等段落。 */
   static String providerAndModelYaml() {
     return "providers:\n  - name: p\n    providerType: openai\n" + resourceYaml("model-entry.yaml");
   }

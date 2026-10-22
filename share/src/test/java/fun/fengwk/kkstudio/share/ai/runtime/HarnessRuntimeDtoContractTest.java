@@ -274,7 +274,6 @@ class HarnessRuntimeDtoContractTest {
     node.setName("root-thread");
     node.setAgentName("default-assistant");
     HarnessModelSelectionDTO model = new HarnessModelSelectionDTO();
-    model.setProviderName("openai");
     model.setModelName("gpt-5");
     model.setVariant("default");
     node.setModel(model);
