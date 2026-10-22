@@ -190,7 +190,7 @@ describe('PaneTarget durable-local FSM', () => {
           threadId: 't1',
           rootSettings: {
             agentName: 'assistant',
-            model: { providerName: 'p', modelName: 'm', variant: 'v' },
+            model: { modelName: 'm', variant: 'v' },
             environmentName: null,
             goal: null,
           },
@@ -204,7 +204,7 @@ describe('PaneTarget durable-local FSM', () => {
       },
       branchDraft: {
         agentName: 'assistant',
-        model: { providerName: 'p', modelName: 'm', variant: 'v' },
+        model: { modelName: 'm', variant: 'v' },
         environmentName: null,
         yoloEnabled: false,
       },
@@ -321,7 +321,7 @@ describe('PaneTarget durable-local FSM', () => {
           threadId: 't1',
           rootSettings: {
             agentName: 'assistant',
-            model: { providerName: 'p', modelName: 'm', variant: 'v' },
+            model: { modelName: 'm', variant: 'v' },
             environmentName: null,
             goal: null,
           },
@@ -335,7 +335,7 @@ describe('PaneTarget durable-local FSM', () => {
       },
       branchDraft: {
         agentName: 'assistant',
-        model: { providerName: 'p', modelName: 'm', variant: 'v' },
+        model: { modelName: 'm', variant: 'v' },
         environmentName: null,
         yoloEnabled: false,
       },
@@ -424,7 +424,7 @@ describe('PaneTarget durable-local FSM', () => {
       {
         type: 'SET_MODEL',
         idempotencyKey: 'c1',
-        model: { providerName: 'p', modelName: 'm', variant: 'v' },
+        model: { modelName: 'm', variant: 'v' },
       },
       {
         type: 'USER_MESSAGE',
@@ -661,7 +661,7 @@ describe('PaneTarget durable-local FSM', () => {
           threadId: 't1',
           rootSettings: {
             agentName: 'assistant',
-            model: { providerName: 'p', modelName: 'm', variant: 'v' },
+            model: { modelName: 'm', variant: 'v' },
             environmentName: null,
             goal: null,
           },
@@ -675,7 +675,7 @@ describe('PaneTarget durable-local FSM', () => {
       },
       branchDraft: {
         agentName: 'assistant',
-        model: { providerName: 'p', modelName: 'm', variant: 'v' },
+        model: { modelName: 'm', variant: 'v' },
         environmentName: null,
         yoloEnabled: false,
       },
@@ -866,7 +866,7 @@ describe('PaneTarget durable-local FSM', () => {
         type: 'SET_ENVIRONMENT',
         idempotencyKey: 'cmd-env-6',
         environmentName: null,
-        model: { providerName: 'p', modelName: 'm', variant: 'v' },
+        model: { modelName: 'm', variant: 'v' },
       },
       {
         type: 'SET_AGENT',
@@ -912,7 +912,7 @@ describe('PaneTarget durable-local FSM', () => {
       unknownOutcome: false,
       targetDraft: {
         agentName: 'assistant',
-        model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+        model: { modelName: 'MiniMax', variant: 'default' },
         environmentName: null,
         yoloEnabled: false,
       },

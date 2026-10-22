@@ -39,7 +39,7 @@ export function ThreadTreeRows({ rows, currentThreadId }: {
                   {t('ai.runtime.agentTree.counts', { turns: node.turnCount, tools: node.toolCallCount })}
                 </span>
                 <span className="thread-tree-detail">
-                  {formatModelLabel(node.model.providerName, node.model.modelName, node.model.variant)}
+                  {formatModelLabel(node.model.modelName, node.model.variant)}
                 </span>
               </span>
             </ThreadLink>

@@ -6,12 +6,14 @@ import type {
 import type { SkillRefDTO } from '@/shared/api/contracts/ai-catalog'
 
 /**
- * 冻结进 branch settings 快照的不可变 provider/model/variant 选择。
+ * 冻结进 branch settings 快照的统一逻辑模型选择。
+ * MODEL 可显式指定 variant；GROUP 只引用逻辑名，成员 Variant 由组配置决定。
  */
 export interface HarnessModelSelectionDTO {
-  providerName: string
+  /** 全局唯一逻辑模型名（单 Model 或 Model Group）。 */
   modelName: string
-  variant: string
+  /** 单 Model 的可选 Variant；组必须为空。 */
+  variant?: string | null
 }
 
 /**

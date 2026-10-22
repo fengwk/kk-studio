@@ -21,18 +21,10 @@ const baseConfig: AgentModelConfigDTO = {
   limit: { context: 128000, output: 8192 },
   abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
   pricing: {
-    currency: 'USD',
-    pricingTier: 'default',
-    serviceTier: 'default',
-    serviceTierMultiplier: 1,
-    version: 'v1',
-    inputPerMillionTokens: 0,
-    outputPerMillionTokens: 0,
-    cacheReadPerMillionTokens: 0,
-    cacheWritePerMillionTokens: 0,
-    cacheWriteLongPerMillionTokens: 0,
-    reasoningPerMillionTokens: 0,
-  },
+      base: { input: '0', output: '0', cacheRead: '0', cacheWrite: '0', cacheWriteByTtl: {}, reasoning: null },
+      overrides: [],
+      multipliers: [],
+    },
   defaultVariant: 'default',
   variants: [{ id: 'default' }, { id: 'fast' }],
 }
@@ -40,6 +32,7 @@ const baseConfig: AgentModelConfigDTO = {
 function modelWithVariants(): AgentModelView {
   return {
     providerName: 'minimax',
+    kind: 'MODEL',
     name: 'MiniMax',
     modelId: 'minimax-variants',
     description: null,
@@ -78,7 +71,7 @@ function agentDefinition(name: string, description: string | null): AgentDefinit
     description,
     systemPrompt: null,
     type: 'USER',
-    model: 'minimax/MiniMax',
+    model: 'MiniMax',
     variant: null,
     config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
     version: '1',
@@ -314,7 +307,7 @@ describe('AgentForm current contracts', () => {
       name: 'assistant',
       description: 'my description',
       systemPrompt: 'my prompt',
-      model: 'minimax/MiniMax',
+      model: 'MiniMax',
       variant: 'fast',
       inheritParentEnvironment: true,
       tools: ['bash'],
@@ -330,7 +323,7 @@ describe('AgentForm current contracts', () => {
       name: 'assistant',
       description: 'my description',
       systemPrompt: 'my prompt',
-      model: 'minimax/MiniMax',
+      model: 'MiniMax',
       variant: 'fast',
       config: {
         inheritParentEnvironment: true,
@@ -387,13 +380,13 @@ describe('AgentForm current contracts', () => {
     ).not.toBeInTheDocument()
 
     // 3. 用户可选定具体 Model 并更新草稿
-    await chooseSelectOption(user, 'Default Model', 'minimax/MiniMax')
-    expect(currentDraft.model).toBe('minimax/MiniMax')
-    expect(modelTrigger).toHaveTextContent('minimax/MiniMax')
+    await chooseSelectOption(user, 'Default Model', 'MiniMax')
+    expect(currentDraft.model).toBe('MiniMax')
+    expect(modelTrigger).toHaveTextContent('MiniMax')
 
     // 4. 保存为 BUILTIN 更新 payload：model 包含所选值，且 payload 不含只读 type
     const payload = toEditableAgentUpdate(currentDraft, true)
-    expect(payload.model).toBe('minimax/MiniMax')
+    expect(payload.model).toBe('MiniMax')
     expect(payload).not.toHaveProperty('type')
   })
 
@@ -430,6 +423,6 @@ describe('AgentForm current contracts', () => {
     expect(fillButton).toBeInTheDocument()
 
     await user.click(fillButton)
-    expect(currentDraft.model).toBe('minimax/MiniMax')
+    expect(currentDraft.model).toBe('MiniMax')
   })
 })

@@ -27,7 +27,7 @@ function node(threadId: string, parentThreadId: string | null) {
   return {
     threadId, parentThreadId, name: 'main', agentName: 'Explorer',
     updateTime: 1774958400.125,
-    model: { providerName: 'p', modelName: 'm', variant: 'default' },
+    model: { modelName: 'm', variant: 'default' },
     processing: false, status: 'IDLE', turnCount: 3, toolCallCount: 5, outcome: 'COMPLETED',
   }
 }

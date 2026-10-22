@@ -36,7 +36,7 @@ function rootThread(overrides: Record<string, unknown> = {}) {
     executionControl: 'RUNNABLE',
     branchSettings: {
       agentName: 'assistant',
-      model: { providerName: 'minimax', modelName: 'VeryLongModelName', variant: 'default' },
+      model: { modelName: 'VeryLongModelName', variant: 'default' },
       environmentName: null,
     },
     createTime: '2026-10-01T00:00:00Z',
@@ -79,7 +79,7 @@ function treeNodes() {
       parentThreadId: null,
       name: '根 Thread',
       agentName: 'assistant',
-      model: { providerName: 'minimax', modelName: 'VeryLongModelName', variant: 'default' },
+      model: { modelName: 'VeryLongModelName', variant: 'default' },
       status: 'IDLE',
       processing: false,
       turnCount: 1,
@@ -92,7 +92,7 @@ function treeNodes() {
       parentThreadId: ROOT_ID,
       name: 'worker child',
       agentName: 'coder',
-      model: { providerName: 'minimax', modelName: 'VeryLongModelName', variant: 'default' },
+      model: { modelName: 'VeryLongModelName', variant: 'default' },
       status: 'MODEL_STREAM',
       processing: true,
       turnCount: 2,
@@ -484,12 +484,12 @@ test('recognizes SETTINGS once and uses the same model label in the footer', asy
   // 安全点立即展示变更；后续相同回合快照不重复，底栏文字与提示同源。
   const rootSettings = {
     agentName: 'assistant',
-    model: { providerName: 'minimax', modelName: 'VeryLongModelName', variant: 'default' },
+    model: { modelName: 'VeryLongModelName', variant: 'default' },
     environmentName: null,
   }
   const changedSettings = {
     agentName: 'researcher',
-    model: { providerName: 'xai', modelName: 'grok-4.7', variant: 'xhigh' },
+    model: { modelName: 'grok-4.7', variant: 'xhigh' },
     environmentName: null,
     goal: null,
   }

@@ -107,7 +107,7 @@ function createThreadSnapshot() {
         executionControl: 'RUNNABLE',
         branchSettings: {
           agentName: 'architect',
-          model: { providerName: 'minimax', modelName: 'MiniMax-M2.7', variant: 'default' },
+          model: { modelName: 'MiniMax-M2.7', variant: 'default' },
           environmentName: null,
           goal: null,
         },
@@ -124,7 +124,7 @@ function createThreadSnapshot() {
           payloadJson: JSON.stringify({
             settings: {
               agentName: 'architect',
-              model: { providerName: 'minimax', modelName: 'MiniMax-M2.7', variant: 'default' },
+              model: { modelName: 'MiniMax-M2.7', variant: 'default' },
               environmentName: null,
               goal: null,
             },

@@ -7,21 +7,23 @@ import {
 } from 'react'
 import { Check, ChevronDown, ChevronLeft } from 'lucide-react'
 import { formatModelLabel } from '@/features/ai/catalog'
+import type { AgentModelKind } from '@/shared/api/contracts/ai-catalog'
 import { useI18n } from '@/shared/i18n'
 
 export interface ThreadComposerModelSelection {
-  providerName: string
+  /** 全局唯一逻辑模型名（单 Model 或组）。 */
   modelName: string
-  variant: string
+  /** 单 Model 的可选 Variant；组为空。 */
+  variant?: string | null
 }
 
 export interface ThreadComposerModelOption {
-  providerName: string
   name: string
-  config: {
-    defaultVariant: string
-    variants: ReadonlyArray<{ id: string }>
-  }
+  kind: AgentModelKind
+  config?: {
+    defaultVariant?: string
+    variants?: ReadonlyArray<{ id: string }>
+  } | null
 }
 
 export interface ThreadComposerEnvironmentOption {
@@ -58,8 +60,8 @@ const NO_ENVIRONMENT_ITEM_ID = 'environment:none'
 /**
  * Composer 底栏的轻量 anchored menus。
  *
- * Permission 只有 Default/YOLO；Model 先选 provider/model，存在多个 Variant
- * 时再进入第二级列表。菜单使用 listbox/option 键盘语义，不创建 Modal/backdrop。
+ * Permission 只有 Default/YOLO；Model 菜单直接使用全局唯一逻辑名。单 Model 存在多个
+ * Variant 时进入第二级列表；组选择即完成，不提供组级 Variant 或伪造默认值。
  */
 export function ThreadComposerControls({
   settings,
@@ -86,14 +88,12 @@ export function ThreadComposerControls({
     }
     return Array.from(new Set(names))
   }, [settings.environmentName, settings.environments])
-  const models = useMemo(
-    () => settings.models.filter((model) => variantIds(model).length > 0),
-    [settings.models],
+  const models = settings.models
+  const usableModels = useMemo(
+    () => models.filter((model) => model.kind === 'GROUP' || variantIds(model).length > 0),
+    [models],
   )
-  const currentModel = models.find((model) =>
-    model.providerName === settings.model.providerName
-    && model.name === settings.model.modelName,
-  )
+  const currentModel = models.find((model) => model.name === settings.model.modelName)
   const variantTarget = variantModel ?? currentModel ?? null
   const items = useMemo<SelectableItem[]>(() => {
     if (menu === 'permission') {
@@ -110,19 +110,18 @@ export function ThreadComposerControls({
     }
     if (menu === 'model') {
       const needle = query.trim().toLowerCase()
-      return models.flatMap((model) => {
-        const label = formatModelLabel(model.providerName, model.name)
-        if (needle && !label.toLowerCase().includes(needle)) {
+      return usableModels.flatMap((model) => {
+        if (needle && !model.name.toLowerCase().includes(needle)) {
           return []
         }
-        return [{ id: modelId(model), label }]
+        return [{ id: model.name, label: model.name }]
       })
     }
-    if (menu === 'variant' && variantTarget != null) {
+    if (menu === 'variant' && variantTarget != null && variantTarget.kind === 'MODEL') {
       return variantIds(variantTarget).map((variant) => ({ id: variant, label: variant }))
     }
     return []
-  }, [environmentOptions, menu, models, query, t, variantTarget])
+  }, [environmentOptions, menu, usableModels, query, t, variantTarget])
 
   useEffect(() => {
     if (menu == null) {
@@ -139,16 +138,14 @@ export function ThreadComposerControls({
           : environmentItemId(settings.environmentName),
       )
     } else if (menu === 'model') {
-      const currentId = currentModel ? modelId(currentModel) : ''
-      setActiveId(currentId)
+      setActiveId(currentModel?.name ?? '')
     } else {
       const variants = variantTarget == null ? [] : variantIds(variantTarget)
       const selected =
-        variantTarget?.providerName === settings.model.providerName
-        && variantTarget.name === settings.model.modelName
-        && variants.includes(settings.model.variant)
-          ? settings.model.variant
-          : variantTarget?.config.defaultVariant
+        variantTarget?.name === settings.model.modelName
+          && variants.includes(settings.model.variant ?? '')
+          ? settings.model.variant ?? ''
+          : variantTarget?.config?.defaultVariant
       setActiveId(selected && variants.includes(selected) ? selected : (variants[0] ?? ''))
     }
     window.setTimeout(() => {
@@ -164,7 +161,6 @@ export function ThreadComposerControls({
     models,
     settings.environmentName,
     settings.model.modelName,
-    settings.model.providerName,
     settings.model.variant,
     settings.yoloEnabled,
     variantTarget,
@@ -220,17 +216,19 @@ export function ThreadComposerControls({
       return
     }
     if (menu === 'model') {
-      const selected = models.find((model) => modelId(model) === id)
+      const selected = models.find((model) => model.name === id)
       if (selected == null) {
         return
       }
+      if (selected.kind === 'GROUP') {
+        // 组选择即完成；成员 Variant 由组配置决定，绝不进入第二级或伪造 default。
+        settings.onModelChange({ modelName: selected.name, variant: null })
+        onMenuChange(null, true)
+        return
+      }
       const variants = variantIds(selected)
-      if (variants.length === 1) {
-        settings.onModelChange({
-          providerName: selected.providerName,
-          modelName: selected.name,
-          variant: variants[0]!,
-        })
+      if (variants.length <= 1) {
+        settings.onModelChange({ modelName: selected.name, variant: variants[0] ?? null })
         onMenuChange(null, true)
         return
       }
@@ -239,11 +237,7 @@ export function ThreadComposerControls({
       return
     }
     if (menu === 'variant' && variantTarget != null && variantIds(variantTarget).includes(id)) {
-      settings.onModelChange({
-        providerName: variantTarget.providerName,
-        modelName: variantTarget.name,
-        variant: id,
-      })
+      settings.onModelChange({ modelName: variantTarget.name, variant: id })
       onMenuChange(null, true)
     }
   }
@@ -297,14 +291,9 @@ export function ThreadComposerControls({
     ? t('ai.runtime.composer.permissionYolo')
     : t('ai.runtime.composer.permissionDefault')
   const environmentLabel = settings.environmentName ?? t('ai.runtime.composer.environmentNone')
-  const modelLabel =
-    settings.model.providerName && settings.model.modelName
-      ? formatModelLabel(
-        settings.model.providerName,
-        settings.model.modelName,
-        settings.model.variant,
-      )
-      : t('ai.runtime.composer.model')
+  const modelLabel = settings.model.modelName
+    ? formatModelLabel(settings.model.modelName, settings.model.variant)
+    : t('ai.runtime.composer.model')
   const settingsStatus = settings.status ?? null
 
   return (
@@ -353,7 +342,7 @@ export function ThreadComposerControls({
           aria-label={t('ai.runtime.composer.modelVariant')}
           aria-haspopup="listbox"
           aria-expanded={menu === 'model' || menu === 'variant'}
-          disabled={disabled || models.length === 0}
+          disabled={disabled || usableModels.length === 0}
           onClick={() => onMenuChange(menu === 'model' || menu === 'variant' ? null : 'model')}
         >
           <span>{modelLabel}</span>
@@ -384,7 +373,7 @@ export function ThreadComposerControls({
               <ChevronLeft aria-hidden="true" />
               {variantTarget == null
                 ? t('ai.runtime.composer.model')
-                : formatModelLabel(variantTarget.providerName, variantTarget.name)}
+                : variantTarget.name}
             </button>
           ) : null}
           {menu === 'model' ? (
@@ -426,10 +415,9 @@ export function ThreadComposerControls({
                         && item.id === environmentItemId(settings.environmentName)
                       )
                     : menu === 'model'
-                      ? item.id === modelIdOfSelection(settings.model)
+                      ? item.id === settings.model.modelName
                       : (
-                          variantTarget?.providerName === settings.model.providerName
-                          && variantTarget.name === settings.model.modelName
+                          variantTarget?.name === settings.model.modelName
                           && item.id === settings.model.variant
                         )
               return (
@@ -458,17 +446,12 @@ export function ThreadComposerControls({
 }
 
 function variantIds(model: ThreadComposerModelOption): string[] {
+  if (model.kind !== 'MODEL') {
+    return []
+  }
   return Array.from(
-    new Set(model.config.variants.map((variant) => variant.id.trim()).filter(Boolean)),
+    new Set((model.config?.variants ?? []).map((variant) => variant.id.trim()).filter(Boolean)),
   )
-}
-
-function modelId(model: ThreadComposerModelOption): string {
-  return `${model.providerName}/${model.name}`
-}
-
-function modelIdOfSelection(model: ThreadComposerModelSelection): string {
-  return `${model.providerName}/${model.modelName}`
 }
 
 function environmentItemId(name: string): string {

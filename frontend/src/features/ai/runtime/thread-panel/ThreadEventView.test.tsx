@@ -92,7 +92,7 @@ describe('ThreadEventView', () => {
         debug={{
           kind: 'NEXT_REQUEST_PREVIEW',
           generatedAt: '2026-09-21T00:00:00.000Z',
-          model: { providerName: 'minimax', modelName: 'MiniMax-M2.7', variant: 'default' },
+          model: { modelName: 'MiniMax-M2.7', variant: 'default' },
           environmentName: null,
           systemInstruction: 'line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nline10\nline11',
           tools: [],
@@ -328,7 +328,7 @@ describe('ThreadEventView', () => {
       return {
         kind: 'NEXT_REQUEST_PREVIEW',
         generatedAt: '2026-09-21T00:00:00.000Z',
-        model: { providerName: 'minimax', modelName: 'MiniMax-M2.7', variant: 'default' },
+        model: { modelName: 'MiniMax-M2.7', variant: 'default' },
         environmentName: 'dev-box',
         systemInstruction: 'You are an expert assistant.',
         tools: [

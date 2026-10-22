@@ -19,17 +19,9 @@ function modelConfig(): AgentModelConfigDTO {
     limit: { context: 128000, output: 8192 },
     abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
     pricing: {
-      currency: 'USD',
-      pricingTier: 'default',
-      serviceTier: 'default',
-      serviceTierMultiplier: 1,
-      version: 'v1',
-      inputPerMillionTokens: 0,
-      outputPerMillionTokens: 0,
-      cacheReadPerMillionTokens: 0,
-      cacheWritePerMillionTokens: 0,
-      cacheWriteLongPerMillionTokens: 0,
-      reasoningPerMillionTokens: 0,
+      base: { input: '0', output: '0', cacheRead: '0', cacheWrite: '0', cacheWriteByTtl: {}, reasoning: null },
+      overrides: [],
+      multipliers: [],
     },
     defaultVariant: 'default',
     variants: [{ id: 'default' }],
@@ -55,6 +47,7 @@ function provider(_id: string, name: string): AgentProviderDTO {
 function model(id: string, providerName: string): AgentModelDTO {
   return {
     providerName,
+    kind: 'MODEL',
     name: id,
     modelId: id.toLowerCase(),
     description: null,
@@ -104,20 +97,20 @@ describe('ai-resource-editor-open-plans', () => {
   it('returns null when editModelEditorPlan cannot find the model', () => {
     const providers = [provider('p1', 'minimax')]
     const models = [model('MiniMax', 'minimax')]
-    expect(editModelEditorPlan(models, 'missing', 'missing')).toBeNull()
+    expect(editModelEditorPlan(models, 'missing')).toBeNull()
     expect(editProviderEditorPlan(providers, 'missing' as never)).toBeNull()
-    expect(editAgentEditorPlan([agent('a1', 'minimax/MiniMax')], models, 'missing' as never)).toBeNull()
+    expect(editAgentEditorPlan([agent('a1', 'MiniMax')], models, 'missing' as never)).toBeNull()
   })
 
   it('builds an edit model plan when the model exists', () => {
     const models = [model('MiniMax', 'minimax')]
-    const plan = editModelEditorPlan(models, 'minimax', 'MiniMax')
+    const plan = editModelEditorPlan(models, 'MiniMax')
     expect(plan).not.toBeNull()
     if (!plan) return
     expect(plan.kind).toBe('model')
     if (plan.kind !== 'model') return
     expect(plan.modelDraft.name).toBe('MiniMax')
-    expect(plan.modal).toMatchObject({ mode: 'edit', providerName: 'minimax', name: 'MiniMax', expectedVersion: '1' })
+    expect(plan.modal).toMatchObject({ mode: 'edit', resourceKind: 'MODEL', name: 'MiniMax', expectedVersion: '1' })
   })
 
   it('seeds a new agent plan with the first model', () => {
@@ -125,7 +118,7 @@ describe('ai-resource-editor-open-plans', () => {
     const plan = createAgentEditorPlan(models)
     expect(plan.kind).toBe('agent')
     if (plan.kind !== 'agent') return
-    expect(plan.agentDraft.model).toBe('minimax/MiniMax')
+    expect(plan.agentDraft.model).toBe('MiniMax')
   })
 
   it('builds an empty agent plan when no model or provider exists', () => {
@@ -137,7 +130,7 @@ describe('ai-resource-editor-open-plans', () => {
 
   it('builds edit plan when the agent exists', () => {
     const models = [model('MiniMax', 'minimax')]
-    const agents = [agent('a1', 'minimax/MiniMax')]
+    const agents = [agent('a1', 'MiniMax')]
     const plan = editAgentEditorPlan(agents, models, 'a1')
     expect(plan).not.toBeNull()
     if (!plan) return
@@ -148,7 +141,7 @@ describe('ai-resource-editor-open-plans', () => {
   it('carries BUILTIN identity and an unconfigured model into the edit plan without seeding a fallback', () => {
     const models = [model('MiniMax', 'minimax')]
     const builtin: AgentDefinitionDTO = {
-      ...agent('summarizer', 'minimax/MiniMax'),
+      ...agent('summarizer', 'MiniMax'),
       type: 'BUILTIN',
       model: null,
     }
@@ -162,15 +155,15 @@ describe('ai-resource-editor-open-plans', () => {
   })
 
   it('keeps an Agent edit plan identity when its Model is deleted or off-page', () => {
-    const agents = [agent('a1', 'deleted/Original-Model')]
+    const agents = [agent('a1', 'Deleted-Model')]
     const plan = editAgentEditorPlan(agents, [model('Unrelated', 'other-provider')], 'a1')
 
     expect(plan).not.toBeNull()
     if (!plan) return
-    expect(plan.agentDraft.model).toBe('deleted/Original-Model')
+    expect(plan.agentDraft.model).toBe('Deleted-Model')
     expect(plan.modal).toMatchObject({
       mode: 'edit',
-      model: 'deleted/Original-Model',
+      model: 'Deleted-Model',
     })
   })
 

@@ -66,7 +66,7 @@ export function Harness() {
             items={selectorDates.map(({ id, value }) => threadSelectionItem({
               threadId: id, name: id, parentThreadId: null, createdAt: value,
               updatedAt: value, status: 'IDLE', processing: false,
-              model: { providerName: 'offline', modelName: 'offline', variant: 'default' },
+              model: { modelName: 'offline', variant: 'default' },
               headMessagePreview: null,
             }))}
             onSelect={() => {}}

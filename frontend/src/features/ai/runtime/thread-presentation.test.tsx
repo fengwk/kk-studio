@@ -13,22 +13,21 @@ const thread: HarnessThreadDTO = {
   nextCommandSequence: '1', version: '1', status: 'IDLE', processing: false,
   executionControl: 'RUNNABLE', createTime: null, updateTime: null,
   branchSettings: {
-    agentName: 'researcher', model: { providerName: 'provider', modelName: 'model', variant: 'deep' },
+    agentName: 'researcher', model: { modelName: 'model', variant: 'deep' },
     environmentName: null, goal: null,
   },
 }
 const model: AgentModelDTO = {
-  providerName: 'provider', name: 'model', modelId: 'actual-model', description: null,
+  providerName: 'provider', kind: 'MODEL', name: 'model', modelId: 'actual-model', description: null,
   version: '1', createTime: null, updateTime: null,
   config: {
     limit: { context: 10000, output: 1000 },
     abilities: { tools: true, reasoning: true, inputModalities: ['TEXT'] },
     defaultVariant: 'deep', variants: [{ id: 'deep', reasoningEffort: 'high' }],
     pricing: {
-      currency: 'USD', pricingTier: 'default', serviceTier: 'default', serviceTierMultiplier: 1,
-      version: '1', inputPerMillionTokens: 1, outputPerMillionTokens: 1,
-      cacheReadPerMillionTokens: 1, cacheWritePerMillionTokens: 1,
-      cacheWriteLongPerMillionTokens: 1, reasoningPerMillionTokens: 1,
+      base: { input: '1', output: '1', cacheRead: '1', cacheWrite: '1', cacheWriteByTtl: {}, reasoning: null },
+      overrides: [],
+      multipliers: [],
     },
   },
 }
@@ -62,7 +61,7 @@ describe('visible thread presentation', () => {
         ...thread,
         branchSettings: {
           ...thread.branchSettings,
-          model: { providerName: 'provider', modelName: 'model', variant: '  ' },
+          model: { modelName: 'model', variant: '  ' },
         },
       },
     })).toBe('researcher · provider/model')

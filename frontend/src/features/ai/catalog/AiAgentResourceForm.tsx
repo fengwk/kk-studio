@@ -15,7 +15,7 @@ import {
 } from '@/features/ai/catalog/agent-capability-candidates'
 import type { AgentDraft } from '@/features/ai/catalog/ai-console-types'
 import { applyAgentModelSelection, variantOptionsFromModel } from '@/features/ai/catalog/ai-draft-normalizers'
-import { modelRef, type AgentModelView } from '@/features/ai/catalog/AgentModelView'
+import type { AgentModelView } from '@/features/ai/catalog/AgentModelView'
 import { emptyAgentDraft } from '@/features/ai/catalog/ai-resource-draft-codecs'
 import type { ResourceFieldKey } from '@/features/ai/catalog/ai-resource-form-validation'
 import { Select } from '@/shared/ui/controls/Select'
@@ -59,7 +59,8 @@ export function AgentForm({
 }) {
   const { t } = useI18n()
   const builtin = agentType === 'BUILTIN'
-  const selectedModel = models.find((model) => modelRef(model) === draft.model)
+  const selectedModel = models.find((model) => model.name === draft.model)
+  const selectedGroup = selectedModel?.kind === 'GROUP'
   const modelUnavailable =
     mode === 'edit' && Boolean(draft.model) && selectedModel === undefined
   const modelUnconfigured = builtin && !draft.model.trim()
@@ -77,7 +78,7 @@ export function AgentForm({
           },
         ]
       : []),
-    ...models.map((model) => ({ value: modelRef(model), label: modelRef(model) })),
+    ...models.map((model) => ({ value: model.name, label: model.name })),
   ]
   const variantSelectOptions = [
     { value: '', label: t('ai.catalog.form.useModelDefault') },
@@ -170,24 +171,26 @@ export function AgentForm({
         ) : null}
         {fieldErrors.model ? <span className="field-error">{fieldErrors.model}</span> : null}
       </label>
-      <label className={`form-group${fieldErrors.variant ? ' is-error' : ''}`}>
-        <FieldLabel>{t('ai.catalog.form.defaultVariantOverride')}</FieldLabel>
-        <Select
-          aria-label={t('ai.catalog.form.defaultVariantOverride')}
-          value={selectedVariant}
-          disabled={selectedModel === undefined}
-          placeholder={t('ai.catalog.form.useModelDefault')}
-          aria-describedby={modelUnavailable ? 'agent-model-variant-status' : undefined}
-          options={variantSelectOptions}
-          onChange={(variant) => onChange({ ...draft, variant })}
-        />
-        {modelUnavailable ? (
-          <span id="agent-model-variant-status" className="inline-hint" role="status">
-            {t('ai.catalog.form.unavailableModelVariants')}
-          </span>
-        ) : null}
-        {fieldErrors.variant ? <span className="field-error">{fieldErrors.variant}</span> : null}
-      </label>
+      {!selectedGroup ? (
+        <label className={`form-group${fieldErrors.variant ? ' is-error' : ''}`}>
+          <FieldLabel>{t('ai.catalog.form.defaultVariantOverride')}</FieldLabel>
+          <Select
+            aria-label={t('ai.catalog.form.defaultVariantOverride')}
+            value={selectedVariant}
+            disabled={selectedModel === undefined}
+            placeholder={t('ai.catalog.form.useModelDefault')}
+            aria-describedby={modelUnavailable ? 'agent-model-variant-status' : undefined}
+            options={variantSelectOptions}
+            onChange={(variant) => onChange({ ...draft, variant })}
+          />
+          {modelUnavailable ? (
+            <span id="agent-model-variant-status" className="inline-hint" role="status">
+              {t('ai.catalog.form.unavailableModelVariants')}
+            </span>
+          ) : null}
+          {fieldErrors.variant ? <span className="field-error">{fieldErrors.variant}</span> : null}
+        </label>
+      ) : null}
       <label className="form-group">
         <FieldLabel>{t('ai.catalog.form.systemPrompt')}</FieldLabel>
         <TextArea
