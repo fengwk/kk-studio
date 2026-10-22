@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.catalog.model.service;
 import static fun.fengwk.kkstudio.platform.catalog.model.AgentModelTestData.buildConfig;
 import static fun.fengwk.kkstudio.platform.catalog.model.AgentModelTestData.executable;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -11,9 +12,12 @@ import fun.fengwk.convention4j.api.page.PageQuery;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import fun.fengwk.kkstudio.platform.catalog.definition.service.AgentDefinitionService;
 import fun.fengwk.kkstudio.platform.catalog.provider.service.AgentProviderService;
+import fun.fengwk.kkstudio.platform.configsync.ConfigSyncService;
 import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
 import fun.fengwk.kkstudio.platform.error.AiInUseException;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
@@ -32,8 +36,16 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelUpdateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentProviderDTO;
+import fun.fengwk.kkstudio.share.configsync.ConfigSyncImportRequestDTO;
 
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /** 全局模型名称跨 MODEL/GROUP 唯一，并验证组 CRUD、引用维护与冷却清理。 */
 public class AgentModelServiceTest extends PostgresSpringTestSupport {
@@ -42,6 +54,8 @@ public class AgentModelServiceTest extends PostgresSpringTestSupport {
   @Autowired private AgentModelService agentModelService;
   @Autowired private AgentDefinitionService agentDefinitionService;
   @Autowired private JdbcTemplate jdbc;
+  @Autowired private PlatformTransactionManager transactionManager;
+  @Autowired private ConfigSyncService configSyncService;
 
   @Test
   public void shouldEnforceGlobalModelNamesAcrossProviders() {
@@ -222,6 +236,235 @@ public class AgentModelServiceTest extends PostgresSpringTestSupport {
     agentProviderService.deleteProvider(providerName, "0");
   }
 
+  /** 真实 PostgreSQL 主键决定全局名称竞争：并发 create 只允许一个成功。 */
+  @Test
+  public void shouldSerializeConcurrentCreatesOfTheSameGlobalName() throws Exception {
+    String suffix = Long.toString(System.nanoTime());
+    AgentProviderDTO provider = provider("concurrent-create-provider-" + suffix);
+    String name = "concurrent-create-model-" + suffix;
+    ExecutorService executor = Executors.newFixedThreadPool(2);
+    CountDownLatch start = new CountDownLatch(1);
+    try {
+      Future<AgentModelDTO> first =
+          executor.submit(
+              () -> {
+                start.await();
+                return agentModelService.createModel(model(provider.getName(), name));
+              });
+      Future<AgentModelDTO> second =
+          executor.submit(
+              () -> {
+                start.await();
+                return agentModelService.createModel(model(provider.getName(), name));
+              });
+      start.countDown();
+      List<Outcome<AgentModelDTO>> outcomes = List.of(outcome(first), outcome(second));
+      assertEquals(1, outcomes.stream().filter(Outcome::succeeded).count());
+      assertEquals(1, outcomes.stream().filter(Outcome::duplicate).count());
+      AgentModelDTO created =
+          outcomes.stream().filter(Outcome::succeeded).findFirst().orElseThrow().value();
+      agentModelService.deleteModel(created.getName(), created.getVersion());
+      agentProviderService.deleteProvider(provider.getName(), "0");
+    } finally {
+      executor.shutdownNow();
+    }
+  }
+
+  /** 两个来源并发 rename 到同一目标名：仍由 name 主键裁决，不允许覆盖已有行。 */
+  @Test
+  public void shouldSerializeConcurrentRenamesToTheSameName() throws Exception {
+    String suffix = Long.toString(System.nanoTime());
+    AgentProviderDTO provider = provider("concurrent-rename-provider-" + suffix);
+    AgentModelDTO firstSource =
+        agentModelService.createModel(model(provider.getName(), "rename-source-a-" + suffix));
+    AgentModelDTO secondSource =
+        agentModelService.createModel(model(provider.getName(), "rename-source-b-" + suffix));
+    String target = "rename-target-" + suffix;
+    ExecutorService executor = Executors.newFixedThreadPool(2);
+    CountDownLatch start = new CountDownLatch(1);
+    try {
+      Future<AgentModelDTO> first =
+          executor.submit(
+              () -> {
+                start.await();
+                return agentModelService.updateModel(
+                    firstSource.getName(), modelUpdate(firstSource, target, "a"));
+              });
+      Future<AgentModelDTO> second =
+          executor.submit(
+              () -> {
+                start.await();
+                return agentModelService.updateModel(
+                    secondSource.getName(), modelUpdate(secondSource, target, "b"));
+              });
+      start.countDown();
+      List<Outcome<AgentModelDTO>> outcomes = List.of(outcome(first), outcome(second));
+      assertEquals(1, outcomes.stream().filter(Outcome::succeeded).count());
+      assertEquals(1, outcomes.stream().filter(Outcome::duplicate).count());
+      AgentModelDTO renamed =
+          outcomes.stream().filter(Outcome::succeeded).findFirst().orElseThrow().value();
+      AgentModelDTO untouched =
+          agentModelService.pageModels(new PageQuery(1, 100)).getResults().stream()
+              .filter(
+                  candidate ->
+                      candidate.getName().equals(firstSource.getName())
+                          || candidate.getName().equals(secondSource.getName()))
+              .findFirst()
+              .orElseThrow();
+      agentModelService.deleteModel(renamed.getName(), renamed.getVersion());
+      agentModelService.deleteModel(untouched.getName(), untouched.getVersion());
+      agentProviderService.deleteProvider(provider.getName(), "0");
+    } finally {
+      executor.shutdownNow();
+    }
+  }
+
+  /** 配置导入与手工 create 并发争用同一全局名称时，仍只允许一行落地。 */
+  @Test
+  public void shouldSerializeConcurrentCreateAndConfigImportOfTheSameName() throws Exception {
+    String suffix = Long.toString(System.nanoTime());
+    AgentProviderDTO provider = provider("import-contention-provider-" + suffix);
+    String modelName = "import-contention-model-" + suffix;
+    ConfigSyncImportRequestDTO request = new ConfigSyncImportRequestDTO();
+    request.setYaml(
+        "providers:\n"
+            + "  - name: "
+            + provider.getName()
+            + "\n    providerType: openai\n"
+            + "models:\n"
+            + "  - kind: MODEL\n    providerName: "
+            + provider.getName()
+            + "\n    name: "
+            + modelName
+            + "\n    modelId: gpt\n"
+            + "    config:\n"
+            + "      limit: {context: 1000, output: 100}\n"
+            + "      abilities: {tools: true, reasoning: false, inputModalities: [TEXT]}\n"
+            + "      pricing: {base: {input: \"0\", output: \"0\"}}\n"
+            + "      defaultVariant: default\n"
+            + "      variants: [{id: default}]\n");
+    ExecutorService executor = Executors.newFixedThreadPool(2);
+    CountDownLatch start = new CountDownLatch(1);
+    try {
+      Future<?> imported =
+          executor.submit(
+              () -> {
+                start.await();
+                return configSyncService.importYaml(request);
+              });
+      Future<AgentModelDTO> created =
+          executor.submit(
+              () -> {
+                start.await();
+                return agentModelService.createModel(model(provider.getName(), modelName));
+              });
+      start.countDown();
+      Outcome<?> importOutcome = outcome(imported);
+      Outcome<AgentModelDTO> createOutcome = outcome(created);
+      // 导入是幂等 upsert：并发时可能落到 create 或 update；但 name 主键必须保证最终只有一行。
+      assertTrue(importOutcome.succeeded() || importOutcome.duplicate());
+      assertTrue(createOutcome.succeeded() || createOutcome.duplicate());
+      assertEquals(
+          1L,
+          jdbc.queryForObject(
+              "select count(*) from agent_model where name = ?", Long.class, modelName));
+      AgentModelDTO persisted =
+          agentModelService.pageModels(new PageQuery(1, 100)).getResults().stream()
+              .filter(candidate -> candidate.getName().equals(modelName))
+              .findFirst()
+              .orElseThrow();
+      agentModelService.deleteModel(persisted.getName(), persisted.getVersion());
+    } finally {
+      executor.shutdownNow();
+    }
+  }
+
+  /** 组更新先锁旧、新成员：旧成员仅被并发锁住时，更新也必须等待，才能安全替换成员集合。 */
+  @Test
+  public void shouldLockOldAndNewMembersBeforeUpdatingGroup() throws Exception {
+    String suffix = Long.toString(System.nanoTime());
+    AgentProviderDTO provider = provider("group-lock-provider-" + suffix);
+    AgentModelDTO oldMember =
+        agentModelService.createModel(model(provider.getName(), "group-old-" + suffix));
+    AgentModelDTO newMember =
+        agentModelService.createModel(model(provider.getName(), "group-new-" + suffix));
+    AgentModelDTO group =
+        agentModelService.createModel(
+            group("group-lock-" + suffix, oldMember.getName(), "default"));
+    ExecutorService executor = Executors.newFixedThreadPool(2);
+    CountDownLatch memberLocked = new CountDownLatch(1);
+    CountDownLatch releaseMemberLock = new CountDownLatch(1);
+    try {
+      Future<?> holder =
+          executor.submit(
+              () ->
+                  new TransactionTemplate(transactionManager)
+                      .executeWithoutResult(
+                          status -> {
+                            jdbc.queryForObject(
+                                "select name from agent_model where name = ? for update",
+                                String.class,
+                                oldMember.getName());
+                            memberLocked.countDown();
+                            await(releaseMemberLock);
+                          }));
+      assertTrue(memberLocked.await(5, TimeUnit.SECONDS));
+      AgentModelUpdateDTO update = groupUpdate(group, newMember.getName(), "default");
+      Future<AgentModelDTO> updater =
+          executor.submit(() -> agentModelService.updateModel(group.getName(), update));
+      Thread.sleep(300);
+      assertFalse(updater.isDone(), "group update must wait for the old member row lock");
+      releaseMemberLock.countDown();
+      holder.get(5, TimeUnit.SECONDS);
+      AgentModelDTO updated = updater.get(5, TimeUnit.SECONDS);
+      assertEquals(List.of(newMember.getName()), memberNames(updated));
+      agentModelService.deleteModel(updated.getName(), updated.getVersion());
+      agentModelService.deleteModel(oldMember.getName(), oldMember.getVersion());
+      agentModelService.deleteModel(newMember.getName(), newMember.getVersion());
+      agentProviderService.deleteProvider(provider.getName(), "0");
+    } finally {
+      releaseMemberLock.countDown();
+      executor.shutdownNow();
+    }
+  }
+
+  private static List<String> memberNames(AgentModelDTO group) {
+    return group.getGroup().getMembers().stream()
+        .map(AgentModelGroupMemberDTO::getModelName)
+        .toList();
+  }
+
+  private static <T> Outcome<T> outcome(Future<T> future) throws InterruptedException {
+    try {
+      return new Outcome<>(future.get(5, TimeUnit.SECONDS), null);
+    } catch (ExecutionException error) {
+      return new Outcome<>(null, error.getCause());
+    } catch (TimeoutException error) {
+      throw new AssertionError("concurrent operation timed out", error);
+    }
+  }
+
+  private static void await(CountDownLatch latch) {
+    try {
+      if (!latch.await(5, TimeUnit.SECONDS)) {
+        throw new AssertionError("timed out waiting for concurrent transaction");
+      }
+    } catch (InterruptedException error) {
+      Thread.currentThread().interrupt();
+      throw new AssertionError(error);
+    }
+  }
+
+  private record Outcome<T>(T value, Throwable error) {
+    private boolean succeeded() {
+      return error == null;
+    }
+
+    private boolean duplicate() {
+      return error instanceof AiDuplicateException;
+    }
+  }
+
   private void insertCooldown(
       String groupName, String memberModelName, String variant, long groupVersion) {
     jdbc.update(
@@ -274,6 +517,23 @@ public class AgentModelServiceTest extends PostgresSpringTestSupport {
     dto.setName(name);
     dto.setKind(AgentModelKind.GROUP);
     dto.setGroup(group);
+    return dto;
+  }
+
+  private AgentModelUpdateDTO groupUpdate(
+      AgentModelDTO current, String memberName, String variant) {
+    AgentModelGroupMemberDTO member = new AgentModelGroupMemberDTO();
+    member.setModelName(memberName);
+    member.setVariant(variant);
+    AgentModelGroupDTO group = new AgentModelGroupDTO();
+    group.setMembers(List.of(member));
+    group.setFallbackStatusCodes(List.of(429));
+    group.setCooldownSeconds(30);
+    AgentModelUpdateDTO dto = new AgentModelUpdateDTO();
+    dto.setKind(AgentModelKind.GROUP);
+    dto.setName(current.getName());
+    dto.setGroup(group);
+    dto.setExpectedVersion(current.getVersion());
     return dto;
   }
 

@@ -7,14 +7,16 @@ cases:
   - path: models[0].providerName
     yaml: |
       models:
-        - providerName: ' p '
+        - kind: MODEL
+          providerName: ' p '
           name: m
           modelId: m
           config: {}
   - path: models[0].name
     yaml: |
       models:
-        - providerName: p
+        - kind: MODEL
+          providerName: p
           name: ' m '
           modelId: m
           config: {}
@@ -22,7 +24,7 @@ cases:
     yaml: |
       agents:
         - name: ' a '
-          model: p/m
+          model: m
           config: {}
   - path: environments[0].name
     yaml: |
