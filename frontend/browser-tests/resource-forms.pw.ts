@@ -1,4 +1,4 @@
-import { expect, test } from './fixture'
+import { expect, test, tokenColor } from './fixture'
 
 test('resource forms preserve native semantics, shared geometry and controlled edits at wide and narrow widths', async ({ page }) => {
   // 真实表单仅编辑本地草稿；任何网络请求都是 harness 越界。
@@ -43,7 +43,8 @@ test('resource forms preserve native semantics, shared geometry and controlled e
     expect(await page.locator('.ui-text-input').evaluateAll((inputs) =>
       inputs.every((input) => input.getBoundingClientRect().height === 32))).toBe(true)
     await password.focus()
-    await expect(password).toHaveCSS('box-shadow', /rgba\(113, 231, 154/)
+    expect(await password.evaluate((el) => getComputedStyle(el).boxShadow))
+      .toContain(await tokenColor(page, '--focus-ring'))
     await expect(model.getByLabel('Reasoning Effort 1')).toHaveCSS('cursor', 'not-allowed')
     expect(await page.evaluate(() =>
       document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)

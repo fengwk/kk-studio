@@ -1,4 +1,4 @@
-import { expect, test } from './fixture'
+import { expect, test, tokenColor } from './fixture'
 
 /**
  * S1 浏览器回归：真实 React MessageList + 现行 styles，验证 SUBAGENT_RESULT 回执信息卡。
@@ -52,16 +52,17 @@ test.describe('Subagent receipt card', () => {
       }
     })
     // 浅青蓝 info-soft 染色 + 1px info 细边框；不是 scrim 纯黑底。
-    expect(metrics.background).toBe('rgba(119, 199, 245, 0.16)')
+    const scrim = await tokenColor(page, '--scrim')
+    expect(metrics.background).toBe(await tokenColor(page, '--info-soft'))
     expect(metrics.borderWidth).toBe('1px')
     expect(metrics.borderColor).toBe(metrics.expectedBorder)
-    expect(metrics.background).not.toBe('rgba(0, 0, 0, 0.72)')
+    expect(metrics.background).not.toBe(scrim)
 
     // 对照：其它系统通知仍走通用系统卡（scrim 底），未被回执样式污染。
     const generic = page.locator('.thread-notification:not(.thread-subagent-receipt)').first()
     await expect(generic).toBeVisible()
     expect(await generic.evaluate((element) => getComputedStyle(element).backgroundColor))
-      .toBe('rgba(0, 0, 0, 0.72)')
+      .toBe(scrim)
 
     // 同一来源 subagent 的两条回执各自保留身份与独立来源链接。
     await expect(cards.nth(0).getByRole('link', { name: '查看 subagent 执行' }))

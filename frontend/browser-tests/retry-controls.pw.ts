@@ -1,4 +1,4 @@
-import { expect, test } from './fixture'
+import { expect, test, tokenColor } from './fixture'
 
 test('provider and system settings retry controls render correct theme, borders, focus rings, and interactions at 1280 and 390 viewports', async ({
   page,
@@ -60,14 +60,16 @@ test('provider and system settings retry controls render correct theme, borders,
     expect(settingsInputStyles.outlineWidth).toBe('0px')
     expect(settingsInputStyles.boxShadow).toBe('none')
 
-    // 2. Verify wrapper focus theme (border color green-primary, focus-ring box shadow)
+    // 2. Verify wrapper focus theme (accent border, focus-ring box shadow)
+    const accent = await tokenColor(page, '--accent')
+    const focusRing = await tokenColor(page, '--focus-ring')
     await providerTagInputField.focus()
-    await expect(providerTagInput).toHaveCSS('border-top-color', 'rgb(113, 231, 154)')
-    await expect(providerTagInput).toHaveCSS('box-shadow', /rgba\(113, 231, 154/)
+    await expect(providerTagInput).toHaveCSS('border-top-color', accent)
+    expect(await providerTagInput.evaluate((el) => getComputedStyle(el).boxShadow)).toContain(focusRing)
 
     await settingsTagInputField.focus()
-    await expect(settingsTagInput).toHaveCSS('border-top-color', 'rgb(113, 231, 154)')
-    await expect(settingsTagInput).toHaveCSS('box-shadow', /rgba\(113, 231, 154/)
+    await expect(settingsTagInput).toHaveCSS('border-top-color', accent)
+    expect(await settingsTagInput.evaluate((el) => getComputedStyle(el).boxShadow)).toContain(focusRing)
 
     // 3. Verify tag Enter and X removal interactions in ProviderForm
     await providerTagInputField.fill('502')

@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
+import { tokenColor } from './fixture'
 
 /**
  * 共享表单控件在真实 .form-group / .modal-body 上下文中的实测：
@@ -6,7 +7,6 @@ import { expect, test, type Locator, type Page } from '@playwright/test'
  * 以及旧 .form-group 规则不会改写共享控件。
  */
 
-const GFG_DIM = 'rgb(157, 168, 159)'
 const DANGER = 'rgb(240, 133, 133)'
 const GREEN = 'rgb(113, 231, 154)'
 
@@ -14,18 +14,6 @@ async function expectHeight(locator: Locator, expected: number) {
   const box = await locator.boundingBox()
   expect(box, `${await locator.evaluate((el) => el.className)} 应有可见盒模型`).not.toBeNull()
   expect(Math.round(box?.height ?? 0)).toBe(expected)
-}
-
-/** 读取主题 token 的实际计算色，避免把断言写死在设计稿色值上。 */
-async function tokenColor(page: Page, token: string) {
-  return page.evaluate((name) => {
-    const probe = document.createElement('span')
-    probe.style.color = `var(${name})`
-    document.body.appendChild(probe)
-    const color = getComputedStyle(probe).color
-    probe.remove()
-    return color
-  }, token)
 }
 
 /**
@@ -167,19 +155,21 @@ test.describe('shared form controls in real form contexts', () => {
   })
 
   test('keeps disabled semantics without dimming whole input surfaces', async ({ page }) => {
-    await expect(page.locator('.control-text-disabled')).toHaveCSS('color', GFG_DIM)
+    // 禁用文字使用次要前景色 token，而不是整体降透明度。
+    const mutedForeground = await tokenColor(page, '--fg-muted')
+    await expect(page.locator('.control-text-disabled')).toHaveCSS('color', mutedForeground)
     await expect(page.locator('.control-text-disabled')).toHaveCSS('cursor', 'not-allowed')
 
     await expect(page.locator('.control-select-disabled .ui-select-trigger')).toHaveCSS(
       'color',
-      GFG_DIM,
+      mutedForeground,
     )
     await expect(page.locator('.control-select-disabled .ui-select-trigger')).toHaveCSS(
       'cursor',
       'not-allowed',
     )
 
-    await expect(page.locator('.control-number-disabled')).toHaveCSS('color', GFG_DIM)
+    await expect(page.locator('.control-number-disabled')).toHaveCSS('color', mutedForeground)
     await expect(page.locator('.control-number-disabled')).toHaveCSS('cursor', 'not-allowed')
 
     // 禁用文本输入不得通过整体降透明度制造“看不清”的输入面。

@@ -1,4 +1,4 @@
-import { expect, test, type Page } from './fixture'
+import { expect, test, tokenColor, type Page } from './fixture'
 
 /**
  * Canvas 库的真实浏览器回归：真实组件 + 真实共享控件 + 传输层替身。
@@ -137,7 +137,7 @@ test.describe('Canvas library real browser regression', () => {
     await openButton.focus()
     await expect(openButton).toBeFocused()
     const focusShadow = await openButton.evaluate((el) => getComputedStyle(el).boxShadow)
-    expect(focusShadow).toContain('113, 231, 154')
+    expect(focusShadow).toContain(await tokenColor(page, '--focus-ring'))
 
     // 窄屏单列且不横向溢出。
     await page.setViewportSize({ width: 360, height: 900 })

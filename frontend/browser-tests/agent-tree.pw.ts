@@ -79,10 +79,8 @@ function threadDto(
     sessionId: '50000000-0000-0000-0000-000000000001',
     headEntryId: 'e0000000-0000-0000-0000-00000000e001',
     parentThreadId,
-    // 子代理的 YOLO 跟随执行根；根自己的策略仍是显式开关。
-    yoloPolicy: parentThreadId == null
-      ? { mode: 'DISABLE', rootThreadId: null }
-      : { mode: 'FOLLOW', rootThreadId: THREAD_ID },
+    rootThreadId: THREAD_ID,
+    yoloEnabled: false,
     nextCommandSequence: '1',
     version: '1',
     status,

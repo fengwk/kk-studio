@@ -38,7 +38,8 @@ for (const scenario of ['pane-root', 'pane-child']) {
           thread: {
             threadId: id, name: '等待工具 Thread', sessionId: 'session-wait', headEntryId: 'assistant-wait',
             parentThreadId: id === ROOT ? null : ROOT,
-            yoloPolicy: { mode: id === ROOT ? 'DISABLE' : 'FOLLOW', rootThreadId: id === ROOT ? null : ROOT },
+            rootThreadId: ROOT,
+            yoloEnabled: false,
             nextCommandSequence: '1', version: '1', status: 'TOOL_READY', processing: true,
             executionControl: 'RUNNABLE',
             branchSettings: { agentName: 'assistant',

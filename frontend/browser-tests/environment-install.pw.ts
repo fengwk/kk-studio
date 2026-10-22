@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { tokenColor } from './fixture'
 import type {
   EnvironmentCardDTO,
   EnvironmentInstallConfigDTO,
@@ -126,7 +127,8 @@ for (const width of [1280, 390, 320]) {
     await expect(modal.locator('details, summary')).toHaveCount(0)
     await expect(modal.getByLabel('Bash 可执行文件')).toHaveAttribute('placeholder', '/bin/bash')
     await expect(modal.getByLabel('备注')).toHaveAttribute('placeholder', '例如：开发工作站')
-    const gray = 'rgb(157, 168, 159)'
+    // 占位符使用次要前景色 token。
+    const gray = await tokenColor(page, '--fg-muted')
     for (const label of ['Bash 可执行文件', '备注']) {
       const field = modal.getByLabel(label)
       expect(await field.evaluate(element => element.matches(':placeholder-shown'))).toBe(true)
@@ -162,7 +164,7 @@ for (const width of [1280, 390, 320]) {
     await expect(modal.locator('#install-lsp-help')).toHaveText('请先在目标主机安装对应的语言服务器。')
     await expect(modal.locator('#install-lsp-help')).not.toContainText('rootMarkers')
     const color = await editor.evaluate(element => getComputedStyle(element, '::placeholder').color)
-    expect(color).toBe('rgb(157, 168, 159)')
+    expect(color).toBe(await tokenColor(page, '--fg-muted'))
     await editor.scrollIntoViewIfNeeded()
     await page.screenshot({ path: testInfo.outputPath(`lsp-placeholder-${width}.png`), animations: 'disabled' })
     if (width === 1280) {

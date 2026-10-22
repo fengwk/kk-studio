@@ -99,7 +99,8 @@ function createThreadSnapshot() {
         sessionId: '50000000-0000-0000-0000-000000000001',
         headEntryId: 'e1',
         parentThreadId: null,
-        yoloPolicy: { mode: 'DISABLE', rootThreadId: null },
+        rootThreadId: VALID_THREAD_ID,
+        yoloEnabled: false,
         nextCommandSequence: '1',
         version: '1',
         status: 'IDLE',
@@ -348,11 +349,8 @@ test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
 
     await expect.poll(() => commandBatches.length).toBe(1)
     const messageBatch = commandBatches[0]!
-    expect(Object.keys(messageBatch).sort()).toEqual([
-      'commands', 'expectedHeadEntryId', 'expectedNextCommandSequence',
-    ])
-    expect(messageBatch.expectedHeadEntryId).toBe('e1')
-    expect(messageBatch.expectedNextCommandSequence).toBe('1')
+    // 单条 USER_MESSAGE 不携带游标：消息按到达顺序排队，不做 head/sequence CAS。
+    expect(Object.keys(messageBatch)).toEqual(['commands'])
     expect(messageBatch.commands).toEqual([
       expect.objectContaining({
         type: 'USER_MESSAGE',
