@@ -87,8 +87,7 @@ function thread(overrides: Partial<HarnessThreadDTO> = {}): HarnessThreadDTO {
     branchSettings: {
       agentName: 'assistant',
       model: {
-        providerName: 'minimax',
-        modelName: 'MiniMax',
+                modelName: 'MiniMax',
         variant: 'default',
       },
       environmentName: null,
@@ -268,6 +267,7 @@ describe('ThreadWorkspacePage', () => {
       totalCount: 1,
       results: [{
         providerName: 'minimax',
+        kind: 'MODEL',
         name: 'MiniMax',
         modelId: 'MiniMax',
         description: null,
@@ -275,18 +275,10 @@ describe('ThreadWorkspacePage', () => {
           limit: { context: 128000, output: 8192 },
           abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
           pricing: {
-            currency: 'USD',
-            pricingTier: 'default',
-            serviceTier: 'standard',
-            serviceTierMultiplier: 1,
-            version: '1',
-            inputPerMillionTokens: 0,
-            outputPerMillionTokens: 0,
-            cacheReadPerMillionTokens: 0,
-            cacheWritePerMillionTokens: 0,
-            cacheWriteLongPerMillionTokens: 0,
-            reasoningPerMillionTokens: 0,
-          },
+      base: { input: '0', output: '0', cacheRead: '0', cacheWrite: '0', cacheWriteByTtl: {}, reasoning: null },
+      overrides: [],
+      multipliers: [],
+    },
           defaultVariant: 'default',
           variants: [{ id: 'default' }],
         },
@@ -345,7 +337,7 @@ describe('ThreadWorkspacePage', () => {
     ))
     renderPage(`/threads/${CHILD_THREAD_ID}`)
     await screen.findByRole('heading', { name: 'researcher', level: 1 })
-    expect(document.querySelector('.workspace-view-identity')).toHaveTextContent('researcher · minimax/MiniMax')
+    expect(document.querySelector('.workspace-view-identity')).toHaveTextContent('researcher · MiniMax (default)')
     expect(screen.queryByText('main', { exact: true })).toBeNull()
     expect(screen.getByRole('link', { name: '回到父 agent' })).toHaveAttribute('href', `/threads/${rootId}`)
     expect(screen.queryByRole('button', { name: 'Debug' })).toBeNull()
@@ -568,7 +560,7 @@ describe('ThreadWorkspacePage', () => {
         parentThreadId: null,
         name: 'Root Agent',
         agentName: 'assistant',
-        model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+        model: { modelName: 'MiniMax', variant: 'default' },
         status: 'STOPPED',
         processing: false,
         turnCount: 2,
@@ -581,7 +573,7 @@ describe('ThreadWorkspacePage', () => {
         parentThreadId: rootId,
         name: 'Waiting Parent',
         agentName: 'coder',
-        model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+        model: { modelName: 'MiniMax', variant: 'default' },
         status: 'WAITING_APPROVAL',
         processing: true,
         turnCount: 1,
@@ -594,7 +586,7 @@ describe('ThreadWorkspacePage', () => {
         parentThreadId: rootId,
         name: 'Idle Child',
         agentName: 'reviewer',
-        model: { providerName: 'anthropic', modelName: 'Claude', variant: 'default' },
+        model: { modelName: 'Claude', variant: 'default' },
         status: 'IDLE',
         processing: false,
         turnCount: 1,

@@ -1,8 +1,16 @@
-import type { AgentDraft, ModelDraft, ProviderDraft, ResourceModal } from '@/features/ai/catalog/ai-console-types'
+import type {
+  AgentDraft,
+  ModelDraft,
+  ModelGroupDraft,
+  ProviderDraft,
+  ResourceModal,
+} from '@/features/ai/catalog/ai-console-types'
 import {
   toEditableAgent,
   toEditableAgentUpdate,
   toEditableModel,
+  toEditableModelGroup,
+  toEditableModelGroupUpdate,
   toEditableModelUpdate,
   toEditableProvider,
   toEditableProviderUpdate,
@@ -14,6 +22,7 @@ export function buildResourceSubmitPlan(
   drafts: {
     providerDraft: ProviderDraft
     modelDraft: ModelDraft
+    modelGroupDraft: ModelGroupDraft
     agentDraft: AgentDraft
   },
 ): ResourceSubmitPlan {
@@ -38,15 +47,21 @@ export function buildResourceSubmitPlan(
       return {
         kind: 'model',
         mode: 'edit',
-        providerName: modal.providerName,
         name: modal.name,
-        data: { ...toEditableModelUpdate(drafts.modelDraft), expectedVersion: modal.expectedVersion },
+        data: {
+          ...(modal.resourceKind === 'GROUP'
+            ? toEditableModelGroupUpdate(drafts.modelGroupDraft)
+            : toEditableModelUpdate(drafts.modelDraft)),
+          expectedVersion: modal.expectedVersion,
+        },
       }
     }
     return {
       kind: 'model',
       mode: 'create',
-      data: toEditableModel(drafts.modelDraft),
+      data: modal.resourceKind === 'GROUP'
+        ? toEditableModelGroup(drafts.modelGroupDraft)
+        : toEditableModel(drafts.modelDraft),
     }
   }
 

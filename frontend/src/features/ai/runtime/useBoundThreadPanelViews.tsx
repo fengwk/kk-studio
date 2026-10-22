@@ -61,24 +61,22 @@ export function useBoundThreadPanelViews(
   const rawDebugSettings = previewOptions?.debugSettings !== undefined
     ? previewOptions.debugSettings
     : controller.thread?.branchSettings
-  const debugModelProvider = rawDebugSettings?.model?.providerName ?? null
   const debugModelName = rawDebugSettings?.model?.modelName ?? null
-  const debugModelVariant = rawDebugSettings?.model?.variant ?? ''
+  const debugModelVariant = rawDebugSettings?.model?.variant ?? null
   const debugEnvironmentName = rawDebugSettings?.environmentName ?? null
 
   const debugRequest = useMemo<HarnessModelRequestDebugRequestDTO | null>(() => {
-    if (!debugModelProvider || !debugModelName) {
+    if (!debugModelName) {
       return null
     }
     return {
       model: {
-        providerName: debugModelProvider,
         modelName: debugModelName,
         variant: debugModelVariant,
       },
       environmentName: debugEnvironmentName,
     }
-  }, [debugModelProvider, debugModelName, debugModelVariant, debugEnvironmentName])
+  }, [debugModelName, debugModelVariant, debugEnvironmentName])
 
   // Debug 请求投影的读取身份：调用 id/phase/requestHead、head 与规划 settings/目录事实。
   // working 一直为 true 的连续 model -> tool -> 下一 model 期间，调用身份已经改变，
@@ -90,7 +88,7 @@ export function useBoundThreadPanelViews(
       ? debugRequest.environmentName
       : (settings?.environmentName ?? null)
     const catalog = controller.models
-      .map((item) => `${item.providerName}/${item.name}`)
+      .map((item) => item.name)
       .join(',')
     return [
       viewKey,
@@ -101,7 +99,6 @@ export function useBoundThreadPanelViews(
       controller.modelInvocation?.id ?? '',
       controller.modelInvocation?.status ?? '',
       controller.modelInvocation?.requestHeadEntryId ?? '',
-      model?.providerName ?? '',
       model?.modelName ?? '',
       model?.variant ?? '',
       settings?.agentName ?? '',

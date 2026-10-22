@@ -263,7 +263,7 @@ function TurnUsageHarness() {
   }
   const settings = {
     agentName: 'coding',
-    model: { providerName: 'offline', modelName: 'fixture', variant: 'default' },
+    model: { modelName: 'fixture', variant: 'default' },
     environmentName: null,
   }
   for (const withUsage of [false, true]) {

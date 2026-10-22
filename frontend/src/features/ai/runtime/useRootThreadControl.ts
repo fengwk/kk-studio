@@ -1636,13 +1636,14 @@ export function branchDraftFromEntry(
     ...cloneDraft(fallback),
     agentName: typeof settings.agentName === 'string' ? settings.agentName : fallback.agentName,
     model: {
-      providerName: typeof model?.providerName === 'string'
-        ? model.providerName
-        : fallback.model.providerName,
       modelName: typeof model?.modelName === 'string'
         ? model.modelName
         : fallback.model.modelName,
-      variant: typeof model?.variant === 'string' ? model.variant : fallback.model.variant,
+      variant: typeof model?.variant === 'string'
+        ? model.variant
+        : model?.variant === null
+          ? null
+          : (fallback.model.variant ?? null),
     },
     environmentName,
   }

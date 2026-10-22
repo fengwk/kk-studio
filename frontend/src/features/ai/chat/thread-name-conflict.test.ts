@@ -6,7 +6,7 @@ import type { RuntimeThreadSummaryDTO } from '@/shared/api/contracts/ai-runtime'
 const summary: RuntimeThreadSummaryDTO = {
   threadId: 'root', parentThreadId: null, name: 'main', createdAt: null, updatedAt: null,
   status: 'IDLE', processing: false,
-  model: { providerName: 'p', modelName: 'm', variant: 'v' }, headMessagePreview: null,
+  model: { modelName: 'm', variant: 'v' }, headMessagePreview: null,
 }
 const draft: PaneTarget = { kind: 'NEW_THREAD_DRAFT', sessionId: 's', startEntryId: 'root', threadName: 'main' }
 

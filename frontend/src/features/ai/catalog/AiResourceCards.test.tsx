@@ -10,6 +10,7 @@ import type { AgentDefinitionDTO, AgentProviderDTO } from '@/shared/api/contract
 function model(overrides: Partial<AgentModelView> = {}): AgentModelView {
   return {
     providerName: 'minimax',
+    kind: 'MODEL',
     name: 'MiniMax',
     modelId: 'minimax-upstream',
     description: 'model description',
@@ -17,18 +18,10 @@ function model(overrides: Partial<AgentModelView> = {}): AgentModelView {
       limit: { context: 128000, output: 8192 },
       abilities: { tools: true, reasoning: true, inputModalities: ['TEXT', 'IMAGE', 'AUDIO', 'VIDEO'] },
       pricing: {
-        currency: 'USD',
-        pricingTier: 'default',
-        serviceTier: 'default',
-        serviceTierMultiplier: 1,
-        version: 'v1',
-        inputPerMillionTokens: 0,
-        outputPerMillionTokens: 0,
-        cacheReadPerMillionTokens: 0,
-        cacheWritePerMillionTokens: 0,
-        cacheWriteLongPerMillionTokens: 0,
-        reasoningPerMillionTokens: 0,
-      },
+      base: { input: '0', output: '0', cacheRead: '0', cacheWrite: '0', cacheWriteByTtl: {}, reasoning: null },
+      overrides: [],
+      multipliers: [],
+    },
       defaultVariant: 'quality',
       variants: [{ id: 'quality' }, { id: 'fast' }, { id: 'cheap' }, { id: 'debug' }],
     },
@@ -45,7 +38,7 @@ function agent(overrides: Partial<AgentDefinitionDTO> = {}): AgentDefinitionDTO 
     description: 'agent description',
     systemPrompt: 'prompt',
     type: 'USER',
-    model: 'minimax/MiniMax',
+    model: 'MiniMax',
     variant: 'quality',
     config: {
       inheritParentEnvironment: true,
@@ -88,7 +81,7 @@ describe('AI resource cards', () => {
         deletePending={false}
       />,
     )
-    expect(screen.getByText('minimax/MiniMax (quality)（模型默认）')).toBeInTheDocument()
+    expect(screen.getByText('MiniMax (quality)（模型默认）')).toBeInTheDocument()
     rerender(
       <AgentResourceCard
         agent={agent({ model: 'xai/grok-4.7', variant: 'xhigh' })}
@@ -115,7 +108,7 @@ describe('AI resource cards', () => {
       />,
     )
 
-    expect(screen.getByText(/minimax\/MiniMax \(quality\)/)).toBeInTheDocument()
+    expect(screen.getByText(/MiniMax \(quality\)/)).toBeInTheDocument()
     // 卡片对 tools 和 skills 做截断展示；超出部分（3 个中的 2 个）折叠为 +1。
     expect(screen.getByText('+1')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '编辑 assistant' }))
@@ -268,7 +261,7 @@ describe('AI resource cards', () => {
         deletePending={false}
       />,
     )
-    expect(screen.getByText(/minimax\/MiniMax \(quality\)/)).toBeInTheDocument()
+    expect(screen.getByText(/MiniMax \(quality\)/)).toBeInTheDocument()
     expect(screen.getAllByText('assistant')).toHaveLength(2)
   })
 
@@ -282,7 +275,7 @@ describe('AI resource cards', () => {
       />,
     )
 
-    expect(screen.getAllByText('minimax/MiniMax').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('MiniMax').length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText('ctx 128000 · out 8192')).toBeInTheDocument()
     expect(screen.getByText('tools · reasoning · TEXT, IMAGE, AUDIO +1')).toBeInTheDocument()
     expect(screen.getAllByText('quality')).toHaveLength(2)
@@ -291,7 +284,7 @@ describe('AI resource cards', () => {
     const orphanedModel = model({
       description: null,
       config: {
-        ...model().config,
+        ...model().config!,
         limit: { context: 0, output: 0 },
         abilities: { tools: false, reasoning: false, inputModalities: [] },
         defaultVariant: '',
@@ -308,7 +301,7 @@ describe('AI resource cards', () => {
         deletePending={false}
       />,
     )
-    // provider 已删除：仍保留唯一的 providerName/model ref
+    // provider 已删除：仍保留全局唯一逻辑名
     expect(screen.getAllByText('MiniMax').length).toBeGreaterThanOrEqual(1)
     expect(screen.getAllByText('—').length).toBeGreaterThanOrEqual(3)
   })

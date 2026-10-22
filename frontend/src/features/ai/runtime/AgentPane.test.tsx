@@ -263,7 +263,7 @@ const agents: AgentDefinitionDTO[] = [{
   description: null,
   systemPrompt: null,
   type: 'USER',
-  model: 'minimax/MiniMax',
+  model: 'MiniMax',
   variant: 'default',
   config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
   version: '0',
@@ -273,6 +273,7 @@ const agents: AgentDefinitionDTO[] = [{
 
 const models: AgentModelDTO[] = [{
   providerName: 'minimax',
+  kind: 'MODEL',
   name: 'MiniMax',
   modelId: 'minimax/MiniMax',
   description: null,
@@ -280,17 +281,9 @@ const models: AgentModelDTO[] = [{
     limit: { context: 128000, output: 8192 },
     abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
     pricing: {
-      currency: 'USD',
-      pricingTier: 'default',
-      serviceTier: 'standard',
-      serviceTierMultiplier: 1,
-      version: '1',
-      inputPerMillionTokens: 1,
-      outputPerMillionTokens: 1,
-      cacheReadPerMillionTokens: 0,
-      cacheWritePerMillionTokens: 0,
-      cacheWriteLongPerMillionTokens: 0,
-      reasoningPerMillionTokens: 0,
+      base: { input: '1', output: '1', cacheRead: '0', cacheWrite: '0', cacheWriteByTtl: {}, reasoning: null },
+      overrides: [],
+      multipliers: [],
     },
     defaultVariant: 'default',
     variants: [{ id: 'default' }],
@@ -320,7 +313,7 @@ function thread(
     executionControl: 'RUNNABLE',
     branchSettings: {
       agentName: 'assistant',
-      model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+      model: { modelName: 'MiniMax', variant: 'default' },
       environmentName: null,
       goal: null,
     },
@@ -443,7 +436,7 @@ function treeNode(
     parentThreadId,
     name,
     agentName: parentThreadId == null ? 'assistant' : 'coder',
-    model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+    model: { modelName: 'MiniMax', variant: 'default' },
     status: processing ? 'MODEL_STREAM' : 'IDLE',
     processing,
     turnCount: 1,
@@ -486,7 +479,7 @@ describe('AgentPane orchestration', () => {
   const historyRoot: HarnessSessionEntryDTO = {
     entryId: 'draft-root', sessionId: 'session-1', parentEntryId: null, entryType: 'ROOT',
     payloadJson: JSON.stringify({ settings: {
-      agentName: 'assistant', model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' }, environmentName: null,
+      agentName: 'assistant', model: { modelName: 'MiniMax', variant: 'default' }, environmentName: null,
     } }), createTime: null,
   }
   const historyMessage: HarnessSessionEntryDTO = {
@@ -1053,7 +1046,7 @@ describe('AgentPane orchestration', () => {
       updatedAt: null,
       status: 'IDLE',
       processing: false,
-      model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+      model: { modelName: 'MiniMax', variant: 'default' },
       headMessagePreview: 'thread preview',
     }])
     renderPane({ type: 'CHAT', chatId: CHAT_ID })
@@ -1233,7 +1226,7 @@ describe('AgentPane orchestration', () => {
       updatedAt: null,
       status: 'MODEL_STREAMING' as const,
       processing: true,
-      model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+      model: { modelName: 'MiniMax', variant: 'default' },
       headMessagePreview: null,
     })
     vi.mocked(harnessService.getThreadSnapshot).mockImplementation(async (threadId) =>
@@ -1338,8 +1331,7 @@ describe('AgentPane orchestration', () => {
     act(() => hook.result.current.selectAgent('assistant'))
     expect(hook.result.current.error).toBeNull()
     act(() => hook.result.current.composer.settings?.onModelChange({
-      providerName: 'minimax',
-      modelName: 'MiniMax',
+            modelName: 'MiniMax',
       variant: 'default',
     }))
     act(() => hook.result.current.composer.settings?.onYoloChange(true))
@@ -1355,7 +1347,7 @@ describe('AgentPane orchestration', () => {
       payloadJson: JSON.stringify({
         settings: {
           agentName: 'assistant',
-          model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+          model: { modelName: 'MiniMax', variant: 'default' },
         },
       }),
       createTime: null,
@@ -1473,7 +1465,7 @@ describe('AgentPane orchestration', () => {
       updatedAt: null,
       status: 'IDLE',
       processing: false,
-      model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+      model: { modelName: 'MiniMax', variant: 'default' },
       headMessagePreview: null,
     })).toMatchObject({
       id: THREAD_ID,
@@ -1578,7 +1570,7 @@ describe('AgentPane orchestration', () => {
         parentThreadId: null,
         name: 'thread-name',
         agentName: 'assistant',
-        model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+        model: { modelName: 'MiniMax', variant: 'default' },
         status: 'IDLE',
         processing: false,
         turnCount: 1,
@@ -1591,7 +1583,7 @@ describe('AgentPane orchestration', () => {
         parentThreadId: THREAD_ID,
         name: 'worker',
         agentName: 'coder',
-        model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+        model: { modelName: 'MiniMax', variant: 'default' },
         status: 'MODEL_STREAM',
         processing: true,
         turnCount: 1,
@@ -1614,7 +1606,7 @@ describe('AgentPane orchestration', () => {
         parentThreadId: null,
         name: 'thread-name',
         agentName: 'assistant',
-        model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+        model: { modelName: 'MiniMax', variant: 'default' },
         status: 'IDLE',
         processing: false,
         turnCount: 1,
@@ -1649,7 +1641,7 @@ describe('AgentPane orchestration', () => {
       parentThreadId: null,
       name: threadId === THREAD_ID ? 'tree A' : 'tree B',
       agentName: 'assistant',
-      model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+      model: { modelName: 'MiniMax', variant: 'default' },
       status: 'IDLE',
       processing: false,
       turnCount: 1,
@@ -1661,7 +1653,7 @@ describe('AgentPane orchestration', () => {
       parentThreadId: threadId,
       name: threadId === THREAD_ID ? 'active A' : 'active B',
       agentName: 'coder',
-      model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+      model: { modelName: 'MiniMax', variant: 'default' },
       status: 'MODEL_STREAM',
       processing: true,
       turnCount: 1,
@@ -1688,7 +1680,7 @@ describe('AgentPane orchestration', () => {
       processing: false,
       createdAt: null,
       updatedAt: null,
-      model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+      model: { modelName: 'MiniMax', variant: 'default' },
       headMessagePreview: null,
     }])
     renderPane({ type: 'CHAT', chatId: CHAT_ID })
@@ -1959,7 +1951,7 @@ describe('AgentPane orchestration', () => {
       updatedAt: null,
       status: 'IDLE',
       processing: false,
-      model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+      model: { modelName: 'MiniMax', variant: 'default' },
       headMessagePreview: null,
     }])
     renderPane({ type: 'CHAT', chatId: CHAT_ID })
@@ -2128,8 +2120,7 @@ describe('AgentPane orchestration', () => {
     await waitFor(() => expect(hook.result.current.activeDraft).not.toBeNull())
     act(() => hook.result.current.selectAgent('assistant'))
     act(() => hook.result.current.composer.settings?.onModelChange({
-      providerName: 'minimax',
-      modelName: 'MiniMax',
+            modelName: 'MiniMax',
       variant: 'default',
     }))
     act(() => hook.result.current.composer.settings?.onYoloChange(true))
@@ -2394,7 +2385,7 @@ describe('TURN_END 绑定与 Debug 只读退出', () => {
     return {
       kind: 'NEXT_REQUEST_PREVIEW',
       generatedAt: '2026-09-27T05:00:00Z',
-      model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+      model: { modelName: 'MiniMax', variant: 'default' },
       environmentName: null,
       systemInstruction: 'system prompt',
       tools: [],
@@ -2472,7 +2463,7 @@ describe('TURN_END 绑定与 Debug 只读退出', () => {
         payloadJson: JSON.stringify({
           settings: {
             agentName: 'assistant',
-            model: { providerName: 'provider-1', modelName: 'model-1', variant: 'default' },
+            model: { modelName: 'model-1', variant: 'default' },
             environmentName: null,
           },
         }),
@@ -2597,7 +2588,7 @@ describe('TURN_END 绑定与 Debug 只读退出', () => {
 describe('branchDraftFromEntry and branchDraftFromEntryPath environment replay', () => {
   const fallbackDraft: BranchDraft = {
     agentName: 'assistant',
-    model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+    model: { modelName: 'MiniMax', variant: 'default' },
     environmentName: 'initial-env',
     yoloEnabled: false,
   }
@@ -3117,7 +3108,7 @@ function previewResponse(overrides: Partial<ProviderRequestPreviewDTO> = {}): Pr
           name: 'Thread 2',
           status: 'IDLE',
           processing: false,
-          model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+          model: { modelName: 'MiniMax', variant: 'default' },
           createdAt: null,
           updatedAt: null,
           headMessagePreview: null,
@@ -3405,7 +3396,7 @@ function previewResponse(overrides: Partial<ProviderRequestPreviewDTO> = {}): Pr
           unknownOutcome: false,
           targetDraft: {
             agentName: 'assistant',
-            model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+            model: { modelName: 'MiniMax', variant: 'default' },
             environmentName: null,
             yoloEnabled: false,
           },
@@ -3649,6 +3640,7 @@ function previewResponse(overrides: Partial<ProviderRequestPreviewDTO> = {}): Pr
   describe('selectAgent model follow & validation behavior', () => {
     const claudeModel: AgentModelDTO = {
       providerName: 'anthropic',
+      kind: 'MODEL',
       name: 'Claude',
       modelId: 'anthropic/Claude',
       description: null,
@@ -3656,18 +3648,10 @@ function previewResponse(overrides: Partial<ProviderRequestPreviewDTO> = {}): Pr
         limit: { context: 200000, output: 4096 },
         abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
         pricing: {
-          currency: 'USD',
-          pricingTier: 'default',
-          serviceTier: 'standard',
-          serviceTierMultiplier: 1,
-          version: '1',
-          inputPerMillionTokens: 1,
-          outputPerMillionTokens: 1,
-          cacheReadPerMillionTokens: 0,
-          cacheWritePerMillionTokens: 0,
-          cacheWriteLongPerMillionTokens: 0,
-          reasoningPerMillionTokens: 0,
-        },
+      base: { input: '1', output: '1', cacheRead: '0', cacheWrite: '0', cacheWriteByTtl: {}, reasoning: null },
+      overrides: [],
+      multipliers: [],
+    },
         defaultVariant: 'v1',
         variants: [{ id: 'v1' }, { id: 'fast' }],
       },
@@ -3681,7 +3665,7 @@ function previewResponse(overrides: Partial<ProviderRequestPreviewDTO> = {}): Pr
       description: null,
       systemPrompt: null,
       type: 'USER',
-      model: 'anthropic/Claude',
+      model: 'Claude',
       variant: 'fast',
       config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
       version: '0',
@@ -3694,7 +3678,7 @@ function previewResponse(overrides: Partial<ProviderRequestPreviewDTO> = {}): Pr
       description: null,
       systemPrompt: null,
       type: 'USER',
-      model: 'nonexistent/model',
+      model: 'nonexistent-model',
       variant: null,
       config: { inheritParentEnvironment: true, tools: [], skills: [], subagents: [] },
       version: '0',
@@ -3757,8 +3741,7 @@ function previewResponse(overrides: Partial<ProviderRequestPreviewDTO> = {}): Pr
       expect(hook.result.current.interaction).toBeNull()
       expect(hook.result.current.activeDraft?.agentName).toBe('coder')
       expect(hook.result.current.activeDraft?.model).toEqual({
-        providerName: 'anthropic',
-        modelName: 'Claude',
+                modelName: 'Claude',
         variant: 'fast',
       })
       expect(partsToText(hook.result.current.composer.parts)).toBe('preserved draft text')
@@ -3767,8 +3750,7 @@ function previewResponse(overrides: Partial<ProviderRequestPreviewDTO> = {}): Pr
       // 手动修改模型后，再次选择同一 agent 显式重置为该 agent 的预设模型
       act(() => {
         hook.result.current.composer.settings?.onModelChange({
-          providerName: 'custom',
-          modelName: 'Custom',
+                    modelName: 'Custom',
           variant: 'v1',
         })
       })
@@ -3778,8 +3760,7 @@ function previewResponse(overrides: Partial<ProviderRequestPreviewDTO> = {}): Pr
         hook.result.current.selectAgent('coder')
       })
       expect(hook.result.current.activeDraft?.model).toEqual({
-        providerName: 'anthropic',
-        modelName: 'Claude',
+                modelName: 'Claude',
         variant: 'fast',
       })
     })
@@ -3811,8 +3792,7 @@ function previewResponse(overrides: Partial<ProviderRequestPreviewDTO> = {}): Pr
       })
       expect(hook.result.current.activeDraft?.agentName).toBe('coder')
       expect(hook.result.current.activeDraft?.model).toEqual({
-        providerName: 'anthropic',
-        modelName: 'Claude',
+                modelName: 'Claude',
         variant: 'fast',
       })
 
@@ -3838,7 +3818,7 @@ function previewResponse(overrides: Partial<ProviderRequestPreviewDTO> = {}): Pr
       ])
       expect(batchRequest.commands[0]).toMatchObject({ agentName: 'coder' })
       expect(batchRequest.commands[1]).toMatchObject({
-        model: { providerName: 'anthropic', modelName: 'Claude', variant: 'fast' },
+        model: { modelName: 'Claude', variant: 'fast' },
       })
       expect(harnessService.acceptCommandBatch).not.toHaveBeenCalled()
     })

@@ -16,7 +16,7 @@ const GRANDCHILD_ID = 'a2000000-0000-4000-8000-0000000000d1'
 const SESSION_ID = 'b2000000-0000-4000-8000-0000000000b1'
 const HARNESS_URL = '/browser-tests/chat-branch-harness.html'
 const rootPayload = JSON.stringify({ settings: {
-  agentName: 'assistant', model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+  agentName: 'assistant', model: { modelName: 'MiniMax', variant: 'default' },
   environmentName: null, goal: null,
 } })
 
@@ -110,7 +110,7 @@ function thread(headEntryId = 'entry-3', options: { busy?: boolean } = {}) {
     executionControl: 'RUNNABLE',
     branchSettings: {
       agentName: 'assistant',
-      model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+      model: { modelName: 'MiniMax', variant: 'default' },
       environmentName: null,
     },
     createTime: '2026-10-01T00:00:00Z',
@@ -237,6 +237,7 @@ async function installChatApi(
             results: [
               {
                 providerName: 'minimax',
+                kind: 'MODEL',
                 name: 'MiniMax',
                 modelId: 'MiniMax-upstream',
                 description: null,
@@ -246,11 +247,10 @@ async function installChatApi(
                   defaultVariant: 'default',
                   variants: [{ id: 'default' }, { id: 'deep', reasoningEffort: 'high' }],
                   pricing: {
-                    currency: 'USD', pricingTier: 'default', serviceTier: 'default', serviceTierMultiplier: 1,
-                    version: '1', inputPerMillionTokens: 1, outputPerMillionTokens: 1,
-                    cacheReadPerMillionTokens: 1, cacheWritePerMillionTokens: 1,
-                    cacheWriteLongPerMillionTokens: 1, reasoningPerMillionTokens: 1,
-                  },
+      base: { input: '1', output: '1', cacheRead: '1', cacheWrite: '1', cacheWriteByTtl: {}, reasoning: null },
+      overrides: [],
+      multipliers: [],
+    },
                 },
                 version: '1',
                 createTime: null,
@@ -259,6 +259,7 @@ async function installChatApi(
               {
                 // 单 variant 模型：一次点击即完成选择（无需进入二级 variant 菜单）。
                 providerName: 'minimax',
+                kind: 'MODEL',
                 name: 'Echo',
                 modelId: 'Echo-upstream',
                 description: null,
@@ -268,11 +269,10 @@ async function installChatApi(
                   defaultVariant: 'default',
                   variants: [{ id: 'default' }],
                   pricing: {
-                    currency: 'USD', pricingTier: 'default', serviceTier: 'default', serviceTierMultiplier: 1,
-                    version: '1', inputPerMillionTokens: 1, outputPerMillionTokens: 1,
-                    cacheReadPerMillionTokens: 1, cacheWritePerMillionTokens: 1,
-                    cacheWriteLongPerMillionTokens: 1, reasoningPerMillionTokens: 1,
-                  },
+      base: { input: '1', output: '1', cacheRead: '1', cacheWrite: '1', cacheWriteByTtl: {}, reasoning: null },
+      overrides: [],
+      multipliers: [],
+    },
                 },
                 version: '1',
                 createTime: null,
@@ -337,7 +337,7 @@ async function installChatApi(
           parentThreadId: grandchild ? CHILD_ID : THREAD_ID,
           yoloPolicy: { mode: 'FOLLOW', rootThreadId: THREAD_ID },
           branchSettings: { ...boundThread.branchSettings, agentName: grandchild ? 'researcher' : 'worker',
-            model: { providerName: 'minimax', modelName: 'MiniMax', variant: grandchild ? 'deep' : 'default' } },
+            model: { modelName: 'MiniMax', variant: grandchild ? 'deep' : 'default' } },
         },
         entries: [
           ...entryList.filter((entry) => entry.entryId !== 'entry-sibling'),
