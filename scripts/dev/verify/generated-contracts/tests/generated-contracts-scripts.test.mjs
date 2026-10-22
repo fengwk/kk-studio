@@ -17,7 +17,7 @@ const REPOSITORY_ROOT = repositoryRoot()
 const CAPABILITY_DIR = path.join(REPOSITORY_ROOT, 'scripts/dev/verify/generated-contracts')
 const CHECK_SCRIPT = path.join(CAPABILITY_DIR, 'check.sh')
 const WRITE_SCRIPT = path.join(CAPABILITY_DIR, 'write.sh')
-const ARTIFACT_TEST = '-Dtest=TsContractArtifactTest'
+const ARTIFACT_TEST = '-Dtest=TsContractArtifactTest,DaemonContractArtifactTest'
 const UPDATE_PROPERTY = '-Dkkstudio.contract.generation.update=true'
 
 /** Run `body({ log, environment })` with a stub `mvn` that records JAVA_HOME and its arguments. */

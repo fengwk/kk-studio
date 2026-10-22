@@ -2,6 +2,33 @@ import { visit as jsoncVisit, type JSONPath } from 'jsonc-parser'
 
 import type { CapabilityResult, ExpectedFile, IdeCommand, IdeReply, ResultContent } from './contracts.js'
 import { parseReleaseArtifactUrl } from './release.js'
+import {
+  ARCHITECTURES,
+  MAX_CAPABILITY_ID_CHARS,
+  MAX_CONTENT_ITEMS,
+  MAX_CONTROL_PAYLOAD_CHARS,
+  MAX_DAEMON_VERSION_CHARS,
+  MAX_FAILURE_MESSAGE_CHARS,
+  MAX_MEDIA_TYPE_ASCII_BYTES,
+  MAX_NAME_UTF8_BYTES,
+  MAX_PAYLOAD_UTF8_BYTES,
+  MAX_PRESIGNED_HEADERS,
+  MAX_PRESIGNED_HEADER_CHARS,
+  MAX_PRESIGNED_URL_CHARS,
+  MAX_PREVIEW_UTF8_BYTES,
+  MAX_UPDATE_MESSAGE_CHARS,
+  MESSAGE_TYPES,
+  OPERATING_SYSTEMS,
+  PROTOCOL_VERSION,
+  READY_CAPABILITIES_VERSION,
+  TICKET_STATES,
+  UPDATE_PHASES,
+  type Architecture,
+  type MessageType,
+  type OperatingSystem,
+  type TicketState,
+  type UpdatePhase,
+} from './generated/protocol-contract.js'
 
 /**
  * Daemon wire 协议的严格 codec（v4 envelope / READY v5 / capability catalog v3）。
@@ -13,69 +40,7 @@ import { parseReleaseArtifactUrl } from './release.js'
  * 超限嵌套/数字/字符串，避免把不完整消息交给运行时。
  */
 
-/** 当前 Daemon wire 协议版本；其他版本一律拒绝，不做双协议 fallback。 */
-export const PROTOCOL_VERSION = 4
-
-/** capability catalog 版本；HELLO 上报、Platform 据此判定能否执行普通能力调用。 */
-export const CAPABILITY_CATALOG_VERSION = '3'
-
-/** READY capabilities 协议版本。 */
-export const READY_CAPABILITIES_VERSION = 5
-
-/** 结果 payload 的 UTF-8 上限（解码前与最终编码输出）：16 MiB。 */
-export const MAX_PAYLOAD_UTF8_BYTES = 16 * 1024 * 1024
-
-/** 单条控制消息（资源上传/更新）的字符上限：控制面只承载元数据，绝无二进制。 */
-export const MAX_CONTROL_PAYLOAD_CHARS = 16 * 1024
-
-/** details JSON 与 json 内容的 UTF-8 上限：1 MiB。 */
-export const MAX_DETAILS_JSON_UTF8_BYTES = 1024 * 1024
-
-/** contents 数组元素上限。 */
-export const MAX_CONTENT_ITEMS = 64
-
-/** ResourceResultContent preview 的 UTF-8 上限。 */
-export const MAX_PREVIEW_UTF8_BYTES = 16384
-
-/** resource mediaType 的 ASCII 上限。 */
-export const MAX_MEDIA_TYPE_ASCII_BYTES = 255
-
-/** resource name 的 UTF-8 上限。 */
-export const MAX_NAME_UTF8_BYTES = 512
-
-/** 单条上传票据 FAILED 说明的字符上限。 */
-export const MAX_FAILURE_MESSAGE_CHARS = 512
-
-/** ERROR payload 的可选 code：目标 Environment 已有活跃租约，按退避重连。 */
-export const ERROR_CODE_RETRY_LATER = 'RETRY_LATER'
-
-/** ERROR payload 的可选 code：注册凭证无效，终态失败。 */
-export const ERROR_CODE_REGISTRATION_REJECTED = 'REGISTRATION_REJECTED'
-
-export const MESSAGE_TYPES = [
-  'HELLO',
-  'READY',
-  'HEARTBEAT',
-  'STARTED',
-  'PROGRESS',
-  'COMPLETED',
-  'FAILED',
-  'CANCELLED',
-  'WELCOME',
-  'TEMPORARY_RESOURCE_POLICY',
-  'INVOKE',
-  'CANCEL',
-  'RESOURCE_UPLOAD_REQUEST',
-  'RESOURCE_UPLOAD_TICKET',
-  'RESOURCE_UPLOAD_COMMIT',
-  'UPDATE',
-  'UPDATE_RESULT',
-  'ERROR',
-  'IDE_COMMAND',
-  'IDE_RESULT',
-] as const
-
-export type MessageType = (typeof MESSAGE_TYPES)[number]
+export * from './generated/protocol-contract.js'
 
 /** 不符合 Daemon wire 协议的消息。 */
 export class ProtocolError extends Error {
@@ -426,9 +391,9 @@ export function decodeEnvelope(text: string): Envelope {
 // ---------------------------------------------------------------------------
 
 export interface EnvironmentInfo {
-  operatingSystem: 'windows' | 'wsl' | 'linux' | 'macos'
+  operatingSystem: OperatingSystem
   /** 宿主 CPU 架构；用于新版归档选择 amd64/arm64 制品，不支持时构建期即失败关闭。 */
-  architecture: 'amd64' | 'arm64'
+  architecture: Architecture
   timeZone: string
   userName: string
   homeDirectory: string
@@ -452,13 +417,11 @@ const READY_ENVIRONMENT_FIELDS = new Set([
   'note',
   'tempDirectory',
 ])
-const OPERATING_SYSTEMS = new Set(['windows', 'wsl', 'linux', 'macos'])
-const ARCHITECTURES = new Set(['amd64', 'arm64'])
-const DAEMON_VERSION_PATTERN = /^[0-9A-Za-z._+-]{1,64}$/
+const DAEMON_VERSION_PATTERN = new RegExp(`^[0-9A-Za-z._+-]{1,${MAX_DAEMON_VERSION_CHARS}}$`)
 
 export function validateDaemonVersion(value: string): string {
   if (value.trim() === '' || !DAEMON_VERSION_PATTERN.test(value)) {
-    throw new ProtocolError('daemonVersion must match [0-9A-Za-z._+-]{1,64}')
+    throw new ProtocolError(`daemonVersion must match [0-9A-Za-z._+-]{1,${MAX_DAEMON_VERSION_CHARS}}`)
   }
   return value
 }
@@ -498,11 +461,11 @@ export function decodeCapabilities(text: string): Capabilities {
   const environment = requiredObject(root, 'environment', 'READY payload')
   rejectUnknownFields(environment, READY_ENVIRONMENT_FIELDS, 'READY environment')
   const operatingSystem = requiredText(environment, 'operatingSystem', 'READY environment')
-  if (!OPERATING_SYSTEMS.has(operatingSystem)) {
+  if (!(OPERATING_SYSTEMS as readonly string[]).includes(operatingSystem)) {
     throw new ProtocolError(`unsupported daemon operating system: ${operatingSystem}`)
   }
   const architecture = requiredText(environment, 'architecture', 'READY environment')
-  if (!ARCHITECTURES.has(architecture)) {
+  if (!(ARCHITECTURES as readonly string[]).includes(architecture)) {
     throw new ProtocolError(`unsupported daemon architecture: ${architecture}`)
   }
   return {
@@ -539,7 +502,7 @@ export function decodeInvoke(text: string): InvokeRequest {
   const root = parseStrictObject(text, 'capability INVOKE payload', ENVELOPE_LIMITS)
   rejectUnknownFields(root, INVOKE_FIELDS, 'capability INVOKE payload')
   const capabilityId = requiredText(root, 'capabilityId', 'capability INVOKE payload')
-  if (capabilityId.length > 128 || !CAPABILITY_ID_PATTERN.test(capabilityId)) {
+  if (capabilityId.length > MAX_CAPABILITY_ID_CHARS || !CAPABILITY_ID_PATTERN.test(capabilityId)) {
     throw new ProtocolError('capability INVOKE payload.capabilityId must use canonical syntax')
   }
   const capabilityVersion = requiredText(root, 'capabilityVersion', 'capability INVOKE payload')
@@ -857,8 +820,6 @@ export function decodeCompleted(text: string, expectedCallId: string, maximumRes
 // Resource transfer control
 // ---------------------------------------------------------------------------
 
-export type TicketState = 'PENDING' | 'READY' | 'FAILED'
-
 export interface UploadRequest {
   transferId: string
   mediaType: string
@@ -947,7 +908,7 @@ export function decodeUploadTicket(text: string): UploadTicket {
   const root = parseStrictObject(text, 'upload ticket', CONTROL_LIMITS)
   const transferId = requiredCanonicalUuid(root, TRANSFER_ID_FIELD, 'upload ticket')
   const stateText = requiredText(root, 'state', 'upload ticket')
-  if (stateText !== 'PENDING' && stateText !== 'READY' && stateText !== 'FAILED') {
+  if (!(TICKET_STATES as readonly string[]).includes(stateText)) {
     throw new ProtocolError(`upload ticket state is unknown: ${stateText}`)
   }
   if (stateText === 'PENDING') {
@@ -988,8 +949,8 @@ function decodePresignedPut(value: unknown): PresignedPut {
     throw new ProtocolError('upload ticket presignedPut.method must be PUT')
   }
   const url = requiredText(value, 'url', 'upload ticket presignedPut')
-  if (url.length > 4096) {
-    throw new ProtocolError('upload ticket presignedPut.url must not exceed 4096 characters')
+  if (url.length > MAX_PRESIGNED_URL_CHARS) {
+    throw new ProtocolError(`upload ticket presignedPut.url must not exceed ${MAX_PRESIGNED_URL_CHARS} characters`)
   }
   const headersNode = value.headers
   if (!isPlainObject(headersNode)) {
@@ -1000,13 +961,15 @@ function decodePresignedPut(value: unknown): PresignedPut {
     if (typeof headerValue !== 'string' || headerValue.trim() === '' || name.trim() === '') {
       throw new ProtocolError('upload ticket presignedPut header names and values must be non-blank strings')
     }
-    if (name.length > 1024 || headerValue.length > 1024) {
-      throw new ProtocolError('upload ticket presignedPut header name and value must not exceed 1024 characters')
+    if (name.length > MAX_PRESIGNED_HEADER_CHARS || headerValue.length > MAX_PRESIGNED_HEADER_CHARS) {
+      throw new ProtocolError(
+        `upload ticket presignedPut header name and value must not exceed ${MAX_PRESIGNED_HEADER_CHARS} characters`,
+      )
     }
     headers[name] = headerValue
   }
-  if (Object.keys(headers).length > 16) {
-    throw new ProtocolError('upload ticket presignedPut.headers must not exceed 16 entries')
+  if (Object.keys(headers).length > MAX_PRESIGNED_HEADERS) {
+    throw new ProtocolError(`upload ticket presignedPut.headers must not exceed ${MAX_PRESIGNED_HEADERS} entries`)
   }
   const expiresAt = requiredText(value, 'expiresAt', 'upload ticket presignedPut')
   const parsed = new Date(expiresAt)
@@ -1019,8 +982,6 @@ function decodePresignedPut(value: unknown): PresignedPut {
 // ---------------------------------------------------------------------------
 // Managed update
 // ---------------------------------------------------------------------------
-
-export type UpdatePhase = 'ACCEPTED' | 'PREPARED' | 'FAILED'
 
 export interface UpdateCommand {
   operationId: string
@@ -1079,16 +1040,17 @@ export function decodeUpdateResult(text: string): UpdateResult {
   rejectUnknownFields(root, new Set(['operationId', 'phase', 'message']), 'update result')
   const operationId = requiredText(root, 'operationId', 'update result')
   const phaseText = requiredText(root, 'phase', 'update result')
-  if (phaseText !== 'ACCEPTED' && phaseText !== 'PREPARED' && phaseText !== 'FAILED') {
+  const phase = UPDATE_PHASES.find((candidate) => candidate === phaseText)
+  if (phase === undefined) {
     throw new ProtocolError(`unknown update phase: ${phaseText}`)
   }
   const message = optionalText(root, 'message', 'update result')
   if (message !== null) {
-    if (message.trim() === '' || message.length > 500) {
+    if (message.trim() === '' || message.length > MAX_UPDATE_MESSAGE_CHARS) {
       throw new ProtocolError('update result.message must be a bounded non-blank string')
     }
   }
-  return { operationId, phase: phaseText, message }
+  return { operationId, phase, message }
 }
 
 // ---------------------------------------------------------------------------
