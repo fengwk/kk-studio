@@ -338,9 +338,7 @@ class ModelRequestDebugServiceTest {
     String secondFrozen =
         service
             .getModelRequestDebug(
-                THREAD_ID,
-                new ModelSelection("other-model", "other-variant"),
-                null)
+                THREAD_ID, new ModelSelection("other-model", "other-variant"), null)
             .getFrozenInvocation()
             .getRequestJson();
     assertEquals(firstFrozen, secondFrozen);
@@ -570,8 +568,7 @@ class ModelRequestDebugServiceTest {
   }
 
   private static BranchSettings branchSettings() {
-    return new BranchSettings(
-        "assistant", new ModelSelection("model", "default"), "env-b", GOAL);
+    return new BranchSettings("assistant", new ModelSelection("model", "default"), "env-b", GOAL);
   }
 
   /** 成功共享规划：SENT 候选在前、FILTERED 候选在后，附 Skill 交付事实、subagent 与 cache control。 */

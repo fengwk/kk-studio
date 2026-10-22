@@ -173,7 +173,6 @@ class StudioHarnessSessionControllerTest {
     thread.setUpdatedAt(Instant.parse("2026-08-10T00:01:00Z"));
     thread.setStatus("IDLE");
     HarnessModelSelectionDTO model = new HarnessModelSelectionDTO();
-    model.setProviderName("openai");
     model.setModelName("gpt-5");
     model.setVariant("default");
     thread.setModel(model);
@@ -201,7 +200,6 @@ class StudioHarnessSessionControllerTest {
         .andExpect(jsonPath("$.data[1].name").value("thread"))
         .andExpect(jsonPath("$.data[0].name").value("thread"))
         .andExpect(jsonPath("$.data[0].status").value("IDLE"))
-        .andExpect(jsonPath("$.data[0].model.providerName").value("openai"))
         .andExpect(jsonPath("$.data[0].model.modelName").value("gpt-5"))
         .andExpect(jsonPath("$.data[0].model.variant").value("default"))
         .andExpect(jsonPath("$.data[0].headMessagePreview").value("hello"));
@@ -213,8 +211,7 @@ class StudioHarnessSessionControllerTest {
             SESSION_ID,
             null,
             new RootPayload(
-                new BranchSettings(
-                    "assistant", new ModelSelection("gpt-5", "default"), null)),
+                new BranchSettings("assistant", new ModelSelection("gpt-5", "default"), null)),
             Instant.parse("2026-08-10T00:00:00Z"));
     Entry user =
         new Entry(

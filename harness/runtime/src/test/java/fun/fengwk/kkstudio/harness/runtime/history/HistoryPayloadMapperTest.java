@@ -17,6 +17,7 @@ import fun.fengwk.kkstudio.harness.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolApproval;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolBinding;
@@ -101,6 +102,23 @@ class HistoryPayloadMapperTest {
     assertEquals(GenerationStopReason.COMPLETE, metadata.stopReason());
     assertEquals(usage(), metadata.usage());
     assertNull(payload.toolResultMetadata());
+  }
+
+  /** 成功 metadata 必须冻结实际执行 ModelSelection、请求开始时间与 Provider 报告的 service tier。 */
+  @Test
+  void assistantPayloadFreezesActualModelRequestedAtAndServiceTier() {
+    ProviderResponse response =
+        new ProviderResponse(
+            "text", "", List.of(), GenerationStopReason.COMPLETE, usage(), "req", "priority", "{}");
+    ModelSelection model = new ModelSelection("model-a", "default");
+    Instant requestedAt = NOW.minusSeconds(1);
+
+    AssistantMessageMetadata metadata =
+        MAPPER.assistantPayload(response, List.of(), model, requestedAt).assistantMetadata();
+
+    assertEquals(model, metadata.model());
+    assertEquals(requestedAt, metadata.requestedAt());
+    assertEquals("priority", metadata.responseServiceTier());
   }
 
   @Test

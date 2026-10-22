@@ -227,7 +227,7 @@ class DatabaseTurnResolverTest {
 
     assertEquals(DatabaseTurnResolver.REJECTION_CODE, rejected.error().code());
     assertEquals(
-        "model variant not found: model variant=missing", rejected.error().message());
+        "unknown agent model variant: model=model, variant=missing", rejected.error().message());
   }
 
   @Test
@@ -503,8 +503,7 @@ class DatabaseTurnResolverTest {
     assertEquals(ENV_A, requestSpec.toolBindings().getFirst().environmentId());
 
     BranchSettings missingName =
-        new BranchSettings(
-            "assistant", new ModelSelection("model", "default"), ENV_MISSING_NAME);
+        new BranchSettings("assistant", new ModelSelection("model", "default"), ENV_MISSING_NAME);
     TurnResolver.Rejected rejected = fixture.rejected(fixture.path(missingName));
     assertEquals(DatabaseTurnResolver.REJECTION_CODE, rejected.error().code());
     assertEquals("environment not found: " + ENV_MISSING_NAME, rejected.error().message());
@@ -533,9 +532,7 @@ class DatabaseTurnResolverTest {
             .resolved(
                 matching.path(
                     new BranchSettings(
-                        "assistant",
-                        new ModelSelection("model", "default"),
-                        ENV_B_NAME)))
+                        "assistant", new ModelSelection("model", "default"), ENV_B_NAME)))
             .toolBindings()
             .getFirst()
             .environmentId());
@@ -632,8 +629,7 @@ class DatabaseTurnResolverTest {
     LiveTurnPlan.Planned custom =
         fixture.plannedWithSettings(
             path,
-            new BranchSettings(
-                "assistant", new ModelSelection("model", "custom"), ENV_A_NAME));
+            new BranchSettings("assistant", new ModelSelection("model", "custom"), ENV_A_NAME));
     assertEquals("custom", custom.spec().variant().id());
 
     // 规划只读：path 的 base settings 与最初完全一致，Draft 绝不写回 EntryPath。
@@ -650,9 +646,7 @@ class DatabaseTurnResolverTest {
             .rejected(
                 fixture.path(
                     new BranchSettings(
-                        "assistant",
-                        new ModelSelection("model", "default"),
-                        ENV_MISSING_NAME)))
+                        "assistant", new ModelSelection("model", "default"), ENV_MISSING_NAME)))
             .error()
             .message());
   }
@@ -721,8 +715,7 @@ class DatabaseTurnResolverTest {
     fixture.readyEnvironment(ENV_A, List.of("dev-a"));
     fixture.readyEnvironment(ENV_B, List.of("dev-b"));
     BranchSettings settings =
-        new BranchSettings(
-            "assistant", new ModelSelection("model", "default"), ENV_B_NAME);
+        new BranchSettings("assistant", new ModelSelection("model", "default"), ENV_B_NAME);
 
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings));
 
@@ -1856,8 +1849,7 @@ class DatabaseTurnResolverTest {
 
   /** BranchSettings 冻结 agent/model 与可空 environmentName；解析出的 EnvironmentId 只能来自该 name。 */
   private static BranchSettings settings(String variant) {
-    return new BranchSettings(
-        "assistant", new ModelSelection("model", variant), ENV_A_NAME);
+    return new BranchSettings("assistant", new ModelSelection("model", variant), ENV_A_NAME);
   }
 
   /** 未选择 Environment 的 branch：环境工具仍需声明并可规划，调用时才失败。 */
@@ -2283,8 +2275,7 @@ class DatabaseTurnResolverTest {
   @Test
   void compactionResolvesFromCompactionAgentAndDoesNotInheritParentModel() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
-    ModelSelection compactorModel =
-        new ModelSelection("fallback-model", "fallback");
+    ModelSelection compactorModel = new ModelSelection("fallback-model", "fallback");
     fixture.addModel(
         "fallback-provider",
         compactorModel,
@@ -3192,8 +3183,7 @@ class DatabaseTurnResolverTest {
       fallbackModel.setModelId(selection.modelName());
       fallbackModel.setKind(AgentModelKind.MODEL);
       fallbackModel.setConfigJson(configJson);
-      when(models.getByName(selection.modelName()))
-          .thenReturn(fallbackModel);
+      when(models.getByName(selection.modelName())).thenReturn(fallbackModel);
       when(modelConfigParser.parse(configJson)).thenReturn(parsedModel);
     }
 
