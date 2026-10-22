@@ -503,7 +503,7 @@ class PostgresqlHarnessStoreConcurrencyTest {
             store, baseline.sessionId(), baseline.turnStartEntryId(), userMessagePayload());
     UUID assistantEntryId =
         insertChildEntry(
-            store, baseline.sessionId(), userEntryId, mappedAssistant(request, response));
+            store, baseline.sessionId(), userEntryId, mappedAssistant(request, response, T1));
     inTransaction(
         store,
         tx -> {
