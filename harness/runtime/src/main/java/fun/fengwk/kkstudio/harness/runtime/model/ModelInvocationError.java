@@ -16,7 +16,7 @@ import java.util.Objects;
  * <p>{@code httpStatus} 只承载结构化 HTTP error 状态（100–599，含非预期 3xx）：普通非 HTTP 失败为 null，绝不从 message
  * 文本推断状态。 {@link #retryCandidate()} 给出统一的「是否可能被重试」判定，实际是否重试由模型 HTTP 状态策略或共享预算唯一决策。
  *
- * <p>严格 JSON 编码/解码位于 {@link ModelInvocationErrorJsonCodec}。
+ * <p>wire 形态就是本 record，持久化与 HTTP 边界经 {@code StrictJson} 严格绑定。
  */
 public record ModelInvocationError(ProviderErrorKind kind, String message, Integer httpStatus) {
 

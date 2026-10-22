@@ -79,7 +79,8 @@ public class ToolInvocationDTO {
   private String resultJson;
 
   /**
-   * 错误详情：canonical JSON（ToolInvocationErrorJsonCodec）；仅记录错误后非 null（{@code @JsonInclude(ALWAYS)}）。
+   * 错误详情：canonical JSON（ToolInvocationError record 的严格绑定）；仅记录错误后非
+   * null（{@code @JsonInclude(ALWAYS)}）。
    */
   @JsonInclude(JsonInclude.Include.ALWAYS)
   private String errorJson;

@@ -12,27 +12,27 @@ import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.common.json.StrictJson;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.CancelledThreadInput;
 import fun.fengwk.kkstudio.harness.runtime.StoppedThreadReceipt;
 import fun.fengwk.kkstudio.harness.runtime.history.Entry;
 import fun.fengwk.kkstudio.harness.runtime.history.EntryType;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryEntryPayloadJsonCodec;
-import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ModelAttemptFailuresJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ModelRequestSpecJsonCodec;
-import fun.fengwk.kkstudio.harness.runtime.invocation.codec.StreamCheckpointJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ToolApprovalJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ToolBindingJsonCodec;
-import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ToolCallJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ToolEffectBatchJsonCodec;
-import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ToolInputReceiptJsonCodec;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelAttemptFailure;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.model.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.runtime.invocation.model.StreamCheckpoint;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInputReceipt;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.runtime.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoin;
-import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationErrorJsonCodec;
+import fun.fengwk.kkstudio.harness.runtime.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderReplayStateJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.model.provider.codec.ProviderResponseJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.session.Session;
@@ -48,10 +48,11 @@ import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayload;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.ThreadCommandType;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationErrorJsonCodec;
+import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.runtime.work.Work;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.runtime.work.WorkTargetType;
+import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
 
 import java.sql.ResultSet;
@@ -72,19 +73,15 @@ final class PostgresqlHarnessRows {
   static final HistoryEntryPayloadJsonCodec ENTRY_PAYLOADS = new HistoryEntryPayloadJsonCodec();
   static final ThreadCommandPayloadJsonCodec COMMAND_PAYLOADS = new ThreadCommandPayloadJsonCodec();
   static final ModelRequestSpecJsonCodec MODEL_REQUESTS = new ModelRequestSpecJsonCodec();
-  static final StreamCheckpointJsonCodec STREAM_CHECKPOINTS = new StreamCheckpointJsonCodec();
-  static final ModelAttemptFailuresJsonCodec MODEL_FAILED_ATTEMPTS =
-      new ModelAttemptFailuresJsonCodec();
   static final ProviderResponseJsonCodec MODEL_RESULTS = new ProviderResponseJsonCodec();
-  static final ModelInvocationErrorJsonCodec MODEL_ERRORS = new ModelInvocationErrorJsonCodec();
   static final ProviderReplayStateJsonCodec PROVIDER_REPLAY_STATES =
       new ProviderReplayStateJsonCodec();
-  static final ToolCallJsonCodec TOOL_CALLS = new ToolCallJsonCodec();
   static final ToolBindingJsonCodec TOOL_BINDINGS = new ToolBindingJsonCodec();
   static final ToolApprovalJsonCodec TOOL_APPROVALS = new ToolApprovalJsonCodec();
   static final ToolEffectBatchJsonCodec TOOL_EFFECTS = new ToolEffectBatchJsonCodec();
-  static final ToolInvocationErrorJsonCodec TOOL_ERRORS = new ToolInvocationErrorJsonCodec();
-  static final ToolInputReceiptJsonCodec TOOL_INPUT_RECEIPTS = new ToolInputReceiptJsonCodec();
+
+  /** wire 与领域 record 一致的列（tool call、checkpoint、错误、失败审计、输入回执）直接严格绑定。 */
+  static final StrictJson JSON = StrictJson.standard();
 
   static final RowMapper<Session> SESSION =
       (resultSet, rowNumber) ->
@@ -275,11 +272,18 @@ final class PostgresqlHarnessRows {
               MODEL_REQUESTS.decode(resultSet.getString("request_spec")),
               ModelInvocationStatus.valueOf(resultSet.getString("status")),
               resultSet.getInt("attempt"),
-              decodeNullable(resultSet.getString("stream_checkpoint"), STREAM_CHECKPOINTS::decode),
+              decodeNullable(
+                  resultSet.getString("stream_checkpoint"),
+                  json -> JSON.read(json, StreamCheckpoint.class, "streamCheckpoint")),
               decodeNullable(resultSet.getString("result"), MODEL_RESULTS::decode),
-              decodeNullable(resultSet.getString("error"), MODEL_ERRORS::decode),
+              decodeNullable(
+                  resultSet.getString("error"),
+                  json -> JSON.read(json, ModelInvocationError.class, "modelInvocationError")),
               nullableUuid(resultSet, "result_entry_id"),
-              MODEL_FAILED_ATTEMPTS.decode(resultSet.getString("failed_attempts")),
+              JSON.readList(
+                  resultSet.getString("failed_attempts"),
+                  ModelAttemptFailure.class,
+                  "modelAttemptFailures"),
               instant(resultSet, "created_at"),
               instant(resultSet, "updated_at"),
               decodeNullable(
@@ -292,17 +296,21 @@ final class PostgresqlHarnessRows {
               uuid(resultSet, "model_invocation_id"),
               uuid(resultSet, "assistant_entry_id"),
               resultSet.getInt("call_index"),
-              TOOL_CALLS.decode(resultSet.getString("call")),
+              JSON.read(resultSet.getString("call"), ToolCall.class, "toolCall"),
               decodeNullable(resultSet.getString("binding"), TOOL_BINDINGS::decode),
               ToolInvocationStatus.valueOf(resultSet.getString("status")),
               resultSet.getInt("attempt"),
               decodeNullable(resultSet.getString("approval"), TOOL_APPROVALS::decode),
               decodeNullable(resultSet.getString("result"), ToolResultJsonCodec::decode),
               TOOL_EFFECTS.decode(resultSet.getString("effects")),
-              decodeNullable(resultSet.getString("error"), TOOL_ERRORS::decode),
+              decodeNullable(
+                  resultSet.getString("error"),
+                  json -> JSON.read(json, ToolInvocationError.class, "toolInvocationError")),
               instant(resultSet, "created_at"),
               instant(resultSet, "updated_at"),
-              decodeNullable(resultSet.getString("input_receipt"), TOOL_INPUT_RECEIPTS::decode));
+              decodeNullable(
+                  resultSet.getString("input_receipt"),
+                  json -> JSON.read(json, ToolInputReceipt.class, "toolInputReceipt")));
 
   static final RowMapper<PendingToolInvocationRow> PENDING_TOOL_INVOCATION =
       (resultSet, rowNumber) ->

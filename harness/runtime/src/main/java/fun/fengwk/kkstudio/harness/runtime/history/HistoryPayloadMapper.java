@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.history;
 
+import fun.fengwk.kkstudio.common.json.StrictJson;
 import fun.fengwk.kkstudio.common.result.JsonResultContent;
 import fun.fengwk.kkstudio.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.common.result.ResultContent;
@@ -21,7 +22,6 @@ import fun.fengwk.kkstudio.harness.runtime.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.runtime.session.ToolResultMessageContent;
-import fun.fengwk.kkstudio.harness.runtime.tool.ToolInvocationErrorJsonCodec;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
 import java.util.ArrayList;
@@ -40,9 +40,9 @@ import java.util.UUID;
  * ToolInvocation} 投影为 TOOL {@link MessagePayload}（SUCCEEDED 把 Text/JSON/Resource {@link
  * ResultContent}（含 Resource preview）映射为对应 {@link AgentMessageContent} 并回退空 text，error 标志原样保留，Binary
  * / 未知 content 显式 {@link IllegalArgumentException} 失败而不是静默丢失；非成功使用 error message + {@link
- * ToolInvocationErrorJsonCodec} 详情且 error=true，metadata.status 精确映射 invocation terminal
- * status）；history normalization 的 synthetic 结果固定为 UNKNOWN / HISTORY_CUT / "No result
- * provided"，不关联任何 ToolInvocation。
+ * ToolInvocationError} JSON 详情且 error=true，metadata.status 精确映射 invocation terminal status）；history
+ * normalization 的 synthetic 结果固定为 UNKNOWN / HISTORY_CUT / "No result provided"，不关联任何
+ * ToolInvocation。
  */
 public final class HistoryPayloadMapper {
 
@@ -54,7 +54,6 @@ public final class HistoryPayloadMapper {
 
   private static final String EMPTY_DETAILS_JSON = "{}";
 
-  private final ToolInvocationErrorJsonCodec errorCodec = new ToolInvocationErrorJsonCodec();
   private final ProviderToolCallDiagnosticJsonCodec diagnosticCodec =
       new ProviderToolCallDiagnosticJsonCodec();
 
@@ -284,7 +283,7 @@ public final class HistoryPayloadMapper {
         rendererKey(invocation),
         List.of(new TextMessageContent(invocation.error().message())),
         true,
-        errorCodec.encode(invocation.error()));
+        StrictJson.standard().write(invocation.error(), "toolInvocationError"));
   }
 
   /** FAILED 槽位的 binding 可能为空（unknown tool）：durable renderer fallback 固定为 {@code tool}。 */

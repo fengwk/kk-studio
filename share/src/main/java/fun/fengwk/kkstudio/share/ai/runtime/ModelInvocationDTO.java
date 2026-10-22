@@ -43,7 +43,7 @@ public class ModelInvocationDTO {
   private Integer attempt;
 
   /**
-   * 当前尝试的 durable 安全流式部分：canonical JSON（StreamCheckpointJsonCodec）；RUNNING 时可持续推进，终态挂接 Entry
+   * 当前尝试的 durable 安全流式部分：canonical JSON（StreamCheckpoint record 的严格绑定）；RUNNING 时可持续推进，终态挂接 Entry
    * 前也可保留，且推进不要求 Thread version 变化（{@code @JsonInclude(ALWAYS)}）。
    */
   @JsonInclude(JsonInclude.Include.ALWAYS)
@@ -54,7 +54,8 @@ public class ModelInvocationDTO {
   private String resultJson;
 
   /**
-   * 错误详情：canonical JSON（ModelInvocationErrorJsonCodec）；仅记录错误后非 null（{@code @JsonInclude(ALWAYS)}）。
+   * 错误详情：canonical JSON（ModelInvocationError record 的严格绑定）；仅记录错误后非
+   * null（{@code @JsonInclude(ALWAYS)}）。
    */
   @JsonInclude(JsonInclude.Include.ALWAYS)
   private String errorJson;

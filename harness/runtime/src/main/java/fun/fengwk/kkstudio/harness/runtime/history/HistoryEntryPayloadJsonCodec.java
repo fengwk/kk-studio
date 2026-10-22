@@ -10,6 +10,7 @@ import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
+import fun.fengwk.kkstudio.common.json.StrictJson;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTrigger;
@@ -17,7 +18,7 @@ import fun.fengwk.kkstudio.harness.runtime.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.runtime.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ToolBindingJsonCodec;
-import fun.fengwk.kkstudio.harness.runtime.invocation.codec.ToolInputReceiptJsonCodec;
+import fun.fengwk.kkstudio.harness.runtime.invocation.tool.ToolInputReceipt;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.runtime.session.AgentMessageJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.session.AssistantMessageMetadata;
@@ -96,9 +97,6 @@ public final class HistoryEntryPayloadJsonCodec {
           "inputReceipt",
           "invocationId",
           "binding");
-
-  private static final ToolInputReceiptJsonCodec INPUT_RECEIPT_CODEC =
-      new ToolInputReceiptJsonCodec();
 
   private static final ToolBindingJsonCodec TOOL_BINDING_CODEC = new ToolBindingJsonCodec();
 
@@ -363,7 +361,7 @@ public final class HistoryEntryPayloadJsonCodec {
     if (metadata.inputReceipt() == null) {
       node.putNull("inputReceipt");
     } else {
-      node.set("inputReceipt", INPUT_RECEIPT_CODEC.encodeNode(metadata.inputReceipt()));
+      node.set("inputReceipt", StrictJson.standard().tree(metadata.inputReceipt()));
     }
     if (metadata.invocationId() == null) {
       node.putNull("invocationId");
@@ -659,7 +657,8 @@ public final class HistoryEntryPayloadJsonCodec {
             ToolResultReason.class, node, "reason", "toolResultMetadata.reason"),
         node.get("inputReceipt") == null || node.get("inputReceipt").isNull()
             ? null
-            : INPUT_RECEIPT_CODEC.decodeNode(node.get("inputReceipt")),
+            : StrictJson.standard()
+                .read(node.get("inputReceipt"), ToolInputReceipt.class, "inputReceipt"),
         node.get("binding") == null || node.get("binding").isNull()
             ? null
             : TOOL_BINDING_CODEC.decodeNode(node.get("binding")));

@@ -48,6 +48,7 @@
                                         <include>fun.fengwk.kkstudio.common.resource.ResourceRef</include>
                                         <include>fun.fengwk.kkstudio.common.resource.ResourceUriValidator</include>
                                         <include>fun.fengwk.kkstudio.common.json.JsonValues</include>
+                                        <include>fun.fengwk.kkstudio.common.json.StrictJson</include>
                                         <include>fun.fengwk.kkstudio.common.json.BoundedJsonWriter</include>
                                         <include>fun.fengwk.kkstudio.common.json.BoundedOutputStream</include>
                                         <include>fun.fengwk.kkstudio.common.io.DeadlineResponseBody</include>
