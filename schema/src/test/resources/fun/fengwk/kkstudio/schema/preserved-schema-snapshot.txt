@@ -8,21 +8,29 @@ column	agent_definition	config	type=jsonb notnull=t default=<null> generated= co
 column	agent_definition	created_at	type=timestamp(3) with time zone notnull=t default=CURRENT_TIMESTAMP generated= collation=-
 column	agent_definition	description	type=text notnull=f default=<null> generated= collation="default"
 column	agent_definition	model_name	type=character varying(128) notnull=f default=<null> generated= collation="default"
-column	agent_definition	model_provider_name	type=character varying(64) notnull=f default=<null> generated= collation="default"
 column	agent_definition	name	type=character varying(64) notnull=t default=<null> generated= collation="default"
 column	agent_definition	system_prompt	type=text notnull=f default=<null> generated= collation="default"
 column	agent_definition	type	type=character varying(16) notnull=t default='USER'::character varying generated= collation="default"
 column	agent_definition	updated_at	type=timestamp(3) with time zone notnull=t default=CURRENT_TIMESTAMP generated= collation=-
 column	agent_definition	variant	type=character varying(64) notnull=f default=<null> generated= collation="default"
 column	agent_definition	version	type=bigint notnull=t default=0 generated= collation=-
-column	agent_model	config	type=jsonb notnull=t default=<null> generated= collation=-
+column	agent_model	config	type=jsonb notnull=f default=<null> generated= collation=-
 column	agent_model	created_at	type=timestamp(3) with time zone notnull=t default=CURRENT_TIMESTAMP generated= collation=-
 column	agent_model	description	type=text notnull=f default=<null> generated= collation="default"
-column	agent_model	model_id	type=character varying(256) notnull=t default=<null> generated= collation="default"
+column	agent_model	group_config	type=jsonb notnull=f default=<null> generated= collation=-
+column	agent_model	kind	type=character varying(16) notnull=t default=<null> generated= collation="default"
+column	agent_model	model_id	type=character varying(256) notnull=f default=<null> generated= collation="default"
 column	agent_model	name	type=character varying(128) notnull=t default=<null> generated= collation="default"
-column	agent_model	provider_name	type=character varying(64) notnull=t default=<null> generated= collation="default"
+column	agent_model	provider_name	type=character varying(64) notnull=f default=<null> generated= collation="default"
 column	agent_model	updated_at	type=timestamp(3) with time zone notnull=t default=CURRENT_TIMESTAMP generated= collation=-
 column	agent_model	version	type=bigint notnull=t default=0 generated= collation=-
+column	agent_model_group_cooldown	cooldown_until	type=timestamp(3) with time zone notnull=t default=<null> generated= collation=-
+column	agent_model_group_cooldown	created_at	type=timestamp(3) with time zone notnull=t default=CURRENT_TIMESTAMP generated= collation=-
+column	agent_model_group_cooldown	group_name	type=character varying(128) notnull=t default=<null> generated= collation="default"
+column	agent_model_group_cooldown	group_version	type=bigint notnull=t default=<null> generated= collation=-
+column	agent_model_group_cooldown	member_model_name	type=character varying(128) notnull=t default=<null> generated= collation="default"
+column	agent_model_group_cooldown	member_variant	type=character varying(64) notnull=t default=<null> generated= collation="default"
+column	agent_model_group_cooldown	updated_at	type=timestamp(3) with time zone notnull=t default=CURRENT_TIMESTAMP generated= collation=-
 column	agent_provider	base_url	type=character varying(512) notnull=f default=<null> generated= collation="default"
 column	agent_provider	config	type=jsonb notnull=t default=<null> generated= collation=-
 column	agent_provider	connection_generation_id	type=uuid notnull=t default=<null> generated= collation=-
@@ -76,10 +84,12 @@ column	harness_model_invocation	attempt	type=integer notnull=t default=<null> ge
 column	harness_model_invocation	created_at	type=timestamp(3) with time zone notnull=t default=<null> generated= collation=-
 column	harness_model_invocation	error	type=jsonb notnull=f default=<null> generated= collation=-
 column	harness_model_invocation	failed_attempts	type=jsonb notnull=t default=<null> generated= collation=-
+column	harness_model_invocation	group_execution	type=jsonb notnull=f default=<null> generated= collation=-
 column	harness_model_invocation	id	type=uuid notnull=t default=<null> generated= collation=-
 column	harness_model_invocation	provider_replay_state	type=jsonb notnull=f default=<null> generated= collation=-
 column	harness_model_invocation	request_head_entry_id	type=uuid notnull=t default=<null> generated= collation=-
 column	harness_model_invocation	request_spec	type=jsonb notnull=t default=<null> generated= collation=-
+column	harness_model_invocation	requested_at	type=timestamp(3) with time zone notnull=f default=<null> generated= collation=-
 column	harness_model_invocation	result	type=jsonb notnull=f default=<null> generated= collation=-
 column	harness_model_invocation	result_entry_id	type=uuid notnull=f default=<null> generated= collation=-
 column	harness_model_invocation	status	type=character varying(16) notnull=t default=<null> generated= collation="default"
@@ -259,18 +269,25 @@ column	system_setting	id	type=bigint notnull=t default=<null> generated= collati
 column	system_setting	updated_at	type=timestamp(3) with time zone notnull=t default=CURRENT_TIMESTAMP generated= collation=-
 column	system_setting	version	type=bigint notnull=t default=0 generated= collation=-
 constraint	agent_definition	agent_definition_pkey	PRIMARY KEY (name)
-constraint	agent_definition	ck_agent_definition_model_pair	CHECK (((model_provider_name IS NULL) = (model_name IS NULL)))
 constraint	agent_definition	ck_agent_definition_name	CHECK ((((name)::text !~ '^[[:space:]]'::text) AND ((name)::text !~ '[[:space:]]$'::text) AND (char_length((name)::text) > 0) AND (POSITION(('/'::text) IN (name)) = 0)))
 constraint	agent_definition	ck_agent_definition_type	CHECK (((type)::text = ANY ((ARRAY['USER'::character varying, 'BUILTIN'::character varying])::text[])))
 constraint	agent_definition	ck_agent_definition_user_requires_model	CHECK ((((type)::text = 'BUILTIN'::text) OR (model_name IS NOT NULL)))
 constraint	agent_definition	ck_agent_definition_variant_requires_model	CHECK (((variant IS NULL) OR (model_name IS NOT NULL)))
 constraint	agent_definition	ck_agent_definition_version_nonneg	CHECK ((version >= 0))
-constraint	agent_definition	fk_agent_definition_model	FOREIGN KEY (model_provider_name, model_name) REFERENCES agent_model(provider_name, name)
-constraint	agent_model	ck_agent_model_model_id	CHECK ((((model_id)::text !~ '^[[:space:]]'::text) AND ((model_id)::text !~ '[[:space:]]$'::text) AND (char_length((model_id)::text) > 0)))
+constraint	agent_definition	fk_agent_definition_model	FOREIGN KEY (model_name) REFERENCES agent_model(name) ON UPDATE CASCADE
+constraint	agent_model	agent_model_pkey	PRIMARY KEY (name)
+constraint	agent_model	ck_agent_model_group_config_object	CHECK (((group_config IS NULL) OR (jsonb_typeof(group_config) = 'object'::text)))
+constraint	agent_model	ck_agent_model_kind	CHECK (((kind)::text = ANY ((ARRAY['MODEL'::character varying, 'GROUP'::character varying])::text[])))
+constraint	agent_model	ck_agent_model_model_id	CHECK (((model_id IS NULL) OR (((model_id)::text !~ '^[[:space:]]'::text) AND ((model_id)::text !~ '[[:space:]]$'::text) AND (char_length((model_id)::text) > 0))))
 constraint	agent_model	ck_agent_model_name	CHECK ((((name)::text !~ '^[[:space:]]'::text) AND ((name)::text !~ '[[:space:]]$'::text) AND (char_length((name)::text) > 0)))
+constraint	agent_model	ck_agent_model_shape	CHECK (((((kind)::text = 'MODEL'::text) AND (provider_name IS NOT NULL) AND (model_id IS NOT NULL) AND (config IS NOT NULL) AND (group_config IS NULL)) OR (((kind)::text = 'GROUP'::text) AND (provider_name IS NULL) AND (model_id IS NULL) AND (config IS NULL) AND (group_config IS NOT NULL))))
 constraint	agent_model	ck_agent_model_version_nonneg	CHECK ((version >= 0))
-constraint	agent_model	fk_agent_model_provider	FOREIGN KEY (provider_name) REFERENCES agent_provider(name)
-constraint	agent_model	pk_agent_model	PRIMARY KEY (provider_name, name)
+constraint	agent_model	fk_agent_model_provider	FOREIGN KEY (provider_name) REFERENCES agent_provider(name) ON UPDATE CASCADE
+constraint	agent_model_group_cooldown	ck_agent_model_group_cooldown_variant	CHECK ((((member_variant)::text = btrim((member_variant)::text)) AND (char_length((member_variant)::text) > 0)))
+constraint	agent_model_group_cooldown	ck_agent_model_group_cooldown_version_nonneg	CHECK ((group_version >= 0))
+constraint	agent_model_group_cooldown	fk_agent_model_group_cooldown_group	FOREIGN KEY (group_name) REFERENCES agent_model(name) ON UPDATE CASCADE ON DELETE CASCADE
+constraint	agent_model_group_cooldown	fk_agent_model_group_cooldown_member	FOREIGN KEY (member_model_name) REFERENCES agent_model(name) ON UPDATE CASCADE
+constraint	agent_model_group_cooldown	pk_agent_model_group_cooldown	PRIMARY KEY (group_name, member_model_name, member_variant)
 constraint	agent_provider	agent_provider_pkey	PRIMARY KEY (name)
 constraint	agent_provider	ck_agent_provider_name	CHECK ((((name)::text !~ '^[[:space:]]'::text) AND ((name)::text !~ '[[:space:]]$'::text) AND (char_length((name)::text) > 0) AND (POSITION(('/'::text) IN (name)) = 0)))
 constraint	agent_provider	ck_agent_provider_provider_type	CHECK (((provider_type)::text = ANY ((ARRAY['openai'::character varying, 'openai_responses'::character varying, 'anthropic'::character varying, 'google'::character varying])::text[])))
@@ -321,6 +338,7 @@ constraint	harness_model_invocation	fk_harness_model_invocation_turn_start	FOREI
 constraint	harness_model_invocation	harness_model_invocation_attempt_check	CHECK ((attempt >= 0))
 constraint	harness_model_invocation	harness_model_invocation_error_check	CHECK (((error IS NULL) OR (jsonb_typeof(error) = 'object'::text)))
 constraint	harness_model_invocation	harness_model_invocation_failed_attempts_check	CHECK ((jsonb_typeof(failed_attempts) = 'array'::text))
+constraint	harness_model_invocation	harness_model_invocation_group_execution_check	CHECK (((group_execution IS NULL) OR (jsonb_typeof(group_execution) = 'object'::text)))
 constraint	harness_model_invocation	harness_model_invocation_pkey	PRIMARY KEY (id)
 constraint	harness_model_invocation	harness_model_invocation_request_spec_check	CHECK ((jsonb_typeof(request_spec) = 'object'::text))
 constraint	harness_model_invocation	harness_model_invocation_result_check	CHECK (((result IS NULL) OR (jsonb_typeof(result) = 'object'::text)))
@@ -496,8 +514,9 @@ constraint	system_setting	ck_system_setting_id	CHECK ((id = 1))
 constraint	system_setting	ck_system_setting_version_nonneg	CHECK ((version >= 0))
 constraint	system_setting	system_setting_pkey	PRIMARY KEY (id)
 index	agent_definition	agent_definition_pkey	CREATE UNIQUE INDEX agent_definition_pkey ON public.agent_definition USING btree (name)
-index	agent_definition	idx_agent_definition_model	CREATE INDEX idx_agent_definition_model ON public.agent_definition USING btree (model_provider_name, model_name)
-index	agent_model	pk_agent_model	CREATE UNIQUE INDEX pk_agent_model ON public.agent_model USING btree (provider_name, name)
+index	agent_definition	idx_agent_definition_model	CREATE INDEX idx_agent_definition_model ON public.agent_definition USING btree (model_name)
+index	agent_model	agent_model_pkey	CREATE UNIQUE INDEX agent_model_pkey ON public.agent_model USING btree (name)
+index	agent_model_group_cooldown	pk_agent_model_group_cooldown	CREATE UNIQUE INDEX pk_agent_model_group_cooldown ON public.agent_model_group_cooldown USING btree (group_name, member_model_name, member_variant)
 index	agent_provider	agent_provider_pkey	CREATE UNIQUE INDEX agent_provider_pkey ON public.agent_provider USING btree (name)
 index	chat	chat_pkey	CREATE UNIQUE INDEX chat_pkey ON public.chat USING btree (id)
 index	chat	idx_chat_archived	CREATE INDEX idx_chat_archived ON public.chat USING btree (archived_at, updated_at, id)
@@ -563,6 +582,7 @@ index	storage_upload	uk_storage_upload_candidate	CREATE UNIQUE INDEX uk_storage_
 index	system_setting	system_setting_pkey	CREATE UNIQUE INDEX system_setting_pkey ON public.system_setting USING btree (id)
 table	agent_definition		preserved
 table	agent_model		preserved
+table	agent_model_group_cooldown		preserved
 table	agent_provider		preserved
 table	chat		preserved
 table	environment		preserved

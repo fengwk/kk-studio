@@ -733,6 +733,8 @@ class ConfigSyncPlannerTest {
 
     Map<String, Object> fileModel =
         ConfigSyncFixtures.mapOf(
+            "kind",
+            "MODEL",
             "providerName",
             "p",
             "name",

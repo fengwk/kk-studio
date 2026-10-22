@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.catalog.modelcatalog;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
@@ -50,6 +51,7 @@ public class ModelCatalogService {
 
   private ModelCatalogSource activeSource;
 
+  @Autowired
   public ModelCatalogService(
       SystemSettingsSnapshot settings,
       ModelCatalogTransport transport,

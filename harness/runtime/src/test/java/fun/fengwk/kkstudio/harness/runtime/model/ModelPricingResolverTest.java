@@ -194,6 +194,24 @@ class ModelPricingResolverTest {
         new BigDecimal("6"), calculateInput(shanghai, Instant.parse("2026-08-17T17:00:00Z"), null));
   }
 
+  /** 内部 00:00-00:00 表示全天，仅按星期限制归属；非午夜相同起止必须被拒绝。 */
+  @Test
+  void treatsInternalMidnightToMidnightAsAllDay() {
+    ModelPricingCondition.TimeWindow allDay =
+        new ModelPricingCondition.TimeWindow(
+            LocalTime.MIDNIGHT, LocalTime.MIDNIGHT, ZoneId.of("UTC"), List.of(1));
+    ModelPricing pricing = pricingWithOverride("all-day", allDay, "5");
+
+    assertEquals(new BigDecimal("5"), calculateInput(pricing, MONDAY_LATE, null));
+    assertEquals(
+        new BigDecimal("1"), calculateInput(pricing, Instant.parse("2026-08-18T01:00:00Z"), null));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ModelPricingCondition.TimeWindow(
+                LocalTime.of(10, 0), LocalTime.of(10, 0), ZoneId.of("UTC"), null));
+  }
+
   /** service tier 属于必需事实；未提供时整个费用为 0，而不是忽略该规则继续猜价。 */
   @Test
   void returnsZeroWhenServiceTierFactIsMissing() {
@@ -209,6 +227,94 @@ class ModelPricingResolverTest {
 
     assertEquals(BigDecimal.ZERO, calculateInput(pricing, MONDAY_LATE, null));
     assertEquals(new BigDecimal("9"), calculateInput(pricing, MONDAY_LATE, "priority"));
+  }
+
+  /** 缺省 any/serviceTier 不约束；显式空列表按标准布尔语义恒假，不能被折叠为缺省。 */
+  @Test
+  void distinguishesExplicitEmptyAnyAndServiceTierFromAbsent() {
+    ModelPricingCondition emptyAny =
+        new ModelPricingCondition(null, null, null, null, null, List.of(), null);
+    assertEquals(
+        new BigDecimal("1"),
+        calculateInput(pricingWithOverride("empty-any", emptyAny, "2"), MONDAY_LATE, null));
+
+    ModelPricingCondition emptyServiceTier =
+        new ModelPricingCondition(null, List.of(), null, null, null, null, null);
+    ModelPricing emptyTierPricing = pricingWithOverride("empty-tier", emptyServiceTier, "2");
+    assertEquals(new BigDecimal("1"), calculateInput(emptyTierPricing, MONDAY_LATE, "priority"));
+    assertEquals(new BigDecimal("1"), calculateInput(emptyTierPricing, MONDAY_LATE, null));
+
+    assertEquals(
+        new BigDecimal("2"),
+        calculateInput(
+            pricingWithOverride("absent-any", ModelPricingCondition.ALWAYS, "2"),
+            MONDAY_LATE,
+            null));
+    assertEquals(
+        new BigDecimal("2"),
+        calculateInput(
+            pricingWithOverride(
+                "absent-tier",
+                new ModelPricingCondition(null, null, null, null, List.of(), null, null),
+                "2"),
+            MONDAY_LATE,
+            "priority"));
+  }
+
+  /** not 包装未知事实仍为未知，整单归零；只有事实已知时才产生确定布尔结果。 */
+  @Test
+  void keepsUnknownPropagatingThroughNot() {
+    ModelPricing pricing =
+        pricingWithOverride(
+            "not-priority",
+            new ModelPricingCondition(null, null, null, null, null, null, tier("priority")),
+            "9");
+
+    assertEquals(BigDecimal.ZERO, calculateInput(pricing, MONDAY_LATE, null));
+    assertEquals(new BigDecimal("1"), calculateInput(pricing, MONDAY_LATE, "priority"));
+    assertEquals(new BigDecimal("9"), calculateInput(pricing, MONDAY_LATE, "standard"));
+  }
+
+  /** AND 中确定 false 必须短路未知分支，避免缺失事实把已可判假的规则误升为 unknown。 */
+  @Test
+  void shortCircuitsUnknownWhenAndAlreadyFalse() {
+    ModelPricingCondition falseContextAndUnknownDate =
+        new ModelPricingCondition(
+            contextAtLeast(2_000_000).context(),
+            null,
+            new ModelPricingCondition.DateRange(LocalDate.of(2026, 8, 17), null),
+            null,
+            null,
+            null,
+            null);
+
+    assertEquals(
+        new BigDecimal("1"),
+        calculateInput(
+            pricingWithOverride("false-and-unknown", falseContextAndUnknownDate, "9"), null, null));
+
+    ModelPricingCondition falseThenUnknownAll =
+        new ModelPricingCondition(
+            null,
+            null,
+            null,
+            null,
+            List.of(
+                contextAtLeast(2_000_000),
+                new ModelPricingCondition(
+                    null,
+                    null,
+                    new ModelPricingCondition.DateRange(LocalDate.of(2026, 8, 17), null),
+                    null,
+                    null,
+                    null,
+                    null)),
+            null,
+            null);
+    assertEquals(
+        new BigDecimal("1"),
+        calculateInput(
+            pricingWithOverride("all-false-and-unknown", falseThenUnknownAll, "9"), null, null));
   }
 
   private static ModelPricing pricingWithOverride(

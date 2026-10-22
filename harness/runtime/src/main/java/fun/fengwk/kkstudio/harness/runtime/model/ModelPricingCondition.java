@@ -13,6 +13,8 @@ import java.util.Set;
  * Pricing 规则条件。同一个条件对象的多个字段为 AND；{@code all}/{@code any}/{@code not} 提供有限的布尔组合。
  *
  * <p>条件只做纯判定，不携带三态结果。缺少判定所需的事实（例如请求时间或最终 service tier）由调用方把整个费用归零， 不得猜测事实后继续计算。
+ *
+ * <p>{@code all} 缺省或空均恒真；{@code any}/{@code serviceTier} 缺省不约束，显式空列表恒假。缺省与显式空列表的 差异必须保留，不能折叠为同一个值。
  */
 public record ModelPricingCondition(
     Context context,
@@ -76,7 +78,10 @@ public record ModelPricingCondition(
     }
   }
 
-  /** IANA 时区中的每日时间窗；跨午夜时按开始日的星期归属。 */
+  /**
+   * 每日左闭右开时间窗。{@code 00:00-24:00} 使用 {@code start=end=00:00} 表示全天；wire 只接受 {@code 00:00-24:00}，不接受
+   * {@code 00:00-00:00}。跨午夜窗口按开始日归属星期。
+   */
   public record TimeWindow(
       LocalTime start, LocalTime end, ZoneId timezone, List<Integer> weekdays) {
 
@@ -84,12 +89,23 @@ public record ModelPricingCondition(
       Objects.requireNonNull(start, "time.start");
       Objects.requireNonNull(end, "time.end");
       Objects.requireNonNull(timezone, "time.timezone");
+      if (start.equals(end) && !start.equals(LocalTime.MIDNIGHT)) {
+        throw new IllegalArgumentException("time.start and time.end must differ unless all day");
+      }
       weekdays = copyWeekdays(weekdays);
+    }
+
+    /** 内部用 00:00-00:00 表示显式全天；该形态不出现在 wire 中。 */
+    public boolean allDay() {
+      return start.equals(LocalTime.MIDNIGHT) && end.equals(LocalTime.MIDNIGHT);
     }
   }
 
   private static List<String> copyServiceTiers(List<String> serviceTier) {
-    if (serviceTier == null || serviceTier.isEmpty()) {
+    if (serviceTier == null) {
+      return null;
+    }
+    if (serviceTier.isEmpty()) {
       return List.of();
     }
     if (serviceTier.size() > MAX_LIST_SIZE) {
@@ -112,7 +128,10 @@ public record ModelPricingCondition(
 
   private static List<ModelPricingCondition> copyConditions(
       List<ModelPricingCondition> conditions, String name) {
-    if (conditions == null || conditions.isEmpty()) {
+    if (conditions == null) {
+      return null;
+    }
+    if (conditions.isEmpty()) {
       return List.of();
     }
     if (conditions.size() > MAX_LIST_SIZE) {
@@ -148,18 +167,7 @@ public record ModelPricingCondition(
   }
 
   private void validateDepth(int depth) {
-    if (depth > MAX_DEPTH) {
-      throw new IllegalArgumentException("condition nesting must not exceed " + MAX_DEPTH);
-    }
-    for (ModelPricingCondition condition : all) {
-      condition.validateDepth(depth + 1);
-    }
-    for (ModelPricingCondition condition : any) {
-      condition.validateDepth(depth + 1);
-    }
-    if (not != null) {
-      not.validateDepth(depth + 1);
-    }
+    validateDepth(all, any, not, depth);
   }
 
   private static void validateDepth(
@@ -170,11 +178,15 @@ public record ModelPricingCondition(
     if (depth > MAX_DEPTH) {
       throw new IllegalArgumentException("condition nesting must not exceed " + MAX_DEPTH);
     }
-    for (ModelPricingCondition condition : allConditions) {
-      condition.validateDepth(depth + 1);
+    if (allConditions != null) {
+      for (ModelPricingCondition condition : allConditions) {
+        condition.validateDepth(depth + 1);
+      }
     }
-    for (ModelPricingCondition condition : anyConditions) {
-      condition.validateDepth(depth + 1);
+    if (anyConditions != null) {
+      for (ModelPricingCondition condition : anyConditions) {
+        condition.validateDepth(depth + 1);
+      }
     }
     if (notCondition != null) {
       notCondition.validateDepth(depth + 1);
