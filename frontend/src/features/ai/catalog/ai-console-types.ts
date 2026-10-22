@@ -1,6 +1,8 @@
 import type {
   AgentDefinitionType,
   AgentModelInputModality,
+  AgentModelKind,
+  AgentModelPricingDefinitionDTO,
   AgentProviderType,
   SkillRefDTO,
 } from '@/shared/api/contracts/ai-catalog'
@@ -32,31 +34,19 @@ export interface VariantDraft {
 }
 
 /**
- * 表单传递的每百万 token 价格。共享的 {@code config.pricing} 子结构在 wire 边界承载币种 / 档位元数据；
- * 表单仅编辑每个单位的价格。
+ * 单 Model 的完整价格草稿。所有十进制值保持字符串，提交时原样发送；
+ * 覆盖/倍率规则与结构化条件也直接使用 wire 形状，确保完整原子替换。
  */
-export interface ModelPricingDraft {
-  currency: string
-  pricingTier: string
-  serviceTier: string
-  serviceTierMultiplier: string
-  version: string
-  inputPerMillionTokens: string
-  outputPerMillionTokens: string
-  cacheReadPerMillionTokens: string
-  cacheWritePerMillionTokens: string
-  cacheWriteLongPerMillionTokens: string
-  reasoningPerMillionTokens: string
-}
+export type ModelPricingDraft = AgentModelPricingDefinitionDTO
 
-/** model 资源的表单草稿。输入保持字符串类型以获得可预测的编辑体验。 */
+/** 单 Model 的表单草稿。输入保持字符串类型以获得可预测的编辑体验。 */
 export interface ModelDraft {
-  providerName: string
-  /** 不可变的模型逻辑名。 */
+  /** 全局唯一逻辑名。 */
   name: string
   /** 发往上游 Provider 的真实模型标识；可编辑且必填。 */
   modelId: string
   description: string
+  providerName: string
   contextWindow: string
   maxOutputTokens: string
   tools: boolean
@@ -70,11 +60,29 @@ export interface ModelDraft {
   pricing: ModelPricingDraft
 }
 
+/** 组的成员草稿；顺序即 Fill First 顺序。 */
+export interface ModelGroupMemberDraft {
+  draftId: string
+  modelName: string
+  variant: string
+}
+
+/** Model Group 表单草稿；不含 Provider、价格、Variant 或能力覆写字段。 */
+export interface ModelGroupDraft {
+  name: string
+  description: string
+  members: ModelGroupMemberDraft[]
+  fallbackStatusCodes: (number | string)[]
+  cooldownSeconds: string
+}
+
 export interface AgentDraft {
   name: string
   description: string
   systemPrompt: string
+  /** 全局唯一逻辑模型名（单 Model 或组）。 */
   model: string
+  /** 单 Model 的可选覆盖；组为空。 */
   variant: string
   inheritParentEnvironment: boolean
   tools: string[]
@@ -85,11 +93,11 @@ export interface AgentDraft {
 export type ResourceModal =
   | { kind: 'provider'; mode: 'create' }
   | { kind: 'provider'; mode: 'edit'; name: string; expectedVersion: CatalogVersion }
-  | { kind: 'model'; mode: 'create' }
+  | { kind: 'model'; mode: 'create'; resourceKind: AgentModelKind }
   | {
       kind: 'model'
       mode: 'edit'
-      providerName: string
+      resourceKind: AgentModelKind
       name: string
       expectedVersion: CatalogVersion
     }

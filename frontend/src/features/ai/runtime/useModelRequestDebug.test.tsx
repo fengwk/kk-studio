@@ -21,7 +21,7 @@ function sampleDebug(): HarnessModelRequestDebugDTO {
   return {
     kind: 'NEXT_REQUEST_PREVIEW',
     generatedAt: 1790504400,
-    model: { providerName: 'minimax', modelName: 'MiniMax-M2.7', variant: 'default' },
+    model: { modelName: 'MiniMax-M2.7', variant: 'default' },
     environmentName: null,
     systemInstruction: 'You are an assistant.',
     tools: [
@@ -54,7 +54,7 @@ function sampleDebug(): HarnessModelRequestDebugDTO {
 }
 
 const sampleRequest = {
-  model: { providerName: 'minimax', modelName: 'MiniMax-M2.7', variant: 'default' },
+  model: { modelName: 'MiniMax-M2.7', variant: 'default' },
   environmentName: null,
 }
 
@@ -120,11 +120,11 @@ describe('useModelRequestDebug', () => {
       .mockImplementationOnce(() => new Promise((resolve) => { finishSecond = resolve }))
 
     const firstSelection: HarnessModelRequestDebugRequestDTO = {
-      model: { providerName: 'minimax', modelName: 'MiniMax-M2.7', variant: 'default' },
+      model: { modelName: 'MiniMax-M2.7', variant: 'default' },
       environmentName: null,
     }
     const secondSelection: HarnessModelRequestDebugRequestDTO = {
-      model: { providerName: 'openai', modelName: 'gpt-4o', variant: 'high' },
+      model: { modelName: 'gpt-4o', variant: 'high' },
       environmentName: 'dev-node',
     }
 

@@ -14,7 +14,7 @@ import type { ConfigSyncKind } from '@/shared/api/generated/stable-contracts'
 export type { ConfigSyncKind } from '@/shared/api/generated/stable-contracts'
 export { CONFIG_SYNC_KIND_VALUES } from '@/shared/api/generated/stable-contracts'
 
-/** 配置引用的业务标识：模型为 `providerName/modelName`，设置为 `settings`，插件为 `pluginId`。 */
+/** 配置引用的业务标识：模型为全局逻辑 `modelName`，设置为 `settings`，插件为 `pluginId`。 */
 export interface ConfigSyncRef {
   kind: ConfigSyncKind
   name: string

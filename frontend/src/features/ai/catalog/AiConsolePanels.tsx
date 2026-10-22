@@ -1,7 +1,7 @@
 import { AgentResourceCard } from '@/features/ai/catalog/AiAgentResourceCard'
 import { ModelResourceCard } from '@/features/ai/catalog/AiModelResourceCard'
 import { ProviderResourceCard } from '@/features/ai/catalog/AiProviderResourceCard'
-import { modelRef, type AgentModelView } from '@/features/ai/catalog/AgentModelView'
+import type { AgentModelView } from '@/features/ai/catalog/AgentModelView'
 import { ResourceGrid } from '@/shared/ui/cards/ResourceGrid'
 import { CreateCard } from '@/shared/ui/feedback/CreateCard'
 import type {
@@ -70,7 +70,7 @@ export function ModelsPanel({
       />
       {models.map((model) => (
         <ModelResourceCard
-          key={modelRef(model)}
+          key={model.name}
           model={model}
           onEdit={() => onEdit(model)}
           onDelete={() => onDelete(model)}

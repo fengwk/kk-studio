@@ -12,18 +12,10 @@ const baseConfig: AgentModelConfigDTO = {
   limit: { context: 128000, output: 8192 },
   abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
   pricing: {
-    currency: 'USD',
-    pricingTier: 'default',
-    serviceTier: 'default',
-    serviceTierMultiplier: 1,
-    version: 'v1',
-    inputPerMillionTokens: 0,
-    outputPerMillionTokens: 0,
-    cacheReadPerMillionTokens: 0,
-    cacheWritePerMillionTokens: 0,
-    cacheWriteLongPerMillionTokens: 0,
-    reasoningPerMillionTokens: 0,
-  },
+      base: { input: '0', output: '0', cacheRead: '0', cacheWrite: '0', cacheWriteByTtl: {}, reasoning: null },
+      overrides: [],
+      multipliers: [],
+    },
   defaultVariant: 'default',
   variants: [{ id: 'default' }],
 }
@@ -31,6 +23,7 @@ const baseConfig: AgentModelConfigDTO = {
 function modelWithProvider(): AgentModelView {
   return {
     providerName: 'minimax',
+    kind: 'MODEL',
     name: 'MiniMax',
     modelId: 'minimax',
     description: null,
@@ -124,8 +117,8 @@ describe('AiConsolePanels', () => {
     )
     expect(screen.getByText('One')).toBeInTheDocument()
     expect(screen.getByText('assistant')).toBeInTheDocument()
-    // Model 卡片使用规范的 provider/model 展示 ref。
-    expect(screen.getAllByText(/minimax\/MiniMax/i).length).toBeGreaterThan(0)
+    // Model 卡片使用全局唯一逻辑名。
+    expect(screen.getAllByText('MiniMax').length).toBeGreaterThan(0)
     expect(screen.getByText(/ctx 128000/)).toBeInTheDocument()
     await user.click(screen.getAllByRole('button', { name: '新建 Chat' })[0]!)
     expect(onCreate).toHaveBeenCalled()

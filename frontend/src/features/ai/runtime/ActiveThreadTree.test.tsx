@@ -33,7 +33,7 @@ function treeNode(
     parentThreadId,
     name,
     agentName: 'assistant',
-    model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
+    model: { modelName: 'MiniMax', variant: 'default' },
     status: processing ? 'MODEL_STREAM' : 'IDLE',
     processing,
     turnCount: 1,

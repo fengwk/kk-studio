@@ -2,9 +2,11 @@ import { normalizeAgentDraftDefaultVariant, normalizeModelDraftDefaultVariant } 
 import {
   emptyAgentDraft,
   emptyModelDraft,
+  emptyModelGroupDraft,
   emptyProviderDraft,
   toAgentDraft,
   toModelDraft,
+  toModelGroupDraft,
   toProviderDraft,
 } from '@/features/ai/catalog/ai-resource-draft-codecs'
 import type { ResourceEditorPlan } from '@/features/ai/catalog/ai-resource-editor-plan-types'
@@ -42,19 +44,18 @@ export function createModelEditorPlan(
 ): Extract<ResourceEditorPlan, { kind: 'model' }> {
   return {
     kind: 'model',
-    modal: { kind: 'model', mode: 'create' },
+    // 创建时两个 Tab 各自持有独立草稿；默认停留单 Model。
+    modal: { kind: 'model', mode: 'create', resourceKind: 'MODEL' },
     modelDraft: normalizeModelDraftDefaultVariant(emptyModelDraft(providers[0])),
+    modelGroupDraft: emptyModelGroupDraft(),
   }
 }
 
 export function editModelEditorPlan(
   models: AgentModelView[],
-  providerName: string,
   modelName: string,
 ): Extract<ResourceEditorPlan, { kind: 'model' }> | null {
-  const model = models.find(
-    (item) => item.providerName === providerName && item.name === modelName,
-  )
+  const model = models.find((item) => item.name === modelName)
   if (!model) {
     return null
   }
@@ -63,11 +64,14 @@ export function editModelEditorPlan(
     modal: {
       kind: 'model',
       mode: 'edit',
-      providerName: model.providerName,
+      resourceKind: model.kind,
       name: model.name,
       expectedVersion: model.version,
     },
-    modelDraft: normalizeModelDraftDefaultVariant(toModelDraft(model)),
+    modelDraft: normalizeModelDraftDefaultVariant(
+      model.kind === 'MODEL' ? toModelDraft(model) : emptyModelDraft({ name: model.providerName ?? '' }),
+    ),
+    modelGroupDraft: model.kind === 'GROUP' ? toModelGroupDraft(model) : emptyModelGroupDraft(),
   }
 }
 

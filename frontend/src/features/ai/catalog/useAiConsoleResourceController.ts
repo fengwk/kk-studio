@@ -53,19 +53,13 @@ export function useAiConsoleResourceController(
     })
   }
 
-  function deleteModel(
-    providerName: string,
-    modelName: string,
-    expectedVersion: string,
-  ) {
+  function deleteModel(modelName: string, expectedVersion: string) {
     setDeleteConfirm({
       title: t('ai.catalog.deleteModelTitle'),
-      description: t('ai.catalog.deleteModelDescription', {
-        name: modelName.includes('/') ? modelName : `${providerName}/${modelName}`,
-      }),
+      description: t('ai.catalog.deleteModelDescription', { name: modelName }),
       confirmLabel: t('ai.catalog.action.confirmDelete'),
       tone: 'danger',
-      onConfirm: () => mutations.deleteModel(providerName, modelName, expectedVersion),
+      onConfirm: () => mutations.deleteModel(modelName, expectedVersion),
     })
   }
 
@@ -106,6 +100,7 @@ export function useAiConsoleResourceController(
     const drafts = {
       providerDraft: editorState.providerDraft,
       modelDraft: editorState.modelDraft,
+      modelGroupDraft: editorState.modelGroupDraft,
       agentDraft: editorState.agentDraft,
     }
     const validation = validateResourceDraft(editorState.resourceModal, drafts)
@@ -141,7 +136,7 @@ export function useAiConsoleResourceController(
 
     if (plan.kind === 'model') {
       if (plan.mode === 'edit') {
-        mutations.updateModel(plan.providerName, plan.name, plan.data)
+        mutations.updateModel(plan.name, plan.data)
       } else {
         mutations.createModel(plan.data)
       }
@@ -183,6 +178,7 @@ export function useAiConsoleResourceController(
       skillsError: skillsQuery.error,
       providerDraft: editorState.providerDraft,
       modelDraft: editorState.modelDraft,
+      modelGroupDraft: editorState.modelGroupDraft,
       agentDraft: editorState.agentDraft,
       pending: mutations.resourceEditorPending,
       formError,
@@ -198,6 +194,12 @@ export function useAiConsoleResourceController(
         setFieldErrors({})
         editorState.onModelDraftChange(draft)
       },
+      onModelGroupDraftChange: (draft: typeof editorState.modelGroupDraft) => {
+        setFormError('')
+        setFieldErrors({})
+        editorState.onModelGroupDraftChange(draft)
+      },
+      onModelCreateKindChange: editorState.selectModelCreateKind,
       onAgentDraftChange: (draft: typeof editorState.agentDraft) => {
         setFormError('')
         setFieldErrors({})

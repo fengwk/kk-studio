@@ -12,7 +12,11 @@ import {
   toEditableModelUpdate,
   toModelDraft,
 } from '@/features/ai/catalog/ai-model-draft-codec'
-import type { AgentModelConfigDTO, AgentModelDTO } from '@/shared/api/contracts/ai-catalog'
+import type {
+  AgentModelConfigDTO,
+  AgentModelDTO,
+  AgentModelPricingDefinitionDTO,
+} from '@/shared/api/contracts/ai-catalog'
 
 function draft(overrides: Partial<ModelDraft> = {}): ModelDraft {
   return {
@@ -25,7 +29,7 @@ function draft(overrides: Partial<ModelDraft> = {}): ModelDraft {
 }
 
 function buildModelConfig(input: ModelDraft): AgentModelConfigDTO {
-  return toEditableModel(input).config
+  return toEditableModel(input).config!
 }
 
 function fullConfig(): AgentModelConfigDTO {
@@ -37,17 +41,9 @@ function fullConfig(): AgentModelConfigDTO {
       inputModalities: ['TEXT', 'IMAGE', 'AUDIO'],
     },
     pricing: {
-      currency: 'USD',
-      pricingTier: 'batch',
-      serviceTier: 'priority',
-      serviceTierMultiplier: 1.25,
-      version: '2026-07',
-      inputPerMillionTokens: 1.1,
-      outputPerMillionTokens: 2.2,
-      cacheReadPerMillionTokens: 0.3,
-      cacheWritePerMillionTokens: 0.4,
-      cacheWriteLongPerMillionTokens: 0.5,
-      reasoningPerMillionTokens: 3.6,
+      base: { input: '1.1', output: '2.2', cacheRead: '0.3', cacheWrite: '0.4', cacheWriteByTtl: {}, reasoning: null },
+      overrides: [],
+      multipliers: [],
     },
     defaultVariant: 'quality',
     variants: [
@@ -62,6 +58,7 @@ function fullConfig(): AgentModelConfigDTO {
 function model(configOverride?: AgentModelConfigDTO): AgentModelDTO {
   return {
     providerName: 'provider-1',
+    kind: 'MODEL',
     name: 'model-a',
     modelId: 'wire-model-a',
     description: 'desc',
@@ -93,9 +90,16 @@ describe('ai-model-draft-codec', () => {
         },
       ],
       pricing: {
-        currency: 'USD',
-        serviceTierMultiplier: '1.25',
-        reasoningPerMillionTokens: '3.6',
+        base: {
+          input: '1.1',
+          output: '2.2',
+          cacheRead: '0.3',
+          cacheWrite: '0.4',
+          cacheWriteByTtl: {},
+          reasoning: null,
+        },
+        overrides: [],
+        multipliers: [],
       },
     })
     expect(extractContextWindow(source)).toBe(200000)
@@ -143,18 +147,10 @@ describe('ai-model-draft-codec', () => {
         inputModalities: ['TEXT', 'IMAGE', 'AUDIO', 'VIDEO'],
       },
       pricing: {
-        currency: 'USD',
-        pricingTier: 'default',
-        serviceTier: 'default',
-        serviceTierMultiplier: 1,
-        version: 'v1',
-        inputPerMillionTokens: 0,
-        outputPerMillionTokens: 0,
-        cacheReadPerMillionTokens: 0,
-        cacheWritePerMillionTokens: 0,
-        cacheWriteLongPerMillionTokens: 0,
-        reasoningPerMillionTokens: 0,
-      },
+      base: { input: '0', output: '0', cacheRead: '0', cacheWrite: '0', cacheWriteByTtl: {}, reasoning: null },
+      overrides: [],
+      multipliers: [],
+    },
       defaultVariant: 'quality',
       variants: [
         {
@@ -237,7 +233,7 @@ describe('ai-model-draft-codec', () => {
     })
 
     const createPayload = toEditableModel(input)
-    expect(createPayload.config.variants).toEqual([
+    expect(createPayload.config!.variants).toEqual([
       { id: 'v-high-upper', reasoningEffort: 'HIGH' },
       { id: 'v-high-lower', reasoningEffort: 'high' },
       { id: 'v-xhigh-mixed', reasoningEffort: 'xHigh' },
@@ -245,6 +241,7 @@ describe('ai-model-draft-codec', () => {
 
     const savedModel: AgentModelDTO = {
       providerName: createPayload.providerName,
+      kind: 'MODEL',
       name: createPayload.name,
       modelId: createPayload.modelId,
       description: createPayload.description,
@@ -263,7 +260,7 @@ describe('ai-model-draft-codec', () => {
     ])
 
     const reSaved = toEditableModel(editDraft)
-    expect(reSaved.config.variants).toEqual(createPayload.config.variants)
+    expect(reSaved.config!.variants).toEqual(createPayload.config!.variants)
   })
 
   /** 自定义 reasoningEffort 在 toModelDraft -> buildModelConfig 往返中完整保留。 */
@@ -307,53 +304,49 @@ describe('ai-model-draft-codec', () => {
     expect(toggled).toEqual<AgentModelInputModality[]>(['TEXT'])
   })
 
-  /** 编辑时必须保留每个持久化的 pricing 元数据字段；新建草稿使用规范默认值。 */
-  it('round-trips pricing metadata across toModelDraft -> buildModelConfig', () => {
-    const source = model({
-      ...fullConfig(),
-      pricing: {
-        currency: 'EUR',
-        pricingTier: 'enterprise',
-        serviceTier: 'premium',
-        serviceTierMultiplier: 2.5,
-        version: '2026-09',
-        inputPerMillionTokens: 9,
-        outputPerMillionTokens: 11,
-        cacheReadPerMillionTokens: 1.25,
-        cacheWritePerMillionTokens: 2.5,
-        cacheWriteLongPerMillionTokens: 3.5,
-        reasoningPerMillionTokens: 4.5,
+  /** 价格定义完整往返：基础费率、TTL、显式 0、覆盖与倍率规则均原样保留。 */
+  it('round-trips the full pricing definition across toModelDraft -> buildModelConfig', () => {
+    const pricing: AgentModelPricingDefinitionDTO = {
+      base: {
+        input: '9',
+        output: '11',
+        cacheRead: '1.25',
+        cacheWrite: '2.5',
+        cacheWriteByTtl: { '3600': '3.5' },
+        reasoning: '0',
       },
-    })
+      overrides: [
+        {
+          id: 'batch-cache',
+          when: { serviceTier: ['batch'] },
+          rates: { output: '5', reasoning: null },
+        },
+      ],
+      multipliers: [
+        {
+          id: 'priority',
+          when: { context: { gt: 200000 } },
+          factors: { input: '1.25' },
+        },
+      ],
+    }
+    const source = model({ ...fullConfig(), pricing })
     const draftFromModel = toModelDraft(source)
-    const rebuilt = buildModelConfig(draftFromModel)
-    expect(rebuilt.pricing).toEqual({
-      currency: 'EUR',
-      pricingTier: 'enterprise',
-      serviceTier: 'premium',
-      serviceTierMultiplier: 2.5,
-      version: '2026-09',
-      inputPerMillionTokens: 9,
-      outputPerMillionTokens: 11,
-      cacheReadPerMillionTokens: 1.25,
-      cacheWritePerMillionTokens: 2.5,
-      cacheWriteLongPerMillionTokens: 3.5,
-      reasoningPerMillionTokens: 4.5,
-    })
+    expect(buildModelConfig(draftFromModel).pricing).toEqual(pricing)
   })
 
-  /** buildModelConfig 拒绝非正 multiplier 和负的每百万 token 价格。 */
-  it('rejects non-positive multiplier and negative prices', () => {
+  /** 价格校验拒绝非法 decimal，且不会把空 reasoning 静默写成 0。 */
+  it('rejects invalid decimal rates instead of coercing them', () => {
     const base = draft()
-    expect(() => buildModelConfig({ ...base, pricing: { ...base.pricing, serviceTierMultiplier: '0' } })).toThrow(
-      /serviceTierMultiplier must be positive/,
-    )
-    expect(() => buildModelConfig({ ...base, pricing: { ...base.pricing, inputPerMillionTokens: '-1' } })).toThrow(
-      /inputPerMillionTokens must not be negative/,
-    )
-    expect(() => buildModelConfig({ ...base, pricing: { ...base.pricing, outputPerMillionTokens: 'NaN' } })).toThrow(
-      /outputPerMillionTokens must be a number/,
-    )
+    expect(() =>
+      buildModelConfig({ ...base, pricing: { ...base.pricing, base: { ...base.pricing.base, input: '-1' } } }),
+    ).toThrow(/pricing\.base\.input/)
+    expect(() =>
+      buildModelConfig({ ...base, pricing: { ...base.pricing, base: { ...base.pricing.base, output: 'NaN' } } }),
+    ).toThrow(/pricing\.base\.output/)
+    expect(() =>
+      buildModelConfig({ ...base, pricing: { ...base.pricing, base: { ...base.pricing.base, reasoning: '' } } }),
+    ).toThrow(/pricing\.base\.reasoning/)
   })
 
   /** toEditableModel 与 toEditableModelUpdate 均拒绝 blank name。 */
@@ -367,15 +360,15 @@ describe('ai-model-draft-codec', () => {
     expect(() => toEditableModel(draft({ providerName: '' }))).toThrow(/providerName is required/)
   })
 
-  /** pricing 元数据为必填项，编辑时不得静默重建。 */
-  it('rejects blank pricing metadata', () => {
+  /** 价格基础字段为必填项，编辑时不得静默补 0。 */
+  it('rejects blank base pricing fields', () => {
     const base = draft()
     expect(() =>
-      buildModelConfig({ ...base, pricing: { ...base.pricing, currency: '' } }),
-    ).toThrow(/pricing\.currency must not be blank/)
+      buildModelConfig({ ...base, pricing: { ...base.pricing, base: { ...base.pricing.base, cacheRead: '' } } }),
+    ).toThrow(/pricing\.base\.cacheRead/)
     expect(() =>
-      buildModelConfig({ ...base, pricing: { ...base.pricing, version: '' } }),
-    ).toThrow(/pricing\.version must not be blank/)
+      buildModelConfig({ ...base, pricing: { ...base.pricing, base: { ...base.pricing.base, cacheWriteByTtl: { '0': '1' } } } }),
+    ).toThrow(/TTL keys/)
   })
 
   /** 缺失的 model 不会凭空生成 Variant ID。 */

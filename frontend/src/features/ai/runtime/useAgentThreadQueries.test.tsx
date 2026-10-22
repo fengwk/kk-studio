@@ -22,7 +22,7 @@ function snapshot(id = ROOT, overrides: Partial<ToolInvocationDTO> = {}): Harnes
       yoloPolicy: { mode: id === ROOT ? 'DISABLE' : 'FOLLOW', rootThreadId: id === ROOT ? null : ROOT },
       nextCommandSequence: '1', version: '1', status: 'TOOL_READY', processing: true,
       executionControl: 'RUNNABLE',
-      branchSettings: { agentName: 'agent', model: { providerName: 'p', modelName: 'm', variant: 'default' },
+      branchSettings: { agentName: 'agent', model: { modelName: 'm', variant: 'default' },
         environmentName: 'composer-is-not-the-route', goal: null },
       createTime: null, updateTime: null,
     },

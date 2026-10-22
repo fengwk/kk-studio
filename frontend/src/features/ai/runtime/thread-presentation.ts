@@ -39,7 +39,7 @@ export function threadIdentity(projection: Pick<ThreadProjection, 'thread'>): st
   const model = settings.model
   return [
     settings.agentName,
-    model ? formatModelLabel(model.providerName, model.modelName, model.variant) : null,
+    model ? formatModelLabel(model.modelName, model.variant) : null,
   ].filter(Boolean).join(' · ')
 }
 

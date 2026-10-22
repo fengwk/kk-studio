@@ -497,8 +497,8 @@ describe('ThreadComposer interactions', () => {
   it('handles true sequential Escape shortcuts with control menu priority: 1st closes control menu, 2nd blurs composer, 3rd refocuses editor via focusOnEscape', async () => {
     const user = userEvent.setup()
     const dummySettings: ThreadComposerSettingsInput = {
-      model: { providerName: 'minimax', modelName: 'MiniMax', variant: 'default' },
-      models: [{ providerName: 'minimax', name: 'MiniMax', config: { defaultVariant: 'default', variants: [{ id: 'default' }] } }],
+      model: { modelName: 'MiniMax', variant: 'default' },
+      models: [{ kind: 'MODEL', name: 'MiniMax', config: { defaultVariant: 'default', variants: [{ id: 'default' }] } }],
       yoloEnabled: false,
       environmentName: null,
       environments: [],
