@@ -35,7 +35,7 @@ describe('subagent execution selector', () => {
     expect(screen.getByRole('link', { name: /Review/ })).toHaveAttribute('href', '/threads/child')
     expect(screen.getByRole('link', { name: /Review/ })).toHaveTextContent('失败')
     expect(screen.getByRole('link', { name: /Review/ })).toHaveTextContent('turns: 7 · tools: 12')
-    expect(screen.getByRole('link', { name: /Review/ })).toHaveTextContent('provider/model (default)')
+    expect(screen.getByRole('link', { name: /Review/ })).toHaveTextContent('model (default)')
   })
 
   it('moves selection by keyboard, clamps boundaries and opens the real selected link', async () => {

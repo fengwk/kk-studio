@@ -300,6 +300,26 @@ describe('ThreadComposerControls model/variant menus', () => {
     expect(within(listbox).queryAllByRole('option')).toHaveLength(0)
   })
 
+  it('selects a Model Group immediately without a group-level variant submenu', async () => {
+    const user = userEvent.setup()
+    const settings = createSettings({
+      models: [
+        ...MODELS,
+        { kind: 'GROUP', name: 'fallback-group', config: null },
+      ],
+    })
+    const view = renderOpen('model', settings)
+
+    await user.click(screen.getByRole('option', { name: 'fallback-group' }))
+
+    expect(settings.onModelChange).toHaveBeenCalledWith({
+      modelName: 'fallback-group',
+      variant: null,
+    })
+    expect(view.onMenuChange.mock.calls).toEqual([[null, true]])
+    expect(screen.queryByRole('listbox', { name: 'Variant 选项' })).not.toBeInTheDocument()
+  })
+
   it('returns to the model menu with Backspace and closes with Escape', async () => {
     const user = userEvent.setup()
     const { onMenuChange } = renderOpen('variant')

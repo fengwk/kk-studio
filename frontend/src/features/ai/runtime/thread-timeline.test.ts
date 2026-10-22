@@ -55,7 +55,7 @@ describe('thread timeline', () => {
     )
 
     expect(timeline.messages).toMatchObject([
-      { role: 'entry', kind: 'root', title: '会话开始 · Agent: JIJI · 模型: provider/model (default) · 环境: 无', status: 'done' },
+      { role: 'entry', kind: 'root', title: '会话开始 · Agent: JIJI · 模型: model (default) · 环境: 无', status: 'done' },
       { role: 'user', text: '检查大纲', status: 'done' },
       { role: 'assistant', text: '结构完整。', thinking: '先梳理结构。', status: 'done' },
     ])
@@ -88,7 +88,7 @@ describe('thread timeline', () => {
       'failed', 'user',
     ])
     expect(projected.slice(1, 4).map((message) => message.role === 'entry' ? message.title : '')).toEqual([
-      'Agent 改为 reviewer', '模型改为 p/m2 (high)', '环境改为 local',
+      'Agent 改为 reviewer', '模型改为 m2 (high)', '环境改为 local',
     ])
     expect(buildThreadTimeline(entries, [], []).messages).toEqual(projected)
   })
@@ -156,7 +156,7 @@ describe('thread timeline', () => {
     expect(settingsChanges).toHaveLength(3)
     expect(settingsChanges.map((m) => (m.role === 'entry' ? m.title : ''))).toEqual([
       'Agent 改为 reviewer',
-      '模型改为 commandcode/glm-5.3-flash (max)',
+      '模型改为 glm-5.3-flash (max)',
       '环境已解除',
     ])
     // 变更的 subjectEntryId 和 createdAt 严格来自该 SETTINGS entry
@@ -228,7 +228,7 @@ describe('thread timeline', () => {
     ], [], []).messages
     expect(messages.map(({ id }) => id)).toEqual(['entry:summary', 'entry:changed:model'])
     expect(messages[1]).toMatchObject({
-      kind: 'settings_change', title: '模型改为 xai/grok-4.7 (xhigh)',
+      kind: 'settings_change', title: '模型改为 grok-4.7 (xhigh)',
     })
   })
 
