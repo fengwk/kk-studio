@@ -405,11 +405,14 @@ final class ThreadProcessorTestSupport {
             null);
     // live attached fixture：assistant Entry 必须由同一 frozen request + ProviderResponse 经 mapper 生成，
     // 与 validateAttached 的完整 payload 校验保持一致。
+    ModelSelection selection =
+        ModelSelection.model(requestSpec.model().modelName(), requestSpec.variant().id());
     UUID assistantEntryId =
         insertAssistantPayload(
             store,
             turn,
-            new HistoryPayloadMapper().assistantPayload(response, requestSpec.toolBindings()));
+            new HistoryPayloadMapper()
+                .assistantPayload(response, requestSpec.toolBindings(), selection, NOW));
     if (modelStatus == ModelInvocationStatus.SUCCEEDED) {
       transitionModel(store, modelId, m -> m.attachResultEntry(assistantEntryId, NOW));
     }
@@ -477,11 +480,14 @@ final class ThreadProcessorTestSupport {
             requestSpec,
             response,
             null);
+    ModelSelection selection =
+        ModelSelection.model(requestSpec.model().modelName(), requestSpec.variant().id());
     UUID assistantEntryId =
         insertAssistantPayload(
             store,
             turn,
-            new HistoryPayloadMapper().assistantPayload(response, requestSpec.toolBindings()));
+            new HistoryPayloadMapper()
+                .assistantPayload(response, requestSpec.toolBindings(), selection, NOW));
     transitionModel(store, modelId, m -> m.attachResultEntry(assistantEntryId, NOW));
     return new SeededToolPhase(modelId, assistantEntryId);
   }
@@ -693,7 +699,10 @@ final class ThreadProcessorTestSupport {
                 model.resultEntryId(),
                 model.failedAttempts(),
                 model.createdAt(),
-                updatedAt));
+                updatedAt,
+                model.providerReplayState(),
+                model.groupProgress(),
+                model.requestedAt()));
   }
 
   /** 通过 Store validator 合法推进 ToolInvocation.updatedAt，保持 invocation 事实不变。 */

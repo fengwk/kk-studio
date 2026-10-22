@@ -587,7 +587,7 @@ public abstract class HarnessStoreInvocationContract {
             store, baseline.sessionId(), baseline.turnStartEntryId(), userMessagePayload());
     UUID assistantEntryId =
         insertChildEntry(
-            store, baseline.sessionId(), userEntryId, mappedAssistant(requestSpec, response));
+            store, baseline.sessionId(), userEntryId, mappedAssistant(requestSpec, response, T1));
     UUID toolResultEntryId =
         insertChildEntry(
             store,
@@ -1706,7 +1706,7 @@ public abstract class HarnessStoreInvocationContract {
             store, baseline.sessionId(), baseline.turnStartEntryId(), userMessagePayload());
     UUID assistantEntryId =
         insertChildEntry(
-            store, baseline.sessionId(), userEntryId, mappedAssistant(requestSpec, response));
+            store, baseline.sessionId(), userEntryId, mappedAssistant(requestSpec, response, T1));
     insertTerminalModel(
         TestIds.id(1),
         baseline.threadId(),
@@ -1795,7 +1795,7 @@ public abstract class HarnessStoreInvocationContract {
             store, baseline.sessionId(), baseline.turnStartEntryId(), userMessagePayload());
     UUID assistantEntryId =
         insertChildEntry(
-            store, baseline.sessionId(), userEntryId, mappedAssistant(requestSpec, response));
+            store, baseline.sessionId(), userEntryId, mappedAssistant(requestSpec, response, T1));
     insertTerminalModel(
         TestIds.id(1),
         baseline.threadId(),
@@ -1924,7 +1924,7 @@ public abstract class HarnessStoreInvocationContract {
             store, baseline.sessionId(), baseline.turnStartEntryId(), userMessagePayload());
     UUID assistantEntryId =
         insertChildEntry(
-            store, baseline.sessionId(), userEntryId, mappedAssistant(requestSpec, response));
+            store, baseline.sessionId(), userEntryId, mappedAssistant(requestSpec, response, T1));
     insertTerminalModel(
         TestIds.id(1),
         baseline.threadId(),
@@ -2707,7 +2707,10 @@ public abstract class HarnessStoreInvocationContract {
             store, baseline2.sessionId(), baseline2.turnStartEntryId(), userMessagePayload());
     UUID assistantEntryId2 =
         insertChildEntry(
-            store, baseline2.sessionId(), userEntryId2, mappedAssistant(requestSpec2, response2));
+            store,
+            baseline2.sessionId(),
+            userEntryId2,
+            mappedAssistant(requestSpec2, response2, T0));
     insertTerminalModel(
         TestIds.id(2),
         baseline2.threadId(),

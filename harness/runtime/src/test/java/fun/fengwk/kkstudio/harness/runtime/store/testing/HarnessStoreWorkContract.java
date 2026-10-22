@@ -161,7 +161,7 @@ public abstract class HarnessStoreWorkContract {
                   assistantEntryId,
                   baseline.sessionId(),
                   userEntryId,
-                  mappedAssistant(requestSpec, response),
+                  mappedAssistant(requestSpec, response, T1),
                   T1));
           tx.lockThread(baseline.threadId()).orElseThrow();
           tx.insertModelInvocation(
@@ -1010,7 +1010,7 @@ public abstract class HarnessStoreWorkContract {
                   assistantEntryId,
                   baseline.sessionId(),
                   userEntryId,
-                  mappedAssistant(requestSpec, response),
+                  mappedAssistant(requestSpec, response, T1),
                   T1));
           tx.lockThread(baseline.threadId()).orElseThrow();
           tx.insertModelInvocation(
