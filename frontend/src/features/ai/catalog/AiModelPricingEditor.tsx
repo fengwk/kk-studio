@@ -404,7 +404,6 @@ function RatePatchEditor({
   onChange: (rates: AgentModelRatePatchDTO) => void
 }) {
   const { t } = useI18n()
-  const [showTtl, setShowTtl] = useState(Object.keys(rates.cacheWriteByTtl ?? {}).length > 0)
   return (
     <fieldset className="form-group">
       <legend>{t('ai.catalog.form.overrideRates')}</legend>
@@ -426,17 +425,24 @@ function RatePatchEditor({
         ))}
       </div>
       <div className="pricing-fold">
-        <button type="button" className="ghost-inline-btn" aria-expanded={showTtl}
-          onClick={() => setShowTtl((current) => !current)}>
-          {t('ai.catalog.form.cacheWriteTtl')}
-        </button>
-        {showTtl ? (
+        <Checkbox
+          checked={rates.cacheWriteByTtl !== undefined}
+          onChange={(checked) => {
+            const next = { ...rates }
+            if (checked) {
+              next.cacheWriteByTtl = {}
+            } else {
+              delete next.cacheWriteByTtl
+            }
+            onChange(next)
+          }}
+          label={t('ai.catalog.form.overrideTtl')}
+        />
+        <span className="inline-hint">{t('ai.catalog.form.overrideTtlHint')}</span>
+        {rates.cacheWriteByTtl !== undefined ? (
           <TtlRateEditor
-            value={rates.cacheWriteByTtl ?? {}}
-            onChange={(ttl) => onChange({
-              ...rates,
-              cacheWriteByTtl: Object.keys(ttl).length > 0 ? ttl : undefined,
-            })}
+            value={rates.cacheWriteByTtl}
+            onChange={(ttl) => onChange({ ...rates, cacheWriteByTtl: ttl })}
           />
         ) : null}
       </div>
@@ -478,6 +484,9 @@ function FactorEditor({
 
 type ConditionKey = 'context' | 'serviceTier' | 'date' | 'time' | 'all' | 'any' | 'not'
 
+/** 时间条件的最小合法默认值：全天使用 wire 规定的 00:00-24:00。 */
+const ALL_DAY_TIME = { start: '00:00', end: '24:00', timezone: 'UTC' } as const
+
 /**
  * 结构化条件编辑器：每个维度原位展开；空条件合法，all/any/not 递归编辑但深度受限。
  */
@@ -506,6 +515,11 @@ export function ConditionEditor({
       onChange({ ...condition, [key]: [{}] })
     } else if (key === 'not') {
       onChange({ ...condition, not: {} })
+    } else if (key === 'serviceTier') {
+      // 显式空列表表示恒假；不能落成对象或折叠为缺省。
+      onChange({ ...condition, serviceTier: [] })
+    } else if (key === 'time') {
+      onChange({ ...condition, time: { ...ALL_DAY_TIME } })
     } else {
       onChange({ ...condition, [key]: {} })
     }
@@ -590,8 +604,9 @@ export function ConditionEditor({
               <label className="form-group">
                 <FieldLabel required>{t('ai.catalog.form.timeStart')}</FieldLabel>
                 <TextInput
-                  type="time"
                   value={condition.time.start}
+                  placeholder="HH:mm"
+                  spellCheck={false}
                   aria-label={t('ai.catalog.form.timeStart')}
                   onChange={(event) => onChange({
                     ...condition,
@@ -602,8 +617,9 @@ export function ConditionEditor({
               <label className="form-group">
                 <FieldLabel required>{t('ai.catalog.form.timeEnd')}</FieldLabel>
                 <TextInput
-                  type="time"
                   value={condition.time.end}
+                  placeholder="HH:mm"
+                  spellCheck={false}
                   aria-label={t('ai.catalog.form.timeEnd')}
                   onChange={(event) => onChange({
                     ...condition,
@@ -624,6 +640,7 @@ export function ConditionEditor({
                 />
               </label>
             </div>
+            <span className="inline-hint">{t('ai.catalog.form.timeHint')}</span>
             <div className="weekday-row">
               {[1, 2, 3, 4, 5, 6, 7].map((day) => (
                 <Checkbox
