@@ -15,6 +15,7 @@ import fun.fengwk.kkstudio.platform.catalog.definition.service.AgentDefinitionSe
 import fun.fengwk.kkstudio.platform.catalog.definition.service.converter.AgentDefinitionConverter;
 import fun.fengwk.kkstudio.platform.catalog.definition.service.model.AgentDefinition;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelDefaultVariantResolver;
+import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
 import fun.fengwk.kkstudio.platform.error.AiInUseException;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
@@ -28,7 +29,7 @@ import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionType;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionUpdateDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.ModelRef;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
 
 /** 全局 Agent definition CRUD。 */
 @AllArgsConstructor
@@ -57,10 +58,10 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
   public AgentDefinitionDTO createAgent(AgentDefinitionCreateDTO createDTO) {
     String name = createDTO == null ? null : createDTO.getName();
     rejectReservedName(name);
-    ModelRef modelRef = parseModelRef(createDTO == null ? null : createDTO.getModel());
-    referenceResolver.requireModelForUpdate(modelRef.providerName(), modelRef.modelName());
+    String modelName = parseModelName(createDTO == null ? null : createDTO.getModel(), true);
+    referenceResolver.requireModelForUpdate(modelName);
     AgentDefinition definition = definitionMutationFactory.newUserAgent(name, createDTO);
-    validateVariant(modelRef, definition.getVariant());
+    validateSelection(modelName, definition.getVariant());
     AgentDefinitionConfigDTO config = configCodec.decode(definition.getConfigJson());
     validateConfig(config);
     referenceResolver.requireReferencedLifecycles(config.getSkills(), config.getTools());
@@ -94,14 +95,14 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
     ensureExpectedVersion(current, name, rawExpected, expected);
     // 内置 Agent 允许显式未配置模型；用户 Agent 仍要求模型。
     boolean builtin = current.getType() == AgentDefinitionType.BUILTIN;
-    ModelRef modelRef = parseModelRef(updateDTO.getModel(), !builtin);
-    if (modelRef != null) {
-      referenceResolver.requireModelForUpdate(modelRef.providerName(), modelRef.modelName());
+    String modelName = parseModelName(updateDTO.getModel(), !builtin);
+    if (modelName != null) {
+      referenceResolver.requireModelForUpdate(modelName);
     }
     AgentDefinition definition = copy(current);
     definitionMutationFactory.update(definition, updateDTO);
-    if (modelRef != null) {
-      validateVariant(modelRef, definition.getVariant());
+    if (modelName != null) {
+      validateSelection(modelName, definition.getVariant());
     }
     AgentDefinitionConfigDTO config = configCodec.decode(definition.getConfigJson());
     validateConfig(config);
@@ -161,7 +162,6 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
     copy.setType(source.getType());
     copy.setDescription(source.getDescription());
     copy.setSystemPrompt(source.getSystemPrompt());
-    copy.setModelProviderName(source.getModelProviderName());
     copy.setModelName(source.getModelName());
     copy.setVariant(source.getVariant());
     copy.setConfigJson(source.getConfigJson());
@@ -179,21 +179,21 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
     }
   }
 
-  private static ModelRef parseModelRef(String raw) {
-    return parseModelRef(raw, true);
-  }
-
   /** {@code required} 为 false 时 null/空白表示内置 Agent 的显式未配置模型，返回 null。 */
-  private static ModelRef parseModelRef(String raw, boolean required) {
+  private static String parseModelName(String raw, boolean required) {
     if (!required && (raw == null || raw.isBlank())) {
       return null;
     }
-    try {
-      return ModelRef.parse(raw);
-    } catch (IllegalArgumentException error) {
-      throw new AiValidationException(
-          RESOURCE, "model must identify providerName/modelName", error);
+    if (raw == null || raw.isBlank()) {
+      throw new AiValidationException(RESOURCE, "model must not be blank");
     }
+    if (!raw.equals(raw.strip())) {
+      throw new AiValidationException(RESOURCE, "model must not contain surrounding whitespace");
+    }
+    if (raw.length() > 128) {
+      throw new AiValidationException(RESOURCE, "model must be <= 128 characters");
+    }
+    return raw;
   }
 
   private static void rejectReservedName(String name) {
@@ -208,10 +208,18 @@ public class AgentDefinitionServiceImpl implements AgentDefinitionService {
     }
   }
 
-  private void validateVariant(ModelRef modelRef, String variant) {
+  private void validateSelection(String modelName, String variant) {
+    AgentModel model = referenceResolver.requireModel(modelName);
+    if (model.getKind() == AgentModelKind.GROUP) {
+      if (variant != null && !variant.isBlank()) {
+        throw new AiValidationException(
+            RESOURCE, "variant must be blank when the selected model is a GROUP");
+      }
+      return;
+    }
     if (variant != null && !variant.isBlank()) {
       try {
-        variantResolver.resolve(modelRef.providerName(), modelRef.modelName(), variant);
+        variantResolver.resolve(modelName, variant);
       } catch (IllegalArgumentException error) {
         throw new AiValidationException(RESOURCE, error.getMessage(), error);
       }

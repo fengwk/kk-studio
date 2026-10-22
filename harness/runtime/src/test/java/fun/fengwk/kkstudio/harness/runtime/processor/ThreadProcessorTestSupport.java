@@ -773,7 +773,7 @@ final class ThreadProcessorTestSupport {
   // -----------------------------------------------------------------------------------------------
 
   static BranchSettings branchSettings() {
-    return new BranchSettings("agent", new ModelSelection("provider", "model", "v1"), null);
+    return new BranchSettings("agent", ModelSelection.model("model", "v1"), null);
   }
 
   /** Resolver 成功后的 INPUT TurnStart：owner 为创建 Thread，contextWindow 已冻结。 */
@@ -872,7 +872,7 @@ final class ThreadProcessorTestSupport {
         1L,
         ProviderType.OPENAI,
         new UUID(0L, 1L),
-        modelDescriptor(settings.model().providerName(), settings.model().modelName()),
+        modelDescriptor("provider", settings.model().modelName()),
         new ModelVariant(settings.model().variant()),
         1024,
         "Test system instruction.",
@@ -891,7 +891,7 @@ final class ThreadProcessorTestSupport {
         1L,
         ProviderType.OPENAI,
         new UUID(0L, 1L),
-        modelDescriptor(model.providerName(), model.modelName()),
+        modelDescriptor("provider", model.modelName()),
         new ModelVariant(model.variant()),
         1024,
         "Test system instruction.",
@@ -901,7 +901,7 @@ final class ThreadProcessorTestSupport {
   }
 
   static ModelRequestSpec compactionRequest(CompactionPreparation preparation) {
-    return compactionRequest(new ModelSelection("provider", "compactor-model", "v1"));
+    return compactionRequest(ModelSelection.model("compactor-model", "v1"));
   }
 
   /**
@@ -1183,7 +1183,7 @@ final class ThreadProcessorTestSupport {
       if (autoConsistent) {
         // 按 candidate path 的最终 branch 事实自动构造一致 spec；压缩 turn 按冻结 preparation 构造 CompactionResolved。
         if (preparation != null) {
-          ModelSelection compactorModel = new ModelSelection("provider", "compactor-model", "v1");
+          ModelSelection compactorModel = ModelSelection.model("compactor-model", "v1");
           return new TurnResolver.CompactionResolved(
               compactorModel,
               4096L,

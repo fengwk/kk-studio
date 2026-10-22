@@ -55,8 +55,7 @@ import java.util.UUID;
 class CompactionPlannerTest {
   private static final UUID OWNER_THREAD_ID = new UUID(0L, 1L);
 
-  private static final ModelSelection SETTINGS_MODEL =
-      new ModelSelection("provider", "model", "v1");
+  private static final ModelSelection SETTINGS_MODEL = ModelSelection.model("model", "v1");
   private static final CompactionConfig CONFIG = new CompactionConfig(20_000);
   private static final Instant BASE = Instant.ofEpochSecond(1000L);
 

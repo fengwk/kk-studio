@@ -112,8 +112,7 @@ class EntryPathTest {
     // baseSettings() 必须返回最新 ROOT/TURN_START 的完整快照，绝不回看更旧的非 null environment/agent。
     BranchSettings rootSettings = settings("root-agent");
     BranchSettings firstTurn =
-        settings("first-agent")
-            .withModel(new ModelSelection("anthropic", "claude-sonnet", "custom"));
+        settings("first-agent").withModel(ModelSelection.model("claude-sonnet", "custom"));
     BranchSettings latestTurn = settings("latest-agent");
     Entry root = root(rootSettings);
     Entry start1 = turnStart(id(2L), id(1L), TurnStartReason.INPUT, firstTurn);
@@ -130,7 +129,7 @@ class EntryPathTest {
     BranchSettings base = path.baseSettings();
     assertEquals(latestTurn, base);
     assertEquals("latest-agent", base.agentName());
-    assertEquals(new ModelSelection("anthropic", "claude-sonnet", "default"), base.model());
+    assertEquals(ModelSelection.model("claude-sonnet", "default"), base.model());
     assertNotEquals(firstTurn, base);
     assertNotEquals(rootSettings, base);
   }
@@ -139,7 +138,7 @@ class EntryPathTest {
   void compactionTurnSettingsNeverChangeBranchProjection() {
     BranchSettings live = settings("live");
     BranchSettings compactionOnly =
-        settings("poison").withModel(new ModelSelection("fallback", "summary", "v2"));
+        settings("poison").withModel(ModelSelection.model("summary", "v2"));
     Entry root = root(settings("root"));
     Entry start = turnStart(id(2L), id(1L), TurnStartReason.INPUT, live);
     Entry user = userMessage(id(3L), id(2L));
@@ -1560,7 +1559,6 @@ class EntryPathTest {
   }
 
   private static BranchSettings settings(String agentName) {
-    return new BranchSettings(
-        agentName, new ModelSelection("anthropic", "claude-sonnet", "default"), null);
+    return new BranchSettings(agentName, ModelSelection.model("claude-sonnet", "default"), null);
   }
 }

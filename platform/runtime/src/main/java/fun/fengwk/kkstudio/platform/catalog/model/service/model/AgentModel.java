@@ -2,36 +2,39 @@ package fun.fengwk.kkstudio.platform.catalog.model.service.model;
 
 import lombok.Data;
 
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
+
 import java.time.Instant;
 
-/** 全局 Agent model 资源。 */
+/** 统一 Agent model 资源：单 MODEL 或按序降级的 MODEL GROUP。 */
 @Data
 public class AgentModel {
 
-  /** 绑定 Provider 名称（必填，复合主键一部分，外键引用 {@code agent_provider.name}）。 */
-  private String providerName;
-
-  /** 模型逻辑名（必填，与 {@link #providerName} 组成复合主键；支持重命名）。 */
+  /** 全局唯一逻辑名称；单 Model 与模型组共享同一名称空间。 */
   private String name;
 
-  /** 发往上游 Provider 的真实模型标识（必填，映射 {@code model_id}，不唯一）。 */
+  /** 资源类型。 */
+  private AgentModelKind kind;
+
+  /** MODEL 绑定 Provider 名称；GROUP 为 null。 */
+  private String providerName;
+
+  /** MODEL 发往上游 Provider 的真实模型标识；GROUP 为 null。 */
   private String modelId;
 
-  /** 描述，可选；映射 text 列，null 表示未填写。 */
+  /** 描述，可选。 */
   private String description;
 
-  /**
-   * 结构化配置 JSON（AgentModelConfigDTO：limit / abilities / pricing / variants / defaultVariant），映射
-   * {@code config} jsonb 列，必填。
-   */
+  /** MODEL 结构化配置 JSON；GROUP 为 null。 */
   private String configJson;
 
-  /** 乐观锁版本：非负，从 0 开始，每次写操作 +1；CAS 更新依据。 */
+  /** GROUP 组配置 JSON；MODEL 为 null。 */
+  private String groupConfigJson;
+
+  /** 乐观锁版本：非负，从 0 开始，每次写操作 +1。 */
   private Long version;
 
-  /** 创建时间（映射 {@code created_at} timestamptz，毫秒精度）。 */
   private Instant createTime;
 
-  /** 更新时间（映射 {@code updated_at} timestamptz，应用侧维护，毫秒精度）。 */
   private Instant updateTime;
 }

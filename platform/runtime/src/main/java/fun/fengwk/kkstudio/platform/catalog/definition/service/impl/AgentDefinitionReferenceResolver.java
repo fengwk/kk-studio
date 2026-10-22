@@ -66,17 +66,16 @@ final class AgentDefinitionReferenceResolver {
     return definition;
   }
 
-  AgentModel requireModel(String providerName, String modelName) {
-    AgentModel model = agentModelRepository.getByProviderNameAndName(providerName, modelName);
+  AgentModel requireModel(String modelName) {
+    AgentModel model = agentModelRepository.getByName(modelName);
     if (model == null) {
       throw new AiResourceNotFoundException(MODEL_RESOURCE);
     }
     return model;
   }
 
-  AgentModel requireModelForUpdate(String providerName, String modelName) {
-    AgentModel model =
-        agentModelRepository.getByProviderNameAndNameForUpdate(providerName, modelName);
+  AgentModel requireModelForUpdate(String modelName) {
+    AgentModel model = agentModelRepository.getByNameForUpdate(modelName);
     if (model == null) {
       throw new AiResourceNotFoundException(MODEL_RESOURCE);
     }

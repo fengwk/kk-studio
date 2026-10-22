@@ -9,7 +9,6 @@ import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionConfigDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionEditablePropertiesDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentDefinitionType;
-import fun.fengwk.kkstudio.share.ai.catalog.ModelRef;
 
 /**
  * 规范化可编辑的 Agent 字段，并序列化严格的结构化执行配置。
@@ -64,7 +63,6 @@ public final class AgentDefinitionMutationFactory {
     definition.setName(mutation.name());
     definition.setDescription(mutation.description());
     definition.setSystemPrompt(mutation.systemPrompt());
-    definition.setModelProviderName(mutation.modelProviderName());
     definition.setModelName(mutation.modelName());
     definition.setVariant(mutation.variant());
     definition.setConfigJson(mutation.configJson());
@@ -89,12 +87,12 @@ public final class AgentDefinitionMutationFactory {
     if (normalizedName.indexOf('/') >= 0) {
       throw new AiValidationException(RESOURCE, RESOURCE + " name must not contain '/'");
     }
-    ModelRef modelRef = parseModelRef(properties.getModel(), modelRequired);
+    String modelName = parseModelName(properties.getModel(), modelRequired);
     String description = editableSupport.trimToNull(properties.getDescription());
     String systemPrompt = editableSupport.trimToNull(properties.getSystemPrompt());
-    // null/blank = 不覆盖；runtime/thread 应用时解析 model.defaultVariant。
+    // null/blank = 不覆盖；runtime/thread 应用时解析 model.defaultVariant（GROUP 必须为 null）。
     String variant = editableSupport.trimToNull(properties.getVariant());
-    if (modelRef == null && variant != null) {
+    if (modelName == null && variant != null) {
       throw new AiValidationException(RESOURCE, RESOURCE + " variant requires a configured model");
     }
     editableSupport.validateMaxLength(RESOURCE, "name", normalizedName, NAME_MAX_LENGTH);
@@ -109,34 +107,30 @@ public final class AgentDefinitionMutationFactory {
     } catch (IllegalArgumentException error) {
       throw new AiValidationException(RESOURCE, error.getMessage(), error);
     }
-    return new Mutation(
-        normalizedName,
-        description,
-        systemPrompt,
-        modelRef == null ? null : modelRef.providerName(),
-        modelRef == null ? null : modelRef.modelName(),
-        variant,
-        configJson);
+    return new Mutation(normalizedName, description, systemPrompt, modelName, variant, configJson);
   }
 
-  /** {@code required} 为 false 时 null/空白表示显式未配置模型，返回 null；其余情况严格解析。 */
-  private static ModelRef parseModelRef(String raw, boolean required) {
+  /** {@code required} 为 false 时 null/空白表示显式未配置模型；单个逻辑模型名不得包含首尾空白。 */
+  private static String parseModelName(String raw, boolean required) {
     if (!required && (raw == null || raw.isBlank())) {
       return null;
     }
-    try {
-      return ModelRef.parse(raw);
-    } catch (IllegalArgumentException error) {
-      throw new AiValidationException(
-          RESOURCE, "model must identify providerName/modelName", error);
+    if (raw == null || raw.isBlank()) {
+      throw new AiValidationException(RESOURCE, "model must not be blank");
     }
+    if (!raw.equals(raw.strip())) {
+      throw new AiValidationException(RESOURCE, "model must not contain surrounding whitespace");
+    }
+    if (raw.length() > 128) {
+      throw new AiValidationException(RESOURCE, "model must be <= 128 characters");
+    }
+    return raw;
   }
 
   record Mutation(
       String name,
       String description,
       String systemPrompt,
-      String modelProviderName,
       String modelName,
       String variant,
       String configJson) {}

@@ -14,8 +14,7 @@ import java.util.UUID;
 /** Branch settings 的 immutable snapshot、canonical 名称/Goal 校验与「不保存目录状态」契约。 */
 class BranchSettingsTest {
 
-  private static final ModelSelection MODEL =
-      new ModelSelection("anthropic", "claude-sonnet", "default");
+  private static final ModelSelection MODEL = ModelSelection.model("claude-sonnet", "default");
 
   @Test
   void preservesAgentNameModelAndEnvironmentName() {
@@ -42,8 +41,7 @@ class BranchSettingsTest {
     BranchSettings base = new BranchSettings("coding", MODEL, "local");
 
     BranchSettings rebound = base.withAgentName("reviewer");
-    BranchSettings remodelled =
-        rebound.withModel(new ModelSelection("anthropic", "claude-opus", "default"));
+    BranchSettings remodelled = rebound.withModel(ModelSelection.model("claude-opus", "default"));
 
     assertEquals("reviewer", rebound.agentName());
     assertEquals(base.model(), rebound.model());

@@ -27,7 +27,7 @@ import java.util.List;
 class CompactionResultEvaluatorTest {
 
   private static final BranchSettings SETTINGS =
-      new BranchSettings("agent", new ModelSelection("provider", "model", "v1"), null);
+      new BranchSettings("agent", ModelSelection.model("model", "v1"), null);
   private static final Instant NOW = Instant.EPOCH;
   private static final long BUDGET = 4096L;
 

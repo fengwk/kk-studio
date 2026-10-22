@@ -754,7 +754,7 @@ final class ToolProcessorTestSupport {
   }
 
   private static BranchSettings branchSettings() {
-    return new BranchSettings("agent", new ModelSelection("provider", "model", "v1"), null);
+    return new BranchSettings("agent", ModelSelection.model("model", "v1"), null);
   }
 
   private static EntryPayload userMessagePayload() {

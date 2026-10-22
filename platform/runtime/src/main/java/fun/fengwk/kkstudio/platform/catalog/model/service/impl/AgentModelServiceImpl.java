@@ -13,6 +13,7 @@ import fun.fengwk.kkstudio.platform.catalog.model.service.AgentModelService;
 import fun.fengwk.kkstudio.platform.catalog.model.service.converter.AgentModelConverter;
 import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.platform.error.AiDuplicateException;
+import fun.fengwk.kkstudio.platform.error.AiInUseException;
 import fun.fengwk.kkstudio.platform.error.AiResourceNotFoundException;
 import fun.fengwk.kkstudio.platform.error.AiValidationException;
 import fun.fengwk.kkstudio.platform.error.AiVersionConflictException;
@@ -20,10 +21,10 @@ import fun.fengwk.kkstudio.platform.error.CatalogVersions;
 import fun.fengwk.kkstudio.platform.persistence.PostgresqlIntegrityViolationClassifier;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelCreateDTO;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelDTO;
+import fun.fengwk.kkstudio.share.ai.catalog.AgentModelKind;
 import fun.fengwk.kkstudio.share.ai.catalog.AgentModelUpdateDTO;
-import fun.fengwk.kkstudio.share.ai.catalog.ModelRef;
 
-/** 全局 model CRUD。 */
+/** 全局 model CRUD：name 跨 MODEL/GROUP 原子唯一。 */
 @AllArgsConstructor
 @Service
 public class AgentModelServiceImpl implements AgentModelService {
@@ -44,80 +45,84 @@ public class AgentModelServiceImpl implements AgentModelService {
   @Override
   @Transactional
   public AgentModelDTO createModel(AgentModelCreateDTO createDTO) {
-    ModelRef ref =
-        parseRef(
-            createDTO == null ? null : createDTO.getProviderName(),
-            createDTO == null ? null : createDTO.getName());
-    referenceResolver.requireProviderForUpdate(ref.providerName());
-    AgentModel model =
-        modelMutationFactory.newModel(ref.providerName(), ref.modelName(), createDTO);
+    String name = createDTO == null ? null : createDTO.getName();
+    AgentModel model = modelMutationFactory.newModel(name, createDTO);
+    if (model.getKind() == AgentModelKind.MODEL) {
+      referenceResolver.requireProviderForUpdate(model.getProviderName());
+    }
     try {
       if (!agentModelRepository.create(model)) {
         throw new IllegalStateException("create agent model failed");
       }
     } catch (DuplicateKeyException error) {
       throw new AiDuplicateException(
-          RESOURCE, RESOURCE + " name already exists under this provider: " + ref, error);
+          RESOURCE, RESOURCE + " name already exists: " + model.getName(), error);
     } catch (DataIntegrityViolationException error) {
       if (PostgresqlIntegrityViolationClassifier.isForeignKeyViolation(error)) {
         throw new AiResourceNotFoundException(PROVIDER_RESOURCE);
       }
       throw error;
     }
-    AgentModel loaded =
-        agentModelRepository.getByProviderNameAndName(ref.providerName(), ref.modelName());
-    return agentModelConverter.convert(loaded);
+    return agentModelConverter.convert(agentModelRepository.getByName(model.getName()));
   }
 
   @Override
   @Transactional
-  public AgentModelDTO updateModel(
-      String providerName, String modelName, AgentModelUpdateDTO updateDTO) {
+  public AgentModelDTO updateModel(String modelName, AgentModelUpdateDTO updateDTO) {
     String rawExpected = updateDTO == null ? null : updateDTO.getExpectedVersion();
     if (rawExpected == null) {
       throw new AiValidationException(RESOURCE, "expectedVersion is required");
     }
     long expected = CatalogVersions.parse(rawExpected, "expectedVersion");
-    ModelRef ref = parseRef(providerName, modelName);
-    AgentModel model = referenceResolver.requireModelForUpdate(ref.providerName(), ref.modelName());
-    ensureExpectedVersion(model, ref, rawExpected, expected);
+    AgentModel model = referenceResolver.requireModelForUpdate(canonicalName(modelName));
+    ensureExpectedVersion(model, rawExpected, expected);
+    String previousConfigJson = model.getConfigJson();
     modelMutationFactory.update(model, updateDTO);
-    boolean isRename = !ref.modelName().equals(model.getName());
-    try {
-      if (isRename) {
-        agentModelRepository.rename(ref.modelName(), model, expected);
-      } else {
-        if (!agentModelRepository.updateByName(model, expected)) {
-          AgentModel reread =
-              agentModelRepository.getByProviderNameAndName(ref.providerName(), ref.modelName());
-          if (reread == null) {
-            throw new AiResourceNotFoundException(RESOURCE);
-          }
-          throw new AiVersionConflictException(
-              RESOURCE, rawExpected, CatalogVersions.format(reread.getVersion()));
+    if (model.getKind() == AgentModelKind.MODEL) {
+      referenceResolver.requireProviderForUpdate(model.getProviderName());
+      for (String removedVariant :
+          modelMutationFactory.removedVariants(previousConfigJson, model)) {
+        if (agentModelRepository.hasVariantReferences(modelName, removedVariant)) {
+          throw new AiInUseException(
+              RESOURCE,
+              "model variant is still referenced: " + modelName + " variant=" + removedVariant);
         }
       }
-    } catch (DuplicateKeyException error) {
-      ModelRef targetRef = new ModelRef(model.getProviderName(), model.getName());
-      throw new AiDuplicateException(
-          RESOURCE, RESOURCE + " name already exists under this provider: " + targetRef, error);
     }
-    AgentModel reloaded =
-        agentModelRepository.getByProviderNameAndName(ref.providerName(), model.getName());
-    return agentModelConverter.convert(reloaded);
+    boolean isRename = !modelName.equals(model.getName());
+    try {
+      if (isRename) {
+        agentModelRepository.rename(modelName, model, expected);
+      } else if (!agentModelRepository.updateByName(model, expected)) {
+        AgentModel reread = agentModelRepository.getByName(modelName);
+        if (reread == null) {
+          throw new AiResourceNotFoundException(RESOURCE);
+        }
+        throw new AiVersionConflictException(
+            RESOURCE, rawExpected, CatalogVersions.format(reread.getVersion()));
+      }
+    } catch (DuplicateKeyException error) {
+      throw new AiDuplicateException(
+          RESOURCE, RESOURCE + " name already exists: " + model.getName(), error);
+    } catch (DataIntegrityViolationException error) {
+      if (PostgresqlIntegrityViolationClassifier.isForeignKeyViolation(error)) {
+        throw new AiResourceNotFoundException(PROVIDER_RESOURCE);
+      }
+      throw error;
+    }
+    return agentModelConverter.convert(agentModelRepository.getByName(model.getName()));
   }
 
   @Override
   @Transactional
-  public void deleteModel(String providerName, String modelName, String expectedVersion) {
+  public void deleteModel(String modelName, String expectedVersion) {
     long expected = CatalogVersions.parse(expectedVersion, "expectedVersion");
-    ModelRef ref = parseRef(providerName, modelName);
-    AgentModel model = referenceResolver.requireModelForUpdate(ref.providerName(), ref.modelName());
-    ensureExpectedVersion(model, ref, expectedVersion, expected);
-    referenceResolver.ensureDeletable(ref.providerName(), ref.modelName());
-    if (!agentModelRepository.deleteByName(ref.providerName(), ref.modelName(), expected)) {
-      AgentModel reread =
-          agentModelRepository.getByProviderNameAndName(ref.providerName(), ref.modelName());
+    String name = canonicalName(modelName);
+    AgentModel model = referenceResolver.requireModelForUpdate(name);
+    ensureExpectedVersion(model, expectedVersion, expected);
+    referenceResolver.ensureDeletable(name);
+    if (!agentModelRepository.deleteByName(name, expected)) {
+      AgentModel reread = agentModelRepository.getByName(name);
       if (reread == null) {
         throw new AiResourceNotFoundException(RESOURCE);
       }
@@ -127,19 +132,21 @@ public class AgentModelServiceImpl implements AgentModelService {
   }
 
   private static void ensureExpectedVersion(
-      AgentModel model, ModelRef ref, String expectedVersion, long expected) {
+      AgentModel model, String expectedVersion, long expected) {
     if (model.getVersion() != expected) {
       throw new AiVersionConflictException(
           RESOURCE, expectedVersion, CatalogVersions.format(model.getVersion()));
     }
   }
 
-  private static ModelRef parseRef(String providerName, String modelName) {
-    try {
-      return new ModelRef(providerName, modelName);
-    } catch (IllegalArgumentException error) {
-      throw new AiValidationException(
-          RESOURCE, "model must identify providerName/modelName", error);
+  private static String canonicalName(String modelName) {
+    if (modelName == null || modelName.isBlank()) {
+      throw new AiValidationException(RESOURCE, "modelName must not be blank");
     }
+    if (!modelName.equals(modelName.strip())) {
+      throw new AiValidationException(
+          RESOURCE, "modelName must not contain surrounding whitespace");
+    }
+    return modelName;
   }
 }

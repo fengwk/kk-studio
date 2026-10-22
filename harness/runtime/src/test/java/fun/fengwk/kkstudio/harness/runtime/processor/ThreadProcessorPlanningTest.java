@@ -162,7 +162,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
         seedCommand(
             fixture.store,
             baseline.threadId(),
-            new SetModelCommandPayload(new ModelSelection("provider", "model-b", "v2")));
+            new SetModelCommandPayload(ModelSelection.model("model-b", "v2")));
     UUID userCommand =
         seedCommand(
             fixture.store,
@@ -251,11 +251,11 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
     seedCommand(
         fixture.store,
         baseline.threadId(),
-        new SetModelCommandPayload(new ModelSelection("provider", "model-a", "v1")));
+        new SetModelCommandPayload(ModelSelection.model("model-a", "v1")));
     seedCommand(
         fixture.store,
         baseline.threadId(),
-        new SetModelCommandPayload(new ModelSelection("provider", "model-b", "v2")));
+        new SetModelCommandPayload(ModelSelection.model("model-b", "v2")));
     requestThreadWork(fixture.store, baseline.threadId());
     fixture.resolver.autoConsistent = true;
 
@@ -297,7 +297,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
         seedCommand(
             fixture.store,
             baseline.threadId(),
-            new SetModelCommandPayload(new ModelSelection("provider", "model-b", "v2")));
+            new SetModelCommandPayload(ModelSelection.model("model-b", "v2")));
     UUID userCommand =
         seedCommand(
             fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));
@@ -335,7 +335,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
         seedCommand(
             fixture.store,
             baseline.threadId(),
-            new SetModelCommandPayload(new ModelSelection("provider", "model-b", "v2")));
+            new SetModelCommandPayload(ModelSelection.model("model-b", "v2")));
     requestThreadWork(fixture.store, baseline.threadId());
 
     // claim1：应用 SET_MODEL 为 SETTINGS 快照；claim2：无 continuation / 无 message，quiesce。
@@ -360,7 +360,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
         seedCommand(
             fixture.store,
             baseline.threadId(),
-            new SetModelCommandPayload(new ModelSelection("provider", "model-b", "v2")));
+            new SetModelCommandPayload(ModelSelection.model("model-b", "v2")));
     requestThreadWork(fixture.store, baseline.threadId());
     fixture.resolver.autoConsistent = true;
 
@@ -393,7 +393,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
         seedCommand(
             fixture.store,
             baseline.threadId(),
-            new SetModelCommandPayload(new ModelSelection("provider", "model-b", "v2")));
+            new SetModelCommandPayload(ModelSelection.model("model-b", "v2")));
     UUID userCommand =
         seedCommand(
             fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));

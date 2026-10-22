@@ -38,7 +38,33 @@ public record ModelRequestSpec(
     String systemInstruction,
     List<ToolBinding> toolBindings,
     List<SubagentBinding> subagentBindings,
-    ProviderCacheControl cacheControl) {
+    ProviderCacheControl cacheControl,
+    ModelGroupExecution groupExecution) {
+
+  public ModelRequestSpec(
+      long catalogEpoch,
+      ProviderType providerType,
+      UUID providerConnectionGenerationId,
+      ModelDescriptor model,
+      ModelVariant variant,
+      int outputTokens,
+      String systemInstruction,
+      List<ToolBinding> toolBindings,
+      List<SubagentBinding> subagentBindings,
+      ProviderCacheControl cacheControl) {
+    this(
+        catalogEpoch,
+        providerType,
+        providerConnectionGenerationId,
+        model,
+        variant,
+        outputTokens,
+        systemInstruction,
+        toolBindings,
+        subagentBindings,
+        cacheControl,
+        null);
+  }
 
   public ModelRequestSpec {
     if (catalogEpoch <= 0) {
@@ -58,10 +84,36 @@ public record ModelRequestSpec(
     toolBindings = List.copyOf(Objects.requireNonNull(toolBindings, "toolBindings"));
     subagentBindings = List.copyOf(Objects.requireNonNull(subagentBindings, "subagentBindings"));
     cacheControl = Objects.requireNonNull(cacheControl, "cacheControl");
+    if (groupExecution != null && groupExecution.members().isEmpty()) {
+      throw new IllegalArgumentException("groupExecution must carry members");
+    }
     requireUniqueToolBindings(toolBindings);
     requireUniqueSubagentNames(subagentBindings);
     requireConsistentEnvironments(toolBindings);
     requireConsistentCatalogEpoch(toolBindings, catalogEpoch);
+  }
+
+  /** 模型组在指定 durable 成员游标处应使用的执行快照；顶层字段被替换为该成员的真实身份。 */
+  public ModelRequestSpec forMember(int memberIndex) {
+    if (groupExecution == null) {
+      throw new IllegalArgumentException("request spec is not a model group");
+    }
+    if (memberIndex < 0 || memberIndex >= groupExecution.members().size()) {
+      throw new IllegalArgumentException("memberIndex is outside the frozen group members");
+    }
+    ModelGroupMemberExecution member = groupExecution.members().get(memberIndex);
+    return new ModelRequestSpec(
+        catalogEpoch,
+        member.providerType(),
+        member.providerConnectionGenerationId(),
+        member.model(),
+        member.variant(),
+        outputTokens,
+        systemInstruction,
+        toolBindings,
+        subagentBindings,
+        cacheControl,
+        groupExecution);
   }
 
   /** 一次模型调用的工具面只来自一个目录 epoch：任何 binding 都必须与 spec 同 epoch。 */
