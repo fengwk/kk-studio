@@ -112,12 +112,13 @@ describe('system settings schema renderer', () => {
       'aiRuntime.retryBackoffStrategy',
       'aiRuntime.retryBaseDelayMillis',
       'aiRuntime.retryMaxDelayMillis',
+      'aiRuntime.modelHttpRetryStatusCodes',
+      'aiRuntime.modelCatalogSource',
       'aiRuntime.compactionKeepRecentTokens',
       'aiRuntime.subagentMaxDepth',
       'aiRuntime.subagentMaxConcurrency',
       'aiRuntime.subagentMaxTotalConcurrency',
       'aiRuntime.subagentMaxTurns',
-      'aiRuntime.modelHttpRetryStatusCodes',
     ])
     // 顺序与 server schema 一致。
     expect(paths![0]).toBe('aiRuntime.retryMaxRetries')

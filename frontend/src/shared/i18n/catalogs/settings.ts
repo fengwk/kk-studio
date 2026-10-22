@@ -823,6 +823,30 @@ export const settingsCatalog = {
     'en-US': 'HTTP error policy',
     'zh-CN': 'HTTP 错误策略',
   },
+  'settings.section.aiRuntime.modelCatalog.title': {
+    'en-US': 'Model catalog',
+    'zh-CN': '模型目录',
+  },
+  'settings.section.aiRuntime.modelCatalog.description': {
+    'en-US': 'Choose the source used to load the model catalog.',
+    'zh-CN': '选择加载模型目录的数据来源。',
+  },
+  'settings.field.aiRuntime.modelCatalogSource': {
+    'en-US': 'Model catalog source',
+    'zh-CN': '模型目录来源',
+  },
+  'settings.field.aiRuntime.modelCatalogSource.hint': {
+    'en-US': 'New catalog HTTP requests use the selected source after saving. No restart is required.',
+    'zh-CN': '保存后新发起的目录 HTTP 请求使用所选来源，无需重启。',
+  },
+  'settings.option.modelCatalogSource.modelsDevV2': {
+    'en-US': 'models.dev v2',
+    'zh-CN': 'models.dev v2',
+  },
+  'settings.option.modelCatalogSource.modelsDevV1': {
+    'en-US': 'models.dev v1 (legacy)',
+    'zh-CN': 'models.dev v1（旧版）',
+  },
   'settings.section.aiRuntime.httpErrors.description': {
     'en-US': 'Configure retry behavior for model HTTP errors. Takes effect on next invocation.',
     'zh-CN': '配置模型调用遇到 HTTP 错误时的重试行为。下次调用生效。',

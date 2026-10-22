@@ -1,3 +1,4 @@
+import type { ModelCatalogSource } from '@/shared/api/contracts/ai-catalog'
 import type {
   PermissionAction,
   SystemSettingsSectionsDTO,
@@ -27,6 +28,7 @@ export interface SystemSettingsToolDraft {
 }
 
 export interface SystemSettingsAiRuntimeDraft {
+  modelCatalogSource: ModelCatalogSource
   retryMaxRetries: DraftNumericField
   retryBackoffStrategy: 'FIXED' | 'EXPONENTIAL'
   retryBaseDelayMillis: DraftNumericField
@@ -164,6 +166,7 @@ function aiRuntimeToDraft(
 ): SystemSettingsAiRuntimeDraft {
   return {
     retryMaxRetries: String(dto.retryMaxRetries),
+    modelCatalogSource: dto.modelCatalogSource,
     retryBackoffStrategy: dto.retryBackoffStrategy,
     retryBaseDelayMillis: dto.retryBaseDelayMillis,
     retryMaxDelayMillis: dto.retryMaxDelayMillis,
@@ -223,6 +226,7 @@ export function assembleSettingsUpdate(
       ),
     },
     aiRuntime: {
+      modelCatalogSource: draft.aiRuntime.modelCatalogSource,
       retryMaxRetries: requiredInt(draft.aiRuntime.retryMaxRetries),
       retryBackoffStrategy: draft.aiRuntime.retryBackoffStrategy,
       retryBaseDelayMillis: requiredLong(draft.aiRuntime.retryBaseDelayMillis),

@@ -12,6 +12,19 @@ import {
 } from '@/test-support/settings-test-fixtures'
 
 describe('system settings draft codec', () => {
+  // 两种权威来源分别 hydrate，随后切换；不能从另一份聚合或前端默认值混入来源。
+  it.each(['models_dev_v1', 'models_dev_v2'] as const)('preserves and edits catalog source %s', (source) => {
+    const dto = makeSettingsDto()
+    dto.aiRuntime.modelCatalogSource = source
+    const draft = settingsSectionsToDraft(dto)
+    expect(draft.aiRuntime.modelCatalogSource).toBe(source)
+    expect(assembleSettingsUpdate(draft, dto.version).aiRuntime).toEqual(dto.aiRuntime)
+    draft.aiRuntime.modelCatalogSource = source === 'models_dev_v1' ? 'models_dev_v2' : 'models_dev_v1'
+    expect(assembleSettingsUpdate(draft, dto.version).aiRuntime).toEqual({
+      ...dto.aiRuntime, modelCatalogSource: draft.aiRuntime.modelCatalogSource,
+    })
+    expect(dto.aiRuntime.modelCatalogSource).toBe(source)
+  })
   // 默认关闭和清空代理都必须明确发送 null；绕过列表保留为字符串，不能产生模块覆盖。
   it('round-trips direct connections and serializes only the two global proxy fields', () => {
     const dto = makeSettingsDto()
