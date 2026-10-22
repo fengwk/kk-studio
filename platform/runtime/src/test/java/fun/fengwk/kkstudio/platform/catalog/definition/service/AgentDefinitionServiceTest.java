@@ -56,7 +56,7 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
         () -> agentDefinitionService.createAgent(agent(modelRef, name)));
     assertThrows(
         AiInUseException.class,
-        () -> agentModelService.deleteModel(provider.getName(), model.getName(), "0"));
+        () -> agentModelService.deleteModel(model.getName(), "0"));
 
     AgentDefinitionUpdateDTO update = new AgentDefinitionUpdateDTO();
     update.setDescription("updated");
@@ -89,7 +89,7 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
     agentDefinitionService.deleteAgent(name, recreated.getVersion());
     assertThrows(
         AiResourceNotFoundException.class, () -> agentDefinitionService.deleteAgent(name, "0"));
-    agentModelService.deleteModel(provider.getName(), model.getName(), model.getVersion());
+    agentModelService.deleteModel(model.getName(), model.getVersion());
     agentProviderService.deleteProvider(provider.getName(), provider.getVersion());
   }
 
@@ -137,7 +137,7 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
                 .orElseThrow();
         agentDefinitionService.deleteAgent(current.getName(), current.getVersion());
       }
-      agentModelService.deleteModel(provider.getName(), model.getName(), model.getVersion());
+      agentModelService.deleteModel(model.getName(), model.getVersion());
       agentProviderService.deleteProvider(provider.getName(), provider.getVersion());
     }
   }
@@ -192,7 +192,7 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
 
     agentDefinitionService.deleteAgent(rightName, right.getVersion());
     agentDefinitionService.deleteAgent(leftName, left.getVersion());
-    agentModelService.deleteModel(provider.getName(), model.getName(), model.getVersion());
+    agentModelService.deleteModel(model.getName(), model.getVersion());
     agentProviderService.deleteProvider(provider.getName(), provider.getVersion());
   }
 
@@ -223,7 +223,7 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
           () -> agentDefinitionService.updateAgent(created.getName(), invalidUpdate));
     } finally {
       agentDefinitionService.deleteAgent(created.getName(), created.getVersion());
-      agentModelService.deleteModel(provider.getName(), model.getName(), model.getVersion());
+      agentModelService.deleteModel(model.getName(), model.getVersion());
       agentProviderService.deleteProvider(provider.getName(), provider.getVersion());
     }
   }
@@ -261,8 +261,8 @@ public class AgentDefinitionServiceTest extends PostgresSpringTestSupport {
       definition = updated;
     } finally {
       agentDefinitionService.deleteAgent(definition.getName(), definition.getVersion());
-      agentModelService.deleteModel(provider.getName(), next.getName(), next.getVersion());
-      agentModelService.deleteModel(provider.getName(), original.getName(), original.getVersion());
+      agentModelService.deleteModel(next.getName(), next.getVersion());
+      agentModelService.deleteModel(original.getName(), original.getVersion());
       agentProviderService.deleteProvider(provider.getName(), provider.getVersion());
     }
   }

@@ -68,7 +68,7 @@ with model_seed (
 ) as (
   values
     ('minimax', 'MiniMax-M2.7', 'MiniMax-M2.7', 'MiniMax-M2.7 (Responses)', 204800, 131072, '["TEXT"]'::jsonb, 'high', '[{"id":"off","reasoningEffort":"off"},{"id":"high","reasoningEffort":"high"}]'::jsonb, 0.3, 1.2, 0.06, 0.375, 1.2),
-    ('minimax', 'MiniMax-M3', 'MiniMax-M3', 'MiniMax-M3 (Responses)', 450000, 128000, '["TEXT","IMAGE"]'::jsonb, 'high', '[{"id":"off","reasoningEffort":"off"},{"id":"high","reasoningEffort":"high"}]'::jsonb, 0.3, 1.2, 0.06, 0, 1.2),
+    ('minimax', 'MiniMax-M3-Responses', 'MiniMax-M3', 'MiniMax-M3 (Responses)', 450000, 128000, '["TEXT","IMAGE"]'::jsonb, 'high', '[{"id":"off","reasoningEffort":"off"},{"id":"high","reasoningEffort":"high"}]'::jsonb, 0.3, 1.2, 0.06, 0, 1.2),
     ('minimax-anthropic', 'MiniMax-M3', 'claude-fable-5-dd-3M-xaMiniM', 'MiniMax-M3', 1048576, 512000, '["TEXT","IMAGE"]'::jsonb, 'high', '[{"id":"off","reasoningEffort":"off"},{"id":"minimal","reasoningEffort":"low"},{"id":"low","reasoningEffort":"low"},{"id":"medium","reasoningEffort":"medium"},{"id":"high","reasoningEffort":"high"}]'::jsonb, 0.3, 1.2, 0.06, 0, 1.2),
     ('openai', 'gpt-5.4', 'gpt-5.4', 'GPT-5.4', 272000, 128000, '["TEXT","IMAGE"]'::jsonb, 'xhigh', '[{"id":"off","reasoningEffort":"off"},{"id":"low","reasoningEffort":"low"},{"id":"medium","reasoningEffort":"medium"},{"id":"high","reasoningEffort":"high"},{"id":"xhigh","reasoningEffort":"high"}]'::jsonb, 2.5, 15, 0.25, 0, 15),
     ('openai', 'gpt-5.5', 'gpt-5.5', 'GPT-5.5', 272000, 128000, '["TEXT","IMAGE"]'::jsonb, 'xhigh', '[{"id":"off","reasoningEffort":"off"},{"id":"low","reasoningEffort":"low"},{"id":"medium","reasoningEffort":"medium"},{"id":"high","reasoningEffort":"high"},{"id":"xhigh","reasoningEffort":"high"}]'::jsonb, 5, 30, 0.5, 0, 30),
@@ -90,12 +90,13 @@ with model_seed (
     ('zai', 'glm-5.2', 'glm-5.2', 'GLM-5.2', 200000, 128000, '["TEXT"]'::jsonb, 'max', '[{"id":"off","reasoningEffort":"off"},{"id":"low","reasoningEffort":"low"},{"id":"medium","reasoningEffort":"medium"},{"id":"high","reasoningEffort":"high"},{"id":"max","reasoningEffort":"high"}]'::jsonb, 0, 0, 0, 0, 0)
 )
 insert into agent_model (
-    provider_name, name, model_id, description, config,
+    name, kind, provider_name, model_id, description, config,
     created_at, updated_at, version
 )
 select
-    provider_name,
     name,
+    'MODEL',
+    provider_name,
     model_id,
     description,
     jsonb_build_object(
@@ -109,25 +110,16 @@ select
             'inputModalities', input_modalities
         ),
         'pricing', jsonb_build_object(
-            'currency', 'USD',
-            'pricingTier', 'pi-base',
-            'serviceTier', 'default',
-            'serviceTierMultiplier', 1,
-            'version',
-                case when (provider_name = 'google' and name = 'gemini-3.8-flash')
-                       or (provider_name = 'openai' and name = 'gpt-5.6-luna')
-                       or (provider_name = 'minimax-anthropic' and name = 'MiniMax-M3')
-                       or (provider_name = 'deepseek' and name = 'deepseek-v4.1-flash')
-                     then 'pi-0.85.1'
-                     else 'pi-0.82.1'
-                end,
-            'inputPerMillionTokens', input_price,
-            'outputPerMillionTokens', output_price,
-            'cacheReadPerMillionTokens', cache_read_price,
-            'cacheWritePerMillionTokens', cache_write_price,
-            'cacheWriteLongPerMillionTokens',
-                case when provider_name = 'anthropic' then input_price * 2 else 0 end,
-            'reasoningPerMillionTokens', reasoning_price
+            'base', jsonb_build_object(
+                'input', input_price::text,
+                'output', output_price::text,
+                'cacheRead', cache_read_price::text,
+                'cacheWrite', cache_write_price::text,
+                'cacheWriteByTtl', '{}'::jsonb,
+                'reasoning', reasoning_price::text
+            ),
+            'overrides', '[]'::jsonb,
+            'multipliers', '[]'::jsonb
         ),
         'defaultVariant', default_variant,
         'variants', variants
@@ -138,12 +130,12 @@ select
 from model_seed;
 
 insert into agent_definition (
-    name, description, system_prompt, model_provider_name, model_name, variant, config,
+    name, description, system_prompt, model_name, variant, config,
     created_at, updated_at, version
 ) values (
     'default-assistant', 'Default e2e assistant.',
     '你是 kk-studio 的本地开发助手。',
-    'minimax', 'MiniMax-M2.7', 'high',
+    'MiniMax-M2.7', 'high',
     '{"tools":[],"skills":[],"subagents":[],"inheritParentEnvironment":true}',
     current_timestamp, current_timestamp, 0
 );

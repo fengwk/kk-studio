@@ -4,6 +4,7 @@ import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.platform.catalog.model.repo.AgentModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelGroupConfigCodec;
+import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelGroupConfigDerivation;
 import fun.fengwk.kkstudio.platform.catalog.model.runtime.AgentModelRuntimeConfigParser;
 import fun.fengwk.kkstudio.platform.catalog.model.service.model.AgentModel;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
@@ -170,6 +171,7 @@ public final class AgentModelMutationFactory {
 
   /** 成员必须是已存在的单 MODEL，且 Variant 由该 Model 当前 config 声明。 */
   private void validateMembers(AgentModelGroupDTO group) {
+    List<AgentModelConfigDTO> memberConfigs = new ArrayList<>();
     for (int index = 0; index < group.getMembers().size(); index++) {
       AgentModelGroupMemberDTO member = group.getMembers().get(index);
       String path = "group.members[" + index + "]";
@@ -201,6 +203,12 @@ public final class AgentModelMutationFactory {
                 + ": "
                 + member.getVariant());
       }
+      memberConfigs.add(config);
+    }
+    try {
+      AgentModelGroupConfigDerivation.derive(memberConfigs);
+    } catch (IllegalArgumentException error) {
+      throw new AiValidationException(RESOURCE, error.getMessage(), error);
     }
   }
 
