@@ -712,6 +712,56 @@ class ConfigSyncPlannerTest {
     assertTrue(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.AGENTS, "blank_variant")));
   }
 
+  /** 文件顺序 Group 先于 Model：计划仍先写 Model 再写 Group，且组成员按全局 Model 名解析。 */
+  @Test
+  void modelIsWrittenBeforeGroupEvenWhenGroupAppearsFirstInFile() {
+    when(snapshotReader.read())
+        .thenReturn(
+            snapshot(
+                List.of(provider("p")),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of()));
+    when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
+
+    Map<String, Object> model =
+        ConfigSyncFixtures.mapOf(
+            "kind",
+            "MODEL",
+            "providerName",
+            "p",
+            "name",
+            "m",
+            "modelId",
+            "gpt",
+            "config",
+            ConfigSyncFixtures.modelConfigMap(ConfigSyncFixtures.modelConfig()));
+    Map<String, Object> group =
+        ConfigSyncFixtures.mapOf(
+            "kind",
+            "GROUP",
+            "name",
+            "g",
+            "group",
+            ConfigSyncFixtures.mapOf(
+                "members",
+                    List.of(ConfigSyncFixtures.mapOf("modelName", "m", "variant", "default")),
+                "fallbackStatusCodes", List.of(429),
+                "cooldownSeconds", 0));
+    Map<String, Object> document = new LinkedHashMap<>();
+    document.put("models", List.of(group, model));
+
+    ConfigSyncPlan plan = plan(ConfigSyncFixtures.documentYaml(document));
+
+    assertEquals(
+        List.of("m", "g"), plan.models().stream().map(ConfigSyncParser.ModelSpec::name).toList());
+    assertEquals(
+        "m", plan.models().get(1).properties().getGroup().getMembers().get(0).getModelName());
+  }
+
   /** 文件内同名 Model config 覆盖快照：文件新增的 variant 通过，快照独有而被移除的 variant 被拒。 */
   @Test
   void fileModelConfigOverridesSnapshotForVariantPrecheck() {
