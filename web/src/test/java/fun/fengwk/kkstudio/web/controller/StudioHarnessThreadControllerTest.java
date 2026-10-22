@@ -274,7 +274,7 @@ class StudioHarnessThreadControllerTest {
   @Test
   void modelRequestDebugReturnsStructuredPreviewWithoutTouchingRuntime() throws Exception {
     ModelSelection draftModel =
-        new ModelSelection("draft-provider", "draft-model", "draft-variant");
+        new ModelSelection("draft-model", "draft-variant");
     when(modelRequestDebugService.getModelRequestDebug(id(1), draftModel, "env-c"))
         .thenReturn(sampleDebug());
 
@@ -343,7 +343,7 @@ class StudioHarnessThreadControllerTest {
   /** 意图：缺省 environmentName 表示未选择 Environment，服务收到显式 null；模型选择仍走 canonical 校验。 */
   @Test
   void modelRequestDebugForwardsMissingEnvironmentAsNull() throws Exception {
-    ModelSelection draftModel = new ModelSelection("provider", "model", "default");
+    ModelSelection draftModel = new ModelSelection("model", "default");
     when(modelRequestDebugService.getModelRequestDebug(id(1), draftModel, null))
         .thenReturn(sampleDebug());
 
@@ -424,7 +424,7 @@ class StudioHarnessThreadControllerTest {
   /** 意图：缺失 Thread 的 typed 异常保持 404 翻译，Debug 服务不额外发明错误语义。 */
   @Test
   void modelRequestDebugMapsMissingThreadToNotFound() throws Exception {
-    ModelSelection draftModel = new ModelSelection("provider", "model", "default");
+    ModelSelection draftModel = new ModelSelection("model", "default");
     when(modelRequestDebugService.getModelRequestDebug(id(1), draftModel, null))
         .thenThrow(new HarnessRuntimeNotFoundException("thread is missing"));
 

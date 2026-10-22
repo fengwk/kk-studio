@@ -69,7 +69,7 @@ class SessionDeletionOrchestratorPostgresTest extends OwnerTestSupport {
   private static final String HASH =
       "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
   private static final BranchSettings SETTINGS =
-      new BranchSettings("agent", new ModelSelection("provider", "model", "v1"), null);
+      new BranchSettings("agent", new ModelSelection("model", "v1"), null);
 
   @Autowired private DataSource dataSource;
   @Autowired private PlatformTransactionManager transactionManager;

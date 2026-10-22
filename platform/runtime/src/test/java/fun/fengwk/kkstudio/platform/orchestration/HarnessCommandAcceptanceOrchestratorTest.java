@@ -109,7 +109,7 @@ class HarnessCommandAcceptanceOrchestratorTest {
   private static final OwnerRef CHAT_OWNER = new OwnerRef.Chat(CHAT_ID);
   private static final OwnerRef ISSUE_AGENT_OWNER = new OwnerRef.IssueAgent(ISSUE_ID, AGENT_NAME);
   private static final BranchSettings SETTINGS =
-      new BranchSettings("assistant", new ModelSelection("provider", "model", "default"), null);
+      new BranchSettings("assistant", new ModelSelection("model", "default"), null);
 
   private ChatSessionRepository chatSessionRepository;
   private ChatRepository chatRepository;
